@@ -10705,11 +10705,11 @@ var init_sdk = __esm({
           const rhs = this.rhs === void 0 ? "" : ` = ${this.rhs}`;
           return `${varKind} ${this.name}${rhs};` + _n;
         }
-        optimizeNames(names, constants10) {
+        optimizeNames(names, constants11) {
           if (!names[this.name.str])
             return;
           if (this.rhs)
-            this.rhs = optimizeExpr(this.rhs, names, constants10);
+            this.rhs = optimizeExpr(this.rhs, names, constants11);
           return this;
         }
         get names() {
@@ -10726,10 +10726,10 @@ var init_sdk = __esm({
         render({ _n }) {
           return `${this.lhs} = ${this.rhs};` + _n;
         }
-        optimizeNames(names, constants10) {
+        optimizeNames(names, constants11) {
           if (this.lhs instanceof code_1.Name && !names[this.lhs.str] && !this.sideEffects)
             return;
-          this.rhs = optimizeExpr(this.rhs, names, constants10);
+          this.rhs = optimizeExpr(this.rhs, names, constants11);
           return this;
         }
         get names() {
@@ -10790,8 +10790,8 @@ var init_sdk = __esm({
         optimizeNodes() {
           return `${this.code}` ? this : void 0;
         }
-        optimizeNames(names, constants10) {
-          this.code = optimizeExpr(this.code, names, constants10);
+        optimizeNames(names, constants11) {
+          this.code = optimizeExpr(this.code, names, constants11);
           return this;
         }
         get names() {
@@ -10820,12 +10820,12 @@ var init_sdk = __esm({
           }
           return nodes.length > 0 ? this : void 0;
         }
-        optimizeNames(names, constants10) {
+        optimizeNames(names, constants11) {
           const { nodes } = this;
           let i = nodes.length;
           while (i--) {
             const n = nodes[i];
-            if (n.optimizeNames(names, constants10))
+            if (n.optimizeNames(names, constants11))
               continue;
             subtractNames(names, n.names);
             nodes.splice(i, 1);
@@ -10878,12 +10878,12 @@ var init_sdk = __esm({
             return;
           return this;
         }
-        optimizeNames(names, constants10) {
+        optimizeNames(names, constants11) {
           var _a;
-          this.else = (_a = this.else) === null || _a === void 0 ? void 0 : _a.optimizeNames(names, constants10);
-          if (!(super.optimizeNames(names, constants10) || this.else))
+          this.else = (_a = this.else) === null || _a === void 0 ? void 0 : _a.optimizeNames(names, constants11);
+          if (!(super.optimizeNames(names, constants11) || this.else))
             return;
-          this.condition = optimizeExpr(this.condition, names, constants10);
+          this.condition = optimizeExpr(this.condition, names, constants11);
           return this;
         }
         get names() {
@@ -10906,10 +10906,10 @@ var init_sdk = __esm({
         render(opts) {
           return `for(${this.iteration})` + super.render(opts);
         }
-        optimizeNames(names, constants10) {
-          if (!super.optimizeNames(names, constants10))
+        optimizeNames(names, constants11) {
+          if (!super.optimizeNames(names, constants11))
             return;
-          this.iteration = optimizeExpr(this.iteration, names, constants10);
+          this.iteration = optimizeExpr(this.iteration, names, constants11);
           return this;
         }
         get names() {
@@ -10945,10 +10945,10 @@ var init_sdk = __esm({
         render(opts) {
           return `for(${this.varKind} ${this.name} ${this.loop} ${this.iterable})` + super.render(opts);
         }
-        optimizeNames(names, constants10) {
-          if (!super.optimizeNames(names, constants10))
+        optimizeNames(names, constants11) {
+          if (!super.optimizeNames(names, constants11))
             return;
-          this.iterable = optimizeExpr(this.iterable, names, constants10);
+          this.iterable = optimizeExpr(this.iterable, names, constants11);
           return this;
         }
         get names() {
@@ -10990,11 +10990,11 @@ var init_sdk = __esm({
           (_b = this.finally) === null || _b === void 0 || _b.optimizeNodes();
           return this;
         }
-        optimizeNames(names, constants10) {
+        optimizeNames(names, constants11) {
           var _a, _b;
-          super.optimizeNames(names, constants10);
-          (_a = this.catch) === null || _a === void 0 || _a.optimizeNames(names, constants10);
-          (_b = this.finally) === null || _b === void 0 || _b.optimizeNames(names, constants10);
+          super.optimizeNames(names, constants11);
+          (_a = this.catch) === null || _a === void 0 || _a.optimizeNames(names, constants11);
+          (_b = this.finally) === null || _b === void 0 || _b.optimizeNames(names, constants11);
           return this;
         }
         get names() {
@@ -11265,7 +11265,7 @@ var init_sdk = __esm({
       function addExprNames(names, from) {
         return from instanceof code_1._CodeOrName ? addNames(names, from.names) : names;
       }
-      function optimizeExpr(expr, names, constants10) {
+      function optimizeExpr(expr, names, constants11) {
         if (expr instanceof code_1.Name)
           return replaceName(expr);
         if (!canOptimize(expr))
@@ -11280,14 +11280,14 @@ var init_sdk = __esm({
           return items;
         }, []));
         function replaceName(n) {
-          const c = constants10[n.str];
+          const c = constants11[n.str];
           if (c === void 0 || names[n.str] !== 1)
             return n;
           delete names[n.str];
           return c;
         }
         function canOptimize(e) {
-          return e instanceof code_1._Code && e._items.some((c) => c instanceof code_1.Name && names[c.str] === 1 && constants10[c.str] !== void 0);
+          return e instanceof code_1._Code && e._items.some((c) => c instanceof code_1.Name && names[c.str] === 1 && constants11[c.str] !== void 0);
         }
       }
       function subtractNames(names, from) {
@@ -46984,16 +46984,8 @@ ${frontmatter.trim()}
 ---
 
 ${PLUGIN_COMPACT_SKILL_SHIM_MARKER}
-
-# ${skillDirName}
-
-This is a compact Claude Code plugin registry shim. It keeps startup skill descriptions small while preserving the full OMC skill body for on-demand invocation.
-
-When this skill is invoked, read and follow the full bundled instructions from the active plugin root:
-
-\`${"${CLAUDE_PLUGIN_ROOT:-${OMC_PLUGIN_ROOT}}"}/${PLUGIN_FULL_SKILL_BODIES_DIR}/${skillDirName}/SKILL.md\`
-
-The plugin root is the directory containing both \`skills/\` and \`${PLUGIN_FULL_SKILL_BODIES_DIR}/\`. Do not resolve \`${PLUGIN_FULL_SKILL_BODIES_DIR}/${skillDirName}/SKILL.md\` under this shim's \`skills/${skillDirName}/\` directory; \`${PLUGIN_FULL_SKILL_BODIES_DIR}/\` is a direct child of the plugin root. The same archived body path is recorded in frontmatter as \`omc-full-body: ${fullBodyRelPath}\` for hosts that understand plugin-root-relative metadata.
+Read and follow the full skill body at \`${"${CLAUDE_PLUGIN_ROOT:-${OMC_PLUGIN_ROOT}}"}/${PLUGIN_FULL_SKILL_BODIES_DIR}/${skillDirName}/SKILL.md\`.
+The plugin root is the directory containing both \`skills/\` and \`${PLUGIN_FULL_SKILL_BODIES_DIR}/\`. Do not resolve \`${PLUGIN_FULL_SKILL_BODIES_DIR}/${skillDirName}/SKILL.md\` under this shim's \`skills/${skillDirName}/\` directory.
 `;
 }
 function compactPluginSkillPayload(targetRoot) {
@@ -50185,6 +50177,12 @@ function parseJevConfig(env2 = process.env) {
       }
     }
   }
+  const pointExcerptChars = {};
+  for (const [key, value] of Object.entries(env2)) {
+    const match = /^OMC_JEV_EXCERPT_CHARS_([A-Z0-9_]+)$/.exec(key);
+    const parsed = match ? positiveInt(value, 0) : 0;
+    if (match && parsed > 0) pointExcerptChars[match[1]] = parsed;
+  }
   return {
     apiKey: env2.TYPESAFE_API_KEY || null,
     masterOff,
@@ -50195,9 +50193,13 @@ function parseJevConfig(env2 = process.env) {
     timeoutMs: positiveInt(env2.OMC_JEV_TIMEOUT_MS, DEFAULT_TIMEOUT_MS, MAX_TIMER_DELAY_MS),
     maxRequests: positiveInt(env2.OMC_JEV_MAX_REQUESTS, 0),
     excerptChars: positiveInt(env2.OMC_JEV_EXCERPT_CHARS, DEFAULT_EXCERPT_CHARS),
+    pointExcerptChars,
     endpoint: env2.OMC_JEV_ENDPOINT || JEV_DEFAULT_ENDPOINT,
     logDir: env2.OMC_JEV_LOG_DIR || (0, import_node_path7.join)(getOmcRoot(), "state", "jev")
   };
+}
+function excerptCharsFor(point, config2) {
+  return config2.pointExcerptChars[point.toUpperCase().replace(/-/g, "_")] ?? (Object.hasOwn(POINT_DEFAULT_EXCERPT_CHARS, point) ? POINT_DEFAULT_EXCERPT_CHARS[point] : config2.excerptChars);
 }
 function isJevEnabled(config2) {
   return config2.apiKey !== null && !config2.masterOff;
@@ -50228,7 +50230,7 @@ function positiveInt(raw, fallback, max = Number.MAX_SAFE_INTEGER) {
   const parsed = Number(raw);
   return Number.isSafeInteger(parsed) && parsed <= max ? parsed : fallback;
 }
-var import_node_path7, JEV_DEFAULT_ENDPOINT, DEFAULT_TIMEOUT_MS, DEFAULT_EXCERPT_CHARS, MAX_TIMER_DELAY_MS, ACTIVATED_POINTS;
+var import_node_path7, JEV_DEFAULT_ENDPOINT, DEFAULT_TIMEOUT_MS, DEFAULT_EXCERPT_CHARS, MAX_TIMER_DELAY_MS, ACTIVATED_POINTS, POINT_DEFAULT_EXCERPT_CHARS;
 var init_config = __esm({
   "src/hooks/jev/config.ts"() {
     "use strict";
@@ -50239,6 +50241,7 @@ var init_config = __esm({
     DEFAULT_EXCERPT_CHARS = 200;
     MAX_TIMER_DELAY_MS = 2147483647;
     ACTIVATED_POINTS = /* @__PURE__ */ new Set();
+    POINT_DEFAULT_EXCERPT_CHARS = { "model-routing": 12e3 };
   }
 });
 
@@ -50385,12 +50388,11 @@ async function resolveJudgment(resolveJudgmentArgs) {
   if (config2.maxRequests > 0 && runtime.requestCount >= config2.maxRequests) {
     return { answer: twinAnswer(), source: "twin", mode: "cap" };
   }
-  const boundedState = boundExcerpts(args.state, config2.excerptChars);
-  const boundedQuestions = boundExcerpts(args.questions, config2.excerptChars);
+  const boundedState = boundExcerpts(args.state, excerptCharsFor(args.point, config2));
   const startedAt = Date.now();
   const attempt = (async () => {
     try {
-      return { ok: true, response: await queryJev(boundedState, boundedQuestions, {
+      return { ok: true, response: await queryJev(boundedState, args.questions, {
         endpoint: config2.endpoint,
         apiKey: config2.apiKey,
         timeoutMs: config2.timeoutMs,
@@ -50582,12 +50584,13 @@ var init_points = __esm({
       },
       effort: {
         type: "score",
-        instructions: "How much reasoning effort does this delegated task need?",
+        instructions: "How much reasoning effort does this delegated task need? Judge the work the delegated agent must actually do. The length of the brief and its formal conditions (language and style rules, permission to use subagents, bans, file locations, report format, words in capitals) do not raise the level.",
         criteria: {
-          trivial: "Trivial: the answer or action is obvious, no thinking needed",
-          some: "Some thought: a few straightforward steps",
-          careful: "Careful multi-step reasoning: several dependent steps or things to check",
-          deep: "Deep reasoning: many tradeoffs, hidden pitfalls, or easy to get subtly wrong"
+          low: "Low: mechanical work: read, look up, list, copy or transcribe, count; the result follows directly from the data",
+          medium: "Medium: a typical change or analysis with clear steps, in one place or following a given procedure or brief",
+          high: "High: multi-file work that needs its own decisions, a diagnosis weighing a few hypotheses, or writing a document",
+          xhigh: "Extra high: in-depth analysis, architecture, a high-stakes review, or a hard bug",
+          max: "Maximum: exceptionally hard, hours of reasoning at the limit of difficulty; rare"
         }
       }
     };
@@ -51481,7 +51484,7 @@ var init_types8 = __esm({
       Object.keys(DEFAULT_HUD_LABELS)
     );
     DEFAULT_ELEMENT_ORDER = {
-      line1: ["hostname", "cwd", "gitRepo", "gitBranch", "gitStatus", "apiKeySource", "profile"],
+      line1: ["hostname", "cwd", "gitRepo", "gitBranch", "gitStatus", "apiKeySource", "account", "profile"],
       main: [
         "omcLabel",
         "model",
@@ -51558,6 +51561,8 @@ var init_types8 = __esm({
         // Text format for backward compatibility
         apiKeySource: false,
         // Disabled by default
+        account: false,
+        // Opt-in to avoid exposing email on screen shares/streams
         hostname: false,
         profile: true,
         // Show profile name when CLAUDE_CONFIG_DIR is set
@@ -51627,6 +51632,7 @@ var init_types8 = __esm({
         thinking: false,
         thinkingFormat: "text",
         apiKeySource: false,
+        account: false,
         hostname: false,
         profile: true,
         missionBoard: false,
@@ -51671,6 +51677,7 @@ var init_types8 = __esm({
         thinking: true,
         thinkingFormat: "text",
         apiKeySource: false,
+        account: false,
         hostname: false,
         profile: true,
         missionBoard: false,
@@ -51716,6 +51723,7 @@ var init_types8 = __esm({
         thinking: true,
         thinkingFormat: "text",
         apiKeySource: true,
+        account: false,
         hostname: false,
         profile: true,
         missionBoard: false,
@@ -51761,6 +51769,7 @@ var init_types8 = __esm({
         thinking: true,
         thinkingFormat: "text",
         apiKeySource: false,
+        account: false,
         hostname: false,
         profile: true,
         missionBoard: false,
@@ -51805,6 +51814,7 @@ var init_types8 = __esm({
         thinking: true,
         thinkingFormat: "text",
         apiKeySource: true,
+        account: false,
         hostname: false,
         profile: true,
         missionBoard: false,
@@ -58425,6 +58435,14 @@ function claimSessionEndJob(directory, sessionId, nonce, identity, deadlineAt) {
   const now = Date.now();
   return mutateSessionEndJob(directory, sessionId, current.revision, (job) => {
     if (job.phase === "complete" || job.owner) throw new Error("claim-conflict");
+    if (Object.values(job.actions).some((action) => action.status === "claimed" && action.runner && action.runner.phase !== "terminal" && Date.now() < Date.parse(action.runner.deadlineAt))) throw new Error("runner-still-bounded");
+    for (const action of Object.values(job.actions)) {
+      if (action.status !== "claimed") continue;
+      action.status = action.class === "best-effort" ? "expired" : "retryable";
+      action.claimantNonce = void 0;
+      action.lastOutcomeCode = action.class === "best-effort" ? "delivery-uncertain-owner-missing" : "owner-missing";
+      if (action.runner) action.runner.phase = "terminal";
+    }
     job.owner = { nonce, pid: process.pid, processStartIdentity: identity, claimedAt: nowIso(), heartbeatAt: nowIso(), leaseExpiresAt: new Date(Math.min(now + 750, deadlineAt)).toISOString(), runDeadlineAt: new Date(deadlineAt).toISOString(), leaseGeneration: 1, claimedFromRevision: job.revision };
     job.phase = "processing";
   });
@@ -76586,6 +76604,32 @@ function isDetached(wtPath) {
 function isWorktreeDirty(wtPath) {
   return isWorktreeDirtyExcept(wtPath).dirty;
 }
+function commitExists(repoRoot2, sha) {
+  try {
+    git(repoRoot2, ["cat-file", "-e", `${sha}^{commit}`]);
+    return true;
+  } catch {
+    return false;
+  }
+}
+function hasCommitsOnlyOnWorkerRefs(repoRoot2, wtPath, ownBranch, baseCommit) {
+  const tips = [git(repoRoot2, ["for-each-ref", "--format=%(objectname)", `refs/heads/${ownBranch}`])];
+  if ((0, import_node_fs15.existsSync)(wtPath) && isRegisteredWorktreePath(repoRoot2, wtPath)) tips.push(git(repoRoot2, ["rev-parse", "HEAD"], wtPath));
+  const commits = tips.filter(Boolean);
+  if (commits.length === 0) return false;
+  const excludedBase = baseCommit && commitExists(repoRoot2, baseCommit) ? [baseCommit] : [];
+  return git(repoRoot2, [
+    "rev-list",
+    "--max-count=1",
+    ...commits,
+    "--not",
+    ...excludedBase,
+    "--exclude=omc-team/*",
+    "--branches",
+    "--tags",
+    "--remotes"
+  ]).length > 0;
+}
 function normalizeStatusPath(rawPath) {
   const trimmed = rawPath.trim();
   if (trimmed.startsWith('"') && trimmed.endsWith('"')) {
@@ -76817,7 +76861,8 @@ function ensureWorkerWorktree(teamName, workerName, repoRoot2, options = {}) {
       mode,
       detached: isDetached(wtPath),
       created: false,
-      reused: true
+      reused: true,
+      baseCommit: readMetadata(repoRoot2, teamName).find((entry2) => entry2.workerName === workerName)?.baseCommit
     };
     recordMetadata(repoRoot2, teamName, info2);
     return info2;
@@ -76836,7 +76881,8 @@ function ensureWorkerWorktree(teamName, workerName, repoRoot2, options = {}) {
     mode,
     detached: mode === "detached",
     created: true,
-    reused: false
+    reused: false,
+    baseCommit: git(repoRoot2, ["rev-parse", "HEAD"], wtPath)
   };
   recordMetadata(repoRoot2, teamName, info);
   return info;
@@ -76885,6 +76931,12 @@ function removeWorkerWorktree(teamName, workerName, repoRoot2) {
   const branch = getBranchName(teamName, workerName);
   const metaLockPath = `${getMetadataPath(repoRoot2, teamName)}.lock`;
   withFileLockSync(metaLockPath, () => {
+    const baseCommit = readMetadata(repoRoot2, teamName).find((entry2) => entry2.workerName === workerName)?.baseCommit;
+    if (hasCommitsOnlyOnWorkerRefs(repoRoot2, wtPath, branch, baseCommit)) {
+      const error2 = new Error(`worktree_unmerged: preserving worker worktree at ${wtPath} and branch ${branch} because they hold commits that only worker branches have; merge or discard the commits, then retry`);
+      error2.code = "worktree_unmerged";
+      throw error2;
+    }
     prepareWorkerWorktreeForRemoval(teamName, workerName, repoRoot2, wtPath);
     const wasRegisteredWorktree = isRegisteredWorktreePath(repoRoot2, wtPath);
     try {
@@ -78036,8 +78088,8 @@ async function startMergeOrchestrator(config2) {
   let persisted = { lastShas: {} };
   if ((0, import_node_fs17.existsSync)(persistedPath)) {
     try {
-      const { readFileSync: readFileSync122 } = await import("node:fs");
-      persisted = JSON.parse(readFileSync122(persistedPath, "utf-8"));
+      const { readFileSync: readFileSync124 } = await import("node:fs");
+      persisted = JSON.parse(readFileSync124(persistedPath, "utf-8"));
     } catch {
       persisted = { lastShas: {} };
     }
@@ -78482,8 +78534,8 @@ async function recoverFromRestart(config2) {
   let persistedShasLoaded = 0;
   if ((0, import_node_fs17.existsSync)(persistedPath)) {
     try {
-      const { readFileSync: readFileSync122 } = await import("node:fs");
-      const persisted = JSON.parse(readFileSync122(persistedPath, "utf-8"));
+      const { readFileSync: readFileSync124 } = await import("node:fs");
+      const persisted = JSON.parse(readFileSync124(persistedPath, "utf-8"));
       persistedShasLoaded = Object.keys(persisted.lastShas ?? {}).length;
     } catch {
       persistedShasLoaded = 0;
@@ -82226,7 +82278,7 @@ async function processCliWorkerVerdictsUnderLock(teamName, cwd2, expectedInstanc
     ).catch(logCursorTransitionMarkerFailure);
   };
   const { rename: rename8 } = await import("fs/promises");
-  const { renameSync: renameSync17, readFileSync: readFileSync122, existsSync: fsExistsSync } = await import("fs");
+  const { renameSync: renameSync17, readFileSync: readFileSync124, existsSync: fsExistsSync } = await import("fs");
   const { withFileLockSync: withFileLockSync2 } = await Promise.resolve().then(() => (init_file_lock(), file_lock_exports));
   const quarantineNonCursorVerdict = async (outputFile, artifactFingerprint, workerName, taskId, taskVersion, reason) => {
     const stalePath = nonCursorVerdictStalePath(outputFile, artifactFingerprint);
@@ -82307,7 +82359,7 @@ async function processCliWorkerVerdictsUnderLock(teamName, cwd2, expectedInstanc
               return;
             }
           }
-          const raw = readFileSync122(outputFile, "utf-8");
+          const raw = readFileSync124(outputFile, "utf-8");
           parseCliWorkerVerdict(raw);
           renameSync17(outputFile, processingOutputFile);
           verdictFile = processingOutputFile;
@@ -83575,30 +83627,17 @@ If you accept, exit your session. If you reject, remain active for task work and
 async function resumeTeamV2(teamName, cwd2) {
   const sanitized = sanitizeTeamName(teamName);
   const config2 = await readTeamConfig(sanitized, cwd2);
-  if (!config2?.instance_id) return null;
+  if (!config2?.instance_id || (config2.lifecycle_state ?? "active") !== "active") return null;
   const sessionName2 = config2.tmux_session || `omc-team-${sanitized}`;
-  if (sessionName2.startsWith("cmux:")) {
-    return {
-      teamName: sanitized,
-      sanitizedName: sanitized,
-      instanceId: config2.instance_id,
-      sessionName: sessionName2,
-      ownsWindow: config2.tmux_window_owned === true,
-      config: config2,
-      cwd: cwd2
-    };
-  }
-  if (!isValidTmuxServerIdentity(config2.tmux_server_identity) || await observeTmuxServerIdentity(config2.tmux_server_identity) !== "matching") {
-    return null;
-  }
   if (!config2.leader_pane_id) return null;
+  const provider = config2.leader_pane_id.startsWith("%") ? "tmux" : "cmux";
   const targetOwnership = await verifyTeamTargetOwnership({
-    provider: "tmux",
+    provider,
     providerTarget: sessionName2,
     recipient: "leader-fixed",
     recipientRole: "leader",
     paneId: config2.leader_pane_id,
-    tmuxServerIdentity: config2.tmux_server_identity
+    ...provider === "tmux" ? { tmuxServerIdentity: config2.tmux_server_identity } : {}
   });
   if (targetOwnership.kind !== "owned") return null;
   return {
@@ -86158,6 +86197,15 @@ function reschedulePendingWorker(payload, job) {
     void processSessionEndWorker(payload);
   }, delay);
 }
+function retryAfterBoundedRunners(payload, job) {
+  if (!job || job.owner || job.phase === "complete") return;
+  const now = Date.now();
+  const deadlines = Object.values(job.actions).filter((action) => action.status === "claimed" && action.runner && action.runner.phase !== "terminal").map((action) => Date.parse(action.runner.deadlineAt)).filter((deadline) => deadline > now);
+  if (deadlines.length === 0) return;
+  setTimeout(() => {
+    void processSessionEndWorker(payload);
+  }, Math.max(...deadlines) - now + 1);
+}
 async function processSessionEndWorker(payload) {
   const deadlineAt = Date.now() + MAX_WORKER_MS;
   const nonce = (0, import_crypto34.randomUUID)();
@@ -86168,7 +86216,10 @@ async function processSessionEndWorker(payload) {
     await reapIfProvenStale(payload, deadlineAt);
     claimed = claimSessionEndJob(payload.directory, payload.sessionId, nonce, identity, deadlineAt);
   }
-  if (!claimed || !claimed.owner) return;
+  if (!claimed || !claimed.owner) {
+    retryAfterBoundedRunners(payload, readSessionEndJob(payload.directory, payload.sessionId));
+    return;
+  }
   let admitted = readSessionEndJob(payload.directory, payload.sessionId);
   const graceExpired = admitted ? Date.now() >= Date.parse(admitted.producerGraceExpiresAt) : false;
   if (admitted && graceExpired) {
@@ -101149,6 +101200,201 @@ var init_hostname = __esm({
   }
 });
 
+// src/hud/elements/account.ts
+function validateEmail(value) {
+  if (typeof value !== "string") {
+    return { valid: false };
+  }
+  if (value.length === 0 || value.length > 320) {
+    return { valid: false };
+  }
+  for (let i = 0; i < value.length; i += 1) {
+    const code = value.charCodeAt(i);
+    if (code <= 31) {
+      return { valid: false };
+    }
+    if (code >= 128 && code <= 159) {
+      return { valid: false };
+    }
+    if (code >= 8206 && code <= 8207 || code >= 8234 && code <= 8238 || code >= 8294 && code <= 8297) {
+      return { valid: false };
+    }
+    if (code === 32 || code === 9 || code === 10 || code === 13 || code === 11 || code === 12) {
+      return { valid: false };
+    }
+    if (code < 33 || code > 126) {
+      return { valid: false };
+    }
+  }
+  if (!value.includes("@") || value.indexOf("@") !== value.lastIndexOf("@")) {
+    return { valid: false };
+  }
+  const [local, domain] = value.split("@", 2);
+  if (!local || !domain || !domain.includes(".")) {
+    return { valid: false };
+  }
+  if (!/^[a-z0-9.-]+$/i.test(domain)) {
+    return { valid: false };
+  }
+  return { valid: true, email: value };
+}
+function truncateEmailMiddle(email2, maxChars = 64) {
+  if (email2.length <= maxChars) {
+    return email2;
+  }
+  const ellipsis = "...";
+  const availableChars = maxChars - ellipsis.length;
+  const startChars = Math.floor(availableChars / 2);
+  const endChars = availableChars - startChars;
+  return `${email2.slice(0, startChars)}${ellipsis}${email2.slice(-endChars)}`;
+}
+function metadataFromStats(stats) {
+  return {
+    mtimeMs: stats.mtimeMs,
+    size: stats.size,
+    ino: stats.ino,
+    isFile: stats.isFile()
+  };
+}
+function getFileMetadata(filePath) {
+  try {
+    return metadataFromStats((0, import_fs137.lstatSync)(filePath));
+  } catch (error2) {
+    const code = error2.code;
+    if (code === "ENOENT" || code === "ENOTDIR") {
+      return null;
+    }
+    throw error2;
+  }
+}
+function bestEffortFileMetadata(filePath) {
+  try {
+    return getFileMetadata(filePath);
+  } catch {
+    return null;
+  }
+}
+function readEmailFromClaudeJson(filePath) {
+  const flags = import_fs137.constants.O_RDONLY | (import_fs137.constants.O_NOFOLLOW ?? 0) | (import_fs137.constants.O_NONBLOCK ?? 0);
+  let fd;
+  try {
+    fd = (0, import_fs137.openSync)(filePath, flags);
+  } catch {
+    return { email: null, metadata: bestEffortFileMetadata(filePath) };
+  }
+  try {
+    const metadata = metadataFromStats((0, import_fs137.fstatSync)(fd));
+    if (!metadata.isFile || metadata.size > 5 * 1024 * 1024) {
+      return { email: null, metadata };
+    }
+    try {
+      const content = (0, import_fs137.readFileSync)(fd, "utf-8");
+      const parsed = JSON.parse(content);
+      if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
+        return { email: null, metadata };
+      }
+      const account = parsed.oauthAccount;
+      if (typeof account !== "object" || account === null || Array.isArray(account)) {
+        return { email: null, metadata };
+      }
+      const email2 = account.emailAddress;
+      const validation = validateEmail(email2);
+      return { email: validation.valid ? validation.email ?? null : null, metadata };
+    } catch {
+      return { email: null, metadata };
+    }
+  } catch {
+    return { email: null, metadata: bestEffortFileMetadata(filePath) };
+  } finally {
+    try {
+      (0, import_fs137.closeSync)(fd);
+    } catch {
+    }
+  }
+}
+function metadataEquals(a, b) {
+  if (a === null || b === null) return a === b;
+  return a.mtimeMs === b.mtimeMs && a.size === b.size && a.ino === b.ino && a.isFile === b.isFile;
+}
+function isAccountFileMetadata(value) {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) return false;
+  const m = value;
+  return [m.mtimeMs, m.size, m.ino].every((item) => typeof item === "number" && Number.isFinite(item)) && typeof m.isFile === "boolean";
+}
+function isCachedAccountData(value) {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) return false;
+  const cached2 = value;
+  return (cached2.email === null || typeof cached2.email === "string") && Array.isArray(cached2.sources) && cached2.sources.every((source) => {
+    if (typeof source !== "object" || source === null) return false;
+    const { path: path30, metadata } = source;
+    return typeof path30 === "string" && (metadata === null || isAccountFileMetadata(metadata));
+  });
+}
+function getCachedAccountEmail() {
+  const cacheDir = getOmcConfigDir();
+  const cacheFile = (0, import_path165.join)(cacheDir, "hud-account-cache.json");
+  const configJsonPath = (0, import_path165.join)(getClaudeConfigDir(), ".claude.json");
+  const fallbackPath = (0, import_path165.join)((0, import_os29.homedir)(), ".claude.json");
+  const candidatePaths = fallbackPath === configJsonPath ? [configJsonPath] : [configJsonPath, fallbackPath];
+  let cacheable = true;
+  const sources = candidatePaths.map((path30) => {
+    try {
+      return { path: path30, metadata: getFileMetadata(path30) };
+    } catch {
+      cacheable = false;
+      return { path: path30, metadata: null };
+    }
+  });
+  try {
+    const cache = cacheable ? JSON.parse((0, import_fs137.readFileSync)(cacheFile, "utf-8")) : {};
+    const cached2 = cache.account;
+    if (isCachedAccountData(cached2) && cached2.sources.length === sources.length && cached2.sources.every((entry2, i) => entry2.path === sources[i].path && metadataEquals(entry2.metadata, sources[i].metadata)) && (cached2.email === null || validateEmail(cached2.email).valid)) {
+      return cached2.email;
+    }
+  } catch {
+  }
+  let email2 = null;
+  for (const path30 of candidatePaths) {
+    email2 = readEmailFromClaudeJson(path30).email;
+    if (email2) break;
+  }
+  if (!cacheable) return email2;
+  try {
+    (0, import_fs137.mkdirSync)(cacheDir, { recursive: true });
+    (0, import_fs137.writeFileSync)(cacheFile, JSON.stringify({ account: { sources, email: email2 } }));
+  } catch {
+  }
+  return email2;
+}
+function renderAccount() {
+  if (process.env.ANTHROPIC_API_KEY) {
+    return null;
+  }
+  let email2;
+  try {
+    email2 = getCachedAccountEmail();
+  } catch {
+    return null;
+  }
+  if (!email2) {
+    return null;
+  }
+  const truncated = truncateEmailMiddle(email2, 64);
+  return cyan(`acct:${truncated}`);
+}
+var import_fs137, import_path165, import_os29;
+var init_account = __esm({
+  "src/hud/elements/account.ts"() {
+    "use strict";
+    import_fs137 = require("fs");
+    import_path165 = require("path");
+    import_os29 = require("os");
+    init_colors();
+    init_config_dir();
+    init_config_dir();
+  }
+});
+
 // src/hud/elements/git.ts
 function git3(args, cwd2) {
   return (0, import_node_child_process15.execFileSync)("git", args, {
@@ -101505,8 +101751,8 @@ var init_effort = __esm({
 // src/hud/elements/api-key-source.ts
 function settingsFileHasApiKey(filePath) {
   try {
-    if (!(0, import_fs137.existsSync)(filePath)) return false;
-    const content = (0, import_fs137.readFileSync)(filePath, "utf-8");
+    if (!(0, import_fs138.existsSync)(filePath)) return false;
+    const content = (0, import_fs138.readFileSync)(filePath, "utf-8");
     const settings = JSON.parse(content);
     const env2 = settings?.env;
     if (typeof env2 !== "object" || env2 === null) return false;
@@ -101517,10 +101763,10 @@ function settingsFileHasApiKey(filePath) {
 }
 function detectApiKeySource(cwd2) {
   if (cwd2) {
-    const projectSettings = (0, import_path165.join)(cwd2, ".claude", "settings.local.json");
+    const projectSettings = (0, import_path166.join)(cwd2, ".claude", "settings.local.json");
     if (settingsFileHasApiKey(projectSettings)) return "project";
   }
-  const globalSettings = (0, import_path165.join)(getClaudeConfigDir(), "settings.json");
+  const globalSettings = (0, import_path166.join)(getClaudeConfigDir(), "settings.json");
   if (settingsFileHasApiKey(globalSettings)) return "global";
   if (process.env.ANTHROPIC_API_KEY) return "env";
   return null;
@@ -101529,12 +101775,12 @@ function renderApiKeySource(source) {
   if (!source) return null;
   return `${dim("key:")}${cyan(source)}`;
 }
-var import_fs137, import_path165;
+var import_fs138, import_path166;
 var init_api_key_source = __esm({
   "src/hud/elements/api-key-source.ts"() {
     "use strict";
-    import_fs137 = require("fs");
-    import_path165 = require("path");
+    import_fs138 = require("fs");
+    import_path166 = require("path");
     init_colors();
     init_config_dir();
   }
@@ -101818,6 +102064,10 @@ async function render(context, config2) {
   if (enabledElements.apiKeySource && context.apiKeySource) {
     const keySource = renderApiKeySource(context.apiKeySource);
     if (keySource) rendered.set("apiKeySource", keySource);
+  }
+  if (enabledElements.account) {
+    const accountElement = renderAccount();
+    if (accountElement) rendered.set("account", accountElement);
   }
   if (enabledElements.profile && context.profileName) {
     rendered.set("profile", bold(`profile:${context.profileName}`));
@@ -102105,6 +102355,7 @@ var init_render = __esm({
     init_autopilot2();
     init_cwd();
     init_hostname();
+    init_account();
     init_git();
     init_multi_repo();
     init_model();
@@ -102199,7 +102450,7 @@ function findByteBackward(fd, fromExclusive, byte) {
   while (end > 0) {
     const start = Math.max(0, end - SCAN_CHUNK_BYTES);
     const length = end - start;
-    (0, import_fs138.readSync)(fd, buffer, 0, length, start);
+    (0, import_fs139.readSync)(fd, buffer, 0, length, start);
     const index = buffer.subarray(0, length).lastIndexOf(byte);
     if (index !== -1) return start + index;
     end = start;
@@ -102211,7 +102462,7 @@ function findByteForward(fd, fromInclusive, size, byte) {
   const buffer = Buffer.allocUnsafe(SCAN_CHUNK_BYTES);
   while (start < size) {
     const length = Math.min(SCAN_CHUNK_BYTES, size - start);
-    (0, import_fs138.readSync)(fd, buffer, 0, length, start);
+    (0, import_fs139.readSync)(fd, buffer, 0, length, start);
     const index = buffer.subarray(0, length).indexOf(byte);
     if (index !== -1) return start + index;
     start += length;
@@ -102226,19 +102477,19 @@ function readLineContainingOffset(fd, size, offset) {
   const length = endOffset - startOffset;
   if (length <= 0 || length > MAX_BOUNDARY_LINE_BYTES) return null;
   const line = Buffer.allocUnsafe(length);
-  (0, import_fs138.readSync)(fd, line, 0, length, startOffset);
+  (0, import_fs139.readSync)(fd, line, 0, length, startOffset);
   return { line, endOffset };
 }
 function findLastCompactBoundaryEndOffset(transcriptPath, size) {
   if (size <= 0) return null;
-  const fd = (0, import_fs138.openSync)(transcriptPath, "r");
+  const fd = (0, import_fs139.openSync)(transcriptPath, "r");
   try {
     let end = size;
     const buffer = Buffer.allocUnsafe(Math.min(SCAN_CHUNK_BYTES, size));
     while (end > 0) {
       const start = Math.max(0, end - SCAN_CHUNK_BYTES);
       const length = end - start;
-      (0, import_fs138.readSync)(fd, buffer, 0, length, start);
+      (0, import_fs139.readSync)(fd, buffer, 0, length, start);
       const chunk = buffer.subarray(0, length);
       let index = chunk.lastIndexOf(COMPACT_BOUNDARY_MARKER_BYTES);
       while (index !== -1) {
@@ -102253,13 +102504,13 @@ function findLastCompactBoundaryEndOffset(transcriptPath, size) {
       end = start + COMPACT_BOUNDARY_MARKER_BYTES.length - 1;
     }
   } finally {
-    (0, import_fs138.closeSync)(fd);
+    (0, import_fs139.closeSync)(fd);
   }
   return null;
 }
 function countLocalApiRequestRecordBytes(transcriptPath, start, end) {
   if (end <= start) return 0;
-  const fd = (0, import_fs138.openSync)(transcriptPath, "r");
+  const fd = (0, import_fs139.openSync)(transcriptPath, "r");
   try {
     const chunk = Buffer.allocUnsafe(SCAN_CHUNK_BYTES);
     const prefix = Buffer.allocUnsafe(LOCAL_API_REQUEST_PREFIX.length);
@@ -102268,7 +102519,7 @@ function countLocalApiRequestRecordBytes(transcriptPath, start, end) {
     const countLine = (lineEndExclusive) => {
       const lineLength = lineEndExclusive - lineStart;
       if (lineLength >= prefix.length) {
-        const bytesRead = (0, import_fs138.readSync)(fd, prefix, 0, prefix.length, lineStart);
+        const bytesRead = (0, import_fs139.readSync)(fd, prefix, 0, prefix.length, lineStart);
         if (bytesRead === prefix.length && prefix.equals(LOCAL_API_REQUEST_PREFIX)) {
           excludedBytes += lineLength;
         }
@@ -102278,7 +102529,7 @@ function countLocalApiRequestRecordBytes(transcriptPath, start, end) {
     let position = start;
     while (position < end) {
       const length = Math.min(SCAN_CHUNK_BYTES, end - position);
-      (0, import_fs138.readSync)(fd, chunk, 0, length, position);
+      (0, import_fs139.readSync)(fd, chunk, 0, length, position);
       const view = chunk.subarray(0, length);
       let newline = view.indexOf(10);
       while (newline !== -1) {
@@ -102290,7 +102541,7 @@ function countLocalApiRequestRecordBytes(transcriptPath, start, end) {
     if (lineStart < end) countLine(end);
     return excludedBytes;
   } finally {
-    (0, import_fs138.closeSync)(fd);
+    (0, import_fs139.closeSync)(fd);
   }
 }
 function estimateTranscriptPayloadBytes(transcriptPath, size) {
@@ -102305,9 +102556,9 @@ function estimateTranscriptPayloadBytes(transcriptPath, size) {
   );
 }
 function estimatePayloadFromTranscriptPath(transcriptPath) {
-  if (!transcriptPath || !(0, import_fs138.existsSync)(transcriptPath)) return null;
+  if (!transcriptPath || !(0, import_fs139.existsSync)(transcriptPath)) return null;
   try {
-    const stat2 = (0, import_fs138.statSync)(transcriptPath);
+    const stat2 = (0, import_fs139.statSync)(transcriptPath);
     if (!stat2.isFile()) return null;
     return createPayloadEstimate(
       estimateTranscriptPayloadBytes(transcriptPath, stat2.size)
@@ -102316,11 +102567,11 @@ function estimatePayloadFromTranscriptPath(transcriptPath) {
     return null;
   }
 }
-var import_fs138, ANTHROPIC_REQUEST_PAYLOAD_LIMIT_BYTES, PAYLOAD_WARNING_BYTES, PAYLOAD_CRITICAL_BYTES, COMPACT_BOUNDARY_MARKER, COMPACT_BOUNDARY_MARKER_BYTES, LOCAL_API_REQUEST_PREFIX, SCAN_CHUNK_BYTES, MAX_BOUNDARY_LINE_BYTES;
+var import_fs139, ANTHROPIC_REQUEST_PAYLOAD_LIMIT_BYTES, PAYLOAD_WARNING_BYTES, PAYLOAD_CRITICAL_BYTES, COMPACT_BOUNDARY_MARKER, COMPACT_BOUNDARY_MARKER_BYTES, LOCAL_API_REQUEST_PREFIX, SCAN_CHUNK_BYTES, MAX_BOUNDARY_LINE_BYTES;
 var init_payload_estimate = __esm({
   "src/hud/payload-estimate.ts"() {
     "use strict";
-    import_fs138 = require("fs");
+    import_fs139 = require("fs");
     ANTHROPIC_REQUEST_PAYLOAD_LIMIT_BYTES = 32e6;
     PAYLOAD_WARNING_BYTES = 22e6;
     PAYLOAD_CRITICAL_BYTES = 26e6;
@@ -102379,10 +102630,10 @@ function mergeStdinRateLimits(stdinRateLimits, usageResult) {
   };
 }
 function readSessionSummary(stateDir, sessionId) {
-  const statePath = (0, import_path166.join)(stateDir, `session-summary-${sessionId}.json`);
-  if (!(0, import_fs139.existsSync)(statePath)) return null;
+  const statePath = (0, import_path167.join)(stateDir, `session-summary-${sessionId}.json`);
+  if (!(0, import_fs140.existsSync)(statePath)) return null;
   try {
-    return JSON.parse((0, import_fs139.readFileSync)(statePath, "utf-8"));
+    return JSON.parse((0, import_fs140.readFileSync)(statePath, "utf-8"));
   } catch {
     return null;
   }
@@ -102408,15 +102659,15 @@ function spawnSessionSummaryScript(transcriptPath, stateDir, sessionId) {
     return;
   }
   lastSummarySpawnTimestamp = now;
-  const thisDir = (0, import_path166.dirname)((0, import_url23.fileURLToPath)(importMetaUrl));
-  const scriptPath = (0, import_path166.join)(
+  const thisDir = (0, import_path167.dirname)((0, import_url23.fileURLToPath)(importMetaUrl));
+  const scriptPath = (0, import_path167.join)(
     thisDir,
     "..",
     "..",
     "scripts",
     "session-summary.mjs"
   );
-  if (!(0, import_fs139.existsSync)(scriptPath)) {
+  if (!(0, import_fs140.existsSync)(scriptPath)) {
     if (process.env.OMC_DEBUG) {
       console.error("[HUD] session-summary script not found:", scriptPath);
     }
@@ -102455,12 +102706,12 @@ async function calculateSessionHealth(sessionStart, contextPercent) {
 function showDiagnostic() {
   const version3 = getRuntimePackageVersion();
   const configDir = getClaudeConfigDir();
-  const hudScript = (0, import_path166.join)(configDir, "hud", "omc-hud.mjs");
-  const settingsFile = (0, import_path166.join)(configDir, "settings.json");
-  const hudExists = (0, import_fs139.existsSync)(hudScript);
+  const hudScript = (0, import_path167.join)(configDir, "hud", "omc-hud.mjs");
+  const settingsFile = (0, import_path167.join)(configDir, "settings.json");
+  const hudExists = (0, import_fs140.existsSync)(hudScript);
   let statusLineOk = false;
   try {
-    const settings = JSON.parse((0, import_fs139.readFileSync)(settingsFile, "utf-8"));
+    const settings = JSON.parse((0, import_fs140.readFileSync)(settingsFile, "utf-8"));
     const sl = settings.statusLine;
     if (sl && typeof sl === "object" && typeof sl.command === "string") {
       statusLineOk = sl.command.includes("omc-hud");
@@ -102589,7 +102840,7 @@ async function mainImpl(watchMode = false, skipInit = false) {
     let sessionSummary = null;
     const sessionSummaryEnabled = config2.elements.sessionSummary ?? false;
     if (sessionSummaryEnabled && resolvedTranscriptPath && currentSessionId) {
-      const omcStateDir = (0, import_path166.join)(getOmcRoot(cwd2), "state");
+      const omcStateDir = (0, import_path167.join)(getOmcRoot(cwd2), "state");
       sessionSummary = readSessionSummary(omcStateDir, currentSessionId);
       const shouldSpawn = !sessionSummary?.generatedAt || Date.now() - new Date(sessionSummary.generatedAt).getTime() > 6e4;
       if (shouldSpawn) {
@@ -102647,7 +102898,7 @@ async function mainImpl(watchMode = false, skipInit = false) {
       apiKeyMode: detectApiKeySource(cwd2) !== null,
       subscriptionType: subscriptionInfo.subscriptionType,
       rateLimitTier: subscriptionInfo.rateLimitTier,
-      profileName: process.env.CLAUDE_CONFIG_DIR ? (0, import_path166.basename)(process.env.CLAUDE_CONFIG_DIR).replace(/^\./, "") : null,
+      profileName: process.env.CLAUDE_CONFIG_DIR ? (0, import_path167.basename)(process.env.CLAUDE_CONFIG_DIR).replace(/^\./, "") : null,
       sessionSummary,
       lastToolName: transcriptData.lastToolName,
       payloadEstimate
@@ -102664,10 +102915,10 @@ async function mainImpl(watchMode = false, skipInit = false) {
     }
     if (config2.contextLimitWarning.autoCompact && context.contextPercent >= config2.contextLimitWarning.threshold) {
       try {
-        const omcStateDir = (0, import_path166.join)(getOmcRoot(cwd2), "state");
-        (0, import_fs139.mkdirSync)(omcStateDir, { recursive: true });
-        const triggerFile = (0, import_path166.join)(omcStateDir, "compact-requested.json");
-        (0, import_fs139.writeFileSync)(
+        const omcStateDir = (0, import_path167.join)(getOmcRoot(cwd2), "state");
+        (0, import_fs140.mkdirSync)(omcStateDir, { recursive: true });
+        const triggerFile = (0, import_path167.join)(omcStateDir, "compact-requested.json");
+        (0, import_fs140.writeFileSync)(
           triggerFile,
           JSON.stringify({
             requestedAt: (/* @__PURE__ */ new Date()).toISOString(),
@@ -102709,7 +102960,7 @@ async function mainImpl(watchMode = false, skipInit = false) {
 function main2(watchMode = false, skipInit = false) {
   return withWorktreePathRenderScope(() => mainImpl(watchMode, skipInit));
 }
-var import_fs139, import_promises32, import_path166, import_child_process49, import_url23, SAME_WINDOW_TOLERANCE_MS, lastSummarySpawnTimestamp, summaryProcessPid;
+var import_fs140, import_promises32, import_path167, import_child_process49, import_url23, SAME_WINDOW_TOLERANCE_MS, lastSummarySpawnTimestamp, summaryProcessPid;
 var init_hud = __esm({
   "src/hud/index.ts"() {
     "use strict";
@@ -102728,9 +102979,9 @@ var init_hud = __esm({
     init_version();
     init_auto_update();
     init_worktree_paths();
-    import_fs139 = require("fs");
+    import_fs140 = require("fs");
     import_promises32 = require("fs/promises");
-    import_path166 = require("path");
+    import_path167 = require("path");
     import_child_process49 = require("child_process");
     import_url23 = require("url");
     init_worktree_paths();
@@ -103265,8 +103516,8 @@ var chalkStderr = createChalk({ level: stderrColor ? stderrColor.level : 0 });
 var source_default = chalk;
 
 // src/cli/index.ts
-var import_path167 = require("path");
-var import_fs140 = require("fs");
+var import_path168 = require("path");
+var import_fs141 = require("fs");
 init_config_dir();
 init_env_vars();
 init_loader();
@@ -117954,6 +118205,41 @@ var SKILL_ENTRIES = [
   entry({ name: "tdd", kind: "skill", decision: "keep", riskClass: "advisory", owner: REGISTRY_OWNER, notes: "Test-first discipline at pre-agreed seams; opt-in, never a default gate." }),
   entry({ name: "ai-slop-cleaner", kind: "skill", decision: "keep", riskClass: "advisory", owner: REGISTRY_OWNER, notes: "Opt-in review tool; never a default gate." }),
   entry({ name: "minimal-code-discipline", kind: "skill", decision: "keep", riskClass: "advisory", owner: REGISTRY_OWNER, notes: "Opt-in writing-time discipline; never a default gate." }),
+  entry({ name: "principles", kind: "skill", decision: "keep", riskClass: "advisory", owner: REGISTRY_OWNER, notes: "Opt-in cross-cutting principle library (idea credit: pstack); travels with lane delegation briefs; never a default gate." }),
+  entry({ name: "benchmark-checklist", kind: "skill", decision: "keep", riskClass: "advisory", owner: REGISTRY_OWNER, notes: "Opt-in measurement discipline before reporting or acting on any measured number (idea credit: pstack); never a default gate." }),
+  entry({ name: "hillclimb", kind: "skill", decision: "keep", riskClass: "advisory", owner: REGISTRY_OWNER, notes: "Opt-in single-metric climbing loop with a fixed baseline, one commit per verified win, and a decision trail (idea credit: pstack); never a default gate." }),
+  entry({ name: "reflect", kind: "skill", decision: "keep", riskClass: "advisory", owner: REGISTRY_OWNER, notes: "Opt-in three-reviewer transcript audit proposing skill edits; proposes only, applies with user go (idea credit: pstack)." }),
+  entry({ name: "personal-mode", kind: "skill", decision: "keep", riskClass: "advisory", owner: REGISTRY_OWNER, notes: "Opt-in user-level behavior profile drafted from transcripts with cited evidence; layers under project skills, never holds secrets (idea credit: pstack)." }),
+  entry({ name: "stacked-delivery", kind: "skill", decision: "keep", riskClass: "advisory", owner: REGISTRY_OWNER, notes: "Opt-in linear stacked-PR delivery with patch-id verdicts and bottom-up landing; never merges (idea credit: pstack)." }),
+  entry({ name: "arena", kind: "skill", decision: "keep", riskClass: "advisory", owner: REGISTRY_OWNER, notes: "Opt-in multi-candidate bakeoff on Task fan-out or team worktree isolation (idea credit: pstack); never a default gate." }),
+  entry({ name: "interrogate", kind: "skill", decision: "keep", riskClass: "advisory", owner: REGISTRY_OWNER, notes: "Opt-in adversarial multi-reviewer panel (idea credit: pstack); advisory verdict to review, never gates or merges on its own." }),
+  entry({ name: "babysit", kind: "skill", decision: "keep", riskClass: "advisory", owner: REGISTRY_OWNER, notes: "Opt-in PR watch-and-fix loop on the watch-pr verdict policy (idea credit: pstack); never merges, rebases, force-pushes, or self-approves." }),
+  entry({ name: "models", kind: "skill", decision: "keep", riskClass: "advisory", owner: REGISTRY_OWNER, notes: "Opt-in setup wizard for team.roleRouting role-based model routing (idea credit: pstack setup-pstack); writes config only, never routes a live team." }),
+  entry({ name: "create-formal-verification-skill", kind: "skill", decision: "keep", riskClass: "advisory", owner: REGISTRY_OWNER, notes: "Opt-in generator of project-local formal verification skills, TLA+/Lean/Kani by property shape (idea credit: pstack); one property per generated skill." }),
+  entry({ name: "maintain-formal-verification-skill", kind: "skill", decision: "keep", riskClass: "advisory", owner: REGISTRY_OWNER, notes: "Opt-in drift re-sync for existing formal verification skills (idea credit: pstack); the rerun is the resync." }),
+  entry({ name: "create-verification-skill", kind: "skill", decision: "keep", riskClass: "advisory", owner: REGISTRY_OWNER, notes: "Opt-in generator of the project-local verify skill, commands discovered by execution with a feature map (idea credit: pstack)." }),
+  entry({ name: "maintain-verification-skill", kind: "skill", decision: "keep", riskClass: "advisory", owner: REGISTRY_OWNER, notes: "Opt-in re-sync of the project verify skill when its commands drift (idea credit: pstack); the rerun is the resync." }),
+  entry({ name: "statechart", kind: "skill", decision: "keep", riskClass: "advisory", owner: REGISTRY_OWNER, notes: "Opt-in TLA+ model checker with a Mermaid statechart and shortest bug paths per broken rule (idea credit: pstack); scratch-folder analysis, never edits the repo." }),
+  entry({ name: "why", kind: "skill", decision: "keep", riskClass: "advisory", owner: REGISTRY_OWNER, notes: "Opt-in evidence-first investigation with human-rulings epistemics (idea credit: pstack); answers, never edits." }),
+  entry({ name: "how", kind: "skill", decision: "keep", riskClass: "advisory", owner: REGISTRY_OWNER, notes: "Opt-in explorer/explainer subsystem walkthrough (idea credit: pstack); cites file:line." }),
+  entry({ name: "correct", kind: "skill", decision: "keep", riskClass: "advisory", owner: REGISTRY_OWNER, notes: "Opt-in repeated-mistake elimination ladder, lint over type over runtime over script over text (idea credit: pstack)." }),
+  entry({ name: "blast-radius", kind: "skill", decision: "keep", riskClass: "advisory", owner: REGISTRY_OWNER, notes: "Opt-in impact analysis with executed proof per certain/likely dependent (idea credit: pstack); reports, never edits." }),
+  entry({ name: "architect", kind: "skill", decision: "keep", riskClass: "advisory", owner: REGISTRY_OWNER, notes: "Opt-in parallel design exploration before cross-boundary code (idea credit: pstack); records decision with rejected alternatives." }),
+  entry({ name: "figure-it-out", kind: "skill", decision: "keep", riskClass: "advisory", owner: REGISTRY_OWNER, notes: "Opt-in bespoke playbook designer stored under .omc/playbooks/ and validated by check-omc-playbooks (idea credit: pstack)." }),
+  entry({ name: "show-me-your-work", kind: "skill", decision: "keep", riskClass: "advisory", owner: REGISTRY_OWNER, notes: "Opt-in TSV decision trail for auditable autonomous work (idea credit: pstack); append-only." }),
+  entry({ name: "technical-writing", kind: "skill", decision: "keep", riskClass: "advisory", owner: REGISTRY_OWNER, notes: "Opt-in layered prose standard for shipping surfaces (idea credit: pstack); composes with minimal-prose-discipline." }),
+  entry({ name: "typescript-best-practices", kind: "skill", decision: "keep", riskClass: "advisory", owner: REGISTRY_OWNER, notes: "Opt-in TS syntax grounding for type-system discipline (idea credit: pstack)." }),
+  entry({ name: "teach", kind: "skill", decision: "keep", riskClass: "advisory", owner: REGISTRY_OWNER, notes: "Opt-in how+why composition with a landing check (idea credit: pstack)." }),
+  entry({ name: "bro", kind: "skill", decision: "keep", riskClass: "advisory", owner: REGISTRY_OWNER, notes: "Opt-in plain-language restatement keeping every fact (idea credit: pstack)." }),
+  entry({ name: "sharpen", kind: "skill", decision: "keep", riskClass: "advisory", owner: REGISTRY_OWNER, notes: "Opt-in task aiming: consumer, done-check, non-goals (idea credit: pstack)." }),
+  entry({ name: "in-your-own-words", kind: "skill", decision: "keep", riskClass: "advisory", owner: REGISTRY_OWNER, notes: "Opt-in goal playback before work starts (idea credit: pstack)." }),
+  entry({ name: "recall", kind: "skill", decision: "keep", riskClass: "advisory", owner: REGISTRY_OWNER, notes: "Opt-in artifact-first context recovery (idea credit: pstack); complements native session state." }),
+  entry({ name: "ketchup", kind: "skill", decision: "keep", riskClass: "advisory", owner: REGISTRY_OWNER, notes: "Opt-in session catch-up summary (idea credit: pstack)." }),
+  entry({ name: "ketchup-video", kind: "skill", decision: "keep", riskClass: "advisory", owner: REGISTRY_OWNER, notes: "Opt-in session catch-up as a short subtitled slide video on ketchup content (idea credit: pstack); read-only outside its scratch render." }),
+  entry({ name: "what-did-i-get-done", kind: "skill", decision: "keep", riskClass: "advisory", owner: REGISTRY_OWNER, notes: "Opt-in authored-commit summary grouped by theme (idea credit: pstack)." }),
+  entry({ name: "fix-ci", kind: "skill", decision: "keep", riskClass: "advisory", owner: REGISTRY_OWNER, notes: "Opt-in CI failure triage: real/flaky/environmental before any fix (idea credit: pstack)." }),
+  entry({ name: "fix-merge-conflicts", kind: "skill", decision: "keep", riskClass: "advisory", owner: REGISTRY_OWNER, notes: "Opt-in both-intent-preserving conflict resolution (idea credit: pstack); no force-push to shared branches." }),
+  entry({ name: "get-pr-comments", kind: "skill", decision: "keep", riskClass: "advisory", owner: REGISTRY_OWNER, notes: "Opt-in review-thread dedupe and fix/dismiss/ask triage (idea credit: pstack); reports, never edits." }),
   entry({ name: "agent-doc-discipline", kind: "skill", decision: "keep", riskClass: "advisory", owner: REGISTRY_OWNER, notes: "Opt-in writing-time discipline for agent-facing documents; mandatory at drydock seed generation and launch C5 sediment; never a default gate." }),
   entry({ name: "minimal-prose-discipline", kind: "skill", decision: "keep", riskClass: "advisory", owner: REGISTRY_OWNER, notes: "Opt-in writing-time discipline for the prose an agent speaks to a human; suspends itself for security warnings, irreversible-action confirmations, and multi-step sequences; never a default gate." }),
   entry({ name: "launch", kind: "skill", decision: "keep", riskClass: "advisory", owner: REGISTRY_OWNER, notes: "Opt-in governed delivery pipeline (spec -> tickets -> frontier); never a default gate." }),
@@ -122849,6 +123135,10 @@ var execAsync = (0, import_util12.promisify)(import_child_process36.exec);
 // src/features/index.ts
 init_agent_addressability();
 
+// src/features/verification-ledger/ledger.ts
+init_file_lock();
+init_worktree_paths();
+
 // src/agents/index.ts
 init_utils();
 init_architect();
@@ -124569,6 +124859,9 @@ var VOLATILE_PATTERNS = [
   /\b\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}:\d{2}(?:\.\d+)?Z?/g,
   /[A-Za-z]:\\[^\s:]*\\[^\s]*(?:omc|omc-)[^\s\\\/]+/g,
   /\/tmp\/[\w.-]+/g,
+  // The process id in Node's warning prefix, "(node:12345) [DEP0040] DeprecationWarning: ...", differs on every run.
+  // Only an id followed by an optional [code] and a "Name:" is replaced, so "(node:42) ready" in an assertion keeps its signal.
+  /(?<=\(node:)\d+(?=\) (?:\[[^\]]+\] )?\w+:)/g,
   /\b[0-9a-f]{8,}\b/gi
 ];
 function signatureLines(output) {
@@ -133229,6 +133522,20 @@ function applyPluginDirOption(rawPath) {
   }
   process.env[OMC_PLUGIN_ROOT_ENV] = resolved;
 }
+function loadConfigForUpdate() {
+  try {
+    if (!(0, import_fs141.existsSync)(CONFIG_FILE)) return { silentAutoUpdate: false };
+    const parsed = JSON.parse((0, import_fs141.readFileSync)(CONFIG_FILE, "utf-8"));
+    if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
+      throw new Error("expected a JSON object");
+    }
+    return parsed;
+  } catch (error2) {
+    console.error(source_default.red(`Cannot read ${CONFIG_FILE}: ${error2 instanceof Error ? error2.message : String(error2)}`));
+    console.error(source_default.gray("Fix or remove the file, then run this command again."));
+    process.exit(1);
+  }
+}
 var program2 = new Command();
 warnIfWin32();
 async function defaultAction() {
@@ -133283,8 +133590,8 @@ Examples:
     console.log(`  User:    ${paths.user}`);
     console.log(`  Project: ${paths.project}`);
     console.log(source_default.blue("\nFile status:"));
-    console.log(`  User:    ${(0, import_fs140.existsSync)(paths.user) ? source_default.green("exists") : source_default.gray("not found")}`);
-    console.log(`  Project: ${(0, import_fs140.existsSync)(paths.project) ? source_default.green("exists") : source_default.gray("not found")}`);
+    console.log(`  User:    ${(0, import_fs141.existsSync)(paths.user) ? source_default.green("exists") : source_default.gray("not found")}`);
+    console.log(`  Project: ${(0, import_fs141.existsSync)(paths.project) ? source_default.green("exists") : source_default.gray("not found")}`);
     return;
   }
   const config2 = loadConfig();
@@ -133327,7 +133634,7 @@ Profile types (use with --profile):
   webhook      Generic webhook (POST with JSON body)
 
 Examples:
-  $ omc config-stop-callback file --enable --path ${(0, import_path167.join)(getClaudeConfigDir(), "logs/{date}.md")}
+  $ omc config-stop-callback file --enable --path ${(0, import_path168.join)(getClaudeConfigDir(), "logs/{date}.md")}
   $ omc config-stop-callback telegram --enable --token <token> --chat <id>
   $ omc config-stop-callback discord --enable --webhook <url>
   $ omc config-stop-callback file --disable
@@ -133347,7 +133654,7 @@ Examples:
       console.error(source_default.gray(`Valid types: ${profileValidTypes.join(", ")}`));
       process.exit(1);
     }
-    const config3 = getOMCConfig();
+    const config3 = loadConfigForUpdate();
     config3.notificationProfiles = config3.notificationProfiles || {};
     const profileName = options.profile;
     const profile = config3.notificationProfiles[profileName] || { enabled: true };
@@ -133453,7 +133760,7 @@ Examples:
     }
     config3.notificationProfiles[profileName] = profile;
     try {
-      (0, import_fs140.writeFileSync)(CONFIG_FILE, JSON.stringify(config3, null, 2), "utf-8");
+      (0, import_fs141.writeFileSync)(CONFIG_FILE, JSON.stringify(config3, null, 2), "utf-8");
       console.log(source_default.green(`\u2713 Profile "${profileName}" \u2014 ${type} configured`));
       console.log(JSON.stringify(profile[type], null, 2));
     } catch (error2) {
@@ -133468,7 +133775,7 @@ Examples:
     console.error(source_default.gray(`Valid types: ${validTypes.join(", ")}`));
     process.exit(1);
   }
-  const config2 = getOMCConfig();
+  const config2 = loadConfigForUpdate();
   config2.stopHookCallbacks = config2.stopHookCallbacks || {};
   if (options.show) {
     const current = config2.stopHookCallbacks[type];
@@ -133511,8 +133818,9 @@ Examples:
     case "file": {
       const current = config2.stopHookCallbacks.file;
       config2.stopHookCallbacks.file = {
+        ...current,
         enabled: enabled ?? current?.enabled ?? false,
-        path: options.path ?? current?.path ?? (0, import_path167.join)(getClaudeConfigDir(), "session-logs/{session_id}.md"),
+        path: options.path ?? current?.path ?? (0, import_path168.join)(getClaudeConfigDir(), "session-logs/{session_id}.md"),
         format: options.format ?? current?.format ?? "markdown"
       };
       break;
@@ -133566,7 +133874,7 @@ Examples:
     }
   }
   try {
-    (0, import_fs140.writeFileSync)(CONFIG_FILE, JSON.stringify(config2, null, 2), "utf-8");
+    (0, import_fs141.writeFileSync)(CONFIG_FILE, JSON.stringify(config2, null, 2), "utf-8");
     console.log(source_default.green(`\u2713 Stop callback '${type}' configured`));
     console.log(JSON.stringify(config2.stopHookCallbacks[type], null, 2));
   } catch (error2) {
@@ -133585,7 +133893,7 @@ Examples:
 
   # Select profile at launch:
   $ OMC_NOTIFY_PROFILE=work claude`).action(async (name, options) => {
-  const config2 = getOMCConfig();
+  const config2 = loadConfigForUpdate();
   const profiles = config2.notificationProfiles || {};
   if (options.list || !name) {
     const names = Object.keys(profiles);
@@ -133628,7 +133936,7 @@ Active profile (OMC_NOTIFY_PROFILE): ${activeProfile}`));
       delete config2.notificationProfiles;
     }
     try {
-      (0, import_fs140.writeFileSync)(CONFIG_FILE, JSON.stringify(config2, null, 2), "utf-8");
+      (0, import_fs141.writeFileSync)(CONFIG_FILE, JSON.stringify(config2, null, 2), "utf-8");
       console.log(source_default.green(`\u2713 Profile "${name}" deleted`));
     } catch (error2) {
       console.error(source_default.red("Failed to write configuration:"), error2);

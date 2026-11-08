@@ -11709,12 +11709,13 @@ var init_points = __esm({
       },
       effort: {
         type: "score",
-        instructions: "How much reasoning effort does this delegated task need?",
+        instructions: "How much reasoning effort does this delegated task need? Judge the work the delegated agent must actually do. The length of the brief and its formal conditions (language and style rules, permission to use subagents, bans, file locations, report format, words in capitals) do not raise the level.",
         criteria: {
-          trivial: "Trivial: the answer or action is obvious, no thinking needed",
-          some: "Some thought: a few straightforward steps",
-          careful: "Careful multi-step reasoning: several dependent steps or things to check",
-          deep: "Deep reasoning: many tradeoffs, hidden pitfalls, or easy to get subtly wrong"
+          low: "Low: mechanical work: read, look up, list, copy or transcribe, count; the result follows directly from the data",
+          medium: "Medium: a typical change or analysis with clear steps, in one place or following a given procedure or brief",
+          high: "High: multi-file work that needs its own decisions, a diagnosis weighing a few hypotheses, or writing a document",
+          xhigh: "Extra high: in-depth analysis, architecture, a high-stakes review, or a hard bug",
+          max: "Maximum: exceptionally hard, hours of reasoning at the limit of difficulty; rare"
         }
       }
     };
@@ -17618,6 +17619,32 @@ function isRegisteredWorktreePath(repoRoot, wtPath) {
     return false;
   }
 }
+function commitExists(repoRoot, sha) {
+  try {
+    git(repoRoot, ["cat-file", "-e", `${sha}^{commit}`]);
+    return true;
+  } catch {
+    return false;
+  }
+}
+function hasCommitsOnlyOnWorkerRefs(repoRoot, wtPath, ownBranch, baseCommit) {
+  const tips = [git(repoRoot, ["for-each-ref", "--format=%(objectname)", `refs/heads/${ownBranch}`])];
+  if ((0, import_node_fs6.existsSync)(wtPath) && isRegisteredWorktreePath(repoRoot, wtPath)) tips.push(git(repoRoot, ["rev-parse", "HEAD"], wtPath));
+  const commits = tips.filter(Boolean);
+  if (commits.length === 0) return false;
+  const excludedBase = baseCommit && commitExists(repoRoot, baseCommit) ? [baseCommit] : [];
+  return git(repoRoot, [
+    "rev-list",
+    "--max-count=1",
+    ...commits,
+    "--not",
+    ...excludedBase,
+    "--exclude=omc-team/*",
+    "--branches",
+    "--tags",
+    "--remotes"
+  ]).length > 0;
+}
 function normalizeStatusPath(rawPath) {
   const trimmed = rawPath.trim();
   if (trimmed.startsWith('"') && trimmed.endsWith('"')) {
@@ -17803,6 +17830,12 @@ function removeWorkerWorktree(teamName, workerName, repoRoot) {
   const branch = getBranchName(teamName, workerName);
   const metaLockPath = `${getMetadataPath(repoRoot, teamName)}.lock`;
   withFileLockSync(metaLockPath, () => {
+    const baseCommit = readMetadata(repoRoot, teamName).find((entry) => entry.workerName === workerName)?.baseCommit;
+    if (hasCommitsOnlyOnWorkerRefs(repoRoot, wtPath, branch, baseCommit)) {
+      const error2 = new Error(`worktree_unmerged: preserving worker worktree at ${wtPath} and branch ${branch} because they hold commits that only worker branches have; merge or discard the commits, then retry`);
+      error2.code = "worktree_unmerged";
+      throw error2;
+    }
     prepareWorkerWorktreeForRemoval(teamName, workerName, repoRoot, wtPath);
     const wasRegisteredWorktree = isRegisteredWorktreePath(repoRoot, wtPath);
     try {
