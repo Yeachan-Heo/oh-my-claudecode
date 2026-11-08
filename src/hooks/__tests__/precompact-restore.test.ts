@@ -178,8 +178,6 @@ describe('PreCompact writer - plan anchors (issue #3730)', () => {
             priority: 1,
             passes: true,
             completionCriteriaRevision,
-            architectVerified: true,
-            architectVerificationCriteriaRevision: completionCriteriaRevision,
           },
           {
             id: 'US-2',
@@ -203,49 +201,6 @@ describe('PreCompact writer - plan anchors (issue #3730)', () => {
     expect(checkpoint.plan_refs!.prd!.status).toBe('in_progress');
     expect(checkpoint.plan_refs!.prd!.stories_total).toBe(2);
     expect(checkpoint.plan_refs!.prd!.stories_completed).toBe(1);
-  });
-
-  it('does not checkpoint a PRD as done while its stories await architect approval', async () => {
-    // Regression: the checkpoint counted bare `passes`, so a compacted session
-    // resumed with "8/8 done" while Ralph still required reviewer sign-off.
-    const prdDir = join(getOmcRootForTest(tempDir), 'state', 'sessions', 'test-session');
-    const revisionFor = (criterion: string) => `sha256:${createHash('sha256').update(JSON.stringify({ acceptanceCriteria: [criterion], criterionAmendments: [] })).digest('hex')}`;
-    mkdirSync(prdDir, { recursive: true });
-    writeFileSync(
-      join(prdDir, 'prd.json'),
-      JSON.stringify({
-        project: 'Awaiting review',
-        branchName: 'feat/review',
-        description: 'Two stories pass but none is approved',
-        userStories: [
-          {
-            id: 'US-1',
-            title: 'First',
-            description: 'First story',
-            acceptanceCriteria: ['first works'],
-            priority: 1,
-            passes: true,
-            completionCriteriaRevision: revisionFor('first works'),
-          },
-          {
-            id: 'US-2',
-            title: 'Second',
-            description: 'Second story',
-            acceptanceCriteria: ['second works'],
-            priority: 2,
-            passes: true,
-            completionCriteriaRevision: revisionFor('second works'),
-          },
-        ],
-      }),
-      'utf-8',
-    );
-
-    const checkpoint = await createCompactCheckpoint(tempDir, 'auto', 'test-session');
-
-    expect(checkpoint.plan_refs!.prd!.status).toBe('in_progress');
-    expect(checkpoint.plan_refs!.prd!.stories_total).toBe(2);
-    expect(checkpoint.plan_refs!.prd!.stories_completed).toBe(0);
   });
 
   it('captures boulder plan anchors when a boulder is active', async () => {

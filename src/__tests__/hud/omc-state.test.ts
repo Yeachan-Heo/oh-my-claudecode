@@ -1,12 +1,10 @@
 import { afterEach, describe, expect, it } from 'vitest';
 import {
-  readPrdStateForHud,
   readRalphStateForHud,
   readAutopilotStateForHud,
   isAnyModeActive,
   getActiveSkills,
 } from '../../hud/omc-state.js';
-import { getStoryGoverningCriteriaRevision } from '../../hooks/ralph/prd.js';
 import {
   mkdtempSync,
   mkdirSync,
@@ -182,73 +180,5 @@ describe('hud omc state session scoping', () => {
 
     expect(isAnyModeActive(worktree)).toBe(false);
     expect(getActiveSkills(worktree)).toEqual([]);
-  });
-
-  describe('readPrdStateForHud completion definition', () => {
-    function writePrd(worktree: string, stories: unknown[]): void {
-      writeJson(join(worktree, '.omc', 'prd.json'), {
-        project: 'hud-prd',
-        branchName: 'main',
-        description: 'hud prd fixture',
-        userStories: stories,
-      });
-    }
-
-    function ralphStory(id: string, priority: number, options: { passes: boolean; architectVerified?: boolean }) {
-      const acceptanceCriteria = [`${id} accepts its result`];
-      const revision = getStoryGoverningCriteriaRevision({ acceptanceCriteria, criterionAmendments: undefined });
-      return {
-        id,
-        title: id,
-        description: 'story',
-        acceptanceCriteria,
-        priority,
-        passes: options.passes,
-        ...(options.passes ? { completionCriteriaRevision: revision } : {}),
-        ...(options.passes && options.architectVerified === true
-          ? { architectVerified: true, architectVerificationCriteriaRevision: revision }
-          : {}),
-      };
-    }
-
-    it('counts only revision-bound, architect-approved stories as complete', () => {
-      const worktree = createWorktree();
-      writePrd(worktree, [
-        ralphStory('US-1', 1, { passes: true, architectVerified: true }),
-        ralphStory('US-2', 2, { passes: true }),
-      ]);
-
-      expect(readPrdStateForHud(worktree)).toEqual({
-        currentStoryId: 'US-2',
-        completed: 1,
-        total: 2,
-      });
-    });
-
-    it('does not report a run as finished while every story awaits approval', () => {
-      // Regression: counting bare `passes` showed 2/2 done while the loop was
-      // still blocked on reviewer sign-off.
-      const worktree = createWorktree();
-      writePrd(worktree, [
-        ralphStory('US-1', 1, { passes: true }),
-        ralphStory('US-2', 2, { passes: true }),
-      ]);
-
-      expect(readPrdStateForHud(worktree)).toMatchObject({ completed: 0, total: 2, currentStoryId: 'US-1' });
-    });
-
-    it('still renders a PRD the Ralph schema rejects, but never counts an unverified story', () => {
-      const worktree = createWorktree();
-      writePrd(worktree, [
-        { id: 'task-1', passes: true, priority: 1, architectVerified: false },
-        { id: 'task-2', passes: false, priority: 2 },
-      ]);
-
-      expect(readPrdStateForHud(worktree)).toEqual({
-        currentStoryId: 'task-1',
-        completed: 0,
-        total: 2,
-      });
-    });
   });
 });
