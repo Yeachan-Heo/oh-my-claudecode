@@ -907,7 +907,7 @@ function executeClaudeMdTransaction(request) {
 // src/cli/claude-md-coordinator.ts
 hardenWindowsExeSearch();
 var CLAUDE_MD_COORDINATOR_SCHEMA_VERSION = 1;
-var COMPILED_ENGINE_VERSION = true ? "5.7.30" : "";
+var COMPILED_ENGINE_VERSION = true ? "5.8.0" : "";
 var COMPILED_SOURCE_SHA256 = true ? "ce84a47faadeef06575382631a6fad331ab4d98137e6042d29da99ac9545bd4b" : "";
 function runClaudeMdCoordinatorHandshake() {
   if (!COMPILED_ENGINE_VERSION || !COMPILED_SOURCE_SHA256) {
