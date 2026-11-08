@@ -56,7 +56,7 @@ Spawn coordinated agents with shared task lists and real-time messaging:
 Teams use Claude Code's implicit agent team (spawn teammates directly with distinct `name` values; no TeamCreate/TeamDelete in Claude Code 2.1.178+). Team orchestration is explicit via /team — there is no bare "team" keyword.
 
 MCP SERVERS:
-Register extra MCP servers (web search, GitHub, etc.) through Claude Code's native MCP config (`claude mcp add ...` or the path selected by `CLAUDE_MCP_CONFIG_PATH`; by default, the sibling `.claude.json` next to `${CLAUDE_CONFIG_DIR:-$HOME/.claude}`). OMC's bundled MCP server is already registered via the plugin's .mcp.json.
+Register extra MCP servers (web search, GitHub, etc.) through Claude Code's native MCP config (`claude mcp add ...` or the path selected by `CLAUDE_MCP_CONFIG_PATH`; by default, `$CLAUDE_CONFIG_DIR/.claude.json` when `CLAUDE_CONFIG_DIR` names a profile other than `~/.claude`, otherwise `~/.claude.json`). OMC's bundled MCP server is already registered via the plugin's .mcp.json.
 
 HUD STATUSLINE:
 The status bar now shows OMC state. Restart Claude Code to see it.
