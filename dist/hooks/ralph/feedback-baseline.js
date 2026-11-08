@@ -21,12 +21,19 @@ export const MAX_SIGNATURES_PER_COMMAND = 200;
 const ANSI_PATTERN = /\x1b\[[0-9;]*m/g;
 /** Volatile substrings normalized away: durations, timestamps, tmp paths, hex ids. */
 const VOLATILE_PATTERNS = [
+    // Pytest's wall-clock parenthesized duration, e.g. "... in 194.32s (0:03:14)".
+    // Anchored to the "in <duration>" suffix so clock-shaped assertion values
+    // (e.g. assert '(12:15)' == '(12:16)') keep their failure signal.
+    /(?<=\bin \d+(?:\.\d+)?s\s)\(\d+:\d{2}(?::\d{2})?(?:\.\d+)?\)/g,
     /\b\d+(?:\.\d+)?\s*(?:ms|s|sec|secs|seconds)\b/gi,
     /\bduration_ms\s*:?\s*\d+(?:\.\d+)?\b/gi,
     /\bduration\s*:?\s*\d+(?:\.\d+)?\b/gi,
     /\b\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}:\d{2}(?:\.\d+)?Z?/g,
     /[A-Za-z]:\\[^\s:]*\\[^\s]*(?:omc|omc-)[^\s\\\/]+/g,
     /\/tmp\/[\w.-]+/g,
+    // The process id in Node's warning prefix, "(node:12345) [DEP0040] DeprecationWarning: ...", differs on every run.
+    // Only an id followed by an optional [code] and a "Name:" is replaced, so "(node:42) ready" in an assertion keeps its signal.
+    /(?<=\(node:)\d+(?=\) (?:\[[^\]]+\] )?\w+:)/g,
     /\b[0-9a-f]{8,}\b/gi,
 ];
 /**
@@ -53,6 +60,18 @@ export function signatureLines(output) {
             continue;
         // Pure progress chatter and test format headers carry no failure signal.
         if (/^(running|collecting|compiling|building|passing|tap\s+version|✓|√|%|\s*at\s)/i.test(line) && !/fail|error|✗|×/i.test(line))
+            continue;
+        // Drop all-pass pytest progress lines (dots plus skipped/xfail/xpass markers with an optional "[ NN%]" suffix); their width and percentages shift with the test count. A line containing F/E is a failure marker and must survive, because quiet runs can emit only that line.
+        if (/^[.sxX]+(?:\s*\[\s*\d+%\]\s*)?$/.test(line))
+            continue;
+        // Exclude pytest all-pass summaries ("N passed in <v>", optionally with warnings/skipped/...
+        // and a trailing duration already normalized to one or more "<v>" tokens); a summary that
+        // reports failures/errors does not match and is kept below.
+        if (/^\d+ passed(?:, \d+ (?:warnings?|skipped|xfailed|xpassed|deselected))* in <v>(?: <v>)*(?: \([^)]*\))?$/.test(line))
+            continue;
+        // Drop vitest's summary clock ("Start at  00:09:56"): the wall-clock start time differs on every run and
+        // carries no failure signal. Whole-line match, so a clock inside an assertion message is kept.
+        if (/^Start at \d{2}:\d{2}:\d{2}$/.test(line))
             continue;
         // Exclude pass/test/fail/skipped/cancelled/todo summary counters when 0 or for non-failure types.
         // These vary as tests are added; only keep failure counter when fail > 0.
