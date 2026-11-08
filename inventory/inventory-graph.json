@@ -5,31 +5,31 @@
   "provenance": {
     "base": "05c800f40d1ad53b42a78609d2667ef4f726808b",
     "planningHead": "0a91273e61dbbd47eb0af4c02844409251e08398",
-    "head": "f792919b37c326dce493f19723b9a5c3ed7cc666",
-    "sourceSha256": "79ea0db29e25d553a5038f064f913e38da302a192efc82dbb0deb61c1c68e5ec",
+    "head": "b0b951f0981a5b2b94ac508b981bf0c1db30bcf8",
+    "sourceSha256": "67f1fddb22f367cc2042ca6d334afd25f9628cbae9ab380afeeb179953f6b67e",
     "generatedAt": null,
     "generator": "scripts/generate-inventory-graph.mjs"
   },
   "base": "05c800f40d1ad53b42a78609d2667ef4f726808b",
   "planningHead": "0a91273e61dbbd47eb0af4c02844409251e08398",
-  "head": "f792919b37c326dce493f19723b9a5c3ed7cc666",
-  "sourceSha256": "79ea0db29e25d553a5038f064f913e38da302a192efc82dbb0deb61c1c68e5ec",
+  "head": "b0b951f0981a5b2b94ac508b981bf0c1db30bcf8",
+  "sourceSha256": "67f1fddb22f367cc2042ca6d334afd25f9628cbae9ab380afeeb179953f6b67e",
   "counts": {
     "public": {
-      "skills": 83,
+      "skills": 84,
       "commands": 21,
       "workflows": 8,
       "agents": 20,
-      "total": 132
+      "total": 133
     },
     "internal": {
-      "hookFiles": 335,
+      "hookFiles": 333,
       "featureFiles": 95,
       "toolFiles": 65,
       "libFiles": 49,
       "templateHooks": 25,
-      "srcFiles": 1440,
-      "total": 1465
+      "srcFiles": 1438,
+      "total": 1463
     },
     "generated": {
       "distFiles": 5471,
@@ -39,9 +39,9 @@
     "prompt": {
       "promptLikeFiles": 63
     },
-    "skills": 83,
+    "skills": 84,
     "commands": 21,
-    "hookFiles": 335,
+    "hookFiles": 333,
     "workflows": 8,
     "agentDefinitions": 18,
     "promptLikeFiles": 63
@@ -111,6 +111,7 @@
       "remember",
       "research",
       "review",
+      "sdd",
       "self-improve",
       "session-flow",
       "sharpen",
@@ -454,8 +455,6 @@
       "src/hooks/session-end/callbacks.ts",
       "src/hooks/session-end/chain-enqueuer.ts",
       "src/hooks/session-end/check-evidence.ts",
-      "src/hooks/session-end/cleanup-manifest.ts",
-      "src/hooks/session-end/cleanup-manifest.ts",
       "src/hooks/session-end/cleanup-manifest.ts",
       "src/hooks/session-end/foreground-bootstrap.ts",
       "src/hooks/session-end/guardrails.ts",
@@ -6713,8 +6712,6 @@
       "src/hooks/session-end/callbacks.ts",
       "src/hooks/session-end/chain-enqueuer.ts",
       "src/hooks/session-end/check-evidence.ts",
-      "src/hooks/session-end/cleanup-manifest.ts",
-      "src/hooks/session-end/cleanup-manifest.ts",
       "src/hooks/session-end/cleanup-manifest.ts",
       "src/hooks/session-end/foreground-bootstrap.ts",
       "src/hooks/session-end/guardrails.ts",
@@ -37368,6 +37365,41 @@
         "path": "skills/review/SKILL.md"
       },
       {
+        "id": "skills/sdd/SKILL.md",
+        "kind": "skill",
+        "path": "skills/sdd/SKILL.md"
+      },
+      {
+        "id": "skills/sdd/phases/criteria.md",
+        "kind": "other",
+        "path": "skills/sdd/phases/criteria.md"
+      },
+      {
+        "id": "skills/sdd/phases/execute.md",
+        "kind": "other",
+        "path": "skills/sdd/phases/execute.md"
+      },
+      {
+        "id": "skills/sdd/phases/review.md",
+        "kind": "other",
+        "path": "skills/sdd/phases/review.md"
+      },
+      {
+        "id": "skills/sdd/phases/rules.md",
+        "kind": "other",
+        "path": "skills/sdd/phases/rules.md"
+      },
+      {
+        "id": "skills/sdd/phases/spec.md",
+        "kind": "other",
+        "path": "skills/sdd/phases/spec.md"
+      },
+      {
+        "id": "skills/sdd/phases/tasks.md",
+        "kind": "other",
+        "path": "skills/sdd/phases/tasks.md"
+      },
+      {
         "id": "skills/self-improve/SKILL.md",
         "kind": "skill",
         "path": "skills/self-improve/SKILL.md"
@@ -50381,6 +50413,11 @@
       },
       {
         "from": "skills/review/SKILL.md",
+        "to": "src/features/builtin-skills/skills.ts",
+        "kind": "registers"
+      },
+      {
+        "from": "skills/sdd/SKILL.md",
         "to": "src/features/builtin-skills/skills.ts",
         "kind": "registers"
       },
@@ -90661,12 +90698,12 @@
       }
     ],
     "stats": {
-      "nodeCount": 8054,
-      "edgeCount": 8672,
+      "nodeCount": 8061,
+      "edgeCount": 8673,
       "importEdgeCount": 7231,
-      "registerEdgeCount": 104
+      "registerEdgeCount": 105
     }
   },
-  "inventorySha256": "46290addbc306f72c1f03e8af9eb0907d5f19d993460bc9ddaeabeab3402414d",
-  "manifestSha256": "600ee0c66814514089a0aa8b2f817074631c6edb6198eb89c5c0aa4a202ccea0"
+  "inventorySha256": "3302b79aa903a9af878c3b5f7cb81b36b09d5bd37f115d7e21d63eadfea445d2",
+  "manifestSha256": "ef265cab89b20f41d5efeeb93746fb739b019431669af9e0f1a1afdc41771642"
 }
