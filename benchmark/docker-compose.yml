@@ -1,0 +1,88 @@
+version: '3.8'
+
+services:
+  swe-bench-runner:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: swe-bench-omc
+
+    # Environment configuration
+    environment:
+      - ANTHROPIC_AUTH_TOKEN=${ANTHROPIC_AUTH_TOKEN}
+      - ANTHROPIC_BASE_URL=${ANTHROPIC_BASE_URL:-https://api.layofflabs.com}
+      - RUN_MODE=${RUN_MODE:-vanilla}
+      - MAX_WORKERS=${MAX_WORKERS:-4}
+      - DATASET=${DATASET:-princeton-nlp/SWE-bench_Verified}
+      - PYTHONUNBUFFERED=1
+      - NODE_ENV=production
+
+    # Volume mounts
+    volumes:
+      # Persist results across runs
+      - ./results:/workspace/results
+      # Model predictions output
+      - ./predictions:/workspace/predictions
+      # Cached repositories
+      - ./repos:/workspace/repos
+      # Execution logs
+      - ./logs:/workspace/logs
+      # Mount OMC source for development (optional)
+      - ../:/workspace/omc-source:ro
+      # Docker socket for SWE-bench container operations
+      - /var/run/docker.sock:/var/run/docker.sock
+      # Claude config persistence
+      - claude-config:/root/.claude
+
+    # Resource limits
+    deploy:
+      resources:
+        limits:
+          cpus: '8'
+          memory: 16G
+        reservations:
+          cpus: '2'
+          memory: 4G
+
+    # Keep container running for interactive use
+    stdin_open: true
+    tty: true
+
+    # Networking
+    networks:
+      - swe-bench-net
+
+    # Working directory
+    working_dir: /workspace
+
+  # Optional: Results analysis service
+  analysis:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: swe-bench-analysis
+    profiles:
+      - analysis
+    environment:
+      - PYTHONUNBUFFERED=1
+    volumes:
+      - ./results:/workspace/results:ro
+      - ./predictions:/workspace/predictions:ro
+      - ./analysis:/workspace/analysis
+    command: >
+      python -c "
+      import pandas as pd
+      import json
+      from pathlib import Path
+      print('Analysis service ready. Mount your analysis scripts.')
+      "
+    networks:
+      - swe-bench-net
+
+networks:
+  swe-bench-net:
+    driver: bridge
+
+volumes:
+  claude-config:
+    driver: local

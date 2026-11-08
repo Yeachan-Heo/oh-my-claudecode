@@ -1,0 +1,19 @@
+{
+  "aliases": {
+    "omc": {
+      "repo": "Yeachan-Heo/oh-my-claudecode",
+      "local": "~/Workspace/oh-my-claudecode",
+      "default_base": "main"
+    },
+    "cc": {
+      "repo": "anthropics/claude-code",
+      "local": "~/Workspace/claude-code",
+      "default_base": "main"
+    }
+  },
+  "defaults": {
+    "worktree_root": "~/.psm/worktrees",
+    "cleanup_after_days": 14,
+    "auto_cleanup_merged": true
+  }
+}

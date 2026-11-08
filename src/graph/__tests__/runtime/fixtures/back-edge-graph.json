@@ -1,0 +1,73 @@
+{
+  "descriptor_version": 1,
+  "run_id": "run-regression-back-edge",
+  "revision_id": "rev-regression-back-edge",
+  "goal": "Bounded retry loop round-trip",
+  "nodes": [
+    {
+      "id": "start",
+      "kind": "agent",
+      "title": "Start",
+      "timeout_ms": 60000,
+      "max_attempts": 3,
+      "effect_policy": { "policy": "side_effect_free" },
+      "instructions": "Start the bounded loop"
+    },
+    {
+      "id": "work",
+      "kind": "command",
+      "title": "Work",
+      "timeout_ms": 60000,
+      "max_attempts": 3,
+      "effect_policy": { "policy": "side_effect_free" },
+      "command": "echo work"
+    },
+    {
+      "id": "give_up",
+      "kind": "command",
+      "title": "Give up",
+      "timeout_ms": 60000,
+      "max_attempts": 3,
+      "effect_policy": { "policy": "side_effect_free" },
+      "command": "echo give-up"
+    },
+    {
+      "id": "term",
+      "kind": "command",
+      "title": "Terminal",
+      "timeout_ms": 60000,
+      "max_attempts": 3,
+      "effect_policy": { "policy": "side_effect_free" },
+      "command": "echo term"
+    }
+  ],
+  "edges": [
+    { "id": "e-start-work", "kind": "fixed", "from": "start", "to": "work" },
+    {
+      "id": "e-work-retry",
+      "kind": "back_edge",
+      "from": "work",
+      "to": "work",
+      "route": "retry",
+      "max_traversals": 2
+    },
+    {
+      "id": "e-work-give-up",
+      "kind": "conditional",
+      "from": "work",
+      "to": "give_up",
+      "route": "give-up"
+    },
+    {
+      "id": "e-work-term",
+      "kind": "conditional",
+      "from": "work",
+      "to": "term",
+      "route": "success"
+    },
+    { "id": "e-give-up-term", "kind": "fixed", "from": "give_up", "to": "term" }
+  ],
+  "entry_node_ids": ["start"],
+  "concurrency_limit": 1,
+  "terminal_verification_node_id": "term"
+}

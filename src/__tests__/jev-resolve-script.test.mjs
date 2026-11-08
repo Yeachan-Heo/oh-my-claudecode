@@ -1,0 +1,371 @@
+/* global process, setTimeout */
+/**
+ * Tests for scripts/jev-resolve.mjs (script-side judgment channel, ticket 15).
+ *
+ * .mjs so vitest picks it up without tsc typechecking the untyped script.
+ * Covers: env-parse tri-state parity with the TS config contract, config
+ * gates (zero fetch when off), bounded fetch + validated response, degrade
+ * path (HTTP error -> degraded, log jev:null), and the end-to-end channel:
+ * a real child process (node scripts/jev-resolve.mjs) fed one JSON request
+ * on stdin against a stub endpoint, reading one JSON result on stdout.
+ */
+
+import { execFile } from 'node:child_process';
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { createServer } from 'node:http';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { afterAll, describe, expect, it } from 'vitest';
+
+import { parseJevEnv, pointExcerptChars, readRequestFile, resolveExcerptChars, resolveJevTimeoutMs, resolveRequest, serializeQuestions, validateJevResponse } from '../../scripts/jev-resolve.mjs';
+import { excerptCharsFor, parseJevConfig } from '../hooks/jev/config.ts';
+
+const root = join(fileURLToPath(import.meta.url), '..', '..', '..');
+const NODE = process.execPath;
+const SCRIPT = join(root, 'scripts', 'jev-resolve.mjs');
+
+const tmp = mkdtempSync(join(tmpdir(), 'jev-resolve-test-'));
+const afterHooks = [];
+function onExit(fn) { afterHooks.push(fn); }
+onExit(() => rmSync(tmp, { recursive: true, force: true }));
+afterAll(async () => { for (const fn of afterHooks.reverse()) await fn(); });
+
+const QUESTIONS = { route: { type: 'choice', criteria: { haiku: 'simple', sonnet: 'standard', opus: 'complex' } } };
+
+function baseEnv(overrides = {}) {
+  return {
+    TYPESAFE_API_KEY: 'test-key',
+    OMC_JEV: 'model-routing',
+    OMC_JEV_LOG_DIR: tmp,
+    ...overrides,
+  };
+}
+
+describe('resolveJevTimeoutMs', () => {
+  it.each(['1e3', '1.5', '2000ms', ' 2000 ', '01', '9007199254740993'])(
+    'falls back before adding the active parent buffer for malformed values (%s)',
+    value => {
+      const env = { OMC_JEV_TIMEOUT_MS: value };
+      expect(resolveJevTimeoutMs(env)).toBe(2000);
+      expect(resolveJevTimeoutMs(env, 500)).toBe(2500);
+    },
+  );
+
+  it('accepts a canonical timeout and keeps the buffered deadline inside the Node timer range', () => {
+    expect(resolveJevTimeoutMs({ OMC_JEV_TIMEOUT_MS: '2500' })).toBe(2500);
+    expect(resolveJevTimeoutMs(
+      { OMC_JEV_TIMEOUT_MS: '2147483647' },
+      500,
+    )).toBe(2_147_483_647);
+  });
+});
+
+describe('parseJevEnv tri-state parity', () => {
+  it('off when the key is absent even with OMC_JEV set', () => {
+    expect(parseJevEnv('model-routing', { OMC_JEV: 'model-routing' })).toBe('off');
+  });
+
+  it('off when OMC_JEV=off', () => {
+    expect(parseJevEnv('model-routing', { TYPESAFE_API_KEY: 'k', OMC_JEV: 'off' })).toBe('off');
+  });
+
+  it('shadow for a listed point, off for an unlisted one', () => {
+    expect(parseJevEnv('model-routing', baseEnv())).toBe('shadow');
+    expect(parseJevEnv('task-size', baseEnv())).toBe('off');
+  });
+
+  it('active for point:active, all, and all:active', () => {
+    expect(parseJevEnv('model-routing', baseEnv({ OMC_JEV: 'model-routing:active' }))).toBe('active');
+    expect(parseJevEnv('task-size', baseEnv({ OMC_JEV: 'all' }))).toBe('shadow');
+    expect(parseJevEnv('task-size', baseEnv({ OMC_JEV: 'all:active' }))).toBe('active');
+  });
+});
+
+describe('excerpt limit parity with the TS config contract', () => {
+  it.each([
+    [{}, 'model-routing'],
+    [{}, 'task-size'],
+    [{ OMC_JEV_EXCERPT_CHARS: '512' }, 'model-routing'],
+    [{ OMC_JEV_EXCERPT_CHARS: '512' }, 'task-size'],
+    [{ OMC_JEV_EXCERPT_CHARS_MODEL_ROUTING: '12000' }, 'model-routing'],
+    [{ OMC_JEV_EXCERPT_CHARS: '512', OMC_JEV_EXCERPT_CHARS_MODEL_ROUTING: '12000' }, 'model-routing'],
+    [{ OMC_JEV_EXCERPT_CHARS: '512', OMC_JEV_EXCERPT_CHARS_MODEL_ROUTING: '12000' }, 'task-size'],
+    [{ OMC_JEV_EXCERPT_CHARS_TASK_SIZE: '4000' }, 'task-size'],
+    [{ OMC_JEV_EXCERPT_CHARS_MODEL_ROUTING: '1e3' }, 'model-routing'],
+    [{ OMC_JEV_EXCERPT_CHARS_MODEL_ROUTING: '0' }, 'model-routing'],
+    [{ OMC_JEV_EXCERPT_CHARS_MODEL_ROUTING: ' 80 ' }, 'model-routing'],
+    [{ OMC_JEV_EXCERPT_CHARS_MODEL_ROUTING: '80' }, 'context-pruning'],
+  ])('script and TS agree for %j and point %s', (env, point) => {
+    expect(resolveExcerptChars(point, env)).toBe(excerptCharsFor(point, parseJevConfig(env)));
+  });
+
+  it('reads only the point variable in pointExcerptChars', () => {
+    expect(pointExcerptChars('model-routing', { OMC_JEV_EXCERPT_CHARS: '512' })).toBeUndefined();
+    expect(pointExcerptChars('model-routing', { OMC_JEV_EXCERPT_CHARS_MODEL_ROUTING: '700' })).toBe(700);
+  });
+});
+
+describe('parseJevEnv plan mode (OMC_JEV_PLAN_MODE)', () => {
+  const active = baseEnv({ OMC_JEV: 'model-routing:active' });
+
+  it('leaves plan mode unchanged when OMC_JEV_PLAN_MODE is unset', () => {
+    expect(parseJevEnv('model-routing', active, 'plan')).toBe('active');
+    expect(parseJevEnv('model-routing', baseEnv(), 'plan')).toBe('shadow');
+  });
+
+  it('shadow: active and shadow points run in shadow, unlisted points stay off', () => {
+    expect(parseJevEnv('model-routing', { ...active, OMC_JEV_PLAN_MODE: 'shadow' }, 'plan')).toBe('shadow');
+    expect(parseJevEnv('model-routing', baseEnv({ OMC_JEV_PLAN_MODE: 'shadow' }), 'plan')).toBe('shadow');
+    expect(parseJevEnv('task-size', { ...active, OMC_JEV_PLAN_MODE: 'shadow' }, 'plan')).toBe('off');
+  });
+
+  it('off: every point is off in plan mode', () => {
+    expect(parseJevEnv('model-routing', { ...active, OMC_JEV_PLAN_MODE: 'off' }, 'plan')).toBe('off');
+    expect(parseJevEnv('task-size', baseEnv({ OMC_JEV: 'all', OMC_JEV_PLAN_MODE: 'off' }), 'plan')).toBe('off');
+  });
+
+  it.each([undefined, 'default', 'acceptEdits', 'auto', 'dontAsk', 'bypassPermissions'])(
+    'does not apply outside plan mode (%s)',
+    (permissionMode) => {
+      expect(parseJevEnv('model-routing', { ...active, OMC_JEV_PLAN_MODE: 'off' }, permissionMode)).toBe('active');
+    },
+  );
+
+  it.each(['active', 'bogus', ''])('ignores an unrecognized value (%j)', (value) => {
+    expect(parseJevEnv('model-routing', { ...active, OMC_JEV_PLAN_MODE: value }, 'plan')).toBe('active');
+  });
+});
+
+describe('wire shape parity with the TS client (#4091)', () => {
+  it('serializes score criteria to the ordered list the API requires', () => {
+    const wire = serializeQuestions({
+      staleness: { type: 'score', criteria: { fresh: 'Fresh', aging: 'Aging', stale: 'Stale' } },
+    });
+    expect(wire.staleness.criteria).toEqual(['Fresh', 'Aging', 'Stale']);
+  });
+
+  it('leaves choice and noul criteria as the named map', () => {
+    const wire = serializeQuestions({
+      intent: { type: 'noul', criteria: { true: 'yes', false: 'no' } },
+    });
+    expect(wire.intent.criteria).toEqual({ true: 'yes', false: 'no' });
+  });
+
+  it('sends the serialized questions on the wire', async () => {
+    let body;
+    const fetchFn = async (_url, init) => {
+      body = JSON.parse(init.body);
+      return { ok: true, status: 200, json: async () => ({ answers: { staleness: { type: 'score', score: 2 } } }) };
+    };
+    await resolveRequest(
+      { point: 'context-pruning', state: { p: 'x' }, questions: { staleness: { type: 'score', criteria: { fresh: 'Fresh', stale: 'Stale' } } }, heuristic: 1 },
+      baseEnv({ OMC_JEV: 'context-pruning' }),
+      fetchFn,
+    );
+    expect(body.questions.staleness.criteria).toEqual(['Fresh', 'Stale']);
+  });
+});
+
+describe('readRequestFile', () => {
+  it('reads the request and deletes the file so tool input never lingers', () => {
+    // Create temp dir with omc-jev- prefix to match the pattern readRequestFile checks for deletion
+    const jevTmpDir = mkdtempSync(join(tmpdir(), 'omc-jev-'));
+    onExit(() => rmSync(jevTmpDir, { recursive: true, force: true }));
+    const path = join(jevTmpDir, 'request.json');
+    writeFileSync(path, JSON.stringify({ point: 'slop-warning', heuristic: true }), 'utf8');
+    expect(readRequestFile(path)).toEqual({ point: 'slop-warning', heuristic: true });
+    expect(existsSync(path)).toBe(false);
+    expect(existsSync(jevTmpDir)).toBe(false);
+  });
+});
+
+describe('validateJevResponse', () => {
+  it('accepts a valid answers object and rejects invalid shapes', () => {
+    validateJevResponse({ answers: { a: { type: 'choice', choice: 'x' } } });
+    expect(() => validateJevResponse(null)).toThrow();
+    expect(() => validateJevResponse({ answers: {} })).toThrow();
+    expect(() => validateJevResponse({ answers: { a: {} } })).toThrow();
+  });
+});
+
+describe('resolveRequest', () => {
+  it('off: zero fetch, no log', async () => {
+    let fetched = false;
+    const fetchFn = async () => { fetched = true; };
+    const result = await resolveRequest({ point: 'task-size', state: {}, questions: QUESTIONS }, baseEnv(), fetchFn);
+    expect(result.mode).toBe('off');
+    expect(fetched).toBe(false);
+  });
+
+  it('shadow: one fetch, one log line, heuristic preserved', async () => {
+    const fetchFn = async () => ({ ok: true, status: 200, json: async () => ({ answers: { route: { type: 'choice', choice: 'opus' } } }) });
+    const result = await resolveRequest({ point: 'model-routing', state: { prompt: 'hi' }, questions: QUESTIONS, heuristic: 'sonnet' }, baseEnv(), fetchFn);
+    expect(result.mode).toBe('shadow');
+    expect(result.answer).toEqual({ type: 'choice', choice: 'opus' });
+    const line = JSON.parse(readFileSync(join(tmp, 'shadow.jsonl'), 'utf8').trim().split('\n').pop());
+    expect(line).toMatchObject({ point: 'model-routing', mode: 'shadow', heuristic: 'sonnet', jev: { choice: 'opus' } });
+  });
+
+  it('active-by-env: Jev decides (mode active, answer returned)', async () => {
+    const fetchFn = async () => ({ ok: true, status: 200, json: async () => ({ answers: { route: { type: 'choice', choice: 'opus' } } }) });
+    const result = await resolveRequest({ point: 'model-routing', state: {}, questions: QUESTIONS }, baseEnv({ OMC_JEV: 'model-routing:active' }), fetchFn);
+    expect(result.mode).toBe('active');
+    expect(result.answer).toEqual({ type: 'choice', choice: 'opus' });
+  });
+
+  it('plan mode with OMC_JEV_PLAN_MODE=shadow: the request permission mode makes an active point resolve and log as shadow', async () => {
+    const fetchFn = async () => ({ ok: true, status: 200, json: async () => ({ answers: { route: { type: 'choice', choice: 'opus' } } }) });
+    const result = await resolveRequest(
+      { point: 'model-routing', state: {}, questions: QUESTIONS, heuristic: 'haiku', permissionMode: 'plan' },
+      baseEnv({ OMC_JEV: 'model-routing:active', OMC_JEV_PLAN_MODE: 'shadow' }),
+      fetchFn,
+    );
+    expect(result.mode).toBe('shadow');
+    const line = JSON.parse(readFileSync(join(tmp, 'shadow.jsonl'), 'utf8').trim().split('\n').pop());
+    expect(line).toMatchObject({ point: 'model-routing', mode: 'shadow', heuristic: 'haiku', jev: { choice: 'opus' } });
+  });
+
+  it('plan mode with OMC_JEV_PLAN_MODE=off: zero fetch', async () => {
+    let fetched = false;
+    const fetchFn = async () => { fetched = true; };
+    const result = await resolveRequest(
+      { point: 'model-routing', state: {}, questions: QUESTIONS, permissionMode: 'plan' },
+      baseEnv({ OMC_JEV: 'model-routing:active', OMC_JEV_PLAN_MODE: 'off' }),
+      fetchFn,
+    );
+    expect(result.mode).toBe('off');
+    expect(fetched).toBe(false);
+  });
+
+  it('degrades on HTTP error and logs jev:null', async () => {
+    const fetchFn = async () => ({ ok: false, status: 500, json: async () => ({}) });
+    const result = await resolveRequest({ point: 'model-routing', state: {}, questions: QUESTIONS }, baseEnv(), fetchFn);
+    expect(result.mode).toBe('degraded');
+    expect(result.answer).toBeNull();
+    const line = JSON.parse(readFileSync(join(tmp, 'shadow.jsonl'), 'utf8').trim().split('\n').pop());
+    expect(line.mode).toBe('degraded');
+    expect(line.jev).toBeNull();
+    expect(result.answers).toBeNull();
+    expect(line.answers).toBeNull();
+  });
+
+  it('returns and logs every answer by question name, whatever their order', async () => {
+    const answers = {
+      effort: { type: 'score', score: 1.2, confidence: 0.7, legend: { 0: 'low', 1: 'medium', 2: 'high', 3: 'xhigh', 4: 'max' }, probabilities: { 0: 0.1, 1: 0.5, 2: 0.3, 3: 0.05, 4: 0.05 } },
+      'model-tier': { type: 'choice', choice: 'sonnet', confidence: 0.9, probabilities: { haiku: 0.05, sonnet: 0.9, opus: 0.05 } },
+    };
+    const questions = {
+      'model-tier': QUESTIONS.route,
+      effort: { type: 'score', criteria: { low: 'low', medium: 'medium', high: 'high', xhigh: 'xhigh', max: 'max' } },
+    };
+    const fetchFn = async () => ({ ok: true, status: 200, json: async () => ({ answers }) });
+    const result = await resolveRequest({ point: 'model-routing', state: {}, questions }, baseEnv({ OMC_JEV: 'model-routing:active' }), fetchFn);
+    expect(result.mode).toBe('active');
+    // `answer` is the answer to the first question asked, not the first one the server sent.
+    expect(result.answer).toEqual(answers['model-tier']);
+    expect(result.answers).toEqual(answers);
+    const line = JSON.parse(readFileSync(join(tmp, 'shadow.jsonl'), 'utf8').trim().split('\n').pop());
+    expect(line.jev).toEqual(answers['model-tier']);
+    expect(line.confidence).toBe(0.9);
+    expect(line.answers).toEqual(answers);
+  });
+
+  it('falls back to the first answer in server order when the first question has no answer', async () => {
+    const fetchFn = async () => ({ ok: true, status: 200, json: async () => ({ answers: { other: { type: 'choice', choice: 'opus' } } }) });
+    const result = await resolveRequest({ point: 'model-routing', state: {}, questions: QUESTIONS }, baseEnv({ OMC_JEV: 'model-routing:active' }), fetchFn);
+    expect(result.answer).toEqual({ type: 'choice', choice: 'opus' });
+  });
+
+  it('bounds excerpts before send and log', async () => {
+    let body;
+    const fetchFn = async (_url, init) => { body = JSON.parse(init.body); return { ok: true, status: 200, json: async () => ({ answers: { route: { type: 'choice', choice: 'x' } } }) }; };
+    await resolveRequest({ point: 'task-size', state: { prompt: 'a'.repeat(500) }, questions: QUESTIONS }, baseEnv({ OMC_JEV: 'task-size', OMC_JEV_EXCERPT_CHARS: '50' }), fetchFn);
+    expect(body.state.prompt).toHaveLength(50);
+  });
+
+  it('sends question definitions whole, whatever OMC_JEV_EXCERPT_CHARS is', async () => {
+    let body;
+    const fetchFn = async (_url, init) => { body = JSON.parse(init.body); return { ok: true, status: 200, json: async () => ({ answers: { route: { type: 'choice', choice: 'x' } } }) }; };
+    const questions = { route: { type: 'choice', instructions: 'i'.repeat(300), criteria: { haiku: 'h'.repeat(300), opus: 'o'.repeat(300) } } };
+    await resolveRequest({ point: 'task-size', state: { prompt: 'a'.repeat(500) }, questions }, baseEnv({ OMC_JEV: 'task-size', OMC_JEV_EXCERPT_CHARS: '50' }), fetchFn);
+    expect(body.state.prompt).toHaveLength(50);
+    expect(body.questions.route.instructions).toHaveLength(300);
+    expect(body.questions.route.criteria.opus).toHaveLength(300);
+  });
+
+  it('model-routing sends up to 12000 characters of state by default and ignores OMC_JEV_EXCERPT_CHARS', async () => {
+    let body;
+    const fetchFn = async (_url, init) => { body = JSON.parse(init.body); return { ok: true, status: 200, json: async () => ({ answers: { route: { type: 'choice', choice: 'x' } } }) }; };
+    await resolveRequest({ point: 'model-routing', state: { prompt: 'a'.repeat(13000) }, questions: QUESTIONS }, baseEnv({ OMC_JEV_EXCERPT_CHARS: '50' }), fetchFn);
+    expect(body.state.prompt).toHaveLength(12000);
+  });
+
+  it('bounds the state of one point with its own OMC_JEV_EXCERPT_CHARS_<POINT> variable', async () => {
+    const bodies = [];
+    const fetchFn = async (_url, init) => { bodies.push(JSON.parse(init.body)); return { ok: true, status: 200, json: async () => ({ answers: { route: { type: 'choice', choice: 'x' } } }) }; };
+    const env = baseEnv({ OMC_JEV: 'model-routing,task-size', OMC_JEV_EXCERPT_CHARS: '50', OMC_JEV_EXCERPT_CHARS_MODEL_ROUTING: '300' });
+    await resolveRequest({ point: 'model-routing', state: { prompt: 'a'.repeat(500) }, questions: QUESTIONS }, env, fetchFn);
+    await resolveRequest({ point: 'task-size', state: { prompt: 'a'.repeat(500) }, questions: QUESTIONS }, env, fetchFn);
+    expect(bodies[0].state.prompt).toHaveLength(300);
+    expect(bodies[1].state.prompt).toHaveLength(50);
+  });
+
+  it('falls back to the safe excerpt default for a truncated numeric override', async () => {
+    let body;
+    const fetchFn = async (_url, init) => { body = JSON.parse(init.body); return { ok: true, status: 200, json: async () => ({ answers: { route: { type: 'choice', choice: 'x' } } }) }; };
+    await resolveRequest({ point: 'task-size', state: { prompt: 'a'.repeat(500) }, questions: QUESTIONS }, baseEnv({ OMC_JEV: 'task-size', OMC_JEV_EXCERPT_CHARS: '1e3' }), fetchFn);
+    expect(body.state.prompt).toHaveLength(200);
+  });
+
+  it.each(['1e3', '2147483648'])(
+    'does not turn an invalid timeout into a 1ms deadline (%s)',
+    async timeout => {
+      const fetchFn = async () => {
+        await new Promise(resolve => setTimeout(resolve, 25));
+        return { ok: true, status: 200, json: async () => ({ answers: { route: { type: 'choice', choice: 'opus' } } }) };
+      };
+      const result = await resolveRequest(
+        { point: 'model-routing', state: {}, questions: QUESTIONS },
+        baseEnv({ OMC_JEV_TIMEOUT_MS: timeout }),
+        fetchFn,
+      );
+      expect(result.mode).toBe('shadow');
+      expect(result.answer).toEqual({ type: 'choice', choice: 'opus' });
+    },
+  );
+
+  it.each([
+    ['a choice outside the declared criteria', QUESTIONS, 'us.anthropic.claude-sonnet-4-6-v1:0'],
+    ['a non-primitive choice', QUESTIONS, ['sonnet']],
+    ['a non-boolean noul answer', { done: { type: 'noul', criteria: { yes: 'done', no: 'not done' } } }, 'true'],
+    ['a non-numeric score', { size: { type: 'score', criteria: { low: 'l', high: 'h' } } }, '2'],
+  ])('logs %s as a non-comparable null heuristic', async (_label, questions, heuristic) => {
+    const fetchFn = async () => ({ ok: true, status: 200, json: async () => ({ answers: { route: { type: 'choice', choice: 'opus' } } }) });
+    await resolveRequest({ point: 'model-routing', state: {}, questions, heuristic }, baseEnv(), fetchFn);
+    const line = JSON.parse(readFileSync(join(tmp, 'shadow.jsonl'), 'utf8').trim().split('\n').pop());
+    expect(line.heuristic).toBeNull();
+  });
+});
+
+describe('end-to-end child process', () => {
+  it('a plain-Node caller feeds stdin JSON to the child and reads the result from stdout', async () => {
+    const server = createServer((req, res) => {
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ answers: { route: { type: 'choice', choice: 'opus', confidence: 0.9 } } }));
+    });
+    await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
+    onExit(() => new Promise((resolve) => server.close(resolve)));
+    const port = server.address().port;
+
+    const result = await new Promise((resolve, reject) => {
+      const child = execFile(NODE, [SCRIPT], {
+        env: { ...process.env, TYPESAFE_API_KEY: 'test-key', OMC_JEV: 'model-routing:active', OMC_JEV_ENDPOINT: 'http://127.0.0.1:' + port, OMC_JEV_LOG_DIR: tmp },
+      }, (error, stdout) => { if (error) reject(error); else resolve(JSON.parse(stdout)); });
+      child.stdin.write(JSON.stringify({ point: 'model-routing', state: { prompt: 'hi' }, questions: QUESTIONS, heuristic: 'sonnet' }));
+      child.stdin.end();
+    });
+
+    expect(result).toMatchObject({ mode: 'active', answer: { type: 'choice', choice: 'opus' } });
+  });
+});

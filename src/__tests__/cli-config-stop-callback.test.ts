@@ -1,0 +1,284 @@
+import { afterEach, beforeEach, describe, it, expect } from 'vitest';
+import { mkdtempSync, writeFileSync, readFileSync, mkdirSync, rmSync } from 'fs';
+import { join, dirname } from 'path';
+import { tmpdir } from 'os';
+import { spawnSync } from 'child_process';
+import { fileURLToPath } from 'url';
+
+const __dirname = dirname(fileURLToPath(import.meta.url));
+const REPO_ROOT = join(__dirname, '..', '..');
+const CLI_ENTRY = join(REPO_ROOT, 'src', 'cli', 'index.ts');
+
+interface CliRunResult {
+  status: number | null;
+  stdout: string;
+  stderr: string;
+}
+
+function runCli(args: string[], homeDir: string): CliRunResult {
+  const result = spawnSync(process.execPath, ['--import', 'tsx', CLI_ENTRY, ...args], {
+    cwd: REPO_ROOT,
+    env: {
+      ...process.env,
+      HOME: homeDir,
+      CLAUDE_CONFIG_DIR: join(homeDir, '.claude'),
+    },
+    encoding: 'utf-8',
+  });
+
+  return {
+    status: result.status,
+    stdout: result.stdout,
+    stderr: result.stderr,
+  };
+}
+
+function readConfig(configPath: string) {
+  return JSON.parse(readFileSync(configPath, 'utf-8')) as {
+    silentAutoUpdate: boolean;
+    defaultExecutionMode?: string;
+    taskTool?: string;
+    stopHookCallbacks?: {
+      telegram?: {
+        enabled: boolean;
+        botToken?: string;
+        chatId?: string;
+        tagList?: string[];
+      };
+      discord?: {
+        enabled: boolean;
+        webhookUrl?: string;
+        tagList?: string[];
+      };
+      slack?: {
+        enabled: boolean;
+        webhookUrl?: string;
+        tagList?: string[];
+      };
+      file?: {
+        enabled: boolean;
+        path: string;
+        format?: 'markdown' | 'json';
+      };
+    };
+  };
+}
+
+describe('omc config-stop-callback tag options', () => {
+  it('updates telegram tagList options and preserves existing config fields', () => {
+    const homeDir = mkdtempSync(join(tmpdir(), 'omc-cli-stop-callback-home-'));
+    const configPath = join(homeDir, '.claude', '.omc-config.json');
+    mkdirSync(join(homeDir, '.claude'), { recursive: true });
+
+    writeFileSync(configPath, JSON.stringify({
+      silentAutoUpdate: false,
+      taskTool: 'task',
+      stopHookCallbacks: {
+        telegram: {
+          enabled: true,
+          botToken: '123456789:ABCdefGHIjklMNOpqrSTUvwxyz012345678',
+          chatId: '12345',
+          tagList: ['@old'],
+        },
+      },
+    }, null, 2));
+
+    const replace = runCli(['config-stop-callback', 'telegram', '--tag-list', '@alice,bob'], homeDir);
+    expect(replace.status).toBe(0);
+
+    let config = readConfig(configPath);
+    expect(config.taskTool).toBe('task');
+    expect(config.stopHookCallbacks?.telegram?.tagList).toEqual(['@alice', 'bob']);
+
+    const add = runCli(['config-stop-callback', 'telegram', '--add-tag', 'charlie'], homeDir);
+    expect(add.status).toBe(0);
+
+    config = readConfig(configPath);
+    expect(config.stopHookCallbacks?.telegram?.tagList).toEqual(['@alice', 'bob', 'charlie']);
+
+    const remove = runCli(['config-stop-callback', 'telegram', '--remove-tag', 'bob'], homeDir);
+    expect(remove.status).toBe(0);
+
+    config = readConfig(configPath);
+    expect(config.stopHookCallbacks?.telegram?.tagList).toEqual(['@alice', 'charlie']);
+
+    const show = runCli(['config-stop-callback', 'telegram', '--show'], homeDir);
+    expect(show.status).toBe(0);
+    expect(show.stdout).toContain('"tagList": [');
+    expect(show.stdout).toContain('"@alice"');
+  });
+
+  it('applies and clears discord tags and ignores tag options for file callback', () => {
+    const homeDir = mkdtempSync(join(tmpdir(), 'omc-cli-stop-callback-home-'));
+    const configPath = join(homeDir, '.claude', '.omc-config.json');
+    mkdirSync(join(homeDir, '.claude'), { recursive: true });
+
+    writeFileSync(configPath, JSON.stringify({
+      silentAutoUpdate: false,
+      stopHookCallbacks: {
+        discord: {
+          enabled: true,
+          webhookUrl: 'https://discord.com/api/webhooks/test',
+          tagList: ['@here'],
+        },
+        file: {
+          enabled: true,
+          path: '/tmp/session.md',
+          format: 'markdown',
+        },
+      },
+    }, null, 2));
+
+    const add = runCli(['config-stop-callback', 'discord', '--add-tag', 'role:123'], homeDir);
+    expect(add.status).toBe(0);
+
+    let config = readConfig(configPath);
+    expect(config.stopHookCallbacks?.discord?.tagList).toEqual(['@here', 'role:123']);
+
+    const clear = runCli(['config-stop-callback', 'discord', '--clear-tags'], homeDir);
+    expect(clear.status).toBe(0);
+
+    config = readConfig(configPath);
+    expect(config.stopHookCallbacks?.discord?.tagList).toEqual([]);
+
+    const file = runCli(['config-stop-callback', 'file', '--tag-list', '@ignored'], homeDir);
+    expect(file.status).toBe(0);
+
+    config = readConfig(configPath);
+    expect(config.stopHookCallbacks?.file).toEqual({
+      enabled: true,
+      path: '/tmp/session.md',
+      format: 'markdown',
+    });
+  });
+
+  it('configures slack stop-callback with webhook and tags', () => {
+    const homeDir = mkdtempSync(join(tmpdir(), 'omc-cli-stop-callback-home-'));
+    const configPath = join(homeDir, '.claude', '.omc-config.json');
+    mkdirSync(join(homeDir, '.claude'), { recursive: true });
+
+    writeFileSync(configPath, JSON.stringify({
+      silentAutoUpdate: false,
+      stopHookCallbacks: {},
+    }, null, 2));
+
+    // Enable slack with webhook and tags
+    const enable = runCli(['config-stop-callback', 'slack', '--enable', '--webhook', 'https://hooks.slack.com/services/T00/B00/xxx', '--tag-list', '<!here>,<@U1234567890>'], homeDir);
+    expect(enable.status).toBe(0);
+
+    let config = readConfig(configPath);
+    expect(config.stopHookCallbacks?.slack?.enabled).toBe(true);
+    expect(config.stopHookCallbacks?.slack?.webhookUrl).toBe('https://hooks.slack.com/services/T00/B00/xxx');
+    expect(config.stopHookCallbacks?.slack?.tagList).toEqual(['<!here>', '<@U1234567890>']);
+
+    // Add a tag
+    const add = runCli(['config-stop-callback', 'slack', '--add-tag', '<!channel>'], homeDir);
+    expect(add.status).toBe(0);
+
+    config = readConfig(configPath);
+    expect(config.stopHookCallbacks?.slack?.tagList).toEqual(['<!here>', '<@U1234567890>', '<!channel>']);
+
+    // Remove a tag
+    const remove = runCli(['config-stop-callback', 'slack', '--remove-tag', '<!here>'], homeDir);
+    expect(remove.status).toBe(0);
+
+    config = readConfig(configPath);
+    expect(config.stopHookCallbacks?.slack?.tagList).toEqual(['<@U1234567890>', '<!channel>']);
+
+    // Show config
+    const show = runCli(['config-stop-callback', 'slack', '--show'], homeDir);
+    expect(show.status).toBe(0);
+    expect(show.stdout).toContain('"webhookUrl"');
+    expect(show.stdout).toContain('"tagList"');
+  });
+
+  it('uses CLAUDE_CONFIG_DIR for the default file callback path', () => {
+    const homeDir = mkdtempSync(join(tmpdir(), 'omc-cli-stop-callback-home-'));
+    const claudeConfigDir = join(homeDir, '.claude-isolated-workspace');
+    const configPath = join(claudeConfigDir, '.omc-config.json');
+    mkdirSync(claudeConfigDir, { recursive: true });
+
+    writeFileSync(configPath, JSON.stringify({
+      silentAutoUpdate: false,
+      stopHookCallbacks: {},
+    }, null, 2));
+
+    const result = spawnSync(process.execPath, ['--import', 'tsx', CLI_ENTRY, 'config-stop-callback', 'file', '--enable'], {
+      cwd: REPO_ROOT,
+      env: {
+        ...process.env,
+        HOME: homeDir,
+        CLAUDE_CONFIG_DIR: claudeConfigDir,
+      },
+      encoding: 'utf-8',
+    });
+    expect(result.status).toBe(0);
+
+    const config = readConfig(configPath);
+    expect(config.stopHookCallbacks?.file).toEqual({
+      enabled: true,
+      path: join(claudeConfigDir, 'session-logs/{session_id}.md'),
+      format: 'markdown',
+    });
+  });
+});
+
+describe('omc commands that rewrite .omc-config.json', () => {
+  const discordWebhook = 'https://discord.com/api/webhooks/1/token';
+  const stopCallbackArgs = ['config-stop-callback', 'file', '--enable', '--path', '/tmp/omc-stop.md'];
+  let homeDir: string;
+  let configPath: string;
+
+  beforeEach(() => {
+    homeDir = mkdtempSync(join(tmpdir(), 'omc-cli-config-keys-'));
+    configPath = join(homeDir, '.claude', '.omc-config.json');
+    mkdirSync(dirname(configPath), { recursive: true });
+  });
+
+  afterEach(() => {
+    rmSync(homeDir, { recursive: true, force: true });
+  });
+
+  it.each<[string, string[], Record<string, unknown>]>([
+    ['config-stop-callback', stopCallbackArgs,
+      { stopHookCallbacks: { file: { enabled: true, path: '/tmp/omc-stop.md', note: 'keep' } } }],
+    ['config-stop-callback --profile', ['config-stop-callback', 'discord', '--profile', 'work', '--enable', '--webhook', discordWebhook],
+      { notificationProfiles: { old: { enabled: true }, other: { enabled: true }, work: { discord: { enabled: true, webhookUrl: discordWebhook } } } }],
+    ['config-notify-profile --delete', ['config-notify-profile', 'old', '--delete'],
+      { notificationProfiles: { other: { enabled: true } } }],
+  ])('%s applies its change and keeps keys it does not manage', (_label, args, applied) => {
+    const unmanaged = {
+      team: { maxAgents: 3 },
+      agents: { sharedMemory: { enabled: true } },
+      customIntegrations: { webhook: { url: 'https://example.test/hook' } },
+    };
+    writeFileSync(configPath, JSON.stringify({
+      ...unmanaged,
+      stopHookCallbacks: { file: { enabled: false, path: '/tmp/old.md', note: 'keep' } },
+      notificationProfiles: { old: { enabled: true }, other: { enabled: true } },
+    }));
+
+    expect(runCli(args, homeDir).status).toBe(0);
+
+    const config = JSON.parse(readFileSync(configPath, 'utf-8'));
+    expect(config).toMatchObject({ ...unmanaged, ...applied });
+    expect(config).not.toHaveProperty('silentAutoUpdate');
+    if (args.includes('--delete')) expect(config.notificationProfiles.old).toBeUndefined();
+  });
+
+  it.each(['{ "team": ', '[]', 'null'])('fails and leaves an unusable config untouched: %s', (content) => {
+    writeFileSync(configPath, content);
+
+    const result = runCli(stopCallbackArgs, homeDir);
+
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain('.omc-config.json');
+    expect(readFileSync(configPath, 'utf-8')).toBe(content);
+  });
+
+  it('still creates the config when none exists', () => {
+    expect(runCli(stopCallbackArgs, homeDir).status).toBe(0);
+
+    expect(readConfig(configPath).stopHookCallbacks?.file?.enabled).toBe(true);
+  });
+});

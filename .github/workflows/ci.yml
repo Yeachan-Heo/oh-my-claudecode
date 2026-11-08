@@ -1,0 +1,691 @@
+name: CI
+
+on:
+  push:
+    branches: [main, dev]
+    tags:
+      - "v*"
+  pull_request:
+    branches: [main, dev]
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.ref_type != 'tag' }}
+
+permissions:
+  contents: read
+
+jobs:
+  lint-and-typecheck:
+    name: Lint & Type Check
+    if: github.event_name != 'push' || github.ref_type != 'tag'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Type check
+        run: npx tsc --noEmit
+
+      - name: Lint
+        run: npm run lint --if-present
+
+  test:
+    name: Test
+    if: github.event_name != 'push' || github.ref_type != 'tag'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build TypeScript for runtime entrypoint tests
+        run: npx tsc
+
+      - name: Run functional tests
+        run: npm test -- --run
+
+      - name: Run subagent-lock performance test
+        run: npm exec vitest -- run tests/perf/subagent-lock.bench.ts --fileParallelism=false --maxWorkers=1
+
+  test-windows:
+    name: Test (Windows path suite)
+    if: github.event_name != 'push' || github.ref_type != 'tag'
+    runs-on: windows-2022
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          # better-sqlite3 12.10+ no longer ships a Node 20 Windows prebuild.
+          # Pin the runner with the supported VS 2022 toolchain so Node 20 users
+          # keep a tested source-build path instead of hiding the gap with Node 22.
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      # Scoped to the cross-platform path/encoding suites on a real Windows
+      # runner. The ubuntu-only `test` job exercises POSIX separators, so
+      # forward-slash assumptions in project-dir encoding and worktree
+      # transcript resolution (see #3274, #3276) can slip through it. Running
+      # the full `npm test` suite here is not yet possible: it has pre-existing
+      # platform-specific failures on Windows (e.g. python-repl sandbox, lsp
+      # devcontainer, session-end path interpolation) that are out of scope for
+      # this gate. Keep this list in sync with the path-handling test files.
+      # run.cjs supervisor/stdio contract tests (#3920) must run here: leaked
+      # protocol handles and process-tree reap are Windows-hosted failures.
+      # The native worker supervisor also requires Windows PowerShell 5.1 to
+      # validate its generated PowerShell and embedded C# source.
+      - name: Run Windows path-handling tests
+        run: >-
+          npx vitest run --fileParallelism=false
+          src/utils/__tests__/encode-project-path.test.ts
+          src/__tests__/resolve-transcript-path.test.ts
+          src/__tests__/hud/cwd-hyperlink-boundary.test.ts
+          src/__tests__/session-history-search.test.ts
+          src/cli/__tests__/session-search.test.ts
+          src/lib/__tests__/worktree-paths.test.ts
+          src/lib/__tests__/worktree-paths-git-probe-failclosed.test.ts
+          src/lib/__tests__/worktree-paths-foreign-root.test.ts
+          src/lib/__tests__/worktree-paths-issue-4254-win32.test.ts
+          src/tools/__tests__/wiki-tools-git-probe-failclosed.test.ts
+          src/tools/__tests__/wiki-tools-direct-dist-failclosed.test.ts
+          src/hooks/project-memory/__tests__/hot-path-tracker.test.ts
+          src/__tests__/windows-prompt-hook-runner.test.ts
+          src/__tests__/run-cjs-generic-timeout.test.ts
+          src/__tests__/run-cjs-windows-stdio-contract.test.ts
+          src/__tests__/release-boundary.test.ts
+          src/installer/__tests__/claude-md-transaction.test.ts
+          src/team/__tests__/cli-detection.windows.integration.test.ts
+          src/team/__tests__/worker-launch-windows-supervisor.test.ts
+          src/utils/__tests__/windows-search.test.ts
+          tests/statechart/native-suite.test.ts
+          tests/statechart/windows-smoke.test.ts
+
+      - name: Run Windows legacy state-lock tests
+        run: >-
+          npx vitest run --fileParallelism=false
+          src/lib/__tests__/atomic-write.test.ts
+          -t "legacy.*lock"
+
+  better-sqlite3-node26:
+    name: better-sqlite3 Node 26 (${{ matrix.os }})
+    if: github.event_name != 'push' || github.ref_type != 'tag'
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-2022]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '26'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Smoke-test native SQLite on Node 26
+        run: node -e "const Database = require('better-sqlite3'); const db = new Database(':memory:'); db.prepare('select 1 as ok').get(); db.close();"
+
+  # The statechart native suite spawns the CLI once per corpus case; each
+  # process pays its type transform. On the 20.x line there is no compile
+  # cache, which puts the 126-case cli.test far past any sane budget, so the
+  # Node 20 test job runs the suite's in-process files and this job runs the
+  # whole suite — cli.test included — on a stripping-native node.
+  test-statechart-node24:
+    name: Statechart suite (Node 24)
+    if: github.event_name != 'push' || github.ref_type != 'tag'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run the statechart native suite
+        run: npx vitest run tests/statechart/
+
+  test-precompact-restore:
+    name: PreCompact restore (${{ matrix.os }})
+    if: github.event_name != 'push' || github.ref_type != 'tag'
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-2022]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build shipped restore implementation
+        run: npm run build
+
+      - name: Run portable restore and SessionStart interleaving tests
+        env:
+          OMC_PRECOMPACT_DIST_INTERLEAVINGS: '1'
+        run: >-
+          npx vitest run
+          src/hooks/__tests__/precompact-restore.test.ts
+          src/__tests__/session-start-precompact-restore.test.ts
+
+      - name: Run Unix state-lock tests
+        if: runner.os != 'Windows'
+        run: npx vitest run src/lib/__tests__/atomic-write.test.ts
+
+  build:
+    name: Build
+    if: github.event_name != 'push' || github.ref_type != 'tag'
+    runs-on: ubuntu-latest
+    needs: [lint-and-typecheck, test]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Verify committed plugin shipping surface
+        run: npm run plugin:shipping:verify
+
+      - name: Build
+        run: npm run build
+
+      - name: Verify bridge omits retired merge-readiness tools
+        run: |
+          set -e
+          for tool in merge_readiness_start merge_readiness_set_content merge_readiness_record_answer merge_readiness_report merge_readiness_cancel; do
+            if grep -q "\"$tool\"" bridge/mcp-server.cjs; then
+              echo "::error::Retired merge-readiness tool remains registered in bridge/mcp-server.cjs: $tool"
+              exit 1
+            fi
+            echo "bridge omits retired tool $tool"
+          done
+
+      - name: Check dist size
+        run: |
+          DIST_SIZE=$(du -sm dist | cut -f1)
+          echo "📦 Dist size: ${DIST_SIZE}MB"
+          if [ "$DIST_SIZE" -gt 50 ]; then
+            echo "⚠️ Warning: dist folder is larger than 50MB!"
+          fi
+
+      - name: Upload build artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: dist
+          path: dist/
+          retention-days: 7
+
+  no-committed-build-artifacts:
+    name: No Committed Build Artifacts
+    runs-on: ubuntu-latest
+    # This candidate-side classifier is credential-free containment only; it
+    # never authorizes generated artifacts or supplies merge approval.
+    if: github.event_name == 'pull_request'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+          ref: ${{ github.event.pull_request.head.sha }}
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Hold candidate generated changes
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: node scripts/ci/check-no-committed-build-artifacts.mjs --base "$BASE_SHA" --head "$HEAD_SHA"
+
+  multirepo-paths-gate:
+    name: Multi-repo Path Gate (AST-grep)
+    if: github.event_name != 'push' || github.ref_type != 'tag'
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        os: [ubuntu-latest, windows-2022]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Check for raw .omc path constructions
+        run: node scripts/ci/check-multirepo-paths.mjs
+
+  version-check:
+    name: Version Consistency Check
+    if: github.event_name != 'push' || github.ref_type != 'tag'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Check version consistency
+        run: |
+          PKG_VERSION=$(node -p "require('./package.json').version")
+          PLUGIN_VERSION=$(node -p "require('./.claude-plugin/plugin.json').version")
+          MARKET_VERSION=$(node -p "require('./.claude-plugin/marketplace.json').version")
+          
+          echo "package.json:              $PKG_VERSION"
+          echo ".claude-plugin/plugin.json: $PLUGIN_VERSION"
+          echo ".claude-plugin/marketplace.json: $MARKET_VERSION"
+          
+          if [ "$PKG_VERSION" != "$PLUGIN_VERSION" ] || [ "$PKG_VERSION" != "$MARKET_VERSION" ]; then
+            echo ""
+            echo "❌ Version mismatch!"
+            echo "  package.json: $PKG_VERSION"
+            echo "  plugin.json:  $PLUGIN_VERSION"
+            echo "  marketplace.json: $MARKET_VERSION"
+            echo ""
+            echo "All three files must have the same version."
+            exit 1
+          fi
+          
+          echo "✅ All versions match: $PKG_VERSION"
+
+  npm-pack-test:
+    name: npm pack + install test
+    if: github.event_name != 'push' || github.ref_type != 'tag'
+    runs-on: ubuntu-latest
+    needs: build
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build
+        run: npm run build
+
+      - name: npm pack test
+        run: |
+          echo "📦 Creating tarball..."
+          npm pack
+
+          TARBALL=$(ls -t oh-my-claude-sisyphus-*.tgz | head -1)
+          echo "📦 Tarball: $TARBALL"
+
+          echo "🔎 Verifying the packaged MCP bridge omits retired merge-readiness tools..."
+          PACKAGED_MCP_SERVER="$RUNNER_TEMP/packaged-mcp-server.cjs"
+          tar -xzOf "$TARBALL" package/bridge/mcp-server.cjs > "$PACKAGED_MCP_SERVER"
+          for tool in merge_readiness_start merge_readiness_set_content merge_readiness_record_answer merge_readiness_report merge_readiness_cancel; do
+            if grep -q "\"$tool\"" "$PACKAGED_MCP_SERVER"; then
+              echo "::error::Retired merge-readiness tool remains registered in npm package: $tool"
+              exit 1
+            fi
+            echo "npm package omits retired tool $tool"
+          done
+
+          echo "🔎 Verifying contained-fs in packaged tarball (issue #4217)..."
+          PACKAGED_FILES="$RUNNER_TEMP/packaged-files.txt"
+          tar -tzf "$TARBALL" > "$PACKAGED_FILES"
+          for script in scripts/build-contained-fs.mjs scripts/postinstall-contained-fs.mjs scripts/verify-graph-contained-fs.mjs; do
+            if ! grep -q "package/$script" "$PACKAGED_FILES"; then
+              echo "::error::npm package missing required script: $script"
+              exit 1
+            fi
+            echo "✓ $script included in tarball"
+          done
+          if ! grep -q "package/native/contained-fs.c" "$PACKAGED_FILES"; then
+            echo "::error::npm package missing native source: native/contained-fs.c"
+            exit 1
+          fi
+          echo "✓ native source included in tarball"
+          PKG_JSON=$(tar -xzOf "$TARBALL" package/package.json)
+          if ! echo "$PKG_JSON" | grep -q '"postinstall".*postinstall-contained-fs.mjs'; then
+            echo "::error::npm package missing postinstall hook"
+            exit 1
+          fi
+          echo "✓ postinstall hook configured"
+
+          # The postinstall hook must never break installing the published tarball.
+          # (The addon itself is darwin-only; its build is exercised by the macOS harness.)
+          echo "🔎 Installing packed tarball to verify postinstall does not fail..."
+          TEST_PREFIX=$(mktemp -d)
+          npm install --prefix "$TEST_PREFIX" "./$TARBALL" --no-audit --no-fund
+          test -f "$TEST_PREFIX/node_modules/oh-my-claude-sisyphus/scripts/postinstall-contained-fs.mjs"
+          rm -rf "$TEST_PREFIX"
+          echo "✓ packed tarball installs cleanly with postinstall hook"
+
+          # ENOTEMPTY hardening (mirrors .github/workflows/upgrade-test.yml):
+          # the global node_modules dir is reused across runs on GitHub-hosted
+          # runners and inside the GitHub-hosted tool cache. A previously
+          # interrupted `npm install -g` can leave the resolved package dir
+          # and/or npm's staging temp dirs (`.oh-my-claude-sisyphus-*`) behind,
+          # so the next install fails with
+          #   npm ERR! ENOTEMPTY: directory not empty, rename
+          #     '.../oh-my-claude-sisyphus' -> '.../.oh-my-claude-sisyphus-XXXX'
+          # Remove any stale global package + npm staging dirs before
+          # installing, then retry a few times so a transient rename race does
+          # not fail the run. A persistent install failure still exits non-zero.
+          PKG=oh-my-claude-sisyphus
+          GLOBAL_ROOT="$(npm root -g)"
+
+          clean_stale_global_pkg() {
+            # `:?` guards against an empty GLOBAL_ROOT so we never rm -rf "/".
+            rm -rf "${GLOBAL_ROOT:?}/$PKG" 2>/dev/null || true
+            find "$GLOBAL_ROOT" -maxdepth 1 -name ".$PKG-*" -exec rm -rf {} + 2>/dev/null || true
+          }
+
+          echo "📦 Testing global install from tarball..."
+          clean_stale_global_pkg
+
+          ATTEMPTS=3
+          INSTALLED=false
+          for attempt in $(seq 1 "$ATTEMPTS"); do
+            echo "Installing $TARBALL globally (attempt $attempt/$ATTEMPTS)"
+            if npm install -g "./$TARBALL" --no-audit --no-fund; then
+              INSTALLED=true
+              break
+            fi
+            echo "Install attempt $attempt failed; cleaning stale global state and retrying."
+            clean_stale_global_pkg
+            sleep 2
+          done
+
+          if [ "$INSTALLED" != "true" ]; then
+            echo "❌ npm install -g ./$TARBALL failed after $ATTEMPTS attempts"
+            exit 1
+          fi
+
+          echo "🔍 Checking omc command..."
+          which omc
+          
+          echo "🔍 Testing omc --version..."
+          omc --version
+          
+          VERSION_OUTPUT=$(omc --version 2>&1)
+          if [ $? -ne 0 ]; then
+            echo "❌ omc --version failed!"
+            echo "$VERSION_OUTPUT"
+            exit 1
+          fi
+          
+          echo "✅ omc --version: $VERSION_OUTPUT"
+          
+          echo "🔍 Testing omc --help..."
+          omc --help
+          
+          HELP_OUTPUT=$(omc --help 2>&1)
+          if [ $? -ne 0 ]; then
+            echo "❌ omc --help failed!"
+            echo "$HELP_OUTPUT"
+            exit 1
+          fi
+          
+          echo "✅ npm pack + install test passed!"
+  release:
+    name: Create GitHub Release
+    if: github.event_name == 'push' && github.ref_type == 'tag' && startsWith(github.ref, 'refs/tags/v')
+    permissions:
+      contents: write
+      id-token: write
+    runs-on: ubuntu-latest
+    concurrency:
+      group: npm-trusted-publish-${{ github.ref_name }}
+      cancel-in-progress: false
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+          cache: "npm"
+          registry-url: "https://registry.npmjs.org"
+      - name: Pin npm for attestation verification
+        run: |
+          npm install --global npm@11.17.0
+          test "$(npm --version)" = "11.17.0"
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Assert release trigger and npm availability
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          git fetch --no-tags --force origin "refs/tags/$GITHUB_REF_NAME:refs/tags/$GITHUB_REF_NAME"
+          TAG_OBJECT=$(git rev-parse --verify "refs/tags/$GITHUB_REF_NAME")
+          test "$(git cat-file -t "$TAG_OBJECT")" = "tag"
+          RELEASE_SHA=$(git rev-parse --verify "refs/tags/$GITHUB_REF_NAME^{}")
+          test "$RELEASE_SHA" = "$GITHUB_SHA"
+          node scripts/release-boundary.mjs assert-trigger --tag "$GITHUB_REF_NAME" --sha "$RELEASE_SHA"
+          node scripts/release-boundary.mjs assert-npm-absent --package oh-my-claude-sisyphus --version "$VERSION"
+
+      - name: Validate release notes
+        run: |
+          git cat-file -e HEAD:.github/release-body.md
+          test -s .github/release-body.md
+          cp .github/release-body.md "$RUNNER_TEMP/release-notes.md"
+
+      - name: Verify plugin shipping surface
+        run: npm run plugin:shipping:verify
+
+      - name: Build
+        run: npm run build
+
+      - name: Run functional tests
+        run: npm test -- --run
+
+      - name: Run subagent-lock performance test
+        run: npm exec vitest -- run tests/perf/subagent-lock.bench.ts --fileParallelism=false --maxWorkers=1
+
+      # Some tests execute scripts/plugin-setup.mjs against the real
+      # hooks/hooks.json and rewrite bare `node` to the absolute node binary
+      # path of the runner (e.g. /opt/hostedtoolcache/node/.../bin/node). If we
+      # let that mutated file ship, every end user inherits a node path that
+      # does not exist on their machine. Restore the file to its committed
+      # state before publishing. See issue #2348.
+      - name: Restore hooks.json before publish
+        run: git checkout -- hooks/hooks.json
+
+      - name: Assert clean deterministic tracked tree before archive
+        run: |
+          # Build/test preparation may regenerate the known tracked build
+          # closure and the hook projection. Restore only those known paths;
+          # the release-notes copy lives outside the checkout.
+          git restore --worktree dist bridge hooks/hooks.json
+          git clean -fdX dist
+          test -z "$(git status --porcelain=v1 --untracked-files=all)"
+
+      - name: Create staged release archive
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          SEED_DIR="$RUNNER_TEMP/seed"
+          STAGE="$RUNNER_TEMP/release-stage"
+          FINAL_DIR="$RUNNER_TEMP/final"
+          EVIDENCE_JSON="$RUNNER_TEMP/release-evidence.json"
+          mkdir -p "$SEED_DIR" "$FINAL_DIR"
+          SEED_NAME=$(npm pack --ignore-scripts --pack-destination "$SEED_DIR" --silent)
+          SEED_TARBALL="$SEED_DIR/$SEED_NAME"
+          node scripts/release-boundary.mjs prepare-stage --seed-tarball "$SEED_TARBALL" --stage "$STAGE" --git-head "$GITHUB_SHA"
+          FINAL_NAME=$(npm pack "$STAGE/package" --ignore-scripts --pack-destination "$FINAL_DIR" --silent)
+          FINAL_TARBALL="$FINAL_DIR/$FINAL_NAME"
+          FINAL_TARBALL_SHA256=$(sha256sum "$FINAL_TARBALL" | cut -d ' ' -f 1)
+          node scripts/release-boundary.mjs assert-archive --tarball "$FINAL_TARBALL" --version "$VERSION" --git-head "$GITHUB_SHA"
+          node scripts/release-boundary.mjs write-evidence --tarball "$FINAL_TARBALL" --output "$EVIDENCE_JSON"
+          printf 'FINAL_TARBALL=%s\n' "$FINAL_TARBALL" >> "$GITHUB_ENV"
+          printf 'EVIDENCE_JSON=%s\n' "$EVIDENCE_JSON" >> "$GITHUB_ENV"
+          printf 'FINAL_TARBALL_SHA256=%s\n' "$FINAL_TARBALL_SHA256" >> "$GITHUB_ENV"
+
+      - name: Smoke test staged archive
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          SMOKE_ROOT="$RUNNER_TEMP/release-smoke"
+          SMOKE_PREFIX="$SMOKE_ROOT/package"
+          SMOKE_HOME="$SMOKE_ROOT/home"
+          SMOKE_CLAUDE_CONFIG_DIR="$SMOKE_HOME/.claude"
+          SMOKE_GJC_CONFIG_DIR="$SMOKE_HOME/.gjc"
+          SMOKE_PROJECT="$SMOKE_ROOT/project"
+          rm -rf "$SMOKE_ROOT"
+          mkdir -p "$SMOKE_HOME" "$SMOKE_PROJECT" "$SMOKE_CLAUDE_CONFIG_DIR" "$SMOKE_GJC_CONFIG_DIR"
+          npm install --ignore-scripts --prefix "$SMOKE_PREFIX" "$FINAL_TARBALL"
+          SMOKE_PACKAGE_ROOT="$SMOKE_PREFIX/node_modules/oh-my-claude-sisyphus"
+          test -f "$SMOKE_PACKAGE_ROOT/bridge/claude-md-coordinator.cjs"
+          test -f "$SMOKE_PACKAGE_ROOT/scripts/setup-claude-md.sh"
+          test -f "$SMOKE_PACKAGE_ROOT/scripts/lib/config-dir.sh"
+          test -s "$SMOKE_PACKAGE_ROOT/skills/wiki/SKILL.md"
+          test -f "$SMOKE_PACKAGE_ROOT/skills/omc-setup/SKILL.md"
+          test -f "$SMOKE_PACKAGE_ROOT/skills/omc-setup/phases/01-install-claude-md.md"
+          test "$(env -i PATH="$PATH" HOME="$SMOKE_HOME" CLAUDE_CONFIG_DIR="$SMOKE_CLAUDE_CONFIG_DIR" GJC_CONFIG_DIR="$SMOKE_GJC_CONFIG_DIR" OMC_SETUP_PLUGIN_ROOT="$SMOKE_PACKAGE_ROOT" CLAUDE_PLUGIN_ROOT="$SMOKE_PACKAGE_ROOT" "$SMOKE_PREFIX/node_modules/.bin/omc" --version)" = "$VERSION"
+          env -i PATH="$PATH" HOME="$SMOKE_HOME" CLAUDE_CONFIG_DIR="$SMOKE_CLAUDE_CONFIG_DIR" GJC_CONFIG_DIR="$SMOKE_GJC_CONFIG_DIR" OMC_SETUP_PLUGIN_ROOT="$SMOKE_PACKAGE_ROOT" CLAUDE_PLUGIN_ROOT="$SMOKE_PACKAGE_ROOT" "$SMOKE_PREFIX/node_modules/.bin/omc" --help
+          API_HELP=$(env -i PATH="$PATH" HOME="$SMOKE_HOME" CLAUDE_CONFIG_DIR="$SMOKE_CLAUDE_CONFIG_DIR" GJC_CONFIG_DIR="$SMOKE_GJC_CONFIG_DIR" OMC_SETUP_PLUGIN_ROOT="$SMOKE_PACKAGE_ROOT" CLAUDE_PLUGIN_ROOT="$SMOKE_PACKAGE_ROOT" "$SMOKE_PREFIX/node_modules/.bin/omc-cli" team api --help)
+          case "$API_HELP" in
+            *recover-worker*write-task-checkpoint*read-recovery-result*) ;;
+            *)
+              echo "omc-cli team api help is missing required recovery commands" >&2
+              exit 1
+              ;;
+          esac
+          cd "$SMOKE_PROJECT"
+          env -i PATH="$PATH" HOME="$SMOKE_HOME" CLAUDE_CONFIG_DIR="$SMOKE_CLAUDE_CONFIG_DIR" GJC_CONFIG_DIR="$SMOKE_GJC_CONFIG_DIR" OMC_SETUP_PLUGIN_ROOT="$SMOKE_PACKAGE_ROOT" CLAUDE_PLUGIN_ROOT="$SMOKE_PACKAGE_ROOT" bash -c 'bash "${OMC_SETUP_PLUGIN_ROOT:-${CLAUDE_PLUGIN_ROOT}}/scripts/setup-claude-md.sh" local'
+          cmp "$SMOKE_PACKAGE_ROOT/docs/CLAUDE.md" "$SMOKE_PROJECT/.claude/CLAUDE.md"
+          cmp "$SMOKE_PACKAGE_ROOT/skills/wiki/SKILL.md" "$SMOKE_PROJECT/.claude/skills/wiki/SKILL.md"
+          COORDINATOR_SHA256=$(sha256sum "$SMOKE_PACKAGE_ROOT/bridge/claude-md-coordinator.cjs" | cut -d ' ' -f 1)
+          test "$FINAL_TARBALL_SHA256" = "$(sha256sum "$FINAL_TARBALL" | cut -d ' ' -f 1)"
+          test "$COORDINATOR_SHA256" = "$(node -e 'const fs = require("node:fs"); const crypto = require("node:crypto"); process.stdout.write(crypto.createHash("sha256").update(fs.readFileSync(process.argv[1])).digest("hex"));' "$SMOKE_PACKAGE_ROOT/bridge/claude-md-coordinator.cjs")"
+          test "$COORDINATOR_SHA256" = "$(node -e 'const evidence = require(process.argv[1]); const file = evidence.archiveManifest.files.find(({ path }) => path === "package/bridge/claude-md-coordinator.cjs"); process.stdout.write(file?.sha256 ?? "");' "$EVIDENCE_JSON")"
+          test "$(node -p 'require(process.argv[1]).gitHead' "$SMOKE_PACKAGE_ROOT/package.json")" = "$GITHUB_SHA"
+          test "$(node -p 'require(process.argv[1]).sourceSha' "$EVIDENCE_JSON")" = "$GITHUB_SHA"
+          test "$(node -p 'require(process.argv[1]).sha256' "$EVIDENCE_JSON")" = "$FINAL_TARBALL_SHA256"
+
+      - name: Upload release archive evidence
+        uses: actions/upload-artifact@v4
+        with:
+          name: npm-release-boundary-${{ github.ref_name }}
+          path: |
+            ${{ runner.temp }}/final/*.tgz
+            ${{ runner.temp }}/release-evidence.json
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Publish exact archive and verify registry
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          set -o pipefail
+          npm publish "$FINAL_TARBALL" --ignore-scripts --access public --provenance 2>&1 | tee npm-publish.log
+          VERIFICATION_PREFIX="$RUNNER_TEMP/npm-provenance-verification"
+          AUDIT_JSON="$VERIFICATION_PREFIX/audit-signatures.json"
+          # The archive is already on the registry at this point: everything below
+          # only waits for it to become visible. The budget must outlast real
+          # propagation (#4083 saw the version land 1.7s after a 12-attempt
+          # window gave up), so keep ~28 minutes of polling.
+          MAX_PROPAGATION_ATTEMPTS=30
+          ATTEMPT=1
+          BACKOFF_SECONDS=10
+          while [ "$ATTEMPT" -le "$MAX_PROPAGATION_ATTEMPTS" ]; do
+            rm -rf "$VERIFICATION_PREFIX"
+            if npm install --ignore-scripts --no-audit --no-fund --prefix "$VERIFICATION_PREFIX" "oh-my-claude-sisyphus@$VERSION" && npm audit signatures --json --include-attestations --prefix "$VERIFICATION_PREFIX" > "$AUDIT_JSON" && test -s "$AUDIT_JSON"; then
+              break
+            fi
+            if [ "$ATTEMPT" -eq "$MAX_PROPAGATION_ATTEMPTS" ]; then
+              echo "oh-my-claude-sisyphus@$VERSION was PUBLISHED to the registry; it did not become visible after $MAX_PROPAGATION_ATTEMPTS attempts" >&2
+              echo "do not republish: recover the GitHub Release with the Release Recovery workflow (tag=$GITHUB_REF_NAME sha=$GITHUB_SHA)" >&2
+              exit 1
+            fi
+            ATTEMPT=$((ATTEMPT + 1))
+            sleep "$BACKOFF_SECONDS"
+            BACKOFF_SECONDS=$((BACKOFF_SECONDS * 2))
+            if [ "$BACKOFF_SECONDS" -gt 60 ]; then
+              BACKOFF_SECONDS=60
+            fi
+          done
+          node scripts/release-boundary.mjs verify-registry --package oh-my-claude-sisyphus --version "$VERSION" --tag "$GITHUB_REF_NAME" --sha "$GITHUB_SHA" --evidence "$EVIDENCE_JSON" --tarball "$FINAL_TARBALL" --provenance required --audit "$AUDIT_JSON"
+
+      - name: Upload finalized release evidence
+        uses: actions/upload-artifact@v4
+        with:
+          name: npm-release-boundary-final-${{ github.ref_name }}
+          path: ${{ runner.temp }}/release-evidence.json
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v1
+        with:
+          body_path: ${{ runner.temp }}/release-notes.md
+          draft: false
+          prerelease: ${{ contains(github.ref, 'alpha') || contains(github.ref, 'beta') || contains(github.ref, 'rc') }}
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

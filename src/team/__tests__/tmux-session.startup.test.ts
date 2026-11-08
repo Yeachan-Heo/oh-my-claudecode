@@ -1,0 +1,1165 @@
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { randomUUID } from 'node:crypto';
+import { mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join, relative } from 'node:path';
+
+import type { WorkerLaunchAttempt } from '../worker-launch-ack.js';
+import { currentStrictProcessStartIdentity } from '../team-owner-epoch.js';
+import type { TmuxServerIdentity } from '../types.js';
+import { getOmcRoot } from '../../lib/worktree-paths.js';
+
+const fixtureProcessStartIdentity = currentStrictProcessStartIdentity();
+const supportsStrictTmuxFixture = fixtureProcessStartIdentity !== null
+  && (process.platform === 'darwin' || process.platform === 'linux');
+const fixtureTmuxServerIdentity: TmuxServerIdentity | undefined = supportsStrictTmuxFixture
+  ? {
+      socket_path: '/tmp/omc-tmux-session-startup.sock',
+      server_pid: process.pid,
+      process_started_at: fixtureProcessStartIdentity!,
+    }
+  : undefined;
+
+function strictTmuxIdentity(): TmuxServerIdentity {
+  if (!fixtureTmuxServerIdentity) throw new Error('strict tmux fixture unsupported on this platform');
+  return fixtureTmuxServerIdentity;
+}
+
+function guardedShellWords(command: string): string[] {
+  return [...command.matchAll(/'((?:[^']|'"'"')*)'/g)].map(match =>
+    match[1]!.replace(/'"'"'/g, "'"));
+}
+
+const strictTmuxIt = supportsStrictTmuxFixture ? it : it.skip;
+
+const processMocks = vi.hoisted(() => ({
+  isProcessIdentityLive: vi.fn(async () => 'live' as 'live' | 'dead' | 'mismatch' | 'unknown'),
+}));
+
+function stripTmuxIdentityPrefixes(args: readonly string[]): string[] {
+  const socketPath = fixtureTmuxServerIdentity?.socket_path;
+  let index = 0;
+  while (socketPath && args[index] === '-S' && args[index + 1] === socketPath) {
+    index += 2;
+  }
+  return [...args.slice(index)];
+}
+
+vi.mock('../../platform/process-utils.js', async importOriginal => ({
+  ...await importOriginal<typeof import('../../platform/process-utils.js')>(),
+  isProcessIdentityLive: processMocks.isProcessIdentityLive,
+}));
+
+const tmuxState = vi.hoisted(() => ({
+  args: [] as string[][],
+  captures: [] as Array<string | Error>,
+  paneStatus: '0 cmd\n',
+  paneMode: '0\n',
+  ownedPaneIds: '%2\n',
+  livenessError: null as Error | null,
+  captureError: null as Error | null,
+  activeAttempt: null as WorkerLaunchAttempt | null,
+}));
+
+vi.mock('../../cli/tmux-utils.js', async importOriginal => {
+  const actual = await importOriginal<typeof import('../../cli/tmux-utils.js')>();
+  return {
+    ...actual,
+    tmuxExecAsync: vi.fn(async (args: string[]) => {
+      tmuxState.args.push(args);
+      const commandIndex = args[0] === '-S' ? 2 : 0;
+      const command = args[commandIndex];
+      if (command === 'kill-pane') tmuxState.paneStatus = '1 cmd\n';
+      if (command === 'list-panes') return { stdout: tmuxState.ownedPaneIds, stderr: '' };
+      if (command === 'capture-pane') {
+        if (commandIndex === 2) tmuxState.args.push(args.slice(commandIndex));
+        if (tmuxState.captureError) throw tmuxState.captureError;
+        const next = tmuxState.captures.length > 1 ? tmuxState.captures.shift() : tmuxState.captures[0];
+        if (next instanceof Error) throw next;
+        return { stdout: next ?? '', stderr: '' };
+      }
+      if (args[0] === 'send-keys' && args.includes('-l')) {
+        const command = String(args.at(-1) ?? '');
+        const descriptorMatch = command.match(/OMC_WORKER_LAUNCH_SPEC_FILE='([^']+)'/);
+        if (descriptorMatch) {
+          // Supervised launches (issue #3655) deliver the attempt-owned
+          // descriptor by path; the runtime CLI reads it from disk.
+          const spec = JSON.parse(await readFile(descriptorMatch[1], 'utf8'));
+          tmuxState.activeAttempt = {
+            schema_version: spec.schema_version,
+            attempt_id: spec.attempt_id,
+            nonce: spec.nonce,
+            instance_id: spec.instance_id,
+            team_name: spec.team_name,
+            worker_name: spec.worker_name,
+            pane_id: spec.pane_id,
+            provider: spec.provider,
+            created_at: spec.created_at,
+            currentPath: spec.current_path,
+            expectedPath: spec.expected_path,
+            ackPath: spec.ack_path,
+            decisionPath: spec.decision_path,
+            startedPath: spec.started_path,
+            transportOwnerPath: spec.transport_owner_path,
+            bootstrapDescriptorPath: spec.bootstrap_descriptor_path,
+            wrapperPath: spec.wrapper_path,
+            transportCleanupCompletePath: spec.transport_cleanup_complete_path,
+            runtimeCliPath: '/runtime-cli.js',
+            context: spec.context,
+          };
+        } else {
+          const encoded = command.match(/OMC_WORKER_LAUNCH_SPEC_B64(?:=|=")'?([A-Za-z0-9+/=]+)/)?.[1];
+          const raw = command.match(/OMC_WORKER_LAUNCH_SPEC='([^']+)'/)?.[1];
+          if (encoded || raw) {
+            const spec = JSON.parse(encoded ? Buffer.from(encoded, 'base64').toString('utf8') : raw!);
+            tmuxState.activeAttempt = {
+              schema_version: spec.schema_version,
+              attempt_id: spec.attempt_id,
+              nonce: spec.nonce,
+              instance_id: spec.instance_id,
+              team_name: spec.team_name,
+              worker_name: spec.worker_name,
+              pane_id: spec.pane_id,
+              provider: spec.provider,
+              created_at: spec.created_at,
+              currentPath: spec.current_path,
+              expectedPath: spec.expected_path,
+              ackPath: spec.ack_path,
+              decisionPath: spec.decision_path,
+              startedPath: spec.started_path,
+              transportOwnerPath: spec.transport_owner_path,
+              bootstrapDescriptorPath: spec.bootstrap_descriptor_path,
+              wrapperPath: spec.wrapper_path,
+              transportCleanupCompletePath: spec.transport_cleanup_complete_path,
+              runtimeCliPath: '/runtime-cli.js',
+              context: spec.context,
+            };
+          }
+        }
+      }
+      if (args[0] === 'send-keys' && args.at(-1) === 'Enter' && tmuxState.activeAttempt) {
+        const attempt = tmuxState.activeAttempt;
+        await writeFile(attempt.ackPath, JSON.stringify({
+          schema_version: attempt.schema_version,
+          attempt_id: attempt.attempt_id,
+          nonce: attempt.nonce,
+          instance_id: attempt.instance_id,
+          team_name: attempt.team_name,
+          worker_name: attempt.worker_name,
+          pane_id: attempt.pane_id,
+          provider: attempt.provider,
+          created_at: attempt.created_at,
+          kind: 'worker_launch_ack',
+          written_at: new Date().toISOString(),
+        }), 'utf8');
+        await writeFile(attempt.startedPath, JSON.stringify({
+          schema_version: attempt.schema_version,
+          attempt_id: attempt.attempt_id,
+          nonce: attempt.nonce,
+          instance_id: attempt.instance_id,
+          team_name: attempt.team_name,
+          worker_name: attempt.worker_name,
+          pane_id: attempt.pane_id,
+          provider: attempt.provider,
+          created_at: attempt.created_at,
+          kind: 'worker_launch_provider_started',
+          pid: process.pid,
+          process_start_identity: 'test:provider-start',
+          written_at: new Date().toISOString(),
+        }), 'utf8');
+        tmuxState.activeAttempt = null;
+      }
+      return { stdout: '', stderr: '' };
+    }),
+    tmuxCmdAsync: vi.fn(async (args: string[]) => {
+      tmuxState.args.push(args);
+      const commandIndex = args[0] === '-S' ? 2 : 0;
+      const command = args[commandIndex];
+      if (command === 'display-message' && args.includes('#{pid}')) {
+        return { stdout: `${process.pid}\n`, stderr: '' };
+      }
+      if (args.includes('#{pane_dead}')) {
+        if (tmuxState.livenessError) throw tmuxState.livenessError;
+        return { stdout: tmuxState.paneStatus.startsWith('1') ? '1\n' : '0\n', stderr: '' };
+      }
+      if (args.includes('#{pane_dead} #{pane_current_command}')) {
+        if (tmuxState.livenessError) throw tmuxState.livenessError;
+        return { stdout: tmuxState.paneStatus, stderr: '' };
+      }
+      if (args.includes('#{pane_in_mode}')) return { stdout: tmuxState.paneMode, stderr: '' };
+      if (command === 'if-shell') {
+        const success = args[commandIndex + 2] ?? '';
+        const words = guardedShellWords(success);
+        const nativeCommand = words[0];
+        const syntheticArgs = words.slice(0, words.indexOf('display-message'));
+        if (nativeCommand === 'send-keys') {
+          tmuxState.args.push(syntheticArgs);
+          if (syntheticArgs.includes('-l')) {
+            const commandText = syntheticArgs[syntheticArgs.indexOf('-l') + 1] ?? '';
+            const descriptorMatch = commandText.match(/OMC_WORKER_LAUNCH_SPEC_FILE='([^']+)'/);
+            if (descriptorMatch) {
+              const spec = JSON.parse(await readFile(descriptorMatch[1], 'utf8'));
+              tmuxState.activeAttempt = {
+                schema_version: spec.schema_version,
+                attempt_id: spec.attempt_id,
+                nonce: spec.nonce,
+                instance_id: spec.instance_id,
+                team_name: spec.team_name,
+                worker_name: spec.worker_name,
+                pane_id: spec.pane_id,
+                provider: spec.provider,
+                created_at: spec.created_at,
+                currentPath: spec.current_path,
+                expectedPath: spec.expected_path,
+                ackPath: spec.ack_path,
+                decisionPath: spec.decision_path,
+                startedPath: spec.started_path,
+                transportOwnerPath: spec.transport_owner_path,
+                bootstrapDescriptorPath: spec.bootstrap_descriptor_path,
+                wrapperPath: spec.wrapper_path,
+                transportCleanupCompletePath: spec.transport_cleanup_complete_path,
+                runtimeCliPath: '/runtime-cli.js',
+                context: spec.context,
+              };
+            }
+          }
+          if (syntheticArgs.at(-1) === 'Enter' && tmuxState.activeAttempt) {
+            const attempt = tmuxState.activeAttempt;
+            await writeFile(attempt.ackPath, JSON.stringify({
+              schema_version: attempt.schema_version,
+              attempt_id: attempt.attempt_id,
+              nonce: attempt.nonce,
+              instance_id: attempt.instance_id,
+              team_name: attempt.team_name,
+              worker_name: attempt.worker_name,
+              pane_id: attempt.pane_id,
+              provider: attempt.provider,
+              created_at: attempt.created_at,
+              kind: 'worker_launch_ack',
+              written_at: new Date().toISOString(),
+            }), 'utf8');
+            await writeFile(attempt.startedPath, JSON.stringify({
+              schema_version: attempt.schema_version,
+              attempt_id: attempt.attempt_id,
+              nonce: attempt.nonce,
+              instance_id: attempt.instance_id,
+              team_name: attempt.team_name,
+              worker_name: attempt.worker_name,
+              pane_id: attempt.pane_id,
+              provider: attempt.provider,
+              created_at: attempt.created_at,
+              kind: 'worker_launch_provider_started',
+              pid: process.pid,
+              process_start_identity: fixtureProcessStartIdentity,
+              written_at: new Date().toISOString(),
+            }), 'utf8');
+            tmuxState.activeAttempt = null;
+          }
+        }
+        const marker = success.match(/OMC_TMUX_GUARD_OK_[A-Za-z0-9_]+/)?.[0];
+        return { stdout: marker ? `${marker}\n` : '', stderr: '' };
+      }
+      return { stdout: '', stderr: '' };
+    }),
+  };
+});
+
+import {
+  deliverStartupInbox,
+  adoptWorkerPaneOwnership,
+  proveWorkerPaneOwnership,
+  probeStartupPaneActivity,
+  buildWorkerStartCommand,
+  spawnWorkerInPane,
+  spawnOwnedWorkerInPane,
+  retryStartupInboxSubmit,
+  injectToLeaderPane,
+  sendToWorker,
+  paneHasActiveTask,
+  paneHasTrustPrompt,
+  paneLooksReady,
+  waitForStartupPaneReady,
+  type StartupPaneContext,
+  type WorkerPaneOwnership,
+} from '../tmux-session.js';
+import { paneLineLooksLikeIdlePrompt } from '../pane-readiness.js';
+import {
+  awaitWorkerLaunchAcknowledgement,
+  prepareWorkerLaunchAttempt,
+} from '../worker-launch-ack.js';
+
+let cwd = '';
+let originalPlatform: PropertyDescriptor | undefined;
+let fixtureEnvCaptured = false;
+let originalHome: string | undefined;
+let originalUserProfile: string | undefined;
+let originalStateDir: string | undefined;
+
+function isolateFixtureRoot(root: string): void {
+  if (!fixtureEnvCaptured) {
+    originalHome = process.env.HOME;
+    originalUserProfile = process.env.USERPROFILE;
+    originalStateDir = process.env.OMC_STATE_DIR;
+    fixtureEnvCaptured = true;
+  }
+  process.env.HOME = root;
+  process.env.USERPROFILE = root;
+  delete process.env.OMC_STATE_DIR;
+}
+
+async function createFixture(prefix: string): Promise<string> {
+  const root = await mkdtemp(join(tmpdir(), prefix));
+  isolateFixtureRoot(root);
+  return root;
+}
+
+function restoreFixtureEnv(): void {
+  if (!fixtureEnvCaptured) return;
+  if (originalHome === undefined) delete process.env.HOME;
+  else process.env.HOME = originalHome;
+  if (originalUserProfile === undefined) delete process.env.USERPROFILE;
+  else process.env.USERPROFILE = originalUserProfile;
+  if (originalStateDir === undefined) delete process.env.OMC_STATE_DIR;
+  else process.env.OMC_STATE_DIR = originalStateDir;
+  fixtureEnvCaptured = false;
+  originalHome = undefined;
+  originalUserProfile = undefined;
+  originalStateDir = undefined;
+}
+
+beforeEach(() => {
+  tmuxState.args = [];
+  tmuxState.captures = [];
+  tmuxState.paneStatus = '0 cmd\n';
+  tmuxState.paneMode = '0\n';
+  tmuxState.ownedPaneIds = '%2\n';
+  tmuxState.livenessError = null;
+  tmuxState.captureError = null;
+  tmuxState.activeAttempt = null;
+  originalPlatform = Object.getOwnPropertyDescriptor(process, 'platform');
+  processMocks.isProcessIdentityLive.mockResolvedValue('live');
+});
+
+afterEach(async () => {
+  if (originalPlatform) Object.defineProperty(process, 'platform', originalPlatform);
+  delete process.env.MSYSTEM;
+  delete process.env.MINGW_PREFIX;
+  delete process.env.COMSPEC;
+  delete process.env.TMUX;
+  delete process.env.OMC_TEAM_START_ACK_TIMEOUT_MS;
+  restoreFixtureEnv();
+  if (cwd) await rm(cwd, { recursive: true, force: true });
+  cwd = '';
+});
+
+function ownership(paneId = '%2'): WorkerPaneOwnership {
+  return {
+    provider: 'tmux',
+    providerTarget: 'startup:0',
+    paneId,
+    splitTarget: '%1',
+    leaderPaneId: '%1',
+    reservedPaneIds: [],
+    source: 'split',
+    ...(fixtureTmuxServerIdentity ? { tmuxServerIdentity: fixtureTmuxServerIdentity } : {}),
+  };
+}
+
+async function acceptedContext(provider: StartupPaneContext['provider']): Promise<StartupPaneContext> {
+  cwd = await createFixture('startup-context-');
+  const attempt = await prepareWorkerLaunchAttempt({
+    cwd,
+    teamName: 'startup-team',
+    workerName: 'worker-1',
+    instanceId: randomUUID(),
+    paneId: '%2',
+    provider,
+    runtimeCliPath: '/runtime-cli.cjs',
+  });
+  await writeFile(attempt.ackPath, JSON.stringify({
+    schema_version: attempt.schema_version,
+    attempt_id: attempt.attempt_id,
+    nonce: attempt.nonce,
+    instance_id: attempt.instance_id,
+    team_name: attempt.team_name,
+    worker_name: attempt.worker_name,
+    pane_id: attempt.pane_id,
+    provider: attempt.provider,
+    created_at: attempt.created_at,
+    kind: 'worker_launch_ack',
+    written_at: new Date().toISOString(),
+  }), 'utf8');
+  await awaitWorkerLaunchAcknowledgement(attempt, { timeoutMs: 100, pollIntervalMs: 5 });
+  return { ownership: ownership(), attempt, provider };
+}
+
+describe('worker pane startup safety', () => {
+  it.each([
+    ['legacy Codex prompt', undefined, '› ', true],
+    ['legacy Claude prompt', undefined, '❯ ', true],
+    ['legacy generic prompt', undefined, '> ', true],
+    ['legacy Cursor arrow', undefined, '→ ', false],
+    ['Cursor prompt', 'cursor', '→ ', true],
+    ['Claude rejects Cursor arrow', 'claude', '→ ', false],
+    ['Codex rejects Cursor arrow', 'codex', '→ ', false],
+    ['Cursor rejects embedded arrow', 'cursor', 'completed → next', false],
+    ['existing Gemini prompt behavior', 'gemini', '❯ ', true],
+  ] as const)('detects %s', (_name, provider, line, expected) => {
+    expect(paneLineLooksLikeIdlePrompt(line, provider)).toBe(expected);
+  });
+
+  strictTmuxIt.each([
+    ['cursor', '→ ', { ok: true }],
+    ['claude', '→ ', { ok: false, reason: 'readiness_timeout' }],
+    ['codex', '→ ', { ok: false, reason: 'readiness_timeout' }],
+    ['cursor', 'completed → next', { ok: false, reason: 'readiness_timeout' }],
+    ['claude', '❯ ', { ok: true }],
+    ['codex', '› ', { ok: true }],
+  ] as const)('waits for the %s startup prompt without generic arrow matching', async (provider, capture, expected) => {
+    const context = await acceptedContext(provider);
+    tmuxState.captures = [capture];
+    await expect(waitForStartupPaneReady(context, { timeoutMs: expected.ok ? 50 : 5, pollIntervalMs: 1 }))
+      .resolves.toEqual(expected);
+  });
+
+  strictTmuxIt('rejects a Cursor prompt retained above its active-task stop marker', async () => {
+    const context = await acceptedContext('cursor');
+    tmuxState.captures = ['→ Plan, search, build anything\nWorking on the task\nctrl+c to stop'];
+
+    await expect(waitForStartupPaneReady(context, { timeoutMs: 50, pollIntervalMs: 1 }))
+      .resolves.toEqual({ ok: false, reason: 'pane_busy' });
+  });
+
+  strictTmuxIt.each([
+    ['leader_alias', '%1', '%1', []],
+    ['split_target_alias', '%3', '%1', []],
+    ['reserved_worker_alias', '%4', '%1', ['%4']],
+  ] as const)('rejects %s before pane mutation', (reason, paneId, leaderPaneId, reservedPaneIds) => {
+    const result = proveWorkerPaneOwnership({
+      commandSucceeded: true,
+      provider: 'tmux',
+      splitTarget: reason === 'split_target_alias' ? paneId : '%9',
+      direction: 'right',
+      rawOutput: `${paneId}\n`,
+      stderr: '',
+      paneId,
+      tmuxServerIdentity: strictTmuxIdentity(),
+    }, {
+      providerTarget: 'startup:0',
+      leaderPaneId,
+      reservedPaneIds,
+      tmuxServerIdentity: strictTmuxIdentity(),
+    });
+    expect(result).toEqual({ ok: false, reason });
+    expect(tmuxState.args).toEqual([]);
+  });
+
+  strictTmuxIt('adopts only panes proven inside the expected tmux target', async () => {
+    const serverIdentityDependencies = {
+      tmuxQuery: vi.fn(async (args: string[]) => {
+        tmuxState.args.push(args);
+        return { stdout: `${strictTmuxIdentity().server_pid}\n`, stderr: '' };
+      }),
+      processIdentity: vi.fn(() => strictTmuxIdentity().process_started_at),
+      processObservation: vi.fn(() => 'matching' as const),
+    };
+    const owned = await adoptWorkerPaneOwnership({
+      provider: 'tmux',
+      providerTarget: 'startup:0',
+      paneId: '%9',
+      leaderPaneId: '%1',
+      reservedPaneIds: [],
+      tmuxServerIdentity: strictTmuxIdentity(),
+      serverIdentityDependencies,
+      dependencies: {
+        serverIdentityDependencies,
+        tmuxExec: vi.fn(async args => {
+          expect(args[0]).toBe('-S');
+          expect(args[1]).toBe(strictTmuxIdentity().socket_path);
+          expect(stripTmuxIdentityPrefixes(args)).toEqual([
+            'list-panes', '-t', '=startup:0', '-F', '#{pane_id}',
+          ]);
+          return { stdout: '%9\n', stderr: '' };
+        }),
+        cmuxExec: vi.fn(),
+      },
+    });
+    expect(owned).toMatchObject({ ok: true, ownership: { paneId: '%9', providerTarget: 'startup:0', source: 'adopted' } });
+    expect(tmuxState.args).toContainEqual([
+      '-S', strictTmuxIdentity().socket_path, 'display-message', '-p', '#{pid}',
+    ]);
+
+    await expect(adoptWorkerPaneOwnership({
+      provider: 'tmux',
+      providerTarget: 'startup:0',
+      paneId: '%9',
+      leaderPaneId: '%1',
+      reservedPaneIds: [],
+      tmuxServerIdentity: strictTmuxIdentity(),
+      serverIdentityDependencies,
+      dependencies: {
+        serverIdentityDependencies,
+        tmuxExec: vi.fn(async args => {
+          expect(args[0]).toBe('-S');
+          expect(args[1]).toBe(strictTmuxIdentity().socket_path);
+          expect(stripTmuxIdentityPrefixes(args)).toEqual([
+            'list-panes', '-t', '=startup:0', '-F', '#{pane_id}',
+          ]);
+          return { stdout: '%8\n', stderr: '' };
+        }),
+        cmuxExec: vi.fn(),
+      },
+    })).resolves.toEqual({ ok: false, reason: 'pane_foreign' });
+  });
+
+  strictTmuxIt.each([
+    ['wide visible command', 'node runtime-cli.cjs --worker-launch', undefined, 'codex'],
+    ['narrow wrapped command', 'node runtime-\ncli.cjs --worker-\nlaunch', undefined, 'claude'],
+    ['stale scrollback command', 'old launch command\n› ready', undefined, 'codex'],
+    ['alternate-screen repaint', '\u001b[?1049h\u001b[2Jprovider ui', undefined, 'claude'],
+    ['capture failure placeholder', '', undefined, 'codex'],
+    ['ignored capture-pane -J', new Error('unknown option -- J'), undefined, 'claude'],
+    ['in-session psmux', 'provider ui', '/tmp/psmux/default,11877,0', 'codex'],
+  ] as const)('accepts a stable Windows cmd wrapper independently of %s capture', async (_fixture, captured, tmuxEnv, provider) => {
+    cwd = await createFixture('startup-stable-cmd-');
+    Object.defineProperty(process, 'platform', { value: 'win32', configurable: true });
+    process.env.COMSPEC = 'cmd.exe';
+    if (tmuxEnv) process.env.TMUX = tmuxEnv;
+    else delete process.env.TMUX;
+    tmuxState.captures = [captured];
+    const attempt = await prepareWorkerLaunchAttempt({
+      cwd,
+      teamName: 'startup-team',
+      workerName: 'worker-1',
+      instanceId: randomUUID(),
+      paneId: '%2',
+      provider,
+      runtimeCliPath: 'C:\\Program Files\\omc\\runtime-cli.cjs',
+    });
+    tmuxState.activeAttempt = attempt;
+
+    if (process.platform === 'win32') {
+      const builderCommand = buildWorkerStartCommand({
+        teamName: 'startup-team',
+        workerName: 'worker-1',
+        envVars: { OMC_TEAM_WORKER: 'startup-team/worker-1' },
+        launchBinary: provider === 'codex'
+          ? 'C:\\Program Files\\Codex\\codex.exe'
+          : 'C:\\Program Files\\Claude\\claude.exe',
+        launchArgs: ['--full-auto'],
+        cwd,
+        provider,
+        launchAttempt: attempt,
+      });
+      expect(builderCommand).toContain('runtime-cli.cjs');
+      expect(builderCommand).toContain('OMC_WORKER_LAUNCH_SPEC_FILE');
+      expect(builderCommand).not.toContain('OMC_WORKER_LAUNCH_SPEC=');
+      await expect(spawnWorkerInPane('startup:0', '%2', {
+        teamName: 'startup-team',
+        workerName: 'worker-1',
+        envVars: { OMC_TEAM_WORKER: 'startup-team/worker-1' },
+        launchBinary: provider === 'codex'
+          ? 'C:\\Program Files\\Codex\\codex.exe'
+          : 'C:\\Program Files\\Claude\\claude.exe',
+        launchArgs: ['--full-auto'],
+        cwd,
+        provider,
+        launchAttempt: attempt,
+      })).rejects.toThrow('worker_start_tmux_server_identity_missing');
+      expect(tmuxState.args).toEqual([]);
+      return;
+    }
+
+    await expect(spawnWorkerInPane('startup:0', '%2', {
+      teamName: 'startup-team',
+      workerName: 'worker-1',
+      tmuxServerIdentity: strictTmuxIdentity(),
+      instanceId: attempt.instance_id,
+      envVars: { OMC_TEAM_WORKER: 'startup-team/worker-1' },
+      launchBinary: provider === 'codex'
+        ? 'C:\\Program Files\\Codex\\codex.exe'
+        : 'C:\\Program Files\\Claude\\claude.exe',
+      launchArgs: ['--full-auto'],
+      cwd,
+      provider,
+      launchAttempt: attempt,
+    })).resolves.toBeUndefined();
+
+    const launchSend = tmuxState.args.find(args => args[0] === 'send-keys' && args.includes('-l'));
+    const canonicalWrapperPath = join(
+      getOmcRoot(cwd), 'state', 'team', 'startup-team', 'workers', 'worker-1',
+      'launch-attempts', attempt.attempt_id, 'launch.cmd',
+    );
+    expect(launchSend?.at(-1)).toBe(relative(cwd, canonicalWrapperPath).replace(/\//g, '\\'));
+    expect(launchSend?.at(-1)).not.toContain('cmd.exe');
+    expect(launchSend?.at(-1)).not.toContain('OMC_TEAM_WORKER');
+    expect(launchSend?.at(-1)).not.toContain('Codex');
+    expect(launchSend?.at(-1)).not.toContain('Claude');
+    const literalIndex = tmuxState.args.indexOf(launchSend!);
+    const enterIndex = tmuxState.args.findIndex(args => args[0] === 'send-keys' && args.at(-1) === 'Enter');
+    expect(literalIndex).toBeGreaterThanOrEqual(0);
+    expect(enterIndex).toBeGreaterThan(literalIndex);
+    expect(launchSend).toEqual(['send-keys', '-t', '%2', '-l', launchSend?.at(-1)]);
+    expect(tmuxState.args[enterIndex]).toEqual(['send-keys', '-t', '%2', 'Enter']);
+    expect(tmuxState.args.some(args => args[0] === 'capture-pane')).toBe(true);
+    expect(tmuxState.args.some(args => args.includes('#{pane_dead} #{pane_current_command}'))).toBe(true);
+    expect(tmuxState.args.some(args =>
+      args[0] === '-S' && args[2] === 'if-shell' && args[4]?.includes("'send-keys'"))).toBe(true);
+    expect(tmuxState.paneStatus).toBe('0 cmd\n');
+  });
+
+  strictTmuxIt('POSIX supervised writer delivers an attempt-owned descriptor the runtime CLI accepts', async () => {
+    cwd = await createFixture('startup-posix-descriptor-');
+    const attempt = await prepareWorkerLaunchAttempt({
+      cwd,
+      teamName: 'startup-team',
+      workerName: 'worker-1',
+      instanceId: randomUUID(),
+      paneId: '%2',
+      provider: 'codex',
+      runtimeCliPath: '/runtime-cli.cjs',
+    });
+
+    await expect(spawnWorkerInPane('startup:0', '%2', {
+      teamName: 'startup-team',
+      workerName: 'worker-1',
+      tmuxServerIdentity: strictTmuxIdentity(),
+      instanceId: attempt.instance_id,
+      envVars: { OMC_TEAM_WORKER: 'startup-team/worker-1' },
+      launchBinary: '/usr/bin/codex',
+      launchArgs: ['--full-auto'],
+      cwd,
+      provider: 'codex',
+      launchAttempt: attempt,
+    })).resolves.toBeUndefined();
+
+    const launchSend = tmuxState.args.find(args => args[0] === 'send-keys' && args.includes('-l'));
+    const cmd = String(launchSend?.at(-1) ?? '');
+    // The delivered command references the attempt-owned descriptor by path;
+    // the bootstrap spec never travels inline (issue #3655).
+    expect(cmd).toContain("OMC_WORKER_LAUNCH_SPEC_FILE='");
+    expect(cmd).not.toContain('OMC_WORKER_LAUNCH_SPEC=');
+    expect(cmd).not.toContain('--full-auto');
+    const descriptorPath = cmd.match(/OMC_WORKER_LAUNCH_SPEC_FILE='([^']+)'/)?.[1];
+    expect(descriptorPath).toBe(attempt.bootstrapDescriptorPath);
+    const descriptor = JSON.parse(await readFile(descriptorPath!, 'utf8')) as Record<string, unknown>;
+    expect(descriptor.attempt_id).toBe(attempt.attempt_id);
+    expect(descriptor.instance_id).toBe(attempt.instance_id);
+    expect(descriptor.provider_argv).toEqual(['/usr/bin/codex', '--full-auto']);
+    expect(tmuxState.args.some(args =>
+      args[0] === '-S' && args[2] === 'if-shell' && args[4]?.includes("'send-keys'"))).toBe(true);
+    expect(Buffer.byteLength(cmd, 'utf8')).toBeLessThan(2_048);
+    // POSIX delivery does not need the Windows-native post-enter capture pass;
+    // readiness is proven through the ack/provider-start handoff instead.
+    expect(tmuxState.args.some(args => args[0] === 'capture-pane')).toBe(false);
+  });
+  strictTmuxIt('clears an exact Codex directory selector before typing the inbox trigger', async () => {
+    const context = await acceptedContext('codex');
+    tmuxState.captures = [
+      'Do you trust the contents of this directory?\n› 1. Yes, continue\n  2. No, quit\n',
+      '› ready\n',
+    ];
+
+    await expect(deliverStartupInbox(context, 'Read inbox.md, execute now.')).resolves.toEqual({
+      ok: true,
+      kind: 'attempted_unconfirmed',
+    });
+    const literalInputs = tmuxState.args
+      .filter(args => args[0] === 'send-keys' && args.includes('-l'))
+      .map(args => args.at(-1));
+    expect(literalInputs).toEqual(['1', 'Read inbox.md, execute now.']);
+    expect(tmuxState.args.findIndex(args => args.at(-1) === '1'))
+      .toBeLessThan(tmuxState.args.findIndex(args => args.at(-1) === 'Read inbox.md, execute now.'));
+    expect(tmuxState.args.filter(args => args[0] === 'send-keys' && args.at(-1) === 'Enter')).toHaveLength(3);
+    expect(tmuxState.args.some(args => args[0] === 'send-keys' && args.at(-1) === 'C-m')).toBe(false);
+  });
+
+  strictTmuxIt('refuses Codex folder trust without selecting trust or delivering task text', async () => {
+    const context = await acceptedContext('codex');
+    const capture = [
+      'Folder access', 'D:\\test\\repo',
+      'Trust this folder? Codex can read, edit, and',
+      'run files here, subject to your permission',
+      'settings. Folder settings can run code',
+      'automatically, even without a model request.',
+      'Continue only if you trust these files. Your',
+      'trust decision will be saved.',
+      'Review the files in this folder before continuing.',
+      'Folder settings may allow code to run automatically.',
+      'Only proceed when you recognize and trust this project.',
+      'Trust applies to the current workspace folder.',
+      'The selected choice is saved for future sessions.',
+      'You can quit now and inspect the folder first.',
+      'Folder access may include reading project files.',
+      'Folder access may include editing project files.',
+      'Review any automated actions before granting access.',
+      'Do not continue if the folder is unfamiliar.',
+      'The trust decision should reflect your own judgment.',
+      'You can return after reviewing the project contents.',
+      'This prompt requires an explicit user decision.',
+      '› 1. Trust and continue', '  2. Quit',
+      'enter continue · esc quit',
+    ].join('\n');
+    tmuxState.captures = [capture];
+
+    expect(paneHasTrustPrompt(capture, 'codex')).toBe(true);
+    expect(paneLooksReady(capture, 'codex')).toBe(false);
+    expect(paneHasActiveTask(capture, 'codex')).toBe(false);
+    expect(paneHasTrustPrompt(capture, 'claude')).toBe(false);
+    const partialCaptures = [
+      ['› ready', 'Trust this folder?'].join('\n'),
+      ['Trust this folder?', '› 1. Trust and continue'].join('\n'),
+      ['Trust this folder?', '› 1. Trust and', 'continue'].join('\n'),
+      ['Trust this folder?', '› 1. Trust and'].join('\n'),
+      ['Trust this folder?', '› 1.'].join('\n'),
+      ['Trust this folder?', '› 1'].join('\n'),
+      ['Trust this folder?', '›'].join('\n'),
+    ];
+    for (const partialCapture of partialCaptures) {
+      expect(paneHasTrustPrompt(partialCapture, 'codex')).toBe(true);
+      expect(paneLooksReady(partialCapture, 'codex')).toBe(false);
+      tmuxState.args = [];
+      tmuxState.captures = [partialCapture];
+      await expect(deliverStartupInbox(context, 'List files and report the result.')).resolves.toEqual({
+        ok: false,
+        reason: 'codex_workspace_untrusted',
+      });
+      expect(tmuxState.args.some(args => args.includes('send-keys'))).toBe(false);
+
+      tmuxState.args = [];
+      tmuxState.captures = [partialCapture];
+      await expect(sendToWorker('', '%2', 'List files and report the result.', context.ownership.tmuxServerIdentity))
+        .resolves.toBe(false);
+      expect(tmuxState.args.some(args => args.includes('send-keys'))).toBe(false);
+    }
+
+    tmuxState.args = [];
+    await expect(deliverStartupInbox(context, 'List files and report the result.')).resolves.toEqual({
+      ok: false,
+      reason: 'codex_workspace_untrusted',
+    });
+    await expect(sendToWorker('', '%2', 'List files and report the result.', context.ownership.tmuxServerIdentity))
+      .resolves.toBe(false);
+    expect(tmuxState.args.some(args => args.includes('send-keys'))).toBe(false);
+
+    const staleCapture = [
+      'Trust this folder?', '› 1. Trust and continue', '  2. Quit',
+      '› ready',
+    ].join('\n');
+    expect(paneHasTrustPrompt(staleCapture, 'codex')).toBe(false);
+    expect(paneLooksReady(staleCapture, 'codex')).toBe(true);
+    const staleBarePromptCapture = [
+      'Trust this folder?', '› 1. Trust and continue', '  2. Quit', '›',
+    ].join('\n');
+    expect(paneHasTrustPrompt(staleBarePromptCapture, 'codex')).toBe(false);
+    expect(paneLooksReady(staleBarePromptCapture, 'codex')).toBe(true);
+
+    const quitSelectedCapture = capture
+      .replace('› 1. Trust and continue', '  1. Trust and continue')
+      .replace('  2. Quit', '› 2. Quit');
+    expect(paneHasTrustPrompt(quitSelectedCapture, 'codex')).toBe(true);
+    expect(paneLooksReady(quitSelectedCapture, 'codex')).toBe(false);
+    tmuxState.args = [];
+    tmuxState.captures = [quitSelectedCapture];
+    await expect(deliverStartupInbox(context, 'List files and report the result.')).resolves.toEqual({
+      ok: false,
+      reason: 'codex_workspace_untrusted',
+    });
+    expect(tmuxState.args.some(args => args.includes('send-keys'))).toBe(false);
+  });
+
+  strictTmuxIt('does not press Enter if Codex trust appears after direct text injection', async () => {
+    const context = await acceptedContext('codex');
+    const message = 'List files and report the result.';
+    const trustSelector = [
+      'Folder access', 'D:\\test\\repo',
+      'Trust this folder? Codex can read, edit, and',
+      'run files here, subject to your permission',
+      'settings. Folder settings can run code',
+      'automatically, even without a model request.',
+      '› 1. Trust and continue', '  2. Quit',
+    ].join('\n');
+    tmuxState.args = [];
+    tmuxState.captures = ['› ready\n', trustSelector];
+
+    await expect(sendToWorker('', context.ownership.paneId, message, context.ownership.tmuxServerIdentity))
+      .resolves.toBe(false);
+
+    const literalInputs = tmuxState.args
+      .filter(args => args[0] === 'send-keys' && args.includes('-l'))
+      .map(args => args.at(-1));
+    expect(literalInputs).toEqual([message]);
+    expect(tmuxState.args.some(args => args[0] === 'send-keys' && args.at(-1) === 'Enter')).toBe(false);
+  });
+
+  strictTmuxIt('does not press startup Enter when Codex trust appears after trigger injection', async () => {
+    const context = await acceptedContext('codex');
+    const message = 'Read inbox.md, execute now.';
+    const partialTrustSelector = ['Trust this folder?', '› 1. Trust and continue'].join('\n');
+    tmuxState.args = [];
+    tmuxState.captures = ['› ready\n', '› ready\n', partialTrustSelector];
+
+    await expect(deliverStartupInbox(context, message)).resolves.toEqual({
+      ok: false,
+      reason: 'codex_workspace_untrusted',
+    });
+
+    const literalInputs = tmuxState.args
+      .filter(args => args[0] === 'send-keys' && args.includes('-l'))
+      .map(args => args.at(-1));
+    expect(literalInputs).toEqual([message]);
+    expect(tmuxState.args.filter(args => args[0] === 'send-keys' && args.at(-1) === 'Enter')).toHaveLength(0);
+  });
+
+  strictTmuxIt('rechecks Codex trust before the second startup Enter', async () => {
+    const context = await acceptedContext('codex');
+    const message = 'Read inbox.md, execute now.';
+    const partialTrustSelector = ['Trust this folder?', '› 1. Trust and continue'].join('\n');
+    tmuxState.args = [];
+    tmuxState.captures = ['› ready\n', '› ready\n', '› ready\n', partialTrustSelector];
+
+    await expect(deliverStartupInbox(context, message)).resolves.toEqual({
+      ok: false,
+      reason: 'codex_workspace_untrusted',
+    });
+
+    expect(tmuxState.args.filter(args => args[0] === 'send-keys' && args.at(-1) === 'Enter')).toHaveLength(1);
+  });
+
+  strictTmuxIt.each([
+    ['Do you trust the files in this folder?', 'Yes, proceed'],
+    ['Quick safety check: Is this a project you created or one you trust?', 'Yes, I trust this folder'],
+    // Claude Code 2.1.310 wraps the question in a 59-column worker pane.
+    ['Quick safety check: Is this a project you created or one\n you trust? (Like your own code, a well-known open source', 'Yes, I trust this folder'],
+  ] as const)(
+    'selects Yes in Claude Code’s new directory trust dialog before delivering the inbox (%s)',
+    async (question, affirmativeChoice) => {
+      const context = await acceptedContext('claude');
+      tmuxState.captures = [
+        `${question}\n❯ No, exit\n  ${affirmativeChoice}\n`,
+        '❯ ready\n',
+      ];
+
+      await expect(deliverStartupInbox(context, 'Read inbox.md, execute now.')).resolves.toEqual({
+        ok: true,
+        kind: 'attempted_unconfirmed',
+      });
+
+      const selectYesIndex = tmuxState.args.findIndex(args => args[0] === 'send-keys' && args.at(-1) === 'Down');
+      const confirmYesIndex = tmuxState.args.findIndex((args, index) =>
+        index > selectYesIndex && args[0] === 'send-keys' && args.at(-1) === 'Enter');
+      const inboxIndex = tmuxState.args.findIndex(args =>
+        args[0] === 'send-keys' && args.includes('-l') && args.at(-1) === 'Read inbox.md, execute now.');
+
+      expect(selectYesIndex).toBeGreaterThanOrEqual(0);
+      expect(confirmYesIndex).toBeGreaterThan(selectYesIndex);
+      expect(inboxIndex).toBeGreaterThan(confirmYesIndex);
+    },
+  );
+
+  strictTmuxIt.each([
+    ['Cursor workspace trust', 'Workspace Trust Required\nDo you trust the contents of this directory?\nPass --trust, --yolo, or -f to skip this prompt.\n'],
+    ['Claude files trust', 'Do you trust the files in this folder?\n❯ No, exit\n  Yes, proceed\n'],
+    ['Claude quick safety check', 'Quick safety check: Is this a project you created or one you trust?\n❯ No, exit\n  Yes, I trust this folder\n'],
+    ['directory trust', 'Do you trust the contents of this directory?\n› 1. Yes, continue\n  2. No, quit\n'],
+    ['Codex hooks review', 'Hooks need review\n› 3. Continue without trusting\nPress enter to confirm or esc to go back\n'],
+  ] as const)('guarded direct send refuses to type into a %s prompt', async (_label, capture) => {
+    const context = await acceptedContext('claude');
+    const identity = context.ownership.tmuxServerIdentity;
+    const senders = [
+      () => sendToWorker('', '%2', 'List files and report the result.', identity),
+      () => injectToLeaderPane('', '%1', 'List files and report the result.', identity),
+    ];
+    for (const send of senders) {
+      tmuxState.args = [];
+      tmuxState.captures = [capture];
+
+      await expect(send()).resolves.toBe(false);
+      expect(tmuxState.args.some(args => args[0] === 'capture-pane')).toBe(true);
+      expect(tmuxState.args.some(args => args.includes('send-keys'))).toBe(false);
+    }
+  });
+
+  strictTmuxIt('handles the exact Codex directory and hooks selectors in order before delivery', async () => {
+    const context = await acceptedContext('codex');
+    tmuxState.captures = [
+      'Do you trust the contents of this directory?\n› 1. Yes, continue\n  2. No, quit\n',
+      'Hooks need review\n› 3. Continue without trusting\nPress enter to confirm or esc to go back\n',
+      '› ready\n',
+    ];
+
+    await expect(deliverStartupInbox(context, 'Read inbox.md, execute now.')).resolves.toEqual({
+      ok: true,
+      kind: 'attempted_unconfirmed',
+    });
+    const literalInputs = tmuxState.args
+      .filter(args => args[0] === 'send-keys' && args.includes('-l'))
+      .map(args => args.at(-1));
+    expect(literalInputs).toEqual(['1', '3', 'Read inbox.md, execute now.']);
+  });
+
+  strictTmuxIt('fails closed when the selector persists after the narrow action', async () => {
+    const context = await acceptedContext('codex');
+    const selector = 'Do you trust the contents of this directory?\n› 1. Yes, continue\n  2. No, quit\n';
+    tmuxState.captures = [selector, selector];
+
+    await expect(deliverStartupInbox(context, 'Read inbox.md, execute now.')).resolves.toEqual({
+      ok: false,
+      reason: 'selector_persistent',
+    });
+    expect(tmuxState.args.some(args => args.at(-1) === 'Read inbox.md, execute now.')).toBe(false);
+  });
+
+  strictTmuxIt('retries Enter only when the exact startup trigger is visibly pending', async () => {
+    const context = await acceptedContext('claude');
+    const message = 'Read inbox.md, execute now.';
+    tmuxState.captures = [`❯ ${message}\n`];
+
+    await expect(retryStartupInboxSubmit(context, message)).resolves.toBe('resubmitted');
+    expect(tmuxState.args.some(args => args[0] === 'send-keys' && args.at(-1) === 'Enter')).toBe(true);
+  });
+
+  strictTmuxIt('reports an engaged pane instead of resubmitting when the worker is actively working', async () => {
+    const context = await acceptedContext('claude');
+    const message = 'Read inbox.md, execute now.';
+    tmuxState.captures = [`> ${message}\n\n  ✻ Thinking…\n  (esc to interrupt at any time to stop)\n`];
+
+    await expect(retryStartupInboxSubmit(context, message)).resolves.toBe('pane_busy');
+    expect(tmuxState.args.some(args => args[0] === 'send-keys' && args.at(-1) === 'Enter')).toBe(false);
+  });
+
+  strictTmuxIt.each([
+    ['codex', '› Read inbox.md\nesc to interrupt\n'],
+    ['cursor', '→ Read inbox.md\nctrl+c to stop\n'],
+  ] as const)('probes a busy %s pane read-only without sending a key', async (provider, capture) => {
+    const context = await acceptedContext(provider);
+    tmuxState.captures = [capture];
+
+    await expect(probeStartupPaneActivity(context)).resolves.toBe('busy');
+    expect(tmuxState.args.some(args => args[0] === 'send-keys')).toBe(false);
+  });
+
+  strictTmuxIt.each([
+    ['codex', 'idle', '› ready\n'],
+    ['cursor', 'idle', '→ ready\n'],
+    ['codex', 'dead', '› ready\n'],
+    ['cursor', 'dead', '→ ready\n'],
+  ] as const)('does not classify a %s %s pane as engaged', async (provider, activity, capture) => {
+    const context = await acceptedContext(provider);
+    tmuxState.captures = [capture];
+    if (activity === 'dead') tmuxState.paneStatus = '1 cmd\n';
+
+    await expect(probeStartupPaneActivity(context)).resolves.toBe(activity);
+    expect(tmuxState.args.some(args => args[0] === 'send-keys')).toBe(false);
+  });
+
+  strictTmuxIt.each(['codex', 'cursor'] as const)(
+    'does not grant busy grace to a %s trust prompt with interrupt text',
+    async provider => {
+      const context = await acceptedContext(provider);
+      tmuxState.captures = [
+        'Do you trust the contents of this directory?\n› 1. Yes, continue\n  2. No, quit\nesc to interrupt\nctrl+c to stop\n',
+      ];
+
+      await expect(probeStartupPaneActivity(context)).resolves.toBe('idle');
+      expect(tmuxState.args.some(args => args[0] === 'send-keys')).toBe(false);
+    },
+  );
+
+  strictTmuxIt.each(['codex', 'cursor'] as const)(
+    'classifies an unreadable %s pane as unknown without sending a key',
+    async provider => {
+      const context = await acceptedContext(provider);
+      tmuxState.captureError = new Error('capture unavailable');
+
+      await expect(probeStartupPaneActivity(context)).resolves.toBe('unknown');
+      expect(tmuxState.args.some(args => args[0] === 'send-keys')).toBe(false);
+    },
+  );
+
+  strictTmuxIt.each(['codex', 'cursor'] as const)(
+    'fails closed for a stale %s launch attempt before probing pane activity',
+    async provider => {
+      const context = await acceptedContext(provider);
+      tmuxState.captures = ['→ Read inbox.md\nctrl+c to stop\n'];
+      tmuxState.activeAttempt = null;
+      await expect(probeStartupPaneActivity({
+        ...context,
+        attempt: { ...context.attempt, attempt_id: '00000000-0000-4000-8000-000000000000' },
+      })).resolves.toBe('unknown');
+      expect(tmuxState.args.some(args => args[0] === 'send-keys')).toBe(false);
+    },
+  );
+
+  strictTmuxIt.each(['codex', 'cursor'] as const)(
+    'fails closed for %s copy mode without probing or sending a key',
+    async provider => {
+      const context = await acceptedContext(provider);
+      tmuxState.captures = ['› Read inbox.md\nesc to interrupt\n'];
+      tmuxState.paneMode = '1\n';
+
+      await expect(probeStartupPaneActivity(context)).resolves.toBe('unknown');
+      expect(tmuxState.args.some(args => args[0] === 'capture-pane')).toBe(false);
+      expect(tmuxState.args.some(args => args[0] === 'send-keys')).toBe(false);
+    },
+  );
+
+  strictTmuxIt.each(['codex', 'cursor'] as const)(
+    'fails closed for %s ownership mismatch without probing or sending a key',
+    async provider => {
+      const context = await acceptedContext(provider);
+      tmuxState.captures = ['→ Read inbox.md\nctrl+c to stop\n'];
+
+      await expect(probeStartupPaneActivity({
+        ...context,
+        ownership: { ...context.ownership, paneId: '%9' },
+      })).resolves.toBe('unknown');
+      expect(tmuxState.args.some(args => args[0] === 'capture-pane')).toBe(false);
+      expect(tmuxState.args.some(args => args[0] === 'send-keys')).toBe(false);
+    },
+  );
+
+  strictTmuxIt.each(['codex', 'cursor'] as const)(
+    'fails closed for a foreign %s pane without probing or sending a key',
+    async provider => {
+      const context = await acceptedContext(provider);
+      tmuxState.captures = ['→ Read inbox.md\nctrl+c to stop\n'];
+      tmuxState.ownedPaneIds = '%9\n';
+
+      await expect(probeStartupPaneActivity(context)).resolves.toBe('unknown');
+      expect(tmuxState.args.some(args => args[0] === 'capture-pane')).toBe(false);
+      expect(tmuxState.args.some(args => args[0] === 'send-keys')).toBe(false);
+    },
+  );
+
+  strictTmuxIt.each(['codex', 'cursor'] as const)(
+    'fails closed for %s unknown liveness without probing or sending a key',
+    async provider => {
+      const context = await acceptedContext(provider);
+      tmuxState.captures = ['→ Read inbox.md\nctrl+c to stop\n'];
+      tmuxState.livenessError = new Error('liveness unavailable');
+
+      await expect(probeStartupPaneActivity(context)).resolves.toBe('unknown');
+      expect(tmuxState.args.some(args => args[0] === 'capture-pane')).toBe(false);
+      expect(tmuxState.args.some(args => args[0] === 'send-keys')).toBe(false);
+    },
+  );
+
+  strictTmuxIt('does not retry Enter for unrelated pane text', async () => {
+    const context = await acceptedContext('claude');
+    tmuxState.captures = ['❯ unrelated text\n'];
+
+    await expect(retryStartupInboxSubmit(context, 'Read inbox.md, execute now.')).resolves.toBe('unavailable');
+    expect(tmuxState.args.some(args => args[0] === 'send-keys' && args.at(-1) === 'Enter')).toBe(false);
+  });
+
+  strictTmuxIt('never sends a Gemini confirmation key without an evidence-backed Gemini selector', async () => {
+    const context = await acceptedContext('gemini');
+    tmuxState.captures = [
+      'Do you trust the contents of this directory?\n› 1. Yes, continue\n  2. No, quit\n',
+    ];
+
+    await expect(deliverStartupInbox(context, 'Read inbox.md, execute now.')).resolves.toEqual({
+      ok: false,
+      reason: 'selector_unsupported',
+    });
+    expect(tmuxState.args.some(args => args.at(-1) === '1')).toBe(false);
+    expect(tmuxState.args.some(args => args.at(-1) === 'Read inbox.md, execute now.')).toBe(false);
+  });
+
+  strictTmuxIt('does not send the Codex hooks selector key to Claude', async () => {
+    const context = await acceptedContext('claude');
+    tmuxState.captures = [
+      'Hooks need review\n› 3. Continue without trusting\nPress enter to confirm or esc to go back\n',
+    ];
+
+    await expect(deliverStartupInbox(context, 'Read inbox.md, execute now.')).resolves.toEqual({
+      ok: false,
+      reason: 'selector_unsupported',
+    });
+    expect(tmuxState.args.some(args => args.at(-1) === '3')).toBe(false);
+  });
+
+  strictTmuxIt('emits bounded redacted capture diagnostics and never treats failure as readiness', async () => {
+    const context = await acceptedContext('codex');
+    const secret = 'SUPERSECRET_VALUE';
+    const jsonSecret = 'JSON_ONLY_SECRET';
+    tmuxState.captures = [new Error(
+      `capture failed --api-key ${secret} Bearer ${secret} {"provider_argv":["codex","--token","${jsonSecret}"]}`,
+    )];
+    const stderr = vi.spyOn(process.stderr, 'write').mockImplementation(() => true);
+
+    await expect(deliverStartupInbox(context, 'Read inbox.md, execute now.')).resolves.toEqual({
+      ok: false,
+      reason: 'capture_failed',
+    });
+    const diagnostic = stderr.mock.calls.map(call => String(call[0])).join('');
+    expect(diagnostic).toContain('pane capture failed operation=startup-readiness pane=%2');
+    expect(diagnostic).not.toContain(secret);
+    expect(diagnostic).not.toContain(jsonSecret);
+    expect(diagnostic.length).toBeLessThan(500);
+    stderr.mockRestore();
+  });
+  strictTmuxIt('retires an accepted launch but preserves the pane when provider cleanup is unverified', async () => {
+    cwd = await createFixture('omc-startup-handoff-cleanup-');
+    process.env.OMC_TEAM_START_ACK_TIMEOUT_MS = '50';
+    processMocks.isProcessIdentityLive.mockResolvedValue('dead');
+
+    await expect(spawnOwnedWorkerInPane('startup:0', ownership(), {
+      teamName: 'startup-team',
+      workerName: 'worker-1',
+      instanceId: randomUUID(),
+      envVars: {},
+      launchArgs: ['--version'],
+      launchBinary: '/usr/bin/codex',
+      cwd,
+      provider: 'codex',
+      launchBootstrapPath: '/runtime-cli.js',
+      launchStateCwd: cwd,
+      launchContext: { kind: 'initial' },
+    })).rejects.toThrow('worker_launch_cleanup_unverified');
+
+    expect(tmuxState.args).not.toContainEqual(['kill-pane', '-t', '%2']);
+    const attemptsRoot = join(getOmcRoot(cwd), 'state', 'team', 'startup-team', 'workers', 'worker-1', 'launch-attempts');
+    const files = await readdir(attemptsRoot, { recursive: true });
+    expect(files.some(file => String(file).endsWith('decision.json.retired'))).toBe(true);
+    expect(tmuxState.paneStatus).toBe('0 cmd\n');
+    delete process.env.OMC_TEAM_START_ACK_TIMEOUT_MS;
+  });
+
+  it('refuses an owned worker launch without its immutable instance id', async () => {
+    cwd = await createFixture('omc-startup-instance-id-');
+
+    if (!supportsStrictTmuxFixture) {
+      await expect(spawnOwnedWorkerInPane('startup:0', ownership(), {
+        teamName: 'startup-team',
+        workerName: 'worker-1',
+        envVars: {},
+        launchArgs: ['--version'],
+        launchBinary: '/usr/bin/codex',
+        cwd,
+        provider: 'codex',
+        launchBootstrapPath: '/runtime-cli.js',
+        launchStateCwd: cwd,
+        launchContext: { kind: 'initial' },
+      })).rejects.toThrow('worker_launch_tmux_server_identity_missing');
+      expect(tmuxState.args).toEqual([]);
+      return;
+    }
+
+    await expect(spawnOwnedWorkerInPane('startup:0', ownership(), {
+      teamName: 'startup-team',
+      workerName: 'worker-1',
+      envVars: {},
+      launchArgs: ['--version'],
+      launchBinary: '/usr/bin/codex',
+      cwd,
+      provider: 'codex',
+      launchBootstrapPath: '/runtime-cli.js',
+      launchStateCwd: cwd,
+      launchContext: { kind: 'initial' },
+    })).rejects.toThrow('worker_launch_instance_id_invalid');
+    expect(tmuxState.args).toHaveLength(0);
+  });
+
+});

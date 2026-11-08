@@ -1,0 +1,247 @@
+/**
+ * Skill Parser
+ *
+ * Parses YAML frontmatter from skill files.
+ */
+
+import type { SkillMetadata } from './types.js';
+import { escapeYamlSingleQuoted, splitFlowSequenceItems, stripLeadingUtf8Bom, unquoteYamlScalar } from '../../utils/frontmatter.js';
+
+export interface SkillParseResult {
+  metadata: Partial<SkillMetadata>;
+  content: string;
+  valid: boolean;
+  errors: string[];
+}
+
+/**
+ * Parse skill file frontmatter and content.
+ */
+export function parseSkillFile(rawContent: string): SkillParseResult {
+  const frontmatterRegex = /^---\r?\n([\s\S]*?)\r?\n---\r?\n?([\s\S]*)$/;
+  // A UTF-8 BOM (Windows editors) would otherwise hide the opening `---`.
+  const match = stripLeadingUtf8Bom(rawContent).match(frontmatterRegex);
+
+  if (!match) {
+    return {
+      metadata: {},
+      content: rawContent,
+      valid: false,
+      errors: ['Missing YAML frontmatter'],
+    };
+  }
+
+  const yamlContent = match[1];
+  const content = match[2].trim();
+  const errors: string[] = [];
+
+  try {
+    const metadata = parseYamlMetadata(yamlContent);
+
+    // Derive id from name if missing
+    if (!metadata.id && metadata.name) {
+      metadata.id = metadata.name
+        .toLowerCase()
+        .replace(/\s+/g, '-')
+        .replace(/[^a-z0-9-]/g, '');
+    }
+
+    // Default source to 'manual' if missing
+    if (!metadata.source) {
+      metadata.source = 'manual';
+    }
+
+    // Validate required fields (only truly required ones)
+    if (!metadata.name) errors.push('Missing required field: name');
+    if (!metadata.description) errors.push('Missing required field: description');
+    if (!metadata.triggers || metadata.triggers.length === 0) {
+      errors.push('Missing required field: triggers');
+    }
+
+    return {
+      metadata,
+      content,
+      valid: errors.length === 0,
+      errors,
+    };
+  } catch (e) {
+    return {
+      metadata: {},
+      content: rawContent,
+      valid: false,
+      errors: [`YAML parse error: ${e}`],
+    };
+  }
+}
+
+/**
+ * Parse YAML metadata without external library.
+ */
+export function parseYamlMetadata(yamlContent: string): Partial<SkillMetadata> {
+  const lines = yamlContent.split(/\r?\n/);
+  const metadata: Partial<SkillMetadata> = {};
+
+  let i = 0;
+  while (i < lines.length) {
+    const line = lines[i];
+    const colonIndex = line.indexOf(':');
+
+    if (colonIndex === -1) {
+      i++;
+      continue;
+    }
+
+    const key = line.slice(0, colonIndex).trim();
+    const rawValue = line.slice(colonIndex + 1).trim();
+
+    switch (key) {
+      case 'id':
+        metadata.id = parseStringValue(rawValue);
+        break;
+      case 'name':
+        metadata.name = parseStringValue(rawValue);
+        break;
+      case 'description':
+        metadata.description = parseStringValue(rawValue);
+        break;
+      case 'source':
+        metadata.source = parseStringValue(rawValue) as 'extracted' | 'promoted' | 'manual';
+        break;
+      case 'createdAt':
+        metadata.createdAt = parseStringValue(rawValue);
+        break;
+      case 'sessionId':
+        metadata.sessionId = parseStringValue(rawValue);
+        break;
+      case 'model':
+        metadata.model = parseStringValue(rawValue);
+        break;
+      case 'agent':
+        metadata.agent = parseStringValue(rawValue);
+        break;
+      case 'matching':
+        metadata.matching = parseStringValue(rawValue) as 'exact' | 'fuzzy';
+        break;
+      case 'quality':
+        metadata.quality = parseInt(rawValue, 10) || undefined;
+        break;
+      case 'usageCount':
+        metadata.usageCount = parseInt(rawValue, 10) || 0;
+        break;
+      case 'triggers':
+      case 'tags': {
+        const { value, consumed } = parseArrayValue(rawValue, lines, i);
+        if (key === 'triggers') {
+          metadata.triggers = normalizeStringArray(value);
+        } else {
+          metadata.tags = normalizeStringArray(value);
+        }
+        i += consumed - 1;
+        break;
+      }
+    }
+
+    i++;
+  }
+
+  return metadata;
+}
+
+export function parseStringValue(value: string): string {
+  if (!value) return '';
+  const unquoted = unquoteYamlScalar(value);
+  // The previous learner writer stored backslashes literally inside double quotes.
+  // Preserve those values while decoding escaped quotes in handwritten YAML.
+  return value.startsWith('"') && value.endsWith('"') ? unquoted.replace(/\\"/g, '"') : unquoted;
+}
+
+function normalizeStringArray(value: string | string[]): string[] {
+  const values = Array.isArray(value) ? value : [value];
+  return values.map((item) => item.trim()).filter(Boolean);
+}
+
+export function parseArrayValue(
+  rawValue: string,
+  lines: string[],
+  currentIndex: number
+): { value: string | string[]; consumed: number } {
+  // Inline array: ["a", "b"]
+  if (rawValue.startsWith('[')) {
+    const endIdx = rawValue.lastIndexOf(']');
+    if (endIdx === -1) return { value: [], consumed: 1 };
+    const content = rawValue.slice(1, endIdx).trim();
+    if (!content) return { value: [], consumed: 1 };
+
+    const items = splitFlowSequenceItems(content).map(s => parseStringValue(s.trim())).filter(Boolean);
+    return { value: items, consumed: 1 };
+  }
+
+  // Multi-line array
+  if (!rawValue || rawValue === '') {
+    const items: string[] = [];
+    let consumed = 1;
+
+    for (let j = currentIndex + 1; j < lines.length; j++) {
+      const nextLine = lines[j];
+      const arrayMatch = nextLine.match(/^\s+-\s*(.*)$/);
+
+      if (arrayMatch) {
+        const itemValue = parseStringValue(arrayMatch[1].trim());
+        if (itemValue) items.push(itemValue);
+        consumed++;
+      } else if (nextLine.trim() === '') {
+        consumed++;
+      } else {
+        break;
+      }
+    }
+
+    if (items.length > 0) {
+      return { value: items, consumed };
+    }
+  }
+
+  // Single value
+  return { value: parseStringValue(rawValue), consumed: 1 };
+}
+
+/**
+ * Generate YAML frontmatter for a skill.
+ */
+export function generateSkillFrontmatter(metadata: SkillMetadata): string {
+  const lines = [
+    '---',
+    `id: '${escapeYamlSingleQuoted(metadata.id)}'`,
+    `name: '${escapeYamlSingleQuoted(metadata.name)}'`,
+    `description: '${escapeYamlSingleQuoted(metadata.description)}'`,
+    `source: ${metadata.source}`,
+    `createdAt: '${escapeYamlSingleQuoted(metadata.createdAt)}'`,
+  ];
+
+  if (metadata.sessionId) {
+    lines.push(`sessionId: '${escapeYamlSingleQuoted(metadata.sessionId)}'`);
+  }
+
+  if (metadata.quality !== undefined) {
+    lines.push(`quality: ${metadata.quality}`);
+  }
+
+  if (metadata.usageCount !== undefined) {
+    lines.push(`usageCount: ${metadata.usageCount}`);
+  }
+
+  lines.push('triggers:');
+  for (const trigger of metadata.triggers) {
+    lines.push(`  - '${escapeYamlSingleQuoted(trigger)}'`);
+  }
+
+  if (metadata.tags && metadata.tags.length > 0) {
+    lines.push('tags:');
+    for (const tag of metadata.tags) {
+      lines.push(`  - '${escapeYamlSingleQuoted(tag)}'`);
+    }
+  }
+
+  lines.push('---');
+  return lines.join('\n');
+}

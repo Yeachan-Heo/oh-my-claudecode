@@ -1,0 +1,57 @@
+@!@!@STARTMSG 2262:0 @!@!@
+TLC2 Version 2.19 of 08 August 2024 (rev: 5a47802)
+@!@!@ENDMSG 2262 @!@!@
+@!@!@STARTMSG 2401:3 @!@!@
+Please run the Java VM which executes TLC with a throughput optimized garbage collector by passing the "-XX:+UseParallelGC" property.
+@!@!@ENDMSG 2401 @!@!@
+@!@!@STARTMSG 2187:0 @!@!@
+Running breadth-first search Model-Checking with fp 0 and seed 1290433993270318185 with 1 worker on 8 cores with 23888MB heap and 64MB offheap memory [pid: 574362] (Linux 6.12.94+ amd64, Eclipse Adoptium 25.0.5 x86_64, MSBDiskFPSet, DiskStateQueue).
+@!@!@ENDMSG 2187 @!@!@
+@!@!@STARTMSG 2220:0 @!@!@
+Starting SANY...
+@!@!@ENDMSG 2220 @!@!@
+Parsing file /tmp/statechart-HNPGAm/statechart-hzYQac/ChartBound.tla
+Parsing file /agent/repos/plugins/pstack/skills/statechart/scripts/test/corpus/CounterStart/CounterStart.tla
+Parsing file /tmp/statechart-HNPGAm/statechart-hzYQac/tmp-verdict-2/Naturals.tla
+Parsing file /tmp/statechart-HNPGAm/statechart-hzYQac/tmp-verdict-2/TLC.tla
+Parsing file /tmp/statechart-HNPGAm/statechart-hzYQac/tmp-verdict-2/Sequences.tla
+Parsing file /tmp/statechart-HNPGAm/statechart-hzYQac/tmp-verdict-2/FiniteSets.tla
+Semantic processing of module Naturals
+Semantic processing of module CounterStart
+Semantic processing of module Sequences
+Semantic processing of module FiniteSets
+Semantic processing of module TLC
+Semantic processing of module ChartBound
+@!@!@STARTMSG 2219:0 @!@!@
+SANY finished.
+@!@!@ENDMSG 2219 @!@!@
+@!@!@STARTMSG 2185:0 @!@!@
+Starting... (2026-10-26 21:45:43)
+@!@!@ENDMSG 2185 @!@!@
+@!@!@STARTMSG 2189:0 @!@!@
+Computing initial states...
+@!@!@ENDMSG 2189 @!@!@
+@!@!@STARTMSG 2191:0 @!@!@
+Finished computing initial states: 2 states generated, with 1 of them distinct at 2026-10-26 21:45:43.
+@!@!@ENDMSG 2191 @!@!@
+@!@!@STARTMSG 2193:0 @!@!@
+Model checking completed. No error has been found.
+  Estimates of the probability that TLC did not check all reachable states
+  because two distinct states had the same fingerprint:
+  calculated (optimistic):  val = 3.3E-19
+@!@!@ENDMSG 2193 @!@!@
+@!@!@STARTMSG 2200:0 @!@!@
+Progress(3) at 2026-10-26 21:45:43: 5 states generated (849 s/min), 3 distinct states found (509 ds/min), 0 states left on queue.
+@!@!@ENDMSG 2200 @!@!@
+@!@!@STARTMSG 2199:0 @!@!@
+5 states generated, 3 distinct states found, 0 states left on queue.
+@!@!@ENDMSG 2199 @!@!@
+@!@!@STARTMSG 2194:0 @!@!@
+The depth of the complete state graph search is 3.
+@!@!@ENDMSG 2194 @!@!@
+@!@!@STARTMSG 2268:0 @!@!@
+The average outdegree of the complete state graph is 1 (minimum is 0, the maximum 1 and the 95th percentile is 1).
+@!@!@ENDMSG 2268 @!@!@
+@!@!@STARTMSG 2186:0 @!@!@
+Finished in 357ms at (2026-10-26 21:45:43)
+@!@!@ENDMSG 2186 @!@!@

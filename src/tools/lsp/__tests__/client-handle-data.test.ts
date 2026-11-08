@@ -1,0 +1,491 @@
+import { describe, it, expect, vi, afterEach } from 'vitest';
+import { spawn } from 'child_process';
+
+// Mock servers module
+vi.mock('../servers.js', () => ({
+  commandExists: vi.fn(() => true),
+}));
+
+vi.mock('child_process', () => ({
+  spawn: vi.fn(() => ({
+    stdin: { write: vi.fn() },
+    stdout: { on: vi.fn() },
+    stderr: { on: vi.fn() },
+    on: vi.fn(),
+    kill: vi.fn(),
+    pid: 12345,
+  })),
+}));
+
+import { LspClient } from '../client.js';
+
+const SERVER_CONFIG = {
+  name: 'test-server',
+  command: 'test-ls',
+  args: ['--stdio'],
+  extensions: ['.ts'],
+  installHint: 'npm i test-ls',
+};
+
+/** Build a well-formed LSP message with correct byte-length header. */
+function buildLspMessage(body: string): Buffer {
+  const bodyBuf = Buffer.from(body, 'utf-8');
+  const header = `Content-Length: ${bodyBuf.length}\r\n\r\n`;
+  return Buffer.concat([Buffer.from(header, 'ascii'), bodyBuf]);
+}
+
+function jsonRpcResponse(id: number, result: unknown): string {
+  return JSON.stringify({ jsonrpc: '2.0', id, result });
+}
+
+function decodeLspMessage(message: string): Record<string, unknown> {
+  const bodyStart = message.indexOf('\r\n\r\n') + 4;
+  return JSON.parse(message.slice(bodyStart));
+}
+
+function setupWritableClient(client: LspClient) {
+  const writes: string[] = [];
+  (client as any).process = {
+    stdin: {
+      write: vi.fn((message: string) => writes.push(message)),
+    },
+  };
+  return writes;
+}
+
+function setupPendingRequest(client: LspClient, id: number) {
+  const resolve = vi.fn();
+  const reject = vi.fn();
+  const timeout = setTimeout(() => {}, 30000);
+  (client as any).pendingRequests.set(id, { resolve, reject, timeout });
+  return { resolve, reject };
+}
+
+describe('LspClient handleData byte-length fix (#1026)', () => {
+  afterEach(() => {
+    vi.clearAllTimers();
+  });
+
+  it('should parse an ASCII-only JSON-RPC response', () => {
+    const client = new LspClient('/tmp/ws', SERVER_CONFIG);
+    const { resolve } = setupPendingRequest(client, 1);
+
+    const body = jsonRpcResponse(1, { hover: 'hello' });
+    (client as any).handleData(buildLspMessage(body));
+
+    expect(resolve).toHaveBeenCalledOnce();
+    expect(resolve).toHaveBeenCalledWith({ hover: 'hello' });
+  });
+
+  it('should parse multi-byte UTF-8 content correctly (the #1026 bug)', () => {
+    const client = new LspClient('/tmp/ws', SERVER_CONFIG);
+    const { resolve } = setupPendingRequest(client, 1);
+
+    // "🚀" is 4 bytes in UTF-8 but 2 JS chars (surrogate pair).
+    // With the old string-length check, the parser would wait for more data
+    // because string.length < byte Content-Length.
+    const result = { info: '🚀 rocket launch' };
+    const body = jsonRpcResponse(1, result);
+
+    // Verify the byte vs char discrepancy that causes the bug
+    expect(Buffer.byteLength(body)).toBeGreaterThan(body.length);
+
+    (client as any).handleData(buildLspMessage(body));
+
+    expect(resolve).toHaveBeenCalledOnce();
+    expect(resolve).toHaveBeenCalledWith(result);
+  });
+
+  it('should handle CJK characters where byte length differs from char length', () => {
+    const client = new LspClient('/tmp/ws', SERVER_CONFIG);
+    const { resolve } = setupPendingRequest(client, 1);
+
+    // Each CJK char is 3 bytes in UTF-8
+    const result = { doc: '変数の型情報' };
+    const body = jsonRpcResponse(1, result);
+
+    expect(Buffer.byteLength(body)).toBeGreaterThan(body.length);
+
+    (client as any).handleData(buildLspMessage(body));
+
+    expect(resolve).toHaveBeenCalledOnce();
+    expect(resolve).toHaveBeenCalledWith(result);
+  });
+
+  it('should handle chunked delivery across multiple data events', () => {
+    const client = new LspClient('/tmp/ws', SERVER_CONFIG);
+    const { resolve } = setupPendingRequest(client, 1);
+
+    const body = jsonRpcResponse(1, { value: 'chunked' });
+    const full = buildLspMessage(body);
+
+    // Split the message at an arbitrary midpoint
+    const mid = Math.floor(full.length / 2);
+    (client as any).handleData(full.subarray(0, mid));
+    expect(resolve).not.toHaveBeenCalled();
+
+    (client as any).handleData(full.subarray(mid));
+    expect(resolve).toHaveBeenCalledOnce();
+    expect(resolve).toHaveBeenCalledWith({ value: 'chunked' });
+  });
+
+  it('should handle chunked delivery splitting a multi-byte char', () => {
+    const client = new LspClient('/tmp/ws', SERVER_CONFIG);
+    const { resolve } = setupPendingRequest(client, 1);
+
+    const result = { text: '日本語テスト' };
+    const body = jsonRpcResponse(1, result);
+    const full = buildLspMessage(body);
+
+    // Split inside the JSON body (likely mid-multibyte sequence)
+    const splitAt = full.indexOf(Buffer.from('日')) + 1; // mid-character
+    (client as any).handleData(full.subarray(0, splitAt));
+    expect(resolve).not.toHaveBeenCalled();
+
+    (client as any).handleData(full.subarray(splitAt));
+    expect(resolve).toHaveBeenCalledOnce();
+    expect(resolve).toHaveBeenCalledWith(result);
+  });
+
+  it('should parse multiple messages delivered in a single chunk', () => {
+    const client = new LspClient('/tmp/ws', SERVER_CONFIG);
+    const { resolve: resolve1 } = setupPendingRequest(client, 1);
+    const { resolve: resolve2 } = setupPendingRequest(client, 2);
+
+    const msg1 = buildLspMessage(jsonRpcResponse(1, 'first'));
+    const msg2 = buildLspMessage(jsonRpcResponse(2, 'second'));
+
+    (client as any).handleData(Buffer.concat([msg1, msg2]));
+
+    expect(resolve1).toHaveBeenCalledWith('first');
+    expect(resolve2).toHaveBeenCalledWith('second');
+  });
+
+  it('should wait when not enough bytes have arrived yet', () => {
+    const client = new LspClient('/tmp/ws', SERVER_CONFIG);
+    const { resolve } = setupPendingRequest(client, 1);
+
+    const body = jsonRpcResponse(1, { partial: true });
+    const full = buildLspMessage(body);
+
+    // Send only the header plus partial body
+    const headerEnd = full.indexOf(Buffer.from('\r\n\r\n')) + 4;
+    (client as any).handleData(full.subarray(0, headerEnd + 3));
+    expect(resolve).not.toHaveBeenCalled();
+
+    // Send the rest
+    (client as any).handleData(full.subarray(headerEnd + 3));
+    expect(resolve).toHaveBeenCalledOnce();
+  });
+
+  it('should recover from an invalid header (no Content-Length)', () => {
+    const client = new LspClient('/tmp/ws', SERVER_CONFIG);
+    const { resolve } = setupPendingRequest(client, 1);
+
+    // First: a malformed message without Content-Length
+    const bad = Buffer.from('X-Bad-Header: oops\r\n\r\n{}');
+    // Then: a valid message
+    const good = buildLspMessage(jsonRpcResponse(1, 'recovered'));
+
+    (client as any).handleData(Buffer.concat([bad, good]));
+
+    expect(resolve).toHaveBeenCalledWith('recovered');
+  });
+
+  it('replies to registration requests with the exact error and preserves string, zero, and empty IDs', async () => {
+    const client = new LspClient('/tmp/ws', SERVER_CONFIG);
+    const writes = setupWritableClient(client);
+
+    for (const id of ['ts1', 0, '']) {
+      (client as any).handleData(buildLspMessage(JSON.stringify({
+        jsonrpc: '2.0',
+        id,
+        method: 'client/registerCapability',
+      })));
+    }
+
+    await vi.waitFor(() => expect(writes).toHaveLength(3));
+
+    expect(writes.map(decodeLspMessage)).toEqual([
+      {
+        jsonrpc: '2.0',
+        id: 'ts1',
+        error: { code: -32803, message: 'Dynamic capability registration is not supported' },
+      },
+      {
+        jsonrpc: '2.0',
+        id: 0,
+        error: { code: -32803, message: 'Dynamic capability registration is not supported' },
+      },
+      {
+        jsonrpc: '2.0',
+        id: '',
+        error: { code: -32803, message: 'Dynamic capability registration is not supported' },
+      },
+    ]);
+  });
+
+  it('replies to unknown server requests with Method not found', async () => {
+    const client = new LspClient('/tmp/ws', SERVER_CONFIG);
+    const writes = setupWritableClient(client);
+
+    (client as any).handleData(buildLspMessage(JSON.stringify({
+      jsonrpc: '2.0',
+      id: 7,
+      method: 'window/showMessageRequest',
+    })));
+
+    await vi.waitFor(() => expect(writes).toHaveLength(1));
+    expect(writes).toHaveLength(1);
+    expect(decodeLspMessage(writes[0])).toEqual({
+      jsonrpc: '2.0',
+      id: 7,
+      error: { code: -32601, message: 'Method not found' },
+    });
+  });
+
+  it('does not reply to fractional-ID requests or route them to pending responses', () => {
+    const client = new LspClient('/tmp/ws', SERVER_CONFIG);
+    const writes = setupWritableClient(client);
+    const { resolve } = setupPendingRequest(client, 1.5);
+
+    (client as any).handleData(buildLspMessage(JSON.stringify({
+      jsonrpc: '2.0',
+      id: 1.5,
+      method: 'client/registerCapability',
+    })));
+
+    expect(writes).toHaveLength(0);
+    expect(resolve).not.toHaveBeenCalled();
+    expect((client as any).pendingRequests.has(1.5)).toBe(true);
+    clearTimeout((client as any).pendingRequests.get(1.5).timeout);
+    (client as any).pendingRequests.delete(1.5);
+  });
+
+  it('preserves numeric response resolution and rejection without string-ID coercion', () => {
+    const client = new LspClient('/tmp/ws', SERVER_CONFIG);
+    const resolved = setupPendingRequest(client, 1);
+    const rejected = setupPendingRequest(client, 2);
+
+    (client as any).handleData(buildLspMessage(JSON.stringify({ jsonrpc: '2.0', id: '1', result: 'wrong' })));
+    (client as any).handleData(buildLspMessage(jsonRpcResponse(1, 'right')));
+    (client as any).handleData(buildLspMessage(JSON.stringify({
+      jsonrpc: '2.0',
+      id: 2,
+      error: { code: -32000, message: 'rejected' },
+    })));
+
+    expect(resolved.resolve).toHaveBeenCalledWith('right');
+    expect(rejected.reject).toHaveBeenCalledWith(new Error('rejected'));
+    expect((client as any).pendingRequests.has(1)).toBe(false);
+    expect((client as any).pendingRequests.has(2)).toBe(false);
+  });
+
+  it('does not correlate method-bearing frames as responses', () => {
+    const client = new LspClient('/tmp/ws', SERVER_CONFIG);
+    const pending = setupPendingRequest(client, 3);
+
+    (client as any).handleData(buildLspMessage(JSON.stringify({
+      jsonrpc: '2.0',
+      id: 3,
+      method: null,
+      result: 'spoofed',
+    })));
+
+    expect(pending.resolve).not.toHaveBeenCalled();
+    expect((client as any).pendingRequests.has(3)).toBe(true);
+    clearTimeout((client as any).pendingRequests.get(3).timeout);
+    (client as any).pendingRequests.delete(3);
+  });
+
+  it('keeps method-only messages as notifications without writing a response', () => {
+    const client = new LspClient('/tmp/ws', SERVER_CONFIG);
+    const writes = setupWritableClient(client);
+    const uri = 'file:///tmp/ws/test.ts';
+    const diagnostics = [{ message: 'problem', severity: 1 }];
+
+    (client as any).handleData(buildLspMessage(JSON.stringify({
+      jsonrpc: '2.0',
+      method: 'textDocument/publishDiagnostics',
+      params: { uri, diagnostics },
+    })));
+
+    expect(writes).toHaveLength(0);
+    expect((client as any).diagnostics.get(uri)).toEqual(diagnostics);
+  });
+
+  it('releases a queued public request only after its registration error reply is pumped', async () => {
+    const writes: string[] = [];
+    let stdoutData: ((data: Buffer) => void) | undefined;
+    let pumpRegistrationReply: (() => void) | undefined;
+    let pumpQueuedWorkspaceResult: (() => void) | undefined;
+    let registrationReplyObserved = false;
+    const stdin = {
+      write: vi.fn((message: string) => {
+        writes.push(message);
+        const outgoing = decodeLspMessage(message);
+        if (outgoing.method === 'initialize') {
+          stdoutData!(buildLspMessage(jsonRpcResponse(outgoing.id as number, { capabilities: {} })));
+        } else if (outgoing.method === 'initialized') {
+          stdoutData!(buildLspMessage(JSON.stringify({
+            jsonrpc: '2.0',
+            id: 'ts1',
+            method: 'client/registerCapability',
+          })));
+        } else if (outgoing.id === 'ts1' && (outgoing.error as { code?: number } | undefined)?.code === -32803) {
+          pumpRegistrationReply = () => {
+            expect(outgoing).toEqual({
+              jsonrpc: '2.0',
+              id: 'ts1',
+              error: { code: -32803, message: 'Dynamic capability registration is not supported' },
+            });
+            registrationReplyObserved = true;
+          };
+        } else if (outgoing.method === 'workspace/symbol') {
+          pumpQueuedWorkspaceResult = () => {
+            expect(registrationReplyObserved).toBe(true);
+            stdoutData!(buildLspMessage(jsonRpcResponse(outgoing.id as number, [])));
+          };
+        }
+      }),
+    };
+    vi.mocked(spawn).mockReturnValueOnce({
+      stdin,
+      stdout: { on: vi.fn((event: string, listener: (data: Buffer) => void) => {
+        if (event === 'data') stdoutData = listener;
+      }) },
+      stderr: { on: vi.fn() },
+      on: vi.fn(),
+      kill: vi.fn(),
+      pid: 12345,
+    } as any);
+
+    const client = new LspClient('/tmp/ws', SERVER_CONFIG);
+    await client.connect();
+    const request = client.workspaceSymbols('queued');
+    let resolved = false;
+    request.then(() => { resolved = true; });
+
+    await vi.waitFor(() => expect(writes).toHaveLength(4));
+    expect(writes).toHaveLength(4);
+    expect(decodeLspMessage(writes[2])).toEqual({
+      jsonrpc: '2.0',
+      id: 'ts1',
+      error: { code: -32803, message: 'Dynamic capability registration is not supported' },
+    });
+    expect(decodeLspMessage(writes[3])).toMatchObject({ id: 2, method: 'workspace/symbol' });
+    expect(pumpRegistrationReply).toBeDefined();
+    expect(pumpQueuedWorkspaceResult).toBeDefined();
+    expect(registrationReplyObserved).toBe(false);
+    expect(resolved).toBe(false);
+
+    pumpRegistrationReply!();
+    expect(registrationReplyObserved).toBe(true);
+    pumpQueuedWorkspaceResult!();
+
+    await expect(request).resolves.toEqual([]);
+    expect(resolved).toBe(true);
+  });
+});
+
+describe('LspClient Windows URI key normalization (#4185)', () => {
+  afterEach(() => {
+    vi.clearAllTimers();
+  });
+
+  it('should normalize Windows-encoded file URIs when publishing diagnostics', () => {
+    const client = new LspClient('/tmp/ws', SERVER_CONFIG);
+    setupWritableClient(client);
+
+    // Simulate server publishing diagnostics with percent-encoded Windows path
+    // This mimics what typescript-language-server sends on Windows: file:///c%3A/Users/...
+    const serverMessage = buildLspMessage(
+      JSON.stringify({
+        jsonrpc: '2.0',
+        method: 'textDocument/publishDiagnostics',
+        params: {
+          uri: 'file:///c%3A/Users/test/lsp_test.ts',
+          diagnostics: [
+            {
+              range: { start: { line: 1, character: 28 }, end: { line: 1, character: 35 } },
+              severity: 1,
+              message: 'Argument of type \'"1"\' is not assignable to parameter of type \'number\'.',
+            },
+          ],
+        },
+      })
+    );
+
+    (client as any).handleData(serverMessage);
+
+    // Verify diagnostic was stored with normalized key (file:///C:/Users/...)
+    const diags = (client as any).diagnostics;
+    expect(diags.size).toBe(1);
+    // The key should be normalized: uppercase drive letter, percent-encoded colon decoded
+    const key = Array.from(diags.keys())[0];
+    expect(key).toContain('file:///C:/');
+    expect(key).not.toContain('%3A');
+  });
+
+  it('should retrieve diagnostics after Windows-encoded publish', () => {
+    const client = new LspClient('/tmp/ws', SERVER_CONFIG);
+    setupWritableClient(client);
+
+    // Publish with percent-encoded URI
+    const serverMessage = buildLspMessage(
+      JSON.stringify({
+        jsonrpc: '2.0',
+        method: 'textDocument/publishDiagnostics',
+        params: {
+          uri: 'file:///c%3A/Users/test/lsp_test.ts',
+          diagnostics: [
+            {
+              range: { start: { line: 0, character: 0 }, end: { line: 0, character: 5 } },
+              severity: 1,
+              message: 'Test error',
+            },
+          ],
+        },
+      })
+    );
+
+    (client as any).handleData(serverMessage);
+
+    // Retrieve using normalized URI - should find diagnostics
+    const diags = (client as any).diagnostics.get('file:///C:/Users/test/lsp_test.ts');
+    expect(diags).toBeDefined();
+    expect(diags).toHaveLength(1);
+    expect(diags[0].message).toBe('Test error');
+  });
+
+  it('should keep non-file URIs unchanged', () => {
+    // This test verifies that the uriKey function doesn't modify non-file URIs
+    const client = new LspClient('/tmp/ws', SERVER_CONFIG);
+    setupWritableClient(client);
+
+    // Simulate publishing diagnostics with a non-file URI
+    const serverMessage = buildLspMessage(
+      JSON.stringify({
+        jsonrpc: '2.0',
+        method: 'textDocument/publishDiagnostics',
+        params: {
+          uri: 'untitled:Untitled-1',
+          diagnostics: [
+            {
+              range: { start: { line: 0, character: 0 }, end: { line: 0, character: 1 } },
+              severity: 1,
+              message: 'Error in untitled doc',
+            },
+          ],
+        },
+      })
+    );
+
+    (client as any).handleData(serverMessage);
+
+    // Verify the diagnostic was stored with the exact URI (unchanged)
+    const diags = (client as any).diagnostics;
+    expect(diags.has('untitled:Untitled-1')).toBe(true);
+    expect(diags.get('untitled:Untitled-1')).toHaveLength(1);
+  });
+});

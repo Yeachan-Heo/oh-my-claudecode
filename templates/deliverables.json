@@ -1,0 +1,25 @@
+{
+  "$schema": "Deliverable requirements per team pipeline stage. Used by verify-deliverables.mjs hook.",
+  "team-plan": {
+    "files": ["DESIGN.md"],
+    "minSize": 500,
+    "requiredSections": ["## File Ownership", "## Architecture"]
+  },
+  "team-prd": {
+    "files": ["PRD.md", "TEST_STRATEGY.md"],
+    "minSize": 300
+  },
+  "team-exec": {
+    "files": [],
+    "note": "No specific deliverables — implementation produces code changes, not documents"
+  },
+  "team-verify": {
+    "files": ["QA_REPORT.md"],
+    "minSize": 200,
+    "requiredPatterns": ["\\b(PASS|FAIL)\\b"]
+  },
+  "team-fix": {
+    "files": [],
+    "note": "No specific deliverables — fixes are code changes"
+  }
+}

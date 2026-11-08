@@ -1,0 +1,65 @@
+name: Manage Stale Issues
+
+on:
+  schedule:
+    # Run daily at midnight UTC
+    - cron: '0 0 * * *'
+  workflow_dispatch:
+
+permissions:
+  issues: write
+  pull-requests: write
+
+jobs:
+  stale:
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    steps:
+      - name: Mark and close stale issues
+        uses: actions/stale@v9
+        with:
+          # Issue configuration
+          stale-issue-message: |
+            This issue has been automatically marked as stale because it has not had recent activity.
+
+            It will be closed in 14 days if no further activity occurs.
+
+            If this is still relevant:
+            - Comment to keep it open
+            - Add the `pinned` label to prevent auto-closing
+
+            Thank you for contributing to oh-my-claudecode!
+
+          close-issue-message: |
+            This issue has been automatically closed due to inactivity.
+
+            Feel free to reopen if the issue persists. For installation help, try running `/doctor` after installing.
+
+          # PR configuration
+          stale-pr-message: |
+            This PR has been automatically marked as stale because it has not had recent activity.
+
+            It will be closed in 14 days if no further activity occurs.
+
+          close-pr-message: |
+            This PR has been automatically closed due to inactivity.
+
+            Feel free to reopen when ready to continue.
+
+          # Timing
+          days-before-stale: 30
+          days-before-close: 14
+
+          # Labels
+          stale-issue-label: stale
+          stale-pr-label: stale
+
+          # Exempt labels - issues/PRs with these labels won't be marked stale
+          exempt-issue-labels: 'pinned,security,bug,enhancement'
+          exempt-pr-labels: 'pinned,work-in-progress'
+
+          # Only process issues, not PRs by default (PRs need more careful handling)
+          only-labels: ''
+
+          # Limit operations per run
+          operations-per-run: 30

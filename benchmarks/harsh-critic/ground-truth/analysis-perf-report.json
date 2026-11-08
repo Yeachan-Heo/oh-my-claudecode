@@ -1,0 +1,71 @@
+{
+  "fixtureId": "analysis-perf-report",
+  "fixturePath": "fixtures/analysis/analysis-perf-report.md",
+  "domain": "analysis",
+  "expectedVerdict": "REJECT",
+  "isCleanBaseline": false,
+  "findings": [
+    {
+      "id": "PERF-CRIT-1",
+      "severity": "CRITICAL",
+      "category": "finding",
+      "summary": "Correlation presented as causation — deployment frequency correlated with latency does not prove a specific deployment caused it",
+      "keywords": ["correlation", "causation", "confound", "deploy", "latency"],
+      "location": "Section 3.1, Section 4.2",
+      "explanation": "Section 3.1 computes r=0.71 correlation between deployment days and P99 latency, then Section 4.2 concludes 'The statistical correlation is significant... confirming' the v2.14.0 deployment caused the regression. Correlation between deployment frequency and latency does not establish causation — there may be confounding variables (e.g., deployment days coincide with higher traffic). The onset timing is supporting evidence, not statistical proof."
+    },
+    {
+      "id": "PERF-MAJ-1",
+      "severity": "MAJOR",
+      "category": "finding",
+      "summary": "Insufficient sample size — n=12 daily data points is too small for statistical significance claims",
+      "keywords": ["sample", "size", "n=12", "significance", "statistical"],
+      "location": "Section 3.1",
+      "explanation": "The t-test uses n=12 total observations (6 per group) split from a 12-day window. A p-value of 0.03 from a sample of 6 per group is unreliable — with this sample size, the test has low power and the result is sensitive to outliers. The report presents p<0.05 as strong evidence without acknowledging the sample size limitation."
+    },
+    {
+      "id": "PERF-MAJ-2",
+      "severity": "MAJOR",
+      "category": "finding",
+      "summary": "Analysis window cherry-picks a 3-day pre-deployment baseline that excludes prior context",
+      "keywords": ["cherry", "pick", "window", "exclude", "time", "period"],
+      "location": "Section 5",
+      "explanation": "Section 5 states the analysis window starts February 17 to 'capture a clean 3-day pre-deployment baseline' — but provides no justification for why 3 days is sufficient. If latency was already trending upward before Feb 17, or if there was a seasonal pattern, the baseline would be misleading. The choice of start date is asserted, not justified."
+    },
+    {
+      "id": "PERF-MIN-1",
+      "severity": "MINOR",
+      "category": "finding",
+      "summary": "P99 on Feb 25 (189ms) is lower than P95 (204ms) — statistically impossible, data error",
+      "keywords": ["P99", "P95", "percentile", "impossible", "lower"],
+      "location": "Section 2.1, table row Feb 25",
+      "explanation": "The data table shows Feb 25 with P95=204ms and P99=189ms. P99 must always be >= P95 by definition (99th percentile cannot be lower than 95th percentile). This indicates a data collection or aggregation error that was not caught before the report was finalized."
+    },
+    {
+      "id": "PERF-MISS-1",
+      "severity": "MAJOR",
+      "category": "missing",
+      "summary": "No baseline comparison period beyond the immediate 3-day pre-deployment window",
+      "keywords": ["baseline", "comparison", "period", "reference"],
+      "explanation": "The report uses only February 17-19 as baseline. There is no comparison to the same period in prior weeks or months to account for weekly traffic patterns, no seasonal baseline, and no reference to historical P99 targets. A robust regression analysis requires a longer baseline period."
+    },
+    {
+      "id": "PERF-MISS-2",
+      "severity": "MAJOR",
+      "category": "missing",
+      "summary": "No confidence intervals reported for any metric — point estimates presented without uncertainty",
+      "keywords": ["confidence", "interval", "error", "margin"],
+      "explanation": "All latency figures (P50, P95, P99, deltas) are presented as point estimates with no confidence intervals or margin of error. Given the small sample size and day-to-day variability visible in the data, confidence intervals are essential for knowing whether the observed differences are meaningful."
+    },
+    {
+      "id": "PERF-PERSP-OPS-1",
+      "severity": "MAJOR",
+      "category": "perspective",
+      "perspective": "ops",
+      "summary": "CPU cost increase from infrastructure scaling recommendations has no budget approval or capacity plan",
+      "keywords": ["CPU", "cost", "budget", "increase"],
+      "location": "Section 6, Infrastructure Scaling recommendations",
+      "explanation": "Recommendations 6 and 7 propose upgrading instance types ($840/month per region) and adding replicas ($1,200/month) — but these are presented as direct action items without budget approval, capacity planning, or ROI justification. Ops teams cannot act on cost-increasing infrastructure changes without a budget owner sign-off."
+    }
+  ]
+}

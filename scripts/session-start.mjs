@@ -1,0 +1,1988 @@
+#!/usr/bin/env node
+
+/**
+ * OMC Session Start Hook (Node.js)
+ * Restores persistent mode states when session starts
+ * Cross-platform: Windows, macOS, Linux
+ */
+
+import { existsSync, readFileSync, readdirSync, rmSync, mkdirSync, writeFileSync, symlinkSync, lstatSync, readlinkSync, unlinkSync, renameSync, statSync } from 'fs';
+import { spawn } from 'child_process';
+import { join, dirname, basename, resolve, relative, isAbsolute } from 'path';
+import { homedir } from 'os';
+import { fileURLToPath, pathToFileURL } from 'url';
+import { getClaudeConfigDir, getUpdateCheckCachePath } from './lib/config-dir.mjs';
+import { resolveOmcStateRoot } from './lib/state-root.mjs';
+import { pathIdentity, publishCacheOccupancy, readOccupiedPluginRoots } from './lib/cache-occupancy.mjs';
+
+// Detached update-cache refresh: argv flag and the child's overall deadline.
+const REFRESH_UPDATE_CACHE_FLAG = '--refresh-update-cache';
+const REFRESH_UPDATE_CACHE_DEADLINE_MS = 3000;
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = dirname(__filename);
+
+/** Claude config directory (respects CLAUDE_CONFIG_DIR env var) */
+const configDir = getClaudeConfigDir();
+
+// Import timeout-protected stdin reader (prevents hangs on Linux/Windows, see issue #240, #524)
+let readStdin;
+try {
+  const mod = await import(pathToFileURL(join(__dirname, 'lib', 'stdin.mjs')).href);
+  readStdin = mod.readStdin;
+} catch {
+  // Fallback: inline timeout-protected readStdin if lib module is missing
+  readStdin = (timeoutMs = 5000) => new Promise((resolve) => {
+    const chunks = [];
+    let settled = false;
+    const timeout = setTimeout(() => {
+      if (!settled) { settled = true; process.stdin.removeAllListeners(); process.stdin.destroy(); resolve(Buffer.concat(chunks).toString('utf-8')); }
+    }, timeoutMs);
+    process.stdin.on('data', (chunk) => { chunks.push(chunk); });
+    process.stdin.on('end', () => { if (!settled) { settled = true; clearTimeout(timeout); resolve(Buffer.concat(chunks).toString('utf-8')); } });
+    process.stdin.on('error', () => { if (!settled) { settled = true; clearTimeout(timeout); resolve(''); } });
+    if (process.stdin.readableEnded) { if (!settled) { settled = true; clearTimeout(timeout); resolve(Buffer.concat(chunks).toString('utf-8')); } }
+  });
+}
+
+// Read JSON file safely
+function readJsonFile(path) {
+  try {
+    if (!existsSync(path)) return null;
+    return JSON.parse(readFileSync(path, 'utf-8'));
+  } catch {
+    return null;
+  }
+}
+
+const TOOL_FAILURE_TEMP_FILE_PATTERN = /^\.last-tool-error(?:-state)?\.json\.tmp\.[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
+const TOOL_FAILURE_TEMP_MIN_AGE_MS = 60_000;
+const SANITIZED_TOOL_FAILURE_ERROR = 'Tool execution failed (details omitted for privacy).';
+
+function unlinkRegularFile(path) {
+  try {
+    if (lstatSync(path).isFile()) unlinkSync(path);
+  } catch {
+    // Legacy-state cleanup is best-effort and must not affect SessionStart.
+  }
+}
+
+function isSanitizedToolFailureState(state) {
+  if (!state || typeof state !== 'object' || Array.isArray(state)) return false;
+  const keys = Object.keys(state).sort();
+  return keys.length === 4
+    && keys[0] === 'error'
+    && keys[1] === 'retry_count'
+    && keys[2] === 'timestamp'
+    && keys[3] === 'tool_name'
+    && typeof state.tool_name === 'string'
+    && state.tool_name.length > 0
+    && state.error === SANITIZED_TOOL_FAILURE_ERROR
+    && typeof state.timestamp === 'string'
+    && Number.isFinite(Date.parse(state.timestamp))
+    && Number.isInteger(state.retry_count);
+}
+
+function purgeLegacyToolFailureFile(path) {
+  let content;
+  try {
+    if (!lstatSync(path).isFile()) return;
+    content = readFileSync(path, 'utf-8');
+  } catch {
+    return;
+  }
+
+  let state;
+  try {
+    state = JSON.parse(content);
+  } catch {
+    unlinkRegularFile(path);
+    return;
+  }
+  if (!isSanitizedToolFailureState(state)) unlinkRegularFile(path);
+}
+
+function purgeToolFailureTemps(directory) {
+  let entries;
+  try {
+    if (!lstatSync(directory).isDirectory()) return;
+    entries = readdirSync(directory);
+  } catch {
+    return;
+  }
+
+  for (const name of entries) {
+    if (!TOOL_FAILURE_TEMP_FILE_PATTERN.test(name)) continue;
+    const path = join(directory, name);
+    try {
+      const stats = lstatSync(path);
+      if (!stats.isFile()) continue;
+      let state;
+      try { state = JSON.parse(readFileSync(path, 'utf-8')); } catch {}
+      if (isSanitizedToolFailureState(state) && Date.now() - stats.mtimeMs < TOOL_FAILURE_TEMP_MIN_AGE_MS) continue;
+      unlinkRegularFile(path);
+    } catch {
+      // A concurrent or inaccessible temp file must not affect SessionStart.
+    }
+  }
+}
+
+const POST_TOOL_FAILURE_LOCK_WAIT_MS = 2500;
+const POST_TOOL_FAILURE_SQLITE_BUSY_WAIT_MS = 100;
+const POST_TOOL_FAILURE_PROCESS_PROBE_MAX_MS = 2000;
+const SESSION_START_HOOK_TIMEOUT_MS = 5000;
+const SESSION_START_OCCUPANCY_PROBE_MAX_MS = 2000;
+const SESSION_START_OUTPUT_RESERVE_MS = 750;
+const POST_TOOL_FAILURE_DEFERRED_WAIT_MS = 30_000;
+const POST_TOOL_FAILURE_LOCK_RETRY_MS = 50;
+const DEFERRED_TOOL_FAILURE_CLEANUP_FLAG = '--purge-legacy-tool-failure-state';
+const STABILIZE_TOOL_FAILURE_CLEANUP_FLAG = '--stabilize-legacy-tool-failure-state';
+const TOOL_FAILURE_CLEANUP_STABILIZATION_MS = 30_000;
+const TOOL_FAILURE_CLEANUP_RESCAN_MS = 250;
+const TOOL_FAILURE_PLUGIN_ROOT_RESCAN_MS = 5000;
+const TOOL_FAILURE_CLEANUP_LIFETIME_WINDOWS = 10;
+const TOOL_FAILURE_CLEANUP_MIN_LIFETIME_MS = 60_000;
+let postToolFailureStateLockModule;
+
+function postToolFailureLockWaitMs() {
+  if (process.env.NODE_ENV === 'test') {
+    const testWaitMs = Number(process.env.OMC_TEST_TOOL_FAILURE_LOCK_WAIT_MS);
+    if (Number.isFinite(testWaitMs) && testWaitMs > 0) return Math.min(testWaitMs, POST_TOOL_FAILURE_LOCK_WAIT_MS);
+  }
+  return POST_TOOL_FAILURE_LOCK_WAIT_MS;
+}
+
+async function loadPostToolFailureStateLock() {
+  if (!postToolFailureStateLockModule) {
+    postToolFailureStateLockModule = await import(pathToFileURL(join(__dirname, 'lib', 'state-lock.mjs')).href);
+  }
+  return postToolFailureStateLockModule;
+}
+
+async function waitForPostToolFailureLock(canonicalPath, deadline) {
+  const { acquireStateFileLockAtPathSync, getStateFileLockFailureKind } = await loadPostToolFailureStateLock();
+  while (Date.now() < deadline) {
+    const remaining = deadline - Date.now();
+    if (remaining <= 0) return { lock: null, timedOut: true };
+    const lock = acquireStateFileLockAtPathSync(
+      `${canonicalPath}.lock`, 1, true, false,
+      Math.min(POST_TOOL_FAILURE_SQLITE_BUSY_WAIT_MS, remaining),
+      Math.min(POST_TOOL_FAILURE_PROCESS_PROBE_MAX_MS, remaining),
+    );
+    if (lock) return { lock, timedOut: false };
+    if (getStateFileLockFailureKind() !== 'contention') return { lock: null, timedOut: false };
+    const remainingAfterAttempt = deadline - Date.now();
+    if (remainingAfterAttempt > 0) {
+      await new Promise(resolve => setTimeout(resolve, Math.min(POST_TOOL_FAILURE_LOCK_RETRY_MS, remainingAfterAttempt)));
+    }
+  }
+  return { lock: null, timedOut: true };
+}
+
+function releasePostToolFailureLock(lock) {
+  return postToolFailureStateLockModule.releaseStateFileLockSync(lock);
+}
+
+function hasToolFailureArtifacts(directory, canonicalFilename) {
+  try {
+    if (!lstatSync(directory).isDirectory()) return false;
+    const lockFilename = `${canonicalFilename}.lock`;
+    const names = readdirSync(directory);
+    if (names.some(name => name === lockFilename || TOOL_FAILURE_TEMP_FILE_PATTERN.test(name))) return true;
+    return names.includes(canonicalFilename)
+      && !isSanitizedToolFailureState(readJsonFile(join(directory, canonicalFilename)));
+  } catch {
+    return false;
+  }
+}
+
+async function purgeToolFailureStateDirectory(directory, canonicalFilename, deadline, lifetimeDeadline = Infinity) {
+  if (!hasToolFailureArtifacts(directory, canonicalFilename)) return false;
+  const canonicalPath = join(directory, canonicalFilename);
+  let postToolFailureLock;
+  let lockWait;
+  try {
+    lockWait = await waitForPostToolFailureLock(canonicalPath, deadline);
+  } catch {
+    return false;
+  }
+  postToolFailureLock = lockWait.lock;
+  if (!postToolFailureLock) return lockWait.timedOut;
+  let releaseFailed = false;
+  let pastLifetime = false;
+  try {
+    // The lock can be granted after the helper's lifetime ended: leave the artifacts.
+    pastLifetime = Date.now() >= lifetimeDeadline;
+    if (!pastLifetime) {
+      purgeLegacyToolFailureFile(canonicalPath);
+      purgeToolFailureTemps(directory);
+    }
+  } finally {
+    releaseFailed = !releasePostToolFailureLock(postToolFailureLock);
+  }
+  return releaseFailed || pastLifetime;
+}
+
+function deferLegacyToolFailureCleanup(omcRoot, waitMs = POST_TOOL_FAILURE_DEFERRED_WAIT_MS) {
+  try {
+    const child = spawn(process.execPath, [__filename, DEFERRED_TOOL_FAILURE_CLEANUP_FLAG, omcRoot, String(waitMs)], {
+      detached: true,
+      stdio: 'ignore',
+      windowsHide: true,
+      env: { ...process.env, OMC_HOOK_BACKGROUND_CHILD: '1' },
+    });
+    child.on('error', () => {});
+    child.unref();
+  } catch {
+    // Deferred cleanup is best-effort and must not delay SessionStart output.
+  }
+}
+
+function toolFailureCleanupStabilizationMs() {
+  if (process.env.NODE_ENV === 'test') {
+    const testWindow = Number(process.env.OMC_TEST_TOOL_FAILURE_STABILIZATION_MS);
+    if (Number.isFinite(testWindow) && testWindow > 0) return Math.min(testWindow, 5000);
+  }
+  return TOOL_FAILURE_CLEANUP_STABILIZATION_MS;
+}
+
+// Hard lifetime of the detached stabilization helper. Sessions on another plugin
+// version can stay open for days, so waiting for them to exit is unbounded. The
+// purge is idempotent and every SessionStart purges again and starts a new
+// helper, so the helper may stop waiting. A caller-supplied cap can only shorten
+// the derived default.
+function toolFailureCleanupMaxLifetimeMs(stabilizationMs, requestedMs) {
+  const defaultMs = Math.max(
+    stabilizationMs * TOOL_FAILURE_CLEANUP_LIFETIME_WINDOWS,
+    TOOL_FAILURE_CLEANUP_MIN_LIFETIME_MS,
+  );
+  return Number.isFinite(requestedMs) && requestedMs > 0 ? Math.min(requestedMs, defaultMs) : defaultMs;
+}
+
+function shouldStabilizeToolFailureCleanup() {
+  if (process.env.NODE_ENV === 'test') {
+    return Number(process.env.OMC_TEST_TOOL_FAILURE_STABILIZATION_MS) > 0;
+  }
+  return true;
+}
+
+function deferToolFailureCleanupStabilization(omcRoot) {
+  if (!shouldStabilizeToolFailureCleanup() || process.env.OMC_HOOK_BACKGROUND_CHILD === '1') return;
+  try {
+    const child = spawn(process.execPath, [__filename, STABILIZE_TOOL_FAILURE_CLEANUP_FLAG, omcRoot, String(toolFailureCleanupStabilizationMs())], {
+      detached: true,
+      stdio: 'ignore',
+      windowsHide: true,
+      env: { ...process.env, OMC_HOOK_BACKGROUND_CHILD: '1' },
+    });
+    child.on('error', () => {});
+    child.unref();
+  } catch {
+    // Stabilization is best-effort and must not delay SessionStart output.
+  }
+}
+
+function legacyToolFailureArtifactSnapshot(omcRoot) {
+  const stateDir = join(omcRoot, 'state');
+  const directories = [[stateDir, 'last-tool-error.json']];
+  try {
+    const sessionsDir = join(stateDir, 'sessions');
+    if (lstatSync(sessionsDir).isDirectory()) {
+      for (const sessionId of readdirSync(sessionsDir)) {
+        directories.push([join(sessionsDir, sessionId), 'last-tool-error-state.json']);
+      }
+    }
+  } catch {
+    // The root-level record can still be inspected when sessions are unavailable.
+  }
+
+  const artifacts = [];
+  for (const [directory, canonicalFilename] of directories) {
+    let names;
+    try {
+      if (!lstatSync(directory).isDirectory()) continue;
+      names = readdirSync(directory);
+    } catch {
+      continue;
+    }
+    for (const name of names) {
+      const isCanonical = name === canonicalFilename;
+      const isLock = name === `${canonicalFilename}.lock`;
+      const isTemp = TOOL_FAILURE_TEMP_FILE_PATTERN.test(name);
+      if (!isCanonical && !isLock && !isTemp) continue;
+      try {
+        const path = join(directory, name);
+        const stat = lstatSync(path);
+        if (!stat.isFile()) continue;
+        if (!isLock && isSanitizedToolFailureState(readJsonFile(path))) continue;
+        artifacts.push(`${directory}\0${name}\0${stat.dev}:${stat.ino}:${stat.size}:${stat.mtimeMs}`);
+      } catch {
+        // Ignore artifacts concurrently removed or replaced.
+      }
+    }
+  }
+  return artifacts.sort().join('\n');
+}
+
+// The identity probe may not outlive `lifetimeDeadline`. A probe that times out or
+// has no time left identifies nothing, so every registry record is kept and its
+// root counts as occupied.
+function hasActiveOlderPluginRoot(lifetimeDeadline = Infinity) {
+  const pluginRoot = process.env.CLAUDE_PLUGIN_ROOT;
+  if (!pluginRoot) return false;
+  try {
+    const currentRoot = pathIdentity(pluginRoot);
+    const pluginVersionsDirectory = dirname(currentRoot);
+    const { roots, unavailable } = readOccupiedPluginRoots(configDir, {
+      probeTimeoutMs: Math.max(0, lifetimeDeadline - Date.now()),
+    });
+    if (unavailable) return true;
+    return [...roots].some(root => root !== currentRoot && dirname(root) === pluginVersionsDirectory);
+  } catch {
+    return false;
+  }
+}
+
+function resolveSessionPluginOccupancy(deadline) {
+  if (!process.env.CLAUDE_PLUGIN_ROOT) return null;
+  const configuredOwnerPid = Number(process.env.OMC_SESSION_OWNER_PID);
+  const ownerPid = Number.isSafeInteger(configuredOwnerPid) && configuredOwnerPid > 1 ? configuredOwnerPid : process.ppid;
+  const probeTimeoutMs = Math.max(
+    0,
+    Math.min(
+      SESSION_START_OCCUPANCY_PROBE_MAX_MS,
+      deadline - Date.now() - SESSION_START_OUTPUT_RESERVE_MS,
+    ),
+  );
+  const occupancy = readOccupiedPluginRoots(configDir, { includePids: [ownerPid], probeTimeoutMs });
+  publishCacheOccupancy(process.env.CLAUDE_PLUGIN_ROOT, configDir, ownerPid, occupancy.identities.get(ownerPid) ?? null);
+  return occupancy;
+}
+
+async function waitForTestArtifactScanRelease(scan) {
+  if (process.env.NODE_ENV !== 'test') return;
+  const scanPrefix = `OMC_TEST_TOOL_FAILURE_${scan}_SCAN`;
+  const readyPath = process.env[`${scanPrefix}_READY_PATH`];
+  const releasePath = process.env[`${scanPrefix}_RELEASE_PATH`];
+  if (!readyPath || !releasePath) return;
+  try {
+    writeFileSync(readyPath, 'ready');
+    const deadline = Date.now() + 30_000;
+    while (!existsSync(releasePath) && Date.now() < deadline) {
+      await new Promise(resolve => setTimeout(resolve, 10));
+    }
+  } catch {
+    // Test-only synchronization must not affect cleanup behavior.
+  }
+}
+
+function signalTestDeferredToolFailureCleanupReady() {
+  if (process.env.NODE_ENV !== 'test') return;
+  const readyPath = process.env.OMC_TEST_TOOL_FAILURE_DEFERRED_CLEANUP_READY_PATH;
+  if (!readyPath) return;
+  try {
+    writeFileSync(readyPath, 'ready');
+  } catch {
+    // Test-only synchronization must not affect cleanup behavior.
+  }
+}
+
+async function stabilizeLegacyToolFailureState(omcRoot, stabilizationMs, maxLifetimeMs = toolFailureCleanupMaxLifetimeMs(stabilizationMs)) {
+  const stateDir = join(omcRoot, 'state');
+  const lifetimeDeadline = Date.now() + maxLifetimeMs;
+  let olderPluginActive = hasActiveOlderPluginRoot(lifetimeDeadline);
+  let quietUntil = Date.now() + stabilizationMs;
+  let nextPluginRootCheck = Date.now() + TOOL_FAILURE_PLUGIN_ROOT_RESCAN_MS;
+  while (true) {
+    const now = Date.now();
+    if (now >= lifetimeDeadline) return;
+    try {
+      if (!lstatSync(stateDir).isDirectory()) return;
+      break;
+    } catch (error) {
+      if (error?.code !== 'ENOENT') return;
+    }
+
+    if (now >= nextPluginRootCheck) {
+      olderPluginActive = hasActiveOlderPluginRoot(lifetimeDeadline);
+      nextPluginRootCheck = now + TOOL_FAILURE_PLUGIN_ROOT_RESCAN_MS;
+    }
+    if (now >= quietUntil && !olderPluginActive) {
+      olderPluginActive = hasActiveOlderPluginRoot(lifetimeDeadline);
+      nextPluginRootCheck = Date.now() + TOOL_FAILURE_PLUGIN_ROOT_RESCAN_MS;
+      if (!olderPluginActive) return;
+    }
+    const remainingQuietMs = quietUntil - Date.now();
+    const pollDelayMs = remainingQuietMs > 0
+      ? Math.min(TOOL_FAILURE_CLEANUP_RESCAN_MS, remainingQuietMs)
+      : TOOL_FAILURE_CLEANUP_RESCAN_MS;
+    await new Promise(resolve => setTimeout(resolve, pollDelayMs));
+  }
+
+  const stateLock = await loadPostToolFailureStateLock();
+  // The state directory can appear at or after the deadline: bound the lock wait by the remaining lifetime.
+  const workerLock = stateLock.acquireStateFileLockAtPathSync(
+    join(stateDir, '.legacy-tool-failure-cleanup-worker.lock'), 300, true, false,
+    undefined, undefined, Math.max(0, lifetimeDeadline - Date.now()),
+  );
+  if (!workerLock) return;
+
+  try {
+    // The lock can be granted at the deadline: release it without doing any work.
+    if (Date.now() >= lifetimeDeadline) return;
+    quietUntil = Date.now() + stabilizationMs;
+    let artifactSnapshot = legacyToolFailureArtifactSnapshot(omcRoot);
+    await waitForTestArtifactScanRelease('INITIAL');
+    olderPluginActive = hasActiveOlderPluginRoot(lifetimeDeadline);
+    nextPluginRootCheck = Date.now() + TOOL_FAILURE_PLUGIN_ROOT_RESCAN_MS;
+    while (true) {
+      const now = Date.now();
+      if (now >= lifetimeDeadline) return;
+      if (now >= nextPluginRootCheck) {
+        olderPluginActive = hasActiveOlderPluginRoot(lifetimeDeadline);
+        nextPluginRootCheck = now + TOOL_FAILURE_PLUGIN_ROOT_RESCAN_MS;
+      }
+      const currentArtifactSnapshot = legacyToolFailureArtifactSnapshot(omcRoot);
+      if (currentArtifactSnapshot !== artifactSnapshot) {
+        artifactSnapshot = currentArtifactSnapshot;
+        quietUntil = now + stabilizationMs;
+      }
+      if (currentArtifactSnapshot) {
+        const cleanupPending = await purgeLegacyToolFailureState(omcRoot, POST_TOOL_FAILURE_LOCK_WAIT_MS, false, lifetimeDeadline);
+        if (cleanupPending) quietUntil = Date.now() + stabilizationMs;
+      }
+      if (Date.now() >= quietUntil && !olderPluginActive) {
+        olderPluginActive = hasActiveOlderPluginRoot(lifetimeDeadline);
+        nextPluginRootCheck = Date.now() + TOOL_FAILURE_PLUGIN_ROOT_RESCAN_MS;
+        if (!olderPluginActive) {
+          await waitForTestArtifactScanRelease('FINAL');
+          const finalArtifactSnapshot = legacyToolFailureArtifactSnapshot(omcRoot);
+          if (finalArtifactSnapshot !== artifactSnapshot) {
+            artifactSnapshot = finalArtifactSnapshot;
+            quietUntil = Date.now() + stabilizationMs;
+            if (finalArtifactSnapshot) {
+              const cleanupPending = await purgeLegacyToolFailureState(omcRoot, POST_TOOL_FAILURE_LOCK_WAIT_MS, false, lifetimeDeadline);
+              if (cleanupPending) quietUntil = Date.now() + stabilizationMs;
+            }
+            continue;
+          }
+          break;
+        }
+      }
+      const remainingQuietMs = quietUntil - Date.now();
+      const pollDelayMs = remainingQuietMs > 0
+        ? Math.min(TOOL_FAILURE_CLEANUP_RESCAN_MS, remainingQuietMs)
+        : TOOL_FAILURE_CLEANUP_RESCAN_MS;
+      await new Promise(resolve => setTimeout(resolve, pollDelayMs));
+    }
+  } finally {
+    stateLock.releaseStateFileLockSync(workerLock);
+  }
+}
+
+async function purgeLegacyToolFailureState(omcRoot, waitMs = postToolFailureLockWaitMs(), deferOnTimeout = true, lifetimeDeadline = Infinity) {
+  const deadline = Math.min(Date.now() + waitMs, lifetimeDeadline);
+  const stateDir = join(omcRoot, 'state');
+  try {
+    if (!lstatSync(stateDir).isDirectory()) return false;
+  } catch {
+    return false;
+  }
+
+  const directories = [[stateDir, 'last-tool-error.json']];
+  const sessionsDir = join(stateDir, 'sessions');
+  let sessions;
+  try {
+    sessions = lstatSync(sessionsDir).isDirectory() ? readdirSync(sessionsDir) : [];
+  } catch {
+    sessions = [];
+  }
+
+  for (const sessionId of sessions) {
+    const sessionDir = join(sessionsDir, sessionId);
+    try {
+      if (lstatSync(sessionDir).isDirectory()) directories.push([sessionDir, 'last-tool-error-state.json']);
+    } catch {
+      // Skip inaccessible or replaced session directories.
+    }
+  }
+
+  const cleanupPending = (await Promise.all(
+    directories.map(([directory, filename]) => purgeToolFailureStateDirectory(directory, filename, deadline, lifetimeDeadline)),
+  )).some(Boolean);
+  if (cleanupPending && deferOnTimeout && !shouldStabilizeToolFailureCleanup()) {
+    deferLegacyToolFailureCleanup(omcRoot, POST_TOOL_FAILURE_DEFERRED_WAIT_MS);
+  }
+  return cleanupPending;
+}
+
+const WORKFLOW_SLOT_TOMBSTONE_TTL_MS = 24 * 60 * 60 * 1000;
+
+function isWorkflowSlotTombstonedForMode(omcRoot, mode, sessionId) {
+  const safeSessionId = typeof sessionId === 'string' && SAFE_SESSION_ID_PATTERN.test(sessionId) ? sessionId : '';
+  const ledgerPath = safeSessionId
+    ? join(omcRoot, 'state', 'sessions', safeSessionId, 'skill-active-state.json')
+    : join(omcRoot, 'state', 'skill-active-state.json');
+  const ledger = readJsonFile(ledgerPath);
+  const slot = ledger?.active_skills?.[mode];
+  if (!slot || typeof slot !== 'object') return false;
+  if (typeof slot.completed_at !== 'string' || !slot.completed_at) return false;
+  const completedAt = new Date(slot.completed_at).getTime();
+  if (!Number.isFinite(completedAt)) return true;
+  return Date.now() - completedAt < WORKFLOW_SLOT_TOMBSTONE_TTL_MS;
+}
+
+function shouldRestoreModeState(omcRoot, mode, state, sessionId) {
+  if (!state?.active) return false;
+  if (isWorkflowSlotTombstonedForMode(omcRoot, mode, sessionId)) return false;
+  return true;
+}
+
+function readLinuxBootId() {
+  try {
+    if (!existsSync(LINUX_BOOT_ID_PATH)) return undefined;
+    const bootId = readFileSync(LINUX_BOOT_ID_PATH, 'utf-8').trim();
+    return bootId || undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+function sessionStateDir(omcRoot, sessionId) {
+  return join(omcRoot, 'state', 'sessions', sessionId);
+}
+
+function sessionStartedMarkerPath(omcRoot, sessionId) {
+  return join(sessionStateDir(omcRoot, sessionId), SESSION_STARTED_MARKER_FILE);
+}
+
+function writeSessionStartedMarker(omcRoot, directory, sessionId) {
+  if (!sessionId || !SAFE_SESSION_ID_PATTERN.test(sessionId)) return;
+  try {
+    const dir = sessionStateDir(omcRoot, sessionId);
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(
+      sessionStartedMarkerPath(omcRoot, sessionId),
+      JSON.stringify({
+        session_id: sessionId,
+        started_at: new Date().toISOString(),
+        cwd: directory,
+        pid: process.pid,
+        // Do not persist process.ppid here: installed hooks run through
+        // scripts/run.cjs, whose short-lived process exits as soon as this
+        // hook returns. Treating that runner PID as owner liveness caused
+        // later SessionStart hooks to falsely clean live session state.
+        boot_id: readLinuxBootId(),
+      }, null, 2),
+      { encoding: 'utf-8', mode: 0o600 },
+    );
+  } catch {
+    // Best-effort only; SessionStart must remain non-blocking.
+  }
+}
+
+function removeSessionStartedMarker(omcRoot, sessionId) {
+  if (!sessionId || !SAFE_SESSION_ID_PATTERN.test(sessionId)) return;
+  try {
+    const markerPath = sessionStartedMarkerPath(omcRoot, sessionId);
+    if (existsSync(markerPath)) unlinkSync(markerPath);
+  } catch {
+    // Best-effort only.
+  }
+}
+
+/**
+ * Return true only when SessionStart has durable abandonment evidence.
+ *
+ * Claude Code SessionStart input currently provides session metadata such as
+ * session_id, transcript_path, cwd, source, model, and agent_type, but no
+ * stable owner process for the interactive session. In installed OMC hooks the
+ * immediate hook parent belongs to scripts/run.cjs and is intentionally
+ * short-lived, so same-boot PID liveness checks are not reliable here. SessionEnd
+ * remains the primary same-boot cleanup path; SessionStart only reconciles
+ * durable leftovers, such as markers from a previous OS boot.
+ */
+function hasDurableAbandonmentEvidence(marker) {
+  const storedBootId = typeof marker?.boot_id === 'string' ? marker.boot_id : undefined;
+  const currentBootId = readLinuxBootId();
+  if (storedBootId && currentBootId && storedBootId !== currentBootId) {
+    return true;
+  }
+
+  // Same-boot hard-kill cleanup requires a durable owner signal. Claude Code
+  // does not currently provide one to hooks, so keep active state rather than
+  // guessing from hook-runner process ancestry or transcript metadata.
+  return false;
+}
+
+function cleanupSessionModeState(omcRoot, sessionId) {
+  const sessionDir = sessionStateDir(omcRoot, sessionId);
+  for (const file of SESSION_END_MODE_STATE_FILES) {
+    try {
+      const filePath = join(sessionDir, file);
+      const state = readJsonFile(filePath);
+      if (state?.active === true || file === 'skill-active-state.json') {
+        unlinkSync(filePath);
+      }
+    } catch {
+      // Leave ambiguous/unreadable state untouched.
+    }
+  }
+}
+
+function cleanupMissionStateForSession(omcRoot, sessionId) {
+  const missionStatePath = join(omcRoot, 'state', 'mission-state.json');
+  const parsed = readJsonFile(missionStatePath);
+  if (!Array.isArray(parsed?.missions)) return;
+
+  const before = parsed.missions.length;
+  parsed.missions = parsed.missions.filter((mission) => {
+    if (mission?.source !== 'session') return true;
+    const missionId = typeof mission.id === 'string' ? mission.id : '';
+    return !missionId.includes(sessionId);
+  });
+  if (parsed.missions.length !== before) {
+    parsed.updatedAt = new Date().toISOString();
+    try {
+      writeFileSync(missionStatePath, JSON.stringify(parsed, null, 2));
+    } catch {
+      // Best-effort only.
+    }
+  }
+}
+
+function reconcileAbandonedSessionStarts(omcRoot, currentSessionId) {
+  const sessionsDir = join(omcRoot, 'state', 'sessions');
+  if (!existsSync(sessionsDir)) return;
+
+  let entries = [];
+  try {
+    entries = readdirSync(sessionsDir);
+  } catch {
+    return;
+  }
+
+  for (const sessionId of entries) {
+    if (!SAFE_SESSION_ID_PATTERN.test(sessionId) || sessionId === currentSessionId) continue;
+
+    const marker = readJsonFile(sessionStartedMarkerPath(omcRoot, sessionId));
+    if (!marker || marker.session_id !== sessionId) continue;
+
+    if (existsSync(join(omcRoot, 'sessions', `${sessionId}.json`))) {
+      removeSessionStartedMarker(omcRoot, sessionId);
+      continue;
+    }
+
+    if (!hasDurableAbandonmentEvidence(marker)) continue;
+
+    cleanupSessionModeState(omcRoot, sessionId);
+    cleanupMissionStateForSession(omcRoot, sessionId);
+    removeSessionStartedMarker(omcRoot, sessionId);
+
+    try {
+      const sessionDir = sessionStateDir(omcRoot, sessionId);
+      if (readdirSync(sessionDir).length === 0) {
+        rmSync(sessionDir, { recursive: false, force: true });
+      }
+    } catch {
+      // Leave non-empty/unreadable directories untouched.
+    }
+  }
+}
+
+function getRuntimeBaseDir() {
+  return process.env.CLAUDE_PLUGIN_ROOT || join(__dirname, '..');
+}
+
+async function loadProjectMemoryModules() {
+  try {
+    const runtimeBase = getRuntimeBaseDir();
+    const [
+      projectMemoryStorage,
+      projectMemoryDetector,
+      projectMemoryFormatter,
+      rulesFinder,
+    ] = await Promise.all([
+      import(pathToFileURL(join(runtimeBase, 'dist', 'hooks', 'project-memory', 'storage.js')).href),
+      import(pathToFileURL(join(runtimeBase, 'dist', 'hooks', 'project-memory', 'detector.js')).href),
+      import(pathToFileURL(join(runtimeBase, 'dist', 'hooks', 'project-memory', 'formatter.js')).href),
+      import(pathToFileURL(join(runtimeBase, 'dist', 'hooks', 'rules-injector', 'finder.js')).href),
+    ]);
+
+    return {
+      loadProjectMemory: projectMemoryStorage.loadProjectMemory,
+      detectProjectEnvironment: projectMemoryDetector.detectProjectEnvironment,
+      formatContextSummary: projectMemoryFormatter.formatContextSummary,
+      findProjectRoot: rulesFinder.findProjectRoot,
+    };
+  } catch {
+    return null;
+  }
+}
+
+
+function dispatchSessionStartNotificationInBackground(pluginRoot, payload) {
+  if (!pluginRoot || process.env.OMC_NOTIFY === '0') return;
+
+  let serializedPayload;
+  try {
+    serializedPayload = JSON.stringify(payload);
+  } catch {
+    return;
+  }
+
+  const notificationsModuleUrl = pathToFileURL(join(pluginRoot, 'dist', 'notifications', 'index.js')).href;
+  const childSource = `import(${JSON.stringify(notificationsModuleUrl)})\n`
+    + `  .then(({ notify }) => notify('session-start', ${serializedPayload}))\n`
+    + `  .catch(() => {});`;
+
+  try {
+    const child = spawn(process.execPath, ['--input-type=module', '-e', childSource], {
+      detached: true,
+      stdio: 'ignore',
+      windowsHide: true,
+      env: {
+        ...process.env,
+        OMC_HOOK_BACKGROUND_CHILD: '1',
+      },
+    });
+    child.unref();
+  } catch {
+    // Notification dispatch is best-effort and must never affect hook output.
+  }
+}
+
+function reconcileSessionEndJobsInBackground(pluginRoot, directory) {
+  const workerModuleUrl = pathToFileURL(join(pluginRoot, 'dist', 'hooks', 'session-end', 'worker.js')).href;
+  const childSource = `import(${JSON.stringify(workerModuleUrl)})\n`
+    + `  .then(({ reconcileSessionEndJobs }) => reconcileSessionEndJobs?.(${JSON.stringify(directory)}))\n`
+    + `  .catch(() => {});`;
+
+  try {
+    const child = spawn(process.execPath, ['--input-type=module', '-e', childSource], {
+      detached: true,
+      stdio: 'ignore',
+      windowsHide: true,
+      env: { ...process.env, OMC_HOOK_BACKGROUND_CHILD: '1' },
+    });
+    child.unref();
+  } catch {
+    // Reconciliation is best-effort and must not delay SessionStart.
+  }
+}
+
+function hasProjectMemoryContent(memory) {
+  return Boolean(
+    memory &&
+    (
+      memory.userDirectives?.length ||
+      memory.customNotes?.length ||
+      memory.hotPaths?.length ||
+      memory.techStack?.languages?.length ||
+      memory.techStack?.frameworks?.length ||
+      memory.build?.buildCommand ||
+      memory.build?.testCommand
+    )
+  );
+}
+
+async function resolveProjectMemorySummary(directory, projectMemoryModules) {
+  const {
+    detectProjectEnvironment,
+    findProjectRoot,
+    formatContextSummary,
+    loadProjectMemory,
+  } = projectMemoryModules;
+
+  const projectRoot = findProjectRoot?.(directory);
+  if (!projectRoot) {
+    return '';
+  }
+
+  // project-memory-session.mjs owns rescans and saves; a second writer here raced it and dropped hotPaths.
+  let memory = await loadProjectMemory?.(projectRoot);
+  if (!memory && detectProjectEnvironment) {
+    memory = await detectProjectEnvironment(projectRoot);
+  }
+
+  if (!hasProjectMemoryContent(memory)) {
+    return '';
+  }
+
+  return formatContextSummary(memory)?.trim() || '';
+}
+
+// Semantic version comparison (for cache cleanup sorting and update checks)
+function parseSemver(version) {
+  if (typeof version !== 'string') return null;
+  const match = version.trim().match(/^v?(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-([0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*))?(?:\+[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?$/);
+  if (!match) return null;
+  return {
+    core: match.slice(1, 4).map(Number),
+    prerelease: match[4]?.split('.') ?? [],
+  };
+}
+
+function semverCompare(a, b) {
+  const pa = parseSemver(a);
+  const pb = parseSemver(b);
+  if (!pa || !pb) return 0;
+  for (let i = 0; i < 3; i++) {
+    if (pa.core[i] !== pb.core[i]) return pa.core[i] - pb.core[i];
+  }
+  if (pa.prerelease.length === 0 || pb.prerelease.length === 0) {
+    return pb.prerelease.length - pa.prerelease.length;
+  }
+  for (let i = 0; i < Math.max(pa.prerelease.length, pb.prerelease.length); i++) {
+    const aPart = pa.prerelease[i];
+    const bPart = pb.prerelease[i];
+    if (aPart === undefined) return -1;
+    if (bPart === undefined) return 1;
+    if (aPart === bPart) continue;
+    const aNumeric = /^\d+$/.test(aPart);
+    const bNumeric = /^\d+$/.test(bPart);
+    if (aNumeric && bNumeric) return Number(aPart) - Number(bPart);
+    if (aNumeric !== bNumeric) return aNumeric ? -1 : 1;
+    return aPart.localeCompare(bPart);
+  }
+  return 0;
+}
+
+const DEFAULT_SESSION_START_CONTEXT_BUDGET = 6000;
+
+// Aggregate character budget shared by everything SessionStart injects.
+// Override with OMC_SESSION_START_CONTEXT_BUDGET (positive integer). Any other
+// value falls back to the default so a bad setting can never blank the context.
+function resolveSessionStartContextBudget() {
+  const raw = (process.env.OMC_SESSION_START_CONTEXT_BUDGET || '').trim();
+  if (!raw) return DEFAULT_SESSION_START_CONTEXT_BUDGET;
+  const parsed = Number(raw);
+  return Number.isSafeInteger(parsed) && parsed > 0 ? parsed : DEFAULT_SESSION_START_CONTEXT_BUDGET;
+}
+
+function sessionStartOmissionNotice(budget) {
+  return `[Additional SessionStart context omitted to preserve the ${budget}-character aggregate budget.]`;
+}
+
+const SESSION_STARTED_MARKER_FILE = 'session-started.json';
+const SAFE_SESSION_ID_PATTERN = /^[a-zA-Z0-9][a-zA-Z0-9_-]{0,255}$/;
+const LINUX_BOOT_ID_PATH = '/proc/sys/kernel/random/boot_id';
+const SESSION_END_MODE_STATE_FILES = [
+  'autopilot-state.json',
+  'autoresearch-state.json',
+  'team-state.json',
+  'ralph-state.json',
+  'ultrawork-state.json',
+  'ultraqa-state.json',
+  'ralplan-state.json',
+  'deep-interview-state.json',
+  'self-improve-state.json',
+  'skill-active-state.json',
+];
+
+import { MODEL_ROUTING_OVERRIDE_MESSAGE } from './lib/model-routing-override-message.mjs';
+export { MODEL_ROUTING_OVERRIDE_MESSAGE };
+
+/**
+ * Validate that a candidate cwd is a real OMC workspace anchor.
+ * Returns the candidate unchanged if it is non-empty AND contains a
+ * `.omc-workspace` marker OR a `.git` directory.
+ * Otherwise emits a one-line warning to stderr and returns null,
+ * signalling the caller to skip all state mutations.
+ */
+function validateCwd(candidate) {
+  if (!candidate || typeof candidate !== 'string') {
+    process.stderr.write(
+      `[OMC] session-start: refusing to use cwd '${candidate}' as workspace anchor (no .omc-workspace or .git marker)\n`
+    );
+    return null;
+  }
+  // cwd is commonly a subdirectory of the repo/workspace root, so walk up
+  // looking for a `.omc-workspace` marker or `.git` dir. Stop before scanning
+  // $HOME (or above) so a stray marker/repo in $HOME cannot validate an
+  // unrelated directory. Returns the original candidate so downstream root
+  // resolution (getOmcRoot/resolveOmcStateRoot) can anchor it.
+  let home = null;
+  try { home = homedir(); } catch { home = null; }
+  let cursor = candidate;
+  while (true) {
+    if (home && cursor === home) break;
+    if (existsSync(join(cursor, '.omc-workspace')) || existsSync(join(cursor, '.git'))) {
+      return candidate;
+    }
+    const parent = dirname(cursor);
+    if (parent === cursor) break;
+    cursor = parent;
+  }
+  process.stderr.write(
+    `[OMC] session-start: refusing to use cwd '${candidate}' as workspace anchor (no .omc-workspace or .git marker)\n`
+  );
+  return null;
+}
+
+function isTruthyProviderFlag(value) {
+  return value === '1' || value === 'true';
+}
+
+function getSessionModelId() {
+  return process.env.CLAUDE_MODEL || process.env.ANTHROPIC_MODEL || '';
+}
+
+function isBedrockSession() {
+  if (isTruthyProviderFlag(process.env.CLAUDE_CODE_USE_BEDROCK)) return true;
+  const modelId = getSessionModelId();
+  return Boolean(
+    modelId && (
+      /^((us|eu|ap|global)\.anthropic\.|anthropic\.claude)/i.test(modelId) ||
+      (
+        /^arn:aws(-[^:]+)?:bedrock:/i.test(modelId) &&
+        /:(inference-profile|application-inference-profile)\//i.test(modelId) &&
+        modelId.toLowerCase().includes('claude')
+      )
+    )
+  );
+}
+
+function isVertexSession() {
+  if (isTruthyProviderFlag(process.env.CLAUDE_CODE_USE_VERTEX)) return true;
+  const modelId = getSessionModelId();
+  return Boolean(modelId && modelId.toLowerCase().startsWith('vertex_ai/'));
+}
+
+function readRoutingForceInheritFromConfig(directory) {
+  const configPaths = [
+    join(configDir, '.omc-config.json'),
+    join(directory, '.omc', 'config.json'),
+  ];
+
+  for (const configPath of configPaths) {
+    const config = readJsonFile(configPath);
+    if (config?.routing?.forceInherit === true) return true;
+  }
+
+  return false;
+}
+
+function shouldEmitModelRoutingOverride(directory) {
+  if (process.env.OMC_ROUTING_FORCE_INHERIT === 'true') return true;
+  if (process.env.OMC_ROUTING_FORCE_INHERIT === 'false') return false;
+  if (readRoutingForceInheritFromConfig(directory)) return true;
+
+  if (isBedrockSession() || isVertexSession()) return true;
+
+  const modelId = getSessionModelId();
+  if (modelId && !modelId.toLowerCase().includes('claude')) return true;
+
+  const baseUrl = process.env.ANTHROPIC_BASE_URL || '';
+  if (baseUrl && !baseUrl.includes('anthropic.com')) return true;
+
+  return false;
+}
+
+
+function compactBudgetedText(text, maxChars) {
+  const notice = '\n...[truncated to preserve SessionStart context budget]';
+  if (!text || text.length <= maxChars) return text || '';
+  if (maxChars <= notice.length) return notice.slice(0, Math.max(0, maxChars));
+  return `${text.slice(0, maxChars - notice.length).trimEnd()}${notice}`;
+}
+
+function formatUpdateNoticeForUser(updateInfo, options = {}) {
+  const latestVersion = updateInfo?.latestVersion || 'latest';
+  const currentVersion = updateInfo?.currentVersion || 'unknown';
+  const action = updateInfo?.source === 'marketplace'
+    ? 'To update the plugin channel, run: /plugin marketplace update omc && /omc-setup'
+    : (options.autoUpgradePrompt === false
+      ? 'To update later, run: omc update'
+      : 'Run /update to upgrade now, or use /plugin install oh-my-claudecode');
+  return `[OMC UPDATE AVAILABLE] oh-my-claudecode v${latestVersion} is available (current: v${currentVersion}). ${action}`;
+}
+
+function buildSessionStartAdditionalContext(messages) {
+  if (!Array.isArray(messages) || messages.length === 0) return '';
+
+  const sections = messages.map((message, index) => ({ index, message }));
+  const priorityOrder = [
+    /\[MODEL ROUTING OVERRIDE/,
+    /\[AUTOPILOT MODE RESTORED\]/,
+    /\[RALPH LOOP RESTORED\]/,
+    /\[PROJECT MEMORY\]/,
+    /\[NOTEPAD - Priority Context\]/,
+    /\[PENDING TASKS DETECTED\]/,
+  ];
+  const prioritized = [];
+  const remaining = [];
+  for (const section of sections) {
+    const score = priorityOrder.findIndex((pattern) => pattern.test(section.message));
+    if (score !== -1) prioritized.push({ ...section, score });
+    else remaining.push({ ...section, score: priorityOrder.length + section.index });
+  }
+  const ordered = [...prioritized.sort((a, b) => a.score - b.score || a.index - b.index), ...remaining]
+    .map((entry) => entry.message);
+
+  const budget = resolveSessionStartContextBudget();
+  let used = 0;
+  const selected = [];
+  for (const message of ordered) {
+    const separator = selected.length > 0 ? 1 : 0;
+    if (used + separator + message.length > budget) {
+      const remainingBudget = budget - used - separator;
+      if (remainingBudget > 0) {
+        selected.push(
+          remainingBudget > 120
+            ? compactBudgetedText(message, remainingBudget)
+            : compactBudgetedText(sessionStartOmissionNotice(budget), remainingBudget),
+        );
+      }
+      break;
+    }
+    selected.push(message);
+    used += separator + message.length;
+  }
+
+  return selected.join('\n');
+}
+
+// Extract OMC version from CLAUDE.md content
+function extractOmcVersion(content) {
+  const match = content.match(/<!-- OMC:VERSION:(\d+\.\d+\.\d+[^\s]*?) -->/);
+  return match ? match[1] : null;
+}
+
+function getPluginCacheBase() {
+  return join(configDir, 'plugins', 'cache', 'omc', 'oh-my-claudecode');
+}
+
+function isPathInsideOrEqual(parent, child) {
+  const relativePath = relative(resolve(parent), resolve(child));
+  return relativePath === '' || (relativePath && !relativePath.startsWith('..') && !isAbsolute(relativePath));
+}
+
+function isManagedPluginCacheRoot(pluginRoot) {
+  const normalizedRoot = pluginRoot.replace(/[\\/]+$/, '');
+  const cacheBase = getPluginCacheBase();
+  if (isPathInsideOrEqual(cacheBase, normalizedRoot)) return true;
+
+  // A stale root can come from an older config-dir location; the canonical
+  // cache path shape still proves it is an OMC managed cache version.
+  const unixRoot = normalizedRoot.replace(/\\/g, '/');
+  return /\/plugins\/cache\/omc\/oh-my-claudecode\/\d+\.\d+\.\d+(?:-[A-Za-z0-9.-]+)?$/.test(unixRoot);
+}
+
+function getLatestPluginCacheVersion() {
+  try {
+    const cacheBase = getPluginCacheBase();
+    if (!existsSync(cacheBase)) return null;
+    const versions = readdirSync(cacheBase)
+      .filter(v => /^\d+\.\d+\.\d+(?:-[A-Za-z0-9.-]+)?$/.test(v))
+      .filter(v => readJsonFile(join(cacheBase, v, 'package.json'))?.version === v)
+      .sort(semverCompare)
+      .reverse();
+    return versions[0] || null;
+  } catch { return null; }
+}
+
+function getMarketplaceCloneVersion() {
+  try {
+    const marketplaceRoot = join(configDir, 'plugins', 'marketplaces', 'omc');
+    if (!existsSync(marketplaceRoot)) return null;
+
+    const marketplaceManifest = readJsonFile(join(marketplaceRoot, '.claude-plugin', 'marketplace.json'));
+    const pluginEntry = Array.isArray(marketplaceManifest?.plugins)
+      ? marketplaceManifest.plugins.find(plugin => plugin?.name === 'oh-my-claudecode')
+      : null;
+    const version = typeof pluginEntry?.version === 'string' ? pluginEntry.version.trim() : '';
+    return parseSemver(version) ? version : null;
+  } catch { return null; }
+}
+
+function readUpdateCheckCache() {
+  try {
+    const cached = JSON.parse(readFileSync(getUpdateCheckCachePath(), 'utf-8'));
+    return cached && typeof cached === 'object' && !Array.isArray(cached) ? cached : {};
+  } catch { return {}; }
+}
+
+// Merge into the existing cache so unrelated fields (e.g. the Claude Code
+// version tracked below) survive an OMC-only refresh.
+function mergeUpdateCheckCache(fields) {
+  const cachePath = getUpdateCheckCachePath();
+  const cacheDir = dirname(cachePath);
+  const lockPath = `${cachePath}.lock`;
+  const deadline = Date.now() + 1000;
+  let locked = false;
+
+  try {
+    mkdirSync(cacheDir, { recursive: true });
+    while (!locked && Date.now() < deadline) {
+      try {
+        mkdirSync(lockPath);
+        locked = true;
+      } catch {
+        // mkdir is exclusive across processes. The critical section is only
+        // synchronous filesystem work, so a short bounded wait is sufficient.
+        try {
+          if (Date.now() - statSync(lockPath).mtimeMs > 10_000) {
+            rmSync(lockPath, { recursive: true, force: true });
+          }
+        } catch {}
+        try { Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 10); } catch {}
+      }
+    }
+    if (!locked) return;
+
+    const temporaryPath = `${cachePath}.${process.pid}.${Date.now()}.tmp`;
+    writeFileSync(temporaryPath, JSON.stringify({ ...readUpdateCheckCache(), ...fields }));
+    try {
+      renameSync(temporaryPath, cachePath);
+    } catch {
+      // Windows cannot replace an existing file with rename. The lock keeps
+      // other writers out; readers already tolerate a missing cache briefly.
+      try { unlinkSync(cachePath); } catch {}
+      renameSync(temporaryPath, cachePath);
+    }
+  } catch {
+    // Cache refresh is best-effort and must never affect session startup.
+  } finally {
+    if (locked) {
+      try { rmSync(lockPath, { recursive: true, force: true }); } catch {}
+    }
+  }
+}
+
+function writeUpdateCheckCache(latestVersion, currentVersion, updateAvailable, source) {
+  mergeUpdateCheckCache({
+    timestamp: Date.now(),
+    latestVersion,
+    currentVersion,
+    updateAvailable,
+    source,
+  });
+}
+
+function getPluginUpdateChannelVersion() {
+  const pluginRoot = process.env.CLAUDE_PLUGIN_ROOT;
+  if (!pluginRoot || !isManagedPluginCacheRoot(pluginRoot)) return { managed: false, version: null };
+  return { managed: true, version: getMarketplaceCloneVersion() };
+}
+
+// Get plugin version from CLAUDE_PLUGIN_ROOT
+function getPluginVersion() {
+  try {
+    const pluginRoot = process.env.CLAUDE_PLUGIN_ROOT;
+    if (!pluginRoot) return null;
+    const pkg = readJsonFile(join(pluginRoot, 'package.json'));
+    const latestCacheVersion = isManagedPluginCacheRoot(pluginRoot) ? getLatestPluginCacheVersion() : null;
+    if (latestCacheVersion && (!pkg?.version || semverCompare(latestCacheVersion, pkg.version) > 0)) {
+      return latestCacheVersion;
+    }
+    return pkg?.version || null;
+  } catch { return null; }
+}
+
+// Get npm global package version
+function getNpmVersion() {
+  try {
+    const versionFile = join(configDir, '.omc-version.json');
+    const data = readJsonFile(versionFile);
+    return data?.version || null;
+  } catch { return null; }
+}
+
+// Get CLAUDE.md version
+function getClaudeMdVersion() {
+  try {
+    // claudeMdEnabled=false: the user owns CLAUDE.md, so its OMC version is never drift.
+    if (readJsonFile(join(configDir, '.omc-config.json'))?.claudeMdEnabled === false) return null;
+    const claudeMdPath = join(configDir, 'CLAUDE.md');
+    if (!existsSync(claudeMdPath)) return null;  // File doesn't exist
+    const content = readFileSync(claudeMdPath, 'utf-8');
+    const version = extractOmcVersion(content);
+    return version || 'unknown';  // File exists but no marker = 'unknown'
+  } catch { return null; }
+}
+
+// Detect version drift between components
+function detectVersionDrift() {
+  const pluginVersion = getPluginVersion();
+  const npmVersion = getNpmVersion();
+  const claudeMdVersion = getClaudeMdVersion();
+  const marketplaceChannel = getPluginUpdateChannelVersion();
+
+  // Need at least plugin version to detect drift
+  if (!pluginVersion) return null;
+
+  const drift = [];
+
+  // Managed plugin installs are intentionally governed by the marketplace clone,
+  // so a newer npm CLI/cache version is not proof that the plugin channel can act.
+  if (!marketplaceChannel.managed && npmVersion && npmVersion !== pluginVersion) {
+    drift.push({ component: 'npm package (omc CLI)', current: npmVersion, expected: pluginVersion });
+  }
+
+  if (claudeMdVersion === 'unknown') {
+    drift.push({
+      component: 'CLAUDE.md instructions',
+      current: 'unknown (needs migration)',
+      expected: pluginVersion
+    });
+  } else if (claudeMdVersion && claudeMdVersion !== pluginVersion) {
+    drift.push({
+      component: 'CLAUDE.md instructions',
+      current: claudeMdVersion,
+      expected: pluginVersion
+    });
+  }
+
+  if (drift.length === 0) return null;
+
+  return {
+    pluginVersion,
+    npmVersion,
+    claudeMdVersion,
+    drift,
+    source: marketplaceChannel.managed ? 'marketplace' : 'npm',
+  };
+}
+
+// Check if we should notify (once per unique drift combination)
+function shouldNotifyDrift(driftInfo) {
+  const stateFile = join(configDir, '.omc', 'update-state.json');
+  const driftKey = `plugin:${driftInfo.pluginVersion}-npm:${driftInfo.npmVersion}-claude:${driftInfo.claudeMdVersion}`;
+
+  try {
+    if (existsSync(stateFile)) {
+      const state = JSON.parse(readFileSync(stateFile, 'utf-8'));
+      if (state.lastNotifiedDrift === driftKey) return false;
+    }
+  } catch {}
+
+  // Save new drift state
+  try {
+    const dir = join(configDir, '.omc');
+    if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
+    writeFileSync(stateFile, JSON.stringify({
+      lastNotifiedDrift: driftKey,
+      lastNotifiedAt: new Date().toISOString()
+    }));
+  } catch {}
+
+  return true;
+}
+
+// Check the actionable update channel for the active install (with 24h npm cache).
+// Plugin marketplace installs update from the marketplace clone (usually origin/main),
+// not from the npm package. Keep those channels separate so HUD/session notices do
+// not advertise npm-only releases that `/plugin marketplace update` cannot install.
+// Registry base override. Only honoured when set; tests point it at a closed
+// port to exercise the offline/timeout paths without touching the network.
+function registryLatestUrl(packageName) {
+  const base = process.env.OMC_UPDATE_REGISTRY_BASE;
+  const root = base ? base.replace(/\/+$/, '') : 'https://registry.npmjs.org';
+  return `${root}/${packageName}/latest`;
+}
+
+async function checkNpmUpdate(currentVersion) {
+  const marketplaceChannel = getPluginUpdateChannelVersion();
+  if (marketplaceChannel.managed) {
+    const marketplaceVersion = marketplaceChannel.version;
+    if (!marketplaceVersion) {
+      writeUpdateCheckCache(currentVersion, currentVersion, false, 'marketplace-unavailable');
+      return null;
+    }
+    const updateAvailable = semverCompare(marketplaceVersion, currentVersion) > 0;
+    writeUpdateCheckCache(marketplaceVersion, currentVersion, updateAvailable, 'marketplace');
+    return updateAvailable ? { currentVersion, latestVersion: marketplaceVersion, source: 'marketplace' } : null;
+  }
+
+  const cacheFile = getUpdateCheckCachePath();
+  const CACHE_DURATION = 24 * 60 * 60 * 1000;
+  const now = Date.now();
+
+  // Check cache
+  try {
+    if (existsSync(cacheFile)) {
+      const cached = JSON.parse(readFileSync(cacheFile, 'utf-8'));
+      if (cached.timestamp && (now - cached.timestamp) < CACHE_DURATION && (!cached.source || cached.source === 'npm')) {
+        return (cached.updateAvailable && semverCompare(cached.latestVersion, currentVersion) > 0)
+          ? { currentVersion, latestVersion: cached.latestVersion, source: 'npm' }
+          : null;
+      }
+    }
+  } catch {}
+
+  // Fetch from npm registry with 2s timeout
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), 2000);
+  try {
+    const response = await fetch(registryLatestUrl('oh-my-claude-sisyphus'), {
+      signal: controller.signal
+    });
+    if (!response.ok) return null;
+
+    const data = await response.json();
+    const latestVersion = data.version;
+    const updateAvailable = semverCompare(latestVersion, currentVersion) > 0;
+
+    writeUpdateCheckCache(latestVersion, currentVersion, updateAvailable, 'npm');
+
+    return updateAvailable ? { currentVersion, latestVersion, source: 'npm' } : null;
+  } catch { return null; } finally { clearTimeout(timeoutId); }
+}
+
+// Refresh the cached latest Claude Code version (same 24h window and 2s timeout
+// as the OMC check). Stored alongside the OMC fields so the HUD reads one file;
+// the field is simply absent on caches written before this check existed.
+async function checkClaudeCodeUpdate() {
+  const CACHE_DURATION = 24 * 60 * 60 * 1000;
+  const cached = readUpdateCheckCache();
+  if (cached.claudeCodeCheckedAt && (Date.now() - cached.claudeCodeCheckedAt) < CACHE_DURATION) return;
+
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), 2000);
+  try {
+    const response = await fetch(registryLatestUrl('@anthropic-ai/claude-code'), {
+      signal: controller.signal
+    });
+    if (!response.ok) return;
+
+    const data = await response.json();
+    if (!data?.version) return;
+    mergeUpdateCheckCache({ claudeCodeLatestVersion: data.version, claudeCodeCheckedAt: Date.now() });
+  } catch {} finally { clearTimeout(timeoutId); }
+}
+
+// Refresh update caches and return a user-facing OMC update notice, if any.
+// Independent of the workspace, so it also runs for non-workspace cwds (#3942).
+async function runUpdateChecks() {
+  // Concurrent: each fetch aborts after 2s, and SessionStart hooks have a 5s
+  // budget, so running them in sequence would risk a cold-cache timeout.
+  const [notice] = await Promise.all([
+    (async () => {
+      try {
+        const pluginVersion = getPluginVersion();
+        if (!pluginVersion) return null;
+        const updateInfo = await checkNpmUpdate(pluginVersion);
+        if (!updateInfo) return null;
+        const omcConfig = readJsonFile(join(configDir, '.omc-config.json')) || {};
+        return formatUpdateNoticeForUser(updateInfo, { autoUpgradePrompt: omcConfig.autoUpgradePrompt !== false });
+      } catch { return null; }
+    })(),
+    checkClaudeCodeUpdate().catch(() => {}),
+  ]);
+  return notice;
+}
+
+// Refresh the update caches in a detached child so a slow or unreachable
+// registry cannot delay the SessionStart response (the hook budget is 5s).
+function refreshUpdateCacheInBackground() {
+  if (process.env.OMC_HOOK_BACKGROUND_CHILD === '1') return;
+  try {
+    const child = spawn(process.execPath, [__filename, REFRESH_UPDATE_CACHE_FLAG], {
+      detached: true,
+      stdio: 'ignore',
+      windowsHide: true,
+      env: { ...process.env, OMC_HOOK_BACKGROUND_CHILD: '1' },
+    });
+    // spawn reports most failures (EMFILE, EPERM, ENOMEM) via an async 'error'
+    // event, not a throw; swallow it so the hook never exits non-zero after answering.
+    child.on('error', () => {});
+    child.unref();
+  } catch {
+    // Cache refresh is best-effort and must never affect hook output.
+  }
+}
+
+// Detached child entrypoint: refresh the caches, then exit. The deadline keeps
+// the child from lingering if a fetch never settles.
+async function refreshUpdateCacheAndExit() {
+  const deadline = setTimeout(() => process.exit(0), REFRESH_UPDATE_CACHE_DEADLINE_MS);
+  deadline.unref();
+  try { await runUpdateChecks(); } catch {}
+  clearTimeout(deadline);
+  process.exit(0);
+}
+
+// Check if HUD is properly installed (with retry for race conditions)
+async function checkHudInstallation(retryCount = 0) {
+  const hudDir = join(configDir, 'hud');
+  // Support current and legacy script names
+  const hudScriptOmc = join(hudDir, 'omc-hud.mjs');
+  const hudScriptLegacy = join(hudDir, 'omc-hud.js');
+  const settingsFile = join(configDir, 'settings.json');
+
+  const MAX_RETRIES = 2;
+  const RETRY_DELAY_MS = 100;
+
+  // Check if HUD script exists (either naming convention)
+  const hudScriptExists = existsSync(hudScriptOmc) || existsSync(hudScriptLegacy);
+  if (!hudScriptExists) {
+    return { installed: false, reason: 'HUD script missing' };
+  }
+
+  // Check if statusLine is configured (with retry for race conditions)
+  try {
+    if (existsSync(settingsFile)) {
+      const content = readFileSync(settingsFile, 'utf-8');
+      // Handle empty or whitespace-only content (race condition during write)
+      if (!content || !content.trim()) {
+        if (retryCount < MAX_RETRIES) {
+          // Sleep and retry (non-blocking)
+          await new Promise(resolve => setTimeout(resolve, RETRY_DELAY_MS));
+          return checkHudInstallation(retryCount + 1);
+        }
+        return { installed: false, reason: 'settings.json empty (possible race condition)' };
+      }
+      const settings = JSON.parse(content);
+      if (!settings.statusLine) {
+        // Retry once if statusLine not found (could be mid-write)
+        if (retryCount < MAX_RETRIES) {
+          await new Promise(resolve => setTimeout(resolve, RETRY_DELAY_MS));
+          return checkHudInstallation(retryCount + 1);
+        }
+        return { installed: false, reason: 'statusLine not configured' };
+      }
+
+      const statusLineCommand = typeof settings.statusLine === 'string'
+        ? settings.statusLine
+        : (typeof settings.statusLine === 'object' && settings.statusLine && typeof settings.statusLine.command === 'string'
+          ? settings.statusLine.command
+          : null);
+
+      // If OMC HUD wrapper is configured, ensure at least one plugin cache version is built.
+      if (statusLineCommand?.includes('omc-hud')) {
+        const pluginCacheBase = join(configDir, 'plugins', 'cache', 'omc', 'oh-my-claudecode');
+        if (existsSync(pluginCacheBase)) {
+          const versions = readdirSync(pluginCacheBase)
+            .filter(version => !version.startsWith('.'))
+            .sort((a, b) => a.localeCompare(b, undefined, { numeric: true }))
+            .reverse();
+          if (versions.length > 0) {
+            const hasBuiltHud = versions.some(version =>
+              existsSync(join(pluginCacheBase, version, 'dist', 'hud', 'index.js'))
+            );
+            if (!hasBuiltHud) {
+              const latestVersionDir = join(pluginCacheBase, versions[0]);
+              return {
+                installed: false,
+                reason: `HUD plugin cache is not built. Run: cd "${latestVersionDir}" && npm install && npm run build`,
+              };
+            }
+          }
+        }
+      }
+    } else {
+      return { installed: false, reason: 'settings.json missing' };
+    }
+  } catch (err) {
+    // JSON parse error - could be mid-write, retry
+    if (retryCount < MAX_RETRIES) {
+      await new Promise(resolve => setTimeout(resolve, RETRY_DELAY_MS));
+      return checkHudInstallation(retryCount + 1);
+    }
+    console.error('HUD check error:', err.message);
+    return { installed: false, reason: 'Could not read settings' };
+  }
+
+  return { installed: true };
+}
+
+// Main
+async function main() {
+  const sessionStartDeadline = Date.now() + SESSION_START_HOOK_TIMEOUT_MS;
+  try {
+    const input = await readStdin();
+    let data = {};
+    try { data = JSON.parse(input); } catch {}
+
+    const rawDirectory = data.cwd || data.directory || process.cwd();
+    const directory = validateCwd(rawDirectory);
+    if (directory === null) {
+      // No workspace here, but the registry update checks do not need one, so
+      // the HUD update cache still refreshes for users who launch Claude Code
+      // outside a repo. It runs detached: this path must answer immediately and
+      // must not touch workspace state. Only the home-scoped or configured
+      // non-git fallback can be touched here.
+      try {
+        const unscopedOmcRoot = process.env.OMC_STATE_DIR
+          ? resolve(process.env.OMC_STATE_DIR, 'non-git')
+          : join(homedir(), '.omc');
+        resolveSessionPluginOccupancy(sessionStartDeadline);
+        await purgeLegacyToolFailureState(unscopedOmcRoot);
+        deferToolFailureCleanupStabilization(unscopedOmcRoot);
+      } catch {
+        // Legacy-state cleanup is best-effort on the no-workspace fast path.
+      }
+      refreshUpdateCacheInBackground();
+      console.log(JSON.stringify({ continue: true }));
+      return;
+    }
+    const sessionId = data.session_id || data.sessionId || '';
+    const omcRoot = await resolveOmcStateRoot(directory);
+    await purgeLegacyToolFailureState(omcRoot);
+    deferToolFailureCleanupStabilization(omcRoot);
+    let messages = [];
+    const userMessages = [];
+    let pendingRestore = null;
+    let pendingRestoreMessage = null;
+
+    // Restore the newest PreCompact checkpoint after compaction (issue #3730).
+    // Only fires when Claude Code signals the session resumed from compaction
+    // (source === 'compact'); never on startup, resume, or clear.
+    if (data.source === 'compact' && sessionId) {
+      try {
+        const { preparePreCompactCheckpointRestore, claimPreCompactCheckpointRestore } = await import(
+          pathToFileURL(join(__dirname, 'lib', 'precompact-restore.mjs')).href
+        );
+        const prepared = preparePreCompactCheckpointRestore(omcRoot, sessionId);
+        if (prepared) {
+          pendingRestore = { ...prepared, preparePreCompactCheckpointRestore, claimPreCompactCheckpointRestore };
+          pendingRestoreMessage = `<session-restore>\n\n${prepared.text}\n\n</session-restore>\n\n---\n`;
+          messages.push(pendingRestoreMessage);
+        }
+      } catch {
+        // Restore is advisory: never break session start on a checkpoint error.
+      }
+    }
+
+    // Fire sibling-retrofit warning once per session (lifted off getOmcRoot hot path)
+    try {
+      const pluginRoot = process.env.CLAUDE_PLUGIN_ROOT;
+      if (pluginRoot) {
+        const { findWorkspaceRoot, warnSiblingRetrofit } = await import(
+          pathToFileURL(join(pluginRoot, 'dist', 'lib', 'worktree-paths.js')).href
+        );
+        const anchor = findWorkspaceRoot(directory);
+        if (anchor) warnSiblingRetrofit(anchor, sessionId || undefined);
+      }
+    } catch { /* non-fatal — dist unavailable or no workspace anchor */ }
+    const projectMemoryModules = await loadProjectMemoryModules();
+
+    // Issue #3995: single occupancy resolution per session start; assigned in
+    // the plugin-root branch below, consumed by the stale-cache GC scan below.
+    let occupancyResolution = null;
+    writeSessionStartedMarker(omcRoot, directory, sessionId);
+    if (process.env.CLAUDE_PLUGIN_ROOT) {
+      // Issue #3995: resolve plugin-cache occupancy ONCE per session start.
+      // The win32 batched identity host (the only PowerShell spawn on this
+      // path) runs a single time; its identities map feeds the owner publish
+      // below and the stale-cache GC scan further down. `includePids` covers
+      // the configured owner even before its own record exists.
+      occupancyResolution = resolveSessionPluginOccupancy(sessionStartDeadline);
+    }
+    reconcileAbandonedSessionStarts(omcRoot, sessionId);
+    reconcileSessionEndJobsInBackground(getRuntimeBaseDir(), directory);
+
+    // Check for version drift between components
+    const driftInfo = detectVersionDrift();
+    if (driftInfo && shouldNotifyDrift(driftInfo)) {
+      let driftMsg = `[OMC VERSION DRIFT DETECTED]\n\nPlugin version: ${driftInfo.pluginVersion}\n`;
+      for (const d of driftInfo.drift) {
+        driftMsg += `${d.component}: ${d.current} (expected ${d.expected})\n`;
+      }
+      driftMsg += driftInfo.source === 'marketplace'
+        ? `\nRun '/plugin marketplace update omc && /omc-setup' to sync plugin-managed components.`
+        : `\nRun 'omc update' to sync all components.`;
+
+      messages.push(`<session-restore>\n\n${driftMsg}\n\n</session-restore>\n\n---\n`);
+    }
+
+    // Check npm registry for available updates (with 24h cache)
+    const updateNotice = await runUpdateChecks();
+    if (updateNotice) userMessages.push(updateNotice);
+
+    // Warn if silentAutoUpdate is enabled but running in plugin mode (#1773)
+    if (process.env.CLAUDE_PLUGIN_ROOT) {
+      try {
+        const omcConfigPath = join(configDir, '.omc-config.json');
+        const omcConfig = readJsonFile(omcConfigPath);
+        if (omcConfig?.silentAutoUpdate) {
+          messages.push(`<session-restore>\n\n[OMC] silentAutoUpdate is enabled in .omc-config.json but has no effect in plugin mode.\nTo update, use: /plugin marketplace update omc && /omc-setup\nOr run manually: omc update\n\n</session-restore>\n\n---\n`);
+        }
+      } catch {}
+    }
+
+    // Check HUD installation (one-time setup guidance)
+    const hudCheck = await checkHudInstallation();
+    if (!hudCheck.installed) {
+      messages.push(`<system-reminder>
+[OMC] HUD not configured (${hudCheck.reason}). Run /hud setup then restart Claude Code.
+</system-reminder>`);
+    }
+
+    if (shouldEmitModelRoutingOverride(directory)) {
+      messages.push(MODEL_ROUTING_OVERRIDE_MESSAGE);
+    }
+
+    // Check for ralph loop state
+    // Session-scoped ONLY when session_id exists — no legacy fallback
+    let ralphState = null;
+    if (sessionId && /^[a-zA-Z0-9][a-zA-Z0-9_-]{0,255}$/.test(sessionId)) {
+      // Session-scoped ONLY — no legacy fallback
+      ralphState = readJsonFile(join(omcRoot, 'state', 'sessions', sessionId, 'ralph-state.json'));
+      // Validate session identity
+      if (ralphState && ralphState.session_id && ralphState.session_id !== sessionId) {
+        ralphState = null;
+      }
+    } else {
+      // No session_id — legacy behavior for backward compat
+      ralphState = readJsonFile(join(omcRoot, 'state', 'ralph-state.json'));
+      if (!ralphState) {
+        ralphState = readJsonFile(join(omcRoot, 'ralph-state.json'));
+      }
+    }
+    if (shouldRestoreModeState(omcRoot, 'ralph', ralphState, sessionId)) {
+      messages.push(`<session-restore>
+
+[RALPH LOOP RESTORED]
+
+You have an active ralph-loop session.
+Original task: ${ralphState.prompt || 'Task in progress'}
+Iteration: ${ralphState.iteration || 1}/${ralphState.max_iterations || 10}
+
+Treat this as prior-session context only. Prioritize the user's newest request, and resume the ralph loop only if the user explicitly asks to continue it.
+
+</session-restore>
+
+---
+`);
+    }
+
+    // Check for incomplete todos (project-local only, not global
+    // [$CLAUDE_CONFIG_DIR|~/.claude]/todos/)
+    // NOTE: We intentionally do NOT scan the global
+    // [$CLAUDE_CONFIG_DIR|~/.claude]/todos/ directory.
+    // That directory accumulates todo files from ALL past sessions across all
+    // projects, causing phantom task counts in fresh sessions (see issue #354).
+    const localTodoPaths = [
+      join(omcRoot, 'todos.json'),
+      join(directory, '.claude', 'todos.json')
+    ];
+    let incompleteCount = 0;
+    for (const todoFile of localTodoPaths) {
+      if (existsSync(todoFile)) {
+        try {
+          const data = readJsonFile(todoFile);
+          const todos = data?.todos || (Array.isArray(data) ? data : []);
+          incompleteCount += todos.filter(t => t.status !== 'completed' && t.status !== 'cancelled').length;
+        } catch {}
+      }
+    }
+
+    if (incompleteCount > 0) {
+      messages.push(`<session-restore>
+
+[PENDING TASKS DETECTED]
+
+You have ${incompleteCount} incomplete tasks from a previous session.
+Treat this as prior-session context only. Prioritize the user's newest request, and resume these tasks only if the user explicitly asks to continue them.
+
+</session-restore>
+
+---
+`);
+    }
+
+    if (projectMemoryModules) {
+      try {
+        const summary = await resolveProjectMemorySummary(directory, projectMemoryModules);
+        if (summary) {
+          messages.push(`<project-memory-context>
+
+[PROJECT MEMORY]
+
+${summary}
+
+</project-memory-context>
+
+---
+`);
+        }
+      } catch {
+        // Project memory is additive only; never break session start.
+      }
+    }
+
+    // Check for notepad Priority Context
+    const notepadPath = join(omcRoot, 'notepad.md');
+    if (existsSync(notepadPath)) {
+      try {
+        const notepadContent = readFileSync(notepadPath, 'utf-8');
+        const priorityMatch = notepadContent.match(/## Priority Context\n([\s\S]*?)(?=## |$)/);
+        if (priorityMatch && priorityMatch[1].trim()) {
+          const priorityContext = priorityMatch[1].trim();
+          // Only inject if there's actual content (not just the placeholder comment)
+          const cleanContent = priorityContext.replace(/<!--[\s\S]*?-->/g, '').trim();
+          if (cleanContent) {
+            messages.push(`<notepad-context>
+[NOTEPAD - Priority Context]
+${cleanContent}
+</notepad-context>`);
+          }
+        }
+      } catch (err) {
+        // Silently ignore notepad read errors
+      }
+    }
+
+    // Cleanup old plugin cache versions (keep latest 2, symlink the rest)
+    // Instead of deleting old versions, replace them with symlinks to the latest.
+    // This prevents "Cannot find module" errors for sessions started before a
+    // plugin update whose CLAUDE_PLUGIN_ROOT still points to the old version.
+    try {
+      const cacheBase = join(configDir, 'plugins', 'cache', 'omc', 'oh-my-claudecode');
+      // Issue #3995: reuse the occupancy resolution hoisted above the owner
+      // publish (same-process identities map, no second win32 host). The GC
+      // still re-scans the registry files for records published after that
+      // resolution, and conservatively keeps records whose pid has no
+      // precomputed identity.
+      const occupancy = readOccupiedPluginRoots(configDir, { identities: occupancyResolution?.identities ?? [] });
+      let versions = [];
+      // Newest entry that is a real directory. Symlink entries stay in
+      // `versions` so they can be re-pointed, but never serve as a link target:
+      // a dangling or downgrade symlink as the target would close a cycle.
+      let latest = null;
+      if (existsSync(cacheBase)) {
+        versions = readdirSync(cacheBase)
+          .filter(v => /^\d+\.\d+\.\d+(?:-[A-Za-z0-9.-]+)?$/.test(v))
+          .filter(v => {
+            const versionPath = join(cacheBase, v);
+            try {
+              if (lstatSync(versionPath).isSymbolicLink()) return true;
+            } catch {
+              return false;
+            }
+            return readJsonFile(join(versionPath, 'package.json'))?.version === v;
+          })
+          .sort(semverCompare)
+          .reverse();
+
+        latest = versions.find(v => {
+          try {
+            return !lstatSync(join(cacheBase, v)).isSymbolicLink();
+          } catch {
+            return false;
+          }
+        }) ?? null;
+
+        if (latest && versions.length > 2) {
+          const toSymlink = versions.slice(2).filter(v => v !== latest);
+          for (const version of toSymlink) {
+            try {
+              const versionPath = join(cacheBase, version);
+              const stat = lstatSync(versionPath);
+
+              const isWin = process.platform === 'win32';
+              const symlinkTarget = isWin ? join(cacheBase, latest) : latest;
+
+              if (stat.isSymbolicLink()) {
+                // Already a symlink — update only if pointing to wrong target.
+                // Use atomic temp-symlink + rename to avoid a window where
+                // the path doesn't exist (fixes race in issue #1007).
+                const target = readlinkSync(versionPath);
+                if (target === latest || target === join(cacheBase, latest)) continue;
+                try {
+                  const tmpLink = versionPath + '.tmp.' + process.pid;
+                  symlinkSync(symlinkTarget, tmpLink, isWin ? 'junction' : undefined);
+                  try {
+                    renameSync(tmpLink, versionPath);
+                  } catch {
+                    // rename failed (e.g. cross-device) — fall back to unlink+symlink
+                    try { unlinkSync(tmpLink); } catch {}
+                    unlinkSync(versionPath);
+                    symlinkSync(symlinkTarget, versionPath, isWin ? 'junction' : undefined);
+                  }
+                } catch (swapErr) {
+                  if (swapErr?.code !== 'EEXIST') {
+                    // Leave as-is rather than losing it
+                  }
+                }
+              } else if (stat.isDirectory()) {
+                if (occupancy.unavailable || occupancy.roots.has(pathIdentity(versionPath))) continue;
+                // Directory → symlink: cannot be atomic, but run.cjs now
+                // handles missing targets gracefully (issue #1007).
+                rmSync(versionPath, { recursive: true, force: true });
+                try {
+                  symlinkSync(symlinkTarget, versionPath, isWin ? 'junction' : undefined);
+                } catch (symlinkErr) {
+                  // EEXIST: another session raced us — safe to ignore.
+                  if (symlinkErr?.code !== 'EEXIST') {
+                    // Symlink genuinely failed. Leave the path as-is.
+                  }
+                }
+              }
+            } catch {
+              // lstatSync / rmSync / unlinkSync failure — leave old directory as-is.
+            }
+          }
+        }
+      }
+
+      // Guard against CLAUDE_PLUGIN_ROOT pointing to a stale/deleted version.
+      // When an old version directory is removed during upgrade but a running
+      // session still has the old CLAUDE_PLUGIN_ROOT in its environment, the
+      // directory won't exist. Create a symlink so subsequent hook invocations
+      // via run.cjs resolve correctly.
+      const pluginRoot = process.env.CLAUDE_PLUGIN_ROOT?.replace(/[\/\\]+$/, ''); // strip trailing separators
+      if (pluginRoot && !existsSync(pluginRoot)) {
+        const pluginRootVersion = basename(pluginRoot);
+        if (/^\d+\.\d+\.\d+/.test(pluginRootVersion) && latest) {
+          const stalePath = pluginRoot;
+          const isWin = process.platform === 'win32';
+          // Always use absolute path to avoid symlink target resolution issues
+          // when stalePath is not under cacheBase (e.g., after config-dir move)
+          const symlinkTarget = join(cacheBase, latest);
+          try {
+            // Atomic: create temp symlink then rename over stale path
+            const tmpLink = stalePath + '.tmp.' + process.pid;
+            // Ensure parent dir exists (stalePath may reference a deleted config tree)
+            const parentDir = dirname(stalePath);
+            if (!existsSync(parentDir)) {
+              try { mkdirSync(parentDir, { recursive: true }); } catch {}
+            }
+            symlinkSync(symlinkTarget, tmpLink, isWin ? 'junction' : undefined);
+            try {
+              renameSync(tmpLink, stalePath);
+            } catch {
+              try { unlinkSync(tmpLink); } catch {}
+              // Remove any pre-existing dangling symlink/junction at stalePath
+              // before recreating, otherwise symlinkSync throws EEXIST
+              try { unlinkSync(stalePath); } catch {}
+              symlinkSync(symlinkTarget, stalePath, isWin ? 'junction' : undefined);
+            }
+          } catch {}
+        }
+      }
+    } catch {}
+
+    // Send session-start notification from an isolated detached process.
+    // Notification transports/custom integrations must never write into this
+    // foreground hook's stdout JSON protocol or stderr CI checks.
+    try {
+      const pluginRoot = process.env.CLAUDE_PLUGIN_ROOT;
+      if (pluginRoot) {
+        dispatchSessionStartNotificationInBackground(pluginRoot, {
+          sessionId,
+          projectPath: directory,
+          timestamp: new Date().toISOString(),
+        });
+
+        // Start reply listener daemon if notification reply config is available
+        try {
+          const { startReplyListener, buildDaemonConfig } = await import(pathToFileURL(join(pluginRoot, 'dist', 'notifications', 'reply-listener.js')).href);
+          const replyConfig = await buildDaemonConfig();
+          if (replyConfig) {
+            startReplyListener(replyConfig);
+          }
+        } catch {
+          // Reply listener not available or not configured, skip silently
+        }
+      }
+    } catch {
+      // Notification module not available, skip silently
+    }
+
+    let additionalContext = '';
+    if (pendingRestore && pendingRestoreMessage) {
+      additionalContext = buildSessionStartAdditionalContext(messages);
+      if (additionalContext.includes(pendingRestoreMessage)) {
+        let markerStatus = null;
+        const waitCell = new Int32Array(new SharedArrayBuffer(4));
+        for (let attempt = 0; attempt < 100; attempt += 1) {
+          const status = pendingRestore.claimPreCompactCheckpointRestore(
+            omcRoot,
+            sessionId,
+            pendingRestore.path,
+            pendingRestore.created_at,
+            pendingRestore.mtime_ms,
+            pendingRestore.checkpoint_sha256,
+          );
+          if (status === 'written') {
+            markerStatus = status;
+            break;
+          }
+          if (status !== 'contended') break;
+          Atomics.wait(waitCell, 0, 0, 10);
+          const refreshed = pendingRestore.preparePreCompactCheckpointRestore(omcRoot, sessionId);
+          if (!refreshed) break;
+          const refreshedMessage = `<session-restore>\n\n${refreshed.text}\n\n</session-restore>\n\n---\n`;
+          const refreshedMessages = messages.map((message) => (
+            message === pendingRestoreMessage ? refreshedMessage : message
+          ));
+          const refreshedContext = buildSessionStartAdditionalContext(refreshedMessages);
+          if (!refreshedContext.includes(refreshedMessage)) break;
+          pendingRestore = {
+            ...refreshed,
+            preparePreCompactCheckpointRestore: pendingRestore.preparePreCompactCheckpointRestore,
+            claimPreCompactCheckpointRestore: pendingRestore.claimPreCompactCheckpointRestore,
+          };
+          pendingRestoreMessage = refreshedMessage;
+          messages = refreshedMessages;
+          additionalContext = refreshedContext;
+        }
+        if (!markerStatus) {
+          messages = messages.filter((message) => message !== pendingRestoreMessage);
+          additionalContext = buildSessionStartAdditionalContext(messages);
+        }
+      } else {
+        // The complete restore sentinel did not fit the aggregate budget;
+        // do not commit a replay marker for context that was not delivered.
+        messages = messages.filter((message) => message !== pendingRestoreMessage);
+        additionalContext = buildSessionStartAdditionalContext(messages);
+      }
+    } else if (messages.length > 0) {
+      additionalContext = buildSessionStartAdditionalContext(messages);
+    }
+
+    if (messages.length > 0 || userMessages.length > 0) {
+      const output = {
+        continue: true,
+      };
+      if (userMessages.length > 0) {
+        output.systemMessage = userMessages.join('\n');
+      }
+      if (messages.length > 0) {
+        output.hookSpecificOutput = {
+          hookEventName: 'SessionStart',
+          additionalContext,
+        };
+      }
+      console.log(JSON.stringify(output));
+    } else {
+      console.log(JSON.stringify({ continue: true, suppressOutput: true }));
+    }
+  } catch (error) {
+    console.log(JSON.stringify({ continue: true, suppressOutput: true }));
+  }
+}
+
+if (process.argv.includes(REFRESH_UPDATE_CACHE_FLAG)) {
+  refreshUpdateCacheAndExit();
+} else if (process.argv[2] === DEFERRED_TOOL_FAILURE_CLEANUP_FLAG) {
+  const omcRoot = process.argv[3];
+  if (!omcRoot) {
+    process.exit(0);
+  }
+  signalTestDeferredToolFailureCleanupReady();
+  const requestedWaitMs = Number(process.argv[4]);
+  const waitMs = Number.isFinite(requestedWaitMs) && requestedWaitMs > 0
+    ? Math.min(requestedWaitMs, POST_TOOL_FAILURE_DEFERRED_WAIT_MS)
+    : POST_TOOL_FAILURE_DEFERRED_WAIT_MS;
+  purgeLegacyToolFailureState(omcRoot, waitMs)
+    .catch(() => {})
+    .finally(() => process.exit(0));
+} else if (process.argv[2] === STABILIZE_TOOL_FAILURE_CLEANUP_FLAG) {
+  const omcRoot = process.argv[3];
+  if (!omcRoot) {
+    process.exit(0);
+  }
+  const requestedWindow = Number(process.argv[4]);
+  const stabilizationMs = Number.isFinite(requestedWindow) && requestedWindow > 0
+    ? Math.min(requestedWindow, TOOL_FAILURE_CLEANUP_STABILIZATION_MS)
+    : TOOL_FAILURE_CLEANUP_STABILIZATION_MS;
+  stabilizeLegacyToolFailureState(omcRoot, stabilizationMs, toolFailureCleanupMaxLifetimeMs(stabilizationMs, Number(process.argv[5])))
+    .catch(() => {})
+    .finally(() => process.exit(0));
+} else {
+  main();
+}

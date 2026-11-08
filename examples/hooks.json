@@ -1,0 +1,94 @@
+{
+  "$schema": "https://raw.githubusercontent.com/anthropics/claude-code/main/hooks.schema.json",
+  "hooks": [
+    {
+      "name": "auto-format-on-save",
+      "description": "Run prettier on saved files",
+      "matcher": {
+        "event": "PostToolUse",
+        "tool": "Write"
+      },
+      "hooks": [
+        {
+          "type": "command",
+          "command": "npx prettier --write \"$FILE_PATH\""
+        }
+      ]
+    },
+    {
+      "name": "typecheck-on-ts-edit",
+      "description": "Run TypeScript check after editing .ts/.tsx files",
+      "matcher": {
+        "event": "PostToolUse",
+        "tool": "Edit",
+        "pattern": "\\.(ts|tsx)$"
+      },
+      "hooks": [
+        {
+          "type": "command",
+          "command": "npx tsc --noEmit --pretty 2>&1 | head -20"
+        }
+      ]
+    },
+    {
+      "name": "warn-console-log",
+      "description": "Warn when writing console.log statements",
+      "matcher": {
+        "event": "PreToolUse",
+        "tool": "Write",
+        "pattern": "console\\.log"
+      },
+      "hooks": [
+        {
+          "type": "message",
+          "message": "WARNING: About to write console.log statement. Consider using a proper logger or removing before commit."
+        }
+      ]
+    },
+    {
+      "name": "prevent-secrets",
+      "description": "Block writes containing potential secrets",
+      "matcher": {
+        "event": "PreToolUse",
+        "tool": "Write",
+        "pattern": "(api[_-]?key|password|secret|token)\\s*[=:]\\s*['\"][^'\"]{8,}['\"]"
+      },
+      "hooks": [
+        {
+          "type": "block",
+          "message": "BLOCKED: Detected potential hardcoded secret. Use environment variables instead."
+        }
+      ]
+    },
+    {
+      "name": "lint-on-js-edit",
+      "description": "Run ESLint after editing .js/.jsx files",
+      "matcher": {
+        "event": "PostToolUse",
+        "tool": "Edit",
+        "pattern": "\\.(js|jsx)$"
+      },
+      "hooks": [
+        {
+          "type": "command",
+          "command": "npx eslint \"$FILE_PATH\" --fix"
+        }
+      ]
+    },
+    {
+      "name": "remind-tests",
+      "description": "Remind to write tests after creating new source files",
+      "matcher": {
+        "event": "PostToolUse",
+        "tool": "Write",
+        "pattern": "src/.*\\.(ts|tsx|js|jsx)$"
+      },
+      "hooks": [
+        {
+          "type": "message",
+          "message": "REMINDER: Don't forget to write tests for this new file. Use the /tdd command for test-driven development."
+        }
+      ]
+    }
+  ]
+}

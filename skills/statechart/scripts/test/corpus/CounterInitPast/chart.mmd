@@ -1,0 +1,12 @@
+stateDiagram-v2
+  state "Legend" as legend {
+    lg0: Breaks NotNine
+    lg1: Path to the NotNine bug
+  }
+  class lg0 breaks
+  class lg1 bugPath
+  s0: 9
+  [*] --> s0
+  classDef breaks fill:#ffecee,stroke:#e72e3b,stroke-width:2.5px,color:#cd2834
+  class s0 breaks
+  class s0 bugPath

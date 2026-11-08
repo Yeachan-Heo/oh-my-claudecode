@@ -1,0 +1,6 @@
+# Typos configuration
+# https://github.com/crate-ci/typos
+
+[default.extend-words]
+# Claude API uses "preceeding" in error messages - must match exactly
+preceeding = "preceeding"

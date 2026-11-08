@@ -1,0 +1,820 @@
+// src/team/types.ts
+
+/**
+ * MCP Team Bridge - Shared TypeScript interfaces
+ *
+ * All types used across the team bridge module for MCP worker orchestration.
+ */
+
+import type { TeamTaskStatus } from './contracts.js';
+import type { TeamPhase } from './phase-controller.js';
+import type { TeamLeaderNextAction } from './leader-nudge-guidance.js';
+import type { CanonicalTeamRole, ExternalModelsDefaults, RoleAssignment } from '../shared/types.js';
+
+/**
+ * Immutable identity of the tmux server incarnation selected for a team.
+ *
+ * The socket path is captured from tmux itself rather than reconstructed from
+ * ambient environment state.  `process_started_at` is a strict native
+ * process-creation token (not a coarse wall-clock timestamp).
+ */
+export interface TmuxServerIdentity {
+  socket_path: string;
+  server_pid: number;
+  process_started_at: string;
+}
+
+function isAbsoluteTmuxSocketPath(value: string): boolean {
+  // Tmux sockets are absolute on POSIX; retain the Windows drive/UNC forms so
+  // persisted records can still be structurally validated across platforms.
+  return value.startsWith('/')
+    || /^[A-Za-z]:[\\/]/.test(value)
+    || value.startsWith('\\\\');
+}
+
+/** Structural validation for persisted or caller-supplied tmux identities. */
+export function isValidTmuxServerIdentity(value: unknown): value is TmuxServerIdentity {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
+  const candidate = value as Record<string, unknown>;
+  return typeof candidate.socket_path === 'string'
+    && candidate.socket_path.length > 0
+    && candidate.socket_path === candidate.socket_path.trim()
+    && !/[\u0000-\u001f\u007f]/.test(candidate.socket_path)
+    && isAbsoluteTmuxSocketPath(candidate.socket_path)
+    && typeof candidate.server_pid === 'number'
+    && Number.isSafeInteger(candidate.server_pid)
+    && candidate.server_pid > 0
+    && typeof candidate.process_started_at === 'string'
+    && candidate.process_started_at.length > 0
+    && candidate.process_started_at.length <= 1024
+    && !/[\u0000-\u001f\u007f]/.test(candidate.process_started_at);
+}
+
+/** Immutable UUID identifying one incarnation of a named team. */
+export type TeamInstanceId = string;
+
+export const TEAM_INSTANCE_ID_PATTERN =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+export function isValidTeamInstanceId(value: unknown): value is TeamInstanceId {
+  return typeof value === 'string' && TEAM_INSTANCE_ID_PATTERN.test(value);
+}
+
+/** Claude/OMC session id stored as team ownership, never a tmux target. */
+export const LEADER_SESSION_ID_PATTERN = /^[a-zA-Z0-9][a-zA-Z0-9_-]{0,255}$/;
+
+export function isValidLeaderSessionId(value: unknown): value is string {
+  return typeof value === 'string' && LEADER_SESSION_ID_PATTERN.test(value);
+}
+
+// ---------------------------------------------------------------------------
+// OMX-aligned types for event-driven team coordination
+// ---------------------------------------------------------------------------
+
+/** Team task with required version for optimistic concurrency */
+export interface TeamTaskV2 extends TeamTask {
+  version: number;
+}
+
+export type TeamTaskDelegationMode = 'none' | 'optional' | 'auto' | 'required';
+export type TeamTaskChildModelPolicy = 'standard' | 'fast' | 'inherit' | 'frontier';
+
+export interface TeamTaskDelegationComplianceEvidence {
+  status: 'spawned' | 'skipped';
+  source: 'terminal_result';
+  detail: string;
+  recorded_at: string;
+}
+
+export interface TeamTaskDelegationPlan {
+  mode: TeamTaskDelegationMode;
+  max_parallel_subtasks?: number;
+  required_parallel_probe?: boolean;
+  spawn_before_serial_search_threshold?: number;
+  child_model_policy?: TeamTaskChildModelPolicy;
+  child_model?: string;
+  subtask_candidates?: string[];
+  child_report_format?: 'bullets' | 'json';
+  skip_allowed_reason_required?: boolean;
+}
+
+/** Claim metadata attached to a task */
+export interface TeamTaskClaim {
+  owner: string;
+  token: string;
+  leased_until: string;
+  launch_attempt_id?: string;
+}
+
+/** Base team task matching OMX shape */
+export interface TeamTask {
+  id: string;
+  subject: string;
+  description: string;
+  status: TeamTaskStatus;
+  requires_code_change?: boolean;
+  role?: string;
+  owner?: string;
+  result?: string;
+  error?: string;
+  metadata?: Record<string, unknown>;
+  blocked_by?: string[];
+  depends_on?: string[];
+  version?: number;
+  claim?: TeamTaskClaim;
+  created_at: string;
+  completed_at?: string;
+  delegation?: TeamTaskDelegationPlan;
+  delegation_compliance?: TeamTaskDelegationComplianceEvidence;
+  recovery_reservation?: TeamTaskRecoveryReservation;
+  recovery_adoption?: TaskRecoveryAdoption;
+}
+
+/** Immutable safe-boundary continuation checkpoint, scoped to one live claim. */
+export interface TaskRecoveryCheckpoint {
+  schema_version: 1;
+  team_name: string;
+  task_id: string;
+  worker_name: string;
+  sequence: number;
+  task_version: number;
+  claim_token: string;
+  resume_payload_hash: string;
+  resume_payload: unknown;
+  updated_at: string;
+}
+
+/** Reservation installed when a dead worker's claimed task is safely requeued. */
+export interface TeamTaskRecoveryReservation {
+  recovery_id: string;
+  request_id: string;
+  continuation_sequence: number;
+  checkpoint_path: string;
+  checkpoint_hash: string;
+  replacement_worker: string;
+  replacement_generation: number;
+  adoption_token_hash: string;
+  reserved_at: string;
+}
+
+/** Durable evidence that a reservation was consumed by its replacement claim. */
+export interface TaskRecoveryAdoption {
+  recovery_id: string;
+  request_id: string;
+  continuation_sequence: number;
+  checkpoint_path: string;
+  checkpoint_hash: string;
+  replacement_worker: string;
+  replacement_generation: number;
+  adopted_at: string;
+}
+
+export interface TaskRecoveryRequeueSidecar {
+  schema_version: 1;
+  recovery_id: string;
+  request_id: string;
+  task_id: string;
+  old_task_version: number;
+  old_owner: string;
+  old_claim_token: string;
+  old_claim_leased_until: string;
+  continuation_sequence: number;
+  checkpoint_path: string;
+  checkpoint_hash: string;
+  replacement_worker: string;
+  replacement_generation: number;
+  adoption_token_hash: string;
+  created_at: string;
+}
+
+export type TaskRecoveryCheckpointValidation =
+  | { ok: true; checkpoint: TaskRecoveryCheckpoint; path: string }
+  | { ok: false; error: 'missing' | 'malformed' | 'stale' | 'ambiguous' };
+
+export interface TaskRecoveryAdoptionProof {
+  recoveryId: string;
+  requestId: string;
+  replacementGeneration: number;
+  adoptionToken: string;
+}
+
+export type TaskRecoveryRequeueResult =
+  | { ok: true; task: TeamTaskV2; reservation: TeamTaskRecoveryReservation; replayed: boolean }
+  | { ok: false; error: 'task_not_found' | 'task_requeue_failed' | 'checkpoint_missing' | 'checkpoint_malformed' | 'checkpoint_stale' | 'checkpoint_ambiguous' | 'claim_conflict' };
+
+export type TaskRecoveryAdoptionResult =
+  | { ok: true; task: TeamTaskV2; claimToken: string; checkpoint: TaskRecoveryCheckpoint; replayed: boolean }
+  | { ok: false; error: 'task_not_found' | 'claim_conflict' | 'checkpoint_missing' | 'checkpoint_malformed' | 'checkpoint_stale' | 'checkpoint_ambiguous' };
+
+export type RecoverDeadWorkerV2Warning =
+  | 'projection_repair_required'
+  | 'identity_repair_required'
+  | 'services_pending'
+  | 'event_repair_required'
+  | 'result_repair_required';
+
+export type RecoverDeadWorkerV2Error =
+  | 'invalid_input' | 'team_not_found' | 'worker_not_found' | 'runtime_v2_required'
+  | 'invalid_persisted_state' | 'runtime_owner_unavailable' | 'runtime_owner_fence_lost'
+  | 'recovery_request_timeout' | 'recovery_attempt_conflict' | 'team_mutation_busy'
+  | 'team_mutation_resume_required' | 'team_shutting_down' | 'team_session_dead'
+  | 'worker_liveness_unknown' | 'recovery_checkpoint_missing' | 'recovery_checkpoint_malformed'
+  | 'recovery_checkpoint_ambiguous' | 'recovery_checkpoint_stale' | 'task_requeue_failed'
+  | 'launch_metadata_incomplete' | 'launch_descriptor_unresolvable' | 'spawn_failed'
+  | 'startup_ack_timeout' | 'worker_activation_failed' | 'worker_cleanup_incomplete' | 'auto_merge_unavailable'
+  | 'stale_state_revision' | 'config_commit_failed';
+
+export interface RecoverDeadWorkerV2OutcomeBase {
+  requestId: string;
+  recoveryId: string;
+  teamName: string;
+  workerName: string;
+  committed: boolean;
+  updatedAt: string;
+}
+
+export interface RecoverDeadWorkerV2Success extends RecoverDeadWorkerV2OutcomeBase {
+  outcome: 'recovered' | 'already_running';
+  committed: true;
+  oldPaneId: string | null;
+  newPaneId: string;
+  requeuedTaskIds: string[];
+  continuationSequenceByTask: Record<string, number>;
+  stateRevision: number;
+  activation: 'active' | 'services_pending';
+  manifestSync: 'synced' | 'repair_required';
+  servicesSync: 'synced' | 'repair_required';
+  warnings: RecoverDeadWorkerV2Warning[];
+}
+
+export interface RecoverDeadWorkerV2Failure extends RecoverDeadWorkerV2OutcomeBase {
+  outcome: 'failed' | 'commit_unknown';
+  committed: false;
+  error: RecoverDeadWorkerV2Error;
+  message?: string;
+  reservationsWritten?: boolean;
+}
+
+export type RecoverDeadWorkerV2Result = RecoverDeadWorkerV2Success | RecoverDeadWorkerV2Failure;
+
+export interface TeamRuntimeOwnerEpoch {
+  epoch: number;
+  nonce: string;
+  pid: number;
+  process_started_at: string;
+  created_at: string;
+}
+
+/** Durable lifecycle fence for a scale-up operation. */
+export interface TeamScaleUpAttempt {
+  /** Missing on older records, which cannot authorize instance-bound effects. */
+  instance_id?: TeamInstanceId;
+  operation_id: string;
+  phase: 'reserved' | 'effects' | 'committed' | 'failed';
+  pid: number;
+  process_started_at: string;
+  state_revision: number;
+  created_at: string;
+  updated_at: string;
+  failure_reason?: string;
+}
+
+export interface TeamRecoveryAttempt {
+  request_id: string;
+  recovery_id: string;
+  worker_name: string;
+  owner_epoch: number;
+  owner_nonce: string;
+  phase: 'reserved' | 'requeued' | 'ready' | 'active' | 'services_pending' | 'adopted' | 'failed';
+  /** Pane identity of the worker before a recovery replaces its config row. */
+  original_pane_id?: string;
+  state_revision: number;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface WorkerLaunchDescriptor {
+  schema_version: 1;
+  provider: 'claude' | 'codex' | 'gemini' | 'cursor' | 'grok' | 'antigravity';
+  model: string | null;
+  binary: string;
+  args: string[];
+}
+
+export type TeamCadencePolicy = 'disabled' | 'worker-auto-commit-v1';
+
+export interface TeamServiceDescriptor {
+  schema_version: 1;
+  service_generation: number;
+  service_attempt_id: string;
+  auto_merge_enabled: boolean;
+  workspace_root: string;
+  leader_branch?: string;
+  cadence_policy: TeamCadencePolicy;
+}
+
+/** Team leader identity */
+export interface TeamLeader {
+  session_id: string;
+  thread_id?: string;
+  worker_id: string;
+  role: string;
+}
+
+/** Team transport/runtime policy configuration */
+export interface TeamTransportPolicy {
+  display_mode: 'split_pane' | 'auto';
+  worker_launch_mode: 'interactive' | 'prompt';
+  dispatch_mode: 'hook_preferred_with_fallback' | 'transport_direct';
+  dispatch_ack_timeout_ms: number;
+}
+
+/** Team governance controls independent from transport/runtime policy */
+export interface TeamGovernance {
+  delegation_only: boolean;
+  plan_approval_required: boolean;
+  nested_teams_allowed: boolean;
+  one_team_per_leader_session: boolean;
+  cleanup_requires_all_workers_inactive: boolean;
+}
+
+/** Legacy alias kept for backwards compatibility when reading old manifests */
+export type TeamPolicy = TeamTransportPolicy & Partial<TeamGovernance>;
+
+/** Permissions snapshot captured at team creation */
+export interface PermissionsSnapshot {
+  approval_mode: string;
+  sandbox_mode: string;
+  network_access: boolean;
+}
+
+/** V2 team manifest matching OMX schema */
+export interface TeamManifestV2 {
+  schema_version: 2;
+  state_revision?: number;
+  name: string;
+  /** Immutable team incarnation. Legacy manifests may omit this for reads only. */
+  instance_id?: TeamInstanceId;
+  /** Immutable tmux server incarnation; absent for CMUX and legacy evidence. */
+  tmux_server_identity?: TmuxServerIdentity;
+  task: string;
+  leader: TeamLeader;
+  policy: TeamTransportPolicy;
+  governance: TeamGovernance;
+  permissions_snapshot: PermissionsSnapshot;
+  tmux_session: string;
+  worker_count: number;
+  workers: WorkerInfo[];
+  next_task_id: number;
+  created_at: string;
+  leader_cwd?: string;
+  team_state_root?: string;
+  workspace_mode?: 'single' | 'worktree';
+  worktree_mode?: 'disabled' | 'detached' | 'named';
+  lifecycle_profile?: 'default' | 'linked_ralph';
+  leader_pane_id: string | null;
+  hud_pane_id: string | null;
+  resize_hook_name: string | null;
+  resize_hook_target: string | null;
+  next_worker_index?: number;
+  resolved_routing?: Record<CanonicalTeamRole, { primary: RoleAssignment; fallback: RoleAssignment }>;
+  resolved_routing_roles?: CanonicalTeamRole[];
+  external_models_defaults?: ExternalModelsDefaults;
+  service_descriptor?: TeamServiceDescriptor;
+}
+
+/** Worker info within a team config */
+export interface WorkerInfo {
+  name: string;
+  index: number;
+  role: string;
+  worker_cli?: 'codex' | 'claude' | 'gemini' | 'cursor' | 'grok' | 'antigravity';
+  assigned_tasks: string[];
+  pid?: number;
+  pane_id?: string;
+  working_dir?: string;
+  worktree_repo_root?: string;
+  worktree_path?: string;
+  worktree_branch?: string;
+  worktree_detached?: boolean;
+  worktree_created?: boolean;
+  team_state_root?: string;
+  /**
+   * Verdict-output file path for CLI-worker output contract (AC-7).
+   * Set when the worker was spawned for a reviewer role on any non-Claude
+   * provider. Consumed by the worker-completion handler in runtime-v2.
+   */
+  output_file?: string;
+  recovery_id?: string;
+  replacement_generation?: number;
+  pane_attempt_id?: string;
+  launch_attempt_id?: string;
+  operational_state?: 'starting' | 'active' | 'dead' | 'stopped';
+  launch_descriptor?: WorkerLaunchDescriptor;
+}
+
+export interface TeamScaleDownAttempt {
+  /** Missing on older records, which cannot authorize instance-bound effects. */
+  instance_id?: TeamInstanceId;
+  operation_id: string;
+  phase: 'draining' | 'effects' | 'failed';
+  pid: number;
+  process_started_at: string;
+  workers: Array<{
+    name: string;
+    pane_id?: string;
+    worktree_path?: string;
+    worktree_created?: boolean;
+    launch_attempt_id?: string;
+    provider?: WorkerInfo['worker_cli'];
+    launch_descriptor?: WorkerLaunchDescriptor;
+  }>;
+  state_revision: number;
+  created_at: string;
+  updated_at: string;
+  failure_reason?: string;
+}
+
+export interface TeamShutdownAttempt {
+  /** Required by instance-bound shutdown; older records are read-only evidence. */
+  instance_id?: TeamInstanceId;
+  nonce: string;
+  pid: number;
+  process_started_at: string;
+  state_revision: number;
+  created_at: string;
+}
+
+/** Team configuration (V1 compat) */
+export interface TeamConfig {
+  name: string;
+  /** Immutable team incarnation. Legacy configs may omit this for reads only. */
+  instance_id?: TeamInstanceId;
+  /** Immutable tmux server incarnation; absent for CMUX and legacy evidence. */
+  tmux_server_identity?: TmuxServerIdentity;
+  task: string;
+  agent_type: string;
+  worker_launch_mode: 'interactive' | 'prompt';
+  policy?: TeamTransportPolicy;
+  governance?: TeamGovernance;
+  worker_count: number;
+  max_workers: number;
+  workers: WorkerInfo[];
+  created_at: string;
+  tmux_session: string;
+  tmux_window_owned?: boolean;
+  next_task_id: number;
+  /**
+   * Claude/OMC session that started this team. Distinct from `tmux_session`.
+   * SessionEnd cleanup authorizes against this field, not the tmux target.
+   */
+  leader_session_id?: string;
+  leader_cwd?: string;
+  team_state_root?: string;
+  workspace_mode?: 'single' | 'worktree';
+  worktree_mode?: 'disabled' | 'detached' | 'named';
+  lifecycle_profile?: 'default' | 'linked_ralph';
+  leader_pane_id: string | null;
+  hud_pane_id: string | null;
+  resize_hook_name: string | null;
+  resize_hook_target: string | null;
+  next_worker_index?: number;
+  /**
+   * Per-team resolved routing snapshot (Option E).
+   * Populated at team creation by `buildResolvedRoutingSnapshot()`; read by
+   * `scaleUp`, worker restart, and spawn paths. Immutable for the team's lifetime.
+   */
+  resolved_routing?: Record<CanonicalTeamRole, { primary: RoleAssignment; fallback: RoleAssignment }>;
+  /** Canonical roles explicitly configured for routing; defaults are not opt-in routes. */
+  resolved_routing_roles?: CanonicalTeamRole[];
+  /** Immutable provider defaults captured at team creation for scale-up parity. */
+  external_models_defaults?: ExternalModelsDefaults;
+  state_revision?: number;
+  runtime_owner_epoch?: TeamRuntimeOwnerEpoch;
+  active_recovery?: TeamRecoveryAttempt;
+  active_scale_down?: TeamScaleDownAttempt;
+  active_scale_up?: TeamScaleUpAttempt;
+  last_recovery?: TeamRecoveryAttempt;
+  all_dead_recovery?: { detected_at: string; deadline_at: string; state_revision: number };
+  service_descriptor?: TeamServiceDescriptor;
+  lifecycle_state?: 'starting' | 'active' | 'shutting_down' | 'stopped';
+  shutdown_attempt?: TeamShutdownAttempt;
+}
+
+// ---------------------------------------------------------------------------
+// Team-instance ownership and destruction contract
+// ---------------------------------------------------------------------------
+
+/** Caller input for creating or addressing one team incarnation. */
+export interface TeamInstanceRequest {
+  teamName: string;
+  cwd: string;
+  /** CLI/MCP callers provide this before spawning; direct callers may omit it. */
+  instanceId?: TeamInstanceId;
+}
+
+/** Canonical immutable binding shared by every producer and destructive consumer. */
+export interface TeamInstanceBinding {
+  instance_id: TeamInstanceId;
+  team_name: string;
+  cwd: string;
+  workspace_hash: string;
+  state_root: string;
+}
+
+export interface TeamInstanceProcessIdentity {
+  pid: number;
+  process_started_at: string;
+  nonce: string;
+}
+
+export type TeamInstanceReservationPhase = 'pending' | 'active';
+
+/** Durable external startup reservation (kept outside the disposable state root). */
+export interface TeamInstanceReservation {
+  schema_version: 1;
+  kind: 'team-instance-reservation';
+  instance_id: TeamInstanceId;
+  team_name: string;
+  cwd: string;
+  workspace_hash: string;
+  state_root: string;
+  phase: TeamInstanceReservationPhase;
+  owner: TeamInstanceProcessIdentity;
+  reservation_path: string;
+  lifecycle_lock_path: string;
+  created_at: string;
+  updated_at: string;
+}
+
+/** Minimal config projection that may be persisted while effects are pending. */
+export type TeamInstancePendingConfig = Pick<
+  TeamConfig,
+  'name' | 'instance_id' | 'leader_cwd' | 'team_state_root' | 'lifecycle_state'
+> & {
+  name: string;
+  instance_id: TeamInstanceId;
+  leader_cwd: string;
+  team_state_root: string;
+  lifecycle_state: 'starting';
+};
+
+/**
+ * Explicit caller-owned proof that provider/pane/worktree teardown has already
+ * completed. The instance module never infers provider death from a pane.
+ */
+export interface TeamInstanceDisposalAuthorization {
+  protocol: 'caller-owned-final-state-v1';
+  providers: 'disposed';
+  panes: 'disposed';
+  worktrees: 'disposed';
+}
+
+export type TeamInstanceCleanupPhase = 'prepared' | 'detached' | 'removing' | 'failed' | 'completed';
+
+/** Durable external cleanup authority for one immutable team instance. */
+export interface TeamInstanceCleanupRecord {
+  schema_version: 1;
+  kind: 'team-instance-cleanup';
+  instance_id: TeamInstanceId;
+  team_name: string;
+  cwd: string;
+  workspace_hash: string;
+  state_root: string;
+  detached_root: string;
+  receipt_path: string;
+  phase: TeamInstanceCleanupPhase;
+  /** Set only after the original state root has been durably renamed. */
+  detached_at?: string;
+  authorization: TeamInstanceDisposalAuthorization;
+  created_at: string;
+  updated_at: string;
+  failure_reason?: string;
+}
+
+export type TeamInstanceObservedState = 'missing' | 'empty' | 'bound';
+
+export interface TeamInstanceAssertion {
+  binding: TeamInstanceBinding;
+  reservation: TeamInstanceReservation;
+  observed_state: TeamInstanceObservedState;
+}
+
+export interface TeamInstanceCleanupResult {
+  outcome: 'cleaned' | 'already_cleaned';
+  binding: TeamInstanceBinding;
+  receipt: TeamInstanceCleanupRecord;
+}
+
+/** Dispatch request kinds */
+export type TeamDispatchRequestKind = 'inbox' | 'mailbox' | 'nudge';
+export type TeamDispatchRequestStatus = 'pending' | 'notified' | 'delivered' | 'failed';
+export type TeamDispatchTransportPreference = 'hook_preferred_with_fallback' | 'transport_direct' | 'prompt_stdin';
+
+/** Dispatch request for worker notification */
+export interface TeamDispatchRequest {
+  request_id: string;
+  kind: TeamDispatchRequestKind;
+  team_name: string;
+  to_worker: string;
+  worker_index?: number;
+  pane_id?: string;
+  trigger_message: string;
+  message_id?: string;
+  inbox_correlation_key?: string;
+  transport_preference: TeamDispatchTransportPreference;
+  fallback_allowed: boolean;
+  status: TeamDispatchRequestStatus;
+  attempt_count: number;
+  created_at: string;
+  updated_at: string;
+  notified_at?: string;
+  delivered_at?: string;
+  failed_at?: string;
+  last_reason?: string;
+}
+
+/** Input for creating a dispatch request */
+export interface TeamDispatchRequestInput {
+  kind: TeamDispatchRequestKind;
+  to_worker: string;
+  worker_index?: number;
+  pane_id?: string;
+  trigger_message: string;
+  message_id?: string;
+  inbox_correlation_key?: string;
+  transport_preference?: TeamDispatchTransportPreference;
+  fallback_allowed?: boolean;
+  last_reason?: string;
+}
+
+/** Team event emitted by the event bus */
+export interface TeamEvent {
+  event_id: string;
+  team: string;
+  type:
+    | 'task_completed'
+    | 'task_failed'
+    | 'worker_idle'
+    | 'worker_stopped'
+    | 'message_received'
+    | 'shutdown_ack'
+    | 'shutdown_gate'
+    | 'shutdown_gate_forced'
+    | 'approval_decision'
+    | 'team_leader_nudge';
+  worker: string;
+  task_id?: string;
+  message_id?: string | null;
+  reason?: string;
+  next_action?: TeamLeaderNextAction;
+  message?: string;
+  /** Undelivered directed messages addressed TO the worker (issue #3662). */
+  undelivered_inbound_count?: number;
+  /** Undelivered directed messages FROM the worker (owed reports/acks, issue #3662). */
+  undelivered_outbound_count?: number;
+  created_at: string;
+}
+
+/** Mailbox message between workers */
+export interface TeamMailboxMessage {
+  message_id: string;
+  from_worker: string;
+  to_worker: string;
+  body: string;
+  created_at: string;
+  notified_at?: string;
+  delivered_at?: string;
+}
+
+/** Worker's mailbox */
+export interface TeamMailbox {
+  worker: string;
+  messages: TeamMailboxMessage[];
+}
+
+/** Approval record for a task */
+export interface TaskApprovalRecord {
+  task_id: string;
+  required: boolean;
+  status: 'pending' | 'approved' | 'rejected';
+  reviewer: string;
+  decision_reason: string;
+  decided_at: string;
+}
+
+/** Task readiness check result */
+export type TaskReadiness =
+  | { ready: true }
+  | { ready: false; reason: 'blocked_dependency'; dependencies: string[] };
+
+/** Result of claiming a task */
+export type ClaimTaskResult =
+  | { ok: true; task: TeamTaskV2; claimToken: string }
+  | { ok: false; error: 'claim_conflict' | 'blocked_dependency' | 'task_not_found' | 'already_terminal' | 'worker_not_found'; dependencies?: string[] };
+
+/** Result of transitioning a task status */
+export type TransitionTaskResult =
+  | { ok: true; task: TeamTaskV2 }
+  | { ok: false; error: 'claim_conflict' | 'invalid_transition' | 'task_not_found' | 'already_terminal' | 'lease_expired' | 'missing_delegation_compliance_evidence' };
+
+/** Result of releasing a task claim */
+export type ReleaseTaskClaimResult =
+  | { ok: true; task: TeamTaskV2 }
+  | { ok: false; error: 'claim_conflict' | 'task_not_found' | 'already_terminal' | 'lease_expired' };
+
+/** Team summary for monitoring */
+export interface TeamSummary {
+  teamName: string;
+  workerCount: number;
+  team_state_root?: string;
+  workspace_mode?: 'single' | 'worktree';
+  worktree_mode?: 'disabled' | 'detached' | 'named';
+  tasks: {
+    total: number;
+    pending: number;
+    blocked: number;
+    in_progress: number;
+    completed: number;
+    failed: number;
+  };
+  workers: Array<{
+    name: string;
+    alive: boolean;
+    lastTurnAt: string | null;
+    turnsWithoutProgress: number;
+    working_dir?: string;
+    worktree_repo_root?: string;
+    worktree_path?: string;
+    worktree_branch?: string;
+    worktree_detached?: boolean;
+    worktree_created?: boolean;
+    team_state_root?: string;
+  }>;
+  nonReportingWorkers: string[];
+  performance?: TeamSummaryPerformance;
+}
+
+/** Performance metrics for team summary */
+export interface TeamSummaryPerformance {
+  total_ms: number;
+  tasks_loaded_ms: number;
+  workers_polled_ms: number;
+  task_count: number;
+  worker_count: number;
+}
+
+/** Shutdown acknowledgment from a worker */
+export interface ShutdownAck {
+  status: 'accept' | 'reject';
+  reason?: string;
+  updated_at?: string;
+}
+
+/** Monitor snapshot state for delta detection */
+export interface TeamMonitorSnapshotState {
+  taskStatusById: Record<string, string>;
+  workerAliveByName: Record<string, boolean>;
+  workerLivenessByName?: Record<string, 'alive' | 'dead' | 'unknown'>;
+  workerStateByName: Record<string, string>;
+  workerTurnCountByName: Record<string, number>;
+  workerTaskIdByName: Record<string, string>;
+  mailboxNotifiedByMessageId: Record<string, string>;
+  completedEventTaskIds: Record<string, boolean>;
+  monitorTimings?: {
+    list_tasks_ms: number;
+    worker_scan_ms: number;
+    mailbox_delivery_ms: number;
+    total_ms: number;
+    updated_at: string;
+  };
+}
+
+/** Phase state for team pipeline */
+export interface TeamPhaseState {
+  current_phase: TeamPhase;
+  max_fix_attempts: number;
+  current_fix_attempt: number;
+  transitions: Array<{ from: string; to: string; at: string; reason?: string }>;
+  updated_at: string;
+}
+
+/** Worker status for event-driven coordination */
+export interface WorkerStatus {
+  state: 'idle' | 'working' | 'blocked' | 'done' | 'failed' | 'draining' | 'unknown';
+  current_task_id?: string;
+  reason?: string;
+  launch_attempt_id?: string;
+  updated_at: string;
+}
+
+/** Worker heartbeat for liveness detection */
+export interface WorkerHeartbeat {
+  pid: number;
+  last_turn_at: string;
+  turn_count: number;
+  alive: boolean;
+}
+
+export const DEFAULT_MAX_WORKERS = 20;
+export const ABSOLUTE_MAX_WORKERS = 20;

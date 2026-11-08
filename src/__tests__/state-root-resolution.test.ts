@@ -1,0 +1,786 @@
+/**
+ * Regression tests for issue #2532: centralized OMC_STATE_DIR state-root resolution.
+ *
+ * Verifies that:
+ *   1. Default behavior (no OMC_STATE_DIR) is unchanged — state lives in {dir}/.omc/
+ *   2. session-start.mjs reads session state from the custom OMC_STATE_DIR location
+ *   3. persistent-mode.cjs (stop hook) reads mode state from the custom OMC_STATE_DIR
+ *      location and correctly blocks the stop when an active mode is present there
+ *   4. pre-tool-enforcer.mjs (PreToolUse hook) reads team-state and writes
+ *      skill-active-state through the centralized OMC_STATE_DIR location
+ */
+
+import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { execFileSync } from 'node:child_process';
+import { existsSync, mkdtempSync, mkdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join, resolve } from 'node:path';
+import { getOmcRoot, clearWorktreeCache, validateWorkingDirectory } from '../lib/worktree-paths.js';
+
+const NODE = process.execPath;
+const REPO_ROOT = resolve(join(__dirname, '..', '..'));
+const SESSION_START = join(REPO_ROOT, 'scripts', 'session-start.mjs');
+const HOOK_RUNNER = join(REPO_ROOT, 'scripts', 'run.cjs');
+const STOP_HOOK = join(REPO_ROOT, 'scripts', 'persistent-mode.cjs');
+const PRE_TOOL_ENFORCER = join(REPO_ROOT, 'scripts', 'pre-tool-enforcer.mjs');
+
+function buildHookEnv(extraEnv: Record<string, string> = {}): Record<string, string> {
+  const env: Record<string, string> = {};
+  for (const [k, v] of Object.entries(process.env)) {
+    if (v !== undefined) env[k] = v;
+  }
+  // Remove OMC_STATE_DIR from parent env so only extraEnv controls it.
+  delete env.OMC_STATE_DIR;
+  delete env.CLAUDE_PLUGIN_ROOT;
+  return { ...env, ...extraEnv };
+}
+
+/** Run a hook script synchronously and return the parsed JSON output. */
+function runHook(
+  scriptPath: string,
+  input: Record<string, unknown>,
+  extraEnv: Record<string, string> = {},
+): Record<string, unknown> {
+  const raw = execFileSync(NODE, [scriptPath], {
+    input: JSON.stringify(input),
+    encoding: 'utf-8',
+    env: buildHookEnv(extraEnv),
+    timeout: 15000,
+  }).trim();
+  return JSON.parse(raw) as Record<string, unknown>;
+}
+
+/** Run a hook script through the installed hook runner path and return parsed JSON output. */
+function runHookViaRunner(
+  scriptPath: string,
+  input: Record<string, unknown>,
+  extraEnv: Record<string, string> = {},
+): Record<string, unknown> {
+  const raw = execFileSync(NODE, [HOOK_RUNNER, scriptPath], {
+    input: JSON.stringify(input),
+    encoding: 'utf-8',
+    env: buildHookEnv(extraEnv),
+    timeout: 15000,
+  }).trim();
+  return JSON.parse(raw) as Record<string, unknown>;
+}
+
+/**
+ * Compute the centralized .omc root path for a given project dir and state dir.
+ * Temporarily sets OMC_STATE_DIR so getOmcRoot() returns the centralized path.
+ */
+function getCentralizedOmcRoot(projectDir: string, stateDir: string): string {
+  const prev = process.env.OMC_STATE_DIR;
+  try {
+    process.env.OMC_STATE_DIR = stateDir;
+    clearWorktreeCache();
+    return getOmcRoot(projectDir);
+  } finally {
+    if (prev === undefined) {
+      delete process.env.OMC_STATE_DIR;
+    } else {
+      process.env.OMC_STATE_DIR = prev;
+    }
+    clearWorktreeCache();
+  }
+}
+
+function writeWorkflowTombstone(
+  omcRoot: string,
+  sessionId: string,
+  mode: 'ralph' | 'ultrawork',
+): void {
+  const sessionDir = join(omcRoot, 'state', 'sessions', sessionId);
+  mkdirSync(sessionDir, { recursive: true });
+  writeFileSync(
+    join(sessionDir, 'skill-active-state.json'),
+    JSON.stringify({
+      version: 2,
+      active_skills: {
+        [mode]: {
+          skill_name: mode,
+          started_at: '2026-04-26T00:00:00.000Z',
+          completed_at: new Date().toISOString(),
+          session_id: sessionId,
+          mode_state_path: `${mode}-state.json`,
+          initialized_mode: mode,
+          initialized_state_path: join(omcRoot, 'state', `${mode}-state.json`),
+          initialized_session_state_path: join(sessionDir, `${mode}-state.json`),
+        },
+      },
+    }, null, 2),
+  );
+}
+
+describe('OMC_STATE_DIR state-root resolution (issue #2532)', () => {
+  let tempDir: string;
+  let fakeProject: string;
+  let fakeStateDir: string;
+  let previousHome: string | undefined;
+  let previousUserProfile: string | undefined;
+  let previousStateDir: string | undefined;
+
+  beforeEach(() => {
+    previousHome = process.env.HOME;
+    previousUserProfile = process.env.USERPROFILE;
+    previousStateDir = process.env.OMC_STATE_DIR;
+    tempDir = mkdtempSync(join(tmpdir(), 'omc-state-root-'));
+    fakeProject = join(tempDir, 'project');
+    fakeStateDir = join(tempDir, 'centralized-state');
+    mkdirSync(fakeProject, { recursive: true });
+    // Hook probes require valid Git metadata rather than an empty .git dir.
+    execFileSync('git', ['init'], { cwd: fakeProject, stdio: 'pipe' });
+    mkdirSync(fakeStateDir, { recursive: true });
+    process.env.HOME = tempDir;
+    process.env.USERPROFILE = tempDir;
+    delete process.env.OMC_STATE_DIR;
+    clearWorktreeCache();
+  });
+
+  afterEach(() => {
+    if (previousHome === undefined) delete process.env.HOME;
+    else process.env.HOME = previousHome;
+    if (previousUserProfile === undefined) delete process.env.USERPROFILE;
+    else process.env.USERPROFILE = previousUserProfile;
+    if (previousStateDir === undefined) delete process.env.OMC_STATE_DIR;
+    else process.env.OMC_STATE_DIR = previousStateDir;
+    clearWorktreeCache();
+    rmSync(tempDir, { recursive: true, force: true });
+  });
+
+  // ────────────────────────────────────────────────────────────────────────────
+  // 1. Default state dir (no OMC_STATE_DIR)
+  // ────────────────────────────────────────────────────────────────────────────
+
+  it('session-start reads ralph state from default .omc path when OMC_STATE_DIR is not set', () => {
+    const sessionId = 'test-session-default';
+    const stateDir = join(fakeProject, '.omc', 'state', 'sessions', sessionId);
+    mkdirSync(stateDir, { recursive: true });
+    writeFileSync(
+      join(stateDir, 'ralph-state.json'),
+      JSON.stringify({
+        active: true,
+        session_id: sessionId,
+        prompt: 'Default-path task',
+        iteration: 1,
+        max_iterations: 5,
+      }),
+    );
+
+    const output = runHook(SESSION_START, {
+      hook_event_name: 'SessionStart',
+      session_id: sessionId,
+      cwd: fakeProject,
+    });
+
+    const context = (output as { hookSpecificOutput?: { additionalContext?: string } })
+      .hookSpecificOutput?.additionalContext ?? '';
+    expect(context).toContain('[RALPH LOOP RESTORED]');
+  });
+
+  it('session-start ignores tombstoned stale ralph restore state after cancel', () => {
+    const sessionId = 'test-session-tombstoned-ralph';
+    const omcRoot = join(fakeProject, '.omc');
+    const stateDir = join(omcRoot, 'state', 'sessions', sessionId);
+    mkdirSync(stateDir, { recursive: true });
+    writeFileSync(
+      join(stateDir, 'ralph-state.json'),
+      JSON.stringify({
+        active: true,
+        session_id: sessionId,
+        prompt: 'Tombstoned task must not restore',
+        iteration: 12,
+        max_iterations: 100,
+      }),
+    );
+    writeWorkflowTombstone(omcRoot, sessionId, 'ralph');
+
+    const output = runHook(SESSION_START, {
+      hook_event_name: 'SessionStart',
+      session_id: sessionId,
+      cwd: fakeProject,
+    });
+
+    const context = (output as { hookSpecificOutput?: { additionalContext?: string } })
+      .hookSpecificOutput?.additionalContext ?? '';
+    expect(context).not.toContain('[RALPH LOOP RESTORED]');
+    expect(context).not.toContain('Tombstoned task must not restore');
+  });
+
+  it('session-start ignores tombstoned stale ultrawork restore state after cancel', () => {
+    const sessionId = 'test-session-tombstoned-ultrawork';
+    const omcRoot = join(fakeProject, '.omc');
+    const stateDir = join(omcRoot, 'state', 'sessions', sessionId);
+    mkdirSync(stateDir, { recursive: true });
+    writeFileSync(
+      join(stateDir, 'ultrawork-state.json'),
+      JSON.stringify({
+        active: true,
+        session_id: sessionId,
+        started_at: '2026-04-26T00:00:00.000Z',
+        original_prompt: 'Tombstoned ultrawork must not restore',
+      }),
+    );
+    writeWorkflowTombstone(omcRoot, sessionId, 'ultrawork');
+
+    const output = runHook(SESSION_START, {
+      hook_event_name: 'SessionStart',
+      session_id: sessionId,
+      cwd: fakeProject,
+    });
+
+    const context = (output as { hookSpecificOutput?: { additionalContext?: string } })
+      .hookSpecificOutput?.additionalContext ?? '';
+    expect(context).not.toContain('[ULTRAWORK MODE RESTORED]');
+    expect(context).not.toContain('Tombstoned ultrawork must not restore');
+  });
+
+  it('session-start through run.cjs does not clean prior active state without durable abandonment evidence', () => {
+    const priorSessionId = 'prior-runner-session';
+    const currentSessionId = 'current-runner-session';
+
+    const priorStateDir = join(fakeProject, '.omc', 'state', 'sessions', priorSessionId);
+    mkdirSync(priorStateDir, { recursive: true });
+    writeFileSync(
+      join(priorStateDir, 'ralph-state.json'),
+      JSON.stringify({
+        active: true,
+        session_id: priorSessionId,
+        prompt: 'Runner-created prior session state must survive',
+        iteration: 1,
+        max_iterations: 5,
+      }),
+    );
+
+    runHookViaRunner(SESSION_START, {
+      hook_event_name: 'SessionStart',
+      session_id: priorSessionId,
+      transcript_path: join(fakeProject, '.claude', 'projects', 'prior.jsonl'),
+      source: 'startup',
+      model: 'claude-sonnet-4-6',
+      cwd: fakeProject,
+    });
+
+    const markerPath = join(priorStateDir, 'session-started.json');
+    expect(existsSync(markerPath)).toBe(true);
+    const marker = JSON.parse(readFileSync(markerPath, 'utf-8')) as Record<string, unknown>;
+    expect(marker.session_id).toBe(priorSessionId);
+    expect(marker.ppid).toBeUndefined();
+
+    runHookViaRunner(SESSION_START, {
+      hook_event_name: 'SessionStart',
+      session_id: currentSessionId,
+      transcript_path: join(fakeProject, '.claude', 'projects', 'current.jsonl'),
+      source: 'startup',
+      model: 'claude-sonnet-4-6',
+      cwd: fakeProject,
+    });
+
+    expect(existsSync(join(priorStateDir, 'ralph-state.json'))).toBe(true);
+    expect(existsSync(markerPath)).toBe(true);
+    expect(existsSync(join(fakeProject, '.omc', 'state', 'sessions', currentSessionId, 'session-started.json'))).toBe(true);
+  });
+
+  // ────────────────────────────────────────────────────────────────────────────
+  // 2. Custom OMC_STATE_DIR — session-start
+  // ────────────────────────────────────────────────────────────────────────────
+
+  it('session-start reads ralph state from centralized path when OMC_STATE_DIR is set', () => {
+    const sessionId = 'test-session-centralized';
+    const centralizedOmcRoot = getCentralizedOmcRoot(fakeProject, fakeStateDir);
+    const stateDir = join(centralizedOmcRoot, 'state', 'sessions', sessionId);
+    mkdirSync(stateDir, { recursive: true });
+    writeFileSync(
+      join(stateDir, 'ralph-state.json'),
+      JSON.stringify({
+        active: true,
+        session_id: sessionId,
+        prompt: 'Centralized-state task',
+        iteration: 2,
+        max_iterations: 10,
+      }),
+    );
+
+    const output = runHook(
+      SESSION_START,
+      { hook_event_name: 'SessionStart', session_id: sessionId, cwd: fakeProject },
+      { OMC_STATE_DIR: fakeStateDir },
+    );
+
+    const context = (output as { hookSpecificOutput?: { additionalContext?: string } })
+      .hookSpecificOutput?.additionalContext ?? '';
+    expect(context).toContain('[RALPH LOOP RESTORED]');
+    expect(context).toContain('Centralized-state task');
+  });
+
+  it('session-start does not restore retired ultrawork state from centralized paths', () => {
+    const sessionId = 'test-session-uw-central';
+    const centralizedOmcRoot = getCentralizedOmcRoot(fakeProject, fakeStateDir);
+    const stateDir = join(centralizedOmcRoot, 'state', 'sessions', sessionId);
+    mkdirSync(stateDir, { recursive: true });
+    writeFileSync(
+      join(stateDir, 'ultrawork-state.json'),
+      JSON.stringify({
+        active: true,
+        session_id: sessionId,
+        started_at: '2026-01-01T00:00:00.000Z',
+        original_prompt: 'Centralized ultrawork task',
+      }),
+    );
+
+    const output = runHook(
+      SESSION_START,
+      { hook_event_name: 'SessionStart', session_id: sessionId, cwd: fakeProject },
+      { OMC_STATE_DIR: fakeStateDir },
+    );
+
+    const context = (output as { hookSpecificOutput?: { additionalContext?: string } })
+      .hookSpecificOutput?.additionalContext ?? '';
+    expect(context).not.toContain('[ULTRAWORK MODE RESTORED]');
+    expect(context).not.toContain('Centralized ultrawork task');
+  });
+
+  it('session-start does NOT restore state when OMC_STATE_DIR is set but state is only in default .omc', () => {
+    const sessionId = 'test-session-only-default';
+    // Place state ONLY in the default .omc location
+    const defaultStateDir = join(fakeProject, '.omc', 'state', 'sessions', sessionId);
+    mkdirSync(defaultStateDir, { recursive: true });
+    writeFileSync(
+      join(defaultStateDir, 'ralph-state.json'),
+      JSON.stringify({
+        active: true,
+        session_id: sessionId,
+        prompt: 'Should not restore from default when OMC_STATE_DIR is set',
+        iteration: 1,
+        max_iterations: 5,
+      }),
+    );
+
+    // Run with OMC_STATE_DIR pointing elsewhere — centralized location is empty
+    const output = runHook(
+      SESSION_START,
+      { hook_event_name: 'SessionStart', session_id: sessionId, cwd: fakeProject },
+      { OMC_STATE_DIR: fakeStateDir },
+    );
+
+    const context = (output as { hookSpecificOutput?: { additionalContext?: string } })
+      .hookSpecificOutput?.additionalContext ?? '';
+    expect(context).not.toContain('[RALPH LOOP RESTORED]');
+  });
+
+  // ────────────────────────────────────────────────────────────────────────────
+  // 3. Custom OMC_STATE_DIR — stop hook (persistent-mode.cjs)
+  // ────────────────────────────────────────────────────────────────────────────
+
+  it('stop hook blocks when active ralph state is in default .omc path (baseline)', () => {
+    const sessionId = 'test-stop-default';
+    const stateDir = join(fakeProject, '.omc', 'state', 'sessions', sessionId);
+    mkdirSync(stateDir, { recursive: true });
+    writeFileSync(
+      join(stateDir, 'ralph-state.json'),
+      JSON.stringify({
+        active: true,
+        session_id: sessionId,
+        prompt: 'Stop hook baseline task',
+        iteration: 1,
+        max_iterations: 5,
+        started_at: new Date().toISOString(),
+        last_checked_at: new Date().toISOString(),
+      }),
+    );
+
+    const output = runHook(STOP_HOOK, {
+      hook_event_name: 'Stop',
+      session_id: sessionId,
+      cwd: fakeProject,
+    });
+
+    expect(output.decision).toBe('block');
+    expect(String(output.reason)).toContain('[RALPH LOOP');
+  });
+
+  it('stop hook blocks when active ralph state is in centralized OMC_STATE_DIR path', () => {
+    const sessionId = 'test-stop-centralized';
+    const centralizedOmcRoot = getCentralizedOmcRoot(fakeProject, fakeStateDir);
+    const stateDir = join(centralizedOmcRoot, 'state', 'sessions', sessionId);
+    mkdirSync(stateDir, { recursive: true });
+    writeFileSync(
+      join(stateDir, 'ralph-state.json'),
+      JSON.stringify({
+        active: true,
+        session_id: sessionId,
+        prompt: 'Stop hook centralized task',
+        iteration: 1,
+        max_iterations: 5,
+        started_at: new Date().toISOString(),
+        last_checked_at: new Date().toISOString(),
+      }),
+    );
+
+    // No .omc in fakeProject — active state ONLY in centralized dir
+    const output = runHook(
+      STOP_HOOK,
+      { hook_event_name: 'Stop', session_id: sessionId, cwd: fakeProject },
+      { OMC_STATE_DIR: fakeStateDir },
+    );
+
+    expect(output.decision).toBe('block');
+    expect(String(output.reason)).toContain('[RALPH LOOP');
+  });
+
+  it('stop hook does NOT block when OMC_STATE_DIR is set but state is only in default .omc', () => {
+    const sessionId = 'test-stop-mismatch';
+    // Place active state in default location only
+    const defaultStateDir = join(fakeProject, '.omc', 'state', 'sessions', sessionId);
+    mkdirSync(defaultStateDir, { recursive: true });
+    writeFileSync(
+      join(defaultStateDir, 'ralph-state.json'),
+      JSON.stringify({
+        active: true,
+        session_id: sessionId,
+        prompt: 'Should be invisible to centralized hook',
+        iteration: 1,
+        max_iterations: 5,
+      }),
+    );
+
+    // Run stop hook with OMC_STATE_DIR — centralized path is empty → no block
+    const output = runHook(
+      STOP_HOOK,
+      { hook_event_name: 'Stop', session_id: sessionId, cwd: fakeProject },
+      { OMC_STATE_DIR: fakeStateDir },
+    );
+
+    expect(output.decision).not.toBe('block');
+  });
+
+  // ────────────────────────────────────────────────────────────────────────────
+  // 4. pre-tool-enforcer.mjs (PreToolUse hook) — follow-up to #2532
+  //    Scenario: enforcer must read team-state and write skill-active-state
+  //    from the same centralized OMC_STATE_DIR location as sibling hooks.
+  // ────────────────────────────────────────────────────────────────────────────
+
+  it('pre-tool-enforcer injects [TEAM ROUTING REQUIRED] when team-state lives in default .omc (baseline)', () => {
+    const sessionId = 'test-pte-team-default';
+    const stateDir = join(fakeProject, '.omc', 'state', 'sessions', sessionId);
+    mkdirSync(stateDir, { recursive: true });
+    writeFileSync(
+      join(stateDir, 'team-state.json'),
+      JSON.stringify({
+        active: true,
+        session_id: sessionId,
+        team_name: 'alpha',
+        current_phase: 'team-exec',
+      }),
+    );
+
+    const output = runHook(PRE_TOOL_ENFORCER, {
+      hook_event_name: 'PreToolUse',
+      tool_name: 'Task',
+      tool_input: { subagent_type: 'executor', description: 'sample task' },
+      session_id: sessionId,
+      cwd: fakeProject,
+    });
+
+    const context = (output as { hookSpecificOutput?: { additionalContext?: string } })
+      .hookSpecificOutput?.additionalContext ?? '';
+    expect(context).toContain('[TEAM ROUTING REQUIRED]');
+    expect(context).toContain('alpha');
+  });
+
+  it('pre-tool-enforcer injects [TEAM ROUTING REQUIRED] when team-state lives in centralized OMC_STATE_DIR', () => {
+    const sessionId = 'test-pte-team-central';
+    const centralizedOmcRoot = getCentralizedOmcRoot(fakeProject, fakeStateDir);
+    const stateDir = join(centralizedOmcRoot, 'state', 'sessions', sessionId);
+    mkdirSync(stateDir, { recursive: true });
+    writeFileSync(
+      join(stateDir, 'team-state.json'),
+      JSON.stringify({
+        active: true,
+        session_id: sessionId,
+        team_name: 'beta',
+        current_phase: 'team-exec',
+      }),
+    );
+
+    // No .omc in fakeProject — active team-state ONLY in centralized dir
+    const output = runHook(
+      PRE_TOOL_ENFORCER,
+      {
+        hook_event_name: 'PreToolUse',
+        tool_name: 'Task',
+        tool_input: { subagent_type: 'executor', description: 'sample task' },
+        session_id: sessionId,
+        cwd: fakeProject,
+      },
+      { OMC_STATE_DIR: fakeStateDir },
+    );
+
+    const context = (output as { hookSpecificOutput?: { additionalContext?: string } })
+      .hookSpecificOutput?.additionalContext ?? '';
+    expect(context).toContain('[TEAM ROUTING REQUIRED]');
+    expect(context).toContain('beta');
+  });
+
+  it('pre-tool-enforcer ignores stale team-state in default .omc when OMC_STATE_DIR is set', () => {
+    const sessionId = 'test-pte-team-mismatch';
+    // Place active team-state in default location only
+    const stateDir = join(fakeProject, '.omc', 'state', 'sessions', sessionId);
+    mkdirSync(stateDir, { recursive: true });
+    writeFileSync(
+      join(stateDir, 'team-state.json'),
+      JSON.stringify({
+        active: true,
+        session_id: sessionId,
+        team_name: 'gamma',
+        current_phase: 'team-exec',
+      }),
+    );
+
+    // Run with OMC_STATE_DIR pointing elsewhere — centralized path is empty → no redirect
+    const output = runHook(
+      PRE_TOOL_ENFORCER,
+      {
+        hook_event_name: 'PreToolUse',
+        tool_name: 'Task',
+        tool_input: { subagent_type: 'executor', description: 'sample task' },
+        session_id: sessionId,
+        cwd: fakeProject,
+      },
+      { OMC_STATE_DIR: fakeStateDir },
+    );
+
+    const context = (output as { hookSpecificOutput?: { additionalContext?: string } })
+      .hookSpecificOutput?.additionalContext ?? '';
+    expect(context).not.toContain('[TEAM ROUTING REQUIRED]');
+  });
+
+  it('pre-tool-enforcer writes skill-active-state into the centralized OMC_STATE_DIR path', () => {
+    const sessionId = 'test-pte-skill-central';
+    const centralizedOmcRoot = getCentralizedOmcRoot(fakeProject, fakeStateDir);
+
+    runHook(
+      PRE_TOOL_ENFORCER,
+      {
+        hook_event_name: 'PreToolUse',
+        tool_name: 'Skill',
+        // `skill` needs a non-'none' protection level. The OMC-prefixed `skill`
+        // slash-command maps to 'light' protection, which triggers the write.
+        tool_input: { skill: 'oh-my-claudecode:skill' },
+        session_id: sessionId,
+        cwd: fakeProject,
+      },
+      { OMC_STATE_DIR: fakeStateDir },
+    );
+
+    const centralizedPath = join(
+      centralizedOmcRoot,
+      'state',
+      'sessions',
+      sessionId,
+      'skill-active-state.json',
+    );
+    const defaultPath = join(
+      fakeProject,
+      '.omc',
+      'state',
+      'sessions',
+      sessionId,
+      'skill-active-state.json',
+    );
+    expect(existsSync(centralizedPath)).toBe(true);
+    expect(existsSync(defaultPath)).toBe(false);
+  });
+
+  it('anchors git-less directories at one stable home state root', () => {
+    const fakeHome = join(tempDir, 'home');
+    const firstCwd = join(fakeHome, 'workspace', 'first');
+    const secondCwd = join(fakeHome, 'workspace', 'second', 'nested');
+    mkdirSync(firstCwd, { recursive: true });
+    mkdirSync(secondCwd, { recursive: true });
+
+    const previousHome = process.env.HOME;
+    const previousUserProfile = process.env.USERPROFILE;
+    const previousCwd = process.cwd();
+    process.env.HOME = fakeHome;
+    process.env.USERPROFILE = fakeHome;
+    try {
+      clearWorktreeCache();
+      const expected = join(fakeHome, '.omc');
+      process.chdir(firstCwd);
+      expect(getOmcRoot()).toBe(expected);
+      process.chdir(secondCwd);
+      expect(getOmcRoot()).toBe(expected);
+      expect(existsSync(join(firstCwd, '.omc'))).toBe(false);
+      expect(existsSync(join(secondCwd, '.omc'))).toBe(false);
+    } finally {
+      process.chdir(previousCwd);
+      if (previousHome === undefined) delete process.env.HOME;
+      else process.env.HOME = previousHome;
+      if (previousUserProfile === undefined) delete process.env.USERPROFILE;
+      else process.env.USERPROFILE = previousUserProfile;
+      clearWorktreeCache();
+    }
+  });
+
+  it('does not implicitly adopt an existing git-less state root', () => {
+    const fakeHome = join(tempDir, 'home');
+    const project = join(fakeHome, 'workspace', 'project');
+    const nestedCwd = join(project, 'deep', 'path');
+    mkdirSync(join(project, '.omc'), { recursive: true });
+    mkdirSync(nestedCwd, { recursive: true });
+
+    const previousHome = process.env.HOME;
+    const previousUserProfile = process.env.USERPROFILE;
+    const previousCwd = process.cwd();
+    process.env.HOME = fakeHome;
+    process.env.USERPROFILE = fakeHome;
+    try {
+      clearWorktreeCache();
+      process.chdir(nestedCwd);
+      expect(getOmcRoot()).toBe(join(fakeHome, '.omc'));
+    } finally {
+      process.chdir(previousCwd);
+      if (previousHome === undefined) delete process.env.HOME;
+      else process.env.HOME = previousHome;
+      if (previousUserProfile === undefined) delete process.env.USERPROFILE;
+      else process.env.USERPROFILE = previousUserProfile;
+      clearWorktreeCache();
+    }
+  });
+
+  it('does not reuse state roots under protected home directories', () => {
+    const fakeHome = join(tempDir, 'home');
+    const sensitiveCwd = join(fakeHome, '.ssh', 'nested');
+    mkdirSync(join(fakeHome, '.ssh', '.omc'), { recursive: true });
+    mkdirSync(sensitiveCwd, { recursive: true });
+
+    const previousHome = process.env.HOME;
+    const previousUserProfile = process.env.USERPROFILE;
+    process.env.HOME = fakeHome;
+    process.env.USERPROFILE = fakeHome;
+    try {
+      clearWorktreeCache();
+      expect(getOmcRoot(sensitiveCwd)).toBe(join(fakeHome, '.omc'));
+    } finally {
+      if (previousHome === undefined) delete process.env.HOME;
+      else process.env.HOME = previousHome;
+      if (previousUserProfile === undefined) delete process.env.USERPROFILE;
+      else process.env.USERPROFILE = previousUserProfile;
+      clearWorktreeCache();
+    }
+  });
+
+  it('honors an explicit workingDirectory when both directories are git-less', () => {
+    const fakeHome = join(tempDir, 'home');
+    const currentCwd = join(fakeHome, 'current');
+    const requestedCwd = join(currentCwd, 'requested');
+    mkdirSync(currentCwd, { recursive: true });
+    mkdirSync(requestedCwd, { recursive: true });
+
+    const previousHome = process.env.HOME;
+    const previousUserProfile = process.env.USERPROFILE;
+    const originalCwd = process.cwd();
+    process.env.HOME = fakeHome;
+    process.env.USERPROFILE = fakeHome;
+    process.chdir(currentCwd);
+    try {
+      clearWorktreeCache();
+      expect(validateWorkingDirectory(requestedCwd)).toBe(realpathSync(requestedCwd));
+    } finally {
+      process.chdir(originalCwd);
+      if (previousHome === undefined) delete process.env.HOME;
+      else process.env.HOME = previousHome;
+      if (previousUserProfile === undefined) delete process.env.USERPROFILE;
+      else process.env.USERPROFILE = previousUserProfile;
+      clearWorktreeCache();
+    }
+  });
+});
+
+/**
+ * Regression tests for issue #4033: the inline state-root fallbacks in
+ * scripts/lib/state-root.{mjs,cjs} and templates/hooks/lib/state-root.mjs
+ * classify "not a git repository" by matching git's English stderr. Without
+ * LC_ALL=C on the spawn, a non-English shell makes probeGitRoot() throw
+ * instead of returning null, and every caller that awaits it dies silently.
+ *
+ * The locale is exercised through a fake `git` on PATH rather than a real
+ * system locale, so the test reproduces the failure on any host regardless of
+ * which locales happen to be installed.
+ */
+describe('state-root inline fallback — locale independence (#4033)', () => {
+  const STATE_ROOT_COPIES = [
+    join(REPO_ROOT, 'scripts', 'lib', 'state-root.mjs'),
+    join(REPO_ROOT, 'scripts', 'lib', 'state-root.cjs'),
+    join(REPO_ROOT, 'templates', 'hooks', 'lib', 'state-root.mjs'),
+  ];
+
+  let shimDir: string;
+  let workDir: string;
+
+  beforeEach(() => {
+    shimDir = mkdtempSync(join(tmpdir(), 'omc-4033-shim-'));
+    workDir = mkdtempSync(join(tmpdir(), 'omc-4033-work-'));
+    // A git that localizes its failure exactly the way real git does: the
+    // English message only when the C locale is forced, a translated one
+    // otherwise. Exit status 128 in both cases.
+    const shim = join(shimDir, 'git');
+    writeFileSync(
+      shim,
+      [
+        '#!/bin/sh',
+        'if [ "$LC_ALL" = "C" ]; then',
+        '  echo "fatal: not a git repository (or any of the parent directories): .git" >&2',
+        'else',
+        '  echo "fatal: (현재 폴더 또는 상위 폴더 중 일부가) 깃 저장소가 아닙니다: .git" >&2',
+        'fi',
+        'exit 128',
+        '',
+      ].join('\n'),
+      { mode: 0o755 },
+    );
+  });
+
+  afterEach(() => {
+    rmSync(shimDir, { recursive: true, force: true });
+    rmSync(workDir, { recursive: true, force: true });
+  });
+
+  it.each(STATE_ROOT_COPIES)('%s forces LC_ALL=C on every git spawn', (copy) => {
+    const source = readFileSync(copy, 'utf-8');
+    const spawns = source.match(/execFileSync\('git',/g) ?? [];
+    expect(spawns.length).toBeGreaterThan(0);
+    // every spawn carries the env; none may be added later without it
+    expect((source.match(/env: gitEnv\(\)/g) ?? []).length).toBe(spawns.length);
+    expect(source).toContain("LC_ALL: 'C'");
+  });
+
+  it.each(STATE_ROOT_COPIES)('%s resolves a non-git dir under a localized git', (copy) => {
+    const isCjs = copy.endsWith('.cjs');
+    const loader = isCjs
+      ? `const { resolveOmcStateRoot } = require(${JSON.stringify(copy)});`
+      : `const { resolveOmcStateRoot } = await import(${JSON.stringify(copy)});`;
+    // Under the localized shim the whole probe must still classify the
+    // directory as non-git and fall back to the home root, not throw.
+    const program = isCjs
+      ? `${loader}\nresolveOmcStateRoot(${JSON.stringify(workDir)}).then((r) => { console.log(r); }, (e) => { console.error('THREW: ' + e.message); process.exit(3); });`
+      : `${loader}\nconst r = await resolveOmcStateRoot(${JSON.stringify(workDir)});\nconsole.log(r);`;
+
+    const out = execFileSync(NODE, [`--input-type=${isCjs ? 'commonjs' : 'module'}`, '-e', program], {
+      encoding: 'utf-8',
+      env: {
+        ...buildHookEnv(),
+        PATH: `${shimDir}:${process.env.PATH ?? ''}`,
+        HOME: workDir,
+        USERPROFILE: workDir,
+        LC_ALL: 'ko_KR.UTF-8',
+        LANG: 'ko_KR.UTF-8',
+        OMC_DISABLE_MULTIREPO: '1',
+      },
+      timeout: 15000,
+    }).trim();
+
+    expect(out).toBe(join(workDir, '.omc'));
+  });
+});

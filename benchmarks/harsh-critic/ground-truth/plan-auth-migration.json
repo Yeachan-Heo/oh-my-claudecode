@@ -1,0 +1,105 @@
+{
+  "fixtureId": "plan-auth-migration",
+  "fixturePath": "fixtures/plans/plan-auth-migration.md",
+  "domain": "plan",
+  "expectedVerdict": "REJECT",
+  "isCleanBaseline": false,
+  "findings": [
+    {
+      "id": "AUTH-CRIT-1",
+      "severity": "CRITICAL",
+      "category": "finding",
+      "summary": "Stale reference to validateSession() — function was renamed to verifySession()",
+      "keywords": ["validateSession", "verifySession", "renamed", "stale"],
+      "location": "Task 1, auth-service-v2 dual-write description",
+      "explanation": "Task 1 states the new service will call validateSession() on the legacy session store. This function was renamed to verifySession() and executors following this plan will hit a runtime error when deploying."
+    },
+    {
+      "id": "AUTH-CRIT-2",
+      "severity": "CRITICAL",
+      "category": "finding",
+      "summary": "No rollback strategy for destructive schema changes — DROP COLUMN has no recovery path",
+      "keywords": ["rollback", "schema", "DROP", "migration", "column"],
+      "location": "Task 2, Database Schema Migration",
+      "explanation": "Task 2 includes ALTER TABLE users DROP COLUMN session_token and DROP COLUMN session_expires_at. While a rollback script is referenced, dropping columns is destructive and data lost before rollback cannot be recovered. The plan provides no safe window or data backup strategy before the drop."
+    },
+    {
+      "id": "AUTH-MAJ-1",
+      "severity": "MAJOR",
+      "category": "finding",
+      "summary": "Missing rate limiting on new auth endpoints",
+      "keywords": ["rate", "limit", "endpoint", "throttle"],
+      "location": "Task 1, new auth endpoints",
+      "explanation": "The new auth endpoints (POST /auth/token, POST /auth/refresh) are exposed with no mention of rate limiting. These are high-value brute-force and credential-stuffing targets and should have rate limiting specified in the plan."
+    },
+    {
+      "id": "AUTH-MAJ-2",
+      "severity": "MAJOR",
+      "category": "finding",
+      "summary": "Task 4 depends on Task 6 but is sequenced before it — out-of-order dependency",
+      "keywords": ["Task 4", "Task 6", "dependency", "order", "circular"],
+      "location": "Task 4 and Task 6 descriptions",
+      "explanation": "Task 4 (Update Downstream Services, Week 3-4) explicitly states it must wait for Task 6 to complete, but Task 6 (Public Key Infrastructure) is placed after Task 4 in the document and is scheduled for Week 2. The timeline table lists these in a confusing order that will cause executor confusion and potential blocking."
+    },
+    {
+      "id": "AUTH-MIN-1",
+      "severity": "MINOR",
+      "category": "finding",
+      "summary": "Inconsistent naming: authToken vs accessToken used interchangeably",
+      "keywords": ["authToken", "accessToken", "inconsistent", "naming"],
+      "location": "Naming Conventions section",
+      "explanation": "The Naming Conventions section acknowledges authToken is used in legacy code and mandates accessToken in new code, but earlier sections (e.g., HTTP header spec uses authToken) create confusion. The plan itself is internally inconsistent."
+    },
+    {
+      "id": "AUTH-MISS-1",
+      "severity": "MAJOR",
+      "category": "missing",
+      "summary": "No session invalidation plan for existing logged-in users during migration",
+      "keywords": ["session", "invalidation", "existing", "users"],
+      "explanation": "The plan handles dual-write for new logins but never addresses what happens to the ~2.4 million users with active legacy sessions at the time of cutover. These sessions could result in authentication failures or stale session data after the legacy system is decommissioned."
+    },
+    {
+      "id": "AUTH-MISS-2",
+      "severity": "MAJOR",
+      "category": "missing",
+      "summary": "No load testing plan for the new auth service under production-scale traffic",
+      "keywords": ["load", "testing", "performance", "stress"],
+      "explanation": "The testing plan covers unit, integration, and staging validation but has no load or stress test plan for the new auth service. Auth is a critical path; the plan only references a <50ms p99 acceptance criterion in Task 1 without specifying how it will be validated at production scale."
+    },
+    {
+      "id": "AUTH-MISS-3",
+      "severity": "MAJOR",
+      "category": "missing",
+      "summary": "No monitoring or alerting plan for auth failure spikes during rollout",
+      "keywords": ["monitoring", "alerting", "auth", "failure", "spike"],
+      "explanation": "Task 5 mentions monitoring error rates for 24 hours at cutover, but there is no defined monitoring or alerting setup for the gradual JWT rollout in Task 3. An auth failure spike at 10% rollout would not be caught without explicit alert thresholds."
+    },
+    {
+      "id": "AUTH-PERSP-SEC-1",
+      "severity": "MAJOR",
+      "category": "perspective",
+      "perspective": "security",
+      "summary": "JWT secret rotation not addressed — migrating without rotating signing keys carries over compromise risk",
+      "keywords": ["JWT", "secret", "rotation", "key"],
+      "explanation": "The plan generates new RSA key pairs in Task 6 but does not address rotation of any pre-existing JWT signing secrets. Migrating to JWT without a clean key rotation means that any previously compromised keys (from the legacy system) could still be used to forge tokens."
+    },
+    {
+      "id": "AUTH-PERSP-NH-1",
+      "severity": "MINOR",
+      "category": "perspective",
+      "perspective": "new-hire",
+      "summary": "RBAC model assumed as known — no documentation reference for new engineers",
+      "keywords": ["RBAC", "documentation", "assumed", "internal"],
+      "explanation": "The plan repeatedly references 'the existing RBAC model' and 'RBAC claims in token payload' without linking to any documentation. A new engineer on the team would have no way to understand the role structure or how permissions are expressed in the JWT payload."
+    },
+    {
+      "id": "AUTH-PERSP-OPS-1",
+      "severity": "MAJOR",
+      "category": "perspective",
+      "perspective": "ops",
+      "summary": "No circuit breaker for OAuth provider dependency — OAuth outage takes down auth entirely",
+      "keywords": ["circuit", "breaker", "OAuth", "provider", "downtime"],
+      "explanation": "Task 1 introduces OAuth provider support (Google, GitHub) via /auth/oauth/callback but the risk register and architecture do not address what happens when OAuth providers are unavailable. Without a circuit breaker or graceful degradation, a Google or GitHub outage would prevent all OAuth-based logins."
+    }
+  ]
+}

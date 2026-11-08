@@ -1,0 +1,390 @@
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
+import { existsSync, mkdtempSync, mkdirSync, readFileSync, rmSync, symlinkSync, writeFileSync, readdirSync } from 'node:fs';
+import { join } from 'path';
+import { tmpdir } from 'os';
+
+vi.mock('fs', async () => {
+  const actual = await vi.importActual<typeof import('fs')>('fs');
+  const { join: pathJoin } = await import('path');
+  const repoRoot = process.cwd();
+  const sourceSkillsDir = pathJoin(repoRoot, 'src', 'skills');
+  const sourceClaudeMdPath = pathJoin(repoRoot, 'src', 'docs', 'CLAUDE.md');
+  const realSkillsDir = pathJoin(repoRoot, 'skills');
+  const realClaudeMdPath = pathJoin(repoRoot, 'docs', 'CLAUDE.md');
+
+  const withRedirect = (pathLike: unknown): string => {
+    const normalized = String(pathLike).replace(/\\/g, '/');
+    const normalizedSourceSkillsDir = sourceSkillsDir.replace(/\\/g, '/');
+    const normalizedRealSkillsDir = realSkillsDir.replace(/\\/g, '/');
+
+    if (normalized === normalizedSourceSkillsDir) {
+      return realSkillsDir;
+    }
+    if (normalized.startsWith(`${normalizedSourceSkillsDir}/`)) {
+      return normalized.replace(normalizedSourceSkillsDir, normalizedRealSkillsDir);
+    }
+    if (normalized === sourceClaudeMdPath.replace(/\\/g, '/')) {
+      return realClaudeMdPath;
+    }
+    return String(pathLike);
+  };
+
+  return {
+    ...actual,
+    existsSync: vi.fn((pathLike: Parameters<typeof actual.existsSync>[0]) =>
+      actual.existsSync(withRedirect(pathLike))
+    ),
+    readFileSync: vi.fn((pathLike: Parameters<typeof actual.readFileSync>[0], options?: Parameters<typeof actual.readFileSync>[1]) =>
+      actual.readFileSync(withRedirect(pathLike), options as never)
+    ),
+    readdirSync: vi.fn((pathLike: Parameters<typeof actual.readdirSync>[0], options?: Parameters<typeof actual.readdirSync>[1]) =>
+      actual.readdirSync(withRedirect(pathLike), options as never)
+    ),
+  };
+});
+
+async function loadInstallerWithEnv(claudeConfigDir: string, homeDir: string) {
+  vi.resetModules();
+  process.env.CLAUDE_CONFIG_DIR = claudeConfigDir;
+  process.env.HOME = homeDir;
+  return import('../installer/index.js');
+}
+
+function writeInstalledPluginRegistry(claudeConfigDir: string, pluginRoot: string): void {
+  const pluginsDir = join(claudeConfigDir, 'plugins');
+  mkdirSync(pluginsDir, { recursive: true });
+  writeFileSync(
+    join(pluginsDir, 'installed_plugins.json'),
+    JSON.stringify({
+      'oh-my-claudecode': [
+        { installPath: pluginRoot },
+      ],
+    }, null, 2)
+  );
+}
+
+function writeEnabledPluginSettings(claudeConfigDir: string): void {
+  writeFileSync(
+    join(claudeConfigDir, 'settings.json'),
+    JSON.stringify({ plugins: ['oh-my-claudecode'] }, null, 2)
+  );
+}
+
+function writeMinimallyCompletePluginPayload(pluginRoot: string): void {
+  mkdirSync(join(pluginRoot, 'dist', 'hooks'), { recursive: true });
+  writeFileSync(join(pluginRoot, 'dist', 'hooks', 'skill-bridge.cjs'), 'console.log("skill bridge");\n');
+  mkdirSync(join(pluginRoot, 'bridge'), { recursive: true });
+  writeFileSync(join(pluginRoot, 'bridge', 'cli.cjs'), 'console.log("bridge");\n');
+  writeFileSync(join(pluginRoot, 'bridge', 'claude-md-coordinator.cjs'), 'console.log("CLAUDE.md coordinator");\n');
+  mkdirSync(join(pluginRoot, 'hooks'), { recursive: true });
+  writeFileSync(join(pluginRoot, 'hooks', 'hooks.json'), '{}\n');
+  mkdirSync(join(pluginRoot, 'commands'), { recursive: true });
+  writeFileSync(join(pluginRoot, 'commands', 'omc-setup.md'), 'Read skills/omc-setup/SKILL.md.\n');
+  mkdirSync(join(pluginRoot, 'skills', 'ultragoal'), { recursive: true });
+  writeFileSync(join(pluginRoot, 'skills', 'ultragoal', 'SKILL.md'), 'name: ultragoal\n');
+  mkdirSync(join(pluginRoot, '.claude-plugin'), { recursive: true });
+  writeFileSync(
+    join(pluginRoot, '.claude-plugin', 'plugin.json'),
+    JSON.stringify({
+      name: 'oh-my-claudecode',
+      commands: './commands/',
+      skills: ['./skills/ultragoal/'],
+    }, null, 2)
+  );
+  writeFileSync(join(pluginRoot, 'package.json'), JSON.stringify({ name: 'oh-my-claude-sisyphus', version: '4.10.2' }, null, 2));
+}
+
+function getBundledSkillNames(): string[] {
+  const entitlementManifest = JSON.parse(
+    readFileSync(join(process.cwd(), 'src', 'config', 'builtin-skill-entitlements.json'), 'utf-8'),
+  ) as { skininthegamebrosOnlySkills: string[] };
+  const skininthegamebrosOnlySkills = new Set(
+    entitlementManifest.skininthegamebrosOnlySkills.map(skill => skill.trim().toLowerCase()),
+  );
+
+  return readdirSync(join(process.cwd(), 'skills'), { withFileTypes: true })
+    .filter(entry => entry.isDirectory())
+    .map(entry => entry.name)
+    .filter(name => existsSync(join(process.cwd(), 'skills', name, 'SKILL.md')))
+    .filter(name => !skininthegamebrosOnlySkills.has(name.toLowerCase()))
+    .sort();
+}
+
+describe('installer bundled + standalone skill sync', () => {
+  let tempRoot: string;
+  let homeDir: string;
+  let claudeConfigDir: string;
+  let originalClaudeConfigDir: string | undefined;
+  let originalHome: string | undefined;
+
+  beforeEach(() => {
+    tempRoot = mkdtempSync(join(tmpdir(), 'omc-installer-omc-reference-'));
+    homeDir = join(tempRoot, 'home');
+    claudeConfigDir = join(homeDir, '.claude');
+    mkdirSync(homeDir, { recursive: true });
+    mkdirSync(claudeConfigDir, { recursive: true });
+
+    originalClaudeConfigDir = process.env.CLAUDE_CONFIG_DIR;
+    originalHome = process.env.HOME;
+  });
+
+  afterEach(() => {
+    if (originalClaudeConfigDir === undefined) {
+      delete process.env.CLAUDE_CONFIG_DIR;
+    } else {
+      process.env.CLAUDE_CONFIG_DIR = originalClaudeConfigDir;
+    }
+
+    if (originalHome === undefined) {
+      delete process.env.HOME;
+    } else {
+      process.env.HOME = originalHome;
+    }
+
+    rmSync(tempRoot, { recursive: true, force: true });
+    vi.resetModules();
+  });
+
+  it('installs standalone slash skills into ~/.claude/skills during legacy install', async () => {
+    const installer = await loadInstallerWithEnv(claudeConfigDir, homeDir);
+    const result = installer.install({
+      skipClaudeCheck: true,
+      skipHud: true,
+    });
+
+    expect(result.success).toBe(true);
+    expect(result.installedSkills).toEqual(expect.arrayContaining([
+      'autopilot/SKILL.md',
+      'ralplan/SKILL.md',
+      'team/SKILL.md',
+      'omc-plan/SKILL.md',
+    ]));
+
+    for (const skillName of [
+      'autopilot', 'ralplan', 'team', 'ultragoal', 'execute', 'omc-plan',
+      'remember', 'verify', 'debug',
+    ]) {
+      const installedSkillPath = join(claudeConfigDir, 'skills', skillName, 'SKILL.md');
+      expect(existsSync(installedSkillPath)).toBe(true);
+      expect(readFileSync(installedSkillPath, 'utf-8')).toContain('name:');
+    }
+
+    expect(existsSync(join(claudeConfigDir, 'skills', 'plan', 'SKILL.md'))).toBe(false);
+  });
+
+  it('installs bundled skills when no enabled OMC plugin is configured', async () => {
+    const pluginRoot = join(tempRoot, 'plugin-cache', 'oh-my-claudecode', '4.10.2');
+    mkdirSync(join(pluginRoot, 'skills', 'ultragoal'), { recursive: true });
+    writeFileSync(join(pluginRoot, 'skills', 'ultragoal', 'SKILL.md'), 'name: ultragoal\n');
+    writeInstalledPluginRegistry(claudeConfigDir, pluginRoot);
+
+    const installer = await loadInstallerWithEnv(claudeConfigDir, homeDir);
+    const result = installer.install({
+      skipClaudeCheck: true,
+      skipHud: true,
+    });
+
+    expect(result.success).toBe(true);
+    const bundledSkillNames = getBundledSkillNames();
+    expect(result.installedSkills.length).toBeGreaterThanOrEqual(bundledSkillNames.length - 4);
+    expect(result.installedSkills).toContain('omc-plan/SKILL.md');
+
+    for (const skillName of ['execute', 'ultragoal', 'team']) {
+      const installedSkillPath = join(claudeConfigDir, 'skills', skillName, 'SKILL.md');
+      expect(existsSync(installedSkillPath)).toBe(true);
+      expect(readFileSync(installedSkillPath, 'utf-8')).toContain(`name: ${skillName}`);
+    }
+
+    expect(existsSync(join(claudeConfigDir, 'skills', 'omc-setup', 'phases', '04-welcome.md'))).toBe(true);
+  });
+
+  it('skips bundled skill sync when an installed plugin already provides skills', async () => {
+    const pluginRoot = join(tempRoot, 'plugin-cache', 'oh-my-claudecode', '4.10.2');
+    writeMinimallyCompletePluginPayload(pluginRoot);
+    writeInstalledPluginRegistry(claudeConfigDir, pluginRoot);
+    writeEnabledPluginSettings(claudeConfigDir);
+
+    const installer = await loadInstallerWithEnv(claudeConfigDir, homeDir);
+    const result = installer.install({
+      skipClaudeCheck: true,
+      skipHud: true,
+    });
+
+    expect(result.success).toBe(true);
+    expect(result.installedSkills).toEqual([]);
+    expect(existsSync(join(claudeConfigDir, 'skills', 'ultragoal', 'SKILL.md'))).toBe(false);
+  });
+
+  it('forces bundled skill sync with noPlugin even when plugin skills exist', async () => {
+    const pluginRoot = join(tempRoot, 'plugin-cache', 'oh-my-claudecode', '4.10.2');
+    mkdirSync(join(pluginRoot, 'skills', 'ultragoal'), { recursive: true });
+    writeFileSync(join(pluginRoot, 'skills', 'ultragoal', 'SKILL.md'), 'name: ultragoal\n');
+    writeInstalledPluginRegistry(claudeConfigDir, pluginRoot);
+    writeEnabledPluginSettings(claudeConfigDir);
+
+    const installer = await loadInstallerWithEnv(claudeConfigDir, homeDir);
+    const result = installer.install({
+      skipClaudeCheck: true,
+      skipHud: true,
+      noPlugin: true,
+    });
+
+    expect(result.success).toBe(true);
+    expect(existsSync(join(claudeConfigDir, 'skills', 'ultragoal', 'SKILL.md'))).toBe(true);
+    expect(readFileSync(join(claudeConfigDir, 'skills', 'ultragoal', 'SKILL.md'), 'utf-8')).toContain('name: ultragoal');
+  });
+
+  it('falls back to bundled skills when plugin is enabled but skill files are unavailable', async () => {
+    const pluginRoot = join(tempRoot, 'plugin-cache', 'oh-my-claudecode', '4.10.2');
+    mkdirSync(pluginRoot, { recursive: true });
+    writeInstalledPluginRegistry(claudeConfigDir, pluginRoot);
+    writeEnabledPluginSettings(claudeConfigDir);
+
+    const installer = await loadInstallerWithEnv(claudeConfigDir, homeDir);
+    const result = installer.install({
+      skipClaudeCheck: true,
+      skipHud: true,
+    });
+
+    expect(result.success).toBe(true);
+    expect(existsSync(join(claudeConfigDir, 'skills', 'ultragoal', 'SKILL.md'))).toBe(true);
+  });
+
+  it('re-syncs bundled skills on repeated noPlugin installs so local skill edits can be validated', async () => {
+    const installedSkillDir = join(claudeConfigDir, 'skills', 'ultragoal');
+    mkdirSync(installedSkillDir, { recursive: true });
+    writeFileSync(join(installedSkillDir, 'SKILL.md'), 'name: ultragoal\n\nstale content\n');
+
+    const installer = await loadInstallerWithEnv(claudeConfigDir, homeDir);
+    const result = installer.install({
+      skipClaudeCheck: true,
+      skipHud: true,
+      noPlugin: true,
+    });
+
+    expect(result.success).toBe(true);
+    expect(readFileSync(join(installedSkillDir, 'SKILL.md'), 'utf-8')).not.toContain('stale content');
+    expect(readFileSync(join(installedSkillDir, 'SKILL.md'), 'utf-8')).toContain('name: ultragoal');
+  });
+
+  it('reports an existing CLAUDE.md as updated through a symlinked config root', async () => {
+    const canonicalConfigDir = join(tempRoot, 'canonical-claude-config');
+    rmSync(claudeConfigDir, { recursive: true, force: true });
+    mkdirSync(canonicalConfigDir, { recursive: true });
+    writeFileSync(join(canonicalConfigDir, 'CLAUDE.md'), 'existing user content\n');
+    symlinkSync(canonicalConfigDir, claudeConfigDir);
+
+    const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+    try {
+      const installer = await loadInstallerWithEnv(claudeConfigDir, homeDir);
+      const result = installer.install({
+        skipClaudeCheck: true,
+        skipHud: true,
+        verbose: true,
+      });
+
+      expect(result.success).toBe(true);
+      expect(logSpy).toHaveBeenCalledWith('Updated CLAUDE.md (merged with existing content)');
+      expect(logSpy).not.toHaveBeenCalledWith('Created CLAUDE.md');
+      expect(readFileSync(join(canonicalConfigDir, 'CLAUDE.md'), 'utf-8')).toContain('<!-- OMC:START -->');
+    } finally {
+      logSpy.mockRestore();
+    }
+  });
+
+  it('reports an unchanged CLAUDE.md as already up to date on a repeated install', async () => {
+    const claudeMdPath = join(claudeConfigDir, 'CLAUDE.md');
+    const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+    try {
+      const firstInstaller = await loadInstallerWithEnv(claudeConfigDir, homeDir);
+      const firstResult = firstInstaller.install({
+        skipClaudeCheck: true,
+        skipHud: true,
+        verbose: true,
+      });
+
+      expect(firstResult.success).toBe(true);
+      expect(logSpy).toHaveBeenCalledWith('Created CLAUDE.md');
+      const firstContent = readFileSync(claudeMdPath, 'utf-8');
+
+      logSpy.mockClear();
+      const secondInstaller = await loadInstallerWithEnv(claudeConfigDir, homeDir);
+      const secondResult = secondInstaller.install({
+        skipClaudeCheck: true,
+        skipHud: true,
+        verbose: true,
+      });
+
+      expect(secondResult.success).toBe(true);
+      expect(logSpy).toHaveBeenCalledWith('CLAUDE.md already up to date');
+      expect(logSpy).not.toHaveBeenCalledWith('Created CLAUDE.md');
+      expect(logSpy).not.toHaveBeenCalledWith('Updated CLAUDE.md (merged with existing content)');
+      expect(readFileSync(claudeMdPath, 'utf-8')).toBe(firstContent);
+    } finally {
+      logSpy.mockRestore();
+    }
+  });
+
+  describe('claudeMdEnabled opt-out', () => {
+    const SKIP_LOG = 'Skipping CLAUDE.md (claudeMdEnabled is false in .omc-config.json)';
+
+    it('leaves an existing CLAUDE.md untouched and logs a skip when claudeMdEnabled is false', async () => {
+      const claudeMdPath = join(claudeConfigDir, 'CLAUDE.md');
+      writeFileSync(claudeMdPath, '# My own global config\n');
+      writeFileSync(join(claudeConfigDir, '.omc-config.json'), JSON.stringify({ claudeMdEnabled: false }));
+
+      const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+      try {
+        const installer = await loadInstallerWithEnv(claudeConfigDir, homeDir);
+        const result = installer.install({ skipClaudeCheck: true, skipHud: true, verbose: true });
+
+        expect(result.success).toBe(true);
+        expect(logSpy).toHaveBeenCalledWith(SKIP_LOG);
+        expect(logSpy).not.toHaveBeenCalledWith('Created CLAUDE.md');
+        expect(logSpy).not.toHaveBeenCalledWith('Updated CLAUDE.md (merged with existing content)');
+        expect(readFileSync(claudeMdPath, 'utf-8')).toBe('# My own global config\n');
+        expect(existsSync(join(claudeConfigDir, 'CLAUDE-omc.md'))).toBe(false);
+        expect(JSON.parse(readFileSync(join(claudeConfigDir, '.omc-config.json'), 'utf-8')).claudeMdEnabled).toBe(false);
+      } finally {
+        logSpy.mockRestore();
+      }
+    });
+
+    it('does not create a CLAUDE.md when claudeMdEnabled is false and none exists', async () => {
+      writeFileSync(join(claudeConfigDir, '.omc-config.json'), JSON.stringify({ claudeMdEnabled: false }));
+
+      const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+      try {
+        const installer = await loadInstallerWithEnv(claudeConfigDir, homeDir);
+        const result = installer.install({ skipClaudeCheck: true, skipHud: true, verbose: true });
+
+        expect(result.success).toBe(true);
+        expect(logSpy).toHaveBeenCalledWith(SKIP_LOG);
+        expect(existsSync(join(claudeConfigDir, 'CLAUDE.md'))).toBe(false);
+      } finally {
+        logSpy.mockRestore();
+      }
+    });
+
+    for (const config of [undefined, { claudeMdEnabled: true }]) {
+      it(`still writes CLAUDE.md when claudeMdEnabled is ${config ? 'true' : 'absent'}`, async () => {
+        if (config) {
+          writeFileSync(join(claudeConfigDir, '.omc-config.json'), JSON.stringify(config));
+        }
+
+        const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+        try {
+          const installer = await loadInstallerWithEnv(claudeConfigDir, homeDir);
+          const result = installer.install({ skipClaudeCheck: true, skipHud: true, verbose: true });
+
+          expect(result.success).toBe(true);
+          expect(logSpy).toHaveBeenCalledWith('Created CLAUDE.md');
+          expect(logSpy).not.toHaveBeenCalledWith(SKIP_LOG);
+          expect(readFileSync(join(claudeConfigDir, 'CLAUDE.md'), 'utf-8')).toContain('<!-- OMC:START -->');
+        } finally {
+          logSpy.mockRestore();
+        }
+      });
+    }
+  });
+});

@@ -1,0 +1,107 @@
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import * as fs from 'fs';
+import { execFileSync } from 'node:child_process';
+import * as os from 'os';
+import * as path from 'path';
+
+const workerMocks = vi.hoisted(() => ({
+  spawnSessionEndWorker: vi.fn(),
+}));
+
+vi.mock('../worker.js', () => ({
+  spawnSessionEndWorker: workerMocks.spawnSessionEndWorker,
+  processSessionEndWorker: vi.fn(),
+}));
+
+vi.mock('../../../lib/worktree-paths.js', async () => {
+  const actual = await vi.importActual<typeof import('../../../lib/worktree-paths.js')>(
+    '../../../lib/worktree-paths.js',
+  );
+  return {
+    ...actual,
+    resolveToWorktreeRoot: vi.fn((directory?: string) => directory ?? process.cwd()),
+  };
+});
+
+import { processSessionEnd, resolveSessionEndCleanupBudgetMs } from '../index.js';
+import { readSessionEndJob } from '../cleanup-manifest.js';
+
+describe('SessionEnd foreground manifest handoff (issue #1700)', () => {
+  let tmpDir: string;
+  let repoRoot: string;
+  let transcriptPath: string;
+  let stateRoot: string;
+
+  beforeEach(() => {
+    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'omc-session-end-timeout-'));
+    repoRoot = path.join(tmpDir, 'repo');
+    fs.mkdirSync(repoRoot, { recursive: true });
+    execFileSync('git', ['init', '--quiet'], { cwd: repoRoot, stdio: 'ignore' });
+    stateRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'omc-session-end-state-'));
+    vi.stubEnv('OMC_STATE_DIR', stateRoot);
+    transcriptPath = path.join(tmpDir, 'transcript.jsonl');
+    fs.writeFileSync(
+      transcriptPath,
+      JSON.stringify({ type: 'assistant', message: { content: [{ type: 'text', text: 'done' }] } }),
+      'utf-8',
+    );
+    vi.clearAllMocks();
+  });
+
+  afterEach(() => {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+    fs.rmSync(stateRoot, { recursive: true, force: true });
+    vi.unstubAllEnvs();
+  });
+
+  it('keeps the SessionEnd manifest timeout at least 30 seconds', () => {
+    const hooksJsonPath = path.resolve(__dirname, '../../../../hooks/hooks.json');
+    const hooksJson = JSON.parse(fs.readFileSync(hooksJsonPath, 'utf-8'));
+
+    for (const entry of hooksJson.hooks.SessionEnd) {
+      for (const hook of entry.hooks) {
+        expect(hook.timeout).toBeGreaterThanOrEqual(30);
+      }
+    }
+  });
+
+  it('returns within the foreground deadline after publishing deferred worker actions', async () => {
+    const sessionId = 'timeout-test-manifest';
+    const startedAt = Date.now();
+
+    await expect(processSessionEnd({
+      session_id: sessionId,
+      transcript_path: transcriptPath,
+      cwd: repoRoot,
+      permission_mode: 'default',
+      hook_event_name: 'SessionEnd',
+      reason: 'clear',
+    })).resolves.toEqual({ continue: true });
+
+    expect(Date.now() - startedAt).toBeLessThanOrEqual(500);
+    expect(workerMocks.spawnSessionEndWorker).toHaveBeenCalledWith({ directory: repoRoot, sessionId });
+
+    const manifest = readSessionEndJob(repoRoot, sessionId);
+    expect(manifest).toEqual(expect.objectContaining({
+      sessionId,
+      producers: expect.objectContaining({ core: expect.objectContaining({ state: 'sealed' }) }),
+    }));
+    expect(manifest?.actions.callback).toEqual(expect.objectContaining({
+      class: 'best-effort',
+      phase: 'deferred-best-effort',
+      status: 'pending',
+    }));
+    expect(manifest?.actions.notification).toEqual(expect.objectContaining({
+      class: 'best-effort',
+      phase: 'deferred-best-effort',
+      status: 'pending',
+    }));
+  });
+
+  it('resolves the legacy cleanup budget environment setting compatibly', () => {
+    expect(resolveSessionEndCleanupBudgetMs({})).toBe(2000);
+    expect(resolveSessionEndCleanupBudgetMs({ OMC_SESSIONEND_CLEANUP_BUDGET_MS: '250' })).toBe(250);
+    expect(resolveSessionEndCleanupBudgetMs({ OMC_SESSIONEND_CLEANUP_BUDGET_MS: '25000' })).toBe(10000);
+    expect(resolveSessionEndCleanupBudgetMs({ OMC_SESSIONEND_CLEANUP_BUDGET_MS: 'not-a-number' })).toBe(2000);
+  });
+});

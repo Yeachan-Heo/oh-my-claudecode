@@ -1,0 +1,36 @@
+{
+  "metadata": {
+    "schema_version": "shellmark/v1",
+    "event_id": 1,
+    "session_id": "20260310T014715888Z",
+    "timestamp_start": "2026-03-10T01:46:53.739867829Z",
+    "timestamp_end": "2026-03-10T01:47:15.885361521Z",
+    "command": "npm run test",
+    "cwd": "/home/bellman/Workspace/oh-my-claudecode",
+    "status": "success",
+    "exit_code": 0,
+    "duration_ms": 22145,
+    "bytes_stdout": 47208,
+    "bytes_stderr": 119586,
+    "provider_used": "deterministic-fallback",
+    "router_class": "medium",
+    "raw_path": "sessions/20260310T014715888Z/events/000001.raw.txt",
+    "summary_path": "sessions/20260310T014715888Z/events/000001.summary.md",
+    "tags": [
+      "success"
+    ]
+  },
+  "provider_trace": {
+    "provider_name": "unsupported-provider",
+    "model_name": null,
+    "latency_ms": null,
+    "error": "provider execution is not configured in the MVP"
+  },
+  "sanitize_notes": [
+    "stripped ANSI escape sequences",
+    "stripped ANSI escape sequences",
+    "trimmed stream to 65536 bytes window"
+  ],
+  "stdout_truncated": false,
+  "stderr_truncated": true
+}

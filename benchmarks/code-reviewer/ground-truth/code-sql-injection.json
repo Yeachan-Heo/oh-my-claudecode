@@ -1,0 +1,62 @@
+{
+  "fixtureId": "code-sql-injection",
+  "fixturePath": "fixtures/code/code-sql-injection.md",
+  "domain": "code",
+  "expectedVerdict": "REJECT",
+  "isCleanBaseline": false,
+  "findings": [
+    {
+      "id": "SQL-CRIT-1",
+      "severity": "CRITICAL",
+      "category": "finding",
+      "summary": "SQL injection via string interpolation in search query — user input directly concatenated into SQL",
+      "keywords": ["SQL", "injection", "interpolation", "concatenat", "parameteriz", "prepared"],
+      "location": "GET /search:33",
+      "explanation": "The search query uses string interpolation to insert user input directly into the SQL string: WHERE username LIKE '%${q}%'. An attacker can inject arbitrary SQL (e.g., q='; DROP TABLE users; --) to read, modify, or delete data. Must use parameterized queries ($1, $2) with pool.query(sql, params)."
+    },
+    {
+      "id": "SQL-CRIT-2",
+      "severity": "CRITICAL",
+      "category": "finding",
+      "summary": "SQL injection in role filter — role parameter concatenated without parameterization",
+      "keywords": ["SQL", "injection", "role", "filter", "parameteriz"],
+      "location": "GET /search:38",
+      "explanation": "The role filter uses string interpolation: AND role = '${role}'. This is a second SQL injection vector. Even though the search query is also vulnerable, this is independently exploitable."
+    },
+    {
+      "id": "SQL-CRIT-3",
+      "severity": "CRITICAL",
+      "category": "finding",
+      "summary": "SQL injection in DELETE endpoint — userId from URL path interpolated into SQL",
+      "keywords": ["SQL", "injection", "delete", "userId", "parameter"],
+      "location": "DELETE /:id:67",
+      "explanation": "The delete route interpolates req.params.id directly into SQL: WHERE id = ${userId}. An attacker can craft a URL like /api/users/1 OR 1=1 to soft-delete all users."
+    },
+    {
+      "id": "SQL-MAJ-1",
+      "severity": "MAJOR",
+      "category": "finding",
+      "summary": "No authentication or authorization check on DELETE endpoint",
+      "keywords": ["auth", "authorization", "middleware", "delete", "permission"],
+      "explanation": "The DELETE endpoint performs a destructive operation (soft-delete) but has no authentication middleware or role-based authorization check. Any unauthenticated user can delete any account."
+    },
+    {
+      "id": "SQL-MAJ-2",
+      "severity": "MAJOR",
+      "category": "finding",
+      "summary": "Search query logged with user input — potential log injection",
+      "keywords": ["log", "console", "search", "user input", "inject"],
+      "location": "GET /search:53",
+      "explanation": "console.log includes raw user input (q and role) which could contain newlines or control characters for log injection attacks. User input should be sanitized before logging."
+    },
+    {
+      "id": "SQL-MIN-1",
+      "severity": "MINOR",
+      "category": "finding",
+      "summary": "sortField validated against allowlist but still interpolated — should use parameterized ORDER BY",
+      "keywords": ["sort", "ORDER BY", "allowlist", "interpolat"],
+      "location": "GET /search:42-44",
+      "explanation": "While sortField is validated against allowedSortFields (good), it's still interpolated into the SQL string. The allowlist approach works but parameterized column references via a mapping object would be more robust against future modifications."
+    }
+  ]
+}

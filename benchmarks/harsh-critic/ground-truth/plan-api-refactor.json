@@ -1,0 +1,80 @@
+{
+  "fixtureId": "plan-api-refactor",
+  "fixturePath": "fixtures/plans/plan-api-refactor.md",
+  "domain": "plan",
+  "expectedVerdict": "REJECT",
+  "isCleanBaseline": false,
+  "findings": [
+    {
+      "id": "API-CRIT-1",
+      "severity": "CRITICAL",
+      "category": "finding",
+      "summary": "Wrong file path — plan references src/api/routes.ts but target structure uses src/routes/api.ts",
+      "keywords": ["src/api/routes", "src/routes/api", "wrong", "path", "file"],
+      "location": "Task 1, Current State route file structure and Task 5",
+      "explanation": "Task 1 directs engineers to audit src/api/routes.ts (458 lines) as the primary route definitions file, but the Target State in Task 5 moves routes to src/routes/api.ts. Tasks that reference the source file by the old path will fail or confuse executors who have already performed the consolidation."
+    },
+    {
+      "id": "API-MAJ-1",
+      "severity": "MAJOR",
+      "category": "finding",
+      "summary": "No backward compatibility strategy for external API consumers",
+      "keywords": ["backward", "compatibility", "existing", "consumers", "breaking"],
+      "location": "Scope section and Task 4",
+      "explanation": "The plan renames models and routes extensively (Account→Organization, /api/accounts→/api/v1/organizations) and mentions 301 redirects for 90 days for internal consumers only. External consumers of the public API are not addressed despite the stated goal being preparation for a public API launch."
+    },
+    {
+      "id": "API-MAJ-2",
+      "severity": "MAJOR",
+      "category": "finding",
+      "summary": "Missing API versioning transition approach — how v1 and future v2 coexist is undefined",
+      "keywords": ["versioning", "v1", "v2", "transition", "API"],
+      "location": "Task 5, Route Consolidation",
+      "explanation": "Task 5 adds a placeholder comment for v2 routes but provides no versioning strategy: no deprecation policy, no contract about what changes are allowed within v1 vs requiring v2, and no timeline. The plan states versioning is a goal but delivers only a prefix, not a strategy."
+    },
+    {
+      "id": "API-MIN-1",
+      "severity": "MINOR",
+      "category": "finding",
+      "summary": "Inconsistent error format in target state — details field type is ambiguous",
+      "keywords": ["error", "format", "inconsistent", "response", "message"],
+      "location": "Target State, Error Response Standard",
+      "explanation": "The standardized error format defines details as {} (optional, for validation errors) but provides no schema or type definition. Implementors will interpret this differently, recreating the inconsistency the plan aims to fix."
+    },
+    {
+      "id": "API-MISS-1",
+      "severity": "MAJOR",
+      "category": "missing",
+      "summary": "No database migration plan for renamed models",
+      "keywords": ["database", "migration", "renamed", "models", "schema"],
+      "explanation": "The plan renames Account→Organization, Item→Product, Ledger→Invoice at the API layer but the Out of Scope section defers database schema changes to Q3. There is no plan for keeping API model names in sync with database column/table names during this intermediate period, creating a confusing mapping layer."
+    },
+    {
+      "id": "API-MISS-2",
+      "severity": "MAJOR",
+      "category": "missing",
+      "summary": "No API documentation update plan for existing consumers during transition",
+      "keywords": ["documentation", "OpenAPI", "Swagger", "update", "API docs"],
+      "explanation": "Task 6 generates a new OpenAPI spec, but there is no plan to communicate API changes to existing consumers before the cutover, no changelog, and no deprecation notices in the existing documentation. External developers using the current API have no warning."
+    },
+    {
+      "id": "API-PERSP-SEC-1",
+      "severity": "CRITICAL",
+      "category": "perspective",
+      "perspective": "security",
+      "summary": "Auth middleware consolidation creates a window where certain routes have no auth middleware applied",
+      "keywords": ["auth", "middleware", "gap", "window", "deprecated"],
+      "location": "Task 3, Note paragraph",
+      "explanation": "Task 3 explicitly states: 'certain service routes will not have any auth middleware applied' during the transition period. This is documented as 'expected' but represents a security gap where routes are temporarily unprotected in production. This should be CRITICAL — unauthenticated access to API routes is not an acceptable transient state."
+    },
+    {
+      "id": "API-PERSP-OPS-1",
+      "severity": "MAJOR",
+      "category": "perspective",
+      "perspective": "ops",
+      "summary": "No canary or blue-green deployment strategy for a breaking API refactor",
+      "keywords": ["canary", "blue-green", "deployment", "rollout", "staged"],
+      "explanation": "The plan describes a big-bang cutover in Week 5 with no staged deployment strategy. Given that route paths, model names, and error formats are all changing simultaneously, a single production cutover without canary or blue-green deployment creates high blast radius if anything goes wrong."
+    }
+  ]
+}

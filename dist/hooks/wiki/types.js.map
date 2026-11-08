@@ -1,0 +1,1 @@
+{"version":3,"file":"types.js","sourceRoot":"","sources":["../../../src/hooks/wiki/types.ts"],"names":[],"mappings":"AAAA;;;;;;GAMG;AAEH,+EAA+E;AAC/E,cAAc;AACd,+EAA+E;AAE/E,mFAAmF;AACnF,MAAM,CAAC,MAAM,mBAAmB,GAAG,CAAC,CAAC;AAqKrC,kCAAkC;AAClC,MAAM,CAAC,MAAM,mBAAmB,GAAe;IAC7C,WAAW,EAAE,IAAI;IACjB,SAAS,EAAE,EAAE;IACb,WAAW,EAAE,MAAM,EAAE,OAAO;CAC7B,CAAC"}

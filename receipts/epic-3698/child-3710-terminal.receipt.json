@@ -1,0 +1,22 @@
+{
+  "schemaVersion": 1,
+  "kind": "child-terminal",
+  "issue": 3710,
+  "createdAt": "2026-08-23T04:50:43.895Z",
+  "payload": {
+    "state": "merged",
+    "evidence": {
+      "pullRequest": {
+        "number": 3719,
+        "headSha": "c8526e40aee2994d285fa176f7245164cc1d4ec4"
+      },
+      "commit": {
+        "sha": "eec055401ebd8849246084928300198c85d21db0"
+      },
+      "status": {
+        "conclusion": "failure",
+        "sha": "c8526e40aee2994d285fa176f7245164cc1d4ec4"
+      }
+    }
+  }
+}

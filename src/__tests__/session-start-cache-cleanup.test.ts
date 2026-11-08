@@ -1,0 +1,398 @@
+import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { mkdtempSync, mkdirSync, writeFileSync, rmSync, existsSync, lstatSync, readlinkSync, readdirSync, realpathSync, symlinkSync } from 'fs';
+import { join, relative, resolve } from 'path';
+import { tmpdir } from 'os';
+import { execFileSync } from 'child_process';
+import { pathIdentity, publishCacheOccupancy, readOccupiedPluginRoots } from '../utils/cache-occupancy.js';
+import { purgeStalePluginCacheVersions } from '../utils/paths.js';
+
+const SCRIPT_PATH = join(__dirname, '..', '..', 'scripts', 'session-start.mjs');
+const NODE = process.execPath;
+
+/**
+ * Integration tests for the plugin cache cleanup logic in session-start.mjs.
+ *
+ * The script's cleanup block scans ~/.claude/plugins/cache/omc/oh-my-claudecode/
+ * for version directories, keeps the latest 2 real directories, and replaces
+ * older versions with symlinks pointing to the latest version. This prevents
+ * "Cannot find module" errors when a running session's CLAUDE_PLUGIN_ROOT
+ * still points to an old (now-removed) version directory.
+ */
+describe('session-start.mjs — plugin cache cleanup uses symlinks', () => {
+  let tmpDir: string;
+  let fakeHome: string;
+  let fakeCacheBase: string;
+  let fakeProject: string;
+
+  beforeEach(() => {
+    tmpDir = mkdtempSync(join(tmpdir(), 'omc-cache-test-'));
+    fakeHome = join(tmpDir, 'home');
+    fakeCacheBase = join(fakeHome, '.claude', 'plugins', 'cache', 'omc', 'oh-my-claudecode');
+    fakeProject = join(tmpDir, 'project');
+
+    // Create fake project directory with .omc
+    mkdirSync(join(fakeProject, '.omc', 'state'), { recursive: true });
+    // session-start validateCwd requires a real workspace anchor (.git / .omc-workspace)
+    mkdirSync(join(fakeProject, '.git'), { recursive: true });
+
+    // Create fake cache base
+    mkdirSync(fakeCacheBase, { recursive: true });
+  });
+
+  afterEach(() => {
+    rmSync(tmpDir, { recursive: true, force: true });
+  });
+
+  function createFakeVersion(version: string) {
+    const versionDir = join(fakeCacheBase, version);
+    mkdirSync(join(versionDir, 'scripts'), { recursive: true });
+    writeFileSync(join(versionDir, 'scripts', 'run.cjs'), '// stub');
+    writeFileSync(join(versionDir, 'scripts', 'session-start.mjs'), '// stub');
+    writeFileSync(join(versionDir, 'package.json'), JSON.stringify({ version }));
+    return versionDir;
+  }
+
+  function runSessionStart(env: Record<string, string> = {}) {
+    // We can't easily run the full session-start.mjs because it reads stdin
+    // and relies on many env vars. Instead, we test the cleanup logic by
+    // providing the minimal input it needs.
+    try {
+      const result = execFileSync(NODE, [SCRIPT_PATH], {
+        input: JSON.stringify({
+          hook_event_name: 'SessionStart',
+          session_id: 'test-session',
+          cwd: fakeProject,
+        }),
+        encoding: 'utf-8',
+        env: {
+          ...process.env,
+          HOME: fakeHome,
+          USERPROFILE: fakeHome, // Windows compat
+          CLAUDE_CONFIG_DIR: join(fakeHome, '.claude'), // Override to use fake home
+          CLAUDE_PLUGIN_ROOT: join(fakeCacheBase, '4.4.3'),
+          ...env,
+        },
+        timeout: 15000,
+      });
+      return result.trim();
+    } catch (err: any) {
+      // The script may exit with non-zero but we still want its stdout
+      return err.stdout?.trim() || '';
+    }
+  }
+
+  function createExternalPluginRoot(version: string) {
+    const externalRoot = join(tmpDir, 'external-plugin-root');
+    mkdirSync(join(externalRoot, 'dist', 'notifications'), { recursive: true });
+    writeFileSync(join(externalRoot, 'package.json'), JSON.stringify({ version }));
+    writeFileSync(join(externalRoot, 'dist', 'notifications', 'index.js'), 'export async function notify() {}\n');
+    writeFileSync(join(externalRoot, 'dist', 'notifications', 'reply-listener.js'), 'export async function buildDaemonConfig() { return null; }\nexport function startReplyListener() {}\n');
+    return externalRoot;
+  }
+
+  it('keeps explicit external plugin roots authoritative for update checks', () => {
+    createFakeVersion('4.14.5');
+    const externalRoot = createExternalPluginRoot('4.14.4');
+    const updateCache = join(fakeHome, '.claude', '.omc', 'update-check.json');
+    mkdirSync(join(fakeHome, '.claude', '.omc'), { recursive: true });
+    writeFileSync(updateCache, JSON.stringify({
+      timestamp: Date.now(),
+      latestVersion: '4.14.5',
+      currentVersion: '4.14.4',
+      updateAvailable: true,
+    }));
+
+    const output = runSessionStart({ CLAUDE_PLUGIN_ROOT: externalRoot });
+    const parsed = JSON.parse(output);
+
+    expect(parsed.systemMessage).toContain('[OMC UPDATE AVAILABLE]');
+    expect(parsed.systemMessage).toContain('current: v4.14.4');
+  });
+
+  it('uses latest managed cache version for stale managed cache roots', () => {
+    createFakeVersion('4.14.4');
+    createFakeVersion('4.14.5');
+    const updateCache = join(fakeHome, '.claude', '.omc', 'update-check.json');
+    mkdirSync(join(fakeHome, '.claude', '.omc'), { recursive: true });
+    writeFileSync(updateCache, JSON.stringify({
+      timestamp: Date.now(),
+      latestVersion: '4.14.5',
+      currentVersion: '4.14.4',
+      updateAvailable: true,
+    }));
+
+    const output = runSessionStart({ CLAUDE_PLUGIN_ROOT: join(fakeCacheBase, '4.14.4') });
+    const parsed = JSON.parse(output);
+
+    expect(parsed.systemMessage).toBeUndefined();
+  });
+
+  it('replaces old versions (beyond latest 2) with symlinks to the latest', () => {
+    createFakeVersion('4.4.1');
+    createFakeVersion('4.4.2');
+    createFakeVersion('4.4.3');
+
+    runSessionStart();
+
+    // 4.4.3 (latest) and 4.4.2 (2nd latest) should remain as real directories
+    const v3Stat = lstatSync(join(fakeCacheBase, '4.4.3'));
+    expect(v3Stat.isDirectory()).toBe(true);
+    expect(v3Stat.isSymbolicLink()).toBe(false);
+
+    const v2Stat = lstatSync(join(fakeCacheBase, '4.4.2'));
+    expect(v2Stat.isDirectory()).toBe(true);
+    expect(v2Stat.isSymbolicLink()).toBe(false);
+
+    // 4.4.1 (oldest) should be a symlink to 4.4.3
+    const v1Stat = lstatSync(join(fakeCacheBase, '4.4.1'));
+    expect(v1Stat.isSymbolicLink()).toBe(true);
+
+    const target = readlinkSync(join(fakeCacheBase, '4.4.1'));
+    expect(target).toBe('4.4.3');
+  });
+
+  it('with only 2 versions, no symlinks are created', () => {
+    createFakeVersion('4.4.2');
+    createFakeVersion('4.4.3');
+
+    runSessionStart();
+
+    // Both should remain as real directories
+    const v3Stat = lstatSync(join(fakeCacheBase, '4.4.3'));
+    expect(v3Stat.isDirectory()).toBe(true);
+    expect(v3Stat.isSymbolicLink()).toBe(false);
+
+    const v2Stat = lstatSync(join(fakeCacheBase, '4.4.2'));
+    expect(v2Stat.isDirectory()).toBe(true);
+    expect(v2Stat.isSymbolicLink()).toBe(false);
+  });
+
+  it('symlinked old version still resolves scripts correctly', () => {
+    createFakeVersion('4.4.1');
+    createFakeVersion('4.4.2');
+    createFakeVersion('4.4.3');
+
+    runSessionStart();
+
+    // Verify that accessing a script through the symlinked old version works
+    const scriptPath = join(fakeCacheBase, '4.4.1', 'scripts', 'run.cjs');
+    expect(existsSync(scriptPath)).toBe(true);
+  });
+
+  it('handles 4+ versions, symlinking all but latest 2', () => {
+    createFakeVersion('4.4.0');
+    createFakeVersion('4.4.1');
+    createFakeVersion('4.4.2');
+    createFakeVersion('4.4.3');
+
+    runSessionStart();
+
+    // 4.4.3 and 4.4.2: real directories
+    expect(lstatSync(join(fakeCacheBase, '4.4.3')).isSymbolicLink()).toBe(false);
+    expect(lstatSync(join(fakeCacheBase, '4.4.2')).isSymbolicLink()).toBe(false);
+
+    // 4.4.1 and 4.4.0: symlinks to 4.4.3
+    expect(lstatSync(join(fakeCacheBase, '4.4.1')).isSymbolicLink()).toBe(true);
+    expect(readlinkSync(join(fakeCacheBase, '4.4.1'))).toBe('4.4.3');
+
+    expect(lstatSync(join(fakeCacheBase, '4.4.0')).isSymbolicLink()).toBe(true);
+    expect(readlinkSync(join(fakeCacheBase, '4.4.0'))).toBe('4.4.3');
+  });
+
+  it('ignores orphaned *.tmp~* directories when choosing versions (issue #4263)', () => {
+    createFakeVersion('4.4.1');
+    createFakeVersion('4.4.2');
+    createFakeVersion('4.4.3');
+    // Interrupted updates leave orphans holding only package.json. With several
+    // of them, at most two could be kept by an unfiltered scan, so the rest
+    // would be replaced by symlinks: the regression is observable regardless
+    // of readdir order.
+    const orphans = Array.from({ length: 6 }, (_, i) => `4.4.3.tmp~orphan${i}`);
+    for (const orphan of orphans) {
+      mkdirSync(join(fakeCacheBase, orphan), { recursive: true });
+      writeFileSync(join(fakeCacheBase, orphan, 'package.json'), JSON.stringify({ version: '4.4.3' }));
+    }
+
+    runSessionStart();
+
+    for (const orphan of orphans) {
+      const stat = lstatSync(join(fakeCacheBase, orphan));
+      expect(stat.isSymbolicLink()).toBe(false);
+      expect(stat.isDirectory()).toBe(true);
+    }
+    expect(lstatSync(join(fakeCacheBase, '4.4.1')).isSymbolicLink()).toBe(true);
+    expect(readlinkSync(join(fakeCacheBase, '4.4.1'))).toBe('4.4.3');
+    expect(existsSync(join(fakeCacheBase, '4.4.1', 'scripts', 'run.cjs'))).toBe(true);
+  });
+
+  it('updates an existing symlink pointing to a non-latest target', () => {
+    createFakeVersion('4.4.2');
+    createFakeVersion('4.4.3');
+
+    // Manually create a stale symlink: 4.4.1 -> 4.4.2 (not the latest 4.4.3)
+    const { symlinkSync } = require('fs');
+    symlinkSync('4.4.2', join(fakeCacheBase, '4.4.1'));
+
+    runSessionStart();
+
+    // 4.4.1 should now be a symlink to 4.4.3 (updated from 4.4.2)
+    const v1Stat = lstatSync(join(fakeCacheBase, '4.4.1'));
+    expect(v1Stat.isSymbolicLink()).toBe(true);
+    expect(readlinkSync(join(fakeCacheBase, '4.4.1'))).toBe('4.4.3');
+
+    // 4.4.3 and 4.4.2 remain as real directories
+    expect(lstatSync(join(fakeCacheBase, '4.4.3')).isSymbolicLink()).toBe(false);
+    expect(lstatSync(join(fakeCacheBase, '4.4.2')).isSymbolicLink()).toBe(false);
+  });
+
+  function resolveErrorCode(path: string): string | null {
+    try {
+      realpathSync(path);
+      return null;
+    } catch (err: any) {
+      return err.code ?? 'UNKNOWN';
+    }
+  }
+
+  it('does not link a stale plugin root into a cycle when the only cache entry is a dangling symlink', () => {
+    // 4.14.2 -> 4.14.5 is dangling: the real 4.14.5 directory was removed.
+    const danglingLink = join(fakeCacheBase, '4.14.2');
+    symlinkSync('4.14.5', danglingLink);
+    const staleRoot = join(fakeCacheBase, '4.14.5');
+
+    runSessionStart({ CLAUDE_PLUGIN_ROOT: staleRoot });
+
+    // Linking 4.14.5 -> 4.14.2 would close a two-link cycle (ELOOP on every hook).
+    expect(resolveErrorCode(staleRoot)).not.toBe('ELOOP');
+    expect(resolveErrorCode(danglingLink)).not.toBe('ELOOP');
+    expect(readdirSync(fakeCacheBase)).toEqual(['4.14.2']);
+    expect(readlinkSync(danglingLink)).toBe('4.14.5');
+  });
+
+  it('points a stale plugin root at the real directory, not at a newer-named symlink', () => {
+    // Downgrade shape: 4.14.5 is a symlink to the only real directory, 4.14.2.
+    const realDir = createFakeVersion('4.14.2');
+    symlinkSync('4.14.2', join(fakeCacheBase, '4.14.5'));
+    const staleRoot = join(fakeCacheBase, '4.14.4'); // removed version
+
+    runSessionStart({ CLAUDE_PLUGIN_ROOT: staleRoot });
+
+    expect(lstatSync(staleRoot).isSymbolicLink()).toBe(true);
+    const target = resolve(fakeCacheBase, readlinkSync(staleRoot));
+    expect(target).toBe(realDir);
+    expect(lstatSync(target).isSymbolicLink()).toBe(false);
+    expect(existsSync(join(staleRoot, 'scripts', 'run.cjs'))).toBe(true);
+  });
+
+  it('keep-latest-2 pass re-points old entries at the real latest directory when the highest entry is a symlink', () => {
+    createFakeVersion('4.4.1');
+    createFakeVersion('4.4.2');
+    createFakeVersion('4.4.3');
+    symlinkSync('4.4.3', join(fakeCacheBase, '4.5.0'));
+
+    runSessionStart();
+
+    expect(lstatSync(join(fakeCacheBase, '4.4.3')).isSymbolicLink()).toBe(false);
+    expect(lstatSync(join(fakeCacheBase, '4.5.0')).isSymbolicLink()).toBe(true);
+    expect(readlinkSync(join(fakeCacheBase, '4.5.0'))).toBe('4.4.3');
+    for (const old of ['4.4.2', '4.4.1']) {
+      expect(lstatSync(join(fakeCacheBase, old)).isSymbolicLink()).toBe(true);
+      expect(readlinkSync(join(fakeCacheBase, old))).toBe('4.4.3');
+    }
+    expect(existsSync(join(fakeCacheBase, '4.4.1', 'scripts', 'run.cjs'))).toBe(true);
+  });
+
+  it('never replaces the only real directory with a symlink when newer entries are symlinks', () => {
+    createFakeVersion('4.4.3');
+    symlinkSync('4.4.3', join(fakeCacheBase, '5.0.0'));
+    symlinkSync('4.4.3', join(fakeCacheBase, '4.9.0'));
+
+    runSessionStart({ CLAUDE_PLUGIN_ROOT: join(fakeCacheBase, '5.0.0') });
+
+    const realDir = join(fakeCacheBase, '4.4.3');
+    expect(lstatSync(realDir).isSymbolicLink()).toBe(false);
+    expect(lstatSync(realDir).isDirectory()).toBe(true);
+    expect(existsSync(join(realDir, 'package.json'))).toBe(true);
+    expect(resolveErrorCode(join(fakeCacheBase, '5.0.0'))).toBeNull();
+  });
+
+  it('with only 1 version, no cleanup is needed', () => {
+    createFakeVersion('4.4.3');
+
+    runSessionStart();
+
+    // Single version should remain as a real directory
+    const entries = readdirSync(fakeCacheBase);
+    expect(entries).toEqual(['4.4.3']);
+
+    const v3Stat = lstatSync(join(fakeCacheBase, '4.4.3'));
+    expect(v3Stat.isDirectory()).toBe(true);
+    expect(v3Stat.isSymbolicLink()).toBe(false);
+  });
+
+  it('retains a mixed-case occupied root in source purge on simulated Windows', async () => {
+    const staleVersion = createFakeVersion('4.4.1');
+    const configDir = join(fakeHome, '.claude');
+    const installedFile = join(configDir, 'plugins', 'installed_plugins.json');
+    mkdirSync(join(configDir, 'plugins'), { recursive: true });
+    writeFileSync(installedFile, JSON.stringify({
+      version: 2,
+      // Keep the only cache version outside an active sibling namespace so the
+      // purge reaches its destructive no-sibling branch.
+      plugins: { 'other-plugin@other': [{ installPath: join(tmpDir, 'other-plugin', '1.0.0') }] },
+    }));
+
+    const mixedCaseRoot = staleVersion.replace('oh-my-claudecode', 'Oh-My-ClaudeCode');
+    const originalPlatform = process.platform;
+    const originalConfigDir = process.env.CLAUDE_CONFIG_DIR;
+    process.env.CLAUDE_CONFIG_DIR = configDir;
+    try {
+      // Publish through the real occupancy writer so the record carries this
+      // process's live PID/start identity; only the path casing is simulated.
+      expect(await publishCacheOccupancy(mixedCaseRoot, configDir)).toBe(true);
+      Object.defineProperty(process, 'platform', { value: 'win32', configurable: true });
+
+      const occupancy = readOccupiedPluginRoots(configDir);
+      expect(occupancy.unavailable).toBe(false);
+      expect(occupancy.roots).toContain(pathIdentity(staleVersion));
+
+      const result = purgeStalePluginCacheVersions({ skipGracePeriod: true });
+
+      expect(result.removed).toBe(0);
+      expect(result.skippedPaths).toContain(staleVersion);
+      expect(lstatSync(staleVersion).isDirectory()).toBe(true);
+      expect(lstatSync(staleVersion).isSymbolicLink()).toBe(false);
+    } finally {
+      Object.defineProperty(process, 'platform', { value: originalPlatform, configurable: true });
+      if (originalConfigDir === undefined) delete process.env.CLAUDE_CONFIG_DIR;
+      else process.env.CLAUDE_CONFIG_DIR = originalConfigDir;
+    }
+  });
+
+  it('preserves lexical install-path comparison on non-Windows source purge', () => {
+    const staleVersion = createFakeVersion('4.4.1');
+    const configDir = join(fakeHome, '.claude');
+    mkdirSync(join(configDir, 'plugins'), { recursive: true });
+    writeFileSync(join(configDir, 'plugins', 'installed_plugins.json'), JSON.stringify({
+      version: 2,
+      // This resolves to staleVersion, but the historical non-Windows
+      // comparison intentionally treats the relative spelling lexically.
+      plugins: { 'other-plugin@other': [{ installPath: relative(process.cwd(), staleVersion) }] },
+    }));
+
+    const originalPlatform = process.platform;
+    const originalConfigDir = process.env.CLAUDE_CONFIG_DIR;
+    process.env.CLAUDE_CONFIG_DIR = configDir;
+    try {
+      Object.defineProperty(process, 'platform', { value: 'linux', configurable: true });
+      const result = purgeStalePluginCacheVersions({ skipGracePeriod: true });
+
+      expect(result.removed).toBe(1);
+      expect(result.removedPaths).toContain(staleVersion);
+    } finally {
+      Object.defineProperty(process, 'platform', { value: originalPlatform, configurable: true });
+      if (originalConfigDir === undefined) delete process.env.CLAUDE_CONFIG_DIR;
+      else process.env.CLAUDE_CONFIG_DIR = originalConfigDir;
+    }
+  });
+});

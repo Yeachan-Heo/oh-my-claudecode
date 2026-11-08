@@ -1,0 +1,355 @@
+import { execFileSync } from 'node:child_process';
+import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { afterEach, describe, expect, it } from 'vitest';
+import { clearWorktreeCache, resolveSessionStatePaths } from '../lib/worktree-paths.js';
+import { PASTED_ECHO_PROMPT_SENTINEL } from '../hooks/autopilot/enforcement.js';
+
+const SCRIPT_PATH = join(process.cwd(), 'scripts', 'keyword-detector.mjs');
+const NODE = process.execPath;
+
+const tempDirs: string[] = [];
+const fixtureEnvironments = new Map<string, NodeJS.ProcessEnv>();
+const ROOT_ENV_KEYS = [
+  'HOME',
+  'USERPROFILE',
+  'OMC_STATE_DIR',
+  'CLAUDE_CONFIG_DIR',
+  'CLAUDE_PLUGIN_ROOT',
+  'OMC_DISABLE_MULTIREPO',
+] as const;
+
+function makeCwd(prefix: string): string {
+  const dir = mkdtempSync(join(tmpdir(), prefix));
+  tempDirs.push(dir);
+  return dir;
+}
+
+afterEach(() => {
+  fixtureEnvironments.clear();
+  while (tempDirs.length > 0) {
+    const dir = tempDirs.pop();
+    if (dir) {
+      try { rmSync(dir, { recursive: true, force: true }); } catch { /* best effort */ }
+    }
+  }
+});
+
+function runKeywordDetector(prompt: string, cwd: string, sessionId: string) {
+  // Hook subprocesses must not inherit the runner's state/config roots. A
+  // per-invocation OMC_STATE_DIR also exercises the same non-git canonical
+  // resolver path used in production without writing into the checkout or
+  // the host user's home directory.
+  const homeDir = mkdtempSync(join(tmpdir(), 'kd-echo-home-'));
+  tempDirs.push(homeDir);
+  const childEnv: NodeJS.ProcessEnv = {
+    ...process.env,
+    NODE_ENV: 'test',
+    DISABLE_OMC: '',
+    OMC_SKIP_HOOKS: '',
+    OMC_TEAM_WORKER: '',
+    OMC_DISABLE_MULTIREPO: '',
+    OMC_STATE_DIR: join(homeDir, 'omc-state'),
+    CLAUDE_PLUGIN_ROOT: '',
+    HOME: homeDir,
+    USERPROFILE: homeDir,
+    CLAUDE_CONFIG_DIR: join(homeDir, '.claude'),
+    XDG_CONFIG_HOME: join(homeDir, '.config'),
+    APPDATA: join(homeDir, 'AppData', 'Roaming'),
+  };
+  fixtureEnvironments.set(cwd, childEnv);
+
+  const raw = execFileSync(NODE, [SCRIPT_PATH], {
+    cwd,
+    input: JSON.stringify({
+      hook_event_name: 'UserPromptSubmit',
+      cwd,
+      session_id: sessionId,
+      prompt,
+    }),
+    encoding: 'utf-8',
+    env: childEnv,
+    timeout: 15000,
+  }).trim();
+
+  return JSON.parse(raw) as {
+    continue: boolean;
+    suppressOutput?: boolean;
+    hookSpecificOutput?: {
+      hookEventName?: string;
+      additionalContext?: string;
+    };
+  };
+}
+
+function stateFile(cwd: string, sessionId: string, name: string) {
+  const fixtureEnv = fixtureEnvironments.get(cwd);
+  if (!fixtureEnv) throw new Error(`Missing fixture environment for ${cwd}`);
+
+  const previousValues = new Map<typeof ROOT_ENV_KEYS[number], string | undefined>();
+  try {
+    for (const key of ROOT_ENV_KEYS) {
+      previousValues.set(key, process.env[key]);
+      const value = fixtureEnv[key];
+      if (value === undefined || value === '') {
+        delete process.env[key];
+      } else {
+        process.env[key] = value;
+      }
+    }
+    clearWorktreeCache();
+    return resolveSessionStatePaths(name, sessionId, cwd).effectiveWrite;
+  } finally {
+    for (const key of ROOT_ENV_KEYS) {
+      const value = previousValues.get(key);
+      if (value === undefined) {
+        delete process.env[key];
+      } else {
+        process.env[key] = value;
+      }
+    }
+    clearWorktreeCache();
+  }
+}
+
+describe('keyword-detector.mjs — pasted system-echo re-entry guard', () => {
+  // Primary regression: user pastes a bare [RALPH LOOP - ITERATION N] block
+  // (no other user request). Must NOT re-activate ralph.
+  it('does NOT re-activate ralph for a bare [RALPH LOOP - ITERATION] paste', () => {
+    const cwd = makeCwd('kd-echo-bare-ralph-');
+    const sid = 'sess-bare-ralph';
+    const prompt = [
+      '[RALPH LOOP - ITERATION 3/100] Work is NOT done. Continue working.',
+      'When FULLY complete (after Architect verification), run /oh-my-claudecode:cancel to cleanly exit ralph mode and clean up all state files. If cancel fails, retry with /oh-my-claudecode:cancel --force.',
+      'Task: keep iterating on ralph until tests pass',
+    ].join('\n');
+
+    const output = runKeywordDetector(prompt, cwd, sid);
+
+    expect(output.continue).toBe(true);
+    expect(existsSync(stateFile(cwd, sid, 'ralph'))).toBe(false);
+    expect(existsSync(stateFile(cwd, sid, 'ultrawork'))).toBe(false);
+  });
+
+  // Other modes' paste blocks must also not re-activate.
+  it('does NOT re-activate autopilot from [AUTOPILOT #N/M] paste', () => {
+    const cwd = makeCwd('kd-echo-autopilot-');
+    const sid = 'sess-autopilot';
+    const prompt = '[AUTOPILOT #2/20] Continue working.\nTask: foo';
+
+    runKeywordDetector(prompt, cwd, sid);
+
+    expect(existsSync(stateFile(cwd, sid, 'autopilot'))).toBe(false);
+  });
+
+  it('does NOT re-activate ultrawork from [ULTRAWORK #N/M] paste', () => {
+    const cwd = makeCwd('kd-echo-ultrawork-');
+    const sid = 'sess-ultrawork';
+    const prompt = '[ULTRAWORK #3/50] Continue working.\nTask: bar';
+
+    runKeywordDetector(prompt, cwd, sid);
+
+    expect(existsSync(stateFile(cwd, sid, 'ultrawork'))).toBe(false);
+  });
+
+  // A "Stop hook feedback:" wrapper must also be recognized as echo.
+  // Regression for Major #1 (GPT-5.5): isAntiSlopCleanupRequest bypasses
+  // hasActionableKeyword. Stripping must happen upstream in the main dispatch
+  // so all matchers benefit, not only the hasActionableKeyword ones.
+  it('does NOT re-activate ai-slop-cleaner from a pasted echo whose Task line contains cleanup/deslop terms', () => {
+    const cwd = makeCwd('kd-echo-anti-slop-');
+    const sid = 'sess-anti-slop';
+    const prompt = [
+      '[RALPH LOOP - ITERATION 7/100] Work is NOT done.',
+      'Task: please run ai-slop-cleaner and deslop the duplicated functions',
+    ].join('\n');
+
+    const output = runKeywordDetector(prompt, cwd, sid);
+    const context = output.hookSpecificOutput?.additionalContext ?? '';
+
+    expect(output.continue).toBe(true);
+    expect(context).not.toContain('[MAGIC KEYWORD: AI-SLOP-CLEANER]');
+    expect(context).not.toContain('<ai-slop-cleaner-mode>');
+    expect(existsSync(stateFile(cwd, sid, 'ai-slop-cleaner'))).toBe(false);
+  });
+
+  it('does NOT re-activate ralph when the prompt is a Stop hook feedback block', () => {
+    const cwd = makeCwd('kd-echo-stop-hook-');
+    const sid = 'sess-stop-hook';
+    const prompt = [
+      'Stop hook feedback:',
+      '[RALPH LOOP - ITERATION 5/100] Work is NOT done.',
+      'When FULLY complete (after Architect verification), run /oh-my-claudecode:cancel ...',
+      'Task: previous ralph task prompt',
+    ].join('\n');
+
+    runKeywordDetector(prompt, cwd, sid);
+
+    expect(existsSync(stateFile(cwd, sid, 'ralph'))).toBe(false);
+  });
+
+  // Sanity check: legitimate explicit invocation still works.
+  it('STILL activates ralph for an explicit user request', () => {
+    const cwd = makeCwd('kd-echo-real-invocation-');
+    const sid = 'sess-real-ralph';
+
+    const output = runKeywordDetector('/ralph 이 문제 계속 고쳐주세요', cwd, sid);
+    const context = output.hookSpecificOutput?.additionalContext ?? '';
+
+    expect(output.continue).toBe(true);
+    expect(context).toContain('[MAGIC KEYWORD: RALPH]');
+    expect(existsSync(stateFile(cwd, sid, 'ralph'))).toBe(true);
+  });
+
+  // Regression for Codex automated review P1/P2 (third round): the previous
+  // revision added standalone single-line strippers for `Task:\s`,
+  // `When FULLY complete`, and `run /oh-my-claudecode:cancel`, which meant
+  // a user's legitimate "Task: ralph로 이거 해줘" prompt would have its
+  // only line removed before keyword dispatch. Continuation stripping must
+  // happen ONLY in the context of an echo block header.
+  it('STILL activates ralph for a user prompt that starts with "Task:" (no echo header)', () => {
+    const cwd = makeCwd('kd-task-standalone-');
+    const sid = 'sess-task-standalone';
+
+    const output = runKeywordDetector('Task: run ralph on 이 문제 계속 고쳐주세요', cwd, sid);
+    const context = output.hookSpecificOutput?.additionalContext ?? '';
+
+    expect(context).toContain('[MAGIC KEYWORD: RALPH]');
+    expect(existsSync(stateFile(cwd, sid, 'ralph'))).toBe(true);
+
+    const state = JSON.parse(readFileSync(stateFile(cwd, sid, 'ralph'), 'utf-8'));
+    // The user's `Task:` line is NOT treated as echo continuation here, so
+    // its content is preserved in state.prompt (up to the 500-char cap).
+    expect(state.prompt).toContain('이 문제 계속 고쳐주세요');
+  });
+
+  // Regression for Codex automated review P1: echo-block body was being
+  // consumed all the way to EOF when no blank line separated it from the
+  // user's follow-up request. Users commonly type the real request on the
+  // immediate next line. Must STILL activate ralph in that shape.
+  it('activates ralph when an echo block is DIRECTLY followed (no blank line) by a real ralph request', () => {
+    const cwd = makeCwd('kd-echo-no-blank-');
+    const sid = 'sess-echo-no-blank';
+
+    const prompt = [
+      '[RALPH LOOP - ITERATION 2/100] Work is NOT done.',
+      'Task: previous task',
+      'run ralph on 새 작업 계속 진행',
+    ].join('\n');
+
+    const output = runKeywordDetector(prompt, cwd, sid);
+    const context = output.hookSpecificOutput?.additionalContext ?? '';
+
+    expect(context).toContain('[MAGIC KEYWORD: RALPH]');
+    expect(existsSync(stateFile(cwd, sid, 'ralph'))).toBe(true);
+
+    const state = JSON.parse(readFileSync(stateFile(cwd, sid, 'ralph'), 'utf-8'));
+    expect(state.prompt).toContain('새 작업 계속 진행');
+    expect(state.prompt).not.toContain('[RALPH LOOP');
+    expect(state.prompt).not.toContain('Task: previous task');
+  });
+
+  // Regression for hasActionableKeyword searchText-index alignment:
+  // user quotes a previous RALPH LOOP block AND issues a fresh explicit ralph
+  // request after a blank line. Stripping the echo must NOT prevent the
+  // trailing real request from matching, because isInformationalKeywordContext
+  // / hasExplicitInvocationContext need match.index to align with the
+  // text they're inspecting (the stripped searchText).
+  it('activates ralph when an echo block is followed by a blank line and a real ralph request', () => {
+    const cwd = makeCwd('kd-echo-plus-real-ralph-');
+    const sid = 'sess-echo-plus-real-ralph';
+
+    const prompt = [
+      '[RALPH LOOP - ITERATION 4/100] Work is NOT done.',
+      'Task: previous task',
+      '',
+      'run ralph on 새 작업 계속해줘',
+    ].join('\n');
+
+    const output = runKeywordDetector(prompt, cwd, sid);
+    const context = output.hookSpecificOutput?.additionalContext ?? '';
+
+    expect(context).toContain('[MAGIC KEYWORD: RALPH]');
+    expect(existsSync(stateFile(cwd, sid, 'ralph'))).toBe(true);
+
+    // state.prompt should capture the REAL request, not the echo sentinel,
+    // when stripping leaves meaningful non-echo content.
+    const state = JSON.parse(readFileSync(stateFile(cwd, sid, 'ralph'), 'utf-8'));
+    expect(state.prompt).toContain('새 작업 계속해줘');
+    expect(state.prompt).not.toContain('[RALPH LOOP');
+    expect(state.prompt).not.toBe('(prompt omitted: pasted system echo)');
+  });
+
+});
+
+describe('keyword-detector.mjs — sanitized pasted-echo prompt (#4250)', () => {
+  // An echo signature with no strippable block makes sanitizePromptForState()
+  // persist only the sentinel. Arming a mode from such a prompt leaves an
+  // orphan state that persistent-mode cannot attribute and blocks every Stop.
+  const prompt = 'use autopilot to fix the parser, then run /oh-my-claudecode:cancel';
+
+  it('does not arm autopilot when the prompt sanitizes to the pasted-echo sentinel', () => {
+    const cwd = makeCwd('kd-issue-4250-');
+    const sid = 'sess-issue-4250';
+
+    const output = runKeywordDetector(prompt, cwd, sid);
+
+    expect(output.continue).toBe(true);
+    expect(existsSync(stateFile(cwd, sid, 'autopilot'))).toBe(false);
+  });
+});
+
+describe('pasted-echo prompt sentinel parity (#4250)', () => {
+  it('keyword-detector writes the exact sentinel every persistent-mode implementation treats as orphaned', () => {
+    const declaration = /PASTED_ECHO_PROMPT_SENTINEL = (['"])(.*?)\1;/;
+    for (const file of [
+      'scripts/keyword-detector.mjs',
+      'scripts/persistent-mode.mjs',
+      'scripts/persistent-mode.cjs',
+    ]) {
+      const match = readFileSync(join(process.cwd(), file), 'utf-8').match(declaration);
+      expect(match?.[2], file).toBe(PASTED_ECHO_PROMPT_SENTINEL);
+    }
+  });
+});
+
+describe('keyword-detector.mjs — state.prompt sanitization', () => {
+  it('truncates oversized prompts when writing ralph state', () => {
+    const cwd = makeCwd('kd-prompt-len-');
+    const sid = 'sess-prompt-len';
+    const longTail = 'x'.repeat(2000);
+    const prompt = `/ralph 다음 긴 지시사항을 수행해주세요:\n${longTail}`;
+
+    runKeywordDetector(prompt, cwd, sid);
+    const path = stateFile(cwd, sid, 'ralph');
+    expect(existsSync(path)).toBe(true);
+
+    const state = JSON.parse(readFileSync(path, 'utf-8'));
+    expect(typeof state.prompt).toBe('string');
+    expect(state.prompt.length).toBeLessThanOrEqual(500);
+  });
+
+  it('records awaiting_confirmation_set_at on ralph state (enables 2-min TTL)', () => {
+    const cwd = makeCwd('kd-setat-ralph-');
+    const sid = 'sess-setat-ralph';
+
+    runKeywordDetector('/ralph 시작해주세요', cwd, sid);
+    const path = stateFile(cwd, sid, 'ralph');
+    expect(existsSync(path)).toBe(true);
+
+    const state = JSON.parse(readFileSync(path, 'utf-8'));
+    expect(state.awaiting_confirmation).toBe(true);
+    expect(typeof state.awaiting_confirmation_set_at).toBe('string');
+    expect(Number.isFinite(new Date(state.awaiting_confirmation_set_at).getTime())).toBe(true);
+  });
+
+  it('does not create ultrawork state for retired ulw alias', () => {
+    const cwd = makeCwd('kd-setat-ultrawork-');
+    const sid = 'sess-setat-uw';
+
+    runKeywordDetector('ulw로 시작해주세요', cwd, sid);
+    const path = stateFile(cwd, sid, 'ultrawork');
+    expect(existsSync(path)).toBe(false);
+  });
+});

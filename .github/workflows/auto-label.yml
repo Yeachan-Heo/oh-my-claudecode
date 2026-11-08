@@ -1,0 +1,67 @@
+name: Auto Label Issues
+
+on:
+  issues:
+    types: [opened]
+
+permissions:
+  issues: write
+
+jobs:
+  label:
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    steps:
+      - name: Auto-label based on title/body
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const issue = context.payload.issue;
+            const title = issue.title.toLowerCase();
+            const body = (issue.body || '').toLowerCase();
+            const labels = [];
+
+            // Bug detection
+            if (title.includes('bug') || title.includes('error') || title.includes('crash') ||
+                title.includes('broken') || title.includes('fail') || title.includes('not working')) {
+              labels.push('bug');
+            }
+
+            // Feature request detection
+            if (title.includes('feature') || title.includes('request') || title.includes('add') ||
+                title.includes('enhancement') || title.includes('suggestion') || title.includes('would be nice')) {
+              labels.push('enhancement');
+            }
+
+            // Question detection
+            if (title.includes('how') || title.includes('?') || title.includes('question') ||
+                title.includes('help') || title.includes('confused')) {
+              labels.push('question');
+            }
+
+            // Documentation issues
+            if (title.includes('doc') || title.includes('readme') || title.includes('typo')) {
+              labels.push('documentation');
+            }
+
+            // Installation issues
+            if (title.includes('install') || title.includes('setup') || title.includes('plugin')) {
+              labels.push('installation');
+            }
+
+            // Agent-related
+            if (body.includes('agent') || body.includes('architect') || body.includes('omc') ||
+                body.includes('planner') || body.includes('ultrawork') || body.includes('chillwork')) {
+              labels.push('agents');
+            }
+
+            // Apply labels if any matched
+            if (labels.length > 0) {
+              await github.rest.issues.addLabels({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: issue.number,
+                labels: labels
+              });
+              console.log(`Added labels: ${labels.join(', ')}`);
+            }

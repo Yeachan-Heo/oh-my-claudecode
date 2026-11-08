@@ -1,0 +1,544 @@
+{
+  "schemaVersion": 1,
+  "kind": "ci-evidence",
+  "issue": 3712,
+  "createdAt": "2026-08-13T02:50:00Z",
+  "payload": {
+    "collector": "scripts/collect-epic-3698-ci-evidence.mjs (gh api check-runs at exact head SHA)",
+    "note": "Includes child PRs with all checks green/skipped/neutral at exact head. PRs #3724 (#3704) and #3725 (#3707) excluded: CI / Test FAILURE (inventory-graph-drift) at exact head, resolved post-merge by #3711 closure inventory refresh.",
+    "pullRequests": [
+      {
+        "number": 3701,
+        "headSha": "0a91273e61dbbd47eb0af4c02844409251e08398",
+        "checks": [
+          {
+            "name": "npm pack + install test",
+            "conclusion": "success",
+            "sha": "0a91273e61dbbd47eb0af4c02844409251e08398"
+          },
+          {
+            "name": "Build",
+            "conclusion": "success",
+            "sha": "0a91273e61dbbd47eb0af4c02844409251e08398"
+          },
+          {
+            "name": "Version Consistency Check",
+            "conclusion": "success",
+            "sha": "0a91273e61dbbd47eb0af4c02844409251e08398"
+          },
+          {
+            "name": "Multi-repo Path Gate (AST-grep) (windows-latest)",
+            "conclusion": "success",
+            "sha": "0a91273e61dbbd47eb0af4c02844409251e08398"
+          },
+          {
+            "name": "Lint & Type Check",
+            "conclusion": "success",
+            "sha": "0a91273e61dbbd47eb0af4c02844409251e08398"
+          },
+          {
+            "name": "Multi-repo Path Gate (AST-grep) (ubuntu-latest)",
+            "conclusion": "success",
+            "sha": "0a91273e61dbbd47eb0af4c02844409251e08398"
+          },
+          {
+            "name": "No Committed Build Artifacts",
+            "conclusion": "success",
+            "sha": "0a91273e61dbbd47eb0af4c02844409251e08398"
+          },
+          {
+            "name": "Test (Windows path suite)",
+            "conclusion": "success",
+            "sha": "0a91273e61dbbd47eb0af4c02844409251e08398"
+          },
+          {
+            "name": "Test",
+            "conclusion": "success",
+            "sha": "0a91273e61dbbd47eb0af4c02844409251e08398"
+          },
+          {
+            "name": "omc update + session-start hook",
+            "conclusion": "success",
+            "sha": "0a91273e61dbbd47eb0af4c02844409251e08398"
+          },
+          {
+            "name": "Base Branch Check",
+            "conclusion": "success",
+            "sha": "0a91273e61dbbd47eb0af4c02844409251e08398"
+          },
+          {
+            "name": "Draft PR Check",
+            "conclusion": "success",
+            "sha": "0a91273e61dbbd47eb0af4c02844409251e08398"
+          },
+          {
+            "name": "Size Check",
+            "conclusion": "success",
+            "sha": "0a91273e61dbbd47eb0af4c02844409251e08398"
+          },
+          {
+            "name": "Authorize generated artifacts from base trust root",
+            "conclusion": "success",
+            "sha": "0a91273e61dbbd47eb0af4c02844409251e08398"
+          }
+        ]
+      },
+      {
+        "number": 3715,
+        "headSha": "f8067b4bce9bcab76cfaa83debd16577203982d8",
+        "checks": [
+          {
+            "name": "npm pack + install test",
+            "conclusion": "success",
+            "sha": "f8067b4bce9bcab76cfaa83debd16577203982d8"
+          },
+          {
+            "name": "Build",
+            "conclusion": "success",
+            "sha": "f8067b4bce9bcab76cfaa83debd16577203982d8"
+          },
+          {
+            "name": "Multi-repo Path Gate (AST-grep) (ubuntu-latest)",
+            "conclusion": "success",
+            "sha": "f8067b4bce9bcab76cfaa83debd16577203982d8"
+          },
+          {
+            "name": "No Committed Build Artifacts",
+            "conclusion": "success",
+            "sha": "f8067b4bce9bcab76cfaa83debd16577203982d8"
+          },
+          {
+            "name": "Lint & Type Check",
+            "conclusion": "success",
+            "sha": "f8067b4bce9bcab76cfaa83debd16577203982d8"
+          },
+          {
+            "name": "Test (Windows path suite)",
+            "conclusion": "success",
+            "sha": "f8067b4bce9bcab76cfaa83debd16577203982d8"
+          },
+          {
+            "name": "Version Consistency Check",
+            "conclusion": "success",
+            "sha": "f8067b4bce9bcab76cfaa83debd16577203982d8"
+          },
+          {
+            "name": "Multi-repo Path Gate (AST-grep) (windows-latest)",
+            "conclusion": "success",
+            "sha": "f8067b4bce9bcab76cfaa83debd16577203982d8"
+          },
+          {
+            "name": "Test",
+            "conclusion": "success",
+            "sha": "f8067b4bce9bcab76cfaa83debd16577203982d8"
+          },
+          {
+            "name": "omc update + session-start hook",
+            "conclusion": "success",
+            "sha": "f8067b4bce9bcab76cfaa83debd16577203982d8"
+          },
+          {
+            "name": "Base Branch Check",
+            "conclusion": "success",
+            "sha": "f8067b4bce9bcab76cfaa83debd16577203982d8"
+          },
+          {
+            "name": "Size Check",
+            "conclusion": "success",
+            "sha": "f8067b4bce9bcab76cfaa83debd16577203982d8"
+          },
+          {
+            "name": "Draft PR Check",
+            "conclusion": "success",
+            "sha": "f8067b4bce9bcab76cfaa83debd16577203982d8"
+          },
+          {
+            "name": "Authorize generated artifacts from base trust root",
+            "conclusion": "success",
+            "sha": "f8067b4bce9bcab76cfaa83debd16577203982d8"
+          }
+        ]
+      },
+      {
+        "number": 3720,
+        "headSha": "2b7c41b1c72dfe864e949c02459f0d3ea0bc2b3a",
+        "checks": [
+          {
+            "name": "npm pack + install test",
+            "conclusion": "success",
+            "sha": "2b7c41b1c72dfe864e949c02459f0d3ea0bc2b3a"
+          },
+          {
+            "name": "Build",
+            "conclusion": "success",
+            "sha": "2b7c41b1c72dfe864e949c02459f0d3ea0bc2b3a"
+          },
+          {
+            "name": "Version Consistency Check",
+            "conclusion": "success",
+            "sha": "2b7c41b1c72dfe864e949c02459f0d3ea0bc2b3a"
+          },
+          {
+            "name": "Base Branch Check",
+            "conclusion": "success",
+            "sha": "2b7c41b1c72dfe864e949c02459f0d3ea0bc2b3a"
+          },
+          {
+            "name": "Draft PR Check",
+            "conclusion": "success",
+            "sha": "2b7c41b1c72dfe864e949c02459f0d3ea0bc2b3a"
+          },
+          {
+            "name": "Size Check",
+            "conclusion": "success",
+            "sha": "2b7c41b1c72dfe864e949c02459f0d3ea0bc2b3a"
+          },
+          {
+            "name": "omc update + session-start hook",
+            "conclusion": "success",
+            "sha": "2b7c41b1c72dfe864e949c02459f0d3ea0bc2b3a"
+          },
+          {
+            "name": "Multi-repo Path Gate (AST-grep) (windows-latest)",
+            "conclusion": "success",
+            "sha": "2b7c41b1c72dfe864e949c02459f0d3ea0bc2b3a"
+          },
+          {
+            "name": "Multi-repo Path Gate (AST-grep) (ubuntu-latest)",
+            "conclusion": "success",
+            "sha": "2b7c41b1c72dfe864e949c02459f0d3ea0bc2b3a"
+          },
+          {
+            "name": "No Committed Build Artifacts",
+            "conclusion": "success",
+            "sha": "2b7c41b1c72dfe864e949c02459f0d3ea0bc2b3a"
+          },
+          {
+            "name": "Lint & Type Check",
+            "conclusion": "success",
+            "sha": "2b7c41b1c72dfe864e949c02459f0d3ea0bc2b3a"
+          },
+          {
+            "name": "Test",
+            "conclusion": "success",
+            "sha": "2b7c41b1c72dfe864e949c02459f0d3ea0bc2b3a"
+          },
+          {
+            "name": "Test (Windows path suite)",
+            "conclusion": "success",
+            "sha": "2b7c41b1c72dfe864e949c02459f0d3ea0bc2b3a"
+          },
+          {
+            "name": "Authorize generated artifacts from base trust root",
+            "conclusion": "success",
+            "sha": "2b7c41b1c72dfe864e949c02459f0d3ea0bc2b3a"
+          }
+        ]
+      },
+      {
+        "number": 3721,
+        "headSha": "d780c9d99dad91eb645f46d9a14c79449e8c2ea2",
+        "checks": [
+          {
+            "name": "npm pack + install test",
+            "conclusion": "success",
+            "sha": "d780c9d99dad91eb645f46d9a14c79449e8c2ea2"
+          },
+          {
+            "name": "Build",
+            "conclusion": "success",
+            "sha": "d780c9d99dad91eb645f46d9a14c79449e8c2ea2"
+          },
+          {
+            "name": "Multi-repo Path Gate (AST-grep) (windows-latest)",
+            "conclusion": "success",
+            "sha": "d780c9d99dad91eb645f46d9a14c79449e8c2ea2"
+          },
+          {
+            "name": "Test (Windows path suite)",
+            "conclusion": "success",
+            "sha": "d780c9d99dad91eb645f46d9a14c79449e8c2ea2"
+          },
+          {
+            "name": "Lint & Type Check",
+            "conclusion": "success",
+            "sha": "d780c9d99dad91eb645f46d9a14c79449e8c2ea2"
+          },
+          {
+            "name": "Multi-repo Path Gate (AST-grep) (ubuntu-latest)",
+            "conclusion": "success",
+            "sha": "d780c9d99dad91eb645f46d9a14c79449e8c2ea2"
+          },
+          {
+            "name": "Test",
+            "conclusion": "success",
+            "sha": "d780c9d99dad91eb645f46d9a14c79449e8c2ea2"
+          },
+          {
+            "name": "Version Consistency Check",
+            "conclusion": "success",
+            "sha": "d780c9d99dad91eb645f46d9a14c79449e8c2ea2"
+          },
+          {
+            "name": "No Committed Build Artifacts",
+            "conclusion": "success",
+            "sha": "d780c9d99dad91eb645f46d9a14c79449e8c2ea2"
+          },
+          {
+            "name": "Draft PR Check",
+            "conclusion": "success",
+            "sha": "d780c9d99dad91eb645f46d9a14c79449e8c2ea2"
+          },
+          {
+            "name": "omc update + session-start hook",
+            "conclusion": "success",
+            "sha": "d780c9d99dad91eb645f46d9a14c79449e8c2ea2"
+          },
+          {
+            "name": "Size Check",
+            "conclusion": "success",
+            "sha": "d780c9d99dad91eb645f46d9a14c79449e8c2ea2"
+          },
+          {
+            "name": "Base Branch Check",
+            "conclusion": "success",
+            "sha": "d780c9d99dad91eb645f46d9a14c79449e8c2ea2"
+          },
+          {
+            "name": "Authorize generated artifacts from base trust root",
+            "conclusion": "success",
+            "sha": "d780c9d99dad91eb645f46d9a14c79449e8c2ea2"
+          }
+        ]
+      },
+      {
+        "number": 3723,
+        "headSha": "c0a842b943f5315bd52f27a47328891c16f95630",
+        "checks": [
+          {
+            "name": "npm pack + install test",
+            "conclusion": "success",
+            "sha": "c0a842b943f5315bd52f27a47328891c16f95630"
+          },
+          {
+            "name": "Build",
+            "conclusion": "success",
+            "sha": "c0a842b943f5315bd52f27a47328891c16f95630"
+          },
+          {
+            "name": "Multi-repo Path Gate (AST-grep) (ubuntu-latest)",
+            "conclusion": "success",
+            "sha": "c0a842b943f5315bd52f27a47328891c16f95630"
+          },
+          {
+            "name": "Multi-repo Path Gate (AST-grep) (windows-latest)",
+            "conclusion": "success",
+            "sha": "c0a842b943f5315bd52f27a47328891c16f95630"
+          },
+          {
+            "name": "Test",
+            "conclusion": "success",
+            "sha": "c0a842b943f5315bd52f27a47328891c16f95630"
+          },
+          {
+            "name": "Lint & Type Check",
+            "conclusion": "success",
+            "sha": "c0a842b943f5315bd52f27a47328891c16f95630"
+          },
+          {
+            "name": "Version Consistency Check",
+            "conclusion": "success",
+            "sha": "c0a842b943f5315bd52f27a47328891c16f95630"
+          },
+          {
+            "name": "No Committed Build Artifacts",
+            "conclusion": "success",
+            "sha": "c0a842b943f5315bd52f27a47328891c16f95630"
+          },
+          {
+            "name": "Test (Windows path suite)",
+            "conclusion": "success",
+            "sha": "c0a842b943f5315bd52f27a47328891c16f95630"
+          },
+          {
+            "name": "omc update + session-start hook",
+            "conclusion": "success",
+            "sha": "c0a842b943f5315bd52f27a47328891c16f95630"
+          },
+          {
+            "name": "Size Check",
+            "conclusion": "success",
+            "sha": "c0a842b943f5315bd52f27a47328891c16f95630"
+          },
+          {
+            "name": "Base Branch Check",
+            "conclusion": "success",
+            "sha": "c0a842b943f5315bd52f27a47328891c16f95630"
+          },
+          {
+            "name": "Draft PR Check",
+            "conclusion": "success",
+            "sha": "c0a842b943f5315bd52f27a47328891c16f95630"
+          },
+          {
+            "name": "Authorize generated artifacts from base trust root",
+            "conclusion": "success",
+            "sha": "c0a842b943f5315bd52f27a47328891c16f95630"
+          }
+        ]
+      },
+      {
+        "number": 3716,
+        "headSha": "8118cc67c93cbc70f6564ab1b8bb5864a0cce2d4",
+        "checks": [
+          {
+            "name": "npm pack + install test",
+            "conclusion": "success",
+            "sha": "8118cc67c93cbc70f6564ab1b8bb5864a0cce2d4"
+          },
+          {
+            "name": "Build",
+            "conclusion": "success",
+            "sha": "8118cc67c93cbc70f6564ab1b8bb5864a0cce2d4"
+          },
+          {
+            "name": "Version Consistency Check",
+            "conclusion": "success",
+            "sha": "8118cc67c93cbc70f6564ab1b8bb5864a0cce2d4"
+          },
+          {
+            "name": "Draft PR Check",
+            "conclusion": "success",
+            "sha": "8118cc67c93cbc70f6564ab1b8bb5864a0cce2d4"
+          },
+          {
+            "name": "Test (Windows path suite)",
+            "conclusion": "success",
+            "sha": "8118cc67c93cbc70f6564ab1b8bb5864a0cce2d4"
+          },
+          {
+            "name": "No Committed Build Artifacts",
+            "conclusion": "success",
+            "sha": "8118cc67c93cbc70f6564ab1b8bb5864a0cce2d4"
+          },
+          {
+            "name": "Size Check",
+            "conclusion": "success",
+            "sha": "8118cc67c93cbc70f6564ab1b8bb5864a0cce2d4"
+          },
+          {
+            "name": "Lint & Type Check",
+            "conclusion": "success",
+            "sha": "8118cc67c93cbc70f6564ab1b8bb5864a0cce2d4"
+          },
+          {
+            "name": "Multi-repo Path Gate (AST-grep) (ubuntu-latest)",
+            "conclusion": "success",
+            "sha": "8118cc67c93cbc70f6564ab1b8bb5864a0cce2d4"
+          },
+          {
+            "name": "Base Branch Check",
+            "conclusion": "success",
+            "sha": "8118cc67c93cbc70f6564ab1b8bb5864a0cce2d4"
+          },
+          {
+            "name": "Test",
+            "conclusion": "success",
+            "sha": "8118cc67c93cbc70f6564ab1b8bb5864a0cce2d4"
+          },
+          {
+            "name": "Multi-repo Path Gate (AST-grep) (windows-latest)",
+            "conclusion": "success",
+            "sha": "8118cc67c93cbc70f6564ab1b8bb5864a0cce2d4"
+          },
+          {
+            "name": "Authorize generated artifacts from base trust root",
+            "conclusion": "success",
+            "sha": "8118cc67c93cbc70f6564ab1b8bb5864a0cce2d4"
+          },
+          {
+            "name": "omc update + session-start hook",
+            "conclusion": "success",
+            "sha": "8118cc67c93cbc70f6564ab1b8bb5864a0cce2d4"
+          }
+        ]
+      },
+      {
+        "number": 3729,
+        "headSha": "433c13ad87973b603f67553268d8a98d7d7df0f9",
+        "checks": [
+          {
+            "name": "npm pack + install test",
+            "conclusion": "success",
+            "sha": "433c13ad87973b603f67553268d8a98d7d7df0f9"
+          },
+          {
+            "name": "Build",
+            "conclusion": "success",
+            "sha": "433c13ad87973b603f67553268d8a98d7d7df0f9"
+          },
+          {
+            "name": "Multi-repo Path Gate (AST-grep) (ubuntu-latest)",
+            "conclusion": "success",
+            "sha": "433c13ad87973b603f67553268d8a98d7d7df0f9"
+          },
+          {
+            "name": "Multi-repo Path Gate (AST-grep) (windows-latest)",
+            "conclusion": "success",
+            "sha": "433c13ad87973b603f67553268d8a98d7d7df0f9"
+          },
+          {
+            "name": "Test (Windows path suite)",
+            "conclusion": "success",
+            "sha": "433c13ad87973b603f67553268d8a98d7d7df0f9"
+          },
+          {
+            "name": "No Committed Build Artifacts",
+            "conclusion": "success",
+            "sha": "433c13ad87973b603f67553268d8a98d7d7df0f9"
+          },
+          {
+            "name": "Version Consistency Check",
+            "conclusion": "success",
+            "sha": "433c13ad87973b603f67553268d8a98d7d7df0f9"
+          },
+          {
+            "name": "Test",
+            "conclusion": "success",
+            "sha": "433c13ad87973b603f67553268d8a98d7d7df0f9"
+          },
+          {
+            "name": "omc update + session-start hook",
+            "conclusion": "success",
+            "sha": "433c13ad87973b603f67553268d8a98d7d7df0f9"
+          },
+          {
+            "name": "Lint & Type Check",
+            "conclusion": "success",
+            "sha": "433c13ad87973b603f67553268d8a98d7d7df0f9"
+          },
+          {
+            "name": "Draft PR Check",
+            "conclusion": "success",
+            "sha": "433c13ad87973b603f67553268d8a98d7d7df0f9"
+          },
+          {
+            "name": "Size Check",
+            "conclusion": "success",
+            "sha": "433c13ad87973b603f67553268d8a98d7d7df0f9"
+          },
+          {
+            "name": "Base Branch Check",
+            "conclusion": "success",
+            "sha": "433c13ad87973b603f67553268d8a98d7d7df0f9"
+          },
+          {
+            "name": "Authorize generated artifacts from base trust root",
+            "conclusion": "success",
+            "sha": "433c13ad87973b603f67553268d8a98d7d7df0f9"
+          }
+        ]
+      }
+    ]
+  }
+}

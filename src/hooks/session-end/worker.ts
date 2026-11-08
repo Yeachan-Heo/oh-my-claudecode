@@ -1,0 +1,191 @@
+import { childEnv } from '../../utils/windows-search.js';
+import { spawn } from 'child_process';
+import { randomUUID } from 'crypto';
+import { fileURLToPath } from 'url';
+import { claimSessionEndAction, claimSessionEndDiscoveryTickets, claimSessionEndJob, failClosedExhaustedForegroundCleanup, failClosedMissingCoreProducer, finishSessionEndAction, markSessionEndActionRunner, readSessionEndJob, reapStaleSessionEndOwner, recoverPreparedCoreProducer, releaseSessionEndDiscoveryTicket, releaseSessionEndJob, renewSessionEndLease, type SessionEndActionName, updateSessionEndActionPayload, type SessionEndActionAuthority } from './cleanup-manifest.js';
+import { runSessionEndAction } from './action-runner.js';
+import { armSessionEndActionWatchdog } from './action-watchdog.js';
+import { getProcessStartIdentity, isProcessIdentityLive } from '../../platform/process-utils.js';
+
+const WORKER_ARG = '--omc-session-end-worker';
+const MAX_WORKER_MS = 10_000;
+export interface SessionEndWorkerPayload { directory: string; sessionId: string; }
+
+/** Durable OpenClaw routing is supplied from the manifest to the action runner, never from worker ambient state. */
+export function workerEnvironment(): NodeJS.ProcessEnv {
+  // APPDATA/LOCALAPPDATA are required for gh keyring-free auth lookup on Windows
+  // (hosts.yml lives in %AppData%\GitHub CLI); without them every
+  // worker-spawned session sees gh as unauthenticated.
+  const keys = ['PATH', 'HOME', 'USERPROFILE', ...(process.platform === 'win32' ? ['APPDATA', 'LOCALAPPDATA'] : []), 'TMPDIR', 'TEMP', 'TMP', 'SystemRoot', 'COMSPEC', 'LANG', 'LC_ALL', 'NODE_ENV', 'CLAUDE_CONFIG_DIR', 'OMC_STATE_DIR', 'OMC_HOOK_CONFIG', 'OMC_CONFIG_PATH', 'OMC_NOTIFY', 'OMC_NOTIFY_PROFILE', 'OMC_TELEGRAM', 'OMC_DISCORD', 'OMC_SLACK', 'OMC_WEBHOOK', 'OMC_DISCORD_MENTION', 'OMC_DISCORD_NOTIFIER_BOT_TOKEN', 'OMC_TELEGRAM_BOT_TOKEN', 'OMC_TELEGRAM_NOTIFIER_BOT_TOKEN', 'OMC_TELEGRAM_CHAT_ID', 'OMC_TELEGRAM_NOTIFIER_UID', 'OMC_SLACK_WEBHOOK_URL', 'OMC_SLACK_MENTION', 'OMC_SLACK_BOT_TOKEN', 'OMC_SLACK_APP_TOKEN', 'OMC_SLACK_BOT_CHANNEL', 'HTTP_PROXY', 'HTTPS_PROXY', 'ALL_PROXY', 'NO_PROXY', 'http_proxy', 'https_proxy', 'all_proxy', 'no_proxy', 'NODE_EXTRA_CA_CERTS', 'SSL_CERT_FILE', 'SSL_CERT_DIR', 'REQUESTS_CA_BUNDLE', 'CURL_CA_BUNDLE', 'OMC_HOOK_BRIDGE', ...(process.env.NODE_ENV === 'test' ? ['OMC_SESSION_END_TEST_PRODUCER_GRACE_MS'] : [])];
+  // ANTHROPIC_* carries model provider auth/routing (API key, base URL, token);
+  // without it worker-spawned sessions exit "Not logged in" immediately.
+  const authPassthrough = Object.entries(process.env).filter(([key]) => key.startsWith('ANTHROPIC_'));
+  return Object.fromEntries([...keys.flatMap((key) => process.env[key] === undefined ? [] : [[key, process.env[key]] as const]), ...authPassthrough]);
+}
+export function spawnSessionEndWorker(payload: SessionEndWorkerPayload): boolean {
+  try {
+    const child = spawn(process.execPath, [fileURLToPath(import.meta.url), WORKER_ARG, JSON.stringify(payload)], { detached: true, stdio: 'ignore', env: childEnv(workerEnvironment()), windowsHide: true });
+    child.unref();
+    return true;
+  } catch { return false; }
+}
+export async function executeSessionEndAction(name: SessionEndActionName, payload: SessionEndWorkerPayload, deadlineAt: number, authority?: SessionEndActionAuthority): Promise<void> {
+  const legacy = await import('./index.js');
+  const manifest = readSessionEndJob(payload.directory, payload.sessionId);
+  const input = manifest?.actions['foreground-cleanup'].payload.input;
+  if (name === 'foreground-cleanup') {
+    if (!authority || authority.actionName !== name) throw new Error('foreground-authority-missing');
+    if (input && typeof input === 'object') {
+      const prepared = await legacy.prepareSessionEndWorkerInput(payload.directory, input as Parameters<typeof legacy.prepareSessionEndWorkerInput>[1]);
+      if (!updateSessionEndActionPayload(payload.directory, payload.sessionId, authority, ['foreground-cleanup', 'team-cleanup', 'python-cleanup', 'callback', 'notification', 'openclaw'], prepared)) throw new Error('foreground-payload-not-durable');
+      await legacy.runForegroundSessionEndCleanup(payload.directory, payload.sessionId, false);
+      legacy.exportSessionSummary(payload.directory, prepared.metrics as Parameters<typeof legacy.exportSessionSummary>[1]);
+    } else {
+      await legacy.runForegroundSessionEndCleanup(payload.directory, payload.sessionId, false);
+    }
+    return;
+  }
+  const current = readSessionEndJob(payload.directory, payload.sessionId);
+  const routing = current?.actions.notification.payload;
+  if (typeof routing?.notificationProfile === 'string') process.env.OMC_NOTIFY_PROFILE = routing.notificationProfile;
+  if (routing?.openClawEnabled === true) process.env.OMC_OPENCLAW = '1';
+  if (name === 'wiki-capture') { const intent = current?.actions['wiki-capture'].payload; const { commitWikiSessionEndCaptureIntent } = await import('../wiki/session-hooks.js'); if (!await commitWikiSessionEndCaptureIntent(intent as unknown as Parameters<typeof commitWikiSessionEndCaptureIntent>[0], { deadlineAt: Math.min(deadlineAt, Date.now() + 9_000) })) throw new Error('wiki-capture-incomplete'); return; }
+  if (name === 'team-cleanup') { const names = current?.actions['team-cleanup'].payload.initialTeamNames; const result = await legacy.cleanupSessionOwnedTeams(payload.directory, payload.sessionId, Array.isArray(names) ? names.filter((name): name is string => typeof name === 'string') : []); if (result.failed.length > 0) throw new Error(`team-cleanup-incomplete:${result.failed.map(item => item.teamName).join(',')}`); return; }
+  if (name === 'python-cleanup') return legacy.cleanupSessionPython(payload.directory, payload.sessionId).then(() => undefined);
+  if (name === 'reply-cleanup') return legacy.cleanupSessionReplies(payload.sessionId);
+  if (name === 'callback') return legacy.runSessionEndCallbacks(payload.directory, payload.sessionId, current?.actions.callback.idempotencyKey, true);
+  if (name === 'notification') return legacy.runSessionEndNotifications(payload.directory, payload.sessionId, true);
+  if (name === 'spawn-next') {
+    const chain = current?.actions['spawn-next']?.payload?.chain as Parameters<typeof import('./spawn-next.js').executeSpawnNext>[0] | undefined;
+    if (!chain || typeof chain !== 'object') return;
+    const { executeSpawnNext } = await import('./spawn-next.js');
+    try {
+      executeSpawnNext(chain, payload.directory);
+    } catch (error) {
+      const { recordChainDecision } = await import('./chain-enqueuer.js');
+      recordChainDecision(payload.directory, {
+        decision: 'enqueued-failed',
+        sessionId: payload.sessionId,
+        intentId: (chain as { intentId?: string }).intentId,
+        error: error instanceof Error ? error.message : String(error),
+      });
+      throw error;
+    }
+    return;
+  }
+  return legacy.runSessionEndOpenClaw(payload.directory, payload.sessionId, true);
+}
+async function reapIfProvenStale(payload: SessionEndWorkerPayload, deadlineAt: number): Promise<void> {
+  const job = readSessionEndJob(payload.directory, payload.sessionId); const owner = job?.owner;
+  if (!owner || Date.now() < Date.parse(owner.leaseExpiresAt)) return;
+  // Windows identity probes shell out to PowerShell (~300-500ms cold); a 250ms
+  // budget made workers silently refuse to start / reap.
+  const liveness = await isProcessIdentityLive(owner.pid, owner.processStartIdentity, Math.min(deadlineAt, Date.now() + 2_500));
+  if (liveness === 'dead' || liveness === 'mismatch') reapStaleSessionEndOwner(payload.directory, payload.sessionId, owner.nonce, owner.leaseGeneration, liveness);
+}
+function reschedulePendingWorker(payload: SessionEndWorkerPayload, job: ReturnType<typeof readSessionEndJob>): void {
+  if (!job || job.phase === 'complete') return;
+  const retryableAttempts = Object.values(job.actions).filter(action => action.status === 'retryable').map(action => action.attempts);
+  const producersReady = ['sealed', 'no-op'].includes(job.producers.core.state)
+    && ['sealed', 'no-op'].includes(job.producers.wiki.state);
+  const hasPendingAction = producersReady && Object.values(job.actions).some(action => action.status === 'pending');
+  // A manifest with a sealed core but an absent wiki producer (the standalone
+  // hook flow never registers one) must wait out the producer grace instead of
+  // releasing as settled — otherwise the first worker exits, nothing respawns
+  // it after the grace converts absent→no-op, and deferred actions (spawn-next
+  // chain enqueue) stall until an unrelated SessionStart reconcile.
+  const awaitingProducerGrace = Date.now() < Date.parse(job.producerGraceExpiresAt)
+    && (job.producers.core.state === 'prepared'
+      || (job.producers.core.state === 'absent' && ['sealed', 'no-op'].includes(job.producers.wiki.state))
+      || job.producers.wiki.state === 'absent');
+  if (!awaitingProducerGrace && retryableAttempts.length === 0 && !hasPendingAction) return;
+  const delay = awaitingProducerGrace
+    ? Math.max(1, Date.parse(job.producerGraceExpiresAt) - Date.now())
+    : retryableAttempts.length > 0
+      ? Math.min(30_000, 250 * 2 ** Math.min(Math.max(...retryableAttempts), 7))
+      : 250;
+  setTimeout(() => { void processSessionEndWorker(payload); }, delay);
+}
+
+/** An ownerless job whose claim is refused by a still-bounded runner gets one retry once every such runner deadline has passed. */
+function retryAfterBoundedRunners(payload: SessionEndWorkerPayload, job: ReturnType<typeof readSessionEndJob>): void {
+  if (!job || job.owner || job.phase === 'complete') return;
+  const now = Date.now();
+  const deadlines = Object.values(job.actions)
+    .filter(action => action.status === 'claimed' && action.runner && action.runner.phase !== 'terminal')
+    .map(action => Date.parse(action.runner!.deadlineAt))
+    .filter(deadline => deadline > now);
+  if (deadlines.length === 0) return;
+  setTimeout(() => { void processSessionEndWorker(payload); }, Math.max(...deadlines) - now + 1);
+}
+
+export async function processSessionEndWorker(payload: SessionEndWorkerPayload): Promise<void> {
+  const deadlineAt = Date.now() + MAX_WORKER_MS; const nonce = randomUUID(); const identity = await getProcessStartIdentity(process.pid, Math.min(deadlineAt, Date.now() + 2_500));
+  if (!identity) return;
+  let claimed = claimSessionEndJob(payload.directory, payload.sessionId, nonce, identity, deadlineAt);
+  if (!claimed) { await reapIfProvenStale(payload, deadlineAt); claimed = claimSessionEndJob(payload.directory, payload.sessionId, nonce, identity, deadlineAt); }
+  if (!claimed || !claimed.owner) { retryAfterBoundedRunners(payload, readSessionEndJob(payload.directory, payload.sessionId)); return; }
+  let admitted = readSessionEndJob(payload.directory, payload.sessionId);
+  const graceExpired = admitted ? Date.now() >= Date.parse(admitted.producerGraceExpiresAt) : false;
+  if (admitted && graceExpired) {
+    recoverPreparedCoreProducer(payload.directory, payload.sessionId);
+    failClosedExhaustedForegroundCleanup(payload.directory, payload.sessionId);
+    failClosedMissingCoreProducer(payload.directory, payload.sessionId);
+    admitted = readSessionEndJob(payload.directory, payload.sessionId);
+  }
+  let producerReady = Boolean(admitted && ['sealed', 'no-op'].includes(admitted.producers.core.state) && ['sealed', 'no-op'].includes(admitted.producers.wiki.state));
+  let generation = claimed.owner.leaseGeneration;
+  // Every loop exit that is not "all actions settled" leaves the job in
+  // recoverable-failure; naming the exit is what makes that state diagnosable
+  // from the manifest alone (issue #4076).
+  let exitReason = 'actions-settled';
+  try {
+    for (const name of Object.keys(claimed.actions) as SessionEndActionName[]) {
+      if (Date.now() >= deadlineAt) { exitReason = 'run-deadline-reached'; break; }
+      const before = readSessionEndJob(payload.directory, payload.sessionId);
+      if (!before || before.owner?.nonce !== nonce) { exitReason = before ? 'ownership-lost' : 'manifest-unreadable'; break; }
+      if (!producerReady && (name !== 'foreground-cleanup' || !graceExpired || before.producers.core.state !== 'prepared')) continue;
+      if (name === 'wiki-capture' && before.producers.wiki.state === 'absent') continue;
+      const owned = claimSessionEndAction(payload.directory, payload.sessionId, nonce, name, deadlineAt);
+      const action = owned?.actions[name];
+      if (!owned || !action || action.status !== 'claimed' || !action.runner) continue;
+      const renewed = renewSessionEndLease(payload.directory, payload.sessionId, nonce, generation, deadlineAt);
+      if (!renewed?.owner) { exitReason = 'lease-renew-failed-before-action'; break; }
+      generation = renewed.owner.leaseGeneration;
+      if (!markSessionEndActionRunner(payload.directory, payload.sessionId, nonce, name, action.runner.runnerNonce, 'started')) { exitReason = `runner-start-rejected-${name}`; break; }
+      const stopWatchdog = armSessionEndActionWatchdog({ directory: payload.directory, jobId: owned.jobId, action: name, attempt: action.attempts, runnerNonce: action.runner.runnerNonce, deadlineAt: Math.min(deadlineAt, Date.now() + action.budgetMs) });
+      const actionDeadline = Math.min(deadlineAt, Date.now() + action.budgetMs);
+      let leaseLost = false;
+      const heartbeatTimer = setInterval(() => { const renewedLease = renewSessionEndLease(payload.directory, payload.sessionId, nonce, generation, deadlineAt); if (!renewedLease?.owner) leaseLost = true; else generation = renewedLease.owner.leaseGeneration; }, 250);
+      heartbeatTimer.unref();
+      const authority: SessionEndActionAuthority = { jobId: owned.jobId, actionName: name, attempt: action.attempts, ownerNonce: nonce, runnerNonce: action.runner.runnerNonce };
+      const result = await runSessionEndAction({ directory: payload.directory, sessionId: payload.sessionId, job: owned, actionName: name, action, ownerNonce: nonce, runnerNonce: action.runner.runnerNonce, deadlineAt: actionDeadline }, () => executeSessionEndAction(name, payload, actionDeadline, authority));
+      clearInterval(heartbeatTimer);
+      stopWatchdog();
+      if (leaseLost) { exitReason = `lease-lost-during-${name}`; break; }
+      finishSessionEndAction(payload.directory, payload.sessionId, nonce, name, action.runner.runnerNonce, result.completed, result.code);
+      if (name === 'foreground-cleanup' && result.completed) {
+        recoverPreparedCoreProducer(payload.directory, payload.sessionId);
+        const recovered = readSessionEndJob(payload.directory, payload.sessionId);
+        producerReady = Boolean(recovered && ['sealed', 'no-op'].includes(recovered.producers.core.state) && ['sealed', 'no-op'].includes(recovered.producers.wiki.state));
+      }
+      const heartbeat = renewSessionEndLease(payload.directory, payload.sessionId, nonce, generation, deadlineAt);
+      if (!heartbeat?.owner) { exitReason = `lease-renew-failed-after-${name}`; break; }
+      generation = heartbeat.owner.leaseGeneration;
+    }
+  } finally {
+    const released = releaseSessionEndJob(payload.directory, payload.sessionId, nonce, generation, exitReason);
+    const terminalized = failClosedExhaustedForegroundCleanup(payload.directory, payload.sessionId);
+    reschedulePendingWorker(payload, terminalized ?? released ?? readSessionEndJob(payload.directory, payload.sessionId));
+  }
+}
+/** Bounded fair SessionStart recovery based on durable tickets, not a directory page. */
+export function reconcileSessionEndJobs(directory: string, sessionIds?: readonly string[]): void {
+  const tickets = sessionIds ? [...sessionIds].slice(0, 4).map(sessionId => ({ sessionId, nonce: '' })) : claimSessionEndDiscoveryTickets(directory, 4);
+  for (const ticket of tickets) {
+    const spawned = spawnSessionEndWorker({ directory, sessionId: ticket.sessionId });
+    if (ticket.nonce && !spawned) releaseSessionEndDiscoveryTicket(directory, ticket.sessionId, ticket.nonce, false);
+  }
+}
+const workerIndex = process.argv.indexOf(WORKER_ARG);
+if (workerIndex >= 0) { try { const payload = JSON.parse(process.argv[workerIndex + 1] ?? '') as SessionEndWorkerPayload; void processSessionEndWorker(payload); } catch { /* invalid child input exits naturally */ } }

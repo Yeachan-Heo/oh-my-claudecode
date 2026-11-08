@@ -1,0 +1,22 @@
+{
+  "schemaVersion": 1,
+  "kind": "child-terminal",
+  "issue": 3709,
+  "createdAt": "2026-08-23T04:50:45.676Z",
+  "payload": {
+    "state": "closed",
+    "evidence": {
+      "issue": {
+        "number": 3709,
+        "state": "CLOSED"
+      },
+      "commit": {
+        "sha": "02acde9367a195c419623c05c4d444d64006e3f7"
+      },
+      "status": {
+        "state": "pending",
+        "sha": "02acde9367a195c419623c05c4d444d64006e3f7"
+      }
+    }
+  }
+}

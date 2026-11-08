@@ -1,0 +1,292 @@
+#!/usr/bin/env node
+// OMC Post-Tool-Use-Failure Hook (Node.js)
+// Tracks tool failures for retry guidance in Stop hook
+// Writes last-tool-error-state.json (session-scoped) or last-tool-error.json (legacy)
+// with tool name, input preview, error, and retry count
+
+import { hardenWindowsExeSearch } from './lib/windows-search.mjs';
+import { existsSync, readFileSync, mkdirSync } from 'fs';
+import { join, dirname, sep, resolve } from 'path';
+import { fileURLToPath, pathToFileURL } from 'url';
+
+hardenWindowsExeSearch();
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = dirname(__filename);
+
+// Dynamic imports for shared modules
+const { readStdin } = await import(pathToFileURL(join(__dirname, 'lib', 'stdin.mjs')).href);
+const { atomicWriteFileSync, withStateFileLockAtPathSync } = await import(pathToFileURL(join(__dirname, 'lib', 'atomic-write.mjs')).href);
+const { resolveOmcStateRoot } = await import(pathToFileURL(join(__dirname, 'lib', 'state-root.mjs')).href);
+
+// ============================================================================
+// Session ID resolution (mirrors src/lib/session-id.ts — inlined for .mjs)
+// Precedence in hook context: payload wins over env var.
+// ============================================================================
+
+/**
+ * Resolve the session id for hook context.
+ * Payload session_id takes priority; falls back to OMC_SESSION_ID env var.
+ *
+ * @param {object|null} hookPayload - Parsed stdin payload (may be null)
+ * @returns {string|undefined}
+ */
+function resolveHookSessionId(hookPayload) {
+  const payloadId =
+    hookPayload &&
+    typeof hookPayload === 'object' &&
+    typeof hookPayload.session_id === 'string' &&
+    hookPayload.session_id.trim()
+      ? hookPayload.session_id.trim()
+      : undefined;
+
+  const envId =
+    process.env.OMC_SESSION_ID && process.env.OMC_SESSION_ID.trim()
+      ? process.env.OMC_SESSION_ID.trim()
+      : undefined;
+
+  return payloadId ?? envId;
+}
+
+// ============================================================================
+// Session ID validation (mirrors src/lib/worktree-paths.ts)
+// ============================================================================
+
+const SESSION_ID_REGEX = /^[a-zA-Z0-9][a-zA-Z0-9_-]{0,255}$/;
+
+/**
+ * Validate session id to prevent path traversal.
+ * Returns the id if valid, undefined otherwise.
+ *
+ * @param {string|undefined} sessionId
+ * @returns {string|undefined}
+ */
+function validateSessionId(sessionId) {
+  if (!sessionId) return undefined;
+  if (sessionId.includes('..') || sessionId.includes('/') || sessionId.includes('\\')) return undefined;
+  if (!SESSION_ID_REGEX.test(sessionId)) return undefined;
+  return sessionId;
+}
+
+// Use the same process-identity-aware state lock as the cleanup hook.
+// run.cjs gives 3s hooks a 2.5s inner budget; share a 1.8s monotonic deadline
+// across acquisition and release, with bounded SQLite and process-probe waits.
+const POST_TOOL_FAILURE_LOCK_ATTEMPTS = 50;
+const POST_TOOL_FAILURE_SQLITE_TIMEOUT_MS = 600;
+const POST_TOOL_FAILURE_PROCESS_PROBE_TIMEOUT_MS = 900;
+const POST_TOOL_FAILURE_TOTAL_TIMEOUT_MS = 1800;
+
+function withFileLockSync(filePath, fn) {
+  const result = withStateFileLockAtPathSync(
+    `${filePath}.lock`,
+    fn,
+    true,
+    POST_TOOL_FAILURE_LOCK_ATTEMPTS,
+    POST_TOOL_FAILURE_SQLITE_TIMEOUT_MS,
+    POST_TOOL_FAILURE_PROCESS_PROBE_TIMEOUT_MS,
+    POST_TOOL_FAILURE_TOTAL_TIMEOUT_MS,
+  );
+  return result.acquired || result.callbackRan;
+}
+
+// ============================================================================
+// State path resolution (mirrors resolveSessionStatePaths logic)
+// ============================================================================
+
+/**
+ * Resolve state file paths for a given omc root and optional session id.
+ * Session-scoped: <omcRoot>/state/sessions/<sid>/last-tool-error-state.json
+ * Legacy:         <omcRoot>/state/last-tool-error.json
+ *
+ * @param {string} omcRoot
+ * @param {string|undefined} sessionId
+ * @returns {{ statePath: string, stateDir: string }}
+ */
+function resolveErrorStatePaths(omcRoot, sessionId) {
+  if (sessionId) {
+    const sessionDir = join(omcRoot, 'state', 'sessions', sessionId);
+    return {
+      stateDir: sessionDir,
+      statePath: join(sessionDir, 'last-tool-error-state.json'),
+    };
+  }
+  const stateDir = join(omcRoot, 'state');
+  return {
+    stateDir,
+    statePath: join(stateDir, 'last-tool-error.json'),
+  };
+}
+
+// Constants
+const RETRY_WINDOW_MS = 60000; // 60 seconds
+// Do not persist tool input or raw errors: either can contain credentials.
+const GENERIC_ERROR_CLASS = 'Tool execution failed (details omitted for privacy).';
+
+// Validate that targetPath is contained within basePath (prevent path traversal)
+function isPathContained(targetPath, basePath) {
+  const normalizedTarget = resolve(targetPath);
+  const normalizedBase = resolve(basePath);
+  return normalizedTarget.startsWith(normalizedBase + sep) || normalizedTarget === normalizedBase;
+}
+
+// Initialize .omc directory if needed; returns the omc root (not state subdir)
+async function initOmcDir(directory) {
+  if (!directory || typeof directory !== 'string') {
+    directory = process.cwd();
+  }
+  const omcDir = await resolveOmcStateRoot(directory);
+  const stateDir = join(omcDir, 'state');
+
+  if (!existsSync(omcDir)) {
+    try { mkdirSync(omcDir, { recursive: true }); } catch {}
+  }
+  if (!existsSync(stateDir)) {
+    try { mkdirSync(stateDir, { recursive: true }); } catch {}
+  }
+
+  return omcDir;
+}
+
+// Read existing error state
+function readErrorState(statePath) {
+  try {
+    if (!existsSync(statePath)) return null;
+    const content = readFileSync(statePath, 'utf-8');
+    return JSON.parse(content);
+  } catch {
+    return null;
+  }
+}
+
+// Calculate retry count
+function calculateRetryCount(existingState, toolName, currentTime) {
+  if (!existingState || existingState.tool_name !== toolName) {
+    return 1; // First failure for this tool
+  }
+
+  const lastErrorTime = new Date(existingState.timestamp).getTime();
+  // Guard against NaN from invalid timestamps
+  if (!Number.isFinite(lastErrorTime)) {
+    return 1; // Treat as first failure if timestamp is invalid
+  }
+  const timeDiff = currentTime - lastErrorTime;
+
+  if (timeDiff > RETRY_WINDOW_MS) {
+    return 1; // Outside retry window, reset count
+  }
+
+  return (existingState.retry_count || 1) + 1;
+}
+
+// Write error state to a pre-resolved statePath (session-scoped or legacy)
+function writeErrorState(stateDir, toolName, retryCount, statePath) {
+  const resolvedPath = statePath || join(stateDir, 'last-tool-error.json');
+
+  const errorState = {
+    tool_name: toolName,
+    error: GENERIC_ERROR_CLASS,
+    timestamp: new Date().toISOString(),
+    retry_count: retryCount,
+  };
+
+  try {
+    atomicWriteFileSync(resolvedPath, JSON.stringify(errorState, null, 2));
+  } catch {}
+}
+
+async function main() {
+  // Skip guard: honor DISABLE_OMC and OMC_SKIP_HOOKS (see issues #838, #3253).
+  // Token `post-tool-use-failure` is preferred; `post-tool-use` is accepted for
+  // compatibility with the sibling PostToolUse hook (post-tool-verifier.mjs).
+  const _skipHooks = (process.env.OMC_SKIP_HOOKS || '').split(',').map(s => s.trim());
+  if (
+    process.env.DISABLE_OMC === '1' ||
+    process.env.DISABLE_OMC === 'true' ||
+    _skipHooks.includes('post-tool-use-failure') ||
+    _skipHooks.includes('post-tool-use')
+  ) {
+    console.log(JSON.stringify({ continue: true }));
+    return;
+  }
+
+  try {
+    const input = await readStdin();
+    const data = JSON.parse(input);
+
+    // Official SDK fields (snake_case)
+    const toolName = data.tool_name || '';
+    const toolInput = data.tool_input;
+    const error = data.error || '';
+    const isInterrupt = data.is_interrupt || false;
+    const directory = data.cwd || data.directory || process.cwd();
+
+    // Ignore user interrupts
+    if (isInterrupt) {
+      console.log(JSON.stringify({ continue: true, suppressOutput: true }));
+      return;
+    }
+
+    // Skip if no tool name or error
+    if (!toolName || !error) {
+      console.log(JSON.stringify({ continue: true, suppressOutput: true }));
+      return;
+    }
+
+    // Resolve session id: payload wins over env var (hook context)
+    const rawSessionId = resolveHookSessionId(data);
+    const sessionId = validateSessionId(rawSessionId);
+
+    // Initialize .omc root directory
+    const omcRoot = await initOmcDir(directory);
+
+    // Resolve state paths (session-scoped or legacy)
+    const { stateDir, statePath } = resolveErrorStatePaths(omcRoot, sessionId);
+
+    // Ensure session state dir exists when session-scoped
+    if (sessionId) {
+      try { mkdirSync(stateDir, { recursive: true }); } catch {}
+    }
+
+    // Hoist retryCount so it is accessible for guidance generation after the lock
+    let retryCount = 1;
+
+    // Read-compute-write under lock to prevent concurrent retryCount corruption
+    const stateWriteCompleted = withFileLockSync(statePath, () => {
+      // Read existing state and calculate retry count
+      const existingState = readErrorState(statePath);
+      const currentTime = Date.now();
+      retryCount = calculateRetryCount(existingState, toolName, currentTime);
+
+      // Write error state
+      writeErrorState(stateDir, toolName, retryCount, statePath);
+    });
+    if (!stateWriteCompleted) {
+      console.error('[omc-tool-failure] state write skipped because the exclusive lock was unavailable');
+    }
+
+    // Inject continuation guidance so the model analyzes the error instead of stopping.
+    // Without this, PostToolUseFailure returns silently and the model may end its turn.
+    // The PostToolUse hook (post-tool-verifier.mjs) provides similar guidance for
+    // successful Bash calls with error patterns, but PostToolUseFailure is a separate
+    // event that needs its own guidance injection.
+    let guidance;
+    if (retryCount >= 5) {
+      guidance = `Tool "${toolName}" has failed ${retryCount} times. Stop retrying the same approach — try a different command, check dependencies, or ask the user for guidance.`;
+    } else {
+      guidance = `Tool "${toolName}" failed. Analyze the error, fix the issue, and continue working.`;
+    }
+
+    console.log(JSON.stringify({
+      continue: true,
+      hookSpecificOutput: {
+        hookEventName: 'PostToolUseFailure',
+        additionalContext: guidance,
+      },
+    }));
+  } catch (error) {
+    // Never block on hook errors
+    console.log(JSON.stringify({ continue: true }));
+  }
+}
+
+main();

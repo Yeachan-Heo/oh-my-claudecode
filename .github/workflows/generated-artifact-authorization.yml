@@ -1,0 +1,43 @@
+name: Generated Artifact Authorization
+
+on:
+  pull_request_target:
+    branches: [main, dev]
+    types: [opened, synchronize, reopened]
+
+# GitHub loads pull_request_target workflow bytes from the default branch, main.
+# Its runtime GITHUB_REF/GITHUB_SHA bind main and its live main commit, while
+# GITHUB_WORKFLOW_REF/GITHUB_WORKFLOW_SHA bind this protected workflow and a
+# separately fetched live main commit. The explicit event-base inputs below bind
+# the target branch and its immutable event commit for the trusted detached checkout.
+# This main-owned workflow authorizes only exact manifest records for main and dev targets. The trusted checkout contains only base-owned
+# verifier and manifest bytes.
+permissions:
+  contents: read
+  pull-requests: read
+
+jobs:
+  authorize-generated-artifacts:
+    name: Authorize generated artifacts from base trust root
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Check out the immutable event base
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          ref: ${{ github.event.pull_request.base.sha }}
+          path: trusted-base
+          fetch-depth: 1
+          persist-credentials: false
+          sparse-checkout: |
+            .github/generated-artifact-authorizations.json
+            scripts/verify-generated-artifact-authorization.mjs
+          sparse-checkout-cone-mode: false
+
+      - name: Verify base-owned generated-artifact authorization
+        working-directory: trusted-base
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          TRUSTED_EVENT_BASE_REF: ${{ github.event.pull_request.base.ref }}
+          TRUSTED_EVENT_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: node scripts/verify-generated-artifact-authorization.mjs

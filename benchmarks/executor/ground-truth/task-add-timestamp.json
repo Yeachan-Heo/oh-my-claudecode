@@ -1,0 +1,33 @@
+{
+  "fixtureId": "task-add-timestamp",
+  "fixturePath": "fixtures/tasks/task-add-timestamp.md",
+  "domain": "task",
+  "expectedVerdict": "trivial",
+  "isCleanBaseline": false,
+  "findings": [
+    {
+      "id": "IMPL-TS-1",
+      "severity": "CRITICAL",
+      "category": "finding",
+      "summary": "Must add createdAt: Date field to the User interface in src/types/user.ts",
+      "keywords": ["createdAt", "User", "interface", "Date", "field"],
+      "explanation": "The User interface needs a new createdAt: Date property. This is the type-level change required."
+    },
+    {
+      "id": "IMPL-TS-2",
+      "severity": "CRITICAL",
+      "category": "finding",
+      "summary": "Must set createdAt: new Date() in the createUser function",
+      "keywords": ["createdAt", "new Date", "createUser", "set"],
+      "explanation": "The createUser function must set createdAt to new Date() when constructing the user object."
+    },
+    {
+      "id": "IMPL-TS-3",
+      "severity": "MAJOR",
+      "category": "finding",
+      "summary": "Scope should be minimal — only User interface and createUser function need changes",
+      "keywords": ["scope", "minimal", "only", "two files", "interface", "service"],
+      "explanation": "This is a trivial task. Only two locations need modification: the type definition and the service function. Routes, other services, and tests should not need changes for this addition."
+    }
+  ]
+}

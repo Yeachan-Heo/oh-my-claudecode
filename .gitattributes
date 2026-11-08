@@ -1,0 +1,30 @@
+# Default to auto (Git decides based on content)
+* text=auto eol=lf
+
+# Force LF for scripts and source files
+*.sh text eol=lf
+*.bash text eol=lf
+*.mjs text eol=lf
+*.js text eol=lf
+*.ts text eol=lf
+*.json text eol=lf
+*.md text eol=lf
+*.yml text eol=lf
+*.yaml text eol=lf
+
+# Force CRLF for Windows-specific files (if any exist)
+*.bat text eol=crlf
+*.cmd text eol=crlf
+*.ps1 text eol=crlf
+
+# Build output (hide from diffs, treat as generated)
+dist/** linguist-generated=true
+dist/**/*.js linguist-generated=true
+dist/**/*.cjs linguist-generated=true
+dist/**/*.d.ts linguist-generated=true
+
+# Binary files (no conversion)
+*.png binary
+*.jpg binary
+*.gif binary
+*.ico binary

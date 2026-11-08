@@ -1,0 +1,382 @@
+/**
+ * Features Module Exports
+ */
+
+export {
+  createMagicKeywordProcessor,
+  detectMagicKeywords,
+  builtInMagicKeywords
+} from './magic-keywords.js';
+
+export {
+  createContinuationHook,
+  continuationSystemPromptAddition,
+  detectCompletionSignals,
+  generateVerificationPrompt
+} from './continuation-enforcement.js';
+
+export {
+  // Types
+  type VersionMetadata,
+  type ReleaseInfo,
+  type UpdateCheckResult,
+  type UpdateResult,
+  type SilentUpdateConfig,
+  // Constants
+  REPO_OWNER,
+  REPO_NAME,
+  GITHUB_API_URL,
+  GITHUB_RAW_URL,
+  CLAUDE_CONFIG_DIR,
+  VERSION_FILE,
+  // Functions
+  getInstalledVersion,
+  saveVersionMetadata,
+  updateLastCheckTime,
+  fetchLatestRelease,
+  compareVersions,
+  checkForUpdates,
+  performUpdate,
+  formatUpdateNotification,
+  shouldCheckForUpdates,
+  backgroundUpdateCheck,
+  interactiveUpdate,
+  // Silent auto-update
+  silentAutoUpdate,
+  hasPendingUpdateRestart,
+  clearPendingUpdateRestart,
+  getPendingUpdateVersion,
+  initSilentAutoUpdate,
+  // Auto-upgrade prompt
+  isAutoUpgradePromptEnabled
+} from './auto-update.js';
+
+// Boulder State - session/plan tracking
+export {
+  // Types
+  type BoulderState,
+  type PlanProgress,
+  type PlanSummary,
+  // Constants
+  BOULDER_DIR,
+  BOULDER_FILE,
+  BOULDER_STATE_PATH,
+  NOTEPAD_DIR,
+  NOTEPAD_BASE_PATH,
+  PLANNER_PLANS_DIR,
+  PLAN_EXTENSION,
+  // Functions
+  getBoulderFilePath,
+  readBoulderState,
+  writeBoulderState,
+  appendSessionId,
+  clearBoulderState,
+  findPlannerPlans,
+  getPlanProgress,
+  getPlanName,
+  createBoulderState,
+  getPlanSummaries,
+  hasBoulder,
+  getActivePlanPath
+} from './boulder-state/index.js';
+
+// Context Injector - multi-source context collection and injection
+export {
+  // Classes
+  ContextCollector,
+  contextCollector,
+  // Functions
+  injectPendingContext,
+  injectContextIntoText,
+  createContextInjectorHook,
+  // Types
+  type ContextSourceType,
+  type ContextPriority,
+  type ContextEntry,
+  type RegisterContextOptions,
+  type PendingContext,
+  type MessageContext,
+  type OutputPart,
+  type InjectionStrategy,
+  type InjectionResult
+} from './context-injector/index.js';
+
+// Background Agent - background task management
+export {
+  // Classes
+  BackgroundManager,
+  ConcurrencyManager,
+  // Functions
+  getBackgroundManager,
+  resetBackgroundManager,
+  // Types
+  type BackgroundTask,
+  type BackgroundTaskStatus,
+  type BackgroundTaskConfig,
+  type LaunchInput,
+  type ResumeInput,
+  type TaskProgress
+} from './background-agent/index.js';
+
+// Builtin Skills - bundled skill definitions
+export {
+  // Functions
+  createBuiltinSkills,
+  getBuiltinSkill,
+  listBuiltinSkillNames,
+  // Types
+  type BuiltinSkill,
+  type SkillMcpConfig,
+  type SkillRegistry
+} from './builtin-skills/index.js';
+
+// Session Friction Report - local context-bloat and operator-friction summaries
+export {
+  generateSessionFrictionReport,
+  type SessionFrictionReport,
+  type SessionFrictionReportOptions,
+  type SessionFrictionSession,
+  type SessionFrictionSignal,
+} from './session-friction-report/index.js';
+
+// Model Routing - intelligent model tier routing
+export {
+  // Main functions
+  routeTask,
+  routeWithEscalation,
+  routeAndAdaptTask,
+  escalateModel,
+  canEscalate,
+  explainRouting,
+  quickTierForAgent,
+  // Signal extraction
+  extractLexicalSignals,
+  extractStructuralSignals,
+  extractContextSignals,
+  extractAllSignals,
+  // Scoring
+  calculateComplexityScore,
+  calculateComplexityTier,
+  scoreToTier,
+  getScoreBreakdown,
+  calculateConfidence,
+  // Rules
+  evaluateRules,
+  getMatchingRules,
+  createRule,
+  mergeRules,
+  DEFAULT_ROUTING_RULES,
+  // Prompt adaptation
+  adaptPromptForTier,
+  getPromptStrategy,
+  getPromptPrefix,
+  getPromptSuffix,
+  createDelegationPrompt,
+  getTaskInstructions,
+  // Constants
+  TIER_MODELS,
+  TIER_TO_MODEL_TYPE,
+  DEFAULT_ROUTING_CONFIG,
+  AGENT_CATEGORY_TIERS,
+  COMPLEXITY_KEYWORDS,
+  TIER_PROMPT_STRATEGIES,
+  TIER_TASK_INSTRUCTIONS,
+  // Types
+  type ComplexityTier,
+  type ComplexitySignals,
+  type LexicalSignals,
+  type StructuralSignals,
+  type ContextSignals,
+  type RoutingDecision,
+  type RoutingContext,
+  type RoutingConfig,
+  type RoutingRule,
+  type PromptAdaptationStrategy,
+} from './model-routing/index.js';
+
+// Notepad Wisdom - plan-scoped wisdom accumulation
+export {
+  // Functions
+  initPlanNotepad,
+  readPlanWisdom,
+  addLearning,
+  addDecision,
+  addIssue,
+  addProblem,
+  getWisdomSummary,
+  // Types
+  type WisdomEntry,
+  type WisdomCategory,
+  type PlanWisdom
+} from './notepad-wisdom/index.js';
+
+// Delegation Categories - semantic task routing
+export {
+  // Functions
+  resolveCategory,
+  isValidCategory,
+  getAllCategories,
+  getCategoryDescription,
+  getCategoryTier,
+  getCategoryTemperature,
+  getCategoryThinkingBudget,
+  getCategoryThinkingBudgetTokens,
+  getCategoryForTask,
+  detectCategoryFromPrompt,
+  enhancePromptWithCategory,
+  // Constants
+  CATEGORY_CONFIGS,
+  THINKING_BUDGET_TOKENS,
+  // Types
+  type DelegationCategory,
+  type CategoryConfig,
+  type ResolvedCategory,
+  type CategoryContext,
+  type ThinkingBudget
+} from './delegation-categories/index.js';
+
+// State Manager - unified state file management
+export {
+  // Classes
+  StateManager,
+  createStateManager,
+  // Functions
+  getStatePath,
+  getLegacyPaths,
+  ensureStateDir,
+  readState,
+  writeState,
+  clearState,
+  migrateState,
+  listStates,
+  cleanupOrphanedStates,
+  // Enums/Constants
+  StateLocation,
+  isStateLocation,
+  DEFAULT_STATE_CONFIG,
+  // Types
+  type StateConfig,
+  type StateReadResult,
+  type StateWriteResult,
+  type StateClearResult,
+  type StateMigrationResult,
+  type StateFileInfo,
+  type ListStatesOptions,
+  type CleanupOptions,
+  type CleanupResult,
+  type StateData
+} from './state-manager/index.js';
+
+
+// Verification - verification protocol for ralph, ultrawork, autopilot
+export {
+  // Functions
+  createProtocol,
+  createChecklist,
+  runVerification,
+  checkEvidence,
+  formatReport,
+  validateChecklist,
+  // Constants
+  STANDARD_CHECKS,
+  // Types
+  type VerificationProtocol,
+  type VerificationCheck,
+  type VerificationChecklist,
+  type VerificationEvidence,
+  type VerificationEvidenceType,
+  type VerificationSummary,
+  type ValidationResult,
+  type VerificationOptions,
+  type ReportOptions
+} from './verification/index.js';
+
+// Task Decomposer - task decomposition and file ownership
+export {
+  // Functions
+  decomposeTask,
+  analyzeTask,
+  identifyComponents,
+  generateSubtasks,
+  assignFileOwnership,
+  identifySharedFiles,
+  // Types
+  type TaskAnalysis,
+  type Component,
+  type Subtask,
+  type SharedFile,
+  type DecompositionResult,
+  type ProjectContext,
+  type TaskType,
+  type ComponentRole,
+  type FileOwnership,
+  type DecompositionStrategy
+} from './task-decomposer/index.js';
+
+
+// Session History Search - local transcript/session artifact search
+export {
+  searchSessionHistory,
+  parseSinceSpec,
+  type SessionHistoryMatch,
+  type SessionHistorySearchOptions,
+  type SessionHistorySearchReport,
+} from './session-history-search/index.js';
+// Agent Addressability & Discoverability - unnamed agent addressing/listing contract (#3665)
+export {
+  shortId,
+  hasExplicitName,
+  hasDescription,
+  addressFor,
+  listingLabel,
+  notificationReference,
+  resolveAgent,
+  formatAgentList,
+  SHORT_ID_LENGTH,
+  type AgentStatus,
+  type AddressableAgent,
+  type MatchKind,
+  type ResolveResult,
+  type FormatAgentListOptions,
+} from './agent-addressability/index.js';;
+// lookout - pre-flight danger scan for autonomous runs (advisory only)
+export {
+  LookoutError,
+  resolveBriefArg,
+  scanLookout,
+  type LookoutConfidence,
+  type LookoutFinding,
+  type LookoutReport,
+  type LookoutSeverity,
+  type LookoutVerdict,
+  type ScanLookoutOptions,
+} from './lookout/index.js';
+// watch-pr - pure PR-readiness classification (babysit skill's verdict policy)
+export {
+  decideWatchVerdict,
+  NO_CHECKS_FIRST_SIGHTING_REASON,
+  type WatchCheckRun,
+  type WatchCheckState,
+  type WatchMergeability,
+  type WatchMergeStateStatus,
+  type WatchOptions,
+  type WatchPrFacts,
+  type WatchReviewDecision,
+  type WatchVerdict,
+  type WatchVerdictKind,
+} from './watch-pr/index.js';
+// verification-ledger - durable append-only verification verdict TSV
+export {
+  appendLedgerEntry,
+  defaultLedgerPath,
+  isVerificationVerdict,
+  LEDGER_HEADER,
+  LEDGER_STATE_RELATIVE_PATH,
+  readLedger,
+  renderLedgerCell,
+  renderLedgerRow,
+  VERIFICATION_VERDICTS,
+  type LedgerEntry,
+  type VerificationVerdict,
+} from './verification-ledger/index.js';
+

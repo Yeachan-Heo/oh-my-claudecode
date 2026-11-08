@@ -1,0 +1,11 @@
+{
+  "name": "omc-statechart",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "node --disable-warning=ExperimentalWarning --test test/*.test.ts"
+  },
+  "devDependencies": {
+    "fast-check": "4.5.3"
+  }
+}

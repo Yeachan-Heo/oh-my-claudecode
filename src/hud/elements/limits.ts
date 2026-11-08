@@ -1,0 +1,465 @@
+/**
+ * OMC HUD - Rate Limits Element
+ *
+ * Renders 5-hour and weekly rate limit usage display (built-in providers),
+ * and custom rate limit buckets from the rateLimitsProvider command.
+ */
+
+import type { RateLimits, CustomProviderResult, CustomBucketUsage, UsageResult } from '../types.js';
+import { RESET } from '../colors.js';
+
+const GREEN = '\x1b[32m';
+const YELLOW = '\x1b[33m';
+const RED = '\x1b[31m';
+const DIM = '\x1b[2m';
+
+// Thresholds for rate limit warnings
+const WARNING_THRESHOLD = 70;
+const CRITICAL_THRESHOLD = 90;
+
+/**
+ * Get color based on percentage
+ */
+function getColor(percent: number): string {
+  if (percent >= CRITICAL_THRESHOLD) {
+    return RED;
+  } else if (percent >= WARNING_THRESHOLD) {
+    return YELLOW;
+  }
+  return GREEN;
+}
+
+/**
+ * Format reset time as human-readable duration.
+ * Returns null if date is null/undefined or in the past.
+ */
+function formatResetTime(date: Date | null | undefined): string | null {
+  if (!date) return null;
+
+  const now = Date.now();
+  const resetMs = date.getTime();
+  const diffMs = resetMs - now;
+
+  // Already reset or invalid
+  if (diffMs <= 0) return null;
+
+  const diffMinutes = Math.floor(diffMs / 60_000);
+  const diffHours = Math.floor(diffMinutes / 60);
+  const diffDays = Math.floor(diffHours / 24);
+
+  if (diffDays > 0) {
+    const remainingHours = diffHours % 24;
+    return `${diffDays}d${remainingHours}h`;
+  }
+
+  const remainingMinutes = diffMinutes % 60;
+  return `${diffHours}h${remainingMinutes}m`;
+}
+
+/**
+ * Render rate limits display.
+ *
+ * Format: 5h:45%(3h42m) wk:12%(2d5h) mo:8%(15d3h) sn:20%(1d2h) op:5%(1d2h)
+ */
+export function renderRateLimits(limits: RateLimits | null, stale?: boolean): string | null {
+  if (!limits) return null;
+
+  const staleMarker = stale ? `${DIM}*${RESET}` : '';
+  const resetPrefix = stale ? '~' : '';
+
+  const parts: string[] = [];
+
+  if (limits.fiveHourPercent != null) {
+    const fiveHour = Math.min(100, Math.max(0, Math.round(limits.fiveHourPercent)));
+    const fiveHourColor = getColor(fiveHour);
+    const fiveHourReset = formatResetTime(limits.fiveHourResetsAt);
+
+    const fiveHourPart = fiveHourReset
+      ? `5h:${fiveHourColor}${fiveHour}%${RESET}${staleMarker}${DIM}(${resetPrefix}${fiveHourReset})${RESET}`
+      : `5h:${fiveHourColor}${fiveHour}%${RESET}${staleMarker}`;
+
+    parts.push(fiveHourPart);
+  }
+
+  if (limits.weeklyPercent != null) {
+    const weekly = Math.min(100, Math.max(0, Math.round(limits.weeklyPercent)));
+    const weeklyColor = getColor(weekly);
+    const weeklyReset = formatResetTime(limits.weeklyResetsAt);
+
+    const weeklyPart = weeklyReset
+      ? `${DIM}wk:${RESET}${weeklyColor}${weekly}%${RESET}${staleMarker}${DIM}(${resetPrefix}${weeklyReset})${RESET}`
+      : `${DIM}wk:${RESET}${weeklyColor}${weekly}%${RESET}${staleMarker}`;
+
+    parts.push(weeklyPart);
+  }
+
+  if (limits.monthlyPercent != null) {
+    const monthly = Math.min(100, Math.max(0, Math.round(limits.monthlyPercent)));
+    const monthlyColor = getColor(monthly);
+    const monthlyReset = formatResetTime(limits.monthlyResetsAt);
+
+    const monthlyPart = monthlyReset
+      ? `${DIM}mo:${RESET}${monthlyColor}${monthly}%${RESET}${staleMarker}${DIM}(${resetPrefix}${monthlyReset})${RESET}`
+      : `${DIM}mo:${RESET}${monthlyColor}${monthly}%${RESET}${staleMarker}`;
+
+    parts.push(monthlyPart);
+  }
+
+  if (limits.sonnetWeeklyPercent != null) {
+    const sonnet = Math.min(100, Math.max(0, Math.round(limits.sonnetWeeklyPercent)));
+    const sonnetColor = getColor(sonnet);
+    const sonnetReset = formatResetTime(limits.sonnetWeeklyResetsAt);
+
+    const sonnetPart = sonnetReset
+      ? `${DIM}sn:${RESET}${sonnetColor}${sonnet}%${RESET}${staleMarker}${DIM}(${resetPrefix}${sonnetReset})${RESET}`
+      : `${DIM}sn:${RESET}${sonnetColor}${sonnet}%${RESET}${staleMarker}`;
+
+    parts.push(sonnetPart);
+  }
+
+  if (limits.opusWeeklyPercent != null) {
+    const opus = Math.min(100, Math.max(0, Math.round(limits.opusWeeklyPercent)));
+    const opusColor = getColor(opus);
+    const opusReset = formatResetTime(limits.opusWeeklyResetsAt);
+
+    const opusPart = opusReset
+      ? `${DIM}op:${RESET}${opusColor}${opus}%${RESET}${staleMarker}${DIM}(${resetPrefix}${opusReset})${RESET}`
+      : `${DIM}op:${RESET}${opusColor}${opus}%${RESET}${staleMarker}`;
+
+    parts.push(opusPart);
+  }
+
+  if (limits.scopedWeeklyBuckets != null) {
+    for (const bucket of limits.scopedWeeklyBuckets) {
+      const value = Math.min(100, Math.max(0, Math.round(bucket.percent)));
+      const color = getColor(value);
+      const reset = formatResetTime(bucket.resetsAt);
+      const label = bucket.label.toLowerCase();
+
+      const part = reset
+        ? `${DIM}${label}:${RESET}${color}${value}%${RESET}${staleMarker}${DIM}(${resetPrefix}${reset})${RESET}`
+        : `${DIM}${label}:${RESET}${color}${value}%${RESET}${staleMarker}`;
+
+      parts.push(part);
+    }
+  }
+
+  if (limits.extraUsagePercent != null && limits.extraUsageLimitUsd != null) {
+    const extra = Math.min(100, Math.max(0, Math.round(limits.extraUsagePercent)));
+    const extraColor = getColor(extra);
+    const extraReset = formatResetTime(limits.extraUsageResetsAt);
+    const dollarPart = `${DIM}($${(limits.extraUsageSpentUsd ?? 0).toFixed(2)}/$${limits.extraUsageLimitUsd.toFixed(2)})${RESET}`;
+
+    const extraPart = extraReset
+      ? `${DIM}extra:${RESET}${extraColor}${extra}%${RESET}${staleMarker}${dollarPart}${DIM}(${resetPrefix}${extraReset})${RESET}`
+      : `${DIM}extra:${RESET}${extraColor}${extra}%${RESET}${staleMarker}${dollarPart}`;
+
+    parts.push(extraPart);
+  }
+
+  return parts.length > 0 ? parts.join(' ') : null;
+}
+
+/**
+ * Render compact rate limits (just percentages).
+ *
+ * Format: 45%/12% or 45%/12%/8%/20%/5% (5h/wk/mo/sn/op)
+ */
+export function renderRateLimitsCompact(limits: RateLimits | null, stale?: boolean): string | null {
+  if (!limits) return null;
+
+  const parts: string[] = [];
+
+  if (limits.fiveHourPercent != null) {
+    const fiveHour = Math.min(100, Math.max(0, Math.round(limits.fiveHourPercent)));
+    const fiveHourColor = getColor(fiveHour);
+    parts.push(`${fiveHourColor}${fiveHour}%${RESET}`);
+  }
+
+  if (limits.weeklyPercent != null) {
+    const weekly = Math.min(100, Math.max(0, Math.round(limits.weeklyPercent)));
+    const weeklyColor = getColor(weekly);
+    parts.push(`${weeklyColor}${weekly}%${RESET}`);
+  }
+
+  if (limits.monthlyPercent != null) {
+    const monthly = Math.min(100, Math.max(0, Math.round(limits.monthlyPercent)));
+    const monthlyColor = getColor(monthly);
+    parts.push(`${monthlyColor}${monthly}%${RESET}`);
+  }
+
+  if (limits.sonnetWeeklyPercent != null) {
+    const sonnet = Math.min(100, Math.max(0, Math.round(limits.sonnetWeeklyPercent)));
+    const sonnetColor = getColor(sonnet);
+    parts.push(`${sonnetColor}${sonnet}%${RESET}`);
+  }
+
+  if (limits.opusWeeklyPercent != null) {
+    const opus = Math.min(100, Math.max(0, Math.round(limits.opusWeeklyPercent)));
+    const opusColor = getColor(opus);
+    parts.push(`${opusColor}${opus}%${RESET}`);
+  }
+
+  if (limits.scopedWeeklyBuckets != null) {
+    for (const bucket of limits.scopedWeeklyBuckets) {
+      const value = Math.min(100, Math.max(0, Math.round(bucket.percent)));
+      const color = getColor(value);
+      parts.push(`${color}${value}%${RESET}`);
+    }
+  }
+
+  if (limits.extraUsagePercent != null && limits.extraUsageLimitUsd != null) {
+    const extra = Math.min(100, Math.max(0, Math.round(limits.extraUsagePercent)));
+    const extraColor = getColor(extra);
+    parts.push(`${extraColor}${extra}%${RESET}`);
+  }
+
+  if (parts.length === 0) return null;
+
+  const result = parts.join('/');
+  return stale ? `${result}${DIM}*${RESET}` : result;
+}
+
+/**
+ * Render rate limits with visual progress bars.
+ *
+ * Format: 5h:[████░░░░░░]45%(3h42m) wk:[█░░░░░░░░░]12%(2d5h) mo:[░░░░░░░░░░]8%(15d3h) sn:[██░░░░░░░░]20%(1d2h) op:[░░░░░░░░░░]5%(1d2h)
+ */
+export function renderRateLimitsWithBar(
+  limits: RateLimits | null,
+  barWidth: number = 8,
+  stale?: boolean,
+): string | null {
+  if (!limits) return null;
+
+  const staleMarker = stale ? `${DIM}*${RESET}` : '';
+  const resetPrefix = stale ? '~' : '';
+
+  const parts: string[] = [];
+
+  if (limits.fiveHourPercent != null) {
+    const fiveHour = Math.min(100, Math.max(0, Math.round(limits.fiveHourPercent)));
+    const fiveHourColor = getColor(fiveHour);
+    const fiveHourFilled = Math.round((fiveHour / 100) * barWidth);
+    const fiveHourEmpty = barWidth - fiveHourFilled;
+    const fiveHourBar = `${fiveHourColor}${'█'.repeat(fiveHourFilled)}${DIM}${'░'.repeat(fiveHourEmpty)}${RESET}`;
+    const fiveHourReset = formatResetTime(limits.fiveHourResetsAt);
+
+    const fiveHourPart = fiveHourReset
+      ? `5h:[${fiveHourBar}]${fiveHourColor}${fiveHour}%${RESET}${staleMarker}${DIM}(${resetPrefix}${fiveHourReset})${RESET}`
+      : `5h:[${fiveHourBar}]${fiveHourColor}${fiveHour}%${RESET}${staleMarker}`;
+
+    parts.push(fiveHourPart);
+  }
+
+  if (limits.weeklyPercent != null) {
+    const weekly = Math.min(100, Math.max(0, Math.round(limits.weeklyPercent)));
+    const weeklyColor = getColor(weekly);
+    const weeklyFilled = Math.round((weekly / 100) * barWidth);
+    const weeklyEmpty = barWidth - weeklyFilled;
+    const weeklyBar = `${weeklyColor}${'█'.repeat(weeklyFilled)}${DIM}${'░'.repeat(weeklyEmpty)}${RESET}`;
+    const weeklyReset = formatResetTime(limits.weeklyResetsAt);
+
+    const weeklyPart = weeklyReset
+      ? `${DIM}wk:${RESET}[${weeklyBar}]${weeklyColor}${weekly}%${RESET}${staleMarker}${DIM}(${resetPrefix}${weeklyReset})${RESET}`
+      : `${DIM}wk:${RESET}[${weeklyBar}]${weeklyColor}${weekly}%${RESET}${staleMarker}`;
+
+    parts.push(weeklyPart);
+  }
+
+  if (limits.monthlyPercent != null) {
+    const monthly = Math.min(100, Math.max(0, Math.round(limits.monthlyPercent)));
+    const monthlyColor = getColor(monthly);
+    const monthlyFilled = Math.round((monthly / 100) * barWidth);
+    const monthlyEmpty = barWidth - monthlyFilled;
+    const monthlyBar = `${monthlyColor}${'█'.repeat(monthlyFilled)}${DIM}${'░'.repeat(monthlyEmpty)}${RESET}`;
+    const monthlyReset = formatResetTime(limits.monthlyResetsAt);
+
+    const monthlyPart = monthlyReset
+      ? `${DIM}mo:${RESET}[${monthlyBar}]${monthlyColor}${monthly}%${RESET}${staleMarker}${DIM}(${resetPrefix}${monthlyReset})${RESET}`
+      : `${DIM}mo:${RESET}[${monthlyBar}]${monthlyColor}${monthly}%${RESET}${staleMarker}`;
+
+    parts.push(monthlyPart);
+  }
+
+  if (limits.sonnetWeeklyPercent != null) {
+    const sonnet = Math.min(100, Math.max(0, Math.round(limits.sonnetWeeklyPercent)));
+    const sonnetColor = getColor(sonnet);
+    const sonnetFilled = Math.round((sonnet / 100) * barWidth);
+    const sonnetEmpty = barWidth - sonnetFilled;
+    const sonnetBar = `${sonnetColor}${'█'.repeat(sonnetFilled)}${DIM}${'░'.repeat(sonnetEmpty)}${RESET}`;
+    const sonnetReset = formatResetTime(limits.sonnetWeeklyResetsAt);
+
+    const sonnetPart = sonnetReset
+      ? `${DIM}sn:${RESET}[${sonnetBar}]${sonnetColor}${sonnet}%${RESET}${staleMarker}${DIM}(${resetPrefix}${sonnetReset})${RESET}`
+      : `${DIM}sn:${RESET}[${sonnetBar}]${sonnetColor}${sonnet}%${RESET}${staleMarker}`;
+
+    parts.push(sonnetPart);
+  }
+
+  if (limits.opusWeeklyPercent != null) {
+    const opus = Math.min(100, Math.max(0, Math.round(limits.opusWeeklyPercent)));
+    const opusColor = getColor(opus);
+    const opusFilled = Math.round((opus / 100) * barWidth);
+    const opusEmpty = barWidth - opusFilled;
+    const opusBar = `${opusColor}${'█'.repeat(opusFilled)}${DIM}${'░'.repeat(opusEmpty)}${RESET}`;
+    const opusReset = formatResetTime(limits.opusWeeklyResetsAt);
+
+    const opusPart = opusReset
+      ? `${DIM}op:${RESET}[${opusBar}]${opusColor}${opus}%${RESET}${staleMarker}${DIM}(${resetPrefix}${opusReset})${RESET}`
+      : `${DIM}op:${RESET}[${opusBar}]${opusColor}${opus}%${RESET}${staleMarker}`;
+
+    parts.push(opusPart);
+  }
+
+  if (limits.scopedWeeklyBuckets != null) {
+    for (const bucket of limits.scopedWeeklyBuckets) {
+      const value = Math.min(100, Math.max(0, Math.round(bucket.percent)));
+      const color = getColor(value);
+      const filled = Math.round((value / 100) * barWidth);
+      const empty = barWidth - filled;
+      const bar = `${color}${'█'.repeat(filled)}${DIM}${'░'.repeat(empty)}${RESET}`;
+      const reset = formatResetTime(bucket.resetsAt);
+      const label = bucket.label.toLowerCase();
+
+      const part = reset
+        ? `${DIM}${label}:${RESET}[${bar}]${color}${value}%${RESET}${staleMarker}${DIM}(${resetPrefix}${reset})${RESET}`
+        : `${DIM}${label}:${RESET}[${bar}]${color}${value}%${RESET}${staleMarker}`;
+
+      parts.push(part);
+    }
+  }
+
+  if (limits.extraUsagePercent != null && limits.extraUsageLimitUsd != null) {
+    const extra = Math.min(100, Math.max(0, Math.round(limits.extraUsagePercent)));
+    const extraColor = getColor(extra);
+    const extraFilled = Math.round((extra / 100) * barWidth);
+    const extraEmpty = barWidth - extraFilled;
+    const extraBar = `${extraColor}${'█'.repeat(extraFilled)}${DIM}${'░'.repeat(extraEmpty)}${RESET}`;
+    const extraReset = formatResetTime(limits.extraUsageResetsAt);
+    const dollarPart = `${DIM}($${(limits.extraUsageSpentUsd ?? 0).toFixed(2)}/$${limits.extraUsageLimitUsd.toFixed(2)})${RESET}`;
+
+    const extraPart = extraReset
+      ? `${DIM}extra:${RESET}[${extraBar}]${extraColor}${extra}%${RESET}${staleMarker}${dollarPart}${DIM}(${resetPrefix}${extraReset})${RESET}`
+      : `${DIM}extra:${RESET}[${extraBar}]${extraColor}${extra}%${RESET}${staleMarker}${dollarPart}`;
+
+    parts.push(extraPart);
+  }
+
+  return parts.length > 0 ? parts.join(' ') : null;
+}
+
+/**
+ * Render an error indicator when the built-in rate limit API call fails.
+ *
+ * - 'network': API timeout, HTTP error, or parse failure → [API err]
+ * - 'auth': credentials expired, refresh failed → [API auth]
+ * - 'no_credentials': no OAuth credentials (expected for API key users) → null (no display)
+ */
+export function renderRateLimitsError(result: UsageResult | null): string | null {
+  if (!result?.error) return null;
+  if (result.error === 'no_credentials') return null;
+  if (result.error === 'rate_limited') {
+    // Prefer rendering stale usage percentages when available; only show the 429 badge
+    // when there is no cached rate limit data to display.
+    return result.rateLimits ? null : `${DIM}[API 429]${RESET}`;
+  }
+  if (result.error === 'auth') return `${YELLOW}[API auth]${RESET}`;
+  return `${YELLOW}[API err]${RESET}`;
+}
+
+/**
+ * Render a usage hint for Anthropic API-key users.
+ *
+ * Built-in usage/rate-limit data is only available for OAuth subscribers
+ * (and z.ai/MiniMax tokens). Plain Anthropic API-key users get a
+ * 'no_credentials' result, which would otherwise render nothing, leaving
+ * them with no explanation for the missing usage display. Anthropic does
+ * not expose a usage endpoint for regular x-api-key callers (only the
+ * org-scoped Admin API, which needs a separate admin key), so we point
+ * users at the custom rateLimitsProvider hook (#794) instead.
+ *
+ * Returns null unless the user is in API-key mode, the built-in fetch
+ * failed with 'no_credentials', and no custom provider is configured.
+ */
+export function renderApiKeyUsageHint(
+  result: UsageResult | null,
+  apiKeyMode: boolean,
+  hasCustomProvider: boolean,
+): string | null {
+  if (!apiKeyMode) return null;
+  if (hasCustomProvider) return null;
+  if (result?.error !== 'no_credentials') return null;
+  return `${DIM}[usage: set omcHud.rateLimitsProvider]${RESET}`;
+}
+
+// ============================================================================
+// Custom provider bucket rendering
+// ============================================================================
+
+/**
+ * Compute a 0-100 usage percentage for threshold checks.
+ * Returns null for string usage (no numeric basis).
+ */
+function bucketUsagePercent(usage: CustomBucketUsage): number | null {
+  if (usage.type === 'percent') return usage.value;
+  if (usage.type === 'credit' && usage.limit > 0) return (usage.used / usage.limit) * 100;
+  return null;
+}
+
+/**
+ * Render a bucket usage value as a display string.
+ *   percent  → "32%"
+ *   credit   → "250/300"
+ *   string   → value as-is
+ */
+function renderBucketUsageValue(usage: CustomBucketUsage): string {
+  if (usage.type === 'percent') return `${Math.round(usage.value)}%`;
+  if (usage.type === 'credit') return `${usage.used}/${usage.limit}`;
+  return usage.value;
+}
+
+/**
+ * Render custom rate limit buckets from the rateLimitsProvider command.
+ *
+ * Format (normal):  label:32%  label2:250/300  label3:as-is
+ * Format (stale):   label:32%*  (asterisk marks stale/cached data)
+ * Format (error):   [cmd:err]
+ *
+ * resetsAt is shown only when usage exceeds thresholdPercent (default 85).
+ */
+export function renderCustomBuckets(
+  result: CustomProviderResult,
+  thresholdPercent: number = 85,
+): string | null {
+  // Command failed and no cached data
+  if (result.error && result.buckets.length === 0) {
+    return `${YELLOW}[cmd:err]${RESET}`;
+  }
+
+  if (result.buckets.length === 0) return null;
+
+  const staleMarker = result.stale ? `${DIM}*${RESET}` : '';
+
+  const parts = result.buckets.map((bucket) => {
+    const pct = bucketUsagePercent(bucket.usage);
+    const color = pct != null ? getColor(pct) : '';
+    const colorReset = pct != null ? RESET : '';
+    const usageStr = renderBucketUsageValue(bucket.usage);
+
+    // Show resetsAt only above threshold (string usage never shows it)
+    let resetPart = '';
+    if (bucket.resetsAt && pct != null && pct >= thresholdPercent) {
+      const d = new Date(bucket.resetsAt);
+      if (!isNaN(d.getTime())) {
+        const str = formatResetTime(d);
+        if (str) resetPart = `${DIM}(${str})${RESET}`;
+      }
+    }
+
+    return `${DIM}${bucket.label}:${RESET}${color}${usageStr}${colorReset}${staleMarker}${resetPart}`;
+  });
+
+  return parts.join(' ');
+}
+

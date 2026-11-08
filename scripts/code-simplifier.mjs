@@ -1,0 +1,237 @@
+#!/usr/bin/env node
+
+/**
+ * OMC Code Simplifier Stop Hook (Node.js)
+ *
+ * Intercepts Stop events to automatically delegate recently modified source files
+ * to the code-simplifier agent for cleanup and simplification.
+ *
+ * Opt-in via the global OMC config.json: { "codeSimplifier": { "enabled": true } }
+ * ($OMC_HOME/config.json, else ${XDG_CONFIG_HOME:-~/.config}/omc/config.json on
+ * Linux/Unix, with legacy ~/.omc/config.json as the fallback)
+ * Default: disabled (must explicitly opt in)
+ */
+
+import {
+  existsSync,
+  readFileSync,
+  writeFileSync,
+  mkdirSync,
+  unlinkSync,
+} from 'fs';
+import { join } from 'path';
+import { homedir } from 'os';
+import { execFileSync } from 'child_process';
+import { readStdin } from './lib/stdin.mjs';
+import { resolveOmcStateRoot } from './lib/state-root.mjs';
+import { BOUNDED_GIT_TIMEOUT_MS } from './lib/bounded-git-timeout.mjs';
+import { recordJevShadow } from './lib/jev-shadow.mjs';
+
+const DEFAULT_EXTENSIONS = ['.ts', '.tsx', '.js', '.jsx', '.py', '.go', '.rs'];
+const DEFAULT_MAX_FILES = 10;
+const MARKER_FILENAME = 'code-simplifier-triggered.marker';
+const SIMPLIFIER_TRIGGER_QUESTIONS = {
+  simplification_worthy: {
+    type: 'noul',
+    instructions: 'Is this change simplification-worthy enough to inject the simplifier delegation?',
+    criteria: {
+      true: 'The change would benefit from a simplification pass (duplication, speculative flexibility, over-abstraction)',
+      false: 'Change is already minimal or not code',
+    },
+  },
+};
+
+function readJsonFile(filePath) {
+  try {
+    if (!existsSync(filePath)) return null;
+    return JSON.parse(readFileSync(filePath, 'utf-8'));
+  } catch {
+    return null;
+  }
+}
+
+// Mirrors src/utils/paths.ts:getGlobalOmcConfigCandidates('config.json'):
+// OMC_HOME alone when set; otherwise the XDG config root on Linux/Unix, then
+// the legacy ~/.omc fallback. The first file that exists wins.
+function getGlobalOmcConfigCandidates() {
+  const explicitRoot = process.env.OMC_HOME?.trim();
+  if (explicitRoot) return [join(explicitRoot, 'config.json')];
+
+  const home = process.platform === 'win32'
+    ? process.env.USERPROFILE || process.env.HOME || homedir()
+    : process.env.HOME || homedir();
+  const legacy = join(home, '.omc', 'config.json');
+  if (process.platform === 'win32' || process.platform === 'darwin') return [legacy];
+
+  const configHome = process.env.XDG_CONFIG_HOME || join(homedir(), '.config');
+  return [...new Set([join(configHome, 'omc', 'config.json'), legacy])];
+}
+
+function readOmcConfig() {
+  for (const configPath of getGlobalOmcConfigCandidates()) {
+    if (existsSync(configPath)) return readJsonFile(configPath);
+  }
+  return null;
+}
+
+function isEnabled(config) {
+  return config?.codeSimplifier?.enabled === true;
+}
+
+function getModifiedFiles(cwd, extensions, maxFiles) {
+  try {
+    const output = execFileSync('git', ['diff', 'HEAD', '--name-only'], {
+      cwd,
+      encoding: 'utf-8',
+      stdio: ['ignore', 'pipe', 'ignore'],
+      timeout: BOUNDED_GIT_TIMEOUT_MS,
+      windowsHide: true,
+    });
+
+    return output
+      .trim()
+      .split('\n')
+      .filter((f) => f.trim().length > 0)
+      .filter((f) => extensions.some((ext) => f.endsWith(ext)))
+      .slice(0, maxFiles);
+  } catch {
+    return [];
+  }
+}
+
+function buildMessage(files) {
+  const fileList = files.map((f) => `  - ${f}`).join('\n');
+  const fileArgs = files.join('\\n');
+  return (
+    `[CODE SIMPLIFIER] Recently modified files detected. Delegate to the ` +
+    `code-simplifier agent to simplify the following files for clarity, ` +
+    `consistency, and maintainability (without changing behavior):\n\n` +
+    `${fileList}\n\n` +
+    `Use: Task(subagent_type="oh-my-claudecode:code-simplifier", ` +
+    `prompt="Simplify the recently modified files:\\n${fileArgs}")`
+  );
+}
+
+async function main() {
+  try {
+    const input = await readStdin();
+    let data = {};
+    try {
+      data = JSON.parse(input);
+    } catch {
+      process.stdout.write(JSON.stringify({ continue: true }) + '\n');
+      return;
+    }
+
+    const cwd = data.cwd || data.directory || process.cwd();
+    const stateDir = join(await resolveOmcStateRoot(cwd), 'state');
+    const config = readOmcConfig();
+
+    if (!isEnabled(config)) {
+      process.stdout.write(JSON.stringify({ continue: true }) + '\n');
+      return;
+    }
+
+    const markerPath = join(stateDir, MARKER_FILENAME);
+
+    // If already triggered this turn, clear marker and allow stop
+    if (existsSync(markerPath)) {
+      try {
+        unlinkSync(markerPath);
+      } catch {
+        // ignore
+      }
+      process.stdout.write(JSON.stringify({ continue: true }) + '\n');
+      return;
+    }
+
+    const extensions = config?.codeSimplifier?.extensions ?? DEFAULT_EXTENSIONS;
+    const maxFiles = config?.codeSimplifier?.maxFiles ?? DEFAULT_MAX_FILES;
+    const files = getModifiedFiles(cwd, extensions, maxFiles);
+
+    if (files.length === 0) {
+      process.stdout.write(JSON.stringify({ continue: true }) + '\n');
+      return;
+    }
+
+    recordJevShadow({
+      point: 'simplifier-trigger',
+      state: { cwd, files, source: 'code-simplifier-stop' },
+      questions: SIMPLIFIER_TRIGGER_QUESTIONS,
+      heuristic: true,
+      permissionMode: data.permission_mode,
+    });
+
+    // Write trigger marker to prevent re-triggering within this turn cycle
+    try {
+      if (!existsSync(stateDir)) {
+        mkdirSync(stateDir, { recursive: true });
+      }
+      writeFileSync(markerPath, new Date().toISOString(), 'utf-8');
+    } catch {
+      // best-effort — proceed even if marker write fails
+    }
+
+    process.stdout.write(
+      JSON.stringify({ continue: false, decision: 'block', reason: buildMessage(files) }) + '\n',
+    );
+  } catch (error) {
+    try {
+      process.stderr.write(`[code-simplifier] Error: ${error?.message || error}\n`);
+    } catch {
+      // ignore
+    }
+    try {
+      process.stdout.write(JSON.stringify({ continue: true }) + '\n');
+    } catch {
+      process.exit(0);
+    }
+  }
+}
+
+process.on('uncaughtException', (error) => {
+  try {
+    process.stderr.write(`[code-simplifier] Uncaught: ${error?.message || error}\n`);
+  } catch {
+    // ignore
+  }
+  try {
+    process.stdout.write(JSON.stringify({ continue: true }) + '\n');
+  } catch {
+    // ignore
+  }
+  process.exit(0);
+});
+
+process.on('unhandledRejection', (error) => {
+  try {
+    process.stderr.write(`[code-simplifier] Unhandled: ${error?.message || error}\n`);
+  } catch {
+    // ignore
+  }
+  try {
+    process.stdout.write(JSON.stringify({ continue: true }) + '\n');
+  } catch {
+    // ignore
+  }
+  process.exit(0);
+});
+
+// Safety timeout: force exit after 10 seconds to prevent hook from hanging
+const safetyTimeout = setTimeout(() => {
+  try {
+    process.stderr.write('[code-simplifier] Safety timeout reached, forcing exit\n');
+  } catch {
+    // ignore
+  }
+  try {
+    process.stdout.write(JSON.stringify({ continue: true }) + '\n');
+  } catch {
+    // ignore
+  }
+  process.exit(0);
+}, 10000);
+
+main().finally(() => {
+  clearTimeout(safetyTimeout);
+});

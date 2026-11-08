@@ -1,0 +1,29 @@
+{
+  "schema": "gajae.receipt.v1",
+  "repository": "Yeachan-Heo/oh-my-claudecode",
+  "issue": 3858,
+  "pr": 3864,
+  "actor": "Yeachan-Heo",
+  "mergedAt": "2026-08-24T19:09:34Z",
+  "mergeCommit": "048d10255f31803ef4a2f2c97ce9280acc179ed1",
+  "exactHead": "07bcaf3584b84ae76b293f1f5a02e1c891bc6682",
+  "mergeBase": "b2bd427307d8d4759bff190237703a81e36f91af",
+  "authorizationHead": "07bcaf3584b84ae76b293f1f5a02e1c891bc6682",
+  "generatedDelta": {
+    "count": 8,
+    "sha256": "d80ba6164f350e9f807dd274fdd5efb4e77998c057d1ab922a95b2e697ca3760"
+  },
+  "dogfood": {
+    "tarball": "oh-my-claude-sisyphus-5.0.0.tgz",
+    "checks": [
+      "fake-git-exit-1-resolver-fail-closed",
+      "seven-wiki-tools-no-io",
+      "git-missing-enoent-subdir-allowed",
+      "3863-weakmap-json-opaque"
+    ]
+  },
+  "verdict": "MERGE_READY",
+  "body": "Merged #3864 into dev as 048d10255f31803ef4a2f2c97ce9280acc179ed1 closing remaining #3858 P1 (git probe fail-closed). Packed dogfood of oh-my-claude-sisyphus-5.0.0.tgz: fake-git-exit-1 fail-closed, seven wiki tools no IO, ENOENT git-missing subdir allowed, #3863 WeakMap JSON opacity. Exact-head 07bcaf3584b84ae76b293f1f5a02e1c891bc6682 CI: authorization success, Test/Build/Windows/pack/lint success. No Committed Build Artifacts remains the candidate-side OWNER_CONFIRMATION_REQUIRED classifier; trusted authorization passed.",
+  "bodySha256": "70af080ed00e13d5d3784917a114c23923f7bd949ddb306dd649bcba9f588fbe",
+  "createdAt": "2026-08-24T19:11:22.000Z"
+}

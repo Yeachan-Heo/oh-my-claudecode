@@ -1,0 +1,8 @@
+{
+  "fixtureId": "code-utils-clean",
+  "fixturePath": "fixtures/code/code-utils-clean.ts",
+  "domain": "code",
+  "expectedVerdict": "ACCEPT",
+  "isCleanBaseline": true,
+  "findings": []
+}

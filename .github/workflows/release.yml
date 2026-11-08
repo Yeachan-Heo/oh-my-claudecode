@@ -1,0 +1,177 @@
+name: Release Recovery
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Exact annotated release tag to recover
+        required: true
+        type: string
+      sha:
+        description: Exact 40-character hexadecimal commit SHA to recover
+        required: true
+        type: string
+
+concurrency:
+  group: release-${{ github.event.inputs.tag || github.ref_name }}
+  cancel-in-progress: false
+
+jobs:
+  recover:
+    name: Recover GitHub Release
+    if: github.event_name == 'workflow_dispatch'
+    permissions:
+      contents: write
+    runs-on: ubuntu-latest
+    env:
+      RECOVERY_TAG: ${{ inputs.tag }}
+      RECOVERY_SHA: ${{ inputs.sha }}
+    steps:
+      - name: Validate recovery inputs
+        run: |
+          printf '%s' "$RECOVERY_TAG" | grep -Eq '^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.]+)?$'
+          printf '%s' "$RECOVERY_SHA" | grep -Eq '^[0-9a-f]{40}$'
+
+      - name: Checkout recovery source
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Assert recovered tag identity
+        run: |
+          git fetch --no-tags --force origin "refs/tags/$RECOVERY_TAG:refs/tags/$RECOVERY_TAG"
+          TAG_OBJECT=$(git rev-parse --verify "refs/tags/$RECOVERY_TAG")
+          test "$(git cat-file -t "$TAG_OBJECT")" = "tag"
+          TAG_SHA=$(git rev-parse --verify "refs/tags/$RECOVERY_TAG^{}")
+          test "$TAG_SHA" = "$RECOVERY_SHA"
+          test "$(git rev-parse HEAD)" = "$RECOVERY_SHA"
+
+      - name: Setup recovery Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          registry-url: "https://registry.npmjs.org"
+
+      - name: Pin npm for recovery attestation verification
+        run: |
+          npm install --global npm@11.17.0
+          test "$(npm --version)" = "11.17.0"
+
+      - name: Assert recovery trigger
+        run: node scripts/release-boundary.mjs assert-trigger --tag "$RECOVERY_TAG" --sha "$RECOVERY_SHA"
+
+      - name: Download published archive and generate recovery evidence
+        run: |
+          VERSION="${RECOVERY_TAG#v}"
+          RECOVERY_ARCHIVE_DIR="$RUNNER_TEMP/recovery-archive"
+          RECOVERY_EVIDENCE_JSON="$RUNNER_TEMP/recovery-evidence.json"
+          mkdir -p "$RECOVERY_ARCHIVE_DIR"
+          RECOVERY_TARBALL_NAME=$(npm pack --ignore-scripts --pack-destination "$RECOVERY_ARCHIVE_DIR" --silent "oh-my-claude-sisyphus@$VERSION")
+          RECOVERY_TARBALL="$RECOVERY_ARCHIVE_DIR/$RECOVERY_TARBALL_NAME"
+          node scripts/release-boundary.mjs assert-archive --tarball "$RECOVERY_TARBALL" --version "$VERSION" --git-head "$RECOVERY_SHA"
+          node scripts/release-boundary.mjs write-evidence --tarball "$RECOVERY_TARBALL" --output "$RECOVERY_EVIDENCE_JSON"
+          printf 'RECOVERY_TARBALL=%s\n' "$RECOVERY_TARBALL" >> "$GITHUB_ENV"
+          printf 'RECOVERY_EVIDENCE_JSON=%s\n' "$RECOVERY_EVIDENCE_JSON" >> "$GITHUB_ENV"
+
+      - name: Verify recovered package provenance
+        run: |
+          VERSION="${RECOVERY_TAG#v}"
+          RECOVERY_PREFIX="$RUNNER_TEMP/recovery-provenance-verification"
+          RECOVERY_AUDIT_JSON="$RECOVERY_PREFIX/audit-signatures.json"
+          rm -rf "$RECOVERY_PREFIX"
+          npm install --ignore-scripts --no-audit --no-fund --prefix "$RECOVERY_PREFIX" "oh-my-claude-sisyphus@$VERSION"
+          npm audit signatures --json --include-attestations --prefix "$RECOVERY_PREFIX" > "$RECOVERY_AUDIT_JSON"
+          test -s "$RECOVERY_AUDIT_JSON"
+          node scripts/release-boundary.mjs verify-registry --package oh-my-claude-sisyphus --version "$VERSION" --tag "$RECOVERY_TAG" --sha "$RECOVERY_SHA" --evidence "$RECOVERY_EVIDENCE_JSON" --tarball "$RECOVERY_TARBALL" --provenance required --audit "$RECOVERY_AUDIT_JSON"
+
+      - name: Validate recovery release notes
+        run: |
+          git cat-file -e HEAD:.github/release-body.md
+          test -s .github/release-body.md
+          cp .github/release-body.md release-notes.md
+
+      - name: Upload recovered release evidence
+        uses: actions/upload-artifact@v4
+        with:
+          name: npm-release-boundary-recovery-${{ inputs.tag }}
+          path: |
+            ${{ runner.temp }}/recovery-archive/*.tgz
+            ${{ runner.temp }}/recovery-evidence.json
+            ${{ runner.temp }}/recovery-provenance-verification/audit-signatures.json
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Assert GitHub Release is absent
+        run: |
+          RECOVERY_RELEASE_HTTP="$RUNNER_TEMP/recovery-release-before.http"
+          if gh api --include "repos/$GITHUB_REPOSITORY/releases/tags/$RECOVERY_TAG" > "$RECOVERY_RELEASE_HTTP"; then
+            GH_STATUS=0
+          else
+            GH_STATUS=$?
+          fi
+          IFS=' ' read -r _ HTTP_STATUS _ < "$RECOVERY_RELEASE_HTTP"
+          case "$GH_STATUS:$HTTP_STATUS" in
+            1:404) ;;
+            *)
+              echo "expected GitHub Release-by-tag API to return exactly 404, got gh exit $GH_STATUS and HTTP $HTTP_STATUS" >&2
+              exit 1
+              ;;
+          esac
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Create recovered GitHub Release
+        uses: softprops/action-gh-release@v1
+        with:
+          tag_name: ${{ inputs.tag }}
+          body_path: release-notes.md
+          draft: false
+          prerelease: ${{ contains(inputs.tag, 'alpha') || contains(inputs.tag, 'beta') || contains(inputs.tag, 'rc') }}
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Verify recovered GitHub Release
+        run: |
+          git fetch --no-tags --force origin "refs/tags/$RECOVERY_TAG:refs/tags/$RECOVERY_TAG"
+          POST_CREATE_TAG_OBJECT=$(git rev-parse --verify "refs/tags/$RECOVERY_TAG")
+          test "$(git cat-file -t "$POST_CREATE_TAG_OBJECT")" = "tag"
+          POST_CREATE_TAG_SHA=$(git rev-parse --verify "refs/tags/$RECOVERY_TAG^{}")
+          test "$POST_CREATE_TAG_SHA" = "$RECOVERY_SHA"
+          export RECOVERY_RELEASE_HTTP="$RUNNER_TEMP/recovery-release-after.http"
+          if gh api --include "repos/$GITHUB_REPOSITORY/releases/tags/$RECOVERY_TAG" > "$RECOVERY_RELEASE_HTTP"; then
+            GH_STATUS=0
+          else
+            GH_STATUS=$?
+          fi
+          IFS=' ' read -r _ HTTP_STATUS _ < "$RECOVERY_RELEASE_HTTP"
+          case "$GH_STATUS:$HTTP_STATUS" in
+            0:200) ;;
+            *)
+              echo "expected GitHub Release-by-tag API to return successful JSON, got gh exit $GH_STATUS and HTTP $HTTP_STATUS" >&2
+              exit 1
+              ;;
+          esac
+          node --input-type=module <<'NODE'
+          import { readFileSync } from 'node:fs';
+
+          const response = readFileSync(process.env.RECOVERY_RELEASE_HTTP, 'utf8');
+          const responseBody = /\r?\n\r?\n([\s\S]*)$/.exec(response)?.[1];
+          if (responseBody === undefined) {
+            throw new Error('GitHub Release API response did not include a JSON body');
+          }
+          const release = JSON.parse(responseBody);
+          const expectedBody = readFileSync('.github/release-body.md', 'utf8');
+          if (release.tag_name !== process.env.RECOVERY_TAG) {
+            throw new Error(`release tag mismatch: ${release.tag_name}`);
+          }
+          if (release.draft !== false || release.prerelease !== false) {
+            throw new Error('recovered release is not a published stable release');
+          }
+          if (release.body !== expectedBody) {
+            throw new Error('recovered release body does not match .github/release-body.md');
+          }
+          NODE
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}

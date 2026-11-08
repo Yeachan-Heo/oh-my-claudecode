@@ -1,0 +1,26 @@
+# Source files (compiled to dist/)
+src/
+
+# Examples
+examples/
+
+# Config files
+tsconfig.json
+.eslintrc*
+.prettierrc*
+
+# Git
+.git/
+.gitignore
+
+# Development
+node_modules/
+*.log
+.env*
+
+# TypeScript source (keep .d.ts)
+*.ts
+!*.d.ts
+
+# Plans and notes
+.claude/

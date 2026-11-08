@@ -1,0 +1,648 @@
+import { execFileSync } from 'child_process';
+import { createReadStream, existsSync, readdirSync, statSync } from 'fs';
+import { dirname, join, normalize, resolve } from 'path';
+import { createInterface } from 'readline';
+import {
+  resolveToWorktreeRoot,
+  validateSessionId,
+  validateWorkingDirectory,
+  getOmcRoot,
+} from '../../lib/worktree-paths.js';
+import { getClaudeConfigDir } from '../../utils/config-dir.js';
+import { encodeProjectPath } from '../../utils/encode-project-path.js';
+import type {
+  SessionHistoryMatch,
+  SessionHistorySearchOptions,
+  SessionHistorySearchReport,
+} from './types.js';
+
+const DEFAULT_LIMIT = 10;
+const DEFAULT_CONTEXT_CHARS = 120;
+
+interface SearchTarget {
+  filePath: string;
+  sourceType: SessionHistoryMatch['sourceType'];
+}
+
+interface SearchableEntry {
+  sessionId: string;
+  agentId?: string;
+  timestamp?: string;
+  projectPath?: string;
+  role?: string;
+  entryType?: string;
+  texts: string[];
+}
+
+function compactWhitespace(text: string): string {
+  return text.replace(/\s+/g, ' ').trim();
+}
+
+function normalizeForSearch(value: string, caseSensitive: boolean): string {
+  const compacted = compactWhitespace(value);
+  return caseSensitive ? compacted : compacted.toLowerCase();
+}
+
+function parseSinceSpec(since?: string): number | undefined {
+  if (!since) return undefined;
+
+  const trimmed = since.trim();
+  if (!trimmed) return undefined;
+
+  const durationMatch = trimmed.match(/^(\d+)\s*([mhdw])$/i);
+  if (durationMatch) {
+    const amount = Number.parseInt(durationMatch[1], 10);
+    const unit = durationMatch[2].toLowerCase();
+    const multiplierMap: Record<string, number> = {
+      m: 60_000,
+      h: 3_600_000,
+      d: 86_400_000,
+      w: 604_800_000,
+    };
+    const multiplier = multiplierMap[unit];
+    return multiplier ? Date.now() - amount * multiplier : undefined;
+  }
+
+  const parsed = Date.parse(trimmed);
+  return Number.isNaN(parsed) ? undefined : parsed;
+}
+
+function getMainRepoRoot(projectRoot: string): string | null {
+  try {
+    const gitCommonDir = execFileSync('git', ['rev-parse', '--git-common-dir'], {
+      cwd: projectRoot,
+      encoding: 'utf-8',
+      stdio: ['pipe', 'pipe', 'pipe'],
+      windowsHide: true,
+    }).trim();
+    const absoluteCommonDir = resolve(projectRoot, gitCommonDir);
+    const mainRepoRoot = dirname(absoluteCommonDir);
+    return mainRepoRoot === projectRoot ? null : mainRepoRoot;
+  } catch {
+    return null;
+  }
+}
+
+function getClaudeWorktreeParent(projectRoot: string): string | null {
+  const marker = `${normalize('/.claude/worktrees/')}`;
+  const normalizedRoot = normalize(projectRoot);
+  const idx = normalizedRoot.indexOf(marker);
+  if (idx === -1) return null;
+  return normalizedRoot.slice(0, idx) || null;
+}
+
+function listJsonlFiles(rootDir: string): string[] {
+  if (!existsSync(rootDir)) {
+    return [];
+  }
+
+  const files: string[] = [];
+  const stack = [rootDir];
+
+  while (stack.length > 0) {
+    const current = stack.pop()!;
+    let entries;
+    try {
+      entries = readdirSync(current, { withFileTypes: true });
+    } catch {
+      continue;
+    }
+
+    for (const entry of entries) {
+      const fullPath = join(current, entry.name);
+      if (entry.isDirectory()) {
+        stack.push(fullPath);
+        continue;
+      }
+      if (entry.isFile() && (entry.name.endsWith('.jsonl') || entry.name.endsWith('.json'))) {
+        files.push(fullPath);
+      }
+    }
+  }
+
+  return files;
+}
+
+function uniqueSortedTargets(targets: SearchTarget[]): SearchTarget[] {
+  const seen = new Set<string>();
+  return targets
+    .filter((target) => {
+      const key = `${target.sourceType}:${target.filePath}`;
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    })
+    .sort((a, b) => {
+      const aTime = existsSync(a.filePath) ? statSync(a.filePath).mtimeMs : 0;
+      const bTime = existsSync(b.filePath) ? statSync(b.filePath).mtimeMs : 0;
+      return bTime - aTime;
+    });
+}
+
+function buildCurrentProjectTargets(projectRoot: string, transcriptProjectRoots: string[] = [projectRoot]): SearchTarget[] {
+  const claudeDir = getClaudeConfigDir();
+  const projectRoots = new Set<string>(transcriptProjectRoots);
+  for (const root of transcriptProjectRoots) {
+    const mainRepoRoot = getMainRepoRoot(root);
+    if (mainRepoRoot) projectRoots.add(mainRepoRoot);
+    const claudeWorktreeParent = getClaudeWorktreeParent(root);
+    if (claudeWorktreeParent) projectRoots.add(claudeWorktreeParent);
+  }
+
+  const targets: SearchTarget[] = [];
+
+  for (const root of projectRoots) {
+    const encodedDir = join(claudeDir, 'projects', encodeProjectPath(root));
+    for (const filePath of listJsonlFiles(encodedDir)) {
+      targets.push({ filePath, sourceType: 'project-transcript' });
+    }
+  }
+
+  const legacyTranscriptsDir = join(claudeDir, 'transcripts');
+  for (const filePath of listJsonlFiles(legacyTranscriptsDir)) {
+    targets.push({ filePath, sourceType: 'legacy-transcript' });
+  }
+
+  const omcRoot = getOmcRoot(projectRoot);
+  const sessionSummariesDir = join(omcRoot, 'sessions');
+  for (const filePath of listJsonlFiles(sessionSummariesDir)) {
+    targets.push({ filePath, sourceType: 'omc-session-summary' });
+  }
+
+  const replayDir = join(omcRoot, 'state');
+  if (existsSync(replayDir)) {
+    for (const filePath of listJsonlFiles(replayDir)) {
+      if (filePath.includes('agent-replay-') && filePath.endsWith('.jsonl')) {
+        targets.push({ filePath, sourceType: 'omc-session-replay' });
+      }
+    }
+  }
+
+  return uniqueSortedTargets(targets);
+}
+
+function buildAllProjectTargets(): SearchTarget[] {
+  const claudeDir = getClaudeConfigDir();
+  const targets: SearchTarget[] = [];
+
+  for (const filePath of listJsonlFiles(join(claudeDir, 'projects'))) {
+    targets.push({ filePath, sourceType: 'project-transcript' });
+  }
+
+  for (const filePath of listJsonlFiles(join(claudeDir, 'transcripts'))) {
+    targets.push({ filePath, sourceType: 'legacy-transcript' });
+  }
+
+  return uniqueSortedTargets(targets);
+}
+
+function isWithinProject(projectPath: string | undefined, projectRoots: string[]): boolean {
+  if (!projectPath) {
+    return false;
+  }
+
+  const normalizedProjectPath = normalize(resolve(projectPath)).replace(/\\/g, '/');
+  return projectRoots.some((root) => {
+    const normalizedRoot = normalize(resolve(root)).replace(/\\/g, '/');
+    return normalizedProjectPath === normalizedRoot || normalizedProjectPath.startsWith(`${normalizedRoot}/`);
+  });
+}
+
+function matchesProjectFilter(projectPath: string | undefined, projectFilter: string | undefined): boolean {
+  if (!projectFilter || projectFilter === 'all') {
+    return true;
+  }
+
+  if (!projectPath) {
+    return false;
+  }
+
+  return projectPath.toLowerCase().includes(projectFilter.toLowerCase());
+}
+
+function stringLeaves(value: unknown, maxLeaves: number = 24): string[] {
+  const leaves: string[] = [];
+  const stack: unknown[] = [value];
+
+  while (stack.length > 0 && leaves.length < maxLeaves) {
+    const current = stack.pop();
+    if (typeof current === 'string') {
+      const compacted = compactWhitespace(current);
+      if (compacted.length > 0) {
+        leaves.push(compacted);
+      }
+      continue;
+    }
+    if (Array.isArray(current)) {
+      stack.push(...current);
+      continue;
+    }
+    if (current && typeof current === 'object') {
+      stack.push(...Object.values(current));
+    }
+  }
+
+  return leaves;
+}
+
+function extractTranscriptTexts(entry: Record<string, unknown>): string[] {
+  const texts: string[] = [];
+  const message = entry.message as Record<string, unknown> | undefined;
+  const content = message?.content;
+
+  if (typeof content === 'string') {
+    texts.push(content);
+  } else if (Array.isArray(content)) {
+    for (const block of content) {
+      if (!block || typeof block !== 'object') continue;
+      const record = block as Record<string, unknown>;
+      const blockType = typeof record.type === 'string' ? record.type : undefined;
+
+      if ((blockType === 'text' || blockType === 'thinking' || blockType === 'reasoning') && typeof record.text === 'string') {
+        texts.push(record.text);
+        continue;
+      }
+
+      if (blockType === 'tool_result') {
+        texts.push(...stringLeaves(record.content));
+        continue;
+      }
+
+      if (blockType === 'tool_use') {
+        const toolName = typeof record.name === 'string' ? record.name : 'tool';
+        const inputText = stringLeaves(record.input).join(' ');
+        if (inputText) {
+          texts.push(`${toolName} ${inputText}`);
+        }
+      }
+    }
+  }
+
+  return texts;
+}
+
+function buildTranscriptEntry(entry: Record<string, unknown>): SearchableEntry | null {
+  const texts = extractTranscriptTexts(entry);
+  if (texts.length === 0) {
+    return null;
+  }
+
+  const message = entry.message as Record<string, unknown> | undefined;
+  const sessionId = typeof entry.sessionId === 'string'
+    ? entry.sessionId
+    : typeof entry.session_id === 'string'
+      ? entry.session_id
+      : typeof message?.sessionId === 'string'
+        ? message.sessionId
+        : undefined;
+
+  if (!sessionId) {
+    return null;
+  }
+
+  return {
+    sessionId,
+    agentId: typeof entry.agentId === 'string' ? entry.agentId : undefined,
+    timestamp: typeof entry.timestamp === 'string' ? entry.timestamp : undefined,
+    projectPath: typeof entry.cwd === 'string' ? entry.cwd : undefined,
+    role: typeof message?.role === 'string' ? message.role : undefined,
+    entryType: typeof entry.type === 'string' ? entry.type : undefined,
+    texts,
+  };
+}
+
+function buildJsonArtifactEntry(entry: Record<string, unknown>, sourceType: SearchTarget['sourceType']): SearchableEntry | null {
+  const sessionId = typeof entry.session_id === 'string'
+    ? entry.session_id
+    : typeof entry.sessionId === 'string'
+      ? entry.sessionId
+      : undefined;
+
+  if (!sessionId) {
+    return null;
+  }
+
+  const texts = stringLeaves(entry);
+  if (texts.length === 0) {
+    return null;
+  }
+
+  const timestamp = typeof entry.ended_at === 'string'
+    ? entry.ended_at
+    : typeof entry.started_at === 'string'
+      ? entry.started_at
+      : typeof entry.timestamp === 'string'
+        ? entry.timestamp
+        : undefined;
+
+  const entryType = sourceType === 'omc-session-summary' ? 'session-summary' : 'session-replay';
+
+  return {
+    sessionId,
+    timestamp,
+    projectPath: typeof entry.cwd === 'string' ? entry.cwd : undefined,
+    entryType,
+    texts,
+  };
+}
+
+function buildSearchableEntry(entry: Record<string, unknown>, sourceType: SearchTarget['sourceType']): SearchableEntry | null {
+  if (sourceType === 'project-transcript' || sourceType === 'legacy-transcript' || sourceType === 'omc-session-replay') {
+    return buildTranscriptEntry(entry) ?? (sourceType === 'omc-session-replay' ? buildJsonArtifactEntry(entry, sourceType) : null);
+  }
+
+  if (sourceType === 'omc-session-summary') {
+    return buildJsonArtifactEntry(entry, sourceType);
+  }
+
+  return null;
+}
+
+function findMatchIndex(text: string, query: string, caseSensitive: boolean): number {
+  const haystack = normalizeForSearch(text, caseSensitive);
+  const needle = normalizeForSearch(query, caseSensitive);
+  const directIndex = haystack.indexOf(needle);
+  if (directIndex >= 0) {
+    return directIndex;
+  }
+
+  const terms = needle.split(/\s+/).filter(Boolean);
+  if (terms.length === 0) return -1;
+  if (terms.every((term) => haystack.includes(term))) {
+    return haystack.indexOf(terms[0]);
+  }
+
+  return -1;
+}
+
+function createExcerpt(text: string, matchIndex: number, contextChars: number): string {
+  const compacted = compactWhitespace(text);
+  if (compacted.length <= contextChars * 2) {
+    return compacted;
+  }
+
+  const safeIndex = Math.max(0, matchIndex);
+  const start = Math.max(0, safeIndex - contextChars);
+  const end = Math.min(compacted.length, safeIndex + contextChars);
+  const prefix = start > 0 ? '…' : '';
+  const suffix = end < compacted.length ? '…' : '';
+  return `${prefix}${compacted.slice(start, end).trim()}${suffix}`;
+}
+
+function buildScopeMode(project: string | undefined): 'current' | 'project' | 'all' {
+  if (!project || project === 'current') return 'current';
+  if (project === 'all') return 'all';
+  return 'project';
+}
+
+function compareMatches(a: SessionHistoryMatch, b: SessionHistoryMatch): number {
+  const parsedATime = a.timestamp ? Date.parse(a.timestamp) : 0;
+  const parsedBTime = b.timestamp ? Date.parse(b.timestamp) : 0;
+  // Malformed non-timestamps are outside the timestamp ordering contract. Keep
+  // them searchable with the same deterministic epoch-zero fallback as missing values.
+  const aTime = Number.isFinite(parsedATime) ? parsedATime : 0;
+  const bTime = Number.isFinite(parsedBTime) ? parsedBTime : 0;
+  if (aTime !== bTime) return bTime - aTime;
+  return a.sourcePath.localeCompare(b.sourcePath);
+}
+
+interface RankedMatch {
+  match: SessionHistoryMatch;
+  encounterOrder: number;
+}
+
+function compareRankedMatches(a: RankedMatch, b: RankedMatch): number {
+  const comparison = compareMatches(a.match, b.match);
+  return comparison || a.encounterOrder - b.encounterOrder;
+}
+
+function addToWorstFirstHeap(heap: RankedMatch[], candidate: RankedMatch, capacity: number): void {
+  if (capacity <= 0) return;
+
+  if (heap.length >= capacity) {
+    if (compareRankedMatches(candidate, heap[0]) >= 0) return;
+    heap[0] = candidate;
+    let index = 0;
+    while (true) {
+      const left = index * 2 + 1;
+      const right = left + 1;
+      let worst = index;
+      if (left < heap.length && compareRankedMatches(heap[left], heap[worst]) > 0) worst = left;
+      if (right < heap.length && compareRankedMatches(heap[right], heap[worst]) > 0) worst = right;
+      if (worst === index) break;
+      [heap[index], heap[worst]] = [heap[worst], heap[index]];
+      index = worst;
+    }
+    return;
+  }
+
+  heap.push(candidate);
+  let index = heap.length - 1;
+  while (index > 0) {
+    const parent = Math.floor((index - 1) / 2);
+    if (compareRankedMatches(heap[parent], heap[index]) >= 0) break;
+    [heap[parent], heap[index]] = [heap[index], heap[parent]];
+    index = parent;
+  }
+}
+
+interface MatchRetainer {
+  add(match: SessionHistoryMatch): void;
+  readonly retained: SessionHistoryMatch[];
+  readonly totalMatches: number;
+}
+
+function createMatchRetainer(limit: number): MatchRetainer {
+  const maxMatches = Number.isNaN(limit) ? 0 : Math.max(0, Math.trunc(limit));
+  const heap: RankedMatch[] = [];
+  let totalMatches = 0;
+  let encounterOrder = 0;
+
+  return {
+    add(match) {
+      totalMatches += 1;
+      const rankedMatch = { match, encounterOrder };
+      encounterOrder += 1;
+      addToWorstFirstHeap(heap, rankedMatch, maxMatches);
+    },
+    get retained() {
+      return [...heap]
+        .sort(compareRankedMatches)
+        .map((rankedMatch) => rankedMatch.match);
+    },
+    get totalMatches() {
+      return totalMatches;
+    },
+  };
+}
+
+async function collectMatchesFromFile(
+  target: SearchTarget,
+  options: {
+    query: string;
+    caseSensitive: boolean;
+    contextChars: number;
+    sinceEpoch?: number;
+    sessionId?: string;
+    projectFilter?: string;
+    projectRoots?: string[];
+    onMatch: (match: SessionHistoryMatch) => void;
+  },
+): Promise<void> {
+  const fileMtime = existsSync(target.filePath) ? statSync(target.filePath).mtimeMs : 0;
+
+  if (target.sourceType === 'omc-session-summary' && target.filePath.endsWith('.json')) {
+    try {
+      const payload = JSON.parse(await import('fs/promises').then((fs) => fs.readFile(target.filePath, 'utf-8')));
+      const entry = buildSearchableEntry(payload as Record<string, unknown>, target.sourceType);
+      if (!entry) return;
+      if (options.sessionId && entry.sessionId !== options.sessionId) return;
+      if (options.projectRoots && options.projectRoots.length > 0 && !isWithinProject(entry.projectPath, options.projectRoots)) return;
+      if (!matchesProjectFilter(entry.projectPath, options.projectFilter)) return;
+      const entryEpoch = entry.timestamp ? Date.parse(entry.timestamp) : fileMtime;
+      if (options.sinceEpoch && Number.isFinite(entryEpoch) && entryEpoch < options.sinceEpoch) return;
+
+      for (const text of entry.texts) {
+        const matchIndex = findMatchIndex(text, options.query, options.caseSensitive);
+        if (matchIndex < 0) continue;
+        options.onMatch({
+          sessionId: entry.sessionId,
+          timestamp: entry.timestamp,
+          projectPath: entry.projectPath,
+          sourcePath: target.filePath,
+          sourceType: target.sourceType,
+          line: 1,
+          role: entry.role,
+          entryType: entry.entryType,
+          excerpt: createExcerpt(text, matchIndex, options.contextChars),
+        });
+        break;
+      }
+    } catch {
+      return;
+    }
+    return;
+  }
+
+  const stream = createReadStream(target.filePath, { encoding: 'utf-8' });
+  const reader = createInterface({ input: stream, crlfDelay: Infinity });
+  let line = 0;
+
+  try {
+    for await (const rawLine of reader) {
+      line += 1;
+      if (!rawLine.trim()) continue;
+
+      let parsed: Record<string, unknown>;
+      try {
+        parsed = JSON.parse(rawLine) as Record<string, unknown>;
+      } catch {
+        continue;
+      }
+
+      const entry = buildSearchableEntry(parsed, target.sourceType);
+      if (!entry) continue;
+      if (options.sessionId && entry.sessionId !== options.sessionId) continue;
+      if (options.projectRoots && options.projectRoots.length > 0 && !isWithinProject(entry.projectPath, options.projectRoots)) continue;
+      if (!matchesProjectFilter(entry.projectPath, options.projectFilter)) continue;
+
+      const entryEpoch = entry.timestamp ? Date.parse(entry.timestamp) : fileMtime;
+      if (options.sinceEpoch && Number.isFinite(entryEpoch) && entryEpoch < options.sinceEpoch) continue;
+
+      for (const text of entry.texts) {
+        const matchIndex = findMatchIndex(text, options.query, options.caseSensitive);
+        if (matchIndex < 0) continue;
+        options.onMatch({
+          sessionId: entry.sessionId,
+          agentId: entry.agentId,
+          timestamp: entry.timestamp,
+          projectPath: entry.projectPath,
+          sourcePath: target.filePath,
+          sourceType: target.sourceType,
+          line,
+          role: entry.role,
+          entryType: entry.entryType,
+          excerpt: createExcerpt(text, matchIndex, options.contextChars),
+        });
+        break;
+      }
+    }
+  } finally {
+    reader.close();
+    stream.destroy();
+  }
+}
+
+export async function searchSessionHistory(
+  rawOptions: SessionHistorySearchOptions,
+): Promise<SessionHistorySearchReport> {
+  const query = compactWhitespace(rawOptions.query || '');
+  if (!query) {
+    throw new Error('Query cannot be empty');
+  }
+
+  if (rawOptions.sessionId) {
+    validateSessionId(rawOptions.sessionId);
+  }
+
+  const limit = Math.max(1, rawOptions.limit ?? DEFAULT_LIMIT);
+  const contextChars = Math.max(20, rawOptions.contextChars ?? DEFAULT_CONTEXT_CHARS);
+  const caseSensitive = rawOptions.caseSensitive ?? false;
+  const sinceEpoch = parseSinceSpec(rawOptions.since);
+  const workingDirectory = validateWorkingDirectory(rawOptions.workingDirectory);
+  const currentProjectRoot = resolveToWorktreeRoot(workingDirectory);
+  const scopeMode = buildScopeMode(rawOptions.project);
+  const projectFilter = scopeMode === 'project' ? rawOptions.project : undefined;
+  const literalWorkingDirectory = rawOptions.workingDirectory ? resolve(rawOptions.workingDirectory) : workingDirectory;
+
+  const currentProjectRoots = [currentProjectRoot, literalWorkingDirectory]
+    .concat(getMainRepoRoot(currentProjectRoot) ?? [])
+    .concat(getClaudeWorktreeParent(currentProjectRoot) ?? [])
+    .filter((value, index, arr): value is string => Boolean(value) && arr.indexOf(value) === index);
+
+  const transcriptProjectRoots = currentProjectRoots.filter((root) => isWithinProject(root, [currentProjectRoot]));
+
+  const targets = scopeMode === 'all'
+    ? buildAllProjectTargets()
+    : buildCurrentProjectTargets(currentProjectRoot, transcriptProjectRoots);
+
+  const matchRetainer = createMatchRetainer(limit);
+  for (const target of targets) {
+    await collectMatchesFromFile(target, {
+      query,
+      caseSensitive,
+      contextChars,
+      sinceEpoch,
+      sessionId: rawOptions.sessionId,
+      projectFilter,
+      projectRoots: scopeMode === 'current' ? currentProjectRoots : undefined,
+      onMatch: matchRetainer.add,
+    });
+  }
+
+  return {
+    query,
+    scope: {
+      mode: scopeMode,
+      project: rawOptions.project,
+      workingDirectory: currentProjectRoot,
+      since: rawOptions.since,
+      caseSensitive,
+    },
+    searchedFiles: targets.length,
+    totalMatches: matchRetainer.totalMatches,
+    results: matchRetainer.retained,
+  };
+}
+
+export {
+  encodeProjectPath,
+  isWithinProject as __testingIsWithinProject,
+  parseSinceSpec,
+  createMatchRetainer as __testingCreateMatchRetainer,
+};
+export type {
+  SessionHistoryMatch,
+  SessionHistorySearchOptions,
+  SessionHistorySearchReport,
+} from './types.js';

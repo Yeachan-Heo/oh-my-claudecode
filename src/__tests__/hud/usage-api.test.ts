@@ -1,0 +1,3470 @@
+/**
+ * Tests for z.ai/MiniMax host validation, response parsing, and getUsage routing.
+ */
+
+import { createHash } from 'crypto';
+import { describe, it, expect, vi, beforeEach, afterEach, beforeAll, afterAll } from 'vitest';
+import * as fs from 'fs';
+import * as childProcess from 'child_process';
+import * as os from 'os';
+import { EventEmitter } from 'events';
+import { isZaiHost, parseZaiResponse, isMinimaxHost, parseMinimaxResponse, isKimiHost, parseKimiResponse, getUsage, getUsageCredentialIdentity, parseUsageResponse } from '../../hud/usage-api.js';
+import { renderRateLimits, renderRateLimitsCompact, renderRateLimitsWithBar } from '../../hud/elements/limits.js';
+
+function stripAnsi(value: string): string {
+  return value.replace(/\x1b\[[0-9;]*[a-zA-Z]/g, '');
+}
+
+// Mock file-lock so withFileLock always executes the callback (tests focus on routing, not locking)
+vi.mock('../../lib/file-lock.js', () => ({
+  withFileLock: vi.fn((_lockPath: string, fn: () => unknown) => fn()),
+  lockPathFor: vi.fn((p: string) => p + '.lock'),
+}));
+
+// Mock dependencies that touch filesystem / keychain / network
+vi.mock('../../utils/paths.js', () => ({
+  getClaudeConfigDir: () => '/tmp/test-claude',
+}));
+
+vi.mock('fs', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('fs')>();
+  return {
+    ...actual,
+    existsSync: vi.fn().mockReturnValue(false),
+    readFileSync: vi.fn().mockReturnValue('{}'),
+    writeFileSync: vi.fn(),
+    mkdirSync: vi.fn(),
+    openSync: vi.fn().mockReturnValue(1),
+    writeSync: vi.fn(),
+    closeSync: vi.fn(),
+    statSync: vi.fn().mockReturnValue({ mtimeMs: Date.now() }),
+    unlinkSync: vi.fn(),
+  };
+});
+
+vi.mock('child_process', () => ({
+  execSync: vi.fn().mockImplementation(() => { throw new Error('mock: no keychain'); }),
+  execFileSync: vi.fn().mockImplementation(() => {
+    throw new Error('The specified item could not be found in the keychain.');
+  }),
+}));
+
+vi.mock('https', () => ({
+  default: {
+    request: vi.fn(),
+  },
+}));
+
+describe('isZaiHost', () => {
+  it('accepts exact z.ai hostname', () => {
+    expect(isZaiHost('https://z.ai')).toBe(true);
+    expect(isZaiHost('https://z.ai/')).toBe(true);
+    expect(isZaiHost('https://z.ai/v1')).toBe(true);
+  });
+
+  it('accepts subdomains of z.ai', () => {
+    expect(isZaiHost('https://api.z.ai')).toBe(true);
+    expect(isZaiHost('https://api.z.ai/v1/messages')).toBe(true);
+    expect(isZaiHost('https://api.z.ai/api/anthropic')).toBe(true);
+    expect(isZaiHost('https://foo.bar.z.ai')).toBe(true);
+  });
+
+  it('rejects hosts that merely contain z.ai as substring', () => {
+    expect(isZaiHost('https://z.ai.evil.tld')).toBe(false);
+    expect(isZaiHost('https://notz.ai')).toBe(false);
+    expect(isZaiHost('https://z.ai.example.com')).toBe(false);
+  });
+
+  it('rejects unrelated hosts', () => {
+    expect(isZaiHost('https://api.anthropic.com')).toBe(false);
+    expect(isZaiHost('https://example.com')).toBe(false);
+    expect(isZaiHost('https://localhost:8080')).toBe(false);
+  });
+
+  it('rejects invalid URLs gracefully', () => {
+    expect(isZaiHost('')).toBe(false);
+    expect(isZaiHost('not-a-url')).toBe(false);
+    expect(isZaiHost('://missing-protocol')).toBe(false);
+  });
+
+  it('is case-insensitive', () => {
+    expect(isZaiHost('https://Z.AI/v1')).toBe(true);
+    expect(isZaiHost('https://API.Z.AI')).toBe(true);
+  });
+});
+
+describe('parseZaiResponse', () => {
+  it('returns null for empty response', () => {
+    expect(parseZaiResponse({})).toBeNull();
+    expect(parseZaiResponse({ data: {} })).toBeNull();
+    expect(parseZaiResponse({ data: { limits: [] } })).toBeNull();
+  });
+
+  it('returns null when no known limit types exist', () => {
+    const response = {
+      data: {
+        limits: [{ type: 'UNKNOWN_LIMIT', percentage: 50 }],
+      },
+    };
+    expect(parseZaiResponse(response)).toBeNull();
+  });
+
+  it('parses TOKENS_LIMIT as fiveHourPercent', () => {
+    const response = {
+      data: {
+        limits: [
+          { type: 'TOKENS_LIMIT', percentage: 42, nextResetTime: Date.now() + 3600_000 },
+        ],
+      },
+    };
+
+    const result = parseZaiResponse(response);
+    expect(result).not.toBeNull();
+    expect(result!.fiveHourPercent).toBe(42);
+    expect(result!.fiveHourResetsAt).toBeInstanceOf(Date);
+  });
+
+  it('parses TIME_LIMIT as monthlyPercent', () => {
+    const response = {
+      data: {
+        limits: [
+          { type: 'TOKENS_LIMIT', percentage: 10 },
+          { type: 'TIME_LIMIT', percentage: 75, nextResetTime: Date.now() + 86400_000 },
+        ],
+      },
+    };
+
+    const result = parseZaiResponse(response);
+    expect(result).not.toBeNull();
+    expect(result!.monthlyPercent).toBe(75);
+    expect(result!.monthlyResetsAt).toBeInstanceOf(Date);
+  });
+
+  it('omits weeklyPercent when API returns a single TOKENS_LIMIT (free/basic tier)', () => {
+    const response = {
+      data: {
+        limits: [
+          { type: 'TOKENS_LIMIT', percentage: 50 },
+        ],
+      },
+    };
+
+    const result = parseZaiResponse(response);
+    expect(result).not.toBeNull();
+    expect(result!.weeklyPercent).toBeUndefined();
+    expect(result!.weeklyResetsAt).toBeUndefined();
+  });
+
+  it('clamps percentages to 0-100', () => {
+    const response = {
+      data: {
+        limits: [
+          { type: 'TOKENS_LIMIT', percentage: 150 },
+          { type: 'TIME_LIMIT', percentage: -10 },
+        ],
+      },
+    };
+
+    const result = parseZaiResponse(response);
+    expect(result).not.toBeNull();
+    expect(result!.fiveHourPercent).toBe(100);
+    expect(result!.monthlyPercent).toBe(0);
+  });
+
+  it('parses monthly-only limited state (TIME_LIMIT without TOKENS_LIMIT)', () => {
+    const resetTime = Date.now() + 86400_000 * 7;
+    const response = {
+      data: {
+        limits: [
+          { type: 'TIME_LIMIT', percentage: 90, nextResetTime: resetTime },
+        ],
+      },
+    };
+
+    const result = parseZaiResponse(response);
+    expect(result).not.toBeNull();
+    expect(result!.fiveHourPercent).toBe(0); // clamped from undefined
+    expect(result!.monthlyPercent).toBe(90);
+    expect(result!.monthlyResetsAt).toBeInstanceOf(Date);
+    expect(result!.monthlyResetsAt!.getTime()).toBe(resetTime);
+    expect(result!.weeklyPercent).toBeUndefined();
+  });
+
+  it('handles TIME_LIMIT without nextResetTime', () => {
+    const response = {
+      data: {
+        limits: [
+          { type: 'TOKENS_LIMIT', percentage: 10 },
+          { type: 'TIME_LIMIT', percentage: 50 },
+        ],
+      },
+    };
+
+    const result = parseZaiResponse(response);
+    expect(result).not.toBeNull();
+    expect(result!.monthlyPercent).toBe(50);
+    expect(result!.monthlyResetsAt).toBeNull();
+  });
+
+  it('parses two TOKENS_LIMIT entries as 5-hour + weekly buckets (pro tier fixture)', () => {
+    // Real z.ai pro tier response payload shared by a user
+    const response = {
+      data: {
+        limits: [
+          { type: 'TOKENS_LIMIT', unit: 3, number: 5, percentage: 1, nextResetTime: 1776180480445 },
+          { type: 'TOKENS_LIMIT', unit: 6, number: 1, percentage: 65, nextResetTime: 1776303517998 },
+          { type: 'TIME_LIMIT', unit: 5, number: 1, percentage: 1, nextResetTime: 1778290717998 },
+        ],
+        level: 'pro',
+      },
+    };
+
+    const result = parseZaiResponse(response);
+    expect(result).not.toBeNull();
+    expect(result!.fiveHourPercent).toBe(1);
+    expect(result!.weeklyPercent).toBe(65);
+    expect(result!.monthlyPercent).toBe(1);
+    expect(result!.fiveHourResetsAt).toBeInstanceOf(Date);
+    expect(result!.fiveHourResetsAt!.getTime()).toBe(1776180480445);
+    expect(result!.weeklyResetsAt).toBeInstanceOf(Date);
+    expect(result!.weeklyResetsAt!.getTime()).toBe(1776303517998);
+    expect(result!.monthlyResetsAt).toBeInstanceOf(Date);
+    expect(result!.monthlyResetsAt!.getTime()).toBe(1778290717998);
+  });
+
+  it('omits weekly when pro-tier response only has TOKENS_LIMIT + TIME_LIMIT (no weekly bucket)', () => {
+    // Real z.ai response: pro tier user whose plan does NOT include a weekly
+    // TOKENS_LIMIT bucket. The HUD must hide the `wk:` segment in this case.
+    const response = {
+      data: {
+        limits: [
+          {
+            type: 'TIME_LIMIT',
+            unit: 5,
+            number: 1,
+            usage: 1000,
+            currentValue: 1000,
+            remaining: 0,
+            percentage: 100,
+            nextResetTime: 1777391696996,
+          },
+          {
+            type: 'TOKENS_LIMIT',
+            unit: 3,
+            number: 5,
+            percentage: 1,
+            nextResetTime: 1776190484314,
+          },
+        ],
+        level: 'pro',
+      },
+    };
+
+    const result = parseZaiResponse(response);
+    expect(result).not.toBeNull();
+    expect(result!.fiveHourPercent).toBe(1);
+    expect(result!.fiveHourResetsAt).toBeInstanceOf(Date);
+    expect(result!.fiveHourResetsAt!.getTime()).toBe(1776190484314);
+    expect(result!.monthlyPercent).toBe(100);
+    expect(result!.monthlyResetsAt).toBeInstanceOf(Date);
+    expect(result!.monthlyResetsAt!.getTime()).toBe(1777391696996);
+    // Critical: weekly fields must remain undefined so HUD hides `wk:` segment
+    expect(result!.weeklyPercent).toBeUndefined();
+    expect(result!.weeklyResetsAt).toBeUndefined();
+  });
+
+  it('classifies by unit code even when weekly.nextResetTime < 5h.nextResetTime', () => {
+    // Edge case: in the final hours before a weekly reset, the weekly
+    // bucket's nextResetTime can be sooner than the 5-hour bucket's. Under a
+    // naive nextResetTime sort this would swap slots. unit-based
+    // classification keeps them correct.
+    const now = Date.now();
+    const response = {
+      data: {
+        limits: [
+          // 5-hour window: resets in ~5 hours
+          { type: 'TOKENS_LIMIT', unit: 3, percentage: 40, nextResetTime: now + 5 * 3600_000 },
+          // Weekly window: resets in ~30 minutes (near end of week)
+          { type: 'TOKENS_LIMIT', unit: 6, percentage: 92, nextResetTime: now + 30 * 60_000 },
+        ],
+      },
+    };
+
+    const result = parseZaiResponse(response);
+    expect(result).not.toBeNull();
+    // Must map by unit, not by reset time
+    expect(result!.fiveHourPercent).toBe(40);
+    expect(result!.weeklyPercent).toBe(92);
+    expect(result!.fiveHourResetsAt!.getTime()).toBe(now + 5 * 3600_000);
+    expect(result!.weeklyResetsAt!.getTime()).toBe(now + 30 * 60_000);
+  });
+
+  it('is robust to TOKENS_LIMIT array order (weekly first, 5-hour second)', () => {
+    const response = {
+      data: {
+        limits: [
+          // Deliberately reversed from the canonical order
+          { type: 'TOKENS_LIMIT', percentage: 65, nextResetTime: 1776303517998 },
+          { type: 'TOKENS_LIMIT', percentage: 1, nextResetTime: 1776180480445 },
+        ],
+      },
+    };
+
+    const result = parseZaiResponse(response);
+    expect(result).not.toBeNull();
+    expect(result!.fiveHourPercent).toBe(1);
+    expect(result!.weeklyPercent).toBe(65);
+  });
+
+  it('pushes TOKENS_LIMIT with missing nextResetTime into the weekly slot', () => {
+    const response = {
+      data: {
+        limits: [
+          { type: 'TOKENS_LIMIT', percentage: 20, nextResetTime: 1776180480445 },
+          { type: 'TOKENS_LIMIT', percentage: 80 }, // no nextResetTime
+        ],
+      },
+    };
+
+    const result = parseZaiResponse(response);
+    expect(result).not.toBeNull();
+    expect(result!.fiveHourPercent).toBe(20);
+    expect(result!.fiveHourResetsAt).toBeInstanceOf(Date);
+    expect(result!.weeklyPercent).toBe(80);
+    expect(result!.weeklyResetsAt).toBeNull();
+  });
+
+  it('treats nextResetTime === 0 the same as missing for sort purposes', () => {
+    const response = {
+      data: {
+        limits: [
+          { type: 'TOKENS_LIMIT', percentage: 30, nextResetTime: 0 },
+          { type: 'TOKENS_LIMIT', percentage: 70, nextResetTime: 1776180480445 },
+        ],
+      },
+    };
+
+    const result = parseZaiResponse(response);
+    expect(result).not.toBeNull();
+    expect(result!.fiveHourPercent).toBe(70);
+    expect(result!.fiveHourResetsAt).toBeInstanceOf(Date);
+    expect(result!.weeklyPercent).toBe(30);
+    expect(result!.weeklyResetsAt).toBeNull();
+  });
+
+  it('uses only the first two TOKENS_LIMIT entries (by reset time) when 3+ exist', () => {
+    const response = {
+      data: {
+        limits: [
+          { type: 'TOKENS_LIMIT', percentage: 10, nextResetTime: 1776180480445 }, // earliest -> 5h
+          { type: 'TOKENS_LIMIT', percentage: 65, nextResetTime: 1776303517998 }, // middle -> weekly
+          { type: 'TOKENS_LIMIT', percentage: 90, nextResetTime: 1778290717998 }, // latest -> ignored
+        ],
+      },
+    };
+
+    const result = parseZaiResponse(response);
+    expect(result).not.toBeNull();
+    expect(result!.fiveHourPercent).toBe(10);
+    expect(result!.weeklyPercent).toBe(65);
+  });
+
+  it('tie-breaks equal nextResetTime by smaller percentage -> 5-hour slot', () => {
+    const sameReset = 1776180480445;
+    const response = {
+      data: {
+        limits: [
+          { type: 'TOKENS_LIMIT', percentage: 80, nextResetTime: sameReset },
+          { type: 'TOKENS_LIMIT', percentage: 20, nextResetTime: sameReset },
+        ],
+      },
+    };
+
+    const result = parseZaiResponse(response);
+    expect(result).not.toBeNull();
+    expect(result!.fiveHourPercent).toBe(20);
+    expect(result!.weeklyPercent).toBe(80);
+  });
+});
+
+describe('getUsage routing', () => {
+  const originalEnv = { ...process.env };
+  const originalPlatform = process.platform;
+  let httpsModule: { default: { request: ReturnType<typeof vi.fn> } };
+  const expectedServiceName = (configDir: string) =>
+    `Claude Code-credentials-${createHash('sha256').update(configDir).digest('hex').slice(0, 8)}`;
+
+  beforeAll(() => {
+    Object.defineProperty(process, 'platform', { value: 'darwin', configurable: true });
+  });
+
+  afterAll(() => {
+    Object.defineProperty(process, 'platform', { value: originalPlatform, configurable: true });
+  });
+
+  beforeEach(async () => {
+    vi.clearAllMocks();
+    vi.mocked(fs.existsSync).mockReturnValue(false);
+    vi.mocked(fs.readFileSync).mockReturnValue('{}');
+    vi.mocked(childProcess.execSync).mockImplementation(() => { throw new Error('mock: no keychain'); });
+    vi.mocked(childProcess.execFileSync).mockImplementation(() => {
+      throw new Error('The specified item could not be found in the keychain.');
+    });
+    // Reset env
+    delete process.env.ANTHROPIC_BASE_URL;
+    delete process.env.ANTHROPIC_AUTH_TOKEN;
+    delete process.env.CLAUDE_CODE_OAUTH_TOKEN;
+    // Get the mocked https module for assertions
+    httpsModule = await import('https') as unknown as typeof httpsModule;
+  });
+
+  afterEach(() => {
+    process.env = { ...originalEnv };
+  });
+
+  it('returns no_credentials error when no credentials and no z.ai env', async () => {
+    const result = await getUsage();
+    expect(result.rateLimits).toBeNull();
+    expect(result.error).toBe('no_credentials');
+    // No network call should be made without credentials
+    expect(httpsModule.default.request).not.toHaveBeenCalled();
+  });
+
+  it('prefers CLAUDE_CODE_OAUTH_TOKEN over Keychain and uses it as the Bearer token', async () => {
+    process.env.CLAUDE_CODE_OAUTH_TOKEN = 'env-oauth-token';
+
+    let capturedAuth: string | undefined;
+    httpsModule.default.request.mockImplementationOnce((options, callback) => {
+      capturedAuth = (options as { headers?: Record<string, string> })?.headers?.Authorization;
+      const req = new EventEmitter() as EventEmitter & { end: () => void; destroy: () => void; on: typeof EventEmitter.prototype.on };
+      req.destroy = vi.fn();
+      req.end = () => {
+        const res = new EventEmitter() as EventEmitter & { statusCode?: number };
+        res.statusCode = 200;
+        callback(res);
+        res.emit('data', JSON.stringify({
+          five_hour: { utilization: 20 },
+          seven_day: { utilization: 40 },
+        }));
+        res.emit('end');
+      };
+      return req;
+    });
+
+    const result = await getUsage();
+
+    // Usage is fetched successfully using the env token...
+    expect(result).toEqual({
+      rateLimits: {
+        fiveHourPercent: 20,
+        weeklyPercent: 40,
+        fiveHourResetsAt: null,
+        weeklyResetsAt: null,
+      },
+    });
+    // ...sent as the Bearer credential...
+    expect(capturedAuth).toBe('Bearer env-oauth-token');
+    // ...and the Keychain is never consulted (the env override short-circuits it).
+    expect(vi.mocked(childProcess.execFileSync)).not.toHaveBeenCalled();
+  });
+
+  it('does not reuse Anthropic usage cache data across env OAuth tokens', async () => {
+    const cachePath = '/tmp/test-claude/plugins/oh-my-claudecode/.usage-cache-anthropic.json';
+    let cacheContent = '{}';
+    const capturedAuth: string[] = [];
+
+    vi.mocked(fs.existsSync).mockImplementation(path => String(path) === cachePath);
+    vi.mocked(fs.readFileSync).mockImplementation(path => {
+      if (String(path) === cachePath) return cacheContent;
+      return '{}';
+    });
+    vi.mocked(fs.writeFileSync).mockImplementation((path, content) => {
+      if (String(path) === cachePath) cacheContent = String(content);
+    });
+
+    const mockUsageResponse = (fiveHourPercent: number) => {
+      httpsModule.default.request.mockImplementationOnce((options, callback) => {
+        capturedAuth.push((options as { headers?: Record<string, string> }).headers?.Authorization ?? '');
+        const req = new EventEmitter() as EventEmitter & { end: () => void; destroy: () => void; on: typeof EventEmitter.prototype.on };
+        req.destroy = vi.fn();
+        req.end = () => {
+          const res = new EventEmitter() as EventEmitter & { statusCode?: number };
+          res.statusCode = 200;
+          callback(res);
+          res.emit('data', JSON.stringify({ five_hour: { utilization: fiveHourPercent } }));
+          res.emit('end');
+        };
+        return req;
+      });
+    };
+
+    process.env.CLAUDE_CODE_OAUTH_TOKEN = 'env-token-one';
+    mockUsageResponse(10);
+    const first = await getUsage();
+
+    process.env.CLAUDE_CODE_OAUTH_TOKEN = 'env-token-two';
+    mockUsageResponse(80);
+    const second = await getUsage();
+
+    expect(first.rateLimits?.fiveHourPercent).toBe(10);
+    expect(second.rateLimits?.fiveHourPercent).toBe(80);
+    expect(capturedAuth).toEqual(['Bearer env-token-one', 'Bearer env-token-two']);
+    expect(cacheContent).not.toContain('env-token-one');
+    expect(cacheContent).not.toContain('env-token-two');
+  });
+
+  it('does not reuse Anthropic usage cache data across stored OAuth accounts', async () => {
+    const cachePath = '/tmp/test-claude/plugins/oh-my-claudecode/.usage-cache-anthropic.json';
+    const credentialsPath = '/tmp/test-claude/.credentials.json';
+    let cacheContent = '{}';
+    let credentialsContent = JSON.stringify({
+      claudeAiOauth: {
+        accessToken: 'stored-access-a',
+        refreshToken: 'stored-refresh-a',
+        expiresAt: Date.now() + 60 * 60 * 1000,
+        oauthAccount: { uuid: 'account-a', emailAddress: 'a@example.test' },
+      },
+    });
+    const capturedAuth: string[] = [];
+
+    process.env.CLAUDE_CONFIG_DIR = '/tmp/test-claude';
+    vi.mocked(fs.existsSync).mockImplementation(path =>
+      String(path) === cachePath || String(path) === credentialsPath,
+    );
+    vi.mocked(fs.readFileSync).mockImplementation(path => {
+      if (String(path) === cachePath) return cacheContent;
+      if (String(path) === credentialsPath) return credentialsContent;
+      return '{}';
+    });
+    vi.mocked(fs.writeFileSync).mockImplementation((path, content) => {
+      if (String(path) === cachePath) cacheContent = String(content);
+    });
+
+    const mockUsageResponse = (fiveHourPercent: number) => {
+      httpsModule.default.request.mockImplementationOnce((options, callback) => {
+        capturedAuth.push((options as { headers?: Record<string, string> }).headers?.Authorization ?? '');
+        const req = new EventEmitter() as EventEmitter & { end: () => void; destroy: () => void; on: typeof EventEmitter.prototype.on };
+        req.destroy = vi.fn();
+        req.end = () => {
+          const res = new EventEmitter() as EventEmitter & { statusCode?: number };
+          res.statusCode = 200;
+          callback(res);
+          res.emit('data', JSON.stringify({ five_hour: { utilization: fiveHourPercent } }));
+          res.emit('end');
+        };
+        return req;
+      });
+    };
+
+    mockUsageResponse(10);
+    const firstIdentity = getUsageCredentialIdentity(true, true);
+    const first = await getUsage();
+
+    credentialsContent = JSON.stringify({
+      claudeAiOauth: {
+        accessToken: 'stored-access-b',
+        refreshToken: 'stored-refresh-b',
+        expiresAt: Date.now() + 60 * 60 * 1000,
+        oauthAccount: { uuid: 'account-b', emailAddress: 'b@example.test' },
+      },
+    });
+    mockUsageResponse(80);
+    const secondIdentity = getUsageCredentialIdentity(true, true);
+    const second = await getUsage();
+
+    expect(firstIdentity).not.toBe(secondIdentity);
+    expect(first.rateLimits?.fiveHourPercent).toBe(10);
+    expect(second.rateLimits?.fiveHourPercent).toBe(80);
+    expect(capturedAuth).toEqual(['Bearer stored-access-a', 'Bearer stored-access-b']);
+    expect(cacheContent).not.toContain('stored-access-a');
+    expect(cacheContent).not.toContain('stored-access-b');
+    expect(cacheContent).not.toContain('stored-refresh-a');
+    expect(cacheContent).not.toContain('stored-refresh-b');
+  });
+
+  it('keeps a legacy OAuth profile stable across token promotion via .claude.json', () => {
+    const credentialsPath = '/tmp/test-claude/.credentials.json';
+    const claudeJsonPath = '/tmp/.claude.json';
+    let credentialsContent = JSON.stringify({
+      claudeAiOauth: {
+        accessToken: 'runtime-access-a',
+        refreshToken: 'runtime-refresh-a',
+      },
+    });
+    let claudeJsonContent = JSON.stringify({
+      oauthAccount: {
+        accountUuid: 'same-stable-account',
+        emailAddress: 'first@example.test',
+      },
+    });
+
+    process.env.CLAUDE_CONFIG_DIR = '/tmp/test-claude';
+    vi.mocked(fs.existsSync).mockImplementation(path =>
+      String(path) === credentialsPath || String(path) === claudeJsonPath,
+    );
+    vi.mocked(fs.readFileSync).mockImplementation(path => {
+      if (String(path) === credentialsPath) return credentialsContent;
+      if (String(path) === claudeJsonPath) return claudeJsonContent;
+      return '{}';
+    });
+
+    const originalIdentity = getUsageCredentialIdentity(false, true);
+    credentialsContent = JSON.stringify({
+      claudeAiOauth: {
+        accessToken: 'runtime-access-b',
+        refreshToken: 'runtime-refresh-b',
+      },
+    });
+    expect(getUsageCredentialIdentity(false, true)).toBe(originalIdentity);
+
+    claudeJsonContent = JSON.stringify({
+      oauthAccount: {
+        accountUuid: 'same-stable-account',
+        emailAddress: 'updated@example.test',
+      },
+    });
+    expect(getUsageCredentialIdentity(false, true)).toBe(originalIdentity);
+
+    claudeJsonContent = JSON.stringify({
+      oauthAccount: { accountUuid: 'different-stable-account' },
+    });
+    expect(getUsageCredentialIdentity(false, true)).not.toBe(originalIdentity);
+  });
+
+  it('prefers account metadata in the active managed runtime directory', () => {
+    const configDir = '/tmp/test-base/.omc-launch';
+    const credentialsPath = `${configDir}/.credentials.json`;
+    const runtimeClaudeJsonPath = `${configDir}/.claude.json`;
+    const adjacentClaudeJsonPath = '/tmp/test-base/.claude.json';
+    let runtimeClaudeJsonContent = JSON.stringify({
+      oauthAccount: { accountUuid: 'runtime-account' },
+    });
+    let adjacentClaudeJsonContent = JSON.stringify({
+      oauthAccount: { accountUuid: 'base-account' },
+    });
+    const credentialsContent = JSON.stringify({
+      claudeAiOauth: {
+        accessToken: 'managed-access-token',
+        refreshToken: 'managed-refresh-token',
+      },
+    });
+
+    process.env.CLAUDE_CONFIG_DIR = configDir;
+    vi.mocked(fs.existsSync).mockImplementation(path =>
+      [credentialsPath, runtimeClaudeJsonPath, adjacentClaudeJsonPath].includes(String(path)),
+    );
+    vi.mocked(fs.readFileSync).mockImplementation(path => {
+      if (String(path) === credentialsPath) return credentialsContent;
+      if (String(path) === runtimeClaudeJsonPath) return runtimeClaudeJsonContent;
+      if (String(path) === adjacentClaudeJsonPath) return adjacentClaudeJsonContent;
+      return '{}';
+    });
+
+    const runtimeIdentity = getUsageCredentialIdentity(false, true);
+    adjacentClaudeJsonContent = JSON.stringify({
+      oauthAccount: { accountUuid: 'another-base-account' },
+    });
+    expect(getUsageCredentialIdentity(false, true)).toBe(runtimeIdentity);
+
+    runtimeClaudeJsonContent = JSON.stringify({
+      oauthAccount: { accountUuid: 'another-runtime-account' },
+    });
+    expect(getUsageCredentialIdentity(false, true)).not.toBe(runtimeIdentity);
+  });
+
+  function getIdentityForCredentialAndRuntimeAccount(
+    embeddedAccount: Record<string, string>,
+    runtimeAccount: Record<string, string>,
+  ): string | null {
+    const configDir = '/tmp/test-base/.omc-launch';
+    const credentialsPath = `${configDir}/.credentials.json`;
+    const runtimeClaudeJsonPath = `${configDir}/.claude.json`;
+    const credentialsContent = JSON.stringify({
+      claudeAiOauth: {
+        accessToken: 'account-b-access',
+        refreshToken: 'account-b-refresh',
+        oauthAccount: embeddedAccount,
+      },
+    });
+
+    process.env.CLAUDE_CONFIG_DIR = configDir;
+    vi.mocked(fs.existsSync).mockImplementation(path =>
+      String(path) === credentialsPath || String(path) === runtimeClaudeJsonPath,
+    );
+    vi.mocked(fs.readFileSync).mockImplementation(path => {
+      if (String(path) === credentialsPath) return credentialsContent;
+      if (String(path) === runtimeClaudeJsonPath) {
+        return JSON.stringify({ oauthAccount: runtimeAccount });
+      }
+      return '{}';
+    });
+
+    return getUsageCredentialIdentity(false, true);
+  }
+
+  it('rejects a config UUID when credentials instead identify an account ID', () => {
+    expect(getIdentityForCredentialAndRuntimeAccount(
+      { accountId: 'account-b' },
+      { accountUuid: 'account-a' },
+    )).toBeNull();
+  });
+
+  it('rejects a config UUID when credentials instead identify an email', () => {
+    expect(getIdentityForCredentialAndRuntimeAccount(
+      { emailAddress: 'account-b@example.test' },
+      { accountUuid: 'account-a' },
+    )).toBeNull();
+  });
+
+  it('rejects config UUID metadata when its email conflicts with credential email', () => {
+    expect(getIdentityForCredentialAndRuntimeAccount(
+      { emailAddress: 'account-b@example.test' },
+      { accountUuid: 'account-a', emailAddress: 'account-a@example.test' },
+    )).toBeNull();
+  });
+
+  it('uses a config UUID when embedded credential email confirms the account', () => {
+    expect(getIdentityForCredentialAndRuntimeAccount(
+      { emailAddress: 'account-a@example.test' },
+      { accountUuid: 'account-a', emailAddress: 'account-a@example.test' },
+    )).not.toBeNull();
+  });
+
+  it('treats unreadable active account metadata as an inconclusive profile', () => {
+    const configDir = '/tmp/test-base/.omc-launch';
+    const credentialsPath = `${configDir}/.credentials.json`;
+    const runtimeClaudeJsonPath = `${configDir}/.claude.json`;
+    const adjacentClaudeJsonPath = '/tmp/test-base/.claude.json';
+    const credentialsContent = JSON.stringify({
+      claudeAiOauth: {
+        accessToken: 'managed-access-token',
+        refreshToken: 'managed-refresh-token',
+        omcUsageProfileId: 'previous-profile',
+        omcUsageProfileTokenHash: createHash('sha256')
+          .update('managed-refresh-token')
+          .digest('hex'),
+      },
+    });
+
+    process.env.CLAUDE_CONFIG_DIR = configDir;
+    vi.mocked(fs.existsSync).mockImplementation(path =>
+      [credentialsPath, runtimeClaudeJsonPath, adjacentClaudeJsonPath].includes(String(path)),
+    );
+    vi.mocked(fs.readFileSync).mockImplementation(path => {
+      if (String(path) === credentialsPath) return credentialsContent;
+      if (String(path) === runtimeClaudeJsonPath) throw new Error('mock: transient metadata read failure');
+      if (String(path) === adjacentClaudeJsonPath) {
+        return JSON.stringify({ oauthAccount: { accountUuid: 'different-account' } });
+      }
+      return '{}';
+    });
+
+    expect(getUsageCredentialIdentity(false, true)).toBeNull();
+  });
+
+  it('does not fall back to file credentials when Keychain lookup is unavailable', async () => {
+    const credentialsPath = '/tmp/test-claude/.credentials.json';
+    const claudeJsonPath = '/tmp/.claude.json';
+    const credentialsContent = JSON.stringify({
+      claudeAiOauth: {
+        accessToken: 'account-b-access',
+        refreshToken: 'account-b-refresh',
+      },
+    });
+
+    process.env.CLAUDE_CONFIG_DIR = '/tmp/test-claude';
+    vi.mocked(fs.existsSync).mockImplementation(path =>
+      String(path) === credentialsPath || String(path) === claudeJsonPath,
+    );
+    vi.mocked(fs.readFileSync).mockImplementation(path => {
+      if (String(path) === credentialsPath) return credentialsContent;
+      if (String(path) === claudeJsonPath) {
+        return JSON.stringify({ oauthAccount: { accountUuid: 'account-a' } });
+      }
+      return '{}';
+    });
+    vi.mocked(childProcess.execFileSync).mockImplementation(() => {
+      throw new Error('mock: transient Keychain failure');
+    });
+
+    expect(getUsageCredentialIdentity(false, true)).toBeNull();
+    expect(childProcess.execFileSync).toHaveBeenCalledTimes(1);
+
+    const result = await getUsage();
+    expect(result.error).toBe('no_credentials');
+    expect(httpsModule.default.request).not.toHaveBeenCalled();
+  });
+
+  it('normalizes the email fallback when no stable account UUID is available', () => {
+    const credentialsPath = '/tmp/test-claude/.credentials.json';
+    let credentialsContent = JSON.stringify({
+      claudeAiOauth: {
+        accessToken: 'email-access-token',
+        refreshToken: 'email-refresh-token',
+        oauthAccount: { emailAddress: 'Owner@Example.test' },
+      },
+    });
+
+    process.env.CLAUDE_CONFIG_DIR = '/tmp/test-claude';
+    vi.mocked(fs.existsSync).mockImplementation(path => String(path) === credentialsPath);
+    vi.mocked(fs.readFileSync).mockImplementation(path =>
+      String(path) === credentialsPath ? credentialsContent : '{}',
+    );
+
+    const originalIdentity = getUsageCredentialIdentity(false, true);
+    credentialsContent = JSON.stringify({
+      claudeAiOauth: {
+        accessToken: 'email-access-token',
+        refreshToken: 'email-refresh-token',
+        oauthAccount: { emailAddress: 'owner@example.test' },
+      },
+    });
+    expect(getUsageCredentialIdentity(false, true)).toBe(originalIdentity);
+
+    credentialsContent = JSON.stringify({
+      claudeAiOauth: {
+        accessToken: 'email-access-token',
+        refreshToken: 'email-refresh-token',
+        oauthAccount: { emailAddress: 'other@example.test' },
+      },
+    });
+    expect(getUsageCredentialIdentity(false, true)).not.toBe(originalIdentity);
+  });
+
+  it('reuses a persisted legacy identity only while its token binding matches', () => {
+    const credentialsPath = '/tmp/test-claude/.credentials.json';
+    const oldTokenHash = createHash('sha256').update('old-refresh-token').digest('hex');
+    let credentialsContent = JSON.stringify({
+      claudeAiOauth: {
+        accessToken: 'old-access-token',
+        refreshToken: 'old-refresh-token',
+        omcUsageProfileId: 'persisted-legacy-profile',
+        omcUsageProfileTokenHash: oldTokenHash,
+      },
+    });
+
+    process.env.CLAUDE_CONFIG_DIR = '/tmp/test-claude';
+    vi.mocked(fs.existsSync).mockImplementation(path => String(path) === credentialsPath);
+    vi.mocked(fs.readFileSync).mockImplementation(path =>
+      String(path) === credentialsPath ? credentialsContent : '{}',
+    );
+
+    const originalIdentity = getUsageCredentialIdentity(false, true);
+    credentialsContent = JSON.stringify({
+      claudeAiOauth: {
+        accessToken: 'old-access-token',
+        refreshToken: 'old-refresh-token',
+      },
+    });
+    expect(getUsageCredentialIdentity(false, true)).not.toBe(originalIdentity);
+
+    credentialsContent = JSON.stringify({
+      claudeAiOauth: {
+        accessToken: 'new-access-token',
+        refreshToken: 'new-refresh-token',
+        omcUsageProfileId: 'persisted-legacy-profile',
+        omcUsageProfileTokenHash: oldTokenHash,
+      },
+    });
+
+    expect(getUsageCredentialIdentity(false, true)).not.toBe(originalIdentity);
+  });
+
+  it('fingerprints the selected third-party provider and API key', () => {
+    process.env.ANTHROPIC_BASE_URL = 'https://api.minimax.io/anthropic';
+    process.env.MINIMAX_API_KEY = 'minimax-account-a';
+    const minimaxIdentity = getUsageCredentialIdentity(true, true);
+
+    process.env.ANTHROPIC_BASE_URL = 'https://api.kimi.com/coding/';
+    process.env.KIMI_API_KEY = 'kimi-account-a';
+    const kimiIdentity = getUsageCredentialIdentity(true, true);
+
+    process.env.KIMI_API_KEY = 'kimi-account-b';
+    const switchedKimiIdentity = getUsageCredentialIdentity(true, true);
+
+    expect(minimaxIdentity).not.toBe(kimiIdentity);
+    expect(kimiIdentity).not.toBe(switchedKimiIdentity);
+    expect(kimiIdentity).not.toContain('kimi-account-a');
+  });
+
+  it('uses the memoized stored credential identity for warm cache hits', async () => {
+    const cachePath = '/tmp/test-claude/plugins/oh-my-claudecode/.usage-cache-anthropic.json';
+    const credentialsPath = '/tmp/test-claude/.credentials.json';
+    const credentialsContent = JSON.stringify({
+      claudeAiOauth: {
+        accessToken: 'warm-access-token',
+        refreshToken: 'warm-refresh-token',
+        expiresAt: Date.now() + 60 * 60 * 1000,
+        oauthAccount: { uuid: 'warm-account', emailAddress: 'warm@example.test' },
+      },
+    });
+    let cacheContent = '{}';
+
+    process.env.CLAUDE_CONFIG_DIR = '/tmp/test-claude';
+    vi.mocked(fs.existsSync).mockImplementation(path =>
+      String(path) === cachePath || String(path) === credentialsPath,
+    );
+    vi.mocked(fs.readFileSync).mockImplementation(path => {
+      if (String(path) === cachePath) return cacheContent;
+      if (String(path) === credentialsPath) return credentialsContent;
+      return '{}';
+    });
+
+    const credentialIdentity = getUsageCredentialIdentity(true, true);
+    cacheContent = JSON.stringify({
+      timestamp: Date.now(),
+      lastSuccessAt: Date.now(),
+      source: 'anthropic',
+      credentialIdentity,
+      data: { fiveHourPercent: 25, weeklyPercent: 50 },
+    });
+    vi.mocked(childProcess.execFileSync).mockClear();
+
+    const first = await getUsage();
+    const second = await getUsage();
+
+    expect(first.rateLimits?.fiveHourPercent).toBe(25);
+    expect(second.rateLimits?.weeklyPercent).toBe(50);
+    expect(vi.mocked(childProcess.execFileSync)).not.toHaveBeenCalled();
+    expect(httpsModule.default.request).not.toHaveBeenCalled();
+  });
+
+  it('does not serve a warm cache for stale config metadata after the stored account changes', async () => {
+    const configDir = '/tmp/test-claude';
+    const cachePath = `${configDir}/plugins/oh-my-claudecode/.usage-cache-anthropic.json`;
+    const claudeJsonPath = `${configDir}/.claude.json`;
+    const cacheAccountA = JSON.stringify({
+      claudeAiOauth: {
+        accessToken: 'account-a-access',
+        refreshToken: 'account-a-refresh',
+        expiresAt: Date.now() + 60 * 60 * 1000,
+        oauthAccount: { uuid: 'account-a' },
+      },
+    });
+    let storedCredentials = cacheAccountA;
+    let cacheContent = '{}';
+    process.env.CLAUDE_CONFIG_DIR = configDir;
+    vi.mocked(fs.existsSync).mockImplementation(path =>
+      String(path) === cachePath || String(path) === claudeJsonPath,
+    );
+    vi.mocked(fs.readFileSync).mockImplementation(path => {
+      if (String(path) === cachePath) return cacheContent;
+      if (String(path) === claudeJsonPath) {
+        return JSON.stringify({ oauthAccount: { accountUuid: 'account-a' } });
+      }
+      return '{}';
+    });
+    vi.mocked(childProcess.execFileSync).mockImplementation(() => storedCredentials);
+
+    const accountAIdentity = getUsageCredentialIdentity(false, true);
+    cacheContent = JSON.stringify({
+      timestamp: Date.now(),
+      lastSuccessAt: Date.now(),
+      source: 'anthropic',
+      credentialIdentity: accountAIdentity,
+      data: { fiveHourPercent: 25, weeklyPercent: 50 },
+    });
+    storedCredentials = JSON.stringify({
+      claudeAiOauth: {
+        accessToken: 'account-b-access',
+        refreshToken: 'account-b-refresh',
+        expiresAt: Date.now() + 60 * 60 * 1000,
+        oauthAccount: { uuid: 'account-b' },
+      },
+    });
+    const accountBIdentity = getUsageCredentialIdentity(false, true);
+    expect(accountBIdentity).not.toBe(accountAIdentity);
+
+    let capturedAuth: string | undefined;
+    httpsModule.default.request.mockImplementationOnce((options, callback) => {
+      capturedAuth = (options as { headers?: Record<string, string> })?.headers?.Authorization;
+      const req = new EventEmitter() as EventEmitter & { end: () => void; destroy: () => void };
+      req.destroy = vi.fn();
+      req.end = () => {
+        const res = new EventEmitter() as EventEmitter & { statusCode?: number };
+        res.statusCode = 200;
+        callback(res);
+        res.emit('data', JSON.stringify({ five_hour: { utilization: 80 }, seven_day: { utilization: 40 } }));
+        res.emit('end');
+      };
+      return req;
+    });
+
+    const result = await getUsage({ skipWarmCache: true });
+
+    expect(result.rateLimits?.fiveHourPercent).toBe(80);
+    expect(capturedAuth).toBe('Bearer account-b-access');
+    expect(httpsModule.default.request).toHaveBeenCalledOnce();
+  });
+
+  it('skips Keychain on a warm OAuth cache hit in a fresh process', async () => {
+    const configDir = '/tmp/test-claude';
+    const cachePath = `${configDir}/plugins/oh-my-claudecode/.usage-cache-anthropic.json`;
+    const claudeJsonPath = `${configDir}/.claude.json`;
+    const cachedCredentials = JSON.stringify({
+      claudeAiOauth: {
+        accessToken: 'warm-keychain-access',
+        refreshToken: 'warm-keychain-refresh',
+        expiresAt: Date.now() + 60 * 60 * 1000,
+        oauthAccount: { uuid: 'warm-keychain-account' },
+      },
+    });
+    let claudeJsonContent = JSON.stringify({
+      oauthAccount: { accountUuid: 'warm-keychain-account' },
+    });
+
+    process.env.CLAUDE_CONFIG_DIR = configDir;
+    vi.mocked(fs.existsSync).mockImplementation(path => String(path) === claudeJsonPath);
+    vi.mocked(fs.readFileSync).mockImplementation(path =>
+      String(path) === claudeJsonPath ? claudeJsonContent : '{}',
+    );
+    vi.mocked(childProcess.execFileSync).mockImplementation((_file, args) => {
+      const argsArray = args as string[];
+      if (argsArray.includes('find-generic-password') && argsArray.includes('-a')) {
+        return cachedCredentials;
+      }
+      throw new Error('The specified item could not be found in the keychain.');
+    });
+
+    const credentialIdentity = getUsageCredentialIdentity(false, true);
+    const cacheContent = JSON.stringify({
+      timestamp: Date.now(),
+      lastSuccessAt: Date.now(),
+      source: 'anthropic',
+      credentialIdentity,
+      data: { fiveHourPercent: 25, weeklyPercent: 50 },
+    });
+    vi.mocked(fs.existsSync).mockImplementation(path =>
+      String(path) === cachePath || String(path) === claudeJsonPath,
+    );
+    vi.mocked(fs.readFileSync).mockImplementation(path => {
+      if (String(path) === cachePath) return cacheContent;
+      if (String(path) === claudeJsonPath) return claudeJsonContent;
+      return '{}';
+    });
+
+    vi.resetModules();
+    const freshFs = await import('fs');
+    const freshChildProcess = await import('child_process');
+    const freshHttps = await import('https') as unknown as { default: { request: ReturnType<typeof vi.fn> } };
+    vi.mocked(freshFs.existsSync).mockImplementation(path =>
+      String(path) === cachePath || String(path) === claudeJsonPath,
+    );
+    vi.mocked(freshFs.readFileSync).mockImplementation(path => {
+      if (String(path) === cachePath) return cacheContent;
+      if (String(path) === claudeJsonPath) return claudeJsonContent;
+      return '{}';
+    });
+    vi.mocked(freshChildProcess.execFileSync).mockClear();
+    vi.mocked(freshChildProcess.execFileSync).mockImplementation(() => {
+      throw new Error('warm cache hit should not read Keychain');
+    });
+
+    const { getUsage: freshGetUsage } = await import('../../hud/usage-api.js');
+    const result = await freshGetUsage();
+
+    expect(result.rateLimits?.fiveHourPercent).toBe(25);
+    expect(result.rateLimits?.weeklyPercent).toBe(50);
+    expect(vi.mocked(freshChildProcess.execFileSync)).not.toHaveBeenCalled();
+    expect(freshHttps.default.request).not.toHaveBeenCalled();
+
+    claudeJsonContent = JSON.stringify({
+      oauthAccount: { accountUuid: 'different-keychain-account' },
+    });
+    const switchedAccountResult = await freshGetUsage();
+    expect(switchedAccountResult.rateLimits?.fiveHourPercent).toBeUndefined();
+    expect(switchedAccountResult.error).toBe('no_credentials');
+    expect(vi.mocked(freshChildProcess.execFileSync)).toHaveBeenCalled();
+  });
+
+  it.each(['network failure', 'rate-limit backoff'] as const)(
+    'skips Keychain on a no-data %s cache hit in a fresh process',
+    async (outcome) => {
+      const configDir = '/tmp/test-claude';
+      const cachePath = `${configDir}/plugins/oh-my-claudecode/.usage-cache-anthropic.json`;
+      const claudeJsonPath = `${configDir}/.claude.json`;
+      const cachedCredentials = JSON.stringify({
+        claudeAiOauth: {
+          accessToken: 'warm-keychain-access',
+          refreshToken: 'warm-keychain-refresh',
+          expiresAt: Date.now() + 60 * 60 * 1000,
+          oauthAccount: { uuid: 'warm-keychain-account' },
+        },
+      });
+
+      process.env.CLAUDE_CONFIG_DIR = configDir;
+      vi.mocked(fs.existsSync).mockImplementation((path) => String(path) === claudeJsonPath);
+      vi.mocked(fs.readFileSync).mockImplementation((path) =>
+        String(path) === claudeJsonPath
+          ? JSON.stringify({ oauthAccount: { accountUuid: 'warm-keychain-account' } })
+          : '{}',
+      );
+      vi.mocked(childProcess.execFileSync).mockImplementation((_file, args) => {
+        const argsArray = args as string[];
+        if (argsArray.includes('find-generic-password') && argsArray.includes('-a')) {
+          return cachedCredentials;
+        }
+        throw new Error('The specified item could not be found in the keychain.');
+      });
+
+      const credentialIdentity = getUsageCredentialIdentity(false, true);
+      const timestamp = Date.now();
+      const rateLimitIdentity = 'anonymous';
+      const backoffUntil = timestamp + 60_000;
+      const cacheContent = JSON.stringify(
+        outcome === 'network failure'
+          ? {
+              timestamp,
+              source: 'anthropic',
+              credentialIdentity,
+              data: null,
+              error: true,
+              errorReason: 'network',
+            }
+          : {
+              timestamp,
+              source: 'anthropic',
+              credentialIdentity,
+              data: null,
+              error: false,
+              errorReason: 'rate_limited',
+              rateLimited: true,
+              rateLimitedCount: 1,
+              rateLimitedUntil: backoffUntil,
+              rateLimitIdentity,
+              rateLimitBackoffs: {
+                [rateLimitIdentity]: {
+                  timestamp,
+                  rateLimitedCount: 1,
+                  rateLimitedUntil: backoffUntil,
+                },
+              },
+            },
+      );
+      vi.mocked(fs.existsSync).mockImplementation(
+        (path) => String(path) === cachePath || String(path) === claudeJsonPath,
+      );
+      vi.mocked(fs.readFileSync).mockImplementation((path) =>
+        String(path) === cachePath
+          ? cacheContent
+          : String(path) === claudeJsonPath
+            ? JSON.stringify({ oauthAccount: { accountUuid: 'warm-keychain-account' } })
+            : '{}',
+      );
+
+      vi.resetModules();
+      const freshFs = await import('fs');
+      const freshChildProcess = await import('child_process');
+      const freshHttps = (await import('https')) as unknown as { default: { request: ReturnType<typeof vi.fn> } };
+      vi.mocked(freshFs.existsSync).mockImplementation(
+        (path) => String(path) === cachePath || String(path) === claudeJsonPath,
+      );
+      vi.mocked(freshFs.readFileSync).mockImplementation((path) =>
+        String(path) === cachePath
+          ? cacheContent
+          : String(path) === claudeJsonPath
+            ? JSON.stringify({ oauthAccount: { accountUuid: 'warm-keychain-account' } })
+            : '{}',
+      );
+      vi.mocked(freshChildProcess.execFileSync).mockClear();
+      vi.mocked(freshChildProcess.execFileSync).mockImplementation(() => {
+        throw new Error('no-data cache hit should not read Keychain');
+      });
+
+      const { getUsage: freshGetUsage } = await import('../../hud/usage-api.js');
+      const result = await freshGetUsage();
+
+      expect(result.rateLimits).toBeNull();
+      expect(result.error).toBe(outcome === 'network failure' ? 'network' : 'rate_limited');
+      expect(vi.mocked(freshChildProcess.execFileSync)).not.toHaveBeenCalled();
+      expect(freshHttps.default.request).not.toHaveBeenCalled();
+    },
+  );
+
+  it('uses the raw ~-prefixed CLAUDE_CONFIG_DIR value for Keychain service lookup', async () => {
+    process.env.CLAUDE_CONFIG_DIR = '~/.claude-personal';
+
+    const oneHourFromNow = Date.now() + 60 * 60 * 1000;
+    const execFileMock = vi.mocked(childProcess.execFileSync);
+    const username = os.userInfo().username;
+    const expectedService = expectedServiceName(process.env.CLAUDE_CONFIG_DIR);
+
+    execFileMock.mockImplementation((_file, args) => {
+      const argsArr = args as string[];
+      expect(argsArr).toContain('find-generic-password');
+      expect(argsArr).toContain('-s');
+      expect(argsArr).toContain(expectedService);
+
+      if (argsArr.includes('-a') && argsArr.includes(username)) {
+        return JSON.stringify({
+          claudeAiOauth: {
+            accessToken: 'raw-token',
+            refreshToken: 'raw-refresh',
+            expiresAt: oneHourFromNow,
+          },
+        });
+      }
+
+      throw new Error(`unexpected keychain lookup: ${JSON.stringify(argsArr)}`);
+    });
+
+    httpsModule.default.request.mockImplementationOnce((_options, callback) => {
+      const req = new EventEmitter() as EventEmitter & { end: () => void; destroy: () => void; on: typeof EventEmitter.prototype.on };
+      req.destroy = vi.fn();
+      req.end = () => {
+        const res = new EventEmitter() as EventEmitter & { statusCode?: number };
+        res.statusCode = 200;
+        callback(res);
+        res.emit('data', JSON.stringify({
+          five_hour: { utilization: 15 },
+          seven_day: { utilization: 35 },
+        }));
+        res.emit('end');
+      };
+      return req;
+    });
+
+    const result = await getUsage();
+
+    expect(result).toEqual({
+      rateLimits: {
+        fiveHourPercent: 15,
+        weeklyPercent: 35,
+        fiveHourResetsAt: null,
+        weeklyResetsAt: null,
+      },
+    });
+    expect(execFileMock).toHaveBeenCalledOnce();
+  });
+
+  it('uses a different Keychain service when CLAUDE_CONFIG_DIR is already expanded', async () => {
+    process.env.CLAUDE_CONFIG_DIR = '/Users/test/.claude-personal';
+
+    const oneHourFromNow = Date.now() + 60 * 60 * 1000;
+    const execFileMock = vi.mocked(childProcess.execFileSync);
+    const username = os.userInfo().username;
+    const expectedService = expectedServiceName(process.env.CLAUDE_CONFIG_DIR);
+
+    execFileMock.mockImplementation((_file, args) => {
+      const argsArr = args as string[];
+      expect(argsArr).toContain('find-generic-password');
+      expect(argsArr).toContain('-s');
+      expect(argsArr).toContain(expectedService);
+
+      if (argsArr.includes('-a') && argsArr.includes(username)) {
+        return JSON.stringify({
+          claudeAiOauth: {
+            accessToken: 'expanded-token',
+            refreshToken: 'expanded-refresh',
+            expiresAt: oneHourFromNow,
+          },
+        });
+      }
+
+      throw new Error(`unexpected keychain lookup: ${JSON.stringify(argsArr)}`);
+    });
+
+    httpsModule.default.request.mockImplementationOnce((_options, callback) => {
+      const req = new EventEmitter() as EventEmitter & { end: () => void; destroy: () => void; on: typeof EventEmitter.prototype.on };
+      req.destroy = vi.fn();
+      req.end = () => {
+        const res = new EventEmitter() as EventEmitter & { statusCode?: number };
+        res.statusCode = 200;
+        callback(res);
+        res.emit('data', JSON.stringify({
+          five_hour: { utilization: 11 },
+          seven_day: { utilization: 22 },
+        }));
+        res.emit('end');
+      };
+      return req;
+    });
+
+    const result = await getUsage();
+
+    expect(result).toEqual({
+      rateLimits: {
+        fiveHourPercent: 11,
+        weeklyPercent: 22,
+        fiveHourResetsAt: null,
+        weeklyResetsAt: null,
+      },
+    });
+    expect(execFileMock).toHaveBeenCalledOnce();
+  });
+
+  it('prefers the username-scoped keychain entry when the legacy service-only entry is expired', async () => {
+    const oneHourFromNow = Date.now() + 60 * 60 * 1000;
+    const oneHourAgo = Date.now() - 60 * 60 * 1000;
+    const execFileMock = vi.mocked(childProcess.execFileSync);
+    const username = os.userInfo().username;
+
+    execFileMock.mockImplementation((_file, args) => {
+      const argsArr = args as string[];
+      if (argsArr && argsArr.includes('-a') && argsArr.includes(username)) {
+        return JSON.stringify({
+          claudeAiOauth: {
+            accessToken: 'fresh-token',
+            refreshToken: 'fresh-refresh',
+            expiresAt: oneHourFromNow,
+          },
+        });
+      }
+      if (argsArr && argsArr.includes('find-generic-password') && !argsArr.includes('-a')) {
+        return JSON.stringify({
+          claudeAiOauth: {
+            accessToken: 'stale-token',
+            refreshToken: 'stale-refresh',
+            expiresAt: oneHourAgo,
+          },
+        });
+      }
+      throw new Error(`unexpected keychain lookup: ${JSON.stringify(argsArr)}`);
+    });
+
+    httpsModule.default.request.mockImplementationOnce((_options, callback) => {
+      const req = new EventEmitter() as EventEmitter & { end: () => void; destroy: () => void; on: typeof EventEmitter.prototype.on };
+      req.destroy = vi.fn();
+      req.end = () => {
+        const res = new EventEmitter() as EventEmitter & { statusCode?: number };
+        res.statusCode = 200;
+        callback(res);
+        res.emit('data', JSON.stringify({
+          five_hour: { utilization: 25 },
+          seven_day: { utilization: 50 },
+        }));
+        res.emit('end');
+      };
+      return req;
+    });
+
+    const result = await getUsage();
+
+    expect(result).toEqual({
+      rateLimits: {
+        fiveHourPercent: 25,
+        weeklyPercent: 50,
+        fiveHourResetsAt: null,
+        weeklyResetsAt: null,
+      },
+    });
+    // Verify username-scoped call was made (first call includes -a <username>)
+    const calls = execFileMock.mock.calls;
+    const userScopedCall = calls.find(c =>
+      Array.isArray(c[1]) && (c[1] as string[]).includes('-a') && (c[1] as string[]).includes(username)
+    );
+    expect(userScopedCall).toBeTruthy();
+    expect(httpsModule.default.request).toHaveBeenCalledTimes(1);
+    expect(httpsModule.default.request.mock.calls[0][0].headers.Authorization).toBe('Bearer fresh-token');
+  });
+
+  it('falls back to the legacy service-only keychain entry when the username-scoped entry is expired', async () => {
+    const oneHourFromNow = Date.now() + 60 * 60 * 1000;
+    const oneHourAgo = Date.now() - 60 * 60 * 1000;
+    const execFileMock = vi.mocked(childProcess.execFileSync);
+    const username = os.userInfo().username;
+
+    execFileMock.mockImplementation((_file, args) => {
+      const argsArr = args as string[];
+      if (argsArr && argsArr.includes('-a') && argsArr.includes(username)) {
+        return JSON.stringify({
+          claudeAiOauth: {
+            accessToken: 'expired-user-token',
+            refreshToken: 'expired-user-refresh',
+            expiresAt: oneHourAgo,
+          },
+        });
+      }
+      if (argsArr && argsArr.includes('find-generic-password') && !argsArr.includes('-a')) {
+        return JSON.stringify({
+          claudeAiOauth: {
+            accessToken: 'fresh-legacy-token',
+            refreshToken: 'fresh-legacy-refresh',
+            expiresAt: oneHourFromNow,
+          },
+        });
+      }
+      throw new Error(`unexpected keychain lookup: ${JSON.stringify(argsArr)}`);
+    });
+
+    httpsModule.default.request.mockImplementationOnce((_options, callback) => {
+      const req = new EventEmitter() as EventEmitter & { end: () => void; destroy: () => void; on: typeof EventEmitter.prototype.on };
+      req.destroy = vi.fn();
+      req.end = () => {
+        const res = new EventEmitter() as EventEmitter & { statusCode?: number };
+        res.statusCode = 200;
+        callback(res);
+        res.emit('data', JSON.stringify({
+          five_hour: { utilization: 10 },
+          seven_day: { utilization: 20 },
+        }));
+        res.emit('end');
+      };
+      return req;
+    });
+
+    const result = await getUsage();
+
+    expect(result).toEqual({
+      rateLimits: {
+        fiveHourPercent: 10,
+        weeklyPercent: 20,
+        fiveHourResetsAt: null,
+        weeklyResetsAt: null,
+      },
+    });
+    expect(execFileMock).toHaveBeenCalledTimes(2);
+    expect(httpsModule.default.request).toHaveBeenCalledTimes(1);
+    expect(httpsModule.default.request.mock.calls[0][0].headers.Authorization).toBe('Bearer fresh-legacy-token');
+  });
+
+  it('preserves model-specific rate limits when generic subscription windows are nullish', () => {
+    const result = parseUsageResponse({
+      five_hour: { utilization: 36, resets_at: '2026-04-24T13:00:00Z' },
+      seven_day: null,
+      seven_day_sonnet: { utilization: 8, resets_at: '2026-04-25T13:00:00Z' },
+    } as unknown as Parameters<typeof parseUsageResponse>[0]);
+
+    expect(result).not.toBeNull();
+    expect(result!.fiveHourPercent).toBe(36);
+    expect(result!.weeklyPercent).toBeUndefined();
+    expect(result!.sonnetWeeklyPercent).toBe(8);
+    expect(result!.sonnetWeeklyResetsAt).toBeInstanceOf(Date);
+  });
+
+  describe('limits[] weekly_scoped fallback (#3576)', () => {
+    it('leaves old-shape responses unchanged when limits[] is absent', () => {
+      const result = parseUsageResponse({
+        five_hour: { utilization: 10, resets_at: '2026-04-24T13:00:00Z' },
+        seven_day: { utilization: 20 },
+        seven_day_sonnet: { utilization: 8, resets_at: '2026-04-25T13:00:00Z' },
+        seven_day_opus: { utilization: 5, resets_at: '2026-04-26T13:00:00Z' },
+      } as unknown as Parameters<typeof parseUsageResponse>[0]);
+
+      expect(result).not.toBeNull();
+      expect(result!.sonnetWeeklyPercent).toBe(8);
+      expect(result!.opusWeeklyPercent).toBe(5);
+      expect(result!.scopedWeeklyBuckets).toBeUndefined();
+    });
+
+    it('fills sonnet/opus from limits[] weekly_scoped entries when flat fields are null (recognized shape)', () => {
+      const result = parseUsageResponse({
+        five_hour: { utilization: 12, resets_at: '2026-04-24T13:00:00Z' },
+        seven_day: { utilization: 22 },
+        seven_day_sonnet: null,
+        seven_day_opus: null,
+        limits: [
+          { kind: 'session', group: 'session', percent: 40, scope: null, is_active: false },
+          { kind: 'weekly_all', group: 'weekly', percent: 22, scope: null, is_active: false },
+          {
+            kind: 'weekly_scoped', group: 'weekly', percent: 33, is_active: true,
+            resets_at: '2026-04-25T13:00:00Z',
+            scope: { model: { id: null, display_name: 'Sonnet' }, surface: null },
+          },
+          {
+            kind: 'weekly_scoped', group: 'weekly', percent: 9, is_active: false,
+            resets_at: '2026-04-26T13:00:00Z',
+            scope: { model: { id: 'claude-opus-4-6', display_name: 'Opus' }, surface: null },
+          },
+        ],
+      } as unknown as Parameters<typeof parseUsageResponse>[0]);
+
+      expect(result).not.toBeNull();
+      expect(result!.sonnetWeeklyPercent).toBe(33);
+      expect(result!.sonnetWeeklyResetsAt).toBeInstanceOf(Date);
+      expect(result!.opusWeeklyPercent).toBe(9);
+      expect(result!.opusWeeklyResetsAt).toBeInstanceOf(Date);
+      expect(result!.scopedWeeklyBuckets).toBeUndefined();
+    });
+
+    it('exposes an unrecognized scoped weekly model (e.g. "Fable") as a generic bucket', () => {
+      const result = parseUsageResponse({
+        five_hour: { utilization: 40, resets_at: '2026-04-24T13:00:00Z' },
+        seven_day: { utilization: 18 },
+        seven_day_oauth_apps: null,
+        seven_day_opus: null,
+        seven_day_sonnet: null,
+        seven_day_cowork: null,
+        limits: [
+          { kind: 'session', group: 'session', percent: 40, scope: null, is_active: false, resets_at: '2026-04-24T18:00:00Z' },
+          { kind: 'weekly_all', group: 'weekly', percent: 18, scope: null, is_active: false, resets_at: '2026-05-01T00:00:00Z' },
+          {
+            kind: 'weekly_scoped', group: 'weekly', percent: 61, is_active: true,
+            resets_at: '2026-05-01T00:00:00Z',
+            scope: { model: { id: null, display_name: 'Fable' }, surface: null },
+          },
+        ],
+      } as unknown as Parameters<typeof parseUsageResponse>[0]);
+
+      expect(result).not.toBeNull();
+      expect(result!.sonnetWeeklyPercent).toBeUndefined();
+      expect(result!.opusWeeklyPercent).toBeUndefined();
+      expect(result!.scopedWeeklyBuckets).toEqual([
+        { id: 'fable', label: 'Fable', percent: 61, resetsAt: expect.any(Date), isActive: true },
+      ]);
+    });
+
+    it('mixed shape: legacy flat sonnet wins over limits[], opus fills from limits[], unrecognized name becomes generic', () => {
+      const result = parseUsageResponse({
+        five_hour: { utilization: 5 },
+        seven_day: { utilization: 7 },
+        seven_day_sonnet: { utilization: 44, resets_at: '2026-04-20T00:00:00Z' },
+        seven_day_opus: null,
+        limits: [
+          {
+            kind: 'weekly_scoped', percent: 99, is_active: false,
+            scope: { model: { id: null, display_name: 'sonnet' }, surface: null },
+          },
+          {
+            kind: 'weekly_scoped', percent: 12, is_active: true, resets_at: '2026-04-27T00:00:00Z',
+            scope: { model: { id: null, display_name: 'Opus 4.6' }, surface: null },
+          },
+          {
+            kind: 'weekly_scoped', percent: 3, is_active: false,
+            scope: { model: { id: null, display_name: 'Haiku Lite' }, surface: null },
+          },
+        ],
+      } as unknown as Parameters<typeof parseUsageResponse>[0]);
+
+      expect(result).not.toBeNull();
+      // Legacy flat field wins; the limits[] "sonnet" entry (percent 99) must not overwrite it.
+      expect(result!.sonnetWeeklyPercent).toBe(44);
+      // Opus has no flat data, so it fills from the case-insensitive family match.
+      expect(result!.opusWeeklyPercent).toBe(12);
+      expect(result!.scopedWeeklyBuckets).toEqual([
+        { id: 'haiku lite', label: 'Haiku Lite', percent: 3, resetsAt: null, isActive: false },
+      ]);
+    });
+
+    it('ignores malformed/null limits entries without throwing', () => {
+      const result = parseUsageResponse({
+        five_hour: { utilization: 1 },
+        seven_day: { utilization: 2 },
+        seven_day_sonnet: null,
+        seven_day_opus: null,
+        limits: [
+          null,
+          undefined,
+          'not-an-object',
+          42,
+          { kind: 'weekly_scoped' }, // missing scope/model/display_name entirely
+          { kind: 'weekly_scoped', scope: {} }, // missing model
+          { kind: 'weekly_scoped', scope: { model: {} } }, // missing display_name
+          { kind: 'weekly_scoped', scope: { model: { display_name: '' } } }, // blank display_name
+          { kind: 'weekly_scoped', scope: { model: { display_name: 'Ghost' } } }, // missing percent
+          { kind: 'weekly_scoped', scope: { model: { display_name: 'NaNModel' } }, percent: NaN },
+          { kind: 'session', scope: { model: { display_name: 'NotWeekly' } }, percent: 50 }, // wrong kind
+        ],
+      } as unknown as Parameters<typeof parseUsageResponse>[0]);
+
+      expect(result).not.toBeNull();
+      expect(result!.sonnetWeeklyPercent).toBeUndefined();
+      expect(result!.opusWeeklyPercent).toBeUndefined();
+      expect(result!.scopedWeeklyBuckets).toBeUndefined();
+    });
+
+    it('non-array limits field is ignored defensively', () => {
+      const result = parseUsageResponse({
+        five_hour: { utilization: 1 },
+        seven_day: { utilization: 2 },
+        limits: { not: 'an array' },
+      } as unknown as Parameters<typeof parseUsageResponse>[0]);
+
+      expect(result).not.toBeNull();
+      expect(result!.scopedWeeklyBuckets).toBeUndefined();
+    });
+
+    it('dedups duplicate model buckets, preferring the is_active entry', () => {
+      const result = parseUsageResponse({
+        five_hour: { utilization: 1 },
+        seven_day: { utilization: 2 },
+        limits: [
+          {
+            kind: 'weekly_scoped', percent: 20, is_active: false, resets_at: '2026-04-01T00:00:00Z',
+            scope: { model: { display_name: 'Fable' }, surface: null },
+          },
+          {
+            kind: 'weekly_scoped', percent: 77, is_active: true, resets_at: '2026-04-02T00:00:00Z',
+            scope: { model: { display_name: 'Fable' }, surface: null },
+          },
+        ],
+      } as unknown as Parameters<typeof parseUsageResponse>[0]);
+
+      expect(result).not.toBeNull();
+      expect(result!.scopedWeeklyBuckets).toHaveLength(1);
+      expect(result!.scopedWeeklyBuckets![0].percent).toBe(77);
+      expect(result!.scopedWeeklyBuckets![0].isActive).toBe(true);
+    });
+
+    it('does not let a second distinct display name matching a recognized family overwrite the first fill', () => {
+      const result = parseUsageResponse({
+        five_hour: { utilization: 1 },
+        seven_day: { utilization: 2 },
+        seven_day_sonnet: null,
+        limits: [
+          {
+            kind: 'weekly_scoped', percent: 15, is_active: false,
+            scope: { model: { display_name: 'Sonnet Classic' }, surface: null },
+          },
+          {
+            kind: 'weekly_scoped', percent: 88, is_active: false,
+            scope: { model: { display_name: 'Sonnet Turbo' }, surface: null },
+          },
+        ],
+      } as unknown as Parameters<typeof parseUsageResponse>[0]);
+
+      expect(result).not.toBeNull();
+      expect(result!.sonnetWeeklyPercent).toBe(15);
+      expect(result!.scopedWeeklyBuckets).toBeUndefined();
+    });
+
+    it('renders an active scoped bucket in the HUD even when generic weekly_all is not the constraining bucket', () => {
+      const result = parseUsageResponse({
+        five_hour: { utilization: 12, resets_at: '2026-04-24T13:00:00Z' },
+        seven_day: { utilization: 10 },
+        seven_day_sonnet: null,
+        seven_day_opus: null,
+        limits: [
+          { kind: 'session', group: 'session', percent: 10, scope: null, is_active: false },
+          { kind: 'weekly_all', group: 'weekly', percent: 10, scope: null, is_active: false },
+          {
+            kind: 'weekly_scoped', group: 'weekly', percent: 95, is_active: true,
+            resets_at: '2026-04-25T00:00:00Z',
+            scope: { model: { id: null, display_name: 'Fable' }, surface: null },
+          },
+        ],
+      } as unknown as Parameters<typeof parseUsageResponse>[0]);
+
+      expect(result).not.toBeNull();
+      expect(result!.scopedWeeklyBuckets).toEqual([
+        { id: 'fable', label: 'Fable', percent: 95, resetsAt: expect.any(Date), isActive: true },
+      ]);
+      expect(result!.weeklyPercent).toBe(10);
+
+      const rendered = renderRateLimits(result, false);
+      expect(rendered).toContain('fable:');
+      expect(rendered).toContain('95%');
+      expect(rendered).toContain('wk:');
+    });
+
+    it('an inactive scoped bucket still renders (is_active is a dedup tiebreak, not a visibility filter)', () => {
+      const result = parseUsageResponse({
+        five_hour: { utilization: 5 },
+        seven_day: { utilization: 5 },
+        limits: [
+          {
+            kind: 'weekly_scoped', percent: 42, is_active: false,
+            scope: { model: { display_name: 'Fable' }, surface: null },
+          },
+        ],
+      } as unknown as Parameters<typeof parseUsageResponse>[0]);
+
+      expect(result).not.toBeNull();
+      expect(result!.scopedWeeklyBuckets).toEqual([
+        { id: 'fable', label: 'Fable', percent: 42, resetsAt: null, isActive: false },
+      ]);
+
+      const rendered = renderRateLimits(result, false);
+      expect(rendered).toContain('fable:');
+      expect(rendered).toContain('42%');
+    });
+
+    it('provides at least one valid value when only limits[] data is present (five_hour/seven_day nullish)', () => {
+      const result = parseUsageResponse({
+        five_hour: null,
+        seven_day: null,
+        limits: [
+          {
+            kind: 'weekly_scoped', percent: 30, is_active: true,
+            scope: { model: { display_name: 'Fable' }, surface: null },
+          },
+        ],
+      } as unknown as Parameters<typeof parseUsageResponse>[0]);
+
+      expect(result).not.toBeNull();
+      expect(result!.scopedWeeklyBuckets).toEqual([
+        { id: 'fable', label: 'Fable', percent: 30, resetsAt: null, isActive: true },
+      ]);
+    });
+
+    it('does not fabricate a 5h:0% bucket when only limits[] scoped weekly data is present', () => {
+      const result = parseUsageResponse({
+        five_hour: null,
+        seven_day: null,
+        seven_day_sonnet: null,
+        seven_day_opus: null,
+        limits: [
+          {
+            kind: 'weekly_scoped', percent: 30, is_active: true,
+            scope: { model: { display_name: 'Fable' }, surface: null },
+          },
+        ],
+      } as unknown as Parameters<typeof parseUsageResponse>[0]);
+
+      expect(result).not.toBeNull();
+      expect(result!.fiveHourPercent).toBeUndefined();
+
+      const detailed = stripAnsi(renderRateLimits(result, false)!);
+      const compact = stripAnsi(renderRateLimitsCompact(result, false)!);
+      const withBar = stripAnsi(renderRateLimitsWithBar(result, 8, false)!);
+
+      expect(detailed).toBe('fable:30%');
+      expect(compact).toBe('30%');
+      expect(withBar).toContain('fable:[');
+      expect(withBar).toContain(']30%');
+      expect(withBar).not.toContain('5h:');
+      expect(detailed).not.toContain('5h:0%');
+      expect(compact.startsWith('0%/')).toBe(false);
+    });
+
+    it('preserves an explicit real 0% five-hour bucket across all built-in renderers', () => {
+      const result = parseUsageResponse({
+        five_hour: { utilization: 0 },
+        seven_day: null,
+        seven_day_sonnet: null,
+        seven_day_opus: null,
+        limits: [
+          {
+            kind: 'weekly_scoped', percent: 30, is_active: true,
+            scope: { model: { display_name: 'Fable' }, surface: null },
+          },
+        ],
+      } as unknown as Parameters<typeof parseUsageResponse>[0]);
+
+      expect(result).not.toBeNull();
+      expect(result!.fiveHourPercent).toBe(0);
+
+      const detailed = stripAnsi(renderRateLimits(result, false)!);
+      const compact = stripAnsi(renderRateLimitsCompact(result, false)!);
+      const withBar = stripAnsi(renderRateLimitsWithBar(result, 8, false)!);
+
+      expect(detailed).toBe('5h:0% fable:30%');
+      expect(compact).toBe('0%/30%');
+      expect(withBar).toContain('5h:[');
+      expect(withBar).toContain(']0%');
+      expect(withBar).toContain('fable:[');
+      expect(withBar).toContain(']30%');
+    });
+  });
+
+  it('passes OAuth subscription metadata so Max used_credits overage stays extra usage', async () => {
+    const mockedExistsSync = vi.mocked(fs.existsSync);
+    const mockedReadFileSync = vi.mocked(fs.readFileSync);
+
+    mockedExistsSync.mockImplementation((path) => String(path).endsWith('.credentials.json'));
+    mockedReadFileSync.mockImplementation((path) => {
+      if (String(path).endsWith('.credentials.json')) {
+        return JSON.stringify({
+          claudeAiOauth: {
+            accessToken: 'valid-token',
+            refreshToken: 'refresh-token',
+            expiresAt: Date.now() + 60_000,
+            subscriptionType: 'max',
+            rateLimitTier: 'default_claude_max_20x',
+          },
+        });
+      }
+      return '{}';
+    });
+
+    httpsModule.default.request.mockImplementationOnce((_options, callback) => {
+      const req = new EventEmitter() as EventEmitter & { end: () => void; destroy: () => void; on: typeof EventEmitter.prototype.on };
+      req.destroy = vi.fn();
+      req.end = () => {
+        const res = new EventEmitter() as EventEmitter & { statusCode?: number };
+        res.statusCode = 200;
+        callback(res);
+        res.emit('data', JSON.stringify({
+          five_hour: { utilization: 3 },
+          seven_day: { utilization: 16 },
+          seven_day_sonnet: { utilization: 0 },
+          extra_usage: {
+            is_enabled: true,
+            used_credits: 2726,
+            monthly_limit: 5000,
+            currency: 'USD',
+          },
+        }));
+        res.emit('end');
+      };
+      return req;
+    });
+
+    const result = await getUsage();
+
+    expect(result.error).toBeUndefined();
+    expect(result.rateLimits).toMatchObject({
+      fiveHourPercent: 3,
+      weeklyPercent: 16,
+      sonnetWeeklyPercent: 0,
+      extraUsageSpentUsd: 27.26,
+      extraUsageLimitUsd: 50,
+      extraUsagePercent: 54.52,
+    });
+    expect(result.rateLimits!.enterpriseSpentUsd).toBeUndefined();
+    expect(result.rateLimits!.enterpriseLimitUsd).toBeUndefined();
+  });
+
+  it('returns getUsage rateLimits when OAuth credentials lack subscription metadata', async () => {
+    const mockedExistsSync = vi.mocked(fs.existsSync);
+    const mockedReadFileSync = vi.mocked(fs.readFileSync);
+
+    mockedExistsSync.mockImplementation((path) => String(path).endsWith('.credentials.json'));
+    mockedReadFileSync.mockImplementation((path) => {
+      if (String(path).endsWith('.credentials.json')) {
+        return JSON.stringify({
+          claudeAiOauth: {
+            accessToken: 'valid-token',
+            refreshToken: 'refresh-token',
+            expiresAt: Date.now() + 60_000,
+            subscriptionType: null,
+            rateLimitTier: null,
+          },
+        });
+      }
+      return '{}';
+    });
+
+    httpsModule.default.request.mockImplementationOnce((_options, callback) => {
+      const req = new EventEmitter() as EventEmitter & { end: () => void; destroy: () => void; on: typeof EventEmitter.prototype.on };
+      req.destroy = vi.fn();
+      req.end = () => {
+        const res = new EventEmitter() as EventEmitter & { statusCode?: number };
+        res.statusCode = 200;
+        callback(res);
+        res.emit('data', JSON.stringify({
+          five_hour: { utilization: 36, resets_at: '2026-04-24T13:00:00Z' },
+          seven_day: { utilization: 32, resets_at: '2026-04-25T13:00:00Z' },
+          seven_day_sonnet: { utilization: 8, resets_at: '2026-04-25T13:00:00Z' },
+        }));
+        res.emit('end');
+      };
+      return req;
+    });
+
+    const result = await getUsage();
+
+    expect(result.error).toBeUndefined();
+    expect(result.rateLimits).toMatchObject({
+      fiveHourPercent: 36,
+      weeklyPercent: 32,
+      sonnetWeeklyPercent: 8,
+    });
+    expect(result.rateLimits!.fiveHourResetsAt).toBeInstanceOf(Date);
+    expect(result.rateLimits!.weeklyResetsAt).toBeInstanceOf(Date);
+    expect(result.rateLimits!.sonnetWeeklyResetsAt).toBeInstanceOf(Date);
+  });
+
+  it('routes z.ai Anthropic Messages endpoint to the quota API', async () => {
+    process.env.ANTHROPIC_BASE_URL = 'https://api.z.ai/api/anthropic';
+    process.env.ANTHROPIC_AUTH_TOKEN = 'test-token';
+
+    // https.request mock not wired, so fetchUsageFromZai resolves to null (network error)
+    const result = await getUsage();
+    expect(result.rateLimits).toBeNull();
+    expect(result.error).toBe('network');
+
+    // Verify z.ai quota endpoint was called
+    expect(httpsModule.default.request).toHaveBeenCalledTimes(1);
+    const callArgs = httpsModule.default.request.mock.calls[0][0];
+    expect(callArgs.hostname).toBe('api.z.ai');
+    expect(callArgs.path).toBe('/api/monitor/usage/quota/limit');
+  });
+
+  it('does NOT route to z.ai for look-alike hosts', async () => {
+    process.env.ANTHROPIC_BASE_URL = 'https://z.ai.evil.tld/v1';
+    process.env.ANTHROPIC_AUTH_TOKEN = 'test-token';
+
+    const result = await getUsage();
+    expect(result.rateLimits).toBeNull();
+    expect(result.error).toBe('no_credentials');
+
+    // Should NOT call https.request with z.ai endpoint.
+    // Falls through to OAuth path which has no credentials (mocked),
+    // so no network call should be made at all.
+    expect(httpsModule.default.request).not.toHaveBeenCalled();
+  });
+
+  it('returns error when API call fails', async () => {
+    process.env.ANTHROPIC_BASE_URL = 'https://api.z.ai/v1';
+    process.env.ANTHROPIC_AUTH_TOKEN = 'test-token';
+
+    // Mock failed API response (network error)
+    const result = await getUsage();
+    expect(result.rateLimits).toBeNull();
+    expect(result.error).toBe('network');
+  });
+
+  it('reuses successful cached usage data for 90 seconds to avoid excessive polling', async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-03-07T00:00:00Z'));
+    process.env.CLAUDE_CODE_OAUTH_TOKEN = 'cache-test-token';
+    const credentialIdentity = getUsageCredentialIdentity(true, true);
+
+    const mockedExistsSync = vi.mocked(fs.existsSync);
+    const mockedReadFileSync = vi.mocked(fs.readFileSync);
+
+    mockedExistsSync.mockImplementation((path) => String(path).endsWith('.usage-cache-anthropic.json'));
+    mockedReadFileSync.mockImplementation((path) => {
+      if (String(path).endsWith('.usage-cache-anthropic.json')) {
+        return JSON.stringify({
+          timestamp: Date.now() - 60_000,
+          source: 'anthropic',
+          credentialIdentity,
+          data: {
+            fiveHourPercent: 42,
+            weeklyPercent: 17,
+            fiveHourResetsAt: null,
+            weeklyResetsAt: null,
+          },
+        });
+      }
+      return '{}';
+    });
+
+    const result = await getUsage();
+
+    expect(result).toEqual({
+      rateLimits: {
+        fiveHourPercent: 42,
+        weeklyPercent: 17,
+        fiveHourResetsAt: null,
+        weeklyResetsAt: null,
+      },
+      error: undefined,
+    });
+    expect(httpsModule.default.request).not.toHaveBeenCalled();
+
+    vi.useRealTimers();
+  });
+
+  it('rehydrates scoped reset dates from serialized cache before rendering', async () => {
+    process.env.CLAUDE_CODE_OAUTH_TOKEN = 'cache-test-token';
+    const credentialIdentity = getUsageCredentialIdentity(true, true);
+    const mockedExistsSync = vi.mocked(fs.existsSync);
+    const mockedReadFileSync = vi.mocked(fs.readFileSync);
+    const resetsAt = new Date(Date.now() + 3_600_000).toISOString();
+
+    mockedExistsSync.mockImplementation((path) => String(path).endsWith('.usage-cache-anthropic.json'));
+    mockedReadFileSync.mockImplementation((path) => {
+      if (String(path).endsWith('.usage-cache-anthropic.json')) {
+        return JSON.stringify({
+          timestamp: Date.now() - 60_000,
+          source: 'anthropic',
+          credentialIdentity,
+          data: {
+            scopedWeeklyBuckets: [
+              { id: 'fable', label: 'Fable', percent: 61, resetsAt, isActive: true },
+            ],
+          },
+        });
+      }
+      return '{}';
+    });
+
+    const result = await getUsage();
+    const bucket = result.rateLimits?.scopedWeeklyBuckets?.[0];
+
+    expect(bucket?.resetsAt).toBeInstanceOf(Date);
+    expect(stripAnsi(renderRateLimits(result.rateLimits, false)!)).toContain('fable:61%');
+    expect(stripAnsi(renderRateLimitsWithBar(result.rateLimits, 8, false)!)).toContain('fable:[');
+    expect(httpsModule.default.request).not.toHaveBeenCalled();
+  });
+
+  it('respects configured usageApiPollIntervalMs for successful cache reuse', async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-03-07T00:00:00Z'));
+    process.env.CLAUDE_CODE_OAUTH_TOKEN = 'cache-test-token';
+    const credentialIdentity = getUsageCredentialIdentity(true, true);
+
+    const mockedExistsSync = vi.mocked(fs.existsSync);
+    const mockedReadFileSync = vi.mocked(fs.readFileSync);
+
+    mockedExistsSync.mockImplementation((path) => {
+      const file = String(path);
+      return file.endsWith('settings.json') || file.endsWith('.usage-cache-anthropic.json');
+    });
+    mockedReadFileSync.mockImplementation((path) => {
+      const file = String(path);
+      if (file.endsWith('settings.json')) {
+        return JSON.stringify({
+          omcHud: {
+            usageApiPollIntervalMs: 180_000,
+          },
+        });
+      }
+      if (file.endsWith('.usage-cache-anthropic.json')) {
+        return JSON.stringify({
+          timestamp: Date.now() - 120_000,
+          source: 'anthropic',
+          credentialIdentity,
+          data: {
+            fiveHourPercent: 42,
+            weeklyPercent: 17,
+            fiveHourResetsAt: null,
+            weeklyResetsAt: null,
+          },
+        });
+      }
+      return '{}';
+    });
+
+    const result = await getUsage();
+
+    expect(result).toEqual({
+      rateLimits: {
+        fiveHourPercent: 42,
+        weeklyPercent: 17,
+        fiveHourResetsAt: null,
+        weeklyResetsAt: null,
+      },
+      error: undefined,
+    });
+    expect(httpsModule.default.request).not.toHaveBeenCalled();
+
+    vi.useRealTimers();
+  });
+
+  it('returns rate_limited and persists exponential backoff metadata even without stale data', async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-03-07T00:00:00Z'));
+
+    process.env.ANTHROPIC_BASE_URL = 'https://api.z.ai/v1';
+    process.env.ANTHROPIC_AUTH_TOKEN = 'test-token';
+
+    const mockedExistsSync = vi.mocked(fs.existsSync);
+    const mockedReadFileSync = vi.mocked(fs.readFileSync);
+    const mockedWriteFileSync = vi.mocked(fs.writeFileSync);
+
+    mockedExistsSync.mockImplementation((path) => String(path).endsWith('settings.json'));
+    mockedReadFileSync.mockImplementation((path) => {
+      const file = String(path);
+      if (file.endsWith('settings.json')) {
+        return JSON.stringify({
+          omcHud: {
+            usageApiPollIntervalMs: 60_000,
+          },
+        });
+      }
+      return '{}';
+    });
+
+    httpsModule.default.request.mockImplementationOnce((_options, callback) => {
+      const req = new EventEmitter() as EventEmitter & { end: () => void; destroy: () => void; on: typeof EventEmitter.prototype.on };
+      req.destroy = vi.fn();
+      req.end = () => {
+        const res = new EventEmitter() as EventEmitter & { statusCode?: number };
+        res.statusCode = 429;
+        callback(res);
+        res.emit('end');
+      };
+      return req;
+    });
+
+    const result = await getUsage();
+
+    expect(result).toEqual({
+      rateLimits: null,
+      error: 'rate_limited',
+    });
+    expect(mockedWriteFileSync).toHaveBeenCalled();
+
+    const writtenCache = JSON.parse(String(mockedWriteFileSync.mock.calls.at(-1)?.[1] ?? '{}'));
+    expect(writtenCache.rateLimited).toBe(true);
+    expect(writtenCache.rateLimitedCount).toBe(1);
+    expect(writtenCache.error).toBe(false);
+    expect(writtenCache.errorReason).toBe('rate_limited');
+    expect(writtenCache.rateLimitedUntil - writtenCache.timestamp).toBe(60_000);
+
+    vi.useRealTimers();
+  });
+
+  it('increases 429 backoff exponentially up to the configured ceiling', async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-03-07T00:00:00Z'));
+
+    process.env.ANTHROPIC_BASE_URL = 'https://api.z.ai/v1';
+    process.env.ANTHROPIC_AUTH_TOKEN = 'test-token';
+    const credentialIdentity = getUsageCredentialIdentity(true, true);
+
+    const mockedExistsSync = vi.mocked(fs.existsSync);
+    const mockedReadFileSync = vi.mocked(fs.readFileSync);
+    const mockedWriteFileSync = vi.mocked(fs.writeFileSync);
+
+    mockedExistsSync.mockImplementation((path) => {
+      const file = String(path);
+      return file.endsWith('settings.json') || file.endsWith('.usage-cache-zai.json');
+    });
+    mockedReadFileSync.mockImplementation((path) => {
+      const file = String(path);
+      if (file.endsWith('settings.json')) {
+        return JSON.stringify({
+          omcHud: {
+            usageApiPollIntervalMs: 60_000,
+          },
+        });
+      }
+      if (file.endsWith('.usage-cache-zai.json')) {
+        return JSON.stringify({
+          timestamp: Date.now() - 300_000,
+          rateLimitedUntil: Date.now() - 1,
+          rateLimited: true,
+          rateLimitedCount: 4,
+          source: 'zai',
+          credentialIdentity,
+          data: null,
+        });
+      }
+      return '{}';
+    });
+
+    httpsModule.default.request.mockImplementationOnce((_options, callback) => {
+      const req = new EventEmitter() as EventEmitter & { end: () => void; destroy: () => void; on: typeof EventEmitter.prototype.on };
+      req.destroy = vi.fn();
+      req.end = () => {
+        const res = new EventEmitter() as EventEmitter & { statusCode?: number };
+        res.statusCode = 429;
+        callback(res);
+        res.emit('end');
+      };
+      return req;
+    });
+
+    const result = await getUsage();
+
+    expect(result.error).toBe('rate_limited');
+    const writtenCache = JSON.parse(String(mockedWriteFileSync.mock.calls.at(-1)?.[1] ?? '{}'));
+    expect(writtenCache.rateLimitedCount).toBe(5);
+    expect(writtenCache.rateLimitedUntil - writtenCache.timestamp).toBe(300_000);
+
+    vi.useRealTimers();
+  });
+
+  it('reuses transient network failure cache to avoid immediate retry hammering without stale data', async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-03-07T00:00:00Z'));
+
+    process.env.ANTHROPIC_BASE_URL = 'https://api.z.ai/v1';
+    process.env.ANTHROPIC_AUTH_TOKEN = 'test-token';
+    const credentialIdentity = getUsageCredentialIdentity(true, true);
+
+    const mockedExistsSync = vi.mocked(fs.existsSync);
+    const mockedReadFileSync = vi.mocked(fs.readFileSync);
+
+    mockedExistsSync.mockImplementation((path) => {
+      const file = String(path);
+      return file.endsWith('settings.json') || file.endsWith('.usage-cache-zai.json');
+    });
+    mockedReadFileSync.mockImplementation((path) => {
+      const file = String(path);
+      if (file.endsWith('settings.json')) {
+        return JSON.stringify({
+          omcHud: {
+            usageApiPollIntervalMs: 60_000,
+          },
+        });
+      }
+      if (file.endsWith('.usage-cache-zai.json')) {
+        return JSON.stringify({
+          timestamp: Date.now() - 90_000,
+          source: 'zai',
+          credentialIdentity,
+          data: null,
+          error: true,
+          errorReason: 'network',
+        });
+      }
+      return '{}';
+    });
+
+    const result = await getUsage();
+
+    expect(result).toEqual({ rateLimits: null, error: 'network' });
+    expect(httpsModule.default.request).not.toHaveBeenCalled();
+
+    vi.useRealTimers();
+  });
+});
+
+describe('isMinimaxHost', () => {
+  it('accepts exact minimax.io hostname', () => {
+    expect(isMinimaxHost('https://minimax.io')).toBe(true);
+    expect(isMinimaxHost('https://minimax.io/')).toBe(true);
+    expect(isMinimaxHost('https://minimax.io/v1')).toBe(true);
+  });
+
+  it('accepts subdomains of minimax.io', () => {
+    expect(isMinimaxHost('https://api.minimax.io')).toBe(true);
+    expect(isMinimaxHost('https://api.minimax.io/anthropic')).toBe(true);
+    expect(isMinimaxHost('https://foo.bar.minimax.io')).toBe(true);
+  });
+
+  it('accepts minimaxi.com (China endpoint)', () => {
+    expect(isMinimaxHost('https://minimaxi.com')).toBe(true);
+    expect(isMinimaxHost('https://api.minimaxi.com')).toBe(true);
+    expect(isMinimaxHost('https://api.minimaxi.com/anthropic')).toBe(true);
+  });
+
+  it('accepts minimax.com (China alternative)', () => {
+    expect(isMinimaxHost('https://minimax.com')).toBe(true);
+    expect(isMinimaxHost('https://api.minimax.com')).toBe(true);
+    expect(isMinimaxHost('https://api.minimax.com/anthropic')).toBe(true);
+  });
+
+  it('rejects hosts that merely contain minimax as substring', () => {
+    expect(isMinimaxHost('https://minimax.io.evil.tld')).toBe(false);
+    expect(isMinimaxHost('https://notminimax.io')).toBe(false);
+    expect(isMinimaxHost('https://minimax.io.example.com')).toBe(false);
+    expect(isMinimaxHost('https://minimaxi.com.evil.tld')).toBe(false);
+  });
+
+  it('rejects unrelated hosts', () => {
+    expect(isMinimaxHost('https://api.anthropic.com')).toBe(false);
+    expect(isMinimaxHost('https://z.ai')).toBe(false);
+    expect(isMinimaxHost('https://localhost:8080')).toBe(false);
+  });
+
+  it('rejects invalid URLs gracefully', () => {
+    expect(isMinimaxHost('')).toBe(false);
+    expect(isMinimaxHost('not-a-url')).toBe(false);
+    expect(isMinimaxHost('://missing-protocol')).toBe(false);
+  });
+
+  it('is case-insensitive', () => {
+    expect(isMinimaxHost('https://MINIMAX.IO/v1')).toBe(true);
+    expect(isMinimaxHost('https://API.MINIMAX.IO')).toBe(true);
+  });
+});
+
+describe('parseMinimaxResponse', () => {
+  it('returns null for empty response', () => {
+    expect(parseMinimaxResponse({})).toBeNull();
+    expect(parseMinimaxResponse({ model_remains: [] })).toBeNull();
+  });
+
+  it('returns null when base_resp.status_code is non-zero', () => {
+    const response = {
+      model_remains: [
+        {
+          model_name: 'MiniMax-M1',
+          current_interval_total_count: 1500,
+          current_interval_usage_count: 750,
+          start_time: Date.now(),
+          end_time: Date.now() + 3600_000,
+          remains_time: 3600_000,
+          current_weekly_total_count: 15000,
+          current_weekly_usage_count: 7500,
+          weekly_start_time: Date.now(),
+          weekly_end_time: Date.now() + 86400_000,
+          weekly_remains_time: 86400_000,
+        },
+      ],
+      base_resp: { status_code: 1001, status_msg: 'error' },
+    };
+    expect(parseMinimaxResponse(response)).toBeNull();
+  });
+
+  it('returns null when no MiniMax-M* model exists', () => {
+    const response = {
+      model_remains: [
+        {
+          model_name: 'speech-hd',
+          current_interval_total_count: 100,
+          current_interval_usage_count: 50,
+          start_time: Date.now(),
+          end_time: Date.now() + 3600_000,
+          remains_time: 3600_000,
+          current_weekly_total_count: 700,
+          current_weekly_usage_count: 350,
+          weekly_start_time: Date.now(),
+          weekly_end_time: Date.now() + 86400_000,
+          weekly_remains_time: 86400_000,
+        },
+      ],
+    };
+    expect(parseMinimaxResponse(response)).toBeNull();
+  });
+
+  it('parses MiniMax-M* remaining counts as used fiveHourPercent and weeklyPercent', () => {
+    const endTime = Date.now() + 3600_000;
+    const weeklyEndTime = Date.now() + 86400_000 * 3;
+    const response = {
+      model_remains: [
+        {
+          model_name: 'MiniMax-M2.7',
+          current_interval_total_count: 1500,
+          current_interval_usage_count: 84,
+          start_time: Date.now(),
+          end_time: endTime,
+          remains_time: 3600_000,
+          current_weekly_total_count: 15000,
+          current_weekly_usage_count: 3,
+          weekly_start_time: Date.now(),
+          weekly_end_time: weeklyEndTime,
+          weekly_remains_time: 86400_000 * 3,
+        },
+      ],
+    };
+
+    const result = parseMinimaxResponse(response);
+    expect(result).not.toBeNull();
+    // Remaining 84 of 1500 means 1416 used => 94.4%
+    expect(result!.fiveHourPercent).toBeCloseTo(94.4, 1);
+    // Remaining 3 of 15000 means 14997 used => 99.98%
+    expect(result!.weeklyPercent).toBeCloseTo(99.98, 1);
+    expect(result!.fiveHourResetsAt).toBeInstanceOf(Date);
+    expect(result!.fiveHourResetsAt!.getTime()).toBe(endTime);
+    expect(result!.weeklyResetsAt).toBeInstanceOf(Date);
+    expect(result!.weeklyResetsAt!.getTime()).toBe(weeklyEndTime);
+  });
+
+  it('shows low usage when most MiniMax quota remains', () => {
+    const response = {
+      model_remains: [
+        {
+          model_name: 'MiniMax-M1',
+          current_interval_total_count: 1500,
+          current_interval_usage_count: 1495,
+          start_time: Date.now(),
+          end_time: Date.now() + 3600_000,
+          remains_time: 3600_000,
+          current_weekly_total_count: 15000,
+          current_weekly_usage_count: 14530,
+          weekly_start_time: Date.now(),
+          weekly_end_time: Date.now() + 86400_000,
+          weekly_remains_time: 86400_000,
+        },
+      ],
+    };
+
+    const result = parseMinimaxResponse(response);
+    expect(result).not.toBeNull();
+    expect(result!.fiveHourPercent).toBeCloseTo((5 / 1500) * 100, 3);
+    expect(result!.weeklyPercent).toBeCloseTo((470 / 15000) * 100, 3);
+  });
+
+  it('handles division by zero when total_count is 0', () => {
+    const response = {
+      model_remains: [
+        {
+          model_name: 'MiniMax-M1',
+          current_interval_total_count: 0,
+          current_interval_usage_count: 0,
+          start_time: Date.now(),
+          end_time: Date.now() + 3600_000,
+          remains_time: 3600_000,
+          current_weekly_total_count: 0,
+          current_weekly_usage_count: 0,
+          weekly_start_time: Date.now(),
+          weekly_end_time: Date.now() + 86400_000,
+          weekly_remains_time: 86400_000,
+        },
+      ],
+    };
+
+    const result = parseMinimaxResponse(response);
+    expect(result).not.toBeNull();
+    expect(result!.fiveHourPercent).toBe(0);
+    expect(result!.weeklyPercent).toBe(0);
+  });
+
+  it('uses first MiniMax-M* model when multiple exist', () => {
+    const response = {
+      model_remains: [
+        {
+          model_name: 'speech-hd',
+          current_interval_total_count: 100,
+          current_interval_usage_count: 0,
+          start_time: Date.now(), end_time: Date.now() + 3600_000,
+          remains_time: 3600_000,
+          current_weekly_total_count: 700, current_weekly_usage_count: 0,
+          weekly_start_time: Date.now(), weekly_end_time: Date.now() + 86400_000,
+          weekly_remains_time: 86400_000,
+        },
+        {
+          model_name: 'MiniMax-M2.7',
+          current_interval_total_count: 1500,
+          current_interval_usage_count: 750,
+          start_time: Date.now(), end_time: Date.now() + 3600_000,
+          remains_time: 3600_000,
+          current_weekly_total_count: 15000, current_weekly_usage_count: 7500,
+          weekly_start_time: Date.now(), weekly_end_time: Date.now() + 86400_000,
+          weekly_remains_time: 86400_000,
+        },
+        {
+          model_name: 'MiniMax-M1',
+          current_interval_total_count: 1000,
+          current_interval_usage_count: 800,
+          start_time: Date.now(), end_time: Date.now() + 3600_000,
+          remains_time: 3600_000,
+          current_weekly_total_count: 10000, current_weekly_usage_count: 8000,
+          weekly_start_time: Date.now(), weekly_end_time: Date.now() + 86400_000,
+          weekly_remains_time: 86400_000,
+        },
+      ],
+    };
+
+    const result = parseMinimaxResponse(response);
+    expect(result).not.toBeNull();
+    // Should use MiniMax-M2.7 (first MiniMax-M* match): 750 used out of 1500 => 50%
+    expect(result!.fiveHourPercent).toBe(50);
+    expect(result!.weeklyPercent).toBe(50);
+  });
+
+  it('succeeds when base_resp.status_code is 0', () => {
+    const response = {
+      model_remains: [
+        {
+          model_name: 'MiniMax-M1',
+          current_interval_total_count: 100,
+          current_interval_usage_count: 50,
+          start_time: Date.now(), end_time: Date.now() + 3600_000,
+          remains_time: 3600_000,
+          current_weekly_total_count: 700, current_weekly_usage_count: 350,
+          weekly_start_time: Date.now(), weekly_end_time: Date.now() + 86400_000,
+          weekly_remains_time: 86400_000,
+        },
+      ],
+      base_resp: { status_code: 0, status_msg: 'success' },
+    };
+
+    const result = parseMinimaxResponse(response);
+    expect(result).not.toBeNull();
+    expect(result!.fiveHourPercent).toBe(50);
+  });
+});
+
+describe('getUsage routing - minimax', () => {
+  const originalEnv = { ...process.env };
+  let httpsModule: { default: { request: ReturnType<typeof vi.fn> } };
+
+  beforeEach(async () => {
+    vi.clearAllMocks();
+    vi.mocked(fs.existsSync).mockReturnValue(false);
+    vi.mocked(fs.readFileSync).mockReturnValue('{}');
+    vi.mocked(childProcess.execSync).mockImplementation(() => { throw new Error('mock: no keychain'); });
+    vi.mocked(childProcess.execFileSync).mockImplementation(() => { throw new Error('mock: no keychain'); });
+    delete process.env.ANTHROPIC_BASE_URL;
+    delete process.env.ANTHROPIC_AUTH_TOKEN;
+    delete process.env.MINIMAX_API_KEY;
+    httpsModule = await import('https') as unknown as typeof httpsModule;
+  });
+
+  afterEach(() => {
+    process.env = { ...originalEnv };
+  });
+
+  it('routes to minimax when ANTHROPIC_BASE_URL is minimax host with MINIMAX_API_KEY', async () => {
+    process.env.ANTHROPIC_BASE_URL = 'https://api.minimax.io/anthropic';
+    process.env.MINIMAX_API_KEY = 'test-minimax-key';
+
+    const result = await getUsage();
+    expect(result.rateLimits).toBeNull();
+    expect(result.error).toBe('network');
+
+    expect(httpsModule.default.request).toHaveBeenCalledTimes(1);
+    const callArgs = httpsModule.default.request.mock.calls[0][0];
+    expect(callArgs.hostname).toBe('api.minimax.io');
+    expect(callArgs.path).toBe('/v1/api/openplatform/coding_plan/remains');
+    expect(callArgs.headers.Authorization).toBe('Bearer test-minimax-key');
+  });
+
+  it('falls back to ANTHROPIC_AUTH_TOKEN when MINIMAX_API_KEY is not set', async () => {
+    process.env.ANTHROPIC_BASE_URL = 'https://api.minimax.io/anthropic';
+    process.env.ANTHROPIC_AUTH_TOKEN = 'test-auth-token';
+
+    const result = await getUsage();
+    expect(result.error).toBe('network');
+
+    expect(httpsModule.default.request).toHaveBeenCalledTimes(1);
+    const callArgs = httpsModule.default.request.mock.calls[0][0];
+    expect(callArgs.hostname).toBe('api.minimax.io');
+    expect(callArgs.headers.Authorization).toBe('Bearer test-auth-token');
+  });
+
+  it('returns no_credentials when minimax host detected but no API key', async () => {
+    process.env.ANTHROPIC_BASE_URL = 'https://api.minimax.io/anthropic';
+    // Neither MINIMAX_API_KEY nor ANTHROPIC_AUTH_TOKEN set
+
+    const result = await getUsage();
+    expect(result.rateLimits).toBeNull();
+    expect(result.error).toBe('no_credentials');
+    expect(httpsModule.default.request).not.toHaveBeenCalled();
+  });
+
+  it('does NOT route to minimax for look-alike hosts', async () => {
+    process.env.ANTHROPIC_BASE_URL = 'https://minimax.io.evil.tld/v1';
+    process.env.MINIMAX_API_KEY = 'test-key';
+
+    const result = await getUsage();
+    expect(result.rateLimits).toBeNull();
+    expect(result.error).toBe('no_credentials');
+    expect(httpsModule.default.request).not.toHaveBeenCalled();
+  });
+
+  it('returns parsed rate limits on successful API response (E2E happy path)', async () => {
+    process.env.ANTHROPIC_BASE_URL = 'https://api.minimax.io/anthropic';
+    process.env.MINIMAX_API_KEY = 'test-key';
+
+    const endTime = Date.now() + 3600_000;
+    const weeklyEndTime = Date.now() + 86400_000 * 3;
+
+    httpsModule.default.request.mockImplementationOnce((_options, callback) => {
+      const req = new EventEmitter() as EventEmitter & { end: () => void; destroy: () => void };
+      req.destroy = vi.fn();
+      req.end = () => {
+        const res = new EventEmitter() as EventEmitter & { statusCode?: number };
+        res.statusCode = 200;
+        callback(res);
+        res.emit('data', JSON.stringify({
+          model_remains: [
+            {
+              model_name: 'MiniMax-M2.7',
+              current_interval_total_count: 1500,
+              current_interval_usage_count: 750,
+              start_time: Date.now(),
+              end_time: endTime,
+              remains_time: 3600_000,
+              current_weekly_total_count: 15000,
+              current_weekly_usage_count: 12000,
+              weekly_start_time: Date.now(),
+              weekly_end_time: weeklyEndTime,
+              weekly_remains_time: 86400_000 * 3,
+            },
+          ],
+          base_resp: { status_code: 0, status_msg: 'success' },
+        }));
+        res.emit('end');
+      };
+      return req;
+    });
+
+    const result = await getUsage();
+
+    expect(result.rateLimits).not.toBeNull();
+    expect(result.rateLimits!.fiveHourPercent).toBe(50); // (1500 - 750) / 1500
+    expect(result.rateLimits!.weeklyPercent).toBe(20);   // (15000 - 12000) / 15000
+    expect(result.rateLimits!.fiveHourResetsAt).toBeInstanceOf(Date);
+    expect(result.rateLimits!.fiveHourResetsAt!.getTime()).toBe(endTime);
+    expect(result.rateLimits!.weeklyResetsAt).toBeInstanceOf(Date);
+    expect(result.rateLimits!.weeklyResetsAt!.getTime()).toBe(weeklyEndTime);
+    expect(result.error).toBeUndefined();
+  });
+
+  it('prefers MINIMAX_API_KEY over ANTHROPIC_AUTH_TOKEN', async () => {
+    process.env.ANTHROPIC_BASE_URL = 'https://api.minimax.io/anthropic';
+    process.env.MINIMAX_API_KEY = 'preferred-key';
+    process.env.ANTHROPIC_AUTH_TOKEN = 'fallback-key';
+
+    await getUsage();
+
+    expect(httpsModule.default.request).toHaveBeenCalledTimes(1);
+    const callArgs = httpsModule.default.request.mock.calls[0][0];
+    expect(callArgs.headers.Authorization).toBe('Bearer preferred-key');
+  });
+
+  it('writes cache with source minimax', async () => {
+    process.env.ANTHROPIC_BASE_URL = 'https://api.minimax.io/anthropic';
+    process.env.MINIMAX_API_KEY = 'test-key';
+
+    httpsModule.default.request.mockImplementationOnce((_options, callback) => {
+      const req = new EventEmitter() as EventEmitter & { end: () => void; destroy: () => void };
+      req.destroy = vi.fn();
+      req.end = () => {
+        const res = new EventEmitter() as EventEmitter & { statusCode?: number };
+        res.statusCode = 200;
+        callback(res);
+        res.emit('data', JSON.stringify({
+          model_remains: [
+            {
+              model_name: 'MiniMax-M1',
+              current_interval_total_count: 100,
+              current_interval_usage_count: 50,
+              start_time: Date.now(), end_time: Date.now() + 3600_000,
+              remains_time: 3600_000,
+              current_weekly_total_count: 700, current_weekly_usage_count: 350,
+              weekly_start_time: Date.now(), weekly_end_time: Date.now() + 86400_000,
+              weekly_remains_time: 86400_000,
+            },
+          ],
+          base_resp: { status_code: 0, status_msg: 'success' },
+        }));
+        res.emit('end');
+      };
+      return req;
+    });
+
+    await getUsage();
+
+    const writeCall = vi.mocked(fs.writeFileSync).mock.calls.find(
+      c => String(c[0]).includes('.usage-cache-minimax.json')
+    );
+    expect(writeCall).toBeTruthy();
+    const written = JSON.parse(String(writeCall![1]));
+    expect(written.source).toBe('minimax');
+    expect(written.data.fiveHourPercent).toBe(50);
+  });
+});
+describe('writeBackCredentials — Keychain vs file refresh', () => {
+  const originalPlatform = process.platform;
+
+  beforeAll(() => {
+    Object.defineProperty(process, 'platform', { value: 'darwin', configurable: true });
+  });
+
+  afterAll(() => {
+    Object.defineProperty(process, 'platform', { value: originalPlatform, configurable: true });
+  });
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    vi.mocked(fs.existsSync).mockReturnValue(false);
+    vi.mocked(fs.readFileSync).mockReturnValue('{}');
+    vi.mocked(childProcess.execFileSync).mockImplementation(() => {
+      throw new Error('The specified item could not be found in the keychain.');
+    });
+    delete process.env.ANTHROPIC_BASE_URL;
+    delete process.env.ANTHROPIC_AUTH_TOKEN;
+  });
+
+  it('writes refreshed token back to Keychain when source is keychain', async () => {
+    const oneHourAgo = Date.now() - 60 * 60 * 1000;
+    const execFileMock = vi.mocked(childProcess.execFileSync);
+    const httpsModule = await import('https') as unknown as { default: { request: ReturnType<typeof vi.fn> } };
+
+    // First call: read expired creds from keychain (username-scoped)
+    // Second call: token refresh HTTP (handled via httpsModule mock)
+    // Third call: read existing keychain entry for merge
+    // Fourth call: write updated creds back to keychain
+    let execCallCount = 0;
+    execFileMock.mockImplementation((_file, args) => {
+      const argsArr = args as string[];
+      execCallCount++;
+
+      if (argsArr.includes('find-generic-password') && argsArr.includes('-a')) {
+        // First read: return expired keychain creds
+        if (execCallCount === 1) {
+          return JSON.stringify({
+            claudeAiOauth: {
+              accessToken: 'expired-access-token',
+              refreshToken: 'valid-refresh-token',
+              expiresAt: oneHourAgo,
+            },
+          });
+        }
+        // Third call: re-read existing entry for merge before write
+        return JSON.stringify({
+          claudeAiOauth: {
+            accessToken: 'expired-access-token',
+            refreshToken: 'valid-refresh-token',
+            expiresAt: oneHourAgo,
+          },
+        });
+      }
+
+      if (argsArr.includes('add-generic-password')) {
+        // Write-back call: capture what was written
+        return '';
+      }
+
+      // service-only fallback: no entry
+      throw new Error('The specified item could not be found in the keychain.');
+    });
+
+    // Token refresh returns new tokens
+    httpsModule.default.request.mockImplementationOnce((_options: unknown, callback: (res: EventEmitter & { statusCode?: number }) => void) => {
+      const req = new EventEmitter() as EventEmitter & { end: () => void; destroy: () => void };
+      req.destroy = vi.fn();
+      req.end = () => {
+        const res = new EventEmitter() as EventEmitter & { statusCode?: number };
+        res.statusCode = 200;
+        callback(res);
+        res.emit('data', JSON.stringify({
+          access_token: 'new-access-token',
+          refresh_token: 'new-refresh-token',
+          expires_in: 3600,
+        }));
+        res.emit('end');
+      };
+      return req;
+    });
+
+    // Usage API call
+    httpsModule.default.request.mockImplementationOnce((_options: unknown, callback: (res: EventEmitter & { statusCode?: number }) => void) => {
+      const req = new EventEmitter() as EventEmitter & { end: () => void; destroy: () => void };
+      req.destroy = vi.fn();
+      req.end = () => {
+        const res = new EventEmitter() as EventEmitter & { statusCode?: number };
+        res.statusCode = 200;
+        callback(res);
+        res.emit('data', JSON.stringify({
+          five_hour: { utilization: 30 },
+          seven_day: { utilization: 60 },
+        }));
+        res.emit('end');
+      };
+      return req;
+    });
+
+    const result = await getUsage();
+
+    expect(result.error).toBeUndefined();
+    expect(result.rateLimits?.fiveHourPercent).toBe(30);
+
+    // Verify Keychain write-back was called with add-generic-password
+    const writeBackCall = execFileMock.mock.calls.find(
+      c => Array.isArray(c[1]) && (c[1] as string[]).includes('add-generic-password')
+    );
+    expect(writeBackCall).toBeTruthy();
+
+    const writeArgs = writeBackCall![1] as string[];
+    // Should use -U flag (update) to replace existing entry
+    expect(writeArgs).toContain('-U');
+
+    // The written JSON should contain the new tokens
+    const writtenJson = writeArgs[writeArgs.indexOf('-w') + 1];
+    const written = JSON.parse(writtenJson);
+    const inner = written.claudeAiOauth ?? written;
+    expect(inner.accessToken).toBe('new-access-token');
+    expect(inner.refreshToken).toBe('new-refresh-token');
+    expect(inner.omcUsageProfileId).toBeDefined();
+    expect(inner.omcUsageProfileTokenHash).toBe(
+      createHash('sha256').update('new-refresh-token').digest('hex'),
+    );
+
+    // File credential store should NOT have been written
+    const fileWriteCall = vi.mocked(fs.writeFileSync).mock.calls.find(
+      c => String(c[0]).endsWith('.credentials.json')
+    );
+    expect(fileWriteCall).toBeUndefined();
+  });
+
+  it('writes refreshed token back to file when source is file, not to Keychain', async () => {
+    const oneHourAgo = Date.now() - 60 * 60 * 1000;
+    const execFileMock = vi.mocked(childProcess.execFileSync);
+    const mockedExistsSync = vi.mocked(fs.existsSync);
+    const mockedReadFileSync = vi.mocked(fs.readFileSync);
+    const httpsModule = await import('https') as unknown as { default: { request: ReturnType<typeof vi.fn> } };
+    let credentialsContent = JSON.stringify({
+      claudeAiOauth: {
+        accessToken: 'expired-file-token',
+        refreshToken: 'file-refresh-token',
+        expiresAt: oneHourAgo,
+      },
+    });
+
+    // Keychain has no entry — only file credentials
+    execFileMock.mockImplementation(() => {
+      throw Object.assign(new Error('security command failed'), {
+        stderr: Buffer.from('The specified item could not be found in the keychain.'),
+      });
+    });
+
+    mockedExistsSync.mockImplementation(path => String(path).endsWith('.credentials.json'));
+    mockedReadFileSync.mockImplementation((path) => {
+      if (String(path).endsWith('.credentials.json')) {
+        return credentialsContent;
+      }
+      return '{}';
+    });
+    process.env.CLAUDE_CONFIG_DIR = '/tmp/test-claude';
+    const originalProfileIdentity = getUsageCredentialIdentity(false, true);
+
+    // Token refresh returns new tokens
+    httpsModule.default.request.mockImplementationOnce((_options: unknown, callback: (res: EventEmitter & { statusCode?: number }) => void) => {
+      const req = new EventEmitter() as EventEmitter & { end: () => void; destroy: () => void };
+      req.destroy = vi.fn();
+      req.end = () => {
+        const res = new EventEmitter() as EventEmitter & { statusCode?: number };
+        res.statusCode = 200;
+        callback(res);
+        res.emit('data', JSON.stringify({
+          access_token: 'new-file-access-token',
+          refresh_token: 'new-file-refresh-token',
+          expires_in: 3600,
+        }));
+        res.emit('end');
+      };
+      return req;
+    });
+
+    // Usage API call
+    httpsModule.default.request.mockImplementationOnce((_options: unknown, callback: (res: EventEmitter & { statusCode?: number }) => void) => {
+      const req = new EventEmitter() as EventEmitter & { end: () => void; destroy: () => void };
+      req.destroy = vi.fn();
+      req.end = () => {
+        const res = new EventEmitter() as EventEmitter & { statusCode?: number };
+        res.statusCode = 200;
+        callback(res);
+        res.emit('data', JSON.stringify({
+          five_hour: { utilization: 20 },
+          seven_day: { utilization: 40 },
+        }));
+        res.emit('end');
+      };
+      return req;
+    });
+
+    const result = await getUsage();
+
+    expect(result.error).toBeUndefined();
+    expect(result.rateLimits?.fiveHourPercent).toBe(20);
+
+    // File should have been written with new tokens
+    const fileWriteCall = vi.mocked(fs.writeFileSync).mock.calls.find(
+      c => String(c[0]).endsWith('.credentials.json.tmp.' + process.pid)
+    );
+    expect(fileWriteCall).toBeTruthy();
+    const written = JSON.parse(String(fileWriteCall![1]));
+    expect(written.claudeAiOauth.accessToken).toBe('new-file-access-token');
+    expect(written.claudeAiOauth.refreshToken).toBe('new-file-refresh-token');
+    expect(written.claudeAiOauth.omcUsageProfileId).toBeDefined();
+    expect(written.claudeAiOauth.omcUsageProfileTokenHash).toBe(
+      createHash('sha256').update('new-file-refresh-token').digest('hex'),
+    );
+    credentialsContent = JSON.stringify(written);
+    expect(getUsageCredentialIdentity(false, true)).toBe(originalProfileIdentity);
+
+    // Keychain write-back should NOT have been called with add-generic-password
+    const keychainWriteCall = execFileMock.mock.calls.find(
+      c => Array.isArray(c[1]) && (c[1] as string[]).includes('add-generic-password')
+    );
+    expect(keychainWriteCall).toBeUndefined();
+  });
+});
+
+
+describe('isKimiHost', () => {
+  it('accepts exact kimi.com hostname', () => {
+    expect(isKimiHost('https://kimi.com')).toBe(true);
+    expect(isKimiHost('https://kimi.com/')).toBe(true);
+    expect(isKimiHost('https://kimi.com/coding/v1')).toBe(true);
+  });
+
+  it('accepts subdomains of kimi.com', () => {
+    expect(isKimiHost('https://api.kimi.com')).toBe(true);
+    expect(isKimiHost('https://api.kimi.com/coding/')).toBe(true);
+    expect(isKimiHost('https://api.kimi.com/coding/v1')).toBe(true);
+    expect(isKimiHost('https://foo.bar.kimi.com')).toBe(true);
+  });
+
+  it('rejects hosts that merely contain kimi as substring', () => {
+    expect(isKimiHost('https://kimi.com.evil.tld')).toBe(false);
+    expect(isKimiHost('https://notkimi.com')).toBe(false);
+    expect(isKimiHost('https://kimi-company.com')).toBe(false);
+  });
+
+  it('rejects Moonshot open-platform hosts (balance API, no /usages)', () => {
+    expect(isKimiHost('https://api.moonshot.ai/v1')).toBe(false);
+    expect(isKimiHost('https://api.moonshot.cn/anthropic')).toBe(false);
+  });
+
+  it('rejects invalid URLs', () => {
+    expect(isKimiHost('')).toBe(false);
+    expect(isKimiHost('not-a-url')).toBe(false);
+  });
+});
+
+describe('parseKimiResponse', () => {
+  // Shape captured from a live GET https://api.kimi.com/coding/v1/usages
+  // with an API key (authentication.method = METHOD_API_KEY).
+  const livePayload = {
+    user: { userId: 'u1', region: 'REGION_OVERSEA', membership: { level: 'LEVEL_STANDARD' } },
+    usage: { limit: '100', used: '45', remaining: '55', resetTime: '2026-07-31T00:54:55.628002Z' },
+    limits: [
+      {
+        window: { duration: 300, timeUnit: 'TIME_UNIT_MINUTE' },
+        detail: { limit: '100', used: '2', remaining: '98', resetTime: '2026-07-25T21:54:55.628002Z' },
+      },
+    ],
+    parallel: { limit: '30' },
+    authentication: { method: 'METHOD_API_KEY', scope: 'FEATURE_CODING' },
+  };
+
+  it('parses the live payload shape (string numbers, nano resetTime)', () => {
+    const result = parseKimiResponse(livePayload);
+    expect(result).not.toBeNull();
+    expect(result!.fiveHourPercent).toBe(2);
+    expect(result!.weeklyPercent).toBe(45);
+    expect(result!.fiveHourResetsAt).toBeInstanceOf(Date);
+    expect(result!.fiveHourResetsAt!.getTime()).toBe(new Date('2026-07-25T21:54:55.628Z').getTime());
+    expect(result!.weeklyResetsAt).toBeInstanceOf(Date);
+    expect(result!.weeklyResetsAt!.getTime()).toBe(new Date('2026-07-31T00:54:55.628Z').getTime());
+  });
+
+  it('tolerates numeric (non-string) quota fields', () => {
+    const result = parseKimiResponse({
+      usage: { limit: 200, used: 50 },
+      limits: [
+        { window: { duration: 5, timeUnit: 'TIME_UNIT_HOUR' }, detail: { limit: 100, used: 25 } },
+      ],
+    });
+    expect(result).not.toBeNull();
+    expect(result!.fiveHourPercent).toBe(25);
+    expect(result!.weeklyPercent).toBe(25);
+  });
+
+  it('derives used from limit - remaining when used is absent', () => {
+    const result = parseKimiResponse({
+      usage: { limit: '100', remaining: '30' },
+      limits: [
+        { window: { duration: 300, timeUnit: 'TIME_UNIT_MINUTE' }, detail: { limit: '100', remaining: '90' } },
+      ],
+    });
+    expect(result).not.toBeNull();
+    expect(result!.weeklyPercent).toBe(70);
+    expect(result!.fiveHourPercent).toBe(10);
+  });
+
+  it('returns weekly-only data when no 5h window is present', () => {
+    const result = parseKimiResponse({ usage: { limit: '100', used: '40' } });
+    expect(result).not.toBeNull();
+    expect(result!.weeklyPercent).toBe(40);
+    expect(result!.fiveHourPercent).toBeUndefined();
+  });
+
+  it('picks the 300-minute window as the 5h bucket, never a shorter or longer one', () => {
+    const result = parseKimiResponse({
+      usage: { limit: '100', used: '45' },
+      limits: [
+        { window: { duration: 1, timeUnit: 'TIME_UNIT_DAY' }, detail: { limit: '100', used: '50' } },
+        { window: { duration: 300, timeUnit: 'TIME_UNIT_MINUTE' }, detail: { limit: '100', used: '12' } },
+        { window: { duration: 60, timeUnit: 'TIME_UNIT_MINUTE' }, detail: { limit: '100', used: '3' } },
+      ],
+    });
+    expect(result).not.toBeNull();
+    expect(result!.fiveHourPercent).toBe(12); // the actual 5h window, not the 60-minute one
+  });
+
+  it('leaves the 5h bucket empty rather than labelling another window as 5h', () => {
+    // Regression: a shorter burst window must never be rendered under "5h".
+    const result = parseKimiResponse({
+      usage: { limit: '100', used: '45' },
+      limits: [
+        { window: { duration: 60, timeUnit: 'TIME_UNIT_MINUTE' }, detail: { limit: '100', used: '80' } },
+        { window: { duration: 1, timeUnit: 'TIME_UNIT_DAY' }, detail: { limit: '100', used: '90' } },
+      ],
+    });
+    expect(result).not.toBeNull();
+    expect(result!.weeklyPercent).toBe(45);
+    expect(result!.fiveHourPercent).toBeUndefined();
+    expect(result!.fiveHourResetsAt).toBeUndefined();
+  });
+
+  it('accepts a 5h window expressed in hours (5 × TIME_UNIT_HOUR)', () => {
+    const result = parseKimiResponse({
+      usage: { limit: '100', used: '45' },
+      limits: [
+        { window: { duration: 5, timeUnit: 'TIME_UNIT_HOUR' }, detail: { limit: '100', used: '12' } },
+      ],
+    });
+    expect(result).not.toBeNull();
+    expect(result!.fiveHourPercent).toBe(12);
+  });
+
+  it('falls through an unusable 5h row to a later usable one', () => {
+    const result = parseKimiResponse({
+      limits: [
+        { window: { duration: 300, timeUnit: 'TIME_UNIT_MINUTE' }, detail: { limit: '0', used: '0' } },
+        { window: { duration: 300, timeUnit: 'TIME_UNIT_MINUTE' }, detail: { limit: '100', used: '4' } },
+      ],
+    });
+    expect(result).not.toBeNull();
+    expect(result!.fiveHourPercent).toBe(4);
+  });
+
+  it('returns null when no usable quota rows exist', () => {
+    expect(parseKimiResponse({})).toBeNull();
+    expect(parseKimiResponse({ limits: [] })).toBeNull();
+    expect(parseKimiResponse({ usage: { limit: '0', used: '0' } })).toBeNull();
+    expect(parseKimiResponse({ usage: { limit: 'abc', used: 'def' } })).toBeNull();
+  });
+
+  it('maps a USD booster wallet to extra usage fields', () => {
+    const result = parseKimiResponse({
+      usage: { limit: '100', used: '45' },
+      boosterWallet: {
+        balance: { type: 'BOOSTER', amount: 1_000_000_000, amountLeft: 500_000_000 },
+        monthlyChargeLimitEnabled: true,
+        monthlyChargeLimit: { priceInCents: 2000, currency: 'USD' },
+        monthlyUsed: { priceInCents: 1500, currency: 'USD' },
+      },
+    });
+    expect(result).not.toBeNull();
+    expect(result!.extraUsagePercent).toBe(75);
+    expect(result!.extraUsageSpentUsd).toBe(15);
+    expect(result!.extraUsageLimitUsd).toBe(20);
+  });
+
+  it('skips non-USD booster wallets (HUD extra renderer is USD-only)', () => {
+    const result = parseKimiResponse({
+      usage: { limit: '100', used: '45' },
+      boosterWallet: {
+        balance: { type: 'BOOSTER', amount: 1_000_000_000, amountLeft: 500_000_000 },
+        monthlyChargeLimitEnabled: true,
+        monthlyChargeLimit: { priceInCents: 20000, currency: 'CNY' },
+        monthlyUsed: { priceInCents: 15000, currency: 'CNY' },
+      },
+    });
+    expect(result).not.toBeNull();
+    expect(result!.weeklyPercent).toBe(45);
+    expect(result!.extraUsagePercent).toBeUndefined();
+    expect(result!.extraUsageLimitUsd).toBeUndefined();
+  });
+
+  it('skips booster wallet when monthly cap is disabled', () => {
+    const result = parseKimiResponse({
+      usage: { limit: '100', used: '45' },
+      boosterWallet: {
+        balance: { type: 'BOOSTER', amount: 1_000_000_000, amountLeft: 500_000_000 },
+        monthlyChargeLimitEnabled: false,
+        monthlyUsed: { priceInCents: 1500, currency: 'USD' },
+      },
+    });
+    expect(result).not.toBeNull();
+    expect(result!.extraUsagePercent).toBeUndefined();
+  });
+
+  it('accepts reset_at/resetAt aliases and survives non-string reset fields', () => {
+    const result = parseKimiResponse({
+      usage: { limit: '100', used: '45', reset_at: '2026-07-31T00:54:55Z' },
+      limits: [
+        {
+          window: { duration: 300, timeUnit: 'TIME_UNIT_MINUTE' },
+          detail: { limit: '100', used: '2', resetTime: 123 as unknown as string },
+        },
+      ],
+    });
+    expect(result).not.toBeNull();
+    expect(result!.weeklyResetsAt).toBeInstanceOf(Date);
+    expect(result!.weeklyResetsAt!.getTime()).toBe(new Date('2026-07-31T00:54:55Z').getTime());
+    expect(result!.fiveHourPercent).toBe(2);
+    expect(result!.fiveHourResetsAt).toBeNull(); // non-string resetTime → null, not a throw
+  });
+
+  it('drops the 5h bucket on unknown timeUnit but keeps weekly data', () => {
+    const result = parseKimiResponse({
+      usage: { limit: '100', used: '45' },
+      limits: [
+        { window: { duration: 2, timeUnit: 'TIME_UNIT_FORTNIGHT' }, detail: { limit: '100', used: '9' } },
+      ],
+    });
+    expect(result).not.toBeNull();
+    expect(result!.fiveHourPercent).toBeUndefined();
+    expect(result!.weeklyPercent).toBe(45);
+  });
+
+  it('skips booster wallet when the limit/used currencies disagree', () => {
+    const mismatched = parseKimiResponse({
+      usage: { limit: '100', used: '45' },
+      boosterWallet: {
+        balance: { type: 'BOOSTER', amount: 1_000_000_000, amountLeft: 500_000_000 },
+        monthlyChargeLimitEnabled: true,
+        monthlyChargeLimit: { priceInCents: 2000, currency: 'USD' },
+        monthlyUsed: { priceInCents: 15000, currency: 'CNY' },
+      },
+    });
+    expect(mismatched).not.toBeNull();
+    expect(mismatched!.extraUsagePercent).toBeUndefined();
+    expect(mismatched!.extraUsageSpentUsd).toBeUndefined();
+    expect(mismatched!.extraUsageLimitUsd).toBeUndefined();
+
+    const reversed = parseKimiResponse({
+      usage: { limit: '100', used: '45' },
+      boosterWallet: {
+        balance: { type: 'BOOSTER', amount: 1_000_000_000, amountLeft: 500_000_000 },
+        monthlyChargeLimitEnabled: true,
+        monthlyChargeLimit: { priceInCents: 20000, currency: 'CNY' },
+        monthlyUsed: { priceInCents: 1500, currency: 'USD' },
+      },
+    });
+    expect(reversed).not.toBeNull();
+    expect(reversed!.extraUsagePercent).toBeUndefined();
+  });
+
+  it('skips booster wallet when only one side declares a currency', () => {
+    const limitOnly = parseKimiResponse({
+      usage: { limit: '100', used: '45' },
+      boosterWallet: {
+        balance: { type: 'BOOSTER', amount: 1_000_000_000, amountLeft: 500_000_000 },
+        monthlyChargeLimitEnabled: true,
+        monthlyChargeLimit: { priceInCents: 2000, currency: 'USD' },
+        monthlyUsed: { priceInCents: 1500 },
+      },
+    });
+    expect(limitOnly!.extraUsagePercent).toBeUndefined();
+
+    const usedOnly = parseKimiResponse({
+      usage: { limit: '100', used: '45' },
+      boosterWallet: {
+        balance: { type: 'BOOSTER', amount: 1_000_000_000, amountLeft: 500_000_000 },
+        monthlyChargeLimitEnabled: true,
+        monthlyChargeLimit: { priceInCents: 2000 },
+        monthlyUsed: { priceInCents: 1500, currency: 'USD' },
+      },
+    });
+    expect(usedOnly!.extraUsagePercent).toBeUndefined();
+  });
+
+  it('survives a non-string currency without throwing', () => {
+    const result = parseKimiResponse({
+      usage: { limit: '100', used: '45' },
+      boosterWallet: {
+        balance: { type: 'BOOSTER', amount: 1_000_000_000, amountLeft: 500_000_000 },
+        monthlyChargeLimitEnabled: true,
+        monthlyChargeLimit: { priceInCents: 2000, currency: 840 as unknown as string },
+        monthlyUsed: { priceInCents: 1500, currency: 840 as unknown as string },
+      },
+    });
+    expect(result).not.toBeNull();
+    expect(result!.extraUsagePercent).toBeUndefined();
+  });
+
+  it('skips booster wallet when currency is absent (never guesses "$")', () => {
+    const result = parseKimiResponse({
+      usage: { limit: '100', used: '45' },
+      boosterWallet: {
+        balance: { type: 'BOOSTER', amount: 1_000_000_000, amountLeft: 500_000_000 },
+        monthlyChargeLimitEnabled: true,
+        monthlyChargeLimit: { priceInCents: 2000 },
+        monthlyUsed: { priceInCents: 1500 },
+      },
+    });
+    expect(result).not.toBeNull();
+    expect(result!.extraUsagePercent).toBeUndefined();
+  });
+
+  it('returns a result when the booster wallet is the only usable section', () => {
+    const result = parseKimiResponse({
+      boosterWallet: {
+        balance: { type: 'BOOSTER', amount: 1_000_000_000, amountLeft: 500_000_000 },
+        monthlyChargeLimitEnabled: true,
+        monthlyChargeLimit: { priceInCents: 2000, currency: 'usd' },
+        monthlyUsed: { priceInCents: 500, currency: 'USD' },
+      },
+    });
+    expect(result).not.toBeNull();
+    expect(result!.fiveHourPercent).toBeUndefined();
+    expect(result!.extraUsagePercent).toBe(25);
+    expect(result!.extraUsageSpentUsd).toBe(5);
+    expect(result!.extraUsageLimitUsd).toBe(20);
+  });
+});
+
+describe('getUsage routing - kimi', () => {
+  const originalEnv = { ...process.env };
+  let httpsModule: { default: { request: ReturnType<typeof vi.fn> } };
+
+  beforeEach(async () => {
+    vi.clearAllMocks();
+    vi.mocked(fs.existsSync).mockReturnValue(false);
+    vi.mocked(fs.readFileSync).mockReturnValue('{}');
+    vi.mocked(childProcess.execSync).mockImplementation(() => { throw new Error('mock: no keychain'); });
+    vi.mocked(childProcess.execFileSync).mockImplementation(() => { throw new Error('mock: no keychain'); });
+    delete process.env.ANTHROPIC_BASE_URL;
+    delete process.env.ANTHROPIC_AUTH_TOKEN;
+    delete process.env.ANTHROPIC_API_KEY;
+    delete process.env.KIMI_API_KEY;
+    httpsModule = await import('https') as unknown as typeof httpsModule;
+  });
+
+  afterEach(() => {
+    process.env = { ...originalEnv };
+  });
+
+  it('routes to kimi when ANTHROPIC_BASE_URL is a kimi host with KIMI_API_KEY', async () => {
+    process.env.ANTHROPIC_BASE_URL = 'https://api.kimi.com/coding/';
+    process.env.KIMI_API_KEY = 'test-kimi-key';
+
+    const result = await getUsage();
+    expect(result.rateLimits).toBeNull();
+    expect(result.error).toBe('network');
+
+    expect(httpsModule.default.request).toHaveBeenCalledTimes(1);
+    const callArgs = httpsModule.default.request.mock.calls[0][0];
+    expect(callArgs.hostname).toBe('api.kimi.com');
+    expect(callArgs.path).toBe('/coding/v1/usages');
+    expect(callArgs.headers.Authorization).toBe('Bearer test-kimi-key');
+  });
+
+  it('falls back to ANTHROPIC_AUTH_TOKEN when KIMI_API_KEY is not set', async () => {
+    process.env.ANTHROPIC_BASE_URL = 'https://api.kimi.com/coding/v1';
+    process.env.ANTHROPIC_AUTH_TOKEN = 'test-auth-token';
+
+    const result = await getUsage();
+    expect(result.error).toBe('network');
+
+    expect(httpsModule.default.request).toHaveBeenCalledTimes(1);
+    const callArgs = httpsModule.default.request.mock.calls[0][0];
+    expect(callArgs.hostname).toBe('api.kimi.com');
+    expect(callArgs.headers.Authorization).toBe('Bearer test-auth-token');
+  });
+
+  it('authenticates with ANTHROPIC_API_KEY, the credential Kimi documents', async () => {
+    // Kimi's Claude Code setup: ANTHROPIC_BASE_URL=https://api.kimi.com/coding/
+    // plus ANTHROPIC_API_KEY. That config alone must reach the usage endpoint.
+    process.env.ANTHROPIC_BASE_URL = 'https://api.kimi.com/coding/';
+    process.env.ANTHROPIC_API_KEY = 'documented-kimi-key';
+
+    const result = await getUsage();
+    expect(result.error).toBe('network'); // reached the request, not no_credentials
+
+    expect(httpsModule.default.request).toHaveBeenCalledTimes(1);
+    const callArgs = httpsModule.default.request.mock.calls[0][0];
+    expect(callArgs.hostname).toBe('api.kimi.com');
+    expect(callArgs.path).toBe('/coding/v1/usages');
+    expect(callArgs.headers.Authorization).toBe('Bearer documented-kimi-key');
+  });
+
+  it('prefers KIMI_API_KEY over ANTHROPIC_AUTH_TOKEN', async () => {
+    process.env.ANTHROPIC_BASE_URL = 'https://api.kimi.com/coding/';
+    process.env.KIMI_API_KEY = 'preferred-key';
+    process.env.ANTHROPIC_AUTH_TOKEN = 'fallback-key';
+
+    await getUsage();
+
+    expect(httpsModule.default.request).toHaveBeenCalledTimes(1);
+    const callArgs = httpsModule.default.request.mock.calls[0][0];
+    expect(callArgs.headers.Authorization).toBe('Bearer preferred-key');
+  });
+
+  it('applies the full credential precedence: KIMI_API_KEY > ANTHROPIC_API_KEY > ANTHROPIC_AUTH_TOKEN', async () => {
+    process.env.ANTHROPIC_BASE_URL = 'https://api.kimi.com/coding/';
+    process.env.KIMI_API_KEY = 'kimi-key';
+    process.env.ANTHROPIC_API_KEY = 'anthropic-key';
+    process.env.ANTHROPIC_AUTH_TOKEN = 'auth-token';
+
+    await getUsage();
+    expect(httpsModule.default.request.mock.calls[0][0].headers.Authorization)
+      .toBe('Bearer kimi-key');
+
+    // Drop the most specific: ANTHROPIC_API_KEY takes over. Moonshot documents
+    // it for this endpoint and warns a stale AUTH_TOKEN conflicts, so the key
+    // the documented setup authenticates with must win over the leftover.
+    vi.clearAllMocks();
+    delete process.env.KIMI_API_KEY;
+    await getUsage();
+    expect(httpsModule.default.request.mock.calls[0][0].headers.Authorization)
+      .toBe('Bearer anthropic-key');
+
+    // Only the auth token left: still used (kimi-code CLI / platform setups).
+    vi.clearAllMocks();
+    delete process.env.ANTHROPIC_API_KEY;
+    await getUsage();
+    expect(httpsModule.default.request.mock.calls[0][0].headers.Authorization)
+      .toBe('Bearer auth-token');
+  });
+
+  it('does not send the bearer token to a non-canonical *.kimi.com subdomain', async () => {
+    process.env.ANTHROPIC_BASE_URL = 'https://evil.kimi.com/coding/';
+    process.env.ANTHROPIC_API_KEY = 'leaky-key';
+
+    const result = await getUsage();
+
+    // Detected as kimi (so we never report another provider's numbers), but the
+    // credential stays home.
+    expect(result.rateLimits).toBeNull();
+    expect(result.error).toBe('network');
+    expect(httpsModule.default.request).not.toHaveBeenCalled();
+  });
+
+  it('returns no_credentials when kimi host detected but no API key', async () => {
+    process.env.ANTHROPIC_BASE_URL = 'https://api.kimi.com/coding/';
+    // No KIMI_API_KEY, ANTHROPIC_API_KEY, or ANTHROPIC_AUTH_TOKEN set
+
+    const result = await getUsage();
+    expect(result.rateLimits).toBeNull();
+    expect(result.error).toBe('no_credentials');
+    expect(httpsModule.default.request).not.toHaveBeenCalled();
+  });
+
+  it('does NOT route to kimi for look-alike hosts', async () => {
+    process.env.ANTHROPIC_BASE_URL = 'https://kimi.com.evil.tld/coding';
+    process.env.KIMI_API_KEY = 'test-key';
+
+    const result = await getUsage();
+    expect(result.rateLimits).toBeNull();
+    expect(result.error).toBe('no_credentials');
+    expect(httpsModule.default.request).not.toHaveBeenCalled();
+  });
+
+  it('returns parsed rate limits on successful API response (E2E happy path)', async () => {
+    process.env.ANTHROPIC_BASE_URL = 'https://api.kimi.com/coding/';
+    process.env.KIMI_API_KEY = 'test-key';
+
+    httpsModule.default.request.mockImplementationOnce((_options, callback) => {
+      const req = new EventEmitter() as EventEmitter & { end: () => void; destroy: () => void };
+      req.destroy = vi.fn();
+      req.end = () => {
+        const res = new EventEmitter() as EventEmitter & { statusCode?: number };
+        res.statusCode = 200;
+        callback(res);
+        res.emit('data', JSON.stringify({
+          usage: { limit: '100', used: '45', remaining: '55', resetTime: '2026-07-31T00:54:55.628002Z' },
+          limits: [
+            {
+              window: { duration: 300, timeUnit: 'TIME_UNIT_MINUTE' },
+              detail: { limit: '100', used: '2', remaining: '98', resetTime: '2026-07-25T21:54:55.628002Z' },
+            },
+          ],
+        }));
+        res.emit('end');
+      };
+      return req;
+    });
+
+    const result = await getUsage();
+
+    expect(result.rateLimits).not.toBeNull();
+    expect(result.rateLimits!.fiveHourPercent).toBe(2);
+    expect(result.rateLimits!.weeklyPercent).toBe(45);
+    expect(result.rateLimits!.fiveHourResetsAt).toBeInstanceOf(Date);
+    expect(result.rateLimits!.weeklyResetsAt).toBeInstanceOf(Date);
+    expect(result.error).toBeUndefined();
+  });
+
+  it('writes cache with source kimi', async () => {
+    process.env.ANTHROPIC_BASE_URL = 'https://api.kimi.com/coding/';
+    process.env.KIMI_API_KEY = 'test-key';
+
+    httpsModule.default.request.mockImplementationOnce((_options, callback) => {
+      const req = new EventEmitter() as EventEmitter & { end: () => void; destroy: () => void };
+      req.destroy = vi.fn();
+      req.end = () => {
+        const res = new EventEmitter() as EventEmitter & { statusCode?: number };
+        res.statusCode = 200;
+        callback(res);
+        res.emit('data', JSON.stringify({
+          usage: { limit: '100', used: '45', remaining: '55' },
+          limits: [
+            { window: { duration: 300, timeUnit: 'TIME_UNIT_MINUTE' }, detail: { limit: '100', used: '2', remaining: '98' } },
+          ],
+        }));
+        res.emit('end');
+      };
+      return req;
+    });
+
+    await getUsage();
+
+    const writeCall = vi.mocked(fs.writeFileSync).mock.calls.find(
+      c => String(c[0]).includes('.usage-cache-kimi.json')
+    );
+    expect(writeCall).toBeTruthy();
+    const written = JSON.parse(String(writeCall![1]));
+    expect(written.source).toBe('kimi');
+    expect(written.data.fiveHourPercent).toBe(2);
+    expect(written.data.weeklyPercent).toBe(45);
+  });
+
+  it('settles as a network error when the request emits error (DNS/connection failure)', async () => {
+    // The routing mocks return undefined and hit the synchronous catch; this
+    // drives the asynchronous req 'error' listener instead.
+    process.env.ANTHROPIC_BASE_URL = 'https://api.kimi.com/coding/';
+    process.env.KIMI_API_KEY = 'test-key';
+
+    httpsModule.default.request.mockImplementationOnce((_options, _callback) => {
+      const req = new EventEmitter() as EventEmitter & { end: () => void; destroy: () => void };
+      req.destroy = vi.fn();
+      req.end = () => { req.emit('error', new Error('ENOTFOUND')); };
+      return req;
+    });
+
+    const result = await getUsage();
+    expect(result.rateLimits).toBeNull();
+    expect(result.error).toBe('network');
+  });
+
+  it('settles as a network error and destroys the request on timeout', async () => {
+    process.env.ANTHROPIC_BASE_URL = 'https://api.kimi.com/coding/';
+    process.env.KIMI_API_KEY = 'test-key';
+
+    const destroy = vi.fn();
+    httpsModule.default.request.mockImplementationOnce((_options, _callback) => {
+      const req = new EventEmitter() as EventEmitter & { end: () => void; destroy: () => void };
+      req.destroy = destroy;
+      req.end = () => { req.emit('timeout'); };
+      return req;
+    });
+
+    const result = await getUsage();
+    expect(result.rateLimits).toBeNull();
+    expect(result.error).toBe('network');
+    expect(destroy).toHaveBeenCalled(); // must not leak the socket
+  });
+
+  it('degrades to a network error when the response stream errors after headers', async () => {
+    // A socket reset after headers surfaces on the response, not the request.
+    // Unhandled, that 'error' would take the HUD process down.
+    process.env.ANTHROPIC_BASE_URL = 'https://api.kimi.com/coding/';
+    process.env.KIMI_API_KEY = 'test-key';
+
+    httpsModule.default.request.mockImplementationOnce((_options, callback) => {
+      const req = new EventEmitter() as EventEmitter & { end: () => void; destroy: () => void };
+      req.destroy = vi.fn();
+      req.end = () => {
+        const res = new EventEmitter() as EventEmitter & { statusCode?: number };
+        res.statusCode = 200;
+        callback(res);
+        res.emit('data', '{"usage":');       // truncated mid-body
+        res.emit('error', new Error('ECONNRESET'));
+      };
+      return req;
+    });
+
+    const result = await getUsage();
+    expect(result.rateLimits).toBeNull();
+    expect(result.error).toBe('network');
+  });
+
+  it('degrades to a network error when the response is aborted', async () => {
+    process.env.ANTHROPIC_BASE_URL = 'https://api.kimi.com/coding/';
+    process.env.KIMI_API_KEY = 'test-key';
+
+    httpsModule.default.request.mockImplementationOnce((_options, callback) => {
+      const req = new EventEmitter() as EventEmitter & { end: () => void; destroy: () => void };
+      req.destroy = vi.fn();
+      req.end = () => {
+        const res = new EventEmitter() as EventEmitter & { statusCode?: number };
+        res.statusCode = 200;
+        callback(res);
+        res.emit('aborted');
+      };
+      return req;
+    });
+
+    const result = await getUsage();
+    expect(result.rateLimits).toBeNull();
+    expect(result.error).toBe('network');
+  });
+
+  it('reports rate_limited when the kimi API returns 429', async () => {
+    process.env.ANTHROPIC_BASE_URL = 'https://api.kimi.com/coding/';
+    process.env.KIMI_API_KEY = 'test-key';
+
+    httpsModule.default.request.mockImplementationOnce((_options, callback) => {
+      const req = new EventEmitter() as EventEmitter & { end: () => void; destroy: () => void };
+      req.destroy = vi.fn();
+      req.end = () => {
+        const res = new EventEmitter() as EventEmitter & { statusCode?: number };
+        res.statusCode = 429;
+        callback(res);
+        res.emit('data', '');
+        res.emit('end');
+      };
+      return req;
+    });
+
+    const result = await getUsage();
+    expect(result.rateLimits).toBeNull();
+    expect(result.error).toBe('rate_limited');
+
+    const writeCall = vi.mocked(fs.writeFileSync).mock.calls.find(
+      c => String(c[0]).includes('.usage-cache-kimi.json')
+    );
+    expect(writeCall).toBeTruthy();
+    const written = JSON.parse(String(writeCall![1]));
+    expect(written.source).toBe('kimi');
+    expect(written.rateLimited).toBe(true);
+  });
+});

@@ -1,0 +1,374 @@
+#!/usr/bin/env node
+// Shipyard yard audit — the mechanically checkable half of `drydock --check`.
+//
+// Emits findings in the vocabulary the lookout feature and the drydock skill
+// text already document (severity / confidence / actionable), so both surfaces
+// share one contract. Covers only the high-confidence finding classes; the
+// heuristic classes (glossary terms unused in code, standards never
+// referenced) stay prose-layer in the skill text and are never emitted here.
+//
+// Surfaces follow an existence-as-declaration semantic: a surface's checks run
+// only when that surface already exists in the yard (adoption = the surface is
+// present), and an absent surface is "not adopted", not "missing". There is no
+// declaration syntax, so the former shipyard.surface.missing.* finding class
+// no longer exists.
+//
+// Current contract version: required day-one yard faces, duplicate glossary
+// authority, a missing/invalid `documentLanguage` tag, dead paths in
+// `CLAUDE.md`, project-skill triggers, and intent statuses.
+//
+// Usage: node scripts/shipyard-audit.mjs [repoRoot]
+// Exit 0 = clean (no high-confidence actionable findings)
+// Exit 1 = high-confidence actionable findings present
+// Exit 2 = invocation/environment error
+//
+// Output: findings JSON on stdout, human summary on stderr.
+
+import { hardenWindowsExeSearch } from './lib/windows-search.mjs';
+import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs';
+import { basename, isAbsolute, join, relative, resolve } from 'node:path';
+import { resolveOmcStateRoot } from './lib/state-root.mjs';
+import { stripLeadingUtf8Bom } from './lib/utf8-bom.mjs';
+
+hardenWindowsExeSearch();
+
+const toPosix = (value) => value.replace(/\\/g, '/');
+
+const SEVERITY = { high: 'high', medium: 'medium', low: 'low', info: 'info' };
+const AUDIT_CONTRACT_VERSION = 2;
+const TAG_PATTERN = /^[a-z]{2,3}(?:-[A-Z][a-z]{3})?(?:-(?:[A-Z]{2}|[0-9]{3}))?$/;
+
+function finding(id, title, severity, confidence, actionable, evidence, advice) {
+  return { id, title, severity, confidence, actionable, evidence, advice };
+}
+
+// During the glossary rename's expand phase, GLOSSARY.md is authoritative and
+// a recognizable legacy CONTEXT.md glossary remains a read-only fallback.
+//
+// A CONTEXT.md only counts as a legacy glossary when it carries a drydock
+// glossary signature: YAML frontmatter with a `documentLanguage` key, or a
+// first H1 matching a drydock glossary seed heading (seeds that predate the
+// language tag). Any other CONTEXT.md is an unrelated agent-context document
+// — the collision this rename exists to avoid — and is ignored.
+// YAML frontmatter, including an empty `---\n---` block.
+const GLOSSARY_FRONTMATTER = /^---\r?\n(?:([\s\S]*?)\r?\n)?---/;
+const LEGACY_GLOSSARY_HEADINGS = new Set(['Glossary', '术语表', '詞彙表']);
+
+function isLegacyGlossary(root) {
+  const path = join(root, 'CONTEXT.md');
+  if (!existsSync(path)) return false;
+  const content = readFileSync(path, 'utf-8').replace(/^\uFEFF/, '');
+  const frontmatter = content.match(GLOSSARY_FRONTMATTER);
+  if (frontmatter && /^documentLanguage:/m.test(frontmatter[1] ?? '')) return true;
+  // Seeds open with the heading, so only the first visible non-blank line
+  // after the frontmatter counts (BOM and HTML comments are not rendered);
+  // headings inside fences, comments, or later prose never do.
+  const body = (frontmatter ? content.slice(frontmatter[0].length) : content)
+    .replace(/<!--[\s\S]*?-->/g, '');
+  const firstLine = body.split(/\r?\n/).find((line) => line.trim() !== '') ?? '';
+  const heading = firstLine.match(/^#\s+(.+?)\s*$/);
+  return Boolean(heading && LEGACY_GLOSSARY_HEADINGS.has(heading[1]));
+}
+
+function glossaryPath(root) {
+  if (existsSync(join(root, 'GLOSSARY.md'))) return join(root, 'GLOSSARY.md');
+  return isLegacyGlossary(root) ? join(root, 'CONTEXT.md') : null;
+}
+
+function checkYardBaseFaces(root) {
+  const missing = [];
+  if (!existsSync(join(root, 'CLAUDE.md'))) missing.push('CLAUDE.md');
+  if (!glossaryPath(root)) missing.push('GLOSSARY.md');
+  if (missing.length === 0) return [];
+  return [
+    finding(
+      'shipyard.yard.unlaid',
+      'The shipyard is missing required day-one faces',
+      SEVERITY.high,
+      'high',
+      true,
+      missing,
+      'Run `/oh-my-claudecode:drydock` to seed CLAUDE.md and GLOSSARY.md; a recognizable legacy CONTEXT.md glossary is accepted until drydock migrates it.',
+    ),
+  ];
+}
+
+function checkDuplicateGlossaryAuthority(root) {
+  if (existsSync(join(root, 'GLOSSARY.md')) && isLegacyGlossary(root)) {
+    return [
+      finding(
+        'shipyard.glossary.duplicate-authority',
+        'Both GLOSSARY.md and a legacy CONTEXT.md glossary exist — only one glossary authority is allowed',
+        SEVERITY.high,
+        'high',
+        true,
+        ['GLOSSARY.md', 'CONTEXT.md'],
+        'Merge any terms only in CONTEXT.md into GLOSSARY.md, delete CONTEXT.md, and point CLAUDE.md references at GLOSSARY.md.',
+      ),
+    ];
+  }
+  return [];
+}
+
+function checkDocumentLanguage(root) {
+  // GLOSSARY.md is the authority; a legacy CONTEXT.md glossary is read only as fallback.
+  const path = glossaryPath(root);
+  if (!path) return [];
+  const glossaryFile = basename(path);
+  const content = readFileSync(path, 'utf-8').replace(/^\uFEFF/, '');
+  const match = content.match(GLOSSARY_FRONTMATTER);
+  if (!match) {
+    return [
+      finding(
+        'shipyard.document-language.missing-frontmatter',
+        `${glossaryFile} has no YAML frontmatter`,
+        SEVERITY.high,
+        'high',
+        true,
+        [glossaryFile],
+        'Add frontmatter with a `documentLanguage` tag (see the drydock skill).',
+      ),
+    ];
+  }
+  const tag = (match[1] ?? '').match(/^documentLanguage:\s*(\S+)\s*$/m);
+  if (!tag) {
+    return [
+      finding(
+        'shipyard.document-language.missing-tag',
+        `${glossaryFile} frontmatter lacks a documentLanguage tag`,
+        SEVERITY.high,
+        'high',
+        true,
+        [glossaryFile],
+        'Add `documentLanguage: <tag>` to the frontmatter.',
+      ),
+    ];
+  }
+  if (!TAG_PATTERN.test(tag[1])) {
+    return [
+      finding(
+        'shipyard.document-language.invalid-tag',
+        `Invalid documentLanguage tag: ${tag[1]}`,
+        SEVERITY.high,
+        'high',
+        true,
+        [tag[1]],
+        'Use a BCP-47-style tag (language lowercased, script Title-Case, region uppercase).',
+      ),
+    ];
+  }
+  return [];
+}
+
+// Fenced blocks hold commands, samples, and templated placeholders. A path
+// there is illustrative, not a claim about this repo's layout, so scanning it
+// manufactures actionable findings the yard cannot act on.
+function stripFencedBlocks(content) {
+  const lines = content.split(/\r?\n/);
+  const kept = [];
+  let fence = null;
+  for (const line of lines) {
+    const open = /^\s*(`{3,}|~{3,})/.exec(line);
+    if (fence) {
+      if (open && open[1][0] === fence[0] && open[1].length >= fence.length) fence = null;
+      continue;
+    }
+    if (open) {
+      fence = open[1];
+      continue;
+    }
+    kept.push(line);
+  }
+  return kept.join('\n');
+}
+
+function checkClaudeMdDeadPaths(root) {
+  const claudePath = join(root, 'CLAUDE.md');
+  if (!existsSync(claudePath)) return [];
+  const content = stripFencedBlocks(readFileSync(claudePath, 'utf-8'));
+  const findings = [];
+  const seen = new Set();
+  const pathPattern = /\b((?:docs|design-system|scripts|\.omc)\/[\w./-]+)/g;
+  for (const m of content.matchAll(pathPattern)) {
+    const p = m[1];
+    if (seen.has(p)) continue;
+    seen.add(p);
+    if (existsSync(join(root, p))) continue;
+    findings.push(
+      finding(
+        `shipyard.claude-md.dead-path.${p.replace(/[^a-z0-9]+/gi, '-')}`,
+        `CLAUDE.md points at a dead path: ${p}`,
+        SEVERITY.high,
+        'high',
+        true,
+        [p],
+        'Fix the path or remove the section it belongs to.',
+      ),
+    );
+  }
+  return findings;
+}
+
+// A project skill is loadable only with non-empty triggers — the loader
+// validates at runtime, so the frontmatter claim is mechanically checkable
+// and a silent omission is a finding, not a style nit.
+function triggersAreNonEmpty(frontmatterBody) {
+  const lines = frontmatterBody.split(/\r?\n/);
+  const start = lines.findIndex((l) => /^triggers:/.test(l));
+  if (start === -1) return false;
+  const inline = lines[start].slice('triggers:'.length).trim();
+  if (inline) return inline !== '[]' && inline !== '""';
+  for (let i = start + 1; i < lines.length; i++) {
+    if (/^\S/.test(lines[i])) break; // next top-level key
+    if (/^\s*-\s*\S/.test(lines[i])) return true;
+  }
+  return false;
+}
+
+async function checkProjectSkillTriggers(root) {
+  // The state-root directory name comes from the canonical resolver instead of a raw
+  // '.omc' join. The audit is scoped to the yard it was pointed at, so when the resolver
+  // escapes `root` (no workspace or git root under a bare directory, which falls back to
+  // the home state root) the same directory name is re-anchored at `root` rather than
+  // scanning skills that do not belong to the audited yard.
+  const resolvedStateRoot = await resolveOmcStateRoot(root);
+  const relResolved = relative(root, resolvedStateRoot);
+  const contained = Boolean(relResolved) && !relResolved.startsWith('..') && !isAbsolute(relResolved);
+  const stateRoot = contained ? resolvedStateRoot : join(root, basename(resolvedStateRoot));
+  const relStateRoot = relative(root, stateRoot);
+  const skillsDir = join(stateRoot, 'skills');
+  if (!existsSync(skillsDir)) return [];
+  const findings = [];
+  for (const entry of readdirSync(skillsDir)) {
+    if (!entry.endsWith('.md')) continue;
+    const rel = `${toPosix(join(relStateRoot, 'skills'))}/${entry}`;
+    const content = readFileSync(join(skillsDir, entry), 'utf-8');
+    const fm = stripLeadingUtf8Bom(content).match(/^---\r?\n([\s\S]*?)\r?\n---/);
+    if (!fm) {
+      findings.push(
+        finding(
+          'shipyard.project-skill.missing-frontmatter',
+          `Project skill has no YAML frontmatter: ${rel}`,
+          SEVERITY.high,
+          'high',
+          true,
+          [rel],
+          'Add frontmatter with id, name, description, and non-empty triggers (see the drydock skill).',
+        ),
+      );
+      continue;
+    }
+    if (!triggersAreNonEmpty(fm[1])) {
+      findings.push(
+        finding(
+          'shipyard.project-skill.missing-triggers',
+          `Project skill triggers missing or empty: ${rel}`,
+          SEVERITY.high,
+          'high',
+          true,
+          [rel],
+          'Add at least one trigger — missing or empty means the skill is never loaded.',
+        ),
+      );
+    }
+  }
+  return findings;
+}
+
+const INTENT_STATUSES = ['draft', 'in-review', 'accepted', 'rejected'];
+
+// An intent's frontmatter status mirrors the tracker review state; a status
+// outside the documented vocabulary makes the mirror unverifiable.
+function checkIntentStatuses(root) {
+  const intentsDir = join(root, 'docs', 'intents');
+  if (!existsSync(intentsDir)) return [];
+  const findings = [];
+  for (const entry of readdirSync(intentsDir)) {
+    const intentPath = join(intentsDir, entry, 'intent.md');
+    if (!existsSync(intentPath)) continue;
+    const rel = `docs/intents/${entry}/intent.md`;
+    const content = readFileSync(intentPath, 'utf-8');
+    const fm = content.match(/^---\r?\n([\s\S]*?)\r?\n---/);
+    const status = fm && fm[1].match(/^status:\s*(\S+)\s*$/m);
+    if (!status) {
+      findings.push(
+        finding(
+          'shipyard.intent.missing-status',
+          `Intent has no status in frontmatter: ${rel}`,
+          SEVERITY.high,
+          'high',
+          true,
+          [rel],
+          'Add `status: draft | in-review | accepted | rejected` to the frontmatter.',
+        ),
+      );
+      continue;
+    }
+    if (!INTENT_STATUSES.includes(status[1])) {
+      findings.push(
+        finding(
+          'shipyard.intent.invalid-status',
+          `Invalid intent status: ${status[1]} (${rel})`,
+          SEVERITY.high,
+          'high',
+          true,
+          [status[1]],
+          'Use one of: draft, in-review, accepted, rejected.',
+        ),
+      );
+    }
+  }
+  return findings;
+}
+
+export async function auditYard(root) {
+  return [
+    ...checkYardBaseFaces(root),
+    ...checkDuplicateGlossaryAuthority(root),
+    ...checkDocumentLanguage(root),
+    ...checkClaudeMdDeadPaths(root),
+    ...(await checkProjectSkillTriggers(root)),
+    ...checkIntentStatuses(root),
+  ];
+}
+
+function summarize(findings) {
+  const counts = { high: 0, medium: 0, low: 0, info: 0 };
+  for (const f of findings) counts[f.severity] += 1;
+  return counts;
+}
+
+async function main() {
+  const root = resolve(process.argv[2] ?? process.cwd());
+  if (!existsSync(root) || !statSync(root).isDirectory()) {
+    console.error(`shipyard-audit: not a directory: ${root}`);
+    process.exit(2);
+  }
+
+  const findings = await auditYard(root);
+  const counts = summarize(findings);
+  const clean = findings.every((f) => !(f.actionable && f.severity === SEVERITY.high));
+
+  console.log(
+    JSON.stringify(
+      {
+        contractVersion: AUDIT_CONTRACT_VERSION,
+        scannedRoot: root,
+        findings,
+        summary: { counts, verdict: clean ? 'clear' : 'review-recommended' },
+      },
+      null,
+      2,
+    ),
+  );
+
+  console.error(
+    findings.length === 0
+      ? 'shipyard-audit: clean — no high-confidence findings'
+      : `shipyard-audit: ${findings.length} finding(s) (${counts.high} high)`,
+  );
+  process.exit(clean ? 0 : 1);
+}
+
+const invoked = process.argv[1] && import.meta.url === new URL(`file://${process.argv[1].replace(/\\/g, '/')}`).href;
+if (invoked) await main();

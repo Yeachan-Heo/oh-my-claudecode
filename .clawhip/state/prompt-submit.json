@@ -1,0 +1,8 @@
+{
+  "observed_at": "2026-04-13T13:59:50.878Z",
+  "provider": "claude-code",
+  "event_name": "UserPromptSubmit",
+  "session_id": "c28baf7e-6eed-453a-89a3-dad010991c11",
+  "turn_id": null,
+  "prompt_summary": "oh sorry it was misunderstanding, proceed to release sicne we bumped. make sure we commit and push dist too"
+}

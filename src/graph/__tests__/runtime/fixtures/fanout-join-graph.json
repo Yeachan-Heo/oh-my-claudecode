@@ -1,0 +1,75 @@
+{
+  "descriptor_version": 1,
+  "run_id": "run-regression-fanout-join",
+  "revision_id": "rev-regression-fanout-join",
+  "goal": "Fan-out/join regression matrix",
+  "nodes": [
+    {
+      "id": "fan",
+      "kind": "agent",
+      "title": "Fan out",
+      "timeout_ms": 60000,
+      "max_attempts": 3,
+      "effect_policy": { "policy": "side_effect_free" },
+      "instructions": "Fan out into branches"
+    },
+    {
+      "id": "b1",
+      "kind": "agent",
+      "title": "Branch one",
+      "timeout_ms": 60000,
+      "max_attempts": 3,
+      "effect_policy": { "policy": "side_effect_free" },
+      "instructions": "Branch one work"
+    },
+    {
+      "id": "b2",
+      "kind": "command",
+      "title": "Branch two",
+      "timeout_ms": 60000,
+      "max_attempts": 3,
+      "effect_policy": { "policy": "side_effect_free" },
+      "command": "echo b2"
+    },
+    {
+      "id": "join",
+      "kind": "join",
+      "title": "Join",
+      "fan_out_node_id": "fan",
+      "input_branch_ids": ["br1", "br2"]
+    },
+    {
+      "id": "term",
+      "kind": "command",
+      "title": "Terminal",
+      "timeout_ms": 60000,
+      "max_attempts": 3,
+      "effect_policy": { "policy": "side_effect_free" },
+      "command": "echo term"
+    }
+  ],
+  "edges": [
+    {
+      "id": "e-fan-b1",
+      "kind": "fan_out",
+      "from": "fan",
+      "to": "b1",
+      "branch_id": "br1",
+      "owner_join_id": "join"
+    },
+    {
+      "id": "e-fan-b2",
+      "kind": "fan_out",
+      "from": "fan",
+      "to": "b2",
+      "branch_id": "br2",
+      "owner_join_id": "join"
+    },
+    { "id": "e-b1-join", "kind": "fixed", "from": "b1", "to": "join" },
+    { "id": "e-b2-join", "kind": "fixed", "from": "b2", "to": "join" },
+    { "id": "e-join-term", "kind": "fixed", "from": "join", "to": "term" }
+  ],
+  "entry_node_ids": ["fan"],
+  "concurrency_limit": 2,
+  "terminal_verification_node_id": "term"
+}

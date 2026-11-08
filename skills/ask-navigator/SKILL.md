@@ -1,0 +1,150 @@
+---
+name: ask-navigator
+description: "Shipyard's navigator — chart a foggy effort (destination unclear, questions not yet stateable) into a map of decision tickets on the repo's issue tracker, then work the frontier one ticket per session until the way is clear, and hand the collapsed decisions to /launch as a mission brief. Wayfinding, not building: it produces decisions, never deliverables."
+argument-hint: "<loose idea | residual questions | map link or number | nothing to continue the open map>"
+level: 3
+disable-model-invocation: true
+pipeline: [deep-interview, ask-navigator]
+---
+
+# Ask Navigator
+
+Ask-navigator is the shipyard's **navigator**: it takes an effort wrapped in fog — the way from here to the destination isn't visible yet — and charts it as a **map of decision tickets** on the repo's issue tracker, then works the frontier one ticket per session until the route is clear. It produces **decisions, never deliverables**: when the way is clear it hands off, it doesn't build. Delivery belongs to `/oh-my-claudecode:launch`.
+
+**The role contract.** The captain (the human) signs the destination (W1) and the chart (W2); the navigator drafts everything else and **never answers a question that belongs to the captain** — a grilling session in which the agent answers its own questions has broken the role, not just the process. Facts are the navigator's job; decisions are the captain's.
+
+**Fog test.** An effort has fog when either answer is no:
+
+1. **Q1** — Can the destination be stated in one sentence: the spec, decision, or change this effort is finding its way to?
+2. **Q2** — Can the first three decisions be stated precisely right now, even though none of them can be answered yet?
+
+Both yes → no map is needed; run `/oh-my-claudecode:launch` (its fog gate sends efforts here only when an answer is no). Either no → chart first. `ask-navigator` is also reachable directly: invoke it with a loose idea, with residual questions handed over by launch's fog gate, or with no argument to continue the open map.
+
+## Map home
+
+The map is a **single issue** labelled `navigator:map` on the repo's issue tracker; its decision tickets are child issues of the map. The tracker should have been recorded by `/oh-my-claudecode:drydock`; if none was recorded, ask once and remember the answer inside the map's Notes.
+
+The tracker is the **only map medium** — there is no local fallback: one map issue, child issues per ticket, native blocking/sub-issue relationships. Concurrent sessions and the tracker's own UI render the frontier — the map lives where humans already look. A map written to local files strands decisions where later sessions, the captain, and launch will never find them; do not fall back to local files. If the tracker is unreachable, stop and report the blocker. Create the `navigator:map` label if the tracker doesn't have it yet; ticket types live in the ticket body, not in labels.
+
+**One-time migration for existing local maps:** On a no-argument continuation, if no tracker map is found but `.omc/wayfinder/<slug>/map.md` exists, treat it as an import source — never start a second map or continue from the local copy as a live backend. Read that map and its `decisions/` entries, identify the configured tracker, and ask the captain to confirm the import. After confirmation, create one `navigator:map` parent issue, one child issue for each decision ticket, native sub-issue and blocking relationships, and carry over the frontier, ruled-out work, settled decisions, and mission brief. Put each resolution on its corresponding child issue and add a parent-issue comment recording the source path and import date. Keep the local files unchanged as the audit source; verify every decision, resolution, and dependency is represented before declaring the import complete. The tracker then becomes the sole live map. If the tracker is unavailable or the captain declines, stop without creating a local map or a duplicate effort.
+
+The map is an **index, not a store**: a decision lives in exactly one place — its ticket. The map gists each resolution in one line and links; it never restates the detail.
+
+## Document language
+
+Map and ticket prose follow the same document-language contract as `/oh-my-claudecode:drydock`: read `documentLanguage` from `GLOSSARY.md` frontmatter when present (a legacy yard with only `CONTEXT.md` reads it there and never gets a second glossary; drydock's legacy glossary migration renames it); if the yard is not laid, ask the language question once during charting (W2) and record the resolved tag in the map's Notes so the later launch run inherits it. Paths, labels, slash commands, the `navigator:map` label, ticket-type names (`research`, `loft`, `grilling`, `task`), `HITL`/`AFK`, and `blockedBy` are stable tokens and stay byte-for-byte stable in every language.
+
+## Chart the map
+
+Invoked with a loose idea (or launch's residual questions). Charting is one session's work; it hand-resolves nothing.
+
+1. **Run the audit, defer the findings.** Run the `/oh-my-claudecode:drydock` `--check` audit in report-only mode — the mechanical subset via `node scripts/shipyard-audit.mjs`, the heuristic classes via the drydock prose audit: findings never block charting (a map produces decisions, not slot landings), but they are recorded verbatim in the map's Notes — launch's yard gate will collect that debt when the effort finally enters delivery. If the yard is not laid at all (no `GLOSSARY.md`, no `docs/adr/`), offer `/oh-my-claudecode:drydock` **once**; if the captain declines, proceed in tracker-only mode and defer all sediment (see Sediment).
+2. **W1 — name the destination.** Call the Skill tool with "deep-interview" and pin down what this map is finding its way to: the spec, decision, or change. The destination fixes the scope, so it is settled first. **W1 is a captain signature: present the destination statement and get explicit confirmation.** If the captain cannot state a destination even with the interview's help, that is not an error — present the best candidates ranked and let the captain pick one to chart toward or park the effort.
+3. **Map the frontier.** Grill again with "deep-interview", **breadth-first with frontier rounds** (`--frontier`): fan out across the whole space rather than deep on any one thread — each round asks the whole frontier of decisions whose prerequisites are settled, then recomputes from the answers — surfacing the open decisions and the first steps takeable now. When charting against an existing map (residual questions or a redraw), read its **Out of scope** section before ticketing — ruled-out work never re-enters as a fresh ticket. **If this surfaces no fog** — the way to the destination is already clear and the journey fits one session — no map is needed: stop and recommend `/oh-my-claudecode:launch`.
+4. **W2 — sign the chart.** Present the proposed map: destination, initial tickets with types and blocking edges, and the fog sketch. **W2 is a captain signature**: granularity wrong here wastes every later session. Iterate until signed.
+5. **Create the map and tickets.** Label the map `navigator:map`; create child tickets; wire blocking edges in a second pass (issues need ids before they can reference each other). Everything not yet sharp enough to ticket stays in **Not yet specified**.
+6. **Fire the research subagents.** For each `research` ticket just created, spawn a background subagent to resolve it in parallel (see Ticket types), capturing findings where the ticket can link them.
+7. **Stop** with the session-close pointer: the map link, how many tickets are on the frontier, and "next session, run `/oh-my-claudecode:ask-navigator` to work the next decision."
+
+## Work through the map
+
+Invoked with a map (link or number) or with no argument (pick up the open map). A ticket is optional: without one, take the next frontier ticket, not one the captain must choose.
+
+1. **Load the map**: the low-res view, never every ticket body. Zoom into a ticket's full body on demand.
+2. **Claim before work**: assign the ticket to the captain **first**, so concurrent sessions skip it. An open, unclaimed ticket is unclaimed. If assignment isn't possible (permissions, no handle), record the claim in a ticket comment instead.
+3. **Resolve it** according to its type (see Ticket types). Zoom as needed; call the Skill tool with "deep-interview" whenever the resolution needs the captain's input.
+4. **Record the resolution**: post the answer as a **resolution comment** on the ticket, close the ticket (as completed; a ticket ruled beyond the destination closes as not planned), and append one line to the map issue body's **Decisions so far** — `[<ticket title>](link): <one-line gist>`. The closed ticket's resolution comment is the decision's one home; the map's line is an index into it.
+5. **Advance the frontier**: graduate any fog the answer has made specifiable (remove it from **Not yet specified**, create the new tickets, wire edges); if the answer reveals a ticket sits beyond the destination, **close it** and leave one line in **Out of scope** carrying the concept and the reason (so a later session or a later map can match it); update or delete tickets the decision invalidated.
+6. **Sediment** (see Sediment).
+7. **Stop after one ticket.** One resolution per session is the cadence — it is the context-window budget, not a policy. The session-close pointer names what just resolved and what is now on the frontier. The map issue is the primary source, session memory secondary — every session re-orients from the map, never from the previous session's memory.
+
+## Large efforts — the map outlives the session
+
+When charting reveals an effort whose frontier no number of sessions is likely to clear quickly — decisions fanning out across several independent threads, a destination that keeps opening new fog — the map itself becomes **long-lived** rather than a short stop on the way to launch:
+
+- **Decisions group into vessels**: independent threads of the frontier are named as vessels in the map's Notes, each carrying its child tickets, so any session can orient to one thread without re-reading the whole space.
+- **The map issue carries a census line**: one line stating the open-ticket count per vessel and what the current frontier is, refreshed every session — a session that reads only the map knows where the effort stands.
+- **The one-ticket-per-session budget is spent on the map's frontier in priority order** across any number of sessions — the cadence never changes; only the horizon does.
+
+Long-lived is a property of the map, not a mode switch: the same map issue, the same child tickets, the same rules. When the fog finally clears, the exit is unchanged — collapse the decisions into the mission brief and hand off.
+
+## Ticket types
+
+Every ticket is **HITL** (worked with the captain, who speaks for themselves) or **AFK** (driven by the navigator alone). A HITL ticket only resolves through live exchange; the agent never stands in for the captain's side.
+
+| Type | Mode | Resolved by | Use when |
+|---|---|---|---|
+| `research` | AFK | Background subagent: investigate against primary sources (official docs, source code, specs); record the findings as a tracker comment on the ticket — or on a throwaway branch that never merges when an artifact is needed to answer — and link it from the ticket. No permanent research file is created: findings live in the session, tracker comments, or a throwaway branch (never merged), so the repo gains zero new permanent files | A decision waits on knowledge outside the current working directory |
+| `loft` | HITL | Call the Skill tool with "loft": a throwaway artifact answers the ticket's question — a pure logic module in a clickable shell, or structurally different UI variants behind one route; the captain reacts, the answer folds into the resolution, the artifact stays on a `loft/<name>` branch | The question is precise but prose cannot settle it — it needs to be seen or clicked, not described |
+| `grilling` | HITL | Call the Skill tool with "deep-interview"; the captain decides each round | Conversation is the resolution — the default case |
+| `task` | HITL or AFK | The navigator drives it alone where it can; otherwise hands the captain a precise checklist | Manual work that unblocks a decision (sign up for a service, provision access, move data so its shape can be seen) — it earns its place by unblocking a decision, not by delivering the destination |
+
+The answer is never part of the ticket body; it is recorded on resolution. Assets created while resolving are linked from the ticket, not pasted in.
+
+A `research` ticket whose knowledge lives in a **person** rather than a document resolves by asking that person directly: one tracker comment naming them (per the granted communication scope), carrying everything they need to answer in one read, and their reply is cited as the primary source — the same standard a document source would meet. No third party is cold-contacted; a person the evidence does not name gets no question. The resolution records who answered and where, so the map's index points at the reply, not at a paraphrase.
+
+A `research` record speaks the yard's one evidence format: it opens by restating the question it answers, every claim links its source, and it closes with an **Unverified** section — what could not be confirmed, and why it matters.
+
+## Map body
+
+```markdown
+## Destination
+
+<what reaching the end of this map looks like: the spec, decision, or change this effort is finding its way to. One or two lines; every session orients to it before choosing a ticket.>
+
+## Notes
+
+<domain; skills every session should consult; standing preferences; deferred drydock --check findings (verbatim); resolved documentLanguage tag; tracker caveats>
+
+## Decisions so far
+
+<!-- the index: one line per closed ticket, enough to judge relevance, then zoom the link for the detail the ticket holds -->
+
+- [<closed ticket title>](link): <one-line gist of the answer>
+
+## Not yet specified
+
+<!-- in-scope fog you cannot ticket yet; graduates as the frontier advances -->
+
+## Out of scope
+
+<!-- work ruled beyond the destination; closed, never graduates -->
+
+## Mission brief
+
+<!-- written at exit: objective, scope boundary, non-goals collapsed from Decisions so far; the handoff pointer launch consumes lives here, in the map issue body -->
+```
+
+**Fog or ticket?** The test is whether you can state the question precisely now, not whether you can answer it now. Ticket when the question is already sharp, even if it is blocked. Not-yet-specified when you cannot phrase it that sharply — do not pre-slice the fog into ticket-sized pieces; one patch may graduate into several tickets, or none. **Out of scope** is a scoping act, not a step on the route: scope, not sharpness, lands work there, and it returns only if the destination is redrawn.
+
+## Sediment
+
+Resolutions land in the shipyard's paper trail the moment they settle — the same slots launch's Phase 1 uses:
+
+- a term the resolutions settled or sharpened → `GLOSSARY.md` glossary (one entry: definition, boundary, resolved ambiguity)
+- a decision passing the ADR test (hard to reverse, surprising without context, a real tradeoff) → `docs/adr/NNNN-<slug>.md`
+- a business rule or background fact → `docs/business/` (one article per business question)
+
+**Legacy yards (CONTEXT.md only)**: If the yard has only a recognizable legacy glossary `CONTEXT.md` and no `GLOSSARY.md`, run drydock before writing sediment to migrate the glossary authority to `GLOSSARY.md`. Do not create a fresh `GLOSSARY.md` beside the legacy file; this would split authorities. When drydock's legacy glossary migration completes, glossary writes will target `GLOSSARY.md` automatically. Alternatively, defer this sediment landing in the map's Notes (see below).
+
+When the yard is not laid (the captain declined drydock at charting time), **defer, don't skip**: record each pending landing as one line in the map's Notes under a `Deferred sediment` heading. The later `/oh-my-claudecode:launch` run's yard gate requires the base faces and audits only adopted optional surfaces — an un-adopted optional surface never becomes a finding — and the deferred lines tell the launch run exactly which first-use trigger to fire and what to land there.
+
+## Exit — hand off, don't build
+
+The map is done when no open tickets remain and **Not yet specified** is empty. Then:
+
+1. Collapse **Decisions so far** into a **mission brief** — objective, scope boundary, non-goals — and write it into the map issue body under **Mission brief**. The handoff passes one pointer, the map issue itself; no brief file is created.
+2. Recommend: "The way is clear. Run `/oh-my-claudecode:launch` with the map issue as the mission brief — the brief pointer is in the map issue body." The map stays as the effort's logbook; launch's yard gate owns every check from there.
+3. Default entry is launch Phase 1 (the paper trail is already half-full; its frontier clears fast). Only when the decisions already read like a spec may a spec be drafted and launch entered at Phase 2, carrying the spec tracker issue reference (the parent spec issue number or link).
+
+## Scope and non-goals
+
+- No daemon, no mode, no always-on behavior, no runtime state machine: the map is ordinary tracker issues — nothing is written to repo files.
+- Incoming requests that arrive as fog are the harbor's to route: a fuzzy issue handed over by `/oh-my-claudecode:harbor` charts like any loose idea, with the original thread and any signed decision links as material.
+- Never mutates Team lifecycle, task statuses, or runtime state; never publishes delivery tickets — vertical-slice build tickets belong to launch's C3, and the navigator must not pre-slice fog into them.
+- Never executes a decision beyond recording it. The one exception is a `task` ticket, which does only what unblocks a decision.
+- The map's Decisions-so-far is an index; a decision lives in exactly one place, its ticket.
+
+## Completion definition
+
+A charting session ends with a captain-signed map and fired research tickets. A working session ends with exactly one resolution recorded, the frontier advanced, and the session-close pointer emitted. The effort ends when the way is clear and the mission brief is in the captain's hands with `/oh-my-claudecode:launch` recommended — every decision the navigator made on the captain's behalf answerable with one pointer to where it was recorded.

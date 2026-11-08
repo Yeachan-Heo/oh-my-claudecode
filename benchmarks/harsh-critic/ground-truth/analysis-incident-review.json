@@ -1,0 +1,70 @@
+{
+  "fixtureId": "analysis-incident-review",
+  "fixturePath": "fixtures/analysis/analysis-incident-review.md",
+  "domain": "analysis",
+  "expectedVerdict": "REJECT",
+  "isCleanBaseline": false,
+  "findings": [
+    {
+      "id": "INC-CRIT-1",
+      "severity": "CRITICAL",
+      "category": "finding",
+      "summary": "Root cause analysis is wrong — timeline evidence points to network partition, not database query degradation as primary cause",
+      "keywords": ["root cause", "database", "network", "partition", "wrong"],
+      "location": "Timeline (13:46-13:48) and Root Cause Analysis section",
+      "explanation": "The timeline shows AWS VPC Flow Logs with 8.4% packet loss (13:46) and TCP retransmission rate of 14% on payment-db's network interface (13:47) — one to two minutes BEFORE the first connection pool exhaustion error (13:48). The AWS Health Dashboard confirmed network degradation in us-east-1b (13:53). The root cause was a network partition causing queries to hang, which exhausted the connection pool. The report inverts this: it identifies the database query planner regression as root cause, with the network event mentioned only as a timeline entry. A network partition causing slow queries is fundamentally different from a query planner regression — the fix (index rebuild) may have coincided with the AWS network recovery at 15:18, not caused the resolution."
+    },
+    {
+      "id": "INC-MAJ-1",
+      "severity": "MAJOR",
+      "category": "finding",
+      "summary": "45-minute unexplained gap in timeline between alert and acknowledgment",
+      "keywords": ["gap", "timeline", "45", "minute", "unexplained"],
+      "location": "Timeline: 13:52 to 14:37",
+      "explanation": "The PagerDuty incident was created at 13:52 but not acknowledged until 14:37 — a 45-minute gap. The postmortem notes 'response time from alert to acknowledgment was slow' under What Went Poorly but provides no explanation of what happened during those 45 minutes, who was paged, whether there was an escalation failure, or why the on-call engineer took 45 minutes to acknowledge. This gap is the primary driver of the 2h10m outage duration."
+    },
+    {
+      "id": "INC-MAJ-2",
+      "severity": "MAJOR",
+      "category": "finding",
+      "summary": "Action items are vague and unmeasurable — no specific acceptance criteria",
+      "keywords": ["vague", "action", "items", "specific", "measurable"],
+      "location": "Action Items table",
+      "explanation": "Action items 1 ('Improve monitoring'), 2 ('Add more tests'), and 4 ('Improve on-call response') are not specific or measurable. 'Improve monitoring' does not specify what monitors to add, what thresholds to set, or what gap is being addressed. Without SMART criteria, these action items cannot be verified as complete and are at risk of being closed without meaningful change — as happened with INC-2025-0312."
+    },
+    {
+      "id": "INC-MIN-1",
+      "severity": "MINOR",
+      "category": "finding",
+      "summary": "S2 severity classification is incorrect — 100% payment failure for 2+ hours should be S1",
+      "keywords": ["S2", "S1", "severity", "classification", "misclass"],
+      "location": "Severity Classification Notes section",
+      "explanation": "The incident is classified S2 with the justification that 'affected users could not complete payments but could attempt to retry after the outage.' A 100% failure rate on payment processing for 2 hours and 10 minutes affecting all users represents complete loss of a revenue-critical feature. Most severity matrices define S1 as complete loss of a critical business function — payment processing qualifies. The classification note's reasoning ('workaround available: retry after outage') is circular."
+    },
+    {
+      "id": "INC-MISS-1",
+      "severity": "MAJOR",
+      "category": "missing",
+      "summary": "No customer impact quantification — number of affected users and revenue impact not stated",
+      "keywords": ["customer", "impact", "revenue", "quantif", "users"],
+      "explanation": "The Impact section states '100% of payment attempts returned 502 errors' but provides no quantification: how many payment attempts failed, how many unique users were affected, what the estimated revenue impact was. A postmortem without impact quantification cannot inform prioritization of remediation work or be used for customer communication."
+    },
+    {
+      "id": "INC-MISS-2",
+      "severity": "MAJOR",
+      "category": "missing",
+      "summary": "No prevention vs. detection analysis — postmortem does not distinguish what could have prevented the incident vs. what would have detected it faster",
+      "keywords": ["prevention", "detection", "prevent", "analysis"],
+      "explanation": "The postmortem's action items mix prevention items (add query timeouts, increase pool size) with detection items (add monitoring, write runbook) without distinguishing them. A rigorous postmortem should explicitly analyze: (1) what changes would have prevented the incident entirely, and (2) what changes would have reduced detection/response time. This is the standard Five Whys / prevention-detection-response framework."
+    },
+    {
+      "id": "INC-PERSP-NH-1",
+      "severity": "MINOR",
+      "category": "perspective",
+      "perspective": "new-hire",
+      "summary": "Unexplained acronyms and assumed knowledge of internal procedures",
+      "keywords": ["acronym", "procedure", "assumed", "DBOPS", "escalation"],
+      "explanation": "The postmortem uses DBOPS without defining it, references INC-2025-0312 without linking to it or summarizing its recommendations, and references 'our severity matrix' without citing where it is documented. A new engineer reading this postmortem to understand the incident or the team's processes would have no way to follow up on these references."
+    }
+  ]
+}

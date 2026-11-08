@@ -1,0 +1,14 @@
+{
+  "trust_confirmed": false,
+  "si_setting_goal": false,
+  "si_setting_benchmark": false,
+  "si_setting_harness": false,
+  "iterations": 0,
+  "best_score": null,
+  "current_milestone": null,
+  "current_phase": null,
+  "plateau_consecutive_count": 0,
+  "circuit_breaker_count": 0,
+  "status": "idle",
+  "goal_slug": null
+}

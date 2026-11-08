@@ -1,0 +1,153 @@
+{
+  "name": "oh-my-claude-sisyphus",
+  "version": "5.8.0",
+  "description": "Multi-agent orchestration system for Claude Code - Inspired by oh-my-opencode",
+  "type": "module",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "exports": {
+    ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+    },
+    "./team": {
+      "import": "./dist/team/index.js",
+      "types": "./dist/team/index.d.ts"
+    }
+  },
+  "bin": {
+    "oh-my-claudecode": "bin/oh-my-claudecode.js",
+    "omc": "bin/oh-my-claudecode.js",
+    "omc-cli": "bridge/cli.cjs"
+  },
+  "files": [
+    "dist",
+    "agents",
+    "bin",
+    "bridge",
+    "bridge/mcp-server.cjs",
+    "bridge/team-mcp.cjs",
+    "bridge/team.js",
+    "bridge/claude-md-coordinator.cjs",
+    "bridge/cli.cjs",
+    "bridge/runtime-cli.cjs",
+    "commands",
+    "hooks",
+    "scripts/build-contained-fs.mjs",
+    "scripts/postinstall-contained-fs.mjs",
+    "scripts/verify-graph-contained-fs.mjs",
+    "scripts",
+    "skills",
+    "templates",
+    "docs",
+    ".claude-plugin",
+    ".mcp.json",
+    "README.md",
+    "LICENSE",
+    "native"
+  ],
+  "scripts": {
+    "prompt-ssot:build": "tsx scripts/build-prompt-ssot.ts",
+    "prompt-ssot:check": "tsx scripts/build-prompt-ssot.ts --check",
+    "prompt-ssot:measure": "tsx scripts/measure-prompt-ssot.ts",
+    "build": "npm run build:contained-fs && node scripts/generate-skill-entitlements.mjs --verify && tsc && node scripts/build-workflow-stage-prompts.mjs && node scripts/build-skill-bridge.mjs && node scripts/build-mcp-server.mjs && npm run compose-docs && npm run generate:prompt-projections && npm run build:claude-md-coordinator && npm run build:runtime-cli && npm run build:team-server && npm run build:cli",
+    "build:bridge": "node scripts/build-skill-bridge.mjs",
+    "build:claude-md-coordinator": "node scripts/build-claude-md-coordinator.mjs",
+    "build:cli": "node scripts/build-cli.mjs",
+    "build:runtime-cli": "node scripts/build-runtime-cli.mjs",
+    "build:team-server": "node scripts/build-team-server.mjs",
+    "compose-docs": "node scripts/compose-docs.mjs",
+    "plugin:shipping:verify": "node scripts/plugin-shipping-surface.mjs verify",
+    "plugin:shipping:check-pr": "node scripts/plugin-shipping-surface.mjs check-pr",
+    "plugin:shipping:stage": "node scripts/plugin-shipping-surface.mjs stage",
+    "dev": "tsc --watch",
+    "dev:full": "concurrently --names \"tsc,cli,mcp,skill-bridge,runtime,team\" \"tsc --watch\" \"node scripts/build-cli.mjs --watch\" \"node scripts/build-mcp-server.mjs --watch\" \"node scripts/build-skill-bridge.mjs --watch\" \"node scripts/build-runtime-cli.mjs --watch\" \"node scripts/build-team-server.mjs --watch\"",
+    "start": "node dist/index.js",
+    "test": "vitest --exclude \"tests/perf/**\"",
+    "bench:prompts": "tsx benchmarks/run-all.ts",
+    "bench:prompts:save": "tsx benchmarks/run-all.ts --save-baseline",
+    "bench:prompts:compare": "tsx benchmarks/run-all.ts --compare",
+    "test:ui": "vitest --ui --exclude \"tests/perf/**\"",
+    "test:run": "vitest run --exclude \"tests/perf/**\"",
+    "test:coverage": "vitest run --coverage --exclude \"tests/perf/**\"",
+    "prepack": "npm run build",
+    "lint": "eslint src",
+    "format": "prettier --write src/**/*.ts",
+    "sync-featured-contributors": "tsx scripts/generate-featured-contributors.ts",
+    "sync-featured-contributors:verify": "tsx scripts/generate-featured-contributors.ts --verify",
+    "sync-featured-contributors:dry-run": "tsx scripts/generate-featured-contributors.ts --dry-run",
+    "sync-metadata": "tsx scripts/sync-metadata.ts",
+    "sync-metadata:verify": "tsx scripts/sync-metadata.ts --verify",
+    "sync-metadata:dry-run": "tsx scripts/sync-metadata.ts --dry-run",
+    "generate:inventory": "node scripts/generate-inventory-graph.mjs --write",
+    "generate:inventory:verify": "node scripts/generate-inventory-graph.mjs --verify",
+    "release": "tsx scripts/release.ts",
+    "prepublishOnly": "npm run build",
+    "version": "bash scripts/sync-version.sh",
+    "generate:skill-entitlements": "node scripts/generate-skill-entitlements.mjs",
+    "verify:skill-entitlements": "node scripts/generate-skill-entitlements.mjs --verify",
+    "generate:prompt-projections": "node scripts/generate-prompt-projections.mjs",
+    "verify:prompt-projections": "node scripts/generate-prompt-projections.mjs --verify",
+    "build:contained-fs": "node scripts/build-contained-fs.mjs",
+    "postinstall": "node scripts/postinstall-contained-fs.mjs"
+  },
+  "dependencies": {
+    "@anthropic-ai/claude-agent-sdk": "^0.1.0",
+    "@ast-grep/napi": "^0.31.0",
+    "@modelcontextprotocol/sdk": "^1.26.0",
+    "@types/better-sqlite3": "^7.6.13",
+    "ajv": "^8.17.1",
+    "better-sqlite3": "^12.10.0",
+    "chalk": "^5.3.0",
+    "commander": "^12.1.0",
+    "jsonc-parser": "^3.3.1",
+    "safe-regex": "^2.1.1",
+    "tsx": "^4.19.2",
+    "vscode-languageserver-protocol": "^3.17.5",
+    "zod": "^3.23.8"
+  },
+  "devDependencies": {
+    "@anthropic-ai/sdk": "^0.78.0",
+    "@eslint/js": "^9.39.2",
+    "@types/node": "^22.19.7",
+    "@typescript-eslint/eslint-plugin": "^8.18.2",
+    "@typescript-eslint/parser": "^8.18.2",
+    "@vitest/ui": "^4.1.11",
+    "concurrently": "^9.2.1",
+    "esbuild": "^0.27.2",
+    "eslint": "^9.17.0",
+    "fast-check": "^4.5.3",
+    "prettier": "^3.4.2",
+    "typescript": "^5.7.2",
+    "typescript-eslint": "^8.53.0",
+    "vitest": "^4.1.11"
+  },
+  "engines": {
+    "node": "20.x || 22.x || 23.x || 24.x || 25.x || 26.x"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Yeachan-Heo/oh-my-claudecode.git"
+  },
+  "homepage": "https://github.com/Yeachan-Heo/oh-my-claudecode#readme",
+  "bugs": {
+    "url": "https://github.com/Yeachan-Heo/oh-my-claudecode/issues"
+  },
+  "author": "Yeachan Heo",
+  "license": "MIT",
+  "keywords": [
+    "claude",
+    "claude-code",
+    "ai",
+    "agent",
+    "multi-agent",
+    "orchestration",
+    "omc",
+    "claudecode",
+    "anthropic",
+    "llm"
+  ],
+  "publishConfig": {
+    "access": "public"
+  }
+}

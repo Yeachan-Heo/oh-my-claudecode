@@ -1,0 +1,90 @@
+{
+  "fixtureId": "code-payment-handler",
+  "fixturePath": "fixtures/code/code-payment-handler.ts",
+  "domain": "code",
+  "expectedVerdict": "REJECT",
+  "isCleanBaseline": false,
+  "findings": [
+    {
+      "id": "PAY-CRIT-1",
+      "severity": "CRITICAL",
+      "category": "finding",
+      "summary": "Race condition in concurrent payment processing — in-flight Set is not atomic",
+      "keywords": ["race", "condition", "concurrent", "mutex", "lock", "double"],
+      "location": "processPayment():47-52",
+      "explanation": "The inFlightPayments Set check and add (lines 47-52) are not atomic. Two concurrent requests for the same userId can both pass the has() check before either calls add(), resulting in double-charges. A proper mutex or database-level advisory lock is required."
+    },
+    {
+      "id": "PAY-CRIT-2",
+      "severity": "CRITICAL",
+      "category": "finding",
+      "summary": "Floating-point arithmetic used for currency — amount * 100 produces imprecise cent values",
+      "keywords": ["floating", "point", "float", "currency", "arithmetic", "cents"],
+      "location": "processPayment():60",
+      "explanation": "Line 60 converts dollars to cents using amount * 100. JavaScript floating-point arithmetic is imprecise for decimal values (e.g., 0.1 + 0.2 !== 0.3). For amounts like $9.99, this produces 998.9999999999999 cents instead of 999. Currency must be handled in integer cents end-to-end or with a decimal library."
+    },
+    {
+      "id": "PAY-MAJ-1",
+      "severity": "MAJOR",
+      "category": "finding",
+      "summary": "Exception details swallowed in catch block — only generic error returned to caller",
+      "keywords": ["catch", "swallow", "exception", "error", "generic"],
+      "location": "processPayment():93-100, refundPayment():169-172",
+      "explanation": "The inner catch block captures lastError but only logs a generic 'Payment attempt N failed' message. The actual error (gateway error code, network failure, etc.) is swallowed. The outer failure path returns { success: false, error: 'Payment failed' } with no diagnostic information for callers or operators."
+    },
+    {
+      "id": "PAY-MAJ-2",
+      "severity": "MAJOR",
+      "category": "finding",
+      "summary": "No idempotency key handling — retries may create duplicate charges",
+      "keywords": ["idempotency", "key", "duplicate", "retry"],
+      "location": "processPayment():63-79",
+      "explanation": "The retry loop (lines 63-79) re-submits the exact same charge request to the gateway on each attempt without an idempotency key. If the first attempt succeeded but the response was lost (network timeout), subsequent retries will create duplicate charges for the same payment."
+    },
+    {
+      "id": "PAY-MIN-1",
+      "severity": "MINOR",
+      "category": "finding",
+      "summary": "Magic number 3 used for retry count — should be a named constant",
+      "keywords": ["magic", "number", "retry", "constant", "3"],
+      "location": "processPayment():63, processPayment():97",
+      "explanation": "The retry limit of 3 appears as a magic number in two places (loop condition <= 3 and the if (attempt < 3) backoff check). This should be extracted to a named constant (e.g., MAX_PAYMENT_RETRIES) at the top of the file for clarity and maintainability."
+    },
+    {
+      "id": "PAY-MISS-1",
+      "severity": "MAJOR",
+      "category": "missing",
+      "summary": "No circuit breaker for payment gateway — gateway outage cascades to application",
+      "keywords": ["circuit", "breaker", "gateway", "fallback"],
+      "explanation": "All gateway calls lack a circuit breaker pattern. If the payment gateway is slow or returning errors, the retry loop will hold connections for up to (1*500 + 2*500) = 1500ms per request, multiplied across concurrent users, potentially exhausting the connection pool."
+    },
+    {
+      "id": "PAY-MISS-2",
+      "severity": "MAJOR",
+      "category": "missing",
+      "summary": "No metrics or observability instrumentation — payment events are not emitted",
+      "keywords": ["metrics", "observability", "telemetry", "emit"],
+      "explanation": "The module uses logger but emits no structured metrics (payment attempt count, success rate, retry rate, latency histogram). Payment processing is a critical business function that requires dashboards and alerting, which cannot be built without instrumentation."
+    },
+    {
+      "id": "PAY-PERSP-SEC-1",
+      "severity": "CRITICAL",
+      "category": "perspective",
+      "perspective": "security",
+      "summary": "Card number (PAN) logged in plaintext during debug flows",
+      "keywords": ["card", "number", "log", "PAN", "debug", "sensitive"],
+      "location": "processPayment():54-56",
+      "explanation": "Lines 54-56 log request.cardNumber to console when NODE_ENV === 'development'. This violates PCI-DSS requirements — PANs must never be logged in any environment. The cardNumber field in the PaymentRequest interface should not exist; sensitive card data should never reach the server in this form."
+    },
+    {
+      "id": "PAY-PERSP-OPS-1",
+      "severity": "MAJOR",
+      "category": "perspective",
+      "perspective": "ops",
+      "summary": "No HTTP timeout on gateway calls — slow gateway hangs requests indefinitely",
+      "keywords": ["timeout", "HTTP", "call", "gateway"],
+      "location": "processPayment():65-79, refundPayment():147-156",
+      "explanation": "axios.post calls to the payment gateway have no timeout configured. If the gateway is slow (e.g., 30s response), each request thread hangs for the full duration. Under load, this will exhaust the Node.js event loop and cause cascading failures across the entire service."
+    }
+  ]
+}

@@ -1,0 +1,292 @@
+---
+name: omc-plan
+description: Strategic planning with optional interview workflow
+argument-hint: "[--direct|--consensus|--review] [--interactive] [--deliberate] <task description>"
+pipeline: [deep-interview]
+handoff-policy: approval-required
+handoff: .omc/plans/ralplan-*.md
+level: 4
+---
+
+<Purpose>
+Plan creates comprehensive, actionable work plans through intelligent interaction. It auto-detects whether to interview the user (broad requests) or plan directly (detailed requests), and supports consensus mode (iterative Planner/Architect/Critic loop with RALPLAN-DR structured deliberation) and review mode (Critic evaluation of existing plans).
+</Purpose>
+
+<Use_When>
+
+- User wants to plan before implementing -- "plan this", "plan the", "let's plan"
+- User wants structured requirements gathering for a vague idea
+- User wants an existing plan reviewed -- "review this plan", `--review`
+- User wants multi-perspective consensus on a plan -- `--consensus`, "ralplan"
+- Task is broad or vague and needs scoping before any code is written
+  </Use_When>
+
+<Do_Not_Use_When>
+
+- User wants autonomous end-to-end execution -- use `autopilot` instead
+- User wants to start coding immediately with a clear task -- use `ralph` or delegate to executor
+- User asks a simple question that can be answered directly -- just answer it
+- Task is a single focused fix with obvious scope -- use an execution skill instead of running it from this planning module
+  </Do_Not_Use_When>
+
+<Why_This_Exists>
+Jumping into code without understanding requirements leads to rework, scope creep, and missed edge cases. Plan provides structured requirements gathering, expert analysis, and quality-gated plans so that execution starts from a solid foundation. The consensus mode adds multi-perspective validation for high-stakes projects.
+</Why_This_Exists>
+
+<Execution_Policy>
+
+- Auto-detect interview vs direct mode based on request specificity
+- Ask one question at a time during interviews -- never batch multiple questions
+- Gather codebase facts via `explore` agent before asking the user about them
+- Plans must meet quality standards: 80%+ claims cite file/line, 90%+ criteria are testable
+- Consensus mode runs fully automated by default; add `--interactive` to enable user prompts at draft review and final approval steps
+- Consensus mode uses RALPLAN-DR short mode by default; switch to deliberate mode with `--deliberate` or when the request explicitly signals high risk (auth/security, data migration, destructive/irreversible changes, production incident, compliance/PII, public API breakage)
+- **Planning/execution boundary:** planning modes inspect context and produce plans/specs/proposals only. They MUST mark artifacts as `pending approval` unless the user has explicitly opted into execution in the current turn or via the structured approval UI. Before explicit execution approval, planning modes MUST NOT run mutation-oriented shell commands, edit source files, commit, push, open PRs, invoke execution skills, or delegate implementation tasks.
+- **Goal workflow boundary:** when a plan compares Claude Code `/goal`, Ralph, Team, or artifact-only Ultragoal, identify exactly one primary loop authority and use the deterministic conflict policies `refuse`, `adopt_existing`, and `artifact_only` rather than non-deterministic warning handling. `/goal` facts must cite Claude Code/Anthropic sources only (Claude Code `/goal` docs: https://code.claude.com/docs/en/goal; Anthropic Claude Code changelog: https://raw.githubusercontent.com/anthropics/claude-code/main/CHANGELOG.md), and plans MUST NOT claim the `/goal` evaluator independently runs commands or reads files; require surfaced proof evidence before any completion claim.
+- **Goal workflow doc target:** for user-facing comparisons, keep examples aligned with `docs/shared/mode-selection-guide.md#goal-oriented-workflow-selection` and `docs/REFERENCE.md#goal-workflow-ux-goal-ralph-team-ultragoal`.
+  </Execution_Policy>
+
+<Steps>
+
+### Mode Selection
+
+| Mode      | Trigger                         | Behavior                                                                                                                                                                                                       |
+| --------- | ------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Interview | Default for broad requests      | Interactive requirements gathering                                                                                                                                                                             |
+| Direct    | `--direct`, or detailed request | Skip interview, generate plan directly                                                                                                                                                                         |
+| Consensus | `--consensus`, "ralplan"        | Planner -> Architect -> Critic loop until agreement with RALPLAN-DR structured deliberation (short by default, `--deliberate` for high-risk); add `--interactive` for user prompts at draft and approval steps |
+| Review    | `--review`, "review this plan"  | Critic evaluation of existing plan                                                                                                                                                                             |
+
+### Interview Mode (broad/vague requests)
+
+1. **Classify the request**: Broad (vague verbs, no specific files, touches 3+ areas) triggers interview mode
+2. **Ask one focused question** using `AskUserQuestion` for preferences, scope, and constraints
+3. **Gather codebase facts first**: Before asking "what patterns does your code use?", spawn an `explore` agent to find out, then ask informed follow-up questions
+4. **Build on answers**: Each question builds on the previous answer
+5. **Consult Analyst** (Opus) for hidden requirements, edge cases, and risks
+6. **Create plan** when the user signals readiness: "create the plan", "I'm ready", "make it a work plan"
+
+### Direct Mode (detailed requests)
+
+1. **Quick Analysis**: Optional brief Analyst consultation
+2. **Create plan**: Generate comprehensive work plan immediately
+3. **Review** (optional): Critic review if requested
+
+### Consensus Mode (`--consensus` / "ralplan")
+
+**RALPLAN-DR modes**: **Short** (default, bounded structure) and **Deliberate** (for `--deliberate` or explicit high-risk requests). Both modes keep the same Planner -> Architect -> Critic sequence and the same `AskUserQuestion` gates.
+
+**Provider overrides (supported when the provider CLI is installed):**
+
+- `--architect codex` — replace the Claude Architect pass with `omc ask codex --agent-prompt architect "..."` for implementation-heavy architecture review
+- `--critic codex` — replace the Claude Critic pass with `omc ask codex --agent-prompt critic "..."` for an external review pass before execution
+- If the requested provider is unavailable, briefly note that and continue with the default Claude Architect/Critic step for that stage
+
+**State lifecycle**: The persistent-mode stop hook uses `ralplan-state.json` to enforce continuation during the consensus loop. The skill **MUST** manage this state:
+
+- **On entry**: Call `state_write(mode="ralplan", active=true, session_id=<current_session_id>)` before step 1
+- **On handoff to execution** (approval → ralph/team): Call `state_write(mode="ralplan", active=false, session_id=<current_session_id>)`. Do NOT use `state_clear` here — `state_clear` writes a 30-second cancel signal that disables stop-hook enforcement for ALL modes, leaving the newly launched execution mode unprotected.
+- **On true terminal exit** (rejection, non-interactive plan output, error/abort): Call `state_clear(mode="ralplan", session_id=<current_session_id>)` — no execution mode follows, so the cancel signal window is harmless.
+- Do NOT clear during intermediate steps like Critic approval or max-iteration presentation, as the user may still select "Request changes".
+
+Without cleanup, the stop hook blocks all subsequent stops with `[RALPLAN - CONSENSUS PLANNING]` reinforcement messages even after the consensus workflow has finished. Always pass `session_id` to avoid clearing other concurrent sessions' state.
+
+1. **Planner** creates initial plan and a compact **RALPLAN-DR summary** before any Architect review. The summary **MUST** include:
+   - **Principles** (3-5)
+   - **Decision Drivers** (top 3)
+   - **Viable Options** (>=2) with bounded pros/cons for each option
+   - If only one viable option remains, an explicit **invalidation rationale** for the alternatives that were rejected
+   - In **deliberate mode**: a **pre-mortem** (3 failure scenarios) and an **expanded test plan** covering **unit / integration / e2e / observability**
+2. **User feedback** _(--interactive only)_: If running with `--interactive`, **MUST** use `AskUserQuestion` to present the draft plan **plus the RALPLAN-DR Principles / Decision Drivers / Options summary for early direction alignment** with these options:
+   - **Proceed to review** — send to Architect and Critic for evaluation
+   - **Request changes** — return to step 1 with user feedback incorporated
+   - **Skip review** — go directly to final approval (step 7)
+     If NOT running with `--interactive`, automatically proceed to review (step 3).
+3. **Architect** reviews for architectural soundness using `Task(subagent_type="oh-my-claudecode:architect", ...)`. Architect review **MUST** include: strongest steelman counterargument (antithesis) against the favored option, at least one meaningful tradeoff tension, and (when possible) a synthesis path. In deliberate mode, Architect should explicitly flag principle violations. Architect MUST evaluate the same fixed plan snapshot produced by Planner in step 1 without mutating it; Architect output MUST NOT be passed to Critic.
+4. **Critic** evaluates against quality criteria using `Task(subagent_type="oh-my-claudecode:critic", ...)`. Critic **MUST** verify principle-option consistency, fair alternative exploration, risk mitigation clarity, testable acceptance criteria, and concrete verification steps. Critic **MUST** explicitly reject shallow alternatives, driver contradictions, vague risks, or weak verification. In deliberate mode, Critic **MUST** reject missing/weak pre-mortem or missing/weak expanded test plan. Critic MUST evaluate the same fixed plan snapshot independently, as a separate, individually awaited Task call; Critic MUST NOT consume or receive the Architect review.
+
+   > **Independent parallel-or-sequential reviews of one fixed plan snapshot (context-dependent).** Architect and Critic each review the same fixed plan snapshot produced by Planner in step 1, and neither review mutates it. Architect output MUST NOT be passed to Critic. **When both Architect and Critic use Claude agents (default), they MAY run in parallel as background subagents.** **When either Architect or Critic uses an external provider (e.g., `--architect codex`, `--critic codex`), they MUST run sequentially as separate, individually awaited Task calls — never in parallel — to prevent sibling cascade failures from rate-limit errors.** Critic MUST NOT consume or receive the Architect review. Architect and Critic results MUST be combined only by Planner during revision or improvement synthesis, and only after both reviews have completed.
+5. **Re-review loop** (max 5 iterations): If Critic rejects, execute this closed loop:
+   a. Collect all rejection feedback from Architect + Critic (Planner-only synthesis: Architect and Critic results MUST be combined only by Planner, and only after both reviews have completed).
+   b. Pass feedback to Planner to produce a revised plan
+   c. **Return to Step 3** — Architect reviews the revised plan
+   d. **Return to Step 4** — Critic evaluates the revised plan
+   e. Repeat until Critic approves OR max 5 iterations reached
+   f. If max iterations reached without approval, present the best version to user via `AskUserQuestion` with note that expert consensus was not reached
+6. **Apply improvements**: When reviewers approve with improvement suggestions, merge all accepted improvements into the plan file before proceeding. Final consensus output **MUST** include an **ADR** section with: **Decision**, **Drivers**, **Alternatives considered**, **Why chosen**, **Consequences**, **Follow-ups**. Specifically:
+   a. Collect all improvement suggestions from Architect and Critic responses
+   b. Deduplicate and categorize the suggestions
+   c. Update the plan file in `.omc/plans/` with the accepted improvements (add missing details, refine steps, strengthen acceptance criteria, ADR updates, etc.)
+   d. Note which improvements were applied in a brief changelog section at the end of the plan
+7. On Critic approval (with improvements applied): mark the plan status as `pending approval` unless explicit execution approval has already been captured. _(--interactive only)_ If running with `--interactive`, use `AskUserQuestion` to present the plan with these options:
+   - **Approve execution via team** (Recommended) — explicit opt-in to proceed via coordinated parallel team agents (`/team`). Team is the canonical orchestration surface since v4.1.7.
+   - **Approve execution via ralph** — explicit opt-in to proceed via Ralph persistence with verification
+   - **Compact then return for execution approval** — explicit opt-in to compact the context window first (recommended when context is large after planning), then stop at the saved pending-approval plan and ask again before launching execution
+   - **Request changes** — return to step 1 with user feedback
+   - **Reject** — discard the plan entirely
+     If NOT running with `--interactive`, output the final plan marked `pending approval`, call `state_clear(mode="ralplan", session_id=<current_session_id>)`, and stop. Do NOT auto-execute.
+8. _(--interactive only)_ User chooses via the structured `AskUserQuestion` UI (never ask for approval in plain text). If user selects **Reject**, call `state_clear(mode="ralplan", session_id=<current_session_id>)` and stop.
+9. On user approval (--interactive only): Call `state_write(mode="ralplan", active=false, session_id=<current_session_id>)` **before** invoking the execution skill (ralph/team), so the stop hook does not interfere with the execution mode's own enforcement. Do NOT use `state_clear` here — it writes a cancel signal that disables enforcement for the newly launched mode.
+   - **Approve execution via team**: **MUST** invoke `Skill("oh-my-claudecode:team")` with the approved plan path from `.omc/plans/` as context. Do NOT implement directly. The team skill coordinates parallel agents across the staged pipeline for faster execution on large tasks. This is the recommended default execution path.
+   - **Approve execution via ralph**: **MUST** invoke `Skill("oh-my-claudecode:ralph")` with the approved plan path from `.omc/plans/` as context. Do NOT implement directly. Do NOT edit source code files in the planning agent. The Ralph skill owns persistent execution and verification.
+   - **Compact then return for execution approval**: First invoke `Skill("compact")` to compress the context window (reduces token usage accumulated during planning), then return with the saved pending-approval plan path and require a fresh explicit execution approval before any ralph/team launch. This path is recommended when the context window is 50%+ full after the planning session.
+
+### Review Mode (`--review`)
+
+1. Read plan file from `.omc/plans/`
+2. Evaluate via Critic using `Task(subagent_type="oh-my-claudecode:critic", ...)`
+3. Return verdict: APPROVED, REVISE (with specific feedback), or REJECT (replanning required)
+
+### Plan Output Format
+
+Every plan includes:
+
+- Requirements Summary
+- Acceptance Criteria (testable)
+- Implementation Steps (with file references)
+- Risks and Mitigations
+- Verification Steps
+- For consensus/ralplan: **RALPLAN-DR summary** (Principles, Decision Drivers, Options)
+- For consensus/ralplan final output: **ADR** (Decision, Drivers, Alternatives considered, Why chosen, Consequences, Follow-ups)
+- For deliberate consensus mode: **Pre-mortem (3 scenarios)** and **Expanded Test Plan** (unit/integration/e2e/observability)
+
+Plans are saved to `.omc/plans/`. Drafts go to `.omc/drafts/`.
+</Steps>
+
+<Tool_Usage>
+
+- Use `AskUserQuestion` for preference questions (scope, priority, timeline, risk tolerance) -- provides clickable UI
+- Use plain text for questions needing specific values (port numbers, names, follow-up clarifications)
+- Use `explore` agent (Haiku, 30s timeout) to gather codebase facts before asking the user
+- Use `Task(subagent_type="oh-my-claudecode:planner", ...)` for planning validation on large-scope plans
+- Use `Task(subagent_type="oh-my-claudecode:analyst", ...)` for requirements analysis
+- Use `Task(subagent_type="oh-my-claudecode:critic", ...)` for plan review in consensus and review modes
+- **Consensus mode agent calls context-dependent:** When both Architect and Critic are Claude agents (default), they MAY run in parallel as background subagents. When either uses an external provider (codex, etc.), they MUST run sequentially to avoid rate-limit sibling cascade failures. Both reviews consume the same fixed plan snapshot; no Architect output passes to Critic; results combine only during Planner synthesis after both reviews complete.
+- In consensus mode, default to RALPLAN-DR short mode; enable deliberate mode on `--deliberate` or explicit high-risk signals (auth/security, migrations, destructive changes, production incidents, compliance/PII, public API breakage)
+- In consensus mode with `--interactive`: use `AskUserQuestion` for the user feedback step (step 2) and the final approval step (step 7) -- never ask for approval in plain text. Without `--interactive`, skip both prompts, mark the plan `pending approval`, output the final plan, and stop.
+- In consensus mode with `--interactive`, on explicit user approval **MUST** invoke `Skill("oh-my-claudecode:ralph")` or `Skill("oh-my-claudecode:team")` for execution (step 9) -- never implement directly in the planning agent
+- Before explicit execution approval, planning mode MUST NOT run mutation-oriented shell commands, edit files, commit, push, open PRs, invoke execution skills, or delegate implementation tasks; it may only inspect context and draft/update plan/spec/proposal artifacts.
+- When user selects "Compact then return for execution approval" in step 7 (--interactive only): keep the plan marked `pending approval`, call `state_write(mode="ralplan", active=false, current_phase="pending_approval", session_id=<current_session_id>)`, then invoke `Skill("compact")` to compress the accumulated planning context. After compact, require a fresh explicit execution approval before any ralph/team launch; never auto-start implementation from compact continuation
+- **CRITICAL — Consensus mode state lifecycle**: Always deactivate ralplan state before stopping or handing off to execution. Use `state_write(active=false)` for handoff paths (approval → ralph/team) and `state_clear` for true terminal exits (rejection, error). Never use `state_clear` before launching an execution mode — its cancel signal disables stop-hook enforcement for 30 seconds.
+  </Tool_Usage>
+
+<Examples>
+<Good>
+Adaptive interview (gathering facts before asking):
+```
+Planner: [spawns explore agent: "find authentication implementation"]
+Planner: [receives: "Auth is in src/auth/ using JWT with passport.js"]
+Planner: "I see you're using JWT authentication with passport.js in src/auth/.
+         For this new feature, should we extend the existing auth or add a separate auth flow?"
+```
+Why good: Answers its own codebase question first, then asks an informed preference question.
+</Good>
+
+<Good>
+Single question at a time:
+```
+Q1: "What's the main goal?"
+A1: "Improve performance"
+Q2: "For performance, what matters more -- latency or throughput?"
+A2: "Latency"
+Q3: "For latency, are we optimizing for p50 or p99?"
+```
+Why good: Each question builds on the previous answer. Focused and progressive.
+</Good>
+
+<Bad>
+Asking about things you could look up:
+```
+Planner: "Where is authentication implemented in your codebase?"
+User: "Uh, somewhere in src/auth I think?"
+```
+Why bad: The planner should spawn an explore agent to find this, not ask the user.
+</Bad>
+
+<Bad>
+Batching multiple questions:
+```
+"What's the scope? And the timeline? And who's the audience?"
+```
+Why bad: Three questions at once causes shallow answers. Ask one at a time.
+</Bad>
+
+<Bad>
+Presenting all design options at once:
+```
+"Here are 4 approaches: Option A... Option B... Option C... Option D... Which do you prefer?"
+```
+Why bad: Decision fatigue. Present one option with trade-offs, get reaction, then present the next.
+</Bad>
+</Examples>
+
+<Escalation_And_Stop_Conditions>
+
+- Stop interviewing when requirements are clear enough to plan -- do not over-interview
+- In consensus mode, stop after 5 Planner/Architect/Critic iterations and present the best version. Do NOT clear ralplan state here — the user may still select "Request changes" in the subsequent step. State is cleared only on the user's final choice (approval/rejection) or when outputting the plan in non-interactive mode.
+- Consensus mode without `--interactive` outputs the final plan marked `pending approval` and stops; with `--interactive`, requires explicit user approval before any implementation begins. **Always** call `state_clear(mode="ralplan", session_id=<current_session_id>)` before stopping.
+- If the user says "just do it" or "skip planning" without explicitly naming an execution path, treat it as a request to end planning: output the current plan/spec/proposal as `pending approval` and ask for explicit execution approval via the structured approval UI. Do NOT invoke `Skill("oh-my-claudecode:ralph")`, mutate files, delegate implementation, commit, push, or open a PR from the planning module until that approval exists.
+- Escalate to the user when there are irreconcilable trade-offs that require a business decision
+  </Escalation_And_Stop_Conditions>
+
+<Final_Checklist>
+
+- [ ] Plan has testable acceptance criteria (90%+ concrete)
+- [ ] Plan references specific files/lines where applicable (80%+ claims)
+- [ ] All risks have mitigations identified
+- [ ] No vague terms without metrics ("fast" -> "p99 < 200ms")
+- [ ] Plan saved to `.omc/plans/`
+- [ ] In consensus mode: RALPLAN-DR summary includes 3-5 principles, top 3 drivers, and >=2 viable options (or explicit invalidation rationale)
+- [ ] In consensus mode final output: ADR section included (Decision / Drivers / Alternatives considered / Why chosen / Consequences / Follow-ups)
+- [ ] In deliberate consensus mode: pre-mortem (3 scenarios) + expanded test plan (unit/integration/e2e/observability) included
+- [ ] In consensus mode with `--interactive`: user explicitly approved before any execution; without `--interactive`: plan output marked `pending approval` only, no auto-execution
+- [ ] In consensus mode: ralplan state deactivated on every exit path — `state_write(active=false)` for handoff to execution, `state_clear` for terminal exits (rejection, error, non-interactive stop)
+      </Final_Checklist>
+
+<Advanced>
+## Design Option Presentation
+
+When presenting design choices during interviews, chunk them:
+
+1. **Overview** (2-3 sentences)
+2. **Option A** with trade-offs
+3. [Wait for user reaction]
+4. **Option B** with trade-offs
+5. [Wait for user reaction]
+6. **Recommendation** (only after options discussed)
+
+Format for each option:
+
+```
+### Option A: [Name]
+**Approach:** [1 sentence]
+**Pros:** [bullets]
+**Cons:** [bullets]
+
+What's your reaction to this approach?
+```
+
+## Question Classification
+
+Before asking any interview question, classify it:
+
+| Type            | Examples                              | Action                         |
+| --------------- | ------------------------------------- | ------------------------------ |
+| Codebase Fact   | "What patterns exist?", "Where is X?" | Explore first, do not ask user |
+| User Preference | "Priority?", "Timeline?"              | Ask user via AskUserQuestion   |
+| Scope Decision  | "Include feature Y?"                  | Ask user                       |
+| Requirement     | "Performance constraints?"            | Ask user                       |
+
+## Review Quality Criteria
+
+| Criterion    | Standard                   |
+| ------------ | -------------------------- |
+| Clarity      | 80%+ claims cite file/line |
+| Testability  | 90%+ criteria are concrete |
+| Verification | All file refs exist        |
+| Specificity  | No vague terms             |
+
+## Deprecation Notice
+
+The separate `/planner`, `/ralplan`, and `/review` skills have been merged into `/plan`. All workflows (interview, direct, consensus, review) are available through `/plan`.
+</Advanced>

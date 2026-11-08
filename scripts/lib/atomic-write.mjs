@@ -1,0 +1,400 @@
+/**
+ * Atomic file writes for oh-my-claudecode hooks.
+ * Self-contained module with no external dependencies.
+ */
+
+import { openSync, writeSync, fsyncSync, closeSync, renameSync, unlinkSync, mkdirSync, existsSync, readFileSync, readdirSync, linkSync, statSync, fstatSync } from 'fs';
+import { dirname, basename, join } from 'path';
+import { createHash, randomUUID } from 'crypto';
+import { processStartIdentity, acquireStateFileLockSync, acquireStateFileLockAtPathSync, releaseStateFileLockSync, withStateFileLockSync, withStateFileLockAtPathSync, isStateFileLockingSupported, isExclusiveStateLockingAvailable, getStateFileLockDiagnostic, getStateFileLockFailureMessage, getStateFileLockFailureKind, acquireRecoveryClaim, readRecoveryClaim, releaseRecoveryClaim, sameRecoveryClaim, isEmergencyOwnerLive } from './state-lock.mjs';
+export { acquireStateFileLockSync, acquireStateFileLockAtPathSync, releaseStateFileLockSync, withStateFileLockSync, withStateFileLockAtPathSync, isStateFileLockingSupported, isExclusiveStateLockingAvailable, getStateFileLockDiagnostic, getStateFileLockFailureMessage, getStateFileLockFailureKind };
+function journalIsOwned(path, transactionId, owner) { const current = readEmergencyJournal(path); return current !== null && current.transactionId === transactionId && isSameEmergencyOwner(current.owner, owner); }
+function isSameEmergencyOwner(left, right) { return left && right && left.pid === right.pid && left.processStart === right.processStart && left.nonce === right.nonce; }
+function emergencyJournalPath(path) { return `${path}.emergency-journal.json`; }
+function stateDigest(raw) { return createHash('sha256').update(raw).digest('hex'); }
+// Windows processStart is formatted as `ticks:<n>`; the literal colon is illegal in NTFS
+// filenames and made every linkSync() in publishEmergencyFileExclusive fail with EINVAL.
+// Filename-embedded process-start identities are sanitized through these two functions
+// (encode when building a temp name, decode when parsing one back out of a directory listing)
+// so the pid-reuse staleness check in reconcileEmergencyPublicationTemps keeps working
+// unchanged cross-platform.
+function encodeProcessStartForFilename(processStart) { return processStart.replace(/:/g, '_c_'); }
+function decodeProcessStartFromFilename(encoded) { return encoded.replace(/_c_/g, ':'); }
+
+function publishEmergencyFileExclusive(path, content) { const processStart = processStartIdentity(process.pid); if (!processStart || processStart === 'absent') return false; const tempPath = `${path}.${process.pid}.${encodeProcessStartForFilename(processStart)}.${randomUUID()}.tmp`; let fd; try { ensureDirSync(dirname(path)); fd = openSync(tempPath, 'wx', 0o600); writeAllSync(fd, content, 'emergency publication'); fsyncSync(fd); closeSync(fd); fd = undefined; linkSync(tempPath, path); unlinkSync(tempPath); return true; } catch { try { if (fd !== undefined) closeSync(fd); } catch {} try { unlinkSync(tempPath); } catch {} return false; } }
+function writeEmergencyJournal(path, journal, requireOwnership = true) {
+  try {
+    if (requireOwnership && !journalIsOwned(path, journal.transactionId, journal.owner)) return false;
+    atomicWriteFileSync(path, JSON.stringify(journal, null, 2));
+    return !requireOwnership || journalIsOwned(path, journal.transactionId, journal.owner);
+  } catch { return false; }
+}
+
+
+
+/**
+ * Ensure directory exists
+ */
+export function ensureDirSync(dir) {
+  if (existsSync(dir)) {
+    return;
+  }
+  try {
+    mkdirSync(dir, { recursive: true });
+  } catch (err) {
+    if (err.code === 'EEXIST') {
+      return;
+    }
+    throw err;
+  }
+}
+
+function writeAllSync(fd, content, label) {
+  const bytes = Buffer.isBuffer(content) ? content : Buffer.from(content, 'utf8');
+  let offset = 0;
+  while (offset < bytes.length) {
+    const written = writeSync(fd, bytes, offset, bytes.length - offset);
+    if (!Number.isInteger(written) || written <= 0) throw new Error(`${label} made no progress`);
+    offset += written;
+  }
+  if (fstatSync(fd).size !== bytes.length) throw new Error(`${label} size verification failed`);
+}
+
+
+/**
+ * Write string content atomically to a file.
+ * Uses temp file + atomic rename pattern with fsync for durability.
+ *
+ * @param {string} filePath Target file path
+ * @param {string} content String content to write
+ */
+export function atomicWriteFileSync(filePath, content) {
+  const dir = dirname(filePath);
+  const base = basename(filePath);
+  const tempPath = join(dir, `.${base}.tmp.${randomUUID()}`);
+
+  let fd = null;
+  let success = false;
+
+  try {
+    // Ensure parent directory exists
+    ensureDirSync(dir);
+
+    // Open temp file with exclusive creation (O_CREAT | O_EXCL | O_WRONLY)
+    fd = openSync(tempPath, 'wx', 0o600);
+
+    // Write content
+    writeAllSync(fd, content, 'atomic write');
+
+    // Sync file data to disk before rename
+    fsyncSync(fd);
+
+    // Close before rename
+    closeSync(fd);
+    fd = null;
+
+    // Atomic rename - replaces target file if it exists
+    renameSync(tempPath, filePath);
+
+    success = true;
+
+    // Best-effort directory fsync to ensure rename is durable
+    try {
+      const dirFd = openSync(dir, 'r');
+      try {
+        fsyncSync(dirFd);
+      } finally {
+        closeSync(dirFd);
+      }
+    } catch {
+      // Some platforms don't support directory fsync - that's okay
+    }
+  } finally {
+    // Close fd if still open
+    if (fd !== null) {
+      try {
+        closeSync(fd);
+      } catch {
+        // Ignore close errors
+      }
+    }
+    // Clean up temp file on error
+    if (!success) {
+      try {
+        unlinkSync(tempPath);
+      } catch {
+        // Ignore cleanup errors
+      }
+    }
+  }
+}
+
+function readEmergencyJournal(path) {
+  try {
+    const journal = JSON.parse(readFileSync(path, 'utf8'));
+    if (journal.version !== 1 || typeof journal.transactionId !== 'string' || !/^[0-9a-f-]{36}$/i.test(journal.transactionId) || !journal.owner || !Number.isInteger(journal.owner.pid) || journal.owner.pid <= 0 || typeof journal.owner.processStart !== 'string' || typeof journal.owner.nonce !== 'string' || !/^[0-9a-f-]{36}$/i.test(journal.owner.nonce) || (journal.originalDigest !== undefined && (typeof journal.originalDigest !== 'string' || !/^[0-9a-f]{64}$/i.test(journal.originalDigest))) || (journal.intendedDigest !== undefined && (typeof journal.intendedDigest !== 'string' || !/^[0-9a-f]{64}$/i.test(journal.intendedDigest))) || (journal.intent !== undefined && journal.intent !== 'clear' && journal.intent !== 'publish') || typeof journal.quarantinePath !== 'string' || (journal.phase !== 'preparing' && journal.phase !== 'prepared' && journal.phase !== 'quarantined' && journal.phase !== 'published')) return null;
+    const complete = typeof journal.originalDigest === 'string' && (journal.intent === 'clear' || (journal.intent === 'publish' && typeof journal.intendedDigest === 'string'));
+    return journal.phase === 'preparing' || complete ? journal : null;
+  } catch { return null; }
+}
+
+// BigInt ids: NTFS file IDs exceed 2^53 once the MFT sequence number reaches
+// 32, and a Number ino rounds distinct files onto the same value.
+function fileIdentity(path) {
+  try {
+    const stat = statSync(path, { bigint: true });
+    return { dev: stat.dev, ino: stat.ino };
+  } catch { return null; }
+}
+
+/**
+ * Compare two file identities for equality.
+ * On Windows, Node returns real volume serial from fstat but 0 from lstat/stat,
+ * so we compare dev only when NOT on Windows OR both dev values are non-zero.
+ * Inode comparison is always performed.
+ */
+function sameFileIdentity(a, b) {
+  // Always compare inode
+  if (a.ino !== b.ino) return false;
+  
+  // On Windows, lstat returns dev=0, so skip dev comparison when on Windows
+  // unless both are non-zero (indicating a real comparison is possible)
+  const isWindows = process.platform === 'win32';
+  if (isWindows && (a.dev === 0n || b.dev === 0n)) {
+    return true; // Skip dev comparison on Windows when either is 0
+  }
+  
+  // On POSIX or when both dev values are non-zero, require dev match
+  return a.dev === b.dev;
+}
+
+function sameFile(path, expected) {
+  const actual = fileIdentity(path);
+  return actual !== null && sameFileIdentity(actual, expected);
+}
+
+function reconcileEmergencyPublicationTemps(filePath, authorizeState) {
+  const directory = dirname(filePath);
+  const base = filePath.slice(directory.length + 1).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const pattern = new RegExp(`^${base}\\.emergency-(journal\\.json|recovery\\.claim|quarantine\\.[0-9a-f-]{36}\\.payload)\\.(\\d+)\\.([^.]+)\\.([0-9a-f-]{36})\\.tmp$`, 'i');
+  let names;
+  try { names = readdirSync(directory); } catch (error) { return error?.code === 'ENOENT'; }
+  for (const name of names) {
+    const match = pattern.exec(name);
+    if (!match) continue;
+    const path = join(directory, name);
+    const currentStart = processStartIdentity(Number(match[2]));
+    if (currentStart === null || currentStart === decodeProcessStartFromFilename(match[3])) return false;
+    const generation = fileIdentity(path);
+    try {
+      if (!generation) return false;
+      const raw = readFileSync(path, 'utf8');
+      if (authorizeState) {
+        if (match[1] === 'journal.json') {
+          const journal = readEmergencyJournal(path);
+          if (!journal || !recoveryGenerationsAuthorized(filePath, journal, authorizeState)) return false;
+        } else if (match[1].startsWith('quarantine.')) {
+          const state = JSON.parse(raw);
+          if (!state || typeof state !== 'object' || Array.isArray(state) || !authorizeState(state)) return false;
+        } else {
+          const claim = readRecoveryClaim(path);
+          if (!claim || claim.pid !== Number(match[2]) || claim.processStart !== decodeProcessStartFromFilename(match[3]) || claim.nonce !== match[4]) return false;
+        }
+      }
+      if (!sameFile(path, generation) || stateDigest(readFileSync(path, 'utf8')) !== stateDigest(raw)) return false;
+      unlinkSync(path);
+    } catch { return false; }
+  }
+  return true;
+}
+
+function recoveryGenerationsAuthorized(filePath, journal, authorizeState) {
+  if (!authorizeState) return true;
+  const paths = [filePath, ...(journal ? [journal.quarantinePath, `${journal.quarantinePath}.payload`] : [])];
+  let authenticatedJournalGeneration = journal === null;
+  for (const path of paths) {
+    if (!existsSync(path)) continue;
+    let raw;
+    let state;
+    try {
+      raw = readFileSync(path, 'utf8');
+      const parsed = JSON.parse(raw);
+      if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return false;
+      state = parsed;
+    } catch { return false; }
+    if (!authorizeState(state)) return false;
+    if (journal && (stateDigest(raw) === journal.originalDigest || (journal.intent === 'publish' && stateDigest(raw) === journal.intendedDigest))) authenticatedJournalGeneration = true;
+  }
+  return authenticatedJournalGeneration;
+}
+
+/** Shared-home recovery claims contain no project identity, so pre-existing
+ * claim publications are never attributable to the caller and must survive. */
+function hasUnattributableRecoveryClaimArtifact(filePath, recoveryClaim) {
+  const directory = dirname(filePath);
+  const base = filePath.slice(directory.length + 1).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const tempPattern = new RegExp(`^${base}\\.emergency-recovery\\.claim\\.\\d+\\.[^.]+\\.[0-9a-f-]{36}\\.tmp$`, 'i');
+  try {
+    if (readdirSync(directory).some((name) => tempPattern.test(name))) return true;
+    const claimPath = `${filePath}.emergency-recovery.claim`;
+    if (!existsSync(claimPath)) return recoveryClaim !== undefined;
+    if (!recoveryClaim) return true;
+    const current = readRecoveryClaim(claimPath);
+    return !current || !sameRecoveryClaim(current, recoveryClaim);
+  } catch {
+    return true;
+  }
+}
+
+function sharedRecoveryArtifactsAuthorized(filePath, authorizeState, recoveryClaim) {
+  if (!authorizeState) return true;
+  if (hasUnattributableRecoveryClaimArtifact(filePath, recoveryClaim)) return false;
+  const journalPath = emergencyJournalPath(filePath);
+  if (!existsSync(journalPath)) {
+    if (!existsSync(filePath)) return true;
+    try {
+      const state = JSON.parse(readFileSync(filePath, 'utf8'));
+      return state !== null && typeof state === 'object' && !Array.isArray(state) && authorizeState(state);
+    } catch { return false; }
+  }
+  const journal = readEmergencyJournal(journalPath);
+  return journal !== null && recoveryGenerationsAuthorized(filePath, journal, authorizeState);
+}
+
+function replacePrimaryDuringRecoveryForTest(filePath) {
+  if (process.env.NODE_ENV !== 'test' || process.env.OMC_TEST_EMERGENCY_CAPTURE_REPLACEMENT_PATH !== filePath || !process.env.OMC_TEST_EMERGENCY_CAPTURE_REPLACEMENT_BASE64) return;
+  try {
+    atomicWriteFileSync(filePath, Buffer.from(process.env.OMC_TEST_EMERGENCY_CAPTURE_REPLACEMENT_BASE64, 'base64').toString('utf8'));
+  } finally {
+    delete process.env.OMC_TEST_EMERGENCY_CAPTURE_REPLACEMENT_PATH;
+    delete process.env.OMC_TEST_EMERGENCY_CAPTURE_REPLACEMENT_BASE64;
+  }
+}
+
+/** Captures only the authenticated source generation and never unlinks a replacement. */
+function captureAndUnlinkPrimary(filePath, quarantinePath, expectedDigest) {
+  try {
+    linkSync(filePath, quarantinePath);
+    const captured = fileIdentity(quarantinePath);
+    if (!captured || stateDigest(readFileSync(quarantinePath, 'utf8')) !== expectedDigest || !sameFile(filePath, captured)) return false;
+    replacePrimaryDuringRecoveryForTest(filePath);
+    if (!sameFile(filePath, captured) || stateDigest(readFileSync(filePath, 'utf8')) !== expectedDigest) return false;
+    unlinkSync(filePath);
+    return true;
+  } catch { return false; }
+}
+
+function removeOwnedEmergencyArtifacts(journalPath, journal, removeQuarantine) {
+  try {
+    if (!journalIsOwned(journalPath, journal.transactionId, journal.owner)) return false;
+    if (removeQuarantine) try { unlinkSync(journal.quarantinePath); } catch { /* absent */ }
+    try { unlinkSync(`${journal.quarantinePath}.payload`); } catch { /* absent */ }
+    if (!journalIsOwned(journalPath, journal.transactionId, journal.owner)) return false;
+    unlinkSync(journalPath);
+    return true;
+  } catch { return false; }
+}
+
+/** A dead transaction is recovered under a state-scoped, generation-verified exclusive claim. */
+export function recoverEmergencyStateFile(filePath, options) {
+  const authorizeState = options?.authorizeState;
+  const journalPath = emergencyJournalPath(filePath);
+  // Prefilter before taking a claim so stale shared-home artifacts cannot be
+  // reclaimed solely because their process owner is dead. Revalidate while
+  // holding our own claim below.
+  if (!sharedRecoveryArtifactsAuthorized(filePath, authorizeState)) return false;
+  if (!existsSync(journalPath)) {
+    if (!authorizeState) return reconcileEmergencyPublicationTemps(filePath);
+    const claimPath = `${filePath}.emergency-recovery.claim`;
+    const claim = acquireRecoveryClaim(claimPath);
+    if (!claim) return false;
+    try {
+      if (existsSync(journalPath) || !sharedRecoveryArtifactsAuthorized(filePath, authorizeState, claim)) return false;
+      return reconcileEmergencyPublicationTemps(filePath, authorizeState);
+    } finally { releaseRecoveryClaim(claimPath, claim); }
+  }
+  const journal = readEmergencyJournal(journalPath);
+  if (!journal) {
+    if (authorizeState) return false;
+    const claimPath = `${filePath}.emergency-recovery.claim`;
+    const claim = acquireRecoveryClaim(claimPath);
+    if (!claim) return false;
+    try {
+      const generation = fileIdentity(journalPath);
+      if (!reconcileEmergencyPublicationTemps(filePath)) return false;
+      if (!generation || readEmergencyJournal(journalPath) !== null || !existsSync(filePath) || !sameFile(journalPath, generation)) return false;
+      unlinkSync(journalPath);
+      return true;
+    } catch { return false; } finally { releaseRecoveryClaim(claimPath, claim); }
+  }
+  const claimPath = `${filePath}.emergency-recovery.claim`;
+  const claim = acquireRecoveryClaim(claimPath);
+  if (!claim) return false;
+  try {
+    if (!sharedRecoveryArtifactsAuthorized(filePath, authorizeState, claim)) return false;
+    const current = readEmergencyJournal(journalPath);
+    if (!recoveryGenerationsAuthorized(filePath, current, authorizeState)) return true;
+    if (!reconcileEmergencyPublicationTemps(filePath, authorizeState)) return false;
+    if (!current || current.quarantinePath !== `${filePath}.emergency-quarantine.${current.transactionId}` || isEmergencyOwnerLive(current.owner)) return false;
+    return recoverDeadEmergencyStateFile(filePath, authorizeState);
+  } finally { releaseRecoveryClaim(claimPath, claim); }
+}
+
+/** Recover a previously interrupted emergency mutation while holding the recovery claim. */
+function recoverDeadEmergencyStateFile(filePath, authorizeState) {
+  const journalPath = emergencyJournalPath(filePath);
+  if (!existsSync(journalPath)) return true;
+  const journal = readEmergencyJournal(journalPath);
+  if (!journal || journal.quarantinePath !== `${filePath}.emergency-quarantine.${journal.transactionId}` || isEmergencyOwnerLive(journal.owner)) return false;
+  if (!recoveryGenerationsAuthorized(filePath, journal, authorizeState)) return true;
+  const owned = () => journalIsOwned(journalPath, journal.transactionId, journal.owner);
+  if (!owned()) return false;
+  const payloadPath = `${journal.quarantinePath}.payload`;
+  const digest = (path) => { try { return stateDigest(readFileSync(path, 'utf8')); } catch { return null; } };
+  if (journal.phase === 'preparing') {
+    const complete = typeof journal.originalDigest === 'string' && (journal.intent === 'clear' || (journal.intent === 'publish' && typeof journal.intendedDigest === 'string'));
+    if (!complete) {
+      if (existsSync(journal.quarantinePath) || existsSync(payloadPath)) return false;
+      return removeOwnedEmergencyArtifacts(journalPath, journal, false);
+    }
+    const originalStillPrimary = !existsSync(journal.quarantinePath) && digest(filePath) === journal.originalDigest;
+    if (journal.intent === 'publish' && digest(payloadPath) !== journal.intendedDigest) return originalStillPrimary && removeOwnedEmergencyArtifacts(journalPath, journal, false);
+    if (journal.intent === 'clear' && existsSync(payloadPath)) return originalStillPrimary && removeOwnedEmergencyArtifacts(journalPath, journal, false);
+    journal.phase = 'prepared';
+    return writeEmergencyJournal(journalPath, journal) && recoverDeadEmergencyStateFile(filePath, authorizeState);
+  }
+  const originalDigest = journal.originalDigest;
+  const intent = journal.intent;
+  const intendedDigest = journal.intendedDigest;
+  const hasPrimary = existsSync(filePath);
+  const hasQuarantine = existsSync(journal.quarantinePath);
+  const finalize = () => removeOwnedEmergencyArtifacts(journalPath, journal, hasQuarantine);
+  if (hasPrimary && hasQuarantine) {
+    if (intent === 'publish' && digest(filePath) === intendedDigest && digest(journal.quarantinePath) === originalDigest) return finalize();
+    return removeOwnedEmergencyArtifacts(journalPath, journal, true);
+  }
+  if (hasPrimary) {
+    if (!hasQuarantine && journal.phase === 'prepared' && digest(filePath) === originalDigest) {
+      if (intent === 'publish' && digest(payloadPath) !== intendedDigest) return false;
+      if (!owned()) return false;
+      if (!captureAndUnlinkPrimary(filePath, journal.quarantinePath, originalDigest)) {
+        if (owned() && existsSync(filePath) && existsSync(journal.quarantinePath) && digest(filePath) !== originalDigest) removeOwnedEmergencyArtifacts(journalPath, journal, true);
+        return false;
+      }
+      journal.phase = 'quarantined';
+      return writeEmergencyJournal(journalPath, journal) && recoverDeadEmergencyStateFile(filePath, authorizeState);
+    }
+    return false;
+  }
+  if (!hasQuarantine) return intent === 'clear' && journal.phase === 'published' && removeOwnedEmergencyArtifacts(journalPath, journal, false);
+  if (digest(journal.quarantinePath) !== originalDigest || !owned()) return false;
+  try {
+    if (intent === 'clear') return removeOwnedEmergencyArtifacts(journalPath, journal, true);
+    const payload = readFileSync(payloadPath, 'utf8');
+    if (stateDigest(payload) !== intendedDigest || !owned()) return false;
+    linkSync(payloadPath, filePath);
+    journal.phase = 'published';
+    if (!writeEmergencyJournal(journalPath, journal)) return false;
+    return removeOwnedEmergencyArtifacts(journalPath, journal, true);
+  } catch { return false; }
+}

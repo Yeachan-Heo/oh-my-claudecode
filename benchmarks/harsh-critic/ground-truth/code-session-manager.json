@@ -1,0 +1,81 @@
+{
+  "fixtureId": "code-session-manager",
+  "fixturePath": "fixtures/code/code-session-manager.ts",
+  "domain": "code",
+  "expectedVerdict": "REJECT",
+  "isCleanBaseline": false,
+  "findings": [
+    {
+      "id": "SESS-CRIT-1",
+      "severity": "CRITICAL",
+      "category": "finding",
+      "summary": "Math.random() used for session token generation — not cryptographically secure",
+      "keywords": ["Math.random", "crypto", "token", "random", "secure"],
+      "location": "generateToken():53-56",
+      "explanation": "The generateToken function uses Math.floor(Math.random() * 256) to generate token bytes. Math.random() is not a cryptographically secure PRNG and its output is predictable. Session tokens must be generated using crypto.randomBytes() (Node.js built-in) to prevent token prediction attacks."
+    },
+    {
+      "id": "SESS-MAJ-1",
+      "severity": "MAJOR",
+      "category": "finding",
+      "summary": "getSession() does not check session expiry — expired sessions remain valid forever",
+      "keywords": ["expiration", "expiry", "check", "forever", "getSession"],
+      "location": "getSession():100-108",
+      "explanation": "The getSession function retrieves a session and updates lastAccessedAt but never checks whether session.expiresAt has passed. The JSDoc comment explicitly states 'Does not check whether the session has expired; callers are responsible for expiry logic' — but no callers are shown implementing this check, meaning expired sessions grant access indefinitely."
+    },
+    {
+      "id": "SESS-MAJ-2",
+      "severity": "MAJOR",
+      "category": "finding",
+      "summary": "Unbounded in-memory Map — no size limit, memory grows without bound under load",
+      "keywords": ["memory", "Map", "unbounded", "limit", "leak", "size"],
+      "location": "sessionStore (line 40), pruneExpiredSessions():194",
+      "explanation": "The sessionStore Map has no maximum size. pruneExpiredSessions() only removes expired entries, but an attacker (or legitimate burst of traffic) can create millions of sessions before they expire, exhausting server memory. There is no eviction policy or maximum session count."
+    },
+    {
+      "id": "SESS-MIN-1",
+      "severity": "MINOR",
+      "category": "finding",
+      "summary": "Inconsistent return types — invalidateSession returns void but also returns undefined explicitly",
+      "keywords": ["null", "undefined", "inconsistent", "return"],
+      "location": "invalidateSession():119-123",
+      "explanation": "invalidateSession is typed as Promise<void> but line 123 contains an explicit 'return undefined' when the session is not found. This is inconsistent and misleading — callers cannot distinguish 'session found and deleted' from 'session not found' as the function always returns void/undefined."
+    },
+    {
+      "id": "SESS-MISS-1",
+      "severity": "MAJOR",
+      "category": "missing",
+      "summary": "No automatic session invalidation on password change",
+      "keywords": ["password", "change", "invalidation", "session"],
+      "explanation": "The invalidateAllUserSessions JSDoc comment explicitly notes 'This does NOT automatically run on password change; callers that handle password changes must call this explicitly if desired.' This means the password change flow is documented to not invalidate sessions, leaving an attacker who has stolen a session token with continued access after the victim changes their password."
+    },
+    {
+      "id": "SESS-MISS-2",
+      "severity": "MAJOR",
+      "category": "missing",
+      "summary": "No concurrent session limit — a user can accumulate unlimited active sessions",
+      "keywords": ["concurrent", "session", "limit", "multiple"],
+      "explanation": "createSession() adds a new session to the user's session index without any limit on how many sessions a single user can have. An attacker with stolen credentials, or a bug in the client, could create thousands of sessions per user, wasting memory and making session management impossible."
+    },
+    {
+      "id": "SESS-PERSP-SEC-1",
+      "severity": "MAJOR",
+      "category": "perspective",
+      "perspective": "security",
+      "summary": "CookieConfig missing SameSite attribute — sessions are vulnerable to CSRF",
+      "keywords": ["SameSite", "cookie", "CSRF", "attribute"],
+      "location": "getSessionCookieConfig():221-228",
+      "explanation": "The CookieConfig interface and getSessionCookieConfig() return value do not include a SameSite attribute. Without SameSite=Lax or SameSite=Strict, session cookies are sent on cross-site requests, enabling CSRF attacks against any state-changing endpoint."
+    },
+    {
+      "id": "SESS-PERSP-NH-1",
+      "severity": "MINOR",
+      "category": "perspective",
+      "perspective": "new-hire",
+      "summary": "No JSDoc documenting the session lifecycle or pruning requirements",
+      "keywords": ["JSDoc", "documentation", "lifecycle", "comment"],
+      "location": "Module header and pruneExpiredSessions()",
+      "explanation": "The module comment describes storage but does not document the session lifecycle: who calls pruneExpiredSessions(), at what interval, and what happens if it is never called. A new engineer wiring up this module would not know they must schedule periodic pruning to prevent memory growth."
+    }
+  ]
+}

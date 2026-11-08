@@ -1,0 +1,166 @@
+import { childEnv } from '../../utils/windows-search.js';
+import * as fs from 'fs';
+import * as path from 'path';
+import { spawn } from 'child_process';
+import { fileURLToPath } from 'url';
+import { atomicWriteJsonSync } from '../../lib/atomic-write.js';
+import type { OpenClawRoutingSnapshot, SessionEndActionName, SessionEndActionState, SessionEndJobV1 } from './cleanup-manifest.js';
+import { getProcessStartIdentitySync, terminateOwnedProcessTree } from '../../platform/process-utils.js';
+import { markSessionEndActionRunner, readSessionEndJob } from './cleanup-manifest.js';
+import { getOmcRoot } from '../../lib/worktree-paths.js';
+
+const RUNNER_ARG = '--omc-session-end-action-runner';
+export interface ActionRunContext { directory: string; sessionId: string; job: SessionEndJobV1; actionName: SessionEndActionName; action: SessionEndActionState; ownerNonce: string; runnerNonce: string; deadlineAt: number; }
+export interface ActionRunResult { code: string; completed: boolean; }
+function runDirectory(context: ActionRunContext): string { return path.join(getOmcRoot(context.directory), 'state', 'session-end-jobs', 'runs', context.job.jobId, context.actionName, String(context.action.attempts), context.runnerNonce); }
+function openClawRoutingEnvironment(payload: Record<string, unknown>): NodeJS.ProcessEnv {
+  const routing = payload.openClawRouting;
+  if (!routing || typeof routing !== 'object' || Array.isArray(routing)) return {};
+  const snapshot = routing as OpenClawRoutingSnapshot;
+  const values: Array<[keyof OpenClawRoutingSnapshot, string]> = [
+    ['openClawConfig', 'OMC_OPENCLAW_CONFIG'],
+    ['replyChannel', 'OPENCLAW_REPLY_CHANNEL'],
+    ['replyTarget', 'OPENCLAW_REPLY_TARGET'],
+    ['replyThread', 'OPENCLAW_REPLY_THREAD'],
+    ['tmux', 'TMUX'],
+    ['tmuxPane', 'TMUX_PANE'],
+  ];
+  return Object.fromEntries(values.flatMap(([property, environment]) => typeof snapshot[property] === 'string' ? [[environment, snapshot[property]]] : []));
+}
+
+function runnerEnvironment(context: ActionRunContext): NodeJS.ProcessEnv {
+  // APPDATA/LOCALAPPDATA are required for gh keyring-free auth lookup on Windows
+  // (hosts.yml lives in %AppData%\GitHub CLI); spawn-next runners issue gh
+  // tracker commands, so without them every tracker update fails auth.
+  const baseKeys = ['PATH', 'HOME', 'USERPROFILE', ...(process.platform === 'win32' ? ['APPDATA', 'LOCALAPPDATA'] : []), 'TMPDIR', 'TEMP', 'TMP', 'SystemRoot', 'COMSPEC', 'LANG', 'LC_ALL', 'NODE_ENV', 'CLAUDE_CONFIG_DIR', 'OMC_STATE_DIR', 'OMC_HOOK_CONFIG', 'OMC_CONFIG_PATH', 'OMC_HOOK_BRIDGE', 'OMC_NOTIFY', 'OMC_NOTIFY_PROFILE', 'HTTP_PROXY', 'HTTPS_PROXY', 'ALL_PROXY', 'NO_PROXY', 'http_proxy', 'https_proxy', 'all_proxy', 'no_proxy', 'NODE_EXTRA_CA_CERTS', 'SSL_CERT_FILE', 'SSL_CERT_DIR', 'REQUESTS_CA_BUNDLE', 'CURL_CA_BUNDLE'];
+  const notificationKeys = ['OMC_TELEGRAM', 'OMC_DISCORD', 'OMC_SLACK', 'OMC_WEBHOOK', 'OMC_DISCORD_MENTION', 'OMC_DISCORD_NOTIFIER_BOT_TOKEN', 'OMC_DISCORD_NOTIFIER_CHANNEL', 'OMC_DISCORD_WEBHOOK_URL', 'OMC_TELEGRAM_BOT_TOKEN', 'OMC_TELEGRAM_NOTIFIER_BOT_TOKEN', 'OMC_TELEGRAM_CHAT_ID', 'OMC_TELEGRAM_NOTIFIER_CHAT_ID', 'OMC_TELEGRAM_NOTIFIER_UID', 'OMC_SLACK_WEBHOOK_URL', 'OMC_SLACK_MENTION', 'OMC_SLACK_BOT_TOKEN', 'OMC_SLACK_APP_TOKEN', 'OMC_SLACK_BOT_CHANNEL'];
+  const keys = context.actionName === 'callback' || context.actionName === 'notification' ? [...baseKeys, ...notificationKeys] : baseKeys;
+  // ANTHROPIC_* carries model provider auth/routing (API key, base URL, token);
+  // the spawn-next runner launches claude chain links as its children, and
+  // without the passthrough every factory link exits "Not logged in"
+  // (dogfood: the chain's first real AFK spawn died exactly there while
+  // workerEnvironment() had already been fixed). Mirrors workerEnvironment().
+  // Scoped to spawn-next: callback/openclaw/cleanup children never need model
+  // credentials, so they must not inherit them (same least-privilege rule as
+  // notificationKeys above).
+  const authPassthrough = context.actionName === 'spawn-next'
+    ? Object.entries(process.env).filter(([key]) => key.startsWith('ANTHROPIC_'))
+    : [];
+  const exact = Object.fromEntries([...keys.flatMap((key) => process.env[key] === undefined ? [] : [[key, process.env[key]]]), ...authPassthrough]);
+  if (context.actionName !== 'openclaw') return exact;
+  const enabled = context.action.payload.openClawEnabled === true ? { OMC_OPENCLAW: '1' } : {};
+  return { ...exact, ...enabled, ...openClawRoutingEnvironment(context.action.payload) };
+}
+
+const POST_KILL_SETTLE_MS = 250;
+
+
+/** Each deferred action runs in its own detached process group. The manifest remains the only authority for claim/result transitions. */
+export async function runSessionEndAction(context: ActionRunContext, _execute: () => Promise<void>): Promise<ActionRunResult> {
+  const runPath = runDirectory(context);
+  try {
+    fs.mkdirSync(runPath, { recursive: true });
+    if (Date.now() >= context.deadlineAt) return { code: 'deadline-before-arm', completed: false };
+    const childInput = { directory: context.directory, sessionId: context.sessionId, jobId: context.job.jobId, actionName: context.actionName, attempt: context.action.attempts, ownerNonce: context.ownerNonce, runnerNonce: context.runnerNonce, runPath, deadlineAt: context.deadlineAt };
+    const child = spawn(process.execPath, [fileURLToPath(import.meta.url), RUNNER_ARG, JSON.stringify(childInput)], { detached: true, stdio: 'ignore', windowsHide: true, env: childEnv(runnerEnvironment(context)) });
+    // Capture identity synchronously, in the same tick as spawn, before
+    // child.unref() or any async operation. This eliminates the PID-reuse
+    // window that an async identity lookup would create. If the child already
+    // exited or /proc is unreadable, identity is null and we fail closed.
+    const identity = child.pid ? getProcessStartIdentitySync(child.pid) : null;
+    child.unref();
+    let settled = false;
+    let exitCode: number | null = null;
+    let settleChild: (code: number | null) => void = () => undefined;
+    const childExit = new Promise<number | null>((resolve) => {
+      settleChild = (code) => {
+        if (settled) return;
+        settled = true;
+        exitCode = code;
+        resolve(code);
+      };
+      child.once('exit', settleChild);
+      child.once('error', () => settleChild(null));
+    });
+    let deadlineTermination: Promise<void> | undefined;
+    let resolveTermination!: () => void;
+    const terminationFinished = new Promise<void>((resolve) => { resolveTermination = resolve; });
+    const terminate = async (): Promise<void> => {
+      const postKillWait = new Promise<void>((resolve) => {
+        const timer = setTimeout(resolve, Math.max(1, context.deadlineAt + POST_KILL_SETTLE_MS - Date.now()));
+        timer.unref();
+      });
+      if (identity && child.pid) {
+        await Promise.race([terminateOwnedProcessTree({
+          pid: child.pid, expectedStartIdentity: identity,
+          deadlineAt: new Date(context.deadlineAt + POST_KILL_SETTLE_MS).toISOString(), force: true,
+        }).catch(() => 'unknown' as const), postKillWait]);
+      }
+      await Promise.race([childExit, postKillWait]);
+    };
+    if (!identity || !child.pid) {
+      // Identity capture failed: fail closed WITHOUT signalling any PID or
+      // process group. The child has its own deadline timer (set in the
+      // runner entrypoint) and will self-exit. Signalling a raw PID/group
+      // after identity failure could hit a reused PID.
+      await Promise.race([childExit, new Promise<void>(resolve => setTimeout(resolve, POST_KILL_SETTLE_MS))]);
+      return { code: 'runner-identity-unavailable', completed: false };
+    }
+    const timeout = setTimeout(() => {
+      deadlineTermination ??= terminate().finally(resolveTermination);
+    }, Math.max(1, context.deadlineAt - Date.now()));
+    if (settled) { clearTimeout(timeout); return { code: exitCode === null ? 'runner-deadline' : `runner-exit-${exitCode}`, completed: false }; }
+    atomicWriteJsonSync(path.join(runPath, 'control.json'), { jobId: context.job.jobId, action: context.actionName, attempt: context.action.attempts, runnerNonce: context.runnerNonce, ownerNonce: context.ownerNonce, runner: { pid: child.pid, processStartIdentity: identity }, deadlineAt: new Date(context.deadlineAt).toISOString(), idempotencyKey: context.action.idempotencyKey });
+    atomicWriteJsonSync(path.join(runPath, 'arm.json'), { runnerNonce: context.runnerNonce, ownerNonce: context.ownerNonce, armedAt: new Date().toISOString() });
+    if (!markSessionEndActionRunner(context.directory, context.sessionId, context.ownerNonce, context.actionName, context.runnerNonce, 'armed')) { clearTimeout(timeout); await terminate(); return { code: 'runner-claim-lost', completed: false }; }
+    const terminal = await Promise.race([
+      childExit.then(code => ({ code, terminated: false })),
+      terminationFinished.then(() => ({ code: null, terminated: true })),
+    ]);
+    clearTimeout(timeout);
+    await deadlineTermination;
+    const completed = terminal.code === 0 && !terminal.terminated && !deadlineTermination;
+    const code = completed ? 'completed' : deadlineTermination || terminal.terminated || terminal.code === null ? 'runner-deadline' : `runner-exit-${terminal.code}`;
+    atomicWriteJsonSync(path.join(runPath, 'result.json'), { code, completedAt: new Date().toISOString() });
+    return { code, completed };
+  } catch (error) {
+    const code = error instanceof Error ? error.name || 'action-failed' : 'action-failed';
+    try { atomicWriteJsonSync(path.join(runPath, 'result.json'), { code, retryable: true, recordedAt: new Date().toISOString() }); } catch { /* manifest retains retry authority */ }
+    return { code, completed: false };
+  }
+}
+
+async function runActionRunnerEntrypoint(): Promise<void> {
+  const runnerIndex = process.argv.indexOf(RUNNER_ARG);
+  if (runnerIndex < 0) return;
+  try {
+    const input = JSON.parse(process.argv[runnerIndex + 1] ?? '') as { directory: string; sessionId: string; jobId: string; actionName: SessionEndActionName; attempt: number; ownerNonce: string; runnerNonce: string; runPath: string; deadlineAt: number };
+    while (Date.now() < input.deadlineAt) {
+      let armed = false;
+      try {
+        const arm = JSON.parse(fs.readFileSync(path.join(input.runPath, 'arm.json'), 'utf8')) as { runnerNonce?: string; ownerNonce?: string };
+        const job = readSessionEndJob(input.directory, input.sessionId);
+        const action = job?.actions[input.actionName];
+        armed = job?.jobId === input.jobId && job.owner?.nonce === input.ownerNonce && action?.status === 'claimed' && action.attempts === input.attempt && action.claimantNonce === input.ownerNonce && action.runner?.runnerNonce === input.runnerNonce && action.runner.phase === 'armed' && arm.runnerNonce === input.runnerNonce && arm.ownerNonce === input.ownerNonce;
+      } catch { /* publication is not complete yet */ }
+      if (armed) break;
+      await new Promise(resolve => setTimeout(resolve, 10));
+    }
+    if (Date.now() >= input.deadlineAt) throw new Error('runner-arm-deadline');
+    const deadlineTimer = setTimeout(() => { process.exitCode = 124; process.exit(); }, Math.max(1, input.deadlineAt - Date.now()));
+    deadlineTimer.unref();
+    const { executeSessionEndAction } = await import('./worker.js');
+    await executeSessionEndAction(input.actionName, { directory: input.directory, sessionId: input.sessionId }, input.deadlineAt, {
+      jobId: input.jobId,
+      actionName: input.actionName,
+      attempt: input.attempt,
+      ownerNonce: input.ownerNonce,
+      runnerNonce: input.runnerNonce,
+    });
+    clearTimeout(deadlineTimer);
+    process.exitCode = 0;
+  } catch {
+    process.exitCode = 1;
+  }
+}
+void runActionRunnerEntrypoint();

@@ -1,0 +1,1566 @@
+#!/usr/bin/env node
+
+/**
+ * OMC Persistent Mode Hook (Node.js)
+ * Minimal continuation enforcer for all OMC modes.
+ * Stripped down for reliability — no optional imports, no PRD, no notepad pruning.
+ *
+ * Supported modes: ralph, autopilot, ultrapilot, swarm, pipeline, team
+ */
+
+import { hardenWindowsExeSearch } from './lib/windows-search.mjs';
+import {
+  existsSync,
+  readFileSync,
+  readdirSync,
+  realpathSync,
+  mkdirSync,
+  unlinkSync,
+  openSync,
+  closeSync,
+} from "fs";
+import { stripLeadingUtf8Bom } from './lib/utf8-bom.mjs';
+import { createHash } from 'node:crypto';
+import { join, dirname, resolve, normalize, sep } from "path";
+import { homedir } from "os";
+import { fileURLToPath, pathToFileURL } from "url";
+
+hardenWindowsExeSearch();
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = dirname(__filename);
+
+const SAFE_CONTINUE = { continue: true, suppressOutput: true };
+const DEFAULT_SAFETY_TIMEOUT_MS = 8500;
+const SAFE_EXIT_FLUSH_TIMEOUT_MS = 100;
+
+
+function getSafetyTimeoutMs() {
+  const raw = (process.env.OMC_PERSISTENT_MODE_TIMEOUT_MS || "").trim();
+  if (!/^\d+$/.test(raw)) return DEFAULT_SAFETY_TIMEOUT_MS;
+  const parsed = Number(raw);
+  return Number.isSafeInteger(parsed) && parsed > 0 ? parsed : DEFAULT_SAFETY_TIMEOUT_MS;
+}
+
+function writeSafeContinue(onFlushed) {
+  let settled = false;
+  const finish = () => {
+    if (settled) return;
+    settled = true;
+    if (onFlushed) onFlushed();
+  };
+
+  try {
+    const ok = process.stdout.write(JSON.stringify(SAFE_CONTINUE) + "\n", finish);
+    if (!ok) {
+      process.stdout.once("drain", finish);
+    }
+    const timeout = setTimeout(finish, SAFE_EXIT_FLUSH_TIMEOUT_MS);
+    if (!onFlushed) timeout.unref?.();
+  } catch {
+    // If stdout is unavailable, exiting still prevents a wedged Stop hook.
+    finish();
+  }
+}
+
+function shouldSkipPersistentModeHook() {
+  const skipHooks = (process.env.OMC_SKIP_HOOKS || "")
+    .split(",")
+    .map((hook) => hook.trim())
+    .filter(Boolean);
+
+  return (
+    process.env.DISABLE_OMC === "1" ||
+    process.env.DISABLE_OMC === "true" ||
+    skipHooks.includes("persistent-mode") ||
+    skipHooks.includes("stop-continuation")
+  );
+}
+
+function forceSafeExit(message) {
+  try {
+    if (message) process.stderr.write(message + "\n");
+  } catch {
+    // Ignore stderr failures; the JSON decision is what matters.
+  }
+  writeSafeContinue(() => process.exit(0));
+}
+
+const safetyTimeout = setTimeout(() => {
+  forceSafeExit("[persistent-mode] Safety timeout reached, forcing exit");
+}, getSafetyTimeoutMs());
+
+process.on("uncaughtException", (error) => {
+  forceSafeExit(`[persistent-mode] Uncaught exception: ${error?.message || error}`);
+});
+
+process.on("unhandledRejection", (error) => {
+  forceSafeExit(`[persistent-mode] Unhandled rejection: ${error?.message || error}`);
+});
+
+const { getClaudeConfigDir } = await import(pathToFileURL(join(__dirname, "lib", "config-dir.mjs")).href);
+const { readStdin } = await import(
+  pathToFileURL(join(__dirname, "lib", "stdin.mjs")).href
+);
+const { resolveOmcStateRoot } = await import(pathToFileURL(join(__dirname, "lib", "state-root.mjs")).href);
+const { advanceWorkflowOnStop, isValidWorkflowDescriptor, isValidWorkflowTrackingState, isWorkflowRuntimeSupported, refreshWorkflowBoundaryForCommit, resolveWorkflowStagePrompt, takeWorkflowTranscriptFailure } = await import(pathToFileURL(join(__dirname, "lib", "workflow-profile-runtime.mjs")).href);
+const { acquireStateFileLockSync, atomicWriteFileSync, getStateFileLockFailureMessage, isExclusiveStateLockingAvailable, isStateFileLockingSupported, releaseStateFileLockSync, withStateFileLockSync } = await import(pathToFileURL(join(__dirname, "lib", "atomic-write.mjs")).href);
+
+function readJsonFile(path) {
+  try {
+    if (!existsSync(path)) return null;
+    return JSON.parse(readFileSync(path, "utf-8"));
+  } catch {
+    return null;
+  }
+}
+
+function lockFailureReason(operation) {
+  const message = getStateFileLockFailureMessage();
+  return `[OMC] ${operation} failed: ${message} Retry the operation after the lock holder exits.`;
+}
+
+/**
+ * A contended or unverifiable state lock is diagnostic, never a turn blocker.
+ * The uncommitted transition is re-derived on the next invocation, so the
+ * stage/phase prompt must still reach the agent; surfacing the shortfall on
+ * stderr keeps #4016's actionable message without losing that contract.
+ */
+function reportLockFailure(operation) {
+  try {
+    console.error(lockFailureReason(operation));
+  } catch {
+    // Diagnostics never affect control flow.
+  }
+}
+
+function writeJsonFile(path, data) {
+  try {
+    atomicWriteFileSync(path, JSON.stringify(data, null, 2));
+    return true;
+  } catch { return false; }
+}
+
+function workflowStopResponse(state) {
+  const stage = state?.workflow?.stages?.[state?.pipelineTracking?.currentStageIndex];
+  if (!stage) return { continue: false, decision: "block", reason: "[AUTOPILOT WORKFLOW] All selected stages are complete." };
+  const prompt = resolveWorkflowStagePrompt(state, stage);
+  return { continue: false, decision: "block", reason: prompt || "[AUTOPILOT WORKFLOW] workflow_stage_dispatch_failed. Run /cancel and re-invoke the workflow." };
+}
+
+function commitWorkflowAdvance(path, advance) {
+  const lock = acquireStateFileLockSync(path);
+  if (!lock) { reportLockFailure('Autopilot workflow state transition'); return { committed: false, state: readJsonFile(path) }; }
+  let result;
+  try {
+    const current = readJsonFile(path);
+    const currentStage = current?.pipelineTracking?.stages?.[advance.expectedStageIndex];
+    if (!isValidWorkflowDescriptor(current?.workflow) || !isValidWorkflowTrackingState(current, advance.expectedSessionId) || current.workflowRunId !== advance.expectedWorkflowRunId || current?.pipelineTracking?.trackingRevision !== advance.expectedRevision || current.workflow.profileHash !== advance.expectedProfileHash || current?.session_id !== advance.expectedSessionId || current?.active !== true || current?.pipelineTracking?.currentStageIndex !== advance.expectedStageIndex || currentStage?.id !== advance.expectedStageId || currentStage?.status !== 'active') {
+      result = { committed: false, state: current };
+    } else if (!refreshWorkflowBoundaryForCommit(advance)) {
+      result = { committed: false, state: current };
+    } else if (!writeJsonFile(path, advance.updated)) {
+      result = { committed: false, state: readJsonFile(path) };
+    } else {
+      result = { committed: true, state: advance.updated };
+    }
+  } finally {
+    if (!releaseStateFileLockSync(lock)) { reportLockFailure('Autopilot workflow state transition release'); result = { committed: false, state: readJsonFile(path) }; }
+  }
+  return result;
+}
+
+function refreshNamedWorkflowDispatch(path, expected) {
+  const lock = acquireStateFileLockSync(path);
+  if (!lock) { reportLockFailure('Autopilot workflow state refresh'); return { committed: false, state: readJsonFile(path) }; }
+  let result;
+  try {
+    const current = readJsonFile(path);
+    const currentStage = current?.pipelineTracking?.stages?.[expected.stageIndex];
+    if (!isValidWorkflowDescriptor(current?.workflow) || !isValidWorkflowTrackingState(current, expected.sessionId)) {
+      result = { committed: false, state: current, integrityFailed: true };
+    } else if (current?.workflowRunId !== expected.workflowRunId || current?.session_id !== expected.sessionId || current?.workflow?.profileHash !== expected.profileHash || current?.pipelineTracking?.trackingRevision !== expected.trackingRevision || current?.pipelineTracking?.currentStageIndex !== expected.stageIndex || currentStage?.id !== expected.stageId || currentStage?.status !== 'active' || current?.phase !== expected.phase || current?.active !== true) {
+      result = { committed: false, state: current };
+    } else {
+      const now = new Date().toISOString();
+      const refreshed = { ...current, last_checked_at: now, updated_at: now };
+      result = writeJsonFile(path, refreshed)
+        ? { committed: true, state: refreshed }
+        : { committed: false, state: readJsonFile(path) };
+    }
+  } finally {
+    if (!releaseStateFileLockSync(lock)) { reportLockFailure('Autopilot workflow state refresh release'); result = { committed: false, state: readJsonFile(path) }; }
+  }
+  return result;
+}
+
+function shouldWriteStateBack(path) {
+  return Boolean(path && existsSync(path));
+}
+
+/**
+ * Read last tool error from state directory.
+ * Returns null if file doesn't exist or error is stale (>60 seconds old).
+ */
+function readLastToolError(stateDir) {
+  const errorPath = join(stateDir, "last-tool-error.json");
+  const toolError = readJsonFile(errorPath);
+
+  if (!toolError || !toolError.timestamp) return null;
+
+  // Check staleness - errors older than 60 seconds are ignored
+  const parsedTime = new Date(toolError.timestamp).getTime();
+  if (!Number.isFinite(parsedTime)) {
+    return null; // Invalid timestamp = stale
+  }
+  const age = Date.now() - parsedTime;
+  if (age > 60000) return null;
+
+  return toolError;
+}
+
+/**
+ * Clear tool error state file atomically.
+ */
+function clearToolErrorState(stateDir) {
+  const errorPath = join(stateDir, "last-tool-error.json");
+  try {
+    if (existsSync(errorPath)) {
+      unlinkSync(errorPath);
+    }
+  } catch {
+    // Ignore errors - file may have been removed already
+  }
+}
+
+/**
+ * Generate retry guidance message for tool errors.
+ * After 5+ retries, suggests alternative approaches.
+ */
+function getToolErrorRetryGuidance(toolError) {
+  if (!toolError) return "";
+
+  const retryCount = toolError.retry_count || 1;
+  const toolName = toolError.tool_name || "unknown";
+  const error = toolError.error || "Unknown error";
+
+  if (retryCount >= 5) {
+    return `[TOOL ERROR - ALTERNATIVE APPROACH NEEDED]
+The "${toolName}" operation has failed ${retryCount} times.
+
+STOP RETRYING THE SAME APPROACH. Instead:
+1. Try a completely different command or approach
+2. Check if the environment/dependencies are correct
+3. Consider breaking down the task differently
+4. If stuck, ask the user for guidance
+
+`;
+  }
+
+  return `[TOOL ERROR - RETRY REQUIRED]
+The previous "${toolName}" operation failed.
+
+Error: ${error}
+
+REQUIRED ACTIONS:
+1. Analyze why the command failed
+2. Fix the issue (wrong path? permission? syntax? missing dependency?)
+3. RETRY the operation with corrected parameters
+4. Continue with your original task after success
+
+Do NOT skip this step. Do NOT move on without fixing the error.
+
+`;
+}
+
+/**
+ * Staleness threshold for mode states (2 hours in milliseconds).
+ * States older than this are treated as inactive to prevent stale state
+ * from causing the stop hook to malfunction in new sessions.
+ */
+const STALE_STATE_THRESHOLD_MS = 2 * 60 * 60 * 1000; // 2 hours
+const PENDING_ASYNC_STATE_STALE_MS = 24 * 60 * 60 * 1000;
+const TEAM_TERMINAL_PHASES = new Set([
+  "completed",
+  "complete",
+  "failed",
+  "cancelled",
+  "canceled",
+  "aborted",
+  "terminated",
+  "done",
+]);
+const TEAM_ACTIVE_PHASES = new Set([
+  "team-plan",
+  "team-prd",
+  "team-exec",
+  "team-verify",
+  "team-fix",
+  "planning",
+  "executing",
+  "verify",
+  "verification",
+  "fix",
+  "fixing",
+]);
+
+/**
+ * Get hard max iterations for persistent modes.
+ * Mirrors src/lib/security-config.ts getSecurityConfig(): default 500;
+ * OMC_SECURITY=strict caps at 200 and a config value may only tighten it.
+ * Returns 0 for unlimited (only reachable outside strict mode).
+ */
+function getHardMaxIterations() {
+  const raw = readSecurityConfigValue("hardMaxIterations");
+  // Mirror sanitizeSecurityOverrides(): only non-negative integers are honored.
+  const configValue = typeof raw === "number" && Number.isInteger(raw) && raw >= 0 ? raw : undefined;
+  if (process.env.OMC_SECURITY === "strict") {
+    return Math.min(200, typeof configValue === "number" && configValue > 0 ? configValue : 200);
+  }
+  return typeof configValue === "number" ? configValue : 500;
+}
+
+/**
+ * Read a single value from the security section of omc config files.
+ * Mirrors src/lib/security-config.ts loadSecurityFromConfigFiles(): the first
+ * config file with a security section wins.
+ */
+function readSecurityConfigValue(key) {
+  const paths = [
+    join(process.cwd(), ".claude", "omc.jsonc"),
+    join(getOmcUserConfigDir(), "claude-omc", "config.jsonc"),
+  ];
+  for (const p of paths) {
+    try {
+      if (!existsSync(p)) continue;
+      const parsed = JSON.parse(stripJsoncComments(readFileSync(p, "utf-8")));
+      if (parsed?.security && typeof parsed.security === "object" && !Array.isArray(parsed.security)) {
+        return parsed.security[key];
+      }
+    } catch {
+      // ignore
+    }
+  }
+  return undefined;
+}
+
+// Inlined so the standalone hook stays build-independent
+// (mirrors scripts/keyword-detector.mjs and src/utils/jsonc.ts).
+function getOmcUserConfigDir() {
+  if (process.platform === 'win32') {
+    return process.env.APPDATA || join(homedir(), 'AppData', 'Roaming');
+  }
+  return process.env.XDG_CONFIG_HOME || join(homedir(), '.config');
+}
+
+// Mirrors src/utils/jsonc.ts:stripJsoncComments (strips a leading BOM, comments AND trailing commas)
+function stripJsoncComments(content) {
+  return stripTrailingCommas(stripComments(stripLeadingUtf8Bom(content)));
+}
+
+
+function stripComments(content) {
+  let result = '';
+  let i = 0;
+  while (i < content.length) {
+    if (content[i] === '/' && content[i + 1] === '/') {
+      while (i < content.length && content[i] !== '\n') i++;
+      continue;
+    }
+    if (content[i] === '/' && content[i + 1] === '*') {
+      i += 2;
+      while (i < content.length && !(content[i] === '*' && content[i + 1] === '/')) i++;
+      if (i >= content.length) throw new SyntaxError('Unterminated JSONC block comment');
+      i += 2;
+      result += ' ';
+      continue;
+    }
+    if (content[i] === '"') {
+      result += content[i++];
+      while (i < content.length && content[i] !== '"') {
+        if (content[i] === '\\') {
+          result += content[i++];
+          if (i < content.length) result += content[i++];
+          continue;
+        }
+        result += content[i++];
+      }
+      if (i < content.length) result += content[i++];
+      continue;
+    }
+    result += content[i++];
+  }
+  return result;
+}
+
+// Mirrors src/utils/jsonc.ts:stripTrailingCommas (comma before a closing } or ]).
+function stripTrailingCommas(content) {
+  let result = '';
+  let i = 0;
+  while (i < content.length) {
+    if (content[i] === '"') {
+      result += content[i++];
+      while (i < content.length && content[i] !== '"') {
+        if (content[i] === '\\') {
+          result += content[i++];
+          if (i < content.length) result += content[i++];
+          continue;
+        }
+        result += content[i++];
+      }
+      if (i < content.length) result += content[i++];
+      continue;
+    }
+    if (content[i] === ',') {
+      let j = i + 1;
+      while (j < content.length && /\s/.test(content[j])) j++;
+      if (content[j] === '}' || content[j] === ']') {
+        i++;
+        continue;
+      }
+    }
+    result += content[i++];
+  }
+  return result;
+}
+
+/**
+ * Check if a state is stale based on its timestamps.
+ * A state is considered stale if it hasn't been updated recently.
+ * We check `last_checked_at`, `updated_at`, and `started_at` - using whichever is more recent.
+ */
+function isStaleState(state) {
+  if (!state) return true;
+
+  const timestamps = [state.last_checked_at, state.updated_at, state.started_at].filter(
+    (value) => typeof value === "string" && value.length > 0,
+  );
+  const mostRecent = timestamps.reduce((max, value) => {
+    const parsed = new Date(value).getTime();
+    return Number.isFinite(parsed) && parsed > max ? parsed : max;
+  }, 0);
+
+  if (mostRecent === 0) return true; // No valid timestamps
+
+  const age = Date.now() - mostRecent;
+  return age > STALE_STATE_THRESHOLD_MS;
+}
+
+
+function parseTimestamp(value) {
+  if (typeof value !== "string" || value.length === 0) return null;
+  const parsed = new Date(value).getTime();
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
+function isFreshTimestamp(value, ttlMs = PENDING_ASYNC_STATE_STALE_MS) {
+  const parsed = parseTimestamp(value);
+  return parsed !== null && Date.now() - parsed <= ttlMs;
+}
+
+function hasPendingBackgroundTask(stateDir, sessionId) {
+  const safeSessionId = sanitizeSessionId(sessionId);
+  const hudPath = safeSessionId
+    ? join(stateDir, "sessions", safeSessionId, "hud-state.json")
+    : join(stateDir, "hud-state.json");
+  const hudState = readJsonFile(hudPath);
+  return Boolean(hudState?.backgroundTasks?.some((task) => {
+    if (task?.status !== "running") return false;
+    return isFreshTimestamp(task.startedAt ?? task.startTime);
+  }));
+}
+
+function readPendingWakeupStates(stateDir, sessionId) {
+  const safeSessionId = sanitizeSessionId(sessionId);
+  const dirs = safeSessionId ? [join(stateDir, "sessions", safeSessionId), stateDir] : [stateDir];
+  const fileNames = ["scheduled-wakeup-state.json", "schedule-wakeup-state.json", "wakeup-state.json"];
+  const states = [];
+  for (const dir of dirs) {
+    for (const fileName of fileNames) {
+      const state = readJsonFile(join(dir, fileName));
+      if (state && typeof state === "object") states.push(state);
+    }
+  }
+  return states;
+}
+
+function hasPendingScheduledWakeup(stateDir, sessionId) {
+  const now = Date.now();
+  return readPendingWakeupStates(stateDir, sessionId).some((state) => {
+    const status = typeof state.status === "string" ? state.status.toLowerCase() : "";
+    if (["completed", "complete", "cancelled", "canceled", "failed", "expired"].includes(status)) {
+      return false;
+    }
+    const dueAt = parseTimestamp(
+      state.due_at ?? state.wakeup_at ?? state.scheduled_for ?? state.deadline_at ?? state.expires_at,
+    );
+    if (dueAt !== null) return dueAt > now;
+    if (state.active === true || state.pending === true) {
+      return isFreshTimestamp(state.created_at ?? state.updated_at ?? state.started_at);
+    }
+    return false;
+  });
+}
+
+function hasPendingOwnedAsyncWork(stateDir, sessionId) {
+  return hasPendingBackgroundTask(stateDir, sessionId) || hasPendingScheduledWakeup(stateDir, sessionId);
+}
+
+function normalizeTeamPhase(state) {
+  if (!state || typeof state !== "object") return null;
+
+  const rawPhase = state.current_phase ?? state.phase ?? state.stage;
+  if (typeof rawPhase !== "string") return null;
+
+  const phase = rawPhase.trim().toLowerCase();
+  if (!phase || TEAM_TERMINAL_PHASES.has(phase)) return null;
+  return TEAM_ACTIVE_PHASES.has(phase) ? phase : null;
+}
+
+function getSafeReinforcementCount(value) {
+  return typeof value === "number" && Number.isFinite(value) && value >= 0
+    ? Math.floor(value)
+    : 0;
+}
+
+const AWAITING_CONFIRMATION_TTL_MS = 2 * 60 * 1000;
+
+function isAwaitingConfirmation(state) {
+  if (!state || state.awaiting_confirmation !== true) {
+    return false;
+  }
+
+  const setAt =
+    state.awaiting_confirmation_set_at ||
+    state.started_at ||
+    null;
+
+  if (!setAt) {
+    return false;
+  }
+
+  const setAtMs = new Date(setAt).getTime();
+  if (!Number.isFinite(setAtMs)) {
+    return false;
+  }
+
+  return Date.now() - setAtMs < AWAITING_CONFIRMATION_TTL_MS;
+}
+
+/**
+ * Check if a skill active state is stale based on its per-skill TTL.
+ * Unlike mode states (which use the global 2-hour threshold), skill states
+ * carry their own stale_ttl_ms value set when the skill was activated.
+ */
+function isStaleSkillState(state) {
+  if (!state) return true;
+  if (!state.active) return true;
+
+  const lastChecked = state.last_checked_at
+    ? new Date(state.last_checked_at).getTime()
+    : 0;
+  const startedAt = state.started_at ? new Date(state.started_at).getTime() : 0;
+  const mostRecent = Math.max(lastChecked, startedAt);
+
+  if (mostRecent === 0) return true;
+
+  const ttl = state.stale_ttl_ms || 5 * 60 * 1000; // Default 5 min
+  const age = Date.now() - mostRecent;
+  return age > ttl;
+}
+
+/**
+ * Check if a cancel signal is in progress for the session.
+ * Cancel signals are written by state_clear and expire after 30 seconds.
+ * @param {string} stateDir - The .omc/state directory path
+ * @param {string} sessionId - Optional session ID
+ * @returns {boolean} true if cancel is in progress
+ */
+function isSessionCancelInProgress(stateDir, sessionId, currentAutopilotPath, cancellationContext) {
+  const CANCEL_SIGNAL_TTL_MS = 30000; // 30 seconds
+  const CANCEL_SIGNAL_CLOCK_SKEW_MS = 5000;
+  let authenticatedAutopilot = null;
+  const validateSignal = (signalPath, currentAutopilot) => {
+    let active = false;
+    const locked = withStateFileLockSync(signalPath, () => {
+      const signal = readJsonFile(signalPath);
+      if (!signal || typeof signal !== "object" || Array.isArray(signal) || signal.active !== true) return;
+      const now = Date.now();
+      const requestedAt = typeof signal.requested_at === "string" ? new Date(signal.requested_at).getTime() : NaN;
+      const expiresAt = typeof signal.expires_at === "string" ? new Date(signal.expires_at).getTime() : NaN;
+      if (!Number.isFinite(requestedAt)) return;
+      const isFreshRequest = requestedAt <= now + CANCEL_SIGNAL_CLOCK_SKEW_MS && now - requestedAt <= CANCEL_SIGNAL_TTL_MS;
+      if (!currentAutopilot) {
+        const effectiveExpiry = Number.isFinite(expiresAt) ? expiresAt : requestedAt + CANCEL_SIGNAL_TTL_MS;
+        if (Number.isFinite(effectiveExpiry) && effectiveExpiry <= now && existsSync(signalPath)) unlinkSync(signalPath);
+        if (signal.mode === "autopilot" || Object.prototype.hasOwnProperty.call(signal, "target_state_sha256") || Object.prototype.hasOwnProperty.call(signal, "target_workflow_run_id")) return;
+        if (isFreshRequest && effectiveExpiry > requestedAt && effectiveExpiry - requestedAt <= CANCEL_SIGNAL_TTL_MS && effectiveExpiry > now) active = true;
+        return;
+      }
+      if (!isFreshRequest) {
+        if (Number.isFinite(expiresAt) && expiresAt <= now && existsSync(signalPath)) unlinkSync(signalPath);
+        return;
+      }
+      if (signal.mode !== "autopilot" || typeof signal.source !== "string" || signal.source.length === 0) return;
+      if (!Number.isFinite(expiresAt) || expiresAt <= requestedAt || expiresAt - requestedAt > CANCEL_SIGNAL_TTL_MS) return;
+      if (expiresAt <= now) {
+        if (existsSync(signalPath)) unlinkSync(signalPath);
+        return;
+      }
+      const stateDigest = createHash("sha256").update(JSON.stringify(currentAutopilot)).digest("hex");
+      if (typeof signal.target_state_sha256 !== "string" || !/^[a-f0-9]{64}$/.test(signal.target_state_sha256) || signal.target_state_sha256 !== stateDigest) return;
+      if (currentAutopilot.workflowRunId && signal.target_workflow_run_id !== currentAutopilot.workflowRunId) return;
+      if (!currentAutopilot.workflowRunId && signal.target_workflow_run_id) return;
+      active = true;
+    }, currentAutopilot !== null);
+    return locked.acquired && active;
+  };
+  const isActiveSignal = (signalPath) => {
+    if (!existsSync(signalPath)) return false;
+    if (!currentAutopilotPath || !cancellationContext) return validateSignal(signalPath, null);
+    // The flock-absent contract lives here rather than inside the lock
+    // primitive: with no exclusive backend to fail closed against, this path
+    // must not authenticate state through the best-effort fallback lock, while
+    // emergency recovery still gets its SQLite-backed exclusive claim.
+    const stateLock = isExclusiveStateLockingAvailable()
+      ? acquireStateFileLockSync(currentAutopilotPath, 50, true)
+      : null;
+    if (!stateLock) {
+      // A real contender holds the lock only when exclusive acquisition is
+      // actually available; without it, fall through to the enforceability check.
+      if (isExclusiveStateLockingAvailable()) return false;
+      const currentAutopilot = readJsonFile(currentAutopilotPath);
+      if (isEnforceableAutopilotCancellationTarget(currentAutopilot, cancellationContext.directory, cancellationContext.isGlobal, cancellationContext.hasValidSessionId, sessionId)) return false;
+      return validateSignal(signalPath, null);
+    }
+    try {
+      const currentAutopilot = readJsonFile(currentAutopilotPath);
+      if (!isEnforceableAutopilotCancellationTarget(currentAutopilot, cancellationContext.directory, cancellationContext.isGlobal, cancellationContext.hasValidSessionId, sessionId)) return validateSignal(signalPath, null);
+      authenticatedAutopilot = currentAutopilot;
+      return validateSignal(signalPath, currentAutopilot);
+    } finally {
+      releaseStateFileLockSync(stateLock);
+    }
+  };
+
+  const localSignalPath = currentAutopilotPath && join(dirname(currentAutopilotPath), "cancel-signal-state.json");
+  if (localSignalPath && isActiveSignal(localSignalPath)) return { active: true, currentAutopilot: authenticatedAutopilot };
+  if (sessionId) {
+    const sessionSignalPath = join(stateDir, "sessions", sessionId, "cancel-signal-state.json");
+    if (sessionSignalPath !== localSignalPath && isActiveSignal(sessionSignalPath)) return { active: true, currentAutopilot: authenticatedAutopilot };
+  }
+  const legacySignalPath = join(stateDir, "cancel-signal-state.json");
+  if (legacySignalPath !== localSignalPath && isActiveSignal(legacySignalPath)) return { active: true, currentAutopilot: authenticatedAutopilot };
+  return { active: false, currentAutopilot: authenticatedAutopilot };
+}
+
+function hasNamedWorkflowMarkers(state) {
+  return Boolean(
+    state &&
+    typeof state === "object" &&
+    ['workflow', 'workflowRunId', 'pipelineTracking'].some((marker) => Object.prototype.hasOwnProperty.call(state, marker)),
+  );
+}
+
+function hasExactWorkflowKeys(value, keys) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return false;
+  const actual = Object.keys(value).sort();
+  const expected = [...keys].sort();
+  return actual.length === expected.length && actual.every((key, index) => key === expected[index]);
+}
+
+function isWorkflowTimestamp(value) {
+  return typeof value === "string" && Number.isFinite(Date.parse(value));
+}
+
+function isWorkflowFileIdentity(value) {
+  return hasExactWorkflowKeys(value, ["device", "inode", "size", "mtimeNs", "ctimeNs", "contentSha256"]) &&
+    [value.device, value.inode, value.size].every((field) => Number.isSafeInteger(field) && field >= 0) &&
+    /^\d+$/.test(value.mtimeNs) && /^\d+$/.test(value.ctimeNs) && /^[a-f0-9]{64}$/.test(value.contentSha256);
+}
+
+
+function hasWorkflowBoundaryTopology(value, sessionId) {
+  let root;
+  try { root = realpathSync(resolve(getClaudeConfigDir(), "projects")); } catch { root = resolve(getClaudeConfigDir(), "projects"); }
+  if (!hasExactWorkflowKeys(value, ["transcriptPath", "transcriptRoot", "transcriptBasename", "sessionId", "byteOffset", "fileIdentity"]) ||
+    typeof value.transcriptPath !== "string" || value.transcriptRoot !== root || value.transcriptBasename !== `${sessionId}.jsonl` || value.sessionId !== sessionId ||
+    !Number.isSafeInteger(value.byteOffset) || value.byteOffset < 0 || !isWorkflowFileIdentity(value.fileIdentity) ||
+    value.fileIdentity.size !== value.byteOffset) return false;
+  if (resolve(value.transcriptPath) !== value.transcriptPath || !value.transcriptPath.startsWith(root + sep)) return false;
+  const relativePath = value.transcriptPath.slice(root.length + sep.length);
+  return relativePath.length > 0 && relativePath.split(sep).every((component) => component && component !== "." && component !== "..") &&
+    value.transcriptPath.endsWith(`${sep}${sessionId}.jsonl`);
+}
+
+function workflowFileIdentityEquals(left, right) {
+  return left.device === right.device && left.inode === right.inode && left.size === right.size &&
+    left.mtimeNs === right.mtimeNs && left.ctimeNs === right.ctimeNs && left.contentSha256 === right.contentSha256;
+}
+
+function isStructurallyValidNamedWorkflowState(state, sessionId) {
+  const workflow = state?.workflow;
+  const tracking = state?.pipelineTracking;
+  if (!isValidWorkflowDescriptor(workflow) || typeof state?.prompt !== "string" || state.prompt.trim().length === 0 ||
+    typeof state?.workflowRunId !== "string" || !/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(state.workflowRunId) || state?.session_id !== sessionId) return false;
+  const terminal = state.active === false && state.phase === "complete";
+  const maxIndex = terminal ? workflow.stages.length : workflow.stages.length - 1;
+  if (!hasExactWorkflowKeys(tracking, ["stages", "currentStageIndex", "trackingRevision", "activationBoundary", "completionObservations"]) ||
+    !Array.isArray(tracking.stages) || !Array.isArray(tracking.completionObservations) || !Number.isSafeInteger(tracking.currentStageIndex) || tracking.currentStageIndex < 0 || tracking.currentStageIndex > maxIndex ||
+    !Number.isSafeInteger(tracking.trackingRevision) || tracking.trackingRevision !== tracking.currentStageIndex ||
+    (terminal && (tracking.currentStageIndex !== workflow.stages.length || tracking.completionObservations.length !== workflow.stages.length)) ||
+    (!terminal && !((state.active === true || state.active === false) && state.phase === workflow.stages[tracking.currentStageIndex])) ||
+    tracking.stages.length !== workflow.stages.length || tracking.completionObservations.length !== tracking.currentStageIndex || !hasWorkflowBoundaryTopology(tracking.activationBoundary, sessionId)) return false;
+  for (let index = 0; index < tracking.stages.length; index += 1) {
+    const stage = tracking.stages[index];
+    const status = terminal || index < tracking.currentStageIndex ? "complete" : index === tracking.currentStageIndex ? "active" : "pending";
+    const keys = status === "complete" ? ["id", "status", "iterations", "startedAt", "completedAt"] : status === "active" ? ["id", "status", "iterations", "startedAt"] : ["id", "status", "iterations"];
+    if (!hasExactWorkflowKeys(stage, keys) || stage.id !== workflow.stages[index] || stage.status !== status || !Number.isSafeInteger(stage.iterations) || stage.iterations < 0 || (stage.startedAt !== undefined && !isWorkflowTimestamp(stage.startedAt)) || (stage.completedAt !== undefined && !isWorkflowTimestamp(stage.completedAt))) return false;
+  }
+  let previous;
+  for (let index = 0; index < tracking.completionObservations.length; index += 1) {
+    const observation = tracking.completionObservations[index];
+    if (!hasExactWorkflowKeys(observation, ["stageId", "sessionId", "signalId", "lineNumber", "byteOffset", "recordContentSha256", "stableFile", "activationBoundary", "observedAt"]) || observation.stageId !== workflow.stages[index] || observation.sessionId !== sessionId || observation.signalId !== `PIPELINE_${observation.stageId.toUpperCase()}_COMPLETE` || !Number.isSafeInteger(observation.lineNumber) || observation.lineNumber < 0 || !Number.isSafeInteger(observation.byteOffset) || !/^[a-f0-9]{64}$/.test(observation.recordContentSha256) || !isWorkflowTimestamp(observation.observedAt) || !isWorkflowFileIdentity(observation.stableFile) || !hasWorkflowBoundaryTopology(observation.activationBoundary, sessionId) || observation.byteOffset < observation.activationBoundary.byteOffset || observation.byteOffset >= observation.stableFile.size || (previous && (observation.activationBoundary.transcriptPath !== previous.activationBoundary.transcriptPath || observation.activationBoundary.byteOffset !== previous.stableFile.size || !workflowFileIdentityEquals(observation.activationBoundary.fileIdentity, previous.stableFile)))) return false;
+    previous = observation;
+  }
+  const latest = tracking.completionObservations.at(-1);
+  return !latest || (tracking.activationBoundary.transcriptPath === latest.activationBoundary.transcriptPath && tracking.activationBoundary.byteOffset === latest.stableFile.size && workflowFileIdentityEquals(tracking.activationBoundary.fileIdentity, latest.stableFile));
+}
+
+function isValidNamedWorkflowState(state, sessionId) {
+  return isWorkflowRuntimeSupported()
+    ? isValidWorkflowDescriptor(state?.workflow) && isValidWorkflowTrackingState(state, sessionId)
+    : isStructurallyValidNamedWorkflowState(state, sessionId);
+}
+
+function isEnforceableAutopilotCancellationTarget(state, directory, isGlobal, hasValidSessionId, sessionId) {
+  if (!state?.active || isAwaitingConfirmation(state) || (isStaleState(state) && !hasNamedWorkflowMarkers(state))) return false;
+  if (!isStateForCurrentProject(state, directory, isGlobal)) return false;
+  if (hasValidSessionId ? state.session_id !== sessionId : state.session_id && state.session_id !== sessionId) return false;
+  return (state.phase || "unspecified") !== "complete";
+}
+
+function isCurrentAutopilotState(state, directory, isGlobal, hasValidSessionId, sessionId) {
+  if (!isStateForCurrentProject(state, directory, isGlobal)) return false;
+  return hasValidSessionId ? state?.session_id === sessionId : !state?.session_id || state.session_id === sessionId;
+}
+
+/**
+ * Normalize a path for comparison.
+ * Uses path.resolve() + path.normalize() for proper handling of:
+ * - Trailing slashes
+ * - Path separators (\ vs /)
+ * - Relative segments (../, ./)
+ * - Case sensitivity on Windows
+ */
+function normalizePath(p) {
+  if (!p) return "";
+  // resolve() makes the path absolute, normalize() cleans up separators and relative segments
+  let normalized = resolve(p);
+  normalized = normalize(normalized);
+  // Remove any trailing separators using a single regex that handles both / and \
+  normalized = normalized.replace(/[\/\\]+$/, "");
+  // On Windows, normalize to lowercase for case-insensitive comparison
+  if (process.platform === "win32") {
+    normalized = normalized.toLowerCase();
+  }
+  return normalized;
+}
+
+/**
+ * Check if a state belongs to the current project.
+ *
+ * For local state files: Accept legacy states without project_path for backward compatibility.
+ * For global state files: Require project_path to prevent cross-project leakage.
+ *
+ * @param state - The state object to check
+ * @param currentDirectory - The current working directory
+ * @param isGlobalState - Whether this state was loaded from global fallback path
+ */
+function isStateForCurrentProject(
+  state,
+  currentDirectory,
+  isGlobalState = false,
+) {
+  if (!state) return true;
+
+  // No project_path in state
+  if (!state.project_path) {
+    // For global state files, require project_path to prevent cross-project leakage
+    if (isGlobalState) {
+      return false;
+    }
+    // For local state files, accept legacy states for backward compatibility
+    return true;
+  }
+
+  // Compare normalized paths
+  return normalizePath(state.project_path) === normalizePath(currentDirectory);
+}
+
+/**
+ * Read state file from local or global location, tracking the source.
+ * Returns { state, path, isGlobal } to track where the state was loaded from.
+ */
+function readStateFile(stateDir, globalStateDir, filename) {
+  const localPath = join(stateDir, filename);
+  const globalPath = join(globalStateDir, filename);
+
+  let state = readJsonFile(localPath);
+  if (state) return { state, path: localPath, isGlobal: false };
+
+  state = readJsonFile(globalPath);
+  if (state) return { state, path: globalPath, isGlobal: true };
+
+  return { state: null, path: localPath, isGlobal: false }; // Default to local for new writes
+}
+
+const SESSION_ID_ALLOWLIST = /^[a-zA-Z0-9][a-zA-Z0-9_-]{0,255}$/;
+
+function sanitizeSessionId(sessionId) {
+  if (!sessionId || typeof sessionId !== "string") return "";
+  return SESSION_ID_ALLOWLIST.test(sessionId) ? sessionId : "";
+}
+
+function isValidSessionId(sessionId) {
+  return typeof sessionId === "string" && SESSION_ID_ALLOWLIST.test(sessionId);
+}
+
+/**
+ * Read state file with session-scoped path support.
+ * If sessionId is provided, prefers the session-scoped path, then scans other
+ * session directories and legacy state for matching ownership.
+ */
+
+function readStateFileWithSession(stateDir, globalStateDir, filename, sessionId) {
+  const safeSessionId = sanitizeSessionId(sessionId);
+  if (safeSessionId) {
+    const sessionsDir = join(stateDir, "sessions", safeSessionId);
+    const sessionPath = join(sessionsDir, filename);
+    const state = readJsonFile(sessionPath);
+    if (state) {
+      return { state, path: sessionPath, isGlobal: false };
+    }
+
+    try {
+      const allSessionsDir = join(stateDir, "sessions");
+      if (existsSync(allSessionsDir)) {
+        const dirs = readdirSync(allSessionsDir).filter((dir) => SESSION_ID_ALLOWLIST.test(dir));
+        for (const dir of dirs) {
+          const candidatePath = join(allSessionsDir, dir, filename);
+          const candidateState = readJsonFile(candidatePath);
+          if (candidateState && candidateState.session_id === safeSessionId) {
+            return { state: candidateState, path: candidatePath, isGlobal: false };
+          }
+        }
+      }
+    } catch {
+      // ignore scan failures
+    }
+
+    const legacyResult = readStateFile(stateDir, globalStateDir, filename);
+    if (legacyResult.state && legacyResult.state.session_id === safeSessionId) {
+      return legacyResult;
+    }
+
+    return { state: null, path: sessionPath, isGlobal: false };
+  }
+
+  return readStateFile(stateDir, globalStateDir, filename);
+}
+
+const WORKFLOW_SLOT_TOMBSTONE_TTL_MS = 24 * 60 * 60 * 1000;
+
+function isWorkflowSlotTombstonedForMode(stateDir, mode, sessionId) {
+  const safeSessionId = sanitizeSessionId(sessionId);
+  const ledgerPath = safeSessionId
+    ? join(stateDir, "sessions", safeSessionId, "skill-active-state.json")
+    : join(stateDir, "skill-active-state.json");
+  const ledger = readJsonFile(ledgerPath);
+  const slot = ledger?.active_skills?.[mode];
+  if (!slot || typeof slot !== "object") return false;
+  if (typeof slot.completed_at !== "string" || !slot.completed_at) return false;
+  const completedAt = new Date(slot.completed_at).getTime();
+  if (!Number.isFinite(completedAt)) return true;
+  return Date.now() - completedAt < WORKFLOW_SLOT_TOMBSTONE_TTL_MS;
+}
+
+function isAuthoritativeModeActive(stateDir, mode, loaded, sessionId) {
+  const state = loaded?.state;
+  if (!state?.active) return false;
+  if (isWorkflowSlotTombstonedForMode(stateDir, mode, sessionId)) return false;
+  const safeSessionId = sanitizeSessionId(sessionId);
+  if (safeSessionId && state.session_id && state.session_id !== safeSessionId) return false;
+  return true;
+}
+
+
+function getActiveSubagentCount(stateDir) {
+  try {
+    const tracking = readJsonFile(join(stateDir, "subagent-tracking.json"));
+    if (!tracking || !Array.isArray(tracking.agents)) {
+      return 0;
+    }
+    return tracking.agents.filter((agent) => agent?.status === "running").length;
+  } catch {
+    return 0;
+  }
+}
+
+
+
+/**
+ * Detect if stop was triggered by context-limit related reasons.
+ * When context is exhausted, Claude Code needs to stop so it can compact.
+ * Blocking these stops causes a deadlock: can't compact because can't stop,
+ * can't continue because context is full.
+ *
+ * See: https://github.com/Yeachan-Heo/oh-my-claudecode/issues/213
+ */
+function isContextLimitStop(data) {
+  const reason = (data.stop_reason || data.stopReason || "").toLowerCase();
+
+  const contextPatterns = [
+    "context_limit",
+    "context_window",
+    "context_exceeded",
+    "context_full",
+    "max_context",
+    "token_limit",
+    "max_tokens",
+    "conversation_too_long",
+    "input_too_long",
+  ];
+
+  if (contextPatterns.some((p) => reason.includes(p))) {
+    return true;
+  }
+
+  const endTurnReason = (
+    data.end_turn_reason ||
+    data.endTurnReason ||
+    ""
+  ).toLowerCase();
+  if (endTurnReason && contextPatterns.some((p) => endTurnReason.includes(p))) {
+    return true;
+  }
+
+  return false;
+}
+
+/**
+ * Detect if stop was triggered by user abort (Ctrl+C, cancel button, etc.)
+ */
+function isUserAbort(data) {
+  if (data.user_requested || data.userRequested) return true;
+
+  const reason = (data.stop_reason || data.stopReason || "").toLowerCase();
+  // Exact-match patterns: short generic words that cause false positives with .includes()
+  const exactPatterns = ["aborted", "abort", "cancel", "interrupt"];
+  // Substring patterns: compound words safe for .includes() matching
+  const substringPatterns = [
+    "user_cancel",
+    "user_interrupt",
+    "ctrl_c",
+    "manual_stop",
+  ];
+
+  return (
+    exactPatterns.some((p) => reason === p) ||
+    substringPatterns.some((p) => reason.includes(p))
+  );
+}
+
+const AUTHENTICATION_ERROR_PATTERNS = [
+  "authentication_error",
+  "authentication_failed",
+  "auth_error",
+  "unauthorized",
+  "unauthorised",
+  "401",
+  "403",
+  "forbidden",
+  "invalid_token",
+  "token_invalid",
+  "token_expired",
+  "expired_token",
+  "oauth_expired",
+  "oauth_token_expired",
+  "invalid_grant",
+  "insufficient_scope",
+];
+
+function isAuthenticationError(data) {
+  const reason = (data.stop_reason || data.stopReason || "").toLowerCase();
+  const endTurnReason = (
+    data.end_turn_reason ||
+    data.endTurnReason ||
+    ""
+  ).toLowerCase();
+
+  return AUTHENTICATION_ERROR_PATTERNS.some(
+    (pattern) => reason.includes(pattern) || endTurnReason.includes(pattern),
+  );
+}
+
+function isScheduledWakeupStop(data) {
+  const stopPatterns = [
+    "schedulewakeup",
+    "schedule_wakeup",
+    "scheduled_wakeup",
+    "scheduled_task",
+    "scheduled_resume",
+    "loop_resume",
+    "loop_wakeup",
+  ];
+
+  const toolName = String(data.tool_name || data.toolName || "").toLowerCase().replace(/[\s-]+/g, "_");
+  if (stopPatterns.some((pattern) => toolName.includes(pattern))) {
+    return true;
+  }
+
+  const reasons = [
+    data.stop_reason,
+    data.stopReason,
+    data.end_turn_reason,
+    data.endTurnReason,
+    data.reason,
+  ]
+    .filter((value) => typeof value === "string" && value.trim().length > 0)
+    .map((value) => value.toLowerCase().replace(/[\s-]+/g, "_"));
+
+  return reasons.some((reason) => stopPatterns.some((pattern) => reason.includes(pattern)));
+}
+
+async function main() {
+  try {
+    if (shouldSkipPersistentModeHook()) {
+      writeSafeContinue();
+      return;
+    }
+
+    const input = await readStdin();
+    let data = {};
+    try {
+      data = JSON.parse(input);
+    } catch {
+      // Invalid JSON - allow stop to prevent hanging
+      writeSafeContinue();
+      return;
+    }
+
+    const directory = data.cwd || data.directory || process.cwd();
+    const sessionIdRaw = data.sessionId || data.session_id || data.sessionid || "";
+    const sessionId = sanitizeSessionId(sessionIdRaw);
+    const hasValidSessionId = isValidSessionId(sessionIdRaw);
+    const omcRoot = await resolveOmcStateRoot(directory);
+    const stateDir = join(omcRoot, "state");
+    const globalStateDir = join(homedir(), ".omc", "state");
+
+    // CRITICAL: Never block context-limit stops.
+    // Blocking these causes a deadlock where Claude Code cannot compact.
+    // See: https://github.com/Yeachan-Heo/oh-my-claudecode/issues/213
+    if (isContextLimitStop(data)) {
+      console.log(JSON.stringify({ continue: true, suppressOutput: true }));
+      return;
+    }
+
+    // Respect user abort (Ctrl+C, cancel)
+    if (isUserAbort(data)) {
+      console.log(JSON.stringify({ continue: true, suppressOutput: true }));
+      return;
+    }
+
+    // Never block auth failures (401/403/expired OAuth): allow re-auth flow.
+    if (isAuthenticationError(data)) {
+      console.log(JSON.stringify({ continue: true, suppressOutput: true }));
+      return;
+    }
+
+    if (isScheduledWakeupStop(data)) {
+      console.log(JSON.stringify({ continue: true, suppressOutput: true }));
+      return;
+    }
+
+    if (hasPendingOwnedAsyncWork(stateDir, sessionId)) {
+      console.log(JSON.stringify({ continue: true, suppressOutput: true }));
+      return;
+    }
+
+    // Read all mode states (session-scoped when sessionId provided)
+    const ralph = readStateFileWithSession(
+      stateDir,
+      globalStateDir,
+      "ralph-state.json",
+      sessionId,
+    );
+    const autopilot = readStateFileWithSession(
+      stateDir,
+      globalStateDir,
+      "autopilot-state.json",
+      sessionId,
+    );
+    const ultrapilot = readStateFileWithSession(
+      stateDir,
+      globalStateDir,
+      "ultrapilot-state.json",
+      sessionId,
+    );
+    const pipeline = readStateFileWithSession(
+      stateDir,
+      globalStateDir,
+      "pipeline-state.json",
+      sessionId,
+    );
+    const team = readStateFileWithSession(
+      stateDir,
+      globalStateDir,
+      "team-state.json",
+      sessionId,
+    );
+
+    // Swarm uses swarm-summary.json (not swarm-state.json) + marker file
+    // Note: Swarm only reads from local stateDir, never global fallback
+    const swarmMarker = existsSync(join(stateDir, "swarm-active.marker"));
+    const swarmSummary = readJsonFile(join(stateDir, "swarm-summary.json"));
+
+
+    const currentAutopilot = isCurrentAutopilotState(autopilot.state, directory, autopilot.isGlobal, hasValidSessionId, sessionId)
+      ? autopilot.state
+      : null;
+    if (currentAutopilot && hasNamedWorkflowMarkers(currentAutopilot) && !isValidNamedWorkflowState(currentAutopilot, sessionId)) {
+      const transcriptFailure = takeWorkflowTranscriptFailure(sessionId);
+      const reason = transcriptFailure === "workflow_transcript_record_too_large"
+        ? `[AUTOPILOT WORKFLOW] ${transcriptFailure}. Run /cancel and re-invoke the workflow.`
+        : "[AUTOPILOT WORKFLOW] workflow_descriptor_integrity_failed. Run /cancel and re-invoke the workflow.";
+      console.log(JSON.stringify({ continue: false, decision: "block", reason }));
+      return;
+    }
+    if (currentAutopilot && hasNamedWorkflowMarkers(currentAutopilot) && !isWorkflowRuntimeSupported()) {
+      console.log(JSON.stringify(SAFE_CONTINUE));
+      return;
+    }
+    const cancellation = isSessionCancelInProgress(stateDir, sessionId, autopilot.path, { directory, isGlobal: autopilot.isGlobal, hasValidSessionId });
+    if (cancellation.currentAutopilot) autopilot.state = cancellation.currentAutopilot;
+    if (cancellation.active) {
+      console.log(JSON.stringify({ continue: true, suppressOutput: true }));
+      return;
+    }
+
+    // Priority 1: Ralph Loop (explicit persistence mode)
+    // Skip if state is stale (older than 2 hours) - prevents blocking new sessions
+    if (
+      isAuthoritativeModeActive(stateDir, "ralph", ralph, sessionId) && !isAwaitingConfirmation(ralph.state) &&
+      !isStaleState(ralph.state) &&
+      isStateForCurrentProject(ralph.state, directory, ralph.isGlobal)
+    ) {
+      const sessionMatches = hasValidSessionId
+        ? ralph.state.session_id === sessionId
+        : !ralph.state.session_id || ralph.state.session_id === sessionId;
+      if (sessionMatches) {
+        const iteration = ralph.state.iteration || 1;
+        const maxIter = ralph.state.max_iterations || 100;
+
+        // Hard max: check the iteration count directly against the security
+        // limit before continuing or extending, so a high max_iterations value
+        // cannot bypass it (mirrors src/hooks/persistent-mode/index.ts).
+        const hardMax = getHardMaxIterations();
+        if (hardMax > 0 && iteration >= hardMax) {
+          ralph.state.active = false;
+          ralph.state.last_checked_at = new Date().toISOString();
+          if (!shouldWriteStateBack(ralph.path)) {
+            console.log(JSON.stringify({ continue: true, suppressOutput: true }));
+            return;
+          }
+          writeJsonFile(ralph.path, ralph.state);
+
+          console.log(
+            JSON.stringify({
+              continue: false,
+              decision: "block",
+              reason: `[RALPH LOOP - HARD LIMIT] Reached hard max iterations (${hardMax}). Mode auto-disabled. Restart with /oh-my-claudecode:ralph if needed.`,
+            }),
+          );
+          return;
+        }
+
+        if (iteration < maxIter) {
+          const toolError = readLastToolError(stateDir);
+          const errorGuidance = getToolErrorRetryGuidance(toolError);
+
+          ralph.state.iteration = iteration + 1;
+          ralph.state.last_checked_at = new Date().toISOString();
+          if (!shouldWriteStateBack(ralph.path)) {
+            console.log(JSON.stringify({ continue: true, suppressOutput: true }));
+            return;
+          }
+          writeJsonFile(ralph.path, ralph.state);
+
+          let reason = `[RALPH LOOP - ITERATION ${iteration + 1}/${maxIter}] Work is NOT done. Continue working.\nWhen FULLY complete (after Architect verification), run /oh-my-claudecode:cancel to cleanly exit ralph mode and clean up all state files. If cancel fails, retry with /oh-my-claudecode:cancel --force.\n${ralph.state.prompt ? `Task: ${ralph.state.prompt}` : ""}`;
+          if (errorGuidance) {
+            reason = errorGuidance + reason;
+          }
+
+          console.log(
+            JSON.stringify({
+              continue: false,
+              decision: "block",
+              reason,
+            }),
+          );
+          return;
+        }
+
+        // Do not silently stop Ralph once it hits max iterations; extend and keep going.
+        // This prevents abrupt stops in long-running loops where the model hasn't finished.
+        ralph.state.max_iterations = maxIter + 10;
+        ralph.state.last_checked_at = new Date().toISOString();
+        if (!shouldWriteStateBack(ralph.path)) {
+          console.log(JSON.stringify({ continue: true, suppressOutput: true }));
+          return;
+        }
+        writeJsonFile(ralph.path, ralph.state);
+
+        console.log(
+          JSON.stringify({
+            continue: false,
+            decision: "block",
+            reason: `[RALPH LOOP - EXTENDED] Max iterations reached; extending to ${ralph.state.max_iterations} and continuing. When FULLY complete (after Architect verification), run /oh-my-claudecode:cancel (or --force).`,
+          }),
+        );
+        return;
+      }
+    }
+
+    // Priority 2: Autopilot (high-level orchestration)
+    if (
+      autopilot.state?.active && !isAwaitingConfirmation(autopilot.state) &&
+      (!isStaleState(autopilot.state) || autopilot.state.workflow) &&
+      isStateForCurrentProject(autopilot.state, directory, autopilot.isGlobal)
+    ) {
+      const sessionMatches = hasValidSessionId
+        ? autopilot.state.session_id === sessionId
+        : !autopilot.state.session_id || autopilot.state.session_id === sessionId;
+      if (sessionMatches) {
+        if (hasNamedWorkflowMarkers(autopilot.state) && !isValidNamedWorkflowState(autopilot.state, sessionId)) {
+          const transcriptFailure = takeWorkflowTranscriptFailure(sessionId);
+          console.log(JSON.stringify({ continue: false, decision: "block", reason: transcriptFailure === 'workflow_transcript_record_too_large' ? '[AUTOPILOT WORKFLOW] workflow_transcript_record_too_large. Run /cancel and re-invoke the workflow.' : "[AUTOPILOT WORKFLOW] workflow_descriptor_integrity_failed. Run /cancel and re-invoke the workflow." }));
+          return;
+        }
+        if (hasNamedWorkflowMarkers(autopilot.state) && !isWorkflowRuntimeSupported()) {
+          console.log(JSON.stringify(SAFE_CONTINUE));
+          return;
+        }
+        const workflowAdvance = advanceWorkflowOnStop(autopilot.state, data, sessionId);
+        if (workflowAdvance) {
+          const commit = commitWorkflowAdvance(autopilot.path, workflowAdvance);
+          if (commit.committed) {
+            console.log(JSON.stringify({ continue: false, decision: "block", reason: workflowAdvance.nextStage
+              ? workflowAdvance.nextStagePrompt
+              : "[AUTOPILOT WORKFLOW] All selected stages are complete." }));
+          } else if (takeWorkflowTranscriptFailure(sessionId) === 'workflow_transcript_record_too_large') {
+            console.log(JSON.stringify({ continue: false, decision: 'block', reason: '[AUTOPILOT WORKFLOW] workflow_transcript_record_too_large. Run /cancel and re-invoke the workflow.' }));
+          } else if (hasNamedWorkflowMarkers(commit.state) && (!isValidWorkflowDescriptor(commit.state.workflow) || !isValidWorkflowTrackingState(commit.state, sessionId))) {
+            console.log(JSON.stringify({ continue: false, decision: "block", reason: "[AUTOPILOT WORKFLOW] workflow_descriptor_integrity_failed. Run /cancel and re-invoke the workflow." }));
+          } else {
+            console.log(JSON.stringify(hasNamedWorkflowMarkers(commit.state) ? workflowStopResponse(commit.state) : SAFE_CONTINUE));
+          }
+          return;
+        }
+        if (takeWorkflowTranscriptFailure(sessionId) === 'workflow_transcript_record_too_large') {
+          console.log(JSON.stringify({ continue: false, decision: 'block', reason: '[AUTOPILOT WORKFLOW] workflow_transcript_record_too_large. Run /cancel and re-invoke the workflow.' }));
+          return;
+        }
+        if (hasNamedWorkflowMarkers(autopilot.state) && (!isValidWorkflowDescriptor(autopilot.state.workflow) || !isValidWorkflowTrackingState(autopilot.state, sessionId))) {
+          console.log(JSON.stringify({ continue: false, decision: "block", reason: "[AUTOPILOT WORKFLOW] workflow_descriptor_integrity_failed. Run /cancel and re-invoke the workflow." }));
+          return;
+        }
+        if (hasNamedWorkflowMarkers(autopilot.state)) {
+          const expected = {
+            workflowRunId: autopilot.state.workflowRunId,
+            sessionId: autopilot.state.session_id,
+            profileHash: autopilot.state.workflow.profileHash,
+            trackingRevision: autopilot.state.pipelineTracking.trackingRevision,
+            stageIndex: autopilot.state.pipelineTracking.currentStageIndex,
+            stageId: autopilot.state.pipelineTracking.stages?.[autopilot.state.pipelineTracking.currentStageIndex]?.id,
+            phase: autopilot.state.phase,
+          };
+          const refresh = refreshNamedWorkflowDispatch(autopilot.path, expected);
+          if (refresh.integrityFailed || (hasNamedWorkflowMarkers(refresh.state) && (!isValidWorkflowDescriptor(refresh.state.workflow) || !isValidWorkflowTrackingState(refresh.state, sessionId)))) {
+            console.log(JSON.stringify({ continue: false, decision: "block", reason: "[AUTOPILOT WORKFLOW] workflow_descriptor_integrity_failed. Run /cancel and re-invoke the workflow." }));
+          } else {
+            console.log(JSON.stringify(refresh.committed ? workflowStopResponse(refresh.state) : SAFE_CONTINUE));
+          }
+          return;
+        }
+        const phase = autopilot.state.phase || "unspecified";
+        if (phase !== "complete") {
+          const loadedSnapshot = JSON.stringify(autopilot.state);
+          const newCount = (autopilot.state.reinforcement_count || 0) + 1;
+          if (newCount <= 20) {
+            const toolError = readLastToolError(stateDir);
+            const errorGuidance = getToolErrorRetryGuidance(toolError);
+            const reinforced = { ...autopilot.state, reinforcement_count: newCount, last_checked_at: new Date().toISOString() };
+            let committed = false;
+            const locked = withStateFileLockSync(autopilot.path, () => {
+              const current = readJsonFile(autopilot.path);
+              if (!current || JSON.stringify(current) !== loadedSnapshot) return;
+              committed = writeJsonFile(autopilot.path, reinforced);
+            });
+            if (!locked.acquired || !committed) {
+              if (!locked.acquired) reportLockFailure('Autopilot state reinforcement');
+              console.log(JSON.stringify(SAFE_CONTINUE));
+              return;
+            }
+            autopilot.state = reinforced;
+
+            const cancelGuidance = hasValidSessionId && autopilot.state.session_id === sessionId
+              ? " When all phases are complete, run /oh-my-claudecode:cancel to cleanly exit and clean up this session's autopilot state files. If cancel fails, retry with /oh-my-claudecode:cancel --force."
+              : "";
+            let reason = `[AUTOPILOT - Phase: ${phase}] Autopilot not complete. Continue working.${cancelGuidance}`;
+            if (errorGuidance) {
+              reason = errorGuidance + reason;
+            }
+
+            console.log(
+              JSON.stringify({
+                continue: false,
+                decision: "block",
+                reason,
+              }),
+            );
+            return;
+          }
+        }
+      }
+    }
+
+    // Priority 3: Ultrapilot (parallel autopilot)
+    if (
+      ultrapilot.state?.active &&
+      !isStaleState(ultrapilot.state) &&
+      (hasValidSessionId
+        ? ultrapilot.state.session_id === sessionId
+        : !ultrapilot.state.session_id || ultrapilot.state.session_id === sessionId) &&
+      isStateForCurrentProject(ultrapilot.state, directory, ultrapilot.isGlobal)
+    ) {
+      const workers = ultrapilot.state.workers || [];
+      const incomplete = workers.filter(
+        (w) => w.status !== "complete" && w.status !== "failed",
+      ).length;
+      if (incomplete > 0) {
+        const newCount = (ultrapilot.state.reinforcement_count || 0) + 1;
+        if (newCount <= 20) {
+          const toolError = readLastToolError(stateDir);
+          const errorGuidance = getToolErrorRetryGuidance(toolError);
+
+          ultrapilot.state.reinforcement_count = newCount;
+          ultrapilot.state.last_checked_at = new Date().toISOString();
+          writeJsonFile(ultrapilot.path, ultrapilot.state);
+
+          let reason = `[ULTRAPILOT] ${incomplete} workers still running. Continue working. When all workers complete, run /oh-my-claudecode:cancel to cleanly exit and clean up state files. If cancel fails, retry with /oh-my-claudecode:cancel --force.`;
+          if (errorGuidance) {
+            reason = errorGuidance + reason;
+          }
+
+          console.log(
+            JSON.stringify({
+              continue: false,
+              decision: "block",
+              reason,
+            }),
+          );
+          return;
+        }
+      }
+    }
+
+    // Priority 4: Swarm (coordinated agents with SQLite)
+    // Note: Swarm only reads from local stateDir, never global fallback
+    if (
+      swarmMarker &&
+      swarmSummary?.active &&
+      !isStaleState(swarmSummary) &&
+      isStateForCurrentProject(swarmSummary, directory, false)
+    ) {
+      const pending =
+        (swarmSummary.tasks_pending || 0) + (swarmSummary.tasks_claimed || 0);
+      if (pending > 0) {
+        const newCount = (swarmSummary.reinforcement_count || 0) + 1;
+        if (newCount <= 15) {
+          const toolError = readLastToolError(stateDir);
+          const errorGuidance = getToolErrorRetryGuidance(toolError);
+
+          swarmSummary.reinforcement_count = newCount;
+          swarmSummary.last_checked_at = new Date().toISOString();
+          writeJsonFile(join(stateDir, "swarm-summary.json"), swarmSummary);
+
+          let reason = `[SWARM ACTIVE] ${pending} tasks remain. Continue working. When all tasks are done, run /oh-my-claudecode:cancel to cleanly exit and clean up state files. If cancel fails, retry with /oh-my-claudecode:cancel --force.`;
+          if (errorGuidance) {
+            reason = errorGuidance + reason;
+          }
+
+          console.log(
+            JSON.stringify({
+              continue: false,
+              decision: "block",
+              reason,
+            }),
+          );
+          return;
+        }
+      }
+    }
+
+    // Priority 5: Pipeline (sequential stages)
+    if (
+      pipeline.state?.active &&
+      !isStaleState(pipeline.state) &&
+      (hasValidSessionId
+        ? pipeline.state.session_id === sessionId
+        : !pipeline.state.session_id || pipeline.state.session_id === sessionId) &&
+      isStateForCurrentProject(pipeline.state, directory, pipeline.isGlobal)
+    ) {
+      const currentStage = pipeline.state.current_stage || 0;
+      const totalStages = pipeline.state.stages?.length || 0;
+      if (currentStage < totalStages) {
+        const newCount = (pipeline.state.reinforcement_count || 0) + 1;
+        if (newCount <= 15) {
+          const toolError = readLastToolError(stateDir);
+          const errorGuidance = getToolErrorRetryGuidance(toolError);
+
+          pipeline.state.reinforcement_count = newCount;
+          pipeline.state.last_checked_at = new Date().toISOString();
+          writeJsonFile(pipeline.path, pipeline.state);
+
+          let reason = `[PIPELINE - Stage ${currentStage + 1}/${totalStages}] Pipeline not complete. Continue working. When all stages complete, run /oh-my-claudecode:cancel to cleanly exit and clean up state files. If cancel fails, retry with /oh-my-claudecode:cancel --force.`;
+          if (errorGuidance) {
+            reason = errorGuidance + reason;
+          }
+
+          console.log(
+            JSON.stringify({
+              continue: false,
+              decision: "block",
+              reason,
+            }),
+          );
+          return;
+        }
+      }
+    }
+
+    // Priority 6: Team (omc-teams / staged pipeline)
+    if (
+      team.state?.active &&
+      !isStaleState(team.state) &&
+      isStateForCurrentProject(team.state, directory, team.isGlobal)
+    ) {
+      const sessionMatches = hasValidSessionId
+        ? team.state.session_id === sessionId
+        : !team.state.session_id || team.state.session_id === sessionId;
+      if (sessionMatches) {
+        const phase = normalizeTeamPhase(team.state);
+        if (phase) {
+          const newCount = getSafeReinforcementCount(team.state.reinforcement_count) + 1;
+          if (newCount <= 20) {
+            const toolError = readLastToolError(stateDir);
+            const errorGuidance = getToolErrorRetryGuidance(toolError);
+
+            team.state.reinforcement_count = newCount;
+            team.state.last_checked_at = new Date().toISOString();
+            writeJsonFile(team.path, team.state);
+
+            let reason = `[TEAM - Phase: ${phase}] Team mode active. Continue working. When all team tasks complete, run /oh-my-claudecode:cancel to cleanly exit. If cancel fails, retry with /oh-my-claudecode:cancel --force.`;
+            if (errorGuidance) {
+              reason = errorGuidance + reason;
+            }
+
+            console.log(
+              JSON.stringify({
+                continue: false,
+                decision: "block",
+                reason,
+              }),
+            );
+            return;
+          }
+        }
+      }
+    }
+
+    // Skills like code-review, plan, tdd, etc. write skill-active-state.json
+    // when invoked via the Skill tool. This prevents premature stops mid-skill.
+    const skillState = readStateFileWithSession(
+      stateDir,
+      globalStateDir,
+      "skill-active-state.json",
+      sessionId,
+    );
+    if (
+      skillState.state?.active &&
+      !isStaleSkillState(skillState.state)
+    ) {
+      const sessionMatches = hasValidSessionId
+        ? skillState.state.session_id === sessionId
+        : !skillState.state.session_id || skillState.state.session_id === sessionId;
+      if (sessionMatches) {
+        const count = skillState.state.reinforcement_count || 0;
+        const maxReinforcements = skillState.state.max_reinforcements || 3;
+
+        if (count < maxReinforcements) {
+          if (getActiveSubagentCount(stateDir) > 0) {
+            console.log(JSON.stringify({ continue: true, suppressOutput: true }));
+            return;
+          }
+
+          const toolError = readLastToolError(stateDir);
+          const errorGuidance = getToolErrorRetryGuidance(toolError);
+
+          skillState.state.reinforcement_count = count + 1;
+          skillState.state.last_checked_at = new Date().toISOString();
+          writeJsonFile(skillState.path, skillState.state);
+
+          const skillName = skillState.state.skill_name || "unknown";
+          let reason = `[SKILL ACTIVE: ${skillName}] The "${skillName}" skill is still executing (reinforcement ${count + 1}/${maxReinforcements}). Continue working on the skill's instructions. Do not stop until the skill completes its workflow.`;
+          if (errorGuidance) {
+            reason = errorGuidance + reason;
+          }
+
+          console.log(JSON.stringify({ continue: false, decision: "block", reason }));
+          return;
+        } else {
+          // Reinforcement limit reached - clear state and allow stop
+          try {
+            if (existsSync(skillState.path)) {
+              unlinkSync(skillState.path);
+            }
+          } catch {
+            // Ignore cleanup errors
+          }
+        }
+      }
+    }
+
+    // No blocking needed
+    console.log(JSON.stringify({ continue: true, suppressOutput: true }));
+  } catch (error) {
+    // On any error, allow stop rather than blocking forever
+    // CRITICAL: Use process.stdout.write instead of console.log to avoid
+    // cascading errors if stdout/stderr are broken (issue #319)
+    // Wrap in try-catch to handle EPIPE and other stream errors gracefully
+    try {
+      process.stderr.write(
+        `[persistent-mode] Error: ${error?.message || error}\n`,
+      );
+    } catch {
+      // Ignore stderr errors - we just need to return valid JSON
+    }
+    writeSafeContinue();
+  }
+}
+
+
+main().finally(() => {
+  clearTimeout(safetyTimeout);
+});

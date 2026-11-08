@@ -1,0 +1,8 @@
+{
+  "fixtureId": "plan-clean-baseline",
+  "fixturePath": "fixtures/plans/plan-clean-baseline.md",
+  "domain": "plan",
+  "expectedVerdict": "ACCEPT",
+  "isCleanBaseline": true,
+  "findings": []
+}

@@ -1,0 +1,2352 @@
+#!/usr/bin/env node
+
+/**
+ * PreToolUse Hook: OMC Reminder Enforcer (Node.js)
+ * Injects contextual reminders before every tool execution
+ * Cross-platform: Windows, macOS, Linux
+ */
+
+import { closeSync, existsSync, fstatSync, lstatSync, mkdirSync, openSync, readFileSync, readSync, readdirSync, renameSync, writeFileSync } from 'fs';
+import { createHash } from 'crypto';
+import { dirname, join, resolve, basename } from 'path';
+import { homedir } from 'os';
+import { execFileSync } from 'child_process';
+import { fileURLToPath, pathToFileURL } from 'url';
+import { getClaudeConfigDir } from './lib/config-dir.mjs';
+import { stripLeadingUtf8Bom } from './lib/utf8-bom.mjs';
+import { encodeProjectPath } from './lib/encode-project-path.mjs';
+import { evaluateAgentHeavyPreflight } from './lib/pre-tool-enforcer-preflight.mjs';
+import { evaluateForceAgentDelegation } from './lib/force-agent-delegation-preflight.mjs';
+import { evaluateReadBudget } from './lib/read-budget-preflight.mjs';
+import { resolveOmcStateRoot, resolveSessionStatePathsForHook } from './lib/state-root.mjs';
+import { readStdin } from './lib/stdin.mjs';
+import { resolveConfiguredAgentModel } from './lib/agent-model-config.mjs';
+import { BOUNDED_GIT_TIMEOUT_MS } from './lib/bounded-git-timeout.mjs';
+import { isSkillVisibleToUser } from './lib/skill-entitlements.mjs';
+import { isJevShadowOptedIn, recordJevShadow } from './lib/jev-shadow.mjs';
+import { resolveExcerptChars } from './jev-resolve.mjs';
+
+// Inlined from src/config/models.ts — avoids a dist/ import so the hook works
+// before a build and stays consistent with the TypeScript source.
+function isProviderSpecificModelId(modelId) {
+  if (/^((us|eu|ap|global)\.anthropic\.|anthropic\.claude)/i.test(modelId)) return true;
+  if (/^arn:aws(-[^:]+)?:bedrock:/i.test(modelId)) return true;
+  if (modelId.toLowerCase().startsWith('vertex_ai/')) return true;
+  return false;
+}
+function hasExtendedContextSuffix(modelId) {
+  return /\[\d+[mk]\]$/i.test(modelId);
+}
+function isSubagentSafeModelId(modelId) {
+  return isProviderSpecificModelId(modelId) && !hasExtendedContextSuffix(modelId);
+}
+function isBedrockProviderEnv() {
+  if (process.env.CLAUDE_CODE_USE_BEDROCK === '1') return true;
+  const modelId = process.env.CLAUDE_MODEL || process.env.ANTHROPIC_MODEL || '';
+  if (/^((us|eu|ap|global)\.anthropic\.|anthropic\.claude)/i.test(modelId)) return true;
+  if (
+    /^arn:aws(-[^:]+)?:bedrock:/i.test(modelId)
+    && /:(inference-profile|application-inference-profile)\//i.test(modelId)
+    && modelId.toLowerCase().includes('claude')
+  ) {
+    return true;
+  }
+  return false;
+}
+function isVertexProviderEnv() {
+  if (process.env.CLAUDE_CODE_USE_VERTEX === '1') return true;
+  const modelId = process.env.CLAUDE_MODEL || process.env.ANTHROPIC_MODEL || '';
+  return !!modelId && modelId.toLowerCase().startsWith('vertex_ai/');
+}
+function getActiveModelIds() {
+  return [process.env.CLAUDE_MODEL || '', process.env.ANTHROPIC_MODEL || ''].filter(Boolean);
+}
+function isNormalClaudeModelId(modelId) {
+  const lower = (modelId || '').toLowerCase();
+  return Boolean(lower) && lower.includes('claude') && !isProviderSpecificModelId(modelId);
+}
+function hasNormalClaudeActiveModel() {
+  return getActiveModelIds().some(isNormalClaudeModelId);
+}
+function isConfigForceInheritProxyEnv() {
+  const config = loadOmcConfig();
+  return config.routing?.forceInherit === true && !hasNormalClaudeActiveModel();
+}
+function isNonClaudeProviderEnv() {
+  if (isBedrockProviderEnv() || isVertexProviderEnv()) return true;
+  const modelId = process.env.CLAUDE_MODEL || process.env.ANTHROPIC_MODEL || '';
+  if (modelId && !modelId.toLowerCase().includes('claude')) return true;
+  const baseUrl = process.env.ANTHROPIC_BASE_URL || '';
+  if (baseUrl && !baseUrl.includes('anthropic.com')) return true;
+  return isConfigForceInheritProxyEnv();
+}
+function acceptsProxyAnthropicDefaultTierValue(key, value) {
+  return key.startsWith('ANTHROPIC_DEFAULT_')
+    && Boolean(value)
+    && isNonClaudeProviderEnv()
+    && !isBedrockProviderEnv()
+    && !isVertexProviderEnv();
+}
+const TIER_ALIASES = new Set(['sonnet', 'opus', 'haiku', 'fable']);
+function isTierAlias(modelId) {
+  return TIER_ALIASES.has((modelId || '').toLowerCase());
+}
+// Resolution chain for tier alias → subagent-safe model ID.
+// Order mirrors src/config/models.ts:TIER_ENV_KEYS with OMC_SUBAGENT_MODEL as top-priority override.
+// OMC_SUBAGENT_MODEL at position 0 wins for ALL tiers — tier-specific vars are only
+// reached when it is unset or fails isSubagentSafeModelId validation.
+// OMC_MODEL_* is intentionally excluded: those are OMC-internal vars that the OMC bridge
+// reads for its own routing, but CC itself does not read them when resolving tier aliases
+// (sonnet/haiku/opus). Allowing OMC_MODEL_* as proof would let the hook pass while CC
+// still fails to route the alias, reintroducing the downstream deadlock this gate prevents.
+const TIER_TO_DEFAULT_ENV_KEYS = {
+  haiku:  ['OMC_SUBAGENT_MODEL', 'CLAUDE_CODE_BEDROCK_HAIKU_MODEL',  'ANTHROPIC_DEFAULT_HAIKU_MODEL'],
+  sonnet: ['OMC_SUBAGENT_MODEL', 'CLAUDE_CODE_BEDROCK_SONNET_MODEL', 'ANTHROPIC_DEFAULT_SONNET_MODEL'],
+  opus:   ['OMC_SUBAGENT_MODEL', 'CLAUDE_CODE_BEDROCK_OPUS_MODEL',   'ANTHROPIC_DEFAULT_OPUS_MODEL'],
+  fable:  ['OMC_SUBAGENT_MODEL', 'CLAUDE_CODE_BEDROCK_FABLE_MODEL',  'ANTHROPIC_DEFAULT_FABLE_MODEL'],
+};
+function resolveTierAliasToSafeModel(tierAlias) {
+  const keys = TIER_TO_DEFAULT_ENV_KEYS[(tierAlias || '').toLowerCase()];
+  if (!keys) return '';
+  for (const key of keys) {
+    const value = (process.env[key] || '').trim();
+    // CC-native vars (ANTHROPIC_DEFAULT_* and CLAUDE_CODE_BEDROCK_*) are read by CC's own
+    // model resolution, which handles [1m] suffixes correctly for explicit model= calls.
+    // OMC-internal vars (OMC_SUBAGENT_MODEL, OMC_MODEL_*) are not read by CC, so a [1m]
+    // value there is not a valid routing proof — keep the stricter isSubagentSafeModelId check.
+    const isAnthropicDefaultTierVar = key.startsWith('ANTHROPIC_DEFAULT_');
+    const isNativeCcVar = isAnthropicDefaultTierVar || key.startsWith('CLAUDE_CODE_BEDROCK_');
+    const validator = isNativeCcVar ? isProviderSpecificModelId : isSubagentSafeModelId;
+    if (value && (validator(value) || acceptsProxyAnthropicDefaultTierValue(key, value))) return value;
+  }
+  return '';
+}
+/** Map a bare Anthropic model ID to its CC tier alias (sonnet/opus/haiku/fable), or null if unrecognised. */
+function normalizeToCcAlias(model) {
+  if (!model) return null;
+  const lower = model.toLowerCase();
+  if (lower.includes('opus'))   return 'opus';
+  if (lower.includes('sonnet')) return 'sonnet';
+  if (lower.includes('haiku'))  return 'haiku';
+  if (lower.includes('fable'))  return 'fable';
+  return null;
+}
+/**
+ * Read the `model:` field from an OMC agent definition's YAML frontmatter.
+ * Returns the raw model string (e.g. "claude-opus-4-6") or null if not found.
+ */
+function readAgentDefinitionModel(subagentType, onlyAgentsDir) {
+  // Guard: subagent_type must be a string — non-string payloads would throw on .replace()
+  // and the catch block would silently return {continue:true}, bypassing enforcement.
+  const agentType = (typeof subagentType === 'string' ? subagentType : '').replace(/^oh-my-claudecode:/, '');
+  if (!agentType) return null;
+  // Reject path traversal: agent names are simple identifiers; no path separators allowed.
+  if (!/^[a-zA-Z0-9_-]+$/.test(agentType)) return null;
+  // Build a prioritised list of agents/ directories to search.
+  // CLAUDE_PLUGIN_ROOT is tried first when set; the script-relative path is always the
+  // final fallback. Checking per-file (not just per-directory) means a partially-populated
+  // plugin install doesn't hide agents that exist in the script-relative tree.
+  const pluginRoot = process.env.CLAUDE_PLUGIN_ROOT;
+  const scriptAgentsDir = join(dirname(fileURLToPath(import.meta.url)), '..', 'agents');
+  const candidateDirs = onlyAgentsDir ? [onlyAgentsDir] : [
+    ...(pluginRoot ? [join(pluginRoot, 'agents')] : []),
+    scriptAgentsDir,
+  ];
+  const agentFile = candidateDirs.map(d => join(d, `${agentType}.md`)).find(f => existsSync(f)) ?? null;
+  try {
+    if (!agentFile) return null;
+    const content = readFileSync(agentFile, 'utf-8').replace(/^\uFEFF/, '');
+    // Extract the YAML frontmatter block (content between the opening and closing ---).
+    // Searching the whole file would match `model:` lines in the body/prompt text, causing
+    // false denies for agents whose prompt happens to contain that word.
+    const fmMatch = content.match(/^---[\r\n]+([\s\S]*?)[\r\n]+---/);
+    if (!fmMatch) return null;
+    // Strip surrounding quotes so `model: "global.anthropic.claude-sonnet-4-6"` and
+    // `model: global.anthropic.claude-sonnet-4-6` are treated identically.
+    const modelMatch = fmMatch[1].match(/^model:\s*(\S+)/m);
+    return modelMatch ? modelMatch[1].trim().replace(/^["']|["']$/g, '') : null;
+  } catch {
+    return null;
+  }
+}
+// ---------------------------------------------------------------------------
+// Skill vs agent namespace guard (issue #3667)
+//
+// Task/Agent subagent_type identifiers and bundled skills share the same
+// `oh-my-claudecode:` namespace, so a caller can hand a skill name to
+// Task(subagent_type=...) and receive only Claude Code's generic native
+// "Agent type not found". OMC owns both registries (agents/*.md and
+// skills/*/SKILL.md), so the PreToolUse hook denies the call BEFORE the
+// native boundary with an error that names the Skill tool and the exact
+// identifier, and forbids closest-match substitution.
+// ---------------------------------------------------------------------------
+
+const SKILL_AGENT_NAMESPACE_PREFIXES = ['oh-my-claudecode:', 'omc:'];
+const SKILL_IDENTIFIER_PATTERN = /^[a-zA-Z0-9_-]+$/;
+
+function splitAgentNamespace(subagentType) {
+  const folded = subagentType.toLowerCase();
+  for (const prefix of SKILL_AGENT_NAMESPACE_PREFIXES) {
+    if (folded.startsWith(prefix.toLowerCase())) {
+      return { name: subagentType.slice(prefix.length), namespaced: true };
+    }
+  }
+  return { name: subagentType, namespaced: false };
+}
+
+function getPluginAgentDirs() {
+  const pluginRoot = process.env.CLAUDE_PLUGIN_ROOT;
+  const scriptAgentsDir = join(dirname(fileURLToPath(import.meta.url)), '..', 'agents');
+  return pluginRoot ? [join(pluginRoot, 'agents'), scriptAgentsDir] : [scriptAgentsDir];
+}
+
+function getPluginSkillsDirs() {
+  const pluginRoot = process.env.CLAUDE_PLUGIN_ROOT;
+  const scriptSkillsDir = join(dirname(fileURLToPath(import.meta.url)), '..', 'skills');
+  return pluginRoot ? [join(pluginRoot, 'skills'), scriptSkillsDir] : [scriptSkillsDir];
+}
+
+/**
+ * Whether an agent definition resolves for the given identifier.
+ * Namespaced identifiers (oh-my-claudecode:X / omc:X) resolve only against
+ * plugin agents; bare identifiers resolve through the full native chain
+ * (plugin, project .claude/agents, user config agents). A real agent always
+ * wins over a bundled skill with the same name (collision rule).
+ */
+function agentDefinitionExists(agentType, directory, namespaced) {
+  const agentDirs = getPluginAgentDirs();
+  if (!namespaced) {
+    agentDirs.push(join(directory, '.claude', 'agents'));
+    agentDirs.push(join(getClaudeConfigDir(), 'agents'));
+  }
+  return agentDirs.some((agentsDir) => existsSync(join(agentsDir, `${agentType}.md`)));
+}
+
+/**
+ * Extract the primary `name` and raw alias list from a bundled SKILL.md YAML
+ * frontmatter block. Mirrors readAgentDefinitionModel's frontmatter
+ * extraction: only the first `--- ... ---` block is inspected, so `name:`
+ * lines in the skill body cannot create false matches.
+ */
+function parseSkillFrontmatterIdentifiers(content) {
+  const fmMatch = stripLeadingUtf8Bom(content).match(/^---[\r\n]+([\s\S]*?)[\r\n]+---/);
+  if (!fmMatch) return { aliases: [], primary: null };
+  const fm = fmMatch[1];
+  const nameMatch = fm.match(/^name:\s*(\S+)/m);
+  const primary = nameMatch ? nameMatch[1].trim().replace(/^["']|["']$/g, '') : null;
+  const aliasMatch = fm.match(/^aliases:\s*(.+)$/m);
+  const aliases = [];
+  if (aliasMatch) {
+    const raw = aliasMatch[1].trim();
+    const tokens = raw.startsWith('[')
+      ? raw.slice(1, raw.indexOf(']') === -1 ? raw.length : raw.indexOf(']')).split(',')
+      : [raw.split(/\s+/)[0]];
+    for (const token of tokens) {
+      const clean = token.trim().replace(/^["']|["']$/g, '');
+      if (clean) aliases.push(clean);
+    }
+  }
+  return { aliases, primary };
+}
+
+/**
+ * Claude Code native command names that must not be shadowed by OMC skill
+ * short names. Mirrors src/features/builtin-skills/skills.ts:CC_NATIVE_COMMANDS
+ * and toSafeSkillName (plan -> omc-plan).
+ */
+const CC_NATIVE_SKILL_COMMANDS = new Set([
+  'review',
+  'plan',
+  'security-review',
+  'init',
+  'doctor',
+  'help',
+  'config',
+  'clear',
+  'compact',
+  'memory',
+]);
+
+function toSafeSkillName(name) {
+  const normalized = name.trim();
+  return CC_NATIVE_SKILL_COMMANDS.has(normalized.toLowerCase()) ? `omc-${normalized}` : normalized;
+}
+/**
+ * Whether a bundled skill directory is visible to the current user, mirroring
+ * loadSkillsFromDirectory's entitlement filter. Hidden skills must never be
+ * suggested as invocable, even when their directory exists on disk.
+ */
+let cachedCanonicalSkillRegistry = null;
+
+/**
+ * Build the canonical bundled-skill registry exactly like the runtime loader
+ * (src/features/builtin-skills/skills.ts loadSkillsFromDirectory +
+ * loadSkillFromFile):
+ * - `skillify` sorts first so it claims its deprecated alias `learner` before
+ *   the legacy skills/learner directory is seen;
+ * - primary names and aliases are normalized with toSafeSkillName;
+ * - the first claim of a name wins (seenNames dedup), so a directory whose
+ *   name is claimed as another skill's alias is not registered under its own
+ *   name.
+ * Returns Map<lowercaseName, primaryName>.
+ */
+function buildCanonicalSkillRegistry() {
+  if (cachedCanonicalSkillRegistry) return cachedCanonicalSkillRegistry;
+  const registry = new Map();
+  for (const skillsDir of getPluginSkillsDirs()) {
+    let entries = [];
+    try {
+      entries = readdirSync(skillsDir, { withFileTypes: true });
+    } catch {
+      continue;
+    }
+    entries.sort((a, b) => {
+      if (a.name === 'skillify') return -1;
+      if (b.name === 'skillify') return 1;
+      return a.name.localeCompare(b.name);
+    });
+    for (const entry of entries) {
+      if (!entry.isDirectory()) continue;
+      // Entitlement filter: hidden skills are not registered for this user.
+      if (!isSkillVisibleToUser(entry.name)) continue;
+      const skillPath = join(skillsDir, entry.name, 'SKILL.md');
+      if (!existsSync(skillPath)) continue;
+      let parsed;
+      try {
+        parsed = parseSkillFrontmatterIdentifiers(readFileSync(skillPath, 'utf-8'));
+      } catch {
+        continue;
+      }
+      const primary = toSafeSkillName(parsed.primary || entry.name);
+      const allNames = [primary, ...parsed.aliases.map(toSafeSkillName)];
+      for (const candidate of allNames) {
+        const key = candidate.toLowerCase();
+        if (registry.has(key)) continue;
+        registry.set(key, primary);
+      }
+    }
+  }
+  cachedCanonicalSkillRegistry = registry;
+  return registry;
+}
+
+/**
+ * Resolve a Task/Agent subagent_type against the bundled skill registry.
+ * Returns { primary } when the identifier names a bundled skill (exact match
+ * only — no fuzzy/closest-match substitution), or null otherwise.
+ *
+ * Canonical registry precedence wins before any directory shortcut: a name
+ * claimed as a deprecated alias (e.g. `learner` owned by `skillify`) resolves
+ * to its canonical primary even when a directory with the same name exists
+ * (skills/learner).
+ *
+ * Bare (un-namespaced) identifiers are denied ONLY on canonical registry
+ * claims. The directory shortcut would otherwise mistake legitimate runtime
+ * agents for skills: Claude Code's built-in `Plan` agent and session-defined
+ * agents are not visible to file-based plugin/project/user agent discovery,
+ * yet `skills/plan` exists (registering `omc-plan`). Bare names therefore
+ * never consult the directory shortcut; explicitly namespaced identifiers
+ * (`oh-my-claudecode:` / `omc:`) are pinned to the OMC plugin namespace and
+ * keep the full canonical + shortcut resolution (e.g. `oh-my-claudecode:plan`
+ * -> `omc-plan`).
+ */
+function resolveBundledSkill(subagentType, directory) {
+  const { name, namespaced } = splitAgentNamespace(subagentType);
+  if (!SKILL_IDENTIFIER_PATTERN.test(name)) return null;
+  // Case-fold once, before every check: registry, alias, visibility, and
+  // filesystem lookups must agree even on case-insensitive filesystems
+  // (Windows/macOS), where a case-variant identifier resolves the same dir.
+  const foldedName = name.toLowerCase();
+  // A real agent definition wins over a skill with the same name.
+  if (agentDefinitionExists(foldedName, directory, namespaced)) return null;
+  // Canonical registry first: covers primaries and aliases (incl. collisions
+  // like learner -> skillify, cancel-ralph -> cancel).
+  const canonicalPrimary = buildCanonicalSkillRegistry().get(foldedName);
+  if (canonicalPrimary) return { primary: canonicalPrimary };
+  // Bare identifiers stop here: the directory shortcut is reserved for the
+  // pinned plugin namespace so native/session-defined agents (e.g. `Plan`)
+  // are never denied (issue #3667 P1).
+  if (!namespaced) return null;
+  // Directory shortcut fallback only for names the canonical registry does not
+  // claim (e.g. the plan/ dir whose frontmatter registers as omc-plan).
+  // Fail closed: a directory that is hidden from this user must never be
+  // suggested as an invocable bundled skill, even though it exists on disk.
+  if (!isSkillVisibleToUser(foldedName)) return null;
+  for (const skillsDir of getPluginSkillsDirs()) {
+    const directPath = join(skillsDir, foldedName, 'SKILL.md');
+    if (existsSync(directPath)) {
+      let primary = foldedName;
+      try {
+        const parsed = parseSkillFrontmatterIdentifiers(readFileSync(directPath, 'utf-8'));
+        if (parsed.primary) primary = parsed.primary;
+      } catch {
+        // Keep the directory name when the file cannot be parsed.
+      }
+      return { primary: toSafeSkillName(primary) };
+    }
+  }
+  return null;
+}
+
+/**
+ * Preflight contract for #3667: when a Task/Agent call names a bundled skill
+ * as its subagent_type, deny the call with a precise, non-substitutable error
+ * that names the Skill tool and the correct identifier.
+ */
+function evaluateSkillAsAgentCall(toolName, toolInput, directory) {
+  if (!toolInput || typeof toolInput !== 'object') return null;
+  const rawSubagentType = toolInput.subagent_type;
+  if (typeof rawSubagentType !== 'string') return null;
+  const subagentType = rawSubagentType.trim();
+  if (subagentType.length === 0) return null;
+
+  const skill = resolveBundledSkill(subagentType, directory);
+  if (!skill) return null;
+
+  const { name } = splitAgentNamespace(subagentType);
+  // Always suggest the canonical plugin-namespaced identifier. A bare skill
+  // name can resolve to a different project/user skill or fail: bundled
+  // skills are exposed under the `oh-my-claudecode:` namespace (issue #3667
+  // review), so the recovery must be unambiguous regardless of the caller's
+  // input namespace form.
+  const skillIdentifier = `oh-my-claudecode:${skill.primary}`;
+  const isPrimaryMatch = name.toLowerCase() === skill.primary.toLowerCase();
+  const queriedName = isPrimaryMatch
+    ? `"${subagentType}"`
+    : `"${subagentType}" (alias of "${skill.primary}")`;
+  const reason =
+    `[SKILL vs AGENT] ${queriedName} is a Skill, not an agent. ` +
+    `Do NOT call it via ${toolName}(subagent_type=...) — that subagent type does not exist, ` +
+    `and Claude Code will fail the call with a generic "Agent type not found". ` +
+    `Use the Skill tool instead: Skill(skill="${skillIdentifier}"). ` +
+    `Do NOT substitute a similarly-named agent as a "closest match".`;
+  return {
+    continue: true,
+    hookSpecificOutput: {
+      hookEventName: 'PreToolUse',
+      permissionDecision: 'deny',
+      permissionDecisionReason: reason,
+    },
+  };
+}
+
+
+const SLOP_RISK_TOOL_NAMES = new Set([
+  'Task',
+  'TaskCreate',
+  'TaskUpdate',
+  'Agent',
+  'Bash',
+  'Edit',
+  'MultiEdit',
+  'Write',
+  'NotebookEdit',
+]);
+// Keep the SLOP trigger tied to actual fallback/workaround semantics.
+// Primary-path domain names and comments often use neutral qualifiers such as
+// "extra" or "additional"; those words alone must not enter this gate.
+const SLOP_FALLBACK_LANGUAGE_PATTERN = /\b(?:fallback|fall\s+back|workaround|work\s+around)\b/i;
+const SLOP_FALLBACK_ACTION_PATTERNS = [
+  /\b(?:add|build|create|implement|introduce|make|patch|use|using|write)\s+(?:an?\s+|the\s+)?(?:fallback|workaround)\b/i,
+  /\b(?:fallback|workaround)\s+(?:layer|path|handler|shim|patch|implementation|mechanism|mode)\b/i,
+  /\bworkaround\s+(?:it|this|that|the|a|an)\b/i,
+  /\b(?:fall\s+back|fallback)\s+(?:to|on|onto)\b/i,
+  /\bwork\s+around\s+(?:it|this|that|the|a|an)\b/i,
+  /\bwork\s+around\s+(?!(?:it|this|that|the|a|an)\b)(?:[a-z0-9][\w-]*\s+){0,5}[a-z0-9][\w-]*\b/i,
+  /(?:^|[\s"'`=:/\\])[\w.-]*(?:fallback|workaround)[\w.-]*\.(?:cjs|js|mjs|py|sh|ts|tsx)\b/i,
+];
+const SLOP_BENIGN_TECHNICAL_PATTERNS = [
+  /\bfail[-\s]?soft\s+fallback(?:\s+(?:value|behavior|behaviour|result|semantics?))?\b/i,
+  /\bfallback\s+(?:value|variable|parameter|argument|option|setting|config(?:uration)?|default)\b/i,
+  /\bfallback\s+to\s+(?:the\s+)?default(?:\s+(?:config(?:uration)?|settings?|value|behavior|behaviour|option))?\b/i,
+  /\b(?:workaround|work\s+around)\s+for\s+(?:commit|change|issue|bug|regression|version|release|pr|pull\s+request|#[0-9]+|[a-f0-9]{7,40}\b)/i,
+  /\b(?:memory|sql|sqlite|mysql|postgres(?:ql)?|typescript|node|browser|runtime)\s+workaround\b/i,
+];
+const SLOP_DOC_CONTEXT_PATTERN = /(?:^|[/\\])(?:docs?|documentation|guides?|instructions?|prompts?|\.om[ctx])(?:[/\\]|$)|\.(?:md|mdx|txt|rst)$/i;
+const SLOP_SELF_REFERENCE_PATH_PATTERN = /(?:^|[/\\])(?:pre-tool-enforcer(?:\.mjs)?|pre-tool-enforcer\.test\.ts)(?:$|[/\\])/i;
+
+function collectStringValues(value, output = [], depth = 0) {
+  if (depth > 5 || output.length > 100) return output;
+  if (typeof value === 'string') {
+    output.push(value);
+    return output;
+  }
+  if (Array.isArray(value)) {
+    for (const item of value) collectStringValues(item, output, depth + 1);
+    return output;
+  }
+  if (value && typeof value === 'object') {
+    for (const [key, child] of Object.entries(value)) {
+      // Skip hook/runtime metadata so warnings are driven by user-authored tool intent.
+      if (/^(cwd|directory|session_?id|transcript_?path|hook_event_name)$/i.test(key)) continue;
+      collectStringValues(child, output, depth + 1);
+    }
+  }
+  return output;
+}
+
+function collectLikelyPathValues(value, output = [], depth = 0) {
+  if (depth > 5 || output.length > 100 || !value || typeof value !== 'object') return output;
+  if (Array.isArray(value)) {
+    for (const item of value) collectLikelyPathValues(item, output, depth + 1);
+    return output;
+  }
+  for (const [key, child] of Object.entries(value)) {
+    if (typeof child === 'string' && /(?:^|_)(?:file_?path|path|filename|target|command)$/i.test(key)) {
+      output.push(child);
+      continue;
+    }
+    collectLikelyPathValues(child, output, depth + 1);
+  }
+  return output;
+}
+
+function stripSlopQuotedAndCodeContexts(text) {
+  return text
+    .replace(/```[\s\S]*?```/g, '\n')
+    .replace(/`[^`\r\n]*`/g, ' ')
+    .replace(/(["'])(?:\\.|(?!\1)[^\\\r\n])*\1/g, ' ');
+}
+
+function splitSlopInspectionSegments(text) {
+  return text
+    .split(/[\r\n!?;]+/)
+    .map(segment => segment.trim())
+    .filter(Boolean);
+}
+
+function removeBenignTechnicalSlopFallbackSpans(text) {
+  return SLOP_BENIGN_TECHNICAL_PATTERNS.reduce(
+    (result, pattern) => {
+      const flags = pattern.flags.includes('g') ? pattern.flags : `${pattern.flags}g`;
+      return result.replace(new RegExp(pattern.source, flags), ' ');
+    },
+    text,
+  );
+}
+
+function hasSlopFallbackActionShape(text) {
+  const strippedText = stripSlopQuotedAndCodeContexts(text);
+  return splitSlopInspectionSegments(strippedText).some(segment => (
+    SLOP_FALLBACK_ACTION_PATTERNS.some(pattern => (
+      pattern.test(removeBenignTechnicalSlopFallbackSpans(segment))
+    ))
+  ));
+}
+
+function isSelfReferentialSlopContext(toolInput) {
+  return collectLikelyPathValues(toolInput).some(value => SLOP_SELF_REFERENCE_PATH_PATTERN.test(value));
+}
+
+function isDocumentationSlopContext(toolInput) {
+  const pathLikeValues = collectLikelyPathValues(toolInput);
+  return pathLikeValues.some(value => SLOP_DOC_CONTEXT_PATTERN.test(value));
+}
+
+function shouldWarnForSlopFallbackLanguage(data, toolName, inspectedText) {
+  if (!SLOP_RISK_TOOL_NAMES.has(toolName)) return false;
+  if (!SLOP_FALLBACK_LANGUAGE_PATTERN.test(inspectedText)) return false;
+
+  const toolInput = data.toolInput || data.tool_input || {};
+  if (isSelfReferentialSlopContext(toolInput)) return false;
+  if (isDocumentationSlopContext(toolInput)) {
+    return false;
+  }
+
+  return hasSlopFallbackActionShape(inspectedText);
+}
+
+// --- Jev script-side shadow points ---
+
+const SLOP_WARNING_QUESTIONS = {
+  slop_advisory: {
+    type: 'noul',
+    instructions: 'Does this tool input contain fallback/workaround language worth an advisory warning?',
+    criteria: {
+      'true': 'Contains fallback/workaround phrasing outside doc or self-referential context',
+      'false': 'No advisory-worthy language',
+    },
+  },
+};
+
+const MODEL_ROUTING_QUESTIONS = {
+  'model-tier': {
+    type: 'choice',
+    instructions: 'Which model tier should this delegated task use?',
+    criteria: {
+      haiku: 'Quick lookups and lightweight, mechanical work',
+      sonnet: 'Standard coding and orchestration work',
+      opus: 'Complex architecture and deep analysis',
+    },
+  },
+  effort: {
+    type: 'score',
+    instructions:
+      'How much reasoning effort does this delegated task need? Judge the work the delegated agent must actually do. ' +
+      'The length of the brief and its formal conditions (language and style rules, permission to use subagents, bans, ' +
+      'file locations, report format, words in capitals) do not raise the level.',
+    criteria: {
+      low: 'Low: mechanical work: read, look up, list, copy or transcribe, count; the result follows directly from the data',
+      medium: 'Medium: a typical change or analysis with clear steps, in one place or following a given procedure or brief',
+      high: 'High: multi-file work that needs its own decisions, a diagnosis weighing a few hypotheses, or writing a document',
+      xhigh: 'Extra high: in-depth analysis, architecture, a high-stakes review, or a hard bug',
+      max: 'Maximum: exceptionally hard, hours of reasoning at the limit of difficulty; rare',
+    },
+  },
+};
+
+// Subagent reasoning effort chosen by the model-routing "effort" score (0-4).
+// The five criteria are ordered low, medium, high, xhigh, max, so the score is
+// the expected value over that scale. It is rounded to the nearest level; an
+// exact tie (0.5, 1.5, 2.5, 3.5) goes to the even level (low, high, high, max)
+// so ties do not push the judgment in one direction. Every result is capped by
+// OMC_JEV_MAX_EFFORT (low, medium, high, xhigh, or max). The default cap is
+// max: with the calibrated question xhigh and max are uncommon answers, so the
+// cap is not needed as a brake and would cut them where the work needs them.
+// Set a lower cap to restrict it.
+// When the point is active and Jev returns no usable effort score, an
+// explicit effort above the cap is lowered to the cap.
+const EFFORT_LEVELS = ['low', 'medium', 'high', 'xhigh', 'max'];
+const DEFAULT_MAX_EFFORT = 'max';
+
+function resolveMaxEffort(env = process.env) {
+  const raw = String(env.OMC_JEV_MAX_EFFORT ?? '').trim().toLowerCase();
+  if (EFFORT_LEVELS.includes(raw)) return raw;
+  // A typo in a cap must not silently lift it to the most expensive level.
+  if (raw && env.OMC_JEV_QUIET !== '1') {
+    console.error('[jev] model-routing: OMC_JEV_MAX_EFFORT=' + raw.slice(0, 40) + ' is not one of ' + EFFORT_LEVELS.join(', ') + '; using ' + DEFAULT_MAX_EFFORT);
+  }
+  return DEFAULT_MAX_EFFORT;
+}
+
+function capEffort(effort, maxEffort) {
+  return EFFORT_LEVELS.indexOf(effort.toLowerCase()) > EFFORT_LEVELS.indexOf(maxEffort) ? maxEffort : effort;
+}
+
+function effortFromScore(score, maxEffort) {
+  const below = Math.floor(score);
+  const fraction = score - below;
+  const index = fraction < 0.5 ? below : fraction > 0.5 ? below + 1 : below % 2 === 0 ? below : below + 1;
+  return capEffort(EFFORT_LEVELS[index], maxEffort);
+}
+
+function recordSlopWarningShadow(toolName, toolInput, warned, permissionMode) {
+  recordJevShadow({
+    point: 'slop-warning',
+    state: { toolName, toolInput },
+    questions: SLOP_WARNING_QUESTIONS,
+    heuristic: warned,
+    permissionMode,
+  });
+}
+
+const MODEL_ROUTING_METADATA_MAX_CHARS = 500;
+// How much of the task and the description the hook passes on: the model-routing excerpt
+// limit (12000 by default, OMC_JEV_EXCERPT_CHARS_MODEL_ROUTING to change it), the same
+// limit the resolver then applies to the state. The fields that decide the routing
+// (subagent_type, model, effort, resume) always keep the fixed limit.
+const MODEL_ROUTING_TEXT_MAX_CHARS = resolveExcerptChars('model-routing');
+
+// OMC_JEV_MODEL_ROUTING_CONTEXT=1 adds two fields to the model-routing state: the call's
+// `description` and the last real user message of the parent session, read from the tail
+// of its transcript. Off by default: the state is then the subagent type and the task only.
+function isModelRoutingContextEnabled(env = process.env) {
+  return ['1', 'true'].includes(String(env.OMC_JEV_MODEL_ROUTING_CONTEXT ?? '').trim().toLowerCase());
+}
+
+// By default Jev is asked only when the call or the agent definition names a model that
+// resolves to haiku, sonnet or opus. OMC_JEV_MODEL_ROUTING_ALL_AGENTS=1 also asks for calls
+// with no model at all (a general-purpose agent without one, an agent definition without a
+// `model:` field or with `inherit`): Jev's answer then sets the model and the effort as
+// usual. A call or an agent definition (plugin, project or user) that names any other
+// model, fable for example, is a deliberate choice and is still left alone.
+function isUnpinnedModel(model) {
+  return !model || String(model).trim().toLowerCase() === 'inherit';
+}
+
+function isModelRoutingAllAgentsEnabled(env = process.env) {
+  return ['1', 'true'].includes(String(env.OMC_JEV_MODEL_ROUTING_ALL_AGENTS ?? '').trim().toLowerCase());
+}
+
+// The `model:` an agent definition declares, searched the way Claude Code finds the
+// definition: plugin agents, and for a bare name also the project and the user config.
+function readNativeAgentDefinitionModel(subagentType, directory) {
+  const fromPlugin = readAgentDefinitionModel(subagentType);
+  if (fromPlugin || typeof subagentType !== 'string' || !/^[a-zA-Z0-9_-]+$/.test(subagentType)) return fromPlugin;
+  for (const agentsDir of [join(directory || process.cwd(), '.claude', 'agents'), join(getClaudeConfigDir(), 'agents')]) {
+    const model = readAgentDefinitionModel(subagentType, agentsDir);
+    if (model) return model;
+  }
+  return null;
+}
+
+const PARENT_MESSAGE_MAX_CHARS = 4000;
+const TRANSCRIPT_TAIL_BYTES = 4 * 1024 * 1024;
+// User-type transcript entries that are system messages, not the user's own words.
+const PARENT_MESSAGE_SKIP_PREFIXES = [
+  '<task-notification>', '<teammate-message', '<command-name>', '<command-message>',
+  '<local-command-stdout>', '<local-command-stderr>',
+];
+
+// Same boundary as the /goal recovery below: only the active session's own transcript
+// (`<sessionId>.jsonl`), a regular file that is not a symlink, read through one fd.
+function readParentLastUserMessage(transcriptPath, sessionId) {
+  if (typeof transcriptPath !== 'string' || !transcriptPath) return undefined;
+  if (typeof sessionId !== 'string' || !sessionId) return undefined;
+  if (basename(transcriptPath).replace(/\.jsonl$/i, '') !== sessionId) return undefined;
+  let fd;
+  try {
+    const linkStat = lstatSync(transcriptPath);
+    if (linkStat.isSymbolicLink() || !linkStat.isFile()) return undefined;
+    fd = openSync(transcriptPath, 'r');
+    const stat = fstatSync(fd);
+    if (!stat.isFile()) return undefined;
+    const length = Math.min(stat.size, TRANSCRIPT_TAIL_BYTES);
+    const buffer = Buffer.allocUnsafe(length);
+    let read = 0;
+    while (read < length) {
+      const n = readSync(fd, buffer, read, length - read, stat.size - length + read);
+      if (n <= 0) break;
+      read += n;
+    }
+    const lines = buffer.toString('utf8', 0, read).split('\n');
+    for (let i = lines.length - 1; i >= 0; i--) {
+      let entry;
+      try { entry = JSON.parse(lines[i]); } catch { continue; }
+      if (entry?.type !== 'user' || entry.isMeta || entry.isCompactSummary || entry.isSidechain) continue;
+      const content = entry.message?.content;
+      if (Array.isArray(content) && content.some((block) => block?.type === 'tool_result')) continue;
+      const text = (typeof content === 'string' ? content : Array.isArray(content)
+        ? content.filter((block) => block?.type === 'text' && typeof block.text === 'string').map((block) => block.text).join('\n')
+        : '').replace(/<system-reminder>[\s\S]*?<\/system-reminder>/g, '').trim();
+      if (text && !PARENT_MESSAGE_SKIP_PREFIXES.some((prefix) => text.startsWith(prefix))) {
+        return text.slice(0, PARENT_MESSAGE_MAX_CHARS);
+      }
+    }
+  } catch {
+    // Missing or unreadable transcript: the field is omitted.
+  } finally {
+    if (fd !== undefined) {
+      try { closeSync(fd); } catch { /* ignore */ }
+    }
+  }
+  return undefined;
+}
+
+function boundModelRoutingInput(toolInput) {
+  const bounded = {};
+  for (const key of ['description', 'prompt', 'subagent_type', 'model', 'effort', 'resume']) {
+    if (typeof toolInput[key] === 'string') {
+      const max = key === 'description' || key === 'prompt' ? MODEL_ROUTING_TEXT_MAX_CHARS : MODEL_ROUTING_METADATA_MAX_CHARS;
+      bounded[key] = toolInput[key].slice(0, max);
+    }
+  }
+  if (typeof toolInput.run_in_background === 'boolean') {
+    bounded.run_in_background = toolInput.run_in_background;
+  }
+  return bounded;
+}
+
+function recordModelRoutingShadow(toolName, toolInput, updatedToolInput, permissionMode, transcriptPath, directory, sessionId) {
+  if (!isJevShadowOptedIn('model-routing', process.env, permissionMode)) return;
+
+  const originalInput = boundModelRoutingInput(toolInput);
+  const modifiedInput = boundModelRoutingInput(updatedToolInput || toolInput);
+  const selectedModel = modifiedInput.model || readAgentDefinitionModel(originalInput.subagent_type);
+  const model = isTierAlias(selectedModel) ? selectedModel.toLowerCase() : normalizeToCcAlias(selectedModel);
+  const knownTier = ['haiku', 'sonnet', 'opus'].includes(model);
+  // A call with no model of its own and no model in a plugin, project or user agent
+  // definition is unpinned; only OMC_JEV_MODEL_ROUTING_ALL_AGENTS asks about those.
+  const unpinned = !knownTier && isModelRoutingAllAgentsEnabled()
+    && isUnpinnedModel(selectedModel || readNativeAgentDefinitionModel(originalInput.subagent_type, directory));
+  if (!knownTier && !unpinned) return;
+
+  // No twin tier for a call without a known model: nothing comparable to log.
+  const heuristic = knownTier ? model : null;
+
+  let context = {};
+  if (isModelRoutingContextEnabled()) {
+    const parentMessage = readParentLastUserMessage(resolveTranscriptPath(transcriptPath, directory), sessionId);
+    context = {
+      description: originalInput.description || '',
+      ...(parentMessage ? { parent_last_user_message: parentMessage } : {}),
+    };
+  }
+
+  const jevResult = recordJevShadow({
+    point: 'model-routing',
+    state: {
+      tool_name: toolName,
+      subagent_type: originalInput.subagent_type || '',
+      task: originalInput.prompt || '',
+      ...context,
+    },
+    questions: MODEL_ROUTING_QUESTIONS,
+    heuristic,
+    permissionMode,
+  });
+  
+  // In active mode, Jev's answers replace the model and effort in the call,
+  // explicit values included. Answers are read by question name: the API
+  // does not guarantee their order. A missing or malformed answer leaves that
+  // field as it was.
+  const answers = jevResult && jevResult.mode === 'active' ? jevResult.answers : undefined;
+  if (answers && typeof answers === 'object') {
+    const ensureUpdated = () => {
+      if (!updatedToolInput) updatedToolInput = { ...toolInput };
+      return updatedToolInput;
+    };
+    const tierChoice = answers['model-tier']?.choice;
+    const jevChoice = typeof tierChoice === 'string' ? tierChoice.toLowerCase() : undefined;
+    // With forceInherit a call without a model deliberately inherits the session model,
+    // and a tier alias the provider cannot resolve is denied: set the alias on such a call
+    // only when it resolves to a provider model.
+    const inheritsSessionModel = unpinned && isForceInheritEnabled() && !resolveTierAliasToSafeModel(jevChoice);
+    if (jevChoice && ['haiku', 'sonnet', 'opus'].includes(jevChoice) && !inheritsSessionModel) {
+      ensureUpdated().model = jevChoice;
+    }
+
+    const maxEffort = resolveMaxEffort();
+    // Only a score answer inside the declared 0-4 range counts; anything else
+    // is treated as a missing effort answer.
+    const effortAnswer = answers.effort;
+    const effortScore = effortAnswer?.type === 'score' ? effortAnswer.score : undefined;
+    const currentEffort = (updatedToolInput || toolInput).effort;
+    if (typeof effortScore === 'number' && Number.isFinite(effortScore) && effortScore >= 0 && effortScore <= 4) {
+      ensureUpdated().effort = effortFromScore(effortScore, maxEffort);
+    } else if (typeof currentEffort === 'string' && capEffort(currentEffort, maxEffort) !== currentEffort) {
+      ensureUpdated().effort = capEffort(currentEffort, maxEffort);
+    }
+  }
+  
+  return updatedToolInput;
+}
+
+function generateSlopWarning(data, toolName) {
+  const toolInput = data.toolInput || data.tool_input || {};
+  const promptLikeFields = {
+    prompt: data.prompt,
+    userPrompt: data.userPrompt,
+    user_prompt: data.user_prompt,
+    message: data.message,
+  };
+  const inspectedText = collectStringValues(toolInput)
+    .concat(collectStringValues(promptLikeFields))
+    .join('\n');
+  const warned = shouldWarnForSlopFallbackLanguage(data, toolName, inspectedText);
+  recordSlopWarningShadow(toolName, data.toolInput || data.tool_input || {}, warned, data.permission_mode);
+  if (!warned) return '';
+
+  return '[SLOP WARNING] Detected fallback/workaround language in this tool input. ' +
+    'Do not make potential slop: avoid ad-hoc fallback layers, workaround shims, or environment-specific patches unless explicitly justified. ' +
+    'For architecture concerns, consult the architect for a concrete design first. ' +
+    'If this seems environment-specific, ask the user to confirm constraints before proceeding.';
+}
+
+function combineHookMessages(...messages) {
+  return messages.filter(Boolean).join('\n\n');
+}
+
+
+const ADVISORY_THROTTLE_STATE_FILE = 'pre-tool-advisory-throttle.json';
+const ADVISORY_THROTTLE_MAX_ENTRIES = 100;
+const ADVISORY_THROTTLE_DEFAULT_COOLDOWN_MS = 5 * 60 * 1000;
+const ADVISORY_THROTTLE_MIN_PRUNE_WINDOW_MS = 60 * 60 * 1000;
+
+function getAdvisoryThrottleCooldownMs() {
+  const raw = process.env.OMC_PRE_TOOL_ADVISORY_COOLDOWN_MS;
+  if (raw == null || !/^\d+$/.test(raw.trim())) return ADVISORY_THROTTLE_DEFAULT_COOLDOWN_MS;
+  const parsed = Number(raw.trim());
+  return Number.isSafeInteger(parsed) ? parsed : ADVISORY_THROTTLE_DEFAULT_COOLDOWN_MS;
+}
+
+function getAdvisoryThrottleNowMs() {
+  const raw = process.env.OMC_PRE_TOOL_ADVISORY_NOW_MS;
+  if (raw != null && raw !== '') {
+    const parsed = Number.parseInt(raw, 10);
+    if (Number.isFinite(parsed)) return parsed;
+  }
+  return Date.now();
+}
+
+function getAdvisoryThrottlePath(stateDir, sessionId) {
+  const safeSessionId = isValidSessionId(sessionId) ? sessionId : '';
+  return safeSessionId
+    ? join(stateDir, 'sessions', safeSessionId, ADVISORY_THROTTLE_STATE_FILE)
+    : join(stateDir, ADVISORY_THROTTLE_STATE_FILE);
+}
+
+function advisoryThrottleKey(message) {
+  return createHash('sha256').update(message).digest('hex');
+}
+
+function normalizeAdvisoryThrottleState(state) {
+  if (!state || typeof state !== 'object' || !state.entries || typeof state.entries !== 'object') {
+    return { version: 1, entries: {} };
+  }
+  return { ...state, version: 1, entries: state.entries };
+}
+
+function pruneAdvisoryThrottleEntries(entries, nowMs, cooldownMs) {
+  const pruneWindowMs = Math.max(cooldownMs * 2, ADVISORY_THROTTLE_MIN_PRUNE_WINDOW_MS);
+  const freshEntries = Object.entries(entries)
+    .filter(([, entry]) => {
+      const last = Number(entry?.last_emitted_at_ms);
+      return Number.isFinite(last) && last <= nowMs && nowMs - last <= pruneWindowMs;
+    })
+    .sort(([, a], [, b]) => Number(b?.last_emitted_at_ms || 0) - Number(a?.last_emitted_at_ms || 0))
+    .slice(0, ADVISORY_THROTTLE_MAX_ENTRIES);
+  return Object.fromEntries(freshEntries);
+}
+
+function shouldEmitAdvisoryMessage(stateDir, sessionId, message) {
+  const cooldownMs = getAdvisoryThrottleCooldownMs();
+  if (!message || cooldownMs <= 0) return true;
+
+  const nowMs = getAdvisoryThrottleNowMs();
+  const throttlePath = getAdvisoryThrottlePath(stateDir, sessionId);
+  const key = advisoryThrottleKey(message);
+
+  try {
+    const state = normalizeAdvisoryThrottleState(readJsonFile(throttlePath));
+    state.entries = pruneAdvisoryThrottleEntries(state.entries, nowMs, cooldownMs);
+
+    const previous = state.entries[key];
+    const previousMs = Number(previous?.last_emitted_at_ms);
+    const shouldEmit = !Number.isFinite(previousMs) || previousMs > nowMs || nowMs - previousMs >= cooldownMs;
+
+    if (shouldEmit) {
+      state.entries[key] = {
+        last_emitted_at_ms: nowMs,
+        message,
+      };
+      state.entries = pruneAdvisoryThrottleEntries(state.entries, nowMs, cooldownMs);
+      state.updated_at = new Date(nowMs).toISOString();
+      mkdirSync(dirname(throttlePath), { recursive: true });
+      const tmpPath = `${throttlePath}.tmp`;
+      writeFileSync(tmpPath, JSON.stringify(state, null, 2), { mode: 0o600 });
+      renameSync(tmpPath, throttlePath);
+    }
+
+    return shouldEmit;
+  } catch {
+    // Fail open: advisory throttling must never silence safety output because
+    // state IO failed. The hook may repeat a nudge rather than risk hiding it.
+    return true;
+  }
+}
+
+const SESSION_ID_PATTERN = /^[a-zA-Z0-9][a-zA-Z0-9_-]{0,255}$/;
+const MODE_STATE_FILES = [
+  'autopilot-state.json',
+  'ultrapilot-state.json',
+  'ralph-state.json',
+  'ultragoal-state.json',
+  'pipeline-state.json',
+  'team-state.json',
+  'omc-teams-state.json',
+];
+const QUIET_LEVEL = getQuietLevel();
+const BUILT_IN_TASK_LIST_TOOL_NAMES = new Set([
+  'TaskCreate',
+  'TaskUpdate',
+  'TaskList',
+  'TaskGet',
+  'TaskOutput',
+  'TaskStop',
+]);
+
+function getQuietLevel() {
+  const parsed = Number.parseInt(process.env.OMC_QUIET || '0', 10);
+  if (Number.isNaN(parsed)) return 0;
+  return Math.max(0, parsed);
+}
+
+/**
+ * Resolve the .omc root directory for a given starting directory.
+ *
+ * Resolution order (mirrors src/lib/worktree-paths.ts getOmcRoot):
+ *   1) OMC_STATE_DIR env — log a warning and fall through (full project-id
+ *      derivation lives in the TS layer; use resolveOmcStateRoot() for async
+ *      TS-backed OMC_STATE_DIR support in main()).
+ *   2) Walk up from startDir looking for a .omc-workspace marker file.
+ *      The first directory containing that file is the workspace anchor.
+ *   3) git rev-parse --show-toplevel from startDir.
+ *   4) Fallback to startDir itself.
+ *
+ * @param {string} startDir - Directory to resolve from (usually cwd from hook payload)
+ * @returns {string} Absolute path to the .omc root directory
+ */
+function resolveOmcRoot(startDir) {
+  const dir = startDir || process.cwd();
+
+  // 1) OMC_STATE_DIR: full project-id derivation is TS-only; warn and fall through.
+  if (process.env.OMC_STATE_DIR) {
+    process.stderr.write(
+      '[omc] OMC_STATE_DIR is set; resolveOmcRoot() falling through to workspace-marker ' +
+      'resolution. Use resolveOmcStateRoot() for full OMC_STATE_DIR support.\n'
+    );
+  }
+
+  // 2) Walk up looking for .omc-workspace marker
+  try {
+    let cursor = resolve(dir);
+    const home = (() => { try { return resolve(homedir()); } catch { return null; } })();
+    while (true) {
+      if (existsSync(join(cursor, '.omc-workspace'))) {
+        return join(cursor, '.omc');
+      }
+      const parent = dirname(cursor);
+      if (parent === cursor) break;
+      if (home && cursor === home) break;
+      cursor = parent;
+    }
+  } catch {
+    // walk failed — continue to git fallback
+  }
+
+  // 3) git rev-parse --show-toplevel
+  try {
+    const top = execFileSync('git', ['rev-parse', '--show-toplevel'], {
+      cwd: dir,
+      encoding: 'utf-8',
+      stdio: ['pipe', 'pipe', 'pipe'],
+      timeout: BOUNDED_GIT_TIMEOUT_MS,
+      windowsHide: true,
+    }).trim();
+    if (top) return join(top, '.omc');
+  } catch {
+    // not in a git repo — fall through
+  }
+
+  // 4) Fallback to startDir
+  return join(dir, '.omc');
+}
+
+
+/**
+ * Resolve transcript path in worktree environments.
+ * Mirrors logic used by context safety/guard hooks.
+ */
+function resolveTranscriptPath(transcriptPath, cwd) {
+  if (!transcriptPath) return transcriptPath;
+  try {
+    if (existsSync(transcriptPath)) return transcriptPath;
+  } catch { /* fallthrough */ }
+
+  const worktreePattern = /--claude-worktrees-[^/\\]+/;
+  if (worktreePattern.test(transcriptPath)) {
+    const resolvedPath = transcriptPath.replace(worktreePattern, '');
+    try {
+      if (existsSync(resolvedPath)) return resolvedPath;
+    } catch { /* fallthrough */ }
+  }
+
+  const effectiveCwd = cwd || process.cwd();
+  try {
+    const gitCommonDir = execFileSync('git', ['rev-parse', '--git-common-dir'], {
+      cwd: effectiveCwd,
+      encoding: 'utf-8',
+      stdio: ['pipe', 'pipe', 'pipe'],
+      timeout: BOUNDED_GIT_TIMEOUT_MS,
+      windowsHide: true,
+    }).trim();
+
+    const absoluteCommonDir = resolve(effectiveCwd, gitCommonDir);
+    const mainRepoRoot = dirname(absoluteCommonDir);
+
+    const worktreeTop = execFileSync('git', ['rev-parse', '--show-toplevel'], {
+      cwd: effectiveCwd,
+      encoding: 'utf-8',
+      stdio: ['pipe', 'pipe', 'pipe'],
+      timeout: BOUNDED_GIT_TIMEOUT_MS,
+      windowsHide: true,
+    }).trim();
+
+    if (mainRepoRoot !== worktreeTop) {
+      const sessionFile = basename(transcriptPath);
+      if (sessionFile) {
+        const configDir = getClaudeConfigDir();
+        const projectsDir = join(configDir, 'projects');
+        if (existsSync(projectsDir)) {
+          const encodedMain = encodeProjectPath(mainRepoRoot);
+          const resolvedPath = join(projectsDir, encodedMain, sessionFile);
+          try {
+            if (existsSync(resolvedPath)) return resolvedPath;
+          } catch { /* fallthrough */ }
+        }
+      }
+    }
+  } catch { /* best-effort fallback */ }
+
+  return transcriptPath;
+}
+
+// Simple JSON field extraction
+function extractJsonField(input, field, defaultValue = '') {
+  try {
+    const data = JSON.parse(input);
+    return data[field] ?? defaultValue;
+  } catch {
+    // Fallback regex extraction
+    const match = input.match(new RegExp(`"${field}"\\s*:\\s*"([^"]*)"`, 'i'));
+    return match ? match[1] : defaultValue;
+  }
+}
+
+// Get agent tracking info from state file.
+// Path resolution is owned by the canonical resolveSessionStatePathsForHook()
+// helper (validation/migration-aware, session-scoped-first read with legacy
+// fallback), so this reader cannot drift from the other OmC consumers again.
+// Issue #3732: the pre-fix manual path construction read legacy-only while
+// post-tool-verifier::getAgentCompletionSummary read session-scoped first,
+// producing contradicting agent counts for the same session.
+//
+// Name note: the canonical resolver normalizes `subagent-tracking` to
+// `<stateDir>/sessions/<sid>/subagent-tracking-state.json` (Wave-A layout) with
+// read fallback to `<stateDir>/subagent-tracking-state.json`. When the
+// session-scoped file exists but is malformed, the canonical legacy file for
+// the same name is probed explicitly (never skipped). The pre-Wave-A legacy
+// file was plain `subagent-tracking.json` (still read by
+// session-end/post-tool-verifier and written by pre-Wave-A installs), so after
+// the canonical probe finds nothing the plain legacy filename is read
+// directly. When no sessionId is observable only the two legacy filenames are
+// probed.
+async function getAgentTrackingInfo(stateDir, directory, sessionId = '') {
+  // The session id arrives from the hook payload and is influenceable, so it
+  // is validated against the canonical allowlist BEFORE any scoped resolution.
+  // An invalid id must skip every session-scoped candidate and only probe the
+  // safe legacy roots: the canonical resolver would throw on it, and the
+  // unvalidated path would let a payload like `../evil` escape the sessions
+  // directory and read unrelated state (issue #3732 review).
+  const safeSessionId = isValidSessionId(sessionId) ? sessionId : '';
+  const candidates = [];
+  try {
+    // Session-scoped effective read for the canonical state name (scoped-first
+    // with canonical-legacy read fallback).
+    const { readPath } = await resolveSessionStatePathsForHook(directory, 'subagent-tracking', safeSessionId || undefined);
+    candidates.push(readPath);
+    // Explicit canonical legacy read: when the session-scoped file exists but
+    // is malformed the effective read above points at it, and without this
+    // probe the valid <stateDir>/subagent-tracking-state.json would be
+    // silently skipped. The canonical legacy file is probed even when no
+    // session id is observable (issue #3732 review). Both reads stay owned by
+    // the canonical resolver — never the suffixed `subagent-tracking.json`
+    // state name, which the resolver would corrupt into `-state.json`.
+    const legacy = await resolveSessionStatePathsForHook(directory, 'subagent-tracking', undefined);
+    if (legacy.readPath !== readPath) candidates.push(legacy.readPath);
+  } catch {}
+  // Pre-Wave-A legacy filename, read directly (outside the canonical naming
+  // scheme) so old installs keep working. resolveSessionStatePathsForHook
+  // appends `-state.json`, which would corrupt a name that already ends in
+  // `.json`, hence the direct join here under the resolved state root.
+  candidates.push(join(stateDir, 'subagent-tracking.json'));
+
+  for (const trackingFile of candidates) {
+    const data = readJsonFile(trackingFile);
+    // Shape-validate per candidate: a parseable file with a non-array `agents`
+    // field is a malformed candidate, never a reason to abort the whole hook
+    // (which would drop the spawn advisory and any configured model injection).
+    // Skip it and continue with the next canonical/legacy candidate.
+    if (!data || typeof data !== 'object' || Array.isArray(data) || !Array.isArray(data.agents)) {
+      continue;
+    }
+    const running = data.agents.filter(a => a && typeof a === 'object' && a.status === 'running').length;
+    return { running, total: data.total_spawned || 0 };
+  }
+  return { running: 0, total: 0 };
+}
+
+// Get todo status from project-local todos only
+async function getTodoStatus(directory) {
+  let pending = 0;
+  let inProgress = 0;
+
+  // Check project-local todos
+  const omcRoot = await resolveOmcStateRoot(directory);
+  const localPaths = [
+    join(omcRoot, 'todos.json'),
+    join(directory, '.claude', 'todos.json')
+  ];
+
+  for (const todoFile of localPaths) {
+    if (existsSync(todoFile)) {
+      try {
+        const content = readFileSync(todoFile, 'utf-8');
+        const data = JSON.parse(content);
+        const todos = data.todos || data;
+        if (Array.isArray(todos)) {
+          pending += todos.filter(t => t.status === 'pending').length;
+          inProgress += todos.filter(t => t.status === 'in_progress').length;
+        }
+      } catch {
+        // Ignore errors
+      }
+    }
+  }
+
+  // NOTE: We intentionally do NOT scan the global
+  // [$CLAUDE_CONFIG_DIR|~/.claude]/todos/ directory.
+  // That directory accumulates todo files from ALL past sessions across all
+  // projects, causing phantom task counts in fresh sessions (see issue #354).
+
+  if (pending + inProgress > 0) {
+    return `[${inProgress} active, ${pending} pending] `;
+  }
+
+  return '';
+}
+
+function isValidSessionId(sessionId) {
+  return typeof sessionId === 'string' && SESSION_ID_PATTERN.test(sessionId);
+}
+
+function readJsonFile(filePath) {
+  try {
+    if (!existsSync(filePath)) return null;
+    return JSON.parse(readFileSync(filePath, 'utf-8'));
+  } catch {
+    return null;
+  }
+}
+
+const STATE_STALE_MS = 2 * 60 * 60 * 1000;
+const ULTRAGOAL_TERMINAL_PHASES = new Set([
+  'complete',
+  'completed',
+  'done',
+  'all-done',
+  'all_done',
+  'failed',
+  'cancelled',
+  'canceled',
+  'aborted',
+]);
+
+const AWAITING_CONFIRMATION_TTL_MS = 2 * 60 * 1000;
+
+function isAwaitingConfirmation(state) {
+  if (!state || state.awaiting_confirmation !== true) return false;
+
+  const preferred = state.awaiting_confirmation_set_at;
+  const timestamp = typeof preferred === 'string' && preferred.trim()
+    ? preferred
+    : typeof state.started_at === 'string' && state.started_at.trim()
+      ? state.started_at
+      : null;
+  if (!timestamp) return false;
+
+  const timestampMs = new Date(timestamp).getTime();
+  const ageMs = Date.now() - timestampMs;
+  return Number.isFinite(ageMs) && ageMs >= 0 && ageMs < AWAITING_CONFIRMATION_TTL_MS;
+}
+
+
+function isStaleModeState(state) {
+  if (!state || typeof state !== 'object') return true;
+  const timestamps = [state.last_checked_at, state.updated_at, state.started_at]
+    .filter(value => typeof value === 'string' && value.length > 0)
+    .map(value => new Date(value).getTime())
+    .filter(value => Number.isFinite(value));
+  if (timestamps.length === 0) return true;
+  return Date.now() - Math.max(...timestamps) > STATE_STALE_MS;
+}
+
+function normalizeText(value) {
+  return typeof value === 'string' ? value.trim().replace(/\s+/g, ' ').toLowerCase() : '';
+}
+
+function normalizePhase(value) {
+  return typeof value === 'string' && value.trim().length > 0 ? value.trim().toLowerCase() : '';
+}
+
+function isUltragoalTerminalState(state, directory) {
+  if (!state || typeof state !== 'object') return true;
+  if (state.active === false) return true;
+  if (typeof state.completed_at === 'string' && state.completed_at.length > 0) return true;
+  if (state.all_done === true || state.done === true) return true;
+
+  const phase = normalizePhase(state.current_phase ?? state.phase ?? state.status);
+  if (phase && ULTRAGOAL_TERMINAL_PHASES.has(phase)) return true;
+
+  const plan = readJsonFile(join(directory, '.omc', 'ultragoal', 'goals.json'));
+  if (!plan || typeof plan !== 'object') return false;
+  if (plan.aggregateCompletion?.status === 'complete') return true;
+  if (!Array.isArray(plan.goals) || plan.goals.length === 0) return false;
+  return plan.goals.every(goal => {
+    const status = normalizePhase(goal?.status);
+    return status === 'complete' || status === 'review_blocked';
+  });
+}
+
+function readSessionModeState(stateDir, mode, sessionId) {
+  const filename = `${mode}-state.json`;
+  const safeSessionId = isValidSessionId(sessionId) ? sessionId : '';
+  const candidates = safeSessionId
+    ? [join(stateDir, 'sessions', safeSessionId, filename), join(stateDir, filename)]
+    : [join(stateDir, filename)];
+  for (const statePath of candidates) {
+    const state = readJsonFile(statePath);
+    if (!state) continue;
+    if (safeSessionId && state.session_id && state.session_id !== safeSessionId) continue;
+    return { state, path: statePath };
+  }
+  return { state: null, path: '' };
+}
+
+function getExpectedUltragoalObjective(state, directory) {
+  const candidates = [
+    state?.claude_goal_objective,
+    state?.claudeGoalObjective,
+    state?.codex_objective,
+    state?.codexObjective,
+    state?.goal_objective,
+    state?.goalObjective,
+    state?.objective,
+  ];
+  for (const value of candidates) {
+    if (typeof value === 'string' && value.trim()) return value.trim();
+  }
+
+  const plan = readJsonFile(join(directory, '.omc', 'ultragoal', 'goals.json'));
+  if (typeof plan?.claudeObjective === 'string' && plan.claudeObjective.trim()) return plan.claudeObjective.trim();
+  if (typeof plan?.aggregateCompletion?.objective === 'string' && plan.aggregateCompletion.objective.trim()) {
+    return plan.aggregateCompletion.objective.trim();
+  }
+  const activeGoal = Array.isArray(plan?.goals) ? plan.goals.find(goal => goal?.status === 'in_progress') : null;
+  if (typeof activeGoal?.objective === 'string' && activeGoal.objective.trim()) return activeGoal.objective.trim();
+  return '';
+}
+
+// Upper bound on the transcript we are willing to read on every tool call.
+const MAX_TRANSCRIPT_BYTES = 25 * 1024 * 1024;
+// The authoritative `/goal` signal is the slash-command *invocation* record, not the
+// `<local-command-stdout>` display echo (which Claude Code also emits for ordinary
+// user-typed/pasted prompts, so display text is spoofable). A real record looks like
+// `<command-name>/goal</command-name> ... <command-args>OBJECTIVE</command-args>`.
+const GOAL_COMMAND_MARKER = /<command-name>\s*\/goal\s*<\/command-name>/;
+const GOAL_COMMAND_ARGS = /<command-args>([\s\S]*?)<\/command-args>/;
+// Any line that plausibly carries `/goal` state — intentionally broad (matches even
+// truncated markers) so a malformed goal-bearing record fails closed instead of
+// silently keeping a stale goal active.
+const GOAL_BEARING_HINT = /\/goal|Goal set|Goal cleared|local-command-stdout/;
+
+// Read a bounded regular file without following symlinks and without a stat->open race:
+// reject symlinks via lstat, then stat the open fd (fstat) and read through that same fd.
+function readBoundedTranscript(path) {
+  let linkStat;
+  try {
+    linkStat = lstatSync(path);
+  } catch {
+    return null;
+  }
+  if (linkStat.isSymbolicLink() || !linkStat.isFile()) return null;
+
+  let fd;
+  try {
+    fd = openSync(path, 'r');
+  } catch {
+    return null;
+  }
+  try {
+    const stat = fstatSync(fd);
+    if (!stat.isFile() || stat.size === 0 || stat.size > MAX_TRANSCRIPT_BYTES) return null;
+    const buffer = Buffer.allocUnsafe(stat.size);
+    let read = 0;
+    while (read < stat.size) {
+      const n = readSync(fd, buffer, read, stat.size - read, read);
+      if (n <= 0) break;
+      read += n;
+    }
+    return buffer.toString('utf-8', 0, read);
+  } catch {
+    return null;
+  } finally {
+    try { closeSync(fd); } catch { /* ignore */ }
+  }
+}
+
+// Recover the active Claude `/goal` from the session transcript.
+//
+// Claude Code does not expose live `/goal` state to hooks (the PreToolUse payload
+// carries none of the goal fields read below), but every hook receives
+// `transcript_path`, where a `/goal` invocation is recorded as a command record.
+// Reading it lets the guard observe a goal the user actually set instead of denying
+// forever (issue #3341) — without trusting arbitrary transcript text.
+//
+// Authorization boundary (PR review on #3465/#3466):
+// - resolve worktree-encoded paths via the shared resolver, then require the file to be
+//   the active session's own transcript (`<sessionId>.jsonl`);
+// - read a bounded, non-symlink regular file through a stable fd;
+// - trust only command-originated `/goal` records (`<command-name>/goal</command-name>`),
+//   never `<local-command-stdout>` display text;
+// - apply set/clear strictly in order (last-event-wins) and fail closed if any
+//   goal-bearing record is malformed.
+function extractGoalFromTranscript(rawTranscriptPath, sessionId, cwd) {
+  if (typeof rawTranscriptPath !== 'string' || !rawTranscriptPath) return null;
+  if (typeof sessionId !== 'string' || !sessionId) return null;
+
+  const resolved = resolveTranscriptPath(rawTranscriptPath, cwd);
+  if (typeof resolved !== 'string' || !resolved) return null;
+  // Bind to the active session; Claude Code names the transcript `<sessionId>.jsonl`.
+  if (basename(resolved).replace(/\.jsonl$/i, '') !== sessionId) return null;
+
+  const content = readBoundedTranscript(resolved);
+  if (content === null) return null;
+
+  let objective = '';
+  for (const line of content.split('\n')) {
+    if (!line || !GOAL_BEARING_HINT.test(line)) continue;
+    let entry;
+    try {
+      entry = JSON.parse(line);
+    } catch {
+      return null; // fail closed: a malformed goal-bearing record invalidates recovery
+    }
+    if (entry?.type !== 'user') continue;
+    const message = entry.message;
+    if (!message || message.role !== 'user' || typeof message.content !== 'string') continue;
+    // Trust only command-originated `/goal` records, not display stdout text.
+    if (!GOAL_COMMAND_MARKER.test(message.content)) continue;
+    const argsMatch = message.content.match(GOAL_COMMAND_ARGS);
+    const args = argsMatch ? argsMatch[1].trim() : '';
+    // `/goal clear` (or empty args) clears; any other args are the objective.
+    objective = args === '' || args.toLowerCase() === 'clear' ? '' : args;
+  }
+
+  if (!objective) return null;
+  return { objective, status: 'active' };
+}
+
+function extractClaudeGoalSnapshot(data, sessionId, cwd) {
+  const candidates = [
+    data.goal,
+    data.claude_goal,
+    data.claudeGoal,
+    data.goal_state,
+    data.goalState,
+    data.codex_goal,
+    data.codexGoal,
+    data.context?.goal,
+    data.context?.claude_goal,
+  ];
+  for (const candidate of candidates) {
+    const goal = candidate?.goal && typeof candidate.goal === 'object' ? candidate.goal : candidate;
+    if (goal && typeof goal === 'object') {
+      const objective = goal.objective ?? goal.condition ?? goal.prompt ?? goal.description;
+      const status = goal.status ?? goal.state;
+      if (typeof objective === 'string' || typeof status === 'string') {
+        return { objective: typeof objective === 'string' ? objective : '', status: typeof status === 'string' ? status : '' };
+      }
+    }
+  }
+  // Runtime injected no goal field (the standard Claude Code case): fall back to the
+  // transcript, the only place a hook can observe an active `/goal`.
+  return extractGoalFromTranscript(data.transcript_path ?? data.transcriptPath, sessionId, cwd);
+}
+
+
+// A bootstrap/exit bypass must apply to one indivisible command only. Reject shell
+// chaining/expansion so a recognized token cannot smuggle other commands past the guard
+// (e.g. `omc ultragoal checkpoint ... && npm test`). See PR review on #3465.
+function isSingleShellCommand(command) {
+  return typeof command === 'string'
+    && command.trim().length > 0
+    && !/[\n\r;&|`]|\$\(|<\(|>\(/.test(command);
+}
+
+const OMC_CLI_PREFIX_PATTERN = /^(?:(?:node|nodejs)\s+(?:"[^"\n]*[/\\]oh-my-claudecode\.js"|'[^'\n]*[/\\]oh-my-claudecode\.js'|[^\s;|&`]*[/\\]oh-my-claudecode\.js)|(?:omc|oh-my-claudecode|oh-my-claudecode\.js|gjc))\s+/;
+const CANCEL_CLI_SUBCOMMAND_PATTERN = /^(?:state\s+(?:clear|read|write|list-active|get-status)|cancel)(?:\s|$)/;
+const ULTRAGOAL_CLI_SUBCOMMAND_PATTERN = /^ultragoal\s+(?:create(?:-goals)?|complete(?:-goals)?|next|start-next|status|checkpoint|record-review-blockers|add-goal|list-plans)(?:\s|$)/;
+
+function matchesOmcCliSubcommand(command, subcommandPattern) {
+  if (!isSingleShellCommand(command)) return false;
+  const commandArgs = command.trim().replace(OMC_CLI_PREFIX_PATTERN, '');
+  return commandArgs !== command.trim() && subcommandPattern.test(commandArgs);
+}
+
+function isCancelSkillBootstrapTool(toolName, toolInput) {
+  const skillName = extractSkillName(toolInput);
+  if (toolName === 'Skill' && skillName === 'cancel') return true;
+  if (toolName === 'ToolSearch') return true;
+
+  if (toolName === 'Read') {
+    const filePath = typeof toolInput.file_path === 'string'
+      ? toolInput.file_path
+      : typeof toolInput.path === 'string'
+        ? toolInput.path
+        : '';
+    const normalized = filePath.replace(/\\/g, '/');
+    if (/(?:^|\/)(?:skills|skill-bodies)\/cancel\/SKILL\.md$/i.test(normalized)) return true;
+  }
+
+  if (/state_(?:clear|read|write|list_active|get_status)$/i.test(toolName)) return true;
+  if (/^mcp__.*__state_(?:clear|read|write|list_active|get_status)$/i.test(toolName)) return true;
+
+  if (toolName !== 'Bash') return false;
+  const command = typeof toolInput.command === 'string' ? toolInput.command : '';
+  // PATH commands may use the plugin's .js filename; node/nodejs is restricted
+  // to that exact entrypoint basename so arbitrary scripts remain denied.
+  return matchesOmcCliSubcommand(command, CANCEL_CLI_SUBCOMMAND_PATTERN);
+}
+
+function isUltragoalBootstrapTool(toolName, toolInput) {
+  if (toolName === 'Skill' && extractSkillName(toolInput) === 'ultragoal') return true;
+  if (toolName !== 'Bash') return false;
+  const command = typeof toolInput.command === 'string' ? toolInput.command : '';
+  return matchesOmcCliSubcommand(command, ULTRAGOAL_CLI_SUBCOMMAND_PATTERN);
+}
+
+function evaluateUltragoalPreToolEnforcement(stateDir, directory, sessionId, data) {
+  if (process.env.ALLOW_ULTRAGOAL_WITHOUT_GOAL === '1') return null;
+  const toolName = data.tool_name || data.toolName || '';
+  const toolInput = data.toolInput || data.tool_input || {};
+  if (isUltragoalBootstrapTool(toolName, toolInput)) return null;
+  if (isCancelSkillBootstrapTool(toolName, toolInput)) return null;
+  const loaded = readSessionModeState(stateDir, 'ultragoal', sessionId);
+  const state = loaded.state;
+  if (!state?.active) return null;
+  if (isStaleModeState(state)) return null;
+  if (state.project_path && resolve(String(state.project_path)) !== resolve(directory)) return null;
+  if (isUltragoalTerminalState(state, directory)) return null;
+  if (isAwaitingConfirmation(state)) return null;
+
+  const expected = getExpectedUltragoalObjective(state, directory);
+  const actual = extractClaudeGoalSnapshot(data, sessionId, directory);
+  const actualObjective = normalizeText(actual?.objective);
+  const expectedObjective = normalizeText(expected);
+  const status = normalizePhase(actual?.status);
+  const objectiveMatches = Boolean(actualObjective && expectedObjective && actualObjective === expectedObjective);
+  const activeStatus = status === '' || status === 'active' || status === 'in_progress' || status === 'running';
+
+  // #3341: Claude Code does not expose live `/goal` state to a PreToolUse hook, so
+  // `actual` may be recovered from the session transcript (see extractGoalFromTranscript)
+  // in addition to the payload. Objective/status matching semantics are otherwise
+  // unchanged: an explicit or recovered goal must match the expected ultragoal objective
+  // (or the expected objective must be unseeded). Denying when no active goal is
+  // observable at all is preserved below, so the guard stays meaningful.
+  if (!expectedObjective && actualObjective && activeStatus) return null;
+  if (objectiveMatches && activeStatus) return null;
+
+  const mismatch = actualObjective
+    ? `current Claude /goal appears unrelated: "${actual.objective}".`
+    : 'no active Claude /goal snapshot was visible to the hook.';
+  return `[ULTRAGOAL /GOAL REQUIRED] Active ultragoal state requires the matching Claude /goal before tools run; ${mismatch} Activate /goal with the ultragoal objective, or set ALLOW_ULTRAGOAL_WITHOUT_GOAL=1 to bypass this guard intentionally. Expected objective: ${expected || '<record one in ultragoal-state.json or .omc/ultragoal/goals.json>'}`;
+}
+
+function hasActiveJsonMode(stateDir, { allowSessionTagged = false } = {}) {
+  for (const file of MODE_STATE_FILES) {
+    const state = readJsonFile(join(stateDir, file));
+    if (!state || state.active !== true) continue;
+    if (!allowSessionTagged && state.session_id) continue;
+    return true;
+  }
+  return false;
+}
+
+function hasActiveSwarmMode(stateDir, { allowSessionTagged = false } = {}) {
+  const markerFile = join(stateDir, 'swarm-active.marker');
+  if (!existsSync(markerFile)) return false;
+
+  const summary = readJsonFile(join(stateDir, 'swarm-summary.json'));
+  if (!summary || summary.active !== true) return false;
+  if (!allowSessionTagged && summary.session_id) return false;
+
+  return true;
+}
+
+function hasActiveMode(stateDir, sessionId) {
+  if (isValidSessionId(sessionId)) {
+    const sessionStateDir = join(stateDir, 'sessions', sessionId);
+    return (
+      hasActiveJsonMode(sessionStateDir, { allowSessionTagged: true }) ||
+      hasActiveSwarmMode(sessionStateDir, { allowSessionTagged: true })
+    );
+  }
+
+  return (
+    hasActiveJsonMode(stateDir, { allowSessionTagged: false }) ||
+    hasActiveSwarmMode(stateDir, { allowSessionTagged: false })
+  );
+}
+
+function mapCanonicalTeamPhaseToStage(rawPhase) {
+  const phase = typeof rawPhase === 'string' ? rawPhase.trim().toLowerCase() : '';
+  switch (phase) {
+    case 'initializing':
+    case 'planning':
+      return 'team-plan';
+    case 'executing':
+      return 'team-exec';
+    case 'fixing':
+      return 'team-fix';
+    case 'completed':
+      return 'complete';
+    case 'failed':
+      return 'failed';
+    default:
+      return '';
+  }
+}
+
+function readCanonicalActiveTeamState(stateDir, sessionId) {
+  if (!sessionId || !SESSION_ID_PATTERN.test(sessionId)) {
+    return null;
+  }
+
+  const teamRoot = join(stateDir, 'team');
+  if (!existsSync(teamRoot)) {
+    return null;
+  }
+
+  const entries = readdirSync(teamRoot, { withFileTypes: true })
+    .filter((entry) => entry.isDirectory())
+    .map((entry) => entry.name)
+    .sort();
+
+  for (const teamName of entries) {
+    const teamDir = join(teamRoot, teamName);
+    const manifest = readJsonFile(join(teamDir, 'manifest.json'));
+    const phaseState = readJsonFile(join(teamDir, 'phase-state.json'));
+    const ownerSessionId = typeof manifest?.leader?.session_id === 'string'
+      ? manifest.leader.session_id.trim()
+      : '';
+    if (!ownerSessionId || ownerSessionId !== sessionId) {
+      continue;
+    }
+
+    const stage = mapCanonicalTeamPhaseToStage(phaseState?.current_phase);
+    if (!stage) {
+      continue;
+    }
+
+    return {
+      active: stage !== 'complete' && stage !== 'failed',
+      session_id: sessionId,
+      team_name: teamName,
+      teamName,
+      phase: stage,
+      current_phase: stage,
+      task: typeof manifest?.task === 'string' ? manifest.task : teamName,
+      started_at: typeof manifest?.created_at === 'string' ? manifest.created_at : undefined,
+      last_checked_at: typeof phaseState?.updated_at === 'string' ? phaseState.updated_at : undefined,
+    };
+  }
+
+  return null;
+}
+
+/**
+ * Check if team mode is active for the given directory/session.
+ * Reads team-state.json from session-scoped or legacy paths and falls back
+ * to canonical team state when the coarse file drifts or disappears.
+ */
+function getActiveTeamState(stateDir, sessionId) {
+  const paths = [];
+  let coarseState = null;
+
+  // Session-scoped path (preferred)
+  if (sessionId && SESSION_ID_PATTERN.test(sessionId)) {
+    paths.push(join(stateDir, 'sessions', sessionId, 'team-state.json'));
+  }
+
+  // Legacy path
+  paths.push(join(stateDir, 'team-state.json'));
+
+  for (const statePath of paths) {
+    const state = readJsonFile(statePath);
+    if (!state) {
+      continue;
+    }
+    if (sessionId && state.session_id && state.session_id !== sessionId) {
+      continue;
+    }
+    coarseState = state;
+    if (state.active === true) {
+      return state;
+    }
+  }
+
+  const canonical = readCanonicalActiveTeamState(stateDir, sessionId);
+  if (canonical && canonical.active === true) {
+    return canonical;
+  }
+
+  return coarseState && coarseState.active === true ? coarseState : null;
+}
+
+// Generate agent spawn message with metadata
+async function generateAgentSpawnMessage(toolInput, stateDir, directory, todoStatus, sessionId) {
+  if (!toolInput || typeof toolInput !== 'object') {
+    if (QUIET_LEVEL >= 2) return '';
+    return `${todoStatus}Launch multiple agents in parallel when tasks are independent. Use run_in_background for long operations.`;
+  }
+
+  const agentType = toolInput.subagent_type || 'unknown';
+  const model = toolInput.model || 'inherit';
+  const desc = toolInput.description || '';
+  const bg = toolInput.run_in_background ? ' [BACKGROUND]' : '';
+  const tracking = await getAgentTrackingInfo(stateDir, directory, sessionId);
+
+  // Team-routing guidance:
+  // Claude Code 2.1.178+ removed TeamCreate/TeamDelete. When OMC team state is
+  // active, teammates should be spawned into the session's implicit agent team by
+  // giving each Agent/Task call a distinct name. team_name is ignored by native
+  // Claude Code and should only be treated as legacy metadata.
+  const teamState = getActiveTeamState(stateDir, sessionId);
+  if (teamState && !toolInput.name) {
+    const teamName = teamState.team_name || teamState.teamName || 'team';
+    return `[TEAM ROUTING REQUIRED] Team "${teamName}" is active but you are spawning an unnamed subagent. ` +
+      `Claude Code 2.1.178+ uses the session's implicit native agent team; TeamCreate and TeamDelete are removed. ` +
+      `Spawn teammates directly with Agent/Task name="worker-N" and subagent_type="${agentType}". ` +
+      `Do NOT rely on team_name for routing; native Claude Code accepts it only as ignored legacy metadata.`;
+  }
+
+  if (QUIET_LEVEL >= 2) return '';
+
+  const parts = [`${todoStatus}Spawning agent: ${agentType} (${model})${bg}`];
+  if (desc) parts.push(`Task: ${desc}`);
+  if (tracking.running > 0) parts.push(`Active agents: ${tracking.running}`);
+
+  return parts.join(' | ');
+}
+
+// Generate contextual message based on tool type
+function generateMessage(toolName, todoStatus, modeActive = false) {
+  if (QUIET_LEVEL >= 1 && ['Bash', 'Edit', 'Write', 'Read', 'Grep', 'Glob'].includes(toolName)) {
+    return '';
+  }
+  if (QUIET_LEVEL >= 2 && toolName === 'TodoWrite') {
+    return '';
+  }
+
+  const messages = {
+    TodoWrite: `${todoStatus}Mark todos in_progress BEFORE starting, completed IMMEDIATELY after finishing.`,
+    Bash: `${todoStatus}Use parallel execution for independent tasks. Use run_in_background for long operations (npm install, builds, tests).`,
+    Edit: `${todoStatus}Verify changes work after editing. Test functionality before marking complete.`,
+    Write: `${todoStatus}Verify changes work after editing. Test functionality before marking complete.`,
+    Read: `${todoStatus}Read multiple files in parallel when possible for faster analysis.`,
+    Grep: `${todoStatus}Combine searches in parallel when investigating multiple patterns.`,
+    Glob: `${todoStatus}Combine searches in parallel when investigating multiple patterns.`,
+  };
+
+  if (messages[toolName]) return messages[toolName];
+  if (modeActive) return `${todoStatus}The boulder never stops. Continue until all tasks complete.`;
+  return '';
+}
+
+// ---------------------------------------------------------------------------
+// Skill Active State (issue #1033)
+// Writes skill-active-state.json so the persistent-mode Stop hook can prevent
+// premature session termination while a skill is executing.
+// ---------------------------------------------------------------------------
+
+const SKILL_PROTECTION_CONFIGS = {
+  none:   { maxReinforcements: 0,  staleTtlMs: 0 },
+  light:  { maxReinforcements: 3,  staleTtlMs: 5 * 60 * 1000 },
+  medium: { maxReinforcements: 5,  staleTtlMs: 15 * 60 * 1000 },
+  heavy:  { maxReinforcements: 10, staleTtlMs: 30 * 60 * 1000 },
+};
+
+const SKILL_PROTECTION_MAP = {
+  // === Already have mode state → no additional protection ===
+  'omc-teams': 'none', cancel: 'none',
+
+  // === Instant / read-only → no protection needed ===
+  trace: 'none', hud: 'none', 'omc-doctor': 'none', 'omc-help': 'none',
+  'learn-about-omc': 'none', note: 'none',
+
+  // === Light protection (simple shortcuts, 3 reinforcements) ===
+  skill: 'light', ask: 'light', 'configure-notifications': 'light',
+
+  // === Medium protection (review/planning, 5 reinforcements) ===
+  'omc-plan': 'medium', plan: 'medium',
+  ralplan: 'none',  // Has first-class checkRalplan() enforcement; no skill-active needed
+  'deep-interview': 'heavy',
+  review: 'medium', 'external-context': 'medium',
+  'ai-slop-cleaner': 'medium',
+  sciomc: 'medium', learner: 'medium', 'omc-setup': 'medium',
+  setup: 'medium',        // alias for omc-setup
+  'mcp-setup': 'medium', 'project-session-manager': 'medium',
+  psm: 'medium',          // alias for project-session-manager
+  'writer-memory': 'medium', 'ralph-init': 'medium',
+  release: 'medium',
+
+  // === Heavy protection (long-running, 10 reinforcements) ===
+  deepinit: 'heavy',
+};
+
+function getSkillProtectionLevel(skillName, rawSkillName) {
+  // When rawSkillName is provided, only apply protection to OMC-prefixed skills.
+  // Non-prefixed skills are project custom skills or other plugins — no protection.
+  // See: https://github.com/Yeachan-Heo/oh-my-claudecode/issues/1581
+  if (rawSkillName != null && typeof rawSkillName === 'string' &&
+      !rawSkillName.toLowerCase().startsWith('oh-my-claudecode:')) {
+    return 'none';
+  }
+  const normalized = (skillName || '').toLowerCase().replace(/^oh-my-claudecode:/, '');
+  return SKILL_PROTECTION_MAP[normalized] || 'none';
+}
+
+// Load OMC config to check forceInherit setting (issues #1135, #1201)
+function loadOmcConfig() {
+  const configPaths = [
+    join(getClaudeConfigDir(), '.omc-config.json'),
+    join(process.cwd(), '.omc', 'config.json'),
+  ];
+  for (const configPath of configPaths) {
+    try {
+      if (existsSync(configPath)) {
+        return JSON.parse(readFileSync(configPath, 'utf-8'));
+      }
+    } catch { /* continue */ }
+  }
+  return {};
+}
+
+// Check if forceInherit is enabled via config or env var
+function isForceInheritEnabled() {
+  if (process.env.OMC_ROUTING_FORCE_INHERIT === 'true') return true;
+  const config = loadOmcConfig();
+  return config.routing?.forceInherit === true;
+}
+
+function extractSkillName(toolInput) {
+  if (!toolInput || typeof toolInput !== 'object') return null;
+  const rawSkill = toolInput.skill || toolInput.skill_name || toolInput.skillName || toolInput.command || null;
+  if (typeof rawSkill !== 'string' || !rawSkill.trim()) return null;
+  const normalized = rawSkill.trim();
+  return normalized.includes(':') ? normalized.split(':').at(-1).toLowerCase() : normalized.toLowerCase();
+}
+
+function writeSkillActiveState(stateDir, skillName, sessionId, rawSkillName) {
+  const protection = getSkillProtectionLevel(skillName, rawSkillName);
+  if (protection === 'none') return;
+
+  const config = SKILL_PROTECTION_CONFIGS[protection];
+  const now = new Date().toISOString();
+  const normalized = (skillName || '').toLowerCase().replace(/^oh-my-claudecode:/, '');
+
+  const safeSessionId = sessionId && SESSION_ID_PATTERN.test(sessionId) ? sessionId : '';
+  const targetDir = safeSessionId
+    ? join(stateDir, 'sessions', safeSessionId)
+    : stateDir;
+  const targetPath = join(targetDir, 'skill-active-state.json');
+
+  // Nesting guard: when a skill (e.g. omc-setup) invokes a child skill
+  // (e.g. mcp-setup), the child must not overwrite the parent's active state.
+  // If a DIFFERENT skill is already active in this session, skip writing —
+  // the parent's stop-hook protection already covers the session.
+  // If the SAME skill is re-invoked, allow the overwrite (idempotent refresh).
+  //
+  // NOTE: This read-check-write sequence has a TOCTOU race condition
+  // (non-atomic), but this is acceptable because Claude Code sessions are
+  // single-threaded — only one tool call executes at a time within a session.
+  try {
+    if (existsSync(targetPath)) {
+      const existing = JSON.parse(readFileSync(targetPath, 'utf-8'));
+      if (existing.active && existing.skill_name && existing.skill_name !== normalized) {
+        return; // A different skill already owns the active state — do not overwrite.
+      }
+    }
+  } catch {
+    // If read/parse fails, treat as no existing state — proceed with write
+  }
+
+  const state = {
+    active: true,
+    skill_name: normalized,
+    session_id: safeSessionId || undefined,
+    started_at: now,
+    last_checked_at: now,
+    reinforcement_count: 0,
+    max_reinforcements: config.maxReinforcements,
+    stale_ttl_ms: config.staleTtlMs,
+  };
+
+  try {
+    if (!existsSync(targetDir)) {
+      mkdirSync(targetDir, { recursive: true });
+    }
+    const tmpPath = targetPath + '.tmp';
+    const envelope = {
+      ...state,
+      _meta: { written_at: now, mode: 'skill-active', ...(safeSessionId ? { sessionId: safeSessionId } : {}) },
+    };
+    writeFileSync(tmpPath, JSON.stringify(envelope, null, 2), { mode: 0o600 });
+    renameSync(tmpPath, targetPath);
+  } catch {
+    // Best-effort; don't fail the hook
+  }
+}
+
+
+function clearAwaitingConfirmationFlag(stateDir, stateName, sessionId) {
+  const safeSessionId = sessionId && SESSION_ID_PATTERN.test(sessionId) ? sessionId : '';
+  const paths = [
+    safeSessionId ? join(stateDir, 'sessions', safeSessionId, `${stateName}-state.json`) : null,
+    join(stateDir, `${stateName}-state.json`),
+  ].filter(Boolean);
+
+  for (const statePath of paths) {
+    try {
+      if (!existsSync(statePath)) continue;
+      const state = JSON.parse(readFileSync(statePath, 'utf-8'));
+      if (!state || typeof state !== 'object' || !state.awaiting_confirmation) continue;
+      delete state.awaiting_confirmation;
+      const tmpPath = statePath + '.tmp';
+      writeFileSync(tmpPath, JSON.stringify(state, null, 2), { mode: 0o600 });
+      renameSync(tmpPath, statePath);
+    } catch {
+      // Best-effort; don't fail the hook
+    }
+  }
+}
+
+function confirmSkillModeStates(stateDir, skillName, sessionId) {
+  switch (skillName) {
+    case 'ralph':
+      clearAwaitingConfirmationFlag(stateDir, 'ralph', sessionId);
+      break;
+    case 'ultragoal':
+      clearAwaitingConfirmationFlag(stateDir, 'ultragoal', sessionId);
+      break;
+    case 'autopilot':
+      clearAwaitingConfirmationFlag(stateDir, 'autopilot', sessionId);
+      break;
+    case 'ralplan':
+      clearAwaitingConfirmationFlag(stateDir, 'ralplan', sessionId);
+      break;
+    default:
+      break;
+  }
+}
+
+// Record Skill/Task invocations to flow trace (best-effort)
+async function recordToolInvocation(data, directory) {
+  try {
+    const toolName = data.toolName || data.tool_name || '';
+    const sessionId = data.session_id || data.sessionId || '';
+    if (!sessionId || !directory) return;
+
+    if (toolName === 'Skill') {
+      const skillName = data.toolInput?.skill || data.tool_input?.skill || '';
+      if (skillName) {
+        const { recordSkillInvoked } = await import('../dist/hooks/subagent-tracker/flow-tracer.js');
+        recordSkillInvoked(directory, sessionId, skillName);
+      }
+    }
+  } catch { /* best-effort, never block tool execution */ }
+}
+
+// Codex identifies plugin hooks with PLUGIN_ROOT and does not accept the
+// common continue/suppressOutput fields on PreToolUse. Its updatedInput shape
+// also requires an explicit allow decision.
+function isCodexPreToolUse(input) {
+  return Boolean(process.env.PLUGIN_ROOT) ||
+    Boolean(input && typeof input === 'object' && typeof input.turn_id === 'string');
+}
+
+function emitPreToolUseOutput(output, input, space = 0) {
+  if (!isCodexPreToolUse(input)) {
+    console.log(JSON.stringify(output, null, space));
+    return;
+  }
+
+  const codexOutput = { ...output };
+  const continueValue = codexOutput.continue;
+  delete codexOutput.continue;
+  delete codexOutput.suppressOutput;
+
+  if (continueValue === false && codexOutput.decision !== 'block') {
+    const existingHookOutput = codexOutput.hookSpecificOutput && typeof codexOutput.hookSpecificOutput === 'object'
+      ? { ...codexOutput.hookSpecificOutput }
+      : {};
+    const reason = typeof existingHookOutput.permissionDecisionReason === 'string'
+      ? existingHookOutput.permissionDecisionReason
+      : typeof codexOutput.message === 'string'
+        ? codexOutput.message
+        : typeof codexOutput.reason === 'string'
+          ? codexOutput.reason
+          : typeof existingHookOutput.additionalContext === 'string'
+            ? existingHookOutput.additionalContext
+            : 'Tool call blocked by hook.';
+    delete existingHookOutput.updatedInput;
+    existingHookOutput.hookEventName = 'PreToolUse';
+    existingHookOutput.permissionDecision = 'deny';
+    existingHookOutput.permissionDecisionReason = reason;
+    delete codexOutput.message;
+    delete codexOutput.reason;
+    codexOutput.hookSpecificOutput = existingHookOutput;
+  }
+
+  const hookSpecificOutput = codexOutput.hookSpecificOutput;
+  if (hookSpecificOutput && typeof hookSpecificOutput === 'object') {
+    const normalizedHookOutput = { ...hookSpecificOutput };
+    if (normalizedHookOutput.updatedInput !== undefined && !normalizedHookOutput.permissionDecision) {
+      normalizedHookOutput.permissionDecision = 'allow';
+    }
+    codexOutput.hookSpecificOutput = normalizedHookOutput;
+  }
+
+  delete codexOutput.message;
+  if (codexOutput.decision !== 'block') delete codexOutput.reason;
+  if (Object.keys(codexOutput).length > 0) {
+    console.log(JSON.stringify(codexOutput, null, space));
+  }
+}
+
+async function main() {
+  // Skip guard: check OMC_SKIP_HOOKS env var (see issue #838)
+  const _skipHooks = (process.env.OMC_SKIP_HOOKS || '').split(',').map(s => s.trim());
+  if (process.env.DISABLE_OMC === '1' || _skipHooks.includes('pre-tool-use')) {
+    emitPreToolUseOutput({ continue: true }, null);
+    return;
+  }
+
+  let data = {};
+  try {
+    const input = await readStdin();
+
+    const toolName = extractJsonField(input, 'tool_name') || extractJsonField(input, 'toolName', 'unknown');
+    const directory = extractJsonField(input, 'cwd') || extractJsonField(input, 'directory', process.cwd());
+
+    // Resolve the .omc state root once, honoring OMC_STATE_DIR.
+    // All helpers receive stateDir so they stay in sync with the centralized
+    // resolver used by session-start.mjs and persistent-mode (issue #2518, PR #2532).
+    const omcRoot = await resolveOmcStateRoot(directory);
+    const stateDir = join(omcRoot, 'state');
+
+    // Record Skill invocations to flow trace
+    data = {};
+    try { data = JSON.parse(input); } catch {}
+    recordToolInvocation(data, directory);
+
+    // Activate skill state when Skill tool is invoked (issue #1033)
+    // Writes skill-active-state.json so the persistent-mode Stop hook can
+    // prevent premature session termination while a skill is executing.
+    if (toolName === 'Skill') {
+      const toolInput = data.toolInput || data.tool_input || {};
+      const skillName = extractSkillName(toolInput);
+      if (skillName) {
+        const sid = typeof data.session_id === 'string' ? data.session_id
+          : typeof data.sessionId === 'string' ? data.sessionId : '';
+        // Pass rawSkillName to distinguish OMC skills from project custom skills (issue #1581)
+        const rawSkill = toolInput.skill || toolInput.skill_name || toolInput.skillName || toolInput.command || '';
+        const rawSkillName = typeof rawSkill === 'string' && rawSkill.trim() ? rawSkill.trim() : undefined;
+        writeSkillActiveState(stateDir, skillName, sid, rawSkillName);
+        confirmSkillModeStates(stateDir, skillName, sid);
+      }
+    }
+
+    const sessionId =
+      typeof data.session_id === 'string'
+        ? data.session_id
+        : typeof data.sessionId === 'string'
+          ? data.sessionId
+          : '';
+
+    const ultragoalDenyReason = evaluateUltragoalPreToolEnforcement(stateDir, directory, sessionId, data);
+    if (ultragoalDenyReason) {
+      emitPreToolUseOutput({
+        continue: true,
+        hookSpecificOutput: {
+          hookEventName: 'PreToolUse',
+          permissionDecision: 'deny',
+          permissionDecisionReason: ultragoalDenyReason
+        }
+      }, data);
+      return;
+    }
+
+    const modeActive = hasActiveMode(stateDir, sessionId);
+
+    // When set, replaces the Task/Agent tool input via hookSpecificOutput.updatedInput
+    // so a configured per-agent model (agents.<name>.model) is applied (issue #3242).
+    let updatedToolInput = null;
+
+    // Force-inherit check: deny Task/Agent calls with invalid model param when forceInherit is
+    // enabled (Bedrock, Vertex, CC Switch, etc.) - issues #1135, #1201, #1767, #1868
+    //
+    // New behaviour (issue #1868 — [1m] suffix deadlock):
+    //   ALLOW explicit valid provider-specific model IDs (full Bedrock/Vertex format, no [1m])
+    //   DENY  tier names (sonnet/opus/haiku) and [1m]-suffixed IDs
+    //   DENY  no-model calls when the session model itself has [1m] — guide to OMC_SUBAGENT_MODEL
+    if (toolName === 'Task' || toolName === 'Agent') {
+      const toolInput = data.toolInput || data.tool_input || {};
+      // Skill vs agent namespace guard (issue #3667): deny BEFORE the native
+      // boundary when a bundled skill name is passed as subagent_type, with an
+      // error that names the Skill tool and the correct identifier.
+      const skillAgentDeny = evaluateSkillAsAgentCall(toolName, toolInput, directory);
+      if (skillAgentDeny) {
+        emitPreToolUseOutput(skillAgentDeny, data);
+        return;
+      }
+      const toolModel = toolInput.model;
+      if (isForceInheritEnabled()) {
+        // Check both vars: if either carries [1m] the session model is unsafe for sub-agents.
+        // Avoids a split-brain between the hook and runtime code that may read the vars in
+        // different orders (e.g. model-contract.ts uses ANTHROPIC_MODEL first).
+        const claudeModel = process.env.CLAUDE_MODEL || '';
+        const anthropicModel = process.env.ANTHROPIC_MODEL || '';
+        const sessionHasLmSuffix =
+          hasExtendedContextSuffix(claudeModel) || hasExtendedContextSuffix(anthropicModel);
+        // For error messages: prefer whichever var actually carries the [1m] suffix.
+        const sessionModel = hasExtendedContextSuffix(claudeModel)
+          ? claudeModel
+          : hasExtendedContextSuffix(anthropicModel)
+            ? anthropicModel
+            : claudeModel || anthropicModel;
+
+        if (toolModel) {
+          // Allow tier aliases (sonnet/opus/haiku) when a subagent-safe model can be
+          // resolved for that tier. Resolution chain: OMC_SUBAGENT_MODEL (global override)
+          // → CLAUDE_CODE_BEDROCK_*_MODEL → ANTHROPIC_DEFAULT_*_MODEL.
+          if (isTierAlias(toolModel) && resolveTierAliasToSafeModel(toolModel)) {
+            // fall through to continue — tier alias resolves to a safe provider-specific ID
+          } else if (!isSubagentSafeModelId(toolModel)) {
+            const tierUpper = isTierAlias(toolModel) ? toolModel.toUpperCase() : '';
+            const derivedTier = tierUpper || (normalizeToCcAlias(toolModel) || '').toUpperCase();
+            const guidance = derivedTier
+              ? `Set ANTHROPIC_DEFAULT_${derivedTier}_MODEL=<valid-bedrock-id> in settings.json env, or set OMC_SUBAGENT_MODEL as a global override.`
+              : `Remove the \`model\` parameter, or set ANTHROPIC_DEFAULT_SONNET_MODEL=<valid-bedrock-id> in settings.json env.`;
+            emitPreToolUseOutput({
+              continue: true,
+              hookSpecificOutput: {
+                hookEventName: 'PreToolUse',
+                permissionDecision: 'deny',
+                permissionDecisionReason: `[MODEL ROUTING] This environment uses a non-standard provider (Bedrock/Vertex/proxy). ${guidance} The model "${toolModel}" is not valid for this provider.`
+              }
+            }, data);
+            return;
+          }
+          // else: valid provider-specific model ID — fall through to continue.
+        } else if (sessionHasLmSuffix) {
+          // No model param, but the session model has a [1m] context-window suffix.
+          // Sub-agents would inherit it and fail — the runtime strips [1m] to a bare
+          // Anthropic model ID (e.g. claude-sonnet-5) which is invalid on Bedrock.
+          // Fix: pass a tier alias (sonnet/haiku/opus). The Agent tool schema only accepts
+          // tier aliases for the model param — full Bedrock IDs are rejected by the schema.
+          const tierAlias = normalizeToCcAlias(sessionModel) || 'sonnet';
+          const resolvedSafe = resolveTierAliasToSafeModel(tierAlias);
+          const suggestion = resolvedSafe
+            ? `Pass model="${tierAlias}" explicitly on this ${toolName} call — tier aliases resolve cleanly on Bedrock.`
+            : `Pass model="${tierAlias}" explicitly on this ${toolName} call, and set ANTHROPIC_DEFAULT_${tierAlias.toUpperCase()}_MODEL=<valid-bedrock-id> in settings.json env.`;
+          emitPreToolUseOutput({
+            continue: true,
+            hookSpecificOutput: {
+              hookEventName: 'PreToolUse',
+              permissionDecision: 'deny',
+              permissionDecisionReason: `[MODEL ROUTING] Your session model "${sessionModel}" has a context-window suffix ([1m]) that sub-agents cannot inherit — the runtime strips it to a bare Anthropic model ID which is invalid on Bedrock. ${suggestion}`
+            }
+          }, data);
+          return;
+        }
+        // Agent-definition model check: runs for any no-model call with a subagent_type,
+        // independent of the sessionHasLmSuffix branch above (which may have matched and
+        // fallen through safely). Claude Code reads the agent definition's `model:` field
+        // AFTER this hook and injects it — if that's a bare Anthropic ID, Bedrock rejects
+        // with 400. Detect it here and deny with guidance to retry with an explicit tier alias.
+        if (!toolModel && toolInput.subagent_type) {
+          const agentDefModel = readAgentDefinitionModel(toolInput.subagent_type);
+          // Only deny when a safe routing target exists for the derived tier alias.
+          // Without a routing target the tier-alias escape hatch doesn't exist, so blocking
+          // would strand Claude in a retry loop with no viable path forward.
+          const defTierAlias = agentDefModel ? normalizeToCcAlias(agentDefModel) : null;
+          const resolvedModel = defTierAlias ? resolveTierAliasToSafeModel(defTierAlias) : '';
+          const hasSafeRouting = !!resolvedModel;
+          if (agentDefModel && !isSubagentSafeModelId(agentDefModel) && !isTierAlias(agentDefModel)
+              && hasSafeRouting) {
+            const guidance = `Add model="${defTierAlias}" to this ${toolName} call — tier aliases resolve to configured provider models (${resolvedModel}).`;
+            const agentType = (toolInput.subagent_type).replace(/^oh-my-claudecode:/, '');
+            emitPreToolUseOutput({
+              continue: true,
+              hookSpecificOutput: {
+                hookEventName: 'PreToolUse',
+                permissionDecision: 'deny',
+                permissionDecisionReason: `[MODEL ROUTING] Agent type "${agentType}" has model "${agentDefModel}" in its definition, which is not valid for this Bedrock/Vertex/proxy environment. ${guidance}`
+              }
+            }, data);
+            return;
+          }
+        }
+        // else: no model param and no [1m] on session model → normal forceInherit,
+        // agents inherit the parent session's model cleanly.
+      } else if (!toolModel && toolInput.subagent_type) {
+        // Non-forceInherit: honor agents.<name>.model from config.jsonc for native
+        // Task/Agent calls without an explicit model param. Without this, Claude Code
+        // reads the static agents/*.md frontmatter and silently ignores the user's
+        // per-agent override (issue #3242). Inject the resolved tier alias via
+        // updatedInput so the spawned subagent runs on the configured model.
+        const configuredModel = resolveConfiguredAgentModel(toolInput.subagent_type, directory);
+        if (configuredModel && configuredModel !== 'inherit') {
+          const normalizedModel = normalizeToCcAlias(configuredModel);
+          if (normalizedModel) {
+            updatedToolInput = { ...toolInput, model: normalizedModel };
+          }
+        }
+      }
+    }
+
+    if (toolName === 'Task' || toolName === 'Agent') {
+      const toolInput = data.toolInput || data.tool_input || {};
+      const jevUpdated = recordModelRoutingShadow(toolName, toolInput, updatedToolInput, data.permission_mode, data.transcript_path || data.transcriptPath || '', directory, data.session_id || data.sessionId || '');
+      // In active mode, Jev may override the model choice
+      if (jevUpdated) updatedToolInput = jevUpdated;
+    }
+
+    // Send notification when AskUserQuestion is about to execute (user input needed)
+    // Fires in PreToolUse so users get notified BEFORE the tool blocks for input (#597)
+    if (toolName === 'AskUserQuestion') {
+      try {
+        const pluginRoot = process.env.CLAUDE_PLUGIN_ROOT;
+        if (pluginRoot) {
+          const { notify } = await import(pathToFileURL(join(pluginRoot, 'dist', 'notifications', 'index.js')).href);
+
+          const toolInput = data.toolInput || data.tool_input || {};
+          const questions = toolInput.questions || [];
+          const questionText = questions.map(q => q.question || '').filter(Boolean).join('; ') || 'User input requested';
+          const sessionId = data.session_id || data.sessionId || '';
+
+          // Fire and forget - don't block tool execution
+          notify('ask-user-question', {
+            sessionId,
+            projectPath: directory,
+            question: questionText,
+          }).catch(() => {});
+        }
+      } catch {
+        // Notification not available, skip
+      }
+    }
+
+    const todoStatus = await getTodoStatus(directory);
+
+    // Force-agent-delegation: symmetric to evaluateAgentHeavyPreflight. Where
+    // preflight blocks Task/Agent spawning when context is exhausted, this
+    // evaluator blocks raw Read/Edit/Write/Grep/Glob when configured rules
+    // indicate the work should be delegated to a specialised agent. Default OFF
+    // — only fires when `.omc/config.json` has `routing.forceDelegation.enforce`.
+    const delegationBlock = evaluateForceAgentDelegation({
+      toolName,
+      stateDir,
+      loadOmcConfig,
+    });
+    if (delegationBlock) {
+      // Force-delegation preflight returns `{ decision: 'block', reason }` to
+      // match the agent-heavy preflight contract. Translate to the
+      // Claude Code hookSpecificOutput shape (`permissionDecision: 'deny'`).
+      emitPreToolUseOutput({
+        continue: true,
+        hookSpecificOutput: {
+          hookEventName: 'PreToolUse',
+          permissionDecision: 'deny',
+          permissionDecisionReason: delegationBlock.reason,
+        },
+      }, data);
+      return;
+    }
+
+    // Read budget (issue #4054): enforce the <Context_Budget> rule that has only
+    // existed as prose in agents/explore.md. A full-file Read of an oversized file
+    // is warned once and denied afterwards; targeted reads, small files,
+    // allowlisted paths, and OMC_READ_BUDGET=off pass through.
+    const readBudget = evaluateReadBudget({
+      toolName,
+      toolInput: data.toolInput || data.tool_input || {},
+      stateDir,
+      loadOmcConfig,
+      cwd: directory,
+    });
+    if (readBudget?.decision === 'block') {
+      emitPreToolUseOutput({
+        continue: true,
+        hookSpecificOutput: {
+          hookEventName: 'PreToolUse',
+          permissionDecision: 'deny',
+          permissionDecisionReason: readBudget.reason,
+        },
+      }, data);
+      return;
+    }
+    if (readBudget?.decision === 'warn') {
+      emitPreToolUseOutput({
+        continue: true,
+        hookSpecificOutput: {
+          hookEventName: 'PreToolUse',
+          additionalContext: readBudget.reason,
+        },
+      }, data);
+      return;
+    }
+
+    if (toolName === 'Task' || toolName === 'Agent') {
+      const rawTranscriptPath = data.transcript_path || data.transcriptPath || '';
+      const transcriptPath = resolveTranscriptPath(rawTranscriptPath, directory);
+      const preflightBlock = evaluateAgentHeavyPreflight({
+        toolName,
+        transcriptPath,
+      });
+      if (preflightBlock) {
+        emitPreToolUseOutput(preflightBlock, data);
+        return;
+      }
+    }
+
+    const slopWarning = generateSlopWarning(data, toolName);
+    let message;
+    if (BUILT_IN_TASK_LIST_TOOL_NAMES.has(toolName)) {
+      emitPreToolUseOutput({ continue: true, suppressOutput: true }, data);
+      return;
+    }
+
+    if (toolName === 'Task' || toolName === 'Agent') {
+      const toolInput = data.toolInput || data.tool_input || null;
+      // Reflect any injected per-agent model (issue #3242) in the advisory label.
+      message = await generateAgentSpawnMessage(updatedToolInput || toolInput, stateDir, directory, todoStatus, sessionId);
+    } else {
+      message = generateMessage(toolName, todoStatus, modeActive);
+    }
+    message = combineHookMessages(slopWarning, message);
+
+    // Carry any per-agent model injection (issue #3242) even when the advisory
+    // message is empty or throttled, so the configured model is always applied.
+    const modelInjection = updatedToolInput
+      ? { hookSpecificOutput: { hookEventName: 'PreToolUse', updatedInput: updatedToolInput } }
+      : null;
+
+    if (!message) {
+      emitPreToolUseOutput(
+        modelInjection
+          ? { continue: true, suppressOutput: true, ...modelInjection }
+          : { continue: true, suppressOutput: true },
+        data,
+      );
+      return;
+    }
+
+    if (!shouldEmitAdvisoryMessage(stateDir, sessionId, message)) {
+      emitPreToolUseOutput(
+        modelInjection
+          ? { continue: true, suppressOutput: true, ...modelInjection }
+          : { continue: true, suppressOutput: true },
+        data,
+      );
+      return;
+    }
+
+    emitPreToolUseOutput({
+      continue: true,
+      hookSpecificOutput: {
+        hookEventName: 'PreToolUse',
+        additionalContext: message,
+        ...(updatedToolInput ? { updatedInput: updatedToolInput } : {})
+      }
+    }, data, 2);
+  } catch (error) {
+    // On error, always continue
+    emitPreToolUseOutput({ continue: true, suppressOutput: true }, data);
+  }
+}
+
+main();

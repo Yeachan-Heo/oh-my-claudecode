@@ -1,0 +1,52 @@
+{
+  "descriptor_version": 1,
+  "run_id": "run-e2e-crash-linear",
+  "revision_id": "rev-e2e-crash-linear",
+  "goal": "e2e crash recovery linear chain",
+  "nodes": [
+    {
+      "id": "n1",
+      "kind": "command",
+      "title": "Stage one",
+      "timeout_ms": 60000,
+      "max_attempts": 3,
+      "effect_policy": { "policy": "side_effect_free" },
+      "command": "node -e \"require('fs').writeFileSync(process.env.GRAPH_E2E_MARKER_DIR + '/n1.marker', String(Date.now()))\""
+    },
+    {
+      "id": "n2",
+      "kind": "command",
+      "title": "Stage two (slow)",
+      "timeout_ms": 60000,
+      "max_attempts": 3,
+      "effect_policy": { "policy": "side_effect_free" },
+      "command": "node -e \"setTimeout(function () { require('fs').writeFileSync(process.env.GRAPH_E2E_MARKER_DIR + '/n2.marker', String(Date.now())) }, 1500)\""
+    },
+    {
+      "id": "n3",
+      "kind": "command",
+      "title": "Stage three",
+      "timeout_ms": 60000,
+      "max_attempts": 3,
+      "effect_policy": { "policy": "side_effect_free" },
+      "command": "node -e \"setTimeout(function () { require('fs').writeFileSync(process.env.GRAPH_E2E_MARKER_DIR + '/n3.marker', String(Date.now())) }, 200)\""
+    },
+    {
+      "id": "term",
+      "kind": "command",
+      "title": "Terminal verification",
+      "timeout_ms": 60000,
+      "max_attempts": 3,
+      "effect_policy": { "policy": "side_effect_free" },
+      "command": "node -e \"require('fs').writeFileSync(process.env.GRAPH_E2E_MARKER_DIR + '/term.marker', String(Date.now()))\""
+    }
+  ],
+  "edges": [
+    { "id": "e-n1-n2", "kind": "fixed", "from": "n1", "to": "n2" },
+    { "id": "e-n2-n3", "kind": "fixed", "from": "n2", "to": "n3" },
+    { "id": "e-n3-term", "kind": "fixed", "from": "n3", "to": "term" }
+  ],
+  "entry_node_ids": ["n1"],
+  "concurrency_limit": 1,
+  "terminal_verification_node_id": "term"
+}
