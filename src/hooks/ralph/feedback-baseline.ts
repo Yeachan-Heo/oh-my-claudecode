@@ -22,6 +22,8 @@ export const MAX_SIGNATURES_PER_COMMAND = 200;
 
 /** ANSI escape sequences, stripped before fingerprinting. */
 const ANSI_PATTERN = /\x1b\[[0-9;]*m/g;
+/** Failure vocabulary shared by the log-level, progress, and summary filters. */
+const FAILURE_WORD_PATTERN = /\bfail(?:ed|ure|ures|ing)?\b|\w*(?:Error|Exception)s?\b|✗|×/i;
 /** Volatile substrings normalized away: durations, timestamps, tmp paths, hex ids. */
 const VOLATILE_PATTERNS: RegExp[] = [
   // Pytest's wall-clock parenthesized duration, e.g. "... in 194.32s (0:03:14)".
@@ -37,19 +39,60 @@ const VOLATILE_PATTERNS: RegExp[] = [
   // The process id in Node's warning prefix, "(node:12345) [DEP0040] DeprecationWarning: ...", differs on every run.
   // Only an id followed by an optional [code] and a "Name:" is replaced, so "(node:42) ready" in an assertion keeps its signal.
   /(?<=\(node:)\d+(?=\) (?:\[[^\]]+\] )?\w+:)/g,
+  // macOS per-user temp dirs (os.tmpdir()) are handled by
+  // normalizeMacosTempPaths(): only the mkdtemp-style random segment is
+  // replaced so stable suffixes (file:line:column) still distinguish failures.
   /\b[0-9a-f]{8,}\b/gi,
 ];
+
+/** macOS temp roots: /var/folders/<xx>/<hash>/T/<segments>, optionally /private-prefixed. */
+const MACOS_TEMP_PATH_PATTERN = /(?:\/private)?\/var\/folders\/[^/\s"']+\/[^/\s"']+\/T((?:\/[^/\s"']*)*)/g;
+
+/** mkdtemp appends six random alphanumerics (e.g. 85IacC, jxgQGA, 0yogcC). */
+const RANDOM_TEMP_SEGMENT_PATTERN = /^[A-Za-z0-9._-]*[A-Za-z0-9]{6}$/;
+
+function isRandomTempSegment(segment: string): boolean {
+  if (!RANDOM_TEMP_SEGMENT_PATTERN.test(segment)) return false;
+  const suffix = segment.slice(-6);
+  return /[0-9]/.test(suffix) || (/[A-Z]/.test(suffix) && /[a-z]/.test(suffix));
+}
+
+/**
+ * Replace the temp root, the first directory beneath it (the mkdtemp dir), and
+ * any later mkdtemp-style segment, while keeping stable repo-relative
+ * directories and the leaf filename/line:
+ * `/var/folders/x/y/T/repo-A/packages/a/index.ts:1:1` becomes
+ * `<v>/packages/a/index.ts:1:1`, so failures in different packages stay
+ * distinct across runs.
+ */
+function normalizeMacosTempPaths(line: string): string {
+  return line.replace(MACOS_TEMP_PATH_PATTERN, (_match, rest: string) => {
+    const segments = rest.split('/').filter(Boolean);
+    const normalized = segments.map((segment, index) => {
+      const isLeaf = index === segments.length - 1;
+      if (isLeaf && /[.:]/.test(segment)) return segment;
+      if (index === 0 || isRandomTempSegment(segment)) return '<v>';
+      return segment;
+    });
+    const joined = normalized.join('/');
+    // A lone leaf filename has no directory to anchor it; keep the temp-root
+    // marker so it cannot collide with a real relative path.
+    return segments.length === 1 && /[.:]/.test(segments[0]) ? `<v>/${joined}` : joined;
+  });
+}
 
 /**
  * Reduce one command's combined output to its failure signature set:
  * ANSI stripped, volatile fragments normalized, boilerplate dropped,
  * deduplicated, capped, and sorted for a stable diff. Lines that look like
  * progress rather than failure ("Running tests...", spinner frames) are
- * dropped. Pass/test count summary lines (e.g., '# pass N', '# tests N') are
- * excluded but failure count lines (e.g., '# fail N') are kept — a changed
- * fail count is signal that something moved. Individual passing test results
- * ("ok N ...") are excluded to prevent false positives when tests are added;
- * failing results ("not ok ...") are kept.
+ * dropped, as are below-WARN log levels and package-manager/runner chrome
+ * that is identical on a green run. Pass/test count summary lines (e.g.,
+ * '# pass N', '# tests N') are excluded but failure count lines (e.g.,
+ * '# fail N') are kept — a changed fail count is signal that something moved.
+ * Individual passing test results ("ok N ...", "✓ ...") are excluded to
+ * prevent false positives when tests are added; failing results ("not ok
+ * ...", "✗ ...") are kept.
  */
 export function signatureLines(output: string): string[] {
   const seen = new Set<string>();
@@ -57,10 +100,27 @@ export function signatureLines(output: string): string[] {
     let line = raw.trim();
     if (!line) continue;
     for (const pattern of VOLATILE_PATTERNS) line = line.replace(pattern, '<v>');
+    line = normalizeMacosTempPaths(line);
     line = line.replace(/\s+/g, ' ').trim();
     if (!line || line.length > 500) continue;
+    // Below-WARN logs are noise unless the message itself reports a failure
+    // ("INFO validation failed"), which is the only signal a quiet failing
+    // command may emit.
+    if ((/^(?:\[[^\]]*\]\s*)*(?:<v>\s+)?(?:TRACE|DEBUG|INFO|NOTICE)\b/i.test(line)
+      || /^\[(?:TRACE|DEBUG|INFO|NOTICE)\]/i.test(line)) && !FAILURE_WORD_PATTERN.test(line)) continue;
+    if (/^(?:npm|yarn|pnpm)\s+warn\b/i.test(line)) continue;
+    if (/^>\s+\S+@\S+/.test(line)) continue;
+    if (/^>\s+(?:tsc|vite|vitest|jest|node|npm|yarn|pnpm|eslint|tsx|ts-node)\b/i.test(line)) continue;
+    if (/^(?:RUN\s+v?\d|Duration\s)/i.test(line)) continue;
+    // Green summaries are chrome; summaries naming any failure variant are signal.
+    if (/^(?:Test Files|Tests)\b/.test(line) && !FAILURE_WORD_PATTERN.test(line)) continue;
+    // Source-context frames repeat the failing code but shift on every edit.
+    if (/^\d+\|\s/.test(line) || /^\|\s*\^/.test(line)) continue;
+    // Vitest/Jest mark passing cases with ✓/√ — never failure signal, even
+    // when the test name itself mentions "Error" (e.g. EmptyDiffError).
+    if (/^(?:✓|√)/.test(line)) continue;
     // Pure progress chatter and test format headers carry no failure signal.
-    if (/^(running|collecting|compiling|building|passing|tap\s+version|✓|√|%|\s*at\s)/i.test(line) && !/fail|error|✗|×/i.test(line)) continue;
+    if (/^(running|collecting|compiling|building|passing|tap\s+version|%|\s*at\s)/i.test(line) && !FAILURE_WORD_PATTERN.test(line)) continue;
     // Drop all-pass pytest progress lines (dots plus skipped/xfail/xpass markers with an optional "[ NN%]" suffix); their width and percentages shift with the test count. A line containing F/E is a failure marker and must survive, because quiet runs can emit only that line.
     if (/^[.sxX]+(?:\s*\[\s*\d+%\]\s*)?$/.test(line)) continue;
     // Exclude pytest all-pass summaries ("N passed in <v>", optionally with warnings/skipped/...
@@ -89,6 +149,8 @@ export function signatureLines(output: string): string[] {
 export interface CommandBaseline {
   /** Normalized failure signatures observed for this command at baseline time. */
   signatures: string[];
+  /** Process exit status observed at baseline time; absent when the command never ran. */
+  exitCode?: number;
   /** True when the command could not execute at all (tool missing, suite unrunnable). */
   unrunnable?: boolean;
   /**
@@ -113,9 +175,20 @@ export interface BaselineDiff {
   resolvedSignatures: string[];
 }
 
+function exitCodeFailure(command: string, entry: CommandBaseline): string | null {
+  return entry.exitCode !== undefined && entry.exitCode !== 0
+    ? `${command}: <exited with code ${entry.exitCode}>`
+    : null;
+}
+
 /**
  * Pure diff: a signature is new when it is absent from the baseline. A command
- * that used to run and now cannot execute is itself a regression. With no
+ * that used to run and now cannot execute is itself a regression. So is a
+ * command that used to exit 0 and now exits nonzero — a failure whose only
+ * diagnostic is below WARN (e.g. `INFO validation failed`) normalizes to no
+ * signatures, so the status transition is the only signal it leaves. A command
+ * absent from the baseline inherits the same rule: a newly discovered failing
+ * command must not slip through just because it has no history. With no
  * baseline at all, everything present is reported as new — the caller decides
  * what that means (baseline creation reports instead of failing).
  */
@@ -125,7 +198,13 @@ export function diffAgainstBaseline(
 ): BaselineDiff {
   if (!baseline) {
     return {
-      newSignatures: Object.entries(current).flatMap(([command, entry]) => entry.signatures.map((signature) => `${command}: ${signature}`)),
+      newSignatures: Object.entries(current).flatMap(([command, entry]) => {
+        const exitFailure = exitCodeFailure(command, entry);
+        return [
+          ...entry.signatures.map((signature) => `${command}: ${signature}`),
+          ...(exitFailure ? [exitFailure] : []),
+        ];
+      }),
       resolvedSignatures: [],
     };
   }
@@ -135,6 +214,8 @@ export function diffAgainstBaseline(
     const before = baseline.commands[command];
     if (!before) {
       newSignatures.push(...entry.signatures.map((signature) => `${command}: ${signature}`));
+      const exitFailure = exitCodeFailure(command, entry);
+      if (exitFailure) newSignatures.push(exitFailure);
       continue;
     }
     if (entry.timedOut && !before.timedOut) {
@@ -146,6 +227,14 @@ export function diffAgainstBaseline(
     if (entry.unrunnable && !before.unrunnable) {
       newSignatures.push(`${command}: <command became unrunnable>`);
       continue;
+    }
+    // Baselines recorded before exitCode existed default to success; they must
+    // be re-recorded, and the one-time transition is the nudge to do so.
+    const beforeExitCode = before.exitCode ?? 0;
+    if (entry.exitCode !== undefined && beforeExitCode === 0 && entry.exitCode !== 0) {
+      newSignatures.push(`${command}: <exited with code ${entry.exitCode}>`);
+    } else if (entry.exitCode === 0 && beforeExitCode !== 0) {
+      resolvedSignatures.push(`${command}: <no longer exits with code ${beforeExitCode}>`);
     }
     const beforeSet = new Set(before.signatures);
     const afterSet = new Set(entry.signatures);

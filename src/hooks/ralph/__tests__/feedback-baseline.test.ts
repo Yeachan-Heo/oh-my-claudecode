@@ -116,6 +116,52 @@ describe('diffAgainstBaseline', () => {
     expect(diff.resolvedSignatures).toEqual(['test: FAIL env-specific']);
   });
 
+  it('flags a command that used to exit 0 and now exits nonzero, even with no signatures', () => {
+    const diff = diffAgainstBaseline(
+      baseline({ test: { signatures: [], exitCode: 0 } }),
+      { test: { signatures: [], exitCode: 1 } },
+    );
+    expect(diff.newSignatures).toEqual(['test: <exited with code 1>']);
+  });
+
+  it('does not re-flag a nonzero exit that was already the baseline state', () => {
+    const diff = diffAgainstBaseline(
+      baseline({ test: { signatures: ['FAIL a'], exitCode: 1 } }),
+      { test: { signatures: ['FAIL a'], exitCode: 1 } },
+    );
+    expect(diff.newSignatures).toEqual([]);
+  });
+
+  it('reports a recovery from nonzero to zero as resolved', () => {
+    const diff = diffAgainstBaseline(
+      baseline({ test: { signatures: [], exitCode: 2 } }),
+      { test: { signatures: [], exitCode: 0 } },
+    );
+    expect(diff.newSignatures).toEqual([]);
+    expect(diff.resolvedSignatures).toEqual(['test: <no longer exits with code 2>']);
+  });
+
+  it('treats a baseline without exitCode as success for the transition check', () => {
+    const diff = diffAgainstBaseline(
+      baseline({ test: { signatures: [] } }),
+      { test: { signatures: [], exitCode: 1 } },
+    );
+    expect(diff.newSignatures).toEqual(['test: <exited with code 1>']);
+  });
+
+  it('flags a command absent from the baseline that exits nonzero with no signatures', () => {
+    const diff = diffAgainstBaseline(
+      baseline({ build: { signatures: [] } }),
+      { build: { signatures: [] }, test: { signatures: [], exitCode: 1 } },
+    );
+    expect(diff.newSignatures).toEqual(['test: <exited with code 1>']);
+  });
+
+  it('flags a nonzero command when there is no baseline at all', () => {
+    const diff = diffAgainstBaseline(null, { test: { signatures: [], exitCode: 1 } });
+    expect(diff.newSignatures).toEqual(['test: <exited with code 1>']);
+  });
+
   it('treats a command that used to run and now cannot execute as new', () => {
     const diff = diffAgainstBaseline(
       baseline({ test: { signatures: ['FAIL a'] } }),
@@ -151,8 +197,9 @@ describe('baseline IO', () => {
     try {
       const path = baselinePath(dir, 'sess-1');
       expect(path).toContain(join('state', 'sessions', 'sess-1', 'feedback-baseline.json'));
-      expect(writeBaseline(path, { test: { signatures: ['FAIL a'] } })).toBe(true);
+      expect(writeBaseline(path, { test: { signatures: ['FAIL a'], exitCode: 1 } })).toBe(true);
       expect(readBaseline(path)?.commands.test?.signatures).toEqual(['FAIL a']);
+      expect(readBaseline(path)?.commands.test?.exitCode).toBe(1);
       expect(readBaseline(join(dir, 'nope.json'))).toBeNull();
     } finally {
       rmSync(dir, { recursive: true, force: true });
@@ -547,5 +594,137 @@ describe('Node warning process id', () => {
     const first = signatureLines(`packages/a test: ${warning(12496, punycode)}`);
     expect(first).toEqual(signatureLines(`packages/a test: ${warning(29272, punycode)}`));
     expect(first).toEqual([`packages/a test: (node:<v>) ${punycode}`]);
+  });
+});
+
+describe('signature noise from environment output', () => {
+  it('normalizes macOS temp dirs so the same warning fingerprints identically across runs', () => {
+    const first = signatureLines('│  No config files with names ["lefthook"] have been found in "/private/var/folders/t8/abc/T/scr-unit-repo-0yogcC"');
+    const second = signatureLines('│  No config files with names ["lefthook"] have been found in "/private/var/folders/t8/abc/T/scr-unit-repo-Zz9QwE"');
+    expect(first).toEqual(second);
+    expect(first.join('\n')).not.toContain('scr-unit-repo');
+  });
+
+  it('normalizes random temp dirs inside a real failure without dropping the failure', () => {
+    const first = signatureLines("Error: ENOTEMPTY, Directory not empty: /var/folders/t8/abc/T/scr-cp-repo-AXe2kO '/var/folders/t8/abc/T/scr-cp-repo-AXe2kO'");
+    const second = signatureLines("Error: ENOTEMPTY, Directory not empty: /var/folders/t8/abc/T/scr-cp-repo-Qw3ErT '/var/folders/t8/abc/T/scr-cp-repo-Qw3ErT'");
+    expect(first).toEqual(second);
+    expect(first[0]).toContain('ENOTEMPTY');
+  });
+
+  it('keeps exception-class diagnostics from low-level log lines', () => {
+    const lines = signatureLines([
+      '2026-11-04T09:09:15.262Z INFO TypeError: Cannot read properties of undefined',
+      'INFO AssertionError: expected 1 to be 2',
+      'INFO ReferenceError: x is not defined',
+    ].join('\n'));
+    expect(lines).toEqual([
+      '<v> INFO TypeError: Cannot read properties of undefined',
+      'INFO AssertionError: expected 1 to be 2',
+      'INFO ReferenceError: x is not defined',
+    ]);
+  });
+
+  it('normalizes the random temp segment and keeps stable suffixes', () => {
+    const first = signatureLines('Error: /var/folders/t8/abc/T/scr-e2e-repo-85IacC/src/a.ts:1:1 boom');
+    const second = signatureLines('Error: /private/var/folders/t8/abc/T/scr-e2e-repo-q2vh5d/src/a.ts:1:1 boom');
+    expect(first).toEqual(second);
+    expect(first[0]).toContain('src/a.ts:1:1');
+    // A different failure location stays distinct across runs.
+    const otherLocation = signatureLines('Error: /var/folders/t8/abc/T/scr-e2e-repo-85IacC/src/b.ts:2:2 boom');
+    expect(otherLocation).not.toEqual(first);
+  });
+
+  it('keeps stable repo-relative directories inside macOS temp paths', () => {
+    const first = signatureLines('Error: /var/folders/t8/abc/T/repo-A/packages/a/index.ts:1:1 boom');
+    const second = signatureLines('Error: /var/folders/t8/abc/T/repo-B/packages/b/index.ts:1:1 boom');
+    expect(first[0]).toContain('packages/a/index.ts:1:1');
+    expect(second[0]).toContain('packages/b/index.ts:1:1');
+    expect(first).not.toEqual(second);
+  });
+
+  it('normalizes digit-free mixed-case mkdtemp suffixes', () => {
+    const first = signatureLines('found in "/var/folders/t8/abc/T/scr-cp-repo-EmATcf"');
+    const second = signatureLines('found in "/private/var/folders/t8/abc/T/scr-cp-repo-TthoUQ"');
+    expect(first).toEqual(second);
+    expect(first[0]).toContain('"<v>"');
+  });
+
+  it('normalizes random segments below a stable temp subdirectory', () => {
+    const first = signatureLines('pmd -r /var/folders/t8/abc/T/pmd/scr-e2e-repo-85IacC/pmd.sarif');
+    const second = signatureLines('pmd -r /var/folders/t8/abc/T/pmd/scr-e2e-repo-q2vh5d/pmd.sarif');
+    expect(first).toEqual(second);
+    expect(first[0]).toContain('pmd -r <v>/<v>/pmd.sarif');
+  });
+
+  it('drops below-WARN log levels but keeps WARN, ERROR, and failure-bearing INFO', () => {
+    const lines = signatureLines([
+      '2026-11-04T09:09:15.262Z INFO zqjz.pmd_scan - B0 完成：findings=1',
+      '[2026-11-04T09:09:15.262Z] INFO bracketed timestamp',
+      '[INFO] bracketed level',
+      'DEBUG cache hit',
+      'TRACE resolved dependency',
+      'INFO validation failed',
+      'WARN deprecated option',
+      'ERROR build failed',
+    ].join('\n'));
+    expect(lines).toEqual(['ERROR build failed', 'INFO validation failed', 'WARN deprecated option']);
+  });
+
+  it('drops package-manager chrome and green summaries but keeps a failed summary', () => {
+    const lines = signatureLines([
+      '> shenkuo-code-review@0.1.0 typecheck',
+      '> tsc --noEmit',
+      'npm warn Unknown user config "PUPPETEER_DOWNLOAD_BASE_URL"',
+      'RUN v3.2.7 /Users/someone/work/repo',
+      '   Start at  17:14:48',
+      'Duration 12.3s (transform 1.2s, setup 0ms, collect 3.4s)',
+      'Test Files 66 passed (66)',
+      'Tests 1002 passed (1002)',
+      'Test Files 1 failed | 65 passed (66)',
+      'Tests: 2 failures',
+      'Tests: 1 error',
+    ].join('\n'));
+    expect(lines).toEqual(['Test Files 1 failed | 65 passed (66)', 'Tests: 1 error', 'Tests: 2 failures']);
+  });
+
+  it('never treats a passing case as a failure, even when its name mentions Error', () => {
+    expect(signatureLines('✓ collectDiff — workspace 模式 > range 模式两端相同 → EmptyDiffError（不再静默产出空报告） 12ms')).toEqual([]);
+    // A genuinely failing case is still kept and normalized.
+    expect(signatureLines('× suite > boom 45ms')).toEqual(['× suite > boom <v>']);
+  });
+
+  it('drops source-context frames from failure reports', () => {
+    expect(signatureLines(['168| function cleanupTempArtifacts(): void {', '| ^'].join('\n'))).toEqual([]);
+  });
+
+  it('a rerun over volatile temp paths and timestamps reports no new or resolved signatures', () => {
+    const run = (tmp: string, time: string): string => [
+      `2026-11-04T09:09:15.262Z INFO zqjz.pmd_scan - 执行 PMD: /Users/x/bin/pmd check --file-list /var/folders/t8/abc/T/${tmp}/pmd-file-list.txt`,
+      `│  No config files with names ["lefthook"] have been found in "/private/var/folders/t8/abc/T/scr-unit-repo-${tmp}"`,
+      `   Start at  ${time}`,
+      'Test Files 66 passed (66)',
+    ].join('\n');
+
+    const base = baseline({ test: { signatures: signatureLines(run('pmd_scan_80gbSQ', '15:30:47')) } });
+    const rerun = { test: { signatures: signatureLines(run('pmd_scan_GNl3U2', '17:14:48')) } };
+
+    const diff = diffAgainstBaseline(base, rerun);
+    expect(diff.newSignatures).toEqual([]);
+    expect(diff.resolvedSignatures).toEqual([]);
+  });
+
+  it('still detects a genuine new failure alongside the same environmental noise', () => {
+    const run = (tmp: string, time: string): string => [
+      `2026-11-04T09:09:15.262Z INFO zqjz.pmd_scan - 执行 PMD: /var/folders/t8/abc/T/${tmp}/pmd-file-list.txt`,
+      `   Start at  ${time}`,
+    ].join('\n');
+    const base = baseline({ test: { signatures: signatureLines(run('pmd_scan_80gbSQ', '15:30:47')) } });
+    const failing = `${run('pmd_scan_GNl3U2', '17:14:48')}
+FAIL src/cli/__tests__/checkpoint-resume.test.ts
+Error: ENOTEMPTY, Directory not empty: /var/folders/t8/abc/T/scr-cp-repo-AXe2kO '/var/folders/t8/abc/T/scr-cp-repo-AXe2kO'`;
+
+    const diff = diffAgainstBaseline(base, { test: { signatures: signatureLines(failing) } });
+    expect(diff.newSignatures.some((signature) => signature.includes('ENOTEMPTY'))).toBe(true);
   });
 });
