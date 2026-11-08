@@ -217,7 +217,11 @@ describe('durable SessionEnd cleanup manifest', () => {
         expect(released.actions['team-cleanup'].runner).toBeUndefined();
         // A started runner may have done work, so release leaves it to the watchdog/reaper.
         expect(released.actions['python-cleanup']).toMatchObject({ status: 'claimed', claimantNonce: 'owner-1', runner: { phase: 'started' } });
-        const next = claimSessionEndJob(directory, sessionId, 'owner-2', 'identity', Date.now() + 5_000);
+        // Cannot claim while runner is still bounded (runner deadline not yet passed)
+        expect(claimSessionEndJob(directory, sessionId, 'owner-2', 'identity', Date.now() + 5_000)).toBeNull();
+        // Once runner deadline passes, new owner can claim
+        vi.setSystemTime(Date.now() + 6_000);
+        const next = claimSessionEndJob(directory, sessionId, 'owner-2', 'identity', Date.now() + 10_000);
         expect(claimSessionEndAction(directory, sessionId, next.owner.nonce, 'team-cleanup', Date.now() + 5_000)?.actions['team-cleanup']).toMatchObject({
             status: 'claimed', attempts: 1, claimantNonce: 'owner-2', runner: { phase: 'reserved' },
         });

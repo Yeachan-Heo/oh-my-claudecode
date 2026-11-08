@@ -85,4 +85,8 @@ export { shortId, hasExplicitName, hasDescription, addressFor, listingLabel, not
 ;
 // lookout - pre-flight danger scan for autonomous runs (advisory only)
 export { LookoutError, resolveBriefArg, scanLookout, } from './lookout/index.js';
+// watch-pr - pure PR-readiness classification (babysit skill's verdict policy)
+export { decideWatchVerdict, NO_CHECKS_FIRST_SIGHTING_REASON, } from './watch-pr/index.js';
+// verification-ledger - durable append-only verification verdict TSV
+export { appendLedgerEntry, defaultLedgerPath, isVerificationVerdict, LEDGER_HEADER, LEDGER_STATE_RELATIVE_PATH, readLedger, renderLedgerCell, renderLedgerRow, VERIFICATION_VERDICTS, } from './verification-ledger/index.js';
 //# sourceMappingURL=index.js.map
