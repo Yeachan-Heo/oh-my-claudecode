@@ -23,31 +23,11 @@ function getUnifiedMcpRegistryPathCandidates() {
 function getUnifiedMcpRegistryStatePathCandidates() {
     return getGlobalOmcStateCandidates('mcp-registry-state.json');
 }
-/**
- * Whether a resolved config dir is the default ~/.claude. Claude Code treats any
- * explicit CLAUDE_CONFIG_DIR as a custom profile, even one naming ~/.claude, so
- * `omc launch` unsets CLAUDE_CONFIG_DIR for this dir.
- */
-export function isDefaultClaudeConfigDirPath(configDir) {
-    return configDir === join(homedir(), '.claude');
-}
-/**
- * The .claude.json that holds Claude Code's user-scoped MCP servers for a config
- * dir. Claude Code reads join(CLAUDE_CONFIG_DIR || homedir(), '.claude.json'), so
- * a profile keeps its own file. The default ~/.claude keeps ~/.claude.json even
- * when CLAUDE_CONFIG_DIR names it, because `omc launch` unsets the variable for
- * that dir and its sessions read ~/.claude.json.
- */
-export function getClaudeJsonPathForConfigDir(configDir) {
-    return isDefaultClaudeConfigDirPath(configDir)
-        ? join(homedir(), '.claude.json')
-        : join(configDir, '.claude.json');
-}
 export function getClaudeMcpConfigPath() {
     if (process.env.CLAUDE_MCP_CONFIG_PATH?.trim()) {
         return process.env.CLAUDE_MCP_CONFIG_PATH.trim();
     }
-    return getClaudeJsonPathForConfigDir(getClaudeConfigDir());
+    return join(dirname(getClaudeConfigDir()), '.claude.json');
 }
 export function getCodexConfigPath() {
     const codexHome = process.env.CODEX_HOME?.trim() || join(homedir(), '.codex');

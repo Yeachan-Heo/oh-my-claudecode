@@ -400,7 +400,7 @@ describe('SessionEnd durable worker', () => {
     expect(actionRunner.runSessionEndAction).toHaveBeenCalledTimes(3);
   });
 
-  it.skip('retries a claim refused by a still-bounded orphaned runner once the runner deadline passes', async () => {
+  it('retries a claim refused by a still-bounded orphaned runner once the runner deadline passes', async () => {
     vi.useFakeTimers();
     actionRunner.runSessionEndAction.mockResolvedValue({ code: 'completed', completed: true });
     const directory = project();

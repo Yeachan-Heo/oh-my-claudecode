@@ -1,113 +1,31 @@
-<<<<<<< HEAD
-# oh-my-claudecode v5.8.0
-=======
-⚠️ **Breaking Changes:** The public `oh-my-claude-sisyphus/team` module exports have been removed (#4788). See [Migration Guide](https://github.com/Yeachan-Heo/oh-my-claudecode/blob/main/docs/MIGRATION.md) for alternatives.
->>>>>>> clean-release
+# oh-my-claudecode v5.8.0: Jev effort routing, pstack skill suites, team bridge removal
 
-**Note:** v5.7.31 was never published. This release aggregates improvements staged in the abandoned v5.7.31 stream with v5.7.30 and subsequent backlog work.
+## Release Notes
 
-<<<<<<< HEAD
-⚠️ **Breaking Changes in v5.8.0**: The public `oh-my-claude-sisyphus/team` module exports have been removed. See [Migration Guide](#breaking-changes--migration) below.
+v5.8.0 is the first release of the 5.8 series. It removes the unused `oh-my-claude-sisyphus/team` MCP bridge, which is a breaking change. It also adds calibrated Jev effort routing and brings in the pstack skill suites, along with a set of ralph, hook, session-end and Windows fixes. **Note:** v5.7.31 was tagged but never published, so this release follows v5.7.30.
 
-Release with **1 new feature**, **11 bug fixes**, **8 other changes** across **23 merged PRs**.
+### ⚠️ Breaking Changes
 
-**Note:** v5.7.31 was never published. This release (v5.8.0) contains all improvements from v5.7.31, with fixes for broken generated-artifact authorization tests and merged main→dev history.
+- **Removed the team MCP bridge** (#4788). The `oh-my-claude-sisyphus/team` package export and its MCP server bridge are gone, because nothing spawned them. Use the `team` skill or the `omc team` command surface instead.
 
-### Highlights
+### Features
 
-- **feat(jev): let model-routing choose subagent effort** (#4810)
+- **feat(jev): calibrated five-level effort for model-routing** (#4850), building on **model-routing choosing subagent effort** (#4810) and **an effort range in model-routing** (#4820)
+- **feat(skills): pstack suites**: PR-care (#4579), panel/generator/utility (#4589), principles and benchmark-checklist (#4592), review-and-climb, statechart (TLA+ model checking) and ketchup-video (#4840), plus pstack wording-drift syncs (#4841, #4849)
+- **feat(core): pstack-inspired mechanisms**: watch-pr policy, verification ledger, playbook checker and credits registry (#4578)
 
-### Breaking Changes & Migration
+### Bug Fixes
 
-**Team Bridge Removal (#4788)**
+- **fix(session-end): derive the foreground budget and recover orphaned claims** (#4845)
+- **fix(cli): keep unmanaged keys when config commands rewrite `.omc-config.json`** (#4843)
+- **fix(verification): run the epic closure verifier on Windows** (#4848)
+- **fix(hud): hide the console window for the Windows npm-root fallback** (#4847)
+- **fix(ralph): more accurate feedback signatures for pytest and vitest output** (#4800, #4801, #4802, #4819)
+- **fix(jev): fixes to the context-pruning answer gate, staleness mapping and active-mode answers** (#4807, #4808, #4809, #4818)
+- **fix(hooks): stop flagging a run that is awaiting confirmation as crashed** (#4799), and keep the plugin and standalone helper copies identical (#4784)
+- **fix: `isCmuxSurfaceTarget` no longer misclassifies herdr pane ids** (#4817)
 
-The public `oh-my-claude-sisyphus/team` exports have been removed. The internal MCP team bridge is no longer published as part of the public API surface.
-
-- **Affected code:** Direct imports from `oh-my-claude-sisyphus/team`
-- **Impact:** External consumers relying on the team bridge will need to use alternative integration patterns
-- **Migration:** See the team documentation or consult the OMC documentation for recommended team orchestration patterns
-
-### New Features
-
-- **feat(jev): let model-routing choose subagent effort** (#4810)
-=======
----
->>>>>>> clean-release
-
-## Highlights
-
-<<<<<<< HEAD
-- **fix(jev): use the full effort range in model-routing** (#4820)
-- **fix(jev): consume active-mode answers in plugin hook scripts** (#4808)
-- **fix(ralph): exclude vitest's Start at clock from failure signatures** (#4819)
-- **fix(jev): map the context-pruning staleness score and keep CRITICAL at the threshold** (#4818)
-- **fix(jev): extract primitive heuristics for comparability - Fixes #4806** (#4809)
-- **fix(hooks): don't flag a run awaiting confirmation as crashed** (#4799)
-- **fix(hooks): correct Jev context-pruning answer gate and mapping (issue #4804)** (#4807)
-- **fix(ralph): stop fingerprinting pytest progress dots as failures** (#4800)
-- **fix(ralph): normalize pytest (m:ss) durations in feedback signatures** (#4801)
-- **fix(ralph): exclude pytest all-pass summaries from failure signatures** (#4802)
-- **fix(hooks): keep the plugin and standalone helper copies identical** (#4784)
-
-### Documentation
-
-- **docs(migration): document the team entry-point exports removed with the bridge**
-- **docs(team): drop skill guidance that calls the removed bridge APIs**
-
-### Other Changes
-
-- **chore(auth): authorize generated artifacts for main→dev sync #4792** (#4793)
-- **chore(sync): rebuild generated artifacts and inventory after main→dev merge**
-- **chore(auth): move the team bridge removal authorization from #4758 to #4788** (#4789)
-- **chore(auth): re-pin the #4758 authorization after merging dev** (#4787)
-- **chore(inventory): regenerate after merging dev**
-- **chore(auth): authorize generated artifacts for #4758 (team bridge removal)** (#4786)
-- **chore: remove build outputs of the deleted team bridge modules**
-- **chore(team): remove the MCP team bridge that nothing spawns**
-=======
-- **feat(jev): let model-routing choose subagent effort** (#4810)
-- **BREAKING: remove public team exports** (#4788) — external consumers must use alternative integration patterns
->>>>>>> clean-release
-
-## New Features
-
-<<<<<<< HEAD
-- **23 PRs merged** | **1 new feature** | **11 bug fixes** | **0 security/hardening improvements** | **8 other changes**
-=======
-- **feat(jev): let model-routing choose subagent effort** (#4810)
->>>>>>> clean-release
-
-## Bug Fixes
-
-- **fix(jev): use the full effort range in model-routing** (#4820)
-- **fix(jev): consume active-mode answers in plugin hook scripts** (#4808)
-- **fix(ralph): exclude vitest's Start at clock from failure signatures** (#4819)
-- **fix(jev): map the context-pruning staleness score and keep CRITICAL at the threshold** (#4818)
-- **fix(jev): extract primitive heuristics for comparability - Fixes #4806** (#4809)
-- **fix(hooks): don't flag a run awaiting confirmation as crashed** (#4799)
-- **fix(hooks): correct Jev context-pruning answer gate and mapping (issue #4804)** (#4807)
-- **fix(ralph): stop fingerprinting pytest progress dots as failures** (#4800)
-- **fix(ralph): normalize pytest (m:ss) durations in feedback signatures** (#4801)
-- **fix(ralph): exclude pytest all-pass summaries from failure signatures** (#4802)
-- **fix(hooks): keep the plugin and standalone helper copies identical** (#4784)
-
-## Documentation
-
-- **docs(migration): document the team entry-point exports removed with the bridge**
-- **docs(team): drop skill guidance that calls the removed bridge APIs**
-
-## Other Changes
-
-- **chore(team): remove the MCP team bridge that nothing spawns**
-- **chore(auth): authorize generated artifacts for releases**
-- **chore(sync): rebuild generated artifacts and inventory after main→dev merge**
-- **chore(inventory): regenerate after merging dev**
-
-## Stats
-
-- **23 PRs merged** | **1 new feature** | **11 bug fixes** | **2 breaking changes** | **8 other changes**
-
-## Install / Update
+### Install / Update
 
 The npm CLI and the Claude Code marketplace/plugin are separate install tracks, not either/or replacements. Update whichever track you use; if you have both installed, update both. CLI-dependent skill paths such as `ask` and CLI-backed `team` require the `omc` CLI from the npm package.
 
@@ -124,3 +42,9 @@ npm install -g oh-my-claude-sisyphus@5.8.0
 ```
 
 **Full Changelog**: https://github.com/Yeachan-Heo/oh-my-claudecode/compare/v5.7.30...v5.8.0
+
+## Contributors
+
+Thank you to all contributors who made this release possible!
+
+@Yeachan-Heo @pangpang778 @Jack11111eee @maciejdrazkowski @iyoda @tanishqbaweja @LukeTheoJohnson @topazyo

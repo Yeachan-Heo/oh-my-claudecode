@@ -17,7 +17,7 @@ import { getClaudeConfigDir } from '../../utils/config-dir.js';
 import { getGlobalOmcConfigCandidates } from '../../utils/paths.js';
 import { resolveToWorktreeRoot, resolveSessionStatePath, resolveStatePath, getOmcRoot } from '../../lib/worktree-paths.js';
 import { captureModeStateCleanup, captureStateFileGeneration, clearModeStateFile, clearStateFileLockedIf, canClearStateForSession, readModeState, readModeStateWithMeta, recoverEmergencyStateFile, writeModeState, withStateFileMutationLock, } from '../../lib/mode-state-io.js';
-import { readRalphState, writeRalphState, restoreRalphStateIfAbsent, incrementRalphIteration, clearRalphState, findPrdPath, getPrdCompletionStatus, getRalphContext, readPrd, getStory, markStoryIncomplete, consumeStoryArchitectApproval, consumeCompletionArchitectApproval, getPrdGoverningCriteriaRevision, readVerificationState, startVerification, recordArchitectFeedback, getArchitectVerificationPrompt, getArchitectRejectionContinuationPrompt, detectArchitectApproval, detectArchitectRejection, hasRejectionSignal, clearVerificationState, consumeVerificationRequest, restoreVerificationRequestIfAbsent, } from '../ralph/index.js';
+import { readRalphState, writeRalphState, restoreRalphStateIfAbsent, incrementRalphIteration, clearRalphState, findPrdPath, getPrdCompletionStatus, getRalphContext, readPrd, getStory, markStoryIncomplete, consumeStoryArchitectApproval, consumeCompletionArchitectApproval, getPrdGoverningCriteriaRevision, readVerificationState, startVerification, recordArchitectFeedback, getArchitectVerificationPrompt, getArchitectRejectionContinuationPrompt, detectArchitectApproval, detectArchitectRejection, clearVerificationState, consumeVerificationRequest, restoreVerificationRequestIfAbsent, } from '../ralph/index.js';
 import { applyRalphVerdictShadow } from '../ralph/jev-shadow.js';
 import { checkIncompleteTodos, getNextPendingTodo, isUserAbort, isContextLimitStop, isRateLimitStop, isExplicitCancelCommand, isAuthenticationError, isScheduledWakeupStop, isOversizeToolResultRedirectStop } from '../todo-continuation/index.js';
 import { TODO_CONTINUATION_PROMPT } from '../../installer/hooks.js';
@@ -596,16 +596,6 @@ export function recordIdleNotificationSent(stateDir, sessionId, repoState) {
 }
 /** Max bytes to read from the tail of a transcript for architect approval detection. */
 const TRANSCRIPT_TAIL_BYTES = 32 * 1024; // 32 KB
-/**
- * Max bytes to scan when looking for a reviewer-authored approval marker.
- *
- * The 32 KB tail is enough for uncorrelated heuristics (rejection wording),
- * but not for approval: the reviewer's tool_result is followed by more turns
- * before the next Stop event, and a single large tool_result can exceed 32 KB
- * on its own. Approvals are correlated by a unique request id, so widening the
- * window cannot resurrect a stale approval from an earlier attempt.
- */
-const TRANSCRIPT_APPROVAL_SCAN_BYTES = 32 * 1024 * 1024; // 32 MB
 const CRITICAL_CONTEXT_STOP_PERCENT = 95;
 const RALPLAN_TERMINAL_PHASES = new Set([
     'completed',
@@ -631,27 +621,27 @@ const RALPLAN_TERMINAL_PHASES = new Set([
  * Architect approval/rejection markers appear near the end of the conversation,
  * so reading only the last N bytes avoids loading megabyte-sized transcripts.
  */
-function readTranscriptTail(transcriptPath, maxBytes = TRANSCRIPT_TAIL_BYTES) {
+function readTranscriptTail(transcriptPath) {
     const size = statSync(transcriptPath).size;
-    if (size <= maxBytes) {
+    if (size <= TRANSCRIPT_TAIL_BYTES) {
         return readFileSync(transcriptPath, 'utf-8');
     }
     const fd = openSync(transcriptPath, 'r');
     try {
-        const offset = size - maxBytes;
-        const buf = Buffer.allocUnsafe(maxBytes);
-        const bytesRead = readSync(fd, buf, 0, maxBytes, offset);
+        const offset = size - TRANSCRIPT_TAIL_BYTES;
+        const buf = Buffer.allocUnsafe(TRANSCRIPT_TAIL_BYTES);
+        const bytesRead = readSync(fd, buf, 0, TRANSCRIPT_TAIL_BYTES, offset);
         return buf.subarray(0, bytesRead).toString('utf-8');
     }
     finally {
         closeSync(fd);
     }
 }
-function splitTranscriptLines(transcriptPath, content, maxBytes) {
+function readTranscriptTailLines(transcriptPath) {
+    const content = readTranscriptTail(transcriptPath);
     const lines = content.split('\n');
     try {
-        // Drop the leading partial line when the window starts mid-file.
-        if (statSync(transcriptPath).size > maxBytes && lines.length > 0) {
+        if (statSync(transcriptPath).size > TRANSCRIPT_TAIL_BYTES && lines.length > 0) {
             lines.shift();
         }
     }
@@ -660,17 +650,8 @@ function splitTranscriptLines(transcriptPath, content, maxBytes) {
     }
     return lines;
 }
-function readTranscriptTailLines(transcriptPath, maxBytes = TRANSCRIPT_TAIL_BYTES) {
-    return splitTranscriptLines(transcriptPath, readTranscriptTail(transcriptPath, maxBytes), maxBytes);
-}
 const REVIEWER_TASK_TOOL_NAMES = new Set(['Task', 'proxy_Task', 'Agent']);
 const REVIEWER_COMMAND_TOOL_NAMES = new Set(['Bash', 'proxy_Bash']);
-/**
- * Cheap line filter before JSON.parse. Reviewer attribution needs a Task
- * tool_use, a codex command, or the tool_result that answers one; everything
- * else in a multi-megabyte transcript is skipped without parsing.
- */
-const REVIEWER_LINE_HINTS = ['"tool_result"', '"subagent_type"', '--agent-prompt'];
 function normalizeReviewerPath(subagentType) {
     if (typeof subagentType !== 'string') {
         return null;
@@ -713,29 +694,10 @@ function matchesVerificationReviewerPath(reviewerPath, verificationState) {
     const expected = verificationState?.critic_mode ?? 'architect';
     return reviewerPath === expected;
 }
-/**
- * Reviewer-authored tool results in the scanned window, in transcript order.
- *
- * Approval and rejection both have to be attributed to the reviewer that the
- * current verification request spawned — a stale verdict left anywhere else in
- * the transcript must not decide the current story. Attribution lives here so
- * the two callers cannot drift apart.
- */
-function collectReviewerOutputs(transcriptPath, verificationState, maxBytes, prefilter) {
-    let content;
-    try {
-        content = readTranscriptTail(transcriptPath, maxBytes);
-    }
-    catch {
-        return [];
-    }
-    if (prefilter && !prefilter(content)) {
-        return [];
-    }
+function checkReviewerAuthoredApprovalInMessages(transcriptPath, verificationState) {
     const reviewerToolUses = new Map();
-    const outputs = [];
-    for (const line of splitTranscriptLines(transcriptPath, content, maxBytes)) {
-        if (!line.trim() || !REVIEWER_LINE_HINTS.some((hint) => line.includes(hint))) {
+    for (const line of readTranscriptTailLines(transcriptPath)) {
+        if (!line.trim()) {
             continue;
         }
         let entry;
@@ -745,13 +707,11 @@ function collectReviewerOutputs(transcriptPath, verificationState, maxBytes, pre
         catch {
             continue;
         }
-        const blocks = entry.message?.content;
-        if (!Array.isArray(blocks)) {
+        const content = entry.message?.content;
+        if (!Array.isArray(content)) {
             continue;
         }
-        const parsedAt = typeof entry.timestamp === 'string' ? Date.parse(entry.timestamp) : NaN;
-        const at = Number.isFinite(parsedAt) ? parsedAt : null;
-        for (const block of blocks) {
+        for (const block of content) {
             if (block?.type === 'tool_use' && block.id && block.name) {
                 if (REVIEWER_TASK_TOOL_NAMES.has(block.name)) {
                     const reviewerPath = normalizeReviewerPath(block.input?.subagent_type);
@@ -774,21 +734,13 @@ function collectReviewerOutputs(transcriptPath, verificationState, maxBytes, pre
             if (!reviewerToolUses.has(block.tool_use_id)) {
                 continue;
             }
-            const text = extractTranscriptText(block.content);
-            if (text) {
-                outputs.push({ text, at });
+            const reviewerOutput = extractTranscriptText(block.content);
+            if (reviewerOutput && detectArchitectApproval(reviewerOutput, verificationState)) {
+                return true;
             }
         }
     }
-    return outputs;
-}
-function checkReviewerAuthoredApprovalInMessages(transcriptPath, verificationState, maxBytes = TRANSCRIPT_TAIL_BYTES) {
-    // Cheap prefilter: the approval tag has to appear in the scanned window.
-    // Skips JSON-parsing megabytes of transcript when no reviewer approved.
-    // detectArchitectApproval() matches the marker case-insensitively, so this
-    // filter has to as well or valid reviewer output would stay pending.
-    const outputs = collectReviewerOutputs(transcriptPath, verificationState, maxBytes, (content) => /verified_complete/i.test(content));
-    return outputs.some((output) => detectArchitectApproval(output.text, verificationState));
+    return false;
 }
 function estimateTranscriptContextPercent(transcriptPath) {
     if (!transcriptPath || !existsSync(transcriptPath)) {
@@ -843,30 +795,17 @@ function isAwaitingConfirmation(state) {
     return Date.now() - setAtMs < AWAITING_CONFIRMATION_TTL_MS;
 }
 /**
- * Check for architect approval in session transcript.
- *
- * `transcriptPath` comes from the Stop payload ([CC] writes
- * `<CLAUDE_CONFIG_DIR>/projects/<slug>/<sessionId>.jsonl`). The legacy
- * `sessions/<id>/messages.json` locations are kept as a fallback for hosts
- * that still write them; nothing in OMC writes that file.
+ * Check for architect approval in session transcript
  */
-function checkArchitectApprovalInTranscript(sessionId, verificationState, transcriptPath) {
+function checkArchitectApprovalInTranscript(sessionId, verificationState) {
     const claudeDir = getClaudeConfigDir();
-    const candidates = [
-        transcriptPath,
-        join(claudeDir, 'sessions', sessionId, 'messages.json'),
-    ].filter((candidate) => typeof candidate === 'string' && candidate.length > 0);
-    const seen = new Set();
-    for (const candidate of candidates) {
-        if (seen.has(candidate)) {
-            continue;
-        }
-        seen.add(candidate);
-        if (!existsSync(candidate)) {
+    const possiblePaths = [join(claudeDir, 'sessions', sessionId, 'messages.json')];
+    for (const transcriptPath of possiblePaths) {
+        if (!existsSync(transcriptPath)) {
             continue;
         }
         try {
-            if (checkReviewerAuthoredApprovalInMessages(candidate, verificationState, TRANSCRIPT_APPROVAL_SCAN_BYTES)) {
+            if (checkReviewerAuthoredApprovalInMessages(transcriptPath, verificationState)) {
                 return true;
             }
         }
@@ -877,59 +816,27 @@ function checkArchitectApprovalInTranscript(sessionId, verificationState, transc
     return false;
 }
 /**
- * Check for architect rejection in session transcript.
- *
- * A rejection is only accepted from the reviewer that the active verification
- * request spawned, and only from a turn at or after that request was created.
- * `detectArchitectRejection()` matches loose wording without any correlation,
- * so reading raw transcript text would let a previous story's rejection mark
- * the story now under review as incomplete.
+ * Check for architect rejection in session transcript
  */
-function checkArchitectRejectionInTranscript(sessionId, verificationState, transcriptPath) {
+function checkArchitectRejectionInTranscript(sessionId) {
     const claudeDir = getClaudeConfigDir();
     const possiblePaths = [
-        transcriptPath,
         join(claudeDir, 'sessions', sessionId, 'transcript.md'),
         join(claudeDir, 'sessions', sessionId, 'messages.json'),
         join(claudeDir, 'transcripts', `${sessionId}.md`)
-    ].filter((candidate) => typeof candidate === 'string' && candidate.length > 0);
-    const requestedAt = verificationState?.requested_at
-        ? Date.parse(verificationState.requested_at)
-        : NaN;
-    const sinceMs = Number.isFinite(requestedAt) ? requestedAt : null;
-    for (const candidate of possiblePaths) {
-        if (!existsSync(candidate)) {
-            continue;
-        }
-        try {
-            if (candidate.endsWith('.md')) {
-                // Plain-text transcripts carry no reviewer attribution. They are a
-                // legacy non-[CC] shape, so keep the original tail heuristic there
-                // rather than silently dropping rejection support for those hosts.
-                const result = detectArchitectRejection(readTranscriptTail(candidate));
+    ];
+    for (const transcriptPath of possiblePaths) {
+        if (existsSync(transcriptPath)) {
+            try {
+                const content = readTranscriptTail(transcriptPath);
+                const result = detectArchitectRejection(content);
                 if (result.rejected) {
                     return result;
                 }
+            }
+            catch {
                 continue;
             }
-            const outputs = collectReviewerOutputs(candidate, verificationState, TRANSCRIPT_APPROVAL_SCAN_BYTES, 
-            // Same pattern set the detector uses, so the prefilter cannot reject
-            // wording that detectArchitectRejection() would have accepted.
-            (content) => hasRejectionSignal(content));
-            for (const output of outputs) {
-                // An output with no timestamp cannot be placed relative to the request,
-                // so it is not treated as this request's verdict.
-                if (sinceMs !== null && (output.at === null || output.at < sinceMs)) {
-                    continue;
-                }
-                const result = detectArchitectRejection(output.text);
-                if (result.rejected) {
-                    return result;
-                }
-            }
-        }
-        catch {
-            continue;
         }
     }
     return { rejected: false, feedback: '' };
@@ -950,7 +857,7 @@ function verificationCriteriaExcerpt(workingDir, sessionId, story) {
  * Check Ralph Loop state and determine if it should continue
  * Now includes Architect verification for completion claims
  */
-async function checkRalphLoop(sessionId, directory, cancelInProgress, transcriptPath) {
+async function checkRalphLoop(sessionId, directory, cancelInProgress) {
     const workingDir = resolveToWorktreeRoot(directory);
     const state = readRalphState(workingDir, sessionId);
     const ralphStatePath = sessionId
@@ -1048,7 +955,7 @@ async function checkRalphLoop(sessionId, directory, cancelInProgress, transcript
             // Verification is in progress - check for architect's response
             if (sessionId) {
                 // Check for architect approval
-                if (checkArchitectApprovalInTranscript(sessionId, verificationState, transcriptPath)) {
+                if (checkArchitectApprovalInTranscript(sessionId, verificationState)) {
                     // Jev ralph-verdict shadow: the detected approval is the twin;
                     // in active mode, use Jev's verdict instead.
                     const verdict = await applyRalphVerdictShadow({
@@ -1142,11 +1049,8 @@ async function checkRalphLoop(sessionId, directory, cancelInProgress, transcript
                         };
                     }
                 }
-                // Check for architect rejection. Without a pending request there is no
-                // verdict to apply, so skip the scan entirely.
-                const rejection = verificationState
-                    ? checkArchitectRejectionInTranscript(sessionId, verificationState, transcriptPath)
-                    : { rejected: false, feedback: '' };
+                // Check for architect rejection
+                const rejection = checkArchitectRejectionInTranscript(sessionId);
                 if (verificationState && rejection.rejected) {
                     // Jev ralph-verdict shadow: the detected rejection is the twin;
                     // in active mode, use Jev's verdict instead.
@@ -2099,7 +2003,7 @@ async function resolvePersistentModeBlock(sessionId, directory, stopContext // N
         // cancel/state_clear has made the registry empty.
         if (tombstonedWorkflowModes.has('ralph') || !isModeActive('ralph', workingDir, sessionId))
             return null;
-        return checkRalphLoop(sessionId, workingDir, cancelInProgress, stopContext?.transcript_path ?? stopContext?.transcriptPath);
+        return checkRalphLoop(sessionId, workingDir, cancelInProgress);
     };
     if (cancelInProgress) {
         // Requested-at-only signals may cancel Ralph, never autopilot.
