@@ -40094,16 +40094,11 @@ function detectArchitectApproval(text, expected) {
   }
   return false;
 }
+function hasRejectionSignal(text) {
+  return REJECTION_PATTERNS.some((pattern) => pattern.test(text));
+}
 function detectArchitectRejection(text) {
-  const rejectionPatterns = [
-    /(architect|critic|codex|reviewer).*?(rejected|found issues|not complete|incomplete)/i,
-    /issues? (found|identified|detected)/i,
-    /not yet complete/i,
-    /missing.*?(implementation|feature|test)/i,
-    /bug.*?(found|detected|identified)/i,
-    /error.*?(found|detected|identified)/i
-  ];
-  for (const pattern of rejectionPatterns) {
+  for (const pattern of REJECTION_PATTERNS) {
     if (pattern.test(text)) {
       const feedbackMatch = text.match(/(?:architect|critic|codex|reviewer|feedback|issue|problem|error|bug)[:\s]+([^.]+\.)/i);
       return {
@@ -40114,7 +40109,7 @@ function detectArchitectRejection(text) {
   }
   return { rejected: false, feedback: "" };
 }
-var import_crypto10, import_fs28, import_path35, DEFAULT_MAX_VERIFICATION_ATTEMPTS, DEFAULT_RALPH_CRITIC_MODE2;
+var import_crypto10, import_fs28, import_path35, DEFAULT_MAX_VERIFICATION_ATTEMPTS, DEFAULT_RALPH_CRITIC_MODE2, REJECTION_PATTERNS;
 var init_verifier = __esm({
   "src/hooks/ralph/verifier.ts"() {
     "use strict";
@@ -40127,6 +40122,14 @@ var init_verifier = __esm({
     init_prd();
     DEFAULT_MAX_VERIFICATION_ATTEMPTS = 3;
     DEFAULT_RALPH_CRITIC_MODE2 = "architect";
+    REJECTION_PATTERNS = [
+      /(architect|critic|codex|reviewer).*?(rejected|found issues|not complete|incomplete)/i,
+      /issues? (found|identified|detected)/i,
+      /not yet complete/i,
+      /missing.*?(implementation|feature|test)/i,
+      /bug.*?(found|detected|identified)/i,
+      /error.*?(found|detected|identified)/i
+    ];
   }
 });
 
@@ -40192,6 +40195,7 @@ __export(ralph_exports, {
   getStoryGoverningCriteriaRevision: () => getStoryGoverningCriteriaRevision,
   getTeamPhaseDirective: () => getTeamPhaseDirective,
   hasPrd: () => hasPrd,
+  hasRejectionSignal: () => hasRejectionSignal,
   incrementRalphIteration: () => incrementRalphIteration,
   initPrd: () => initPrd,
   initProgress: () => initProgress,
@@ -43566,11 +43570,17 @@ function getUnifiedMcpRegistryPathCandidates() {
 function getUnifiedMcpRegistryStatePathCandidates() {
   return getGlobalOmcStateCandidates("mcp-registry-state.json");
 }
+function isDefaultClaudeConfigDirPath(configDir) {
+  return configDir === (0, import_path61.join)((0, import_os11.homedir)(), ".claude");
+}
+function getClaudeJsonPathForConfigDir(configDir) {
+  return isDefaultClaudeConfigDirPath(configDir) ? (0, import_path61.join)((0, import_os11.homedir)(), ".claude.json") : (0, import_path61.join)(configDir, ".claude.json");
+}
 function getClaudeMcpConfigPath() {
   if (process.env.CLAUDE_MCP_CONFIG_PATH?.trim()) {
     return process.env.CLAUDE_MCP_CONFIG_PATH.trim();
   }
-  return (0, import_path61.join)((0, import_path61.dirname)(getClaudeConfigDir()), ".claude.json");
+  return getClaudeJsonPathForConfigDir(getClaudeConfigDir());
 }
 function getCodexConfigPath() {
   const codexHome = process.env.CODEX_HOME?.trim() || (0, import_path61.join)((0, import_os11.homedir)(), ".codex");
@@ -45782,7 +45792,7 @@ function canonicalizeExistingPath2(value) {
     return normalizePath2((0, import_path63.resolve)(value));
   }
 }
-function isDefaultClaudeConfigDirPath(configDir) {
+function isDefaultClaudeConfigDirPath2(configDir) {
   return normalizePath2(configDir) === normalizePath2((0, import_path63.join)((0, import_os12.homedir)(), ".claude"));
 }
 function quoteShellArg(value) {
@@ -45794,12 +45804,12 @@ function buildStatusLineCommand(nodeBin, hudScriptPath, findNodePath, cacheWrapp
   }
   const normalizedHudScriptPath = hudScriptPath.replace(/\\/g, "/");
   if (cacheWrapperPath) {
-    if (isDefaultClaudeConfigDirPath(CLAUDE_CONFIG_DIR)) {
+    if (isDefaultClaudeConfigDirPath2(CLAUDE_CONFIG_DIR)) {
       return "sh ${CLAUDE_CONFIG_DIR:-$HOME/.claude}/hud/omc-hud-cache.sh ${CLAUDE_CONFIG_DIR:-$HOME/.claude}/hud/omc-hud.mjs";
     }
     return `sh ${quoteShellArg(cacheWrapperPath.replace(/\\/g, "/"))} ${quoteShellArg(normalizedHudScriptPath)}`;
   }
-  if (isDefaultClaudeConfigDirPath(CLAUDE_CONFIG_DIR)) {
+  if (isDefaultClaudeConfigDirPath2(CLAUDE_CONFIG_DIR)) {
     if (findNodePath) {
       return "sh ${CLAUDE_CONFIG_DIR:-$HOME/.claude}/hud/find-node.sh ${CLAUDE_CONFIG_DIR:-$HOME/.claude}/hud/omc-hud.mjs";
     }
@@ -49451,6 +49461,9 @@ function getAllKeywords(text) {
   if (types.includes("team") && types.includes("autopilot")) {
     types = types.filter((t) => t !== "autopilot");
   }
+  if (NO_IMPLEMENT_PATTERN.test(removeCodeBlocks2(text)) && !/^\s*\//.test(text)) {
+    types = types.filter((t) => !CODE_EDITING_KEYWORDS.has(t));
+  }
   return KEYWORD_PRIORITY.filter((k) => types.includes(k));
 }
 function getAllKeywordsWithSizeCheck(text, options = {}) {
@@ -49519,7 +49532,7 @@ function applyRalplanGate(keywords, text) {
   }
   return { keywords: filtered, gateApplied: true, gatedKeywords: executionKeywords };
 }
-var KEYWORD_PATTERNS, OUROBOROS_BRAND_AT_START, KEYWORD_SKIP_PREDICATES, KEYWORD_PRIORITY, RETIRED_WORKFLOW_SLASH_PATTERN, CANONICAL_WORKFLOW_SLASH_SKILLS, SLASH_SKILL_TO_KEYWORD_TYPE, WORKFLOW_SLASH_PATTERN, PASTED_MAGIC_KEYWORD_HEADER_PATTERN, ROLE_BOUNDARY_PATTERN, SKILL_TRANSCRIPT_LINE_PATTERN, USER_REQUEST_LINE_PATTERN, SHELL_TRANSCRIPT_LINE_PATTERN, GIT_DIFF_START_PATTERNS, GIT_DIFF_CONTINUATION_PATTERNS, NON_LATIN_SCRIPT_PATTERN, PATH_SEGMENT_CHARS, FILE_PATH_PATTERN, INFORMATIONAL_INTENT_PATTERNS2, STRONG_HELP_QUERY_PATTERN, MULTILINGUAL_HELP_REQUEST_PATTERN, ENGLISH_HELP_REQUEST_PATTERN, TASK_ACTION_VERB_PATTERN, RESULTS_REPORTING_REQUEST_PATTERN, INFORMATIONAL_CONTEXT_WINDOW2, QUOTED_SPAN_PATTERN, REFERENCE_META_PATTERNS, REFERENCE_EXPLANATION_PATTERNS, QUESTION_FOLLOWUP_PATTERNS, MODE_REFERENCE_PATTERN, EXECUTION_GATE_KEYWORDS, GATE_BYPASS_PREFIXES, WELL_SPECIFIED_SIGNALS;
+var KEYWORD_PATTERNS, OUROBOROS_BRAND_AT_START, KEYWORD_SKIP_PREDICATES, KEYWORD_PRIORITY, RETIRED_WORKFLOW_SLASH_PATTERN, CANONICAL_WORKFLOW_SLASH_SKILLS, SLASH_SKILL_TO_KEYWORD_TYPE, WORKFLOW_SLASH_PATTERN, PASTED_MAGIC_KEYWORD_HEADER_PATTERN, ROLE_BOUNDARY_PATTERN, SKILL_TRANSCRIPT_LINE_PATTERN, USER_REQUEST_LINE_PATTERN, SHELL_TRANSCRIPT_LINE_PATTERN, GIT_DIFF_START_PATTERNS, GIT_DIFF_CONTINUATION_PATTERNS, NON_LATIN_SCRIPT_PATTERN, PATH_SEGMENT_CHARS, FILE_PATH_PATTERN, INFORMATIONAL_INTENT_PATTERNS2, STRONG_HELP_QUERY_PATTERN, MULTILINGUAL_HELP_REQUEST_PATTERN, ENGLISH_HELP_REQUEST_PATTERN, TASK_ACTION_VERB_PATTERN, RESULTS_REPORTING_REQUEST_PATTERN, INFORMATIONAL_CONTEXT_WINDOW2, QUOTED_SPAN_PATTERN, REFERENCE_META_PATTERNS, REFERENCE_EXPLANATION_PATTERNS, QUESTION_FOLLOWUP_PATTERNS, MODE_REFERENCE_PATTERN, CODE_EDITING_KEYWORDS, NO_IMPLEMENT_PATTERN, EXECUTION_GATE_KEYWORDS, GATE_BYPASS_PREFIXES, WELL_SPECIFIED_SIGNALS;
 var init_keyword_detector = __esm({
   "src/hooks/keyword-detector/index.ts"() {
     "use strict";
@@ -49656,6 +49669,8 @@ var init_keyword_detector = __esm({
       /(?:ทำไม|อะไร|ยังไง|อย่างไร|เท่าไหร่|กี่|มั้ย|ไหม|เหรอ|หรอ|หรือไม่|หรือเปล่า|ใช่ไหม|ถูกมั้ย)/u
     ];
     MODE_REFERENCE_PATTERN = /\b(?:ralph|autopilot|auto[\s-]?pilot|ralplan|ultrathink|deepsearch|deep[\s-]?analyze|deepanalyze|deep[\s-]interview|ouroboros|deerflow)\b/gi;
+    CODE_EDITING_KEYWORDS = /* @__PURE__ */ new Set(["autopilot", "ralph", "tdd"]);
+    NO_IMPLEMENT_PATTERN = /\b(?:do\s+not|don'?t|never|without)\s+(?:begin\s+|start\s+)?implement(?:ing|ation)?\b|\bno\s+(?:code\s+)?(?:changes|edits)\b|\bread[\s-]only\s+(?:review|audit|investigation)\b/i;
     EXECUTION_GATE_KEYWORDS = /* @__PURE__ */ new Set([
       "ralph",
       "autopilot",
@@ -55576,32 +55591,34 @@ function recordIdleNotificationSent(stateDir, sessionId, repoState) {
   } catch {
   }
 }
-function readTranscriptTail(transcriptPath) {
+function readTranscriptTail(transcriptPath, maxBytes = TRANSCRIPT_TAIL_BYTES) {
   const size = (0, import_fs63.statSync)(transcriptPath).size;
-  if (size <= TRANSCRIPT_TAIL_BYTES) {
+  if (size <= maxBytes) {
     return (0, import_fs63.readFileSync)(transcriptPath, "utf-8");
   }
   const fd = (0, import_fs63.openSync)(transcriptPath, "r");
   try {
-    const offset = size - TRANSCRIPT_TAIL_BYTES;
-    const buf = Buffer.allocUnsafe(TRANSCRIPT_TAIL_BYTES);
-    const bytesRead = (0, import_fs63.readSync)(fd, buf, 0, TRANSCRIPT_TAIL_BYTES, offset);
+    const offset = size - maxBytes;
+    const buf = Buffer.allocUnsafe(maxBytes);
+    const bytesRead = (0, import_fs63.readSync)(fd, buf, 0, maxBytes, offset);
     return buf.subarray(0, bytesRead).toString("utf-8");
   } finally {
     (0, import_fs63.closeSync)(fd);
   }
 }
-function readTranscriptTailLines(transcriptPath) {
-  const content = readTranscriptTail(transcriptPath);
+function splitTranscriptLines(transcriptPath, content, maxBytes) {
   const lines = content.split("\n");
   try {
-    if ((0, import_fs63.statSync)(transcriptPath).size > TRANSCRIPT_TAIL_BYTES && lines.length > 0) {
+    if ((0, import_fs63.statSync)(transcriptPath).size > maxBytes && lines.length > 0) {
       lines.shift();
     }
   } catch {
     return lines;
   }
   return lines;
+}
+function readTranscriptTailLines(transcriptPath, maxBytes = TRANSCRIPT_TAIL_BYTES) {
+  return splitTranscriptLines(transcriptPath, readTranscriptTail(transcriptPath, maxBytes), maxBytes);
 }
 function normalizeReviewerPath(subagentType) {
   if (typeof subagentType !== "string") {
@@ -55642,10 +55659,20 @@ function matchesVerificationReviewerPath(reviewerPath, verificationState) {
   const expected = verificationState?.critic_mode ?? "architect";
   return reviewerPath === expected;
 }
-function checkReviewerAuthoredApprovalInMessages(transcriptPath, verificationState) {
+function collectReviewerOutputs(transcriptPath, verificationState, maxBytes, prefilter) {
+  let content;
+  try {
+    content = readTranscriptTail(transcriptPath, maxBytes);
+  } catch {
+    return [];
+  }
+  if (prefilter && !prefilter(content)) {
+    return [];
+  }
   const reviewerToolUses = /* @__PURE__ */ new Map();
-  for (const line of readTranscriptTailLines(transcriptPath)) {
-    if (!line.trim()) {
+  const outputs = [];
+  for (const line of splitTranscriptLines(transcriptPath, content, maxBytes)) {
+    if (!line.trim() || !REVIEWER_LINE_HINTS.some((hint) => line.includes(hint))) {
       continue;
     }
     let entry2;
@@ -55654,11 +55681,13 @@ function checkReviewerAuthoredApprovalInMessages(transcriptPath, verificationSta
     } catch {
       continue;
     }
-    const content = entry2.message?.content;
-    if (!Array.isArray(content)) {
+    const blocks = entry2.message?.content;
+    if (!Array.isArray(blocks)) {
       continue;
     }
-    for (const block of content) {
+    const parsedAt = typeof entry2.timestamp === "string" ? Date.parse(entry2.timestamp) : NaN;
+    const at = Number.isFinite(parsedAt) ? parsedAt : null;
+    for (const block of blocks) {
       if (block?.type === "tool_use" && block.id && block.name) {
         if (REVIEWER_TASK_TOOL_NAMES.has(block.name)) {
           const reviewerPath = normalizeReviewerPath(block.input?.subagent_type);
@@ -55681,13 +55710,22 @@ function checkReviewerAuthoredApprovalInMessages(transcriptPath, verificationSta
       if (!reviewerToolUses.has(block.tool_use_id)) {
         continue;
       }
-      const reviewerOutput = extractTranscriptText(block.content);
-      if (reviewerOutput && detectArchitectApproval(reviewerOutput, verificationState)) {
-        return true;
+      const text = extractTranscriptText(block.content);
+      if (text) {
+        outputs.push({ text, at });
       }
     }
   }
-  return false;
+  return outputs;
+}
+function checkReviewerAuthoredApprovalInMessages(transcriptPath, verificationState, maxBytes = TRANSCRIPT_TAIL_BYTES) {
+  const outputs = collectReviewerOutputs(
+    transcriptPath,
+    verificationState,
+    maxBytes,
+    (content) => /verified_complete/i.test(content)
+  );
+  return outputs.some((output) => detectArchitectApproval(output.text, verificationState));
 }
 function estimateTranscriptContextPercent(transcriptPath) {
   if (!transcriptPath || !(0, import_fs63.existsSync)(transcriptPath)) {
@@ -55737,15 +55775,23 @@ function isAwaitingConfirmation(state) {
   }
   return Date.now() - setAtMs < AWAITING_CONFIRMATION_TTL_MS;
 }
-function checkArchitectApprovalInTranscript(sessionId, verificationState) {
+function checkArchitectApprovalInTranscript(sessionId, verificationState, transcriptPath) {
   const claudeDir = getClaudeConfigDir();
-  const possiblePaths = [(0, import_path74.join)(claudeDir, "sessions", sessionId, "messages.json")];
-  for (const transcriptPath of possiblePaths) {
-    if (!(0, import_fs63.existsSync)(transcriptPath)) {
+  const candidates = [
+    transcriptPath,
+    (0, import_path74.join)(claudeDir, "sessions", sessionId, "messages.json")
+  ].filter((candidate) => typeof candidate === "string" && candidate.length > 0);
+  const seen = /* @__PURE__ */ new Set();
+  for (const candidate of candidates) {
+    if (seen.has(candidate)) {
+      continue;
+    }
+    seen.add(candidate);
+    if (!(0, import_fs63.existsSync)(candidate)) {
       continue;
     }
     try {
-      if (checkReviewerAuthoredApprovalInMessages(transcriptPath, verificationState)) {
+      if (checkReviewerAuthoredApprovalInMessages(candidate, verificationState, TRANSCRIPT_APPROVAL_SCAN_BYTES)) {
         return true;
       }
     } catch {
@@ -55754,24 +55800,47 @@ function checkArchitectApprovalInTranscript(sessionId, verificationState) {
   }
   return false;
 }
-function checkArchitectRejectionInTranscript(sessionId) {
+function checkArchitectRejectionInTranscript(sessionId, verificationState, transcriptPath) {
   const claudeDir = getClaudeConfigDir();
   const possiblePaths = [
+    transcriptPath,
     (0, import_path74.join)(claudeDir, "sessions", sessionId, "transcript.md"),
     (0, import_path74.join)(claudeDir, "sessions", sessionId, "messages.json"),
     (0, import_path74.join)(claudeDir, "transcripts", `${sessionId}.md`)
-  ];
-  for (const transcriptPath of possiblePaths) {
-    if ((0, import_fs63.existsSync)(transcriptPath)) {
-      try {
-        const content = readTranscriptTail(transcriptPath);
-        const result = detectArchitectRejection(content);
+  ].filter((candidate) => typeof candidate === "string" && candidate.length > 0);
+  const requestedAt = verificationState?.requested_at ? Date.parse(verificationState.requested_at) : NaN;
+  const sinceMs = Number.isFinite(requestedAt) ? requestedAt : null;
+  for (const candidate of possiblePaths) {
+    if (!(0, import_fs63.existsSync)(candidate)) {
+      continue;
+    }
+    try {
+      if (candidate.endsWith(".md")) {
+        const result = detectArchitectRejection(readTranscriptTail(candidate));
         if (result.rejected) {
           return result;
         }
-      } catch {
         continue;
       }
+      const outputs = collectReviewerOutputs(
+        candidate,
+        verificationState,
+        TRANSCRIPT_APPROVAL_SCAN_BYTES,
+        // Same pattern set the detector uses, so the prefilter cannot reject
+        // wording that detectArchitectRejection() would have accepted.
+        (content) => hasRejectionSignal(content)
+      );
+      for (const output of outputs) {
+        if (sinceMs !== null && (output.at === null || output.at < sinceMs)) {
+          continue;
+        }
+        const result = detectArchitectRejection(output.text);
+        if (result.rejected) {
+          return result;
+        }
+      }
+    } catch {
+      continue;
     }
   }
   return { rejected: false, feedback: "" };
@@ -55780,7 +55849,7 @@ function verificationCriteriaExcerpt(workingDir, sessionId, story) {
   const criteria = story?.acceptanceCriteria ?? readPrd(workingDir, sessionId)?.userStories.flatMap((s) => s.acceptanceCriteria) ?? [];
   return criteria.join("; ");
 }
-async function checkRalphLoop(sessionId, directory, cancelInProgress) {
+async function checkRalphLoop(sessionId, directory, cancelInProgress, transcriptPath) {
   const workingDir = resolveToWorktreeRoot(directory);
   const state = readRalphState(workingDir, sessionId);
   const ralphStatePath = sessionId ? resolveSessionStatePath("ralph", sessionId, workingDir) : resolveStatePath("ralph", workingDir);
@@ -55851,7 +55920,7 @@ async function checkRalphLoop(sessionId, directory, cancelInProgress) {
     }
     if (verificationState?.pending) {
       if (sessionId) {
-        if (checkArchitectApprovalInTranscript(sessionId, verificationState)) {
+        if (checkArchitectApprovalInTranscript(sessionId, verificationState, transcriptPath)) {
           const verdict = await applyRalphVerdictShadow({
             verdict: true,
             prdContext: verificationCriteriaExcerpt(workingDir, sessionId, verifiedStory),
@@ -55947,7 +56016,7 @@ async function checkRalphLoop(sessionId, directory, cancelInProgress) {
             };
           }
         }
-        const rejection = checkArchitectRejectionInTranscript(sessionId);
+        const rejection = verificationState ? checkArchitectRejectionInTranscript(sessionId, verificationState, transcriptPath) : { rejected: false, feedback: "" };
         if (verificationState && rejection.rejected) {
           const verdict = await applyRalphVerdictShadow({
             verdict: false,
@@ -56634,7 +56703,7 @@ async function resolvePersistentModeBlock(sessionId, directory, stopContext) {
   };
   const runRalphPriority = async () => {
     if (tombstonedWorkflowModes.has("ralph") || !isModeActive("ralph", workingDir, sessionId)) return null;
-    return checkRalphLoop(sessionId, workingDir, cancelInProgress);
+    return checkRalphLoop(sessionId, workingDir, cancelInProgress, stopContext?.transcript_path ?? stopContext?.transcriptPath);
   };
   if (cancelInProgress) {
     const autopilotResult = await runAutopilotPriority();
@@ -56699,7 +56768,7 @@ function createHookOutput(result) {
     message: result.message || void 0
   };
 }
-var import_crypto20, import_fs63, import_path74, CANCEL_SIGNAL_TTL_MS2, CANCEL_SIGNAL_CLOCK_SKEW_MS, STALE_STATE_THRESHOLD_MS, PENDING_ASYNC_STATE_STALE_MS, OVERSIZE_TOOL_RESULT_REDIRECT_STOP_MAX, OVERSIZE_TOOL_RESULT_REDIRECT_STOP_TTL_MS, TERMINAL_WORKFLOW_SLOT_MODES, TERMINAL_WORKFLOW_PHASES, todoContinuationAttempts, TRANSCRIPT_TAIL_BYTES, CRITICAL_CONTEXT_STOP_PERCENT, RALPLAN_TERMINAL_PHASES, REVIEWER_TASK_TOOL_NAMES, REVIEWER_COMMAND_TOOL_NAMES, AWAITING_CONFIRMATION_TTL_MS, THINKING_ONLY_STREAK_BREAKER, THINKING_ONLY_STREAK_MAX, THINKING_ONLY_STREAK_TTL_MS, THINKING_ONLY_STREAK_BAILOUT_MESSAGE, TEAM_PIPELINE_STOP_BLOCKER_MAX, TEAM_PIPELINE_STOP_BLOCKER_TTL_MS, RALPLAN_STOP_BLOCKER_MAX, RALPLAN_STOP_BLOCKER_TTL_MS, RALPLAN_ACTIVE_AGENT_RECENCY_WINDOW_MS;
+var import_crypto20, import_fs63, import_path74, CANCEL_SIGNAL_TTL_MS2, CANCEL_SIGNAL_CLOCK_SKEW_MS, STALE_STATE_THRESHOLD_MS, PENDING_ASYNC_STATE_STALE_MS, OVERSIZE_TOOL_RESULT_REDIRECT_STOP_MAX, OVERSIZE_TOOL_RESULT_REDIRECT_STOP_TTL_MS, TERMINAL_WORKFLOW_SLOT_MODES, TERMINAL_WORKFLOW_PHASES, todoContinuationAttempts, TRANSCRIPT_TAIL_BYTES, TRANSCRIPT_APPROVAL_SCAN_BYTES, CRITICAL_CONTEXT_STOP_PERCENT, RALPLAN_TERMINAL_PHASES, REVIEWER_TASK_TOOL_NAMES, REVIEWER_COMMAND_TOOL_NAMES, REVIEWER_LINE_HINTS, AWAITING_CONFIRMATION_TTL_MS, THINKING_ONLY_STREAK_BREAKER, THINKING_ONLY_STREAK_MAX, THINKING_ONLY_STREAK_TTL_MS, THINKING_ONLY_STREAK_BAILOUT_MESSAGE, TEAM_PIPELINE_STOP_BLOCKER_MAX, TEAM_PIPELINE_STOP_BLOCKER_TTL_MS, RALPLAN_STOP_BLOCKER_MAX, RALPLAN_STOP_BLOCKER_TTL_MS, RALPLAN_ACTIVE_AGENT_RECENCY_WINDOW_MS;
 var init_persistent_mode = __esm({
   "src/hooks/persistent-mode/index.ts"() {
     "use strict";
@@ -56743,6 +56812,7 @@ var init_persistent_mode = __esm({
     ]);
     todoContinuationAttempts = /* @__PURE__ */ new Map();
     TRANSCRIPT_TAIL_BYTES = 32 * 1024;
+    TRANSCRIPT_APPROVAL_SCAN_BYTES = 32 * 1024 * 1024;
     CRITICAL_CONTEXT_STOP_PERCENT = 95;
     RALPLAN_TERMINAL_PHASES = /* @__PURE__ */ new Set([
       "completed",
@@ -56765,6 +56835,7 @@ var init_persistent_mode = __esm({
     ]);
     REVIEWER_TASK_TOOL_NAMES = /* @__PURE__ */ new Set(["Task", "proxy_Task", "Agent"]);
     REVIEWER_COMMAND_TOOL_NAMES = /* @__PURE__ */ new Set(["Bash", "proxy_Bash"]);
+    REVIEWER_LINE_HINTS = ['"tool_result"', '"subagent_type"', "--agent-prompt"];
     AWAITING_CONFIRMATION_TTL_MS = 2 * 60 * 1e3;
     THINKING_ONLY_STREAK_BREAKER = "thinking-only-streak";
     THINKING_ONLY_STREAK_MAX = 3;
@@ -58435,14 +58506,6 @@ function claimSessionEndJob(directory, sessionId, nonce, identity, deadlineAt) {
   const now = Date.now();
   return mutateSessionEndJob(directory, sessionId, current.revision, (job) => {
     if (job.phase === "complete" || job.owner) throw new Error("claim-conflict");
-    if (Object.values(job.actions).some((action) => action.status === "claimed" && action.runner && action.runner.phase !== "terminal" && Date.now() < Date.parse(action.runner.deadlineAt))) throw new Error("runner-still-bounded");
-    for (const action of Object.values(job.actions)) {
-      if (action.status !== "claimed") continue;
-      action.status = action.class === "best-effort" ? "expired" : "retryable";
-      action.claimantNonce = void 0;
-      action.lastOutcomeCode = action.class === "best-effort" ? "delivery-uncertain-owner-missing" : "owner-missing";
-      if (action.runner) action.runner.phase = "terminal";
-    }
     job.owner = { nonce, pid: process.pid, processStartIdentity: identity, claimedAt: nowIso(), heartbeatAt: nowIso(), leaseExpiresAt: new Date(Math.min(now + 750, deadlineAt)).toISOString(), runDeadlineAt: new Date(deadlineAt).toISOString(), leaseGeneration: 1, claimedFromRevision: job.revision };
     job.phase = "processing";
   });
@@ -58478,15 +58541,6 @@ function reapStaleSessionEndOwner(directory, sessionId, expectedNonce, expectedG
 function releaseSessionEndJob(directory, sessionId, nonce, generation, reason = "worker-released") {
   return mutateLatest(directory, sessionId, (job) => {
     if (!job.owner || job.owner.nonce !== nonce || job.owner.leaseGeneration !== generation) throw new Error("release-conflict");
-    for (const action of Object.values(job.actions)) {
-      if (action.status === "claimed" && action.claimantNonce === nonce && action.runner?.phase === "reserved") {
-        action.attempts--;
-        action.status = action.attempts > 0 ? "retryable" : "pending";
-        action.claimantNonce = void 0;
-        action.claimedAt = void 0;
-        action.runner = void 0;
-      }
-    }
     job.owner = null;
     if (job.phase !== "complete") {
       job.phase = "recoverable-failure";
@@ -84561,7 +84615,7 @@ function sanitizeReplyInput(text) {
   return text.replace(/[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]/g, "").replace(/[\u202a-\u202e\u2066-\u2069]/g, "").replace(/\r\n|[\r\n]/g, " ").replace(/\\/g, "\\\\").replace(/`/g, "\\`").replace(/\$\(/g, "\\$(").replace(/\$\{/g, "\\${").trim();
 }
 function parseApprovalReply(text) {
-  const firstWord = text.trim().toLowerCase().split(/\s+/)[0] || "";
+  const firstWord = text.trim().toLowerCase().split(/[\s.,!;:。，！；：、]+/)[0] || "";
   if (APPROVAL_APPROVE_WORDS.has(firstWord)) return "approved";
   if (APPROVAL_DENY_WORDS.has(firstWord)) return "denied";
   return null;
@@ -124848,6 +124902,7 @@ var import_path144 = require("path");
 var FEEDBACK_BASELINE_FILENAME = "feedback-baseline.json";
 var MAX_SIGNATURES_PER_COMMAND = 200;
 var ANSI_PATTERN = /\x1b\[[0-9;]*m/g;
+var FAILURE_WORD_PATTERN = /\bfail(?:ed|ure|ures|ing)?\b|\w*(?:Error|Exception)s?\b|✗|×/i;
 var VOLATILE_PATTERNS = [
   // Pytest's wall-clock parenthesized duration, e.g. "... in 194.32s (0:03:14)".
   // Anchored to the "in <duration>" suffix so clock-shaped assertion values
@@ -124862,17 +124917,49 @@ var VOLATILE_PATTERNS = [
   // The process id in Node's warning prefix, "(node:12345) [DEP0040] DeprecationWarning: ...", differs on every run.
   // Only an id followed by an optional [code] and a "Name:" is replaced, so "(node:42) ready" in an assertion keeps its signal.
   /(?<=\(node:)\d+(?=\) (?:\[[^\]]+\] )?\w+:)/g,
+  // macOS per-user temp dirs (os.tmpdir()) are handled by
+  // normalizeMacosTempPaths(): only the mkdtemp-style random segment is
+  // replaced so stable suffixes (file:line:column) still distinguish failures.
   /\b[0-9a-f]{8,}\b/gi
 ];
+var MACOS_TEMP_PATH_PATTERN = /(?:\/private)?\/var\/folders\/[^/\s"']+\/[^/\s"']+\/T((?:\/[^/\s"']*)*)/g;
+var RANDOM_TEMP_SEGMENT_PATTERN = /^[A-Za-z0-9._-]*[A-Za-z0-9]{6}$/;
+function isRandomTempSegment(segment) {
+  if (!RANDOM_TEMP_SEGMENT_PATTERN.test(segment)) return false;
+  const suffix = segment.slice(-6);
+  return /[0-9]/.test(suffix) || /[A-Z]/.test(suffix) && /[a-z]/.test(suffix);
+}
+function normalizeMacosTempPaths(line) {
+  return line.replace(MACOS_TEMP_PATH_PATTERN, (_match, rest) => {
+    const segments = rest.split("/").filter(Boolean);
+    const normalized = segments.map((segment, index) => {
+      const isLeaf = index === segments.length - 1;
+      if (isLeaf && /[.:]/.test(segment)) return segment;
+      if (index === 0 || isRandomTempSegment(segment)) return "<v>";
+      return segment;
+    });
+    const joined = normalized.join("/");
+    return segments.length === 1 && /[.:]/.test(segments[0]) ? `<v>/${joined}` : joined;
+  });
+}
 function signatureLines(output) {
   const seen = /* @__PURE__ */ new Set();
   for (const raw of output.replace(ANSI_PATTERN, "").split(/\r?\n/)) {
     let line = raw.trim();
     if (!line) continue;
     for (const pattern of VOLATILE_PATTERNS) line = line.replace(pattern, "<v>");
+    line = normalizeMacosTempPaths(line);
     line = line.replace(/\s+/g, " ").trim();
     if (!line || line.length > 500) continue;
-    if (/^(running|collecting|compiling|building|passing|tap\s+version|✓|√|%|\s*at\s)/i.test(line) && !/fail|error|✗|×/i.test(line)) continue;
+    if ((/^(?:\[[^\]]*\]\s*)*(?:<v>\s+)?(?:TRACE|DEBUG|INFO|NOTICE)\b/i.test(line) || /^\[(?:TRACE|DEBUG|INFO|NOTICE)\]/i.test(line)) && !FAILURE_WORD_PATTERN.test(line)) continue;
+    if (/^(?:npm|yarn|pnpm)\s+warn\b/i.test(line)) continue;
+    if (/^>\s+\S+@\S+/.test(line)) continue;
+    if (/^>\s+(?:tsc|vite|vitest|jest|node|npm|yarn|pnpm|eslint|tsx|ts-node)\b/i.test(line)) continue;
+    if (/^(?:RUN\s+v?\d|Duration\s)/i.test(line)) continue;
+    if (/^(?:Test Files|Tests)\b/.test(line) && !FAILURE_WORD_PATTERN.test(line)) continue;
+    if (/^\d+\|\s/.test(line) || /^\|\s*\^/.test(line)) continue;
+    if (/^(?:✓|√)/.test(line)) continue;
+    if (/^(running|collecting|compiling|building|passing|tap\s+version|%|\s*at\s)/i.test(line) && !FAILURE_WORD_PATTERN.test(line)) continue;
     if (/^[.sxX]+(?:\s*\[\s*\d+%\]\s*)?$/.test(line)) continue;
     if (/^\d+ passed(?:, \d+ (?:warnings?|skipped|xfailed|xpassed|deselected))* in <v>(?: <v>)*(?: \([^)]*\))?$/.test(line)) continue;
     if (/^Start at \d{2}:\d{2}:\d{2}$/.test(line)) continue;
@@ -124886,10 +124973,19 @@ function signatureLines(output) {
   }
   return [...seen].sort();
 }
+function exitCodeFailure(command, entry2) {
+  return entry2.exitCode !== void 0 && entry2.exitCode !== 0 ? `${command}: <exited with code ${entry2.exitCode}>` : null;
+}
 function diffAgainstBaseline(baseline, current) {
   if (!baseline) {
     return {
-      newSignatures: Object.entries(current).flatMap(([command, entry2]) => entry2.signatures.map((signature) => `${command}: ${signature}`)),
+      newSignatures: Object.entries(current).flatMap(([command, entry2]) => {
+        const exitFailure = exitCodeFailure(command, entry2);
+        return [
+          ...entry2.signatures.map((signature) => `${command}: ${signature}`),
+          ...exitFailure ? [exitFailure] : []
+        ];
+      }),
       resolvedSignatures: []
     };
   }
@@ -124899,11 +124995,19 @@ function diffAgainstBaseline(baseline, current) {
     const before = baseline.commands[command];
     if (!before) {
       newSignatures.push(...entry2.signatures.map((signature) => `${command}: ${signature}`));
+      const exitFailure = exitCodeFailure(command, entry2);
+      if (exitFailure) newSignatures.push(exitFailure);
       continue;
     }
     if (entry2.unrunnable && !before.unrunnable) {
       newSignatures.push(`${command}: <command became unrunnable>`);
       continue;
+    }
+    const beforeExitCode = before.exitCode ?? 0;
+    if (entry2.exitCode !== void 0 && beforeExitCode === 0 && entry2.exitCode !== 0) {
+      newSignatures.push(`${command}: <exited with code ${entry2.exitCode}>`);
+    } else if (entry2.exitCode === 0 && beforeExitCode !== 0) {
+      resolvedSignatures.push(`${command}: <no longer exits with code ${beforeExitCode}>`);
     }
     const beforeSet = new Set(before.signatures);
     const afterSet = new Set(entry2.signatures);
@@ -125655,7 +125759,12 @@ Command execution failed: ${errorCode2}` : output;
     const hasShellMissingCommand = SHELL_MISSING_COMMAND_PATTERN.test(output);
     const otherSignatures = hasShellMissingCommand ? signatureLines(output.split(/\r?\n/).filter((line) => !SHELL_MISSING_COMMAND_PATTERN.test(line) && !/^>\s/.test(line) && !/^operable program or batch file\.?$/i.test(line)).join("\n")) : signatures;
     const unrunnable = failedToSpawn || result.status === 126 || result.status === 127 || !result.error && hasShellMissingCommand && otherSignatures.length === 0;
-    return { signatures: unrunnable ? [] : signatures, ...unrunnable ? { unrunnable: true } : {} };
+    const exitCode = !unrunnable && typeof result.status === "number" ? result.status : void 0;
+    return {
+      signatures: unrunnable ? [] : signatures,
+      ...exitCode !== void 0 ? { exitCode } : {},
+      ...unrunnable ? { unrunnable: true } : {}
+    };
   } catch (error2) {
     const errorCode2 = typeof error2 === "object" && error2 !== null && "code" in error2 && typeof error2.code === "string" ? error2.code : void 0;
     return errorCode2 === "ENOENT" ? { signatures: [], unrunnable: true } : { signatures: [`Command execution failed: ${errorCode2 ?? "unknown"}`] };
@@ -130556,15 +130665,15 @@ function compareOnboardingVersion(left, right) {
   }
   return 0;
 }
-function refreshRuntimeClaudeJson(baseConfigDir, runtimeClaudeJsonPath, sourceClaudeJson = readJsonObject4((0, import_path151.join)((0, import_path151.dirname)(baseConfigDir), ".claude.json"))) {
-  if (!sourceClaudeJson) return;
+function refreshRuntimeClaudeJson(baseConfigDir, runtimeClaudeJsonPath, sourceClaudeJson = readJsonObject4((0, import_path151.join)((0, import_path151.dirname)(baseConfigDir), ".claude.json")), mcpServersSourceJson = readJsonObject4(getClaudeJsonPathForConfigDir(baseConfigDir))) {
+  if (!sourceClaudeJson && !mcpServersSourceJson) return;
   const runtimeClaudeJson = readJsonObject4(runtimeClaudeJsonPath) ?? {};
   let changed = false;
-  if (sourceClaudeJson.hasCompletedOnboarding === true && runtimeClaudeJson.hasCompletedOnboarding !== true) {
+  if (sourceClaudeJson?.hasCompletedOnboarding === true && runtimeClaudeJson.hasCompletedOnboarding !== true) {
     runtimeClaudeJson.hasCompletedOnboarding = true;
     changed = true;
   }
-  const sourceVersion = sourceClaudeJson.lastOnboardingVersion;
+  const sourceVersion = sourceClaudeJson?.lastOnboardingVersion;
   if (typeof sourceVersion === "string" || typeof sourceVersion === "number") {
     const runtimeHasVersion = hasOwn(runtimeClaudeJson, "lastOnboardingVersion");
     const compared = compareOnboardingVersion(sourceVersion, runtimeClaudeJson.lastOnboardingVersion);
@@ -130573,7 +130682,7 @@ function refreshRuntimeClaudeJson(baseConfigDir, runtimeClaudeJsonPath, sourceCl
       changed = true;
     }
   }
-  if (hasOwn(sourceClaudeJson, "oauthAccount")) {
+  if (sourceClaudeJson && hasOwn(sourceClaudeJson, "oauthAccount")) {
     const sourceAccount = sourceClaudeJson.oauthAccount;
     if (sourceAccount === null || sourceAccount === void 0) {
       if (hasOwn(runtimeClaudeJson, "oauthAccount")) {
@@ -130588,8 +130697,9 @@ function refreshRuntimeClaudeJson(baseConfigDir, runtimeClaudeJsonPath, sourceCl
       changed = true;
     }
   }
-  if (isJsonObject(sourceClaudeJson.mcpServers)) {
-    runtimeClaudeJson.mcpServers = sourceClaudeJson.mcpServers;
+  const sourceMcpServers = mcpServersSourceJson?.mcpServers;
+  if (isJsonObject(sourceMcpServers)) {
+    runtimeClaudeJson.mcpServers = sourceMcpServers;
     changed = true;
   }
   if (changed) {
@@ -130691,11 +130801,13 @@ function prepareOmcLaunchConfigDir(baseConfigDir = getClaudeConfigDir()) {
   const runtimeClaudeJsonPath = (0, import_path151.join)(runtimeConfigDir, ".claude.json");
   const runtimeCredentialsPath = (0, import_path151.join)(runtimeConfigDir, ".credentials.json");
   const sourceClaudeJsonPath = (0, import_path151.join)((0, import_path151.dirname)(baseConfigDir), ".claude.json");
+  const mcpServersSourcePath = getClaudeJsonPathForConfigDir(baseConfigDir);
   const lifecycleLockPath = lockPathFor((0, import_path151.join)(baseConfigDir, ".omc-launch.prepare.lock"));
   return withFileLockSync(lifecycleLockPath, () => {
     const preservedClaudeJson = pathExists(runtimeClaudeJsonPath) ? (0, import_fs126.readFileSync)(runtimeClaudeJsonPath) : null;
     const preservedRuntimeClaudeJson = readJsonObject4(runtimeClaudeJsonPath);
     const sourceClaudeJson = readJsonObject4(sourceClaudeJsonPath);
+    const mcpServersSourceJson = mcpServersSourcePath === sourceClaudeJsonPath ? sourceClaudeJson : readJsonObject4(mcpServersSourcePath);
     reconcileRuntimeCredentials(
       baseConfigDir,
       runtimeCredentialsPath,
@@ -130709,7 +130821,7 @@ function prepareOmcLaunchConfigDir(baseConfigDir = getClaudeConfigDir()) {
       if (preservedClaudeJson) {
         (0, import_fs126.writeFileSync)(nextClaudeJsonPath, preservedClaudeJson);
       }
-      refreshRuntimeClaudeJson(baseConfigDir, nextClaudeJsonPath, sourceClaudeJson);
+      refreshRuntimeClaudeJson(baseConfigDir, nextClaudeJsonPath, sourceClaudeJson, mcpServersSourceJson);
       (0, import_fs126.copyFileSync)(companionPath, (0, import_path151.join)(nextConfigDir, "CLAUDE.md"));
       for (const entry2 of [
         "agents",
@@ -130762,9 +130874,6 @@ function prepareOmcLaunchConfigDir(baseConfigDir = getClaudeConfigDir()) {
     swapRuntimeConfigDir(runtimeConfigDir, nextConfigDir);
     return runtimeConfigDir;
   }, { timeoutMs: 5e3, retryDelayMs: 50 });
-}
-function isDefaultClaudeConfigDirPath2(configDir) {
-  return configDir === (0, import_path151.join)((0, import_os26.homedir)(), ".claude");
 }
 function extractNotifyFlag(args) {
   let notifyEnabled = true;
@@ -131334,7 +131443,7 @@ async function launchCommand(args) {
     process.exit(1);
   }
   const launchConfigDir = prepareOmcLaunchConfigDir();
-  if (isDefaultClaudeConfigDirPath2(launchConfigDir)) {
+  if (isDefaultClaudeConfigDirPath(launchConfigDir)) {
     delete process.env.CLAUDE_CONFIG_DIR;
   } else {
     process.env.CLAUDE_CONFIG_DIR = launchConfigDir;
