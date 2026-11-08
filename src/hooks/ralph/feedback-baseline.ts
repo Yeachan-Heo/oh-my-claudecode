@@ -91,6 +91,12 @@ export interface CommandBaseline {
   signatures: string[];
   /** True when the command could not execute at all (tool missing, suite unrunnable). */
   unrunnable?: boolean;
+  /**
+   * True when the command exceeded the verify timeout. A killed process only
+   * produced partial output, so nothing in it is failure evidence: the
+   * progress lines depend on how long the run lasted, not on what failed.
+   */
+  timedOut?: boolean;
 }
 
 export interface FeedbackBaseline {
@@ -129,6 +135,12 @@ export function diffAgainstBaseline(
     const before = baseline.commands[command];
     if (!before) {
       newSignatures.push(...entry.signatures.map((signature) => `${command}: ${signature}`));
+      continue;
+    }
+    if (entry.timedOut && !before.timedOut) {
+      // The command never finished, so there is no output to compare. Report
+      // the timeout itself instead of fingerprinting a partial run.
+      newSignatures.push(`${command}: <command timed out>`);
       continue;
     }
     if (entry.unrunnable && !before.unrunnable) {

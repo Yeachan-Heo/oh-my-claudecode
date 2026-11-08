@@ -5,15 +5,15 @@
   "provenance": {
     "base": "05c800f40d1ad53b42a78609d2667ef4f726808b",
     "planningHead": "0a91273e61dbbd47eb0af4c02844409251e08398",
-    "head": "14f01806a9a51a2626647a88affc33105d8a9079",
-    "sourceSha256": "7700d73537f36a921ed58e1d7bf93e2aac3ea00c667e105f2ad41a17f58a73e6",
+    "head": "066b43fdbfa3079f261ed9e327b848a8ab42795e",
+    "sourceSha256": "6d44343f1fce78f67886e129d1b234120528bca242ac696e911c92975ee9a096",
     "generatedAt": null,
     "generator": "scripts/generate-inventory-graph.mjs"
   },
   "base": "05c800f40d1ad53b42a78609d2667ef4f726808b",
   "planningHead": "0a91273e61dbbd47eb0af4c02844409251e08398",
-  "head": "14f01806a9a51a2626647a88affc33105d8a9079",
-  "sourceSha256": "7700d73537f36a921ed58e1d7bf93e2aac3ea00c667e105f2ad41a17f58a73e6",
+  "head": "066b43fdbfa3079f261ed9e327b848a8ab42795e",
+  "sourceSha256": "6d44343f1fce78f67886e129d1b234120528bca242ac696e911c92975ee9a096",
   "counts": {
     "public": {
       "skills": 83,
@@ -47054,6 +47054,11 @@
         "path": "tests/integration/issue-4806.test.ts"
       },
       {
+        "id": "tests/integration/issue-4814-ralph-plugin-cli.test.ts",
+        "kind": "other",
+        "path": "tests/integration/issue-4814-ralph-plugin-cli.test.ts"
+      },
+      {
         "id": "tests/integration/jev-active-mode-repro.test.ts",
         "kind": "other",
         "path": "tests/integration/jev-active-mode-repro.test.ts"
@@ -60151,6 +60156,11 @@
         "kind": "imports"
       },
       {
+        "from": "src/cli/__tests__/ralph-afk.test.ts",
+        "to": "src/lib/file-lock.ts",
+        "kind": "imports"
+      },
+      {
         "from": "src/cli/__tests__/self-improve-paths.test.ts",
         "to": "external:node:child_process",
         "kind": "imports"
@@ -61328,6 +61338,11 @@
       {
         "from": "src/cli/commands/ralph.ts",
         "to": "src/hooks/session-end/spawn-next.ts",
+        "kind": "imports"
+      },
+      {
+        "from": "src/cli/commands/ralph.ts",
+        "to": "src/lib/file-lock.ts",
         "kind": "imports"
       },
       {
@@ -89566,6 +89581,46 @@
         "kind": "imports"
       },
       {
+        "from": "tests/integration/issue-4814-ralph-plugin-cli.test.ts",
+        "to": "external:node:child_process",
+        "kind": "imports"
+      },
+      {
+        "from": "tests/integration/issue-4814-ralph-plugin-cli.test.ts",
+        "to": "external:node:fs",
+        "kind": "imports"
+      },
+      {
+        "from": "tests/integration/issue-4814-ralph-plugin-cli.test.ts",
+        "to": "external:node:os",
+        "kind": "imports"
+      },
+      {
+        "from": "tests/integration/issue-4814-ralph-plugin-cli.test.ts",
+        "to": "external:node:path",
+        "kind": "imports"
+      },
+      {
+        "from": "tests/integration/issue-4814-ralph-plugin-cli.test.ts",
+        "to": "external:node:url",
+        "kind": "imports"
+      },
+      {
+        "from": "tests/integration/issue-4814-ralph-plugin-cli.test.ts",
+        "to": "external:vitest",
+        "kind": "imports"
+      },
+      {
+        "from": "tests/integration/issue-4814-ralph-plugin-cli.test.ts",
+        "to": "src/cli/commands/ralph.ts",
+        "kind": "imports"
+      },
+      {
+        "from": "tests/integration/issue-4814-ralph-plugin-cli.test.ts",
+        "to": "src/utils/omc-cli-rendering.ts",
+        "kind": "imports"
+      },
+      {
         "from": "tests/integration/jev-active-mode-repro.test.ts",
         "to": "external:node:child_process",
         "kind": "imports"
@@ -90657,12 +90712,12 @@
       }
     ],
     "stats": {
-      "nodeCount": 8054,
-      "edgeCount": 8672,
-      "importEdgeCount": 7231,
+      "nodeCount": 8055,
+      "edgeCount": 8682,
+      "importEdgeCount": 7241,
       "registerEdgeCount": 104
     }
   },
-  "inventorySha256": "42233718e3a692b51157c3b5ec4b88e1cf8e1465e1d077b9b48982ede697ae85",
-  "manifestSha256": "568d38e883c8727a6c119309b44be2b182aca383992600c14aed55b3ae7fcdbc"
+  "inventorySha256": "6d79739c81ad8461fd0dc3d87f7cc4bac0fee8e7064580b6630f6ee5e7623ea5",
+  "manifestSha256": "9a4a66190ad395756a4368ee0bd15e8e44c1f05b38a29fd66b3cc59e7eb00b73"
 }
