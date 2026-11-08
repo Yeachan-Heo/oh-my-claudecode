@@ -49548,6 +49548,13 @@ var init_keyword_detector = __esm({
       deepsearch: /\b(deepsearch)\b|\bsearch\s+the\s+codebase\b|\bfind\s+in\s+(the\s+)?codebase\b|(딥\s?서치)|(ディープ\s?サーチ)/i,
       analyze: /\b(deep[\s-]?analyze|deepanalyze)\b|(딥\s?분석)|(ディープ\s?アナライズ)/i,
       "deep-interview": /\b(deep[\s-]interview|ouroboros)\b|(딥인터뷰)|(ディープインタビュー)/i,
+      // Script-only triggers: never-match placeholders (script detects them, TypeScript doesn't)
+      ultragoal: /(?!x)x/,
+      // Script-only detection
+      "ai-slop-cleaner": /(?!x)x/,
+      // Script-only detection
+      wiki: /(?!x)x/,
+      // Script-only detection
       codex: /\b(ask|use|delegate\s+to)\s+(codex|gpt)\b/i,
       gemini: /\b(ask|use|delegate\s+to)\s+gemini\b/i,
       cursor: /\b(ask|use|delegate\s+to)\s+cursor\b/i,
@@ -49570,6 +49577,9 @@ var init_keyword_detector = __esm({
       "deepsearch",
       "analyze",
       "deep-interview",
+      "ultragoal",
+      "ai-slop-cleaner",
+      "wiki",
       "codex",
       "gemini",
       "cursor",
@@ -50314,7 +50324,11 @@ function sanitizeUsage(usage) {
   const isCount = (value) => typeof value === "number" && Number.isFinite(value) && value >= 0;
   return isCount(input_tokens) && isCount(output_tokens) ? { input_tokens, output_tokens } : void 0;
 }
-function firstAnswer(response) {
+function firstAnswer(response, questions) {
+  const firstQuestion = Object.keys(questions)[0];
+  if (firstQuestion !== void 0 && Object.hasOwn(response.answers, firstQuestion)) {
+    return response.answers[firstQuestion];
+  }
   return Object.values(response.answers)[0];
 }
 async function writeShadowLog(entry2, logDir) {
@@ -50334,6 +50348,23 @@ function recordFailure(point) {
     runtime.openCircuits.add(point);
     console.error("[jev] " + point + ": circuit open after " + count + " consecutive failures");
   }
+}
+function comparableHeuristic(value, questions) {
+  const question = Object.values(questions)[0];
+  if (!question) return null;
+  switch (question.type) {
+    case "choice":
+      return typeof value === "string" && Object.hasOwn(question.criteria ?? {}, value) ? value : null;
+    case "noul":
+      return typeof value === "boolean" ? value : null;
+    case "score":
+      return typeof value === "number" && Number.isFinite(value) ? value : null;
+    default:
+      return null;
+  }
+}
+function extractHeuristicForLogging(twinResult, questions, mapHeuristic, questionSet) {
+  return comparableHeuristic(mapHeuristic ? mapHeuristic(twinResult, questionSet) : twinResult, questions);
 }
 async function resolveJudgment(resolveJudgmentArgs) {
   const args = resolveJudgmentArgs;
@@ -50372,13 +50403,14 @@ async function resolveJudgment(resolveJudgmentArgs) {
   runtime.requestCount += 1;
   if (mode === "shadow" && args.blocking === false) {
     const heuristic2 = twinAnswer();
+    const loggableHeuristic2 = extractHeuristicForLogging(heuristic2, args.questions, args.mapHeuristic, args.questionSet);
     void attempt.then((outcome2) => {
       if (outcome2.ok) {
         recordSuccess(args.point);
-        void writeShadowLog(buildLogEntry(args.point, boundedState, startedAt, "shadow", heuristic2, firstAnswer(outcome2.response), outcome2.response.usage), config2.logDir);
+        void writeShadowLog(buildLogEntry(args.point, boundedState, startedAt, "shadow", loggableHeuristic2, outcome2.response, args.questions), config2.logDir);
       } else {
         recordFailure(args.point);
-        void writeShadowLog(buildLogEntry(args.point, boundedState, startedAt, "degraded", heuristic2, null), config2.logDir);
+        void writeShadowLog(buildLogEntry(args.point, boundedState, startedAt, "degraded", loggableHeuristic2, null), config2.logDir);
       }
     }).catch(() => {
     });
@@ -50386,15 +50418,16 @@ async function resolveJudgment(resolveJudgmentArgs) {
   }
   if (mode === "active" && args.blocking === false) {
     const heuristic2 = twinAnswer();
+    const loggableHeuristic2 = extractHeuristicForLogging(heuristic2, args.questions, args.mapHeuristic, args.questionSet);
     const outcome2 = await attempt;
     if (!outcome2.ok) {
       recordFailure(args.point);
-      await writeShadowLog(buildLogEntry(args.point, boundedState, startedAt, "degraded", heuristic2, null), config2.logDir);
+      await writeShadowLog(buildLogEntry(args.point, boundedState, startedAt, "degraded", loggableHeuristic2, null), config2.logDir);
       return { answer: heuristic2, source: "twin", mode: "degraded" };
     }
     recordSuccess(args.point);
-    const jevAnswer2 = firstAnswer(outcome2.response);
-    await writeShadowLog(buildLogEntry(args.point, boundedState, startedAt, "active", heuristic2, jevAnswer2, outcome2.response.usage), config2.logDir);
+    const jevAnswer2 = firstAnswer(outcome2.response, args.questions);
+    await writeShadowLog(buildLogEntry(args.point, boundedState, startedAt, "active", loggableHeuristic2, outcome2.response, args.questions), config2.logDir);
     const answer = args.mapAnswer ? args.mapAnswer(jevAnswer2) : jevAnswer2;
     return { answer, source: "jev", mode: "active" };
   }
@@ -50403,21 +50436,24 @@ async function resolveJudgment(resolveJudgmentArgs) {
     recordFailure(args.point);
     console.error("[jev] " + args.point + ": degraded - " + outcome.error);
     const heuristic2 = twinAnswer();
-    await writeShadowLog(buildLogEntry(args.point, boundedState, startedAt, "degraded", heuristic2, null), config2.logDir);
+    const loggableHeuristic2 = extractHeuristicForLogging(heuristic2, args.questions, args.mapHeuristic, args.questionSet);
+    await writeShadowLog(buildLogEntry(args.point, boundedState, startedAt, "degraded", loggableHeuristic2, null), config2.logDir);
     return { answer: heuristic2, source: "twin", mode: "degraded" };
   }
   recordSuccess(args.point);
   const heuristic = twinAnswer();
-  const jevAnswer = firstAnswer(outcome.response);
-  await writeShadowLog(buildLogEntry(args.point, boundedState, startedAt, mode === "active" ? "active" : "shadow", heuristic, jevAnswer, outcome.response.usage), config2.logDir);
+  const loggableHeuristic = extractHeuristicForLogging(heuristic, args.questions, args.mapHeuristic, args.questionSet);
+  const jevAnswer = firstAnswer(outcome.response, args.questions);
+  await writeShadowLog(buildLogEntry(args.point, boundedState, startedAt, mode === "active" ? "active" : "shadow", loggableHeuristic, outcome.response, args.questions), config2.logDir);
   if (mode === "active") {
     const answer = args.mapAnswer ? args.mapAnswer(jevAnswer) : jevAnswer;
     return { answer, source: "jev", mode: "active" };
   }
   return { answer: heuristic, source: "twin", mode: "shadow" };
 }
-function buildLogEntry(point, boundedState, startedAt, entryMode, heuristic, jev, usage) {
-  const safeUsage = sanitizeUsage(usage);
+function buildLogEntry(point, boundedState, startedAt, entryMode, heuristic, response, questions) {
+  const jev = response ? firstAnswer(response, questions ?? {}) : null;
+  const safeUsage = sanitizeUsage(response?.usage);
   return {
     ts: (/* @__PURE__ */ new Date()).toISOString(),
     point,
@@ -50425,6 +50461,7 @@ function buildLogEntry(point, boundedState, startedAt, entryMode, heuristic, jev
     state: boundedState,
     heuristic,
     jev,
+    answers: response ? response.answers : null,
     confidence: jev?.confidence,
     durationMs: Date.now() - startedAt,
     ...safeUsage ? { usage: safeUsage } : {}
@@ -50453,7 +50490,7 @@ function skillTriggerCriteria() {
   const priority = Array.isArray(KEYWORD_PRIORITY) ? KEYWORD_PRIORITY : [];
   return {
     ...Object.fromEntries(
-      priority.filter((type) => type !== "team").slice(0, 12).map((type) => [type, `The prompt explicitly invokes the ${type} trigger.`])
+      priority.filter((type) => type !== "team").map((type) => [type, `The prompt explicitly invokes the ${type} trigger.`])
     ),
     none: "No trigger fires; handle the prompt without a mode or skill."
   };
@@ -50492,6 +50529,8 @@ function recordJudgment(pointName, call) {
     questions: typeof questions === "function" ? questions() : questions,
     twin: call.twin,
     mapAnswer: call.mapAnswer,
+    mapHeuristic: call.mapHeuristic,
+    questionSet,
     blocking: point.blocking,
     fetchFn: call.fetchFn
   });
@@ -50539,6 +50578,16 @@ var init_points = __esm({
           haiku: "Quick lookups and lightweight, mechanical work",
           sonnet: "Standard coding and orchestration work",
           opus: "Complex architecture and deep analysis"
+        }
+      },
+      effort: {
+        type: "score",
+        instructions: "How much reasoning effort does this delegated task need?",
+        criteria: {
+          trivial: "Trivial: the answer or action is obvious, no thinking needed",
+          some: "Some thought: a few straightforward steps",
+          careful: "Careful multi-step reasoning: several dependent steps or things to check",
+          deep: "Deep reasoning: many tradeoffs, hidden pitfalls, or easy to get subtly wrong"
         }
       }
     };
@@ -54987,6 +55036,7 @@ async function applyRalphVerdictShadow(args) {
       critic_mode: args.criticMode ?? null
     },
     twin: () => verdict,
+    mapHeuristic: (result2, questionSet) => result2,
     mapAnswer: (answer) => {
       return answer.noul === true;
     },
@@ -55028,17 +55078,25 @@ async function applyLoopContinuationShadow(args) {
       return result;
     }
   };
+  const mapHeuristicForLoopContinuation = (r, questionSet) => {
+    if (questionSet === 1) {
+      return null;
+    }
+    return r.shouldBlock ? false : null;
+  };
   const results = await Promise.all([
     recordJudgment("loop-continuation", {
       state,
       twin: () => result,
       mapAnswer: mapTaskCompletionAnswer,
+      mapHeuristic: mapHeuristicForLoopContinuation,
       fetchFn: args.fetchFn
     }),
     recordJudgment("loop-continuation", {
       state,
       twin: () => result,
       questionSet: 1,
+      mapHeuristic: mapHeuristicForLoopContinuation,
       fetchFn: args.fetchFn
     })
   ]);
@@ -71517,6 +71575,7 @@ __export(tmux_session_exports, {
   getWorkerLiveness: () => getWorkerLiveness,
   injectToLeaderPane: () => injectToLeaderPane,
   invokeDirectMailboxEffect: () => invokeDirectMailboxEffect,
+  isCmuxSurfaceTarget: () => isCmuxSurfaceTarget,
   isPosixTmuxSession: () => isPosixTmuxSession,
   isSessionAlive: () => isSessionAlive,
   isUnixLikeOnWindows: () => isUnixLikeOnWindows2,
@@ -71975,7 +72034,11 @@ function isCmuxContext() {
   return detectTeamMultiplexerContext() === "cmux";
 }
 function isCmuxSurfaceTarget(value) {
-  return typeof value === "string" && value.trim().length > 0 && !value.trim().startsWith("%");
+  if (typeof value !== "string") return false;
+  const trimmed = value.trim();
+  if (trimmed.length === 0 || trimmed.startsWith("%")) return false;
+  if (/^w[0-9A-Za-z]+:p[0-9A-Za-z]+$/.test(trimmed)) return false;
+  return isCmuxContext();
 }
 async function cmuxExecAsync(args) {
   const result = await execFileAsync5("cmux", args, { encoding: "utf-8" });
@@ -87503,6 +87566,7 @@ function recordSimplifierTriggerShadow(args) {
       source: "code-simplifier-stop"
     },
     twin: () => computeSimplifierTriggerTwin(args.stateDir, args.files),
+    mapHeuristic: (result, questionSet) => result,
     mapAnswer: (answer) => {
       return answer.noul === true;
     },
@@ -116137,6 +116201,7 @@ function recordSkillTriggerShadow(prompt, fetchFn) {
   return recordJudgment("skill-trigger", {
     state: { prompt, source: "user-prompt-submit" },
     twin: () => getAllKeywords(prompt),
+    mapHeuristic: (keywords, questionSet) => keywords.length > 0 ? keywords[0] : "none",
     mapAnswer: (answer) => {
       const choice = answer.choice?.toLowerCase();
       if (choice === "none" || !choice) return [];
@@ -116150,6 +116215,7 @@ function recordIntentShadow(prompt, fetchFn) {
   return recordJudgment("intent", {
     state: { prompt, mode_name: "intent" },
     twin: () => INTENT_SLASH_PATTERN.test(prompt),
+    mapHeuristic: (result, questionSet) => result,
     mapAnswer: (answer) => {
       return answer.noul === true;
     },
@@ -116164,6 +116230,7 @@ function recordTaskSizeShadow(prompt, fetchFn) {
   return recordJudgment("task-size", {
     state: { prompt, source: "user-prompt-submit" },
     twin: () => classifyTaskSize(prompt),
+    mapHeuristic: (result, questionSet) => result.size,
     mapAnswer: (answer) => {
       const choice = answer.choice?.toLowerCase();
       const sizeMap = {
@@ -120794,6 +120861,13 @@ var CLAUDE_DEFAULT_CONTEXT_LIMIT = process.env.ANTHROPIC_1M_CONTEXT === "true" |
 
 // src/hooks/preemptive-compaction/jev-shadow.ts
 init_jev();
+var CONTEXT_PRUNING_POINT = "context-pruning";
+function readStalenessLabels() {
+  const questions = getJudgmentPoint(CONTEXT_PRUNING_POINT).questions[0];
+  const resolved = typeof questions === "function" ? questions() : questions;
+  return Object.keys(resolved.staleness?.criteria ?? {});
+}
+var STALENESS_LABELS = readStalenessLabels();
 
 // src/hooks/preemptive-compaction/index.ts
 var DEBUG4 = process.env.PREEMPTIVE_COMPACTION_DEBUG === "1";
@@ -124485,6 +124559,10 @@ var FEEDBACK_BASELINE_FILENAME = "feedback-baseline.json";
 var MAX_SIGNATURES_PER_COMMAND = 200;
 var ANSI_PATTERN = /\x1b\[[0-9;]*m/g;
 var VOLATILE_PATTERNS = [
+  // Pytest's wall-clock parenthesized duration, e.g. "... in 194.32s (0:03:14)".
+  // Anchored to the "in <duration>" suffix so clock-shaped assertion values
+  // (e.g. assert '(12:15)' == '(12:16)') keep their failure signal.
+  /(?<=\bin \d+(?:\.\d+)?s\s)\(\d+:\d{2}(?::\d{2})?(?:\.\d+)?\)/g,
   /\b\d+(?:\.\d+)?\s*(?:ms|s|sec|secs|seconds)\b/gi,
   /\bduration_ms\s*:?\s*\d+(?:\.\d+)?\b/gi,
   /\bduration\s*:?\s*\d+(?:\.\d+)?\b/gi,
@@ -124502,6 +124580,9 @@ function signatureLines(output) {
     line = line.replace(/\s+/g, " ").trim();
     if (!line || line.length > 500) continue;
     if (/^(running|collecting|compiling|building|passing|tap\s+version|✓|√|%|\s*at\s)/i.test(line) && !/fail|error|✗|×/i.test(line)) continue;
+    if (/^[.sxX]+(?:\s*\[\s*\d+%\]\s*)?$/.test(line)) continue;
+    if (/^\d+ passed(?:, \d+ (?:warnings?|skipped|xfailed|xpassed|deselected))* in <v>(?: <v>)*(?: \([^)]*\))?$/.test(line)) continue;
+    if (/^Start at \d{2}:\d{2}:\d{2}$/.test(line)) continue;
     if (/^#\s*(?:pass|tests?|skipped|cancelled|todo)\s+\d+\s*$/.test(line)) continue;
     if (/^#\s*fail\s+0\s*$/.test(line)) continue;
     if (/^#\s*<v>\s*(<v>\s*)*$/.test(line)) continue;

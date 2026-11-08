@@ -8743,6 +8743,7 @@ __export(tmux_session_exports, {
   getWorkerLiveness: () => getWorkerLiveness,
   injectToLeaderPane: () => injectToLeaderPane,
   invokeDirectMailboxEffect: () => invokeDirectMailboxEffect,
+  isCmuxSurfaceTarget: () => isCmuxSurfaceTarget,
   isPosixTmuxSession: () => isPosixTmuxSession,
   isSessionAlive: () => isSessionAlive,
   isUnixLikeOnWindows: () => isUnixLikeOnWindows2,
@@ -9207,7 +9208,11 @@ function isCmuxContext() {
   return detectTeamMultiplexerContext() === "cmux";
 }
 function isCmuxSurfaceTarget(value) {
-  return typeof value === "string" && value.trim().length > 0 && !value.trim().startsWith("%");
+  if (typeof value !== "string") return false;
+  const trimmed = value.trim();
+  if (trimmed.length === 0 || trimmed.startsWith("%")) return false;
+  if (/^w[0-9A-Za-z]+:p[0-9A-Za-z]+$/.test(trimmed)) return false;
+  return isCmuxContext();
 }
 async function cmuxExecAsync(args) {
   const result = await execFileAsync2("cmux", args, { encoding: "utf-8" });
@@ -14856,6 +14861,9 @@ var init_keyword_detector = __esm({
       "deepsearch",
       "analyze",
       "deep-interview",
+      "ultragoal",
+      "ai-slop-cleaner",
+      "wiki",
       "codex",
       "gemini",
       "cursor",
@@ -14886,7 +14894,7 @@ function skillTriggerCriteria() {
   const priority = Array.isArray(KEYWORD_PRIORITY) ? KEYWORD_PRIORITY : [];
   return {
     ...Object.fromEntries(
-      priority.filter((type) => type !== "team").slice(0, 12).map((type) => [type, `The prompt explicitly invokes the ${type} trigger.`])
+      priority.filter((type) => type !== "team").map((type) => [type, `The prompt explicitly invokes the ${type} trigger.`])
     ),
     none: "No trigger fires; handle the prompt without a mode or skill."
   };
@@ -14950,6 +14958,16 @@ var init_points = __esm({
           haiku: "Quick lookups and lightweight, mechanical work",
           sonnet: "Standard coding and orchestration work",
           opus: "Complex architecture and deep analysis"
+        }
+      },
+      effort: {
+        type: "score",
+        instructions: "How much reasoning effort does this delegated task need?",
+        criteria: {
+          trivial: "Trivial: the answer or action is obvious, no thinking needed",
+          some: "Some thought: a few straightforward steps",
+          careful: "Careful multi-step reasoning: several dependent steps or things to check",
+          deep: "Deep reasoning: many tradeoffs, hidden pitfalls, or easy to get subtly wrong"
         }
       }
     };
