@@ -5,15 +5,15 @@
   "provenance": {
     "base": "05c800f40d1ad53b42a78609d2667ef4f726808b",
     "planningHead": "0a91273e61dbbd47eb0af4c02844409251e08398",
-    "head": "27008098cfc9089bd671127a1654a666ba23a176",
-    "sourceSha256": "37d603580bc34083ca14c772b10c73ad37e5e0959769ab752741889983668c71",
+    "head": "416a45a5466e6174bf61c0c877663af422a526cd",
+    "sourceSha256": "c7fc45c1d4b3c9c34eb1f5be060684daa0c753e86fcfbb3d29840529962d4acf",
     "generatedAt": null,
     "generator": "scripts/generate-inventory-graph.mjs"
   },
   "base": "05c800f40d1ad53b42a78609d2667ef4f726808b",
   "planningHead": "0a91273e61dbbd47eb0af4c02844409251e08398",
-  "head": "27008098cfc9089bd671127a1654a666ba23a176",
-  "sourceSha256": "37d603580bc34083ca14c772b10c73ad37e5e0959769ab752741889983668c71",
+  "head": "416a45a5466e6174bf61c0c877663af422a526cd",
+  "sourceSha256": "c7fc45c1d4b3c9c34eb1f5be060684daa0c753e86fcfbb3d29840529962d4acf",
   "counts": {
     "public": {
       "skills": 84,
@@ -32,9 +32,9 @@
       "total": 1466
     },
     "generated": {
-      "distFiles": 5627,
+      "distFiles": 5639,
       "bridgeFiles": 8,
-      "total": 5635
+      "total": 5647
     },
     "prompt": {
       "promptLikeFiles": 63
@@ -2349,6 +2349,10 @@
       "dist/cli/__tests__/ralph-afk.test.d.ts.map",
       "dist/cli/__tests__/ralph-afk.test.js",
       "dist/cli/__tests__/ralph-afk.test.js.map",
+      "dist/cli/__tests__/ralph-closeout.test.d.ts",
+      "dist/cli/__tests__/ralph-closeout.test.d.ts.map",
+      "dist/cli/__tests__/ralph-closeout.test.js",
+      "dist/cli/__tests__/ralph-closeout.test.js.map",
       "dist/cli/__tests__/self-improve-paths.test.d.ts",
       "dist/cli/__tests__/self-improve-paths.test.d.ts.map",
       "dist/cli/__tests__/self-improve-paths.test.js",
@@ -4014,6 +4018,10 @@
       "dist/hooks/prompt-prerequisites/index.d.ts.map",
       "dist/hooks/prompt-prerequisites/index.js",
       "dist/hooks/prompt-prerequisites/index.js.map",
+      "dist/hooks/ralph/__tests__/closeout.test.d.ts",
+      "dist/hooks/ralph/__tests__/closeout.test.d.ts.map",
+      "dist/hooks/ralph/__tests__/closeout.test.js",
+      "dist/hooks/ralph/__tests__/closeout.test.js.map",
       "dist/hooks/ralph/__tests__/feedback-baseline.test.d.ts",
       "dist/hooks/ralph/__tests__/feedback-baseline.test.d.ts.map",
       "dist/hooks/ralph/__tests__/feedback-baseline.test.js",
@@ -4026,6 +4034,10 @@
       "dist/hooks/ralph/__tests__/prd-read.test.d.ts.map",
       "dist/hooks/ralph/__tests__/prd-read.test.js",
       "dist/hooks/ralph/__tests__/prd-read.test.js.map",
+      "dist/hooks/ralph/closeout.d.ts",
+      "dist/hooks/ralph/closeout.d.ts.map",
+      "dist/hooks/ralph/closeout.js",
+      "dist/hooks/ralph/closeout.js.map",
       "dist/hooks/ralph/feedback-baseline.d.ts",
       "dist/hooks/ralph/feedback-baseline.d.ts.map",
       "dist/hooks/ralph/feedback-baseline.js",
@@ -15025,6 +15037,26 @@
         "path": "dist/cli/__tests__/ralph-afk.test.js.map"
       },
       {
+        "id": "dist/cli/__tests__/ralph-closeout.test.d.ts",
+        "kind": "generated-dist",
+        "path": "dist/cli/__tests__/ralph-closeout.test.d.ts"
+      },
+      {
+        "id": "dist/cli/__tests__/ralph-closeout.test.d.ts.map",
+        "kind": "generated-dist",
+        "path": "dist/cli/__tests__/ralph-closeout.test.d.ts.map"
+      },
+      {
+        "id": "dist/cli/__tests__/ralph-closeout.test.js",
+        "kind": "generated-dist",
+        "path": "dist/cli/__tests__/ralph-closeout.test.js"
+      },
+      {
+        "id": "dist/cli/__tests__/ralph-closeout.test.js.map",
+        "kind": "generated-dist",
+        "path": "dist/cli/__tests__/ralph-closeout.test.js.map"
+      },
+      {
         "id": "dist/cli/__tests__/self-improve-paths.test.d.ts",
         "kind": "generated-dist",
         "path": "dist/cli/__tests__/self-improve-paths.test.d.ts"
@@ -23350,6 +23382,26 @@
         "path": "dist/hooks/prompt-prerequisites/index.js.map"
       },
       {
+        "id": "dist/hooks/ralph/__tests__/closeout.test.d.ts",
+        "kind": "generated-dist",
+        "path": "dist/hooks/ralph/__tests__/closeout.test.d.ts"
+      },
+      {
+        "id": "dist/hooks/ralph/__tests__/closeout.test.d.ts.map",
+        "kind": "generated-dist",
+        "path": "dist/hooks/ralph/__tests__/closeout.test.d.ts.map"
+      },
+      {
+        "id": "dist/hooks/ralph/__tests__/closeout.test.js",
+        "kind": "generated-dist",
+        "path": "dist/hooks/ralph/__tests__/closeout.test.js"
+      },
+      {
+        "id": "dist/hooks/ralph/__tests__/closeout.test.js.map",
+        "kind": "generated-dist",
+        "path": "dist/hooks/ralph/__tests__/closeout.test.js.map"
+      },
+      {
         "id": "dist/hooks/ralph/__tests__/feedback-baseline.test.d.ts",
         "kind": "generated-dist",
         "path": "dist/hooks/ralph/__tests__/feedback-baseline.test.d.ts"
@@ -23408,6 +23460,26 @@
         "id": "dist/hooks/ralph/__tests__/prd-read.test.js.map",
         "kind": "generated-dist",
         "path": "dist/hooks/ralph/__tests__/prd-read.test.js.map"
+      },
+      {
+        "id": "dist/hooks/ralph/closeout.d.ts",
+        "kind": "generated-dist",
+        "path": "dist/hooks/ralph/closeout.d.ts"
+      },
+      {
+        "id": "dist/hooks/ralph/closeout.d.ts.map",
+        "kind": "generated-dist",
+        "path": "dist/hooks/ralph/closeout.d.ts.map"
+      },
+      {
+        "id": "dist/hooks/ralph/closeout.js",
+        "kind": "generated-dist",
+        "path": "dist/hooks/ralph/closeout.js"
+      },
+      {
+        "id": "dist/hooks/ralph/closeout.js.map",
+        "kind": "generated-dist",
+        "path": "dist/hooks/ralph/closeout.js.map"
       },
       {
         "id": "dist/hooks/ralph/feedback-baseline.d.ts",
@@ -91838,12 +91910,12 @@
       }
     ],
     "stats": {
-      "nodeCount": 8222,
+      "nodeCount": 8234,
       "edgeCount": 8708,
       "importEdgeCount": 7265,
       "registerEdgeCount": 105
     }
   },
   "inventorySha256": "5a4dc84bd3dd449ace559e4ff1ddeeda55de849ca1379845600c5d9f963582bb",
-  "manifestSha256": "dba6b4f8f5fdefb71582d339cc53c2e4fe88508333638605a1b72f3b2c50931b"
+  "manifestSha256": "d07359b6358ee9455d23de4af4aea448a799eb7a9d3fcecddc8a00e1e8b25cf5"
 }
