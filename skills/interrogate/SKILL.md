@@ -40,7 +40,9 @@ attack those first.
 
 Spawn three reviewers in one message, in the background, each read-only:
 
-- seat the panel for model diversity: read `team.roleRouting` from the
+- seat the panel as a diverse-model panel — different provider families
+  find different defect classes, and agreement across them is high-signal.
+  Read `team.roleRouting` from the
   project config (`.claude/omc.jsonc`) or the user config
   (`claude-omc/config.jsonc`; `omc config` prints the effective values) and
   collect up to three distinct provider families in canonical role order,
