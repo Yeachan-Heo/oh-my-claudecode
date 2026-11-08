@@ -486,7 +486,9 @@ export function evaluateCloseoutGate(directory: string, stateRoot: string, sessi
   const prdPath = findPrdPath(directory, sessionId || undefined);
   if (!prdPath) return { required: false, satisfied: true, criteriaRevision: null, deslop: null };
   const { prd } = readPrdFromPath(prdPath);
-  if (!prd || !getPrdStatus(prd).allComplete) {
+  // A PRD with no stories has finished nothing, so there is nothing to close
+  // out (verify on a story-less PRD only judges feedback).
+  if (!prd || prd.userStories.length === 0 || !getPrdStatus(prd).allComplete) {
     return { required: false, satisfied: true, criteriaRevision: null, deslop: null };
   }
   const criteriaRevision = getPrdGoverningCriteriaRevision(prd);
