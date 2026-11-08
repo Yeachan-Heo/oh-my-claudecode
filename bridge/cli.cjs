@@ -124925,12 +124925,9 @@ var VOLATILE_PATTERNS = [
   // The process id in Node's warning prefix, "(node:12345) [DEP0040] DeprecationWarning: ...", differs on every run.
   // Only an id followed by an optional [code] and a "Name:" is replaced, so "(node:42) ready" in an assertion keeps its signal.
   /(?<=\(node:)\d+(?=\) (?:\[[^\]]+\] )?\w+:)/g,
-<<<<<<< HEAD
   // macOS per-user temp dirs (os.tmpdir()) are handled by
   // normalizeMacosTempPaths(): only the mkdtemp-style random segment is
   // replaced so stable suffixes (file:line:column) still distinguish failures.
-=======
->>>>>>> clean-release
   /\b[0-9a-f]{8,}\b/gi
 ];
 var MACOS_TEMP_PATH_PATTERN = /(?:\/private)?\/var\/folders\/[^/\s"']+\/[^/\s"']+\/T((?:\/[^/\s"']*)*)/g;
@@ -124962,7 +124959,6 @@ function signatureLines(output) {
     line = normalizeMacosTempPaths(line);
     line = line.replace(/\s+/g, " ").trim();
     if (!line || line.length > 500) continue;
-<<<<<<< HEAD
     if ((/^(?:\[[^\]]*\]\s*)*(?:<v>\s+)?(?:TRACE|DEBUG|INFO|NOTICE)\b/i.test(line) || /^\[(?:TRACE|DEBUG|INFO|NOTICE)\]/i.test(line)) && !FAILURE_WORD_PATTERN.test(line)) continue;
     if (/^(?:npm|yarn|pnpm)\s+warn\b/i.test(line)) continue;
     if (/^>\s+\S+@\S+/.test(line)) continue;
@@ -124972,9 +124968,6 @@ function signatureLines(output) {
     if (/^\d+\|\s/.test(line) || /^\|\s*\^/.test(line)) continue;
     if (/^(?:✓|√)/.test(line)) continue;
     if (/^(running|collecting|compiling|building|passing|tap\s+version|%|\s*at\s)/i.test(line) && !FAILURE_WORD_PATTERN.test(line)) continue;
-=======
-    if (/^(running|collecting|compiling|building|passing|tap\s+version|✓|√|%|\s*at\s)/i.test(line) && !/fail|error|✗|×/i.test(line)) continue;
->>>>>>> clean-release
     if (/^[.sxX]+(?:\s*\[\s*\d+%\]\s*)?$/.test(line)) continue;
     if (/^\d+ passed(?:, \d+ (?:warnings?|skipped|xfailed|xpassed|deselected))* in <v>(?: <v>)*(?: \([^)]*\))?$/.test(line)) continue;
     if (/^Start at \d{2}:\d{2}:\d{2}$/.test(line)) continue;
