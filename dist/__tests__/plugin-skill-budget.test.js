@@ -66,6 +66,7 @@ describe('plugin skill context budget gate (issues #2943, #2986)', () => {
                 const source = readFileSync(join(SKILLS_DIR, skillDir, 'SKILL.md'), 'utf-8');
                 expect(Buffer.byteLength(shim), `${skillDir} compact shim size`).toBeLessThan(COMPACT_PLUGIN_SKILL_PER_FILE_BUDGET_BYTES);
                 expect(shim, `${skillDir} shim should point to archived body`).toContain(`../../skill-bodies/${skillDir}/SKILL.md`);
+                expect(shim, `${skillDir} shim should instruct native loaders`).toContain('Read and follow the full skill body at');
                 expect(shim, `${skillDir} shim should expose runtime body override`).toContain('omc-full-body:');
                 expect(shim, `${skillDir} shim should prefer plugin root env vars`).toContain(`\${CLAUDE_PLUGIN_ROOT:-\${OMC_PLUGIN_ROOT}}/skill-bodies/${skillDir}/SKILL.md`);
                 expect(shim, `${skillDir} shim should define plugin root by containing directories`).toContain('The plugin root is the directory containing both `skills/` and `skill-bodies/`.');

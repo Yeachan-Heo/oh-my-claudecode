@@ -15,7 +15,7 @@
 import { appendFile, mkdir } from 'node:fs/promises';
 import { join } from 'node:path';
 import { queryJev } from './client.js';
-import { ACTIVATED_POINTS, boundExcerpts, parseJevConfig, pointState } from './config.js';
+import { ACTIVATED_POINTS, boundExcerpts, excerptCharsFor, parseJevConfig, pointState } from './config.js';
 const CIRCUIT_FAILURE_THRESHOLD = 3;
 const runtime = {
     requestCount: 0,
@@ -125,12 +125,12 @@ export async function resolveJudgment(resolveJudgmentArgs) {
     if (config.maxRequests > 0 && runtime.requestCount >= config.maxRequests) {
         return { answer: twinAnswer(), source: 'twin', mode: 'cap' };
     }
-    const boundedState = boundExcerpts(args.state, config.excerptChars);
-    const boundedQuestions = boundExcerpts(args.questions, config.excerptChars);
+    // Only the state carries user text; question definitions are static (they must never embed user text) and go out whole.
+    const boundedState = boundExcerpts(args.state, excerptCharsFor(args.point, config));
     const startedAt = Date.now();
     const attempt = (async () => {
         try {
-            return { ok: true, response: await queryJev(boundedState, boundedQuestions, {
+            return { ok: true, response: await queryJev(boundedState, args.questions, {
                     endpoint: config.endpoint,
                     apiKey: config.apiKey,
                     timeoutMs: config.timeoutMs,

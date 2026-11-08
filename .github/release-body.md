@@ -1,6 +1,8 @@
-# oh-my-claudecode v5.7.31: let model-routing choose
+# oh-my-claudecode v5.7.32
 
 ## Release Notes
+
+⚠️ **Note:** v5.7.31 was never published. This release (v5.7.32) contains all improvements from v5.7.31, with fixes for broken generated-artifact authorization tests and merged main→dev history.
 
 Release with **1 new feature**, **11 bug fixes**, **8 other changes** across **23 merged PRs**.
 
@@ -53,7 +55,7 @@ The npm CLI and the Claude Code marketplace/plugin are separate install tracks, 
 **CLI / runtime:**
 
 ```bash
-npm install -g oh-my-claude-sisyphus@5.7.31
+npm install -g oh-my-claude-sisyphus@5.7.32
 ```
 
 **Claude Code plugin:**
@@ -62,4 +64,4 @@ npm install -g oh-my-claude-sisyphus@5.7.31
 /plugin marketplace update omc
 ```
 
-**Full Changelog**: https://github.com/Yeachan-Heo/oh-my-claudecode/compare/v5.7.30...v5.7.31
+**Full Changelog**: https://github.com/Yeachan-Heo/oh-my-claudecode/compare/v5.7.30...v5.7.32
