@@ -1,6 +1,6 @@
 ---
 name: sdd
-description: Spec-Driven Development, lite by default. Interview, then spec with testable acceptance criteria, then a short plan, then test-first execution with checkpoints. Use when the user types /sdd or asks to work spec-driven. `/sdd full` runs the 6-phase pipeline in phases/ instead.
+description: Spec-Driven Development. Interview → spec with acceptance criteria → plan → test-first execution. `/sdd full` runs the 6-phase pipeline instead.
 level: 3
 ---
 

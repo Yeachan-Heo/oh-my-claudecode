@@ -15,9 +15,21 @@ Ralph is a PRD-driven persistence loop that keeps working on a task until ALL us
 <Precondition_Feedback_Gate>
 NON-NEGOTIABLE, runs before any story work and at every verification gate:
 
+0. Resolve the CLI once per run. An `omc ralph afk` session exports
+   `OMC_RALPH_AFK_FEEDBACK` and grants only the bare `Bash(omc ralph verify:*)`
+   form, so use `omc` directly there — do not run a discovery probe, it is not
+   granted and is denied in headless mode. Everywhere else use `omc` when it is
+   on PATH; on a plugin-only install there is no `omc`, so use the plugin-shaped
+   form `node "$CLAUDE_PLUGIN_ROOT"/bridge/cli.cjs` — the same prefix OMC's own
+   skill renderer emits, and the same fallback `ultragoal` and `cancel` already
+   document. Every `omc ralph verify` below means the resolved command. If
+   neither form is available, STOP and report the failure — do not fall back to
+   hand-rolled judgment.
+
 1. FIRST ITERATION, before picking a story: run `omc ralph verify --write-baseline --session <sessionId>` (session id: read OMC_SESSION_ID if set — `omc ralph afk` exports it — else the one in the Ralph continuation context / active PRD path; use the SAME id for every call in this run). This records the feedback baseline. If the command is unavailable or denied, STOP and report the failure — do not fall back to hand-rolled judgment.
-2. EVERY verification gate (story verification, post-deslop re-verification): run `omc ralph verify --session <sessionId>` and obey the exit code — 0 = pass (baseline-only failures are recorded warnings, never a story failure), 1 = new failures to fix.
+2. EVERY verification gate (story verification, post-deslop re-verification): run `omc ralph verify --session <sessionId>` and obey the exit code — 0 = pass (baseline-only failures are recorded warnings, never a story failure), 1 = new failures to fix. Two infrastructure causes also exit 1 and are printed on their own lines: `timed out` (the command exceeded its per-command budget; partial output is discarded) and `another verify is running` (runs for one session are serialized). Neither is a story failure: retry after the other run finishes, or raise the budget with `--timeout <seconds>` (or `OMC_RALPH_VERIFY_TIMEOUT_SECONDS`) when the suite legitimately needs more than 600 s.
 3. NEVER hand-roll the feedback diff (running the suite yourself and eyeballing the output is exactly the failure mode this gate exists to prevent).
+4. NEVER re-record the baseline to make a gate pass. A re-record turns every regression introduced since the previous one into baseline-only noise. If the gate cannot run for an infrastructure reason, report it as a blocker in the Step 8 closeout instead.
 </Precondition_Feedback_Gate>
 
 
