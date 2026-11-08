@@ -134,6 +134,19 @@ function reschedulePendingWorker(payload, job) {
             : 250;
     setTimeout(() => { void processSessionEndWorker(payload); }, delay);
 }
+/** An ownerless job whose claim is refused by a still-bounded runner gets one retry once every such runner deadline has passed. */
+function retryAfterBoundedRunners(payload, job) {
+    if (!job || job.owner || job.phase === 'complete')
+        return;
+    const now = Date.now();
+    const deadlines = Object.values(job.actions)
+        .filter(action => action.status === 'claimed' && action.runner && action.runner.phase !== 'terminal')
+        .map(action => Date.parse(action.runner.deadlineAt))
+        .filter(deadline => deadline > now);
+    if (deadlines.length === 0)
+        return;
+    setTimeout(() => { void processSessionEndWorker(payload); }, Math.max(...deadlines) - now + 1);
+}
 export async function processSessionEndWorker(payload) {
     const deadlineAt = Date.now() + MAX_WORKER_MS;
     const nonce = randomUUID();
@@ -145,8 +158,10 @@ export async function processSessionEndWorker(payload) {
         await reapIfProvenStale(payload, deadlineAt);
         claimed = claimSessionEndJob(payload.directory, payload.sessionId, nonce, identity, deadlineAt);
     }
-    if (!claimed || !claimed.owner)
+    if (!claimed || !claimed.owner) {
+        retryAfterBoundedRunners(payload, readSessionEndJob(payload.directory, payload.sessionId));
         return;
+    }
     let admitted = readSessionEndJob(payload.directory, payload.sessionId);
     const graceExpired = admitted ? Date.now() >= Date.parse(admitted.producerGraceExpiresAt) : false;
     if (admitted && graceExpired) {

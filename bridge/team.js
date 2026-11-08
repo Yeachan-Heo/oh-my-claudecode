@@ -8743,6 +8743,7 @@ __export(tmux_session_exports, {
   getWorkerLiveness: () => getWorkerLiveness,
   injectToLeaderPane: () => injectToLeaderPane,
   invokeDirectMailboxEffect: () => invokeDirectMailboxEffect,
+  isCmuxSurfaceTarget: () => isCmuxSurfaceTarget,
   isPosixTmuxSession: () => isPosixTmuxSession,
   isSessionAlive: () => isSessionAlive,
   isUnixLikeOnWindows: () => isUnixLikeOnWindows2,
@@ -9207,7 +9208,11 @@ function isCmuxContext() {
   return detectTeamMultiplexerContext() === "cmux";
 }
 function isCmuxSurfaceTarget(value) {
-  return typeof value === "string" && value.trim().length > 0 && !value.trim().startsWith("%");
+  if (typeof value !== "string") return false;
+  const trimmed = value.trim();
+  if (trimmed.length === 0 || trimmed.startsWith("%")) return false;
+  if (/^w[0-9A-Za-z]+:p[0-9A-Za-z]+$/.test(trimmed)) return false;
+  return isCmuxContext();
 }
 async function cmuxExecAsync(args) {
   const result = await execFileAsync2("cmux", args, { encoding: "utf-8" });
@@ -14856,6 +14861,9 @@ var init_keyword_detector = __esm({
       "deepsearch",
       "analyze",
       "deep-interview",
+      "ultragoal",
+      "ai-slop-cleaner",
+      "wiki",
       "codex",
       "gemini",
       "cursor",
@@ -14886,7 +14894,7 @@ function skillTriggerCriteria() {
   const priority = Array.isArray(KEYWORD_PRIORITY) ? KEYWORD_PRIORITY : [];
   return {
     ...Object.fromEntries(
-      priority.filter((type) => type !== "team").slice(0, 12).map((type) => [type, `The prompt explicitly invokes the ${type} trigger.`])
+      priority.filter((type) => type !== "team").map((type) => [type, `The prompt explicitly invokes the ${type} trigger.`])
     ),
     none: "No trigger fires; handle the prompt without a mode or skill."
   };
@@ -14950,6 +14958,17 @@ var init_points = __esm({
           haiku: "Quick lookups and lightweight, mechanical work",
           sonnet: "Standard coding and orchestration work",
           opus: "Complex architecture and deep analysis"
+        }
+      },
+      effort: {
+        type: "score",
+        instructions: "How much reasoning effort does this delegated task need? Judge the work the delegated agent must actually do. The length of the brief and its formal conditions (language and style rules, permission to use subagents, bans, file locations, report format, words in capitals) do not raise the level.",
+        criteria: {
+          low: "Low: mechanical work: read, look up, list, copy or transcribe, count; the result follows directly from the data",
+          medium: "Medium: a typical change or analysis with clear steps, in one place or following a given procedure or brief",
+          high: "High: multi-file work that needs its own decisions, a diagnosis weighing a few hypotheses, or writing a document",
+          xhigh: "Extra high: in-depth analysis, architecture, a high-stakes review, or a hard bug",
+          max: "Maximum: exceptionally hard, hours of reasoning at the limit of difficulty; rare"
         }
       }
     };
@@ -16426,6 +16445,32 @@ function isDetached(wtPath) {
 function isWorktreeDirty(wtPath) {
   return isWorktreeDirtyExcept(wtPath).dirty;
 }
+function commitExists(repoRoot, sha) {
+  try {
+    git(repoRoot, ["cat-file", "-e", `${sha}^{commit}`]);
+    return true;
+  } catch {
+    return false;
+  }
+}
+function hasCommitsOnlyOnWorkerRefs(repoRoot, wtPath, ownBranch, baseCommit) {
+  const tips = [git(repoRoot, ["for-each-ref", "--format=%(objectname)", `refs/heads/${ownBranch}`])];
+  if (existsSync25(wtPath) && isRegisteredWorktreePath(repoRoot, wtPath)) tips.push(git(repoRoot, ["rev-parse", "HEAD"], wtPath));
+  const commits = tips.filter(Boolean);
+  if (commits.length === 0) return false;
+  const excludedBase = baseCommit && commitExists(repoRoot, baseCommit) ? [baseCommit] : [];
+  return git(repoRoot, [
+    "rev-list",
+    "--max-count=1",
+    ...commits,
+    "--not",
+    ...excludedBase,
+    "--exclude=omc-team/*",
+    "--branches",
+    "--tags",
+    "--remotes"
+  ]).length > 0;
+}
 function normalizeStatusPath(rawPath) {
   const trimmed = rawPath.trim();
   if (trimmed.startsWith('"') && trimmed.endsWith('"')) {
@@ -16657,7 +16702,8 @@ function ensureWorkerWorktree(teamName, workerName, repoRoot, options = {}) {
       mode,
       detached: isDetached(wtPath),
       created: false,
-      reused: true
+      reused: true,
+      baseCommit: readMetadata(repoRoot, teamName).find((entry) => entry.workerName === workerName)?.baseCommit
     };
     recordMetadata(repoRoot, teamName, info2);
     return info2;
@@ -16676,7 +16722,8 @@ function ensureWorkerWorktree(teamName, workerName, repoRoot, options = {}) {
     mode,
     detached: mode === "detached",
     created: true,
-    reused: false
+    reused: false,
+    baseCommit: git(repoRoot, ["rev-parse", "HEAD"], wtPath)
   };
   recordMetadata(repoRoot, teamName, info);
   return info;
@@ -16725,6 +16772,12 @@ function removeWorkerWorktree(teamName, workerName, repoRoot) {
   const branch = getBranchName(teamName, workerName);
   const metaLockPath = `${getMetadataPath(repoRoot, teamName)}.lock`;
   withFileLockSync(metaLockPath, () => {
+    const baseCommit = readMetadata(repoRoot, teamName).find((entry) => entry.workerName === workerName)?.baseCommit;
+    if (hasCommitsOnlyOnWorkerRefs(repoRoot, wtPath, branch, baseCommit)) {
+      const error = new Error(`worktree_unmerged: preserving worker worktree at ${wtPath} and branch ${branch} because they hold commits that only worker branches have; merge or discard the commits, then retry`);
+      error.code = "worktree_unmerged";
+      throw error;
+    }
     prepareWorkerWorktreeForRemoval(teamName, workerName, repoRoot, wtPath);
     const wasRegisteredWorktree = isRegisteredWorktreePath(repoRoot, wtPath);
     try {
@@ -23414,30 +23467,17 @@ If you accept, exit your session. If you reject, remain active for task work and
 async function resumeTeamV2(teamName, cwd) {
   const sanitized = sanitizeTeamName(teamName);
   const config = await readTeamConfig(sanitized, cwd);
-  if (!config?.instance_id) return null;
+  if (!config?.instance_id || (config.lifecycle_state ?? "active") !== "active") return null;
   const sessionName2 = config.tmux_session || `omc-team-${sanitized}`;
-  if (sessionName2.startsWith("cmux:")) {
-    return {
-      teamName: sanitized,
-      sanitizedName: sanitized,
-      instanceId: config.instance_id,
-      sessionName: sessionName2,
-      ownsWindow: config.tmux_window_owned === true,
-      config,
-      cwd
-    };
-  }
-  if (!isValidTmuxServerIdentity(config.tmux_server_identity) || await observeTmuxServerIdentity(config.tmux_server_identity) !== "matching") {
-    return null;
-  }
   if (!config.leader_pane_id) return null;
+  const provider = config.leader_pane_id.startsWith("%") ? "tmux" : "cmux";
   const targetOwnership = await verifyTeamTargetOwnership({
-    provider: "tmux",
+    provider,
     providerTarget: sessionName2,
     recipient: "leader-fixed",
     recipientRole: "leader",
     paneId: config.leader_pane_id,
-    tmuxServerIdentity: config.tmux_server_identity
+    ...provider === "tmux" ? { tmuxServerIdentity: config.tmux_server_identity } : {}
   });
   if (targetOwnership.kind !== "owned") return null;
   return {
@@ -25791,6 +25831,25 @@ async function teamStatusByTeamName(teamName, cwd = process.cwd()) {
 }
 async function teamResumeByName(teamName, cwd = process.cwd()) {
   validateTeamName2(teamName);
+  const runtimeV2 = await Promise.resolve().then(() => (init_runtime_v2(), runtime_v2_exports));
+  if (runtimeV2.isRuntimeV2Enabled()) {
+    const runtime2 = await runtimeV2.resumeTeamV2(teamName, cwd);
+    if (!runtime2) {
+      return {
+        teamName,
+        resumed: false,
+        error: "Team session is not currently resumable"
+      };
+    }
+    return {
+      teamName,
+      resumed: true,
+      instanceId: runtime2.instanceId,
+      sessionName: runtime2.sessionName,
+      leaderPaneId: runtime2.config.leader_pane_id,
+      workerPaneIds: runtime2.config.workers.map((worker) => worker.pane_id).filter((paneId) => typeof paneId === "string" && paneId.trim().length > 0)
+    };
+  }
   const runtime = await resumeTeam(teamName, cwd);
   if (!runtime) {
     return {
