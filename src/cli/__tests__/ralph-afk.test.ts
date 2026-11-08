@@ -1,7 +1,7 @@
 import { describe, it, expect, afterEach, beforeEach, vi } from 'vitest';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'fs';
 import { tmpdir } from 'os';
-import { join } from 'path';
+import { dirname, join } from 'path';
 
 const spawnMock = vi.hoisted(() => ({ defaultSpawnFn: vi.fn(() => ({ pid: 4242, unref: vi.fn() })) }));
 vi.mock('../../hooks/session-end/spawn-next.js', async (importOriginal) => {
@@ -309,6 +309,84 @@ process.exit(${exitCode});
     expect(ralphVerify({ session: 'sess-verify' }, dir)).toBe(0);
     writeFailer('FAIL brand new regression');
     expect(ralphVerify({ session: 'sess-verify' }, dir)).toBe(1);
+  });
+
+  it('reports a re-record delta and preserves the previous baseline', () => {
+    writeFailer('FAIL old');
+    writePackage('node failer.js');
+    const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+    try {
+      expect(ralphVerify({ session: 'sess-rerecord', json: true, writeBaseline: true }, dir)).toBe(0);
+      const first = JSON.parse(String(logSpy.mock.calls[0][0])) as { previousPath: string | null; added: number; removed: number };
+      expect(first.previousPath).toBeNull();
+      expect(first.added).toBe(0);
+      expect(first.removed).toBe(0);
+
+      writeFailer('FAIL new');
+      logSpy.mockClear();
+      expect(ralphVerify({ session: 'sess-rerecord', writeBaseline: true }, dir)).toBe(0);
+      expect(String(logSpy.mock.calls[0][0])).toContain('baseline replaced: +1 signature, -1 signature (previous saved at ');
+      expect(String(logSpy.mock.calls[0][0])).toContain('feedback-baseline.history');
+
+      logSpy.mockClear();
+      expect(ralphVerify({ session: 'sess-rerecord', json: true, writeBaseline: true }, dir)).toBe(0);
+      const second = JSON.parse(String(logSpy.mock.calls[0][0])) as { previousPath: string; added: number; removed: number };
+      expect(second.previousPath).toContain('feedback-baseline.history');
+      expect(second.added).toBe(0);
+      expect(second.removed).toBe(0);
+    } finally {
+      logSpy.mockRestore();
+    }
+  });
+
+  it('reports removed stored signatures when a re-record turns the command unrunnable', () => {
+    writePrd(JSON.stringify({
+      project: 'fb-fixture',
+      branchName: 'main',
+      description: 'fixture',
+      userStories: [],
+      feedbackCommands: ['node runner.js'],
+    }));
+    writeFileSync(join(dir, 'runner.js'), `const fs = require('fs');
+if (fs.existsSync('unrunnable')) process.exit(127);
+console.log('FAIL a');
+console.log('FAIL b');
+process.exit(1);
+`, 'utf8');
+    expect(ralphVerify({ session: 'sess-rerecord-unrunnable', writeBaseline: true }, dir)).toBe(0);
+    // Exit 127 marks the previously runnable command unrunnable.
+    writeFileSync(join(dir, 'unrunnable'), '', 'utf8');
+
+    const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+    try {
+      expect(ralphVerify({ session: 'sess-rerecord-unrunnable', json: true, writeBaseline: true }, dir)).toBe(0);
+      const result = JSON.parse(String(logSpy.mock.calls[0][0])) as { added: number; removed: number; becameUnrunnable: string[] };
+      expect(result.added).toBe(0);
+      expect(result.removed).toBe(2);
+      expect(result.becameUnrunnable).toEqual(['node runner.js']);
+    } finally {
+      logSpy.mockRestore();
+    }
+  });
+
+  it('exits nonzero and leaves the live baseline untouched when history cannot be archived', () => {
+    writeFailer('FAIL old');
+    writePackage('node failer.js');
+    expect(ralphVerify({ session: 'sess-unarchivable', writeBaseline: true }, dir)).toBe(0);
+    const baselineFile = join(dir, '.omc', 'state', 'sessions', 'sess-unarchivable', 'feedback-baseline.json');
+    const before = readFileSync(baselineFile);
+    // A regular file where the history directory must go makes archiving fail.
+    writeFileSync(join(dirname(baselineFile), 'feedback-baseline.history'), 'not a directory', 'utf8');
+    writeFailer('FAIL new');
+
+    const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+    try {
+      expect(ralphVerify({ session: 'sess-unarchivable', writeBaseline: true }, dir)).toBe(1);
+      expect(logSpy.mock.calls.flat().join('\n')).toContain('could not write a baseline');
+    } finally {
+      logSpy.mockRestore();
+    }
+    expect(readFileSync(baselineFile)).toEqual(before);
   });
 
   it('reports new test failures even when suite output includes ENOENT', () => {

@@ -5,15 +5,15 @@
   "provenance": {
     "base": "05c800f40d1ad53b42a78609d2667ef4f726808b",
     "planningHead": "0a91273e61dbbd47eb0af4c02844409251e08398",
-    "head": "2ec590211a7e790e187f73f28ad1ccbecebdb4e6",
-    "sourceSha256": "8f05e9257e4b7ac7a93b3108417cfc05f6bc023178344355e2d469bc099c6263",
+    "head": "520578f55e9a2fe8c7a1d94ad657d1e6133bc0fc",
+    "sourceSha256": "ef6fc4e0c956924f09a08f206136e03822e7f350cf55f678d8a41179fcceaf38",
     "generatedAt": null,
     "generator": "scripts/generate-inventory-graph.mjs"
   },
   "base": "05c800f40d1ad53b42a78609d2667ef4f726808b",
   "planningHead": "0a91273e61dbbd47eb0af4c02844409251e08398",
-  "head": "2ec590211a7e790e187f73f28ad1ccbecebdb4e6",
-  "sourceSha256": "8f05e9257e4b7ac7a93b3108417cfc05f6bc023178344355e2d469bc099c6263",
+  "head": "520578f55e9a2fe8c7a1d94ad657d1e6133bc0fc",
+  "sourceSha256": "ef6fc4e0c956924f09a08f206136e03822e7f350cf55f678d8a41179fcceaf38",
   "counts": {
     "public": {
       "skills": 83,
@@ -47066,11 +47066,6 @@
         "path": "tests/integration/issue-4806.test.ts"
       },
       {
-        "id": "tests/integration/issue-4814-ralph-plugin-cli.test.ts",
-        "kind": "other",
-        "path": "tests/integration/issue-4814-ralph-plugin-cli.test.ts"
-      },
-      {
         "id": "tests/integration/jev-active-mode-repro.test.ts",
         "kind": "other",
         "path": "tests/integration/jev-active-mode-repro.test.ts"
@@ -60178,11 +60173,6 @@
         "kind": "imports"
       },
       {
-        "from": "src/cli/__tests__/ralph-afk.test.ts",
-        "to": "src/lib/file-lock.ts",
-        "kind": "imports"
-      },
-      {
         "from": "src/cli/__tests__/self-improve-paths.test.ts",
         "to": "external:node:child_process",
         "kind": "imports"
@@ -61360,11 +61350,6 @@
       {
         "from": "src/cli/commands/ralph.ts",
         "to": "src/hooks/session-end/spawn-next.ts",
-        "kind": "imports"
-      },
-      {
-        "from": "src/cli/commands/ralph.ts",
-        "to": "src/lib/file-lock.ts",
         "kind": "imports"
       },
       {
@@ -71024,6 +71009,16 @@
       },
       {
         "from": "src/hooks/ralph/__tests__/feedback-baseline.test.ts",
+        "to": "external:child_process",
+        "kind": "imports"
+      },
+      {
+        "from": "src/hooks/ralph/__tests__/feedback-baseline.test.ts",
+        "to": "external:child_process",
+        "kind": "type-imports"
+      },
+      {
+        "from": "src/hooks/ralph/__tests__/feedback-baseline.test.ts",
         "to": "external:fs",
         "kind": "imports"
       },
@@ -71035,6 +71030,11 @@
       {
         "from": "src/hooks/ralph/__tests__/feedback-baseline.test.ts",
         "to": "external:path",
+        "kind": "imports"
+      },
+      {
+        "from": "src/hooks/ralph/__tests__/feedback-baseline.test.ts",
+        "to": "external:url",
         "kind": "imports"
       },
       {
@@ -89678,46 +89678,6 @@
         "kind": "imports"
       },
       {
-        "from": "tests/integration/issue-4814-ralph-plugin-cli.test.ts",
-        "to": "external:node:child_process",
-        "kind": "imports"
-      },
-      {
-        "from": "tests/integration/issue-4814-ralph-plugin-cli.test.ts",
-        "to": "external:node:fs",
-        "kind": "imports"
-      },
-      {
-        "from": "tests/integration/issue-4814-ralph-plugin-cli.test.ts",
-        "to": "external:node:os",
-        "kind": "imports"
-      },
-      {
-        "from": "tests/integration/issue-4814-ralph-plugin-cli.test.ts",
-        "to": "external:node:path",
-        "kind": "imports"
-      },
-      {
-        "from": "tests/integration/issue-4814-ralph-plugin-cli.test.ts",
-        "to": "external:node:url",
-        "kind": "imports"
-      },
-      {
-        "from": "tests/integration/issue-4814-ralph-plugin-cli.test.ts",
-        "to": "external:vitest",
-        "kind": "imports"
-      },
-      {
-        "from": "tests/integration/issue-4814-ralph-plugin-cli.test.ts",
-        "to": "src/cli/commands/ralph.ts",
-        "kind": "imports"
-      },
-      {
-        "from": "tests/integration/issue-4814-ralph-plugin-cli.test.ts",
-        "to": "src/utils/omc-cli-rendering.ts",
-        "kind": "imports"
-      },
-      {
         "from": "tests/integration/jev-active-mode-repro.test.ts",
         "to": "external:node:child_process",
         "kind": "imports"
@@ -90844,12 +90804,12 @@
       }
     ],
     "stats": {
-      "nodeCount": 8058,
-      "edgeCount": 8705,
-      "importEdgeCount": 7263,
+      "nodeCount": 8057,
+      "edgeCount": 8698,
+      "importEdgeCount": 7255,
       "registerEdgeCount": 104
     }
   },
-  "inventorySha256": "68f22a7b2b325dad5fd33350c64ad7c16afc43f335e6b1c26742da6d42521890",
-  "manifestSha256": "7b3f5c593b579770ab23ad5b98f7cc320c158142da1ada58ddea0070f431d68b"
+  "inventorySha256": "ad634a0992f471e08530b5f5fd403d8f383038e53026465f54a4f3c53531cd03",
+  "manifestSha256": "32367e328be8a8a90649d3d7c24c51545c7b41ebbb94cd4de12b9991cc997f68"
 }
