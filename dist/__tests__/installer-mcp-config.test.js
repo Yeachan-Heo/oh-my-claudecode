@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { existsSync, mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { homedir, tmpdir } from 'node:os';
 import { join } from 'node:path';
 vi.mock('fs', async () => {
     const actual = await vi.importActual('fs');
@@ -21,10 +21,12 @@ vi.mock('fs', async () => {
         readFileSync: vi.fn((pathLike, options) => actual.readFileSync(withRedirect(pathLike), options)),
     };
 });
+// homedir() reads USERPROFILE on Windows and HOME elsewhere, so both are set.
 async function loadInstallerWithEnv(claudeConfigDir, homeDir, codexHome, omcHome) {
     vi.resetModules();
     process.env.CLAUDE_CONFIG_DIR = claudeConfigDir;
     process.env.HOME = homeDir;
+    process.env.USERPROFILE = homeDir;
     process.env.CODEX_HOME = codexHome;
     process.env.OMC_HOME = omcHome;
     delete process.env.CLAUDE_MCP_CONFIG_PATH;
@@ -88,6 +90,9 @@ describe('installer MCP config ownership (issue #1802)', () => {
             },
         }, null, 2));
         const installer = await loadInstallerWithEnv(claudeConfigDir, homeDir, codexHome, omcHome);
+        // CLAUDE_CONFIG_DIR names the default ~/.claude, which keeps its MCP servers in
+        // ~/.claude.json, so homedir() has to be the test home.
+        expect(homedir()).toBe(homeDir);
         const result = installer.install({
             skipClaudeCheck: true,
             skipHud: true,
@@ -142,6 +147,39 @@ describe('installer MCP config ownership (issue #1802)', () => {
         expect(codexConfig).toContain('# BEGIN OMC MANAGED MCP REGISTRY');
         expect(codexConfig).toContain('[mcp_servers.gitnexus]');
         expect(codexConfig).toContain('command = "gitnexus"');
+    });
+    it('moves legacy settings.json mcpServers into $CLAUDE_CONFIG_DIR/.claude.json for a profile', async () => {
+        const profileDir = join(homeDir, '.claude-work');
+        const settingsPath = join(profileDir, 'settings.json');
+        const profileMcpConfigPath = join(profileDir, '.claude.json');
+        mkdirSync(profileDir, { recursive: true });
+        writeFileSync(settingsPath, JSON.stringify({
+            theme: 'dark',
+            mcpServers: {
+                gitnexus: {
+                    command: 'gitnexus',
+                    args: ['mcp'],
+                    timeout: 15,
+                },
+            },
+        }, null, 2));
+        const installer = await loadInstallerWithEnv(profileDir, homeDir, codexHome, omcHome);
+        const result = installer.install({
+            skipClaudeCheck: true,
+            skipHud: true,
+        });
+        expect(result.success).toBe(true);
+        expect(JSON.parse(readFileSync(settingsPath, 'utf-8'))).not.toHaveProperty('mcpServers');
+        expect(JSON.parse(readFileSync(profileMcpConfigPath, 'utf-8'))).toEqual({
+            mcpServers: {
+                gitnexus: {
+                    command: 'gitnexus',
+                    args: ['mcp'],
+                    timeout: 15,
+                },
+            },
+        });
+        expect(existsSync(join(homeDir, '.claude.json'))).toBe(false);
     });
 });
 // ---------------------------------------------------------------------------

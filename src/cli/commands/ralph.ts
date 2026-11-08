@@ -639,9 +639,7 @@ export function ralphVerify(options: { json?: boolean; session?: string; writeBa
     // A timeout already present in the baseline is environment noise, like a
     // baseline failure; a new one means the gate could not run at all.
     const newlyTimedOut = timedOutCommands.filter((command) => !gateBaseline?.commands[command]?.timedOut);
-    const closeout = options.writeBaseline
-      ? { required: false, satisfied: true, criteriaRevision: null, deslop: null }
-      : evaluateCloseoutGate(directory, stateRoot, sessionId || '');
+    const closeout = evaluateCloseoutGate(directory, stateRoot, sessionId || '');
     const closeoutBlocked = closeout.required && !closeout.satisfied;
     const closeoutNote = closeoutBlocked
       ? 'the PRD is complete but no closeout record matches its criteria revision; run `omc ralph closeout --deslop completed|skipped` before Step 7.6'
@@ -701,6 +699,10 @@ export function ralphVerify(options: { json?: boolean; session?: string; writeBa
   };
 
   if (!path) return runGate();
+  // When writing the baseline, recordBaseline will acquire its own lock.
+  // Only acquire the outer lock for verification (non-write) to serialize concurrent gate runs.
+  if (options.writeBaseline) return runGate();
+  
   // Two concurrent gates compete for the same machine and can interleave their
   // reads and re-records. Serialize on the baseline itself.
   let lock: ReturnType<typeof acquireFileLockSync> = null;

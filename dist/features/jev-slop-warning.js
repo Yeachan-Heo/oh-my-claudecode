@@ -27,6 +27,7 @@ export function recordSlopWarningShadow(args) {
             source: 'pre-tool-enforcer',
         },
         twin: () => args.warned,
+        mapHeuristic: (result, questionSet) => result,
         fetchFn: args.fetchFn,
     });
 }

@@ -40,6 +40,7 @@ export function recordSimplifierTriggerShadow(args) {
             source: 'code-simplifier-stop',
         },
         twin: () => computeSimplifierTriggerTwin(args.stateDir, args.files),
+        mapHeuristic: (result, questionSet) => result,
         mapAnswer: (answer) => {
             // Jev Noul answer has { type: 'noul', noul: boolean | undefined }
             return answer.noul === true;
