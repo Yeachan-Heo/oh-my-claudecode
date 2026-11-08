@@ -436,8 +436,16 @@ function releaseBaselineLock(fd: number, lockPath: string): void {
  *
  * A failed live write leaves the archive in place: when `writeFileSync` fails
  * partway (ENOSPC/EFBIG) that archive is the only intact recovery copy.
+ *
+ * When `lockHeld` is true, the caller already holds the lock and this function
+ * skips lock acquisition/release (must be held by outer code).
  */
-export function recordBaseline(path: string, commands: Record<string, CommandBaseline>, now: Date = new Date()): BaselineWriteResult {
+export function recordBaseline(
+  path: string,
+  commands: Record<string, CommandBaseline>,
+  now: Date = new Date(),
+  options?: { lockHeld?: boolean },
+): BaselineWriteResult {
   // The lock lives beside the baseline, so its parent must exist first.
   try {
     fs.mkdirSync(dirname(path), { recursive: true });
@@ -445,8 +453,11 @@ export function recordBaseline(path: string, commands: Record<string, CommandBas
     return { written: false, added: 0, removed: 0 };
   }
   const lockPath = `${path}.lock`;
-  const lockFd = acquireBaselineLock(lockPath);
-  if (lockFd === null) return { written: false, added: 0, removed: 0 };
+  let lockFd: number | null = null;
+  if (!options?.lockHeld) {
+    lockFd = acquireBaselineLock(lockPath);
+    if (lockFd === null) return { written: false, added: 0, removed: 0 };
+  }
   try {
     const previous = readBaseline(path);
     const previousPath = archiveBaseline(path, now);
@@ -489,7 +500,9 @@ export function recordBaseline(path: string, commands: Record<string, CommandBas
       ...(becameUnrunnable.length > 0 ? { becameUnrunnable } : {}),
     };
   } finally {
-    releaseBaselineLock(lockFd, lockPath);
+    if (!options?.lockHeld && lockFd !== null) {
+      releaseBaselineLock(lockFd, lockPath);
+    }
   }
 }
 

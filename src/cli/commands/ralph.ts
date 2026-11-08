@@ -620,10 +620,9 @@ export function ralphVerify(options: { json?: boolean; session?: string; writeBa
     const unrunnableCommands = Object.entries(current).filter(([, entry]) => entry.unrunnable).map(([command]) => command);
     const timedOutCommands = Object.entries(current).filter(([, entry]) => entry.timedOut).map(([command]) => command);
     if (options.writeBaseline) {
-      // Release the outer lock before writing: recordBaseline has its own inner lock,
-      // and holding the outer lock would prevent the inner lock from being acquired.
-      if (lock) releaseFileLockSync(lock);
-      const result = path ? recordBaseline(path, current, now) : { written: false, added: 0, removed: 0 };
+      // Hold the outer lock while writing: recordBaseline will use lockHeld to skip
+      // its own lock acquisition, since we already hold the lock.
+      const result = path ? recordBaseline(path, current, now, { lockHeld: true }) : { written: false, added: 0, removed: 0 };
       const { written, previousPath } = result;
       const transitionNote = result.becameUnrunnable?.length
         ? `, ${result.becameUnrunnable.length} command${result.becameUnrunnable.length === 1 ? '' : 's'} became unrunnable (${result.becameUnrunnable.join(', ')})`

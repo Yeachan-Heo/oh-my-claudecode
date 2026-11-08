@@ -1,5 +1,5 @@
 import { describe, it, expect, afterEach, beforeEach, vi } from 'vitest';
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'fs';
 import { tmpdir } from 'os';
 import { dirname, join } from 'path';
 
@@ -754,10 +754,51 @@ operable program or batch file.`);
       expect(errorSpy.mock.calls.flat().join('\n')).toContain('could not acquire the session lock');
       expect(existsSync(marker)).toBe(false);
     } finally {
-      lockSpy.mockRestore();
+      errorSpy.mockRestore();
       logSpy.mockRestore();
       errorSpy.mockRestore();
     }
+  });
+
+  it('allows both interleaved baseline updates to survive when outer lock is held through recordBaseline', () => {
+    // Test that ralphVerify holds the outer lock through recordBaseline and both writes survive
+    // This test writes a script whose output changes, then verifies twice to ensure both
+    // baseline updates are persisted (not lost to a race).
+    writeFailer('FAIL 1');
+    writePackage('node failer.js');
+
+    // First verify with FAIL 1, write baseline
+    expect(ralphVerify({ session: 'sess-interleaved', writeBaseline: true }, dir)).toBe(0);
+    const baselinePath = join(dir, '.omc', 'state', 'sessions', 'sess-interleaved', 'feedback-baseline.json');
+    const baseline1 = readFileSync(baselinePath, 'utf8');
+    const baseline1Obj = JSON.parse(baseline1) as { commands: Record<string, { signatures: string[] }> };
+    const baseline1Signatures = baseline1Obj.commands['npm run test']?.signatures ?? [];
+    expect(baseline1Signatures.length).toBeGreaterThan(0);
+    const baseline1Str = JSON.stringify(baseline1Signatures);
+
+    // Change the script output
+    writeFailer('FAIL 2');
+
+    // Second verify with FAIL 2, write baseline
+    expect(ralphVerify({ session: 'sess-interleaved', writeBaseline: true }, dir)).toBe(0);
+    const baseline2 = readFileSync(baselinePath, 'utf8');
+    const baseline2Obj = JSON.parse(baseline2) as { commands: Record<string, { signatures: string[] }> };
+    const baseline2Signatures = baseline2Obj.commands['npm run test']?.signatures ?? [];
+    expect(baseline2Signatures.length).toBeGreaterThan(0);
+    const baseline2Str = JSON.stringify(baseline2Signatures);
+    
+    // Verify that the baselines are different (meaning the second write actually changed the baseline)
+    expect(baseline2Str).not.toBe(baseline1Str);
+    // Verify that FAIL 1 signature is not in the live baseline (it should be in history)
+    expect(baseline2Str).not.toContain('FAIL 1');
+
+    // Verify history was preserved (FAIL 1 should be archived)
+    const historyDir = join(dir, '.omc', 'state', 'sessions', 'sess-interleaved', 'feedback-baseline.history');
+    expect(existsSync(historyDir)).toBe(true);
+    const historyFiles = readdirSync(historyDir);
+    expect(historyFiles.length).toBeGreaterThan(0);
+    const historicalBaseline = readFileSync(join(historyDir, historyFiles[0]), 'utf8');
+    expect(historicalBaseline).toContain('FAIL 1');
   });
 });
 
