@@ -1,0 +1,634 @@
+/**
+ * Cross-Platform Path Utilities
+ *
+ * Provides utility functions for handling paths across Windows, macOS, and Linux.
+ * These utilities ensure paths in configuration files use forward slashes
+ * (which work universally) and handle platform-specific directory conventions.
+ */
+import { join, dirname } from 'path';
+import { existsSync, readFileSync, readdirSync, statSync, lstatSync, realpathSync, unlinkSync, rmSync, renameSync, symlinkSync } from 'fs';
+import { homedir } from 'os';
+import { getClaudeConfigDir } from './config-dir.js';
+import { compareVersions } from './semver-compare.js';
+import { pathIdentity, readOccupiedPluginRoots } from './cache-occupancy.js';
+import { firstChildBelowDirectoryIdentity, hasAncestorWithIdentity, isOmcPluginCacheIdentity, isUsableGenericPluginTarget, isUsableVersionPath, sameFileSystemIdentity, } from './plugin-cache-validation.js';
+/**
+ * Convert a path to use forward slashes (for JSON/config files)
+ * This is necessary because settings.json commands are executed
+ * by shells that expect forward slashes even on Windows
+ */
+export function toForwardSlash(path) {
+    return path.replace(/\\/g, '/');
+}
+/**
+ * Get a path suitable for use in shell commands
+ * Converts backslashes to forward slashes for cross-platform compatibility
+ */
+export function toShellPath(path) {
+    const normalized = toForwardSlash(path);
+    // Windows paths with spaces need quoting
+    if (normalized.includes(' ')) {
+        return `"${normalized}"`;
+    }
+    return normalized;
+}
+/**
+ * Get Windows-appropriate data directory
+ * Falls back to sensible locations instead of XDG paths
+ */
+export function getDataDir() {
+    if (process.platform === 'win32') {
+        return process.env.LOCALAPPDATA || join(homedir(), 'AppData', 'Local');
+    }
+    return process.env.XDG_DATA_HOME || join(homedir(), '.local', 'share');
+}
+/**
+ * Get Windows-appropriate config directory
+ */
+export function getConfigDir() {
+    if (process.platform === 'win32') {
+        return process.env.APPDATA || join(homedir(), 'AppData', 'Roaming');
+    }
+    return process.env.XDG_CONFIG_HOME || join(homedir(), '.config');
+}
+/**
+ * Get Windows-appropriate state directory.
+ */
+export function getStateDir() {
+    if (process.platform === 'win32') {
+        return process.env.LOCALAPPDATA || join(homedir(), 'AppData', 'Local');
+    }
+    return process.env.XDG_STATE_HOME || join(homedir(), '.local', 'state');
+}
+function prefersXdgOmcDirs() {
+    return process.platform !== 'win32' && process.platform !== 'darwin';
+}
+function getUserHomeDir() {
+    if (process.platform === 'win32') {
+        return process.env.USERPROFILE || process.env.HOME || homedir();
+    }
+    return process.env.HOME || homedir();
+}
+/**
+ * Legacy global OMC directory under the user's home directory.
+ */
+export function getLegacyOmcDir() {
+    return join(getUserHomeDir(), '.omc');
+}
+/**
+ * Global OMC config directory.
+ *
+ * Precedence:
+ * 1. OMC_HOME (existing explicit override)
+ * 2. XDG-aware config root on Linux/Unix
+ * 3. Legacy ~/.omc elsewhere
+ */
+export function getGlobalOmcConfigRoot() {
+    const explicitRoot = process.env.OMC_HOME?.trim();
+    if (explicitRoot) {
+        return explicitRoot;
+    }
+    if (prefersXdgOmcDirs()) {
+        return join(getConfigDir(), 'omc');
+    }
+    return getLegacyOmcDir();
+}
+/**
+ * Global OMC state directory.
+ *
+ * When OMC_HOME is set, preserve that existing override semantics by treating
+ * it as the shared root and resolving state beneath it.
+ */
+export function getGlobalOmcStateRoot() {
+    const explicitRoot = process.env.OMC_HOME?.trim();
+    if (explicitRoot) {
+        return join(explicitRoot, 'state');
+    }
+    if (prefersXdgOmcDirs()) {
+        return join(getStateDir(), 'omc');
+    }
+    return join(getLegacyOmcDir(), 'state');
+}
+export function getGlobalOmcConfigPath(...segments) {
+    return join(getGlobalOmcConfigRoot(), ...segments);
+}
+export function getGlobalOmcStatePath(...segments) {
+    return join(getGlobalOmcStateRoot(), ...segments);
+}
+export function getLegacyOmcPath(...segments) {
+    return join(getLegacyOmcDir(), ...segments);
+}
+function dedupePaths(paths) {
+    return [...new Set(paths)];
+}
+export function getGlobalOmcConfigCandidates(...segments) {
+    if (process.env.OMC_HOME?.trim()) {
+        return [getGlobalOmcConfigPath(...segments)];
+    }
+    return dedupePaths([
+        getGlobalOmcConfigPath(...segments),
+        getLegacyOmcPath(...segments),
+    ]);
+}
+export function getGlobalOmcStateCandidates(...segments) {
+    const explicitRoot = process.env.OMC_HOME?.trim();
+    if (explicitRoot) {
+        return dedupePaths([
+            getGlobalOmcStatePath(...segments),
+            join(explicitRoot, ...segments),
+        ]);
+    }
+    return dedupePaths([
+        getGlobalOmcStatePath(...segments),
+        getLegacyOmcPath('state', ...segments),
+    ]);
+}
+/**
+ * Get the plugin cache base directory for oh-my-claudecode.
+ * This is the directory containing version subdirectories.
+ *
+ * Structure: <configDir>/plugins/cache/omc/oh-my-claudecode/
+ */
+export function getPluginCacheBase() {
+    return join(getClaudeConfigDir(), 'plugins', 'cache', 'omc', 'oh-my-claudecode');
+}
+/**
+ * Safely delete a file, ignoring ENOENT errors.
+ * Prevents crashes when cleaning up files that may not exist (Bug #13 fix).
+ */
+export function safeUnlinkSync(filePath) {
+    try {
+        if (existsSync(filePath)) {
+            unlinkSync(filePath);
+            return true;
+        }
+        return false;
+    }
+    catch {
+        return false;
+    }
+}
+/**
+ * Safely remove a directory recursively, ignoring errors.
+ */
+export function safeRmSync(dirPath) {
+    try {
+        if (existsSync(dirPath)) {
+            rmSync(dirPath, { recursive: true, force: true });
+            return true;
+        }
+        return false;
+    }
+    catch {
+        return false;
+    }
+}
+/** How many times to retry placing the redirect symlink when the path is
+ * re-created underneath us (Finder `.DS_Store`, Spotlight, a concurrent
+ * purge from another session). */
+const RELINK_ATTEMPTS = 3;
+/** Suffix for the directory a stale version is moved to while its redirect
+ * symlink is placed. Includes the pid so concurrent purges cannot collide. */
+const ASIDE_SUFFIX = '.omc-stale-';
+/** Matches the aside suffix so an interrupted relink can be recognised and
+ * repaired instead of being mistaken for a plugin version. Group 1 is the pid
+ * of the purge that created it. */
+const ASIDE_SUFFIX_RE = /\.omc-stale-(\d+)$/;
+/**
+ * True when the purge that created an aside directory is still running, i.e.
+ * the backup belongs to a swap in flight and must not be touched.
+ *
+ * Signal 0 does not deliver anything; it only probes. `EPERM` means the process
+ * exists but is not ours to signal, which still counts as alive.
+ */
+function isAsideOwnerAlive(pid) {
+    if (pid === process.pid)
+        return true;
+    try {
+        process.kill(pid, 0);
+        return true;
+    }
+    catch (err) {
+        return err.code === 'EPERM';
+    }
+}
+/**
+ * Remove whatever occupies `path`, including a symlink whose target is gone.
+ *
+ * `safeRmSync` guards on `existsSync`, which follows the link — so a dangling
+ * redirect reports false and is left in place, and every retry then fails the
+ * same way. `lstatSync` sees the link itself.
+ */
+function removePathEntry(path) {
+    let stats;
+    try {
+        stats = lstatSync(path);
+    }
+    catch {
+        return false;
+    }
+    try {
+        if (stats.isDirectory()) {
+            rmSync(path, { recursive: true, force: true });
+        }
+        else {
+            unlinkSync(path);
+        }
+        return true;
+    }
+    catch {
+        return false;
+    }
+}
+/** Errno values that mean "something else is at this path", per POSIX rename(2)
+ * and symlink(2). Verified on macOS/APFS:
+ *   symlink over any existing entry        → EEXIST
+ *   rename(dir → non-empty dir)            → ENOTEMPTY
+ *   rename(dir → symlink, live or dangling)→ ENOTDIR
+ *   rename(dir → empty dir)                → succeeds
+ *
+ * Windows reports a collision as EPERM/EACCES rather than ENOTEMPTY, so those
+ * are added there only. They stay out on POSIX, where they mean the caller
+ * genuinely lacks permission and clearing the path would be the wrong response.
+ * Retrying is still safe under either reading: removePathEntry() fails on a path
+ * we cannot write, the attempts drain, and the caller reports instead of
+ * silently dropping anything.
+ */
+const OCCUPIED_CODES = new Set(process.platform === 'win32'
+    ? ['EEXIST', 'ENOTEMPTY', 'ENOTDIR', 'EISDIR', 'EPERM', 'EACCES']
+    : ['EEXIST', 'ENOTEMPTY', 'ENOTDIR', 'EISDIR']);
+/**
+ * Run `place` at `path`, clearing whatever occupies it and retrying when the
+ * path is taken. Returns false once the attempts are exhausted.
+ *
+ * Both halves of a relink need this: the symlink placement and the rollback
+ * that restores the original directory. A rollback that is not retried can
+ * leave the original stranded at its aside path while a squatter holds the
+ * pinned path — the exact failure this helper exists to prevent.
+ */
+function placeClearingSquatters(path, place, 
+/** Directory the path must sit directly inside. Clearing anything else — a
+ * parent, a sibling namespace — would delete versions this operation has no
+ * business touching, so the guard refuses rather than trusting the caller. */
+containedIn) {
+    if (stripTrailing(dirname(path)) !== stripTrailing(containedIn)) {
+        return { ok: false, last: new Error(`refusing to clear ${path}: not a child of ${containedIn}`) };
+    }
+    let last;
+    for (let attempt = 0; attempt < RELINK_ATTEMPTS; attempt++) {
+        try {
+            place();
+            return { ok: true };
+        }
+        catch (err) {
+            const code = err.code;
+            if (!code || !OCCUPIED_CODES.has(code))
+                throw err;
+            last = err;
+            removePathEntry(path);
+        }
+    }
+    return { ok: false, last };
+}
+function describeError(err) {
+    const code = err?.code;
+    if (code)
+        return code;
+    return err instanceof Error ? err.message : String(err);
+}
+/**
+ * Replace a stale version directory with a symlink to `target`, without ever
+ * leaving the path missing.
+ *
+ * `rename()` cannot swap a directory for a symlink (POSIX requires both sides to
+ * be the same type), so the stale directory is moved aside first and only
+ * discarded once the symlink is in place and its target remains usable. If the
+ * target breaks through the stale path during the move, the stale directory is
+ * moved back, keeping `CLAUDE_PLUGIN_ROOT`-pinned sessions alive.
+ *
+ * Invariant: on return the path is either the redirect symlink or the original
+ * directory. It is never an empty directory and never absent.
+ */
+function relinkStaleVersionDir(versionDir, target, isTargetUsable) {
+    const symlinkType = process.platform === 'win32' ? 'junction' : 'dir';
+    const asideDir = `${versionDir}${ASIDE_SUFFIX}${process.pid}`;
+    const pluginDir = dirname(versionDir);
+    // Never overwrite an intact backup: it is the only copy of some version, and
+    // clearing it here is how the earlier revision could destroy one. Aside
+    // entries are reconciled before normal versions, so reaching this with a
+    // usable backup in place means another purge owns it.
+    if (isUsableVersionPath(asideDir)) {
+        throw new Error(`an intact backup already occupies ${asideDir}`);
+    }
+    removePathEntry(asideDir);
+    renameSync(versionDir, asideDir);
+    let failure;
+    try {
+        const placed = placeClearingSquatters(versionDir, () => symlinkSync(target, versionDir, symlinkType), pluginDir);
+        if (placed.ok) {
+            if (isTargetUsable()) {
+                safeRmSync(asideDir);
+                return;
+            }
+            failure = new Error('registered active plugin target became unusable during relink');
+        }
+        else {
+            failure = new Error(`could not place redirect symlink after ${RELINK_ATTEMPTS} attempts (${describeError(placed.last)})`);
+        }
+    }
+    catch (err) {
+        // Not a contended path (EPERM, EACCES, …) — restore and report as-is.
+        failure = err;
+    }
+    if (!placeClearingSquatters(versionDir, () => renameSync(asideDir, versionDir), pluginDir).ok) {
+        throw new Error(`could not place redirect symlink (${describeError(failure)}) and could not restore the ` +
+            `original: it is left at ${asideDir}`);
+    }
+    throw failure;
+}
+/**
+ * Purge stale plugin cache versions that are no longer referenced by
+ * installed_plugins.json.
+ *
+ * Claude Code caches each plugin version under:
+ *   <configDir>/plugins/cache/<marketplace>/<plugin>/<version>/
+ *
+ * On plugin update the old version directory is left behind. This function
+ * reads the active install paths from installed_plugins.json and removes
+ * every version directory that is NOT active.
+ */
+/**
+ * Strip trailing slashes from a normalised forward-slash path.
+ */
+function stripTrailing(p) {
+    return toForwardSlash(p).replace(/\/+$/, '');
+}
+/**
+ * Identity used for cache-path comparisons. Keep the historical lexical path
+ * handling on non-Windows; Windows comparisons must resolve and case-fold.
+ */
+function comparisonPath(p) {
+    if (process.platform !== 'win32')
+        return stripTrailing(p);
+    return toForwardSlash(pathIdentity(p)).replace(/\/+$/, '');
+}
+/** Short install/update race guard. Session occupancy is the liveness source. */
+const STALE_THRESHOLD_MS = 10 * 60 * 1000;
+/**
+ * Compare two semver-like version strings descending (higher version first).
+ * Non-numeric segments fall back to 0.
+ */
+/**
+ * The trailing path segment, split on either separator.
+ *
+ * These paths come from the plugin registration file, so on Windows they are
+ * native and splitting on '/' alone returned the whole string. The comparator
+ * then read the drive and directory names as version components: every path
+ * under the default .claude directory parsed to the same leading numbers, so
+ * '...\\1.2.3' and '...\\1.2.4' compared equal and the newest active version
+ * was not reliably chosen.
+ */
+export function versionLeaf(path) {
+    const segments = path.split(/[\\/]/).filter((segment) => segment.length > 0);
+    return segments[segments.length - 1] ?? path;
+}
+export function compareSemverDesc(a, b) {
+    return compareVersions(b, a);
+}
+export function purgeStalePluginCacheVersions(options) {
+    const result = {
+        removed: 0, removedPaths: [], symlinked: 0, symlinkPaths: [],
+        restored: 0, restoredPaths: [], skipped: 0, skippedPaths: [], errors: [],
+    };
+    const configDir = getClaudeConfigDir();
+    const pluginsDir = join(configDir, 'plugins');
+    const installedFile = join(pluginsDir, 'installed_plugins.json');
+    const cacheDir = join(pluginsDir, 'cache');
+    if (!existsSync(installedFile) || !existsSync(cacheDir)) {
+        return result;
+    }
+    // Collect active install paths (normalised, trailing-slash stripped)
+    let activePaths;
+    try {
+        const raw = JSON.parse(readFileSync(installedFile, 'utf-8'));
+        const plugins = raw.plugins ?? raw;
+        if (typeof plugins !== 'object' || plugins === null || Array.isArray(plugins)) {
+            result.errors.push('installed_plugins.json has unexpected top-level structure');
+            return result;
+        }
+        activePaths = new Set();
+        for (const entries of Object.values(plugins)) {
+            if (!Array.isArray(entries))
+                continue;
+            for (const entry of entries) {
+                const ip = entry.installPath;
+                if (ip) {
+                    activePaths.add(stripTrailing(ip));
+                }
+            }
+        }
+    }
+    catch (err) {
+        result.errors.push(`Failed to parse installed_plugins.json: ${err instanceof Error ? err.message : err}`);
+        return result;
+    }
+    // Walk cache/<marketplace>/<plugin>/<version> and remove inactive versions
+    let marketplaces;
+    try {
+        marketplaces = readdirSync(cacheDir, { withFileTypes: true })
+            .filter(d => d.isDirectory())
+            .map(d => d.name);
+    }
+    catch {
+        return result;
+    }
+    const now = Date.now();
+    const occupancy = readOccupiedPluginRoots(configDir);
+    const activePathsArray = [...activePaths];
+    const activePathIdentities = [...new Set(activePathsArray.map(comparisonPath))];
+    for (const marketplace of marketplaces) {
+        const marketDir = join(cacheDir, marketplace);
+        let pluginNames;
+        try {
+            pluginNames = readdirSync(marketDir, { withFileTypes: true })
+                .filter(d => d.isDirectory())
+                .map(d => d.name);
+        }
+        catch {
+            continue;
+        }
+        for (const pluginName of pluginNames) {
+            const pluginDir = join(marketDir, pluginName);
+            let versions;
+            try {
+                versions = readdirSync(pluginDir, { withFileTypes: true })
+                    .filter(d => d.isDirectory())
+                    .map(d => d.name);
+            }
+            catch {
+                continue;
+            }
+            const pluginDirNorm = comparisonPath(pluginDir);
+            const lexicalActiveVersionDirsHere = activePathIdentities
+                .filter(ap => ap.startsWith(pluginDirNorm + '/'))
+                .map(ap => join(pluginDir, ap.slice(pluginDirNorm.length + 1).split('/')[0]));
+            const filesystemActiveVersionDirsHere = [];
+            try {
+                const pluginDirStats = statSync(pluginDir, { bigint: true });
+                for (const activePath of activePathsArray) {
+                    const versionName = firstChildBelowDirectoryIdentity(activePath, pluginDirStats);
+                    if (versionName)
+                        filesystemActiveVersionDirsHere.push(join(pluginDir, versionName));
+                }
+            }
+            catch {
+                // Lexical matches remain available if the namespace disappears mid-scan.
+            }
+            const activeVersionDirsHere = dedupePaths([
+                ...lexicalActiveVersionDirsHere,
+                ...filesystemActiveVersionDirsHere,
+            ]);
+            // Reconcile interrupted relinks BEFORE walking normal versions.  Entries
+            // arrive in filesystem order, so a squatter at `4.15.6` could otherwise be
+            // relinked first — and that relink clears `4.15.6.omc-stale-<pid>`, the
+            // only intact backup, before anyone knows the new symlink can be placed.
+            const asideEntries = [];
+            const plainVersions = [];
+            for (const version of versions) {
+                const aside = ASIDE_SUFFIX_RE.exec(version);
+                // A bare `.omc-stale-<pid>` carries no version to restore to: the prefix
+                // would be empty and the "original" path would resolve to the plugin
+                // namespace itself.  Renaming the entry over its own parent reports
+                // ENOTEMPTY, which the placement helper reads as an occupied path and
+                // clears recursively — taking the active version and every sibling with
+                // it.  An entry we cannot attribute is left alone, not acted on.
+                if (aside && aside.index > 0) {
+                    asideEntries.push({
+                        versionDir: join(pluginDir, version),
+                        originalDir: join(pluginDir, version.slice(0, aside.index)),
+                        ownerPid: Number(aside[1]),
+                    });
+                }
+                else if (!aside) {
+                    plainVersions.push(version);
+                }
+            }
+            for (const { versionDir, originalDir, ownerPid } of asideEntries) {
+                // A live owner means the swap is in flight, not interrupted.  Stealing
+                // its backup would make the owner's retry delete the real directory.
+                //
+                // Record it rather than returning silently: while the owner runs, the
+                // version path is legitimately unusable, but if that pid was recycled by
+                // an unrelated process the backup is never reclaimed and the pinned path
+                // stays broken with nothing to show for it.
+                if (isAsideOwnerAlive(ownerPid)) {
+                    result.skipped++;
+                    result.skippedPaths.push(`${versionDir} (owner pid ${ownerPid} still running)`);
+                    continue;
+                }
+                try {
+                    if (isUsableVersionPath(originalDir)) {
+                        // The redirect landed, or the version was reinstalled — the aside
+                        // copy carries nothing the live path does not already have.
+                        safeRmSync(versionDir);
+                    }
+                    else {
+                        // The path is missing, or holds only a squatter created inside the
+                        // lost window.  The aside copy is the sole intact version, so it
+                        // wins: clear the squatter and move it back, retrying if the
+                        // squatter comes back while we do.
+                        if (!placeClearingSquatters(originalDir, () => renameSync(versionDir, originalDir), pluginDir).ok) {
+                            throw new Error(`could not restore it over the path after ${RELINK_ATTEMPTS} attempts`);
+                        }
+                        result.restored++;
+                        result.restoredPaths.push(originalDir);
+                    }
+                }
+                catch (err) {
+                    result.errors.push(`Failed to reconcile interrupted relink ${versionDir}: ${err instanceof Error ? err.message : err}`);
+                }
+            }
+            for (const version of plainVersions) {
+                const versionDir = join(pluginDir, version);
+                const normalised = comparisonPath(versionDir);
+                // Check if this version or any of its subdirectories are referenced
+                const isActive = activePathIdentities.includes(normalised) ||
+                    activePathIdentities.some(ap => ap.startsWith(normalised + '/')) ||
+                    activeVersionDirsHere.some(activeDir => comparisonPath(activeDir) === normalised);
+                if (isActive)
+                    continue;
+                // Grace period: skip recently modified directories to avoid
+                // race conditions during concurrent plugin updates
+                if (!options?.skipGracePeriod) {
+                    try {
+                        const stats = statSync(versionDir);
+                        if (now - stats.mtimeMs < STALE_THRESHOLD_MS)
+                            continue;
+                    }
+                    catch {
+                        continue;
+                    }
+                }
+                // When an active version exists in the same plugin namespace, replace the
+                // stale directory with a symlink rather than deleting it.  This keeps any
+                // running session whose CLAUDE_PLUGIN_ROOT still points to this path working.
+                if (activeVersionDirsHere.length > 0) {
+                    const target = [...activeVersionDirsHere].sort((a, b) => compareSemverDesc(versionLeaf(a), versionLeaf(b)))[0];
+                    try {
+                        const targetStats = statSync(target, { bigint: true });
+                        if (!targetStats.isDirectory()) {
+                            throw new Error('Registered active plugin target is not a directory');
+                        }
+                        const staleVersionStats = statSync(versionDir, { bigint: true });
+                        const resolvedTarget = realpathSync(target);
+                        const resolvedStaleVersion = realpathSync(versionDir);
+                        const targetPath = comparisonPath(resolvedTarget);
+                        const staleVersionPath = comparisonPath(resolvedStaleVersion);
+                        const targetOverlapsStaleVersion = sameFileSystemIdentity(targetStats, staleVersionStats) ||
+                            targetPath === staleVersionPath ||
+                            targetPath.startsWith(`${staleVersionPath}/`) ||
+                            staleVersionPath.startsWith(`${targetPath}/`) ||
+                            hasAncestorWithIdentity(resolvedTarget, staleVersionStats) ||
+                            hasAncestorWithIdentity(resolvedStaleVersion, targetStats);
+                        const isOmcPlugin = isOmcPluginCacheIdentity(pluginName, marketplace);
+                        const isTargetUsable = () => statSync(target).isDirectory() &&
+                            (isOmcPlugin
+                                ? isUsableVersionPath(target, staleVersionStats)
+                                : isUsableGenericPluginTarget(target, staleVersionStats));
+                        if (targetOverlapsStaleVersion || !isTargetUsable()) {
+                            throw new Error('Registered active plugin target is unusable or overlaps the stale version tree');
+                        }
+                        relinkStaleVersionDir(versionDir, target, isTargetUsable);
+                        result.symlinked++;
+                        result.symlinkPaths.push(versionDir);
+                    }
+                    catch (err) {
+                        result.errors.push(`Failed to symlink ${versionDir} → ${target}: ${err instanceof Error ? err.message : err}`);
+                    }
+                }
+                else {
+                    // No active sibling exists, so there is nothing to redirect to and a
+                    // symlink is not possible — deletion is the only cleanup path, and
+                    // keeping the directory forever was rejected in 9bfd910e ("would
+                    // accumulate real dirs indefinitely").  A session pinned here is
+                    // therefore protected only by the grace period, whose mtime signal
+                    // does not track liveness; that is tracked separately in #3688.
+                    // A no-sibling directory is the only destructive cleanup path.  A
+                    // session-start occupancy record protects it; registry failures also
+                    // fail closed rather than treating mtime as a liveness signal.
+                    if (occupancy.unavailable || occupancy.roots.has(pathIdentity(versionDir))) {
+                        result.skipped++;
+                        result.skippedPaths.push(versionDir);
+                        continue;
+                    }
+                    if (safeRmSync(versionDir)) {
+                        result.removed++;
+                        result.removedPaths.push(versionDir);
+                    }
+                }
+            }
+        }
+    }
+    return result;
+}
+//# sourceMappingURL=paths.js.map

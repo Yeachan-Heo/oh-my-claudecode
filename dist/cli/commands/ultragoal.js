@@ -1,0 +1,320 @@
+import { readFile } from 'node:fs/promises';
+import { ClaudeGoalSnapshotError, formatClaudeGoalReconciliation, readClaudeGoalSnapshotInput, reconcileClaudeGoalSnapshot, } from '../../goal-workflows/claude-goal-snapshot.js';
+import { addUltragoalGoal, buildClaudeGoalInstruction, checkpointUltragoal, createUltragoalPlan, listUltragoalPlanIds, readUltragoalPlan, recordFinalReviewBlockers, resolveActivePlanId, startNextUltragoal, summarizeUltragoalPlan, UltragoalError, } from '../../ultragoal/artifacts.js';
+export const ULTRAGOAL_HELP = `omc ultragoal - Durable repo-native multi-goal workflow with Claude Code /goal handoff
+
+Plugin-only installs where omc is not on PATH can use oh-my-claudecode.js or node <plugin-root>/bin/oh-my-claudecode.js instead.
+
+Usage:
+  omc ultragoal create-goals [--brief <text> | --brief-file <path> | --from-stdin] [--goal <title::objective>] [--claude-goal-mode <aggregate|per-story>] [--force] [--plan-id <id> | --auto-plan-id] [--json]
+  omc ultragoal complete-goals [<goal-id>] [--retry-failed] [--plan-id <id>] [--json]
+  omc ultragoal add-goal --title <title> --objective <text> [--evidence <text>] [--plan-id <id>] [--json]
+  omc ultragoal record-review-blockers --goal-id <id> --title <title> --objective <text> --evidence <review-findings> --claude-goal-json <active-json-or-path> [--plan-id <id>] [--json]
+  omc ultragoal checkpoint --goal-id <id> --status <complete|failed|blocked> [--evidence <text>] [--claude-goal-json <json-or-path>] [--quality-gate-json <json-or-path>] [--plan-id <id>] [--json]
+  omc ultragoal status [--claude-goal-json <json-or-path>] [--plan-id <id>] [--json]
+  omc ultragoal list-plans [--json]
+
+Aliases:
+  create -> create-goals, complete|next|start-next -> complete-goals
+
+Artifacts (single-plan, default for monorepo / single session):
+  .omc/ultragoal/brief.md
+  .omc/ultragoal/goals.json
+  .omc/ultragoal/ledger.jsonl
+
+Artifacts (multi-plan, enabled by --plan-id or --auto-plan-id):
+  .omc/ultragoal/plans/{planId}/brief.md
+  .omc/ultragoal/plans/{planId}/goals.json
+  .omc/ultragoal/plans/{planId}/ledger.jsonl
+
+Multi-plan resolution:
+  When --plan-id is omitted, ultragoal selects the legacy plan if present,
+  otherwise the single multi-plan if there's exactly one. If multiple plans
+  exist, --plan-id becomes required. Use multi-plan mode for parallel
+  ultragoal runs in a shared .omc/ (multi-repo workspaces; see .omc-workspace).
+
+Claude /goal integration:
+  This command cannot directly invoke the Claude Code /goal slash command from a shell;
+  /goal is a model-facing in-session directive that registers a session-scoped Stop hook
+  until its condition holds (auto-clears on success). complete-goals writes durable state
+  and prints a model-facing handoff that tells the active Claude agent when to invoke
+  /goal <condition>, when to clear it, and what snapshot JSON to share back.
+  New plans default to aggregate mode: one Claude /goal covers the whole ultragoal run
+  while OMC checkpoints G001/G002 stories in the durable ledger.
+  Final completion is mandatory-gated: run ai-slop-cleaner, rerun verification,
+  run $code-review, and pass --quality-gate-json with APPROVE + CLEAR evidence.
+  Non-clean final review must use record-review-blockers before clearing the /goal.
+`;
+function hasFlag(args, flag) {
+    return args.includes(flag);
+}
+function readValue(args, flag) {
+    const index = args.indexOf(flag);
+    if (index >= 0)
+        return args[index + 1];
+    const prefix = `${flag}=`;
+    return args.find((arg) => arg.startsWith(prefix))?.slice(prefix.length);
+}
+function readRepeated(args, flag) {
+    const values = [];
+    const prefix = `${flag}=`;
+    for (let index = 0; index < args.length; index++) {
+        const arg = args[index];
+        if (arg === flag && args[index + 1]) {
+            values.push(args[index + 1]);
+            index += 1;
+        }
+        else if (arg.startsWith(prefix)) {
+            values.push(arg.slice(prefix.length));
+        }
+    }
+    return values;
+}
+function parseGoalArg(raw) {
+    const [title, ...rest] = raw.split('::');
+    if (rest.length === 0)
+        return { objective: raw.trim() };
+    return { title: title.trim(), objective: rest.join('::').trim() };
+}
+async function readStdin() {
+    const chunks = [];
+    for await (const chunk of process.stdin)
+        chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
+    return Buffer.concat(chunks).toString('utf-8');
+}
+function positionalText(args) {
+    const valueTaking = new Set(['--brief', '--brief-file', '--goal', '--goal-id', '--status', '--evidence', '--claude-goal-json', '--claude-goal-mode', '--title', '--objective', '--quality-gate-json', '--plan-id']);
+    const words = [];
+    for (let i = 0; i < args.length; i++) {
+        const arg = args[i];
+        if (valueTaking.has(arg)) {
+            i += 1;
+            continue;
+        }
+        if ([...valueTaking].some((flag) => arg.startsWith(`${flag}=`)))
+            continue;
+        if (arg.startsWith('--'))
+            continue;
+        words.push(arg);
+    }
+    return words.join(' ').trim();
+}
+function printJson(value) {
+    console.log(JSON.stringify(value, null, 2));
+}
+function normalizeClaudeGoalMode(raw) {
+    if (!raw)
+        return undefined;
+    if (raw === 'aggregate')
+        return 'aggregate';
+    if (raw === 'per-story' || raw === 'per_story')
+        return 'per_story';
+    throw new UltragoalError('Invalid --claude-goal-mode; expected aggregate or per-story.');
+}
+function printStatus(plan) {
+    const summary = summarizeUltragoalPlan(plan);
+    if (summary.aggregateComplete) {
+        console.log('ultragoal aggregate product: complete');
+        console.log(`microgoal ledger bookkeeping (progress-only): ${summary.complete}/${summary.total} complete, ${summary.pending} pending, ${summary.inProgress} in progress, ${summary.failed} failed, ${summary.reviewBlocked} review-blocked`);
+    }
+    else {
+        console.log(`ultragoal: ${summary.complete}/${summary.total} complete, ${summary.pending} pending, ${summary.inProgress} in progress, ${summary.failed} failed, ${summary.reviewBlocked} review-blocked`);
+    }
+    for (const goal of plan.goals) {
+        const marker = goal.id === plan.activeGoalId ? '*' : '-';
+        console.log(`${marker} ${goal.id} [${goal.status}] ${goal.title}`);
+    }
+}
+async function parseClaudeGoalJson(raw) {
+    if (!raw)
+        return undefined;
+    return readClaudeGoalSnapshotInput(raw, process.cwd());
+}
+async function readJsonInput(raw) {
+    if (!raw)
+        return undefined;
+    try {
+        const trimmed = raw.trim();
+        if (trimmed.startsWith('{') || trimmed.startsWith('['))
+            return JSON.parse(trimmed);
+        return JSON.parse(await readFile(trimmed, 'utf-8'));
+    }
+    catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        throw new UltragoalError(`Invalid --quality-gate-json: ${message}`);
+    }
+}
+export async function ultragoalCommand(args) {
+    const command = args[0] ?? 'help';
+    const rest = args.slice(1);
+    const json = hasFlag(rest, '--json');
+    const cwd = process.cwd();
+    try {
+        if (command === 'help' || command === '--help' || command === '-h') {
+            console.log(ULTRAGOAL_HELP);
+            return;
+        }
+        if (command === 'create' || command === 'create-goals') {
+            const briefFile = readValue(rest, '--brief-file');
+            const brief = readValue(rest, '--brief')
+                ?? (briefFile ? await readFile(briefFile, 'utf-8') : undefined)
+                ?? (hasFlag(rest, '--from-stdin') ? await readStdin() : undefined)
+                ?? positionalText(rest);
+            if (!brief.trim())
+                throw new UltragoalError('Missing brief text. Pass --brief, --brief-file, --from-stdin, or positional text.');
+            const goals = readRepeated(rest, '--goal').map(parseGoalArg);
+            const plan = await createUltragoalPlan(cwd, {
+                brief,
+                goals,
+                claudeGoalMode: normalizeClaudeGoalMode(readValue(rest, '--claude-goal-mode')),
+                force: hasFlag(rest, '--force'),
+                planId: readValue(rest, '--plan-id'),
+                autoPlanId: hasFlag(rest, '--auto-plan-id'),
+            });
+            if (json)
+                printJson({ ok: true, plan, planId: plan.planId, summary: summarizeUltragoalPlan(plan) });
+            else {
+                console.log(`ultragoal plan created: ${plan.goals.length} goal(s)`);
+                if (plan.planId)
+                    console.log(`plan id: ${plan.planId}`);
+                console.log(`brief: ${plan.briefPath}`);
+                console.log(`goals: ${plan.goalsPath}`);
+                console.log(`ledger: ${plan.ledgerPath}`);
+                if (plan.planId) {
+                    console.log('');
+                    console.log(`Subsequent commands MUST pass --plan-id ${plan.planId} (or run in a workspace where this is the only plan).`);
+                }
+            }
+            return;
+        }
+        if (command === 'list-plans') {
+            const ids = await listUltragoalPlanIds(cwd);
+            if (json)
+                printJson({ ok: true, plans: ids });
+            else if (ids.length === 0)
+                console.log('ultragoal: no multi-plans (use --plan-id or --auto-plan-id with create-goals to create one).');
+            else
+                for (const id of ids)
+                    console.log(id);
+            return;
+        }
+        if (command === 'status') {
+            const planId = await resolveActivePlanId(cwd, readValue(rest, '--plan-id'));
+            const plan = await readUltragoalPlan(cwd, planId);
+            const snapshot = await readClaudeGoalSnapshotInput(readValue(rest, '--claude-goal-json'), cwd);
+            const activeGoal = plan.goals.find((goal) => goal.id === plan.activeGoalId || goal.status === 'in_progress');
+            const expectedObjective = plan.claudeGoalMode === 'aggregate'
+                ? plan.claudeObjective
+                : activeGoal?.objective;
+            const reconciliation = activeGoal
+                ? reconcileClaudeGoalSnapshot(snapshot, {
+                    expectedObjective: expectedObjective ?? activeGoal.objective,
+                    allowedStatuses: plan.claudeGoalMode === 'aggregate' ? ['active'] : ['active', 'complete'],
+                    requireSnapshot: false,
+                })
+                : null;
+            if (json)
+                printJson({ plan, summary: summarizeUltragoalPlan(plan), reconciliation });
+            else {
+                printStatus(plan);
+                if (reconciliation && !reconciliation.ok)
+                    console.log(`claude goal warning: ${formatClaudeGoalReconciliation(reconciliation)}`);
+                else if (reconciliation?.warnings.length)
+                    console.log(`claude goal warning: ${formatClaudeGoalReconciliation(reconciliation)}`);
+            }
+            return;
+        }
+        if (command === 'add-goal') {
+            const title = readValue(rest, '--title');
+            const objective = readValue(rest, '--objective');
+            if (!title?.trim())
+                throw new UltragoalError('Missing --title.');
+            if (!objective?.trim())
+                throw new UltragoalError('Missing --objective.');
+            const planId = await resolveActivePlanId(cwd, readValue(rest, '--plan-id'));
+            const result = await addUltragoalGoal(cwd, { title, objective, evidence: readValue(rest, '--evidence'), planId });
+            if (json)
+                printJson({ ok: true, plan: result.plan, addedGoal: result.goal, summary: summarizeUltragoalPlan(result.plan) });
+            else {
+                console.log(`ultragoal added goal: ${result.goal.id}`);
+                printStatus(result.plan);
+            }
+            return;
+        }
+        if (command === 'record-review-blockers') {
+            const goalId = readValue(rest, '--goal-id');
+            const title = readValue(rest, '--title');
+            const objective = readValue(rest, '--objective');
+            const evidence = readValue(rest, '--evidence');
+            if (!goalId)
+                throw new UltragoalError('Missing --goal-id.');
+            if (!title?.trim())
+                throw new UltragoalError('Missing --title.');
+            if (!objective?.trim())
+                throw new UltragoalError('Missing --objective.');
+            if (!evidence?.trim())
+                throw new UltragoalError('Missing --evidence.');
+            const claudeGoal = await parseClaudeGoalJson(readValue(rest, '--claude-goal-json'));
+            const planId = await resolveActivePlanId(cwd, readValue(rest, '--plan-id'));
+            const result = await recordFinalReviewBlockers(cwd, { goalId, title, objective, evidence, claudeGoal, planId });
+            if (json)
+                printJson({ ok: true, plan: result.plan, blockedGoal: result.blockedGoal, addedGoal: result.addedGoal, summary: summarizeUltragoalPlan(result.plan) });
+            else {
+                console.log(`ultragoal final review blockers recorded: ${result.blockedGoal.id} -> review_blocked; added ${result.addedGoal.id}`);
+                printStatus(result.plan);
+            }
+            return;
+        }
+        if (command === 'complete' || command === 'complete-goals' || command === 'next' || command === 'start-next') {
+            const planId = await resolveActivePlanId(cwd, readValue(rest, '--plan-id'));
+            const goalId = positionalText(rest);
+            if (goalId.split(/\s+/).filter(Boolean).length > 1)
+                throw new UltragoalError('Expected at most one positional ultragoal id.');
+            const result = await startNextUltragoal(cwd, { retryFailed: hasFlag(rest, '--retry-failed'), goalId: goalId || undefined, planId });
+            if (!result.goal) {
+                if (json)
+                    printJson({ ok: true, done: result.done, summary: summarizeUltragoalPlan(result.plan) });
+                else
+                    console.log(result.done ? 'ultragoal: all goals complete' : 'ultragoal: no pending goals (use --retry-failed to retry failed goals)');
+                return;
+            }
+            const instruction = buildClaudeGoalInstruction(result.goal, result.plan);
+            if (json)
+                printJson({ ok: true, resumed: result.resumed, goal: result.goal, instruction });
+            else
+                console.log(instruction);
+            return;
+        }
+        if (command === 'checkpoint') {
+            const goalId = readValue(rest, '--goal-id');
+            const status = readValue(rest, '--status');
+            if (!goalId)
+                throw new UltragoalError('Missing --goal-id.');
+            if (status !== 'complete' && status !== 'failed' && status !== 'blocked')
+                throw new UltragoalError('Missing or invalid --status; expected complete, failed, or blocked.');
+            const evidence = readValue(rest, '--evidence');
+            const claudeGoal = await parseClaudeGoalJson(readValue(rest, '--claude-goal-json'));
+            const qualityGate = await readJsonInput(readValue(rest, '--quality-gate-json'));
+            const planId = await resolveActivePlanId(cwd, readValue(rest, '--plan-id'));
+            const plan = await checkpointUltragoal(cwd, { goalId, status, evidence, claudeGoal, qualityGate, planId });
+            if (json)
+                printJson({ ok: true, plan, summary: summarizeUltragoalPlan(plan) });
+            else {
+                const goal = plan.goals.find((candidate) => candidate.id === goalId);
+                console.log(`ultragoal checkpoint: ${goalId} -> ${goal?.status ?? status}`);
+                printStatus(plan);
+            }
+            return;
+        }
+        throw new UltragoalError(`Unknown ultragoal command: ${command}\n\n${ULTRAGOAL_HELP}`);
+    }
+    catch (error) {
+        if (error instanceof UltragoalError || error instanceof ClaudeGoalSnapshotError) {
+            console.error(`[ultragoal] ${error.message}`);
+            process.exitCode = 1;
+            return;
+        }
+        throw error;
+    }
+}
+//# sourceMappingURL=ultragoal.js.map
