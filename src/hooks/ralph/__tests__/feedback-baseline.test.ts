@@ -181,6 +181,15 @@ describe('diffAgainstBaseline', () => {
     expect(diff.newSignatures).toEqual(['test: <command became unrunnable>']);
   });
 
+  it('reports a new timeout as its own signal and a baseline timeout as noise', () => {
+    expect(
+      diffAgainstBaseline(baseline({ test: { signatures: [] } }), { test: { signatures: [], timedOut: true } }).newSignatures,
+    ).toEqual(['test: <command timed out>']);
+    expect(
+      diffAgainstBaseline(baseline({ test: { signatures: [], timedOut: true } }), { test: { signatures: [], timedOut: true } }).newSignatures,
+    ).toEqual([]);
+  });
+
   it('treats a command missing from the baseline as all-new, and a same-shape unrunnable as noise', () => {
     expect(diffAgainstBaseline(baseline({}), { lint: { signatures: ['FAIL lint'] } }).newSignatures).toEqual(['lint: FAIL lint']);
     expect(
