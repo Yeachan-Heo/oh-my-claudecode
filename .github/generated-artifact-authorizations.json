@@ -43031,13 +43031,13 @@
     {
       "pullNumber": 4887,
       "targetRef": "main",
-      "mergeBaseSha": "d10c16530a13c8e0f2b994ac0447190f71296082",
-      "headSha": "416a45a5466e6174bf61c0c877663af422a526cd",
+      "mergeBaseSha": "5601ccbc61f4f909355272c8090613af31570272",
+      "headSha": "38282ceef6da6521daaee2c675c7d57c92e44bbb",
       "owner": "Yeachan-Heo",
       "expiresAt": "2027-01-08T00:00:00.000Z",
       "generatedDelta": {
-        "count": 44,
-        "sha256": "66f200560561f32fcec051e144029f44f850525b1a84ca9b79c0a0392bd21775"
+        "count": 56,
+        "sha256": "f15f8a35377d971be5e1871863087edf813c44d366b78a6a25dc8c5500a0297b"
       },
       "generatedFiles": [
         {
@@ -43137,6 +43137,30 @@
           "previousFilename": null
         },
         {
+          "status": "added",
+          "filename": "dist/cli/__tests__/ralph-closeout.test.d.ts",
+          "sha": "241c866d208b60a07f75ba2ea9d665593d3d1a8c",
+          "previousFilename": null
+        },
+        {
+          "status": "added",
+          "filename": "dist/cli/__tests__/ralph-closeout.test.d.ts.map",
+          "sha": "f8ebb0fbea1d527b09e42be9782bb1092452e7b9",
+          "previousFilename": null
+        },
+        {
+          "status": "added",
+          "filename": "dist/cli/__tests__/ralph-closeout.test.js",
+          "sha": "5677339a77cc1e46499b9c5370987cccb17af0df",
+          "previousFilename": null
+        },
+        {
+          "status": "added",
+          "filename": "dist/cli/__tests__/ralph-closeout.test.js.map",
+          "sha": "7533e71fe679f5071be2b9e977acfc98dfceeb62",
+          "previousFilename": null
+        },
+        {
           "status": "modified",
           "filename": "dist/cli/commands/ralph.d.ts",
           "sha": "4ec3a83f8142b7ed4eed03167076d4a9f109bb38",
@@ -43209,6 +43233,30 @@
           "previousFilename": null
         },
         {
+          "status": "added",
+          "filename": "dist/hooks/ralph/__tests__/closeout.test.d.ts",
+          "sha": "f015d06b872a29a826b604bd2b0b58987dbe8458",
+          "previousFilename": null
+        },
+        {
+          "status": "added",
+          "filename": "dist/hooks/ralph/__tests__/closeout.test.d.ts.map",
+          "sha": "1b978b4f74851d595dc18707c27e7e42080af980",
+          "previousFilename": null
+        },
+        {
+          "status": "added",
+          "filename": "dist/hooks/ralph/__tests__/closeout.test.js",
+          "sha": "70b5da13d110067dff4eba12f812e16c6dd8fc85",
+          "previousFilename": null
+        },
+        {
+          "status": "added",
+          "filename": "dist/hooks/ralph/__tests__/closeout.test.js.map",
+          "sha": "7a67a0cff3b120b9bcfc5fa19bea30fe1245f4e3",
+          "previousFilename": null
+        },
+        {
           "status": "modified",
           "filename": "dist/hooks/ralph/__tests__/feedback-baseline.test.js",
           "sha": "6fa75bf1d6de3d1714bfb0e76024f955043de0a6",
@@ -43218,6 +43266,30 @@
           "status": "modified",
           "filename": "dist/hooks/ralph/__tests__/feedback-baseline.test.js.map",
           "sha": "a7eb7c6afe39ec5c1e9a497d379da1ade03b6ea9",
+          "previousFilename": null
+        },
+        {
+          "status": "added",
+          "filename": "dist/hooks/ralph/closeout.d.ts",
+          "sha": "e880018fe1ead1a55f04ac6ae2e5674a00928f4d",
+          "previousFilename": null
+        },
+        {
+          "status": "added",
+          "filename": "dist/hooks/ralph/closeout.d.ts.map",
+          "sha": "de6bdcaa1f792aa9944821a8a9afc3bd8033f66f",
+          "previousFilename": null
+        },
+        {
+          "status": "added",
+          "filename": "dist/hooks/ralph/closeout.js",
+          "sha": "528a693be7305e8e0bfe2df1a9db429d3e5d2ea9",
+          "previousFilename": null
+        },
+        {
+          "status": "added",
+          "filename": "dist/hooks/ralph/closeout.js.map",
+          "sha": "bbde4ccd031f0006716343d91a77e22e76bcc25e",
           "previousFilename": null
         },
         {
