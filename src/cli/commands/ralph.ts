@@ -612,7 +612,7 @@ export function ralphVerify(options: { json?: boolean; session?: string; writeBa
     return 0;
   }
 
-  const runGate = (): number => {
+  const runGate = (lock?: ReturnType<typeof acquireFileLockSync>): number => {
     // Re-read under the lock: a concurrent run may have re-recorded it.
     const gateBaseline = readCurrentBaseline();
     const current: Record<string, CommandBaseline> = {};
@@ -620,6 +620,9 @@ export function ralphVerify(options: { json?: boolean; session?: string; writeBa
     const unrunnableCommands = Object.entries(current).filter(([, entry]) => entry.unrunnable).map(([command]) => command);
     const timedOutCommands = Object.entries(current).filter(([, entry]) => entry.timedOut).map(([command]) => command);
     if (options.writeBaseline) {
+      // Release the outer lock before writing: recordBaseline has its own inner lock,
+      // and holding the outer lock would prevent the inner lock from being acquired.
+      if (lock) releaseFileLockSync(lock);
       const result = path ? recordBaseline(path, current, now) : { written: false, added: 0, removed: 0 };
       const { written, previousPath } = result;
       const transitionNote = result.becameUnrunnable?.length
@@ -706,7 +709,8 @@ export function ralphVerify(options: { json?: boolean; session?: string; writeBa
   if (options.writeBaseline) return runGate();
   
   // Two concurrent gates compete for the same machine and can interleave their
-  // reads and re-records. Serialize on the baseline itself.
+  // reads and re-records. Serialize on the baseline itself for reading commands.
+  // For writing, recordBaseline has its own inner lock.
   let lock: ReturnType<typeof acquireFileLockSync> = null;
   let lockError: string | null = null;
   try {
@@ -726,7 +730,7 @@ export function ralphVerify(options: { json?: boolean; session?: string; writeBa
     return 1;
   }
   try {
-    return runGate();
+    return runGate(lock);
   } finally {
     releaseFileLockSync(lock);
   }
