@@ -4,6 +4,2282 @@
   "owner": "Yeachan-Heo",
   "authorizations": [
     {
+      "pullNumber": 4852,
+      "targetRef": "main",
+      "mergeBaseSha": "0564555b63dfedd158669c6799d53743abd7d6bf",
+      "headSha": "c67b2d1c6e09662455779958445c1b415d77c057",
+      "owner": "Yeachan-Heo",
+      "expiresAt": "2027-02-08T00:00:00.000Z",
+      "generatedDelta": {
+        "count": 377,
+        "sha256": "fb58db35b3629129fe3d5e7236acd43666b469ff5f237c57c4c3704ef49829b4"
+      },
+      "generatedFiles": [
+        {
+          "status": "modified",
+          "filename": "bridge/claude-md-coordinator.cjs",
+          "sha": "27645c74a7fa5ca134424d5f2846e26f9fb5401b",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "bridge/cli.cjs",
+          "sha": "41a624709b2f4f9accd4f50326d5cd8439b1e728",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "bridge/runtime-cli.cjs",
+          "sha": "41ca364a1aa3ef51511df905bececd12d07ab611",
+          "previousFilename": null
+        },
+        {
+          "status": "removed",
+          "filename": "bridge/team-bridge.cjs",
+          "sha": "4e5f9651b2e598d80a4cac8813b8d3a614810bf1",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "bridge/team-mcp.cjs",
+          "sha": "4a0f41d56a86ce88a4d35a0269cad1d68c38591b",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "bridge/team.js",
+          "sha": "05eaa9e80f3643cc8b1f07c2e1ae7a4c10e4c2e7",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/__tests__/cli-config-stop-callback.test.js",
+          "sha": "445b68d9ad06efcb7508a3f788e32afd6f5f7058",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/__tests__/cli-config-stop-callback.test.js.map",
+          "sha": "bac98d20d9cef92c8158578d0314add00794b6ab",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/__tests__/hud-windows.test.js",
+          "sha": "004603bb6b0ed35e96d7f428121dce56775feb7d",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/__tests__/hud-windows.test.js.map",
+          "sha": "1c62966e06deec8afd839d360ab56b4b51e91554",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/__tests__/hud/windows-platform.test.js",
+          "sha": "a509668e47ba7c336559d7466c8cc5b94432219b",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/__tests__/hud/windows-platform.test.js.map",
+          "sha": "0941c5911225866ac35f039a68b6eee670342d14",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/__tests__/npm-package-bin-surface.test.js",
+          "sha": "51ea4cc64a1ba9196a60c56aff196d0ffec6fdc1",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/__tests__/npm-package-bin-surface.test.js.map",
+          "sha": "4673ec387abdbfc861eb0501f6f8ab766720de71",
+          "previousFilename": null
+        },
+        {
+          "status": "removed",
+          "filename": "dist/__tests__/outbox-reader-partial-lines.test.d.ts",
+          "sha": "87ff2674d6ad42241ab08db0d452946c70661c46",
+          "previousFilename": null
+        },
+        {
+          "status": "removed",
+          "filename": "dist/__tests__/outbox-reader-partial-lines.test.d.ts.map",
+          "sha": "b1613c5779e3e5bd74f4d0b24efd37ff66b71fd5",
+          "previousFilename": null
+        },
+        {
+          "status": "removed",
+          "filename": "dist/__tests__/outbox-reader-partial-lines.test.js",
+          "sha": "a16eb8df473ba04f8dd5728b0692e2114afcd3bf",
+          "previousFilename": null
+        },
+        {
+          "status": "removed",
+          "filename": "dist/__tests__/outbox-reader-partial-lines.test.js.map",
+          "sha": "0e15b470b79e817a2cad14f16b739aa3388ad001",
+          "previousFilename": null
+        },
+        {
+          "status": "removed",
+          "filename": "dist/__tests__/permission-enforcement.test.d.ts",
+          "sha": "c0272ca9f15278291e600d9533a813c4e9972447",
+          "previousFilename": null
+        },
+        {
+          "status": "removed",
+          "filename": "dist/__tests__/permission-enforcement.test.d.ts.map",
+          "sha": "af79f0bd786f43b597ddfab234eec1d4a67104d7",
+          "previousFilename": null
+        },
+        {
+          "status": "removed",
+          "filename": "dist/__tests__/permission-enforcement.test.js",
+          "sha": "a195c505deac66c6d491cb34eea971adb2a0c366",
+          "previousFilename": null
+        },
+        {
+          "status": "removed",
+          "filename": "dist/__tests__/permission-enforcement.test.js.map",
+          "sha": "b20b7925a65559ac1054bf61ded5c9264312deda",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/__tests__/plugin-skill-budget.test.js",
+          "sha": "a6cd2ad43b6cfcb6aa06891406fd776182388029",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/__tests__/plugin-skill-budget.test.js.map",
+          "sha": "e08bcfb541370e275b8795477a27b53e02696dc3",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/__tests__/preemptive-compaction-hook.test.js",
+          "sha": "1fd44a80810ccc98c695977ba1b5438ab3dfd470",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/__tests__/preemptive-compaction-hook.test.js.map",
+          "sha": "7f5317a1836f467f5b9b34690899ef1f8ea88d14",
+          "previousFilename": null
+        },
+        {
+          "status": "removed",
+          "filename": "dist/__tests__/protected-mode-regressions.test.d.ts",
+          "sha": "cb7288f4b651fdd24aec8a853060e021eaaec6a3",
+          "previousFilename": null
+        },
+        {
+          "status": "removed",
+          "filename": "dist/__tests__/protected-mode-regressions.test.d.ts.map",
+          "sha": "7dce41ce7ae11a4146d35c48748a2fae4a57f62a",
+          "previousFilename": null
+        },
+        {
+          "status": "removed",
+          "filename": "dist/__tests__/protected-mode-regressions.test.js",
+          "sha": "a0fe68c7bf9c8a19fd693e881fd5db37d4500605",
+          "previousFilename": null
+        },
+        {
+          "status": "removed",
+          "filename": "dist/__tests__/protected-mode-regressions.test.js.map",
+          "sha": "c925b0ccb0f9d3372de9e49756b368a73612d0d6",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/__tests__/session-end-process-exit.test.js",
+          "sha": "535da06c06187c6f73e0d569eb81ce0d3935c636",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/__tests__/session-end-process-exit.test.js.map",
+          "sha": "216882357728242b4bcfb364f5e56f40a401ac39",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/__tests__/skills.test.js",
+          "sha": "9d424566627744782d8b65cb3b6d833d32816638",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/__tests__/skills.test.js.map",
+          "sha": "2cd6ad4bc1dcdd2a1faa2fc6bafe53a247be605b",
+          "previousFilename": null
+        },
+        {
+          "status": "removed",
+          "filename": "dist/__tests__/team-status-failed-count.test.d.ts",
+          "sha": "fdec5888902016b235fc6524f052c8e60e4db602",
+          "previousFilename": null
+        },
+        {
+          "status": "removed",
+          "filename": "dist/__tests__/team-status-failed-count.test.d.ts.map",
+          "sha": "e8017845555a399a6f026d307dd32bd14155a97b",
+          "previousFilename": null
+        },
+        {
+          "status": "removed",
+          "filename": "dist/__tests__/team-status-failed-count.test.js",
+          "sha": "fc7ff31367d2948e0bd364bad3250dcb8891cbab",
+          "previousFilename": null
+        },
+        {
+          "status": "removed",
+          "filename": "dist/__tests__/team-status-failed-count.test.js.map",
+          "sha": "594d113f17a43f78292349f4fc96cd9ceeecf936",
+          "previousFilename": null
+        },
+        {
+          "status": "removed",
+          "filename": "dist/__tests__/team-status-tmux-provider.test.d.ts",
+          "sha": "3222eaa445eada397a79dc0971c494b9aca2e7b3",
+          "previousFilename": null
+        },
+        {
+          "status": "removed",
+          "filename": "dist/__tests__/team-status-tmux-provider.test.d.ts.map",
+          "sha": "4dd51fa361231f46a3f9d94b2e439f1039b29521",
+          "previousFilename": null
+        },
+        {
+          "status": "removed",
+          "filename": "dist/__tests__/team-status-tmux-provider.test.js",
+          "sha": "5b146a75f79dd47f0507c17a6cfd16d1cc7cbe9d",
+          "previousFilename": null
+        },
+        {
+          "status": "removed",
+          "filename": "dist/__tests__/team-status-tmux-provider.test.js.map",
+          "sha": "fe8348ea8f326eecfdbe78dde5f94146e9a0d05e",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/alias-retirement/__tests__/registry.test.js",
+          "sha": "d57aa3b00be54cc8cc50c590f10ca0b16378498b",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/alias-retirement/__tests__/registry.test.js.map",
+          "sha": "c05a5e4799354851e360dc83cfbc8edcdd57c3ed",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/cli/__tests__/team.test.js",
+          "sha": "97c05efd15854a237063f71d5b57e651b3acb245",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/cli/__tests__/team.test.js.map",
+          "sha": "ae2a0a3d50885f1f77cde612212d075655939131",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/cli/index.d.ts.map",
+          "sha": "7a71da711575d2f8eff120e7fbb4eb31714e0b99",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/cli/index.js",
+          "sha": "2600624826671ede5c8215b29c10d53476732b20",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/cli/index.js.map",
+          "sha": "d7215ef21bfea981e5d6206b7cb7e5e81ff684d4",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/cli/team.d.ts.map",
+          "sha": "37ec41810e399c430242c4cc813a6ba66a28a850",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/cli/team.js",
+          "sha": "94494d798e9ba124a8fa38b921f4943126abb204",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/cli/team.js.map",
+          "sha": "3db6672e2e72ad20ef53788dccced350a3b9943b",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/features/__tests__/jev-model-routing.test.js",
+          "sha": "118be4e9f28a4e1b40aa7e694556f83eff2c9aab",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/features/__tests__/jev-model-routing.test.js.map",
+          "sha": "dab60abb1a9aaf901834895d27cc25129689fbaf",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/features/index.d.ts",
+          "sha": "5f35ef808eff38866ca27bdd1bee2b466bfa9046",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/features/index.d.ts.map",
+          "sha": "6fecfeb61cde52e79b736754c5f80504b456fcd8",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/features/index.js",
+          "sha": "9c280b4dcf45381cda43d6a6efc1198bf7fec3a3",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/features/index.js.map",
+          "sha": "a0cf920116cb36723bd31c3975f85b3b598a6cac",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/features/jev-model-routing.d.ts.map",
+          "sha": "2f3aa947d9ec684f2fd9ceedeb73e620b17df30f",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/features/jev-model-routing.js.map",
+          "sha": "ddc551bb1582fc92207add375d1aa664f2112864",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/features/jev-slop-warning.d.ts.map",
+          "sha": "6d1e423f11cbe13617e30f9845ad135221cb9e9c",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/features/jev-slop-warning.js.map",
+          "sha": "5cd9f125624fcad1ac0a80f7bccdaca917ae05ac",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/hooks/code-simplifier/jev-shadow.d.ts.map",
+          "sha": "f388a0949784210eeda0f980b6616a4fbf584e45",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/hooks/code-simplifier/jev-shadow.js.map",
+          "sha": "b8108d1aee8cb23ab8d1e462e80c8bec2f781746",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/hooks/jev/__tests__/active-mode.test.js",
+          "sha": "9caaaeb49fce931bf9b5ad8c1fc5ef91c713e8e7",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/hooks/jev/__tests__/active-mode.test.js.map",
+          "sha": "f50b6d4b2fdbaafb6251ec667d9b53b69c248a95",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/hooks/jev/__tests__/resolver.test.js",
+          "sha": "f7c14e413e2f705fe87c9c3ec865e305edda0d1e",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/hooks/jev/__tests__/resolver.test.js.map",
+          "sha": "3df1bf8349da2ee04faa858de8b5e4928c5ceaf5",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/hooks/jev/config.d.ts",
+          "sha": "0c5596541b07c0256e83c5ff277f16107a08f202",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/hooks/jev/config.d.ts.map",
+          "sha": "8964ace489aca21eb9f6f2dffc938f2dabc4087c",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/hooks/jev/config.js",
+          "sha": "a584067d9f2ba24aed12895368ab8b92950fecad",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/hooks/jev/config.js.map",
+          "sha": "47ce94ac2bedbf2359f972fd041b42e837c355cd",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/hooks/jev/points.d.ts.map",
+          "sha": "0fc395026843ee86384ee7adb1a2974112fec9a4",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/hooks/jev/points.js",
+          "sha": "2cf89f74040b093d299166b79ed33518c784fe73",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/hooks/jev/points.js.map",
+          "sha": "639cd24870957340d97ca38aef9546a0fb8080c2",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/hooks/jev/resolver.d.ts.map",
+          "sha": "05e6ef0f92e8a169a424399cc2d0d5428716f93c",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/hooks/jev/resolver.js",
+          "sha": "57823f4c728027e4f286da7fd1d65e872e47b633",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/hooks/jev/resolver.js.map",
+          "sha": "c2b6a33ad85d77d892b08b94f9014bece858c923",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/hooks/keyword-detector/__tests__/jev-shadow.test.js",
+          "sha": "85ebe756e5dc772a434daec4a6230b5e26f2ac2e",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/hooks/keyword-detector/__tests__/jev-shadow.test.js.map",
+          "sha": "be8c0f60baa0ed06339176006d994c9fb14c2918",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/hooks/keyword-detector/index.d.ts.map",
+          "sha": "d0cd2a5793c3d6f33c22f64cd6b4c899a87c4287",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/hooks/keyword-detector/index.js.map",
+          "sha": "080f9aa6f551c6e6182924d28790a98b57a9dbd4",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/hooks/keyword-detector/jev-shadow.d.ts.map",
+          "sha": "0f2326b907d8f69b08672fb96e9e924444b5d74d",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/hooks/keyword-detector/jev-shadow.js.map",
+          "sha": "4b4467ade3d823dffbe5a6306af87ae8362ca917",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/hooks/learner/__tests__/jev-extraction-shadow.test.js",
+          "sha": "e85a37194cd87c063cda369c8ff7537ee096f642",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/hooks/learner/__tests__/jev-extraction-shadow.test.js.map",
+          "sha": "d272e1912e737a9e501949c27f9ae67542a76829",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/hooks/learner/jev-shadow.d.ts.map",
+          "sha": "b1c5bf318d1c1f4ec28821e55435ab4efcb69820",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/hooks/learner/jev-shadow.js.map",
+          "sha": "86881d1989401d1c46eba584093353bb4f44e33e",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/hooks/persistent-mode/__tests__/error-handling.test.js",
+          "sha": "e47f37d4a5da2b70db391e65e4b077cc0950b8dd",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/hooks/persistent-mode/__tests__/error-handling.test.js.map",
+          "sha": "f4854dc1f3d8f24b50510bb07f912f8567bbd90e",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/hooks/persistent-mode/__tests__/jev-loop-continuation-shadow.test.js",
+          "sha": "fc0fa760635a56b293620e12df176f938598e516",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/hooks/persistent-mode/__tests__/jev-loop-continuation-shadow.test.js.map",
+          "sha": "20bfadda16981e989e2ff9c5c868e4033af4fa83",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/hooks/persistent-mode/jev-shadow.d.ts.map",
+          "sha": "3b109cfc74c88fb5d95d688b8164ab5abefc1788",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/hooks/persistent-mode/jev-shadow.js.map",
+          "sha": "a3a689651f2b1bb6efb63a1db56ea47f193477b4",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/hooks/preemptive-compaction/__tests__/jev-shadow.test.js",
+          "sha": "9d6639a06b36561b7a9aa26d0a34688b7b9472e9",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/hooks/preemptive-compaction/__tests__/jev-shadow.test.js.map",
+          "sha": "22045c37d10bb68dd4b7464ff2a5912c955c55bd",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/hooks/preemptive-compaction/jev-shadow.d.ts.map",
+          "sha": "3cd08a7cbc254d8cff76e0ed94bf890f5c877924",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/hooks/preemptive-compaction/jev-shadow.js.map",
+          "sha": "49965eb76d68c55406e440c357726702647e5aa4",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/hooks/ralph/__tests__/feedback-baseline.test.js",
+          "sha": "56ff1c396ce423c0594e52a818313235eb44a8fa",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/hooks/ralph/__tests__/feedback-baseline.test.js.map",
+          "sha": "73695427bc3d40c2e761a64e5db7314d112b0469",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/hooks/ralph/feedback-baseline.d.ts.map",
+          "sha": "e67b41b4dfb1c1e72e68a3e4a9263051db0a0df2",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/hooks/ralph/feedback-baseline.js",
+          "sha": "a96cfa6b18668645920321750b79ca2edec7c7df",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/hooks/ralph/feedback-baseline.js.map",
+          "sha": "4642cd936b2cb097a128beb23cc8348ea064c237",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/hooks/ralph/jev-shadow.d.ts.map",
+          "sha": "61c80635737bd345e48ebf8e23a746d2214bed5c",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/hooks/ralph/jev-shadow.js.map",
+          "sha": "6e5dadc4fcf14c00968fb33b3db77d9b926058ff",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/hooks/session-end/__tests__/cleanup-manifest.test.js",
+          "sha": "000d3643eaf692cd6d266168518a108ad4673c88",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/hooks/session-end/__tests__/cleanup-manifest.test.js.map",
+          "sha": "215375604dd2994b58622632181c1830793ec3cc",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/hooks/session-end/__tests__/worker.test.js",
+          "sha": "6e411c09c8627db8b8e3eff220ebbfab04293013",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/hooks/session-end/__tests__/worker.test.js.map",
+          "sha": "92957707aa740a2b8c5d6c7273a0765c50955044",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/hooks/session-end/cleanup-manifest.d.ts.map",
+          "sha": "555ffaf8806a7e7f961bef5b241cc77f4451c4e8",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/hooks/session-end/cleanup-manifest.js",
+          "sha": "13cc6be9a2eab7fc1f2732d71bcc92da780dfa69",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/hooks/session-end/cleanup-manifest.js.map",
+          "sha": "c97f010f7b57970af46f31914c737913d5450da0",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/hooks/session-end/worker.d.ts.map",
+          "sha": "7db756b93b0eeadfc5de51bef2fc9530e88961d7",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/hooks/session-end/worker.js",
+          "sha": "233c469594c5f702ab5f96256831ab55a8217dd3",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/hooks/session-end/worker.js.map",
+          "sha": "38b021ef4b318a9c95945ec9aac97143b090580d",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/hooks/task-size-detector/__tests__/jev-shadow.test.js",
+          "sha": "320227a0b5aa123154cb5d79b77cd4b6788242a8",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/hooks/task-size-detector/__tests__/jev-shadow.test.js.map",
+          "sha": "1e8cce86ec9df46313bcb624f547e456e89eb1c9",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/hooks/task-size-detector/jev-shadow.d.ts.map",
+          "sha": "8e3d56dc7e7c4777ab067f6f29bb119f4bf45db5",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/hooks/task-size-detector/jev-shadow.js.map",
+          "sha": "58eeac075e026f1552ee31725532435034f97aee",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/hud/elements/index.d.ts",
+          "sha": "3f992e9d6da40e75a0fe8636719c292b489e3f41",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/hud/elements/index.d.ts.map",
+          "sha": "9fa76b76370d980e7560016fa436ea8906478cb5",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/hud/elements/index.js",
+          "sha": "ff64fe0e334a697a24751008ffbd1e755d3e900a",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/hud/elements/index.js.map",
+          "sha": "56ce6cdf39c6ae90f760ed8bc35915179ee57786",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/hud/render.d.ts.map",
+          "sha": "3a138b37ce1872d52011e1ef916ec5acc60df375",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/hud/render.js",
+          "sha": "e031eabe9846bb70cf2316585f4b2b8365a2e5bf",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/hud/render.js.map",
+          "sha": "49ca60a097f457841fe90f06a2b2f96131782f90",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/hud/types.d.ts",
+          "sha": "7aa1a3b4cbdc50ab5ea0e262788b23b89c911822",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/hud/types.d.ts.map",
+          "sha": "ab7f622967083961d027ca2570cec36cb23db234",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/hud/types.js",
+          "sha": "941ef6c286b46465f24ed3ed4635359b68c5743f",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/hud/types.js.map",
+          "sha": "5a2db2d86d8824a65318ff3a0b88c55a60e24b83",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/installer/index.js",
+          "sha": "4a4ed07d4b0879a5b3008cedb719291b8a4b4b53",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/installer/index.js.map",
+          "sha": "ac4cfecc9abadd5369c8b4dd4387904322946c40",
+          "previousFilename": null
+        },
+        {
+          "status": "removed",
+          "filename": "dist/team/__tests__/activity-log.test.d.ts",
+          "sha": "9fdbada7a850f143d9407896458ad6eecc486238",
+          "previousFilename": null
+        },
+        {
+          "status": "removed",
+          "filename": "dist/team/__tests__/activity-log.test.d.ts.map",
+          "sha": "475b8afab16d58670c3387fd6b22bfd551257937",
+          "previousFilename": null
+        },
+        {
+          "status": "removed",
+          "filename": "dist/team/__tests__/activity-log.test.js",
+          "sha": "3d83c72a999b8054513d128963f9f00e953d464d",
+          "previousFilename": null
+        },
+        {
+          "status": "removed",
+          "filename": "dist/team/__tests__/activity-log.test.js.map",
+          "sha": "aa21abffa6790b9f7bff8431c6159251ff4b5bf3",
+          "previousFilename": null
+        },
+        {
+          "status": "removed",
+          "filename": "dist/team/__tests__/antigravity-mcp-rejection.test.d.ts",
+          "sha": "36fa15102e053ed18c7e61a16d0fd71d59101101",
+          "previousFilename": null
+        },
+        {
+          "status": "removed",
+          "filename": "dist/team/__tests__/antigravity-mcp-rejection.test.d.ts.map",
+          "sha": "500108b98bef697fb63ac76dbeaa5c0dfd876dd6",
+          "previousFilename": null
+        },
+        {
+          "status": "removed",
+          "filename": "dist/team/__tests__/antigravity-mcp-rejection.test.js",
+          "sha": "340087e5e5f9b91710304524789f4e8192e5333f",
+          "previousFilename": null
+        },
+        {
+          "status": "removed",
+          "filename": "dist/team/__tests__/antigravity-mcp-rejection.test.js.map",
+          "sha": "e56a19fbe024ad6f70baf058724957a219941ca5",
+          "previousFilename": null
+        },
+        {
+          "status": "removed",
+          "filename": "dist/team/__tests__/audit-log.test.d.ts",
+          "sha": "f21443e4485ec0b43dc2e530f4af5a6cd3deff04",
+          "previousFilename": null
+        },
+        {
+          "status": "removed",
+          "filename": "dist/team/__tests__/audit-log.test.d.ts.map",
+          "sha": "83c8db3c99ed7db30dbaaa789476c04edc436222",
+          "previousFilename": null
+        },
+        {
+          "status": "removed",
+          "filename": "dist/team/__tests__/audit-log.test.js",
+          "sha": "b5a18aa631efe47cde062d89b47bdebc00fad254",
+          "previousFilename": null
+        },
+        {
+          "status": "removed",
+          "filename": "dist/team/__tests__/audit-log.test.js.map",
+          "sha": "07c487354aeb2aef561d4502e9cd5b83fb341b44",
+          "previousFilename": null
+        },
+        {
+          "status": "removed",
+          "filename": "dist/team/__tests__/auto-cleanup.test.d.ts",
+          "sha": "e451360d1ee3a31ea8505c3dd1e01eec78cadad2",
+          "previousFilename": null
+        },
+        {
+          "status": "removed",
+          "filename": "dist/team/__tests__/auto-cleanup.test.d.ts.map",
+          "sha": "ef13928cf910762b2c0ddaaed8cb417a86b1e743",
+          "previousFilename": null
+        },
+        {
+          "status": "removed",
+          "filename": "dist/team/__tests__/auto-cleanup.test.js",
+          "sha": "4668410dbd9cba1017bba7bbba1f742be97109f5",
+          "previousFilename": null
+        },
+        {
+          "status": "removed",
+          "filename": "dist/team/__tests__/auto-cleanup.test.js.map",
+          "sha": "2fd29dc852042f2b41949938ddea33378c12b1aa",
+          "previousFilename": null
+        },
+        {
+          "status": "removed",
+          "filename": "dist/team/__tests__/bridge-entry.guardrails.test.d.ts",
+          "sha": "2a09c6a66649f68eaef2c18917fc88b48919baf6",
+          "previousFilename": null
+        },
+        {
+          "status": "removed",
+          "filename": "dist/team/__tests__/bridge-entry.guardrails.test.d.ts.map",
+          "sha": "4b5017e508aa170fab8a5ba51aac8aa657388b11",
+          "previousFilename": null
+        },
+        {
+          "status": "removed",
+          "filename": "dist/team/__tests__/bridge-entry.guardrails.test.js",
+          "sha": "92a9084de304e0113875eb64be93ce4636916b23",
+          "previousFilename": null
+        },
+        {
+          "status": "removed",
+          "filename": "dist/team/__tests__/bridge-entry.guardrails.test.js.map",
+          "sha": "4162df153db5adf72117b4660a269113a01b9e76",
+          "previousFilename": null
+        },
+        {
+          "status": "removed",
+          "filename": "dist/team/__tests__/bridge-entry.test.d.ts",
+          "sha": "51ff6c3e1edf49a8541dd35da1e51475e35b166c",
+          "previousFilename": null
+        },
+        {
+          "status": "removed",
+          "filename": "dist/team/__tests__/bridge-entry.test.d.ts.map",
+          "sha": "2ef2fa8bbb628c8413e7a455823eee21caf24c84",
+          "previousFilename": null
+        },
+        {
+          "status": "removed",
+          "filename": "dist/team/__tests__/bridge-entry.test.js",
+          "sha": "22f6f2f5167ff2451a1588324173f18670c2f719",
+          "previousFilename": null
+        },
+        {
+          "status": "removed",
+          "filename": "dist/team/__tests__/bridge-entry.test.js.map",
+          "sha": "f28bdb5c22182f925706efa549852129416913fe",
+          "previousFilename": null
+        },
+        {
+          "status": "removed",
+          "filename": "dist/team/__tests__/bridge-integration.test.d.ts",
+          "sha": "4caf2ae83539d4c7710ef5634c98cda734cea15b",
+          "previousFilename": null
+        },
+        {
+          "status": "removed",
+          "filename": "dist/team/__tests__/bridge-integration.test.d.ts.map",
+          "sha": "b7b9ae7f98d47768263af485ec3627a72807505c",
+          "previousFilename": null
+        },
+        {
+          "status": "removed",
+          "filename": "dist/team/__tests__/bridge-integration.test.js",
+          "sha": "3e9fc99793efdc5e7734c3706dbb9af235880051",
+          "previousFilename": null
+        },
+        {
+          "status": "removed",
+          "filename": "dist/team/__tests__/bridge-integration.test.js.map",
+          "sha": "784a755469639bf13693ba44550f43b78cceb6b6",
+          "previousFilename": null
+        },
+        {
+          "status": "removed",
+          "filename": "dist/team/__tests__/capabilities.test.d.ts",
+          "sha": "9482cc17203a397c71690c4491a78399e2039edc",
+          "previousFilename": null
+        },
+        {
+          "status": "removed",
+          "filename": "dist/team/__tests__/capabilities.test.d.ts.map",
+          "sha": "ad42c6019e79a0ad0bea8ecfe03d8b94ed7a6227",
+          "previousFilename": null
+        },
+        {
+          "status": "removed",
+          "filename": "dist/team/__tests__/capabilities.test.js",
+          "sha": "f239c0c17efaa4e01fa70c395ef3170c82e8d5f2",
+          "previousFilename": null
+        },
+        {
+          "status": "removed",
+          "filename": "dist/team/__tests__/capabilities.test.js.map",
+          "sha": "05dc2fcf266e627e30d89e1502b676617f2e79c0",
+          "previousFilename": null
+        },
+        {
+          "status": "removed",
+          "filename": "dist/team/__tests__/capture-file-snapshot.test.d.ts",
+          "sha": "39d53a19cee48957dc4fef6c3315a54ec296fa44",
+          "previousFilename": null
+        },
+        {
+          "status": "removed",
+          "filename": "dist/team/__tests__/capture-file-snapshot.test.d.ts.map",
+          "sha": "c83a3f7e4851bac4cafeb6016b271c9b2a9367c8",
+          "previousFilename": null
+        },
+        {
+          "status": "removed",
+          "filename": "dist/team/__tests__/capture-file-snapshot.test.js",
+          "sha": "ce0443aea7a188812317a7f600c7c0ab8ce214a5",
+          "previousFilename": null
+        },
+        {
+          "status": "removed",
+          "filename": "dist/team/__tests__/capture-file-snapshot.test.js.map",
+          "sha": "a3f6b079ec6b338afe307fcd558af57e7fcc2390",
+          "previousFilename": null
+        },
+        {
+          "status": "removed",
+          "filename": "dist/team/__tests__/edge-cases.test.d.ts",
+          "sha": "0e8140a97d7e5aa6f392d0776848f173035684ed",
+          "previousFilename": null
+        },
+        {
+          "status": "removed",
+          "filename": "dist/team/__tests__/edge-cases.test.d.ts.map",
+          "sha": "5b14ba500befdebd39983b6e34fd985aa0dafaff",
+          "previousFilename": null
+        },
+        {
+          "status": "removed",
+          "filename": "dist/team/__tests__/edge-cases.test.js",
+          "sha": "4ccd8b8600a2f5330e81deb6fc81ece6c5a72fcd",
+          "previousFilename": null
+        },
+        {
+          "status": "removed",
+          "filename": "dist/team/__tests__/edge-cases.test.js.map",
+          "sha": "df660a06db074d19712730bf457d09de44b01fd2",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/team/__tests__/git-worktree.test.js",
+          "sha": "34b643d7e9e5c334546af4557414ffbe888ea18a",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/team/__tests__/git-worktree.test.js.map",
+          "sha": "fcf4cd711668cf52ae7411fe822416a5c41ed668",
+          "previousFilename": null
+        },
+        {
+          "status": "removed",
+          "filename": "dist/team/__tests__/heartbeat.test.d.ts",
+          "sha": "44bab3714ad6cc1d6b1ded407b95e117b25d255c",
+          "previousFilename": null
+        },
+        {
+          "status": "removed",
+          "filename": "dist/team/__tests__/heartbeat.test.d.ts.map",
+          "sha": "7b821a71f8d8d3308417f1e7629eaf3c7c46906a",
+          "previousFilename": null
+        },
+        {
+          "status": "removed",
+          "filename": "dist/team/__tests__/heartbeat.test.js",
+          "sha": "421fc1ea9d4db7bbd4925b3c34f44aec3073eb8a",
+          "previousFilename": null
+        },
+        {
+          "status": "removed",
+          "filename": "dist/team/__tests__/heartbeat.test.js.map",
+          "sha": "eaa7d949f9053fa6a1ff7f8a839ed17cc9daf1ca",
+          "previousFilename": null
+        },
+        {
+          "status": "removed",
+          "filename": "dist/team/__tests__/inbox-outbox.test.d.ts",
+          "sha": "adbf6be6d7e98c355701f2316cb1006f948b4765",
+          "previousFilename": null
+        },
+        {
+          "status": "removed",
+          "filename": "dist/team/__tests__/inbox-outbox.test.d.ts.map",
+          "sha": "ae6e40acdcb3ddad38f60d46936e9de08ab5fddf",
+          "previousFilename": null
+        },
+        {
+          "status": "removed",
+          "filename": "dist/team/__tests__/inbox-outbox.test.js",
+          "sha": "bf5fdf5ace8ef41859f82bd9265f867a6424d816",
+          "previousFilename": null
+        },
+        {
+          "status": "removed",
+          "filename": "dist/team/__tests__/inbox-outbox.test.js.map",
+          "sha": "45a42b02f2e28c034d8feb9c98de8d205e89c6bd",
+          "previousFilename": null
+        },
+        {
+          "status": "removed",
+          "filename": "dist/team/__tests__/mcp-team-bridge.spawn-args.test.d.ts",
+          "sha": "7d2c27d17e2005250020b3ca248a9d5ebb83b22d",
+          "previousFilename": null
+        },
+        {
+          "status": "removed",
+          "filename": "dist/team/__tests__/mcp-team-bridge.spawn-args.test.d.ts.map",
+          "sha": "79b662c09954672090c15fba9eefe44358e52ba1",
+          "previousFilename": null
+        },
+        {
+          "status": "removed",
+          "filename": "dist/team/__tests__/mcp-team-bridge.spawn-args.test.js",
+          "sha": "717aba1d7519c6748332288edeaa3086a3bee88a",
+          "previousFilename": null
+        },
+        {
+          "status": "removed",
+          "filename": "dist/team/__tests__/mcp-team-bridge.spawn-args.test.js.map",
+          "sha": "1be5fb37360975044747e3fbf800cefc2ec69263",
+          "previousFilename": null
+        },
+        {
+          "status": "removed",
+          "filename": "dist/team/__tests__/mcp-team-bridge.usage.test.d.ts",
+          "sha": "15e1bc13eb64ec5ad030af5bc5c28099bdcf35f5",
+          "previousFilename": null
+        },
+        {
+          "status": "removed",
+          "filename": "dist/team/__tests__/mcp-team-bridge.usage.test.d.ts.map",
+          "sha": "849c1f033e3ccd2d70d6bc4ab2bae141c6b72994",
+          "previousFilename": null
+        },
+        {
+          "status": "removed",
+          "filename": "dist/team/__tests__/mcp-team-bridge.usage.test.js",
+          "sha": "7daf61ffe21a42f136c082f783e427ebab8a1912",
+          "previousFilename": null
+        },
+        {
+          "status": "removed",
+          "filename": "dist/team/__tests__/mcp-team-bridge.usage.test.js.map",
+          "sha": "b841ea2a16f6068f9c51be7c7b2432ffda7f7a93",
+          "previousFilename": null
+        },
+        {
+          "status": "removed",
+          "filename": "dist/team/__tests__/message-router.test.d.ts",
+          "sha": "3ea4d24df707de0fa30ef863905ee6b3becaa156",
+          "previousFilename": null
+        },
+        {
+          "status": "removed",
+          "filename": "dist/team/__tests__/message-router.test.d.ts.map",
+          "sha": "71470acffe45571f28bd40a4435908b112d6caeb",
+          "previousFilename": null
+        },
+        {
+          "status": "removed",
+          "filename": "dist/team/__tests__/message-router.test.js",
+          "sha": "dd6b12daf9698e34219606b0abe61e0b3e821fc9",
+          "previousFilename": null
+        },
+        {
+          "status": "removed",
+          "filename": "dist/team/__tests__/message-router.test.js.map",
+          "sha": "76637f313aae9a85fcabd8e71712eb9a53bef23b",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/team/__tests__/multirepo-workspace-team.test.js",
+          "sha": "f677a0cef2bd7e2efce7aa367ebf8e8c6140bafb",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/team/__tests__/multirepo-workspace-team.test.js.map",
+          "sha": "d440bba6d24cda7b553be6d1a1f207b61037a6cc",
+          "previousFilename": null
+        },
+        {
+          "status": "removed",
+          "filename": "dist/team/__tests__/outbox-reader.test.d.ts",
+          "sha": "e39869c8fbdfd2530afe64a482eb045c1a3f4501",
+          "previousFilename": null
+        },
+        {
+          "status": "removed",
+          "filename": "dist/team/__tests__/outbox-reader.test.d.ts.map",
+          "sha": "61654efa66eccb7e09792391cf8bb7fe31b12c9f",
+          "previousFilename": null
+        },
+        {
+          "status": "removed",
+          "filename": "dist/team/__tests__/outbox-reader.test.js",
+          "sha": "54e122cf94afaff0cd79acca32421d9bdea55bfa",
+          "previousFilename": null
+        },
+        {
+          "status": "removed",
+          "filename": "dist/team/__tests__/outbox-reader.test.js.map",
+          "sha": "69e1264840f242cdf5a5fb83917b0bbe518fd12b",
+          "previousFilename": null
+        },
+        {
+          "status": "removed",
+          "filename": "dist/team/__tests__/permissions.test.d.ts",
+          "sha": "85f46714c3483a53ad7b47e06da9aceab94f453d",
+          "previousFilename": null
+        },
+        {
+          "status": "removed",
+          "filename": "dist/team/__tests__/permissions.test.d.ts.map",
+          "sha": "81c43996d8970005ec99221b69b4c5f42fed66f7",
+          "previousFilename": null
+        },
+        {
+          "status": "removed",
+          "filename": "dist/team/__tests__/permissions.test.js",
+          "sha": "a9d56036735cc1c998c64a3a006f6effb2cf40a2",
+          "previousFilename": null
+        },
+        {
+          "status": "removed",
+          "filename": "dist/team/__tests__/permissions.test.js.map",
+          "sha": "da4d89504689fd9d26658354e68ebd4dee124bd2",
+          "previousFilename": null
+        },
+        {
+          "status": "removed",
+          "filename": "dist/team/__tests__/prompt-sanitization.test.d.ts",
+          "sha": "2a703092387ff97e872208b4741a10f84dc4f2bf",
+          "previousFilename": null
+        },
+        {
+          "status": "removed",
+          "filename": "dist/team/__tests__/prompt-sanitization.test.d.ts.map",
+          "sha": "6b0911456cc2204ae609028cb30af1be2e32999b",
+          "previousFilename": null
+        },
+        {
+          "status": "removed",
+          "filename": "dist/team/__tests__/prompt-sanitization.test.js",
+          "sha": "591ad451d88683776b85483b9a190563874626a6",
+          "previousFilename": null
+        },
+        {
+          "status": "removed",
+          "filename": "dist/team/__tests__/prompt-sanitization.test.js.map",
+          "sha": "26e45dc973b5ef2f8de4e3bac474a7bab697b07d",
+          "previousFilename": null
+        },
+        {
+          "status": "removed",
+          "filename": "dist/team/__tests__/runtime-done-recovery.test.d.ts",
+          "sha": "077f14f7849dd0c50973f4e469af977d3c43b650",
+          "previousFilename": null
+        },
+        {
+          "status": "removed",
+          "filename": "dist/team/__tests__/runtime-done-recovery.test.d.ts.map",
+          "sha": "7c877b1e380bfe60b5f053122b61f432195e595f",
+          "previousFilename": null
+        },
+        {
+          "status": "removed",
+          "filename": "dist/team/__tests__/runtime-done-recovery.test.js",
+          "sha": "47fe0ea5ab97f986910f8f9761f726164ae22aad",
+          "previousFilename": null
+        },
+        {
+          "status": "removed",
+          "filename": "dist/team/__tests__/runtime-done-recovery.test.js.map",
+          "sha": "b9f3a4ec9a72e527883f92fc79f83c97e5489afb",
+          "previousFilename": null
+        },
+        {
+          "status": "removed",
+          "filename": "dist/team/__tests__/runtime-watchdog-retry.test.d.ts",
+          "sha": "4d6219518727581c6467597c77be1ca358c4afa8",
+          "previousFilename": null
+        },
+        {
+          "status": "removed",
+          "filename": "dist/team/__tests__/runtime-watchdog-retry.test.d.ts.map",
+          "sha": "020ea519f9eb65a691e77ff6aca2efa577e74b81",
+          "previousFilename": null
+        },
+        {
+          "status": "removed",
+          "filename": "dist/team/__tests__/runtime-watchdog-retry.test.js",
+          "sha": "bf1c01fe6eef52e79ba3d8f5209b68d29ae8248a",
+          "previousFilename": null
+        },
+        {
+          "status": "removed",
+          "filename": "dist/team/__tests__/runtime-watchdog-retry.test.js.map",
+          "sha": "4b37aeb09dbf8a13a0a91e8bb3cd8d0847597447",
+          "previousFilename": null
+        },
+        {
+          "status": "removed",
+          "filename": "dist/team/__tests__/summary-report.test.d.ts",
+          "sha": "55fc94e7a6df0ea35da5ba450655f211aad4df01",
+          "previousFilename": null
+        },
+        {
+          "status": "removed",
+          "filename": "dist/team/__tests__/summary-report.test.d.ts.map",
+          "sha": "95d6441a6bafc15f0c1b0170d058463cc01df11d",
+          "previousFilename": null
+        },
+        {
+          "status": "removed",
+          "filename": "dist/team/__tests__/summary-report.test.js",
+          "sha": "65f6948fc55f0fbfb9da66a6ac96322dd89f740e",
+          "previousFilename": null
+        },
+        {
+          "status": "removed",
+          "filename": "dist/team/__tests__/summary-report.test.js.map",
+          "sha": "137d9b732d6a3e0c2a12413bda14a71ece09aecb",
+          "previousFilename": null
+        },
+        {
+          "status": "removed",
+          "filename": "dist/team/__tests__/task-file-ops.test.d.ts",
+          "sha": "88188fc4876d431d8c453a06f242eaaeb10abf9a",
+          "previousFilename": null
+        },
+        {
+          "status": "removed",
+          "filename": "dist/team/__tests__/task-file-ops.test.d.ts.map",
+          "sha": "a87b459d03923cd5da63d591b5be339ccb6acdd8",
+          "previousFilename": null
+        },
+        {
+          "status": "removed",
+          "filename": "dist/team/__tests__/task-file-ops.test.js",
+          "sha": "96d17e4768f0470e1c3389a1cdf8990bb5962861",
+          "previousFilename": null
+        },
+        {
+          "status": "removed",
+          "filename": "dist/team/__tests__/task-file-ops.test.js.map",
+          "sha": "ccdae541a2cde33d65546b930e3dc46c5553f78f",
+          "previousFilename": null
+        },
+        {
+          "status": "removed",
+          "filename": "dist/team/__tests__/task-router.test.d.ts",
+          "sha": "ace4db7813586b30e166ba27a395ea27c824d004",
+          "previousFilename": null
+        },
+        {
+          "status": "removed",
+          "filename": "dist/team/__tests__/task-router.test.d.ts.map",
+          "sha": "09a8b09903fa1bb4a03ad03d14c3640e1c20ffc5",
+          "previousFilename": null
+        },
+        {
+          "status": "removed",
+          "filename": "dist/team/__tests__/task-router.test.js",
+          "sha": "f5462b32f4bd54a137e9450b1c424fa912592203",
+          "previousFilename": null
+        },
+        {
+          "status": "removed",
+          "filename": "dist/team/__tests__/task-router.test.js.map",
+          "sha": "d711154b753b104b5b0fd7c27386f5529c6574e5",
+          "previousFilename": null
+        },
+        {
+          "status": "removed",
+          "filename": "dist/team/__tests__/team-registration.test.d.ts",
+          "sha": "76072a9112a27e313c024ee7aad28c6145d1b57b",
+          "previousFilename": null
+        },
+        {
+          "status": "removed",
+          "filename": "dist/team/__tests__/team-registration.test.d.ts.map",
+          "sha": "71aa0ded3d0501cbcf24e9c54472b733c80652ee",
+          "previousFilename": null
+        },
+        {
+          "status": "removed",
+          "filename": "dist/team/__tests__/team-registration.test.js",
+          "sha": "b2cd746da99cb0d578e98c5509f4e3e4c49247ca",
+          "previousFilename": null
+        },
+        {
+          "status": "removed",
+          "filename": "dist/team/__tests__/team-registration.test.js.map",
+          "sha": "b437f366f6583a878ccda7f7761ab9b81b551fb1",
+          "previousFilename": null
+        },
+        {
+          "status": "removed",
+          "filename": "dist/team/__tests__/team-state-reader.test.d.ts",
+          "sha": "77de06990ec861e6d5d457e67af02c19352efd5a",
+          "previousFilename": null
+        },
+        {
+          "status": "removed",
+          "filename": "dist/team/__tests__/team-state-reader.test.d.ts.map",
+          "sha": "144247c538c78d18047cce96ad4a5bba5d752cba",
+          "previousFilename": null
+        },
+        {
+          "status": "removed",
+          "filename": "dist/team/__tests__/team-state-reader.test.js",
+          "sha": "02481bec7fb71c80f53b6494d2dee153e0cd08dc",
+          "previousFilename": null
+        },
+        {
+          "status": "removed",
+          "filename": "dist/team/__tests__/team-state-reader.test.js.map",
+          "sha": "90ccfb96ffe935f415a7aa29c4b5209ec6762650",
+          "previousFilename": null
+        },
+        {
+          "status": "removed",
+          "filename": "dist/team/__tests__/team-status.test.d.ts",
+          "sha": "dcb25990d66353cef5b8d6e6a13fe618333ee88d",
+          "previousFilename": null
+        },
+        {
+          "status": "removed",
+          "filename": "dist/team/__tests__/team-status.test.d.ts.map",
+          "sha": "3f9ccdc5b970a3a302205f701b39cf97d029ae86",
+          "previousFilename": null
+        },
+        {
+          "status": "removed",
+          "filename": "dist/team/__tests__/team-status.test.js",
+          "sha": "cd6007e819e653f4a8ee412af1c6bcb117f2a17c",
+          "previousFilename": null
+        },
+        {
+          "status": "removed",
+          "filename": "dist/team/__tests__/team-status.test.js.map",
+          "sha": "3602280cecc73d525cec26f1f026774c20b32f4f",
+          "previousFilename": null
+        },
+        {
+          "status": "removed",
+          "filename": "dist/team/__tests__/tmux-comm.test.d.ts",
+          "sha": "a4182d2f211ec31df8e5ebe86b0b6f0f09e2d58b",
+          "previousFilename": null
+        },
+        {
+          "status": "removed",
+          "filename": "dist/team/__tests__/tmux-comm.test.d.ts.map",
+          "sha": "dc2751b8a7e1227b61e482c4d851f71e4c8965d7",
+          "previousFilename": null
+        },
+        {
+          "status": "removed",
+          "filename": "dist/team/__tests__/tmux-comm.test.js",
+          "sha": "2542a5422aa86bcbc55fd188d6d0d602ebdacf49",
+          "previousFilename": null
+        },
+        {
+          "status": "removed",
+          "filename": "dist/team/__tests__/tmux-comm.test.js.map",
+          "sha": "e069e070744e6b80c5549300ddb6620deb035318",
+          "previousFilename": null
+        },
+        {
+          "status": "removed",
+          "filename": "dist/team/__tests__/unified-team.test.d.ts",
+          "sha": "faa29159bcf981d48d76d184661df843cb39d8bd",
+          "previousFilename": null
+        },
+        {
+          "status": "removed",
+          "filename": "dist/team/__tests__/unified-team.test.d.ts.map",
+          "sha": "95aa289ba642b018a6aa7af4674a2f0bcc909a9b",
+          "previousFilename": null
+        },
+        {
+          "status": "removed",
+          "filename": "dist/team/__tests__/unified-team.test.js",
+          "sha": "73c64788dfd88bbb07c7912d45da35a73a5c2291",
+          "previousFilename": null
+        },
+        {
+          "status": "removed",
+          "filename": "dist/team/__tests__/unified-team.test.js.map",
+          "sha": "815154fa00c29b27c3f23d1f89a92a039ea97b4f",
+          "previousFilename": null
+        },
+        {
+          "status": "removed",
+          "filename": "dist/team/__tests__/usage-record-shape.test.d.ts",
+          "sha": "4ab7097faf6e76f059df793ef9c5d2f31a2c294b",
+          "previousFilename": null
+        },
+        {
+          "status": "removed",
+          "filename": "dist/team/__tests__/usage-record-shape.test.d.ts.map",
+          "sha": "94779fdd687830e099ce81f48e71bcc865cf772a",
+          "previousFilename": null
+        },
+        {
+          "status": "removed",
+          "filename": "dist/team/__tests__/usage-record-shape.test.js",
+          "sha": "68cc37d8c361332ec182e89c5de6557795d4bc70",
+          "previousFilename": null
+        },
+        {
+          "status": "removed",
+          "filename": "dist/team/__tests__/usage-record-shape.test.js.map",
+          "sha": "d544f03acff2b1643049ba57fdc172e814b65419",
+          "previousFilename": null
+        },
+        {
+          "status": "removed",
+          "filename": "dist/team/__tests__/usage-tracker.test.d.ts",
+          "sha": "0551c4f628f486d29319ca59fe58d1368a852176",
+          "previousFilename": null
+        },
+        {
+          "status": "removed",
+          "filename": "dist/team/__tests__/usage-tracker.test.d.ts.map",
+          "sha": "42a2a7115f19b3bf67781c0db2723737352d89d5",
+          "previousFilename": null
+        },
+        {
+          "status": "removed",
+          "filename": "dist/team/__tests__/usage-tracker.test.js",
+          "sha": "5c9a5f28c6e321dcf28d0c78472473852f663ec2",
+          "previousFilename": null
+        },
+        {
+          "status": "removed",
+          "filename": "dist/team/__tests__/usage-tracker.test.js.map",
+          "sha": "0bbdc004a8b671bf53ea066b6f95a54f1fefa7c4",
+          "previousFilename": null
+        },
+        {
+          "status": "removed",
+          "filename": "dist/team/__tests__/usage-unicode-counts.test.d.ts",
+          "sha": "fcee445ef2f22cf3500eb91a0d06f15a586713d4",
+          "previousFilename": null
+        },
+        {
+          "status": "removed",
+          "filename": "dist/team/__tests__/usage-unicode-counts.test.d.ts.map",
+          "sha": "c62af0d065b13d0db38f398b4abed815a25399f5",
+          "previousFilename": null
+        },
+        {
+          "status": "removed",
+          "filename": "dist/team/__tests__/usage-unicode-counts.test.js",
+          "sha": "e46074acc3ec41f372c1fa6adb0a04e50cb64f0d",
+          "previousFilename": null
+        },
+        {
+          "status": "removed",
+          "filename": "dist/team/__tests__/usage-unicode-counts.test.js.map",
+          "sha": "9992e6516aa9384421ab6b2e3b3648f9894587b3",
+          "previousFilename": null
+        },
+        {
+          "status": "removed",
+          "filename": "dist/team/__tests__/worker-health.test.d.ts",
+          "sha": "7a9ef635e843fcb3f183bf7efcb8234fe3f3f8a5",
+          "previousFilename": null
+        },
+        {
+          "status": "removed",
+          "filename": "dist/team/__tests__/worker-health.test.d.ts.map",
+          "sha": "c5511b67cc7d8cb4716fc33efb386dedde71af9e",
+          "previousFilename": null
+        },
+        {
+          "status": "removed",
+          "filename": "dist/team/__tests__/worker-health.test.js",
+          "sha": "0d3b05e444937b4d8908a7aeb0effe8bba3bce60",
+          "previousFilename": null
+        },
+        {
+          "status": "removed",
+          "filename": "dist/team/__tests__/worker-health.test.js.map",
+          "sha": "9db58310bcc04d2cee25baec1ab4f11c4844cea8",
+          "previousFilename": null
+        },
+        {
+          "status": "removed",
+          "filename": "dist/team/__tests__/worker-restart.test.d.ts",
+          "sha": "69737406b407cd5ed217a64ab09cb07d15486f18",
+          "previousFilename": null
+        },
+        {
+          "status": "removed",
+          "filename": "dist/team/__tests__/worker-restart.test.d.ts.map",
+          "sha": "9f0e4be0f3c36b3bc1332265898f4344e69d4477",
+          "previousFilename": null
+        },
+        {
+          "status": "removed",
+          "filename": "dist/team/__tests__/worker-restart.test.js",
+          "sha": "29cff5d284b89ccdd972226e233ef84ed68b5d13",
+          "previousFilename": null
+        },
+        {
+          "status": "removed",
+          "filename": "dist/team/__tests__/worker-restart.test.js.map",
+          "sha": "e5159901122423b85c9689fc801902ae51012065",
+          "previousFilename": null
+        },
+        {
+          "status": "removed",
+          "filename": "dist/team/activity-log.d.ts",
+          "sha": "133764f91c6be96926f3bcf2ba7284776bf694de",
+          "previousFilename": null
+        },
+        {
+          "status": "removed",
+          "filename": "dist/team/activity-log.d.ts.map",
+          "sha": "35ea5bd2a15cad8e9d575f966d661aad19e05e8d",
+          "previousFilename": null
+        },
+        {
+          "status": "removed",
+          "filename": "dist/team/activity-log.js",
+          "sha": "64fb27a5496061a5d86430286f5e364e06e56b6e",
+          "previousFilename": null
+        },
+        {
+          "status": "removed",
+          "filename": "dist/team/activity-log.js.map",
+          "sha": "6cba8b80074942e0fef055017c0061dd3885363b",
+          "previousFilename": null
+        },
+        {
+          "status": "removed",
+          "filename": "dist/team/audit-log.d.ts",
+          "sha": "c95401eaede167d6033346bee8e7a1e3887d8308",
+          "previousFilename": null
+        },
+        {
+          "status": "removed",
+          "filename": "dist/team/audit-log.d.ts.map",
+          "sha": "48133679985a5afab6e7557df8745aa184699023",
+          "previousFilename": null
+        },
+        {
+          "status": "removed",
+          "filename": "dist/team/audit-log.js",
+          "sha": "206d164da708619366e1656ef083566775c54aaa",
+          "previousFilename": null
+        },
+        {
+          "status": "removed",
+          "filename": "dist/team/audit-log.js.map",
+          "sha": "793d9928c1cbf3ad18f53b2f9f85239fe344ce1e",
+          "previousFilename": null
+        },
+        {
+          "status": "removed",
+          "filename": "dist/team/bridge-entry.d.ts",
+          "sha": "31c61f88dc9ab88283f4beb8eb254196018162f4",
+          "previousFilename": null
+        },
+        {
+          "status": "removed",
+          "filename": "dist/team/bridge-entry.d.ts.map",
+          "sha": "27dfc7c42a6d8799ba9bc5827a914f3b72ac51ba",
+          "previousFilename": null
+        },
+        {
+          "status": "removed",
+          "filename": "dist/team/bridge-entry.js",
+          "sha": "9ef14fc15f63fb63990a0e87df86a917ca639f1e",
+          "previousFilename": null
+        },
+        {
+          "status": "removed",
+          "filename": "dist/team/bridge-entry.js.map",
+          "sha": "466ba014a2d2efe300e7202ee43d9971accec7b0",
+          "previousFilename": null
+        },
+        {
+          "status": "removed",
+          "filename": "dist/team/capabilities.d.ts",
+          "sha": "78217477e5ec83fe507cee09bbb4f5ad7d23c3a1",
+          "previousFilename": null
+        },
+        {
+          "status": "removed",
+          "filename": "dist/team/capabilities.d.ts.map",
+          "sha": "f43dfd588e88f517aaabecde895fd82945eb01b0",
+          "previousFilename": null
+        },
+        {
+          "status": "removed",
+          "filename": "dist/team/capabilities.js",
+          "sha": "041cae9e2f00d1bedfd83e7c737a90ee42d3d089",
+          "previousFilename": null
+        },
+        {
+          "status": "removed",
+          "filename": "dist/team/capabilities.js.map",
+          "sha": "c1579d98e5712fce246f40fb8a6645e78d3c739d",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/team/git-worktree.d.ts",
+          "sha": "a2bddb6bc0c14c8573159ec0219c6a4296293e85",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/team/git-worktree.d.ts.map",
+          "sha": "ce0bda02fc5294db7293e9cd53569bc22d93a847",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/team/git-worktree.js",
+          "sha": "ca936b42fff0f1a710c84843498d5e21e6fde018",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/team/git-worktree.js.map",
+          "sha": "fdf3869abc22f9c79066a9f029f827c64a449ca5",
+          "previousFilename": null
+        },
+        {
+          "status": "removed",
+          "filename": "dist/team/heartbeat.d.ts",
+          "sha": "c1fbd644a814a5bec0f6b08bb93251c7184e4d65",
+          "previousFilename": null
+        },
+        {
+          "status": "removed",
+          "filename": "dist/team/heartbeat.d.ts.map",
+          "sha": "f758b854a4370eaccfe9ec528d4832c4f1585b7c",
+          "previousFilename": null
+        },
+        {
+          "status": "removed",
+          "filename": "dist/team/heartbeat.js",
+          "sha": "af01418cd89616c4fc78c0d326513cc8c224c264",
+          "previousFilename": null
+        },
+        {
+          "status": "removed",
+          "filename": "dist/team/heartbeat.js.map",
+          "sha": "3a0750905e766d53e63199f22e7056c4c01b1505",
+          "previousFilename": null
+        },
+        {
+          "status": "removed",
+          "filename": "dist/team/inbox-outbox.d.ts",
+          "sha": "b1303eb133e96e3594921055b8dfc93153a44e70",
+          "previousFilename": null
+        },
+        {
+          "status": "removed",
+          "filename": "dist/team/inbox-outbox.d.ts.map",
+          "sha": "a8024ca414c6ec88532bd87f026a00896e46e522",
+          "previousFilename": null
+        },
+        {
+          "status": "removed",
+          "filename": "dist/team/inbox-outbox.js",
+          "sha": "e9e395859edaa900b8b05e0cfe4118ac1571c377",
+          "previousFilename": null
+        },
+        {
+          "status": "removed",
+          "filename": "dist/team/inbox-outbox.js.map",
+          "sha": "dcc052c87d4a479b06ee8817563a68fad3b35993",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/team/index.d.ts",
+          "sha": "a0ea1b881751313d97610e67f090244e705f8da3",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/team/index.d.ts.map",
+          "sha": "9eec8c7d9bbf375a59ca09ae7ae30223f0a33f4f",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/team/index.js",
+          "sha": "e9dfa22197c255ea0dc57b5c86b3f851adb8d9f5",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/team/index.js.map",
+          "sha": "aea6a37661efdd4032d479799695b7ce3ef05fe1",
+          "previousFilename": null
+        },
+        {
+          "status": "removed",
+          "filename": "dist/team/mcp-team-bridge.d.ts",
+          "sha": "c7cadcdb10f3c268cc286e425629885731e261c5",
+          "previousFilename": null
+        },
+        {
+          "status": "removed",
+          "filename": "dist/team/mcp-team-bridge.d.ts.map",
+          "sha": "776654538800dd85a4ddcd6ba3345b428a6463a5",
+          "previousFilename": null
+        },
+        {
+          "status": "removed",
+          "filename": "dist/team/mcp-team-bridge.js",
+          "sha": "df3bab0fc370f4b1647045aa978d40d439416167",
+          "previousFilename": null
+        },
+        {
+          "status": "removed",
+          "filename": "dist/team/mcp-team-bridge.js.map",
+          "sha": "a10f10fb4f9f0116b766fc7be22dc01d3ffb5dea",
+          "previousFilename": null
+        },
+        {
+          "status": "removed",
+          "filename": "dist/team/message-router.d.ts",
+          "sha": "d590e5cd8a4bba7e913bc932118c92d6dcb69230",
+          "previousFilename": null
+        },
+        {
+          "status": "removed",
+          "filename": "dist/team/message-router.d.ts.map",
+          "sha": "e2ab3ab2a6653680174b6ff1eea3b61e002a7fa3",
+          "previousFilename": null
+        },
+        {
+          "status": "removed",
+          "filename": "dist/team/message-router.js",
+          "sha": "a5c67062a4f7b521010bad810be427de2780833f",
+          "previousFilename": null
+        },
+        {
+          "status": "removed",
+          "filename": "dist/team/message-router.js.map",
+          "sha": "b320a75ee3fae5710b5e1f4088a0ad90b09e205e",
+          "previousFilename": null
+        },
+        {
+          "status": "removed",
+          "filename": "dist/team/outbox-reader.d.ts",
+          "sha": "e6b3ef009523a6d9983a0af59dc2041b8a45fed3",
+          "previousFilename": null
+        },
+        {
+          "status": "removed",
+          "filename": "dist/team/outbox-reader.d.ts.map",
+          "sha": "1c8569378a4e8f04179655c4fe9feb468cb8e051",
+          "previousFilename": null
+        },
+        {
+          "status": "removed",
+          "filename": "dist/team/outbox-reader.js",
+          "sha": "6fe6cbaa18445a06911e3964bb3d24e30c39dae3",
+          "previousFilename": null
+        },
+        {
+          "status": "removed",
+          "filename": "dist/team/outbox-reader.js.map",
+          "sha": "f7bc184271285d15ae3b2bf5930e77e2eb46d89e",
+          "previousFilename": null
+        },
+        {
+          "status": "removed",
+          "filename": "dist/team/permissions.d.ts",
+          "sha": "0cffd2e49ea73c2c451493c3dead3ecb6627681d",
+          "previousFilename": null
+        },
+        {
+          "status": "removed",
+          "filename": "dist/team/permissions.d.ts.map",
+          "sha": "ab5f007bba97ebe16d99faa5b9164b630d454536",
+          "previousFilename": null
+        },
+        {
+          "status": "removed",
+          "filename": "dist/team/permissions.js",
+          "sha": "6824e6d3194ca3a56fa93d2257973c895920a18f",
+          "previousFilename": null
+        },
+        {
+          "status": "removed",
+          "filename": "dist/team/permissions.js.map",
+          "sha": "ab338a0d799833ba281953cde3f17489ef9ac9f7",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/team/runtime-v2.d.ts.map",
+          "sha": "6cef0ca8c950a7ab6fb313714ddb5c2f80ab2463",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/team/runtime-v2.js",
+          "sha": "2519ce25f6ede2292a749eec66fe954975ace4dc",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/team/runtime-v2.js.map",
+          "sha": "3a3851ac2de68c67cf1b59c1924ba2a915f26017",
+          "previousFilename": null
+        },
+        {
+          "status": "removed",
+          "filename": "dist/team/summary-report.d.ts",
+          "sha": "647ce99c4edd68d807a936734f23509b9f3be8c3",
+          "previousFilename": null
+        },
+        {
+          "status": "removed",
+          "filename": "dist/team/summary-report.d.ts.map",
+          "sha": "524b5ffe271b90c350ebdca2aacea04291e80fd2",
+          "previousFilename": null
+        },
+        {
+          "status": "removed",
+          "filename": "dist/team/summary-report.js",
+          "sha": "7f5feb2714e9b5e3d9d88ab29fc0f3a333935129",
+          "previousFilename": null
+        },
+        {
+          "status": "removed",
+          "filename": "dist/team/summary-report.js.map",
+          "sha": "019111d6c387a692f1cfdb701a6927ecd7d50943",
+          "previousFilename": null
+        },
+        {
+          "status": "removed",
+          "filename": "dist/team/task-file-ops.d.ts",
+          "sha": "567065351769262d8f656f73c03b2da0e7d80fc3",
+          "previousFilename": null
+        },
+        {
+          "status": "removed",
+          "filename": "dist/team/task-file-ops.d.ts.map",
+          "sha": "724509111ba6e0cd20d41a3e4f5acb1a0d5c5899",
+          "previousFilename": null
+        },
+        {
+          "status": "removed",
+          "filename": "dist/team/task-file-ops.js",
+          "sha": "f8795e597d74f65c14ee6a32b2de9d671fe3a2fc",
+          "previousFilename": null
+        },
+        {
+          "status": "removed",
+          "filename": "dist/team/task-file-ops.js.map",
+          "sha": "0cfc37433a2ef6b631b2ebaf961f7b35d5e31036",
+          "previousFilename": null
+        },
+        {
+          "status": "removed",
+          "filename": "dist/team/task-router.d.ts",
+          "sha": "4ec32157a22eacc53b2703f4659204f263707541",
+          "previousFilename": null
+        },
+        {
+          "status": "removed",
+          "filename": "dist/team/task-router.d.ts.map",
+          "sha": "90b9c3d294ae15b0ffe1d8ef73a6e6c3ffcb4d59",
+          "previousFilename": null
+        },
+        {
+          "status": "removed",
+          "filename": "dist/team/task-router.js",
+          "sha": "28fe45ff6d8f8788185c2c63ee939443688f762a",
+          "previousFilename": null
+        },
+        {
+          "status": "removed",
+          "filename": "dist/team/task-router.js.map",
+          "sha": "afb40ced88b748aa043156a9cf132edaee16d3ea",
+          "previousFilename": null
+        },
+        {
+          "status": "removed",
+          "filename": "dist/team/team-projection.d.ts",
+          "sha": "29d42c8961093d5c62c69ab9926fb54ced8410e1",
+          "previousFilename": null
+        },
+        {
+          "status": "removed",
+          "filename": "dist/team/team-projection.d.ts.map",
+          "sha": "ab53bbcc180e0aa2bcbe724ea02e1c9b07eb71b2",
+          "previousFilename": null
+        },
+        {
+          "status": "removed",
+          "filename": "dist/team/team-projection.js",
+          "sha": "0d57d2af4ae42166f7eb303893bf6af258c3814d",
+          "previousFilename": null
+        },
+        {
+          "status": "removed",
+          "filename": "dist/team/team-projection.js.map",
+          "sha": "b0f2aaff6628a1dd24b9041d8ec77c54e1868968",
+          "previousFilename": null
+        },
+        {
+          "status": "removed",
+          "filename": "dist/team/team-registration.d.ts",
+          "sha": "c5ba7e449ae752fffc56284a46b0cc7d866c5205",
+          "previousFilename": null
+        },
+        {
+          "status": "removed",
+          "filename": "dist/team/team-registration.d.ts.map",
+          "sha": "add2a3103769e2ff6858aaed8a1b8d465bab0637",
+          "previousFilename": null
+        },
+        {
+          "status": "removed",
+          "filename": "dist/team/team-registration.js",
+          "sha": "409d2f068c07a3b7d2ac4c0dff30d6c6fc3dff98",
+          "previousFilename": null
+        },
+        {
+          "status": "removed",
+          "filename": "dist/team/team-registration.js.map",
+          "sha": "121ff7446748118011ebefdc6e45e596e3005408",
+          "previousFilename": null
+        },
+        {
+          "status": "removed",
+          "filename": "dist/team/team-state-reader.d.ts",
+          "sha": "4506467ac1f07bb0780a7272fc86c058ea828705",
+          "previousFilename": null
+        },
+        {
+          "status": "removed",
+          "filename": "dist/team/team-state-reader.d.ts.map",
+          "sha": "695e1e820aca7efdffbb8d947b5cfcd58f04a8b5",
+          "previousFilename": null
+        },
+        {
+          "status": "removed",
+          "filename": "dist/team/team-state-reader.js",
+          "sha": "06804f0b60909df3739779d47138a7d1d3485c67",
+          "previousFilename": null
+        },
+        {
+          "status": "removed",
+          "filename": "dist/team/team-state-reader.js.map",
+          "sha": "318b9235a2f15c83e4d850acf728967149280e61",
+          "previousFilename": null
+        },
+        {
+          "status": "removed",
+          "filename": "dist/team/team-status.d.ts",
+          "sha": "881893b60e118dedb3fa8f8a4fe91697fb8c4425",
+          "previousFilename": null
+        },
+        {
+          "status": "removed",
+          "filename": "dist/team/team-status.d.ts.map",
+          "sha": "616779270eabd6dc65796c62d456539b14370b4c",
+          "previousFilename": null
+        },
+        {
+          "status": "removed",
+          "filename": "dist/team/team-status.js",
+          "sha": "1f5ddac2bd34a930630018440a780bb9fe3b6726",
+          "previousFilename": null
+        },
+        {
+          "status": "removed",
+          "filename": "dist/team/team-status.js.map",
+          "sha": "22cf42feb1678e5b6ba17694420fd8e3b160c953",
+          "previousFilename": null
+        },
+        {
+          "status": "removed",
+          "filename": "dist/team/tmux-comm.d.ts",
+          "sha": "61b4ca09789e310be274a9575b85733f4fb60e66",
+          "previousFilename": null
+        },
+        {
+          "status": "removed",
+          "filename": "dist/team/tmux-comm.d.ts.map",
+          "sha": "2bb8badf93c4175e1cd535b0cae69befb7099e5a",
+          "previousFilename": null
+        },
+        {
+          "status": "removed",
+          "filename": "dist/team/tmux-comm.js",
+          "sha": "bf38e2fcf23f6c3e8e6227dab2537e6658ccd633",
+          "previousFilename": null
+        },
+        {
+          "status": "removed",
+          "filename": "dist/team/tmux-comm.js.map",
+          "sha": "ebac78d1448e83344572ac5e41461b62220abd7e",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/team/tmux-session.d.ts.map",
+          "sha": "b07dc7364185b74da0d77cd00e138dceaadc1727",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/team/tmux-session.js.map",
+          "sha": "93495f6740bf1ab172b8e1f9051153f0d0b90167",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/team/types.d.ts",
+          "sha": "5406a77958ba19f7fc9a466cfe2951a71db27352",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/team/types.d.ts.map",
+          "sha": "ed6142d9ae97d1d0fd9510abc5dfd4c9c1814131",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/team/types.js.map",
+          "sha": "2ae8e8c81b458fc0e55c65978ab534a891079a1a",
+          "previousFilename": null
+        },
+        {
+          "status": "removed",
+          "filename": "dist/team/unified-team.d.ts",
+          "sha": "85d9e8f14261546453374c640497c3c19fdc66e6",
+          "previousFilename": null
+        },
+        {
+          "status": "removed",
+          "filename": "dist/team/unified-team.d.ts.map",
+          "sha": "d1b623b78c7c2a09c87a94047646ee7375f6b0f4",
+          "previousFilename": null
+        },
+        {
+          "status": "removed",
+          "filename": "dist/team/unified-team.js",
+          "sha": "54493c08587b8b44eab72a5af8f5ce4d3188194d",
+          "previousFilename": null
+        },
+        {
+          "status": "removed",
+          "filename": "dist/team/unified-team.js.map",
+          "sha": "3f54edb227606a075081567463eba01e0fd3b62a",
+          "previousFilename": null
+        },
+        {
+          "status": "removed",
+          "filename": "dist/team/usage-tracker.d.ts",
+          "sha": "2e5acb90ac738062db14c0ff1f7b4a4a15cc41da",
+          "previousFilename": null
+        },
+        {
+          "status": "removed",
+          "filename": "dist/team/usage-tracker.d.ts.map",
+          "sha": "3e5067bc977744fa728a0a4e3d58c1921a850c47",
+          "previousFilename": null
+        },
+        {
+          "status": "removed",
+          "filename": "dist/team/usage-tracker.js",
+          "sha": "60f9efad2dd2c7fe9c79ad822e49f711fa37dded",
+          "previousFilename": null
+        },
+        {
+          "status": "removed",
+          "filename": "dist/team/usage-tracker.js.map",
+          "sha": "62f9d003ecf30c02083c76c612b994fd9392ab51",
+          "previousFilename": null
+        },
+        {
+          "status": "removed",
+          "filename": "dist/team/worker-health.d.ts",
+          "sha": "4652cb67e26d62be8920e09374b47157ed6a0013",
+          "previousFilename": null
+        },
+        {
+          "status": "removed",
+          "filename": "dist/team/worker-health.d.ts.map",
+          "sha": "5d79150767decc7cb056aab4d830d659cbca7810",
+          "previousFilename": null
+        },
+        {
+          "status": "removed",
+          "filename": "dist/team/worker-health.js",
+          "sha": "4970e2cdadbc18239f53b8bdff1bfe40c2d682b6",
+          "previousFilename": null
+        },
+        {
+          "status": "removed",
+          "filename": "dist/team/worker-health.js.map",
+          "sha": "b4878f58ba68a35732ec152f74c35a65bde6e265",
+          "previousFilename": null
+        },
+        {
+          "status": "removed",
+          "filename": "dist/team/worker-restart.d.ts",
+          "sha": "5f628f17985e9f9c2cf7c1b3d42732c37365a384",
+          "previousFilename": null
+        },
+        {
+          "status": "removed",
+          "filename": "dist/team/worker-restart.d.ts.map",
+          "sha": "1d50c62c65ffad8fea9cd81c275cd1d9ffc99374",
+          "previousFilename": null
+        },
+        {
+          "status": "removed",
+          "filename": "dist/team/worker-restart.js",
+          "sha": "630aa897007dc13d4a744b059b65ed69dc016e85",
+          "previousFilename": null
+        },
+        {
+          "status": "removed",
+          "filename": "dist/team/worker-restart.js.map",
+          "sha": "5b31fc217738eacdc99c0ba0e94575d1fa61219f",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/workflow/__tests__/projections.test.js",
+          "sha": "b6d7e0b769a1d3e9d32e344d5e1f2d66699721d7",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/workflow/__tests__/registry.test.js",
+          "sha": "6348388a7c9aba44a0dce2e515bd99ce752b667e",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/workflow/registry.d.ts.map",
+          "sha": "43caeacb2b4a0880418cc021c0de5355993f06ee",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/workflow/registry.js",
+          "sha": "1866a9daee3ae949a7e58c05fe11bd45961a8fbb",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/workflow/registry.js.map",
+          "sha": "52650dcd4047c6fdf51bf84dd2f23929d9869012",
+          "previousFilename": null
+        }
+      ]
+    },
+    {
       "pullNumber": 4792,
       "targetRef": "dev",
       "mergeBaseSha": "f616907b0434b41219f871fbb1bb3d6160679256",
