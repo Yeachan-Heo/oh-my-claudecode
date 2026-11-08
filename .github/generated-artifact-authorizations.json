@@ -38933,8 +38933,8 @@
     {
       "pullNumber": 4877,
       "targetRef": "dev",
-      "mergeBaseSha": "fa1d8b3c80fe2e97084a2afaa203dd2e048b88ee",
-      "headSha": "f6c01ba11fba732cddb5acfa1175cd2ce0b1f7d3",
+      "mergeBaseSha": "b65a16c875767b01891278a359e45f2a17212338",
+      "headSha": "a08e7aa977d7f1022b3c14317fc7df751b2e68dc",
       "owner": "Yeachan-Heo",
       "expiresAt": "2026-11-29T00:00:00.000Z",
       "generatedDelta": {
