@@ -1,12 +1,26 @@
-# oh-my-claudecode v5.7.31: let model-routing choose
+# oh-my-claudecode v5.8.0
 
 ## Release Notes
 
+⚠️ **Breaking Changes in v5.8.0**: The public `oh-my-claude-sisyphus/team` module exports have been removed. See [Migration Guide](#breaking-changes--migration) below.
+
 Release with **1 new feature**, **11 bug fixes**, **8 other changes** across **23 merged PRs**.
+
+**Note:** v5.7.31 was never published. This release (v5.8.0) contains all improvements from v5.7.31, with fixes for broken generated-artifact authorization tests and merged main→dev history.
 
 ### Highlights
 
 - **feat(jev): let model-routing choose subagent effort** (#4810)
+
+### Breaking Changes & Migration
+
+**Team Bridge Removal (#4788)**
+
+The public `oh-my-claude-sisyphus/team` exports have been removed. The internal MCP team bridge is no longer published as part of the public API surface.
+
+- **Affected code:** Direct imports from `oh-my-claude-sisyphus/team`
+- **Impact:** External consumers relying on the team bridge will need to use alternative integration patterns
+- **Migration:** See the team documentation or consult the OMC documentation for recommended team orchestration patterns
 
 ### New Features
 
@@ -53,7 +67,7 @@ The npm CLI and the Claude Code marketplace/plugin are separate install tracks, 
 **CLI / runtime:**
 
 ```bash
-npm install -g oh-my-claude-sisyphus@5.7.31
+npm install -g oh-my-claude-sisyphus@5.8.0
 ```
 
 **Claude Code plugin:**
@@ -62,4 +76,4 @@ npm install -g oh-my-claude-sisyphus@5.7.31
 /plugin marketplace update omc
 ```
 
-**Full Changelog**: https://github.com/Yeachan-Heo/oh-my-claudecode/compare/v5.7.30...v5.7.31
+**Full Changelog**: https://github.com/Yeachan-Heo/oh-my-claudecode/compare/v5.7.30...v5.8.0

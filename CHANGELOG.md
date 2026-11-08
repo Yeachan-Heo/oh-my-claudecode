@@ -1,4 +1,25 @@
-# oh-my-claudecode v5.7.31: let model-routing choose
+# oh-my-claudecode v5.8.0
+
+## Release Notes
+
+⚠️ **Breaking Changes:** The public `oh-my-claude-sisyphus/team` module exports have been removed (#4788). See migration guide for alternatives.
+
+**Note:** v5.7.31 was never published. This release contains all improvements from v5.7.31 with fixed generated-artifact authorization tests and merged main→dev history.
+
+Release with **1 new feature**, **11 bug fixes**, **8 other changes** across **23 merged PRs**.
+
+### Highlights
+
+- **feat(jev): let model-routing choose subagent effort** (#4810)
+- **BREAKING: remove public team exports** (#4788)
+
+### Breaking Changes
+
+- **Team Bridge Removal (#4788)**: Public `oh-my-claude-sisyphus/team` exports removed. External consumers should use alternative integration patterns.
+
+---
+
+# oh-my-claudecode v5.7.31: let model-routing choose (UNPUBLISHED)
 
 ## Release Notes
 
