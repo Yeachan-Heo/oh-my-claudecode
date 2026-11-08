@@ -23,6 +23,7 @@ export function recordSkillTriggerShadow(prompt, fetchFn) {
     return recordJudgment('skill-trigger', {
         state: { prompt, source: 'user-prompt-submit' },
         twin: () => getAllKeywords(prompt),
+        mapHeuristic: (keywords, questionSet) => keywords.length > 0 ? keywords[0] : 'none',
         mapAnswer: (answer) => {
             // Jev Choice answer has { type: 'choice', choice: <keyword> | 'none' }
             const choice = answer.choice?.toLowerCase();
@@ -51,6 +52,7 @@ export function recordIntentShadow(prompt, fetchFn) {
     return recordJudgment('intent', {
         state: { prompt, mode_name: 'intent' },
         twin: () => INTENT_SLASH_PATTERN.test(prompt),
+        mapHeuristic: (result, questionSet) => result,
         mapAnswer: (answer) => {
             // Jev Noul answer has { type: 'noul', noul: boolean | undefined }
             return answer.noul === true;
