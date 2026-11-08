@@ -43027,6 +43027,284 @@
           "previousFilename": null
         }
       ]
+    },
+    {
+      "pullNumber": 4887,
+      "targetRef": "main",
+      "mergeBaseSha": "d10c16530a13c8e0f2b994ac0447190f71296082",
+      "headSha": "416a45a5466e6174bf61c0c877663af422a526cd",
+      "owner": "Yeachan-Heo",
+      "expiresAt": "2027-01-08T00:00:00.000Z",
+      "generatedDelta": {
+        "count": 44,
+        "sha256": "66f200560561f32fcec051e144029f44f850525b1a84ca9b79c0a0392bd21775"
+      },
+      "generatedFiles": [
+        {
+          "status": "modified",
+          "filename": "bridge/claude-md-coordinator.cjs",
+          "sha": "c4e05bf2d8f2ed688b1344f61bc7d204b21f513b",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "bridge/cli.cjs",
+          "sha": "e525699e9dd0574fd33daf9cd7692d35e9af727b",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "bridge/runtime-cli.cjs",
+          "sha": "99c697c9b11f2dc8849b7ced2861b46e38d1a2ee",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "bridge/team-mcp.cjs",
+          "sha": "0892f469832313ad3db86d3343f8ffbce900d55e",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "bridge/team.js",
+          "sha": "892b408a283d254444a6a0028dafdff3faa5b8f0",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/__tests__/hud/omc-state.test.js",
+          "sha": "6e8d486991da90c9cdde0b47ba1f818ea251d49f",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/__tests__/hud/omc-state.test.js.map",
+          "sha": "d937a1d21cb6d49ec587b1dc5a05a19c1282b7de",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/__tests__/keyword-detector-echo-guard.test.js",
+          "sha": "7de65b337cb1abc97e2dd49b942a62bf0455e745",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/__tests__/keyword-detector-echo-guard.test.js.map",
+          "sha": "fa0c2a2931e90b1cc105fd4adfd4a6d04b088495",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/__tests__/keyword-detector-script.test.js",
+          "sha": "f2ce67be3fe19cfe087606a96bfada6c3a80c049",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/__tests__/keyword-detector-script.test.js.map",
+          "sha": "efc0c47acf41ab90d20af3ae124803faf77c1f13",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/__tests__/skills.test.js",
+          "sha": "b36c52c66e8b1ae793fb1e7fb422356c5c3a769a",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/__tests__/skills.test.js.map",
+          "sha": "18144bcd4da9e8aa48693040059c178ae83968a7",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/alias-retirement/__tests__/registry.test.js",
+          "sha": "145ebc995418bd5a2afc3c192b385e9ef07b5aab",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/cli/__tests__/ralph-afk.test.js",
+          "sha": "53195885e17b46cfd732aaab731b8c3bc5867146",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/cli/__tests__/ralph-afk.test.js.map",
+          "sha": "7db25d4901553ac1a9fcc95ec3cb84e0474674aa",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/cli/commands/ralph.d.ts",
+          "sha": "4ec3a83f8142b7ed4eed03167076d4a9f109bb38",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/cli/commands/ralph.d.ts.map",
+          "sha": "4322cea2201e7d47c0c1995ebe2ad59dd0507f1d",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/cli/commands/ralph.js",
+          "sha": "a0bc3dfa19f78a080acfbdbdfe66451f8aba47ef",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/cli/commands/ralph.js.map",
+          "sha": "2eaf986e1afd418af527ad136d4db1d2c89f1f03",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/hooks/__tests__/precompact-restore.test.js",
+          "sha": "bc7606d39f55b9f0beb2d7bf4aad45599282c5bb",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/hooks/__tests__/precompact-restore.test.js.map",
+          "sha": "95ea928b520b5c79801eab764ec35ad67af3cf9d",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/hooks/jev/points.d.ts.map",
+          "sha": "651aa3daa58592d9ae0a5685d34fb94e7f345ece",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/hooks/jev/points.js",
+          "sha": "8c895fe03db07a855fa2bff82125115fdf27af23",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/hooks/jev/points.js.map",
+          "sha": "c73c04a165a151758d750436386bc698ab4d1b7a",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/hooks/pre-compact/index.d.ts.map",
+          "sha": "e717ccdf803b56626a16cfa8c0c065e160470cf2",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/hooks/pre-compact/index.js",
+          "sha": "801051b99d608da55f0b7d8bca83be6887dc5c85",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/hooks/pre-compact/index.js.map",
+          "sha": "3b192c9ac93ef4ed6ff26598e855a231a393596e",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/hooks/ralph/__tests__/feedback-baseline.test.js",
+          "sha": "6fa75bf1d6de3d1714bfb0e76024f955043de0a6",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/hooks/ralph/__tests__/feedback-baseline.test.js.map",
+          "sha": "a7eb7c6afe39ec5c1e9a497d379da1ade03b6ea9",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/hooks/ralph/feedback-baseline.d.ts",
+          "sha": "a761acb7603ea97cde1edcf438c3f85abf7784ee",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/hooks/ralph/feedback-baseline.d.ts.map",
+          "sha": "2502174853d74f3c797c212baf884bebfd8b5b0c",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/hooks/ralph/feedback-baseline.js",
+          "sha": "a903f7bf4bcebf167e677800f04ee6f4d7d8757e",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/hooks/ralph/feedback-baseline.js.map",
+          "sha": "dbb89fb9c69610aa42282b1a23ecb7f32652e749",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/hud/omc-state.d.ts",
+          "sha": "abd8e6a2775b1ea12a294ef59f5b52c05f09ed46",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/hud/omc-state.d.ts.map",
+          "sha": "93f2c2841db28eebf27902ba6705f6f4c1022ccb",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/hud/omc-state.js",
+          "sha": "973fb09731e0b6fa22c70f8f8cdeec232464998f",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/hud/omc-state.js.map",
+          "sha": "ce1e812e80becb46a13f4fd808c5dcc7ad38f0b9",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/workflow/__tests__/projections.test.js",
+          "sha": "9ba70511588ca96b365b028a6844ffb79fa8dfbd",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/workflow/__tests__/projections.test.js.map",
+          "sha": "d9caa0e01f72af1c205ef7357f7dedbbca7d05e2",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/workflow/__tests__/registry.test.js",
+          "sha": "ab51c148c122586ce9c2eb67fdb787c65a4950b2",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/workflow/registry.d.ts.map",
+          "sha": "f93b023485e9ac3b091e2875a0d003b05b7d22b8",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/workflow/registry.js",
+          "sha": "6cdfae2903b566b64326faec82c038b51af74331",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/workflow/registry.js.map",
+          "sha": "d27d9770662e731cec3f74aa0263eed5bec44726",
+          "previousFilename": null
+        }
+      ]
     }
   ]
 }
