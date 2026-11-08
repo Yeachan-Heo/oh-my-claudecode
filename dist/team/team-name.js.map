@@ -1,1 +1,0 @@
-{"version":3,"file":"team-name.js","sourceRoot":"","sources":["../../src/team/team-name.ts"],"names":[],"mappings":"AAAA,MAAM,iBAAiB,GAAG,mCAAmC,CAAC;AAE9D,MAAM,UAAU,gBAAgB,CAAC,QAAgB;IAC/C,IAAI,CAAC,iBAAiB,CAAC,IAAI,CAAC,QAAQ,CAAC,EAAE,CAAC;QACtC,MAAM,IAAI,KAAK,CACb,uBAAuB,QAAQ,8DAA8D,CAC9F,CAAC;IACJ,CAAC;IACD,OAAO,QAAQ,CAAC;AAClB,CAAC"}
