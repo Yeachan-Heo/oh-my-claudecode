@@ -58506,6 +58506,13 @@ function claimSessionEndJob(directory, sessionId, nonce, identity, deadlineAt) {
   const now = Date.now();
   return mutateSessionEndJob(directory, sessionId, current.revision, (job) => {
     if (job.phase === "complete" || job.owner) throw new Error("claim-conflict");
+    if (Object.values(job.actions).some((action) => action.status === "claimed" && action.runner && action.runner.phase !== "terminal" && Date.now() < Date.parse(action.runner.deadlineAt))) throw new Error("runner-still-bounded");
+    for (const action of Object.values(job.actions)) {
+      if (action.status !== "claimed") continue;
+      action.status = action.class === "required" ? "retryable" : "expired";
+      action.claimantNonce = void 0;
+      if (action.runner) action.runner.phase = "terminal";
+    }
     job.owner = { nonce, pid: process.pid, processStartIdentity: identity, claimedAt: nowIso(), heartbeatAt: nowIso(), leaseExpiresAt: new Date(Math.min(now + 750, deadlineAt)).toISOString(), runDeadlineAt: new Date(deadlineAt).toISOString(), leaseGeneration: 1, claimedFromRevision: job.revision };
     job.phase = "processing";
   });
@@ -58541,6 +58548,13 @@ function reapStaleSessionEndOwner(directory, sessionId, expectedNonce, expectedG
 function releaseSessionEndJob(directory, sessionId, nonce, generation, reason = "worker-released") {
   return mutateLatest(directory, sessionId, (job) => {
     if (!job.owner || job.owner.nonce !== nonce || job.owner.leaseGeneration !== generation) throw new Error("release-conflict");
+    for (const action of Object.values(job.actions)) {
+      if (action.status !== "claimed" || !action.runner || action.runner.phase !== "reserved") continue;
+      action.status = "pending";
+      action.attempts = 0;
+      action.claimantNonce = void 0;
+      action.runner = void 0;
+    }
     job.owner = null;
     if (job.phase !== "complete") {
       job.phase = "recoverable-failure";

@@ -373,7 +373,15 @@ export function sealWikiManifest(directory, sessionId, payload) {
 }
 export function claimSessionEndJob(directory, sessionId, nonce, identity, deadlineAt) { const current = readSessionEndJob(directory, sessionId); if (!current)
     return null; const now = Date.now(); return mutateSessionEndJob(directory, sessionId, current.revision, (job) => { if (job.phase === 'complete' || job.owner)
-    throw new Error('claim-conflict'); job.owner = { nonce, pid: process.pid, processStartIdentity: identity, claimedAt: nowIso(), heartbeatAt: nowIso(), leaseExpiresAt: new Date(Math.min(now + 750, deadlineAt)).toISOString(), runDeadlineAt: new Date(deadlineAt).toISOString(), leaseGeneration: 1, claimedFromRevision: job.revision }; job.phase = 'processing'; }); }
+    throw new Error('claim-conflict'); if (Object.values(job.actions).some(action => action.status === 'claimed' && action.runner && action.runner.phase !== 'terminal' && Date.now() < Date.parse(action.runner.deadlineAt)))
+    throw new Error('runner-still-bounded'); for (const action of Object.values(job.actions)) {
+    if (action.status !== 'claimed')
+        continue;
+    action.status = action.class === 'required' ? 'retryable' : 'expired';
+    action.claimantNonce = undefined;
+    if (action.runner)
+        action.runner.phase = 'terminal';
+} job.owner = { nonce, pid: process.pid, processStartIdentity: identity, claimedAt: nowIso(), heartbeatAt: nowIso(), leaseExpiresAt: new Date(Math.min(now + 750, deadlineAt)).toISOString(), runDeadlineAt: new Date(deadlineAt).toISOString(), leaseGeneration: 1, claimedFromRevision: job.revision }; job.phase = 'processing'; }); }
 export function renewSessionEndLease(directory, sessionId, nonce, generation, deadlineAt) { return mutateLatest(directory, sessionId, (job) => { const owner = job.owner; if (!owner || owner.nonce !== nonce || owner.leaseGeneration !== generation)
     throw new Error('lease-conflict'); owner.leaseGeneration++; owner.heartbeatAt = nowIso(); owner.leaseExpiresAt = new Date(Math.min(Date.now() + 750, deadlineAt)).toISOString(); }); }
 /** Reaping is intentionally separate from a new claim. Caller must establish dead or PID-reused identity. */
@@ -394,7 +402,14 @@ export function reapStaleSessionEndOwner(directory, sessionId, expectedNonce, ex
  * job non-terminal, so the caller's reason is persisted with it (issue #4076).
  */
 export function releaseSessionEndJob(directory, sessionId, nonce, generation, reason = 'worker-released') { return mutateLatest(directory, sessionId, (job) => { if (!job.owner || job.owner.nonce !== nonce || job.owner.leaseGeneration !== generation)
-    throw new Error('release-conflict'); job.owner = null; if (job.phase !== 'complete') {
+    throw new Error('release-conflict'); for (const action of Object.values(job.actions)) {
+    if (action.status !== 'claimed' || !action.runner || action.runner.phase !== 'reserved')
+        continue;
+    action.status = 'pending';
+    action.attempts = 0;
+    action.claimantNonce = undefined;
+    action.runner = undefined;
+} job.owner = null; if (job.phase !== 'complete') {
     job.phase = 'recoverable-failure';
     job.recoverableFailure = { reason, releasedAt: nowIso(), ownerNonce: nonce };
 } }); }
