@@ -5,43 +5,43 @@
   "provenance": {
     "base": "05c800f40d1ad53b42a78609d2667ef4f726808b",
     "planningHead": "0a91273e61dbbd47eb0af4c02844409251e08398",
-    "head": "7cf0568fd521cc40383d5b2e372ee3380bcd5c35",
-    "sourceSha256": "1defa417788a003ff25b5bd59303dcaf609e24dc3d49cff32c200d743aa7047b",
+    "head": "416a45a5466e6174bf61c0c877663af422a526cd",
+    "sourceSha256": "c7fc45c1d4b3c9c34eb1f5be060684daa0c753e86fcfbb3d29840529962d4acf",
     "generatedAt": null,
     "generator": "scripts/generate-inventory-graph.mjs"
   },
   "base": "05c800f40d1ad53b42a78609d2667ef4f726808b",
   "planningHead": "0a91273e61dbbd47eb0af4c02844409251e08398",
-  "head": "7cf0568fd521cc40383d5b2e372ee3380bcd5c35",
-  "sourceSha256": "1defa417788a003ff25b5bd59303dcaf609e24dc3d49cff32c200d743aa7047b",
+  "head": "416a45a5466e6174bf61c0c877663af422a526cd",
+  "sourceSha256": "c7fc45c1d4b3c9c34eb1f5be060684daa0c753e86fcfbb3d29840529962d4acf",
   "counts": {
     "public": {
-      "skills": 83,
+      "skills": 84,
       "commands": 21,
       "workflows": 8,
       "agents": 20,
-      "total": 132
+      "total": 133
     },
     "internal": {
-      "hookFiles": 333,
+      "hookFiles": 335,
       "featureFiles": 95,
       "toolFiles": 65,
       "libFiles": 49,
       "templateHooks": 25,
-      "srcFiles": 1438,
-      "total": 1463
+      "srcFiles": 1441,
+      "total": 1466
     },
     "generated": {
-      "distFiles": 5627,
+      "distFiles": 5639,
       "bridgeFiles": 8,
-      "total": 5635
+      "total": 5647
     },
     "prompt": {
       "promptLikeFiles": 63
     },
-    "skills": 83,
+    "skills": 84,
     "commands": 21,
-    "hookFiles": 333,
+    "hookFiles": 335,
     "workflows": 8,
     "agentDefinitions": 18,
     "promptLikeFiles": 63
@@ -111,6 +111,7 @@
       "remember",
       "research",
       "review",
+      "sdd",
       "self-improve",
       "session-flow",
       "sharpen",
@@ -385,9 +386,11 @@
       "src/hooks/project-memory/storage.ts",
       "src/hooks/project-memory/types.ts",
       "src/hooks/prompt-prerequisites/index.ts",
+      "src/hooks/ralph/__tests__/closeout.test.ts",
       "src/hooks/ralph/__tests__/feedback-baseline.test.ts",
       "src/hooks/ralph/__tests__/jev-verdict-shadow.test.ts",
       "src/hooks/ralph/__tests__/prd-read.test.ts",
+      "src/hooks/ralph/closeout.ts",
       "src/hooks/ralph/feedback-baseline.ts",
       "src/hooks/ralph/index.ts",
       "src/hooks/ralph/jev-shadow.ts",
@@ -2346,6 +2349,10 @@
       "dist/cli/__tests__/ralph-afk.test.d.ts.map",
       "dist/cli/__tests__/ralph-afk.test.js",
       "dist/cli/__tests__/ralph-afk.test.js.map",
+      "dist/cli/__tests__/ralph-closeout.test.d.ts",
+      "dist/cli/__tests__/ralph-closeout.test.d.ts.map",
+      "dist/cli/__tests__/ralph-closeout.test.js",
+      "dist/cli/__tests__/ralph-closeout.test.js.map",
       "dist/cli/__tests__/self-improve-paths.test.d.ts",
       "dist/cli/__tests__/self-improve-paths.test.d.ts.map",
       "dist/cli/__tests__/self-improve-paths.test.js",
@@ -4011,6 +4018,10 @@
       "dist/hooks/prompt-prerequisites/index.d.ts.map",
       "dist/hooks/prompt-prerequisites/index.js",
       "dist/hooks/prompt-prerequisites/index.js.map",
+      "dist/hooks/ralph/__tests__/closeout.test.d.ts",
+      "dist/hooks/ralph/__tests__/closeout.test.d.ts.map",
+      "dist/hooks/ralph/__tests__/closeout.test.js",
+      "dist/hooks/ralph/__tests__/closeout.test.js.map",
       "dist/hooks/ralph/__tests__/feedback-baseline.test.d.ts",
       "dist/hooks/ralph/__tests__/feedback-baseline.test.d.ts.map",
       "dist/hooks/ralph/__tests__/feedback-baseline.test.js",
@@ -4023,6 +4034,10 @@
       "dist/hooks/ralph/__tests__/prd-read.test.d.ts.map",
       "dist/hooks/ralph/__tests__/prd-read.test.js",
       "dist/hooks/ralph/__tests__/prd-read.test.js.map",
+      "dist/hooks/ralph/closeout.d.ts",
+      "dist/hooks/ralph/closeout.d.ts.map",
+      "dist/hooks/ralph/closeout.js",
+      "dist/hooks/ralph/closeout.js.map",
       "dist/hooks/ralph/feedback-baseline.d.ts",
       "dist/hooks/ralph/feedback-baseline.d.ts.map",
       "dist/hooks/ralph/feedback-baseline.js",
@@ -6798,9 +6813,11 @@
       "src/hooks/project-memory/storage.ts",
       "src/hooks/project-memory/types.ts",
       "src/hooks/prompt-prerequisites/index.ts",
+      "src/hooks/ralph/__tests__/closeout.test.ts",
       "src/hooks/ralph/__tests__/feedback-baseline.test.ts",
       "src/hooks/ralph/__tests__/jev-verdict-shadow.test.ts",
       "src/hooks/ralph/__tests__/prd-read.test.ts",
+      "src/hooks/ralph/closeout.ts",
       "src/hooks/ralph/feedback-baseline.ts",
       "src/hooks/ralph/index.ts",
       "src/hooks/ralph/jev-shadow.ts",
@@ -15018,6 +15035,26 @@
         "id": "dist/cli/__tests__/ralph-afk.test.js.map",
         "kind": "generated-dist",
         "path": "dist/cli/__tests__/ralph-afk.test.js.map"
+      },
+      {
+        "id": "dist/cli/__tests__/ralph-closeout.test.d.ts",
+        "kind": "generated-dist",
+        "path": "dist/cli/__tests__/ralph-closeout.test.d.ts"
+      },
+      {
+        "id": "dist/cli/__tests__/ralph-closeout.test.d.ts.map",
+        "kind": "generated-dist",
+        "path": "dist/cli/__tests__/ralph-closeout.test.d.ts.map"
+      },
+      {
+        "id": "dist/cli/__tests__/ralph-closeout.test.js",
+        "kind": "generated-dist",
+        "path": "dist/cli/__tests__/ralph-closeout.test.js"
+      },
+      {
+        "id": "dist/cli/__tests__/ralph-closeout.test.js.map",
+        "kind": "generated-dist",
+        "path": "dist/cli/__tests__/ralph-closeout.test.js.map"
       },
       {
         "id": "dist/cli/__tests__/self-improve-paths.test.d.ts",
@@ -23345,6 +23382,26 @@
         "path": "dist/hooks/prompt-prerequisites/index.js.map"
       },
       {
+        "id": "dist/hooks/ralph/__tests__/closeout.test.d.ts",
+        "kind": "generated-dist",
+        "path": "dist/hooks/ralph/__tests__/closeout.test.d.ts"
+      },
+      {
+        "id": "dist/hooks/ralph/__tests__/closeout.test.d.ts.map",
+        "kind": "generated-dist",
+        "path": "dist/hooks/ralph/__tests__/closeout.test.d.ts.map"
+      },
+      {
+        "id": "dist/hooks/ralph/__tests__/closeout.test.js",
+        "kind": "generated-dist",
+        "path": "dist/hooks/ralph/__tests__/closeout.test.js"
+      },
+      {
+        "id": "dist/hooks/ralph/__tests__/closeout.test.js.map",
+        "kind": "generated-dist",
+        "path": "dist/hooks/ralph/__tests__/closeout.test.js.map"
+      },
+      {
         "id": "dist/hooks/ralph/__tests__/feedback-baseline.test.d.ts",
         "kind": "generated-dist",
         "path": "dist/hooks/ralph/__tests__/feedback-baseline.test.d.ts"
@@ -23403,6 +23460,26 @@
         "id": "dist/hooks/ralph/__tests__/prd-read.test.js.map",
         "kind": "generated-dist",
         "path": "dist/hooks/ralph/__tests__/prd-read.test.js.map"
+      },
+      {
+        "id": "dist/hooks/ralph/closeout.d.ts",
+        "kind": "generated-dist",
+        "path": "dist/hooks/ralph/closeout.d.ts"
+      },
+      {
+        "id": "dist/hooks/ralph/closeout.d.ts.map",
+        "kind": "generated-dist",
+        "path": "dist/hooks/ralph/closeout.d.ts.map"
+      },
+      {
+        "id": "dist/hooks/ralph/closeout.js",
+        "kind": "generated-dist",
+        "path": "dist/hooks/ralph/closeout.js"
+      },
+      {
+        "id": "dist/hooks/ralph/closeout.js.map",
+        "kind": "generated-dist",
+        "path": "dist/hooks/ralph/closeout.js.map"
       },
       {
         "id": "dist/hooks/ralph/feedback-baseline.d.ts",
@@ -38300,6 +38377,41 @@
         "path": "skills/review/SKILL.md"
       },
       {
+        "id": "skills/sdd/SKILL.md",
+        "kind": "skill",
+        "path": "skills/sdd/SKILL.md"
+      },
+      {
+        "id": "skills/sdd/phases/criteria.md",
+        "kind": "other",
+        "path": "skills/sdd/phases/criteria.md"
+      },
+      {
+        "id": "skills/sdd/phases/execute.md",
+        "kind": "other",
+        "path": "skills/sdd/phases/execute.md"
+      },
+      {
+        "id": "skills/sdd/phases/review.md",
+        "kind": "other",
+        "path": "skills/sdd/phases/review.md"
+      },
+      {
+        "id": "skills/sdd/phases/rules.md",
+        "kind": "other",
+        "path": "skills/sdd/phases/rules.md"
+      },
+      {
+        "id": "skills/sdd/phases/spec.md",
+        "kind": "other",
+        "path": "skills/sdd/phases/spec.md"
+      },
+      {
+        "id": "skills/sdd/phases/tasks.md",
+        "kind": "other",
+        "path": "skills/sdd/phases/tasks.md"
+      },
+      {
         "id": "skills/self-improve/SKILL.md",
         "kind": "skill",
         "path": "skills/self-improve/SKILL.md"
@@ -42325,6 +42437,11 @@
         "path": "src/cli/__tests__/ralph-afk.test.ts"
       },
       {
+        "id": "src/cli/__tests__/ralph-closeout.test.ts",
+        "kind": "src",
+        "path": "src/cli/__tests__/ralph-closeout.test.ts"
+      },
+      {
         "id": "src/cli/__tests__/self-improve-paths.test.ts",
         "kind": "src",
         "path": "src/cli/__tests__/self-improve-paths.test.ts"
@@ -44440,6 +44557,11 @@
         "path": "src/hooks/prompt-prerequisites/index.ts"
       },
       {
+        "id": "src/hooks/ralph/__tests__/closeout.test.ts",
+        "kind": "hook",
+        "path": "src/hooks/ralph/__tests__/closeout.test.ts"
+      },
+      {
         "id": "src/hooks/ralph/__tests__/feedback-baseline.test.ts",
         "kind": "hook",
         "path": "src/hooks/ralph/__tests__/feedback-baseline.test.ts"
@@ -44453,6 +44575,11 @@
         "id": "src/hooks/ralph/__tests__/prd-read.test.ts",
         "kind": "hook",
         "path": "src/hooks/ralph/__tests__/prd-read.test.ts"
+      },
+      {
+        "id": "src/hooks/ralph/closeout.ts",
+        "kind": "hook",
+        "path": "src/hooks/ralph/closeout.ts"
       },
       {
         "id": "src/hooks/ralph/feedback-baseline.ts",
@@ -47990,6 +48117,11 @@
         "path": "tests/integration/issue-4806.test.ts"
       },
       {
+        "id": "tests/integration/issue-4814-ralph-plugin-cli.test.ts",
+        "kind": "other",
+        "path": "tests/integration/issue-4814-ralph-plugin-cli.test.ts"
+      },
+      {
         "id": "tests/integration/jev-active-mode-repro.test.ts",
         "kind": "other",
         "path": "tests/integration/jev-active-mode-repro.test.ts"
@@ -48138,6 +48270,11 @@
         "id": "tests/lint/omc-playbooks.test.ts",
         "kind": "other",
         "path": "tests/lint/omc-playbooks.test.ts"
+      },
+      {
+        "id": "tests/lint/panel-tier-wording.test.ts",
+        "kind": "other",
+        "path": "tests/lint/panel-tier-wording.test.ts"
       },
       {
         "id": "tests/lint/plugin-manifest-parity.test.ts",
@@ -51313,6 +51450,11 @@
       },
       {
         "from": "skills/review/SKILL.md",
+        "to": "src/features/builtin-skills/skills.ts",
+        "kind": "registers"
+      },
+      {
+        "from": "skills/sdd/SKILL.md",
         "to": "src/features/builtin-skills/skills.ts",
         "kind": "registers"
       },
@@ -54724,6 +54866,11 @@
       {
         "from": "src/__tests__/hud/omc-state.test.ts",
         "to": "external:vitest",
+        "kind": "imports"
+      },
+      {
+        "from": "src/__tests__/hud/omc-state.test.ts",
+        "to": "src/hooks/ralph/prd.ts",
         "kind": "imports"
       },
       {
@@ -61087,6 +61234,51 @@
         "kind": "imports"
       },
       {
+        "from": "src/cli/__tests__/ralph-afk.test.ts",
+        "to": "src/lib/file-lock.ts",
+        "kind": "imports"
+      },
+      {
+        "from": "src/cli/__tests__/ralph-closeout.test.ts",
+        "to": "external:child_process",
+        "kind": "imports"
+      },
+      {
+        "from": "src/cli/__tests__/ralph-closeout.test.ts",
+        "to": "external:fs",
+        "kind": "imports"
+      },
+      {
+        "from": "src/cli/__tests__/ralph-closeout.test.ts",
+        "to": "external:os",
+        "kind": "imports"
+      },
+      {
+        "from": "src/cli/__tests__/ralph-closeout.test.ts",
+        "to": "external:path",
+        "kind": "imports"
+      },
+      {
+        "from": "src/cli/__tests__/ralph-closeout.test.ts",
+        "to": "external:vitest",
+        "kind": "imports"
+      },
+      {
+        "from": "src/cli/__tests__/ralph-closeout.test.ts",
+        "to": "src/cli/commands/ralph.ts",
+        "kind": "imports"
+      },
+      {
+        "from": "src/cli/__tests__/ralph-closeout.test.ts",
+        "to": "src/hooks/ralph/closeout.ts",
+        "kind": "imports"
+      },
+      {
+        "from": "src/cli/__tests__/ralph-closeout.test.ts",
+        "to": "src/hooks/ralph/prd.ts",
+        "kind": "imports"
+      },
+      {
         "from": "src/cli/__tests__/self-improve-paths.test.ts",
         "to": "external:node:child_process",
         "kind": "imports"
@@ -62243,6 +62435,11 @@
       },
       {
         "from": "src/cli/commands/ralph.ts",
+        "to": "src/hooks/ralph/closeout.ts",
+        "kind": "imports"
+      },
+      {
+        "from": "src/cli/commands/ralph.ts",
         "to": "src/hooks/ralph/feedback-baseline.ts",
         "kind": "imports"
       },
@@ -62264,6 +62461,11 @@
       {
         "from": "src/cli/commands/ralph.ts",
         "to": "src/hooks/session-end/spawn-next.ts",
+        "kind": "imports"
+      },
+      {
+        "from": "src/cli/commands/ralph.ts",
+        "to": "src/lib/file-lock.ts",
         "kind": "imports"
       },
       {
@@ -71877,6 +72079,46 @@
         "kind": "type-imports"
       },
       {
+        "from": "src/hooks/ralph/__tests__/closeout.test.ts",
+        "to": "external:crypto",
+        "kind": "imports"
+      },
+      {
+        "from": "src/hooks/ralph/__tests__/closeout.test.ts",
+        "to": "external:fs",
+        "kind": "imports"
+      },
+      {
+        "from": "src/hooks/ralph/__tests__/closeout.test.ts",
+        "to": "external:os",
+        "kind": "imports"
+      },
+      {
+        "from": "src/hooks/ralph/__tests__/closeout.test.ts",
+        "to": "external:path",
+        "kind": "imports"
+      },
+      {
+        "from": "src/hooks/ralph/__tests__/closeout.test.ts",
+        "to": "external:vitest",
+        "kind": "imports"
+      },
+      {
+        "from": "src/hooks/ralph/__tests__/closeout.test.ts",
+        "to": "src/hooks/ralph/closeout.ts",
+        "kind": "imports"
+      },
+      {
+        "from": "src/hooks/ralph/__tests__/feedback-baseline.test.ts",
+        "to": "external:child_process",
+        "kind": "imports"
+      },
+      {
+        "from": "src/hooks/ralph/__tests__/feedback-baseline.test.ts",
+        "to": "external:child_process",
+        "kind": "type-imports"
+      },
+      {
         "from": "src/hooks/ralph/__tests__/feedback-baseline.test.ts",
         "to": "external:fs",
         "kind": "imports"
@@ -71889,6 +72131,11 @@
       {
         "from": "src/hooks/ralph/__tests__/feedback-baseline.test.ts",
         "to": "external:path",
+        "kind": "imports"
+      },
+      {
+        "from": "src/hooks/ralph/__tests__/feedback-baseline.test.ts",
+        "to": "external:url",
         "kind": "imports"
       },
       {
@@ -71959,6 +72206,16 @@
       {
         "from": "src/hooks/ralph/__tests__/prd-read.test.ts",
         "to": "src/hooks/ralph/prd.ts",
+        "kind": "imports"
+      },
+      {
+        "from": "src/hooks/ralph/closeout.ts",
+        "to": "external:fs",
+        "kind": "imports"
+      },
+      {
+        "from": "src/hooks/ralph/closeout.ts",
+        "to": "external:path",
         "kind": "imports"
       },
       {
@@ -76305,6 +76562,11 @@
         "from": "src/hud/omc-state.ts",
         "to": "src/hooks/autopilot/types.ts",
         "kind": "type-imports"
+      },
+      {
+        "from": "src/hud/omc-state.ts",
+        "to": "src/hooks/ralph/prd.ts",
+        "kind": "imports"
       },
       {
         "from": "src/hud/omc-state.ts",
@@ -90502,6 +90764,46 @@
         "kind": "imports"
       },
       {
+        "from": "tests/integration/issue-4814-ralph-plugin-cli.test.ts",
+        "to": "external:node:child_process",
+        "kind": "imports"
+      },
+      {
+        "from": "tests/integration/issue-4814-ralph-plugin-cli.test.ts",
+        "to": "external:node:fs",
+        "kind": "imports"
+      },
+      {
+        "from": "tests/integration/issue-4814-ralph-plugin-cli.test.ts",
+        "to": "external:node:os",
+        "kind": "imports"
+      },
+      {
+        "from": "tests/integration/issue-4814-ralph-plugin-cli.test.ts",
+        "to": "external:node:path",
+        "kind": "imports"
+      },
+      {
+        "from": "tests/integration/issue-4814-ralph-plugin-cli.test.ts",
+        "to": "external:node:url",
+        "kind": "imports"
+      },
+      {
+        "from": "tests/integration/issue-4814-ralph-plugin-cli.test.ts",
+        "to": "external:vitest",
+        "kind": "imports"
+      },
+      {
+        "from": "tests/integration/issue-4814-ralph-plugin-cli.test.ts",
+        "to": "src/cli/commands/ralph.ts",
+        "kind": "imports"
+      },
+      {
+        "from": "tests/integration/issue-4814-ralph-plugin-cli.test.ts",
+        "to": "src/utils/omc-cli-rendering.ts",
+        "kind": "imports"
+      },
+      {
         "from": "tests/integration/jev-active-mode-repro.test.ts",
         "to": "external:node:child_process",
         "kind": "imports"
@@ -91322,6 +91624,21 @@
         "kind": "imports"
       },
       {
+        "from": "tests/lint/panel-tier-wording.test.ts",
+        "to": "external:fs",
+        "kind": "imports"
+      },
+      {
+        "from": "tests/lint/panel-tier-wording.test.ts",
+        "to": "external:path",
+        "kind": "imports"
+      },
+      {
+        "from": "tests/lint/panel-tier-wording.test.ts",
+        "to": "external:vitest",
+        "kind": "imports"
+      },
+      {
         "from": "tests/lint/plugin-manifest-parity.test.ts",
         "to": "external:node:fs",
         "kind": "imports"
@@ -91593,12 +91910,12 @@
       }
     ],
     "stats": {
-      "nodeCount": 8210,
-      "edgeCount": 8672,
-      "importEdgeCount": 7231,
-      "registerEdgeCount": 104
+      "nodeCount": 8234,
+      "edgeCount": 8708,
+      "importEdgeCount": 7265,
+      "registerEdgeCount": 105
     }
   },
-  "inventorySha256": "42233718e3a692b51157c3b5ec4b88e1cf8e1465e1d077b9b48982ede697ae85",
-  "manifestSha256": "63dc031152548ebc5807faa640776728d86098f26cba1dd4d0ae6ae16076887a"
+  "inventorySha256": "5a4dc84bd3dd449ace559e4ff1ddeeda55de849ca1379845600c5d9f963582bb",
+  "manifestSha256": "d07359b6358ee9455d23de4af4aea448a799eb7a9d3fcecddc8a00e1e8b25cf5"
 }

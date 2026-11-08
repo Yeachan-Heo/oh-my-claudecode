@@ -685,7 +685,7 @@ Every registered judgment point with its lifecycle hook, decision type, and bloc
 | `intent` | UserPromptSubmit | keyword-detector | Is this an Intent-intake request? | Noul (yes/no) | No | — |
 | `skill-trigger` | UserPromptSubmit | keyword-detector | Which skill should this prompt trigger? | Choice (cancel/ralph/autopilot/…) | No | — |
 | `task-size` | UserPromptSubmit | task-size-detector | Is this small/medium/large? | Choice (small/medium/large) | No | — |
-| `model-routing` | PreToolUse | delegation-enforcer | Which model tier (haiku/sonnet/opus)? + How much reasoning effort? | Choice (haiku/sonnet/opus) + Score (effort 0-4) | No | — |
+| `model-routing` | PreToolUse | delegation-enforcer | Which is the cheapest model (haiku/sonnet/opus) that does the work well? + How much reasoning effort? | Choice (haiku/sonnet/opus) + Score (effort 0-4) | No | — |
 | `slop-warning` | PreToolUse | jev-slop-warning | Does this tool input have advisory language? | Noul (yes/no) | No | — |
 | `context-pruning` | PostToolUse | post-tool-verifier | How stale is this context candidate? | Score (fresh/recent/aging/stale) | No | — |
 | `loop-continuation` | Stop | persistent-mode | Is task complete? + Progress level? | Noul + Score | **Yes** | — |
@@ -705,10 +705,12 @@ The `model-routing` point asks two questions in one request, so choosing the eff
 
 | Question | Type | Answer |
 |----------|------|--------|
-| `model-tier` | Choice | `haiku`, `sonnet`, or `opus` |
+| `model-tier` | Choice | `haiku`, `sonnet`, or `opus`: the cheapest model that will do the work well, meaning correctly and completely |
 | `effort` | Score 0-4 | 0 low (mechanical work), 1 medium (a typical change or analysis with clear steps), 2 high (multi-file work that needs its own decisions, a diagnosis, or writing a document), 3 xhigh (in-depth analysis, architecture, a high-stakes review, a hard bug), 4 max (exceptionally hard, rare) |
 
-The question asks about the work the delegated agent must actually do and says that the length of the brief and its formal conditions (language and style rules, permission to use subagents, bans, file locations, report format, words in capitals) do not raise the level. The five criteria map one to one onto `low`, `medium`, `high`, `xhigh`, `max`.
+The `model-tier` question asks for the cheapest model that will do the work well, meaning correctly and completely, and describes each model by the work it suits: Haiku for mechanical work whose result follows directly from the data and is easy to check (look up, read, list, count, copy, run a command and report the result, one obvious fix); Sonnet for typical developer and analyst work with a clear goal (code changes in one or a few files, tests, a diagnosis with clear leads, gathering and summarising several sources, a deployment following given steps); Opus for work where a mistake is costly or hard to notice and that needs deep reasoning (architecture with tradeoffs, a hard bug without clear leads, an independent high-stakes review or fact-check, a document on which money or important decisions depend, hard proofs, deciding between conflicting sources, planning a large change). A more expensive model is needed when a cheaper one would clearly be more likely to get the work wrong or to miss something important. The length of the brief, the number of steps, its formal conditions and the name of the agent type do not by themselves raise the choice; the effort question carries the amount of reasoning. In active mode the `choice` field becomes the model of the call, as described below.
+
+The `effort` question asks about the work the delegated agent must actually do and says that the length of the brief and its formal conditions (language and style rules, permission to use subagents, bans, file locations, report format, words in capitals) do not raise the level. The five criteria map one to one onto `low`, `medium`, `high`, `xhigh`, `max`.
 
 In active mode (`OMC_JEV=model-routing:active`), `pre-tool-enforcer.mjs` rounds the effort score to the nearest level and maps it onto the `effort` field of the Task/Agent call:
 

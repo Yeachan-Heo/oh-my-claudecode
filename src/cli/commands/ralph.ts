@@ -29,15 +29,18 @@ import { join } from 'path';
 import type { Command } from 'commander';
 import { getSkillsDir } from '../../features/builtin-skills/skills.js';
 import { getOmcRoot, validateSessionId } from '../../lib/worktree-paths.js';
+import { acquireFileLockSync, lockPathFor, releaseFileLockSync } from '../../lib/file-lock.js';
 import {
   baselinePath,
   diffAgainstBaseline,
   readBaseline,
+  recordBaseline,
   signatureLines,
   writeBaseline,
   type CommandBaseline,
 } from '../../hooks/ralph/feedback-baseline.js';
-import { findPrdPath, readPrd, readPrdFromPath } from '../../hooks/ralph/prd.js';
+import { findPrdPath, getPrdGoverningCriteriaRevision, getPrdStatus, readPrd, readPrdFromPath } from '../../hooks/ralph/prd.js';
+import { closeoutPath, isCloseoutSatisfied, isDeslopStatus, readCloseout, writeCloseout } from '../../hooks/ralph/closeout.js';
 import { executePlanActions, loadMapRecords, parseMapRef, planFromMap, renderActionOutcomes, renderMapPlan } from '../../factory/map-ingest.js';
 import { composeMapPrd, finalizeMapRun, launchGate, mapRunTaskPrompt, readMapRunSidecar } from '../../factory/map-run.js';
 import { defaultSpawnFn, factoryLinkArgv } from '../../hooks/session-end/spawn-next.js';
@@ -179,18 +182,29 @@ Examples:
     .option('--json', 'Output the judgment as JSON')
     .option('--session <id>', 'Session whose baseline to read (defaults to OMC_SESSION_ID, then a sole baseline under the state root)')
     .option('--write-baseline', 'Record the current failures as the session baseline instead of judging')
+    .option('--timeout <seconds>', 'Per-command timeout in seconds (default 600; env OMC_RALPH_VERIFY_TIMEOUT_SECONDS)')
     .addHelpText('after', `
 Examples:
   $ omc ralph verify --write-baseline     Record the baseline (Step 1f, first iteration)
   $ omc ralph verify                      Gate: exit 1 only when NEW failures appeared
   $ omc ralph verify --json               Machine-readable judgment
   $ omc ralph verify --session <id>       Judge another session's baseline
+  $ omc ralph verify --timeout 1800       Allow 30 minutes per feedback command
   Feedback commands come from the PRD's feedbackCommands, falling back to
   package.json build/lint/test scripts. Inside an \`omc ralph afk\` session only
   the launcher's declared --verify commands run. A missing baseline is not a failure:
-  verify reports the current signatures as a baseline candidate and exits 0.`)
-    .action((options: { json?: boolean; session?: string; writeBaseline?: boolean }) => {
-      process.exitCode = ralphVerify(options);
+  verify reports the current signatures as a baseline candidate and exits 0.
+  A command that exceeds the timeout is reported as timed out, not as a new
+  failure: its partial output is discarded. Concurrent runs for one session are
+  serialized; the second run exits 1 with a lock message.`)
+    .action((options: { json?: boolean; session?: string; writeBaseline?: boolean; timeout?: string }) => {
+      const timeoutMs = resolveFeedbackTimeoutMs(options.timeout);
+      if (timeoutMs === null) {
+        console.error('omc ralph verify: --timeout must be a positive number of seconds');
+        process.exitCode = 1;
+        return;
+      }
+      process.exitCode = ralphVerify({ ...options, timeoutMs });
     });
 
   cmd
@@ -363,14 +377,37 @@ export function resolveFeedbackCommands(directory: string, sessionId?: string): 
 
 const SHELL_MISSING_COMMAND_PATTERN = /^(?:[^:\r\n]*\/)?(?:sh|bash):\s*(?:(?:line\s+)?\d+:\s*)?[^:\r\n]+:\s*(?:command not found|not found)\s*$|^(?:zsh:\s*)?(?:(?:line\s+)?\d+:\s*)?command not found:\s*\S+\s*$|^['"][^'"\r\n]+['"] is not recognized as an internal or external command\b/im;
 
+/** Default wall-clock budget for one feedback command (10 minutes). */
+export const DEFAULT_FEEDBACK_TIMEOUT_MS = 600_000;
+
+/**
+ * Resolve the per-command budget: `--timeout <seconds>`, then
+ * OMC_RALPH_VERIFY_TIMEOUT_SECONDS, then the 10-minute default.
+ * Returns null for a value that is not a positive number of milliseconds:
+ * `spawnSync` treats a 0 timeout as "no deadline", so a budget that rounds to
+ * zero (for example `--timeout 0.0001`) must be rejected, not passed through.
+ */
+export function resolveFeedbackTimeoutMs(raw?: string): number | null {
+  const value = raw ?? process.env.OMC_RALPH_VERIFY_TIMEOUT_SECONDS;
+  if (value === undefined || value.trim() === '') return DEFAULT_FEEDBACK_TIMEOUT_MS;
+  const seconds = Number(value);
+  if (!Number.isFinite(seconds) || seconds <= 0) return null;
+  const timeoutMs = Math.round(seconds * 1000);
+  return timeoutMs >= 1 ? timeoutMs : null;
+}
+
 /** Run one feedback command on the current tree and fingerprint its failures. */
-export function runFeedbackCommand(command: string, directory: string): CommandBaseline {
+export function runFeedbackCommand(
+  command: string,
+  directory: string,
+  options: { timeoutMs?: number } = {},
+): CommandBaseline {
   try {
     const result = spawnSync(command, {
       shell: true,
       cwd: directory,
       encoding: 'utf8',
-      timeout: 600_000,
+      timeout: options.timeoutMs ?? DEFAULT_FEEDBACK_TIMEOUT_MS,
       windowsHide: true,
       maxBuffer: 32 * 1024 * 1024,
     });
@@ -380,6 +417,21 @@ export function runFeedbackCommand(command: string, directory: string): CommandB
       : undefined;
     // spawnSync also reports errors after a child ran (for example, ETIMEDOUT); pid 0 means no child started.
     const failedToSpawn = Boolean(result.error) && result.pid === 0;
+    if (errorCode === 'ETIMEDOUT') {
+      // The process was killed mid-run. Its partial output is not failure
+      // evidence, and its progress lines shift with elapsed time (issues
+      // #4794/#4795), so record the timeout instead of fingerprinting it.
+      return { signatures: [], timedOut: true };
+    }
+    // The exit code is the contract the skill gives a feedback command. A
+    // command that exits 0 has no failures to fingerprint, so its success
+    // output must not become a baseline signature. This matters when the
+    // baseline is recorded against a check that is *designed* to fail before
+    // the work starts: once the check passes, printing "all checks passed"
+    // must not read as a NEW failure.
+    if (result.status === 0 && !result.error) {
+      return { signatures: [] };
+    }
     const outputWithExecutionError = errorCode && errorCode !== 'ENOENT'
       ? `${output}\nCommand execution failed: ${errorCode}`
       : output;
@@ -407,8 +459,108 @@ export function runFeedbackCommand(command: string, directory: string): CommandB
   }
 }
 
+/**
+ * Closeout state for the session's PRD.
+ *
+ * Ralph's terminal steps (the Step 7.5 deslop pass and the Step 8 closeout)
+ * are prose in the skill; nothing failed when an agent skipped them. Once
+ * every story is complete the gate therefore requires a record, bound to the
+ * governing criteria revision so a later amendment invalidates it.
+ */
+export interface CloseoutGate {
+  required: boolean;
+  satisfied: boolean;
+  criteriaRevision: string | null;
+  deslop: string | null;
+}
+
+export function evaluateCloseoutGate(directory: string, stateRoot: string, sessionId: string): CloseoutGate {
+  // The record is session-scoped. Without a session there is nowhere to write
+  // or read it, so there is nothing to gate (verify still judges feedback).
+  if (!sessionId) return { required: false, satisfied: true, criteriaRevision: null, deslop: null };
+  const prdPath = findPrdPath(directory, sessionId || undefined);
+  if (!prdPath) return { required: false, satisfied: true, criteriaRevision: null, deslop: null };
+  const { prd } = readPrdFromPath(prdPath);
+  // A PRD with no stories has finished nothing, so there is nothing to close
+  // out (verify on a story-less PRD only judges feedback).
+  if (!prd || prd.userStories.length === 0 || !getPrdStatus(prd).allComplete) {
+    return { required: false, satisfied: true, criteriaRevision: null, deslop: null };
+  }
+  const criteriaRevision = getPrdGoverningCriteriaRevision(prd);
+  const record = sessionId ? readCloseout(closeoutPath(stateRoot, sessionId)) : null;
+  return {
+    required: true,
+    satisfied: isCloseoutSatisfied(record, criteriaRevision),
+    criteriaRevision,
+    deslop: record?.deslop ?? null,
+  };
+}
+
+/** The closeout action: write a revision-bound record, or check the existing one. */
+export function ralphCloseout(
+  options: { deslop?: string; check?: boolean; json?: boolean; session?: string },
+  directory: string = process.cwd(),
+  now: Date = new Date(),
+): number {
+  const stateRoot = getOmcRoot(directory);
+  const sessionId = options.session ?? process.env.OMC_SESSION_ID ?? '';
+  if (!sessionId) {
+    console.error('omc ralph closeout: no session id — pass --session <id> (or set OMC_SESSION_ID)');
+    return 1;
+  }
+  try {
+    validateSessionId(sessionId);
+  } catch (error) {
+    console.error(`omc ralph closeout: ${error instanceof Error ? error.message : String(error)}`);
+    return 1;
+  }
+  const prdPath = findPrdPath(directory, sessionId);
+  if (!prdPath) {
+    console.error('omc ralph closeout: no PRD for this session — a closeout records a completed ralph run');
+    return 1;
+  }
+  const { prd, error } = readPrdFromPath(prdPath);
+  if (!prd) {
+    console.error(`omc ralph closeout: ${error ?? 'invalid PRD'}`);
+    return 1;
+  }
+  const criteriaRevision = getPrdGoverningCriteriaRevision(prd);
+  const path = closeoutPath(stateRoot, sessionId);
+
+  if (options.check) {
+    const record = readCloseout(path);
+    const satisfied = isCloseoutSatisfied(record, criteriaRevision);
+    if (options.json) {
+      console.log(JSON.stringify({ sessionId, satisfied, criteriaRevision, closeout: record }));
+    } else if (satisfied) {
+      console.log(`ralph closeout: recorded (deslop: ${record?.deslop})`);
+    } else {
+      console.log('ralph closeout: no record matches the current criteria revision — run `omc ralph closeout --deslop completed|skipped`');
+    }
+    return satisfied ? 0 : 1;
+  }
+
+  if (!getPrdStatus(prd).allComplete) {
+    console.error('omc ralph closeout: the PRD still has incomplete stories — record the closeout only after Step 6 completes');
+    return 1;
+  }
+  if (!isDeslopStatus(options.deslop)) {
+    console.error('omc ralph closeout: pass --deslop completed or --deslop skipped (Step 7.5)');
+    return 1;
+  }
+  const written = writeCloseout(path, { sessionId, deslop: options.deslop, criteriaRevision }, now);
+  if (options.json) {
+    console.log(JSON.stringify({ sessionId, written, path, criteriaRevision, deslop: options.deslop }));
+  } else if (written) {
+    console.log(`ralph closeout: recorded (deslop: ${options.deslop}) at ${path}`);
+  } else {
+    console.error(`omc ralph closeout: could not write ${path}`);
+  }
+  return written ? 0 : 1;
+}
+
 /** The verify action, extracted so tests can drive it directly. Exit code is the contract. */
-export function ralphVerify(options: { json?: boolean; session?: string; writeBaseline?: boolean }, directory: string = process.cwd(), now: Date = new Date()): number {
+export function ralphVerify(options: { json?: boolean; session?: string; writeBaseline?: boolean; timeoutMs?: number }, directory: string = process.cwd(), now: Date = new Date()): number {
   const stateRoot = getOmcRoot(directory);
   let sessionId = options.session ?? process.env.OMC_SESSION_ID ?? '';
   if (sessionId) {
@@ -437,7 +589,8 @@ export function ralphVerify(options: { json?: boolean; session?: string; writeBa
     }
   }
   const path = sessionId ? baselinePath(stateRoot, sessionId) : '';
-  const baseline = path ? readBaseline(path) : null;
+  const readCurrentBaseline = () => (path ? readBaseline(path) : null);
+  const baseline = readCurrentBaseline();
   const resolution = resolveFeedbackCommands(directory, sessionId || undefined);
   if (resolution.prdError) {
     console.error(`omc ralph verify: ${resolution.prdError}`);
@@ -453,40 +606,123 @@ export function ralphVerify(options: { json?: boolean; session?: string; writeBa
     else console.log(`ralph verify: ${message}`);
     return 0;
   }
-  const current: Record<string, CommandBaseline> = {};
-  for (const command of commands) current[command] = runFeedbackCommand(command, directory);
-  const unrunnableCommands = Object.entries(current).filter(([, entry]) => entry.unrunnable).map(([command]) => command);
 
-  if (options.writeBaseline) {
-    const written = path ? writeBaseline(path, current, now) : false;
-    const note = written ? `baseline recorded at ${path}` : 'could not write a baseline (no session id; pass --session)';
-    if (options.json) console.log(JSON.stringify({ sessionId: sessionId || null, baselineWritten: written, commands, signatures: Object.fromEntries(Object.entries(current).map(([c, e]) => [c, e.signatures.length])), unrunnableCommands }));
-    else console.log(`ralph verify: ${note}`);
-    return written ? 0 : 1;
-  }
+  const runGate = (): number => {
+    // Re-read under the lock: a concurrent run may have re-recorded it.
+    const gateBaseline = readCurrentBaseline();
+    const current: Record<string, CommandBaseline> = {};
+    for (const command of commands) current[command] = runFeedbackCommand(command, directory, { timeoutMs: options.timeoutMs });
+    const unrunnableCommands = Object.entries(current).filter(([, entry]) => entry.unrunnable).map(([command]) => command);
+    const timedOutCommands = Object.entries(current).filter(([, entry]) => entry.timedOut).map(([command]) => command);
+    if (options.writeBaseline) {
+      const result = path ? recordBaseline(path, current, now) : { written: false, added: 0, removed: 0 };
+      const { written, previousPath } = result;
+      const transitionNote = result.becameUnrunnable?.length
+        ? `, ${result.becameUnrunnable.length} command${result.becameUnrunnable.length === 1 ? '' : 's'} became unrunnable (${result.becameUnrunnable.join(', ')})`
+        : '';
+      const note = written
+        ? previousPath
+          ? `baseline replaced: +${result.added} signature${result.added === 1 ? '' : 's'}, -${result.removed} signature${result.removed === 1 ? '' : 's'}${transitionNote} (previous saved at ${previousPath})`
+          : `baseline recorded at ${path}`
+        : path
+          ? 'could not write a baseline'
+          : 'could not write a baseline (no session id; pass --session)';
+      if (options.json) console.log(JSON.stringify({ sessionId: sessionId || null, baselineWritten: written, previousPath: previousPath ?? null, added: result.added, removed: result.removed, becameUnrunnable: result.becameUnrunnable ?? [], commands, signatures: Object.fromEntries(Object.entries(current).map(([c, e]) => [c, e.signatures.length])), unrunnableCommands }));
+      else console.log(`ralph verify: ${note}`);
+      return written ? 0 : 1;
+    }
 
-  const diff = diffAgainstBaseline(baseline, current);
-  if (options.json) {
-    console.log(JSON.stringify({ sessionId: sessionId || null, baselinePresent: Boolean(baseline), commands, newFailures: diff.newSignatures, resolvedFailures: diff.resolvedSignatures, unrunnableCommands }));
-    return diff.newSignatures.length > 0 ? 1 : 0;
-  }
-  if (!baseline) {
-    console.log(`ralph verify: no baseline for session ${sessionId || '(unknown)'} — current failures can serve as the baseline; run with --write-baseline at startup`);
-    for (const signature of diff.newSignatures) console.log(`  candidate: ${signature}`);
+    const diff = diffAgainstBaseline(gateBaseline, current);
+    // A timeout already present in the baseline is environment noise, like a
+    // baseline failure; a new one means the gate could not run at all.
+    const newlyTimedOut = timedOutCommands.filter((command) => !gateBaseline?.commands[command]?.timedOut);
+    const closeout = evaluateCloseoutGate(directory, stateRoot, sessionId || '');
+    const closeoutBlocked = closeout.required && !closeout.satisfied;
+    const closeoutNote = closeoutBlocked
+      ? 'the PRD is complete but no closeout record matches its criteria revision; run `omc ralph closeout --deslop completed|skipped` before Step 7.6'
+      : null;
+    if (options.json) {
+      console.log(JSON.stringify({ sessionId: sessionId || null, baselinePresent: Boolean(gateBaseline), commands, newFailures: diff.newSignatures, resolvedFailures: diff.resolvedSignatures, unrunnableCommands, timedOutCommands, closeout, closeoutError: closeoutNote }));
+      return diff.newSignatures.length > 0 || newlyTimedOut.length > 0 || closeoutBlocked ? 1 : 0;
+    }
+    if (newlyTimedOut.length > 0) {
+      const budgetSeconds = Math.round((options.timeoutMs ?? DEFAULT_FEEDBACK_TIMEOUT_MS) / 1000);
+      console.log(`ralph verify: ${newlyTimedOut.length} feedback command(s) timed out after ${budgetSeconds}s; the gate could not complete`);
+      for (const command of newlyTimedOut) console.log(`  timed out: ${command}`);
+      console.log('  raise the budget with --timeout <seconds> or OMC_RALPH_VERIFY_TIMEOUT_SECONDS');
+      const otherNew = diff.newSignatures.filter((signature) => !signature.endsWith(': <command timed out>'));
+      if (otherNew.length > 0 && gateBaseline) {
+        console.log(`ralph verify: ${otherNew.length} NEW failure(s) since baseline`);
+        for (const signature of otherNew) console.log(`  new: ${signature}`);
+      } else if (otherNew.length > 0) {
+        // Without a baseline there is nothing to diff against, so these are
+        // candidates, not regressions — the same classification the
+        // missing-baseline branch below uses. The timeout alone fails the gate.
+        console.log(`ralph verify: no baseline for session ${sessionId || '(unknown)'} — ${otherNew.length} failure signature(s) reported as candidates, not regressions`);
+        for (const signature of otherNew) console.log(`  candidate: ${signature}`);
+      }
+      if (closeoutNote) console.log(`ralph verify: ${closeoutNote}`);
+      return 1;
+    }
+    if (!gateBaseline) {
+      console.log(`ralph verify: no baseline for session ${sessionId || '(unknown)'} — current failures can serve as the baseline; run with --write-baseline at startup`);
+      for (const signature of diff.newSignatures) console.log(`  candidate: ${signature}`);
+      if (closeoutNote) {
+        console.log(`ralph verify: ${closeoutNote}`);
+        return 1;
+      }
+      return 0;
+    }
+    if (diff.newSignatures.length > 0) {
+      console.log(`ralph verify: ${diff.newSignatures.length} NEW failure(s) since baseline`);
+      for (const signature of diff.newSignatures) console.log(`  new: ${signature}`);
+      if (closeoutNote) console.log(`ralph verify: ${closeoutNote}`);
+      return 1;
+    }
+    const stillUnrunnable = unrunnableCommands.filter((command) => gateBaseline.commands[command]?.unrunnable);
+    if (stillUnrunnable.length > 0) {
+      console.log(`ralph verify: ${stillUnrunnable.length} feedback command(s) remain unrunnable; no comparison was possible`);
+      for (const command of stillUnrunnable) console.log(`  unavailable: ${command}`);
+      if (closeoutNote) console.log(`ralph verify: ${closeoutNote}`);
+      return closeoutBlocked ? 1 : 0;
+    }
+    const note = diff.resolvedSignatures.length > 0 ? ` (${diff.resolvedSignatures.length} baseline failure(s) resolved)` : '';
+    if (closeoutBlocked) {
+      console.log(`ralph verify: ${closeoutNote}`);
+      return 1;
+    }
+    console.log(`ralph verify: clean vs baseline${note}${closeout.required ? ' + closeout recorded' : ''}`);
     return 0;
+  };
+
+  if (!path) return runGate();
+  // When writing the baseline, recordBaseline will acquire its own lock.
+  // Only acquire the outer lock for verification (non-write) to serialize concurrent gate runs.
+  if (options.writeBaseline) return runGate();
+  
+  // Two concurrent gates compete for the same machine and can interleave their
+  // reads and re-records. Serialize on the baseline itself.
+  let lock: ReturnType<typeof acquireFileLockSync> = null;
+  let lockError: string | null = null;
+  try {
+    lock = acquireFileLockSync(lockPathFor(path));
+  } catch (error) {
+    lockError = error instanceof Error ? error.message : String(error);
   }
-  if (diff.newSignatures.length > 0) {
-    console.log(`ralph verify: ${diff.newSignatures.length} NEW failure(s) since baseline`);
-    for (const signature of diff.newSignatures) console.log(`  new: ${signature}`);
+  if (!lock) {
+    const message = lockError
+      ? `could not acquire the session lock (${lockPathFor(path)}): ${lockError}`
+      : `another verify is running for session ${sessionId} (${lockPathFor(path)})`;
+    console.error(`omc ralph verify: ${message}`);
+    if (options.json) {
+      // A JSON consumer needs a parseable result for this outcome too.
+      console.log(JSON.stringify({ sessionId: sessionId || null, baselinePresent: Boolean(readCurrentBaseline()), commands: [], newFailures: [], resolvedFailures: [], unrunnableCommands: [], error: message }));
+    }
     return 1;
   }
-  const stillUnrunnable = unrunnableCommands.filter((command) => baseline?.commands[command]?.unrunnable);
-  if (stillUnrunnable.length > 0) {
-    console.log(`ralph verify: ${stillUnrunnable.length} feedback command(s) remain unrunnable; no comparison was possible`);
-    for (const command of stillUnrunnable) console.log(`  unavailable: ${command}`);
-    return 0;
+  try {
+    return runGate();
+  } finally {
+    releaseFileLockSync(lock);
   }
-  const note = diff.resolvedSignatures.length > 0 ? ` (${diff.resolvedSignatures.length} baseline failure(s) resolved)` : '';
-  console.log(`ralph verify: clean vs baseline${note}`);
-  return 0;
 }

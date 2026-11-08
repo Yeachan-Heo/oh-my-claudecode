@@ -30,10 +30,14 @@ describe.skipIf(!win32)('statechart Windows smoke', () => {
   it(
     'charts the MediaPlayer corpus case with real TLC',
     { timeout: 300_000 },
-    () => {
+    (ctx) => {
       expect(existsSync(join(corpus, 'MediaPlayer.tla'))).toBe(true);
       const javaHome = process.env.JAVA_HOME_21_X64;
-      expect(javaHome, 'the windows runner ships a Java 21 home').toBeTruthy();
+      if (!javaHome) {
+        // A Windows box without the runner's Java 21 home (a contributor's
+        // laptop) skips the smoke instead of failing it — CI always has it.
+        ctx.skip();
+      }
       const java = join(javaHome as string, 'bin', 'java.exe');
       const work = mkdtempSync(join(tmpdir(), 'statechart-smoke-'));
       try {
