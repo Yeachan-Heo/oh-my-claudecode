@@ -5,7 +5,7 @@
  * Task/Agent effort above the cap is lowered whether or not Jev answers or is
  * asked, and on the hook's error path. Without the variable nothing changes.
  */
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { spawn } from "node:child_process";
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { createServer, type Server } from "node:http";
@@ -38,11 +38,12 @@ function scoreAnswer(score: number, confidence = 0.7) {
 }
 
 // Keep the test's event loop free: the hook's synchronous Jev child must be
-// able to POST to the HTTP server running in this process.
-function runEnforcer(input: Record<string, unknown>, env: NodeJS.ProcessEnv, cwd: string) {
+// able to POST to the HTTP server running in this process. `processCwd` is the
+// hook's working directory; the hook reads the project directory from `input.cwd`.
+function runEnforcer(input: Record<string, unknown>, env: NodeJS.ProcessEnv, processCwd: string) {
   return new Promise<{ stdout: string; stderr: string; exitCode: number }>((resolve, reject) => {
     const child = spawn(process.execPath, [join(PROJECT_ROOT, "scripts", "pre-tool-enforcer.mjs")], {
-      cwd,
+      cwd: processCwd,
       env,
       stdio: ["pipe", "pipe", "pipe"],
     });
@@ -69,6 +70,11 @@ function runEnforcer(input: Record<string, unknown>, env: NodeJS.ProcessEnv, cwd
 }
 
 describe("pre-tool-enforcer.mjs: OMC_JEV_MAX_EFFORT_ALWAYS caps every explicit Task/Agent effort", () => {
+  // The hooks run with `root` as their working directory, and so do the detached
+  // shadow resolvers they start. A process's working directory cannot be removed on
+  // Windows, so each test's project directory lives under `root`, which is removed
+  // only after every test.
+  let root: string;
   let cwd: string;
   let env: NodeJS.ProcessEnv;
   let server: Server;
@@ -76,8 +82,16 @@ describe("pre-tool-enforcer.mjs: OMC_JEV_MAX_EFFORT_ALWAYS caps every explicit T
   let status: number;
   let answersFor: () => Answers;
 
+  beforeAll(() => {
+    root = mkdtempSync(join(tmpdir(), "jev-effort-always-"));
+  });
+
+  afterAll(() => {
+    rmSync(root, { recursive: true, force: true, maxRetries: 20, retryDelay: 250 });
+  });
+
   beforeEach(async () => {
-    cwd = mkdtempSync(join(tmpdir(), "jev-effort-always-"));
+    cwd = mkdtempSync(join(root, "case-"));
     requests = [];
     status = 200;
     answersFor = () => ({ "model-tier": choiceAnswer("opus") });
@@ -124,9 +138,8 @@ describe("pre-tool-enforcer.mjs: OMC_JEV_MAX_EFFORT_ALWAYS caps every explicit T
 
   afterEach(async () => {
     await new Promise<void>((resolve, reject) => server.close((error) => (error ? reject(error) : resolve())));
-    // On Windows a detached shadow resolver can still hold the directory for a moment
-    // after it has written its row, so retry for up to two seconds.
-    rmSync(cwd, { recursive: true, force: true, maxRetries: 20, retryDelay: 100 });
+    // A detached shadow resolver may still have its log file open for a moment.
+    rmSync(cwd, { recursive: true, force: true, maxRetries: 10, retryDelay: 250 });
   });
 
   function agentInput(extra: Record<string, unknown> = {}, toolName = "Agent") {
@@ -147,7 +160,7 @@ describe("pre-tool-enforcer.mjs: OMC_JEV_MAX_EFFORT_ALWAYS caps every explicit T
 
   /** The tool input Claude Code would run: updatedInput when present, else the original. */
   async function routedInput(input: ReturnType<typeof agentInput>, extraEnv: NodeJS.ProcessEnv = {}) {
-    const result = await runEnforcer(input, { ...env, ...extraEnv }, cwd);
+    const result = await runEnforcer(input, { ...env, ...extraEnv }, root);
     expect(result.exitCode, result.stderr).toBe(0);
     const output = JSON.parse(result.stdout);
     expect(output.continue).toBe(true);
@@ -170,12 +183,36 @@ describe("pre-tool-enforcer.mjs: OMC_JEV_MAX_EFFORT_ALWAYS caps every explicit T
     );
   }
 
-  /** A plugin root whose dist module throws, so main() fails before it parses the input. */
+  /** A plugin root whose dist module throws on import, so main() fails before it parses the input. */
   function brokenPluginRoot() {
-    const root = join(cwd, "broken-plugin-root");
-    mkdirSync(join(root, "dist", "lib"), { recursive: true });
-    writeFileSync(join(root, "dist", "lib", "worktree-paths.js"), "throw new Error('forced hook failure');\n");
-    return root;
+    const pluginRoot = join(cwd, "broken-plugin-root");
+    mkdirSync(join(pluginRoot, "dist", "lib"), { recursive: true });
+    writeFileSync(join(pluginRoot, "dist", "lib", "worktree-paths.js"), "throw new Error('forced hook failure');\n");
+    return pluginRoot;
+  }
+
+  /**
+   * A plugin root whose getOmcRoot works once and then throws: main() resolves the state
+   * root, parses the input and handles the Task/Agent call, then fails in getTodoStatus.
+   */
+  function laterFailingPluginRoot() {
+    const pluginRoot = join(cwd, "later-failing-plugin-root");
+    mkdirSync(join(pluginRoot, "dist", "lib"), { recursive: true });
+    writeFileSync(join(pluginRoot, "package.json"), '{ "type": "module" }\n');
+    writeFileSync(
+      join(pluginRoot, "dist", "lib", "worktree-paths.js"),
+      [
+        "import { join } from 'node:path';",
+        "let calls = 0;",
+        "export function getOmcRoot(directory) {",
+        "  calls += 1;",
+        "  if (calls > 1) throw new Error('forced hook failure');",
+        "  return join(directory, '.omc');",
+        "}",
+        "",
+      ].join("\n"),
+    );
+    return pluginRoot;
   }
 
   const ALWAYS = { OMC_JEV_MAX_EFFORT_ALWAYS: "1" };
@@ -219,7 +256,7 @@ describe("pre-tool-enforcer.mjs: OMC_JEV_MAX_EFFORT_ALWAYS caps every explicit T
     }, 15000);
 
     it("continues with the call unchanged when the hook fails", async () => {
-      const result = await runEnforcer(agentInput({ effort: "max" }), { ...env, CLAUDE_PLUGIN_ROOT: brokenPluginRoot() }, cwd);
+      const result = await runEnforcer(agentInput({ effort: "max" }), { ...env, CLAUDE_PLUGIN_ROOT: brokenPluginRoot() }, root);
       expect(result.exitCode, result.stderr).toBe(0);
       expect(JSON.parse(result.stdout)).toEqual({ continue: true, suppressOutput: true });
     }, 15000);
@@ -310,10 +347,10 @@ describe("pre-tool-enforcer.mjs: OMC_JEV_MAX_EFFORT_ALWAYS caps every explicit T
     it("reports an unknown cap once per hook run, however often it is read", async () => {
       answersFor = () => ({ effort: scoreAnswer(1.2), "model-tier": choiceAnswer("opus") });
       const loudEnv = { ...env, ...ALWAYS, OMC_JEV_QUIET: undefined, OMC_JEV_MAX_EFFORT: "hihg" };
-      const active = await runEnforcer(agentInput({ effort: "max" }), loudEnv, cwd);
+      const active = await runEnforcer(agentInput({ effort: "max" }), loudEnv, root);
       expect(active.exitCode, active.stderr).toBe(0);
       expect(active.stderr.split("OMC_JEV_MAX_EFFORT=hihg")).toHaveLength(2);
-      const off = await runEnforcer(agentInput({ effort: "max" }), { ...loudEnv, OMC_JEV: undefined }, cwd);
+      const off = await runEnforcer(agentInput({ effort: "max" }), { ...loudEnv, OMC_JEV: undefined }, root);
       expect(off.exitCode, off.stderr).toBe(0);
       expect(off.stderr.split("OMC_JEV_MAX_EFFORT=hihg")).toHaveLength(2);
       // The unknown value means the default cap (max), so the explicit max stays.
@@ -323,7 +360,7 @@ describe("pre-tool-enforcer.mjs: OMC_JEV_MAX_EFFORT_ALWAYS caps every explicit T
     it("caps the effort on the hook's error path and changes nothing else", async () => {
       const failing = { ...env, ...ALWAYS, CLAUDE_PLUGIN_ROOT: brokenPluginRoot() };
       const input = agentInput({ effort: "max" });
-      const result = await runEnforcer(input, failing, cwd);
+      const result = await runEnforcer(input, failing, root);
       expect(result.exitCode, result.stderr).toBe(0);
       expect(JSON.parse(result.stdout)).toEqual({
         continue: true,
@@ -333,16 +370,46 @@ describe("pre-tool-enforcer.mjs: OMC_JEV_MAX_EFFORT_ALWAYS caps every explicit T
 
       // Within the cap, or not a Task/Agent call: the usual error output.
       for (const other of [agentInput({ effort: "medium" }), agentInput({ effort: "max" }, "Bash")]) {
-        const plain = await runEnforcer(other, failing, cwd);
+        const plain = await runEnforcer(other, failing, root);
         expect(plain.exitCode, plain.stderr).toBe(0);
         expect(JSON.parse(plain.stdout)).toEqual({ continue: true, suppressOutput: true });
       }
     }, 30000);
 
+    it("caps the call's own effort when the hook fails after it parsed the input", async () => {
+      const failing = { ...env, ...ALWAYS, OMC_JEV: undefined, CLAUDE_PLUGIN_ROOT: laterFailingPluginRoot() };
+      const input = agentInput({ effort: "xhigh" });
+      const result = await runEnforcer(input, failing, root);
+      expect(result.exitCode, result.stderr).toBe(0);
+      expect(JSON.parse(result.stdout)).toEqual({
+        continue: true,
+        suppressOutput: true,
+        hookSpecificOutput: { hookEventName: "PreToolUse", updatedInput: { ...input.tool_input, effort: "high" } },
+      });
+      // Without the variable the same failure gives the usual error output.
+      const plain = await runEnforcer(input, { ...failing, OMC_JEV_MAX_EFFORT_ALWAYS: undefined }, root);
+      expect(plain.exitCode, plain.stderr).toBe(0);
+      expect(JSON.parse(plain.stdout)).toEqual({ continue: true, suppressOutput: true });
+    }, 30000);
+
+    it("keeps a configured per-agent model (issue #3242) and caps the effort", async () => {
+      mkdirSync(join(cwd, ".claude"), { recursive: true });
+      writeFileSync(join(cwd, ".claude", "omc.jsonc"), '{ "agents": { "explore": { "model": "sonnet" } } }');
+      const input = agentInput({ subagent_type: "oh-my-claudecode:explore", model: undefined, effort: "max" }, "Task");
+      const routingEnv = { OMC_JEV: undefined, OMC_ROUTING_FORCE_INHERIT: "false" };
+      expect(await routedInput(input, { ...routingEnv, ...ALWAYS })).toEqual({
+        ...input.tool_input,
+        model: "sonnet",
+        effort: "high",
+      });
+      // Without the variable only the model is injected.
+      expect(await routedInput(input, routingEnv)).toEqual({ ...input.tool_input, model: "sonnet" });
+    }, 30000);
+
     it("uses the Codex output shape on the error path for a Codex hook input", async () => {
       const failing = { ...env, ...ALWAYS, CLAUDE_PLUGIN_ROOT: brokenPluginRoot() };
       const input = { ...agentInput({ effort: "max" }), turn_id: "turn-1" };
-      const result = await runEnforcer(input, failing, cwd);
+      const result = await runEnforcer(input, failing, root);
       expect(result.exitCode, result.stderr).toBe(0);
       expect(JSON.parse(result.stdout)).toEqual({
         hookSpecificOutput: {
