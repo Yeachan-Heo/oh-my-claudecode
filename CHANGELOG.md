@@ -1,3 +1,21 @@
+# oh-my-claudecode v5.8.1: Skills polish, jev model-routing question wording, Windows docs
+
+## Release Notes
+
+v5.8.1 is a patch release that includes skills polish, improved jev model-routing question wording, and additional documentation for Windows Node.js version support.
+
+### Bug Fixes
+
+- **fix(skills): skills polish** (#4854)
+- **fix(jev): ask model-routing for the cheapest model that does the work well** (#4886)
+- **fix(docs): add Windows Node.js version note for provider spawns** (#4881)
+
+### Stats
+
+- **3 PRs merged** | **0 new features** | **3 bug fixes** | **0 test improvements** | **0 chore**
+
+---
+
 # oh-my-claudecode v5.8.0: Jev effort routing, pstack skill suites, team bridge removal
 
 ## Release Notes
