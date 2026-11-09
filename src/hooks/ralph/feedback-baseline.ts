@@ -395,7 +395,7 @@ export function recordBaseline(path: string, commands: Record<string, CommandBas
   }
   const lockPath = lockPathFor(path);
   // Use PID-aware locking to respect live process ownership.
-  // Pass explicit retry/timeout options (500ms timeout, 50ms retry) to handle lock contention gracefully.
+  // Pass explicit retry/timeout options (10s timeout, 50ms retry), matching the previous bounded wait to handle lock contention gracefully.
   try {
     return withFileLockSync(lockPath, () => {
       const previous = readBaseline(path);
@@ -438,7 +438,7 @@ export function recordBaseline(path: string, commands: Record<string, CommandBas
         removed,
         ...(becameUnrunnable.length > 0 ? { becameUnrunnable } : {}),
       };
-    }, { timeoutMs: 500, retryDelayMs: 50 });
+    }, { timeoutMs: 10_000, retryDelayMs: 50 });
   } catch (err) {
     // Lock acquisition failed due to contention or timeout
     if (err instanceof Error && err.message.includes('Failed to acquire file lock')) {
