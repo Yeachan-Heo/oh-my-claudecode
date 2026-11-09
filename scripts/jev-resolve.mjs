@@ -66,14 +66,16 @@ export function pointExcerptChars(point, env = process.env) {
  * loop-continuation judges whether the task is complete from the last
  * assistant message, which persistent-mode.mjs already bounds to 2000
  * characters (boundLastAssistantMessage); a 200-character cut keeps only its
- * opening. Mirror of POINT_DEFAULT_EXCERPT_CHARS in config.ts.
+ * opening. compaction judges tool results by their start and end and the
+ * user's last messages (the hooks module bounds them itself, at most 4000
+ * characters). Mirror of POINT_DEFAULT_EXCERPT_CHARS in config.ts.
  */
-const POINT_DEFAULT_EXCERPT_CHARS = { "model-routing": 12000, "loop-continuation": 2000 };
+const POINT_DEFAULT_EXCERPT_CHARS = { "model-routing": 12000, "loop-continuation": 2000, compaction: 4000 };
 
 /**
  * Excerpt limit for one point: its own variable, else the point's default
- * (model-routing, loop-continuation), else OMC_JEV_EXCERPT_CHARS, else 200.
- * The global variable does not apply to a point with its own default.
+ * (model-routing, loop-continuation, compaction), else OMC_JEV_EXCERPT_CHARS,
+ * else 200. The global variable does not apply to a point with its own default.
  */
 export function resolveExcerptChars(point, env = process.env) {
   return (
@@ -120,6 +122,13 @@ export function serializeQuestions(questions) {
 }
 
 /**
+ * Points that `all` and `all:active` never enable: they send more than the
+ * bounded excerpts of the other points, so each needs its own opt-in. Mirror
+ * of NAMED_ONLY_POINTS in src/hooks/jev/config.ts.
+ */
+export const NAMED_ONLY_POINTS = new Set(["compaction"]);
+
+/**
  * Mirror of parseJevConfig + pointState in src/hooks/jev/config.ts. Returns
  * the tri-state decision the TS resolver makes for one point:
  * off | shadow | active.
@@ -128,6 +137,9 @@ export function serializeQuestions(questions) {
  * mode, OMC_JEV_PLAN_MODE=shadow runs opted-in points in shadow and
  * OMC_JEV_PLAN_MODE=off turns them off; any other value changes nothing.
  * Script channel only: the TS resolver receives no permission mode.
+ *
+ * Points in NAMED_ONLY_POINTS run only when OMC_JEV names them; `all` and
+ * `all:active` leave them off and never activate them.
  */
 export function parseJevEnv(point, env = process.env, permissionMode) {
   const raw = (env.OMC_JEV || "").trim();
@@ -149,6 +161,10 @@ export function parseJevEnv(point, env = process.env, permissionMode) {
       listed = true;
       if (isActive) active = true;
     }
+  }
+  if (NAMED_ONLY_POINTS.has(point)) {
+    sawAll = false;
+    activateAll = false;
   }
   if (!sawAll && !listed) return "off";
   if (permissionMode === "plan") {

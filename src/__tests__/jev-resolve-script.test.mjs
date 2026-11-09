@@ -19,7 +19,7 @@ import { fileURLToPath } from 'node:url';
 import { afterAll, describe, expect, it } from 'vitest';
 
 import { parseJevEnv, pointExcerptChars, readRequestFile, resolveExcerptChars, resolveJevTimeoutMs, resolveRequest, serializeQuestions, validateJevResponse } from '../../scripts/jev-resolve.mjs';
-import { excerptCharsFor, parseJevConfig } from '../hooks/jev/config.ts';
+import { excerptCharsFor, parseJevConfig, pointState } from '../hooks/jev/config.ts';
 
 const root = join(fileURLToPath(import.meta.url), '..', '..', '..');
 const NODE = process.execPath;
@@ -79,6 +79,25 @@ describe('parseJevEnv tri-state parity', () => {
     expect(parseJevEnv('model-routing', baseEnv({ OMC_JEV: 'model-routing:active' }))).toBe('active');
     expect(parseJevEnv('task-size', baseEnv({ OMC_JEV: 'all' }))).toBe('shadow');
     expect(parseJevEnv('task-size', baseEnv({ OMC_JEV: 'all:active' }))).toBe('active');
+  });
+
+  it('named-only compaction: all and all:active leave it off; only its own entry enables it, in its own mode', () => {
+    const cases = [
+      ['all', 'off'],
+      ['all:active', 'off'],
+      ['all:active,compaction', 'shadow'],
+      ['all,compaction:active', 'active'],
+      ['compaction', 'shadow'],
+      ['compaction:active', 'active'],
+      ['model-routing:active', 'off'],
+    ];
+    for (const [value, expected] of cases) {
+      const env = baseEnv({ OMC_JEV: value });
+      expect(parseJevEnv('compaction', env), value).toBe(expected);
+      expect(pointState('compaction', parseJevConfig(env)), value).toBe(expected);
+      // Every other point keeps the `all` semantics.
+      expect(parseJevEnv('task-size', env), value).toBe(pointState('task-size', parseJevConfig(env)));
+    }
   });
 });
 
