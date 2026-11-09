@@ -95,9 +95,9 @@ jobs:
       # forward-slash assumptions in project-dir encoding and worktree
       # transcript resolution (see #3274, #3276) can slip through it. Running
       # the full `npm test` suite here is not yet possible: it has pre-existing
-      # platform-specific failures on Windows (e.g. python-repl sandbox, lsp
-      # devcontainer, session-end path interpolation) that are out of scope for
-      # this gate. Keep this list in sync with the path-handling test files.
+      # platform-specific failures on Windows (e.g. python-repl sandbox,
+      # session-end path interpolation) that are out of scope for this gate.
+      # Keep this list in sync with the path-handling test files.
       # run.cjs supervisor/stdio contract tests (#3920) must run here: leaked
       # protocol handles and process-tree reap are Windows-hosted failures.
       # The native worker supervisor also requires Windows PowerShell 5.1 to
@@ -124,6 +124,8 @@ jobs:
           src/installer/__tests__/claude-md-transaction.test.ts
           src/team/__tests__/cli-detection.windows.integration.test.ts
           src/team/__tests__/worker-launch-windows-supervisor.test.ts
+          src/tools/lsp/__tests__/devcontainer.test.ts
+          src/tools/lsp/__tests__/client-devcontainer.test.ts
           src/utils/__tests__/windows-search.test.ts
           tests/statechart/native-suite.test.ts
           tests/statechart/windows-smoke.test.ts
