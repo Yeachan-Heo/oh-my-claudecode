@@ -205,17 +205,43 @@ function jevSaysTaskComplete(result) {
     (noul === true || (typeof noul === "number" && Number.isFinite(noul) && noul >= 0.5));
 }
 
-function completeModeFromJev(state, statePath) {
-  if (!isStateUnchangedSinceJevRequest(state, statePath)) return false;
+/**
+ * Stop output for a completeModeFromJev() outcome that releases the stop. A
+ * Stop hook's `decision` accepts only "approve" or "block", so a release omits
+ * it; `systemMessage` is the field shown to the user. A cancelled mode is
+ * released silently, like every other stop whose state file is gone.
+ */
+function jevCompletionStopOutput(outcome, modeName) {
+  if (outcome !== "completed") return SAFE_CONTINUE;
+  return {
+    ...SAFE_CONTINUE,
+    systemMessage: `[JEV-COMPLETION] Task complete per Jev answer; ${modeName} mode exited and transitioned to completion.`,
+  };
+}
 
-  state.active = false;
-  state.current_phase = "complete";
-  state.phase = "complete";
-  state.completed_at = new Date().toISOString();
-  if (shouldWriteStateBack(statePath)) {
-    writeJsonFile(statePath, state);
+/**
+ * Persist the terminal state for a Jev-confirmed completion.
+ * - "completed": the terminal state reached disk.
+ * - "cancelled": the state file is gone, i.e. cancel removed it while Jev was
+ *   answering (#2088); it is not written back.
+ * - null: the state changed meanwhile or the write failed; the caller keeps
+ *   blocking, so Stop is never released while the file still says active: true.
+ */
+function completeModeFromJev(state, statePath) {
+  if (isStateUnchangedSinceJevRequest(state, statePath)) {
+    const terminalState = {
+      ...state,
+      active: false,
+      current_phase: "complete",
+      phase: "complete",
+      completed_at: new Date().toISOString(),
+    };
+    if (shouldWriteStateBack(statePath) && writeJsonFile(statePath, terminalState)) {
+      Object.assign(state, terminalState);
+      return "completed";
+    }
   }
-  return true;
+  return shouldWriteStateBack(statePath) ? null : "cancelled";
 }
 
 /**
@@ -1813,31 +1839,25 @@ async function main() {
           };
           const jevResult = recordLoopContinuationShadow(judgmentState, heuristic, data.permission_mode);
 
-          const jevCompletionAccepted =
-            jevSaysTaskComplete(jevResult) &&
-            completeModeFromJev(ralph.state, ralph.path);
+          const jevCompletion = jevSaysTaskComplete(jevResult)
+            ? completeModeFromJev(ralph.state, ralph.path)
+            : null;
 
-          if (jevCompletionAccepted) {
+          if (jevCompletion) {
             if (!hasActiveAutopilotForSession) {
-              console.log(
-                JSON.stringify({
-                  decision: "continue",
-                  reason: '[JEV-COMPLETION] Task complete per Jev answer; ralph mode exited and transitioned to completion.',
-                }),
-              );
+              console.log(JSON.stringify(jevCompletionStopOutput(jevCompletion, "ralph")));
               return;
             }
 
-            // Ralph is a child workflow here; let the active autopilot handler
-            // below enforce Stop instead of releasing the turn.
+            // Ralph is a child workflow here, completed or cancelled; let the
+            // active autopilot handler below decide Stop instead of releasing
+            // the turn.
             break ralphPriority;
           }
 
-          const shouldBlock = heuristic.shouldBlock;
-
           console.log(
             JSON.stringify({
-              decision: shouldBlock ? "block" : "continue",
+              decision: "block",
               reason: reason,
             }),
           );
@@ -1869,11 +1889,11 @@ async function main() {
           maxIterations: ralph.state.max_iterations,
         }, data.permission_mode);
         
-        const jevCompletionAcceptedAtExtend =
-          jevSaysTaskComplete(jevExtendResult) &&
-          completeModeFromJev(ralph.state, ralph.path);
+        const jevCompletionAtExtend = jevSaysTaskComplete(jevExtendResult)
+          ? completeModeFromJev(ralph.state, ralph.path)
+          : null;
 
-        if (!jevCompletionAcceptedAtExtend) {
+        if (!jevCompletionAtExtend) {
           console.log(
             JSON.stringify({
               decision: "block",
@@ -1884,16 +1904,12 @@ async function main() {
         }
 
         if (!hasActiveAutopilotForSession) {
-          console.log(
-            JSON.stringify({
-              decision: "continue",
-              reason: '[JEV-COMPLETION] Task complete per Jev answer; ralph mode exited and transitioned to completion.',
-            }),
-          );
+          console.log(JSON.stringify(jevCompletionStopOutput(jevCompletionAtExtend, "ralph")));
           return;
         }
 
-        // Continue into the active autopilot handler below.
+        // Completed or cancelled child Ralph: continue into the active
+        // autopilot handler below.
         break ralphPriority;
       }
     }
@@ -2057,24 +2073,17 @@ async function main() {
               phase,
             }, data.permission_mode);
 
-            if (
-              jevSaysTaskComplete(jevAutopilotResult) &&
-              completeModeFromJev(autopilot.state, autopilot.path)
-            ) {
-              console.log(
-                JSON.stringify({
-                  decision: "continue",
-                  reason: '[JEV-COMPLETION] Task complete per Jev answer; autopilot mode exited and transitioned to completion.',
-                }),
-              );
+            const jevAutopilotCompletion = jevSaysTaskComplete(jevAutopilotResult)
+              ? completeModeFromJev(autopilot.state, autopilot.path)
+              : null;
+            if (jevAutopilotCompletion) {
+              console.log(JSON.stringify(jevCompletionStopOutput(jevAutopilotCompletion, "autopilot")));
               return;
             }
 
-            const shouldBlockAP = true; // Always block after reaching iteration limit (original behavior)
-
             console.log(
               JSON.stringify({
-                decision: shouldBlockAP ? "block" : "continue",
+                decision: "block",
                 reason: reason,
               }),
             );

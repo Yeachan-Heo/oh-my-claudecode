@@ -17,7 +17,7 @@ import {
   getAllKeywords,
   type KeywordType,
 } from './index.js';
-import { recordJudgment } from '../jev/index.js';
+import { noulAnswerIsYes, recordJudgment } from '../jev/index.js';
 import type { JevAnswer, ResolveResult } from '../jev/index.js';
 
 /**
@@ -67,8 +67,8 @@ export function recordIntentShadow(
     twin: () => INTENT_SLASH_PATTERN.test(prompt),
     mapHeuristic: (result, questionSet) => result,
     mapAnswer: (answer: JevAnswer) => {
-      // Jev Noul answer has { type: 'noul', noul: boolean | undefined }
-      return answer.noul === true;
+      // Jev Noul answer: noul is the probability of "yes" (0-1)
+      return noulAnswerIsYes(answer);
     },
     fetchFn,
   }) as Promise<ResolveResult<boolean>>;

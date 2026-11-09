@@ -36,7 +36,7 @@ afterEach(() => {
   rmSync(logDir, { recursive: true, force: true });
 });
 
-function stubFetch(): { fetchFn: typeof fetch; calls: Array<{ body: string }> } {
+function stubFetch(noul: boolean | number = true): { fetchFn: typeof fetch; calls: Array<{ body: string }> } {
   const calls: Array<{ body: string }> = [];
   const fetchFn = (async (_url: unknown, init?: unknown) => {
     const body = (init as RequestInit | undefined)?.body as string;
@@ -46,7 +46,7 @@ function stubFetch(): { fetchFn: typeof fetch; calls: Array<{ body: string }> } 
       status: 200,
       json: async () => ({
         answers: {
-          slop_advisory: { type: 'noul', noul: true, confidence: 0.8 },
+          slop_advisory: { type: 'noul', noul, confidence: 0.8 },
         },
       }),
     } as unknown as Response;
@@ -171,5 +171,28 @@ describe('slop-warning shadow judgment point (recorder only — no runtime wirin
     expect(entry.mode).toBe('degraded');
     expect(entry.heuristic).toBe(true);
     expect(entry.jev).toBeNull();
+  });
+});
+
+describe('slop-warning point in active mode', () => {
+  // The API returns noul as the probability of "yes". The twin decision is the
+  // opposite of Jev's, which shows that Jev decided.
+  it.each([
+    { noul: 0.92, expected: true },
+    { noul: 0.08, expected: false },
+  ])('reads a noul probability of $noul as $expected', async ({ noul, expected }) => {
+    process.env.TYPESAFE_API_KEY = TEST_KEY;
+    process.env.OMC_JEV = 'slop-warning:active';
+    const { fetchFn, calls } = stubFetch(noul);
+
+    const result = await recordSlopWarningShadow({
+      warned: !expected,
+      toolName: 'Edit',
+      toolInput: { new_string: 'add a fallback in case the primary path fails' },
+      fetchFn,
+    });
+
+    expect(result).toEqual({ answer: expected, source: 'jev', mode: 'active' });
+    expect(calls).toHaveLength(1);
   });
 });

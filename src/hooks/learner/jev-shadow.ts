@@ -12,7 +12,7 @@
  */
 
 import { detectExtractableMoment, type DetectionResult } from './detector.js';
-import { recordJudgment } from '../jev/index.js';
+import { noulAnswerIsYes, recordJudgment } from '../jev/index.js';
 import type { JevAnswer, ResolveResult } from '../jev/index.js';
 
 /**
@@ -36,9 +36,9 @@ export function recordLearnerExtractionShadow(
     twin: () => detectExtractableMoment(assistantMessage, userMessage),
     mapHeuristic: (result, questionSet) => result.detected,
     mapAnswer: (answer: JevAnswer) => {
-      // Jev Noul answer has { type: 'noul', noul: boolean | undefined }
+      // Jev Noul answer: noul is the probability of "yes" (0-1)
       return {
-        detected: answer.noul === true,
+        detected: noulAnswerIsYes(answer),
         confidence: (answer.confidence ?? 0.5) * 100, // Scale to 0-100
         patternType: 'technique' as const,
         suggestedTriggers: [],

@@ -12,6 +12,7 @@ const ENV_KEYS = [
   'OMC_JEV_MAX_REQUESTS',
   'OMC_JEV_EXCERPT_CHARS',
   'OMC_JEV_EXCERPT_CHARS_MODEL_ROUTING',
+  'OMC_JEV_EXCERPT_CHARS_LOOP_CONTINUATION',
   'OMC_JEV_LOG_DIR',
   'OMC_JEV_ENDPOINT',
 ] as const;
@@ -277,6 +278,21 @@ describe('resolveJudgment', () => {
     const line = JSON.parse(await readLog());
     expect(line.state.prompt).toHaveLength(50);
     expect(line.state.nested.deep).toHaveLength(50);
+  });
+
+  it('bounds loop-continuation state to 2000 characters by default, whatever OMC_JEV_EXCERPT_CHARS is', async () => {
+    process.env.TYPESAFE_API_KEY = 'test-key';
+    process.env.OMC_JEV_EXCERPT_CHARS = '50';
+    const state = { last_assistant_message: 'a'.repeat(2500), continuation_excerpt: 'b'.repeat(2500) };
+    const { fetchFn, calls } = captureFetch(() => jevOk({ choice: 'x' }));
+    await call({ point: 'loop-continuation', state, fetchFn });
+    process.env.OMC_JEV_EXCERPT_CHARS_LOOP_CONTINUATION = '200';
+    await call({ point: 'loop-continuation', state, fetchFn });
+    const [byDefault, lowered] = calls.map((entry) => JSON.parse(entry.init?.body as string));
+    expect(byDefault.state.last_assistant_message).toHaveLength(2000);
+    expect(byDefault.state.continuation_excerpt).toHaveLength(2000);
+    expect(lowered.state.last_assistant_message).toHaveLength(200);
+    expect(lowered.state.continuation_excerpt).toHaveLength(200);
   });
 
   it('sends question definitions whole, whatever OMC_JEV_EXCERPT_CHARS is', async () => {

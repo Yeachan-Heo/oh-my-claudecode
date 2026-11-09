@@ -42,7 +42,8 @@ export interface JevAnswer {
   type: string;
   choice?: string;
   score?: number;
-  noul?: boolean;
+  /** Probability of "yes" (0-1), as the API returns it; read it with noulAnswerIsYes(). */
+  noul?: number | boolean;
   probabilities?: Record<string, number>;
   confidence?: number;
 }

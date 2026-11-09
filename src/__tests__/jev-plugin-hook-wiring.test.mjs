@@ -245,6 +245,24 @@ describe('plugin hook script Jev wiring (#4120)', () => {
     expect(logEntries.filter((candidate) => candidate.point === 'loop-continuation')).toHaveLength(1);
   });
 
+  // An empty value counts as unset, so a variable set in the parent shell cannot leak in.
+  it.each([
+    [{ OMC_JEV_EXCERPT_CHARS: '', OMC_JEV_EXCERPT_CHARS_LOOP_CONTINUATION: '' }, 2000],
+    [{ OMC_JEV_EXCERPT_CHARS: '50', OMC_JEV_EXCERPT_CHARS_LOOP_CONTINUATION: '' }, 2000],
+    [{ OMC_JEV_EXCERPT_CHARS_LOOP_CONTINUATION: '200' }, 200],
+  ])('sends loop-continuation the assistant message as the Stop hook bounds it (%j)', (overrides, expected) => {
+    const context = makeContext();
+    const sessionId = createRalphState(context);
+    runHook(context, 'persistent-mode.mjs', {
+      cwd: context.cwd,
+      session_id: sessionId,
+      last_assistant_message: 'a'.repeat(2500),
+    }, 'loop-continuation', overrides);
+
+    const entry = readPoint(context, 'loop-continuation');
+    expect(entry.state.last_assistant_message).toHaveLength(expected);
+  });
+
   it('does not fabricate a Ralph verdict when the plugin Stop hook has no verifier', () => {
     const context = makeContext();
     const sessionId = createRalphState(context);
