@@ -185,6 +185,57 @@ describe('teleportCommand', () => {
     expect(execFileSync).toHaveBeenCalledWith('yarn', ['install'], expect.objectContaining({ cwd: '/root/issue/repo-1' }));
   });
 
+  describe('worktree without a readable package.json', () => {
+    beforeEach(() => {
+      // A Python, Go or Rust repository: no package.json, lockfile or node_modules.
+      (existsSync as ReturnType<typeof vi.fn>).mockImplementation((target: unknown) => target === '/root/issue');
+      (readFileSync as ReturnType<typeof vi.fn>).mockImplementation((target: unknown) => {
+        throw Object.assign(new Error(`ENOENT: no such file or directory, open '${String(target)}'`), { code: 'ENOENT' });
+      });
+      // Like the real package managers, an install fails when there is no package.json.
+      (execFileSync as ReturnType<typeof vi.fn>).mockImplementation((command: string, args: string[]) => {
+        if (command === 'git' && args.join(' ') === 'rev-parse --show-toplevel') return '/repo';
+        if (command === 'git' && args.join(' ') === 'remote get-url origin') return 'git@github.com:owner/repo.git';
+        if (command === 'npm' || command === 'pnpm' || command === 'yarn') {
+          throw new Error(`Command failed: ${command} ${args.join(' ')}`);
+        }
+        return Buffer.from('');
+      });
+    });
+
+    it.each([true, false])('skips the dependency step for a repository with no package.json (symlinkNodeModules=%s)', async (symlink) => {
+      (loadConfig as ReturnType<typeof vi.fn>).mockReturnValue({ teleport: { symlinkNodeModules: symlink } });
+      const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+      const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+
+      const result = await teleportCommand('#1', { worktreePath: '/root' });
+
+      const installCalls = (execFileSync as ReturnType<typeof vi.fn>).mock.calls.filter(
+        ([cmd]) => cmd === 'npm' || cmd === 'pnpm' || cmd === 'yarn',
+      );
+      expect(installCalls).toHaveLength(0);
+      expect(symlinkSync).not.toHaveBeenCalled();
+      expect(warnSpy).not.toHaveBeenCalled();
+      expect(logSpy).toHaveBeenCalledWith(expect.stringContaining('Worktree created successfully!'));
+      expect(result).toMatchObject({ success: true, worktreePath: '/root/issue/repo-1' });
+    });
+
+    it('still installs when the package.json exists but cannot be read', async () => {
+      const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+      (existsSync as ReturnType<typeof vi.fn>).mockImplementation(
+        (target: unknown) => target === '/root/issue' || target === '/root/issue/repo-1/package.json',
+      );
+      (readFileSync as ReturnType<typeof vi.fn>).mockImplementation((target: unknown) => {
+        throw Object.assign(new Error(`EACCES: permission denied, open '${String(target)}'`), { code: 'EACCES' });
+      });
+
+      await teleportCommand('#1', { worktreePath: '/root' });
+
+      expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining('could not read package.json'));
+      expect(execFileSync).toHaveBeenCalledWith('npm', ['install'], expect.objectContaining({ cwd: '/root/issue/repo-1' }));
+    });
+  });
+
   it.each([
     ['https://github.com/owner/repo/issues/7/', 7],
     ['https://github.com/owner/repo/pull/8/files', 8],
