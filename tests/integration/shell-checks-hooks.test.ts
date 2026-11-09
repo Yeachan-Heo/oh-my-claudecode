@@ -9,11 +9,12 @@ import { spawnSync } from 'node:child_process';
 import { cpSync, existsSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 
 const ROOT = fileURLToPath(new URL('../../', import.meta.url));
 const onWindows = process.platform === 'win32';
-const SYNTAX_LIMIT = '15000'; // a loaded machine must not turn a slow bash -n into a skipped check
+const SYNTAX_LIMIT = '3000'; // the cap of the variable; a loaded machine must not turn a slow bash -n into a skipped check
+const haveBash = (await import(pathToFileURL(join(ROOT, 'scripts', 'lib', 'shell-checks.mjs')).href)).findBashForSyntax() !== null;
 
 type HookJson = { continue?: boolean; suppressOutput?: boolean; hookSpecificOutput?: { permissionDecision?: string; permissionDecisionReason?: string; additionalContext?: string } };
 type HookResult = { code: number | null; stdout: string; stderr: string; json: HookJson | null };
@@ -37,6 +38,11 @@ describe('shell checks in the hooks', () => {
     env = {
       PATH: process.env.PATH,
       SystemRoot: process.env.SystemRoot,
+      // where findBashForSyntax looks for Git Bash on Windows
+      ProgramFiles: process.env.ProgramFiles,
+      ProgramW6432: process.env.ProgramW6432,
+      LOCALAPPDATA: process.env.LOCALAPPDATA,
+      CLAUDE_CODE_GIT_BASH_PATH: process.env.CLAUDE_CODE_GIT_BASH_PATH,
       HOME: cwd,
       USERPROFILE: cwd,
       XDG_CONFIG_HOME: join(cwd, 'config'),
@@ -110,11 +116,11 @@ describe('shell checks in the hooks', () => {
     const extra = { OMC_SHELL_CHECKS: '1', OMC_SHELL_CHECKS_LOG_DIR: logDir, OMC_SHELL_SYNTAX_TIMEOUT_MS: SYNTAX_LIMIT };
     const secret = 'sk-secret1234567890abcd';
     const unclosed = 'echo "this command is longer than two hundred characters so that the syntax check also runs on Windows, where it covers only longer commands; the double quote is never closed until the end of the command';
-    const valid = 'git -C "D:/repo" status --short | head -20; echo "state: $(date \'+%F %T\')"; ls -la \'D:/repo/docs\' | head -5; printf \'%s\\n\' "end of the check, which is longer than two hundred characters and syntactically valid"';
+    const valid = 'git -C "E:/repo" status --short | head -20; echo "state: $(date \'+%F %T\')"; ls -la \'E:/repo/docs\' | head -5; printf \'%s\\n\' "end of the check, which is longer than two hundred characters and syntactically valid"';
     const table: Array<[string, string, 'deny' | 'warn' | 'allow']> = [
       ['Bash', `${longCommand()}\necho API_KEY=${secret}`, onWindows ? 'deny' : 'allow'],
       ['Bash', 'echo "$(echo hi) $(printf %s $\'\\r\' | wc -c)"', onWindows ? 'deny' : 'allow'],
-      ['Bash', unclosed, 'deny'],
+      ['Bash', unclosed, haveBash ? 'deny' : 'allow'],
       ['Bash', valid, 'allow'],
       ['Bash', "printf '%s\\n' 'C:\\\\Users\\\\x'", onWindows ? 'warn' : 'allow'],
       ['PowerShell', 'ssh host "ls \\$HOME; echo \\$(date)"', 'warn'],

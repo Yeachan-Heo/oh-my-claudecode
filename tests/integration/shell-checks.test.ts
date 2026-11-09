@@ -9,7 +9,8 @@
  */
 import { describe, expect, it } from 'vitest';
 import { spawnSync } from 'node:child_process';
-import { existsSync, readFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, readdirSync, rmSync, truncateSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
@@ -119,7 +120,8 @@ describe.skipIf(!bashPath)('shell checks: length boundary', () => {
   });
 });
 
-describe.skipIf(!onWindows)('shell checks: sentinels against the real Git Bash (Windows only)', () => {
+// Each sentinel starts Git Bash up to 32 times (about 0.1-1 s each on Windows), more than the default 30 s test timeout allows.
+describe.skipIf(!onWindows)('shell checks: sentinels against the real Git Bash (Windows only)', { timeout: 180_000 }, () => {
   const run = (args: string[], options: Record<string, unknown> = {}) => spawnSync(GIT_BASH as string, args, { encoding: 'utf8', windowsHide: true, timeout: 20000, ...options });
 
   it('Git Bash still cuts the -c argument at about 8190 characters (8185 passes, 8195 is cut)', () => {
@@ -130,7 +132,7 @@ describe.skipIf(!onWindows)('shell checks: sentinels against the real Git Bash (
 
   // The Bash tool of Claude Code 2.1.318 runs bash -c "source <snapshot> ... && eval '<command>' < /dev/null && pwd -P >| <file>"
   // with every ' of the command written as '"'"' (the wrapper measured about 451 characters).
-  const BEFORE = "source /c/Users/user/.claude/shell-snapshots/snapshot-bash-1762671234567-abcdef.sh 2>/dev/null || true && export TEMP='D:\\Temp' TMP='D:\\Temp' && shopt -u extglob 2>/dev/null || true && { \\builtin unalias -- 'which'; \\builtin unset -f -- 'which'; } >/dev/null 2>&1 || true && { \\builtin unalias -- 'unsetenv'; \\builtin unset -f -- 'unsetenv'; } >/dev/null 2>&1 || true && eval '";
+  const BEFORE = "source /c/Users/user/.claude/shell-snapshots/snapshot-bash-1762671234567-abcdef.sh 2>/dev/null || true && export TEMP='E:\\Temp' TMP='E:\\Temp' && shopt -u extglob 2>/dev/null || true && { \\builtin unalias -- 'which'; \\builtin unset -f -- 'which'; } >/dev/null 2>&1 || true && { \\builtin unalias -- 'unsetenv'; \\builtin unset -f -- 'unsetenv'; } >/dev/null 2>&1 || true && eval '";
   const AFTER = "' < /dev/null && pwd -P >| /d/Temp/claude-5345-cwd";
   const wrapped = (command: string) => BEFORE + command.split("'").join("'\"'\"'") + AFTER;
   const echoOfEffectiveLength = (effective: number, apostrophes: number) => {
@@ -227,6 +229,28 @@ describe('shell checks: tokenizer', () => {
     expect(lib.tokenizeBash("cat <<'EOF'\n$(x)\nEOF").heredocs[0].parts).toBeUndefined();
   });
 
+  it('ends a literal part where the expansion after it starts', () => {
+    const text = 'echo a$b "c$d" ${e:-f$g}';
+    const t = lib.tokenizeBash(text);
+    const summary: string[] = [];
+    lib.walkBashParts(t.tokens, (part: { kind: string; text?: string }) => { if (part.kind === 'lit' || part.kind === 'param') summary.push(`${part.kind}:${part.text}`); });
+    expect(summary).toEqual(['lit:echo', 'lit:a', 'param:$b', 'lit:c', 'param:$d', 'param:${e:-f$g}', 'lit:e:-f', 'param:$g']);
+    expect(lib.wordText(t.tokens[1])).toBe('a\u0000');
+  });
+
+  it('takes a here-document delimiter literally, including expansions, and ignores a CR at the end of the closing line', () => {
+    const delimiter = (source: string) => lib.tokenizeBash(source).heredocs[0];
+    expect(delimiter('cat <<$EOF\nhi\n$EOF')).toMatchObject({ delimiter: '$EOF', terminated: true, quoted: false });
+    expect(delimiter('cat <<"$X"\nhi\n$X')).toMatchObject({ delimiter: '$X', terminated: true, quoted: true });
+    expect(delimiter("cat <<'A B'\nhi\nA B")).toMatchObject({ delimiter: 'A B', terminated: true });
+    expect(delimiter('cat <<EOF\r\nhi\r\nEOF\r\n').terminated).toBe(true);
+    expect(delimiter('cat <<EOF\nhi\nEOF x').terminated).toBe(false);
+    for (const platform of ['win32', 'linux']) {
+      expect(lib.checkBashCommand('cat <<$EOF\nhi\n$EOF', { platform, syntax: false }).decision).toBe('allow');
+      expect(lib.checkBashCommand('cat <<EOF\r\nx\r\nEOF\r', { platform, syntax: false }).decision).toBe('allow');
+    }
+  });
+
   it('treats a carriage return as a word character', () => {
     const t = lib.tokenizeBash('rm\r x');
     expect(lib.wordValue(t.tokens[0])).toBe('rm\r');
@@ -267,17 +291,17 @@ describe('shell checks: helpers', () => {
   });
 
   it('masks secrets and keeps ordinary paths', () => {
-    const masked = lib.maskSecrets('curl -H "Authorization: Bearer abcdefghijklmnop" https://u:pass123@example.com API_KEY=sk-1234567890abcdefgh token=zxcvbnm12 ghp_abcdefghijklmnopqrstuvwx 0123456789abcdef0123456789abcdef01 D:/repo/docs/PLAN.md');
+    const masked = lib.maskSecrets('curl -H "Authorization: Bearer abcdefghijklmnop" https://u:pass123@example.com API_KEY=sk-1234567890abcdefgh token=zxcvbnm12 ghp_abcdefghijklmnopqrstuvwx 0123456789abcdef0123456789abcdef01 E:/repo/docs/PLAN.md');
     for (const secret of ['abcdefghijklmnop', 'pass123', 'sk-1234567890abcdefgh', 'zxcvbnm12', 'ghp_abcdefghijklmnopqrstuvwx', '0123456789abcdef0123456789abcdef01']) expect(masked).not.toContain(secret);
-    expect(masked).toContain('D:/repo/docs/PLAN.md');
+    expect(masked).toContain('E:/repo/docs/PLAN.md');
     const masked2 = lib.maskSecrets("curl -u admin:SecretA x; mysql -uroot -pSecretB db; app --password SecretC --token=SecretD; sshpass -p SecretE ssh h; curl -H 'Cookie: session=abcdef1234567890F' x; python -c \"os.environ['API_KEY']='SecretG'\"");
     for (const secret of ['SecretA', 'SecretB', 'SecretC', 'SecretD', 'SecretE', 'abcdef1234567890F', 'SecretG']) expect(masked2).not.toContain(secret);
     expect(masked2).toContain('curl -u admin:');
     expect(masked2).toContain('mysql -uroot');
   });
 
-  it('keeps OMC_SHELL_SYNTAX_TIMEOUT_MS inside 100-15000 ms', () => {
-    for (const [value, expected] of [[undefined, 1000], ['', 1000], ['abc', 1000], ['50', 1000], ['100', 100], ['2500', 2500], ['15000', 15000], ['15001', 1000]] as const) {
+  it('keeps OMC_SHELL_SYNTAX_TIMEOUT_MS inside 100-3000 ms, below the hook budget', () => {
+    for (const [value, expected] of [[undefined, 1000], ['', 1000], ['abc', 1000], ['50', 1000], ['100', 100], ['2500', 2500], ['3000', 3000], ['3001', 1000], ['15000', 1000]] as const) {
       expect(lib.syntaxTimeoutMs(value === undefined ? {} : { OMC_SHELL_SYNTAX_TIMEOUT_MS: value }), String(value)).toBe(expected);
     }
   });
@@ -287,6 +311,35 @@ describe('shell checks: helpers', () => {
     expect(found.map((f: { class: string }) => f.class)).toEqual(['unexpected-eof']);
     expect(lib.classifyToolErrors(["logs/a.txt:3:bash: -c: line 1: unexpected EOF while looking for matching `''\nlogs/b.txt:9:  ENAMETOOLONG in a note"])).toEqual([]);
     expect(lib.classifyToolErrors(['Error: spawn ENAMETOOLONG']).map((f: { class: string }) => f.class)).toEqual(['enametoolong']);
+  });
+});
+
+describe('shell checks: logs', () => {
+  it('renames a log above 50 MB and keeps the newest two renamed files', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'shell-checks-log-'));
+    try {
+      for (const stamp of ['20200101-000000', '20200102-000000', '20200103-000000']) writeFileSync(join(dir, `checks-${stamp}.jsonl`), '{}\n');
+      writeFileSync(join(dir, 'errors-20200101-000000.jsonl'), '{}\n');
+      const big = join(dir, 'checks.jsonl');
+      writeFileSync(big, '');
+      truncateSync(big, lib.LOG_MAX_BYTES + 1);
+      lib.appendShellLog('checks.jsonl', { a: 1 }, { logDir: dir, env: {} });
+      const names = readdirSync(dir).sort();
+      expect(names.filter((n) => n.startsWith('checks-'))).toHaveLength(2);
+      expect(names).not.toContain('checks-20200101-000000.jsonl');
+      expect(names).not.toContain('checks-20200102-000000.jsonl');
+      expect(names).toContain('checks-20200103-000000.jsonl');
+      expect(names).toContain('errors-20200101-000000.jsonl');
+      expect(readFileSync(big, 'utf8')).toBe('{"a":1}\n');
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('writes to OMC_SHELL_CHECKS_LOG_DIR first, then the directory the hook passes', () => {
+    expect(lib.shellLogDir({ OMC_SHELL_CHECKS_LOG_DIR: '/a' }, '/b')).toBe('/a');
+    expect(lib.shellLogDir({}, '/b')).toBe('/b');
+    expect(lib.shellLogDir({})).toContain(join('.omc', 'state', 'shell-checks'));
   });
 });
 

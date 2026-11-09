@@ -7,7 +7,7 @@
 === B01 | Bash | win: deny cr-parser | linux: allow - | parser bug: minimal pattern, two $'\r' substitutions in one "..."
 echo "$(echo $'\r' | wc -c) $(echo $'\r' | wc -c)"
 === B02 | Bash | win: deny cr-parser | linux: allow - | parser bug: grep with parentheses in single quotes, then $'\r$'
-echo "m=$(grep -cE '^(a|b)' plik) c=$(grep -c $'\r$' plik)"
+echo "m=$(grep -cE '^(a|b)' file) c=$(grep -c $'\r$' file)"
 === B03 | Bash | win: deny cr-parser | linux: allow - | parser bug: counting CR after sed
 echo "c=$(grep -c $'\r$' cr.txt) h=$(echo x | grep -c $'\r$')"
 === B04 | Bash | win: deny cr-parser | linux: allow - | parser bug: CR written in octal \015
@@ -81,7 +81,7 @@ for ((i=1; i<(1<<3); i<<=1)); do echo $i; done
 === A04 | Bash | win: allow - | linux: allow - | arithmetic: $[1<<2]
 echo $[1<<2]
 === C01 | Bash | win: deny syntax | linux: deny syntax | manual mistake: Windows path with a backslash right before the closing "
-cd "D:\Downloads" && ls -la "report one.odt" "report two.odt" "D:\Data\Shared drives\Tenders - Acme\" 2>&1; ls -la "D:\Downloads\Acme" 2>&1; which soffice libreoffice python python3 pandoc 2>&1; ls "C:/Program Files/LibreOffice/program/soffice.exe" 2>&1
+cd "E:\Downloads" && ls -la "report one.odt" "report two.odt" "E:\Data\Shared drives\Tenders - Acme\" 2>&1; ls -la "E:\Downloads\Acme" 2>&1; which soffice libreoffice python python3 pandoc 2>&1; ls "C:/Program Files/LibreOffice/program/soffice.exe" 2>&1
 === C03 | Bash | win: deny syntax | linux: deny syntax | manual mistake: ssh '...' without the closing apostrophe
 ssh.exe -o ConnectTimeout=10 host1 'hostname; date; df -h / | tail -1; ls -la /opt/app/scripts | head -60; echo ---; ls -la /opt/app/data/uploads/.tmp 2>&1 | head; echo ---; ls -la /root/backup-20261103 | head -30; echo ---; ls /root/app/scripts | grep -c .; cd /root/app && git log --oneline -3 && git status --short | head
 === C04 | Bash | win: deny syntax | linux: deny syntax | manual mistake: powershell.exe -Command "..." with a stray apostrophe
@@ -89,11 +89,11 @@ date '+%H:%M:%S'; powershell.exe -NoProfile -Command "Get-AppxPackage -Name '*Te
 === C09 | Bash | win: deny backslash,syntax | linux: allow - | manual mistake: backticks inside "..." of git merge -m and printf; \` becomes a live backtick after halving
 cd /d/repo/work && git diff --stat 87acf5a feature/x -- "*.py" "*.toml" | tail -1; git merge --no-ff feature/x -m "Merge feature/x (notes in NOTES.md) into the hub
 
-Description: merge of a test branch." 2>&1 | tail -1; git log --oneline -1; cd /d/repo/plans && printf '%s\n' "- 2026-10-11: step one (\\\`e5b0369\`) **green** for the plan acceptance (\`git diff --stat -- \"*.py\" \"*.toml\"\` is empty; the \`source/\` and \`derived/\` folders exist; a row in \`data/INDEX.tsv\`): the test run \`2026-10-test-copy\` in \`D:\\Data\\repo\\run\`" >> plan.md
+Description: merge of a test branch." 2>&1 | tail -1; git log --oneline -1; cd /d/repo/plans && printf '%s\n' "- 2026-10-11: step one (\\\`e5b0369\`) **green** for the plan acceptance (\`git diff --stat -- \"*.py\" \"*.toml\"\` is empty; the \`source/\` and \`derived/\` folders exist; a row in \`data/INDEX.tsv\`): the test run \`2026-10-test-copy\` in \`E:\\Data\\repo\\run\`" >> plan.md
 === C10 | Bash | win: deny syntax | linux: deny syntax | manual mistake: ``` inside the "..." of a grep pattern
 cd /d/repo/research && ls -la ANALYSIS-2026-10-30.md notes/*.md 2>&1 | head -5; sed -n '290,354p' ANALYSIS-2026-10-30.md | grep -n "CARD\|^[A-Z ] *[A-Z]\|^ *>\|^```" | cut -c1-140 | head -40; cd /d/repo2; git show HEAD:pkg/stage.py | sed -n '300,330p'
 === C11 | Bash | win: deny syntax | linux: deny syntax | manual mistake: ssh "..." with an unpaired " at the end
-C:/Windows/System32/OpenSSH/ssh.exe -o BatchMode=yes host1 "python3 - d5ae451283fd p6-6" < "C:/Users/user/AppData/Local/Temp/claude/scratch/dump_pattern.py" | grep -E '^[78]\.|SECTION|0479066|0480260' | cut -c1-300"
+C:/Windows/System32/OpenSSH/ssh.exe -o BatchMode=yes host1 "python3 - abc123def456 x-1" < "C:/Users/user/AppData/Local/Temp/claude/scratch/dump_pattern.py" | grep -E '^[78]\.|SECTION|AAA111|BBB222' | cut -c1-300"
 === C12 | Bash | win: deny backslash,syntax | linux: allow - | manual mistake: Python here-document and \\\` inside "..." (a live backtick after halving)
 S="/c/Users/user/AppData/Local/Temp/claude/scratch/review-2"
 python - "$S/inject" <<'PY'
@@ -113,7 +113,7 @@ cd "$S/inject" && GITHUB_STEP_SUMMARY="$S/inject/summary2.md" bash step2.sh
 echo "--- MARKER:"; ls "$S/inject/MARKER" 2>/dev/null && echo "YES - injection works with \\\` as in the file" || echo "no"
 === H01 | Bash | win: allow - | linux: allow - | here-document with its closing line
 cat > /tmp/omc-test-x.txt <<'EOF'
-linia
+line
 EOF
 wc -l /tmp/omc-test-x.txt
 === H02 | Bash | win: deny heredoc | linux: deny heredoc | here-document without a closing line (bash -n exits 0 and only warns), command longer than 200 characters
@@ -133,7 +133,7 @@ EOF)
 echo "[$x]"
 === H05 | Bash | win: allow - | linux: allow - | <<- with a closing line indented by a tab
 cat <<-EOF
-	wciete
+	indented
 	EOF
 echo po
 === H06 | Bash | win: deny heredoc | linux: deny syntax | unterminated here-document inside $(...): bash -n exits 2 on Linux; on Windows the short command skips bash -n and the tokenizer decides
@@ -145,40 +145,55 @@ x=$( (echo a); cat <<EOF
 hi
 EOF)
 echo "[$x]"
+=== H08 | Bash | win: allow - | linux: allow - | a delimiter that starts with an expansion is taken literally: <<$EOF
+cat <<$EOF
+hi
+$EOF
+echo done
+=== H09 | Bash | win: allow - | linux: allow - | a quoted delimiter that holds an expansion is taken literally: <<"$X"
+cat <<"$X"
+hi
+$X
+echo done
+=== H10 | Bash | win: deny heredoc | linux: deny heredoc | unquoted <<$EOF without its closing line, command longer than 200 characters
+cat > /tmp/omc-test-x.txt <<$EOF
+first line of text that was meant to reach the file through a here-document, but the author forgot the closing line;
+second line, so that the command is longer than two hundred characters and the bash -n check also runs on Windows;
+wc -l /tmp/omc-test-x.txt
 === S01 | Bash | win: allow - | linux: deny syntax | unclosed " in a short command: on Windows bash -n runs only above 200 characters
-echo "niedomkniety
+echo "unclosed
 === S02 | Bash | win: deny syntax | linux: deny syntax | unclosed " in a command longer than 200 characters
 echo "this command is longer than two hundred characters so that the syntax check also runs on Windows, where it covers only longer commands (the p95 of bash -n exceeds 300 ms); the double quote is never closed until the end of the command
 === S03 | Bash | win: allow - | linux: allow - | valid command longer than 200 characters with quotes
-git -C "D:/repo" status --short | head -20; echo "state: $(date '+%F %T')"; ls -la 'D:/repo/docs' | head -5; printf '%s\n' "end of the check, which is longer than two hundred characters and syntactically valid"
+git -C "E:/repo" status --short | head -20; echo "state: $(date '+%F %T')"; ls -la 'E:/repo/docs' | head -5; printf '%s\n' "end of the check, which is longer than two hundred characters and syntactically valid"
 === U01 | Bash | win: allow backslash | linux: allow - | \\ in single quotes: Git Bash halves it anyway
 printf '%s\n' 'C:\\Users\\x'
 === U02 | Bash | win: allow - | linux: allow - | \\ right before " is kept (no warning)
-echo "koniec\\"
+echo "end\\"
 === U03 | Bash | win: allow backslash | linux: allow - | \\| in a grep regular expression
-grep -n "foo\\|bar" plik
+grep -n "foo\\|bar" file
 === U04 | Bash | win: allow backslash | linux: allow - | \\n in Python code becomes a newline
 python3 -c 'print("a\\nb")'
-=== U05 | Bash | win: allow - | linux: allow - | a single backslash and a D:/ path give no warning
-ls "D:/inne" && echo a\ b
+=== U05 | Bash | win: allow - | linux: allow - | a single backslash and a E:/ path give no warning
+ls "C:/repo" && echo a\ b
 === U06 | Bash | win: allow backslash | linux: allow - | UNC path \\\\server
-ls \\\\serwer\\udzial
+ls \\\\server\\share
 === U07 | Bash | win: allow backslash | linux: deny syntax | \\' becomes \' after halving (valid on Windows); without halving it opens an apostrophe
 echo "this command is longer than two hundred characters so that the bash -n syntax check also runs on Windows, where it covers only longer commands; at the end is a double backslash right before an apostrophe, which Git Bash halves:" \\'
 === U08 | Bash | win: deny backslash,syntax | linux: allow - | \\\` inside "..." opens a substitution after halving (like C09 and C12)
 echo "this command is longer than two hundred characters so that the bash -n syntax check also runs on Windows, where it covers only longer commands (the p95 exceeds 300 ms); next come three backslashes before a backtick: a \\\` b"
 === P01 | PowerShell | win: allow ps-ssh-dollar | linux: allow ps-ssh-dollar | ssh with \$ in "...": PowerShell expands locally
-ssh serwer "ls \$HOME; echo \$(date)"
+ssh server "ls \$HOME; echo \$(date)"
 === P02 | PowerShell | win: allow - | linux: allow - | ssh with '...' (the recommended form)
-ssh serwer 'ls $HOME; echo $(date)'
+ssh server 'ls $HOME; echo $(date)'
 === P03 | PowerShell | win: allow ps-dev-null | linux: allow - | 2>/dev/null in PowerShell on Windows
-Get-ChildItem C:\brak 2>/dev/null
+Get-ChildItem C:\missing 2>/dev/null
 === P04 | PowerShell | win: allow - | linux: allow - | 2>/dev/null inside '...' for a remote shell is fine
-ssh serwer 'ls /brak 2>/dev/null'
+ssh server 'ls /missing 2>/dev/null'
 === P05 | PowerShell | win: allow - | linux: allow - | \$ in "..." without ssh
 $x = "a \$b"; Write-Output $x
 === P06 | PowerShell | win: allow ps-ssh-dollar | linux: allow ps-ssh-dollar | ssh with an @"..."@ here-string and \$
-ssh serwer @"
+ssh server @"
 ls \$HOME
 "@
 === P07 | PowerShell | win: allow - | linux: allow - | 2>$null (the recommended form)
@@ -186,13 +201,13 @@ git status 2>$null
 === P08 | PowerShell | win: allow - | linux: allow - | 2>/dev/null as text inside "..."
 Write-Output "2>/dev/null"
 === P09 | PowerShell | win: allow - | linux: allow - | ssh and \$ only in a comment
-# ssh serwer "\$x"
+# ssh server "\$x"
 Write-Output ok
 === P10 | PowerShell | win: allow ps-ssh-dollar,ps-dev-null | linux: allow ps-ssh-dollar | ssh.exe with a path, \$ in "..." and > /dev/null
-C:/Windows/System32/OpenSSH/ssh.exe serwer "df -h \$HOME" > /dev/null
+C:/Windows/System32/OpenSSH/ssh.exe server "df -h \$HOME" > /dev/null
 === P11 | PowerShell | win: allow ps-ssh-dollar,ps-dev-null | linux: allow ps-ssh-dollar | ssh.exe with an option, \$((...)) in "..." and 2>/dev/null
-ssh.exe -o BatchMode=yes serwer "uptime; echo \$((1+2))" 2>/dev/null
+ssh.exe -o BatchMode=yes server "uptime; echo \$((1+2))" 2>/dev/null
 === P12 | PowerShell | win: allow ps-ssh-dollar | linux: allow ps-ssh-dollar | & "C:\...\ssh.exe" (quoted path) with \$ in "..."
-& "C:\Windows\System32\OpenSSH\ssh.exe" serwer "ls \$HOME"
+& "C:\Windows\System32\OpenSSH\ssh.exe" server "ls \$HOME"
 === P13 | PowerShell | win: allow ps-dev-null | linux: allow - | x>/dev/null without a space
 Get-ChildItem x>/dev/null
