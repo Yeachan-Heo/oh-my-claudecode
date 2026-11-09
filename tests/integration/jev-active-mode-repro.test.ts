@@ -1,14 +1,61 @@
 /** Real script subprocess regressions for issue #4208. */
 import { afterEach, beforeEach, describe, it, expect, vi } from "vitest";
 import { spawn } from "node:child_process";
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { createServer, type IncomingHttpHeaders, type Server } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 
 const PROJECT_ROOT = fileURLToPath(new URL("../../", import.meta.url));
 const API_KEY = "test-key-123";
+
+// Preloaded into the hook process with --import. It fails only the atomic
+// rename that would publish an inactive (terminal) copy of the state file
+// named by FAIL_TERMINAL_STATE_FILE; every other write goes through.
+const FAIL_TERMINAL_STATE_WRITE_PRELOAD = `
+import fs from "node:fs";
+import { basename } from "node:path";
+import { syncBuiltinESMExports } from "node:module";
+
+const target = process.env.FAIL_TERMINAL_STATE_FILE;
+const renameSync = fs.renameSync;
+fs.renameSync = function (from, to, ...rest) {
+  if (target && basename(String(to)) === target) {
+    let next = null;
+    try {
+      next = JSON.parse(fs.readFileSync(from, "utf8"));
+    } catch {}
+    if (next && next.active === false) {
+      throw Object.assign(new Error("EIO: simulated state write failure"), { code: "EIO" });
+    }
+  }
+  return renameSync.call(this, from, to, ...rest);
+};
+syncBuiltinESMExports();
+`;
+
+// The Stop hook output schema accepts only "approve" or "block" in
+// `decision`; any other value fails output validation and the hook's
+// message never reaches the user.
+function parseStopOutput(stdout: string): Record<string, unknown> {
+  const output = JSON.parse(stdout) as Record<string, unknown>;
+  if ("decision" in output) {
+    expect(["approve", "block"]).toContain(output.decision);
+  }
+  return output;
+}
+
+function expectJevCompletionRelease(stdout: string, modeName: string) {
+  const output = parseStopOutput(stdout);
+  expect(output).not.toHaveProperty("decision");
+  expect(output.continue).toBe(true);
+  expect(output.suppressOutput).toBe(true);
+  expect(output.systemMessage).toEqual(expect.stringContaining("[JEV-COMPLETION]"));
+  expect(output.systemMessage).toEqual(
+    expect.stringContaining(`${modeName} mode exited`),
+  );
+}
 
 type WireRequest = {
   method: string | undefined;
@@ -31,12 +78,13 @@ async function runScript(
   input: Record<string, unknown>,
   env: NodeJS.ProcessEnv,
   cwd: string,
+  nodeArgs: string[] = [],
 ) {
   return new Promise<{ stdout: string; stderr: string; exitCode: number }>(
     (resolve, reject) => {
       const child = spawn(
         process.execPath,
-        [join(PROJECT_ROOT, "scripts", script)],
+        [...nodeArgs, join(PROJECT_ROOT, "scripts", script)],
         {
           cwd,
           env,
@@ -785,7 +833,7 @@ describe("jev active-mode subprocess repro", () => {
     );
 
     expect(result.exitCode, result.stderr).toBe(0);
-    expect(JSON.parse(result.stdout).decision).toBe("continue");
+    expectJevCompletionRelease(result.stdout, "ralph");
     const taskCompleteRequest = requests.find(
       (entry) => "task_complete" in entry.body.questions,
     );
@@ -819,7 +867,7 @@ describe("jev active-mode subprocess repro", () => {
     );
 
     expect(result.exitCode, result.stderr).toBe(0);
-    expect(JSON.parse(result.stdout).decision).toBe("block");
+    expect(parseStopOutput(result.stdout).decision).toBe("block");
     const resultingState = JSON.parse(readFileSync(statePath, "utf8")) as Record<string, unknown>;
     expect(resultingState.active).toBe(true);
     expect(resultingState.phase).not.toBe("complete");
@@ -856,7 +904,7 @@ describe("jev active-mode subprocess repro", () => {
     );
 
     expect(result.exitCode, result.stderr).toBe(0);
-    expect(JSON.parse(result.stdout).decision).toBe("block");
+    expect(parseStopOutput(result.stdout).decision).toBe("block");
     const resultingState = JSON.parse(readFileSync(statePath, "utf8")) as Record<string, unknown>;
     expect(resultingState.iteration).toBe(concurrentIteration);
     expect(resultingState.active).toBe(true);
@@ -881,7 +929,7 @@ describe("jev active-mode subprocess repro", () => {
     );
 
     expect(completed.exitCode, completed.stderr).toBe(0);
-    expect(JSON.parse(completed.stdout).decision).toBe("continue");
+    expectJevCompletionRelease(completed.stdout, "ralph");
     const completedState = JSON.parse(readFileSync(statePath, "utf8")) as Record<string, unknown>;
     expect(completedState.active).toBe(false);
     expect(completedState.max_iterations).toBe(13);
@@ -902,7 +950,7 @@ describe("jev active-mode subprocess repro", () => {
     );
 
     expect(extended.exitCode, extended.stderr).toBe(0);
-    expect(JSON.parse(extended.stdout)).toMatchObject({ decision: "block" });
+    expect(parseStopOutput(extended.stdout)).toMatchObject({ decision: "block" });
     expect(JSON.parse(extended.stdout).reason).toContain("[RALPH LOOP - EXTENDED]");
     expect(requests).toHaveLength(0);
     const extendedState = JSON.parse(readFileSync(statePath, "utf8")) as Record<string, unknown>;
@@ -932,7 +980,7 @@ describe("jev active-mode subprocess repro", () => {
     );
 
     expect(result.exitCode, result.stderr).toBe(0);
-    const output = JSON.parse(result.stdout);
+    const output = parseStopOutput(result.stdout);
     expect(output.decision).toBe("block");
     expect(output.reason).toContain("[AUTOPILOT - Phase: qa]");
     expect(requests.map((entry) => entry.body.state.mode_name)).toEqual([
@@ -971,8 +1019,8 @@ describe("jev active-mode subprocess repro", () => {
     );
     
     expect(result.exitCode, result.stderr).toBe(0);
-    expect(JSON.parse(result.stdout).decision).toBe("continue");
-    
+    expectJevCompletionRelease(result.stdout, "autopilot");
+
     // Verify that Jev was called with the task_complete question
     const taskCompleteRequest = requests.find(
       (entry) => "task_complete" in entry.body.questions
@@ -1000,5 +1048,158 @@ describe("jev active-mode subprocess repro", () => {
     expect(resultingState.completed_at).toBeDefined();
     expect(typeof resultingState.completed_at).toBe("string");
   }, 15000);
+
+  it.each([
+    {
+      name: "Ralph iteration",
+      fileName: "ralph-state.json",
+      createState: (sessionId: string) => createRalphState(sessionId),
+      reasonMarker: "[RALPH LOOP - ITERATION 2/5]",
+      persisted: { iteration: 2 },
+    },
+    {
+      name: "Ralph extension",
+      fileName: "ralph-state.json",
+      createState: (sessionId: string) =>
+        createRalphState(sessionId, { iteration: 3, max_iterations: 3 }),
+      reasonMarker: "[RALPH LOOP - EXTENDED]",
+      persisted: { max_iterations: 13 },
+    },
+    {
+      name: "autopilot",
+      fileName: "autopilot-state.json",
+      createState: (sessionId: string) => createAutopilotState(sessionId),
+      reasonMarker: "[AUTOPILOT - Phase: qa]",
+      persisted: { reinforcement_count: 1 },
+    },
+  ])(
+    "persistent-mode.mjs: $name keeps blocking when the Jev terminal state cannot be persisted",
+    async ({ name, fileName, createState, reasonMarker, persisted }) => {
+      const sessionId = `test-sess-terminal-write-${name.replace(/\W+/g, "-").toLowerCase()}`;
+      const statePath = writeSessionState(sessionId, fileName, createState(sessionId));
+      const preloadPath = join(cwd, "fail-terminal-state-write.mjs");
+      writeFileSync(preloadPath, FAIL_TERMINAL_STATE_WRITE_PRELOAD);
+      noulAnswer = 0.95;
+
+      const result = await runScript(
+        "persistent-mode.mjs",
+        persistentModeInput(sessionId),
+        {
+          ...env,
+          OMC_JEV: "loop-continuation:active",
+          FAIL_TERMINAL_STATE_FILE: fileName,
+        },
+        cwd,
+        ["--import", pathToFileURL(preloadPath).href],
+      );
+
+      expect(result.exitCode, result.stderr).toBe(0);
+      expect(
+        requests.some((entry) => "task_complete" in entry.body.questions),
+      ).toBe(true);
+      const output = parseStopOutput(result.stdout);
+      expect(output.decision).toBe("block");
+      expect(output.reason).toEqual(expect.stringContaining(reasonMarker));
+      expect(output).not.toHaveProperty("systemMessage");
+
+      const resultingState = JSON.parse(readFileSync(statePath, "utf8")) as Record<string, unknown>;
+      expect(resultingState).toMatchObject({ active: true, ...persisted });
+      expect(resultingState.phase).not.toBe("complete");
+      expect(resultingState.current_phase).not.toBe("complete");
+      expect(resultingState).not.toHaveProperty("completed_at");
+    },
+    15000,
+  );
+
+  it.each([
+    {
+      name: "Ralph iteration",
+      fileName: "ralph-state.json",
+      createState: (sessionId: string) => createRalphState(sessionId),
+    },
+    {
+      name: "Ralph extension",
+      fileName: "ralph-state.json",
+      createState: (sessionId: string) =>
+        createRalphState(sessionId, { iteration: 3, max_iterations: 3 }),
+    },
+    {
+      name: "autopilot",
+      fileName: "autopilot-state.json",
+      createState: (sessionId: string) => createAutopilotState(sessionId),
+    },
+  ])(
+    "persistent-mode.mjs: $name releases Stop when cancel removes the state during the Jev request",
+    async ({ name, fileName, createState }) => {
+      const sessionId = `test-sess-cancelled-${name.replace(/\W+/g, "-").toLowerCase()}`;
+      const statePath = writeSessionState(sessionId, fileName, createState(sessionId));
+      onTaskCompleteRequest = () => rmSync(statePath, { force: true });
+      noulAnswer = 0.95;
+
+      const result = await runScript(
+        "persistent-mode.mjs",
+        persistentModeInput(sessionId),
+        { ...env, OMC_JEV: "loop-continuation:active" },
+        cwd,
+      );
+
+      expect(result.exitCode, result.stderr).toBe(0);
+      expect(
+        requests.some((entry) => "task_complete" in entry.body.questions),
+      ).toBe(true);
+      expect(parseStopOutput(result.stdout)).toEqual({
+        continue: true,
+        suppressOutput: true,
+      });
+      expect(existsSync(statePath)).toBe(false);
+    },
+    15000,
+  );
+
+  it.each([
+    { removed: "Ralph state", removeAutopilot: false },
+    { removed: "Ralph and autopilot state", removeAutopilot: true },
+  ])(
+    "persistent-mode.mjs: cancel removing $removed under an active autopilot leaves Stop to the autopilot handler",
+    async ({ removeAutopilot }) => {
+      const sessionId = `test-sess-cancelled-parent-${removeAutopilot ? "both" : "ralph"}`;
+      const ralphPath = writeSessionState(
+        sessionId,
+        "ralph-state.json",
+        createRalphState(sessionId),
+      );
+      const autopilotPath = writeSessionState(
+        sessionId,
+        "autopilot-state.json",
+        createAutopilotState(sessionId),
+      );
+      onTaskCompleteRequest = () => {
+        rmSync(ralphPath, { force: true });
+        if (removeAutopilot) rmSync(autopilotPath, { force: true });
+      };
+      noulAnswerByMode = { ralph: 0.95, autopilot: 0.2 };
+
+      const result = await runScript(
+        "persistent-mode.mjs",
+        persistentModeInput(sessionId),
+        { ...env, OMC_JEV: "loop-continuation:active" },
+        cwd,
+      );
+
+      expect(result.exitCode, result.stderr).toBe(0);
+      const output = parseStopOutput(result.stdout);
+      expect(existsSync(ralphPath)).toBe(false);
+      if (removeAutopilot) {
+        expect(output).toEqual({ continue: true, suppressOutput: true });
+        expect(existsSync(autopilotPath)).toBe(false);
+      } else {
+        expect(output.decision).toBe("block");
+        expect(output.reason).toEqual(expect.stringContaining("[AUTOPILOT - Phase: qa]"));
+        const autopilotState = JSON.parse(readFileSync(autopilotPath, "utf8")) as Record<string, unknown>;
+        expect(autopilotState).toMatchObject({ active: true, reinforcement_count: 1 });
+      }
+    },
+    15000,
+  );
 });
 

@@ -96,6 +96,9 @@ describe('excerpt limit parity with the TS config contract', () => {
     [{ OMC_JEV_EXCERPT_CHARS_MODEL_ROUTING: '0' }, 'model-routing'],
     [{ OMC_JEV_EXCERPT_CHARS_MODEL_ROUTING: ' 80 ' }, 'model-routing'],
     [{ OMC_JEV_EXCERPT_CHARS_MODEL_ROUTING: '80' }, 'context-pruning'],
+    [{}, 'loop-continuation'],
+    [{ OMC_JEV_EXCERPT_CHARS: '512' }, 'loop-continuation'],
+    [{ OMC_JEV_EXCERPT_CHARS_LOOP_CONTINUATION: '200' }, 'loop-continuation'],
   ])('script and TS agree for %j and point %s', (env, point) => {
     expect(resolveExcerptChars(point, env)).toBe(excerptCharsFor(point, parseJevConfig(env)));
   });
@@ -299,6 +302,18 @@ describe('resolveRequest', () => {
     const fetchFn = async (_url, init) => { body = JSON.parse(init.body); return { ok: true, status: 200, json: async () => ({ answers: { route: { type: 'choice', choice: 'x' } } }) }; };
     await resolveRequest({ point: 'model-routing', state: { prompt: 'a'.repeat(13000) }, questions: QUESTIONS }, baseEnv({ OMC_JEV_EXCERPT_CHARS: '50' }), fetchFn);
     expect(body.state.prompt).toHaveLength(12000);
+  });
+
+  it('loop-continuation sends up to 2000 characters of state by default and its own variable lowers it', async () => {
+    const bodies = [];
+    const fetchFn = async (_url, init) => { bodies.push(JSON.parse(init.body)); return { ok: true, status: 200, json: async () => ({ answers: { route: { type: 'choice', choice: 'x' } } }) }; };
+    const state = { last_assistant_message: 'a'.repeat(2500), continuation_excerpt: 'b'.repeat(2500) };
+    await resolveRequest({ point: 'loop-continuation', state, questions: QUESTIONS }, baseEnv({ OMC_JEV: 'loop-continuation', OMC_JEV_EXCERPT_CHARS: '50' }), fetchFn);
+    await resolveRequest({ point: 'loop-continuation', state, questions: QUESTIONS }, baseEnv({ OMC_JEV: 'loop-continuation', OMC_JEV_EXCERPT_CHARS_LOOP_CONTINUATION: '200' }), fetchFn);
+    expect(bodies[0].state.last_assistant_message).toHaveLength(2000);
+    expect(bodies[0].state.continuation_excerpt).toHaveLength(2000);
+    expect(bodies[1].state.last_assistant_message).toHaveLength(200);
+    expect(bodies[1].state.continuation_excerpt).toHaveLength(200);
   });
 
   it('bounds the state of one point with its own OMC_JEV_EXCERPT_CHARS_<POINT> variable', async () => {
