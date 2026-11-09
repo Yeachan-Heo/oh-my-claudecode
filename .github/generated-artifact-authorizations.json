@@ -2,12 +2,12 @@
   "pullNumber": 4895,
   "targetRef": "dev",
   "mergeBaseSha": "dc59576e34514750d89f24d7649f406081a73d51",
-  "headSha": "733e76e8dc1eb0b5589c4a6e24dacf992738df8a",
+  "headSha": "b23ed544e08d452fb74704e84b86407a4212fe60",
   "owner": "Yeachan-Heo",
   "expiresAt": "2026-12-09T02:13:16.838Z",
   "generatedDelta": {
     "count": 93,
-    "sha256": "2decb4e1fafef6d395038d220358c4159b465182b334832ac0b1e1d93fe80e60"
+    "sha256": "d3c68474f7b985ca210aa15444649d8b9d771ee843c5ce7033490a0e678de295"
   },
   "generatedFiles": [
     {
@@ -19,7 +19,7 @@
     {
       "status": "modified",
       "filename": "bridge/cli.cjs",
-      "sha": "17fd6dd5651c05f6ba2656f010665df2c4c098c9",
+      "sha": "938afe57d13a8c7b940a9b4fbc24aad6cbedfcb1",
       "previousFilename": null
     },
     {
@@ -175,19 +175,19 @@
     {
       "status": "modified",
       "filename": "dist/cli/commands/ralph.d.ts.map",
-      "sha": "e22f5e0f0d05d344d98f9a5c0ed8fb83d96e8bac",
+      "sha": "cd7620007ad115e57da7d6d5766678cd826a78d9",
       "previousFilename": null
     },
     {
       "status": "modified",
       "filename": "dist/cli/commands/ralph.js",
-      "sha": "33b7342039217434b2f96884a907ef42ec8a4c2f",
+      "sha": "084993acd57b8bfffa5f2d479a5cae9cb6e2f772",
       "previousFilename": null
     },
     {
       "status": "modified",
       "filename": "dist/cli/commands/ralph.js.map",
-      "sha": "3024d780662299782f7435f2769f069a840b9756",
+      "sha": "655e1264110ef4e7db81abd1b3baf4acd596c8ba",
       "previousFilename": null
     },
     {
