@@ -136,7 +136,13 @@ describe('shell checks in the hooks', () => {
       } else {
         expect(decision(result), result.stdout.slice(0, 300)).not.toBe('deny');
         expect(context(result).includes('[SHELL CHECK]'), `${tool}: ${context(result).slice(0, 120)}`).toBe(expected === 'warn');
-        expect(result.json?.suppressOutput).toBeUndefined();
+        if (expected === 'warn') {
+          expect(result.json?.suppressOutput).toBeUndefined(); // the warning is meant to be seen
+        } else {
+          // no finding: the output is exactly what the hook emits without the checks (PowerShell has no
+          // advisory of its own, so there the hook stays silent with suppressOutput: true)
+          expect(result.json).toEqual(runHook('pre-tool-enforcer.mjs', preInput(command, tool, session())).json);
+        }
       }
       const logged = rows(join(logDir, 'checks.jsonl')).filter((row) => row.session_id === sid);
       expect(logged).toHaveLength(1);
