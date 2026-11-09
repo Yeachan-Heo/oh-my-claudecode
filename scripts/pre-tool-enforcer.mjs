@@ -1953,7 +1953,25 @@ function isCodexPreToolUse(input) {
     Boolean(input && typeof input === 'object' && typeof input.turn_id === 'string');
 }
 
+// Warnings of the opt-in shell checks (OMC_SHELL_CHECKS=1) ride on whatever output the hook emits, unless it denies.
+let shellCheckContext = '';
+function withShellCheckContext(output) {
+  if (!shellCheckContext || !output || typeof output !== 'object') return output;
+  const hookOutput = output.hookSpecificOutput && typeof output.hookSpecificOutput === 'object' ? output.hookSpecificOutput : {};
+  if (hookOutput.permissionDecision === 'deny') return output;
+  const context = typeof hookOutput.additionalContext === 'string' && hookOutput.additionalContext
+    ? `${shellCheckContext}
+
+${hookOutput.additionalContext}`
+    : shellCheckContext;
+  const merged = { ...output, hookSpecificOutput: { ...hookOutput, hookEventName: 'PreToolUse', additionalContext: context } };
+  delete merged.suppressOutput; // the warning is meant to be seen
+  shellCheckContext = '';
+  return merged;
+}
+
 function emitPreToolUseOutput(output, input, space = 0) {
+  output = withShellCheckContext(output);
   if (!isCodexPreToolUse(input)) {
     console.log(JSON.stringify(output, null, space));
     return;
@@ -2026,6 +2044,28 @@ async function main() {
     // Record Skill invocations to flow trace
     data = {};
     try { data = JSON.parse(input); } catch {}
+
+    // Opt-in shell checks (OMC_SHELL_CHECKS=1) for Bash and PowerShell commands. Fail-open: any error here
+    // leaves the hook behaving as without the checks.
+    if ((toolName === 'Bash' || toolName === 'PowerShell') && process.env.OMC_SHELL_CHECKS === '1') {
+      try {
+        const { runShellChecks } = await import('./lib/shell-checks.mjs');
+        const verdict = runShellChecks(toolName, data, { logDir: join(stateDir, 'shell-checks') });
+        if (verdict?.decision === 'deny' && verdict.reason) {
+          emitPreToolUseOutput({
+            continue: true,
+            hookSpecificOutput: {
+              hookEventName: 'PreToolUse',
+              permissionDecision: 'deny',
+              permissionDecisionReason: verdict.reason,
+            },
+          }, data);
+          return;
+        }
+        if (verdict?.context) shellCheckContext = verdict.context;
+      } catch { /* fail-open */ }
+    }
+
     recordToolInvocation(data, directory);
 
     // Activate skill state when Skill tool is invoked (issue #1033)
