@@ -282,6 +282,15 @@ async function main() {
     const input = await readStdin();
     const data = JSON.parse(input);
 
+    // Opt-in shell checks (OMC_SHELL_CHECKS=1): record known Bash/PowerShell error classes. Never affects the hook.
+    if (process.env.OMC_SHELL_CHECKS === '1' && (data?.tool_name === 'Bash' || data?.tool_name === 'PowerShell')) {
+      try {
+        const { recordShellToolErrors } = await import('./lib/shell-checks.mjs');
+        const stateRoot = await resolveOmcStateRoot(data.cwd || data.directory || process.cwd());
+        recordShellToolErrors('post-tool-use-failure', data, { logDir: join(stateRoot, 'state', 'shell-checks') });
+      } catch { /* best-effort */ }
+    }
+
     // Official SDK fields (snake_case)
     const toolName = data.tool_name || '';
     const toolInput = data.tool_input;
