@@ -26,7 +26,7 @@ import { atomicWriteJsonSync } from '../lib/atomic-write.js';
 import { lockPathFor, withFileLockSync } from '../lib/file-lock.js';
 import { resolvePluginDirArg } from '../lib/plugin-dir.js';
 import {
-  getClaudeJsonPathForConfigDir,
+  getClaudeMcpConfigPath,
   isDefaultClaudeConfigDirPath,
   stripRetiredTeamMcpServers,
 } from '../installer/mcp-registry.js';
@@ -352,7 +352,7 @@ function refreshRuntimeClaudeJson(
   baseConfigDir: string,
   runtimeClaudeJsonPath: string,
   sourceClaudeJson = readJsonObject(join(dirname(baseConfigDir), '.claude.json')),
-  mcpServersSourceJson = readJsonObject(getClaudeJsonPathForConfigDir(baseConfigDir)),
+  mcpServersSourceJson = readJsonObject(getClaudeMcpConfigPath(baseConfigDir)),
 ): void {
   if (!sourceClaudeJson && !mcpServersSourceJson) return;
 
@@ -528,10 +528,11 @@ export function prepareOmcLaunchConfigDir(baseConfigDir = getClaudeConfigDir()):
   const runtimeClaudeJsonPath = join(runtimeConfigDir, '.claude.json');
   const runtimeCredentialsPath = join(runtimeConfigDir, '.credentials.json');
   const sourceClaudeJsonPath = join(dirname(baseConfigDir), '.claude.json');
-  // User-scoped MCP servers come from the .claude.json Claude Code reads for this
-  // config dir: a CLAUDE_CONFIG_DIR profile's own file, or for the default
-  // ~/.claude the same ~/.claude.json as sourceClaudeJsonPath.
-  const mcpServersSourcePath = getClaudeJsonPathForConfigDir(baseConfigDir);
+  // User-scoped MCP servers come from the file `omc setup` syncs the registry
+  // into: CLAUDE_MCP_CONFIG_PATH when set, otherwise the .claude.json Claude Code
+  // reads for this config dir (a CLAUDE_CONFIG_DIR profile's own file, or for the
+  // default ~/.claude the same ~/.claude.json as sourceClaudeJsonPath).
+  const mcpServersSourcePath = getClaudeMcpConfigPath(baseConfigDir);
   const lifecycleLockPath = lockPathFor(join(baseConfigDir, '.omc-launch.prepare.lock'));
 
   return withFileLockSync(lifecycleLockPath, () => {
