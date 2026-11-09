@@ -13,6 +13,10 @@
  * story — this module never decides that.
  */
 export declare const FEEDBACK_BASELINE_FILENAME = "feedback-baseline.json";
+/** Sibling directory that keeps replaced baselines recoverable. */
+export declare const FEEDBACK_BASELINE_HISTORY_DIRNAME = "feedback-baseline.history";
+/** Bounded history: older re-records are pruned so the state directory cannot grow without limit. */
+export declare const MAX_FEEDBACK_BASELINE_HISTORY = 20;
 /** Per-command signature cap: a pathological runaway output must not become a giant baseline. */
 export declare const MAX_SIGNATURES_PER_COMMAND = 200;
 /**
@@ -32,6 +36,12 @@ export interface CommandBaseline {
     signatures: string[];
     /** True when the command could not execute at all (tool missing, suite unrunnable). */
     unrunnable?: boolean;
+    /**
+     * True when the command exceeded the verify timeout. A killed process only
+     * produced partial output, so nothing in it is failure evidence: the
+     * progress lines depend on how long the run lasted, not on what failed.
+     */
+    timedOut?: boolean;
 }
 export interface FeedbackBaseline {
     version: 1;
@@ -54,5 +64,40 @@ export interface BaselineDiff {
 export declare function diffAgainstBaseline(baseline: FeedbackBaseline | null, current: Record<string, CommandBaseline>): BaselineDiff;
 export declare function baselinePath(stateRoot: string, sessionId: string): string;
 export declare function readBaseline(path: string): FeedbackBaseline | null;
+/**
+ * Copy the live baseline into its sibling history directory before it is
+ * replaced, returning the history path (or null when there is nothing to
+ * archive or the copy failed). The file name uses the replaced document's own
+ * `recordedAt` (sanitized for cross-platform paths) plus a counter, so history
+ * sorts chronologically.
+ */
+export declare function archiveBaseline(path: string, now?: Date): string | null;
+export interface BaselineWriteResult {
+    written: boolean;
+    /** History path preserving the replaced baseline, when one existed. */
+    previousPath?: string;
+    /** Signatures present now but absent from the replaced baseline. */
+    added: number;
+    /** Signatures in the replaced baseline that are gone now. */
+    removed: number;
+    /** Commands that ran in the replaced baseline but could not execute now. */
+    becameUnrunnable?: string[];
+}
+/**
+ * Write a baseline, archiving any existing document first. The archive must
+ * succeed before the live file is replaced: losing history silently is the bug
+ * this guards against, so an unarchivable previous baseline fails the write.
+ *
+ * The whole read/archive/write transaction runs under a sibling `.lock` file.
+ * `COPYFILE_EXCL` only makes archive NAMES unique; without serialization two
+ * writers could archive the same original and the second could overwrite the
+ * first replacement without archiving it. A writer that cannot take the lock
+ * fails closed rather than proceeding unlocked.
+ *
+ * A failed live write leaves the archive in place: when `writeFileSync` fails
+ * partway (ENOSPC/EFBIG) that archive is the only intact recovery copy.
+ */
+export declare function recordBaseline(path: string, commands: Record<string, CommandBaseline>, now?: Date): BaselineWriteResult;
+/** Backward-compatible wrapper: the boolean says only whether the write succeeded. */
 export declare function writeBaseline(path: string, commands: Record<string, CommandBaseline>, now?: Date): boolean;
 //# sourceMappingURL=feedback-baseline.d.ts.map
