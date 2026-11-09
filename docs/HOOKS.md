@@ -621,6 +621,9 @@ export OMC_JEV="point1,point2:active,all"
 | `OMC_JEV` | (absent) | Per-point opt-in: `point`, `point:active`, `all` (every point, shadow), or `all:active` (every point, active). Comma-separated; unknown point names are ignored. |
 | `OMC_JEV_TIMEOUT_MS` | `2000` | Per-call timeout in milliseconds (single round-trip measured at 465–605 ms; default allows margin). |
 | `OMC_JEV_MAX_REQUESTS` | `0` (unlimited) | Maximum Jev requests per process. When reached, heuristic twins run for remaining calls. |
+| `OMC_JEV_BREAKER` | (unset) | Set to `1` to share one circuit breaker between every process of the machine, hook scripts included: after HTTP 429, 401, 402, 403, any 5xx, or three requests without a response within a minute, no request is sent until it closes. See [Shared breaker and request limit](#shared-breaker-and-request-limit). |
+| `OMC_JEV_MAX_RPM` | (unset, no limit) | Maximum Jev requests per UTC minute for the machine and endpoint/key, a positive integer (`0` or any other value means no limit). Low-priority points stop at 60 % of it and medium ones at 85 %. See [Shared breaker and request limit](#shared-breaker-and-request-limit). |
+| `OMC_JEV_BREAKER_DIR` | `~/.omc/state/jev/breaker` | State directory of the shared breaker and request limit (test only). |
 | `OMC_JEV_EXCERPT_CHARS` | `200` | Maximum string length sent in state and shadow log. Recursively bounds all strings in the judgment state; question definitions are static text and are sent whole. Does not apply to `model-routing` and `loop-continuation`, which have their own defaults (next row). |
 | `OMC_JEV_EXCERPT_CHARS_<POINT>` | (unset) | The same limit for one point: the point name upper-cased with dashes as underscores, for example `OMC_JEV_EXCERPT_CHARS_MODEL_ROUTING` (the variable name itself must be upper case). Order for a point: its own variable, then the point's default (`model-routing`: `12000`; `loop-continuation`: `2000`, the length to which `persistent-mode.mjs` already cuts the last assistant message), then `OMC_JEV_EXCERPT_CHARS`. An invalid value is ignored. To send less of the `loop-continuation` state, set `OMC_JEV_EXCERPT_CHARS_LOOP_CONTINUATION`, for example to `200`, the limit of earlier releases. |
 | `OMC_JEV_ENDPOINT` | `https://api.typesafe.ai/v1/systemone` | Override for stub servers or tests. |
@@ -696,7 +699,7 @@ Each line is a JSON record with:
 - `ts`: ISO timestamp
 - `point`: judgment-point name
 - `state`: the bounded state passed to the judgment
-- `mode`: `"shadow"`, `"active"`, or `"degraded"`
+- `mode`: `"shadow"`, `"active"`, or `"degraded"`; with the opt-in shared breaker or request limit also `"circuit-open"` or `"cap"` for a call they held back (no request was sent), with `reason` and either `until` (the breaker) or `priority` and `rpm` (the limit)
 - `heuristic`: the heuristic twin's result
 - `jev`: Jev's first answer, or `null` when the request degrades. In a Noul answer, `noul` is the probability of "yes" from 0 to 1; the hook scripts and `scripts/jev-eval.mjs` read 0.5 or more as yes.
 - `answers`: every Jev answer by question name, or `null` when the request degrades. Points that ask more than one question in one request, such as `model-routing`, are read from this map: the API does not guarantee the order of its answers.
@@ -714,6 +717,42 @@ Jev never blocks the workflow:
 - **Over budget**: If `OMC_JEV_MAX_REQUESTS` is reached, all remaining calls use heuristic twins.
 - **Unavailable**: If the API is unreachable or returns an error, heuristic twin is used and the failure is logged.
 - **Blocking points**: Even in active mode, if Jev fails, the heuristic twin's decision is used and the workflow continues.
+
+### Shared breaker and request limit
+
+Each plugin hook runs as a fresh process, so the resolver's own breaker (three consecutive failures of a point) and `OMC_JEV_MAX_REQUESTS` count one hook call at a time. During an outage every opted-in point of every hook keeps sending requests to an endpoint that already refuses them. Two opt-in variables share the protection between all processes of the machine through small files in `~/.omc/state/jev/breaker/<scope>/`, where `<scope>` is a hash of `OMC_JEV_ENDPOINT` and `TYPESAFE_API_KEY` (the key itself is never written, and a new key or another endpoint starts with a closed breaker). Both the hook scripts and the TypeScript resolver read and write the same state.
+
+`OMC_JEV_BREAKER=1` opens the breaker when a response or a missing response shows that the endpoint cannot serve requests:
+
+| Failure | Breaker open for |
+|---------|------------------|
+| HTTP 429, any 5xx | `Retry-After`, else 60 s |
+| HTTP 401, 402, 403 (key or account) | `Retry-After`, else 10 minutes |
+| Three requests without any HTTP response (timeout, network error) within 60 s | 60 s |
+| Any other status, an invalid response body | not opened |
+
+`Retry-After` is read as seconds (a decimal value is rounded up) or as an HTTP date and capped at 30 minutes; any other form uses the default. Only the status code and the presence of a response are used; response bodies are never read, so any System One compatible endpoint behaves the same. A breaker never closes early, and a later failure only extends it. A request counts as without a response only in the resolver that sent it: a call held back by the breaker or the limit never counts.
+
+`OMC_JEV_MAX_RPM=<n>` allows at most `n` requests per UTC minute for the machine (per endpoint and key). Points have a priority: low points stop at 60 % of `n` and medium points at 85 %, so the rest of the minute stays for the points that gate or route work. A request that is held back takes no slot. Every priority keeps at least one request a minute, so the tiers overlap for `n` of 3 or less.
+
+| Priority | Points |
+|----------|--------|
+| high | `model-routing`, `loop-continuation`, `ralph-verdict` |
+| medium | `intent`, `skill-trigger`, `task-size` (and any point not listed) |
+| low | `slop-warning`, `learner-extraction`, `simplifier-trigger`, `context-pruning` |
+
+The window is the calendar minute, so a burst at the turn of a minute can send up to twice `n` within a few seconds.
+
+A call held back by either ends like a failed call: the heuristic twin decides, the resolver returns mode `circuit-open` or `cap`, and the shadow log gets a line with that mode (see [Shadow Log Location](#shadow-log-location)); `jev-eval` counts these lines in their mode but not in the latency figures. While the breaker is open, an active-mode hook does not wait for the resolver: it runs in the background, as in shadow mode, only to log the held-back call.
+
+While the breaker is open, the hook scripts add one `systemMessage` per session and outage to their own output and write the same line to stderr, for example `[OMC] Jev requests paused until 14:33 (HTTP 429); hooks decide without Jev until then.` (local time, rounded up to the minute). The breaker is one outage while it is extended or opens again within 15 minutes of closing. Points reached only through the TypeScript resolver follow the breaker and the limit but show no notice.
+
+```bash
+export OMC_JEV_BREAKER=1
+export OMC_JEV_MAX_RPM=60   # requests per minute for this machine
+```
+
+When neither variable is set, nothing is read or written and the behavior is the same as before. Every file operation is fail-open: a state directory that cannot be used never holds a request back.
 
 ### Judgment Points Registry
 
