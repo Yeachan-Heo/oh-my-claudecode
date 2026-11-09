@@ -319,6 +319,17 @@ Examples:
         }
         report(`launched (session ${sessionId}); PRD at ${composed.prdPath}; finalize with --finalize --session ${sessionId}`);
     });
+    cmd
+        .command('closeout')
+        .description('Record or verify the session\'s terminal closeout record (Step 7.5)')
+        .option('--deslop <status>', 'Record the closeout: "completed" or "skipped"')
+        .option('--check', 'Verify the closeout record matches the current criteria revision')
+        .option('--json', 'Output as JSON')
+        .option('--session <id>', 'Session id (defaults to OMC_SESSION_ID)')
+        .addHelpText('after', '\nExamples:\n  $ omc ralph closeout --deslop completed   Record the closeout after Step 6 completes\n  $ omc ralph closeout --check              Verify the closeout gate for the next step\n  $ omc ralph closeout --check --json       Machine-readable judgment\n  The closeout is a terminal record tying session completion to the criteria\n  revision that was active at completion time. Its presence gates further\n  verification steps and is required for clean session closure.')
+        .action((options) => {
+        process.exitCode = ralphCloseout(options);
+    });
     return cmd;
 }
 /**
@@ -426,7 +437,12 @@ export function runFeedbackCommand(command, directory, options = {}) {
             || result.status === 126
             || result.status === 127
             || (!result.error && hasShellMissingCommand && otherSignatures.length === 0);
-        return { signatures: unrunnable ? [] : signatures, ...(unrunnable ? { unrunnable: true } : {}) };
+        const exitCode = !unrunnable && typeof result.status === 'number' ? result.status : undefined;
+        return {
+            signatures: unrunnable ? [] : signatures,
+            ...(exitCode !== undefined ? { exitCode } : {}),
+            ...(unrunnable ? { unrunnable: true } : {}),
+        };
     }
     catch (error) {
         const errorCode = typeof error === 'object' && error !== null && 'code' in error && typeof error.code === 'string'
@@ -565,14 +581,6 @@ export function ralphVerify(options, directory = process.cwd(), now = new Date()
         return 1;
     }
     const commands = resolution.commands;
-    if (commands.length === 0) {
-        const message = 'no feedback commands: declare feedbackCommands in the PRD or add package.json build/lint/test scripts';
-        if (options.json)
-            console.log(JSON.stringify({ sessionId: sessionId || null, baselinePresent: Boolean(baseline), commands: [], newFailures: [], resolvedFailures: [], unrunnableCommands: [], note: message }));
-        else
-            console.log(`ralph verify: ${message}`);
-        return 0;
-    }
     const runGate = () => {
         // Re-read under the lock: a concurrent run may have re-recorded it.
         const gateBaseline = readCurrentBaseline();
@@ -600,6 +608,7 @@ export function ralphVerify(options, directory = process.cwd(), now = new Date()
                 console.log(`ralph verify: ${note}`);
             return written ? 0 : 1;
         }
+        // When there are no feedback commands, current is empty; diff still evaluates properly.
         const diff = diffAgainstBaseline(gateBaseline, current);
         // A timeout already present in the baseline is environment noise, like a
         // baseline failure; a new one means the gate could not run at all.
@@ -609,9 +618,24 @@ export function ralphVerify(options, directory = process.cwd(), now = new Date()
         const closeoutNote = closeoutBlocked
             ? 'the PRD is complete but no closeout record matches its criteria revision; run `omc ralph closeout --deslop completed|skipped` before Step 7.6'
             : null;
+        // When no feedback commands exist, still emit JSON with closeout judgment.
         if (options.json) {
-            console.log(JSON.stringify({ sessionId: sessionId || null, baselinePresent: Boolean(gateBaseline), commands, newFailures: diff.newSignatures, resolvedFailures: diff.resolvedSignatures, unrunnableCommands, timedOutCommands, closeout, closeoutError: closeoutNote }));
+            const noCommandsNote = commands.length === 0 ? 'no feedback commands: declare feedbackCommands in the PRD or add package.json build/lint/test scripts' : null;
+            console.log(JSON.stringify({ sessionId: sessionId || null, baselinePresent: Boolean(gateBaseline), commands, newFailures: diff.newSignatures, resolvedFailures: diff.resolvedSignatures, unrunnableCommands, timedOutCommands, closeout, closeoutError: closeoutNote, ...(noCommandsNote ? { note: noCommandsNote } : {}) }));
             return diff.newSignatures.length > 0 || newlyTimedOut.length > 0 || closeoutBlocked ? 1 : 0;
+        }
+        // Report no commands case only when not outputting JSON (JSON case is above).
+        if (commands.length === 0) {
+            const message = 'no feedback commands: declare feedbackCommands in the PRD or add package.json build/lint/test scripts';
+            if (closeoutBlocked) {
+                console.log(message);
+                console.log(closeoutNote);
+                return 1;
+            }
+            else {
+                console.log(message);
+                return 0;
+            }
         }
         if (newlyTimedOut.length > 0) {
             const budgetSeconds = Math.round((options.timeoutMs ?? DEFAULT_FEEDBACK_TIMEOUT_MS) / 1000);
