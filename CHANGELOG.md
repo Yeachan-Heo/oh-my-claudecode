@@ -1,3 +1,22 @@
+# oh-my-claudecode v5.8.2: Restore dev fixes, ralph closeout fixes, LSP Windows support
+
+## Release Notes
+
+v5.8.2 is a patch release that restores important dev-branch fixes that were inadvertently reverted in the v5.8.0 sync, adds ralph closeout Codex findings fixes, and improves LSP devcontainer URI mapping on Windows hosts.
+
+### Bug Fixes
+
+- **fix(mcp): restore the profile's own .claude.json for CLAUDE_CONFIG_DIR** (#4890)
+- **fix: restore dev fixes reverted by the v5.8.0 main→dev sync** (#4893)
+- **fix: address ralph closeout Codex findings** (#4896)
+- **fix(lsp): map devcontainer URIs and labels on a Windows host** (#4897)
+
+### Stats
+
+- **4 PRs merged** | **0 new features** | **4 bug fixes** | **0 test improvements** | **0 chore**
+
+---
+
 # oh-my-claudecode v5.8.1: Skills polish, jev model-routing question wording, Windows docs
 
 ## Release Notes
