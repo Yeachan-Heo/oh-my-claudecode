@@ -606,12 +606,10 @@ export function ralphVerify(options: { json?: boolean; session?: string; writeBa
   }
   const commands = resolution.commands;
   if (commands.length === 0) {
-    const message = 'no feedback commands: declare feedbackCommands in the PRD or add package.json build/lint/test scripts';
-    if (options.json) console.log(JSON.stringify({ sessionId: sessionId || null, baselinePresent: Boolean(baseline), commands: [], newFailures: [], resolvedFailures: [], unrunnableCommands: [], note: message }));
-    else console.log(`ralph verify: ${message}`);
     // Even with no feedback commands, evaluate the closeout requirement: terminal step gate
     const closeout = evaluateCloseoutGate(directory, stateRoot, sessionId || '');
     const closeoutBlocked = closeout.required && !closeout.satisfied;
+    // If closeout is blocked, it supersedes the no-commands message: emit only the closeout error
     if (closeoutBlocked) {
       const closeoutNote = 'the PRD is complete but no closeout record matches its criteria revision; run `omc ralph closeout --deslop completed|skipped` before Step 7.6';
       if (options.json) {
@@ -621,6 +619,10 @@ export function ralphVerify(options: { json?: boolean; session?: string; writeBa
       }
       return 1;
     }
+    // No feedback commands and closeout is not blocked: emit the no-commands message
+    const message = 'no feedback commands: declare feedbackCommands in the PRD or add package.json build/lint/test scripts';
+    if (options.json) console.log(JSON.stringify({ sessionId: sessionId || null, baselinePresent: Boolean(baseline), commands: [], newFailures: [], resolvedFailures: [], unrunnableCommands: [], note: message }));
+    else console.log(`ralph verify: ${message}`);
     return 0;
   }
 

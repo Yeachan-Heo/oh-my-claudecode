@@ -126047,9 +126047,6 @@ function ralphVerify(options, directory = process.cwd(), now = /* @__PURE__ */ n
   }
   const commands = resolution.commands;
   if (commands.length === 0) {
-    const message2 = "no feedback commands: declare feedbackCommands in the PRD or add package.json build/lint/test scripts";
-    if (options.json) console.log(JSON.stringify({ sessionId: sessionId || null, baselinePresent: Boolean(baseline), commands: [], newFailures: [], resolvedFailures: [], unrunnableCommands: [], note: message2 }));
-    else console.log(`ralph verify: ${message2}`);
     const closeout = evaluateCloseoutGate(directory, stateRoot2, sessionId || "");
     const closeoutBlocked = closeout.required && !closeout.satisfied;
     if (closeoutBlocked) {
@@ -126061,6 +126058,9 @@ function ralphVerify(options, directory = process.cwd(), now = /* @__PURE__ */ n
       }
       return 1;
     }
+    const message2 = "no feedback commands: declare feedbackCommands in the PRD or add package.json build/lint/test scripts";
+    if (options.json) console.log(JSON.stringify({ sessionId: sessionId || null, baselinePresent: Boolean(baseline), commands: [], newFailures: [], resolvedFailures: [], unrunnableCommands: [], note: message2 }));
+    else console.log(`ralph verify: ${message2}`);
     return 0;
   }
   const runGate = () => {
