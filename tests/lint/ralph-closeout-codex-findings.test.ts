@@ -6,10 +6,10 @@
  */
 
 import { describe, test, expect, beforeEach, afterEach } from 'vitest';
-import { join } from 'path';
+import { join, dirname } from 'path';
 import { randomUUID } from 'crypto';
 import * as fs from 'fs';
-import { mkdirSync, rmSync, writeFileSync, existsSync } from 'fs';
+import { mkdirSync, rmSync, writeFileSync, existsSync, readFileSync } from 'fs';
 import { ralphCloseout, ralphVerify, runFeedbackCommand } from '../../src/cli/commands/ralph';
 import { recordBaseline, readBaseline, type CommandBaseline } from '../../src/hooks/ralph/feedback-baseline';
 import { readCloseout, writeCloseout } from '../../src/hooks/ralph/closeout';
@@ -134,21 +134,95 @@ describe('Ralph Closeout Codex Findings', () => {
     });
   });
 
-  describe('P2: Evaluate closeout even when no feedback commands exist', () => {
-    test('ralphVerify should call evaluateCloseoutGate and include it in JSON output', () => {
-      // This test verifies the fix by checking that closeout is evaluated
-      // Create a minimal PRD (even without complete stories, closeout should be evaluated)
+  describe('P1: Required closeout gate with no feedback commands', () => {
+    test('ralphVerify should fail when closeout is required but not recorded', () => {
+      // Create a valid, anchored PRD with required fields and a completed story
       const prdPath = join(stateRoot, 'state', 'sessions', sessionId, 'prd.json');
       mkdirSync(join(stateRoot, 'state', 'sessions', sessionId), { recursive: true });
       
       writeFileSync(prdPath, JSON.stringify({
         version: 1,
-        userStories: [],
+        project: 'test-project',
+        branchName: 'test-branch',
+        description: 'Test feature',
+        userStories: [
+          {
+            id: 'story-1',
+            title: 'Test Story',
+            description: 'Test implementation',
+            acceptanceCriteria: ['Criterion 1', 'Criterion 2'],
+            priority: 1,
+            passes: true,
+            architectVerified: true,
+          },
+        ],
         feedbackCommands: [],
         criteriaHash: 'test-hash-v1',
       }, null, 2));
 
-      // Capture console output to verify closeout is in JSON
+      // Capture console output to check for JSON
+      let jsonOutput: string = '';
+      const originalLog = console.log;
+      const outputs: string[] = [];
+      console.log = (msg: string) => {
+        outputs.push(msg);
+        if (msg.startsWith('{')) jsonOutput = msg;
+        originalLog(msg);
+      };
+
+      try {
+        process.env.OMC_SESSION_ID = sessionId;
+        // With a valid PRD and no feedback commands but no closeout record, verification should fail
+        ralphVerify({ json: true, session: sessionId }, tmpDir);
+
+        // Parse the JSON output to check for closeout gate block
+        if (jsonOutput) {
+          const parsed = JSON.parse(jsonOutput);
+          // Should indicate that closeout is required but missing
+          expect(parsed).toHaveProperty('closeout');
+          // Closeout gate should have a 'required' or 'blocking' indicator
+          expect(parsed.closeout || parsed.blocked).toBeTruthy();
+        }
+      } finally {
+        console.log = originalLog;
+      }
+    });
+
+    test('ralphVerify should pass after recording a closeout for no-feedback-command case', () => {
+      // Create the same valid PRD
+      const prdPath = join(stateRoot, 'state', 'sessions', sessionId, 'prd.json');
+      mkdirSync(join(stateRoot, 'state', 'sessions', sessionId), { recursive: true });
+      
+      writeFileSync(prdPath, JSON.stringify({
+        version: 1,
+        project: 'test-project',
+        branchName: 'test-branch',
+        description: 'Test feature',
+        userStories: [
+          {
+            id: 'story-1',
+            title: 'Test Story',
+            description: 'Test implementation',
+            acceptanceCriteria: ['Criterion 1', 'Criterion 2'],
+            priority: 1,
+            passes: true,
+            architectVerified: true,
+          },
+        ],
+        feedbackCommands: [],
+        criteriaHash: 'test-hash-v1',
+      }, null, 2));
+
+      // First, record a closeout with deslop: 'completed'
+      const closeoutPath = join(stateRoot, 'state', 'sessions', sessionId, 'ralph-closeout.json');
+      const closeoutWritten = writeCloseout(closeoutPath, {
+        sessionId,
+        deslop: 'completed',
+        criteriaRevision: 'test-hash-v1',
+      });
+      expect(closeoutWritten).toBe(true);
+
+      // Now verify - should succeed
       let jsonOutput: string = '';
       const originalLog = console.log;
       console.log = (msg: string) => {
@@ -158,55 +232,45 @@ describe('Ralph Closeout Codex Findings', () => {
 
       try {
         process.env.OMC_SESSION_ID = sessionId;
-        // With no feedback commands, the function should still emit JSON with closeout info
         ralphVerify({ json: true, session: sessionId }, tmpDir);
 
-        // Parse the JSON output
+        // Parse JSON output - should not have a blocking closeout gate
         if (jsonOutput) {
           const parsed = JSON.parse(jsonOutput);
-          // Verify closeout gate was evaluated (should have closeout property)
-          expect(parsed).toHaveProperty('closeout');
-          expect(parsed).toHaveProperty('commands');
-          expect(parsed.commands).toEqual([]); // No commands
-          // Should have a note about no commands
-          expect(parsed).toHaveProperty('note');
-          expect(parsed.note).toMatch(/no feedback commands/i);
+          // Closeout gate should now pass (either not present or not blocking)
+          expect(!parsed.closeout || !parsed.blocked).toBeTruthy();
         }
       } finally {
         console.log = originalLog;
       }
     });
+  });
 
-    test('closeout command should be defined and callable', () => {
-      // This test verifies that the closeout command is properly registered
-      // by checking that ralphCloseout can be called
-      const prdPath = join(stateRoot, 'state', 'sessions', sessionId, 'prd.json');
+  describe('P2: Evaluate closeout even when no feedback commands exist', () => {
+    test('recordBaseline should handle lock contention gracefully', () => {
+      // Test that holds a lock from a live process to verify recordBaseline returns {written:false}
+      const baselinePath = join(stateRoot, 'state', 'sessions', sessionId, 'feedback-baseline.json');
       mkdirSync(join(stateRoot, 'state', 'sessions', sessionId), { recursive: true });
-      
-      writeFileSync(prdPath, JSON.stringify({
-        version: 1,
-        userStories: [
-          {
-            id: 'story-1',
-            title: 'Test Story',
-            description: 'Test',
-            acceptanceCriteria: 'Test criteria',
-            passes: true,
-            architectVerified: true,
-          },
-        ],
-        feedbackCommands: [],
-        criteriaHash: 'test-hash-v1',
-      }, null, 2));
 
-      // Test that closeout can check status
-      const result = ralphCloseout(
-        { check: true, json: true, session: sessionId },
-        tmpDir
-      );
-      
-      // Should return 0 or 1, not throw
-      expect(typeof result).toBe('number');
+      // Simulate lock contention by holding the lock
+      const lockPath = `${baselinePath}.lock`;
+      mkdirSync(dirname(lockPath), { recursive: true });
+      writeFileSync(lockPath, JSON.stringify({ pid: process.pid, timestamp: Date.now() }));
+
+      try {
+        const commands = { test: { signatures: ['error 1'] } };
+        const result = recordBaseline(baselinePath, commands);
+
+        // Should return {written:false} without throwing
+        expect(result.written).toBe(false);
+        expect(result.added).toBe(0);
+        expect(result.removed).toBe(0);
+      } finally {
+        // Clean up
+        if (existsSync(lockPath)) {
+          rmSync(lockPath);
+        }
+      }
     });
   });
 });

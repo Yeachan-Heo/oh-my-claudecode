@@ -395,48 +395,57 @@ export function recordBaseline(path: string, commands: Record<string, CommandBas
   }
   const lockPath = lockPathFor(path);
   // Use PID-aware locking to respect live process ownership.
-  return withFileLockSync(lockPath, () => {
-    const previous = readBaseline(path);
-    const previousPath = archiveBaseline(path, now);
-    if (previousPath === null && fs.existsSync(path)) return { written: false, added: 0, removed: 0 };
-    try {
-      fs.writeFileSync(path, `${JSON.stringify({ version: 1, recordedAt: now.toISOString(), commands }, null, 2)}\n`, 'utf8');
-    } catch {
-      // Deliberately keep the archive: a partial live write makes it the only
-      // intact copy of the document the caller was replacing.
+  // Pass explicit retry/timeout options (500ms timeout, 50ms retry) to handle lock contention gracefully.
+  try {
+    return withFileLockSync(lockPath, () => {
+      const previous = readBaseline(path);
+      const previousPath = archiveBaseline(path, now);
+      if (previousPath === null && fs.existsSync(path)) return { written: false, added: 0, removed: 0 };
+      try {
+        fs.writeFileSync(path, `${JSON.stringify({ version: 1, recordedAt: now.toISOString(), commands }, null, 2)}\n`, 'utf8');
+      } catch {
+        // Deliberately keep the archive: a partial live write makes it the only
+        // intact copy of the document the caller was replacing.
+        return { written: false, added: 0, removed: 0 };
+      }
+      // Prune only now that the live replacement succeeded, so a failed write and
+      // its retry never evict history for a replacement that never landed.
+      if (previousPath) pruneBaselineHistory(dirname(previousPath), previousPath);
+      // Audit the document replacement from the raw signature sets, independent of
+      // the gate judgment in diffAgainstBaseline: that function collapses a newly
+      // unrunnable command into one synthetic marker, which would misreport the
+      // stored signatures the replacement actually removed.
+      let added = 0;
+      let removed = 0;
+      const becameUnrunnable: string[] = [];
+      if (previous && previousPath) {
+        for (const command of new Set([...Object.keys(previous.commands), ...Object.keys(commands)])) {
+          const before = previous.commands[command];
+          const after = commands[command];
+          const beforeSet = new Set(before?.signatures ?? []);
+          const afterSet = new Set(after?.signatures ?? []);
+          for (const signature of afterSet) if (!beforeSet.has(signature)) added += 1;
+          for (const signature of beforeSet) if (!afterSet.has(signature)) removed += 1;
+          // Only mark as becameUnrunnable if the command existed in the previous baseline.
+          // A newly added unrunnable command was never runnable, so it doesn't "become" unrunnable.
+          if (before && after?.unrunnable && !before?.unrunnable) becameUnrunnable.push(command);
+        }
+      }
+      return {
+        written: true,
+        ...(previousPath ? { previousPath } : {}),
+        added,
+        removed,
+        ...(becameUnrunnable.length > 0 ? { becameUnrunnable } : {}),
+      };
+    }, { timeoutMs: 500, retryDelayMs: 50 });
+  } catch (err) {
+    // Lock acquisition failed due to contention or timeout
+    if (err instanceof Error && err.message.includes('Failed to acquire file lock')) {
       return { written: false, added: 0, removed: 0 };
     }
-    // Prune only now that the live replacement succeeded, so a failed write and
-    // its retry never evict history for a replacement that never landed.
-    if (previousPath) pruneBaselineHistory(dirname(previousPath), previousPath);
-    // Audit the document replacement from the raw signature sets, independent of
-    // the gate judgment in diffAgainstBaseline: that function collapses a newly
-    // unrunnable command into one synthetic marker, which would misreport the
-    // stored signatures the replacement actually removed.
-    let added = 0;
-    let removed = 0;
-    const becameUnrunnable: string[] = [];
-    if (previous && previousPath) {
-      for (const command of new Set([...Object.keys(previous.commands), ...Object.keys(commands)])) {
-        const before = previous.commands[command];
-        const after = commands[command];
-        const beforeSet = new Set(before?.signatures ?? []);
-        const afterSet = new Set(after?.signatures ?? []);
-        for (const signature of afterSet) if (!beforeSet.has(signature)) added += 1;
-        for (const signature of beforeSet) if (!afterSet.has(signature)) removed += 1;
-        // Only mark as becameUnrunnable if the command existed in the previous baseline.
-        // A newly added unrunnable command was never runnable, so it doesn't "become" unrunnable.
-        if (before && after?.unrunnable && !before?.unrunnable) becameUnrunnable.push(command);
-      }
-    }
-    return {
-      written: true,
-      ...(previousPath ? { previousPath } : {}),
-      added,
-      removed,
-      ...(becameUnrunnable.length > 0 ? { becameUnrunnable } : {}),
-    };
-  }) ?? { written: false, added: 0, removed: 0 };
+    throw err;
+  }
 }
 
 /** Backward-compatible wrapper: the boolean says only whether the write succeeded. */
