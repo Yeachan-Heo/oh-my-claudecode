@@ -97,8 +97,8 @@ describe('persistent-mode hook error handling (issue #319)', () => {
 
   it('keeps the default safety timeout below the shipped Stop hook wrapper kill', () => {
     const manifest = JSON.parse(readFileSync(join(__dirname, '../../../../hooks/hooks.json'), 'utf-8'));
-    const stopHook = manifest.hooks.Stop[0].hooks.find((hook: { command?: string }) =>
-      hook.command?.includes('/scripts/persistent-mode.mjs'),
+    const stopHook = manifest.hooks.Stop.flatMap((group: { hooks?: Array<{ command?: string; args?: string[]; timeout?: number }> }) => group.hooks ?? []).find((hook: { command?: string; args?: string[] }) =>
+      [hook.command, ...(hook.args ?? [])].join(' ').includes('/scripts/persistent-mode.mjs'),
     );
     expect(stopHook?.timeout).toBe(10);
 
