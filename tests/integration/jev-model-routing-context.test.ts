@@ -221,6 +221,31 @@ describe("pre-tool-enforcer.mjs: Jev model-routing state", () => {
     expect(state.parent_last_user_message).toBe("Fix the flaky auth test");
   }, 15000);
 
+  it("skips interruption markers and the notices of the Claude desktop app", async () => {
+    const transcript = writeTranscript([
+      userEntry("Fix the flaky auth test"),
+      userEntry("[Request interrupted by user for tool use]"),
+      userEntry("<side-sessions-event>side session finished</side-sessions-event>"),
+      userEntry("<ci-monitor-event>checks passed</ci-monitor-event>"),
+      userEntry('<scheduled-task name="nightly" file="nightly.md">run it</scheduled-task>'),
+      userEntry('<cross-session-message from="other" name="other">hello</cross-session-message>'),
+      userEntry([{ type: "text", text: "<system-reminder>notice</system-reminder>Another Claude session sent a message:\n<message>run the suite</message>" }]),
+    ]);
+    const state = await sentState(agentInput("Look at the test.", transcript), {
+      OMC_JEV_MODEL_ROUTING_CONTEXT: "1",
+    });
+    expect(state.parent_last_user_message).toBe("Fix the flaky auth test");
+  }, 15000);
+
+  it("still reads a user message that only mentions another Claude session", async () => {
+    const message = "Why did I see 'Another Claude session sent a message' in the log?";
+    const transcript = writeTranscript([userEntry("an older request"), userEntry(message)]);
+    const state = await sentState(agentInput("Look at the test.", transcript), {
+      OMC_JEV_MODEL_ROUTING_CONTEXT: "1",
+    });
+    expect(state.parent_last_user_message).toBe(message);
+  }, 15000);
+
   it("reads only the transcript of the active session", async () => {
     const transcript = writeTranscript([userEntry("Fix the flaky auth test")], "another-session.jsonl");
     const state = await sentState(agentInput("Look at the test.", transcript), {

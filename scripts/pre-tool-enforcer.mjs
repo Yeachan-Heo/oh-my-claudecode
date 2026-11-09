@@ -688,10 +688,15 @@ function readNativeAgentDefinitionModel(subagentType, directory) {
 
 const PARENT_MESSAGE_MAX_CHARS = 4000;
 const TRANSCRIPT_TAIL_BYTES = 4 * 1024 * 1024;
-// User-type transcript entries that are system messages, not the user's own words.
+// User-type transcript entries that are system messages, not the user's own words: Claude
+// Code's task, teammate and command notices and its interruption marker, and the notices the
+// Claude desktop app adds (side-session and CI-monitor events, scheduled tasks, messages
+// from another session).
 const PARENT_MESSAGE_SKIP_PREFIXES = [
   '<task-notification>', '<teammate-message', '<command-name>', '<command-message>',
-  '<local-command-stdout>', '<local-command-stderr>',
+  '<local-command-stdout>', '<local-command-stderr>', '[Request interrupted by user',
+  '<side-sessions-event>', '<ci-monitor-event>', '<scheduled-task', '<cross-session-message',
+  'Another Claude session sent a message:',
 ];
 
 // Same boundary as the /goal recovery below: only the active session's own transcript
