@@ -5,15 +5,15 @@
   "provenance": {
     "base": "05c800f40d1ad53b42a78609d2667ef4f726808b",
     "planningHead": "0a91273e61dbbd47eb0af4c02844409251e08398",
-    "head": "27008098cfc9089bd671127a1654a666ba23a176",
-    "sourceSha256": "37d603580bc34083ca14c772b10c73ad37e5e0959769ab752741889983668c71",
+    "head": "b13c5777c41a42432d34857d7c82d4b12c4905e4",
+    "sourceSha256": "a4243bce7281ed8f327823fe9f2de498e7f6ab6ad29c0ac7022580d0894fe972",
     "generatedAt": null,
     "generator": "scripts/generate-inventory-graph.mjs"
   },
   "base": "05c800f40d1ad53b42a78609d2667ef4f726808b",
   "planningHead": "0a91273e61dbbd47eb0af4c02844409251e08398",
-  "head": "27008098cfc9089bd671127a1654a666ba23a176",
-  "sourceSha256": "37d603580bc34083ca14c772b10c73ad37e5e0959769ab752741889983668c71",
+  "head": "b13c5777c41a42432d34857d7c82d4b12c4905e4",
+  "sourceSha256": "a4243bce7281ed8f327823fe9f2de498e7f6ab6ad29c0ac7022580d0894fe972",
   "counts": {
     "public": {
       "skills": 84,
@@ -28,8 +28,8 @@
       "toolFiles": 65,
       "libFiles": 49,
       "templateHooks": 25,
-      "srcFiles": 1441,
-      "total": 1466
+      "srcFiles": 1442,
+      "total": 1467
     },
     "generated": {
       "distFiles": 5627,
@@ -45465,6 +45465,11 @@
         "path": "src/installer/__tests__/bundled-skill-sync.test.ts"
       },
       {
+        "id": "src/installer/__tests__/claude-mcp-config-path.test.ts",
+        "kind": "src",
+        "path": "src/installer/__tests__/claude-mcp-config-path.test.ts"
+      },
+      {
         "id": "src/installer/__tests__/claude-md-analysis.test.ts",
         "kind": "src",
         "path": "src/installer/__tests__/claude-md-analysis.test.ts"
@@ -77072,6 +77077,31 @@
         "kind": "imports"
       },
       {
+        "from": "src/installer/__tests__/claude-mcp-config-path.test.ts",
+        "to": "external:fs",
+        "kind": "imports"
+      },
+      {
+        "from": "src/installer/__tests__/claude-mcp-config-path.test.ts",
+        "to": "external:os",
+        "kind": "imports"
+      },
+      {
+        "from": "src/installer/__tests__/claude-mcp-config-path.test.ts",
+        "to": "external:path",
+        "kind": "imports"
+      },
+      {
+        "from": "src/installer/__tests__/claude-mcp-config-path.test.ts",
+        "to": "external:vitest",
+        "kind": "imports"
+      },
+      {
+        "from": "src/installer/__tests__/claude-mcp-config-path.test.ts",
+        "to": "src/installer/mcp-registry.ts",
+        "kind": "imports"
+      },
+      {
         "from": "src/installer/__tests__/claude-md-analysis.test.ts",
         "to": "external:crypto",
         "kind": "imports"
@@ -91838,12 +91868,12 @@
       }
     ],
     "stats": {
-      "nodeCount": 8222,
-      "edgeCount": 8708,
-      "importEdgeCount": 7265,
+      "nodeCount": 8223,
+      "edgeCount": 8713,
+      "importEdgeCount": 7270,
       "registerEdgeCount": 105
     }
   },
-  "inventorySha256": "5a4dc84bd3dd449ace559e4ff1ddeeda55de849ca1379845600c5d9f963582bb",
-  "manifestSha256": "dba6b4f8f5fdefb71582d339cc53c2e4fe88508333638605a1b72f3b2c50931b"
+  "inventorySha256": "a8d8e93d723e245b4d8be7a856f469a96e8266af3ae9da9fda8ebdd47b30a4ac",
+  "manifestSha256": "fc002f4add62f8d8a2ba5763e2e1613c6562318ab873c21cf0f2e63c0a7b22c9"
 }
