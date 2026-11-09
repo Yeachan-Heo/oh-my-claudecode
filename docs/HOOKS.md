@@ -624,8 +624,9 @@ export OMC_JEV="point1,point2:active,all"
 | `OMC_JEV_EXCERPT_CHARS` | `200` | Maximum string length sent in state and shadow log. Recursively bounds all strings in the judgment state; question definitions are static text and are sent whole. Does not apply to `model-routing` and `loop-continuation`, which have their own defaults (next row). |
 | `OMC_JEV_EXCERPT_CHARS_<POINT>` | (unset) | The same limit for one point: the point name upper-cased with dashes as underscores, for example `OMC_JEV_EXCERPT_CHARS_MODEL_ROUTING` (the variable name itself must be upper case). Order for a point: its own variable, then the point's default (`model-routing`: `12000`; `loop-continuation`: `2000`, the length to which `persistent-mode.mjs` already cuts the last assistant message), then `OMC_JEV_EXCERPT_CHARS`. An invalid value is ignored. To send less of the `loop-continuation` state, set `OMC_JEV_EXCERPT_CHARS_LOOP_CONTINUATION`, for example to `200`, the limit of earlier releases. |
 | `OMC_JEV_ENDPOINT` | `https://api.typesafe.ai/v1/systemone` | Override for stub servers or tests. |
-| `OMC_JEV_LOG_DIR` | `.omc/state/jev` | Shadow-log directory override (test only). |
+| `OMC_JEV_LOG_DIR` | `.omc/state/jev` | Directory of the Jev logs: `shadow.jsonl` and the files the hook scripts write next to it. The default is `state/jev` under the project's state root, so it follows `OMC_STATE_DIR`; set this variable to keep the logs of every project in one place. |
 | `OMC_JEV_LOG_MAX_MB` | (unset) | Size limit in megabytes (MiB) for each Jev log file. Before a line is appended, a file larger than the limit is renamed and the line starts a new file. Unset, `0`, a value that is not a canonical positive integer (a sign, spaces, a decimal point, an exponent or a leading zero), or a value above `8589934591`: no rotation, the log grows as before. See [Log rotation](#log-rotation). |
+| `OMC_JEV_LOG_CONTEXT` | (unset) | Set to `1` or `true` to add the ids of the hook call to every Jev log line (`tool_use_id`, `session_id`, `cwd`, `agent_id`, `agent_type`, `prompt_id`, and a `request_id` for each request), to log active-mode resolver processes that end without a line, and to log `jev` and `confidence` for the first question only. The ids stay in the local log and are never sent to Jev. See [Call ids and resolver failures](#call-ids-and-resolver-failures). |
 | `OMC_JEV_QUIET` | (unset) | Set to `1` to silence the env-activation stderr warning. |
 | `OMC_JEV_MAX_EFFORT` | `max` | Cap for the subagent reasoning effort set by the active `model-routing` point: `low`, `medium`, `high`, `xhigh`, or `max`, case-insensitive, surrounding spaces ignored. Other values use the default. A lower cap lowers the mapping: `high` restores the cap of earlier releases. A value that is set but not one of these is reported on stderr (unless `OMC_JEV_QUIET=1`) and the default is used. See [Model routing: subagent effort](#model-routing-subagent-effort). |
 | `OMC_JEV_MODEL_ROUTING_CONTEXT` | (unset) | Set to `1` or `true` to add two fields to the `model-routing` state: the Task/Agent call's `description` and `parent_last_user_message`, the last real user message of the parent session (read from the tail of its transcript; tool results, hook-injected reminders and system notices are skipped). Both are bounded by the point's excerpt limit. Script hooks only; the TypeScript resolver ignores it. See [Model routing: what Jev sees](#model-routing-what-jev-sees). |
@@ -699,7 +700,7 @@ Each line is a JSON record with:
 - `state`: the bounded state passed to the judgment
 - `mode`: `"shadow"`, `"active"`, or `"degraded"`
 - `heuristic`: the heuristic twin's result
-- `jev`: Jev's first answer, or `null` when the request degrades. In a Noul answer, `noul` is the probability of "yes" from 0 to 1; the hook scripts and `scripts/jev-eval.mjs` read 0.5 or more as yes.
+- `jev`: Jev's first answer, or `null` when the request degrades (with `OMC_JEV_LOG_CONTEXT`, also `null` when Jev did not answer the first question). In a Noul answer, `noul` is the probability of "yes" from 0 to 1; the hook scripts and `scripts/jev-eval.mjs` read 0.5 or more as yes.
 - `answers`: every Jev answer by question name, or `null` when the request degrades. Points that ask more than one question in one request, such as `model-routing`, are read from this map: the API does not guarantee the order of its answers.
 - `confidence`: Jev's confidence when provided
 - `durationMs`: elapsed request time
@@ -724,6 +725,25 @@ node scripts/jev-eval.mjs --include-rotated
 ```
 
 The files are read one at a time, so their total size is not limited by memory, though each file is read whole, as the single log is today.
+
+#### Call ids and resolver failures
+
+With `OMC_JEV_LOG_CONTEXT=1` every line written to the Jev logs names the hook call it belongs to, right after `point`:
+
+- `tool_use_id`: the tool call (PreToolUse and PostToolUse hooks)
+- `session_id`: the Claude Code session
+- `cwd`: the hook input's working directory (the hook process's own when the input has none)
+- `agent_id`, `agent_type`: the subagent, for a tool call made inside one
+- `prompt_id`: when the host sends one
+- `request_id`: a new UUID for each Jev request; the resolver also returns it to the hook, so any later line about the same request can carry the same value
+
+The ids come from the hook input. Only non-empty strings are kept, each cut to 1000 characters, and a field the host does not send is left out. They travel in the request file the hook hands to the resolver and end up in the local log only: the body sent to Jev is still `state`, `questions` and `model`. `cwd` is a local path, so keep that in mind before you share a log.
+
+In active mode a hook waits for its resolver for `OMC_JEV_TIMEOUT_MS` plus 500 ms. A resolver killed at that limit (for example after a slow cold start) or ended with a non-zero status writes no line, so with the variable the hook writes one for it: `ts`, `point`, the ids, `mode: "degraded"`, `reason` (`resolver-timeout` or `resolver-exit`) and `durationMs`, with no state and no answers. `jev-eval` counts it as a degraded request. A resolver killed just after writing its own line leaves two lines with one `request_id`.
+
+The variable also changes `jev` and `confidence`: they belong to the first question of the request and are `null` (and absent) when Jev did not answer it, instead of the first answer in server order. `jev-eval` compares `heuristic`, which always answers the first question, with `jev`, so such a line is no longer compared with the answer to another question. The answer the hook acts on does not change.
+
+Without the variable, log lines, requests and resolver results are exactly as before. The TypeScript resolver follows the same variable for its own lines and logs the ids a caller passes as `logContext`; its current callers pass none, so their lines carry only `request_id`.
 
 ### Heuristic Fallback on Failure
 

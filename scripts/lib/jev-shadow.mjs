@@ -1,7 +1,9 @@
 /* global process, URL */
 
 import { spawn, spawnSync } from "node:child_process";
+import { randomUUID } from "node:crypto";
 import {
+  appendFileSync,
   closeSync,
   constants,
   fstatSync,
@@ -19,7 +21,15 @@ import {
 import { homedir, tmpdir } from "node:os";
 import { basename, dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { parseJevEnv, resolveJevTimeoutMs } from "../jev-resolve.mjs";
+import {
+  isJevLogContextEnabled,
+  jevLogContextOf,
+  parseJevEnv,
+  resolveJevLogDir,
+  resolveJevLogMaxBytes,
+  resolveJevTimeoutMs,
+  rotateJevLog,
+} from "../jev-resolve.mjs";
 
 const SWEEP_THROTTLE_MS = 60 * 60 * 1000; // 1 hour
 const ACTIVE_RESOLVER_TIMEOUT_BUFFER_MS = 500;
@@ -315,10 +325,12 @@ export function recordJevShadow({ point, state, questions, heuristic, permission
   try {
     tempDir = mkdtempSync(join(tmpdir(), "omc-jev-"));
     requestFile = join(tempDir, "request.json");
+    const logContext = requestLogContext();
+    const startedAt = Date.now();
 
     writeFileSync(
       requestFile,
-      JSON.stringify({ point, state, questions, heuristic, permissionMode }),
+      JSON.stringify({ point, state, questions, heuristic, permissionMode, ...(logContext ? { context: logContext } : {}) }),
       {
         encoding: "utf8",
         mode: 0o600,
@@ -382,6 +394,7 @@ export function recordJevShadow({ point, state, questions, heuristic, permission
             return undefined;
           }
         }
+        if (result.status !== 0) recordResolverFailure(point, result, Date.now() - startedAt, logContext);
       } finally {
         // Always clean up temp dir after active mode
         if (tempDir) {
@@ -405,4 +418,88 @@ export function recordJevShadow({ point, state, questions, heuristic, permission
     }
   }
   return undefined;
+}
+
+// OMC_JEV_LOG_CONTEXT=1: the ids of the hook call being judged, for the Jev
+// logs only (they are never sent to Jev), and the log directory for the lines
+// a hook writes itself. Set once per hook process by setJevHookContext.
+let hookLogContext;
+let hookLogDir;
+
+/** True when this configuration can send a Jev request at all (a key and OMC_JEV entries). */
+function mayRequestJev(env) {
+  const raw = (env.OMC_JEV || "").trim();
+  return Boolean(env.TYPESAFE_API_KEY) && raw !== "" && raw !== "off";
+}
+
+/**
+ * Tell the Jev channel which hook call it judges: the hook input's
+ * tool_use_id, session_id, cwd (the process's working directory when the
+ * input has none), agent_id, agent_type and prompt_id. Call it once after the
+ * hook input is parsed, before any recordJevShadow call. It does something
+ * only with OMC_JEV_LOG_CONTEXT=1 and a configuration that can send Jev
+ * requests, and then also resolves the Jev log directory, as the resolver
+ * does. Never throws.
+ */
+export async function setJevHookContext(data) {
+  hookLogContext = undefined;
+  hookLogDir = undefined;
+  if (!isJevLogContextEnabled(process.env) || !mayRequestJev(process.env)) return;
+  const context = jevLogContextOf(data);
+  delete context.request_id;
+  if (context.cwd === undefined) {
+    try {
+      context.cwd = process.cwd();
+    } catch {
+      // No working directory: the field is left out.
+    }
+  }
+  hookLogContext = context;
+  try {
+    hookLogDir = await resolveJevLogDir(process.env);
+  } catch {
+    // Without a log directory the hook writes no lines itself.
+  }
+}
+
+/** The ids of one request: the hook call's and a new request_id. Undefined without OMC_JEV_LOG_CONTEXT=1. */
+function requestLogContext() {
+  if (!isJevLogContextEnabled(process.env)) return undefined;
+  return { ...hookLogContext, request_id: randomUUID() };
+}
+
+/**
+ * Append one line to a Jev log file in the hook's log directory
+ * (OMC_JEV_LOG_DIR when setJevHookContext did not resolve one), rotated like
+ * the resolver's lines. Never throws.
+ */
+function appendHookLogLine(fileName, entry) {
+  const logDir = hookLogDir || process.env.OMC_JEV_LOG_DIR;
+  if (!logDir) return;
+  try {
+    mkdirSync(logDir, { recursive: true });
+    const path = join(logDir, fileName);
+    rotateJevLog(path, resolveJevLogMaxBytes(process.env));
+    appendFileSync(path, JSON.stringify(entry) + "\n", "utf8");
+  } catch {
+    // Best-effort logging: a logging failure must never affect the hook.
+  }
+}
+
+/**
+ * An active-mode resolver killed at the hook's time limit (resolver-timeout)
+ * or ended with a non-zero status (resolver-exit) wrote no shadow-log line.
+ * With OMC_JEV_LOG_CONTEXT=1 the hook writes one for it: the request's ids,
+ * mode "degraded", the reason and the time waited; no state and no answers.
+ */
+function recordResolverFailure(point, result, durationMs, logContext) {
+  if (!logContext) return;
+  appendHookLogLine("shadow.jsonl", {
+    ts: new Date().toISOString(),
+    point,
+    ...logContext,
+    mode: "degraded",
+    reason: result?.error?.code === "ETIMEDOUT" ? "resolver-timeout" : "resolver-exit",
+    durationMs,
+  });
 }

@@ -26,7 +26,7 @@ import { spawn, spawnSync } from "child_process";
 import { join, dirname, resolve, normalize, sep } from "path";
 import { homedir } from "os";
 import { fileURLToPath, pathToFileURL } from "url";
-import { isJevShadowOptedIn, recordJevShadow } from "./lib/jev-shadow.mjs";
+import { isJevShadowOptedIn, recordJevShadow, setJevHookContext } from "./lib/jev-shadow.mjs";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -1587,6 +1587,8 @@ async function main() {
     // The stop_hook_active guard runs after the Ralph state read: a forced
     // continuation re-enters here carrying the reviewer's verdict, and that
     // verdict still has to be consumed. See the guard below.
+
+    await setJevHookContext(data);
 
     // Stop supplies the assistant response text directly; only load the
     // existing detector when this advisory point is explicitly enabled.

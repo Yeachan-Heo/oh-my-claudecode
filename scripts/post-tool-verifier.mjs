@@ -18,7 +18,7 @@ import { resolveOmcStateRoot } from './lib/state-root.mjs';
 import { readStdin } from './lib/stdin.mjs';
 import { resolveContextPercent } from './lib/context-usage.mjs';
 import { BOUNDED_GIT_TIMEOUT_MS } from './lib/bounded-git-timeout.mjs';
-import { recordJevShadow } from './lib/jev-shadow.mjs';
+import { recordJevShadow, setJevHookContext } from './lib/jev-shadow.mjs';
 import { initializeRalphStateForSkill } from './lib/ralph-startup.mjs';
 
 const SKIP_HOOKS = (process.env.OMC_SKIP_HOOKS || '').split(',').map(s => s.trim());
@@ -1161,6 +1161,7 @@ async function main() {
   try {
     const input = await readStdin();
     const data = JSON.parse(input);
+    await setJevHookContext(data);
 
     // Opt-in shell checks (OMC_SHELL_CHECKS=1): record known Bash/PowerShell error classes. Never affects the hook.
     if (process.env.OMC_SHELL_CHECKS === '1' && (data?.tool_name === 'Bash' || data?.tool_name === 'PowerShell')) {

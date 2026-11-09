@@ -15,10 +15,14 @@
  *   model-routing defaults to 12000 and loop-continuation to 2000; both ignore
  *   OMC_JEV_EXCERPT_CHARS; set the point's own variable to change them.
  * - OMC_JEV_ENDPOINT: base URL overlay (stub servers / tests)
- * - OMC_JEV_LOG_DIR: shadow-log directory override (tests)
+ * - OMC_JEV_LOG_DIR: directory of the Jev logs, default state/jev under the
+ *   state root; the hook scripts write their own logs there too
  * - OMC_JEV_LOG_MAX_MB: size limit in MiB of each Jev log file; a larger
  *   file is renamed before the next append (see rotateJevLog in
  *   resolver.ts). Unset or not a canonical positive integer = no rotation
+ * - OMC_JEV_LOG_CONTEXT=1: shadow-log lines carry the ids of the hook call
+ *   (ResolveJudgmentArgs.logContext) and a request_id, and their `jev` and
+ *   confidence answer the first question only (see isJevLogContextEnabled)
  * - OMC_JEV_QUIET=1: silence the env-activation stderr warning (hook
  *   processes are one-shot, so warn-once-per-process degrades to warn-every)
  *
@@ -70,6 +74,8 @@ export interface JevConfig {
   logDir: string;
   /** Rotation limit of each log file in bytes (OMC_JEV_LOG_MAX_MB); 0 = no rotation. */
   logMaxBytes: number;
+  /** OMC_JEV_LOG_CONTEXT=1: call ids in log lines, first-question `jev` (isJevLogContextEnabled). */
+  logContext: boolean;
 }
 
 export function parseJevConfig(env: NodeJS.ProcessEnv = process.env): JevConfig {
@@ -115,6 +121,7 @@ export function parseJevConfig(env: NodeJS.ProcessEnv = process.env): JevConfig 
     endpoint: env.OMC_JEV_ENDPOINT || JEV_DEFAULT_ENDPOINT,
     logDir: env.OMC_JEV_LOG_DIR || join(getOmcRoot(), 'state', 'jev'),
     logMaxBytes: positiveInt(env.OMC_JEV_LOG_MAX_MB, 0, MAX_LOG_MB) * BYTES_PER_MB,
+    logContext: isJevLogContextEnabled(env),
   };
 }
 
@@ -144,6 +151,16 @@ export function excerptCharsFor(point: string, config: JevConfig): number {
       ? POINT_DEFAULT_EXCERPT_CHARS[point]
       : config.excerptChars)
   );
+}
+
+/**
+ * OMC_JEV_LOG_CONTEXT=1 (or `true`): shadow-log lines carry the ids of the
+ * hook call and a request_id, and their `jev` and confidence belong to the
+ * first question only. Mirror of isJevLogContextEnabled in
+ * scripts/jev-resolve.mjs.
+ */
+export function isJevLogContextEnabled(env: NodeJS.ProcessEnv = process.env): boolean {
+  return ['1', 'true'].includes(String(env.OMC_JEV_LOG_CONTEXT ?? '').trim().toLowerCase());
 }
 
 /** Master gate: is Jev enabled at all, independent of per-point state? */
