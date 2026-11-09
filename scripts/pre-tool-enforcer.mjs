@@ -782,7 +782,7 @@ function parseModelRoutingMarker(prompt) {
     else return null;
   }
   const drop = lines[index + 1] !== undefined && lines[index + 1].trim() === '' ? 2 : 1;
-  const rest = [...lines.slice(0, index), ...lines.slice(index + drop)].join('\n');
+  const rest = lines.slice(index + drop).join('\n');
   return { line, model, effort, rejected, prompt: rest.trim() === '' ? prompt : rest };
 }
 
@@ -818,7 +818,7 @@ function recordModelRoutingShadow(toolName, toolInput, updatedToolInput, permiss
   // Jev is then asked only the questions the marker leaves open.
   const marker = isModelRoutingMarkerEnabled() ? parseModelRoutingMarker(toolInput.prompt) : null;
   if (marker?.model && isForceInheritEnabled() && !resolveTierAliasToSafeModel(marker.model)) {
-    // The same check Jev's answer gets: a tier alias the provider cannot resolve is not set.
+    // A tier alias the provider cannot resolve is not set (the marker then sets no model).
     marker.rejected.push('force-inherit');
     marker.model = undefined;
   }
@@ -829,7 +829,9 @@ function recordModelRoutingShadow(toolName, toolInput, updatedToolInput, permiss
   // Jev judges the task without the marker line.
   const originalInput = boundModelRoutingInput(markerApplies ? { ...toolInput, prompt: marker.prompt } : toolInput);
   const modifiedInput = boundModelRoutingInput(updatedToolInput || toolInput);
-  const selectedModel = modifiedInput.model || readAgentDefinitionModel(originalInput.subagent_type);
+  // A model from the marker counts as the call's model: Jev is asked the open questions
+  // about a call whose model is known, whether the call or the marker named it.
+  const selectedModel = marker?.model || modifiedInput.model || readAgentDefinitionModel(originalInput.subagent_type);
   const model = isTierAlias(selectedModel) ? selectedModel.toLowerCase() : normalizeToCcAlias(selectedModel);
   const knownTier = ['haiku', 'sonnet', 'opus'].includes(model);
   // A call with no model of its own and no model in a plugin, project or user agent
@@ -877,6 +879,9 @@ function recordModelRoutingShadow(toolName, toolInput, updatedToolInput, permiss
   // The model and effort the call had before Jev and the marker touched it (for the log).
   const baseModel = (updatedToolInput || toolInput).model;
   const baseEffort = (updatedToolInput || toolInput).effort;
+  // Read lazily and once: the cap is only looked at when an effort is set, and a bad value is reported once.
+  let maxEffortValue;
+  const maxEffort = () => (maxEffortValue ??= resolveMaxEffort());
 
   // In active mode, Jev's answers replace the model and effort in the call,
   // explicit values included. Answers are read by question name: the API
@@ -894,16 +899,15 @@ function recordModelRoutingShadow(toolName, toolInput, updatedToolInput, permiss
       ensureUpdated().model = jevChoice;
     }
 
-    const maxEffort = resolveMaxEffort();
     // Only a score answer inside the declared 0-4 range counts; anything else
     // is treated as a missing effort answer.
     const effortAnswer = answers.effort;
     const effortScore = effortAnswer?.type === 'score' ? effortAnswer.score : undefined;
     const currentEffort = (updatedToolInput || toolInput).effort;
     if (typeof effortScore === 'number' && Number.isFinite(effortScore) && effortScore >= 0 && effortScore <= 4) {
-      ensureUpdated().effort = effortFromScore(effortScore, maxEffort);
-    } else if (typeof currentEffort === 'string' && capEffort(currentEffort, maxEffort) !== currentEffort) {
-      ensureUpdated().effort = capEffort(currentEffort, maxEffort);
+      ensureUpdated().effort = effortFromScore(effortScore, maxEffort());
+    } else if (typeof currentEffort === 'string' && capEffort(currentEffort, maxEffort()) !== currentEffort) {
+      ensureUpdated().effort = capEffort(currentEffort, maxEffort());
     }
   }
 
@@ -924,7 +928,7 @@ function recordModelRoutingShadow(toolName, toolInput, updatedToolInput, permiss
         row.model = { from: baseModel ?? null, to: marker.model };
       }
       if (marker.effort) {
-        const to = capEffort(marker.effort, resolveMaxEffort());
+        const to = capEffort(marker.effort, maxEffort());
         target.effort = to;
         row.effort = { from: baseEffort ?? null, to, ...(to !== marker.effort ? { capped: true, requested: marker.effort } : {}) };
       }

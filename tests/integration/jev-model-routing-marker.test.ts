@@ -7,7 +7,7 @@
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { spawn } from "node:child_process";
-import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { createServer, type Server } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -25,10 +25,13 @@ const ANSWERS = {
 
 // Keep the test's event loop free: the hook's synchronous Jev child must be
 // able to POST to the HTTP server running in this process.
-function runEnforcer(input: Record<string, unknown>, env: NodeJS.ProcessEnv, cwd: string) {
+// The hook runs with the repository as its working directory, not the temporary one: a detached
+// shadow-mode resolver would otherwise keep the directory busy and make the cleanup fail on Windows.
+// The call's own directory travels in the hook input (`cwd`).
+function runEnforcer(input: Record<string, unknown>, env: NodeJS.ProcessEnv) {
   return new Promise<{ stdout: string; stderr: string; exitCode: number }>((resolve, reject) => {
     const child = spawn(process.execPath, [join(PROJECT_ROOT, "scripts", "pre-tool-enforcer.mjs")], {
-      cwd,
+      cwd: PROJECT_ROOT,
       env,
       stdio: ["pipe", "pipe", "pipe"],
     });
@@ -125,7 +128,7 @@ describe("pre-tool-enforcer.mjs: model-routing use marker", () => {
 
   /** The tool input Claude Code would run: updatedInput when present, else the original. */
   async function routedInput(input: ReturnType<typeof agentInput>, extraEnv: NodeJS.ProcessEnv = {}) {
-    const result = await runEnforcer(input, { ...env, ...extraEnv }, cwd);
+    const result = await runEnforcer(input, { ...env, ...extraEnv });
     expect(result.exitCode, result.stderr).toBe(0);
     const output = JSON.parse(result.stdout);
     expect(output.continue).toBe(true);
@@ -177,11 +180,11 @@ describe("pre-tool-enforcer.mjs: model-routing use marker", () => {
     expect(routed.effort).toBe("high");
   }, 15000);
 
-  it("ignores case and surrounding spaces, and skips leading empty lines", async () => {
+  it("ignores case and surrounding spaces, and removes the empty lines before the line too", async () => {
     const routed = await routedInput(agentInput(`\n\n   USE  Opus   XHigh  \r\n\r\n${TASK}`));
     expect(routed.model).toBe("opus");
     expect(routed.effort).toBe("xhigh");
-    expect(routed.prompt).toBe(`\n\n${TASK}`);
+    expect(routed.prompt).toBe(TASK);
   }, 15000);
 
   it("wins over the call's own model and effort", async () => {
@@ -297,8 +300,9 @@ describe("pre-tool-enforcer.mjs: model-routing use marker", () => {
 
   describe("without Jev and in shadow mode", () => {
     it("works with the point off: no request, the row goes to the default state directory", async () => {
-      const { OMC_JEV_LOG_DIR: _unused, ...withoutLogDir } = env;
-      const result = await runEnforcer(agentInput(`use sonnet low\n${TASK}`), { ...withoutLogDir, OMC_JEV: "off" }, cwd);
+      const withoutLogDir = { ...env };
+      delete withoutLogDir.OMC_JEV_LOG_DIR;
+      const result = await runEnforcer(agentInput(`use sonnet low\n${TASK}`), { ...withoutLogDir, OMC_JEV: "off" });
       expect(result.exitCode, result.stderr).toBe(0);
       const updated = JSON.parse(result.stdout).hookSpecificOutput.updatedInput;
       expect(updated).toMatchObject({ model: "sonnet", effort: "low", prompt: TASK });
@@ -307,6 +311,8 @@ describe("pre-tool-enforcer.mjs: model-routing use marker", () => {
       const file = (readdirSync(join(cwd, ".omc"), { recursive: true }) as string[])
         .find((entry) => entry.endsWith("overrides.jsonl"));
       expect(file).toBeDefined();
+      // <state root>/state/jev/overrides.jsonl, where shadow.jsonl would be
+      expect(file as string).toMatch(/state[\\/]jev[\\/]overrides\.jsonl$/);
       const row = JSON.parse(readFileSync(join(cwd, ".omc", file as string), "utf8").trim());
       expect(row.override).toBe("both");
     }, 15000);
@@ -322,7 +328,7 @@ describe("pre-tool-enforcer.mjs: model-routing use marker", () => {
       expect(routed).toMatchObject({ model: "sonnet", effort: "low", prompt: TASK });
       await vi.waitFor(() => expect(requests).toHaveLength(1), { timeout: 5000, interval: 25 });
       expect(Object.keys(requests[0].questions)).toEqual(["effort"]);
-      // Wait for the detached resolver to finish its log line, so it no longer holds the directory.
+      // Wait for the detached resolver to write its line before the directory is cleaned up.
       await vi.waitFor(() => expect(existsSync(join(cwd, "jev-logs", "shadow.jsonl"))).toBe(true), { timeout: 5000, interval: 25 });
     }, 15000);
   });
@@ -338,6 +344,16 @@ describe("pre-tool-enforcer.mjs: model-routing use marker", () => {
       expect(overrideRows()[0]).toMatchObject({ override: "effort", rejected: ["force-inherit"] });
     }, 15000);
 
+    it("a marker that names only a model the provider cannot resolve changes nothing and stays in the prompt", async () => {
+      const prompt = `use sonnet\n${TASK}`;
+      const routed = await routedInput(agentInput(prompt, { model: undefined }), forceInherit);
+      expect(routed).toEqual(agentInput(prompt, { model: undefined }).tool_input);
+      const rows = overrideRows();
+      expect(rows).toHaveLength(1);
+      expect(rows[0]).toMatchObject({ marker: "use sonnet", rejected: ["force-inherit"] });
+      expect(rows[0].override).toBeUndefined();
+    }, 15000);
+
     it("sets the alias when the provider resolves it", async () => {
       const routed = await routedInput(agentInput(`use sonnet low\n${TASK}`, { model: undefined }), {
         ...forceInherit,
@@ -346,6 +362,58 @@ describe("pre-tool-enforcer.mjs: model-routing use marker", () => {
       expect(routed).toMatchObject({ model: "sonnet", effort: "low" });
     }, 15000);
   });
+
+  describe("which calls Jev is asked about", () => {
+    it("a call without a model: `use <model>` counts as its model, so the effort question still goes to Jev", async () => {
+      const routed = await routedInput(agentInput(`use sonnet\n${TASK}`, { model: undefined }));
+      expect(requests).toHaveLength(1);
+      expect(Object.keys(requests[0].questions)).toEqual(["effort"]);
+      expect(routed).toMatchObject({ model: "sonnet", effort: "medium", prompt: TASK });
+    }, 15000);
+
+    it("a call without a model: `use <effort>` alone sends nothing to Jev, as without the marker", async () => {
+      const routed = await routedInput(agentInput(`use high\n${TASK}`, { model: undefined }));
+      expect(requests).toHaveLength(0);
+      expect(routed.model).toBeUndefined();
+      expect(routed).toMatchObject({ effort: "high", prompt: TASK });
+    }, 15000);
+
+    it("wins over the model from agents.<name>.model in the project config", async () => {
+      mkdirSync(join(cwd, ".claude"), { recursive: true });
+      writeFileSync(join(cwd, ".claude", "omc.jsonc"), JSON.stringify({ agents: { executor: { model: "sonnet" } } }));
+      const routed = await routedInput(
+        agentInput(`use opus high\n${TASK}`, { model: undefined, subagent_type: "oh-my-claudecode:executor" }),
+        { XDG_CONFIG_HOME: join(cwd, "config"), APPDATA: join(cwd, "config"), OMC_ROUTING_FORCE_INHERIT: "false" },
+      );
+      expect(routed).toMatchObject({ model: "opus", effort: "high", prompt: TASK });
+      expect(overrideRows()[0].model).toEqual({ from: "sonnet", to: "opus" });
+    }, 15000);
+
+    it("a marker that is refused alone leaves the line in the task Jev sees", async () => {
+      await routedInput(agentInput(`use max\n${TASK}`));
+      expect(requests[0].state.task).toBe(`use max\n${TASK}`);
+    }, 15000);
+  });
+
+  it("a prompt that is not a string is left alone", async () => {
+    const input = agentInput(TASK);
+    (input.tool_input as Record<string, unknown>).prompt = { text: "use sonnet low" };
+    const routed = await routedInput(input);
+    expect(routed.prompt).toEqual({ text: "use sonnet low" });
+    expect(routed.model).toBe("opus"); // Jev decided
+    expect(overrideRows()).toEqual([]);
+  }, 15000);
+
+  it.each([
+    ["shadow mode", { OMC_JEV: "model-routing" }],
+    ["the point off", { OMC_JEV: "off" }],
+  ])("without the variable and with %s the call is passed through unchanged", async (_name, extraEnv) => {
+    const input = agentInput(`use sonnet low\n${TASK}`);
+    const result = await runEnforcer(input, { ...env, ...extraEnv, OMC_JEV_MODEL_ROUTING_MARKER: "" });
+    expect(result.exitCode, result.stderr).toBe(0);
+    expect(JSON.parse(result.stdout).hookSpecificOutput?.updatedInput).toBeUndefined();
+    expect(overrideRows()).toEqual([]);
+  }, 15000);
 
   it("can pin fable, which Jev never chooses", async () => {
     const routed = await routedInput(agentInput(`use fable high\n${TASK}`));

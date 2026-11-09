@@ -760,17 +760,18 @@ In active mode Jev replaces the model and the effort of a delegated call, an exp
 
 | First line of the prompt | Effect |
 |--------------------------|--------|
-| `use <model>` | pins the model; Jev is asked only the `effort` question |
+| `use <model>` | pins the model; Jev is asked only the `effort` question (when it would be asked about the call at all, see below) |
 | `use <model> <effort>` | pins both; Jev is not asked |
-| `use <effort>` | pins the effort; Jev is asked only the `model-tier` question |
+| `use <effort>` | pins the effort; Jev is asked only the `model-tier` question (when it would be asked about the call at all, see below) |
 
 - `<model>` is `haiku`, `sonnet`, `opus`, or `fable`; `<effort>` is `low`, `medium`, `high`, or `xhigh`. The two sets do not overlap, so `use high` is an effort. `fable` can be chosen only this way: Jev answers haiku, sonnet, or opus.
 - The whole first non-empty line must have this form; case and surrounding spaces do not matter. A marker on a later line, in `description`, or in a line with other text is plain text and changes nothing.
 - The marker wins over the call's own `model` and `effort` and over Jev's answers. Jev, when it is asked, sees the task without the marker line.
-- The line, and one blank line after it, is removed from the prompt in `updatedInput`, because it is an instruction for the hook, not for the agent. A prompt that is only the marker keeps it.
+- Whether Jev is asked about the call at all follows the usual rules for the call's model, with the marker's model counted as the call's: a call that names no model is asked about only with `OMC_JEV_MODEL_ROUTING_ALL_AGENTS=1`, so `use opus` on such a call pins the model and leaves the effort question to Jev, while `use high` alone on it sends nothing to Jev.
+- The line, the empty lines before it, and one empty line after it are removed from the prompt in `updatedInput`, because the line is an instruction for the hook, not for the agent. A prompt that is only the marker keeps it.
 - `max` stays Jev's decision (and the cap's). `use max` and `use <model> max` do not set an effort: `use <model> max` still pins the model, `use max` alone changes nothing and leaves the line in the prompt. The refusal is logged in `rejected`.
 - The effort from a marker is capped by `OMC_JEV_MAX_EFFORT` like Jev's; the log row then has `"capped": true` and the requested level.
-- With `forceInherit` a marker model is set only when the provider resolves its tier alias, the same check Jev's answer gets (`fable` has no provider mapping, so it is not set); the effort is still set and the log row has `"rejected": ["force-inherit"]`.
+- With `forceInherit` a marker model is set only when the provider resolves its tier alias (`OMC_SUBAGENT_MODEL`, `CLAUDE_CODE_BEDROCK_<TIER>_MODEL`, `ANTHROPIC_DEFAULT_<TIER>_MODEL`; `fable` included), as for any tier alias the hook checks under `forceInherit`. A marker with an effort still sets the effort and the log row has `"rejected": ["force-inherit"]`; a marker that names only such a model changes nothing and stays in the prompt, like `use max`. The `forceInherit` denials of the call's own model run before the marker is read.
 - The marker is an explicit instruction, so it applies in shadow mode too and when the `model-routing` point is off or there is no `TYPESAFE_API_KEY`. In shadow mode the Jev request still goes out for the questions the marker leaves open and its answers change nothing.
 - Every use is logged as one line in `overrides.jsonl` in the Jev log directory, next to `shadow.jsonl` but separate from it, because `jev-eval` counts every line of `shadow.jsonl` as a Jev request. A row carries `ts`, `point`, `session_id`, `subagent_type`, the literal `marker` line, `override` (`model`, `effort`, or `both`), the `model` and `effort` `from` and `to`, and `rejected` when something was refused. The row is written when the hook decides, so a call that a later check denies still has its row.
 
