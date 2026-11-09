@@ -5,12 +5,13 @@
  * 3. Evaluate closeout even when no feedback commands exist (P2)
  */
 
-import { describe, test, expect, beforeEach, afterEach } from 'vitest';
+import { describe, test, expect, beforeEach, afterEach, vi } from 'vitest';
+import { Command } from 'commander';
 import { join, dirname } from 'path';
 import { randomUUID } from 'crypto';
 import * as fs from 'fs';
 import { mkdirSync, rmSync, writeFileSync, existsSync, readFileSync } from 'fs';
-import { ralphCloseout, ralphVerify, runFeedbackCommand } from '../../src/cli/commands/ralph';
+import { ralphCloseout, ralphCommand, ralphVerify, runFeedbackCommand } from '../../src/cli/commands/ralph';
 import { recordBaseline, readBaseline, type CommandBaseline } from '../../src/hooks/ralph/feedback-baseline';
 import { readCloseout, writeCloseout } from '../../src/hooks/ralph/closeout';
 import { getOmcRoot, validateSessionId } from '../../src/lib/worktree-paths';
@@ -37,18 +38,29 @@ describe('Ralph Closeout Codex Findings', () => {
   });
 
   describe('P1: Register closeout command', () => {
-    test('closeout command should be accessible and executable', () => {
-      // This test verifies that ralphCloseout can be called as an action
-      // The command registration in ralphCommand() is tested by the CLI itself.
-      
-      // Test that ralphCloseout accepts the documented options
-      const result = ralphCloseout(
-        { check: true, json: true, session: sessionId },
-        tmpDir
-      );
-      
-      // Should return 1 because there's no PRD yet
-      expect(typeof result).toBe('number');
+    test('`omc ralph closeout` is registered and dispatches to ralphCloseout', async () => {
+      const program = new Command().exitOverride();
+      ralphCommand(program);
+      const ralph = program.commands.find(c => c.name() === 'ralph');
+      ralph?.exitOverride();
+      ralph?.commands.forEach(c => c.exitOverride());
+      const errors: string[] = [];
+      const errorSpy = vi.spyOn(console, 'error').mockImplementation((...args: unknown[]) => { errors.push(args.join(' ')); });
+      const logSpy = vi.spyOn(console, 'log').mockImplementation((...args: unknown[]) => { errors.push(args.join(' ')); });
+      const cwd = process.cwd();
+      const previousExitCode = process.exitCode;
+      try {
+        process.chdir(tmpDir);
+        await program.parseAsync(['ralph', 'closeout', '--check', '--session', sessionId], { from: 'user' });
+        // No PRD exists, so the action itself rejects; an unregistered command would throw instead.
+        expect(process.exitCode).toBe(1);
+        expect(errors.join('\n')).toContain('ralph closeout');
+      } finally {
+        process.chdir(cwd);
+        process.exitCode = previousExitCode;
+        errorSpy.mockRestore();
+        logSpy.mockRestore();
+      }
     });
 
     test('closeout command should record with --deslop option', () => {
