@@ -5,15 +5,25 @@
   "provenance": {
     "base": "05c800f40d1ad53b42a78609d2667ef4f726808b",
     "planningHead": "0a91273e61dbbd47eb0af4c02844409251e08398",
+<<<<<<< HEAD
     "head": "e2bfea1cd73d09e2ce73b798d471de01a51b6e3c",
     "sourceSha256": "5657b7e6bde868d1271f83e07429487a4f16dc111e46df8742fd2f8552c7526e",
+=======
+    "head": "b1c22334c5e4fd3c4d5e2d94fede384f054ada37",
+    "sourceSha256": "b35c49fff5c488420c34eee895e8f30abfca6642c54eda0428830fc742fb9151",
+>>>>>>> origin/dev
     "generatedAt": null,
     "generator": "scripts/generate-inventory-graph.mjs"
   },
   "base": "05c800f40d1ad53b42a78609d2667ef4f726808b",
   "planningHead": "0a91273e61dbbd47eb0af4c02844409251e08398",
+<<<<<<< HEAD
   "head": "e2bfea1cd73d09e2ce73b798d471de01a51b6e3c",
   "sourceSha256": "5657b7e6bde868d1271f83e07429487a4f16dc111e46df8742fd2f8552c7526e",
+=======
+  "head": "b1c22334c5e4fd3c4d5e2d94fede384f054ada37",
+  "sourceSha256": "b35c49fff5c488420c34eee895e8f30abfca6642c54eda0428830fc742fb9151",
+>>>>>>> origin/dev
   "counts": {
     "public": {
       "skills": 84,
@@ -48165,6 +48175,11 @@
         "path": "tests/integration/jev-model-routing-effort.test.ts"
       },
       {
+        "id": "tests/integration/jev-model-routing-marker.test.ts",
+        "kind": "other",
+        "path": "tests/integration/jev-model-routing-marker.test.ts"
+      },
+      {
         "id": "tests/integration/multirepo-workspace.test.ts",
         "kind": "other",
         "path": "tests/integration/multirepo-workspace.test.ts"
@@ -91102,6 +91117,46 @@
         "kind": "imports"
       },
       {
+        "from": "tests/integration/jev-model-routing-marker.test.ts",
+        "to": "external:node:child_process",
+        "kind": "imports"
+      },
+      {
+        "from": "tests/integration/jev-model-routing-marker.test.ts",
+        "to": "external:node:fs",
+        "kind": "imports"
+      },
+      {
+        "from": "tests/integration/jev-model-routing-marker.test.ts",
+        "to": "external:node:http",
+        "kind": "imports"
+      },
+      {
+        "from": "tests/integration/jev-model-routing-marker.test.ts",
+        "to": "external:node:http",
+        "kind": "type-imports"
+      },
+      {
+        "from": "tests/integration/jev-model-routing-marker.test.ts",
+        "to": "external:node:os",
+        "kind": "imports"
+      },
+      {
+        "from": "tests/integration/jev-model-routing-marker.test.ts",
+        "to": "external:node:path",
+        "kind": "imports"
+      },
+      {
+        "from": "tests/integration/jev-model-routing-marker.test.ts",
+        "to": "external:node:url",
+        "kind": "imports"
+      },
+      {
+        "from": "tests/integration/jev-model-routing-marker.test.ts",
+        "to": "external:vitest",
+        "kind": "imports"
+      },
+      {
         "from": "tests/integration/multirepo-workspace.test.ts",
         "to": "external:node:fs",
         "kind": "imports"
@@ -92123,12 +92178,17 @@
       }
     ],
     "stats": {
-      "nodeCount": 8240,
-      "edgeCount": 8744,
-      "importEdgeCount": 7299,
+      "nodeCount": 8241,
+      "edgeCount": 8752,
+      "importEdgeCount": 7306,
       "registerEdgeCount": 105
     }
   },
+<<<<<<< HEAD
   "inventorySha256": "7ad0e300b13247247bfddf38927c3e9ebf6abc361f830f66f5e68071b8355523",
   "manifestSha256": "b14e8558fde0ba0fa522abe1ab9dbb8e4806840e8f2ee93290b2af3dfeec87de"
+=======
+  "inventorySha256": "b3c5bb477b75a907a0bc0416c760db8acf62d47b69ab308aea7325a7ea03e7bc",
+  "manifestSha256": "a8facf93fa0821ece6ffcdc15c9abf4107a99a9fc4529b36593b93331181e248"
+>>>>>>> origin/dev
 }
