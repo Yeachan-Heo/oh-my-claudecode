@@ -5,15 +5,15 @@
   "provenance": {
     "base": "05c800f40d1ad53b42a78609d2667ef4f726808b",
     "planningHead": "0a91273e61dbbd47eb0af4c02844409251e08398",
-    "head": "1dc6fda78bfe6da253597f697525ef5ba98d14e9",
-    "sourceSha256": "ca67bdede46c72b273915937ff911a47b1cb4cde37d7fa0d205cc7603deb1a43",
+    "head": "1cda1b23de70f225ad0d89d0f071eecafaabd5e8",
+    "sourceSha256": "4eba3d8090f0cae2506e9d00f92b34ff6e6b7880946a918db247f5d5be07f3b8",
     "generatedAt": null,
     "generator": "scripts/generate-inventory-graph.mjs"
   },
   "base": "05c800f40d1ad53b42a78609d2667ef4f726808b",
   "planningHead": "0a91273e61dbbd47eb0af4c02844409251e08398",
-  "head": "1dc6fda78bfe6da253597f697525ef5ba98d14e9",
-  "sourceSha256": "ca67bdede46c72b273915937ff911a47b1cb4cde37d7fa0d205cc7603deb1a43",
+  "head": "1cda1b23de70f225ad0d89d0f071eecafaabd5e8",
+  "sourceSha256": "4eba3d8090f0cae2506e9d00f92b34ff6e6b7880946a918db247f5d5be07f3b8",
   "counts": {
     "public": {
       "skills": 84,
@@ -48299,6 +48299,11 @@
         "path": "tests/lint/plugin-manifest-parity.test.ts"
       },
       {
+        "id": "tests/lint/ralph-closeout-codex-findings.test.ts",
+        "kind": "other",
+        "path": "tests/lint/ralph-closeout-codex-findings.test.ts"
+      },
+      {
         "id": "tests/lint/session-end-forwarder-no-op.test.ts",
         "kind": "other",
         "path": "tests/lint/session-end-forwarder-no-op.test.ts"
@@ -72296,6 +72301,11 @@
         "kind": "imports"
       },
       {
+        "from": "src/hooks/ralph/feedback-baseline.ts",
+        "to": "src/lib/file-lock.ts",
+        "kind": "imports"
+      },
+      {
         "from": "src/hooks/ralph/index.ts",
         "to": "src/hooks/ralph/loop.ts",
         "kind": "exports"
@@ -91786,6 +91796,56 @@
         "kind": "imports"
       },
       {
+        "from": "tests/lint/ralph-closeout-codex-findings.test.ts",
+        "to": "external:commander",
+        "kind": "imports"
+      },
+      {
+        "from": "tests/lint/ralph-closeout-codex-findings.test.ts",
+        "to": "external:crypto",
+        "kind": "imports"
+      },
+      {
+        "from": "tests/lint/ralph-closeout-codex-findings.test.ts",
+        "to": "external:fs",
+        "kind": "imports"
+      },
+      {
+        "from": "tests/lint/ralph-closeout-codex-findings.test.ts",
+        "to": "external:path",
+        "kind": "imports"
+      },
+      {
+        "from": "tests/lint/ralph-closeout-codex-findings.test.ts",
+        "to": "external:vitest",
+        "kind": "imports"
+      },
+      {
+        "from": "tests/lint/ralph-closeout-codex-findings.test.ts",
+        "to": "src/cli/commands/ralph.ts",
+        "kind": "imports"
+      },
+      {
+        "from": "tests/lint/ralph-closeout-codex-findings.test.ts",
+        "to": "src/hooks/ralph/closeout.ts",
+        "kind": "imports"
+      },
+      {
+        "from": "tests/lint/ralph-closeout-codex-findings.test.ts",
+        "to": "src/hooks/ralph/feedback-baseline.ts",
+        "kind": "imports"
+      },
+      {
+        "from": "tests/lint/ralph-closeout-codex-findings.test.ts",
+        "to": "src/hooks/ralph/feedback-baseline.ts",
+        "kind": "type-imports"
+      },
+      {
+        "from": "tests/lint/ralph-closeout-codex-findings.test.ts",
+        "to": "src/lib/worktree-paths.ts",
+        "kind": "imports"
+      },
+      {
         "from": "tests/lint/session-end-forwarder-no-op.test.ts",
         "to": "external:fs",
         "kind": "imports"
@@ -92042,12 +92102,12 @@
       }
     ],
     "stats": {
-      "nodeCount": 8237,
-      "edgeCount": 8731,
-      "importEdgeCount": 7287,
+      "nodeCount": 8238,
+      "edgeCount": 8742,
+      "importEdgeCount": 7297,
       "registerEdgeCount": 105
     }
   },
-  "inventorySha256": "64cc9aaa4cfaa3124eee75c2f9fc65d5156d41e72364377de5732706dcfb7080",
-  "manifestSha256": "2a9159ee45d181207863e4289bf912118fa672997d1a3706f3c5259f569715a3"
+  "inventorySha256": "be3c5e169757db578f9933a08e80e9c6ca15ffa046d9bd5ad6a5910afd66b0b2",
+  "manifestSha256": "f692daed121390a6649c6bd361c738057cbfa15f16083b04414c38c76df3c032"
 }
