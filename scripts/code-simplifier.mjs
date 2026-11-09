@@ -25,7 +25,7 @@ import { execFileSync } from 'child_process';
 import { readStdin } from './lib/stdin.mjs';
 import { resolveOmcStateRoot } from './lib/state-root.mjs';
 import { BOUNDED_GIT_TIMEOUT_MS } from './lib/bounded-git-timeout.mjs';
-import { recordJevShadow, setJevHookContext } from './lib/jev-shadow.mjs';
+import { jevStateIds, recordJevShadow, setJevHookContext } from './lib/jev-shadow.mjs';
 
 const DEFAULT_EXTENSIONS = ['.ts', '.tsx', '.js', '.jsx', '.py', '.go', '.rs'];
 const DEFAULT_MAX_FILES = 10;
@@ -157,7 +157,7 @@ async function main() {
 
     recordJevShadow({
       point: 'simplifier-trigger',
-      state: { cwd, files, source: 'code-simplifier-stop' },
+      state: { ...jevStateIds({ cwd }), files, source: 'code-simplifier-stop' },
       questions: SIMPLIFIER_TRIGGER_QUESTIONS,
       heuristic: true,
       permissionMode: data.permission_mode,

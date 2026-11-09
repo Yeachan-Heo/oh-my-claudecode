@@ -14,19 +14,20 @@
  * share the same twin decision and iteration state.
  */
 
-import { recordJudgment } from '../jev/index.js';
+import { isJevStateOmitIdsEnabled, recordJudgment } from '../jev/index.js';
 import type { JevAnswer } from '../jev/index.js';
 import type { PersistentModeResult } from './index.js';
 
 /**
  * Iteration metadata only: mode/session/iteration context, tool names, and
  * the continuation-message excerpt (bounded by OMC_JEV_EXCERPT_CHARS in the
- * resolver before send/log). Never whole file contents.
+ * resolver before send/log). Never whole file contents. Without session_id
+ * under OMC_JEV_STATE_OMIT_IDS=1.
  */
 function buildLoopContinuationState(result: PersistentModeResult, sessionId?: string): Record<string, unknown> {
   return {
     mode_name: result.mode,
-    session_id: sessionId ?? null,
+    ...(isJevStateOmitIdsEnabled() ? {} : { session_id: sessionId ?? null }),
     iteration: result.metadata?.iteration ?? null,
     phase: result.metadata?.phase ?? null,
     should_block: result.shouldBlock,

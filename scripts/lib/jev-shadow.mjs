@@ -23,6 +23,7 @@ import { basename, dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
   isJevLogContextEnabled,
+  isJevStateOmitIdsEnabled,
   jevLogContextOf,
   parseJevEnv,
   resolveJevLogDir,
@@ -434,6 +435,15 @@ const lastRequestIds = new Map();
  */
 export function isJevAppliedLogEnabled(env = process.env) {
   return ["1", "true"].includes(String(env.OMC_JEV_APPLIED_LOG ?? "").trim().toLowerCase());
+}
+
+/**
+ * Ids a hook puts into a Jev state (session_id, cwd), or nothing with
+ * OMC_JEV_STATE_OMIT_IDS=1: then they reach the log only, with
+ * OMC_JEV_LOG_CONTEXT=1, and are never sent to Jev. Spread it into the state.
+ */
+export function jevStateIds(ids) {
+  return isJevStateOmitIdsEnabled(process.env) ? {} : ids;
 }
 
 /** True when this configuration can send a Jev request at all (a key and OMC_JEV entries). */

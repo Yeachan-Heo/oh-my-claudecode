@@ -26,7 +26,7 @@ import { spawn, spawnSync } from "child_process";
 import { join, dirname, resolve, normalize, sep } from "path";
 import { homedir } from "os";
 import { fileURLToPath, pathToFileURL } from "url";
-import { isJevShadowOptedIn, recordJevApplied, recordJevShadow, setJevHookContext } from "./lib/jev-shadow.mjs";
+import { isJevShadowOptedIn, jevStateIds, recordJevApplied, recordJevShadow, setJevHookContext } from "./lib/jev-shadow.mjs";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -1835,7 +1835,7 @@ async function main() {
           };
           const judgmentState = {
             mode_name: "ralph",
-            session_id: sessionId || null,
+            ...jevStateIds({ session_id: sessionId || null }),
             iteration: ralph.state.iteration,
             phase: null,
             should_block: true,
@@ -1881,7 +1881,7 @@ async function main() {
         const ralphExtendedReason = `[RALPH LOOP - EXTENDED] Max iterations reached; extending to ${ralph.state.max_iterations} and continuing. When FULLY complete (after Architect verification), run /oh-my-claudecode:cancel (or --force).`;
         const jevExtendResult = recordLoopContinuationShadow({
           mode_name: "ralph",
-          session_id: sessionId || null,
+          ...jevStateIds({ session_id: sessionId || null }),
           iteration: ralph.state.iteration,
           phase: null,
           should_block: true,
@@ -2065,7 +2065,7 @@ async function main() {
 
             const jevAutopilotResult = recordLoopContinuationShadow({
               mode_name: "autopilot",
-              session_id: sessionId || null,
+              ...jevStateIds({ session_id: sessionId || null }),
               iteration: newCount,
               phase,
               should_block: true,

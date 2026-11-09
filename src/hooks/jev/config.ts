@@ -23,6 +23,8 @@
  * - OMC_JEV_LOG_CONTEXT=1: shadow-log lines carry the ids of the hook call
  *   (ResolveJudgmentArgs.logContext) and a request_id, and their `jev` and
  *   confidence answer the first question only (see isJevLogContextEnabled)
+ * - OMC_JEV_STATE_OMIT_IDS=1: loop-continuation and simplifier-trigger send
+ *   their state without session_id and cwd (see isJevStateOmitIdsEnabled)
  * - OMC_JEV_QUIET=1: silence the env-activation stderr warning (hook
  *   processes are one-shot, so warn-once-per-process degrades to warn-every)
  *
@@ -161,6 +163,16 @@ export function excerptCharsFor(point: string, config: JevConfig): number {
  */
 export function isJevLogContextEnabled(env: NodeJS.ProcessEnv = process.env): boolean {
   return ['1', 'true'].includes(String(env.OMC_JEV_LOG_CONTEXT ?? '').trim().toLowerCase());
+}
+
+/**
+ * OMC_JEV_STATE_OMIT_IDS=1 (or `true`): the states sent to Jev leave out the
+ * ids that describe the session rather than the work: `session_id` in the
+ * loop-continuation state and `cwd` in the simplifier-trigger state. Mirror
+ * of isJevStateOmitIdsEnabled in scripts/jev-resolve.mjs.
+ */
+export function isJevStateOmitIdsEnabled(env: NodeJS.ProcessEnv = process.env): boolean {
+  return ['1', 'true'].includes(String(env.OMC_JEV_STATE_OMIT_IDS ?? '').trim().toLowerCase());
 }
 
 /** Master gate: is Jev enabled at all, independent of per-point state? */

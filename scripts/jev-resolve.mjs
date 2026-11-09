@@ -270,6 +270,16 @@ export function isJevLogContextEnabled(env = process.env) {
   return ["1", "true"].includes(String(env.OMC_JEV_LOG_CONTEXT ?? "").trim().toLowerCase());
 }
 
+/**
+ * OMC_JEV_STATE_OMIT_IDS=1 (or `true`): the states sent to Jev leave out the
+ * ids that describe the session rather than the work: `session_id` in the
+ * loop-continuation state and `cwd` in the simplifier-trigger state. Mirror
+ * of isJevStateOmitIdsEnabled in src/hooks/jev/config.ts.
+ */
+export function isJevStateOmitIdsEnabled(env = process.env) {
+  return ["1", "true"].includes(String(env.OMC_JEV_STATE_OMIT_IDS ?? "").trim().toLowerCase());
+}
+
 /** Log field name -> the names a hook input may use for it (snake or camel case). */
 const LOG_CONTEXT_FIELDS = {
   tool_use_id: ["tool_use_id", "toolUseId"],
