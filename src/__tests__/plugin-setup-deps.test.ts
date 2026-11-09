@@ -4,7 +4,6 @@ import { execFileSync } from 'node:child_process';
 import { tmpdir } from 'node:os';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
-// @ts-expect-error -- plain .mjs helper without type declarations
 import { hookPrefixForPlatform, normalizeHookCommand, normalizeHooksDataForPlatform, UNIX_HOOK_PREFIX, windowsExecArgs } from '../../scripts/lib/hook-command-normalizer.mjs';
 
 const __filename = fileURLToPath(import.meta.url);
