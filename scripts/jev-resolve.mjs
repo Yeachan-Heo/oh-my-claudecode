@@ -29,7 +29,7 @@
  * deliberate mirrors; parity with the TS parse is locked by the test suite.
  */
 
-import { lstatSync, readFileSync, rmdirSync, unlinkSync } from "node:fs";
+import { existsSync, lstatSync, readFileSync, renameSync, rmdirSync, statSync, unlinkSync } from "node:fs";
 import { appendFile, mkdir } from "node:fs/promises";
 import { basename, dirname, join, resolve } from "node:path";
 import { tmpdir } from "node:os";
@@ -82,6 +82,40 @@ export function resolveExcerptChars(point, env = process.env) {
       ? POINT_DEFAULT_EXCERPT_CHARS[point]
       : positiveInt(env.OMC_JEV_EXCERPT_CHARS, DEFAULT_EXCERPT_CHARS))
   );
+}
+
+const BYTES_PER_MB = 1024 * 1024;
+const MAX_LOG_MB = Math.floor(Number.MAX_SAFE_INTEGER / BYTES_PER_MB);
+
+/**
+ * Size limit of one Jev log file in bytes: OMC_JEV_LOG_MAX_MB megabytes
+ * (MiB). 0 when the variable is unset or not a canonical positive integer,
+ * which turns rotation off. Mirror of logMaxBytes in config.ts.
+ */
+export function resolveJevLogMaxBytes(env = process.env) {
+  return positiveInt(env.OMC_JEV_LOG_MAX_MB, 0, MAX_LOG_MB) * BYTES_PER_MB;
+}
+
+/**
+ * Rotate one Jev log file before an append. A file larger than maxBytes is
+ * renamed to <name>-<YYYYMMDD-HHmmss>-<pid>.jsonl (UTC) in the same directory,
+ * so the append starts a new file. maxBytes 0 turns rotation off. An existing
+ * target is never overwritten, and a failed rename (another process rotated
+ * the file first, the file is locked) is ignored: rotation is best-effort and
+ * must never cost the line being appended. Rotated files are never deleted.
+ * Every writer of a Jev log file calls this right before appending.
+ * Mirror of rotateJevLog in src/hooks/jev/resolver.ts.
+ */
+export function rotateJevLog(path, maxBytes, now = new Date()) {
+  if (!(maxBytes > 0)) return;
+  try {
+    if (statSync(path).size <= maxBytes) return;
+    const stamp = now.toISOString().replace(/\.\d+Z$/, "").replace(/[-:]/g, "").replace("T", "-");
+    const target = path.replace(/\.jsonl$/, "") + "-" + stamp + "-" + process.pid + ".jsonl";
+    if (!existsSync(target)) renameSync(path, target);
+  } catch {
+    // Missing file or failed rename: nothing to rotate, the append goes on.
+  }
 }
 
 /**
@@ -231,11 +265,13 @@ async function logDirFor(env) {
 
 /**
  * Mirror of the resolver's shadow-log entry (ShadowLogEntry): the jev-eval
- * tool compares lines regardless of which side wrote them.
+ * tool compares lines regardless of which side wrote them. maxBytes is the
+ * rotation limit (resolveJevLogMaxBytes); 0 appends as before.
  */
-async function writeShadowLog(entry, logDir) {
+async function writeShadowLog(entry, logDir, maxBytes) {
   try {
     await mkdir(logDir, { recursive: true });
+    rotateJevLog(join(logDir, "shadow.jsonl"), maxBytes);
     await appendFile(
       join(logDir, "shadow.jsonl"),
       JSON.stringify(entry) + "\n",
@@ -334,6 +370,7 @@ export async function resolveRequest(
       durationMs,
     },
     await logDirFor(env),
+    resolveJevLogMaxBytes(env),
   );
   return {
     mode: entryMode,

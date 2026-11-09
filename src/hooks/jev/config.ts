@@ -16,6 +16,9 @@
  *   OMC_JEV_EXCERPT_CHARS; set the point's own variable to change them.
  * - OMC_JEV_ENDPOINT: base URL overlay (stub servers / tests)
  * - OMC_JEV_LOG_DIR: shadow-log directory override (tests)
+ * - OMC_JEV_LOG_MAX_MB: size limit in MiB of each Jev log file; a larger
+ *   file is renamed before the next append (see rotateJevLog in
+ *   resolver.ts). Unset or not a canonical positive integer = no rotation
  * - OMC_JEV_QUIET=1: silence the env-activation stderr warning (hook
  *   processes are one-shot, so warn-once-per-process degrades to warn-every)
  *
@@ -40,6 +43,8 @@ export const JEV_DEFAULT_ENDPOINT = 'https://api.typesafe.ai/v1/systemone';
 const DEFAULT_TIMEOUT_MS = 2000;
 const DEFAULT_EXCERPT_CHARS = 200;
 const MAX_TIMER_DELAY_MS = 2_147_483_647;
+const BYTES_PER_MB = 1024 * 1024;
+const MAX_LOG_MB = Math.floor(Number.MAX_SAFE_INTEGER / BYTES_PER_MB);
 
 /** Points currently promoted to active. Empty until the promotion ticket (07). */
 export const ACTIVATED_POINTS: ReadonlySet<string> = new Set<string>();
@@ -63,6 +68,8 @@ export interface JevConfig {
   pointExcerptChars: Readonly<Record<string, number>>;
   endpoint: string;
   logDir: string;
+  /** Rotation limit of each log file in bytes (OMC_JEV_LOG_MAX_MB); 0 = no rotation. */
+  logMaxBytes: number;
 }
 
 export function parseJevConfig(env: NodeJS.ProcessEnv = process.env): JevConfig {
@@ -107,6 +114,7 @@ export function parseJevConfig(env: NodeJS.ProcessEnv = process.env): JevConfig 
     pointExcerptChars,
     endpoint: env.OMC_JEV_ENDPOINT || JEV_DEFAULT_ENDPOINT,
     logDir: env.OMC_JEV_LOG_DIR || join(getOmcRoot(), 'state', 'jev'),
+    logMaxBytes: positiveInt(env.OMC_JEV_LOG_MAX_MB, 0, MAX_LOG_MB) * BYTES_PER_MB,
   };
 }
 

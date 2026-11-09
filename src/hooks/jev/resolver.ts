@@ -13,10 +13,12 @@
  * are existing repo code whose bugs must not be masked.
  */
 
+import { existsSync, renameSync, statSync } from 'node:fs';
 import { appendFile, mkdir } from 'node:fs/promises';
 import { join } from 'node:path';
 import { queryJev } from './client.js';
 import { ACTIVATED_POINTS, boundExcerpts, excerptCharsFor, parseJevConfig, pointState } from './config.js';
+import type { JevConfig } from './config.js';
 import type { JevAnswer, JevQuestions, JevResponse, JevUsage, ResolveMode, ResolveResult } from './types.js';
 
 const CIRCUIT_FAILURE_THRESHOLD = 3;
@@ -123,11 +125,35 @@ function firstAnswer(response: JevResponse, questions: JevQuestions): JevAnswer 
   return Object.values(response.answers)[0] as JevAnswer;
 }
 
-/** Best-effort JSONL append under the shadow-log dir. Never throws. */
-async function writeShadowLog(entry: ShadowLogEntry, logDir: string): Promise<void> {
+/**
+ * Rotate one Jev log file before an append. A file larger than maxBytes is
+ * renamed to <name>-<YYYYMMDD-HHmmss>-<pid>.jsonl (UTC) in the same directory,
+ * so the append starts a new file. maxBytes 0 turns rotation off. An existing
+ * target is never overwritten, and a failed rename (another process rotated
+ * the file first, the file is locked) is ignored: rotation is best-effort and
+ * must never cost the line being appended. Rotated files are never deleted.
+ * Every writer of a Jev log file calls this right before appending.
+ * Mirror of rotateJevLog in scripts/jev-resolve.mjs.
+ */
+export function rotateJevLog(path: string, maxBytes: number, now: Date = new Date()): void {
+  if (!(maxBytes > 0)) return;
   try {
-    await mkdir(logDir, { recursive: true });
-    await appendFile(join(logDir, 'shadow.jsonl'), JSON.stringify(entry) + '\n', 'utf8');
+    if (statSync(path).size <= maxBytes) return;
+    const stamp = now.toISOString().replace(/\.\d+Z$/, '').replace(/[-:]/g, '').replace('T', '-');
+    const target = path.replace(/\.jsonl$/, '') + '-' + stamp + '-' + process.pid + '.jsonl';
+    if (!existsSync(target)) renameSync(path, target);
+  } catch {
+    // Missing file or failed rename: nothing to rotate, the append goes on.
+  }
+}
+
+/** Best-effort JSONL append under the shadow-log dir, rotated per OMC_JEV_LOG_MAX_MB. Never throws. */
+async function writeShadowLog(entry: ShadowLogEntry, config: Pick<JevConfig, 'logDir' | 'logMaxBytes'>): Promise<void> {
+  try {
+    await mkdir(config.logDir, { recursive: true });
+    const path = join(config.logDir, 'shadow.jsonl');
+    rotateJevLog(path, config.logMaxBytes);
+    await appendFile(path, JSON.stringify(entry) + '\n', 'utf8');
   } catch {
     // Best-effort logging: a logging failure must never affect the judgment.
   }
@@ -231,10 +257,10 @@ export async function resolveJudgment<T>(resolveJudgmentArgs: ResolveJudgmentArg
     void attempt.then((outcome) => {
       if (outcome.ok) {
         recordSuccess(args.point);
-        void writeShadowLog(buildLogEntry(args.point, boundedState, startedAt, 'shadow', loggableHeuristic, outcome.response, args.questions), config.logDir);
+        void writeShadowLog(buildLogEntry(args.point, boundedState, startedAt, 'shadow', loggableHeuristic, outcome.response, args.questions), config);
       } else {
         recordFailure(args.point);
-        void writeShadowLog(buildLogEntry(args.point, boundedState, startedAt, 'degraded', loggableHeuristic, null), config.logDir);
+        void writeShadowLog(buildLogEntry(args.point, boundedState, startedAt, 'degraded', loggableHeuristic, null), config);
       }
       // Belt-and-braces: a future throw in this callback must never become an
       // unhandled rejection that kills a one-shot hook process.
@@ -250,12 +276,12 @@ export async function resolveJudgment<T>(resolveJudgmentArgs: ResolveJudgmentArg
     const outcome = await attempt;
     if (!outcome.ok) {
       recordFailure(args.point);
-      await writeShadowLog(buildLogEntry(args.point, boundedState, startedAt, 'degraded', loggableHeuristic, null), config.logDir);
+      await writeShadowLog(buildLogEntry(args.point, boundedState, startedAt, 'degraded', loggableHeuristic, null), config);
       return { answer: heuristic, source: 'twin', mode: 'degraded' };
     }
     recordSuccess(args.point);
     const jevAnswer = firstAnswer(outcome.response, args.questions);
-    await writeShadowLog(buildLogEntry(args.point, boundedState, startedAt, 'active', loggableHeuristic, outcome.response, args.questions), config.logDir);
+    await writeShadowLog(buildLogEntry(args.point, boundedState, startedAt, 'active', loggableHeuristic, outcome.response, args.questions), config);
     const answer = args.mapAnswer ? args.mapAnswer(jevAnswer) : (jevAnswer as unknown as T);
     return { answer, source: 'jev', mode: 'active' };
   }
@@ -266,7 +292,7 @@ export async function resolveJudgment<T>(resolveJudgmentArgs: ResolveJudgmentArg
     console.error('[jev] ' + args.point + ': degraded - ' + outcome.error);
     const heuristic = twinAnswer();
     const loggableHeuristic = extractHeuristicForLogging(heuristic, args.questions, args.mapHeuristic, args.questionSet);
-    await writeShadowLog(buildLogEntry(args.point, boundedState, startedAt, 'degraded', loggableHeuristic, null), config.logDir);
+    await writeShadowLog(buildLogEntry(args.point, boundedState, startedAt, 'degraded', loggableHeuristic, null), config);
     return { answer: heuristic, source: 'twin', mode: 'degraded' };
   }
 
@@ -274,7 +300,7 @@ export async function resolveJudgment<T>(resolveJudgmentArgs: ResolveJudgmentArg
   const heuristic = twinAnswer();
   const loggableHeuristic = extractHeuristicForLogging(heuristic, args.questions, args.mapHeuristic, args.questionSet);
   const jevAnswer = firstAnswer(outcome.response, args.questions);
-  await writeShadowLog(buildLogEntry(args.point, boundedState, startedAt, mode === 'active' ? 'active' : 'shadow', loggableHeuristic, outcome.response, args.questions), config.logDir);
+  await writeShadowLog(buildLogEntry(args.point, boundedState, startedAt, mode === 'active' ? 'active' : 'shadow', loggableHeuristic, outcome.response, args.questions), config);
   if (mode === 'active') {
     const answer = args.mapAnswer ? args.mapAnswer(jevAnswer) : (jevAnswer as unknown as T);
     return { answer, source: 'jev', mode: 'active' };
