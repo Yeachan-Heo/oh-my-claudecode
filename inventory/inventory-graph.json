@@ -5,15 +5,15 @@
   "provenance": {
     "base": "05c800f40d1ad53b42a78609d2667ef4f726808b",
     "planningHead": "0a91273e61dbbd47eb0af4c02844409251e08398",
-    "head": "8592d45b917b1a829c97ce20a79432534d5c389b",
-    "sourceSha256": "16ebe71dca784eebba5689517cf2fa1788950a74a9158a96a6b1f5caf093d4bf",
+    "head": "236bb4b0531c34fd4d1abfd83e814ea129b755dd",
+    "sourceSha256": "58dbcc4c07a5754c616d339e13cc6882443154a2288e5fd2b4eb7f9672d64dc5",
     "generatedAt": null,
     "generator": "scripts/generate-inventory-graph.mjs"
   },
   "base": "05c800f40d1ad53b42a78609d2667ef4f726808b",
   "planningHead": "0a91273e61dbbd47eb0af4c02844409251e08398",
-  "head": "8592d45b917b1a829c97ce20a79432534d5c389b",
-  "sourceSha256": "16ebe71dca784eebba5689517cf2fa1788950a74a9158a96a6b1f5caf093d4bf",
+  "head": "236bb4b0531c34fd4d1abfd83e814ea129b755dd",
+  "sourceSha256": "58dbcc4c07a5754c616d339e13cc6882443154a2288e5fd2b4eb7f9672d64dc5",
   "counts": {
     "public": {
       "skills": 84,
@@ -897,6 +897,7 @@
       "scripts/lib/ralph-startup.mjs",
       "scripts/lib/read-budget-preflight.mjs",
       "scripts/lib/run-reaper.mjs",
+      "scripts/lib/shell-checks.mjs",
       "scripts/lib/skill-entitlements.mjs",
       "scripts/lib/state-lock.mjs",
       "scripts/lib/state-root.cjs",
@@ -37480,6 +37481,11 @@
         "path": "scripts/lib/run-reaper.mjs"
       },
       {
+        "id": "scripts/lib/shell-checks.mjs",
+        "kind": "script",
+        "path": "scripts/lib/shell-checks.mjs"
+      },
+      {
         "id": "scripts/lib/skill-entitlements.mjs",
         "kind": "script",
         "path": "scripts/lib/skill-entitlements.mjs"
@@ -48065,6 +48071,11 @@
         "path": "tests/fixtures/prompt-projection/transaction-backup-rollback.json"
       },
       {
+        "id": "tests/fixtures/shell-checks/cases.txt",
+        "kind": "other",
+        "path": "tests/fixtures/shell-checks/cases.txt"
+      },
+      {
         "id": "tests/fixtures/typescript-pnpm/package.json",
         "kind": "other",
         "path": "tests/fixtures/typescript-pnpm/package.json"
@@ -48188,6 +48199,16 @@
         "id": "tests/integration/session-flow-skill.test.ts",
         "kind": "other",
         "path": "tests/integration/session-flow-skill.test.ts"
+      },
+      {
+        "id": "tests/integration/shell-checks-hooks.test.ts",
+        "kind": "other",
+        "path": "tests/integration/shell-checks-hooks.test.ts"
+      },
+      {
+        "id": "tests/integration/shell-checks.test.ts",
+        "kind": "other",
+        "path": "tests/integration/shell-checks.test.ts"
       },
       {
         "id": "tests/integration/skill-map-references.test.ts",
@@ -49782,6 +49803,26 @@
         "kind": "imports"
       },
       {
+        "from": "scripts/lib/shell-checks.mjs",
+        "to": "external:node:child_process",
+        "kind": "imports"
+      },
+      {
+        "from": "scripts/lib/shell-checks.mjs",
+        "to": "external:node:fs",
+        "kind": "imports"
+      },
+      {
+        "from": "scripts/lib/shell-checks.mjs",
+        "to": "external:node:os",
+        "kind": "imports"
+      },
+      {
+        "from": "scripts/lib/shell-checks.mjs",
+        "to": "external:node:path",
+        "kind": "imports"
+      },
+      {
         "from": "scripts/lib/state-lock.mjs",
         "to": "external:better-sqlite3",
         "kind": "imports"
@@ -50183,6 +50224,11 @@
       },
       {
         "from": "scripts/post-tool-use-failure.mjs",
+        "to": "scripts/lib/shell-checks.mjs",
+        "kind": "imports"
+      },
+      {
+        "from": "scripts/post-tool-use-failure.mjs",
         "to": "scripts/lib/state-root.mjs",
         "kind": "imports"
       },
@@ -50249,6 +50295,11 @@
       {
         "from": "scripts/post-tool-verifier.mjs",
         "to": "scripts/lib/ralph-startup.mjs",
+        "kind": "imports"
+      },
+      {
+        "from": "scripts/post-tool-verifier.mjs",
+        "to": "scripts/lib/shell-checks.mjs",
         "kind": "imports"
       },
       {
@@ -50374,6 +50425,11 @@
       {
         "from": "scripts/pre-tool-enforcer.mjs",
         "to": "scripts/lib/read-budget-preflight.mjs",
+        "kind": "imports"
+      },
+      {
+        "from": "scripts/pre-tool-enforcer.mjs",
+        "to": "scripts/lib/shell-checks.mjs",
         "kind": "imports"
       },
       {
@@ -91242,6 +91298,66 @@
         "kind": "imports"
       },
       {
+        "from": "tests/integration/shell-checks-hooks.test.ts",
+        "to": "external:node:child_process",
+        "kind": "imports"
+      },
+      {
+        "from": "tests/integration/shell-checks-hooks.test.ts",
+        "to": "external:node:fs",
+        "kind": "imports"
+      },
+      {
+        "from": "tests/integration/shell-checks-hooks.test.ts",
+        "to": "external:node:os",
+        "kind": "imports"
+      },
+      {
+        "from": "tests/integration/shell-checks-hooks.test.ts",
+        "to": "external:node:path",
+        "kind": "imports"
+      },
+      {
+        "from": "tests/integration/shell-checks-hooks.test.ts",
+        "to": "external:node:url",
+        "kind": "imports"
+      },
+      {
+        "from": "tests/integration/shell-checks-hooks.test.ts",
+        "to": "external:vitest",
+        "kind": "imports"
+      },
+      {
+        "from": "tests/integration/shell-checks.test.ts",
+        "to": "external:node:child_process",
+        "kind": "imports"
+      },
+      {
+        "from": "tests/integration/shell-checks.test.ts",
+        "to": "external:node:fs",
+        "kind": "imports"
+      },
+      {
+        "from": "tests/integration/shell-checks.test.ts",
+        "to": "external:node:os",
+        "kind": "imports"
+      },
+      {
+        "from": "tests/integration/shell-checks.test.ts",
+        "to": "external:node:path",
+        "kind": "imports"
+      },
+      {
+        "from": "tests/integration/shell-checks.test.ts",
+        "to": "external:node:url",
+        "kind": "imports"
+      },
+      {
+        "from": "tests/integration/shell-checks.test.ts",
+        "to": "external:vitest",
+        "kind": "imports"
+      },
+      {
         "from": "tests/integration/skill-map-references.test.ts",
         "to": "external:node:fs",
         "kind": "imports"
@@ -92123,12 +92239,12 @@
       }
     ],
     "stats": {
-      "nodeCount": 8240,
-      "edgeCount": 8744,
-      "importEdgeCount": 7299,
+      "nodeCount": 8244,
+      "edgeCount": 8763,
+      "importEdgeCount": 7318,
       "registerEdgeCount": 105
     }
   },
-  "inventorySha256": "7ad0e300b13247247bfddf38927c3e9ebf6abc361f830f66f5e68071b8355523",
-  "manifestSha256": "e8f6dcdbd5ac637acd8684277d7c7f58b92706e6d270d3c03f33436186c46903"
+  "inventorySha256": "67d6664859e5db2d2f7faa260216995b95013e679effd5d46263a5fe4150df1f",
+  "manifestSha256": "b5cfd4195b874906996c69d6da8d57b93a1547e48cdc269544250102aa1e92cf"
 }
