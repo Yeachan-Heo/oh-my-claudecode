@@ -377,9 +377,8 @@ export function claimSessionEndJob(directory, sessionId, nonce, identity, deadli
     throw new Error('runner-still-bounded'); for (const action of Object.values(job.actions)) {
     if (action.status !== 'claimed')
         continue;
-    action.status = action.class === 'best-effort' ? 'expired' : 'retryable';
+    action.status = action.class === 'required' ? 'retryable' : 'expired';
     action.claimantNonce = undefined;
-    action.lastOutcomeCode = action.class === 'best-effort' ? 'delivery-uncertain-owner-missing' : 'owner-missing';
     if (action.runner)
         action.runner.phase = 'terminal';
 } job.owner = { nonce, pid: process.pid, processStartIdentity: identity, claimedAt: nowIso(), heartbeatAt: nowIso(), leaseExpiresAt: new Date(Math.min(now + 750, deadlineAt)).toISOString(), runDeadlineAt: new Date(deadlineAt).toISOString(), leaseGeneration: 1, claimedFromRevision: job.revision }; job.phase = 'processing'; }); }
@@ -401,17 +400,15 @@ export function reapStaleSessionEndOwner(directory, sessionId, expectedNonce, ex
 /**
  * Releasing ownership without reaching `complete` is the one path that leaves a
  * job non-terminal, so the caller's reason is persisted with it (issue #4076).
- * Claims this owner reserved but never started are undone, so a later owner can run them.
  */
 export function releaseSessionEndJob(directory, sessionId, nonce, generation, reason = 'worker-released') { return mutateLatest(directory, sessionId, (job) => { if (!job.owner || job.owner.nonce !== nonce || job.owner.leaseGeneration !== generation)
     throw new Error('release-conflict'); for (const action of Object.values(job.actions)) {
-    if (action.status === 'claimed' && action.claimantNonce === nonce && action.runner?.phase === 'reserved') {
-        action.attempts--;
-        action.status = action.attempts > 0 ? 'retryable' : 'pending';
-        action.claimantNonce = undefined;
-        action.claimedAt = undefined;
-        action.runner = undefined;
-    }
+    if (action.status !== 'claimed' || !action.runner || action.runner.phase !== 'reserved')
+        continue;
+    action.status = 'pending';
+    action.attempts = 0;
+    action.claimantNonce = undefined;
+    action.runner = undefined;
 } job.owner = null; if (job.phase !== 'complete') {
     job.phase = 'recoverable-failure';
     job.recoverableFailure = { reason, releasedAt: nowIso(), ownerNonce: nonce };

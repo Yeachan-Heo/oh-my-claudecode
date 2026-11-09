@@ -609,6 +609,18 @@ export function ralphVerify(options: { json?: boolean; session?: string; writeBa
     const message = 'no feedback commands: declare feedbackCommands in the PRD or add package.json build/lint/test scripts';
     if (options.json) console.log(JSON.stringify({ sessionId: sessionId || null, baselinePresent: Boolean(baseline), commands: [], newFailures: [], resolvedFailures: [], unrunnableCommands: [], note: message }));
     else console.log(`ralph verify: ${message}`);
+    // Even with no feedback commands, evaluate the closeout requirement: terminal step gate
+    const closeout = evaluateCloseoutGate(directory, stateRoot, sessionId || '');
+    const closeoutBlocked = closeout.required && !closeout.satisfied;
+    if (closeoutBlocked) {
+      const closeoutNote = 'the PRD is complete but no closeout record matches its criteria revision; run `omc ralph closeout --deslop completed|skipped` before Step 7.6';
+      if (options.json) {
+        console.log(JSON.stringify({ sessionId: sessionId || null, baselinePresent: Boolean(baseline), commands: [], newFailures: [], resolvedFailures: [], unrunnableCommands: [], closeout, closeoutError: closeoutNote }));
+      } else {
+        console.log(`ralph verify: ${closeoutNote}`);
+      }
+      return 1;
+    }
     return 0;
   }
 

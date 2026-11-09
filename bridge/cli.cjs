@@ -13154,7 +13154,7 @@ var init_sdk = __esm({
         const schOrFunc = root2.refs[ref];
         if (schOrFunc)
           return schOrFunc;
-        let _sch = resolve48.call(this, root2, ref);
+        let _sch = resolve49.call(this, root2, ref);
         if (_sch === void 0) {
           const schema = (_a = root2.localRefs) === null || _a === void 0 ? void 0 : _a[ref];
           const { schemaId } = this.opts;
@@ -13181,7 +13181,7 @@ var init_sdk = __esm({
       function sameSchemaEnv(s1, s2) {
         return s1.schema === s2.schema && s1.root === s2.root && s1.baseId === s2.baseId;
       }
-      function resolve48(root2, ref) {
+      function resolve49(root2, ref) {
         let sch;
         while (typeof (sch = this.refs[ref]) == "string")
           ref = sch;
@@ -13679,7 +13679,7 @@ var init_sdk = __esm({
         }
         return uri;
       }
-      function resolve48(baseURI, relativeURI, options) {
+      function resolve49(baseURI, relativeURI, options) {
         const schemelessOptions = Object.assign({ scheme: "null" }, options);
         const resolved = resolveComponents(parse62(baseURI, schemelessOptions), parse62(relativeURI, schemelessOptions), schemelessOptions, true);
         return serialize(resolved, { ...schemelessOptions, skipEscape: true });
@@ -13912,7 +13912,7 @@ var init_sdk = __esm({
       var fastUri = {
         SCHEMES,
         normalize: normalize13,
-        resolve: resolve48,
+        resolve: resolve49,
         resolveComponents,
         equal,
         serialize,
@@ -17326,7 +17326,7 @@ var init_sdk = __esm({
           }
           return;
         }
-        return new Promise((resolve48, reject) => {
+        return new Promise((resolve49, reject) => {
           const exitHandler = (code, signal) => {
             if (this.abortController.signal.aborted) {
               reject(new AbortError("Operation aborted"));
@@ -17336,7 +17336,7 @@ var init_sdk = __esm({
             if (error2) {
               reject(error2);
             } else {
-              resolve48();
+              resolve49();
             }
           };
           this.process.once("exit", exitHandler);
@@ -17382,17 +17382,17 @@ var init_sdk = __esm({
         if (this.hasError) {
           return Promise.reject(this.hasError);
         }
-        return new Promise((resolve48, reject) => {
-          this.readResolve = resolve48;
+        return new Promise((resolve49, reject) => {
+          this.readResolve = resolve49;
           this.readReject = reject;
         });
       }
       enqueue(value) {
         if (this.readResolve) {
-          const resolve48 = this.readResolve;
+          const resolve49 = this.readResolve;
           this.readResolve = void 0;
           this.readReject = void 0;
-          resolve48({ done: false, value });
+          resolve49({ done: false, value });
         } else {
           this.queue.push(value);
         }
@@ -17400,10 +17400,10 @@ var init_sdk = __esm({
       done() {
         this.isDone = true;
         if (this.readResolve) {
-          const resolve48 = this.readResolve;
+          const resolve49 = this.readResolve;
           this.readResolve = void 0;
           this.readReject = void 0;
-          resolve48({ done: true, value: void 0 });
+          resolve49({ done: true, value: void 0 });
         }
       }
       error(error2) {
@@ -17736,10 +17736,10 @@ var init_sdk = __esm({
           type: "control_request",
           request
         };
-        return new Promise((resolve48, reject) => {
+        return new Promise((resolve49, reject) => {
           this.pendingControlResponses.set(requestId, (response) => {
             if (response.subtype === "success") {
-              resolve48(response);
+              resolve49(response);
             } else {
               reject(new Error(response.error));
               if (response.pending_permission_requests) {
@@ -17829,15 +17829,15 @@ var init_sdk = __esm({
           logForDebugging(`[Query.waitForFirstResult] Result already received, returning immediately`);
           return Promise.resolve();
         }
-        return new Promise((resolve48) => {
+        return new Promise((resolve49) => {
           if (this.abortController?.signal.aborted) {
-            resolve48();
+            resolve49();
             return;
           }
-          this.abortController?.signal.addEventListener("abort", () => resolve48(), {
+          this.abortController?.signal.addEventListener("abort", () => resolve49(), {
             once: true
           });
-          this.firstResultReceivedResolve = resolve48;
+          this.firstResultReceivedResolve = resolve49;
         });
       }
       handleHookCallbacks(callbackId, input, toolUseID, abortSignal) {
@@ -17888,13 +17888,13 @@ var init_sdk = __esm({
       handleMcpControlRequest(serverName, mcpRequest, transport) {
         const messageId = "id" in mcpRequest.message ? mcpRequest.message.id : null;
         const key = `${serverName}:${messageId}`;
-        return new Promise((resolve48, reject) => {
+        return new Promise((resolve49, reject) => {
           const cleanup = () => {
             this.pendingMcpResponses.delete(key);
           };
           const resolveAndCleanup = (response) => {
             cleanup();
-            resolve48(response);
+            resolve49(response);
           };
           const rejectAndCleanup = (error2) => {
             cleanup();
@@ -26131,7 +26131,7 @@ Set the \`cycles\` parameter to \`"ref"\` to resolve cyclical schemas with defs.
               return;
             }
             const pollInterval = (_c = (_a = task2.pollInterval) !== null && _a !== void 0 ? _a : (_b = this._options) === null || _b === void 0 ? void 0 : _b.defaultTaskPollInterval) !== null && _c !== void 0 ? _c : 1e3;
-            await new Promise((resolve48) => setTimeout(resolve48, pollInterval));
+            await new Promise((resolve49) => setTimeout(resolve49, pollInterval));
             (_d = options === null || options === void 0 ? void 0 : options.signal) === null || _d === void 0 || _d.throwIfAborted();
           }
         } catch (error2) {
@@ -26143,7 +26143,7 @@ Set the \`cycles\` parameter to \`"ref"\` to resolve cyclical schemas with defs.
       }
       request(request, resultSchema, options) {
         const { relatedRequestId, resumptionToken, onresumptiontoken, task, relatedTask } = options !== null && options !== void 0 ? options : {};
-        return new Promise((resolve48, reject) => {
+        return new Promise((resolve49, reject) => {
           var _a, _b, _c, _d, _e, _f, _g;
           const earlyReject = (error2) => {
             reject(error2);
@@ -26224,7 +26224,7 @@ Set the \`cycles\` parameter to \`"ref"\` to resolve cyclical schemas with defs.
               if (!parseResult.success) {
                 reject(parseResult.error);
               } else {
-                resolve48(parseResult.data);
+                resolve49(parseResult.data);
               }
             } catch (error2) {
               reject(error2);
@@ -26421,12 +26421,12 @@ Set the \`cycles\` parameter to \`"ref"\` to resolve cyclical schemas with defs.
           }
         } catch (_d) {
         }
-        return new Promise((resolve48, reject) => {
+        return new Promise((resolve49, reject) => {
           if (signal.aborted) {
             reject(new McpError(ErrorCode.InvalidRequest, "Request cancelled"));
             return;
           }
-          const timeoutId = setTimeout(resolve48, interval);
+          const timeoutId = setTimeout(resolve49, interval);
           signal.addEventListener("abort", () => {
             clearTimeout(timeoutId);
             reject(new McpError(ErrorCode.InvalidRequest, "Request cancelled"));
@@ -27097,7 +27097,7 @@ Set the \`cycles\` parameter to \`"ref"\` to resolve cyclical schemas with defs.
         let task = createTaskResult.task;
         const pollInterval = (_a = task.pollInterval) !== null && _a !== void 0 ? _a : 5e3;
         while (task.status !== "completed" && task.status !== "failed" && task.status !== "cancelled") {
-          await new Promise((resolve48) => setTimeout(resolve48, pollInterval));
+          await new Promise((resolve49) => setTimeout(resolve49, pollInterval));
           const updatedTask = await extra.taskStore.getTask(taskId);
           if (!updatedTask) {
             throw new McpError(ErrorCode.InternalError, `Task ${taskId} not found during polling`);
@@ -34446,7 +34446,7 @@ async function removeFileIfExists(filePath) {
   }
 }
 function sleep2(ms) {
-  return new Promise((resolve48) => setTimeout(resolve48, ms));
+  return new Promise((resolve49) => setTimeout(resolve49, ms));
 }
 var import_child_process9, fs5, fsPromises2, path5, import_url7, import_child_process10, import_util6, execFileAsync3, BRIDGE_SPAWN_TIMEOUT_MS, DEFAULT_GRACE_PERIOD_MS, SIGTERM_GRACE_MS, ownedBridgeSessionIds, USE_TCP_FALLBACK;
 var init_bridge_manager = __esm({
@@ -40094,16 +40094,11 @@ function detectArchitectApproval(text, expected) {
   }
   return false;
 }
+function hasRejectionSignal(text) {
+  return REJECTION_PATTERNS.some((pattern) => pattern.test(text));
+}
 function detectArchitectRejection(text) {
-  const rejectionPatterns = [
-    /(architect|critic|codex|reviewer).*?(rejected|found issues|not complete|incomplete)/i,
-    /issues? (found|identified|detected)/i,
-    /not yet complete/i,
-    /missing.*?(implementation|feature|test)/i,
-    /bug.*?(found|detected|identified)/i,
-    /error.*?(found|detected|identified)/i
-  ];
-  for (const pattern of rejectionPatterns) {
+  for (const pattern of REJECTION_PATTERNS) {
     if (pattern.test(text)) {
       const feedbackMatch = text.match(/(?:architect|critic|codex|reviewer|feedback|issue|problem|error|bug)[:\s]+([^.]+\.)/i);
       return {
@@ -40114,7 +40109,7 @@ function detectArchitectRejection(text) {
   }
   return { rejected: false, feedback: "" };
 }
-var import_crypto10, import_fs28, import_path35, DEFAULT_MAX_VERIFICATION_ATTEMPTS, DEFAULT_RALPH_CRITIC_MODE2;
+var import_crypto10, import_fs28, import_path35, DEFAULT_MAX_VERIFICATION_ATTEMPTS, DEFAULT_RALPH_CRITIC_MODE2, REJECTION_PATTERNS;
 var init_verifier = __esm({
   "src/hooks/ralph/verifier.ts"() {
     "use strict";
@@ -40127,6 +40122,14 @@ var init_verifier = __esm({
     init_prd();
     DEFAULT_MAX_VERIFICATION_ATTEMPTS = 3;
     DEFAULT_RALPH_CRITIC_MODE2 = "architect";
+    REJECTION_PATTERNS = [
+      /(architect|critic|codex|reviewer).*?(rejected|found issues|not complete|incomplete)/i,
+      /issues? (found|identified|detected)/i,
+      /not yet complete/i,
+      /missing.*?(implementation|feature|test)/i,
+      /bug.*?(found|detected|identified)/i,
+      /error.*?(found|detected|identified)/i
+    ];
   }
 });
 
@@ -40192,6 +40195,7 @@ __export(ralph_exports, {
   getStoryGoverningCriteriaRevision: () => getStoryGoverningCriteriaRevision,
   getTeamPhaseDirective: () => getTeamPhaseDirective,
   hasPrd: () => hasPrd,
+  hasRejectionSignal: () => hasRejectionSignal,
   incrementRalphIteration: () => incrementRalphIteration,
   initPrd: () => initPrd,
   initProgress: () => initProgress,
@@ -42206,7 +42210,7 @@ async function withProcessIdentityFileLock(lockPath2, fn, timeoutMs = 1e4) {
           continue;
         }
         if (Date.now() >= deadline) throw new Error("process_identity_lock_timeout");
-        await new Promise((resolve48) => setTimeout(resolve48, 25));
+        await new Promise((resolve49) => setTimeout(resolve49, 25));
         continue;
       }
       try {
@@ -42227,7 +42231,7 @@ async function withProcessIdentityFileLock(lockPath2, fn, timeoutMs = 1e4) {
           }
         }
         if (Date.now() >= deadline) throw new Error("process_identity_lock_timeout");
-        await new Promise((resolve48) => setTimeout(resolve48, 25));
+        await new Promise((resolve49) => setTimeout(resolve49, 25));
       }
     }
     return await fn();
@@ -42451,7 +42455,7 @@ function withFileLockSync(lockPath2, fn, opts) {
   }
 }
 function sleep3(ms) {
-  return new Promise((resolve48) => setTimeout(resolve48, ms));
+  return new Promise((resolve49) => setTimeout(resolve49, ms));
 }
 async function acquireFileLock(lockPath2, opts) {
   const staleLockMs = opts?.staleLockMs ?? DEFAULT_STALE_LOCK_MS;
@@ -43566,11 +43570,17 @@ function getUnifiedMcpRegistryPathCandidates() {
 function getUnifiedMcpRegistryStatePathCandidates() {
   return getGlobalOmcStateCandidates("mcp-registry-state.json");
 }
-function getClaudeMcpConfigPath() {
+function isDefaultClaudeConfigDirPath(configDir) {
+  return configDir === (0, import_path61.join)((0, import_os11.homedir)(), ".claude");
+}
+function getClaudeJsonPathForConfigDir(configDir) {
+  return isDefaultClaudeConfigDirPath(configDir) ? (0, import_path61.join)((0, import_os11.homedir)(), ".claude.json") : (0, import_path61.join)(configDir, ".claude.json");
+}
+function getClaudeMcpConfigPath(configDir = getClaudeConfigDir()) {
   if (process.env.CLAUDE_MCP_CONFIG_PATH?.trim()) {
     return process.env.CLAUDE_MCP_CONFIG_PATH.trim();
   }
-  return (0, import_path61.join)((0, import_path61.dirname)(getClaudeConfigDir()), ".claude.json");
+  return getClaudeJsonPathForConfigDir(configDir);
 }
 function getCodexConfigPath() {
   const codexHome = process.env.CODEX_HOME?.trim() || (0, import_path61.join)((0, import_os11.homedir)(), ".codex");
@@ -43684,24 +43694,55 @@ function ensureParentDir(path30) {
     (0, import_fs47.mkdirSync)(parent, { recursive: true });
   }
 }
-function readManagedServerNames() {
+function parseServerNames(value) {
+  return Array.isArray(value) ? value.filter((item) => typeof item === "string").sort((a, b) => a.localeCompare(b)) : [];
+}
+function getOlderSyncClaudeConfigPath() {
+  return process.env.CLAUDE_MCP_CONFIG_PATH?.trim() || (0, import_path61.join)((0, import_path61.dirname)(getClaudeConfigDir()), ".claude.json");
+}
+function readManagedServerState(claudeConfigPath, claudeConfigServerNames) {
   for (const statePath of getUnifiedMcpRegistryStatePathCandidates()) {
     if (!(0, import_fs47.existsSync)(statePath)) {
       continue;
     }
     try {
       const state = JSON.parse((0, import_fs47.readFileSync)(statePath, "utf-8"));
-      return Array.isArray(state.managedServers) ? state.managedServers.filter((item) => typeof item === "string").sort((a, b) => a.localeCompare(b)) : [];
+      const serverNames = parseServerNames(state.managedServers);
+      const byClaudeConfig = state.managedServersByClaudeConfig;
+      if (!byClaudeConfig || typeof byClaudeConfig !== "object" || Array.isArray(byClaudeConfig)) {
+        const olderSyncClaudeConfigPath = (0, import_path61.resolve)(getOlderSyncClaudeConfigPath());
+        const olderSyncServerNames = olderSyncClaudeConfigPath === (0, import_path61.resolve)(claudeConfigPath) ? serverNames : serverNames.filter((name) => !claudeConfigServerNames.includes(name));
+        const serverNamesByClaudeConfig = /* @__PURE__ */ new Map();
+        if (olderSyncServerNames.length > 0) {
+          serverNamesByClaudeConfig.set(olderSyncClaudeConfigPath, olderSyncServerNames);
+        }
+        return { serverNames, serverNamesByClaudeConfig };
+      }
+      return {
+        serverNames,
+        serverNamesByClaudeConfig: new Map(
+          Object.entries(byClaudeConfig).map(([configPath, names]) => [configPath, parseServerNames(names)])
+        )
+      };
     } catch {
-      return [];
+      return { serverNames: [], serverNamesByClaudeConfig: /* @__PURE__ */ new Map() };
     }
   }
-  return [];
+  return { serverNames: [], serverNamesByClaudeConfig: /* @__PURE__ */ new Map() };
 }
-function writeManagedServerNames(serverNames) {
+function writeManagedServerState(state, claudeConfigPath, serverNames) {
+  const sortedNames = [...serverNames].sort((a, b) => a.localeCompare(b));
+  const byClaudeConfig = new Map(state.serverNamesByClaudeConfig);
+  byClaudeConfig.set((0, import_path61.resolve)(claudeConfigPath), sortedNames);
   const statePath = getUnifiedMcpRegistryStatePath();
   ensureParentDir(statePath);
-  (0, import_fs47.writeFileSync)(statePath, JSON.stringify({ managedServers: [...serverNames].sort((a, b) => a.localeCompare(b)) }, null, 2));
+  (0, import_fs47.writeFileSync)(statePath, JSON.stringify({
+    managedServers: sortedNames,
+    managedServersByClaudeConfig: Object.fromEntries([...byClaudeConfig].filter(([, names]) => names.length > 0))
+  }, null, 2));
+}
+function getManagedServerNamesForClaudeConfig(state, claudeConfigPath) {
+  return state.serverNamesByClaudeConfig.get((0, import_path61.resolve)(claudeConfigPath)) ?? [];
 }
 function bootstrapRegistryFromClaude(settings, registryPath) {
   const registry2 = extractClaudeMcpRegistry(settings);
@@ -44369,10 +44410,12 @@ function syncUnifiedMcpRegistryTargets(settings) {
   const registryPath = getUnifiedMcpRegistryPath();
   const claudeConfigPath = getClaudeMcpConfigPath();
   const codexConfigPath = getCodexConfigPath();
-  const managedServerNames = readManagedServerNames();
-  const legacyClaudeRegistry = extractClaudeMcpRegistry(settings);
   const currentClaudeConfig = readJsonObject(claudeConfigPath);
-  const claudeConfigForBootstrap = Object.keys(extractClaudeMcpRegistry(currentClaudeConfig)).length > 0 ? currentClaudeConfig : settings;
+  const currentClaudeServerNames = Object.keys(extractClaudeMcpRegistry(currentClaudeConfig));
+  const managedServerState = readManagedServerState(claudeConfigPath, currentClaudeServerNames);
+  const managedServerNames = getManagedServerNamesForClaudeConfig(managedServerState, claudeConfigPath);
+  const legacyClaudeRegistry = extractClaudeMcpRegistry(settings);
+  const claudeConfigForBootstrap = currentClaudeServerNames.length > 0 ? currentClaudeConfig : settings;
   const registryState = loadOrBootstrapRegistry(claudeConfigForBootstrap);
   const registry2 = registryState.registry;
   const serverNames = Object.keys(registry2);
@@ -44390,8 +44433,8 @@ function syncUnifiedMcpRegistryTargets(settings) {
     (0, import_fs47.writeFileSync)(codexConfigPath, nextCodexConfig.content);
     codexChanged = true;
   }
-  if (registryState.registryExists || Object.keys(legacyClaudeRegistry).length > 0 || managedServerNames.length > 0) {
-    writeManagedServerNames(serverNames);
+  if (registryState.registryExists || Object.keys(legacyClaudeRegistry).length > 0 || managedServerState.serverNames.length > 0 || managedServerNames.length > 0) {
+    writeManagedServerState(managedServerState, claudeConfigPath, serverNames);
   }
   return {
     settings: cleanedSettings.settings,
@@ -45782,7 +45825,7 @@ function canonicalizeExistingPath2(value) {
     return normalizePath2((0, import_path63.resolve)(value));
   }
 }
-function isDefaultClaudeConfigDirPath(configDir) {
+function isDefaultClaudeConfigDirPath2(configDir) {
   return normalizePath2(configDir) === normalizePath2((0, import_path63.join)((0, import_os12.homedir)(), ".claude"));
 }
 function quoteShellArg(value) {
@@ -45794,12 +45837,12 @@ function buildStatusLineCommand(nodeBin, hudScriptPath, findNodePath, cacheWrapp
   }
   const normalizedHudScriptPath = hudScriptPath.replace(/\\/g, "/");
   if (cacheWrapperPath) {
-    if (isDefaultClaudeConfigDirPath(CLAUDE_CONFIG_DIR)) {
+    if (isDefaultClaudeConfigDirPath2(CLAUDE_CONFIG_DIR)) {
       return "sh ${CLAUDE_CONFIG_DIR:-$HOME/.claude}/hud/omc-hud-cache.sh ${CLAUDE_CONFIG_DIR:-$HOME/.claude}/hud/omc-hud.mjs";
     }
     return `sh ${quoteShellArg(cacheWrapperPath.replace(/\\/g, "/"))} ${quoteShellArg(normalizedHudScriptPath)}`;
   }
-  if (isDefaultClaudeConfigDirPath(CLAUDE_CONFIG_DIR)) {
+  if (isDefaultClaudeConfigDirPath2(CLAUDE_CONFIG_DIR)) {
     if (findNodePath) {
       return "sh ${CLAUDE_CONFIG_DIR:-$HOME/.claude}/hud/find-node.sh ${CLAUDE_CONFIG_DIR:-$HOME/.claude}/hud/omc-hud.mjs";
     }
@@ -49451,6 +49494,9 @@ function getAllKeywords(text) {
   if (types.includes("team") && types.includes("autopilot")) {
     types = types.filter((t) => t !== "autopilot");
   }
+  if (NO_IMPLEMENT_PATTERN.test(removeCodeBlocks2(text)) && !/^\s*\//.test(text)) {
+    types = types.filter((t) => !CODE_EDITING_KEYWORDS.has(t));
+  }
   return KEYWORD_PRIORITY.filter((k) => types.includes(k));
 }
 function getAllKeywordsWithSizeCheck(text, options = {}) {
@@ -49519,7 +49565,7 @@ function applyRalplanGate(keywords, text) {
   }
   return { keywords: filtered, gateApplied: true, gatedKeywords: executionKeywords };
 }
-var KEYWORD_PATTERNS, OUROBOROS_BRAND_AT_START, KEYWORD_SKIP_PREDICATES, KEYWORD_PRIORITY, RETIRED_WORKFLOW_SLASH_PATTERN, CANONICAL_WORKFLOW_SLASH_SKILLS, SLASH_SKILL_TO_KEYWORD_TYPE, WORKFLOW_SLASH_PATTERN, PASTED_MAGIC_KEYWORD_HEADER_PATTERN, ROLE_BOUNDARY_PATTERN, SKILL_TRANSCRIPT_LINE_PATTERN, USER_REQUEST_LINE_PATTERN, SHELL_TRANSCRIPT_LINE_PATTERN, GIT_DIFF_START_PATTERNS, GIT_DIFF_CONTINUATION_PATTERNS, NON_LATIN_SCRIPT_PATTERN, PATH_SEGMENT_CHARS, FILE_PATH_PATTERN, INFORMATIONAL_INTENT_PATTERNS2, STRONG_HELP_QUERY_PATTERN, MULTILINGUAL_HELP_REQUEST_PATTERN, ENGLISH_HELP_REQUEST_PATTERN, TASK_ACTION_VERB_PATTERN, RESULTS_REPORTING_REQUEST_PATTERN, INFORMATIONAL_CONTEXT_WINDOW2, QUOTED_SPAN_PATTERN, REFERENCE_META_PATTERNS, REFERENCE_EXPLANATION_PATTERNS, QUESTION_FOLLOWUP_PATTERNS, MODE_REFERENCE_PATTERN, EXECUTION_GATE_KEYWORDS, GATE_BYPASS_PREFIXES, WELL_SPECIFIED_SIGNALS;
+var KEYWORD_PATTERNS, OUROBOROS_BRAND_AT_START, KEYWORD_SKIP_PREDICATES, KEYWORD_PRIORITY, RETIRED_WORKFLOW_SLASH_PATTERN, CANONICAL_WORKFLOW_SLASH_SKILLS, SLASH_SKILL_TO_KEYWORD_TYPE, WORKFLOW_SLASH_PATTERN, PASTED_MAGIC_KEYWORD_HEADER_PATTERN, ROLE_BOUNDARY_PATTERN, SKILL_TRANSCRIPT_LINE_PATTERN, USER_REQUEST_LINE_PATTERN, SHELL_TRANSCRIPT_LINE_PATTERN, GIT_DIFF_START_PATTERNS, GIT_DIFF_CONTINUATION_PATTERNS, NON_LATIN_SCRIPT_PATTERN, PATH_SEGMENT_CHARS, FILE_PATH_PATTERN, INFORMATIONAL_INTENT_PATTERNS2, STRONG_HELP_QUERY_PATTERN, MULTILINGUAL_HELP_REQUEST_PATTERN, ENGLISH_HELP_REQUEST_PATTERN, TASK_ACTION_VERB_PATTERN, RESULTS_REPORTING_REQUEST_PATTERN, INFORMATIONAL_CONTEXT_WINDOW2, QUOTED_SPAN_PATTERN, REFERENCE_META_PATTERNS, REFERENCE_EXPLANATION_PATTERNS, QUESTION_FOLLOWUP_PATTERNS, MODE_REFERENCE_PATTERN, CODE_EDITING_KEYWORDS, NO_IMPLEMENT_PATTERN, EXECUTION_GATE_KEYWORDS, GATE_BYPASS_PREFIXES, WELL_SPECIFIED_SIGNALS;
 var init_keyword_detector = __esm({
   "src/hooks/keyword-detector/index.ts"() {
     "use strict";
@@ -49656,6 +49702,8 @@ var init_keyword_detector = __esm({
       /(?:ทำไม|อะไร|ยังไง|อย่างไร|เท่าไหร่|กี่|มั้ย|ไหม|เหรอ|หรอ|หรือไม่|หรือเปล่า|ใช่ไหม|ถูกมั้ย)/u
     ];
     MODE_REFERENCE_PATTERN = /\b(?:ralph|autopilot|auto[\s-]?pilot|ralplan|ultrathink|deepsearch|deep[\s-]?analyze|deepanalyze|deep[\s-]interview|ouroboros|deerflow)\b/gi;
+    CODE_EDITING_KEYWORDS = /* @__PURE__ */ new Set(["autopilot", "ralph", "tdd"]);
+    NO_IMPLEMENT_PATTERN = /\b(?:do\s+not|don'?t|never|without)\s+(?:begin\s+|start\s+)?implement(?:ing|ation)?\b|\bno\s+(?:code\s+)?(?:changes|edits)\b|\bread[\s-]only\s+(?:review|audit|investigation)\b/i;
     EXECUTION_GATE_KEYWORDS = /* @__PURE__ */ new Set([
       "ralph",
       "autopilot",
@@ -55576,32 +55624,34 @@ function recordIdleNotificationSent(stateDir, sessionId, repoState) {
   } catch {
   }
 }
-function readTranscriptTail(transcriptPath) {
+function readTranscriptTail(transcriptPath, maxBytes = TRANSCRIPT_TAIL_BYTES) {
   const size = (0, import_fs63.statSync)(transcriptPath).size;
-  if (size <= TRANSCRIPT_TAIL_BYTES) {
+  if (size <= maxBytes) {
     return (0, import_fs63.readFileSync)(transcriptPath, "utf-8");
   }
   const fd = (0, import_fs63.openSync)(transcriptPath, "r");
   try {
-    const offset = size - TRANSCRIPT_TAIL_BYTES;
-    const buf = Buffer.allocUnsafe(TRANSCRIPT_TAIL_BYTES);
-    const bytesRead = (0, import_fs63.readSync)(fd, buf, 0, TRANSCRIPT_TAIL_BYTES, offset);
+    const offset = size - maxBytes;
+    const buf = Buffer.allocUnsafe(maxBytes);
+    const bytesRead = (0, import_fs63.readSync)(fd, buf, 0, maxBytes, offset);
     return buf.subarray(0, bytesRead).toString("utf-8");
   } finally {
     (0, import_fs63.closeSync)(fd);
   }
 }
-function readTranscriptTailLines(transcriptPath) {
-  const content = readTranscriptTail(transcriptPath);
+function splitTranscriptLines(transcriptPath, content, maxBytes) {
   const lines = content.split("\n");
   try {
-    if ((0, import_fs63.statSync)(transcriptPath).size > TRANSCRIPT_TAIL_BYTES && lines.length > 0) {
+    if ((0, import_fs63.statSync)(transcriptPath).size > maxBytes && lines.length > 0) {
       lines.shift();
     }
   } catch {
     return lines;
   }
   return lines;
+}
+function readTranscriptTailLines(transcriptPath, maxBytes = TRANSCRIPT_TAIL_BYTES) {
+  return splitTranscriptLines(transcriptPath, readTranscriptTail(transcriptPath, maxBytes), maxBytes);
 }
 function normalizeReviewerPath(subagentType) {
   if (typeof subagentType !== "string") {
@@ -55642,10 +55692,20 @@ function matchesVerificationReviewerPath(reviewerPath, verificationState) {
   const expected = verificationState?.critic_mode ?? "architect";
   return reviewerPath === expected;
 }
-function checkReviewerAuthoredApprovalInMessages(transcriptPath, verificationState) {
+function collectReviewerOutputs(transcriptPath, verificationState, maxBytes, prefilter) {
+  let content;
+  try {
+    content = readTranscriptTail(transcriptPath, maxBytes);
+  } catch {
+    return [];
+  }
+  if (prefilter && !prefilter(content)) {
+    return [];
+  }
   const reviewerToolUses = /* @__PURE__ */ new Map();
-  for (const line of readTranscriptTailLines(transcriptPath)) {
-    if (!line.trim()) {
+  const outputs = [];
+  for (const line of splitTranscriptLines(transcriptPath, content, maxBytes)) {
+    if (!line.trim() || !REVIEWER_LINE_HINTS.some((hint) => line.includes(hint))) {
       continue;
     }
     let entry2;
@@ -55654,11 +55714,13 @@ function checkReviewerAuthoredApprovalInMessages(transcriptPath, verificationSta
     } catch {
       continue;
     }
-    const content = entry2.message?.content;
-    if (!Array.isArray(content)) {
+    const blocks = entry2.message?.content;
+    if (!Array.isArray(blocks)) {
       continue;
     }
-    for (const block of content) {
+    const parsedAt = typeof entry2.timestamp === "string" ? Date.parse(entry2.timestamp) : NaN;
+    const at = Number.isFinite(parsedAt) ? parsedAt : null;
+    for (const block of blocks) {
       if (block?.type === "tool_use" && block.id && block.name) {
         if (REVIEWER_TASK_TOOL_NAMES.has(block.name)) {
           const reviewerPath = normalizeReviewerPath(block.input?.subagent_type);
@@ -55681,13 +55743,22 @@ function checkReviewerAuthoredApprovalInMessages(transcriptPath, verificationSta
       if (!reviewerToolUses.has(block.tool_use_id)) {
         continue;
       }
-      const reviewerOutput = extractTranscriptText(block.content);
-      if (reviewerOutput && detectArchitectApproval(reviewerOutput, verificationState)) {
-        return true;
+      const text = extractTranscriptText(block.content);
+      if (text) {
+        outputs.push({ text, at });
       }
     }
   }
-  return false;
+  return outputs;
+}
+function checkReviewerAuthoredApprovalInMessages(transcriptPath, verificationState, maxBytes = TRANSCRIPT_TAIL_BYTES) {
+  const outputs = collectReviewerOutputs(
+    transcriptPath,
+    verificationState,
+    maxBytes,
+    (content) => /verified_complete/i.test(content)
+  );
+  return outputs.some((output) => detectArchitectApproval(output.text, verificationState));
 }
 function estimateTranscriptContextPercent(transcriptPath) {
   if (!transcriptPath || !(0, import_fs63.existsSync)(transcriptPath)) {
@@ -55737,15 +55808,23 @@ function isAwaitingConfirmation(state) {
   }
   return Date.now() - setAtMs < AWAITING_CONFIRMATION_TTL_MS;
 }
-function checkArchitectApprovalInTranscript(sessionId, verificationState) {
+function checkArchitectApprovalInTranscript(sessionId, verificationState, transcriptPath) {
   const claudeDir = getClaudeConfigDir();
-  const possiblePaths = [(0, import_path74.join)(claudeDir, "sessions", sessionId, "messages.json")];
-  for (const transcriptPath of possiblePaths) {
-    if (!(0, import_fs63.existsSync)(transcriptPath)) {
+  const candidates = [
+    transcriptPath,
+    (0, import_path74.join)(claudeDir, "sessions", sessionId, "messages.json")
+  ].filter((candidate) => typeof candidate === "string" && candidate.length > 0);
+  const seen = /* @__PURE__ */ new Set();
+  for (const candidate of candidates) {
+    if (seen.has(candidate)) {
+      continue;
+    }
+    seen.add(candidate);
+    if (!(0, import_fs63.existsSync)(candidate)) {
       continue;
     }
     try {
-      if (checkReviewerAuthoredApprovalInMessages(transcriptPath, verificationState)) {
+      if (checkReviewerAuthoredApprovalInMessages(candidate, verificationState, TRANSCRIPT_APPROVAL_SCAN_BYTES)) {
         return true;
       }
     } catch {
@@ -55754,24 +55833,47 @@ function checkArchitectApprovalInTranscript(sessionId, verificationState) {
   }
   return false;
 }
-function checkArchitectRejectionInTranscript(sessionId) {
+function checkArchitectRejectionInTranscript(sessionId, verificationState, transcriptPath) {
   const claudeDir = getClaudeConfigDir();
   const possiblePaths = [
+    transcriptPath,
     (0, import_path74.join)(claudeDir, "sessions", sessionId, "transcript.md"),
     (0, import_path74.join)(claudeDir, "sessions", sessionId, "messages.json"),
     (0, import_path74.join)(claudeDir, "transcripts", `${sessionId}.md`)
-  ];
-  for (const transcriptPath of possiblePaths) {
-    if ((0, import_fs63.existsSync)(transcriptPath)) {
-      try {
-        const content = readTranscriptTail(transcriptPath);
-        const result = detectArchitectRejection(content);
+  ].filter((candidate) => typeof candidate === "string" && candidate.length > 0);
+  const requestedAt = verificationState?.requested_at ? Date.parse(verificationState.requested_at) : NaN;
+  const sinceMs = Number.isFinite(requestedAt) ? requestedAt : null;
+  for (const candidate of possiblePaths) {
+    if (!(0, import_fs63.existsSync)(candidate)) {
+      continue;
+    }
+    try {
+      if (candidate.endsWith(".md")) {
+        const result = detectArchitectRejection(readTranscriptTail(candidate));
         if (result.rejected) {
           return result;
         }
-      } catch {
         continue;
       }
+      const outputs = collectReviewerOutputs(
+        candidate,
+        verificationState,
+        TRANSCRIPT_APPROVAL_SCAN_BYTES,
+        // Same pattern set the detector uses, so the prefilter cannot reject
+        // wording that detectArchitectRejection() would have accepted.
+        (content) => hasRejectionSignal(content)
+      );
+      for (const output of outputs) {
+        if (sinceMs !== null && (output.at === null || output.at < sinceMs)) {
+          continue;
+        }
+        const result = detectArchitectRejection(output.text);
+        if (result.rejected) {
+          return result;
+        }
+      }
+    } catch {
+      continue;
     }
   }
   return { rejected: false, feedback: "" };
@@ -55780,7 +55882,7 @@ function verificationCriteriaExcerpt(workingDir, sessionId, story) {
   const criteria = story?.acceptanceCriteria ?? readPrd(workingDir, sessionId)?.userStories.flatMap((s) => s.acceptanceCriteria) ?? [];
   return criteria.join("; ");
 }
-async function checkRalphLoop(sessionId, directory, cancelInProgress) {
+async function checkRalphLoop(sessionId, directory, cancelInProgress, transcriptPath) {
   const workingDir = resolveToWorktreeRoot(directory);
   const state = readRalphState(workingDir, sessionId);
   const ralphStatePath = sessionId ? resolveSessionStatePath("ralph", sessionId, workingDir) : resolveStatePath("ralph", workingDir);
@@ -55851,7 +55953,7 @@ async function checkRalphLoop(sessionId, directory, cancelInProgress) {
     }
     if (verificationState?.pending) {
       if (sessionId) {
-        if (checkArchitectApprovalInTranscript(sessionId, verificationState)) {
+        if (checkArchitectApprovalInTranscript(sessionId, verificationState, transcriptPath)) {
           const verdict = await applyRalphVerdictShadow({
             verdict: true,
             prdContext: verificationCriteriaExcerpt(workingDir, sessionId, verifiedStory),
@@ -55947,7 +56049,7 @@ async function checkRalphLoop(sessionId, directory, cancelInProgress) {
             };
           }
         }
-        const rejection = checkArchitectRejectionInTranscript(sessionId);
+        const rejection = verificationState ? checkArchitectRejectionInTranscript(sessionId, verificationState, transcriptPath) : { rejected: false, feedback: "" };
         if (verificationState && rejection.rejected) {
           const verdict = await applyRalphVerdictShadow({
             verdict: false,
@@ -56634,7 +56736,7 @@ async function resolvePersistentModeBlock(sessionId, directory, stopContext) {
   };
   const runRalphPriority = async () => {
     if (tombstonedWorkflowModes.has("ralph") || !isModeActive("ralph", workingDir, sessionId)) return null;
-    return checkRalphLoop(sessionId, workingDir, cancelInProgress);
+    return checkRalphLoop(sessionId, workingDir, cancelInProgress, stopContext?.transcript_path ?? stopContext?.transcriptPath);
   };
   if (cancelInProgress) {
     const autopilotResult = await runAutopilotPriority();
@@ -56699,7 +56801,7 @@ function createHookOutput(result) {
     message: result.message || void 0
   };
 }
-var import_crypto20, import_fs63, import_path74, CANCEL_SIGNAL_TTL_MS2, CANCEL_SIGNAL_CLOCK_SKEW_MS, STALE_STATE_THRESHOLD_MS, PENDING_ASYNC_STATE_STALE_MS, OVERSIZE_TOOL_RESULT_REDIRECT_STOP_MAX, OVERSIZE_TOOL_RESULT_REDIRECT_STOP_TTL_MS, TERMINAL_WORKFLOW_SLOT_MODES, TERMINAL_WORKFLOW_PHASES, todoContinuationAttempts, TRANSCRIPT_TAIL_BYTES, CRITICAL_CONTEXT_STOP_PERCENT, RALPLAN_TERMINAL_PHASES, REVIEWER_TASK_TOOL_NAMES, REVIEWER_COMMAND_TOOL_NAMES, AWAITING_CONFIRMATION_TTL_MS, THINKING_ONLY_STREAK_BREAKER, THINKING_ONLY_STREAK_MAX, THINKING_ONLY_STREAK_TTL_MS, THINKING_ONLY_STREAK_BAILOUT_MESSAGE, TEAM_PIPELINE_STOP_BLOCKER_MAX, TEAM_PIPELINE_STOP_BLOCKER_TTL_MS, RALPLAN_STOP_BLOCKER_MAX, RALPLAN_STOP_BLOCKER_TTL_MS, RALPLAN_ACTIVE_AGENT_RECENCY_WINDOW_MS;
+var import_crypto20, import_fs63, import_path74, CANCEL_SIGNAL_TTL_MS2, CANCEL_SIGNAL_CLOCK_SKEW_MS, STALE_STATE_THRESHOLD_MS, PENDING_ASYNC_STATE_STALE_MS, OVERSIZE_TOOL_RESULT_REDIRECT_STOP_MAX, OVERSIZE_TOOL_RESULT_REDIRECT_STOP_TTL_MS, TERMINAL_WORKFLOW_SLOT_MODES, TERMINAL_WORKFLOW_PHASES, todoContinuationAttempts, TRANSCRIPT_TAIL_BYTES, TRANSCRIPT_APPROVAL_SCAN_BYTES, CRITICAL_CONTEXT_STOP_PERCENT, RALPLAN_TERMINAL_PHASES, REVIEWER_TASK_TOOL_NAMES, REVIEWER_COMMAND_TOOL_NAMES, REVIEWER_LINE_HINTS, AWAITING_CONFIRMATION_TTL_MS, THINKING_ONLY_STREAK_BREAKER, THINKING_ONLY_STREAK_MAX, THINKING_ONLY_STREAK_TTL_MS, THINKING_ONLY_STREAK_BAILOUT_MESSAGE, TEAM_PIPELINE_STOP_BLOCKER_MAX, TEAM_PIPELINE_STOP_BLOCKER_TTL_MS, RALPLAN_STOP_BLOCKER_MAX, RALPLAN_STOP_BLOCKER_TTL_MS, RALPLAN_ACTIVE_AGENT_RECENCY_WINDOW_MS;
 var init_persistent_mode = __esm({
   "src/hooks/persistent-mode/index.ts"() {
     "use strict";
@@ -56743,6 +56845,7 @@ var init_persistent_mode = __esm({
     ]);
     todoContinuationAttempts = /* @__PURE__ */ new Map();
     TRANSCRIPT_TAIL_BYTES = 32 * 1024;
+    TRANSCRIPT_APPROVAL_SCAN_BYTES = 32 * 1024 * 1024;
     CRITICAL_CONTEXT_STOP_PERCENT = 95;
     RALPLAN_TERMINAL_PHASES = /* @__PURE__ */ new Set([
       "completed",
@@ -56765,6 +56868,7 @@ var init_persistent_mode = __esm({
     ]);
     REVIEWER_TASK_TOOL_NAMES = /* @__PURE__ */ new Set(["Task", "proxy_Task", "Agent"]);
     REVIEWER_COMMAND_TOOL_NAMES = /* @__PURE__ */ new Set(["Bash", "proxy_Bash"]);
+    REVIEWER_LINE_HINTS = ['"tool_result"', '"subagent_type"', "--agent-prompt"];
     AWAITING_CONFIRMATION_TTL_MS = 2 * 60 * 1e3;
     THINKING_ONLY_STREAK_BREAKER = "thinking-only-streak";
     THINKING_ONLY_STREAK_MAX = 3;
@@ -58438,9 +58542,8 @@ function claimSessionEndJob(directory, sessionId, nonce, identity, deadlineAt) {
     if (Object.values(job.actions).some((action) => action.status === "claimed" && action.runner && action.runner.phase !== "terminal" && Date.now() < Date.parse(action.runner.deadlineAt))) throw new Error("runner-still-bounded");
     for (const action of Object.values(job.actions)) {
       if (action.status !== "claimed") continue;
-      action.status = action.class === "best-effort" ? "expired" : "retryable";
+      action.status = action.class === "required" ? "retryable" : "expired";
       action.claimantNonce = void 0;
-      action.lastOutcomeCode = action.class === "best-effort" ? "delivery-uncertain-owner-missing" : "owner-missing";
       if (action.runner) action.runner.phase = "terminal";
     }
     job.owner = { nonce, pid: process.pid, processStartIdentity: identity, claimedAt: nowIso(), heartbeatAt: nowIso(), leaseExpiresAt: new Date(Math.min(now + 750, deadlineAt)).toISOString(), runDeadlineAt: new Date(deadlineAt).toISOString(), leaseGeneration: 1, claimedFromRevision: job.revision };
@@ -58479,13 +58582,11 @@ function releaseSessionEndJob(directory, sessionId, nonce, generation, reason = 
   return mutateLatest(directory, sessionId, (job) => {
     if (!job.owner || job.owner.nonce !== nonce || job.owner.leaseGeneration !== generation) throw new Error("release-conflict");
     for (const action of Object.values(job.actions)) {
-      if (action.status === "claimed" && action.claimantNonce === nonce && action.runner?.phase === "reserved") {
-        action.attempts--;
-        action.status = action.attempts > 0 ? "retryable" : "pending";
-        action.claimantNonce = void 0;
-        action.claimedAt = void 0;
-        action.runner = void 0;
-      }
+      if (action.status !== "claimed" || !action.runner || action.runner.phase !== "reserved") continue;
+      action.status = "pending";
+      action.attempts = 0;
+      action.claimantNonce = void 0;
+      action.runner = void 0;
     }
     job.owner = null;
     if (job.phase !== "complete") {
@@ -58728,24 +58829,24 @@ async function runSessionEndAction(context, _execute) {
     let settled = false;
     let exitCode = null;
     let settleChild = () => void 0;
-    const childExit = new Promise((resolve48) => {
+    const childExit = new Promise((resolve49) => {
       settleChild = (code2) => {
         if (settled) return;
         settled = true;
         exitCode = code2;
-        resolve48(code2);
+        resolve49(code2);
       };
       child.once("exit", settleChild);
       child.once("error", () => settleChild(null));
     });
     let deadlineTermination;
     let resolveTermination;
-    const terminationFinished = new Promise((resolve48) => {
-      resolveTermination = resolve48;
+    const terminationFinished = new Promise((resolve49) => {
+      resolveTermination = resolve49;
     });
     const terminate = async () => {
-      const postKillWait = new Promise((resolve48) => {
-        const timer = setTimeout(resolve48, Math.max(1, context.deadlineAt + POST_KILL_SETTLE_MS - Date.now()));
+      const postKillWait = new Promise((resolve49) => {
+        const timer = setTimeout(resolve49, Math.max(1, context.deadlineAt + POST_KILL_SETTLE_MS - Date.now()));
         timer.unref();
       });
       if (identity && child.pid) {
@@ -58759,7 +58860,7 @@ async function runSessionEndAction(context, _execute) {
       await Promise.race([childExit, postKillWait]);
     };
     if (!identity || !child.pid) {
-      await Promise.race([childExit, new Promise((resolve48) => setTimeout(resolve48, POST_KILL_SETTLE_MS))]);
+      await Promise.race([childExit, new Promise((resolve49) => setTimeout(resolve49, POST_KILL_SETTLE_MS))]);
       return { code: "runner-identity-unavailable", completed: false };
     }
     const timeout = setTimeout(() => {
@@ -58810,7 +58911,7 @@ async function runActionRunnerEntrypoint() {
       } catch {
       }
       if (armed) break;
-      await new Promise((resolve48) => setTimeout(resolve48, 10));
+      await new Promise((resolve49) => setTimeout(resolve49, 10));
     }
     if (Date.now() >= input.deadlineAt) throw new Error("runner-arm-deadline");
     const deadlineTimer = setTimeout(() => {
@@ -60564,7 +60665,7 @@ async function sendTelegram(config2, payload) {
       text: payload.message,
       parse_mode: config2.parseMode || "Markdown"
     });
-    const result = await new Promise((resolve48) => {
+    const result = await new Promise((resolve49) => {
       const req = (0, import_https.request)(
         telegramRequestOptions(Buffer.byteLength(body), config2.botToken),
         (res) => {
@@ -60580,9 +60681,9 @@ async function sendTelegram(config2, payload) {
                 }
               } catch {
               }
-              resolve48({ platform: "telegram", success: true, messageId });
+              resolve49({ platform: "telegram", success: true, messageId });
             } else {
-              resolve48({
+              resolve49({
                 platform: "telegram",
                 success: false,
                 error: `HTTP ${res.statusCode}`
@@ -60592,11 +60693,11 @@ async function sendTelegram(config2, payload) {
         }
       );
       req.on("error", (e) => {
-        resolve48({ platform: "telegram", success: false, error: e.message });
+        resolve49({ platform: "telegram", success: false, error: e.message });
       });
       req.on("timeout", () => {
         req.destroy();
-        resolve48({
+        resolve49({
           platform: "telegram",
           success: false,
           error: "Request timeout"
@@ -60843,9 +60944,9 @@ async function dispatchNotifications(config2, event, payload, platformMessages) 
           }
         )
       ),
-      new Promise((resolve48) => {
+      new Promise((resolve49) => {
         timer = setTimeout(
-          () => resolve48([
+          () => resolve49([
             {
               platform: "unknown",
               success: false,
@@ -63880,10 +63981,10 @@ async function runWithinDeadline(deadlineAt, run) {
   const controller = new AbortController();
   let timer;
   try {
-    return await Promise.race([run(controller.signal), new Promise((resolve48) => {
+    return await Promise.race([run(controller.signal), new Promise((resolve49) => {
       timer = setTimeout(() => {
         controller.abort();
-        resolve48(void 0);
+        resolve49(void 0);
       }, remaining);
     })]);
   } finally {
@@ -67236,7 +67337,7 @@ async function withMailboxLock(teamName, workerName, cwd2, fn) {
   while (Date.now() < deadline) {
     const result = await withLock2(lockDir, fn);
     if (result.ok) return result.value;
-    await new Promise((resolve48) => setTimeout(resolve48, delayMs));
+    await new Promise((resolve49) => setTimeout(resolve49, delayMs));
     delayMs = Math.min(delayMs * 2, 200);
   }
   throw new Error(`Failed to acquire mailbox lock for ${workerName} after ${timeoutMs}ms`);
@@ -67399,7 +67500,7 @@ async function teamCreateTask(teamName, task, cwd2) {
       return taskLock.value;
     });
     if (result.ok) return result.value;
-    await new Promise((resolve48) => setTimeout(resolve48, delayMs));
+    await new Promise((resolve49) => setTimeout(resolve49, delayMs));
     delayMs = Math.min(delayMs * 2, 200);
   }
   throw new Error(`Failed to acquire task creation lock for team ${teamName} after ${timeoutMs}ms`);
@@ -67465,7 +67566,7 @@ async function teamUpdateTask(teamName, taskId, updates, cwd2) {
       return normalized;
     });
     if (result.ok) return result.value;
-    await new Promise((resolve48) => setTimeout(resolve48, delayMs));
+    await new Promise((resolve49) => setTimeout(resolve49, delayMs));
     delayMs = Math.min(delayMs * 2, 200);
   }
   throw new Error(`Failed to acquire task update lock for task ${taskId} in team ${teamName} after ${timeoutMs}ms`);
@@ -69485,7 +69586,7 @@ function canonicalAuthorityDigest(input) {
   return (0, import_node_crypto8.createHash)("sha256").update(payload, "utf8").digest("hex");
 }
 function sleep4(ms) {
-  return new Promise((resolve48) => setTimeout(resolve48, ms));
+  return new Promise((resolve49) => setTimeout(resolve49, ms));
 }
 function isExactText(value) {
   return typeof value === "string" && value.length > 0 && value === value.trim();
@@ -71360,7 +71461,7 @@ async function bootstrapPersistentOwner(input, priorEpoch) {
       return true;
     }
     if (owner && (owner.epoch > expectedEpoch || owner.epoch === expectedEpoch && owner.pid !== childPid)) return false;
-    await new Promise((resolve48) => setTimeout(resolve48, 25));
+    await new Promise((resolve49) => setTimeout(resolve49, 25));
   }
   return false;
 }
@@ -71523,7 +71624,7 @@ function createRecoveryOwnerClient(dispatch, timing = {}) {
           teamName: normalized.teamName,
           workerName: normalized.workerName
         })) return outcome.result;
-        await new Promise((resolve48) => setTimeout(resolve48, timing.pollIntervalMs ?? 250));
+        await new Promise((resolve49) => setTimeout(resolve49, timing.pollIntervalMs ?? 250));
       }
       return timeoutResult(normalized, canonical.recovery_id);
     }
@@ -75385,7 +75486,7 @@ async function withDispatchLock(teamName, cwd2, fn) {
         );
       }
       const jitter = 0.5 + Math.random() * 0.5;
-      await new Promise((resolve48) => setTimeout(resolve48, Math.floor(pollMs * jitter)));
+      await new Promise((resolve49) => setTimeout(resolve49, Math.floor(pollMs * jitter)));
       pollMs = Math.min(pollMs * 2, DISPATCH_LOCK_MAX_POLL_MS);
     }
   }
@@ -78471,8 +78572,8 @@ ${dirtyFiles.map((f) => `- \`${f}\``).join("\n")}`;
               return false;
             }
           })(),
-          new Promise((resolve48) => {
-            const t = setTimeout(() => resolve48(false), remaining);
+          new Promise((resolve49) => {
+            const t = setTimeout(() => resolve49(false), remaining);
             if (typeof t.unref === "function") t.unref();
           })
         ]);
@@ -78739,7 +78840,7 @@ async function waitForRecoveryGateRecord(path30, expected, timeoutMs, pollInterv
       if (value.recovery_id === expected.recovery_id && value.worker_name === expected.worker_name && value.replacement_generation === expected.replacement_generation && value.pane_attempt_id === expected.pane_attempt_id && value.launch_attempt_id === expected.launch_attempt_id && value.launch_nonce === expected.launch_nonce) return true;
     } catch {
     }
-    await new Promise((resolve48) => setTimeout(resolve48, pollIntervalMs));
+    await new Promise((resolve49) => setTimeout(resolve49, pollIntervalMs));
   }
   return false;
 }
@@ -79370,7 +79471,7 @@ async function waitForStartupEvidenceBudget(hasEvidence, budgetMs, delayMs = WOR
     if (await hasEvidence()) return true;
     const remainingMs = deadline - Date.now();
     if (remainingMs <= 0) return false;
-    await new Promise((resolve48) => setTimeout(resolve48, Math.min(delayMs, remainingMs)));
+    await new Promise((resolve49) => setTimeout(resolve49, Math.min(delayMs, remainingMs)));
   }
 }
 async function waitForWorkerStartupEvidence(teamName, workerName, taskId, cwd2, baseline, launchAttemptId, budgetMs, delayMs = WORKER_STARTUP_EVIDENCE_POLL_INTERVAL_MS) {
@@ -80140,14 +80241,14 @@ async function readOrCreateRecoveryAttempt(input, recoveryId, replacementGenerat
   }
 }
 function waitForBootstrapRecoveryEvidence(delayMs, signal) {
-  return new Promise((resolve48, reject) => {
+  return new Promise((resolve49, reject) => {
     if (signal?.aborted) {
       reject(signal.reason ?? new Error("bootstrap_recovery_evidence_aborted"));
       return;
     }
     const timer = setTimeout(() => {
       signal?.removeEventListener("abort", onAbort);
-      resolve48();
+      resolve49();
     }, delayMs);
     const onAbort = () => {
       clearTimeout(timer);
@@ -84292,7 +84393,7 @@ function createRemoteApprovalGate(options) {
   const pollIntervalMs = options.pollIntervalMs ?? DEFAULT_POLL_INTERVAL_MS3;
   const timeoutPolicy = options.timeoutPolicy ?? DEFAULT_TIMEOUT_POLICY;
   const now = options.now ?? (() => Date.now());
-  const sleep7 = options.sleep ?? ((ms) => new Promise((resolve48) => setTimeout(resolve48, ms)));
+  const sleep7 = options.sleep ?? ((ms) => new Promise((resolve49) => setTimeout(resolve49, ms)));
   return {
     async prompt(request) {
       const runDir = resolveRunDirHandle(options.runsRoot, options.runId);
@@ -84561,7 +84662,7 @@ function sanitizeReplyInput(text) {
   return text.replace(/[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]/g, "").replace(/[\u202a-\u202e\u2066-\u2069]/g, "").replace(/\r\n|[\r\n]/g, " ").replace(/\\/g, "\\\\").replace(/`/g, "\\`").replace(/\$\(/g, "\\$(").replace(/\$\{/g, "\\${").trim();
 }
 function parseApprovalReply(text) {
-  const firstWord = text.trim().toLowerCase().split(/\s+/)[0] || "";
+  const firstWord = text.trim().toLowerCase().split(/[\s.,!;:。，！；：、]+/)[0] || "";
   if (APPROVAL_APPROVE_WORDS.has(firstWord)) return "approved";
   if (APPROVAL_DENY_WORDS.has(firstWord)) return "denied";
   return null;
@@ -84771,7 +84872,7 @@ async function pollTelegram(config2, state, rateLimiter) {
   try {
     const offset = state.telegramLastUpdateId ? state.telegramLastUpdateId + 1 : 0;
     const path30 = `/bot${config2.telegramBotToken}/getUpdates?offset=${offset}&timeout=0`;
-    const updates = await new Promise((resolve48, reject) => {
+    const updates = await new Promise((resolve49, reject) => {
       const req = (0, import_https2.request)(
         {
           hostname: "api.telegram.org",
@@ -84788,7 +84889,7 @@ async function pollTelegram(config2, state, rateLimiter) {
             try {
               const body = JSON.parse(Buffer.concat(chunks).toString("utf-8"));
               if (res.statusCode && res.statusCode >= 200 && res.statusCode < 300) {
-                resolve48(body.result || []);
+                resolve49(body.result || []);
               } else {
                 reject(new Error(`HTTP ${res.statusCode}`));
               }
@@ -84839,7 +84940,7 @@ async function pollTelegram(config2, state, rateLimiter) {
               text: `Approval recorded: ${decision}`,
               reply_to_message_id: msg.message_id
             });
-            await new Promise((resolve48) => {
+            await new Promise((resolve49) => {
               const confirmReq = (0, import_https2.request)(
                 {
                   hostname: "api.telegram.org",
@@ -84854,13 +84955,13 @@ async function pollTelegram(config2, state, rateLimiter) {
                 },
                 (res) => {
                   res.resume();
-                  resolve48();
+                  resolve49();
                 }
               );
-              confirmReq.on("error", () => resolve48());
+              confirmReq.on("error", () => resolve49());
               confirmReq.on("timeout", () => {
                 confirmReq.destroy();
-                resolve48();
+                resolve49();
               });
               confirmReq.write(confirmBody);
               confirmReq.end();
@@ -84897,7 +84998,7 @@ async function pollTelegram(config2, state, rateLimiter) {
             text: "Injected into Claude Code session.",
             reply_to_message_id: msg.message_id
           });
-          await new Promise((resolve48) => {
+          await new Promise((resolve49) => {
             const replyReq = (0, import_https2.request)(
               {
                 hostname: "api.telegram.org",
@@ -84912,13 +85013,13 @@ async function pollTelegram(config2, state, rateLimiter) {
               },
               (res) => {
                 res.resume();
-                resolve48();
+                resolve49();
               }
             );
-            replyReq.on("error", () => resolve48());
+            replyReq.on("error", () => resolve49());
             replyReq.on("timeout", () => {
               replyReq.destroy();
-              resolve48();
+              resolve49();
             });
             replyReq.write(replyBody);
             replyReq.end();
@@ -85070,13 +85171,13 @@ async function pollLoop() {
         }
       }
       writeDaemonState(state);
-      await new Promise((resolve48) => setTimeout(resolve48, config2.pollIntervalMs));
+      await new Promise((resolve49) => setTimeout(resolve49, config2.pollIntervalMs));
     } catch (error2) {
       state.errors++;
       state.lastError = redactTokens(error2 instanceof Error ? error2.message : String(error2));
       log(`Poll error: ${state.lastError}`);
       writeDaemonState(state);
-      await new Promise((resolve48) => setTimeout(resolve48, config2.pollIntervalMs * 2));
+      await new Promise((resolve49) => setTimeout(resolve49, config2.pollIntervalMs * 2));
     }
   }
   log("Poll loop ended");
@@ -94311,7 +94412,7 @@ function validateCredentials(creds) {
   return !isCredentialExpired(creds);
 }
 function refreshAccessToken(refreshToken) {
-  return new Promise((resolve48) => {
+  return new Promise((resolve49) => {
     const clientId = process.env.CLAUDE_CODE_OAUTH_CLIENT_ID || DEFAULT_OAUTH_CLIENT_ID;
     const body = new URLSearchParams({
       grant_type: "refresh_token",
@@ -94339,7 +94440,7 @@ function refreshAccessToken(refreshToken) {
             try {
               const parsed = JSON.parse(data);
               if (parsed.access_token) {
-                resolve48({
+                resolve49({
                   accessToken: parsed.access_token,
                   refreshToken: parsed.refresh_token || refreshToken,
                   expiresAt: parsed.expires_in ? Date.now() + parsed.expires_in * 1e3 : parsed.expires_at
@@ -94352,14 +94453,14 @@ function refreshAccessToken(refreshToken) {
           if (process.env.OMC_DEBUG) {
             console.error(`[usage-api] Token refresh failed: HTTP ${res.statusCode}`);
           }
-          resolve48(null);
+          resolve49(null);
         });
       }
     );
-    req.on("error", () => resolve48(null));
+    req.on("error", () => resolve49(null));
     req.on("timeout", () => {
       req.destroy();
-      resolve48(null);
+      resolve49(null);
     });
     req.end(body);
   });
@@ -94372,7 +94473,7 @@ function buildUserAgent(clientVersion) {
 }
 function fetchUsageFromApi(accessToken, clientVersion) {
   const userAgent = buildUserAgent(clientVersion);
-  return new Promise((resolve48) => {
+  return new Promise((resolve49) => {
     const req = import_https3.default.request(
       {
         hostname: "api.anthropic.com",
@@ -94394,27 +94495,27 @@ function fetchUsageFromApi(accessToken, clientVersion) {
         res.on("end", () => {
           if (res.statusCode === 200) {
             try {
-              resolve48({ data: JSON.parse(data) });
+              resolve49({ data: JSON.parse(data) });
             } catch {
-              resolve48({ data: null });
+              resolve49({ data: null });
             }
           } else if (res.statusCode === 429) {
             if (process.env.OMC_DEBUG) {
               console.error(`[usage-api] Anthropic API returned 429 (rate limited)`);
             }
-            resolve48({ data: null, rateLimited: true });
+            resolve49({ data: null, rateLimited: true });
           } else if (res.statusCode === 403) {
-            fetchUsageViaRateLimitHeaders(accessToken, clientVersion).then(resolve48);
+            fetchUsageViaRateLimitHeaders(accessToken, clientVersion).then(resolve49);
           } else {
-            resolve48({ data: null });
+            resolve49({ data: null });
           }
         });
       }
     );
-    req.on("error", () => resolve48({ data: null }));
+    req.on("error", () => resolve49({ data: null }));
     req.on("timeout", () => {
       req.destroy();
-      resolve48({ data: null });
+      resolve49({ data: null });
     });
     req.end();
   });
@@ -94457,7 +94558,7 @@ function fetchUsageViaRateLimitHeaders(accessToken, clientVersion) {
     max_tokens: 1,
     messages: [{ role: "user", content: "." }]
   });
-  return new Promise((resolve48) => {
+  return new Promise((resolve49) => {
     const req = import_https3.default.request(
       {
         hostname: "api.anthropic.com",
@@ -94478,34 +94579,34 @@ function fetchUsageViaRateLimitHeaders(accessToken, clientVersion) {
         });
         res.on("end", () => {
           if (res.statusCode === 200) {
-            resolve48({ data: rateLimitHeadersToUsage(res.headers) });
+            resolve49({ data: rateLimitHeadersToUsage(res.headers) });
           } else {
-            resolve48({ data: null, rateLimited: res.statusCode === 429 });
+            resolve49({ data: null, rateLimited: res.statusCode === 429 });
           }
         });
       }
     );
-    req.on("error", () => resolve48({ data: null }));
+    req.on("error", () => resolve49({ data: null }));
     req.on("timeout", () => {
       req.destroy();
-      resolve48({ data: null });
+      resolve49({ data: null });
     });
     req.write(body);
     req.end();
   });
 }
 function fetchUsageFromZai() {
-  return new Promise((resolve48) => {
+  return new Promise((resolve49) => {
     const baseUrl = process.env.ANTHROPIC_BASE_URL;
     const authToken = process.env.ANTHROPIC_AUTH_TOKEN;
     if (!baseUrl || !authToken) {
-      resolve48({ data: null });
+      resolve49({ data: null });
       return;
     }
     const validation = validateAnthropicBaseUrl(baseUrl);
     if (!validation.allowed) {
       console.error(`[SSRF Guard] Blocking usage API call: ${validation.reason}`);
-      resolve48({ data: null });
+      resolve49({ data: null });
       return;
     }
     try {
@@ -94533,29 +94634,29 @@ function fetchUsageFromZai() {
           res.on("end", () => {
             if (res.statusCode === 200) {
               try {
-                resolve48({ data: JSON.parse(data) });
+                resolve49({ data: JSON.parse(data) });
               } catch {
-                resolve48({ data: null });
+                resolve49({ data: null });
               }
             } else if (res.statusCode === 429) {
               if (process.env.OMC_DEBUG) {
                 console.error(`[usage-api] z.ai API returned 429 (rate limited)`);
               }
-              resolve48({ data: null, rateLimited: true });
+              resolve49({ data: null, rateLimited: true });
             } else {
-              resolve48({ data: null });
+              resolve49({ data: null });
             }
           });
         }
       );
-      req.on("error", () => resolve48({ data: null }));
+      req.on("error", () => resolve49({ data: null }));
       req.on("timeout", () => {
         req.destroy();
-        resolve48({ data: null });
+        resolve49({ data: null });
       });
       req.end();
     } catch {
-      resolve48({ data: null });
+      resolve49({ data: null });
     }
   });
 }
@@ -94821,16 +94922,16 @@ function parseZaiResponse(response) {
   return result;
 }
 function fetchUsageFromMinimax(apiKey) {
-  return new Promise((resolve48) => {
+  return new Promise((resolve49) => {
     const baseUrl = process.env.ANTHROPIC_BASE_URL;
     if (!baseUrl) {
-      resolve48({ data: null });
+      resolve49({ data: null });
       return;
     }
     const validation = validateAnthropicBaseUrl(baseUrl);
     if (!validation.allowed) {
       console.error(`[SSRF Guard] Blocking usage API call: ${validation.reason}`);
-      resolve48({ data: null });
+      resolve49({ data: null });
       return;
     }
     try {
@@ -94857,29 +94958,29 @@ function fetchUsageFromMinimax(apiKey) {
           res.on("end", () => {
             if (res.statusCode === 200) {
               try {
-                resolve48({ data: JSON.parse(data) });
+                resolve49({ data: JSON.parse(data) });
               } catch {
-                resolve48({ data: null });
+                resolve49({ data: null });
               }
             } else if (res.statusCode === 429) {
               if (process.env.OMC_DEBUG) {
                 console.error(`[usage-api] MiniMax API returned 429 (rate limited)`);
               }
-              resolve48({ data: null, rateLimited: true });
+              resolve49({ data: null, rateLimited: true });
             } else {
-              resolve48({ data: null });
+              resolve49({ data: null });
             }
           });
         }
       );
-      req.on("error", () => resolve48({ data: null }));
+      req.on("error", () => resolve49({ data: null }));
       req.on("timeout", () => {
         req.destroy();
-        resolve48({ data: null });
+        resolve49({ data: null });
       });
       req.end();
     } catch {
-      resolve48({ data: null });
+      resolve49({ data: null });
     }
   });
 }
@@ -94919,16 +95020,16 @@ function parseMinimaxResponse(response) {
   };
 }
 function fetchUsageFromKimi(apiKey) {
-  return new Promise((resolve48) => {
+  return new Promise((resolve49) => {
     const baseUrl = process.env.ANTHROPIC_BASE_URL;
     if (!baseUrl) {
-      resolve48({ data: null });
+      resolve49({ data: null });
       return;
     }
     const validation = validateAnthropicBaseUrl(baseUrl);
     if (!validation.allowed) {
       console.error(`[SSRF Guard] Blocking usage API call: ${validation.reason}`);
-      resolve48({ data: null });
+      resolve49({ data: null });
       return;
     }
     try {
@@ -94939,7 +95040,7 @@ function fetchUsageFromKimi(apiKey) {
             `[usage-api] Refusing to send Kimi credentials to non-canonical host '${hostname4}'`
           );
         }
-        resolve48({ data: null });
+        resolve49({ data: null });
         return;
       }
       const req = import_https3.default.request(
@@ -94955,37 +95056,37 @@ function fetchUsageFromKimi(apiKey) {
         },
         (res) => {
           let data = "";
-          res.on("error", () => resolve48({ data: null }));
-          res.on("aborted", () => resolve48({ data: null }));
+          res.on("error", () => resolve49({ data: null }));
+          res.on("aborted", () => resolve49({ data: null }));
           res.on("data", (chunk) => {
             data += chunk;
           });
           res.on("end", () => {
             if (res.statusCode === 200) {
               try {
-                resolve48({ data: JSON.parse(data) });
+                resolve49({ data: JSON.parse(data) });
               } catch {
-                resolve48({ data: null });
+                resolve49({ data: null });
               }
             } else if (res.statusCode === 429) {
               if (process.env.OMC_DEBUG) {
                 console.error(`[usage-api] Kimi API returned 429 (rate limited)`);
               }
-              resolve48({ data: null, rateLimited: true });
+              resolve49({ data: null, rateLimited: true });
             } else {
-              resolve48({ data: null });
+              resolve49({ data: null });
             }
           });
         }
       );
-      req.on("error", () => resolve48({ data: null }));
+      req.on("error", () => resolve49({ data: null }));
       req.on("timeout", () => {
         req.destroy();
-        resolve48({ data: null });
+        resolve49({ data: null });
       });
       req.end();
     } catch {
-      resolve48({ data: null });
+      resolve49({ data: null });
     }
   });
 }
@@ -99842,7 +99943,7 @@ function isCacheValid2(cache) {
   return Date.now() - cache.timestamp < CACHE_TTL_MS2;
 }
 function spawnWithTimeout(cmd, timeoutMs) {
-  return new Promise((resolve48, reject) => {
+  return new Promise((resolve49, reject) => {
     const [executable, ...args] = Array.isArray(cmd) ? cmd : ["sh", "-c", cmd];
     const child = (0, import_child_process48.spawn)(executable, args, {
       stdio: ["ignore", "pipe", "pipe"],
@@ -99880,7 +99981,7 @@ function spawnWithTimeout(cmd, timeoutMs) {
       if (!timedOut && escalationTimer) clearTimeout(escalationTimer);
       if (!timedOut) {
         if (code === 0) {
-          resolve48(stdout);
+          resolve49(stdout);
         } else {
           reject(new Error(`Command exited with code ${code}`));
         }
@@ -104237,7 +104338,7 @@ var LspClient = class _LspClient {
 Install with: ${this.serverConfig.installHint}`
       );
     }
-    return new Promise((resolve48, reject) => {
+    return new Promise((resolve49, reject) => {
       const command = this.devContainerContext ? "docker" : this.serverConfig.command;
       const args = this.devContainerContext ? ["exec", "-i", "-w", this.devContainerContext.containerWorkspaceRoot, this.devContainerContext.containerId, this.serverConfig.command, ...this.serverConfig.args] : this.serverConfig.args;
       this.process = (0, import_child_process4.spawn)(command, args, {
@@ -104285,7 +104386,7 @@ Install with: ${this.serverConfig.installHint}`
           return;
         }
         this.initialized = true;
-        resolve48();
+        resolve49();
       }).catch((error2) => {
         if (this.process === child && this.connectionGeneration === connectionGeneration) {
           this.forceKill();
@@ -104544,13 +104645,13 @@ ${content}`;
     const message2 = `Content-Length: ${Buffer.byteLength(content)}\r
 \r
 ${content}`;
-    return new Promise((resolve48, reject) => {
+    return new Promise((resolve49, reject) => {
       const timeoutHandle = setTimeout(() => {
         this.pendingRequests.delete(id);
         reject(new Error(`LSP request '${method}' timed out after ${effectiveTimeout}ms`));
       }, effectiveTimeout);
       this.pendingRequests.set(id, {
-        resolve: resolve48,
+        resolve: resolve49,
         reject,
         timeout: timeoutHandle
       });
@@ -104730,7 +104831,7 @@ ${content}`;
     });
     this.assertCurrentConnection(child, connectionGeneration);
     this.openDocuments.add(hostUri);
-    await new Promise((resolve48) => setTimeout(resolve48, 100));
+    await new Promise((resolve49) => setTimeout(resolve49, 100));
     this.assertCurrentConnection(child, connectionGeneration);
     this.throwIfTerminal();
   }
@@ -104962,7 +105063,7 @@ ${content}`;
     if (this.diagnostics.has(key)) {
       return Promise.resolve();
     }
-    return new Promise((resolve48, reject) => {
+    return new Promise((resolve49, reject) => {
       let resolved = false;
       const removeWaiter = (waiter2) => {
         const waiters = this.diagnosticWaiters.get(key);
@@ -104981,7 +105082,7 @@ ${content}`;
           if (error2) {
             reject(error2);
           } else {
-            resolve48();
+            resolve49();
           }
         }
       };
@@ -104989,7 +105090,7 @@ ${content}`;
         if (!resolved) {
           resolved = true;
           removeWaiter(waiter);
-          resolve48();
+          resolve49();
         }
       }, timeoutMs);
       const existing = this.diagnosticWaiters.get(key) || [];
@@ -107105,7 +107206,7 @@ var SessionLock = class {
   }
 };
 function sleep(ms) {
-  return new Promise((resolve48) => setTimeout(resolve48, ms));
+  return new Promise((resolve49) => setTimeout(resolve49, ms));
 }
 
 // src/tools/python-repl/socket-client.ts
@@ -107135,7 +107236,7 @@ var JsonRpcError = class extends Error {
   }
 };
 async function sendSocketRequest(socketPath, method, params, timeout = 6e4) {
-  return new Promise((resolve48, reject) => {
+  return new Promise((resolve49, reject) => {
     const id = (0, import_crypto6.randomUUID)();
     const request = {
       jsonrpc: "2.0",
@@ -107225,7 +107326,7 @@ async function sendSocketRequest(socketPath, method, params, timeout = 6e4) {
           }
           if (!settled) {
             settled = true;
-            resolve48(response.result);
+            resolve49(response.result);
           }
         } catch (e) {
           if (!settled) {
@@ -110639,7 +110740,7 @@ function mergeArrays(fieldName, base, incoming) {
       return mergeScalarArray(base, incoming);
   }
 }
-function mergeByKey(base, incoming, keyFn, resolve48) {
+function mergeByKey(base, incoming, keyFn, resolve49) {
   const seen = /* @__PURE__ */ new Map();
   for (const item of base) {
     seen.set(keyFn(item), item);
@@ -110648,7 +110749,7 @@ function mergeByKey(base, incoming, keyFn, resolve48) {
     const key = keyFn(item);
     const existing = seen.get(key);
     if (existing) {
-      seen.set(key, resolve48(existing, item));
+      seen.set(key, resolve49(existing, item));
     } else {
       seen.set(key, item);
     }
@@ -118535,7 +118636,7 @@ async function runShadowObservation(hookType, legacyOutput, legacyDurationMs) {
       const dispatchResult = await Promise.race([
         dispatcher.dispatch(event, {}),
         new Promise(
-          (resolve48) => setTimeout(() => resolve48(null), SHADOW_OBSERVATION_BUDGET_MS)
+          (resolve49) => setTimeout(() => resolve49(null), SHADOW_OBSERVATION_BUDGET_MS)
         )
       ]);
       shadowDurationMs = performance.now() - started;
@@ -123729,7 +123830,7 @@ async function pollLoop2(config2) {
             log2("Claude usage profile became unavailable during quota check; discarding quota sample", config2);
           }
           writeDaemonState2(state, config2);
-          await new Promise((resolve48) => setTimeout(resolve48, config2.pollIntervalMs));
+          await new Promise((resolve49) => setTimeout(resolve49, config2.pollIntervalMs));
           continue;
         }
       }
@@ -123815,7 +123916,7 @@ async function pollLoop2(config2) {
       log2(`Poll error: ${state.lastError}`, config2);
       writeDaemonState2(state, config2);
     }
-    await new Promise((resolve48) => setTimeout(resolve48, config2.pollIntervalMs));
+    await new Promise((resolve49) => setTimeout(resolve49, config2.pollIntervalMs));
   }
 }
 function startDaemon(config2) {
@@ -124858,14 +124959,15 @@ init_file_lock();
 // src/hooks/ralph/feedback-baseline.ts
 var fs27 = __toESM(require("fs"), 1);
 var import_path144 = require("path");
+init_file_lock();
 var FEEDBACK_BASELINE_FILENAME = "feedback-baseline.json";
 var FEEDBACK_BASELINE_HISTORY_DIRNAME = "feedback-baseline.history";
 var MAX_FEEDBACK_BASELINE_HISTORY = 20;
 var MAX_SIGNATURES_PER_COMMAND = 200;
-var BASELINE_LOCK_RETRY_MS = 10;
 var BASELINE_LOCK_STALE_MS = 3e4;
 var BASELINE_LOCK_TIMEOUT_MS = 1e4;
 var ANSI_PATTERN = /\x1b\[[0-9;]*m/g;
+var FAILURE_WORD_PATTERN = /\bfail(?:ed|ure|ures|ing)?\b|\w*(?:Error|Exception)s?\b|✗|×/i;
 var VOLATILE_PATTERNS = [
   // Pytest's wall-clock parenthesized duration, e.g. "... in 194.32s (0:03:14)".
   // Anchored to the "in <duration>" suffix so clock-shaped assertion values
@@ -124880,17 +124982,49 @@ var VOLATILE_PATTERNS = [
   // The process id in Node's warning prefix, "(node:12345) [DEP0040] DeprecationWarning: ...", differs on every run.
   // Only an id followed by an optional [code] and a "Name:" is replaced, so "(node:42) ready" in an assertion keeps its signal.
   /(?<=\(node:)\d+(?=\) (?:\[[^\]]+\] )?\w+:)/g,
+  // macOS per-user temp dirs (os.tmpdir()) are handled by
+  // normalizeMacosTempPaths(): only the mkdtemp-style random segment is
+  // replaced so stable suffixes (file:line:column) still distinguish failures.
   /\b[0-9a-f]{8,}\b/gi
 ];
+var MACOS_TEMP_PATH_PATTERN = /(?:\/private)?\/var\/folders\/[^/\s"']+\/[^/\s"']+\/T((?:\/[^/\s"']*)*)/g;
+var RANDOM_TEMP_SEGMENT_PATTERN = /^[A-Za-z0-9._-]*[A-Za-z0-9]{6}$/;
+function isRandomTempSegment(segment) {
+  if (!RANDOM_TEMP_SEGMENT_PATTERN.test(segment)) return false;
+  const suffix = segment.slice(-6);
+  return /[0-9]/.test(suffix) || /[A-Z]/.test(suffix) && /[a-z]/.test(suffix);
+}
+function normalizeMacosTempPaths(line) {
+  return line.replace(MACOS_TEMP_PATH_PATTERN, (_match, rest) => {
+    const segments = rest.split("/").filter(Boolean);
+    const normalized = segments.map((segment, index) => {
+      const isLeaf = index === segments.length - 1;
+      if (isLeaf && /[.:]/.test(segment)) return segment;
+      if (index === 0 || isRandomTempSegment(segment)) return "<v>";
+      return segment;
+    });
+    const joined = normalized.join("/");
+    return segments.length === 1 && /[.:]/.test(segments[0]) ? `<v>/${joined}` : joined;
+  });
+}
 function signatureLines(output) {
   const seen = /* @__PURE__ */ new Set();
   for (const raw of output.replace(ANSI_PATTERN, "").split(/\r?\n/)) {
     let line = raw.trim();
     if (!line) continue;
     for (const pattern of VOLATILE_PATTERNS) line = line.replace(pattern, "<v>");
+    line = normalizeMacosTempPaths(line);
     line = line.replace(/\s+/g, " ").trim();
     if (!line || line.length > 500) continue;
-    if (/^(running|collecting|compiling|building|passing|tap\s+version|✓|√|%|\s*at\s)/i.test(line) && !/fail|error|✗|×/i.test(line)) continue;
+    if ((/^(?:\[[^\]]*\]\s*)*(?:<v>\s+)?(?:TRACE|DEBUG|INFO|NOTICE)\b/i.test(line) || /^\[(?:TRACE|DEBUG|INFO|NOTICE)\]/i.test(line)) && !FAILURE_WORD_PATTERN.test(line)) continue;
+    if (/^(?:npm|yarn|pnpm)\s+warn\b/i.test(line)) continue;
+    if (/^>\s+\S+@\S+/.test(line)) continue;
+    if (/^>\s+(?:tsc|vite|vitest|jest|node|npm|yarn|pnpm|eslint|tsx|ts-node)\b/i.test(line)) continue;
+    if (/^(?:RUN\s+v?\d|Duration\s)/i.test(line)) continue;
+    if (/^(?:Test Files|Tests)\b/.test(line) && !FAILURE_WORD_PATTERN.test(line)) continue;
+    if (/^\d+\|\s/.test(line) || /^\|\s*\^/.test(line)) continue;
+    if (/^(?:✓|√)/.test(line)) continue;
+    if (/^(running|collecting|compiling|building|passing|tap\s+version|%|\s*at\s)/i.test(line) && !FAILURE_WORD_PATTERN.test(line)) continue;
     if (/^[.sxX]+(?:\s*\[\s*\d+%\]\s*)?$/.test(line)) continue;
     if (/^\d+ passed(?:, \d+ (?:warnings?|skipped|xfailed|xpassed|deselected))* in <v>(?: <v>)*(?: \([^)]*\))?$/.test(line)) continue;
     if (/^Start at \d{2}:\d{2}:\d{2}$/.test(line)) continue;
@@ -124904,10 +125038,19 @@ function signatureLines(output) {
   }
   return [...seen].sort();
 }
+function exitCodeFailure(command, entry2) {
+  return entry2.exitCode !== void 0 && entry2.exitCode !== 0 ? `${command}: <exited with code ${entry2.exitCode}>` : null;
+}
 function diffAgainstBaseline(baseline, current) {
   if (!baseline) {
     return {
-      newSignatures: Object.entries(current).flatMap(([command, entry2]) => entry2.signatures.map((signature) => `${command}: ${signature}`)),
+      newSignatures: Object.entries(current).flatMap(([command, entry2]) => {
+        const exitFailure = exitCodeFailure(command, entry2);
+        return [
+          ...entry2.signatures.map((signature) => `${command}: ${signature}`),
+          ...exitFailure ? [exitFailure] : []
+        ];
+      }),
       resolvedSignatures: []
     };
   }
@@ -124922,6 +125065,8 @@ function diffAgainstBaseline(baseline, current) {
     }
     if (!before) {
       newSignatures.push(...entry2.signatures.map((signature) => `${command}: ${signature}`));
+      const exitFailure = exitCodeFailure(command, entry2);
+      if (exitFailure) newSignatures.push(exitFailure);
       continue;
     }
     if (entry2.timedOut && !before.timedOut) {
@@ -124931,6 +125076,12 @@ function diffAgainstBaseline(baseline, current) {
     if (entry2.unrunnable && !before.unrunnable) {
       newSignatures.push(`${command}: <command became unrunnable>`);
       continue;
+    }
+    const beforeExitCode = before.exitCode ?? 0;
+    if (entry2.exitCode !== void 0 && beforeExitCode === 0 && entry2.exitCode !== 0) {
+      newSignatures.push(`${command}: <exited with code ${entry2.exitCode}>`);
+    } else if (entry2.exitCode === 0 && beforeExitCode !== 0) {
+      resolvedSignatures.push(`${command}: <no longer exits with code ${beforeExitCode}>`);
     }
     const beforeSet = new Set(before.signatures);
     const afterSet = new Set(entry2.signatures);
@@ -125010,40 +125161,6 @@ function compareHistoryNames(left, right) {
   if (leftMatch[1] !== rightMatch[1]) return leftMatch[1] < rightMatch[1] ? -1 : 1;
   return Number(leftMatch[2]) - Number(rightMatch[2]);
 }
-function sleepSync(ms) {
-  Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
-}
-function acquireBaselineLock(lockPath2) {
-  const deadline = Date.now() + BASELINE_LOCK_TIMEOUT_MS;
-  for (; ; ) {
-    try {
-      return fs27.openSync(lockPath2, "wx");
-    } catch (err) {
-      if (err?.code !== "EEXIST") return null;
-    }
-    try {
-      const age = Date.now() - fs27.statSync(lockPath2).mtimeMs;
-      if (age > BASELINE_LOCK_STALE_MS) {
-        fs27.rmSync(lockPath2, { force: true });
-        continue;
-      }
-    } catch {
-      continue;
-    }
-    if (Date.now() >= deadline) return null;
-    sleepSync(BASELINE_LOCK_RETRY_MS);
-  }
-}
-function releaseBaselineLock(fd, lockPath2) {
-  try {
-    fs27.closeSync(fd);
-  } catch {
-  }
-  try {
-    fs27.rmSync(lockPath2, { force: true });
-  } catch {
-  }
-}
 function recordBaseline(path30, commands, now = /* @__PURE__ */ new Date()) {
   try {
     fs27.mkdirSync((0, import_path144.dirname)(path30), { recursive: true });
@@ -125051,42 +125168,42 @@ function recordBaseline(path30, commands, now = /* @__PURE__ */ new Date()) {
     return { written: false, added: 0, removed: 0 };
   }
   const lockPath2 = `${path30}.lock`;
-  const lockFd = acquireBaselineLock(lockPath2);
-  if (lockFd === null) return { written: false, added: 0, removed: 0 };
   try {
-    const previous = readBaseline(path30);
-    const previousPath = archiveBaseline(path30, now);
-    if (previousPath === null && fs27.existsSync(path30)) return { written: false, added: 0, removed: 0 };
-    try {
-      fs27.writeFileSync(path30, `${JSON.stringify({ version: 1, recordedAt: now.toISOString(), commands }, null, 2)}
+    return withFileLockSync(lockPath2, () => {
+      const previous = readBaseline(path30);
+      const previousPath = archiveBaseline(path30, now);
+      if (previousPath === null && fs27.existsSync(path30)) return { written: false, added: 0, removed: 0 };
+      try {
+        fs27.writeFileSync(path30, `${JSON.stringify({ version: 1, recordedAt: now.toISOString(), commands }, null, 2)}
 `, "utf8");
-    } catch {
-      return { written: false, added: 0, removed: 0 };
-    }
-    if (previousPath) pruneBaselineHistory((0, import_path144.dirname)(previousPath), previousPath);
-    let added = 0;
-    let removed = 0;
-    const becameUnrunnable = [];
-    if (previous && previousPath) {
-      for (const command of /* @__PURE__ */ new Set([...Object.keys(previous.commands), ...Object.keys(commands)])) {
-        const before = previous.commands[command];
-        const after = commands[command];
-        const beforeSet = new Set(before?.signatures ?? []);
-        const afterSet = new Set(after?.signatures ?? []);
-        for (const signature of afterSet) if (!beforeSet.has(signature)) added += 1;
-        for (const signature of beforeSet) if (!afterSet.has(signature)) removed += 1;
-        if (before && after?.unrunnable && !before?.unrunnable) becameUnrunnable.push(command);
+      } catch {
+        return { written: false, added: 0, removed: 0 };
       }
-    }
-    return {
-      written: true,
-      ...previousPath ? { previousPath } : {},
-      added,
-      removed,
-      ...becameUnrunnable.length > 0 ? { becameUnrunnable } : {}
-    };
-  } finally {
-    releaseBaselineLock(lockFd, lockPath2);
+      if (previousPath) pruneBaselineHistory((0, import_path144.dirname)(previousPath), previousPath);
+      let added = 0;
+      let removed = 0;
+      const becameUnrunnable = [];
+      if (previous && previousPath) {
+        for (const command of /* @__PURE__ */ new Set([...Object.keys(previous.commands), ...Object.keys(commands)])) {
+          const before = previous.commands[command];
+          const after = commands[command];
+          const beforeSet = new Set(before?.signatures ?? []);
+          const afterSet = new Set(after?.signatures ?? []);
+          for (const signature of afterSet) if (!beforeSet.has(signature)) added += 1;
+          for (const signature of beforeSet) if (!afterSet.has(signature)) removed += 1;
+          if (before && after?.unrunnable && !before?.unrunnable) becameUnrunnable.push(command);
+        }
+      }
+      return {
+        written: true,
+        ...previousPath ? { previousPath } : {},
+        added,
+        removed,
+        ...becameUnrunnable.length > 0 ? { becameUnrunnable } : {}
+      };
+    }, { timeoutMs: BASELINE_LOCK_TIMEOUT_MS, staleLockMs: BASELINE_LOCK_STALE_MS });
+  } catch {
+    return { written: false, added: 0, removed: 0 };
   }
 }
 
@@ -125866,7 +125983,12 @@ Command execution failed: ${errorCode2}` : output;
     const hasShellMissingCommand = SHELL_MISSING_COMMAND_PATTERN.test(output);
     const otherSignatures = hasShellMissingCommand ? signatureLines(output.split(/\r?\n/).filter((line) => !SHELL_MISSING_COMMAND_PATTERN.test(line) && !/^>\s/.test(line) && !/^operable program or batch file\.?$/i.test(line)).join("\n")) : signatures;
     const unrunnable = failedToSpawn || result.status === 126 || result.status === 127 || !result.error && hasShellMissingCommand && otherSignatures.length === 0;
-    return { signatures: unrunnable ? [] : signatures, ...unrunnable ? { unrunnable: true } : {} };
+    const exitCode = !unrunnable && typeof result.status === "number" ? result.status : void 0;
+    return {
+      signatures: unrunnable ? [] : signatures,
+      ...exitCode !== void 0 ? { exitCode } : {},
+      ...unrunnable ? { unrunnable: true } : {}
+    };
   } catch (error2) {
     const errorCode2 = typeof error2 === "object" && error2 !== null && "code" in error2 && typeof error2.code === "string" ? error2.code : void 0;
     return errorCode2 === "ENOENT" ? { signatures: [], unrunnable: true } : { signatures: [`Command execution failed: ${errorCode2 ?? "unknown"}`] };
@@ -125928,6 +126050,17 @@ function ralphVerify(options, directory = process.cwd(), now = /* @__PURE__ */ n
     const message2 = "no feedback commands: declare feedbackCommands in the PRD or add package.json build/lint/test scripts";
     if (options.json) console.log(JSON.stringify({ sessionId: sessionId || null, baselinePresent: Boolean(baseline), commands: [], newFailures: [], resolvedFailures: [], unrunnableCommands: [], note: message2 }));
     else console.log(`ralph verify: ${message2}`);
+    const closeout = evaluateCloseoutGate(directory, stateRoot2, sessionId || "");
+    const closeoutBlocked = closeout.required && !closeout.satisfied;
+    if (closeoutBlocked) {
+      const closeoutNote = "the PRD is complete but no closeout record matches its criteria revision; run `omc ralph closeout --deslop completed|skipped` before Step 7.6";
+      if (options.json) {
+        console.log(JSON.stringify({ sessionId: sessionId || null, baselinePresent: Boolean(baseline), commands: [], newFailures: [], resolvedFailures: [], unrunnableCommands: [], closeout, closeoutError: closeoutNote }));
+      } else {
+        console.log(`ralph verify: ${closeoutNote}`);
+      }
+      return 1;
+    }
     return 0;
   }
   const runGate = () => {
@@ -128596,7 +128729,7 @@ async function ralphthonCommand(args) {
   console.log(source_default.gray("Orchestrator running. Press Ctrl+C to stop."));
 }
 function sleep6(ms) {
-  return new Promise((resolve48) => setTimeout(resolve48, ms));
+  return new Promise((resolve49) => setTimeout(resolve49, ms));
 }
 
 // src/cli/commands/ultragoal.ts
@@ -130843,15 +130976,15 @@ function compareOnboardingVersion(left, right) {
   }
   return 0;
 }
-function refreshRuntimeClaudeJson(baseConfigDir, runtimeClaudeJsonPath, sourceClaudeJson = readJsonObject4((0, import_path152.join)((0, import_path152.dirname)(baseConfigDir), ".claude.json"))) {
-  if (!sourceClaudeJson) return;
+function refreshRuntimeClaudeJson(baseConfigDir, runtimeClaudeJsonPath, sourceClaudeJson = readJsonObject4((0, import_path152.join)((0, import_path152.dirname)(baseConfigDir), ".claude.json")), mcpServersSourceJson = readJsonObject4(getClaudeMcpConfigPath(baseConfigDir))) {
+  if (!sourceClaudeJson && !mcpServersSourceJson) return;
   const runtimeClaudeJson = readJsonObject4(runtimeClaudeJsonPath) ?? {};
   let changed = false;
-  if (sourceClaudeJson.hasCompletedOnboarding === true && runtimeClaudeJson.hasCompletedOnboarding !== true) {
+  if (sourceClaudeJson?.hasCompletedOnboarding === true && runtimeClaudeJson.hasCompletedOnboarding !== true) {
     runtimeClaudeJson.hasCompletedOnboarding = true;
     changed = true;
   }
-  const sourceVersion = sourceClaudeJson.lastOnboardingVersion;
+  const sourceVersion = sourceClaudeJson?.lastOnboardingVersion;
   if (typeof sourceVersion === "string" || typeof sourceVersion === "number") {
     const runtimeHasVersion = hasOwn(runtimeClaudeJson, "lastOnboardingVersion");
     const compared = compareOnboardingVersion(sourceVersion, runtimeClaudeJson.lastOnboardingVersion);
@@ -130860,7 +130993,7 @@ function refreshRuntimeClaudeJson(baseConfigDir, runtimeClaudeJsonPath, sourceCl
       changed = true;
     }
   }
-  if (hasOwn(sourceClaudeJson, "oauthAccount")) {
+  if (sourceClaudeJson && hasOwn(sourceClaudeJson, "oauthAccount")) {
     const sourceAccount = sourceClaudeJson.oauthAccount;
     if (sourceAccount === null || sourceAccount === void 0) {
       if (hasOwn(runtimeClaudeJson, "oauthAccount")) {
@@ -130875,8 +131008,9 @@ function refreshRuntimeClaudeJson(baseConfigDir, runtimeClaudeJsonPath, sourceCl
       changed = true;
     }
   }
-  if (isJsonObject(sourceClaudeJson.mcpServers)) {
-    runtimeClaudeJson.mcpServers = sourceClaudeJson.mcpServers;
+  const sourceMcpServers = mcpServersSourceJson?.mcpServers;
+  if (isJsonObject(sourceMcpServers)) {
+    runtimeClaudeJson.mcpServers = sourceMcpServers;
     changed = true;
   }
   if (changed) {
@@ -130978,11 +131112,13 @@ function prepareOmcLaunchConfigDir(baseConfigDir = getClaudeConfigDir()) {
   const runtimeClaudeJsonPath = (0, import_path152.join)(runtimeConfigDir, ".claude.json");
   const runtimeCredentialsPath = (0, import_path152.join)(runtimeConfigDir, ".credentials.json");
   const sourceClaudeJsonPath = (0, import_path152.join)((0, import_path152.dirname)(baseConfigDir), ".claude.json");
+  const mcpServersSourcePath = getClaudeMcpConfigPath(baseConfigDir);
   const lifecycleLockPath = lockPathFor((0, import_path152.join)(baseConfigDir, ".omc-launch.prepare.lock"));
   return withFileLockSync(lifecycleLockPath, () => {
     const preservedClaudeJson = pathExists(runtimeClaudeJsonPath) ? (0, import_fs126.readFileSync)(runtimeClaudeJsonPath) : null;
     const preservedRuntimeClaudeJson = readJsonObject4(runtimeClaudeJsonPath);
     const sourceClaudeJson = readJsonObject4(sourceClaudeJsonPath);
+    const mcpServersSourceJson = mcpServersSourcePath === sourceClaudeJsonPath ? sourceClaudeJson : readJsonObject4(mcpServersSourcePath);
     reconcileRuntimeCredentials(
       baseConfigDir,
       runtimeCredentialsPath,
@@ -130996,7 +131132,7 @@ function prepareOmcLaunchConfigDir(baseConfigDir = getClaudeConfigDir()) {
       if (preservedClaudeJson) {
         (0, import_fs126.writeFileSync)(nextClaudeJsonPath, preservedClaudeJson);
       }
-      refreshRuntimeClaudeJson(baseConfigDir, nextClaudeJsonPath, sourceClaudeJson);
+      refreshRuntimeClaudeJson(baseConfigDir, nextClaudeJsonPath, sourceClaudeJson, mcpServersSourceJson);
       (0, import_fs126.copyFileSync)(companionPath, (0, import_path152.join)(nextConfigDir, "CLAUDE.md"));
       for (const entry2 of [
         "agents",
@@ -131049,9 +131185,6 @@ function prepareOmcLaunchConfigDir(baseConfigDir = getClaudeConfigDir()) {
     swapRuntimeConfigDir(runtimeConfigDir, nextConfigDir);
     return runtimeConfigDir;
   }, { timeoutMs: 5e3, retryDelayMs: 50 });
-}
-function isDefaultClaudeConfigDirPath2(configDir) {
-  return configDir === (0, import_path152.join)((0, import_os26.homedir)(), ".claude");
 }
 function extractNotifyFlag(args) {
   let notifyEnabled = true;
@@ -131621,7 +131754,7 @@ async function launchCommand(args) {
     process.exit(1);
   }
   const launchConfigDir = prepareOmcLaunchConfigDir();
-  if (isDefaultClaudeConfigDirPath2(launchConfigDir)) {
+  if (isDefaultClaudeConfigDirPath(launchConfigDir)) {
     delete process.env.CLAUDE_CONFIG_DIR;
   } else {
     process.env.CLAUDE_CONFIG_DIR = launchConfigDir;
@@ -132267,7 +132400,7 @@ function terminateProcessTree(child, signal) {
   }
 }
 function runShellCommand(command, timeoutMs, stdoutTail, stderrTail, idempotencyKey) {
-  return new Promise((resolve48) => {
+  return new Promise((resolve49) => {
     let child;
     try {
       child = (0, import_node_child_process14.spawn)(command, {
@@ -132281,7 +132414,7 @@ function runShellCommand(command, timeoutMs, stdoutTail, stderrTail, idempotency
         ...process.platform === "win32" ? {} : { detached: true }
       });
     } catch (error2) {
-      resolve48({ timed_out: false, exit_code: null, infra_error: describeError2(error2) });
+      resolve49({ timed_out: false, exit_code: null, infra_error: describeError2(error2) });
       return;
     }
     let settled = false;
@@ -132296,7 +132429,7 @@ function runShellCommand(command, timeoutMs, stdoutTail, stderrTail, idempotency
       settled = true;
       if (timeoutTimer !== void 0) clearTimeout(timeoutTimer);
       if (escalationTimer !== void 0) clearTimeout(escalationTimer);
-      resolve48({ timed_out: timedOut, exit_code: exitCode, infra_error: infraError });
+      resolve49({ timed_out: timedOut, exit_code: exitCode, infra_error: infraError });
     };
     if (child.stdout) {
       child.stdout.setEncoding("utf8");
@@ -132449,8 +132582,8 @@ function createStdinApprovalGate(input) {
       return Promise.resolve(queued);
     }
     getInterface();
-    return new Promise((resolve48) => {
-      waitingReader = resolve48;
+    return new Promise((resolve49) => {
+      waitingReader = resolve49;
     });
   }
   return {
@@ -133378,14 +133511,14 @@ function startListener(config2, deps = {}) {
       }
     });
   });
-  return new Promise((resolve48) => {
+  return new Promise((resolve49) => {
     server.listen(config2.port, host, () => {
       (0, import_fs132.mkdirSync)((0, import_path160.join)(pidFilePath(config2.cwd), ".."), { recursive: true });
       const addr = server.address();
       const portForLog = addr && typeof addr !== "string" ? addr.port : config2.port;
       const hostForLog = addr && typeof addr !== "string" ? addr.address : host;
       (0, import_fs132.writeFileSync)(pidFilePath(config2.cwd), JSON.stringify({ pid: process.pid, port: portForLog, host: hostForLog, startedAt }, null, 2));
-      resolve48(server);
+      resolve49(server);
     });
   });
 }
@@ -133773,15 +133906,15 @@ async function runHudWatchLoop(options) {
     if (shouldStop) {
       break;
     }
-    await new Promise((resolve48) => {
+    await new Promise((resolve49) => {
       const timer = setTimeout(() => {
         wakeSleep = null;
-        resolve48();
+        resolve49();
       }, options.intervalMs);
       wakeSleep = () => {
         clearTimeout(timer);
         wakeSleep = null;
-        resolve48();
+        resolve49();
       };
     });
   }

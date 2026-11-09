@@ -426,7 +426,12 @@ export function runFeedbackCommand(command, directory, options = {}) {
             || result.status === 126
             || result.status === 127
             || (!result.error && hasShellMissingCommand && otherSignatures.length === 0);
-        return { signatures: unrunnable ? [] : signatures, ...(unrunnable ? { unrunnable: true } : {}) };
+        const exitCode = !unrunnable && typeof result.status === 'number' ? result.status : undefined;
+        return {
+            signatures: unrunnable ? [] : signatures,
+            ...(exitCode !== undefined ? { exitCode } : {}),
+            ...(unrunnable ? { unrunnable: true } : {}),
+        };
     }
     catch (error) {
         const errorCode = typeof error === 'object' && error !== null && 'code' in error && typeof error.code === 'string'
@@ -571,6 +576,19 @@ export function ralphVerify(options, directory = process.cwd(), now = new Date()
             console.log(JSON.stringify({ sessionId: sessionId || null, baselinePresent: Boolean(baseline), commands: [], newFailures: [], resolvedFailures: [], unrunnableCommands: [], note: message }));
         else
             console.log(`ralph verify: ${message}`);
+        // Even with no feedback commands, evaluate the closeout requirement: terminal step gate
+        const closeout = evaluateCloseoutGate(directory, stateRoot, sessionId || '');
+        const closeoutBlocked = closeout.required && !closeout.satisfied;
+        if (closeoutBlocked) {
+            const closeoutNote = 'the PRD is complete but no closeout record matches its criteria revision; run `omc ralph closeout --deslop completed|skipped` before Step 7.6';
+            if (options.json) {
+                console.log(JSON.stringify({ sessionId: sessionId || null, baselinePresent: Boolean(baseline), commands: [], newFailures: [], resolvedFailures: [], unrunnableCommands: [], closeout, closeoutError: closeoutNote }));
+            }
+            else {
+                console.log(`ralph verify: ${closeoutNote}`);
+            }
+            return 1;
+        }
         return 0;
     }
     const runGate = () => {
