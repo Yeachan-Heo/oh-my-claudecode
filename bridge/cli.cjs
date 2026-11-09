@@ -58584,7 +58584,6 @@ function releaseSessionEndJob(directory, sessionId, nonce, generation, reason = 
     for (const action of Object.values(job.actions)) {
       if (action.status !== "claimed" || !action.runner || action.runner.phase !== "reserved") continue;
       action.status = "pending";
-      action.attempts = 0;
       action.claimantNonce = void 0;
       action.runner = void 0;
     }
