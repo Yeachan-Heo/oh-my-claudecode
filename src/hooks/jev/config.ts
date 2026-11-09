@@ -19,7 +19,9 @@
  *   upper-cased, dashes as underscores, e.g. OMC_JEV_EXCERPT_CHARS_MODEL_ROUTING).
  *   model-routing defaults to 12000 and loop-continuation to 2000; both ignore
  *   OMC_JEV_EXCERPT_CHARS; set the point's own variable to change them.
- * - OMC_JEV_ENDPOINT: base URL overlay (stub servers / tests)
+ * - OMC_JEV_ENDPOINT: address of the Jev API (default JEV_DEFAULT_ENDPOINT);
+ *   any endpoint that implements the same API, e.g. a proxy, or a stub
+ *   server in tests. TYPESAFE_API_KEY is sent to it as a bearer token.
  * - OMC_JEV_LOG_DIR: shadow-log directory override (tests)
  * - OMC_JEV_QUIET=1: silence the env-activation stderr warning (hook
  *   processes are one-shot, so warn-once-per-process degrades to warn-every)

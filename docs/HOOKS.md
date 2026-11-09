@@ -611,13 +611,16 @@ export TYPESAFE_API_KEY="your-api-key"
 
 # 2. Explicitly opt in to judgment points
 export OMC_JEV="point1,point2:active,all"
+
+# Optional: another endpoint that implements the same API, such as a proxy
+export OMC_JEV_ENDPOINT="https://jev-proxy.example.com/v1/systemone"
 ```
 
 #### Environment Variables
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `TYPESAFE_API_KEY` | (absent) | API key for TypeSafe System One. Required to enable Jev; the key alone does not enable any points. |
+| `TYPESAFE_API_KEY` | (absent) | API key for the Jev API at `OMC_JEV_ENDPOINT` (TypeSafe System One by default). Required to enable Jev; the key alone does not enable any points. |
 | `OMC_JEV` | (absent) | Per-point opt-in: `point`, `point:active`, `all` (every point, shadow), or `all:active` (every point, active). Comma-separated; unknown point names are ignored. |
 | `OMC_JEV_TIMEOUT_MS` | `2000` | Per-call timeout in milliseconds (single round-trip measured at 465–605 ms; default allows margin). |
 | `OMC_JEV_MAX_REQUESTS` | `0` (unlimited) | Maximum Jev requests per process. When reached, heuristic twins run for remaining calls. |
@@ -626,7 +629,7 @@ export OMC_JEV="point1,point2:active,all"
 | `OMC_JEV_BREAKER_DIR` | `~/.omc/state/jev/breaker` | State directory of the shared breaker and request limit (test only). |
 | `OMC_JEV_EXCERPT_CHARS` | `200` | Maximum string length sent in state and shadow log. Recursively bounds all strings in the judgment state; question definitions are static text and are sent whole. Does not apply to `model-routing` and `loop-continuation`, which have their own defaults (next row). |
 | `OMC_JEV_EXCERPT_CHARS_<POINT>` | (unset) | The same limit for one point: the point name upper-cased with dashes as underscores, for example `OMC_JEV_EXCERPT_CHARS_MODEL_ROUTING` (the variable name itself must be upper case). Order for a point: its own variable, then the point's default (`model-routing`: `12000`; `loop-continuation`: `2000`, the length to which `persistent-mode.mjs` already cuts the last assistant message), then `OMC_JEV_EXCERPT_CHARS`. An invalid value is ignored. To send less of the `loop-continuation` state, set `OMC_JEV_EXCERPT_CHARS_LOOP_CONTINUATION`, for example to `200`, the limit of earlier releases. |
-| `OMC_JEV_ENDPOINT` | `https://api.typesafe.ai/v1/systemone` | Override for stub servers or tests. |
+| `OMC_JEV_ENDPOINT` | `https://api.typesafe.ai/v1/systemone` | Address of the Jev API. Any endpoint that implements the same API works, for example a proxy or gateway in front of it, or a stub server in tests. `TYPESAFE_API_KEY` is sent to this address as a bearer token. |
 | `OMC_JEV_LOG_DIR` | `.omc/state/jev` | Shadow-log directory override (test only). |
 | `OMC_JEV_QUIET` | (unset) | Set to `1` to silence the env-activation stderr warning. |
 | `OMC_JEV_MAX_EFFORT` | `max` | Cap for the subagent reasoning effort set by the active `model-routing` point: `low`, `medium`, `high`, `xhigh`, or `max`, case-insensitive, surrounding spaces ignored. Other values use the default. A lower cap lowers the mapping: `high` restores the cap of earlier releases. A value that is set but not one of these is reported on stderr (unless `OMC_JEV_QUIET=1`) and the default is used. See [Model routing: subagent effort](#model-routing-subagent-effort). |
