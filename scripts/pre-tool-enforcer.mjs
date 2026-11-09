@@ -23,7 +23,7 @@ import { readStdin } from './lib/stdin.mjs';
 import { resolveConfiguredAgentModel } from './lib/agent-model-config.mjs';
 import { BOUNDED_GIT_TIMEOUT_MS } from './lib/bounded-git-timeout.mjs';
 import { isSkillVisibleToUser } from './lib/skill-entitlements.mjs';
-import { isJevShadowOptedIn, recordJevApplied, recordJevShadow, setJevHookContext } from './lib/jev-shadow.mjs';
+import { isJevAppliedLogEnabled, isJevShadowOptedIn, recordJevApplied, recordJevShadow, setJevHookContext } from './lib/jev-shadow.mjs';
 import { resolveExcerptChars } from './jev-resolve.mjs';
 
 // Inlined from src/config/models.ts — avoids a dist/ import so the hook works
@@ -914,7 +914,8 @@ function recordModelRoutingShadow(toolName, toolInput, updatedToolInput, permiss
     } else if (typeof currentEffort === 'string' && capEffort(currentEffort, maxEffort()) !== currentEffort) {
       ensureUpdated().effort = capEffort(currentEffort, maxEffort());
     }
-    noteJevRouting(modifiedInput, updatedToolInput, answers, originalInput.subagent_type);
+    // What the agent would have run on without Jev: the call's model, else its definition's.
+    noteJevRouting({ model: knownTier ? model : modifiedInput.model, effort: modifiedInput.effort }, updatedToolInput, answers, originalInput.subagent_type);
   }
 
   // The marker wins over the call's own values and over Jev's answers. The effort is still
@@ -946,16 +947,18 @@ function recordModelRoutingShadow(toolName, toolInput, updatedToolInput, permiss
   return updatedToolInput;
 }
 
-// OMC_JEV_APPLIED_LOG: what Jev's active answers set on a Task/Agent call. The
-// applied.jsonl line is written only once the hook output carries those values
-// in updatedInput (emitPreToolUseOutput), so a call that a later check denies,
-// or a value that other code replaced, leaves no line. An effort lowered by
-// OMC_JEV_MAX_EFFORT alone is the cap's doing, not Jev's, and is not recorded.
+// OMC_JEV_APPLIED_LOG: what Jev's active answers set on a Task/Agent call,
+// against what the agent would have run on without them (the call's model,
+// else the one its definition names). The applied.jsonl line is written only
+// once the hook output carries those values in updatedInput
+// (emitPreToolUseOutput), so a call that a later check denies, or a value that
+// other code replaced, leaves no line. An effort lowered by OMC_JEV_MAX_EFFORT
+// alone is the cap's doing, not Jev's, and is not recorded.
 let pendingJevRouting;
 
 function noteJevRouting(before, updated, answers, subagentType) {
   pendingJevRouting = undefined;
-  if (!updated) return;
+  if (!updated || !isJevAppliedLogEnabled()) return;
   const applied = {};
   const choice = answers['model-tier']?.choice;
   if (typeof choice === 'string' && updated.model === choice.toLowerCase() && updated.model !== before.model) {
@@ -970,15 +973,20 @@ function noteJevRouting(before, updated, answers, subagentType) {
 
 function flushJevRouting(output) {
   const pending = pendingJevRouting;
+  if (!pending) return;
   pendingJevRouting = undefined;
-  const sent = output?.hookSpecificOutput?.updatedInput;
-  if (!pending || !sent || typeof sent !== 'object') return;
-  const { subagent_type, model, effort } = pending;
-  const carried = {
-    ...(model && sent.model === model.to ? { model } : {}),
-    ...(effort && sent.effort === effort.to ? { effort } : {}),
-  };
-  if (carried.model || carried.effort) recordJevApplied('model-routing', { subagent_type, ...carried });
+  try {
+    const sent = output?.hookSpecificOutput?.updatedInput;
+    if (!sent || typeof sent !== 'object') return;
+    const { subagent_type, model, effort } = pending;
+    const carried = {
+      ...(model && sent.model === model.to ? { model } : {}),
+      ...(effort && sent.effort === effort.to ? { effort } : {}),
+    };
+    if (carried.model || carried.effort) recordJevApplied('model-routing', { subagent_type, ...carried });
+  } catch {
+    // The applied log is advisory: it must never cost the hook its output.
+  }
 }
 
 function generateSlopWarning(data, toolName) {

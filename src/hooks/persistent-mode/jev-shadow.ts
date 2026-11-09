@@ -97,6 +97,7 @@ export async function applyLoopContinuationShadow(args: LoopContinuationShadowAr
       twin: () => result,
       mapAnswer: mapTaskCompletionAnswer,
       mapHeuristic: mapHeuristicForLoopContinuation,
+      logContext: { session_id: args.sessionId },
       fetchFn: args.fetchFn,
     }),
     recordJudgment<PersistentModeResult>('loop-continuation', {
@@ -104,6 +105,7 @@ export async function applyLoopContinuationShadow(args: LoopContinuationShadowAr
       twin: () => result,
       questionSet: 1,
       mapHeuristic: mapHeuristicForLoopContinuation,
+      logContext: { session_id: args.sessionId },
       fetchFn: args.fetchFn,
     }),
   ]);

@@ -4,7 +4,7 @@
  * without the variable.
  */
 import { execFile, execFileSync } from 'node:child_process';
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { createServer } from 'node:http';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -175,6 +175,18 @@ describe('recordJevApplied', () => {
     runApplied(context, hookEnv(context, 'context-pruning', { OMC_JEV_APPLIED_LOG: undefined }));
     expect(existsSync(join(context.logDir, 'applied.jsonl'))).toBe(false);
   });
+
+  it('rotates applied.jsonl with OMC_JEV_LOG_MAX_MB like the resolver lines', () => {
+    const context = makeContext();
+    mkdirSync(context.logDir, { recursive: true });
+    const before = (JSON.stringify({ ts: '2026-11-01T00:00:00.000Z', point: 'intent', applied: { pad: 'x'.repeat(80) } }) + '\n').repeat(12_000);
+    writeFileSync(join(context.logDir, 'applied.jsonl'), before);
+    runApplied(context, hookEnv(context, 'context-pruning', { OMC_JEV_LOG_MAX_MB: '1' }));
+    const rotated = readdirSync(context.logDir).filter((name) => /^applied-\d{8}-\d{6}-\d+\.jsonl$/.test(name));
+    expect(rotated).toHaveLength(1);
+    expect(readFileSync(join(context.logDir, rotated[0]), 'utf8')).toBe(before);
+    expect(readLog(context, 'applied.jsonl')).toHaveLength(1);
+  });
 });
 
 describe('hook scripts with OMC_JEV_APPLIED_LOG=1', () => {
@@ -226,6 +238,41 @@ describe('hook scripts with OMC_JEV_APPLIED_LOG=1', () => {
     expect(existsSync(join(off.logDir, 'applied.jsonl'))).toBe(false);
   }, 90_000);
 
+  it('model-routing: a call without a model is compared with the model of its agent definition', async () => {
+    // agents/executor.md names sonnet: an answer of sonnet changes nothing.
+    stubAnswers = { 'model-tier': { type: 'choice', choice: 'sonnet' } };
+    const same = makeContext();
+    await runHook(same, 'pre-tool-enforcer.mjs', TASK_CALL(same.cwd, { model: undefined }), 'model-routing');
+    expect(readLog(same, 'applied.jsonl')).toEqual([]);
+
+    stubAnswers = { 'model-tier': { type: 'choice', choice: 'opus' } };
+    const changed = makeContext();
+    await runHook(changed, 'pre-tool-enforcer.mjs', TASK_CALL(changed.cwd, { model: undefined }), 'model-routing');
+    expect(readLog(changed, 'applied.jsonl')).toEqual([
+      expect.objectContaining({ applied: { subagent_type: 'oh-my-claudecode:executor', model: { from: 'sonnet', to: 'opus' } } }),
+    ]);
+  }, 90_000);
+
+  it('model-routing: no line for an effort that only OMC_JEV_MAX_EFFORT lowered', async () => {
+    stubAnswers = { 'model-tier': { type: 'choice', choice: 'sonnet' } };
+    const context = makeContext();
+    const output = await runHook(context, 'pre-tool-enforcer.mjs', TASK_CALL(context.cwd, { effort: 'xhigh' }), 'model-routing', { OMC_JEV_MAX_EFFORT: 'high' });
+    expect(output.hookSpecificOutput.updatedInput).toMatchObject({ effort: 'high' });
+    expect(readLog(context, 'applied.jsonl')).toEqual([]);
+  }, 60_000);
+
+  it('model-routing: no line for a call that a later check of the hook denies', async () => {
+    stubAnswers = { 'model-tier': { type: 'choice', choice: 'opus' } };
+    const context = makeContext();
+    // A transcript at 90 % of its context window: the agent-heavy preflight blocks the call.
+    const transcript = join(context.root, 'transcript.jsonl');
+    writeFileSync(transcript, JSON.stringify({ context_window: 1000, usage: { input_tokens: 900 } }) + '\n');
+    const output = await runHook(context, 'pre-tool-enforcer.mjs', { ...TASK_CALL(context.cwd), transcript_path: transcript }, 'model-routing');
+    expect(output).toMatchObject({ decision: 'block' });
+    expect(readLog(context, 'shadow.jsonl')).toHaveLength(1);
+    expect(readLog(context, 'applied.jsonl')).toEqual([]);
+  }, 60_000);
+
   it('context-pruning: the action Jev changed', async () => {
     stubAnswers = { staleness: { type: 'score', score: 0 } };
     const context = makeContext();
@@ -237,7 +284,7 @@ describe('hook scripts with OMC_JEV_APPLIED_LOG=1', () => {
       context_window: { used_percentage: 80 },
     }, 'context-pruning');
     const [line] = readLog(context, 'applied.jsonl');
-    expect(line).toMatchObject({ point: 'context-pruning', applied: { action: { from: 'warn', to: 'none' }, staleness: 'fresh' } });
+    expect(line).toMatchObject({ point: 'context-pruning', applied: { action: { from: 'warn', to: 'none' }, staleness: 'fresh', message: 'none' } });
   }, 60_000);
 
   it('skill-trigger: the keywords Jev changed', async () => {

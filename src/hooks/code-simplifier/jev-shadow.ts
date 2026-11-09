@@ -67,6 +67,7 @@ export function recordSimplifierTriggerShadow(
       // Jev Noul answer: noul is the probability of "yes" (0-1)
       return noulAnswerIsYes(answer);
     },
+    logContext: { cwd: args.cwd },
     fetchFn: args.fetchFn,
   });
 }

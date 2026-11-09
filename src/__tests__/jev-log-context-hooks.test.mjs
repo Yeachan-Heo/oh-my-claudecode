@@ -177,6 +177,18 @@ describe('hook scripts with OMC_JEV_LOG_CONTEXT=1', () => {
     expect(lines[0]).toMatchObject({ ...ids, cwd: context.cwd, request_id: expect.stringMatching(UUID), mode: 'active' });
   }, 60_000);
 
+  it.each(CASES)('$hook prints the same output with every log option set as with none', async ({ hook, point, input, setup }) => {
+    const ALL_OPTIONS = { OMC_JEV_LOG_CONTEXT: '1', OMC_JEV_APPLIED_LOG: '1', OMC_JEV_STATE_OMIT_IDS: '1', OMC_JEV_LOG_MAX_MB: '50' };
+    const outputs = [];
+    for (const options of [{}, ALL_OPTIONS]) {
+      const context = makeContext();
+      setup?.(context);
+      const stdout = await runHook(context, hook, input(context.cwd), point, options);
+      outputs.push(stdout.split(context.root).join('<root>').split(JSON.stringify(context.root).slice(1, -1)).join('<root>'));
+    }
+    expect(outputs[1]).toBe(outputs[0]);
+  }, 90_000);
+
   it('keyword-detector writes no ids without the variable', async () => {
     const context = makeContext();
     const { hook, point, input } = CASES[0];

@@ -9,7 +9,7 @@
  */
 
 import { execFile } from 'node:child_process';
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { createServer } from 'node:http';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -297,8 +297,21 @@ describe('recordJevShadow with OMC_JEV_LOG_CONTEXT', () => {
     expect(result).toBeNull();
     const lines = readLines(join(dir, 'log', 'shadow.jsonl'));
     expect(lines).toHaveLength(1);
-    expect(Object.keys(lines[0])).toEqual(['ts', 'point', 'tool_use_id', 'session_id', 'cwd', 'agent_id', 'agent_type', 'request_id', 'mode', 'reason', 'durationMs']);
-    expect(lines[0]).toMatchObject({ point: 'model-routing', session_id: 'session-1', request_id: expect.stringMatching(UUID), mode: 'degraded', reason: 'resolver-exit' });
+    expect(Object.keys(lines[0])).toEqual(['ts', 'point', 'tool_use_id', 'session_id', 'cwd', 'agent_id', 'agent_type', 'request_id', 'mode', 'reason', 'status', 'durationMs']);
+    expect(lines[0]).toMatchObject({ point: 'model-routing', session_id: 'session-1', request_id: expect.stringMatching(UUID), mode: 'degraded', reason: 'resolver-exit', status: 3 });
+  }, 60_000);
+
+  it('rotates shadow.jsonl before its own line with OMC_JEV_LOG_MAX_MB', async () => {
+    const dir = freshDir();
+    mkdirSync(join(dir, 'log'), { recursive: true });
+    const before = (JSON.stringify({ ts: '2026-11-01T00:00:00.000Z', point: 'intent', mode: 'shadow', pad: 'x'.repeat(80) }) + '\n').repeat(12_000);
+    writeFileSync(join(dir, 'log', 'shadow.jsonl'), before);
+    const exit = preload('exit-6.cjs', 'process.exit(6);\n');
+    await runRecord({ cwd: dir, resolverPreload: exit, env: baseEnv(dir, { OMC_JEV_ENDPOINT: 'http://127.0.0.1:1', OMC_JEV_LOG_DIR: join(dir, 'log'), OMC_JEV_LOG_CONTEXT: '1', OMC_JEV_LOG_MAX_MB: '1' }) });
+    const rotated = readdirSync(join(dir, 'log')).filter((name) => /^shadow-\d{8}-\d{6}-\d+\.jsonl$/.test(name));
+    expect(rotated).toHaveLength(1);
+    expect(readFileSync(join(dir, 'log', rotated[0]), 'utf8')).toBe(before);
+    expect(readLines(join(dir, 'log', 'shadow.jsonl'))).toEqual([expect.objectContaining({ reason: 'resolver-exit', status: 6 })]);
   }, 60_000);
 
   it('writes a degraded line when the hook kills the resolver at its time limit', async () => {
@@ -307,7 +320,7 @@ describe('recordJevShadow with OMC_JEV_LOG_CONTEXT', () => {
     const result = await runRecord({ cwd: dir, resolverPreload: hang, env: baseEnv(dir, { OMC_JEV_ENDPOINT: 'http://127.0.0.1:1', OMC_JEV_TIMEOUT_MS: '100', OMC_JEV_LOG_DIR: join(dir, 'log'), OMC_JEV_LOG_CONTEXT: '1' }) });
     expect(result).toBeNull();
     const [line] = readLines(join(dir, 'log', 'shadow.jsonl'));
-    expect(line).toMatchObject({ mode: 'degraded', reason: 'resolver-timeout' });
+    expect(line).toMatchObject({ mode: 'degraded', reason: 'resolver-timeout', signal: expect.any(String) });
     expect(line.durationMs).toBeGreaterThanOrEqual(500);
   }, 60_000);
 

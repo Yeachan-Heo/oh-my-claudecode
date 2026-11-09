@@ -507,7 +507,7 @@ function requestLogContext(point) {
 export function recordJevApplied(point, applied) {
   if (!isJevAppliedLogEnabled(process.env)) return;
   const requestId = lastRequestIds.get(point);
-  appendHookLogLine("applied.jsonl", {
+  appendJevLogLine("applied.jsonl", {
     ts: new Date().toISOString(),
     point,
     ...(isJevLogContextEnabled(process.env) ? { ...hookLogContext, ...(requestId ? { request_id: requestId } : {}) } : {}),
@@ -518,9 +518,10 @@ export function recordJevApplied(point, applied) {
 /**
  * Append one line to a Jev log file in the hook's log directory
  * (OMC_JEV_LOG_DIR when setJevHookContext did not resolve one), rotated like
- * the resolver's lines. Never throws.
+ * the resolver's lines (OMC_JEV_LOG_MAX_MB). Every file a hook script writes
+ * next to shadow.jsonl goes through this. Never throws.
  */
-function appendHookLogLine(fileName, entry) {
+export function appendJevLogLine(fileName, entry) {
   const logDir = hookLogDir || process.env.OMC_JEV_LOG_DIR;
   if (!logDir) return;
   try {
@@ -534,19 +535,24 @@ function appendHookLogLine(fileName, entry) {
 }
 
 /**
- * An active-mode resolver killed at the hook's time limit (resolver-timeout)
- * or ended with a non-zero status (resolver-exit) wrote no shadow-log line.
- * With OMC_JEV_LOG_CONTEXT=1 the hook writes one for it: the request's ids,
- * mode "degraded", the reason and the time waited; no state and no answers.
+ * An active-mode resolver that the hook killed at its time limit
+ * (resolver-timeout), that could not be started (resolver-spawn), or that
+ * ended with a non-zero status or a signal (resolver-exit) wrote no
+ * shadow-log line. With OMC_JEV_LOG_CONTEXT=1 the hook writes one for it: the
+ * request's ids, mode "degraded", the reason, the exit status or signal when
+ * there is one, and the time waited; no state and no answers.
  */
 function recordResolverFailure(point, result, durationMs, logContext) {
   if (!logContext) return;
-  appendHookLogLine("shadow.jsonl", {
+  const code = result?.error?.code;
+  appendJevLogLine("shadow.jsonl", {
     ts: new Date().toISOString(),
     point,
     ...logContext,
     mode: "degraded",
-    reason: result?.error?.code === "ETIMEDOUT" ? "resolver-timeout" : "resolver-exit",
+    reason: code === "ETIMEDOUT" ? "resolver-timeout" : result?.error ? "resolver-spawn" : "resolver-exit",
+    ...(typeof result?.status === "number" ? { status: result.status } : {}),
+    ...(result?.signal ? { signal: result.signal } : {}),
     durationMs,
   });
 }

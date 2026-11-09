@@ -718,7 +718,7 @@ The shadow log is append-only and grows with every judgment: with many points op
 export OMC_JEV_LOG_MAX_MB=50
 ```
 
-Before a line is appended, a file larger than the limit is renamed to `<name>-<YYYYMMDD-HHmmss>-<pid>.jsonl` in the same directory (UTC time and the writing process ID, for example `shadow-20261109-143005-4242.jsonl`), and the line starts a new `shadow.jsonl`. Both writers rotate the same way: the plugin hook scripts (`scripts/jev-resolve.mjs`) and the TypeScript resolver. The process ID in the name keeps the writers of one machine apart, and an existing name is skipped. A failed rename (another process rotated first, or the file is locked) is ignored and the line is appended anyway: rotation never costs a line and never affects a hook. A rotated file is always above the limit, usually by about one line; the first rotation after the variable is set renames the whole existing log, and a file whose renames keep failing keeps growing until a rename succeeds. Rotated files are never deleted; remove old ones yourself. Code that writes another file to the Jev log directory should call the same helper (`rotateJevLog` with `resolveJevLogMaxBytes()` in the scripts, `config.logMaxBytes` in TypeScript) before each append, so the same variable caps it.
+Before a line is appended, a file larger than the limit is renamed to `<name>-<YYYYMMDD-HHmmss>-<pid>.jsonl` in the same directory (UTC time and the writing process ID, for example `shadow-20261109-143005-4242.jsonl`), and the line starts a new `shadow.jsonl`. Both writers rotate the same way: the plugin hook scripts (`scripts/jev-resolve.mjs`) and the TypeScript resolver. The process ID in the name keeps the writers of one machine apart, and an existing name is skipped. A failed rename (another process rotated first, or the file is locked) is ignored and the line is appended anyway: rotation never costs a line and never affects a hook. A rotated file is above the limit, usually by about one line (two processes that rotate the same file at once can leave a small one); the first rotation after the variable is set renames the whole existing log, and a file whose renames keep failing keeps growing until a rename succeeds. Rotated files are never deleted; remove old ones yourself. Code that writes another file to the Jev log directory should call the same helper (`rotateJevLog` with `resolveJevLogMaxBytes()` in the scripts, `config.logMaxBytes` in TypeScript) before each append, so the same variable caps it; in the hook scripts `appendJevLogLine(fileName, entry)` from `scripts/lib/jev-shadow.mjs` does both, in the same directory as the resolver.
 
 `jev-eval` reads only `shadow.jsonl` by default. Pass `--include-rotated` to read the rotated files of the same log first, oldest first:
 
@@ -741,11 +741,11 @@ With `OMC_JEV_LOG_CONTEXT=1` every line written to the Jev logs names the hook c
 
 The ids come from the hook input. Only non-empty strings are kept, each cut to 1000 characters, and a field the host does not send is left out. They travel in the request file the hook hands to the resolver and end up in the local log only: the body sent to Jev is still `state`, `questions` and `model`. `cwd` is a local path, so keep that in mind before you share a log.
 
-In active mode a hook waits for its resolver for `OMC_JEV_TIMEOUT_MS` plus 500 ms. A resolver killed at that limit (for example after a slow cold start) or ended with a non-zero status writes no line, so with the variable the hook writes one for it: `ts`, `point`, the ids, `mode: "degraded"`, `reason` (`resolver-timeout` or `resolver-exit`) and `durationMs`, with no state and no answers. `jev-eval` counts it as a degraded request. A resolver killed just after writing its own line leaves two lines with one `request_id`.
+In active mode a hook waits for its resolver for `OMC_JEV_TIMEOUT_MS` plus 500 ms. A resolver killed at that limit (for example after a slow cold start) or ended with a non-zero status writes no line, so with the variable the hook writes one for it: `ts`, `point`, the ids, `mode: "degraded"`, `reason` (`resolver-timeout`, `resolver-spawn` when it could not be started, or `resolver-exit`), `status` or `signal` when there is one, and `durationMs`, with no state and no answers. `jev-eval` counts it as a degraded request. A resolver killed just after writing its own line leaves two lines with one `request_id`.
 
 The variable also changes `jev` and `confidence`: they belong to the first question of the request and are `null` (and absent) when Jev did not answer it, instead of the first answer in server order. `jev-eval` compares `heuristic`, which always answers the first question, with `jev`, so such a line is no longer compared with the answer to another question. The answer the hook acts on does not change.
 
-Without the variable, log lines, requests and resolver results are exactly as before. The TypeScript resolver follows the same variable for its own lines and logs the ids a caller passes as `logContext`; its current callers pass none, so their lines carry only `request_id`.
+Without the variable, log lines, requests and resolver results are exactly as before. To find the log directory, a hook process resolves it once, the way the resolver does, when this variable or `OMC_JEV_APPLIED_LOG` is set and Jev can send requests; with the plugin's built `dist` the lookup is cached, without it the fallback can spawn `git` up to three times, and setting `OMC_JEV_LOG_DIR` skips it. The TypeScript resolver follows the same variable for its own lines and logs the ids a caller passes as `logContext`: the `loop-continuation` and `simplifier-trigger` points pass their `session_id` and `cwd`, the other TypeScript callers pass none yet, so their lines carry only `request_id`.
 
 #### Applied log
 
@@ -753,11 +753,11 @@ Without the variable, log lines, requests and resolver results are exactly as be
 
 | Point | Line written when | `applied` |
 |-------|-------------------|-----------|
-| `model-routing` | the hook output carries Jev's model or effort in `updatedInput` and it differs from the call's | `subagent_type`, and `model` and/or `effort` as `{from, to}`; `effort` also has the `score` |
-| `context-pruning` | Jev's staleness changed the compaction action | `action: {from, to}`, `staleness` |
-| `skill-trigger` | Jev's choice changed the triggered keywords | `keywords: {from, to}`, `choice` |
+| `model-routing` | the hook output carries Jev's model or effort in `updatedInput` and it differs from what the agent would have run on (the call's model, else the one its agent definition names) | `subagent_type`, and `model` and/or `effort` as `{from, to}`; `effort` also has the `score` |
+| `context-pruning` | Jev's staleness changed the compaction action | `action: {from, to}`, `staleness`, and `message`: what the hook printed (`none`, `warning`, `critical`, or `suppressed` by the warning cooldown) |
+| `skill-trigger` | Jev's choice changed the triggered keywords (a later `task-size` suppression has its own line) | `keywords: {from, to}`, `choice` |
 | `task-size` | Jev's `small` suppressed heavy modes | `size`, `confidence`, `suppressed` (the keywords removed) |
-| `loop-continuation` | Jev's "task complete" ended the mode instead of blocking the stop | `mode`, `completed: {from: false, to: true}` |
+| `loop-continuation` | Jev's "task complete" ended the mode (another active mode can still block the stop) | `mode`, `completed: {from: false, to: true}` |
 
 Each line is `{ts, point, applied}`. With `OMC_JEV_LOG_CONTEXT=1` as well, the ids of the hook call and the `request_id` of the request follow `point`, so the line joins the request's `shadow.jsonl` line, which holds the answer itself:
 

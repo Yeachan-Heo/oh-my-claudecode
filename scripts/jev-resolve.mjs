@@ -328,9 +328,10 @@ async function logDirFor(env) {
 /**
  * Mirror of the resolver's shadow-log entry (ShadowLogEntry): the jev-eval
  * tool compares lines regardless of which side wrote them. maxBytes is the
- * rotation limit (resolveJevLogMaxBytes); 0 appends as before.
+ * rotation limit (resolveJevLogMaxBytes, from this process's environment
+ * when not given); 0 appends as before.
  */
-async function writeShadowLog(entry, logDir, maxBytes) {
+async function writeShadowLog(entry, logDir, maxBytes = resolveJevLogMaxBytes()) {
   try {
     await mkdir(logDir, { recursive: true });
     rotateJevLog(join(logDir, "shadow.jsonl"), maxBytes);
@@ -359,6 +360,10 @@ export async function resolveRequest(
   if (mode === "off") {
     return { mode, answer: null, answers: null, confidence: undefined, durationMs: 0 };
   }
+  // OMC_JEV_LOG_CONTEXT: the call's ids for every line of this request, and
+  // the line's `jev` and confidence from the first question only (null when
+  // Jev did not answer it).
+  const logContext = isJevLogContextEnabled(env) ? jevLogContextOf(request.context) : undefined;
   // Only the state carries user text. Question definitions are static text
   // written by the hook scripts and go out whole: bounding them would cut the
   // model-routing effort instructions (295 characters) and the intent
@@ -378,9 +383,6 @@ export async function resolveRequest(
   });
   let jevAnswer = null;
   let jevAnswers = null;
-  // OMC_JEV_LOG_CONTEXT: the call's ids, and the line's `jev` and confidence
-  // from the first question only (null when Jev did not answer it).
-  const logContext = isJevLogContextEnabled(env) ? jevLogContextOf(request.context) : undefined;
   let firstOnly = null;
   let confidence;
   let entryMode = mode;

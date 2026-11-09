@@ -614,6 +614,8 @@ async function maybeBuildPreemptiveCompactionMessage(toolName, data, directory) 
   // critical threshold: at or above it the hook always asks for /compact.
   // The Jev call above still runs there so the shadow log keeps the
   // comparison; it is the rare case and is bounded by OMC_JEV_TIMEOUT_MS.
+  // OMC_JEV_APPLIED_LOG: the action Jev changed, written with the message it led to.
+  let appliedPruning;
   if (jevResult && jevResult.mode === 'active' && jevResult.answer && percentUsed < criticalThreshold) {
     const label = stalenessLabelOf(jevResult.answer);
     const heuristicAction = action;
@@ -627,12 +629,13 @@ async function maybeBuildPreemptiveCompactionMessage(toolName, data, directory) 
     }
     // Otherwise keep the heuristic action
     if (action !== heuristicAction) {
-      recordJevApplied('context-pruning', { action: { from: heuristicAction, to: action }, staleness: label });
+      appliedPruning = { action: { from: heuristicAction, to: action }, staleness: label };
     }
   }
 
   // Build message based on the computed action
   if (action === 'none') {
+    if (appliedPruning) recordJevApplied('context-pruning', { ...appliedPruning, message: 'none' });
     return '';
   }
 
@@ -641,10 +644,12 @@ async function maybeBuildPreemptiveCompactionMessage(toolName, data, directory) 
   const severity = action === 'compact' ? 'critical' : 'warning';
 
   if (shouldSuppressPreemptiveWarning(directory, sessionId, severity, now)) {
+    if (appliedPruning) recordJevApplied('context-pruning', { ...appliedPruning, message: 'suppressed' });
     return '';
   }
 
   writePreemptiveCooldownState(directory, sessionId, severity, now);
+  if (appliedPruning) recordJevApplied('context-pruning', { ...appliedPruning, message: severity });
   return buildPreemptiveContextMessage(percentUsed, severity);
 }
 
