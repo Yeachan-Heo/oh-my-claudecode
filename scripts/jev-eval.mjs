@@ -23,6 +23,9 @@ import { pathToFileURL } from 'node:url';
 import { resolveOmcStateRoot } from './lib/state-root.mjs';
 
 const MODES = ['shadow', 'active', 'degraded', 'off', 'cap', 'circuit-open'];
+// Calls held back by the request cap or an open breaker were never sent: they
+// count in their mode, not as latency samples.
+const HELD_BACK_MODES = new Set(['cap', 'circuit-open']);
 const MAX_EXAMPLES = 5;
 const BOUND_CHARS = 200;
 
@@ -141,7 +144,8 @@ export function analyzeLog(text, logPath) {
       stats.modes[entry.mode] += 1;
     }
     const duration = typeof entry.durationMs === 'number' && Number.isFinite(entry.durationMs) ? entry.durationMs : 0;
-    (stats._durations ??= []).push(duration);
+    stats._durations ??= [];
+    if (!HELD_BACK_MODES.has(entry.mode)) stats._durations.push(duration);
 
     const verdict = comparePair(entry.heuristic, entry.jev);
     if (verdict === null) {
@@ -173,9 +177,9 @@ export function analyzeLog(text, logPath) {
       stats.agreementRate = round2(stats.agree / stats.comparable);
     }
     const durations = stats._durations.sort((a, b) => a - b);
-    const mean = durations.reduce((sum, d) => sum + d, 0) / durations.length;
+    const mean = durations.length ? durations.reduce((sum, d) => sum + d, 0) / durations.length : 0;
     const p95Index = Math.max(0, Math.ceil(0.95 * durations.length) - 1);
-    stats.durationMs = { mean: round2(mean), p95: durations[p95Index] };
+    stats.durationMs = { mean: round2(mean), p95: durations[p95Index] ?? 0 };
     delete stats._durations;
   }
 

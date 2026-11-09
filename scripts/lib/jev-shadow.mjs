@@ -19,10 +19,89 @@ import {
 import { homedir, tmpdir } from "node:os";
 import { basename, dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { parseJevEnv, resolveJevTimeoutMs } from "../jev-resolve.mjs";
+import { parseJevEnv, resolveJevEndpoint, resolveJevTimeoutMs } from "../jev-resolve.mjs";
 
 const SWEEP_THROTTLE_MS = 60 * 60 * 1000; // 1 hour
 const ACTIVE_RESOLVER_TIMEOUT_BUFFER_MS = 500;
+
+// Opt-in shared breaker (OMC_JEV_BREAKER=1, see jev-breaker.mjs): the hook
+// shows one notice per session and outage. Without the variable the module is
+// not loaded; a module that fails to load means no notice, never a failed hook.
+let jevBreaker;
+if (String(process.env.OMC_JEV_BREAKER ?? "").trim() === "1") {
+  try {
+    jevBreaker = await import("./jev-breaker.mjs");
+  } catch {
+    jevBreaker = undefined;
+  }
+}
+let jevSessionId;
+
+/**
+ * Tell the Jev channel which Claude Code session this hook call belongs to
+ * (the hook input's session_id). Used only to show the breaker's outage
+ * notice once per session; without it the notice is once per outage.
+ */
+export function setJevSessionId(sessionId) {
+  jevSessionId = typeof sessionId === "string" && sessionId ? sessionId : undefined;
+}
+
+let outageNoticeArmed = false;
+
+/**
+ * Add the breaker's outage notice to this hook's own output: the first JSON
+ * object the hook writes to stdout gets a `systemMessage` (appended to one it
+ * already has). The notice is claimed only when that write happens, so a hook
+ * that exits without output does not use it up, and only one process per
+ * session and outage shows it. Never throws.
+ */
+function armOutageNotice(settings, breaker) {
+  if (outageNoticeArmed || !settings || !breaker) return;
+  outageNoticeArmed = true;
+  try {
+    const write = process.stdout.write;
+    let done = false;
+    process.stdout.write = function writeWithJevNotice(chunk, ...rest) {
+      if (!done && typeof chunk === "string" && chunk.trimStart().startsWith("{")) {
+        try {
+          const output = JSON.parse(chunk);
+          if (output && typeof output === "object" && !Array.isArray(output)) {
+            done = true;
+            process.stdout.write = write;
+            // The file's state at write time: concurrent openers may have
+            // extended it, and a breaker that closed meanwhile needs no notice.
+            const shown = jevBreaker.readBreaker(settings);
+            const message = shown && jevBreaker.claimOutageNotice(settings, jevSessionId, shown);
+            if (message) {
+              // Also on stderr, for hosts that do not display systemMessage.
+              process.stderr.write(message + "\n");
+              output.systemMessage = typeof output.systemMessage === "string" && output.systemMessage
+                ? output.systemMessage + "\n" + message
+                : message;
+              const indent = /^\{\r?\n( +)"/.exec(chunk.trimStart())?.[1].length ?? 0;
+              chunk = JSON.stringify(output, null, indent) + (chunk.endsWith("\n") ? "\n" : "");
+            }
+          }
+        } catch {
+          // Not one JSON object: written unchanged.
+        }
+      }
+      return write.call(this, chunk, ...rest);
+    };
+  } catch {
+    // The notice is advisory.
+  }
+}
+
+/** Breaker settings for this hook process, or undefined without OMC_JEV_BREAKER=1. */
+function hookBreakerSettings() {
+  if (!jevBreaker) return undefined;
+  try {
+    return jevBreaker.breakerSettings(process.env, resolveJevEndpoint(process.env), process.env.TYPESAFE_API_KEY);
+  } catch {
+    return undefined;
+  }
+}
 
 /**
  * Get the cross-process sweep throttle marker path.
@@ -276,6 +355,7 @@ export function sweepStaleTempDirs(maxAgeMs = 24 * 60 * 60 * 1000) {
  * Fire-and-record one script-side judgment.
  * - Shadow mode: fire-and-forget, returns undefined immediately
  * - Active mode: waits (sync) for Jev answer, returns { mode, answer, answers, ... }
+ *   (not while the opt-in shared breaker is open: then as in shadow mode)
  *   (`answers` maps every question name to its answer; read multi-question
  *   points by name, never by position)
  * - Off mode: returns undefined
@@ -286,6 +366,13 @@ export function sweepStaleTempDirs(maxAgeMs = 24 * 60 * 60 * 1000) {
 export function recordJevShadow({ point, state, questions, heuristic, permissionMode }) {
   const mode = jevModeFor(point, process.env, permissionMode);
   if (mode === "off") return undefined;
+  // Opt-in shared breaker: the resolver holds the call back itself and logs
+  // it. While the breaker is open an active hook does not wait for that: the
+  // resolver runs in the background as in shadow mode and the twin decides.
+  const breakerSettings = hookBreakerSettings();
+  const openBreaker = breakerSettings && jevBreaker.readBreaker(breakerSettings);
+  if (openBreaker) armOutageNotice(breakerSettings, openBreaker);
+  const spawnMode = openBreaker ? "shadow" : mode;
 
   // Throttled best-effort sweep of stale temp directories (once per hour)
   // This cleans up leftovers from killed resolvers that couldn't clean themselves
@@ -325,7 +412,7 @@ export function recordJevShadow({ point, state, questions, heuristic, permission
       },
     );
 
-    if (mode === "shadow") {
+    if (spawnMode === "shadow") {
       // Fire-and-forget for shadow mode
       const child = spawn(
         process.execPath,
@@ -354,7 +441,7 @@ export function recordJevShadow({ point, state, questions, heuristic, permission
     }
 
     // Active mode: spawn synchronously and read result
-    if (mode === "active") {
+    if (spawnMode === "active") {
       try {
         const result = spawnSync(
           process.execPath,
@@ -376,7 +463,10 @@ export function recordJevShadow({ point, state, questions, heuristic, permission
 
         if (result.status === 0 && result.stdout) {
           try {
-            return JSON.parse(result.stdout);
+            const parsed = JSON.parse(result.stdout);
+            // This request opened the shared breaker.
+            if (breakerSettings && parsed?.breaker) armOutageNotice(breakerSettings, parsed.breaker);
+            return parsed;
           } catch {
             // Parse error: fall back to heuristic
             return undefined;

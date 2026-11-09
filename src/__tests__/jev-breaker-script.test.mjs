@@ -1,0 +1,678 @@
+/* global process, setTimeout, clearTimeout */
+/**
+ * Tests for the opt-in shared Jev breaker and request limit
+ * (scripts/lib/jev-breaker.mjs) on the script channel: the library itself,
+ * scripts/jev-resolve.mjs in process and as concurrent child processes, and
+ * the one-time outage notice in a real hook script (pre-tool-enforcer.mjs).
+ *
+ * .mjs so vitest picks it up without tsc typechecking the untyped scripts.
+ */
+
+import { execFileSync, spawn } from 'node:child_process';
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { createServer } from 'node:http';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { fileURLToPath, pathToFileURL } from 'node:url';
+import { afterAll, beforeEach, describe, expect, it } from 'vitest';
+
+import {
+  BREAKER_MAX_SECONDS,
+  POINT_PRIORITY,
+  admitRequest,
+  breakerSettings,
+  classifyFailure,
+  minuteKey,
+  outageMessage,
+  readBreaker,
+  recordFailure,
+  reserveRequest,
+  retryAfterSeconds,
+  thresholdFor,
+} from '../../scripts/lib/jev-breaker.mjs';
+import { resolveRequest } from '../../scripts/jev-resolve.mjs';
+import { JUDGMENT_POINTS } from '../hooks/jev/points.ts';
+import { resetJevResolverState, resolveJudgment } from '../hooks/jev/resolver.ts';
+
+const root = join(fileURLToPath(import.meta.url), '..', '..', '..');
+const NODE = process.execPath;
+const RESOLVER = join(root, 'scripts', 'jev-resolve.mjs');
+const ENFORCER = join(root, 'scripts', 'pre-tool-enforcer.mjs');
+
+const tmp = mkdtempSync(join(tmpdir(), 'jev-breaker-test-'));
+// Detached resolvers may still be closing files: retry the removal (Windows reports EPERM meanwhile).
+const cleanups = [() => rmSync(tmp, { recursive: true, force: true, maxRetries: 60, retryDelay: 250 })];
+afterAll(async () => {
+  for (const fn of cleanups.reverse()) await fn();
+});
+
+const QUESTIONS = { slop_advisory: { type: 'noul', criteria: { yes: 'advisory', no: 'plain' } } };
+const ENDPOINT = 'http://127.0.0.1:9/v1/systemone';
+let caseDir = '';
+let caseCount = 0;
+
+beforeEach(() => {
+  caseCount += 1;
+  caseDir = join(tmp, 'case-' + caseCount);
+  mkdirSync(caseDir, { recursive: true });
+});
+
+/** The parent environment without any Jev or TypeSafe variable, so a developer's own settings never leak in. */
+function cleanParentEnv() {
+  const env = {};
+  for (const [key, value] of Object.entries(process.env)) {
+    if (!key.startsWith('OMC_JEV') && !key.startsWith('TYPESAFE_')) env[key] = value;
+  }
+  return env;
+}
+
+function jevEnv(overrides = {}) {
+  return {
+    TYPESAFE_API_KEY: 'test-key',
+    OMC_JEV: 'slop-warning,model-routing',
+    OMC_JEV_LOG_DIR: join(caseDir, 'log'),
+    OMC_JEV_BREAKER_DIR: join(caseDir, 'breaker'),
+    OMC_JEV_ENDPOINT: ENDPOINT,
+    ...overrides,
+  };
+}
+
+function request(point = 'slop-warning') {
+  return { point, state: { toolName: 'Bash' }, questions: QUESTIONS, heuristic: false };
+}
+
+function okResponse() {
+  return { ok: true, status: 200, json: async () => ({ answers: { slop_advisory: { type: 'noul', noul: false, confidence: 0.9 } } }) };
+}
+
+/** A failed response whose body must never be read: the breaker classifies by status and headers only. */
+function errorResponse(status, headers = {}) {
+  const lower = Object.fromEntries(Object.entries(headers).map(([key, value]) => [key.toLowerCase(), value]));
+  return {
+    ok: false,
+    status,
+    headers: { get: (name) => lower[name.toLowerCase()] ?? null },
+    json: async () => { throw new Error('the body of a failed response must not be read'); },
+    text: async () => { throw new Error('the body of a failed response must not be read'); },
+  };
+}
+
+function countingFetch(handler) {
+  const calls = [];
+  const fetchFn = async (url, init) => {
+    calls.push({ url, init });
+    return handler(calls.length);
+  };
+  return { fetchFn, calls };
+}
+
+function logRows(env) {
+  const path = join(env.OMC_JEV_LOG_DIR, 'shadow.jsonl');
+  return existsSync(path) ? readFileSync(path, 'utf8').trim().split('\n').filter(Boolean).map((line) => JSON.parse(line)) : [];
+}
+
+function settingsFor(env) {
+  return breakerSettings(env, env.OMC_JEV_ENDPOINT, env.TYPESAFE_API_KEY);
+}
+
+/**
+ * Run `body(dir)` so that a per-minute count stays inside one UTC minute: it
+ * starts after waiting out the last seconds of a minute, and when the run
+ * still crossed into the next minute it runs once more on fresh state.
+ * Returns what the valid run returned; the caller asserts on it.
+ */
+async function inOneMinute(body, seconds = 10) {
+  for (let attempt = 0; ; attempt += 1) {
+    const left = 60_000 - (Date.now() % 60_000);
+    if (left < seconds * 1000) await new Promise((resolve) => setTimeout(resolve, left + 50));
+    const start = minuteKey();
+    const result = await body(join(caseDir, 'attempt-' + attempt));
+    if (minuteKey() === start || attempt === 1) return result;
+  }
+}
+
+describe('jev-breaker library', () => {
+  it('is off without OMC_JEV_BREAKER=1 and without a positive OMC_JEV_MAX_RPM', () => {
+    expect(breakerSettings({}, ENDPOINT, 'k')).toBeUndefined();
+    for (const value of ['0', '', ' ', '1.5', '-3', 'abc', '10rpm']) {
+      expect(breakerSettings({ OMC_JEV_MAX_RPM: value }, ENDPOINT, 'k')).toBeUndefined();
+    }
+    for (const value of ['0', 'true', 'yes', '']) {
+      expect(breakerSettings({ OMC_JEV_BREAKER: value }, ENDPOINT, 'k')).toBeUndefined();
+    }
+    expect(breakerSettings({ OMC_JEV_BREAKER: '1' }, ENDPOINT, 'k')).toMatchObject({ breaker: true, maxRpm: undefined });
+    expect(breakerSettings({ OMC_JEV_MAX_RPM: ' 48 ' }, ENDPOINT, 'k')).toMatchObject({ breaker: false, maxRpm: 48 });
+  });
+
+  it('keeps one state directory per endpoint and key, without the key in the path', () => {
+    const env = { OMC_JEV_BREAKER: '1', OMC_JEV_BREAKER_DIR: caseDir };
+    const a = breakerSettings(env, ENDPOINT, 'secret-key-a').dir;
+    expect(breakerSettings(env, ENDPOINT, 'secret-key-a').dir).toBe(a);
+    expect(breakerSettings(env, ENDPOINT, 'secret-key-b').dir).not.toBe(a);
+    expect(breakerSettings(env, 'https://other.example/v1/systemone', 'secret-key-a').dir).not.toBe(a);
+    expect(a).not.toContain('secret-key-a');
+    expect(a.startsWith(caseDir)).toBe(true);
+  });
+
+  it('classifies failures by HTTP status and missing response only', () => {
+    const now = Date.parse('2026-11-09T12:00:00Z');
+    expect(classifyFailure({ status: 429 }, now)).toEqual({ reason: 'http-429', opens: true, seconds: 60 });
+    for (const status of [500, 502, 503, 504, 599]) {
+      expect(classifyFailure({ status }, now)).toEqual({ reason: 'http-' + status, opens: true, seconds: 60 });
+    }
+    for (const status of [401, 402, 403]) {
+      expect(classifyFailure({ status }, now)).toEqual({ reason: 'http-' + status, opens: true, seconds: 600 });
+    }
+    for (const status of [400, 404, 408, 409, 413, 422]) {
+      expect(classifyFailure({ status }, now)).toBeUndefined();
+    }
+    expect(classifyFailure({ noResponse: true }, now)).toEqual({ reason: 'no-response', opens: false });
+    expect(classifyFailure({}, now)).toBeUndefined();
+    expect(classifyFailure(undefined, now)).toBeUndefined();
+  });
+
+  it('honors Retry-After in seconds or as an HTTP date, capped at 30 minutes', () => {
+    const now = Date.parse('2026-11-09T12:00:00Z');
+    expect(classifyFailure({ status: 429, retryAfter: '178' }, now).seconds).toBe(178);
+    expect(classifyFailure({ status: 503, retryAfter: new Date(now + 90_000).toUTCString() }, now).seconds).toBe(90);
+    expect(classifyFailure({ status: 402, retryAfter: '86400' }, now).seconds).toBe(BREAKER_MAX_SECONDS);
+    expect(classifyFailure({ status: 429, retryAfter: 'soon' }, now).seconds).toBe(60);
+    expect(retryAfterSeconds('0', now)).toBe(1);
+    expect(retryAfterSeconds(new Date(now - 5000).toUTCString(), now)).toBe(1);
+    expect(retryAfterSeconds(undefined, now)).toBeUndefined();
+    expect(retryAfterSeconds('', now)).toBeUndefined();
+    // Decimal seconds round up instead of being read as a year by a lenient date parser.
+    expect(retryAfterSeconds('1.5', now)).toBe(2);
+    expect(retryAfterSeconds('0.5', now)).toBe(1);
+    expect(classifyFailure({ status: 429, retryAfter: '1.5' }, now).seconds).toBe(2);
+    // Obsolete HTTP-date forms recipients must accept.
+    expect(retryAfterSeconds('Monday, 09-Nov-26 12:02:00 GMT', now)).toBe(120);
+    expect(retryAfterSeconds('Mon Nov  9 12:01:30 2026', now)).toBe(90);
+    // Anything else falls back to the default.
+    for (const value of ['-5', '2001', '1e3', '12:30', 'Nov 9 2026', '2026-11-09T12:05:00Z']) {
+      expect([value, classifyFailure({ status: 429, retryAfter: value }, now).seconds]).toEqual([value, value === '2001' ? 1800 : 60]);
+    }
+  });
+
+  it('gives every registered judgment point a priority', () => {
+    expect(Object.keys(POINT_PRIORITY).sort()).toEqual(Object.keys(JUDGMENT_POINTS).sort());
+    for (const priority of Object.values(POINT_PRIORITY)) expect(['high', 'medium', 'low']).toContain(priority);
+  });
+
+  it('derives per-priority thresholds from the limit', () => {
+    expect([thresholdFor(10, 'slop-warning'), thresholdFor(10, 'intent'), thresholdFor(10, 'model-routing')]).toEqual([6, 9, 10]);
+    expect([thresholdFor(48, 'context-pruning'), thresholdFor(48, 'task-size'), thresholdFor(48, 'ralph-verdict')]).toEqual([29, 41, 48]);
+    expect([thresholdFor(1, 'slop-warning'), thresholdFor(1, 'skill-trigger'), thresholdFor(1, 'loop-continuation')]).toEqual([1, 1, 1]);
+    expect(thresholdFor(10, 'some-new-point')).toBe(9);
+  });
+
+  it('drops low-priority requests first and never lets a refused request take a slot', () => {
+    const settings = breakerSettings({ OMC_JEV_MAX_RPM: '10', OMC_JEV_BREAKER_DIR: caseDir }, ENDPOINT, 'k');
+    const now = Date.parse('2026-11-09T12:00:10Z');
+    const low = Array.from({ length: 8 }, () => reserveRequest(settings, 'slop-warning', now).ok);
+    expect(low.filter(Boolean).length).toBe(6);
+    const medium = Array.from({ length: 4 }, () => reserveRequest(settings, 'intent', now).ok);
+    expect(medium).toEqual([true, true, true, false]);
+    const high = Array.from({ length: 3 }, () => reserveRequest(settings, 'model-routing', now).ok);
+    expect(high).toEqual([true, false, false]);
+    expect(reserveRequest(settings, 'slop-warning', now)).toEqual({ ok: false, priority: 'low', count: 10, threshold: 6, limit: 10 });
+    // A new minute starts from zero.
+    expect(reserveRequest(settings, 'slop-warning', now + 60_000).ok).toBe(true);
+  });
+
+  it('removes counters older than ten minutes when a new minute starts', () => {
+    const settings = breakerSettings({ OMC_JEV_MAX_RPM: '5', OMC_JEV_BREAKER_DIR: caseDir }, ENDPOINT, 'k');
+    const start = Date.parse('2026-11-09T12:00:10Z');
+    reserveRequest(settings, 'intent', start);
+    reserveRequest(settings, 'intent', start + 5 * 60_000);
+    reserveRequest(settings, 'intent', start + 11 * 60_000);
+    const minutes = readdirSync(settings.dir).filter((name) => name.startsWith('rpm-')).sort();
+    expect(minutes).toEqual(['rpm-' + minuteKey(start + 5 * 60_000), 'rpm-' + minuteKey(start + 11 * 60_000)]);
+  });
+
+  it('opens on three requests without a response within a minute, not on two or on old ones', () => {
+    const settings = breakerSettings({ OMC_JEV_BREAKER: '1', OMC_JEV_BREAKER_DIR: caseDir }, ENDPOINT, 'k');
+    const now = Date.parse('2026-11-09T12:00:00Z');
+    const noResponse = classifyFailure({ noResponse: true });
+    expect(recordFailure(settings, noResponse, now - 120_000)).toBeUndefined();
+    expect(recordFailure(settings, noResponse, now)).toBeUndefined();
+    expect(recordFailure(settings, noResponse, now + 1000)).toBeUndefined();
+    const opened = recordFailure(settings, noResponse, now + 2000);
+    expect(opened).toMatchObject({ reason: 'no-response', until: now + 2000 + 60_000 });
+  });
+
+  it('never shortens an open breaker and keeps the start of one outage', () => {
+    const settings = breakerSettings({ OMC_JEV_BREAKER: '1', OMC_JEV_BREAKER_DIR: caseDir }, ENDPOINT, 'k');
+    const now = Date.parse('2026-11-09T12:00:00Z');
+    const first = recordFailure(settings, classifyFailure({ status: 402 }), now);
+    expect(first).toEqual({ until: now + 600_000, reason: 'http-402', since: now });
+    // A shorter one leaves it as it is.
+    expect(recordFailure(settings, classifyFailure({ status: 429 }), now + 1000)).toEqual(first);
+    // Expired and opened again within 15 minutes: the same outage.
+    const again = recordFailure(settings, classifyFailure({ status: 429 }), now + 600_000 + 5 * 60_000);
+    expect(again.since).toBe(now);
+    // Much later: a new outage.
+    const later = recordFailure(settings, classifyFailure({ status: 429 }), now + 3 * 3_600_000);
+    expect(later.since).toBe(now + 3 * 3_600_000);
+  });
+
+  it('ignores an expired, corrupt or far-future breaker file (fail-open)', () => {
+    const settings = breakerSettings({ OMC_JEV_BREAKER: '1', OMC_JEV_BREAKER_DIR: caseDir }, ENDPOINT, 'k');
+    mkdirSync(settings.dir, { recursive: true });
+    const now = Date.now();
+    const write = (text) => writeFileSync(join(settings.dir, 'breaker.json'), text);
+    write(JSON.stringify({ until: now - 1000, reason: 'http-429', since: now - 61_000 }));
+    expect(readBreaker(settings, now)).toBeUndefined();
+    write('{not json');
+    expect(readBreaker(settings, now)).toBeUndefined();
+    expect(admitRequest(settings, 'slop-warning', now)).toEqual({});
+    write(JSON.stringify({ until: now + 24 * 3_600_000, reason: 'http-429', since: now }));
+    expect(readBreaker(settings, now)).toBeUndefined();
+    write(JSON.stringify({ until: now + 60_000, reason: 'http-429', since: now }));
+    expect(readBreaker(settings, now)).toEqual({ until: now + 60_000, reason: 'http-429', since: now });
+    // Without OMC_JEV_BREAKER the same open file is not read.
+    expect(readBreaker({ ...settings, breaker: false }, now)).toBeUndefined();
+  });
+
+  it('describes the outage in one line, never naming a time before the breaker closes', () => {
+    const until = new Date(2026, 10, 9, 14, 32).getTime();
+    expect(outageMessage({ until, reason: 'http-429', since: until - 60_000 }))
+      .toBe('[OMC] Jev requests paused until 14:32 (HTTP 429); hooks decide without Jev until then.');
+    expect(outageMessage({ until: until + 45_000, reason: 'http-503', since: until - 60_000 })).toContain('until 14:33 (HTTP 503)');
+    expect(outageMessage({ until, reason: 'no-response', since: until - 60_000 })).toContain('(no response from the Jev endpoint)');
+  });
+
+  it('keeps the later end when a concurrent opener wrote an earlier one', () => {
+    const settings = breakerSettings({ OMC_JEV_BREAKER: '1', OMC_JEV_BREAKER_DIR: caseDir }, ENDPOINT, 'k');
+    const now = Date.parse('2026-11-09T12:00:00Z');
+    recordFailure(settings, classifyFailure({ status: 402 }), now);
+    // Another process that read the file before this opener landed replaces it with its own 60 s breaker.
+    writeFileSync(join(settings.dir, 'breaker.json'), JSON.stringify({ until: now + 60_000, reason: 'http-429', since: now }));
+    expect(recordFailure(settings, classifyFailure({ status: 402 }), now + 100)).toMatchObject({ until: now + 100 + 600_000, reason: 'http-402', since: now });
+  });
+});
+
+describe('resolveRequest with the shared breaker and limit', () => {
+  it('without OMC_JEV_BREAKER and OMC_JEV_MAX_RPM: every request goes out, no state files, no new fields', async () => {
+    const env = jevEnv();
+    const { fetchFn, calls } = countingFetch((n) => (n === 1 ? errorResponse(429, { 'Retry-After': '120' }) : okResponse()));
+    const first = await resolveRequest(request(), env, fetchFn);
+    const second = await resolveRequest(request(), env, fetchFn);
+    expect(calls).toHaveLength(2);
+    expect(Object.keys(first).sort()).toEqual(['answer', 'answers', 'confidence', 'durationMs', 'mode']);
+    expect(first.mode).toBe('degraded');
+    expect(second.mode).toBe('shadow');
+    expect(existsSync(env.OMC_JEV_BREAKER_DIR)).toBe(false);
+    const rows = logRows(env);
+    expect(rows.map((row) => row.mode)).toEqual(['degraded', 'shadow']);
+    for (const row of rows) {
+      expect(Object.keys(row).sort()).toEqual(['answers', 'confidence', 'durationMs', 'heuristic', 'jev', 'mode', 'point', 'state', 'ts'].filter((key) => key !== 'confidence' || row.confidence !== undefined));
+    }
+  });
+
+  it('a 429 opens the breaker for Retry-After; later requests send nothing and end as circuit-open', async () => {
+    const env = jevEnv({ OMC_JEV_BREAKER: '1' });
+    const { fetchFn, calls } = countingFetch(() => errorResponse(429, { 'Retry-After': '120' }));
+    const before = Date.now();
+    const first = await resolveRequest(request(), env, fetchFn);
+    expect(first.mode).toBe('degraded');
+    expect(first.breaker).toMatchObject({ reason: 'http-429' });
+    expect(first.breaker.until).toBeGreaterThanOrEqual(before + 120_000);
+    expect(first.breaker.until).toBeLessThanOrEqual(Date.now() + 120_000);
+    for (let i = 0; i < 5; i += 1) {
+      const held = await resolveRequest(request(i % 2 ? 'model-routing' : 'slop-warning'), env, fetchFn);
+      expect(held).toMatchObject({ mode: 'circuit-open', answer: null, answers: null, breaker: { reason: 'http-429' } });
+    }
+    expect(calls).toHaveLength(1);
+    const rows = logRows(env);
+    expect(rows.map((row) => row.mode)).toEqual(['degraded', 'circuit-open', 'circuit-open', 'circuit-open', 'circuit-open', 'circuit-open']);
+    expect(rows[1]).toMatchObject({ point: 'slop-warning', reason: 'http-429', jev: null, answers: null, heuristic: false, state: { toolName: 'Bash' } });
+    expect(new Date(rows[1].until).getTime()).toBe(first.breaker.until);
+  });
+
+  it('opens on 401, 402, 403 and 5xx, not on other 4xx or an invalid body', async () => {
+    for (const [status, opens] of [[401, true], [402, true], [403, true], [500, true], [503, true], [400, false], [404, false], [422, false]]) {
+      const env = jevEnv({ OMC_JEV_BREAKER: '1', OMC_JEV_BREAKER_DIR: join(caseDir, 'breaker-' + status) });
+      const { fetchFn, calls } = countingFetch(() => errorResponse(status));
+      await resolveRequest(request(), env, fetchFn);
+      const next = await resolveRequest(request(), env, fetchFn);
+      expect([status, next.mode]).toEqual([status, opens ? 'circuit-open' : 'degraded']);
+      expect(calls).toHaveLength(opens ? 1 : 2);
+    }
+    const env = jevEnv({ OMC_JEV_BREAKER: '1', OMC_JEV_BREAKER_DIR: join(caseDir, 'breaker-invalid') });
+    const { fetchFn, calls } = countingFetch(() => ({ ok: true, status: 200, json: async () => ({ nope: true }) }));
+    for (let i = 0; i < 4; i += 1) expect((await resolveRequest(request(), env, fetchFn)).mode).toBe('degraded');
+    expect(calls).toHaveLength(4);
+  });
+
+  it('counts network errors and timeouts as no response: the third within a minute opens the breaker', async () => {
+    const env = jevEnv({ OMC_JEV_BREAKER: '1', OMC_JEV_TIMEOUT_MS: '50' });
+    let calls = 0;
+    const fetchFn = async () => {
+      calls += 1;
+      if (calls === 2) return new Promise(() => {}); // never answers: the 50 ms timeout fires
+      throw new TypeError('fetch failed');
+    };
+    expect((await resolveRequest(request(), env, fetchFn)).breaker).toBeUndefined();
+    expect((await resolveRequest(request(), env, fetchFn)).breaker).toBeUndefined();
+    const third = await resolveRequest(request(), env, fetchFn);
+    expect(third.breaker).toMatchObject({ reason: 'no-response' });
+    expect((await resolveRequest(request(), env, fetchFn)).mode).toBe('circuit-open');
+    expect(calls).toBe(3);
+  });
+
+  it('another key is not held back by the breaker of the first one', async () => {
+    const env = jevEnv({ OMC_JEV_BREAKER: '1' });
+    const { fetchFn, calls } = countingFetch((n) => (n === 1 ? errorResponse(401) : okResponse()));
+    await resolveRequest(request(), env, fetchFn);
+    expect((await resolveRequest(request(), env, fetchFn)).mode).toBe('circuit-open');
+    expect((await resolveRequest(request(), { ...env, TYPESAFE_API_KEY: 'new-key' }, fetchFn)).mode).toBe('shadow');
+    expect(calls).toHaveLength(2);
+  });
+
+  it('OMC_JEV_MAX_RPM holds back low-priority points first and logs them as cap', async () => {
+    const { env, low, high, calls } = await inOneMinute(async (dir) => {
+      const env = jevEnv({ OMC_JEV_MAX_RPM: '10', OMC_JEV_BREAKER_DIR: join(dir, 'breaker'), OMC_JEV_LOG_DIR: join(dir, 'log') });
+      const { fetchFn, calls } = countingFetch(() => okResponse());
+      const low = [];
+      for (let i = 0; i < 8; i += 1) low.push((await resolveRequest(request('slop-warning'), env, fetchFn)).mode);
+      const high = [];
+      for (let i = 0; i < 5; i += 1) high.push((await resolveRequest(request('model-routing'), env, fetchFn)).mode);
+      return { env, low, high, calls };
+    });
+    expect(low.filter((mode) => mode === 'shadow')).toHaveLength(6);
+    expect(low.filter((mode) => mode === 'cap')).toHaveLength(2);
+    expect(high).toEqual(['shadow', 'shadow', 'shadow', 'shadow', 'cap']);
+    expect(calls).toHaveLength(10);
+    const capRow = logRows(env).find((row) => row.mode === 'cap');
+    expect(capRow).toMatchObject({ point: 'slop-warning', reason: 'rpm', priority: 'low', rpm: { count: 6, threshold: 6, limit: 10 }, jev: null });
+    // The limit alone never opens the breaker on a failure.
+    const failing = countingFetch(() => errorResponse(429));
+    await resolveRequest(request('model-routing'), { ...env, OMC_JEV_MAX_RPM: '1000' }, failing.fetchFn);
+    await resolveRequest(request('model-routing'), { ...env, OMC_JEV_MAX_RPM: '1000' }, failing.fetchFn);
+    expect(failing.calls).toHaveLength(2);
+    expect(existsSync(join(settingsFor({ ...env, OMC_JEV_MAX_RPM: '1000' }).dir, 'breaker.json'))).toBe(false);
+  });
+
+  it('shares the breaker with the TS resolver in both directions', async () => {
+    const names = ['TYPESAFE_API_KEY', 'OMC_JEV', 'OMC_JEV_LOG_DIR', 'OMC_JEV_BREAKER_DIR', 'OMC_JEV_ENDPOINT', 'OMC_JEV_BREAKER'];
+    const saved = Object.fromEntries(names.map((name) => [name, process.env[name]]));
+    const env = jevEnv({ OMC_JEV_BREAKER: '1' });
+    try {
+      for (const name of names) process.env[name] = env[name];
+      resetJevResolverState();
+      const judge = (fetchFn) => resolveJudgment({ point: 'model-routing', state: { task: 'x' }, questions: QUESTIONS, twin: () => false, fetchFn });
+      // Opened by the script channel, honored by the TS resolver.
+      expect((await resolveRequest(request('model-routing'), env, async () => errorResponse(503))).breaker).toMatchObject({ reason: 'http-503' });
+      const tsCalls = countingFetch(() => okResponse());
+      expect((await judge(tsCalls.fetchFn)).mode).toBe('circuit-open');
+      expect(tsCalls.calls).toHaveLength(0);
+      // Opened by the TS resolver (another key, so another scope), honored by the script channel.
+      process.env.TYPESAFE_API_KEY = 'second-key';
+      await judge(async () => errorResponse(402));
+      const scriptCalls = countingFetch(() => okResponse());
+      expect((await resolveRequest(request(), { ...env, TYPESAFE_API_KEY: 'second-key' }, scriptCalls.fetchFn)).mode).toBe('circuit-open');
+      expect(scriptCalls.calls).toHaveLength(0);
+    } finally {
+      for (const name of names) {
+        if (saved[name] === undefined) delete process.env[name];
+        else process.env[name] = saved[name];
+      }
+      resetJevResolverState();
+    }
+  });
+
+  it('a module that cannot write its state never blocks a request', async () => {
+    const blocked = join(caseDir, 'not-a-directory');
+    writeFileSync(blocked, 'x');
+    const env = jevEnv({ OMC_JEV_BREAKER: '1', OMC_JEV_MAX_RPM: '1', OMC_JEV_BREAKER_DIR: blocked });
+    const { fetchFn, calls } = countingFetch(() => errorResponse(429));
+    for (let i = 0; i < 3; i += 1) expect((await resolveRequest(request(), env, fetchFn)).mode).toBe('degraded');
+    expect(calls).toHaveLength(3);
+  });
+});
+
+/** A stub System One endpoint that counts requests; `respond` picks the status, headers and an optional delay. */
+async function startStub(respond) {
+  let count = 0;
+  const server = createServer((req, res) => {
+    let body = '';
+    req.on('data', (chunk) => { body += chunk; });
+    req.on('end', () => {
+      count += 1;
+      const { status, headers = {}, delayMs = 0 } = respond(count, body);
+      setTimeout(() => {
+        res.writeHead(status, { 'Content-Type': 'application/json', ...headers });
+        res.end(status === 200
+          ? JSON.stringify({ answers: { slop_advisory: { type: 'noul', noul: false, confidence: 0.9 } } })
+          : JSON.stringify({ error: 'stub ' + status }));
+      }, delayMs);
+    });
+  });
+  await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
+  cleanups.push(() => new Promise((resolve) => server.close(resolve)));
+  return { endpoint: 'http://127.0.0.1:' + server.address().port + '/v1/systemone', count: () => count };
+}
+
+function runResolver(input, env) {
+  return new Promise((resolve, reject) => {
+    const child = spawn(NODE, [RESOLVER], { env: { ...cleanParentEnv(), ...env }, cwd: caseDir, windowsHide: true });
+    let stdout = '';
+    child.stdout.on('data', (chunk) => { stdout += chunk; });
+    child.stderr.resume();
+    child.on('error', reject);
+    child.on('close', () => {
+      try {
+        resolve(JSON.parse(stdout.trim().split('\n').pop()));
+      } catch (error) {
+        reject(error);
+      }
+    });
+    child.stdin.end(JSON.stringify(input));
+  });
+}
+
+describe('shared between processes', () => {
+  it('after one 429, ten concurrent resolver processes send no request', async () => {
+    const stub = await startStub(() => ({ status: 429, headers: { 'Retry-After': '120' } }));
+    const env = jevEnv({ OMC_JEV_BREAKER: '1', OMC_JEV_ENDPOINT: stub.endpoint, OMC_JEV_TIMEOUT_MS: '5000' });
+    const first = await runResolver(request(), env);
+    expect(first).toMatchObject({ mode: 'degraded', breaker: { reason: 'http-429' } });
+    const results = await Promise.all(Array.from({ length: 10 }, () => runResolver(request(), env)));
+    expect(results.map((result) => result.mode)).toEqual(Array(10).fill('circuit-open'));
+    expect(stub.count()).toBe(1);
+  }, 60_000);
+
+  it('a limit of 10 lets exactly 10 of 30 concurrent processes send their request', async () => {
+    const { modes, sent } = await inOneMinute(async (dir) => {
+      const stub = await startStub(() => ({ status: 200 }));
+      const env = jevEnv({
+        OMC_JEV_MAX_RPM: '10',
+        OMC_JEV_ENDPOINT: stub.endpoint,
+        OMC_JEV_TIMEOUT_MS: '5000',
+        OMC_JEV_BREAKER_DIR: join(dir, 'breaker'),
+        OMC_JEV_LOG_DIR: join(dir, 'log'),
+      });
+      const modes = [];
+      for (let wave = 0; wave < 3; wave += 1) {
+        const results = await Promise.all(Array.from({ length: 10 }, () => runResolver(request('model-routing'), env)));
+        modes.push(...results.map((result) => result.mode));
+      }
+      return { modes, sent: stub.count() };
+    }, 25);
+    expect(modes.filter((mode) => mode === 'shadow')).toHaveLength(10);
+    expect(modes.filter((mode) => mode === 'cap')).toHaveLength(20);
+    expect(sent).toBe(10);
+  }, 180_000);
+
+  it('concurrent failures with different block times leave the longest one', async () => {
+    // Every request is in flight before the first answer, so the openers race.
+    const stub = await startStub((n) => ({ status: n % 2 ? 402 : 429, delayMs: 3000 }));
+    const env = jevEnv({ OMC_JEV_BREAKER: '1', OMC_JEV_ENDPOINT: stub.endpoint, OMC_JEV_TIMEOUT_MS: '10000' });
+    const before = Date.now();
+    await Promise.all(Array.from({ length: 8 }, () => runResolver(request(), env)));
+    expect(stub.count()).toBeGreaterThanOrEqual(2);
+    const state = readBreaker(settingsFor(env));
+    expect(state.reason).toBe('http-402');
+    expect(state.until).toBeGreaterThanOrEqual(before + 600_000);
+  }, 60_000);
+});
+
+function makeGitTemp(prefix) {
+  const directory = mkdtempSync(join(tmp, prefix));
+  execFileSync('git', ['init'], { cwd: directory, stdio: 'pipe' });
+  return directory;
+}
+
+let lastHookStdout = '';
+let lastHookStderr = '';
+
+/** Run the hook asynchronously: a synchronous run would freeze the stub server in this process. */
+function runEnforcer(sessionId, env) {
+  const cwd = makeGitTemp('enforcer-');
+  const home = join(cwd, '.test-home');
+  return new Promise((resolve, reject) => {
+    const child = spawn(NODE, [ENFORCER], {
+      cwd,
+      windowsHide: true,
+      env: {
+        ...cleanParentEnv(),
+        HOME: home,
+        USERPROFILE: home,
+        CLAUDE_CONFIG_DIR: join(home, '.claude'),
+        NODE_ENV: 'test',
+        DISABLE_OMC: '',
+        OMC_SKIP_HOOKS: '',
+        OMC_STATE_DIR: '',
+        ...env,
+      },
+    });
+    let stdout = '';
+    let stderr = '';
+    const timer = setTimeout(() => { child.kill(); reject(new Error('hook timed out')); }, 20_000);
+    child.stdout.on('data', (chunk) => { stdout += chunk; });
+    child.stderr.on('data', (chunk) => { stderr += chunk; });
+    child.on('error', reject);
+    child.on('close', () => {
+      clearTimeout(timer);
+      lastHookStdout = stdout;
+      lastHookStderr = stderr;
+      try {
+        resolve(JSON.parse(stdout));
+      } catch (error) {
+        reject(error);
+      }
+    });
+    child.stdin.end(JSON.stringify({
+      cwd,
+      session_id: sessionId,
+      tool_name: 'Task',
+      toolInput: {
+        subagent_type: 'oh-my-claudecode:executor',
+        description: 'Implement a fallback',
+        prompt: 'Add a workaround if the normal architecture is hard.',
+      },
+    }));
+  });
+}
+
+async function waitForRows(env, count) {
+  for (let i = 0; i < 200; i += 1) {
+    const rows = logRows(env);
+    if (rows.length >= count) return rows;
+    await new Promise((resolve) => setTimeout(resolve, 50));
+  }
+  return logRows(env);
+}
+
+function openBreakerFile(env, seconds = 300) {
+  const settings = breakerSettings({ ...env, OMC_JEV_BREAKER: '1' }, env.OMC_JEV_ENDPOINT, env.TYPESAFE_API_KEY);
+  mkdirSync(settings.dir, { recursive: true });
+  const now = Date.now();
+  const state = { until: now + seconds * 1000, reason: 'http-429', since: now };
+  writeFileSync(join(settings.dir, 'breaker.json'), JSON.stringify(state));
+  return state;
+}
+
+describe('outage notice in a hook script', () => {
+  it('shows one systemMessage per session and outage; the rest of the output is unchanged', async () => {
+    const env = jevEnv({ OMC_JEV: 'slop-warning', OMC_JEV_BREAKER: '1' });
+    const state = openBreakerFile(env);
+    const first = await runEnforcer('session-a', env);
+    expect(first.systemMessage).toBe(outageMessage(state));
+    expect(first.hookSpecificOutput.additionalContext).toContain('SLOP WARNING');
+    // The hook's pretty-printed output stays pretty-printed, and stderr carries the notice once.
+    expect(lastHookStdout.startsWith('{\n  "')).toBe(true);
+    expect(lastHookStderr.split(outageMessage(state)).length - 1).toBe(1);
+    const again = await runEnforcer('session-a', env);
+    expect(again.systemMessage).toBeUndefined();
+    const withoutNotice = { ...first };
+    delete withoutNotice.systemMessage;
+    expect(again).toEqual(withoutNotice);
+    expect((await runEnforcer('session-b', env)).systemMessage).toBe(outageMessage(state));
+    // The resolver held the requests back and logged them.
+    const rows = await waitForRows(env, 3);
+    expect(rows.map((row) => row.mode)).toEqual(['circuit-open', 'circuit-open', 'circuit-open']);
+  }, 60_000);
+
+  it('without OMC_JEV_BREAKER an open breaker file changes nothing', async () => {
+    const env = jevEnv({ OMC_JEV: 'slop-warning' });
+    openBreakerFile(env);
+    const output = await runEnforcer('session-a', env);
+    expect(output.systemMessage).toBeUndefined();
+    const rows = await waitForRows(env, 1);
+    expect(rows.map((row) => row.mode)).toEqual(['degraded']); // the request went out (unreachable stub endpoint)
+  }, 60_000);
+
+  it('active mode: the request that opens the breaker shows the notice in the same hook output', async () => {
+    const stub = await startStub(() => ({ status: 503, headers: { 'Retry-After': '30' } }));
+    const env = jevEnv({ OMC_JEV: 'slop-warning:active', OMC_JEV_BREAKER: '1', OMC_JEV_ENDPOINT: stub.endpoint, OMC_JEV_TIMEOUT_MS: '5000' });
+    const first = await runEnforcer('session-a', env);
+    expect(first.systemMessage).toMatch(/^\[OMC\] Jev requests paused until \d\d:\d\d \(HTTP 503\); hooks decide without Jev until then\.$/);
+    expect((await runEnforcer('session-a', env)).systemMessage).toBeUndefined();
+    expect(stub.count()).toBe(1);
+  }, 60_000);
+
+  it('active mode with an open breaker: no request, no wait for the resolver, no missing-response count', async () => {
+    const stub = await startStub(() => ({ status: 200, delayMs: 8000 }));
+    const env = jevEnv({ OMC_JEV: 'slop-warning:active', OMC_JEV_BREAKER: '1', OMC_JEV_ENDPOINT: stub.endpoint, OMC_JEV_TIMEOUT_MS: '100' });
+    const state = openBreakerFile(env);
+    for (const session of ['session-a', 'session-b', 'session-c', 'session-d']) {
+      const output = await runEnforcer(session, env);
+      expect(output.hookSpecificOutput.additionalContext).toContain('SLOP WARNING');
+    }
+    const rows = await waitForRows(env, 4);
+    expect(rows.map((row) => row.mode)).toEqual(['circuit-open', 'circuit-open', 'circuit-open', 'circuit-open']);
+    expect(stub.count()).toBe(0);
+    const settings = settingsFor(env);
+    expect(readdirSync(settings.dir).filter((name) => name.startsWith('noresp-'))).toEqual([]);
+    expect(readBreaker(settings)).toEqual(state);
+  }, 90_000);
+
+  it('works when the hook runs in a worker thread (as run.cjs runs UserPromptSubmit hooks)', async () => {
+    const env = jevEnv({ OMC_JEV: 'intent', OMC_JEV_BREAKER: '1' });
+    const state = openBreakerFile(env);
+    const shadowUrl = pathToFileURL(join(root, 'scripts', 'lib', 'jev-shadow.mjs')).href;
+    writeFileSync(join(caseDir, 'worker.mjs'), [
+      "import { recordJevShadow, setJevSessionId } from " + JSON.stringify(shadowUrl) + ";",
+      "setJevSessionId('worker-session');",
+      "recordJevShadow({ point: 'intent', state: { prompt: 'x' }, questions: { intent: { type: 'noul', criteria: { yes: 'a', no: 'b' } } }, heuristic: false });",
+      "console.log(JSON.stringify({ continue: true }));",
+    ].join('\n'));
+    writeFileSync(join(caseDir, 'runner.mjs'), [
+      "import { Worker } from 'node:worker_threads';",
+      "new Worker(new URL('./worker.mjs', import.meta.url)).on('exit', (code) => { process.exitCode = code; });",
+    ].join('\n'));
+    const stdout = await new Promise((resolve, reject) => {
+      const child = spawn(NODE, [join(caseDir, 'runner.mjs')], { cwd: caseDir, env: { ...cleanParentEnv(), ...env }, windowsHide: true });
+      let out = '';
+      child.stdout.on('data', (chunk) => { out += chunk; });
+      child.stderr.resume();
+      child.on('error', reject);
+      child.on('close', () => resolve(out));
+    });
+    expect(JSON.parse(stdout)).toEqual({ continue: true, systemMessage: outageMessage(state) });
+    // The background resolver held the call back and logged it.
+    expect((await waitForRows(env, 1)).map((row) => row.mode)).toEqual(['circuit-open']);
+  }, 60_000);
+});

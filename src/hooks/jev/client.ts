@@ -8,10 +8,27 @@
 
 import type { JevAnswer, JevQuestionDef, JevQuestions, JevResponse } from './types.js';
 
+/** What a failed request tells about the endpoint (read by the opt-in shared breaker). */
+export interface JevFailureDetails {
+  /** HTTP status of a non-2xx response. */
+  status?: number;
+  /** Retry-After header of that response. */
+  retryAfter?: string;
+  /** No HTTP response arrived at all: timeout or network error. */
+  noResponse?: boolean;
+}
+
 export class JevClientError extends Error {
-  constructor(message: string) {
+  readonly status?: number;
+  readonly retryAfter?: string;
+  readonly noResponse?: boolean;
+
+  constructor(message: string, details: JevFailureDetails = {}) {
     super(message);
     this.name = 'JevClientError';
+    this.status = details.status;
+    this.retryAfter = details.retryAfter;
+    this.noResponse = details.noResponse;
   }
 }
 
@@ -31,10 +48,11 @@ export async function queryJev(
   const fetchFn = options.fetchFn ?? fetch;
   const controller = new AbortController();
   let timer: NodeJS.Timeout | undefined;
+  let responded = false;
   const timeoutPromise = new Promise<never>((_resolve, reject) => {
     timer = setTimeout(() => {
       controller.abort();
-      reject(new JevClientError(`jev request timed out after ${options.timeoutMs}ms`));
+      reject(new JevClientError(`jev request timed out after ${options.timeoutMs}ms`, { noResponse: !responded }));
     }, options.timeoutMs);
   });
   try {
@@ -47,16 +65,22 @@ export async function queryJev(
       body: JSON.stringify({ state, questions: serializeQuestions(questions), model: JEV_MODEL }),
       signal: controller.signal,
     }), timeoutPromise]);
+    responded = true;
     if (!response.ok) {
-      throw new JevClientError(`jev request failed: HTTP ${response.status}`);
+      throw new JevClientError(`jev request failed: HTTP ${response.status}`, {
+        status: response.status,
+        retryAfter: response.headers?.get?.('retry-after') ?? undefined,
+      });
     }
     const body: unknown = await response.json();
     return validateJevResponse(body);
   } catch (error) {
     if (controller.signal.aborted && !(error instanceof JevClientError)) {
-      throw new JevClientError(`jev request timed out after ${options.timeoutMs}ms`);
+      throw new JevClientError(`jev request timed out after ${options.timeoutMs}ms`, { noResponse: !responded });
     }
-    throw error instanceof JevClientError ? error : new JevClientError(error instanceof Error ? error.message : String(error));
+    throw error instanceof JevClientError
+      ? error
+      : new JevClientError(error instanceof Error ? error.message : String(error), { noResponse: !responded });
   } finally {
     if (timer) clearTimeout(timer);
   }

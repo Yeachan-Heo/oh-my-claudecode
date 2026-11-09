@@ -8,7 +8,9 @@
  * request to stdin and reads one JSON result from stdout.
  *
  * Request:  { point, state, questions, heuristic, permissionMode? }
- * Result:   { mode, answer, answers, confidence, durationMs }
+ * Result:   { mode, answer, answers, confidence, durationMs, breaker? }
+ * (`breaker`, only with OMC_JEV_BREAKER=1: the shared breaker {until, reason,
+ * since} when it is open after this call)
  *
  * `answer` is the answer to the request's first question (the first answer
  * in server order when that name is missing). `answers` maps every question
@@ -17,10 +19,15 @@
  *
  * mode mirrors the resolver's ResolveMode contract: off (config gates),
  * shadow (twin decides, comparison recorded), active (Jev decides), degraded
- * (a Jev call was attempted and failed - caller falls back to its twin).
+ * (a Jev call was attempted and failed - caller falls back to its twin),
+ * circuit-open and cap (the shared breaker or request limit held the call
+ * back - caller falls back to its twin, as for degraded).
  * The calling script computes its own heuristic twin; this child never sees
- * the twin's code. Request cap and circuit breaker are in-process resolver
- * runtime - meaningless for a one-shot child and intentionally omitted.
+ * the twin's code. The TS resolver's request cap and circuit breaker are
+ * in-process runtime - meaningless for a one-shot child and omitted here.
+ * Their cross-process counterpart is opt-in: OMC_JEV_BREAKER=1 and
+ * OMC_JEV_MAX_RPM=<n> share a breaker and a per-minute limit between all
+ * processes through files (lib/jev-breaker.mjs); without them nothing changes.
  * Degrade-never-block: any failure exits 0 with mode:"degraded" so a hook
  * process is never killed by a Jev outage.
  *
@@ -229,6 +236,28 @@ async function logDirFor(env) {
   return join(omcRoot, "state", "jev");
 }
 
+/** The Jev endpoint every channel sends to. Mirror of `endpoint` in config.ts. */
+export function resolveJevEndpoint(env = process.env) {
+  return env.OMC_JEV_ENDPOINT || DEFAULT_ENDPOINT;
+}
+
+/**
+ * The shared breaker and request limit (lib/jev-breaker.mjs) for this
+ * endpoint and key: {breaker, settings}, or undefined when neither
+ * OMC_JEV_BREAKER=1 nor OMC_JEV_MAX_RPM is set. The module is loaded only
+ * then; a module that fails to load means no breaker, never a failed request.
+ */
+export async function loadJevBreaker(env = process.env) {
+  if (String(env.OMC_JEV_BREAKER ?? "").trim() !== "1" && !String(env.OMC_JEV_MAX_RPM ?? "").trim()) return undefined;
+  try {
+    const breaker = await import("./lib/jev-breaker.mjs");
+    const settings = breaker.breakerSettings(env, resolveJevEndpoint(env), env.TYPESAFE_API_KEY);
+    return settings ? { breaker, settings } : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
 /**
  * Mirror of the resolver's shadow-log entry (ShadowLogEntry): the jev-eval
  * tool compares lines regardless of which side wrote them.
@@ -269,6 +298,37 @@ export async function resolveRequest(
     state: boundExcerpts(request.state, resolveExcerptChars(request.point, env)),
     questions: request.questions,
   };
+  // Opt-in shared breaker and request limit: a held-back call is logged and
+  // ends like a failed one (the caller uses its twin), without a fetch.
+  const guard = await loadJevBreaker(env);
+  if (guard) {
+    const { skip } = guard.breaker.admitRequest(guard.settings, request.point);
+    if (skip) {
+      const durationMs = Date.now() - startedAt;
+      await writeShadowLog(
+        {
+          ts: new Date().toISOString(),
+          point: request.point,
+          mode: skip.mode,
+          state: bound.state,
+          heuristic: comparableHeuristic(request.heuristic, request.questions),
+          jev: null,
+          answers: null,
+          ...guard.breaker.skipLogFields(skip),
+          durationMs,
+        },
+        await logDirFor(env),
+      );
+      return {
+        mode: skip.mode,
+        answer: null,
+        answers: null,
+        confidence: undefined,
+        durationMs,
+        ...(skip.breaker ? { breaker: skip.breaker } : {}),
+      };
+    }
+  }
   const controller = new AbortController();
   let timer;
   const timeoutMs = resolveJevTimeoutMs(env);
@@ -282,9 +342,13 @@ export async function resolveRequest(
   let jevAnswers = null;
   let confidence;
   let entryMode = mode;
+  // What the breaker needs to classify a failure: the HTTP status and
+  // Retry-After, or that no response arrived at all (timeout, network error).
+  let failure;
+  let responded = false;
   try {
     const response = await Promise.race([
-      fetchFn(env.OMC_JEV_ENDPOINT || DEFAULT_ENDPOINT, {
+      fetchFn(resolveJevEndpoint(env), {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -299,8 +363,11 @@ export async function resolveRequest(
       }),
       timeoutPromise,
     ]);
-    if (!response.ok)
+    responded = true;
+    if (!response.ok) {
+      if (guard) failure = { status: response.status, retryAfter: response.headers?.get?.("retry-after") ?? undefined };
       throw new Error("jev request failed: HTTP " + response.status);
+    }
     const body = validateJevResponse(await response.json());
     const firstQuestion = Object.keys(request.questions ?? {})[0];
     jevAnswer =
@@ -317,10 +384,15 @@ export async function resolveRequest(
         ": degraded - " +
         (error instanceof Error ? error.message : String(error)),
     );
+    if (guard && !responded) failure = { noResponse: true };
   } finally {
     if (timer) clearTimeout(timer);
   }
   const durationMs = Date.now() - startedAt;
+  // Tell the breaker before the log write, so concurrent callers see it at once.
+  const opened = guard && failure
+    ? guard.breaker.recordFailure(guard.settings, guard.breaker.classifyFailure(failure))
+    : undefined;
   await writeShadowLog(
     {
       ts: new Date().toISOString(),
@@ -341,6 +413,7 @@ export async function resolveRequest(
     answers: entryMode === "degraded" ? null : jevAnswers,
     confidence,
     durationMs,
+    ...(opened ? { breaker: opened } : {}),
   };
 }
 

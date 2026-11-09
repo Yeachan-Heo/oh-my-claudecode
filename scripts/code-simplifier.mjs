@@ -25,7 +25,7 @@ import { execFileSync } from 'child_process';
 import { readStdin } from './lib/stdin.mjs';
 import { resolveOmcStateRoot } from './lib/state-root.mjs';
 import { BOUNDED_GIT_TIMEOUT_MS } from './lib/bounded-git-timeout.mjs';
-import { recordJevShadow } from './lib/jev-shadow.mjs';
+import { recordJevShadow, setJevSessionId } from './lib/jev-shadow.mjs';
 
 const DEFAULT_EXTENSIONS = ['.ts', '.tsx', '.js', '.jsx', '.py', '.go', '.rs'];
 const DEFAULT_MAX_FILES = 10;
@@ -122,6 +122,7 @@ async function main() {
       process.stdout.write(JSON.stringify({ continue: true }) + '\n');
       return;
     }
+    setJevSessionId(data.session_id || data.sessionId);
 
     const cwd = data.cwd || data.directory || process.cwd();
     const stateDir = join(await resolveOmcStateRoot(cwd), 'state');
