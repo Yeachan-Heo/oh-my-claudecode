@@ -58,12 +58,14 @@ function gitTopLevel(cwd) {
  * (including missing Jev answer, e.g. degraded lines).
  * Comparable shapes: twin boolean <-> Jev noul.noul; twin string <-> Jev
  * choice.choice; twin number <-> Jev score.score. Answer types are the
- * lower-case wire literals the API returns.
+ * lower-case wire literals the API returns. The API returns noul as the
+ * probability of "yes" (0-1); 0.5 or more reads as yes, as in the hooks.
  */
 export function comparePair(heuristic, jev) {
   if (jev === null || typeof jev !== 'object') return null;
-  if (jev.type === 'noul' && typeof heuristic === 'boolean' && typeof jev.noul === 'boolean') {
-    return heuristic === jev.noul;
+  if (jev.type === 'noul' && typeof heuristic === 'boolean') {
+    const yes = noulAsBoolean(jev.noul);
+    return yes === null ? null : heuristic === yes;
   }
   if (jev.type === 'choice' && typeof heuristic === 'string' && typeof jev.choice === 'string') {
     return heuristic === jev.choice;
@@ -71,6 +73,13 @@ export function comparePair(heuristic, jev) {
   if (jev.type === 'score' && typeof heuristic === 'number' && typeof jev.score === 'number') {
     return heuristic === jev.score;
   }
+  return null;
+}
+
+/** A Noul answer as a boolean: a boolean as-is, a finite probability >= 0.5 as yes, anything else null. */
+function noulAsBoolean(noul) {
+  if (typeof noul === 'boolean') return noul;
+  if (typeof noul === 'number' && Number.isFinite(noul)) return noul >= 0.5;
   return null;
 }
 

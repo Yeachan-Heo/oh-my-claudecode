@@ -14,7 +14,7 @@
  * (hooks/jev/points.ts); this module keeps the call-specific state shape.
  */
 
-import { recordJudgment } from '../jev/index.js';
+import { noulAnswerIsYes, recordJudgment } from '../jev/index.js';
 import type { JevAnswer } from '../jev/index.js';
 
 export interface RalphVerdictShadowArgs {
@@ -49,8 +49,8 @@ export async function applyRalphVerdictShadow(args: RalphVerdictShadowArgs): Pro
     twin: () => verdict,
     mapHeuristic: (result, questionSet) => result,
     mapAnswer: (answer: JevAnswer) => {
-      // Jev Noul answer has { type: 'noul', noul: boolean | undefined }
-      return answer.noul === true;
+      // Jev Noul answer: noul is the probability of "yes" (0-1)
+      return noulAnswerIsYes(answer);
     },
     fetchFn: args.fetchFn,
   });

@@ -36,7 +36,7 @@ afterEach(async () => {
   await rm(logDir, { recursive: true, force: true });
 });
 
-function stubFetch(): { fetchFn: typeof fetch; calls: Array<{ url: string; body: string }> } {
+function stubFetch(noul: boolean | number = true): { fetchFn: typeof fetch; calls: Array<{ url: string; body: string }> } {
   const calls: Array<{ url: string; body: string }> = [];
   const fetchFn = (async (url: unknown, init?: unknown) => {
     const body = (init as RequestInit | undefined)?.body as string;
@@ -44,7 +44,7 @@ function stubFetch(): { fetchFn: typeof fetch; calls: Array<{ url: string; body:
     return {
       ok: true,
       status: 200,
-      json: async () => ({ answers: { completion_criteria_met: { type: 'noul', noul: true, confidence: 0.9 } } }),
+      json: async () => ({ answers: { completion_criteria_met: { type: 'noul', noul, confidence: 0.9 } } }),
     } as unknown as Response;
   }) as unknown as typeof fetch;
   return { fetchFn, calls };
@@ -159,5 +159,29 @@ describe('applyRalphVerdictShadow', () => {
     expect(entry.mode).toBe('degraded');
     expect(entry.heuristic).toBe(true);
     expect(entry.jev).toBeNull();
+  });
+});
+
+describe('applyRalphVerdictShadow in active mode', () => {
+  // The API returns noul as the probability that the completion criteria are
+  // met. The twin verdict is the opposite of Jev's, which shows that Jev decided.
+  it.each([
+    { noul: 0.92, expected: true },
+    { noul: 0.08, expected: false },
+  ])('reads a noul probability of $noul as verdict $expected', async ({ noul, expected }) => {
+    process.env.TYPESAFE_API_KEY = 'test-key-123';
+    process.env.OMC_JEV = 'ralph-verdict:active';
+    const { fetchFn, calls } = stubFetch(noul);
+
+    const verdict = await applyRalphVerdictShadow({
+      verdict: !expected,
+      prdContext: 'US-1: the hook exits 0',
+      claim: 'all stories complete',
+      criticMode: 'architect',
+      fetchFn,
+    });
+
+    expect(verdict).toBe(expected);
+    expect(calls).toHaveLength(1);
   });
 });
