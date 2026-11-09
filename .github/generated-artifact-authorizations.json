@@ -43743,8 +43743,8 @@
     {
       "pullNumber": 4913,
       "targetRef": "main",
-      "mergeBaseSha": "7281924d9ac2f4a1db1f1875a1a6c3fd41530cc6",
-      "headSha": "4498ccbc1fb265f44d8fb177d63e43f9e6f1c014",
+      "mergeBaseSha": "52deb356e7dc8c1d03565563cc768766191f6647",
+      "headSha": "8ef5f32f4ae308e4d4909cf790db2d314fbddd96",
       "owner": "Yeachan-Heo",
       "expiresAt": "2026-12-31T23:59:59.999Z",
       "generatedDelta": {
