@@ -31,7 +31,7 @@ import { atomicWriteFileSync, getStateFileLockFailureMessage, recoverEmergencySt
 import { readStdin } from './lib/stdin.mjs';
 import { resolveOmcStateRoot, resolveSessionStatePathsForHook } from './lib/state-root.mjs';
 import { parseWorkflowInvocation, selectWorkflowProfile, createWorkflowState, isValidWorkflowTrackingState, isWorkflowRuntimeSupported, resolveWorkflowStagePrompt, takeWorkflowTranscriptFailure } from './lib/workflow-profile-runtime.mjs';
-import { isJevShadowOptedIn, recordJevShadow, setJevHookContext } from './lib/jev-shadow.mjs';
+import { isJevShadowOptedIn, recordJevApplied, recordJevShadow, setJevHookContext } from './lib/jev-shadow.mjs';
 import { initializeRalphStateForSkill, createPrdScaffold } from './lib/ralph-startup.mjs';
 
 // Resolve OMC package root: CLAUDE_PLUGIN_ROOT (plugin system) or derive from this script's location
@@ -2108,6 +2108,7 @@ async function main() {
       // In active mode, use Jev's skill choice
       if (jevResult && jevResult.mode === 'active' && jevResult.answer) {
         const jevChoice = jevResult.answer.choice?.toLowerCase();
+        const keywordsBefore = resolved.map((match) => match.name);
         if (jevChoice && jevChoice !== 'none') {
           // Override with Jev's chosen skill
           const matchedKeyword = uniqueMatches.find((m) => m.name === jevChoice);
@@ -2115,6 +2116,10 @@ async function main() {
         } else if (jevChoice === 'none') {
           // Jev says no trigger
           resolved = [];
+        }
+        const keywordsAfter = resolved.map((match) => match.name);
+        if (keywordsAfter.join(',') !== keywordsBefore.join(',')) {
+          recordJevApplied('skill-trigger', { keywords: { from: keywordsBefore, to: keywordsAfter }, choice: jevChoice });
         }
       }
     }
@@ -2193,6 +2198,7 @@ async function main() {
         if (/^\s*\/(?:oh-my-claudecode:)?team(?:\s|$|:)/i.test(cleanPrompt)) slashInvokedKeywords.add('team');
         
         // Filter out non-slash-invoked heavy keywords
+        const keywordsBeforeSize = resolved.map((match) => match.name);
         resolved = resolved.filter(keyword => {
           if (!HEAVY_KEYWORDS.has(keyword.name)) {
             return true; // Keep non-heavy keywords
@@ -2200,6 +2206,10 @@ async function main() {
           // For heavy keywords, suppress only if NOT slash-invoked
           return slashInvokedKeywords.has(keyword.name);
         });
+        const suppressedForSize = keywordsBeforeSize.filter((name) => !resolved.some((match) => match.name === name));
+        if (suppressedForSize.length > 0) {
+          recordJevApplied('task-size', { size: 'small', confidence: jevTaskSizeResult.confidence, suppressed: suppressedForSize });
+        }
       }
     }
 

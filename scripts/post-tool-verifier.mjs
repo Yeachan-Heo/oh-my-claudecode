@@ -18,7 +18,7 @@ import { resolveOmcStateRoot } from './lib/state-root.mjs';
 import { readStdin } from './lib/stdin.mjs';
 import { resolveContextPercent } from './lib/context-usage.mjs';
 import { BOUNDED_GIT_TIMEOUT_MS } from './lib/bounded-git-timeout.mjs';
-import { recordJevShadow, setJevHookContext } from './lib/jev-shadow.mjs';
+import { recordJevApplied, recordJevShadow, setJevHookContext } from './lib/jev-shadow.mjs';
 import { initializeRalphStateForSkill } from './lib/ralph-startup.mjs';
 
 const SKIP_HOOKS = (process.env.OMC_SKIP_HOOKS || '').split(',').map(s => s.trim());
@@ -616,6 +616,7 @@ async function maybeBuildPreemptiveCompactionMessage(toolName, data, directory) 
   // comparison; it is the rare case and is bounded by OMC_JEV_TIMEOUT_MS.
   if (jevResult && jevResult.mode === 'active' && jevResult.answer && percentUsed < criticalThreshold) {
     const label = stalenessLabelOf(jevResult.answer);
+    const heuristicAction = action;
     // Map staleness to action: fresh/recent -> none, aging -> warn, stale -> compact
     if (label === 'fresh' || label === 'recent') {
       action = 'none';
@@ -625,6 +626,9 @@ async function maybeBuildPreemptiveCompactionMessage(toolName, data, directory) 
       action = 'compact';
     }
     // Otherwise keep the heuristic action
+    if (action !== heuristicAction) {
+      recordJevApplied('context-pruning', { action: { from: heuristicAction, to: action }, staleness: label });
+    }
   }
 
   // Build message based on the computed action

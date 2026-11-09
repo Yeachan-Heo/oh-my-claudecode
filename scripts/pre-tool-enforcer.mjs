@@ -23,7 +23,7 @@ import { readStdin } from './lib/stdin.mjs';
 import { resolveConfiguredAgentModel } from './lib/agent-model-config.mjs';
 import { BOUNDED_GIT_TIMEOUT_MS } from './lib/bounded-git-timeout.mjs';
 import { isSkillVisibleToUser } from './lib/skill-entitlements.mjs';
-import { isJevShadowOptedIn, recordJevShadow, setJevHookContext } from './lib/jev-shadow.mjs';
+import { isJevShadowOptedIn, recordJevApplied, recordJevShadow, setJevHookContext } from './lib/jev-shadow.mjs';
 import { resolveExcerptChars } from './jev-resolve.mjs';
 
 // Inlined from src/config/models.ts — avoids a dist/ import so the hook works
@@ -914,6 +914,7 @@ function recordModelRoutingShadow(toolName, toolInput, updatedToolInput, permiss
     } else if (typeof currentEffort === 'string' && capEffort(currentEffort, maxEffort()) !== currentEffort) {
       ensureUpdated().effort = capEffort(currentEffort, maxEffort());
     }
+    noteJevRouting(modifiedInput, updatedToolInput, answers, originalInput.subagent_type);
   }
 
   // The marker wins over the call's own values and over Jev's answers. The effort is still
@@ -943,6 +944,41 @@ function recordModelRoutingShadow(toolName, toolInput, updatedToolInput, permiss
   }
 
   return updatedToolInput;
+}
+
+// OMC_JEV_APPLIED_LOG: what Jev's active answers set on a Task/Agent call. The
+// applied.jsonl line is written only once the hook output carries those values
+// in updatedInput (emitPreToolUseOutput), so a call that a later check denies,
+// or a value that other code replaced, leaves no line. An effort lowered by
+// OMC_JEV_MAX_EFFORT alone is the cap's doing, not Jev's, and is not recorded.
+let pendingJevRouting;
+
+function noteJevRouting(before, updated, answers, subagentType) {
+  pendingJevRouting = undefined;
+  if (!updated) return;
+  const applied = {};
+  const choice = answers['model-tier']?.choice;
+  if (typeof choice === 'string' && updated.model === choice.toLowerCase() && updated.model !== before.model) {
+    applied.model = { from: before.model ?? null, to: updated.model };
+  }
+  const score = answers.effort?.type === 'score' ? answers.effort.score : undefined;
+  if (typeof score === 'number' && Number.isFinite(score) && score >= 0 && score <= 4 && updated.effort !== before.effort) {
+    applied.effort = { from: before.effort ?? null, to: updated.effort, score };
+  }
+  if (applied.model || applied.effort) pendingJevRouting = { subagent_type: subagentType || null, ...applied };
+}
+
+function flushJevRouting(output) {
+  const pending = pendingJevRouting;
+  pendingJevRouting = undefined;
+  const sent = output?.hookSpecificOutput?.updatedInput;
+  if (!pending || !sent || typeof sent !== 'object') return;
+  const { subagent_type, model, effort } = pending;
+  const carried = {
+    ...(model && sent.model === model.to ? { model } : {}),
+    ...(effort && sent.effort === effort.to ? { effort } : {}),
+  };
+  if (carried.model || carried.effort) recordJevApplied('model-routing', { subagent_type, ...carried });
 }
 
 function generateSlopWarning(data, toolName) {
@@ -2089,6 +2125,7 @@ ${hookOutput.additionalContext}`
 
 function emitPreToolUseOutput(output, input, space = 0) {
   output = withShellCheckContext(output);
+  flushJevRouting(output);
   if (!isCodexPreToolUse(input)) {
     console.log(JSON.stringify(output, null, space));
     return;

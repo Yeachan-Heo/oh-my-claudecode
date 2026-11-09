@@ -325,7 +325,7 @@ export function recordJevShadow({ point, state, questions, heuristic, permission
   try {
     tempDir = mkdtempSync(join(tmpdir(), "omc-jev-"));
     requestFile = join(tempDir, "request.json");
-    const logContext = requestLogContext();
+    const logContext = requestLogContext(point);
     const startedAt = Date.now();
 
     writeFileSync(
@@ -425,6 +425,16 @@ export function recordJevShadow({ point, state, questions, heuristic, permission
 // a hook writes itself. Set once per hook process by setJevHookContext.
 let hookLogContext;
 let hookLogDir;
+// request_id of the last request per point in this process, for applied.jsonl.
+const lastRequestIds = new Map();
+
+/**
+ * OMC_JEV_APPLIED_LOG=1 (or `true`): a hook that acts on an active Jev answer
+ * writes what the answer changed to applied.jsonl (see recordJevApplied).
+ */
+export function isJevAppliedLogEnabled(env = process.env) {
+  return ["1", "true"].includes(String(env.OMC_JEV_APPLIED_LOG ?? "").trim().toLowerCase());
+}
 
 /** True when this configuration can send a Jev request at all (a key and OMC_JEV entries). */
 function mayRequestJev(env) {
@@ -437,24 +447,28 @@ function mayRequestJev(env) {
  * tool_use_id, session_id, cwd (the process's working directory when the
  * input has none), agent_id, agent_type and prompt_id. Call it once after the
  * hook input is parsed, before any recordJevShadow call. It does something
- * only with OMC_JEV_LOG_CONTEXT=1 and a configuration that can send Jev
- * requests, and then also resolves the Jev log directory, as the resolver
- * does. Never throws.
+ * only with OMC_JEV_LOG_CONTEXT=1 or OMC_JEV_APPLIED_LOG=1 and a configuration
+ * that can send Jev requests: it keeps the ids (OMC_JEV_LOG_CONTEXT only) and
+ * resolves the Jev log directory, as the resolver does. Never throws.
  */
 export async function setJevHookContext(data) {
   hookLogContext = undefined;
   hookLogDir = undefined;
-  if (!isJevLogContextEnabled(process.env) || !mayRequestJev(process.env)) return;
-  const context = jevLogContextOf(data);
-  delete context.request_id;
-  if (context.cwd === undefined) {
-    try {
-      context.cwd = process.cwd();
-    } catch {
-      // No working directory: the field is left out.
+  lastRequestIds.clear();
+  const logContext = isJevLogContextEnabled(process.env);
+  if ((!logContext && !isJevAppliedLogEnabled(process.env)) || !mayRequestJev(process.env)) return;
+  if (logContext) {
+    const context = jevLogContextOf(data);
+    delete context.request_id;
+    if (context.cwd === undefined) {
+      try {
+        context.cwd = process.cwd();
+      } catch {
+        // No working directory: the field is left out.
+      }
     }
+    hookLogContext = context;
   }
-  hookLogContext = context;
   try {
     hookLogDir = await resolveJevLogDir(process.env);
   } catch {
@@ -463,9 +477,32 @@ export async function setJevHookContext(data) {
 }
 
 /** The ids of one request: the hook call's and a new request_id. Undefined without OMC_JEV_LOG_CONTEXT=1. */
-function requestLogContext() {
+function requestLogContext(point) {
   if (!isJevLogContextEnabled(process.env)) return undefined;
-  return { ...hookLogContext, request_id: randomUUID() };
+  const context = { ...hookLogContext, request_id: randomUUID() };
+  lastRequestIds.set(point, context.request_id);
+  return context;
+}
+
+/**
+ * Record that this hook acted on an active Jev answer: one line in
+ * applied.jsonl next to shadow.jsonl, {ts, point, ...ids, applied}, where
+ * `applied` says what the answer changed, typically as {from, to}. Call it
+ * only when the answer really changed what the hook does. With
+ * OMC_JEV_LOG_CONTEXT=1 the line carries the hook call's ids and the
+ * request_id of this process's last request for the point, which is also in
+ * that request's shadow.jsonl line. Only with OMC_JEV_APPLIED_LOG=1; never
+ * throws.
+ */
+export function recordJevApplied(point, applied) {
+  if (!isJevAppliedLogEnabled(process.env)) return;
+  const requestId = lastRequestIds.get(point);
+  appendHookLogLine("applied.jsonl", {
+    ts: new Date().toISOString(),
+    point,
+    ...(isJevLogContextEnabled(process.env) ? { ...hookLogContext, ...(requestId ? { request_id: requestId } : {}) } : {}),
+    applied,
+  });
 }
 
 /**

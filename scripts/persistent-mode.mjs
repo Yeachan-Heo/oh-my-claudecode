@@ -26,7 +26,7 @@ import { spawn, spawnSync } from "child_process";
 import { join, dirname, resolve, normalize, sep } from "path";
 import { homedir } from "os";
 import { fileURLToPath, pathToFileURL } from "url";
-import { isJevShadowOptedIn, recordJevShadow, setJevHookContext } from "./lib/jev-shadow.mjs";
+import { isJevShadowOptedIn, recordJevApplied, recordJevShadow, setJevHookContext } from "./lib/jev-shadow.mjs";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -238,6 +238,9 @@ function completeModeFromJev(state, statePath) {
     };
     if (shouldWriteStateBack(statePath) && writeJsonFile(statePath, terminalState)) {
       Object.assign(state, terminalState);
+      // OMC_JEV_APPLIED_LOG: Jev's "task complete" ended the mode instead of blocking the stop.
+      const modeName = /([^\\/]+)-state\.json$/.exec(statePath)?.[1] ?? null;
+      recordJevApplied("loop-continuation", { mode: modeName, completed: { from: false, to: true } });
       return "completed";
     }
   }

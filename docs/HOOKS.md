@@ -627,6 +627,7 @@ export OMC_JEV="point1,point2:active,all"
 | `OMC_JEV_LOG_DIR` | `.omc/state/jev` | Directory of the Jev logs: `shadow.jsonl` and the files the hook scripts write next to it. The default is `state/jev` under the project's state root, so it follows `OMC_STATE_DIR`; set this variable to keep the logs of every project in one place. |
 | `OMC_JEV_LOG_MAX_MB` | (unset) | Size limit in megabytes (MiB) for each Jev log file. Before a line is appended, a file larger than the limit is renamed and the line starts a new file. Unset, `0`, a value that is not a canonical positive integer (a sign, spaces, a decimal point, an exponent or a leading zero), or a value above `8589934591`: no rotation, the log grows as before. See [Log rotation](#log-rotation). |
 | `OMC_JEV_LOG_CONTEXT` | (unset) | Set to `1` or `true` to add the ids of the hook call to every Jev log line (`tool_use_id`, `session_id`, `cwd`, `agent_id`, `agent_type`, `prompt_id`, and a `request_id` for each request), to log active-mode resolver processes that end without a line, and to log `jev` and `confidence` for the first question only. The ids stay in the local log and are never sent to Jev. See [Call ids and resolver failures](#call-ids-and-resolver-failures). |
+| `OMC_JEV_APPLIED_LOG` | (unset) | Set to `1` or `true` to log every active Jev answer that changed what a hook script does to `applied.jsonl`, next to `shadow.jsonl`. See [Applied log](#applied-log). |
 | `OMC_JEV_QUIET` | (unset) | Set to `1` to silence the env-activation stderr warning. |
 | `OMC_JEV_MAX_EFFORT` | `max` | Cap for the subagent reasoning effort set by the active `model-routing` point: `low`, `medium`, `high`, `xhigh`, or `max`, case-insensitive, surrounding spaces ignored. Other values use the default. A lower cap lowers the mapping: `high` restores the cap of earlier releases. A value that is set but not one of these is reported on stderr (unless `OMC_JEV_QUIET=1`) and the default is used. See [Model routing: subagent effort](#model-routing-subagent-effort). |
 | `OMC_JEV_MODEL_ROUTING_CONTEXT` | (unset) | Set to `1` or `true` to add two fields to the `model-routing` state: the Task/Agent call's `description` and `parent_last_user_message`, the last real user message of the parent session (read from the tail of its transcript; tool results, hook-injected reminders and system notices are skipped). Both are bounded by the point's excerpt limit. Script hooks only; the TypeScript resolver ignores it. See [Model routing: what Jev sees](#model-routing-what-jev-sees). |
@@ -744,6 +745,28 @@ In active mode a hook waits for its resolver for `OMC_JEV_TIMEOUT_MS` plus 500 m
 The variable also changes `jev` and `confidence`: they belong to the first question of the request and are `null` (and absent) when Jev did not answer it, instead of the first answer in server order. `jev-eval` compares `heuristic`, which always answers the first question, with `jev`, so such a line is no longer compared with the answer to another question. The answer the hook acts on does not change.
 
 Without the variable, log lines, requests and resolver results are exactly as before. The TypeScript resolver follows the same variable for its own lines and logs the ids a caller passes as `logContext`; its current callers pass none, so their lines carry only `request_id`.
+
+#### Applied log
+
+`shadow.jsonl` records every answer, but not whether an active answer changed anything: most active answers agree with the heuristic, and some are not used at all. With `OMC_JEV_APPLIED_LOG=1` a hook script that acted on an active answer writes one line to `applied.jsonl`, next to `shadow.jsonl`, only when the answer changed what the hook does:
+
+| Point | Line written when | `applied` |
+|-------|-------------------|-----------|
+| `model-routing` | the hook output carries Jev's model or effort in `updatedInput` and it differs from the call's | `subagent_type`, and `model` and/or `effort` as `{from, to}`; `effort` also has the `score` |
+| `context-pruning` | Jev's staleness changed the compaction action | `action: {from, to}`, `staleness` |
+| `skill-trigger` | Jev's choice changed the triggered keywords | `keywords: {from, to}`, `choice` |
+| `task-size` | Jev's `small` suppressed heavy modes | `size`, `confidence`, `suppressed` (the keywords removed) |
+| `loop-continuation` | Jev's "task complete" ended the mode instead of blocking the stop | `mode`, `completed: {from: false, to: true}` |
+
+Each line is `{ts, point, applied}`. With `OMC_JEV_LOG_CONTEXT=1` as well, the ids of the hook call and the `request_id` of the request follow `point`, so the line joins the request's `shadow.jsonl` line, which holds the answer itself:
+
+```bash
+# The shadow line behind the last model-routing decision that was applied
+id=$(jq -r 'select(.point == "model-routing") | .request_id' .omc/state/jev/applied.jsonl | tail -n 1)
+jq --arg id "$id" 'select(.request_id == $id)' .omc/state/jev/shadow.jsonl
+```
+
+A `model-routing` line means the decision was handed to Claude Code, not decided: a call that a later check of the same hook denies, or a value other code replaced, has no line. An effort lowered only by `OMC_JEV_MAX_EFFORT` is the cap's doing and has no line. The log is a separate file because `jev-eval` counts every line of `shadow.jsonl` as a request; it is rotated with `OMC_JEV_LOG_MAX_MB` like the other Jev logs. Script hooks only: the points reached through the TypeScript resolver write no applied lines. Without the variable no file is written.
 
 ### Heuristic Fallback on Failure
 
