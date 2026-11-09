@@ -5,15 +5,15 @@
   "provenance": {
     "base": "05c800f40d1ad53b42a78609d2667ef4f726808b",
     "planningHead": "0a91273e61dbbd47eb0af4c02844409251e08398",
-    "head": "dcc3f5942779869ffa17b64e5dd71175acdbf04c",
-    "sourceSha256": "272b1011cfe171eafdc3f389e415eb86e8096cad4d7beb235e5707f19aed6ea4",
+    "head": "1e2f020007ba4a85d8b8243a949c373dfb1ba67d",
+    "sourceSha256": "f5693af602571a0634b34e7524dc60684563e0273cb3af9e23152e763885a087",
     "generatedAt": null,
     "generator": "scripts/generate-inventory-graph.mjs"
   },
   "base": "05c800f40d1ad53b42a78609d2667ef4f726808b",
   "planningHead": "0a91273e61dbbd47eb0af4c02844409251e08398",
-  "head": "dcc3f5942779869ffa17b64e5dd71175acdbf04c",
-  "sourceSha256": "272b1011cfe171eafdc3f389e415eb86e8096cad4d7beb235e5707f19aed6ea4",
+  "head": "1e2f020007ba4a85d8b8243a949c373dfb1ba67d",
+  "sourceSha256": "f5693af602571a0634b34e7524dc60684563e0273cb3af9e23152e763885a087",
   "counts": {
     "public": {
       "skills": 84,
@@ -884,6 +884,7 @@
       "scripts/lib/encode-project-path.mjs",
       "scripts/lib/enforcement-log.mjs",
       "scripts/lib/force-agent-delegation-preflight.mjs",
+      "scripts/lib/hook-command-normalizer.d.mts",
       "scripts/lib/hook-command-normalizer.mjs",
       "scripts/lib/hud-cache-wrapper.sh",
       "scripts/lib/hud-wrapper-template.mjs",
@@ -37412,6 +37413,11 @@
         "id": "scripts/lib/force-agent-delegation-preflight.mjs",
         "kind": "script",
         "path": "scripts/lib/force-agent-delegation-preflight.mjs"
+      },
+      {
+        "id": "scripts/lib/hook-command-normalizer.d.mts",
+        "kind": "script",
+        "path": "scripts/lib/hook-command-normalizer.d.mts"
       },
       {
         "id": "scripts/lib/hook-command-normalizer.mjs",
@@ -74512,6 +74518,11 @@
       },
       {
         "from": "src/hooks/setup/index.ts",
+        "to": "scripts/lib/hook-command-normalizer.mjs",
+        "kind": "imports"
+      },
+      {
+        "from": "src/hooks/setup/index.ts",
         "to": "src/hooks/beads-context/index.ts",
         "kind": "imports"
       },
@@ -77923,6 +77934,11 @@
       {
         "from": "src/installer/index.ts",
         "to": "external:url",
+        "kind": "imports"
+      },
+      {
+        "from": "src/installer/index.ts",
+        "to": "scripts/lib/hook-command-normalizer.mjs",
         "kind": "imports"
       },
       {
@@ -92107,12 +92123,12 @@
       }
     ],
     "stats": {
-      "nodeCount": 8239,
-      "edgeCount": 8742,
-      "importEdgeCount": 7297,
+      "nodeCount": 8240,
+      "edgeCount": 8744,
+      "importEdgeCount": 7299,
       "registerEdgeCount": 105
     }
   },
-  "inventorySha256": "8e427b73db99516f5dfdea0235e1e8e429e6c9a6be8e0c89d9489478fdc446ed",
-  "manifestSha256": "242ecee26868d9c78729b1187f512edc957cc800b30afac8753fdaf0bb8f59f1"
+  "inventorySha256": "7ad0e300b13247247bfddf38927c3e9ebf6abc361f830f66f5e68071b8355523",
+  "manifestSha256": "5118e9a809ff010229081311fb15e417daec7a629692b99428c04d89264eca34"
 }
