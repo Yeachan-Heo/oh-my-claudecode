@@ -625,6 +625,7 @@ export OMC_JEV="point1,point2:active,all"
 | `OMC_JEV_EXCERPT_CHARS_<POINT>` | (unset) | The same limit for one point: the point name upper-cased with dashes as underscores, for example `OMC_JEV_EXCERPT_CHARS_MODEL_ROUTING` (the variable name itself must be upper case). Order for a point: its own variable, then the point's default (`model-routing`: `12000`; `loop-continuation`: `2000`, the length to which `persistent-mode.mjs` already cuts the last assistant message), then `OMC_JEV_EXCERPT_CHARS`. An invalid value is ignored. To send less of the `loop-continuation` state, set `OMC_JEV_EXCERPT_CHARS_LOOP_CONTINUATION`, for example to `200`, the limit of earlier releases. |
 | `OMC_JEV_ENDPOINT` | `https://api.typesafe.ai/v1/systemone` | Override for stub servers or tests. |
 | `OMC_JEV_LOG_DIR` | `.omc/state/jev` | Shadow-log directory override (test only). |
+| `OMC_JEV_LOG_MAX_MB` | (unset) | Size limit in megabytes (MiB) for each Jev log file. Before a line is appended, a file larger than the limit is renamed and the line starts a new file. Unset, `0`, a value that is not a canonical positive integer (a sign, spaces, a decimal point, an exponent or a leading zero), or a value above `8589934591`: no rotation, the log grows as before. See [Log rotation](#log-rotation). |
 | `OMC_JEV_QUIET` | (unset) | Set to `1` to silence the env-activation stderr warning. |
 | `OMC_JEV_MAX_EFFORT` | `max` | Cap for the subagent reasoning effort set by the active `model-routing` point: `low`, `medium`, `high`, `xhigh`, or `max`, case-insensitive, surrounding spaces ignored. Other values use the default. A lower cap lowers the mapping: `high` restores the cap of earlier releases. A value that is set but not one of these is reported on stderr (unless `OMC_JEV_QUIET=1`) and the default is used. See [Model routing: subagent effort](#model-routing-subagent-effort). |
 | `OMC_JEV_MODEL_ROUTING_CONTEXT` | (unset) | Set to `1` or `true` to add two fields to the `model-routing` state: the Task/Agent call's `description` and `parent_last_user_message`, the last real user message of the parent session (read from the tail of its transcript; tool results, hook-injected reminders and system notices are skipped). Both are bounded by the point's excerpt limit. Script hooks only; the TypeScript resolver ignores it. See [Model routing: what Jev sees](#model-routing-what-jev-sees). |
@@ -705,6 +706,24 @@ Each line is a JSON record with:
 - `usage`: Jev-reported token usage when available
 
 Use shadow logs to collect evidence for promotion decisions (ticket 07) and to debug mismatches.
+
+#### Log rotation
+
+The shadow log is append-only and grows with every judgment: with many points opted in, a busy machine can add several megabytes a day. Set `OMC_JEV_LOG_MAX_MB` to cap the size of each file:
+
+```bash
+export OMC_JEV_LOG_MAX_MB=50
+```
+
+Before a line is appended, a file larger than the limit is renamed to `<name>-<YYYYMMDD-HHmmss>-<pid>.jsonl` in the same directory (UTC time and the writing process ID, for example `shadow-20261109-143005-4242.jsonl`), and the line starts a new `shadow.jsonl`. Both writers rotate the same way: the plugin hook scripts (`scripts/jev-resolve.mjs`) and the TypeScript resolver. The process ID in the name keeps the writers of one machine apart, and an existing name is skipped. A failed rename (another process rotated first, or the file is locked) is ignored and the line is appended anyway: rotation never costs a line and never affects a hook. A rotated file is always above the limit, usually by about one line; the first rotation after the variable is set renames the whole existing log, and a file whose renames keep failing keeps growing until a rename succeeds. Rotated files are never deleted; remove old ones yourself. Code that writes another file to the Jev log directory should call the same helper (`rotateJevLog` with `resolveJevLogMaxBytes()` in the scripts, `config.logMaxBytes` in TypeScript) before each append, so the same variable caps it.
+
+`jev-eval` reads only `shadow.jsonl` by default. Pass `--include-rotated` to read the rotated files of the same log first, oldest first:
+
+```bash
+node scripts/jev-eval.mjs --include-rotated
+```
+
+The files are read one at a time, so their total size is not limited by memory, though each file is read whole, as the single log is today.
 
 ### Heuristic Fallback on Failure
 
@@ -889,6 +908,10 @@ Read the shadow log for a point:
 
 ```bash
 jq 'select(.point == "model-routing")' .omc/state/jev/shadow.jsonl
+
+# With OMC_JEV_LOG_MAX_MB set: rotated files too, oldest first
+# (jq reports an error for the pattern until the first file has been rotated)
+jq 'select(.point == "model-routing")' .omc/state/jev/shadow-[0-9]*.jsonl .omc/state/jev/shadow.jsonl
 ```
 
 #### Verify Jev is Running
