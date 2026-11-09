@@ -107,7 +107,15 @@ function bootstrapTeleportDependencies(
   parentRepoRoot: string,
   worktreePath: string,
   options: { json?: boolean; symlinkNodeModules: boolean }
-): { mode: 'symlink' | 'install'; packageManager: SupportedPackageManager } {
+): { mode: 'none' } | { mode: 'symlink' | 'install'; packageManager: SupportedPackageManager } {
+  const worktreePackageJson = readPackageJsonText(worktreePath);
+
+  // No package.json at the worktree root (for example a Python, Go or Rust repository):
+  // there is nothing to install or link. One that exists but cannot be read still installs.
+  if (worktreePackageJson === null && !existsSync(join(worktreePath, PACKAGE_JSON_NAME))) {
+    return { mode: 'none' };
+  }
+
   const packageManager = detectPackageManager(parentRepoRoot, worktreePath);
 
   if (!options.symlinkNodeModules) {
@@ -116,7 +124,6 @@ function bootstrapTeleportDependencies(
   }
 
   const parentPackageJson = readPackageJsonText(parentRepoRoot);
-  const worktreePackageJson = readPackageJsonText(worktreePath);
 
   if (!parentPackageJson || !worktreePackageJson) {
     warnTeleportDependencyFallback(
