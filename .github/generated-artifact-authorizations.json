@@ -4,6 +4,374 @@
   "owner": "Yeachan-Heo",
   "authorizations": [
     {
+      "pullNumber": 4898,
+      "targetRef": "main",
+      "mergeBaseSha": "19e6daa3647ec9609a5ff11e9199c631167cbc3a",
+      "headSha": "ca3462849de294b388ebfdef4179194b0186a426",
+      "owner": "Yeachan-Heo",
+      "expiresAt": "2026-12-31T23:59:59.999Z",
+      "generatedDelta": {
+        "count": 59,
+        "sha256": "41dd17c59d29b7ced1a4bebb009102e920fba72063255c8ec7df8cf8075439a2"
+      },
+      "generatedFiles": [
+        {
+          "status": "added",
+          "filename": "bridge/__pycache__/gyoshu_bridge.cpython-314.pyc",
+          "sha": "65ebd0aef1a17edc12c63d69bce016134407639c",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "bridge/claude-md-coordinator.cjs",
+          "sha": "7a161b4b5bf4e0e693ab539b2b93ccb711649e5e",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "bridge/cli.cjs",
+          "sha": "896aa841d2419561f61157f698a07a8d3a32d1c9",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "bridge/mcp-server.cjs",
+          "sha": "b818b0b3b93968189f0b991b0cd7b94089afa056",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "bridge/team-mcp.cjs",
+          "sha": "3c488f5fee4fa82290a573a58fde948a3ea3658b",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "bridge/team.js",
+          "sha": "236e76ccfad602a7eb20aeb4465a24a4bda346ac",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/__tests__/installer-mcp-config.test.js",
+          "sha": "8fa1fd3cd9ab5c13b30b9c3174e7e97ac5e69709",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/__tests__/installer-mcp-config.test.js.map",
+          "sha": "994b6b97e67651a7e64bb029952c3a5b88508226",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/__tests__/keyword-detector-script.test.js",
+          "sha": "d72ce87252c86633f26216edb21cb338c78af27c",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/__tests__/keyword-detector-script.test.js.map",
+          "sha": "abb6d9cf0d1a46b1cb42de99567871e24fe005e2",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/__tests__/preemptive-compaction-hook.test.js",
+          "sha": "d810031e23c10720919bcbb272edd39bb20da352",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/__tests__/preemptive-compaction-hook.test.js.map",
+          "sha": "1c3ebb8ddbb08584d134d030fd72fdcda76b2d00",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/cli/__tests__/launch.test.js",
+          "sha": "a02a742afe818795610867b2adc8b770f9e29960",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/cli/__tests__/launch.test.js.map",
+          "sha": "2de447f344433d41ca05c6263a7936e1d61196ea",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/cli/commands/ralph.d.ts.map",
+          "sha": "dfa2e2133339a68f23d4b3e241c544b12d75c0be",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/cli/commands/ralph.js",
+          "sha": "1764d56ac16c633f1e11bafcbf30da518a703ec2",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/cli/commands/ralph.js.map",
+          "sha": "ae035f544ed3cbeeaaac0a7aa6adfcd9a3409fdc",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/cli/launch.d.ts.map",
+          "sha": "6338bd42ef8840a6c8818c792679466afa966372",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/cli/launch.js",
+          "sha": "c2b4eaac53c0964f943e513be144252cdeb667ef",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/cli/launch.js.map",
+          "sha": "2831bc2512e7391798f605d6aa389cc3f473dd6e",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/hooks/keyword-detector/__tests__/index.test.js",
+          "sha": "a8531532878f73ffb1313b7e815fa84d1564cf58",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/hooks/keyword-detector/__tests__/index.test.js.map",
+          "sha": "d3f2bbc8ee37c533fae8f3dc084133dcae5461e3",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/hooks/keyword-detector/index.d.ts.map",
+          "sha": "8faa4d5f8793bd96cd68b8fcc318308f21822122",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/hooks/keyword-detector/index.js",
+          "sha": "5a56d42d92f48dcf5a2c1583dd5e68d402db2827",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/hooks/keyword-detector/index.js.map",
+          "sha": "cfcda23e23dd8d8fdd5d81154e1137aec449431c",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/hooks/persistent-mode/index.d.ts.map",
+          "sha": "8c65949fffd387655e8759cf62d3243579023834",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/hooks/persistent-mode/index.js",
+          "sha": "e5ded2077c17ae372278eb4ebfe9556a121bc927",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/hooks/persistent-mode/index.js.map",
+          "sha": "2d322aae6bf99c62b5b4ab08e9392090e2678d4f",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/hooks/ralph/__tests__/feedback-baseline.test.js",
+          "sha": "7eac337d4eef6655bdf080dca0d6046c44292196",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/hooks/ralph/__tests__/feedback-baseline.test.js.map",
+          "sha": "680766624227452c54c01c51e9587f30db0b9bf2",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/hooks/ralph/feedback-baseline.d.ts",
+          "sha": "9c042f4ae65959fc208cb1c30f95ea24b5228e4e",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/hooks/ralph/feedback-baseline.d.ts.map",
+          "sha": "b83b00db527d58c2a4881b52eb1dda50a99bd988",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/hooks/ralph/feedback-baseline.js",
+          "sha": "aa634ac83e3f985fec7d7b8e469ddb1f169b6242",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/hooks/ralph/feedback-baseline.js.map",
+          "sha": "bce7c7a18ab8472088db2577855d9477f1de3f6e",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/hooks/ralph/index.d.ts",
+          "sha": "a01b104bda57218b08f51eb3e97e8070a22fdd1d",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/hooks/ralph/index.d.ts.map",
+          "sha": "606c43ce6c26ee55f448e1aceeefa3e1a9eae2af",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/hooks/ralph/index.js",
+          "sha": "40ae2d5069c423cb0a15c5b6659e59e9fdeb53f5",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/hooks/ralph/index.js.map",
+          "sha": "ef62a1daeb6d54ed02f0bc732b480cba0e1b3bdd",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/hooks/ralph/verifier.d.ts",
+          "sha": "c64ddfa6756b481412fb6301b08825f80e504dab",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/hooks/ralph/verifier.d.ts.map",
+          "sha": "9ca769fc67eff571cccae7f5442f4de1803c8525",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/hooks/ralph/verifier.js",
+          "sha": "670753eca5fea76da7a6d7374adefd3dce7f03a6",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/hooks/ralph/verifier.js.map",
+          "sha": "1d2f38745beb986fffc7bdee400e01dcd03d037d",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/hooks/session-end/cleanup-manifest.d.ts",
+          "sha": "02e236315f30808cc80d69594f12d3e19846c738",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/hooks/session-end/cleanup-manifest.d.ts.map",
+          "sha": "eaae34c929bf54b0fb9b794c39f58cda94930953",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/hooks/session-end/cleanup-manifest.js",
+          "sha": "48bfc04883d987d05e2940446415425f6e6c801f",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/hooks/session-end/cleanup-manifest.js.map",
+          "sha": "3a7bfaf2d7568c2fb41ca946fbce386fc71e83fd",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/installer/mcp-registry.d.ts",
+          "sha": "2e7d2e4ccd77b0f791883cb2de40283f448e9924",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/installer/mcp-registry.d.ts.map",
+          "sha": "51b7b99d8ef1ecdf91c03053698e96bc08ed34e5",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/installer/mcp-registry.js",
+          "sha": "9f01e417fd5202b9f0bbb18d976d1445971bc3b3",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/installer/mcp-registry.js.map",
+          "sha": "6da8c912ab7051234bbefc5a0bda6bf8e1f208a7",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/notifications/__tests__/approval-reply.test.js",
+          "sha": "190435a6984fcd2f09cf928afb41d1566a5cf133",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/notifications/__tests__/approval-reply.test.js.map",
+          "sha": "9a9e1a1b50b7c358108d7fe675b81dc44210601d",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/notifications/reply-listener.js",
+          "sha": "82b9d03b15bed8f19f5163a11f506f075ffc0433",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/notifications/reply-listener.js.map",
+          "sha": "7960b548dbf39fef846a661574ec1c30ec5146ec",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/tools/lsp/__tests__/devcontainer.test.js",
+          "sha": "5b7f576a36c2a32d60b1204e73a70c721c4ecef4",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/tools/lsp/__tests__/devcontainer.test.js.map",
+          "sha": "90fb4e61052555cb7eaa1f7a6f780b0b0112a7d2",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/tools/lsp/devcontainer.d.ts.map",
+          "sha": "1ac8d516a02a2bde5bd8be57d80a80ed1fff8990",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/tools/lsp/devcontainer.js",
+          "sha": "d691d0c87be43dc8360230525263fd65f6565d89",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/tools/lsp/devcontainer.js.map",
+          "sha": "9751f908c58a5137c6a297490a74111a9a02b19e",
+          "previousFilename": null
+        }
+      ]
+    },
+    {
       "pullNumber": 3537,
       "targetRef": "main",
       "mergeBaseSha": "76c90920b74494df6e34d6165be963bca8a9adf6",
