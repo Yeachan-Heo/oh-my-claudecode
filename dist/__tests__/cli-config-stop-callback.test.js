@@ -1,5 +1,5 @@
-import { describe, it, expect } from 'vitest';
-import { mkdtempSync, writeFileSync, readFileSync, mkdirSync } from 'fs';
+import { afterEach, beforeEach, describe, it, expect } from 'vitest';
+import { mkdtempSync, writeFileSync, readFileSync, mkdirSync, rmSync } from 'fs';
 import { join, dirname } from 'path';
 import { tmpdir } from 'os';
 import { spawnSync } from 'child_process';
@@ -153,6 +153,56 @@ describe('omc config-stop-callback tag options', () => {
             path: join(claudeConfigDir, 'session-logs/{session_id}.md'),
             format: 'markdown',
         });
+    });
+});
+describe('omc commands that rewrite .omc-config.json', () => {
+    const discordWebhook = 'https://discord.com/api/webhooks/1/token';
+    const stopCallbackArgs = ['config-stop-callback', 'file', '--enable', '--path', '/tmp/omc-stop.md'];
+    let homeDir;
+    let configPath;
+    beforeEach(() => {
+        homeDir = mkdtempSync(join(tmpdir(), 'omc-cli-config-keys-'));
+        configPath = join(homeDir, '.claude', '.omc-config.json');
+        mkdirSync(dirname(configPath), { recursive: true });
+    });
+    afterEach(() => {
+        rmSync(homeDir, { recursive: true, force: true });
+    });
+    it.each([
+        ['config-stop-callback', stopCallbackArgs,
+            { stopHookCallbacks: { file: { enabled: true, path: '/tmp/omc-stop.md', note: 'keep' } } }],
+        ['config-stop-callback --profile', ['config-stop-callback', 'discord', '--profile', 'work', '--enable', '--webhook', discordWebhook],
+            { notificationProfiles: { old: { enabled: true }, other: { enabled: true }, work: { discord: { enabled: true, webhookUrl: discordWebhook } } } }],
+        ['config-notify-profile --delete', ['config-notify-profile', 'old', '--delete'],
+            { notificationProfiles: { other: { enabled: true } } }],
+    ])('%s applies its change and keeps keys it does not manage', (_label, args, applied) => {
+        const unmanaged = {
+            team: { maxAgents: 3 },
+            agents: { sharedMemory: { enabled: true } },
+            customIntegrations: { webhook: { url: 'https://example.test/hook' } },
+        };
+        writeFileSync(configPath, JSON.stringify({
+            ...unmanaged,
+            stopHookCallbacks: { file: { enabled: false, path: '/tmp/old.md', note: 'keep' } },
+            notificationProfiles: { old: { enabled: true }, other: { enabled: true } },
+        }));
+        expect(runCli(args, homeDir).status).toBe(0);
+        const config = JSON.parse(readFileSync(configPath, 'utf-8'));
+        expect(config).toMatchObject({ ...unmanaged, ...applied });
+        expect(config).not.toHaveProperty('silentAutoUpdate');
+        if (args.includes('--delete'))
+            expect(config.notificationProfiles.old).toBeUndefined();
+    });
+    it.each(['{ "team": ', '[]', 'null'])('fails and leaves an unusable config untouched: %s', (content) => {
+        writeFileSync(configPath, content);
+        const result = runCli(stopCallbackArgs, homeDir);
+        expect(result.status).toBe(1);
+        expect(result.stderr).toContain('.omc-config.json');
+        expect(readFileSync(configPath, 'utf-8')).toBe(content);
+    });
+    it('still creates the config when none exists', () => {
+        expect(runCli(stopCallbackArgs, homeDir).status).toBe(0);
+        expect(readConfig(configPath).stopHookCallbacks?.file?.enabled).toBe(true);
     });
 });
 //# sourceMappingURL=cli-config-stop-callback.test.js.map

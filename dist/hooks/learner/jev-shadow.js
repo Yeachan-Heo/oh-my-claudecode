@@ -27,6 +27,7 @@ export function recordLearnerExtractionShadow(assistantMessage, userMessage, fet
             source: 'learner-detection',
         },
         twin: () => detectExtractableMoment(assistantMessage, userMessage),
+        mapHeuristic: (result, questionSet) => result.detected,
         mapAnswer: (answer) => {
             // Jev Noul answer has { type: 'noul', noul: boolean | undefined }
             return {
