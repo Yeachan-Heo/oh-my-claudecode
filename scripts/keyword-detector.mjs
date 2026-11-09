@@ -1739,6 +1739,29 @@ function isTaskSizePrefixWinsEnabled(env = process.env) {
   return ['1', 'true'].includes(String(env.OMC_JEV_TASK_SIZE_PREFIX_WINS ?? '').trim().toLowerCase());
 }
 
+// OMC_JEV_TASK_SIZE_SLASH_ANYWHERE=1: a heavy mode typed as a slash command
+// anywhere in the prompt, also as /omc:<mode>, is never dropped by the active
+// task-size point. Off by default: only a slash command at the start of the
+// prompt keeps its mode.
+function isTaskSizeSlashAnywhereEnabled(env = process.env) {
+  return ['1', 'true'].includes(String(env.OMC_JEV_TASK_SIZE_SLASH_ANYWHERE ?? '').trim().toLowerCase());
+}
+
+// A slash command starts the prompt or follows whitespace, an opening bracket or
+// a quote, and ends at whitespace, the end, a closing bracket or quote, or
+// punctuation; a dot only when no word character follows (/ralph.md is a file).
+const HEAVY_MODE_SLASH_ANYWHERE_PATTERN = /(?:^|[\s("'])\/(?:oh-my-claudecode:|omc:)?(ralph|autopilot|team|ralplan)(?=\s|$|[?!,;:)\]"']|\.(?!\w))/gi;
+
+/**
+ * Heavy modes typed as a slash command anywhere in the sanitized prompt
+ * (/ralph, /oh-my-claudecode:ralph, /omc:ralph). Pass cleanPrompt: code
+ * blocks, quotes and pasted payloads are already removed there, while bare
+ * slash commands are kept by sanitizeForKeywordDetection.
+ */
+function heavyModeSlashInvocations(prompt) {
+  return new Set([...String(prompt ?? '').matchAll(HEAVY_MODE_SLASH_ANYWHERE_PATTERN)].map((match) => match[1].toLowerCase()));
+}
+
 /**
  * Create a compact skill invocation guide without inlining SKILL.md bodies.
  * Full skill text remains available by path, avoiding UserPromptSubmit token blowups.
@@ -2205,7 +2228,8 @@ async function main() {
     // Only suppress when enabled, confidence >= 0.9, and the heuristic says
     // small or the prompt has an explicit size prefix (with
     // OMC_JEV_TASK_SIZE_PREFIX_WINS=1 a classifier prefix alone is enough).
-    // - NEVER suppress slash-invoked modes
+    // - NEVER suppress slash-invoked modes (with OMC_JEV_TASK_SIZE_SLASH_ANYWHERE=1
+    //   a slash command anywhere in the prompt counts)
     // With OMC_JEV_TASK_SIZE_NOTICE=1 the outcome is reported in additionalContext:
     // the suppressed modes with the reason, and the heavy modes kept although Jev
     // rated the task small, each with the reason it was kept.
@@ -2220,6 +2244,7 @@ async function main() {
     // OMC_JEV_TASK_SIZE_PREFIX_WINS=1: a classifier size prefix drops heavy modes
     // whatever size Jev answers.
     const classifierSizePrefix = isTaskSizePrefixWinsEnabled() && heuristicTaskSize?.hasEscapeHatch === true;
+    const taskSizeSlashAnywhere = isTaskSizeSlashAnywhereEnabled();
     if (
       taskSizeDetectionConfig.enabled &&
       taskSizeDetectionConfig.suppressHeavyModesForSmallTasks &&
@@ -2245,6 +2270,9 @@ async function main() {
         if (isExplicitRalphSlashInvocation(cleanPrompt)) slashInvokedKeywords.add('ralph');
         if (/^\s*\/(?:oh-my-claudecode:)?autopilot(?:\s|$|:)/i.test(cleanPrompt)) slashInvokedKeywords.add('autopilot');
         if (/^\s*\/(?:oh-my-claudecode:)?team(?:\s|$|:)/i.test(cleanPrompt)) slashInvokedKeywords.add('team');
+        if (taskSizeSlashAnywhere) {
+          for (const name of heavyModeSlashInvocations(cleanPrompt)) slashInvokedKeywords.add(name);
+        }
         
         // Filter out non-slash-invoked heavy keywords
         resolved = resolved.filter(keyword => {
@@ -2285,8 +2313,11 @@ async function main() {
         `[TASK-SIZE: SMALL] Heavy orchestration mode(s) suppressed: ${suppressedHeavy.join(', ')}.\n` +
           `Reason: ${suppressionReason}\n` +
           'Running directly without heavy agent stacking. ' +
-          `To run a suppressed mode anyway, start the prompt with its slash command (for example \`/oh-my-claudecode:${suppressedHeavy[0]}\`); ` +
-          'slash commands at the start of the prompt are never suppressed.\n\n',
+          (taskSizeSlashAnywhere
+            ? `To run a suppressed mode anyway, type its slash command anywhere in the prompt (for example \`/oh-my-claudecode:${suppressedHeavy[0]}\`); ` +
+              'slash commands are never suppressed.\n\n'
+            : `To run a suppressed mode anyway, start the prompt with its slash command (for example \`/oh-my-claudecode:${suppressedHeavy[0]}\`); ` +
+              'slash commands at the start of the prompt are never suppressed.\n\n'),
       );
     }
     if (taskSizeNotice && keptHeavy.length > 0) {
