@@ -1731,6 +1731,14 @@ function isTaskSizeNoticeEnabled(env = process.env) {
   return ['1', 'true'].includes(String(env.OMC_JEV_TASK_SIZE_NOTICE ?? '').trim().toLowerCase());
 }
 
+// OMC_JEV_TASK_SIZE_PREFIX_WINS=1: a size prefix of the classifier (quick:,
+// simple:, tiny:, minor:, small:, just:, only:, which classifyTaskSize always
+// rates small) makes the active task-size point drop heavy modes whatever size
+// Jev answers. Off by default: Jev must answer small with confidence >= 0.9.
+function isTaskSizePrefixWinsEnabled(env = process.env) {
+  return ['1', 'true'].includes(String(env.OMC_JEV_TASK_SIZE_PREFIX_WINS ?? '').trim().toLowerCase());
+}
+
 /**
  * Create a compact skill invocation guide without inlining SKILL.md bodies.
  * Full skill text remains available by path, avoiding UserPromptSubmit token blowups.
@@ -2195,7 +2203,8 @@ async function main() {
 
     // Filter heavy keywords if task-size is 'small' (issue #4805)
     // Only suppress when enabled, confidence >= 0.9, and the heuristic says
-    // small or the prompt has an explicit size prefix.
+    // small or the prompt has an explicit size prefix (with
+    // OMC_JEV_TASK_SIZE_PREFIX_WINS=1 a classifier prefix alone is enough).
     // - NEVER suppress slash-invoked modes
     // With OMC_JEV_TASK_SIZE_NOTICE=1 the outcome is reported in additionalContext:
     // the suppressed modes with the reason, and the heavy modes kept although Jev
@@ -2208,12 +2217,16 @@ async function main() {
       : String(jevTaskSizeResult.confidence);
     const sizeTwin = gateTaskSize ?? heuristicTaskSize;
     const heavyInResolved = () => resolved.filter((keyword) => HEAVY_KEYWORDS.has(keyword.name)).map((keyword) => keyword.name);
+    // OMC_JEV_TASK_SIZE_PREFIX_WINS=1: a classifier size prefix drops heavy modes
+    // whatever size Jev answers.
+    const classifierSizePrefix = isTaskSizePrefixWinsEnabled() && heuristicTaskSize?.hasEscapeHatch === true;
     if (
       taskSizeDetectionConfig.enabled &&
       taskSizeDetectionConfig.suppressHeavyModesForSmallTasks &&
       jevTaskSizeResult &&
-      jevTaskSizeResult.size === 'small' &&
-      jevTaskSizeResult.confidence >= 0.9
+      ((jevTaskSizeResult.size === 'small' &&
+        jevTaskSizeResult.confidence >= 0.9) ||
+        classifierSizePrefix)
     ) {
       // Check if prompt has a size prefix like "quick:"
       const hasSizePrefix = /^\s*(?:quick|small|tiny|minimal|fast|speed|urgent):/i.test(cleanPrompt);
@@ -2221,6 +2234,7 @@ async function main() {
       const heuristicSaysSmall = sizeTwin && (sizeTwin.size === 'small' || sizeTwin.size === 'quick');
       
       // Only suppress if BOTH conditions are true: confidence >= 0.9 AND (heuristic small OR size prefix)
+      // (a classifier prefix under OMC_JEV_TASK_SIZE_PREFIX_WINS makes the heuristic say small)
       const shouldSuppressForSize = (heuristicSaysSmall || hasSizePrefix);
       
       if (shouldSuppressForSize) {
@@ -2245,9 +2259,13 @@ async function main() {
           suppressedHeavy.push(keyword.name);
           return false;
         });
-        suppressionReason = heuristicSaysSmall
-          ? `Jev active-mode classification: small (confidence ${jevSizeConfidence}); heuristic: ${sizeTwin.reason}`
-          : `Jev active-mode classification: small (confidence ${jevSizeConfidence}); size prefix in the prompt`;
+        const prefixWon = classifierSizePrefix &&
+          !(jevTaskSizeResult.size === 'small' && jevTaskSizeResult.confidence >= 0.9);
+        suppressionReason = prefixWon
+          ? `size prefix "${heuristicTaskSize.escapePrefixUsed}" (Jev active-mode classification: ${jevTaskSizeResult.size}, confidence ${jevSizeConfidence ?? 'not given'})`
+          : heuristicSaysSmall
+            ? `Jev active-mode classification: small (confidence ${jevSizeConfidence}); heuristic: ${sizeTwin.reason}`
+            : `Jev active-mode classification: small (confidence ${jevSizeConfidence}); size prefix in the prompt`;
       } else if (taskSizeNotice) {
         const heuristicSize = sizeTwin?.size ?? 'unknown';
         keptHeavy.push(...heavyInResolved().map((name) => `${name} (the heuristic rates the task ${heuristicSize} and the prompt has no size prefix)`));
