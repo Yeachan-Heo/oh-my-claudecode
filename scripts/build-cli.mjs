@@ -14,6 +14,9 @@ const sharedExternal = [
   '@ast-grep/napi', 'better-sqlite3',
   // Avoid bundling jsonc-parser's UMD internals
   'jsonc-parser',
+  // Optional/conditional dependencies
+  'ajv-formats', 'zod-to-json-schema', 'fast-deep-equal',
+  'json-schema-traverse', 'fast-uri', 'regexp-tree',
 ];
 
 const cliConfig = {

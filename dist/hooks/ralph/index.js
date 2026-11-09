@@ -53,7 +53,7 @@ readVerificationState, writeVerificationState, clearVerificationState, consumeVe
 // Verification workflow
 startVerification, recordArchitectFeedback, 
 // Prompts & detection
-getArchitectVerificationPrompt, getArchitectRejectionContinuationPrompt, detectArchitectApproval, detectArchitectRejection } from './verifier.js';
+getArchitectVerificationPrompt, getArchitectRejectionContinuationPrompt, detectArchitectApproval, detectArchitectRejection, hasRejectionSignal } from './verifier.js';
 // ============================================================================
 // Ralph PRD Stale-State Detection & Reconciliation (#3669)
 // ============================================================================
