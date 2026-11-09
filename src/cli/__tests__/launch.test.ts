@@ -1255,7 +1255,6 @@ describe('launchCommand — env var propagation', () => {
 
 describe('prepareOmcLaunchConfigDir / launchCommand OMC companion loading', () => {
   const originalClaudeConfigDir = process.env.CLAUDE_CONFIG_DIR;
-  const originalClaudeMcpConfigPath = process.env.CLAUDE_MCP_CONFIG_PATH;
   const originalHome = process.env.HOME;
   const originalUserProfile = process.env.USERPROFILE;
   let tempRoot: string | null = null;
@@ -1265,7 +1264,6 @@ describe('prepareOmcLaunchConfigDir / launchCommand OMC companion loading', () =
   beforeEach(() => {
     vi.resetAllMocks();
     delete process.env.CLAUDECODE;
-    delete process.env.CLAUDE_MCP_CONFIG_PATH;
     tempRoot = mkdtempSync(join(tmpdir(), 'omc-launch-profile-'));
     // homedir() reads USERPROFILE on Windows and HOME elsewhere.
     process.env.HOME = join(tempRoot, 'home');
@@ -1295,11 +1293,6 @@ describe('prepareOmcLaunchConfigDir / launchCommand OMC companion loading', () =
       delete process.env.CLAUDE_CONFIG_DIR;
     } else {
       process.env.CLAUDE_CONFIG_DIR = originalClaudeConfigDir;
-    }
-    if (originalClaudeMcpConfigPath === undefined) {
-      delete process.env.CLAUDE_MCP_CONFIG_PATH;
-    } else {
-      process.env.CLAUDE_MCP_CONFIG_PATH = originalClaudeMcpConfigPath;
     }
     if (originalClaudecode === undefined) {
       delete process.env.CLAUDECODE;
@@ -1565,66 +1558,6 @@ describe('prepareOmcLaunchConfigDir / launchCommand OMC companion loading', () =
     expect(runtimeClaudeJson).toEqual({
       mcpServers: {
         'work-docs': { command: 'node', args: ['work-docs.js'] },
-      },
-    });
-  });
-
-  it('seeds runtime mcpServers from CLAUDE_MCP_CONFIG_PATH, the file omc setup syncs into, when it is set', () => {
-    const profilesDir = join(tempRoot!, 'profiles');
-    const profileDir = join(profilesDir, 'work');
-    // Here the file next to the profile, which OMC used before it followed CLAUDE_CONFIG_DIR.
-    const mcpConfigPath = join(profilesDir, '.claude.json');
-    mkdirSync(profileDir, { recursive: true });
-    writeFileSync(join(profileDir, 'CLAUDE-omc.md'), '<!-- OMC:START -->\n# OMC\n<!-- OMC:END -->\n');
-    writeFileSync(join(profileDir, '.claude.json'), JSON.stringify({
-      mcpServers: {
-        'work-docs': { command: 'node', args: ['work-docs.js'] },
-      },
-    }, null, 2));
-    writeFileSync(mcpConfigPath, JSON.stringify({
-      mcpServers: {
-        'team-docs': { command: 'node', args: ['team-docs.js'] },
-      },
-    }, null, 2));
-    process.env.CLAUDE_CONFIG_DIR = profileDir;
-    process.env.CLAUDE_MCP_CONFIG_PATH = mcpConfigPath;
-
-    const runtimeDir = prepareOmcLaunchConfigDir();
-    const runtimeClaudeJson = JSON.parse(readFileSync(join(runtimeDir, '.claude.json'), 'utf-8')) as Record<string, unknown>;
-
-    expect(runtimeClaudeJson.mcpServers).toEqual({
-      'team-docs': { command: 'node', args: ['team-docs.js'] },
-    });
-  });
-
-  it('seeds only runtime mcpServers from CLAUDE_MCP_CONFIG_PATH for the default ~/.claude', () => {
-    const homeDir = join(tempRoot!, 'home');
-    const configDir = join(homeDir, '.claude');
-    const mcpConfigPath = join(tempRoot!, 'custom', 'claude-mcp.json');
-    mkdirSync(configDir, { recursive: true });
-    mkdirSync(dirname(mcpConfigPath), { recursive: true });
-    writeFileSync(join(configDir, 'CLAUDE-omc.md'), '<!-- OMC:START -->\n# OMC\n<!-- OMC:END -->\n');
-    writeFileSync(join(homeDir, '.claude.json'), JSON.stringify({
-      hasCompletedOnboarding: true,
-      mcpServers: {
-        github: { command: 'node', args: ['github-mcp.js'] },
-      },
-    }, null, 2));
-    writeFileSync(mcpConfigPath, JSON.stringify({
-      mcpServers: {
-        'team-docs': { command: 'node', args: ['team-docs.js'] },
-      },
-    }, null, 2));
-    process.env.CLAUDE_MCP_CONFIG_PATH = mcpConfigPath;
-
-    const runtimeDir = prepareOmcLaunchConfigDir(configDir);
-    const runtimeClaudeJson = JSON.parse(readFileSync(join(runtimeDir, '.claude.json'), 'utf-8')) as Record<string, unknown>;
-
-    // Onboarding state still comes from ~/.claude.json.
-    expect(runtimeClaudeJson).toEqual({
-      hasCompletedOnboarding: true,
-      mcpServers: {
-        'team-docs': { command: 'node', args: ['team-docs.js'] },
       },
     });
   });
