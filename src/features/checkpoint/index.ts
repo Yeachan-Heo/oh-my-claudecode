@@ -23,6 +23,8 @@ import { tmpdir } from "os";
 import { join } from "path";
 
 const GIT_TIMEOUT_MS = 60_000;
+/** `git ls-files --stage` prints a line per tracked file, past Node's 1 MiB default at about 10,000 files. */
+const GIT_MAX_BUFFER_BYTES = 256 * 1024 * 1024;
 const REF_PREFIX = "refs/omc/checkpoints/";
 
 /** Author/committer identity for shadow commits (never uses user git config). */
@@ -41,22 +43,29 @@ export class CheckpointError extends Error {
 interface GitOptions {
   cwd?: string;
   env?: NodeJS.ProcessEnv;
+  input?: Buffer;
 }
 
-function git(args: readonly string[], options: GitOptions = {}): string {
+/** Run git and return its raw stdout (paths in -z output are bytes, not UTF-8 text). */
+function gitBytes(args: readonly string[], options: GitOptions = {}): Buffer {
   try {
     return execFileSync("git", args, {
       cwd: options.cwd ?? process.cwd(),
       env: options.env ?? process.env,
+      input: options.input,
+      maxBuffer: GIT_MAX_BUFFER_BYTES,
       timeout: GIT_TIMEOUT_MS,
-      encoding: "utf8",
       windowsHide: true,
-    }).trim();
+    });
   } catch (error) {
-    const err = error as { stderr?: string; message: string };
-    const detail = (err.stderr ?? err.message ?? "").trim();
+    const err = error as { stderr?: Buffer; message: string };
+    const detail = (err.stderr?.toString("utf8") ?? err.message ?? "").trim();
     throw new CheckpointError(`git ${args[0]} failed: ${detail}`, 1);
   }
+}
+
+function git(args: readonly string[], options: GitOptions = {}): string {
+  return gitBytes(args, options).toString("utf8").trim();
 }
 
 /** Resolve the enclosing repository toplevel, failing closed outside git. */
@@ -83,12 +92,22 @@ export function createCheckpoint(cwd: string, label: string): string {
   // user's real index and HEAD are never touched.
   const tmpIndexDir = mkdtempSync(join(tmpdir(), "omc-checkpoint-"));
   try {
-    const tmpIndexPath = join(tmpIndexDir, "index");
-    git(["add", "-A", "--"], {
+    const tmpIndexEnv = { ...process.env, GIT_INDEX_FILE: join(tmpIndexDir, "index") };
+    // Seed the temporary index with the real index's entries (path, mode and
+    // blob, without stat data or flags) so `git add -A` sees tracked files as
+    // tracked. From an empty index it skips tracked files that match an
+    // ignore rule and submodules that are not checked out, and records
+    // executables and symlinks as plain files when core.fileMode or
+    // core.symlinks is false. Without stat data or assume-unchanged bits,
+    // every tracked file is still read from the worktree.
+    const trackedEntries = gitBytes(["ls-files", "--stage", "-z"], { cwd: toplevel });
+    gitBytes(["update-index", "-z", "--index-info"], {
       cwd: toplevel,
-      env: { ...process.env, GIT_INDEX_FILE: tmpIndexPath },
+      env: tmpIndexEnv,
+      input: trackedEntries,
     });
-    const tree = git(["write-tree"], { cwd: toplevel, env: { ...process.env, GIT_INDEX_FILE: tmpIndexPath } });
+    git(["add", "-A", "--"], { cwd: toplevel, env: tmpIndexEnv });
+    const tree = git(["write-tree"], { cwd: toplevel, env: tmpIndexEnv });
 
     // Parent onto HEAD when the repository has commits; orphan trees are
     // valid snapshots for freshly-initialized repositories.
