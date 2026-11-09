@@ -27,7 +27,7 @@
 // The tokenizer documents its token shapes so other hooks can reuse it.
 
 import { spawnSync } from 'node:child_process';
-import { appendFileSync, existsSync, mkdirSync, renameSync, statSync } from 'node:fs';
+import { appendFileSync, existsSync, mkdirSync, readdirSync, renameSync, statSync, unlinkSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { dirname, join } from 'node:path';
 
@@ -41,10 +41,11 @@ export const APOSTROPHE_EXTRA = 4;
 export const LENGTH_CUT_AT = 8190; // where Git Bash cuts the -c argument (measured: 8185 passes, 8195 is cut)
 export const TRUNCATION_CAUSE_AT = 7500; // errors.jsonl: an unexpected EOF of a command this long (effective) counts as truncation
 export const SYNTAX_TIMEOUT_MS = 1000;
-// OMC_SHELL_SYNTAX_TIMEOUT_MS: limit of bash -n in the hook (100-15000 ms, default 1000).
+// OMC_SHELL_SYNTAX_TIMEOUT_MS: limit of bash -n in the hook (100-3000 ms, default 1000). pre-tool-enforcer has a 5 s budget, and a
+// blocked spawnSync cannot be interrupted, so the limit stays well below it.
 export function syntaxTimeoutMs(env = process.env) {
   const value = Number(env.OMC_SHELL_SYNTAX_TIMEOUT_MS);
-  return Number.isFinite(value) && value >= 100 && value <= 15000 ? value : SYNTAX_TIMEOUT_MS;
+  return Number.isFinite(value) && value >= 100 && value <= 3000 ? value : SYNTAX_TIMEOUT_MS;
 }
 // OMC_SHELL_CHECKS_LENGTH_LIMIT: effective length from which the length check denies (1000-100000, default 7700). The wrapper
 // size and the cut point belong to the host, so a Claude Code or Git for Windows update may move them.
@@ -55,6 +56,7 @@ export function lengthDenyAt(env = process.env) {
 export const SYNTAX_MIN_CHARS = { win32: 200, default: 0 };
 export const MAX_NESTING = 64; // deeper $( ${ " ` nesting stops the tokenizer (error too-deep) instead of overflowing the stack
 const ARITH_SCAN_MAX = 2000; // longest (( ... )) or $(( ... )) the tokenizer looks for
+const ARITH_SCAN_TOTAL = 200000; // all such scans of one text together: a run of thousands of '(' stays cheap
 const EXCERPT_CHARS = 300;
 
 export function shellChecksEnabled(env = process.env) {
@@ -100,6 +102,7 @@ class BashLexer {
     this.pending = [];
     this.depth = 0; // inside $( ) or <( ): here-document bodies may end at "EOF)"
     this.level = level; // any nesting, limited by MAX_NESTING
+    this.arithBudget = ARITH_SCAN_TOTAL; // characters the (( ... )) scans may still read in this text
   }
 
   enter() {
@@ -198,7 +201,7 @@ class BashLexer {
         const word = this.word();
         token.target = word;
         token.end = word.end;
-        this.pending.push({ delimiter: wordValue(word), quoted: word.parts.some((p) => p.kind !== 'lit') || /\\/.test(this.s.slice(word.start, word.end)), strip: op === '<<-', redirStart: start });
+        this.pending.push({ delimiter: wordValue(word, this.s), quoted: word.parts.some((p) => p.kind === 'single' || p.kind === 'ansi' || p.kind === 'double') || /\\/.test(this.s.slice(word.start, word.end)), strip: op === '<<-', redirStart: start });
       }
     }
     return token;
@@ -219,7 +222,7 @@ class BashLexer {
         const lineEnd = nl < 0 || nl > this.n ? this.n : nl;
         const line = s.slice(pos, lineEnd);
         const check = h.strip ? line.replace(/^\t+/, '') : line;
-        if (check === h.delimiter) {
+        if (check === h.delimiter || check === `${h.delimiter}\r`) {
           terminated = true;
           end = pos;
           next = lineEnd < this.n ? lineEnd + 1 : this.n;
@@ -262,7 +265,7 @@ class BashLexer {
     const s = this.s;
     const parts = [];
     let lit = null;
-    const flush = () => { if (lit) { lit.end = this.i; lit.text = s.slice(lit.start, lit.end); parts.push(lit); lit = null; } };
+    const flush = (end = this.i) => { if (lit) { lit.end = end; lit.text = s.slice(lit.start, end); parts.push(lit); lit = null; } };
     while (this.i < this.n) {
       const c = s[this.i];
       if (closing && c === closing) {
@@ -274,8 +277,9 @@ class BashLexer {
       if (c === '\\') { if (!lit) lit = { kind: 'lit', start: this.i }; this.i = Math.min(this.n, this.i + 2); continue; }
       if (c === '`') { flush(); parts.push(this.backtick()); continue; }
       if (c === '$') {
+        const at = this.i;
         const p = this.dollar();
-        if (p) { flush(); parts.push(p); continue; }
+        if (p) { flush(at); parts.push(p); continue; }
       }
       if (!lit) lit = { kind: 'lit', start: this.i };
       this.i++;
@@ -291,7 +295,7 @@ class BashLexer {
     const start = this.i;
     const parts = [];
     let lit = null;
-    const flush = () => { if (lit) { lit.end = this.i; lit.text = s.slice(lit.start, lit.end); parts.push(lit); lit = null; } };
+    const flush = (end = this.i) => { if (lit) { lit.end = end; lit.text = s.slice(lit.start, end); parts.push(lit); lit = null; } };
     const addLit = (len) => { if (!lit) lit = { kind: 'lit', start: this.i }; this.i += len; };
     while (this.i < this.n) {
       const c = s[this.i];
@@ -328,8 +332,9 @@ class BashLexer {
         const d = s[this.i + 1];
         if (d === "'") { flush(); parts.push(this.ansi()); continue; }
         if (d === '"') { flush(); this.i++; parts.push(this.double(true)); continue; }
+        const at = this.i;
         const p = this.dollar();
-        if (p) { flush(); parts.push(p); continue; }
+        if (p) { flush(at); parts.push(p); continue; }
       }
       addLit(1);
     }
@@ -452,7 +457,8 @@ class BashLexer {
   // stops after ARITH_SCAN_MAX characters (no real expression is that long), so a run of thousands of '(' stays linear.
   arithmeticEnd(from) {
     let depth = 0;
-    const stop = Math.min(this.n, from + ARITH_SCAN_MAX);
+    const stop = Math.min(this.n, from + ARITH_SCAN_MAX, from + this.arithBudget);
+    this.arithBudget -= Math.max(0, stop - from);
     for (let j = from; j < stop; j++) {
       const c = this.s[j];
       if (c === '(') depth++;
@@ -473,7 +479,7 @@ class BashLexer {
       this.i += 2;
       const parts = [];
       let lit = null;
-      const flush = () => { if (lit) { lit.end = this.i; lit.text = s.slice(lit.start, lit.end); parts.push(lit); lit = null; } };
+      const flush = (end = this.i) => { if (lit) { lit.end = end; lit.text = s.slice(lit.start, end); parts.push(lit); lit = null; } };
       while (this.i < this.n) {
         const c = s[this.i];
         if (c === '}') {
@@ -487,8 +493,9 @@ class BashLexer {
         if (c === '`') { flush(); parts.push(this.backtick()); continue; }
         if (c === '$') {
           if (s[this.i + 1] === "'") { flush(); parts.push(this.ansi()); continue; }
+          const at = this.i;
           const p = this.dollar();
-          if (p) { flush(); parts.push(p); continue; }
+          if (p) { flush(at); parts.push(p); continue; }
         }
         if (!lit) lit = { kind: 'lit', start: this.i };
         this.i++;
@@ -528,13 +535,15 @@ export function wordText(word) {
   return word.parts.map((p) => (p.kind === 'lit' ? p.text : '\u0000')).join('');
 }
 
-// Text of a word after quote removal, without expansions (here-document delimiters, command names).
-export function wordValue(word) {
+// Text of a word after quote removal. Expansions give '' unless src (the text the word was cut from) is passed, which keeps them
+// as written: a here-document delimiter is taken literally ($EOF is the delimiter "$EOF"). Command names need no src.
+export function wordValue(word, src) {
+  const written = (q) => (src === undefined ? '' : src.slice(q.start, q.end));
   return word.parts.map((p) => {
     if (p.kind === 'lit') return p.text.replace(/\\(.)/gs, '$1');
     if (p.kind === 'single' || p.kind === 'ansi') return p.text;
-    if (p.kind === 'double') return p.parts.map((q) => (q.kind === 'lit' ? q.text.replace(/\\([$`"\\\n])/g, '$1') : '')).join('');
-    return '';
+    if (p.kind === 'double') return p.parts.map((q) => (q.kind === 'lit' ? q.text.replace(/\\([$`"\\\n])/g, '$1') : written(q))).join('');
+    return written(p);
   }).join('');
 }
 
@@ -584,7 +593,7 @@ function backslashRuns(text) {
 }
 
 // Git Bash started from a Windows process halves every run of backslashes that is not directly before '"' (1->1, 2->1, 3->2,
-// 4->2, 5->3; runs before '"' stay). Measured in the diagnosis (cudzyslowy.md, class A2) and by the test sentinels.
+// 4->2, 5->3; runs before '"' stay). Measured with the sentinels of tests/integration/shell-checks.test.ts.
 export function gitBashHalved(command) {
   const text = String(command);
   const out = [];
@@ -638,11 +647,11 @@ export function ansiProducesCarriageReturn(text) {
 }
 
 // bash 5.3.15 (Git for Windows 2.55.0.windows.3) fails with "unexpected EOF while looking for matching `)'" when one top-level
-// double-quoted string has, after a $(...), a later $(...) or ${...} holding a CR-producing $'...' (laptop tests 9.11: "$(a)
+// double-quoted string has, after a $(...), a later $(...) or ${...} holding a CR-producing $'...' (measured with Git for Windows 2.55.0: "$(a)
 // $(b $'\r')" and "$(a) ${l%$'\r'}" fail; "$(b $'\r') $(a)", "${l%$'\r'} $(a)" and "$l ${l%$'\r'}" pass; \t \n \e pass, \015 \x0d
 // \cM \u000d fail; two separate "..." pass; backticks pass; the pattern nested inside a $(...) passes; a newline between the
-// previous $(...) and the CR part passes). Returns the offending part ({ start, end }) or null. bash -n does not see it (24 of 24
-// in the diagnosis). Checked on the diagnosis data: 22 of 22 failed commands with $'\ found, 0 of 395 passing ones flagged.
+// previous $(...) and the CR part passes). Returns the offending part ({ start, end }) or null. bash -n does not see it. Checked on 417 real commands
+// containing $'\: all 22 that failed were found, none of the 395 that passed was flagged.
 export function findCrParserBug(command, tokenized = tokenizeBash(command)) {
   const text = String(command ?? '');
   let found = null;
@@ -811,6 +820,8 @@ export function bashSyntaxCheck(text, { platform = process.platform, env = proce
   const childEnv = { ...env, LC_ALL: 'C', LANG: 'C' };
   delete childEnv.BASH_ENV;
   delete childEnv.ENV;
+  // extglob is on so that a script that turns it on itself (shopt -s extglob on an earlier line) is not rejected; the Bash tool
+  // turns it off before eval, so extglob syntax on the first line is a false negative here, never a false denial.
   const r = spawnSync(bash, ['--norc', '--noprofile', '-O', 'extglob', '-n'], { input: text, encoding: 'utf8', timeout: timeoutMs, windowsHide: true, env: childEnv, maxBuffer: 1024 * 1024 });
   const ms = Number(process.hrtime.bigint() - started) / 1e6;
   if (r.error && r.error.code === 'ETIMEDOUT') return { ran: true, timedOut: true, ms };
@@ -934,11 +945,13 @@ export function checkPowerShellCommand(command, { platform = process.platform } 
 // ---------------------------------------------------------------------------------------------------------------------------
 // Logs: checks.jsonl (one row per checked command) and errors.jsonl (error classes of tool results), in
 // OMC_SHELL_CHECKS_LOG_DIR, else the logDir the hook passes (<state root>/state/shell-checks), else ~/.omc/state/shell-checks.
-// A file above 50 MB is renamed to <name>-<YYYYMMDD-HHmmss>.jsonl (UTC) before the next append. The command text goes to the
+// A file above 50 MB is renamed to <name>-<YYYYMMDD-HHmmss>.jsonl (UTC) before the next append; the newest two renamed
+// files are kept, older ones are deleted. The command text goes to the
 // log only with a denial: at most 300 characters, after masking secrets.
 // ---------------------------------------------------------------------------------------------------------------------------
 
 export const LOG_MAX_BYTES = 50 * 1024 * 1024;
+const ROTATED_KEPT = 2;
 
 export function shellLogDir(env = process.env, logDir) {
   return env.OMC_SHELL_CHECKS_LOG_DIR || logDir || join(homedir(), '.omc', 'state', 'shell-checks');
@@ -950,6 +963,11 @@ function rotateLog(path, now = new Date()) {
     const stamp = now.toISOString().replace(/[-:]/g, '').replace(/\..*$/, '').replace('T', '-');
     const target = path.replace(/\.jsonl$/, '') + '-' + stamp + '.jsonl';
     if (!existsSync(target)) renameSync(path, target);
+    const base = path.replace(/\.jsonl$/, '');
+    const dir = dirname(path);
+    const prefix = base.slice(dir.length + 1) + '-';
+    const rotated = readdirSync(dir).filter((f) => f.startsWith(prefix) && /^-\d{8}-\d{6}\.jsonl$/.test(f.slice(prefix.length - 1))).sort();
+    for (const old of rotated.slice(0, -ROTATED_KEPT)) unlinkSync(join(dir, old));
   } catch { /* missing file or a lost rename race: the append goes on */ }
 }
 
@@ -1058,6 +1076,12 @@ function toolResultTexts(data) {
   }
   if (typeof data?.error === 'string') texts.push(data.error);
   return texts;
+}
+
+// Whether a tool result shows a known error class (the post hooks resolve the log directory only then).
+export function hasShellToolError(data) {
+  const toolName = data?.tool_name || data?.toolName || '';
+  return (toolName === 'Bash' || toolName === 'PowerShell') && classifyToolErrors(toolResultTexts(data)).length > 0;
 }
 
 // The PostToolUse and PostToolUseFailure entry point: one errors.jsonl row when a Bash or PowerShell result shows a known class.

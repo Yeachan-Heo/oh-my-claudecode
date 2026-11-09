@@ -372,14 +372,14 @@ The checks exist because some failures of the Bash tool are silent or misleading
 
 A denial is a PreToolUse `permissionDecision: "deny"` whose reason starts with `[SHELL CHECK]`. A warning is added to `additionalContext`, in front of whatever other context the hook emits for that call, and is never added to a denial.
 
-- **Log**: `<state root>/state/shell-checks/checks.jsonl` has one row per Bash or PowerShell command (decision, checks run, length, `bash -n` time, session and tool-use ids; the command text only for a denial, at most 300 characters, after masking secrets). `errors.jsonl` has one row for each tool result that shows a known shell error class (`unexpected-eof`, `heredoc-eof`, `enametoolong`, `python-invalid-escape`, `win-path-not-found`, `ps-missing-terminator`, `ps-dev-null`; for the first two a `cause` of `truncation`, `parser-bug` or `manual`), written by `post-tool-verifier.mjs` and `post-tool-use-failure.mjs`. Files above 50 MB are renamed with a timestamp.
+- **Log**: `<state root>/state/shell-checks/checks.jsonl` has one row per Bash or PowerShell command (decision, checks run, length, `bash -n` time, session and tool-use ids and `cwd`; the command text only for a denial, at most 300 characters, after masking secrets). `errors.jsonl` has one row for each tool result that shows a known shell error class (`unexpected-eof`, `heredoc-eof`, `enametoolong`, `python-invalid-escape`, `win-path-not-found`, `ps-missing-terminator`, `ps-dev-null`; for the first two a `cause` of `truncation`, `parser-bug` or `manual`), written by `post-tool-verifier.mjs` and `post-tool-use-failure.mjs`. A file above 50 MB is renamed with a timestamp and the newest two such files are kept.
 - **Measured on**: Claude Code 2.1.318 and Git for Windows 2.55.0 (`bash.exe` 5.3.15). The wrapper size and the cut point belong to those programs, so re-check them after updating either (`printf '%s' "$BASH_EXECUTION_STRING"` shows the wrapper).
 
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `OMC_SHELL_CHECKS` | (unset) | `1` enables the checks and the error log. Any other value leaves everything off. |
 | `OMC_SHELL_CHECKS_LENGTH_LIMIT` | `7700` | Effective length from which `length` denies on Windows (1000-100000; other values use the default). |
-| `OMC_SHELL_SYNTAX_TIMEOUT_MS` | `1000` | Time limit of the `bash -n` check in milliseconds (100-15000; other values use the default). |
+| `OMC_SHELL_SYNTAX_TIMEOUT_MS` | `1000` | Time limit of the `bash -n` check in milliseconds (100-3000, so that a hung `bash` stays inside the 5 s hook budget; other values use the default). |
 | `OMC_SHELL_CHECKS_LOG_DIR` | `<state root>/state/shell-checks` | Log directory override. |
 
 #### Stale Run Reporter (`stale-run-reporter.mjs`)
