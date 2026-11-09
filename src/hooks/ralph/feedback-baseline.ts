@@ -15,6 +15,7 @@
 
 import * as fs from 'fs';
 import { dirname, join } from 'path';
+import { withFileLockSync, lockPathFor } from '../../lib/file-lock.js';
 
 export const FEEDBACK_BASELINE_FILENAME = 'feedback-baseline.json';
 /** Sibling directory that keeps replaced baselines recoverable. */
@@ -23,12 +24,7 @@ export const FEEDBACK_BASELINE_HISTORY_DIRNAME = 'feedback-baseline.history';
 export const MAX_FEEDBACK_BASELINE_HISTORY = 20;
 /** Per-command signature cap: a pathological runaway output must not become a giant baseline. */
 export const MAX_SIGNATURES_PER_COMMAND = 200;
-/** Cross-process baseline write lock: how long to wait between acquisition attempts. */
-const BASELINE_LOCK_RETRY_MS = 10;
-/** A lock file older than this is treated as abandoned by a crashed writer. */
-const BASELINE_LOCK_STALE_MS = 30_000;
-/** Upper bound on waiting for the write lock; past it the write fails closed. */
-const BASELINE_LOCK_TIMEOUT_MS = 10_000;
+// Lock timeout constants are now in the PID-aware file-lock.ts module.
 
 /** ANSI escape sequences, stripped before fingerprinting. */
 const ANSI_PATTERN = /\x1b\[[0-9;]*m/g;
@@ -374,54 +370,7 @@ export interface BaselineWriteResult {
   becameUnrunnable?: string[];
 }
 
-/** Synchronous sleep: this module is synchronous, so a blocking wait is the only option. */
-function sleepSync(ms: number): void {
-  Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
-}
-
-/**
- * Take the sibling `.lock` for a baseline transaction, returning the open fd
- * (kept open until release) or null on timeout/failure. `openSync(..., 'wx')`
- * is an atomic exclusive create, so exactly one writer wins each round.
- * A lock older than BASELINE_LOCK_STALE_MS is assumed abandoned by a crashed
- * writer and removed, otherwise one crash would wedge the baseline forever.
- */
-function acquireBaselineLock(lockPath: string): number | null {
-  const deadline = Date.now() + BASELINE_LOCK_TIMEOUT_MS;
-  for (;;) {
-    try {
-      return fs.openSync(lockPath, 'wx');
-    } catch (err) {
-      if ((err as NodeJS.ErrnoException)?.code !== 'EEXIST') return null;
-    }
-    try {
-      const age = Date.now() - fs.statSync(lockPath).mtimeMs;
-      if (age > BASELINE_LOCK_STALE_MS) {
-        fs.rmSync(lockPath, { force: true });
-        continue;
-      }
-    } catch {
-      // The lock vanished between open and stat; retry the atomic create.
-      continue;
-    }
-    if (Date.now() >= deadline) return null;
-    sleepSync(BASELINE_LOCK_RETRY_MS);
-  }
-}
-
-/** Release the lock on every path, so a failed transaction cannot leak the file. */
-function releaseBaselineLock(fd: number, lockPath: string): void {
-  try {
-    fs.closeSync(fd);
-  } catch {
-    // Already closed; the path removal below is what actually releases the lock.
-  }
-  try {
-    fs.rmSync(lockPath, { force: true });
-  } catch {
-    // A stale lock is broken by age on the next acquisition.
-  }
-}
+// Lock acquisition and release are now handled by the PID-aware withFileLockSync from file-lock.ts.
 
 /**
  * Write a baseline, archiving any existing document first. The archive must
@@ -444,52 +393,58 @@ export function recordBaseline(path: string, commands: Record<string, CommandBas
   } catch {
     return { written: false, added: 0, removed: 0 };
   }
-  const lockPath = `${path}.lock`;
-  const lockFd = acquireBaselineLock(lockPath);
-  if (lockFd === null) return { written: false, added: 0, removed: 0 };
+  const lockPath = lockPathFor(path);
+  // Use PID-aware locking to respect live process ownership.
+  // Pass explicit retry/timeout options (10s timeout, 50ms retry), matching the previous bounded wait to handle lock contention gracefully.
   try {
-    const previous = readBaseline(path);
-    const previousPath = archiveBaseline(path, now);
-    if (previousPath === null && fs.existsSync(path)) return { written: false, added: 0, removed: 0 };
-    try {
-      fs.writeFileSync(path, `${JSON.stringify({ version: 1, recordedAt: now.toISOString(), commands }, null, 2)}\n`, 'utf8');
-    } catch {
-      // Deliberately keep the archive: a partial live write makes it the only
-      // intact copy of the document the caller was replacing.
+    return withFileLockSync(lockPath, () => {
+      const previous = readBaseline(path);
+      const previousPath = archiveBaseline(path, now);
+      if (previousPath === null && fs.existsSync(path)) return { written: false, added: 0, removed: 0 };
+      try {
+        fs.writeFileSync(path, `${JSON.stringify({ version: 1, recordedAt: now.toISOString(), commands }, null, 2)}\n`, 'utf8');
+      } catch {
+        // Deliberately keep the archive: a partial live write makes it the only
+        // intact copy of the document the caller was replacing.
+        return { written: false, added: 0, removed: 0 };
+      }
+      // Prune only now that the live replacement succeeded, so a failed write and
+      // its retry never evict history for a replacement that never landed.
+      if (previousPath) pruneBaselineHistory(dirname(previousPath), previousPath);
+      // Audit the document replacement from the raw signature sets, independent of
+      // the gate judgment in diffAgainstBaseline: that function collapses a newly
+      // unrunnable command into one synthetic marker, which would misreport the
+      // stored signatures the replacement actually removed.
+      let added = 0;
+      let removed = 0;
+      const becameUnrunnable: string[] = [];
+      if (previous && previousPath) {
+        for (const command of new Set([...Object.keys(previous.commands), ...Object.keys(commands)])) {
+          const before = previous.commands[command];
+          const after = commands[command];
+          const beforeSet = new Set(before?.signatures ?? []);
+          const afterSet = new Set(after?.signatures ?? []);
+          for (const signature of afterSet) if (!beforeSet.has(signature)) added += 1;
+          for (const signature of beforeSet) if (!afterSet.has(signature)) removed += 1;
+          // Only mark as becameUnrunnable if the command existed in the previous baseline.
+          // A newly added unrunnable command was never runnable, so it doesn't "become" unrunnable.
+          if (before && after?.unrunnable && !before?.unrunnable) becameUnrunnable.push(command);
+        }
+      }
+      return {
+        written: true,
+        ...(previousPath ? { previousPath } : {}),
+        added,
+        removed,
+        ...(becameUnrunnable.length > 0 ? { becameUnrunnable } : {}),
+      };
+    }, { timeoutMs: 10_000, retryDelayMs: 50 });
+  } catch (err) {
+    // Lock acquisition failed due to contention or timeout
+    if (err instanceof Error && err.message.includes('Failed to acquire file lock')) {
       return { written: false, added: 0, removed: 0 };
     }
-    // Prune only now that the live replacement succeeded, so a failed write and
-    // its retry never evict history for a replacement that never landed.
-    if (previousPath) pruneBaselineHistory(dirname(previousPath), previousPath);
-    // Audit the document replacement from the raw signature sets, independent of
-    // the gate judgment in diffAgainstBaseline: that function collapses a newly
-    // unrunnable command into one synthetic marker, which would misreport the
-    // stored signatures the replacement actually removed.
-    let added = 0;
-    let removed = 0;
-    const becameUnrunnable: string[] = [];
-    if (previous && previousPath) {
-      for (const command of new Set([...Object.keys(previous.commands), ...Object.keys(commands)])) {
-        const before = previous.commands[command];
-        const after = commands[command];
-        const beforeSet = new Set(before?.signatures ?? []);
-        const afterSet = new Set(after?.signatures ?? []);
-        for (const signature of afterSet) if (!beforeSet.has(signature)) added += 1;
-        for (const signature of beforeSet) if (!afterSet.has(signature)) removed += 1;
-        // Only mark as becameUnrunnable if the command existed in the previous baseline.
-        // A newly added unrunnable command was never runnable, so it doesn't "become" unrunnable.
-        if (before && after?.unrunnable && !before?.unrunnable) becameUnrunnable.push(command);
-      }
-    }
-    return {
-      written: true,
-      ...(previousPath ? { previousPath } : {}),
-      added,
-      removed,
-      ...(becameUnrunnable.length > 0 ? { becameUnrunnable } : {}),
-    };
-  } finally {
-    releaseBaselineLock(lockFd, lockPath);
+    throw err;
   }
 }
 

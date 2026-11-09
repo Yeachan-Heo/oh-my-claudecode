@@ -5,15 +5,15 @@
   "provenance": {
     "base": "05c800f40d1ad53b42a78609d2667ef4f726808b",
     "planningHead": "0a91273e61dbbd47eb0af4c02844409251e08398",
-    "head": "dc59576e34514750d89f24d7649f406081a73d51",
-    "sourceSha256": "92f8b9be967affbc813f8297017808c5ca7954548d4aec8f63ffcb02c26d8709",
+    "head": "2918e1c4ff70b3692a1c9b013e893533327b96ba",
+    "sourceSha256": "2cd563201213a461b06b911959662c16dfb80954d5aa45cb7c8204499e96447f",
     "generatedAt": null,
     "generator": "scripts/generate-inventory-graph.mjs"
   },
   "base": "05c800f40d1ad53b42a78609d2667ef4f726808b",
   "planningHead": "0a91273e61dbbd47eb0af4c02844409251e08398",
-  "head": "dc59576e34514750d89f24d7649f406081a73d51",
-  "sourceSha256": "92f8b9be967affbc813f8297017808c5ca7954548d4aec8f63ffcb02c26d8709",
+  "head": "2918e1c4ff70b3692a1c9b013e893533327b96ba",
+  "sourceSha256": "2cd563201213a461b06b911959662c16dfb80954d5aa45cb7c8204499e96447f",
   "counts": {
     "public": {
       "skills": 84,
@@ -32,9 +32,9 @@
       "total": 1468
     },
     "generated": {
-      "distFiles": 5627,
+      "distFiles": 5639,
       "bridgeFiles": 8,
-      "total": 5635
+      "total": 5647
     },
     "prompt": {
       "promptLikeFiles": 63
@@ -2350,6 +2350,10 @@
       "dist/cli/__tests__/ralph-afk.test.d.ts.map",
       "dist/cli/__tests__/ralph-afk.test.js",
       "dist/cli/__tests__/ralph-afk.test.js.map",
+      "dist/cli/__tests__/ralph-closeout.test.d.ts",
+      "dist/cli/__tests__/ralph-closeout.test.d.ts.map",
+      "dist/cli/__tests__/ralph-closeout.test.js",
+      "dist/cli/__tests__/ralph-closeout.test.js.map",
       "dist/cli/__tests__/self-improve-paths.test.d.ts",
       "dist/cli/__tests__/self-improve-paths.test.d.ts.map",
       "dist/cli/__tests__/self-improve-paths.test.js",
@@ -4015,6 +4019,10 @@
       "dist/hooks/prompt-prerequisites/index.d.ts.map",
       "dist/hooks/prompt-prerequisites/index.js",
       "dist/hooks/prompt-prerequisites/index.js.map",
+      "dist/hooks/ralph/__tests__/closeout.test.d.ts",
+      "dist/hooks/ralph/__tests__/closeout.test.d.ts.map",
+      "dist/hooks/ralph/__tests__/closeout.test.js",
+      "dist/hooks/ralph/__tests__/closeout.test.js.map",
       "dist/hooks/ralph/__tests__/feedback-baseline.test.d.ts",
       "dist/hooks/ralph/__tests__/feedback-baseline.test.d.ts.map",
       "dist/hooks/ralph/__tests__/feedback-baseline.test.js",
@@ -4027,6 +4035,10 @@
       "dist/hooks/ralph/__tests__/prd-read.test.d.ts.map",
       "dist/hooks/ralph/__tests__/prd-read.test.js",
       "dist/hooks/ralph/__tests__/prd-read.test.js.map",
+      "dist/hooks/ralph/closeout.d.ts",
+      "dist/hooks/ralph/closeout.d.ts.map",
+      "dist/hooks/ralph/closeout.js",
+      "dist/hooks/ralph/closeout.js.map",
       "dist/hooks/ralph/feedback-baseline.d.ts",
       "dist/hooks/ralph/feedback-baseline.d.ts.map",
       "dist/hooks/ralph/feedback-baseline.js",
@@ -15027,6 +15039,26 @@
         "path": "dist/cli/__tests__/ralph-afk.test.js.map"
       },
       {
+        "id": "dist/cli/__tests__/ralph-closeout.test.d.ts",
+        "kind": "generated-dist",
+        "path": "dist/cli/__tests__/ralph-closeout.test.d.ts"
+      },
+      {
+        "id": "dist/cli/__tests__/ralph-closeout.test.d.ts.map",
+        "kind": "generated-dist",
+        "path": "dist/cli/__tests__/ralph-closeout.test.d.ts.map"
+      },
+      {
+        "id": "dist/cli/__tests__/ralph-closeout.test.js",
+        "kind": "generated-dist",
+        "path": "dist/cli/__tests__/ralph-closeout.test.js"
+      },
+      {
+        "id": "dist/cli/__tests__/ralph-closeout.test.js.map",
+        "kind": "generated-dist",
+        "path": "dist/cli/__tests__/ralph-closeout.test.js.map"
+      },
+      {
         "id": "dist/cli/__tests__/self-improve-paths.test.d.ts",
         "kind": "generated-dist",
         "path": "dist/cli/__tests__/self-improve-paths.test.d.ts"
@@ -23352,6 +23384,26 @@
         "path": "dist/hooks/prompt-prerequisites/index.js.map"
       },
       {
+        "id": "dist/hooks/ralph/__tests__/closeout.test.d.ts",
+        "kind": "generated-dist",
+        "path": "dist/hooks/ralph/__tests__/closeout.test.d.ts"
+      },
+      {
+        "id": "dist/hooks/ralph/__tests__/closeout.test.d.ts.map",
+        "kind": "generated-dist",
+        "path": "dist/hooks/ralph/__tests__/closeout.test.d.ts.map"
+      },
+      {
+        "id": "dist/hooks/ralph/__tests__/closeout.test.js",
+        "kind": "generated-dist",
+        "path": "dist/hooks/ralph/__tests__/closeout.test.js"
+      },
+      {
+        "id": "dist/hooks/ralph/__tests__/closeout.test.js.map",
+        "kind": "generated-dist",
+        "path": "dist/hooks/ralph/__tests__/closeout.test.js.map"
+      },
+      {
         "id": "dist/hooks/ralph/__tests__/feedback-baseline.test.d.ts",
         "kind": "generated-dist",
         "path": "dist/hooks/ralph/__tests__/feedback-baseline.test.d.ts"
@@ -23410,6 +23462,26 @@
         "id": "dist/hooks/ralph/__tests__/prd-read.test.js.map",
         "kind": "generated-dist",
         "path": "dist/hooks/ralph/__tests__/prd-read.test.js.map"
+      },
+      {
+        "id": "dist/hooks/ralph/closeout.d.ts",
+        "kind": "generated-dist",
+        "path": "dist/hooks/ralph/closeout.d.ts"
+      },
+      {
+        "id": "dist/hooks/ralph/closeout.d.ts.map",
+        "kind": "generated-dist",
+        "path": "dist/hooks/ralph/closeout.d.ts.map"
+      },
+      {
+        "id": "dist/hooks/ralph/closeout.js",
+        "kind": "generated-dist",
+        "path": "dist/hooks/ralph/closeout.js"
+      },
+      {
+        "id": "dist/hooks/ralph/closeout.js.map",
+        "kind": "generated-dist",
+        "path": "dist/hooks/ralph/closeout.js.map"
       },
       {
         "id": "dist/hooks/ralph/feedback-baseline.d.ts",
@@ -48227,6 +48299,11 @@
         "path": "tests/lint/plugin-manifest-parity.test.ts"
       },
       {
+        "id": "tests/lint/ralph-closeout-codex-findings.test.ts",
+        "kind": "other",
+        "path": "tests/lint/ralph-closeout-codex-findings.test.ts"
+      },
+      {
         "id": "tests/lint/session-end-forwarder-no-op.test.ts",
         "kind": "other",
         "path": "tests/lint/session-end-forwarder-no-op.test.ts"
@@ -72224,6 +72301,11 @@
         "kind": "imports"
       },
       {
+        "from": "src/hooks/ralph/feedback-baseline.ts",
+        "to": "src/lib/file-lock.ts",
+        "kind": "imports"
+      },
+      {
         "from": "src/hooks/ralph/index.ts",
         "to": "src/hooks/ralph/loop.ts",
         "kind": "exports"
@@ -91714,6 +91796,56 @@
         "kind": "imports"
       },
       {
+        "from": "tests/lint/ralph-closeout-codex-findings.test.ts",
+        "to": "external:commander",
+        "kind": "imports"
+      },
+      {
+        "from": "tests/lint/ralph-closeout-codex-findings.test.ts",
+        "to": "external:crypto",
+        "kind": "imports"
+      },
+      {
+        "from": "tests/lint/ralph-closeout-codex-findings.test.ts",
+        "to": "external:fs",
+        "kind": "imports"
+      },
+      {
+        "from": "tests/lint/ralph-closeout-codex-findings.test.ts",
+        "to": "external:path",
+        "kind": "imports"
+      },
+      {
+        "from": "tests/lint/ralph-closeout-codex-findings.test.ts",
+        "to": "external:vitest",
+        "kind": "imports"
+      },
+      {
+        "from": "tests/lint/ralph-closeout-codex-findings.test.ts",
+        "to": "src/cli/commands/ralph.ts",
+        "kind": "imports"
+      },
+      {
+        "from": "tests/lint/ralph-closeout-codex-findings.test.ts",
+        "to": "src/hooks/ralph/closeout.ts",
+        "kind": "imports"
+      },
+      {
+        "from": "tests/lint/ralph-closeout-codex-findings.test.ts",
+        "to": "src/hooks/ralph/feedback-baseline.ts",
+        "kind": "imports"
+      },
+      {
+        "from": "tests/lint/ralph-closeout-codex-findings.test.ts",
+        "to": "src/hooks/ralph/feedback-baseline.ts",
+        "kind": "type-imports"
+      },
+      {
+        "from": "tests/lint/ralph-closeout-codex-findings.test.ts",
+        "to": "src/lib/worktree-paths.ts",
+        "kind": "imports"
+      },
+      {
         "from": "tests/lint/session-end-forwarder-no-op.test.ts",
         "to": "external:fs",
         "kind": "imports"
@@ -91970,12 +92102,12 @@
       }
     ],
     "stats": {
-      "nodeCount": 8225,
-      "edgeCount": 8731,
-      "importEdgeCount": 7287,
+      "nodeCount": 8238,
+      "edgeCount": 8742,
+      "importEdgeCount": 7297,
       "registerEdgeCount": 105
     }
   },
-  "inventorySha256": "64cc9aaa4cfaa3124eee75c2f9fc65d5156d41e72364377de5732706dcfb7080",
-  "manifestSha256": "bb58dc4e5443593163786c88223df45e3a1e021a37e938267aa484b47e8ed8aa"
+  "inventorySha256": "be3c5e169757db578f9933a08e80e9c6ca15ffa046d9bd5ad6a5910afd66b0b2",
+  "manifestSha256": "784a473b5e363b9043587e7f3e3f040f4169deab411b4886f41dbdf9f9980199"
 }
