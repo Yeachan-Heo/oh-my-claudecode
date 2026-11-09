@@ -28,7 +28,10 @@ const buildConfig = {
   external: [
     'fs', 'path', 'os', 'util', 'stream', 'events',
     'buffer', 'crypto', 'http', 'https', 'url',
-    'child_process', 'assert', 'module'
+    'child_process', 'assert', 'module',
+    // Optional/conditional dependencies
+    'ajv-formats', 'zod-to-json-schema', 'fast-deep-equal',
+    'json-schema-traverse', 'fast-uri', 'regexp-tree',
   ],
 };
 
