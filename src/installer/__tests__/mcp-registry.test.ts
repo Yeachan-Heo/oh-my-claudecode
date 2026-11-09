@@ -209,7 +209,9 @@ describe('unified MCP registry sync', () => {
     const codexConfig = readFileSync(getCodexConfigPath(), 'utf-8');
     expect(codexConfig).toContain('[mcp_servers.remoteOmc]');
     expect(codexConfig).toContain('url = "https://lab.example.com/mcp"');
-    expect(codexConfig).toContain('type = "sse"');
+    // Codex does not recognize the 'type' key and warns about it (issue #4899),
+    // so it is not written to the Codex config. The type is preserved in Claude's JSON config.
+    expect(codexConfig).not.toContain('type = ');
     expect(codexConfig).toContain('[mcp_servers.remoteOmc.headers]');
     expect(codexConfig).toContain('Authorization = "Bearer test-token"');
     expect(codexConfig).toContain('X-Custom-Header = "custom-value"');
@@ -282,7 +284,9 @@ describe('unified MCP registry sync', () => {
     const codexConfig = readFileSync(getCodexConfigPath(), 'utf-8');
     expect(codexConfig).toContain('[mcp_servers.mySseServer]');
     expect(codexConfig).toContain('url = "http://localhost:11235/mcp/sse"');
-    expect(codexConfig).toContain('type = "sse"');
+    // Codex does not recognize the 'type' key and warns about it (issue #4899),
+    // so it is not written to the Codex config. The type is preserved in Claude's JSON config.
+    expect(codexConfig).not.toContain('type = ');
   });
 
   it('preserves explicit launcher timeouts and leaves custom MCP servers untouched', () => {
@@ -992,7 +996,11 @@ describe('unified MCP registry sync', () => {
     const status = inspectUnifiedMcpRegistrySync();
 
     expect(status.codexMissing).toEqual([]);
-    expect(status.codexMismatched).toEqual(['changed', 'implicitTypeMismatch', 'quotedTypeMismatch', 'sseOmitted', 'typeMismatch', 'unicodeTypeMismatch', 'unparsedType']);
+    // After issue #4899, type field is not written to Codex. Codex entries with
+    // 'sse' or 'streamable-http' types are now treated as equivalent to 'http' type,
+    // since Codex infers the transport method from 'command' vs 'url' fields.
+    // Only entries with real differences (different command/args or unparseable type) remain mismatched.
+    expect(status.codexMismatched).toEqual(['changed', 'unparsedType']);
     expect(status.claudeMissing).toEqual([]);
     expect(status.claudeMismatched).toEqual([]);
   });
@@ -1339,6 +1347,86 @@ describe('unified MCP registry sync', () => {
         expect(second.changed).toBe(false);
         expect(second.content).toBe(first.content);
       }
+    });
+
+    it('does not write type field for stdio or url entries (issue #4899)', () => {
+      // Codex does not recognize the 'type' key and warns about it, so we should
+      // not write it to the Codex TOML config. The type field is preserved in
+      // Claude's JSON config (.claude.json).
+      const registry = {
+        stdio_server: {
+          command: 'python',
+          args: ['server.py'],
+          type: 'stdio',
+        },
+        http_server: {
+          url: 'https://example.com/mcp',
+          type: 'http',
+        },
+        sse_server: {
+          url: 'https://example.com/sse',
+          type: 'sse',
+        },
+        streamable_http_server: {
+          url: 'https://example.com/streamable',
+          type: 'streamable-http',
+        },
+      };
+
+      const { content } = syncCodexConfigToml('model = "gpt-5"\n', registry);
+
+      // Verify that the content has the mcp_servers entries
+      expect(content).toContain('[mcp_servers.stdio_server]');
+      expect(content).toContain('[mcp_servers.http_server]');
+      expect(content).toContain('[mcp_servers.sse_server]');
+      expect(content).toContain('[mcp_servers.streamable_http_server]');
+
+      // Verify that command and url fields are present
+      expect(content).toContain('command = "python"');
+      expect(content).toContain('args = ["server.py"]');
+      expect(content).toContain('url = "https://example.com/mcp"');
+
+      // Verify that type field is NOT written to Codex config
+      expect(content).not.toContain('type = "stdio"');
+      expect(content).not.toContain('type = "http"');
+      expect(content).not.toContain('type = "sse"');
+      expect(content).not.toContain('type = "streamable-http"');
+      expect(content).not.toMatch(/type\s*=/);
+    });
+
+    it('treats existing type fields in Codex config as equivalent if they normalize to the same transport', () => {
+      // Codex entries with 'sse' or 'streamable-http' types should be treated as
+      // equivalent to 'http' type, since they all use HTTP transport.
+      const registry = {
+        sse_entry: {
+          url: 'https://example.com/sse',
+          type: 'sse',
+        },
+      };
+
+      const existingCodexWithType = [
+        'model = "gpt-5"',
+        '',
+        '# BEGIN OMC MANAGED MCP REGISTRY',
+        '[mcp_servers.sse_entry]',
+        'url = "https://example.com/sse"',
+        'type = "sse"',
+        '# END OMC MANAGED MCP REGISTRY',
+        '',
+      ].join('\n');
+
+      // The sync should remove the type field since it's no longer written
+      const { content, changed } = syncCodexConfigToml(existingCodexWithType, registry);
+
+      // Since we're not writing the type field, there should be a change
+      expect(changed).toBe(true);
+
+      // The new content should not have the type field
+      expect(content).not.toContain('type = "sse"');
+      expect(content).toContain('[mcp_servers.sse_entry]');
+      expect(content).toContain('url = "https://example.com/sse"');
+      // Verify no 'type =' line at all
+      expect(content).not.toMatch(/type\s*=/);
     });
   });
 
