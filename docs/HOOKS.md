@@ -20,7 +20,11 @@ Hooks are defined in a `hooks.json` file. Each hook follows this structure:
       "hooks": [
         {
           "type": "command",
-          "command": "node scripts/hook-script.mjs",
+          "command": "node",
+          "args": [
+            "${CLAUDE_PLUGIN_ROOT}/scripts/run.cjs",
+            "${CLAUDE_PLUGIN_ROOT}/scripts/hook-script.mjs"
+          ],
           "timeout": 5
         }
       ]
@@ -31,8 +35,11 @@ Hooks are defined in a `hooks.json` file. Each hook follows this structure:
 
 - **EventName**: The lifecycle event the hook responds to
 - **matcher**: Condition for running the hook (`*` matches all cases)
-- **command**: The Node.js script to execute
+- **command**: The program to spawn. Published plugin hooks use `node`
+- **args**: Arguments passed to that program. The first is `run.cjs`; the second is the hook script
 - **timeout**: Maximum execution time in seconds
+
+Published plugin hooks use exec form: `command` is `node` and `args` names `scripts/run.cjs` plus the hook script. Claude Code and Grok substitute `${CLAUDE_PLUGIN_ROOT}` inside each arg and spawn `node` with no shell, so a plugin root that contains spaces stays one argument. A host that ignores `args` and runs `command` as a shell string would start bare `node`, and the hook would miss its script. `find-node.sh` remains for the HUD and for repairing older Unix caches whose non-interactive PATH does not include `node`.
 
 Hook output is injected into Claude via `<system-reminder>` tags. Additional context is passed through `hookSpecificOutput.additionalContext`.
 

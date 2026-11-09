@@ -1035,4 +1035,46 @@ describe('install() plugin-provided hook deduplication (#2252)', () => {
     expect(result.success).toBe(true);
     expect(writtenSettings.hooks?.SessionStart?.[0]?.hooks?.[0]?.command).toBe(pluginCommand);
   });
+
+  it('removes a shell-string settings copy of an exec-form plugin hook and keeps an unrelated node command', async () => {
+    setupPluginWithHooks();
+
+    const shellCopy = 'node "$CLAUDE_PLUGIN_ROOT"/scripts/run.cjs "$CLAUDE_PLUGIN_ROOT"/scripts/session-start.mjs';
+    writeFileSync(join(fakePluginRoot, 'hooks', 'hooks.json'), JSON.stringify({
+      hooks: {
+        SessionStart: [{
+          hooks: [{
+            type: 'command',
+            command: 'node',
+            args: [
+              '${CLAUDE_PLUGIN_ROOT}/scripts/run.cjs',
+              '${CLAUDE_PLUGIN_ROOT}/scripts/session-start.mjs',
+            ],
+          }],
+        }],
+      },
+    }));
+    writeFileSync(join(testClaudeDir, 'settings.json'), JSON.stringify({
+      enabledPlugins: { 'oh-my-claudecode': true },
+      hooks: {
+        SessionStart: [{
+          hooks: [
+            { type: 'command', command: shellCopy },
+            { type: 'command', command: 'node', args: ['unrelated.mjs'] },
+          ],
+        }],
+      },
+    }, null, 2));
+
+    const { install } = await loadInstaller();
+    const result = install({ force: true, skipClaudeCheck: true });
+    const writtenSettings = JSON.parse(readFileSync(join(testClaudeDir, 'settings.json'), 'utf-8')) as {
+      hooks?: Record<string, Array<{ hooks: Array<{ command: string; args?: string[] }> }>>;
+    };
+
+    expect(result.success).toBe(true);
+    expect(writtenSettings.hooks?.SessionStart?.[0]?.hooks).toEqual([
+      { type: 'command', command: 'node', args: ['unrelated.mjs'] },
+    ]);
+  });
 });

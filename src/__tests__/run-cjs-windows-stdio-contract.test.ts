@@ -177,7 +177,10 @@ describe('run.cjs Windows/protocol stdio contract (#3920)', () => {
       .flatMap(groups => groups)
       .flatMap(group => group.hooks ?? [])
       .filter(hook => hook.timeout === 3)
-      .map(hook => [...(hook.command ?? '').matchAll(/scripts[/\\]([^"\s]+)/g)].at(-1)?.[1])
+      .map(hook => {
+        const text = [hook.command, ...((hook as { args?: string[] }).args ?? [])].join(' ');
+        return [...text.matchAll(/scripts[/\\]([^"\s]+)/g)].at(-1)?.[1];
+      })
       .filter((name): name is string => Boolean(name))
       .sort();
     expect(commands).toEqual([

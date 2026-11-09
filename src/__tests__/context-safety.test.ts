@@ -104,12 +104,12 @@ describe('context-safety hook matcher', () => {
   it('does not register a dedicated ExitPlanMode context-safety matcher', () => {
     const hooksJson = JSON.parse(readFileSync(HOOKS_PATH, 'utf-8')) as {
       hooks: {
-        PreToolUse: Array<{ matcher: string; hooks: Array<{ command: string }> }>;
+        PreToolUse: Array<{ matcher: string; hooks: Array<{ command: string; args?: string[] }> }>;
       };
     };
 
     const contextSafetyHook = hooksJson.hooks.PreToolUse.find(entry =>
-      entry.hooks.some(hook => hook.command.includes('scripts/context-safety.mjs'))
+      entry.hooks.some(hook => [hook.command, ...(hook.args ?? [])].join(' ').includes('scripts/context-safety.mjs'))
     );
 
     expect(contextSafetyHook).toBeUndefined();
