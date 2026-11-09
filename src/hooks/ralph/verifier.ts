@@ -417,20 +417,32 @@ export function detectArchitectApproval(
 }
 
 /**
+ * Rejection wording the detector recognizes. Exported so the transcript
+ * prefilter can be a superset by construction instead of re-listing the
+ * patterns and drifting from them.
+ */
+const REJECTION_PATTERNS: readonly RegExp[] = [
+  /(architect|critic|codex|reviewer).*?(rejected|found issues|not complete|incomplete)/i,
+  /issues? (found|identified|detected)/i,
+  /not yet complete/i,
+  /missing.*?(implementation|feature|test)/i,
+  /bug.*?(found|detected|identified)/i,
+  /error.*?(found|detected|identified)/i
+];
+
+/**
+ * True when the text contains any rejection wording at all. A superset test
+ * only — `detectArchitectRejection` is what decides.
+ */
+export function hasRejectionSignal(text: string): boolean {
+  return REJECTION_PATTERNS.some((pattern) => pattern.test(text));
+}
+
+/**
  * Check if text contains architect rejection indicators
  */
 export function detectArchitectRejection(text: string): { rejected: boolean; feedback: string } {
-  // Look for explicit rejection patterns
-  const rejectionPatterns = [
-    /(architect|critic|codex|reviewer).*?(rejected|found issues|not complete|incomplete)/i,
-    /issues? (found|identified|detected)/i,
-    /not yet complete/i,
-    /missing.*?(implementation|feature|test)/i,
-    /bug.*?(found|detected|identified)/i,
-    /error.*?(found|detected|identified)/i
-  ];
-
-  for (const pattern of rejectionPatterns) {
+  for (const pattern of REJECTION_PATTERNS) {
     if (pattern.test(text)) {
       // Extract feedback (rough heuristic)
       const feedbackMatch = text.match(/(?:architect|critic|codex|reviewer|feedback|issue|problem|error|bug)[:\s]+([^.]+\.)/i);

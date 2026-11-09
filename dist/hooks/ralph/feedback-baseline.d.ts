@@ -24,16 +24,20 @@ export declare const MAX_SIGNATURES_PER_COMMAND = 200;
  * ANSI stripped, volatile fragments normalized, boilerplate dropped,
  * deduplicated, capped, and sorted for a stable diff. Lines that look like
  * progress rather than failure ("Running tests...", spinner frames) are
- * dropped. Pass/test count summary lines (e.g., '# pass N', '# tests N') are
- * excluded but failure count lines (e.g., '# fail N') are kept — a changed
- * fail count is signal that something moved. Individual passing test results
- * ("ok N ...") are excluded to prevent false positives when tests are added;
- * failing results ("not ok ...") are kept.
+ * dropped, as are below-WARN log levels and package-manager/runner chrome
+ * that is identical on a green run. Pass/test count summary lines (e.g.,
+ * '# pass N', '# tests N') are excluded but failure count lines (e.g.,
+ * '# fail N') are kept — a changed fail count is signal that something moved.
+ * Individual passing test results ("ok N ...", "✓ ...") are excluded to
+ * prevent false positives when tests are added; failing results ("not ok
+ * ...", "✗ ...") are kept.
  */
 export declare function signatureLines(output: string): string[];
 export interface CommandBaseline {
     /** Normalized failure signatures observed for this command at baseline time. */
     signatures: string[];
+    /** Process exit status observed at baseline time; absent when the command never ran. */
+    exitCode?: number;
     /** True when the command could not execute at all (tool missing, suite unrunnable). */
     unrunnable?: boolean;
     /**
@@ -57,7 +61,12 @@ export interface BaselineDiff {
 }
 /**
  * Pure diff: a signature is new when it is absent from the baseline. A command
- * that used to run and now cannot execute is itself a regression. With no
+ * that used to run and now cannot execute is itself a regression. So is a
+ * command that used to exit 0 and now exits nonzero — a failure whose only
+ * diagnostic is below WARN (e.g. `INFO validation failed`) normalizes to no
+ * signatures, so the status transition is the only signal it leaves. A command
+ * absent from the baseline inherits the same rule: a newly discovered failing
+ * command must not slip through just because it has no history. With no
  * baseline at all, everything present is reported as new — the caller decides
  * what that means (baseline creation reports instead of failing).
  */
