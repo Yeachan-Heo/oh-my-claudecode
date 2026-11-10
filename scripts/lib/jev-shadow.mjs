@@ -529,7 +529,7 @@ export function recordJevShadow({ point, state, questions, heuristic, permission
       try {
         const hookTimeoutMs = resolveJevTimeoutMs(
           process.env,
-          ACTIVE_RESOLVER_TIMEOUT_BUFFER_MS,
+          activeResolverBufferMs(point),
         );
         const spawnedAt = Date.now();
         const result = spawnSync(
@@ -547,10 +547,7 @@ export function recordJevShadow({ point, state, questions, heuristic, permission
               ? { ...process.env, OMC_JEV_HOOK_DEADLINE: String(spawnedAt + hookTimeoutMs - 100) }
               : process.env,
             encoding: "utf8",
-            timeout: resolveJevTimeoutMs(
-              process.env,
-              activeResolverBufferMs(point),
-            ),
+            timeout: hookTimeoutMs,
           },
         );
 
