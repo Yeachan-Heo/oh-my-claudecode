@@ -320,7 +320,7 @@
           {
             "type": "command",
             "command": "node",
-            "timeout": 10,
+            "timeout": 15,
             "args": [
               "${CLAUDE_PLUGIN_ROOT}/scripts/run.cjs",
               "${CLAUDE_PLUGIN_ROOT}/scripts/persistent-mode.mjs"
