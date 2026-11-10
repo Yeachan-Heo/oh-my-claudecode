@@ -20,16 +20,20 @@ const RESOLVER_START_MS = 1200;
 // bridge attempts in one Stop event; it runs between the two Jev requests.
 const BRIDGE_DELEGATION_MS = 6000;
 
-// Hooks that wait for Jev, with the points one process can ask in a row.
-// keyword-detector.mjs is left out: run.cjs caps its Worker at 8 s whatever
-// the manifest says (TRUSTED_WORKER_HOOKS in scripts/run.cjs).
+// Hooks that wait for Jev, with the requests one process can send in a row.
+// Known gap, not covered here: keyword-detector.mjs can send three requests
+// (skill-trigger, intent, task-size), but run.cjs caps its Worker at 8 s
+// whatever the manifest says (TRUSTED_WORKER_HOOKS in scripts/run.cjs), so a
+// manifest timeout cannot fix it.
 const JEV_HOOKS = [
   { script: 'pre-tool-enforcer.mjs', event: 'PreToolUse', points: ['model-routing', 'slop-warning'], extraMs: 0 },
   { script: 'post-tool-verifier.mjs', event: 'PostToolUse', points: ['context-pruning'], extraMs: 0 },
   {
     script: 'persistent-mode.mjs',
     event: 'Stop',
-    points: ['learner-extraction', 'loop-continuation'],
+    // loop-continuation is asked once per mode that can block; when ralph lets
+    // the Stop through, the autopilot handler asks it a second time.
+    points: ['learner-extraction', 'loop-continuation', 'loop-continuation'],
     extraMs: BRIDGE_DELEGATION_MS,
   },
   { script: 'code-simplifier.mjs', event: 'Stop', points: ['simplifier-trigger'], extraMs: 0 },
@@ -59,13 +63,18 @@ describe('hook timeouts for hooks that wait for Jev', () => {
     expect(resolveJevTimeoutMs({}, 0)).toBe(2000);
   });
 
-  it.each(JEV_HOOKS)('$script asks the points listed here', ({ script, points }) => {
+  it('uses the bridge delegation budget that the table assumes', () => {
+    const source = readFileSync(join(ROOT, 'scripts', 'persistent-mode.mjs'), 'utf8');
+    expect(source).toContain(`BRIDGE_DELEGATION_TIMEOUT_MS = ${BRIDGE_DELEGATION_MS};`);
+  });
+
+  it.each(JEV_HOOKS)('$script sends the points listed here', ({ script, points }) => {
     const source = readFileSync(join(ROOT, 'scripts', script), 'utf8');
-    for (const point of points) expect(source).toMatch(new RegExp(`point: ['"]${point}['"]`));
+    for (const point of new Set(points)) expect(source).toMatch(new RegExp(`point: ['"]${point}['"]`));
   });
 
   it.each(JEV_HOOKS)(
-    '$script has a timeout that holds every Jev request it can wait for at the defaults',
+    '$script has a timeout that holds the Jev requests listed here at the defaults',
     (hook) => {
       const innerLimitMs = manifestTimeoutMs(hook.event, hook.script) - WINDOWS_CUSHION_MS;
       expect(innerLimitMs).toBeGreaterThanOrEqual(worstCaseMs(hook));

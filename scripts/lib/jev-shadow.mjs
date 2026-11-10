@@ -23,9 +23,9 @@ import { parseJevEnv, resolveJevTimeoutMs } from "../jev-resolve.mjs";
 
 const SWEEP_THROTTLE_MS = 60 * 60 * 1000; // 1 hour
 const ACTIVE_RESOLVER_TIMEOUT_BUFFER_MS = 500;
-// model-routing decides the model and effort of a subagent call, and its hook
-// (pre-tool-enforcer) has the longest manifest timeout, so its resolver gets
-// 3 s more to start and finish before the hook kills it (cold start under load).
+// model-routing decides the model and effort of a subagent call, and a lost
+// answer costs that choice, so its resolver gets 3 s more to start and finish
+// before spawnSync kills it (a cold start under load can take a second or more).
 const MODEL_ROUTING_RESOLVER_EXTRA_BUFFER_MS = 3000;
 
 /**

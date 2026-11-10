@@ -41,8 +41,8 @@ export const APOSTROPHE_EXTRA = 4;
 export const LENGTH_CUT_AT = 8190; // where Git Bash cuts the -c argument (measured: 8185 passes, 8195 is cut)
 export const TRUNCATION_CAUSE_AT = 7500; // errors.jsonl: an unexpected EOF of a command this long (effective) counts as truncation
 export const SYNTAX_TIMEOUT_MS = 1000;
-// OMC_SHELL_SYNTAX_TIMEOUT_MS: limit of bash -n in the hook (100-3000 ms, default 1000). pre-tool-enforcer has a 5 s budget, and a
-// blocked spawnSync cannot be interrupted, so the limit stays well below it.
+// OMC_SHELL_SYNTAX_TIMEOUT_MS: limit of bash -n in the hook (100-3000 ms, default 1000). a blocked spawnSync cannot be interrupted, and
+// pre-tool-enforcer may wait for Jev requests too, so the limit stays small.
 export function syntaxTimeoutMs(env = process.env) {
   const value = Number(env.OMC_SHELL_SYNTAX_TIMEOUT_MS);
   return Number.isFinite(value) && value >= 100 && value <= 3000 ? value : SYNTAX_TIMEOUT_MS;
