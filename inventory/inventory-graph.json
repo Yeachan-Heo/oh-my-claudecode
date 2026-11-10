@@ -5,15 +5,15 @@
   "provenance": {
     "base": "05c800f40d1ad53b42a78609d2667ef4f726808b",
     "planningHead": "0a91273e61dbbd47eb0af4c02844409251e08398",
-    "head": "225e82f4aaa94098359488a838a3662b2df87a0e",
-    "sourceSha256": "677a0c49d754c73416c06deba5fbf9a2de882d714ae72e5601eb7264205a716a",
+    "head": "312f6002719596e83ffd28de5d5645b3c191e70a",
+    "sourceSha256": "6a59bfc21566921052c59d8f8c764461c0f7c0c8571861e9ece44f53c22abac5",
     "generatedAt": null,
     "generator": "scripts/generate-inventory-graph.mjs"
   },
   "base": "05c800f40d1ad53b42a78609d2667ef4f726808b",
   "planningHead": "0a91273e61dbbd47eb0af4c02844409251e08398",
-  "head": "225e82f4aaa94098359488a838a3662b2df87a0e",
-  "sourceSha256": "677a0c49d754c73416c06deba5fbf9a2de882d714ae72e5601eb7264205a716a",
+  "head": "312f6002719596e83ffd28de5d5645b3c191e70a",
+  "sourceSha256": "6a59bfc21566921052c59d8f8c764461c0f7c0c8571861e9ece44f53c22abac5",
   "counts": {
     "public": {
       "skills": 84,
@@ -48353,6 +48353,11 @@
         "path": "tests/lint/issue-4267-tmux-guard-shell-syntax.test.ts"
       },
       {
+        "id": "tests/lint/issue-4934-hook-timeouts.test.ts",
+        "kind": "other",
+        "path": "tests/lint/issue-4934-hook-timeouts.test.ts"
+      },
+      {
         "id": "tests/lint/omc-playbooks.test.ts",
         "kind": "other",
         "path": "tests/lint/omc-playbooks.test.ts"
@@ -92125,6 +92130,21 @@
         "kind": "imports"
       },
       {
+        "from": "tests/lint/issue-4934-hook-timeouts.test.ts",
+        "to": "external:fs",
+        "kind": "imports"
+      },
+      {
+        "from": "tests/lint/issue-4934-hook-timeouts.test.ts",
+        "to": "external:path",
+        "kind": "imports"
+      },
+      {
+        "from": "tests/lint/issue-4934-hook-timeouts.test.ts",
+        "to": "external:vitest",
+        "kind": "imports"
+      },
+      {
         "from": "tests/lint/omc-playbooks.test.ts",
         "to": "external:node:child_process",
         "kind": "imports"
@@ -92486,12 +92506,12 @@
       }
     ],
     "stats": {
-      "nodeCount": 8251,
-      "edgeCount": 8805,
-      "importEdgeCount": 7358,
+      "nodeCount": 8252,
+      "edgeCount": 8808,
+      "importEdgeCount": 7361,
       "registerEdgeCount": 105
     }
   },
-  "inventorySha256": "e89bd6a2324194f4faa808c69710922f5b8ad163effc4c40f90c43a752b0e467",
-  "manifestSha256": "f0ed181895f7d62cdbeb60a330b2597954afc6278825fee7a3e522d7cfb87ecd"
+  "inventorySha256": "44857481ab7ece3d6f425305d3215477b2a9fa6e56e3cd23c771adcb894ed9a8",
+  "manifestSha256": "e44a8ed4064ea2718c5b36317c25eef3810d504de783b629f4d6d3ca5c2dfa3a"
 }
