@@ -985,6 +985,7 @@ async function decide($, e, cfg, record, started) {
   record.secret_skipped = candidates.filter((c) => c.secret).length;
   record.non_text = candidates.filter((c) => !c.textOnly).length;
   const left = cfg.maxRequests ? cfg.maxRequests - session.requests : MAX_REQUESTS;
+  if (left <= 0) return { fallback: 'cap' };
   const asked = askable.slice(0, BATCH * Math.min(MAX_REQUESTS, left));
   record.asked = asked.length;
 
@@ -1024,13 +1025,6 @@ async function decide($, e, cfg, record, started) {
         return { ...r, batch, ms: Date.now() - t0 };
       }),
     );
-  }
-  // Recheck the process cap after awaiting: when two compactions pass blockedReason() concurrently,
-  // both might compute capacity and enter the loop. After the first increments and one awaits, the second
-  // resumes with stale capacity and empty asked; the loop never runs, so held is unset. If no requests
-  // were made and the cap is now reached, treat it as a cap hit so the result goes to unanswered fallback.
-  if (!runs.length && !held && cfg.maxRequests && session.requests >= cfg.maxRequests) {
-    held = { mode: 'process-cap' };
   }
   if (held) {
     // A request held back by the shared breaker or limit is no failure of the endpoint. The results it
