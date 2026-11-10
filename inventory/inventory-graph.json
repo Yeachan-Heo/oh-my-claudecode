@@ -5,15 +5,15 @@
   "provenance": {
     "base": "05c800f40d1ad53b42a78609d2667ef4f726808b",
     "planningHead": "0a91273e61dbbd47eb0af4c02844409251e08398",
-    "head": "048278f31eedaa24e3bcfea827b310c78dc2c64f",
-    "sourceSha256": "86bbe43a5fd9d88523fdcdb5ce8bf90a9909213ad1f802669f2a12070fd0201c",
+    "head": "4d17a093f1fbc7410e2bad0fddc1e08ca4cbd0c7",
+    "sourceSha256": "5b31a8652889feacf3b2493032c72903f8482e1d62cf233be0a63bfd80dead9d",
     "generatedAt": null,
     "generator": "scripts/generate-inventory-graph.mjs"
   },
   "base": "05c800f40d1ad53b42a78609d2667ef4f726808b",
   "planningHead": "0a91273e61dbbd47eb0af4c02844409251e08398",
-  "head": "048278f31eedaa24e3bcfea827b310c78dc2c64f",
-  "sourceSha256": "86bbe43a5fd9d88523fdcdb5ce8bf90a9909213ad1f802669f2a12070fd0201c",
+  "head": "4d17a093f1fbc7410e2bad0fddc1e08ca4cbd0c7",
+  "sourceSha256": "5b31a8652889feacf3b2493032c72903f8482e1d62cf233be0a63bfd80dead9d",
   "counts": {
     "public": {
       "skills": 84,
@@ -28,8 +28,8 @@
       "toolFiles": 65,
       "libFiles": 49,
       "templateHooks": 25,
-      "srcFiles": 1451,
-      "total": 1476
+      "srcFiles": 1453,
+      "total": 1478
     },
     "generated": {
       "distFiles": 5639,
@@ -892,6 +892,8 @@
       "scripts/lib/hud-cache-wrapper.sh",
       "scripts/lib/hud-wrapper-template.mjs",
       "scripts/lib/hud-wrapper-template.txt",
+      "scripts/lib/jev-compaction-state.mjs",
+      "scripts/lib/jev-mask.mjs",
       "scripts/lib/jev-shadow.mjs",
       "scripts/lib/model-routing-override-message.mjs",
       "scripts/lib/pre-tool-enforcer-preflight.mjs",
@@ -37037,6 +37039,11 @@
         "path": "hooks/hooks.json"
       },
       {
+        "id": "hooks/jev-compaction.mjs",
+        "kind": "other",
+        "path": "hooks/jev-compaction.mjs"
+      },
+      {
         "id": "missions/enhance-omc-performance/mission.md",
         "kind": "other",
         "path": "missions/enhance-omc-performance/mission.md"
@@ -37445,6 +37452,16 @@
         "id": "scripts/lib/hud-wrapper-template.txt",
         "kind": "script",
         "path": "scripts/lib/hud-wrapper-template.txt"
+      },
+      {
+        "id": "scripts/lib/jev-compaction-state.mjs",
+        "kind": "script",
+        "path": "scripts/lib/jev-compaction-state.mjs"
+      },
+      {
+        "id": "scripts/lib/jev-mask.mjs",
+        "kind": "script",
+        "path": "scripts/lib/jev-mask.mjs"
       },
       {
         "id": "scripts/lib/jev-shadow.mjs",
@@ -41330,6 +41347,16 @@
         "id": "src/__tests__/jev-applied-log.test.mjs",
         "kind": "src",
         "path": "src/__tests__/jev-applied-log.test.mjs"
+      },
+      {
+        "id": "src/__tests__/jev-compaction-module.test.mjs",
+        "kind": "src",
+        "path": "src/__tests__/jev-compaction-module.test.mjs"
+      },
+      {
+        "id": "src/__tests__/jev-compaction-state.test.mjs",
+        "kind": "src",
+        "path": "src/__tests__/jev-compaction-state.test.mjs"
       },
       {
         "id": "src/__tests__/jev-eval-script.test.mjs",
@@ -48914,6 +48941,11 @@
         "kind": "imports"
       },
       {
+        "from": "hooks/jev-compaction.mjs",
+        "to": "scripts/lib/jev-mask.mjs",
+        "kind": "imports"
+      },
+      {
         "from": "scripts/audit-multirepo-e2e.mjs",
         "to": "external:node:child_process",
         "kind": "imports"
@@ -49744,6 +49776,41 @@
         "kind": "imports"
       },
       {
+        "from": "scripts/lib/jev-compaction-state.mjs",
+        "to": "external:node:fs",
+        "kind": "imports"
+      },
+      {
+        "from": "scripts/lib/jev-compaction-state.mjs",
+        "to": "external:node:os",
+        "kind": "imports"
+      },
+      {
+        "from": "scripts/lib/jev-compaction-state.mjs",
+        "to": "external:node:path",
+        "kind": "imports"
+      },
+      {
+        "from": "scripts/lib/jev-compaction-state.mjs",
+        "to": "external:node:url",
+        "kind": "imports"
+      },
+      {
+        "from": "scripts/lib/jev-compaction-state.mjs",
+        "to": "scripts/jev-resolve.mjs",
+        "kind": "imports"
+      },
+      {
+        "from": "scripts/lib/jev-compaction-state.mjs",
+        "to": "scripts/lib/atomic-write.mjs",
+        "kind": "imports"
+      },
+      {
+        "from": "scripts/lib/jev-compaction-state.mjs",
+        "to": "scripts/lib/jev-mask.mjs",
+        "kind": "imports"
+      },
+      {
         "from": "scripts/lib/jev-shadow.mjs",
         "to": "external:node:child_process",
         "kind": "imports"
@@ -50276,6 +50343,11 @@
       {
         "from": "scripts/post-tool-use-failure.mjs",
         "to": "scripts/lib/atomic-write.mjs",
+        "kind": "imports"
+      },
+      {
+        "from": "scripts/post-tool-use-failure.mjs",
+        "to": "scripts/lib/jev-compaction-state.mjs",
         "kind": "imports"
       },
       {
@@ -55896,6 +55968,91 @@
       {
         "from": "src/__tests__/jev-applied-log.test.mjs",
         "to": "scripts/lib/jev-shadow.mjs",
+        "kind": "imports"
+      },
+      {
+        "from": "src/__tests__/jev-compaction-module.test.mjs",
+        "to": "external:node:fs",
+        "kind": "imports"
+      },
+      {
+        "from": "src/__tests__/jev-compaction-module.test.mjs",
+        "to": "external:node:path",
+        "kind": "imports"
+      },
+      {
+        "from": "src/__tests__/jev-compaction-module.test.mjs",
+        "to": "external:node:url",
+        "kind": "imports"
+      },
+      {
+        "from": "src/__tests__/jev-compaction-module.test.mjs",
+        "to": "external:vitest",
+        "kind": "imports"
+      },
+      {
+        "from": "src/__tests__/jev-compaction-module.test.mjs",
+        "to": "hooks/jev-compaction.mjs",
+        "kind": "imports"
+      },
+      {
+        "from": "src/__tests__/jev-compaction-module.test.mjs",
+        "to": "scripts/jev-resolve.mjs",
+        "kind": "imports"
+      },
+      {
+        "from": "src/__tests__/jev-compaction-module.test.mjs",
+        "to": "scripts/lib/jev-mask.mjs",
+        "kind": "imports"
+      },
+      {
+        "from": "src/__tests__/jev-compaction-module.test.mjs",
+        "to": "src/hooks/jev/config.ts",
+        "kind": "imports"
+      },
+      {
+        "from": "src/__tests__/jev-compaction-module.test.mjs",
+        "to": "src/hooks/jev/points.ts",
+        "kind": "imports"
+      },
+      {
+        "from": "src/__tests__/jev-compaction-state.test.mjs",
+        "to": "external:node:child_process",
+        "kind": "imports"
+      },
+      {
+        "from": "src/__tests__/jev-compaction-state.test.mjs",
+        "to": "external:node:fs",
+        "kind": "imports"
+      },
+      {
+        "from": "src/__tests__/jev-compaction-state.test.mjs",
+        "to": "external:node:os",
+        "kind": "imports"
+      },
+      {
+        "from": "src/__tests__/jev-compaction-state.test.mjs",
+        "to": "external:node:path",
+        "kind": "imports"
+      },
+      {
+        "from": "src/__tests__/jev-compaction-state.test.mjs",
+        "to": "external:node:url",
+        "kind": "imports"
+      },
+      {
+        "from": "src/__tests__/jev-compaction-state.test.mjs",
+        "to": "external:vitest",
+        "kind": "imports"
+      },
+      {
+        "from": "src/__tests__/jev-compaction-state.test.mjs",
+        "to": "scripts/lib/jev-compaction-state.mjs",
+        "kind": "imports"
+      },
+      {
+        "from": "src/__tests__/jev-compaction-state.test.mjs",
+        "to": "scripts/lib/jev-mask.mjs",
         "kind": "imports"
       },
       {
@@ -92690,12 +92847,12 @@
       }
     ],
     "stats": {
-      "nodeCount": 8253,
-      "edgeCount": 8843,
-      "importEdgeCount": 7393,
+      "nodeCount": 8258,
+      "edgeCount": 8869,
+      "importEdgeCount": 7419,
       "registerEdgeCount": 105
     }
   },
-  "inventorySha256": "30a3f6ac0122e308db554624478c0be9a4950e6b70e90a7da48247dae6a491da",
-  "manifestSha256": "b085151be596b7157e7006f32d15d24f90b5a3520fc066dcc08e40032d840467"
+  "inventorySha256": "6ff7b53870aa1d0acd0f022c23913d9f5a9efdf59406327107f95aac7b9e21e7",
+  "manifestSha256": "ee93446a88a4ab651512f1e58928f2ec9a4039791d1dad85d411824dc7223779"
 }

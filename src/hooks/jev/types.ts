@@ -16,7 +16,8 @@ export type JudgmentPointName =
   | 'ralph-verdict'
   | 'learner-extraction'
   | 'slop-warning'
-  | 'simplifier-trigger';
+  | 'simplifier-trigger'
+  | 'compaction';
 
 /**
  * TypeSafe question shapes. The API rejects any other casing with HTTP 400,
