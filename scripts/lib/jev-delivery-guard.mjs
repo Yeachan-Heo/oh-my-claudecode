@@ -71,10 +71,16 @@ export function minTimeoutSeconds(env = process.env) {
 
 const guardDir = (configDir) => join(configDir, '.omc', 'jev-guard');
 const digest = (text) => createHash('sha256').update(text).digest('hex').slice(0, 16);
+// Resolve relative log paths to absolute to prevent collisions between projects with same relative path
+const resolveLogDir = (logDir, cwd = process.cwd()) => {
+  if (!logDir) return '';
+  const str = String(logDir);
+  return str.startsWith('/') || (str.length > 1 && str[1] === ':') ? str : join(cwd, str);
+};
 // The daily check belongs to one Jev log directory (one project's log), so its files carry a key of it.
 const dailyFile = (dir, logDir, kind) => {
   const [name, extension] = kind.split('.');
-  return join(dir, `${name}-${digest(String(logDir ?? ''))}.${extension}`);
+  return join(dir, `${name}-${digest(resolveLogDir(logDir))}.${extension}`);
 };
 /** Path of a daily-check state file (kind: daily.json, daily.lock or delivery.json) for a Jev log directory. */
 export const dailyStatePath = (configDir, logDir, kind) => dailyFile(guardDir(configDir), logDir, kind);
