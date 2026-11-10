@@ -252,6 +252,16 @@ describe("keyword-detector.mjs: OMC_JEV_TASK_SIZE_NOTICE", () => {
       );
     });
 
+    it("covers the configured largeWordLimit in the classifier check", async () => {
+      writeProjectConfig({ largeWordLimit: 50 });
+      const output = await run(MEDIUM_PROMPT, NOTICE);
+      expect(taskSizeLog().map((entry) => entry.heuristic)).toEqual(["medium"]);
+      expect(output.hookSpecificOutput?.additionalContext).toContain(
+        `${KEPT_NOTE} ralph (the heuristic rates the task medium and the prompt has no size prefix).`,
+      );
+      expectModeKept(output.hookSpecificOutput?.additionalContext ?? "", "ralph");
+    });
+
     it("adds no note when Jev does not rate the task small", async () => {
       choice = "large";
       const output = await run("Please use ralph to fix this.", NOTICE);

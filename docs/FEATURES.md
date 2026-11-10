@@ -665,4 +665,4 @@ Optional environment variables to customize heavy-mode suppression in active tas
 
 - Script: `scripts/keyword-detector.mjs`
 - Config keys read: `taskSizeDetection.enabled`, `taskSizeDetection.suppressHeavyModesForSmallTasks`, `taskSizeDetection.smallWordLimit`, `taskSizeDetection.largeWordLimit`
-- See `docs/HOOKS.md` [Task size: heavy-mode suppression](docs/HOOKS.md#task-size-heavy-mode-suppression) for full behavior documentation
+- See `HOOKS.md` [Task size: heavy-mode suppression](HOOKS.md#task-size-heavy-mode-suppression) for full behavior documentation
