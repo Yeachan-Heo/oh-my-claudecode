@@ -2185,9 +2185,9 @@ async function main() {
     const taskSizeNotice = isTaskSizeNoticeEnabled();
     const taskSizeNotes = [];
 
-    // Track slash invocations to carry into state activation (for confirmedBySlash).
-    // Start-of-prompt slash commands always count; a slash command anywhere is
-    // added below only when an active task-size decision applies.
+    // Slash invocations the task-size filter never suppresses. Start-of-prompt slash
+    // commands always count; a slash command anywhere is added below only when an
+    // active task-size decision applies.
     const slashInvokedByAnyRule = new Set();
     if (isExplicitRalplanSlashInvocation(cleanPrompt)) slashInvokedByAnyRule.add('ralplan');
     if (isExplicitRalphSlashInvocation(cleanPrompt)) slashInvokedByAnyRule.add('ralph');
@@ -2237,9 +2237,10 @@ async function main() {
     // anywhere counts as the user's confirmation only when an active task-size
     // decision applies. In shadow mode or with Jev off, a mid-prompt slash
     // command keeps the awaiting-confirmation window, as without the variable.
-    if (jevTaskSizeResult && isTaskSizeSlashAnywhereEnabled()) {
-      for (const name of heavyModeSlashInvocations(cleanPrompt)) slashInvokedByAnyRule.add(name);
-    }
+    const slashAnywhereKeywords = jevTaskSizeResult && isTaskSizeSlashAnywhereEnabled()
+      ? heavyModeSlashInvocations(cleanPrompt)
+      : new Set();
+    for (const name of slashAnywhereKeywords) slashInvokedByAnyRule.add(name);
 
     // Filter heavy keywords if task-size is 'small' (issue #4805)
     // Only suppress when enabled, confidence >= 0.9, and the heuristic says
@@ -2435,10 +2436,13 @@ async function main() {
       : resolved.filter(m => ['ralph', 'ultragoal', 'autopilot', 'ralplan'].includes(m.name));
     for (const mode of stateModes) {
       const activationError = await activateState(directory, prompt, mode.name, sessionId, {
-        // A slash command counts as the user's confirmation (start-of-prompt by default,
-        // anywhere when OMC_JEV_TASK_SIZE_SLASH_ANYWHERE=1).
+        // Only a slash command at the start of the raw prompt counts as the user's
+        // confirmation; the sanitized prompt is not used, which would make a command
+        // that follows inline code look leading. A slash command anywhere counts too when
+        // OMC_JEV_TASK_SIZE_SLASH_ANYWHERE=1 and an active task-size decision applies.
         // A mention inside prose keeps the awaiting-confirmation window.
-        confirmedBySlash: slashInvokedByAnyRule.has(mode.name),
+        confirmedBySlash: mode.name === 'ralph' &&
+          (isExplicitRalphSlashInvocation(prompt) || slashAnywhereKeywords.has('ralph')),
       });
       if (activationError === 'workflow_descriptor_integrity_failed') {
         console.log(JSON.stringify(createHookOutput('workflow_descriptor_integrity_failed')));
