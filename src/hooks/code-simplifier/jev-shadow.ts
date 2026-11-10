@@ -17,7 +17,7 @@ import {
   isAlreadyTriggered,
   isCodeSimplifierEnabled,
 } from './index.js';
-import { recordJudgment } from '../jev/index.js';
+import { noulAnswerIsYes, recordJudgment } from '../jev/index.js';
 import type { JevAnswer, ResolveResult } from '../jev/index.js';
 
 export interface SimplifierTriggerShadowArgs {
@@ -63,8 +63,8 @@ export function recordSimplifierTriggerShadow(
     twin: () => computeSimplifierTriggerTwin(args.stateDir, args.files),
     mapHeuristic: (result, questionSet) => result,
     mapAnswer: (answer: JevAnswer) => {
-      // Jev Noul answer has { type: 'noul', noul: boolean | undefined }
-      return answer.noul === true;
+      // Jev Noul answer: noul is the probability of "yes" (0-1)
+      return noulAnswerIsYes(answer);
     },
     fetchFn: args.fetchFn,
   });

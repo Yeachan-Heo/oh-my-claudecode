@@ -19,6 +19,7 @@ const HOOKS_MANIFEST = join(REPO_ROOT, 'hooks', 'hooks.json');
 interface Hook {
   type: string;
   command?: string;
+  args?: string[];
   async?: boolean;
   timeout?: number;
 }
@@ -42,7 +43,8 @@ function findHook(manifest: HooksManifest, eventName: string, scriptName: string
   if (!groups) return null;
   for (const group of groups) {
     for (const hook of group.hooks) {
-      if (hook.command && hook.command.includes(scriptName)) {
+      const text = [hook.command, ...(hook.args ?? [])].join(' ');
+      if (text.includes(scriptName)) {
         return hook;
       }
     }

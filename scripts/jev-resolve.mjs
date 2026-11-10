@@ -63,14 +63,17 @@ export function pointExcerptChars(point, env = process.env) {
 /**
  * Points whose state needs more than the global default to be judged at all.
  * model-routing judges the work behind the task, which 200 characters hide.
- * Mirror of POINT_DEFAULT_EXCERPT_CHARS in config.ts.
+ * loop-continuation judges whether the task is complete from the last
+ * assistant message, which persistent-mode.mjs already bounds to 2000
+ * characters (boundLastAssistantMessage); a 200-character cut keeps only its
+ * opening. Mirror of POINT_DEFAULT_EXCERPT_CHARS in config.ts.
  */
-const POINT_DEFAULT_EXCERPT_CHARS = { "model-routing": 12000 };
+const POINT_DEFAULT_EXCERPT_CHARS = { "model-routing": 12000, "loop-continuation": 2000 };
 
 /**
  * Excerpt limit for one point: its own variable, else the point's default
- * (model-routing only), else OMC_JEV_EXCERPT_CHARS, else 200. The global
- * variable does not apply to a point with its own default.
+ * (model-routing, loop-continuation), else OMC_JEV_EXCERPT_CHARS, else 200.
+ * The global variable does not apply to a point with its own default.
  */
 export function resolveExcerptChars(point, env = process.env) {
   return (

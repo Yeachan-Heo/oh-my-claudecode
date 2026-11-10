@@ -6,7 +6,7 @@
  * Cross-platform: Windows, macOS, Linux
  */
 
-import { closeSync, existsSync, fstatSync, lstatSync, mkdirSync, openSync, readFileSync, readSync, readdirSync, renameSync, writeFileSync } from 'fs';
+import { appendFileSync, closeSync, existsSync, fstatSync, lstatSync, mkdirSync, openSync, readFileSync, readSync, readdirSync, renameSync, writeFileSync } from 'fs';
 import { createHash } from 'crypto';
 import { dirname, join, resolve, basename } from 'path';
 import { homedir } from 'os';
@@ -688,10 +688,15 @@ function readNativeAgentDefinitionModel(subagentType, directory) {
 
 const PARENT_MESSAGE_MAX_CHARS = 4000;
 const TRANSCRIPT_TAIL_BYTES = 4 * 1024 * 1024;
-// User-type transcript entries that are system messages, not the user's own words.
+// User-type transcript entries that are system messages, not the user's own words: Claude
+// Code's task, teammate and command notices and its interruption marker, and the notices the
+// Claude desktop app adds (side-session and CI-monitor events, scheduled tasks, messages
+// from another session).
 const PARENT_MESSAGE_SKIP_PREFIXES = [
   '<task-notification>', '<teammate-message', '<command-name>', '<command-message>',
-  '<local-command-stdout>', '<local-command-stderr>',
+  '<local-command-stdout>', '<local-command-stderr>', '[Request interrupted by user',
+  '<side-sessions-event>', '<ci-monitor-event>', '<scheduled-task', '<cross-session-message',
+  'Another Claude session sent a message:',
 ];
 
 // Same boundary as the /goal recovery below: only the active session's own transcript
@@ -739,6 +744,65 @@ function readParentLastUserMessage(transcriptPath, sessionId) {
   return undefined;
 }
 
+// OMC_JEV_MODEL_ROUTING_MARKER=1 lets the caller pin the model and the effort of one
+// Task/Agent call from the first line of its prompt, in place of Jev's answer:
+//   use <model> | use <model> <effort> | use <effort>
+// The whole first non-empty line must have this form (any case, surrounding spaces ignored).
+// The model words and the effort words do not overlap, so `use high` is an effort. The line is
+// an instruction for this hook, not for the agent: it is removed from the prompt, with one
+// blank line after it. A marker anywhere else, or in `description`, is plain text.
+// `max` is never accepted from a marker: it stays Jev's decision (and the cap's).
+const MODEL_ROUTING_MARKER_MODELS = ['haiku', 'sonnet', 'opus', 'fable'];
+const MODEL_ROUTING_MARKER_EFFORTS = ['low', 'medium', 'high', 'xhigh'];
+
+function isModelRoutingMarkerEnabled(env = process.env) {
+  return ['1', 'true'].includes(String(env.OMC_JEV_MODEL_ROUTING_MARKER ?? '').trim().toLowerCase());
+}
+
+// Returns null when the prompt has no marker line. Otherwise `{ line, model, effort,
+// rejected, prompt }`: `rejected` lists what the marker named but may not set (`max`) and
+// `prompt` is the prompt without the marker line. A prompt that is only the marker keeps it.
+function parseModelRoutingMarker(prompt) {
+  if (typeof prompt !== 'string') return null;
+  const lines = prompt.split('\n');
+  const index = lines.findIndex((line) => line.trim() !== '');
+  if (index === -1) return null;
+  const line = lines[index].trim();
+  const tokens = line.toLowerCase().split(/\s+/);
+  if (tokens[0] !== 'use' || tokens.length < 2 || tokens.length > 3) return null;
+  const [, first, second] = tokens;
+  let model;
+  let effort;
+  const rejected = [];
+  if (second === undefined) {
+    if (MODEL_ROUTING_MARKER_MODELS.includes(first)) model = first;
+    else if (MODEL_ROUTING_MARKER_EFFORTS.includes(first)) effort = first;
+    else if (first === 'max') rejected.push('max');
+    else return null;
+  } else {
+    if (!MODEL_ROUTING_MARKER_MODELS.includes(first)) return null;
+    model = first;
+    if (MODEL_ROUTING_MARKER_EFFORTS.includes(second)) effort = second;
+    else if (second === 'max') rejected.push('max');
+    else return null;
+  }
+  const drop = lines[index + 1] !== undefined && lines[index + 1].trim() === '' ? 2 : 1;
+  const rest = lines.slice(index + drop).join('\n');
+  return { line, model, effort, rejected, prompt: rest.trim() === '' ? prompt : rest };
+}
+
+// One line per marker in overrides.jsonl, next to shadow.jsonl. It is a separate file on
+// purpose: jev-eval reads shadow.jsonl and counts every line there as a Jev request.
+function recordModelRoutingOverride(stateDir, row) {
+  try {
+    const dir = process.env.OMC_JEV_LOG_DIR || join(stateDir, 'jev');
+    mkdirSync(dir, { recursive: true });
+    appendFileSync(join(dir, 'overrides.jsonl'), JSON.stringify({ ts: new Date().toISOString(), point: 'model-routing', ...row }) + '\n', 'utf8');
+  } catch {
+    // Best-effort logging: a logging failure never affects the call.
+  }
+}
+
 function boundModelRoutingInput(toolInput) {
   const bounded = {};
   for (const key of ['description', 'prompt', 'subagent_type', 'model', 'effort', 'resume']) {
@@ -753,25 +817,46 @@ function boundModelRoutingInput(toolInput) {
   return bounded;
 }
 
-function recordModelRoutingShadow(toolName, toolInput, updatedToolInput, permissionMode, transcriptPath, directory, sessionId) {
-  if (!isJevShadowOptedIn('model-routing', process.env, permissionMode)) return;
+function recordModelRoutingShadow(toolName, toolInput, updatedToolInput, permissionMode, transcriptPath, directory, sessionId, stateDir) {
+  // OMC_JEV_MODEL_ROUTING_MARKER: a `use` line in the prompt pins the model and/or the effort.
+  // The marker is the caller's own instruction, so it works whether or not the point is on;
+  // Jev is then asked only the questions the marker leaves open.
+  const marker = isModelRoutingMarkerEnabled() ? parseModelRoutingMarker(toolInput.prompt) : null;
+  if (marker?.model && isForceInheritEnabled() && !resolveTierAliasToSafeModel(marker.model)) {
+    // A tier alias the provider cannot resolve is not set (the marker then sets no model).
+    marker.rejected.push('force-inherit');
+    marker.model = undefined;
+  }
+  const markerApplies = Boolean(marker && (marker.model || marker.effort));
+  const jevOptedIn = isJevShadowOptedIn('model-routing', process.env, permissionMode);
+  if (!jevOptedIn && !marker) return;
 
-  const originalInput = boundModelRoutingInput(toolInput);
+  // Jev judges the task without the marker line.
+  const originalInput = boundModelRoutingInput(markerApplies ? { ...toolInput, prompt: marker.prompt } : toolInput);
   const modifiedInput = boundModelRoutingInput(updatedToolInput || toolInput);
-  const selectedModel = modifiedInput.model || readAgentDefinitionModel(originalInput.subagent_type);
+  // A model from the marker counts as the call's model: Jev is asked the open questions
+  // about a call whose model is known, whether the call or the marker named it.
+  const selectedModel = marker?.model || modifiedInput.model || readAgentDefinitionModel(originalInput.subagent_type);
   const model = isTierAlias(selectedModel) ? selectedModel.toLowerCase() : normalizeToCcAlias(selectedModel);
   const knownTier = ['haiku', 'sonnet', 'opus'].includes(model);
   // A call with no model of its own and no model in a plugin, project or user agent
   // definition is unpinned; only OMC_JEV_MODEL_ROUTING_ALL_AGENTS asks about those.
   const unpinned = !knownTier && isModelRoutingAllAgentsEnabled()
     && isUnpinnedModel(selectedModel || readNativeAgentDefinitionModel(originalInput.subagent_type, directory));
-  if (!knownTier && !unpinned) return;
+  if (!knownTier && !unpinned && !marker) return;
+
+  // What the marker settles is not asked: a model leaves the effort question, an effort
+  // leaves the model-tier question, both leave no question and no Jev request at all.
+  const questions = { ...MODEL_ROUTING_QUESTIONS };
+  if (marker?.model) delete questions['model-tier'];
+  if (marker?.effort) delete questions.effort;
+  const askJev = jevOptedIn && (knownTier || unpinned) && Object.keys(questions).length > 0;
 
   // No twin tier for a call without a known model: nothing comparable to log.
   const heuristic = knownTier ? model : null;
 
   let context = {};
-  if (isModelRoutingContextEnabled()) {
+  if (askJev && isModelRoutingContextEnabled()) {
     const parentMessage = readParentLastUserMessage(resolveTranscriptPath(transcriptPath, directory), sessionId);
     context = {
       description: originalInput.description || '',
@@ -779,7 +864,7 @@ function recordModelRoutingShadow(toolName, toolInput, updatedToolInput, permiss
     };
   }
 
-  const jevResult = recordJevShadow({
+  const jevResult = !askJev ? undefined : recordJevShadow({
     point: 'model-routing',
     state: {
       tool_name: toolName,
@@ -787,21 +872,28 @@ function recordModelRoutingShadow(toolName, toolInput, updatedToolInput, permiss
       task: originalInput.prompt || '',
       ...context,
     },
-    questions: MODEL_ROUTING_QUESTIONS,
+    questions,
     heuristic,
     permissionMode,
   });
-  
+
+  const ensureUpdated = () => {
+    if (!updatedToolInput) updatedToolInput = { ...toolInput };
+    return updatedToolInput;
+  };
+  // The model and effort the call had before Jev and the marker touched it (for the log).
+  const baseModel = (updatedToolInput || toolInput).model;
+  const baseEffort = (updatedToolInput || toolInput).effort;
+  // Read lazily and once: the cap is only looked at when an effort is set, and a bad value is reported once.
+  let maxEffortValue;
+  const maxEffort = () => (maxEffortValue ??= resolveMaxEffort());
+
   // In active mode, Jev's answers replace the model and effort in the call,
   // explicit values included. Answers are read by question name: the API
   // does not guarantee their order. A missing or malformed answer leaves that
   // field as it was.
   const answers = jevResult && jevResult.mode === 'active' ? jevResult.answers : undefined;
   if (answers && typeof answers === 'object') {
-    const ensureUpdated = () => {
-      if (!updatedToolInput) updatedToolInput = { ...toolInput };
-      return updatedToolInput;
-    };
     const tierChoice = answers['model-tier']?.choice;
     const jevChoice = typeof tierChoice === 'string' ? tierChoice.toLowerCase() : undefined;
     // With forceInherit a call without a model deliberately inherits the session model,
@@ -812,19 +904,44 @@ function recordModelRoutingShadow(toolName, toolInput, updatedToolInput, permiss
       ensureUpdated().model = jevChoice;
     }
 
-    const maxEffort = resolveMaxEffort();
     // Only a score answer inside the declared 0-4 range counts; anything else
     // is treated as a missing effort answer.
     const effortAnswer = answers.effort;
     const effortScore = effortAnswer?.type === 'score' ? effortAnswer.score : undefined;
     const currentEffort = (updatedToolInput || toolInput).effort;
     if (typeof effortScore === 'number' && Number.isFinite(effortScore) && effortScore >= 0 && effortScore <= 4) {
-      ensureUpdated().effort = effortFromScore(effortScore, maxEffort);
-    } else if (typeof currentEffort === 'string' && capEffort(currentEffort, maxEffort) !== currentEffort) {
-      ensureUpdated().effort = capEffort(currentEffort, maxEffort);
+      ensureUpdated().effort = effortFromScore(effortScore, maxEffort());
+    } else if (typeof currentEffort === 'string' && capEffort(currentEffort, maxEffort()) !== currentEffort) {
+      ensureUpdated().effort = capEffort(currentEffort, maxEffort());
     }
   }
-  
+
+  // The marker wins over the call's own values and over Jev's answers. The effort is still
+  // capped by OMC_JEV_MAX_EFFORT; the marker line leaves the prompt the agent receives.
+  if (marker) {
+    const row = {
+      ...(typeof sessionId === 'string' && sessionId ? { session_id: sessionId } : {}),
+      subagent_type: originalInput.subagent_type || null,
+      marker: marker.line,
+    };
+    if (marker.rejected.length > 0) row.rejected = marker.rejected;
+    if (markerApplies) {
+      const target = ensureUpdated();
+      row.override = marker.model && marker.effort ? 'both' : marker.model ? 'model' : 'effort';
+      if (marker.model) {
+        target.model = marker.model;
+        row.model = { from: baseModel ?? null, to: marker.model };
+      }
+      if (marker.effort) {
+        const to = capEffort(marker.effort, maxEffort());
+        target.effort = to;
+        row.effort = { from: baseEffort ?? null, to, ...(to !== marker.effort ? { capped: true, requested: marker.effort } : {}) };
+      }
+      target.prompt = marker.prompt;
+    }
+    recordModelRoutingOverride(stateDir, row);
+  }
+
   return updatedToolInput;
 }
 
@@ -1953,7 +2070,25 @@ function isCodexPreToolUse(input) {
     Boolean(input && typeof input === 'object' && typeof input.turn_id === 'string');
 }
 
+// Warnings of the opt-in shell checks (OMC_SHELL_CHECKS=1) ride on whatever output the hook emits, unless it denies.
+let shellCheckContext = '';
+function withShellCheckContext(output) {
+  if (!shellCheckContext || !output || typeof output !== 'object') return output;
+  const hookOutput = output.hookSpecificOutput && typeof output.hookSpecificOutput === 'object' ? output.hookSpecificOutput : {};
+  if (hookOutput.permissionDecision === 'deny') return output;
+  const context = typeof hookOutput.additionalContext === 'string' && hookOutput.additionalContext
+    ? `${shellCheckContext}
+
+${hookOutput.additionalContext}`
+    : shellCheckContext;
+  const merged = { ...output, hookSpecificOutput: { ...hookOutput, hookEventName: 'PreToolUse', additionalContext: context } };
+  delete merged.suppressOutput; // the warning is meant to be seen
+  shellCheckContext = '';
+  return merged;
+}
+
 function emitPreToolUseOutput(output, input, space = 0) {
+  output = withShellCheckContext(output);
   if (!isCodexPreToolUse(input)) {
     console.log(JSON.stringify(output, null, space));
     return;
@@ -2026,6 +2161,28 @@ async function main() {
     // Record Skill invocations to flow trace
     data = {};
     try { data = JSON.parse(input); } catch {}
+
+    // Opt-in shell checks (OMC_SHELL_CHECKS=1) for Bash and PowerShell commands. Fail-open: any error here
+    // leaves the hook behaving as without the checks.
+    if ((toolName === 'Bash' || toolName === 'PowerShell') && process.env.OMC_SHELL_CHECKS === '1') {
+      try {
+        const { runShellChecks } = await import('./lib/shell-checks.mjs');
+        const verdict = runShellChecks(toolName, data, { logDir: join(stateDir, 'shell-checks') });
+        if (verdict?.decision === 'deny' && verdict.reason) {
+          emitPreToolUseOutput({
+            continue: true,
+            hookSpecificOutput: {
+              hookEventName: 'PreToolUse',
+              permissionDecision: 'deny',
+              permissionDecisionReason: verdict.reason,
+            },
+          }, data);
+          return;
+        }
+        if (verdict?.context) shellCheckContext = verdict.context;
+      } catch { /* fail-open */ }
+    }
+
     recordToolInvocation(data, directory);
 
     // Activate skill state when Skill tool is invoked (issue #1033)
@@ -2196,7 +2353,7 @@ async function main() {
 
     if (toolName === 'Task' || toolName === 'Agent') {
       const toolInput = data.toolInput || data.tool_input || {};
-      const jevUpdated = recordModelRoutingShadow(toolName, toolInput, updatedToolInput, data.permission_mode, data.transcript_path || data.transcriptPath || '', directory, data.session_id || data.sessionId || '');
+      const jevUpdated = recordModelRoutingShadow(toolName, toolInput, updatedToolInput, data.permission_mode, data.transcript_path || data.transcriptPath || '', directory, data.session_id || data.sessionId || '', stateDir);
       // In active mode, Jev may override the model choice
       if (jevUpdated) updatedToolInput = jevUpdated;
     }

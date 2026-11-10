@@ -203,10 +203,12 @@ function resolveHookTimeoutMsFromRoot(pluginRoot, targetPath, extraArgs) {
       const hooks = Array.isArray(entry?.hooks) ? entry.hooks : [];
       for (const hook of hooks) {
         const command = typeof hook?.command === 'string' ? hook.command : '';
+        const hookArgs = Array.isArray(hook?.args) ? hook.args.filter(arg => typeof arg === 'string') : [];
+        const invocation = [command, ...hookArgs].join(' ');
         const timeout = Number(hook?.timeout);
-        if (!scriptPattern.test(command)) continue;
+        if (!scriptPattern.test(invocation)) continue;
         if (!Number.isFinite(timeout) || timeout <= 0) continue;
-        if (!argNeedles.every(arg => command.includes(` ${arg}`) || command.endsWith(` ${arg}`))) continue;
+        if (!argNeedles.every(arg => invocation.includes(` ${arg}`) || invocation.endsWith(` ${arg}`))) continue;
         return { event, timeoutMs: Math.floor(timeout * 1000) };
       }
     }

@@ -13,10 +13,11 @@ export const MCP_JSON_PATH = join(PACKAGE_ROOT, '.mcp.json');
 const SCRIPTS_ROOT = join(PACKAGE_ROOT, 'scripts');
 const LOCAL_IMPORT_RE =
   /(?:import\s+(?:[^'"()]+?\s+from\s+)?|import\s*\(|export\s+\*\s+from\s+|export\s+\{[^}]*\}\s+from\s+|require\s*\()\s*['"](\.[^'"]+)['"]/g;
-const PLUGIN_SCRIPT_RE = /"\$CLAUDE_PLUGIN_ROOT"\/(scripts\/[^\s"]+)/g;
+const PLUGIN_SCRIPT_RE = /(?:\$\{CLAUDE_PLUGIN_ROOT\}|\$CLAUDE_PLUGIN_ROOT)\/(scripts\/[A-Za-z0-9_./-]+)/g;
 
 type HookCommandConfig = {
   command?: string;
+  args?: string[];
 };
 
 type HooksJson = {
@@ -98,9 +99,12 @@ function listHookScriptEntries(): string[] {
   for (const eventHooks of Object.values(hooksJson.hooks ?? {})) {
     for (const matcherEntry of eventHooks) {
       for (const hook of matcherEntry.hooks ?? []) {
-        const command = hook.command ?? '';
-        for (const match of command.matchAll(PLUGIN_SCRIPT_RE)) {
-          entries.add(match[1]);
+        const texts = [hook.command, ...(hook.args ?? [])];
+        for (const text of texts) {
+          if (typeof text !== 'string') continue;
+          for (const match of text.matchAll(PLUGIN_SCRIPT_RE)) {
+            entries.add(match[1]);
+          }
         }
       }
     }

@@ -35,6 +35,7 @@ import { analyzeLegacyClaudeMd, OMC_END_MARKER, OMC_START_MARKER, parseClaudeMdM
 import { executeClaudeMdTransaction, isClaudeMdEnabledInConfig } from './claude-md-transaction.js';
 import { HISTORICAL_AGENT_OWNERSHIP, type HistoricalAgentOwnership } from './historical-agent-ownership.js';
 import entitlementManifest from '../config/builtin-skill-entitlements.json' with { type: 'json' };
+import { parseHookInvocation } from '../../scripts/lib/hook-command-normalizer.mjs';
 
 /** Claude Code configuration directory */
 export const CLAUDE_CONFIG_DIR = getClaudeConfigDir();
@@ -594,6 +595,15 @@ function isObjectRecord(value: unknown): value is Record<string, unknown> {
   return !!value && typeof value === 'object' && !Array.isArray(value);
 }
 
+/** Same script, whether the manifest still uses a shell string or exec `args`. */
+function installedHookIdentity(entry: { command?: unknown; args?: unknown }): string {
+  if (typeof entry.command !== 'string') return '';
+  const parsed = parseHookInvocation(entry);
+  if (!parsed) return entry.command;
+  const tail = parsed.extra.length > 0 ? ` ${parsed.extra.join(' ')}` : '';
+  return `omc:${parsed.script}${tail}`;
+}
+
 function filterSettingsPluginDuplicateHooks(
   hooks: Record<string, unknown>,
   commandsByEvent: Map<string, Set<string>>,
@@ -622,7 +632,7 @@ function filterSettingsPluginDuplicateHooks(
         const hook = entry as SettingsHookEntry;
         const isDuplicate = hook.type === 'command'
           && typeof hook.command === 'string'
-          && eventCommands.has(hook.command);
+          && eventCommands.has(installedHookIdentity(hook));
         if (isDuplicate) {
           removed++;
           removedByEvent.set(eventType, (removedByEvent.get(eventType) ?? 0) + 1);
@@ -1720,7 +1730,7 @@ function collectPluginHookManifestSnapshot(): PluginHookManifestSnapshot {
               diagnostics: [`${root}: hooks.${eventType} contains a command hook without a string command`],
             };
           }
-          commands.add(entry.command);
+          commands.add(installedHookIdentity(entry));
         }
       }
       if (commands.size > 0) commandsByEvent.set(eventType, commands);
@@ -2806,8 +2816,9 @@ export function install(options: InstallOptions = {}): InstallResult {
       });
 
       // 3. Persist the detected node binary path into .omc-config.json so that
-      //    find-node.sh (used in hooks/hooks.json) can locate it at hook runtime
-      //    even when node is not on PATH (nvm/fnm users, issue #892).
+      //    find-node.sh can locate it at hook runtime on Unix, where a published
+      //    cache rewrites hooks to the sh bootstrap (nvm/fnm, issue #892).
+      //    The shipped hooks.json spawns node directly and does not call it.
       try {
         const configPath = join(CLAUDE_CONFIG_DIR, OMC_CONFIG_FILE_REL);
         let omcConfig: Record<string, unknown> = {};

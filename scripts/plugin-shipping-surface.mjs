@@ -230,7 +230,10 @@ function collectManifestEntrypoints(root) {
       for (const group of groups) {
         if (!Array.isArray(group?.hooks)) continue;
         for (const hook of group.hooks) {
-          for (const repoPath of pluginRootPaths(hook?.command, 'hooks/hooks.json command')) paths.add(repoPath);
+          const values = [hook?.command, ...(Array.isArray(hook?.args) ? hook.args : [])];
+          for (const value of values) {
+            for (const repoPath of pluginRootPaths(value, 'hooks/hooks.json command')) paths.add(repoPath);
+          }
         }
       }
     }

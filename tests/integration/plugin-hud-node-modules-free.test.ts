@@ -21,14 +21,17 @@ function getPluginDistEntrypoints(pluginRoot: string): string[] {
   const hookScripts = new Set<string>();
   for (const groups of Object.values(hookManifest.hooks ?? {})) {
     for (const group of groups as Array<{
-      hooks?: Array<{ command?: string }>;
+      hooks?: Array<{ command?: string; args?: string[] }>;
     }>) {
       for (const hook of group.hooks ?? []) {
-        if (typeof hook.command !== "string") continue;
-        for (const match of hook.command.matchAll(
-          /scripts\/[A-Za-z0-9_./-]+\.(?:mjs|cjs)/g,
-        )) {
-          hookScripts.add(match[0]);
+        const texts = [hook.command, ...(hook.args ?? [])];
+        for (const text of texts) {
+          if (typeof text !== "string") continue;
+          for (const match of text.matchAll(
+            /scripts\/[A-Za-z0-9_./-]+\.(?:mjs|cjs)/g,
+          )) {
+            hookScripts.add(match[0]);
+          }
         }
       }
     }

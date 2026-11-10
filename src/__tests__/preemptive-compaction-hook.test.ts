@@ -114,24 +114,17 @@ describe('post-tool-verifier preemptive compaction warnings', () => {
     };
 
     const commands = hooksJson.hooks.PostToolUse.flatMap(entry =>
-      entry.hooks.map(hook => hook.command),
+      entry.hooks.map(hook => [hook.command, ...((hook as { args?: string[] }).args ?? [])].join(' ')),
     );
 
-    expect(commands).not.toContain(
-      'node "${CLAUDE_PLUGIN_ROOT}"/scripts/run.cjs "${CLAUDE_PLUGIN_ROOT}"/scripts/preemptive-compaction.mjs',
-    );
+    expect(commands.some(command => command.includes('preemptive-compaction.mjs'))).toBe(false);
     expect(
       commands.some(
         command =>
-          command.includes('"${CLAUDE_PLUGIN_ROOT}"/scripts/run.cjs') &&
-          command.includes('"${CLAUDE_PLUGIN_ROOT}"/scripts/post-tool-verifier.mjs'),
+          command.includes('${CLAUDE_PLUGIN_ROOT}/scripts/run.cjs') &&
+          command.includes('${CLAUDE_PLUGIN_ROOT}/scripts/post-tool-verifier.mjs'),
       ),
     ).toBe(true);
-    expect(
-      commands.some(command =>
-        command.includes('"${CLAUDE_PLUGIN_ROOT}"/scripts/preemptive-compaction.mjs'),
-      ),
-    ).toBe(false);
   });
 
   it('warns when transcript usage crosses the configured threshold', () => {

@@ -86,8 +86,9 @@ describe('run.cjs — graceful fallback for stale plugin paths', () => {
     const hooksJson = JSON.parse(readFileSync(join(__dirname, '..', '..', 'hooks', 'hooks.json'), 'utf-8'));
     const promptHooks = hooksJson.hooks.UserPromptSubmit.flatMap((entry: any) => entry.hooks);
 
-    const keywordDetector = promptHooks.find((hook: any) => hook.command.includes('keyword-detector.mjs'));
-    const skillInjector = promptHooks.find((hook: any) => hook.command.includes('skill-injector.mjs'));
+    const hookText = (hook: { command?: string; args?: string[] }) => [hook.command, ...(hook.args ?? [])].join(' ');
+    const keywordDetector = promptHooks.find((hook: any) => hookText(hook).includes('keyword-detector.mjs'));
+    const skillInjector = promptHooks.find((hook: any) => hookText(hook).includes('skill-injector.mjs'));
 
     expect(keywordDetector?.timeout).toBe(30);
     expect(skillInjector?.timeout).toBe(30);

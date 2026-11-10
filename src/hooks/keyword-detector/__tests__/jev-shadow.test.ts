@@ -174,3 +174,21 @@ describe('keyword-detector shadow judgment points', () => {
     expect(entry.heuristic).toBeNull();
   });
 });
+
+describe('keyword-detector intent point in active mode', () => {
+  // The API returns noul as the probability of "yes". Each prompt is picked so
+  // that the twin says the opposite of Jev, which shows that Jev decided.
+  it.each([
+    { noul: 0.92, prompt: PROMPT, expected: true },
+    { noul: 0.08, prompt: INTENT_PROMPT, expected: false },
+  ])('reads a noul probability of $noul as $expected', async ({ noul, prompt, expected }) => {
+    process.env.TYPESAFE_API_KEY = 'test-key-123';
+    process.env.OMC_JEV = 'intent:active';
+    const intent = stubFetch({ noul, confidence: 0.9 });
+
+    const result = await recordIntentShadow(prompt, intent.fetchFn);
+
+    expect(result).toEqual({ answer: expected, source: 'jev', mode: 'active' });
+    expect(intent.calls).toHaveLength(1);
+  });
+});
