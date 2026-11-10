@@ -31,7 +31,7 @@ import { atomicWriteFileSync, getStateFileLockFailureMessage, recoverEmergencySt
 import { readStdin } from './lib/stdin.mjs';
 import { resolveOmcStateRoot, resolveSessionStatePathsForHook } from './lib/state-root.mjs';
 import { parseWorkflowInvocation, selectWorkflowProfile, createWorkflowState, isValidWorkflowTrackingState, isWorkflowRuntimeSupported, resolveWorkflowStagePrompt, takeWorkflowTranscriptFailure } from './lib/workflow-profile-runtime.mjs';
-import { isJevShadowOptedIn, recordJevShadow } from './lib/jev-shadow.mjs';
+import { isJevShadowOptedIn, jevNoulOf, recordJevShadow } from './lib/jev-shadow.mjs';
 import { initializeRalphStateForSkill, createPrdScaffold } from './lib/ralph-startup.mjs';
 
 // Resolve OMC package root: CLAUDE_PLUGIN_ROOT (plugin system) or derive from this script's location
@@ -1747,6 +1747,13 @@ function isTaskSizeSlashAnywhereEnabled(env = process.env) {
   return ['1', 'true'].includes(String(env.OMC_JEV_TASK_SIZE_SLASH_ANYWHERE ?? '').trim().toLowerCase());
 }
 
+// OMC_JEV_INTENT_APPLY=1 lets the active `intent` answer decide whether the
+// intent skill is invoked. Off by default: the heuristic (slash pattern) decides
+// and the answer is only logged.
+function isIntentApplyEnabled(env = process.env) {
+  return ['1', 'true'].includes(String(env.OMC_JEV_INTENT_APPLY ?? '').trim().toLowerCase());
+}
+
 // A slash command starts the prompt or follows whitespace, an opening parenthesis or
 // a quote, and ends at whitespace, the end, a closing parenthesis or square bracket, a quote, or
 // punctuation; a dot only when no word character or letter follows (/ralph.md and /ralph.é are files).
@@ -2210,8 +2217,18 @@ async function main() {
         heuristic: INTENT_SLASH_PATTERN.test(cleanPrompt),
         permissionMode,
       });
-      // In active mode, intent Jev answer could be used here if needed
-      // Currently logging-only: resolved keywords come from skill-trigger
+      // In active mode with opt-in, intent Jev answer decides whether to invoke the skill
+      // The keywordDetector.disabled opt-out still wins, and intent is added at most once.
+      if (
+        isIntentApplyEnabled() &&
+        !disabledKeywords.has('intent') &&
+        !resolved.some((match) => match.name === 'intent')
+      ) {
+        const noul = jevNoulOf(jevResult, 'intent');
+        if (noul !== undefined && noul >= 0.5) {
+          resolved.push({ name: 'intent', args: '' });
+        }
+      }
     }
 
     // Apply task-size filtering: suppress heavy keywords for small tasks (issue #4805)

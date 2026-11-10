@@ -6,14 +6,14 @@
     "base": "05c800f40d1ad53b42a78609d2667ef4f726808b",
     "planningHead": "0a91273e61dbbd47eb0af4c02844409251e08398",
     "head": "45808a2e6f9b8d5d5d41aa265df278c8c78057e9",
-    "sourceSha256": "5fbc7e688741460d18e79abda16a7b149af088a6eac81cde83797a1f9eb07255",
+    "sourceSha256": "d30ef85cc0426c9732a84fb35539ddc3b6de01891bd96eb297532217c4846dcf",
     "generatedAt": null,
     "generator": "scripts/generate-inventory-graph.mjs"
   },
   "base": "05c800f40d1ad53b42a78609d2667ef4f726808b",
   "planningHead": "0a91273e61dbbd47eb0af4c02844409251e08398",
   "head": "45808a2e6f9b8d5d5d41aa265df278c8c78057e9",
-  "sourceSha256": "5fbc7e688741460d18e79abda16a7b149af088a6eac81cde83797a1f9eb07255",
+  "sourceSha256": "d30ef85cc0426c9732a84fb35539ddc3b6de01891bd96eb297532217c4846dcf",
   "counts": {
     "public": {
       "skills": 84,
@@ -28,8 +28,8 @@
       "toolFiles": 65,
       "libFiles": 49,
       "templateHooks": 25,
-      "srcFiles": 1449,
-      "total": 1474
+      "srcFiles": 1448,
+      "total": 1473
     },
     "generated": {
       "distFiles": 5639,
@@ -37,14 +37,14 @@
       "total": 5647
     },
     "prompt": {
-      "promptLikeFiles": 68
+      "promptLikeFiles": 63
     },
     "skills": 84,
     "commands": 21,
     "hookFiles": 336,
     "workflows": 8,
     "agentDefinitions": 18,
-    "promptLikeFiles": 68
+    "promptLikeFiles": 63
   },
   "public": {
     "skills": [
@@ -773,11 +773,6 @@
     "promptSources": [
       ".clawhip/state/prompt-submit.json",
       ".github/CLAUDE.md",
-      ".test-job-state-db-1445660/.omc/prompts/codex-status-bad-file.json",
-      ".test-job-state-db-1445660/.omc/prompts/codex-status-invalid.json",
-      ".test-job-state-db-1445660/.omc/prompts/codex-status-test-job1.json",
-      ".test-job-state-db-1445660/.omc/prompts/codex-status-test-migrated1.json",
-      ".test-job-state-db-1445660/.omc/prompts/gemini-status-test-job2.json",
       "CLAUDE.md",
       "benchmarks/code-reviewer/prompts/quality-reviewer.md",
       "benchmarks/debugger/prompts/build-fixer.md",
@@ -895,7 +890,6 @@
       "scripts/lib/hud-wrapper-template.mjs",
       "scripts/lib/hud-wrapper-template.txt",
       "scripts/lib/jev-compaction-state.mjs",
-      "scripts/lib/jev-delivery-guard.mjs",
       "scripts/lib/jev-mask.mjs",
       "scripts/lib/jev-shadow.mjs",
       "scripts/lib/model-routing-override-message.mjs",
@@ -6979,11 +6973,6 @@
     "promptSources": [
       ".clawhip/state/prompt-submit.json",
       ".github/CLAUDE.md",
-      ".test-job-state-db-1445660/.omc/prompts/codex-status-bad-file.json",
-      ".test-job-state-db-1445660/.omc/prompts/codex-status-invalid.json",
-      ".test-job-state-db-1445660/.omc/prompts/codex-status-test-job1.json",
-      ".test-job-state-db-1445660/.omc/prompts/codex-status-test-migrated1.json",
-      ".test-job-state-db-1445660/.omc/prompts/gemini-status-test-job2.json",
       "CLAUDE.md",
       "benchmarks/code-reviewer/prompts/quality-reviewer.md",
       "benchmarks/debugger/prompts/build-fixer.md",
@@ -7367,31 +7356,6 @@
         "id": ".omx/plans/source-overall-cleanup/ownership-matrix.md",
         "kind": "other",
         "path": ".omx/plans/source-overall-cleanup/ownership-matrix.md"
-      },
-      {
-        "id": ".test-job-state-db-1445660/.omc/prompts/codex-status-bad-file.json",
-        "kind": "prompt",
-        "path": ".test-job-state-db-1445660/.omc/prompts/codex-status-bad-file.json"
-      },
-      {
-        "id": ".test-job-state-db-1445660/.omc/prompts/codex-status-invalid.json",
-        "kind": "prompt",
-        "path": ".test-job-state-db-1445660/.omc/prompts/codex-status-invalid.json"
-      },
-      {
-        "id": ".test-job-state-db-1445660/.omc/prompts/codex-status-test-job1.json",
-        "kind": "prompt",
-        "path": ".test-job-state-db-1445660/.omc/prompts/codex-status-test-job1.json"
-      },
-      {
-        "id": ".test-job-state-db-1445660/.omc/prompts/codex-status-test-migrated1.json",
-        "kind": "prompt",
-        "path": ".test-job-state-db-1445660/.omc/prompts/codex-status-test-migrated1.json"
-      },
-      {
-        "id": ".test-job-state-db-1445660/.omc/prompts/gemini-status-test-job2.json",
-        "kind": "prompt",
-        "path": ".test-job-state-db-1445660/.omc/prompts/gemini-status-test-job2.json"
       },
       {
         "id": "AGENTS.md",
@@ -36899,11 +36863,6 @@
         "path": "node:process"
       },
       {
-        "id": "external:node:readline",
-        "kind": "external",
-        "path": "node:readline"
-      },
-      {
         "id": "external:node:stream",
         "kind": "external",
         "path": "node:stream"
@@ -37492,11 +37451,6 @@
         "id": "scripts/lib/jev-compaction-state.mjs",
         "kind": "script",
         "path": "scripts/lib/jev-compaction-state.mjs"
-      },
-      {
-        "id": "scripts/lib/jev-delivery-guard.mjs",
-        "kind": "script",
-        "path": "scripts/lib/jev-delivery-guard.mjs"
       },
       {
         "id": "scripts/lib/jev-mask.mjs",
@@ -41397,11 +41351,6 @@
         "id": "src/__tests__/jev-compaction-state.test.mjs",
         "kind": "src",
         "path": "src/__tests__/jev-compaction-state.test.mjs"
-      },
-      {
-        "id": "src/__tests__/jev-delivery-guard.test.mjs",
-        "kind": "src",
-        "path": "src/__tests__/jev-delivery-guard.test.mjs"
       },
       {
         "id": "src/__tests__/jev-eval-script.test.mjs",
@@ -48264,11 +48213,6 @@
         "path": "tests/integration/jev-advisory-points.test.ts"
       },
       {
-        "id": "tests/integration/jev-delivery-guard-per-logdir.test.ts",
-        "kind": "other",
-        "path": "tests/integration/jev-delivery-guard-per-logdir.test.ts"
-      },
-      {
         "id": "tests/integration/jev-max-effort-always.test.ts",
         "kind": "other",
         "path": "tests/integration/jev-max-effort-always.test.ts"
@@ -49677,11 +49621,6 @@
       },
       {
         "from": "scripts/keyword-detector.mjs",
-        "to": "scripts/lib/jev-delivery-guard.mjs",
-        "kind": "imports"
-      },
-      {
-        "from": "scripts/keyword-detector.mjs",
         "to": "scripts/lib/jev-shadow.mjs",
         "kind": "imports"
       },
@@ -49873,56 +49812,6 @@
       {
         "from": "scripts/lib/jev-compaction-state.mjs",
         "to": "scripts/lib/jev-mask.mjs",
-        "kind": "imports"
-      },
-      {
-        "from": "scripts/lib/jev-delivery-guard.mjs",
-        "to": "external:node:child_process",
-        "kind": "imports"
-      },
-      {
-        "from": "scripts/lib/jev-delivery-guard.mjs",
-        "to": "external:node:crypto",
-        "kind": "imports"
-      },
-      {
-        "from": "scripts/lib/jev-delivery-guard.mjs",
-        "to": "external:node:fs",
-        "kind": "imports"
-      },
-      {
-        "from": "scripts/lib/jev-delivery-guard.mjs",
-        "to": "external:node:os",
-        "kind": "imports"
-      },
-      {
-        "from": "scripts/lib/jev-delivery-guard.mjs",
-        "to": "external:node:path",
-        "kind": "imports"
-      },
-      {
-        "from": "scripts/lib/jev-delivery-guard.mjs",
-        "to": "external:node:readline",
-        "kind": "imports"
-      },
-      {
-        "from": "scripts/lib/jev-delivery-guard.mjs",
-        "to": "external:node:url",
-        "kind": "imports"
-      },
-      {
-        "from": "scripts/lib/jev-delivery-guard.mjs",
-        "to": "scripts/jev-resolve.mjs",
-        "kind": "imports"
-      },
-      {
-        "from": "scripts/lib/jev-delivery-guard.mjs",
-        "to": "scripts/lib/config-dir.mjs",
-        "kind": "imports"
-      },
-      {
-        "from": "scripts/lib/jev-delivery-guard.mjs",
-        "to": "scripts/lib/state-root.mjs",
         "kind": "imports"
       },
       {
@@ -56143,41 +56032,6 @@
       {
         "from": "src/__tests__/jev-compaction-state.test.mjs",
         "to": "scripts/lib/jev-mask.mjs",
-        "kind": "imports"
-      },
-      {
-        "from": "src/__tests__/jev-delivery-guard.test.mjs",
-        "to": "external:node:child_process",
-        "kind": "imports"
-      },
-      {
-        "from": "src/__tests__/jev-delivery-guard.test.mjs",
-        "to": "external:node:fs",
-        "kind": "imports"
-      },
-      {
-        "from": "src/__tests__/jev-delivery-guard.test.mjs",
-        "to": "external:node:os",
-        "kind": "imports"
-      },
-      {
-        "from": "src/__tests__/jev-delivery-guard.test.mjs",
-        "to": "external:node:path",
-        "kind": "imports"
-      },
-      {
-        "from": "src/__tests__/jev-delivery-guard.test.mjs",
-        "to": "external:node:url",
-        "kind": "imports"
-      },
-      {
-        "from": "src/__tests__/jev-delivery-guard.test.mjs",
-        "to": "external:vitest",
-        "kind": "imports"
-      },
-      {
-        "from": "src/__tests__/jev-delivery-guard.test.mjs",
-        "to": "scripts/lib/jev-delivery-guard.mjs",
         "kind": "imports"
       },
       {
@@ -91526,36 +91380,6 @@
         "kind": "imports"
       },
       {
-        "from": "tests/integration/jev-delivery-guard-per-logdir.test.ts",
-        "to": "external:node:crypto",
-        "kind": "imports"
-      },
-      {
-        "from": "tests/integration/jev-delivery-guard-per-logdir.test.ts",
-        "to": "external:node:fs",
-        "kind": "imports"
-      },
-      {
-        "from": "tests/integration/jev-delivery-guard-per-logdir.test.ts",
-        "to": "external:node:os",
-        "kind": "imports"
-      },
-      {
-        "from": "tests/integration/jev-delivery-guard-per-logdir.test.ts",
-        "to": "external:node:path",
-        "kind": "imports"
-      },
-      {
-        "from": "tests/integration/jev-delivery-guard-per-logdir.test.ts",
-        "to": "external:node:url",
-        "kind": "imports"
-      },
-      {
-        "from": "tests/integration/jev-delivery-guard-per-logdir.test.ts",
-        "to": "external:vitest",
-        "kind": "imports"
-      },
-      {
         "from": "tests/integration/jev-max-effort-always.test.ts",
         "to": "external:node:child_process",
         "kind": "imports"
@@ -93007,12 +92831,12 @@
       }
     ],
     "stats": {
-      "nodeCount": 8269,
-      "edgeCount": 8889,
-      "importEdgeCount": 7436,
+      "nodeCount": 8260,
+      "edgeCount": 8865,
+      "importEdgeCount": 7412,
       "registerEdgeCount": 105
     }
   },
-  "inventorySha256": "b8e0f8b48d7495d37ce612bd4a39e4cbb380bf546f7b69f37d537553a90dfa12",
-  "manifestSha256": "2a4c3600e0034fa572f825f89e63fbb1420ac388827594cdda9152119d4999df"
+  "inventorySha256": "a6bc1a36066b6e9d37b02f940c1f61d6c1422f17d89b04ceb1cb5d7073fc6166",
+  "manifestSha256": "b3da52f8948be2843b77ed48013ebd5c7190ecf3384af6e99564a5774fad81f9"
 }
