@@ -780,7 +780,7 @@ describe('jev-compaction module: what the host sends after the compaction', () =
     const original = messages.map((m) => table.get(m.handle));
     const api = hostRequest(original).map((m) => ({ role: m.role, content: m.blocks }));
     const asked = [];
-    fake.$.session.messages = async (opts) => { fake.calls.messages++; asked.push(opts); return opts?.as === 'api' ? (options.api ?? (() => api))(opts, messages) : messages; };
+    fake.$.session.messages = async (opts) => { fake.calls.messages++; asked.push(opts); return opts?.as === 'api' ? (options.api ?? (() => api))(opts, messages, api) : messages; };
     const next = summaryNext();
     const out = await handlers['session.compact'](fake.$, Object.freeze({ trigger: 'auto', messages, ...options.event }), next);
     const written = hostWrite(out.messages, table);
@@ -788,21 +788,30 @@ describe('jev-compaction module: what the host sends after the compaction', () =
   }
 
   const opening = [U('Task: review the notes and count the lines.')];
+  // Between turns: the last request was answered without a call.
   const closing = [U('Good, now sum up the NEEDED results.'), T('mz'), X('mz', 'Summary: done.')];
+  const needed = (use) => R(use, `RESULT-${use} NEEDED ${'x'.repeat(2000)}`);
+  const refused = () => { throw new Error('refused'); };
+  const clean = { missing: 0, dropped: 0 };
+  const noReplay = { repeatedServer: 0, returning: 0 };
 
-  it('two parallel calls whose second call becomes a trace: the host would replace the kept result, so the module falls back', async () => {
-    const parallel = [T('mp'), C('mp', 'pa'), C('mp', 'pb'), R('pa', `RESULT-pa NEEDED ${'x'.repeat(2000)}`), R('pb')];
-    const run = await compactHost([...opening, ...parallel, ...singles(20, 1), ...closing]);
-    expect(run.records()[0]).toMatchObject({ result: 'fallback', reason: 'build_error' });
-    expect(run.next.seen).toHaveLength(1);
-    expect(run.request).toEqual({ missing: 0, dropped: 0 });
-    // The same calls in two API messages pair in the host's request, and the compaction stands.
-    const apart = [T('mpa'), C('mpa', 'pa'), R('pa', `RESULT-pa NEEDED ${'x'.repeat(2000)}`), T('mpb'), C('mpb', 'pb'), R('pb')];
-    const control = await compactHost([...opening, ...apart, ...singles(20, 1), ...closing]);
-    expect(control.records()[0]).toMatchObject({ result: 'jev' });
-    expect(resultOf(control.out.messages, 'pa')).toBeDefined();
-    expect(resultOf(control.out.messages, 'pb')).toBeUndefined();
-    expect(control.request).toEqual({ missing: 0, dropped: 0 });
+  it('the calls of one API message become one message with its results right after it: 0 placeholders, the compaction stands', async () => {
+    const shapes = {
+      // A A U U, the second call traced; the first; both kept. A A U A U U (a result streamed in between). A U A U.
+      secondTraced: [[T('mp'), C('mp', 'pa'), C('mp', 'pb'), needed('pa'), R('pb')], ['pa'], ['pb'], 1],
+      firstTraced: [[T('mp'), C('mp', 'pa'), C('mp', 'pb'), R('pa'), needed('pb')], ['pb'], ['pa'], 1],
+      bothKept: [[T('mp'), C('mp', 'pa'), C('mp', 'pb'), needed('pa'), needed('pb')], ['pa', 'pb'], [], 1],
+      streamed: [[T('ms'), C('ms', 'sa'), C('ms', 'sb'), needed('sa'), C('ms', 'sc'), needed('sb'), needed('sc')], ['sa', 'sb', 'sc'], [], 2],
+      alternating: [[T('mq'), C('mq', 'qa'), needed('qa'), C('mq', 'qb'), needed('qb')], ['qa', 'qb'], [], 1],
+    };
+    for (const [name, [shape, kept, traced, joined]] of Object.entries(shapes)) {
+      const run = await compactHost([...opening, ...shape, ...singles(20, 1), ...closing]);
+      expect([name, run.records()[0]]).toMatchObject([name, { result: 'jev', joined_rows: joined }]);
+      for (const id of kept) expect([name, id, resultOf(run.out.messages, id)?.text]).toEqual([name, id, expect.stringContaining('NEEDED')]);
+      for (const id of traced) expect([name, id, resultOf(run.out.messages, id)]).toEqual([name, id, undefined]);
+      expect([name, run.request]).toEqual([name, clean]);
+      expect([name, run.resumed]).toEqual([name, noReplay]);
+    }
   });
 
   it('pairingOk compares the pairing the host checks: each call with its result in the next message', () => {
@@ -813,75 +822,70 @@ describe('jev-compaction module: what the host sends after the compaction', () =
     expect(pairingOk(original, [{ role: 'assistant', text: '', toolUses: [...call('a').toolUses, ...call('b').toolUses] }, res(['a', 'b'])])).toBe(true);
     expect(pairingOk(original, [call('a'), call('b'), res(['a']), res(['b'])])).toBe(false);
     expect(pairingOk(original, [call('a', 'h1'), { role: 'assistant', text: '[compacted] b', toolUses: [] }, res(['a'])])).toBe(false);
+    // The host joins a kept row to its message across a built row: b's message is then followed by the built row.
+    const thought = [{ role: 'assistant', text: '', toolUses: [], handle: 'h0' }, call('a', 'h1'), call('b', 'h2'), res(['a'], 'h3'), res(['b'], 'h4')];
+    expect(pairingOk(thought, [thought[0], { role: 'assistant', text: '[compacted] a', toolUses: [] }, call('b', 'h2'), res(['b'])])).toBe(false);
   });
 
-  it('on --resume no row before the tail joins its rows from before the compaction: no repeated server_tool_use, no traced call comes back', async () => {
+  it('between turns no assistant row keeps its handle, so --resume joins nothing from before the compaction', async () => {
     const advice = [T('ma'), S('ma', 'srv1'), X('ma', 'The advisor agrees.')];
     const run = await compactHost([...opening, ...advice, ...singles(20, 1), ...closing]);
-    expect(run.records()[0]).toMatchObject({ result: 'jev', server_blocks: 1 });
-    expect(run.resumed).toEqual({ repeatedServer: 0, returning: 0 });
-    expect(run.request).toEqual({ missing: 0, dropped: 0 });
-    const tailStart = run.messages.length - 6;
-    const kept = new Set(run.out.messages.filter((m) => m.handle).map((m) => m.handle));
-    for (const [i, m] of run.messages.entries()) if (m.role === 'assistant') expect(kept.has(m.handle)).toBe(i >= tailStart);
-    // Text stays word for word; thinking-only and server-block-only rows before the tail are dropped.
-    expect(run.out.messages.some((m) => m.role === 'assistant' && m.text === 'The advisor agrees.')).toBe(true);
-    expect(run.records()[0]).toMatchObject({ rebuilt_assistant: 41, dropped_assistant: 21 });
+    // No user row stands between the advisor's answer and the next call, so they are one message (joined_rows 1).
+    expect(run.records()[0]).toMatchObject({ result: 'jev', server_blocks: 1, kept_from: 0, rebuilt_assistant: 45, dropped_assistant: 23, joined_rows: 1 });
+    expect(run.resumed).toEqual(noReplay);
+    expect(run.request).toEqual(clean);
+    expect(run.out.messages.filter((m) => m.role === 'assistant' && m.handle)).toHaveLength(0);
+    // Text stays word for word; thinking-only and server-block-only rows are dropped.
+    expect(run.out.messages.some((m) => m.role === 'assistant' && m.text.startsWith('The advisor agrees.'))).toBe(true);
+    expect(run.out.messages.some((m) => m.role === 'assistant' && m.text === 'Summary: done.')).toBe(true);
     expect(run.asked).toEqual([{ as: 'api' }]);
   });
 
-  it('a server block in the tail falls back before any request; without the API form an empty tail row counts as one', async () => {
-    const lastAdvice = [U('Good, now sum up the NEEDED results.'), T('ma'), S('ma', 'srv1'), X('ma', 'The advisor agrees.')];
-    const inTail = await compactHost([...opening, ...singles(20, 1), ...lastAdvice]);
-    expect(inTail.records()[0]).toMatchObject({ result: 'fallback', reason: 'server_block_in_tail', server_blocks: 1 });
-    expect(inTail.calls.fetch).toHaveLength(0);
-    // A host that ignores `as: 'api'` answers the plain messages, which carry no API blocks.
-    const plain = await compactHost([...opening, ...singles(20, 1), ...lastAdvice], { api: (_opts, messages) => messages });
-    expect(plain.records()[0]).toMatchObject({ result: 'fallback', reason: 'server_block_in_tail', server_blocks: null });
-    const refused = () => { throw new Error('refused'); };
-    const blind = await compactHost([...opening, ...singles(20, 1), ...closing], { api: refused });
-    expect(blind.records()[0]).toMatchObject({ result: 'fallback', reason: 'server_block_in_tail', server_blocks: null });
-    const plainTail = [U('Check one more.'), X('my', 'Checking.'), C('my', 'ty'), R('ty', 'short'), U('Good, now sum up the NEEDED results.'), X('mz', 'Summary: done.')];
-    const sub = await compactHost([...opening, ...singles(20, 1), ...plainTail], { api: refused, event: { agentId: 'sub-1' } });
+  it('inside an open tool loop the last message keeps its handles; a call whose result came back quickly needs the API form', async () => {
+    // The compaction runs right after the last message's calls returned (no user text after them).
+    const loop = [U('Now check two more.'), X('mo', 'Running two checks.'), C('mo', 'oa'), C('mo', 'ob'), needed('oa'), needed('ob')];
+    const run = await compactHost([...opening, ...singles(20, 1), ...loop]);
+    expect(run.records()[0]).toMatchObject({ result: 'jev', kept_from: 5, server_blocks: 0 });
+    for (const m of run.messages.slice(-5).filter((x) => x.role === 'assistant')) expect(run.out.messages).toContain(m);
+    expect(run.request).toEqual(clean);
+    // A message typed during the tool turn is a row of its own after the results; the loop is still open.
+    const queued = await compactHost([...opening, ...singles(20, 1), ...loop, U('Also check the third one.')]);
+    expect(queued.records()[0]).toMatchObject({ result: 'jev', kept_from: 6 });
+    for (const m of queued.messages.slice(-6).filter((x) => x.role === 'assistant')) expect(queued.out.messages).toContain(m);
+    expect(queued.request).toEqual(clean);
+    const quick = [U('Now check two more.'), X('mo', 'Running two checks.'), C('mo', 'oa'), needed('oa'), C('mo', 'ob'), needed('ob')];
+    const withApi = await compactHost([...opening, ...singles(20, 1), ...quick]);
+    expect(withApi.records()[0]).toMatchObject({ result: 'jev', kept_from: 5 });
+    for (const m of withApi.messages.slice(-5).filter((x) => x.role === 'assistant')) expect(withApi.out.messages).toContain(m);
+    expect(withApi.request).toEqual(clean);
+    const withoutApi = await compactHost([...opening, ...singles(20, 1), ...quick], { api: refused });
+    expect(withoutApi.records()[0]).toMatchObject({ result: 'fallback', reason: 'no_api_form' });
+    expect(withoutApi.calls.fetch).toHaveLength(0);
+  });
+
+  it('inside an open tool loop a thinking row or a server block among the kept rows runs the summary before any request', async () => {
+    const thinking = await compactHost([...opening, ...singles(20, 1), U('Now check one more.'), T('mo'), C('mo', 'oa'), needed('oa')]);
+    expect(thinking.records()[0]).toMatchObject({ result: 'fallback', reason: 'thinking_in_tail', kept_from: 3 });
+    expect(thinking.calls.fetch).toHaveLength(0);
+    const advice = await compactHost([...opening, ...singles(20, 1), U('Ask the advisor, then check.'), S('mo', 'srv1'), X('mo', 'The advisor agrees.'), C('mo', 'oa'), needed('oa')]);
+    expect(advice.records()[0]).toMatchObject({ result: 'fallback', reason: 'server_block_in_tail', server_blocks: 1 });
+    expect(advice.calls.fetch).toHaveLength(0);
+  });
+
+  it('takes the API form only in its shape and only when it holds every kept call', async () => {
+    const loop = [U('Now check two more.'), X('mo', 'Running two checks.'), C('mo', 'oa'), C('mo', 'ob'), needed('oa'), needed('ob')];
+    // A host that ignores `as: 'api'` answers the plain messages.
+    const plain = (_opts, messages) => messages;
+    const open = await compactHost([...opening, ...singles(20, 1), ...loop], { api: plain });
+    expect(open.records()[0]).toMatchObject({ result: 'fallback', reason: 'no_api_form' });
+    const between = await compactHost([...opening, ...singles(20, 1), ...closing], { api: plain });
+    expect(between.records()[0]).toMatchObject({ result: 'jev', server_blocks: null, kept_from: 0 });
+    expect(between.request).toEqual(clean);
+    const missing = (_opts, _messages, api) => api.map((a) => (a.role === 'assistant' ? { ...a, content: a.content.filter((b) => b.id !== 'ob') } : a));
+    const partial = await compactHost([...opening, ...singles(20, 1), ...loop], { api: missing });
+    expect(partial.records()[0]).toMatchObject({ result: 'fallback', reason: 'no_api_form' });
+    const sub = await compactHost([...opening, ...singles(20, 1), ...closing], { api: refused, event: { agentId: 'sub-1' } });
     expect(sub.records()[0]).toMatchObject({ result: 'jev', server_blocks: null, agent_id: 'sub-1' });
     expect(sub.asked).toEqual([{ as: 'api', agentId: 'sub-1' }]);
-  });
-
-  it('the tail starts at the first row of the API message it opens in, so a message keeps its thinking with its call', async () => {
-    const tail = [T('m21'), C('m21', 't21'), R('t21'), ...closing, X('mz', 'Anything else?')];
-    const run = await compactHost([...opening, ...singles(20, 1), ...tail]);
-    expect(run.records()[0]).toMatchObject({ result: 'jev' });
-    expect(run.messages[run.messages.length - 6].toolUses.map((u) => u.tool_use_id)).toEqual(['t21']);
-    expect(run.out.messages).toContain(run.messages[run.messages.length - 7]);
-    expect(run.out.messages).toContain(run.messages[run.messages.length - 6]);
-  });
-
-  it('parallel and streamed calls: what the host sends never loses a kept result', async () => {
-    const needed = (use) => R(use, `RESULT-${use} NEEDED ${'x'.repeat(2000)}`);
-    // Rebuilt row by row these split a call from its result in the host's request: the summary runs.
-    const split = {
-      // A A U U, both results kept.
-      parallel: [T('mp'), C('mp', 'pa'), C('mp', 'pb'), needed('pa'), needed('pb')],
-      // A A U A U U, a result streamed in between.
-      streamed: [T('ms'), C('ms', 'sa'), C('ms', 'sb'), needed('sa'), C('ms', 'sc'), needed('sb'), needed('sc')],
-    };
-    for (const shape of Object.values(split)) {
-      const run = await compactHost([...opening, ...shape, ...singles(20, 1), ...closing]);
-      expect(run.records()[0]).toMatchObject({ result: 'fallback', reason: 'build_error' });
-      expect(run.request).toEqual({ missing: 0, dropped: 0 });
-    }
-    // These pair once rebuilt, and the compaction stands: A A U U with the first call traced, and A U A U.
-    const pairs = {
-      firstTraced: [[T('mp'), C('mp', 'pa'), C('mp', 'pb'), R('pa'), needed('pb')], ['pb'], ['pa']],
-      alternating: [[T('mq'), C('mq', 'qa'), needed('qa'), C('mq', 'qb'), needed('qb')], ['qa', 'qb'], []],
-    };
-    for (const [shape, kept, traced] of Object.values(pairs)) {
-      const run = await compactHost([...opening, ...shape, ...singles(20, 1), ...closing]);
-      expect(run.records()[0]).toMatchObject({ result: 'jev' });
-      for (const id of kept) expect(resultOf(run.out.messages, id)).toBeDefined();
-      for (const id of traced) expect(resultOf(run.out.messages, id)).toBeUndefined();
-      expect(run.request).toEqual({ missing: 0, dropped: 0 });
-      expect(run.resumed).toEqual({ repeatedServer: 0, returning: 0 });
-    }
   });
 });
