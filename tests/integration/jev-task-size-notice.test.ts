@@ -5,7 +5,7 @@
  * taskSizeDetection word limits. Without the variable the script behaves
  * exactly as before. Real script subprocess against a stub Jev endpoint.
  */
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { spawn } from "node:child_process";
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { createServer, type Server } from "node:http";
@@ -55,6 +55,28 @@ function runKeywordDetector(input: Record<string, unknown>, env: NodeJS.ProcessE
     child.stdin.on("error", reject);
     child.stdin.end(JSON.stringify(input));
   });
+}
+
+// Polling utility to wait for a condition to be true (replacement for vi.waitFor which is not available in vitest 4.1.11)
+async function waitFor(
+  condition: () => void,
+  options: { timeout?: number; interval?: number } = {},
+): Promise<void> {
+  const { timeout = 5000, interval = 50 } = options;
+  const startTime = Date.now();
+
+  while (Date.now() - startTime < timeout) {
+    try {
+      condition();
+      return; // Condition passed
+    } catch (error) {
+      // Condition failed, retry after interval
+      await new Promise((resolve) => setTimeout(resolve, interval));
+    }
+  }
+
+  // Last attempt before timeout
+  condition();
 }
 
 describe("keyword-detector.mjs: OMC_JEV_TASK_SIZE_NOTICE", () => {
@@ -297,7 +319,7 @@ describe("keyword-detector.mjs: OMC_JEV_TASK_SIZE_NOTICE", () => {
       expectModeKept(context, "ralph");
       expect(context).not.toContain("[TASK-SIZE");
       // The shadow resolver is detached: wait for its line before the workspace is removed.
-      await vi.waitFor(() => expect(taskSizeLog().map((entry) => entry.mode)).toEqual(["shadow"]), { timeout: 10000, interval: 50 });
+      await waitFor(() => expect(taskSizeLog().map((entry) => entry.mode)).toEqual(["shadow"]), { timeout: 10000, interval: 50 });
     });
 
     it("adds no note when the Jev call degrades", async () => {

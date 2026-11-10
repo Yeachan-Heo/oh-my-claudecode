@@ -26,7 +26,8 @@ import { spawn, spawnSync } from "child_process";
 import { join, dirname, resolve, normalize, sep } from "path";
 import { homedir } from "os";
 import { fileURLToPath, pathToFileURL } from "url";
-import { isJevShadowOptedIn, recordJevShadow, setJevSessionId } from "./lib/jev-shadow.mjs";
+<<<<<<< HEAD
+import { isJevShadowOptedIn, recordJevShadow, setJevSessionId, jevNoulOf } from "./lib/jev-shadow.mjs";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -55,6 +56,34 @@ const LEARNER_EXTRACTION_QUESTIONS = {
     },
   },
 };
+
+function isJevFlagOn(name, env = process.env) {
+  return ["1", "true"].includes(String(env[name] ?? "").trim().toLowerCase());
+}
+
+// OMC_JEV_LEARNER_HINT=1: when the active learner-extraction answer is at or above
+// this probability of "yes", the non-blocking Stop output carries a systemMessage
+// that points to /oh-my-claudecode:remember, at most once per session.
+const LEARNER_HINT_MIN_NOUL = 0.8;
+const LEARNER_HINT_MESSAGE =
+  "[JEV: LEARNER] The last response looks worth keeping; save it with /oh-my-claudecode:remember.";
+const LEARNER_HINT_MARKER = "jev-learner-hint.json";
+let learnerHintNoul;
+
+/** Stop output that releases the stop, with the learner hint when one is due and not yet shown in this session. */
+async function releaseOutput(directory, sessionId, hasValidSessionId) {
+  if (learnerHintNoul === undefined || !hasValidSessionId) return SAFE_CONTINUE;
+  const { sessionScopedPath: markerPath } = await resolveSessionStatePathsForHook(
+    directory,
+    "jev-learner-hint",
+    sessionId,
+    { fileName: LEARNER_HINT_MARKER },
+  );
+  if (!markerPath) return SAFE_CONTINUE;
+  if (existsSync(markerPath)) return SAFE_CONTINUE;
+  if (!writeJsonFile(markerPath, { ts: new Date().toISOString(), noul: learnerHintNoul })) return SAFE_CONTINUE;
+  return { ...SAFE_CONTINUE, systemMessage: LEARNER_HINT_MESSAGE };
+}
 
 function boundLastAssistantMessage(text, maxChars = 2000) {
   if (typeof text !== 'string') return null;
@@ -88,13 +117,17 @@ async function recordLearnerExtractionShadow(data) {
     const { detectExtractableMoment } = await import(pathToFileURL(detectorPath).href);
     const detectionResult = detectExtractableMoment(assistantMessage);
     const heuristic = detectionResult.detected;
-    recordJevShadow({
+    const jevResult = recordJevShadow({
       point: "learner-extraction",
       state: { assistant_message: assistantMessage, user_message: null },
       questions: LEARNER_EXTRACTION_QUESTIONS,
       heuristic,
       permissionMode: data.permission_mode,
     });
+    if (isJevFlagOn("OMC_JEV_LEARNER_HINT")) {
+      const noul = jevNoulOf(jevResult, "extractable_moment");
+      if (noul !== undefined && noul >= LEARNER_HINT_MIN_NOUL) learnerHintNoul = noul;
+    }
   } catch {
     // Missing optional detector output or resolver plumbing must not affect Stop.
   }
@@ -185,7 +218,8 @@ function readJsonFile(path) {
 /**
  * Check if the state file has been modified since it was last read.
  * Re-reads the state from disk and verifies that key identifiers
- * (session_id, iteration, updated_at) haven't changed.
+ * (session_id, iteration, updated_at, active, phase, current_phase and the
+ * _meta.written_at generation stamp) haven't changed.
  * Returns true if the state is safe to write (unchanged), false otherwise.
  */
 function isStateUnchangedSinceJevRequest(originalState, statePath) {
@@ -197,14 +231,64 @@ function isStateUnchangedSinceJevRequest(originalState, statePath) {
   if (originalState.session_id !== currentState.session_id) return false;
   if (originalState.iteration !== currentState.iteration) return false;
   if (originalState.updated_at !== currentState.updated_at) return false;
+  if (originalState.active !== currentState.active) return false;
+  if (originalState.phase !== currentState.phase) return false;
+  if (originalState.current_phase !== currentState.current_phase) return false;
+  if (originalState._meta?.written_at !== currentState._meta?.written_at) return false;
   
   return true;
 }
 
 function jevSaysTaskComplete(result) {
-  const noul = result?.answer?.noul;
-  return result?.mode === "active" &&
-    (noul === true || (typeof noul === "number" && Number.isFinite(noul) && noul >= 0.5));
+  // jevNoulOf() requires an active result, a Noul answer to this question and a value in 0-1.
+  const noul = jevNoulOf(result, "task_complete");
+  return noul !== undefined && noul >= 0.5;
+}
+
+/**
+ * OMC_JEV_LOOP_RELEASE_ONLY=1: a Jev "task complete" answer releases only the
+ * Stop it was asked about. The mode is not completed: its state stays active
+ * with the counter already advanced, and the next Stop asks Jev again. The
+ * user ends the loop with /oh-my-claudecode:cancel. Without the variable a
+ * "task complete" answer completes the mode (completeModeFromJev).
+ */
+function isJevLoopReleaseOnly() {
+  return isJevFlagOn("OMC_JEV_LOOP_RELEASE_ONLY");
+}
+
+/**
+ * Outcome of a Jev "task complete" answer for one mode: null when Jev did not
+ * say complete, with OMC_JEV_LOOP_RELEASE_ONLY "released" (without completing
+ * the mode) or,
+ * when the mode ended while Jev was answering, "cancelled" (a silent release,
+ * see isModeEndedSinceJevRequest); otherwise the
+ * completeModeFromJev() outcome.
+ */
+function jevCompletionOutcome(result, state, statePath) {
+  if (!jevSaysTaskComplete(result)) return null;
+  if (!isJevLoopReleaseOnly()) return completeModeFromJev(state, statePath);
+  if (isStateUnchangedSinceJevRequest(state, statePath)) return "released";
+  return isModeEndedSinceJevRequest(statePath) ? "cancelled" : null;
+}
+
+/**
+ * True when the mode ended while Jev was answering: cancel removed the state
+ * file (#2088), or another writer persisted it as inactive (for example
+ * transitionPhase(..., "complete") keeps the file with active: false). Such a
+ * Stop is released silently; a state that is still active but changed keeps
+ * blocking.
+ */
+function isModeEndedSinceJevRequest(statePath) {
+  if (!shouldWriteStateBack(statePath)) return true;
+  return readJsonFile(statePath)?.active === false;
+}
+
+/** Stop output for a release that leaves the mode active; see isJevLoopReleaseOnly(). */
+function jevReleaseOnlyStopOutput(modeName) {
+  return {
+    ...SAFE_CONTINUE,
+    systemMessage: `[JEV-COMPLETION] Task complete per Jev answer; this Stop is released and ${modeName} mode stays active. Run /oh-my-claudecode:cancel to end it.`,
+  };
 }
 
 /**
@@ -214,6 +298,7 @@ function jevSaysTaskComplete(result) {
  * released silently, like every other stop whose state file is gone.
  */
 function jevCompletionStopOutput(outcome, modeName) {
+  if (outcome === "released") return jevReleaseOnlyStopOutput(modeName);
   if (outcome !== "completed") return SAFE_CONTINUE;
   return {
     ...SAFE_CONTINUE,
@@ -224,8 +309,8 @@ function jevCompletionStopOutput(outcome, modeName) {
 /**
  * Persist the terminal state for a Jev-confirmed completion.
  * - "completed": the terminal state reached disk.
- * - "cancelled": the state file is gone, i.e. cancel removed it while Jev was
- *   answering (#2088); it is not written back.
+ * - "cancelled": the mode ended while Jev was answering (the state file is
+ *   gone, #2088, or now says active: false); it is not written back.
  * - null: the state changed meanwhile or the write failed; the caller keeps
  *   blocking, so Stop is never released while the file still says active: true.
  */
@@ -243,7 +328,7 @@ function completeModeFromJev(state, statePath) {
       return "completed";
     }
   }
-  return shouldWriteStateBack(statePath) ? null : "cancelled";
+  return isModeEndedSinceJevRequest(statePath) ? "cancelled" : null;
 }
 
 /**
@@ -1842,9 +1927,7 @@ async function main() {
           };
           const jevResult = recordLoopContinuationShadow(judgmentState, heuristic, data.permission_mode);
 
-          const jevCompletion = jevSaysTaskComplete(jevResult)
-            ? completeModeFromJev(ralph.state, ralph.path)
-            : null;
+          const jevCompletion = jevCompletionOutcome(jevResult, ralph.state, ralph.path);
 
           if (jevCompletion) {
             if (!hasActiveAutopilotForSession) {
@@ -1892,9 +1975,7 @@ async function main() {
           maxIterations: ralph.state.max_iterations,
         }, data.permission_mode);
         
-        const jevCompletionAtExtend = jevSaysTaskComplete(jevExtendResult)
-          ? completeModeFromJev(ralph.state, ralph.path)
-          : null;
+        const jevCompletionAtExtend = jevCompletionOutcome(jevExtendResult, ralph.state, ralph.path);
 
         if (!jevCompletionAtExtend) {
           console.log(
@@ -2035,23 +2116,30 @@ async function main() {
         const phase = getAutopilotPhase(autopilot.state);
         if (phase !== "complete") {
           const loadedSnapshot = JSON.stringify(autopilot.state);
-          const newCount = (autopilot.state.reinforcement_count || 0) + 1;
+          const releaseOnly = isJevLoopReleaseOnly();
+          const currentCount = autopilot.state.reinforcement_count || 0;
+          const reinforcementLimitReached = currentCount >= 20;
+          // Release-only still asks Jev at the cap without advancing the bounded fallback counter.
+          // The capped fallback releases; only a valid active answer refreshes the heartbeat (after the request).
+          const newCount = releaseOnly ? Math.min(currentCount + 1, 20) : currentCount + 1;
           if (newCount <= 20) {
             const toolError = readLastToolError(stateDir);
             const errorGuidance = getToolErrorRetryGuidance(toolError);
-            const reinforced = { ...autopilot.state, reinforcement_count: newCount, last_checked_at: new Date().toISOString() };
-            let committed = false;
-            const locked = withStateFileLockSync(autopilot.path, () => {
-              const current = readJsonFile(autopilot.path);
-              if (!current || JSON.stringify(current) !== loadedSnapshot) return;
-              committed = writeJsonFile(autopilot.path, reinforced);
-            });
-            if (!locked.acquired || !committed) {
-              if (!locked.acquired) reportLockFailure('Autopilot state reinforcement');
-              console.log(JSON.stringify(SAFE_CONTINUE));
-              return;
+            if (!reinforcementLimitReached) {
+              const reinforced = { ...autopilot.state, reinforcement_count: newCount, last_checked_at: new Date().toISOString() };
+              let committed = false;
+              const locked = withStateFileLockSync(autopilot.path, () => {
+                const current = readJsonFile(autopilot.path);
+                if (!current || JSON.stringify(current) !== loadedSnapshot) return;
+                committed = writeJsonFile(autopilot.path, reinforced);
+              });
+              if (!locked.acquired || !committed) {
+                if (!locked.acquired) reportLockFailure('Autopilot state reinforcement');
+                console.log(JSON.stringify(SAFE_CONTINUE));
+                return;
+              }
+              autopilot.state = reinforced;
             }
-            autopilot.state = reinforced;
 
             const cancelGuidance = hasValidSessionId && autopilot.state.session_id === sessionId
               ? " When all phases are complete, run /oh-my-claudecode:cancel to cleanly exit and clean up this session's autopilot state files. If cancel fails, retry with /oh-my-claudecode:cancel --force."
@@ -2066,31 +2154,47 @@ async function main() {
               session_id: sessionId || null,
               iteration: newCount,
               phase,
-              should_block: true,
+              // At the cap (release-only) the fallback releases Stop unless Jev answers.
+              should_block: !reinforcementLimitReached,
               continuation_excerpt: reason,
               last_assistant_message: boundLastAssistantMessage(data.last_assistant_message),
             }, {
               mode: "autopilot",
-              shouldBlock: true,
+              shouldBlock: !reinforcementLimitReached,
               iteration: newCount,
               phase,
             }, data.permission_mode);
 
-            const jevAutopilotCompletion = jevSaysTaskComplete(jevAutopilotResult)
-              ? completeModeFromJev(autopilot.state, autopilot.path)
-              : null;
+            // Capped: only a valid Jev answer given while the state is still current may block. The
+            // heartbeat write doubles as that check, so a state cancelled or changed meanwhile releases.
+            let refreshed = false;
+            if (reinforcementLimitReached && jevNoulOf(jevAutopilotResult, "task_complete") !== undefined) {
+              // Keep the count, refresh the heartbeat so isStaleState() does not end per-Stop judgment.
+              // Same snapshot and lock checks; a changed or removed state is left alone.
+              const heartbeat = { ...autopilot.state, last_checked_at: new Date().toISOString() };
+              withStateFileLockSync(autopilot.path, () => {
+                const current = readJsonFile(autopilot.path);
+                if (!current || JSON.stringify(current) !== loadedSnapshot) return;
+                refreshed = writeJsonFile(autopilot.path, heartbeat);
+              });
+              if (refreshed) autopilot.state = heartbeat;
+            }
+
+            const jevAutopilotCompletion = jevCompletionOutcome(jevAutopilotResult, autopilot.state, autopilot.path);
             if (jevAutopilotCompletion) {
               console.log(JSON.stringify(jevCompletionStopOutput(jevAutopilotCompletion, "autopilot")));
               return;
             }
 
-            console.log(
-              JSON.stringify({
-                decision: "block",
-                reason: reason,
-              }),
-            );
-            return;
+            if (!reinforcementLimitReached || refreshed) {
+              console.log(
+                JSON.stringify({
+                  decision: "block",
+                  reason: reason,
+                }),
+              );
+              return;
+            }
           }
         }
       }
@@ -2285,7 +2389,7 @@ async function main() {
         recordIdleNotificationSent(stateDir);
       }
     }
-    console.log(JSON.stringify({ continue: true, suppressOutput: true }));
+    console.log(JSON.stringify(await releaseOutput(directory, sessionId, hasValidSessionId)));
   } catch (error) {
     // On any error, allow stop rather than blocking forever
     try {
