@@ -44121,6 +44121,26 @@
           "previousFilename": null
         }
       ]
+    },
+    {
+      "pullNumber": 4945,
+      "targetRef": "dev",
+      "mergeBaseSha": "08ad1a4e4be10d4414f7ab832c3f52c4e2b170fe",
+      "headSha": "69a40721b79124567c8979c7610410cabbeac04f",
+      "owner": "Yeachan-Heo",
+      "expiresAt": "2026-12-31T23:59:59.999Z",
+      "generatedDelta": {
+        "count": 1,
+        "sha256": "b3caf5a2ac165b8667358dad0739c9bea2bb419a9fa02c85c670a26fa97dc3c4"
+      },
+      "generatedFiles": [
+        {
+          "status": "modified",
+          "filename": "bridge/claude-md-coordinator.cjs",
+          "sha": "fb45be27cbf100664dad4828977dc9f6dd2a9d26",
+          "previousFilename": null
+        }
+      ]
     }
   ]
 }
