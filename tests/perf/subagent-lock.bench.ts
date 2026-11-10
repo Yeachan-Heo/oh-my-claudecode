@@ -30,11 +30,11 @@ const WARMUP_RUNS = 1;
 const MEASURED_RUNS = 5;
 const LOCAL_P99_LIMIT_MS = 8;
 // CI ceilings sit above noisy GitHub-hosted runners (observed p95 ~75ms on
-// tag-publish, second-highest p99 ~123ms on PR Test, now ~187ms on Nov 2026 runs).
-// Median p50/p95 still catch sustained slowdowns. Strict 8ms p99 is local-only. See #3352.
+// tag-publish, second-highest p99 ~123ms on PR Test). Median p50/p95 still
+// catch sustained slowdowns. Strict 8ms p99 is local-only. See #3352.
 const CI_MEDIAN_P50_LIMIT_MS = 80;
 const CI_MEDIAN_P95_LIMIT_MS = 90;
-const CI_SECOND_HIGHEST_P99_LIMIT_MS = 200;
+const CI_SECOND_HIGHEST_P99_LIMIT_MS = 150;
 const isCi = process.env.CI === "true" || process.env.CI === "1";
 
 function makeEmptyState(): SubagentTrackingState {
