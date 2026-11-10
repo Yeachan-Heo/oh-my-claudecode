@@ -1,12 +1,12 @@
 /**
  * jev-shadow spawn failure tests: real pre-tool-enforcer.mjs subprocess.
  * Tests the resolver-spawn degraded log entry when a resolver cannot be started.
- * Covers the non-timeout resolver spawn failures branch (line 553 in jev-shadow.mjs).
+ * A preload in the hook process makes spawnSync of jev-resolve.mjs return a
+ * non-timeout error (EACCES), the branch recordResolverFailure maps to "resolver-spawn".
  */
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { spawn } from "node:child_process";
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
-import { createServer, type Server } from "node:http";
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -46,26 +46,31 @@ function runEnforcer(input: Record<string, unknown>, env: NodeJS.ProcessEnv, cwd
 describe("jev-shadow: resolver spawn failure logging", () => {
   let cwd: string;
   let env: NodeJS.ProcessEnv;
-  let server: Server;
+  let preload: string;
 
   beforeEach(async () => {
     cwd = mkdtempSync(join(tmpdir(), "jev-spawn-failure-"));
-    server = createServer((request, response) => {
-      // Simulate resolver unavailable (no resolver at this endpoint)
-      response.writeHead(503, { "Content-Type": "application/json", Connection: "close" });
-      response.end(JSON.stringify({ error: "Service unavailable" }));
-    });
-    await new Promise<void>((resolve, reject) => {
-      server.once("error", reject);
-      server.listen(0, "127.0.0.1", resolve);
-    });
-    const address = server.address();
-    if (!address || typeof address === "string") throw new Error("Expected local TCP endpoint");
-    const [host, port] = [address.address, address.port];
+    // Runs in the hook process before its modules load: spawning the resolver fails
+    // with EACCES (not ETIMEDOUT), every other spawnSync call goes through.
+    preload = join(cwd, "spawn-error.cjs");
+    writeFileSync(
+      preload,
+      [
+        "const cp = require('node:child_process');",
+        "const real = cp.spawnSync;",
+        "cp.spawnSync = function (file, args, options) {",
+        "  if (Array.isArray(args) && args.some((a) => String(a).endsWith('jev-resolve.mjs'))) {",
+        "    return { error: Object.assign(new Error('spawn EACCES'), { code: 'EACCES' }), status: null, signal: null, stdout: '', stderr: '', pid: 0, output: null };",
+        "  }",
+        "  return real.apply(this, arguments);",
+        "};",
+      ].join("\n"),
+    );
     env = {
       ...process.env,
       TYPESAFE_API_KEY: API_KEY,
-      OMC_JEV_ENDPOINT: `http://${host}:${port}`,
+      OMC_JEV_ENDPOINT: "http://127.0.0.1:1",
+      NODE_OPTIONS: `--require ${preload.replace(/\\/g, "/")}`,
       OMC_JEV: "model-routing:active",
       OMC_JEV_LOG_CONTEXT: "1",
       OMC_JEV_LOG_DIR: join(cwd, "jev-logs"),
@@ -74,7 +79,6 @@ describe("jev-shadow: resolver spawn failure logging", () => {
   });
 
   afterEach(() => {
-    server.close();
     rmSync(cwd, { recursive: true, force: true });
   });
 
@@ -140,7 +144,9 @@ describe("jev-shadow: resolver spawn failure logging", () => {
     expect(result.exitCode).toBe(0);
 
     const shadowPath = join(cwd, "jev-logs", "shadow.jsonl");
-    const lines = readFileSync(shadowPath, "utf-8").trim().split("\n").filter(Boolean);
+    const lines = existsSync(shadowPath)
+      ? readFileSync(shadowPath, "utf-8").trim().split("\n").filter(Boolean)
+      : [];
     
     const degraded = lines.find((line) => {
       const entry = JSON.parse(line);
