@@ -13,9 +13,6 @@ const { activeResolverBufferMs } = await import(pathToFileURL(join(ROOT, 'script
 // timeout minus a cushion (500 ms POSIX, 1500 ms Windows, scripts/run.cjs) and
 // throws away everything the hook printed.
 const WINDOWS_CUSHION_MS = 1500;
-// Start of one resolver process: 0.5-1.2 s on a busy Windows laptop, which the
-// request timeout does not include.
-const RESOLVER_START_MS = 1200;
 // scripts/persistent-mode.mjs: BRIDGE_DELEGATION_TIMEOUT_MS, shared by all
 // bridge attempts in one Stop event; it runs between the two Jev requests.
 const BRIDGE_DELEGATION_MS = 6000;
@@ -52,7 +49,7 @@ function manifestTimeoutMs(event, script) {
 function worstCaseMs({ points, extraMs }) {
   return (
     points.reduce(
-      (sum, point) => sum + resolveJevTimeoutMs({}, activeResolverBufferMs(point)) + RESOLVER_START_MS,
+      (sum, point) => sum + resolveJevTimeoutMs({}, activeResolverBufferMs(point)),
       0,
     ) + extraMs
   );
