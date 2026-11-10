@@ -5,15 +5,15 @@
   "provenance": {
     "base": "05c800f40d1ad53b42a78609d2667ef4f726808b",
     "planningHead": "0a91273e61dbbd47eb0af4c02844409251e08398",
-    "head": "d0d9a7a6383cd3bd5c49a2e456eda7c0022f053f",
-    "sourceSha256": "6e1a4d9484712be87583bb3cc78783ab6f8bb979f3fb50e8ba58b3828e704c5d",
+    "head": "66d91bd68575c123678efba6543a706cc9331ac8",
+    "sourceSha256": "b621ba8cb68538c9094261505adcfb200b3d1528802657e01ef8e6bcf8733db1",
     "generatedAt": null,
     "generator": "scripts/generate-inventory-graph.mjs"
   },
   "base": "05c800f40d1ad53b42a78609d2667ef4f726808b",
   "planningHead": "0a91273e61dbbd47eb0af4c02844409251e08398",
-  "head": "d0d9a7a6383cd3bd5c49a2e456eda7c0022f053f",
-  "sourceSha256": "6e1a4d9484712be87583bb3cc78783ab6f8bb979f3fb50e8ba58b3828e704c5d",
+  "head": "66d91bd68575c123678efba6543a706cc9331ac8",
+  "sourceSha256": "b621ba8cb68538c9094261505adcfb200b3d1528802657e01ef8e6bcf8733db1",
   "counts": {
     "public": {
       "skills": 84,
@@ -37,14 +37,14 @@
       "total": 5647
     },
     "prompt": {
-      "promptLikeFiles": 63
+      "promptLikeFiles": 68
     },
     "skills": 84,
     "commands": 21,
     "hookFiles": 336,
     "workflows": 8,
     "agentDefinitions": 18,
-    "promptLikeFiles": 63
+    "promptLikeFiles": 68
   },
   "public": {
     "skills": [
@@ -773,6 +773,11 @@
     "promptSources": [
       ".clawhip/state/prompt-submit.json",
       ".github/CLAUDE.md",
+      ".test-job-state-db-1445660/.omc/prompts/codex-status-bad-file.json",
+      ".test-job-state-db-1445660/.omc/prompts/codex-status-invalid.json",
+      ".test-job-state-db-1445660/.omc/prompts/codex-status-test-job1.json",
+      ".test-job-state-db-1445660/.omc/prompts/codex-status-test-migrated1.json",
+      ".test-job-state-db-1445660/.omc/prompts/gemini-status-test-job2.json",
       "CLAUDE.md",
       "benchmarks/code-reviewer/prompts/quality-reviewer.md",
       "benchmarks/debugger/prompts/build-fixer.md",
@@ -6974,6 +6979,11 @@
     "promptSources": [
       ".clawhip/state/prompt-submit.json",
       ".github/CLAUDE.md",
+      ".test-job-state-db-1445660/.omc/prompts/codex-status-bad-file.json",
+      ".test-job-state-db-1445660/.omc/prompts/codex-status-invalid.json",
+      ".test-job-state-db-1445660/.omc/prompts/codex-status-test-job1.json",
+      ".test-job-state-db-1445660/.omc/prompts/codex-status-test-migrated1.json",
+      ".test-job-state-db-1445660/.omc/prompts/gemini-status-test-job2.json",
       "CLAUDE.md",
       "benchmarks/code-reviewer/prompts/quality-reviewer.md",
       "benchmarks/debugger/prompts/build-fixer.md",
@@ -7357,6 +7367,31 @@
         "id": ".omx/plans/source-overall-cleanup/ownership-matrix.md",
         "kind": "other",
         "path": ".omx/plans/source-overall-cleanup/ownership-matrix.md"
+      },
+      {
+        "id": ".test-job-state-db-1445660/.omc/prompts/codex-status-bad-file.json",
+        "kind": "prompt",
+        "path": ".test-job-state-db-1445660/.omc/prompts/codex-status-bad-file.json"
+      },
+      {
+        "id": ".test-job-state-db-1445660/.omc/prompts/codex-status-invalid.json",
+        "kind": "prompt",
+        "path": ".test-job-state-db-1445660/.omc/prompts/codex-status-invalid.json"
+      },
+      {
+        "id": ".test-job-state-db-1445660/.omc/prompts/codex-status-test-job1.json",
+        "kind": "prompt",
+        "path": ".test-job-state-db-1445660/.omc/prompts/codex-status-test-job1.json"
+      },
+      {
+        "id": ".test-job-state-db-1445660/.omc/prompts/codex-status-test-migrated1.json",
+        "kind": "prompt",
+        "path": ".test-job-state-db-1445660/.omc/prompts/codex-status-test-migrated1.json"
+      },
+      {
+        "id": ".test-job-state-db-1445660/.omc/prompts/gemini-status-test-job2.json",
+        "kind": "prompt",
+        "path": ".test-job-state-db-1445660/.omc/prompts/gemini-status-test-job2.json"
       },
       {
         "id": "AGENTS.md",
@@ -48217,6 +48252,11 @@
         "id": "tests/integration/jev-active-mode-repro.test.ts",
         "kind": "other",
         "path": "tests/integration/jev-active-mode-repro.test.ts"
+      },
+      {
+        "id": "tests/integration/jev-delivery-guard-per-logdir.test.ts",
+        "kind": "other",
+        "path": "tests/integration/jev-delivery-guard-per-logdir.test.ts"
       },
       {
         "id": "tests/integration/jev-max-effort-always.test.ts",
@@ -91416,6 +91456,36 @@
         "kind": "imports"
       },
       {
+        "from": "tests/integration/jev-delivery-guard-per-logdir.test.ts",
+        "to": "external:node:crypto",
+        "kind": "imports"
+      },
+      {
+        "from": "tests/integration/jev-delivery-guard-per-logdir.test.ts",
+        "to": "external:node:fs",
+        "kind": "imports"
+      },
+      {
+        "from": "tests/integration/jev-delivery-guard-per-logdir.test.ts",
+        "to": "external:node:os",
+        "kind": "imports"
+      },
+      {
+        "from": "tests/integration/jev-delivery-guard-per-logdir.test.ts",
+        "to": "external:node:path",
+        "kind": "imports"
+      },
+      {
+        "from": "tests/integration/jev-delivery-guard-per-logdir.test.ts",
+        "to": "external:node:url",
+        "kind": "imports"
+      },
+      {
+        "from": "tests/integration/jev-delivery-guard-per-logdir.test.ts",
+        "to": "external:vitest",
+        "kind": "imports"
+      },
+      {
         "from": "tests/integration/jev-max-effort-always.test.ts",
         "to": "external:node:child_process",
         "kind": "imports"
@@ -92867,12 +92937,12 @@
       }
     ],
     "stats": {
-      "nodeCount": 8261,
-      "edgeCount": 8871,
-      "importEdgeCount": 7419,
+      "nodeCount": 8267,
+      "edgeCount": 8877,
+      "importEdgeCount": 7425,
       "registerEdgeCount": 105
     }
   },
-  "inventorySha256": "d7e3bb37237bff01a13983ae5e72462a0a8b0b4a820272484f01e3731808b582",
-  "manifestSha256": "9bc3778fcb602e4617c843c341577a1e37f1c10b74722d05c0020f30f524a919"
+  "inventorySha256": "522bf0790bdd7125a3b405a282a858272132f83793fa64ce66f4d523037bda54",
+  "manifestSha256": "a9be8bbeae1ca9a2526d7c19e294461cb66f67d3e742bc01d4b026acb798abc8"
 }
