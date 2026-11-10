@@ -299,6 +299,33 @@ export function sweepStaleTempDirs(maxAgeMs = 24 * 60 * 60 * 1000) {
 }
 
 /**
+ * Read the active Noul answer of a recordJevShadow() result as a probability
+ * of "yes" (0-1). The API returns a number; a boolean is accepted too and maps
+ * to 1 or 0. Returns undefined for a shadow, off or degraded call, a missing
+ * answer, an answer whose type is not "noul", or a value that is not a finite
+ * number in 0-1, so the caller falls back to its heuristic. When the result
+ * carries an `answers` map the answer is read by `questionName` only: a name
+ * the map lacks returns undefined, never another question's answer. Without a
+ * map the single `answer` is read.
+ */
+export function jevNoulOf(result, questionName) {
+  if (result?.mode !== "active") return undefined;
+  // With an answers map the answer is read by question name only: a name the
+  // map lacks must not fall back to result.answer, which can be the answer to
+  // a different question. Without a map the single answer is used.
+  const answer =
+    result.answers && typeof result.answers === "object"
+      ? Object.hasOwn(result.answers, questionName)
+        ? result.answers[questionName]
+        : undefined
+      : result.answer;
+  if (answer?.type !== "noul") return undefined;
+  const noul = answer.noul;
+  if (typeof noul === "boolean") return noul ? 1 : 0;
+  return typeof noul === "number" && Number.isFinite(noul) && noul >= 0 && noul <= 1 ? noul : undefined;
+}
+
+/**
  * Fire-and-record one script-side judgment.
  * - Shadow mode: fire-and-forget, returns undefined immediately
  * - Active mode: waits (sync) for Jev answer, returns { mode, answer, answers, ... }
