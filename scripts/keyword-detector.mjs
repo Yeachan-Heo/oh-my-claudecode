@@ -1747,6 +1747,13 @@ function isTaskSizeSlashAnywhereEnabled(env = process.env) {
   return ['1', 'true'].includes(String(env.OMC_JEV_TASK_SIZE_SLASH_ANYWHERE ?? '').trim().toLowerCase());
 }
 
+// OMC_JEV_INTENT_APPLY=1 lets the active `intent` answer decide whether the
+// intent skill is invoked. Off by default: the heuristic (slash pattern) decides
+// and the answer is only logged.
+function isIntentApplyEnabled(env = process.env) {
+  return ['1', 'true'].includes(String(env.OMC_JEV_INTENT_APPLY ?? '').trim().toLowerCase());
+}
+
 // A slash command starts the prompt or follows whitespace, an opening parenthesis or
 // a quote, and ends at whitespace, the end, a closing parenthesis or square bracket, a quote, or
 // punctuation; a dot only when no word character or letter follows (/ralph.md and /ralph.é are files).
@@ -2174,8 +2181,14 @@ async function main() {
         heuristic: INTENT_SLASH_PATTERN.test(cleanPrompt),
         permissionMode,
       });
-      // In active mode, intent Jev answer could be used here if needed
-      // Currently logging-only: resolved keywords come from skill-trigger
+      // In active mode with opt-in, intent Jev answer decides whether to invoke the skill
+      if (isIntentApplyEnabled() && jevResult && jevResult.mode === 'active' && jevResult.answer) {
+        const noul = jevResult.answer.noul;
+        // Only a noul value of 0.5 or higher triggers the intent skill (yes-ish answer)
+        if (typeof noul === 'number' && noul >= 0.5) {
+          resolved.push({ name: 'intent', args: '' });
+        }
+      }
     }
 
     // Apply task-size filtering: suppress heavy keywords for small tasks (issue #4805)
