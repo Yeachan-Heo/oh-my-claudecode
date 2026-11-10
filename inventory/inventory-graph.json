@@ -5,15 +5,15 @@
   "provenance": {
     "base": "05c800f40d1ad53b42a78609d2667ef4f726808b",
     "planningHead": "0a91273e61dbbd47eb0af4c02844409251e08398",
-    "head": "c2ca382c84278f099bf651c6d6ec826f34d54a1e",
-    "sourceSha256": "81da46868d792e9feded4422d063a6b4676c99e673dfa2b1ba21ed46e7da6cc4",
+    "head": "048278f31eedaa24e3bcfea827b310c78dc2c64f",
+    "sourceSha256": "4d9a9ee2a7a977789c84a25cb0ce761a8805fb2d9b35cb3c25ba71069fa8e9cc",
     "generatedAt": null,
     "generator": "scripts/generate-inventory-graph.mjs"
   },
   "base": "05c800f40d1ad53b42a78609d2667ef4f726808b",
   "planningHead": "0a91273e61dbbd47eb0af4c02844409251e08398",
-  "head": "c2ca382c84278f099bf651c6d6ec826f34d54a1e",
-  "sourceSha256": "81da46868d792e9feded4422d063a6b4676c99e673dfa2b1ba21ed46e7da6cc4",
+  "head": "048278f31eedaa24e3bcfea827b310c78dc2c64f",
+  "sourceSha256": "4d9a9ee2a7a977789c84a25cb0ce761a8805fb2d9b35cb3c25ba71069fa8e9cc",
   "counts": {
     "public": {
       "skills": 84,
@@ -28,8 +28,8 @@
       "toolFiles": 65,
       "libFiles": 49,
       "templateHooks": 25,
-      "srcFiles": 1443,
-      "total": 1468
+      "srcFiles": 1444,
+      "total": 1469
     },
     "generated": {
       "distFiles": 5639,
@@ -41336,6 +41336,11 @@
         "path": "src/__tests__/jev-resolve-script.test.mjs"
       },
       {
+        "id": "src/__tests__/jev-shadow-noul.test.mjs",
+        "kind": "src",
+        "path": "src/__tests__/jev-shadow-noul.test.mjs"
+      },
+      {
         "id": "src/__tests__/job-state-db.test.ts",
         "kind": "src",
         "path": "src/__tests__/job-state-db.test.ts"
@@ -48159,6 +48164,11 @@
         "id": "tests/integration/jev-active-mode-repro.test.ts",
         "kind": "other",
         "path": "tests/integration/jev-active-mode-repro.test.ts"
+      },
+      {
+        "id": "tests/integration/jev-advisory-points.test.ts",
+        "kind": "other",
+        "path": "tests/integration/jev-advisory-points.test.ts"
       },
       {
         "id": "tests/integration/jev-model-routing-all-agents.test.ts",
@@ -55915,6 +55925,16 @@
       {
         "from": "src/__tests__/jev-resolve-script.test.mjs",
         "to": "src/hooks/jev/config.ts",
+        "kind": "imports"
+      },
+      {
+        "from": "src/__tests__/jev-shadow-noul.test.mjs",
+        "to": "external:vitest",
+        "kind": "imports"
+      },
+      {
+        "from": "src/__tests__/jev-shadow-noul.test.mjs",
+        "to": "scripts/lib/jev-shadow.mjs",
         "kind": "imports"
       },
       {
@@ -91033,6 +91053,46 @@
         "kind": "imports"
       },
       {
+        "from": "tests/integration/jev-advisory-points.test.ts",
+        "to": "external:node:child_process",
+        "kind": "imports"
+      },
+      {
+        "from": "tests/integration/jev-advisory-points.test.ts",
+        "to": "external:node:fs",
+        "kind": "imports"
+      },
+      {
+        "from": "tests/integration/jev-advisory-points.test.ts",
+        "to": "external:node:http",
+        "kind": "imports"
+      },
+      {
+        "from": "tests/integration/jev-advisory-points.test.ts",
+        "to": "external:node:http",
+        "kind": "type-imports"
+      },
+      {
+        "from": "tests/integration/jev-advisory-points.test.ts",
+        "to": "external:node:os",
+        "kind": "imports"
+      },
+      {
+        "from": "tests/integration/jev-advisory-points.test.ts",
+        "to": "external:node:path",
+        "kind": "imports"
+      },
+      {
+        "from": "tests/integration/jev-advisory-points.test.ts",
+        "to": "external:node:url",
+        "kind": "imports"
+      },
+      {
+        "from": "tests/integration/jev-advisory-points.test.ts",
+        "to": "external:vitest",
+        "kind": "imports"
+      },
+      {
         "from": "tests/integration/jev-model-routing-all-agents.test.ts",
         "to": "external:node:child_process",
         "kind": "imports"
@@ -92284,12 +92344,12 @@
       }
     ],
     "stats": {
-      "nodeCount": 8245,
-      "edgeCount": 8771,
-      "importEdgeCount": 7325,
+      "nodeCount": 8247,
+      "edgeCount": 8781,
+      "importEdgeCount": 7334,
       "registerEdgeCount": 105
     }
   },
-  "inventorySha256": "afeb9b0fb04c9b26f3ac7f8342d242930562fc5d8edce61dbc6424976ef8b457",
-  "manifestSha256": "f40c9aa27ce99f18fcbee3044c508babeadbf1752a3ce34b19f283260e236b47"
+  "inventorySha256": "8294cde3eb0a69e7787c7bf804818cc241de654966ec9299574ef8cf924eabf1",
+  "manifestSha256": "d8d5bd1a17fb32f4fae70c4c0bd93f9c0e2df57092a0c1b4df1ed6be344a79de"
 }
