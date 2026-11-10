@@ -5,15 +5,15 @@
   "provenance": {
     "base": "05c800f40d1ad53b42a78609d2667ef4f726808b",
     "planningHead": "0a91273e61dbbd47eb0af4c02844409251e08398",
-    "head": "f16bb3049b83d872ac1f8eda66a4b9faf84b1c62",
-    "sourceSha256": "5c6634927b89e219c2f05fd4715c33aa5134558534313c1e41bdf2973cce8e98",
+    "head": "a8fd0b13836b9e2db7d004895efc9e644120b77d",
+    "sourceSha256": "3a82d47452a37459f4309f97e7cb13461eed067f77dba3307c849e6c49af48d3",
     "generatedAt": null,
     "generator": "scripts/generate-inventory-graph.mjs"
   },
   "base": "05c800f40d1ad53b42a78609d2667ef4f726808b",
   "planningHead": "0a91273e61dbbd47eb0af4c02844409251e08398",
-  "head": "f16bb3049b83d872ac1f8eda66a4b9faf84b1c62",
-  "sourceSha256": "5c6634927b89e219c2f05fd4715c33aa5134558534313c1e41bdf2973cce8e98",
+  "head": "a8fd0b13836b9e2db7d004895efc9e644120b77d",
+  "sourceSha256": "3a82d47452a37459f4309f97e7cb13461eed067f77dba3307c849e6c49af48d3",
   "counts": {
     "public": {
       "skills": 84,
@@ -890,7 +890,6 @@
       "scripts/lib/hud-wrapper-template.mjs",
       "scripts/lib/hud-wrapper-template.txt",
       "scripts/lib/jev-compaction-state.mjs",
-      "scripts/lib/jev-delivery-guard.mjs",
       "scripts/lib/jev-mask.mjs",
       "scripts/lib/jev-shadow.mjs",
       "scripts/lib/model-routing-override-message.mjs",
@@ -36864,11 +36863,6 @@
         "path": "node:process"
       },
       {
-        "id": "external:node:readline",
-        "kind": "external",
-        "path": "node:readline"
-      },
-      {
         "id": "external:node:stream",
         "kind": "external",
         "path": "node:stream"
@@ -37457,11 +37451,6 @@
         "id": "scripts/lib/jev-compaction-state.mjs",
         "kind": "script",
         "path": "scripts/lib/jev-compaction-state.mjs"
-      },
-      {
-        "id": "scripts/lib/jev-delivery-guard.mjs",
-        "kind": "script",
-        "path": "scripts/lib/jev-delivery-guard.mjs"
       },
       {
         "id": "scripts/lib/jev-mask.mjs",
@@ -41364,14 +41353,14 @@
         "path": "src/__tests__/jev-compaction-state.test.mjs"
       },
       {
-        "id": "src/__tests__/jev-delivery-guard.test.mjs",
-        "kind": "src",
-        "path": "src/__tests__/jev-delivery-guard.test.mjs"
-      },
-      {
         "id": "src/__tests__/jev-eval-script.test.mjs",
         "kind": "src",
         "path": "src/__tests__/jev-eval-script.test.mjs"
+      },
+      {
+        "id": "src/__tests__/jev-hook-timeouts.test.mjs",
+        "kind": "src",
+        "path": "src/__tests__/jev-hook-timeouts.test.mjs"
       },
       {
         "id": "src/__tests__/jev-plugin-hook-wiring.test.mjs",
@@ -49622,11 +49611,6 @@
       },
       {
         "from": "scripts/keyword-detector.mjs",
-        "to": "scripts/lib/jev-delivery-guard.mjs",
-        "kind": "imports"
-      },
-      {
-        "from": "scripts/keyword-detector.mjs",
         "to": "scripts/lib/jev-shadow.mjs",
         "kind": "imports"
       },
@@ -49818,51 +49802,6 @@
       {
         "from": "scripts/lib/jev-compaction-state.mjs",
         "to": "scripts/lib/jev-mask.mjs",
-        "kind": "imports"
-      },
-      {
-        "from": "scripts/lib/jev-delivery-guard.mjs",
-        "to": "external:node:child_process",
-        "kind": "imports"
-      },
-      {
-        "from": "scripts/lib/jev-delivery-guard.mjs",
-        "to": "external:node:crypto",
-        "kind": "imports"
-      },
-      {
-        "from": "scripts/lib/jev-delivery-guard.mjs",
-        "to": "external:node:fs",
-        "kind": "imports"
-      },
-      {
-        "from": "scripts/lib/jev-delivery-guard.mjs",
-        "to": "external:node:os",
-        "kind": "imports"
-      },
-      {
-        "from": "scripts/lib/jev-delivery-guard.mjs",
-        "to": "external:node:path",
-        "kind": "imports"
-      },
-      {
-        "from": "scripts/lib/jev-delivery-guard.mjs",
-        "to": "external:node:readline",
-        "kind": "imports"
-      },
-      {
-        "from": "scripts/lib/jev-delivery-guard.mjs",
-        "to": "external:node:url",
-        "kind": "imports"
-      },
-      {
-        "from": "scripts/lib/jev-delivery-guard.mjs",
-        "to": "scripts/jev-resolve.mjs",
-        "kind": "imports"
-      },
-      {
-        "from": "scripts/lib/jev-delivery-guard.mjs",
-        "to": "scripts/lib/config-dir.mjs",
         "kind": "imports"
       },
       {
@@ -56086,41 +56025,6 @@
         "kind": "imports"
       },
       {
-        "from": "src/__tests__/jev-delivery-guard.test.mjs",
-        "to": "external:node:child_process",
-        "kind": "imports"
-      },
-      {
-        "from": "src/__tests__/jev-delivery-guard.test.mjs",
-        "to": "external:node:fs",
-        "kind": "imports"
-      },
-      {
-        "from": "src/__tests__/jev-delivery-guard.test.mjs",
-        "to": "external:node:os",
-        "kind": "imports"
-      },
-      {
-        "from": "src/__tests__/jev-delivery-guard.test.mjs",
-        "to": "external:node:path",
-        "kind": "imports"
-      },
-      {
-        "from": "src/__tests__/jev-delivery-guard.test.mjs",
-        "to": "external:node:url",
-        "kind": "imports"
-      },
-      {
-        "from": "src/__tests__/jev-delivery-guard.test.mjs",
-        "to": "external:vitest",
-        "kind": "imports"
-      },
-      {
-        "from": "src/__tests__/jev-delivery-guard.test.mjs",
-        "to": "scripts/lib/jev-delivery-guard.mjs",
-        "kind": "imports"
-      },
-      {
         "from": "src/__tests__/jev-eval-script.test.mjs",
         "to": "external:node:child_process",
         "kind": "imports"
@@ -56153,6 +56057,26 @@
       {
         "from": "src/__tests__/jev-eval-script.test.mjs",
         "to": "scripts/jev-eval.mjs",
+        "kind": "imports"
+      },
+      {
+        "from": "src/__tests__/jev-hook-timeouts.test.mjs",
+        "to": "external:node:fs",
+        "kind": "imports"
+      },
+      {
+        "from": "src/__tests__/jev-hook-timeouts.test.mjs",
+        "to": "external:node:path",
+        "kind": "imports"
+      },
+      {
+        "from": "src/__tests__/jev-hook-timeouts.test.mjs",
+        "to": "external:node:url",
+        "kind": "imports"
+      },
+      {
+        "from": "src/__tests__/jev-hook-timeouts.test.mjs",
+        "to": "external:vitest",
         "kind": "imports"
       },
       {
@@ -92842,12 +92766,12 @@
       }
     ],
     "stats": {
-      "nodeCount": 8260,
-      "edgeCount": 8867,
-      "importEdgeCount": 7415,
+      "nodeCount": 8258,
+      "edgeCount": 8854,
+      "importEdgeCount": 7402,
       "registerEdgeCount": 105
     }
   },
-  "inventorySha256": "a28b6c522de242437452005b85e387fb17582edebb2ddaf85825aaa69861a7ad",
-  "manifestSha256": "fa271d63a672b4b94115184045985d318854f8dcfbdf734a8d965ed60fec1504"
+  "inventorySha256": "103e11fa71e6f5a8e7af28ad8a35f574a4f138acc404a0ee2ca761ec8393af12",
+  "manifestSha256": "da72658bf7e6d91ac48fb80772223c61e7dd17c93754d8160de097ad5f07094b"
 }
