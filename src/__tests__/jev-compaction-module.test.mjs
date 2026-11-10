@@ -442,6 +442,16 @@ describe('jev-compaction module: endpoint failures', () => {
     expect(retryAfterMs('soon', now)).toBeUndefined();
   });
 
+  it('rounds a fractional Retry-After up to whole seconds, never down', () => {
+    const now = Date.parse('2026-11-09T12:00:00Z');
+    expect(retryAfterMs('1.5', now)).toBe(2000);
+    expect(retryAfterMs('0.2', now)).toBe(1000);
+    expect(retryAfterMs('90.0', now)).toBe(90_000);
+    expect(classifyFailure({ error: { status: 429, retryAfter: '1.5' } }, now)).toEqual({ kind: 'http_429', pauseMs: 2000 });
+    expect(classifyFailure({ error: { status: 429, retryAfter: '0.2' } }, now)).toEqual({ kind: 'http_429', pauseMs: 1000 });
+    expect(classifyFailure({ error: { status: 503, retryAfter: '99999.5' } }, now).pauseMs).toBe(1_800_000);
+  });
+
   it('reads Retry-After from the response headers', async () => {
     const handlers = load();
     await compactOnce(conversation(30), { handlers, respond: () => ({ ok: false, status: 429, headers: { 'retry-after': '90' }, text: '' }) });

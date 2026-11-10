@@ -156,11 +156,11 @@ export function boundExcerpts(value, max) {
   return value;
 }
 
-/** Retry-After in milliseconds (delay seconds or an HTTP date), else undefined. */
+/** Retry-After in milliseconds (delay seconds, a decimal value rounded up to whole seconds, or an HTTP date), else undefined. */
 export function retryAfterMs(value, now = Date.now()) {
   const text = String(value ?? '').trim();
   if (!text) return undefined;
-  if (/^\d+$/.test(text)) return Number(text) * 1000;
+  if (/^\d+(\.\d+)?$/.test(text)) return Math.ceil(Number(text)) * 1000;
   const at = Date.parse(text);
   return Number.isFinite(at) ? Math.max(0, at - now) : undefined;
 }
