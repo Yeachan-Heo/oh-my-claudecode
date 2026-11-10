@@ -5,15 +5,15 @@
   "provenance": {
     "base": "05c800f40d1ad53b42a78609d2667ef4f726808b",
     "planningHead": "0a91273e61dbbd47eb0af4c02844409251e08398",
-    "head": "626c20b4fab00dd6a7cfb2d0d9dee3b63e3b3689",
-    "sourceSha256": "4d2d7514d1e1d7d75433396255ef565b8929391d3ef7d995ebad72ce3c3764b1",
+    "head": "549bb3d950178e59c912f48a4094087ab94997af",
+    "sourceSha256": "b298ea0fe6256fdb132e465a242aa7db68386dd252302072d99e127b8477f48b",
     "generatedAt": null,
     "generator": "scripts/generate-inventory-graph.mjs"
   },
   "base": "05c800f40d1ad53b42a78609d2667ef4f726808b",
   "planningHead": "0a91273e61dbbd47eb0af4c02844409251e08398",
-  "head": "626c20b4fab00dd6a7cfb2d0d9dee3b63e3b3689",
-  "sourceSha256": "4d2d7514d1e1d7d75433396255ef565b8929391d3ef7d995ebad72ce3c3764b1",
+  "head": "549bb3d950178e59c912f48a4094087ab94997af",
+  "sourceSha256": "b298ea0fe6256fdb132e465a242aa7db68386dd252302072d99e127b8477f48b",
   "counts": {
     "public": {
       "skills": 84,
@@ -23,13 +23,13 @@
       "total": 133
     },
     "internal": {
-      "hookFiles": 337,
+      "hookFiles": 338,
       "featureFiles": 95,
       "toolFiles": 65,
       "libFiles": 49,
       "templateHooks": 25,
-      "srcFiles": 1447,
-      "total": 1472
+      "srcFiles": 1449,
+      "total": 1474
     },
     "generated": {
       "distFiles": 5639,
@@ -41,7 +41,7 @@
     },
     "skills": 84,
     "commands": 21,
-    "hookFiles": 337,
+    "hookFiles": 338,
     "workflows": 8,
     "agentDefinitions": 18,
     "promptLikeFiles": 63
@@ -286,6 +286,7 @@
       "src/hooks/jev/__tests__/active-mode.test.ts",
       "src/hooks/jev/__tests__/client.test.ts",
       "src/hooks/jev/__tests__/points-wire-shape.test.ts",
+      "src/hooks/jev/__tests__/resolver-request-count.test.ts",
       "src/hooks/jev/__tests__/resolver.test.ts",
       "src/hooks/jev/__tests__/shared-breaker.test.ts",
       "src/hooks/jev/client.ts",
@@ -6721,6 +6722,7 @@
       "src/hooks/jev/__tests__/active-mode.test.ts",
       "src/hooks/jev/__tests__/client.test.ts",
       "src/hooks/jev/__tests__/points-wire-shape.test.ts",
+      "src/hooks/jev/__tests__/resolver-request-count.test.ts",
       "src/hooks/jev/__tests__/resolver.test.ts",
       "src/hooks/jev/__tests__/shared-breaker.test.ts",
       "src/hooks/jev/client.ts",
@@ -41382,6 +41384,11 @@
         "path": "src/__tests__/jev-resolve-script.test.mjs"
       },
       {
+        "id": "src/__tests__/jev-shadow-spawn-mode.test.mjs",
+        "kind": "src",
+        "path": "src/__tests__/jev-shadow-spawn-mode.test.mjs"
+      },
+      {
         "id": "src/__tests__/job-state-db.test.ts",
         "kind": "src",
         "path": "src/__tests__/job-state-db.test.ts"
@@ -44120,6 +44127,11 @@
         "id": "src/hooks/jev/__tests__/points-wire-shape.test.ts",
         "kind": "hook",
         "path": "src/hooks/jev/__tests__/points-wire-shape.test.ts"
+      },
+      {
+        "id": "src/hooks/jev/__tests__/resolver-request-count.test.ts",
+        "kind": "hook",
+        "path": "src/hooks/jev/__tests__/resolver-request-count.test.ts"
       },
       {
         "id": "src/hooks/jev/__tests__/resolver.test.ts",
@@ -56186,6 +56198,21 @@
       {
         "from": "src/__tests__/jev-resolve-script.test.mjs",
         "to": "src/hooks/jev/config.ts",
+        "kind": "imports"
+      },
+      {
+        "from": "src/__tests__/jev-shadow-spawn-mode.test.mjs",
+        "to": "external:node:path",
+        "kind": "imports"
+      },
+      {
+        "from": "src/__tests__/jev-shadow-spawn-mode.test.mjs",
+        "to": "external:node:url",
+        "kind": "imports"
+      },
+      {
+        "from": "src/__tests__/jev-shadow-spawn-mode.test.mjs",
+        "to": "external:vitest",
         "kind": "imports"
       },
       {
@@ -69942,6 +69969,16 @@
         "from": "src/hooks/jev/__tests__/points-wire-shape.test.ts",
         "to": "src/hooks/jev/types.ts",
         "kind": "type-imports"
+      },
+      {
+        "from": "src/hooks/jev/__tests__/resolver-request-count.test.ts",
+        "to": "external:vitest",
+        "kind": "imports"
+      },
+      {
+        "from": "src/hooks/jev/__tests__/resolver-request-count.test.ts",
+        "to": "src/hooks/jev/resolver.ts",
+        "kind": "imports"
       },
       {
         "from": "src/hooks/jev/__tests__/resolver.test.ts",
@@ -92605,12 +92642,12 @@
       }
     ],
     "stats": {
-      "nodeCount": 8254,
-      "edgeCount": 8825,
-      "importEdgeCount": 7377,
+      "nodeCount": 8256,
+      "edgeCount": 8830,
+      "importEdgeCount": 7382,
       "registerEdgeCount": 105
     }
   },
-  "inventorySha256": "01d3690b95c3202d843f0c6ed4dfdca7829155be86287b4d408bfad0725a354f",
-  "manifestSha256": "81342fe0cfeb42d27a75d51c25a0487fefa198d016a46f28c770142f5880381d"
+  "inventorySha256": "5310915831550b1308b1d439b6d9044fa228e29a8b8830a020c7efc832c3d918",
+  "manifestSha256": "5961449d75fa2238c15205f18a8c7a09b0330c18c86789f4ce2c805fac958fa0"
 }
