@@ -618,7 +618,7 @@ export OMC_JEV="point1,point2:active,all"
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `TYPESAFE_API_KEY` | (absent) | API key for TypeSafe System One. Required to enable Jev; the key alone does not enable any points. |
-| `OMC_JEV` | (absent) | Per-point opt-in: `point`, `point:active`, `all` (every point, shadow), or `all:active` (every point, active). Comma-separated; unknown point names are ignored. |
+| `OMC_JEV` | (absent) | Per-point opt-in: `point`, `point:active`, `all` (every point, shadow), `all:active` (every point, active), or `point:off` (that point off, also under `all` and `all:active`). Comma-separated; unknown point names are ignored. |
 | `OMC_JEV_TIMEOUT_MS` | `2000` | Per-call timeout in milliseconds (single round-trip measured at 465–605 ms; default allows margin). |
 | `OMC_JEV_MAX_REQUESTS` | `0` (unlimited) | Maximum Jev requests per process. When reached, heuristic twins run for remaining calls. |
 | `OMC_JEV_EXCERPT_CHARS` | `200` | Maximum string length sent in state and shadow log. Recursively bounds all strings in the judgment state; question definitions are static text and are sent whole. Does not apply to the points that have their own default (next row). |
@@ -644,7 +644,7 @@ export OMC_JEV="point1,point2:active,all"
 
 #### Point Activation Syntax
 
-`OMC_JEV` accepts comma-separated entries with three syntax forms:
+`OMC_JEV` accepts comma-separated entries:
 
 ```bash
 # Shadow mode (Jev runs but decision is not used, heuristic twin is authoritative)
@@ -658,6 +658,10 @@ export OMC_JEV="all"
 
 # Wildcard: all registered points in active
 export OMC_JEV="all:active"
+
+# Turn one point off while the rest stay on (a later non-off entry for the same point turns it back on;
+# the suffix is case-insensitive; `all:off` withdraws the wildcard)
+export OMC_JEV="all:active,intent:off"
 
 # Master disable
 export OMC_JEV="off"
@@ -686,7 +690,7 @@ Each judgment point operates in one of three states:
 
 | State | Behavior | When It Occurs |
 |-------|----------|----------------|
-| **off** | Point does not run; heuristic twin is used | No `TYPESAFE_API_KEY`, `OMC_JEV=off`, or point not opted in |
+| **off** | Point does not run; heuristic twin is used | No `TYPESAFE_API_KEY`, `OMC_JEV=off`, a `point:off` entry, or point not opted in |
 | **shadow** | Both Jev and heuristic run; Jev answer is logged but NOT acted on; heuristic is authoritative; fire-and-forget for non-blocking points | Point is opted in but not activated; Jev unavailable, times out, or over budget |
 | **active** | Jev answer IS acted on; blocking points gate behavior, non-blocking points wait (bounded by `OMC_JEV_TIMEOUT_MS`) | Point is opted in and activated via env `:active` or code-time `ACTIVATED_POINTS` |
 
