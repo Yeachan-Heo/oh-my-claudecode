@@ -26,28 +26,6 @@ const PROJECT_ROOT = fileURLToPath(new URL("../../", import.meta.url));
 
 type RunResult = { stdout: string; stderr: string; exitCode: number };
 
-// Polling utility to wait for a condition to be true (replacement for vi.waitFor which is not available in vitest 4.1.11)
-async function waitFor(
-  condition: () => void,
-  options: { timeout?: number; interval?: number } = {},
-): Promise<void> {
-  const { timeout = 5000, interval = 50 } = options;
-  const startTime = Date.now();
-  
-  while (Date.now() - startTime < timeout) {
-    try {
-      condition();
-      return; // Condition passed
-    } catch (error) {
-      // Condition failed, retry after interval
-      await new Promise((resolve) => setTimeout(resolve, interval));
-    }
-  }
-  
-  // Last attempt before timeout
-  condition();
-}
-
 // Keep the test's event loop free: the hook's synchronous Jev child has to be
 // able to POST to the HTTP server that runs in this process.
 function runScript(
@@ -784,7 +762,7 @@ describe("jev advisory points: opt-in actions", () => {
 
       const output = await stop(sessionId, { OMC_JEV: "loop-continuation", OMC_JEV_LOOP_RELEASE_ONLY: "1" });
       expect(output).toEqual({ continue: true, suppressOutput: true });
-      await waitFor(
+      await vi.waitFor(
         () => {
           const logPath = join(cwd, "jev-logs", "shadow.jsonl");
           const entry = (existsSync(logPath) ? readFileSync(logPath, "utf8").trim().split("\n") : [])
