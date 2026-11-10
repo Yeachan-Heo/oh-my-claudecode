@@ -306,3 +306,59 @@ describe('jev-eval --include-rotated', () => {
     expect(statSync(files[0]).size).toBeGreaterThan(MIB);
   });
 });
+
+describe('overrides.jsonl of the model-routing use marker', () => {
+  const OVERRIDES_ROTATED = /^overrides-\d{8}-\d{6}-\d+\.jsonl$/;
+
+  /** One Task call whose prompt starts with a marker that settles model and effort, so Jev is not asked. */
+  function runMarkerHook(dir, extraEnv) {
+    const home = join(dir, 'home');
+    mkdirSync(home, { recursive: true });
+    const env = {
+      ...process.env,
+      HOME: home,
+      USERPROFILE: home,
+      CLAUDE_PLUGIN_ROOT: '',
+      DISABLE_OMC: '',
+      OMC_SKIP_HOOKS: '',
+      OMC_STATE_DIR: '',
+      OMC_JEV_MODEL_ROUTING_MARKER: '1',
+      OMC_JEV_LOG_DIR: join(dir, 'log'),
+      NODE_ENV: 'test',
+      ...extraEnv,
+    };
+    for (const key of Object.keys(env)) if (env[key] === undefined || /^(TYPESAFE_|OMC_JEV$)/.test(key)) delete env[key];
+    const input = {
+      cwd: dir,
+      session_id: 'session-1',
+      tool_use_id: 'toolu_1',
+      tool_name: 'Task',
+      tool_input: { subagent_type: 'oh-my-claudecode:executor', description: 'Fix', prompt: 'use sonnet low\n\nFix the regression.', model: 'haiku' },
+    };
+    execFileSync(NODE, [join(root, 'scripts', 'pre-tool-enforcer.mjs')], { cwd: dir, env, input: JSON.stringify(input), encoding: 'utf8', timeout: 30_000 });
+  }
+
+  function prepared() {
+    const dir = freshDir();
+    mkdirSync(join(dir, 'log'), { recursive: true });
+    writeFileSync(join(dir, 'log', 'overrides.jsonl'), filler(MIB + 1));
+    return dir;
+  }
+
+  it('is rotated before a row is appended when OMC_JEV_LOG_MAX_MB is set', () => {
+    const dir = prepared();
+    runMarkerHook(dir, { OMC_JEV_LOG_MAX_MB: '1' });
+    const files = readdirSync(join(dir, 'log'));
+    expect(files.filter((name) => OVERRIDES_ROTATED.test(name))).toHaveLength(1);
+    const rows = readFileSync(join(dir, 'log', 'overrides.jsonl'), 'utf8').trim().split('\n').map((line) => JSON.parse(line));
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({ point: 'model-routing', override: 'both' });
+  });
+
+  it('keeps growing without OMC_JEV_LOG_MAX_MB, as on dev', () => {
+    const dir = prepared();
+    runMarkerHook(dir, {});
+    expect(readdirSync(join(dir, 'log'))).toEqual(['overrides.jsonl']);
+    expect(statSync(join(dir, 'log', 'overrides.jsonl')).size).toBeGreaterThan(MIB);
+  });
+});

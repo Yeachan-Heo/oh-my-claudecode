@@ -24,7 +24,7 @@ import { resolveConfiguredAgentModel } from './lib/agent-model-config.mjs';
 import { BOUNDED_GIT_TIMEOUT_MS } from './lib/bounded-git-timeout.mjs';
 import { isSkillVisibleToUser } from './lib/skill-entitlements.mjs';
 import { isJevAppliedLogEnabled, isJevShadowOptedIn, recordJevApplied, recordJevShadow, setJevHookContext } from './lib/jev-shadow.mjs';
-import { resolveExcerptChars } from './jev-resolve.mjs';
+import { resolveExcerptChars, resolveJevLogMaxBytes, rotateJevLog } from './jev-resolve.mjs';
 
 // Inlined from src/config/models.ts — avoids a dist/ import so the hook works
 // before a build and stays consistent with the TypeScript source.
@@ -797,6 +797,8 @@ function recordModelRoutingOverride(stateDir, row) {
   try {
     const dir = process.env.OMC_JEV_LOG_DIR || join(stateDir, 'jev');
     mkdirSync(dir, { recursive: true });
+    // OMC_JEV_LOG_MAX_MB rotates this file like the other Jev logs (no rotation without it).
+    rotateJevLog(join(dir, 'overrides.jsonl'), resolveJevLogMaxBytes(process.env));
     appendFileSync(join(dir, 'overrides.jsonl'), JSON.stringify({ ts: new Date().toISOString(), point: 'model-routing', ...row }) + '\n', 'utf8');
   } catch {
     // Best-effort logging: a logging failure never affects the call.
