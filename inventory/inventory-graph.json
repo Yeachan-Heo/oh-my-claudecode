@@ -5,15 +5,15 @@
   "provenance": {
     "base": "05c800f40d1ad53b42a78609d2667ef4f726808b",
     "planningHead": "0a91273e61dbbd47eb0af4c02844409251e08398",
-    "head": "97d2adda582ae201203372f327e652d4b34447b6",
-    "sourceSha256": "ba6211273650c7fc1195361e7423ee271a3b97799cfb5babc29d979203cf2947",
+    "head": "e9a5f202908de7c2c550044eab5fad4403a479de",
+    "sourceSha256": "dbeb1d2db4fa64ad78006ee459c5daf3172072be8143447b37fb0e63f7582f2e",
     "generatedAt": null,
     "generator": "scripts/generate-inventory-graph.mjs"
   },
   "base": "05c800f40d1ad53b42a78609d2667ef4f726808b",
   "planningHead": "0a91273e61dbbd47eb0af4c02844409251e08398",
-  "head": "97d2adda582ae201203372f327e652d4b34447b6",
-  "sourceSha256": "ba6211273650c7fc1195361e7423ee271a3b97799cfb5babc29d979203cf2947",
+  "head": "e9a5f202908de7c2c550044eab5fad4403a479de",
+  "sourceSha256": "dbeb1d2db4fa64ad78006ee459c5daf3172072be8143447b37fb0e63f7582f2e",
   "counts": {
     "public": {
       "skills": 84,
@@ -28,8 +28,8 @@
       "toolFiles": 65,
       "libFiles": 49,
       "templateHooks": 25,
-      "srcFiles": 1447,
-      "total": 1472
+      "srcFiles": 1446,
+      "total": 1471
     },
     "generated": {
       "distFiles": 5639,
@@ -41358,11 +41358,6 @@
         "path": "src/__tests__/jev-eval-script.test.mjs"
       },
       {
-        "id": "src/__tests__/jev-hook-timeouts.test.mjs",
-        "kind": "src",
-        "path": "src/__tests__/jev-hook-timeouts.test.mjs"
-      },
-      {
         "id": "src/__tests__/jev-plugin-hook-wiring.test.mjs",
         "kind": "src",
         "path": "src/__tests__/jev-plugin-hook-wiring.test.mjs"
@@ -56052,26 +56047,6 @@
       {
         "from": "src/__tests__/jev-eval-script.test.mjs",
         "to": "scripts/jev-eval.mjs",
-        "kind": "imports"
-      },
-      {
-        "from": "src/__tests__/jev-hook-timeouts.test.mjs",
-        "to": "external:node:fs",
-        "kind": "imports"
-      },
-      {
-        "from": "src/__tests__/jev-hook-timeouts.test.mjs",
-        "to": "external:node:path",
-        "kind": "imports"
-      },
-      {
-        "from": "src/__tests__/jev-hook-timeouts.test.mjs",
-        "to": "external:node:url",
-        "kind": "imports"
-      },
-      {
-        "from": "src/__tests__/jev-hook-timeouts.test.mjs",
-        "to": "external:vitest",
         "kind": "imports"
       },
       {
@@ -92721,12 +92696,12 @@
       }
     ],
     "stats": {
-      "nodeCount": 8257,
-      "edgeCount": 8846,
-      "importEdgeCount": 7395,
+      "nodeCount": 8256,
+      "edgeCount": 8842,
+      "importEdgeCount": 7391,
       "registerEdgeCount": 105
     }
   },
-  "inventorySha256": "771d309c6639de1a83400b06f0a406e8327aea6cd049504e69f45064413d806d",
-  "manifestSha256": "5ee43a65b719cc931e3412570cae26f0819998c45ea17e6871a306c8f553c96a"
+  "inventorySha256": "adad03789087cea22759a8833288d7d33c2b0a20de2321288ec4e106d98036d2",
+  "manifestSha256": "b11aa479c21897f07acfaad268e20d91ef3db1e893a8cc3c6dbbaa947693f434"
 }

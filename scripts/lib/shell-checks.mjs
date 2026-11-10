@@ -825,7 +825,9 @@ export function bashSyntaxCheck(text, { platform = process.platform, env = proce
   const r = spawnSync(bash, ['--norc', '--noprofile', '-O', 'extglob', '-n'], { input: text, encoding: 'utf8', timeout: timeoutMs, windowsHide: true, env: childEnv, maxBuffer: 1024 * 1024 });
   const ms = Number(process.hrtime.bigint() - started) / 1e6;
   if (r.error && r.error.code === 'ETIMEDOUT') return { ran: true, timedOut: true, ms };
-  if (r.error) return { ran: false, reason: String(r.error.code || r.error.message), ms };
+  // EPIPE with an exit status: bash exited before reading all of the input. It still ran, so its
+  // status decides below (a crashed bash is a bash-failure, not a missing check).
+  if (r.error && !(r.error.code === 'EPIPE' && r.status !== null)) return { ran: false, reason: String(r.error.code || r.error.message), ms };
   if (r.status === null) return { ran: true, timedOut: true, ms };
   const stderr = String(r.stderr || '');
   const heredoc = /warning: here-document at line \d+ delimited by end-of-file \(wanted `([^']*)'\)/.exec(stderr);
