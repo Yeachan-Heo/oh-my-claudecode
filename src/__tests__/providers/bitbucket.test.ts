@@ -15,7 +15,7 @@ describe('BitbucketProvider', () => {
 
   afterEach(() => {
     process.env = originalEnv;
-    vi.restoreAllMocks();
+    vi.unstubAllGlobals();
   });
 
   describe('static properties', () => {

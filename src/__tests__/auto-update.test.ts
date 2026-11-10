@@ -133,7 +133,7 @@ describe('auto-update reconciliation', () => {
   });
 
   afterEach(() => {
-    vi.restoreAllMocks();
+    vi.unstubAllGlobals();
     delete process.env.OMC_UPDATE_RECONCILE;
     delete process.env.CLAUDE_PLUGIN_ROOT;
     if (originalPluginCacheSynced === undefined) {

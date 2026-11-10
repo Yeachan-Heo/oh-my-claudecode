@@ -427,7 +427,7 @@ describe('CLAUDE.md coordinator protocol', () => {
       expect(localOutput).toContain('<!-- OMC:VERSION:1.0.0 -->');
       expect(localOutput).toContain('# canonical');
     } finally {
-      vi.restoreAllMocks();
+      vi.unstubAllGlobals();
       vi.resetModules();
     }
   });
