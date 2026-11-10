@@ -303,15 +303,16 @@ async function readConfig($) {
     USERPROFILE: await $.env.get('USERPROFILE'),
     HOME: await $.env.get('HOME'),
   };
-  if (env.OMC_JEV === undefined || env.TYPESAFE_API_KEY === undefined || env.OMC_JEV_BREAKER === undefined || env.OMC_JEV_MAX_RPM === undefined) {
+  // Only read settings if mode-determining vars are unset; if mode is 'off', skip settings read.
+  if ((env.OMC_JEV === undefined || env.TYPESAFE_API_KEY === undefined) && pointMode(env.OMC_JEV, env.TYPESAFE_API_KEY) !== 'off') {
     try {
-      const fromSettings = await $.settings.read({ key: 'env' });
+      const fromSettings = await withDeadline($, $.settings.read({ key: 'env' }), CONFIG_TTL_MS);
       if (fromSettings && typeof fromSettings === 'object') {
         for (const name of Object.keys(env)) if (env[name] === undefined && typeof fromSettings[name] === 'string') env[name] = fromSettings[name];
       }
     } catch { /* no settings: the process environment stands */ }
   }
-  const home = env.USERPROFILE || env.HOME;
+  const home = env.HOME || env.USERPROFILE;
   const stateDir = env.OMC_JEV_LOG_DIR ? slash(env.OMC_JEV_LOG_DIR) : home ? `${slash(home)}/.omc/state/jev` : undefined;
   const privatePaths = String(env.OMC_JEV_COMPACT_PRIVATE_PATHS ?? '')
     .split(',')
