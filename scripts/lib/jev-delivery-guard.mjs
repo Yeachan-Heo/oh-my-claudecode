@@ -43,6 +43,7 @@ import { dirname, join } from 'node:path';
 import { createInterface } from 'node:readline';
 import { fileURLToPath } from 'node:url';
 import { parseJevEnv } from '../jev-resolve.mjs';
+import { resolveOmcStateRoot } from './state-root.mjs';
 import { getClaudeConfigDir } from './config-dir.mjs';
 
 export const DEFAULT_MIN_TIMEOUT_S = 60;
@@ -456,6 +457,17 @@ export async function computeDelivery({ logDir, configDir = getClaudeConfigDir()
   return result;
 }
 
+async function resolveDefaultLogDir(env = process.env, cwd = process.cwd()) {
+  if (env.OMC_JEV_LOG_DIR) return env.OMC_JEV_LOG_DIR;
+  try {
+    const omcRoot = await resolveOmcStateRoot(cwd);
+    return join(omcRoot, 'state', 'jev');
+  } catch {
+    // If resolution fails, return null and readDecisions will return empty results
+    return null;
+  }
+}
+
 async function runDailyCheck(argv) {
   const value = (name) => { const i = argv.indexOf(name); return i === -1 ? undefined : argv[i + 1]; };
   try { setPriority(process.pid, 19); } catch { /* the priority stays normal */ }
@@ -465,8 +477,9 @@ async function runDailyCheck(argv) {
   const now = Date.parse(value('--now') ?? '');
   let result;
   try {
+    const logDir = value('--log') || (await resolveDefaultLogDir(process.env, process.cwd()));
     result = await computeDelivery({
-      logDir: value('--log'),
+      logDir,
       configDir,
       now: Number.isFinite(now) ? now : Date.now(),
       windowMs: hours > 0 ? hours * 3600000 : DAY_MS,
