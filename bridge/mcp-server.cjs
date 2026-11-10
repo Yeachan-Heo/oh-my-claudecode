@@ -19602,7 +19602,12 @@ function containerUriToHostUri(uri, context) {
   if (!context || !uri.startsWith("file://")) {
     return uri;
   }
-  return (0, import_url2.pathToFileURL)(containerPathToHostPath((0, import_url2.fileURLToPath)(uri), context)).href;
+  const containerPath = containerFileUriToPath(uri);
+  if (containerPath === null) {
+    return uri;
+  }
+  const hostPath = containerPathToHostPath(containerPath, context);
+  return hostPath === containerPath ? uri : (0, import_url2.pathToFileURL)(hostPath).href;
 }
 function resolveDevContainerConfigPath(workspaceRoot) {
   let dir = workspaceRoot;
@@ -19738,14 +19743,14 @@ function scoreContainerMatch(inspect, hostWorkspaceRoot, configFilePath) {
   let hasDevContainerLabelMatch = false;
   const expectedLocalFolder = configFilePath ? deriveHostDevContainerRoot(configFilePath) : (0, import_path6.resolve)(hostWorkspaceRoot);
   for (const label of DEVCONTAINER_LOCAL_FOLDER_LABELS) {
-    if (labels[label] && (0, import_path6.resolve)(labels[label]) === expectedLocalFolder) {
+    if (labels[label] && isSameHostPath(labels[label], expectedLocalFolder)) {
       score += 4;
       hasDevContainerLabelMatch = true;
     }
   }
   if (configFilePath) {
     for (const label of DEVCONTAINER_CONFIG_FILE_LABELS) {
-      if (labels[label] && (0, import_path6.resolve)(labels[label]) === configFilePath) {
+      if (labels[label] && isSameHostPath(labels[label], configFilePath)) {
         score += 3;
         hasDevContainerLabelMatch = true;
       }
@@ -19757,6 +19762,9 @@ function scoreContainerMatch(inspect, hostWorkspaceRoot, configFilePath) {
   }
   return score;
 }
+function isSameHostPath(left, right) {
+  return (0, import_path6.relative)((0, import_path6.resolve)(left), (0, import_path6.resolve)(right)) === "";
+}
 function normalizeContainerPath(filePath) {
   return import_path7.posix.normalize(filePath.replace(/\\/g, "/"));
 }
@@ -19764,6 +19772,14 @@ function containerPathToFileUri(filePath) {
   const normalizedPath = normalizeContainerPath(filePath);
   const encodedPath = normalizedPath.split("/").map((segment) => encodeURIComponent(segment)).join("/");
   return `file://${encodedPath.startsWith("/") ? encodedPath : `/${encodedPath}`}`;
+}
+function containerFileUriToPath(uri) {
+  try {
+    const { pathname } = new URL(uri);
+    return /%2f/i.test(pathname) ? null : normalizeContainerPath(decodeURIComponent(pathname));
+  } catch {
+    return null;
+  }
 }
 function runDocker(args) {
   const result = (0, import_child_process4.spawnSync)("docker", args, {

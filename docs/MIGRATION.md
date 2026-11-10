@@ -6,6 +6,7 @@ This guide covers all migration paths for oh-my-claudecode. Find your current ve
 
 ## Table of Contents
 
+- [Unreleased: Team Bridge Exports Removed from `oh-my-claude-sisyphus/team`](#unreleased-team-bridge-exports-removed-from-oh-my-claude-sisyphusteam)
 - [Unreleased: Host Load Gate Threshold Values](#unreleased-host-load-gate-threshold-values)
 - [Unreleased: Rule Glob Brace Alternation](#unreleased-rule-glob-brace-alternation)
 - [Unreleased: Glossary File Rename (CONTEXT.md → GLOSSARY.md)](#unreleased-glossary-file-rename-contextmd--glossarymd)
@@ -24,6 +25,29 @@ This guide covers all migration paths for oh-my-claudecode. Find your current ve
 - [v3.x → v4.0: Major Architecture Overhaul](#v3x--v40-major-architecture-overhaul)
 
 ---
+
+## Unreleased: Team Bridge Exports Removed from `oh-my-claude-sisyphus/team`
+
+The MCP team bridge (`bridge/team-bridge.cjs`) was never spawned by any OMC
+runtime path, so it and the modules only it used have been removed. The
+`oh-my-claude-sisyphus/team` entry point no longer exports the APIs of these
+modules: `activity-log`, `audit-log`, `bridge-entry`, `capabilities`,
+`heartbeat`, `inbox-outbox`, `mcp-team-bridge`, `message-router`,
+`outbox-reader`, `permissions`, `summary-report`, `task-file-ops`,
+`task-router`, `team-registration`, `team-status`, `tmux-comm`,
+`unified-team`, `usage-tracker`, `worker-health`, and `worker-restart`
+(for example `getTeamStatus`, `readTask`, and `readNewOutboxMessages`).
+
+This is a breaking change for JavaScript code that imports those names from
+`oh-my-claude-sisyphus/team`. Such imports now fail at module load with
+"does not provide an export named ...".
+
+### Migration
+
+- Drive teams through the `omc team` CLI (`omc team status <team>`,
+  `omc team api <operation>`) instead of the removed helpers.
+- Read team state through the exports that remain on the entry point
+  (`runtime-v2`, `team-ops`, `api-interop`, and the team types).
 
 ## Unreleased: Host Load Gate Threshold Values
 

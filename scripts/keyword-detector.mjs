@@ -208,6 +208,10 @@ function isExplicitRalplanSlashInvocation(prompt) {
   return /^\s*\/(?:oh-my-claudecode:)?ralplan(?:\s|$)/i.test(prompt);
 }
 
+function isExplicitRalphSlashInvocation(prompt) {
+  return /^\s*\/(?:oh-my-claudecode:)?ralph(?:\s|$|:)/i.test(prompt);
+}
+
 function isExplicitAskSlashInvocation(prompt) {
   return /^\s*\/(?:oh-my-claudecode:)?ask\s+(?:claude|codex|gemini|antigravity|agy|grok|cursor|muse)\b/i.test(prompt);
 }
@@ -221,10 +225,18 @@ const ANTI_SLOP_EXPLICIT_PATTERN = /\b(ai[\s-]?slop|anti[\s-]?slop|deslop|de[\s-
 const ANTI_SLOP_ACTION_PATTERN = /\b(clean(?:\s*up)?|cleanup|refactor|simplify|dedupe|de-duplicate|prune)\b/i;
 const ANTI_SLOP_SMELL_PATTERN = /\b(slop|duplicate(?:d|s)?|duplication|dead\s+code|unused\s+code|over[\s-]?abstract(?:ion|ed)?|wrapper\s+layers?|boundary\s+violations?|needless\s+abstractions?|unnecessary\s+abstractions?|ai[\s-]?generated|generated\s+code|tech\s+debt)\b/i;
 
+// Action + smell must share one sentence: a long review prompt can say
+// "duplicate execution" in one place and "simplify the architecture" far later.
+// Explicit "ai-slop"/"deslop" still goes through the informational-mention filter.
 function isAntiSlopCleanupRequest(text) {
-  return ANTI_SLOP_EXPLICIT_PATTERN.test(text) ||
-    (ANTI_SLOP_ACTION_PATTERN.test(text) && ANTI_SLOP_SMELL_PATTERN.test(text));
+  if (hasActionableKeyword(text, ANTI_SLOP_EXPLICIT_PATTERN)) return true;
+  return text.split(/[.!?;\n]+/).some((sentence) =>
+    ANTI_SLOP_ACTION_PATTERN.test(sentence) && ANTI_SLOP_SMELL_PATTERN.test(sentence));
 }
+
+// Skills that edit code; never auto-routed when the prompt forbids implementation.
+const CODE_EDITING_SKILLS = new Set(['ai-slop-cleaner', 'autopilot', 'ralph', 'ultragoal', 'tdd']);
+const NO_IMPLEMENT_PATTERN = /\b(?:do\s+not|don'?t|never|without)\s+(?:begin\s+|start\s+)?implement(?:ing|ation)?\b|\bno\s+(?:code\s+)?(?:changes|edits)\b|\bread[\s-]only\s+(?:review|audit|investigation)\b/i;
 
 /** Review-outcome labels that appear together in seeded review instruction text. */
 const REVIEW_SEED_OUTCOME_RES = [
@@ -1081,7 +1093,7 @@ function hasValidWorkflowDescriptor(state, sessionId) {
 
 
 // Create state file for a mode
-async function activateState(directory, prompt, stateName, sessionId) {
+async function activateState(directory, prompt, stateName, sessionId, options = {}) {
   const now = new Date().toISOString();
   // Sanitize prompt BEFORE writing to state: prevents pasted system echoes
   // and oversized blobs from being persisted and re-emitted by Stop hook.
@@ -1098,11 +1110,23 @@ async function activateState(directory, prompt, stateName, sessionId) {
       prompt: safePrompt,
       session_id: sessionId || undefined,
       project_path: directory,
-      awaiting_confirmation: true,
-      awaiting_confirmation_set_at: now,
       last_checked_at: now,
       prd_mode: true, // CRITICAL: Enable PRD mode for ralph (issue #4363)
     };
+    // A typed `/oh-my-claudecode:ralph` IS the confirmation. Arming the
+    // awaiting_confirmation flag here would suppress the Stop hook for
+    // AWAITING_CONFIRMATION_TTL_MS, and the only clearer
+    // (confirmSkillModeStates on a Skill tool call) never runs on the slash
+    // path — [CC] expands the skill body without a Skill tool use. A short
+    // first turn therefore ended the loop silently. Prose activation
+    // ("use ralph for this") keeps the flag so an accidental mention cannot
+    // hijack the session.
+    if (options.confirmedBySlash === true) {
+      state.invocation_source = 'slash';
+    } else {
+      state.awaiting_confirmation = true;
+      state.awaiting_confirmation_set_at = now;
+    }
   } else if (stateName === 'ralplan') {
     // Ralplan needs active + session_id for stop-hook enforcement
     state = {
@@ -1658,6 +1682,87 @@ function loadDisabledKeywords(directory) {
 }
 
 /**
+ * Read task-size suppression opt-outs from the same project and user JSONC
+ * config files used by the TypeScript bridge. User config is merged first so
+ * explicitly set project values take precedence, matching loadConfig().
+ */
+function loadTaskSizeDetectionConfig(directory) {
+  const configPaths = [
+    join(getOmcUserConfigDir(), 'claude-omc', 'config.jsonc'),
+    join(directory || process.cwd(), '.claude', 'omc.jsonc'),
+  ];
+  const result = {
+    enabled: true,
+    suppressHeavyModesForSmallTasks: true,
+  };
+
+  for (const configPath of configPaths) {
+    const taskSizeDetection = loadJsoncConfig(configPath)?.taskSizeDetection;
+    if (!taskSizeDetection || typeof taskSizeDetection !== 'object' || Array.isArray(taskSizeDetection)) {
+      continue;
+    }
+    if (taskSizeDetection.enabled !== undefined) {
+      result.enabled = taskSizeDetection.enabled !== false;
+    }
+    if (taskSizeDetection.suppressHeavyModesForSmallTasks !== undefined) {
+      result.suppressHeavyModesForSmallTasks =
+        taskSizeDetection.suppressHeavyModesForSmallTasks !== false;
+    }
+    // Word limits of the classifier, read like the bridge reads them. Only
+    // OMC_JEV_TASK_SIZE_NOTICE=1 passes them on (isTaskSizeNoticeEnabled).
+    for (const limit of ['smallWordLimit', 'largeWordLimit']) {
+      if (typeof taskSizeDetection[limit] === 'number' && Number.isFinite(taskSizeDetection[limit])) {
+        result[limit] = taskSizeDetection[limit];
+      }
+    }
+  }
+
+  return result;
+}
+
+// OMC_JEV_TASK_SIZE_NOTICE=1 makes the task-size step of this script report
+// what it did. Suppressed heavy modes are announced with the reason, as the
+// TypeScript bridge (src/hooks/bridge.ts) does; heavy modes kept although Jev
+// rated the task small are named with the reason (script only: the bridge
+// drops them on any small answer). The classifier agreement check also uses
+// the taskSizeDetection word limits, which the bridge reads too. Off by
+// default: suppression is then silent and the check uses the default limits.
+function isTaskSizeNoticeEnabled(env = process.env) {
+  return ['1', 'true'].includes(String(env.OMC_JEV_TASK_SIZE_NOTICE ?? '').trim().toLowerCase());
+}
+
+// OMC_JEV_TASK_SIZE_PREFIX_WINS=1: a size prefix of the classifier (quick:,
+// simple:, tiny:, minor:, small:, just:, only:, which classifyTaskSize always
+// rates small) makes the active task-size point drop heavy modes whatever size
+// Jev answers. Off by default: Jev must answer small with confidence >= 0.9.
+function isTaskSizePrefixWinsEnabled(env = process.env) {
+  return ['1', 'true'].includes(String(env.OMC_JEV_TASK_SIZE_PREFIX_WINS ?? '').trim().toLowerCase());
+}
+
+// OMC_JEV_TASK_SIZE_SLASH_ANYWHERE=1: a heavy mode typed as a slash command
+// anywhere in the prompt, also as /omc:<mode>, is never dropped by the active
+// task-size point. Off by default: only a slash command at the start of the
+// prompt keeps its mode.
+function isTaskSizeSlashAnywhereEnabled(env = process.env) {
+  return ['1', 'true'].includes(String(env.OMC_JEV_TASK_SIZE_SLASH_ANYWHERE ?? '').trim().toLowerCase());
+}
+
+// A slash command starts the prompt or follows whitespace, an opening parenthesis or
+// a quote, and ends at whitespace, the end, a closing parenthesis or square bracket, a quote, or
+// punctuation; a dot only when no word character or letter follows (/ralph.md and /ralph.é are files).
+const HEAVY_MODE_SLASH_ANYWHERE_PATTERN = /(?:^|[\s("'])\/(?:oh-my-claudecode:|omc:)?(ralph|autopilot|team|ralplan)(?=\s|$|[?!,;:)\]"']|\.(?![\w\p{L}]))/gui;
+
+/**
+ * Heavy modes typed as a slash command anywhere in the sanitized prompt
+ * (/ralph, /oh-my-claudecode:ralph, /omc:ralph). Pass cleanPrompt: code
+ * blocks, quotes and pasted payloads are already removed there, while bare
+ * slash commands are kept by sanitizeForKeywordDetection.
+ */
+function heavyModeSlashInvocations(prompt) {
+  return new Set([...String(prompt ?? '').matchAll(HEAVY_MODE_SLASH_ANYWHERE_PATTERN)].map((match) => match[1].toLowerCase()));
+}
+
+/**
  * Create a compact skill invocation guide without inlining SKILL.md bodies.
  * Full skill text remains available by path, avoiding UserPromptSubmit token blowups.
  */
@@ -1777,6 +1882,9 @@ const SKILL_TRIGGER_QUESTIONS = {
       analyze: 'The prompt explicitly invokes the analyze trigger.',
       'deep-interview': 'The prompt explicitly invokes the deep-interview trigger.',
       codex: 'The prompt explicitly invokes the codex trigger.',
+      ultragoal: 'The prompt explicitly invokes the ultragoal trigger.',
+      'ai-slop-cleaner': 'The prompt explicitly invokes the ai-slop-cleaner trigger.',
+      wiki: 'The prompt explicitly invokes the wiki trigger.',
       none: 'No trigger fires; handle the prompt without a mode or skill.',
     },
   },
@@ -2030,14 +2138,18 @@ async function main() {
 
     // Resolve conflicts
     let resolved = resolveConflicts(uniqueMatches);
+    if (NO_IMPLEMENT_PATTERN.test(cleanPrompt) && !/^\s*\//.test(prompt)) {
+      resolved = resolved.filter((m) => !CODE_EDITING_SKILLS.has(m.name));
+    }
 
     const permissionMode = data.permission_mode;
     if (isJevShadowOptedIn('skill-trigger', process.env, permissionMode)) {
+      const keywords = resolved.map((match) => match.name);
       const jevResult = recordJevShadow({
         point: 'skill-trigger',
         state: { prompt: cleanPrompt, source: 'user-prompt-submit' },
         questions: SKILL_TRIGGER_QUESTIONS,
-        heuristic: resolved.map((match) => match.name),
+        heuristic: keywords.length > 0 ? keywords[0] : 'none',
         permissionMode,
       });
       
@@ -2065,21 +2177,161 @@ async function main() {
       // In active mode, intent Jev answer could be used here if needed
       // Currently logging-only: resolved keywords come from skill-trigger
     }
+
+    // Apply task-size filtering: suppress heavy keywords for small tasks (issue #4805)
+    // Heavy keywords are: ralph, autopilot, team, ralplan
+    const HEAVY_KEYWORDS = new Set(['ralph', 'autopilot', 'team', 'ralplan']);
+    const taskSizeDetectionConfig = loadTaskSizeDetectionConfig(directory);
+    const taskSizeNotice = isTaskSizeNoticeEnabled();
+    const taskSizeNotes = [];
+
+    // Slash invocations the task-size filter never suppresses. Start-of-prompt slash
+    // commands always count; a slash command anywhere is added below only when an
+    // active task-size decision applies.
+    const slashInvokedByAnyRule = new Set();
+    if (isExplicitRalplanSlashInvocation(cleanPrompt)) slashInvokedByAnyRule.add('ralplan');
+    if (isExplicitRalphSlashInvocation(cleanPrompt)) slashInvokedByAnyRule.add('ralph');
+    if (/^\s*\/(?:oh-my-claudecode:)?autopilot(?:\s|$|:)/i.test(cleanPrompt)) slashInvokedByAnyRule.add('autopilot');
+    if (/^\s*\/(?:oh-my-claudecode:)?team(?:\s|$|:)/i.test(cleanPrompt)) slashInvokedByAnyRule.add('team');
+
+    let jevTaskSizeResult = null;
+    let heuristicTaskSize = null;
+    let gateTaskSize = null;
     if (isJevShadowOptedIn('task-size', process.env, permissionMode)) {
       try {
         const { classifyTaskSize } = await import('../dist/hooks/task-size-detector/index.js');
+        heuristicTaskSize = classifyTaskSize(cleanPrompt);
+        // With OMC_JEV_TASK_SIZE_NOTICE=1 the classifier agreement check below uses the
+        // taskSizeDetection word limits, which the bridge reads too. The logged heuristic
+        // keeps the default limits, as the bridge's twin (recordTaskSizeShadow) does.
+        if (taskSizeNotice) {
+          gateTaskSize = classifyTaskSize(cleanPrompt, {
+            smallWordLimit: taskSizeDetectionConfig.smallWordLimit ?? 50,
+            largeWordLimit: taskSizeDetectionConfig.largeWordLimit ?? 200,
+          });
+        }
         const jevResult = recordJevShadow({
           point: 'task-size',
           state: { prompt: cleanPrompt, source: 'user-prompt-submit' },
           questions: TASK_SIZE_QUESTIONS,
-          heuristic: classifyTaskSize(cleanPrompt),
+          heuristic: heuristicTaskSize.size,
           permissionMode,
         });
-        // In active mode, task-size Jev answer could be used here if needed
-        // Currently logging-only: task sizing is handled on TypeScript side
+        // In active mode, consume the Jev answer to suppress heavy keywords for small tasks
+        if (jevResult && jevResult.mode === 'active' && jevResult.answer) {
+          const choice = (jevResult.answer.choice || '').toLowerCase();
+          jevTaskSizeResult = {
+            size: choice === 'small' ? 'small' : choice === 'large' ? 'large' : 'medium',
+            reason: `Jev active-mode classification: ${choice}`,
+            wordCount: 0,
+            hasEscapeHatch: false,
+            confidence: jevResult.answer.confidence,
+          };
+        }
       } catch {
         // The compiled twin is optional for script-only installs; never affect prompt handling.
       }
+    }
+
+    // OMC_JEV_TASK_SIZE_SLASH_ANYWHERE=1 is a task-size rule: a slash command
+    // anywhere counts as the user's confirmation only when an active task-size
+    // decision applies. In shadow mode or with Jev off, a mid-prompt slash
+    // command keeps the awaiting-confirmation window, as without the variable.
+    const slashAnywhereKeywords = jevTaskSizeResult && isTaskSizeSlashAnywhereEnabled()
+      ? heavyModeSlashInvocations(cleanPrompt)
+      : new Set();
+    for (const name of slashAnywhereKeywords) slashInvokedByAnyRule.add(name);
+
+    // Filter heavy keywords if task-size is 'small' (issue #4805)
+    // Only suppress when enabled, confidence >= 0.9, and the heuristic says
+    // small or the prompt has an explicit size prefix (with
+    // OMC_JEV_TASK_SIZE_PREFIX_WINS=1 a classifier prefix alone is enough).
+    // - NEVER suppress slash-invoked modes (with OMC_JEV_TASK_SIZE_SLASH_ANYWHERE=1
+    //   a slash command anywhere in the prompt counts)
+    // With OMC_JEV_TASK_SIZE_NOTICE=1 the outcome is reported in additionalContext:
+    // the suppressed modes with the reason, and the heavy modes kept although Jev
+    // rated the task small, each with the reason it was kept.
+    const suppressedHeavy = [];
+    const keptHeavy = [];
+    let suppressionReason = '';
+    const jevSizeConfidence = jevTaskSizeResult?.confidence === undefined || jevTaskSizeResult?.confidence === null
+      ? null
+      : String(jevTaskSizeResult.confidence);
+    const sizeTwin = gateTaskSize ?? heuristicTaskSize;
+    const heavyInResolved = () => resolved.filter((keyword) => HEAVY_KEYWORDS.has(keyword.name)).map((keyword) => keyword.name);
+    // OMC_JEV_TASK_SIZE_PREFIX_WINS=1: a classifier size prefix drops heavy modes
+    // whatever size Jev answers.
+    const classifierSizePrefix = isTaskSizePrefixWinsEnabled() && heuristicTaskSize?.hasEscapeHatch === true;
+    const taskSizeSlashAnywhere = isTaskSizeSlashAnywhereEnabled();
+    if (
+      taskSizeDetectionConfig.enabled &&
+      taskSizeDetectionConfig.suppressHeavyModesForSmallTasks &&
+      jevTaskSizeResult &&
+      ((jevTaskSizeResult.size === 'small' &&
+        jevTaskSizeResult.confidence >= 0.9) ||
+        classifierSizePrefix)
+    ) {
+      // Check if prompt has a size prefix like "quick:"
+      const hasSizePrefix = /^\s*(?:quick|small|tiny|minimal|fast|speed|urgent):/i.test(cleanPrompt);
+      // Check if heuristic classifyTaskSize also says small
+      const heuristicSaysSmall = sizeTwin && (sizeTwin.size === 'small' || sizeTwin.size === 'quick');
+      
+      // Only suppress if BOTH conditions are true: confidence >= 0.9 AND (heuristic small OR size prefix)
+      // (a classifier prefix under OMC_JEV_TASK_SIZE_PREFIX_WINS makes the heuristic say small)
+      const shouldSuppressForSize = (heuristicSaysSmall || hasSizePrefix);
+      
+      if (shouldSuppressForSize) {
+        // Filter out non-slash-invoked heavy keywords
+        // (slash invocations already collected in slashInvokedByAnyRule)
+        resolved = resolved.filter(keyword => {
+          if (!HEAVY_KEYWORDS.has(keyword.name)) {
+            return true; // Keep non-heavy keywords
+          }
+          // For heavy keywords, suppress only if NOT slash-invoked
+          if (slashInvokedByAnyRule.has(keyword.name)) {
+            keptHeavy.push(`${keyword.name} (slash command)`);
+            return true;
+          }
+          suppressedHeavy.push(keyword.name);
+          return false;
+        });
+        const prefixWon = classifierSizePrefix &&
+          !(jevTaskSizeResult.size === 'small' && jevTaskSizeResult.confidence >= 0.9);
+        suppressionReason = prefixWon
+          ? `size prefix "${heuristicTaskSize.escapePrefixUsed}" (Jev active-mode classification: ${jevTaskSizeResult.size}, confidence ${jevSizeConfidence ?? 'not given'})`
+          : heuristicSaysSmall
+            ? `Jev active-mode classification: small (confidence ${jevSizeConfidence}); heuristic: ${sizeTwin.reason}`
+            : `Jev active-mode classification: small (confidence ${jevSizeConfidence}); size prefix in the prompt`;
+      } else if (taskSizeNotice) {
+        const heuristicSize = sizeTwin?.size ?? 'unknown';
+        keptHeavy.push(...heavyInResolved().map((name) => `${name} (the heuristic rates the task ${heuristicSize} and the prompt has no size prefix)`));
+      }
+    } else if (
+      taskSizeNotice &&
+      taskSizeDetectionConfig.enabled &&
+      taskSizeDetectionConfig.suppressHeavyModesForSmallTasks &&
+      jevTaskSizeResult &&
+      jevTaskSizeResult.size === 'small'
+    ) {
+      const keptReason = jevSizeConfidence === null ? 'Jev gave no confidence' : `Jev confidence ${jevSizeConfidence} is below 0.9`;
+      keptHeavy.push(...heavyInResolved().map((name) => `${name} (${keptReason})`));
+    }
+    if (taskSizeNotice && suppressedHeavy.length > 0) {
+      taskSizeNotes.push(
+        `[TASK-SIZE: SMALL] Heavy orchestration mode(s) suppressed: ${suppressedHeavy.join(', ')}.\n` +
+          `Reason: ${suppressionReason}\n` +
+          'Running directly without heavy agent stacking. ' +
+          (taskSizeSlashAnywhere
+            ? `To run a suppressed mode anyway, type its slash command anywhere in the prompt (for example \`/oh-my-claudecode:${suppressedHeavy[0]}\`); ` +
+              'slash commands are never suppressed.\n\n'
+            : `To run a suppressed mode anyway, start the prompt with its slash command (for example \`/oh-my-claudecode:${suppressedHeavy[0]}\`); ` +
+              'slash commands at the start of the prompt are never suppressed.\n\n'),
+      );
+    }
+    if (taskSizeNotice && keptHeavy.length > 0) {
+      // A mode can also be kept by a slash command after a size prefix won over a larger Jev answer.
+      const keptHeader = jevTaskSizeResult?.size === 'small' ? 'kept although Jev rated this task small' : 'kept';
+      taskSizeNotes.push(`[TASK-SIZE] Heavy mode(s) ${keptHeader}: ${keptHeavy.join(', ')}.\n\n`);
     }
 
     // Import flow tracer once (best-effort)
@@ -2155,7 +2407,9 @@ async function main() {
     // prompts like "team" can launch the approved execution path even
     // though generic team keyword auto-detection is disabled.
     if (resolved.length === 0) {
-      console.log(JSON.stringify({ continue: true, suppressOutput: true }));
+      console.log(JSON.stringify(taskSizeNotes.length > 0
+        ? createHookOutput(taskSizeNotes.join(''))
+        : { continue: true, suppressOutput: true }));
       return;
     }
 
@@ -2181,14 +2435,22 @@ async function main() {
       ? []
       : resolved.filter(m => ['ralph', 'ultragoal', 'autopilot', 'ralplan'].includes(m.name));
     for (const mode of stateModes) {
-      const activationError = await activateState(directory, prompt, mode.name, sessionId);
+      const activationError = await activateState(directory, prompt, mode.name, sessionId, {
+        // Only a slash command at the start of the raw prompt counts as the user's
+        // confirmation; the sanitized prompt is not used, which would make a command
+        // that follows inline code look leading. A slash command anywhere counts too when
+        // OMC_JEV_TASK_SIZE_SLASH_ANYWHERE=1 and an active task-size decision applies.
+        // A mention inside prose keeps the awaiting-confirmation window.
+        confirmedBySlash: mode.name === 'ralph' &&
+          (isExplicitRalphSlashInvocation(prompt) || slashAnywhereKeywords.has('ralph')),
+      });
       if (activationError === 'workflow_descriptor_integrity_failed') {
         console.log(JSON.stringify(createHookOutput('workflow_descriptor_integrity_failed')));
         return;
       }
       if (activationError) {
         console.log(JSON.stringify(createHookOutput(
-          `[OMC STATE ERROR] ${activationError} No ${mode.name} state was activated.`,
+          taskSizeNotes.join('') + `[OMC STATE ERROR] ${activationError} No ${mode.name} state was activated.`,
         )));
         return;
       }
@@ -2201,7 +2463,7 @@ async function main() {
       }
     }
 
-    const additionalContextParts = [];
+    const additionalContextParts = [...taskSizeNotes];
     for (const [keywordName, message] of MODE_MESSAGE_KEYWORDS) {
       const index = resolved.findIndex(m => m.name === keywordName);
       if (index !== -1) {

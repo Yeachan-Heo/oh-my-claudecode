@@ -60,6 +60,14 @@ describe('comparePair commensurability', () => {
     expect(comparePair(true, { type: 'noul', noul: true })).toBe(true);
     expect(comparePair(false, { type: 'noul', noul: true })).toBe(false);
   });
+  it('twin boolean <-> Jev Noul probability, 0.5 or more reads as yes', () => {
+    expect(comparePair(true, { type: 'noul', noul: 0.92 })).toBe(true);
+    expect(comparePair(true, { type: 'noul', noul: 0.5 })).toBe(true);
+    expect(comparePair(true, { type: 'noul', noul: 0.08 })).toBe(false);
+    expect(comparePair(false, { type: 'noul', noul: 0.08 })).toBe(true);
+    expect(comparePair(false, { type: 'noul', noul: Number.NaN })).toBeNull();
+    expect(comparePair(false, { type: 'noul' })).toBeNull();
+  });
   it('twin string <-> Jev Choice.choice', () => {
     expect(comparePair('build', { type: 'choice', choice: 'build' })).toBe(true);
     expect(comparePair('build', { type: 'choice', choice: 'query' })).toBe(false);

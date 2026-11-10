@@ -23,6 +23,21 @@ import { parseJevEnv, resolveJevTimeoutMs } from "../jev-resolve.mjs";
 
 const SWEEP_THROTTLE_MS = 60 * 60 * 1000; // 1 hour
 const ACTIVE_RESOLVER_TIMEOUT_BUFFER_MS = 500;
+// model-routing decides the model and effort of a subagent call, and a lost
+// answer costs that choice, so its resolver gets 3 s more to start and finish
+// before spawnSync kills it (a cold start under load can take a second or more).
+const MODEL_ROUTING_RESOLVER_EXTRA_BUFFER_MS = 3000;
+
+/**
+ * Time the hook gives the resolver process beyond the request timeout
+ * (OMC_JEV_TIMEOUT_MS) before it kills it.
+ */
+export function activeResolverBufferMs(point) {
+  return (
+    ACTIVE_RESOLVER_TIMEOUT_BUFFER_MS +
+    (point === "model-routing" ? MODEL_ROUTING_RESOLVER_EXTRA_BUFFER_MS : 0)
+  );
+}
 
 /**
  * Get the cross-process sweep throttle marker path.
@@ -273,9 +288,38 @@ export function sweepStaleTempDirs(maxAgeMs = 24 * 60 * 60 * 1000) {
 }
 
 /**
+ * Read the active Noul answer of a recordJevShadow() result as a probability
+ * of "yes" (0-1). The API returns a number; a boolean is accepted too and maps
+ * to 1 or 0. Returns undefined for a shadow, off or degraded call, a missing
+ * answer, an answer whose type is not "noul", or a value that is not a finite
+ * number in 0-1, so the caller falls back to its heuristic. When the result
+ * carries an `answers` map the answer is read by `questionName` only: a name
+ * the map lacks returns undefined, never another question's answer. Without a
+ * map the single `answer` is read.
+ */
+export function jevNoulOf(result, questionName) {
+  if (result?.mode !== "active") return undefined;
+  // With an answers map the answer is read by question name only: a name the
+  // map lacks must not fall back to result.answer, which can be the answer to
+  // a different question. Without a map the single answer is used.
+  const answer =
+    result.answers && typeof result.answers === "object"
+      ? Object.hasOwn(result.answers, questionName)
+        ? result.answers[questionName]
+        : undefined
+      : result.answer;
+  if (answer?.type !== "noul") return undefined;
+  const noul = answer.noul;
+  if (typeof noul === "boolean") return noul ? 1 : 0;
+  return typeof noul === "number" && Number.isFinite(noul) && noul >= 0 && noul <= 1 ? noul : undefined;
+}
+
+/**
  * Fire-and-record one script-side judgment.
  * - Shadow mode: fire-and-forget, returns undefined immediately
- * - Active mode: waits (sync) for Jev answer, returns { mode, answer, source, ... }
+ * - Active mode: waits (sync) for Jev answer, returns { mode, answer, answers, ... }
+ *   (`answers` maps every question name to its answer; read multi-question
+ *   points by name, never by position)
  * - Off mode: returns undefined
  * Falls back to undefined (caller uses heuristic) on timeout/error/parse-failure.
  * permissionMode is the hook input's permission_mode; it travels in the
@@ -367,7 +411,7 @@ export function recordJevShadow({ point, state, questions, heuristic, permission
             encoding: "utf8",
             timeout: resolveJevTimeoutMs(
               process.env,
-              ACTIVE_RESOLVER_TIMEOUT_BUFFER_MS,
+              activeResolverBufferMs(point),
             ),
           },
         );

@@ -282,13 +282,25 @@ describe('keyword-detector.mjs — state.prompt sanitization', () => {
     it('records awaiting_confirmation_set_at on ralph state (enables 2-min TTL)', () => {
         const cwd = makeCwd('kd-setat-ralph-');
         const sid = 'sess-setat-ralph';
-        runKeywordDetector('/ralph 시작해주세요', cwd, sid);
+        // Prose activation, not `/ralph`: a typed slash command is the user's own
+        // confirmation and deliberately does not arm the TTL window.
+        runKeywordDetector('ralph this task', cwd, sid);
         const path = stateFile(cwd, sid, 'ralph');
         expect(existsSync(path)).toBe(true);
         const state = JSON.parse(readFileSync(path, 'utf-8'));
         expect(state.awaiting_confirmation).toBe(true);
         expect(typeof state.awaiting_confirmation_set_at).toBe('string');
         expect(Number.isFinite(new Date(state.awaiting_confirmation_set_at).getTime())).toBe(true);
+    });
+    it('does not arm the confirmation TTL for a typed /ralph invocation', () => {
+        const cwd = makeCwd('kd-setat-ralph-slash-');
+        const sid = 'sess-setat-ralph-slash';
+        runKeywordDetector('/ralph 시작해주세요', cwd, sid);
+        const path = stateFile(cwd, sid, 'ralph');
+        expect(existsSync(path)).toBe(true);
+        const state = JSON.parse(readFileSync(path, 'utf-8'));
+        expect(state.awaiting_confirmation).toBeUndefined();
+        expect(state.invocation_source).toBe('slash');
     });
     it('does not create ultrawork state for retired ulw alias', () => {
         const cwd = makeCwd('kd-setat-ultrawork-');

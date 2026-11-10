@@ -8,7 +8,12 @@
  * request to stdin and reads one JSON result from stdout.
  *
  * Request:  { point, state, questions, heuristic, permissionMode? }
- * Result:   { mode, answer, confidence, durationMs }
+ * Result:   { mode, answer, answers, confidence, durationMs }
+ *
+ * `answer` is the answer to the request's first question (the first answer
+ * in server order when that name is missing). `answers` maps every question
+ * name to its answer; multi-question points must read it by name, because the
+ * API does not guarantee the order of the answers object.
  *
  * mode mirrors the resolver's ResolveMode contract: off (config gates),
  * shadow (twin decides, comparison recorded), active (Jev decides), degraded
@@ -42,6 +47,54 @@ function positiveInt(raw, fallback, max = Number.MAX_SAFE_INTEGER) {
   if (typeof raw !== "string" || !/^[1-9]\d*$/.test(raw)) return fallback;
   const parsed = Number(raw);
   return Number.isSafeInteger(parsed) && parsed <= max ? parsed : fallback;
+}
+
+/**
+ * Per-point excerpt limit: OMC_JEV_EXCERPT_CHARS_<POINT>, with the point name
+ * upper-cased and dashes turned into underscores (model-routing reads
+ * OMC_JEV_EXCERPT_CHARS_MODEL_ROUTING). Undefined when that variable is unset
+ * or not a canonical positive integer. Mirror of excerptCharsFor in config.ts.
+ */
+export function pointExcerptChars(point, env = process.env) {
+  const name = "OMC_JEV_EXCERPT_CHARS_" + String(point).toUpperCase().replace(/-/g, "_");
+  return positiveInt(env[name], undefined);
+}
+
+/**
+ * Points whose state needs more than the global default to be judged at all.
+ * model-routing judges the work behind the task, which 200 characters hide.
+ * loop-continuation judges whether the task is complete from the last
+ * assistant message, which persistent-mode.mjs already bounds to 2000
+ * characters (boundLastAssistantMessage); a 200-character cut keeps only its
+ * opening. compaction judges tool results by their start and end and the
+ * user's last messages (the hooks module bounds them itself, at most 4000
+ * characters). task-size, skill-trigger and intent judge the user's prompt and
+ * learner-extraction the assistant message; a 200-character cut keeps only
+ * the opening of either. learner-extraction uses the same 2000 characters as
+ * loop-continuation. Mirror of POINT_DEFAULT_EXCERPT_CHARS in config.ts.
+ */
+const POINT_DEFAULT_EXCERPT_CHARS = {
+  "model-routing": 12000,
+  "task-size": 4000,
+  "skill-trigger": 1000,
+  intent: 1000,
+  "learner-extraction": 2000,
+  "loop-continuation": 2000,
+  compaction: 4000,
+};
+
+/**
+ * Excerpt limit for one point: its own variable, else the point's default
+ * (POINT_DEFAULT_EXCERPT_CHARS), else OMC_JEV_EXCERPT_CHARS, else 200.
+ * The global variable does not apply to a point with its own default.
+ */
+export function resolveExcerptChars(point, env = process.env) {
+  return (
+    pointExcerptChars(point, env) ??
+    (Object.hasOwn(POINT_DEFAULT_EXCERPT_CHARS, point)
+      ? POINT_DEFAULT_EXCERPT_CHARS[point]
+      : positiveInt(env.OMC_JEV_EXCERPT_CHARS, DEFAULT_EXCERPT_CHARS))
+  );
 }
 
 /**
@@ -80,6 +133,13 @@ export function serializeQuestions(questions) {
 }
 
 /**
+ * Points that `all` and `all:active` never enable: they send more than the
+ * bounded excerpts of the other points, so each needs its own opt-in. Mirror
+ * of NAMED_ONLY_POINTS in src/hooks/jev/config.ts.
+ */
+export const NAMED_ONLY_POINTS = new Set(["compaction"]);
+
+/**
  * Mirror of parseJevConfig + pointState in src/hooks/jev/config.ts. Returns
  * the tri-state decision the TS resolver makes for one point:
  * off | shadow | active.
@@ -88,6 +148,9 @@ export function serializeQuestions(questions) {
  * mode, OMC_JEV_PLAN_MODE=shadow runs opted-in points in shadow and
  * OMC_JEV_PLAN_MODE=off turns them off; any other value changes nothing.
  * Script channel only: the TS resolver receives no permission mode.
+ *
+ * Points in NAMED_ONLY_POINTS run only when OMC_JEV names them; `all` and
+ * `all:active` leave them off and never activate them.
  */
 export function parseJevEnv(point, env = process.env, permissionMode) {
   const raw = (env.OMC_JEV || "").trim();
@@ -96,19 +159,39 @@ export function parseJevEnv(point, env = process.env, permissionMode) {
   let activateAll = false;
   let active = false;
   let listed = false;
+  let off = false;
   for (const entry of raw.split(",")) {
     const token = entry.trim();
     if (!token) continue;
     const colon = token.lastIndexOf(":");
     const name = colon === -1 ? token : token.slice(0, colon);
     const isActive = colon !== -1 && token.slice(colon + 1) === "active";
+    const isOff = colon !== -1 && token.slice(colon + 1).trim().toLowerCase() === "off";
     if (name === "all") {
-      sawAll = true;
-      if (isActive) activateAll = true;
+      if (isOff) {
+        // `all:off` withdraws the wildcard instead of enabling it.
+        sawAll = false;
+        activateAll = false;
+      } else {
+        sawAll = true;
+        if (isActive) activateAll = true;
+      }
     } else if (name === point) {
-      listed = true;
-      if (isActive) active = true;
+      // `point:off` turns the point off even under `all`; a later non-off entry for the point turns it back on.
+      if (isOff) {
+        off = true;
+        active = false;
+      } else {
+        off = false;
+        listed = true;
+        if (isActive) active = true;
+      }
     }
+  }
+  if (off) return "off";
+  if (NAMED_ONLY_POINTS.has(point)) {
+    sawAll = false;
+    activateAll = false;
   }
   if (!sawAll && !listed) return "off";
   if (permissionMode === "plan") {
@@ -135,6 +218,26 @@ export function boundExcerpts(value, max) {
 }
 
 /** Mirror of validateJevResponse in client.ts. Throws on any invalid shape. */
+/**
+ * A logged heuristic is comparable with the logged Jev answer only when it is
+ * a valid answer to the same question: the first declared question, whose
+ * answer is the one logged. Anything else is logged as null (non-comparable).
+ */
+export function comparableHeuristic(value, questions) {
+  const question = Object.values(questions ?? {})[0];
+  if (!question || typeof question !== "object") return null;
+  switch (question.type) {
+    case "choice":
+      return typeof value === "string" && Object.hasOwn(question.criteria ?? {}, value) ? value : null;
+    case "noul":
+      return typeof value === "boolean" ? value : null;
+    case "score":
+      return typeof value === "number" && Number.isFinite(value) ? value : null;
+    default:
+      return null;
+  }
+}
+
 export function validateJevResponse(body) {
   if (body === null || typeof body !== "object")
     throw new Error("invalid response: expected object");
@@ -199,12 +302,16 @@ export async function resolveRequest(
   const startedAt = Date.now();
   const mode = parseJevEnv(request.point, env, request.permissionMode);
   if (mode === "off") {
-    return { mode, answer: null, confidence: undefined, durationMs: 0 };
+    return { mode, answer: null, answers: null, confidence: undefined, durationMs: 0 };
   }
-  const bound = boundExcerpts(
-    { state: request.state, questions: request.questions },
-    positiveInt(env.OMC_JEV_EXCERPT_CHARS, DEFAULT_EXCERPT_CHARS),
-  );
+  // Only the state carries user text. Question definitions are static text
+  // written by the hook scripts and go out whole: bounding them would cut the
+  // model-routing effort instructions (295 characters) and the intent
+  // criterion (209). A question must never embed user text.
+  const bound = {
+    state: boundExcerpts(request.state, resolveExcerptChars(request.point, env)),
+    questions: request.questions,
+  };
   const controller = new AbortController();
   let timer;
   const timeoutMs = resolveJevTimeoutMs(env);
@@ -215,6 +322,7 @@ export async function resolveRequest(
     }, timeoutMs);
   });
   let jevAnswer = null;
+  let jevAnswers = null;
   let confidence;
   let entryMode = mode;
   try {
@@ -237,7 +345,12 @@ export async function resolveRequest(
     if (!response.ok)
       throw new Error("jev request failed: HTTP " + response.status);
     const body = validateJevResponse(await response.json());
-    jevAnswer = Object.values(body.answers)[0];
+    const firstQuestion = Object.keys(request.questions ?? {})[0];
+    jevAnswer =
+      firstQuestion !== undefined && Object.hasOwn(body.answers, firstQuestion)
+        ? body.answers[firstQuestion]
+        : Object.values(body.answers)[0];
+    jevAnswers = body.answers;
     confidence = jevAnswer.confidence;
   } catch (error) {
     entryMode = "degraded";
@@ -257,8 +370,9 @@ export async function resolveRequest(
       point: request.point,
       mode: entryMode,
       state: bound.state,
-      heuristic: request.heuristic ?? null,
+      heuristic: comparableHeuristic(request.heuristic, request.questions),
       jev: entryMode === "degraded" ? null : jevAnswer,
+      answers: entryMode === "degraded" ? null : jevAnswers,
       confidence,
       durationMs,
     },
@@ -267,6 +381,7 @@ export async function resolveRequest(
   return {
     mode: entryMode,
     answer: entryMode === "degraded" ? null : jevAnswer,
+    answers: entryMode === "degraded" ? null : jevAnswers,
     confidence,
     durationMs,
   };

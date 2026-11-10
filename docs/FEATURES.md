@@ -589,3 +589,80 @@ if (report.summary.verdict === 'review-recommended') {
 - Workspace rules flag tracked secret-looking files (environment templates like `.env.example` excluded) and a dirty worktree
 - Design follows the retired risk-assess classifier's lessons (#3164): mechanically checkable signals only, word- and path-anchored patterns, evidence on every finding, prefer misses over alarm fatigue
 - CLI: `omc lookout scan [--brief <text|@file>] [--json] [--strict]` (see REFERENCE.md)
+
+## Watch-PR Verdict Policy
+
+Pure PR-readiness classification for the `babysit` skill: one function turns
+a facts snapshot into a gate verdict, with all I/O owned by the caller.
+
+### API
+
+```ts
+import { decideWatchVerdict } from './features/watch-pr/index.js';
+
+const verdict = decideWatchVerdict(facts, { nowMs });
+// verdict: { kind: 'ready'|'waiting'|'blocked'|'gone', reasons: string[],
+//            proof?: { headSha } }
+```
+
+### Gates, first-match order
+
+- closed/merged → `gone`
+- conflicts, failed checks, canceled checks, requested changes, (when required) missing approval → `blocked`
+- draft, unknown mergeability, pending checks, unserved no-checks window → `waiting`
+- otherwise → `ready` with the head SHA as proof
+
+### Rules
+
+- Check states are `gh pr checks` buckets: `pass`/`fail`/`pending`/`skipping`/`cancel`; `cancel` blocks
+- A first sighting of "no checks" is never readiness; the same head must show none for a 60s confirmation window
+- Unknown mergeability waits at the poll interval; it is never an error
+- Mechanism credit: pstack watch-pr (see docs/CREDITS.md)
+
+## Verification Ledger
+
+Durable, append-only record of verification verdicts at
+`.omc/state/verification-ledger.tsv`, shared by `babysit`,
+`create-verification-skill`, `create-formal-verification-skill`, and
+`correct`.
+
+### API
+
+```ts
+import { appendLedgerEntry, readLedger } from './features/verification-ledger/index.js';
+
+await appendLedgerEntry(path, {
+  ts: '2026-10-26T00:00:00Z', kind: 'babysit', verdict: 'unit-test-verified', evidence: 'npm test',
+});
+const entries = await readLedger(path);
+```
+
+### Verdicts
+
+`live-ui-verified` | `unit-test-verified` | `type-check-only` |
+`enforcement-verified` | `formally-verified` | `verifier-blocked` |
+`verifier-failed`
+
+### Rules
+
+- The verdict records what was actually exercised — never stronger than the evidence
+- Cells starting with a formula character are `'`-prefixed; tabs/newlines flatten; append-only, history is never rewritten
+- Vocabulary credit: pstack orch ledger (see docs/CREDITS.md)
+
+## Jev Task-Size Configuration
+
+Optional environment variables to customize heavy-mode suppression in active task-size mode (`OMC_JEV=task-size:active`). By default, `keyword-detector.mjs` drops heavy modes (`ralph`, `autopilot`, `ralplan`) when Jev answers `small` with confidence ≥ 0.9 AND the classifier agrees or a size prefix is found. Slash commands at prompt start are never suppressed.
+
+### Variables
+
+| Variable | Default | Behavior |
+|----------|---------|----------|
+| `OMC_JEV_TASK_SIZE_NOTICE` | unset | Set to `1` or `true` to report suppressed modes and their reasons in `additionalContext`, matching the TypeScript bridge's output format. Also enables use of `taskSizeDetection` word limits from config (default 50/200). |
+| `OMC_JEV_TASK_SIZE_PREFIX_WINS` | unset | Set to `1` or `true` to let a classifier size prefix (`quick:`, `simple:`, `tiny:`, `minor:`, `small:`, `just:`, `only:`) drop heavy modes regardless of Jev's confidence or answer. |
+| `OMC_JEV_TASK_SIZE_SLASH_ANYWHERE` | unset | Set to `1` or `true` to keep heavy modes from slash commands anywhere in the prompt (`/ralph`, `/omc:ralph`), not just at the start. Filenames (`/ralph.md`) and paths (`a/ralph`) are excluded. |
+
+### Implementation
+
+- Script: `scripts/keyword-detector.mjs`
+- Config keys read: `taskSizeDetection.enabled`, `taskSizeDetection.suppressHeavyModesForSmallTasks`, `taskSizeDetection.smallWordLimit`, `taskSizeDetection.largeWordLimit`
+- See `HOOKS.md` [Task size: heavy-mode suppression](HOOKS.md#task-size-heavy-mode-suppression) for full behavior documentation

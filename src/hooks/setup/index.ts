@@ -13,6 +13,7 @@ import { join } from 'path';
 import { registerBeadsContext } from '../beads-context/index.js';
 import { getClaudeConfigDir } from '../../utils/config-dir.js';
 import { getOmcRoot } from '../../lib/worktree-paths.js';
+import { normalizeHooksDataForPlatform } from '../../../scripts/lib/hook-command-normalizer.mjs';
 
 // ============================================================================
 // Types
@@ -128,29 +129,18 @@ export function setEnvironmentVariables(): string[] {
 }
 
 /**
- * On Windows, replace sh+find-node.sh hook invocations with direct node calls.
+ * On Windows, rewrite hook invocations to `command: node` plus `args`.
  *
- * The sh->find-node.sh->node chain introduced in v4.3.4 (issue #892) is only
- * needed on Unix where nvm/fnm may not expose `node` on PATH in non-interactive
- * shells.  On Windows (MSYS2 / Git Bash) the same chain triggers Claude Code UI
- * bug #17088, which mislabels every successful hook as an error.
+ * The sh->find-node.sh->node chain (v4.3.4, issue #892) is only needed on
+ * Unix, where nvm/fnm may not expose `node` on PATH. On Windows that chain
+ * triggers Claude Code UI bug #17088. The later shell string
+ * `node "${CLAUDE_PLUGIN_ROOT}"/scripts/run.cjs ...` avoids #17088 and still
+ * breaks under PowerShell: the shell splits the quoted root from `/scripts`,
+ * and Node loads the plugin directory. Exec form spawns `node` with each
+ * path as one argument and no shell (#4042, Grok on Windows).
  *
- * This function reads the plugin's hooks.json and rewrites every command of the
- * current form:
- *   sh "${CLAUDE_PLUGIN_ROOT}"/scripts/find-node.sh "${CLAUDE_PLUGIN_ROOT}"/scripts/run.cjs "${CLAUDE_PLUGIN_ROOT}"/scripts/X.mjs [args]
- * or stale absolute-shell cache form:
- *   "/bin/sh" "${CLAUDE_PLUGIN_ROOT}"/scripts/find-node.sh ... [args]
- * or legacy form:
- *   sh "${CLAUDE_PLUGIN_ROOT}/scripts/find-node.sh" "${CLAUDE_PLUGIN_ROOT}/scripts/X.mjs" [args]
- * to:
- *   node "${CLAUDE_PLUGIN_ROOT}"/scripts/run.cjs "${CLAUDE_PLUGIN_ROOT}"/scripts/X.mjs [args]
- *
- * The braced placeholder is required: Claude Code substitutes it itself, while
- * the bare `$CLAUDE_PLUGIN_ROOT` spelling only expands when a POSIX shell runs
- * the command — which the direct-node Windows form deliberately avoids (#4042).
- *
- * The file is only written when at least one command was actually changed, so
- * the function is safe to call on every init (idempotent after first patch).
+ * Input may be find-node.sh, the split shell string, or exec form. Exec form
+ * is left unchanged. The file is written only when a command changed.
  */
 export function patchHooksJsonForWindows(pluginRoot: string): void {
   const hooksJsonPath = join(pluginRoot, 'hooks', 'hooks.json');
@@ -158,45 +148,9 @@ export function patchHooksJsonForWindows(pluginRoot: string): void {
 
   try {
     const content = readFileSync(hooksJsonPath, 'utf-8');
-    const data = JSON.parse(content) as {
-      hooks?: Record<string, Array<{ hooks?: Array<{ command?: string }> }>>;
-    };
-
-    // Either spelling of the placeholder is accepted on input so that manifests
-    // written by any earlier version are repaired; output is always braced.
-    const ROOT = String.raw`(?:\$\{CLAUDE_PLUGIN_ROOT\}|\$CLAUDE_PLUGIN_ROOT)`;
-
-    // Matches current hooks.json:
-    // sh "${CLAUDE_PLUGIN_ROOT}"/scripts/find-node.sh ... /scripts/X.mjs [optional args]
-    // Also matches older hotfix cache entries that hardcoded "/bin/sh".
-    const currentPattern = new RegExp(
-      String.raw`^(?:"\/bin\/sh"|sh) "${ROOT}"\/scripts\/find-node\.sh "${ROOT}"\/scripts\/run\.cjs "${ROOT}"\/scripts\/([^"\s]+)"?(.*)$`,
-    );
-
-    // Matches legacy hooks.json:
-    // sh "${CLAUDE_PLUGIN_ROOT}/scripts/find-node.sh" "${CLAUDE_PLUGIN_ROOT}/scripts/X.mjs" [optional args]
-    const legacyPattern = new RegExp(
-      String.raw`^sh "${ROOT}\/scripts\/find-node\.sh" "${ROOT}\/scripts\/([^"\s]+)"?(.*)$`,
-    );
-
-    let patched = false;
-    for (const groups of Object.values(data.hooks ?? {})) {
-      for (const group of groups) {
-        for (const hook of group.hooks ?? []) {
-          if (typeof hook.command === 'string') {
-            const m = hook.command.match(currentPattern) ?? hook.command.match(legacyPattern);
-            if (m) {
-              hook.command = `node "\${CLAUDE_PLUGIN_ROOT}"/scripts/run.cjs "\${CLAUDE_PLUGIN_ROOT}"/scripts/${m[1]}${m[2]}`;
-              patched = true;
-            }
-          }
-        }
-      }
-    }
-
-    if (patched) {
-      writeFileSync(hooksJsonPath, JSON.stringify(data, null, 2) + '\n');
-    }
+    const data = JSON.parse(content) as { hooks?: Record<string, unknown[]> };
+    if (!normalizeHooksDataForPlatform(data, 'win32')) return;
+    writeFileSync(hooksJsonPath, JSON.stringify(data, null, 2) + '\n');
   } catch {
     // Non-fatal: hooks.json patching is best-effort
   }

@@ -64,9 +64,12 @@ describe('persistent-mode hook error handling (issue #319)', () => {
     }));
 
     for (const result of await Promise.all(runs)) {
-      // Falls back to the default safety timeout, which outlives the harness.
+      // A truncated value (1ms, 30ms) would fire the safety timeout almost
+      // immediately and report it on stderr. The hook outliving a second of
+      // open stdin is what proves the value was not truncated; it used to
+      // outlive the harness instead only because readStdin waited 5s for EOF.
       expect(result.stderr).not.toContain('Safety timeout reached');
-      expect(result.timedOut).toBe(true);
+      expect(result.duration).toBeGreaterThan(1000);
     }
   }, 10_000);
 
@@ -94,10 +97,10 @@ describe('persistent-mode hook error handling (issue #319)', () => {
 
   it('keeps the default safety timeout below the shipped Stop hook wrapper kill', () => {
     const manifest = JSON.parse(readFileSync(join(__dirname, '../../../../hooks/hooks.json'), 'utf-8'));
-    const stopHook = manifest.hooks.Stop[0].hooks.find((hook: { command?: string }) =>
-      hook.command?.includes('/scripts/persistent-mode.mjs'),
+    const stopHook = manifest.hooks.Stop.flatMap((group: { hooks?: Array<{ command?: string; args?: string[]; timeout?: number }> }) => group.hooks ?? []).find((hook: { command?: string; args?: string[] }) =>
+      [hook.command, ...(hook.args ?? [])].join(' ').includes('/scripts/persistent-mode.mjs'),
     );
-    expect(stopHook?.timeout).toBe(10);
+    expect(stopHook?.timeout).toBe(20);
 
     const wrapperKillMs = stopHook.timeout * 1000 - 500;
     for (const hookPath of [TEMPLATE_HOOK_PATH, SCRIPT_HOOK_PATH]) {

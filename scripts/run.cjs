@@ -203,10 +203,12 @@ function resolveHookTimeoutMsFromRoot(pluginRoot, targetPath, extraArgs) {
       const hooks = Array.isArray(entry?.hooks) ? entry.hooks : [];
       for (const hook of hooks) {
         const command = typeof hook?.command === 'string' ? hook.command : '';
+        const hookArgs = Array.isArray(hook?.args) ? hook.args.filter(arg => typeof arg === 'string') : [];
+        const invocation = [command, ...hookArgs].join(' ');
         const timeout = Number(hook?.timeout);
-        if (!scriptPattern.test(command)) continue;
+        if (!scriptPattern.test(invocation)) continue;
         if (!Number.isFinite(timeout) || timeout <= 0) continue;
-        if (!argNeedles.every(arg => command.includes(` ${arg}`) || command.endsWith(` ${arg}`))) continue;
+        if (!argNeedles.every(arg => invocation.includes(` ${arg}`) || invocation.endsWith(` ${arg}`))) continue;
         return { event, timeoutMs: Math.floor(timeout * 1000) };
       }
     }
@@ -1063,15 +1065,17 @@ if (require.main === module) {
       } else {
         const sessionEndManifestHook = resolveTrustedSessionEndTarget(resolution, extraArgs);
         if (sessionEndManifestHook) {
-          // The shipped foreground budget stays 300ms unconditionally; only the
-          // test harness may widen it, and only under NODE_ENV=test.
+          // Reserve half the manifest budget, with at least 1000ms for Node cold start
+          // when the declared timeout permits it. Only tests may override this budget.
+          const manifestTimeoutMs = resolveGenericTimeoutMs(sessionEndManifestHook);
+          const MIN_SESSION_END_BUDGET_MS = 1000;
           const requestedTestTimeout = process.env.NODE_ENV === 'test'
             ? Number(process.env.OMC_SESSION_END_TEST_FOREGROUND_TIMEOUT_MS)
             : NaN;
           const budgetMs = Number.isFinite(requestedTestTimeout) && requestedTestTimeout > 0
             ? requestedTestTimeout
-            : 300;
-          const timeoutMs = Math.min(resolveGenericTimeoutMs(sessionEndManifestHook), budgetMs);
+            : Math.max(MIN_SESSION_END_BUDGET_MS, Math.floor(manifestTimeoutMs * 0.5));
+          const timeoutMs = Math.min(manifestTimeoutMs, budgetMs);
           runWorker(resolution.targetPath, sessionEndManifestHook, timeoutMs).then(status => {
             process.exitCode = status;
           });

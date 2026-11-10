@@ -13,6 +13,7 @@ const ENV_KEYS = [
   'OMC_JEV_TIMEOUT_MS',
   'OMC_JEV_MAX_REQUESTS',
   'OMC_JEV_EXCERPT_CHARS',
+  'OMC_JEV_EXCERPT_CHARS_TASK_SIZE',
   'OMC_JEV_LOG_DIR',
   'OMC_JEV_ENDPOINT',
 ] as const;
@@ -87,7 +88,7 @@ describe('task-size-detector shadow judgment point', () => {
       point: 'task-size',
       mode: 'shadow',
       state: { prompt: PROMPT, source: 'user-prompt-submit' },
-      heuristic: classifyTaskSize(PROMPT),
+      heuristic: classifyTaskSize(PROMPT).size,
       jev: { type: 'choice', choice: 'medium', confidence: 0.6 },
     });
     expect(calls).toHaveLength(1);
@@ -124,7 +125,7 @@ describe('task-size-detector shadow judgment point', () => {
   it('bounds the prompt excerpt in the logged state', async () => {
     process.env.TYPESAFE_API_KEY = 'test-key-123';
     process.env.OMC_JEV = 'task-size';
-    process.env.OMC_JEV_EXCERPT_CHARS = '40';
+    process.env.OMC_JEV_EXCERPT_CHARS_TASK_SIZE = '40';
     const { fetchFn } = stubFetch({ choice: 'medium' });
 
     await recordTaskSizeShadow(PROMPT, fetchFn);

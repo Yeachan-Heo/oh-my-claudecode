@@ -19,14 +19,18 @@ const SCRIPT_NAME = 'post-tool-directory-context-injector.mjs';
 const SCRIPT_PATH = join(REPO_ROOT, 'scripts', SCRIPT_NAME);
 const DIST_HOOK = join(REPO_ROOT, 'dist', 'hooks', 'directory-readme-injector', 'index.js');
 
-interface HookCommand { type: string; command: string; timeout?: number }
+interface HookCommand { type: string; command: string; args?: string[]; timeout?: number }
+
+function hookText(hook: HookCommand): string {
+  return [hook.command, ...(hook.args ?? [])].join(' ');
+}
 interface HookGroup { matcher: string; hooks: HookCommand[] }
 
 function postToolUseCommands(): string[] {
   const config = JSON.parse(readFileSync(join(REPO_ROOT, 'hooks', 'hooks.json'), 'utf-8')) as {
     hooks: Record<string, HookGroup[]>;
   };
-  return (config.hooks.PostToolUse ?? []).flatMap((group) => group.hooks.map((hook) => hook.command));
+  return (config.hooks.PostToolUse ?? []).flatMap((group) => group.hooks.map((hook) => hookText(hook)));
 }
 
 function runInjector(payload: unknown, env: Record<string, string> = {}): Record<string, unknown> {
@@ -53,7 +57,7 @@ describe('PostToolUse directory-context injector registration (issue #4006)', ()
       hooks: Record<string, HookGroup[]>;
     };
     const groups = (script: string) =>
-      (config.hooks.PostToolUse ?? []).filter((group) => group.hooks.some((hook) => hook.command.includes(script)));
+      (config.hooks.PostToolUse ?? []).filter((group) => group.hooks.some((hook) => hookText(hook).includes(script)));
     const matcherTools = (script: string) =>
       groups(script).flatMap((group) => group.matcher.split('|')).sort();
     // Claude Code matches a `|` list case-sensitively against tool_name, while the hooks lowercase it.

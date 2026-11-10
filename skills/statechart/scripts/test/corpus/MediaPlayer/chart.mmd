@@ -1,0 +1,43 @@
+stateDiagram-v2
+  direction LR
+  state "Legend" as legend {
+    lg0: Breaks LoudWhenStopped in some cases
+    lg1: Path to the LoudWhenStopped bug
+  }
+  class lg0 mayBreak
+  class lg1 bugPath
+  state "At the same time" as all {
+    state "Playback" as r0 {
+      s0: Stopped
+      s1: Buffering
+      s2: Playing
+      s3: Paused
+      [*] --> s0
+      s0 --> s1: you press play
+      s1 --> s0: you press stop
+      s1 --> s2: enough data arrives
+      s2 --> s0: the track ends or you press stop
+      s2 --> s1: the network slows
+      s2 --> s3: a call comes in or you press pause
+      s3 --> s0: you press stop
+      s3 --> s2: you press play
+    }
+    --
+    state "Volume" as r1 {
+      s4: Normal volume
+      s5: Loud
+      s6: Muted
+      [*] --> s4
+      s4 --> s5: you turn it up
+      s4 --> s6: a call comes in or you press mute
+      s5 --> s4: the track ends or you press stop or you turn it down
+      s5 --> s6: a call comes in or you press mute
+      s6 --> s4: the call ends or you press mute
+    }
+  }
+  classDef mayBreak fill:#fff3e6,stroke:#e8730c,stroke-width:2.5px,color:#b85a06
+  class s0 mayBreak
+  class s0 bugPath
+  class s4 bugPath
+  class s5 mayBreak
+  class s5 bugPath

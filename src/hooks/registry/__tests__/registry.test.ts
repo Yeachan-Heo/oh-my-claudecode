@@ -170,7 +170,15 @@ describe('hook registry — selection and ordering', () => {
         'node "$CLAUDE_PLUGIN_ROOT"/scripts/run.cjs "$CLAUDE_PLUGIN_ROOT"/scripts/subagent-tracker.mjs start',
       ),
     ).toEqual({ entrypoint: 'subagent-tracker.mjs', args: ['start'] });
+    expect(
+      parseEntrypointCommand('node', [
+        '${CLAUDE_PLUGIN_ROOT}/scripts/run.cjs',
+        '${CLAUDE_PLUGIN_ROOT}/scripts/subagent-tracker.mjs',
+        'start',
+      ]),
+    ).toEqual({ entrypoint: 'subagent-tracker.mjs', args: ['start'] });
     expect(parseEntrypointCommand('echo nothing')).toBeNull();
+    expect(parseEntrypointCommand('node')).toBeNull();
   });
 
   it('selects applicable entries in execution order, honoring matchers', () => {

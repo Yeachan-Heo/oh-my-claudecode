@@ -6,7 +6,7 @@
  * Throws JevClientError on any failure; the resolver catches and degrades.
  */
 
-import type { JevQuestionDef, JevQuestions, JevResponse } from './types.js';
+import type { JevAnswer, JevQuestionDef, JevQuestions, JevResponse } from './types.js';
 
 export class JevClientError extends Error {
   constructor(message: string) {
@@ -106,4 +106,19 @@ export function validateJevResponse(body: unknown): JevResponse {
     }
   }
   return body as JevResponse;
+}
+
+/** A Noul probability at or above this value reads as "yes". */
+export const NOUL_YES_THRESHOLD = 0.5;
+
+/**
+ * Read a Noul answer as yes/no. The API returns `noul` as the probability of
+ * "yes" (0-1), not as a boolean, so `noul === true` never matches a real
+ * answer. A boolean is still accepted; a missing or non-finite value reads as
+ * "no". Same rule as jevSaysTaskComplete() in scripts/persistent-mode.mjs.
+ */
+export function noulAnswerIsYes(answer: JevAnswer | undefined): boolean {
+  const noul = answer?.noul;
+  if (typeof noul === 'boolean') return noul;
+  return typeof noul === 'number' && Number.isFinite(noul) && noul >= NOUL_YES_THRESHOLD;
 }

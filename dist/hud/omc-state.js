@@ -8,6 +8,7 @@ import { existsSync, readFileSync, statSync, readdirSync } from 'fs';
 import { join } from 'path';
 import { getOmcRoot } from '../lib/worktree-paths.js';
 import { validateNamedWorkflowStateStructure } from '../hooks/autopilot/named-workflow-resume-validator.js';
+import { getPrdStatus, readPrdFromPath } from '../hooks/ralph/prd.js';
 /**
  * Maximum age for state files to be considered "active".
  * Files older than this are treated as stale/abandoned.
@@ -135,6 +136,14 @@ export function readRalphStateForHud(directory, sessionId) {
 /**
  * Read PRD state for HUD display.
  * Checks both root prd.json and .omc/prd.json.
+ *
+ * Completion is judged with the same predicate Ralph uses (`getPrdStatus`):
+ * a story counts only when its `passes` claim is revision-bound and the
+ * architect has approved it. Otherwise the HUD shows a run as finished while
+ * the loop is still waiting for reviewer sign-off.
+ *
+ * PRDs that do not satisfy the Ralph schema still render through the tolerant
+ * read below, so display-only usage (a hand-written task list) keeps working.
  */
 export function readPrdStateForHud(directory) {
     // Check root first
@@ -146,6 +155,17 @@ export function readPrdStateForHud(directory) {
             return null;
         }
     }
+    const strict = readPrdFromPath(prdPath);
+    if (strict.prd) {
+        const status = getPrdStatus(strict.prd);
+        return {
+            currentStoryId: status.nextStory?.id ?? null,
+            completed: status.completed,
+            total: status.total,
+        };
+    }
+    // Tolerant fallback for PRDs the Ralph schema rejects: keep the display but
+    // never count a story the PRD explicitly marks as unverified.
     try {
         const content = readFileSync(prdPath, 'utf-8');
         const prd = JSON.parse(content);
@@ -153,11 +173,12 @@ export function readPrdStateForHud(directory) {
             return null;
         }
         const stories = prd.userStories;
-        const completed = stories.filter((s) => s.passes).length;
+        const isComplete = (story) => story.passes === true && story.architectVerified !== false;
+        const completed = stories.filter(isComplete).length;
         const total = stories.length;
         // Find current story (first incomplete, sorted by priority)
         const incomplete = stories
-            .filter((s) => !s.passes)
+            .filter((s) => !isComplete(s))
             .sort((a, b) => a.priority - b.priority);
         return {
             currentStoryId: incomplete[0]?.id || null,

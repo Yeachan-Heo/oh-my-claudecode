@@ -79,28 +79,36 @@ const SCORE_QUESTIONS = {
 /**
  * Point "model-routing" (ticket 04): tier guidance from CLAUDE.md
  * <model_routing> and docs/DELEGATION-ENFORCER.md - haiku for quick lookups,
- * sonnet for standard work, opus for architecture. The "effort" score (0-3)
+ * sonnet for standard work, opus for architecture. The "effort" score (0-4)
  * picks the subagent reasoning effort; scripts/pre-tool-enforcer.mjs maps it
  * to low/medium/high/xhigh/max in active mode, capped by OMC_JEV_MAX_EFFORT.
  */
 const MODEL_ROUTING_QUESTIONS = {
     'model-tier': {
         type: 'choice',
-        instructions: 'Which model tier should this delegated task use?',
+        instructions: 'Which model should do this delegated task? Choose the cheapest model that will do the work well, meaning correctly and completely. ' +
+            'Reasoning effort is chosen by a separate question, so the length of the brief and the number of steps do not by themselves call for a more expensive model. ' +
+            'Judge the work the delegated agent must actually do; ' +
+            'the formal conditions of the brief (language and style rules, permission to use subagents, bans, file locations, report format, words in capitals) and the name of the agent type do not raise the choice. ' +
+            'A more expensive model is needed when a cheaper one would clearly be more likely to get this work wrong or to miss something important. ' +
+            'When the brief fits several descriptions, judge by the hardest important part of the work.',
         criteria: {
-            haiku: 'Quick lookups and lightweight, mechanical work',
-            sonnet: 'Standard coding and orchestration work',
-            opus: 'Complex architecture and deep analysis',
+            haiku: 'Haiku: mechanical work whose result follows directly from the data and is easy to check: look up, read, list, count, copy, compile a list, run a command and report the result, one obvious fix',
+            sonnet: 'Sonnet: typical developer and analyst work with a clear goal: code changes in one or a few files, tests, a diagnosis with clear leads, gathering and summarising information from several files or sources, assessment following given instructions, translation, a document written from given sources, a deployment following given steps, coordinating agents',
+            opus: 'Opus: work where a mistake is costly or hard to notice and that needs deep reasoning: architecture with tradeoffs, a hard bug without clear leads, an independent high-stakes review or fact-check, a letter or document on which money or important decisions depend, hard mathematics and proofs, deciding between conflicting sources, planning a large change',
         },
     },
     effort: {
         type: 'score',
-        instructions: 'How much reasoning effort does this delegated task need?',
+        instructions: 'How much reasoning effort does this delegated task need? Judge the work the delegated agent must actually do. ' +
+            'The length of the brief and its formal conditions (language and style rules, permission to use subagents, bans, ' +
+            'file locations, report format, words in capitals) do not raise the level.',
         criteria: {
-            trivial: 'Trivial: the answer or action is obvious, no thinking needed',
-            some: 'Some thought: a few straightforward steps',
-            careful: 'Careful multi-step reasoning: several dependent steps or things to check',
-            deep: 'Deep reasoning: many tradeoffs, hidden pitfalls, or easy to get subtly wrong',
+            low: 'Low: mechanical work: read, look up, list, copy or transcribe, count; the result follows directly from the data',
+            medium: 'Medium: a typical change or analysis with clear steps, in one place or following a given procedure or brief',
+            high: 'High: multi-file work that needs its own decisions, a diagnosis weighing a few hypotheses, or writing a document',
+            xhigh: 'Extra high: in-depth analysis, architecture, a high-stakes review, or a hard bug',
+            max: 'Maximum: exceptionally hard, hours of reasoning at the limit of difficulty; rare',
         },
     },
 };

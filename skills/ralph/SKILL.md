@@ -15,9 +15,21 @@ Ralph is a PRD-driven persistence loop that keeps working on a task until ALL us
 <Precondition_Feedback_Gate>
 NON-NEGOTIABLE, runs before any story work and at every verification gate:
 
+0. Resolve the CLI once per run. An `omc ralph afk` session exports
+   `OMC_RALPH_AFK_FEEDBACK` and grants only the bare `Bash(omc ralph verify:*)`
+   form, so use `omc` directly there — do not run a discovery probe, it is not
+   granted and is denied in headless mode. Everywhere else use `omc` when it is
+   on PATH; on a plugin-only install there is no `omc`, so use the plugin-shaped
+   form `node "$CLAUDE_PLUGIN_ROOT"/bridge/cli.cjs` — the same prefix OMC's own
+   skill renderer emits, and the same fallback `ultragoal` and `cancel` already
+   document. Every `omc ralph verify` below means the resolved command. If
+   neither form is available, STOP and report the failure — do not fall back to
+   hand-rolled judgment.
+
 1. FIRST ITERATION, before picking a story: run `omc ralph verify --write-baseline --session <sessionId>` (session id: read OMC_SESSION_ID if set — `omc ralph afk` exports it — else the one in the Ralph continuation context / active PRD path; use the SAME id for every call in this run). This records the feedback baseline. If the command is unavailable or denied, STOP and report the failure — do not fall back to hand-rolled judgment.
-2. EVERY verification gate (story verification, post-deslop re-verification): run `omc ralph verify --session <sessionId>` and obey the exit code — 0 = pass (baseline-only failures are recorded warnings, never a story failure), 1 = new failures to fix.
+2. EVERY verification gate (story verification, post-deslop re-verification): run `omc ralph verify --session <sessionId>` and obey the exit code — 0 = pass (baseline-only failures are recorded warnings, never a story failure), 1 = new failures to fix. Two infrastructure causes also exit 1 and are printed on their own lines: `timed out` (the command exceeded its per-command budget; partial output is discarded) and `another verify is running` (runs for one session are serialized). Neither is a story failure: retry after the other run finishes, or raise the budget with `--timeout <seconds>` (or `OMC_RALPH_VERIFY_TIMEOUT_SECONDS`) when the suite legitimately needs more than 600 s.
 3. NEVER hand-roll the feedback diff (running the suite yourself and eyeballing the output is exactly the failure mode this gate exists to prevent).
+4. NEVER re-record the baseline to make a gate pass. A re-record turns every regression introduced since the previous one into baseline-only noise. If the gate cannot run for an infrastructure reason, report it as a blocker in the Step 8 closeout instead.
 </Precondition_Feedback_Gate>
 
 
@@ -172,14 +184,24 @@ Rules:
 - **Invoke the `ai-slop-cleaner` skill via the Skill tool: `Skill("oh-my-claudecode:ai-slop-cleaner")`** — it is a Skill, not an agent. If you mistakenly call it via `Task(subagent_type="oh-my-claudecode:ai-slop-cleaner")`, OMC's PreToolUse hook denies the call with the correct Skill-tool identifier; do not substitute a similarly-named agent. Run in standard mode (not `--review`) on the files changed during the current Ralph session only.
 - Keep the scope bounded to the Ralph changed-file set; do not broaden the cleanup pass to unrelated files.
 - If the reviewer approved the implementation but the deslop pass introduces follow-up edits, keep those edits inside the same changed-file scope before proceeding.
+- **Record the pass — this is the machine-checked part.** Once every story is complete, `omc ralph verify` refuses to pass until a record matching the PRD's criteria revision exists, so whichever way this step ends it has to be stated:
+
+  ```bash
+  omc ralph closeout --deslop completed   # the pass ran
+  omc ralph closeout --deslop skipped     # only when this run started with --no-deslop
+  ```
+
+  The record lands in `.omc/state/sessions/{sessionId}/ralph-closeout.json`, bound to the PRD's governing criteria revision; amending a story's acceptance criteria invalidates it. It states whether the pass ran — it cannot prove the work was good, so the outcome still belongs in the Step 8 notes.
 
   7.6 **Regression Re-verification**:
 
-- After the deslop pass, call `omc ralph verify --session <sessionId>` once more.
+- After the deslop pass and its record, call `omc ralph verify --session <sessionId>` once more.
 - Exit 0 confirms the post-deslop regression state matches the baseline (baseline-only failures are recorded warnings, not a reason to loop here forever). Exit 1 means NEW failures — roll back the cleaner changes or fix the regression, then re-verify until it exits 0.
 - Only proceed to completion after the verify call exits 0 (or `--no-deslop` was explicitly specified).
 
 8. **On approval, terminal closeout and cleanup**: After Step 7.6 passes (with Step 7.5 completed, or skipped via `--no-deslop`), run the closeout below and any applicable Step 10 incident work item before PR creation or `/oh-my-claudecode:cancel` state cleanup. When the user or mode invocation explicitly authorizes publishing and draft-PR creation, draft the body with `/oh-my-claudecode:pr` and create the draft PR. Do not push or open a PR based on completion alone. Mark an authorized draft ready only after the user accepts the completion report. Before any other terminal `/cancel` or state cleanup, including user-requested cancellation, run the same closeout first.
+
+   The deslop record was written in Step 7.5; `omc ralph closeout --check` confirms it still matches the criteria revision.
 
    Append at most three factual lines to `.omc/notepads/ralph/problems.md` — what broke (errors that survived retries, verdicts that came back rejected) and what dragged (missing checks, unreachable information, environment friction); blockers additionally go in `.omc/notepads/ralph/issues.md`. Preserve existing entries: append only and never replace the shared file. If there are no observations, append nothing; an empty closeout is valid, so do not write “no lessons.” These are observations only; landing them on repo surfaces is `refit`'s job, with the user's approval.
 
@@ -318,6 +340,7 @@ Why good: The falsified criterion stops governing, the measurement is preserved 
 - [ ] Selected reviewer verification passed against specific acceptance criteria
 - [ ] ai-slop-cleaner pass completed on changed files (or `--no-deslop` specified)
 - [ ] Post-deslop regression tests pass, or only failures already present in the feedback baseline (same treatment as the test/build lines)
+- [ ] `omc ralph closeout --deslop completed|skipped` recorded, and `omc ralph verify` exits 0 against it
 - [ ] `/oh-my-claudecode:cancel` run for clean state cleanup
 </Final_Checklist>
 

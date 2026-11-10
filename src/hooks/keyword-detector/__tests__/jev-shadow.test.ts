@@ -88,7 +88,7 @@ describe('keyword-detector shadow judgment points', () => {
     expect(byPoint.get('skill-trigger')).toMatchObject({
       mode: 'shadow',
       state: { prompt: PROMPT, source: 'user-prompt-submit' },
-      heuristic: ['ralph'],
+      heuristic: 'ralph',
       jev: { type: 'choice', choice: 'autopilot', confidence: 0.8 },
     });
     expect(byPoint.get('intent')).toMatchObject({
@@ -144,5 +144,51 @@ describe('keyword-detector shadow judgment points', () => {
     expect(triggerResult.source).toBe('twin');
     expect(intentResult.answer).toBe(true);
     expect(intentResult.source).toBe('twin');
+  });
+
+  it('empty keyword list maps to none choice instead of null', async () => {
+    process.env.TYPESAFE_API_KEY = 'test-key-123';
+    process.env.OMC_JEV = 'skill-trigger';
+    const promptWithoutKeywords = 'just some random text without keywords';
+    const trigger = stubFetch({ choice: 'autopilot' });
+
+    const result = await recordSkillTriggerShadow(promptWithoutKeywords, trigger.fetchFn);
+    expect(result.source).toBe('twin');
+    expect(result.answer).toEqual([]);
+
+    const lines = await waitForLogLines(1);
+    const entry = JSON.parse(lines[0]!) as Record<string, unknown>;
+    expect(entry.heuristic).toBe('none');
+  });
+
+  it('logs a detected keyword outside the declared trigger choices as non-comparable', async () => {
+    process.env.TYPESAFE_API_KEY = 'test-key-123';
+    process.env.OMC_JEV = 'skill-trigger';
+    const trigger = stubFetch({ choice: 'none' });
+
+    const result = await recordSkillTriggerShadow('/team fix the regression', trigger.fetchFn);
+    expect(result.answer[0]).toBe('team');
+
+    const lines = await waitForLogLines(1);
+    const entry = JSON.parse(lines[0]!) as Record<string, unknown>;
+    expect(entry.heuristic).toBeNull();
+  });
+});
+
+describe('keyword-detector intent point in active mode', () => {
+  // The API returns noul as the probability of "yes". Each prompt is picked so
+  // that the twin says the opposite of Jev, which shows that Jev decided.
+  it.each([
+    { noul: 0.92, prompt: PROMPT, expected: true },
+    { noul: 0.08, prompt: INTENT_PROMPT, expected: false },
+  ])('reads a noul probability of $noul as $expected', async ({ noul, prompt, expected }) => {
+    process.env.TYPESAFE_API_KEY = 'test-key-123';
+    process.env.OMC_JEV = 'intent:active';
+    const intent = stubFetch({ noul, confidence: 0.9 });
+
+    const result = await recordIntentShadow(prompt, intent.fetchFn);
+
+    expect(result).toEqual({ answer: expected, source: 'jev', mode: 'active' });
+    expect(intent.calls).toHaveLength(1);
   });
 });

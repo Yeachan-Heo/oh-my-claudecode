@@ -92,7 +92,7 @@ describe('applyLoopContinuationShadow', () => {
       expect(body.state.session_id).toBe('sess-1');
       expect(body.state.iteration).toBe(2);
       expect(typeof body.state.continuation_excerpt).toBe('string');
-      expect(String(body.state.continuation_excerpt).length).toBeLessThanOrEqual(200);
+      expect(body.state.continuation_excerpt).toBe(TWIN.message);
     }
     expect(bodies.map((b) => Object.values(b.questions)[0].type).sort()).toEqual(['noul', 'score']);
 
@@ -101,15 +101,21 @@ describe('applyLoopContinuationShadow', () => {
     const parsed = lines.map((line) => JSON.parse(line) as {
       point: string;
       mode: string;
-      heuristic: PersistentModeResult;
+      heuristic: boolean | number | null;
       jev: { type: string } | null;
     });
-    for (const entry of parsed) {
-      expect(entry.point).toBe('loop-continuation');
-      expect(entry.mode).toBe('shadow');
-      expect(entry.heuristic).toEqual(TWIN);
-    }
-    expect(parsed.map((entry) => entry.jev?.type).sort()).toEqual(['noul', 'score']);
+    // heuristics are extracted by mapHeuristic: 
+    // - noul=!shouldBlock (task complete question)
+    // - score=null (no reliable progress data, make non-comparable)
+    // logs may be written in any order since both are async (non-blocking points)
+    const noulEntry = parsed.find((e) => e.jev?.type === 'noul')!;
+    const scoreEntry = parsed.find((e) => e.jev?.type === 'score')!;
+    expect(noulEntry.point).toBe('loop-continuation');
+    expect(noulEntry.mode).toBe('shadow');
+    expect(noulEntry.heuristic).toBe(false); // !shouldBlock
+    expect(scoreEntry.point).toBe('loop-continuation');
+    expect(scoreEntry.mode).toBe('shadow');
+    expect(scoreEntry.heuristic).toBeNull(); // No reliable progress data
   });
 
   it('without a key, zero fetch calls and the twin result is returned unchanged', async () => {
@@ -131,10 +137,15 @@ describe('applyLoopContinuationShadow', () => {
     expect(result).toEqual(TWIN);
     const lines = await readLogLines();
     expect(lines).toHaveLength(2);
-    for (const line of lines) {
-      const entry = JSON.parse(line) as { mode: string; heuristic: PersistentModeResult; jev: unknown };
+    const parsed = lines.map((line) => JSON.parse(line) as { mode: string; heuristic: boolean | number | null; jev: unknown });
+    // heuristics are extracted by mapHeuristic: [!shouldBlock (noul), null (score)]
+    // logs may be written in any order since both are async (non-blocking points)
+    // but degraded logs will have jev:null, so we can't use jev.type to distinguish
+    // Instead, check that we have the right heuristics regardless of order
+    expect(parsed).toHaveLength(2);
+    expect(new Set(parsed.map((e) => e.heuristic))).toEqual(new Set([false, null]));
+    for (const entry of parsed) {
       expect(entry.mode).toBe('degraded');
-      expect(entry.heuristic).toEqual(TWIN);
       expect(entry.jev).toBeNull();
     }
   });
@@ -149,5 +160,169 @@ describe('applyLoopContinuationShadow', () => {
     expect(result).toBe(none);
     expect(calls).toHaveLength(0);
     await expect(readLogLines()).rejects.toThrow();
+  });
+
+  it('makes task-complete non-comparable when team pipeline fails/cancels (shouldBlock=false but not task complete)', async () => {
+    process.env.TYPESAFE_API_KEY = 'test-key-123';
+    process.env.OMC_JEV = 'loop-continuation';
+    const { fetchFn, calls } = stubFetch();
+    
+    // Team pipeline failure: shouldBlock=false (allow stopping) but task is NOT complete
+    const teamFailed: PersistentModeResult = {
+      shouldBlock: false,
+      message: '[TEAM] Pipeline failed; allowing stop for recovery',
+      mode: 'team',
+      metadata: { iteration: 3, maxIterations: 10 },
+    };
+    const result = await applyLoopContinuationShadow({ result: teamFailed, sessionId: 'sess-1', fetchFn });
+
+    expect(result).toEqual(teamFailed);
+    expect(calls).toHaveLength(2);
+
+    const lines = await readLogLines();
+    expect(lines).toHaveLength(2);
+    const parsed = lines.map((line) => JSON.parse(line) as { point: string; jev: { type: string } | null; heuristic: boolean | null });
+    
+    // When team mode fails/cancels, the noul (task complete) heuristic should be null
+    // not !shouldBlock (which would be true), because shouldBlock=false here means
+    // "stop for safety" not "task is complete"
+    const noulEntry = parsed.find((e) => e.jev?.type === 'noul')!;
+    expect(noulEntry.heuristic).toBeNull();
+  });
+
+  it('makes task-complete non-comparable when ralplan circuit breaker trips (shouldBlock=false but not task complete)', async () => {
+    process.env.TYPESAFE_API_KEY = 'test-key-123';
+    process.env.OMC_JEV = 'loop-continuation';
+    const { fetchFn, calls } = stubFetch();
+    
+    // Ralplan circuit breaker: shouldBlock=false (allow stopping) but task is NOT complete
+    const ralplanTripped: PersistentModeResult = {
+      shouldBlock: false,
+      message: '[RALPLAN] Circuit breaker tripped; allowing stop for recovery',
+      mode: 'ralplan',
+      metadata: { iteration: 5, maxIterations: 10, phase: 'execution' },
+    };
+    const result = await applyLoopContinuationShadow({ result: ralplanTripped, sessionId: 'sess-1', fetchFn });
+
+    expect(result).toEqual(ralplanTripped);
+
+    const lines = await readLogLines();
+    const parsed = lines.map((line) => JSON.parse(line) as { jev: { type: string } | null; heuristic: boolean | null });
+    const noulEntry = parsed.find((e) => e.jev?.type === 'noul')!;
+    // Ralplan safety release should be non-comparable, not "task complete"
+    expect(noulEntry.heuristic).toBeNull();
+  });
+
+  it('makes task-complete non-comparable when autoresearch fails/cancels (shouldBlock=false but not task complete)', async () => {
+    process.env.TYPESAFE_API_KEY = 'test-key-123';
+    process.env.OMC_JEV = 'loop-continuation';
+    const { fetchFn, calls } = stubFetch();
+    
+    // Autoresearch failure: shouldBlock=false (allow stopping) but task is NOT complete
+    const autoresearchFailed: PersistentModeResult = {
+      shouldBlock: false,
+      message: '[AUTORESEARCH] Mission failed; allowing stop',
+      mode: 'autoresearch',
+      metadata: { iteration: 2, maxIterations: 5, phase: 'research' },
+    };
+    const result = await applyLoopContinuationShadow({ result: autoresearchFailed, sessionId: 'sess-1', fetchFn });
+
+    expect(result).toEqual(autoresearchFailed);
+
+    const lines = await readLogLines();
+    const parsed = lines.map((line) => JSON.parse(line) as { jev: { type: string } | null; heuristic: boolean | null });
+    const noulEntry = parsed.find((e) => e.jev?.type === 'noul')!;
+    // Autoresearch safety release should be non-comparable, not "task complete"
+    expect(noulEntry.heuristic).toBeNull();
+  });
+
+  it.each(['ralph', 'todo-continuation', 'autopilot', 'skill-active'] as const)(
+    'never infers task completion from a %s release',
+    async (mode) => {
+      process.env.TYPESAFE_API_KEY = 'test-key-123';
+      process.env.OMC_JEV = 'loop-continuation';
+      const { fetchFn } = stubFetch();
+      const released: PersistentModeResult = {
+        shouldBlock: false,
+        message: `[${mode}] diagnostic release`,
+        mode,
+        metadata: { iteration: 1 },
+      };
+
+      await applyLoopContinuationShadow({ result: released, sessionId: 'sess-1', fetchFn });
+
+      const parsed = (await readLogLines()).map((line) => JSON.parse(line) as { jev: { type: string } | null; heuristic: boolean | null });
+      expect(parsed.find((e) => e.jev?.type === 'noul')!.heuristic).toBeNull();
+    },
+  );
+
+  it('logs a blocked stop as an explicit not-complete judgment', async () => {
+    process.env.TYPESAFE_API_KEY = 'test-key-123';
+    process.env.OMC_JEV = 'loop-continuation';
+    const { fetchFn } = stubFetch();
+    const blocked: PersistentModeResult = {
+      shouldBlock: true,
+      message: '[AUTOPILOT] keep going',
+      mode: 'autopilot',
+      metadata: { iteration: 2 },
+    };
+
+    await applyLoopContinuationShadow({ result: blocked, sessionId: 'sess-1', fetchFn });
+
+    const parsed = (await readLogLines()).map((line) => JSON.parse(line) as { jev: { type: string } | null; heuristic: boolean | null });
+    expect(parsed.find((e) => e.jev?.type === 'noul')!.heuristic).toBe(false);
+  });
+});
+
+describe('applyLoopContinuationShadow active mode reads Noul as a probability', () => {
+  function noulFetch(noul: number | boolean): typeof fetch {
+    return captureFetch((body) => {
+      const { questions } = JSON.parse(body) as { questions: Record<string, unknown> };
+      const name = Object.keys(questions)[0];
+      const answers = name === 'iteration_progress'
+        ? { iteration_progress: { type: 'score', score: 2, confidence: 0.7 } }
+        : { task_complete: { type: 'noul', noul, confidence: 0.8 } };
+      return { ok: true, status: 200, json: async () => ({ answers }) } as unknown as Response;
+    }).fetchFn;
+  }
+
+  async function activeResult(noul: number | boolean) {
+    process.env.TYPESAFE_API_KEY = 'test-key-123';
+    process.env.OMC_JEV = 'loop-continuation:active';
+    return applyLoopContinuationShadow({ result: TWIN, sessionId: 'sess-1', fetchFn: noulFetch(noul) });
+  }
+
+  it.each([0.5, 0.9, 1, true])('releases the stop when the answer is %s', async (noul) => {
+    const result = await activeResult(noul);
+    expect(result.shouldBlock).toBe(false);
+    expect(result.message).toContain('[jev-completion]');
+  });
+
+  it.each([0, 0.49, 0.1, false])('keeps the twin decision when the answer is %s', async (noul) => {
+    const result = await activeResult(noul);
+    expect(result).toEqual(TWIN);
+  });
+
+  it('keeps the twin decision in shadow mode whatever the answer is', async () => {
+    process.env.TYPESAFE_API_KEY = 'test-key-123';
+    process.env.OMC_JEV = 'loop-continuation';
+    const result = await applyLoopContinuationShadow({ result: TWIN, sessionId: 'sess-1', fetchFn: noulFetch(0.99) });
+    expect(result).toBe(TWIN);
+  });
+});
+
+describe('applyLoopContinuationShadow excerpt limit', () => {
+  it('sends up to 2000 characters of the continuation message by default, whatever OMC_JEV_EXCERPT_CHARS is', async () => {
+    process.env.TYPESAFE_API_KEY = 'test-key-123';
+    process.env.OMC_JEV = 'loop-continuation';
+    process.env.OMC_JEV_EXCERPT_CHARS = '50';
+    const { fetchFn, calls } = stubFetch();
+    await applyLoopContinuationShadow({ result: { ...TWIN, message: 'm'.repeat(2500) }, sessionId: 'sess-1', fetchFn });
+
+    expect(calls).toHaveLength(2);
+    for (const call of calls) {
+      const body = JSON.parse(call.body) as { state: Record<string, unknown> };
+      expect(body.state.continuation_excerpt).toBe('m'.repeat(2000));
+    }
   });
 });
