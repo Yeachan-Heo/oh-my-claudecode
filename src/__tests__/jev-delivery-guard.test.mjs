@@ -352,13 +352,22 @@ describe('(c) the daily figures', () => {
     expect(result).toMatchObject({
       ts: NOW,
       windowHours: 24,
-      decisions: 10, // d1-d9 plus one near the window boundary that was previously skipped as too young
+      decisions: 9, // d1-d9; skipped: no id, shadow mode, other point, too old, too young
       withAgent: 8, // d9 has no agent
       delivered: 6, // d7 and d8 ran on sonnet although Jev chose opus
       deliveredPercent: 75,
       interruptedAgentHooks: 3, // t1, t2 and t8 (the label of a hook defined with args cannot be told apart and counts as ours)
       interruptedOtherHooks: 3, // t3 (a Bash hook), t7 and the second hook cut on t8 (both another plugin's command)
     });
+  });
+
+  it('counts a decision made just before one daily run in the next run', async () => {
+    const logDir = join(root, 'carry-logs');
+    mkdirSync(logDir, { recursive: true });
+    writeFileSync(join(logDir, 'shadow.jsonl'), JSON.stringify({ ts: new Date(NOW - 30 * 1000).toISOString(), point: 'model-routing', mode: 'active', tool_use_id: 'tail', answers: { 'model-tier': { type: 'choice', choice: 'opus' } } }) + '\n');
+    expect((await computeDelivery({ logDir, configDir, now: NOW, env: {} })).decisions).toBe(0);
+    expect((await computeDelivery({ logDir, configDir, now: NOW + 24 * HOUR, env: {} })).decisions).toBe(1);
+    expect((await computeDelivery({ logDir, configDir, now: NOW + 48 * HOUR, env: {} })).decisions).toBe(0);
   });
 
   it('matches the model by word, not by substring', async () => {
@@ -463,7 +472,7 @@ describe('(c) the daily figures', () => {
     const run = spawnSync(NODE, [GUARD_SCRIPT, '--daily', '--config', configDir, '--log', logDir, '--now', new Date(NOW).toISOString(), '--print'], { encoding: 'utf8', timeout: 20000 });
     expect(run.status).toBe(0);
     const printed = JSON.parse(run.stdout);
-    expect(printed).toMatchObject({ decisions: 10, delivered: 6, deliveredPercent: 75, interruptedAgentHooks: 3 });
+    expect(printed).toMatchObject({ decisions: 9, delivered: 6, deliveredPercent: 75, interruptedAgentHooks: 3 });
     expect(existsSync(dailyStatePath(configDir, logDir, 'delivery.json'))).toBe(false); // a run by hand leaves the state alone
     const written = spawnSync(NODE, [GUARD_SCRIPT, '--daily', '--write', '--config', configDir, '--log', logDir, '--now', new Date(NOW).toISOString()], { encoding: 'utf8', timeout: 20000 });
     expect(written.status).toBe(0);
@@ -473,7 +482,7 @@ describe('(c) the daily figures', () => {
   it('falls back to a 24 hour window for a window that is not a positive number', () => {
     const logDir = writeFixture();
     const run = spawnSync(NODE, [GUARD_SCRIPT, '--daily', '--print', '--config', configDir, '--log', logDir, '--now', new Date(NOW).toISOString(), '--window-hours', 'abc'], { encoding: 'utf8', timeout: 20000 });
-    expect(JSON.parse(run.stdout)).toMatchObject({ windowHours: 24, decisions: 10 });
+    expect(JSON.parse(run.stdout)).toMatchObject({ windowHours: 24, decisions: 9 });
   });
 
   it('shows a bad result once per session at the next prompt', () => {

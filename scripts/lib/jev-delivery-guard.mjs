@@ -43,7 +43,7 @@ import { dirname, join } from 'node:path';
 import { createInterface } from 'node:readline';
 import { fileURLToPath } from 'node:url';
 import { parseJevEnv } from '../jev-resolve.mjs';
-import { resolveOmcStateRoot, resolveSessionStatePathsForHook } from './state-root.mjs';
+import { resolveOmcStateRoot } from './state-root.mjs';
 import { getClaudeConfigDir } from './config-dir.mjs';
 
 export const DEFAULT_MIN_TIMEOUT_S = 60;
@@ -280,7 +280,7 @@ export function promptCheck(data, options = {}) {
     if (file && (!record || typeof record !== 'object')) {
       // A session that began before the guard was enabled: the baseline is this prompt.
       record = newRecord(now, pluginRoot, configDir);
-      writeJson(file.writePath, record);
+      writeJson(file, record);
     } else if (file) {
       touchRecord(file, now); // a live session keeps its baseline out of the sweep
     }
@@ -360,7 +360,6 @@ async function* linesOf(path) {
 
 // Active model-routing decisions of the window that carry a tool_use_id field:
 // tool_use_id -> the model Jev chose. Rotated files (shadow-<stamp>-<pid>.jsonl) are read too.
-// Decisions within SETTLE_MS of the window upper bound are included: they may complete in later windows.
 async function readDecisions(logDir, since, until) {
   const decisions = new Map();
   if (!logDir) return decisions;
@@ -454,8 +453,13 @@ export async function computeDelivery({ logDir, configDir = getClaudeConfigDir()
   const since = now - windowMs;
   const projectsDir = join(configDir, 'projects');
   // With forceInherit the hook leaves the model of some calls alone: the share would say nothing then.
-  const decisions = env.OMC_ROUTING_FORCE_INHERIT === 'true' ? new Map() : await readDecisions(logDir, since, now);
-  const models = readAgentModels(projectsDir, since - 3600 * 1000);
+  // Decisions are read over the settled window (since - SETTLE_MS, now - SETTLE_MS]: a decision younger
+  // than SETTLE_MS may not have an agent yet, and shifting the whole window instead of trimming its tail
+  // makes back-to-back daily runs cover every decision exactly once.
+  const decisions = env.OMC_ROUTING_FORCE_INHERIT === 'true'
+    ? new Map()
+    : await readDecisions(logDir, since - SETTLE_MS, now - SETTLE_MS);
+  const models = readAgentModels(projectsDir, since - SETTLE_MS - 3600 * 1000);
   const result = { ts: now, windowHours: Math.round(windowMs / 360000) / 10, decisions: decisions.size, withAgent: 0, delivered: 0, deliveredPercent: null };
   for (const [id, wanted] of decisions) {
     if (!models.has(id)) continue;
