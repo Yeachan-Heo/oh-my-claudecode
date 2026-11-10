@@ -611,11 +611,16 @@ async function reserveRequest($, shared, now) {
   }
 }
 
-// Admission of one request, right before the HTTP call: the open breaker first, then the limit.
+// Admission of one request, right before the HTTP call: reserve the process cap atomically before
+// awaiting shared state, and release it if the breaker or shared limit refuses the request.
 // Returns {skip: {mode: 'circuit-open', breaker}} or {skip: {mode: 'cap', count, threshold, limit}}
 // when the request must not go out, {} otherwise.
-function admitRequest($, shared) {
-  return sharedStep($, () => admitNow($, shared), {});
+async function admitRequest($, cfg) {
+  if (cfg.maxRequests && session.requests >= cfg.maxRequests) return { skip: { mode: 'process-cap' } };
+  session.requests++;
+  const admission = cfg.shared ? await sharedStep($, () => admitNow($, cfg.shared), {}) : {};
+  if (admission.skip) session.requests--;
+  return admission;
 }
 async function admitNow($, shared) {
   const now = Date.now();
@@ -994,14 +999,8 @@ async function decide($, e, cfg, record, started) {
   const runs = [];
   let held;
   for (let b = 0; b * BATCH < asked.length; b++) {
-    // The process cap is checked and taken in one step, before any await: a concurrent compaction
-    // that passed blockedReason() meanwhile cannot also go over OMC_JEV_MAX_REQUESTS.
-    if (cfg.maxRequests && session.requests >= cfg.maxRequests) { held = { mode: 'process-cap' }; break; }
-    session.requests++;
-    if (cfg.shared) {
-      const admission = await admitRequest($, cfg.shared);
-      if (admission.skip) { session.requests--; held = admission.skip; break; }
-    }
+    const admission = await admitRequest($, cfg);
+    if (admission.skip) { held = admission.skip; break; }
     const batch = asked.slice(b * BATCH, (b + 1) * BATCH);
     const results = {};
     const questions = {};
