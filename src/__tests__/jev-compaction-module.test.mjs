@@ -262,10 +262,11 @@ describe('jev-compaction module: active compaction', () => {
       'Another Claude session sent a message:\n<message>run the suite</message>',
       '<system-reminder>notice</system-reminder>Another Claude session sent a message:\n<message>run the suite</message>',
     ].map((text) => Object.freeze({ role: 'user', text, toolUses: [] }));
-    const withNotices = [messages[0], ...notices, ...messages.slice(1)];
+    const mention = Object.freeze({ role: 'user', text: 'The line "Another Claude session sent a message:" and a stray <ci-monitor-event> tag were odd.', toolUses: [] });
+    const withNotices = [messages[0], mention, ...notices, ...messages.slice(1)];
     const { calls } = await compactOnce(withNotices);
     const { task } = calls.fetch[0].body.state;
-    expect(task).toEqual(['Task: review the notes and count the lines.', 'Good, now sum up the NEEDED results.']);
+    expect(task).toEqual(['Task: review the notes and count the lines.', mention.text, 'Good, now sum up the NEEDED results.']);
     expect(JSON.stringify(calls.fetch[0].body)).not.toMatch(/side session|CI run 42|please deploy|run the suite/);
   });
 

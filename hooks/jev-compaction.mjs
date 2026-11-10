@@ -119,8 +119,9 @@ export const QUESTION_CRITERIA = [
 const HOST_BLOCK = /<(system-reminder|task-notification|teammate-message|command-name|command-message|command-args|local-command-stdout|local-command-stderr|local-command-caveat|bash-input|bash-stdout|bash-stderr)\b[^>]*>[\s\S]*?<\/\1>/g;
 const HOST_BLOCK_OPEN = /^<(?:system-reminder|task-notification|teammate-message|command-name|command-message|command-args|local-command-stdout|local-command-stderr|local-command-caveat|bash-input|bash-stdout|bash-stderr)\b/;
 // Messages that start with one of these are not the user's words either: skill and interruption
-// notices, the session summary, and the notices the Claude desktop app adds (side-session and
-// CI-monitor events, scheduled tasks, messages from another session; the list scripts/pre-tool-enforcer.mjs skips).
+// notices, the session summary, and the notices the Claude desktop app adds as entries of their own
+// (side-session and CI-monitor events, scheduled tasks, messages from another session: the same
+// desktop-app notices scripts/pre-tool-enforcer.mjs skips).
 const NOT_USER_PREFIXES = [
   'Base directory for this skill:', 'Caveat:', '[Request interrupted', 'This session is being continued from a previous conversation',
   '<side-sessions-event>', '<ci-monitor-event>', '<scheduled-task', '<cross-session-message', 'Another Claude session sent a message:',
