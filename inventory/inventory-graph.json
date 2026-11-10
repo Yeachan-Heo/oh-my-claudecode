@@ -5,15 +5,15 @@
   "provenance": {
     "base": "05c800f40d1ad53b42a78609d2667ef4f726808b",
     "planningHead": "0a91273e61dbbd47eb0af4c02844409251e08398",
-    "head": "d35da26cde62cdd5227dd7bb58c907cda4ae6f5f",
-    "sourceSha256": "34b736972a79786fc05da51d6c780da159cf704d913b5576676fa5e9d4aeebac",
+    "head": "d6ba59fa78015f8246a4e1c2ae3c2602bcb4f284",
+    "sourceSha256": "29d5427c4e2a0aa226bd89165dc49eec5fb68145323050b7448799a9f51da486",
     "generatedAt": null,
     "generator": "scripts/generate-inventory-graph.mjs"
   },
   "base": "05c800f40d1ad53b42a78609d2667ef4f726808b",
   "planningHead": "0a91273e61dbbd47eb0af4c02844409251e08398",
-  "head": "d35da26cde62cdd5227dd7bb58c907cda4ae6f5f",
-  "sourceSha256": "34b736972a79786fc05da51d6c780da159cf704d913b5576676fa5e9d4aeebac",
+  "head": "d6ba59fa78015f8246a4e1c2ae3c2602bcb4f284",
+  "sourceSha256": "29d5427c4e2a0aa226bd89165dc49eec5fb68145323050b7448799a9f51da486",
   "counts": {
     "public": {
       "skills": 84,
@@ -28,8 +28,8 @@
       "toolFiles": 65,
       "libFiles": 49,
       "templateHooks": 25,
-      "srcFiles": 1445,
-      "total": 1470
+      "srcFiles": 1446,
+      "total": 1471
     },
     "generated": {
       "distFiles": 5639,
@@ -41363,6 +41363,11 @@
         "path": "src/__tests__/jev-resolve-script.test.mjs"
       },
       {
+        "id": "src/__tests__/jev-shadow-noul.test.mjs",
+        "kind": "src",
+        "path": "src/__tests__/jev-shadow-noul.test.mjs"
+      },
+      {
         "id": "src/__tests__/job-state-db.test.ts",
         "kind": "src",
         "path": "src/__tests__/job-state-db.test.ts"
@@ -48191,6 +48196,11 @@
         "id": "tests/integration/jev-active-mode-repro.test.ts",
         "kind": "other",
         "path": "tests/integration/jev-active-mode-repro.test.ts"
+      },
+      {
+        "id": "tests/integration/jev-advisory-points.test.ts",
+        "kind": "other",
+        "path": "tests/integration/jev-advisory-points.test.ts"
       },
       {
         "id": "tests/integration/jev-max-effort-always.test.ts",
@@ -56097,6 +56107,16 @@
       {
         "from": "src/__tests__/jev-resolve-script.test.mjs",
         "to": "src/hooks/jev/config.ts",
+        "kind": "imports"
+      },
+      {
+        "from": "src/__tests__/jev-shadow-noul.test.mjs",
+        "to": "external:vitest",
+        "kind": "imports"
+      },
+      {
+        "from": "src/__tests__/jev-shadow-noul.test.mjs",
+        "to": "scripts/lib/jev-shadow.mjs",
         "kind": "imports"
       },
       {
@@ -91255,6 +91275,51 @@
         "kind": "imports"
       },
       {
+        "from": "tests/integration/jev-advisory-points.test.ts",
+        "to": "external:node:child_process",
+        "kind": "imports"
+      },
+      {
+        "from": "tests/integration/jev-advisory-points.test.ts",
+        "to": "external:node:fs",
+        "kind": "imports"
+      },
+      {
+        "from": "tests/integration/jev-advisory-points.test.ts",
+        "to": "external:node:http",
+        "kind": "imports"
+      },
+      {
+        "from": "tests/integration/jev-advisory-points.test.ts",
+        "to": "external:node:http",
+        "kind": "type-imports"
+      },
+      {
+        "from": "tests/integration/jev-advisory-points.test.ts",
+        "to": "external:node:os",
+        "kind": "imports"
+      },
+      {
+        "from": "tests/integration/jev-advisory-points.test.ts",
+        "to": "external:node:path",
+        "kind": "imports"
+      },
+      {
+        "from": "tests/integration/jev-advisory-points.test.ts",
+        "to": "external:node:url",
+        "kind": "imports"
+      },
+      {
+        "from": "tests/integration/jev-advisory-points.test.ts",
+        "to": "external:vitest",
+        "kind": "imports"
+      },
+      {
+        "from": "tests/integration/jev-advisory-points.test.ts",
+        "to": "src/lib/worktree-paths.ts",
+        "kind": "imports"
+      },
+      {
         "from": "tests/integration/jev-max-effort-always.test.ts",
         "to": "external:node:child_process",
         "kind": "imports"
@@ -92666,12 +92731,12 @@
       }
     ],
     "stats": {
-      "nodeCount": 8255,
-      "edgeCount": 8837,
-      "importEdgeCount": 7386,
+      "nodeCount": 8257,
+      "edgeCount": 8848,
+      "importEdgeCount": 7396,
       "registerEdgeCount": 105
     }
   },
-  "inventorySha256": "c15e50dbecefb72d8d5139869a91748a53476604ac6e9fb5dc36176131018031",
-  "manifestSha256": "e67a297e7de0f76180927fcb39a51c8d3b4ee46c4f6e68b576549a054880dd24"
+  "inventorySha256": "23dcb3dc576c95b38813fde29f787c08a1d01845d2d1c5a93530966512789053",
+  "manifestSha256": "2d8e00056392dec29e8dc2ecfef5f24908c0bb88fabbf5a5d7f11ecab5d92f70"
 }
