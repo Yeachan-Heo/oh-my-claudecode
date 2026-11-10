@@ -5954,7 +5954,7 @@ function defineJudgmentPoint(definition) {
     blocking: definition.blocking
   };
 }
-var INTENT_QUESTIONS, NOUL_QUESTIONS, SCORE_QUESTIONS, MODEL_ROUTING_QUESTIONS, STALENESS_QUESTIONS, VERDICT_QUESTIONS, TASK_SIZE_QUESTIONS, LEARNER_EXTRACTION_QUESTIONS, SLOP_WARNING_QUESTIONS, SIMPLIFIER_TRIGGER_QUESTIONS, JUDGMENT_POINTS;
+var INTENT_QUESTIONS, NOUL_QUESTIONS, SCORE_QUESTIONS, MODEL_ROUTING_QUESTIONS, STALENESS_QUESTIONS, VERDICT_QUESTIONS, TASK_SIZE_QUESTIONS, LEARNER_EXTRACTION_QUESTIONS, SLOP_WARNING_QUESTIONS, SIMPLIFIER_TRIGGER_QUESTIONS, COMPACTION_QUESTIONS, JUDGMENT_POINTS;
 var init_points = __esm({
   "src/hooks/jev/points.ts"() {
     "use strict";
@@ -6074,6 +6074,18 @@ var init_points = __esm({
         }
       }
     };
+    COMPACTION_QUESTIONS = {
+      "result-need": {
+        type: "score",
+        instructions: "How much will the tool result described under this question's name in state.results still be needed for further work on the user's task (state.task)? Judge whether further work will use it, not whether it was needed before.",
+        criteria: {
+          not_needed: "Not needed: the work it served is finished, or the result is easy to reproduce (a file listing, repository status, a write confirmation, a result repeated later).",
+          probably_not_needed: "Probably not needed: background from which further work needs at most a conclusion already written in the conversation.",
+          may_be_useful: "May be useful: details that further work may come back to.",
+          needed: "Needed: data that further work relies on and that is nowhere else in the conversation (file contents before an edit, numbers for later calculations, findings, an error to fix)."
+        }
+      }
+    };
     JUDGMENT_POINTS = {
       intent: defineJudgmentPoint({ name: "intent", questions: INTENT_QUESTIONS, blocking: false }),
       "loop-continuation": defineJudgmentPoint({
@@ -6096,7 +6108,8 @@ var init_points = __esm({
         name: "simplifier-trigger",
         questions: SIMPLIFIER_TRIGGER_QUESTIONS,
         blocking: false
-      })
+      }),
+      compaction: defineJudgmentPoint({ name: "compaction", questions: COMPACTION_QUESTIONS, blocking: true })
     };
   }
 });
