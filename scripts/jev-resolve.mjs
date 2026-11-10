@@ -68,14 +68,25 @@ export function pointExcerptChars(point, env = process.env) {
  * characters (boundLastAssistantMessage); a 200-character cut keeps only its
  * opening. compaction judges tool results by their start and end and the
  * user's last messages (the hooks module bounds them itself, at most 4000
- * characters). Mirror of POINT_DEFAULT_EXCERPT_CHARS in config.ts.
+ * characters). task-size, skill-trigger and intent judge the user's prompt and
+ * learner-extraction the assistant message; a 200-character cut keeps only
+ * the opening of either. learner-extraction uses the same 2000 characters as
+ * loop-continuation. Mirror of POINT_DEFAULT_EXCERPT_CHARS in config.ts.
  */
-const POINT_DEFAULT_EXCERPT_CHARS = { "model-routing": 12000, "loop-continuation": 2000, compaction: 4000 };
+const POINT_DEFAULT_EXCERPT_CHARS = {
+  "model-routing": 12000,
+  "task-size": 4000,
+  "skill-trigger": 1000,
+  intent: 1000,
+  "learner-extraction": 2000,
+  "loop-continuation": 2000,
+  compaction: 4000,
+};
 
 /**
  * Excerpt limit for one point: its own variable, else the point's default
- * (model-routing, loop-continuation, compaction), else OMC_JEV_EXCERPT_CHARS,
- * else 200. The global variable does not apply to a point with its own default.
+ * (POINT_DEFAULT_EXCERPT_CHARS), else OMC_JEV_EXCERPT_CHARS, else 200.
+ * The global variable does not apply to a point with its own default.
  */
 export function resolveExcerptChars(point, env = process.env) {
   return (

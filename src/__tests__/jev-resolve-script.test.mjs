@@ -107,10 +107,18 @@ describe('excerpt limit parity with the TS config contract', () => {
     [{}, 'task-size'],
     [{ OMC_JEV_EXCERPT_CHARS: '512' }, 'model-routing'],
     [{ OMC_JEV_EXCERPT_CHARS: '512' }, 'task-size'],
+    [{ OMC_JEV_EXCERPT_CHARS: '512' }, 'skill-trigger'],
+    [{ OMC_JEV_EXCERPT_CHARS: '512' }, 'intent'],
+    [{ OMC_JEV_EXCERPT_CHARS: '512' }, 'learner-extraction'],
+    [{ OMC_JEV_EXCERPT_CHARS: '512' }, 'slop-warning'],
+    [{}, 'skill-trigger'],
+    [{}, 'intent'],
+    [{}, 'learner-extraction'],
     [{ OMC_JEV_EXCERPT_CHARS_MODEL_ROUTING: '12000' }, 'model-routing'],
     [{ OMC_JEV_EXCERPT_CHARS: '512', OMC_JEV_EXCERPT_CHARS_MODEL_ROUTING: '12000' }, 'model-routing'],
-    [{ OMC_JEV_EXCERPT_CHARS: '512', OMC_JEV_EXCERPT_CHARS_MODEL_ROUTING: '12000' }, 'task-size'],
-    [{ OMC_JEV_EXCERPT_CHARS_TASK_SIZE: '4000' }, 'task-size'],
+    [{ OMC_JEV_EXCERPT_CHARS: '512', OMC_JEV_EXCERPT_CHARS_MODEL_ROUTING: '12000' }, 'slop-warning'],
+    [{ OMC_JEV_EXCERPT_CHARS_TASK_SIZE: '300' }, 'task-size'],
+    [{ OMC_JEV_EXCERPT_CHARS: '512', OMC_JEV_EXCERPT_CHARS_LEARNER_EXTRACTION: '300' }, 'learner-extraction'],
     [{ OMC_JEV_EXCERPT_CHARS_MODEL_ROUTING: '1e3' }, 'model-routing'],
     [{ OMC_JEV_EXCERPT_CHARS_MODEL_ROUTING: '0' }, 'model-routing'],
     [{ OMC_JEV_EXCERPT_CHARS_MODEL_ROUTING: ' 80 ' }, 'model-routing'],
@@ -302,7 +310,7 @@ describe('resolveRequest', () => {
   it('bounds excerpts before send and log', async () => {
     let body;
     const fetchFn = async (_url, init) => { body = JSON.parse(init.body); return { ok: true, status: 200, json: async () => ({ answers: { route: { type: 'choice', choice: 'x' } } }) }; };
-    await resolveRequest({ point: 'task-size', state: { prompt: 'a'.repeat(500) }, questions: QUESTIONS }, baseEnv({ OMC_JEV: 'task-size', OMC_JEV_EXCERPT_CHARS: '50' }), fetchFn);
+    await resolveRequest({ point: 'slop-warning', state: { prompt: 'a'.repeat(500) }, questions: QUESTIONS }, baseEnv({ OMC_JEV: 'slop-warning', OMC_JEV_EXCERPT_CHARS: '50' }), fetchFn);
     expect(body.state.prompt).toHaveLength(50);
   });
 
@@ -310,7 +318,7 @@ describe('resolveRequest', () => {
     let body;
     const fetchFn = async (_url, init) => { body = JSON.parse(init.body); return { ok: true, status: 200, json: async () => ({ answers: { route: { type: 'choice', choice: 'x' } } }) }; };
     const questions = { route: { type: 'choice', instructions: 'i'.repeat(300), criteria: { haiku: 'h'.repeat(300), opus: 'o'.repeat(300) } } };
-    await resolveRequest({ point: 'task-size', state: { prompt: 'a'.repeat(500) }, questions }, baseEnv({ OMC_JEV: 'task-size', OMC_JEV_EXCERPT_CHARS: '50' }), fetchFn);
+    await resolveRequest({ point: 'slop-warning', state: { prompt: 'a'.repeat(500) }, questions }, baseEnv({ OMC_JEV: 'slop-warning', OMC_JEV_EXCERPT_CHARS: '50' }), fetchFn);
     expect(body.state.prompt).toHaveLength(50);
     expect(body.questions.route.instructions).toHaveLength(300);
     expect(body.questions.route.criteria.opus).toHaveLength(300);
@@ -338,9 +346,9 @@ describe('resolveRequest', () => {
   it('bounds the state of one point with its own OMC_JEV_EXCERPT_CHARS_<POINT> variable', async () => {
     const bodies = [];
     const fetchFn = async (_url, init) => { bodies.push(JSON.parse(init.body)); return { ok: true, status: 200, json: async () => ({ answers: { route: { type: 'choice', choice: 'x' } } }) }; };
-    const env = baseEnv({ OMC_JEV: 'model-routing,task-size', OMC_JEV_EXCERPT_CHARS: '50', OMC_JEV_EXCERPT_CHARS_MODEL_ROUTING: '300' });
+    const env = baseEnv({ OMC_JEV: 'model-routing,slop-warning', OMC_JEV_EXCERPT_CHARS: '50', OMC_JEV_EXCERPT_CHARS_MODEL_ROUTING: '300' });
     await resolveRequest({ point: 'model-routing', state: { prompt: 'a'.repeat(500) }, questions: QUESTIONS }, env, fetchFn);
-    await resolveRequest({ point: 'task-size', state: { prompt: 'a'.repeat(500) }, questions: QUESTIONS }, env, fetchFn);
+    await resolveRequest({ point: 'slop-warning', state: { prompt: 'a'.repeat(500) }, questions: QUESTIONS }, env, fetchFn);
     expect(bodies[0].state.prompt).toHaveLength(300);
     expect(bodies[1].state.prompt).toHaveLength(50);
   });
@@ -348,8 +356,23 @@ describe('resolveRequest', () => {
   it('falls back to the safe excerpt default for a truncated numeric override', async () => {
     let body;
     const fetchFn = async (_url, init) => { body = JSON.parse(init.body); return { ok: true, status: 200, json: async () => ({ answers: { route: { type: 'choice', choice: 'x' } } }) }; };
-    await resolveRequest({ point: 'task-size', state: { prompt: 'a'.repeat(500) }, questions: QUESTIONS }, baseEnv({ OMC_JEV: 'task-size', OMC_JEV_EXCERPT_CHARS: '1e3' }), fetchFn);
+    await resolveRequest({ point: 'slop-warning', state: { prompt: 'a'.repeat(500) }, questions: QUESTIONS }, baseEnv({ OMC_JEV: 'slop-warning', OMC_JEV_EXCERPT_CHARS: '1e3' }), fetchFn);
     expect(body.state.prompt).toHaveLength(200);
+  });
+
+  it.each([
+    ['task-size', 4000, 'OMC_JEV_EXCERPT_CHARS_TASK_SIZE'],
+    ['skill-trigger', 1000, 'OMC_JEV_EXCERPT_CHARS_SKILL_TRIGGER'],
+    ['intent', 1000, 'OMC_JEV_EXCERPT_CHARS_INTENT'],
+    ['learner-extraction', 2000, 'OMC_JEV_EXCERPT_CHARS_LEARNER_EXTRACTION'],
+  ])('%s sends up to %i characters of state by default, ignores OMC_JEV_EXCERPT_CHARS and obeys %s', async (point, limit, variable) => {
+    const bodies = [];
+    const fetchFn = async (_url, init) => { bodies.push(JSON.parse(init.body)); return { ok: true, status: 200, json: async () => ({ answers: { route: { type: 'choice', choice: 'x' } } }) }; };
+    const state = { prompt: 'a'.repeat(limit + 500) };
+    await resolveRequest({ point, state, questions: QUESTIONS }, baseEnv({ OMC_JEV: point, OMC_JEV_EXCERPT_CHARS: '50' }), fetchFn);
+    await resolveRequest({ point, state, questions: QUESTIONS }, baseEnv({ OMC_JEV: point, [variable]: '300' }), fetchFn);
+    expect(bodies[0].state.prompt).toHaveLength(limit);
+    expect(bodies[1].state.prompt).toHaveLength(300);
   });
 
   it.each(['1e3', '2147483648'])(

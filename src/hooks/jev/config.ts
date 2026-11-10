@@ -12,8 +12,9 @@
  * - OMC_JEV_EXCERPT_CHARS: max excerpt length sent in state, default 200
  * - OMC_JEV_EXCERPT_CHARS_<POINT>: the same limit for one point (point name
  *   upper-cased, dashes as underscores, e.g. OMC_JEV_EXCERPT_CHARS_MODEL_ROUTING).
- *   model-routing defaults to 12000 and loop-continuation to 2000; both ignore
- *   OMC_JEV_EXCERPT_CHARS; set the point's own variable to change them.
+ *   Points with their own default (POINT_DEFAULT_EXCERPT_CHARS: model-routing,
+ *   task-size, skill-trigger, intent, learner-extraction, loop-continuation)
+ *   ignore OMC_JEV_EXCERPT_CHARS; set the point's own variable to change them.
  * - OMC_JEV_ENDPOINT: base URL overlay (stub servers / tests)
  * - OMC_JEV_LOG_DIR: shadow-log directory override (tests)
  * - OMC_JEV_QUIET=1: silence the env-activation stderr warning (hook
@@ -127,18 +128,25 @@ export function parseJevConfig(env: NodeJS.ProcessEnv = process.env): JevConfig 
  * opening. Here the state carries the continuation message only.
  * compaction judges tool results by their start and end and the user's last
  * messages (hooks/jev-compaction.mjs bounds them itself, at most 4000
- * characters). Mirror of POINT_DEFAULT_EXCERPT_CHARS in scripts/jev-resolve.mjs
+ * characters). task-size, skill-trigger and intent judge the user's prompt and
+ * learner-extraction the assistant message; a 200-character cut keeps only
+ * the opening of either. learner-extraction uses the same 2000 characters as
+ * loop-continuation. Mirror of POINT_DEFAULT_EXCERPT_CHARS in scripts/jev-resolve.mjs
  * and DEFAULT_EXCERPT_CHARS in hooks/jev-compaction.mjs.
  */
 export const POINT_DEFAULT_EXCERPT_CHARS: Readonly<Record<string, number>> = {
   'model-routing': 12000,
+  'task-size': 4000,
+  'skill-trigger': 1000,
+  intent: 1000,
+  'learner-extraction': 2000,
   'loop-continuation': 2000,
   compaction: 4000,
 };
 
 /**
  * Excerpt limit for one point: its own variable, else the point's default
- * (model-routing, loop-continuation, compaction), else OMC_JEV_EXCERPT_CHARS.
+ * (POINT_DEFAULT_EXCERPT_CHARS: model-routing, task-size, skill-trigger, intent, learner-extraction, loop-continuation, compaction), else OMC_JEV_EXCERPT_CHARS.
  * The global variable does not apply to a point with its own default.
  */
 export function excerptCharsFor(point: string, config: JevConfig): number {
