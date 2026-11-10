@@ -22,6 +22,8 @@ const RALPH_INVOCATION = "[MAGIC KEYWORD: RALPH]";
 const PROMPTS_WITH_RALPH = [
   "use ralph to fix the typo in a/ralph",
   "use ralph to fix the typo in /ralph.md",
+  "use ralph to fix the typo in /ralph.\u00e9",
+  "use ralph to fix the typo in /ralph.\u914d\u7f6e",
   "use ralph to fix the typo\n```\n/ralph\n```",
   "use ralph to fix the typo\n> /ralph was run before",
   "fix the typo and run /oh-my-claudecode:ralph now",
@@ -174,6 +176,21 @@ describe("keyword-detector.mjs: OMC_JEV_TASK_SIZE_SLASH_ANYWHERE", () => {
     expect(state?.awaiting_confirmation).toBeUndefined();
   }
 
+  /**
+   * Ralph was kept and its persisted state still awaits confirmation: no slash
+   * command counted as the user's confirmation. Same load caveat as
+   * expectConfirmedBySlash.
+   */
+  function expectAwaitingConfirmation(output: Awaited<ReturnType<typeof run>>) {
+    const context = output.hookSpecificOutput?.additionalContext ?? "";
+    expectModeKept(context, "ralph");
+    if (context.includes("No ralph state was activated.")) return;
+    const state = persistedRalphState();
+    expect(state, "ralph state was not persisted").not.toBeNull();
+    expect(state?.awaiting_confirmation).toBe(true);
+    expect(state?.invocation_source).toBeUndefined();
+  }
+
   /** Jev answered in active mode (not degraded), so a kept mode was kept by the rule under test. */
   function expectJevAnswered() {
     expect(taskSizeRequests).toBe(1);
@@ -201,6 +218,20 @@ describe("keyword-detector.mjs: OMC_JEV_TASK_SIZE_SLASH_ANYWHERE", () => {
       expect(await run("fix the typo and run /oh-my-claudecode:ralph now", { OMC_JEV_TASK_SIZE_SLASH_ANYWHERE: "0" })).toEqual(SUPPRESSED);
       expectJevAnswered();
     });
+
+    it("a slash command at the start of the prompt is the confirmation of the ralph state", async () => {
+      expectConfirmedBySlash(await run("/oh-my-claudecode:ralph fix the typo"));
+      expectJevAnswered();
+    });
+
+    it.each([
+      ["active", "task-size:active"],
+      ["off", "off"],
+    ])("a slash command that leads only after inline code is removed still awaits confirmation (%s)", async (_label, jev) => {
+      // Keyword detection reads the prompt without the inline code and finds ralph; the
+      // confirmation is read from the raw prompt, which does not start with the command.
+      expectAwaitingConfirmation(await run("`reference.txt` /ralph fix this", { OMC_JEV: jev }));
+    });
   });
 
   describe("with OMC_JEV_TASK_SIZE_SLASH_ANYWHERE=1", () => {
@@ -224,6 +255,11 @@ describe("keyword-detector.mjs: OMC_JEV_TASK_SIZE_SLASH_ANYWHERE", () => {
       expectJevAnswered();
     });
 
+    it("a slash command that leads only after inline code is removed confirms ralph", async () => {
+      expectConfirmedBySlash(await run("`reference.txt` /ralph fix this", SLASH_ANYWHERE));
+      expectJevAnswered();
+    });
+
     it("accepts true as well as 1", async () => {
       expectConfirmedBySlash(await run("fix the typo and run /oh-my-claudecode:ralph now", { OMC_JEV_TASK_SIZE_SLASH_ANYWHERE: "true" }));
       expectJevAnswered();
@@ -243,6 +279,8 @@ describe("keyword-detector.mjs: OMC_JEV_TASK_SIZE_SLASH_ANYWHERE", () => {
     it.each([
       ["a mode name inside a path", "use ralph to fix the typo in a/ralph"],
       ["a file name that starts with the mode", "use ralph to fix the typo in /ralph.md"],
+      ["a file name with a non-ASCII letter after the dot", "use ralph to fix the typo in /ralph.\u00e9"],
+      ["a file name with a non-ASCII script after the dot", "use ralph to fix the typo in /ralph.\u914d\u7f6e"],
       ["a slash command inside a code block", "use ralph to fix the typo\n```\n/ralph\n```"],
       ["a slash command inside a quote", "use ralph to fix the typo\n> /ralph was run before"],
     ])("%s does not keep ralph", async (_label, prompt) => {
@@ -258,17 +296,6 @@ describe("keyword-detector.mjs: OMC_JEV_TASK_SIZE_SLASH_ANYWHERE", () => {
   });
 
   describe("with OMC_JEV_TASK_SIZE_SLASH_ANYWHERE=1 but no active task-size decision", () => {
-    /** Ralph was kept and its persisted state still awaits confirmation (no slash confirmation). */
-    function expectAwaitingConfirmation(output: Awaited<ReturnType<typeof run>>) {
-      const context = output.hookSpecificOutput?.additionalContext ?? "";
-      expectModeKept(context, "ralph");
-      if (context.includes("No ralph state was activated.")) return;
-      const state = persistedRalphState();
-      expect(state, "ralph state was not persisted").not.toBeNull();
-      expect(state?.awaiting_confirmation).toBe(true);
-      expect(state?.invocation_source).toBeUndefined();
-    }
-
     it.each([
       ["shadow mode", "task-size"],
       ["Jev off", "off"],
