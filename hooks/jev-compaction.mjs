@@ -704,12 +704,21 @@ async function decide($, e, cfg, record, started) {
   const built = build(messages, candidates, stats);
   if (!pairingOk(messages, built)) return { fallback: 'build_error' };
   const after = built.reduce((s, m) => s + messageChars(m), 0);
+  const reduction = before ? (1 - after / before) : 0;
+  // Fall back when protected calls prevent meaningful compaction (zero or negative reduction)
+  if (after >= before) {
+    record.failure = 'insufficient_reduction';
+    record.chars_after = after;
+    record.reduction = Math.round(reduction * 1000) / 1000;
+    session.failedInRow++;
+    return { fallback: 'insufficient_reduction' };
+  }
   const hist = [0, 0, 0, 0];
   for (const c of asked) if (c.answered) hist[Math.min(3, Math.round(c.score * 3))]++;
   Object.assign(record, {
     messages_after: built.length,
     chars_after: after,
-    reduction: before ? Math.round((1 - after / before) * 1000) / 1000 : 0,
+    reduction: Math.round(reduction * 1000) / 1000,
     kept_full: candidates.filter((c) => c.keep === 'full').length,
     kept_short: candidates.filter((c) => c.keep === 'short').length,
     traced: candidates.filter((c) => c.keep === 'trace').length,
