@@ -247,6 +247,10 @@ function startDailyCheck(dir, configDir, logDir, env, now) {
   const lock = claimDailyCheck(dir, logDir, now);
   if (!lock) return;
   const release = () => { try { unlinkSync(lock); } catch { /* gone */ } };
+  // Re-read daily.json after acquiring the lock: another session may have started the check
+  // while we were waiting for the lock, so verify that we haven't missed the daily slot.
+  const state = readJson(dailyFile(dir, logDir, 'daily.json'));
+  if (typeof state?.lastStart === 'number' && now - state.lastStart < DAY_MS) return release();
   if (!writeJson(dailyFile(dir, logDir, 'daily.json'), { lastStart: now })) return release();
   try {
     const args = [SELF, '--daily', '--write', '--config', configDir];
