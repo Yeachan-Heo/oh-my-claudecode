@@ -1053,9 +1053,10 @@ function recordModelRoutingShadow(toolName, toolInput, updatedToolInput, permiss
       : knownTier && !isTierAlias(selectedModel) ? selectedModel : knownTier ? model : modifiedInput.model;
     // Resolve the baseline effort: the effort the call would run on without Jev, checking
     // explicit call effort, agent definition effort, and inherited session effort in order.
+    // Use the original baseEffort saved before any modifications, but resolve inherited values.
     // Apply the always-on cap to the baseline effort before recording to avoid counting
     // a no-Jev cap as a Jev-induced change when both baseline and result are capped the same way.
-    const baselineEffortRaw = resolveBaselineEffort(modifiedInput.effort, originalInput.subagent_type);
+    const baselineEffortRaw = baseEffort || resolveBaselineEffort(undefined, originalInput.subagent_type);
     const baselineEffort = typeof baselineEffortRaw === 'string' && isMaxEffortAlwaysEnabled() ? capEffort(baselineEffortRaw, maxEffort()) : baselineEffortRaw;
     noteJevRouting({ model: baselineModel, effort: baselineEffort }, updatedToolInput, answers, originalInput.subagent_type);
   }
