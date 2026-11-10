@@ -1,3 +1,19 @@
+# oh-my-claudecode v5.8.5: Jev hook timeout fix
+
+## Release Notes
+
+v5.8.5 is a patch release that extends hook timeouts for hooks that wait on Jev model routing and provides additional time for the model-routing resolver.
+
+### Bug Fixes
+
+- **fix(jev): lengthen hook timeouts for hooks that wait for Jev and give the model-routing resolver more time** (#4961)
+
+### Stats
+
+- **1 PR merged** | **0 new features** | **1 bug fix** | **0 security/hardening improvements** | **0 other changes**
+
+---
+
 # oh-my-claudecode v5.8.4: Hooks improvements, Jev enhancements, Teleport fix
 
 ## Release Notes
