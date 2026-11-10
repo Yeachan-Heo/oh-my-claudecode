@@ -14,14 +14,15 @@
  * share the same twin decision and iteration state.
  */
 
-import { recordJudgment } from '../jev/index.js';
+import { noulAnswerIsYes, recordJudgment } from '../jev/index.js';
 import type { JevAnswer } from '../jev/index.js';
 import type { PersistentModeResult } from './index.js';
 
 /**
  * Iteration metadata only: mode/session/iteration context, tool names, and
- * the continuation-message excerpt (bounded by OMC_JEV_EXCERPT_CHARS in the
- * resolver before send/log). Never whole file contents.
+ * the continuation-message excerpt (bounded by the point's excerpt limit in the
+ * resolver before send/log: 2000 characters by default, or
+ * OMC_JEV_EXCERPT_CHARS_LOOP_CONTINUATION). Never whole file contents.
  */
 function buildLoopContinuationState(result: PersistentModeResult, sessionId?: string): Record<string, unknown> {
   return {
@@ -61,10 +62,10 @@ export async function applyLoopContinuationShadow(args: LoopContinuationShadowAr
 
   const state = buildLoopContinuationState(result, args.sessionId);
   
-  // For active mode, map Jev's Noul answer (task complete?) to a boolean
+  // For active mode, map Jev's Noul answer (task complete?) to the continuation decision
   const mapTaskCompletionAnswer = (answer: JevAnswer): PersistentModeResult => {
-    // Jev Noul answer: noul=true means task is complete, noul=false/undefined means not complete
-    const taskComplete = answer.noul === true;
+    // Jev Noul answer: noul is the probability of "yes" (0-1); "yes" means the task is complete
+    const taskComplete = noulAnswerIsYes(answer);
     if (taskComplete) {
       // Task is complete, exit the loop
       return { ...result, shouldBlock: false, message: '[jev-completion] task complete; exiting loop' };
