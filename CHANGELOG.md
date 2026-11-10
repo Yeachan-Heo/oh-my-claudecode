@@ -1,3 +1,27 @@
+# oh-my-claudecode v5.8.4: Hooks improvements, Jev enhancements, Teleport fix
+
+## Release Notes
+
+v5.8.4 is a patch release that adds opt-in shell command checks, improves Jev model routing, fixes worktree teleport for projects without package.json, and hardens Windows plugin hook spawning.
+
+### Features
+
+- **feat(hooks): opt-in shell command checks for Bash and PowerShell** (#4925) — enable with `OMC_SHELL_CHECKS=1`
+- **feat(jev): let a use marker pin the model and effort of a model-routing call** (#4924)
+
+### Bug Fixes
+
+- **fix(jev): Stop completion output, Noul probabilities, loop-continuation excerpt, parent-message notices** (#4923)
+- **fix(teleport): skip the dependency step when the new worktree has no package.json** (#4919)
+- **fix(types): add TypeScript declarations for hook-command-normalizer module** (e1ec999)
+- **fix(hooks): spawn plugin hooks without a shell on Windows** (d605bce)
+
+### Stats
+
+- **5 PRs merged** | **2 new features** | **4 bug fixes** | **0 security/hardening improvements** | **0 other changes**
+
+---
+
 # oh-my-claudecode v5.8.3: Bug Fixes
 
 ## Release Notes
