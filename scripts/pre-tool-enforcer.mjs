@@ -569,7 +569,7 @@ const SLOP_WARNING_QUESTIONS = {
   },
 };
 
-const MODEL_ROUTING_QUESTIONS = {
+const MODEL_ROUTING_QUESTIONS_BASE = {
   'model-tier': {
     type: 'choice',
     instructions:
@@ -600,6 +600,16 @@ const MODEL_ROUTING_QUESTIONS = {
     },
   },
 };
+
+function getModelRoutingQuestions(env = process.env) {
+  const questions = JSON.parse(JSON.stringify(MODEL_ROUTING_QUESTIONS_BASE));
+  if (isModelRoutingFableOptinEnabled(env)) {
+    questions['model-tier'].criteria.fable = 'Fable: highest-complexity tier for exceptionally demanding reasoning tasks';
+  }
+  return questions;
+}
+
+const MODEL_ROUTING_QUESTIONS = getModelRoutingQuestions();
 
 // Subagent reasoning effort chosen by the model-routing "effort" score (0-4).
 // The five criteria are ordered low, medium, high, xhigh, max, so the score is
@@ -711,6 +721,11 @@ function isUnpinnedModel(model) {
 
 function isModelRoutingAllAgentsEnabled(env = process.env) {
   return ['1', 'true'].includes(String(env.OMC_JEV_MODEL_ROUTING_ALL_AGENTS ?? '').trim().toLowerCase());
+}
+
+// OMC_JEV_MODEL_ROUTING_FABLE=1 enables fable as an opt-in model choice.
+function isModelRoutingFableOptinEnabled(env = process.env) {
+  return ['1', 'true'].includes(String(env.OMC_JEV_MODEL_ROUTING_FABLE ?? '').trim().toLowerCase());
 }
 
 // The `model:` an agent definition declares, searched the way Claude Code finds the
@@ -877,7 +892,11 @@ function recordModelRoutingShadow(toolName, toolInput, updatedToolInput, permiss
   // about a call whose model is known, whether the call or the marker named it.
   const selectedModel = marker?.model || modifiedInput.model || readAgentDefinitionModel(originalInput.subagent_type);
   const model = isTierAlias(selectedModel) ? selectedModel.toLowerCase() : normalizeToCcAlias(selectedModel);
-  const knownTier = ['haiku', 'sonnet', 'opus'].includes(model);
+  const allowedTiers = ['haiku', 'sonnet', 'opus'];
+  if (isModelRoutingFableOptinEnabled()) {
+    allowedTiers.push('fable');
+  }
+  const knownTier = allowedTiers.includes(model);
   // A call with no model of its own and no model in a plugin, project or user agent
   // definition is unpinned; only OMC_JEV_MODEL_ROUTING_ALL_AGENTS asks about those.
   const unpinned = !knownTier && isModelRoutingAllAgentsEnabled()
@@ -939,7 +958,11 @@ function recordModelRoutingShadow(toolName, toolInput, updatedToolInput, permiss
     // and a tier alias the provider cannot resolve is denied: set the alias on such a call
     // only when it resolves to a provider model.
     const inheritsSessionModel = unpinned && isForceInheritEnabled() && !resolveTierAliasToSafeModel(jevChoice);
-    if (jevChoice && ['haiku', 'sonnet', 'opus'].includes(jevChoice) && !inheritsSessionModel) {
+    const allowedJevChoices = ['haiku', 'sonnet', 'opus'];
+    if (isModelRoutingFableOptinEnabled()) {
+      allowedJevChoices.push('fable');
+    }
+    if (jevChoice && allowedJevChoices.includes(jevChoice) && !inheritsSessionModel) {
       ensureUpdated().model = jevChoice;
     }
 
