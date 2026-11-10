@@ -274,6 +274,43 @@ describe('applyLoopContinuationShadow', () => {
   });
 });
 
+describe('applyLoopContinuationShadow active mode reads Noul as a probability', () => {
+  function noulFetch(noul: number | boolean): typeof fetch {
+    return captureFetch((body) => {
+      const { questions } = JSON.parse(body) as { questions: Record<string, unknown> };
+      const name = Object.keys(questions)[0];
+      const answers = name === 'iteration_progress'
+        ? { iteration_progress: { type: 'score', score: 2, confidence: 0.7 } }
+        : { task_complete: { type: 'noul', noul, confidence: 0.8 } };
+      return { ok: true, status: 200, json: async () => ({ answers }) } as unknown as Response;
+    }).fetchFn;
+  }
+
+  async function activeResult(noul: number | boolean) {
+    process.env.TYPESAFE_API_KEY = 'test-key-123';
+    process.env.OMC_JEV = 'loop-continuation:active';
+    return applyLoopContinuationShadow({ result: TWIN, sessionId: 'sess-1', fetchFn: noulFetch(noul) });
+  }
+
+  it.each([0.5, 0.9, 1, true])('releases the stop when the answer is %s', async (noul) => {
+    const result = await activeResult(noul);
+    expect(result.shouldBlock).toBe(false);
+    expect(result.message).toContain('[jev-completion]');
+  });
+
+  it.each([0, 0.49, 0.1, false])('keeps the twin decision when the answer is %s', async (noul) => {
+    const result = await activeResult(noul);
+    expect(result).toEqual(TWIN);
+  });
+
+  it('keeps the twin decision in shadow mode whatever the answer is', async () => {
+    process.env.TYPESAFE_API_KEY = 'test-key-123';
+    process.env.OMC_JEV = 'loop-continuation';
+    const result = await applyLoopContinuationShadow({ result: TWIN, sessionId: 'sess-1', fetchFn: noulFetch(0.99) });
+    expect(result).toBe(TWIN);
+  });
+});
+
 describe('applyLoopContinuationShadow excerpt limit', () => {
   it('sends up to 2000 characters of the continuation message by default, whatever OMC_JEV_EXCERPT_CHARS is', async () => {
     process.env.TYPESAFE_API_KEY = 'test-key-123';
