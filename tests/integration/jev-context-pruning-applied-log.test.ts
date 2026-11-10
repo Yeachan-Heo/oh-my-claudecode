@@ -1,11 +1,11 @@
 /**
  * Context pruning applied-log tests: real post-tool-verifier.mjs subprocess
- * against a mock Jev endpoint. Covers the warning and cooldown branches
+ * against a mock Jev endpoint. Covers the critical and cooldown branches
  * that emit applied-log rows (line 645, 651 in post-tool-verifier.mjs).
  */
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { spawn } from "node:child_process";
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { createServer, type Server } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -16,9 +16,9 @@ const API_KEY = "test-key-123";
 
 type WireBody = { state: Record<string, unknown>; questions: Record<string, unknown> };
 
-// Mock Jev answers: stale context below critical (triggers warning)
+// Mock Jev answers: stale context (score 3 triggers critical then suppressed)
 const STALE_ANSWER = {
-  "context-pruning": { type: "choice", choice: "stale", confidence: 0.8 },
+  staleness: { type: "score", score: 3, confidence: 0.8 },
 };
 
 function runVerifier(input: Record<string, unknown>, env: NodeJS.ProcessEnv, cwd: string) {
@@ -50,7 +50,7 @@ function runVerifier(input: Record<string, unknown>, env: NodeJS.ProcessEnv, cwd
   });
 }
 
-describe("post-tool-verifier.mjs: context-pruning applied-log (warning and cooldown)", () => {
+describe("post-tool-verifier.mjs: context-pruning applied-log (critical and cooldown)", () => {
   let cwd: string;
   let env: NodeJS.ProcessEnv;
   let server: Server;
@@ -93,60 +93,66 @@ describe("post-tool-verifier.mjs: context-pruning applied-log (warning and coold
     rmSync(cwd, { recursive: true, force: true });
   });
 
-  it("writes applied row when stale context triggers warning", async () => {
+  it("writes applied row when stale context triggers critical", async () => {
     const input = {
       tool_name: "Read",
-      tool_input: { path: "/some/file" },
+      tool_response: "A retained tool result with useful context.\nMore content.",
       cwd,
       session_id: "test-session",
       permission_mode: "normal" as const,
+      context_window: { used_percentage: 80 },
     };
 
     const result = await runVerifier(input, env, cwd);
     expect(result.exitCode).toBe(0);
 
-    // Check that applied log exists and contains the context-pruning entry with warning message
+    // Check that applied log exists and contains the context-pruning entry with critical message
     const appliedPath = join(cwd, "jev-logs", "applied.jsonl");
     const lines = readFileSync(appliedPath, "utf-8").trim().split("\n").filter(Boolean);
     expect(lines.length).toBeGreaterThan(0);
 
     const entry = JSON.parse(lines[lines.length - 1]);
     expect(entry.point).toBe("context-pruning");
-    expect(entry.applied.message).toBe("warning");
+    expect(entry.applied.message).toBe("critical");
     expect(entry.applied.staleness).toBe("stale");
   });
 
-  it("writes suppressed row when cooldown prevents second warning", async () => {
-    // First call triggers warning
+  it("writes suppressed row when cooldown prevents second critical", async () => {
+    // First call triggers critical
     const input1 = {
       tool_name: "Read",
-      tool_input: { path: "/some/file" },
+      tool_response: "A retained tool result with useful context.\nMore content.",
       cwd,
       session_id: "test-session",
       permission_mode: "normal" as const,
+      context_window: { used_percentage: 80 },
     };
 
-    await runVerifier(input1, env, cwd);
+    const result1 = await runVerifier(input1, env, cwd);
+    expect(result1.exitCode).toBe(0);
 
-    // Second call within cooldown should suppress warning
+    // Second call within cooldown should be suppressed
     const input2 = {
       tool_name: "Read",
-      tool_input: { path: "/other/file" },
+      tool_response: "Another tool result.",
       cwd,
       session_id: "test-session",
       permission_mode: "normal" as const,
+      context_window: { used_percentage: 80 },
     };
 
-    const result = await runVerifier(input2, env, cwd);
-    expect(result.exitCode).toBe(0);
+    const result2 = await runVerifier(input2, env, cwd);
+    expect(result2.exitCode).toBe(0);
 
-    // Check that suppressed entry exists
+    // Check that both rows exist: first critical, second suppressed
     const appliedPath = join(cwd, "jev-logs", "applied.jsonl");
     const lines = readFileSync(appliedPath, "utf-8").trim().split("\n").filter(Boolean);
-    const suppressed = lines.filter((line) => {
-      const entry = JSON.parse(line);
-      return entry.applied?.message === "suppressed";
-    });
-    expect(suppressed.length).toBeGreaterThan(0);
+    expect(lines.length).toBeGreaterThanOrEqual(2);
+
+    const [first, second] = [lines[0], lines[1]].map((l) => JSON.parse(l));
+    expect(first.applied.message).toBe("critical");
+    expect(first.applied.staleness).toBe("stale");
+    expect(second.applied.message).toBe("suppressed");
+    expect(second.applied.staleness).toBe("stale");
   });
 });
