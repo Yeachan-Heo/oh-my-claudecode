@@ -11,11 +11,24 @@ import { mkdtempSync, rmSync, writeFileSync, readFileSync, mkdirSync } from 'nod
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { createHash } from 'node:crypto';
 
 const ROOT = fileURLToPath(new URL('../../', import.meta.url));
 
 // Import the promptCheck function
 const { promptCheck } = await import(join(ROOT, 'scripts', 'lib', 'jev-delivery-guard.mjs'));
+
+// Helper to create a digest that matches the source implementation
+function digest(text: string): string {
+  return createHash('sha256').update(text).digest('hex').slice(0, 16);
+}
+
+// Helper to get the daily file path (matching source dailyFile function)
+function dailyFile(guardDir: string, logDir: string | undefined, kind: string): string {
+  const [name, extension] = kind.split('.');
+  const filename = `${name}-${digest(String(logDir ?? ''))}.${extension}`;
+  return join(guardDir, filename);
+}
 
 describe('jev-delivery-guard per-logdir acknowledgments', () => {
   let cwd: string;
@@ -71,20 +84,16 @@ describe('jev-delivery-guard per-logdir acknowledgments', () => {
     const logDir2 = join(cwd, 'project-b', 'jev-logs');
     const sessionFile = join(sessionsDir, `${sessionId}.json`);
 
-    // Helper to get the daily file path for delivery results
-    const dailyFile = (logDir: string, kind: string) => {
-      const filename = kind === 'delivery.json' ? `${logDir.replace(/\//g, '_')}-delivery.json` : kind;
-      return join(guardDir, filename);
-    };
-
     // Simulate two projects with delivery results
     const ts1 = now - 3600000; // 1 hour ago
     const ts2 = now - 1800000; // 30 minutes ago
     
     // Create delivery report for project 1 (shown earlier)
-    writeFileSync(dailyFile(logDir1, 'delivery.json'), JSON.stringify({ ts: ts1, share: 0.95, interrupted: 0 }), 'utf8');
+    const file1 = dailyFile(guardDir, logDir1, 'delivery.json');
+    writeFileSync(file1, JSON.stringify({ ts: ts1, share: 0.95, interrupted: 0 }), 'utf8');
     // Create delivery report for project 2 (shown more recently)
-    writeFileSync(dailyFile(logDir2, 'delivery.json'), JSON.stringify({ ts: ts2, share: 0.85, interrupted: 0 }), 'utf8');
+    const file2 = dailyFile(guardDir, logDir2, 'delivery.json');
+    writeFileSync(file2, JSON.stringify({ ts: ts2, share: 0.85, interrupted: 0 }), 'utf8');
 
     // Create a session record with per-logdir shown tracking - project 1 was already shown, project 2 was not
     const record = {
