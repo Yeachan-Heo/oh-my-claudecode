@@ -1747,8 +1747,8 @@ function isTaskSizeSlashAnywhereEnabled(env = process.env) {
   return ['1', 'true'].includes(String(env.OMC_JEV_TASK_SIZE_SLASH_ANYWHERE ?? '').trim().toLowerCase());
 }
 
-// A slash command starts the prompt or follows whitespace, an opening bracket or
-// a quote, and ends at whitespace, the end, a closing bracket or quote, or
+// A slash command starts the prompt or follows whitespace, an opening parenthesis or
+// a quote, and ends at whitespace, the end, a closing parenthesis or square bracket, a quote, or
 // punctuation; a dot only when no word character follows (/ralph.md is a file).
 const HEAVY_MODE_SLASH_ANYWHERE_PATTERN = /(?:^|[\s("'])\/(?:oh-my-claudecode:|omc:)?(ralph|autopilot|team|ralplan)(?=\s|$|[?!,;:)\]"']|\.(?!\w))/gi;
 
@@ -2321,7 +2321,9 @@ async function main() {
       );
     }
     if (taskSizeNotice && keptHeavy.length > 0) {
-      taskSizeNotes.push(`[TASK-SIZE] Heavy mode(s) kept although Jev rated this task small: ${keptHeavy.join(', ')}.\n\n`);
+      // A mode can also be kept by a slash command after a size prefix won over a larger Jev answer.
+      const keptHeader = jevTaskSizeResult?.size === 'small' ? 'kept although Jev rated this task small' : 'kept';
+      taskSizeNotes.push(`[TASK-SIZE] Heavy mode(s) ${keptHeader}: ${keptHeavy.join(', ')}.\n\n`);
     }
 
     // Import flow tracer once (best-effort)

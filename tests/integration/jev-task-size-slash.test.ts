@@ -249,6 +249,14 @@ describe("keyword-detector.mjs: OMC_JEV_TASK_SIZE_SLASH_ANYWHERE", () => {
       expect(context).not.toContain(RALPH_INVOCATION);
     });
 
+    it("does not say Jev rated the task small when a size prefix won over a medium answer", async () => {
+      choice = "medium";
+      const context = (await run("quick: fix the typo and run /oh-my-claudecode:ralph now", ALL)).hookSpecificOutput?.additionalContext ?? "";
+      expect(context).toContain("[TASK-SIZE] Heavy mode(s) kept: ralph (slash command).");
+      expect(context).not.toContain("rated this task small");
+      expectModeKept(context, "ralph");
+    });
+
     it("names a mode kept by a slash command after the start of the prompt", async () => {
       const context = (await run("fix the typo and run /oh-my-claudecode:ralph now", ALL)).hookSpecificOutput?.additionalContext ?? "";
       expect(context).toContain("[TASK-SIZE] Heavy mode(s) kept although Jev rated this task small: ralph (slash command).");
