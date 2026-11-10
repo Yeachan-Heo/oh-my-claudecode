@@ -5,15 +5,15 @@
   "provenance": {
     "base": "05c800f40d1ad53b42a78609d2667ef4f726808b",
     "planningHead": "0a91273e61dbbd47eb0af4c02844409251e08398",
-    "head": "8d4931cc3589d436ad6e8238420e373518fd1486",
-    "sourceSha256": "c158b37785636426f4f5ab4f5839374b55d1d844e3070591e9ec22872700439f",
+    "head": "c467b6011aa58e0d2d975e0018fa8c4936b78bc2",
+    "sourceSha256": "d0f0699e156d8549af0e4ae02fe11362699604198c99f87fa1be0bd12fae06d0",
     "generatedAt": null,
     "generator": "scripts/generate-inventory-graph.mjs"
   },
   "base": "05c800f40d1ad53b42a78609d2667ef4f726808b",
   "planningHead": "0a91273e61dbbd47eb0af4c02844409251e08398",
-  "head": "8d4931cc3589d436ad6e8238420e373518fd1486",
-  "sourceSha256": "c158b37785636426f4f5ab4f5839374b55d1d844e3070591e9ec22872700439f",
+  "head": "c467b6011aa58e0d2d975e0018fa8c4936b78bc2",
+  "sourceSha256": "d0f0699e156d8549af0e4ae02fe11362699604198c99f87fa1be0bd12fae06d0",
   "counts": {
     "public": {
       "skills": 84,
@@ -48193,6 +48193,11 @@
         "path": "tests/integration/jev-active-mode-repro.test.ts"
       },
       {
+        "id": "tests/integration/jev-max-effort-always.test.ts",
+        "kind": "other",
+        "path": "tests/integration/jev-max-effort-always.test.ts"
+      },
+      {
         "id": "tests/integration/jev-model-routing-all-agents.test.ts",
         "kind": "other",
         "path": "tests/integration/jev-model-routing-all-agents.test.ts"
@@ -91156,6 +91161,41 @@
       },
       {
         "from": "tests/integration/issue-4933-fable-opt-in-routing.test.ts",
+        "to": "external:node:child_process",
+        "kind": "imports"
+      },
+      {
+        "from": "tests/integration/issue-4933-fable-opt-in-routing.test.ts",
+        "to": "external:node:fs",
+        "kind": "imports"
+      },
+      {
+        "from": "tests/integration/issue-4933-fable-opt-in-routing.test.ts",
+        "to": "external:node:http",
+        "kind": "imports"
+      },
+      {
+        "from": "tests/integration/issue-4933-fable-opt-in-routing.test.ts",
+        "to": "external:node:http",
+        "kind": "type-imports"
+      },
+      {
+        "from": "tests/integration/issue-4933-fable-opt-in-routing.test.ts",
+        "to": "external:node:os",
+        "kind": "imports"
+      },
+      {
+        "from": "tests/integration/issue-4933-fable-opt-in-routing.test.ts",
+        "to": "external:node:path",
+        "kind": "imports"
+      },
+      {
+        "from": "tests/integration/issue-4933-fable-opt-in-routing.test.ts",
+        "to": "external:node:url",
+        "kind": "imports"
+      },
+      {
+        "from": "tests/integration/issue-4933-fable-opt-in-routing.test.ts",
         "to": "external:vitest",
         "kind": "imports"
       },
@@ -91196,6 +91236,46 @@
       },
       {
         "from": "tests/integration/jev-active-mode-repro.test.ts",
+        "to": "external:vitest",
+        "kind": "imports"
+      },
+      {
+        "from": "tests/integration/jev-max-effort-always.test.ts",
+        "to": "external:node:child_process",
+        "kind": "imports"
+      },
+      {
+        "from": "tests/integration/jev-max-effort-always.test.ts",
+        "to": "external:node:fs",
+        "kind": "imports"
+      },
+      {
+        "from": "tests/integration/jev-max-effort-always.test.ts",
+        "to": "external:node:http",
+        "kind": "imports"
+      },
+      {
+        "from": "tests/integration/jev-max-effort-always.test.ts",
+        "to": "external:node:http",
+        "kind": "type-imports"
+      },
+      {
+        "from": "tests/integration/jev-max-effort-always.test.ts",
+        "to": "external:node:os",
+        "kind": "imports"
+      },
+      {
+        "from": "tests/integration/jev-max-effort-always.test.ts",
+        "to": "external:node:path",
+        "kind": "imports"
+      },
+      {
+        "from": "tests/integration/jev-max-effort-always.test.ts",
+        "to": "external:node:url",
+        "kind": "imports"
+      },
+      {
+        "from": "tests/integration/jev-max-effort-always.test.ts",
         "to": "external:vitest",
         "kind": "imports"
       },
@@ -92451,12 +92531,12 @@
       }
     ],
     "stats": {
-      "nodeCount": 8251,
-      "edgeCount": 8798,
-      "importEdgeCount": 7352,
+      "nodeCount": 8252,
+      "edgeCount": 8813,
+      "importEdgeCount": 7365,
       "registerEdgeCount": 105
     }
   },
-  "inventorySha256": "b3fac8b1e01bd5c29c7a330e07b8c86ee4f6f0e6b3aeee342cf395571ef30bcf",
-  "manifestSha256": "91b096cdfb39b19252ad300d54c47402d04c79f4f36cdd53f7efbe30593ec016"
+  "inventorySha256": "cdd0922c3dced1a18d8021d99dcdbd4ccc0acbf4065c710568f75f56df49e15a",
+  "manifestSha256": "4e59e054f434c40fd157f9ed67215877b2ee4413b338a8c7d1cb1f5cba5d0d25"
 }
