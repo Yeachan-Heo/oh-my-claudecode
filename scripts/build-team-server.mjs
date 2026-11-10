@@ -32,12 +32,6 @@ const buildConfig = {
     'buffer', 'crypto', 'http', 'https', 'url',
     'child_process', 'assert', 'module', 'net', 'tls',
     'dns', 'readline', 'tty', 'worker_threads',
-    // MCP SDK optional dependencies
-    'ajv-formats',
-    'zod-to-json-schema',
-    'fast-deep-equal',
-    'json-schema-traverse',
-    'fast-uri',
   ],
 };
 

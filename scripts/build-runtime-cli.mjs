@@ -31,9 +31,6 @@ const buildConfig = {
     '@ast-grep/napi', 'better-sqlite3',
     // jsonc-parser has dynamic requires that don't bundle well; we use a custom parser
     'jsonc-parser',
-    // Optional/conditional dependencies
-    'ajv-formats', 'zod-to-json-schema', 'fast-deep-equal',
-    'json-schema-traverse', 'fast-uri', 'regexp-tree',
   ],
 };
 

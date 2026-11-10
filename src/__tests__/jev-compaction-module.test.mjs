@@ -595,11 +595,14 @@ describe('jev-compaction module: own threshold (OMC_JEV_COMPACT_AT_PERCENT)', ()
 
 describe('jev-compaction module: mirrors and mods API', () => {
   it('pointMode matches parseJevEnv for the named-only point', () => {
-    for (const value of [undefined, '', 'off', 'all', 'all:active', 'compaction', 'compaction:active', 'all:active,compaction', 'compaction:active,all', 'model-routing,compaction:shadow', ' compaction:active ']) {
+    for (const value of [undefined, '', 'off', 'all', 'all:active', 'compaction', 'compaction:active', 'all:active,compaction', 'compaction:active,all', 'compaction:off', 'compaction: OFF', 'compaction:active,compaction:off', 'compaction:off,compaction', 'model-routing,compaction:shadow', ' compaction:active ']) {
       for (const key of [undefined, 'k']) {
         expect(pointMode(value, key), `${value} / ${key}`).toBe(parseJevEnv('compaction', { OMC_JEV: value, TYPESAFE_API_KEY: key }));
       }
     }
+    expect(pointMode('compaction:off', 'k')).toBe('off');
+    expect(pointMode('compaction:active,compaction:off', 'k')).toBe('off');
+    expect(pointMode('compaction:off,compaction:active', 'k')).toBe('active');
   });
 
   it('the question is the registry\'s compaction question; boundExcerpts matches config.ts', () => {
