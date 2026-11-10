@@ -2186,15 +2186,13 @@ async function main() {
     const taskSizeNotes = [];
 
     // Track slash invocations to carry into state activation (for confirmedBySlash).
-    // Both start-of-prompt and anywhere (when OMC_JEV_TASK_SIZE_SLASH_ANYWHERE=1) are included.
+    // Start-of-prompt slash commands always count; a slash command anywhere is
+    // added below only when an active task-size decision applies.
     const slashInvokedByAnyRule = new Set();
     if (isExplicitRalplanSlashInvocation(cleanPrompt)) slashInvokedByAnyRule.add('ralplan');
     if (isExplicitRalphSlashInvocation(cleanPrompt)) slashInvokedByAnyRule.add('ralph');
     if (/^\s*\/(?:oh-my-claudecode:)?autopilot(?:\s|$|:)/i.test(cleanPrompt)) slashInvokedByAnyRule.add('autopilot');
     if (/^\s*\/(?:oh-my-claudecode:)?team(?:\s|$|:)/i.test(cleanPrompt)) slashInvokedByAnyRule.add('team');
-    if (isTaskSizeSlashAnywhereEnabled()) {
-      for (const name of heavyModeSlashInvocations(cleanPrompt)) slashInvokedByAnyRule.add(name);
-    }
 
     let jevTaskSizeResult = null;
     let heuristicTaskSize = null;
@@ -2233,6 +2231,14 @@ async function main() {
       } catch {
         // The compiled twin is optional for script-only installs; never affect prompt handling.
       }
+    }
+
+    // OMC_JEV_TASK_SIZE_SLASH_ANYWHERE=1 is a task-size rule: a slash command
+    // anywhere counts as the user's confirmation only when an active task-size
+    // decision applies. In shadow mode or with Jev off, a mid-prompt slash
+    // command keeps the awaiting-confirmation window, as without the variable.
+    if (jevTaskSizeResult && isTaskSizeSlashAnywhereEnabled()) {
+      for (const name of heavyModeSlashInvocations(cleanPrompt)) slashInvokedByAnyRule.add(name);
     }
 
     // Filter heavy keywords if task-size is 'small' (issue #4805)
