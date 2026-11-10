@@ -318,7 +318,7 @@ async function readConfig($) {
   const mode = pointMode(env.OMC_JEV, env.TYPESAFE_API_KEY);
   if (mode !== 'off' && (env.OMC_JEV_BREAKER === undefined || env.OMC_JEV_MAX_RPM === undefined)) {
     try {
-      const result = await withDeadline($, $.settings.read({ key: 'env' }), CONFIG_TTL_MS);
+      const result = await withDeadline($, $.settings.read({ key: 'env' }), 1000);
       const fromSettings = result && typeof result === 'object' ? (result.value || result) : result;
       if (fromSettings && typeof fromSettings === 'object') {
         for (const name of Object.keys(env)) if (env[name] === undefined && typeof fromSettings[name] === 'string') env[name] = fromSettings[name];
@@ -335,7 +335,7 @@ async function readConfig($) {
     .map((p) => p.trim())
     .filter(Boolean)
     // A leading ~ matches both as written (in a command) and expanded to the home directory.
-    .flatMap((p) => (homeForPrivatePaths && /^~(?=$|[\\\/])/.test(p) ? [p, slash(homeForPrivatePaths) + p.slice(1)] : [p]))
+    .flatMap((p) => (homeForPrivatePaths && /^~(?=$|[\\/])/.test(p) ? [p, slash(homeForPrivatePaths) + p.slice(1)] : [p]))
     .map((p) => slash(p).toLowerCase());
   const endpoint = env.OMC_JEV_ENDPOINT || DEFAULT_ENDPOINT;
   return {
