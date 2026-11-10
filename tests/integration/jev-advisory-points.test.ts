@@ -862,6 +862,38 @@ describe("jev advisory points: opt-in actions", () => {
       expect(result.stdout).toContain("intent");
     }, 45000);
 
+    it("with the variable a boolean true answer invokes the intent skill", async () => {
+      const intentPrompt =
+        "Checkout fails for customers paying in euros. We need to find out why before Friday.";
+      const apply = { OMC_JEV: "intent:active", OMC_JEV_INTENT_APPLY: "1" };
+
+      rawAnswer = { type: "noul", noul: true, confidence: 0.9 };
+      let result = await detectIntent(intentPrompt, apply);
+      expect(result.stdout).toContain("intent");
+
+      rawAnswer = { type: "noul", noul: false, confidence: 0.9 };
+      result = await detectIntent(intentPrompt, apply);
+      expect(result.stdout).not.toContain("intent");
+    }, 30000);
+
+    it("keywordDetector.disabled keeps intent off even with a positive active answer", async () => {
+      const intentPrompt =
+        "Invoices are emailed twice to some customers. We need to understand the cause.";
+      const apply = { OMC_JEV: "intent:active", OMC_JEV_INTENT_APPLY: "1" };
+      noul.intent = 0.99;
+
+      let result = await detectIntent(intentPrompt, apply);
+      expect(result.stdout).toContain("intent");
+
+      mkdirSync(join(cwd, ".claude"), { recursive: true });
+      writeFileSync(
+        join(cwd, ".claude", "omc.jsonc"),
+        JSON.stringify({ keywordDetector: { disabled: ["intent"] } }),
+      );
+      result = await detectIntent(intentPrompt, apply);
+      expect(result.stdout).not.toContain("intent");
+    }, 30000);
+
     it("shadow mode and a degraded call keep the heuristic", async () => {
       const intentPrompt =
         "We have a data inconsistency issue where the user profile cache and the database don't sync. " +

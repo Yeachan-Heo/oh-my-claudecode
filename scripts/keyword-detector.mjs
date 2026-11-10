@@ -31,7 +31,7 @@ import { atomicWriteFileSync, getStateFileLockFailureMessage, recoverEmergencySt
 import { readStdin } from './lib/stdin.mjs';
 import { resolveOmcStateRoot, resolveSessionStatePathsForHook } from './lib/state-root.mjs';
 import { parseWorkflowInvocation, selectWorkflowProfile, createWorkflowState, isValidWorkflowTrackingState, isWorkflowRuntimeSupported, resolveWorkflowStagePrompt, takeWorkflowTranscriptFailure } from './lib/workflow-profile-runtime.mjs';
-import { isJevShadowOptedIn, recordJevShadow } from './lib/jev-shadow.mjs';
+import { isJevShadowOptedIn, jevNoulOf, recordJevShadow } from './lib/jev-shadow.mjs';
 import { initializeRalphStateForSkill, createPrdScaffold } from './lib/ralph-startup.mjs';
 
 // Resolve OMC package root: CLAUDE_PLUGIN_ROOT (plugin system) or derive from this script's location
@@ -2182,10 +2182,14 @@ async function main() {
         permissionMode,
       });
       // In active mode with opt-in, intent Jev answer decides whether to invoke the skill
-      if (isIntentApplyEnabled() && jevResult && jevResult.mode === 'active' && jevResult.answer) {
-        const noul = jevResult.answer.noul;
-        // Only a noul value of 0.5 or higher triggers the intent skill (yes-ish answer)
-        if (typeof noul === 'number' && noul >= 0.5) {
+      // The keywordDetector.disabled opt-out still wins, and intent is added at most once.
+      if (
+        isIntentApplyEnabled() &&
+        !disabledKeywords.has('intent') &&
+        !resolved.some((match) => match.name === 'intent')
+      ) {
+        const noul = jevNoulOf(jevResult, 'intent');
+        if (noul !== undefined && noul >= 0.5) {
           resolved.push({ name: 'intent', args: '' });
         }
       }
