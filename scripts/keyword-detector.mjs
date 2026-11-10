@@ -1749,8 +1749,8 @@ function isTaskSizeSlashAnywhereEnabled(env = process.env) {
 
 // A slash command starts the prompt or follows whitespace, an opening parenthesis or
 // a quote, and ends at whitespace, the end, a closing parenthesis or square bracket, a quote, or
-// punctuation; a dot only when no word character follows (/ralph.md is a file).
-const HEAVY_MODE_SLASH_ANYWHERE_PATTERN = /(?:^|[\s("'])\/(?:oh-my-claudecode:|omc:)?(ralph|autopilot|team|ralplan)(?=\s|$|[?!,;:)\]"']|\.(?!\w))/gi;
+// punctuation; a dot only when no word character or letter follows (/ralph.md and /ralph.é are files).
+const HEAVY_MODE_SLASH_ANYWHERE_PATTERN = /(?:^|[\s("'])\/(?:oh-my-claudecode:|omc:)?(ralph|autopilot|team|ralplan)(?=\s|$|[?!,;:)\]"']|\.(?![\w\p{L}]))/gui;
 
 /**
  * Heavy modes typed as a slash command anywhere in the sanitized prompt
@@ -2185,6 +2185,17 @@ async function main() {
     const taskSizeNotice = isTaskSizeNoticeEnabled();
     const taskSizeNotes = [];
 
+    // Track slash invocations to carry into state activation (for confirmedBySlash).
+    // Both start-of-prompt and anywhere (when OMC_JEV_TASK_SIZE_SLASH_ANYWHERE=1) are included.
+    const slashInvokedByAnyRule = new Set();
+    if (isExplicitRalplanSlashInvocation(cleanPrompt)) slashInvokedByAnyRule.add('ralplan');
+    if (isExplicitRalphSlashInvocation(cleanPrompt)) slashInvokedByAnyRule.add('ralph');
+    if (/^\s*\/(?:oh-my-claudecode:)?autopilot(?:\s|$|:)/i.test(cleanPrompt)) slashInvokedByAnyRule.add('autopilot');
+    if (/^\s*\/(?:oh-my-claudecode:)?team(?:\s|$|:)/i.test(cleanPrompt)) slashInvokedByAnyRule.add('team');
+    if (isTaskSizeSlashAnywhereEnabled()) {
+      for (const name of heavyModeSlashInvocations(cleanPrompt)) slashInvokedByAnyRule.add(name);
+    }
+
     let jevTaskSizeResult = null;
     let heuristicTaskSize = null;
     let gateTaskSize = null;
@@ -2263,24 +2274,14 @@ async function main() {
       const shouldSuppressForSize = (heuristicSaysSmall || hasSizePrefix);
       
       if (shouldSuppressForSize) {
-        // Check for slash invocations: never suppress slash-invoked modes
-        const slashInvokedKeywords = new Set();
-        if (isExplicitRalplanSlashInvocation(cleanPrompt)) slashInvokedKeywords.add('ralplan');
-        // Check for other slash modes: /oh-my-claudecode:ralph, /oh-my-claudecode:autopilot, etc.
-        if (isExplicitRalphSlashInvocation(cleanPrompt)) slashInvokedKeywords.add('ralph');
-        if (/^\s*\/(?:oh-my-claudecode:)?autopilot(?:\s|$|:)/i.test(cleanPrompt)) slashInvokedKeywords.add('autopilot');
-        if (/^\s*\/(?:oh-my-claudecode:)?team(?:\s|$|:)/i.test(cleanPrompt)) slashInvokedKeywords.add('team');
-        if (taskSizeSlashAnywhere) {
-          for (const name of heavyModeSlashInvocations(cleanPrompt)) slashInvokedKeywords.add(name);
-        }
-        
         // Filter out non-slash-invoked heavy keywords
+        // (slash invocations already collected in slashInvokedByAnyRule)
         resolved = resolved.filter(keyword => {
           if (!HEAVY_KEYWORDS.has(keyword.name)) {
             return true; // Keep non-heavy keywords
           }
           // For heavy keywords, suppress only if NOT slash-invoked
-          if (slashInvokedKeywords.has(keyword.name)) {
+          if (slashInvokedByAnyRule.has(keyword.name)) {
             keptHeavy.push(`${keyword.name} (slash command)`);
             return true;
           }
@@ -2428,9 +2429,10 @@ async function main() {
       : resolved.filter(m => ['ralph', 'ultragoal', 'autopilot', 'ralplan'].includes(m.name));
     for (const mode of stateModes) {
       const activationError = await activateState(directory, prompt, mode.name, sessionId, {
-        // Only a leading slash command counts as the user's confirmation.
+        // A slash command counts as the user's confirmation (start-of-prompt by default,
+        // anywhere when OMC_JEV_TASK_SIZE_SLASH_ANYWHERE=1).
         // A mention inside prose keeps the awaiting-confirmation window.
-        confirmedBySlash: mode.name === 'ralph' && isExplicitRalphSlashInvocation(prompt),
+        confirmedBySlash: slashInvokedByAnyRule.has(mode.name),
       });
       if (activationError === 'workflow_descriptor_integrity_failed') {
         console.log(JSON.stringify(createHookOutput('workflow_descriptor_integrity_failed')));
