@@ -982,13 +982,15 @@ function recordModelRoutingShadow(toolName, toolInput, updatedToolInput, permiss
     // When routing.forceInherit is enabled and the call is unpinned (no model),
     // use the inherited session model as the baseline, not the agent definition model.
     const inheritsSession = Boolean(unpinned && isForceInheritEnabled() && inheritedModel);
+    // A concrete model the call or its definition pins stays concrete: its tier alias may
+    // resolve to a different version.
     const baselineModel = inheritsSession
       ? inheritedModel
-      : knownTier ? model : modifiedInput.model;
+      : knownTier && !isTierAlias(selectedModel) ? selectedModel : knownTier ? model : modifiedInput.model;
     // Apply the always-on cap to the baseline effort before recording to avoid counting
     // a no-Jev cap as a Jev-induced change when both baseline and result are capped the same way.
     const baselineEffort = typeof modifiedInput.effort === 'string' && isMaxEffortAlwaysEnabled() ? capEffort(modifiedInput.effort, maxEffort()) : modifiedInput.effort;
-    noteJevRouting({ model: baselineModel, effort: baselineEffort, inherited: inheritsSession ? inheritedModel : undefined }, updatedToolInput, answers, originalInput.subagent_type);
+    noteJevRouting({ model: baselineModel, effort: baselineEffort }, updatedToolInput, answers, originalInput.subagent_type);
   }
 
   // The marker wins over the call's own values and over Jev's answers. The effort is still
@@ -1034,10 +1036,10 @@ function noteJevRouting(before, updated, answers, subagentType) {
   if (!updated || !isJevAppliedLogEnabled()) return;
   const applied = {};
   const choice = answers['model-tier']?.choice;
-  // A call that inherits the session model (forceInherit): a tier alias that resolves to that
-  // very model changes nothing.
-  const sameAsInherited = Boolean(before.inherited) && resolveTierAliasToSafeModel(updated.model) === before.inherited;
-  if (typeof choice === 'string' && updated.model === choice.toLowerCase() && updated.model !== before.model && !sameAsInherited) {
+  // Compare the models the call actually runs on: a tier alias that resolves to the baseline's
+  // concrete model changes nothing, and one that resolves to another version does.
+  const routedModel = (id) => (isTierAlias(id) && resolveTierAliasToSafeModel(id)) || id;
+  if (typeof choice === 'string' && updated.model === choice.toLowerCase() && routedModel(updated.model) !== routedModel(before.model)) {
     applied.model = { from: before.model ?? null, to: updated.model };
   }
   const score = answers.effort?.type === 'score' ? answers.effort.score : undefined;

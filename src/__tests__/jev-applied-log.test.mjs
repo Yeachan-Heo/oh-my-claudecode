@@ -331,6 +331,28 @@ describe('hook scripts with OMC_JEV_APPLIED_LOG=1', () => {
     ]);
   }, 120_000);
 
+  it('model-routing: a call pinned to a concrete model is compared with that model, not its tier', async () => {
+    const SONNET_DEFAULT = 'us.anthropic.claude-sonnet-5-v1:0';
+    const env = {
+      OMC_SUBAGENT_MODEL: undefined,
+      CLAUDE_CODE_BEDROCK_SONNET_MODEL: undefined,
+      ANTHROPIC_DEFAULT_SONNET_MODEL: SONNET_DEFAULT,
+    };
+    stubAnswers = { 'model-tier': { type: 'choice', choice: 'sonnet' } };
+    // Pinned to another Sonnet version: the alias Jev answers switches the version.
+    const pinned = makeContext();
+    const output = await runHook(pinned, 'pre-tool-enforcer.mjs', TASK_CALL(pinned.cwd, { model: 'us.anthropic.claude-sonnet-4-5-v1:0' }), 'model-routing', env);
+    expect(output.hookSpecificOutput.updatedInput).toMatchObject({ model: 'sonnet' });
+    expect(readLog(pinned, 'applied.jsonl')).toEqual([
+      expect.objectContaining({ applied: expect.objectContaining({ model: { from: 'us.anthropic.claude-sonnet-4-5-v1:0', to: 'sonnet' } }) }),
+    ]);
+
+    // Pinned to the very model the alias resolves to: nothing changes, nothing is logged.
+    const same = makeContext();
+    await runHook(same, 'pre-tool-enforcer.mjs', TASK_CALL(same.cwd, { model: SONNET_DEFAULT }), 'model-routing', env);
+    expect(readLog(same, 'applied.jsonl')).toEqual([]);
+  }, 120_000);
+
   it('model-routing: no line for a call that a later check of the hook denies', async () => {
     stubAnswers = { 'model-tier': { type: 'choice', choice: 'opus' } };
     const context = makeContext();
