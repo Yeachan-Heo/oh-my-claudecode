@@ -1,0 +1,1 @@
+{"provider":"codex","jobId":"job1","slug":"test-prompt","status":"spawned","pid":12345,"promptFile":"/test/prompt.md","responseFile":"/test/response.md","model":"gpt-5.3-codex","agentRole":"architect","spawnedAt":"2026-11-10T22:10:24.282Z"}

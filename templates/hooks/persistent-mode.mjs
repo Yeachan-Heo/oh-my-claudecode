@@ -1474,6 +1474,21 @@ async function main() {
         if (work.pending) {
           const delegated = delegateToBridge(data);
           if (delegated) {
+            // If bridge returned completion but state couldn't be persisted, keep blocking
+            if (String(delegated.systemMessage).includes('[JEV-COMPLETION]')) {
+              const finalState = readJsonFile(ralph.path);
+              if (finalState?.active === true) {
+                // Ralph is still active; state write must have failed
+                console.log(JSON.stringify({
+                  continue: false,
+                  decision: "block",
+                  reason: iteration >= maxIter
+                    ? `[RALPH LOOP - EXTENDED] Max iterations reached; extending to ${(ralph.state.max_iterations || 100) + 10} and continuing. When FULLY complete (after Architect verification), run /oh-my-claudecode:cancel (or --force).`
+                    : `[RALPH LOOP - ITERATION ${iteration + 1}/${maxIter}] Work is NOT done. Continue working.\nWhen FULLY complete (after Architect verification), run /oh-my-claudecode:cancel to cleanly exit ralph mode and clean up all state files. If cancel fails, retry with /oh-my-claudecode:cancel --force.`,
+                }));
+                return;
+              }
+            }
             console.log(JSON.stringify(delegated));
             return;
           }
