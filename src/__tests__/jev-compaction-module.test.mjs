@@ -569,6 +569,45 @@ describe('jev-compaction module: own threshold (OMC_JEV_COMPACT_AT_PERCENT)', ()
     expect(fake.calls.compact).toBe(2);
   });
 
+  it('after a compaction of the main loop waits until the context grew by 10 % of the window from the first usage after it, from the threshold at most', async () => {
+    // Threshold 60 % of 200000 = 120000; the gate wants 10 % of 200000 = 20000 above min(first usage, 120000).
+    let tokens = 130000;
+    const usage = () => ({ context: { tokens, window: 200000 } });
+    const summary = (handlers, fake, event = {}) => handlers['session.compact'](fake.$, Object.freeze({ trigger: 'auto', messages: conversation(2), ...event }), summaryNext());
+
+    // A subagent's compaction does not count: the main loop is asked at once.
+    let handlers = load();
+    let fake = fakeDollar({ env, messages: conversation(40, { chars: 4000 }), usage });
+    expect(await summary(handlers, fake, { agentId: 'sub-1' })).toEqual(SUMMARY);
+    await turn(handlers, fake);
+    expect(fake.calls.compact).toBe(1);
+
+    // The host's summary ends at 130000, above the threshold: 139000 (19000 above it) waits, 141000 asks.
+    handlers = load();
+    fake = fakeDollar({ env, messages: conversation(40, { chars: 4000 }), usage });
+    expect(await summary(handlers, fake)).toEqual(SUMMARY);
+    for (let k = 0; k < 6; k++) await turn(handlers, fake);
+    expect(fake.calls.compact).toBe(0);
+    tokens = 139000;
+    for (let k = 0; k < 6; k++) await turn(handlers, fake);
+    expect(fake.calls.compact).toBe(0);
+    tokens = 141000;
+    await turn(handlers, fake);
+    expect(fake.calls.compact).toBe(1);
+
+    // The compaction it asked for ends at 100000: that first usage is the base, taken within the 5-turn
+    // gap; the gap still holds, and 5 turns after the request 125000 (25000 above the base) asks again.
+    // A base taken only after the gap would be 125000 and that turn would not ask.
+    tokens = 100000;
+    expect(await summary(handlers, fake)).toEqual(SUMMARY);
+    await turn(handlers, fake);
+    tokens = 125000;
+    for (let k = 0; k < 3; k++) await turn(handlers, fake);
+    expect(fake.calls.compact).toBe(1);
+    await turn(handlers, fake);
+    expect(fake.calls.compact).toBe(2);
+  });
+
   it('does not ask below the threshold or when the removable results are small; in shadow mode or without the variable it does not even read the usage', async () => {
     const below = fakeDollar({ env, messages: conversation(40, { chars: 4000 }), usage: () => ({ context: { tokens: 100000, window: 200000 } }) });
     const small = fakeDollar({ env, messages: conversation(40, { chars: 5 }), usage: highUsage });
