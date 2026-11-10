@@ -6,14 +6,14 @@
     "base": "05c800f40d1ad53b42a78609d2667ef4f726808b",
     "planningHead": "0a91273e61dbbd47eb0af4c02844409251e08398",
     "head": "ef0c092f0a91b10083214177de564b8a9f96dc90",
-    "sourceSha256": "e307e20f7efccb45892f33f9985431e2a41dc863141ddac05e52595edeaa5577",
+    "sourceSha256": "afe1214cad1d9ef8fc71e8c0de7d3e6d71be406dce2dfacd5ca1c285a1fcd776",
     "generatedAt": null,
     "generator": "scripts/generate-inventory-graph.mjs"
   },
   "base": "05c800f40d1ad53b42a78609d2667ef4f726808b",
   "planningHead": "0a91273e61dbbd47eb0af4c02844409251e08398",
   "head": "ef0c092f0a91b10083214177de564b8a9f96dc90",
-  "sourceSha256": "e307e20f7efccb45892f33f9985431e2a41dc863141ddac05e52595edeaa5577",
+  "sourceSha256": "afe1214cad1d9ef8fc71e8c0de7d3e6d71be406dce2dfacd5ca1c285a1fcd776",
   "counts": {
     "public": {
       "skills": 84,
@@ -37,14 +37,14 @@
       "total": 5647
     },
     "prompt": {
-      "promptLikeFiles": 68
+      "promptLikeFiles": 63
     },
     "skills": 84,
     "commands": 21,
     "hookFiles": 336,
     "workflows": 8,
     "agentDefinitions": 18,
-    "promptLikeFiles": 68
+    "promptLikeFiles": 63
   },
   "public": {
     "skills": [
@@ -773,11 +773,6 @@
     "promptSources": [
       ".clawhip/state/prompt-submit.json",
       ".github/CLAUDE.md",
-      ".test-job-state-db-1445660/.omc/prompts/codex-status-bad-file.json",
-      ".test-job-state-db-1445660/.omc/prompts/codex-status-invalid.json",
-      ".test-job-state-db-1445660/.omc/prompts/codex-status-test-job1.json",
-      ".test-job-state-db-1445660/.omc/prompts/codex-status-test-migrated1.json",
-      ".test-job-state-db-1445660/.omc/prompts/gemini-status-test-job2.json",
       "CLAUDE.md",
       "benchmarks/code-reviewer/prompts/quality-reviewer.md",
       "benchmarks/debugger/prompts/build-fixer.md",
@@ -6979,11 +6974,6 @@
     "promptSources": [
       ".clawhip/state/prompt-submit.json",
       ".github/CLAUDE.md",
-      ".test-job-state-db-1445660/.omc/prompts/codex-status-bad-file.json",
-      ".test-job-state-db-1445660/.omc/prompts/codex-status-invalid.json",
-      ".test-job-state-db-1445660/.omc/prompts/codex-status-test-job1.json",
-      ".test-job-state-db-1445660/.omc/prompts/codex-status-test-migrated1.json",
-      ".test-job-state-db-1445660/.omc/prompts/gemini-status-test-job2.json",
       "CLAUDE.md",
       "benchmarks/code-reviewer/prompts/quality-reviewer.md",
       "benchmarks/debugger/prompts/build-fixer.md",
@@ -7367,31 +7357,6 @@
         "id": ".omx/plans/source-overall-cleanup/ownership-matrix.md",
         "kind": "other",
         "path": ".omx/plans/source-overall-cleanup/ownership-matrix.md"
-      },
-      {
-        "id": ".test-job-state-db-1445660/.omc/prompts/codex-status-bad-file.json",
-        "kind": "prompt",
-        "path": ".test-job-state-db-1445660/.omc/prompts/codex-status-bad-file.json"
-      },
-      {
-        "id": ".test-job-state-db-1445660/.omc/prompts/codex-status-invalid.json",
-        "kind": "prompt",
-        "path": ".test-job-state-db-1445660/.omc/prompts/codex-status-invalid.json"
-      },
-      {
-        "id": ".test-job-state-db-1445660/.omc/prompts/codex-status-test-job1.json",
-        "kind": "prompt",
-        "path": ".test-job-state-db-1445660/.omc/prompts/codex-status-test-job1.json"
-      },
-      {
-        "id": ".test-job-state-db-1445660/.omc/prompts/codex-status-test-migrated1.json",
-        "kind": "prompt",
-        "path": ".test-job-state-db-1445660/.omc/prompts/codex-status-test-migrated1.json"
-      },
-      {
-        "id": ".test-job-state-db-1445660/.omc/prompts/gemini-status-test-job2.json",
-        "kind": "prompt",
-        "path": ".test-job-state-db-1445660/.omc/prompts/gemini-status-test-job2.json"
       },
       {
         "id": "AGENTS.md",
@@ -48262,6 +48227,11 @@
         "id": "tests/integration/jev-advisory-points.test.ts",
         "kind": "other",
         "path": "tests/integration/jev-advisory-points.test.ts"
+      },
+      {
+        "id": "tests/integration/jev-delivery-guard-handoff.test.ts",
+        "kind": "other",
+        "path": "tests/integration/jev-delivery-guard-handoff.test.ts"
       },
       {
         "id": "tests/integration/jev-delivery-guard-per-logdir.test.ts",
@@ -91526,6 +91496,46 @@
         "kind": "imports"
       },
       {
+        "from": "tests/integration/jev-delivery-guard-handoff.test.ts",
+        "to": "external:node:child_process",
+        "kind": "imports"
+      },
+      {
+        "from": "tests/integration/jev-delivery-guard-handoff.test.ts",
+        "to": "external:node:fs",
+        "kind": "imports"
+      },
+      {
+        "from": "tests/integration/jev-delivery-guard-handoff.test.ts",
+        "to": "external:node:http",
+        "kind": "imports"
+      },
+      {
+        "from": "tests/integration/jev-delivery-guard-handoff.test.ts",
+        "to": "external:node:http",
+        "kind": "type-imports"
+      },
+      {
+        "from": "tests/integration/jev-delivery-guard-handoff.test.ts",
+        "to": "external:node:os",
+        "kind": "imports"
+      },
+      {
+        "from": "tests/integration/jev-delivery-guard-handoff.test.ts",
+        "to": "external:node:path",
+        "kind": "imports"
+      },
+      {
+        "from": "tests/integration/jev-delivery-guard-handoff.test.ts",
+        "to": "external:node:url",
+        "kind": "imports"
+      },
+      {
+        "from": "tests/integration/jev-delivery-guard-handoff.test.ts",
+        "to": "external:vitest",
+        "kind": "imports"
+      },
+      {
         "from": "tests/integration/jev-delivery-guard-per-logdir.test.ts",
         "to": "external:node:crypto",
         "kind": "imports"
@@ -93007,12 +93017,12 @@
       }
     ],
     "stats": {
-      "nodeCount": 8269,
-      "edgeCount": 8889,
-      "importEdgeCount": 7436,
+      "nodeCount": 8265,
+      "edgeCount": 8897,
+      "importEdgeCount": 7443,
       "registerEdgeCount": 105
     }
   },
-  "inventorySha256": "b8e0f8b48d7495d37ce612bd4a39e4cbb380bf546f7b69f37d537553a90dfa12",
-  "manifestSha256": "fca4f5299c5612dac325c8645996f24cfb898ec0a63abbe17aa050c506c17bc2"
+  "inventorySha256": "51a7a0d9b340c2aa749b638d2177b79c7ae15ae08462f7388c99658d8ea70436",
+  "manifestSha256": "3d24e3b5171e1f66dbc84abe05c1bb8cdcaafc56d99c868a73ccb9b3289f5175"
 }
