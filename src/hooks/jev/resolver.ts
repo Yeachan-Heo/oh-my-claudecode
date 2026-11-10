@@ -267,7 +267,7 @@ export async function resolveJudgment<T>(resolveJudgmentArgs: ResolveJudgmentArg
     if (skip) {
       const heuristic = twinAnswer();
       const loggableHeuristic = extractHeuristicForLogging(heuristic, args.questions, args.mapHeuristic, args.questionSet);
-      await writeShadowLog({
+      const logEntry = {
         ts: new Date().toISOString(),
         point: args.point,
         mode: skip.mode,
@@ -277,7 +277,13 @@ export async function resolveJudgment<T>(resolveJudgmentArgs: ResolveJudgmentArg
         answers: null,
         ...shared.breaker.skipLogFields(skip),
         durationMs: Date.now() - startedAt,
-      }, config.logDir);
+      };
+      // For nonblocking shadow calls, don't wait for the log write to complete.
+      if (args.blocking === false) {
+        void writeShadowLog(logEntry, config.logDir);
+      } else {
+        await writeShadowLog(logEntry, config.logDir);
+      }
       return { answer: heuristic, source: 'twin', mode: skip.mode };
     }
   }

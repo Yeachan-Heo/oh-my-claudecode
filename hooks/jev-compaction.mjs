@@ -1036,6 +1036,12 @@ async function decide($, e, cfg, record, started) {
       }),
     );
   }
+  // Recheck process cap: concurrent calls may both pass blockedReason() check; after one increments
+  // session.requests and returns, the second resumes with potentially exhausted capacity. If no requests
+  // were made and the cap is now reached, treat it as a cap hit so the built-in summary runs.
+  if (!runs.length && !held && cfg.maxRequests && session.requests >= cfg.maxRequests) {
+    held = { mode: 'process-cap' };
+  }
   if (held) {
     // A request held back by the shared breaker or limit is no failure of the endpoint. The results it
     // would have scored count as unanswered, as after a failed request: the budget decides about them.
