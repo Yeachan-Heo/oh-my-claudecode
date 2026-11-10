@@ -25,7 +25,8 @@
  *
  * Failures are classified by HTTP status and by whether a response arrived at
  * all, never by the response body, so any System One compatible endpoint
- * behaves the same. Imported by scripts/jev-resolve.mjs, scripts/lib/jev-shadow.mjs
+ * behaves the same. The one use of a body is the retry time of a 429 that has
+ * no usable Retry-After header (retryAfterFromBody). Imported by scripts/jev-resolve.mjs, scripts/lib/jev-shadow.mjs
  * and src/hooks/jev/resolver.ts (types in jev-breaker.d.mts).
  */
 
@@ -52,6 +53,13 @@ const NO_RESPONSE_WINDOW_MS = 60_000;
 const SAME_OUTAGE_GAP_MS = 15 * 60_000;
 /** An open breaker is rewritten only when the new end is this much later, so a burst of failures does not rewrite it on every response. */
 const EXTEND_MIN_MS = 5000;
+/**
+ * Pause after writing the breaker before it is read back. A concurrent opener
+ * that read the file before our write replaces it within a few milliseconds
+ * (a rename retries for up to 30 ms on Windows), so after the pause the file
+ * shows whether a shorter end overwrote ours and we write the longer end again.
+ */
+const SETTLE_MS = 50;
 /** An `until` beyond the cap plus this, or a `since` in the future, means a corrupt file or a clock set back: ignored. */
 const CLOCK_SLACK_MS = 60_000;
 /** Per-minute files older than this are removed when a new minute file starts. */
@@ -216,8 +224,11 @@ export function readBreaker(settings, now = Date.now()) {
 
 /**
  * Open the breaker for `seconds`, or keep it open at least that long. An open
- * breaker is never shortened: when a concurrent opener replaced the file with
- * an earlier end, the later end is written back. `since` stays the start of
+ * breaker is never shortened: there is no lock, so after each write the opener
+ * pauses SETTLE_MS and reads the file again, and when a concurrent opener
+ * replaced it with an earlier end, the later end is written back (at most 3
+ * writes; what stays is an opener held up for longer than SETTLE_MS between
+ * its read and its write). `since` stays the start of
  * the outage while the breaker is extended or opens again within 15 minutes of
  * expiring. Returns the state in the file afterwards (so concurrent openers
  * agree on `since`), or undefined when it cannot be written.
@@ -239,11 +250,15 @@ function openBreaker(settings, seconds, reason, now) {
       since = previous.since;
     }
     for (let attempt = 0; attempt < 3; attempt += 1) {
+      // After a write, give a concurrent opener that read the file before our
+      // write time to replace it, then read the file again.
+      if (attempt > 0) sleepSync(SETTLE_MS);
       const current = readBreaker(settings, now);
       if (current && current.until >= until - EXTEND_MIN_MS) return current;
       const state = { until, reason, since: current ? Math.min(current.since, since) : since };
       if (!replaceFile(join(settings.dir, "breaker.json"), JSON.stringify(state))) return undefined;
     }
+    sleepSync(SETTLE_MS);
     return readBreaker(settings, now);
   } catch {
     return undefined;
@@ -269,12 +284,30 @@ export function retryAfterSeconds(value, now = Date.now()) {
   return Math.max(1, Math.ceil((date - now) / 1000));
 }
 
+/** Longest part of a 429 response body that is read for a retry time. */
+export const RETRY_BODY_MAX_CHARS = 2000;
+
+/**
+ * Retry time in whole seconds (at least 1) that a 429 response body states in
+ * words, for an endpoint that sends no usable Retry-After header: "retry after
+ * 30 seconds", "Retry after ~178s", "retry_after: 12 s". Only the phrase
+ * "retry after" followed by a number of seconds counts; any other text, and a
+ * time in other units, gives undefined. Used only as a fallback behind the
+ * header, with the same ceiling (BREAKER_MAX_SECONDS).
+ */
+export function retryAfterFromBody(text) {
+  if (typeof text !== "string") return undefined;
+  const match = /\bretry[\s_-]*after\b\s*[:=]?\s*~?\s*(\d+(?:\.\d+)?)\s*(?:s|secs?|seconds?)\b/i.exec(text.slice(0, RETRY_BODY_MAX_CHARS));
+  return match ? Math.max(1, Math.ceil(Number(match[1]))) : undefined;
+}
+
 /**
  * Class of a failed request: {reason, opens, seconds?}, or undefined when the
  * failure says nothing about the endpoint (another 4xx, an invalid 2xx body).
- * failure: {status?, retryAfter?, noResponse?}. 429, 401, 402, 403 and 5xx
- * open the breaker at once; a request without any HTTP response counts towards
- * NO_RESPONSE_TO_OPEN.
+ * failure: {status?, retryAfter?, body?, noResponse?}. 429, 401, 402, 403 and
+ * 5xx open the breaker at once; a request without any HTTP response counts
+ * towards NO_RESPONSE_TO_OPEN. `body` is the text of a 429 response and is
+ * read only for a retry time when the Retry-After header gives none.
  */
 export function classifyFailure(failure, now = Date.now()) {
   const status = Number.isInteger(failure?.status) ? failure.status : undefined;
@@ -283,7 +316,7 @@ export function classifyFailure(failure, now = Date.now()) {
   if (status === 429 || (status >= 500 && status <= 599)) seconds = BREAKER_SECONDS.transient;
   else if (status === 401 || status === 402 || status === 403) seconds = BREAKER_SECONDS.account;
   else return undefined;
-  const retry = retryAfterSeconds(failure.retryAfter, now);
+  const retry = retryAfterSeconds(failure.retryAfter, now) ?? (status === 429 ? retryAfterFromBody(failure.body) : undefined);
   return { reason: "http-" + status, opens: true, seconds: Math.min(retry ?? seconds, BREAKER_MAX_SECONDS) };
 }
 

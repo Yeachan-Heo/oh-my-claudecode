@@ -259,6 +259,43 @@ export async function loadJevBreaker(env = process.env) {
 }
 
 /**
+ * The first `maxChars` of a failed response's body, or undefined when it
+ * cannot be read within a second. Never throws.
+ */
+async function readErrorBody(response, maxChars) {
+  let timer;
+  try {
+    const text = await Promise.race([
+      response.text(),
+      new Promise((resolve) => {
+        timer = setTimeout(() => resolve(undefined), 1000);
+      }),
+    ]);
+    return typeof text === "string" ? text.slice(0, maxChars) : undefined;
+  } catch {
+    return undefined;
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
+}
+
+/**
+ * Timeout of one request in the resolver process. With OMC_JEV_BREAKER=1 an
+ * active hook passes the moment it kills this process, less 100 ms, in
+ * OMC_JEV_HOOK_DEADLINE (epoch ms); the request then ends by that time at the
+ * latest (but not within the first 200 ms), so a slow process start cannot
+ * push the resolver's own timeout, which records the missing response, past
+ * the kill.
+ */
+export function resolveRequestTimeoutMs(env = process.env, now = Date.now()) {
+  const timeoutMs = resolveJevTimeoutMs(env);
+  if (String(env.OMC_JEV_BREAKER ?? "").trim() !== "1") return timeoutMs;
+  const deadline = Number(env.OMC_JEV_HOOK_DEADLINE);
+  if (!Number.isFinite(deadline) || deadline <= 0) return timeoutMs;
+  return Math.max(200, Math.min(timeoutMs, deadline - now));
+}
+
+/**
  * Mirror of the resolver's shadow-log entry (ShadowLogEntry): the jev-eval
  * tool compares lines regardless of which side wrote them.
  */
@@ -331,7 +368,7 @@ export async function resolveRequest(
   }
   const controller = new AbortController();
   let timer;
-  const timeoutMs = resolveJevTimeoutMs(env);
+  const timeoutMs = resolveRequestTimeoutMs(env);
   const timeoutPromise = new Promise((resolve, reject) => {
     timer = setTimeout(() => {
       controller.abort();
@@ -365,7 +402,14 @@ export async function resolveRequest(
     ]);
     responded = true;
     if (!response.ok) {
-      if (guard) failure = { status: response.status, retryAfter: response.headers?.get?.("retry-after") ?? undefined };
+      if (guard) {
+        const retryAfter = response.headers?.get?.("retry-after") ?? undefined;
+        failure = { status: response.status, retryAfter };
+        // A 429 without a usable Retry-After may state the time in its body.
+        if (guard.settings.breaker && response.status === 429 && guard.breaker.retryAfterSeconds(retryAfter) === undefined) {
+          failure.body = await readErrorBody(response, guard.breaker.RETRY_BODY_MAX_CHARS);
+        }
+      }
       throw new Error("jev request failed: HTTP " + response.status);
     }
     const body = validateJevResponse(await response.json());

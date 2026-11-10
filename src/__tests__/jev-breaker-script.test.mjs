@@ -27,10 +27,11 @@ import {
   readBreaker,
   recordFailure,
   reserveRequest,
+  retryAfterFromBody,
   retryAfterSeconds,
   thresholdFor,
 } from '../../scripts/lib/jev-breaker.mjs';
-import { resolveRequest } from '../../scripts/jev-resolve.mjs';
+import { resolveRequest, resolveRequestTimeoutMs } from '../../scripts/jev-resolve.mjs';
 import { JUDGMENT_POINTS } from '../hooks/jev/points.ts';
 import { resetJevResolverState, resolveJudgment } from '../hooks/jev/resolver.ts';
 
@@ -290,6 +291,99 @@ describe('jev-breaker library', () => {
     writeFileSync(join(settings.dir, 'breaker.json'), JSON.stringify({ until: now + 60_000, reason: 'http-429', since: now }));
     expect(recordFailure(settings, classifyFailure({ status: 402 }), now + 100)).toMatchObject({ until: now + 100 + 600_000, reason: 'http-402', since: now });
   });
+
+  it('writes its end again when a concurrent opener replaces the file right after its write', async () => {
+    const settings = breakerSettings({ OMC_JEV_BREAKER: '1', OMC_JEV_BREAKER_DIR: caseDir }, ENDPOINT, 'k');
+    mkdirSync(settings.dir, { recursive: true });
+    const file = join(settings.dir, 'breaker.json');
+    const now = Date.now();
+    // The other opener read the (then missing) file before ours was written: it waits for the file and replaces
+    // it with its own, earlier end, as a process that lost the race between its read and its write does.
+    const script = join(caseDir, 'other-opener.mjs');
+    writeFileSync(script, [
+      "import { existsSync, writeFileSync } from 'node:fs';",
+      'const file = ' + JSON.stringify(file) + ';',
+      'const pause = (ms) => Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);',
+      "console.log('ready');",
+      'while (!existsSync(file)) pause(1);',
+      'for (;;) {',
+      '  try {',
+      '    writeFileSync(file, JSON.stringify({ until: ' + (now + 60_000) + ", reason: 'http-429', since: " + now + ' }));',
+      '    break;',
+      '  } catch {',
+      '    pause(2);',
+      '  }',
+      '}',
+    ].join('\n'));
+    const child = spawn(NODE, [script], { stdio: ['ignore', 'pipe', 'inherit'], windowsHide: true });
+    const exited = new Promise((resolve) => child.on('close', resolve));
+    await new Promise((resolve) => child.stdout.once('data', resolve));
+    const started = Date.now();
+    const opened = recordFailure(settings, classifyFailure({ status: 402 }, now), now);
+    const took = Date.now() - started;
+    await exited;
+    expect(opened).toMatchObject({ until: now + 600_000, reason: 'http-402' });
+    // Not just the returned state: the file itself keeps the longer end after the other opener has finished.
+    expect(JSON.parse(readFileSync(file, 'utf8'))).toMatchObject({ until: now + 600_000, reason: 'http-402' });
+    expect(took).toBeGreaterThanOrEqual(45); // the pause after the write
+  }, 30_000);
+
+  it('reads a retry time from a 429 body only as a fallback behind the header, with the same ceiling', () => {
+    expect(retryAfterFromBody('Rate limit exceeded. Retry after ~178s')).toBe(178);
+    expect(retryAfterFromBody('retry after 30 seconds')).toBe(30);
+    expect(retryAfterFromBody('{"error":"slow down","detail":"Retry-After: 12 s"}')).toBe(12);
+    expect(retryAfterFromBody('retry_after: 1.5 sec')).toBe(2);
+    expect(retryAfterFromBody('retry after 0 s')).toBe(1);
+    // Other text, other units, no number, not a string.
+    expect(retryAfterFromBody('Too many requests')).toBeUndefined();
+    expect(retryAfterFromBody('retry after 5 minutes')).toBeUndefined();
+    expect(retryAfterFromBody('retry after 30')).toBeUndefined();
+    expect(retryAfterFromBody('retry afterwards 30 s')).toBeUndefined();
+    expect(retryAfterFromBody('x'.repeat(2500) + ' retry after 30 s')).toBeUndefined();
+    expect(retryAfterFromBody(undefined)).toBeUndefined();
+    const now = Date.parse('2026-11-09T12:00:00Z');
+    expect(classifyFailure({ status: 429, body: 'retry after ~45s' }, now)).toEqual({ reason: 'http-429', opens: true, seconds: 45 });
+    expect(classifyFailure({ status: 429, retryAfter: '20', body: 'retry after ~45s' }, now).seconds).toBe(20);
+    expect(classifyFailure({ status: 429, retryAfter: 'soon', body: 'retry after ~45s' }, now).seconds).toBe(45);
+    expect(classifyFailure({ status: 429, body: 'retry after 99999 s' }, now).seconds).toBe(BREAKER_MAX_SECONDS);
+    expect(classifyFailure({ status: 429, body: 'nothing useful' }, now).seconds).toBe(60);
+    // Only a 429 looks at a body.
+    expect(classifyFailure({ status: 503, body: 'retry after ~45s' }, now).seconds).toBe(60);
+    expect(classifyFailure({ status: 402, body: 'retry after ~45s' }, now).seconds).toBe(600);
+  });
+});
+
+describe('request timeout under a hook deadline', () => {
+  it('shortens the timeout to the deadline given by the hook, not below 200 ms, only with OMC_JEV_BREAKER=1', () => {
+    const now = 1_000_000;
+    const base = { OMC_JEV_TIMEOUT_MS: '2000' };
+    expect(resolveRequestTimeoutMs({ ...base, OMC_JEV_BREAKER: '1', OMC_JEV_HOOK_DEADLINE: String(now + 700) }, now)).toBe(700);
+    expect(resolveRequestTimeoutMs({ ...base, OMC_JEV_BREAKER: '1', OMC_JEV_HOOK_DEADLINE: String(now + 9000) }, now)).toBe(2000);
+    expect(resolveRequestTimeoutMs({ ...base, OMC_JEV_BREAKER: '1', OMC_JEV_HOOK_DEADLINE: String(now + 50) }, now)).toBe(200);
+    expect(resolveRequestTimeoutMs({ ...base, OMC_JEV_BREAKER: '1', OMC_JEV_HOOK_DEADLINE: String(now - 5000) }, now)).toBe(200);
+    for (const bad of ['', 'soon', '0', '-5', 'NaN']) {
+      expect(resolveRequestTimeoutMs({ ...base, OMC_JEV_BREAKER: '1', OMC_JEV_HOOK_DEADLINE: bad }, now)).toBe(2000);
+    }
+    expect(resolveRequestTimeoutMs({ ...base, OMC_JEV_BREAKER: '1' }, now)).toBe(2000);
+    // Without the breaker (also with only a request limit) the variable is not read.
+    expect(resolveRequestTimeoutMs({ ...base, OMC_JEV_HOOK_DEADLINE: String(now + 700) }, now)).toBe(2000);
+    expect(resolveRequestTimeoutMs({ ...base, OMC_JEV_MAX_RPM: '5', OMC_JEV_HOOK_DEADLINE: String(now + 700) }, now)).toBe(2000);
+  });
+
+  it('a request that has not answered by the deadline ends there and counts as no response', async () => {
+    const env = jevEnv({ OMC_JEV_BREAKER: '1', OMC_JEV_TIMEOUT_MS: '20000', OMC_JEV_HOOK_DEADLINE: String(Date.now() + 500) });
+    const hangs = (_url, init) => new Promise((_resolve, reject) => {
+      init.signal.addEventListener('abort', () => reject(new Error('aborted')));
+    });
+    const started = Date.now();
+    const result = await resolveRequest(request(), env, hangs);
+    const took = Date.now() - started;
+    expect(result.mode).toBe('degraded');
+    expect(took).toBeGreaterThanOrEqual(400);
+    expect(took).toBeLessThan(5000);
+    expect(logRows(env).map((row) => row.mode)).toEqual(['degraded']);
+    expect(readdirSync(settingsFor(env).dir).filter((name) => name.startsWith('noresp-'))).toHaveLength(1);
+  }, 30_000);
 });
 
 describe('resolveRequest with the shared breaker and limit', () => {
@@ -328,6 +422,46 @@ describe('resolveRequest with the shared breaker and limit', () => {
     expect(rows.map((row) => row.mode)).toEqual(['degraded', 'circuit-open', 'circuit-open', 'circuit-open', 'circuit-open', 'circuit-open']);
     expect(rows[1]).toMatchObject({ point: 'slop-warning', reason: 'http-429', jev: null, answers: null, heuristic: false, state: { toolName: 'Bash' } });
     expect(new Date(rows[1].until).getTime()).toBe(first.breaker.until);
+  });
+
+  it('a 429 without a usable Retry-After takes the retry time from its body; the header wins; other statuses and an off breaker read no body', async () => {
+    const withBody = (status, text, headers = {}) => {
+      const response = errorResponse(status, headers);
+      response.reads = 0;
+      response.text = async () => { response.reads += 1; return text; };
+      return response;
+    };
+    const open = async (envOverrides, response) => {
+      const env = jevEnv(envOverrides);
+      const before = Date.now();
+      const { fetchFn } = countingFetch(() => response);
+      const result = await resolveRequest(request(), env, fetchFn);
+      return { result, seconds: result.breaker ? Math.round((result.breaker.until - before) / 1000) : undefined };
+    };
+    let { seconds } = await open({ OMC_JEV_BREAKER: '1' }, withBody(429, 'Rate limited. Retry after ~45s'));
+    expect(seconds).toBe(45);
+    // The header wins and the body is not even read.
+    const withHeader = withBody(429, 'retry after ~45s', { 'Retry-After': '20' });
+    ({ seconds } = await open({ OMC_JEV_BREAKER: '1', OMC_JEV_BREAKER_DIR: join(caseDir, 'b2') }, withHeader));
+    expect(seconds).toBe(20);
+    expect(withHeader.reads).toBe(0);
+    // No time in the body: the default minute. An unreadable body: the same.
+    ({ seconds } = await open({ OMC_JEV_BREAKER: '1', OMC_JEV_BREAKER_DIR: join(caseDir, 'b3') }, withBody(429, '{"error":"slow down"}')));
+    expect(seconds).toBe(60);
+    ({ seconds } = await open({ OMC_JEV_BREAKER: '1', OMC_JEV_BREAKER_DIR: join(caseDir, 'b4') }, errorResponse(429)));
+    expect(seconds).toBe(60);
+    // A ceiling of 30 minutes, as for the header.
+    ({ seconds } = await open({ OMC_JEV_BREAKER: '1', OMC_JEV_BREAKER_DIR: join(caseDir, 'b5') }, withBody(429, 'retry after 99999 s')));
+    expect(seconds).toBe(BREAKER_MAX_SECONDS);
+    // Another status: no body read. A request limit alone (no breaker): no body read.
+    const server = withBody(503, 'retry after ~45s');
+    ({ seconds } = await open({ OMC_JEV_BREAKER: '1', OMC_JEV_BREAKER_DIR: join(caseDir, 'b6') }, server));
+    expect(seconds).toBe(60);
+    expect(server.reads).toBe(0);
+    const limitOnly = withBody(429, 'retry after ~45s');
+    const { result } = await open({ OMC_JEV_MAX_RPM: '100', OMC_JEV_BREAKER_DIR: join(caseDir, 'b7') }, limitOnly);
+    expect(result.breaker).toBeUndefined();
+    expect(limitOnly.reads).toBe(0);
   });
 
   it('opens on 401, 402, 403 and 5xx, not on other 4xx or an invalid body', async () => {
@@ -440,12 +574,12 @@ async function startStub(respond) {
     req.on('data', (chunk) => { body += chunk; });
     req.on('end', () => {
       count += 1;
-      const { status, headers = {}, delayMs = 0 } = respond(count, body);
+      const { status, headers = {}, delayMs = 0, body: replyBody } = respond(count, body);
       setTimeout(() => {
         res.writeHead(status, { 'Content-Type': 'application/json', ...headers });
         res.end(status === 200
           ? JSON.stringify({ answers: { slop_advisory: { type: 'noul', noul: false, confidence: 0.9 } } })
-          : JSON.stringify({ error: 'stub ' + status }));
+          : replyBody ?? JSON.stringify({ error: 'stub ' + status }));
       }, delayMs);
     });
   });
@@ -481,6 +615,15 @@ describe('shared between processes', () => {
     const results = await Promise.all(Array.from({ length: 10 }, () => runResolver(request(), env)));
     expect(results.map((result) => result.mode)).toEqual(Array(10).fill('circuit-open'));
     expect(stub.count()).toBe(1);
+  }, 60_000);
+
+  it('a 429 body with a retry time reaches the breaker through a real HTTP response', async () => {
+    const stub = await startStub(() => ({ status: 429, body: JSON.stringify({ error: 'rate limited, retry after ~45s' }) }));
+    const env = jevEnv({ OMC_JEV_BREAKER: '1', OMC_JEV_ENDPOINT: stub.endpoint, OMC_JEV_TIMEOUT_MS: '5000' });
+    const before = Date.now();
+    const first = await runResolver(request(), env);
+    expect(first).toMatchObject({ mode: 'degraded', breaker: { reason: 'http-429' } });
+    expect(Math.round((first.breaker.until - before) / 1000)).toBe(45);
   }, 60_000);
 
   it('a limit of 10 lets exactly 10 of 30 concurrent processes send their request', async () => {
@@ -674,5 +817,85 @@ describe('outage notice in a hook script', () => {
     expect(JSON.parse(stdout)).toEqual({ continue: true, systemMessage: outageMessage(state) });
     // The background resolver held the call back and logged it.
     expect((await waitForRows(env, 1)).map((row) => row.mode)).toEqual(['circuit-open']);
+  }, 60_000);
+});
+
+describe('active hook and its resolver process', () => {
+  /**
+   * A preload for node (NODE_OPTIONS) that acts only in the resolver process: it
+   * records the deadline variable it was given and then returns at once, hangs,
+   * or exits with a code, as TEST_RESOLVER_MODE says.
+   */
+  function writePreload() {
+    const preload = join(caseDir, 'resolver-preload.cjs');
+    writeFileSync(preload, [
+      "const fs = require('node:fs');",
+      "if (process.argv[1] && /jev-resolve[.]mjs$/.test(process.argv[1])) {",
+      "  fs.writeFileSync(process.env.TEST_RESOLVER_SEEN, JSON.stringify({ deadline: process.env.OMC_JEV_HOOK_DEADLINE ?? null, at: Date.now() }));",
+      "  const mode = process.env.TEST_RESOLVER_MODE;",
+      "  if (mode === 'hang') Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 30000);",
+      "  if (mode === 'exit3') process.exit(3);",
+      "}",
+    ].join('\n'));
+    return preload.split('\\').join('/');
+  }
+
+  function preloadEnv(mode, overrides = {}) {
+    return jevEnv({
+      OMC_JEV: 'slop-warning:active',
+      OMC_JEV_BREAKER: '1',
+      OMC_JEV_TIMEOUT_MS: '1000',
+      NODE_OPTIONS: '--require ' + writePreload(),
+      TEST_RESOLVER_SEEN: join(caseDir, 'seen.json'),
+      TEST_RESOLVER_MODE: mode,
+      ...overrides,
+    });
+  }
+
+  it('gives the resolver the moment it will be killed, less 100 ms, only with OMC_JEV_BREAKER=1', async () => {
+    const env = preloadEnv('pass');
+    const before = Date.now();
+    await runEnforcer('session-a', env);
+    const after = Date.now();
+    const seen = JSON.parse(readFileSync(env.TEST_RESOLVER_SEEN, 'utf8'));
+    // kill time = spawn + OMC_JEV_TIMEOUT_MS (1000) + 500 ms buffer, less 100 ms
+    expect(Number(seen.deadline)).toBeGreaterThanOrEqual(before + 1400);
+    expect(Number(seen.deadline)).toBeLessThanOrEqual(after + 1400);
+    rmSync(env.TEST_RESOLVER_SEEN);
+    await runEnforcer('session-b', { ...env, OMC_JEV_BREAKER: '' });
+    expect(JSON.parse(readFileSync(env.TEST_RESOLVER_SEEN, 'utf8')).deadline).toBeNull();
+  }, 60_000);
+
+  it('a resolver killed after the hook limit leaves a degraded row with how it ended, and no missing-response count', async () => {
+    const env = preloadEnv('hang');
+    const output = await runEnforcer('session-a', env);
+    expect(output.hookSpecificOutput.additionalContext).toContain('SLOP WARNING'); // the twin decided
+    const rows = await waitForRows(env, 1);
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({ point: 'slop-warning', mode: 'degraded', reason: 'resolver-timeout' });
+    expect(rows[0].spawn_error).toBeUndefined();
+    expect(rows[0].exit_status).toBeUndefined();
+    expect(rows[0].exit_signal).toBe('SIGTERM');
+    expect(typeof rows[0].durationMs).toBe('number');
+    expect(rows[0]).not.toHaveProperty('state'); // no request content
+    const stateDir = settingsFor(env).dir;
+    expect(existsSync(stateDir) ? readdirSync(stateDir).filter((name) => name.startsWith('noresp-')) : []).toEqual([]);
+  }, 60_000);
+
+  it('a resolver that exits with a code leaves a degraded row with exit_status', async () => {
+    const env = preloadEnv('exit3');
+    await runEnforcer('session-a', env);
+    const rows = await waitForRows(env, 1);
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({ point: 'slop-warning', mode: 'degraded', reason: 'resolver-exit', exit_status: 3 });
+    expect(rows[0].exit_signal).toBeUndefined();
+    expect(rows[0].spawn_error).toBeUndefined();
+  }, 60_000);
+
+  it('without OMC_JEV_BREAKER the hook writes no row for a killed or failed resolver', async () => {
+    const env = preloadEnv('exit3', { OMC_JEV_BREAKER: '' });
+    await runEnforcer('session-a', env);
+    await new Promise((resolve) => setTimeout(resolve, 500));
+    expect(logRows(env)).toEqual([]);
   }, 60_000);
 });

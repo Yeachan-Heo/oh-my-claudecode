@@ -2,6 +2,7 @@
 
 import { spawn, spawnSync } from "node:child_process";
 import {
+  appendFileSync,
   closeSync,
   constants,
   fstatSync,
@@ -90,6 +91,42 @@ function armOutageNotice(settings, breaker) {
     };
   } catch {
     // The notice is advisory.
+  }
+}
+
+/**
+ * The resolver of an active hook was killed after the hook's time limit or
+ * ended without a result, so it wrote no row itself: append
+ * {ts, point, mode:"degraded", reason, exit_status?, exit_signal?,
+ * spawn_error?, durationMs} to shadow.jsonl (how the process ended, no request
+ * content, no stderr). Only with OMC_JEV_BREAKER=1, and only when
+ * OMC_JEV_LOG_DIR is set (the default per-project directory is resolved
+ * asynchronously, by the resolver alone). Never throws.
+ */
+function recordResolverEnded(point, result, durationMs) {
+  try {
+    const logDir = process.env.OMC_JEV_LOG_DIR;
+    if (!logDir) return;
+    mkdirSync(logDir, { recursive: true });
+    const code = result?.error?.code;
+    const how = {};
+    if (Number.isInteger(result?.status)) how.exit_status = result.status;
+    if (typeof result?.signal === "string") how.exit_signal = result.signal;
+    if (typeof code === "string" && code !== "ETIMEDOUT") how.spawn_error = code;
+    appendFileSync(
+      join(logDir, "shadow.jsonl"),
+      JSON.stringify({
+        ts: new Date().toISOString(),
+        point,
+        mode: "degraded",
+        reason: code === "ETIMEDOUT" ? "resolver-timeout" : "resolver-exit",
+        ...how,
+        durationMs,
+      }) + "\n",
+      "utf8",
+    );
+  } catch {
+    // A logging failure must never affect the hook.
   }
 }
 
@@ -443,6 +480,11 @@ export function recordJevShadow({ point, state, questions, heuristic, permission
     // Active mode: spawn synchronously and read result
     if (spawnMode === "active") {
       try {
+        const hookTimeoutMs = resolveJevTimeoutMs(
+          process.env,
+          ACTIVE_RESOLVER_TIMEOUT_BUFFER_MS,
+        );
+        const spawnedAt = Date.now();
         const result = spawnSync(
           process.execPath,
           [
@@ -452,12 +494,13 @@ export function recordJevShadow({ point, state, questions, heuristic, permission
           ],
           {
             stdio: ["ignore", "pipe", "ignore"],
-            env: process.env,
+            // With the breaker the resolver learns when this hook kills it and
+            // ends its own request 100 ms earlier (OMC_JEV_HOOK_DEADLINE).
+            env: breakerSettings?.breaker
+              ? { ...process.env, OMC_JEV_HOOK_DEADLINE: String(spawnedAt + hookTimeoutMs - 100) }
+              : process.env,
             encoding: "utf8",
-            timeout: resolveJevTimeoutMs(
-              process.env,
-              ACTIVE_RESOLVER_TIMEOUT_BUFFER_MS,
-            ),
+            timeout: hookTimeoutMs,
           },
         );
 
@@ -472,6 +515,7 @@ export function recordJevShadow({ point, state, questions, heuristic, permission
             return undefined;
           }
         }
+        if (breakerSettings?.breaker) recordResolverEnded(point, result, Date.now() - spawnedAt);
       } finally {
         // Always clean up temp dir after active mode
         if (tempDir) {

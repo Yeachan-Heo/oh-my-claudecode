@@ -276,6 +276,14 @@ export async function resolveJudgment<T>(resolveJudgmentArgs: ResolveJudgmentArg
         apiKey: config.apiKey as string,
         timeoutMs: config.timeoutMs,
         fetchFn: args.fetchFn,
+        ...(shared?.settings.breaker
+          ? {
+              bodyForRetry: (retryAfter: string | undefined) =>
+                shared.breaker.retryAfterSeconds(retryAfter) === undefined
+                  ? { maxChars: shared.breaker.RETRY_BODY_MAX_CHARS }
+                  : undefined,
+            }
+          : {}),
       }) };
     } catch (error) {
       if (shared && error instanceof JevClientError) {

@@ -31,8 +31,10 @@ export function parseMaxRpm(raw: string | undefined): number | undefined;
 export function breakerSettings(env: NodeJS.ProcessEnv, endpoint: string, apiKey: string | null | undefined): BreakerSettings | undefined;
 export function readBreaker(settings: BreakerSettings | undefined, now?: number): OpenBreaker | undefined;
 export function retryAfterSeconds(value: string | null | undefined, now?: number): number | undefined;
+export const RETRY_BODY_MAX_CHARS: number;
+export function retryAfterFromBody(text: string | undefined): number | undefined;
 export function classifyFailure(
-  failure: { status?: number; retryAfter?: string | null; noResponse?: boolean } | undefined,
+  failure: { status?: number; retryAfter?: string | null; body?: string; noResponse?: boolean } | undefined,
   now?: number,
 ): FailureClass | undefined;
 export function recordFailure(settings: BreakerSettings | undefined, failure: FailureClass | undefined, now?: number): OpenBreaker | undefined;

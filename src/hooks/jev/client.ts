@@ -14,6 +14,8 @@ export interface JevFailureDetails {
   status?: number;
   /** Retry-After header of that response. */
   retryAfter?: string;
+  /** Start of the body of a 429 response, read only when JevClientOptions.bodyForRetry asked for it. */
+  body?: string;
   /** No HTTP response arrived at all: timeout or network error. */
   noResponse?: boolean;
 }
@@ -21,6 +23,7 @@ export interface JevFailureDetails {
 export class JevClientError extends Error {
   readonly status?: number;
   readonly retryAfter?: string;
+  readonly body?: string;
   readonly noResponse?: boolean;
 
   constructor(message: string, details: JevFailureDetails = {}) {
@@ -28,6 +31,7 @@ export class JevClientError extends Error {
     this.name = 'JevClientError';
     this.status = details.status;
     this.retryAfter = details.retryAfter;
+    this.body = details.body;
     this.noResponse = details.noResponse;
   }
 }
@@ -36,6 +40,12 @@ export interface JevClientOptions {
   endpoint: string;
   apiKey: string;
   timeoutMs: number;
+  /**
+   * Opt-in shared breaker: for a 429, called with the Retry-After header; when it
+   * returns { maxChars }, that many characters of the response body are read
+   * (the breaker takes a retry time from them). Without it no body is read.
+   */
+  bodyForRetry?: (retryAfter: string | undefined) => { maxChars: number } | undefined;
   /** Test hook: injected transport. Defaults to globalThis.fetch. */
   fetchFn?: typeof fetch;
 }
@@ -67,9 +77,12 @@ export async function queryJev(
     }), timeoutPromise]);
     responded = true;
     if (!response.ok) {
+      const retryAfter = response.headers?.get?.('retry-after') ?? undefined;
+      const wanted = response.status === 429 ? options.bodyForRetry?.(retryAfter) : undefined;
       throw new JevClientError(`jev request failed: HTTP ${response.status}`, {
         status: response.status,
-        retryAfter: response.headers?.get?.('retry-after') ?? undefined,
+        retryAfter,
+        ...(wanted ? { body: await readErrorBody(response, wanted.maxChars) } : {}),
       });
     }
     const body: unknown = await response.json();
@@ -81,6 +94,24 @@ export async function queryJev(
     throw error instanceof JevClientError
       ? error
       : new JevClientError(error instanceof Error ? error.message : String(error), { noResponse: !responded });
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
+}
+
+/** The first `maxChars` characters of a failed response's body, or undefined when it cannot be read within a second. Never throws. */
+async function readErrorBody(response: Response, maxChars: number): Promise<string | undefined> {
+  let timer: NodeJS.Timeout | undefined;
+  try {
+    const text = await Promise.race([
+      response.text(),
+      new Promise<undefined>((resolve) => {
+        timer = setTimeout(() => resolve(undefined), 1000);
+      }),
+    ]);
+    return typeof text === 'string' ? text.slice(0, maxChars) : undefined;
+  } catch {
+    return undefined;
   } finally {
     if (timer) clearTimeout(timer);
   }

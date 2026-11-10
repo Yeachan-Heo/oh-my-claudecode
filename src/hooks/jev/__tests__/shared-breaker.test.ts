@@ -3,7 +3,7 @@
  * hook scripts (scripts/lib/jev-breaker.mjs): same state, same classification,
  * no change without OMC_JEV_BREAKER / OMC_JEV_MAX_RPM.
  */
-import { existsSync, readFileSync } from 'node:fs';
+import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -134,6 +134,45 @@ describe('resolveJudgment with the shared breaker', () => {
     const last = rows().pop();
     expect(last).toMatchObject({ point: 'model-routing', mode: 'circuit-open', reason: 'http-429', jev: null, answers: null, heuristic: TWIN });
     expect(typeof last?.until).toBe('string');
+  });
+
+  it('a 429 without a usable Retry-After takes the retry time from its body; the header wins; without the breaker no body is read', async () => {
+    const withBody = (status: number, text: string, retryAfter?: string) => {
+      const response = failed(status, retryAfter) as unknown as { text: () => Promise<string>; reads: number };
+      response.reads = 0;
+      response.text = async () => {
+        response.reads += 1;
+        return text;
+      };
+      return response as unknown as Response & { reads: number };
+    };
+    const openFor = async (response: Response): Promise<number> => {
+      resetJevResolverState();
+      const before = Date.now();
+      const { fetchFn } = counting(() => response);
+      await judge(fetchFn);
+      const state = JSON.parse(readFileSync(join(dir, 'breaker', readdirSync(join(dir, 'breaker'))[0], 'breaker.json'), 'utf8')) as { until: number };
+      return Math.round((state.until - before) / 1000);
+    };
+    process.env.OMC_JEV_BREAKER = '1';
+    expect(await openFor(withBody(429, 'Rate limited. Retry after ~45s'))).toBe(45);
+    await rm(join(dir, 'breaker'), { recursive: true, force: true });
+    const withHeader = withBody(429, 'retry after ~45s', '20');
+    expect(await openFor(withHeader)).toBe(20);
+    expect(withHeader.reads).toBe(0);
+    await rm(join(dir, 'breaker'), { recursive: true, force: true });
+    expect(await openFor(failed(429))).toBe(60); // no readable body: the default minute
+    await rm(join(dir, 'breaker'), { recursive: true, force: true });
+    const server = withBody(503, 'retry after ~45s');
+    expect(await openFor(server)).toBe(60);
+    expect(server.reads).toBe(0);
+    // A request limit alone does not read a body.
+    delete process.env.OMC_JEV_BREAKER;
+    process.env.OMC_JEV_MAX_RPM = '100';
+    await rm(join(dir, 'breaker'), { recursive: true, force: true });
+    const limitOnly = withBody(429, 'retry after ~45s');
+    await judge(counting(() => limitOnly).fetchFn);
+    expect(limitOnly.reads).toBe(0);
   });
 
   it('OMC_JEV_MAX_RPM=1: the second call of the minute returns the twin as cap', async () => {
