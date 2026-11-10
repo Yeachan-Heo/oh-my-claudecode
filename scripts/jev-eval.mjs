@@ -303,7 +303,30 @@ async function main(argv, env = process.env, cwd = process.cwd()) {
   let report;
   if (includeRotated) {
     const read = [];
-    report = analyzeLog(linesOfFiles([...rotatedLogPaths(path), path], read), path);
+    // Rescan rotations after reading to detect any files created during the read.
+    // Hook writes may rotate logs while we read, so rescan and include any new files.
+    let allRotated = rotatedLogPaths(path);
+    report = analyzeLog(linesOfFiles([...allRotated, path], read), path);
+    
+    // After reading, rescan for new rotations and include any new files with deduplication
+    const readSet = new Set(read);
+    const postReadRotated = rotatedLogPaths(path).filter(f => !readSet.has(f));
+    if (postReadRotated.length > 0) {
+      for (const file of postReadRotated) {
+        const text = readLogFile(file);
+        if (text !== null) {
+          read.push(file);
+        }
+      }
+      // Reanalyze with all files including newly discovered rotations
+      const allLines = [];
+      for (const file of read) {
+        const text = readLogFile(file);
+        if (text !== null) allLines.push(...text.split('\n'));
+      }
+      report = analyzeLog(allLines, path);
+    }
+    
     if (read.length === 0) {
       console.log(`no shadow log at ${path} — nothing to evaluate (exit 0)`);
       return 0;

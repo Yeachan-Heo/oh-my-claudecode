@@ -819,7 +819,7 @@ function boundModelRoutingInput(toolInput) {
   return bounded;
 }
 
-function recordModelRoutingShadow(toolName, toolInput, updatedToolInput, permissionMode, transcriptPath, directory, sessionId, stateDir) {
+function recordModelRoutingShadow(toolName, toolInput, updatedToolInput, permissionMode, transcriptPath, directory, sessionId, stateDir, inheritedModel = null) {
   // OMC_JEV_MODEL_ROUTING_MARKER: a `use` line in the prompt pins the model and/or the effort.
   // The marker is the caller's own instruction, so it works whether or not the point is on;
   // Jev is then asked only the questions the marker leaves open.
@@ -917,7 +917,12 @@ function recordModelRoutingShadow(toolName, toolInput, updatedToolInput, permiss
       ensureUpdated().effort = capEffort(currentEffort, maxEffort());
     }
     // What the agent would have run on without Jev: the call's model, else its definition's.
-    noteJevRouting({ model: knownTier ? model : modifiedInput.model, effort: modifiedInput.effort }, updatedToolInput, answers, originalInput.subagent_type);
+    // When routing.forceInherit is enabled and the call is unpinned (no model),
+    // use the inherited session model as the baseline, not the agent definition model.
+    const baselineModel = unpinned && isForceInheritEnabled() && inheritedModel
+      ? inheritedModel
+      : knownTier ? model : modifiedInput.model;
+    noteJevRouting({ model: baselineModel, effort: modifiedInput.effort }, updatedToolInput, answers, originalInput.subagent_type);
   }
 
   // The marker wins over the call's own values and over Jev's answers. The effort is still
@@ -2401,7 +2406,14 @@ async function main() {
 
     if (toolName === 'Task' || toolName === 'Agent') {
       const toolInput = data.toolInput || data.tool_input || {};
-      const jevUpdated = recordModelRoutingShadow(toolName, toolInput, updatedToolInput, data.permission_mode, data.transcript_path || data.transcriptPath || '', directory, data.session_id || data.sessionId || '', stateDir);
+      // Extract inherited session model for Jev baseline when forceInherit is enabled
+      let inheritedModel = null;
+      if (isForceInheritEnabled()) {
+        const claudeModel = process.env.CLAUDE_MODEL || '';
+        const anthropicModel = process.env.ANTHROPIC_MODEL || '';
+        inheritedModel = claudeModel || anthropicModel || null;
+      }
+      const jevUpdated = recordModelRoutingShadow(toolName, toolInput, updatedToolInput, data.permission_mode, data.transcript_path || data.transcriptPath || '', directory, data.session_id || data.sessionId || '', stateDir, inheritedModel);
       // In active mode, Jev may override the model choice
       if (jevUpdated) updatedToolInput = jevUpdated;
     }
