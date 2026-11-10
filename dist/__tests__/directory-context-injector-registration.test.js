@@ -17,12 +17,9 @@ const REPO_ROOT = resolve(__dirname, '..', '..');
 const SCRIPT_NAME = 'post-tool-directory-context-injector.mjs';
 const SCRIPT_PATH = join(REPO_ROOT, 'scripts', SCRIPT_NAME);
 const DIST_HOOK = join(REPO_ROOT, 'dist', 'hooks', 'directory-readme-injector', 'index.js');
-function hookText(hook) {
-    return [hook.command, ...(hook.args ?? [])].join(' ');
-}
 function postToolUseCommands() {
     const config = JSON.parse(readFileSync(join(REPO_ROOT, 'hooks', 'hooks.json'), 'utf-8'));
-    return (config.hooks.PostToolUse ?? []).flatMap((group) => group.hooks.map((hook) => hookText(hook)));
+    return (config.hooks.PostToolUse ?? []).flatMap((group) => group.hooks.map((hook) => hook.command));
 }
 function runInjector(payload, env = {}) {
     const stdout = execFileSync(process.execPath, [SCRIPT_PATH], {
@@ -42,7 +39,7 @@ describe('PostToolUse directory-context injector registration (issue #4006)', ()
     });
     it('scopes the file injectors to the tools they track so other tool calls skip the launch', () => {
         const config = JSON.parse(readFileSync(join(REPO_ROOT, 'hooks', 'hooks.json'), 'utf-8'));
-        const groups = (script) => (config.hooks.PostToolUse ?? []).filter((group) => group.hooks.some((hook) => hookText(hook).includes(script)));
+        const groups = (script) => (config.hooks.PostToolUse ?? []).filter((group) => group.hooks.some((hook) => hook.command.includes(script)));
         const matcherTools = (script) => groups(script).flatMap((group) => group.matcher.split('|')).sort();
         // Claude Code matches a `|` list case-sensitively against tool_name, while the hooks lowercase it.
         const claudeToolNames = { read: 'Read', write: 'Write', edit: 'Edit', multiedit: 'MultiEdit' };

@@ -10,11 +10,6 @@ const ENV_KEYS = [
     'OMC_JEV_MAX_REQUESTS',
     'OMC_JEV_EXCERPT_CHARS',
     'OMC_JEV_EXCERPT_CHARS_MODEL_ROUTING',
-    'OMC_JEV_EXCERPT_CHARS_LOOP_CONTINUATION',
-    'OMC_JEV_EXCERPT_CHARS_TASK_SIZE',
-    'OMC_JEV_EXCERPT_CHARS_SKILL_TRIGGER',
-    'OMC_JEV_EXCERPT_CHARS_INTENT',
-    'OMC_JEV_EXCERPT_CHARS_LEARNER_EXTRACTION',
     'OMC_JEV_LOG_DIR',
     'OMC_JEV_ENDPOINT',
 ];
@@ -244,7 +239,7 @@ describe('resolveJudgment', () => {
         process.env.OMC_JEV_EXCERPT_CHARS = '50';
         const long = 'a'.repeat(500);
         const { fetchFn, calls } = captureFetch(() => jevOk({ choice: 'x' }));
-        await call({ point: 'context-pruning', state: { prompt: long, nested: { deep: long }, list: [long] }, fetchFn });
+        await call({ point: 'intent', state: { prompt: long, nested: { deep: long }, list: [long] }, fetchFn });
         const body = JSON.parse(calls[0].init?.body);
         expect(body.state.prompt).toHaveLength(50);
         expect(body.state.nested.deep).toHaveLength(50);
@@ -252,38 +247,6 @@ describe('resolveJudgment', () => {
         const line = JSON.parse(await readLog());
         expect(line.state.prompt).toHaveLength(50);
         expect(line.state.nested.deep).toHaveLength(50);
-    });
-    it('bounds loop-continuation state to 2000 characters by default, whatever OMC_JEV_EXCERPT_CHARS is', async () => {
-        process.env.TYPESAFE_API_KEY = 'test-key';
-        process.env.OMC_JEV_EXCERPT_CHARS = '50';
-        const state = { last_assistant_message: 'a'.repeat(2500), continuation_excerpt: 'b'.repeat(2500) };
-        const { fetchFn, calls } = captureFetch(() => jevOk({ choice: 'x' }));
-        await call({ point: 'loop-continuation', state, fetchFn });
-        process.env.OMC_JEV_EXCERPT_CHARS_LOOP_CONTINUATION = '200';
-        await call({ point: 'loop-continuation', state, fetchFn });
-        const [byDefault, lowered] = calls.map((entry) => JSON.parse(entry.init?.body));
-        expect(byDefault.state.last_assistant_message).toHaveLength(2000);
-        expect(byDefault.state.continuation_excerpt).toHaveLength(2000);
-        expect(lowered.state.last_assistant_message).toHaveLength(200);
-        expect(lowered.state.continuation_excerpt).toHaveLength(200);
-    });
-    it.each([
-        ['task-size', 4000, 'OMC_JEV_EXCERPT_CHARS_TASK_SIZE'],
-        ['skill-trigger', 1000, 'OMC_JEV_EXCERPT_CHARS_SKILL_TRIGGER'],
-        ['intent', 1000, 'OMC_JEV_EXCERPT_CHARS_INTENT'],
-        ['learner-extraction', 2000, 'OMC_JEV_EXCERPT_CHARS_LEARNER_EXTRACTION'],
-    ])('bounds %s state to %i characters by default, whatever OMC_JEV_EXCERPT_CHARS is, and %s changes it', async (point, limit, variable) => {
-        process.env.TYPESAFE_API_KEY = 'test-key';
-        process.env.OMC_JEV = point;
-        process.env.OMC_JEV_EXCERPT_CHARS = '50';
-        const state = { prompt: 'a'.repeat(limit + 500) };
-        const { fetchFn, calls } = captureFetch(() => jevOk({ choice: 'x' }));
-        await call({ point, state, fetchFn });
-        process.env[variable] = '300';
-        await call({ point, state, fetchFn });
-        const [byDefault, lowered] = calls.map((entry) => JSON.parse(entry.init?.body));
-        expect(byDefault.state.prompt).toHaveLength(limit);
-        expect(lowered.state.prompt).toHaveLength(300);
     });
     it('sends question definitions whole, whatever OMC_JEV_EXCERPT_CHARS is', async () => {
         process.env.TYPESAFE_API_KEY = 'test-key';
@@ -293,7 +256,7 @@ describe('resolveJudgment', () => {
         };
         const { fetchFn, calls } = captureFetch(() => jevOk({ choice: 'haiku' }));
         await resolveJudgment({
-            point: 'context-pruning',
+            point: 'intent',
             state: { prompt: 'a'.repeat(500) },
             questions,
             twin: () => 'haiku',

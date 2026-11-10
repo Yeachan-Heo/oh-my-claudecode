@@ -56,8 +56,7 @@ describe('workflow-drift-guard Stop hook', () => {
         for (const [event, groups] of Object.entries(manifest.hooks)) {
             for (const group of groups) {
                 for (const hook of group.hooks || []) {
-                    const text = [hook.command, ...(hook.args ?? [])].join(' ');
-                    if (text.includes('workflow-drift-guard.mjs'))
+                    if (hook.command?.includes('workflow-drift-guard.mjs'))
                         registrations.push({ event, ...hook });
                 }
             }
@@ -65,12 +64,8 @@ describe('workflow-drift-guard Stop hook', () => {
         expect(registrations).toEqual([{
                 event: 'Stop',
                 type: 'command',
-                command: 'node',
+                command: 'node "${CLAUDE_PLUGIN_ROOT}"/scripts/run.cjs "${CLAUDE_PLUGIN_ROOT}"/scripts/workflow-drift-guard.mjs',
                 timeout: 3,
-                args: [
-                    '${CLAUDE_PLUGIN_ROOT}/scripts/run.cjs',
-                    '${CLAUDE_PLUGIN_ROOT}/scripts/workflow-drift-guard.mjs',
-                ],
             }]);
         expect(readFileSync(SCRIPT).equals(readFileSync(TEMPLATE))).toBe(true);
     });

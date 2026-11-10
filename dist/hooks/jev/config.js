@@ -9,22 +9,12 @@
  * - OMC_JEV_TIMEOUT_MS: per-call timeout, default 2000 (measured single-question
  *   round-trips are 465-605 ms, so a sub-second default degrades every call)
  * - OMC_JEV_MAX_REQUESTS: per-process request cap (0/absent = unlimited)
- * - OMC_JEV_BREAKER=1: circuit breaker shared by every process of the machine
- *   (opt-in; read by scripts/lib/jev-breaker.mjs, not parsed here)
- * - OMC_JEV_MAX_RPM: requests per UTC minute for the machine, by point
- *   priority (opt-in; absent = no limit; also read by jev-breaker.mjs)
- * - OMC_JEV_BREAKER_DIR: state directory of both (tests)
  * - OMC_JEV_EXCERPT_CHARS: max excerpt length sent in state, default 200
  * - OMC_JEV_EXCERPT_CHARS_<POINT>: the same limit for one point (point name
  *   upper-cased, dashes as underscores, e.g. OMC_JEV_EXCERPT_CHARS_MODEL_ROUTING).
- *   model-routing defaults to 12000 and loop-continuation to 2000; both ignore
- *   OMC_JEV_EXCERPT_CHARS; set the point's own variable to change them.
- *   Points with their own default (POINT_DEFAULT_EXCERPT_CHARS: model-routing,
- *   task-size, skill-trigger, intent, learner-extraction, loop-continuation)
- *   ignore OMC_JEV_EXCERPT_CHARS.
- * - OMC_JEV_ENDPOINT: address of the Jev API (default JEV_DEFAULT_ENDPOINT);
- *   base URL overlay for stub servers and tests. TYPESAFE_API_KEY is sent as
- *   a bearer token.
+ *   model-routing defaults to 12000 and ignores OMC_JEV_EXCERPT_CHARS; set its
+ *   own variable to change it.
+ * - OMC_JEV_ENDPOINT: base URL overlay (stub servers / tests)
  * - OMC_JEV_LOG_DIR: shadow-log directory override (tests)
  * - OMC_JEV_QUIET=1: silence the env-activation stderr warning (hook
  *   processes are one-shot, so warn-once-per-process degrades to warn-every)
@@ -48,13 +38,6 @@ const DEFAULT_EXCERPT_CHARS = 200;
 const MAX_TIMER_DELAY_MS = 2_147_483_647;
 /** Points currently promoted to active. Empty until the promotion ticket (07). */
 export const ACTIVATED_POINTS = new Set();
-/**
- * Points that `all` and `all:active` never enable: they send more than the
- * bounded excerpts of the other points (`compaction` sends tool results and
- * user messages from the conversation), so each needs its own entry in
- * OMC_JEV. Mirror of NAMED_ONLY_POINTS in scripts/jev-resolve.mjs.
- */
-export const NAMED_ONLY_POINTS = new Set(['compaction']);
 export function parseJevConfig(env = process.env) {
     const raw = env.OMC_JEV?.trim();
     const masterOff = raw === 'off';
@@ -107,31 +90,13 @@ export function parseJevConfig(env = process.env) {
 /**
  * Points whose state needs more than the global default to be judged at all.
  * model-routing judges the work behind the task, which 200 characters hide.
- * loop-continuation judges whether the task is complete; the script hook
- * (scripts/persistent-mode.mjs) sends the last assistant message, which it
- * already bounds to 2000 characters, and a 200-character cut keeps only its
- * opening. Here the state carries the continuation message only.
- * compaction judges tool results by their start and end and the user's last
- * messages (hooks/jev-compaction.mjs bounds them itself, at most 4000
- * characters). task-size, skill-trigger and intent judge the user's prompt and
- * learner-extraction the assistant message; a 200-character cut keeps only
- * the opening of either. learner-extraction uses the same 2000 characters as
- * loop-continuation. Mirror of POINT_DEFAULT_EXCERPT_CHARS in scripts/jev-resolve.mjs
- * and DEFAULT_EXCERPT_CHARS in hooks/jev-compaction.mjs.
+ * Mirror of POINT_DEFAULT_EXCERPT_CHARS in scripts/jev-resolve.mjs.
  */
-export const POINT_DEFAULT_EXCERPT_CHARS = {
-    'model-routing': 12000,
-    'task-size': 4000,
-    'skill-trigger': 1000,
-    intent: 1000,
-    'learner-extraction': 2000,
-    'loop-continuation': 2000,
-    compaction: 4000,
-};
+export const POINT_DEFAULT_EXCERPT_CHARS = { 'model-routing': 12000 };
 /**
  * Excerpt limit for one point: its own variable, else the point's default
- * (POINT_DEFAULT_EXCERPT_CHARS: model-routing, task-size, skill-trigger, intent, learner-extraction, loop-continuation, compaction), else OMC_JEV_EXCERPT_CHARS.
- * The global variable does not apply to a point with its own default.
+ * (model-routing only), else OMC_JEV_EXCERPT_CHARS. The global variable does
+ * not apply to a point with its own default.
  */
 export function excerptCharsFor(point, config) {
     return (config.pointExcerptChars[point.toUpperCase().replace(/-/g, '_')] ??
@@ -152,10 +117,9 @@ export function isJevEnabled(config) {
 export function pointState(point, config, activated = ACTIVATED_POINTS) {
     if (!isJevEnabled(config))
         return 'off';
-    const namedOnly = NAMED_ONLY_POINTS.has(point);
-    if ((namedOnly || !config.allPoints) && !config.points.has(point))
+    if (!config.allPoints && !config.points.has(point))
         return 'off';
-    return (activated.has(point) || (!namedOnly && config.activateAll) || config.activatedPoints.has(point))
+    return (activated.has(point) || config.activateAll || config.activatedPoints.has(point))
         ? 'active'
         : 'shadow';
 }

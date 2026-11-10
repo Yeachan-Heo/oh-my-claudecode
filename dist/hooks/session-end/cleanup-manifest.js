@@ -406,7 +406,6 @@ export function releaseSessionEndJob(directory, sessionId, nonce, generation, re
     if (action.status !== 'claimed' || !action.runner || action.runner.phase !== 'reserved')
         continue;
     action.status = 'pending';
-    action.attempts--;
     action.claimantNonce = undefined;
     action.runner = undefined;
 } job.owner = null; if (job.phase !== 'complete') {
