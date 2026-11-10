@@ -5,15 +5,15 @@
   "provenance": {
     "base": "05c800f40d1ad53b42a78609d2667ef4f726808b",
     "planningHead": "0a91273e61dbbd47eb0af4c02844409251e08398",
-    "head": "937134558f4f85ef94f9d68089a4dfad1d6f0fb3",
-    "sourceSha256": "121dd6643a7ea23cb54a1c3b0e2d257b246b4524395710d80b072d55f0f2f94c",
+    "head": "76b17dbb7d1a7b3e9eaf6c0aa494605b5370cb24",
+    "sourceSha256": "128df2b6a4ac81a5ec0e942650d139901ff5f24186cc51a8e5a07377d9afa99b",
     "generatedAt": null,
     "generator": "scripts/generate-inventory-graph.mjs"
   },
   "base": "05c800f40d1ad53b42a78609d2667ef4f726808b",
   "planningHead": "0a91273e61dbbd47eb0af4c02844409251e08398",
-  "head": "937134558f4f85ef94f9d68089a4dfad1d6f0fb3",
-  "sourceSha256": "121dd6643a7ea23cb54a1c3b0e2d257b246b4524395710d80b072d55f0f2f94c",
+  "head": "76b17dbb7d1a7b3e9eaf6c0aa494605b5370cb24",
+  "sourceSha256": "128df2b6a4ac81a5ec0e942650d139901ff5f24186cc51a8e5a07377d9afa99b",
   "counts": {
     "public": {
       "skills": 84,
@@ -48234,6 +48234,11 @@
         "path": "tests/integration/jev-active-mode-repro.test.ts"
       },
       {
+        "id": "tests/integration/jev-codex-p2-fixes.test.ts",
+        "kind": "other",
+        "path": "tests/integration/jev-codex-p2-fixes.test.ts"
+      },
+      {
         "id": "tests/integration/jev-max-effort-always.test.ts",
         "kind": "other",
         "path": "tests/integration/jev-max-effort-always.test.ts"
@@ -91601,6 +91606,31 @@
         "kind": "imports"
       },
       {
+        "from": "tests/integration/jev-codex-p2-fixes.test.ts",
+        "to": "external:node:child_process",
+        "kind": "imports"
+      },
+      {
+        "from": "tests/integration/jev-codex-p2-fixes.test.ts",
+        "to": "external:node:fs",
+        "kind": "imports"
+      },
+      {
+        "from": "tests/integration/jev-codex-p2-fixes.test.ts",
+        "to": "external:node:path",
+        "kind": "imports"
+      },
+      {
+        "from": "tests/integration/jev-codex-p2-fixes.test.ts",
+        "to": "external:node:url",
+        "kind": "imports"
+      },
+      {
+        "from": "tests/integration/jev-codex-p2-fixes.test.ts",
+        "to": "external:vitest",
+        "kind": "imports"
+      },
+      {
         "from": "tests/integration/jev-max-effort-always.test.ts",
         "to": "external:node:child_process",
         "kind": "imports"
@@ -92892,12 +92922,12 @@
       }
     ],
     "stats": {
-      "nodeCount": 8259,
-      "edgeCount": 8877,
-      "importEdgeCount": 7426,
+      "nodeCount": 8260,
+      "edgeCount": 8882,
+      "importEdgeCount": 7431,
       "registerEdgeCount": 105
     }
   },
-  "inventorySha256": "ae89e8485b359ff7164c283d3c02e66bd75f6b1546efab10f73ac441dff3b846",
-  "manifestSha256": "ee604490fb9ff6217c4ef914e88ff79174a5e3ddb97b46c440c0889d5d5d9782"
+  "inventorySha256": "779c022cba7be97d31cfb66f6b0785d5afb0836494e5d600347b4c661483f971",
+  "manifestSha256": "8817ace749ab0ca3a3ffd6c0514b53caa86775416c3be4b6ee0d6ab8e640d53f"
 }

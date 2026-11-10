@@ -32,7 +32,7 @@ import { homedir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-import { parseJevEnv } from '../jev-resolve.mjs';
+import { parseJevEnv, resolveJevLogMaxBytes, rotateJevLog } from '../jev-resolve.mjs';
 import { atomicWriteFileSync } from './atomic-write.mjs';
 import { maskSecrets } from './jev-mask.mjs';
 
@@ -202,7 +202,10 @@ function appendRows(logDir, rows) {
   if (!rows.length) return true;
   try {
     mkdirSync(logDir, { recursive: true });
-    appendFileSync(join(logDir, 'compaction.jsonl'), rows.map((r) => JSON.stringify(r)).join('\n') + '\n', 'utf8');
+    const compactionPath = join(logDir, 'compaction.jsonl');
+    // Apply the rotation limit to the compaction log like other Jev logs (OMC_JEV_LOG_MAX_MB)
+    rotateJevLog(compactionPath, resolveJevLogMaxBytes(process.env));
+    appendFileSync(compactionPath, rows.map((r) => JSON.stringify(r)).join('\n') + '\n', 'utf8');
     return true;
   } catch { return false; }
 }

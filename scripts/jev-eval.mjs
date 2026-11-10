@@ -312,19 +312,9 @@ async function main(argv, env = process.env, cwd = process.cwd()) {
     const readSet = new Set(read);
     const postReadRotated = rotatedLogPaths(path).filter(f => !readSet.has(f));
     if (postReadRotated.length > 0) {
-      for (const file of postReadRotated) {
-        const text = readLogFile(file);
-        if (text !== null) {
-          read.push(file);
-        }
-      }
-      // Reanalyze with all files including newly discovered rotations
-      const allLines = [];
-      for (const file of read) {
-        const text = readLogFile(file);
-        if (text !== null) allLines.push(...text.split('\n'));
-      }
-      report = analyzeLog(allLines, path);
+      // Reanalyze with all files including newly discovered rotations, using the line iterator
+      // to avoid spreading all lines into arguments (which causes RangeError on large logs)
+      report = analyzeLog(linesOfFiles(read.concat(postReadRotated), read), path);
     }
     
     if (read.length === 0) {

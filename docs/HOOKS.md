@@ -770,6 +770,10 @@ jq --arg id "$id" 'select(.request_id == $id)' .omc/state/jev/shadow.jsonl
 
 A `model-routing` line means the decision was handed to Claude Code, not decided: a call that a later check of the same hook denies, or a value other code replaced, has no line. An effort lowered only by `OMC_JEV_MAX_EFFORT` is the cap's doing and has no line. The log is a separate file because `jev-eval` counts every line of `shadow.jsonl` as a request; it is rotated with `OMC_JEV_LOG_MAX_MB` like the other Jev logs. Script hooks only: the points reached through the TypeScript resolver write no applied lines. Without the variable no file is written.
 
+#### Compaction log
+
+With the compaction point enabled, Jev's compaction module (if installed in the plugin) writes one JSON record per compaction to `compaction.jsonl` in the Jev log directory (next to `shadow.jsonl`), appended during SessionStart. Each line is `{ts, session_id, agent_id, compaction, context, systemMessage, …}`, recording metadata about the compaction source and any registry-based context sent to Claude. The file grows with every compaction and is rotated with `OMC_JEV_LOG_MAX_MB` like the other Jev logs.
+
 #### States without session ids
 
 Two states sent to Jev carry an id of the session rather than of the work: the `loop-continuation` state has `session_id`, and the `simplifier-trigger` state has `cwd`, the project path. Neither helps the judgment, and both leave the machine with the request. With `OMC_JEV_STATE_OMIT_IDS=1` the hook scripts and the TypeScript points leave them out of the state. They are then also missing from the state recorded in `shadow.jsonl`; set `OMC_JEV_LOG_CONTEXT=1` as well to keep them in the log line, as the top-level `session_id` and `cwd` fields, without sending them. Without the variable the states are unchanged.
