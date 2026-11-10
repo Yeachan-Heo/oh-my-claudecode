@@ -1,30 +1,48 @@
-# oh-my-claudecode v5.8.4: Hooks improvements, Jev enhancements, Teleport fix
+# oh-my-claudecode v5.8.5: MCP servers start again on plugin installs without node_modules (#4954)
 
 ## Release Notes
 
-v5.8.4 is a patch release that adds opt-in shell command checks, improves Jev model routing, fixes worktree teleport for projects without package.json, and hardens Windows plugin hook spawning.
+Release with **5 new features**, **5 bug fixes**, **8 other changes** across **19 merged PRs**.
 
 ### Highlights
 
-- **feat(hooks): opt-in shell command checks for Bash and PowerShell** (#4925) — enable with `OMC_SHELL_CHECKS=1`
-- **feat(jev): let a use marker pin the model and effort of a model-routing call** (#4924)
-- **fix(teleport): skip the dependency step when the new worktree has no package.json** (#4919)
+- **fix(bridge): bundle MCP SDK dependencies so plugin installs start without node_modules** (#4955) — fixes the v5.8.4 MCP server crash (#4954)
+- **feat(model-routing): add opt-in support for fable model routing (Fixes #4933)** (#4942)
+- **feat(jev): opt-in task-size notice and explicit-request rules in the hook script** (#4932)
+- **feat(jev): add OMC_JEV_MAX_EFFORT_ALWAYS to cap every explicit Task/Agent effort** (#4930)
+- **feat(jev): opt-in `compaction` point that keeps the conversation verbatim** (#4940)
+- **feat(jev): give task-size, skill-trigger, intent and learner-extraction their own default excerpt limits** (#4936)
 
-### Features
+### New Features
 
-- **feat(hooks): opt-in shell command checks for Bash and PowerShell** (#4925)
-- **feat(jev): let a use marker pin the model and effort of a model-routing call** (#4924)
+- **feat(model-routing): add opt-in support for fable model routing (Fixes #4933)** (#4942)
+- **feat(jev): opt-in task-size notice and explicit-request rules in the hook script** (#4932)
+- **feat(jev): add OMC_JEV_MAX_EFFORT_ALWAYS to cap every explicit Task/Agent effort** (#4930)
+- **feat(jev): opt-in `compaction` point that keeps the conversation verbatim** (#4940)
+- **feat(jev): give task-size, skill-trigger, intent and learner-extraction their own default excerpt limits** (#4936)
 
 ### Bug Fixes
 
-- **fix(jev): Stop completion output, Noul probabilities, loop-continuation excerpt, parent-message notices** (#4923)
-- **fix(teleport): skip the dependency step when the new worktree has no package.json** (#4919)
-- **fix(types): add TypeScript declarations for hook-command-normalizer module**
-- **fix(hooks): spawn plugin hooks without a shell on Windows**
+- **fix(bridge): bundle MCP SDK dependencies so plugin installs start without node_modules** (#4955)
+- **fix(jev): make point:off turn a point off under all and all:active** (#4959)
+- **fix(jev): read the ralph slash confirmation from the raw prompt** (#4957)
+- **fix(jev): confirm mid-prompt slash commands only under an active task-size decision** (#4952)
+- **fix(jev): read the TypeScript loop-continuation Noul answer as a probability** (#4938)
+
+### Other Changes
+
+- **ci: re-authorize #4955 generated bridges at d3fe4895** (#4964)
+- **ci: authorize #4955 regenerated bridge bundles** (#4956)
+- **chore(sync): merge main into dev for v5.8.4** (#4945)
+- **ci: authorize sync PR #4945 at GitHub-signed head 1ae48609** (#4953)
+- **ci: restore #4945 authorization to signed head 69a40721** (#4951)
+- **ci: update #4945 authorization to original head da712048** (#4950)
+- **ci: repin #4945 authorization to signed head 69a40721** (#4948)
+- **ci: authorize generated artifacts for sync PR #4945 at da712048** (#4946)
 
 ### Stats
 
-- **5 PRs merged** | **2 new features** | **4 bug fixes** | **0 security/hardening improvements** | **0 other changes**
+- **19 PRs merged** | **5 new features** | **5 bug fixes** | **0 security/hardening improvements** | **8 other changes**
 
 ### Install / Update
 
@@ -33,7 +51,7 @@ The npm CLI and the Claude Code marketplace/plugin are separate install tracks, 
 **CLI / runtime:**
 
 ```bash
-npm install -g oh-my-claude-sisyphus@5.8.4
+npm install -g oh-my-claude-sisyphus@5.8.5
 ```
 
 **Claude Code plugin:**
@@ -42,4 +60,10 @@ npm install -g oh-my-claude-sisyphus@5.8.4
 /plugin marketplace update omc
 ```
 
-**Full Changelog**: https://github.com/Yeachan-Heo/oh-my-claudecode/compare/v5.8.3...v5.8.4
+**Full Changelog**: https://github.com/Yeachan-Heo/oh-my-claudecode/compare/v5.8.4...v5.8.5
+
+## Contributors
+
+Thank you to all contributors who made this release possible!
+
+@gaebal-gajae @maciejdrazkowski @Yeachan-Heo
