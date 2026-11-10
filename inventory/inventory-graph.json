@@ -5,15 +5,15 @@
   "provenance": {
     "base": "05c800f40d1ad53b42a78609d2667ef4f726808b",
     "planningHead": "0a91273e61dbbd47eb0af4c02844409251e08398",
-    "head": "424550db6903c7b372214243d6169ef4664da4e4",
-    "sourceSha256": "d3d5033f358d2a6a730c8dad5efa7904d731a69f51c1d6f1a10ea81022533271",
+    "head": "14de40c226d83ae7c36048fd8b175de1c8cac47d",
+    "sourceSha256": "86af0589957a8cf65fd62d4acc85b38a289d37878a18bab4c6140e9e5b823a6f",
     "generatedAt": null,
     "generator": "scripts/generate-inventory-graph.mjs"
   },
   "base": "05c800f40d1ad53b42a78609d2667ef4f726808b",
   "planningHead": "0a91273e61dbbd47eb0af4c02844409251e08398",
-  "head": "424550db6903c7b372214243d6169ef4664da4e4",
-  "sourceSha256": "d3d5033f358d2a6a730c8dad5efa7904d731a69f51c1d6f1a10ea81022533271",
+  "head": "14de40c226d83ae7c36048fd8b175de1c8cac47d",
+  "sourceSha256": "86af0589957a8cf65fd62d4acc85b38a289d37878a18bab4c6140e9e5b823a6f",
   "counts": {
     "public": {
       "skills": 84,
@@ -48208,6 +48208,21 @@
         "path": "tests/integration/jev-model-routing-marker.test.ts"
       },
       {
+        "id": "tests/integration/jev-task-size-notice.test.ts",
+        "kind": "other",
+        "path": "tests/integration/jev-task-size-notice.test.ts"
+      },
+      {
+        "id": "tests/integration/jev-task-size-prefix.test.ts",
+        "kind": "other",
+        "path": "tests/integration/jev-task-size-prefix.test.ts"
+      },
+      {
+        "id": "tests/integration/jev-task-size-slash.test.ts",
+        "kind": "other",
+        "path": "tests/integration/jev-task-size-slash.test.ts"
+      },
+      {
         "id": "tests/integration/multirepo-workspace.test.ts",
         "kind": "other",
         "path": "tests/integration/multirepo-workspace.test.ts"
@@ -91360,6 +91375,126 @@
         "kind": "imports"
       },
       {
+        "from": "tests/integration/jev-task-size-notice.test.ts",
+        "to": "external:node:child_process",
+        "kind": "imports"
+      },
+      {
+        "from": "tests/integration/jev-task-size-notice.test.ts",
+        "to": "external:node:fs",
+        "kind": "imports"
+      },
+      {
+        "from": "tests/integration/jev-task-size-notice.test.ts",
+        "to": "external:node:http",
+        "kind": "imports"
+      },
+      {
+        "from": "tests/integration/jev-task-size-notice.test.ts",
+        "to": "external:node:http",
+        "kind": "type-imports"
+      },
+      {
+        "from": "tests/integration/jev-task-size-notice.test.ts",
+        "to": "external:node:os",
+        "kind": "imports"
+      },
+      {
+        "from": "tests/integration/jev-task-size-notice.test.ts",
+        "to": "external:node:path",
+        "kind": "imports"
+      },
+      {
+        "from": "tests/integration/jev-task-size-notice.test.ts",
+        "to": "external:node:url",
+        "kind": "imports"
+      },
+      {
+        "from": "tests/integration/jev-task-size-notice.test.ts",
+        "to": "external:vitest",
+        "kind": "imports"
+      },
+      {
+        "from": "tests/integration/jev-task-size-prefix.test.ts",
+        "to": "external:node:child_process",
+        "kind": "imports"
+      },
+      {
+        "from": "tests/integration/jev-task-size-prefix.test.ts",
+        "to": "external:node:fs",
+        "kind": "imports"
+      },
+      {
+        "from": "tests/integration/jev-task-size-prefix.test.ts",
+        "to": "external:node:http",
+        "kind": "imports"
+      },
+      {
+        "from": "tests/integration/jev-task-size-prefix.test.ts",
+        "to": "external:node:http",
+        "kind": "type-imports"
+      },
+      {
+        "from": "tests/integration/jev-task-size-prefix.test.ts",
+        "to": "external:node:os",
+        "kind": "imports"
+      },
+      {
+        "from": "tests/integration/jev-task-size-prefix.test.ts",
+        "to": "external:node:path",
+        "kind": "imports"
+      },
+      {
+        "from": "tests/integration/jev-task-size-prefix.test.ts",
+        "to": "external:node:url",
+        "kind": "imports"
+      },
+      {
+        "from": "tests/integration/jev-task-size-prefix.test.ts",
+        "to": "external:vitest",
+        "kind": "imports"
+      },
+      {
+        "from": "tests/integration/jev-task-size-slash.test.ts",
+        "to": "external:node:child_process",
+        "kind": "imports"
+      },
+      {
+        "from": "tests/integration/jev-task-size-slash.test.ts",
+        "to": "external:node:fs",
+        "kind": "imports"
+      },
+      {
+        "from": "tests/integration/jev-task-size-slash.test.ts",
+        "to": "external:node:http",
+        "kind": "imports"
+      },
+      {
+        "from": "tests/integration/jev-task-size-slash.test.ts",
+        "to": "external:node:http",
+        "kind": "type-imports"
+      },
+      {
+        "from": "tests/integration/jev-task-size-slash.test.ts",
+        "to": "external:node:os",
+        "kind": "imports"
+      },
+      {
+        "from": "tests/integration/jev-task-size-slash.test.ts",
+        "to": "external:node:path",
+        "kind": "imports"
+      },
+      {
+        "from": "tests/integration/jev-task-size-slash.test.ts",
+        "to": "external:node:url",
+        "kind": "imports"
+      },
+      {
+        "from": "tests/integration/jev-task-size-slash.test.ts",
+        "to": "external:vitest",
+        "kind": "imports"
+      },
+      {
         "from": "tests/integration/multirepo-workspace.test.ts",
         "to": "external:node:fs",
         "kind": "imports"
@@ -92441,12 +92576,12 @@
       }
     ],
     "stats": {
-      "nodeCount": 8250,
-      "edgeCount": 8797,
-      "importEdgeCount": 7351,
+      "nodeCount": 8253,
+      "edgeCount": 8821,
+      "importEdgeCount": 7372,
       "registerEdgeCount": 105
     }
   },
-  "inventorySha256": "3f474e8ffd2c9489ced914c6438e9ff9453611476676f359b8fc2a0c46a2ca00",
-  "manifestSha256": "e000b4cf86bab203dc43f38a997a3dc29d19c0b3bc5ea6f9aefc7e4fb9e2fcd6"
+  "inventorySha256": "827e4f5b1a2dbe9f897ff501db6e2920d20844162db2ecb1a0cc50b7f514a2be",
+  "manifestSha256": "4d72f2ef2cbf25ebf4f4f016b34dd825ee6a7931ea90039daf76995b91d2d73b"
 }

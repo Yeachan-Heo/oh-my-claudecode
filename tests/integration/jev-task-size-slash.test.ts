@@ -8,7 +8,7 @@
  */
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { spawn } from "node:child_process";
-import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { mkdtempSync, readdirSync, readFileSync, rmSync } from "node:fs";
 import { createServer, type Server } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -149,6 +149,31 @@ describe("keyword-detector.mjs: OMC_JEV_TASK_SIZE_SLASH_ANYWHERE", () => {
     expectModeKept(output.hookSpecificOutput?.additionalContext ?? "", mode);
   }
 
+  /** The ralph state written by activation, or null when activation did not write one. */
+  function persistedRalphState() {
+    const file = readdirSync(cwd, { recursive: true, encoding: "utf8" })
+      .find((entry) => entry.replace(/\\/g, "/").split("/").pop() === "ralph-state.json");
+    return file
+      ? JSON.parse(readFileSync(join(cwd, file), "utf8")) as { invocation_source?: string; awaiting_confirmation?: boolean }
+      : null;
+  }
+
+  /**
+   * Ralph was kept and its persisted state records the slash command as the
+   * user's confirmation: no awaiting-confirmation window, which would make the
+   * Stop hook skip ralph enforcement. Activation may fail under load without
+   * the better-sqlite3 binding (see expectModeKept); only then is no state checked.
+   */
+  function expectConfirmedBySlash(output: Awaited<ReturnType<typeof run>>) {
+    const context = output.hookSpecificOutput?.additionalContext ?? "";
+    expectModeKept(context, "ralph");
+    if (context.includes("No ralph state was activated.")) return;
+    const state = persistedRalphState();
+    expect(state, "ralph state was not persisted").not.toBeNull();
+    expect(state?.invocation_source).toBe("slash");
+    expect(state?.awaiting_confirmation).toBeUndefined();
+  }
+
   /** Jev answered in active mode (not degraded), so a kept mode was kept by the rule under test. */
   function expectJevAnswered() {
     expect(taskSizeRequests).toBe(1);
@@ -187,7 +212,7 @@ describe("keyword-detector.mjs: OMC_JEV_TASK_SIZE_SLASH_ANYWHERE", () => {
       ["in brackets", "use ralph to fix the typo (/ralph)"],
       ["through the /omc: alias", "/omc:ralph fix the typo"],
     ])("a slash command %s keeps ralph", async (_label, prompt) => {
-      expectKept(await run(prompt, SLASH_ANYWHERE));
+      expectConfirmedBySlash(await run(prompt, SLASH_ANYWHERE));
       expectJevAnswered();
     });
 
@@ -200,8 +225,19 @@ describe("keyword-detector.mjs: OMC_JEV_TASK_SIZE_SLASH_ANYWHERE", () => {
     });
 
     it("accepts true as well as 1", async () => {
-      expectKept(await run("fix the typo and run /oh-my-claudecode:ralph now", { OMC_JEV_TASK_SIZE_SLASH_ANYWHERE: "true" }));
+      expectConfirmedBySlash(await run("fix the typo and run /oh-my-claudecode:ralph now", { OMC_JEV_TASK_SIZE_SLASH_ANYWHERE: "true" }));
       expectJevAnswered();
+    });
+
+    it("a ralph mention in prose kept for a medium answer still awaits confirmation", async () => {
+      choice = "medium";
+      const context = (await run("use ralph to fix the typo", SLASH_ANYWHERE)).hookSpecificOutput?.additionalContext ?? "";
+      expectModeKept(context, "ralph");
+      if (context.includes("No ralph state was activated.")) return;
+      const state = persistedRalphState();
+      expect(state, "ralph state was not persisted").not.toBeNull();
+      expect(state?.awaiting_confirmation).toBe(true);
+      expect(state?.invocation_source).toBeUndefined();
     });
 
     it.each([
