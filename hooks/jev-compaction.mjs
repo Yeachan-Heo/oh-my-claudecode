@@ -1002,12 +1002,20 @@ async function decide($, e, cfg, record, started) {
       }),
     );
   }
+  // Recheck the process cap after awaiting: when two compactions pass blockedReason() concurrently,
+  // both might compute capacity and enter the loop. After the first increments and one awaits, the second
+  // resumes with stale capacity and empty asked; the loop never runs, so held is unset. If no requests
+  // were made and the cap is now reached, treat it as a cap hit so the result goes to unanswered fallback.
+  if (!runs.length && !held && cfg.maxRequests && session.requests >= cfg.maxRequests) {
+    held = { mode: 'process-cap' };
+  }
   if (held) {
     // A request held back by the shared breaker or limit is no failure of the endpoint. The results it
     // would have scored count as unanswered, as after a failed request: the budget decides about them.
     const unscored = asked.slice(runs.length * BATCH);
     for (const c of unscored) { c.asked = true; c.score = UNANSWERED_SCORE; }
     record.unscored = unscored.length;
+    record.requests = runs.length;
     if (held.mode === 'circuit-open') Object.assign(record, { held: 'breaker', breaker_until: new Date(held.breaker.until).toISOString(), breaker_reason: held.breaker.reason });
     else if (held.mode === 'process-cap') record.held = 'cap';
     else Object.assign(record, { held: 'rpm', rpm: { count: held.count, threshold: held.threshold, limit: held.limit } });
