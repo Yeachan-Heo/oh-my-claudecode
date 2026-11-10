@@ -956,6 +956,19 @@ If this does not appear, the point is not activated or Jev is disabled.
 export OMC_JEV_QUIET=1  # Suppress the activation message
 ```
 
+#### Repair a Transcript That Will Not Resume After a Compaction
+
+With the `compaction` point active, a resumed session (or a message to a finished subagent) can fail with `API Error: 400 ... server_tool_use ids must be unique per assistant turn`. The module hands some assistant rows back to Claude Code unchanged; the host writes them behind the compaction boundary as copies with the same `message.id`, and on resume it joins all rows of one `message.id` from the file, including the originals before the boundary.
+
+`scripts/jev-repair-transcript.mjs` finds those rows and gives them a new `message.id` (same length, nothing else changes). It only checks by default:
+
+```bash
+node scripts/jev-repair-transcript.mjs ~/.claude/projects/<project>/<session>.jsonl          # list the rows, exit 1 if any
+node scripts/jev-repair-transcript.mjs ~/.claude/projects/<project>/<session>.jsonl --write  # repair
+```
+
+`--write` first saves a copy next to the file (`<file>.pre-repair`, then `.pre-repair.1` and so on; an existing copy is never overwritten) and replaces the file with one rename. Close the session first: if the file changes while the script runs, it writes nothing. A second run finds nothing to change. Exit codes: 0 nothing to repair (or repaired), 1 rows need repair, 2 usage error or a row that cannot be repaired safely.
+
 ### References
 
 - **Decision Model**: [Jev Issue #3669](https://github.com/Yeachan-Heo/oh-my-claudecode/issues/3669) — user stories and design
