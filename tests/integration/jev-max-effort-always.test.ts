@@ -334,6 +334,32 @@ describe("pre-tool-enforcer.mjs: OMC_JEV_MAX_EFFORT_ALWAYS caps every explicit T
       expect(withoutEffortAnswer).toMatchObject({ model: "sonnet", effort: "high" });
     }, 30000);
 
+    it("works with a use marker: the marker sets the model, the cap holds the explicit effort", async () => {
+      const prompt = "use opus\n\nFind why src/auth/session.test.ts fails intermittently and fix it.";
+      const input = agentInput({ prompt, effort: "max" });
+      const routed = await routedInput(input, { ...ALWAYS, OMC_JEV: undefined, OMC_JEV_MODEL_ROUTING_MARKER: "1" });
+      expect(routed).toEqual({
+        ...input.tool_input,
+        prompt: "Find why src/auth/session.test.ts fails intermittently and fix it.",
+        model: "opus",
+        effort: "high",
+      });
+      expect(requests).toHaveLength(0);
+    }, 15000);
+
+    it("works with a use marker that names an effort: the cap bounds it as well", async () => {
+      const prompt = "use sonnet xhigh\n\nFind why src/auth/session.test.ts fails intermittently and fix it.";
+      const input = agentInput({ prompt, effort: "max" });
+      const routed = await routedInput(input, {
+        ...ALWAYS,
+        OMC_JEV: undefined,
+        OMC_JEV_MODEL_ROUTING_MARKER: "1",
+        OMC_JEV_MAX_EFFORT: "medium",
+      });
+      expect(routed).toMatchObject({ model: "sonnet", effort: "medium" });
+      expect(requests).toHaveLength(0);
+    }, 15000);
+
     it.each([
       ["an effort within the cap", { effort: "medium" }, {}],
       ["an effort that is not a level", { effort: "ultra" }, {}],
