@@ -392,11 +392,17 @@ async function sharedSettings(env, endpoint, home) {
 
 // One step of file work on the shared state after the other (this module writes whole files, so two
 // steps at once would lose each other's lines). A step that takes longer than SHARED_OP_MS (or throws)
-// ends with `fallback`, and the next step goes on.
-function sharedStep($, work, fallback) {
-  const done = session.sharedQueue.then(() => withDeadline($, work(), SHARED_OP_MS)).then((r) => ('value' in r ? r.value : fallback));
-  session.sharedQueue = done;
-  return done;
+// returns `fallback`, but retains its place until the underlying work settles. Queue waiting counts
+// toward the deadline too; a step that expires before starting must not do stale file work later.
+function sharedStep($, work, fallback, ms = SHARED_OP_MS) {
+  const deadline = Date.now() + ms;
+  let expired = false;
+  const pending = session.sharedQueue.then(() => expired || Date.now() >= deadline ? fallback : work());
+  session.sharedQueue = pending.then(() => undefined, () => undefined);
+  return withDeadline($, pending, ms).then((r) => {
+    expired = true;
+    return 'value' in r ? r.value : fallback;
+  });
 }
 
 const minuteKey = (now) => new Date(now).toISOString().replace(/[-:T]/g, '').slice(0, 12);
