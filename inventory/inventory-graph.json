@@ -6,14 +6,14 @@
     "base": "05c800f40d1ad53b42a78609d2667ef4f726808b",
     "planningHead": "0a91273e61dbbd47eb0af4c02844409251e08398",
     "head": "01bdba16b894d67035507e2845251d31f27a5e26",
-    "sourceSha256": "d6bb283d0ff5f699c5d9fa8b96dac30e4b77aca1a8edeaa4652dbacf975bafab",
+    "sourceSha256": "29baa79977f2a94eb3500d4b73f4396ec39e8bdee0a059aa0d7eeac2891572a1",
     "generatedAt": null,
     "generator": "scripts/generate-inventory-graph.mjs"
   },
   "base": "05c800f40d1ad53b42a78609d2667ef4f726808b",
   "planningHead": "0a91273e61dbbd47eb0af4c02844409251e08398",
   "head": "01bdba16b894d67035507e2845251d31f27a5e26",
-  "sourceSha256": "d6bb283d0ff5f699c5d9fa8b96dac30e4b77aca1a8edeaa4652dbacf975bafab",
+  "sourceSha256": "29baa79977f2a94eb3500d4b73f4396ec39e8bdee0a059aa0d7eeac2891572a1",
   "counts": {
     "public": {
       "skills": 84,
@@ -69992,13 +69992,38 @@
       },
       {
         "from": "src/hooks/jev/__tests__/resolver-request-count.test.ts",
+        "to": "external:node:fs/promises",
+        "kind": "imports"
+      },
+      {
+        "from": "src/hooks/jev/__tests__/resolver-request-count.test.ts",
+        "to": "external:node:os",
+        "kind": "imports"
+      },
+      {
+        "from": "src/hooks/jev/__tests__/resolver-request-count.test.ts",
+        "to": "external:node:path",
+        "kind": "imports"
+      },
+      {
+        "from": "src/hooks/jev/__tests__/resolver-request-count.test.ts",
         "to": "external:vitest",
+        "kind": "imports"
+      },
+      {
+        "from": "src/hooks/jev/__tests__/resolver-request-count.test.ts",
+        "to": "scripts/lib/jev-breaker.mjs",
         "kind": "imports"
       },
       {
         "from": "src/hooks/jev/__tests__/resolver-request-count.test.ts",
         "to": "src/hooks/jev/resolver.ts",
         "kind": "imports"
+      },
+      {
+        "from": "src/hooks/jev/__tests__/resolver-request-count.test.ts",
+        "to": "src/hooks/jev/types.ts",
+        "kind": "type-imports"
       },
       {
         "from": "src/hooks/jev/__tests__/resolver.test.ts",
@@ -92823,11 +92848,11 @@
     ],
     "stats": {
       "nodeCount": 8260,
-      "edgeCount": 8862,
-      "importEdgeCount": 7410,
+      "edgeCount": 8867,
+      "importEdgeCount": 7414,
       "registerEdgeCount": 105
     }
   },
   "inventorySha256": "dc1e8f607afc4bc64ea3de4b174f970ddf083b3b850d1b23a5029328deb2cc76",
-  "manifestSha256": "fc0311be08e9ce3f7c9f5a9ead0d0bdc897774ba340c0800030887607843384b"
+  "manifestSha256": "890a517d86a3faabc94f05b780798aec9133db956d0223cccf9b20425d256862"
 }
