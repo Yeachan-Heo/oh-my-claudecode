@@ -314,6 +314,23 @@ describe('jev-compaction module: active compaction', () => {
     expect(run.records()[0]).toMatchObject({ secret_skipped: 6, non_text: 1 });
   });
 
+  it('a private path written with a backslash after ~ is expanded against a Windows home directory, so its results are never sent', async () => {
+    const calls = {
+      3: ['Read', { file_path: 'C:/Users/alice/private/ledger.txt' }],
+      5: ['Read', { file_path: 'C:\\Users\\alice\\private\\notes.txt' }],
+      7: ['Bash', { command: 'cat ~\\private\\todo.txt' }],
+    };
+    const messages = conversation(20, {
+      tool: (i) => (calls[i] ? calls[i][0] : 'Bash'),
+      input: (i) => (calls[i] ? calls[i][1] : { command: `cat notes-${i}.txt` }),
+    });
+    const env = { ...ACTIVE_ENV, HOME: undefined, USERPROFILE: 'C:\\Users\\alice', OMC_JEV_LOG_DIR: STATE, OMC_JEV_COMPACT_PRIVATE_PATHS: '~\\private' };
+    const run = await compactOnce(messages, { env });
+    const sent = sentResults(run.calls).map((r) => r.input).join('\n');
+    expect(sent).not.toMatch(/private/);
+    expect(run.records()[0]).toMatchObject({ secret_skipped: 3 });
+  });
+
   it('a result the user names in a recent message counts as needed, matched as a whole name', async () => {
     const messages = conversation(20, { last: 'The value inside notes-5.txt will be needed later; ignore old-notes-6.txt.' });
     const { out, records } = await compactOnce(messages);
