@@ -101,6 +101,8 @@ describe("jev advisory points: opt-in actions", () => {
   let noul: Record<string, number>;
   let noulByMode: Record<string, number>;
   let status: number;
+  // When set, the stub returns this answer for the first question instead of a Noul probability.
+  let rawAnswer: Record<string, unknown> | undefined;
   let onTaskComplete: (() => void) | undefined;
   // Shadow-mode runs leave a detached resolver that writes one log row when it is done.
   let shadowRuns: number;
@@ -111,6 +113,7 @@ describe("jev advisory points: opt-in actions", () => {
     noul = {};
     noulByMode = {};
     status = 200;
+    rawAnswer = undefined;
     onTaskComplete = undefined;
     shadowRuns = 0;
     server = createServer((request, response) => {
@@ -133,7 +136,9 @@ describe("jev advisory points: opt-in actions", () => {
           typeof mode === "string" && mode in noulByMode ? noulByMode[mode] : noul[question] ?? 0;
         response.writeHead(status, { "Content-Type": "application/json", Connection: "close" });
         response.end(
-          JSON.stringify({ answers: { [question]: { type: "noul", noul: value, confidence: 0.9 } } }),
+          JSON.stringify({
+            answers: { [question]: rawAnswer ?? { type: "noul", noul: value, confidence: 0.9 } },
+          }),
         );
       });
     });
@@ -519,6 +524,22 @@ describe("jev advisory points: opt-in actions", () => {
       expect(third.decision).toBe("block");
       expect(read(path)).toMatchObject({ active: true, iteration: 4 });
     }, 60000);
+
+    it.each([
+      ["a probability above 1", { type: "noul", noul: 2, confidence: 0.9 }],
+      ["a negative probability", { type: "noul", noul: -1, confidence: 0.9 }],
+      ["an answer of another type carrying a noul field", { type: "choice", choice: "a", noul: 0.9, confidence: 0.9 }],
+      ["an answer without a type", { noul: 0.9, confidence: 0.9 }],
+    ])("keeps blocking a Ralph Stop on %s", async (_label, answer) => {
+      const sessionId = "sess-release-malformed";
+      const path = write(sessionId, "ralph-state.json", state("ralph", sessionId));
+      rawAnswer = answer;
+      const output = await stop(sessionId, { OMC_JEV_LOOP_RELEASE_ONLY: "1" });
+      expect(output.decision).toBe("block");
+      expect(JSON.stringify(output)).not.toContain("[JEV-COMPLETION]");
+      expect(read(path)).toMatchObject({ active: true, iteration: 2 });
+      expect(read(path)).not.toHaveProperty("completed_at");
+    }, 20000);
 
     it("releases silently when cancel removes the state while Jev is answering", async () => {
       const sessionId = "sess-release-cancel";

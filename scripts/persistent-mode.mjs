@@ -237,9 +237,9 @@ function isStateUnchangedSinceJevRequest(originalState, statePath) {
 }
 
 function jevSaysTaskComplete(result) {
-  const noul = result?.answer?.noul;
-  return result?.mode === "active" &&
-    (noul === true || (typeof noul === "number" && Number.isFinite(noul) && noul >= 0.5));
+  // jevNoulOf() requires an active result, a Noul answer to this question and a value in 0-1.
+  const noul = jevNoulOf(result, "task_complete");
+  return noul !== undefined && noul >= 0.5;
 }
 
 /**

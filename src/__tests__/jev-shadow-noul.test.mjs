@@ -20,8 +20,19 @@ describe('jevNoulOf', () => {
       answers: { other: { type: 'noul', noul: 0.1 }, wanted: { type: 'noul', noul: 0.9 } },
     });
     expect(jevNoulOf(result, 'wanted')).toBe(0.9);
-    // A name that the map does not hold falls back to the first answer.
-    expect(jevNoulOf(result, 'missing')).toBe(0.1);
+  });
+
+  it('never reads the answer of another question when the answers map lacks the name', () => {
+    const result = active({
+      answer: { type: 'noul', noul: 0.1 },
+      answers: { other: { type: 'noul', noul: 0.1 } },
+    });
+    expect(jevNoulOf(result, 'missing')).toBeUndefined();
+    expect(jevNoulOf(active({ answer: { type: 'noul', noul: 0.7 }, answers: {} }), 'q')).toBeUndefined();
+  });
+
+  it('reads the single answer when there is no answers map', () => {
+    expect(jevNoulOf(active({ answer: { type: 'noul', noul: 0.4 }, answers: null }), 'q')).toBe(0.4);
   });
 
   it('maps a boolean answer to 1 or 0', () => {
