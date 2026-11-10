@@ -780,7 +780,7 @@ describe('jev-compaction module: what the host sends after the compaction', () =
     const original = messages.map((m) => table.get(m.handle));
     const api = hostRequest(original).map((m) => ({ role: m.role, content: m.blocks }));
     const asked = [];
-    fake.$.session.messages = async (opts) => { fake.calls.messages++; asked.push(opts); return opts?.as === 'api' ? (options.api ?? (() => api))(opts) : messages; };
+    fake.$.session.messages = async (opts) => { fake.calls.messages++; asked.push(opts); return opts?.as === 'api' ? (options.api ?? (() => api))(opts, messages) : messages; };
     const next = summaryNext();
     const out = await handlers['session.compact'](fake.$, Object.freeze({ trigger: 'auto', messages, ...options.event }), next);
     const written = hostWrite(out.messages, table);
@@ -835,6 +835,9 @@ describe('jev-compaction module: what the host sends after the compaction', () =
     const inTail = await compactHost([...opening, ...singles(20, 1), ...lastAdvice]);
     expect(inTail.records()[0]).toMatchObject({ result: 'fallback', reason: 'server_block_in_tail', server_blocks: 1 });
     expect(inTail.calls.fetch).toHaveLength(0);
+    // A host that ignores `as: 'api'` answers the plain messages, which carry no API blocks.
+    const plain = await compactHost([...opening, ...singles(20, 1), ...lastAdvice], { api: (_opts, messages) => messages });
+    expect(plain.records()[0]).toMatchObject({ result: 'fallback', reason: 'server_block_in_tail', server_blocks: null });
     const refused = () => { throw new Error('refused'); };
     const blind = await compactHost([...opening, ...singles(20, 1), ...closing], { api: refused });
     expect(blind.records()[0]).toMatchObject({ result: 'fallback', reason: 'server_block_in_tail', server_blocks: null });

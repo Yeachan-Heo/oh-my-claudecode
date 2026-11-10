@@ -522,11 +522,12 @@ const isServerBlock = (b) => Boolean(b) && typeof b.type === 'string' && b.type 
 
 // Assistant API messages with a server block, and whether one may stand in the tail: its row is found
 // by a tool use, else by a text block equal to a row's text (any such row in the tail counts); a
-// message found nowhere counts as in the tail. Without the API form a tail assistant row with neither
+// message found nowhere counts as in the tail. Without the API form (refused, late, empty, or a list
+// without `content` blocks, as from a host that ignores `as: 'api'`) a tail assistant row with neither
 // text nor calls (thinking or a server block, which `messages` does not tell apart) counts as one.
 function serverBlocks(messages, api, keepFrom) {
   const tailEmpty = () => messages.some((m, i) => i >= keepFrom && m.role === 'assistant' && !m.text && !(m.toolUses || []).length);
-  if (!Array.isArray(api) || !api.length) return { count: null, inTail: tailEmpty() };
+  if (!Array.isArray(api) || !api.some((a) => a && Array.isArray(a.content))) return { count: null, inTail: tailEmpty() };
   const rowOfUse = new Map();
   const rowsOfText = new Map();
   messages.forEach((m, i) => {
@@ -624,7 +625,10 @@ function pairing(messages) {
 // internal error]" in its place and drops the real result. A row a hook built gets a new message.id,
 // so it joins nothing; a run of rows with the engine's handle is taken as one message (a built
 // assistant row or a user row with text ends the run). Counts calls without a result in the next
-// message and results without a call in the previous one.
+// message and results without a call in the previous one. The host keeps joining a handle row to its
+// message across a built row; this model does not, which is exact for what build() returns: every
+// assistant row before the tail is built and every one in it keeps its handle, so no built assistant
+// row stands after a kept one.
 function adjacencyBreaks(messages) {
   const msgs = [];
   let run = -1;
