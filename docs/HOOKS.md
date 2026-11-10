@@ -621,8 +621,8 @@ export OMC_JEV="point1,point2:active,all"
 | `OMC_JEV` | (absent) | Per-point opt-in: `point`, `point:active`, `all` (every point, shadow), or `all:active` (every point, active). Comma-separated; unknown point names are ignored. |
 | `OMC_JEV_TIMEOUT_MS` | `2000` | Per-call timeout in milliseconds (single round-trip measured at 465–605 ms; default allows margin). |
 | `OMC_JEV_MAX_REQUESTS` | `0` (unlimited) | Maximum Jev requests per process. When reached, heuristic twins run for remaining calls. |
-| `OMC_JEV_EXCERPT_CHARS` | `200` | Maximum string length sent in state and shadow log. Recursively bounds all strings in the judgment state; question definitions are static text and are sent whole. Does not apply to `model-routing` and `loop-continuation`, which have their own defaults (next row). |
-| `OMC_JEV_EXCERPT_CHARS_<POINT>` | (unset) | The same limit for one point: the point name upper-cased with dashes as underscores, for example `OMC_JEV_EXCERPT_CHARS_MODEL_ROUTING` (the variable name itself must be upper case). Order for a point: its own variable, then the point's default (`model-routing`: `12000`; `loop-continuation`: `2000`, the length to which `persistent-mode.mjs` already cuts the last assistant message), then `OMC_JEV_EXCERPT_CHARS`. An invalid value is ignored. To send less of the `loop-continuation` state, set `OMC_JEV_EXCERPT_CHARS_LOOP_CONTINUATION`, for example to `200`, the limit of earlier releases. |
+| `OMC_JEV_EXCERPT_CHARS` | `200` | Maximum string length sent in state and shadow log. Recursively bounds all strings in the judgment state; question definitions are static text and are sent whole. Does not apply to the points that have their own default (next row). |
+| `OMC_JEV_EXCERPT_CHARS_<POINT>` | (unset) | The same limit for one point: the point name upper-cased with dashes as underscores, for example `OMC_JEV_EXCERPT_CHARS_MODEL_ROUTING` (the variable name itself must be upper case). Order for a point: its own variable, then the point's default, then `OMC_JEV_EXCERPT_CHARS`. Point defaults: `model-routing` `12000`; `task-size` `4000`; `skill-trigger` and `intent` `1000`; `learner-extraction` and `loop-continuation` `2000` (the length to which `persistent-mode.mjs` cuts the last assistant message it sends for `loop-continuation`). An invalid value is ignored. To send less of one of these points, set its own variable, for example `OMC_JEV_EXCERPT_CHARS_TASK_SIZE=200`, the limit of earlier releases; `OMC_JEV_EXCERPT_CHARS` alone does not reach a point that has its own default. |
 | `OMC_JEV_ENDPOINT` | `https://api.typesafe.ai/v1/systemone` | Override for stub servers or tests. |
 | `OMC_JEV_LOG_DIR` | `.omc/state/jev` | Shadow-log directory override (test only). |
 | `OMC_JEV_QUIET` | (unset) | Set to `1` to silence the env-activation stderr warning. |
@@ -853,7 +853,8 @@ export OMC_JEV_MAX_REQUESTS=100
 # Raise timeout for slow networks
 export OMC_JEV_TIMEOUT_MS=5000
 
-# Truncate large state excerpts
+# Truncate large state excerpts (points that have their own default, see the
+# variable table, need their own variable, e.g. OMC_JEV_EXCERPT_CHARS_TASK_SIZE=500)
 export OMC_JEV_EXCERPT_CHARS=500
 ```
 
