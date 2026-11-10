@@ -2301,12 +2301,14 @@ async function main() {
           suppressedHeavy.push(keyword.name);
           return false;
         });
-        const suppressedForSize = keywordsBeforeSize.filter((name) => !resolved.some((match) => match.name === name));
-        if (suppressedForSize.length > 0) {
-          recordJevApplied('task-size', { size: jevTaskSizeResult.size, confidence: jevTaskSizeResult.confidence, suppressed: suppressedForSize });
-        }
         const prefixWon = classifierSizePrefix &&
           !(jevTaskSizeResult.size === 'small' && jevTaskSizeResult.confidence >= 0.9);
+        // A size prefix that won over another answer (OMC_JEV_TASK_SIZE_PREFIX_WINS) dropped the
+        // modes, not Jev's small answer: no applied line.
+        const suppressedForSize = keywordsBeforeSize.filter((name) => !resolved.some((match) => match.name === name));
+        if (suppressedForSize.length > 0 && !prefixWon) {
+          recordJevApplied('task-size', { size: jevTaskSizeResult.size, confidence: jevTaskSizeResult.confidence, suppressed: suppressedForSize });
+        }
         suppressionReason = prefixWon
           ? `size prefix "${heuristicTaskSize.escapePrefixUsed}" (Jev active-mode classification: ${jevTaskSizeResult.size}, confidence ${jevSizeConfidence ?? 'not given'})`
           : heuristicSaysSmall

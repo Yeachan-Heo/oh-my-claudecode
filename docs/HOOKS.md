@@ -760,7 +760,7 @@ Without the variable, log lines, requests and resolver results are exactly as be
 | `model-routing` | the hook output carries Jev's model or effort in `updatedInput` and it differs from what the agent would have run on (the call's model, else the one its agent definition names) | `subagent_type`, and `model` and/or `effort` as `{from, to}`; `effort` also has the `score` |
 | `context-pruning` | Jev's staleness changed the compaction action | `action: {from, to}`, `staleness`, and `message`: what the hook printed (`none`, `warning`, `critical`, or `suppressed` by the warning cooldown) |
 | `skill-trigger` | Jev's choice changed the triggered keywords (a later `task-size` suppression has its own line) | `keywords: {from, to}`, `choice` |
-| `task-size` | Jev's `small` suppressed heavy modes | `size`, `confidence`, `suppressed` (the keywords removed) |
+| `task-size` | Jev's `small` suppressed heavy modes (not when a size prefix won over another answer under `OMC_JEV_TASK_SIZE_PREFIX_WINS`) | `size`, `confidence`, `suppressed` (the keywords removed) |
 | `loop-continuation` | Jev's "task complete" ended the mode (another active mode can still block the stop) | `mode`, `completed: {from: false, to: true}` |
 
 Each line is `{ts, point, applied}`. With `OMC_JEV_LOG_CONTEXT=1` as well, the ids of the hook call and the `request_id` of the request follow `point`, so the line joins the request's `shadow.jsonl` line, which holds the answer itself:

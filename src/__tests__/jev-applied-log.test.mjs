@@ -365,6 +365,28 @@ describe('hook scripts with OMC_JEV_APPLIED_LOG=1', () => {
     expect(line).toMatchObject({ point: 'task-size', applied: { size: 'small', confidence: 0.95, suppressed: ['ralph'] } });
   }, 60_000);
 
+  it('task-size: no line for heavy modes that a winning size prefix dropped (OMC_JEV_TASK_SIZE_PREFIX_WINS)', async () => {
+    const prompt = 'quick: ralph fix the typo in the readme';
+    const env = { OMC_JEV_TASK_SIZE_PREFIX_WINS: '1', OMC_JEV_TASK_SIZE_NOTICE: '1' };
+    // The prefix drops ralph whatever Jev answers; Jev's answer changed nothing here.
+    for (const answer of [{ choice: 'large', confidence: 0.95 }, { choice: 'medium', confidence: 0.95 }, { choice: 'small', confidence: 0.5 }]) {
+      stubAnswers = { 'task-size': { type: 'choice', ...answer } };
+      const context = makeContext();
+      const output = await runHook(context, 'keyword-detector.mjs', { cwd: context.cwd, session_id: 'session-1', prompt }, 'task-size', env);
+      expect(JSON.stringify(output)).toContain('Heavy orchestration mode(s) suppressed: ralph');
+      expect(readLog(context, 'shadow.jsonl')).toHaveLength(1);
+      expect(readLog(context, 'applied.jsonl')).toEqual([]);
+    }
+
+    // Jev's own small answer is still recorded under the same variable.
+    stubAnswers = { 'task-size': { type: 'choice', choice: 'small', confidence: 0.95 } };
+    const small = makeContext();
+    await runHook(small, 'keyword-detector.mjs', { cwd: small.cwd, session_id: 'session-1', prompt }, 'task-size', env);
+    expect(readLog(small, 'applied.jsonl')).toEqual([
+      expect.objectContaining({ point: 'task-size', applied: { size: 'small', confidence: 0.95, suppressed: ['ralph'] } }),
+    ]);
+  }, 90_000);
+
   it('loop-continuation: the mode Jev\'s "task complete" ended', async () => {
     stubAnswers = { task_complete: { type: 'noul', noul: 0.9 } };
     const context = makeContext();
