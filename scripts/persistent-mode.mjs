@@ -2132,12 +2132,13 @@ async function main() {
               session_id: sessionId || null,
               iteration: newCount,
               phase,
-              should_block: true,
+              // At the cap (release-only) the fallback releases Stop unless Jev answers.
+              should_block: !reinforcementLimitReached,
               continuation_excerpt: reason,
               last_assistant_message: boundLastAssistantMessage(data.last_assistant_message),
             }, {
               mode: "autopilot",
-              shouldBlock: true,
+              shouldBlock: !reinforcementLimitReached,
               iteration: newCount,
               phase,
             }, data.permission_mode);

@@ -5,7 +5,7 @@
  * Every variable is off by default; each block also checks that the hook
  * behaves as before without it.
  */
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { execFileSync, spawn } from "node:child_process";
 import {
   existsSync,
@@ -18,8 +18,9 @@ import {
 } from "node:fs";
 import { createServer, type Server } from "node:http";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { clearWorktreeCache, resolveSessionStatePaths } from "../../src/lib/worktree-paths.js";
 
 const PROJECT_ROOT = fileURLToPath(new URL("../../", import.meta.url));
 
@@ -70,6 +71,25 @@ function findFiles(dir: string, name: string): string[] {
     else if (entry.name === name) found.push(path);
   }
   return found;
+}
+
+
+/**
+ * Session-scoped state file the hook reads, resolved by the canonical helper
+ * with the fixture's OMC_STATE_DIR applied (the hook subprocess resolves the
+ * same path from the same environment).
+ */
+function sessionStateFile(cwd: string, stateDir: string, sessionId: string, file: string): string {
+  const saved = process.env.OMC_STATE_DIR;
+  process.env.OMC_STATE_DIR = stateDir;
+  clearWorktreeCache();
+  try {
+    return resolveSessionStatePaths(file.replace(/\.json$/, ""), sessionId, cwd, { fileName: file }).effectiveWrite;
+  } finally {
+    if (saved === undefined) delete process.env.OMC_STATE_DIR;
+    else process.env.OMC_STATE_DIR = saved;
+    clearWorktreeCache();
+  }
 }
 
 describe("jev advisory points: opt-in actions", () => {
@@ -331,10 +351,10 @@ describe("jev advisory points: opt-in actions", () => {
     it("a blocked Stop carries no hint and does not use up the session's hint", async () => {
       const sessionId = "sess-learner-block";
       const now = new Date().toISOString();
-      const dir = join(cwd, ".omc", "non-git", "state", "sessions", sessionId);
-      mkdirSync(dir, { recursive: true });
+      const ralphPath = sessionStateFile(cwd, String(env.OMC_STATE_DIR), sessionId, "ralph-state.json");
+      mkdirSync(dirname(ralphPath), { recursive: true });
       writeFileSync(
-        join(dir, "ralph-state.json"),
+        ralphPath,
         JSON.stringify({
           active: true,
           mode: "ralph",
@@ -358,7 +378,7 @@ describe("jev advisory points: opt-in actions", () => {
       expect(findFiles(cwd, "jev-learner-hint.json")).toEqual([]);
 
       // Once the mode is gone, the next Stop of the same session shows the hint.
-      rmSync(join(dir, "ralph-state.json"), { force: true });
+      rmSync(ralphPath, { force: true });
       const later = await stop(sessionId, {
         OMC_JEV: "learner-extraction:active",
         OMC_JEV_LEARNER_HINT: "1",
@@ -453,9 +473,8 @@ describe("jev advisory points: opt-in actions", () => {
     }
 
     function write(sessionId: string, file: string, content: Record<string, unknown>): string {
-      const dir = join(cwd, ".omc", "non-git", "state", "sessions", sessionId);
-      mkdirSync(dir, { recursive: true });
-      const path = join(dir, file);
+      const path = sessionStateFile(cwd, String(env.OMC_STATE_DIR), sessionId, file);
+      mkdirSync(dirname(path), { recursive: true });
       writeFileSync(path, JSON.stringify(content, null, 2));
       return path;
     }
@@ -593,6 +612,29 @@ describe("jev advisory points: opt-in actions", () => {
       expect(output).toEqual({ continue: true, suppressOutput: true });
       expect(read(path)).toMatchObject({ active: true, reinforcement_count: 20 });
       expect(requests).toHaveLength(1);
+    }, 20000);
+
+    it("logs the capped autopilot release as a non-comparable heuristic in shadow mode", async () => {
+      const sessionId = "sess-release-autopilot-cap-shadow";
+      write(sessionId, "autopilot-state.json", state("autopilot", sessionId, { reinforcement_count: 20 }));
+      noul.task_complete = 0.95;
+      shadowRuns += 1;
+
+      const output = await stop(sessionId, { OMC_JEV: "loop-continuation", OMC_JEV_LOOP_RELEASE_ONLY: "1" });
+      expect(output).toEqual({ continue: true, suppressOutput: true });
+      await vi.waitFor(
+        () => {
+          const logPath = join(cwd, "jev-logs", "shadow.jsonl");
+          const entry = (existsSync(logPath) ? readFileSync(logPath, "utf8").trim().split("\n") : [])
+            .filter(Boolean)
+            .map((line) => JSON.parse(line) as { point: string; mode: string; heuristic: unknown; state?: { should_block?: boolean } })
+            .find((line) => line.point === "loop-continuation" && line.mode === "shadow");
+          expect(entry).toBeDefined();
+          expect(entry?.heuristic).toBeNull();
+          expect(entry?.state?.should_block).toBe(false);
+        },
+        { timeout: 10000, interval: 50 },
+      );
     }, 20000);
 
     it("a released child Ralph hands the Stop to the active autopilot", async () => {
