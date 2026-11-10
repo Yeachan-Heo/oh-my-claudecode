@@ -136,6 +136,7 @@ Fires immediately before Claude uses a tool.
 Runs on all tool calls (`matcher: "*"`). Enforces agent permission restrictions (e.g., blocking Write/Edit for read-only agents).
 Denies Task/Agent calls whose `subagent_type` names a bundled skill (issue #3667): instead of Claude Code's generic native "Agent type not found", the hook returns a precise error naming the Skill tool and the correct identifier, and forbids closest-match agent substitution.
 The exact canonical shipped script runs in the trusted Worker path; untrusted paths, event mismatches, and extra arguments retain the isolated child-process fallback.
+With `OMC_SHELL_CHECKS=1` it also checks Bash and PowerShell commands before they run (see [Shell Checks](#shell-checks-scriptslibshell-checksmjs)).
 
 ### PermissionRequest
 
@@ -159,7 +160,7 @@ Fires after a tool use completes.
 | `post-tool-directory-context-injector.mjs` | Injects the README.md and AGENTS.md files from the file's directory up to the working directory, for Read, Write, Edit, and MultiEdit | 3s |
 
 Injects additional guidance based on Read, Write, Edit, and Bash results. For example, after reading a file it may hint "consider using parallel reads."
-These exact canonical shipped scripts use the trusted Worker path without changing their manifest timeout budgets. The verifier retains statistics for the current session and the 99 most recently updated historical sessions so per-tool writes stay bounded. Disable all four with `DISABLE_OMC=1` (or `DISABLE_OMC=true`) or `OMC_SKIP_HOOKS=post-tool-use`; `project-memory-posttool` also accepts its script-specific token.
+These exact canonical shipped scripts use the trusted Worker path without changing their manifest timeout budgets. The verifier retains statistics for the current session and the 99 most recently updated historical sessions so per-tool writes stay bounded. With `OMC_SHELL_CHECKS=1`, `post-tool-verifier.mjs` also records known shell error classes of Bash and PowerShell results (see [Shell Checks](#shell-checks-scriptslibshell-checksmjs)). Disable all four with `DISABLE_OMC=1` (or `DISABLE_OMC=true`) or `OMC_SKIP_HOOKS=post-tool-use`; `project-memory-posttool` also accepts its script-specific token.
 
 ### PostToolUseFailure
 
@@ -168,6 +169,8 @@ Fires when a tool use fails.
 | Script | Role | Timeout |
 |--------|------|---------|
 | `post-tool-use-failure.mjs` | Provides recovery guidance for failed tool use | 3s |
+
+With `OMC_SHELL_CHECKS=1`, the script also records known shell error classes of failed Bash and PowerShell calls (see [Shell Checks](#shell-checks-scriptslibshell-checksmjs)).
 
 Disable via `DISABLE_OMC=1` (or `DISABLE_OMC=true`) or `OMC_SKIP_HOOKS=post-tool-use-failure` (the `post-tool-use` token also skips it, alongside `post-tool-verifier.mjs`).
 
@@ -350,6 +353,34 @@ A PreToolUse hook (matcher: `Bash`) that checks shell command positions and bloc
 - **Safe operations**: `git push --dry-run` / `git push -n`, clean dry-runs (`git clean -n`, including `git clean -n -- -f`), soft resets, non-forced branch deletes (`-d`), and path-specific checkout/restore commands such as `git checkout ./path` and `git restore ./file` pass. Malformed, absent, or command-less payloads fail open. An unset guard variable outside an active mode also fails open after a bounded stdin read; explicit `=0` exits before reading stdin.
 - **Message**: the hook refuses with “You do not have authority for this operation” and names the two legitimate exits — the user runs it themselves, or explicitly sets `OMC_GIT_GUARDRAILS=0`. When auto-enabled by an active mode, the refusal names the mode.
 - **Prove it bites**: before trusting the guardrail in a session, feed it a planted violation once and watch it block (see the `refit` skill's landing rule). An installed guardrail nobody has seen fire is decoration, not protection.
+
+#### Shell Checks (`scripts/lib/shell-checks.mjs`)
+
+Opt-in checks of Bash and PowerShell commands, run by `pre-tool-enforcer.mjs` before the rest of the hook, plus a log of the shell errors that still happen. Set `OMC_SHELL_CHECKS=1` to enable. Without it no hook imports the module and the hooks behave exactly as before. Every check is fail-open: if the module throws, the command runs as if the checks did not exist, and the hook never returns `ask`.
+
+The checks exist because some failures of the Bash tool are silent or misleading. On Windows the Bash tool passes the command to Git Bash as the argument of `bash -c`, inside a wrapper of about 460 characters in which every `'` becomes `'"'"'`. Git Bash cuts that argument after about 8190 characters, so the tail of a long command (usually a heredoc written by an agent) is lost: the result is `unexpected EOF while looking for matching`, or a silently shortened here-document. Git Bash also halves runs of backslashes in the command text (`\\` becomes `\`) except right before a `"`, and bash 5.3.15 in Git for Windows 2.55.0 fails to parse some `$'\r'` constructs inside `"$(...)"`.
+
+| Check | Platforms | Result | What it catches |
+|-------|-----------|--------|-----------------|
+| `length` | Windows | deny | `characters + 4 x apostrophes + 460` is 7700 or more. The message says to write the script to a file and run it with a short command, or to pass the script to bash on stdin. |
+| `cr-parser` | Windows | deny | In one top-level `"..."`, a `$(...)` or `${...}` with a CR-producing `$'...'` (`\r`, `\015`, `\x0d`, `\cM`, `\u000d`) after another `$(...)`. The message names replacements such as `grep -c -P '\r$'`. `bash -n` does not see this bug. |
+| `syntax` | all | deny | `bash -n` on the command (stdin, 1 s limit) exits 2 with a parser message. On Windows the text checked is the one Git Bash will see after halving backslashes, and only commands longer than 200 characters are checked, because `bash -n` costs about 110 ms there (p95 about 500 ms). On macOS only a Homebrew bash is used, since `/bin/bash` 3.2 rejects bash 4 syntax; without one the check is skipped. A crashed `bash` or a timeout never denies. |
+| `heredoc` | all | deny | A here-document without its closing line (`bash -n` only warns and exits 0). |
+| `backslash` | Windows | warn | A run of two or more backslashes not directly before `"`. |
+| `ps-ssh-dollar` | all | warn | PowerShell: `ssh` with `\$` inside `"..."` (`\$` is no escape in PowerShell, so the expansion happens locally). |
+| `ps-dev-null` | Windows | warn | PowerShell: `2>/dev/null` outside quotes (it writes to `C:\dev\null`; use `2>$null`). |
+
+A denial is a PreToolUse `permissionDecision: "deny"` whose reason starts with `[SHELL CHECK]`. A warning is added to `additionalContext`, in front of whatever other context the hook emits for that call, and is never added to a denial.
+
+- **Log**: `<state root>/state/shell-checks/checks.jsonl` has one row per Bash or PowerShell command (decision, checks run, length, `bash -n` time, session and tool-use ids and `cwd`; the command text only for a denial, at most 300 characters, after masking secrets). `errors.jsonl` has one row for each tool result that shows a known shell error class (`unexpected-eof`, `heredoc-eof`, `enametoolong`, `python-invalid-escape`, `win-path-not-found`, `ps-missing-terminator`, `ps-dev-null`; for the first two a `cause` of `truncation`, `parser-bug` or `manual`), written by `post-tool-verifier.mjs` and `post-tool-use-failure.mjs`. A file above 50 MB is renamed with a timestamp and the newest two such files are kept.
+- **Measured on**: Claude Code 2.1.318 and Git for Windows 2.55.0 (`bash.exe` 5.3.15). The wrapper size and the cut point belong to those programs, so re-check them after updating either (`printf '%s' "$BASH_EXECUTION_STRING"` shows the wrapper).
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `OMC_SHELL_CHECKS` | (unset) | `1` enables the checks and the error log. Any other value leaves everything off. |
+| `OMC_SHELL_CHECKS_LENGTH_LIMIT` | `7700` | Effective length from which `length` denies on Windows (1000-100000; other values use the default). |
+| `OMC_SHELL_SYNTAX_TIMEOUT_MS` | `1000` | Time limit of the `bash -n` check in milliseconds (100-3000, so that a hung `bash` stays inside the 5 s hook budget; other values use the default). |
+| `OMC_SHELL_CHECKS_LOG_DIR` | `<state root>/state/shell-checks` | Log directory override. |
 
 #### Stale Run Reporter (`stale-run-reporter.mjs`)
 
