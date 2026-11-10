@@ -5,15 +5,15 @@
   "provenance": {
     "base": "05c800f40d1ad53b42a78609d2667ef4f726808b",
     "planningHead": "0a91273e61dbbd47eb0af4c02844409251e08398",
-    "head": "66d91bd68575c123678efba6543a706cc9331ac8",
-    "sourceSha256": "b621ba8cb68538c9094261505adcfb200b3d1528802657e01ef8e6bcf8733db1",
+    "head": "4f8e09d4a858fc560f7d512355f368e2aa8a479f",
+    "sourceSha256": "a531aaa8745e58529a6d6e8237ce25dd4997836c921f6fbd0fb8b8cf13a25af1",
     "generatedAt": null,
     "generator": "scripts/generate-inventory-graph.mjs"
   },
   "base": "05c800f40d1ad53b42a78609d2667ef4f726808b",
   "planningHead": "0a91273e61dbbd47eb0af4c02844409251e08398",
-  "head": "66d91bd68575c123678efba6543a706cc9331ac8",
-  "sourceSha256": "b621ba8cb68538c9094261505adcfb200b3d1528802657e01ef8e6bcf8733db1",
+  "head": "4f8e09d4a858fc560f7d512355f368e2aa8a479f",
+  "sourceSha256": "a531aaa8745e58529a6d6e8237ce25dd4997836c921f6fbd0fb8b8cf13a25af1",
   "counts": {
     "public": {
       "skills": 84,
@@ -37,14 +37,14 @@
       "total": 5647
     },
     "prompt": {
-      "promptLikeFiles": 68
+      "promptLikeFiles": 63
     },
     "skills": 84,
     "commands": 21,
     "hookFiles": 336,
     "workflows": 8,
     "agentDefinitions": 18,
-    "promptLikeFiles": 68
+    "promptLikeFiles": 63
   },
   "public": {
     "skills": [
@@ -773,11 +773,6 @@
     "promptSources": [
       ".clawhip/state/prompt-submit.json",
       ".github/CLAUDE.md",
-      ".test-job-state-db-1445660/.omc/prompts/codex-status-bad-file.json",
-      ".test-job-state-db-1445660/.omc/prompts/codex-status-invalid.json",
-      ".test-job-state-db-1445660/.omc/prompts/codex-status-test-job1.json",
-      ".test-job-state-db-1445660/.omc/prompts/codex-status-test-migrated1.json",
-      ".test-job-state-db-1445660/.omc/prompts/gemini-status-test-job2.json",
       "CLAUDE.md",
       "benchmarks/code-reviewer/prompts/quality-reviewer.md",
       "benchmarks/debugger/prompts/build-fixer.md",
@@ -895,7 +890,6 @@
       "scripts/lib/hud-wrapper-template.mjs",
       "scripts/lib/hud-wrapper-template.txt",
       "scripts/lib/jev-compaction-state.mjs",
-      "scripts/lib/jev-delivery-guard.mjs",
       "scripts/lib/jev-mask.mjs",
       "scripts/lib/jev-shadow.mjs",
       "scripts/lib/model-routing-override-message.mjs",
@@ -6979,11 +6973,6 @@
     "promptSources": [
       ".clawhip/state/prompt-submit.json",
       ".github/CLAUDE.md",
-      ".test-job-state-db-1445660/.omc/prompts/codex-status-bad-file.json",
-      ".test-job-state-db-1445660/.omc/prompts/codex-status-invalid.json",
-      ".test-job-state-db-1445660/.omc/prompts/codex-status-test-job1.json",
-      ".test-job-state-db-1445660/.omc/prompts/codex-status-test-migrated1.json",
-      ".test-job-state-db-1445660/.omc/prompts/gemini-status-test-job2.json",
       "CLAUDE.md",
       "benchmarks/code-reviewer/prompts/quality-reviewer.md",
       "benchmarks/debugger/prompts/build-fixer.md",
@@ -7367,31 +7356,6 @@
         "id": ".omx/plans/source-overall-cleanup/ownership-matrix.md",
         "kind": "other",
         "path": ".omx/plans/source-overall-cleanup/ownership-matrix.md"
-      },
-      {
-        "id": ".test-job-state-db-1445660/.omc/prompts/codex-status-bad-file.json",
-        "kind": "prompt",
-        "path": ".test-job-state-db-1445660/.omc/prompts/codex-status-bad-file.json"
-      },
-      {
-        "id": ".test-job-state-db-1445660/.omc/prompts/codex-status-invalid.json",
-        "kind": "prompt",
-        "path": ".test-job-state-db-1445660/.omc/prompts/codex-status-invalid.json"
-      },
-      {
-        "id": ".test-job-state-db-1445660/.omc/prompts/codex-status-test-job1.json",
-        "kind": "prompt",
-        "path": ".test-job-state-db-1445660/.omc/prompts/codex-status-test-job1.json"
-      },
-      {
-        "id": ".test-job-state-db-1445660/.omc/prompts/codex-status-test-migrated1.json",
-        "kind": "prompt",
-        "path": ".test-job-state-db-1445660/.omc/prompts/codex-status-test-migrated1.json"
-      },
-      {
-        "id": ".test-job-state-db-1445660/.omc/prompts/gemini-status-test-job2.json",
-        "kind": "prompt",
-        "path": ".test-job-state-db-1445660/.omc/prompts/gemini-status-test-job2.json"
       },
       {
         "id": "AGENTS.md",
@@ -36899,11 +36863,6 @@
         "path": "node:process"
       },
       {
-        "id": "external:node:readline",
-        "kind": "external",
-        "path": "node:readline"
-      },
-      {
         "id": "external:node:stream",
         "kind": "external",
         "path": "node:stream"
@@ -37492,11 +37451,6 @@
         "id": "scripts/lib/jev-compaction-state.mjs",
         "kind": "script",
         "path": "scripts/lib/jev-compaction-state.mjs"
-      },
-      {
-        "id": "scripts/lib/jev-delivery-guard.mjs",
-        "kind": "script",
-        "path": "scripts/lib/jev-delivery-guard.mjs"
       },
       {
         "id": "scripts/lib/jev-mask.mjs",
@@ -41399,11 +41353,6 @@
         "path": "src/__tests__/jev-compaction-state.test.mjs"
       },
       {
-        "id": "src/__tests__/jev-delivery-guard.test.mjs",
-        "kind": "src",
-        "path": "src/__tests__/jev-delivery-guard.test.mjs"
-      },
-      {
         "id": "src/__tests__/jev-eval-script.test.mjs",
         "kind": "src",
         "path": "src/__tests__/jev-eval-script.test.mjs"
@@ -41422,6 +41371,11 @@
         "id": "src/__tests__/jev-resolve-script.test.mjs",
         "kind": "src",
         "path": "src/__tests__/jev-resolve-script.test.mjs"
+      },
+      {
+        "id": "src/__tests__/jev-shadow-noul.test.mjs",
+        "kind": "src",
+        "path": "src/__tests__/jev-shadow-noul.test.mjs"
       },
       {
         "id": "src/__tests__/job-state-db.test.ts",
@@ -48254,9 +48208,9 @@
         "path": "tests/integration/jev-active-mode-repro.test.ts"
       },
       {
-        "id": "tests/integration/jev-delivery-guard-per-logdir.test.ts",
+        "id": "tests/integration/jev-advisory-points.test.ts",
         "kind": "other",
-        "path": "tests/integration/jev-delivery-guard-per-logdir.test.ts"
+        "path": "tests/integration/jev-advisory-points.test.ts"
       },
       {
         "id": "tests/integration/jev-max-effort-always.test.ts",
@@ -49667,11 +49621,6 @@
       },
       {
         "from": "scripts/keyword-detector.mjs",
-        "to": "scripts/lib/jev-delivery-guard.mjs",
-        "kind": "imports"
-      },
-      {
-        "from": "scripts/keyword-detector.mjs",
         "to": "scripts/lib/jev-shadow.mjs",
         "kind": "imports"
       },
@@ -49863,51 +49812,6 @@
       {
         "from": "scripts/lib/jev-compaction-state.mjs",
         "to": "scripts/lib/jev-mask.mjs",
-        "kind": "imports"
-      },
-      {
-        "from": "scripts/lib/jev-delivery-guard.mjs",
-        "to": "external:node:child_process",
-        "kind": "imports"
-      },
-      {
-        "from": "scripts/lib/jev-delivery-guard.mjs",
-        "to": "external:node:crypto",
-        "kind": "imports"
-      },
-      {
-        "from": "scripts/lib/jev-delivery-guard.mjs",
-        "to": "external:node:fs",
-        "kind": "imports"
-      },
-      {
-        "from": "scripts/lib/jev-delivery-guard.mjs",
-        "to": "external:node:os",
-        "kind": "imports"
-      },
-      {
-        "from": "scripts/lib/jev-delivery-guard.mjs",
-        "to": "external:node:path",
-        "kind": "imports"
-      },
-      {
-        "from": "scripts/lib/jev-delivery-guard.mjs",
-        "to": "external:node:readline",
-        "kind": "imports"
-      },
-      {
-        "from": "scripts/lib/jev-delivery-guard.mjs",
-        "to": "external:node:url",
-        "kind": "imports"
-      },
-      {
-        "from": "scripts/lib/jev-delivery-guard.mjs",
-        "to": "scripts/jev-resolve.mjs",
-        "kind": "imports"
-      },
-      {
-        "from": "scripts/lib/jev-delivery-guard.mjs",
-        "to": "scripts/lib/config-dir.mjs",
         "kind": "imports"
       },
       {
@@ -56131,41 +56035,6 @@
         "kind": "imports"
       },
       {
-        "from": "src/__tests__/jev-delivery-guard.test.mjs",
-        "to": "external:node:child_process",
-        "kind": "imports"
-      },
-      {
-        "from": "src/__tests__/jev-delivery-guard.test.mjs",
-        "to": "external:node:fs",
-        "kind": "imports"
-      },
-      {
-        "from": "src/__tests__/jev-delivery-guard.test.mjs",
-        "to": "external:node:os",
-        "kind": "imports"
-      },
-      {
-        "from": "src/__tests__/jev-delivery-guard.test.mjs",
-        "to": "external:node:path",
-        "kind": "imports"
-      },
-      {
-        "from": "src/__tests__/jev-delivery-guard.test.mjs",
-        "to": "external:node:url",
-        "kind": "imports"
-      },
-      {
-        "from": "src/__tests__/jev-delivery-guard.test.mjs",
-        "to": "external:vitest",
-        "kind": "imports"
-      },
-      {
-        "from": "src/__tests__/jev-delivery-guard.test.mjs",
-        "to": "scripts/lib/jev-delivery-guard.mjs",
-        "kind": "imports"
-      },
-      {
         "from": "src/__tests__/jev-eval-script.test.mjs",
         "to": "external:node:child_process",
         "kind": "imports"
@@ -56298,6 +56167,16 @@
       {
         "from": "src/__tests__/jev-resolve-script.test.mjs",
         "to": "src/hooks/jev/config.ts",
+        "kind": "imports"
+      },
+      {
+        "from": "src/__tests__/jev-shadow-noul.test.mjs",
+        "to": "external:vitest",
+        "kind": "imports"
+      },
+      {
+        "from": "src/__tests__/jev-shadow-noul.test.mjs",
+        "to": "scripts/lib/jev-shadow.mjs",
         "kind": "imports"
       },
       {
@@ -91456,33 +91335,48 @@
         "kind": "imports"
       },
       {
-        "from": "tests/integration/jev-delivery-guard-per-logdir.test.ts",
-        "to": "external:node:crypto",
+        "from": "tests/integration/jev-advisory-points.test.ts",
+        "to": "external:node:child_process",
         "kind": "imports"
       },
       {
-        "from": "tests/integration/jev-delivery-guard-per-logdir.test.ts",
+        "from": "tests/integration/jev-advisory-points.test.ts",
         "to": "external:node:fs",
         "kind": "imports"
       },
       {
-        "from": "tests/integration/jev-delivery-guard-per-logdir.test.ts",
+        "from": "tests/integration/jev-advisory-points.test.ts",
+        "to": "external:node:http",
+        "kind": "imports"
+      },
+      {
+        "from": "tests/integration/jev-advisory-points.test.ts",
+        "to": "external:node:http",
+        "kind": "type-imports"
+      },
+      {
+        "from": "tests/integration/jev-advisory-points.test.ts",
         "to": "external:node:os",
         "kind": "imports"
       },
       {
-        "from": "tests/integration/jev-delivery-guard-per-logdir.test.ts",
+        "from": "tests/integration/jev-advisory-points.test.ts",
         "to": "external:node:path",
         "kind": "imports"
       },
       {
-        "from": "tests/integration/jev-delivery-guard-per-logdir.test.ts",
+        "from": "tests/integration/jev-advisory-points.test.ts",
         "to": "external:node:url",
         "kind": "imports"
       },
       {
-        "from": "tests/integration/jev-delivery-guard-per-logdir.test.ts",
+        "from": "tests/integration/jev-advisory-points.test.ts",
         "to": "external:vitest",
+        "kind": "imports"
+      },
+      {
+        "from": "tests/integration/jev-advisory-points.test.ts",
+        "to": "src/lib/worktree-paths.ts",
         "kind": "imports"
       },
       {
@@ -92937,12 +92831,12 @@
       }
     ],
     "stats": {
-      "nodeCount": 8267,
-      "edgeCount": 8877,
-      "importEdgeCount": 7425,
+      "nodeCount": 8260,
+      "edgeCount": 8865,
+      "importEdgeCount": 7412,
       "registerEdgeCount": 105
     }
   },
-  "inventorySha256": "522bf0790bdd7125a3b405a282a858272132f83793fa64ce66f4d523037bda54",
-  "manifestSha256": "a9be8bbeae1ca9a2526d7c19e294461cb66f67d3e742bc01d4b026acb798abc8"
+  "inventorySha256": "a6bc1a36066b6e9d37b02f940c1f61d6c1422f17d89b04ceb1cb5d7073fc6166",
+  "manifestSha256": "2457a942f31d51c43001aab6680ac47846fa034ff32e66dda6339ce282e2b52a"
 }
