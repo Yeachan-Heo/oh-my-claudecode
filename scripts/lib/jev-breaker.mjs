@@ -340,12 +340,21 @@ export function classifyFailure(failure, now = Date.now()) {
   return { reason: "http-" + status, opens: true, seconds: Math.min(retry ?? seconds, BREAKER_MAX_SECONDS) };
 }
 
-/** Requests without a response within the window, this one included. */
+/**
+ * Requests without a response within the window, this one included. The window
+ * ends at the newest time recorded, not at this call's own clock: concurrent
+ * processes sample their clock before they append, so a process may append a
+ * time that is older than lines already in the file (and in the next minute's
+ * file). Counting back from the newest time gives every process the same count
+ * once all lines are written, whatever the order of the appends. A time more
+ * than CLOCK_SLACK_MS ahead of this clock is a corrupt line or a clock set back
+ * and is ignored.
+ */
 function noteNoResponse(settings, now) {
   try {
     appendToMinute(settings, "noresp", String(now), now);
-    let count = 0;
-    for (const key of [minuteKey(now), minuteKey(now - 60_000)]) {
+    const times = [];
+    for (const key of [minuteKey(now - 60_000), minuteKey(now), minuteKey(now + 60_000)]) {
       let text = "";
       try {
         text = readFileSync(join(settings.dir, "noresp-" + key), "utf8");
@@ -354,10 +363,11 @@ function noteNoResponse(settings, now) {
       }
       for (const line of text.split("\n")) {
         const time = Number(line);
-        if (line && Number.isFinite(time) && time > now - NO_RESPONSE_WINDOW_MS && time <= now) count += 1;
+        if (line && Number.isFinite(time) && time <= now + CLOCK_SLACK_MS) times.push(time);
       }
     }
-    return count;
+    const newest = times.reduce((latest, time) => Math.max(latest, time), now);
+    return times.filter((time) => time > newest - NO_RESPONSE_WINDOW_MS).length;
   } catch {
     return 0;
   }

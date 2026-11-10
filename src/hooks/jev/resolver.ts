@@ -254,6 +254,14 @@ export async function resolveJudgment<T>(resolveJudgmentArgs: ResolveJudgmentArg
 
   // Opt-in breaker and request limit shared with every process of the machine.
   const shared = sharedBreakerWanted() ? await loadSharedBreaker(config.endpoint, config.apiKey) : undefined;
+
+  // Recheck the process cap right after that await and before admission: concurrent calls passed the first check
+  // together, and a call this cap rejects must not reserve a slot of the shared per-minute limit. Nothing yields
+  // between this check, admission and the count below, so the cap holds exactly.
+  if (config.maxRequests > 0 && runtime.requestCount >= config.maxRequests) {
+    return { answer: twinAnswer(), source: 'twin', mode: 'cap' };
+  }
+
   if (shared) {
     const { skip } = shared.breaker.admitRequest(shared.settings, args.point);
     if (skip) {
@@ -274,12 +282,7 @@ export async function resolveJudgment<T>(resolveJudgmentArgs: ResolveJudgmentArg
     }
   }
 
-  // Recheck the process cap after the shared-breaker await, as other processes may have made requests while waiting.
-  if (config.maxRequests > 0 && runtime.requestCount >= config.maxRequests) {
-    return { answer: twinAnswer(), source: 'twin', mode: 'cap' };
-  }
-
-  // Count the request after shared admission succeeds, so only admitted requests are counted.
+  // Count the request only after shared admission succeeded, so a call held back counts for nothing.
   runtime.requestCount += 1;
 
   const attempt = (async () => {

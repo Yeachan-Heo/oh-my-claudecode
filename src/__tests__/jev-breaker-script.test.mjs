@@ -245,6 +245,38 @@ describe('jev-breaker library', () => {
     expect(opened).toMatchObject({ reason: 'no-response', until: now + 2000 + 60_000 });
   });
 
+  it('counts three concurrent missing responses whose times are appended out of order, also across a minute', () => {
+    const noResponse = classifyFailure({ noResponse: true });
+    // Three processes read their clock in the order 1, 2, 3 but append in the order 3, 2, 1.
+    for (const base of [Date.parse('2026-11-09T12:00:10Z'), Date.parse('2026-11-09T12:00:59.900Z')]) {
+      const settings = breakerSettings({ OMC_JEV_BREAKER: '1', OMC_JEV_BREAKER_DIR: join(caseDir, 'at-' + base) }, ENDPOINT, 'k');
+      expect(recordFailure(settings, noResponse, base + 200)).toBeUndefined();
+      expect(recordFailure(settings, noResponse, base + 100)).toBeUndefined();
+      expect(recordFailure(settings, noResponse, base)).toMatchObject({ reason: 'no-response', until: base + 60_000 });
+    }
+  });
+
+  it('does not count missing responses more than a minute apart, in whatever order they are appended', () => {
+    const settings = breakerSettings({ OMC_JEV_BREAKER: '1', OMC_JEV_BREAKER_DIR: caseDir }, ENDPOINT, 'k');
+    const noResponse = classifyFailure({ noResponse: true });
+    const base = Date.parse('2026-11-09T12:00:00Z');
+    expect(recordFailure(settings, noResponse, base + 90_000)).toBeUndefined();
+    expect(recordFailure(settings, noResponse, base + 40_000)).toBeUndefined();
+    expect(recordFailure(settings, noResponse, base)).toBeUndefined();
+    expect(readBreaker(settings, base + 90_000)).toBeUndefined();
+  });
+
+  it('ignores a recorded time far ahead of the clock: it neither counts nor moves the window', () => {
+    const settings = breakerSettings({ OMC_JEV_BREAKER: '1', OMC_JEV_BREAKER_DIR: caseDir }, ENDPOINT, 'k');
+    const noResponse = classifyFailure({ noResponse: true });
+    const base = Date.parse('2026-11-09T12:00:10Z');
+    mkdirSync(settings.dir, { recursive: true });
+    writeFileSync(join(settings.dir, 'noresp-' + minuteKey(base)), String(base + 600_000) + '\n');
+    expect(recordFailure(settings, noResponse, base)).toBeUndefined();
+    expect(recordFailure(settings, noResponse, base + 1000)).toBeUndefined();
+    expect(recordFailure(settings, noResponse, base + 2000)).toMatchObject({ reason: 'no-response' });
+  });
+
   it('never shortens an open breaker and keeps the start of one outage', () => {
     const settings = breakerSettings({ OMC_JEV_BREAKER: '1', OMC_JEV_BREAKER_DIR: caseDir }, ENDPOINT, 'k');
     const now = Date.parse('2026-11-09T12:00:00Z');
@@ -901,6 +933,7 @@ describe('active hook and its resolver process', () => {
       "  const mode = process.env.TEST_RESOLVER_MODE;",
       "  if (mode === 'hang') Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 30000);",
       "  if (mode === 'exit3') process.exit(3);",
+      "  if (mode === 'delay') Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, Number(process.env.TEST_RESOLVER_DELAY_MS));",
       "}",
     ].join('\n'));
     return preload.split('\\').join('/');
@@ -956,6 +989,48 @@ describe('active hook and its resolver process', () => {
     expect(rows[0]).toMatchObject({ point: 'slop-warning', mode: 'degraded', reason: 'resolver-exit', exit_status: 3 });
     expect(rows[0].exit_signal).toBeUndefined();
     expect(rows[0].spawn_error).toBeUndefined();
+  }, 60_000);
+
+  it('a resolver started while the breaker was open stays in shadow mode when the breaker has closed before it asks for admission', async () => {
+    const stub = await startStub(() => ({ status: 200 }));
+    // The breaker is open for 4 s; the resolver starts 5.5 s after the hook has seen it open.
+    const env = preloadEnv('delay', { OMC_JEV_ENDPOINT: stub.endpoint, TEST_RESOLVER_DELAY_MS: '5500' });
+    openBreakerFile(env, 4);
+    const output = await runEnforcer('session-a', env);
+    expect(output.hookSpecificOutput.additionalContext).toContain('SLOP WARNING'); // the twin decided, the hook did not wait
+    const rows = await waitForRows(env, 1);
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({ point: 'slop-warning', mode: 'shadow' });
+    expect(rows[0].jev).not.toBeNull(); // the request went out, and its answer is not used as an active decision
+    expect(stub.count()).toBe(1);
+  }, 60_000);
+
+  it('a resolver that printed its result but is kept alive by an unfinished response body leaves one row, and its result is used', async () => {
+    const server = createServer((req, res) => {
+      req.resume();
+      req.on('end', () => {
+        res.writeHead(503, { 'Retry-After': '120', 'Content-Type': 'application/json' });
+        res.write('{"error":'); // the body never ends
+      });
+    });
+    await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
+    cleanups.push(() => new Promise((resolve) => {
+      server.closeAllConnections();
+      server.close(resolve);
+    }));
+    const env = jevEnv({
+      OMC_JEV: 'slop-warning:active',
+      OMC_JEV_BREAKER: '1',
+      OMC_JEV_TIMEOUT_MS: '1500',
+      OMC_JEV_ENDPOINT: 'http://127.0.0.1:' + server.address().port + '/v1/systemone',
+    });
+    const output = await runEnforcer('session-a', env);
+    await new Promise((resolve) => setTimeout(resolve, 500));
+    const rows = logRows(env);
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({ point: 'slop-warning', mode: 'degraded' });
+    expect(rows[0]).not.toHaveProperty('reason'); // the resolver's own row, not a resolver-timeout row of the hook
+    expect(output.systemMessage).toContain('HTTP 503'); // the result (the breaker it opened) reached the hook
   }, 60_000);
 
   it('without OMC_JEV_BREAKER the hook writes no row for a killed or failed resolver', async () => {

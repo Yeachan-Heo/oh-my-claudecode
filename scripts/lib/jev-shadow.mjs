@@ -509,15 +509,19 @@ export function recordJevShadow({ point, state, questions, heuristic, permission
           },
         );
 
-        if (result.status === 0 && result.stdout) {
+        // With the breaker, a resolver killed at the limit may already have written its row and printed its
+        // whole result (an unfinished response body keeps the process alive): that result counts, and the
+        // hook adds no second row for the same request.
+        const keptAlive = Boolean(breakerSettings?.breaker) && result.error?.code === "ETIMEDOUT";
+        if (result.stdout && (result.status === 0 || keptAlive)) {
           try {
             const parsed = JSON.parse(result.stdout);
             // This request opened the shared breaker.
             if (breakerSettings && parsed?.breaker) armOutageNotice(breakerSettings, parsed.breaker);
             return parsed;
           } catch {
-            // Parse error: fall back to heuristic
-            return undefined;
+            // Parse error: fall back to heuristic (output cut by the kill: recorded below)
+            if (!keptAlive) return undefined;
           }
         }
         // Only log resolver exit for actual failures (non-zero status or error), not for successful completions.
