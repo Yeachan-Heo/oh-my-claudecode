@@ -23,6 +23,21 @@ import { parseJevEnv, resolveJevTimeoutMs } from "../jev-resolve.mjs";
 
 const SWEEP_THROTTLE_MS = 60 * 60 * 1000; // 1 hour
 const ACTIVE_RESOLVER_TIMEOUT_BUFFER_MS = 500;
+// model-routing decides the model and effort of a subagent call, and its hook
+// (pre-tool-enforcer) has the longest manifest timeout, so its resolver gets
+// 3 s more to start and finish before the hook kills it (cold start under load).
+const MODEL_ROUTING_RESOLVER_EXTRA_BUFFER_MS = 3000;
+
+/**
+ * Time the hook gives the resolver process beyond the request timeout
+ * (OMC_JEV_TIMEOUT_MS) before it kills it.
+ */
+export function activeResolverBufferMs(point) {
+  return (
+    ACTIVE_RESOLVER_TIMEOUT_BUFFER_MS +
+    (point === "model-routing" ? MODEL_ROUTING_RESOLVER_EXTRA_BUFFER_MS : 0)
+  );
+}
 
 /**
  * Get the cross-process sweep throttle marker path.
@@ -369,7 +384,7 @@ export function recordJevShadow({ point, state, questions, heuristic, permission
             encoding: "utf8",
             timeout: resolveJevTimeoutMs(
               process.env,
-              ACTIVE_RESOLVER_TIMEOUT_BUFFER_MS,
+              activeResolverBufferMs(point),
             ),
           },
         );
