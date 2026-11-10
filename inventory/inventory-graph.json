@@ -5,23 +5,15 @@
   "provenance": {
     "base": "05c800f40d1ad53b42a78609d2667ef4f726808b",
     "planningHead": "0a91273e61dbbd47eb0af4c02844409251e08398",
-    "head": "0fa697c4577d8131f36c993e202ad00e954ff888",
-<<<<<<< HEAD
-    "sourceSha256": "cc96147328ac5377ca68b029af32127285c62d222e8b5192b34398810c125bb8",
-=======
-    "sourceSha256": "dfb5612de6fad4afd2d254fe096548f958758c3e2e250909e6b69a480175720f",
->>>>>>> origin/dev
+    "head": "a353c0118f409832dfed376dbc105291ca36d430",
+    "sourceSha256": "6530fc959bd802fee02b8c79c9bbbfcbe2c558b5b7029ce8a0cce83578e5f9f4",
     "generatedAt": null,
     "generator": "scripts/generate-inventory-graph.mjs"
   },
   "base": "05c800f40d1ad53b42a78609d2667ef4f726808b",
   "planningHead": "0a91273e61dbbd47eb0af4c02844409251e08398",
-  "head": "0fa697c4577d8131f36c993e202ad00e954ff888",
-<<<<<<< HEAD
-  "sourceSha256": "cc96147328ac5377ca68b029af32127285c62d222e8b5192b34398810c125bb8",
-=======
-  "sourceSha256": "dfb5612de6fad4afd2d254fe096548f958758c3e2e250909e6b69a480175720f",
->>>>>>> origin/dev
+  "head": "a353c0118f409832dfed376dbc105291ca36d430",
+  "sourceSha256": "6530fc959bd802fee02b8c79c9bbbfcbe2c558b5b7029ce8a0cce83578e5f9f4",
   "counts": {
     "public": {
       "skills": 84,
@@ -36,8 +28,8 @@
       "toolFiles": 65,
       "libFiles": 49,
       "templateHooks": 25,
-      "srcFiles": 1445,
-      "total": 1470
+      "srcFiles": 1446,
+      "total": 1471
     },
     "generated": {
       "distFiles": 5639,
@@ -40771,6 +40763,11 @@
         "path": "src/__tests__/bridge-help-question-regex.test.ts"
       },
       {
+        "id": "src/__tests__/bridge-self-contained.test.ts",
+        "kind": "src",
+        "path": "src/__tests__/bridge-self-contained.test.ts"
+      },
+      {
         "id": "src/__tests__/chain-enqueuer-registration.test.ts",
         "kind": "src",
         "path": "src/__tests__/chain-enqueuer-registration.test.ts"
@@ -53339,6 +53336,31 @@
       },
       {
         "from": "src/__tests__/bridge-help-question-regex.test.ts",
+        "to": "external:vitest",
+        "kind": "imports"
+      },
+      {
+        "from": "src/__tests__/bridge-self-contained.test.ts",
+        "to": "external:node:child_process",
+        "kind": "imports"
+      },
+      {
+        "from": "src/__tests__/bridge-self-contained.test.ts",
+        "to": "external:node:fs",
+        "kind": "imports"
+      },
+      {
+        "from": "src/__tests__/bridge-self-contained.test.ts",
+        "to": "external:node:os",
+        "kind": "imports"
+      },
+      {
+        "from": "src/__tests__/bridge-self-contained.test.ts",
+        "to": "external:node:path",
+        "kind": "imports"
+      },
+      {
+        "from": "src/__tests__/bridge-self-contained.test.ts",
         "to": "external:vitest",
         "kind": "imports"
       },
@@ -92719,17 +92741,12 @@
       }
     ],
     "stats": {
-      "nodeCount": 8256,
-      "edgeCount": 8845,
-      "importEdgeCount": 7393,
+      "nodeCount": 8257,
+      "edgeCount": 8850,
+      "importEdgeCount": 7398,
       "registerEdgeCount": 105
     }
   },
-<<<<<<< HEAD
-  "inventorySha256": "1e5659b6e774954bf573f735607f9cf22116789cfbd8aa222149ab243c3cd57d",
-  "manifestSha256": "602a13b2a0448ee1c8086b570a916c21a6c94fa5fdea68e1b53d7e787ba4db76"
-=======
-  "inventorySha256": "c15e50dbecefb72d8d5139869a91748a53476604ac6e9fb5dc36176131018031",
-  "manifestSha256": "85a7500ae2e9408231c7c35d8b7f1ec1c026375929b74143b4a720ae526722b5"
->>>>>>> origin/dev
+  "inventorySha256": "fa04d7071e18e22d42b8ba14c229cfdf46f8c2409e54e03e76a79fec297dcb03",
+  "manifestSha256": "86c56a95d504ccb91652529252d1be6dcd3feed572e5d5fc7be241910d3bffb1"
 }
