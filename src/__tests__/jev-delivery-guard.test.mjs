@@ -24,6 +24,7 @@ import {
   preToolTimeout,
   promptCheck,
   settingsEnvHash,
+  startDailyCheck,
   startSession,
 } from '../../scripts/lib/jev-delivery-guard.mjs';
 
@@ -538,6 +539,138 @@ describe('(c) the daily figures', () => {
     expect(existsSync(state('daily.lock'))).toBe(false);
     promptCheck(session(), options({ now: start + 23 * HOUR, logDir }));
     expect(JSON.parse(readFileSync(state('daily.json'), 'utf8')).lastStart).toBe(start);
+  });
+});
+
+describe('regression coverage for the review findings', () => {
+  const guardState = () => join(configDir, '.omc', 'jev-guard');
+  const badResult = (ts, interrupted) => ({ ts, windowHours: 24, decisions: 0, withAgent: 0, delivered: 0, deliveredPercent: null, interruptedAgentHooks: interrupted, interruptedOtherHooks: 0 });
+
+  it('stays inactive for a plan-mode hook when OMC_JEV_PLAN_MODE turns routing off or to shadow', () => {
+    writeHooks(5);
+    const input = { ...session('plan'), permission_mode: 'plan' };
+    for (const mode of ['off', 'shadow']) {
+      const env = { ...ON, OMC_JEV_PLAN_MODE: mode };
+      expect(startSession(input, options({ env }))).toBeNull();
+      expect(promptCheck(input, options({ env, logDir: join(root, 'jev-log') }))).toBeNull();
+    }
+    expect(existsSync(guardState())).toBe(false);
+    // the same hooks outside plan mode, and in plan mode without the override, still warn
+    expect(startSession(session('normal'), options())).toContain('5 s');
+    expect(startSession(input, options({ env: { ...ON, OMC_JEV_PLAN_MODE: 'active' } }))).toContain('5 s');
+  });
+
+  it('counts a timed-out legacy PreToolUse:Task hook as an interrupted agent hook', async () => {
+    const sessionDir = join(configDir, 'projects', 'proj');
+    mkdirSync(sessionDir, { recursive: true });
+    const hook = (name, id) => JSON.stringify({ type: 'attachment', timestamp: new Date(NOW - 2 * HOUR).toISOString(), attachment: { type: 'hook_cancelled', hookName: name, toolUseID: id, command: 'node "/plugins/omc/scripts/pre-tool-enforcer.mjs"', timedOut: true } });
+    writeFileSync(join(sessionDir, 'sess.jsonl'), [hook('PreToolUse:Task', 'k1'), hook('PreToolUse:Agent', 'k2'), hook('PreToolUse:Bash', 'k3')].join('\n') + '\n');
+    const result = await computeDelivery({ logDir: join(root, 'none'), configDir, now: NOW, env: {} });
+    expect(result).toMatchObject({ interruptedAgentHooks: 2, interruptedOtherHooks: 1 });
+    // a Task-only result still raises the alarm
+    const taskOnly = { ...result, interruptedAgentHooks: 1, interruptedOtherHooks: 0 };
+    expect(deliveryMessage(taskOnly)).toContain('PreToolUse:Agent hooks interrupted: 1');
+  });
+
+  it('computes 113 of 119 delivered decisions as a warning, not as 95 %', async () => {
+    const logDir = join(root, 'jev-log');
+    mkdirSync(logDir, { recursive: true });
+    const sessionDir = join(configDir, 'projects', 'proj', 'sess', 'subagents');
+    mkdirSync(sessionDir, { recursive: true });
+    const rows = [];
+    for (let i = 0; i < 119; i++) {
+      rows.push(JSON.stringify({ ts: new Date(NOW - 3 * HOUR).toISOString(), point: 'model-routing', mode: 'active', tool_use_id: `b${i}`, answers: { 'model-tier': { choice: 'opus' } } }));
+      writeFileSync(join(sessionDir, `agent-b${i}.meta.json`), JSON.stringify({ toolUseId: `b${i}`, model: i < 113 ? 'opus' : 'sonnet' }));
+    }
+    writeFileSync(join(logDir, 'shadow.jsonl'), rows.join('\n') + '\n');
+    const result = await computeDelivery({ logDir, configDir, now: NOW, env: {} });
+    expect(result).toMatchObject({ withAgent: 119, delivered: 113, deliveredPercent: 95 });
+    expect(deliveryMessage(result)).toContain('113 of 119 Jev model decisions reached the agent (95 %');
+  });
+
+  it('startDailyCheck leaves a slot another session already claimed: no worker, no new timestamp, lock released', () => {
+    const logDir = join(root, 'jev-log');
+    const dir = guardState();
+    mkdirSync(dir, { recursive: true });
+    const claimed = NOW - 5 * 60 * 1000;
+    writeFileSync(dailyStatePath(configDir, logDir, 'daily.json'), JSON.stringify({ lastStart: claimed }));
+    startDailyCheck(dir, configDir, logDir, { ...process.env }, NOW); // the caller saw the state before the claim
+    expect(JSON.parse(readFileSync(dailyStatePath(configDir, logDir, 'daily.json'), 'utf8')).lastStart).toBe(claimed);
+    expect(existsSync(dailyStatePath(configDir, logDir, 'daily.lock'))).toBe(false);
+    expect(existsSync(dailyStatePath(configDir, logDir, 'delivery.json'))).toBe(false);
+  });
+
+  describe('a relative OMC_JEV_LOG_DIR in two working directories', () => {
+    it('keeps daily state and displayed-report acknowledgments apart, including an older report in the second project', () => {
+      writeHooks(60);
+      const cwdA = join(root, 'proj-a');
+      const cwdB = join(root, 'proj-b');
+      mkdirSync(cwdA, { recursive: true });
+      mkdirSync(cwdB, { recursive: true });
+      startSession(session(), options());
+      const seed = (cwd, ts, interrupted) => {
+        mkdirSync(guardState(), { recursive: true });
+        writeFileSync(dailyStatePath(configDir, 'logs', 'daily.json', cwd), JSON.stringify({ lastStart: NOW })); // no new daily check
+        writeFileSync(dailyStatePath(configDir, 'logs', 'delivery.json', cwd), JSON.stringify(badResult(ts, interrupted)));
+      };
+      expect(dailyStatePath(configDir, 'logs', 'daily.json', cwdA)).not.toBe(dailyStatePath(configDir, 'logs', 'daily.json', cwdB));
+      seed(cwdA, NOW - HOUR, 2);
+      seed(cwdB, NOW - 5 * HOUR, 7); // older than the report of A
+      const shownA = promptCheck(session(), options({ logDir: 'logs', cwd: cwdA }));
+      expect(shownA.text).toContain('interrupted: 2');
+      shownA.confirm();
+      expect(promptCheck(session(), options({ logDir: 'logs', cwd: cwdA }))).toBeNull();
+      const shownB = promptCheck(session(), options({ logDir: 'logs', cwd: cwdB }));
+      expect(shownB.text).toContain('interrupted: 7');
+      shownB.confirm();
+      expect(promptCheck(session(), options({ logDir: 'logs', cwd: cwdB }))).toBeNull();
+    });
+
+    it('uses one key for an absolute path whatever the working directory, and a different one for a relative path', () => {
+      const key = (logDir, cwd) => dailyStatePath(configDir, logDir, 'daily.json', cwd);
+      const absolute = join(root, 'shared-log');
+      expect(key(absolute, join(root, 'x'))).toBe(key(absolute, join(root, 'y')));
+      expect(key('logs', join(root, 'x'))).toBe(key(join(root, 'x', 'logs'), join(root, 'y')));
+      expect(key('logs', join(root, 'x'))).not.toBe(key('logs', join(root, 'y')));
+    });
+
+    it.runIf(process.platform === 'win32')('treats a UNC log directory as absolute', () => {
+      const unc = '\\\\server\\share\\logs';
+      expect(dailyStatePath(configDir, unc, 'daily.json', 'C:\\a')).toBe(dailyStatePath(configDir, unc, 'daily.json', 'C:\\b'));
+    });
+  });
+
+  describe('a manual --daily run without --log', () => {
+    const run = (args, cwd, extraEnv) => spawnSync(NODE, [GUARD_SCRIPT, '--daily', '--config', configDir, '--now', new Date(NOW).toISOString(), ...args], { cwd, encoding: 'utf8', timeout: 20000, env: { ...process.env, OMC_STATE_DIR: '', OMC_DISABLE_MULTIREPO: '1', OMC_JEV_LOG_DIR: '', ...extraEnv } });
+
+    it('scans OMC_JEV_LOG_DIR and writes the report under that directory\'s key', () => {
+      const logDir = writeFixture();
+      const output = run(['--print', '--write'], root, { OMC_JEV_LOG_DIR: logDir });
+      expect(output.status).toBe(0);
+      expect(JSON.parse(output.stdout)).toMatchObject({ decisions: 9, delivered: 6, deliveredPercent: 75 });
+      const written = JSON.parse(readFileSync(dailyStatePath(configDir, logDir, 'delivery.json'), 'utf8'));
+      expect(written).toMatchObject({ decisions: 9, delivered: 6 });
+      expect(existsSync(dailyStatePath(configDir, undefined, 'delivery.json'))).toBe(false); // not the empty-directory key
+      // ... and the next prompt of a session in that project consumes it
+      writeHooks(60);
+      writeFileSync(dailyStatePath(configDir, logDir, 'daily.json'), JSON.stringify({ lastStart: NOW }));
+      startSession(session(), options({ now: NOW - 3 * HOUR }));
+      expect(promptCheck(session(), options({ logDir })).text).toContain('6 of 8 Jev model decisions reached the agent (75 %');
+    });
+
+    it('scans the project default log directory when neither --log nor OMC_JEV_LOG_DIR is given', () => {
+      const logDir = writeFixture();
+      const project = join(root, 'project-default');
+      mkdirSync(project, { recursive: true });
+      execFileSync('git', ['init', '--quiet'], { cwd: project, stdio: 'ignore' });
+      const defaultDir = join(project, '.omc', 'state', 'jev');
+      mkdirSync(defaultDir, { recursive: true });
+      for (const name of readdirSync(logDir)) writeFileSync(join(defaultDir, name), readFileSync(join(logDir, name)));
+      const output = run(['--print', '--write'], project, {});
+      expect(output.status).toBe(0);
+      expect(JSON.parse(output.stdout)).toMatchObject({ decisions: 9, delivered: 6 });
+      expect(JSON.parse(readFileSync(dailyStatePath(configDir, defaultDir, 'delivery.json'), 'utf8'))).toMatchObject({ decisions: 9 });
+    });
   });
 });
 

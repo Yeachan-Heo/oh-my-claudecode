@@ -39,7 +39,7 @@ import { spawn } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { closeSync, createReadStream, existsSync, mkdirSync, openSync, readFileSync, readdirSync, renameSync, statSync, unlinkSync, utimesSync, writeFileSync } from 'node:fs';
 import { setPriority } from 'node:os';
-import { dirname, join } from 'node:path';
+import { dirname, join, resolve } from 'node:path';
 import { createInterface } from 'node:readline';
 import { fileURLToPath } from 'node:url';
 import { parseJevEnv } from '../jev-resolve.mjs';
@@ -71,19 +71,16 @@ export function minTimeoutSeconds(env = process.env) {
 
 const guardDir = (configDir) => join(configDir, '.omc', 'jev-guard');
 const digest = (text) => createHash('sha256').update(text).digest('hex').slice(0, 16);
-// Resolve relative log paths to absolute to prevent collisions between projects with same relative path
-const resolveLogDir = (logDir, cwd = process.cwd()) => {
-  if (!logDir) return '';
-  const str = String(logDir);
-  return str.startsWith('/') || (str.length > 1 && str[1] === ':') ? str : join(cwd, str);
-};
+// A relative log path means a different directory in each working directory: resolve it with the platform's own path
+// rules (drive letters, UNC shares) before it becomes a state key, so two projects never share one.
+const resolveLogDir = (logDir, cwd = process.cwd()) => (logDir ? resolve(cwd, String(logDir)) : '');
 // The daily check belongs to one Jev log directory (one project's log), so its files carry a key of it.
-const dailyFile = (dir, logDir, kind) => {
+const dailyFile = (dir, logDir, kind, cwd) => {
   const [name, extension] = kind.split('.');
-  return join(dir, `${name}-${digest(resolveLogDir(logDir))}.${extension}`);
+  return join(dir, `${name}-${digest(resolveLogDir(logDir, cwd))}.${extension}`);
 };
 /** Path of a daily-check state file (kind: daily.json, daily.lock or delivery.json) for a Jev log directory. */
-export const dailyStatePath = (configDir, logDir, kind) => dailyFile(guardDir(configDir), logDir, kind);
+export const dailyStatePath = (configDir, logDir, kind, cwd) => dailyFile(guardDir(configDir), logDir, kind, cwd);
 
 function readJson(path) {
   try {
@@ -244,7 +241,7 @@ function claimDailyCheck(dir, logDir, now) {
   return null;
 }
 
-function startDailyCheck(dir, configDir, logDir, env, now) {
+export function startDailyCheck(dir, configDir, logDir, env, now) {
   const lock = claimDailyCheck(dir, logDir, now);
   if (!lock) return;
   const release = () => { try { unlinkSync(lock); } catch { /* gone */ } };
@@ -271,7 +268,9 @@ function startDailyCheck(dir, configDir, logDir, env, now) {
  * prompt's project; the other options are test seams.
  */
 export function promptCheck(data, options = {}) {
-  const { env = process.env, now = Date.now(), pluginRoot = PLUGIN_ROOT, configDir = getClaudeConfigDir(), logDir, cwd = process.cwd() } = options;
+  const { env = process.env, now = Date.now(), pluginRoot = PLUGIN_ROOT, configDir = getClaudeConfigDir(), cwd = process.cwd() } = options;
+  // One absolute key for the daily files, the acknowledgments and the worker's --log.
+  const logDir = resolveLogDir(options.logDir, cwd);
   try {
     if (!isGuardEnabled(env, data?.permission_mode)) return null;
     const dir = guardDir(configDir);
@@ -306,7 +305,7 @@ export function promptCheck(data, options = {}) {
       }
       if (reasons.length > 0) messages.push(changedSinceStartMessage(reasons));
       const result = readJson(dailyFile(dir, logDir, 'delivery.json'));
-      const key = resolveLogDir(logDir, cwd);
+      const key = logDir;
       const prevShown = typeof record.shownByLogDir?.[key] === 'number' ? record.shownByLogDir[key] : 0;
       if (typeof result?.ts === 'number' && result.ts > prevShown && now - result.ts <= STALE_RESULT_MS) {
         const message = deliveryMessage(result);

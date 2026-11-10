@@ -58,18 +58,22 @@ describe('jev-delivery-guard per-logdir acknowledgments', () => {
     const guardDir = join(configDir, '.omc', 'jev-guard');
     mkdirSync(join(guardDir, 'sessions'), { recursive: true });
 
-    // First, trigger a session start which should create a record
+    const logDir = join(cwd, 'project-a');
+    writeFileSync(dailyFile(guardDir, logDir, 'daily.json'), JSON.stringify({ lastStart: now }), 'utf8'); // no new daily check here
+
+    // The first prompt of a session without a record creates it; there is no report to show yet
     const result1 = promptCheck(data, {
       env,
       now,
       pluginRoot: ROOT,
       configDir,
-      logDir: join(cwd, 'project-a'),
+      logDir,
       cwd,
     });
 
-    // Both calls should succeed without error
-    expect(typeof result1 === 'object' || result1 === null).toBe(true);
+    expect(result1).toBeNull();
+    const record = JSON.parse(readFileSync(join(guardDir, 'sessions', 'test1.json'), 'utf8'));
+    expect(record.shownByLogDir).toEqual({});
   });
 
   it('tracks different logDir entries independently and displays per-directory reports', async () => {
@@ -84,6 +88,8 @@ describe('jev-delivery-guard per-logdir acknowledgments', () => {
     const logDir1 = join(cwd, 'project-a', 'jev-logs');
     const logDir2 = join(cwd, 'project-b', 'jev-logs');
     const sessionFile = join(sessionsDir, `${sessionId}.json`);
+    // No new daily check in this test: both directories were checked a moment ago.
+    for (const dir of [logDir1, logDir2]) writeFileSync(dailyFile(guardDir, dir, 'daily.json'), JSON.stringify({ lastStart: now }), 'utf8');
 
     // Simulate two projects with delivery results
     const ts1 = now - 3600000; // 1 hour ago
@@ -132,18 +138,15 @@ describe('jev-delivery-guard per-logdir acknowledgments', () => {
     });
     
     // Project 2 report should be displayed since it hasn't been shown before and has bad delivery
-    if (result2 !== null) {
-      expect(result2).toHaveProperty('text');
-      expect(result2).toHaveProperty('confirm');
-      expect(result2.text).toContain('85');
-      // Confirm that we've seen the report
-      result2.confirm();
-      
-      // Verify the record was updated with project 2's shown timestamp
-      const updated = JSON.parse(readFileSync(sessionFile, 'utf8'));
-      expect(updated.shownByLogDir[logDir2]).toBe(ts2);
-      expect(updated.shownByLogDir[logDir1]).toBe(ts1); // project 1's timestamp unchanged
-    }
+    expect(result2).not.toBeNull();
+    expect(result2!.text).toContain('85');
+    // Confirm that we've seen the report
+    result2!.confirm();
+
+    // Verify the record was updated with project 2's shown timestamp
+    const updated = JSON.parse(readFileSync(sessionFile, 'utf8'));
+    expect(updated.shownByLogDir[logDir2]).toBe(ts2);
+    expect(updated.shownByLogDir[logDir1]).toBe(ts1); // project 1's timestamp unchanged
   });
 
   it('initializes shownByLogDir as empty object for new session records', async () => {
