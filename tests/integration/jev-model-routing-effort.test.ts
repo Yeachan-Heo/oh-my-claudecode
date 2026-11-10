@@ -4,7 +4,7 @@
  * `score`, `legend`, and `probabilities` but no `choice`; the server may put
  * the `effort` answer before `model-tier`, so answers must be read by name.
  */
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { spawn } from "node:child_process";
 import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { createServer, type Server } from "node:http";
@@ -77,6 +77,28 @@ function runEnforcer(input: Record<string, unknown>, env: NodeJS.ProcessEnv, cwd
     child.stdin.on("error", reject);
     child.stdin.end(JSON.stringify(input));
   });
+}
+
+// Polling utility to wait for a condition to be true (replacement for vi.waitFor which is not available in vitest 4.1.11)
+async function waitFor(
+  condition: () => void,
+  options: { timeout?: number; interval?: number } = {},
+): Promise<void> {
+  const { timeout = 5000, interval = 50 } = options;
+  const startTime = Date.now();
+
+  while (Date.now() - startTime < timeout) {
+    try {
+      condition();
+      return; // Condition passed
+    } catch (error) {
+      // Condition failed, retry after interval
+      await new Promise((resolve) => setTimeout(resolve, interval));
+    }
+  }
+
+  // Last attempt before timeout
+  condition();
 }
 
 describe("pre-tool-enforcer.mjs: Jev model-routing chooses subagent effort", () => {
@@ -415,7 +437,7 @@ describe("pre-tool-enforcer.mjs: Jev model-routing chooses subagent effort", () 
     expect(planned.exitCode, planned.stderr).toBe(0);
     expect(planned.stdout).toBe(baseline.stdout);
     // Jev is still asked (shadow), so wait for the detached resolver before cleanup.
-    await vi.waitFor(
+    await waitFor(
       () => {
         const entries = readFileSync(join(cwd, "jev-logs", "shadow.jsonl"), "utf8")
           .trim()
@@ -436,7 +458,7 @@ describe("pre-tool-enforcer.mjs: Jev model-routing chooses subagent effort", () 
     const shadow = await runEnforcer(input, { ...env, OMC_JEV: "model-routing" }, cwd);
     expect(shadow.exitCode, shadow.stderr).toBe(0);
     expect(shadow.stdout).toBe(baseline.stdout);
-    await vi.waitFor(
+    await waitFor(
       () => {
         const entries = readFileSync(join(cwd, "jev-logs", "shadow.jsonl"), "utf8")
           .trim()

@@ -69,6 +69,28 @@ function runEnforcer(input: Record<string, unknown>, env: NodeJS.ProcessEnv, pro
   });
 }
 
+// Polling utility to wait for a condition to be true (replacement for vi.waitFor which is not available in vitest 4.1.11)
+async function waitFor(
+  condition: () => void,
+  options: { timeout?: number; interval?: number } = {},
+): Promise<void> {
+  const { timeout = 5000, interval = 50 } = options;
+  const startTime = Date.now();
+
+  while (Date.now() - startTime < timeout) {
+    try {
+      condition();
+      return; // Condition passed
+    } catch (error) {
+      // Condition failed, retry after interval
+      await new Promise((resolve) => setTimeout(resolve, interval));
+    }
+  }
+
+  // Last attempt before timeout
+  condition();
+}
+
 describe("pre-tool-enforcer.mjs: OMC_JEV_MAX_EFFORT_ALWAYS caps every explicit Task/Agent effort", () => {
   // The hooks run with `root` as their working directory, and so do the detached
   // shadow resolvers they start. A process's working directory cannot be removed on
@@ -169,7 +191,7 @@ describe("pre-tool-enforcer.mjs: OMC_JEV_MAX_EFFORT_ALWAYS caps every explicit T
 
   /** Shadow mode asks Jev from a detached resolver: wait for its row before cleanup. */
   async function waitForShadowRow() {
-    await vi.waitFor(
+    await waitFor(
       () => {
         const entries = readFileSync(join(cwd, "jev-logs", "shadow.jsonl"), "utf8")
           .trim()

@@ -5,7 +5,7 @@
  * pins the model and the effort in place of Jev's answer, and is removed from
  * the prompt. Without the variable the hook behaves exactly as before.
  */
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { spawn } from "node:child_process";
 import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { createServer, type Server } from "node:http";
@@ -55,6 +55,28 @@ function runEnforcer(input: Record<string, unknown>, env: NodeJS.ProcessEnv) {
     child.stdin.on("error", reject);
     child.stdin.end(JSON.stringify(input));
   });
+}
+
+// Polling utility to wait for a condition to be true (replacement for vi.waitFor which is not available in vitest 4.1.11)
+async function waitFor(
+  condition: () => void,
+  options: { timeout?: number; interval?: number } = {},
+): Promise<void> {
+  const { timeout = 5000, interval = 50 } = options;
+  const startTime = Date.now();
+
+  while (Date.now() - startTime < timeout) {
+    try {
+      condition();
+      return; // Condition passed
+    } catch (error) {
+      // Condition failed, retry after interval
+      await new Promise((resolve) => setTimeout(resolve, interval));
+    }
+  }
+
+  // Last attempt before timeout
+  condition();
 }
 
 describe("pre-tool-enforcer.mjs: model-routing use marker", () => {
@@ -326,10 +348,10 @@ describe("pre-tool-enforcer.mjs: model-routing use marker", () => {
     it("in shadow mode the marker applies, Jev is asked the open question and changes nothing", async () => {
       const routed = await routedInput(agentInput(`use sonnet\n${TASK}`, { effort: "low" }), { OMC_JEV: "model-routing" });
       expect(routed).toMatchObject({ model: "sonnet", effort: "low", prompt: TASK });
-      await vi.waitFor(() => expect(requests).toHaveLength(1), { timeout: 5000, interval: 25 });
+      await waitFor(() => expect(requests).toHaveLength(1), { timeout: 5000, interval: 25 });
       expect(Object.keys(requests[0].questions)).toEqual(["effort"]);
       // Wait for the detached resolver to write its line before the directory is cleaned up.
-      await vi.waitFor(() => expect(existsSync(join(cwd, "jev-logs", "shadow.jsonl"))).toBe(true), { timeout: 5000, interval: 25 });
+      await waitFor(() => expect(existsSync(join(cwd, "jev-logs", "shadow.jsonl"))).toBe(true), { timeout: 5000, interval: 25 });
     }, 15000);
   });
 
