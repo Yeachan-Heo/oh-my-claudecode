@@ -200,19 +200,19 @@ describe("issue #4933: opt-in fable model routing (subprocess)", () => {
     }
   }, 30000);
 
-  it("only the value '1' enables fable, other values do not", async () => {
-    const testValues = ["true", "yes", "0", ""];
+  it("only the values '1' or 'true' enable fable, other values do not", async () => {
+    const disabledValues = ["yes", "0", ""];
     const disabledResults = await Promise.all(
-      testValues.map((value) =>
+      disabledValues.map((value) =>
         runEnforcer(agentInput(), {
           OMC_JEV_MODEL_ROUTING_FABLE: value,
         })
       )
     );
 
-    // All with non-'1' values should NOT have fable in criteria
+    // All with non-'1'/'true' values should NOT have fable in criteria
     disabledResults.forEach((result, index) => {
-      const value = testValues[index];
+      const value = disabledValues[index];
       const modelRoutingRequest = result.jevRequests.find((req) =>
         req.questions && req.questions["model-tier"]
       );
@@ -225,19 +225,30 @@ describe("issue #4933: opt-in fable model routing (subprocess)", () => {
       }
     });
 
-    // Now test with '1'
-    const enabledResult = await runEnforcer(agentInput(), {
+    // Test with '1' - should enable fable
+    const enabledResult1 = await runEnforcer(agentInput(), {
       OMC_JEV_MODEL_ROUTING_FABLE: "1",
     });
-
-    const modelRoutingRequest = enabledResult.jevRequests.find((req) =>
+    const modelRoutingRequest1 = enabledResult1.jevRequests.find((req) =>
       req.questions && req.questions["model-tier"]
     );
-    if (modelRoutingRequest) {
-      const criteria = (modelRoutingRequest.questions["model-tier"] as Record<string, unknown>)?.criteria || {};
-      expect(Object.keys(criteria), `fable should be in criteria with value="1"`).toContain("fable");
+    if (modelRoutingRequest1) {
+      const criteria1 = (modelRoutingRequest1.questions["model-tier"] as Record<string, unknown>)?.criteria || {};
+      expect(Object.keys(criteria1), `fable should be in criteria with value="1"`).toContain("fable");
     }
-  }, 60000);
+
+    // Test with 'true' - should also enable fable
+    const enabledResultTrue = await runEnforcer(agentInput(), {
+      OMC_JEV_MODEL_ROUTING_FABLE: "true",
+    });
+    const modelRoutingRequestTrue = enabledResultTrue.jevRequests.find((req) =>
+      req.questions && req.questions["model-tier"]
+    );
+    if (modelRoutingRequestTrue) {
+      const criteriaTrue = (modelRoutingRequestTrue.questions["model-tier"] as Record<string, unknown>)?.criteria || {};
+      expect(Object.keys(criteriaTrue), `fable should be in criteria with value="true"`).toContain("fable");
+    }
+  }, 90000);
 
   it("should reject fable when Jev suggests it but opt-in is disabled", async () => {
     const result = await runEnforcer(agentInput(), {
