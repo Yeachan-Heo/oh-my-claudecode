@@ -215,8 +215,9 @@ export function deliveryMessage(result) {
   if (!result || typeof result !== 'object') return null;
   if (typeof result.error === 'string') return `Jev delivery guard: the daily check failed (${result.error}); it will try again in 24 hours.`;
   const interrupted = Number(result.interruptedAgentHooks) || 0;
+  const precisionPercent = typeof result.deliveredPercentFull === 'number' ? result.deliveredPercentFull : null;
   const percent = typeof result.deliveredPercent === 'number' ? result.deliveredPercent : null;
-  if (!(interrupted > 0 || (percent !== null && percent < DELIVERY_ALERT_PERCENT))) return null;
+  if (!(interrupted > 0 || (precisionPercent !== null && precisionPercent < DELIVERY_ALERT_PERCENT))) return null;
   const share = percent === null
     ? 'no active model-routing decision could be matched to an agent'
     : `${result.delivered} of ${result.withAgent} Jev model decisions reached the agent (${percent} %; a call the hook leaves alone on purpose, such as a \`use\` marker or forceInherit, counts as not delivered)`;
@@ -444,7 +445,11 @@ export async function computeDelivery({ logDir, configDir = getClaudeConfigDir()
     result.withAgent++;
     if (modelMatches(models.get(id), wanted, env)) result.delivered++;
   }
-  if (result.withAgent > 0) result.deliveredPercent = Math.round((1000 * result.delivered) / result.withAgent) / 10;
+  if (result.withAgent > 0) {
+    const fullPercent = (1000 * result.delivered) / result.withAgent / 10;
+    result.deliveredPercentFull = fullPercent;
+    result.deliveredPercent = Math.round(fullPercent);
+  }
   const interrupted = await countInterruptions(projectsDir, since, now);
   result.interruptedAgentHooks = interrupted.agent;
   result.interruptedOtherHooks = interrupted.other;
