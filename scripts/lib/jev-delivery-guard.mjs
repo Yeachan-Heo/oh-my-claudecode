@@ -160,7 +160,7 @@ function sessionFile(configDir, data) {
 }
 
 function newRecord(now, pluginRoot, configDir) {
-  return { start: now, hooks: hooksJsonHash(pluginRoot), env: settingsEnvHash(configDir), warnedHooks: null, warnedEnv: null, shown: 0 };
+  return { start: now, hooks: hooksJsonHash(pluginRoot), env: settingsEnvHash(configDir), warnedHooks: null, warnedEnv: null, shownByLogDir: {} };
 }
 
 // Marks a session record as in use: the sweep reads its modification time. Only the time changes, never the content
@@ -293,11 +293,16 @@ export function promptCheck(data, options = {}) {
       }
       if (reasons.length > 0) messages.push(changedSinceStartMessage(reasons));
       const result = readJson(dailyFile(dir, logDir, 'delivery.json'));
-      if (typeof result?.ts === 'number' && result.ts > (Number(record.shown) || 0) && now - result.ts <= STALE_RESULT_MS) {
+      const key = logDir || '';
+      const prevShown = typeof record.shownByLogDir?.[key] === 'number' ? record.shownByLogDir[key] : 0;
+      if (typeof result?.ts === 'number' && result.ts > prevShown && now - result.ts <= STALE_RESULT_MS) {
         const message = deliveryMessage(result);
         if (message) {
           messages.push(message);
-          confirmations.push(() => { record.shown = result.ts; });
+          confirmations.push(() => {
+            if (!record.shownByLogDir) record.shownByLogDir = {};
+            record.shownByLogDir[key] = result.ts;
+          });
         }
       }
     }
