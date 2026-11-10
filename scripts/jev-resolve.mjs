@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-/* global process, console, fetch, AbortController, setTimeout, clearTimeout, Buffer */
+/* global process, console, fetch, AbortController, setTimeout, clearTimeout, Buffer, TextDecoder */
 /**
  * Jev script-side judgment channel (ADR 03671, ticket 15).
  *
@@ -259,25 +259,46 @@ export async function loadJevBreaker(env = process.env) {
 }
 
 /**
- * The first `maxChars` of a failed response's body, or undefined when it
- * cannot be read within a second. Never throws.
+ * The first `maxChars` characters of a failed response's body, or undefined
+ * when it cannot be read within a second. The stream is read only as far as
+ * needed and then cancelled. Never throws.
  */
 async function readErrorBody(response, maxChars) {
   let timer;
+  let reader;
   try {
-    const text = await Promise.race([
-      response.text(),
+    const read = async () => {
+      if (typeof response.body?.getReader !== "function") return String(await response.text()).slice(0, maxChars);
+      reader = response.body.getReader();
+      const decoder = new TextDecoder();
+      let text = "";
+      while (text.length < maxChars) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        text += decoder.decode(value, { stream: true });
+      }
+      return text.slice(0, maxChars);
+    };
+    return await Promise.race([
+      read(),
       new Promise((resolve) => {
         timer = setTimeout(() => resolve(undefined), 1000);
       }),
     ]);
-    return typeof text === "string" ? text.slice(0, maxChars) : undefined;
   } catch {
     return undefined;
   } finally {
     if (timer) clearTimeout(timer);
+    try {
+      await reader?.cancel();
+    } catch {
+      // The body is not needed any more.
+    }
   }
 }
+
+/** A request that ran shorter than this because of the hook deadline is not counted as a missing response. */
+const MIN_COUNTED_REQUEST_MS = 1000;
 
 /**
  * Timeout of one request in the resolver process. With OMC_JEV_BREAKER=1 an
@@ -428,7 +449,9 @@ export async function resolveRequest(
         ": degraded - " +
         (error instanceof Error ? error.message : String(error)),
     );
-    if (guard && !responded) failure = { noResponse: true };
+    // A request that had less than a second (a slow process start used up the rest before the hook's
+    // deadline) says little about the endpoint and is not counted as a missing response.
+    if (guard && !responded && timeoutMs >= Math.min(resolveJevTimeoutMs(env), MIN_COUNTED_REQUEST_MS)) failure = { noResponse: true };
   } finally {
     if (timer) clearTimeout(timer);
   }

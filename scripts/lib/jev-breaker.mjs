@@ -51,6 +51,12 @@ const NO_RESPONSE_TO_OPEN = 3;
 const NO_RESPONSE_WINDOW_MS = 60_000;
 /** A breaker that opens again within this time after it expired is the same outage (one notice). */
 const SAME_OUTAGE_GAP_MS = 15 * 60_000;
+/**
+ * Openers that start one outage at the same moment may record `since` a few milliseconds apart, so the
+ * notice claim is keyed by a five-minute bucket of it, not by the minute (a new outage starts at least
+ * 15 minutes after the previous one ended).
+ */
+const NOTICE_BUCKET_MS = 5 * 60_000;
 /** An open breaker is rewritten only when the new end is this much later, so a burst of failures does not rewrite it on every response. */
 const EXTEND_MIN_MS = 5000;
 /**
@@ -59,7 +65,7 @@ const EXTEND_MIN_MS = 5000;
  * (a rename retries for up to 30 ms on Windows), so after the pause the file
  * shows whether a shorter end overwrote ours and we write the longer end again.
  */
-const SETTLE_MS = 50;
+const SETTLE_MS = 50; // settings.settleMs replaces it in tests only
 /** An `until` beyond the cap plus this, or a `since` in the future, means a corrupt file or a clock set back: ignored. */
 const CLOCK_SLACK_MS = 60_000;
 /** Per-minute files older than this are removed when a new minute file starts. */
@@ -222,6 +228,19 @@ export function readBreaker(settings, now = Date.now()) {
   }
 }
 
+/** Temp files of a write that a killed process left behind (.breaker.json.tmp.<id>) are removed after five minutes. */
+function removeStaleTemp(dir, now) {
+  try {
+    for (const name of readdirSync(dir)) {
+      if (name.startsWith(".breaker.json.tmp.") && now - statSync(join(dir, name)).mtimeMs > 5 * 60_000) {
+        rmSync(join(dir, name), { force: true });
+      }
+    }
+  } catch {
+    // Best effort.
+  }
+}
+
 /**
  * Open the breaker for `seconds`, or keep it open at least that long. An open
  * breaker is never shortened: there is no lock, so after each write the opener
@@ -252,13 +271,14 @@ function openBreaker(settings, seconds, reason, now) {
     for (let attempt = 0; attempt < 3; attempt += 1) {
       // After a write, give a concurrent opener that read the file before our
       // write time to replace it, then read the file again.
-      if (attempt > 0) sleepSync(SETTLE_MS);
+      if (attempt > 0) sleepSync(settings.settleMs ?? SETTLE_MS);
       const current = readBreaker(settings, now);
       if (current && current.until >= until - EXTEND_MIN_MS) return current;
       const state = { until, reason, since: current ? Math.min(current.since, since) : since };
       if (!replaceFile(join(settings.dir, "breaker.json"), JSON.stringify(state))) return undefined;
+      removeStaleTemp(settings.dir, now);
     }
-    sleepSync(SETTLE_MS);
+    sleepSync(settings.settleMs ?? SETTLE_MS);
     return readBreaker(settings, now);
   } catch {
     return undefined;
@@ -467,7 +487,7 @@ export function claimOutageNotice(settings, sessionId, breaker, now = Date.now()
     ensureDir(dir);
     const id = String(sessionId || "any").replace(/[^A-Za-z0-9_-]/g, "_").slice(0, 100);
     try {
-      closeSync(openSync(join(dir, id + "-" + Math.floor(breaker.since / 60_000)), "wx", 0o600));
+      closeSync(openSync(join(dir, id + "-" + Math.floor(breaker.since / NOTICE_BUCKET_MS)), "wx", 0o600));
     } catch {
       return undefined;
     }

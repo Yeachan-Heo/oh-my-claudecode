@@ -2,6 +2,8 @@ export interface BreakerSettings {
   breaker: boolean;
   maxRpm: number | undefined;
   dir: string;
+  /** Pause after a breaker write in milliseconds (tests only; default 50). */
+  settleMs?: number;
 }
 
 export interface OpenBreaker {

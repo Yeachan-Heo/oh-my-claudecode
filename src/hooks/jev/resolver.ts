@@ -39,7 +39,6 @@ let breakerModule: Promise<typeof JevBreaker> | undefined;
  */
 async function loadSharedBreaker(endpoint: string, apiKey: string | null): Promise<SharedBreaker | undefined> {
   const env = process.env;
-  if (String(env.OMC_JEV_BREAKER ?? '').trim() !== '1' && !String(env.OMC_JEV_MAX_RPM ?? '').trim()) return undefined;
   try {
     breakerModule ??= import('../../../scripts/lib/jev-breaker.mjs');
     const breaker = await breakerModule;
@@ -48,6 +47,12 @@ async function loadSharedBreaker(endpoint: string, apiKey: string | null): Promi
   } catch {
     return undefined;
   }
+}
+
+/** Whether OMC_JEV_BREAKER=1 or OMC_JEV_MAX_RPM asks for the shared breaker. Synchronous, so a call without them never yields before it sends. */
+function sharedBreakerWanted(): boolean {
+  const env = process.env;
+  return String(env.OMC_JEV_BREAKER ?? '').trim() === '1' || String(env.OMC_JEV_MAX_RPM ?? '').trim() !== '';
 }
 
 interface ResolverRuntime {
@@ -247,11 +252,15 @@ export async function resolveJudgment<T>(resolveJudgmentArgs: ResolveJudgmentArg
   const boundedState = boundExcerpts(args.state, excerptCharsFor(args.point, config));
   const startedAt = Date.now();
 
+  // Count the request before the first await, so concurrent calls see the cap.
+  runtime.requestCount += 1;
+
   // Opt-in breaker and request limit shared with every process of the machine.
-  const shared = await loadSharedBreaker(config.endpoint, config.apiKey);
+  const shared = sharedBreakerWanted() ? await loadSharedBreaker(config.endpoint, config.apiKey) : undefined;
   if (shared) {
     const { skip } = shared.breaker.admitRequest(shared.settings, args.point);
     if (skip) {
+      runtime.requestCount -= 1; // held back: it takes no slot of OMC_JEV_MAX_REQUESTS
       const heuristic = twinAnswer();
       const loggableHeuristic = extractHeuristicForLogging(heuristic, args.questions, args.mapHeuristic, args.questionSet);
       await writeShadowLog({
@@ -292,7 +301,6 @@ export async function resolveJudgment<T>(resolveJudgmentArgs: ResolveJudgmentArg
       return { ok: false as const, error: error instanceof Error ? error.message : String(error) };
     }
   })();
-  runtime.requestCount += 1;
 
   // Non-blocking (detector-type) in shadow mode: return the twin now; log when Jev settles.
   if (mode === 'shadow' && args.blocking === false) {

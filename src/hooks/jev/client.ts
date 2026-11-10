@@ -99,21 +99,41 @@ export async function queryJev(
   }
 }
 
-/** The first `maxChars` characters of a failed response's body, or undefined when it cannot be read within a second. Never throws. */
+/**
+ * The first `maxChars` characters of a failed response's body, or undefined when it cannot be read within a
+ * second. The stream is read only as far as needed and then cancelled. Never throws.
+ */
 async function readErrorBody(response: Response, maxChars: number): Promise<string | undefined> {
   let timer: NodeJS.Timeout | undefined;
+  let reader: ReadableStreamDefaultReader<Uint8Array> | undefined;
   try {
-    const text = await Promise.race([
-      response.text(),
+    const read = async (): Promise<string> => {
+      if (typeof response.body?.getReader !== 'function') return String(await response.text()).slice(0, maxChars);
+      reader = response.body.getReader();
+      const decoder = new TextDecoder();
+      let text = '';
+      while (text.length < maxChars) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        text += decoder.decode(value, { stream: true });
+      }
+      return text.slice(0, maxChars);
+    };
+    return await Promise.race([
+      read(),
       new Promise<undefined>((resolve) => {
         timer = setTimeout(() => resolve(undefined), 1000);
       }),
     ]);
-    return typeof text === 'string' ? text.slice(0, maxChars) : undefined;
   } catch {
     return undefined;
   } finally {
     if (timer) clearTimeout(timer);
+    try {
+      await reader?.cancel();
+    } catch {
+      // The body is not needed any more.
+    }
   }
 }
 

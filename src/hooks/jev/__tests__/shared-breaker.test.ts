@@ -166,6 +166,11 @@ describe('resolveJudgment with the shared breaker', () => {
     const server = withBody(503, 'retry after ~45s');
     expect(await openFor(server)).toBe(60);
     expect(server.reads).toBe(0);
+    // A real response with a body stream: read as far as the first 2000 characters.
+    await rm(join(dir, 'breaker'), { recursive: true, force: true });
+    expect(await openFor(new Response('rate limited, retry after ~45s ' + 'x'.repeat(3_000_000), { status: 429 }))).toBe(45);
+    await rm(join(dir, 'breaker'), { recursive: true, force: true });
+    expect(await openFor(new Response('x'.repeat(2500) + ' retry after ~45s', { status: 429 }))).toBe(60);
     // A request limit alone does not read a body.
     delete process.env.OMC_JEV_BREAKER;
     process.env.OMC_JEV_MAX_RPM = '100';
@@ -173,6 +178,34 @@ describe('resolveJudgment with the shared breaker', () => {
     const limitOnly = withBody(429, 'retry after ~45s');
     await judge(counting(() => limitOnly).fetchFn);
     expect(limitOnly.reads).toBe(0);
+  });
+
+  it('OMC_JEV_MAX_REQUESTS counts calls that run at the same time, with and without the shared breaker', async () => {
+    process.env.OMC_JEV_MAX_REQUESTS = '1';
+    for (const maxRpm of [undefined, '100']) {
+      resetJevResolverState();
+      if (maxRpm === undefined) delete process.env.OMC_JEV_MAX_RPM;
+      else process.env.OMC_JEV_MAX_RPM = maxRpm;
+      const { fetchFn, count } = counting(() => ok());
+      const results = await Promise.all([judge(fetchFn), judge(fetchFn)]);
+      expect(count()).toBe(1);
+      expect(results.map((result) => result.mode).sort()).toEqual(['cap', 'shadow']);
+    }
+  });
+
+  it('a call held back by the shared limit takes no slot of OMC_JEV_MAX_REQUESTS', async () => {
+    const left = 60_000 - (Date.now() % 60_000);
+    if (left < 3000) await new Promise((resolve) => setTimeout(resolve, left + 50));
+    process.env.OMC_JEV_MAX_REQUESTS = '2';
+    process.env.OMC_JEV_MAX_RPM = '1';
+    const { fetchFn, count } = counting(() => ok());
+    expect((await judge(fetchFn)).mode).toBe('shadow');
+    expect((await judge(fetchFn)).mode).toBe('cap'); // the per-minute limit
+    expect((await judge(fetchFn)).mode).toBe('cap');
+    expect(count()).toBe(1);
+    delete process.env.OMC_JEV_MAX_RPM;
+    expect((await judge(fetchFn)).mode).toBe('shadow'); // the second slot of OMC_JEV_MAX_REQUESTS is still free
+    expect(count()).toBe(2);
   });
 
   it('OMC_JEV_MAX_RPM=1: the second call of the minute returns the twin as cap', async () => {
