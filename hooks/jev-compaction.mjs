@@ -17,6 +17,12 @@
  * target budget (OMC_JEV_COMPACT_TARGET of the characters before). In shadow mode the decision is
  * computed and logged, and the built-in summary runs.
  *
+ * Every assistant row before the last KEEP_LAST messages is rebuilt from its text, traces and kept
+ * calls (its thinking and server blocks go, a row left empty is dropped), so the host writes it with
+ * a new message.id and `--resume` cannot join it with its rows from before the compaction. The last
+ * messages keep their handles; a server block among them (server_tool_use, advisor or web search
+ * results, read from the API form of the conversation) runs the built-in summary instead.
+ *
  * The built-in summary (next(e)) also runs when the conversation is too short or its tool results
  * are too small for the removal to matter, while requests are paused after an endpoint failure, when
  * OMC_JEV_MAX_REQUESTS is used up, and when Jev fails, answers too little or does not answer in time.
@@ -50,6 +56,9 @@ import { maskSecrets } from '../scripts/lib/jev-mask.mjs';
 const POINT = 'compaction';
 // The last messages stay whole: the work in flight.
 const KEEP_LAST = 6;
+// Cap on the host call for the API form of the conversation: a call that never settles must not hold
+// the compaction.
+const HOST_MS = 2000;
 // Up to BATCH * MAX_REQUESTS = 240 results are scored per compaction. A 40-question request took
 // 1.4-2.9 s against the production endpoint; the deadlines leave room for a slow answer and keep the
 // whole decision under TOTAL_MS, after which the built-in summary runs instead.
@@ -493,28 +502,82 @@ function allocate(candidates, before, target) {
   }
 }
 
+// On `--resume` the host joins the assistant rows of one message.id from the whole transcript, rows
+// from before the compact boundary included, and repeats every block of them but tool_use (measured
+// on Claude Code 2.1.321: a repeated server_tool_use fails the request with API 400 "ids must be
+// unique", and a call that became a trace comes back without its result). A row kept by its handle is
+// written after the boundary with its message.id, one built without a handle gets a new one; so no
+// assistant row before the tail keeps its handle. The tail keeps its handles, and the rows of one API
+// message do not straddle its start: it starts at the first row of the run of assistant rows it opens
+// in (the rows of a message are consecutive assistant rows unless a result streams in between).
+function keepFromOf(messages, tailStart) {
+  let k = tailStart;
+  while (k > 0 && k < messages.length && messages[k].role === 'assistant' && messages[k - 1].role === 'assistant') k--;
+  return k;
+}
+
+// A block the API runs itself: server_tool_use, mcp_tool_use and their results
+// (advisor_tool_result, web_search_tool_result, ...).
+const isServerBlock = (b) => Boolean(b) && typeof b.type === 'string' && b.type !== 'tool_use' && b.type !== 'tool_result' && /_tool_(?:use|result)$/.test(b.type);
+
+// Assistant API messages with a server block, and whether one may stand in the tail: its row is found
+// by a tool use, else by a text block equal to a row's text (any such row in the tail counts); a
+// message found nowhere counts as in the tail. Without the API form a tail assistant row with neither
+// text nor calls (thinking or a server block, which `messages` does not tell apart) counts as one.
+function serverBlocks(messages, api, keepFrom) {
+  const tailEmpty = () => messages.some((m, i) => i >= keepFrom && m.role === 'assistant' && !m.text && !(m.toolUses || []).length);
+  if (!Array.isArray(api) || !api.length) return { count: null, inTail: tailEmpty() };
+  const rowOfUse = new Map();
+  const rowsOfText = new Map();
+  messages.forEach((m, i) => {
+    if (m.role !== 'assistant') return;
+    for (const u of m.toolUses || []) if (!rowOfUse.has(u.tool_use_id)) rowOfUse.set(u.tool_use_id, i);
+    if (m.text) { if (!rowsOfText.has(m.text)) rowsOfText.set(m.text, []); rowsOfText.get(m.text).push(i); }
+  });
+  let count = 0;
+  let inTail = false;
+  for (const a of api) {
+    if (!a || a.role !== 'assistant' || !Array.isArray(a.content) || !a.content.some(isServerBlock)) continue;
+    count++;
+    const rows = [];
+    for (const b of a.content) {
+      if (b && b.type === 'tool_use' && rowOfUse.has(b.id)) rows.push(rowOfUse.get(b.id));
+      else if (b && b.type === 'text' && typeof b.text === 'string') rows.push(...(rowsOfText.get(b.text) || []));
+    }
+    if (!rows.length || rows.some((r) => r >= keepFrom)) inTail = true;
+  }
+  return { count, inTail };
+}
+
 // A user message with tool results kept by its engine handle is written after the compact boundary
 // with its original parent, which points before the boundary, so `--resume` (and every `-p` turn)
 // rebuilt the conversation from before the compaction (measured on Claude Code 2.1.318). Such a
 // message is therefore rebuilt from its own text, unchanged for the model, whenever all its results
 // are text. A message with an image or another non-text result in the last KEEP_LAST messages keeps
-// its handle (counted in kept_handle) and has that limit.
-function build(messages, candidates, stats) {
+// its handle (counted in kept_handle) and has that limit. Every assistant row before `keepFrom` is
+// rebuilt (text, traces and kept calls; thinking and server blocks dropped, an empty row removed), so
+// none keeps its handle and the host gives it a new message.id (keepFromOf).
+function build(messages, candidates, keepFrom, stats) {
   const byId = new Map();
   for (const c of candidates) byId.set(c.id, c);
   const out = [];
   stats.rebuiltUnchanged = 0;
   stats.keptHandle = 0;
-  for (const m of messages) {
-    if (m.role === 'assistant' && (m.toolUses || []).some((u) => byId.get(u.tool_use_id)?.keep === 'trace')) {
+  stats.rebuiltAssistant = 0;
+  stats.droppedAssistant = 0;
+  for (const [i, m] of messages.entries()) {
+    if (m.role === 'assistant' && (i < keepFrom || (m.toolUses || []).some((u) => byId.get(u.tool_use_id)?.keep === 'trace'))) {
+      stats.rebuiltAssistant++;
       const traces = [];
       const kept = [];
-      for (const u of m.toolUses) {
+      for (const u of m.toolUses || []) {
         const c = byId.get(u.tool_use_id);
         if (c && c.keep === 'trace') traces.push(c.trace);
         else kept.push({ tool_use_id: u.tool_use_id, tool: u.tool, input: u.input });
       }
-      out.push({ role: 'assistant', text: [m.text || '', ...traces].filter(Boolean).join('\n'), toolUses: kept });
+      const text = [m.text || '', ...traces].filter(Boolean).join('\n');
+      if (!text && !kept.length) { stats.droppedAssistant++; continue; }
+      out.push({ role: 'assistant', text, toolUses: kept });
       continue;
     }
     if (m.role === 'user' && (m.toolResults || []).length) {
@@ -669,6 +732,12 @@ async function decide($, e, cfg, record, started) {
   const before = messages.reduce((s, m) => s + messageChars(m), 0);
   record.chars_before = before;
   if (messages.length <= KEEP_LAST + 1) return { fallback: 'too_few_messages' };
+  const keepFrom = keepFromOf(messages, Math.max(1, messages.length - KEEP_LAST));
+  const asApi = e.agentId === undefined ? { as: 'api' } : { as: 'api', agentId: e.agentId };
+  const api = await withDeadline($, Promise.resolve().then(() => $.session.messages(asApi)), HOST_MS);
+  const server = serverBlocks(messages, api.value, keepFrom);
+  record.server_blocks = server.count;
+  if (server.inTail) return { fallback: 'server_block_in_tail' };
   const candidates = findCandidates(messages, cfg.privatePaths);
   record.candidates = candidates.length;
   const removable = removableChars(candidates);
@@ -740,7 +809,7 @@ async function decide($, e, cfg, record, started) {
   record.mentioned = markMentioned(candidates, user);
   allocate(candidates, before, cfg.target);
   const stats = {};
-  const built = build(messages, candidates, stats);
+  const built = build(messages, candidates, keepFrom, stats);
   if (!pairingOk(messages, built)) return { fallback: 'build_error' };
   const after = built.reduce((s, m) => s + messageChars(m), 0);
   const hist = [0, 0, 0, 0];
@@ -754,6 +823,8 @@ async function decide($, e, cfg, record, started) {
     traced: candidates.filter((c) => c.keep === 'trace').length,
     rebuilt_unchanged: stats.rebuiltUnchanged,
     kept_handle: stats.keptHandle,
+    rebuilt_assistant: stats.rebuiltAssistant,
+    dropped_assistant: stats.droppedAssistant,
     score_hist: hist,
     unanswered: asked.length - answered,
   });
