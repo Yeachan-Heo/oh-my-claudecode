@@ -49,6 +49,8 @@ export const BREAKER_SECONDS = {
 export const BREAKER_MAX_SECONDS = 1800;
 const NO_RESPONSE_TO_OPEN = 3;
 const NO_RESPONSE_WINDOW_MS = 60_000;
+/** Concurrent processes read their clock a few milliseconds apart; a recorded no-response time further ahead of this clock than this is a corrupt line or a clock set back. */
+const NO_RESPONSE_SKEW_MS = 5000;
 /** A breaker that opens again within this time after it expired is the same outage (one notice). */
 const SAME_OUTAGE_GAP_MS = 15 * 60_000;
 /**
@@ -341,14 +343,14 @@ export function classifyFailure(failure, now = Date.now()) {
 }
 
 /**
- * Requests without a response within the window, this one included. The window
- * ends at the newest time recorded, not at this call's own clock: concurrent
- * processes sample their clock before they append, so a process may append a
- * time that is older than lines already in the file (and in the next minute's
- * file). Counting back from the newest time gives every process the same count
- * once all lines are written, whatever the order of the appends. A time more
- * than CLOCK_SLACK_MS ahead of this clock is a corrupt line or a clock set back
- * and is ignored.
+ * Requests without a response within the window, this one included, and the
+ * newest time recorded: {count, newest}. The window ends at the newest time,
+ * not at this call's own clock: concurrent processes sample their clock before
+ * they append, so a process may append a time that is older than lines already
+ * in the file (or in the next minute's file). Counting back from the newest
+ * time gives every process the same count once all lines are written, whatever
+ * the order of the appends. A time more than NO_RESPONSE_SKEW_MS ahead of this
+ * clock is a corrupt line or a clock set back and is ignored.
  */
 function noteNoResponse(settings, now) {
   try {
@@ -363,13 +365,13 @@ function noteNoResponse(settings, now) {
       }
       for (const line of text.split("\n")) {
         const time = Number(line);
-        if (line && Number.isFinite(time) && time <= now + CLOCK_SLACK_MS) times.push(time);
+        if (line && Number.isFinite(time) && time <= now + NO_RESPONSE_SKEW_MS) times.push(time);
       }
     }
     const newest = times.reduce((latest, time) => Math.max(latest, time), now);
-    return times.filter((time) => time > newest - NO_RESPONSE_WINDOW_MS).length;
+    return { count: times.filter((time) => time > newest - NO_RESPONSE_WINDOW_MS).length, newest };
   } catch {
-    return 0;
+    return { count: 0, newest: now };
   }
 }
 
@@ -381,8 +383,10 @@ function noteNoResponse(settings, now) {
 export function recordFailure(settings, failure, now = Date.now()) {
   if (!settings?.breaker || !failure) return undefined;
   if (failure.opens) return openBreaker(settings, failure.seconds, failure.reason, now);
-  if (failure.reason === "no-response" && noteNoResponse(settings, now) >= NO_RESPONSE_TO_OPEN) {
-    return openBreaker(settings, BREAKER_SECONDS.noResponse, "no-response", now);
+  if (failure.reason === "no-response") {
+    // The breaker closes a minute after the newest of the failures, not of this process's own clock.
+    const { count, newest } = noteNoResponse(settings, now);
+    if (count >= NO_RESPONSE_TO_OPEN) return openBreaker(settings, BREAKER_SECONDS.noResponse, "no-response", newest);
   }
   return undefined;
 }

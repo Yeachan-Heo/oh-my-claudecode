@@ -324,6 +324,19 @@ async function readErrorBody(response, maxChars) {
   }
 }
 
+/**
+ * Drop the unread rest of a failed response's body, so an endpoint that never
+ * ends it cannot keep this process alive after it has printed its result
+ * (an active hook waits for the process to end). Never throws.
+ */
+function dropBody(response) {
+  try {
+    response.body?.cancel().catch(() => {});
+  } catch {
+    // Not a real stream (a test double), or already locked: nothing to drop.
+  }
+}
+
 /** A request that ran shorter than this because of the hook deadline is not counted as a missing response. */
 const MIN_COUNTED_REQUEST_MS = 1000;
 
@@ -457,6 +470,7 @@ export async function resolveRequest(
         if (guard.settings.breaker && response.status === 429 && guard.breaker.retryAfterSeconds(retryAfter) === undefined) {
           failure.body = await readErrorBody(response, guard.breaker.RETRY_BODY_MAX_CHARS);
         }
+        dropBody(response);
       }
       throw new Error("jev request failed: HTTP " + response.status);
     }
