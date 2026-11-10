@@ -23,7 +23,7 @@ import { readStdin } from './lib/stdin.mjs';
 import { resolveConfiguredAgentModel } from './lib/agent-model-config.mjs';
 import { BOUNDED_GIT_TIMEOUT_MS } from './lib/bounded-git-timeout.mjs';
 import { isSkillVisibleToUser } from './lib/skill-entitlements.mjs';
-import { isJevShadowOptedIn, recordJevShadow } from './lib/jev-shadow.mjs';
+import { isJevShadowOptedIn, jevNoulOf, recordJevShadow } from './lib/jev-shadow.mjs';
 import { resolveExcerptChars } from './jev-resolve.mjs';
 
 // Inlined from src/config/models.ts — avoids a dist/ import so the hook works
@@ -636,8 +636,29 @@ function effortFromScore(score, maxEffort) {
   return capEffort(EFFORT_LEVELS[index], maxEffort);
 }
 
+// OMC_JEV_SLOP_WARNING_APPLY=1 lets the active `slop-warning` answer decide whether the
+// warning is shown. Off by default: the heuristic decides and the answer is only logged.
+function isSlopWarningApplyEnabled(env = process.env) {
+  return ['1', 'true'].includes(String(env.OMC_JEV_SLOP_WARNING_APPLY ?? '').trim().toLowerCase());
+}
+
+// Probability of "yes" at or above which the active answer warns. Default 0.8;
+// OMC_JEV_SLOP_WARNING_THRESHOLD overrides it with a number above 0 up to 1.
+const DEFAULT_SLOP_WARNING_THRESHOLD = 0.8;
+
+function resolveSlopWarningThreshold(env = process.env) {
+  const raw = String(env.OMC_JEV_SLOP_WARNING_THRESHOLD ?? '').trim();
+  if (!raw) return DEFAULT_SLOP_WARNING_THRESHOLD;
+  const value = Number(raw);
+  if (Number.isFinite(value) && value > 0 && value <= 1) return value;
+  if (env.OMC_JEV_QUIET !== '1') {
+    console.error('[jev] slop-warning: OMC_JEV_SLOP_WARNING_THRESHOLD=' + raw.slice(0, 40) + ' is not a number above 0 up to 1; using ' + DEFAULT_SLOP_WARNING_THRESHOLD);
+  }
+  return DEFAULT_SLOP_WARNING_THRESHOLD;
+}
+
 function recordSlopWarningShadow(toolName, toolInput, warned, permissionMode) {
-  recordJevShadow({
+  return recordJevShadow({
     point: 'slop-warning',
     state: { toolName, toolInput },
     questions: SLOP_WARNING_QUESTIONS,
@@ -956,8 +977,13 @@ function generateSlopWarning(data, toolName) {
   const inspectedText = collectStringValues(toolInput)
     .concat(collectStringValues(promptLikeFields))
     .join('\n');
-  const warned = shouldWarnForSlopFallbackLanguage(data, toolName, inspectedText);
-  recordSlopWarningShadow(toolName, data.toolInput || data.tool_input || {}, warned, data.permission_mode);
+  let warned = shouldWarnForSlopFallbackLanguage(data, toolName, inspectedText);
+  const jevResult = recordSlopWarningShadow(toolName, data.toolInput || data.tool_input || {}, warned, data.permission_mode);
+  if (isSlopWarningApplyEnabled()) {
+    // Only an active answer decides; shadow, degraded and missing answers keep the heuristic.
+    const noul = jevNoulOf(jevResult, 'slop_advisory');
+    if (noul !== undefined) warned = noul >= resolveSlopWarningThreshold();
+  }
   if (!warned) return '';
 
   return '[SLOP WARNING] Detected fallback/workaround language in this tool input. ' +

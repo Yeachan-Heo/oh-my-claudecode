@@ -273,6 +273,25 @@ export function sweepStaleTempDirs(maxAgeMs = 24 * 60 * 60 * 1000) {
 }
 
 /**
+ * Read the active Noul answer of a recordJevShadow() result as a probability
+ * of "yes" (0-1). The API returns a number; a boolean is accepted too and maps
+ * to 1 or 0. Returns undefined for a shadow, off or degraded call, a missing
+ * answer, or a value that is not a finite number, so the caller falls back to
+ * its heuristic. Read a multi-question point by `questionName`; a point with
+ * one question reads its single answer.
+ */
+export function jevNoulOf(result, questionName) {
+  if (result?.mode !== "active") return undefined;
+  const answer =
+    result.answers && typeof result.answers === "object" && Object.hasOwn(result.answers, questionName)
+      ? result.answers[questionName]
+      : result.answer;
+  const noul = answer?.noul;
+  if (typeof noul === "boolean") return noul ? 1 : 0;
+  return typeof noul === "number" && Number.isFinite(noul) ? noul : undefined;
+}
+
+/**
  * Fire-and-record one script-side judgment.
  * - Shadow mode: fire-and-forget, returns undefined immediately
  * - Active mode: waits (sync) for Jev answer, returns { mode, answer, answers, ... }
