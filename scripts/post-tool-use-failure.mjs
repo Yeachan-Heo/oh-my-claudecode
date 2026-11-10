@@ -293,6 +293,13 @@ async function main() {
       } catch { /* best-effort */ }
     }
 
+    // Last tool error for the work-state registry of the opt-in Jev compaction point.
+    if ((process.env.OMC_JEV || '').includes('compaction') && !data?.is_interrupt) {
+      try {
+        (await import('./lib/jev-compaction-state.mjs')).recordCompactionState('failure', data);
+      } catch { /* never breaks the hook */ }
+    }
+
     // Official SDK fields (snake_case)
     const toolName = data.tool_name || '';
     const toolInput = data.tool_input;
