@@ -527,6 +527,27 @@ describe('jev-compaction module: endpoint failures', () => {
     expect(partial.out.messages).toBeDefined();
     expect(partial.records()[0]).toMatchObject({ result: 'jev', requests: 3, requests_ok: 2, failure: 'http_500', unanswered: 40 });
   });
+
+  it('an HTTP 200 with fewer than half usable answers falls back to the summary and counts as a failed compaction', async () => {
+    const handlers = load();
+    const empty = await compactOnce(conversation(30), { handlers, respond: () => okResponse({ answers: {} }) });
+    expect(empty.out).toBe(SUMMARY);
+    expect(empty.records()[0]).toMatchObject({ result: 'fallback', reason: 'jev_error', failure: 'insufficient_answers', answered: 0 });
+    const few = await compactOnce(conversation(30), {
+      handlers,
+      respond: (body) => {
+        const { answers } = scoreByMarker(body);
+        const names = Object.keys(answers);
+        return okResponse({ answers: Object.fromEntries(names.slice(0, Math.floor(names.length / 2) - 1).map((n) => [n, answers[n]])) });
+      },
+    });
+    expect(few.out).toBe(SUMMARY);
+    expect(few.records()[0]).toMatchObject({ result: 'fallback', reason: 'jev_error', failure: 'insufficient_answers' });
+    await compactOnce(conversation(30), { handlers, respond: () => okResponse({ answers: {} }) });
+    const after = await compactOnce(conversation(30), { handlers });
+    expect(after.calls.fetch).toHaveLength(0);
+    expect(after.records()[0]).toMatchObject({ reason: 'circuit_open' });
+  });
 });
 
 describe('jev-compaction module: own threshold (OMC_JEV_COMPACT_AT_PERCENT)', () => {
