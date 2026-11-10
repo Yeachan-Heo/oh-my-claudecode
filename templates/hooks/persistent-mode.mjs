@@ -34,7 +34,7 @@ const __dirname = dirname(__filename);
 const SAFE_CONTINUE = { continue: true, suppressOutput: true };
 const DEFAULT_SAFETY_TIMEOUT_MS = 8500;
 const SAFE_EXIT_FLUSH_TIMEOUT_MS = 100;
-/** Keep bridge delegation inside the Stop hook's 10s budget. */
+/** Keep bridge delegation inside the Stop hook's 15s budget (issue #4934). */
 /** Shared budget for all bridge delegation attempts inside one Stop event. */
 const BRIDGE_DELEGATION_TIMEOUT_MS = 6000;
 
