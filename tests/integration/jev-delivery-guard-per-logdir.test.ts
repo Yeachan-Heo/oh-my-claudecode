@@ -77,13 +77,20 @@ describe('jev-delivery-guard per-logdir acknowledgments', () => {
     const sessionId = 'test2';
     const data = { session_id: sessionId };
 
-    const guardDir = join(configDir, '.omc', 'jev-guard');
-    const sessionsDir = join(guardDir, 'sessions');
+    // Create OMC root marker so resolveSessionStatePathsForHook uses this directory
+    writeFileSync(join(cwd, '.omc-workspace'), JSON.stringify({}), 'utf8');
+    
+    const omcRoot = join(cwd, '.omc');
+    const sessionsDir = join(omcRoot, 'state', 'sessions', sessionId);
     mkdirSync(sessionsDir, { recursive: true });
 
     const logDir1 = join(cwd, 'project-a', 'jev-logs');
     const logDir2 = join(cwd, 'project-b', 'jev-logs');
-    const sessionFile = join(sessionsDir, `${sessionId}.json`);
+    const sessionFile = join(sessionsDir, 'jev-delivery-guard-state.json');
+    
+    // Also create delivery report directory
+    const guardDir = join(omcRoot, 'jev-guard');
+    mkdirSync(guardDir, { recursive: true });
 
     // Simulate two projects with delivery results
     const ts1 = now - 3600000; // 1 hour ago
