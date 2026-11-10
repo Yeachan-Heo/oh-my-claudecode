@@ -634,6 +634,8 @@ export OMC_JEV="point1,point2:active,all"
 | `OMC_JEV_TASK_SIZE_NOTICE` | (unset) | Set to `1` or `true` to make the active `task-size` point of the hook script report what it did: suppressed heavy modes with the reason, as the TypeScript bridge does, and heavy modes kept although Jev rated the task small (script only). The classifier check behind the suppression also uses the `taskSizeDetection` word limits. Which modes are suppressed by default limits does not change. Script hooks only. See [Task size: heavy-mode suppression](#task-size-heavy-mode-suppression). |
 | `OMC_JEV_TASK_SIZE_PREFIX_WINS` | (unset) | Set to `1` or `true` so that a size prefix of the classifier (`quick:`, `simple:`, `tiny:`, `minor:`, `small:`, `just:`, `only:`) makes the active `task-size` point of the hook script drop heavy modes whatever size Jev answers. Script hooks only. See [Task size: heavy-mode suppression](#task-size-heavy-mode-suppression). |
 | `OMC_JEV_TASK_SIZE_SLASH_ANYWHERE` | (unset) | Set to `1` or `true` so that a heavy mode typed as a slash command anywhere in the prompt, also as `/omc:<mode>`, is never dropped by the active `task-size` point of the hook script. By default only a slash command at the start of the prompt keeps its mode. Script hooks only. See [Task size: heavy-mode suppression](#task-size-heavy-mode-suppression). |
+| `OMC_JEV_GUARD` | (unset) | Set to `1` or `true` to turn on the delivery guard while the `model-routing` point is active: a message when the `pre-tool-enforcer` timeout is too short, when `hooks/hooks.json` or the `OMC_*`/`ANTHROPIC_*` variables in the `env` section of `settings.json` changed after the session started, and once a day a check of interrupted hooks and delivered Jev decisions. Script hooks only. See [Delivery guard](#delivery-guard). |
+| `OMC_JEV_GUARD_MIN_TIMEOUT_S` | `60` | Seconds the delivery guard requires of the `pre-tool-enforcer` PreToolUse timeout in `hooks/hooks.json`; a lower timeout gets a message at session start. Not a positive number: the default. |
 | `OMC_JEV_PLAN_MODE` | (unset) | Behavior while Claude Code is in plan mode (`permission_mode: "plan"`): `shadow` runs every opted-in point in shadow, `off` disables every point. Unset or any other value changes nothing. See [Plan mode](#plan-mode). |
 | `OMC_JEV=off` | — | Master switch: disables every point regardless of key or other config. |
 
@@ -847,6 +849,25 @@ With the default limits, which modes are dropped does not change. Shadow mode, a
 `OMC_JEV_TASK_SIZE_SLASH_ANYWHERE=1` (or `true`): a heavy mode typed as a slash command anywhere in the prompt is never dropped, also through the `/omc:` alias: `/ralph`, `/oh-my-claudecode:ralph` and `/omc:ralph` at the start, after whitespace, or after an opening parenthesis or quote, and followed by whitespace, the end of the prompt, a closing parenthesis, a closing square bracket or a quote, `?`, `!`, `,`, `;`, `:`, or a `.` that is not followed by a letter, digit or underscore. A mode name inside a path (`a/ralph`) or a file name (`/ralph.md`) is not a slash command. The check reads the prompt after code blocks, inline code, quoted lines and pasted payloads are removed, as keyword detection does, so a `/ralph` quoted there does not count. The slash command also keeps its mode when a size prefix wins under `OMC_JEV_TASK_SIZE_PREFIX_WINS`. With `OMC_JEV_TASK_SIZE_NOTICE=1` the notice says that a slash command anywhere in the prompt keeps its mode. When an active task-size decision applies, such a slash command also counts as the user's confirmation, so ralph arms no awaiting-confirmation window; in shadow mode or with Jev off a mid-prompt slash command keeps that window.
 
 Shadow mode, the TypeScript bridge and the other task-size rules do not change.
+
+### Delivery guard
+
+In active mode the model and effort Jev picks for a Task/Agent call travel in the output of the `pre-tool-enforcer` PreToolUse hook. When Claude Code cuts that hook off at its `hooks.json` timeout, it drops the output: the Jev log still shows the correct answer, and only the hand-over is lost. Claude Code also reads `hooks/hooks.json` and the `env` section of `settings.json` once, at session start, so a session that started before such a change keeps the old values. `OMC_JEV_GUARD=1` (or `true`) turns on three checks. They run only while `model-routing` is active, use no network, never ask Jev, and never break a hook (a failure of the guard changes nothing).
+
+| Check | When | Message when |
+|-------|------|--------------|
+| Timeout | session start | the smallest numeric timeout of the `pre-tool-enforcer` PreToolUse entries in the plugin's `hooks/hooks.json` is below `OMC_JEV_GUARD_MIN_TIMEOUT_S` (default 60). An entry without a `timeout` field, or a plugin file without such an entry (hooks installed through `settings.json`), gives no message. |
+| Changed since start | each prompt | `hooks/hooks.json` or the `OMC_*` and `ANTHROPIC_*` keys of the `env` section of `settings.json` differ from what the session saw at start. One message per change and session: restart the session. Hook scripts load on every call, so a change to scripts alone needs no restart and gives no message. |
+| Daily check | prompt, at most once per 24 hours | a detached process finds an interrupted `PreToolUse:Agent` hook in the last 24 hours, or fewer than 95 % of the active `model-routing` decisions reached an agent with the model Jev chose; the next prompt of each session shows the result once. |
+
+How the daily check reads data:
+
+- Interrupted hooks: the session transcripts under `<Claude config dir>/projects` are scanned for hook attachments with `"timedOut":true`. Only the hook name, time and tool use id of such lines are read; nothing from a transcript is stored or printed.
+- Delivered decisions: `shadow.jsonl` lines (rotated files included) of the Jev log directory of the project of the prompt (`OMC_JEV_LOG_DIR`, else `.omc/state/jev`) that carry a `tool_use_id` field are joined to the `agent-*.meta.json` files of the agents on `toolUseId` and compared on the model. Decisions younger than two minutes and decisions with no agent found are left out. A call the hook deliberately left alone (a `use` marker, `forceInherit`) counts as not delivered. Lines without a `tool_use_id` are skipped, so with a log that does not record tool use ids the share stays empty and the check reports interruptions only.
+
+State is kept under `<Claude config dir>/.omc/jev-guard/`: a record per session id with the start time and the two hashes (sha256, 16 hex digits; the values behind them, which can be API keys, are never stored), plus the daily result in `delivery.json`. The daily process runs at the lowest priority; run it by hand with `node scripts/lib/jev-delivery-guard.mjs --daily --print [--log <dir>] [--window-hours <n>]`.
+
+Without the variable no file is read or written and the hooks behave exactly as before.
 
 ### Request Budget and Latency
 
