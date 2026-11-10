@@ -252,14 +252,22 @@ describe("keyword-detector.mjs: OMC_JEV_TASK_SIZE_NOTICE", () => {
       );
     });
 
-    it("covers the configured largeWordLimit in the classifier check", async () => {
+    it("uses the taskSizeDetection largeWordLimit for the classifier check, not for the logged heuristic", async () => {
+      // A typo prompt of about 70 words is small under the default large limit (200),
+      // so ralph is suppressed; a configured large limit below its length makes it large.
+      const longTypoPrompt = `${MEDIUM_PROMPT} Also fix the typo in the header.`;
+      const suppressed = await run(longTypoPrompt, NOTICE);
+      expect(suppressed.hookSpecificOutput?.additionalContext).toContain(SUPPRESSED_NOTE);
+
       writeProjectConfig({ largeWordLimit: 50 });
-      const output = await run(MEDIUM_PROMPT, NOTICE);
-      expect(taskSizeLog().map((entry) => entry.heuristic)).toEqual(["medium"]);
-      expect(output.hookSpecificOutput?.additionalContext).toContain(
-        `${KEPT_NOTE} ralph (the heuristic rates the task medium and the prompt has no size prefix).`,
+      const output = await run(longTypoPrompt, NOTICE);
+      const context = output.hookSpecificOutput?.additionalContext ?? "";
+      expect(taskSizeLog().map((entry) => entry.heuristic)).toEqual(["small", "small"]);
+      expect(context).toContain(
+        `${KEPT_NOTE} ralph (the heuristic rates the task large and the prompt has no size prefix).`,
       );
-      expectModeKept(output.hookSpecificOutput?.additionalContext ?? "", "ralph");
+      expectModeKept(context, "ralph");
+      expect(context).not.toContain(SUPPRESSED_NOTE);
     });
 
     it("adds no note when Jev does not rate the task small", async () => {
