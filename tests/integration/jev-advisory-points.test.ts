@@ -421,6 +421,7 @@ describe("jev advisory points: opt-in actions", () => {
 
     it("shadow mode and a degraded call keep the reminder", async () => {
       noul.simplification_worthy = 0.01;
+      shadowRuns += 1;
       const shadow = await stop({ OMC_JEV: "simplifier-trigger", OMC_JEV_SIMPLIFIER_APPLY: "1" });
       expect(shadow.decision).toBe("block");
       rmSync(join(cwd, ".omc"), { recursive: true, force: true });
@@ -510,6 +511,21 @@ describe("jev advisory points: opt-in actions", () => {
       expect(existsSync(path)).toBe(false);
     }, 20000);
 
+    it("keeps blocking when the Ralph state changes while Jev is answering", async () => {
+      const sessionId = "sess-release-stale";
+      const path = write(sessionId, "ralph-state.json", state("ralph", sessionId));
+      noul.task_complete = 0.95;
+      onTaskComplete = () => {
+        const current = read(path);
+        writeFileSync(path, JSON.stringify({ ...current, iteration: Number(current.iteration) + 1 }));
+      };
+
+      const output = await stop(sessionId, { OMC_JEV_LOOP_RELEASE_ONLY: "1" });
+      expect(output.decision).toBe("block");
+      expect(String(output.reason)).toContain("[RALPH LOOP - ITERATION");
+      expect(read(path)).toMatchObject({ active: true, iteration: 3 });
+    }, 20000);
+
     it("without the variable a complete answer still completes the mode", async () => {
       const sessionId = "sess-release-off";
       const path = write(sessionId, "ralph-state.json", state("ralph", sessionId));
@@ -541,6 +557,26 @@ describe("jev advisory points: opt-in actions", () => {
       expect(String(output.systemMessage)).toContain("autopilot mode stays active");
       expect(read(path)).toMatchObject({ active: true, phase: "qa", reinforcement_count: 1 });
     }, 20000);
+
+    it("keeps asking Jev after release-only autopilot passes the reinforcement cap", async () => {
+      const sessionId = "sess-release-autopilot-cap";
+      const path = write(
+        sessionId,
+        "autopilot-state.json",
+        state("autopilot", sessionId, { reinforcement_count: 19 }),
+      );
+      noul.task_complete = 0.95;
+
+      const first = await stop(sessionId, { OMC_JEV_LOOP_RELEASE_ONLY: "1" });
+      expect(String(first.systemMessage)).toContain("autopilot mode stays active");
+      expect(read(path)).toMatchObject({ active: true, reinforcement_count: 20 });
+      expect(requests).toHaveLength(1);
+
+      const second = await stop(sessionId, { OMC_JEV_LOOP_RELEASE_ONLY: "1" });
+      expect(String(second.systemMessage)).toContain("autopilot mode stays active");
+      expect(read(path)).toMatchObject({ active: true, reinforcement_count: 20 });
+      expect(requests).toHaveLength(2);
+    }, 40000);
 
     it("a released child Ralph hands the Stop to the active autopilot", async () => {
       const sessionId = "sess-release-parent";

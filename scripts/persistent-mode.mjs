@@ -68,9 +68,15 @@ const LEARNER_HINT_MARKER = "jev-learner-hint.json";
 let learnerHintNoul;
 
 /** Stop output that releases the stop, with the learner hint when one is due and not yet shown in this session. */
-function releaseOutput(stateDir, sessionId, hasValidSessionId) {
+async function releaseOutput(directory, sessionId, hasValidSessionId) {
   if (learnerHintNoul === undefined || !hasValidSessionId) return SAFE_CONTINUE;
-  const markerPath = join(stateDir, "sessions", sessionId, LEARNER_HINT_MARKER);
+  const { sessionScopedPath: markerPath } = await resolveSessionStatePathsForHook(
+    directory,
+    "jev-learner-hint",
+    sessionId,
+    { fileName: LEARNER_HINT_MARKER },
+  );
+  if (!markerPath) return SAFE_CONTINUE;
   if (existsSync(markerPath)) return SAFE_CONTINUE;
   if (!writeJsonFile(markerPath, { ts: new Date().toISOString(), noul: learnerHintNoul })) return SAFE_CONTINUE;
   return { ...SAFE_CONTINUE, systemMessage: LEARNER_HINT_MESSAGE };
@@ -244,7 +250,8 @@ function isJevLoopReleaseOnly() {
 
 /**
  * Outcome of a Jev "task complete" answer for one mode: null when Jev did not
- * say complete, with OMC_JEV_LOOP_RELEASE_ONLY "released" (state untouched) or,
+ * say complete, with OMC_JEV_LOOP_RELEASE_ONLY "released" (without completing
+ * the mode) or,
  * when cancel removed the state file while Jev was answering, "cancelled" (a
  * silent release, as for completeModeFromJev); otherwise the
  * completeModeFromJev() outcome.
@@ -252,7 +259,8 @@ function isJevLoopReleaseOnly() {
 function jevCompletionOutcome(result, state, statePath) {
   if (!jevSaysTaskComplete(result)) return null;
   if (!isJevLoopReleaseOnly()) return completeModeFromJev(state, statePath);
-  return shouldWriteStateBack(statePath) ? "released" : "cancelled";
+  if (isStateUnchangedSinceJevRequest(state, statePath)) return "released";
+  return shouldWriteStateBack(statePath) ? null : "cancelled";
 }
 
 /** Stop output for a release that leaves the mode active; see isJevLoopReleaseOnly(). */
@@ -2087,7 +2095,10 @@ async function main() {
         const phase = getAutopilotPhase(autopilot.state);
         if (phase !== "complete") {
           const loadedSnapshot = JSON.stringify(autopilot.state);
-          const newCount = (autopilot.state.reinforcement_count || 0) + 1;
+          const releaseOnly = isJevLoopReleaseOnly();
+          const currentCount = autopilot.state.reinforcement_count || 0;
+          // Release-only keeps the mode active, so the counter stays capped while Jev evaluates every Stop.
+          const newCount = releaseOnly ? Math.min(currentCount + 1, 20) : currentCount + 1;
           if (newCount <= 20) {
             const toolError = readLastToolError(stateDir);
             const errorGuidance = getToolErrorRetryGuidance(toolError);
@@ -2335,7 +2346,7 @@ async function main() {
         recordIdleNotificationSent(stateDir);
       }
     }
-    console.log(JSON.stringify(releaseOutput(stateDir, sessionId, hasValidSessionId)));
+    console.log(JSON.stringify(await releaseOutput(directory, sessionId, hasValidSessionId)));
   } catch (error) {
     // On any error, allow stop rather than blocking forever
     try {
