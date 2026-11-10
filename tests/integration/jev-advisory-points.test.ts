@@ -601,18 +601,82 @@ describe("jev advisory points: opt-in actions", () => {
 
     it("keeps the reinforcement-cap fallback when release-only Jev has no answer", async () => {
       const sessionId = "sess-release-autopilot-cap-degraded";
+      const staleish = new Date(Date.now() - 90 * 60 * 1000).toISOString();
       const path = write(
         sessionId,
         "autopilot-state.json",
-        state("autopilot", sessionId, { reinforcement_count: 20 }),
+        state("autopilot", sessionId, { reinforcement_count: 20, last_checked_at: staleish }),
       );
       status = 500;
 
       const output = await stop(sessionId, { OMC_JEV_LOOP_RELEASE_ONLY: "1" });
       expect(output).toEqual({ continue: true, suppressOutput: true });
-      expect(read(path)).toMatchObject({ active: true, reinforcement_count: 20 });
+      // No valid answer, no heartbeat: the state can still go stale.
+      expect(read(path)).toMatchObject({ active: true, reinforcement_count: 20, last_checked_at: staleish });
       expect(requests).toHaveLength(1);
     }, 20000);
+
+    it("refreshes the heartbeat of a capped autopilot after an active answer and keeps the count", async () => {
+      const staleish = new Date(Date.now() - 90 * 60 * 1000).toISOString();
+      const startedAt = Date.now();
+      for (const [answer, sessionId] of [
+        [0.2, "sess-release-heartbeat-block"],
+        [0.95, "sess-release-heartbeat-release"],
+      ] as const) {
+        const path = write(
+          sessionId,
+          "autopilot-state.json",
+          state("autopilot", sessionId, {
+            reinforcement_count: 20,
+            started_at: staleish,
+            last_checked_at: staleish,
+            updated_at: staleish,
+          }),
+        );
+        noul.task_complete = answer;
+        const output = await stop(sessionId, { OMC_JEV_LOOP_RELEASE_ONLY: "1" });
+        expect(output.decision === "block").toBe(answer < 0.5);
+        const after = read(path);
+        expect(after).toMatchObject({ active: true, reinforcement_count: 20 });
+        expect(Date.parse(String(after.last_checked_at))).toBeGreaterThanOrEqual(startedAt);
+      }
+    }, 40000);
+
+    it("leaves a capped autopilot state untouched when Jev is off", async () => {
+      const sessionId = "sess-release-heartbeat-off";
+      const staleish = new Date(Date.now() - 90 * 60 * 1000).toISOString();
+      const path = write(
+        sessionId,
+        "autopilot-state.json",
+        state("autopilot", sessionId, { reinforcement_count: 20, last_checked_at: staleish }),
+      );
+      const output = await stop(sessionId, { OMC_JEV: "off", OMC_JEV_LOOP_RELEASE_ONLY: "1" });
+      expect(output).toEqual({ continue: true, suppressOutput: true });
+      expect(read(path)).toMatchObject({ reinforcement_count: 20, last_checked_at: staleish });
+      expect(requests).toHaveLength(0);
+    }, 20000);
+
+    it("logs the capped autopilot release as a non-comparable heuristic in active mode and a blocking one below the cap", async () => {
+      const readRows = () => {
+        const logPath = join(cwd, "jev-logs", "shadow.jsonl");
+        return (existsSync(logPath) ? readFileSync(logPath, "utf8").split("\n") : [])
+          .filter(Boolean)
+          .map((line) => JSON.parse(line) as { mode: string; heuristic: unknown })
+          .filter((row) => row.mode === "active");
+      };
+      noul.task_complete = 0.2;
+      const capped = "sess-release-log-active-capped";
+      write(capped, "autopilot-state.json", state("autopilot", capped, { reinforcement_count: 20 }));
+      await stop(capped, { OMC_JEV_LOOP_RELEASE_ONLY: "1" });
+      expect(readRows().map((row) => row.heuristic)).toEqual([null]);
+      expect(requests[0].state).toMatchObject({ should_block: false });
+
+      const below = "sess-release-log-active-below";
+      write(below, "autopilot-state.json", state("autopilot", below, { reinforcement_count: 5 }));
+      await stop(below, { OMC_JEV_LOOP_RELEASE_ONLY: "1" });
+      expect(readRows().map((row) => row.heuristic)).toEqual([null, false]);
+      expect(requests[1].state).toMatchObject({ should_block: true });
+    }, 40000);
 
     it("logs the capped autopilot release as a non-comparable heuristic in shadow mode", async () => {
       const sessionId = "sess-release-autopilot-cap-shadow";

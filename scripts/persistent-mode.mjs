@@ -2099,6 +2099,7 @@ async function main() {
           const currentCount = autopilot.state.reinforcement_count || 0;
           const reinforcementLimitReached = currentCount >= 20;
           // Release-only still asks Jev at the cap without advancing the bounded fallback counter.
+          // The capped fallback releases; only a valid active answer refreshes the heartbeat (after the request).
           const newCount = releaseOnly ? Math.min(currentCount + 1, 20) : currentCount + 1;
           if (newCount <= 20) {
             const toolError = readLastToolError(stateDir);
@@ -2142,6 +2143,19 @@ async function main() {
               iteration: newCount,
               phase,
             }, data.permission_mode);
+
+            if (reinforcementLimitReached && jevNoulOf(jevAutopilotResult, "task_complete") !== undefined) {
+              // Capped: keep the count, refresh the heartbeat so isStaleState() does not end per-Stop judgment.
+              // Best effort under the same snapshot and lock checks; a changed or removed state is left alone.
+              const heartbeat = { ...autopilot.state, last_checked_at: new Date().toISOString() };
+              let refreshed = false;
+              withStateFileLockSync(autopilot.path, () => {
+                const current = readJsonFile(autopilot.path);
+                if (!current || JSON.stringify(current) !== loadedSnapshot) return;
+                refreshed = writeJsonFile(autopilot.path, heartbeat);
+              });
+              if (refreshed) autopilot.state = heartbeat;
+            }
 
             const jevAutopilotCompletion = jevCompletionOutcome(jevAutopilotResult, autopilot.state, autopilot.path);
             if (jevAutopilotCompletion) {
