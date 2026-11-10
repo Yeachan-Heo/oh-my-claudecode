@@ -44141,6 +44141,38 @@
           "previousFilename": null
         }
       ]
+    },
+    {
+      "pullNumber": 4955,
+      "targetRef": "dev",
+      "mergeBaseSha": "0fa697c4577d8131f36c993e202ad00e954ff888",
+      "headSha": "8d49bc789dd6c8a750ba3017cf1f5f51ed2e08c0",
+      "owner": "Yeachan-Heo",
+      "expiresAt": "2026-12-31T23:59:59.999Z",
+      "generatedDelta": {
+        "count": 3,
+        "sha256": "db9eb47e82b60ceeb5457c769c498367afbce6516a72709cf777ba662244eb3d"
+      },
+      "generatedFiles": [
+        {
+          "status": "modified",
+          "filename": "bridge/cli.cjs",
+          "sha": "9705d7308f02602c98f2ca347ad13444b97a2124",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "bridge/mcp-server.cjs",
+          "sha": "3cd0b1f9939060dcd57c4794c6f44ea515bc5004",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "bridge/team-mcp.cjs",
+          "sha": "73c2d44483ac2f27727b7aa79d67935eed6a6706",
+          "previousFilename": null
+        }
+      ]
     }
   ]
 }
