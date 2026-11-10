@@ -571,8 +571,19 @@ function hasUniversalClipboardFeature(features) {
 function isCmuxContext() {
     return detectTeamMultiplexerContext() === 'cmux';
 }
-function isCmuxSurfaceTarget(value) {
-    return typeof value === 'string' && value.trim().length > 0 && !value.trim().startsWith('%');
+/**
+ * A pane id names a cmux surface only inside a cmux session (issue #4816).
+ * tmux ids (`%N`) and herdr ids (`w<id>:p<id>`, e.g. `w2FQ:p16`) never do.
+ */
+export function isCmuxSurfaceTarget(value) {
+    if (typeof value !== 'string')
+        return false;
+    const trimmed = value.trim();
+    if (trimmed.length === 0 || trimmed.startsWith('%'))
+        return false;
+    if (/^w[0-9A-Za-z]+:p[0-9A-Za-z]+$/.test(trimmed))
+        return false;
+    return isCmuxContext();
 }
 async function cmuxExecAsync(args) {
     const result = await execFileAsync('cmux', args, { encoding: 'utf-8' });
@@ -1487,12 +1498,14 @@ export function buildWorkerStartCommand(config) {
             windowsEnvVars.OMC_RECOVERY_GATE_SPEC_B64 = Buffer.from(windowsEnvVars.OMC_RECOVERY_GATE_SPEC, 'utf8').toString('base64');
             delete windowsEnvVars.OMC_RECOVERY_GATE_SPEC;
         }
-        const envPrefix = Object.entries(windowsEnvVars)
-            .map(([key, value]) => {
-            assertSafeEnvKey(key);
-            assertSafeCmdValue(value);
-            return `set "${key}=${escapeForCmdSet(value)}"`;
-        })
+        // cmd.exe searches the cwd (the repo) before PATH; a caller value never turns that back on.
+        const envPrefix = ['set "NoDefaultCurrentDirectoryInExePath=1"', ...Object.entries(windowsEnvVars)
+                .filter(([key]) => key.toUpperCase() !== 'NODEFAULTCURRENTDIRECTORYINEXEPATH')
+                .map(([key, value]) => {
+                assertSafeEnvKey(key);
+                assertSafeCmdValue(value);
+                return `set "${key}=${escapeForCmdSet(value)}"`;
+            })]
             .join(' && ');
         const launch = launchWords.map(part => {
             assertSafeCmdValue(part);

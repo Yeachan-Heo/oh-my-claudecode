@@ -13,7 +13,7 @@ import { join, dirname, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { getClaudeConfigDir } from './lib/config-dir.mjs';
 import { buildHudWrapper } from './lib/hud-wrapper-template.mjs';
-import { hookPrefixForPlatform, normalizeHooksDataForPlatform } from './lib/hook-command-normalizer.mjs';
+import { normalizeHooksDataForPlatform } from './lib/hook-command-normalizer.mjs';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -106,10 +106,13 @@ try {
 // Keep stale cache self-healing for older manifests that used sh/find-node, an
 // accidentally baked absolute node path, or the Windows-safe direct node form.
 //
-// Commands are emitted with the braced "${CLAUDE_PLUGIN_ROOT}" placeholder,
-// which Claude Code substitutes itself. The bare "$CLAUDE_PLUGIN_ROOT" spelling
-// only expands where a POSIX shell runs the command, so it cannot work behind
-// the direct-node Windows prefix (#4042).
+// Commands use the braced `${CLAUDE_PLUGIN_ROOT}` placeholder. On Windows the
+// published form is exec (`command: node` plus `args`): the host substitutes
+// each arg and spawns node with no shell, so a root that contains spaces stays
+// one argument (#4042). On Unix the cache rewrite is a find-node.sh shell
+// command and `args` is deleted. A host that sees `args` would otherwise spawn
+// that whole shell string as the executable. The bare `$CLAUDE_PLUGIN_ROOT`
+// spelling only expands where a POSIX shell runs the command.
 //
 // Patterns handled (both the bare and braced spellings are accepted on input):
 //  1. find-node.sh format – sh "${CLAUDE_PLUGIN_ROOT}"/scripts/find-node.sh ...
@@ -126,7 +129,7 @@ try {
 
     if (patched) {
       writeFileSync(hooksJsonPath, JSON.stringify(data, null, 2) + '\n');
-      const platformLabel = hookPrefixForPlatform().startsWith('node ') ? 'direct node run.cjs' : 'find-node.sh run.cjs';
+      const platformLabel = process.platform === 'win32' ? 'direct node exec' : 'find-node.sh run.cjs';
       console.log(`[OMC] Patched hooks.json to use ${platformLabel} hook commands`);
     }
   }

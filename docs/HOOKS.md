@@ -20,7 +20,11 @@ Hooks are defined in a `hooks.json` file. Each hook follows this structure:
       "hooks": [
         {
           "type": "command",
-          "command": "node scripts/hook-script.mjs",
+          "command": "node",
+          "args": [
+            "${CLAUDE_PLUGIN_ROOT}/scripts/run.cjs",
+            "${CLAUDE_PLUGIN_ROOT}/scripts/hook-script.mjs"
+          ],
           "timeout": 5
         }
       ]
@@ -31,8 +35,11 @@ Hooks are defined in a `hooks.json` file. Each hook follows this structure:
 
 - **EventName**: The lifecycle event the hook responds to
 - **matcher**: Condition for running the hook (`*` matches all cases)
-- **command**: The Node.js script to execute
+- **command**: The program to spawn. Published plugin hooks use `node`
+- **args**: Arguments passed to that program. The first is `run.cjs`; the second is the hook script
 - **timeout**: Maximum execution time in seconds
+
+Published plugin hooks use exec form: `command` is `node` and `args` names `scripts/run.cjs` plus the hook script. Claude Code and Grok substitute `${CLAUDE_PLUGIN_ROOT}` inside each arg and spawn `node` with no shell, so a plugin root that contains spaces stays one argument. A host that ignores `args` and runs `command` as a shell string would start bare `node`, and the hook would miss its script. `find-node.sh` remains for the HUD and for repairing older Unix caches whose non-interactive PATH does not include `node`.
 
 Hook output is injected into Claude via `<system-reminder>` tags. Additional context is passed through `hookSpecificOutput.additionalContext`.
 
@@ -129,6 +136,7 @@ Fires immediately before Claude uses a tool.
 Runs on all tool calls (`matcher: "*"`). Enforces agent permission restrictions (e.g., blocking Write/Edit for read-only agents).
 Denies Task/Agent calls whose `subagent_type` names a bundled skill (issue #3667): instead of Claude Code's generic native "Agent type not found", the hook returns a precise error naming the Skill tool and the correct identifier, and forbids closest-match agent substitution.
 The exact canonical shipped script runs in the trusted Worker path; untrusted paths, event mismatches, and extra arguments retain the isolated child-process fallback.
+With `OMC_SHELL_CHECKS=1` it also checks Bash and PowerShell commands before they run (see [Shell Checks](#shell-checks-scriptslibshell-checksmjs)).
 
 ### PermissionRequest
 
@@ -152,7 +160,7 @@ Fires after a tool use completes.
 | `post-tool-directory-context-injector.mjs` | Injects the README.md and AGENTS.md files from the file's directory up to the working directory, for Read, Write, Edit, and MultiEdit | 3s |
 
 Injects additional guidance based on Read, Write, Edit, and Bash results. For example, after reading a file it may hint "consider using parallel reads."
-These exact canonical shipped scripts use the trusted Worker path without changing their manifest timeout budgets. The verifier retains statistics for the current session and the 99 most recently updated historical sessions so per-tool writes stay bounded. Disable all four with `DISABLE_OMC=1` (or `DISABLE_OMC=true`) or `OMC_SKIP_HOOKS=post-tool-use`; `project-memory-posttool` also accepts its script-specific token.
+These exact canonical shipped scripts use the trusted Worker path without changing their manifest timeout budgets. The verifier retains statistics for the current session and the 99 most recently updated historical sessions so per-tool writes stay bounded. With `OMC_SHELL_CHECKS=1`, `post-tool-verifier.mjs` also records known shell error classes of Bash and PowerShell results (see [Shell Checks](#shell-checks-scriptslibshell-checksmjs)). Disable all four with `DISABLE_OMC=1` (or `DISABLE_OMC=true`) or `OMC_SKIP_HOOKS=post-tool-use`; `project-memory-posttool` also accepts its script-specific token.
 
 ### PostToolUseFailure
 
@@ -161,6 +169,8 @@ Fires when a tool use fails.
 | Script | Role | Timeout |
 |--------|------|---------|
 | `post-tool-use-failure.mjs` | Provides recovery guidance for failed tool use | 3s |
+
+With `OMC_SHELL_CHECKS=1`, the script also records known shell error classes of failed Bash and PowerShell calls (see [Shell Checks](#shell-checks-scriptslibshell-checksmjs)).
 
 Disable via `DISABLE_OMC=1` (or `DISABLE_OMC=true`) or `OMC_SKIP_HOOKS=post-tool-use-failure` (the `post-tool-use` token also skips it, alongside `post-tool-verifier.mjs`).
 
@@ -344,11 +354,42 @@ A PreToolUse hook (matcher: `Bash`) that checks shell command positions and bloc
 - **Message**: the hook refuses with “You do not have authority for this operation” and names the two legitimate exits — the user runs it themselves, or explicitly sets `OMC_GIT_GUARDRAILS=0`. When auto-enabled by an active mode, the refusal names the mode.
 - **Prove it bites**: before trusting the guardrail in a session, feed it a planted violation once and watch it block (see the `refit` skill's landing rule). An installed guardrail nobody has seen fire is decoration, not protection.
 
+#### Shell Checks (`scripts/lib/shell-checks.mjs`)
+
+Opt-in checks of Bash and PowerShell commands, run by `pre-tool-enforcer.mjs` before the rest of the hook, plus a log of the shell errors that still happen. Set `OMC_SHELL_CHECKS=1` to enable. Without it no hook imports the module and the hooks behave exactly as before. Every check is fail-open: if the module throws, the command runs as if the checks did not exist, and the hook never returns `ask`.
+
+The checks exist because some failures of the Bash tool are silent or misleading. On Windows the Bash tool passes the command to Git Bash as the argument of `bash -c`, inside a wrapper of about 460 characters in which every `'` becomes `'"'"'`. Git Bash cuts that argument after about 8190 characters, so the tail of a long command (usually a heredoc written by an agent) is lost: the result is `unexpected EOF while looking for matching`, or a silently shortened here-document. Git Bash also halves runs of backslashes in the command text (`\\` becomes `\`) except right before a `"`, and bash 5.3.15 in Git for Windows 2.55.0 fails to parse some `$'\r'` constructs inside `"$(...)"`.
+
+| Check | Platforms | Result | What it catches |
+|-------|-----------|--------|-----------------|
+| `length` | Windows | deny | `characters + 4 x apostrophes + 460` is 7700 or more. The message says to write the script to a file and run it with a short command, or to pass the script to bash on stdin. |
+| `cr-parser` | Windows | deny | In one top-level `"..."`, a `$(...)` or `${...}` with a CR-producing `$'...'` (`\r`, `\015`, `\x0d`, `\cM`, `\u000d`) after another `$(...)`. The message names replacements such as `grep -c -P '\r$'`. `bash -n` does not see this bug. |
+| `syntax` | all | deny | `bash -n` on the command (stdin, 1 s limit) exits 2 with a parser message. On Windows the text checked is the one Git Bash will see after halving backslashes, and only commands longer than 200 characters are checked, because `bash -n` costs about 110 ms there (p95 about 500 ms). On macOS only a Homebrew bash is used, since `/bin/bash` 3.2 rejects bash 4 syntax; without one the check is skipped. A crashed `bash` or a timeout never denies. |
+| `heredoc` | all | deny | A here-document without its closing line (`bash -n` only warns and exits 0). |
+| `backslash` | Windows | warn | A run of two or more backslashes not directly before `"`. |
+| `ps-ssh-dollar` | all | warn | PowerShell: `ssh` with `\$` inside `"..."` (`\$` is no escape in PowerShell, so the expansion happens locally). |
+| `ps-dev-null` | Windows | warn | PowerShell: `2>/dev/null` outside quotes (it writes to `C:\dev\null`; use `2>$null`). |
+
+A denial is a PreToolUse `permissionDecision: "deny"` whose reason starts with `[SHELL CHECK]`. A warning is added to `additionalContext`, in front of whatever other context the hook emits for that call, and is never added to a denial.
+
+- **Log**: `<state root>/state/shell-checks/checks.jsonl` has one row per Bash or PowerShell command (decision, checks run, length, `bash -n` time, session and tool-use ids and `cwd`; the command text only for a denial, at most 300 characters, after masking secrets). `errors.jsonl` has one row for each tool result that shows a known shell error class (`unexpected-eof`, `heredoc-eof`, `enametoolong`, `python-invalid-escape`, `win-path-not-found`, `ps-missing-terminator`, `ps-dev-null`; for the first two a `cause` of `truncation`, `parser-bug` or `manual`), written by `post-tool-verifier.mjs` and `post-tool-use-failure.mjs`. A file above 50 MB is renamed with a timestamp and the newest two such files are kept.
+- **Measured on**: Claude Code 2.1.318 and Git for Windows 2.55.0 (`bash.exe` 5.3.15). The wrapper size and the cut point belong to those programs, so re-check them after updating either (`printf '%s' "$BASH_EXECUTION_STRING"` shows the wrapper).
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `OMC_SHELL_CHECKS` | (unset) | `1` enables the checks and the error log. Any other value leaves everything off. |
+| `OMC_SHELL_CHECKS_LENGTH_LIMIT` | `7700` | Effective length from which `length` denies on Windows (1000-100000; other values use the default). |
+| `OMC_SHELL_SYNTAX_TIMEOUT_MS` | `1000` | Time limit of the `bash -n` check in milliseconds (100-3000, so that a hung `bash` stays inside the 5 s hook budget; other values use the default). |
+| `OMC_SHELL_CHECKS_LOG_DIR` | `<state root>/state/shell-checks` | Log directory override. |
+
 #### Stale Run Reporter (`stale-run-reporter.mjs`)
 
-A SessionStart hook: the unattended-run **watchdog**. It scans the resolved `.omc` state root for persistent unattended-mode state files — ralph, autopilot, team, ultragoal — left `active: true` with a stale mtime (the signature of a run whose process died mid-flight), and surfaces them as advisory `[STALE RUN]` context naming the mode, approximate age, and state path.
+A SessionStart hook: the unattended-run **watchdog**. It scans the resolved `.omc` state root for persistent unattended-mode state files — ralph, autopilot, team, ultragoal — left `active: true` with a stale mtime and surfaces them as advisory context, split into two categories.
 
+- **`[STALE RUN]`**: the signature of a run whose process died mid-flight. The message names the mode, approximate age, and state path, and points at reclaiming the state via `/oh-my-claudecode:cancel` or re-entering the mode.
+- **`[AWAITING CONFIRMATION]`**: the run is parked on a confirmation prompt and has emitted no activity since `awaiting_confirmation_set_at`. It is reported separately so a live-but-paused run is not called dead; the message names the mode, session, `since` timestamp, and state path, and points at answering the prompt or cancelling if the run is gone.
 - **Threshold**: 2 hours of mtime silence (matching the persistent-mode freshness window); tunable via `OMC_STALE_RUN_HOURS`.
+- **Confirmation expiry**: the waiting category requires the marker to be the file's last write — `awaiting_confirmation_set_at` must parse, must not be in the future, and must be within a few seconds of the state file's mtime. `keyword-detector.mjs` writes both in the same atomic write, so a genuinely parked run keeps them aligned no matter how old it is; a leftover flag on a file that was written again afterwards has an mtime later than `set_at` and falls back to `[STALE RUN]`.
 - **Coverage**: both layouts — legacy `.omc/state/<mode>-state.json` and session-scoped `.omc/state/sessions/<sessionId>/<mode>-state.json`. The starting session's own state is excluded; malformed state files are ignored, never findings.
 - **Doctrine**: the watchdog observes and reports only. It never mutates state, never resumes a run, and never infers approval — reclaiming a dead run (`/oh-my-claudecode:cancel` to clean up, or re-entering the mode to resume from artifacts) is always a human decision.
 
@@ -580,10 +621,15 @@ export OMC_JEV="point1,point2:active,all"
 | `OMC_JEV` | (absent) | Per-point opt-in: `point`, `point:active`, `all` (every point, shadow), or `all:active` (every point, active). Comma-separated; unknown point names are ignored. |
 | `OMC_JEV_TIMEOUT_MS` | `2000` | Per-call timeout in milliseconds (single round-trip measured at 465–605 ms; default allows margin). |
 | `OMC_JEV_MAX_REQUESTS` | `0` (unlimited) | Maximum Jev requests per process. When reached, heuristic twins run for remaining calls. |
-| `OMC_JEV_EXCERPT_CHARS` | `200` | Maximum string length sent in state and shadow log. Recursively bounds all strings in the judgment payload. |
+| `OMC_JEV_EXCERPT_CHARS` | `200` | Maximum string length sent in state and shadow log. Recursively bounds all strings in the judgment state; question definitions are static text and are sent whole. Does not apply to the points that have their own default (next row). |
+| `OMC_JEV_EXCERPT_CHARS_<POINT>` | (unset) | The same limit for one point: the point name upper-cased with dashes as underscores, for example `OMC_JEV_EXCERPT_CHARS_MODEL_ROUTING` (the variable name itself must be upper case). Order for a point: its own variable, then the point's default, then `OMC_JEV_EXCERPT_CHARS`. Point defaults: `model-routing` `12000`; `task-size` `4000`; `skill-trigger` and `intent` `1000`; `learner-extraction` and `loop-continuation` `2000` (the length to which `persistent-mode.mjs` cuts the last assistant message it sends for `loop-continuation`). An invalid value is ignored. To send less of one of these points, set its own variable, for example `OMC_JEV_EXCERPT_CHARS_TASK_SIZE=200`, the limit of earlier releases; `OMC_JEV_EXCERPT_CHARS` alone does not reach a point that has its own default. |
 | `OMC_JEV_ENDPOINT` | `https://api.typesafe.ai/v1/systemone` | Override for stub servers or tests. |
 | `OMC_JEV_LOG_DIR` | `.omc/state/jev` | Shadow-log directory override (test only). |
 | `OMC_JEV_QUIET` | (unset) | Set to `1` to silence the env-activation stderr warning. |
+| `OMC_JEV_MAX_EFFORT` | `max` | Cap for the subagent reasoning effort set by the active `model-routing` point: `low`, `medium`, `high`, `xhigh`, or `max`, case-insensitive, surrounding spaces ignored. Other values use the default. A lower cap lowers the mapping: `high` restores the cap of earlier releases. A value that is set but not one of these is reported on stderr (unless `OMC_JEV_QUIET=1`) and the default is used. See [Model routing: subagent effort](#model-routing-subagent-effort). |
+| `OMC_JEV_MODEL_ROUTING_CONTEXT` | (unset) | Set to `1` or `true` to add two fields to the `model-routing` state: the Task/Agent call's `description` and `parent_last_user_message`, the last real user message of the parent session (read from the tail of its transcript; tool results, hook-injected reminders and system notices are skipped). Both are bounded by the point's excerpt limit. Script hooks only; the TypeScript resolver ignores it. See [Model routing: what Jev sees](#model-routing-what-jev-sees). |
+| `OMC_JEV_MODEL_ROUTING_ALL_AGENTS` | (unset) | Set to `1` or `true` to ask the `model-routing` point about Task/Agent calls that name no model (a `general-purpose` agent without one, `model: "inherit"`) as well. By default Jev is asked only when the call or the agent definition names `haiku`, `sonnet`, or `opus`. Calls and agent definitions that name any other model (for example `fable`) are left alone. Script hooks only. See [Model routing: what Jev sees](#model-routing-what-jev-sees). |
+| `OMC_JEV_MODEL_ROUTING_MARKER` | (unset) | Set to `1` or `true` to let the first line of a Task/Agent prompt pin the model and the effort of that call: `use <model>`, `use <model> <effort>`, or `use <effort>`. The marker replaces Jev's answer for what it names, is removed from the prompt the agent receives, and each use is logged to `overrides.jsonl`. `max` is never accepted from a marker. Script hooks only. See [Model routing: the `use` marker](#model-routing-the-use-marker). |
 | `OMC_JEV_PLAN_MODE` | (unset) | Behavior while Claude Code is in plan mode (`permission_mode: "plan"`): `shadow` runs every opted-in point in shadow, `off` disables every point. Unset or any other value changes nothing. See [Plan mode](#plan-mode). |
 | `OMC_JEV=off` | — | Master switch: disables every point regardless of key or other config. |
 
@@ -652,7 +698,8 @@ Each line is a JSON record with:
 - `state`: the bounded state passed to the judgment
 - `mode`: `"shadow"`, `"active"`, or `"degraded"`
 - `heuristic`: the heuristic twin's result
-- `jev`: Jev's response, or `null` when the request degrades
+- `jev`: Jev's first answer, or `null` when the request degrades. In a Noul answer, `noul` is the probability of "yes" from 0 to 1; the hook scripts and `scripts/jev-eval.mjs` read 0.5 or more as yes.
+- `answers`: every Jev answer by question name, or `null` when the request degrades. Points that ask more than one question in one request, such as `model-routing`, are read from this map: the API does not guarantee the order of its answers.
 - `confidence`: Jev's confidence when provided
 - `durationMs`: elapsed request time
 - `usage`: Jev-reported token usage when available
@@ -677,7 +724,7 @@ Every registered judgment point with its lifecycle hook, decision type, and bloc
 | `intent` | UserPromptSubmit | keyword-detector | Is this an Intent-intake request? | Noul (yes/no) | No | — |
 | `skill-trigger` | UserPromptSubmit | keyword-detector | Which skill should this prompt trigger? | Choice (cancel/ralph/autopilot/…) | No | — |
 | `task-size` | UserPromptSubmit | task-size-detector | Is this small/medium/large? | Choice (small/medium/large) | No | — |
-| `model-routing` | PreToolUse | delegation-enforcer | Which model tier (haiku/sonnet/opus)? | Choice (haiku/sonnet/opus) | No | — |
+| `model-routing` | PreToolUse | delegation-enforcer | Which is the cheapest model (haiku/sonnet/opus) that does the work well? + How much reasoning effort? | Choice (haiku/sonnet/opus) + Score (effort 0-4) | No | — |
 | `slop-warning` | PreToolUse | jev-slop-warning | Does this tool input have advisory language? | Noul (yes/no) | No | — |
 | `context-pruning` | PostToolUse | post-tool-verifier | How stale is this context candidate? | Score (fresh/recent/aging/stale) | No | — |
 | `loop-continuation` | Stop | persistent-mode | Is task complete? + Progress level? | Noul + Score | **Yes** | — |
@@ -691,6 +738,92 @@ Every registered judgment point with its lifecycle hook, decision type, and bloc
 - **Advisory points** (Blocking=No): Jev answers are recorded in shadow log but do not affect workflow. Useful for collecting calibration data.
 - **Blocking points** (Blocking=Yes): In active mode, Jev's yes/no answer gates behavior (e.g., ralph stops when `ralph-verdict` decides completion is met). Timeout, unavailability, or budget exhaustion reverts to heuristic twin.
 
+### Model routing: subagent effort
+
+The `model-routing` point asks two questions in one request, so choosing the effort adds no Jev call:
+
+| Question | Type | Answer |
+|----------|------|--------|
+| `model-tier` | Choice | `haiku`, `sonnet`, or `opus`: the cheapest model that will do the work well, meaning correctly and completely |
+| `effort` | Score 0-4 | 0 low (mechanical work), 1 medium (a typical change or analysis with clear steps), 2 high (multi-file work that needs its own decisions, a diagnosis, or writing a document), 3 xhigh (in-depth analysis, architecture, a high-stakes review, a hard bug), 4 max (exceptionally hard, rare) |
+
+The `model-tier` question asks for the cheapest model that will do the work well, meaning correctly and completely, and describes each model by the work it suits: Haiku for mechanical work whose result follows directly from the data and is easy to check (look up, read, list, count, copy, run a command and report the result, one obvious fix); Sonnet for typical developer and analyst work with a clear goal (code changes in one or a few files, tests, a diagnosis with clear leads, gathering and summarising several sources, a deployment following given steps); Opus for work where a mistake is costly or hard to notice and that needs deep reasoning (architecture with tradeoffs, a hard bug without clear leads, an independent high-stakes review or fact-check, a document on which money or important decisions depend, hard proofs, deciding between conflicting sources, planning a large change). A more expensive model is needed when a cheaper one would clearly be more likely to get the work wrong or to miss something important. The length of the brief, the number of steps, its formal conditions and the name of the agent type do not by themselves raise the choice; the effort question carries the amount of reasoning. In active mode the `choice` field becomes the model of the call, as described below.
+
+The `effort` question asks about the work the delegated agent must actually do and says that the length of the brief and its formal conditions (language and style rules, permission to use subagents, bans, file locations, report format, words in capitals) do not raise the level. The five criteria map one to one onto `low`, `medium`, `high`, `xhigh`, `max`.
+
+In active mode (`OMC_JEV=model-routing:active`), `pre-tool-enforcer.mjs` rounds the effort score to the nearest level and maps it onto the `effort` field of the Task/Agent call:
+
+| Score | Effort |
+|-------|--------|
+| 0 to 0.5 | `low` |
+| above 0.5 and below 1.5 | `medium` |
+| 1.5 to 2.5 | `high` |
+| above 2.5 and below 3.5 | `xhigh` |
+| 3.5 to 4 | `max` |
+
+The ends of the ranges are the exact ties: a score exactly halfway between two levels (0.5, 1.5, 2.5, 3.5) goes to the even level (`low`, `high`, `high`, `max`), so ties do not push the judgment in one direction. There is no confidence threshold and no other adjustment of the score.
+
+Every result is capped by `OMC_JEV_MAX_EFFORT`.
+
+This needs a Claude Code version whose Agent/Task tool schema has an `effort` field (checked on Claude Code 2.1.316).
+
+- Answers are read by question name. An effort answer counts only when its `type` is `score` and its `score` is a number from 0 to 4. A missing or malformed answer leaves its field as it was: a response without `effort` changes only the model, and one without `model-tier` changes only the effort.
+- As with the model, Jev's effort replaces an explicit `effort` in the call.
+- `OMC_JEV_MAX_EFFORT` defaults to `max`, so the mapping is not capped. `xhigh` and `max` can spend several times the tokens of `high` on a delegated call, but the calibrated question gives them for a minority of briefs. Set the cap to `high` or lower to hold every delegated call at that level: a lower cap such as `medium` lowers every level above it.
+- When the point is active and Jev returns no usable effort score, an explicit `effort` above the cap is lowered to the cap; with the default cap (`max`) nothing is lowered, and with `OMC_JEV_MAX_EFFORT=high`, for example, `max` becomes `high`.
+- Shadow mode, a degraded call (timeout, HTTP error, invalid response), and plan mode with `OMC_JEV_PLAN_MODE` leave the call exactly as it was, explicit effort included.
+
+Example: `OMC_JEV=model-routing:active` with `OMC_JEV_MAX_EFFORT=medium`. A call `{ "subagent_type": "executor", "model": "haiku", "effort": "max", ... }` and the answers `{ "effort": { "type": "score", "score": 2.3, ... }, "model-tier": { "type": "choice", "choice": "opus", ... } }` run with `"model": "opus", "effort": "medium"`. With the default cap and the effort score 2.9 the same call runs with `"effort": "xhigh"`, and with the score 3.7 with `"effort": "max"`.
+
+### Model routing: what Jev sees and which calls are asked
+
+By default the `model-routing` state is `tool_name`, `subagent_type` and up to 12000 characters of the task. The effort question judges the work the delegated agent must do, and a task cut to 200 characters hides most of it, so this point has its own default limit and ignores the global `OMC_JEV_EXCERPT_CHARS` (which still bounds every point without its own default). To change it, set `OMC_JEV_EXCERPT_CHARS_MODEL_ROUTING`; a smaller value sends less of the task and, in the measurement behind the calibrated question, makes its answers too low. The request carries more text than before, and the round trip stayed about the same in a small test (three requests each: 1.5 s at 300 characters, 1.6 s at 12000). Three variables control what is sent and which calls are asked:
+
+- `OMC_JEV_EXCERPT_CHARS_MODEL_ROUTING=<n>` sets the limit for the task and for the extra fields below. The fields that decide the routing (`subagent_type`, `model`, `effort`, `resume`) always keep a fixed 500 characters in the hook.
+- `OMC_JEV_MODEL_ROUTING_CONTEXT=1` adds `description` and `parent_last_user_message` to the state. The message is the user's own last real message in the parent session, a new kind of data next to the task, and it leaves your machine like the task does, so enable it only where that is acceptable. Both fields are also written to the local shadow log (`state`), and the message, before it is cut, to the short-lived request file in the temporary directory. The hook reads it from the tail of the session's own transcript (`<session_id>.jsonl`, a regular file, not a symlink), skips tool results, hook-injected reminders, compact summaries, sidechain entries, task, teammate and command notices, interruption markers, and the notices of the Claude desktop app (side-session and CI-monitor events, scheduled tasks, messages from another Claude session), cuts it to 4000 characters and then to the point limit. When no matching transcript is found, only the description is added.
+- `OMC_JEV_MODEL_ROUTING_ALL_AGENTS=1` asks about calls that name no model too: calls to `general-purpose` without a model and calls to an agent whose definition (plugin, project or user) has no `model:` field or says `inherit`. Without it those calls never reach Jev, so Jev can set neither their model nor their effort. A call that names any other model than haiku, sonnet or opus (`fable`, a non-Claude proxy model), or an agent definition that does, is left alone; a provider-specific Claude ID such as `us.anthropic.claude-sonnet-...` counts as its tier and is routed with or without the variable. In shadow mode the comparison is logged with a null heuristic (there is no twin tier to compare); in active mode Jev's answers set the model and the effort as usual. With `forceInherit` a call without a model keeps inheriting the session model unless the provider resolves the tier alias Jev picks (`ANTHROPIC_DEFAULT_<TIER>_MODEL` and the other variables the hook already checks); its effort is still set.
+
+All three are off by default, and nothing changes without them.
+
+### Model routing: the `use` marker
+
+In active mode Jev replaces the model and the effort of a delegated call, an explicit `model` or `effort` included, so the session that writes the call has no way to say "this one runs on this model". `OMC_JEV_MODEL_ROUTING_MARKER=1` adds one: a marker in the first line of the prompt of a Task/Agent call.
+
+| First line of the prompt | Effect |
+|--------------------------|--------|
+| `use <model>` | pins the model; Jev is asked only the `effort` question (when it would be asked about the call at all, see below) |
+| `use <model> <effort>` | pins both; Jev is not asked |
+| `use <effort>` | pins the effort; Jev is asked only the `model-tier` question (when it would be asked about the call at all, see below) |
+
+- `<model>` is `haiku`, `sonnet`, `opus`, or `fable`; `<effort>` is `low`, `medium`, `high`, or `xhigh`. The two sets do not overlap, so `use high` is an effort. `fable` can be chosen only this way: Jev answers haiku, sonnet, or opus.
+- The whole first non-empty line must have this form; case and surrounding spaces do not matter. A marker on a later line, in `description`, or in a line with other text is plain text and changes nothing.
+- The marker wins over the call's own `model` and `effort` and over Jev's answers. Jev, when it is asked, sees the task without the marker line.
+- Whether Jev is asked about the call at all follows the usual rules for the call's model, with the marker's model counted as the call's: a call that names no model is asked about only with `OMC_JEV_MODEL_ROUTING_ALL_AGENTS=1`, so `use opus` on such a call pins the model and leaves the effort question to Jev, while `use high` alone on it sends nothing to Jev.
+- The line, the empty lines before it, and one empty line after it are removed from the prompt in `updatedInput`, because the line is an instruction for the hook, not for the agent. A prompt that is only the marker keeps it.
+- `max` stays Jev's decision (and the cap's). `use max` and `use <model> max` do not set an effort: `use <model> max` still pins the model, `use max` alone changes nothing and leaves the line in the prompt. The refusal is logged in `rejected`.
+- The effort from a marker is capped by `OMC_JEV_MAX_EFFORT` like Jev's; the log row then has `"capped": true` and the requested level.
+- With `forceInherit` a marker model is set only when the provider resolves its tier alias (`OMC_SUBAGENT_MODEL`, `CLAUDE_CODE_BEDROCK_<TIER>_MODEL`, `ANTHROPIC_DEFAULT_<TIER>_MODEL`; `fable` included), as for any tier alias the hook checks under `forceInherit`. A marker with an effort still sets the effort and the log row has `"rejected": ["force-inherit"]`; a marker that names only such a model changes nothing and stays in the prompt, like `use max`. The `forceInherit` denials of the call's own model run before the marker is read.
+- The marker is an explicit instruction, so it applies in shadow mode too and when the `model-routing` point is off or there is no `TYPESAFE_API_KEY`. In shadow mode the Jev request still goes out for the questions the marker leaves open and its answers change nothing.
+- Every use is logged as one line in `overrides.jsonl` in the Jev log directory, next to `shadow.jsonl` but separate from it, because `jev-eval` counts every line of `shadow.jsonl` as a Jev request. A row carries `ts`, `point`, `session_id`, `subagent_type`, the literal `marker` line, `override` (`model`, `effort`, or `both`), the `model` and `effort` `from` and `to`, and `rejected` when something was refused. The row is written when the hook decides, so a call that a later check denies still has its row.
+
+Example: `OMC_JEV=model-routing:active`, a call with `"model": "haiku"` and the prompt `use sonnet low` then the task. The hook sends no request to Jev, and the call runs with `"model": "sonnet", "effort": "low"` and the task alone as its prompt. The same call with the prompt `use sonnet` runs on sonnet with the effort Jev chooses for the task.
+
+Without the variable the hook behaves exactly as before: the line stays in the prompt and Jev decides.
+
+### Context pruning: staleness score
+
+`post-tool-verifier.mjs` asks the `context-pruning` point only for large-output tools (read, grep, glob, bash, webfetch, and the task tools) and only once context usage reaches the warning threshold (default 70%). The `staleness` question is a Score 0-3, and a score answer carries no `choice`, so in active mode the score is rounded to the nearest label and mapped to an action:
+
+| Score | Label | Action |
+|-------|-------|--------|
+| < 0.5 | `fresh` | no message |
+| 0.5 to < 1.5 | `recent` | no message |
+| 1.5 to < 2.5 | `aging` | `[OMC WARNING]` |
+| 2.5 to 3 | `stale` | `[OMC CRITICAL]` |
+
+- Jev changes the level only below the critical threshold (default 90%). At or above it the hook always emits `[OMC CRITICAL]` and asks for `/compact`, whatever Jev answers, subject to the usual warning cooldown.
+- A score outside 0-3, a non-numeric score, or an answer of another type is ignored and the heuristic action stays, even when that answer carries a `choice`. In a score answer, a string `choice` that names one of the four labels, matched case-insensitively, takes precedence over the score.
+
 ### Request Budget and Latency
 
 Set limits to control cost and latency:
@@ -702,7 +835,8 @@ export OMC_JEV_MAX_REQUESTS=100
 # Raise timeout for slow networks
 export OMC_JEV_TIMEOUT_MS=5000
 
-# Truncate large state excerpts
+# Truncate large state excerpts (points that have their own default, see the
+# variable table, need their own variable, e.g. OMC_JEV_EXCERPT_CHARS_TASK_SIZE=500)
 export OMC_JEV_EXCERPT_CHARS=500
 ```
 

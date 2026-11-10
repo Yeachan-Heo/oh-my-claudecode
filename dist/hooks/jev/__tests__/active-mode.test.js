@@ -113,6 +113,7 @@ describe('active mode integration', () => {
         const result = await recordJudgment('task-size', {
             state: { prompt: 'a small prompt', source: 'test' },
             twin: () => ({ size: 'small', reason: 'heuristic', wordCount: 10, hasEscapeHatch: false }),
+            mapHeuristic: (result, questionSet) => result.size,
             mapAnswer: (answer) => ({
                 size: answer.choice?.toLowerCase() ?? 'medium',
                 reason: 'jev-active',
@@ -129,7 +130,7 @@ describe('active mode integration', () => {
         // Log preserves heuristic for comparison
         const line = JSON.parse(await readLog());
         expect(line.mode).toBe('active');
-        expect(line.heuristic.size).toBe('small');
+        expect(line.heuristic).toBe('small');
         expect(line.jev.choice).toBe('large');
     });
     it('intent: active mode uses Jev noul over the heuristic pattern match', async () => {
@@ -158,6 +159,7 @@ describe('active mode integration', () => {
         const result = await recordJudgment('model-routing', {
             state: { tool_name: 'Tool', source: 'test' },
             twin: () => ({ tier: 'sonnet' }), // Heuristic default
+            mapHeuristic: (result, questionSet) => result.tier,
             mapAnswer: (answer) => ({ tier: answer.choice || 'sonnet' }),
             fetchFn,
         });

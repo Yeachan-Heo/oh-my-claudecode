@@ -1,0 +1,64 @@
+@!@!@STARTMSG 2262:0 @!@!@
+TLC2 Version 2.19 of 08 August 2024 (rev: 5a47802)
+@!@!@ENDMSG 2262 @!@!@
+@!@!@STARTMSG 2401:3 @!@!@
+Please run the Java VM which executes TLC with a throughput optimized garbage collector by passing the "-XX:+UseParallelGC" property.
+@!@!@ENDMSG 2401 @!@!@
+@!@!@STARTMSG 2187:0 @!@!@
+Running breadth-first search Model-Checking with fp 0 and seed 3221330054825607476 with 1 worker on 8 cores with 23888MB heap and 64MB offheap memory [pid: 576746] (Linux 6.12.94+ amd64, Eclipse Adoptium 25.0.5 x86_64, MSBDiskFPSet, DiskStateQueue).
+@!@!@ENDMSG 2187 @!@!@
+@!@!@STARTMSG 2220:0 @!@!@
+Starting SANY...
+@!@!@ENDMSG 2220 @!@!@
+Parsing file /tmp/statechart-ZK5K4e/statechart-H3b8iX/ChartBound.tla
+Parsing file /agent/repos/plugins/pstack/skills/statechart/scripts/test/corpus/FirstRule/FirstRule.tla
+Parsing file /tmp/statechart-ZK5K4e/statechart-H3b8iX/tmp-verdict-2/Naturals.tla
+Parsing file /tmp/statechart-ZK5K4e/statechart-H3b8iX/tmp-verdict-2/TLC.tla
+Parsing file /tmp/statechart-ZK5K4e/statechart-H3b8iX/tmp-verdict-2/Sequences.tla
+Parsing file /tmp/statechart-ZK5K4e/statechart-H3b8iX/tmp-verdict-2/FiniteSets.tla
+Semantic processing of module Naturals
+Semantic processing of module FirstRule
+Semantic processing of module Sequences
+Semantic processing of module FiniteSets
+Semantic processing of module TLC
+Semantic processing of module ChartBound
+@!@!@STARTMSG 2219:0 @!@!@
+SANY finished.
+@!@!@ENDMSG 2219 @!@!@
+@!@!@STARTMSG 2185:0 @!@!@
+Starting... (2026-10-26 21:46:03)
+@!@!@ENDMSG 2185 @!@!@
+@!@!@STARTMSG 2189:0 @!@!@
+Computing initial states...
+@!@!@ENDMSG 2189 @!@!@
+@!@!@STARTMSG 2190:0 @!@!@
+Finished computing initial states: 1 distinct state generated at 2026-10-26 21:46:03.
+@!@!@ENDMSG 2190 @!@!@
+@!@!@STARTMSG 2110:1 @!@!@
+Invariant NotOneOrThree is violated.
+@!@!@ENDMSG 2110 @!@!@
+@!@!@STARTMSG 2121:1 @!@!@
+The behavior up to this point is:
+@!@!@ENDMSG 2121 @!@!@
+@!@!@STARTMSG 2217:4 @!@!@
+1: <Initial predicate>
+x = 0
+
+@!@!@ENDMSG 2217 @!@!@
+@!@!@STARTMSG 2217:4 @!@!@
+2: <Next line 6, col 9 to line 6, col 27 of module FirstRule>
+x = 1
+
+@!@!@ENDMSG 2217 @!@!@
+@!@!@STARTMSG 2200:0 @!@!@
+Progress(2) at 2026-10-26 21:46:03: 2 states generated (346 s/min), 2 distinct states found (346 ds/min), 0 states left on queue.
+@!@!@ENDMSG 2200 @!@!@
+@!@!@STARTMSG 2199:0 @!@!@
+2 states generated, 2 distinct states found, 0 states left on queue.
+@!@!@ENDMSG 2199 @!@!@
+@!@!@STARTMSG 2194:0 @!@!@
+The depth of the complete state graph search is 2.
+@!@!@ENDMSG 2194 @!@!@
+@!@!@STARTMSG 2186:0 @!@!@
+Finished in 350ms at (2026-10-26 21:46:03)
+@!@!@ENDMSG 2186 @!@!@

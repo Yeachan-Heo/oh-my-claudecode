@@ -1,0 +1,19 @@
+stateDiagram-v2
+  state "Legend" as legend {
+    lg0: Breaks Even or NoDeadlock
+    lg1: Path to the Even or NoDeadlock bug
+  }
+  class lg0 breaks
+  class lg1 bugPath
+  s0: 0
+  s1: 1
+  s2: 9
+  [*] --> s0
+  s0 --> s1: A
+  s0 --> s2: B
+  classDef breaks fill:#ffecee,stroke:#e72e3b,stroke-width:2.5px,color:#cd2834
+  class s0 bugPath
+  class s1 breaks
+  class s1 bugPath
+  class s2 breaks
+  class s2 bugPath

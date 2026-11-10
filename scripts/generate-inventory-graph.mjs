@@ -50,8 +50,21 @@ const OUT_PATH = join(REPO_ROOT, 'inventory', 'inventory-graph.json');
 
 // Seed census excludes retained for legacy counts; durable #3702 hashes use stable files below.
 const SEED_IGNORES = new Set(['node_modules', '.git', 'dist', 'coverage']);
-// Additional ephemeral ignores for counts/graph stability (not for inventorySha parity)
-const EPHEMERAL_IGNORES = new Set(['.tmp', '.tmp-02', '.clawhip', '.omc', '.omx', '__pycache__', '.gjc']);
+// Additional ephemeral ignores for counts/graph stability (not for inventorySha parity).
+// Tooling cache dirs (ruff, pytest, mypy) live only on machines that ran those
+// tools — counting them would make the baseline machine-dependent.
+const EPHEMERAL_IGNORES = new Set([
+  '.tmp',
+  '.tmp-02',
+  '.clawhip',
+  '.omc',
+  '.omx',
+  '__pycache__',
+  '.gjc',
+  '.ruff_cache',
+  '.pytest_cache',
+  '.mypy_cache',
+]);
 // Exclude self-generated output and base-owned authorization metadata. Neither is
 // candidate source: including either creates a provenance feedback loop when main
 // refreshes release authorization after the candidate inventory is generated.

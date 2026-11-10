@@ -8743,6 +8743,7 @@ __export(tmux_session_exports, {
   getWorkerLiveness: () => getWorkerLiveness,
   injectToLeaderPane: () => injectToLeaderPane,
   invokeDirectMailboxEffect: () => invokeDirectMailboxEffect,
+  isCmuxSurfaceTarget: () => isCmuxSurfaceTarget,
   isPosixTmuxSession: () => isPosixTmuxSession,
   isSessionAlive: () => isSessionAlive,
   isUnixLikeOnWindows: () => isUnixLikeOnWindows2,
@@ -9207,7 +9208,11 @@ function isCmuxContext() {
   return detectTeamMultiplexerContext() === "cmux";
 }
 function isCmuxSurfaceTarget(value) {
-  return typeof value === "string" && value.trim().length > 0 && !value.trim().startsWith("%");
+  if (typeof value !== "string") return false;
+  const trimmed = value.trim();
+  if (trimmed.length === 0 || trimmed.startsWith("%")) return false;
+  if (/^w[0-9A-Za-z]+:p[0-9A-Za-z]+$/.test(trimmed)) return false;
+  return isCmuxContext();
 }
 async function cmuxExecAsync(args) {
   const result = await execFileAsync2("cmux", args, { encoding: "utf-8" });
@@ -9947,11 +9952,11 @@ function buildWorkerStartCommand(config) {
       windowsEnvVars.OMC_RECOVERY_GATE_SPEC_B64 = Buffer.from(windowsEnvVars.OMC_RECOVERY_GATE_SPEC, "utf8").toString("base64");
       delete windowsEnvVars.OMC_RECOVERY_GATE_SPEC;
     }
-    const envPrefix = Object.entries(windowsEnvVars).map(([key, value]) => {
+    const envPrefix = ['set "NoDefaultCurrentDirectoryInExePath=1"', ...Object.entries(windowsEnvVars).filter(([key]) => key.toUpperCase() !== "NODEFAULTCURRENTDIRECTORYINEXEPATH").map(([key, value]) => {
       assertSafeEnvKey(key);
       assertSafeCmdValue2(value);
       return `set "${key}=${escapeForCmdSet(value)}"`;
-    }).join(" && ");
+    })].join(" && ");
     const launch = launchWords.map((part) => {
       assertSafeCmdValue2(part);
       return `"${escapeForCmdSet(part)}"`;
@@ -14856,6 +14861,9 @@ var init_keyword_detector = __esm({
       "deepsearch",
       "analyze",
       "deep-interview",
+      "ultragoal",
+      "ai-slop-cleaner",
+      "wiki",
       "codex",
       "gemini",
       "cursor",
@@ -14886,7 +14894,7 @@ function skillTriggerCriteria() {
   const priority = Array.isArray(KEYWORD_PRIORITY) ? KEYWORD_PRIORITY : [];
   return {
     ...Object.fromEntries(
-      priority.filter((type) => type !== "team").slice(0, 12).map((type) => [type, `The prompt explicitly invokes the ${type} trigger.`])
+      priority.filter((type) => type !== "team").map((type) => [type, `The prompt explicitly invokes the ${type} trigger.`])
     ),
     none: "No trigger fires; handle the prompt without a mode or skill."
   };
@@ -14945,11 +14953,22 @@ var init_points = __esm({
     MODEL_ROUTING_QUESTIONS = {
       "model-tier": {
         type: "choice",
-        instructions: "Which model tier should this delegated task use?",
+        instructions: "Which model should do this delegated task? Choose the cheapest model that will do the work well, meaning correctly and completely. Reasoning effort is chosen by a separate question, so the length of the brief and the number of steps do not by themselves call for a more expensive model. Judge the work the delegated agent must actually do; the formal conditions of the brief (language and style rules, permission to use subagents, bans, file locations, report format, words in capitals) and the name of the agent type do not raise the choice. A more expensive model is needed when a cheaper one would clearly be more likely to get this work wrong or to miss something important. When the brief fits several descriptions, judge by the hardest important part of the work.",
         criteria: {
-          haiku: "Quick lookups and lightweight, mechanical work",
-          sonnet: "Standard coding and orchestration work",
-          opus: "Complex architecture and deep analysis"
+          haiku: "Haiku: mechanical work whose result follows directly from the data and is easy to check: look up, read, list, count, copy, compile a list, run a command and report the result, one obvious fix",
+          sonnet: "Sonnet: typical developer and analyst work with a clear goal: code changes in one or a few files, tests, a diagnosis with clear leads, gathering and summarising information from several files or sources, assessment following given instructions, translation, a document written from given sources, a deployment following given steps, coordinating agents",
+          opus: "Opus: work where a mistake is costly or hard to notice and that needs deep reasoning: architecture with tradeoffs, a hard bug without clear leads, an independent high-stakes review or fact-check, a letter or document on which money or important decisions depend, hard mathematics and proofs, deciding between conflicting sources, planning a large change"
+        }
+      },
+      effort: {
+        type: "score",
+        instructions: "How much reasoning effort does this delegated task need? Judge the work the delegated agent must actually do. The length of the brief and its formal conditions (language and style rules, permission to use subagents, bans, file locations, report format, words in capitals) do not raise the level.",
+        criteria: {
+          low: "Low: mechanical work: read, look up, list, copy or transcribe, count; the result follows directly from the data",
+          medium: "Medium: a typical change or analysis with clear steps, in one place or following a given procedure or brief",
+          high: "High: multi-file work that needs its own decisions, a diagnosis weighing a few hypotheses, or writing a document",
+          xhigh: "Extra high: in-depth analysis, architecture, a high-stakes review, or a hard bug",
+          max: "Maximum: exceptionally hard, hours of reasoning at the limit of difficulty; rare"
         }
       }
     };
@@ -16426,6 +16445,32 @@ function isDetached(wtPath) {
 function isWorktreeDirty(wtPath) {
   return isWorktreeDirtyExcept(wtPath).dirty;
 }
+function commitExists(repoRoot, sha) {
+  try {
+    git(repoRoot, ["cat-file", "-e", `${sha}^{commit}`]);
+    return true;
+  } catch {
+    return false;
+  }
+}
+function hasCommitsOnlyOnWorkerRefs(repoRoot, wtPath, ownBranch, baseCommit) {
+  const tips = [git(repoRoot, ["for-each-ref", "--format=%(objectname)", `refs/heads/${ownBranch}`])];
+  if (existsSync25(wtPath) && isRegisteredWorktreePath(repoRoot, wtPath)) tips.push(git(repoRoot, ["rev-parse", "HEAD"], wtPath));
+  const commits = tips.filter(Boolean);
+  if (commits.length === 0) return false;
+  const excludedBase = baseCommit && commitExists(repoRoot, baseCommit) ? [baseCommit] : [];
+  return git(repoRoot, [
+    "rev-list",
+    "--max-count=1",
+    ...commits,
+    "--not",
+    ...excludedBase,
+    "--exclude=omc-team/*",
+    "--branches",
+    "--tags",
+    "--remotes"
+  ]).length > 0;
+}
 function normalizeStatusPath(rawPath) {
   const trimmed = rawPath.trim();
   if (trimmed.startsWith('"') && trimmed.endsWith('"')) {
@@ -16657,7 +16702,8 @@ function ensureWorkerWorktree(teamName, workerName, repoRoot, options = {}) {
       mode,
       detached: isDetached(wtPath),
       created: false,
-      reused: true
+      reused: true,
+      baseCommit: readMetadata(repoRoot, teamName).find((entry) => entry.workerName === workerName)?.baseCommit
     };
     recordMetadata(repoRoot, teamName, info2);
     return info2;
@@ -16676,7 +16722,8 @@ function ensureWorkerWorktree(teamName, workerName, repoRoot, options = {}) {
     mode,
     detached: mode === "detached",
     created: true,
-    reused: false
+    reused: false,
+    baseCommit: git(repoRoot, ["rev-parse", "HEAD"], wtPath)
   };
   recordMetadata(repoRoot, teamName, info);
   return info;
@@ -16725,6 +16772,12 @@ function removeWorkerWorktree(teamName, workerName, repoRoot) {
   const branch = getBranchName(teamName, workerName);
   const metaLockPath = `${getMetadataPath(repoRoot, teamName)}.lock`;
   withFileLockSync(metaLockPath, () => {
+    const baseCommit = readMetadata(repoRoot, teamName).find((entry) => entry.workerName === workerName)?.baseCommit;
+    if (hasCommitsOnlyOnWorkerRefs(repoRoot, wtPath, branch, baseCommit)) {
+      const error = new Error(`worktree_unmerged: preserving worker worktree at ${wtPath} and branch ${branch} because they hold commits that only worker branches have; merge or discard the commits, then retry`);
+      error.code = "worktree_unmerged";
+      throw error;
+    }
     prepareWorkerWorktreeForRemoval(teamName, workerName, repoRoot, wtPath);
     const wasRegisteredWorktree = isRegisteredWorktreePath(repoRoot, wtPath);
     try {
@@ -23414,30 +23467,17 @@ If you accept, exit your session. If you reject, remain active for task work and
 async function resumeTeamV2(teamName, cwd) {
   const sanitized = sanitizeTeamName(teamName);
   const config = await readTeamConfig(sanitized, cwd);
-  if (!config?.instance_id) return null;
+  if (!config?.instance_id || (config.lifecycle_state ?? "active") !== "active") return null;
   const sessionName2 = config.tmux_session || `omc-team-${sanitized}`;
-  if (sessionName2.startsWith("cmux:")) {
-    return {
-      teamName: sanitized,
-      sanitizedName: sanitized,
-      instanceId: config.instance_id,
-      sessionName: sessionName2,
-      ownsWindow: config.tmux_window_owned === true,
-      config,
-      cwd
-    };
-  }
-  if (!isValidTmuxServerIdentity(config.tmux_server_identity) || await observeTmuxServerIdentity(config.tmux_server_identity) !== "matching") {
-    return null;
-  }
   if (!config.leader_pane_id) return null;
+  const provider = config.leader_pane_id.startsWith("%") ? "tmux" : "cmux";
   const targetOwnership = await verifyTeamTargetOwnership({
-    provider: "tmux",
+    provider,
     providerTarget: sessionName2,
     recipient: "leader-fixed",
     recipientRole: "leader",
     paneId: config.leader_pane_id,
-    tmuxServerIdentity: config.tmux_server_identity
+    ...provider === "tmux" ? { tmuxServerIdentity: config.tmux_server_identity } : {}
   });
   if (targetOwnership.kind !== "owned") return null;
   return {
@@ -23570,6 +23610,9 @@ var init_runtime_v2 = __esm({
         this.cwd = cwd;
         this.threshold = threshold;
       }
+      teamName;
+      cwd;
+      threshold;
       consecutiveFailures = 0;
       tripped = false;
       recordSuccess() {
@@ -23593,6 +23636,19 @@ var init_runtime_v2 = __esm({
     CURSOR_DELEGATION_EVIDENCE_LINE = /^\s*Subagent (?:spawn evidence|skip reason):/i;
   }
 });
+
+// src/utils/windows-search.ts
+var VARIABLE = "NoDefaultCurrentDirectoryInExePath";
+function isVariable(key) {
+  return key.toUpperCase() === VARIABLE.toUpperCase();
+}
+function hardenWindowsExeSearch() {
+  if (process.platform !== "win32") return;
+  for (const key of Object.keys(process.env)) {
+    if (isVariable(key)) delete process.env[key];
+  }
+  process.env[VARIABLE] = "1";
+}
 
 // src/cli/team.ts
 import { randomUUID as randomUUID16 } from "crypto";
@@ -25114,6 +25170,7 @@ function readApprovedExecutionLaunchHintOutcome(cwd, mode, options = {}) {
 // src/cli/team.ts
 init_types();
 init_process_identity_lock();
+hardenWindowsExeSearch();
 var JOB_ID_PATTERN = /^omc-[a-z0-9]{1,16}$/;
 var VALID_CLI_AGENT_TYPES = /* @__PURE__ */ new Set(["claude", "codex", "gemini", "cursor", "grok", "antigravity"]);
 var SUBCOMMANDS = /* @__PURE__ */ new Set(["start", "status", "wait", "cleanup", "resume", "shutdown", "api", "help", "--help", "-h"]);
@@ -25777,6 +25834,25 @@ async function teamStatusByTeamName(teamName, cwd = process.cwd()) {
 }
 async function teamResumeByName(teamName, cwd = process.cwd()) {
   validateTeamName2(teamName);
+  const runtimeV2 = await Promise.resolve().then(() => (init_runtime_v2(), runtime_v2_exports));
+  if (runtimeV2.isRuntimeV2Enabled()) {
+    const runtime2 = await runtimeV2.resumeTeamV2(teamName, cwd);
+    if (!runtime2) {
+      return {
+        teamName,
+        resumed: false,
+        error: "Team session is not currently resumable"
+      };
+    }
+    return {
+      teamName,
+      resumed: true,
+      instanceId: runtime2.instanceId,
+      sessionName: runtime2.sessionName,
+      leaderPaneId: runtime2.config.leader_pane_id,
+      workerPaneIds: runtime2.config.workers.map((worker) => worker.pane_id).filter((paneId) => typeof paneId === "string" && paneId.trim().length > 0)
+    };
+  }
   const runtime = await resumeTeam(teamName, cwd);
   if (!runtime) {
     return {

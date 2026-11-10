@@ -11,6 +11,12 @@ const ENV_KEYS = [
   'OMC_JEV_TIMEOUT_MS',
   'OMC_JEV_MAX_REQUESTS',
   'OMC_JEV_EXCERPT_CHARS',
+  'OMC_JEV_EXCERPT_CHARS_MODEL_ROUTING',
+  'OMC_JEV_EXCERPT_CHARS_LOOP_CONTINUATION',
+  'OMC_JEV_EXCERPT_CHARS_TASK_SIZE',
+  'OMC_JEV_EXCERPT_CHARS_SKILL_TRIGGER',
+  'OMC_JEV_EXCERPT_CHARS_INTENT',
+  'OMC_JEV_EXCERPT_CHARS_LEARNER_EXTRACTION',
   'OMC_JEV_LOG_DIR',
   'OMC_JEV_ENDPOINT',
 ] as const;
@@ -19,7 +25,7 @@ const QUESTIONS: JevQuestions = {
   route: { type: 'choice', criteria: { haiku: 'simple', sonnet: 'standard', opus: 'complex' } },
 };
 
-const TWIN = { tier: 'sonnet' };
+const TWIN = 'sonnet';
 
 let logDir = '';
 const savedEnv: Record<string, string | undefined> = {};
@@ -181,6 +187,40 @@ describe('resolveJudgment', () => {
     expect(line.jev).toBeNull();
   });
 
+  it('logs every answer by name and takes jev/confidence from the first question asked', async () => {
+    process.env.TYPESAFE_API_KEY = 'test-key';
+    process.env.OMC_JEV = 'model-routing:active';
+    const answers = {
+      effort: { type: 'score', score: 2.1, confidence: 0.6 },
+      'model-tier': { type: 'choice', choice: 'opus', confidence: 0.9 },
+    };
+    const { fetchFn } = captureFetch(() => ({ ok: true, status: 200, json: async () => ({ answers }) }) as unknown as Response);
+    const result = await resolveJudgment({
+      point: 'model-routing',
+      state: { prompt: 'hi' },
+      questions: {
+        'model-tier': QUESTIONS.route,
+        effort: { type: 'score', criteria: { low: 'low', high: 'high' } },
+      },
+      twin: () => TWIN,
+      fetchFn,
+    });
+    expect(result.answer).toEqual(answers['model-tier']);
+    const line = JSON.parse(await readLog());
+    expect(line.jev).toEqual(answers['model-tier']);
+    expect(line.confidence).toBe(0.9);
+    expect(line.answers).toEqual(answers);
+  });
+
+  it('logs answers as null on a degraded comparison', async () => {
+    process.env.TYPESAFE_API_KEY = 'test-key';
+    const { fetchFn } = captureFetch(httpErrorResponse);
+    await call({ point: 'model-routing', fetchFn });
+    const line = JSON.parse(await readLog());
+    expect(line.mode).toBe('degraded');
+    expect(line.answers).toBeNull();
+  });
+
   it('degrades to the twin on an invalid Jev response', async () => {
     process.env.TYPESAFE_API_KEY = 'test-key';
     const { fetchFn } = captureFetch(() => ({ ok: true, status: 200, json: async () => ({}) }) as unknown as Response);
@@ -234,7 +274,7 @@ describe('resolveJudgment', () => {
     process.env.OMC_JEV_EXCERPT_CHARS = '50';
     const long = 'a'.repeat(500);
     const { fetchFn, calls } = captureFetch(() => jevOk({ choice: 'x' }));
-    await call({ point: 'intent', state: { prompt: long, nested: { deep: long }, list: [long] }, fetchFn });
+    await call({ point: 'context-pruning', state: { prompt: long, nested: { deep: long }, list: [long] }, fetchFn });
     const body = JSON.parse(calls[0].init?.body as string);
     expect(body.state.prompt).toHaveLength(50);
     expect(body.state.nested.deep).toHaveLength(50);
@@ -242,6 +282,60 @@ describe('resolveJudgment', () => {
     const line = JSON.parse(await readLog());
     expect(line.state.prompt).toHaveLength(50);
     expect(line.state.nested.deep).toHaveLength(50);
+  });
+
+  it('bounds loop-continuation state to 2000 characters by default, whatever OMC_JEV_EXCERPT_CHARS is', async () => {
+    process.env.TYPESAFE_API_KEY = 'test-key';
+    process.env.OMC_JEV_EXCERPT_CHARS = '50';
+    const state = { last_assistant_message: 'a'.repeat(2500), continuation_excerpt: 'b'.repeat(2500) };
+    const { fetchFn, calls } = captureFetch(() => jevOk({ choice: 'x' }));
+    await call({ point: 'loop-continuation', state, fetchFn });
+    process.env.OMC_JEV_EXCERPT_CHARS_LOOP_CONTINUATION = '200';
+    await call({ point: 'loop-continuation', state, fetchFn });
+    const [byDefault, lowered] = calls.map((entry) => JSON.parse(entry.init?.body as string));
+    expect(byDefault.state.last_assistant_message).toHaveLength(2000);
+    expect(byDefault.state.continuation_excerpt).toHaveLength(2000);
+    expect(lowered.state.last_assistant_message).toHaveLength(200);
+    expect(lowered.state.continuation_excerpt).toHaveLength(200);
+  });
+
+  it.each([
+    ['task-size', 4000, 'OMC_JEV_EXCERPT_CHARS_TASK_SIZE'],
+    ['skill-trigger', 1000, 'OMC_JEV_EXCERPT_CHARS_SKILL_TRIGGER'],
+    ['intent', 1000, 'OMC_JEV_EXCERPT_CHARS_INTENT'],
+    ['learner-extraction', 2000, 'OMC_JEV_EXCERPT_CHARS_LEARNER_EXTRACTION'],
+  ])('bounds %s state to %i characters by default, whatever OMC_JEV_EXCERPT_CHARS is, and %s changes it', async (point, limit, variable) => {
+    process.env.TYPESAFE_API_KEY = 'test-key';
+    process.env.OMC_JEV = point;
+    process.env.OMC_JEV_EXCERPT_CHARS = '50';
+    const state = { prompt: 'a'.repeat(limit + 500) };
+    const { fetchFn, calls } = captureFetch(() => jevOk({ choice: 'x' }));
+    await call({ point, state, fetchFn });
+    process.env[variable] = '300';
+    await call({ point, state, fetchFn });
+    const [byDefault, lowered] = calls.map((entry) => JSON.parse(entry.init?.body as string));
+    expect(byDefault.state.prompt).toHaveLength(limit);
+    expect(lowered.state.prompt).toHaveLength(300);
+  });
+
+  it('sends question definitions whole, whatever OMC_JEV_EXCERPT_CHARS is', async () => {
+    process.env.TYPESAFE_API_KEY = 'test-key';
+    process.env.OMC_JEV_EXCERPT_CHARS = '50';
+    const questions = {
+      route: { type: 'choice' as const, instructions: 'i'.repeat(300), criteria: { haiku: 'h'.repeat(300), opus: 'o'.repeat(300) } },
+    };
+    const { fetchFn, calls } = captureFetch(() => jevOk({ choice: 'haiku' }));
+    await resolveJudgment({
+      point: 'context-pruning',
+      state: { prompt: 'a'.repeat(500) },
+      questions,
+      twin: () => 'haiku',
+      fetchFn,
+    });
+    const body = JSON.parse(calls[0].init?.body as string);
+    expect(body.state.prompt).toHaveLength(50);
+    expect(body.questions.route.instructions).toHaveLength(300);
+    expect(body.questions.route.criteria.opus).toHaveLength(300);
   });
 
   it('propagates twin errors instead of masking them', async () => {

@@ -75,6 +75,10 @@ function getGlobalNodeModuleRoots() {
       // Node 20.12+ rejects direct .cmd/.bat spawns without a shell on Windows.
       // Keep non-Windows behavior unchanged by only enabling shell there.
       shell: isWin,
+      // A shell spawn routes through cmd.exe (console subsystem); windowsHide maps to
+      // CREATE_NO_WINDOW so no console window flashes on each statusline render.
+      // No-op on other platforms.
+      windowsHide: true,
     })).trim();
     if (isAbsolute(npmRoot)) roots.unshift(npmRoot);
   } catch { /* continue */ }

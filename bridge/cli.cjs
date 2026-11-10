@@ -35,6 +35,33 @@ var __toESM = (mod, isNodeMode, target) => (target = mod != null ? __create(__ge
 ));
 var __toCommonJS = (mod) => __copyProps(__defProp({}, "__esModule", { value: true }), mod);
 
+// src/utils/windows-search.ts
+function isVariable(key) {
+  return key.toUpperCase() === VARIABLE.toUpperCase();
+}
+function hardenWindowsExeSearch() {
+  if (process.platform !== "win32") return;
+  for (const key of Object.keys(process.env)) {
+    if (isVariable(key)) delete process.env[key];
+  }
+  process.env[VARIABLE] = "1";
+}
+function childEnv(env2) {
+  const out = {};
+  for (const [key, value] of Object.entries(env2)) {
+    if (process.platform !== "win32" || !isVariable(key)) out[key] = value;
+  }
+  if (process.platform === "win32") out[VARIABLE] = "1";
+  return out;
+}
+var VARIABLE;
+var init_windows_search = __esm({
+  "src/utils/windows-search.ts"() {
+    "use strict";
+    VARIABLE = "NoDefaultCurrentDirectoryInExePath";
+  }
+});
+
 // node_modules/commander/lib/error.js
 var require_error = __commonJS({
   "node_modules/commander/lib/error.js"(exports2) {
@@ -969,7 +996,7 @@ var require_command = __commonJS({
     var EventEmitter = require("node:events").EventEmitter;
     var childProcess = require("node:child_process");
     var path30 = require("node:path");
-    var fs30 = require("node:fs");
+    var fs31 = require("node:fs");
     var process3 = require("node:process");
     var { Argument: Argument2, humanReadableArgName } = require_argument();
     var { CommanderError: CommanderError2 } = require_error();
@@ -1902,10 +1929,10 @@ Expecting one of '${allowedValues.join("', '")}'`);
         const sourceExt = [".js", ".ts", ".tsx", ".mjs", ".cjs"];
         function findFile(baseDir, baseName) {
           const localBin = path30.resolve(baseDir, baseName);
-          if (fs30.existsSync(localBin)) return localBin;
+          if (fs31.existsSync(localBin)) return localBin;
           if (sourceExt.includes(path30.extname(baseName))) return void 0;
           const foundExt = sourceExt.find(
-            (ext) => fs30.existsSync(`${localBin}${ext}`)
+            (ext) => fs31.existsSync(`${localBin}${ext}`)
           );
           if (foundExt) return `${localBin}${foundExt}`;
           return void 0;
@@ -1917,7 +1944,7 @@ Expecting one of '${allowedValues.join("', '")}'`);
         if (this._scriptPath) {
           let resolvedScriptPath;
           try {
-            resolvedScriptPath = fs30.realpathSync(this._scriptPath);
+            resolvedScriptPath = fs31.realpathSync(this._scriptPath);
           } catch (err) {
             resolvedScriptPath = this._scriptPath;
           }
@@ -10678,11 +10705,11 @@ var init_sdk = __esm({
           const rhs = this.rhs === void 0 ? "" : ` = ${this.rhs}`;
           return `${varKind} ${this.name}${rhs};` + _n;
         }
-        optimizeNames(names, constants10) {
+        optimizeNames(names, constants12) {
           if (!names[this.name.str])
             return;
           if (this.rhs)
-            this.rhs = optimizeExpr(this.rhs, names, constants10);
+            this.rhs = optimizeExpr(this.rhs, names, constants12);
           return this;
         }
         get names() {
@@ -10699,10 +10726,10 @@ var init_sdk = __esm({
         render({ _n }) {
           return `${this.lhs} = ${this.rhs};` + _n;
         }
-        optimizeNames(names, constants10) {
+        optimizeNames(names, constants12) {
           if (this.lhs instanceof code_1.Name && !names[this.lhs.str] && !this.sideEffects)
             return;
-          this.rhs = optimizeExpr(this.rhs, names, constants10);
+          this.rhs = optimizeExpr(this.rhs, names, constants12);
           return this;
         }
         get names() {
@@ -10763,8 +10790,8 @@ var init_sdk = __esm({
         optimizeNodes() {
           return `${this.code}` ? this : void 0;
         }
-        optimizeNames(names, constants10) {
-          this.code = optimizeExpr(this.code, names, constants10);
+        optimizeNames(names, constants12) {
+          this.code = optimizeExpr(this.code, names, constants12);
           return this;
         }
         get names() {
@@ -10793,12 +10820,12 @@ var init_sdk = __esm({
           }
           return nodes.length > 0 ? this : void 0;
         }
-        optimizeNames(names, constants10) {
+        optimizeNames(names, constants12) {
           const { nodes } = this;
           let i = nodes.length;
           while (i--) {
             const n = nodes[i];
-            if (n.optimizeNames(names, constants10))
+            if (n.optimizeNames(names, constants12))
               continue;
             subtractNames(names, n.names);
             nodes.splice(i, 1);
@@ -10851,12 +10878,12 @@ var init_sdk = __esm({
             return;
           return this;
         }
-        optimizeNames(names, constants10) {
+        optimizeNames(names, constants12) {
           var _a;
-          this.else = (_a = this.else) === null || _a === void 0 ? void 0 : _a.optimizeNames(names, constants10);
-          if (!(super.optimizeNames(names, constants10) || this.else))
+          this.else = (_a = this.else) === null || _a === void 0 ? void 0 : _a.optimizeNames(names, constants12);
+          if (!(super.optimizeNames(names, constants12) || this.else))
             return;
-          this.condition = optimizeExpr(this.condition, names, constants10);
+          this.condition = optimizeExpr(this.condition, names, constants12);
           return this;
         }
         get names() {
@@ -10879,10 +10906,10 @@ var init_sdk = __esm({
         render(opts) {
           return `for(${this.iteration})` + super.render(opts);
         }
-        optimizeNames(names, constants10) {
-          if (!super.optimizeNames(names, constants10))
+        optimizeNames(names, constants12) {
+          if (!super.optimizeNames(names, constants12))
             return;
-          this.iteration = optimizeExpr(this.iteration, names, constants10);
+          this.iteration = optimizeExpr(this.iteration, names, constants12);
           return this;
         }
         get names() {
@@ -10918,10 +10945,10 @@ var init_sdk = __esm({
         render(opts) {
           return `for(${this.varKind} ${this.name} ${this.loop} ${this.iterable})` + super.render(opts);
         }
-        optimizeNames(names, constants10) {
-          if (!super.optimizeNames(names, constants10))
+        optimizeNames(names, constants12) {
+          if (!super.optimizeNames(names, constants12))
             return;
-          this.iterable = optimizeExpr(this.iterable, names, constants10);
+          this.iterable = optimizeExpr(this.iterable, names, constants12);
           return this;
         }
         get names() {
@@ -10963,11 +10990,11 @@ var init_sdk = __esm({
           (_b = this.finally) === null || _b === void 0 || _b.optimizeNodes();
           return this;
         }
-        optimizeNames(names, constants10) {
+        optimizeNames(names, constants12) {
           var _a, _b;
-          super.optimizeNames(names, constants10);
-          (_a = this.catch) === null || _a === void 0 || _a.optimizeNames(names, constants10);
-          (_b = this.finally) === null || _b === void 0 || _b.optimizeNames(names, constants10);
+          super.optimizeNames(names, constants12);
+          (_a = this.catch) === null || _a === void 0 || _a.optimizeNames(names, constants12);
+          (_b = this.finally) === null || _b === void 0 || _b.optimizeNames(names, constants12);
           return this;
         }
         get names() {
@@ -11238,7 +11265,7 @@ var init_sdk = __esm({
       function addExprNames(names, from) {
         return from instanceof code_1._CodeOrName ? addNames(names, from.names) : names;
       }
-      function optimizeExpr(expr, names, constants10) {
+      function optimizeExpr(expr, names, constants12) {
         if (expr instanceof code_1.Name)
           return replaceName(expr);
         if (!canOptimize(expr))
@@ -11253,14 +11280,14 @@ var init_sdk = __esm({
           return items;
         }, []));
         function replaceName(n) {
-          const c = constants10[n.str];
+          const c = constants12[n.str];
           if (c === void 0 || names[n.str] !== 1)
             return n;
           delete names[n.str];
           return c;
         }
         function canOptimize(e) {
-          return e instanceof code_1._Code && e._items.some((c) => c instanceof code_1.Name && names[c.str] === 1 && constants10[c.str] !== void 0);
+          return e instanceof code_1._Code && e._items.some((c) => c instanceof code_1.Name && names[c.str] === 1 && constants12[c.str] !== void 0);
         }
       }
       function subtractNames(names, from) {
@@ -13127,7 +13154,7 @@ var init_sdk = __esm({
         const schOrFunc = root2.refs[ref];
         if (schOrFunc)
           return schOrFunc;
-        let _sch = resolve48.call(this, root2, ref);
+        let _sch = resolve49.call(this, root2, ref);
         if (_sch === void 0) {
           const schema = (_a = root2.localRefs) === null || _a === void 0 ? void 0 : _a[ref];
           const { schemaId } = this.opts;
@@ -13154,7 +13181,7 @@ var init_sdk = __esm({
       function sameSchemaEnv(s1, s2) {
         return s1.schema === s2.schema && s1.root === s2.root && s1.baseId === s2.baseId;
       }
-      function resolve48(root2, ref) {
+      function resolve49(root2, ref) {
         let sch;
         while (typeof (sch = this.refs[ref]) == "string")
           ref = sch;
@@ -13652,7 +13679,7 @@ var init_sdk = __esm({
         }
         return uri;
       }
-      function resolve48(baseURI, relativeURI, options) {
+      function resolve49(baseURI, relativeURI, options) {
         const schemelessOptions = Object.assign({ scheme: "null" }, options);
         const resolved = resolveComponents(parse62(baseURI, schemelessOptions), parse62(relativeURI, schemelessOptions), schemelessOptions, true);
         return serialize(resolved, { ...schemelessOptions, skipEscape: true });
@@ -13885,7 +13912,7 @@ var init_sdk = __esm({
       var fastUri = {
         SCHEMES,
         normalize: normalize13,
-        resolve: resolve48,
+        resolve: resolve49,
         resolveComponents,
         equal,
         serialize,
@@ -17299,7 +17326,7 @@ var init_sdk = __esm({
           }
           return;
         }
-        return new Promise((resolve48, reject) => {
+        return new Promise((resolve49, reject) => {
           const exitHandler = (code, signal) => {
             if (this.abortController.signal.aborted) {
               reject(new AbortError("Operation aborted"));
@@ -17309,7 +17336,7 @@ var init_sdk = __esm({
             if (error2) {
               reject(error2);
             } else {
-              resolve48();
+              resolve49();
             }
           };
           this.process.once("exit", exitHandler);
@@ -17355,17 +17382,17 @@ var init_sdk = __esm({
         if (this.hasError) {
           return Promise.reject(this.hasError);
         }
-        return new Promise((resolve48, reject) => {
-          this.readResolve = resolve48;
+        return new Promise((resolve49, reject) => {
+          this.readResolve = resolve49;
           this.readReject = reject;
         });
       }
       enqueue(value) {
         if (this.readResolve) {
-          const resolve48 = this.readResolve;
+          const resolve49 = this.readResolve;
           this.readResolve = void 0;
           this.readReject = void 0;
-          resolve48({ done: false, value });
+          resolve49({ done: false, value });
         } else {
           this.queue.push(value);
         }
@@ -17373,10 +17400,10 @@ var init_sdk = __esm({
       done() {
         this.isDone = true;
         if (this.readResolve) {
-          const resolve48 = this.readResolve;
+          const resolve49 = this.readResolve;
           this.readResolve = void 0;
           this.readReject = void 0;
-          resolve48({ done: true, value: void 0 });
+          resolve49({ done: true, value: void 0 });
         }
       }
       error(error2) {
@@ -17709,10 +17736,10 @@ var init_sdk = __esm({
           type: "control_request",
           request
         };
-        return new Promise((resolve48, reject) => {
+        return new Promise((resolve49, reject) => {
           this.pendingControlResponses.set(requestId, (response) => {
             if (response.subtype === "success") {
-              resolve48(response);
+              resolve49(response);
             } else {
               reject(new Error(response.error));
               if (response.pending_permission_requests) {
@@ -17802,15 +17829,15 @@ var init_sdk = __esm({
           logForDebugging(`[Query.waitForFirstResult] Result already received, returning immediately`);
           return Promise.resolve();
         }
-        return new Promise((resolve48) => {
+        return new Promise((resolve49) => {
           if (this.abortController?.signal.aborted) {
-            resolve48();
+            resolve49();
             return;
           }
-          this.abortController?.signal.addEventListener("abort", () => resolve48(), {
+          this.abortController?.signal.addEventListener("abort", () => resolve49(), {
             once: true
           });
-          this.firstResultReceivedResolve = resolve48;
+          this.firstResultReceivedResolve = resolve49;
         });
       }
       handleHookCallbacks(callbackId, input, toolUseID, abortSignal) {
@@ -17861,13 +17888,13 @@ var init_sdk = __esm({
       handleMcpControlRequest(serverName, mcpRequest, transport) {
         const messageId = "id" in mcpRequest.message ? mcpRequest.message.id : null;
         const key = `${serverName}:${messageId}`;
-        return new Promise((resolve48, reject) => {
+        return new Promise((resolve49, reject) => {
           const cleanup = () => {
             this.pendingMcpResponses.delete(key);
           };
           const resolveAndCleanup = (response) => {
             cleanup();
-            resolve48(response);
+            resolve49(response);
           };
           const rejectAndCleanup = (error2) => {
             cleanup();
@@ -26104,7 +26131,7 @@ Set the \`cycles\` parameter to \`"ref"\` to resolve cyclical schemas with defs.
               return;
             }
             const pollInterval = (_c = (_a = task2.pollInterval) !== null && _a !== void 0 ? _a : (_b = this._options) === null || _b === void 0 ? void 0 : _b.defaultTaskPollInterval) !== null && _c !== void 0 ? _c : 1e3;
-            await new Promise((resolve48) => setTimeout(resolve48, pollInterval));
+            await new Promise((resolve49) => setTimeout(resolve49, pollInterval));
             (_d = options === null || options === void 0 ? void 0 : options.signal) === null || _d === void 0 || _d.throwIfAborted();
           }
         } catch (error2) {
@@ -26116,7 +26143,7 @@ Set the \`cycles\` parameter to \`"ref"\` to resolve cyclical schemas with defs.
       }
       request(request, resultSchema, options) {
         const { relatedRequestId, resumptionToken, onresumptiontoken, task, relatedTask } = options !== null && options !== void 0 ? options : {};
-        return new Promise((resolve48, reject) => {
+        return new Promise((resolve49, reject) => {
           var _a, _b, _c, _d, _e, _f, _g;
           const earlyReject = (error2) => {
             reject(error2);
@@ -26197,7 +26224,7 @@ Set the \`cycles\` parameter to \`"ref"\` to resolve cyclical schemas with defs.
               if (!parseResult.success) {
                 reject(parseResult.error);
               } else {
-                resolve48(parseResult.data);
+                resolve49(parseResult.data);
               }
             } catch (error2) {
               reject(error2);
@@ -26394,12 +26421,12 @@ Set the \`cycles\` parameter to \`"ref"\` to resolve cyclical schemas with defs.
           }
         } catch (_d) {
         }
-        return new Promise((resolve48, reject) => {
+        return new Promise((resolve49, reject) => {
           if (signal.aborted) {
             reject(new McpError(ErrorCode.InvalidRequest, "Request cancelled"));
             return;
           }
-          const timeoutId = setTimeout(resolve48, interval);
+          const timeoutId = setTimeout(resolve49, interval);
           signal.addEventListener("abort", () => {
             clearTimeout(timeoutId);
             reject(new McpError(ErrorCode.InvalidRequest, "Request cancelled"));
@@ -27070,7 +27097,7 @@ Set the \`cycles\` parameter to \`"ref"\` to resolve cyclical schemas with defs.
         let task = createTaskResult.task;
         const pollInterval = (_a = task.pollInterval) !== null && _a !== void 0 ? _a : 5e3;
         while (task.status !== "completed" && task.status !== "failed" && task.status !== "cancelled") {
-          await new Promise((resolve48) => setTimeout(resolve48, pollInterval));
+          await new Promise((resolve49) => setTimeout(resolve49, pollInterval));
           const updatedTask = await extra.taskStore.getTask(taskId);
           if (!updatedTask) {
             throw new McpError(ErrorCode.InternalError, `Task ${taskId} not found during polling`);
@@ -34419,7 +34446,7 @@ async function removeFileIfExists(filePath) {
   }
 }
 function sleep2(ms) {
-  return new Promise((resolve48) => setTimeout(resolve48, ms));
+  return new Promise((resolve49) => setTimeout(resolve49, ms));
 }
 var import_child_process9, fs5, fsPromises2, path5, import_url7, import_child_process10, import_util6, execFileAsync3, BRIDGE_SPAWN_TIMEOUT_MS, DEFAULT_GRACE_PERIOD_MS, SIGTERM_GRACE_MS, ownedBridgeSessionIds, USE_TCP_FALLBACK;
 var init_bridge_manager = __esm({
@@ -40067,16 +40094,11 @@ function detectArchitectApproval(text, expected) {
   }
   return false;
 }
+function hasRejectionSignal(text) {
+  return REJECTION_PATTERNS.some((pattern) => pattern.test(text));
+}
 function detectArchitectRejection(text) {
-  const rejectionPatterns = [
-    /(architect|critic|codex|reviewer).*?(rejected|found issues|not complete|incomplete)/i,
-    /issues? (found|identified|detected)/i,
-    /not yet complete/i,
-    /missing.*?(implementation|feature|test)/i,
-    /bug.*?(found|detected|identified)/i,
-    /error.*?(found|detected|identified)/i
-  ];
-  for (const pattern of rejectionPatterns) {
+  for (const pattern of REJECTION_PATTERNS) {
     if (pattern.test(text)) {
       const feedbackMatch = text.match(/(?:architect|critic|codex|reviewer|feedback|issue|problem|error|bug)[:\s]+([^.]+\.)/i);
       return {
@@ -40087,7 +40109,7 @@ function detectArchitectRejection(text) {
   }
   return { rejected: false, feedback: "" };
 }
-var import_crypto10, import_fs28, import_path35, DEFAULT_MAX_VERIFICATION_ATTEMPTS, DEFAULT_RALPH_CRITIC_MODE2;
+var import_crypto10, import_fs28, import_path35, DEFAULT_MAX_VERIFICATION_ATTEMPTS, DEFAULT_RALPH_CRITIC_MODE2, REJECTION_PATTERNS;
 var init_verifier = __esm({
   "src/hooks/ralph/verifier.ts"() {
     "use strict";
@@ -40100,6 +40122,14 @@ var init_verifier = __esm({
     init_prd();
     DEFAULT_MAX_VERIFICATION_ATTEMPTS = 3;
     DEFAULT_RALPH_CRITIC_MODE2 = "architect";
+    REJECTION_PATTERNS = [
+      /(architect|critic|codex|reviewer).*?(rejected|found issues|not complete|incomplete)/i,
+      /issues? (found|identified|detected)/i,
+      /not yet complete/i,
+      /missing.*?(implementation|feature|test)/i,
+      /bug.*?(found|detected|identified)/i,
+      /error.*?(found|detected|identified)/i
+    ];
   }
 });
 
@@ -40165,6 +40195,7 @@ __export(ralph_exports, {
   getStoryGoverningCriteriaRevision: () => getStoryGoverningCriteriaRevision,
   getTeamPhaseDirective: () => getTeamPhaseDirective,
   hasPrd: () => hasPrd,
+  hasRejectionSignal: () => hasRejectionSignal,
   incrementRalphIteration: () => incrementRalphIteration,
   initPrd: () => initPrd,
   initProgress: () => initProgress,
@@ -42179,7 +42210,7 @@ async function withProcessIdentityFileLock(lockPath2, fn, timeoutMs = 1e4) {
           continue;
         }
         if (Date.now() >= deadline) throw new Error("process_identity_lock_timeout");
-        await new Promise((resolve48) => setTimeout(resolve48, 25));
+        await new Promise((resolve49) => setTimeout(resolve49, 25));
         continue;
       }
       try {
@@ -42200,7 +42231,7 @@ async function withProcessIdentityFileLock(lockPath2, fn, timeoutMs = 1e4) {
           }
         }
         if (Date.now() >= deadline) throw new Error("process_identity_lock_timeout");
-        await new Promise((resolve48) => setTimeout(resolve48, 25));
+        await new Promise((resolve49) => setTimeout(resolve49, 25));
       }
     }
     return await fn();
@@ -42424,7 +42455,7 @@ function withFileLockSync(lockPath2, fn, opts) {
   }
 }
 function sleep3(ms) {
-  return new Promise((resolve48) => setTimeout(resolve48, ms));
+  return new Promise((resolve49) => setTimeout(resolve49, ms));
 }
 async function acquireFileLock(lockPath2, opts) {
   const staleLockMs = opts?.staleLockMs ?? DEFAULT_STALE_LOCK_MS;
@@ -43539,11 +43570,17 @@ function getUnifiedMcpRegistryPathCandidates() {
 function getUnifiedMcpRegistryStatePathCandidates() {
   return getGlobalOmcStateCandidates("mcp-registry-state.json");
 }
-function getClaudeMcpConfigPath() {
+function isDefaultClaudeConfigDirPath(configDir) {
+  return configDir === (0, import_path61.join)((0, import_os11.homedir)(), ".claude");
+}
+function getClaudeJsonPathForConfigDir(configDir) {
+  return isDefaultClaudeConfigDirPath(configDir) ? (0, import_path61.join)((0, import_os11.homedir)(), ".claude.json") : (0, import_path61.join)(configDir, ".claude.json");
+}
+function getClaudeMcpConfigPath(configDir = getClaudeConfigDir()) {
   if (process.env.CLAUDE_MCP_CONFIG_PATH?.trim()) {
     return process.env.CLAUDE_MCP_CONFIG_PATH.trim();
   }
-  return (0, import_path61.join)((0, import_path61.dirname)(getClaudeConfigDir()), ".claude.json");
+  return getClaudeJsonPathForConfigDir(configDir);
 }
 function getCodexConfigPath() {
   const codexHome = process.env.CODEX_HOME?.trim() || (0, import_path61.join)((0, import_os11.homedir)(), ".codex");
@@ -43657,24 +43694,55 @@ function ensureParentDir(path30) {
     (0, import_fs47.mkdirSync)(parent, { recursive: true });
   }
 }
-function readManagedServerNames() {
+function parseServerNames(value) {
+  return Array.isArray(value) ? value.filter((item) => typeof item === "string").sort((a, b) => a.localeCompare(b)) : [];
+}
+function getOlderSyncClaudeConfigPath() {
+  return process.env.CLAUDE_MCP_CONFIG_PATH?.trim() || (0, import_path61.join)((0, import_path61.dirname)(getClaudeConfigDir()), ".claude.json");
+}
+function readManagedServerState(claudeConfigPath, claudeConfigServerNames) {
   for (const statePath of getUnifiedMcpRegistryStatePathCandidates()) {
     if (!(0, import_fs47.existsSync)(statePath)) {
       continue;
     }
     try {
       const state = JSON.parse((0, import_fs47.readFileSync)(statePath, "utf-8"));
-      return Array.isArray(state.managedServers) ? state.managedServers.filter((item) => typeof item === "string").sort((a, b) => a.localeCompare(b)) : [];
+      const serverNames = parseServerNames(state.managedServers);
+      const byClaudeConfig = state.managedServersByClaudeConfig;
+      if (!byClaudeConfig || typeof byClaudeConfig !== "object" || Array.isArray(byClaudeConfig)) {
+        const olderSyncClaudeConfigPath = (0, import_path61.resolve)(getOlderSyncClaudeConfigPath());
+        const olderSyncServerNames = olderSyncClaudeConfigPath === (0, import_path61.resolve)(claudeConfigPath) ? serverNames : serverNames.filter((name) => !claudeConfigServerNames.includes(name));
+        const serverNamesByClaudeConfig = /* @__PURE__ */ new Map();
+        if (olderSyncServerNames.length > 0) {
+          serverNamesByClaudeConfig.set(olderSyncClaudeConfigPath, olderSyncServerNames);
+        }
+        return { serverNames, serverNamesByClaudeConfig };
+      }
+      return {
+        serverNames,
+        serverNamesByClaudeConfig: new Map(
+          Object.entries(byClaudeConfig).map(([configPath, names]) => [configPath, parseServerNames(names)])
+        )
+      };
     } catch {
-      return [];
+      return { serverNames: [], serverNamesByClaudeConfig: /* @__PURE__ */ new Map() };
     }
   }
-  return [];
+  return { serverNames: [], serverNamesByClaudeConfig: /* @__PURE__ */ new Map() };
 }
-function writeManagedServerNames(serverNames) {
+function writeManagedServerState(state, claudeConfigPath, serverNames) {
+  const sortedNames = [...serverNames].sort((a, b) => a.localeCompare(b));
+  const byClaudeConfig = new Map(state.serverNamesByClaudeConfig);
+  byClaudeConfig.set((0, import_path61.resolve)(claudeConfigPath), sortedNames);
   const statePath = getUnifiedMcpRegistryStatePath();
   ensureParentDir(statePath);
-  (0, import_fs47.writeFileSync)(statePath, JSON.stringify({ managedServers: [...serverNames].sort((a, b) => a.localeCompare(b)) }, null, 2));
+  (0, import_fs47.writeFileSync)(statePath, JSON.stringify({
+    managedServers: sortedNames,
+    managedServersByClaudeConfig: Object.fromEntries([...byClaudeConfig].filter(([, names]) => names.length > 0))
+  }, null, 2));
+}
+function getManagedServerNamesForClaudeConfig(state, claudeConfigPath) {
+  return state.serverNamesByClaudeConfig.get((0, import_path61.resolve)(claudeConfigPath)) ?? [];
 }
 function bootstrapRegistryFromClaude(settings, registryPath) {
   const registry2 = extractClaudeMcpRegistry(settings);
@@ -44342,10 +44410,12 @@ function syncUnifiedMcpRegistryTargets(settings) {
   const registryPath = getUnifiedMcpRegistryPath();
   const claudeConfigPath = getClaudeMcpConfigPath();
   const codexConfigPath = getCodexConfigPath();
-  const managedServerNames = readManagedServerNames();
-  const legacyClaudeRegistry = extractClaudeMcpRegistry(settings);
   const currentClaudeConfig = readJsonObject(claudeConfigPath);
-  const claudeConfigForBootstrap = Object.keys(extractClaudeMcpRegistry(currentClaudeConfig)).length > 0 ? currentClaudeConfig : settings;
+  const currentClaudeServerNames = Object.keys(extractClaudeMcpRegistry(currentClaudeConfig));
+  const managedServerState = readManagedServerState(claudeConfigPath, currentClaudeServerNames);
+  const managedServerNames = getManagedServerNamesForClaudeConfig(managedServerState, claudeConfigPath);
+  const legacyClaudeRegistry = extractClaudeMcpRegistry(settings);
+  const claudeConfigForBootstrap = currentClaudeServerNames.length > 0 ? currentClaudeConfig : settings;
   const registryState = loadOrBootstrapRegistry(claudeConfigForBootstrap);
   const registry2 = registryState.registry;
   const serverNames = Object.keys(registry2);
@@ -44363,8 +44433,8 @@ function syncUnifiedMcpRegistryTargets(settings) {
     (0, import_fs47.writeFileSync)(codexConfigPath, nextCodexConfig.content);
     codexChanged = true;
   }
-  if (registryState.registryExists || Object.keys(legacyClaudeRegistry).length > 0 || managedServerNames.length > 0) {
-    writeManagedServerNames(serverNames);
+  if (registryState.registryExists || Object.keys(legacyClaudeRegistry).length > 0 || managedServerState.serverNames.length > 0 || managedServerNames.length > 0) {
+    writeManagedServerState(managedServerState, claudeConfigPath, serverNames);
   }
   return {
     settings: cleanedSettings.settings,
@@ -45171,7 +45241,7 @@ function isStrictChildPath(root2, candidate, path30 = nativePath) {
   const rel = path30.relative(normalizedRoot, normalizedCandidate);
   return rel !== "" && rel !== ".." && !rel.startsWith(`..${nativePath.sep}`) && !rel.startsWith("../") && !rel.startsWith("..\\") && !path30.isAbsolute(rel);
 }
-function validateRootedRegularFile(root2, path30, allowAbsent = true, fs30 = defaultFs) {
+function validateRootedRegularFile(root2, path30, allowAbsent = true, fs31 = defaultFs) {
   const normalizedRoot = nativePath.resolve(root2);
   const normalizedPath = nativePath.resolve(path30);
   if (!isStrictChildPath(root2, path30)) {
@@ -45180,7 +45250,7 @@ function validateRootedRegularFile(root2, path30, allowAbsent = true, fs30 = def
   }
   let stat2;
   try {
-    stat2 = fs30.lstatSync(normalizedPath);
+    stat2 = fs31.lstatSync(normalizedPath);
   } catch (error2) {
     if (error2.code === "ENOENT" && allowAbsent) return normalizedPath;
     if (error2.code === "ENOENT") throw new Error(`Missing path: ${normalizedPath}`);
@@ -45190,22 +45260,22 @@ function validateRootedRegularFile(root2, path30, allowAbsent = true, fs30 = def
   if (!stat2.isFile()) throw new Error(`Not a regular file: ${normalizedPath}`);
   return normalizedPath;
 }
-function captureTransactionRoot(root2, fs30) {
+function captureTransactionRoot(root2, fs31) {
   const alias = (0, import_node_path6.resolve)(root2);
-  const canonical = (0, import_node_path6.resolve)(fs30.realpathSync(alias));
-  const stat2 = fs30.lstatSync(canonical);
+  const canonical = (0, import_node_path6.resolve)(fs31.realpathSync(alias));
+  const stat2 = fs31.lstatSync(canonical);
   if (stat2.isSymbolicLink() || !stat2.isDirectory()) throw new Error(`Invalid transaction root: ${alias}`);
   return { alias, canonical, dev: typeof stat2.dev === "number" ? stat2.dev : void 0, ino: typeof stat2.ino === "number" ? stat2.ino : void 0 };
 }
-function verifyCapturedRoot(root2, fs30, verifyAlias) {
-  if (verifyAlias && (0, import_node_path6.resolve)(fs30.realpathSync(root2.alias)) !== root2.canonical) throw new Error(`Transaction root changed: ${root2.alias}`);
-  if ((0, import_node_path6.resolve)(fs30.realpathSync(root2.canonical)) !== root2.canonical) throw new Error(`Transaction root changed: ${root2.canonical}`);
-  const stat2 = fs30.lstatSync(root2.canonical);
+function verifyCapturedRoot(root2, fs31, verifyAlias) {
+  if (verifyAlias && (0, import_node_path6.resolve)(fs31.realpathSync(root2.alias)) !== root2.canonical) throw new Error(`Transaction root changed: ${root2.alias}`);
+  if ((0, import_node_path6.resolve)(fs31.realpathSync(root2.canonical)) !== root2.canonical) throw new Error(`Transaction root changed: ${root2.canonical}`);
+  const stat2 = fs31.lstatSync(root2.canonical);
   if (stat2.isSymbolicLink() || !stat2.isDirectory() || root2.dev !== void 0 && stat2.dev !== root2.dev || root2.ino !== void 0 && stat2.ino !== root2.ino) throw new Error(`Invalid transaction root: ${root2.canonical}`);
 }
-function validateTransactionTarget(root2, path30, allowAbsent, fs30, verifyAlias) {
-  verifyCapturedRoot(root2, fs30, verifyAlias);
-  return validateRootedRegularFile(root2.canonical, path30, allowAbsent, fs30);
+function validateTransactionTarget(root2, path30, allowAbsent, fs31, verifyAlias) {
+  verifyCapturedRoot(root2, fs31, verifyAlias);
+  return validateRootedRegularFile(root2.canonical, path30, allowAbsent, fs31);
 }
 function cleanCanonical(source) {
   const markers = parseClaudeMdMarkers(source);
@@ -45261,26 +45331,26 @@ function mergeForOverwrite(existing, canonical, version3) {
 <!-- User customizations -->
 ${cleaned.content}`, ranges: cleaned.ranges, variants: cleaned.variants };
 }
-function exclusiveVerifiedBackup(state, root2, fs30) {
+function exclusiveVerifiedBackup(state, root2, fs31) {
   const directory = (0, import_node_path6.dirname)(state.path);
   const stem = `${(0, import_node_path6.basename)(state.path)}.backup.${(/* @__PURE__ */ new Date()).toISOString().replace(/[:.]/g, "-")}`;
   for (let attempt = 0; attempt < 16; attempt += 1) {
     const backup = `${directory}/${stem}.${(0, import_node_crypto3.randomBytes)(12).toString("hex")}`;
     try {
-      validateTransactionTarget(root2, backup, true, fs30, true);
-      const fd = fs30.openSync(backup, "wx", 384);
+      validateTransactionTarget(root2, backup, true, fs31, true);
+      const fd = fs31.openSync(backup, "wx", 384);
       try {
-        fs30.writeFileSync(fd, state.bytes);
+        fs31.writeFileSync(fd, state.bytes);
       } finally {
-        fs30.closeSync(fd);
+        fs31.closeSync(fd);
       }
-      validateTransactionTarget(root2, backup, false, fs30, true);
-      if (!fs30.readFileSync(backup).equals(state.bytes)) throw new Error(`Backup readback mismatch: ${backup}`);
+      validateTransactionTarget(root2, backup, false, fs31, true);
+      if (!fs31.readFileSync(backup).equals(state.bytes)) throw new Error(`Backup readback mismatch: ${backup}`);
       return backup;
     } catch (error2) {
       try {
-        validateTransactionTarget(root2, backup, true, fs30, false);
-        fs30.unlinkSync(backup);
+        validateTransactionTarget(root2, backup, true, fs31, false);
+        fs31.unlinkSync(backup);
       } catch {
       }
       if (attempt === 15) throw error2;
@@ -45288,53 +45358,53 @@ function exclusiveVerifiedBackup(state, root2, fs30) {
   }
   throw new Error("Unable to create backup");
 }
-function atomicWrite(operation, root2, fs30, verifyAlias) {
+function atomicWrite(operation, root2, fs31, verifyAlias) {
   const directory = (0, import_node_path6.dirname)(operation.path);
   operation.tempPath = `${directory}/.${(0, import_node_path6.basename)(operation.path)}.omc-tmp-${(0, import_node_crypto3.randomBytes)(12).toString("hex")}`;
-  validateTransactionTarget(root2, operation.tempPath, true, fs30, verifyAlias);
-  fs30.writeFileSync(operation.tempPath, operation.bytes, { flag: "wx", mode: 384 });
-  validateTransactionTarget(root2, operation.tempPath, false, fs30, verifyAlias);
-  validateTransactionTarget(root2, operation.path, true, fs30, verifyAlias);
-  fs30.renameSync(operation.tempPath, operation.path);
+  validateTransactionTarget(root2, operation.tempPath, true, fs31, verifyAlias);
+  fs31.writeFileSync(operation.tempPath, operation.bytes, { flag: "wx", mode: 384 });
+  validateTransactionTarget(root2, operation.tempPath, false, fs31, verifyAlias);
+  validateTransactionTarget(root2, operation.path, true, fs31, verifyAlias);
+  fs31.renameSync(operation.tempPath, operation.path);
   operation.tempPath = void 0;
 }
-function cleanupTemps(operations, result, root2, fs30) {
+function cleanupTemps(operations, result, root2, fs31) {
   for (const operation of operations) if (operation.tempPath) {
     const tempPath = operation.tempPath;
     try {
-      validateTransactionTarget(root2, tempPath, true, fs30, false);
-      fs30.rmSync(tempPath, { force: true });
+      validateTransactionTarget(root2, tempPath, true, fs31, false);
+      fs31.rmSync(tempPath, { force: true });
       result.tempCleanup.push({ path: tempPath, ok: true });
     } catch (error2) {
       result.tempCleanup.push({ path: tempPath, ok: false, error: message(error2) });
     }
   }
 }
-function lstatPresent(path30, fs30) {
+function lstatPresent(path30, fs31) {
   try {
-    fs30.lstatSync(path30);
+    fs31.lstatSync(path30);
     return true;
   } catch (error2) {
     if (error2.code === "ENOENT") return false;
     throw error2;
   }
 }
-function isClaudeMdEnabledInConfig(configRoot, fs30 = defaultFs) {
+function isClaudeMdEnabledInConfig(configRoot, fs31 = defaultFs) {
   try {
     const configPath = (0, import_node_path6.resolve)(configRoot, OMC_CONFIG_FILE_REL);
-    if (!fs30.existsSync(configPath)) return true;
-    return JSON.parse(fs30.readFileSync(configPath, "utf-8")).claudeMdEnabled !== false;
+    if (!fs31.existsSync(configPath)) return true;
+    return JSON.parse(fs31.readFileSync(configPath, "utf-8")).claudeMdEnabled !== false;
   } catch {
     return true;
   }
 }
 function executeClaudeMdTransaction(request) {
-  const fs30 = request.fs ?? defaultFs;
+  const fs31 = request.fs ?? defaultFs;
   let capturedRoot;
   let sourcePath;
   try {
-    capturedRoot = captureTransactionRoot(request.root, fs30);
-    sourcePath = validateRootedRegularFile(request.sourceRoot ?? request.root, request.source, !request.sourceBytes, fs30);
+    capturedRoot = captureTransactionRoot(request.root, fs31);
+    sourcePath = validateRootedRegularFile(request.sourceRoot ?? request.root, request.source, !request.sourceBytes, fs31);
   } catch (error2) {
     return failure(request, 3, message(error2), "validation");
   }
@@ -45342,12 +45412,12 @@ function executeClaudeMdTransaction(request) {
   const main3 = (0, import_node_path6.resolve)(root2, "CLAUDE.md");
   const companion = (0, import_node_path6.resolve)(root2, "CLAUDE-omc.md");
   try {
-    verifyCapturedRoot(capturedRoot, fs30, true);
-    validateTransactionTarget(capturedRoot, main3, true, fs30, true);
-    if (request.mode !== "local") validateTransactionTarget(capturedRoot, companion, true, fs30, true);
-    const canonical = decodeClaudeMdUtf82(request.sourceBytes ?? fs30.readFileSync(sourcePath), sourcePath);
-    const mainBytes = fs30.existsSync(main3) ? fs30.readFileSync(main3) : void 0;
-    const companionBytes = fs30.existsSync(companion) ? fs30.readFileSync(companion) : void 0;
+    verifyCapturedRoot(capturedRoot, fs31, true);
+    validateTransactionTarget(capturedRoot, main3, true, fs31, true);
+    if (request.mode !== "local") validateTransactionTarget(capturedRoot, companion, true, fs31, true);
+    const canonical = decodeClaudeMdUtf82(request.sourceBytes ?? fs31.readFileSync(sourcePath), sourcePath);
+    const mainBytes = fs31.existsSync(main3) ? fs31.readFileSync(main3) : void 0;
+    const companionBytes = fs31.existsSync(companion) ? fs31.readFileSync(companion) : void 0;
     const mainText = mainBytes ? decodeClaudeMdUtf82(mainBytes, main3) : null;
     if (companionBytes) decodeClaudeMdUtf82(companionBytes, companion);
     const overwrite = request.mode === "global-preserve" ? { content: "", ranges: [], variants: [] } : mergeForOverwrite(mainText, canonical, request.version);
@@ -45376,9 +45446,9 @@ function executeClaudeMdTransaction(request) {
     const appliedMainCleanup = effectiveOperations.some((operation) => operation.path === main3);
     const result = { ok: false, exitCode: 0, mode: request.mode, operations: effectiveOperations.map(publicOperation), completedOperations: [], backups: [], createdPaths: [], deletedPaths: [], mutatedPaths: [], removedRanges: appliedMainCleanup ? request.mode === "global-preserve" ? preserve.ranges : overwrite.ranges : [], removedVariants: appliedMainCleanup ? request.mode === "global-preserve" ? preserve.variants : overwrite.variants : [], warnings: [], rollback: [], tempCleanup: [] };
     try {
-      verifyCapturedRoot(capturedRoot, fs30, true);
+      verifyCapturedRoot(capturedRoot, fs31, true);
       for (const state of states.values()) if (state.existedBefore) {
-        state.backupPath = exclusiveVerifiedBackup(state, capturedRoot, fs30);
+        state.backupPath = exclusiveVerifiedBackup(state, capturedRoot, fs31);
         result.backups.push(state.backupPath);
       }
     } catch (error2) {
@@ -45389,15 +45459,15 @@ function executeClaudeMdTransaction(request) {
     }
     try {
       for (const operation of effectiveOperations) {
-        validateTransactionTarget(capturedRoot, operation.path, true, fs30, true);
-        if (operation.type === "write") atomicWrite(operation, capturedRoot, fs30, true);
-        else fs30.unlinkSync(operation.path);
+        validateTransactionTarget(capturedRoot, operation.path, true, fs31, true);
+        if (operation.type === "write") atomicWrite(operation, capturedRoot, fs31, true);
+        else fs31.unlinkSync(operation.path);
         result.completedOperations.push(publicOperation(operation));
         result.mutatedPaths.push(operation.path);
         if (!operation.existedBefore && operation.type === "write") result.createdPaths.push(operation.path);
         if (operation.type === "delete") result.deletedPaths.push(operation.path);
       }
-      verifyCapturedRoot(capturedRoot, fs30, true);
+      verifyCapturedRoot(capturedRoot, fs31, true);
       result.ok = true;
       result.exitCode = 0;
       return result;
@@ -45412,10 +45482,10 @@ function executeClaudeMdTransaction(request) {
           if (state.existedBefore) {
             const rollbackOperation = { path: state.path, type: "write", existedBefore: true, bytes: state.bytes };
             rollbackOperations.push(rollbackOperation);
-            atomicWrite(rollbackOperation, capturedRoot, fs30, false);
-          } else if (lstatPresent(state.path, fs30)) {
-            validateTransactionTarget(capturedRoot, state.path, true, fs30, false);
-            fs30.unlinkSync(state.path);
+            atomicWrite(rollbackOperation, capturedRoot, fs31, false);
+          } else if (lstatPresent(state.path, fs31)) {
+            validateTransactionTarget(capturedRoot, state.path, true, fs31, false);
+            fs31.unlinkSync(state.path);
           }
           result.rollback.push({ path: state.path, ok: true });
         } catch (rollbackError) {
@@ -45424,7 +45494,7 @@ function executeClaudeMdTransaction(request) {
           result.rollback.push({ path: state.path, ok: false, error: message(rollbackError) });
         }
       }
-      cleanupTemps([...effectiveOperations, ...rollbackOperations], result, capturedRoot, fs30);
+      cleanupTemps([...effectiveOperations, ...rollbackOperations], result, capturedRoot, fs31);
       result.exitCode = result.rollback.every((item) => item.ok) && result.tempCleanup.every((item) => item.ok) ? 5 : 6;
       return result;
     }
@@ -45755,7 +45825,7 @@ function canonicalizeExistingPath2(value) {
     return normalizePath2((0, import_path63.resolve)(value));
   }
 }
-function isDefaultClaudeConfigDirPath(configDir) {
+function isDefaultClaudeConfigDirPath2(configDir) {
   return normalizePath2(configDir) === normalizePath2((0, import_path63.join)((0, import_os12.homedir)(), ".claude"));
 }
 function quoteShellArg(value) {
@@ -45767,12 +45837,12 @@ function buildStatusLineCommand(nodeBin, hudScriptPath, findNodePath, cacheWrapp
   }
   const normalizedHudScriptPath = hudScriptPath.replace(/\\/g, "/");
   if (cacheWrapperPath) {
-    if (isDefaultClaudeConfigDirPath(CLAUDE_CONFIG_DIR)) {
+    if (isDefaultClaudeConfigDirPath2(CLAUDE_CONFIG_DIR)) {
       return "sh ${CLAUDE_CONFIG_DIR:-$HOME/.claude}/hud/omc-hud-cache.sh ${CLAUDE_CONFIG_DIR:-$HOME/.claude}/hud/omc-hud.mjs";
     }
     return `sh ${quoteShellArg(cacheWrapperPath.replace(/\\/g, "/"))} ${quoteShellArg(normalizedHudScriptPath)}`;
   }
-  if (isDefaultClaudeConfigDirPath(CLAUDE_CONFIG_DIR)) {
+  if (isDefaultClaudeConfigDirPath2(CLAUDE_CONFIG_DIR)) {
     if (findNodePath) {
       return "sh ${CLAUDE_CONFIG_DIR:-$HOME/.claude}/hud/find-node.sh ${CLAUDE_CONFIG_DIR:-$HOME/.claude}/hud/omc-hud.mjs";
     }
@@ -46957,16 +47027,8 @@ ${frontmatter.trim()}
 ---
 
 ${PLUGIN_COMPACT_SKILL_SHIM_MARKER}
-
-# ${skillDirName}
-
-This is a compact Claude Code plugin registry shim. It keeps startup skill descriptions small while preserving the full OMC skill body for on-demand invocation.
-
-When this skill is invoked, read and follow the full bundled instructions from the active plugin root:
-
-\`${"${CLAUDE_PLUGIN_ROOT:-${OMC_PLUGIN_ROOT}}"}/${PLUGIN_FULL_SKILL_BODIES_DIR}/${skillDirName}/SKILL.md\`
-
-The plugin root is the directory containing both \`skills/\` and \`${PLUGIN_FULL_SKILL_BODIES_DIR}/\`. Do not resolve \`${PLUGIN_FULL_SKILL_BODIES_DIR}/${skillDirName}/SKILL.md\` under this shim's \`skills/${skillDirName}/\` directory; \`${PLUGIN_FULL_SKILL_BODIES_DIR}/\` is a direct child of the plugin root. The same archived body path is recorded in frontmatter as \`omc-full-body: ${fullBodyRelPath}\` for hosts that understand plugin-root-relative metadata.
+Read and follow the full skill body at \`${"${CLAUDE_PLUGIN_ROOT:-${OMC_PLUGIN_ROOT}}"}/${PLUGIN_FULL_SKILL_BODIES_DIR}/${skillDirName}/SKILL.md\`.
+The plugin root is the directory containing both \`skills/\` and \`${PLUGIN_FULL_SKILL_BODIES_DIR}/\`. Do not resolve \`${PLUGIN_FULL_SKILL_BODIES_DIR}/${skillDirName}/SKILL.md\` under this shim's \`skills/${skillDirName}/\` directory.
 `;
 }
 function compactPluginSkillPayload(targetRoot) {
@@ -49432,6 +49494,9 @@ function getAllKeywords(text) {
   if (types.includes("team") && types.includes("autopilot")) {
     types = types.filter((t) => t !== "autopilot");
   }
+  if (NO_IMPLEMENT_PATTERN.test(removeCodeBlocks2(text)) && !/^\s*\//.test(text)) {
+    types = types.filter((t) => !CODE_EDITING_KEYWORDS.has(t));
+  }
   return KEYWORD_PRIORITY.filter((k) => types.includes(k));
 }
 function getAllKeywordsWithSizeCheck(text, options = {}) {
@@ -49500,7 +49565,7 @@ function applyRalplanGate(keywords, text) {
   }
   return { keywords: filtered, gateApplied: true, gatedKeywords: executionKeywords };
 }
-var KEYWORD_PATTERNS, OUROBOROS_BRAND_AT_START, KEYWORD_SKIP_PREDICATES, KEYWORD_PRIORITY, RETIRED_WORKFLOW_SLASH_PATTERN, CANONICAL_WORKFLOW_SLASH_SKILLS, SLASH_SKILL_TO_KEYWORD_TYPE, WORKFLOW_SLASH_PATTERN, PASTED_MAGIC_KEYWORD_HEADER_PATTERN, ROLE_BOUNDARY_PATTERN, SKILL_TRANSCRIPT_LINE_PATTERN, USER_REQUEST_LINE_PATTERN, SHELL_TRANSCRIPT_LINE_PATTERN, GIT_DIFF_START_PATTERNS, GIT_DIFF_CONTINUATION_PATTERNS, NON_LATIN_SCRIPT_PATTERN, PATH_SEGMENT_CHARS, FILE_PATH_PATTERN, INFORMATIONAL_INTENT_PATTERNS2, STRONG_HELP_QUERY_PATTERN, MULTILINGUAL_HELP_REQUEST_PATTERN, ENGLISH_HELP_REQUEST_PATTERN, TASK_ACTION_VERB_PATTERN, RESULTS_REPORTING_REQUEST_PATTERN, INFORMATIONAL_CONTEXT_WINDOW2, QUOTED_SPAN_PATTERN, REFERENCE_META_PATTERNS, REFERENCE_EXPLANATION_PATTERNS, QUESTION_FOLLOWUP_PATTERNS, MODE_REFERENCE_PATTERN, EXECUTION_GATE_KEYWORDS, GATE_BYPASS_PREFIXES, WELL_SPECIFIED_SIGNALS;
+var KEYWORD_PATTERNS, OUROBOROS_BRAND_AT_START, KEYWORD_SKIP_PREDICATES, KEYWORD_PRIORITY, RETIRED_WORKFLOW_SLASH_PATTERN, CANONICAL_WORKFLOW_SLASH_SKILLS, SLASH_SKILL_TO_KEYWORD_TYPE, WORKFLOW_SLASH_PATTERN, PASTED_MAGIC_KEYWORD_HEADER_PATTERN, ROLE_BOUNDARY_PATTERN, SKILL_TRANSCRIPT_LINE_PATTERN, USER_REQUEST_LINE_PATTERN, SHELL_TRANSCRIPT_LINE_PATTERN, GIT_DIFF_START_PATTERNS, GIT_DIFF_CONTINUATION_PATTERNS, NON_LATIN_SCRIPT_PATTERN, PATH_SEGMENT_CHARS, FILE_PATH_PATTERN, INFORMATIONAL_INTENT_PATTERNS2, STRONG_HELP_QUERY_PATTERN, MULTILINGUAL_HELP_REQUEST_PATTERN, ENGLISH_HELP_REQUEST_PATTERN, TASK_ACTION_VERB_PATTERN, RESULTS_REPORTING_REQUEST_PATTERN, INFORMATIONAL_CONTEXT_WINDOW2, QUOTED_SPAN_PATTERN, REFERENCE_META_PATTERNS, REFERENCE_EXPLANATION_PATTERNS, QUESTION_FOLLOWUP_PATTERNS, MODE_REFERENCE_PATTERN, CODE_EDITING_KEYWORDS, NO_IMPLEMENT_PATTERN, EXECUTION_GATE_KEYWORDS, GATE_BYPASS_PREFIXES, WELL_SPECIFIED_SIGNALS;
 var init_keyword_detector = __esm({
   "src/hooks/keyword-detector/index.ts"() {
     "use strict";
@@ -49521,6 +49586,13 @@ var init_keyword_detector = __esm({
       deepsearch: /\b(deepsearch)\b|\bsearch\s+the\s+codebase\b|\bfind\s+in\s+(the\s+)?codebase\b|(딥\s?서치)|(ディープ\s?サーチ)/i,
       analyze: /\b(deep[\s-]?analyze|deepanalyze)\b|(딥\s?분석)|(ディープ\s?アナライズ)/i,
       "deep-interview": /\b(deep[\s-]interview|ouroboros)\b|(딥인터뷰)|(ディープインタビュー)/i,
+      // Script-only triggers: never-match placeholders (script detects them, TypeScript doesn't)
+      ultragoal: /(?!x)x/,
+      // Script-only detection
+      "ai-slop-cleaner": /(?!x)x/,
+      // Script-only detection
+      wiki: /(?!x)x/,
+      // Script-only detection
       codex: /\b(ask|use|delegate\s+to)\s+(codex|gpt)\b/i,
       gemini: /\b(ask|use|delegate\s+to)\s+gemini\b/i,
       cursor: /\b(ask|use|delegate\s+to)\s+cursor\b/i,
@@ -49543,6 +49615,9 @@ var init_keyword_detector = __esm({
       "deepsearch",
       "analyze",
       "deep-interview",
+      "ultragoal",
+      "ai-slop-cleaner",
+      "wiki",
       "codex",
       "gemini",
       "cursor",
@@ -49627,6 +49702,8 @@ var init_keyword_detector = __esm({
       /(?:ทำไม|อะไร|ยังไง|อย่างไร|เท่าไหร่|กี่|มั้ย|ไหม|เหรอ|หรอ|หรือไม่|หรือเปล่า|ใช่ไหม|ถูกมั้ย)/u
     ];
     MODE_REFERENCE_PATTERN = /\b(?:ralph|autopilot|auto[\s-]?pilot|ralplan|ultrathink|deepsearch|deep[\s-]?analyze|deepanalyze|deep[\s-]interview|ouroboros|deerflow)\b/gi;
+    CODE_EDITING_KEYWORDS = /* @__PURE__ */ new Set(["autopilot", "ralph", "tdd"]);
+    NO_IMPLEMENT_PATTERN = /\b(?:do\s+not|don'?t|never|without)\s+(?:begin\s+|start\s+)?implement(?:ing|ation)?\b|\bno\s+(?:code\s+)?(?:changes|edits)\b|\bread[\s-]only\s+(?:review|audit|investigation)\b/i;
     EXECUTION_GATE_KEYWORDS = /* @__PURE__ */ new Set([
       "ralph",
       "autopilot",
@@ -50148,6 +50225,12 @@ function parseJevConfig(env2 = process.env) {
       }
     }
   }
+  const pointExcerptChars = {};
+  for (const [key, value] of Object.entries(env2)) {
+    const match = /^OMC_JEV_EXCERPT_CHARS_([A-Z0-9_]+)$/.exec(key);
+    const parsed = match ? positiveInt(value, 0) : 0;
+    if (match && parsed > 0) pointExcerptChars[match[1]] = parsed;
+  }
   return {
     apiKey: env2.TYPESAFE_API_KEY || null,
     masterOff,
@@ -50158,9 +50241,13 @@ function parseJevConfig(env2 = process.env) {
     timeoutMs: positiveInt(env2.OMC_JEV_TIMEOUT_MS, DEFAULT_TIMEOUT_MS, MAX_TIMER_DELAY_MS),
     maxRequests: positiveInt(env2.OMC_JEV_MAX_REQUESTS, 0),
     excerptChars: positiveInt(env2.OMC_JEV_EXCERPT_CHARS, DEFAULT_EXCERPT_CHARS),
+    pointExcerptChars,
     endpoint: env2.OMC_JEV_ENDPOINT || JEV_DEFAULT_ENDPOINT,
     logDir: env2.OMC_JEV_LOG_DIR || (0, import_node_path7.join)(getOmcRoot(), "state", "jev")
   };
+}
+function excerptCharsFor(point, config2) {
+  return config2.pointExcerptChars[point.toUpperCase().replace(/-/g, "_")] ?? (Object.hasOwn(POINT_DEFAULT_EXCERPT_CHARS, point) ? POINT_DEFAULT_EXCERPT_CHARS[point] : config2.excerptChars);
 }
 function isJevEnabled(config2) {
   return config2.apiKey !== null && !config2.masterOff;
@@ -50191,7 +50278,7 @@ function positiveInt(raw, fallback, max = Number.MAX_SAFE_INTEGER) {
   const parsed = Number(raw);
   return Number.isSafeInteger(parsed) && parsed <= max ? parsed : fallback;
 }
-var import_node_path7, JEV_DEFAULT_ENDPOINT, DEFAULT_TIMEOUT_MS, DEFAULT_EXCERPT_CHARS, MAX_TIMER_DELAY_MS, ACTIVATED_POINTS;
+var import_node_path7, JEV_DEFAULT_ENDPOINT, DEFAULT_TIMEOUT_MS, DEFAULT_EXCERPT_CHARS, MAX_TIMER_DELAY_MS, ACTIVATED_POINTS, POINT_DEFAULT_EXCERPT_CHARS;
 var init_config = __esm({
   "src/hooks/jev/config.ts"() {
     "use strict";
@@ -50202,6 +50289,7 @@ var init_config = __esm({
     DEFAULT_EXCERPT_CHARS = 200;
     MAX_TIMER_DELAY_MS = 2147483647;
     ACTIVATED_POINTS = /* @__PURE__ */ new Set();
+    POINT_DEFAULT_EXCERPT_CHARS = { "model-routing": 12e3 };
   }
 });
 
@@ -50287,7 +50375,11 @@ function sanitizeUsage(usage) {
   const isCount = (value) => typeof value === "number" && Number.isFinite(value) && value >= 0;
   return isCount(input_tokens) && isCount(output_tokens) ? { input_tokens, output_tokens } : void 0;
 }
-function firstAnswer(response) {
+function firstAnswer(response, questions) {
+  const firstQuestion = Object.keys(questions)[0];
+  if (firstQuestion !== void 0 && Object.hasOwn(response.answers, firstQuestion)) {
+    return response.answers[firstQuestion];
+  }
   return Object.values(response.answers)[0];
 }
 async function writeShadowLog(entry2, logDir) {
@@ -50308,6 +50400,23 @@ function recordFailure(point) {
     console.error("[jev] " + point + ": circuit open after " + count + " consecutive failures");
   }
 }
+function comparableHeuristic(value, questions) {
+  const question = Object.values(questions)[0];
+  if (!question) return null;
+  switch (question.type) {
+    case "choice":
+      return typeof value === "string" && Object.hasOwn(question.criteria ?? {}, value) ? value : null;
+    case "noul":
+      return typeof value === "boolean" ? value : null;
+    case "score":
+      return typeof value === "number" && Number.isFinite(value) ? value : null;
+    default:
+      return null;
+  }
+}
+function extractHeuristicForLogging(twinResult, questions, mapHeuristic, questionSet) {
+  return comparableHeuristic(mapHeuristic ? mapHeuristic(twinResult, questionSet) : twinResult, questions);
+}
 async function resolveJudgment(resolveJudgmentArgs) {
   const args = resolveJudgmentArgs;
   const config2 = parseJevConfig();
@@ -50327,12 +50436,11 @@ async function resolveJudgment(resolveJudgmentArgs) {
   if (config2.maxRequests > 0 && runtime.requestCount >= config2.maxRequests) {
     return { answer: twinAnswer(), source: "twin", mode: "cap" };
   }
-  const boundedState = boundExcerpts(args.state, config2.excerptChars);
-  const boundedQuestions = boundExcerpts(args.questions, config2.excerptChars);
+  const boundedState = boundExcerpts(args.state, excerptCharsFor(args.point, config2));
   const startedAt = Date.now();
   const attempt = (async () => {
     try {
-      return { ok: true, response: await queryJev(boundedState, boundedQuestions, {
+      return { ok: true, response: await queryJev(boundedState, args.questions, {
         endpoint: config2.endpoint,
         apiKey: config2.apiKey,
         timeoutMs: config2.timeoutMs,
@@ -50345,13 +50453,14 @@ async function resolveJudgment(resolveJudgmentArgs) {
   runtime.requestCount += 1;
   if (mode === "shadow" && args.blocking === false) {
     const heuristic2 = twinAnswer();
+    const loggableHeuristic2 = extractHeuristicForLogging(heuristic2, args.questions, args.mapHeuristic, args.questionSet);
     void attempt.then((outcome2) => {
       if (outcome2.ok) {
         recordSuccess(args.point);
-        void writeShadowLog(buildLogEntry(args.point, boundedState, startedAt, "shadow", heuristic2, firstAnswer(outcome2.response), outcome2.response.usage), config2.logDir);
+        void writeShadowLog(buildLogEntry(args.point, boundedState, startedAt, "shadow", loggableHeuristic2, outcome2.response, args.questions), config2.logDir);
       } else {
         recordFailure(args.point);
-        void writeShadowLog(buildLogEntry(args.point, boundedState, startedAt, "degraded", heuristic2, null), config2.logDir);
+        void writeShadowLog(buildLogEntry(args.point, boundedState, startedAt, "degraded", loggableHeuristic2, null), config2.logDir);
       }
     }).catch(() => {
     });
@@ -50359,15 +50468,16 @@ async function resolveJudgment(resolveJudgmentArgs) {
   }
   if (mode === "active" && args.blocking === false) {
     const heuristic2 = twinAnswer();
+    const loggableHeuristic2 = extractHeuristicForLogging(heuristic2, args.questions, args.mapHeuristic, args.questionSet);
     const outcome2 = await attempt;
     if (!outcome2.ok) {
       recordFailure(args.point);
-      await writeShadowLog(buildLogEntry(args.point, boundedState, startedAt, "degraded", heuristic2, null), config2.logDir);
+      await writeShadowLog(buildLogEntry(args.point, boundedState, startedAt, "degraded", loggableHeuristic2, null), config2.logDir);
       return { answer: heuristic2, source: "twin", mode: "degraded" };
     }
     recordSuccess(args.point);
-    const jevAnswer2 = firstAnswer(outcome2.response);
-    await writeShadowLog(buildLogEntry(args.point, boundedState, startedAt, "active", heuristic2, jevAnswer2, outcome2.response.usage), config2.logDir);
+    const jevAnswer2 = firstAnswer(outcome2.response, args.questions);
+    await writeShadowLog(buildLogEntry(args.point, boundedState, startedAt, "active", loggableHeuristic2, outcome2.response, args.questions), config2.logDir);
     const answer = args.mapAnswer ? args.mapAnswer(jevAnswer2) : jevAnswer2;
     return { answer, source: "jev", mode: "active" };
   }
@@ -50376,21 +50486,24 @@ async function resolveJudgment(resolveJudgmentArgs) {
     recordFailure(args.point);
     console.error("[jev] " + args.point + ": degraded - " + outcome.error);
     const heuristic2 = twinAnswer();
-    await writeShadowLog(buildLogEntry(args.point, boundedState, startedAt, "degraded", heuristic2, null), config2.logDir);
+    const loggableHeuristic2 = extractHeuristicForLogging(heuristic2, args.questions, args.mapHeuristic, args.questionSet);
+    await writeShadowLog(buildLogEntry(args.point, boundedState, startedAt, "degraded", loggableHeuristic2, null), config2.logDir);
     return { answer: heuristic2, source: "twin", mode: "degraded" };
   }
   recordSuccess(args.point);
   const heuristic = twinAnswer();
-  const jevAnswer = firstAnswer(outcome.response);
-  await writeShadowLog(buildLogEntry(args.point, boundedState, startedAt, mode === "active" ? "active" : "shadow", heuristic, jevAnswer, outcome.response.usage), config2.logDir);
+  const loggableHeuristic = extractHeuristicForLogging(heuristic, args.questions, args.mapHeuristic, args.questionSet);
+  const jevAnswer = firstAnswer(outcome.response, args.questions);
+  await writeShadowLog(buildLogEntry(args.point, boundedState, startedAt, mode === "active" ? "active" : "shadow", loggableHeuristic, outcome.response, args.questions), config2.logDir);
   if (mode === "active") {
     const answer = args.mapAnswer ? args.mapAnswer(jevAnswer) : jevAnswer;
     return { answer, source: "jev", mode: "active" };
   }
   return { answer: heuristic, source: "twin", mode: "shadow" };
 }
-function buildLogEntry(point, boundedState, startedAt, entryMode, heuristic, jev, usage) {
-  const safeUsage = sanitizeUsage(usage);
+function buildLogEntry(point, boundedState, startedAt, entryMode, heuristic, response, questions) {
+  const jev = response ? firstAnswer(response, questions ?? {}) : null;
+  const safeUsage = sanitizeUsage(response?.usage);
   return {
     ts: (/* @__PURE__ */ new Date()).toISOString(),
     point,
@@ -50398,6 +50511,7 @@ function buildLogEntry(point, boundedState, startedAt, entryMode, heuristic, jev
     state: boundedState,
     heuristic,
     jev,
+    answers: response ? response.answers : null,
     confidence: jev?.confidence,
     durationMs: Date.now() - startedAt,
     ...safeUsage ? { usage: safeUsage } : {}
@@ -50426,7 +50540,7 @@ function skillTriggerCriteria() {
   const priority = Array.isArray(KEYWORD_PRIORITY) ? KEYWORD_PRIORITY : [];
   return {
     ...Object.fromEntries(
-      priority.filter((type) => type !== "team").slice(0, 12).map((type) => [type, `The prompt explicitly invokes the ${type} trigger.`])
+      priority.filter((type) => type !== "team").map((type) => [type, `The prompt explicitly invokes the ${type} trigger.`])
     ),
     none: "No trigger fires; handle the prompt without a mode or skill."
   };
@@ -50465,6 +50579,8 @@ function recordJudgment(pointName, call) {
     questions: typeof questions === "function" ? questions() : questions,
     twin: call.twin,
     mapAnswer: call.mapAnswer,
+    mapHeuristic: call.mapHeuristic,
+    questionSet,
     blocking: point.blocking,
     fetchFn: call.fetchFn
   });
@@ -50507,11 +50623,22 @@ var init_points = __esm({
     MODEL_ROUTING_QUESTIONS = {
       "model-tier": {
         type: "choice",
-        instructions: "Which model tier should this delegated task use?",
+        instructions: "Which model should do this delegated task? Choose the cheapest model that will do the work well, meaning correctly and completely. Reasoning effort is chosen by a separate question, so the length of the brief and the number of steps do not by themselves call for a more expensive model. Judge the work the delegated agent must actually do; the formal conditions of the brief (language and style rules, permission to use subagents, bans, file locations, report format, words in capitals) and the name of the agent type do not raise the choice. A more expensive model is needed when a cheaper one would clearly be more likely to get this work wrong or to miss something important. When the brief fits several descriptions, judge by the hardest important part of the work.",
         criteria: {
-          haiku: "Quick lookups and lightweight, mechanical work",
-          sonnet: "Standard coding and orchestration work",
-          opus: "Complex architecture and deep analysis"
+          haiku: "Haiku: mechanical work whose result follows directly from the data and is easy to check: look up, read, list, count, copy, compile a list, run a command and report the result, one obvious fix",
+          sonnet: "Sonnet: typical developer and analyst work with a clear goal: code changes in one or a few files, tests, a diagnosis with clear leads, gathering and summarising information from several files or sources, assessment following given instructions, translation, a document written from given sources, a deployment following given steps, coordinating agents",
+          opus: "Opus: work where a mistake is costly or hard to notice and that needs deep reasoning: architecture with tradeoffs, a hard bug without clear leads, an independent high-stakes review or fact-check, a letter or document on which money or important decisions depend, hard mathematics and proofs, deciding between conflicting sources, planning a large change"
+        }
+      },
+      effort: {
+        type: "score",
+        instructions: "How much reasoning effort does this delegated task need? Judge the work the delegated agent must actually do. The length of the brief and its formal conditions (language and style rules, permission to use subagents, bans, file locations, report format, words in capitals) do not raise the level.",
+        criteria: {
+          low: "Low: mechanical work: read, look up, list, copy or transcribe, count; the result follows directly from the data",
+          medium: "Medium: a typical change or analysis with clear steps, in one place or following a given procedure or brief",
+          high: "High: multi-file work that needs its own decisions, a diagnosis weighing a few hypotheses, or writing a document",
+          xhigh: "Extra high: in-depth analysis, architecture, a high-stakes review, or a hard bug",
+          max: "Maximum: exceptionally hard, hours of reasoning at the limit of difficulty; rare"
         }
       }
     };
@@ -51405,7 +51532,7 @@ var init_types8 = __esm({
       Object.keys(DEFAULT_HUD_LABELS)
     );
     DEFAULT_ELEMENT_ORDER = {
-      line1: ["hostname", "cwd", "gitRepo", "gitBranch", "gitStatus", "apiKeySource", "profile"],
+      line1: ["hostname", "cwd", "gitRepo", "gitBranch", "gitStatus", "apiKeySource", "account", "profile"],
       main: [
         "omcLabel",
         "model",
@@ -51482,6 +51609,8 @@ var init_types8 = __esm({
         // Text format for backward compatibility
         apiKeySource: false,
         // Disabled by default
+        account: false,
+        // Opt-in to avoid exposing email on screen shares/streams
         hostname: false,
         profile: true,
         // Show profile name when CLAUDE_CONFIG_DIR is set
@@ -51551,6 +51680,7 @@ var init_types8 = __esm({
         thinking: false,
         thinkingFormat: "text",
         apiKeySource: false,
+        account: false,
         hostname: false,
         profile: true,
         missionBoard: false,
@@ -51595,6 +51725,7 @@ var init_types8 = __esm({
         thinking: true,
         thinkingFormat: "text",
         apiKeySource: false,
+        account: false,
         hostname: false,
         profile: true,
         missionBoard: false,
@@ -51640,6 +51771,7 @@ var init_types8 = __esm({
         thinking: true,
         thinkingFormat: "text",
         apiKeySource: true,
+        account: false,
         hostname: false,
         profile: true,
         missionBoard: false,
@@ -51685,6 +51817,7 @@ var init_types8 = __esm({
         thinking: true,
         thinkingFormat: "text",
         apiKeySource: false,
+        account: false,
         hostname: false,
         profile: true,
         missionBoard: false,
@@ -51729,6 +51862,7 @@ var init_types8 = __esm({
         thinking: true,
         thinkingFormat: "text",
         apiKeySource: true,
+        account: false,
         hostname: false,
         profile: true,
         missionBoard: false,
@@ -52635,7 +52769,7 @@ function readDiskState(directory, sessionId) {
     total_failed: 0,
     last_updated: (/* @__PURE__ */ new Date()).toISOString()
   });
-  const readFile27 = (p) => {
+  const readFile26 = (p) => {
     if (!(0, import_fs58.existsSync)(p)) return null;
     try {
       return JSON.parse((0, import_fs58.readFileSync)(p, "utf-8"));
@@ -52646,9 +52780,9 @@ function readDiskState(directory, sessionId) {
   };
   if (sessionId) {
     const paths = resolveSessionStatePaths(STATE_NAME, sessionId, directory);
-    return readFile27(paths.sessionScoped) ?? empty2();
+    return readFile26(paths.sessionScoped) ?? empty2();
   }
-  const legacyState = readFile27(resolveReadPath(directory, void 0));
+  const legacyState = readFile26(resolveReadPath(directory, void 0));
   if (legacyState) return legacyState;
   const sessionsDir = (0, import_path71.join)(getOmcRoot(directory), "state", "sessions");
   if (!(0, import_fs58.existsSync)(sessionsDir)) return empty2();
@@ -52658,7 +52792,7 @@ function readDiskState(directory, sessionId) {
     const normalizedName = `${STATE_NAME}-state.json`;
     for (const entry2 of entries) {
       if (!entry2.isDirectory()) continue;
-      const sessionState = readFile27((0, import_path71.join)(sessionsDir, entry2.name, normalizedName));
+      const sessionState = readFile26((0, import_path71.join)(sessionsDir, entry2.name, normalizedName));
       if (sessionState) {
         merged = mergeTrackerStates(merged, sessionState);
       }
@@ -54960,6 +55094,7 @@ async function applyRalphVerdictShadow(args) {
       critic_mode: args.criticMode ?? null
     },
     twin: () => verdict,
+    mapHeuristic: (result2, questionSet) => result2,
     mapAnswer: (answer) => {
       return answer.noul === true;
     },
@@ -55001,17 +55136,25 @@ async function applyLoopContinuationShadow(args) {
       return result;
     }
   };
+  const mapHeuristicForLoopContinuation = (r, questionSet) => {
+    if (questionSet === 1) {
+      return null;
+    }
+    return r.shouldBlock ? false : null;
+  };
   const results = await Promise.all([
     recordJudgment("loop-continuation", {
       state,
       twin: () => result,
       mapAnswer: mapTaskCompletionAnswer,
+      mapHeuristic: mapHeuristicForLoopContinuation,
       fetchFn: args.fetchFn
     }),
     recordJudgment("loop-continuation", {
       state,
       twin: () => result,
       questionSet: 1,
+      mapHeuristic: mapHeuristicForLoopContinuation,
       fetchFn: args.fetchFn
     })
   ]);
@@ -55481,32 +55624,34 @@ function recordIdleNotificationSent(stateDir, sessionId, repoState) {
   } catch {
   }
 }
-function readTranscriptTail(transcriptPath) {
+function readTranscriptTail(transcriptPath, maxBytes = TRANSCRIPT_TAIL_BYTES) {
   const size = (0, import_fs63.statSync)(transcriptPath).size;
-  if (size <= TRANSCRIPT_TAIL_BYTES) {
+  if (size <= maxBytes) {
     return (0, import_fs63.readFileSync)(transcriptPath, "utf-8");
   }
   const fd = (0, import_fs63.openSync)(transcriptPath, "r");
   try {
-    const offset = size - TRANSCRIPT_TAIL_BYTES;
-    const buf = Buffer.allocUnsafe(TRANSCRIPT_TAIL_BYTES);
-    const bytesRead = (0, import_fs63.readSync)(fd, buf, 0, TRANSCRIPT_TAIL_BYTES, offset);
+    const offset = size - maxBytes;
+    const buf = Buffer.allocUnsafe(maxBytes);
+    const bytesRead = (0, import_fs63.readSync)(fd, buf, 0, maxBytes, offset);
     return buf.subarray(0, bytesRead).toString("utf-8");
   } finally {
     (0, import_fs63.closeSync)(fd);
   }
 }
-function readTranscriptTailLines(transcriptPath) {
-  const content = readTranscriptTail(transcriptPath);
+function splitTranscriptLines(transcriptPath, content, maxBytes) {
   const lines = content.split("\n");
   try {
-    if ((0, import_fs63.statSync)(transcriptPath).size > TRANSCRIPT_TAIL_BYTES && lines.length > 0) {
+    if ((0, import_fs63.statSync)(transcriptPath).size > maxBytes && lines.length > 0) {
       lines.shift();
     }
   } catch {
     return lines;
   }
   return lines;
+}
+function readTranscriptTailLines(transcriptPath, maxBytes = TRANSCRIPT_TAIL_BYTES) {
+  return splitTranscriptLines(transcriptPath, readTranscriptTail(transcriptPath, maxBytes), maxBytes);
 }
 function normalizeReviewerPath(subagentType) {
   if (typeof subagentType !== "string") {
@@ -55547,10 +55692,20 @@ function matchesVerificationReviewerPath(reviewerPath, verificationState) {
   const expected = verificationState?.critic_mode ?? "architect";
   return reviewerPath === expected;
 }
-function checkReviewerAuthoredApprovalInMessages(transcriptPath, verificationState) {
+function collectReviewerOutputs(transcriptPath, verificationState, maxBytes, prefilter) {
+  let content;
+  try {
+    content = readTranscriptTail(transcriptPath, maxBytes);
+  } catch {
+    return [];
+  }
+  if (prefilter && !prefilter(content)) {
+    return [];
+  }
   const reviewerToolUses = /* @__PURE__ */ new Map();
-  for (const line of readTranscriptTailLines(transcriptPath)) {
-    if (!line.trim()) {
+  const outputs = [];
+  for (const line of splitTranscriptLines(transcriptPath, content, maxBytes)) {
+    if (!line.trim() || !REVIEWER_LINE_HINTS.some((hint) => line.includes(hint))) {
       continue;
     }
     let entry2;
@@ -55559,11 +55714,13 @@ function checkReviewerAuthoredApprovalInMessages(transcriptPath, verificationSta
     } catch {
       continue;
     }
-    const content = entry2.message?.content;
-    if (!Array.isArray(content)) {
+    const blocks = entry2.message?.content;
+    if (!Array.isArray(blocks)) {
       continue;
     }
-    for (const block of content) {
+    const parsedAt = typeof entry2.timestamp === "string" ? Date.parse(entry2.timestamp) : NaN;
+    const at = Number.isFinite(parsedAt) ? parsedAt : null;
+    for (const block of blocks) {
       if (block?.type === "tool_use" && block.id && block.name) {
         if (REVIEWER_TASK_TOOL_NAMES.has(block.name)) {
           const reviewerPath = normalizeReviewerPath(block.input?.subagent_type);
@@ -55586,13 +55743,22 @@ function checkReviewerAuthoredApprovalInMessages(transcriptPath, verificationSta
       if (!reviewerToolUses.has(block.tool_use_id)) {
         continue;
       }
-      const reviewerOutput = extractTranscriptText(block.content);
-      if (reviewerOutput && detectArchitectApproval(reviewerOutput, verificationState)) {
-        return true;
+      const text = extractTranscriptText(block.content);
+      if (text) {
+        outputs.push({ text, at });
       }
     }
   }
-  return false;
+  return outputs;
+}
+function checkReviewerAuthoredApprovalInMessages(transcriptPath, verificationState, maxBytes = TRANSCRIPT_TAIL_BYTES) {
+  const outputs = collectReviewerOutputs(
+    transcriptPath,
+    verificationState,
+    maxBytes,
+    (content) => /verified_complete/i.test(content)
+  );
+  return outputs.some((output) => detectArchitectApproval(output.text, verificationState));
 }
 function estimateTranscriptContextPercent(transcriptPath) {
   if (!transcriptPath || !(0, import_fs63.existsSync)(transcriptPath)) {
@@ -55642,15 +55808,23 @@ function isAwaitingConfirmation(state) {
   }
   return Date.now() - setAtMs < AWAITING_CONFIRMATION_TTL_MS;
 }
-function checkArchitectApprovalInTranscript(sessionId, verificationState) {
+function checkArchitectApprovalInTranscript(sessionId, verificationState, transcriptPath) {
   const claudeDir = getClaudeConfigDir();
-  const possiblePaths = [(0, import_path74.join)(claudeDir, "sessions", sessionId, "messages.json")];
-  for (const transcriptPath of possiblePaths) {
-    if (!(0, import_fs63.existsSync)(transcriptPath)) {
+  const candidates = [
+    transcriptPath,
+    (0, import_path74.join)(claudeDir, "sessions", sessionId, "messages.json")
+  ].filter((candidate) => typeof candidate === "string" && candidate.length > 0);
+  const seen = /* @__PURE__ */ new Set();
+  for (const candidate of candidates) {
+    if (seen.has(candidate)) {
+      continue;
+    }
+    seen.add(candidate);
+    if (!(0, import_fs63.existsSync)(candidate)) {
       continue;
     }
     try {
-      if (checkReviewerAuthoredApprovalInMessages(transcriptPath, verificationState)) {
+      if (checkReviewerAuthoredApprovalInMessages(candidate, verificationState, TRANSCRIPT_APPROVAL_SCAN_BYTES)) {
         return true;
       }
     } catch {
@@ -55659,24 +55833,47 @@ function checkArchitectApprovalInTranscript(sessionId, verificationState) {
   }
   return false;
 }
-function checkArchitectRejectionInTranscript(sessionId) {
+function checkArchitectRejectionInTranscript(sessionId, verificationState, transcriptPath) {
   const claudeDir = getClaudeConfigDir();
   const possiblePaths = [
+    transcriptPath,
     (0, import_path74.join)(claudeDir, "sessions", sessionId, "transcript.md"),
     (0, import_path74.join)(claudeDir, "sessions", sessionId, "messages.json"),
     (0, import_path74.join)(claudeDir, "transcripts", `${sessionId}.md`)
-  ];
-  for (const transcriptPath of possiblePaths) {
-    if ((0, import_fs63.existsSync)(transcriptPath)) {
-      try {
-        const content = readTranscriptTail(transcriptPath);
-        const result = detectArchitectRejection(content);
+  ].filter((candidate) => typeof candidate === "string" && candidate.length > 0);
+  const requestedAt = verificationState?.requested_at ? Date.parse(verificationState.requested_at) : NaN;
+  const sinceMs = Number.isFinite(requestedAt) ? requestedAt : null;
+  for (const candidate of possiblePaths) {
+    if (!(0, import_fs63.existsSync)(candidate)) {
+      continue;
+    }
+    try {
+      if (candidate.endsWith(".md")) {
+        const result = detectArchitectRejection(readTranscriptTail(candidate));
         if (result.rejected) {
           return result;
         }
-      } catch {
         continue;
       }
+      const outputs = collectReviewerOutputs(
+        candidate,
+        verificationState,
+        TRANSCRIPT_APPROVAL_SCAN_BYTES,
+        // Same pattern set the detector uses, so the prefilter cannot reject
+        // wording that detectArchitectRejection() would have accepted.
+        (content) => hasRejectionSignal(content)
+      );
+      for (const output of outputs) {
+        if (sinceMs !== null && (output.at === null || output.at < sinceMs)) {
+          continue;
+        }
+        const result = detectArchitectRejection(output.text);
+        if (result.rejected) {
+          return result;
+        }
+      }
+    } catch {
+      continue;
     }
   }
   return { rejected: false, feedback: "" };
@@ -55685,7 +55882,7 @@ function verificationCriteriaExcerpt(workingDir, sessionId, story) {
   const criteria = story?.acceptanceCriteria ?? readPrd(workingDir, sessionId)?.userStories.flatMap((s) => s.acceptanceCriteria) ?? [];
   return criteria.join("; ");
 }
-async function checkRalphLoop(sessionId, directory, cancelInProgress) {
+async function checkRalphLoop(sessionId, directory, cancelInProgress, transcriptPath) {
   const workingDir = resolveToWorktreeRoot(directory);
   const state = readRalphState(workingDir, sessionId);
   const ralphStatePath = sessionId ? resolveSessionStatePath("ralph", sessionId, workingDir) : resolveStatePath("ralph", workingDir);
@@ -55756,7 +55953,7 @@ async function checkRalphLoop(sessionId, directory, cancelInProgress) {
     }
     if (verificationState?.pending) {
       if (sessionId) {
-        if (checkArchitectApprovalInTranscript(sessionId, verificationState)) {
+        if (checkArchitectApprovalInTranscript(sessionId, verificationState, transcriptPath)) {
           const verdict = await applyRalphVerdictShadow({
             verdict: true,
             prdContext: verificationCriteriaExcerpt(workingDir, sessionId, verifiedStory),
@@ -55852,7 +56049,7 @@ async function checkRalphLoop(sessionId, directory, cancelInProgress) {
             };
           }
         }
-        const rejection = checkArchitectRejectionInTranscript(sessionId);
+        const rejection = verificationState ? checkArchitectRejectionInTranscript(sessionId, verificationState, transcriptPath) : { rejected: false, feedback: "" };
         if (verificationState && rejection.rejected) {
           const verdict = await applyRalphVerdictShadow({
             verdict: false,
@@ -56539,7 +56736,7 @@ async function resolvePersistentModeBlock(sessionId, directory, stopContext) {
   };
   const runRalphPriority = async () => {
     if (tombstonedWorkflowModes.has("ralph") || !isModeActive("ralph", workingDir, sessionId)) return null;
-    return checkRalphLoop(sessionId, workingDir, cancelInProgress);
+    return checkRalphLoop(sessionId, workingDir, cancelInProgress, stopContext?.transcript_path ?? stopContext?.transcriptPath);
   };
   if (cancelInProgress) {
     const autopilotResult = await runAutopilotPriority();
@@ -56604,7 +56801,7 @@ function createHookOutput(result) {
     message: result.message || void 0
   };
 }
-var import_crypto20, import_fs63, import_path74, CANCEL_SIGNAL_TTL_MS2, CANCEL_SIGNAL_CLOCK_SKEW_MS, STALE_STATE_THRESHOLD_MS, PENDING_ASYNC_STATE_STALE_MS, OVERSIZE_TOOL_RESULT_REDIRECT_STOP_MAX, OVERSIZE_TOOL_RESULT_REDIRECT_STOP_TTL_MS, TERMINAL_WORKFLOW_SLOT_MODES, TERMINAL_WORKFLOW_PHASES, todoContinuationAttempts, TRANSCRIPT_TAIL_BYTES, CRITICAL_CONTEXT_STOP_PERCENT, RALPLAN_TERMINAL_PHASES, REVIEWER_TASK_TOOL_NAMES, REVIEWER_COMMAND_TOOL_NAMES, AWAITING_CONFIRMATION_TTL_MS, THINKING_ONLY_STREAK_BREAKER, THINKING_ONLY_STREAK_MAX, THINKING_ONLY_STREAK_TTL_MS, THINKING_ONLY_STREAK_BAILOUT_MESSAGE, TEAM_PIPELINE_STOP_BLOCKER_MAX, TEAM_PIPELINE_STOP_BLOCKER_TTL_MS, RALPLAN_STOP_BLOCKER_MAX, RALPLAN_STOP_BLOCKER_TTL_MS, RALPLAN_ACTIVE_AGENT_RECENCY_WINDOW_MS;
+var import_crypto20, import_fs63, import_path74, CANCEL_SIGNAL_TTL_MS2, CANCEL_SIGNAL_CLOCK_SKEW_MS, STALE_STATE_THRESHOLD_MS, PENDING_ASYNC_STATE_STALE_MS, OVERSIZE_TOOL_RESULT_REDIRECT_STOP_MAX, OVERSIZE_TOOL_RESULT_REDIRECT_STOP_TTL_MS, TERMINAL_WORKFLOW_SLOT_MODES, TERMINAL_WORKFLOW_PHASES, todoContinuationAttempts, TRANSCRIPT_TAIL_BYTES, TRANSCRIPT_APPROVAL_SCAN_BYTES, CRITICAL_CONTEXT_STOP_PERCENT, RALPLAN_TERMINAL_PHASES, REVIEWER_TASK_TOOL_NAMES, REVIEWER_COMMAND_TOOL_NAMES, REVIEWER_LINE_HINTS, AWAITING_CONFIRMATION_TTL_MS, THINKING_ONLY_STREAK_BREAKER, THINKING_ONLY_STREAK_MAX, THINKING_ONLY_STREAK_TTL_MS, THINKING_ONLY_STREAK_BAILOUT_MESSAGE, TEAM_PIPELINE_STOP_BLOCKER_MAX, TEAM_PIPELINE_STOP_BLOCKER_TTL_MS, RALPLAN_STOP_BLOCKER_MAX, RALPLAN_STOP_BLOCKER_TTL_MS, RALPLAN_ACTIVE_AGENT_RECENCY_WINDOW_MS;
 var init_persistent_mode = __esm({
   "src/hooks/persistent-mode/index.ts"() {
     "use strict";
@@ -56648,6 +56845,7 @@ var init_persistent_mode = __esm({
     ]);
     todoContinuationAttempts = /* @__PURE__ */ new Map();
     TRANSCRIPT_TAIL_BYTES = 32 * 1024;
+    TRANSCRIPT_APPROVAL_SCAN_BYTES = 32 * 1024 * 1024;
     CRITICAL_CONTEXT_STOP_PERCENT = 95;
     RALPLAN_TERMINAL_PHASES = /* @__PURE__ */ new Set([
       "completed",
@@ -56670,6 +56868,7 @@ var init_persistent_mode = __esm({
     ]);
     REVIEWER_TASK_TOOL_NAMES = /* @__PURE__ */ new Set(["Task", "proxy_Task", "Agent"]);
     REVIEWER_COMMAND_TOOL_NAMES = /* @__PURE__ */ new Set(["Bash", "proxy_Bash"]);
+    REVIEWER_LINE_HINTS = ['"tool_result"', '"subagent_type"', "--agent-prompt"];
     AWAITING_CONFIRMATION_TTL_MS = 2 * 60 * 1e3;
     THINKING_ONLY_STREAK_BREAKER = "thinking-only-streak";
     THINKING_ONLY_STREAK_MAX = 3;
@@ -58340,6 +58539,13 @@ function claimSessionEndJob(directory, sessionId, nonce, identity, deadlineAt) {
   const now = Date.now();
   return mutateSessionEndJob(directory, sessionId, current.revision, (job) => {
     if (job.phase === "complete" || job.owner) throw new Error("claim-conflict");
+    if (Object.values(job.actions).some((action) => action.status === "claimed" && action.runner && action.runner.phase !== "terminal" && Date.now() < Date.parse(action.runner.deadlineAt))) throw new Error("runner-still-bounded");
+    for (const action of Object.values(job.actions)) {
+      if (action.status !== "claimed") continue;
+      action.status = action.class === "required" ? "retryable" : "expired";
+      action.claimantNonce = void 0;
+      if (action.runner) action.runner.phase = "terminal";
+    }
     job.owner = { nonce, pid: process.pid, processStartIdentity: identity, claimedAt: nowIso(), heartbeatAt: nowIso(), leaseExpiresAt: new Date(Math.min(now + 750, deadlineAt)).toISOString(), runDeadlineAt: new Date(deadlineAt).toISOString(), leaseGeneration: 1, claimedFromRevision: job.revision };
     job.phase = "processing";
   });
@@ -58376,13 +58582,10 @@ function releaseSessionEndJob(directory, sessionId, nonce, generation, reason = 
   return mutateLatest(directory, sessionId, (job) => {
     if (!job.owner || job.owner.nonce !== nonce || job.owner.leaseGeneration !== generation) throw new Error("release-conflict");
     for (const action of Object.values(job.actions)) {
-      if (action.status === "claimed" && action.claimantNonce === nonce && action.runner?.phase === "reserved") {
-        action.attempts--;
-        action.status = action.attempts > 0 ? "retryable" : "pending";
-        action.claimantNonce = void 0;
-        action.claimedAt = void 0;
-        action.runner = void 0;
-      }
+      if (action.status !== "claimed" || !action.runner || action.runner.phase !== "reserved") continue;
+      action.status = "pending";
+      action.claimantNonce = void 0;
+      action.runner = void 0;
     }
     job.owner = null;
     if (job.phase !== "complete") {
@@ -58619,30 +58822,30 @@ async function runSessionEndAction(context, _execute) {
     fs13.mkdirSync(runPath, { recursive: true });
     if (Date.now() >= context.deadlineAt) return { code: "deadline-before-arm", completed: false };
     const childInput = { directory: context.directory, sessionId: context.sessionId, jobId: context.job.jobId, actionName: context.actionName, attempt: context.action.attempts, ownerNonce: context.ownerNonce, runnerNonce: context.runnerNonce, runPath, deadlineAt: context.deadlineAt };
-    const child = (0, import_child_process21.spawn)(process.execPath, [(0, import_url13.fileURLToPath)(importMetaUrl), RUNNER_ARG, JSON.stringify(childInput)], { detached: true, stdio: "ignore", windowsHide: true, env: runnerEnvironment(context) });
+    const child = (0, import_child_process21.spawn)(process.execPath, [(0, import_url13.fileURLToPath)(importMetaUrl), RUNNER_ARG, JSON.stringify(childInput)], { detached: true, stdio: "ignore", windowsHide: true, env: childEnv(runnerEnvironment(context)) });
     const identity = child.pid ? getProcessStartIdentitySync(child.pid) : null;
     child.unref();
     let settled = false;
     let exitCode = null;
     let settleChild = () => void 0;
-    const childExit = new Promise((resolve48) => {
+    const childExit = new Promise((resolve49) => {
       settleChild = (code2) => {
         if (settled) return;
         settled = true;
         exitCode = code2;
-        resolve48(code2);
+        resolve49(code2);
       };
       child.once("exit", settleChild);
       child.once("error", () => settleChild(null));
     });
     let deadlineTermination;
     let resolveTermination;
-    const terminationFinished = new Promise((resolve48) => {
-      resolveTermination = resolve48;
+    const terminationFinished = new Promise((resolve49) => {
+      resolveTermination = resolve49;
     });
     const terminate = async () => {
-      const postKillWait = new Promise((resolve48) => {
-        const timer = setTimeout(resolve48, Math.max(1, context.deadlineAt + POST_KILL_SETTLE_MS - Date.now()));
+      const postKillWait = new Promise((resolve49) => {
+        const timer = setTimeout(resolve49, Math.max(1, context.deadlineAt + POST_KILL_SETTLE_MS - Date.now()));
         timer.unref();
       });
       if (identity && child.pid) {
@@ -58656,7 +58859,7 @@ async function runSessionEndAction(context, _execute) {
       await Promise.race([childExit, postKillWait]);
     };
     if (!identity || !child.pid) {
-      await Promise.race([childExit, new Promise((resolve48) => setTimeout(resolve48, POST_KILL_SETTLE_MS))]);
+      await Promise.race([childExit, new Promise((resolve49) => setTimeout(resolve49, POST_KILL_SETTLE_MS))]);
       return { code: "runner-identity-unavailable", completed: false };
     }
     const timeout = setTimeout(() => {
@@ -58707,7 +58910,7 @@ async function runActionRunnerEntrypoint() {
       } catch {
       }
       if (armed) break;
-      await new Promise((resolve48) => setTimeout(resolve48, 10));
+      await new Promise((resolve49) => setTimeout(resolve49, 10));
     }
     if (Date.now() >= input.deadlineAt) throw new Error("runner-arm-deadline");
     const deadlineTimer = setTimeout(() => {
@@ -58733,6 +58936,7 @@ var fs13, path18, import_child_process21, import_url13, RUNNER_ARG, POST_KILL_SE
 var init_action_runner = __esm({
   "src/hooks/session-end/action-runner.ts"() {
     "use strict";
+    init_windows_search();
     fs13 = __toESM(require("fs"), 1);
     path18 = __toESM(require("path"), 1);
     import_child_process21 = require("child_process");
@@ -60460,7 +60664,7 @@ async function sendTelegram(config2, payload) {
       text: payload.message,
       parse_mode: config2.parseMode || "Markdown"
     });
-    const result = await new Promise((resolve48) => {
+    const result = await new Promise((resolve49) => {
       const req = (0, import_https.request)(
         telegramRequestOptions(Buffer.byteLength(body), config2.botToken),
         (res) => {
@@ -60476,9 +60680,9 @@ async function sendTelegram(config2, payload) {
                 }
               } catch {
               }
-              resolve48({ platform: "telegram", success: true, messageId });
+              resolve49({ platform: "telegram", success: true, messageId });
             } else {
-              resolve48({
+              resolve49({
                 platform: "telegram",
                 success: false,
                 error: `HTTP ${res.statusCode}`
@@ -60488,11 +60692,11 @@ async function sendTelegram(config2, payload) {
         }
       );
       req.on("error", (e) => {
-        resolve48({ platform: "telegram", success: false, error: e.message });
+        resolve49({ platform: "telegram", success: false, error: e.message });
       });
       req.on("timeout", () => {
         req.destroy();
-        resolve48({
+        resolve49({
           platform: "telegram",
           success: false,
           error: "Request timeout"
@@ -60739,9 +60943,9 @@ async function dispatchNotifications(config2, event, payload, platformMessages) 
           }
         )
       ),
-      new Promise((resolve48) => {
+      new Promise((resolve49) => {
         timer = setTimeout(
-          () => resolve48([
+          () => resolve49([
             {
               platform: "unknown",
               success: false,
@@ -61424,6 +61628,8 @@ var init_slack_socket = __esm({
         this.onMessage = onMessage;
         this.log = (msg) => log3(redactTokens(msg));
       }
+      config;
+      onMessage;
       ws = null;
       reconnectAttempts = 0;
       maxReconnectAttempts = 10;
@@ -63776,10 +63982,10 @@ async function runWithinDeadline(deadlineAt, run) {
   const controller = new AbortController();
   let timer;
   try {
-    return await Promise.race([run(controller.signal), new Promise((resolve48) => {
+    return await Promise.race([run(controller.signal), new Promise((resolve49) => {
       timer = setTimeout(() => {
         controller.abort();
-        resolve48(void 0);
+        resolve49(void 0);
       }, remaining);
     })]);
   } finally {
@@ -67132,7 +67338,7 @@ async function withMailboxLock(teamName, workerName, cwd2, fn) {
   while (Date.now() < deadline) {
     const result = await withLock2(lockDir, fn);
     if (result.ok) return result.value;
-    await new Promise((resolve48) => setTimeout(resolve48, delayMs));
+    await new Promise((resolve49) => setTimeout(resolve49, delayMs));
     delayMs = Math.min(delayMs * 2, 200);
   }
   throw new Error(`Failed to acquire mailbox lock for ${workerName} after ${timeoutMs}ms`);
@@ -67295,7 +67501,7 @@ async function teamCreateTask(teamName, task, cwd2) {
       return taskLock.value;
     });
     if (result.ok) return result.value;
-    await new Promise((resolve48) => setTimeout(resolve48, delayMs));
+    await new Promise((resolve49) => setTimeout(resolve49, delayMs));
     delayMs = Math.min(delayMs * 2, 200);
   }
   throw new Error(`Failed to acquire task creation lock for team ${teamName} after ${timeoutMs}ms`);
@@ -67361,7 +67567,7 @@ async function teamUpdateTask(teamName, taskId, updates, cwd2) {
       return normalized;
     });
     if (result.ok) return result.value;
-    await new Promise((resolve48) => setTimeout(resolve48, delayMs));
+    await new Promise((resolve49) => setTimeout(resolve49, delayMs));
     delayMs = Math.min(delayMs * 2, 200);
   }
   throw new Error(`Failed to acquire task update lock for task ${taskId} in team ${teamName} after ${timeoutMs}ms`);
@@ -69381,7 +69587,7 @@ function canonicalAuthorityDigest(input) {
   return (0, import_node_crypto8.createHash)("sha256").update(payload, "utf8").digest("hex");
 }
 function sleep4(ms) {
-  return new Promise((resolve48) => setTimeout(resolve48, ms));
+  return new Promise((resolve49) => setTimeout(resolve49, ms));
 }
 function isExactText(value) {
   return typeof value === "string" && value.length > 0 && value === value.trim();
@@ -71256,7 +71462,7 @@ async function bootstrapPersistentOwner(input, priorEpoch) {
       return true;
     }
     if (owner && (owner.epoch > expectedEpoch || owner.epoch === expectedEpoch && owner.pid !== childPid)) return false;
-    await new Promise((resolve48) => setTimeout(resolve48, 25));
+    await new Promise((resolve49) => setTimeout(resolve49, 25));
   }
   return false;
 }
@@ -71419,7 +71625,7 @@ function createRecoveryOwnerClient(dispatch, timing = {}) {
           teamName: normalized.teamName,
           workerName: normalized.workerName
         })) return outcome.result;
-        await new Promise((resolve48) => setTimeout(resolve48, timing.pollIntervalMs ?? 250));
+        await new Promise((resolve49) => setTimeout(resolve49, timing.pollIntervalMs ?? 250));
       }
       return timeoutResult(normalized, canonical.recovery_id);
     }
@@ -71489,6 +71695,7 @@ __export(tmux_session_exports, {
   getWorkerLiveness: () => getWorkerLiveness,
   injectToLeaderPane: () => injectToLeaderPane,
   invokeDirectMailboxEffect: () => invokeDirectMailboxEffect,
+  isCmuxSurfaceTarget: () => isCmuxSurfaceTarget,
   isPosixTmuxSession: () => isPosixTmuxSession,
   isSessionAlive: () => isSessionAlive,
   isUnixLikeOnWindows: () => isUnixLikeOnWindows2,
@@ -71947,7 +72154,11 @@ function isCmuxContext() {
   return detectTeamMultiplexerContext() === "cmux";
 }
 function isCmuxSurfaceTarget(value) {
-  return typeof value === "string" && value.trim().length > 0 && !value.trim().startsWith("%");
+  if (typeof value !== "string") return false;
+  const trimmed = value.trim();
+  if (trimmed.length === 0 || trimmed.startsWith("%")) return false;
+  if (/^w[0-9A-Za-z]+:p[0-9A-Za-z]+$/.test(trimmed)) return false;
+  return isCmuxContext();
 }
 async function cmuxExecAsync(args) {
   const result = await execFileAsync5("cmux", args, { encoding: "utf-8" });
@@ -72687,11 +72898,11 @@ function buildWorkerStartCommand(config2) {
       windowsEnvVars.OMC_RECOVERY_GATE_SPEC_B64 = Buffer.from(windowsEnvVars.OMC_RECOVERY_GATE_SPEC, "utf8").toString("base64");
       delete windowsEnvVars.OMC_RECOVERY_GATE_SPEC;
     }
-    const envPrefix = Object.entries(windowsEnvVars).map(([key, value]) => {
+    const envPrefix = ['set "NoDefaultCurrentDirectoryInExePath=1"', ...Object.entries(windowsEnvVars).filter(([key]) => key.toUpperCase() !== "NODEFAULTCURRENTDIRECTORYINEXEPATH").map(([key, value]) => {
       assertSafeEnvKey(key);
       assertSafeCmdValue2(value);
       return `set "${key}=${escapeForCmdSet2(value)}"`;
-    }).join(" && ");
+    })].join(" && ");
     const launch = launchWords.map((part) => {
       assertSafeCmdValue2(part);
       return `"${escapeForCmdSet2(part)}"`;
@@ -75276,7 +75487,7 @@ async function withDispatchLock(teamName, cwd2, fn) {
         );
       }
       const jitter = 0.5 + Math.random() * 0.5;
-      await new Promise((resolve48) => setTimeout(resolve48, Math.floor(pollMs * jitter)));
+      await new Promise((resolve49) => setTimeout(resolve49, Math.floor(pollMs * jitter)));
       pollMs = Math.min(pollMs * 2, DISPATCH_LOCK_MAX_POLL_MS);
     }
   }
@@ -76495,6 +76706,32 @@ function isDetached(wtPath) {
 function isWorktreeDirty(wtPath) {
   return isWorktreeDirtyExcept(wtPath).dirty;
 }
+function commitExists(repoRoot2, sha) {
+  try {
+    git(repoRoot2, ["cat-file", "-e", `${sha}^{commit}`]);
+    return true;
+  } catch {
+    return false;
+  }
+}
+function hasCommitsOnlyOnWorkerRefs(repoRoot2, wtPath, ownBranch, baseCommit) {
+  const tips = [git(repoRoot2, ["for-each-ref", "--format=%(objectname)", `refs/heads/${ownBranch}`])];
+  if ((0, import_node_fs15.existsSync)(wtPath) && isRegisteredWorktreePath(repoRoot2, wtPath)) tips.push(git(repoRoot2, ["rev-parse", "HEAD"], wtPath));
+  const commits = tips.filter(Boolean);
+  if (commits.length === 0) return false;
+  const excludedBase = baseCommit && commitExists(repoRoot2, baseCommit) ? [baseCommit] : [];
+  return git(repoRoot2, [
+    "rev-list",
+    "--max-count=1",
+    ...commits,
+    "--not",
+    ...excludedBase,
+    "--exclude=omc-team/*",
+    "--branches",
+    "--tags",
+    "--remotes"
+  ]).length > 0;
+}
 function normalizeStatusPath(rawPath) {
   const trimmed = rawPath.trim();
   if (trimmed.startsWith('"') && trimmed.endsWith('"')) {
@@ -76726,7 +76963,8 @@ function ensureWorkerWorktree(teamName, workerName, repoRoot2, options = {}) {
       mode,
       detached: isDetached(wtPath),
       created: false,
-      reused: true
+      reused: true,
+      baseCommit: readMetadata(repoRoot2, teamName).find((entry2) => entry2.workerName === workerName)?.baseCommit
     };
     recordMetadata(repoRoot2, teamName, info2);
     return info2;
@@ -76745,7 +76983,8 @@ function ensureWorkerWorktree(teamName, workerName, repoRoot2, options = {}) {
     mode,
     detached: mode === "detached",
     created: true,
-    reused: false
+    reused: false,
+    baseCommit: git(repoRoot2, ["rev-parse", "HEAD"], wtPath)
   };
   recordMetadata(repoRoot2, teamName, info);
   return info;
@@ -76794,6 +77033,12 @@ function removeWorkerWorktree(teamName, workerName, repoRoot2) {
   const branch = getBranchName(teamName, workerName);
   const metaLockPath = `${getMetadataPath(repoRoot2, teamName)}.lock`;
   withFileLockSync(metaLockPath, () => {
+    const baseCommit = readMetadata(repoRoot2, teamName).find((entry2) => entry2.workerName === workerName)?.baseCommit;
+    if (hasCommitsOnlyOnWorkerRefs(repoRoot2, wtPath, branch, baseCommit)) {
+      const error2 = new Error(`worktree_unmerged: preserving worker worktree at ${wtPath} and branch ${branch} because they hold commits that only worker branches have; merge or discard the commits, then retry`);
+      error2.code = "worktree_unmerged";
+      throw error2;
+    }
     prepareWorkerWorktreeForRemoval(teamName, workerName, repoRoot2, wtPath);
     const wasRegisteredWorktree = isRegisteredWorktreePath(repoRoot2, wtPath);
     try {
@@ -77945,8 +78190,8 @@ async function startMergeOrchestrator(config2) {
   let persisted = { lastShas: {} };
   if ((0, import_node_fs17.existsSync)(persistedPath)) {
     try {
-      const { readFileSync: readFileSync128 } = await import("node:fs");
-      persisted = JSON.parse(readFileSync128(persistedPath, "utf-8"));
+      const { readFileSync: readFileSync125 } = await import("node:fs");
+      persisted = JSON.parse(readFileSync125(persistedPath, "utf-8"));
     } catch {
       persisted = { lastShas: {} };
     }
@@ -78328,8 +78573,8 @@ ${dirtyFiles.map((f) => `- \`${f}\``).join("\n")}`;
               return false;
             }
           })(),
-          new Promise((resolve48) => {
-            const t = setTimeout(() => resolve48(false), remaining);
+          new Promise((resolve49) => {
+            const t = setTimeout(() => resolve49(false), remaining);
             if (typeof t.unref === "function") t.unref();
           })
         ]);
@@ -78391,8 +78636,8 @@ async function recoverFromRestart(config2) {
   let persistedShasLoaded = 0;
   if ((0, import_node_fs17.existsSync)(persistedPath)) {
     try {
-      const { readFileSync: readFileSync128 } = await import("node:fs");
-      const persisted = JSON.parse(readFileSync128(persistedPath, "utf-8"));
+      const { readFileSync: readFileSync125 } = await import("node:fs");
+      const persisted = JSON.parse(readFileSync125(persistedPath, "utf-8"));
       persistedShasLoaded = Object.keys(persisted.lastShas ?? {}).length;
     } catch {
       persistedShasLoaded = 0;
@@ -78596,7 +78841,7 @@ async function waitForRecoveryGateRecord(path30, expected, timeoutMs, pollInterv
       if (value.recovery_id === expected.recovery_id && value.worker_name === expected.worker_name && value.replacement_generation === expected.replacement_generation && value.pane_attempt_id === expected.pane_attempt_id && value.launch_attempt_id === expected.launch_attempt_id && value.launch_nonce === expected.launch_nonce) return true;
     } catch {
     }
-    await new Promise((resolve48) => setTimeout(resolve48, pollIntervalMs));
+    await new Promise((resolve49) => setTimeout(resolve49, pollIntervalMs));
   }
   return false;
 }
@@ -79227,7 +79472,7 @@ async function waitForStartupEvidenceBudget(hasEvidence, budgetMs, delayMs = WOR
     if (await hasEvidence()) return true;
     const remainingMs = deadline - Date.now();
     if (remainingMs <= 0) return false;
-    await new Promise((resolve48) => setTimeout(resolve48, Math.min(delayMs, remainingMs)));
+    await new Promise((resolve49) => setTimeout(resolve49, Math.min(delayMs, remainingMs)));
   }
 }
 async function waitForWorkerStartupEvidence(teamName, workerName, taskId, cwd2, baseline, launchAttemptId, budgetMs, delayMs = WORKER_STARTUP_EVIDENCE_POLL_INTERVAL_MS) {
@@ -79997,14 +80242,14 @@ async function readOrCreateRecoveryAttempt(input, recoveryId, replacementGenerat
   }
 }
 function waitForBootstrapRecoveryEvidence(delayMs, signal) {
-  return new Promise((resolve48, reject) => {
+  return new Promise((resolve49, reject) => {
     if (signal?.aborted) {
       reject(signal.reason ?? new Error("bootstrap_recovery_evidence_aborted"));
       return;
     }
     const timer = setTimeout(() => {
       signal?.removeEventListener("abort", onAbort);
-      resolve48();
+      resolve49();
     }, delayMs);
     const onAbort = () => {
       clearTimeout(timer);
@@ -81975,7 +82220,7 @@ async function startTeamV2(config2) {
   });
 }
 async function writeWatchdogFailedMarker(teamName, cwd2, reason) {
-  const { writeFile: writeFile15 } = await import("fs/promises");
+  const { writeFile: writeFile14 } = await import("fs/promises");
   const marker = {
     failedAt: Date.now(),
     reason,
@@ -81984,7 +82229,7 @@ async function writeWatchdogFailedMarker(teamName, cwd2, reason) {
   const root2 = absPath(cwd2, TeamPaths.root(sanitizeTeamName(teamName)));
   const markerPath = (0, import_path109.join)(root2, "watchdog-failed.json");
   await (0, import_promises25.mkdir)(root2, { recursive: true });
-  await writeFile15(markerPath, JSON.stringify(marker, null, 2), "utf-8");
+  await writeFile14(markerPath, JSON.stringify(marker, null, 2), "utf-8");
 }
 async function requeueDeadWorkerTasks(teamName, deadWorkerNames, cwd2) {
   const sanitized = sanitizeTeamName(teamName);
@@ -82135,7 +82380,7 @@ async function processCliWorkerVerdictsUnderLock(teamName, cwd2, expectedInstanc
     ).catch(logCursorTransitionMarkerFailure);
   };
   const { rename: rename8 } = await import("fs/promises");
-  const { renameSync: renameSync18, readFileSync: readFileSync128, existsSync: fsExistsSync } = await import("fs");
+  const { renameSync: renameSync17, readFileSync: readFileSync125, existsSync: fsExistsSync } = await import("fs");
   const { withFileLockSync: withFileLockSync2 } = await Promise.resolve().then(() => (init_file_lock(), file_lock_exports));
   const quarantineNonCursorVerdict = async (outputFile, artifactFingerprint, workerName, taskId, taskVersion, reason) => {
     const stalePath = nonCursorVerdictStalePath(outputFile, artifactFingerprint);
@@ -82208,7 +82453,7 @@ async function processCliWorkerVerdictsUnderLock(teamName, cwd2, expectedInstanc
             if (fsExistsSync(outputFile)) {
               const stalePath = `${processingOutputFile}.stale`;
               try {
-                renameSync18(processingOutputFile, stalePath);
+                renameSync17(processingOutputFile, stalePath);
               } catch {
               }
             } else {
@@ -82216,9 +82461,9 @@ async function processCliWorkerVerdictsUnderLock(teamName, cwd2, expectedInstanc
               return;
             }
           }
-          const raw = readFileSync128(outputFile, "utf-8");
+          const raw = readFileSync125(outputFile, "utf-8");
           parseCliWorkerVerdict(raw);
-          renameSync18(outputFile, processingOutputFile);
+          renameSync17(outputFile, processingOutputFile);
           verdictFile = processingOutputFile;
         });
       }
@@ -83484,30 +83729,17 @@ If you accept, exit your session. If you reject, remain active for task work and
 async function resumeTeamV2(teamName, cwd2) {
   const sanitized = sanitizeTeamName(teamName);
   const config2 = await readTeamConfig(sanitized, cwd2);
-  if (!config2?.instance_id) return null;
+  if (!config2?.instance_id || (config2.lifecycle_state ?? "active") !== "active") return null;
   const sessionName2 = config2.tmux_session || `omc-team-${sanitized}`;
-  if (sessionName2.startsWith("cmux:")) {
-    return {
-      teamName: sanitized,
-      sanitizedName: sanitized,
-      instanceId: config2.instance_id,
-      sessionName: sessionName2,
-      ownsWindow: config2.tmux_window_owned === true,
-      config: config2,
-      cwd: cwd2
-    };
-  }
-  if (!isValidTmuxServerIdentity(config2.tmux_server_identity) || await observeTmuxServerIdentity(config2.tmux_server_identity) !== "matching") {
-    return null;
-  }
   if (!config2.leader_pane_id) return null;
+  const provider = config2.leader_pane_id.startsWith("%") ? "tmux" : "cmux";
   const targetOwnership = await verifyTeamTargetOwnership({
-    provider: "tmux",
+    provider,
     providerTarget: sessionName2,
     recipient: "leader-fixed",
     recipientRole: "leader",
     paneId: config2.leader_pane_id,
-    tmuxServerIdentity: config2.tmux_server_identity
+    ...provider === "tmux" ? { tmuxServerIdentity: config2.tmux_server_identity } : {}
   });
   if (targetOwnership.kind !== "owned") return null;
   return {
@@ -83646,6 +83878,9 @@ var init_runtime_v2 = __esm({
         this.cwd = cwd2;
         this.threshold = threshold;
       }
+      teamName;
+      cwd;
+      threshold;
       consecutiveFailures = 0;
       tripped = false;
       recordSuccess() {
@@ -84162,7 +84397,7 @@ function createRemoteApprovalGate(options) {
   const pollIntervalMs = options.pollIntervalMs ?? DEFAULT_POLL_INTERVAL_MS3;
   const timeoutPolicy = options.timeoutPolicy ?? DEFAULT_TIMEOUT_POLICY;
   const now = options.now ?? (() => Date.now());
-  const sleep7 = options.sleep ?? ((ms) => new Promise((resolve48) => setTimeout(resolve48, ms)));
+  const sleep7 = options.sleep ?? ((ms) => new Promise((resolve49) => setTimeout(resolve49, ms)));
   return {
     async prompt(request) {
       const runDir = resolveRunDirHandle(options.runsRoot, options.runId);
@@ -84431,7 +84666,7 @@ function sanitizeReplyInput(text) {
   return text.replace(/[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]/g, "").replace(/[\u202a-\u202e\u2066-\u2069]/g, "").replace(/\r\n|[\r\n]/g, " ").replace(/\\/g, "\\\\").replace(/`/g, "\\`").replace(/\$\(/g, "\\$(").replace(/\$\{/g, "\\${").trim();
 }
 function parseApprovalReply(text) {
-  const firstWord = text.trim().toLowerCase().split(/\s+/)[0] || "";
+  const firstWord = text.trim().toLowerCase().split(/[\s.,!;:。，！；：、]+/)[0] || "";
   if (APPROVAL_APPROVE_WORDS.has(firstWord)) return "approved";
   if (APPROVAL_DENY_WORDS.has(firstWord)) return "denied";
   return null;
@@ -84641,7 +84876,7 @@ async function pollTelegram(config2, state, rateLimiter) {
   try {
     const offset = state.telegramLastUpdateId ? state.telegramLastUpdateId + 1 : 0;
     const path30 = `/bot${config2.telegramBotToken}/getUpdates?offset=${offset}&timeout=0`;
-    const updates = await new Promise((resolve48, reject) => {
+    const updates = await new Promise((resolve49, reject) => {
       const req = (0, import_https2.request)(
         {
           hostname: "api.telegram.org",
@@ -84658,7 +84893,7 @@ async function pollTelegram(config2, state, rateLimiter) {
             try {
               const body = JSON.parse(Buffer.concat(chunks).toString("utf-8"));
               if (res.statusCode && res.statusCode >= 200 && res.statusCode < 300) {
-                resolve48(body.result || []);
+                resolve49(body.result || []);
               } else {
                 reject(new Error(`HTTP ${res.statusCode}`));
               }
@@ -84709,7 +84944,7 @@ async function pollTelegram(config2, state, rateLimiter) {
               text: `Approval recorded: ${decision}`,
               reply_to_message_id: msg.message_id
             });
-            await new Promise((resolve48) => {
+            await new Promise((resolve49) => {
               const confirmReq = (0, import_https2.request)(
                 {
                   hostname: "api.telegram.org",
@@ -84724,13 +84959,13 @@ async function pollTelegram(config2, state, rateLimiter) {
                 },
                 (res) => {
                   res.resume();
-                  resolve48();
+                  resolve49();
                 }
               );
-              confirmReq.on("error", () => resolve48());
+              confirmReq.on("error", () => resolve49());
               confirmReq.on("timeout", () => {
                 confirmReq.destroy();
-                resolve48();
+                resolve49();
               });
               confirmReq.write(confirmBody);
               confirmReq.end();
@@ -84767,7 +85002,7 @@ async function pollTelegram(config2, state, rateLimiter) {
             text: "Injected into Claude Code session.",
             reply_to_message_id: msg.message_id
           });
-          await new Promise((resolve48) => {
+          await new Promise((resolve49) => {
             const replyReq = (0, import_https2.request)(
               {
                 hostname: "api.telegram.org",
@@ -84782,13 +85017,13 @@ async function pollTelegram(config2, state, rateLimiter) {
               },
               (res) => {
                 res.resume();
-                resolve48();
+                resolve49();
               }
             );
-            replyReq.on("error", () => resolve48());
+            replyReq.on("error", () => resolve49());
             replyReq.on("timeout", () => {
               replyReq.destroy();
-              resolve48();
+              resolve49();
             });
             replyReq.write(replyBody);
             replyReq.end();
@@ -84940,13 +85175,13 @@ async function pollLoop() {
         }
       }
       writeDaemonState(state);
-      await new Promise((resolve48) => setTimeout(resolve48, config2.pollIntervalMs));
+      await new Promise((resolve49) => setTimeout(resolve49, config2.pollIntervalMs));
     } catch (error2) {
       state.errors++;
       state.lastError = redactTokens(error2 instanceof Error ? error2.message : String(error2));
       log(`Poll error: ${state.lastError}`);
       writeDaemonState(state);
-      await new Promise((resolve48) => setTimeout(resolve48, config2.pollIntervalMs * 2));
+      await new Promise((resolve49) => setTimeout(resolve49, config2.pollIntervalMs * 2));
     }
   }
   log("Poll loop ended");
@@ -84979,7 +85214,7 @@ function startReplyListener(_config) {
       detached: true,
       stdio: "ignore",
       cwd: process.cwd(),
-      env: createMinimalDaemonEnv()
+      env: childEnv(createMinimalDaemonEnv())
     });
     child.unref();
     const pid = child.pid;
@@ -85161,6 +85396,7 @@ var import_fs91, import_path114, import_url15, import_child_process28, import_cr
 var init_reply_listener = __esm({
   "src/notifications/reply-listener.ts"() {
     "use strict";
+    init_windows_search();
     import_fs91 = require("fs");
     import_path114 = require("path");
     import_url15 = require("url");
@@ -85241,6 +85477,7 @@ var init_reply_listener = __esm({
       constructor(maxPerMinute) {
         this.maxPerMinute = maxPerMinute;
       }
+      maxPerMinute;
       timestamps = [];
       windowMs = 60 * 1e3;
       canProceed() {
@@ -85984,7 +86221,7 @@ function workerEnvironment() {
 }
 function spawnSessionEndWorker(payload) {
   try {
-    const child = (0, import_child_process29.spawn)(process.execPath, [(0, import_url16.fileURLToPath)(importMetaUrl), WORKER_ARG, JSON.stringify(payload)], { detached: true, stdio: "ignore", env: workerEnvironment(), windowsHide: true });
+    const child = (0, import_child_process29.spawn)(process.execPath, [(0, import_url16.fileURLToPath)(importMetaUrl), WORKER_ARG, JSON.stringify(payload)], { detached: true, stdio: "ignore", env: childEnv(workerEnvironment()), windowsHide: true });
     child.unref();
     return true;
   } catch {
@@ -86066,6 +86303,15 @@ function reschedulePendingWorker(payload, job) {
     void processSessionEndWorker(payload);
   }, delay);
 }
+function retryAfterBoundedRunners(payload, job) {
+  if (!job || job.owner || job.phase === "complete") return;
+  const now = Date.now();
+  const deadlines = Object.values(job.actions).filter((action) => action.status === "claimed" && action.runner && action.runner.phase !== "terminal").map((action) => Date.parse(action.runner.deadlineAt)).filter((deadline) => deadline > now);
+  if (deadlines.length === 0) return;
+  setTimeout(() => {
+    void processSessionEndWorker(payload);
+  }, Math.max(...deadlines) - now + 1);
+}
 async function processSessionEndWorker(payload) {
   const deadlineAt = Date.now() + MAX_WORKER_MS;
   const nonce = (0, import_crypto34.randomUUID)();
@@ -86076,7 +86322,10 @@ async function processSessionEndWorker(payload) {
     await reapIfProvenStale(payload, deadlineAt);
     claimed = claimSessionEndJob(payload.directory, payload.sessionId, nonce, identity, deadlineAt);
   }
-  if (!claimed || !claimed.owner) return;
+  if (!claimed || !claimed.owner) {
+    retryAfterBoundedRunners(payload, readSessionEndJob(payload.directory, payload.sessionId));
+    return;
+  }
   let admitted = readSessionEndJob(payload.directory, payload.sessionId);
   const graceExpired = admitted ? Date.now() >= Date.parse(admitted.producerGraceExpiresAt) : false;
   if (admitted && graceExpired) {
@@ -86161,6 +86410,7 @@ var import_child_process29, import_crypto34, import_url16, WORKER_ARG, MAX_WORKE
 var init_worker = __esm({
   "src/hooks/session-end/worker.ts"() {
     "use strict";
+    init_windows_search();
     import_child_process29 = require("child_process");
     import_crypto34 = require("crypto");
     import_url16 = require("url");
@@ -86824,13 +87074,13 @@ function collectPlanRefs(directory, sessionId) {
       const read = readPrdFromPath(prdPath);
       const prd = read?.prd;
       if (prd) {
-        const stories = Array.isArray(prd.userStories) ? prd.userStories : [];
+        const status = getPrdStatus(prd);
         refs.prd = {
           path: prdPath,
           title: typeof prd.project === "string" ? prd.project : "untitled",
-          status: stories.some((s) => !s.passes) ? "in_progress" : "done",
-          stories_total: stories.length,
-          stories_completed: stories.filter((s) => s.passes).length
+          status: status.allComplete ? "done" : "in_progress",
+          stories_total: status.total,
+          stories_completed: status.completed
         };
       }
     }
@@ -87473,6 +87723,7 @@ function recordSimplifierTriggerShadow(args) {
       source: "code-simplifier-stop"
     },
     twin: () => computeSimplifierTriggerTwin(args.stateDir, args.files),
+    mapHeuristic: (result, questionSet) => result,
     mapAnswer: (answer) => {
       return answer.noul === true;
     },
@@ -87668,5542 +87919,10 @@ var require_analyzer = __commonJS({
   }
 });
 
-// node_modules/regexp-tree/dist/compat-transpiler/transforms/compat-dotall-s-transform.js
-var require_compat_dotall_s_transform = __commonJS({
-  "node_modules/regexp-tree/dist/compat-transpiler/transforms/compat-dotall-s-transform.js"(exports2, module2) {
-    "use strict";
-    module2.exports = {
-      // Whether `u` flag present. In which case we transform to
-      // \u{10FFFF} instead of \uFFFF.
-      _hasUFlag: false,
-      // Only run this plugin if we have `s` flag.
-      shouldRun: function shouldRun(ast) {
-        var shouldRun2 = ast.flags.includes("s");
-        if (!shouldRun2) {
-          return false;
-        }
-        ast.flags = ast.flags.replace("s", "");
-        this._hasUFlag = ast.flags.includes("u");
-        return true;
-      },
-      Char: function Char(path30) {
-        var node = path30.node;
-        if (node.kind !== "meta" || node.value !== ".") {
-          return;
-        }
-        var toValue = "\\uFFFF";
-        var toSymbol = "\uFFFF";
-        if (this._hasUFlag) {
-          toValue = "\\u{10FFFF}";
-          toSymbol = "\u{10FFFF}";
-        }
-        path30.replace({
-          type: "CharacterClass",
-          expressions: [{
-            type: "ClassRange",
-            from: {
-              type: "Char",
-              value: "\\0",
-              kind: "decimal",
-              symbol: "\0"
-            },
-            to: {
-              type: "Char",
-              value: toValue,
-              kind: "unicode",
-              symbol: toSymbol
-            }
-          }]
-        });
-      }
-    };
-  }
-});
-
-// node_modules/regexp-tree/dist/compat-transpiler/transforms/compat-named-capturing-groups-transform.js
-var require_compat_named_capturing_groups_transform = __commonJS({
-  "node_modules/regexp-tree/dist/compat-transpiler/transforms/compat-named-capturing-groups-transform.js"(exports2, module2) {
-    "use strict";
-    module2.exports = {
-      // To track the names of the groups, and return them
-      // in the transform result state.
-      //
-      // A map from name to number: {foo: 2, bar: 4}
-      _groupNames: {},
-      /**
-       * Initialises the trasnform.
-       */
-      init: function init() {
-        this._groupNames = {};
-      },
-      /**
-       * Returns extra state, which eventually is returned to
-       */
-      getExtra: function getExtra() {
-        return this._groupNames;
-      },
-      Group: function Group(path30) {
-        var node = path30.node;
-        if (!node.name) {
-          return;
-        }
-        this._groupNames[node.name] = node.number;
-        delete node.name;
-        delete node.nameRaw;
-      },
-      Backreference: function Backreference(path30) {
-        var node = path30.node;
-        if (node.kind !== "name") {
-          return;
-        }
-        node.kind = "number";
-        node.reference = node.number;
-        delete node.referenceRaw;
-      }
-    };
-  }
-});
-
-// node_modules/regexp-tree/dist/compat-transpiler/transforms/compat-x-flag-transform.js
-var require_compat_x_flag_transform = __commonJS({
-  "node_modules/regexp-tree/dist/compat-transpiler/transforms/compat-x-flag-transform.js"(exports2, module2) {
-    "use strict";
-    module2.exports = {
-      RegExp: function RegExp2(_ref) {
-        var node = _ref.node;
-        if (node.flags.includes("x")) {
-          node.flags = node.flags.replace("x", "");
-        }
-      }
-    };
-  }
-});
-
-// node_modules/regexp-tree/dist/compat-transpiler/transforms/index.js
-var require_transforms = __commonJS({
-  "node_modules/regexp-tree/dist/compat-transpiler/transforms/index.js"(exports2, module2) {
-    "use strict";
-    module2.exports = {
-      // "dotAll" `s` flag
-      dotAll: require_compat_dotall_s_transform(),
-      // Named capturing groups.
-      namedCapturingGroups: require_compat_named_capturing_groups_transform(),
-      // `x` flag
-      xFlag: require_compat_x_flag_transform()
-    };
-  }
-});
-
-// node_modules/regexp-tree/dist/generator/index.js
-var require_generator = __commonJS({
-  "node_modules/regexp-tree/dist/generator/index.js"(exports2, module2) {
-    "use strict";
-    function gen(node) {
-      return node ? generator[node.type](node) : "";
-    }
-    var generator = {
-      RegExp: function RegExp2(node) {
-        return "/" + gen(node.body) + "/" + node.flags;
-      },
-      Alternative: function Alternative(node) {
-        return (node.expressions || []).map(gen).join("");
-      },
-      Disjunction: function Disjunction(node) {
-        return gen(node.left) + "|" + gen(node.right);
-      },
-      Group: function Group(node) {
-        var expression = gen(node.expression);
-        if (node.capturing) {
-          if (node.name) {
-            return "(?<" + (node.nameRaw || node.name) + ">" + expression + ")";
-          }
-          return "(" + expression + ")";
-        }
-        return "(?:" + expression + ")";
-      },
-      Backreference: function Backreference(node) {
-        switch (node.kind) {
-          case "number":
-            return "\\" + node.reference;
-          case "name":
-            return "\\k<" + (node.referenceRaw || node.reference) + ">";
-          default:
-            throw new TypeError("Unknown Backreference kind: " + node.kind);
-        }
-      },
-      Assertion: function Assertion(node) {
-        switch (node.kind) {
-          case "^":
-          case "$":
-          case "\\b":
-          case "\\B":
-            return node.kind;
-          case "Lookahead": {
-            var assertion = gen(node.assertion);
-            if (node.negative) {
-              return "(?!" + assertion + ")";
-            }
-            return "(?=" + assertion + ")";
-          }
-          case "Lookbehind": {
-            var _assertion = gen(node.assertion);
-            if (node.negative) {
-              return "(?<!" + _assertion + ")";
-            }
-            return "(?<=" + _assertion + ")";
-          }
-          default:
-            throw new TypeError("Unknown Assertion kind: " + node.kind);
-        }
-      },
-      CharacterClass: function CharacterClass(node) {
-        var expressions = node.expressions.map(gen).join("");
-        if (node.negative) {
-          return "[^" + expressions + "]";
-        }
-        return "[" + expressions + "]";
-      },
-      ClassRange: function ClassRange(node) {
-        return gen(node.from) + "-" + gen(node.to);
-      },
-      Repetition: function Repetition(node) {
-        return "" + gen(node.expression) + gen(node.quantifier);
-      },
-      Quantifier: function Quantifier(node) {
-        var quantifier = void 0;
-        var greedy = node.greedy ? "" : "?";
-        switch (node.kind) {
-          case "+":
-          case "?":
-          case "*":
-            quantifier = node.kind;
-            break;
-          case "Range":
-            if (node.from === node.to) {
-              quantifier = "{" + node.from + "}";
-            } else if (!node.to) {
-              quantifier = "{" + node.from + ",}";
-            } else {
-              quantifier = "{" + node.from + "," + node.to + "}";
-            }
-            break;
-          default:
-            throw new TypeError("Unknown Quantifier kind: " + node.kind);
-        }
-        return "" + quantifier + greedy;
-      },
-      Char: function Char(node) {
-        var value = node.value;
-        switch (node.kind) {
-          case "simple": {
-            if (node.escaped) {
-              return "\\" + value;
-            }
-            return value;
-          }
-          case "hex":
-          case "unicode":
-          case "oct":
-          case "decimal":
-          case "control":
-          case "meta":
-            return value;
-          default:
-            throw new TypeError("Unknown Char kind: " + node.kind);
-        }
-      },
-      UnicodeProperty: function UnicodeProperty(node) {
-        var escapeChar = node.negative ? "P" : "p";
-        var namePart = void 0;
-        if (!node.shorthand && !node.binary) {
-          namePart = node.name + "=";
-        } else {
-          namePart = "";
-        }
-        return "\\" + escapeChar + "{" + namePart + node.value + "}";
-      }
-    };
-    module2.exports = {
-      /**
-       * Generates a regexp string from an AST.
-       *
-       * @param Object ast - an AST node
-       */
-      generate: gen
-    };
-  }
-});
-
-// node_modules/regexp-tree/dist/parser/unicode/parser-unicode-properties.js
-var require_parser_unicode_properties = __commonJS({
-  "node_modules/regexp-tree/dist/parser/unicode/parser-unicode-properties.js"(exports2, module2) {
-    "use strict";
-    var NON_BINARY_PROP_NAMES_TO_ALIASES = {
-      General_Category: "gc",
-      Script: "sc",
-      Script_Extensions: "scx"
-    };
-    var NON_BINARY_ALIASES_TO_PROP_NAMES = inverseMap(NON_BINARY_PROP_NAMES_TO_ALIASES);
-    var BINARY_PROP_NAMES_TO_ALIASES = {
-      ASCII: "ASCII",
-      ASCII_Hex_Digit: "AHex",
-      Alphabetic: "Alpha",
-      Any: "Any",
-      Assigned: "Assigned",
-      Bidi_Control: "Bidi_C",
-      Bidi_Mirrored: "Bidi_M",
-      Case_Ignorable: "CI",
-      Cased: "Cased",
-      Changes_When_Casefolded: "CWCF",
-      Changes_When_Casemapped: "CWCM",
-      Changes_When_Lowercased: "CWL",
-      Changes_When_NFKC_Casefolded: "CWKCF",
-      Changes_When_Titlecased: "CWT",
-      Changes_When_Uppercased: "CWU",
-      Dash: "Dash",
-      Default_Ignorable_Code_Point: "DI",
-      Deprecated: "Dep",
-      Diacritic: "Dia",
-      Emoji: "Emoji",
-      Emoji_Component: "Emoji_Component",
-      Emoji_Modifier: "Emoji_Modifier",
-      Emoji_Modifier_Base: "Emoji_Modifier_Base",
-      Emoji_Presentation: "Emoji_Presentation",
-      Extended_Pictographic: "Extended_Pictographic",
-      Extender: "Ext",
-      Grapheme_Base: "Gr_Base",
-      Grapheme_Extend: "Gr_Ext",
-      Hex_Digit: "Hex",
-      IDS_Binary_Operator: "IDSB",
-      IDS_Trinary_Operator: "IDST",
-      ID_Continue: "IDC",
-      ID_Start: "IDS",
-      Ideographic: "Ideo",
-      Join_Control: "Join_C",
-      Logical_Order_Exception: "LOE",
-      Lowercase: "Lower",
-      Math: "Math",
-      Noncharacter_Code_Point: "NChar",
-      Pattern_Syntax: "Pat_Syn",
-      Pattern_White_Space: "Pat_WS",
-      Quotation_Mark: "QMark",
-      Radical: "Radical",
-      Regional_Indicator: "RI",
-      Sentence_Terminal: "STerm",
-      Soft_Dotted: "SD",
-      Terminal_Punctuation: "Term",
-      Unified_Ideograph: "UIdeo",
-      Uppercase: "Upper",
-      Variation_Selector: "VS",
-      White_Space: "space",
-      XID_Continue: "XIDC",
-      XID_Start: "XIDS"
-    };
-    var BINARY_ALIASES_TO_PROP_NAMES = inverseMap(BINARY_PROP_NAMES_TO_ALIASES);
-    var GENERAL_CATEGORY_VALUE_TO_ALIASES = {
-      Cased_Letter: "LC",
-      Close_Punctuation: "Pe",
-      Connector_Punctuation: "Pc",
-      Control: ["Cc", "cntrl"],
-      Currency_Symbol: "Sc",
-      Dash_Punctuation: "Pd",
-      Decimal_Number: ["Nd", "digit"],
-      Enclosing_Mark: "Me",
-      Final_Punctuation: "Pf",
-      Format: "Cf",
-      Initial_Punctuation: "Pi",
-      Letter: "L",
-      Letter_Number: "Nl",
-      Line_Separator: "Zl",
-      Lowercase_Letter: "Ll",
-      Mark: ["M", "Combining_Mark"],
-      Math_Symbol: "Sm",
-      Modifier_Letter: "Lm",
-      Modifier_Symbol: "Sk",
-      Nonspacing_Mark: "Mn",
-      Number: "N",
-      Open_Punctuation: "Ps",
-      Other: "C",
-      Other_Letter: "Lo",
-      Other_Number: "No",
-      Other_Punctuation: "Po",
-      Other_Symbol: "So",
-      Paragraph_Separator: "Zp",
-      Private_Use: "Co",
-      Punctuation: ["P", "punct"],
-      Separator: "Z",
-      Space_Separator: "Zs",
-      Spacing_Mark: "Mc",
-      Surrogate: "Cs",
-      Symbol: "S",
-      Titlecase_Letter: "Lt",
-      Unassigned: "Cn",
-      Uppercase_Letter: "Lu"
-    };
-    var GENERAL_CATEGORY_VALUE_ALIASES_TO_VALUES = inverseMap(GENERAL_CATEGORY_VALUE_TO_ALIASES);
-    var SCRIPT_VALUE_TO_ALIASES = {
-      Adlam: "Adlm",
-      Ahom: "Ahom",
-      Anatolian_Hieroglyphs: "Hluw",
-      Arabic: "Arab",
-      Armenian: "Armn",
-      Avestan: "Avst",
-      Balinese: "Bali",
-      Bamum: "Bamu",
-      Bassa_Vah: "Bass",
-      Batak: "Batk",
-      Bengali: "Beng",
-      Bhaiksuki: "Bhks",
-      Bopomofo: "Bopo",
-      Brahmi: "Brah",
-      Braille: "Brai",
-      Buginese: "Bugi",
-      Buhid: "Buhd",
-      Canadian_Aboriginal: "Cans",
-      Carian: "Cari",
-      Caucasian_Albanian: "Aghb",
-      Chakma: "Cakm",
-      Cham: "Cham",
-      Cherokee: "Cher",
-      Common: "Zyyy",
-      Coptic: ["Copt", "Qaac"],
-      Cuneiform: "Xsux",
-      Cypriot: "Cprt",
-      Cyrillic: "Cyrl",
-      Deseret: "Dsrt",
-      Devanagari: "Deva",
-      Dogra: "Dogr",
-      Duployan: "Dupl",
-      Egyptian_Hieroglyphs: "Egyp",
-      Elbasan: "Elba",
-      Ethiopic: "Ethi",
-      Georgian: "Geor",
-      Glagolitic: "Glag",
-      Gothic: "Goth",
-      Grantha: "Gran",
-      Greek: "Grek",
-      Gujarati: "Gujr",
-      Gunjala_Gondi: "Gong",
-      Gurmukhi: "Guru",
-      Han: "Hani",
-      Hangul: "Hang",
-      Hanifi_Rohingya: "Rohg",
-      Hanunoo: "Hano",
-      Hatran: "Hatr",
-      Hebrew: "Hebr",
-      Hiragana: "Hira",
-      Imperial_Aramaic: "Armi",
-      Inherited: ["Zinh", "Qaai"],
-      Inscriptional_Pahlavi: "Phli",
-      Inscriptional_Parthian: "Prti",
-      Javanese: "Java",
-      Kaithi: "Kthi",
-      Kannada: "Knda",
-      Katakana: "Kana",
-      Kayah_Li: "Kali",
-      Kharoshthi: "Khar",
-      Khmer: "Khmr",
-      Khojki: "Khoj",
-      Khudawadi: "Sind",
-      Lao: "Laoo",
-      Latin: "Latn",
-      Lepcha: "Lepc",
-      Limbu: "Limb",
-      Linear_A: "Lina",
-      Linear_B: "Linb",
-      Lisu: "Lisu",
-      Lycian: "Lyci",
-      Lydian: "Lydi",
-      Mahajani: "Mahj",
-      Makasar: "Maka",
-      Malayalam: "Mlym",
-      Mandaic: "Mand",
-      Manichaean: "Mani",
-      Marchen: "Marc",
-      Medefaidrin: "Medf",
-      Masaram_Gondi: "Gonm",
-      Meetei_Mayek: "Mtei",
-      Mende_Kikakui: "Mend",
-      Meroitic_Cursive: "Merc",
-      Meroitic_Hieroglyphs: "Mero",
-      Miao: "Plrd",
-      Modi: "Modi",
-      Mongolian: "Mong",
-      Mro: "Mroo",
-      Multani: "Mult",
-      Myanmar: "Mymr",
-      Nabataean: "Nbat",
-      New_Tai_Lue: "Talu",
-      Newa: "Newa",
-      Nko: "Nkoo",
-      Nushu: "Nshu",
-      Ogham: "Ogam",
-      Ol_Chiki: "Olck",
-      Old_Hungarian: "Hung",
-      Old_Italic: "Ital",
-      Old_North_Arabian: "Narb",
-      Old_Permic: "Perm",
-      Old_Persian: "Xpeo",
-      Old_Sogdian: "Sogo",
-      Old_South_Arabian: "Sarb",
-      Old_Turkic: "Orkh",
-      Oriya: "Orya",
-      Osage: "Osge",
-      Osmanya: "Osma",
-      Pahawh_Hmong: "Hmng",
-      Palmyrene: "Palm",
-      Pau_Cin_Hau: "Pauc",
-      Phags_Pa: "Phag",
-      Phoenician: "Phnx",
-      Psalter_Pahlavi: "Phlp",
-      Rejang: "Rjng",
-      Runic: "Runr",
-      Samaritan: "Samr",
-      Saurashtra: "Saur",
-      Sharada: "Shrd",
-      Shavian: "Shaw",
-      Siddham: "Sidd",
-      SignWriting: "Sgnw",
-      Sinhala: "Sinh",
-      Sogdian: "Sogd",
-      Sora_Sompeng: "Sora",
-      Soyombo: "Soyo",
-      Sundanese: "Sund",
-      Syloti_Nagri: "Sylo",
-      Syriac: "Syrc",
-      Tagalog: "Tglg",
-      Tagbanwa: "Tagb",
-      Tai_Le: "Tale",
-      Tai_Tham: "Lana",
-      Tai_Viet: "Tavt",
-      Takri: "Takr",
-      Tamil: "Taml",
-      Tangut: "Tang",
-      Telugu: "Telu",
-      Thaana: "Thaa",
-      Thai: "Thai",
-      Tibetan: "Tibt",
-      Tifinagh: "Tfng",
-      Tirhuta: "Tirh",
-      Ugaritic: "Ugar",
-      Vai: "Vaii",
-      Warang_Citi: "Wara",
-      Yi: "Yiii",
-      Zanabazar_Square: "Zanb"
-    };
-    var SCRIPT_VALUE_ALIASES_TO_VALUE = inverseMap(SCRIPT_VALUE_TO_ALIASES);
-    function inverseMap(data) {
-      var inverse = {};
-      for (var name in data) {
-        if (!data.hasOwnProperty(name)) {
-          continue;
-        }
-        var value = data[name];
-        if (Array.isArray(value)) {
-          for (var i = 0; i < value.length; i++) {
-            inverse[value[i]] = name;
-          }
-        } else {
-          inverse[value] = name;
-        }
-      }
-      return inverse;
-    }
-    function isValidName(name) {
-      return NON_BINARY_PROP_NAMES_TO_ALIASES.hasOwnProperty(name) || NON_BINARY_ALIASES_TO_PROP_NAMES.hasOwnProperty(name) || BINARY_PROP_NAMES_TO_ALIASES.hasOwnProperty(name) || BINARY_ALIASES_TO_PROP_NAMES.hasOwnProperty(name);
-    }
-    function isValidValue(name, value) {
-      if (isGeneralCategoryName(name)) {
-        return isGeneralCategoryValue(value);
-      }
-      if (isScriptCategoryName(name)) {
-        return isScriptCategoryValue(value);
-      }
-      return false;
-    }
-    function isAlias(name) {
-      return NON_BINARY_ALIASES_TO_PROP_NAMES.hasOwnProperty(name) || BINARY_ALIASES_TO_PROP_NAMES.hasOwnProperty(name);
-    }
-    function isGeneralCategoryName(name) {
-      return name === "General_Category" || name == "gc";
-    }
-    function isScriptCategoryName(name) {
-      return name === "Script" || name === "Script_Extensions" || name === "sc" || name === "scx";
-    }
-    function isGeneralCategoryValue(value) {
-      return GENERAL_CATEGORY_VALUE_TO_ALIASES.hasOwnProperty(value) || GENERAL_CATEGORY_VALUE_ALIASES_TO_VALUES.hasOwnProperty(value);
-    }
-    function isScriptCategoryValue(value) {
-      return SCRIPT_VALUE_TO_ALIASES.hasOwnProperty(value) || SCRIPT_VALUE_ALIASES_TO_VALUE.hasOwnProperty(value);
-    }
-    function isBinaryPropertyName(name) {
-      return BINARY_PROP_NAMES_TO_ALIASES.hasOwnProperty(name) || BINARY_ALIASES_TO_PROP_NAMES.hasOwnProperty(name);
-    }
-    function getCanonicalName(name) {
-      if (NON_BINARY_ALIASES_TO_PROP_NAMES.hasOwnProperty(name)) {
-        return NON_BINARY_ALIASES_TO_PROP_NAMES[name];
-      }
-      if (BINARY_ALIASES_TO_PROP_NAMES.hasOwnProperty(name)) {
-        return BINARY_ALIASES_TO_PROP_NAMES[name];
-      }
-      return null;
-    }
-    function getCanonicalValue(value) {
-      if (GENERAL_CATEGORY_VALUE_ALIASES_TO_VALUES.hasOwnProperty(value)) {
-        return GENERAL_CATEGORY_VALUE_ALIASES_TO_VALUES[value];
-      }
-      if (SCRIPT_VALUE_ALIASES_TO_VALUE.hasOwnProperty(value)) {
-        return SCRIPT_VALUE_ALIASES_TO_VALUE[value];
-      }
-      if (BINARY_ALIASES_TO_PROP_NAMES.hasOwnProperty(value)) {
-        return BINARY_ALIASES_TO_PROP_NAMES[value];
-      }
-      return null;
-    }
-    module2.exports = {
-      isAlias,
-      isValidName,
-      isValidValue,
-      isGeneralCategoryValue,
-      isScriptCategoryValue,
-      isBinaryPropertyName,
-      getCanonicalName,
-      getCanonicalValue,
-      NON_BINARY_PROP_NAMES_TO_ALIASES,
-      NON_BINARY_ALIASES_TO_PROP_NAMES,
-      BINARY_PROP_NAMES_TO_ALIASES,
-      BINARY_ALIASES_TO_PROP_NAMES,
-      GENERAL_CATEGORY_VALUE_TO_ALIASES,
-      GENERAL_CATEGORY_VALUE_ALIASES_TO_VALUES,
-      SCRIPT_VALUE_TO_ALIASES,
-      SCRIPT_VALUE_ALIASES_TO_VALUE
-    };
-  }
-});
-
-// node_modules/regexp-tree/dist/parser/generated/regexp-tree.js
-var require_regexp_tree = __commonJS({
-  "node_modules/regexp-tree/dist/parser/generated/regexp-tree.js"(exports2, module2) {
-    "use strict";
-    var _slicedToArray = /* @__PURE__ */ (function() {
-      function sliceIterator(arr, i) {
-        var _arr = [];
-        var _n = true;
-        var _d = false;
-        var _e = void 0;
-        try {
-          for (var _i = arr[Symbol.iterator](), _s; !(_n = (_s = _i.next()).done); _n = true) {
-            _arr.push(_s.value);
-            if (i && _arr.length === i) break;
-          }
-        } catch (err) {
-          _d = true;
-          _e = err;
-        } finally {
-          try {
-            if (!_n && _i["return"]) _i["return"]();
-          } finally {
-            if (_d) throw _e;
-          }
-        }
-        return _arr;
-      }
-      return function(arr, i) {
-        if (Array.isArray(arr)) {
-          return arr;
-        } else if (Symbol.iterator in Object(arr)) {
-          return sliceIterator(arr, i);
-        } else {
-          throw new TypeError("Invalid attempt to destructure non-iterable instance");
-        }
-      };
-    })();
-    function _toConsumableArray(arr) {
-      if (Array.isArray(arr)) {
-        for (var i = 0, arr2 = Array(arr.length); i < arr.length; i++) {
-          arr2[i] = arr[i];
-        }
-        return arr2;
-      } else {
-        return Array.from(arr);
-      }
-    }
-    var yytext = void 0;
-    var yyleng = void 0;
-    var yy = {};
-    var __ = void 0;
-    var __loc = void 0;
-    function yyloc(start, end) {
-      if (!yy.options.captureLocations) {
-        return null;
-      }
-      if (!start || !end) {
-        return start || end;
-      }
-      return {
-        startOffset: start.startOffset,
-        endOffset: end.endOffset,
-        startLine: start.startLine,
-        endLine: end.endLine,
-        startColumn: start.startColumn,
-        endColumn: end.endColumn
-      };
-    }
-    var EOF = "$";
-    var productions = [[-1, 1, function(_1, _1loc) {
-      __loc = yyloc(_1loc, _1loc);
-      __ = _1;
-    }], [0, 4, function(_1, _2, _3, _4, _1loc, _2loc, _3loc, _4loc) {
-      __loc = yyloc(_1loc, _4loc);
-      __ = Node({
-        type: "RegExp",
-        body: _2,
-        flags: checkFlags(_4)
-      }, loc(_1loc, _4loc || _3loc));
-    }], [1, 1, function(_1, _1loc) {
-      __loc = yyloc(_1loc, _1loc);
-      __ = _1;
-    }], [1, 0, function() {
-      __loc = null;
-      __ = "";
-    }], [2, 1, function(_1, _1loc) {
-      __loc = yyloc(_1loc, _1loc);
-      __ = _1;
-    }], [2, 2, function(_1, _2, _1loc, _2loc) {
-      __loc = yyloc(_1loc, _2loc);
-      __ = _1 + _2;
-    }], [3, 1, function(_1, _1loc) {
-      __loc = yyloc(_1loc, _1loc);
-      __ = _1;
-    }], [4, 1, function(_1, _1loc) {
-      __loc = yyloc(_1loc, _1loc);
-      __ = _1;
-    }], [4, 3, function(_1, _2, _3, _1loc, _2loc, _3loc) {
-      __loc = yyloc(_1loc, _3loc);
-      var _loc = null;
-      if (_2loc) {
-        _loc = loc(_1loc || _2loc, _3loc || _2loc);
-      }
-      ;
-      __ = Node({
-        type: "Disjunction",
-        left: _1,
-        right: _3
-      }, _loc);
-    }], [5, 1, function(_1, _1loc) {
-      __loc = yyloc(_1loc, _1loc);
-      if (_1.length === 0) {
-        __ = null;
-        return;
-      }
-      if (_1.length === 1) {
-        __ = Node(_1[0], __loc);
-      } else {
-        __ = Node({
-          type: "Alternative",
-          expressions: _1
-        }, __loc);
-      }
-    }], [6, 0, function() {
-      __loc = null;
-      __ = [];
-    }], [6, 2, function(_1, _2, _1loc, _2loc) {
-      __loc = yyloc(_1loc, _2loc);
-      __ = _1.concat(_2);
-    }], [7, 1, function(_1, _1loc) {
-      __loc = yyloc(_1loc, _1loc);
-      __ = Node(Object.assign({ type: "Assertion" }, _1), __loc);
-    }], [7, 2, function(_1, _2, _1loc, _2loc) {
-      __loc = yyloc(_1loc, _2loc);
-      __ = _1;
-      if (_2) {
-        __ = Node({
-          type: "Repetition",
-          expression: _1,
-          quantifier: _2
-        }, __loc);
-      }
-    }], [8, 1, function(_1, _1loc) {
-      __loc = yyloc(_1loc, _1loc);
-      __ = { kind: "^" };
-    }], [8, 1, function(_1, _1loc) {
-      __loc = yyloc(_1loc, _1loc);
-      __ = { kind: "$" };
-    }], [8, 1, function(_1, _1loc) {
-      __loc = yyloc(_1loc, _1loc);
-      __ = { kind: "\\b" };
-    }], [8, 1, function(_1, _1loc) {
-      __loc = yyloc(_1loc, _1loc);
-      __ = { kind: "\\B" };
-    }], [8, 3, function(_1, _2, _3, _1loc, _2loc, _3loc) {
-      __loc = yyloc(_1loc, _3loc);
-      __ = {
-        kind: "Lookahead",
-        assertion: _2
-      };
-    }], [8, 3, function(_1, _2, _3, _1loc, _2loc, _3loc) {
-      __loc = yyloc(_1loc, _3loc);
-      __ = {
-        kind: "Lookahead",
-        negative: true,
-        assertion: _2
-      };
-    }], [8, 3, function(_1, _2, _3, _1loc, _2loc, _3loc) {
-      __loc = yyloc(_1loc, _3loc);
-      __ = {
-        kind: "Lookbehind",
-        assertion: _2
-      };
-    }], [8, 3, function(_1, _2, _3, _1loc, _2loc, _3loc) {
-      __loc = yyloc(_1loc, _3loc);
-      __ = {
-        kind: "Lookbehind",
-        negative: true,
-        assertion: _2
-      };
-    }], [9, 1, function(_1, _1loc) {
-      __loc = yyloc(_1loc, _1loc);
-      __ = _1;
-    }], [9, 1, function(_1, _1loc) {
-      __loc = yyloc(_1loc, _1loc);
-      __ = _1;
-    }], [9, 1, function(_1, _1loc) {
-      __loc = yyloc(_1loc, _1loc);
-      __ = _1;
-    }], [10, 1, function(_1, _1loc) {
-      __loc = yyloc(_1loc, _1loc);
-      __ = Char(_1, "simple", __loc);
-    }], [10, 1, function(_1, _1loc) {
-      __loc = yyloc(_1loc, _1loc);
-      __ = Char(_1.slice(1), "simple", __loc);
-      __.escaped = true;
-    }], [10, 1, function(_1, _1loc) {
-      __loc = yyloc(_1loc, _1loc);
-      __ = Char(_1, "unicode", __loc);
-      __.isSurrogatePair = true;
-    }], [10, 1, function(_1, _1loc) {
-      __loc = yyloc(_1loc, _1loc);
-      __ = Char(_1, "unicode", __loc);
-    }], [10, 1, function(_1, _1loc) {
-      __loc = yyloc(_1loc, _1loc);
-      __ = UnicodeProperty(_1, __loc);
-    }], [10, 1, function(_1, _1loc) {
-      __loc = yyloc(_1loc, _1loc);
-      __ = Char(_1, "control", __loc);
-    }], [10, 1, function(_1, _1loc) {
-      __loc = yyloc(_1loc, _1loc);
-      __ = Char(_1, "hex", __loc);
-    }], [10, 1, function(_1, _1loc) {
-      __loc = yyloc(_1loc, _1loc);
-      __ = Char(_1, "oct", __loc);
-    }], [10, 1, function(_1, _1loc) {
-      __loc = yyloc(_1loc, _1loc);
-      __ = GroupRefOrDecChar(_1, __loc);
-    }], [10, 1, function(_1, _1loc) {
-      __loc = yyloc(_1loc, _1loc);
-      __ = Char(_1, "meta", __loc);
-    }], [10, 1, function(_1, _1loc) {
-      __loc = yyloc(_1loc, _1loc);
-      __ = Char(_1, "meta", __loc);
-    }], [10, 1, function(_1, _1loc) {
-      __loc = yyloc(_1loc, _1loc);
-      __ = NamedGroupRefOrChars(_1, _1loc);
-    }], [11, 1, function(_1, _1loc) {
-      __loc = yyloc(_1loc, _1loc);
-      __ = _1;
-    }], [11, 0], [12, 1, function(_1, _1loc) {
-      __loc = yyloc(_1loc, _1loc);
-      __ = _1;
-    }], [12, 2, function(_1, _2, _1loc, _2loc) {
-      __loc = yyloc(_1loc, _2loc);
-      _1.greedy = false;
-      __ = _1;
-    }], [13, 1, function(_1, _1loc) {
-      __loc = yyloc(_1loc, _1loc);
-      __ = Node({
-        type: "Quantifier",
-        kind: _1,
-        greedy: true
-      }, __loc);
-    }], [13, 1, function(_1, _1loc) {
-      __loc = yyloc(_1loc, _1loc);
-      __ = Node({
-        type: "Quantifier",
-        kind: _1,
-        greedy: true
-      }, __loc);
-    }], [13, 1, function(_1, _1loc) {
-      __loc = yyloc(_1loc, _1loc);
-      __ = Node({
-        type: "Quantifier",
-        kind: _1,
-        greedy: true
-      }, __loc);
-    }], [13, 1, function(_1, _1loc) {
-      __loc = yyloc(_1loc, _1loc);
-      var range = getRange(_1);
-      __ = Node({
-        type: "Quantifier",
-        kind: "Range",
-        from: range[0],
-        to: range[0],
-        greedy: true
-      }, __loc);
-    }], [13, 1, function(_1, _1loc) {
-      __loc = yyloc(_1loc, _1loc);
-      __ = Node({
-        type: "Quantifier",
-        kind: "Range",
-        from: getRange(_1)[0],
-        greedy: true
-      }, __loc);
-    }], [13, 1, function(_1, _1loc) {
-      __loc = yyloc(_1loc, _1loc);
-      var range = getRange(_1);
-      __ = Node({
-        type: "Quantifier",
-        kind: "Range",
-        from: range[0],
-        to: range[1],
-        greedy: true
-      }, __loc);
-    }], [14, 1, function(_1, _1loc) {
-      __loc = yyloc(_1loc, _1loc);
-      __ = _1;
-    }], [14, 1, function(_1, _1loc) {
-      __loc = yyloc(_1loc, _1loc);
-      __ = _1;
-    }], [15, 3, function(_1, _2, _3, _1loc, _2loc, _3loc) {
-      __loc = yyloc(_1loc, _3loc);
-      var nameRaw = String(_1);
-      var name = decodeUnicodeGroupName(nameRaw);
-      if (!yy.options.allowGroupNameDuplicates && namedGroups.hasOwnProperty(name)) {
-        throw new SyntaxError('Duplicate of the named group "' + name + '".');
-      }
-      namedGroups[name] = _1.groupNumber;
-      __ = Node({
-        type: "Group",
-        capturing: true,
-        name,
-        nameRaw,
-        number: _1.groupNumber,
-        expression: _2
-      }, __loc);
-    }], [15, 3, function(_1, _2, _3, _1loc, _2loc, _3loc) {
-      __loc = yyloc(_1loc, _3loc);
-      __ = Node({
-        type: "Group",
-        capturing: true,
-        number: _1.groupNumber,
-        expression: _2
-      }, __loc);
-    }], [16, 3, function(_1, _2, _3, _1loc, _2loc, _3loc) {
-      __loc = yyloc(_1loc, _3loc);
-      __ = Node({
-        type: "Group",
-        capturing: false,
-        expression: _2
-      }, __loc);
-    }], [17, 3, function(_1, _2, _3, _1loc, _2loc, _3loc) {
-      __loc = yyloc(_1loc, _3loc);
-      __ = Node({
-        type: "CharacterClass",
-        negative: true,
-        expressions: _2
-      }, __loc);
-    }], [17, 3, function(_1, _2, _3, _1loc, _2loc, _3loc) {
-      __loc = yyloc(_1loc, _3loc);
-      __ = Node({
-        type: "CharacterClass",
-        expressions: _2
-      }, __loc);
-    }], [18, 0, function() {
-      __loc = null;
-      __ = [];
-    }], [18, 1, function(_1, _1loc) {
-      __loc = yyloc(_1loc, _1loc);
-      __ = _1;
-    }], [19, 1, function(_1, _1loc) {
-      __loc = yyloc(_1loc, _1loc);
-      __ = [_1];
-    }], [19, 2, function(_1, _2, _1loc, _2loc) {
-      __loc = yyloc(_1loc, _2loc);
-      __ = [_1].concat(_2);
-    }], [19, 4, function(_1, _2, _3, _4, _1loc, _2loc, _3loc, _4loc) {
-      __loc = yyloc(_1loc, _4loc);
-      checkClassRange(_1, _3);
-      __ = [Node({
-        type: "ClassRange",
-        from: _1,
-        to: _3
-      }, loc(_1loc, _3loc))];
-      if (_4) {
-        __ = __.concat(_4);
-      }
-    }], [20, 1, function(_1, _1loc) {
-      __loc = yyloc(_1loc, _1loc);
-      __ = _1;
-    }], [20, 2, function(_1, _2, _1loc, _2loc) {
-      __loc = yyloc(_1loc, _2loc);
-      __ = [_1].concat(_2);
-    }], [20, 4, function(_1, _2, _3, _4, _1loc, _2loc, _3loc, _4loc) {
-      __loc = yyloc(_1loc, _4loc);
-      checkClassRange(_1, _3);
-      __ = [Node({
-        type: "ClassRange",
-        from: _1,
-        to: _3
-      }, loc(_1loc, _3loc))];
-      if (_4) {
-        __ = __.concat(_4);
-      }
-    }], [21, 1, function(_1, _1loc) {
-      __loc = yyloc(_1loc, _1loc);
-      __ = Char(_1, "simple", __loc);
-    }], [21, 1, function(_1, _1loc) {
-      __loc = yyloc(_1loc, _1loc);
-      __ = _1;
-    }], [22, 1, function(_1, _1loc) {
-      __loc = yyloc(_1loc, _1loc);
-      __ = _1;
-    }], [22, 1, function(_1, _1loc) {
-      __loc = yyloc(_1loc, _1loc);
-      __ = Char(_1, "meta", __loc);
-    }]];
-    var tokens = { "SLASH": "23", "CHAR": "24", "BAR": "25", "BOS": "26", "EOS": "27", "ESC_b": "28", "ESC_B": "29", "POS_LA_ASSERT": "30", "R_PAREN": "31", "NEG_LA_ASSERT": "32", "POS_LB_ASSERT": "33", "NEG_LB_ASSERT": "34", "ESC_CHAR": "35", "U_CODE_SURROGATE": "36", "U_CODE": "37", "U_PROP_VALUE_EXP": "38", "CTRL_CH": "39", "HEX_CODE": "40", "OCT_CODE": "41", "DEC_CODE": "42", "META_CHAR": "43", "ANY": "44", "NAMED_GROUP_REF": "45", "Q_MARK": "46", "STAR": "47", "PLUS": "48", "RANGE_EXACT": "49", "RANGE_OPEN": "50", "RANGE_CLOSED": "51", "NAMED_CAPTURE_GROUP": "52", "L_PAREN": "53", "NON_CAPTURE_GROUP": "54", "NEG_CLASS": "55", "R_BRACKET": "56", "L_BRACKET": "57", "DASH": "58", "$": "59" };
-    var table = [{ "0": 1, "23": "s2" }, { "59": "acc" }, { "3": 3, "4": 4, "5": 5, "6": 6, "23": "r10", "24": "r10", "25": "r10", "26": "r10", "27": "r10", "28": "r10", "29": "r10", "30": "r10", "32": "r10", "33": "r10", "34": "r10", "35": "r10", "36": "r10", "37": "r10", "38": "r10", "39": "r10", "40": "r10", "41": "r10", "42": "r10", "43": "r10", "44": "r10", "45": "r10", "52": "r10", "53": "r10", "54": "r10", "55": "r10", "57": "r10" }, { "23": "s7" }, { "23": "r6", "25": "s12" }, { "23": "r7", "25": "r7", "31": "r7" }, { "7": 14, "8": 15, "9": 16, "10": 25, "14": 27, "15": 42, "16": 43, "17": 26, "23": "r9", "24": "s28", "25": "r9", "26": "s17", "27": "s18", "28": "s19", "29": "s20", "30": "s21", "31": "r9", "32": "s22", "33": "s23", "34": "s24", "35": "s29", "36": "s30", "37": "s31", "38": "s32", "39": "s33", "40": "s34", "41": "s35", "42": "s36", "43": "s37", "44": "s38", "45": "s39", "52": "s44", "53": "s45", "54": "s46", "55": "s40", "57": "s41" }, { "1": 8, "2": 9, "24": "s10", "59": "r3" }, { "59": "r1" }, { "24": "s11", "59": "r2" }, { "24": "r4", "59": "r4" }, { "24": "r5", "59": "r5" }, { "5": 13, "6": 6, "23": "r10", "24": "r10", "25": "r10", "26": "r10", "27": "r10", "28": "r10", "29": "r10", "30": "r10", "31": "r10", "32": "r10", "33": "r10", "34": "r10", "35": "r10", "36": "r10", "37": "r10", "38": "r10", "39": "r10", "40": "r10", "41": "r10", "42": "r10", "43": "r10", "44": "r10", "45": "r10", "52": "r10", "53": "r10", "54": "r10", "55": "r10", "57": "r10" }, { "23": "r8", "25": "r8", "31": "r8" }, { "23": "r11", "24": "r11", "25": "r11", "26": "r11", "27": "r11", "28": "r11", "29": "r11", "30": "r11", "31": "r11", "32": "r11", "33": "r11", "34": "r11", "35": "r11", "36": "r11", "37": "r11", "38": "r11", "39": "r11", "40": "r11", "41": "r11", "42": "r11", "43": "r11", "44": "r11", "45": "r11", "52": "r11", "53": "r11", "54": "r11", "55": "r11", "57": "r11" }, { "23": "r12", "24": "r12", "25": "r12", "26": "r12", "27": "r12", "28": "r12", "29": "r12", "30": "r12", "31": "r12", "32": "r12", "33": "r12", "34": "r12", "35": "r12", "36": "r12", "37": "r12", "38": "r12", "39": "r12", "40": "r12", "41": "r12", "42": "r12", "43": "r12", "44": "r12", "45": "r12", "52": "r12", "53": "r12", "54": "r12", "55": "r12", "57": "r12" }, { "11": 47, "12": 48, "13": 49, "23": "r38", "24": "r38", "25": "r38", "26": "r38", "27": "r38", "28": "r38", "29": "r38", "30": "r38", "31": "r38", "32": "r38", "33": "r38", "34": "r38", "35": "r38", "36": "r38", "37": "r38", "38": "r38", "39": "r38", "40": "r38", "41": "r38", "42": "r38", "43": "r38", "44": "r38", "45": "r38", "46": "s52", "47": "s50", "48": "s51", "49": "s53", "50": "s54", "51": "s55", "52": "r38", "53": "r38", "54": "r38", "55": "r38", "57": "r38" }, { "23": "r14", "24": "r14", "25": "r14", "26": "r14", "27": "r14", "28": "r14", "29": "r14", "30": "r14", "31": "r14", "32": "r14", "33": "r14", "34": "r14", "35": "r14", "36": "r14", "37": "r14", "38": "r14", "39": "r14", "40": "r14", "41": "r14", "42": "r14", "43": "r14", "44": "r14", "45": "r14", "52": "r14", "53": "r14", "54": "r14", "55": "r14", "57": "r14" }, { "23": "r15", "24": "r15", "25": "r15", "26": "r15", "27": "r15", "28": "r15", "29": "r15", "30": "r15", "31": "r15", "32": "r15", "33": "r15", "34": "r15", "35": "r15", "36": "r15", "37": "r15", "38": "r15", "39": "r15", "40": "r15", "41": "r15", "42": "r15", "43": "r15", "44": "r15", "45": "r15", "52": "r15", "53": "r15", "54": "r15", "55": "r15", "57": "r15" }, { "23": "r16", "24": "r16", "25": "r16", "26": "r16", "27": "r16", "28": "r16", "29": "r16", "30": "r16", "31": "r16", "32": "r16", "33": "r16", "34": "r16", "35": "r16", "36": "r16", "37": "r16", "38": "r16", "39": "r16", "40": "r16", "41": "r16", "42": "r16", "43": "r16", "44": "r16", "45": "r16", "52": "r16", "53": "r16", "54": "r16", "55": "r16", "57": "r16" }, { "23": "r17", "24": "r17", "25": "r17", "26": "r17", "27": "r17", "28": "r17", "29": "r17", "30": "r17", "31": "r17", "32": "r17", "33": "r17", "34": "r17", "35": "r17", "36": "r17", "37": "r17", "38": "r17", "39": "r17", "40": "r17", "41": "r17", "42": "r17", "43": "r17", "44": "r17", "45": "r17", "52": "r17", "53": "r17", "54": "r17", "55": "r17", "57": "r17" }, { "4": 57, "5": 5, "6": 6, "24": "r10", "25": "r10", "26": "r10", "27": "r10", "28": "r10", "29": "r10", "30": "r10", "31": "r10", "32": "r10", "33": "r10", "34": "r10", "35": "r10", "36": "r10", "37": "r10", "38": "r10", "39": "r10", "40": "r10", "41": "r10", "42": "r10", "43": "r10", "44": "r10", "45": "r10", "52": "r10", "53": "r10", "54": "r10", "55": "r10", "57": "r10" }, { "4": 59, "5": 5, "6": 6, "24": "r10", "25": "r10", "26": "r10", "27": "r10", "28": "r10", "29": "r10", "30": "r10", "31": "r10", "32": "r10", "33": "r10", "34": "r10", "35": "r10", "36": "r10", "37": "r10", "38": "r10", "39": "r10", "40": "r10", "41": "r10", "42": "r10", "43": "r10", "44": "r10", "45": "r10", "52": "r10", "53": "r10", "54": "r10", "55": "r10", "57": "r10" }, { "4": 61, "5": 5, "6": 6, "24": "r10", "25": "r10", "26": "r10", "27": "r10", "28": "r10", "29": "r10", "30": "r10", "31": "r10", "32": "r10", "33": "r10", "34": "r10", "35": "r10", "36": "r10", "37": "r10", "38": "r10", "39": "r10", "40": "r10", "41": "r10", "42": "r10", "43": "r10", "44": "r10", "45": "r10", "52": "r10", "53": "r10", "54": "r10", "55": "r10", "57": "r10" }, { "4": 63, "5": 5, "6": 6, "24": "r10", "25": "r10", "26": "r10", "27": "r10", "28": "r10", "29": "r10", "30": "r10", "31": "r10", "32": "r10", "33": "r10", "34": "r10", "35": "r10", "36": "r10", "37": "r10", "38": "r10", "39": "r10", "40": "r10", "41": "r10", "42": "r10", "43": "r10", "44": "r10", "45": "r10", "52": "r10", "53": "r10", "54": "r10", "55": "r10", "57": "r10" }, { "23": "r22", "24": "r22", "25": "r22", "26": "r22", "27": "r22", "28": "r22", "29": "r22", "30": "r22", "31": "r22", "32": "r22", "33": "r22", "34": "r22", "35": "r22", "36": "r22", "37": "r22", "38": "r22", "39": "r22", "40": "r22", "41": "r22", "42": "r22", "43": "r22", "44": "r22", "45": "r22", "46": "r22", "47": "r22", "48": "r22", "49": "r22", "50": "r22", "51": "r22", "52": "r22", "53": "r22", "54": "r22", "55": "r22", "57": "r22" }, { "23": "r23", "24": "r23", "25": "r23", "26": "r23", "27": "r23", "28": "r23", "29": "r23", "30": "r23", "31": "r23", "32": "r23", "33": "r23", "34": "r23", "35": "r23", "36": "r23", "37": "r23", "38": "r23", "39": "r23", "40": "r23", "41": "r23", "42": "r23", "43": "r23", "44": "r23", "45": "r23", "46": "r23", "47": "r23", "48": "r23", "49": "r23", "50": "r23", "51": "r23", "52": "r23", "53": "r23", "54": "r23", "55": "r23", "57": "r23" }, { "23": "r24", "24": "r24", "25": "r24", "26": "r24", "27": "r24", "28": "r24", "29": "r24", "30": "r24", "31": "r24", "32": "r24", "33": "r24", "34": "r24", "35": "r24", "36": "r24", "37": "r24", "38": "r24", "39": "r24", "40": "r24", "41": "r24", "42": "r24", "43": "r24", "44": "r24", "45": "r24", "46": "r24", "47": "r24", "48": "r24", "49": "r24", "50": "r24", "51": "r24", "52": "r24", "53": "r24", "54": "r24", "55": "r24", "57": "r24" }, { "23": "r25", "24": "r25", "25": "r25", "26": "r25", "27": "r25", "28": "r25", "29": "r25", "30": "r25", "31": "r25", "32": "r25", "33": "r25", "34": "r25", "35": "r25", "36": "r25", "37": "r25", "38": "r25", "39": "r25", "40": "r25", "41": "r25", "42": "r25", "43": "r25", "44": "r25", "45": "r25", "46": "r25", "47": "r25", "48": "r25", "49": "r25", "50": "r25", "51": "r25", "52": "r25", "53": "r25", "54": "r25", "55": "r25", "56": "r25", "57": "r25", "58": "r25" }, { "23": "r26", "24": "r26", "25": "r26", "26": "r26", "27": "r26", "28": "r26", "29": "r26", "30": "r26", "31": "r26", "32": "r26", "33": "r26", "34": "r26", "35": "r26", "36": "r26", "37": "r26", "38": "r26", "39": "r26", "40": "r26", "41": "r26", "42": "r26", "43": "r26", "44": "r26", "45": "r26", "46": "r26", "47": "r26", "48": "r26", "49": "r26", "50": "r26", "51": "r26", "52": "r26", "53": "r26", "54": "r26", "55": "r26", "56": "r26", "57": "r26", "58": "r26" }, { "23": "r27", "24": "r27", "25": "r27", "26": "r27", "27": "r27", "28": "r27", "29": "r27", "30": "r27", "31": "r27", "32": "r27", "33": "r27", "34": "r27", "35": "r27", "36": "r27", "37": "r27", "38": "r27", "39": "r27", "40": "r27", "41": "r27", "42": "r27", "43": "r27", "44": "r27", "45": "r27", "46": "r27", "47": "r27", "48": "r27", "49": "r27", "50": "r27", "51": "r27", "52": "r27", "53": "r27", "54": "r27", "55": "r27", "56": "r27", "57": "r27", "58": "r27" }, { "23": "r28", "24": "r28", "25": "r28", "26": "r28", "27": "r28", "28": "r28", "29": "r28", "30": "r28", "31": "r28", "32": "r28", "33": "r28", "34": "r28", "35": "r28", "36": "r28", "37": "r28", "38": "r28", "39": "r28", "40": "r28", "41": "r28", "42": "r28", "43": "r28", "44": "r28", "45": "r28", "46": "r28", "47": "r28", "48": "r28", "49": "r28", "50": "r28", "51": "r28", "52": "r28", "53": "r28", "54": "r28", "55": "r28", "56": "r28", "57": "r28", "58": "r28" }, { "23": "r29", "24": "r29", "25": "r29", "26": "r29", "27": "r29", "28": "r29", "29": "r29", "30": "r29", "31": "r29", "32": "r29", "33": "r29", "34": "r29", "35": "r29", "36": "r29", "37": "r29", "38": "r29", "39": "r29", "40": "r29", "41": "r29", "42": "r29", "43": "r29", "44": "r29", "45": "r29", "46": "r29", "47": "r29", "48": "r29", "49": "r29", "50": "r29", "51": "r29", "52": "r29", "53": "r29", "54": "r29", "55": "r29", "56": "r29", "57": "r29", "58": "r29" }, { "23": "r30", "24": "r30", "25": "r30", "26": "r30", "27": "r30", "28": "r30", "29": "r30", "30": "r30", "31": "r30", "32": "r30", "33": "r30", "34": "r30", "35": "r30", "36": "r30", "37": "r30", "38": "r30", "39": "r30", "40": "r30", "41": "r30", "42": "r30", "43": "r30", "44": "r30", "45": "r30", "46": "r30", "47": "r30", "48": "r30", "49": "r30", "50": "r30", "51": "r30", "52": "r30", "53": "r30", "54": "r30", "55": "r30", "56": "r30", "57": "r30", "58": "r30" }, { "23": "r31", "24": "r31", "25": "r31", "26": "r31", "27": "r31", "28": "r31", "29": "r31", "30": "r31", "31": "r31", "32": "r31", "33": "r31", "34": "r31", "35": "r31", "36": "r31", "37": "r31", "38": "r31", "39": "r31", "40": "r31", "41": "r31", "42": "r31", "43": "r31", "44": "r31", "45": "r31", "46": "r31", "47": "r31", "48": "r31", "49": "r31", "50": "r31", "51": "r31", "52": "r31", "53": "r31", "54": "r31", "55": "r31", "56": "r31", "57": "r31", "58": "r31" }, { "23": "r32", "24": "r32", "25": "r32", "26": "r32", "27": "r32", "28": "r32", "29": "r32", "30": "r32", "31": "r32", "32": "r32", "33": "r32", "34": "r32", "35": "r32", "36": "r32", "37": "r32", "38": "r32", "39": "r32", "40": "r32", "41": "r32", "42": "r32", "43": "r32", "44": "r32", "45": "r32", "46": "r32", "47": "r32", "48": "r32", "49": "r32", "50": "r32", "51": "r32", "52": "r32", "53": "r32", "54": "r32", "55": "r32", "56": "r32", "57": "r32", "58": "r32" }, { "23": "r33", "24": "r33", "25": "r33", "26": "r33", "27": "r33", "28": "r33", "29": "r33", "30": "r33", "31": "r33", "32": "r33", "33": "r33", "34": "r33", "35": "r33", "36": "r33", "37": "r33", "38": "r33", "39": "r33", "40": "r33", "41": "r33", "42": "r33", "43": "r33", "44": "r33", "45": "r33", "46": "r33", "47": "r33", "48": "r33", "49": "r33", "50": "r33", "51": "r33", "52": "r33", "53": "r33", "54": "r33", "55": "r33", "56": "r33", "57": "r33", "58": "r33" }, { "23": "r34", "24": "r34", "25": "r34", "26": "r34", "27": "r34", "28": "r34", "29": "r34", "30": "r34", "31": "r34", "32": "r34", "33": "r34", "34": "r34", "35": "r34", "36": "r34", "37": "r34", "38": "r34", "39": "r34", "40": "r34", "41": "r34", "42": "r34", "43": "r34", "44": "r34", "45": "r34", "46": "r34", "47": "r34", "48": "r34", "49": "r34", "50": "r34", "51": "r34", "52": "r34", "53": "r34", "54": "r34", "55": "r34", "56": "r34", "57": "r34", "58": "r34" }, { "23": "r35", "24": "r35", "25": "r35", "26": "r35", "27": "r35", "28": "r35", "29": "r35", "30": "r35", "31": "r35", "32": "r35", "33": "r35", "34": "r35", "35": "r35", "36": "r35", "37": "r35", "38": "r35", "39": "r35", "40": "r35", "41": "r35", "42": "r35", "43": "r35", "44": "r35", "45": "r35", "46": "r35", "47": "r35", "48": "r35", "49": "r35", "50": "r35", "51": "r35", "52": "r35", "53": "r35", "54": "r35", "55": "r35", "56": "r35", "57": "r35", "58": "r35" }, { "23": "r36", "24": "r36", "25": "r36", "26": "r36", "27": "r36", "28": "r36", "29": "r36", "30": "r36", "31": "r36", "32": "r36", "33": "r36", "34": "r36", "35": "r36", "36": "r36", "37": "r36", "38": "r36", "39": "r36", "40": "r36", "41": "r36", "42": "r36", "43": "r36", "44": "r36", "45": "r36", "46": "r36", "47": "r36", "48": "r36", "49": "r36", "50": "r36", "51": "r36", "52": "r36", "53": "r36", "54": "r36", "55": "r36", "56": "r36", "57": "r36", "58": "r36" }, { "10": 70, "18": 65, "19": 66, "21": 67, "22": 69, "24": "s28", "28": "s71", "35": "s29", "36": "s30", "37": "s31", "38": "s32", "39": "s33", "40": "s34", "41": "s35", "42": "s36", "43": "s37", "44": "s38", "45": "s39", "56": "r54", "58": "s68" }, { "10": 70, "18": 83, "19": 66, "21": 67, "22": 69, "24": "s28", "28": "s71", "35": "s29", "36": "s30", "37": "s31", "38": "s32", "39": "s33", "40": "s34", "41": "s35", "42": "s36", "43": "s37", "44": "s38", "45": "s39", "56": "r54", "58": "s68" }, { "23": "r47", "24": "r47", "25": "r47", "26": "r47", "27": "r47", "28": "r47", "29": "r47", "30": "r47", "31": "r47", "32": "r47", "33": "r47", "34": "r47", "35": "r47", "36": "r47", "37": "r47", "38": "r47", "39": "r47", "40": "r47", "41": "r47", "42": "r47", "43": "r47", "44": "r47", "45": "r47", "46": "r47", "47": "r47", "48": "r47", "49": "r47", "50": "r47", "51": "r47", "52": "r47", "53": "r47", "54": "r47", "55": "r47", "57": "r47" }, { "23": "r48", "24": "r48", "25": "r48", "26": "r48", "27": "r48", "28": "r48", "29": "r48", "30": "r48", "31": "r48", "32": "r48", "33": "r48", "34": "r48", "35": "r48", "36": "r48", "37": "r48", "38": "r48", "39": "r48", "40": "r48", "41": "r48", "42": "r48", "43": "r48", "44": "r48", "45": "r48", "46": "r48", "47": "r48", "48": "r48", "49": "r48", "50": "r48", "51": "r48", "52": "r48", "53": "r48", "54": "r48", "55": "r48", "57": "r48" }, { "4": 85, "5": 5, "6": 6, "24": "r10", "25": "r10", "26": "r10", "27": "r10", "28": "r10", "29": "r10", "30": "r10", "31": "r10", "32": "r10", "33": "r10", "34": "r10", "35": "r10", "36": "r10", "37": "r10", "38": "r10", "39": "r10", "40": "r10", "41": "r10", "42": "r10", "43": "r10", "44": "r10", "45": "r10", "52": "r10", "53": "r10", "54": "r10", "55": "r10", "57": "r10" }, { "4": 87, "5": 5, "6": 6, "24": "r10", "25": "r10", "26": "r10", "27": "r10", "28": "r10", "29": "r10", "30": "r10", "31": "r10", "32": "r10", "33": "r10", "34": "r10", "35": "r10", "36": "r10", "37": "r10", "38": "r10", "39": "r10", "40": "r10", "41": "r10", "42": "r10", "43": "r10", "44": "r10", "45": "r10", "52": "r10", "53": "r10", "54": "r10", "55": "r10", "57": "r10" }, { "4": 89, "5": 5, "6": 6, "24": "r10", "25": "r10", "26": "r10", "27": "r10", "28": "r10", "29": "r10", "30": "r10", "31": "r10", "32": "r10", "33": "r10", "34": "r10", "35": "r10", "36": "r10", "37": "r10", "38": "r10", "39": "r10", "40": "r10", "41": "r10", "42": "r10", "43": "r10", "44": "r10", "45": "r10", "52": "r10", "53": "r10", "54": "r10", "55": "r10", "57": "r10" }, { "23": "r13", "24": "r13", "25": "r13", "26": "r13", "27": "r13", "28": "r13", "29": "r13", "30": "r13", "31": "r13", "32": "r13", "33": "r13", "34": "r13", "35": "r13", "36": "r13", "37": "r13", "38": "r13", "39": "r13", "40": "r13", "41": "r13", "42": "r13", "43": "r13", "44": "r13", "45": "r13", "52": "r13", "53": "r13", "54": "r13", "55": "r13", "57": "r13" }, { "23": "r37", "24": "r37", "25": "r37", "26": "r37", "27": "r37", "28": "r37", "29": "r37", "30": "r37", "31": "r37", "32": "r37", "33": "r37", "34": "r37", "35": "r37", "36": "r37", "37": "r37", "38": "r37", "39": "r37", "40": "r37", "41": "r37", "42": "r37", "43": "r37", "44": "r37", "45": "r37", "52": "r37", "53": "r37", "54": "r37", "55": "r37", "57": "r37" }, { "23": "r39", "24": "r39", "25": "r39", "26": "r39", "27": "r39", "28": "r39", "29": "r39", "30": "r39", "31": "r39", "32": "r39", "33": "r39", "34": "r39", "35": "r39", "36": "r39", "37": "r39", "38": "r39", "39": "r39", "40": "r39", "41": "r39", "42": "r39", "43": "r39", "44": "r39", "45": "r39", "46": "s56", "52": "r39", "53": "r39", "54": "r39", "55": "r39", "57": "r39" }, { "23": "r41", "24": "r41", "25": "r41", "26": "r41", "27": "r41", "28": "r41", "29": "r41", "30": "r41", "31": "r41", "32": "r41", "33": "r41", "34": "r41", "35": "r41", "36": "r41", "37": "r41", "38": "r41", "39": "r41", "40": "r41", "41": "r41", "42": "r41", "43": "r41", "44": "r41", "45": "r41", "46": "r41", "52": "r41", "53": "r41", "54": "r41", "55": "r41", "57": "r41" }, { "23": "r42", "24": "r42", "25": "r42", "26": "r42", "27": "r42", "28": "r42", "29": "r42", "30": "r42", "31": "r42", "32": "r42", "33": "r42", "34": "r42", "35": "r42", "36": "r42", "37": "r42", "38": "r42", "39": "r42", "40": "r42", "41": "r42", "42": "r42", "43": "r42", "44": "r42", "45": "r42", "46": "r42", "52": "r42", "53": "r42", "54": "r42", "55": "r42", "57": "r42" }, { "23": "r43", "24": "r43", "25": "r43", "26": "r43", "27": "r43", "28": "r43", "29": "r43", "30": "r43", "31": "r43", "32": "r43", "33": "r43", "34": "r43", "35": "r43", "36": "r43", "37": "r43", "38": "r43", "39": "r43", "40": "r43", "41": "r43", "42": "r43", "43": "r43", "44": "r43", "45": "r43", "46": "r43", "52": "r43", "53": "r43", "54": "r43", "55": "r43", "57": "r43" }, { "23": "r44", "24": "r44", "25": "r44", "26": "r44", "27": "r44", "28": "r44", "29": "r44", "30": "r44", "31": "r44", "32": "r44", "33": "r44", "34": "r44", "35": "r44", "36": "r44", "37": "r44", "38": "r44", "39": "r44", "40": "r44", "41": "r44", "42": "r44", "43": "r44", "44": "r44", "45": "r44", "46": "r44", "52": "r44", "53": "r44", "54": "r44", "55": "r44", "57": "r44" }, { "23": "r45", "24": "r45", "25": "r45", "26": "r45", "27": "r45", "28": "r45", "29": "r45", "30": "r45", "31": "r45", "32": "r45", "33": "r45", "34": "r45", "35": "r45", "36": "r45", "37": "r45", "38": "r45", "39": "r45", "40": "r45", "41": "r45", "42": "r45", "43": "r45", "44": "r45", "45": "r45", "46": "r45", "52": "r45", "53": "r45", "54": "r45", "55": "r45", "57": "r45" }, { "23": "r46", "24": "r46", "25": "r46", "26": "r46", "27": "r46", "28": "r46", "29": "r46", "30": "r46", "31": "r46", "32": "r46", "33": "r46", "34": "r46", "35": "r46", "36": "r46", "37": "r46", "38": "r46", "39": "r46", "40": "r46", "41": "r46", "42": "r46", "43": "r46", "44": "r46", "45": "r46", "46": "r46", "52": "r46", "53": "r46", "54": "r46", "55": "r46", "57": "r46" }, { "23": "r40", "24": "r40", "25": "r40", "26": "r40", "27": "r40", "28": "r40", "29": "r40", "30": "r40", "31": "r40", "32": "r40", "33": "r40", "34": "r40", "35": "r40", "36": "r40", "37": "r40", "38": "r40", "39": "r40", "40": "r40", "41": "r40", "42": "r40", "43": "r40", "44": "r40", "45": "r40", "52": "r40", "53": "r40", "54": "r40", "55": "r40", "57": "r40" }, { "25": "s12", "31": "s58" }, { "23": "r18", "24": "r18", "25": "r18", "26": "r18", "27": "r18", "28": "r18", "29": "r18", "30": "r18", "31": "r18", "32": "r18", "33": "r18", "34": "r18", "35": "r18", "36": "r18", "37": "r18", "38": "r18", "39": "r18", "40": "r18", "41": "r18", "42": "r18", "43": "r18", "44": "r18", "45": "r18", "52": "r18", "53": "r18", "54": "r18", "55": "r18", "57": "r18" }, { "25": "s12", "31": "s60" }, { "23": "r19", "24": "r19", "25": "r19", "26": "r19", "27": "r19", "28": "r19", "29": "r19", "30": "r19", "31": "r19", "32": "r19", "33": "r19", "34": "r19", "35": "r19", "36": "r19", "37": "r19", "38": "r19", "39": "r19", "40": "r19", "41": "r19", "42": "r19", "43": "r19", "44": "r19", "45": "r19", "52": "r19", "53": "r19", "54": "r19", "55": "r19", "57": "r19" }, { "25": "s12", "31": "s62" }, { "23": "r20", "24": "r20", "25": "r20", "26": "r20", "27": "r20", "28": "r20", "29": "r20", "30": "r20", "31": "r20", "32": "r20", "33": "r20", "34": "r20", "35": "r20", "36": "r20", "37": "r20", "38": "r20", "39": "r20", "40": "r20", "41": "r20", "42": "r20", "43": "r20", "44": "r20", "45": "r20", "52": "r20", "53": "r20", "54": "r20", "55": "r20", "57": "r20" }, { "25": "s12", "31": "s64" }, { "23": "r21", "24": "r21", "25": "r21", "26": "r21", "27": "r21", "28": "r21", "29": "r21", "30": "r21", "31": "r21", "32": "r21", "33": "r21", "34": "r21", "35": "r21", "36": "r21", "37": "r21", "38": "r21", "39": "r21", "40": "r21", "41": "r21", "42": "r21", "43": "r21", "44": "r21", "45": "r21", "52": "r21", "53": "r21", "54": "r21", "55": "r21", "57": "r21" }, { "56": "s72" }, { "56": "r55" }, { "10": 70, "20": 73, "21": 75, "22": 76, "24": "s28", "28": "s71", "35": "s29", "36": "s30", "37": "s31", "38": "s32", "39": "s33", "40": "s34", "41": "s35", "42": "s36", "43": "s37", "44": "s38", "45": "s39", "56": "r56", "58": "s74" }, { "24": "r62", "28": "r62", "35": "r62", "36": "r62", "37": "r62", "38": "r62", "39": "r62", "40": "r62", "41": "r62", "42": "r62", "43": "r62", "44": "r62", "45": "r62", "56": "r62", "58": "r62" }, { "24": "r63", "28": "r63", "35": "r63", "36": "r63", "37": "r63", "38": "r63", "39": "r63", "40": "r63", "41": "r63", "42": "r63", "43": "r63", "44": "r63", "45": "r63", "56": "r63", "58": "r63" }, { "24": "r64", "28": "r64", "35": "r64", "36": "r64", "37": "r64", "38": "r64", "39": "r64", "40": "r64", "41": "r64", "42": "r64", "43": "r64", "44": "r64", "45": "r64", "56": "r64", "58": "r64" }, { "24": "r65", "28": "r65", "35": "r65", "36": "r65", "37": "r65", "38": "r65", "39": "r65", "40": "r65", "41": "r65", "42": "r65", "43": "r65", "44": "r65", "45": "r65", "56": "r65", "58": "r65" }, { "23": "r52", "24": "r52", "25": "r52", "26": "r52", "27": "r52", "28": "r52", "29": "r52", "30": "r52", "31": "r52", "32": "r52", "33": "r52", "34": "r52", "35": "r52", "36": "r52", "37": "r52", "38": "r52", "39": "r52", "40": "r52", "41": "r52", "42": "r52", "43": "r52", "44": "r52", "45": "r52", "46": "r52", "47": "r52", "48": "r52", "49": "r52", "50": "r52", "51": "r52", "52": "r52", "53": "r52", "54": "r52", "55": "r52", "57": "r52" }, { "56": "r57" }, { "10": 70, "21": 77, "22": 69, "24": "s28", "28": "s71", "35": "s29", "36": "s30", "37": "s31", "38": "s32", "39": "s33", "40": "s34", "41": "s35", "42": "s36", "43": "s37", "44": "s38", "45": "s39", "56": "r62", "58": "s68" }, { "56": "r59" }, { "10": 70, "20": 79, "21": 75, "22": 76, "24": "s28", "28": "s71", "35": "s29", "36": "s30", "37": "s31", "38": "s32", "39": "s33", "40": "s34", "41": "s35", "42": "s36", "43": "s37", "44": "s38", "45": "s39", "56": "r63", "58": "s80" }, { "10": 70, "18": 78, "19": 66, "21": 67, "22": 69, "24": "s28", "28": "s71", "35": "s29", "36": "s30", "37": "s31", "38": "s32", "39": "s33", "40": "s34", "41": "s35", "42": "s36", "43": "s37", "44": "s38", "45": "s39", "56": "r54", "58": "s68" }, { "56": "r58" }, { "56": "r60" }, { "10": 70, "21": 81, "22": 69, "24": "s28", "28": "s71", "35": "s29", "36": "s30", "37": "s31", "38": "s32", "39": "s33", "40": "s34", "41": "s35", "42": "s36", "43": "s37", "44": "s38", "45": "s39", "56": "r62", "58": "s68" }, { "10": 70, "18": 82, "19": 66, "21": 67, "22": 69, "24": "s28", "28": "s71", "35": "s29", "36": "s30", "37": "s31", "38": "s32", "39": "s33", "40": "s34", "41": "s35", "42": "s36", "43": "s37", "44": "s38", "45": "s39", "56": "r54", "58": "s68" }, { "56": "r61" }, { "56": "s84" }, { "23": "r53", "24": "r53", "25": "r53", "26": "r53", "27": "r53", "28": "r53", "29": "r53", "30": "r53", "31": "r53", "32": "r53", "33": "r53", "34": "r53", "35": "r53", "36": "r53", "37": "r53", "38": "r53", "39": "r53", "40": "r53", "41": "r53", "42": "r53", "43": "r53", "44": "r53", "45": "r53", "46": "r53", "47": "r53", "48": "r53", "49": "r53", "50": "r53", "51": "r53", "52": "r53", "53": "r53", "54": "r53", "55": "r53", "57": "r53" }, { "25": "s12", "31": "s86" }, { "23": "r49", "24": "r49", "25": "r49", "26": "r49", "27": "r49", "28": "r49", "29": "r49", "30": "r49", "31": "r49", "32": "r49", "33": "r49", "34": "r49", "35": "r49", "36": "r49", "37": "r49", "38": "r49", "39": "r49", "40": "r49", "41": "r49", "42": "r49", "43": "r49", "44": "r49", "45": "r49", "46": "r49", "47": "r49", "48": "r49", "49": "r49", "50": "r49", "51": "r49", "52": "r49", "53": "r49", "54": "r49", "55": "r49", "57": "r49" }, { "25": "s12", "31": "s88" }, { "23": "r50", "24": "r50", "25": "r50", "26": "r50", "27": "r50", "28": "r50", "29": "r50", "30": "r50", "31": "r50", "32": "r50", "33": "r50", "34": "r50", "35": "r50", "36": "r50", "37": "r50", "38": "r50", "39": "r50", "40": "r50", "41": "r50", "42": "r50", "43": "r50", "44": "r50", "45": "r50", "46": "r50", "47": "r50", "48": "r50", "49": "r50", "50": "r50", "51": "r50", "52": "r50", "53": "r50", "54": "r50", "55": "r50", "57": "r50" }, { "25": "s12", "31": "s90" }, { "23": "r51", "24": "r51", "25": "r51", "26": "r51", "27": "r51", "28": "r51", "29": "r51", "30": "r51", "31": "r51", "32": "r51", "33": "r51", "34": "r51", "35": "r51", "36": "r51", "37": "r51", "38": "r51", "39": "r51", "40": "r51", "41": "r51", "42": "r51", "43": "r51", "44": "r51", "45": "r51", "46": "r51", "47": "r51", "48": "r51", "49": "r51", "50": "r51", "51": "r51", "52": "r51", "53": "r51", "54": "r51", "55": "r51", "57": "r51" }];
-    var stack = [];
-    var tokenizer = void 0;
-    var lexRules = [[/^#[^\n]+/, function() {
-    }], [/^\s+/, function() {
-    }], [/^-/, function() {
-      return "DASH";
-    }], [/^\//, function() {
-      return "CHAR";
-    }], [/^#/, function() {
-      return "CHAR";
-    }], [/^\|/, function() {
-      return "CHAR";
-    }], [/^\./, function() {
-      return "CHAR";
-    }], [/^\{/, function() {
-      return "CHAR";
-    }], [/^\{\d+\}/, function() {
-      return "RANGE_EXACT";
-    }], [/^\{\d+,\}/, function() {
-      return "RANGE_OPEN";
-    }], [/^\{\d+,\d+\}/, function() {
-      return "RANGE_CLOSED";
-    }], [/^\\k<(([\u0041-\u005a\u0061-\u007a\u00aa\u00b5\u00ba\u00c0-\u00d6\u00d8-\u00f6\u00f8-\u02c1\u02c6-\u02d1\u02e0-\u02e4\u02ec\u02ee\u0370-\u0374\u0376-\u0377\u037a-\u037d\u037f\u0386\u0388-\u038a\u038c\u038e-\u03a1\u03a3-\u03f5\u03f7-\u0481\u048a-\u052f\u0531-\u0556\u0559\u0560-\u0588\u05d0-\u05ea\u05ef-\u05f2\u0620-\u064a\u066e-\u066f\u0671-\u06d3\u06d5\u06e5-\u06e6\u06ee-\u06ef\u06fa-\u06fc\u06ff\u0710\u0712-\u072f\u074d-\u07a5\u07b1\u07ca-\u07ea\u07f4-\u07f5\u07fa\u0800-\u0815\u081a\u0824\u0828\u0840-\u0858\u0860-\u086a\u08a0-\u08b4\u08b6-\u08bd\u0904-\u0939\u093d\u0950\u0958-\u0961\u0971-\u0980\u0985-\u098c\u098f-\u0990\u0993-\u09a8\u09aa-\u09b0\u09b2\u09b6-\u09b9\u09bd\u09ce\u09dc-\u09dd\u09df-\u09e1\u09f0-\u09f1\u09fc\u0a05-\u0a0a\u0a0f-\u0a10\u0a13-\u0a28\u0a2a-\u0a30\u0a32-\u0a33\u0a35-\u0a36\u0a38-\u0a39\u0a59-\u0a5c\u0a5e\u0a72-\u0a74\u0a85-\u0a8d\u0a8f-\u0a91\u0a93-\u0aa8\u0aaa-\u0ab0\u0ab2-\u0ab3\u0ab5-\u0ab9\u0abd\u0ad0\u0ae0-\u0ae1\u0af9\u0b05-\u0b0c\u0b0f-\u0b10\u0b13-\u0b28\u0b2a-\u0b30\u0b32-\u0b33\u0b35-\u0b39\u0b3d\u0b5c-\u0b5d\u0b5f-\u0b61\u0b71\u0b83\u0b85-\u0b8a\u0b8e-\u0b90\u0b92-\u0b95\u0b99-\u0b9a\u0b9c\u0b9e-\u0b9f\u0ba3-\u0ba4\u0ba8-\u0baa\u0bae-\u0bb9\u0bd0\u0c05-\u0c0c\u0c0e-\u0c10\u0c12-\u0c28\u0c2a-\u0c39\u0c3d\u0c58-\u0c5a\u0c60-\u0c61\u0c80\u0c85-\u0c8c\u0c8e-\u0c90\u0c92-\u0ca8\u0caa-\u0cb3\u0cb5-\u0cb9\u0cbd\u0cde\u0ce0-\u0ce1\u0cf1-\u0cf2\u0d05-\u0d0c\u0d0e-\u0d10\u0d12-\u0d3a\u0d3d\u0d4e\u0d54-\u0d56\u0d5f-\u0d61\u0d7a-\u0d7f\u0d85-\u0d96\u0d9a-\u0db1\u0db3-\u0dbb\u0dbd\u0dc0-\u0dc6\u0e01-\u0e30\u0e32-\u0e33\u0e40-\u0e46\u0e81-\u0e82\u0e84\u0e86-\u0e8a\u0e8c-\u0ea3\u0ea5\u0ea7-\u0eb0\u0eb2-\u0eb3\u0ebd\u0ec0-\u0ec4\u0ec6\u0edc-\u0edf\u0f00\u0f40-\u0f47\u0f49-\u0f6c\u0f88-\u0f8c\u1000-\u102a\u103f\u1050-\u1055\u105a-\u105d\u1061\u1065-\u1066\u106e-\u1070\u1075-\u1081\u108e\u10a0-\u10c5\u10c7\u10cd\u10d0-\u10fa\u10fc-\u1248\u124a-\u124d\u1250-\u1256\u1258\u125a-\u125d\u1260-\u1288\u128a-\u128d\u1290-\u12b0\u12b2-\u12b5\u12b8-\u12be\u12c0\u12c2-\u12c5\u12c8-\u12d6\u12d8-\u1310\u1312-\u1315\u1318-\u135a\u1380-\u138f\u13a0-\u13f5\u13f8-\u13fd\u1401-\u166c\u166f-\u167f\u1681-\u169a\u16a0-\u16ea\u16ee-\u16f8\u1700-\u170c\u170e-\u1711\u1720-\u1731\u1740-\u1751\u1760-\u176c\u176e-\u1770\u1780-\u17b3\u17d7\u17dc\u1820-\u1878\u1880-\u18a8\u18aa\u18b0-\u18f5\u1900-\u191e\u1950-\u196d\u1970-\u1974\u1980-\u19ab\u19b0-\u19c9\u1a00-\u1a16\u1a20-\u1a54\u1aa7\u1b05-\u1b33\u1b45-\u1b4b\u1b83-\u1ba0\u1bae-\u1baf\u1bba-\u1be5\u1c00-\u1c23\u1c4d-\u1c4f\u1c5a-\u1c7d\u1c80-\u1c88\u1c90-\u1cba\u1cbd-\u1cbf\u1ce9-\u1cec\u1cee-\u1cf3\u1cf5-\u1cf6\u1cfa\u1d00-\u1dbf\u1e00-\u1f15\u1f18-\u1f1d\u1f20-\u1f45\u1f48-\u1f4d\u1f50-\u1f57\u1f59\u1f5b\u1f5d\u1f5f-\u1f7d\u1f80-\u1fb4\u1fb6-\u1fbc\u1fbe\u1fc2-\u1fc4\u1fc6-\u1fcc\u1fd0-\u1fd3\u1fd6-\u1fdb\u1fe0-\u1fec\u1ff2-\u1ff4\u1ff6-\u1ffc\u2071\u207f\u2090-\u209c\u2102\u2107\u210a-\u2113\u2115\u2118-\u211d\u2124\u2126\u2128\u212a-\u2139\u213c-\u213f\u2145-\u2149\u214e\u2160-\u2188\u2c00-\u2c2e\u2c30-\u2c5e\u2c60-\u2ce4\u2ceb-\u2cee\u2cf2-\u2cf3\u2d00-\u2d25\u2d27\u2d2d\u2d30-\u2d67\u2d6f\u2d80-\u2d96\u2da0-\u2da6\u2da8-\u2dae\u2db0-\u2db6\u2db8-\u2dbe\u2dc0-\u2dc6\u2dc8-\u2dce\u2dd0-\u2dd6\u2dd8-\u2dde\u3005-\u3007\u3021-\u3029\u3031-\u3035\u3038-\u303c\u3041-\u3096\u309b-\u309f\u30a1-\u30fa\u30fc-\u30ff\u3105-\u312f\u3131-\u318e\u31a0-\u31ba\u31f0-\u31ff\u3400-\u4db5\u4e00-\u9fef\ua000-\ua48c\ua4d0-\ua4fd\ua500-\ua60c\ua610-\ua61f\ua62a-\ua62b\ua640-\ua66e\ua67f-\ua69d\ua6a0-\ua6ef\ua717-\ua71f\ua722-\ua788\ua78b-\ua7bf\ua7c2-\ua7c6\ua7f7-\ua801\ua803-\ua805\ua807-\ua80a\ua80c-\ua822\ua840-\ua873\ua882-\ua8b3\ua8f2-\ua8f7\ua8fb\ua8fd-\ua8fe\ua90a-\ua925\ua930-\ua946\ua960-\ua97c\ua984-\ua9b2\ua9cf\ua9e0-\ua9e4\ua9e6-\ua9ef\ua9fa-\ua9fe\uaa00-\uaa28\uaa40-\uaa42\uaa44-\uaa4b\uaa60-\uaa76\uaa7a\uaa7e-\uaaaf\uaab1\uaab5-\uaab6\uaab9-\uaabd\uaac0\uaac2\uaadb-\uaadd\uaae0-\uaaea\uaaf2-\uaaf4\uab01-\uab06\uab09-\uab0e\uab11-\uab16\uab20-\uab26\uab28-\uab2e\uab30-\uab5a\uab5c-\uab67\uab70-\uabe2\uac00-\ud7a3\ud7b0-\ud7c6\ud7cb-\ud7fb\uf900-\ufa6d\ufa70-\ufad9\ufb00-\ufb06\ufb13-\ufb17\ufb1d\ufb1f-\ufb28\ufb2a-\ufb36\ufb38-\ufb3c\ufb3e\ufb40-\ufb41\ufb43-\ufb44\ufb46-\ufbb1\ufbd3-\ufd3d\ufd50-\ufd8f\ufd92-\ufdc7\ufdf0-\ufdfb\ufe70-\ufe74\ufe76-\ufefc\uff21-\uff3a\uff41-\uff5a\uff66-\uffbe\uffc2-\uffc7\uffca-\uffcf\uffd2-\uffd7\uffda-\uffdc]|\ud800[\udc00-\udc0b\udc0d-\udc26\udc28-\udc3a\udc3c-\udc3d\udc3f-\udc4d\udc50-\udc5d\udc80-\udcfa\udd40-\udd74\ude80-\ude9c\udea0-\uded0\udf00-\udf1f\udf2d-\udf4a\udf50-\udf75\udf80-\udf9d\udfa0-\udfc3\udfc8-\udfcf\udfd1-\udfd5]|\ud801[\udc00-\udc9d\udcb0-\udcd3\udcd8-\udcfb\udd00-\udd27\udd30-\udd63\ude00-\udf36\udf40-\udf55\udf60-\udf67]|\ud802[\udc00-\udc05\udc08\udc0a-\udc35\udc37-\udc38\udc3c\udc3f-\udc55\udc60-\udc76\udc80-\udc9e\udce0-\udcf2\udcf4-\udcf5\udd00-\udd15\udd20-\udd39\udd80-\uddb7\uddbe-\uddbf\ude00\ude10-\ude13\ude15-\ude17\ude19-\ude35\ude60-\ude7c\ude80-\ude9c\udec0-\udec7\udec9-\udee4\udf00-\udf35\udf40-\udf55\udf60-\udf72\udf80-\udf91]|\ud803[\udc00-\udc48\udc80-\udcb2\udcc0-\udcf2\udd00-\udd23\udf00-\udf1c\udf27\udf30-\udf45\udfe0-\udff6]|\ud804[\udc03-\udc37\udc83-\udcaf\udcd0-\udce8\udd03-\udd26\udd44\udd50-\udd72\udd76\udd83-\uddb2\uddc1-\uddc4\uddda\udddc\ude00-\ude11\ude13-\ude2b\ude80-\ude86\ude88\ude8a-\ude8d\ude8f-\ude9d\ude9f-\udea8\udeb0-\udede\udf05-\udf0c\udf0f-\udf10\udf13-\udf28\udf2a-\udf30\udf32-\udf33\udf35-\udf39\udf3d\udf50\udf5d-\udf61]|\ud805[\udc00-\udc34\udc47-\udc4a\udc5f\udc80-\udcaf\udcc4-\udcc5\udcc7\udd80-\uddae\uddd8-\udddb\ude00-\ude2f\ude44\ude80-\udeaa\udeb8\udf00-\udf1a]|\ud806[\udc00-\udc2b\udca0-\udcdf\udcff\udda0-\udda7\uddaa-\uddd0\udde1\udde3\ude00\ude0b-\ude32\ude3a\ude50\ude5c-\ude89\ude9d\udec0-\udef8]|\ud807[\udc00-\udc08\udc0a-\udc2e\udc40\udc72-\udc8f\udd00-\udd06\udd08-\udd09\udd0b-\udd30\udd46\udd60-\udd65\udd67-\udd68\udd6a-\udd89\udd98\udee0-\udef2]|\ud808[\udc00-\udf99]|\ud809[\udc00-\udc6e\udc80-\udd43]|\ud80c[\udc00-\udfff]|\ud80d[\udc00-\udc2e]|\ud811[\udc00-\ude46]|\ud81a[\udc00-\ude38\ude40-\ude5e\uded0-\udeed\udf00-\udf2f\udf40-\udf43\udf63-\udf77\udf7d-\udf8f]|\ud81b[\ude40-\ude7f\udf00-\udf4a\udf50\udf93-\udf9f\udfe0-\udfe1\udfe3]|\ud81c[\udc00-\udfff]|\ud81d[\udc00-\udfff]|\ud81e[\udc00-\udfff]|\ud81f[\udc00-\udfff]|\ud820[\udc00-\udfff]|\ud821[\udc00-\udff7]|\ud822[\udc00-\udef2]|\ud82c[\udc00-\udd1e\udd50-\udd52\udd64-\udd67\udd70-\udefb]|\ud82f[\udc00-\udc6a\udc70-\udc7c\udc80-\udc88\udc90-\udc99]|\ud835[\udc00-\udc54\udc56-\udc9c\udc9e-\udc9f\udca2\udca5-\udca6\udca9-\udcac\udcae-\udcb9\udcbb\udcbd-\udcc3\udcc5-\udd05\udd07-\udd0a\udd0d-\udd14\udd16-\udd1c\udd1e-\udd39\udd3b-\udd3e\udd40-\udd44\udd46\udd4a-\udd50\udd52-\udea5\udea8-\udec0\udec2-\udeda\udedc-\udefa\udefc-\udf14\udf16-\udf34\udf36-\udf4e\udf50-\udf6e\udf70-\udf88\udf8a-\udfa8\udfaa-\udfc2\udfc4-\udfcb]|\ud838[\udd00-\udd2c\udd37-\udd3d\udd4e\udec0-\udeeb]|\ud83a[\udc00-\udcc4\udd00-\udd43\udd4b]|\ud83b[\ude00-\ude03\ude05-\ude1f\ude21-\ude22\ude24\ude27\ude29-\ude32\ude34-\ude37\ude39\ude3b\ude42\ude47\ude49\ude4b\ude4d-\ude4f\ude51-\ude52\ude54\ude57\ude59\ude5b\ude5d\ude5f\ude61-\ude62\ude64\ude67-\ude6a\ude6c-\ude72\ude74-\ude77\ude79-\ude7c\ude7e\ude80-\ude89\ude8b-\ude9b\udea1-\udea3\udea5-\udea9\udeab-\udebb]|\ud840[\udc00-\udfff]|\ud841[\udc00-\udfff]|\ud842[\udc00-\udfff]|\ud843[\udc00-\udfff]|\ud844[\udc00-\udfff]|\ud845[\udc00-\udfff]|\ud846[\udc00-\udfff]|\ud847[\udc00-\udfff]|\ud848[\udc00-\udfff]|\ud849[\udc00-\udfff]|\ud84a[\udc00-\udfff]|\ud84b[\udc00-\udfff]|\ud84c[\udc00-\udfff]|\ud84d[\udc00-\udfff]|\ud84e[\udc00-\udfff]|\ud84f[\udc00-\udfff]|\ud850[\udc00-\udfff]|\ud851[\udc00-\udfff]|\ud852[\udc00-\udfff]|\ud853[\udc00-\udfff]|\ud854[\udc00-\udfff]|\ud855[\udc00-\udfff]|\ud856[\udc00-\udfff]|\ud857[\udc00-\udfff]|\ud858[\udc00-\udfff]|\ud859[\udc00-\udfff]|\ud85a[\udc00-\udfff]|\ud85b[\udc00-\udfff]|\ud85c[\udc00-\udfff]|\ud85d[\udc00-\udfff]|\ud85e[\udc00-\udfff]|\ud85f[\udc00-\udfff]|\ud860[\udc00-\udfff]|\ud861[\udc00-\udfff]|\ud862[\udc00-\udfff]|\ud863[\udc00-\udfff]|\ud864[\udc00-\udfff]|\ud865[\udc00-\udfff]|\ud866[\udc00-\udfff]|\ud867[\udc00-\udfff]|\ud868[\udc00-\udfff]|\ud869[\udc00-\uded6\udf00-\udfff]|\ud86a[\udc00-\udfff]|\ud86b[\udc00-\udfff]|\ud86c[\udc00-\udfff]|\ud86d[\udc00-\udf34\udf40-\udfff]|\ud86e[\udc00-\udc1d\udc20-\udfff]|\ud86f[\udc00-\udfff]|\ud870[\udc00-\udfff]|\ud871[\udc00-\udfff]|\ud872[\udc00-\udfff]|\ud873[\udc00-\udea1\udeb0-\udfff]|\ud874[\udc00-\udfff]|\ud875[\udc00-\udfff]|\ud876[\udc00-\udfff]|\ud877[\udc00-\udfff]|\ud878[\udc00-\udfff]|\ud879[\udc00-\udfff]|\ud87a[\udc00-\udfe0]|\ud87e[\udc00-\ude1d])|[$_]|(\\u[0-9a-fA-F]{4}|\\u\{[0-9a-fA-F]{1,}\}))(([\u0030-\u0039\u0041-\u005a\u005f\u0061-\u007a\u00aa\u00b5\u00b7\u00ba\u00c0-\u00d6\u00d8-\u00f6\u00f8-\u02c1\u02c6-\u02d1\u02e0-\u02e4\u02ec\u02ee\u0300-\u0374\u0376-\u0377\u037a-\u037d\u037f\u0386-\u038a\u038c\u038e-\u03a1\u03a3-\u03f5\u03f7-\u0481\u0483-\u0487\u048a-\u052f\u0531-\u0556\u0559\u0560-\u0588\u0591-\u05bd\u05bf\u05c1-\u05c2\u05c4-\u05c5\u05c7\u05d0-\u05ea\u05ef-\u05f2\u0610-\u061a\u0620-\u0669\u066e-\u06d3\u06d5-\u06dc\u06df-\u06e8\u06ea-\u06fc\u06ff\u0710-\u074a\u074d-\u07b1\u07c0-\u07f5\u07fa\u07fd\u0800-\u082d\u0840-\u085b\u0860-\u086a\u08a0-\u08b4\u08b6-\u08bd\u08d3-\u08e1\u08e3-\u0963\u0966-\u096f\u0971-\u0983\u0985-\u098c\u098f-\u0990\u0993-\u09a8\u09aa-\u09b0\u09b2\u09b6-\u09b9\u09bc-\u09c4\u09c7-\u09c8\u09cb-\u09ce\u09d7\u09dc-\u09dd\u09df-\u09e3\u09e6-\u09f1\u09fc\u09fe\u0a01-\u0a03\u0a05-\u0a0a\u0a0f-\u0a10\u0a13-\u0a28\u0a2a-\u0a30\u0a32-\u0a33\u0a35-\u0a36\u0a38-\u0a39\u0a3c\u0a3e-\u0a42\u0a47-\u0a48\u0a4b-\u0a4d\u0a51\u0a59-\u0a5c\u0a5e\u0a66-\u0a75\u0a81-\u0a83\u0a85-\u0a8d\u0a8f-\u0a91\u0a93-\u0aa8\u0aaa-\u0ab0\u0ab2-\u0ab3\u0ab5-\u0ab9\u0abc-\u0ac5\u0ac7-\u0ac9\u0acb-\u0acd\u0ad0\u0ae0-\u0ae3\u0ae6-\u0aef\u0af9-\u0aff\u0b01-\u0b03\u0b05-\u0b0c\u0b0f-\u0b10\u0b13-\u0b28\u0b2a-\u0b30\u0b32-\u0b33\u0b35-\u0b39\u0b3c-\u0b44\u0b47-\u0b48\u0b4b-\u0b4d\u0b56-\u0b57\u0b5c-\u0b5d\u0b5f-\u0b63\u0b66-\u0b6f\u0b71\u0b82-\u0b83\u0b85-\u0b8a\u0b8e-\u0b90\u0b92-\u0b95\u0b99-\u0b9a\u0b9c\u0b9e-\u0b9f\u0ba3-\u0ba4\u0ba8-\u0baa\u0bae-\u0bb9\u0bbe-\u0bc2\u0bc6-\u0bc8\u0bca-\u0bcd\u0bd0\u0bd7\u0be6-\u0bef\u0c00-\u0c0c\u0c0e-\u0c10\u0c12-\u0c28\u0c2a-\u0c39\u0c3d-\u0c44\u0c46-\u0c48\u0c4a-\u0c4d\u0c55-\u0c56\u0c58-\u0c5a\u0c60-\u0c63\u0c66-\u0c6f\u0c80-\u0c83\u0c85-\u0c8c\u0c8e-\u0c90\u0c92-\u0ca8\u0caa-\u0cb3\u0cb5-\u0cb9\u0cbc-\u0cc4\u0cc6-\u0cc8\u0cca-\u0ccd\u0cd5-\u0cd6\u0cde\u0ce0-\u0ce3\u0ce6-\u0cef\u0cf1-\u0cf2\u0d00-\u0d03\u0d05-\u0d0c\u0d0e-\u0d10\u0d12-\u0d44\u0d46-\u0d48\u0d4a-\u0d4e\u0d54-\u0d57\u0d5f-\u0d63\u0d66-\u0d6f\u0d7a-\u0d7f\u0d82-\u0d83\u0d85-\u0d96\u0d9a-\u0db1\u0db3-\u0dbb\u0dbd\u0dc0-\u0dc6\u0dca\u0dcf-\u0dd4\u0dd6\u0dd8-\u0ddf\u0de6-\u0def\u0df2-\u0df3\u0e01-\u0e3a\u0e40-\u0e4e\u0e50-\u0e59\u0e81-\u0e82\u0e84\u0e86-\u0e8a\u0e8c-\u0ea3\u0ea5\u0ea7-\u0ebd\u0ec0-\u0ec4\u0ec6\u0ec8-\u0ecd\u0ed0-\u0ed9\u0edc-\u0edf\u0f00\u0f18-\u0f19\u0f20-\u0f29\u0f35\u0f37\u0f39\u0f3e-\u0f47\u0f49-\u0f6c\u0f71-\u0f84\u0f86-\u0f97\u0f99-\u0fbc\u0fc6\u1000-\u1049\u1050-\u109d\u10a0-\u10c5\u10c7\u10cd\u10d0-\u10fa\u10fc-\u1248\u124a-\u124d\u1250-\u1256\u1258\u125a-\u125d\u1260-\u1288\u128a-\u128d\u1290-\u12b0\u12b2-\u12b5\u12b8-\u12be\u12c0\u12c2-\u12c5\u12c8-\u12d6\u12d8-\u1310\u1312-\u1315\u1318-\u135a\u135d-\u135f\u1369-\u1371\u1380-\u138f\u13a0-\u13f5\u13f8-\u13fd\u1401-\u166c\u166f-\u167f\u1681-\u169a\u16a0-\u16ea\u16ee-\u16f8\u1700-\u170c\u170e-\u1714\u1720-\u1734\u1740-\u1753\u1760-\u176c\u176e-\u1770\u1772-\u1773\u1780-\u17d3\u17d7\u17dc-\u17dd\u17e0-\u17e9\u180b-\u180d\u1810-\u1819\u1820-\u1878\u1880-\u18aa\u18b0-\u18f5\u1900-\u191e\u1920-\u192b\u1930-\u193b\u1946-\u196d\u1970-\u1974\u1980-\u19ab\u19b0-\u19c9\u19d0-\u19da\u1a00-\u1a1b\u1a20-\u1a5e\u1a60-\u1a7c\u1a7f-\u1a89\u1a90-\u1a99\u1aa7\u1ab0-\u1abd\u1b00-\u1b4b\u1b50-\u1b59\u1b6b-\u1b73\u1b80-\u1bf3\u1c00-\u1c37\u1c40-\u1c49\u1c4d-\u1c7d\u1c80-\u1c88\u1c90-\u1cba\u1cbd-\u1cbf\u1cd0-\u1cd2\u1cd4-\u1cfa\u1d00-\u1df9\u1dfb-\u1f15\u1f18-\u1f1d\u1f20-\u1f45\u1f48-\u1f4d\u1f50-\u1f57\u1f59\u1f5b\u1f5d\u1f5f-\u1f7d\u1f80-\u1fb4\u1fb6-\u1fbc\u1fbe\u1fc2-\u1fc4\u1fc6-\u1fcc\u1fd0-\u1fd3\u1fd6-\u1fdb\u1fe0-\u1fec\u1ff2-\u1ff4\u1ff6-\u1ffc\u203f-\u2040\u2054\u2071\u207f\u2090-\u209c\u20d0-\u20dc\u20e1\u20e5-\u20f0\u2102\u2107\u210a-\u2113\u2115\u2118-\u211d\u2124\u2126\u2128\u212a-\u2139\u213c-\u213f\u2145-\u2149\u214e\u2160-\u2188\u2c00-\u2c2e\u2c30-\u2c5e\u2c60-\u2ce4\u2ceb-\u2cf3\u2d00-\u2d25\u2d27\u2d2d\u2d30-\u2d67\u2d6f\u2d7f-\u2d96\u2da0-\u2da6\u2da8-\u2dae\u2db0-\u2db6\u2db8-\u2dbe\u2dc0-\u2dc6\u2dc8-\u2dce\u2dd0-\u2dd6\u2dd8-\u2dde\u2de0-\u2dff\u3005-\u3007\u3021-\u302f\u3031-\u3035\u3038-\u303c\u3041-\u3096\u3099-\u309f\u30a1-\u30fa\u30fc-\u30ff\u3105-\u312f\u3131-\u318e\u31a0-\u31ba\u31f0-\u31ff\u3400-\u4db5\u4e00-\u9fef\ua000-\ua48c\ua4d0-\ua4fd\ua500-\ua60c\ua610-\ua62b\ua640-\ua66f\ua674-\ua67d\ua67f-\ua6f1\ua717-\ua71f\ua722-\ua788\ua78b-\ua7bf\ua7c2-\ua7c6\ua7f7-\ua827\ua840-\ua873\ua880-\ua8c5\ua8d0-\ua8d9\ua8e0-\ua8f7\ua8fb\ua8fd-\ua92d\ua930-\ua953\ua960-\ua97c\ua980-\ua9c0\ua9cf-\ua9d9\ua9e0-\ua9fe\uaa00-\uaa36\uaa40-\uaa4d\uaa50-\uaa59\uaa60-\uaa76\uaa7a-\uaac2\uaadb-\uaadd\uaae0-\uaaef\uaaf2-\uaaf6\uab01-\uab06\uab09-\uab0e\uab11-\uab16\uab20-\uab26\uab28-\uab2e\uab30-\uab5a\uab5c-\uab67\uab70-\uabea\uabec-\uabed\uabf0-\uabf9\uac00-\ud7a3\ud7b0-\ud7c6\ud7cb-\ud7fb\uf900-\ufa6d\ufa70-\ufad9\ufb00-\ufb06\ufb13-\ufb17\ufb1d-\ufb28\ufb2a-\ufb36\ufb38-\ufb3c\ufb3e\ufb40-\ufb41\ufb43-\ufb44\ufb46-\ufbb1\ufbd3-\ufd3d\ufd50-\ufd8f\ufd92-\ufdc7\ufdf0-\ufdfb\ufe00-\ufe0f\ufe20-\ufe2f\ufe33-\ufe34\ufe4d-\ufe4f\ufe70-\ufe74\ufe76-\ufefc\uff10-\uff19\uff21-\uff3a\uff3f\uff41-\uff5a\uff66-\uffbe\uffc2-\uffc7\uffca-\uffcf\uffd2-\uffd7\uffda-\uffdc]|\ud800[\udc00-\udc0b\udc0d-\udc26\udc28-\udc3a\udc3c-\udc3d\udc3f-\udc4d\udc50-\udc5d\udc80-\udcfa\udd40-\udd74\uddfd\ude80-\ude9c\udea0-\uded0\udee0\udf00-\udf1f\udf2d-\udf4a\udf50-\udf7a\udf80-\udf9d\udfa0-\udfc3\udfc8-\udfcf\udfd1-\udfd5]|\ud801[\udc00-\udc9d\udca0-\udca9\udcb0-\udcd3\udcd8-\udcfb\udd00-\udd27\udd30-\udd63\ude00-\udf36\udf40-\udf55\udf60-\udf67]|\ud802[\udc00-\udc05\udc08\udc0a-\udc35\udc37-\udc38\udc3c\udc3f-\udc55\udc60-\udc76\udc80-\udc9e\udce0-\udcf2\udcf4-\udcf5\udd00-\udd15\udd20-\udd39\udd80-\uddb7\uddbe-\uddbf\ude00-\ude03\ude05-\ude06\ude0c-\ude13\ude15-\ude17\ude19-\ude35\ude38-\ude3a\ude3f\ude60-\ude7c\ude80-\ude9c\udec0-\udec7\udec9-\udee6\udf00-\udf35\udf40-\udf55\udf60-\udf72\udf80-\udf91]|\ud803[\udc00-\udc48\udc80-\udcb2\udcc0-\udcf2\udd00-\udd27\udd30-\udd39\udf00-\udf1c\udf27\udf30-\udf50\udfe0-\udff6]|\ud804[\udc00-\udc46\udc66-\udc6f\udc7f-\udcba\udcd0-\udce8\udcf0-\udcf9\udd00-\udd34\udd36-\udd3f\udd44-\udd46\udd50-\udd73\udd76\udd80-\uddc4\uddc9-\uddcc\uddd0-\uddda\udddc\ude00-\ude11\ude13-\ude37\ude3e\ude80-\ude86\ude88\ude8a-\ude8d\ude8f-\ude9d\ude9f-\udea8\udeb0-\udeea\udef0-\udef9\udf00-\udf03\udf05-\udf0c\udf0f-\udf10\udf13-\udf28\udf2a-\udf30\udf32-\udf33\udf35-\udf39\udf3b-\udf44\udf47-\udf48\udf4b-\udf4d\udf50\udf57\udf5d-\udf63\udf66-\udf6c\udf70-\udf74]|\ud805[\udc00-\udc4a\udc50-\udc59\udc5e-\udc5f\udc80-\udcc5\udcc7\udcd0-\udcd9\udd80-\uddb5\uddb8-\uddc0\uddd8-\udddd\ude00-\ude40\ude44\ude50-\ude59\ude80-\udeb8\udec0-\udec9\udf00-\udf1a\udf1d-\udf2b\udf30-\udf39]|\ud806[\udc00-\udc3a\udca0-\udce9\udcff\udda0-\udda7\uddaa-\uddd7\uddda-\udde1\udde3-\udde4\ude00-\ude3e\ude47\ude50-\ude99\ude9d\udec0-\udef8]|\ud807[\udc00-\udc08\udc0a-\udc36\udc38-\udc40\udc50-\udc59\udc72-\udc8f\udc92-\udca7\udca9-\udcb6\udd00-\udd06\udd08-\udd09\udd0b-\udd36\udd3a\udd3c-\udd3d\udd3f-\udd47\udd50-\udd59\udd60-\udd65\udd67-\udd68\udd6a-\udd8e\udd90-\udd91\udd93-\udd98\udda0-\udda9\udee0-\udef6]|\ud808[\udc00-\udf99]|\ud809[\udc00-\udc6e\udc80-\udd43]|\ud80c[\udc00-\udfff]|\ud80d[\udc00-\udc2e]|\ud811[\udc00-\ude46]|\ud81a[\udc00-\ude38\ude40-\ude5e\ude60-\ude69\uded0-\udeed\udef0-\udef4\udf00-\udf36\udf40-\udf43\udf50-\udf59\udf63-\udf77\udf7d-\udf8f]|\ud81b[\ude40-\ude7f\udf00-\udf4a\udf4f-\udf87\udf8f-\udf9f\udfe0-\udfe1\udfe3]|\ud81c[\udc00-\udfff]|\ud81d[\udc00-\udfff]|\ud81e[\udc00-\udfff]|\ud81f[\udc00-\udfff]|\ud820[\udc00-\udfff]|\ud821[\udc00-\udff7]|\ud822[\udc00-\udef2]|\ud82c[\udc00-\udd1e\udd50-\udd52\udd64-\udd67\udd70-\udefb]|\ud82f[\udc00-\udc6a\udc70-\udc7c\udc80-\udc88\udc90-\udc99\udc9d-\udc9e]|\ud834[\udd65-\udd69\udd6d-\udd72\udd7b-\udd82\udd85-\udd8b\uddaa-\uddad\ude42-\ude44]|\ud835[\udc00-\udc54\udc56-\udc9c\udc9e-\udc9f\udca2\udca5-\udca6\udca9-\udcac\udcae-\udcb9\udcbb\udcbd-\udcc3\udcc5-\udd05\udd07-\udd0a\udd0d-\udd14\udd16-\udd1c\udd1e-\udd39\udd3b-\udd3e\udd40-\udd44\udd46\udd4a-\udd50\udd52-\udea5\udea8-\udec0\udec2-\udeda\udedc-\udefa\udefc-\udf14\udf16-\udf34\udf36-\udf4e\udf50-\udf6e\udf70-\udf88\udf8a-\udfa8\udfaa-\udfc2\udfc4-\udfcb\udfce-\udfff]|\ud836[\ude00-\ude36\ude3b-\ude6c\ude75\ude84\ude9b-\ude9f\udea1-\udeaf]|\ud838[\udc00-\udc06\udc08-\udc18\udc1b-\udc21\udc23-\udc24\udc26-\udc2a\udd00-\udd2c\udd30-\udd3d\udd40-\udd49\udd4e\udec0-\udef9]|\ud83a[\udc00-\udcc4\udcd0-\udcd6\udd00-\udd4b\udd50-\udd59]|\ud83b[\ude00-\ude03\ude05-\ude1f\ude21-\ude22\ude24\ude27\ude29-\ude32\ude34-\ude37\ude39\ude3b\ude42\ude47\ude49\ude4b\ude4d-\ude4f\ude51-\ude52\ude54\ude57\ude59\ude5b\ude5d\ude5f\ude61-\ude62\ude64\ude67-\ude6a\ude6c-\ude72\ude74-\ude77\ude79-\ude7c\ude7e\ude80-\ude89\ude8b-\ude9b\udea1-\udea3\udea5-\udea9\udeab-\udebb]|\ud840[\udc00-\udfff]|\ud841[\udc00-\udfff]|\ud842[\udc00-\udfff]|\ud843[\udc00-\udfff]|\ud844[\udc00-\udfff]|\ud845[\udc00-\udfff]|\ud846[\udc00-\udfff]|\ud847[\udc00-\udfff]|\ud848[\udc00-\udfff]|\ud849[\udc00-\udfff]|\ud84a[\udc00-\udfff]|\ud84b[\udc00-\udfff]|\ud84c[\udc00-\udfff]|\ud84d[\udc00-\udfff]|\ud84e[\udc00-\udfff]|\ud84f[\udc00-\udfff]|\ud850[\udc00-\udfff]|\ud851[\udc00-\udfff]|\ud852[\udc00-\udfff]|\ud853[\udc00-\udfff]|\ud854[\udc00-\udfff]|\ud855[\udc00-\udfff]|\ud856[\udc00-\udfff]|\ud857[\udc00-\udfff]|\ud858[\udc00-\udfff]|\ud859[\udc00-\udfff]|\ud85a[\udc00-\udfff]|\ud85b[\udc00-\udfff]|\ud85c[\udc00-\udfff]|\ud85d[\udc00-\udfff]|\ud85e[\udc00-\udfff]|\ud85f[\udc00-\udfff]|\ud860[\udc00-\udfff]|\ud861[\udc00-\udfff]|\ud862[\udc00-\udfff]|\ud863[\udc00-\udfff]|\ud864[\udc00-\udfff]|\ud865[\udc00-\udfff]|\ud866[\udc00-\udfff]|\ud867[\udc00-\udfff]|\ud868[\udc00-\udfff]|\ud869[\udc00-\uded6\udf00-\udfff]|\ud86a[\udc00-\udfff]|\ud86b[\udc00-\udfff]|\ud86c[\udc00-\udfff]|\ud86d[\udc00-\udf34\udf40-\udfff]|\ud86e[\udc00-\udc1d\udc20-\udfff]|\ud86f[\udc00-\udfff]|\ud870[\udc00-\udfff]|\ud871[\udc00-\udfff]|\ud872[\udc00-\udfff]|\ud873[\udc00-\udea1\udeb0-\udfff]|\ud874[\udc00-\udfff]|\ud875[\udc00-\udfff]|\ud876[\udc00-\udfff]|\ud877[\udc00-\udfff]|\ud878[\udc00-\udfff]|\ud879[\udc00-\udfff]|\ud87a[\udc00-\udfe0]|\ud87e[\udc00-\ude1d]|\udb40[\udd00-\uddef])|[$_]|(\\u[0-9a-fA-F]{4}|\\u\{[0-9a-fA-F]{1,}\})|[\u200c\u200d])*>/, function() {
-      var groupName = yytext.slice(3, -1);
-      validateUnicodeGroupName(groupName, this.getCurrentState());
-      return "NAMED_GROUP_REF";
-    }], [/^\\b/, function() {
-      return "ESC_b";
-    }], [/^\\B/, function() {
-      return "ESC_B";
-    }], [/^\\c[a-zA-Z]/, function() {
-      return "CTRL_CH";
-    }], [/^\\0\d{1,2}/, function() {
-      return "OCT_CODE";
-    }], [/^\\0/, function() {
-      return "DEC_CODE";
-    }], [/^\\\d{1,3}/, function() {
-      return "DEC_CODE";
-    }], [/^\\u[dD][89abAB][0-9a-fA-F]{2}\\u[dD][c-fC-F][0-9a-fA-F]{2}/, function() {
-      return "U_CODE_SURROGATE";
-    }], [/^\\u\{[0-9a-fA-F]{1,}\}/, function() {
-      return "U_CODE";
-    }], [/^\\u[0-9a-fA-F]{4}/, function() {
-      return "U_CODE";
-    }], [/^\\[pP]\{\w+(?:=\w+)?\}/, function() {
-      return "U_PROP_VALUE_EXP";
-    }], [/^\\x[0-9a-fA-F]{2}/, function() {
-      return "HEX_CODE";
-    }], [/^\\[tnrdDsSwWvf]/, function() {
-      return "META_CHAR";
-    }], [/^\\\//, function() {
-      return "ESC_CHAR";
-    }], [/^\\[ #]/, function() {
-      return "ESC_CHAR";
-    }], [/^\\[\^\$\.\*\+\?\(\)\\\[\]\{\}\|\/]/, function() {
-      return "ESC_CHAR";
-    }], [/^\\[^*?+\[()\\|]/, function() {
-      var s = this.getCurrentState();
-      if (s === "u_class" && yytext === "\\-") {
-        return "ESC_CHAR";
-      } else if (s === "u" || s === "xu" || s === "u_class") {
-        throw new SyntaxError("invalid Unicode escape " + yytext);
-      }
-      return "ESC_CHAR";
-    }], [/^\(/, function() {
-      return "CHAR";
-    }], [/^\)/, function() {
-      return "CHAR";
-    }], [/^\(\?=/, function() {
-      return "POS_LA_ASSERT";
-    }], [/^\(\?!/, function() {
-      return "NEG_LA_ASSERT";
-    }], [/^\(\?<=/, function() {
-      return "POS_LB_ASSERT";
-    }], [/^\(\?<!/, function() {
-      return "NEG_LB_ASSERT";
-    }], [/^\(\?:/, function() {
-      return "NON_CAPTURE_GROUP";
-    }], [/^\(\?<(([\u0041-\u005a\u0061-\u007a\u00aa\u00b5\u00ba\u00c0-\u00d6\u00d8-\u00f6\u00f8-\u02c1\u02c6-\u02d1\u02e0-\u02e4\u02ec\u02ee\u0370-\u0374\u0376-\u0377\u037a-\u037d\u037f\u0386\u0388-\u038a\u038c\u038e-\u03a1\u03a3-\u03f5\u03f7-\u0481\u048a-\u052f\u0531-\u0556\u0559\u0560-\u0588\u05d0-\u05ea\u05ef-\u05f2\u0620-\u064a\u066e-\u066f\u0671-\u06d3\u06d5\u06e5-\u06e6\u06ee-\u06ef\u06fa-\u06fc\u06ff\u0710\u0712-\u072f\u074d-\u07a5\u07b1\u07ca-\u07ea\u07f4-\u07f5\u07fa\u0800-\u0815\u081a\u0824\u0828\u0840-\u0858\u0860-\u086a\u08a0-\u08b4\u08b6-\u08bd\u0904-\u0939\u093d\u0950\u0958-\u0961\u0971-\u0980\u0985-\u098c\u098f-\u0990\u0993-\u09a8\u09aa-\u09b0\u09b2\u09b6-\u09b9\u09bd\u09ce\u09dc-\u09dd\u09df-\u09e1\u09f0-\u09f1\u09fc\u0a05-\u0a0a\u0a0f-\u0a10\u0a13-\u0a28\u0a2a-\u0a30\u0a32-\u0a33\u0a35-\u0a36\u0a38-\u0a39\u0a59-\u0a5c\u0a5e\u0a72-\u0a74\u0a85-\u0a8d\u0a8f-\u0a91\u0a93-\u0aa8\u0aaa-\u0ab0\u0ab2-\u0ab3\u0ab5-\u0ab9\u0abd\u0ad0\u0ae0-\u0ae1\u0af9\u0b05-\u0b0c\u0b0f-\u0b10\u0b13-\u0b28\u0b2a-\u0b30\u0b32-\u0b33\u0b35-\u0b39\u0b3d\u0b5c-\u0b5d\u0b5f-\u0b61\u0b71\u0b83\u0b85-\u0b8a\u0b8e-\u0b90\u0b92-\u0b95\u0b99-\u0b9a\u0b9c\u0b9e-\u0b9f\u0ba3-\u0ba4\u0ba8-\u0baa\u0bae-\u0bb9\u0bd0\u0c05-\u0c0c\u0c0e-\u0c10\u0c12-\u0c28\u0c2a-\u0c39\u0c3d\u0c58-\u0c5a\u0c60-\u0c61\u0c80\u0c85-\u0c8c\u0c8e-\u0c90\u0c92-\u0ca8\u0caa-\u0cb3\u0cb5-\u0cb9\u0cbd\u0cde\u0ce0-\u0ce1\u0cf1-\u0cf2\u0d05-\u0d0c\u0d0e-\u0d10\u0d12-\u0d3a\u0d3d\u0d4e\u0d54-\u0d56\u0d5f-\u0d61\u0d7a-\u0d7f\u0d85-\u0d96\u0d9a-\u0db1\u0db3-\u0dbb\u0dbd\u0dc0-\u0dc6\u0e01-\u0e30\u0e32-\u0e33\u0e40-\u0e46\u0e81-\u0e82\u0e84\u0e86-\u0e8a\u0e8c-\u0ea3\u0ea5\u0ea7-\u0eb0\u0eb2-\u0eb3\u0ebd\u0ec0-\u0ec4\u0ec6\u0edc-\u0edf\u0f00\u0f40-\u0f47\u0f49-\u0f6c\u0f88-\u0f8c\u1000-\u102a\u103f\u1050-\u1055\u105a-\u105d\u1061\u1065-\u1066\u106e-\u1070\u1075-\u1081\u108e\u10a0-\u10c5\u10c7\u10cd\u10d0-\u10fa\u10fc-\u1248\u124a-\u124d\u1250-\u1256\u1258\u125a-\u125d\u1260-\u1288\u128a-\u128d\u1290-\u12b0\u12b2-\u12b5\u12b8-\u12be\u12c0\u12c2-\u12c5\u12c8-\u12d6\u12d8-\u1310\u1312-\u1315\u1318-\u135a\u1380-\u138f\u13a0-\u13f5\u13f8-\u13fd\u1401-\u166c\u166f-\u167f\u1681-\u169a\u16a0-\u16ea\u16ee-\u16f8\u1700-\u170c\u170e-\u1711\u1720-\u1731\u1740-\u1751\u1760-\u176c\u176e-\u1770\u1780-\u17b3\u17d7\u17dc\u1820-\u1878\u1880-\u18a8\u18aa\u18b0-\u18f5\u1900-\u191e\u1950-\u196d\u1970-\u1974\u1980-\u19ab\u19b0-\u19c9\u1a00-\u1a16\u1a20-\u1a54\u1aa7\u1b05-\u1b33\u1b45-\u1b4b\u1b83-\u1ba0\u1bae-\u1baf\u1bba-\u1be5\u1c00-\u1c23\u1c4d-\u1c4f\u1c5a-\u1c7d\u1c80-\u1c88\u1c90-\u1cba\u1cbd-\u1cbf\u1ce9-\u1cec\u1cee-\u1cf3\u1cf5-\u1cf6\u1cfa\u1d00-\u1dbf\u1e00-\u1f15\u1f18-\u1f1d\u1f20-\u1f45\u1f48-\u1f4d\u1f50-\u1f57\u1f59\u1f5b\u1f5d\u1f5f-\u1f7d\u1f80-\u1fb4\u1fb6-\u1fbc\u1fbe\u1fc2-\u1fc4\u1fc6-\u1fcc\u1fd0-\u1fd3\u1fd6-\u1fdb\u1fe0-\u1fec\u1ff2-\u1ff4\u1ff6-\u1ffc\u2071\u207f\u2090-\u209c\u2102\u2107\u210a-\u2113\u2115\u2118-\u211d\u2124\u2126\u2128\u212a-\u2139\u213c-\u213f\u2145-\u2149\u214e\u2160-\u2188\u2c00-\u2c2e\u2c30-\u2c5e\u2c60-\u2ce4\u2ceb-\u2cee\u2cf2-\u2cf3\u2d00-\u2d25\u2d27\u2d2d\u2d30-\u2d67\u2d6f\u2d80-\u2d96\u2da0-\u2da6\u2da8-\u2dae\u2db0-\u2db6\u2db8-\u2dbe\u2dc0-\u2dc6\u2dc8-\u2dce\u2dd0-\u2dd6\u2dd8-\u2dde\u3005-\u3007\u3021-\u3029\u3031-\u3035\u3038-\u303c\u3041-\u3096\u309b-\u309f\u30a1-\u30fa\u30fc-\u30ff\u3105-\u312f\u3131-\u318e\u31a0-\u31ba\u31f0-\u31ff\u3400-\u4db5\u4e00-\u9fef\ua000-\ua48c\ua4d0-\ua4fd\ua500-\ua60c\ua610-\ua61f\ua62a-\ua62b\ua640-\ua66e\ua67f-\ua69d\ua6a0-\ua6ef\ua717-\ua71f\ua722-\ua788\ua78b-\ua7bf\ua7c2-\ua7c6\ua7f7-\ua801\ua803-\ua805\ua807-\ua80a\ua80c-\ua822\ua840-\ua873\ua882-\ua8b3\ua8f2-\ua8f7\ua8fb\ua8fd-\ua8fe\ua90a-\ua925\ua930-\ua946\ua960-\ua97c\ua984-\ua9b2\ua9cf\ua9e0-\ua9e4\ua9e6-\ua9ef\ua9fa-\ua9fe\uaa00-\uaa28\uaa40-\uaa42\uaa44-\uaa4b\uaa60-\uaa76\uaa7a\uaa7e-\uaaaf\uaab1\uaab5-\uaab6\uaab9-\uaabd\uaac0\uaac2\uaadb-\uaadd\uaae0-\uaaea\uaaf2-\uaaf4\uab01-\uab06\uab09-\uab0e\uab11-\uab16\uab20-\uab26\uab28-\uab2e\uab30-\uab5a\uab5c-\uab67\uab70-\uabe2\uac00-\ud7a3\ud7b0-\ud7c6\ud7cb-\ud7fb\uf900-\ufa6d\ufa70-\ufad9\ufb00-\ufb06\ufb13-\ufb17\ufb1d\ufb1f-\ufb28\ufb2a-\ufb36\ufb38-\ufb3c\ufb3e\ufb40-\ufb41\ufb43-\ufb44\ufb46-\ufbb1\ufbd3-\ufd3d\ufd50-\ufd8f\ufd92-\ufdc7\ufdf0-\ufdfb\ufe70-\ufe74\ufe76-\ufefc\uff21-\uff3a\uff41-\uff5a\uff66-\uffbe\uffc2-\uffc7\uffca-\uffcf\uffd2-\uffd7\uffda-\uffdc]|\ud800[\udc00-\udc0b\udc0d-\udc26\udc28-\udc3a\udc3c-\udc3d\udc3f-\udc4d\udc50-\udc5d\udc80-\udcfa\udd40-\udd74\ude80-\ude9c\udea0-\uded0\udf00-\udf1f\udf2d-\udf4a\udf50-\udf75\udf80-\udf9d\udfa0-\udfc3\udfc8-\udfcf\udfd1-\udfd5]|\ud801[\udc00-\udc9d\udcb0-\udcd3\udcd8-\udcfb\udd00-\udd27\udd30-\udd63\ude00-\udf36\udf40-\udf55\udf60-\udf67]|\ud802[\udc00-\udc05\udc08\udc0a-\udc35\udc37-\udc38\udc3c\udc3f-\udc55\udc60-\udc76\udc80-\udc9e\udce0-\udcf2\udcf4-\udcf5\udd00-\udd15\udd20-\udd39\udd80-\uddb7\uddbe-\uddbf\ude00\ude10-\ude13\ude15-\ude17\ude19-\ude35\ude60-\ude7c\ude80-\ude9c\udec0-\udec7\udec9-\udee4\udf00-\udf35\udf40-\udf55\udf60-\udf72\udf80-\udf91]|\ud803[\udc00-\udc48\udc80-\udcb2\udcc0-\udcf2\udd00-\udd23\udf00-\udf1c\udf27\udf30-\udf45\udfe0-\udff6]|\ud804[\udc03-\udc37\udc83-\udcaf\udcd0-\udce8\udd03-\udd26\udd44\udd50-\udd72\udd76\udd83-\uddb2\uddc1-\uddc4\uddda\udddc\ude00-\ude11\ude13-\ude2b\ude80-\ude86\ude88\ude8a-\ude8d\ude8f-\ude9d\ude9f-\udea8\udeb0-\udede\udf05-\udf0c\udf0f-\udf10\udf13-\udf28\udf2a-\udf30\udf32-\udf33\udf35-\udf39\udf3d\udf50\udf5d-\udf61]|\ud805[\udc00-\udc34\udc47-\udc4a\udc5f\udc80-\udcaf\udcc4-\udcc5\udcc7\udd80-\uddae\uddd8-\udddb\ude00-\ude2f\ude44\ude80-\udeaa\udeb8\udf00-\udf1a]|\ud806[\udc00-\udc2b\udca0-\udcdf\udcff\udda0-\udda7\uddaa-\uddd0\udde1\udde3\ude00\ude0b-\ude32\ude3a\ude50\ude5c-\ude89\ude9d\udec0-\udef8]|\ud807[\udc00-\udc08\udc0a-\udc2e\udc40\udc72-\udc8f\udd00-\udd06\udd08-\udd09\udd0b-\udd30\udd46\udd60-\udd65\udd67-\udd68\udd6a-\udd89\udd98\udee0-\udef2]|\ud808[\udc00-\udf99]|\ud809[\udc00-\udc6e\udc80-\udd43]|\ud80c[\udc00-\udfff]|\ud80d[\udc00-\udc2e]|\ud811[\udc00-\ude46]|\ud81a[\udc00-\ude38\ude40-\ude5e\uded0-\udeed\udf00-\udf2f\udf40-\udf43\udf63-\udf77\udf7d-\udf8f]|\ud81b[\ude40-\ude7f\udf00-\udf4a\udf50\udf93-\udf9f\udfe0-\udfe1\udfe3]|\ud81c[\udc00-\udfff]|\ud81d[\udc00-\udfff]|\ud81e[\udc00-\udfff]|\ud81f[\udc00-\udfff]|\ud820[\udc00-\udfff]|\ud821[\udc00-\udff7]|\ud822[\udc00-\udef2]|\ud82c[\udc00-\udd1e\udd50-\udd52\udd64-\udd67\udd70-\udefb]|\ud82f[\udc00-\udc6a\udc70-\udc7c\udc80-\udc88\udc90-\udc99]|\ud835[\udc00-\udc54\udc56-\udc9c\udc9e-\udc9f\udca2\udca5-\udca6\udca9-\udcac\udcae-\udcb9\udcbb\udcbd-\udcc3\udcc5-\udd05\udd07-\udd0a\udd0d-\udd14\udd16-\udd1c\udd1e-\udd39\udd3b-\udd3e\udd40-\udd44\udd46\udd4a-\udd50\udd52-\udea5\udea8-\udec0\udec2-\udeda\udedc-\udefa\udefc-\udf14\udf16-\udf34\udf36-\udf4e\udf50-\udf6e\udf70-\udf88\udf8a-\udfa8\udfaa-\udfc2\udfc4-\udfcb]|\ud838[\udd00-\udd2c\udd37-\udd3d\udd4e\udec0-\udeeb]|\ud83a[\udc00-\udcc4\udd00-\udd43\udd4b]|\ud83b[\ude00-\ude03\ude05-\ude1f\ude21-\ude22\ude24\ude27\ude29-\ude32\ude34-\ude37\ude39\ude3b\ude42\ude47\ude49\ude4b\ude4d-\ude4f\ude51-\ude52\ude54\ude57\ude59\ude5b\ude5d\ude5f\ude61-\ude62\ude64\ude67-\ude6a\ude6c-\ude72\ude74-\ude77\ude79-\ude7c\ude7e\ude80-\ude89\ude8b-\ude9b\udea1-\udea3\udea5-\udea9\udeab-\udebb]|\ud840[\udc00-\udfff]|\ud841[\udc00-\udfff]|\ud842[\udc00-\udfff]|\ud843[\udc00-\udfff]|\ud844[\udc00-\udfff]|\ud845[\udc00-\udfff]|\ud846[\udc00-\udfff]|\ud847[\udc00-\udfff]|\ud848[\udc00-\udfff]|\ud849[\udc00-\udfff]|\ud84a[\udc00-\udfff]|\ud84b[\udc00-\udfff]|\ud84c[\udc00-\udfff]|\ud84d[\udc00-\udfff]|\ud84e[\udc00-\udfff]|\ud84f[\udc00-\udfff]|\ud850[\udc00-\udfff]|\ud851[\udc00-\udfff]|\ud852[\udc00-\udfff]|\ud853[\udc00-\udfff]|\ud854[\udc00-\udfff]|\ud855[\udc00-\udfff]|\ud856[\udc00-\udfff]|\ud857[\udc00-\udfff]|\ud858[\udc00-\udfff]|\ud859[\udc00-\udfff]|\ud85a[\udc00-\udfff]|\ud85b[\udc00-\udfff]|\ud85c[\udc00-\udfff]|\ud85d[\udc00-\udfff]|\ud85e[\udc00-\udfff]|\ud85f[\udc00-\udfff]|\ud860[\udc00-\udfff]|\ud861[\udc00-\udfff]|\ud862[\udc00-\udfff]|\ud863[\udc00-\udfff]|\ud864[\udc00-\udfff]|\ud865[\udc00-\udfff]|\ud866[\udc00-\udfff]|\ud867[\udc00-\udfff]|\ud868[\udc00-\udfff]|\ud869[\udc00-\uded6\udf00-\udfff]|\ud86a[\udc00-\udfff]|\ud86b[\udc00-\udfff]|\ud86c[\udc00-\udfff]|\ud86d[\udc00-\udf34\udf40-\udfff]|\ud86e[\udc00-\udc1d\udc20-\udfff]|\ud86f[\udc00-\udfff]|\ud870[\udc00-\udfff]|\ud871[\udc00-\udfff]|\ud872[\udc00-\udfff]|\ud873[\udc00-\udea1\udeb0-\udfff]|\ud874[\udc00-\udfff]|\ud875[\udc00-\udfff]|\ud876[\udc00-\udfff]|\ud877[\udc00-\udfff]|\ud878[\udc00-\udfff]|\ud879[\udc00-\udfff]|\ud87a[\udc00-\udfe0]|\ud87e[\udc00-\ude1d])|[$_]|(\\u[0-9a-fA-F]{4}|\\u\{[0-9a-fA-F]{1,}\}))(([\u0030-\u0039\u0041-\u005a\u005f\u0061-\u007a\u00aa\u00b5\u00b7\u00ba\u00c0-\u00d6\u00d8-\u00f6\u00f8-\u02c1\u02c6-\u02d1\u02e0-\u02e4\u02ec\u02ee\u0300-\u0374\u0376-\u0377\u037a-\u037d\u037f\u0386-\u038a\u038c\u038e-\u03a1\u03a3-\u03f5\u03f7-\u0481\u0483-\u0487\u048a-\u052f\u0531-\u0556\u0559\u0560-\u0588\u0591-\u05bd\u05bf\u05c1-\u05c2\u05c4-\u05c5\u05c7\u05d0-\u05ea\u05ef-\u05f2\u0610-\u061a\u0620-\u0669\u066e-\u06d3\u06d5-\u06dc\u06df-\u06e8\u06ea-\u06fc\u06ff\u0710-\u074a\u074d-\u07b1\u07c0-\u07f5\u07fa\u07fd\u0800-\u082d\u0840-\u085b\u0860-\u086a\u08a0-\u08b4\u08b6-\u08bd\u08d3-\u08e1\u08e3-\u0963\u0966-\u096f\u0971-\u0983\u0985-\u098c\u098f-\u0990\u0993-\u09a8\u09aa-\u09b0\u09b2\u09b6-\u09b9\u09bc-\u09c4\u09c7-\u09c8\u09cb-\u09ce\u09d7\u09dc-\u09dd\u09df-\u09e3\u09e6-\u09f1\u09fc\u09fe\u0a01-\u0a03\u0a05-\u0a0a\u0a0f-\u0a10\u0a13-\u0a28\u0a2a-\u0a30\u0a32-\u0a33\u0a35-\u0a36\u0a38-\u0a39\u0a3c\u0a3e-\u0a42\u0a47-\u0a48\u0a4b-\u0a4d\u0a51\u0a59-\u0a5c\u0a5e\u0a66-\u0a75\u0a81-\u0a83\u0a85-\u0a8d\u0a8f-\u0a91\u0a93-\u0aa8\u0aaa-\u0ab0\u0ab2-\u0ab3\u0ab5-\u0ab9\u0abc-\u0ac5\u0ac7-\u0ac9\u0acb-\u0acd\u0ad0\u0ae0-\u0ae3\u0ae6-\u0aef\u0af9-\u0aff\u0b01-\u0b03\u0b05-\u0b0c\u0b0f-\u0b10\u0b13-\u0b28\u0b2a-\u0b30\u0b32-\u0b33\u0b35-\u0b39\u0b3c-\u0b44\u0b47-\u0b48\u0b4b-\u0b4d\u0b56-\u0b57\u0b5c-\u0b5d\u0b5f-\u0b63\u0b66-\u0b6f\u0b71\u0b82-\u0b83\u0b85-\u0b8a\u0b8e-\u0b90\u0b92-\u0b95\u0b99-\u0b9a\u0b9c\u0b9e-\u0b9f\u0ba3-\u0ba4\u0ba8-\u0baa\u0bae-\u0bb9\u0bbe-\u0bc2\u0bc6-\u0bc8\u0bca-\u0bcd\u0bd0\u0bd7\u0be6-\u0bef\u0c00-\u0c0c\u0c0e-\u0c10\u0c12-\u0c28\u0c2a-\u0c39\u0c3d-\u0c44\u0c46-\u0c48\u0c4a-\u0c4d\u0c55-\u0c56\u0c58-\u0c5a\u0c60-\u0c63\u0c66-\u0c6f\u0c80-\u0c83\u0c85-\u0c8c\u0c8e-\u0c90\u0c92-\u0ca8\u0caa-\u0cb3\u0cb5-\u0cb9\u0cbc-\u0cc4\u0cc6-\u0cc8\u0cca-\u0ccd\u0cd5-\u0cd6\u0cde\u0ce0-\u0ce3\u0ce6-\u0cef\u0cf1-\u0cf2\u0d00-\u0d03\u0d05-\u0d0c\u0d0e-\u0d10\u0d12-\u0d44\u0d46-\u0d48\u0d4a-\u0d4e\u0d54-\u0d57\u0d5f-\u0d63\u0d66-\u0d6f\u0d7a-\u0d7f\u0d82-\u0d83\u0d85-\u0d96\u0d9a-\u0db1\u0db3-\u0dbb\u0dbd\u0dc0-\u0dc6\u0dca\u0dcf-\u0dd4\u0dd6\u0dd8-\u0ddf\u0de6-\u0def\u0df2-\u0df3\u0e01-\u0e3a\u0e40-\u0e4e\u0e50-\u0e59\u0e81-\u0e82\u0e84\u0e86-\u0e8a\u0e8c-\u0ea3\u0ea5\u0ea7-\u0ebd\u0ec0-\u0ec4\u0ec6\u0ec8-\u0ecd\u0ed0-\u0ed9\u0edc-\u0edf\u0f00\u0f18-\u0f19\u0f20-\u0f29\u0f35\u0f37\u0f39\u0f3e-\u0f47\u0f49-\u0f6c\u0f71-\u0f84\u0f86-\u0f97\u0f99-\u0fbc\u0fc6\u1000-\u1049\u1050-\u109d\u10a0-\u10c5\u10c7\u10cd\u10d0-\u10fa\u10fc-\u1248\u124a-\u124d\u1250-\u1256\u1258\u125a-\u125d\u1260-\u1288\u128a-\u128d\u1290-\u12b0\u12b2-\u12b5\u12b8-\u12be\u12c0\u12c2-\u12c5\u12c8-\u12d6\u12d8-\u1310\u1312-\u1315\u1318-\u135a\u135d-\u135f\u1369-\u1371\u1380-\u138f\u13a0-\u13f5\u13f8-\u13fd\u1401-\u166c\u166f-\u167f\u1681-\u169a\u16a0-\u16ea\u16ee-\u16f8\u1700-\u170c\u170e-\u1714\u1720-\u1734\u1740-\u1753\u1760-\u176c\u176e-\u1770\u1772-\u1773\u1780-\u17d3\u17d7\u17dc-\u17dd\u17e0-\u17e9\u180b-\u180d\u1810-\u1819\u1820-\u1878\u1880-\u18aa\u18b0-\u18f5\u1900-\u191e\u1920-\u192b\u1930-\u193b\u1946-\u196d\u1970-\u1974\u1980-\u19ab\u19b0-\u19c9\u19d0-\u19da\u1a00-\u1a1b\u1a20-\u1a5e\u1a60-\u1a7c\u1a7f-\u1a89\u1a90-\u1a99\u1aa7\u1ab0-\u1abd\u1b00-\u1b4b\u1b50-\u1b59\u1b6b-\u1b73\u1b80-\u1bf3\u1c00-\u1c37\u1c40-\u1c49\u1c4d-\u1c7d\u1c80-\u1c88\u1c90-\u1cba\u1cbd-\u1cbf\u1cd0-\u1cd2\u1cd4-\u1cfa\u1d00-\u1df9\u1dfb-\u1f15\u1f18-\u1f1d\u1f20-\u1f45\u1f48-\u1f4d\u1f50-\u1f57\u1f59\u1f5b\u1f5d\u1f5f-\u1f7d\u1f80-\u1fb4\u1fb6-\u1fbc\u1fbe\u1fc2-\u1fc4\u1fc6-\u1fcc\u1fd0-\u1fd3\u1fd6-\u1fdb\u1fe0-\u1fec\u1ff2-\u1ff4\u1ff6-\u1ffc\u203f-\u2040\u2054\u2071\u207f\u2090-\u209c\u20d0-\u20dc\u20e1\u20e5-\u20f0\u2102\u2107\u210a-\u2113\u2115\u2118-\u211d\u2124\u2126\u2128\u212a-\u2139\u213c-\u213f\u2145-\u2149\u214e\u2160-\u2188\u2c00-\u2c2e\u2c30-\u2c5e\u2c60-\u2ce4\u2ceb-\u2cf3\u2d00-\u2d25\u2d27\u2d2d\u2d30-\u2d67\u2d6f\u2d7f-\u2d96\u2da0-\u2da6\u2da8-\u2dae\u2db0-\u2db6\u2db8-\u2dbe\u2dc0-\u2dc6\u2dc8-\u2dce\u2dd0-\u2dd6\u2dd8-\u2dde\u2de0-\u2dff\u3005-\u3007\u3021-\u302f\u3031-\u3035\u3038-\u303c\u3041-\u3096\u3099-\u309f\u30a1-\u30fa\u30fc-\u30ff\u3105-\u312f\u3131-\u318e\u31a0-\u31ba\u31f0-\u31ff\u3400-\u4db5\u4e00-\u9fef\ua000-\ua48c\ua4d0-\ua4fd\ua500-\ua60c\ua610-\ua62b\ua640-\ua66f\ua674-\ua67d\ua67f-\ua6f1\ua717-\ua71f\ua722-\ua788\ua78b-\ua7bf\ua7c2-\ua7c6\ua7f7-\ua827\ua840-\ua873\ua880-\ua8c5\ua8d0-\ua8d9\ua8e0-\ua8f7\ua8fb\ua8fd-\ua92d\ua930-\ua953\ua960-\ua97c\ua980-\ua9c0\ua9cf-\ua9d9\ua9e0-\ua9fe\uaa00-\uaa36\uaa40-\uaa4d\uaa50-\uaa59\uaa60-\uaa76\uaa7a-\uaac2\uaadb-\uaadd\uaae0-\uaaef\uaaf2-\uaaf6\uab01-\uab06\uab09-\uab0e\uab11-\uab16\uab20-\uab26\uab28-\uab2e\uab30-\uab5a\uab5c-\uab67\uab70-\uabea\uabec-\uabed\uabf0-\uabf9\uac00-\ud7a3\ud7b0-\ud7c6\ud7cb-\ud7fb\uf900-\ufa6d\ufa70-\ufad9\ufb00-\ufb06\ufb13-\ufb17\ufb1d-\ufb28\ufb2a-\ufb36\ufb38-\ufb3c\ufb3e\ufb40-\ufb41\ufb43-\ufb44\ufb46-\ufbb1\ufbd3-\ufd3d\ufd50-\ufd8f\ufd92-\ufdc7\ufdf0-\ufdfb\ufe00-\ufe0f\ufe20-\ufe2f\ufe33-\ufe34\ufe4d-\ufe4f\ufe70-\ufe74\ufe76-\ufefc\uff10-\uff19\uff21-\uff3a\uff3f\uff41-\uff5a\uff66-\uffbe\uffc2-\uffc7\uffca-\uffcf\uffd2-\uffd7\uffda-\uffdc]|\ud800[\udc00-\udc0b\udc0d-\udc26\udc28-\udc3a\udc3c-\udc3d\udc3f-\udc4d\udc50-\udc5d\udc80-\udcfa\udd40-\udd74\uddfd\ude80-\ude9c\udea0-\uded0\udee0\udf00-\udf1f\udf2d-\udf4a\udf50-\udf7a\udf80-\udf9d\udfa0-\udfc3\udfc8-\udfcf\udfd1-\udfd5]|\ud801[\udc00-\udc9d\udca0-\udca9\udcb0-\udcd3\udcd8-\udcfb\udd00-\udd27\udd30-\udd63\ude00-\udf36\udf40-\udf55\udf60-\udf67]|\ud802[\udc00-\udc05\udc08\udc0a-\udc35\udc37-\udc38\udc3c\udc3f-\udc55\udc60-\udc76\udc80-\udc9e\udce0-\udcf2\udcf4-\udcf5\udd00-\udd15\udd20-\udd39\udd80-\uddb7\uddbe-\uddbf\ude00-\ude03\ude05-\ude06\ude0c-\ude13\ude15-\ude17\ude19-\ude35\ude38-\ude3a\ude3f\ude60-\ude7c\ude80-\ude9c\udec0-\udec7\udec9-\udee6\udf00-\udf35\udf40-\udf55\udf60-\udf72\udf80-\udf91]|\ud803[\udc00-\udc48\udc80-\udcb2\udcc0-\udcf2\udd00-\udd27\udd30-\udd39\udf00-\udf1c\udf27\udf30-\udf50\udfe0-\udff6]|\ud804[\udc00-\udc46\udc66-\udc6f\udc7f-\udcba\udcd0-\udce8\udcf0-\udcf9\udd00-\udd34\udd36-\udd3f\udd44-\udd46\udd50-\udd73\udd76\udd80-\uddc4\uddc9-\uddcc\uddd0-\uddda\udddc\ude00-\ude11\ude13-\ude37\ude3e\ude80-\ude86\ude88\ude8a-\ude8d\ude8f-\ude9d\ude9f-\udea8\udeb0-\udeea\udef0-\udef9\udf00-\udf03\udf05-\udf0c\udf0f-\udf10\udf13-\udf28\udf2a-\udf30\udf32-\udf33\udf35-\udf39\udf3b-\udf44\udf47-\udf48\udf4b-\udf4d\udf50\udf57\udf5d-\udf63\udf66-\udf6c\udf70-\udf74]|\ud805[\udc00-\udc4a\udc50-\udc59\udc5e-\udc5f\udc80-\udcc5\udcc7\udcd0-\udcd9\udd80-\uddb5\uddb8-\uddc0\uddd8-\udddd\ude00-\ude40\ude44\ude50-\ude59\ude80-\udeb8\udec0-\udec9\udf00-\udf1a\udf1d-\udf2b\udf30-\udf39]|\ud806[\udc00-\udc3a\udca0-\udce9\udcff\udda0-\udda7\uddaa-\uddd7\uddda-\udde1\udde3-\udde4\ude00-\ude3e\ude47\ude50-\ude99\ude9d\udec0-\udef8]|\ud807[\udc00-\udc08\udc0a-\udc36\udc38-\udc40\udc50-\udc59\udc72-\udc8f\udc92-\udca7\udca9-\udcb6\udd00-\udd06\udd08-\udd09\udd0b-\udd36\udd3a\udd3c-\udd3d\udd3f-\udd47\udd50-\udd59\udd60-\udd65\udd67-\udd68\udd6a-\udd8e\udd90-\udd91\udd93-\udd98\udda0-\udda9\udee0-\udef6]|\ud808[\udc00-\udf99]|\ud809[\udc00-\udc6e\udc80-\udd43]|\ud80c[\udc00-\udfff]|\ud80d[\udc00-\udc2e]|\ud811[\udc00-\ude46]|\ud81a[\udc00-\ude38\ude40-\ude5e\ude60-\ude69\uded0-\udeed\udef0-\udef4\udf00-\udf36\udf40-\udf43\udf50-\udf59\udf63-\udf77\udf7d-\udf8f]|\ud81b[\ude40-\ude7f\udf00-\udf4a\udf4f-\udf87\udf8f-\udf9f\udfe0-\udfe1\udfe3]|\ud81c[\udc00-\udfff]|\ud81d[\udc00-\udfff]|\ud81e[\udc00-\udfff]|\ud81f[\udc00-\udfff]|\ud820[\udc00-\udfff]|\ud821[\udc00-\udff7]|\ud822[\udc00-\udef2]|\ud82c[\udc00-\udd1e\udd50-\udd52\udd64-\udd67\udd70-\udefb]|\ud82f[\udc00-\udc6a\udc70-\udc7c\udc80-\udc88\udc90-\udc99\udc9d-\udc9e]|\ud834[\udd65-\udd69\udd6d-\udd72\udd7b-\udd82\udd85-\udd8b\uddaa-\uddad\ude42-\ude44]|\ud835[\udc00-\udc54\udc56-\udc9c\udc9e-\udc9f\udca2\udca5-\udca6\udca9-\udcac\udcae-\udcb9\udcbb\udcbd-\udcc3\udcc5-\udd05\udd07-\udd0a\udd0d-\udd14\udd16-\udd1c\udd1e-\udd39\udd3b-\udd3e\udd40-\udd44\udd46\udd4a-\udd50\udd52-\udea5\udea8-\udec0\udec2-\udeda\udedc-\udefa\udefc-\udf14\udf16-\udf34\udf36-\udf4e\udf50-\udf6e\udf70-\udf88\udf8a-\udfa8\udfaa-\udfc2\udfc4-\udfcb\udfce-\udfff]|\ud836[\ude00-\ude36\ude3b-\ude6c\ude75\ude84\ude9b-\ude9f\udea1-\udeaf]|\ud838[\udc00-\udc06\udc08-\udc18\udc1b-\udc21\udc23-\udc24\udc26-\udc2a\udd00-\udd2c\udd30-\udd3d\udd40-\udd49\udd4e\udec0-\udef9]|\ud83a[\udc00-\udcc4\udcd0-\udcd6\udd00-\udd4b\udd50-\udd59]|\ud83b[\ude00-\ude03\ude05-\ude1f\ude21-\ude22\ude24\ude27\ude29-\ude32\ude34-\ude37\ude39\ude3b\ude42\ude47\ude49\ude4b\ude4d-\ude4f\ude51-\ude52\ude54\ude57\ude59\ude5b\ude5d\ude5f\ude61-\ude62\ude64\ude67-\ude6a\ude6c-\ude72\ude74-\ude77\ude79-\ude7c\ude7e\ude80-\ude89\ude8b-\ude9b\udea1-\udea3\udea5-\udea9\udeab-\udebb]|\ud840[\udc00-\udfff]|\ud841[\udc00-\udfff]|\ud842[\udc00-\udfff]|\ud843[\udc00-\udfff]|\ud844[\udc00-\udfff]|\ud845[\udc00-\udfff]|\ud846[\udc00-\udfff]|\ud847[\udc00-\udfff]|\ud848[\udc00-\udfff]|\ud849[\udc00-\udfff]|\ud84a[\udc00-\udfff]|\ud84b[\udc00-\udfff]|\ud84c[\udc00-\udfff]|\ud84d[\udc00-\udfff]|\ud84e[\udc00-\udfff]|\ud84f[\udc00-\udfff]|\ud850[\udc00-\udfff]|\ud851[\udc00-\udfff]|\ud852[\udc00-\udfff]|\ud853[\udc00-\udfff]|\ud854[\udc00-\udfff]|\ud855[\udc00-\udfff]|\ud856[\udc00-\udfff]|\ud857[\udc00-\udfff]|\ud858[\udc00-\udfff]|\ud859[\udc00-\udfff]|\ud85a[\udc00-\udfff]|\ud85b[\udc00-\udfff]|\ud85c[\udc00-\udfff]|\ud85d[\udc00-\udfff]|\ud85e[\udc00-\udfff]|\ud85f[\udc00-\udfff]|\ud860[\udc00-\udfff]|\ud861[\udc00-\udfff]|\ud862[\udc00-\udfff]|\ud863[\udc00-\udfff]|\ud864[\udc00-\udfff]|\ud865[\udc00-\udfff]|\ud866[\udc00-\udfff]|\ud867[\udc00-\udfff]|\ud868[\udc00-\udfff]|\ud869[\udc00-\uded6\udf00-\udfff]|\ud86a[\udc00-\udfff]|\ud86b[\udc00-\udfff]|\ud86c[\udc00-\udfff]|\ud86d[\udc00-\udf34\udf40-\udfff]|\ud86e[\udc00-\udc1d\udc20-\udfff]|\ud86f[\udc00-\udfff]|\ud870[\udc00-\udfff]|\ud871[\udc00-\udfff]|\ud872[\udc00-\udfff]|\ud873[\udc00-\udea1\udeb0-\udfff]|\ud874[\udc00-\udfff]|\ud875[\udc00-\udfff]|\ud876[\udc00-\udfff]|\ud877[\udc00-\udfff]|\ud878[\udc00-\udfff]|\ud879[\udc00-\udfff]|\ud87a[\udc00-\udfe0]|\ud87e[\udc00-\ude1d]|\udb40[\udd00-\uddef])|[$_]|(\\u[0-9a-fA-F]{4}|\\u\{[0-9a-fA-F]{1,}\})|[\u200c\u200d])*>/, function() {
-      yytext = yytext.slice(3, -1);
-      validateUnicodeGroupName(yytext, this.getCurrentState());
-      return "NAMED_CAPTURE_GROUP";
-    }], [/^\(/, function() {
-      return "L_PAREN";
-    }], [/^\)/, function() {
-      return "R_PAREN";
-    }], [/^[*?+[^$]/, function() {
-      return "CHAR";
-    }], [/^\\\]/, function() {
-      return "ESC_CHAR";
-    }], [/^\]/, function() {
-      this.popState();
-      return "R_BRACKET";
-    }], [/^\^/, function() {
-      return "BOS";
-    }], [/^\$/, function() {
-      return "EOS";
-    }], [/^\*/, function() {
-      return "STAR";
-    }], [/^\?/, function() {
-      return "Q_MARK";
-    }], [/^\+/, function() {
-      return "PLUS";
-    }], [/^\|/, function() {
-      return "BAR";
-    }], [/^\./, function() {
-      return "ANY";
-    }], [/^\//, function() {
-      return "SLASH";
-    }], [/^[^*?+\[()\\|]/, function() {
-      return "CHAR";
-    }], [/^\[\^/, function() {
-      var s = this.getCurrentState();
-      this.pushState(s === "u" || s === "xu" ? "u_class" : "class");
-      return "NEG_CLASS";
-    }], [/^\[/, function() {
-      var s = this.getCurrentState();
-      this.pushState(s === "u" || s === "xu" ? "u_class" : "class");
-      return "L_BRACKET";
-    }]];
-    var lexRulesByConditions = { "INITIAL": [8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 20, 22, 23, 24, 26, 27, 30, 31, 32, 33, 34, 35, 36, 37, 41, 42, 43, 44, 45, 46, 47, 48, 49, 50, 51], "u": [8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 26, 27, 30, 31, 32, 33, 34, 35, 36, 37, 41, 42, 43, 44, 45, 46, 47, 48, 49, 50, 51], "xu": [0, 1, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 30, 31, 32, 33, 34, 35, 36, 37, 41, 42, 43, 44, 45, 46, 47, 48, 49, 50, 51], "x": [0, 1, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 20, 22, 23, 24, 26, 27, 30, 31, 32, 33, 34, 35, 36, 37, 41, 42, 43, 44, 45, 46, 47, 48, 49, 50, 51], "u_class": [2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43, 44, 45, 46, 47, 48, 49, 50, 51], "class": [2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 20, 22, 23, 24, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43, 44, 45, 46, 47, 48, 49, 50, 51] };
-    var EOF_TOKEN = {
-      type: EOF,
-      value: ""
-    };
-    tokenizer = {
-      initString: function initString(string3) {
-        this._string = string3;
-        this._cursor = 0;
-        this._states = ["INITIAL"];
-        this._tokensQueue = [];
-        this._currentLine = 1;
-        this._currentColumn = 0;
-        this._currentLineBeginOffset = 0;
-        this._tokenStartOffset = 0;
-        this._tokenEndOffset = 0;
-        this._tokenStartLine = 1;
-        this._tokenEndLine = 1;
-        this._tokenStartColumn = 0;
-        this._tokenEndColumn = 0;
-        return this;
-      },
-      /**
-       * Returns tokenizer states.
-       */
-      getStates: function getStates() {
-        return this._states;
-      },
-      getCurrentState: function getCurrentState() {
-        return this._states[this._states.length - 1];
-      },
-      pushState: function pushState(state) {
-        this._states.push(state);
-      },
-      begin: function begin(state) {
-        this.pushState(state);
-      },
-      popState: function popState() {
-        if (this._states.length > 1) {
-          return this._states.pop();
-        }
-        return this._states[0];
-      },
-      getNextToken: function getNextToken() {
-        if (this._tokensQueue.length > 0) {
-          return this.onToken(this._toToken(this._tokensQueue.shift()));
-        }
-        if (!this.hasMoreTokens()) {
-          return this.onToken(EOF_TOKEN);
-        }
-        var string3 = this._string.slice(this._cursor);
-        var lexRulesForState = lexRulesByConditions[this.getCurrentState()];
-        for (var i = 0; i < lexRulesForState.length; i++) {
-          var lexRuleIndex = lexRulesForState[i];
-          var lexRule = lexRules[lexRuleIndex];
-          var matched = this._match(string3, lexRule[0]);
-          if (string3 === "" && matched === "") {
-            this._cursor++;
-          }
-          if (matched !== null) {
-            yytext = matched;
-            yyleng = yytext.length;
-            var token = lexRule[1].call(this);
-            if (!token) {
-              return this.getNextToken();
-            }
-            if (Array.isArray(token)) {
-              var tokensToQueue = token.slice(1);
-              token = token[0];
-              if (tokensToQueue.length > 0) {
-                var _tokensQueue;
-                (_tokensQueue = this._tokensQueue).unshift.apply(_tokensQueue, _toConsumableArray(tokensToQueue));
-              }
-            }
-            return this.onToken(this._toToken(token, yytext));
-          }
-        }
-        if (this.isEOF()) {
-          this._cursor++;
-          return EOF_TOKEN;
-        }
-        this.throwUnexpectedToken(string3[0], this._currentLine, this._currentColumn);
-      },
-      /**
-       * Throws default "Unexpected token" exception, showing the actual
-       * line from the source, pointing with the ^ marker to the bad token.
-       * In addition, shows `line:column` location.
-       */
-      throwUnexpectedToken: function throwUnexpectedToken(symbol, line, column) {
-        var lineSource = this._string.split("\n")[line - 1];
-        var lineData = "";
-        if (lineSource) {
-          var pad = " ".repeat(column);
-          lineData = "\n\n" + lineSource + "\n" + pad + "^\n";
-        }
-        throw new SyntaxError(lineData + 'Unexpected token: "' + symbol + '" ' + ("at " + line + ":" + column + "."));
-      },
-      getCursor: function getCursor() {
-        return this._cursor;
-      },
-      getCurrentLine: function getCurrentLine() {
-        return this._currentLine;
-      },
-      getCurrentColumn: function getCurrentColumn() {
-        return this._currentColumn;
-      },
-      _captureLocation: function _captureLocation(matched) {
-        var nlRe = /\n/g;
-        this._tokenStartOffset = this._cursor;
-        this._tokenStartLine = this._currentLine;
-        this._tokenStartColumn = this._tokenStartOffset - this._currentLineBeginOffset;
-        var nlMatch = void 0;
-        while ((nlMatch = nlRe.exec(matched)) !== null) {
-          this._currentLine++;
-          this._currentLineBeginOffset = this._tokenStartOffset + nlMatch.index + 1;
-        }
-        this._tokenEndOffset = this._cursor + matched.length;
-        this._tokenEndLine = this._currentLine;
-        this._tokenEndColumn = this._currentColumn = this._tokenEndOffset - this._currentLineBeginOffset;
-      },
-      _toToken: function _toToken(tokenType) {
-        var yytext2 = arguments.length > 1 && arguments[1] !== void 0 ? arguments[1] : "";
-        return {
-          // Basic data.
-          type: tokenType,
-          value: yytext2,
-          // Location data.
-          startOffset: this._tokenStartOffset,
-          endOffset: this._tokenEndOffset,
-          startLine: this._tokenStartLine,
-          endLine: this._tokenEndLine,
-          startColumn: this._tokenStartColumn,
-          endColumn: this._tokenEndColumn
-        };
-      },
-      isEOF: function isEOF() {
-        return this._cursor === this._string.length;
-      },
-      hasMoreTokens: function hasMoreTokens() {
-        return this._cursor <= this._string.length;
-      },
-      _match: function _match(string3, regexp) {
-        var matched = string3.match(regexp);
-        if (matched) {
-          this._captureLocation(matched[0]);
-          this._cursor += matched[0].length;
-          return matched[0];
-        }
-        return null;
-      },
-      /**
-       * Allows analyzing, and transforming token. Default implementation
-       * just passes the token through.
-       */
-      onToken: function onToken(token) {
-        return token;
-      }
-    };
-    yy.lexer = tokenizer;
-    yy.tokenizer = tokenizer;
-    yy.options = {
-      captureLocations: true
-    };
-    var yyparse = {
-      /**
-       * Sets global parsing options.
-       */
-      setOptions: function setOptions(options) {
-        yy.options = options;
-        return this;
-      },
-      /**
-       * Returns parsing options.
-       */
-      getOptions: function getOptions() {
-        return yy.options;
-      },
-      /**
-       * Parses a string.
-       */
-      parse: function parse12(string3, parseOptions) {
-        if (!tokenizer) {
-          throw new Error("Tokenizer instance wasn't specified.");
-        }
-        tokenizer.initString(string3);
-        var globalOptions = yy.options;
-        if (parseOptions) {
-          yy.options = Object.assign({}, yy.options, parseOptions);
-        }
-        yyparse.onParseBegin(string3, tokenizer, yy.options);
-        stack.length = 0;
-        stack.push(0);
-        var token = tokenizer.getNextToken();
-        var shiftedToken = null;
-        do {
-          if (!token) {
-            yy.options = globalOptions;
-            unexpectedEndOfInput();
-          }
-          var state = stack[stack.length - 1];
-          var column = tokens[token.type];
-          if (!table[state].hasOwnProperty(column)) {
-            yy.options = globalOptions;
-            unexpectedToken(token);
-          }
-          var entry2 = table[state][column];
-          if (entry2[0] === "s") {
-            var _loc2 = null;
-            if (yy.options.captureLocations) {
-              _loc2 = {
-                startOffset: token.startOffset,
-                endOffset: token.endOffset,
-                startLine: token.startLine,
-                endLine: token.endLine,
-                startColumn: token.startColumn,
-                endColumn: token.endColumn
-              };
-            }
-            shiftedToken = this.onShift(token);
-            stack.push({ symbol: tokens[shiftedToken.type], semanticValue: shiftedToken.value, loc: _loc2 }, Number(entry2.slice(1)));
-            token = tokenizer.getNextToken();
-          } else if (entry2[0] === "r") {
-            var productionNumber = entry2.slice(1);
-            var production = productions[productionNumber];
-            var hasSemanticAction = typeof production[2] === "function";
-            var semanticValueArgs = hasSemanticAction ? [] : null;
-            var locationArgs = hasSemanticAction && yy.options.captureLocations ? [] : null;
-            if (production[1] !== 0) {
-              var rhsLength = production[1];
-              while (rhsLength-- > 0) {
-                stack.pop();
-                var stackEntry = stack.pop();
-                if (hasSemanticAction) {
-                  semanticValueArgs.unshift(stackEntry.semanticValue);
-                  if (locationArgs) {
-                    locationArgs.unshift(stackEntry.loc);
-                  }
-                }
-              }
-            }
-            var reduceStackEntry = { symbol: production[0] };
-            if (hasSemanticAction) {
-              yytext = shiftedToken ? shiftedToken.value : null;
-              yyleng = shiftedToken ? shiftedToken.value.length : null;
-              var semanticActionArgs = locationArgs !== null ? semanticValueArgs.concat(locationArgs) : semanticValueArgs;
-              production[2].apply(production, _toConsumableArray(semanticActionArgs));
-              reduceStackEntry.semanticValue = __;
-              if (locationArgs) {
-                reduceStackEntry.loc = __loc;
-              }
-            }
-            var nextState = stack[stack.length - 1];
-            var symbolToReduceWith = production[0];
-            stack.push(reduceStackEntry, table[nextState][symbolToReduceWith]);
-          } else if (entry2 === "acc") {
-            stack.pop();
-            var parsed = stack.pop();
-            if (stack.length !== 1 || stack[0] !== 0 || tokenizer.hasMoreTokens()) {
-              yy.options = globalOptions;
-              unexpectedToken(token);
-            }
-            if (parsed.hasOwnProperty("semanticValue")) {
-              yy.options = globalOptions;
-              yyparse.onParseEnd(parsed.semanticValue);
-              return parsed.semanticValue;
-            }
-            yyparse.onParseEnd();
-            yy.options = globalOptions;
-            return true;
-          }
-        } while (tokenizer.hasMoreTokens() || stack.length > 1);
-      },
-      setTokenizer: function setTokenizer(customTokenizer) {
-        tokenizer = customTokenizer;
-        return yyparse;
-      },
-      getTokenizer: function getTokenizer() {
-        return tokenizer;
-      },
-      onParseBegin: function onParseBegin(string3, tokenizer2, options) {
-      },
-      onParseEnd: function onParseEnd(parsed) {
-      },
-      /**
-       * Allows analyzing, and transforming shifted token. Default implementation
-       * just passes the token through.
-       */
-      onShift: function onShift(token) {
-        return token;
-      }
-    };
-    var capturingGroupsCount = 0;
-    var namedGroups = {};
-    var parsingString = "";
-    yyparse.onParseBegin = function(string3, lexer) {
-      parsingString = string3;
-      capturingGroupsCount = 0;
-      namedGroups = {};
-      var lastSlash = string3.lastIndexOf("/");
-      var flags = string3.slice(lastSlash);
-      if (flags.includes("x") && flags.includes("u")) {
-        lexer.pushState("xu");
-      } else {
-        if (flags.includes("x")) {
-          lexer.pushState("x");
-        }
-        if (flags.includes("u")) {
-          lexer.pushState("u");
-        }
-      }
-    };
-    yyparse.onShift = function(token) {
-      if (token.type === "L_PAREN" || token.type === "NAMED_CAPTURE_GROUP") {
-        token.value = new String(token.value);
-        token.value.groupNumber = ++capturingGroupsCount;
-      }
-      return token;
-    };
-    function getRange(text) {
-      var range = text.match(/\d+/g).map(Number);
-      if (Number.isFinite(range[1]) && range[1] < range[0]) {
-        throw new SyntaxError("Numbers out of order in " + text + " quantifier");
-      }
-      return range;
-    }
-    function checkClassRange(from, to) {
-      if (from.kind === "control" || to.kind === "control" || !isNaN(from.codePoint) && !isNaN(to.codePoint) && from.codePoint > to.codePoint) {
-        throw new SyntaxError("Range " + from.value + "-" + to.value + " out of order in character class");
-      }
-    }
-    var unicodeProperties = require_parser_unicode_properties();
-    function UnicodeProperty(matched, loc2) {
-      var negative = matched[1] === "P";
-      var separatorIdx = matched.indexOf("=");
-      var name = matched.slice(3, separatorIdx !== -1 ? separatorIdx : -1);
-      var value = void 0;
-      var isShorthand = separatorIdx === -1 && unicodeProperties.isGeneralCategoryValue(name);
-      var isBinaryProperty = separatorIdx === -1 && unicodeProperties.isBinaryPropertyName(name);
-      if (isShorthand) {
-        value = name;
-        name = "General_Category";
-      } else if (isBinaryProperty) {
-        value = name;
-      } else {
-        if (!unicodeProperties.isValidName(name)) {
-          throw new SyntaxError("Invalid unicode property name: " + name + ".");
-        }
-        value = matched.slice(separatorIdx + 1, -1);
-        if (!unicodeProperties.isValidValue(name, value)) {
-          throw new SyntaxError("Invalid " + name + " unicode property value: " + value + ".");
-        }
-      }
-      return Node({
-        type: "UnicodeProperty",
-        name,
-        value,
-        negative,
-        shorthand: isShorthand,
-        binary: isBinaryProperty,
-        canonicalName: unicodeProperties.getCanonicalName(name) || name,
-        canonicalValue: unicodeProperties.getCanonicalValue(value) || value
-      }, loc2);
-    }
-    function Char(value, kind, loc2) {
-      var symbol = void 0;
-      var codePoint = void 0;
-      switch (kind) {
-        case "decimal": {
-          codePoint = Number(value.slice(1));
-          symbol = String.fromCodePoint(codePoint);
-          break;
-        }
-        case "oct": {
-          codePoint = parseInt(value.slice(1), 8);
-          symbol = String.fromCodePoint(codePoint);
-          break;
-        }
-        case "hex":
-        case "unicode": {
-          if (value.lastIndexOf("\\u") > 0) {
-            var _value$split$slice = value.split("\\u").slice(1), _value$split$slice2 = _slicedToArray(_value$split$slice, 2), lead = _value$split$slice2[0], trail = _value$split$slice2[1];
-            lead = parseInt(lead, 16);
-            trail = parseInt(trail, 16);
-            codePoint = (lead - 55296) * 1024 + (trail - 56320) + 65536;
-            symbol = String.fromCodePoint(codePoint);
-          } else {
-            var hex = value.slice(2).replace("{", "");
-            codePoint = parseInt(hex, 16);
-            if (codePoint > 1114111) {
-              throw new SyntaxError("Bad character escape sequence: " + value);
-            }
-            symbol = String.fromCodePoint(codePoint);
-          }
-          break;
-        }
-        case "meta": {
-          switch (value) {
-            case "\\t":
-              symbol = "	";
-              codePoint = symbol.codePointAt(0);
-              break;
-            case "\\n":
-              symbol = "\n";
-              codePoint = symbol.codePointAt(0);
-              break;
-            case "\\r":
-              symbol = "\r";
-              codePoint = symbol.codePointAt(0);
-              break;
-            case "\\v":
-              symbol = "\v";
-              codePoint = symbol.codePointAt(0);
-              break;
-            case "\\f":
-              symbol = "\f";
-              codePoint = symbol.codePointAt(0);
-              break;
-            case "\\b":
-              symbol = "\b";
-              codePoint = symbol.codePointAt(0);
-            case "\\0":
-              symbol = "\0";
-              codePoint = 0;
-            case ".":
-              symbol = ".";
-              codePoint = NaN;
-              break;
-            default:
-              codePoint = NaN;
-          }
-          break;
-        }
-        case "simple": {
-          symbol = value;
-          codePoint = symbol.codePointAt(0);
-          break;
-        }
-      }
-      return Node({
-        type: "Char",
-        value,
-        kind,
-        symbol,
-        codePoint
-      }, loc2);
-    }
-    var validFlags = "gimsuxy";
-    function checkFlags(flags) {
-      var seen = /* @__PURE__ */ new Set();
-      var _iteratorNormalCompletion = true;
-      var _didIteratorError = false;
-      var _iteratorError = void 0;
-      try {
-        for (var _iterator = flags[Symbol.iterator](), _step; !(_iteratorNormalCompletion = (_step = _iterator.next()).done); _iteratorNormalCompletion = true) {
-          var flag = _step.value;
-          if (seen.has(flag) || !validFlags.includes(flag)) {
-            throw new SyntaxError("Invalid flags: " + flags);
-          }
-          seen.add(flag);
-        }
-      } catch (err) {
-        _didIteratorError = true;
-        _iteratorError = err;
-      } finally {
-        try {
-          if (!_iteratorNormalCompletion && _iterator.return) {
-            _iterator.return();
-          }
-        } finally {
-          if (_didIteratorError) {
-            throw _iteratorError;
-          }
-        }
-      }
-      return flags.split("").sort().join("");
-    }
-    function GroupRefOrDecChar(text, textLoc) {
-      var reference = Number(text.slice(1));
-      if (reference > 0 && reference <= capturingGroupsCount) {
-        return Node({
-          type: "Backreference",
-          kind: "number",
-          number: reference,
-          reference
-        }, textLoc);
-      }
-      return Char(text, "decimal", textLoc);
-    }
-    var uReStart = /^\\u[0-9a-fA-F]{4}/;
-    var ucpReStart = /^\\u\{[0-9a-fA-F]{1,}\}/;
-    var ucpReAnywhere = /\\u\{[0-9a-fA-F]{1,}\}/;
-    function validateUnicodeGroupName(name, state) {
-      var isUnicodeName = ucpReAnywhere.test(name);
-      var isUnicodeState = state === "u" || state === "xu" || state === "u_class";
-      if (isUnicodeName && !isUnicodeState) {
-        throw new SyntaxError('invalid group Unicode name "' + name + '", use `u` flag.');
-      }
-      return name;
-    }
-    var uidRe = /\\u(?:([dD][89aAbB][0-9a-fA-F]{2})\\u([dD][c-fC-F][0-9a-fA-F]{2})|([dD][89aAbB][0-9a-fA-F]{2})|([dD][c-fC-F][0-9a-fA-F]{2})|([0-9a-ce-fA-CE-F][0-9a-fA-F]{3}|[dD][0-7][0-9a-fA-F]{2})|\{(0*(?:[0-9a-fA-F]{1,5}|10[0-9a-fA-F]{4}))\})/;
-    function decodeUnicodeGroupName(name) {
-      return name.replace(new RegExp(uidRe, "g"), function(_, leadSurrogate, trailSurrogate, leadSurrogateOnly, trailSurrogateOnly, nonSurrogate, codePoint) {
-        if (leadSurrogate) {
-          return String.fromCodePoint(parseInt(leadSurrogate, 16), parseInt(trailSurrogate, 16));
-        }
-        if (leadSurrogateOnly) {
-          return String.fromCodePoint(parseInt(leadSurrogateOnly, 16));
-        }
-        if (trailSurrogateOnly) {
-          return String.fromCodePoint(parseInt(trailSurrogateOnly, 16));
-        }
-        if (nonSurrogate) {
-          return String.fromCodePoint(parseInt(nonSurrogate, 16));
-        }
-        if (codePoint) {
-          return String.fromCodePoint(parseInt(codePoint, 16));
-        }
-        return _;
-      });
-    }
-    function NamedGroupRefOrChars(text, textLoc) {
-      var referenceRaw = text.slice(3, -1);
-      var reference = decodeUnicodeGroupName(referenceRaw);
-      if (namedGroups.hasOwnProperty(reference)) {
-        return Node({
-          type: "Backreference",
-          kind: "name",
-          number: namedGroups[reference],
-          reference,
-          referenceRaw
-        }, textLoc);
-      }
-      var startOffset = null;
-      var startLine = null;
-      var endLine = null;
-      var startColumn = null;
-      if (textLoc) {
-        startOffset = textLoc.startOffset;
-        startLine = textLoc.startLine;
-        endLine = textLoc.endLine;
-        startColumn = textLoc.startColumn;
-      }
-      var charRe = /^[\w$<>]/;
-      var loc2 = void 0;
-      var chars = [
-        // Init to first \k, taking 2 symbols.
-        Char(text.slice(1, 2), "simple", startOffset ? {
-          startLine,
-          endLine,
-          startColumn,
-          startOffset,
-          endOffset: startOffset += 2,
-          endColumn: startColumn += 2
-        } : null)
-      ];
-      chars[0].escaped = true;
-      text = text.slice(2);
-      while (text.length > 0) {
-        var matched = null;
-        if ((matched = text.match(uReStart)) || (matched = text.match(ucpReStart))) {
-          if (startOffset) {
-            loc2 = {
-              startLine,
-              endLine,
-              startColumn,
-              startOffset,
-              endOffset: startOffset += matched[0].length,
-              endColumn: startColumn += matched[0].length
-            };
-          }
-          chars.push(Char(matched[0], "unicode", loc2));
-          text = text.slice(matched[0].length);
-        } else if (matched = text.match(charRe)) {
-          if (startOffset) {
-            loc2 = {
-              startLine,
-              endLine,
-              startColumn,
-              startOffset,
-              endOffset: ++startOffset,
-              endColumn: ++startColumn
-            };
-          }
-          chars.push(Char(matched[0], "simple", loc2));
-          text = text.slice(1);
-        }
-      }
-      return chars;
-    }
-    function Node(node, loc2) {
-      if (yy.options.captureLocations) {
-        node.loc = {
-          source: parsingString.slice(loc2.startOffset, loc2.endOffset),
-          start: {
-            line: loc2.startLine,
-            column: loc2.startColumn,
-            offset: loc2.startOffset
-          },
-          end: {
-            line: loc2.endLine,
-            column: loc2.endColumn,
-            offset: loc2.endOffset
-          }
-        };
-      }
-      return node;
-    }
-    function loc(start, end) {
-      if (!yy.options.captureLocations) {
-        return null;
-      }
-      return {
-        startOffset: start.startOffset,
-        endOffset: end.endOffset,
-        startLine: start.startLine,
-        endLine: end.endLine,
-        startColumn: start.startColumn,
-        endColumn: end.endColumn
-      };
-    }
-    function unexpectedToken(token) {
-      if (token.type === EOF) {
-        unexpectedEndOfInput();
-      }
-      tokenizer.throwUnexpectedToken(token.value, token.startLine, token.startColumn);
-    }
-    function unexpectedEndOfInput() {
-      parseError("Unexpected end of input.");
-    }
-    function parseError(message2) {
-      throw new SyntaxError(message2);
-    }
-    module2.exports = yyparse;
-  }
-});
-
-// node_modules/regexp-tree/dist/parser/index.js
-var require_parser = __commonJS({
-  "node_modules/regexp-tree/dist/parser/index.js"(exports2, module2) {
-    "use strict";
-    var regexpTreeParser = require_regexp_tree();
-    var generatedParseFn = regexpTreeParser.parse.bind(regexpTreeParser);
-    regexpTreeParser.parse = function(regexp, options) {
-      return generatedParseFn("" + regexp, options);
-    };
-    regexpTreeParser.setOptions({ captureLocations: false });
-    module2.exports = regexpTreeParser;
-  }
-});
-
-// node_modules/regexp-tree/dist/traverse/node-path.js
-var require_node_path = __commonJS({
-  "node_modules/regexp-tree/dist/traverse/node-path.js"(exports2, module2) {
-    "use strict";
-    var _createClass = /* @__PURE__ */ (function() {
-      function defineProperties(target, props) {
-        for (var i = 0; i < props.length; i++) {
-          var descriptor = props[i];
-          descriptor.enumerable = descriptor.enumerable || false;
-          descriptor.configurable = true;
-          if ("value" in descriptor) descriptor.writable = true;
-          Object.defineProperty(target, descriptor.key, descriptor);
-        }
-      }
-      return function(Constructor, protoProps, staticProps) {
-        if (protoProps) defineProperties(Constructor.prototype, protoProps);
-        if (staticProps) defineProperties(Constructor, staticProps);
-        return Constructor;
-      };
-    })();
-    function _classCallCheck(instance, Constructor) {
-      if (!(instance instanceof Constructor)) {
-        throw new TypeError("Cannot call a class as a function");
-      }
-    }
-    var DEFAULT_COLLECTION_PROP = "expressions";
-    var DEFAULT_SINGLE_PROP = "expression";
-    var NodePath = (function() {
-      function NodePath2(node) {
-        var parentPath = arguments.length > 1 && arguments[1] !== void 0 ? arguments[1] : null;
-        var property = arguments.length > 2 && arguments[2] !== void 0 ? arguments[2] : null;
-        var index = arguments.length > 3 && arguments[3] !== void 0 ? arguments[3] : null;
-        _classCallCheck(this, NodePath2);
-        this.node = node;
-        this.parentPath = parentPath;
-        this.parent = parentPath ? parentPath.node : null;
-        this.property = property;
-        this.index = index;
-      }
-      _createClass(NodePath2, [{
-        key: "_enforceProp",
-        value: function _enforceProp(property) {
-          if (!this.node.hasOwnProperty(property)) {
-            throw new Error("Node of type " + this.node.type + ` doesn't have "` + property + '" collection.');
-          }
-        }
-        /**
-         * Sets a node into a children collection or the single child.
-         * By default child nodes are supposed to be under `expressions` property.
-         * An explicit property can be passed.
-         *
-         * @param Object node - a node to set into a collection or as single child
-         * @param number index - index at which to set
-         * @param string property - name of the collection or single property
-         */
-      }, {
-        key: "setChild",
-        value: function setChild(node) {
-          var index = arguments.length > 1 && arguments[1] !== void 0 ? arguments[1] : null;
-          var property = arguments.length > 2 && arguments[2] !== void 0 ? arguments[2] : null;
-          var childPath = void 0;
-          if (index != null) {
-            if (!property) {
-              property = DEFAULT_COLLECTION_PROP;
-            }
-            this._enforceProp(property);
-            this.node[property][index] = node;
-            childPath = NodePath2.getForNode(node, this, property, index);
-          } else {
-            if (!property) {
-              property = DEFAULT_SINGLE_PROP;
-            }
-            this._enforceProp(property);
-            this.node[property] = node;
-            childPath = NodePath2.getForNode(node, this, property, null);
-          }
-          return childPath;
-        }
-        /**
-         * Appends a node to a children collection.
-         * By default child nodes are supposed to be under `expressions` property.
-         * An explicit property can be passed.
-         *
-         * @param Object node - a node to set into a collection or as single child
-         * @param string property - name of the collection or single property
-         */
-      }, {
-        key: "appendChild",
-        value: function appendChild(node) {
-          var property = arguments.length > 1 && arguments[1] !== void 0 ? arguments[1] : null;
-          if (!property) {
-            property = DEFAULT_COLLECTION_PROP;
-          }
-          this._enforceProp(property);
-          var end = this.node[property].length;
-          return this.setChild(node, end, property);
-        }
-        /**
-         * Inserts a node into a collection.
-         * By default child nodes are supposed to be under `expressions` property.
-         * An explicit property can be passed.
-         *
-         * @param Object node - a node to insert into a collection
-         * @param number index - index at which to insert
-         * @param string property - name of the collection property
-         */
-      }, {
-        key: "insertChildAt",
-        value: function insertChildAt(node, index) {
-          var property = arguments.length > 2 && arguments[2] !== void 0 ? arguments[2] : DEFAULT_COLLECTION_PROP;
-          this._enforceProp(property);
-          this.node[property].splice(index, 0, node);
-          if (index <= NodePath2.getTraversingIndex()) {
-            NodePath2.updateTraversingIndex(1);
-          }
-          this._rebuildIndex(this.node, property);
-        }
-        /**
-         * Removes a node.
-         */
-      }, {
-        key: "remove",
-        value: function remove() {
-          if (this.isRemoved()) {
-            return;
-          }
-          NodePath2.registry.delete(this.node);
-          this.node = null;
-          if (!this.parent) {
-            return;
-          }
-          if (this.index !== null) {
-            this.parent[this.property].splice(this.index, 1);
-            if (this.index <= NodePath2.getTraversingIndex()) {
-              NodePath2.updateTraversingIndex(-1);
-            }
-            this._rebuildIndex(this.parent, this.property);
-            this.index = null;
-            this.property = null;
-            return;
-          }
-          delete this.parent[this.property];
-          this.property = null;
-        }
-        /**
-         * Rebuilds child nodes index (used on remove/insert).
-         */
-      }, {
-        key: "_rebuildIndex",
-        value: function _rebuildIndex(parent, property) {
-          var parentPath = NodePath2.getForNode(parent);
-          for (var i = 0; i < parent[property].length; i++) {
-            var path30 = NodePath2.getForNode(parent[property][i], parentPath, property, i);
-            path30.index = i;
-          }
-        }
-        /**
-         * Whether the path was removed.
-         */
-      }, {
-        key: "isRemoved",
-        value: function isRemoved() {
-          return this.node === null;
-        }
-        /**
-         * Replaces a node with the passed one.
-         */
-      }, {
-        key: "replace",
-        value: function replace(newNode) {
-          NodePath2.registry.delete(this.node);
-          this.node = newNode;
-          if (!this.parent) {
-            return null;
-          }
-          if (this.index !== null) {
-            this.parent[this.property][this.index] = newNode;
-          } else {
-            this.parent[this.property] = newNode;
-          }
-          return NodePath2.getForNode(newNode, this.parentPath, this.property, this.index);
-        }
-        /**
-         * Updates a node inline.
-         */
-      }, {
-        key: "update",
-        value: function update(nodeProps) {
-          Object.assign(this.node, nodeProps);
-        }
-        /**
-         * Returns parent.
-         */
-      }, {
-        key: "getParent",
-        value: function getParent() {
-          return this.parentPath;
-        }
-        /**
-         * Returns nth child.
-         */
-      }, {
-        key: "getChild",
-        value: function getChild() {
-          var n = arguments.length > 0 && arguments[0] !== void 0 ? arguments[0] : 0;
-          if (this.node.expressions) {
-            return NodePath2.getForNode(this.node.expressions[n], this, DEFAULT_COLLECTION_PROP, n);
-          } else if (this.node.expression && n == 0) {
-            return NodePath2.getForNode(this.node.expression, this, DEFAULT_SINGLE_PROP);
-          }
-          return null;
-        }
-        /**
-         * Whether a path node is syntactically equal to the passed one.
-         *
-         * NOTE: we don't rely on `source` property from the `loc` data
-         * (which would be the fastest comparison), since it might be unsync
-         * after several modifications. We use here simple `JSON.stringify`
-         * excluding the `loc` data.
-         *
-         * @param NodePath other - path to compare to.
-         * @return boolean
-         */
-      }, {
-        key: "hasEqualSource",
-        value: function hasEqualSource(path30) {
-          return JSON.stringify(this.node, jsonSkipLoc) === JSON.stringify(path30.node, jsonSkipLoc);
-        }
-        /**
-         * JSON-encodes a node skipping location.
-         */
-      }, {
-        key: "jsonEncode",
-        value: function jsonEncode() {
-          var _ref = arguments.length > 0 && arguments[0] !== void 0 ? arguments[0] : {}, format = _ref.format, useLoc = _ref.useLoc;
-          return JSON.stringify(this.node, useLoc ? null : jsonSkipLoc, format);
-        }
-        /**
-         * Returns previous sibling.
-         */
-      }, {
-        key: "getPreviousSibling",
-        value: function getPreviousSibling() {
-          if (!this.parent || this.index == null) {
-            return null;
-          }
-          return NodePath2.getForNode(this.parent[this.property][this.index - 1], NodePath2.getForNode(this.parent), this.property, this.index - 1);
-        }
-        /**
-         * Returns next sibling.
-         */
-      }, {
-        key: "getNextSibling",
-        value: function getNextSibling() {
-          if (!this.parent || this.index == null) {
-            return null;
-          }
-          return NodePath2.getForNode(this.parent[this.property][this.index + 1], NodePath2.getForNode(this.parent), this.property, this.index + 1);
-        }
-        /**
-         * Returns a NodePath instance for a node.
-         *
-         * The same NodePath can be reused in several places, e.g.
-         * a parent node passed for all its children.
-         */
-      }], [{
-        key: "getForNode",
-        value: function getForNode(node) {
-          var parentPath = arguments.length > 1 && arguments[1] !== void 0 ? arguments[1] : null;
-          var prop = arguments.length > 2 && arguments[2] !== void 0 ? arguments[2] : null;
-          var index = arguments.length > 3 && arguments[3] !== void 0 ? arguments[3] : -1;
-          if (!node) {
-            return null;
-          }
-          if (!NodePath2.registry.has(node)) {
-            NodePath2.registry.set(node, new NodePath2(node, parentPath, prop, index == -1 ? null : index));
-          }
-          var path30 = NodePath2.registry.get(node);
-          if (parentPath !== null) {
-            path30.parentPath = parentPath;
-            path30.parent = path30.parentPath.node;
-          }
-          if (prop !== null) {
-            path30.property = prop;
-          }
-          if (index >= 0) {
-            path30.index = index;
-          }
-          return path30;
-        }
-        /**
-         * Initializes the NodePath registry. The registry is a map from
-         * a node to its NodePath instance.
-         */
-      }, {
-        key: "initRegistry",
-        value: function initRegistry2() {
-          if (!NodePath2.registry) {
-            NodePath2.registry = /* @__PURE__ */ new Map();
-          }
-          NodePath2.registry.clear();
-        }
-        /**
-         * Updates index of a currently traversing collection.
-         */
-      }, {
-        key: "updateTraversingIndex",
-        value: function updateTraversingIndex(dx) {
-          return NodePath2.traversingIndexStack[NodePath2.traversingIndexStack.length - 1] += dx;
-        }
-        /**
-         * Returns current traversing index.
-         */
-      }, {
-        key: "getTraversingIndex",
-        value: function getTraversingIndex() {
-          return NodePath2.traversingIndexStack[NodePath2.traversingIndexStack.length - 1];
-        }
-      }]);
-      return NodePath2;
-    })();
-    NodePath.initRegistry();
-    NodePath.traversingIndexStack = [];
-    function jsonSkipLoc(prop, value) {
-      if (prop === "loc") {
-        return void 0;
-      }
-      return value;
-    }
-    module2.exports = NodePath;
-  }
-});
-
-// node_modules/regexp-tree/dist/traverse/index.js
-var require_traverse = __commonJS({
-  "node_modules/regexp-tree/dist/traverse/index.js"(exports2, module2) {
-    "use strict";
-    var NodePath = require_node_path();
-    function astTraverse(root2) {
-      var options = arguments.length > 1 && arguments[1] !== void 0 ? arguments[1] : {};
-      var pre = options.pre;
-      var post = options.post;
-      var skipProperty = options.skipProperty;
-      function visit(node, parent, prop, idx) {
-        if (!node || typeof node.type !== "string") {
-          return;
-        }
-        var res = void 0;
-        if (pre) {
-          res = pre(node, parent, prop, idx);
-        }
-        if (res !== false) {
-          if (parent && parent[prop]) {
-            if (!isNaN(idx)) {
-              node = parent[prop][idx];
-            } else {
-              node = parent[prop];
-            }
-          }
-          for (var _prop in node) {
-            if (node.hasOwnProperty(_prop)) {
-              if (skipProperty ? skipProperty(_prop, node) : _prop[0] === "$") {
-                continue;
-              }
-              var child = node[_prop];
-              if (Array.isArray(child)) {
-                var index = 0;
-                NodePath.traversingIndexStack.push(index);
-                while (index < child.length) {
-                  visit(child[index], node, _prop, index);
-                  index = NodePath.updateTraversingIndex(1);
-                }
-                NodePath.traversingIndexStack.pop();
-              } else {
-                visit(child, node, _prop);
-              }
-            }
-          }
-        }
-        if (post) {
-          post(node, parent, prop, idx);
-        }
-      }
-      visit(root2, null);
-    }
-    module2.exports = {
-      /**
-       * Traverses an AST.
-       *
-       * @param Object ast - an AST node
-       *
-       * @param Object | Array<Object> handlers:
-       *
-       *   an object (or an array of objects)
-       *
-       *   Each such object contains a handler function per node.
-       *   In case of an array of handlers, they are applied in order.
-       *   A handler may return a transformed node (or a different type).
-       *
-       *   The per-node function may instead be an object with functions pre and post.
-       *   pre is called before visiting the node, post after.
-       *   If a handler is a function, it is treated as the pre function, with an empty post.
-       *
-       * @param Object options:
-       *
-       *   a config object, specifying traversal options:
-       *
-       *   `asNodes`: boolean - whether handlers should receives raw AST nodes
-       *   (false by default), instead of a `NodePath` wrapper. Note, by default
-       *   `NodePath` wrapper provides a set of convenient method to manipulate
-       *   a traversing AST, and also has access to all parents list. A raw
-       *   nodes traversal should be used in rare cases, when no `NodePath`
-       *   features are needed.
-       *
-       * Special hooks:
-       *
-       *   - `shouldRun(ast)` - a predicate determining whether the handler
-       *                        should be applied.
-       *
-       * NOTE: Multiple handlers are used as an optimization of applying all of
-       * them in one AST traversal pass.
-       */
-      traverse: function traverse(ast, handlers) {
-        var options = arguments.length > 2 && arguments[2] !== void 0 ? arguments[2] : { asNodes: false };
-        if (!Array.isArray(handlers)) {
-          handlers = [handlers];
-        }
-        handlers = handlers.filter(function(handler) {
-          if (typeof handler.shouldRun !== "function") {
-            return true;
-          }
-          return handler.shouldRun(ast);
-        });
-        NodePath.initRegistry();
-        handlers.forEach(function(handler) {
-          if (typeof handler.init === "function") {
-            handler.init(ast);
-          }
-        });
-        function getPathFor(node, parent, prop, index) {
-          var parentPath = NodePath.getForNode(parent);
-          var nodePath = NodePath.getForNode(node, parentPath, prop, index);
-          return nodePath;
-        }
-        astTraverse(ast, {
-          /**
-           * Handler on node enter.
-           */
-          pre: function pre(node, parent, prop, index) {
-            var nodePath = void 0;
-            if (!options.asNodes) {
-              nodePath = getPathFor(node, parent, prop, index);
-            }
-            var _iteratorNormalCompletion = true;
-            var _didIteratorError = false;
-            var _iteratorError = void 0;
-            try {
-              for (var _iterator = handlers[Symbol.iterator](), _step; !(_iteratorNormalCompletion = (_step = _iterator.next()).done); _iteratorNormalCompletion = true) {
-                var handler = _step.value;
-                if (typeof handler["*"] === "function") {
-                  if (nodePath) {
-                    if (!nodePath.isRemoved()) {
-                      var handlerResult = handler["*"](nodePath);
-                      if (handlerResult === false) {
-                        return false;
-                      }
-                    }
-                  } else {
-                    handler["*"](node, parent, prop, index);
-                  }
-                }
-                var handlerFuncPre = void 0;
-                if (typeof handler[node.type] === "function") {
-                  handlerFuncPre = handler[node.type];
-                } else if (typeof handler[node.type] === "object" && typeof handler[node.type].pre === "function") {
-                  handlerFuncPre = handler[node.type].pre;
-                }
-                if (handlerFuncPre) {
-                  if (nodePath) {
-                    if (!nodePath.isRemoved()) {
-                      var _handlerResult = handlerFuncPre.call(handler, nodePath);
-                      if (_handlerResult === false) {
-                        return false;
-                      }
-                    }
-                  } else {
-                    handlerFuncPre.call(handler, node, parent, prop, index);
-                  }
-                }
-              }
-            } catch (err) {
-              _didIteratorError = true;
-              _iteratorError = err;
-            } finally {
-              try {
-                if (!_iteratorNormalCompletion && _iterator.return) {
-                  _iterator.return();
-                }
-              } finally {
-                if (_didIteratorError) {
-                  throw _iteratorError;
-                }
-              }
-            }
-          },
-          // pre func
-          /**
-           * Handler on node exit.
-           */
-          post: function post(node, parent, prop, index) {
-            if (!node) {
-              return;
-            }
-            var nodePath = void 0;
-            if (!options.asNodes) {
-              nodePath = getPathFor(node, parent, prop, index);
-            }
-            var _iteratorNormalCompletion2 = true;
-            var _didIteratorError2 = false;
-            var _iteratorError2 = void 0;
-            try {
-              for (var _iterator2 = handlers[Symbol.iterator](), _step2; !(_iteratorNormalCompletion2 = (_step2 = _iterator2.next()).done); _iteratorNormalCompletion2 = true) {
-                var handler = _step2.value;
-                var handlerFuncPost = void 0;
-                if (typeof handler[node.type] === "object" && typeof handler[node.type].post === "function") {
-                  handlerFuncPost = handler[node.type].post;
-                }
-                if (handlerFuncPost) {
-                  if (nodePath) {
-                    if (!nodePath.isRemoved()) {
-                      var handlerResult = handlerFuncPost.call(handler, nodePath);
-                      if (handlerResult === false) {
-                        return false;
-                      }
-                    }
-                  } else {
-                    handlerFuncPost.call(handler, node, parent, prop, index);
-                  }
-                }
-              }
-            } catch (err) {
-              _didIteratorError2 = true;
-              _iteratorError2 = err;
-            } finally {
-              try {
-                if (!_iteratorNormalCompletion2 && _iterator2.return) {
-                  _iterator2.return();
-                }
-              } finally {
-                if (_didIteratorError2) {
-                  throw _iteratorError2;
-                }
-              }
-            }
-          },
-          // post func
-          /**
-           * Skip locations by default.
-           */
-          skipProperty: function skipProperty(prop) {
-            return prop === "loc";
-          }
-        });
-      }
-    };
-  }
-});
-
-// node_modules/regexp-tree/dist/transform/index.js
-var require_transform = __commonJS({
-  "node_modules/regexp-tree/dist/transform/index.js"(exports2, module2) {
-    "use strict";
-    var _createClass = /* @__PURE__ */ (function() {
-      function defineProperties(target, props) {
-        for (var i = 0; i < props.length; i++) {
-          var descriptor = props[i];
-          descriptor.enumerable = descriptor.enumerable || false;
-          descriptor.configurable = true;
-          if ("value" in descriptor) descriptor.writable = true;
-          Object.defineProperty(target, descriptor.key, descriptor);
-        }
-      }
-      return function(Constructor, protoProps, staticProps) {
-        if (protoProps) defineProperties(Constructor.prototype, protoProps);
-        if (staticProps) defineProperties(Constructor, staticProps);
-        return Constructor;
-      };
-    })();
-    function _classCallCheck(instance, Constructor) {
-      if (!(instance instanceof Constructor)) {
-        throw new TypeError("Cannot call a class as a function");
-      }
-    }
-    var generator = require_generator();
-    var parser = require_parser();
-    var traverse = require_traverse();
-    var TransformResult = (function() {
-      function TransformResult2(ast) {
-        var extra = arguments.length > 1 && arguments[1] !== void 0 ? arguments[1] : null;
-        _classCallCheck(this, TransformResult2);
-        this._ast = ast;
-        this._source = null;
-        this._string = null;
-        this._regexp = null;
-        this._extra = extra;
-      }
-      _createClass(TransformResult2, [{
-        key: "getAST",
-        value: function getAST() {
-          return this._ast;
-        }
-      }, {
-        key: "setExtra",
-        value: function setExtra(extra) {
-          this._extra = extra;
-        }
-      }, {
-        key: "getExtra",
-        value: function getExtra() {
-          return this._extra;
-        }
-      }, {
-        key: "toRegExp",
-        value: function toRegExp() {
-          if (!this._regexp) {
-            this._regexp = new RegExp(this.getSource(), this._ast.flags);
-          }
-          return this._regexp;
-        }
-      }, {
-        key: "getSource",
-        value: function getSource() {
-          if (!this._source) {
-            this._source = generator.generate(this._ast.body);
-          }
-          return this._source;
-        }
-      }, {
-        key: "getFlags",
-        value: function getFlags() {
-          return this._ast.flags;
-        }
-      }, {
-        key: "toString",
-        value: function toString() {
-          if (!this._string) {
-            this._string = generator.generate(this._ast);
-          }
-          return this._string;
-        }
-      }]);
-      return TransformResult2;
-    })();
-    module2.exports = {
-      /**
-       * Expose `TransformResult`.
-       */
-      TransformResult,
-      /**
-       * Transforms a regular expression applying a set of
-       * transformation handlers.
-       *
-       * @param string | AST | RegExp:
-       *
-       *   a regular expression in different representations: a string,
-       *   a RegExp object, or an AST.
-       *
-       * @param Object | Array<Object>:
-       *
-       *   a handler (or a list of handlers) from `traverse` API.
-       *
-       * @return TransformResult instance.
-       *
-       * Example:
-       *
-       *   transform(/[a-z]/i, {
-       *     onChar(path) {
-       *       const {node} = path;
-       *
-       *       if (...) {
-       *         path.remove();
-       *       }
-       *     }
-       *   });
-       */
-      transform: function transform2(regexp, handlers) {
-        var ast = regexp;
-        if (regexp instanceof RegExp) {
-          regexp = "" + regexp;
-        }
-        if (typeof regexp === "string") {
-          ast = parser.parse(regexp, {
-            captureLocations: true
-          });
-        }
-        traverse.traverse(ast, handlers);
-        return new TransformResult(ast);
-      }
-    };
-  }
-});
-
-// node_modules/regexp-tree/dist/compat-transpiler/index.js
-var require_compat_transpiler = __commonJS({
-  "node_modules/regexp-tree/dist/compat-transpiler/index.js"(exports2, module2) {
-    "use strict";
-    var compatTransforms = require_transforms();
-    var _transform = require_transform();
-    module2.exports = {
-      /**
-       * Translates a regexp in new syntax to equivalent regexp in old syntax.
-       *
-       * @param string|RegExp|AST - regexp
-       * @param Array transformsWhitelist - names of the transforms to apply
-       */
-      transform: function transform2(regexp) {
-        var transformsWhitelist = arguments.length > 1 && arguments[1] !== void 0 ? arguments[1] : [];
-        var transformToApply = transformsWhitelist.length > 0 ? transformsWhitelist : Object.keys(compatTransforms);
-        var result = void 0;
-        var extra = {};
-        transformToApply.forEach(function(transformName) {
-          if (!compatTransforms.hasOwnProperty(transformName)) {
-            throw new Error("Unknown compat-transform: " + transformName + ". Available transforms are: " + Object.keys(compatTransforms).join(", "));
-          }
-          var handler = compatTransforms[transformName];
-          result = _transform.transform(regexp, handler);
-          regexp = result.getAST();
-          if (typeof handler.getExtra === "function") {
-            extra[transformName] = handler.getExtra();
-          }
-        });
-        result.setExtra(extra);
-        return result;
-      }
-    };
-  }
-});
-
-// node_modules/regexp-tree/dist/utils/clone.js
-var require_clone = __commonJS({
-  "node_modules/regexp-tree/dist/utils/clone.js"(exports2, module2) {
-    "use strict";
-    module2.exports = function clone2(obj) {
-      if (obj === null || typeof obj !== "object") {
-        return obj;
-      }
-      var res = void 0;
-      if (Array.isArray(obj)) {
-        res = [];
-      } else {
-        res = {};
-      }
-      for (var i in obj) {
-        res[i] = clone2(obj[i]);
-      }
-      return res;
-    };
-  }
-});
-
-// node_modules/regexp-tree/dist/optimizer/transforms/char-surrogate-pair-to-single-unicode-transform.js
-var require_char_surrogate_pair_to_single_unicode_transform = __commonJS({
-  "node_modules/regexp-tree/dist/optimizer/transforms/char-surrogate-pair-to-single-unicode-transform.js"(exports2, module2) {
-    "use strict";
-    module2.exports = {
-      shouldRun: function shouldRun(ast) {
-        return ast.flags.includes("u");
-      },
-      Char: function Char(path30) {
-        var node = path30.node;
-        if (node.kind !== "unicode" || !node.isSurrogatePair || isNaN(node.codePoint)) {
-          return;
-        }
-        node.value = "\\u{" + node.codePoint.toString(16) + "}";
-        delete node.isSurrogatePair;
-      }
-    };
-  }
-});
-
-// node_modules/regexp-tree/dist/optimizer/transforms/char-code-to-simple-char-transform.js
-var require_char_code_to_simple_char_transform = __commonJS({
-  "node_modules/regexp-tree/dist/optimizer/transforms/char-code-to-simple-char-transform.js"(exports2, module2) {
-    "use strict";
-    var UPPER_A_CP = "A".codePointAt(0);
-    var UPPER_Z_CP = "Z".codePointAt(0);
-    var LOWER_A_CP = "a".codePointAt(0);
-    var LOWER_Z_CP = "z".codePointAt(0);
-    var DIGIT_0_CP = "0".codePointAt(0);
-    var DIGIT_9_CP = "9".codePointAt(0);
-    module2.exports = {
-      Char: function Char(path30) {
-        var node = path30.node, parent = path30.parent;
-        if (isNaN(node.codePoint) || node.kind === "simple") {
-          return;
-        }
-        if (parent.type === "ClassRange") {
-          if (!isSimpleRange(parent)) {
-            return;
-          }
-        }
-        if (!isPrintableASCIIChar(node.codePoint)) {
-          return;
-        }
-        var symbol = String.fromCodePoint(node.codePoint);
-        var newChar = {
-          type: "Char",
-          kind: "simple",
-          value: symbol,
-          symbol,
-          codePoint: node.codePoint
-        };
-        if (needsEscape(symbol, parent.type)) {
-          newChar.escaped = true;
-        }
-        path30.replace(newChar);
-      }
-    };
-    function isSimpleRange(classRange) {
-      var from = classRange.from, to = classRange.to;
-      return from.codePoint >= DIGIT_0_CP && from.codePoint <= DIGIT_9_CP && to.codePoint >= DIGIT_0_CP && to.codePoint <= DIGIT_9_CP || from.codePoint >= UPPER_A_CP && from.codePoint <= UPPER_Z_CP && to.codePoint >= UPPER_A_CP && to.codePoint <= UPPER_Z_CP || from.codePoint >= LOWER_A_CP && from.codePoint <= LOWER_Z_CP && to.codePoint >= LOWER_A_CP && to.codePoint <= LOWER_Z_CP;
-    }
-    function isPrintableASCIIChar(codePoint) {
-      return codePoint >= 32 && codePoint <= 126;
-    }
-    function needsEscape(symbol, parentType) {
-      if (parentType === "ClassRange" || parentType === "CharacterClass") {
-        return /[\]\\^-]/.test(symbol);
-      }
-      return /[*[()+?^$./\\|{}]/.test(symbol);
-    }
-  }
-});
-
-// node_modules/regexp-tree/dist/optimizer/transforms/char-case-insensitive-lowercase-transform.js
-var require_char_case_insensitive_lowercase_transform = __commonJS({
-  "node_modules/regexp-tree/dist/optimizer/transforms/char-case-insensitive-lowercase-transform.js"(exports2, module2) {
-    "use strict";
-    var UPPER_A_CP = "A".codePointAt(0);
-    var UPPER_Z_CP = "Z".codePointAt(0);
-    module2.exports = {
-      _AZClassRanges: null,
-      _hasUFlag: false,
-      init: function init(ast) {
-        this._AZClassRanges = /* @__PURE__ */ new Set();
-        this._hasUFlag = ast.flags.includes("u");
-      },
-      shouldRun: function shouldRun(ast) {
-        return ast.flags.includes("i");
-      },
-      Char: function Char(path30) {
-        var node = path30.node, parent = path30.parent;
-        if (isNaN(node.codePoint)) {
-          return;
-        }
-        if (!this._hasUFlag && node.codePoint >= 4096) {
-          return;
-        }
-        if (parent.type === "ClassRange") {
-          if (!this._AZClassRanges.has(parent) && !isAZClassRange(parent)) {
-            return;
-          }
-          this._AZClassRanges.add(parent);
-        }
-        var lower = node.symbol.toLowerCase();
-        if (lower !== node.symbol) {
-          node.value = displaySymbolAsValue(lower, node);
-          node.symbol = lower;
-          node.codePoint = lower.codePointAt(0);
-        }
-      }
-    };
-    function isAZClassRange(classRange) {
-      var from = classRange.from, to = classRange.to;
-      return from.codePoint >= UPPER_A_CP && from.codePoint <= UPPER_Z_CP && to.codePoint >= UPPER_A_CP && to.codePoint <= UPPER_Z_CP;
-    }
-    function displaySymbolAsValue(symbol, node) {
-      var codePoint = symbol.codePointAt(0);
-      if (node.kind === "decimal") {
-        return "\\" + codePoint;
-      }
-      if (node.kind === "oct") {
-        return "\\0" + codePoint.toString(8);
-      }
-      if (node.kind === "hex") {
-        return "\\x" + codePoint.toString(16);
-      }
-      if (node.kind === "unicode") {
-        if (node.isSurrogatePair) {
-          var _getSurrogatePairFrom = getSurrogatePairFromCodePoint(codePoint), lead = _getSurrogatePairFrom.lead, trail = _getSurrogatePairFrom.trail;
-          return "\\u" + "0".repeat(4 - lead.length) + lead + "\\u" + "0".repeat(4 - trail.length) + trail;
-        } else if (node.value.includes("{")) {
-          return "\\u{" + codePoint.toString(16) + "}";
-        } else {
-          var code = codePoint.toString(16);
-          return "\\u" + "0".repeat(4 - code.length) + code;
-        }
-      }
-      return symbol;
-    }
-    function getSurrogatePairFromCodePoint(codePoint) {
-      var lead = Math.floor((codePoint - 65536) / 1024) + 55296;
-      var trail = (codePoint - 65536) % 1024 + 56320;
-      return {
-        lead: lead.toString(16),
-        trail: trail.toString(16)
-      };
-    }
-  }
-});
-
-// node_modules/regexp-tree/dist/optimizer/transforms/char-class-remove-duplicates-transform.js
-var require_char_class_remove_duplicates_transform = __commonJS({
-  "node_modules/regexp-tree/dist/optimizer/transforms/char-class-remove-duplicates-transform.js"(exports2, module2) {
-    "use strict";
-    module2.exports = {
-      CharacterClass: function CharacterClass(path30) {
-        var node = path30.node;
-        var sources = {};
-        for (var i = 0; i < node.expressions.length; i++) {
-          var childPath = path30.getChild(i);
-          var source = childPath.jsonEncode();
-          if (sources.hasOwnProperty(source)) {
-            childPath.remove();
-            i--;
-          }
-          sources[source] = true;
-        }
-      }
-    };
-  }
-});
-
-// node_modules/regexp-tree/dist/transform/utils.js
-var require_utils2 = __commonJS({
-  "node_modules/regexp-tree/dist/transform/utils.js"(exports2, module2) {
-    "use strict";
-    function _toConsumableArray(arr) {
-      if (Array.isArray(arr)) {
-        for (var i = 0, arr2 = Array(arr.length); i < arr.length; i++) {
-          arr2[i] = arr[i];
-        }
-        return arr2;
-      } else {
-        return Array.from(arr);
-      }
-    }
-    function disjunctionToList(node) {
-      if (node.type !== "Disjunction") {
-        throw new TypeError('Expected "Disjunction" node, got "' + node.type + '"');
-      }
-      var list = [];
-      if (node.left && node.left.type === "Disjunction") {
-        list.push.apply(list, _toConsumableArray(disjunctionToList(node.left)).concat([node.right]));
-      } else {
-        list.push(node.left, node.right);
-      }
-      return list;
-    }
-    function listToDisjunction(list) {
-      return list.reduce(function(left, right) {
-        return {
-          type: "Disjunction",
-          left,
-          right
-        };
-      });
-    }
-    function increaseQuantifierByOne(quantifier) {
-      if (quantifier.kind === "*") {
-        quantifier.kind = "+";
-      } else if (quantifier.kind === "+") {
-        quantifier.kind = "Range";
-        quantifier.from = 2;
-        delete quantifier.to;
-      } else if (quantifier.kind === "?") {
-        quantifier.kind = "Range";
-        quantifier.from = 1;
-        quantifier.to = 2;
-      } else if (quantifier.kind === "Range") {
-        quantifier.from += 1;
-        if (quantifier.to) {
-          quantifier.to += 1;
-        }
-      }
-    }
-    module2.exports = {
-      disjunctionToList,
-      listToDisjunction,
-      increaseQuantifierByOne
-    };
-  }
-});
-
-// node_modules/regexp-tree/dist/optimizer/transforms/quantifiers-merge-transform.js
-var require_quantifiers_merge_transform = __commonJS({
-  "node_modules/regexp-tree/dist/optimizer/transforms/quantifiers-merge-transform.js"(exports2, module2) {
-    "use strict";
-    var _require = require_utils2();
-    var increaseQuantifierByOne = _require.increaseQuantifierByOne;
-    module2.exports = {
-      Repetition: function Repetition(path30) {
-        var node = path30.node, parent = path30.parent;
-        if (parent.type !== "Alternative" || !path30.index) {
-          return;
-        }
-        var previousSibling = path30.getPreviousSibling();
-        if (!previousSibling) {
-          return;
-        }
-        if (previousSibling.node.type === "Repetition") {
-          if (!previousSibling.getChild().hasEqualSource(path30.getChild())) {
-            return;
-          }
-          var _extractFromTo = extractFromTo(previousSibling.node.quantifier), previousSiblingFrom = _extractFromTo.from, previousSiblingTo = _extractFromTo.to;
-          var _extractFromTo2 = extractFromTo(node.quantifier), nodeFrom = _extractFromTo2.from, nodeTo = _extractFromTo2.to;
-          if (previousSibling.node.quantifier.greedy !== node.quantifier.greedy && !isGreedyOpenRange(previousSibling.node.quantifier) && !isGreedyOpenRange(node.quantifier)) {
-            return;
-          }
-          node.quantifier.kind = "Range";
-          node.quantifier.from = previousSiblingFrom + nodeFrom;
-          if (previousSiblingTo && nodeTo) {
-            node.quantifier.to = previousSiblingTo + nodeTo;
-          } else {
-            delete node.quantifier.to;
-          }
-          if (isGreedyOpenRange(previousSibling.node.quantifier) || isGreedyOpenRange(node.quantifier)) {
-            node.quantifier.greedy = true;
-          }
-          previousSibling.remove();
-        } else {
-          if (!previousSibling.hasEqualSource(path30.getChild())) {
-            return;
-          }
-          increaseQuantifierByOne(node.quantifier);
-          previousSibling.remove();
-        }
-      }
-    };
-    function isGreedyOpenRange(quantifier) {
-      return quantifier.greedy && (quantifier.kind === "+" || quantifier.kind === "*" || quantifier.kind === "Range" && !quantifier.to);
-    }
-    function extractFromTo(quantifier) {
-      var from = void 0, to = void 0;
-      if (quantifier.kind === "*") {
-        from = 0;
-      } else if (quantifier.kind === "+") {
-        from = 1;
-      } else if (quantifier.kind === "?") {
-        from = 0;
-        to = 1;
-      } else {
-        from = quantifier.from;
-        if (quantifier.to) {
-          to = quantifier.to;
-        }
-      }
-      return { from, to };
-    }
-  }
-});
-
-// node_modules/regexp-tree/dist/optimizer/transforms/quantifier-range-to-symbol-transform.js
-var require_quantifier_range_to_symbol_transform = __commonJS({
-  "node_modules/regexp-tree/dist/optimizer/transforms/quantifier-range-to-symbol-transform.js"(exports2, module2) {
-    "use strict";
-    module2.exports = {
-      Quantifier: function Quantifier(path30) {
-        var node = path30.node;
-        if (node.kind !== "Range") {
-          return;
-        }
-        rewriteOpenZero(path30);
-        rewriteOpenOne(path30);
-        rewriteExactOne(path30);
-      }
-    };
-    function rewriteOpenZero(path30) {
-      var node = path30.node;
-      if (node.from !== 0 || node.to) {
-        return;
-      }
-      node.kind = "*";
-      delete node.from;
-    }
-    function rewriteOpenOne(path30) {
-      var node = path30.node;
-      if (node.from !== 1 || node.to) {
-        return;
-      }
-      node.kind = "+";
-      delete node.from;
-    }
-    function rewriteExactOne(path30) {
-      var node = path30.node;
-      if (node.from !== 1 || node.to !== 1) {
-        return;
-      }
-      path30.parentPath.replace(path30.parentPath.node.expression);
-    }
-  }
-});
-
-// node_modules/regexp-tree/dist/optimizer/transforms/char-class-classranges-to-chars-transform.js
-var require_char_class_classranges_to_chars_transform = __commonJS({
-  "node_modules/regexp-tree/dist/optimizer/transforms/char-class-classranges-to-chars-transform.js"(exports2, module2) {
-    "use strict";
-    module2.exports = {
-      ClassRange: function ClassRange(path30) {
-        var node = path30.node;
-        if (node.from.codePoint === node.to.codePoint) {
-          path30.replace(node.from);
-        } else if (node.from.codePoint === node.to.codePoint - 1) {
-          path30.getParent().insertChildAt(node.to, path30.index + 1);
-          path30.replace(node.from);
-        }
-      }
-    };
-  }
-});
-
-// node_modules/regexp-tree/dist/optimizer/transforms/char-class-to-meta-transform.js
-var require_char_class_to_meta_transform = __commonJS({
-  "node_modules/regexp-tree/dist/optimizer/transforms/char-class-to-meta-transform.js"(exports2, module2) {
-    "use strict";
-    function _toConsumableArray(arr) {
-      if (Array.isArray(arr)) {
-        for (var i = 0, arr2 = Array(arr.length); i < arr.length; i++) {
-          arr2[i] = arr[i];
-        }
-        return arr2;
-      } else {
-        return Array.from(arr);
-      }
-    }
-    module2.exports = {
-      _hasIFlag: false,
-      _hasUFlag: false,
-      init: function init(ast) {
-        this._hasIFlag = ast.flags.includes("i");
-        this._hasUFlag = ast.flags.includes("u");
-      },
-      CharacterClass: function CharacterClass(path30) {
-        rewriteNumberRanges(path30);
-        rewriteWordRanges(path30, this._hasIFlag, this._hasUFlag);
-        rewriteWhitespaceRanges(path30);
-      }
-    };
-    function rewriteNumberRanges(path30) {
-      var node = path30.node;
-      node.expressions.forEach(function(expression, i) {
-        if (isFullNumberRange(expression)) {
-          path30.getChild(i).replace({
-            type: "Char",
-            value: "\\d",
-            kind: "meta"
-          });
-        }
-      });
-    }
-    function rewriteWordRanges(path30, hasIFlag, hasUFlag) {
-      var node = path30.node;
-      var numberPath = null;
-      var lowerCasePath = null;
-      var upperCasePath = null;
-      var underscorePath = null;
-      var u017fPath = null;
-      var u212aPath = null;
-      node.expressions.forEach(function(expression, i) {
-        if (isMetaChar(expression, "\\d")) {
-          numberPath = path30.getChild(i);
-        } else if (isLowerCaseRange(expression)) {
-          lowerCasePath = path30.getChild(i);
-        } else if (isUpperCaseRange(expression)) {
-          upperCasePath = path30.getChild(i);
-        } else if (isUnderscore(expression)) {
-          underscorePath = path30.getChild(i);
-        } else if (hasIFlag && hasUFlag && isCodePoint(expression, 383)) {
-          u017fPath = path30.getChild(i);
-        } else if (hasIFlag && hasUFlag && isCodePoint(expression, 8490)) {
-          u212aPath = path30.getChild(i);
-        }
-      });
-      if (numberPath && (lowerCasePath && upperCasePath || hasIFlag && (lowerCasePath || upperCasePath)) && underscorePath && (!hasUFlag || !hasIFlag || u017fPath && u212aPath)) {
-        numberPath.replace({
-          type: "Char",
-          value: "\\w",
-          kind: "meta"
-        });
-        if (lowerCasePath) {
-          lowerCasePath.remove();
-        }
-        if (upperCasePath) {
-          upperCasePath.remove();
-        }
-        underscorePath.remove();
-        if (u017fPath) {
-          u017fPath.remove();
-        }
-        if (u212aPath) {
-          u212aPath.remove();
-        }
-      }
-    }
-    var whitespaceRangeTests = [function(node) {
-      return isChar(node, " ");
-    }].concat(_toConsumableArray(["\\f", "\\n", "\\r", "\\t", "\\v"].map(function(char) {
-      return function(node) {
-        return isMetaChar(node, char);
-      };
-    })), _toConsumableArray([160, 5760, 8232, 8233, 8239, 8287, 12288, 65279].map(function(codePoint) {
-      return function(node) {
-        return isCodePoint(node, codePoint);
-      };
-    })), [function(node) {
-      return node.type === "ClassRange" && isCodePoint(node.from, 8192) && isCodePoint(node.to, 8202);
-    }]);
-    function rewriteWhitespaceRanges(path30) {
-      var node = path30.node;
-      if (node.expressions.length < whitespaceRangeTests.length || !whitespaceRangeTests.every(function(test) {
-        return node.expressions.some(function(expression) {
-          return test(expression);
-        });
-      })) {
-        return;
-      }
-      var nNode = node.expressions.find(function(expression) {
-        return isMetaChar(expression, "\\n");
-      });
-      nNode.value = "\\s";
-      nNode.symbol = void 0;
-      nNode.codePoint = NaN;
-      node.expressions.map(function(expression, i) {
-        return whitespaceRangeTests.some(function(test) {
-          return test(expression);
-        }) ? path30.getChild(i) : void 0;
-      }).filter(Boolean).forEach(function(path31) {
-        return path31.remove();
-      });
-    }
-    function isFullNumberRange(node) {
-      return node.type === "ClassRange" && node.from.value === "0" && node.to.value === "9";
-    }
-    function isChar(node, value) {
-      var kind = arguments.length > 2 && arguments[2] !== void 0 ? arguments[2] : "simple";
-      return node.type === "Char" && node.value === value && node.kind === kind;
-    }
-    function isMetaChar(node, value) {
-      return isChar(node, value, "meta");
-    }
-    function isLowerCaseRange(node) {
-      return node.type === "ClassRange" && node.from.value === "a" && node.to.value === "z";
-    }
-    function isUpperCaseRange(node) {
-      return node.type === "ClassRange" && node.from.value === "A" && node.to.value === "Z";
-    }
-    function isUnderscore(node) {
-      return node.type === "Char" && node.value === "_" && node.kind === "simple";
-    }
-    function isCodePoint(node, codePoint) {
-      return node.type === "Char" && node.kind === "unicode" && node.codePoint === codePoint;
-    }
-  }
-});
-
-// node_modules/regexp-tree/dist/optimizer/transforms/char-class-to-single-char-transform.js
-var require_char_class_to_single_char_transform = __commonJS({
-  "node_modules/regexp-tree/dist/optimizer/transforms/char-class-to-single-char-transform.js"(exports2, module2) {
-    "use strict";
-    module2.exports = {
-      CharacterClass: function CharacterClass(path30) {
-        var node = path30.node;
-        if (node.expressions.length !== 1 || !hasAppropriateSiblings(path30) || !isAppropriateChar(node.expressions[0])) {
-          return;
-        }
-        var _node$expressions$ = node.expressions[0], value = _node$expressions$.value, kind = _node$expressions$.kind, escaped = _node$expressions$.escaped;
-        if (node.negative) {
-          if (!isMeta(value)) {
-            return;
-          }
-          value = getInverseMeta(value);
-        }
-        path30.replace({
-          type: "Char",
-          value,
-          kind,
-          escaped: escaped || shouldEscape(value)
-        });
-      }
-    };
-    function isAppropriateChar(node) {
-      return node.type === "Char" && // We don't extract [\b] (backspace) since \b has different
-      // semantics (word boundary).
-      node.value !== "\\b";
-    }
-    function isMeta(value) {
-      return /^\\[dwsDWS]$/.test(value);
-    }
-    function getInverseMeta(value) {
-      return /[dws]/.test(value) ? value.toUpperCase() : value.toLowerCase();
-    }
-    function hasAppropriateSiblings(path30) {
-      var parent = path30.parent, index = path30.index;
-      if (parent.type !== "Alternative") {
-        return true;
-      }
-      var previousNode = parent.expressions[index - 1];
-      if (previousNode == null) {
-        return true;
-      }
-      if (previousNode.type === "Backreference" && previousNode.kind === "number") {
-        return false;
-      }
-      if (previousNode.type === "Char" && previousNode.kind === "decimal") {
-        return false;
-      }
-      return true;
-    }
-    function shouldEscape(value) {
-      return /[*[()+?$./{}|]/.test(value);
-    }
-  }
-});
-
-// node_modules/regexp-tree/dist/optimizer/transforms/char-escape-unescape-transform.js
-var require_char_escape_unescape_transform = __commonJS({
-  "node_modules/regexp-tree/dist/optimizer/transforms/char-escape-unescape-transform.js"(exports2, module2) {
-    "use strict";
-    module2.exports = {
-      _hasXFlag: false,
-      init: function init(ast) {
-        this._hasXFlag = ast.flags.includes("x");
-      },
-      Char: function Char(path30) {
-        var node = path30.node;
-        if (!node.escaped) {
-          return;
-        }
-        if (shouldUnescape(path30, this._hasXFlag)) {
-          delete node.escaped;
-        }
-      }
-    };
-    function shouldUnescape(path30, hasXFlag) {
-      var value = path30.node.value, index = path30.index, parent = path30.parent;
-      if (parent.type !== "CharacterClass" && parent.type !== "ClassRange") {
-        return !preservesEscape(value, index, parent, hasXFlag);
-      }
-      return !preservesInCharClass(value, index, parent);
-    }
-    function preservesInCharClass(value, index, parent) {
-      if (value === "^") {
-        return index === 0 && !parent.negative;
-      }
-      if (value === "-") {
-        return true;
-      }
-      return /[\]\\]/.test(value);
-    }
-    function preservesEscape(value, index, parent, hasXFlag) {
-      if (value === "{") {
-        return preservesOpeningCurlyBraceEscape(index, parent);
-      }
-      if (value === "}") {
-        return preservesClosingCurlyBraceEscape(index, parent);
-      }
-      if (hasXFlag && /[ #]/.test(value)) {
-        return true;
-      }
-      return /[*[()+?^$./\\|]/.test(value);
-    }
-    function consumeNumbers(startIndex, parent, rtl) {
-      var i = startIndex;
-      var siblingNode = (rtl ? i >= 0 : i < parent.expressions.length) && parent.expressions[i];
-      while (siblingNode && siblingNode.type === "Char" && siblingNode.kind === "simple" && !siblingNode.escaped && /\d/.test(siblingNode.value)) {
-        rtl ? i-- : i++;
-        siblingNode = (rtl ? i >= 0 : i < parent.expressions.length) && parent.expressions[i];
-      }
-      return Math.abs(startIndex - i);
-    }
-    function isSimpleChar(node, value) {
-      return node && node.type === "Char" && node.kind === "simple" && !node.escaped && node.value === value;
-    }
-    function preservesOpeningCurlyBraceEscape(index, parent) {
-      if (index == null) {
-        return false;
-      }
-      var nbFollowingNumbers = consumeNumbers(index + 1, parent);
-      var i = index + nbFollowingNumbers + 1;
-      var nextSiblingNode = i < parent.expressions.length && parent.expressions[i];
-      if (nbFollowingNumbers) {
-        if (isSimpleChar(nextSiblingNode, "}")) {
-          return true;
-        }
-        if (isSimpleChar(nextSiblingNode, ",")) {
-          nbFollowingNumbers = consumeNumbers(i + 1, parent);
-          i = i + nbFollowingNumbers + 1;
-          nextSiblingNode = i < parent.expressions.length && parent.expressions[i];
-          return isSimpleChar(nextSiblingNode, "}");
-        }
-      }
-      return false;
-    }
-    function preservesClosingCurlyBraceEscape(index, parent) {
-      if (index == null) {
-        return false;
-      }
-      var nbPrecedingNumbers = consumeNumbers(index - 1, parent, true);
-      var i = index - nbPrecedingNumbers - 1;
-      var previousSiblingNode = i >= 0 && parent.expressions[i];
-      if (nbPrecedingNumbers && isSimpleChar(previousSiblingNode, "{")) {
-        return true;
-      }
-      if (isSimpleChar(previousSiblingNode, ",")) {
-        nbPrecedingNumbers = consumeNumbers(i - 1, parent, true);
-        i = i - nbPrecedingNumbers - 1;
-        previousSiblingNode = i < parent.expressions.length && parent.expressions[i];
-        return nbPrecedingNumbers && isSimpleChar(previousSiblingNode, "{");
-      }
-      return false;
-    }
-  }
-});
-
-// node_modules/regexp-tree/dist/optimizer/transforms/char-class-classranges-merge-transform.js
-var require_char_class_classranges_merge_transform = __commonJS({
-  "node_modules/regexp-tree/dist/optimizer/transforms/char-class-classranges-merge-transform.js"(exports2, module2) {
-    "use strict";
-    module2.exports = {
-      _hasIUFlags: false,
-      init: function init(ast) {
-        this._hasIUFlags = ast.flags.includes("i") && ast.flags.includes("u");
-      },
-      CharacterClass: function CharacterClass(path30) {
-        var node = path30.node;
-        var expressions = node.expressions;
-        var metas = [];
-        expressions.forEach(function(expression2) {
-          if (isMeta(expression2)) {
-            metas.push(expression2.value);
-          }
-        });
-        expressions.sort(sortCharClass);
-        for (var i = 0; i < expressions.length; i++) {
-          var expression = expressions[i];
-          if (fitsInMetas(expression, metas, this._hasIUFlags) || combinesWithPrecedingClassRange(expression, expressions[i - 1]) || combinesWithFollowingClassRange(expression, expressions[i + 1])) {
-            expressions.splice(i, 1);
-            i--;
-          } else {
-            var nbMergedChars = charCombinesWithPrecedingChars(expression, i, expressions);
-            expressions.splice(i - nbMergedChars + 1, nbMergedChars);
-            i -= nbMergedChars;
-          }
-        }
-      }
-    };
-    function sortCharClass(a, b) {
-      var aValue = getSortValue(a);
-      var bValue = getSortValue(b);
-      if (aValue === bValue) {
-        if (a.type === "ClassRange" && b.type !== "ClassRange") {
-          return -1;
-        }
-        if (b.type === "ClassRange" && a.type !== "ClassRange") {
-          return 1;
-        }
-        if (a.type === "ClassRange" && b.type === "ClassRange") {
-          return getSortValue(a.to) - getSortValue(b.to);
-        }
-        if (isMeta(a) && isMeta(b) || isControl(a) && isControl(b)) {
-          return a.value < b.value ? -1 : 1;
-        }
-      }
-      return aValue - bValue;
-    }
-    function getSortValue(expression) {
-      if (expression.type === "Char") {
-        if (expression.value === "-") {
-          return Infinity;
-        }
-        if (expression.kind === "control") {
-          return Infinity;
-        }
-        if (expression.kind === "meta" && isNaN(expression.codePoint)) {
-          return -1;
-        }
-        return expression.codePoint;
-      }
-      return expression.from.codePoint;
-    }
-    function isMeta(expression) {
-      var value = arguments.length > 1 && arguments[1] !== void 0 ? arguments[1] : null;
-      return expression.type === "Char" && expression.kind === "meta" && (value ? expression.value === value : /^\\[dws]$/i.test(expression.value));
-    }
-    function isControl(expression) {
-      return expression.type === "Char" && expression.kind === "control";
-    }
-    function fitsInMetas(expression, metas, hasIUFlags) {
-      for (var i = 0; i < metas.length; i++) {
-        if (fitsInMeta(expression, metas[i], hasIUFlags)) {
-          return true;
-        }
-      }
-      return false;
-    }
-    function fitsInMeta(expression, meta, hasIUFlags) {
-      if (expression.type === "ClassRange") {
-        return fitsInMeta(expression.from, meta, hasIUFlags) && fitsInMeta(expression.to, meta, hasIUFlags);
-      }
-      if (meta === "\\S" && (isMeta(expression, "\\w") || isMeta(expression, "\\d"))) {
-        return true;
-      }
-      if (meta === "\\D" && (isMeta(expression, "\\W") || isMeta(expression, "\\s"))) {
-        return true;
-      }
-      if (meta === "\\w" && isMeta(expression, "\\d")) {
-        return true;
-      }
-      if (meta === "\\W" && isMeta(expression, "\\s")) {
-        return true;
-      }
-      if (expression.type !== "Char" || isNaN(expression.codePoint)) {
-        return false;
-      }
-      if (meta === "\\s") {
-        return fitsInMetaS(expression);
-      }
-      if (meta === "\\S") {
-        return !fitsInMetaS(expression);
-      }
-      if (meta === "\\d") {
-        return fitsInMetaD(expression);
-      }
-      if (meta === "\\D") {
-        return !fitsInMetaD(expression);
-      }
-      if (meta === "\\w") {
-        return fitsInMetaW(expression, hasIUFlags);
-      }
-      if (meta === "\\W") {
-        return !fitsInMetaW(expression, hasIUFlags);
-      }
-      return false;
-    }
-    function fitsInMetaS(expression) {
-      return expression.codePoint === 9 || // \t
-      expression.codePoint === 10 || // \n
-      expression.codePoint === 11 || // \v
-      expression.codePoint === 12 || // \f
-      expression.codePoint === 13 || // \r
-      expression.codePoint === 32 || // space
-      expression.codePoint === 160 || // nbsp
-      expression.codePoint === 5760 || // part of Zs
-      expression.codePoint >= 8192 && expression.codePoint <= 8202 || // part of Zs
-      expression.codePoint === 8232 || // line separator
-      expression.codePoint === 8233 || // paragraph separator
-      expression.codePoint === 8239 || // part of Zs
-      expression.codePoint === 8287 || // part of Zs
-      expression.codePoint === 12288 || // part of Zs
-      expression.codePoint === 65279;
-    }
-    function fitsInMetaD(expression) {
-      return expression.codePoint >= 48 && expression.codePoint <= 57;
-    }
-    function fitsInMetaW(expression, hasIUFlags) {
-      return fitsInMetaD(expression) || expression.codePoint >= 65 && expression.codePoint <= 90 || // A-Z
-      expression.codePoint >= 97 && expression.codePoint <= 122 || // a-z
-      expression.value === "_" || hasIUFlags && (expression.codePoint === 383 || expression.codePoint === 8490);
-    }
-    function combinesWithPrecedingClassRange(expression, classRange) {
-      if (classRange && classRange.type === "ClassRange") {
-        if (fitsInClassRange(expression, classRange)) {
-          return true;
-        } else if (
-          // We only want \w chars or char codes to keep readability
-          isMetaWCharOrCode(expression) && classRange.to.codePoint === expression.codePoint - 1
-        ) {
-          classRange.to = expression;
-          return true;
-        } else if (expression.type === "ClassRange" && expression.from.codePoint <= classRange.to.codePoint + 1 && expression.to.codePoint >= classRange.from.codePoint - 1) {
-          if (expression.from.codePoint < classRange.from.codePoint) {
-            classRange.from = expression.from;
-          }
-          if (expression.to.codePoint > classRange.to.codePoint) {
-            classRange.to = expression.to;
-          }
-          return true;
-        }
-      }
-      return false;
-    }
-    function combinesWithFollowingClassRange(expression, classRange) {
-      if (classRange && classRange.type === "ClassRange") {
-        if (
-          // We only want \w chars or char codes to keep readability
-          isMetaWCharOrCode(expression) && classRange.from.codePoint === expression.codePoint + 1
-        ) {
-          classRange.from = expression;
-          return true;
-        }
-      }
-      return false;
-    }
-    function fitsInClassRange(expression, classRange) {
-      if (expression.type === "Char" && isNaN(expression.codePoint)) {
-        return false;
-      }
-      if (expression.type === "ClassRange") {
-        return fitsInClassRange(expression.from, classRange) && fitsInClassRange(expression.to, classRange);
-      }
-      return expression.codePoint >= classRange.from.codePoint && expression.codePoint <= classRange.to.codePoint;
-    }
-    function charCombinesWithPrecedingChars(expression, index, expressions) {
-      if (!isMetaWCharOrCode(expression)) {
-        return 0;
-      }
-      var nbMergedChars = 0;
-      while (index > 0) {
-        var currentExpression = expressions[index];
-        var precedingExpresion = expressions[index - 1];
-        if (isMetaWCharOrCode(precedingExpresion) && precedingExpresion.codePoint === currentExpression.codePoint - 1) {
-          nbMergedChars++;
-          index--;
-        } else {
-          break;
-        }
-      }
-      if (nbMergedChars > 1) {
-        expressions[index] = {
-          type: "ClassRange",
-          from: expressions[index],
-          to: expression
-        };
-        return nbMergedChars;
-      }
-      return 0;
-    }
-    function isMetaWCharOrCode(expression) {
-      return expression && expression.type === "Char" && !isNaN(expression.codePoint) && (fitsInMetaW(expression, false) || expression.kind === "unicode" || expression.kind === "hex" || expression.kind === "oct" || expression.kind === "decimal");
-    }
-  }
-});
-
-// node_modules/regexp-tree/dist/optimizer/transforms/disjunction-remove-duplicates-transform.js
-var require_disjunction_remove_duplicates_transform = __commonJS({
-  "node_modules/regexp-tree/dist/optimizer/transforms/disjunction-remove-duplicates-transform.js"(exports2, module2) {
-    "use strict";
-    var NodePath = require_node_path();
-    var _require = require_utils2();
-    var disjunctionToList = _require.disjunctionToList;
-    var listToDisjunction = _require.listToDisjunction;
-    module2.exports = {
-      Disjunction: function Disjunction(path30) {
-        var node = path30.node;
-        var uniqueNodesMap = {};
-        var parts = disjunctionToList(node).filter(function(part) {
-          var encoded = part ? NodePath.getForNode(part).jsonEncode() : "null";
-          if (uniqueNodesMap.hasOwnProperty(encoded)) {
-            return false;
-          }
-          uniqueNodesMap[encoded] = part;
-          return true;
-        });
-        path30.replace(listToDisjunction(parts));
-      }
-    };
-  }
-});
-
-// node_modules/regexp-tree/dist/optimizer/transforms/group-single-chars-to-char-class.js
-var require_group_single_chars_to_char_class = __commonJS({
-  "node_modules/regexp-tree/dist/optimizer/transforms/group-single-chars-to-char-class.js"(exports2, module2) {
-    "use strict";
-    module2.exports = {
-      Disjunction: function Disjunction(path30) {
-        var node = path30.node, parent = path30.parent;
-        if (!handlers[parent.type]) {
-          return;
-        }
-        var charset = /* @__PURE__ */ new Map();
-        if (!shouldProcess(node, charset) || !charset.size) {
-          return;
-        }
-        var characterClass = {
-          type: "CharacterClass",
-          expressions: Array.from(charset.keys()).sort().map(function(key) {
-            return charset.get(key);
-          })
-        };
-        handlers[parent.type](path30.getParent(), characterClass);
-      }
-    };
-    var handlers = {
-      RegExp: function RegExp2(path30, characterClass) {
-        var node = path30.node;
-        node.body = characterClass;
-      },
-      Group: function Group(path30, characterClass) {
-        var node = path30.node;
-        if (node.capturing) {
-          node.expression = characterClass;
-        } else {
-          path30.replace(characterClass);
-        }
-      }
-    };
-    function shouldProcess(expression, charset) {
-      if (!expression) {
-        return false;
-      }
-      var type = expression.type;
-      if (type === "Disjunction") {
-        var left = expression.left, right = expression.right;
-        return shouldProcess(left, charset) && shouldProcess(right, charset);
-      } else if (type === "Char") {
-        if (expression.kind === "meta" && expression.symbol === ".") {
-          return false;
-        }
-        var value = expression.value;
-        charset.set(value, expression);
-        return true;
-      } else if (type === "CharacterClass" && !expression.negative) {
-        return expression.expressions.every(function(expression2) {
-          return shouldProcess(expression2, charset);
-        });
-      }
-      return false;
-    }
-  }
-});
-
-// node_modules/regexp-tree/dist/optimizer/transforms/remove-empty-group-transform.js
-var require_remove_empty_group_transform = __commonJS({
-  "node_modules/regexp-tree/dist/optimizer/transforms/remove-empty-group-transform.js"(exports2, module2) {
-    "use strict";
-    module2.exports = {
-      Group: function Group(path30) {
-        var node = path30.node, parent = path30.parent;
-        var childPath = path30.getChild();
-        if (node.capturing || childPath) {
-          return;
-        }
-        if (parent.type === "Repetition") {
-          path30.getParent().replace(node);
-        } else if (parent.type !== "RegExp") {
-          path30.remove();
-        }
-      }
-    };
-  }
-});
-
-// node_modules/regexp-tree/dist/optimizer/transforms/ungroup-transform.js
-var require_ungroup_transform = __commonJS({
-  "node_modules/regexp-tree/dist/optimizer/transforms/ungroup-transform.js"(exports2, module2) {
-    "use strict";
-    function _toConsumableArray(arr) {
-      if (Array.isArray(arr)) {
-        for (var i = 0, arr2 = Array(arr.length); i < arr.length; i++) {
-          arr2[i] = arr[i];
-        }
-        return arr2;
-      } else {
-        return Array.from(arr);
-      }
-    }
-    module2.exports = {
-      Group: function Group(path30) {
-        var node = path30.node, parent = path30.parent;
-        var childPath = path30.getChild();
-        if (node.capturing || !childPath) {
-          return;
-        }
-        if (!hasAppropriateSiblings(path30)) {
-          return;
-        }
-        if (childPath.node.type === "Disjunction" && parent.type !== "RegExp") {
-          return;
-        }
-        if (parent.type === "Repetition" && childPath.node.type !== "Char" && childPath.node.type !== "CharacterClass") {
-          return;
-        }
-        if (childPath.node.type === "Alternative") {
-          var parentPath = path30.getParent();
-          if (parentPath.node.type === "Alternative") {
-            parentPath.replace({
-              type: "Alternative",
-              expressions: [].concat(_toConsumableArray(parent.expressions.slice(0, path30.index)), _toConsumableArray(childPath.node.expressions), _toConsumableArray(parent.expressions.slice(path30.index + 1)))
-            });
-          }
-        } else {
-          path30.replace(childPath.node);
-        }
-      }
-    };
-    function hasAppropriateSiblings(path30) {
-      var parent = path30.parent, index = path30.index;
-      if (parent.type !== "Alternative") {
-        return true;
-      }
-      var previousNode = parent.expressions[index - 1];
-      if (previousNode == null) {
-        return true;
-      }
-      if (previousNode.type === "Backreference" && previousNode.kind === "number") {
-        return false;
-      }
-      if (previousNode.type === "Char" && previousNode.kind === "decimal") {
-        return false;
-      }
-      return true;
-    }
-  }
-});
-
-// node_modules/regexp-tree/dist/optimizer/transforms/combine-repeating-patterns-transform.js
-var require_combine_repeating_patterns_transform = __commonJS({
-  "node_modules/regexp-tree/dist/optimizer/transforms/combine-repeating-patterns-transform.js"(exports2, module2) {
-    "use strict";
-    function _toConsumableArray(arr) {
-      if (Array.isArray(arr)) {
-        for (var i = 0, arr2 = Array(arr.length); i < arr.length; i++) {
-          arr2[i] = arr[i];
-        }
-        return arr2;
-      } else {
-        return Array.from(arr);
-      }
-    }
-    var NodePath = require_node_path();
-    var _require = require_utils2();
-    var increaseQuantifierByOne = _require.increaseQuantifierByOne;
-    module2.exports = {
-      Alternative: function Alternative(path30) {
-        var node = path30.node;
-        var index = 1;
-        while (index < node.expressions.length) {
-          var child = path30.getChild(index);
-          index = Math.max(1, combineRepeatingPatternLeft(path30, child, index));
-          if (index >= node.expressions.length) {
-            break;
-          }
-          child = path30.getChild(index);
-          index = Math.max(1, combineWithPreviousRepetition(path30, child, index));
-          if (index >= node.expressions.length) {
-            break;
-          }
-          child = path30.getChild(index);
-          index = Math.max(1, combineRepetitionWithPrevious(path30, child, index));
-          index++;
-        }
-      }
-    };
-    function combineRepeatingPatternLeft(alternative, child, index) {
-      var node = alternative.node;
-      var nbPossibleLengths = Math.ceil(index / 2);
-      var i = 0;
-      while (i < nbPossibleLengths) {
-        var startIndex = index - 2 * i - 1;
-        var right = void 0, left = void 0;
-        if (i === 0) {
-          right = child;
-          left = alternative.getChild(startIndex);
-        } else {
-          right = NodePath.getForNode({
-            type: "Alternative",
-            expressions: [].concat(_toConsumableArray(node.expressions.slice(index - i, index)), [child.node])
-          });
-          left = NodePath.getForNode({
-            type: "Alternative",
-            expressions: [].concat(_toConsumableArray(node.expressions.slice(startIndex, index - i)))
-          });
-        }
-        if (right.hasEqualSource(left)) {
-          for (var j = 0; j < 2 * i + 1; j++) {
-            alternative.getChild(startIndex).remove();
-          }
-          child.replace({
-            type: "Repetition",
-            expression: i === 0 && right.node.type !== "Repetition" ? right.node : {
-              type: "Group",
-              capturing: false,
-              expression: right.node
-            },
-            quantifier: {
-              type: "Quantifier",
-              kind: "Range",
-              from: 2,
-              to: 2,
-              greedy: true
-            }
-          });
-          return startIndex;
-        }
-        i++;
-      }
-      return index;
-    }
-    function combineWithPreviousRepetition(alternative, child, index) {
-      var node = alternative.node;
-      var i = 0;
-      while (i < index) {
-        var previousChild = alternative.getChild(i);
-        if (previousChild.node.type === "Repetition" && previousChild.node.quantifier.greedy) {
-          var left = previousChild.getChild();
-          var right = void 0;
-          if (left.node.type === "Group" && !left.node.capturing) {
-            left = left.getChild();
-          }
-          if (i + 1 === index) {
-            right = child;
-            if (right.node.type === "Group" && !right.node.capturing) {
-              right = right.getChild();
-            }
-          } else {
-            right = NodePath.getForNode({
-              type: "Alternative",
-              expressions: [].concat(_toConsumableArray(node.expressions.slice(i + 1, index + 1)))
-            });
-          }
-          if (left.hasEqualSource(right)) {
-            for (var j = i; j < index; j++) {
-              alternative.getChild(i + 1).remove();
-            }
-            increaseQuantifierByOne(previousChild.node.quantifier);
-            return i;
-          }
-        }
-        i++;
-      }
-      return index;
-    }
-    function combineRepetitionWithPrevious(alternative, child, index) {
-      var node = alternative.node;
-      if (child.node.type === "Repetition" && child.node.quantifier.greedy) {
-        var right = child.getChild();
-        var left = void 0;
-        if (right.node.type === "Group" && !right.node.capturing) {
-          right = right.getChild();
-        }
-        var rightLength = void 0;
-        if (right.node.type === "Alternative") {
-          rightLength = right.node.expressions.length;
-          left = NodePath.getForNode({
-            type: "Alternative",
-            expressions: [].concat(_toConsumableArray(node.expressions.slice(index - rightLength, index)))
-          });
-        } else {
-          rightLength = 1;
-          left = alternative.getChild(index - 1);
-          if (left.node.type === "Group" && !left.node.capturing) {
-            left = left.getChild();
-          }
-        }
-        if (left.hasEqualSource(right)) {
-          for (var j = index - rightLength; j < index; j++) {
-            alternative.getChild(index - rightLength).remove();
-          }
-          increaseQuantifierByOne(child.node.quantifier);
-          return index - rightLength;
-        }
-      }
-      return index;
-    }
-  }
-});
-
-// node_modules/regexp-tree/dist/optimizer/transforms/index.js
-var require_transforms2 = __commonJS({
-  "node_modules/regexp-tree/dist/optimizer/transforms/index.js"(exports2, module2) {
-    "use strict";
-    module2.exports = /* @__PURE__ */ new Map([
-      // \ud83d\ude80 -> \u{1f680}
-      ["charSurrogatePairToSingleUnicode", require_char_surrogate_pair_to_single_unicode_transform()],
-      // \u0061 -> a
-      ["charCodeToSimpleChar", require_char_code_to_simple_char_transform()],
-      // /Aa/i -> /aa/i
-      ["charCaseInsensitiveLowerCaseTransform", require_char_case_insensitive_lowercase_transform()],
-      // [\d\d] -> [\d]
-      ["charClassRemoveDuplicates", require_char_class_remove_duplicates_transform()],
-      // a{1,2}a{2,3} -> a{3,5}
-      ["quantifiersMerge", require_quantifiers_merge_transform()],
-      // a{1,} -> a+, a{3,3} -> a{3}, a{1} -> a
-      ["quantifierRangeToSymbol", require_quantifier_range_to_symbol_transform()],
-      // [a-a] -> [a], [a-b] -> [ab]
-      ["charClassClassrangesToChars", require_char_class_classranges_to_chars_transform()],
-      // [0-9] -> [\d]
-      ["charClassToMeta", require_char_class_to_meta_transform()],
-      // [\d] -> \d, [^\w] -> \W
-      ["charClassToSingleChar", require_char_class_to_single_char_transform()],
-      // \e -> e
-      ["charEscapeUnescape", require_char_escape_unescape_transform()],
-      // [a-de-f] -> [a-f]
-      ["charClassClassrangesMerge", require_char_class_classranges_merge_transform()],
-      // (ab|ab) -> (ab)
-      ["disjunctionRemoveDuplicates", require_disjunction_remove_duplicates_transform()],
-      // (a|b|c) -> [abc]
-      ["groupSingleCharsToCharClass", require_group_single_chars_to_char_class()],
-      // (?:)a -> a
-      ["removeEmptyGroup", require_remove_empty_group_transform()],
-      // (?:a) -> a
-      ["ungroup", require_ungroup_transform()],
-      // abcabcabc -> (?:abc){3}
-      ["combineRepeatingPatterns", require_combine_repeating_patterns_transform()]
-    ]);
-  }
-});
-
-// node_modules/regexp-tree/dist/optimizer/index.js
-var require_optimizer = __commonJS({
-  "node_modules/regexp-tree/dist/optimizer/index.js"(exports2, module2) {
-    "use strict";
-    var clone2 = require_clone();
-    var parser = require_parser();
-    var transform2 = require_transform();
-    var optimizationTransforms = require_transforms2();
-    module2.exports = {
-      /**
-       * Optimizer transforms a regular expression into an optimized version,
-       * replacing some sub-expressions with their idiomatic patterns.
-       *
-       * @param string | RegExp | AST - a regexp to optimize.
-       *
-       * @return TransformResult - an optimized regexp.
-       *
-       * Example:
-       *
-       *   /[a-zA-Z_0-9][a-zA-Z_0-9]*\e{1,}/
-       *
-       * Optimized to:
-       *
-       *   /\w+e+/
-       */
-      optimize: function optimize(regexp) {
-        var _ref = arguments.length > 1 && arguments[1] !== void 0 ? arguments[1] : {}, _ref$whitelist = _ref.whitelist, whitelist = _ref$whitelist === void 0 ? [] : _ref$whitelist, _ref$blacklist = _ref.blacklist, blacklist = _ref$blacklist === void 0 ? [] : _ref$blacklist;
-        var transformsRaw = whitelist.length > 0 ? whitelist : Array.from(optimizationTransforms.keys());
-        var transformToApply = transformsRaw.filter(function(transform3) {
-          return !blacklist.includes(transform3);
-        });
-        var ast = regexp;
-        if (regexp instanceof RegExp) {
-          regexp = "" + regexp;
-        }
-        if (typeof regexp === "string") {
-          ast = parser.parse(regexp);
-        }
-        var result = new transform2.TransformResult(ast);
-        var prevResultString = void 0;
-        do {
-          prevResultString = result.toString();
-          ast = clone2(result.getAST());
-          transformToApply.forEach(function(transformName) {
-            if (!optimizationTransforms.has(transformName)) {
-              throw new Error("Unknown optimization-transform: " + transformName + ". Available transforms are: " + Array.from(optimizationTransforms.keys()).join(", "));
-            }
-            var transformer = optimizationTransforms.get(transformName);
-            var newResult = transform2.transform(ast, transformer);
-            if (newResult.toString() !== result.toString()) {
-              if (newResult.toString().length <= result.toString().length) {
-                result = newResult;
-              } else {
-                ast = clone2(result.getAST());
-              }
-            }
-          });
-        } while (result.toString() !== prevResultString);
-        return result;
-      }
-    };
-  }
-});
-
-// node_modules/regexp-tree/dist/interpreter/finite-automaton/special-symbols.js
-var require_special_symbols = __commonJS({
-  "node_modules/regexp-tree/dist/interpreter/finite-automaton/special-symbols.js"(exports2, module2) {
-    "use strict";
-    var EPSILON = "\u03B5";
-    var EPSILON_CLOSURE = EPSILON + "*";
-    module2.exports = {
-      EPSILON,
-      EPSILON_CLOSURE
-    };
-  }
-});
-
-// node_modules/regexp-tree/dist/interpreter/finite-automaton/nfa/nfa.js
-var require_nfa = __commonJS({
-  "node_modules/regexp-tree/dist/interpreter/finite-automaton/nfa/nfa.js"(exports2, module2) {
-    "use strict";
-    var _slicedToArray = /* @__PURE__ */ (function() {
-      function sliceIterator(arr, i) {
-        var _arr = [];
-        var _n = true;
-        var _d = false;
-        var _e = void 0;
-        try {
-          for (var _i = arr[Symbol.iterator](), _s; !(_n = (_s = _i.next()).done); _n = true) {
-            _arr.push(_s.value);
-            if (i && _arr.length === i) break;
-          }
-        } catch (err) {
-          _d = true;
-          _e = err;
-        } finally {
-          try {
-            if (!_n && _i["return"]) _i["return"]();
-          } finally {
-            if (_d) throw _e;
-          }
-        }
-        return _arr;
-      }
-      return function(arr, i) {
-        if (Array.isArray(arr)) {
-          return arr;
-        } else if (Symbol.iterator in Object(arr)) {
-          return sliceIterator(arr, i);
-        } else {
-          throw new TypeError("Invalid attempt to destructure non-iterable instance");
-        }
-      };
-    })();
-    var _createClass = /* @__PURE__ */ (function() {
-      function defineProperties(target, props) {
-        for (var i = 0; i < props.length; i++) {
-          var descriptor = props[i];
-          descriptor.enumerable = descriptor.enumerable || false;
-          descriptor.configurable = true;
-          if ("value" in descriptor) descriptor.writable = true;
-          Object.defineProperty(target, descriptor.key, descriptor);
-        }
-      }
-      return function(Constructor, protoProps, staticProps) {
-        if (protoProps) defineProperties(Constructor.prototype, protoProps);
-        if (staticProps) defineProperties(Constructor, staticProps);
-        return Constructor;
-      };
-    })();
-    function _toConsumableArray(arr) {
-      if (Array.isArray(arr)) {
-        for (var i = 0, arr2 = Array(arr.length); i < arr.length; i++) {
-          arr2[i] = arr[i];
-        }
-        return arr2;
-      } else {
-        return Array.from(arr);
-      }
-    }
-    function _classCallCheck(instance, Constructor) {
-      if (!(instance instanceof Constructor)) {
-        throw new TypeError("Cannot call a class as a function");
-      }
-    }
-    var _require = require_special_symbols();
-    var EPSILON = _require.EPSILON;
-    var EPSILON_CLOSURE = _require.EPSILON_CLOSURE;
-    var NFA = (function() {
-      function NFA2(inState, outState) {
-        _classCallCheck(this, NFA2);
-        this.in = inState;
-        this.out = outState;
-      }
-      _createClass(NFA2, [{
-        key: "matches",
-        value: function matches(string3) {
-          return this.in.matches(string3);
-        }
-        /**
-         * Returns an alphabet for this NFA.
-         */
-      }, {
-        key: "getAlphabet",
-        value: function getAlphabet() {
-          if (!this._alphabet) {
-            this._alphabet = /* @__PURE__ */ new Set();
-            var table = this.getTransitionTable();
-            for (var state in table) {
-              var transitions = table[state];
-              for (var symbol in transitions) {
-                if (symbol !== EPSILON_CLOSURE) {
-                  this._alphabet.add(symbol);
-                }
-              }
-            }
-          }
-          return this._alphabet;
-        }
-        /**
-         * Returns set of accepting states.
-         */
-      }, {
-        key: "getAcceptingStates",
-        value: function getAcceptingStates() {
-          if (!this._acceptingStates) {
-            this.getTransitionTable();
-          }
-          return this._acceptingStates;
-        }
-        /**
-         * Returns accepting state numbers.
-         */
-      }, {
-        key: "getAcceptingStateNumbers",
-        value: function getAcceptingStateNumbers() {
-          if (!this._acceptingStateNumbers) {
-            this._acceptingStateNumbers = /* @__PURE__ */ new Set();
-            var _iteratorNormalCompletion = true;
-            var _didIteratorError = false;
-            var _iteratorError = void 0;
-            try {
-              for (var _iterator = this.getAcceptingStates()[Symbol.iterator](), _step; !(_iteratorNormalCompletion = (_step = _iterator.next()).done); _iteratorNormalCompletion = true) {
-                var acceptingState = _step.value;
-                this._acceptingStateNumbers.add(acceptingState.number);
-              }
-            } catch (err) {
-              _didIteratorError = true;
-              _iteratorError = err;
-            } finally {
-              try {
-                if (!_iteratorNormalCompletion && _iterator.return) {
-                  _iterator.return();
-                }
-              } finally {
-                if (_didIteratorError) {
-                  throw _iteratorError;
-                }
-              }
-            }
-          }
-          return this._acceptingStateNumbers;
-        }
-        /**
-         * Builds and returns transition table.
-         */
-      }, {
-        key: "getTransitionTable",
-        value: function getTransitionTable() {
-          var _this = this;
-          if (!this._transitionTable) {
-            this._transitionTable = {};
-            this._acceptingStates = /* @__PURE__ */ new Set();
-            var visited = /* @__PURE__ */ new Set();
-            var symbols = /* @__PURE__ */ new Set();
-            var visitState = function visitState2(state) {
-              if (visited.has(state)) {
-                return;
-              }
-              visited.add(state);
-              state.number = visited.size;
-              _this._transitionTable[state.number] = {};
-              if (state.accepting) {
-                _this._acceptingStates.add(state);
-              }
-              var transitions = state.getTransitions();
-              var _iteratorNormalCompletion2 = true;
-              var _didIteratorError2 = false;
-              var _iteratorError2 = void 0;
-              try {
-                for (var _iterator2 = transitions[Symbol.iterator](), _step2; !(_iteratorNormalCompletion2 = (_step2 = _iterator2.next()).done); _iteratorNormalCompletion2 = true) {
-                  var _ref = _step2.value;
-                  var _ref2 = _slicedToArray(_ref, 2);
-                  var symbol = _ref2[0];
-                  var symbolTransitions = _ref2[1];
-                  var combinedState = [];
-                  symbols.add(symbol);
-                  var _iteratorNormalCompletion3 = true;
-                  var _didIteratorError3 = false;
-                  var _iteratorError3 = void 0;
-                  try {
-                    for (var _iterator3 = symbolTransitions[Symbol.iterator](), _step3; !(_iteratorNormalCompletion3 = (_step3 = _iterator3.next()).done); _iteratorNormalCompletion3 = true) {
-                      var nextState = _step3.value;
-                      visitState2(nextState);
-                      combinedState.push(nextState.number);
-                    }
-                  } catch (err) {
-                    _didIteratorError3 = true;
-                    _iteratorError3 = err;
-                  } finally {
-                    try {
-                      if (!_iteratorNormalCompletion3 && _iterator3.return) {
-                        _iterator3.return();
-                      }
-                    } finally {
-                      if (_didIteratorError3) {
-                        throw _iteratorError3;
-                      }
-                    }
-                  }
-                  _this._transitionTable[state.number][symbol] = combinedState;
-                }
-              } catch (err) {
-                _didIteratorError2 = true;
-                _iteratorError2 = err;
-              } finally {
-                try {
-                  if (!_iteratorNormalCompletion2 && _iterator2.return) {
-                    _iterator2.return();
-                  }
-                } finally {
-                  if (_didIteratorError2) {
-                    throw _iteratorError2;
-                  }
-                }
-              }
-            };
-            visitState(this.in);
-            visited.forEach(function(state) {
-              delete _this._transitionTable[state.number][EPSILON];
-              _this._transitionTable[state.number][EPSILON_CLOSURE] = [].concat(_toConsumableArray(state.getEpsilonClosure())).map(function(s) {
-                return s.number;
-              });
-            });
-          }
-          return this._transitionTable;
-        }
-      }]);
-      return NFA2;
-    })();
-    module2.exports = NFA;
-  }
-});
-
-// node_modules/regexp-tree/dist/interpreter/finite-automaton/dfa/dfa-minimizer.js
-var require_dfa_minimizer = __commonJS({
-  "node_modules/regexp-tree/dist/interpreter/finite-automaton/dfa/dfa-minimizer.js"(exports2, module2) {
-    "use strict";
-    var _slicedToArray = /* @__PURE__ */ (function() {
-      function sliceIterator(arr, i) {
-        var _arr = [];
-        var _n = true;
-        var _d = false;
-        var _e = void 0;
-        try {
-          for (var _i = arr[Symbol.iterator](), _s; !(_n = (_s = _i.next()).done); _n = true) {
-            _arr.push(_s.value);
-            if (i && _arr.length === i) break;
-          }
-        } catch (err) {
-          _d = true;
-          _e = err;
-        } finally {
-          try {
-            if (!_n && _i["return"]) _i["return"]();
-          } finally {
-            if (_d) throw _e;
-          }
-        }
-        return _arr;
-      }
-      return function(arr, i) {
-        if (Array.isArray(arr)) {
-          return arr;
-        } else if (Symbol.iterator in Object(arr)) {
-          return sliceIterator(arr, i);
-        } else {
-          throw new TypeError("Invalid attempt to destructure non-iterable instance");
-        }
-      };
-    })();
-    function _toArray(arr) {
-      return Array.isArray(arr) ? arr : Array.from(arr);
-    }
-    function _toConsumableArray(arr) {
-      if (Array.isArray(arr)) {
-        for (var i = 0, arr2 = Array(arr.length); i < arr.length; i++) {
-          arr2[i] = arr[i];
-        }
-        return arr2;
-      } else {
-        return Array.from(arr);
-      }
-    }
-    var currentTransitionMap = null;
-    function minimize(dfa) {
-      var table = dfa.getTransitionTable();
-      var allStates = Object.keys(table);
-      var alphabet = dfa.getAlphabet();
-      var accepting = dfa.getAcceptingStateNumbers();
-      currentTransitionMap = {};
-      var nonAccepting = /* @__PURE__ */ new Set();
-      allStates.forEach(function(state) {
-        state = Number(state);
-        var isAccepting = accepting.has(state);
-        if (isAccepting) {
-          currentTransitionMap[state] = accepting;
-        } else {
-          nonAccepting.add(state);
-          currentTransitionMap[state] = nonAccepting;
-        }
-      });
-      var all = [
-        // 0-equivalent sets.
-        [nonAccepting, accepting].filter(function(set2) {
-          return set2.size > 0;
-        })
-      ];
-      var current = void 0;
-      var previous = void 0;
-      current = all[all.length - 1];
-      previous = all[all.length - 2];
-      var _loop = function _loop2() {
-        var newTransitionMap = {};
-        var _iteratorNormalCompletion3 = true;
-        var _didIteratorError3 = false;
-        var _iteratorError3 = void 0;
-        try {
-          for (var _iterator3 = current[Symbol.iterator](), _step3; !(_iteratorNormalCompletion3 = (_step3 = _iterator3.next()).done); _iteratorNormalCompletion3 = true) {
-            var _set = _step3.value;
-            var handledStates = {};
-            var _set2 = _toArray(_set), first = _set2[0], rest = _set2.slice(1);
-            handledStates[first] = /* @__PURE__ */ new Set([first]);
-            var _iteratorNormalCompletion4 = true;
-            var _didIteratorError4 = false;
-            var _iteratorError4 = void 0;
-            try {
-              restSets: for (var _iterator4 = rest[Symbol.iterator](), _step4; !(_iteratorNormalCompletion4 = (_step4 = _iterator4.next()).done); _iteratorNormalCompletion4 = true) {
-                var state = _step4.value;
-                var _iteratorNormalCompletion5 = true;
-                var _didIteratorError5 = false;
-                var _iteratorError5 = void 0;
-                try {
-                  for (var _iterator5 = Object.keys(handledStates)[Symbol.iterator](), _step5; !(_iteratorNormalCompletion5 = (_step5 = _iterator5.next()).done); _iteratorNormalCompletion5 = true) {
-                    var handledState = _step5.value;
-                    if (areEquivalent(state, handledState, table, alphabet)) {
-                      handledStates[handledState].add(state);
-                      handledStates[state] = handledStates[handledState];
-                      continue restSets;
-                    }
-                  }
-                } catch (err) {
-                  _didIteratorError5 = true;
-                  _iteratorError5 = err;
-                } finally {
-                  try {
-                    if (!_iteratorNormalCompletion5 && _iterator5.return) {
-                      _iterator5.return();
-                    }
-                  } finally {
-                    if (_didIteratorError5) {
-                      throw _iteratorError5;
-                    }
-                  }
-                }
-                handledStates[state] = /* @__PURE__ */ new Set([state]);
-              }
-            } catch (err) {
-              _didIteratorError4 = true;
-              _iteratorError4 = err;
-            } finally {
-              try {
-                if (!_iteratorNormalCompletion4 && _iterator4.return) {
-                  _iterator4.return();
-                }
-              } finally {
-                if (_didIteratorError4) {
-                  throw _iteratorError4;
-                }
-              }
-            }
-            Object.assign(newTransitionMap, handledStates);
-          }
-        } catch (err) {
-          _didIteratorError3 = true;
-          _iteratorError3 = err;
-        } finally {
-          try {
-            if (!_iteratorNormalCompletion3 && _iterator3.return) {
-              _iterator3.return();
-            }
-          } finally {
-            if (_didIteratorError3) {
-              throw _iteratorError3;
-            }
-          }
-        }
-        currentTransitionMap = newTransitionMap;
-        var newSets = new Set(Object.keys(newTransitionMap).map(function(state2) {
-          return newTransitionMap[state2];
-        }));
-        all.push([].concat(_toConsumableArray(newSets)));
-        current = all[all.length - 1];
-        previous = all[all.length - 2];
-      };
-      while (!sameRow(current, previous)) {
-        _loop();
-      }
-      var remaped = /* @__PURE__ */ new Map();
-      var idx = 1;
-      current.forEach(function(set2) {
-        return remaped.set(set2, idx++);
-      });
-      var minimizedTable = {};
-      var minimizedAcceptingStates = /* @__PURE__ */ new Set();
-      var updateAcceptingStates = function updateAcceptingStates2(set2, idx2) {
-        var _iteratorNormalCompletion = true;
-        var _didIteratorError = false;
-        var _iteratorError = void 0;
-        try {
-          for (var _iterator = set2[Symbol.iterator](), _step; !(_iteratorNormalCompletion = (_step = _iterator.next()).done); _iteratorNormalCompletion = true) {
-            var state = _step.value;
-            if (accepting.has(state)) {
-              minimizedAcceptingStates.add(idx2);
-            }
-          }
-        } catch (err) {
-          _didIteratorError = true;
-          _iteratorError = err;
-        } finally {
-          try {
-            if (!_iteratorNormalCompletion && _iterator.return) {
-              _iterator.return();
-            }
-          } finally {
-            if (_didIteratorError) {
-              throw _iteratorError;
-            }
-          }
-        }
-      };
-      var _iteratorNormalCompletion2 = true;
-      var _didIteratorError2 = false;
-      var _iteratorError2 = void 0;
-      try {
-        for (var _iterator2 = remaped.entries()[Symbol.iterator](), _step2; !(_iteratorNormalCompletion2 = (_step2 = _iterator2.next()).done); _iteratorNormalCompletion2 = true) {
-          var _ref = _step2.value;
-          var _ref2 = _slicedToArray(_ref, 2);
-          var set = _ref2[0];
-          var _idx = _ref2[1];
-          minimizedTable[_idx] = {};
-          var _iteratorNormalCompletion6 = true;
-          var _didIteratorError6 = false;
-          var _iteratorError6 = void 0;
-          try {
-            for (var _iterator6 = alphabet[Symbol.iterator](), _step6; !(_iteratorNormalCompletion6 = (_step6 = _iterator6.next()).done); _iteratorNormalCompletion6 = true) {
-              var symbol = _step6.value;
-              updateAcceptingStates(set, _idx);
-              var originalTransition = void 0;
-              var _iteratorNormalCompletion7 = true;
-              var _didIteratorError7 = false;
-              var _iteratorError7 = void 0;
-              try {
-                for (var _iterator7 = set[Symbol.iterator](), _step7; !(_iteratorNormalCompletion7 = (_step7 = _iterator7.next()).done); _iteratorNormalCompletion7 = true) {
-                  var originalState = _step7.value;
-                  originalTransition = table[originalState][symbol];
-                  if (originalTransition) {
-                    break;
-                  }
-                }
-              } catch (err) {
-                _didIteratorError7 = true;
-                _iteratorError7 = err;
-              } finally {
-                try {
-                  if (!_iteratorNormalCompletion7 && _iterator7.return) {
-                    _iterator7.return();
-                  }
-                } finally {
-                  if (_didIteratorError7) {
-                    throw _iteratorError7;
-                  }
-                }
-              }
-              if (originalTransition) {
-                minimizedTable[_idx][symbol] = remaped.get(currentTransitionMap[originalTransition]);
-              }
-            }
-          } catch (err) {
-            _didIteratorError6 = true;
-            _iteratorError6 = err;
-          } finally {
-            try {
-              if (!_iteratorNormalCompletion6 && _iterator6.return) {
-                _iterator6.return();
-              }
-            } finally {
-              if (_didIteratorError6) {
-                throw _iteratorError6;
-              }
-            }
-          }
-        }
-      } catch (err) {
-        _didIteratorError2 = true;
-        _iteratorError2 = err;
-      } finally {
-        try {
-          if (!_iteratorNormalCompletion2 && _iterator2.return) {
-            _iterator2.return();
-          }
-        } finally {
-          if (_didIteratorError2) {
-            throw _iteratorError2;
-          }
-        }
-      }
-      dfa.setTransitionTable(minimizedTable);
-      dfa.setAcceptingStateNumbers(minimizedAcceptingStates);
-      return dfa;
-    }
-    function sameRow(r1, r2) {
-      if (!r2) {
-        return false;
-      }
-      if (r1.length !== r2.length) {
-        return false;
-      }
-      for (var i = 0; i < r1.length; i++) {
-        var s1 = r1[i];
-        var s2 = r2[i];
-        if (s1.size !== s2.size) {
-          return false;
-        }
-        if ([].concat(_toConsumableArray(s1)).sort().join(",") !== [].concat(_toConsumableArray(s2)).sort().join(",")) {
-          return false;
-        }
-      }
-      return true;
-    }
-    function areEquivalent(s1, s2, table, alphabet) {
-      var _iteratorNormalCompletion8 = true;
-      var _didIteratorError8 = false;
-      var _iteratorError8 = void 0;
-      try {
-        for (var _iterator8 = alphabet[Symbol.iterator](), _step8; !(_iteratorNormalCompletion8 = (_step8 = _iterator8.next()).done); _iteratorNormalCompletion8 = true) {
-          var symbol = _step8.value;
-          if (!goToSameSet(s1, s2, table, symbol)) {
-            return false;
-          }
-        }
-      } catch (err) {
-        _didIteratorError8 = true;
-        _iteratorError8 = err;
-      } finally {
-        try {
-          if (!_iteratorNormalCompletion8 && _iterator8.return) {
-            _iterator8.return();
-          }
-        } finally {
-          if (_didIteratorError8) {
-            throw _iteratorError8;
-          }
-        }
-      }
-      return true;
-    }
-    function goToSameSet(s1, s2, table, symbol) {
-      if (!currentTransitionMap[s1] || !currentTransitionMap[s2]) {
-        return false;
-      }
-      var originalTransitionS1 = table[s1][symbol];
-      var originalTransitionS2 = table[s2][symbol];
-      if (!originalTransitionS1 && !originalTransitionS2) {
-        return true;
-      }
-      return currentTransitionMap[s1].has(originalTransitionS1) && currentTransitionMap[s2].has(originalTransitionS2);
-    }
-    module2.exports = {
-      minimize
-    };
-  }
-});
-
-// node_modules/regexp-tree/dist/interpreter/finite-automaton/dfa/dfa.js
-var require_dfa = __commonJS({
-  "node_modules/regexp-tree/dist/interpreter/finite-automaton/dfa/dfa.js"(exports2, module2) {
-    "use strict";
-    var _createClass = /* @__PURE__ */ (function() {
-      function defineProperties(target, props) {
-        for (var i = 0; i < props.length; i++) {
-          var descriptor = props[i];
-          descriptor.enumerable = descriptor.enumerable || false;
-          descriptor.configurable = true;
-          if ("value" in descriptor) descriptor.writable = true;
-          Object.defineProperty(target, descriptor.key, descriptor);
-        }
-      }
-      return function(Constructor, protoProps, staticProps) {
-        if (protoProps) defineProperties(Constructor.prototype, protoProps);
-        if (staticProps) defineProperties(Constructor, staticProps);
-        return Constructor;
-      };
-    })();
-    function _toConsumableArray(arr) {
-      if (Array.isArray(arr)) {
-        for (var i = 0, arr2 = Array(arr.length); i < arr.length; i++) {
-          arr2[i] = arr[i];
-        }
-        return arr2;
-      } else {
-        return Array.from(arr);
-      }
-    }
-    function _classCallCheck(instance, Constructor) {
-      if (!(instance instanceof Constructor)) {
-        throw new TypeError("Cannot call a class as a function");
-      }
-    }
-    var DFAMinimizer = require_dfa_minimizer();
-    var _require = require_special_symbols();
-    var EPSILON_CLOSURE = _require.EPSILON_CLOSURE;
-    var DFA = (function() {
-      function DFA2(nfa) {
-        _classCallCheck(this, DFA2);
-        this._nfa = nfa;
-      }
-      _createClass(DFA2, [{
-        key: "minimize",
-        value: function minimize() {
-          this.getTransitionTable();
-          this._originalAcceptingStateNumbers = this._acceptingStateNumbers;
-          this._originalTransitionTable = this._transitionTable;
-          DFAMinimizer.minimize(this);
-        }
-        /**
-         * Returns alphabet for this DFA.
-         */
-      }, {
-        key: "getAlphabet",
-        value: function getAlphabet() {
-          return this._nfa.getAlphabet();
-        }
-        /**
-         * Returns accepting states.
-         */
-      }, {
-        key: "getAcceptingStateNumbers",
-        value: function getAcceptingStateNumbers() {
-          if (!this._acceptingStateNumbers) {
-            this.getTransitionTable();
-          }
-          return this._acceptingStateNumbers;
-        }
-        /**
-         * Returns original accepting states.
-         */
-      }, {
-        key: "getOriginaAcceptingStateNumbers",
-        value: function getOriginaAcceptingStateNumbers() {
-          if (!this._originalAcceptingStateNumbers) {
-            this.getTransitionTable();
-          }
-          return this._originalAcceptingStateNumbers;
-        }
-        /**
-         * Sets transition table.
-         */
-      }, {
-        key: "setTransitionTable",
-        value: function setTransitionTable(table) {
-          this._transitionTable = table;
-        }
-        /**
-         * Sets accepting states.
-         */
-      }, {
-        key: "setAcceptingStateNumbers",
-        value: function setAcceptingStateNumbers(stateNumbers) {
-          this._acceptingStateNumbers = stateNumbers;
-        }
-        /**
-         * DFA transition table is built from NFA table.
-         */
-      }, {
-        key: "getTransitionTable",
-        value: function getTransitionTable() {
-          var _this = this;
-          if (this._transitionTable) {
-            return this._transitionTable;
-          }
-          var nfaTable = this._nfa.getTransitionTable();
-          var nfaStates = Object.keys(nfaTable);
-          this._acceptingStateNumbers = /* @__PURE__ */ new Set();
-          var startState = nfaTable[nfaStates[0]][EPSILON_CLOSURE];
-          var worklist = [startState];
-          var alphabet = this.getAlphabet();
-          var nfaAcceptingStates = this._nfa.getAcceptingStateNumbers();
-          var dfaTable = {};
-          var updateAcceptingStates = function updateAcceptingStates2(states2) {
-            var _iteratorNormalCompletion = true;
-            var _didIteratorError = false;
-            var _iteratorError = void 0;
-            try {
-              for (var _iterator = nfaAcceptingStates[Symbol.iterator](), _step; !(_iteratorNormalCompletion = (_step = _iterator.next()).done); _iteratorNormalCompletion = true) {
-                var nfaAcceptingState = _step.value;
-                if (states2.indexOf(nfaAcceptingState) !== -1) {
-                  _this._acceptingStateNumbers.add(states2.join(","));
-                  break;
-                }
-              }
-            } catch (err) {
-              _didIteratorError = true;
-              _iteratorError = err;
-            } finally {
-              try {
-                if (!_iteratorNormalCompletion && _iterator.return) {
-                  _iterator.return();
-                }
-              } finally {
-                if (_didIteratorError) {
-                  throw _iteratorError;
-                }
-              }
-            }
-          };
-          while (worklist.length > 0) {
-            var states = worklist.shift();
-            var dfaStateLabel = states.join(",");
-            dfaTable[dfaStateLabel] = {};
-            var _iteratorNormalCompletion2 = true;
-            var _didIteratorError2 = false;
-            var _iteratorError2 = void 0;
-            try {
-              for (var _iterator2 = alphabet[Symbol.iterator](), _step2; !(_iteratorNormalCompletion2 = (_step2 = _iterator2.next()).done); _iteratorNormalCompletion2 = true) {
-                var symbol = _step2.value;
-                var onSymbol = [];
-                updateAcceptingStates(states);
-                var _iteratorNormalCompletion3 = true;
-                var _didIteratorError3 = false;
-                var _iteratorError3 = void 0;
-                try {
-                  for (var _iterator3 = states[Symbol.iterator](), _step3; !(_iteratorNormalCompletion3 = (_step3 = _iterator3.next()).done); _iteratorNormalCompletion3 = true) {
-                    var state = _step3.value;
-                    var nfaStatesOnSymbol = nfaTable[state][symbol];
-                    if (!nfaStatesOnSymbol) {
-                      continue;
-                    }
-                    var _iteratorNormalCompletion4 = true;
-                    var _didIteratorError4 = false;
-                    var _iteratorError4 = void 0;
-                    try {
-                      for (var _iterator4 = nfaStatesOnSymbol[Symbol.iterator](), _step4; !(_iteratorNormalCompletion4 = (_step4 = _iterator4.next()).done); _iteratorNormalCompletion4 = true) {
-                        var nfaStateOnSymbol = _step4.value;
-                        if (!nfaTable[nfaStateOnSymbol]) {
-                          continue;
-                        }
-                        onSymbol.push.apply(onSymbol, _toConsumableArray(nfaTable[nfaStateOnSymbol][EPSILON_CLOSURE]));
-                      }
-                    } catch (err) {
-                      _didIteratorError4 = true;
-                      _iteratorError4 = err;
-                    } finally {
-                      try {
-                        if (!_iteratorNormalCompletion4 && _iterator4.return) {
-                          _iterator4.return();
-                        }
-                      } finally {
-                        if (_didIteratorError4) {
-                          throw _iteratorError4;
-                        }
-                      }
-                    }
-                  }
-                } catch (err) {
-                  _didIteratorError3 = true;
-                  _iteratorError3 = err;
-                } finally {
-                  try {
-                    if (!_iteratorNormalCompletion3 && _iterator3.return) {
-                      _iterator3.return();
-                    }
-                  } finally {
-                    if (_didIteratorError3) {
-                      throw _iteratorError3;
-                    }
-                  }
-                }
-                var dfaStatesOnSymbolSet = new Set(onSymbol);
-                var dfaStatesOnSymbol = [].concat(_toConsumableArray(dfaStatesOnSymbolSet));
-                if (dfaStatesOnSymbol.length > 0) {
-                  var dfaOnSymbolStr = dfaStatesOnSymbol.join(",");
-                  dfaTable[dfaStateLabel][symbol] = dfaOnSymbolStr;
-                  if (!dfaTable.hasOwnProperty(dfaOnSymbolStr)) {
-                    worklist.unshift(dfaStatesOnSymbol);
-                  }
-                }
-              }
-            } catch (err) {
-              _didIteratorError2 = true;
-              _iteratorError2 = err;
-            } finally {
-              try {
-                if (!_iteratorNormalCompletion2 && _iterator2.return) {
-                  _iterator2.return();
-                }
-              } finally {
-                if (_didIteratorError2) {
-                  throw _iteratorError2;
-                }
-              }
-            }
-          }
-          return this._transitionTable = this._remapStateNumbers(dfaTable);
-        }
-        /**
-         * Remaps state numbers in the resulting table:
-         * combined states '1,2,3' -> 1, '3,4' -> 2, etc.
-         */
-      }, {
-        key: "_remapStateNumbers",
-        value: function _remapStateNumbers(calculatedDFATable) {
-          var newStatesMap = {};
-          this._originalTransitionTable = calculatedDFATable;
-          var transitionTable = {};
-          Object.keys(calculatedDFATable).forEach(function(originalNumber2, newNumber) {
-            newStatesMap[originalNumber2] = newNumber + 1;
-          });
-          for (var originalNumber in calculatedDFATable) {
-            var originalRow = calculatedDFATable[originalNumber];
-            var row = {};
-            for (var symbol in originalRow) {
-              row[symbol] = newStatesMap[originalRow[symbol]];
-            }
-            transitionTable[newStatesMap[originalNumber]] = row;
-          }
-          this._originalAcceptingStateNumbers = this._acceptingStateNumbers;
-          this._acceptingStateNumbers = /* @__PURE__ */ new Set();
-          var _iteratorNormalCompletion5 = true;
-          var _didIteratorError5 = false;
-          var _iteratorError5 = void 0;
-          try {
-            for (var _iterator5 = this._originalAcceptingStateNumbers[Symbol.iterator](), _step5; !(_iteratorNormalCompletion5 = (_step5 = _iterator5.next()).done); _iteratorNormalCompletion5 = true) {
-              var _originalNumber = _step5.value;
-              this._acceptingStateNumbers.add(newStatesMap[_originalNumber]);
-            }
-          } catch (err) {
-            _didIteratorError5 = true;
-            _iteratorError5 = err;
-          } finally {
-            try {
-              if (!_iteratorNormalCompletion5 && _iterator5.return) {
-                _iterator5.return();
-              }
-            } finally {
-              if (_didIteratorError5) {
-                throw _iteratorError5;
-              }
-            }
-          }
-          return transitionTable;
-        }
-        /**
-         * Returns original DFA table, where state numbers
-         * are combined numbers from NFA.
-         */
-      }, {
-        key: "getOriginalTransitionTable",
-        value: function getOriginalTransitionTable() {
-          if (!this._originalTransitionTable) {
-            this.getTransitionTable();
-          }
-          return this._originalTransitionTable;
-        }
-        /**
-         * Checks whether this DFA accepts a string.
-         */
-      }, {
-        key: "matches",
-        value: function matches(string3) {
-          var state = 1;
-          var i = 0;
-          var table = this.getTransitionTable();
-          while (string3[i]) {
-            state = table[state][string3[i++]];
-            if (!state) {
-              return false;
-            }
-          }
-          if (!this.getAcceptingStateNumbers().has(state)) {
-            return false;
-          }
-          return true;
-        }
-      }]);
-      return DFA2;
-    })();
-    module2.exports = DFA;
-  }
-});
-
-// node_modules/regexp-tree/dist/interpreter/finite-automaton/state.js
-var require_state = __commonJS({
-  "node_modules/regexp-tree/dist/interpreter/finite-automaton/state.js"(exports2, module2) {
-    "use strict";
-    var _createClass = /* @__PURE__ */ (function() {
-      function defineProperties(target, props) {
-        for (var i = 0; i < props.length; i++) {
-          var descriptor = props[i];
-          descriptor.enumerable = descriptor.enumerable || false;
-          descriptor.configurable = true;
-          if ("value" in descriptor) descriptor.writable = true;
-          Object.defineProperty(target, descriptor.key, descriptor);
-        }
-      }
-      return function(Constructor, protoProps, staticProps) {
-        if (protoProps) defineProperties(Constructor.prototype, protoProps);
-        if (staticProps) defineProperties(Constructor, staticProps);
-        return Constructor;
-      };
-    })();
-    function _classCallCheck(instance, Constructor) {
-      if (!(instance instanceof Constructor)) {
-        throw new TypeError("Cannot call a class as a function");
-      }
-    }
-    var State = (function() {
-      function State2() {
-        var _ref = arguments.length > 0 && arguments[0] !== void 0 ? arguments[0] : {}, _ref$accepting = _ref.accepting, accepting = _ref$accepting === void 0 ? false : _ref$accepting;
-        _classCallCheck(this, State2);
-        this._transitions = /* @__PURE__ */ new Map();
-        this.accepting = accepting;
-      }
-      _createClass(State2, [{
-        key: "getTransitions",
-        value: function getTransitions() {
-          return this._transitions;
-        }
-        /**
-         * Creates a transition on symbol.
-         */
-      }, {
-        key: "addTransition",
-        value: function addTransition(symbol, toState) {
-          this.getTransitionsOnSymbol(symbol).add(toState);
-          return this;
-        }
-        /**
-         * Returns transitions set on symbol.
-         */
-      }, {
-        key: "getTransitionsOnSymbol",
-        value: function getTransitionsOnSymbol(symbol) {
-          var transitions = this._transitions.get(symbol);
-          if (!transitions) {
-            transitions = /* @__PURE__ */ new Set();
-            this._transitions.set(symbol, transitions);
-          }
-          return transitions;
-        }
-      }]);
-      return State2;
-    })();
-    module2.exports = State;
-  }
-});
-
-// node_modules/regexp-tree/dist/interpreter/finite-automaton/nfa/nfa-state.js
-var require_nfa_state = __commonJS({
-  "node_modules/regexp-tree/dist/interpreter/finite-automaton/nfa/nfa-state.js"(exports2, module2) {
-    "use strict";
-    var _createClass = /* @__PURE__ */ (function() {
-      function defineProperties(target, props) {
-        for (var i = 0; i < props.length; i++) {
-          var descriptor = props[i];
-          descriptor.enumerable = descriptor.enumerable || false;
-          descriptor.configurable = true;
-          if ("value" in descriptor) descriptor.writable = true;
-          Object.defineProperty(target, descriptor.key, descriptor);
-        }
-      }
-      return function(Constructor, protoProps, staticProps) {
-        if (protoProps) defineProperties(Constructor.prototype, protoProps);
-        if (staticProps) defineProperties(Constructor, staticProps);
-        return Constructor;
-      };
-    })();
-    function _classCallCheck(instance, Constructor) {
-      if (!(instance instanceof Constructor)) {
-        throw new TypeError("Cannot call a class as a function");
-      }
-    }
-    function _possibleConstructorReturn(self2, call) {
-      if (!self2) {
-        throw new ReferenceError("this hasn't been initialised - super() hasn't been called");
-      }
-      return call && (typeof call === "object" || typeof call === "function") ? call : self2;
-    }
-    function _inherits(subClass, superClass) {
-      if (typeof superClass !== "function" && superClass !== null) {
-        throw new TypeError("Super expression must either be null or a function, not " + typeof superClass);
-      }
-      subClass.prototype = Object.create(superClass && superClass.prototype, { constructor: { value: subClass, enumerable: false, writable: true, configurable: true } });
-      if (superClass) Object.setPrototypeOf ? Object.setPrototypeOf(subClass, superClass) : subClass.__proto__ = superClass;
-    }
-    var State = require_state();
-    var _require = require_special_symbols();
-    var EPSILON = _require.EPSILON;
-    var NFAState = (function(_State) {
-      _inherits(NFAState2, _State);
-      function NFAState2() {
-        _classCallCheck(this, NFAState2);
-        return _possibleConstructorReturn(this, (NFAState2.__proto__ || Object.getPrototypeOf(NFAState2)).apply(this, arguments));
-      }
-      _createClass(NFAState2, [{
-        key: "matches",
-        /**
-         * Whether this state matches a string.
-         *
-         * We maintain set of visited epsilon-states to avoid infinite loops
-         * when an epsilon-transition goes eventually to itself.
-         *
-         * NOTE: this function is rather "educational", since we use DFA for strings
-         * matching. DFA is built on top of NFA, and uses fast transition table.
-         */
-        value: function matches(string3) {
-          var visited = arguments.length > 1 && arguments[1] !== void 0 ? arguments[1] : /* @__PURE__ */ new Set();
-          if (visited.has(this)) {
-            return false;
-          }
-          visited.add(this);
-          if (string3.length === 0) {
-            if (this.accepting) {
-              return true;
-            }
-            var _iteratorNormalCompletion = true;
-            var _didIteratorError = false;
-            var _iteratorError = void 0;
-            try {
-              for (var _iterator = this.getTransitionsOnSymbol(EPSILON)[Symbol.iterator](), _step; !(_iteratorNormalCompletion = (_step = _iterator.next()).done); _iteratorNormalCompletion = true) {
-                var nextState = _step.value;
-                if (nextState.matches("", visited)) {
-                  return true;
-                }
-              }
-            } catch (err) {
-              _didIteratorError = true;
-              _iteratorError = err;
-            } finally {
-              try {
-                if (!_iteratorNormalCompletion && _iterator.return) {
-                  _iterator.return();
-                }
-              } finally {
-                if (_didIteratorError) {
-                  throw _iteratorError;
-                }
-              }
-            }
-            return false;
-          }
-          var symbol = string3[0];
-          var rest = string3.slice(1);
-          var symbolTransitions = this.getTransitionsOnSymbol(symbol);
-          var _iteratorNormalCompletion2 = true;
-          var _didIteratorError2 = false;
-          var _iteratorError2 = void 0;
-          try {
-            for (var _iterator2 = symbolTransitions[Symbol.iterator](), _step2; !(_iteratorNormalCompletion2 = (_step2 = _iterator2.next()).done); _iteratorNormalCompletion2 = true) {
-              var _nextState = _step2.value;
-              if (_nextState.matches(rest)) {
-                return true;
-              }
-            }
-          } catch (err) {
-            _didIteratorError2 = true;
-            _iteratorError2 = err;
-          } finally {
-            try {
-              if (!_iteratorNormalCompletion2 && _iterator2.return) {
-                _iterator2.return();
-              }
-            } finally {
-              if (_didIteratorError2) {
-                throw _iteratorError2;
-              }
-            }
-          }
-          var _iteratorNormalCompletion3 = true;
-          var _didIteratorError3 = false;
-          var _iteratorError3 = void 0;
-          try {
-            for (var _iterator3 = this.getTransitionsOnSymbol(EPSILON)[Symbol.iterator](), _step3; !(_iteratorNormalCompletion3 = (_step3 = _iterator3.next()).done); _iteratorNormalCompletion3 = true) {
-              var _nextState2 = _step3.value;
-              if (_nextState2.matches(string3, visited)) {
-                return true;
-              }
-            }
-          } catch (err) {
-            _didIteratorError3 = true;
-            _iteratorError3 = err;
-          } finally {
-            try {
-              if (!_iteratorNormalCompletion3 && _iterator3.return) {
-                _iterator3.return();
-              }
-            } finally {
-              if (_didIteratorError3) {
-                throw _iteratorError3;
-              }
-            }
-          }
-          return false;
-        }
-        /**
-         * Returns an ε-closure for this state:
-         * self + all states following ε-transitions.
-         */
-      }, {
-        key: "getEpsilonClosure",
-        value: function getEpsilonClosure() {
-          var _this2 = this;
-          if (!this._epsilonClosure) {
-            (function() {
-              var epsilonTransitions = _this2.getTransitionsOnSymbol(EPSILON);
-              var closure = _this2._epsilonClosure = /* @__PURE__ */ new Set();
-              closure.add(_this2);
-              var _iteratorNormalCompletion4 = true;
-              var _didIteratorError4 = false;
-              var _iteratorError4 = void 0;
-              try {
-                for (var _iterator4 = epsilonTransitions[Symbol.iterator](), _step4; !(_iteratorNormalCompletion4 = (_step4 = _iterator4.next()).done); _iteratorNormalCompletion4 = true) {
-                  var nextState = _step4.value;
-                  if (!closure.has(nextState)) {
-                    closure.add(nextState);
-                    var nextClosure = nextState.getEpsilonClosure();
-                    nextClosure.forEach(function(state) {
-                      return closure.add(state);
-                    });
-                  }
-                }
-              } catch (err) {
-                _didIteratorError4 = true;
-                _iteratorError4 = err;
-              } finally {
-                try {
-                  if (!_iteratorNormalCompletion4 && _iterator4.return) {
-                    _iterator4.return();
-                  }
-                } finally {
-                  if (_didIteratorError4) {
-                    throw _iteratorError4;
-                  }
-                }
-              }
-            })();
-          }
-          return this._epsilonClosure;
-        }
-      }]);
-      return NFAState2;
-    })(State);
-    module2.exports = NFAState;
-  }
-});
-
-// node_modules/regexp-tree/dist/interpreter/finite-automaton/nfa/builders.js
-var require_builders = __commonJS({
-  "node_modules/regexp-tree/dist/interpreter/finite-automaton/nfa/builders.js"(exports2, module2) {
-    "use strict";
-    var NFA = require_nfa();
-    var NFAState = require_nfa_state();
-    var _require = require_special_symbols();
-    var EPSILON = _require.EPSILON;
-    function char(c) {
-      var inState = new NFAState();
-      var outState = new NFAState({
-        accepting: true
-      });
-      return new NFA(inState.addTransition(c, outState), outState);
-    }
-    function e() {
-      return char(EPSILON);
-    }
-    function altPair(first, second) {
-      first.out.accepting = false;
-      second.out.accepting = true;
-      first.out.addTransition(EPSILON, second.in);
-      return new NFA(first.in, second.out);
-    }
-    function alt(first) {
-      for (var _len = arguments.length, fragments = Array(_len > 1 ? _len - 1 : 0), _key = 1; _key < _len; _key++) {
-        fragments[_key - 1] = arguments[_key];
-      }
-      var _iteratorNormalCompletion = true;
-      var _didIteratorError = false;
-      var _iteratorError = void 0;
-      try {
-        for (var _iterator = fragments[Symbol.iterator](), _step; !(_iteratorNormalCompletion = (_step = _iterator.next()).done); _iteratorNormalCompletion = true) {
-          var fragment = _step.value;
-          first = altPair(first, fragment);
-        }
-      } catch (err) {
-        _didIteratorError = true;
-        _iteratorError = err;
-      } finally {
-        try {
-          if (!_iteratorNormalCompletion && _iterator.return) {
-            _iterator.return();
-          }
-        } finally {
-          if (_didIteratorError) {
-            throw _iteratorError;
-          }
-        }
-      }
-      return first;
-    }
-    function orPair(first, second) {
-      var inState = new NFAState();
-      var outState = new NFAState();
-      inState.addTransition(EPSILON, first.in);
-      inState.addTransition(EPSILON, second.in);
-      outState.accepting = true;
-      first.out.accepting = false;
-      second.out.accepting = false;
-      first.out.addTransition(EPSILON, outState);
-      second.out.addTransition(EPSILON, outState);
-      return new NFA(inState, outState);
-    }
-    function or(first) {
-      for (var _len2 = arguments.length, fragments = Array(_len2 > 1 ? _len2 - 1 : 0), _key2 = 1; _key2 < _len2; _key2++) {
-        fragments[_key2 - 1] = arguments[_key2];
-      }
-      var _iteratorNormalCompletion2 = true;
-      var _didIteratorError2 = false;
-      var _iteratorError2 = void 0;
-      try {
-        for (var _iterator2 = fragments[Symbol.iterator](), _step2; !(_iteratorNormalCompletion2 = (_step2 = _iterator2.next()).done); _iteratorNormalCompletion2 = true) {
-          var fragment = _step2.value;
-          first = orPair(first, fragment);
-        }
-      } catch (err) {
-        _didIteratorError2 = true;
-        _iteratorError2 = err;
-      } finally {
-        try {
-          if (!_iteratorNormalCompletion2 && _iterator2.return) {
-            _iterator2.return();
-          }
-        } finally {
-          if (_didIteratorError2) {
-            throw _iteratorError2;
-          }
-        }
-      }
-      return first;
-    }
-    function repExplicit(fragment) {
-      var inState = new NFAState();
-      var outState = new NFAState({
-        accepting: true
-      });
-      inState.addTransition(EPSILON, fragment.in);
-      inState.addTransition(EPSILON, outState);
-      fragment.out.accepting = false;
-      fragment.out.addTransition(EPSILON, outState);
-      outState.addTransition(EPSILON, fragment.in);
-      return new NFA(inState, outState);
-    }
-    function rep(fragment) {
-      fragment.in.addTransition(EPSILON, fragment.out);
-      fragment.out.addTransition(EPSILON, fragment.in);
-      return fragment;
-    }
-    function plusRep(fragment) {
-      fragment.out.addTransition(EPSILON, fragment.in);
-      return fragment;
-    }
-    function questionRep(fragment) {
-      fragment.in.addTransition(EPSILON, fragment.out);
-      return fragment;
-    }
-    module2.exports = {
-      alt,
-      char,
-      e,
-      or,
-      rep,
-      repExplicit,
-      plusRep,
-      questionRep
-    };
-  }
-});
-
-// node_modules/regexp-tree/dist/interpreter/finite-automaton/nfa/nfa-from-regexp.js
-var require_nfa_from_regexp = __commonJS({
-  "node_modules/regexp-tree/dist/interpreter/finite-automaton/nfa/nfa-from-regexp.js"(exports2, module2) {
-    "use strict";
-    function _toConsumableArray(arr) {
-      if (Array.isArray(arr)) {
-        for (var i = 0, arr2 = Array(arr.length); i < arr.length; i++) {
-          arr2[i] = arr[i];
-        }
-        return arr2;
-      } else {
-        return Array.from(arr);
-      }
-    }
-    var parser = require_parser();
-    var _require = require_builders();
-    var alt = _require.alt;
-    var char = _require.char;
-    var or = _require.or;
-    var rep = _require.rep;
-    var plusRep = _require.plusRep;
-    var questionRep = _require.questionRep;
-    function gen(node) {
-      if (node && !generator[node.type]) {
-        throw new Error(node.type + " is not supported in NFA/DFA interpreter.");
-      }
-      return node ? generator[node.type](node) : "";
-    }
-    var generator = {
-      RegExp: function RegExp2(node) {
-        if (node.flags !== "") {
-          throw new Error("NFA/DFA: Flags are not supported yet.");
-        }
-        return gen(node.body);
-      },
-      Alternative: function Alternative(node) {
-        var fragments = (node.expressions || []).map(gen);
-        return alt.apply(void 0, _toConsumableArray(fragments));
-      },
-      Disjunction: function Disjunction(node) {
-        return or(gen(node.left), gen(node.right));
-      },
-      Repetition: function Repetition(node) {
-        switch (node.quantifier.kind) {
-          case "*":
-            return rep(gen(node.expression));
-          case "+":
-            return plusRep(gen(node.expression));
-          case "?":
-            return questionRep(gen(node.expression));
-          default:
-            throw new Error("Unknown repeatition: " + node.quantifier.kind + ".");
-        }
-      },
-      Char: function Char(node) {
-        if (node.kind !== "simple") {
-          throw new Error("NFA/DFA: Only simple chars are supported yet.");
-        }
-        return char(node.value);
-      },
-      Group: function Group(node) {
-        return gen(node.expression);
-      }
-    };
-    module2.exports = {
-      /**
-       * Builds an NFA from the passed regexp.
-       */
-      build: function build(regexp) {
-        var ast = regexp;
-        if (regexp instanceof RegExp) {
-          regexp = "" + regexp;
-        }
-        if (typeof regexp === "string") {
-          ast = parser.parse(regexp, {
-            captureLocations: true
-          });
-        }
-        return gen(ast);
-      }
-    };
-  }
-});
-
-// node_modules/regexp-tree/dist/interpreter/finite-automaton/index.js
-var require_finite_automaton = __commonJS({
-  "node_modules/regexp-tree/dist/interpreter/finite-automaton/index.js"(exports2, module2) {
-    "use strict";
-    var NFA = require_nfa();
-    var DFA = require_dfa();
-    var nfaFromRegExp = require_nfa_from_regexp();
-    var builders = require_builders();
-    module2.exports = {
-      /**
-       * Export NFA and DFA classes.
-       */
-      NFA,
-      DFA,
-      /**
-       * Expose builders.
-       */
-      builders,
-      /**
-       * Builds an NFA for the passed regexp.
-       *
-       * @param string | AST | RegExp:
-       *
-       *   a regular expression in different representations: a string,
-       *   a RegExp object, or an AST.
-       */
-      toNFA: function toNFA(regexp) {
-        return nfaFromRegExp.build(regexp);
-      },
-      /**
-       * Builds DFA for the passed regexp.
-       *
-       * @param string | AST | RegExp:
-       *
-       *   a regular expression in different representations: a string,
-       *   a RegExp object, or an AST.
-       */
-      toDFA: function toDFA(regexp) {
-        return new DFA(this.toNFA(regexp));
-      },
-      /**
-       * Returns true if regexp accepts the string.
-       */
-      test: function test(regexp, string3) {
-        return this.toDFA(regexp).matches(string3);
-      }
-    };
-  }
-});
-
-// node_modules/regexp-tree/dist/compat-transpiler/runtime/index.js
-var require_runtime = __commonJS({
-  "node_modules/regexp-tree/dist/compat-transpiler/runtime/index.js"(exports2, module2) {
-    "use strict";
-    var _createClass = /* @__PURE__ */ (function() {
-      function defineProperties(target, props) {
-        for (var i = 0; i < props.length; i++) {
-          var descriptor = props[i];
-          descriptor.enumerable = descriptor.enumerable || false;
-          descriptor.configurable = true;
-          if ("value" in descriptor) descriptor.writable = true;
-          Object.defineProperty(target, descriptor.key, descriptor);
-        }
-      }
-      return function(Constructor, protoProps, staticProps) {
-        if (protoProps) defineProperties(Constructor.prototype, protoProps);
-        if (staticProps) defineProperties(Constructor, staticProps);
-        return Constructor;
-      };
-    })();
-    function _classCallCheck(instance, Constructor) {
-      if (!(instance instanceof Constructor)) {
-        throw new TypeError("Cannot call a class as a function");
-      }
-    }
-    var RegExpTree = (function() {
-      function RegExpTree2(re, _ref) {
-        var flags = _ref.flags, groups = _ref.groups, source = _ref.source;
-        _classCallCheck(this, RegExpTree2);
-        this._re = re;
-        this._groups = groups;
-        this.flags = flags;
-        this.source = source || re.source;
-        this.dotAll = flags.includes("s");
-        this.global = re.global;
-        this.ignoreCase = re.ignoreCase;
-        this.multiline = re.multiline;
-        this.sticky = re.sticky;
-        this.unicode = re.unicode;
-      }
-      _createClass(RegExpTree2, [{
-        key: "test",
-        value: function test(string3) {
-          return this._re.test(string3);
-        }
-        /**
-         * Facade wrapper for RegExp `compile` method.
-         */
-      }, {
-        key: "compile",
-        value: function compile(string3) {
-          return this._re.compile(string3);
-        }
-        /**
-         * Facade wrapper for RegExp `toString` method.
-         */
-      }, {
-        key: "toString",
-        value: function toString() {
-          if (!this._toStringResult) {
-            this._toStringResult = "/" + this.source + "/" + this.flags;
-          }
-          return this._toStringResult;
-        }
-        /**
-         * Facade wrapper for RegExp `exec` method.
-         */
-      }, {
-        key: "exec",
-        value: function exec4(string3) {
-          var result = this._re.exec(string3);
-          if (!this._groups || !result) {
-            return result;
-          }
-          result.groups = {};
-          for (var group in this._groups) {
-            var groupNumber = this._groups[group];
-            result.groups[group] = result[groupNumber];
-          }
-          return result;
-        }
-      }]);
-      return RegExpTree2;
-    })();
-    module2.exports = {
-      RegExpTree
-    };
-  }
-});
-
-// node_modules/regexp-tree/dist/regexp-tree.js
-var require_regexp_tree2 = __commonJS({
-  "node_modules/regexp-tree/dist/regexp-tree.js"(exports2, module2) {
-    "use strict";
-    var compatTranspiler = require_compat_transpiler();
-    var generator = require_generator();
-    var optimizer = require_optimizer();
-    var parser = require_parser();
-    var _transform = require_transform();
-    var _traverse = require_traverse();
-    var fa = require_finite_automaton();
-    var _require = require_runtime();
-    var RegExpTree = _require.RegExpTree;
-    var regexpTree2 = {
-      /**
-       * Parser module exposed.
-       */
-      parser,
-      /**
-       * Expose finite-automaton module.
-       */
-      fa,
-      /**
-       * `TransformResult` exposed.
-       */
-      TransformResult: _transform.TransformResult,
-      /**
-       * Parses a regexp string, producing an AST.
-       *
-       * @param string regexp
-       *
-       *   a regular expression in different formats: string, AST, RegExp.
-       *
-       * @param Object options
-       *
-       *   parsing options for this parse call. Default are:
-       *
-       *     - captureLocations: boolean
-       *     - any other custom options
-       *
-       * @return Object AST
-       */
-      parse: function parse12(regexp, options) {
-        return parser.parse("" + regexp, options);
-      },
-      /**
-       * Traverses a RegExp AST.
-       *
-       * @param Object ast
-       * @param Object | Array<Object> handlers
-       *
-       * Each `handler` is an object containing handler function for needed
-       * node types. Example:
-       *
-       *   regexpTree.traverse(ast, {
-       *     onChar(node) {
-       *       ...
-       *     },
-       *   });
-       *
-       * The value for a node type may also be an object with functions pre and post.
-       * This enables more context-aware analyses, e.g. measuring star height.
-       */
-      traverse: function traverse(ast, handlers, options) {
-        return _traverse.traverse(ast, handlers, options);
-      },
-      /**
-       * Transforms a regular expression.
-       *
-       * A regexp can be passed in different formats (string, regexp or AST),
-       * applying a set of transformations. It is a convenient wrapper
-       * on top of "parse-traverse-generate" tool chain.
-       *
-       * @param string | AST | RegExp regexp - a regular expression;
-       * @param Object | Array<Object> handlers - a list of handlers.
-       *
-       * @return TransformResult - a transformation result.
-       */
-      transform: function transform2(regexp, handlers) {
-        return _transform.transform(regexp, handlers);
-      },
-      /**
-       * Generates a RegExp string from an AST.
-       *
-       * @param Object ast
-       *
-       * Invariant:
-       *
-       *   regexpTree.generate(regexpTree.parse('/[a-z]+/i')); // '/[a-z]+/i'
-       */
-      generate: function generate(ast) {
-        return generator.generate(ast);
-      },
-      /**
-       * Creates a RegExp object from a regexp string.
-       *
-       * @param string regexp
-       */
-      toRegExp: function toRegExp(regexp) {
-        var compat = this.compatTranspile(regexp);
-        return new RegExp(compat.getSource(), compat.getFlags());
-      },
-      /**
-       * Optimizes a regular expression by replacing some
-       * sub-expressions with their idiomatic patterns.
-       *
-       * @param string regexp
-       *
-       * @return TransformResult object
-       */
-      optimize: function optimize(regexp, whitelist) {
-        var _ref = arguments.length > 2 && arguments[2] !== void 0 ? arguments[2] : {}, blacklist = _ref.blacklist;
-        return optimizer.optimize(regexp, { whitelist, blacklist });
-      },
-      /**
-       * Translates a regular expression in new syntax or in new format
-       * into equivalent expressions in old syntax.
-       *
-       * @param string regexp
-       *
-       * @return TransformResult object
-       */
-      compatTranspile: function compatTranspile(regexp, whitelist) {
-        return compatTranspiler.transform(regexp, whitelist);
-      },
-      /**
-       * Executes a regular expression on a string.
-       *
-       * @param RegExp|string re - a regular expression.
-       * @param string string - a testing string.
-       */
-      exec: function exec4(re, string3) {
-        if (typeof re === "string") {
-          var compat = this.compatTranspile(re);
-          var extra = compat.getExtra();
-          if (extra.namedCapturingGroups) {
-            re = new RegExpTree(compat.toRegExp(), {
-              flags: compat.getFlags(),
-              source: compat.getSource(),
-              groups: extra.namedCapturingGroups
-            });
-          } else {
-            re = compat.toRegExp();
-          }
-        }
-        return re.exec(string3);
-      }
-    };
-    module2.exports = regexpTree2;
-  }
-});
-
-// node_modules/regexp-tree/index.js
-var require_regexp_tree3 = __commonJS({
-  "node_modules/regexp-tree/index.js"(exports2, module2) {
-    "use strict";
-    module2.exports = require_regexp_tree2();
-  }
-});
-
 // node_modules/safe-regex/lib/heuristic-analyzer.js
 var require_heuristic_analyzer = __commonJS({
   "node_modules/safe-regex/lib/heuristic-analyzer.js"(exports2, module2) {
-    var regexpTree2 = require_regexp_tree3();
+    var regexpTree2 = require("regexp-tree");
     var analyzer = require_analyzer();
     var HeuristicAnalyzer = class extends analyzer.Analyzer {
       constructor(analyzerOptions) {
@@ -93339,15 +88058,15 @@ function stateRoot(cwd2, teamName) {
 }
 async function readJsonSafe5(filePath) {
   try {
-    return JSON.parse(await (0, import_promises27.readFile)(filePath, "utf-8"));
+    return JSON.parse(await (0, import_promises26.readFile)(filePath, "utf-8"));
   } catch {
     return null;
   }
 }
 function taskPath(root2, taskId) {
-  return (0, import_path143.join)(root2, "tasks", `${normalizeTaskFileStem(taskId)}.json`);
+  return (0, import_path135.join)(root2, "tasks", `${normalizeTaskFileStem(taskId)}.json`);
 }
-async function readTask2(root2, taskId) {
+async function readTask(root2, taskId) {
   return readJsonSafe5(taskPath(root2, taskId));
 }
 async function startTeam(_config) {
@@ -93363,9 +88082,9 @@ async function monitorTeam(teamName, cwd2, workerPaneIds) {
   const taskCounts = { pending: 0, inProgress: 0, completed: 0, failed: 0 };
   try {
     const { readdir: readdir10 } = await import("fs/promises");
-    const taskFiles = await readdir10((0, import_path143.join)(root2, "tasks"));
+    const taskFiles = await readdir10((0, import_path135.join)(root2, "tasks"));
     for (const f of taskFiles.filter((f2) => f2.endsWith(".json"))) {
-      const task = await readJsonSafe5((0, import_path143.join)(root2, "tasks", f));
+      const task = await readJsonSafe5((0, import_path135.join)(root2, "tasks", f));
       if (task?.status === "pending") taskCounts.pending++;
       else if (task?.status === "in_progress") taskCounts.inProgress++;
       else if (task?.status === "completed") taskCounts.completed++;
@@ -93381,7 +88100,7 @@ async function monitorTeam(teamName, cwd2, workerPaneIds) {
     const wName = `worker-${i + 1}`;
     const paneId = workerPaneIds[i];
     const alive = await isWorkerAlive(paneId);
-    const heartbeatPath = (0, import_path143.join)(root2, "workers", wName, "heartbeat.json");
+    const heartbeatPath = (0, import_path135.join)(root2, "workers", wName, "heartbeat.json");
     const heartbeat = await readJsonSafe5(heartbeatPath);
     let stalled = false;
     if (heartbeat?.updatedAt) {
@@ -93437,7 +88156,7 @@ async function shutdownTeam(teamName, sessionName2, cwd2, timeoutMs = 3e4, worke
 }
 async function resumeTeam(teamName, cwd2) {
   const root2 = stateRoot(cwd2, teamName);
-  const configData = await readJsonSafe5((0, import_path143.join)(root2, "config.json"));
+  const configData = await readJsonSafe5((0, import_path135.join)(root2, "config.json"));
   if (!configData || !isValidTeamInstanceId(configData.instance_id)) return null;
   const sName = configData.tmuxSession;
   const leaderPaneId = configData.leaderPaneId;
@@ -93497,7 +88216,7 @@ async function resumeTeam(teamName, cwd2) {
   const activeWorkers = /* @__PURE__ */ new Map();
   for (let i = 0; i < configData.tasks.length; i++) {
     const taskId = String(i + 1);
-    const task = await readTask2(root2, taskId);
+    const task = await readTask(root2, taskId);
     if (task?.status === "in_progress" && task.owner) {
       const paneId = paneByWorker.get(task.owner) ?? "";
       if (!paneId || !workerPaneOwnership.has(paneId)) return null;
@@ -93524,12 +88243,12 @@ async function resumeTeam(teamName, cwd2) {
     ownsWindow: Boolean(configData.tmuxOwnsWindow)
   };
 }
-var import_promises27, import_path143;
+var import_promises26, import_path135;
 var init_runtime = __esm({
   "src/team/runtime.ts"() {
     "use strict";
-    import_promises27 = require("fs/promises");
-    import_path143 = require("path");
+    import_promises26 = require("fs/promises");
+    import_path135 = require("path");
     init_tmux_utils();
     init_team_name();
     init_tmux_session();
@@ -93642,33 +88361,33 @@ function isKimiHost(urlString) {
   }
 }
 function getLegacyCachePath() {
-  return (0, import_path148.join)(getClaudeConfigDir(), "plugins", "oh-my-claudecode", ".usage-cache.json");
+  return (0, import_path140.join)(getClaudeConfigDir(), "plugins", "oh-my-claudecode", ".usage-cache.json");
 }
 function getCachePath(source) {
-  return (0, import_path148.join)(getClaudeConfigDir(), "plugins", "oh-my-claudecode", `.usage-cache-${source}.json`);
+  return (0, import_path140.join)(getClaudeConfigDir(), "plugins", "oh-my-claudecode", `.usage-cache-${source}.json`);
 }
 function migrateLegacyCache(source) {
   try {
     const legacyPath = getLegacyCachePath();
-    if (!(0, import_fs123.existsSync)(legacyPath)) return;
-    if ((0, import_fs123.existsSync)(getCachePath(source))) return;
-    const content = (0, import_fs123.readFileSync)(legacyPath, "utf-8");
+    if (!(0, import_fs116.existsSync)(legacyPath)) return;
+    if ((0, import_fs116.existsSync)(getCachePath(source))) return;
+    const content = (0, import_fs116.readFileSync)(legacyPath, "utf-8");
     const cache = JSON.parse(content);
     if (cache.source !== source) return;
     const newPath = getCachePath(source);
-    const cacheDir = (0, import_path148.dirname)(newPath);
-    if (!(0, import_fs123.existsSync)(cacheDir)) {
-      (0, import_fs123.mkdirSync)(cacheDir, { recursive: true });
+    const cacheDir = (0, import_path140.dirname)(newPath);
+    if (!(0, import_fs116.existsSync)(cacheDir)) {
+      (0, import_fs116.mkdirSync)(cacheDir, { recursive: true });
     }
-    (0, import_fs123.writeFileSync)(newPath, content);
+    (0, import_fs116.writeFileSync)(newPath, content);
   } catch {
   }
 }
 function readCache(source) {
   try {
     const cachePath = getCachePath(source);
-    if (!(0, import_fs123.existsSync)(cachePath)) return null;
-    const content = (0, import_fs123.readFileSync)(cachePath, "utf-8");
+    if (!(0, import_fs116.existsSync)(cachePath)) return null;
+    const content = (0, import_fs116.readFileSync)(cachePath, "utf-8");
     const cache = JSON.parse(content);
     if (cache.data) {
       if (cache.data.fiveHourResetsAt) {
@@ -93706,9 +88425,9 @@ function readCache(source) {
 function writeCache(opts) {
   try {
     const cachePath = getCachePath(opts.source);
-    const cacheDir = (0, import_path148.dirname)(cachePath);
-    if (!(0, import_fs123.existsSync)(cacheDir)) {
-      (0, import_fs123.mkdirSync)(cacheDir, { recursive: true });
+    const cacheDir = (0, import_path140.dirname)(cachePath);
+    if (!(0, import_fs116.existsSync)(cacheDir)) {
+      (0, import_fs116.mkdirSync)(cacheDir, { recursive: true });
     }
     const cache = {
       timestamp: Date.now(),
@@ -93724,7 +88443,7 @@ function writeCache(opts) {
       credentialIdentity: opts.credentialIdentity,
       rateLimitBackoffs: opts.rateLimitBackoffs
     };
-    (0, import_fs123.writeFileSync)(cachePath, JSON.stringify(cache, null, 2));
+    (0, import_fs116.writeFileSync)(cachePath, JSON.stringify(cache, null, 2));
   } catch {
   }
 }
@@ -93820,14 +88539,14 @@ function getOAuthAccountProfileIdentity(credentials) {
   let claudeJsonAccount = {};
   const configDir = getClaudeConfigDir();
   const claudeJsonPaths = /* @__PURE__ */ new Set([
-    (0, import_path148.join)(configDir, ".claude.json"),
-    (0, import_path148.join)((0, import_path148.dirname)(configDir), ".claude.json")
+    (0, import_path140.join)(configDir, ".claude.json"),
+    (0, import_path140.join)((0, import_path140.dirname)(configDir), ".claude.json")
   ]);
   for (const claudeJsonPath of claudeJsonPaths) {
     let parsed;
     try {
-      if (!(0, import_fs123.existsSync)(claudeJsonPath)) continue;
-      parsed = JSON.parse((0, import_fs123.readFileSync)(claudeJsonPath, "utf-8"));
+      if (!(0, import_fs116.existsSync)(claudeJsonPath)) continue;
+      parsed = JSON.parse((0, import_fs116.readFileSync)(claudeJsonPath, "utf-8"));
     } catch {
       return null;
     }
@@ -94004,7 +88723,7 @@ ${String(details.stderr ?? "")}`
 function readKeychainCredential(serviceName, account) {
   try {
     const args = account ? ["find-generic-password", "-s", serviceName, "-a", account, "-w"] : ["find-generic-password", "-s", serviceName, "-w"];
-    const result = (0, import_child_process38.execFileSync)("/usr/bin/security", args, {
+    const result = (0, import_child_process37.execFileSync)("/usr/bin/security", args, {
       encoding: "utf-8",
       timeout: 2e3,
       stdio: ["pipe", "pipe", "pipe"]
@@ -94063,9 +88782,9 @@ function readKeychainCredentials() {
 }
 function readFileCredentials() {
   try {
-    const credPath = (0, import_path148.join)(getClaudeConfigDir(), ".credentials.json");
-    if (!(0, import_fs123.existsSync)(credPath)) return null;
-    const content = (0, import_fs123.readFileSync)(credPath, "utf-8");
+    const credPath = (0, import_path140.join)(getClaudeConfigDir(), ".credentials.json");
+    if (!(0, import_fs116.existsSync)(credPath)) return null;
+    const content = (0, import_fs116.readFileSync)(credPath, "utf-8");
     const parsed = JSON.parse(content);
     const creds = parsed.claudeAiOauth || parsed;
     if (creds.accessToken) {
@@ -94166,7 +88885,7 @@ function validateCredentials(creds) {
   return !isCredentialExpired(creds);
 }
 function refreshAccessToken(refreshToken) {
-  return new Promise((resolve48) => {
+  return new Promise((resolve49) => {
     const clientId = process.env.CLAUDE_CODE_OAUTH_CLIENT_ID || DEFAULT_OAUTH_CLIENT_ID;
     const body = new URLSearchParams({
       grant_type: "refresh_token",
@@ -94194,7 +88913,7 @@ function refreshAccessToken(refreshToken) {
             try {
               const parsed = JSON.parse(data);
               if (parsed.access_token) {
-                resolve48({
+                resolve49({
                   accessToken: parsed.access_token,
                   refreshToken: parsed.refresh_token || refreshToken,
                   expiresAt: parsed.expires_in ? Date.now() + parsed.expires_in * 1e3 : parsed.expires_at
@@ -94207,14 +88926,14 @@ function refreshAccessToken(refreshToken) {
           if (process.env.OMC_DEBUG) {
             console.error(`[usage-api] Token refresh failed: HTTP ${res.statusCode}`);
           }
-          resolve48(null);
+          resolve49(null);
         });
       }
     );
-    req.on("error", () => resolve48(null));
+    req.on("error", () => resolve49(null));
     req.on("timeout", () => {
       req.destroy();
-      resolve48(null);
+      resolve49(null);
     });
     req.end(body);
   });
@@ -94227,7 +88946,7 @@ function buildUserAgent(clientVersion) {
 }
 function fetchUsageFromApi(accessToken, clientVersion) {
   const userAgent = buildUserAgent(clientVersion);
-  return new Promise((resolve48) => {
+  return new Promise((resolve49) => {
     const req = import_https3.default.request(
       {
         hostname: "api.anthropic.com",
@@ -94249,27 +88968,27 @@ function fetchUsageFromApi(accessToken, clientVersion) {
         res.on("end", () => {
           if (res.statusCode === 200) {
             try {
-              resolve48({ data: JSON.parse(data) });
+              resolve49({ data: JSON.parse(data) });
             } catch {
-              resolve48({ data: null });
+              resolve49({ data: null });
             }
           } else if (res.statusCode === 429) {
             if (process.env.OMC_DEBUG) {
               console.error(`[usage-api] Anthropic API returned 429 (rate limited)`);
             }
-            resolve48({ data: null, rateLimited: true });
+            resolve49({ data: null, rateLimited: true });
           } else if (res.statusCode === 403) {
-            fetchUsageViaRateLimitHeaders(accessToken, clientVersion).then(resolve48);
+            fetchUsageViaRateLimitHeaders(accessToken, clientVersion).then(resolve49);
           } else {
-            resolve48({ data: null });
+            resolve49({ data: null });
           }
         });
       }
     );
-    req.on("error", () => resolve48({ data: null }));
+    req.on("error", () => resolve49({ data: null }));
     req.on("timeout", () => {
       req.destroy();
-      resolve48({ data: null });
+      resolve49({ data: null });
     });
     req.end();
   });
@@ -94312,7 +89031,7 @@ function fetchUsageViaRateLimitHeaders(accessToken, clientVersion) {
     max_tokens: 1,
     messages: [{ role: "user", content: "." }]
   });
-  return new Promise((resolve48) => {
+  return new Promise((resolve49) => {
     const req = import_https3.default.request(
       {
         hostname: "api.anthropic.com",
@@ -94333,34 +89052,34 @@ function fetchUsageViaRateLimitHeaders(accessToken, clientVersion) {
         });
         res.on("end", () => {
           if (res.statusCode === 200) {
-            resolve48({ data: rateLimitHeadersToUsage(res.headers) });
+            resolve49({ data: rateLimitHeadersToUsage(res.headers) });
           } else {
-            resolve48({ data: null, rateLimited: res.statusCode === 429 });
+            resolve49({ data: null, rateLimited: res.statusCode === 429 });
           }
         });
       }
     );
-    req.on("error", () => resolve48({ data: null }));
+    req.on("error", () => resolve49({ data: null }));
     req.on("timeout", () => {
       req.destroy();
-      resolve48({ data: null });
+      resolve49({ data: null });
     });
     req.write(body);
     req.end();
   });
 }
 function fetchUsageFromZai() {
-  return new Promise((resolve48) => {
+  return new Promise((resolve49) => {
     const baseUrl = process.env.ANTHROPIC_BASE_URL;
     const authToken = process.env.ANTHROPIC_AUTH_TOKEN;
     if (!baseUrl || !authToken) {
-      resolve48({ data: null });
+      resolve49({ data: null });
       return;
     }
     const validation = validateAnthropicBaseUrl(baseUrl);
     if (!validation.allowed) {
       console.error(`[SSRF Guard] Blocking usage API call: ${validation.reason}`);
-      resolve48({ data: null });
+      resolve49({ data: null });
       return;
     }
     try {
@@ -94388,29 +89107,29 @@ function fetchUsageFromZai() {
           res.on("end", () => {
             if (res.statusCode === 200) {
               try {
-                resolve48({ data: JSON.parse(data) });
+                resolve49({ data: JSON.parse(data) });
               } catch {
-                resolve48({ data: null });
+                resolve49({ data: null });
               }
             } else if (res.statusCode === 429) {
               if (process.env.OMC_DEBUG) {
                 console.error(`[usage-api] z.ai API returned 429 (rate limited)`);
               }
-              resolve48({ data: null, rateLimited: true });
+              resolve49({ data: null, rateLimited: true });
             } else {
-              resolve48({ data: null });
+              resolve49({ data: null });
             }
           });
         }
       );
-      req.on("error", () => resolve48({ data: null }));
+      req.on("error", () => resolve49({ data: null }));
       req.on("timeout", () => {
         req.destroy();
-        resolve48({ data: null });
+        resolve49({ data: null });
       });
       req.end();
     } catch {
-      resolve48({ data: null });
+      resolve49({ data: null });
     }
   });
 }
@@ -94422,7 +89141,7 @@ function writeKeychainCredentials(creds) {
     const readArgs = account ? ["find-generic-password", "-s", serviceName, "-a", account, "-w"] : ["find-generic-password", "-s", serviceName, "-w"];
     let existing = {};
     try {
-      const raw = (0, import_child_process38.execFileSync)("/usr/bin/security", readArgs, {
+      const raw = (0, import_child_process37.execFileSync)("/usr/bin/security", readArgs, {
         encoding: "utf-8",
         timeout: 2e3,
         stdio: ["pipe", "pipe", "pipe"]
@@ -94438,7 +89157,7 @@ function writeKeychainCredentials(creds) {
     }
     const newJson = JSON.stringify(existing);
     const writeArgs = account ? ["add-generic-password", "-s", serviceName, "-a", account, "-w", newJson, "-U"] : ["add-generic-password", "-s", serviceName, "-w", newJson, "-U"];
-    (0, import_child_process38.execFileSync)("/usr/bin/security", writeArgs, {
+    (0, import_child_process37.execFileSync)("/usr/bin/security", writeArgs, {
       encoding: "utf-8",
       timeout: 2e3,
       stdio: ["pipe", "pipe", "pipe"]
@@ -94467,9 +89186,9 @@ function writeBackCredentials(creds) {
   }
   if (creds.source === "env") return;
   try {
-    const credPath = (0, import_path148.join)(getClaudeConfigDir(), ".credentials.json");
-    if (!(0, import_fs123.existsSync)(credPath)) return;
-    const content = (0, import_fs123.readFileSync)(credPath, "utf-8");
+    const credPath = (0, import_path140.join)(getClaudeConfigDir(), ".credentials.json");
+    if (!(0, import_fs116.existsSync)(credPath)) return;
+    const content = (0, import_fs116.readFileSync)(credPath, "utf-8");
     const parsed = JSON.parse(content);
     if (parsed.claudeAiOauth) {
       updateStoredOAuthCredentialFields(parsed.claudeAiOauth, creds);
@@ -94478,12 +89197,12 @@ function writeBackCredentials(creds) {
     }
     const tmpPath = `${credPath}.tmp.${process.pid}`;
     try {
-      (0, import_fs123.writeFileSync)(tmpPath, JSON.stringify(parsed, null, 2), { mode: 384 });
-      (0, import_fs123.renameSync)(tmpPath, credPath);
+      (0, import_fs116.writeFileSync)(tmpPath, JSON.stringify(parsed, null, 2), { mode: 384 });
+      (0, import_fs116.renameSync)(tmpPath, credPath);
     } catch (writeErr) {
       try {
-        if ((0, import_fs123.existsSync)(tmpPath)) {
-          (0, import_fs123.unlinkSync)(tmpPath);
+        if ((0, import_fs116.existsSync)(tmpPath)) {
+          (0, import_fs116.unlinkSync)(tmpPath);
         }
       } catch {
       }
@@ -94676,16 +89395,16 @@ function parseZaiResponse(response) {
   return result;
 }
 function fetchUsageFromMinimax(apiKey) {
-  return new Promise((resolve48) => {
+  return new Promise((resolve49) => {
     const baseUrl = process.env.ANTHROPIC_BASE_URL;
     if (!baseUrl) {
-      resolve48({ data: null });
+      resolve49({ data: null });
       return;
     }
     const validation = validateAnthropicBaseUrl(baseUrl);
     if (!validation.allowed) {
       console.error(`[SSRF Guard] Blocking usage API call: ${validation.reason}`);
-      resolve48({ data: null });
+      resolve49({ data: null });
       return;
     }
     try {
@@ -94712,29 +89431,29 @@ function fetchUsageFromMinimax(apiKey) {
           res.on("end", () => {
             if (res.statusCode === 200) {
               try {
-                resolve48({ data: JSON.parse(data) });
+                resolve49({ data: JSON.parse(data) });
               } catch {
-                resolve48({ data: null });
+                resolve49({ data: null });
               }
             } else if (res.statusCode === 429) {
               if (process.env.OMC_DEBUG) {
                 console.error(`[usage-api] MiniMax API returned 429 (rate limited)`);
               }
-              resolve48({ data: null, rateLimited: true });
+              resolve49({ data: null, rateLimited: true });
             } else {
-              resolve48({ data: null });
+              resolve49({ data: null });
             }
           });
         }
       );
-      req.on("error", () => resolve48({ data: null }));
+      req.on("error", () => resolve49({ data: null }));
       req.on("timeout", () => {
         req.destroy();
-        resolve48({ data: null });
+        resolve49({ data: null });
       });
       req.end();
     } catch {
-      resolve48({ data: null });
+      resolve49({ data: null });
     }
   });
 }
@@ -94774,16 +89493,16 @@ function parseMinimaxResponse(response) {
   };
 }
 function fetchUsageFromKimi(apiKey) {
-  return new Promise((resolve48) => {
+  return new Promise((resolve49) => {
     const baseUrl = process.env.ANTHROPIC_BASE_URL;
     if (!baseUrl) {
-      resolve48({ data: null });
+      resolve49({ data: null });
       return;
     }
     const validation = validateAnthropicBaseUrl(baseUrl);
     if (!validation.allowed) {
       console.error(`[SSRF Guard] Blocking usage API call: ${validation.reason}`);
-      resolve48({ data: null });
+      resolve49({ data: null });
       return;
     }
     try {
@@ -94794,7 +89513,7 @@ function fetchUsageFromKimi(apiKey) {
             `[usage-api] Refusing to send Kimi credentials to non-canonical host '${hostname4}'`
           );
         }
-        resolve48({ data: null });
+        resolve49({ data: null });
         return;
       }
       const req = import_https3.default.request(
@@ -94810,37 +89529,37 @@ function fetchUsageFromKimi(apiKey) {
         },
         (res) => {
           let data = "";
-          res.on("error", () => resolve48({ data: null }));
-          res.on("aborted", () => resolve48({ data: null }));
+          res.on("error", () => resolve49({ data: null }));
+          res.on("aborted", () => resolve49({ data: null }));
           res.on("data", (chunk) => {
             data += chunk;
           });
           res.on("end", () => {
             if (res.statusCode === 200) {
               try {
-                resolve48({ data: JSON.parse(data) });
+                resolve49({ data: JSON.parse(data) });
               } catch {
-                resolve48({ data: null });
+                resolve49({ data: null });
               }
             } else if (res.statusCode === 429) {
               if (process.env.OMC_DEBUG) {
                 console.error(`[usage-api] Kimi API returned 429 (rate limited)`);
               }
-              resolve48({ data: null, rateLimited: true });
+              resolve49({ data: null, rateLimited: true });
             } else {
-              resolve48({ data: null });
+              resolve49({ data: null });
             }
           });
         }
       );
-      req.on("error", () => resolve48({ data: null }));
+      req.on("error", () => resolve49({ data: null }));
       req.on("timeout", () => {
         req.destroy();
-        resolve48({ data: null });
+        resolve49({ data: null });
       });
       req.end();
     } catch {
-      resolve48({ data: null });
+      resolve49({ data: null });
     }
   });
 }
@@ -95177,14 +89896,14 @@ async function getUsage(opts) {
     return { rateLimits: null, error: "network" };
   }
 }
-var import_fs123, import_path148, import_child_process38, import_crypto38, import_os23, import_https3, CACHE_TTL_FAILURE_MS, CACHE_TTL_TRANSIENT_NETWORK_MS, MAX_RATE_LIMITED_BACKOFF_MS, API_TIMEOUT_MS2, MAX_STALE_DATA_MS, TOKEN_REFRESH_URL_HOSTNAME, USAGE_CACHE_LOCK_OPTS, TOKEN_REFRESH_URL_PATH, OMC_USAGE_PROFILE_ID_FIELD, OMC_USAGE_PROFILE_TOKEN_HASH_FIELD, DEFAULT_OAUTH_CLIENT_ID, storedCredentialCache, storedCredentialLookupGeneration, ZAI_UNIT_WEEK, KIMI_USAGE_HOSTNAMES, KIMI_USAGE_PATH, RATE_LIMIT_PROBE_MODEL, KIMI_FIVE_HOUR_WINDOW_MINUTES;
+var import_fs116, import_path140, import_child_process37, import_crypto38, import_os23, import_https3, CACHE_TTL_FAILURE_MS, CACHE_TTL_TRANSIENT_NETWORK_MS, MAX_RATE_LIMITED_BACKOFF_MS, API_TIMEOUT_MS2, MAX_STALE_DATA_MS, TOKEN_REFRESH_URL_HOSTNAME, USAGE_CACHE_LOCK_OPTS, TOKEN_REFRESH_URL_PATH, OMC_USAGE_PROFILE_ID_FIELD, OMC_USAGE_PROFILE_TOKEN_HASH_FIELD, DEFAULT_OAUTH_CLIENT_ID, storedCredentialCache, storedCredentialLookupGeneration, ZAI_UNIT_WEEK, KIMI_USAGE_HOSTNAMES, KIMI_USAGE_PATH, RATE_LIMIT_PROBE_MODEL, KIMI_FIVE_HOUR_WINDOW_MINUTES;
 var init_usage_api = __esm({
   "src/hud/usage-api.ts"() {
     "use strict";
-    import_fs123 = require("fs");
+    import_fs116 = require("fs");
     init_config_dir();
-    import_path148 = require("path");
-    import_child_process38 = require("child_process");
+    import_path140 = require("path");
+    import_child_process37 = require("child_process");
     import_crypto38 = require("crypto");
     import_os23 = require("os");
     import_https3 = __toESM(require("https"), 1);
@@ -95245,18 +89964,18 @@ function getStdinCachePaths(stdin, root2 = getWorktreeRoot() || process.cwd()) {
 function writeStdinCache(stdin) {
   try {
     const cachePath = getStdinCachePaths(stdin).effectiveWrite;
-    const cacheDir = (0, import_path149.dirname)(cachePath);
-    if (!(0, import_fs124.existsSync)(cacheDir)) {
-      (0, import_fs124.mkdirSync)(cacheDir, { recursive: true });
+    const cacheDir = (0, import_path141.dirname)(cachePath);
+    if (!(0, import_fs117.existsSync)(cacheDir)) {
+      (0, import_fs117.mkdirSync)(cacheDir, { recursive: true });
     }
     const newContent = JSON.stringify(stdin);
-    if ((0, import_fs124.existsSync)(cachePath)) {
+    if ((0, import_fs117.existsSync)(cachePath)) {
       try {
-        const existingContent = (0, import_fs124.readFileSync)(cachePath, "utf-8");
+        const existingContent = (0, import_fs117.readFileSync)(cachePath, "utf-8");
         if (existingContent === newContent) {
           const now = /* @__PURE__ */ new Date();
           try {
-            (0, import_fs124.utimesSync)(cachePath, now, now);
+            (0, import_fs117.utimesSync)(cachePath, now, now);
             return;
           } catch {
           }
@@ -95264,7 +89983,7 @@ function writeStdinCache(stdin) {
       } catch {
       }
     }
-    (0, import_fs124.writeFileSync)(cachePath, newContent);
+    (0, import_fs117.writeFileSync)(cachePath, newContent);
   } catch {
   }
 }
@@ -95273,8 +89992,8 @@ function readStdinCache() {
   const paths = getStdinCachePaths(void 0, root2);
   const tryRead = (p) => {
     try {
-      if (!(0, import_fs124.existsSync)(p)) return null;
-      return parseCachedStdin((0, import_fs124.readFileSync)(p, "utf-8"));
+      if (!(0, import_fs117.existsSync)(p)) return null;
+      return parseCachedStdin((0, import_fs117.readFileSync)(p, "utf-8"));
     } catch {
       return null;
     }
@@ -95298,7 +90017,7 @@ function readMostRecentCache(root2, legacyPath) {
   }
   const candidates = [];
   try {
-    const st = (0, import_fs124.statSync)(legacyPath);
+    const st = (0, import_fs117.statSync)(legacyPath);
     if (st.isFile()) candidates.push({ path: legacyPath, mtimeMs: st.mtimeMs });
   } catch {
   }
@@ -95312,7 +90031,7 @@ function readMostRecentCache(root2, legacyPath) {
       continue;
     }
     try {
-      const st = (0, import_fs124.statSync)(candidate);
+      const st = (0, import_fs117.statSync)(candidate);
       if (!st.isFile()) continue;
       candidates.push({ path: candidate, mtimeMs: st.mtimeMs });
     } catch {
@@ -95321,7 +90040,7 @@ function readMostRecentCache(root2, legacyPath) {
   candidates.sort((a, b) => b.mtimeMs - a.mtimeMs || a.path.localeCompare(b.path));
   for (const candidate of candidates) {
     try {
-      const parsed = parseCachedStdin((0, import_fs124.readFileSync)(candidate.path, "utf-8"));
+      const parsed = parseCachedStdin((0, import_fs117.readFileSync)(candidate.path, "utf-8"));
       if (parsed) return parsed;
     } catch {
     }
@@ -95476,12 +90195,12 @@ function getModelName(stdin) {
   const displayName = stdin.model?.display_name?.trim();
   return displayName || getModelId(stdin);
 }
-var import_fs124, import_path149, TRANSIENT_CONTEXT_PERCENT_TOLERANCE, SESSION_ID_ENV_VARS, HUD_STDIN_CACHE_STATE_NAME, HUD_STDIN_CACHE_FILE_NAME;
+var import_fs117, import_path141, TRANSIENT_CONTEXT_PERCENT_TOLERANCE, SESSION_ID_ENV_VARS, HUD_STDIN_CACHE_STATE_NAME, HUD_STDIN_CACHE_FILE_NAME;
 var init_stdin = __esm({
   "src/hud/stdin.ts"() {
     "use strict";
-    import_fs124 = require("fs");
-    import_path149 = require("path");
+    import_fs117 = require("fs");
+    import_path141 = require("path");
     init_worktree_paths();
     TRANSIENT_CONTEXT_PERCENT_TOLERANCE = 3;
     SESSION_ID_ENV_VARS = ["CLAUDE_SESSION_ID", "CLAUDECODE_SESSION_ID"];
@@ -96273,7 +90992,7 @@ __export(checkpoint_exports, {
 });
 function git2(args, options = {}) {
   try {
-    return (0, import_child_process47.execFileSync)("git", args, {
+    return (0, import_child_process46.execFileSync)("git", args, {
       cwd: options.cwd ?? process.cwd(),
       env: options.env ?? process.env,
       timeout: GIT_TIMEOUT_MS3,
@@ -96298,9 +91017,9 @@ function createCheckpoint(cwd2, label) {
     throw new CheckpointError("checkpoint label must not be empty");
   }
   const toplevel = repoToplevel(cwd2);
-  const tmpIndexDir = (0, import_fs135.mkdtempSync)((0, import_path161.join)((0, import_os28.tmpdir)(), "omc-checkpoint-"));
+  const tmpIndexDir = (0, import_fs128.mkdtempSync)((0, import_path154.join)((0, import_os28.tmpdir)(), "omc-checkpoint-"));
   try {
-    const tmpIndexPath = (0, import_path161.join)(tmpIndexDir, "index");
+    const tmpIndexPath = (0, import_path154.join)(tmpIndexDir, "index");
     git2(["add", "-A", "--"], {
       cwd: toplevel,
       env: { ...process.env, GIT_INDEX_FILE: tmpIndexPath }
@@ -96320,7 +91039,7 @@ function createCheckpoint(cwd2, label) {
     git2(["update-ref", `${REF_PREFIX}${commit}`, commit], { cwd: toplevel });
     return commit.slice(0, 12);
   } finally {
-    (0, import_fs135.rmSync)(tmpIndexDir, { recursive: true, force: true });
+    (0, import_fs128.rmSync)(tmpIndexDir, { recursive: true, force: true });
   }
 }
 function listCheckpoints(cwd2) {
@@ -96378,14 +91097,14 @@ function rollbackToCheckpoint(cwd2, checkpointId, force = false) {
   git2(["restore", "--source", full, "--staged", "--worktree", ":/"], { cwd: toplevel });
   git2(["clean", "-fd"], { cwd: toplevel });
 }
-var import_child_process47, import_fs135, import_os28, import_path161, GIT_TIMEOUT_MS3, REF_PREFIX, SHADOW_IDENTITY, CheckpointError;
+var import_child_process46, import_fs128, import_os28, import_path154, GIT_TIMEOUT_MS3, REF_PREFIX, SHADOW_IDENTITY, CheckpointError;
 var init_checkpoint = __esm({
   "src/features/checkpoint/index.ts"() {
     "use strict";
-    import_child_process47 = require("child_process");
-    import_fs135 = require("fs");
+    import_child_process46 = require("child_process");
+    import_fs128 = require("fs");
     import_os28 = require("os");
-    import_path161 = require("path");
+    import_path154 = require("path");
     GIT_TIMEOUT_MS3 = 6e4;
     REF_PREFIX = "refs/omc/checkpoints/";
     SHADOW_IDENTITY = [
@@ -96400,6 +91119,7 @@ var init_checkpoint = __esm({
         this.exitCode = exitCode;
         this.name = "CheckpointError";
       }
+      exitCode;
     };
   }
 });
@@ -97391,13 +92111,13 @@ function envelopeError(value) {
   }
   return null;
 }
-var import_fs136, import_crypto42, import_path162, DESCRIPTOR_HASH_PATTERN2, JOURNAL_FINGERPRINT_PATTERN, FileJournal;
+var import_fs129, import_crypto42, import_path155, DESCRIPTOR_HASH_PATTERN2, JOURNAL_FINGERPRINT_PATTERN, FileJournal;
 var init_journal = __esm({
   "src/graph/runtime/journal.ts"() {
     "use strict";
-    import_fs136 = require("fs");
+    import_fs129 = require("fs");
     import_crypto42 = require("crypto");
-    import_path162 = require("path");
+    import_path155 = require("path");
     init_descriptor();
     init_run_dir();
     init_safe_fs();
@@ -97444,7 +92164,7 @@ var init_journal = __esm({
           try {
             fd = operations.open(
               filePath,
-              import_fs136.constants.O_APPEND | import_fs136.constants.O_CREAT | import_fs136.constants.O_WRONLY | (import_fs136.constants.O_NONBLOCK ?? 0)
+              import_fs129.constants.O_APPEND | import_fs129.constants.O_CREAT | import_fs129.constants.O_WRONLY | (import_fs129.constants.O_NONBLOCK ?? 0)
             );
             assertPrivateRegularFile(fd, filePath);
           } catch (error2) {
@@ -97457,22 +92177,22 @@ var init_journal = __esm({
             throw error2;
           }
           try {
-            const initialSize = (0, import_fs136.fstatSync)(fd).size;
+            const initialSize = (0, import_fs129.fstatSync)(fd).size;
             assertOwnership?.();
             let writeCompleted = false;
             try {
-              (0, import_fs136.writeSync)(fd, line);
+              (0, import_fs129.writeSync)(fd, line);
               writeCompleted = true;
-              (0, import_fs136.fsyncSync)(fd);
+              (0, import_fs129.fsyncSync)(fd);
               assertOwnership?.();
             } catch (error2) {
               if (writeCompleted) {
                 try {
-                  const size = (0, import_fs136.fstatSync)(fd).size;
+                  const size = (0, import_fs129.fstatSync)(fd).size;
                   const expectedSize = initialSize + Buffer.byteLength(line);
                   if (size === expectedSize) {
-                    (0, import_fs136.ftruncateSync)(fd, initialSize);
-                    (0, import_fs136.fsyncSync)(fd);
+                    (0, import_fs129.ftruncateSync)(fd, initialSize);
+                    (0, import_fs129.fsyncSync)(fd);
                   }
                 } catch {
                 }
@@ -97480,7 +92200,7 @@ var init_journal = __esm({
               throw error2;
             }
           } finally {
-            (0, import_fs136.closeSync)(fd);
+            (0, import_fs129.closeSync)(fd);
           }
         });
       }
@@ -97494,7 +92214,7 @@ var init_journal = __esm({
       }
       async readAll() {
         const runDir = this.runDir();
-        const filePath = (0, import_path162.join)(runDir.path, "journal.jsonl");
+        const filePath = (0, import_path155.join)(runDir.path, "journal.jsonl");
         let content;
         try {
           content = readContainedFileNoFollow(runDir, "journal.jsonl");
@@ -97589,11 +92309,11 @@ function lstatNoFollow(operations, filePath) {
   }
   return stats;
 }
-var import_fs137, import_crypto43, DEFAULT_STALE_GRACE_MS, LOCK_FILE_NAME, EPOCH_FILE_NAME, FileOwnershipFence;
+var import_fs130, import_crypto43, DEFAULT_STALE_GRACE_MS, LOCK_FILE_NAME, EPOCH_FILE_NAME, FileOwnershipFence;
 var init_fence = __esm({
   "src/graph/runtime/fence.ts"() {
     "use strict";
-    import_fs137 = require("fs");
+    import_fs130 = require("fs");
     import_crypto43 = require("crypto");
     init_atomic_write();
     init_platform();
@@ -97791,7 +92511,7 @@ var init_fence = __esm({
         try {
           fd = operations.open(
             lockPath2,
-            import_fs137.constants.O_CREAT | import_fs137.constants.O_EXCL | import_fs137.constants.O_WRONLY,
+            import_fs130.constants.O_CREAT | import_fs130.constants.O_EXCL | import_fs130.constants.O_WRONLY,
             384
           );
         } catch (error2) {
@@ -97806,12 +92526,12 @@ var init_fence = __esm({
             epoch,
             timestamp: Date.now()
           };
-          (0, import_fs137.writeSync)(fd, JSON.stringify(payload), null, "utf8");
+          (0, import_fs130.writeSync)(fd, JSON.stringify(payload), null, "utf8");
           this.beforeEpochPersist?.();
           atomicWriteFileSync(epochFilePath, String(epoch), void 0, operations);
         } catch (error2) {
           const createdIdentity = this.identityFromFd(fd);
-          (0, import_fs137.closeSync)(fd);
+          (0, import_fs130.closeSync)(fd);
           this.cleanupCreatedLock(operations, lockPath2, createdIdentity);
           throw error2;
         }
@@ -97862,7 +92582,7 @@ var init_fence = __esm({
       }
       identityFromFd(fd) {
         try {
-          const stats = (0, import_fs137.fstatSync)(fd);
+          const stats = (0, import_fs130.fstatSync)(fd);
           return {
             dev: stats.dev,
             ino: stats.ino,
@@ -97937,7 +92657,7 @@ var init_fence = __esm({
           return false;
         }
         try {
-          const ours = (0, import_fs137.fstatSync)(this.fd);
+          const ours = (0, import_fs130.fstatSync)(this.fd);
           const theirs = lstatNoFollow(operations, lockPath2);
           if (ours.ino !== theirs.ino || ours.size !== theirs.size) {
             return false;
@@ -97951,7 +92671,7 @@ var init_fence = __esm({
       clearHeld() {
         if (this.fd !== null) {
           try {
-            (0, import_fs137.closeSync)(this.fd);
+            (0, import_fs130.closeSync)(this.fd);
           } catch {
           }
           this.fd = null;
@@ -98015,11 +92735,11 @@ function parseStoredEnvelope(raw) {
   }
   return candidate;
 }
-var import_path163, DESCRIPTOR_HASH_PATTERN3, PROJECTION_FILE_NAME, ProjectionStoreError, FileProjectionStore;
+var import_path156, DESCRIPTOR_HASH_PATTERN3, PROJECTION_FILE_NAME, ProjectionStoreError, FileProjectionStore;
 var init_store = __esm({
   "src/graph/runtime/store.ts"() {
     "use strict";
-    import_path163 = require("path");
+    import_path156 = require("path");
     init_atomic_write();
     init_run_dir();
     init_safe_fs();
@@ -98088,7 +92808,7 @@ var init_store = __esm({
       }
       async load() {
         const runDir = this.runDir();
-        const filePath = (0, import_path163.join)(runDir.path, PROJECTION_FILE_NAME);
+        const filePath = (0, import_path156.join)(runDir.path, PROJECTION_FILE_NAME);
         let content;
         try {
           content = readContainedFileNoFollow(runDir, PROJECTION_FILE_NAME);
@@ -98395,7 +93115,7 @@ function foldNodeResultRecord(descriptor, projection, transition) {
 }
 async function runGraph(sealed, options) {
   assertContainedFsSupported(process.platform);
-  const runsRoot = options.runsRoot ?? (0, import_path164.join)(process.cwd(), ...DEFAULT_RUNS_ROOT_SEGMENTS);
+  const runsRoot = options.runsRoot ?? (0, import_path157.join)(process.cwd(), ...DEFAULT_RUNS_ROOT_SEGMENTS);
   const runId = sealed.run_id;
   const runDirHandle = resolveRunDirHandle(runsRoot, runId);
   const fence = new FileOwnershipFence(runsRoot, runId, void 0, runDirHandle);
@@ -98875,11 +93595,11 @@ function mapRunFailure(error2, phase, epoch, runId, descriptorHash) {
   }
   return null;
 }
-var import_path164, DEFAULT_RUNS_ROOT_SEGMENTS, DESCRIPTOR_FILE_NAME, REQUEST_FINGERPRINT_PATTERN;
+var import_path157, DEFAULT_RUNS_ROOT_SEGMENTS, DESCRIPTOR_FILE_NAME, REQUEST_FINGERPRINT_PATTERN;
 var init_runner = __esm({
   "src/graph/runtime/runner.ts"() {
     "use strict";
-    import_path164 = require("path");
+    import_path157 = require("path");
     init_descriptor();
     init_scheduler();
     init_atomic_write();
@@ -98978,12 +93698,12 @@ async function parseTranscript(transcriptPath, options) {
     skillCallCount: 0,
     lastToolName: null
   };
-  if (!transcriptPath || !(0, import_fs141.existsSync)(transcriptPath)) {
+  if (!transcriptPath || !(0, import_fs134.existsSync)(transcriptPath)) {
     return result;
   }
   let cacheKey = null;
   try {
-    const stat2 = (0, import_fs141.statSync)(transcriptPath);
+    const stat2 = (0, import_fs134.statSync)(transcriptPath);
     cacheKey = `${transcriptPath}:${stat2.size}:${stat2.mtimeMs}`;
     const cached2 = transcriptCache.get(transcriptPath);
     if (cached2?.cacheKey === cacheKey) {
@@ -99003,7 +93723,7 @@ async function parseTranscript(transcriptPath, options) {
   let sessionTotalsReliable = false;
   const observedSessionIds = /* @__PURE__ */ new Set();
   try {
-    const stat2 = (0, import_fs141.statSync)(transcriptPath);
+    const stat2 = (0, import_fs134.statSync)(transcriptPath);
     const fileSize = stat2.size;
     if (fileSize > MAX_TAIL_BYTES) {
       const lines = readTailLines(transcriptPath, fileSize, MAX_TAIL_BYTES);
@@ -99026,7 +93746,7 @@ async function parseTranscript(transcriptPath, options) {
       }
       sessionTotalsReliable = sessionTokenTotals.seenUsage;
     } else {
-      const fileStream = (0, import_fs141.createReadStream)(transcriptPath);
+      const fileStream = (0, import_fs134.createReadStream)(transcriptPath);
       const rl = (0, import_readline5.createInterface)({
         input: fileStream,
         crlfDelay: Infinity
@@ -99143,12 +93863,12 @@ function finalizeTranscriptResult(result, options, pendingPermissions) {
 function readTailLines(filePath, fileSize, maxBytes) {
   const startOffset = Math.max(0, fileSize - maxBytes);
   const bytesToRead = fileSize - startOffset;
-  const fd = (0, import_fs141.openSync)(filePath, "r");
+  const fd = (0, import_fs134.openSync)(filePath, "r");
   const buffer = Buffer.alloc(bytesToRead);
   try {
-    (0, import_fs141.readSync)(fd, buffer, 0, bytesToRead, startOffset);
+    (0, import_fs134.readSync)(fd, buffer, 0, bytesToRead, startOffset);
   } finally {
-    (0, import_fs141.closeSync)(fd);
+    (0, import_fs134.closeSync)(fd);
   }
   const content = buffer.toString("utf8");
   const lines = content.split("\n");
@@ -99192,7 +93912,7 @@ function extractTargetSummary(input, toolName) {
   if (toolName.includes("Edit") || toolName.includes("Write")) {
     const filePath = inp.file_path;
     if (filePath) {
-      return (0, import_path170.basename)(filePath) || filePath;
+      return (0, import_path163.basename)(filePath) || filePath;
     }
   }
   if (toolName.includes("Bash")) {
@@ -99270,7 +93990,7 @@ function processEntry(entry2, agentMap, latestTodos, result, maxAgentMapSize = 5
       if (block.name === "Task" || block.name === "proxy_Task" || block.name === "Agent" || block.name === "proxy_Agent") {
         result.agentCallCount++;
         const input = block.input;
-        const spawn15 = classifyAgentSpawn({
+        const spawn14 = classifyAgentSpawn({
           hasName: Boolean(input?.name),
           sessionId: entry2.sessionId
         });
@@ -99282,8 +94002,8 @@ function processEntry(entry2, agentMap, latestTodos, result, maxAgentMapSize = 5
           description: input?.description,
           status: "running",
           startTime: timestamp2,
-          kind: spawn15.kind,
-          spawnedBy: spawn15.spawnedBy
+          kind: spawn14.kind,
+          spawnedBy: spawn14.spawnedBy
         };
         if (agentMap.size >= maxAgentMapSize) {
           let oldestCompleted = null;
@@ -99439,13 +94159,13 @@ function extractLastRequestTokenUsage(usage) {
 function getNumericUsageValue(value) {
   return typeof value === "number" && Number.isFinite(value) ? value : null;
 }
-var import_fs141, import_readline5, import_path170, MAX_TAIL_BYTES, MAX_AGENT_MAP_SIZE, PERMISSION_TOOLS, PERMISSION_THRESHOLD_MS, pendingPermissionMap, taskToolStates, TASK_STATUSES, THINKING_PART_TYPES2, THINKING_RECENCY_MS, transcriptCache, TRANSCRIPT_CACHE_MAX_SIZE;
+var import_fs134, import_readline5, import_path163, MAX_TAIL_BYTES, MAX_AGENT_MAP_SIZE, PERMISSION_TOOLS, PERMISSION_THRESHOLD_MS, pendingPermissionMap, taskToolStates, TASK_STATUSES, THINKING_PART_TYPES2, THINKING_RECENCY_MS, transcriptCache, TRANSCRIPT_CACHE_MAX_SIZE;
 var init_transcript = __esm({
   "src/hud/transcript.ts"() {
     "use strict";
-    import_fs141 = require("fs");
+    import_fs134 = require("fs");
     import_readline5 = require("readline");
-    import_path170 = require("path");
+    import_path163 = require("path");
     init_agent_kind();
     MAX_TAIL_BYTES = 4 * 1024 * 1024;
     MAX_AGENT_MAP_SIZE = 100;
@@ -99471,7 +94191,7 @@ var init_transcript = __esm({
 // src/hud/omc-state.ts
 function isStateFileStale(filePath) {
   try {
-    const stat2 = (0, import_fs142.statSync)(filePath);
+    const stat2 = (0, import_fs135.statSync)(filePath);
     const age = Date.now() - stat2.mtimeMs;
     return age > MAX_STATE_AGE_MS2;
   } catch {
@@ -99481,21 +94201,21 @@ function isStateFileStale(filePath) {
 function resolveStatePath2(directory, filename, sessionId) {
   const omcRoot = getOmcRoot(directory);
   if (sessionId) {
-    const sessionPath = (0, import_path171.join)(omcRoot, "state", "sessions", sessionId, filename);
-    return (0, import_fs142.existsSync)(sessionPath) ? sessionPath : null;
+    const sessionPath = (0, import_path164.join)(omcRoot, "state", "sessions", sessionId, filename);
+    return (0, import_fs135.existsSync)(sessionPath) ? sessionPath : null;
   }
   let bestPath = null;
   let bestMtime = 0;
-  const sessionsDir = (0, import_path171.join)(omcRoot, "state", "sessions");
-  if ((0, import_fs142.existsSync)(sessionsDir)) {
+  const sessionsDir = (0, import_path164.join)(omcRoot, "state", "sessions");
+  if ((0, import_fs135.existsSync)(sessionsDir)) {
     try {
-      const entries = (0, import_fs142.readdirSync)(sessionsDir, { withFileTypes: true });
+      const entries = (0, import_fs135.readdirSync)(sessionsDir, { withFileTypes: true });
       for (const entry2 of entries) {
         if (!entry2.isDirectory()) continue;
-        const sessionFile = (0, import_path171.join)(sessionsDir, entry2.name, filename);
-        if ((0, import_fs142.existsSync)(sessionFile)) {
+        const sessionFile = (0, import_path164.join)(sessionsDir, entry2.name, filename);
+        if ((0, import_fs135.existsSync)(sessionFile)) {
           try {
-            const mtime = (0, import_fs142.statSync)(sessionFile).mtimeMs;
+            const mtime = (0, import_fs135.statSync)(sessionFile).mtimeMs;
             if (mtime > bestMtime) {
               bestMtime = mtime;
               bestPath = sessionFile;
@@ -99507,10 +94227,10 @@ function resolveStatePath2(directory, filename, sessionId) {
     } catch {
     }
   }
-  const newPath = (0, import_path171.join)(omcRoot, "state", filename);
-  if ((0, import_fs142.existsSync)(newPath)) {
+  const newPath = (0, import_path164.join)(omcRoot, "state", filename);
+  if ((0, import_fs135.existsSync)(newPath)) {
     try {
-      const mtime = (0, import_fs142.statSync)(newPath).mtimeMs;
+      const mtime = (0, import_fs135.statSync)(newPath).mtimeMs;
       if (mtime > bestMtime) {
         bestMtime = mtime;
         bestPath = newPath;
@@ -99519,10 +94239,10 @@ function resolveStatePath2(directory, filename, sessionId) {
       if (!bestPath) bestPath = newPath;
     }
   }
-  const legacyPath = (0, import_path171.join)(omcRoot, filename);
-  if ((0, import_fs142.existsSync)(legacyPath)) {
+  const legacyPath = (0, import_path164.join)(omcRoot, filename);
+  if ((0, import_fs135.existsSync)(legacyPath)) {
     try {
-      const mtime = (0, import_fs142.statSync)(legacyPath).mtimeMs;
+      const mtime = (0, import_fs135.statSync)(legacyPath).mtimeMs;
       if (mtime > bestMtime) {
         bestPath = legacyPath;
       }
@@ -99541,7 +94261,7 @@ function readRalphStateForHud(directory, sessionId) {
     return null;
   }
   try {
-    const content = (0, import_fs142.readFileSync)(stateFile, "utf-8");
+    const content = (0, import_fs135.readFileSync)(stateFile, "utf-8");
     const state = JSON.parse(content);
     if (!state.active) {
       return null;
@@ -99558,23 +94278,33 @@ function readRalphStateForHud(directory, sessionId) {
   }
 }
 function readPrdStateForHud(directory) {
-  let prdPath = (0, import_path171.join)(directory, "prd.json");
-  if (!(0, import_fs142.existsSync)(prdPath)) {
-    prdPath = (0, import_path171.join)(getOmcRoot(directory), "prd.json");
-    if (!(0, import_fs142.existsSync)(prdPath)) {
+  let prdPath = (0, import_path164.join)(directory, "prd.json");
+  if (!(0, import_fs135.existsSync)(prdPath)) {
+    prdPath = (0, import_path164.join)(getOmcRoot(directory), "prd.json");
+    if (!(0, import_fs135.existsSync)(prdPath)) {
       return null;
     }
   }
+  const strict = readPrdFromPath(prdPath);
+  if (strict.prd) {
+    const status = getPrdStatus(strict.prd);
+    return {
+      currentStoryId: status.nextStory?.id ?? null,
+      completed: status.completed,
+      total: status.total
+    };
+  }
   try {
-    const content = (0, import_fs142.readFileSync)(prdPath, "utf-8");
+    const content = (0, import_fs135.readFileSync)(prdPath, "utf-8");
     const prd = JSON.parse(content);
     if (!prd.userStories || !Array.isArray(prd.userStories)) {
       return null;
     }
     const stories = prd.userStories;
-    const completed = stories.filter((s) => s.passes).length;
+    const isComplete = (story) => story.passes === true && story.architectVerified !== false;
+    const completed = stories.filter(isComplete).length;
     const total = stories.length;
-    const incomplete = stories.filter((s) => !s.passes).sort((a, b) => a.priority - b.priority);
+    const incomplete = stories.filter((s) => !isComplete(s)).sort((a, b) => a.priority - b.priority);
     return {
       currentStoryId: incomplete[0]?.id || null,
       completed,
@@ -99619,7 +94349,7 @@ function readAutopilotStateForHud(directory, sessionId) {
     return null;
   }
   try {
-    const content = (0, import_fs142.readFileSync)(stateFile, "utf-8");
+    const content = (0, import_fs135.readFileSync)(stateFile, "utf-8");
     const state = JSON.parse(content);
     if (!state.active) {
       return null;
@@ -99642,21 +94372,22 @@ function readAutopilotStateForHud(directory, sessionId) {
     return null;
   }
 }
-var import_fs142, import_path171, MAX_STATE_AGE_MS2;
+var import_fs135, import_path164, MAX_STATE_AGE_MS2;
 var init_omc_state = __esm({
   "src/hud/omc-state.ts"() {
     "use strict";
-    import_fs142 = require("fs");
-    import_path171 = require("path");
+    import_fs135 = require("fs");
+    import_path164 = require("path");
     init_worktree_paths();
     init_named_workflow_resume_validator();
+    init_prd();
     MAX_STATE_AGE_MS2 = 2 * 60 * 60 * 1e3;
   }
 });
 
 // src/hud/custom-rate-provider.ts
 function getCachePath2() {
-  return (0, import_path172.join)(
+  return (0, import_path165.join)(
     getClaudeConfigDir(),
     "plugins",
     "oh-my-claudecode",
@@ -99666,8 +94397,8 @@ function getCachePath2() {
 function readCache2() {
   try {
     const p = getCachePath2();
-    if (!(0, import_fs143.existsSync)(p)) return null;
-    return JSON.parse((0, import_fs143.readFileSync)(p, "utf-8"));
+    if (!(0, import_fs136.existsSync)(p)) return null;
+    return JSON.parse((0, import_fs136.readFileSync)(p, "utf-8"));
   } catch {
     return null;
   }
@@ -99675,10 +94406,10 @@ function readCache2() {
 function writeCache2(buckets, identity) {
   try {
     const p = getCachePath2();
-    const dir = (0, import_path172.dirname)(p);
-    if (!(0, import_fs143.existsSync)(dir)) (0, import_fs143.mkdirSync)(dir, { recursive: true });
+    const dir = (0, import_path165.dirname)(p);
+    if (!(0, import_fs136.existsSync)(dir)) (0, import_fs136.mkdirSync)(dir, { recursive: true });
     const cache = { timestamp: Date.now(), buckets, identity };
-    (0, import_fs143.writeFileSync)(p, JSON.stringify(cache, null, 2));
+    (0, import_fs136.writeFileSync)(p, JSON.stringify(cache, null, 2));
   } catch {
   }
 }
@@ -99686,9 +94417,9 @@ function isCacheValid2(cache) {
   return Date.now() - cache.timestamp < CACHE_TTL_MS2;
 }
 function spawnWithTimeout(cmd, timeoutMs) {
-  return new Promise((resolve48, reject) => {
+  return new Promise((resolve49, reject) => {
     const [executable, ...args] = Array.isArray(cmd) ? cmd : ["sh", "-c", cmd];
-    const child = (0, import_child_process49.spawn)(executable, args, {
+    const child = (0, import_child_process48.spawn)(executable, args, {
       stdio: ["ignore", "pipe", "pipe"],
       detached: process.platform !== "win32"
     });
@@ -99724,7 +94455,7 @@ function spawnWithTimeout(cmd, timeoutMs) {
       if (!timedOut && escalationTimer) clearTimeout(escalationTimer);
       if (!timedOut) {
         if (code === 0) {
-          resolve48(stdout);
+          resolve49(stdout);
         } else {
           reject(new Error(`Command exited with code ${code}`));
         }
@@ -99796,14 +94527,14 @@ async function executeCustomProvider(config2) {
     return { buckets: [], stale: false, error: "command failed" };
   }
 }
-var import_child_process49, import_node_crypto15, import_fs143, import_path172, CACHE_TTL_MS2, DEFAULT_TIMEOUT_MS3;
+var import_child_process48, import_node_crypto15, import_fs136, import_path165, CACHE_TTL_MS2, DEFAULT_TIMEOUT_MS3;
 var init_custom_rate_provider = __esm({
   "src/hud/custom-rate-provider.ts"() {
     "use strict";
-    import_child_process49 = require("child_process");
+    import_child_process48 = require("child_process");
     import_node_crypto15 = require("node:crypto");
-    import_fs143 = require("fs");
-    import_path172 = require("path");
+    import_fs136 = require("fs");
+    import_path165 = require("path");
     init_config_dir();
     CACHE_TTL_MS2 = 3e4;
     DEFAULT_TIMEOUT_MS3 = 800;
@@ -101055,6 +95786,201 @@ var init_hostname = __esm({
   }
 });
 
+// src/hud/elements/account.ts
+function validateEmail(value) {
+  if (typeof value !== "string") {
+    return { valid: false };
+  }
+  if (value.length === 0 || value.length > 320) {
+    return { valid: false };
+  }
+  for (let i = 0; i < value.length; i += 1) {
+    const code = value.charCodeAt(i);
+    if (code <= 31) {
+      return { valid: false };
+    }
+    if (code >= 128 && code <= 159) {
+      return { valid: false };
+    }
+    if (code >= 8206 && code <= 8207 || code >= 8234 && code <= 8238 || code >= 8294 && code <= 8297) {
+      return { valid: false };
+    }
+    if (code === 32 || code === 9 || code === 10 || code === 13 || code === 11 || code === 12) {
+      return { valid: false };
+    }
+    if (code < 33 || code > 126) {
+      return { valid: false };
+    }
+  }
+  if (!value.includes("@") || value.indexOf("@") !== value.lastIndexOf("@")) {
+    return { valid: false };
+  }
+  const [local, domain] = value.split("@", 2);
+  if (!local || !domain || !domain.includes(".")) {
+    return { valid: false };
+  }
+  if (!/^[a-z0-9.-]+$/i.test(domain)) {
+    return { valid: false };
+  }
+  return { valid: true, email: value };
+}
+function truncateEmailMiddle(email2, maxChars = 64) {
+  if (email2.length <= maxChars) {
+    return email2;
+  }
+  const ellipsis = "...";
+  const availableChars = maxChars - ellipsis.length;
+  const startChars = Math.floor(availableChars / 2);
+  const endChars = availableChars - startChars;
+  return `${email2.slice(0, startChars)}${ellipsis}${email2.slice(-endChars)}`;
+}
+function metadataFromStats(stats) {
+  return {
+    mtimeMs: stats.mtimeMs,
+    size: stats.size,
+    ino: stats.ino,
+    isFile: stats.isFile()
+  };
+}
+function getFileMetadata(filePath) {
+  try {
+    return metadataFromStats((0, import_fs137.lstatSync)(filePath));
+  } catch (error2) {
+    const code = error2.code;
+    if (code === "ENOENT" || code === "ENOTDIR") {
+      return null;
+    }
+    throw error2;
+  }
+}
+function bestEffortFileMetadata(filePath) {
+  try {
+    return getFileMetadata(filePath);
+  } catch {
+    return null;
+  }
+}
+function readEmailFromClaudeJson(filePath) {
+  const flags = import_fs137.constants.O_RDONLY | (import_fs137.constants.O_NOFOLLOW ?? 0) | (import_fs137.constants.O_NONBLOCK ?? 0);
+  let fd;
+  try {
+    fd = (0, import_fs137.openSync)(filePath, flags);
+  } catch {
+    return { email: null, metadata: bestEffortFileMetadata(filePath) };
+  }
+  try {
+    const metadata = metadataFromStats((0, import_fs137.fstatSync)(fd));
+    if (!metadata.isFile || metadata.size > 5 * 1024 * 1024) {
+      return { email: null, metadata };
+    }
+    try {
+      const content = (0, import_fs137.readFileSync)(fd, "utf-8");
+      const parsed = JSON.parse(content);
+      if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
+        return { email: null, metadata };
+      }
+      const account = parsed.oauthAccount;
+      if (typeof account !== "object" || account === null || Array.isArray(account)) {
+        return { email: null, metadata };
+      }
+      const email2 = account.emailAddress;
+      const validation = validateEmail(email2);
+      return { email: validation.valid ? validation.email ?? null : null, metadata };
+    } catch {
+      return { email: null, metadata };
+    }
+  } catch {
+    return { email: null, metadata: bestEffortFileMetadata(filePath) };
+  } finally {
+    try {
+      (0, import_fs137.closeSync)(fd);
+    } catch {
+    }
+  }
+}
+function metadataEquals(a, b) {
+  if (a === null || b === null) return a === b;
+  return a.mtimeMs === b.mtimeMs && a.size === b.size && a.ino === b.ino && a.isFile === b.isFile;
+}
+function isAccountFileMetadata(value) {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) return false;
+  const m = value;
+  return [m.mtimeMs, m.size, m.ino].every((item) => typeof item === "number" && Number.isFinite(item)) && typeof m.isFile === "boolean";
+}
+function isCachedAccountData(value) {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) return false;
+  const cached2 = value;
+  return (cached2.email === null || typeof cached2.email === "string") && Array.isArray(cached2.sources) && cached2.sources.every((source) => {
+    if (typeof source !== "object" || source === null) return false;
+    const { path: path30, metadata } = source;
+    return typeof path30 === "string" && (metadata === null || isAccountFileMetadata(metadata));
+  });
+}
+function getCachedAccountEmail() {
+  const cacheDir = getOmcConfigDir();
+  const cacheFile = (0, import_path166.join)(cacheDir, "hud-account-cache.json");
+  const configJsonPath = (0, import_path166.join)(getClaudeConfigDir(), ".claude.json");
+  const fallbackPath = (0, import_path166.join)((0, import_os29.homedir)(), ".claude.json");
+  const candidatePaths = fallbackPath === configJsonPath ? [configJsonPath] : [configJsonPath, fallbackPath];
+  let cacheable = true;
+  const sources = candidatePaths.map((path30) => {
+    try {
+      return { path: path30, metadata: getFileMetadata(path30) };
+    } catch {
+      cacheable = false;
+      return { path: path30, metadata: null };
+    }
+  });
+  try {
+    const cache = cacheable ? JSON.parse((0, import_fs137.readFileSync)(cacheFile, "utf-8")) : {};
+    const cached2 = cache.account;
+    if (isCachedAccountData(cached2) && cached2.sources.length === sources.length && cached2.sources.every((entry2, i) => entry2.path === sources[i].path && metadataEquals(entry2.metadata, sources[i].metadata)) && (cached2.email === null || validateEmail(cached2.email).valid)) {
+      return cached2.email;
+    }
+  } catch {
+  }
+  let email2 = null;
+  for (const path30 of candidatePaths) {
+    email2 = readEmailFromClaudeJson(path30).email;
+    if (email2) break;
+  }
+  if (!cacheable) return email2;
+  try {
+    (0, import_fs137.mkdirSync)(cacheDir, { recursive: true });
+    (0, import_fs137.writeFileSync)(cacheFile, JSON.stringify({ account: { sources, email: email2 } }));
+  } catch {
+  }
+  return email2;
+}
+function renderAccount() {
+  if (process.env.ANTHROPIC_API_KEY) {
+    return null;
+  }
+  let email2;
+  try {
+    email2 = getCachedAccountEmail();
+  } catch {
+    return null;
+  }
+  if (!email2) {
+    return null;
+  }
+  const truncated = truncateEmailMiddle(email2, 64);
+  return cyan(`acct:${truncated}`);
+}
+var import_fs137, import_path166, import_os29;
+var init_account = __esm({
+  "src/hud/elements/account.ts"() {
+    "use strict";
+    import_fs137 = require("fs");
+    import_path166 = require("path");
+    import_os29 = require("os");
+    init_colors();
+    init_config_dir();
+    init_config_dir();
+  }
+});
+
 // src/hud/elements/git.ts
 function git3(args, cwd2) {
   return (0, import_node_child_process15.execFileSync)("git", args, {
@@ -101411,8 +96337,8 @@ var init_effort = __esm({
 // src/hud/elements/api-key-source.ts
 function settingsFileHasApiKey(filePath) {
   try {
-    if (!(0, import_fs144.existsSync)(filePath)) return false;
-    const content = (0, import_fs144.readFileSync)(filePath, "utf-8");
+    if (!(0, import_fs138.existsSync)(filePath)) return false;
+    const content = (0, import_fs138.readFileSync)(filePath, "utf-8");
     const settings = JSON.parse(content);
     const env2 = settings?.env;
     if (typeof env2 !== "object" || env2 === null) return false;
@@ -101423,10 +96349,10 @@ function settingsFileHasApiKey(filePath) {
 }
 function detectApiKeySource(cwd2) {
   if (cwd2) {
-    const projectSettings = (0, import_path173.join)(cwd2, ".claude", "settings.local.json");
+    const projectSettings = (0, import_path167.join)(cwd2, ".claude", "settings.local.json");
     if (settingsFileHasApiKey(projectSettings)) return "project";
   }
-  const globalSettings = (0, import_path173.join)(getClaudeConfigDir(), "settings.json");
+  const globalSettings = (0, import_path167.join)(getClaudeConfigDir(), "settings.json");
   if (settingsFileHasApiKey(globalSettings)) return "global";
   if (process.env.ANTHROPIC_API_KEY) return "env";
   return null;
@@ -101435,12 +96361,12 @@ function renderApiKeySource(source) {
   if (!source) return null;
   return `${dim("key:")}${cyan(source)}`;
 }
-var import_fs144, import_path173;
+var import_fs138, import_path167;
 var init_api_key_source = __esm({
   "src/hud/elements/api-key-source.ts"() {
     "use strict";
-    import_fs144 = require("fs");
-    import_path173 = require("path");
+    import_fs138 = require("fs");
+    import_path167 = require("path");
     init_colors();
     init_config_dir();
   }
@@ -101724,6 +96650,10 @@ async function render(context, config2) {
   if (enabledElements.apiKeySource && context.apiKeySource) {
     const keySource = renderApiKeySource(context.apiKeySource);
     if (keySource) rendered.set("apiKeySource", keySource);
+  }
+  if (enabledElements.account) {
+    const accountElement = renderAccount();
+    if (accountElement) rendered.set("account", accountElement);
   }
   if (enabledElements.profile && context.profileName) {
     rendered.set("profile", bold(`profile:${context.profileName}`));
@@ -102011,6 +96941,7 @@ var init_render = __esm({
     init_autopilot2();
     init_cwd();
     init_hostname();
+    init_account();
     init_git();
     init_multi_repo();
     init_model();
@@ -102105,7 +97036,7 @@ function findByteBackward(fd, fromExclusive, byte) {
   while (end > 0) {
     const start = Math.max(0, end - SCAN_CHUNK_BYTES);
     const length = end - start;
-    (0, import_fs145.readSync)(fd, buffer, 0, length, start);
+    (0, import_fs139.readSync)(fd, buffer, 0, length, start);
     const index = buffer.subarray(0, length).lastIndexOf(byte);
     if (index !== -1) return start + index;
     end = start;
@@ -102117,7 +97048,7 @@ function findByteForward(fd, fromInclusive, size, byte) {
   const buffer = Buffer.allocUnsafe(SCAN_CHUNK_BYTES);
   while (start < size) {
     const length = Math.min(SCAN_CHUNK_BYTES, size - start);
-    (0, import_fs145.readSync)(fd, buffer, 0, length, start);
+    (0, import_fs139.readSync)(fd, buffer, 0, length, start);
     const index = buffer.subarray(0, length).indexOf(byte);
     if (index !== -1) return start + index;
     start += length;
@@ -102132,19 +97063,19 @@ function readLineContainingOffset(fd, size, offset) {
   const length = endOffset - startOffset;
   if (length <= 0 || length > MAX_BOUNDARY_LINE_BYTES) return null;
   const line = Buffer.allocUnsafe(length);
-  (0, import_fs145.readSync)(fd, line, 0, length, startOffset);
+  (0, import_fs139.readSync)(fd, line, 0, length, startOffset);
   return { line, endOffset };
 }
 function findLastCompactBoundaryEndOffset(transcriptPath, size) {
   if (size <= 0) return null;
-  const fd = (0, import_fs145.openSync)(transcriptPath, "r");
+  const fd = (0, import_fs139.openSync)(transcriptPath, "r");
   try {
     let end = size;
     const buffer = Buffer.allocUnsafe(Math.min(SCAN_CHUNK_BYTES, size));
     while (end > 0) {
       const start = Math.max(0, end - SCAN_CHUNK_BYTES);
       const length = end - start;
-      (0, import_fs145.readSync)(fd, buffer, 0, length, start);
+      (0, import_fs139.readSync)(fd, buffer, 0, length, start);
       const chunk = buffer.subarray(0, length);
       let index = chunk.lastIndexOf(COMPACT_BOUNDARY_MARKER_BYTES);
       while (index !== -1) {
@@ -102159,13 +97090,13 @@ function findLastCompactBoundaryEndOffset(transcriptPath, size) {
       end = start + COMPACT_BOUNDARY_MARKER_BYTES.length - 1;
     }
   } finally {
-    (0, import_fs145.closeSync)(fd);
+    (0, import_fs139.closeSync)(fd);
   }
   return null;
 }
 function countLocalApiRequestRecordBytes(transcriptPath, start, end) {
   if (end <= start) return 0;
-  const fd = (0, import_fs145.openSync)(transcriptPath, "r");
+  const fd = (0, import_fs139.openSync)(transcriptPath, "r");
   try {
     const chunk = Buffer.allocUnsafe(SCAN_CHUNK_BYTES);
     const prefix = Buffer.allocUnsafe(LOCAL_API_REQUEST_PREFIX.length);
@@ -102174,7 +97105,7 @@ function countLocalApiRequestRecordBytes(transcriptPath, start, end) {
     const countLine = (lineEndExclusive) => {
       const lineLength = lineEndExclusive - lineStart;
       if (lineLength >= prefix.length) {
-        const bytesRead = (0, import_fs145.readSync)(fd, prefix, 0, prefix.length, lineStart);
+        const bytesRead = (0, import_fs139.readSync)(fd, prefix, 0, prefix.length, lineStart);
         if (bytesRead === prefix.length && prefix.equals(LOCAL_API_REQUEST_PREFIX)) {
           excludedBytes += lineLength;
         }
@@ -102184,7 +97115,7 @@ function countLocalApiRequestRecordBytes(transcriptPath, start, end) {
     let position = start;
     while (position < end) {
       const length = Math.min(SCAN_CHUNK_BYTES, end - position);
-      (0, import_fs145.readSync)(fd, chunk, 0, length, position);
+      (0, import_fs139.readSync)(fd, chunk, 0, length, position);
       const view = chunk.subarray(0, length);
       let newline = view.indexOf(10);
       while (newline !== -1) {
@@ -102196,7 +97127,7 @@ function countLocalApiRequestRecordBytes(transcriptPath, start, end) {
     if (lineStart < end) countLine(end);
     return excludedBytes;
   } finally {
-    (0, import_fs145.closeSync)(fd);
+    (0, import_fs139.closeSync)(fd);
   }
 }
 function estimateTranscriptPayloadBytes(transcriptPath, size) {
@@ -102211,9 +97142,9 @@ function estimateTranscriptPayloadBytes(transcriptPath, size) {
   );
 }
 function estimatePayloadFromTranscriptPath(transcriptPath) {
-  if (!transcriptPath || !(0, import_fs145.existsSync)(transcriptPath)) return null;
+  if (!transcriptPath || !(0, import_fs139.existsSync)(transcriptPath)) return null;
   try {
-    const stat2 = (0, import_fs145.statSync)(transcriptPath);
+    const stat2 = (0, import_fs139.statSync)(transcriptPath);
     if (!stat2.isFile()) return null;
     return createPayloadEstimate(
       estimateTranscriptPayloadBytes(transcriptPath, stat2.size)
@@ -102222,11 +97153,11 @@ function estimatePayloadFromTranscriptPath(transcriptPath) {
     return null;
   }
 }
-var import_fs145, ANTHROPIC_REQUEST_PAYLOAD_LIMIT_BYTES, PAYLOAD_WARNING_BYTES, PAYLOAD_CRITICAL_BYTES, COMPACT_BOUNDARY_MARKER, COMPACT_BOUNDARY_MARKER_BYTES, LOCAL_API_REQUEST_PREFIX, SCAN_CHUNK_BYTES, MAX_BOUNDARY_LINE_BYTES;
+var import_fs139, ANTHROPIC_REQUEST_PAYLOAD_LIMIT_BYTES, PAYLOAD_WARNING_BYTES, PAYLOAD_CRITICAL_BYTES, COMPACT_BOUNDARY_MARKER, COMPACT_BOUNDARY_MARKER_BYTES, LOCAL_API_REQUEST_PREFIX, SCAN_CHUNK_BYTES, MAX_BOUNDARY_LINE_BYTES;
 var init_payload_estimate = __esm({
   "src/hud/payload-estimate.ts"() {
     "use strict";
-    import_fs145 = require("fs");
+    import_fs139 = require("fs");
     ANTHROPIC_REQUEST_PAYLOAD_LIMIT_BYTES = 32e6;
     PAYLOAD_WARNING_BYTES = 22e6;
     PAYLOAD_CRITICAL_BYTES = 26e6;
@@ -102285,10 +97216,10 @@ function mergeStdinRateLimits(stdinRateLimits, usageResult) {
   };
 }
 function readSessionSummary(stateDir, sessionId) {
-  const statePath = (0, import_path174.join)(stateDir, `session-summary-${sessionId}.json`);
-  if (!(0, import_fs146.existsSync)(statePath)) return null;
+  const statePath = (0, import_path168.join)(stateDir, `session-summary-${sessionId}.json`);
+  if (!(0, import_fs140.existsSync)(statePath)) return null;
   try {
-    return JSON.parse((0, import_fs146.readFileSync)(statePath, "utf-8"));
+    return JSON.parse((0, import_fs140.readFileSync)(statePath, "utf-8"));
   } catch {
     return null;
   }
@@ -102314,22 +97245,22 @@ function spawnSessionSummaryScript(transcriptPath, stateDir, sessionId) {
     return;
   }
   lastSummarySpawnTimestamp = now;
-  const thisDir = (0, import_path174.dirname)((0, import_url23.fileURLToPath)(importMetaUrl));
-  const scriptPath = (0, import_path174.join)(
+  const thisDir = (0, import_path168.dirname)((0, import_url23.fileURLToPath)(importMetaUrl));
+  const scriptPath = (0, import_path168.join)(
     thisDir,
     "..",
     "..",
     "scripts",
     "session-summary.mjs"
   );
-  if (!(0, import_fs146.existsSync)(scriptPath)) {
+  if (!(0, import_fs140.existsSync)(scriptPath)) {
     if (process.env.OMC_DEBUG) {
       console.error("[HUD] session-summary script not found:", scriptPath);
     }
     return;
   }
   try {
-    const child = (0, import_child_process50.spawn)(
+    const child = (0, import_child_process49.spawn)(
       "node",
       [scriptPath, transcriptPath, stateDir, sessionId],
       {
@@ -102361,12 +97292,12 @@ async function calculateSessionHealth(sessionStart, contextPercent) {
 function showDiagnostic() {
   const version3 = getRuntimePackageVersion();
   const configDir = getClaudeConfigDir();
-  const hudScript = (0, import_path174.join)(configDir, "hud", "omc-hud.mjs");
-  const settingsFile = (0, import_path174.join)(configDir, "settings.json");
-  const hudExists = (0, import_fs146.existsSync)(hudScript);
+  const hudScript = (0, import_path168.join)(configDir, "hud", "omc-hud.mjs");
+  const settingsFile = (0, import_path168.join)(configDir, "settings.json");
+  const hudExists = (0, import_fs140.existsSync)(hudScript);
   let statusLineOk = false;
   try {
-    const settings = JSON.parse((0, import_fs146.readFileSync)(settingsFile, "utf-8"));
+    const settings = JSON.parse((0, import_fs140.readFileSync)(settingsFile, "utf-8"));
     const sl = settings.statusLine;
     if (sl && typeof sl === "object" && typeof sl.command === "string") {
       statusLineOk = sl.command.includes("omc-hud");
@@ -102472,8 +97403,8 @@ async function mainImpl(watchMode = false, skipInit = false) {
     }
     try {
       const updateCacheFile = getUpdateCheckCachePath();
-      await (0, import_promises33.access)(updateCacheFile);
-      const content = await (0, import_promises33.readFile)(updateCacheFile, "utf-8");
+      await (0, import_promises32.access)(updateCacheFile);
+      const content = await (0, import_promises32.readFile)(updateCacheFile, "utf-8");
       const cached2 = JSON.parse(content);
       if (cached2?.latestVersion && omcVersion && compareVersions2(omcVersion, cached2.latestVersion) < 0) {
         updateAvailable = cached2.latestVersion;
@@ -102495,7 +97426,7 @@ async function mainImpl(watchMode = false, skipInit = false) {
     let sessionSummary = null;
     const sessionSummaryEnabled = config2.elements.sessionSummary ?? false;
     if (sessionSummaryEnabled && resolvedTranscriptPath && currentSessionId) {
-      const omcStateDir = (0, import_path174.join)(getOmcRoot(cwd2), "state");
+      const omcStateDir = (0, import_path168.join)(getOmcRoot(cwd2), "state");
       sessionSummary = readSessionSummary(omcStateDir, currentSessionId);
       const shouldSpawn = !sessionSummary?.generatedAt || Date.now() - new Date(sessionSummary.generatedAt).getTime() > 6e4;
       if (shouldSpawn) {
@@ -102553,7 +97484,7 @@ async function mainImpl(watchMode = false, skipInit = false) {
       apiKeyMode: detectApiKeySource(cwd2) !== null,
       subscriptionType: subscriptionInfo.subscriptionType,
       rateLimitTier: subscriptionInfo.rateLimitTier,
-      profileName: process.env.CLAUDE_CONFIG_DIR ? (0, import_path174.basename)(process.env.CLAUDE_CONFIG_DIR).replace(/^\./, "") : null,
+      profileName: process.env.CLAUDE_CONFIG_DIR ? (0, import_path168.basename)(process.env.CLAUDE_CONFIG_DIR).replace(/^\./, "") : null,
       sessionSummary,
       lastToolName: transcriptData.lastToolName,
       payloadEstimate
@@ -102570,10 +97501,10 @@ async function mainImpl(watchMode = false, skipInit = false) {
     }
     if (config2.contextLimitWarning.autoCompact && context.contextPercent >= config2.contextLimitWarning.threshold) {
       try {
-        const omcStateDir = (0, import_path174.join)(getOmcRoot(cwd2), "state");
-        (0, import_fs146.mkdirSync)(omcStateDir, { recursive: true });
-        const triggerFile = (0, import_path174.join)(omcStateDir, "compact-requested.json");
-        (0, import_fs146.writeFileSync)(
+        const omcStateDir = (0, import_path168.join)(getOmcRoot(cwd2), "state");
+        (0, import_fs140.mkdirSync)(omcStateDir, { recursive: true });
+        const triggerFile = (0, import_path168.join)(omcStateDir, "compact-requested.json");
+        (0, import_fs140.writeFileSync)(
           triggerFile,
           JSON.stringify({
             requestedAt: (/* @__PURE__ */ new Date()).toISOString(),
@@ -102615,10 +97546,11 @@ async function mainImpl(watchMode = false, skipInit = false) {
 function main2(watchMode = false, skipInit = false) {
   return withWorktreePathRenderScope(() => mainImpl(watchMode, skipInit));
 }
-var import_fs146, import_promises33, import_path174, import_child_process50, import_url23, SAME_WINDOW_TOLERANCE_MS, lastSummarySpawnTimestamp, summaryProcessPid;
+var import_fs140, import_promises32, import_path168, import_child_process49, import_url23, SAME_WINDOW_TOLERANCE_MS, lastSummarySpawnTimestamp, summaryProcessPid;
 var init_hud = __esm({
   "src/hud/index.ts"() {
     "use strict";
+    init_windows_search();
     init_stdin();
     init_transcript();
     init_state3();
@@ -102633,13 +97565,14 @@ var init_hud = __esm({
     init_version();
     init_auto_update();
     init_worktree_paths();
-    import_fs146 = require("fs");
-    import_promises33 = require("fs/promises");
-    import_path174 = require("path");
-    import_child_process50 = require("child_process");
+    import_fs140 = require("fs");
+    import_promises32 = require("fs/promises");
+    import_path168 = require("path");
+    import_child_process49 = require("child_process");
     import_url23 = require("url");
     init_worktree_paths();
     init_config_dir();
+    hardenWindowsExeSearch();
     SAME_WINDOW_TOLERANCE_MS = 60 * 1e3;
     lastSummarySpawnTimestamp = 0;
     summaryProcessPid = null;
@@ -102654,6 +97587,7 @@ __export(index_exports, {
   buildProgram: () => buildProgram
 });
 module.exports = __toCommonJS(index_exports);
+init_windows_search();
 
 // node_modules/commander/esm.mjs
 var import_index = __toESM(require_commander(), 1);
@@ -103168,8 +98102,8 @@ var chalkStderr = createChalk({ level: stderrColor ? stderrColor.level : 0 });
 var source_default = chalk;
 
 // src/cli/index.ts
-var import_path175 = require("path");
-var import_fs147 = require("fs");
+var import_path169 = require("path");
+var import_fs141 = require("fs");
 init_config_dir();
 init_env_vars();
 init_loader();
@@ -103331,7 +98265,12 @@ function containerUriToHostUri(uri, context) {
   if (!context || !uri.startsWith("file://")) {
     return uri;
   }
-  return (0, import_url4.pathToFileURL)(containerPathToHostPath((0, import_url4.fileURLToPath)(uri), context)).href;
+  const containerPath = containerFileUriToPath(uri);
+  if (containerPath === null) {
+    return uri;
+  }
+  const hostPath = containerPathToHostPath(containerPath, context);
+  return hostPath === containerPath ? uri : (0, import_url4.pathToFileURL)(hostPath).href;
 }
 function resolveDevContainerConfigPath(workspaceRoot) {
   let dir = workspaceRoot;
@@ -103467,14 +98406,14 @@ function scoreContainerMatch(inspect, hostWorkspaceRoot, configFilePath) {
   let hasDevContainerLabelMatch = false;
   const expectedLocalFolder = configFilePath ? deriveHostDevContainerRoot(configFilePath) : (0, import_path12.resolve)(hostWorkspaceRoot);
   for (const label of DEVCONTAINER_LOCAL_FOLDER_LABELS) {
-    if (labels[label] && (0, import_path12.resolve)(labels[label]) === expectedLocalFolder) {
+    if (labels[label] && isSameHostPath(labels[label], expectedLocalFolder)) {
       score += 4;
       hasDevContainerLabelMatch = true;
     }
   }
   if (configFilePath) {
     for (const label of DEVCONTAINER_CONFIG_FILE_LABELS) {
-      if (labels[label] && (0, import_path12.resolve)(labels[label]) === configFilePath) {
+      if (labels[label] && isSameHostPath(labels[label], configFilePath)) {
         score += 3;
         hasDevContainerLabelMatch = true;
       }
@@ -103486,6 +98425,9 @@ function scoreContainerMatch(inspect, hostWorkspaceRoot, configFilePath) {
   }
   return score;
 }
+function isSameHostPath(left, right) {
+  return (0, import_path12.relative)((0, import_path12.resolve)(left), (0, import_path12.resolve)(right)) === "";
+}
 function normalizeContainerPath(filePath) {
   return import_path13.posix.normalize(filePath.replace(/\\/g, "/"));
 }
@@ -103493,6 +98435,14 @@ function containerPathToFileUri(filePath) {
   const normalizedPath = normalizeContainerPath(filePath);
   const encodedPath = normalizedPath.split("/").map((segment) => encodeURIComponent(segment)).join("/");
   return `file://${encodedPath.startsWith("/") ? encodedPath : `/${encodedPath}`}`;
+}
+function containerFileUriToPath(uri) {
+  try {
+    const { pathname } = new URL(uri);
+    return /%2f/i.test(pathname) ? null : normalizeContainerPath(decodeURIComponent(pathname));
+  } catch {
+    return null;
+  }
 }
 function runDocker(args) {
   const result = (0, import_child_process2.spawnSync)("docker", args, {
@@ -103878,7 +98828,7 @@ var LspClient = class _LspClient {
 Install with: ${this.serverConfig.installHint}`
       );
     }
-    return new Promise((resolve48, reject) => {
+    return new Promise((resolve49, reject) => {
       const command = this.devContainerContext ? "docker" : this.serverConfig.command;
       const args = this.devContainerContext ? ["exec", "-i", "-w", this.devContainerContext.containerWorkspaceRoot, this.devContainerContext.containerId, this.serverConfig.command, ...this.serverConfig.args] : this.serverConfig.args;
       this.process = (0, import_child_process4.spawn)(command, args, {
@@ -103926,7 +98876,7 @@ Install with: ${this.serverConfig.installHint}`
           return;
         }
         this.initialized = true;
-        resolve48();
+        resolve49();
       }).catch((error2) => {
         if (this.process === child && this.connectionGeneration === connectionGeneration) {
           this.forceKill();
@@ -104185,13 +99135,13 @@ ${content}`;
     const message2 = `Content-Length: ${Buffer.byteLength(content)}\r
 \r
 ${content}`;
-    return new Promise((resolve48, reject) => {
+    return new Promise((resolve49, reject) => {
       const timeoutHandle = setTimeout(() => {
         this.pendingRequests.delete(id);
         reject(new Error(`LSP request '${method}' timed out after ${effectiveTimeout}ms`));
       }, effectiveTimeout);
       this.pendingRequests.set(id, {
-        resolve: resolve48,
+        resolve: resolve49,
         reject,
         timeout: timeoutHandle
       });
@@ -104371,7 +99321,7 @@ ${content}`;
     });
     this.assertCurrentConnection(child, connectionGeneration);
     this.openDocuments.add(hostUri);
-    await new Promise((resolve48) => setTimeout(resolve48, 100));
+    await new Promise((resolve49) => setTimeout(resolve49, 100));
     this.assertCurrentConnection(child, connectionGeneration);
     this.throwIfTerminal();
   }
@@ -104603,7 +99553,7 @@ ${content}`;
     if (this.diagnostics.has(key)) {
       return Promise.resolve();
     }
-    return new Promise((resolve48, reject) => {
+    return new Promise((resolve49, reject) => {
       let resolved = false;
       const removeWaiter = (waiter2) => {
         const waiters = this.diagnosticWaiters.get(key);
@@ -104622,7 +99572,7 @@ ${content}`;
           if (error2) {
             reject(error2);
           } else {
-            resolve48();
+            resolve49();
           }
         }
       };
@@ -104630,7 +99580,7 @@ ${content}`;
         if (!resolved) {
           resolved = true;
           removeWaiter(waiter);
-          resolve48();
+          resolve49();
         }
       }, timeoutMs);
       const existing = this.diagnosticWaiters.get(key) || [];
@@ -106455,6 +101405,9 @@ var LockTimeoutError = class extends Error {
     this.lastHolder = lastHolder;
     this.name = "LockTimeoutError";
   }
+  lockPath;
+  timeout;
+  lastHolder;
 };
 var LockError = class extends Error {
   constructor(message2) {
@@ -106746,7 +101699,7 @@ var SessionLock = class {
   }
 };
 function sleep(ms) {
-  return new Promise((resolve48) => setTimeout(resolve48, ms));
+  return new Promise((resolve49) => setTimeout(resolve49, ms));
 }
 
 // src/tools/python-repl/socket-client.ts
@@ -106759,6 +101712,8 @@ var SocketConnectionError = class extends Error {
     this.originalError = originalError;
     this.name = "SocketConnectionError";
   }
+  socketPath;
+  originalError;
 };
 var SocketTimeoutError = class extends Error {
   constructor(message2, timeoutMs) {
@@ -106766,6 +101721,7 @@ var SocketTimeoutError = class extends Error {
     this.timeoutMs = timeoutMs;
     this.name = "SocketTimeoutError";
   }
+  timeoutMs;
 };
 var JsonRpcError = class extends Error {
   constructor(message2, code, data) {
@@ -106774,9 +101730,11 @@ var JsonRpcError = class extends Error {
     this.data = data;
     this.name = "JsonRpcError";
   }
+  code;
+  data;
 };
 async function sendSocketRequest(socketPath, method, params, timeout = 6e4) {
-  return new Promise((resolve48, reject) => {
+  return new Promise((resolve49, reject) => {
     const id = (0, import_crypto6.randomUUID)();
     const request = {
       jsonrpc: "2.0",
@@ -106866,7 +101824,7 @@ async function sendSocketRequest(socketPath, method, params, timeout = 6e4) {
           }
           if (!settled) {
             settled = true;
-            resolve48(response.result);
+            resolve49(response.result);
           }
         } catch (e) {
           if (!settled) {
@@ -110280,7 +105238,7 @@ function mergeArrays(fieldName, base, incoming) {
       return mergeScalarArray(base, incoming);
   }
 }
-function mergeByKey(base, incoming, keyFn, resolve48) {
+function mergeByKey(base, incoming, keyFn, resolve49) {
   const seen = /* @__PURE__ */ new Map();
   for (const item of base) {
     seen.set(keyFn(item), item);
@@ -110289,7 +105247,7 @@ function mergeByKey(base, incoming, keyFn, resolve48) {
     const key = keyFn(item);
     const existing = seen.get(key);
     if (existing) {
-      seen.set(key, resolve48(existing, item));
+      seen.set(key, resolve49(existing, item));
     } else {
       seen.set(key, item);
     }
@@ -110897,7 +105855,7 @@ async function collectMatchesFromFile(target, options) {
   const fileMtime = (0, import_fs37.existsSync)(target.filePath) ? (0, import_fs37.statSync)(target.filePath).mtimeMs : 0;
   if (target.sourceType === "omc-session-summary" && target.filePath.endsWith(".json")) {
     try {
-      const payload = JSON.parse(await import("fs/promises").then((fs30) => fs30.readFile(target.filePath, "utf-8")));
+      const payload = JSON.parse(await import("fs/promises").then((fs31) => fs31.readFile(target.filePath, "utf-8")));
       const entry2 = buildSearchableEntry(payload, target.sourceType);
       if (!entry2) return;
       if (options.sessionId && entry2.sessionId !== options.sessionId) return;
@@ -114514,6 +109472,7 @@ var LookoutError = class extends Error {
     this.exitCode = exitCode;
     this.name = "LookoutError";
   }
+  exitCode;
 };
 
 // src/features/lookout/workspace.ts
@@ -116104,6 +111063,7 @@ function recordSkillTriggerShadow(prompt, fetchFn) {
   return recordJudgment("skill-trigger", {
     state: { prompt, source: "user-prompt-submit" },
     twin: () => getAllKeywords(prompt),
+    mapHeuristic: (keywords, questionSet) => keywords.length > 0 ? keywords[0] : "none",
     mapAnswer: (answer) => {
       const choice = answer.choice?.toLowerCase();
       if (choice === "none" || !choice) return [];
@@ -116117,6 +111077,7 @@ function recordIntentShadow(prompt, fetchFn) {
   return recordJudgment("intent", {
     state: { prompt, mode_name: "intent" },
     twin: () => INTENT_SLASH_PATTERN.test(prompt),
+    mapHeuristic: (result, questionSet) => result,
     mapAnswer: (answer) => {
       return answer.noul === true;
     },
@@ -116131,6 +111092,7 @@ function recordTaskSizeShadow(prompt, fetchFn) {
   return recordJudgment("task-size", {
     state: { prompt, source: "user-prompt-submit" },
     twin: () => classifyTaskSize(prompt),
+    mapHeuristic: (result, questionSet) => result.size,
     mapAnswer: (answer) => {
       const choice = answer.choice?.toLowerCase();
       const sizeMap = {
@@ -117854,8 +112816,44 @@ var SKILL_ENTRIES = [
   entry({ name: "tdd", kind: "skill", decision: "keep", riskClass: "advisory", owner: REGISTRY_OWNER, notes: "Test-first discipline at pre-agreed seams; opt-in, never a default gate." }),
   entry({ name: "ai-slop-cleaner", kind: "skill", decision: "keep", riskClass: "advisory", owner: REGISTRY_OWNER, notes: "Opt-in review tool; never a default gate." }),
   entry({ name: "minimal-code-discipline", kind: "skill", decision: "keep", riskClass: "advisory", owner: REGISTRY_OWNER, notes: "Opt-in writing-time discipline; never a default gate." }),
+  entry({ name: "principles", kind: "skill", decision: "keep", riskClass: "advisory", owner: REGISTRY_OWNER, notes: "Opt-in cross-cutting principle library (idea credit: pstack); travels with lane delegation briefs; never a default gate." }),
+  entry({ name: "benchmark-checklist", kind: "skill", decision: "keep", riskClass: "advisory", owner: REGISTRY_OWNER, notes: "Opt-in measurement discipline before reporting or acting on any measured number (idea credit: pstack); never a default gate." }),
+  entry({ name: "hillclimb", kind: "skill", decision: "keep", riskClass: "advisory", owner: REGISTRY_OWNER, notes: "Opt-in single-metric climbing loop with a fixed baseline, one commit per verified win, and a decision trail (idea credit: pstack); never a default gate." }),
+  entry({ name: "reflect", kind: "skill", decision: "keep", riskClass: "advisory", owner: REGISTRY_OWNER, notes: "Opt-in three-reviewer transcript audit proposing skill edits; proposes only, applies with user go (idea credit: pstack)." }),
+  entry({ name: "personal-mode", kind: "skill", decision: "keep", riskClass: "advisory", owner: REGISTRY_OWNER, notes: "Opt-in user-level behavior profile drafted from transcripts with cited evidence; layers under project skills, never holds secrets (idea credit: pstack)." }),
+  entry({ name: "stacked-delivery", kind: "skill", decision: "keep", riskClass: "advisory", owner: REGISTRY_OWNER, notes: "Opt-in linear stacked-PR delivery with patch-id verdicts and bottom-up landing; never merges (idea credit: pstack)." }),
+  entry({ name: "arena", kind: "skill", decision: "keep", riskClass: "advisory", owner: REGISTRY_OWNER, notes: "Opt-in multi-candidate bakeoff on Task fan-out or team worktree isolation (idea credit: pstack); never a default gate." }),
+  entry({ name: "interrogate", kind: "skill", decision: "keep", riskClass: "advisory", owner: REGISTRY_OWNER, notes: "Opt-in adversarial multi-reviewer panel (idea credit: pstack); advisory verdict to review, never gates or merges on its own." }),
+  entry({ name: "babysit", kind: "skill", decision: "keep", riskClass: "advisory", owner: REGISTRY_OWNER, notes: "Opt-in PR watch-and-fix loop on the watch-pr verdict policy (idea credit: pstack); never merges, rebases, force-pushes, or self-approves." }),
+  entry({ name: "models", kind: "skill", decision: "keep", riskClass: "advisory", owner: REGISTRY_OWNER, notes: "Opt-in setup wizard for team.roleRouting role-based model routing (idea credit: pstack setup-pstack); writes config only, never routes a live team." }),
+  entry({ name: "create-formal-verification-skill", kind: "skill", decision: "keep", riskClass: "advisory", owner: REGISTRY_OWNER, notes: "Opt-in generator of project-local formal verification skills, TLA+/Lean/Kani by property shape (idea credit: pstack); one property per generated skill." }),
+  entry({ name: "maintain-formal-verification-skill", kind: "skill", decision: "keep", riskClass: "advisory", owner: REGISTRY_OWNER, notes: "Opt-in drift re-sync for existing formal verification skills (idea credit: pstack); the rerun is the resync." }),
+  entry({ name: "create-verification-skill", kind: "skill", decision: "keep", riskClass: "advisory", owner: REGISTRY_OWNER, notes: "Opt-in generator of the project-local verify skill, commands discovered by execution with a feature map (idea credit: pstack)." }),
+  entry({ name: "maintain-verification-skill", kind: "skill", decision: "keep", riskClass: "advisory", owner: REGISTRY_OWNER, notes: "Opt-in re-sync of the project verify skill when its commands drift (idea credit: pstack); the rerun is the resync." }),
+  entry({ name: "statechart", kind: "skill", decision: "keep", riskClass: "advisory", owner: REGISTRY_OWNER, notes: "Opt-in TLA+ model checker with a Mermaid statechart and shortest bug paths per broken rule (idea credit: pstack); scratch-folder analysis, never edits the repo." }),
+  entry({ name: "why", kind: "skill", decision: "keep", riskClass: "advisory", owner: REGISTRY_OWNER, notes: "Opt-in evidence-first investigation with human-rulings epistemics (idea credit: pstack); answers, never edits." }),
+  entry({ name: "how", kind: "skill", decision: "keep", riskClass: "advisory", owner: REGISTRY_OWNER, notes: "Opt-in explorer/explainer subsystem walkthrough (idea credit: pstack); cites file:line." }),
+  entry({ name: "correct", kind: "skill", decision: "keep", riskClass: "advisory", owner: REGISTRY_OWNER, notes: "Opt-in repeated-mistake elimination ladder, lint over type over runtime over script over text (idea credit: pstack)." }),
+  entry({ name: "blast-radius", kind: "skill", decision: "keep", riskClass: "advisory", owner: REGISTRY_OWNER, notes: "Opt-in impact analysis with executed proof per certain/likely dependent (idea credit: pstack); reports, never edits." }),
+  entry({ name: "architect", kind: "skill", decision: "keep", riskClass: "advisory", owner: REGISTRY_OWNER, notes: "Opt-in parallel design exploration before cross-boundary code (idea credit: pstack); records decision with rejected alternatives." }),
+  entry({ name: "figure-it-out", kind: "skill", decision: "keep", riskClass: "advisory", owner: REGISTRY_OWNER, notes: "Opt-in bespoke playbook designer stored under .omc/playbooks/ and validated by check-omc-playbooks (idea credit: pstack)." }),
+  entry({ name: "show-me-your-work", kind: "skill", decision: "keep", riskClass: "advisory", owner: REGISTRY_OWNER, notes: "Opt-in TSV decision trail for auditable autonomous work (idea credit: pstack); append-only." }),
+  entry({ name: "technical-writing", kind: "skill", decision: "keep", riskClass: "advisory", owner: REGISTRY_OWNER, notes: "Opt-in layered prose standard for shipping surfaces (idea credit: pstack); composes with minimal-prose-discipline." }),
+  entry({ name: "typescript-best-practices", kind: "skill", decision: "keep", riskClass: "advisory", owner: REGISTRY_OWNER, notes: "Opt-in TS syntax grounding for type-system discipline (idea credit: pstack)." }),
+  entry({ name: "teach", kind: "skill", decision: "keep", riskClass: "advisory", owner: REGISTRY_OWNER, notes: "Opt-in how+why composition with a landing check (idea credit: pstack)." }),
+  entry({ name: "bro", kind: "skill", decision: "keep", riskClass: "advisory", owner: REGISTRY_OWNER, notes: "Opt-in plain-language restatement keeping every fact (idea credit: pstack)." }),
+  entry({ name: "sharpen", kind: "skill", decision: "keep", riskClass: "advisory", owner: REGISTRY_OWNER, notes: "Opt-in task aiming: consumer, done-check, non-goals (idea credit: pstack)." }),
+  entry({ name: "in-your-own-words", kind: "skill", decision: "keep", riskClass: "advisory", owner: REGISTRY_OWNER, notes: "Opt-in goal playback before work starts (idea credit: pstack)." }),
+  entry({ name: "recall", kind: "skill", decision: "keep", riskClass: "advisory", owner: REGISTRY_OWNER, notes: "Opt-in artifact-first context recovery (idea credit: pstack); complements native session state." }),
+  entry({ name: "ketchup", kind: "skill", decision: "keep", riskClass: "advisory", owner: REGISTRY_OWNER, notes: "Opt-in session catch-up summary (idea credit: pstack)." }),
+  entry({ name: "ketchup-video", kind: "skill", decision: "keep", riskClass: "advisory", owner: REGISTRY_OWNER, notes: "Opt-in session catch-up as a short subtitled slide video on ketchup content (idea credit: pstack); read-only outside its scratch render." }),
+  entry({ name: "what-did-i-get-done", kind: "skill", decision: "keep", riskClass: "advisory", owner: REGISTRY_OWNER, notes: "Opt-in authored-commit summary grouped by theme (idea credit: pstack)." }),
+  entry({ name: "fix-ci", kind: "skill", decision: "keep", riskClass: "advisory", owner: REGISTRY_OWNER, notes: "Opt-in CI failure triage: real/flaky/environmental before any fix (idea credit: pstack)." }),
+  entry({ name: "fix-merge-conflicts", kind: "skill", decision: "keep", riskClass: "advisory", owner: REGISTRY_OWNER, notes: "Opt-in both-intent-preserving conflict resolution (idea credit: pstack); no force-push to shared branches." }),
+  entry({ name: "get-pr-comments", kind: "skill", decision: "keep", riskClass: "advisory", owner: REGISTRY_OWNER, notes: "Opt-in review-thread dedupe and fix/dismiss/ask triage (idea credit: pstack); reports, never edits." }),
   entry({ name: "agent-doc-discipline", kind: "skill", decision: "keep", riskClass: "advisory", owner: REGISTRY_OWNER, notes: "Opt-in writing-time discipline for agent-facing documents; mandatory at drydock seed generation and launch C5 sediment; never a default gate." }),
   entry({ name: "minimal-prose-discipline", kind: "skill", decision: "keep", riskClass: "advisory", owner: REGISTRY_OWNER, notes: "Opt-in writing-time discipline for the prose an agent speaks to a human; suspends itself for security warnings, irreversible-action confirmations, and multi-step sequences; never a default gate." }),
+  entry({ name: "sdd", kind: "skill", decision: "keep", riskClass: "advisory", owner: REGISTRY_OWNER, notes: "Opt-in spec-driven development workflow (lite by default, full via phases/); never a default gate." }),
   entry({ name: "launch", kind: "skill", decision: "keep", riskClass: "advisory", owner: REGISTRY_OWNER, notes: "Opt-in governed delivery pipeline (spec -> tickets -> frontier); never a default gate." }),
   entry({ name: "intent", kind: "skill", decision: "keep", riskClass: "advisory", owner: REGISTRY_OWNER, notes: "Opt-in internal requirements intake for non-engineer contributors; never a default gate, never implements." }),
   entry({ name: "ask-navigator", kind: "skill", decision: "keep", riskClass: "advisory", owner: REGISTRY_OWNER, notes: "Opt-in navigator: charts foggy efforts into decision-ticket maps; never a default gate, never builds." }),
@@ -117963,6 +112961,8 @@ var HookTimeoutError = class extends Error {
     this.timeoutMs = timeoutMs;
     this.name = "TimeoutError";
   }
+  hookId;
+  timeoutMs;
 };
 function matcherInputFor(event, input) {
   if (input === null || typeof input !== "object") return void 0;
@@ -118137,7 +113137,7 @@ async function runShadowObservation(hookType, legacyOutput, legacyDurationMs) {
       const dispatchResult = await Promise.race([
         dispatcher.dispatch(event, {}),
         new Promise(
-          (resolve48) => setTimeout(() => resolve48(null), SHADOW_OBSERVATION_BUDGET_MS)
+          (resolve49) => setTimeout(() => resolve49(null), SHADOW_OBSERVATION_BUDGET_MS)
         )
       ]);
       shadowDurationMs = performance.now() - started;
@@ -120761,6 +115761,13 @@ var CLAUDE_DEFAULT_CONTEXT_LIMIT = process.env.ANTHROPIC_1M_CONTEXT === "true" |
 
 // src/hooks/preemptive-compaction/jev-shadow.ts
 init_jev();
+var CONTEXT_PRUNING_POINT = "context-pruning";
+function readStalenessLabels() {
+  const questions = getJudgmentPoint(CONTEXT_PRUNING_POINT).questions[0];
+  const resolved = typeof questions === "function" ? questions() : questions;
+  return Object.keys(resolved.staleness?.criteria ?? {});
+}
+var STALENESS_LABELS = readStalenessLabels();
 
 // src/hooks/preemptive-compaction/index.ts
 var DEBUG4 = process.env.PREEMPTIVE_COMPACTION_DEBUG === "1";
@@ -120943,127 +115950,15 @@ init_codebase_map();
 init_agents_overlay();
 init_code_simplifier();
 
-// src/team/task-file-ops.ts
-var import_fs109 = require("fs");
-var import_path133 = require("path");
-init_worktree_paths();
-init_config_dir();
-init_tmux_session();
-init_fs_utils();
-init_platform();
-init_state_paths();
-
 // src/team/index.ts
 init_tmux_session();
-
-// src/team/inbox-outbox.ts
-var import_fs110 = require("fs");
-var import_path134 = require("path");
-init_config_dir();
-init_tmux_session();
-init_fs_utils();
-var MAX_INBOX_READ_SIZE = 10 * 1024 * 1024;
-
-// src/team/team-registration.ts
-var import_fs111 = require("fs");
-var import_path135 = require("path");
-init_config_dir();
-init_worktree_paths();
-init_tmux_session();
-init_fs_utils();
-init_file_lock();
-
-// src/team/heartbeat.ts
-var import_fs112 = require("fs");
-var import_path136 = require("path");
-init_tmux_session();
-init_fs_utils();
-init_worktree_paths();
-
-// src/team/outbox-reader.ts
-var import_fs113 = require("fs");
-var import_path137 = require("path");
-init_config_dir();
-init_fs_utils();
-init_tmux_session();
-var MAX_OUTBOX_READ_SIZE = 10 * 1024 * 1024;
-
-// src/team/team-status.ts
-var import_fs114 = require("fs");
-var import_path138 = require("path");
-init_config_dir();
-init_tmux_session();
-
-// src/team/usage-tracker.ts
-init_zod();
-init_worktree_paths();
-init_fs_utils();
-var nonemptyString = external_exports.string().refine((value) => value.trim().length > 0);
-var taskUsageRecordSchema = external_exports.object({
-  taskId: nonemptyString,
-  workerName: nonemptyString,
-  provider: external_exports.enum(["codex", "gemini"]),
-  model: external_exports.string(),
-  startedAt: nonemptyString,
-  completedAt: nonemptyString,
-  wallClockMs: external_exports.number().finite().nonnegative().max(Number.MAX_SAFE_INTEGER),
-  promptChars: external_exports.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER),
-  responseChars: external_exports.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER)
-});
-var MAX_SAFE_DURATION = { coefficient: BigInt(Number.MAX_SAFE_INTEGER), scale: 0 };
-
-// src/team/mcp-team-bridge.ts
-var import_child_process34 = require("child_process");
-var import_fs115 = require("fs");
-var import_path139 = require("path");
-init_fs_utils();
-init_worktree_paths();
-
-// src/team/audit-log.ts
-init_fs_utils();
-init_worktree_paths();
-var DEFAULT_MAX_LOG_SIZE = 5 * 1024 * 1024;
-
-// src/team/mcp-team-bridge.ts
-init_models();
-init_prompt_helpers();
-var MAX_BUFFER_SIZE = 10 * 1024 * 1024;
-var INBOX_ROTATION_THRESHOLD = 10 * 1024 * 1024;
-var MAX_CODEX_OUTPUT_SIZE = 1024 * 1024;
-
-// src/team/worker-health.ts
-init_tmux_session();
-init_tmux_utils();
-
-// src/team/worker-restart.ts
-init_fs_utils();
-init_worktree_paths();
-
-// src/team/unified-team.ts
-init_config_dir();
-
-// src/team/message-router.ts
-init_config_dir();
-init_fs_utils();
-init_tmux_session();
-
-// src/team/task-router.ts
-init_role_router();
-
-// src/team/index.ts
 init_git_worktree();
 init_merge_coordinator();
-
-// src/team/summary-report.ts
-init_fs_utils();
-init_worktree_paths();
-
-// src/team/index.ts
 init_state_paths();
 
 // src/hooks/factcheck/checks.ts
-var import_fs116 = require("fs");
-var import_path140 = require("path");
+var import_fs109 = require("fs");
+var import_path133 = require("path");
 
 // src/hooks/factcheck/config.ts
 var import_os22 = require("os");
@@ -121106,16 +116001,16 @@ var DEFAULT_GUARDS_CONFIG = {
 };
 
 // src/hooks/factcheck/sentinel.ts
-var import_fs117 = require("fs");
+var import_fs110 = require("fs");
 
 // src/team/index.ts
 init_model_contract();
 
 // src/team/cli-detection.ts
 init_model_contract();
-var import_fs118 = require("fs");
-var import_path141 = __toESM(require("path"), 1);
-var import_child_process35 = require("child_process");
+var import_fs111 = require("fs");
+var import_path134 = __toESM(require("path"), 1);
+var import_child_process34 = require("child_process");
 var RESOLVE_TIMEOUT_MS = 5e3;
 var VERSION_TIMEOUT_MS = 3e3;
 var DEFAULT_PATHEXT2 = ".COM;.EXE;.BAT;.CMD";
@@ -121134,7 +116029,7 @@ function platformModel(platform) {
   return {
     isWindows: isWindows2,
     finder: isWindows2 ? "where.exe" : "which",
-    pathFlavor: isWindows2 ? import_path141.default.win32 : import_path141.default.posix
+    pathFlavor: isWindows2 ? import_path134.default.win32 : import_path134.default.posix
   };
 }
 function asText(value) {
@@ -121160,7 +116055,7 @@ function errorCode(error2) {
 function resolveCliPath(binary, model) {
   let result;
   try {
-    result = (0, import_child_process35.spawnSync)(model.finder, [binary], {
+    result = (0, import_child_process34.spawnSync)(model.finder, [binary], {
       timeout: RESOLVE_TIMEOUT_MS,
       encoding: "utf8",
       shell: false,
@@ -121207,14 +116102,14 @@ function isBatchPath(resolvedPath, model) {
 }
 function isValidatedComspec(candidate) {
   if (!candidate || /[\0\r\n]/.test(candidate) || /[\\/]$/.test(candidate)) return false;
-  if (!import_path141.default.win32.isAbsolute(candidate)) return false;
-  return import_path141.default.win32.basename(candidate).toLowerCase() === "cmd.exe";
+  if (!import_path134.default.win32.isAbsolute(candidate)) return false;
+  return import_path134.default.win32.basename(candidate).toLowerCase() === "cmd.exe";
 }
 function validatedComspec() {
   const configured = process.env.ComSpec ?? process.env.COMSPEC;
   if (isValidatedComspec(configured)) return configured;
   try {
-    if ((0, import_fs118.existsSync)(DEFAULT_COMSPEC) && isValidatedComspec(DEFAULT_COMSPEC)) return DEFAULT_COMSPEC;
+    if ((0, import_fs111.existsSync)(DEFAULT_COMSPEC) && isValidatedComspec(DEFAULT_COMSPEC)) return DEFAULT_COMSPEC;
   } catch {
   }
   return void 0;
@@ -121228,7 +116123,7 @@ function runBatchVersion(resolvedPath) {
   const comspec = validatedComspec();
   if (!comspec) return void 0;
   try {
-    return (0, import_child_process35.spawnSync)(
+    return (0, import_child_process34.spawnSync)(
       comspec,
       ["/d", "/v:off", "/s", "/c", `""${resolvedPath}" --version"`],
       {
@@ -121281,7 +116176,7 @@ function executeCliProbe(binary, platform) {
   }
   let directResult;
   try {
-    directResult = (0, import_child_process35.spawnSync)(resolvedPath, ["--version"], directVersionOptions());
+    directResult = (0, import_child_process34.spawnSync)(resolvedPath, ["--version"], directVersionOptions());
   } catch {
     return failedVersionResult(resolvedPath);
   }
@@ -121313,12 +116208,6 @@ function probeCli(binary, platform = process.platform) {
 // src/team/index.ts
 init_worker_bootstrap();
 init_worker_launch_ack();
-
-// src/team/tmux-comm.ts
-var import_promises26 = require("fs/promises");
-var import_path142 = require("path");
-init_tmux_session();
-init_state_paths();
 
 // src/team/layout-stabilizer.ts
 init_tmux_utils();
@@ -122376,9 +117265,9 @@ async function executeTeamApiOperation(operation, args, fallbackCwd) {
 init_scaling();
 
 // src/hooks/team-leader-nudge-hook.ts
-var import_promises28 = require("fs/promises");
-var import_fs119 = require("fs");
-var import_path144 = require("path");
+var import_promises27 = require("fs/promises");
+var import_fs112 = require("fs");
+var import_path136 = require("path");
 init_events();
 init_leader_nudge_guidance();
 init_swallowed_error();
@@ -122397,9 +117286,9 @@ init_context_injector();
 init_skills();
 
 // src/features/session-friction-report/index.ts
-var import_child_process36 = require("child_process");
-var import_fs120 = require("fs");
-var import_path145 = require("path");
+var import_child_process35 = require("child_process");
+var import_fs113 = require("fs");
+var import_path137 = require("path");
 var import_readline3 = require("readline");
 init_worktree_paths();
 init_config_dir();
@@ -122431,38 +117320,38 @@ function parseSinceSpec2(since) {
 }
 function getMainRepoRoot2(projectRoot) {
   try {
-    const gitCommonDir = (0, import_child_process36.execFileSync)("git", ["rev-parse", "--git-common-dir"], {
+    const gitCommonDir = (0, import_child_process35.execFileSync)("git", ["rev-parse", "--git-common-dir"], {
       cwd: projectRoot,
       encoding: "utf-8",
       stdio: ["pipe", "pipe", "pipe"],
       windowsHide: true
     }).trim();
-    const mainRepoRoot = (0, import_path145.dirname)((0, import_path145.resolve)(projectRoot, gitCommonDir));
+    const mainRepoRoot = (0, import_path137.dirname)((0, import_path137.resolve)(projectRoot, gitCommonDir));
     return mainRepoRoot === projectRoot ? null : mainRepoRoot;
   } catch {
     return null;
   }
 }
 function getClaudeWorktreeParent2(projectRoot) {
-  const marker = `${(0, import_path145.normalize)("/.claude/worktrees/")}`;
-  const normalizedRoot = (0, import_path145.normalize)(projectRoot);
+  const marker = `${(0, import_path137.normalize)("/.claude/worktrees/")}`;
+  const normalizedRoot = (0, import_path137.normalize)(projectRoot);
   const idx = normalizedRoot.indexOf(marker);
   return idx === -1 ? null : normalizedRoot.slice(0, idx) || null;
 }
 function listJsonFiles(rootDir) {
-  if (!(0, import_fs120.existsSync)(rootDir)) return [];
+  if (!(0, import_fs113.existsSync)(rootDir)) return [];
   const files = [];
   const stack = [rootDir];
   while (stack.length > 0) {
     const current = stack.pop();
     let entries;
     try {
-      entries = (0, import_fs120.readdirSync)(current, { withFileTypes: true });
+      entries = (0, import_fs113.readdirSync)(current, { withFileTypes: true });
     } catch {
       continue;
     }
     for (const entry2 of entries) {
-      const fullPath = (0, import_path145.join)(current, entry2.name);
+      const fullPath = (0, import_path137.join)(current, entry2.name);
       if (entry2.isDirectory()) {
         stack.push(fullPath);
       } else if (entry2.isFile() && (entry2.name.endsWith(".jsonl") || entry2.name.endsWith(".json"))) {
@@ -122474,9 +117363,9 @@ function listJsonFiles(rootDir) {
 }
 function isWithinProject2(projectPath, projectRoots2) {
   if (!projectPath) return false;
-  const normalizedProjectPath = (0, import_path145.normalize)((0, import_path145.resolve)(projectPath)).replace(/\\/g, "/");
+  const normalizedProjectPath = (0, import_path137.normalize)((0, import_path137.resolve)(projectPath)).replace(/\\/g, "/");
   return projectRoots2.some((root2) => {
-    const normalizedRoot = (0, import_path145.normalize)((0, import_path145.resolve)(root2)).replace(/\\/g, "/");
+    const normalizedRoot = (0, import_path137.normalize)((0, import_path137.resolve)(root2)).replace(/\\/g, "/");
     return normalizedProjectPath === normalizedRoot || normalizedProjectPath.startsWith(`${normalizedRoot}/`);
   });
 }
@@ -122506,8 +117395,8 @@ function uniqueSortedTargets2(targets) {
     seen.add(key);
     return true;
   }).sort((a, b) => {
-    const aTime = (0, import_fs120.existsSync)(a.filePath) ? (0, import_fs120.statSync)(a.filePath).mtimeMs : 0;
-    const bTime = (0, import_fs120.existsSync)(b.filePath) ? (0, import_fs120.statSync)(b.filePath).mtimeMs : 0;
+    const aTime = (0, import_fs113.existsSync)(a.filePath) ? (0, import_fs113.statSync)(a.filePath).mtimeMs : 0;
+    const bTime = (0, import_fs113.existsSync)(b.filePath) ? (0, import_fs113.statSync)(b.filePath).mtimeMs : 0;
     return bTime - aTime;
   });
 }
@@ -122515,27 +117404,27 @@ function buildTargets(projectRoot, projectRoots2, scopeMode) {
   const claudeDir = getClaudeConfigDir();
   const targets = [];
   if (scopeMode === "all") {
-    for (const filePath of listJsonFiles((0, import_path145.join)(claudeDir, "projects"))) {
+    for (const filePath of listJsonFiles((0, import_path137.join)(claudeDir, "projects"))) {
       targets.push({ filePath, sourceType: "project-transcript" });
     }
-    for (const filePath of listJsonFiles((0, import_path145.join)(claudeDir, "transcripts"))) {
+    for (const filePath of listJsonFiles((0, import_path137.join)(claudeDir, "transcripts"))) {
       targets.push({ filePath, sourceType: "legacy-transcript" });
     }
   } else {
     for (const root2 of projectRoots2) {
-      for (const filePath of listJsonFiles((0, import_path145.join)(claudeDir, "projects", encodeProjectPath(root2)))) {
+      for (const filePath of listJsonFiles((0, import_path137.join)(claudeDir, "projects", encodeProjectPath(root2)))) {
         targets.push({ filePath, sourceType: "project-transcript" });
       }
     }
-    for (const filePath of listJsonFiles((0, import_path145.join)(claudeDir, "transcripts"))) {
+    for (const filePath of listJsonFiles((0, import_path137.join)(claudeDir, "transcripts"))) {
       targets.push({ filePath, sourceType: "legacy-transcript" });
     }
   }
   const omcRoot = getOmcRoot(projectRoot);
-  for (const filePath of listJsonFiles((0, import_path145.join)(omcRoot, "sessions"))) {
+  for (const filePath of listJsonFiles((0, import_path137.join)(omcRoot, "sessions"))) {
     targets.push({ filePath, sourceType: "omc-session-summary" });
   }
-  for (const filePath of listJsonFiles((0, import_path145.join)(omcRoot, "state"))) {
+  for (const filePath of listJsonFiles((0, import_path137.join)(omcRoot, "state"))) {
     if (filePath.includes("agent-replay-") && filePath.endsWith(".jsonl")) {
       targets.push({ filePath, sourceType: "omc-session-replay" });
     }
@@ -122677,8 +117566,8 @@ function computeSignals(stats) {
   return { score: Math.min(100, score), signals };
 }
 async function scanJsonlTarget(target, sessions, filters) {
-  const fileMtime = (0, import_fs120.existsSync)(target.filePath) ? (0, import_fs120.statSync)(target.filePath).mtimeMs : 0;
-  const reader = (0, import_readline3.createInterface)({ input: (0, import_fs120.createReadStream)(target.filePath, { encoding: "utf-8" }), crlfDelay: Infinity });
+  const fileMtime = (0, import_fs113.existsSync)(target.filePath) ? (0, import_fs113.statSync)(target.filePath).mtimeMs : 0;
+  const reader = (0, import_readline3.createInterface)({ input: (0, import_fs113.createReadStream)(target.filePath, { encoding: "utf-8" }), crlfDelay: Infinity });
   const lastTimestamps = /* @__PURE__ */ new Map();
   try {
     for await (const rawLine of reader) {
@@ -122731,8 +117620,8 @@ async function scanJsonlTarget(target, sessions, filters) {
 async function scanJsonTarget(target, sessions, filters) {
   let record2;
   try {
-    const { readFile: readFile27 } = await import("fs/promises");
-    record2 = JSON.parse(await readFile27(target.filePath, "utf-8"));
+    const { readFile: readFile26 } = await import("fs/promises");
+    record2 = JSON.parse(await readFile26(target.filePath, "utf-8"));
   } catch {
     return;
   }
@@ -122742,14 +117631,14 @@ async function scanJsonTarget(target, sessions, filters) {
   if (filters.projectRoots && filters.projectRoots.length > 0 && projectPath && !isWithinProject2(projectPath, filters.projectRoots)) return;
   if (!matchesProjectScope(target.sourceType, projectPath, filters.projectFilter)) return;
   const timestamp2 = timestampOf(record2);
-  const fileMtime = (0, import_fs120.existsSync)(target.filePath) ? (0, import_fs120.statSync)(target.filePath).mtimeMs : 0;
+  const fileMtime = (0, import_fs113.existsSync)(target.filePath) ? (0, import_fs113.statSync)(target.filePath).mtimeMs : 0;
   const entryEpoch = timestamp2 ? Date.parse(timestamp2) : fileMtime;
   if (filters.sinceEpoch && Number.isFinite(entryEpoch) && entryEpoch < filters.sinceEpoch) return;
   const stats = getStats(sessions, sessionId);
   stats.sources.add(target.sourceType);
   if (projectPath) stats.projectPath = projectPath;
   updateTimeRange(stats, timestamp2);
-  const bytes = (0, import_fs120.existsSync)(target.filePath) ? (0, import_fs120.statSync)(target.filePath).size : 0;
+  const bytes = (0, import_fs113.existsSync)(target.filePath) ? (0, import_fs113.statSync)(target.filePath).size : 0;
   stats.transcriptBytes += bytes;
   stats.transcriptLines += 1;
 }
@@ -122760,7 +117649,7 @@ async function generateSessionFrictionReport(rawOptions = {}) {
   const workingDirectory = validateWorkingDirectory(rawOptions.workingDirectory);
   const currentProjectRoot = resolveToWorktreeRoot(workingDirectory);
   const scopeMode = buildScopeMode2(rawOptions.project);
-  const literalWorkingDirectory = rawOptions.workingDirectory ? (0, import_path145.resolve)(rawOptions.workingDirectory) : workingDirectory;
+  const literalWorkingDirectory = rawOptions.workingDirectory ? (0, import_path137.resolve)(rawOptions.workingDirectory) : workingDirectory;
   const projectRoots2 = [currentProjectRoot, literalWorkingDirectory].concat(getMainRepoRoot2(currentProjectRoot) ?? []).concat(getClaudeWorktreeParent2(currentProjectRoot) ?? []).filter((value, index, arr) => Boolean(value) && arr.indexOf(value) === index);
   const targets = buildTargets(currentProjectRoot, projectRoots2, scopeMode);
   const sessions = /* @__PURE__ */ new Map();
@@ -122828,8 +117717,8 @@ init_models();
 var TIER_MODELS = getDefaultTierModels();
 
 // src/features/notepad-wisdom/index.ts
-var import_fs121 = require("fs");
-var import_path146 = require("path");
+var import_fs114 = require("fs");
+var import_path138 = require("path");
 init_constants2();
 
 // src/features/state-manager/index.ts
@@ -122853,12 +117742,16 @@ var path28 = __toESM(require("path"), 1);
 var MAX_STATE_AGE_MS = 4 * 60 * 60 * 1e3;
 
 // src/features/verification/index.ts
-var import_child_process37 = require("child_process");
+var import_child_process36 = require("child_process");
 var import_util12 = require("util");
-var execAsync = (0, import_util12.promisify)(import_child_process37.exec);
+var execAsync = (0, import_util12.promisify)(import_child_process36.exec);
 
 // src/features/index.ts
 init_agent_addressability();
+
+// src/features/verification-ledger/ledger.ts
+init_file_lock();
+init_worktree_paths();
 
 // src/agents/index.ts
 init_utils();
@@ -122883,12 +117776,12 @@ init_definitions();
 init_document_specialist();
 
 // src/commands/index.ts
-var import_fs122 = require("fs");
-var import_path147 = require("path");
+var import_fs115 = require("fs");
+var import_path139 = require("path");
 var import_url19 = require("url");
 init_config_dir();
 init_frontmatter();
-var PACKAGED_COMMANDS_DIR = (0, import_path147.join)((0, import_path147.dirname)((0, import_url19.fileURLToPath)(importMetaUrl)), "..", "..", "commands");
+var PACKAGED_COMMANDS_DIR = (0, import_path139.join)((0, import_path139.dirname)((0, import_url19.fileURLToPath)(importMetaUrl)), "..", "..", "commands");
 
 // src/index.ts
 init_installer();
@@ -123129,10 +118022,11 @@ function shouldMonitorBlockedPanes(status) {
 init_tmux_detector();
 
 // src/features/rate-limit-wait/daemon.ts
-var import_fs125 = require("fs");
-var import_path150 = require("path");
+init_windows_search();
+var import_fs118 = require("fs");
+var import_path142 = require("path");
 var import_url20 = require("url");
-var import_child_process39 = require("child_process");
+var import_child_process38 = require("child_process");
 init_daemon_module_path();
 init_paths();
 init_tmux_detector();
@@ -123263,15 +118157,15 @@ function getConfig(config2) {
   return { ...DEFAULT_CONFIG5, ...config2 };
 }
 function ensureStateDir7(config2) {
-  const stateDir = (0, import_path150.dirname)(config2.stateFilePath);
-  if (!(0, import_fs125.existsSync)(stateDir)) {
-    (0, import_fs125.mkdirSync)(stateDir, { recursive: true, mode: 448 });
+  const stateDir = (0, import_path142.dirname)(config2.stateFilePath);
+  if (!(0, import_fs118.existsSync)(stateDir)) {
+    (0, import_fs118.mkdirSync)(stateDir, { recursive: true, mode: 448 });
   }
 }
 function writeSecureFile2(filePath, content) {
-  (0, import_fs125.writeFileSync)(filePath, content, { mode: SECURE_FILE_MODE3 });
+  (0, import_fs118.writeFileSync)(filePath, content, { mode: SECURE_FILE_MODE3 });
   try {
-    (0, import_fs125.chmodSync)(filePath, SECURE_FILE_MODE3);
+    (0, import_fs118.chmodSync)(filePath, SECURE_FILE_MODE3);
   } catch (err) {
     if (process.platform !== "win32") {
       console.warn(`[RateLimitDaemon] Failed to set permissions on ${filePath}:`, err);
@@ -123280,14 +118174,14 @@ function writeSecureFile2(filePath, content) {
 }
 function rotateLogIfNeeded2(logPath) {
   try {
-    if (!(0, import_fs125.existsSync)(logPath)) return;
-    const stats = (0, import_fs125.statSync)(logPath);
+    if (!(0, import_fs118.existsSync)(logPath)) return;
+    const stats = (0, import_fs118.statSync)(logPath);
     if (stats.size > MAX_LOG_SIZE_BYTES2) {
       const backupPath = `${logPath}.old`;
-      if ((0, import_fs125.existsSync)(backupPath)) {
-        (0, import_fs125.unlinkSync)(backupPath);
+      if ((0, import_fs118.existsSync)(backupPath)) {
+        (0, import_fs118.unlinkSync)(backupPath);
       }
-      (0, import_fs125.renameSync)(logPath, backupPath);
+      (0, import_fs118.renameSync)(logPath, backupPath);
     }
   } catch {
   }
@@ -123295,10 +118189,10 @@ function rotateLogIfNeeded2(logPath) {
 function readDaemonState2(config2) {
   const cfg = getConfig(config2);
   try {
-    if (!(0, import_fs125.existsSync)(cfg.stateFilePath)) {
+    if (!(0, import_fs118.existsSync)(cfg.stateFilePath)) {
       return null;
     }
-    const content = (0, import_fs125.readFileSync)(cfg.stateFilePath, "utf-8");
+    const content = (0, import_fs118.readFileSync)(cfg.stateFilePath, "utf-8");
     const state = JSON.parse(content);
     if (state.startedAt) state.startedAt = new Date(state.startedAt);
     if (state.lastPollAt) state.lastPollAt = new Date(state.lastPollAt);
@@ -123328,10 +118222,10 @@ function writeDaemonState2(state, config2) {
 }
 function readPidFile2(config2) {
   try {
-    if (!(0, import_fs125.existsSync)(config2.pidFilePath)) {
+    if (!(0, import_fs118.existsSync)(config2.pidFilePath)) {
       return null;
     }
-    const content = (0, import_fs125.readFileSync)(config2.pidFilePath, "utf-8");
+    const content = (0, import_fs118.readFileSync)(config2.pidFilePath, "utf-8");
     return parseInt(content.trim(), 10);
   } catch {
     return null;
@@ -123342,8 +118236,8 @@ function writePidFile2(pid, config2) {
   writeSecureFile2(config2.pidFilePath, String(pid));
 }
 function removePidFile2(config2) {
-  if ((0, import_fs125.existsSync)(config2.pidFilePath)) {
-    (0, import_fs125.unlinkSync)(config2.pidFilePath);
+  if ((0, import_fs118.existsSync)(config2.pidFilePath)) {
+    (0, import_fs118.unlinkSync)(config2.pidFilePath);
   }
 }
 function isDaemonRunning2(config2) {
@@ -123368,7 +118262,7 @@ function log2(message2, config2) {
     const timestamp2 = (/* @__PURE__ */ new Date()).toISOString();
     const logLine = `[${timestamp2}] ${message2}
 `;
-    (0, import_fs125.appendFileSync)(config2.logFilePath, logLine, { mode: SECURE_FILE_MODE3 });
+    (0, import_fs118.appendFileSync)(config2.logFilePath, logLine, { mode: SECURE_FILE_MODE3 });
   } catch {
   }
 }
@@ -123410,7 +118304,7 @@ async function pollLoop2(config2) {
     try {
       const previousProfileHash = state.usageProfileHash;
       const usageProfileHash = getUsageProfileHash();
-      scopeStateToCurrentUsageProfile(state, usageProfileHash, (0, import_path150.dirname)(config2.stateFilePath));
+      scopeStateToCurrentUsageProfile(state, usageProfileHash, (0, import_path142.dirname)(config2.stateFilePath));
       if (usageProfileHash !== null && state.usageProfileHash !== previousProfileHash) {
         lastConfirmedLimited = state.lastConfirmedLimited === true;
         log2("Claude usage profile changed; discarded saved quota and pane state", config2);
@@ -123429,7 +118323,7 @@ async function pollLoop2(config2) {
             scopeStateToCurrentUsageProfile(
               state,
               checkedUsageProfileHash,
-              (0, import_path150.dirname)(config2.stateFilePath)
+              (0, import_path142.dirname)(config2.stateFilePath)
             );
             lastConfirmedLimited = state.lastConfirmedLimited === true;
             log2("Claude usage profile changed during quota check; discarded saved quota and pane state", config2);
@@ -123437,7 +118331,7 @@ async function pollLoop2(config2) {
             log2("Claude usage profile became unavailable during quota check; discarding quota sample", config2);
           }
           writeDaemonState2(state, config2);
-          await new Promise((resolve48) => setTimeout(resolve48, config2.pollIntervalMs));
+          await new Promise((resolve49) => setTimeout(resolve49, config2.pollIntervalMs));
           continue;
         }
       }
@@ -123464,7 +118358,7 @@ async function pollLoop2(config2) {
       }
       if (isNowLimited && isTmuxAvailable2()) {
         log2("Rate limited - scanning for blocked panes", config2);
-        const blockedPanes = scanForBlockedPanes(config2.paneLinesToCapture, (0, import_path150.dirname)(config2.stateFilePath));
+        const blockedPanes = scanForBlockedPanes(config2.paneLinesToCapture, (0, import_path142.dirname)(config2.stateFilePath));
         for (const pane of blockedPanes) {
           const existing = state.blockedPanes.find((p) => p.id === pane.id);
           if (!existing) {
@@ -123523,7 +118417,7 @@ async function pollLoop2(config2) {
       log2(`Poll error: ${state.lastError}`, config2);
       writeDaemonState2(state, config2);
     }
-    await new Promise((resolve48) => setTimeout(resolve48, config2.pollIntervalMs));
+    await new Promise((resolve49) => setTimeout(resolve49, config2.pollIntervalMs));
   }
 }
 function startDaemon(config2) {
@@ -123543,7 +118437,7 @@ function startDaemon(config2) {
   const modulePath = resolveDaemonModulePath(__filename3, ["features", "rate-limit-wait", "daemon.js"]);
   const moduleUrl = (0, import_url20.pathToFileURL)(modulePath).href;
   const configId = Date.now().toString(36) + Math.random().toString(36).slice(2);
-  const configPath = (0, import_path150.join)((0, import_path150.dirname)(cfg.stateFilePath), `.daemon-config-${configId}.json`);
+  const configPath = (0, import_path142.join)((0, import_path142.dirname)(cfg.stateFilePath), `.daemon-config-${configId}.json`);
   try {
     writeSecureFile2(configPath, JSON.stringify(cfg));
   } catch {
@@ -123556,10 +118450,10 @@ function startDaemon(config2) {
   `;
   try {
     const daemonEnv = {
-      ...createMinimalDaemonEnv2(),
+      ...childEnv(createMinimalDaemonEnv2()),
       OMC_DAEMON_CONFIG_FILE: configPath
     };
-    const child = (0, import_child_process39.spawn)("node", ["-e", daemonScript], {
+    const child = (0, import_child_process38.spawn)("node", ["-e", daemonScript], {
       detached: true,
       stdio: "ignore",
       cwd: process.cwd(),
@@ -123572,7 +118466,7 @@ function startDaemon(config2) {
       const state = scopeStateToCurrentUsageProfile(
         readDaemonState2(cfg) || createInitialState(),
         getUsageProfileHash(false),
-        (0, import_path150.dirname)(cfg.stateFilePath)
+        (0, import_path142.dirname)(cfg.stateFilePath)
       );
       state.isRunning = true;
       state.pid = pid;
@@ -123587,7 +118481,7 @@ function startDaemon(config2) {
     return { success: false, message: "Failed to start daemon process" };
   } catch (error2) {
     try {
-      (0, import_fs125.unlinkSync)(configPath);
+      (0, import_fs118.unlinkSync)(configPath);
     } catch {
     }
     return {
@@ -123690,7 +118584,7 @@ async function detectBlockedPanes(config2) {
     };
   }
   const rateLimitStatus = await checkRateLimitStatus();
-  const blockedPanes = scanForBlockedPanes(cfg.paneLinesToCapture, (0, import_path150.dirname)(cfg.stateFilePath));
+  const blockedPanes = scanForBlockedPanes(cfg.paneLinesToCapture, (0, import_path142.dirname)(cfg.stateFilePath));
   return {
     success: true,
     message: formatBlockedPanesSummary(blockedPanes),
@@ -123901,8 +118795,8 @@ async function waitDetectCommand(options) {
 }
 
 // src/cli/commands/doctor-conflicts.ts
-var import_fs126 = require("fs");
-var import_path151 = require("path");
+var import_fs119 = require("fs");
+var import_path143 = require("path");
 init_config_dir();
 init_installer();
 init_claude_md_analysis();
@@ -123913,10 +118807,10 @@ init_mcp_registry();
 init_worktree_paths();
 function hasActiveOmcPluginForDiagnostics() {
   if (process.env.CLAUDE_PLUGIN_ROOT?.trim()) return true;
-  const settingsPath = (0, import_path151.join)(getClaudeConfigDir(), "settings.json");
-  if (!(0, import_fs126.existsSync)(settingsPath)) return false;
+  const settingsPath = (0, import_path143.join)(getClaudeConfigDir(), "settings.json");
+  if (!(0, import_fs119.existsSync)(settingsPath)) return false;
   try {
-    const settings = JSON.parse((0, import_fs126.readFileSync)(settingsPath, "utf-8"));
+    const settings = JSON.parse((0, import_fs119.readFileSync)(settingsPath, "utf-8"));
     for (const candidate of [settings.enabledPlugins, settings.plugins]) {
       if (Array.isArray(candidate) && candidate.some((id) => typeof id === "string" && id.toLowerCase().includes("oh-my-claudecode"))) return true;
       if (candidate && typeof candidate === "object" && Object.entries(candidate).some(([id, value]) => id.toLowerCase().includes("oh-my-claudecode") && value !== false)) return true;
@@ -123927,11 +118821,11 @@ function hasActiveOmcPluginForDiagnostics() {
 }
 function collectHooksFromSettings(settingsPath) {
   const conflicts = [];
-  if (!(0, import_fs126.existsSync)(settingsPath)) {
+  if (!(0, import_fs119.existsSync)(settingsPath)) {
     return conflicts;
   }
   try {
-    const settings = JSON.parse((0, import_fs126.readFileSync)(settingsPath, "utf-8"));
+    const settings = JSON.parse((0, import_fs119.readFileSync)(settingsPath, "utf-8"));
     const hooks = settings.hooks || {};
     const hookEvents = [
       "PreToolUse",
@@ -123959,8 +118853,8 @@ function collectHooksFromSettings(settingsPath) {
   return conflicts;
 }
 function checkHookConflicts() {
-  const profileSettingsPath = (0, import_path151.join)(getClaudeConfigDir(), "settings.json");
-  const projectSettingsPath = (0, import_path151.join)(process.cwd(), ".claude", "settings.json");
+  const profileSettingsPath = (0, import_path143.join)(getClaudeConfigDir(), "settings.json");
+  const projectSettingsPath = (0, import_path143.join)(process.cwd(), ".claude", "settings.json");
   const profileHooks = collectHooksFromSettings(profileSettingsPath);
   const projectHooks = collectHooksFromSettings(projectSettingsPath);
   const seen = /* @__PURE__ */ new Set();
@@ -123987,10 +118881,10 @@ function checkWindowsUnsafePluginHooks() {
   for (const pluginRoot of roots) {
     if (seenRoots.has(pluginRoot)) continue;
     seenRoots.add(pluginRoot);
-    const hooksJsonPath = (0, import_path151.join)(pluginRoot, "hooks", "hooks.json");
-    if (!(0, import_fs126.existsSync)(hooksJsonPath)) continue;
+    const hooksJsonPath = (0, import_path143.join)(pluginRoot, "hooks", "hooks.json");
+    if (!(0, import_fs119.existsSync)(hooksJsonPath)) continue;
     try {
-      const parsed = JSON.parse((0, import_fs126.readFileSync)(hooksJsonPath, "utf-8"));
+      const parsed = JSON.parse((0, import_fs119.readFileSync)(hooksJsonPath, "utf-8"));
       for (const [event, groups] of Object.entries(parsed.hooks ?? {})) {
         for (const group of groups) {
           for (const hook of group.hooks ?? []) {
@@ -124029,14 +118923,14 @@ function directClaudeMdReferences(content, configDir) {
   const references = /* @__PURE__ */ new Set();
   for (const line of content.split(/\r?\n/)) {
     if (/^@CLAUDE-[A-Za-z0-9][A-Za-z0-9_-]*\.md$/i.test(line)) {
-      references.add((0, import_path151.join)(configDir, line.slice(1)));
+      references.add((0, import_path143.join)(configDir, line.slice(1)));
     }
   }
   return [...references].sort();
 }
 function pathExistsWithoutFollowingSymlinks(filePath) {
   try {
-    (0, import_fs126.lstatSync)(filePath);
+    (0, import_fs119.lstatSync)(filePath);
     return true;
   } catch {
     return false;
@@ -124045,7 +118939,7 @@ function pathExistsWithoutFollowingSymlinks(filePath) {
 function inspectClaudeMdFile(filePath, configDir, isMain) {
   let stats;
   try {
-    stats = (0, import_fs126.lstatSync)(filePath);
+    stats = (0, import_fs119.lstatSync)(filePath);
   } catch {
     return {
       status: { path: filePath, hasMarkers: false, hasUserContent: false, markerState: "unreadable", exactLegacy: false, manualReview: false },
@@ -124066,7 +118960,7 @@ function inspectClaudeMdFile(filePath, configDir, isMain) {
   }
   let bytes;
   try {
-    bytes = (0, import_fs126.readFileSync)(filePath);
+    bytes = (0, import_fs119.readFileSync)(filePath);
   } catch {
     return {
       status: { path: filePath, hasMarkers: false, hasUserContent: false, markerState: "unreadable", exactLegacy: false, manualReview: false },
@@ -124098,15 +118992,15 @@ function inspectClaudeMdFile(filePath, configDir, isMain) {
 }
 function genericClaudeMdFiles(configDir) {
   try {
-    return (0, import_fs126.readdirSync)(configDir).filter((name) => /^CLAUDE-.+\.md$/i.test(name) && name.toLowerCase() !== "claude-omc.md").sort().map((name) => (0, import_path151.join)(configDir, name));
+    return (0, import_fs119.readdirSync)(configDir).filter((name) => /^CLAUDE-.+\.md$/i.test(name) && name.toLowerCase() !== "claude-omc.md").sort().map((name) => (0, import_path143.join)(configDir, name));
   } catch {
     return [];
   }
 }
 function checkClaudeMdStatus() {
   const configDir = getClaudeConfigDir();
-  const claudeMdPath = (0, import_path151.join)(configDir, "CLAUDE.md");
-  const activePath = (0, import_path151.join)(configDir, "CLAUDE-omc.md");
+  const claudeMdPath = (0, import_path143.join)(configDir, "CLAUDE.md");
+  const activePath = (0, import_path143.join)(configDir, "CLAUDE-omc.md");
   const genericPaths = genericClaudeMdFiles(configDir);
   const mainExists = pathExistsWithoutFollowingSymlinks(claudeMdPath);
   const managementDisabled = !isClaudeMdEnabledInConfig(configDir);
@@ -124167,15 +119061,15 @@ function compareSemverLikeVersions(a, b) {
   return 0;
 }
 function isValidSetupPluginRoot(pluginRoot) {
-  return (0, import_fs126.existsSync)((0, import_path151.join)(pluginRoot, "docs", "CLAUDE.md"));
+  return (0, import_fs119.existsSync)((0, import_path143.join)(pluginRoot, "docs", "CLAUDE.md"));
 }
 function readInstalledPluginRoots() {
-  const installedPluginsPath = (0, import_path151.join)(getClaudeConfigDir(), "plugins", "installed_plugins.json");
-  if (!(0, import_fs126.existsSync)(installedPluginsPath)) {
+  const installedPluginsPath = (0, import_path143.join)(getClaudeConfigDir(), "plugins", "installed_plugins.json");
+  if (!(0, import_fs119.existsSync)(installedPluginsPath)) {
     return [];
   }
   try {
-    const parsed = JSON.parse((0, import_fs126.readFileSync)(installedPluginsPath, "utf-8"));
+    const parsed = JSON.parse((0, import_fs119.readFileSync)(installedPluginsPath, "utf-8"));
     if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
       return [];
     }
@@ -124186,19 +119080,19 @@ function readInstalledPluginRoots() {
   }
 }
 function findLatestSiblingPluginRoot(pluginRoot) {
-  const cacheBase = (0, import_path151.dirname)(pluginRoot);
-  if (!(0, import_fs126.existsSync)(cacheBase)) {
+  const cacheBase = (0, import_path143.dirname)(pluginRoot);
+  if (!(0, import_fs119.existsSync)(cacheBase)) {
     return null;
   }
   try {
-    return (0, import_fs126.readdirSync)(cacheBase).filter((entry2) => parseSemverLikeVersion(entry2)).map((entry2) => (0, import_path151.join)(cacheBase, entry2)).filter(isValidSetupPluginRoot).sort((a, b) => compareSemverLikeVersions((0, import_path151.basename)(b), (0, import_path151.basename)(a)))[0] || null;
+    return (0, import_fs119.readdirSync)(cacheBase).filter((entry2) => parseSemverLikeVersion(entry2)).map((entry2) => (0, import_path143.join)(cacheBase, entry2)).filter(isValidSetupPluginRoot).sort((a, b) => compareSemverLikeVersions((0, import_path143.basename)(b), (0, import_path143.basename)(a)))[0] || null;
   } catch {
     return null;
   }
 }
 function getSetupFallbackCanonicalSkillPaths(baseName) {
   const currentSkillsDir2 = getSkillsDir();
-  const currentPluginRoot = (0, import_path151.dirname)(currentSkillsDir2);
+  const currentPluginRoot = (0, import_path143.dirname)(currentSkillsDir2);
   const roots = [
     currentPluginRoot,
     process.env.CLAUDE_PLUGIN_ROOT,
@@ -124212,8 +119106,8 @@ function getSetupFallbackCanonicalSkillPaths(baseName) {
   }
   const seen = /* @__PURE__ */ new Set();
   return [
-    (0, import_path151.join)(currentSkillsDir2, baseName, "SKILL.md"),
-    ...roots.flatMap((root2) => [(0, import_path151.join)(root2, "skills", baseName, "SKILL.md")])
+    (0, import_path143.join)(currentSkillsDir2, baseName, "SKILL.md"),
+    ...roots.flatMap((root2) => [(0, import_path143.join)(root2, "skills", baseName, "SKILL.md")])
   ].filter((path30) => {
     if (seen.has(path30)) {
       return false;
@@ -124229,13 +119123,13 @@ function isSupportedSetupFallbackSkill(legacySkillsDir, entry2, baseName) {
   if (entry2.toLowerCase() !== baseName) {
     return false;
   }
-  const installedSkillPath = (0, import_path151.join)(legacySkillsDir, entry2, "SKILL.md");
-  if (!(0, import_fs126.existsSync)(installedSkillPath)) {
+  const installedSkillPath = (0, import_path143.join)(legacySkillsDir, entry2, "SKILL.md");
+  if (!(0, import_fs119.existsSync)(installedSkillPath)) {
     return false;
   }
   try {
-    const installedContent = (0, import_fs126.readFileSync)(installedSkillPath);
-    return getSetupFallbackCanonicalSkillPaths(baseName).some((canonicalSkillPath) => (0, import_fs126.existsSync)(canonicalSkillPath) && installedContent.equals((0, import_fs126.readFileSync)(canonicalSkillPath)));
+    const installedContent = (0, import_fs119.readFileSync)(installedSkillPath);
+    return getSetupFallbackCanonicalSkillPaths(baseName).some((canonicalSkillPath) => (0, import_fs119.existsSync)(canonicalSkillPath) && installedContent.equals((0, import_fs119.readFileSync)(canonicalSkillPath)));
   } catch {
     return false;
   }
@@ -124248,10 +119142,10 @@ function isVerifiedStandaloneManagedSkill(legacySkillsDir, entry2, baseName) {
   if (entry2.toLowerCase().endsWith(".md")) {
     return false;
   }
-  const skillDir = (0, import_path151.join)(legacySkillsDir, entry2);
-  const markerPath = (0, import_path151.join)(skillDir, OMC_MANAGED_SKILL_MARKER2);
-  const installedSkillPath = (0, import_path151.join)(skillDir, "SKILL.md");
-  if (!(0, import_fs126.existsSync)(markerPath) || !(0, import_fs126.existsSync)(installedSkillPath)) {
+  const skillDir = (0, import_path143.join)(legacySkillsDir, entry2);
+  const markerPath = (0, import_path143.join)(skillDir, OMC_MANAGED_SKILL_MARKER2);
+  const installedSkillPath = (0, import_path143.join)(skillDir, "SKILL.md");
+  if (!(0, import_fs119.existsSync)(markerPath) || !(0, import_fs119.existsSync)(installedSkillPath)) {
     return false;
   }
   const canonicalNames = /* @__PURE__ */ new Set([baseName]);
@@ -124260,21 +119154,21 @@ function isVerifiedStandaloneManagedSkill(legacySkillsDir, entry2, baseName) {
   }
   const canonicalPaths = Array.from(canonicalNames).flatMap((name) => getSetupFallbackCanonicalSkillPaths(name));
   try {
-    const installedContent = (0, import_fs126.readFileSync)(installedSkillPath, "utf-8");
-    return canonicalPaths.some((canonicalSkillPath) => (0, import_fs126.existsSync)(canonicalSkillPath) && installedContent === (0, import_fs126.readFileSync)(canonicalSkillPath, "utf-8"));
+    const installedContent = (0, import_fs119.readFileSync)(installedSkillPath, "utf-8");
+    return canonicalPaths.some((canonicalSkillPath) => (0, import_fs119.existsSync)(canonicalSkillPath) && installedContent === (0, import_fs119.readFileSync)(canonicalSkillPath, "utf-8"));
   } catch {
     return false;
   }
 }
 function checkLegacySkills() {
-  const legacySkillsDir = (0, import_path151.join)(getClaudeConfigDir(), "skills");
-  if (!(0, import_fs126.existsSync)(legacySkillsDir)) return [];
+  const legacySkillsDir = (0, import_path143.join)(getClaudeConfigDir(), "skills");
+  if (!(0, import_fs119.existsSync)(legacySkillsDir)) return [];
   const collisions = [];
   try {
     const pluginSkillNames = new Set(
       listBuiltinSkillNames({ includeAliases: true }).map((n) => n.toLowerCase())
     );
-    const entries = (0, import_fs126.readdirSync)(legacySkillsDir);
+    const entries = (0, import_fs119.readdirSync)(legacySkillsDir);
     for (const entry2 of entries) {
       const baseName = entry2.replace(/\.md$/i, "").toLowerCase();
       if (pluginSkillNames.has(baseName)) {
@@ -124284,7 +119178,7 @@ function checkLegacySkills() {
         if (isSupportedSetupFallbackSkill(legacySkillsDir, entry2, baseName)) {
           continue;
         }
-        collisions.push({ name: baseName, path: (0, import_path151.join)(legacySkillsDir, entry2) });
+        collisions.push({ name: baseName, path: (0, import_path143.join)(legacySkillsDir, entry2) });
       }
     }
   } catch {
@@ -124293,12 +119187,12 @@ function checkLegacySkills() {
 }
 function checkConfigIssues() {
   const unknownFields = [];
-  const configPath = (0, import_path151.join)(getClaudeConfigDir(), ".omc-config.json");
-  if (!(0, import_fs126.existsSync)(configPath)) {
+  const configPath = (0, import_path143.join)(getClaudeConfigDir(), ".omc-config.json");
+  if (!(0, import_fs119.existsSync)(configPath)) {
     return { unknownFields };
   }
   try {
-    const config2 = JSON.parse((0, import_fs126.readFileSync)(configPath, "utf-8"));
+    const config2 = JSON.parse((0, import_fs119.readFileSync)(configPath, "utf-8"));
     const knownFields = /* @__PURE__ */ new Set([
       // PluginConfig fields
       "agents",
@@ -124556,36 +119450,83 @@ async function doctorConflictsCommand(options) {
 
 // src/cli/commands/ralph.ts
 var import_crypto39 = require("crypto");
-var import_child_process42 = require("child_process");
-var import_fs128 = require("fs");
-var import_path154 = require("path");
+var import_child_process41 = require("child_process");
+var import_fs121 = require("fs");
+var import_path147 = require("path");
 init_skills();
 init_worktree_paths();
+init_file_lock();
 
 // src/hooks/ralph/feedback-baseline.ts
 var fs27 = __toESM(require("fs"), 1);
-var import_path152 = require("path");
+var import_path144 = require("path");
+init_file_lock();
 var FEEDBACK_BASELINE_FILENAME = "feedback-baseline.json";
+var FEEDBACK_BASELINE_HISTORY_DIRNAME = "feedback-baseline.history";
+var MAX_FEEDBACK_BASELINE_HISTORY = 20;
 var MAX_SIGNATURES_PER_COMMAND = 200;
 var ANSI_PATTERN = /\x1b\[[0-9;]*m/g;
+var FAILURE_WORD_PATTERN = /\bfail(?:ed|ure|ures|ing)?\b|\w*(?:Error|Exception)s?\b|✗|×/i;
 var VOLATILE_PATTERNS = [
+  // Pytest's wall-clock parenthesized duration, e.g. "... in 194.32s (0:03:14)".
+  // Anchored to the "in <duration>" suffix so clock-shaped assertion values
+  // (e.g. assert '(12:15)' == '(12:16)') keep their failure signal.
+  /(?<=\bin \d+(?:\.\d+)?s\s)\(\d+:\d{2}(?::\d{2})?(?:\.\d+)?\)/g,
   /\b\d+(?:\.\d+)?\s*(?:ms|s|sec|secs|seconds)\b/gi,
   /\bduration_ms\s*:?\s*\d+(?:\.\d+)?\b/gi,
   /\bduration\s*:?\s*\d+(?:\.\d+)?\b/gi,
   /\b\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}:\d{2}(?:\.\d+)?Z?/g,
   /[A-Za-z]:\\[^\s:]*\\[^\s]*(?:omc|omc-)[^\s\\\/]+/g,
   /\/tmp\/[\w.-]+/g,
+  // The process id in Node's warning prefix, "(node:12345) [DEP0040] DeprecationWarning: ...", differs on every run.
+  // Only an id followed by an optional [code] and a "Name:" is replaced, so "(node:42) ready" in an assertion keeps its signal.
+  /(?<=\(node:)\d+(?=\) (?:\[[^\]]+\] )?\w+:)/g,
+  // macOS per-user temp dirs (os.tmpdir()) are handled by
+  // normalizeMacosTempPaths(): only the mkdtemp-style random segment is
+  // replaced so stable suffixes (file:line:column) still distinguish failures.
   /\b[0-9a-f]{8,}\b/gi
 ];
+var MACOS_TEMP_PATH_PATTERN = /(?:\/private)?\/var\/folders\/[^/\s"']+\/[^/\s"']+\/T((?:\/[^/\s"']*)*)/g;
+var RANDOM_TEMP_SEGMENT_PATTERN = /^[A-Za-z0-9._-]*[A-Za-z0-9]{6}$/;
+function isRandomTempSegment(segment) {
+  if (!RANDOM_TEMP_SEGMENT_PATTERN.test(segment)) return false;
+  const suffix = segment.slice(-6);
+  return /[0-9]/.test(suffix) || /[A-Z]/.test(suffix) && /[a-z]/.test(suffix);
+}
+function normalizeMacosTempPaths(line) {
+  return line.replace(MACOS_TEMP_PATH_PATTERN, (_match, rest) => {
+    const segments = rest.split("/").filter(Boolean);
+    const normalized = segments.map((segment, index) => {
+      const isLeaf = index === segments.length - 1;
+      if (isLeaf && /[.:]/.test(segment)) return segment;
+      if (index === 0 || isRandomTempSegment(segment)) return "<v>";
+      return segment;
+    });
+    const joined = normalized.join("/");
+    return segments.length === 1 && /[.:]/.test(segments[0]) ? `<v>/${joined}` : joined;
+  });
+}
 function signatureLines(output) {
   const seen = /* @__PURE__ */ new Set();
   for (const raw of output.replace(ANSI_PATTERN, "").split(/\r?\n/)) {
     let line = raw.trim();
     if (!line) continue;
     for (const pattern of VOLATILE_PATTERNS) line = line.replace(pattern, "<v>");
+    line = normalizeMacosTempPaths(line);
     line = line.replace(/\s+/g, " ").trim();
     if (!line || line.length > 500) continue;
-    if (/^(running|collecting|compiling|building|passing|tap\s+version|✓|√|%|\s*at\s)/i.test(line) && !/fail|error|✗|×/i.test(line)) continue;
+    if ((/^(?:\[[^\]]*\]\s*)*(?:<v>\s+)?(?:TRACE|DEBUG|INFO|NOTICE)\b/i.test(line) || /^\[(?:TRACE|DEBUG|INFO|NOTICE)\]/i.test(line)) && !FAILURE_WORD_PATTERN.test(line)) continue;
+    if (/^(?:npm|yarn|pnpm)\s+warn\b/i.test(line)) continue;
+    if (/^>\s+\S+@\S+/.test(line)) continue;
+    if (/^>\s+(?:tsc|vite|vitest|jest|node|npm|yarn|pnpm|eslint|tsx|ts-node)\b/i.test(line)) continue;
+    if (/^(?:RUN\s+v?\d|Duration\s)/i.test(line)) continue;
+    if (/^(?:Test Files|Tests)\b/.test(line) && !FAILURE_WORD_PATTERN.test(line)) continue;
+    if (/^\d+\|\s/.test(line) || /^\|\s*\^/.test(line)) continue;
+    if (/^(?:✓|√)/.test(line)) continue;
+    if (/^(running|collecting|compiling|building|passing|tap\s+version|%|\s*at\s)/i.test(line) && !FAILURE_WORD_PATTERN.test(line)) continue;
+    if (/^[.sxX]+(?:\s*\[\s*\d+%\]\s*)?$/.test(line)) continue;
+    if (/^\d+ passed(?:, \d+ (?:warnings?|skipped|xfailed|xpassed|deselected))* in <v>(?: <v>)*(?: \([^)]*\))?$/.test(line)) continue;
+    if (/^Start at \d{2}:\d{2}:\d{2}$/.test(line)) continue;
     if (/^#\s*(?:pass|tests?|skipped|cancelled|todo)\s+\d+\s*$/.test(line)) continue;
     if (/^#\s*fail\s+0\s*$/.test(line)) continue;
     if (/^#\s*<v>\s*(<v>\s*)*$/.test(line)) continue;
@@ -124596,24 +119537,50 @@ function signatureLines(output) {
   }
   return [...seen].sort();
 }
+function exitCodeFailure(command, entry2) {
+  return entry2.exitCode !== void 0 && entry2.exitCode !== 0 ? `${command}: <exited with code ${entry2.exitCode}>` : null;
+}
 function diffAgainstBaseline(baseline, current) {
   if (!baseline) {
     return {
-      newSignatures: Object.entries(current).flatMap(([command, entry2]) => entry2.signatures.map((signature) => `${command}: ${signature}`)),
+      newSignatures: Object.entries(current).flatMap(([command, entry2]) => {
+        const exitFailure = exitCodeFailure(command, entry2);
+        return [
+          ...entry2.signatures.map((signature) => `${command}: ${signature}`),
+          ...exitFailure ? [exitFailure] : []
+        ];
+      }),
       resolvedSignatures: []
     };
   }
   const newSignatures = [];
   const resolvedSignatures = [];
-  for (const [command, entry2] of Object.entries(current)) {
+  for (const command of /* @__PURE__ */ new Set([...Object.keys(baseline.commands), ...Object.keys(current)])) {
+    const entry2 = current[command];
     const before = baseline.commands[command];
+    if (!entry2) {
+      if (before) resolvedSignatures.push(...before.signatures.map((signature) => `${command}: ${signature}`));
+      continue;
+    }
     if (!before) {
       newSignatures.push(...entry2.signatures.map((signature) => `${command}: ${signature}`));
+      const exitFailure = exitCodeFailure(command, entry2);
+      if (exitFailure) newSignatures.push(exitFailure);
+      continue;
+    }
+    if (entry2.timedOut && !before.timedOut) {
+      newSignatures.push(`${command}: <command timed out>`);
       continue;
     }
     if (entry2.unrunnable && !before.unrunnable) {
       newSignatures.push(`${command}: <command became unrunnable>`);
       continue;
+    }
+    const beforeExitCode = before.exitCode ?? 0;
+    if (entry2.exitCode !== void 0 && beforeExitCode === 0 && entry2.exitCode !== 0) {
+      newSignatures.push(`${command}: <exited with code ${entry2.exitCode}>`);
+    } else if (entry2.exitCode === 0 && beforeExitCode !== 0) {
+      resolvedSignatures.push(`${command}: <no longer exits with code ${beforeExitCode}>`);
     }
     const beforeSet = new Set(before.signatures);
     const afterSet = new Set(entry2.signatures);
@@ -124623,7 +119590,7 @@ function diffAgainstBaseline(baseline, current) {
   return { newSignatures, resolvedSignatures };
 }
 function baselinePath(stateRoot2, sessionId) {
-  return (0, import_path152.join)(stateRoot2, "state", "sessions", sessionId, FEEDBACK_BASELINE_FILENAME);
+  return (0, import_path144.join)(stateRoot2, "state", "sessions", sessionId, FEEDBACK_BASELINE_FILENAME);
 }
 function readBaseline(path30) {
   try {
@@ -124636,22 +119603,161 @@ function readBaseline(path30) {
     return null;
   }
 }
-function writeBaseline(path30, commands, now = /* @__PURE__ */ new Date()) {
+function archiveBaseline(path30, now = /* @__PURE__ */ new Date()) {
   try {
-    fs27.mkdirSync((0, import_path152.join)(path30, ".."), { recursive: true });
-    fs27.writeFileSync(path30, `${JSON.stringify({ version: 1, recordedAt: now.toISOString(), commands }, null, 2)}
-`, "utf8");
-    return true;
+    if (!fs27.existsSync(path30)) return null;
+    const dir = (0, import_path144.join)((0, import_path144.dirname)(path30), FEEDBACK_BASELINE_HISTORY_DIRNAME);
+    fs27.mkdirSync(dir, { recursive: true });
+    const stamp = (readBaseline(path30)?.recordedAt || now.toISOString()).replace(/[^0-9A-Za-z.-]+/g, "-");
+    let counter = 1;
+    try {
+      for (const name of fs27.readdirSync(dir)) {
+        if (!name.startsWith(`${stamp}-`)) continue;
+        const match = /-(\d+)\.json$/.exec(name);
+        if (match) counter = Math.max(counter, Number(match[1]) + 1);
+      }
+    } catch {
+    }
+    let target = (0, import_path144.join)(dir, `${stamp}-${counter}.json`);
+    while (true) {
+      try {
+        fs27.copyFileSync(path30, target, fs27.constants.COPYFILE_EXCL);
+        break;
+      } catch (err) {
+        const isEEXIST = err?.code === "EEXIST";
+        if (isEEXIST) {
+          counter += 1;
+          target = (0, import_path144.join)(dir, `${stamp}-${counter}.json`);
+          continue;
+        }
+        throw err;
+      }
+    }
+    return target;
   } catch {
-    return false;
+    return null;
+  }
+}
+function pruneBaselineHistory(dir, keepPath) {
+  let entries;
+  try {
+    entries = fs27.readdirSync(dir).filter((name) => name.endsWith(".json") && (0, import_path144.join)(dir, name) !== keepPath).sort(compareHistoryNames);
+  } catch {
+    return;
+  }
+  const budget = Math.max(0, MAX_FEEDBACK_BASELINE_HISTORY - 1);
+  for (const name of entries.slice(0, Math.max(0, entries.length - budget))) {
+    try {
+      fs27.rmSync((0, import_path144.join)(dir, name), { force: true });
+    } catch {
+    }
+  }
+}
+function compareHistoryNames(left, right) {
+  const leftMatch = /^(.*)-(\d+)\.json$/.exec(left);
+  const rightMatch = /^(.*)-(\d+)\.json$/.exec(right);
+  if (!leftMatch || !rightMatch) return left < right ? -1 : left > right ? 1 : 0;
+  if (leftMatch[1] !== rightMatch[1]) return leftMatch[1] < rightMatch[1] ? -1 : 1;
+  return Number(leftMatch[2]) - Number(rightMatch[2]);
+}
+function recordBaseline(path30, commands, now = /* @__PURE__ */ new Date()) {
+  try {
+    fs27.mkdirSync((0, import_path144.dirname)(path30), { recursive: true });
+  } catch {
+    return { written: false, added: 0, removed: 0 };
+  }
+  const lockPath2 = lockPathFor(path30);
+  try {
+    return withFileLockSync(lockPath2, () => {
+      const previous = readBaseline(path30);
+      const previousPath = archiveBaseline(path30, now);
+      if (previousPath === null && fs27.existsSync(path30)) return { written: false, added: 0, removed: 0 };
+      try {
+        fs27.writeFileSync(path30, `${JSON.stringify({ version: 1, recordedAt: now.toISOString(), commands }, null, 2)}
+`, "utf8");
+      } catch {
+        return { written: false, added: 0, removed: 0 };
+      }
+      if (previousPath) pruneBaselineHistory((0, import_path144.dirname)(previousPath), previousPath);
+      let added = 0;
+      let removed = 0;
+      const becameUnrunnable = [];
+      if (previous && previousPath) {
+        for (const command of /* @__PURE__ */ new Set([...Object.keys(previous.commands), ...Object.keys(commands)])) {
+          const before = previous.commands[command];
+          const after = commands[command];
+          const beforeSet = new Set(before?.signatures ?? []);
+          const afterSet = new Set(after?.signatures ?? []);
+          for (const signature of afterSet) if (!beforeSet.has(signature)) added += 1;
+          for (const signature of beforeSet) if (!afterSet.has(signature)) removed += 1;
+          if (before && after?.unrunnable && !before?.unrunnable) becameUnrunnable.push(command);
+        }
+      }
+      return {
+        written: true,
+        ...previousPath ? { previousPath } : {},
+        added,
+        removed,
+        ...becameUnrunnable.length > 0 ? { becameUnrunnable } : {}
+      };
+    }, { timeoutMs: 1e4, retryDelayMs: 50 });
+  } catch (err) {
+    if (err instanceof Error && err.message.includes("Failed to acquire file lock")) {
+      return { written: false, added: 0, removed: 0 };
+    }
+    throw err;
   }
 }
 
 // src/cli/commands/ralph.ts
 init_prd();
 
+// src/hooks/ralph/closeout.ts
+var fs28 = __toESM(require("fs"), 1);
+var import_path145 = require("path");
+var RALPH_CLOSEOUT_FILENAME = "ralph-closeout.json";
+var DESLOP_STATUSES = ["completed", "skipped"];
+function isDeslopStatus(value) {
+  return typeof value === "string" && DESLOP_STATUSES.includes(value);
+}
+function closeoutPath(stateRoot2, sessionId) {
+  return (0, import_path145.join)(stateRoot2, "state", "sessions", sessionId, RALPH_CLOSEOUT_FILENAME);
+}
+function readCloseout(path30) {
+  try {
+    const parsed = JSON.parse(fs28.readFileSync(path30, "utf8"));
+    if (!parsed || typeof parsed !== "object") return null;
+    const record2 = parsed;
+    if (record2.version !== 1 || !isDeslopStatus(record2.deslop)) return null;
+    if (typeof record2.criteriaRevision !== "string" || record2.criteriaRevision.length === 0) return null;
+    return {
+      version: 1,
+      sessionId: typeof record2.sessionId === "string" ? record2.sessionId : "",
+      deslop: record2.deslop,
+      criteriaRevision: record2.criteriaRevision,
+      recordedAt: typeof record2.recordedAt === "string" ? record2.recordedAt : ""
+    };
+  } catch {
+    return null;
+  }
+}
+function writeCloseout(path30, record2, now = /* @__PURE__ */ new Date()) {
+  try {
+    fs28.mkdirSync((0, import_path145.join)(path30, ".."), { recursive: true });
+    const payload = { version: 1, ...record2, recordedAt: now.toISOString() };
+    fs28.writeFileSync(path30, `${JSON.stringify(payload, null, 2)}
+`, "utf8");
+    return true;
+  } catch {
+    return false;
+  }
+}
+function isCloseoutSatisfied(record2, criteriaRevision) {
+  return record2 !== null && isDeslopStatus(record2.deslop) && record2.criteriaRevision === criteriaRevision;
+}
+
 // src/factory/map-ingest.ts
-var import_child_process40 = require("child_process");
+var import_child_process39 = require("child_process");
 
 // src/factory/map-frontier.ts
 var WAYFINDER_TASK_AFK_LABEL = "wayfinder:task:afk";
@@ -124755,7 +119861,7 @@ function enumerateFrontier(mapNumber, records) {
 
 // src/factory/map-ingest.ts
 var defaultGhRunner = (args) => {
-  const result = (0, import_child_process40.spawnSync)("gh", args, { encoding: "utf8", windowsHide: true, timeout: 6e4, maxBuffer: 32 * 1024 * 1024 });
+  const result = (0, import_child_process39.spawnSync)("gh", args, { encoding: "utf8", windowsHide: true, timeout: 6e4, maxBuffer: 32 * 1024 * 1024 });
   return { status: result.status, stdout: result.stdout ?? "", stderr: result.stderr ?? "" };
 };
 function parseMapRef(raw, fallbackRepo) {
@@ -124878,7 +119984,7 @@ function renderRoutingComment(ref, ticket, awaitingHuman) {
   return awaitingHuman ? `Surfaced to a human by an automated ralph planning run: this ticket is a human gate (wayfinder:grilling / wayfinder:prototype / bare wayfinder:task). No auto-run. Already marked awaiting-human.` : `Surfaced to a human by an automated ralph planning run: this ticket is a human gate (wayfinder:grilling / wayfinder:prototype / bare wayfinder:task). It was NOT claimed and will not be executed headlessly. Marked \`${WAYFINDER_AWAITING_HUMAN_LABEL}\`.`;
 }
 var defaultCommentRunner = (ref, ticket, body) => {
-  const result = (0, import_child_process40.spawnSync)("gh", ["issue", "comment", String(ticket), "--repo", ref.repo, "--body-file", "-"], {
+  const result = (0, import_child_process39.spawnSync)("gh", ["issue", "comment", String(ticket), "--repo", ref.repo, "--body-file", "-"], {
     input: body,
     encoding: "utf8",
     windowsHide: true,
@@ -124940,10 +120046,10 @@ function renderActionOutcomes(outcomes) {
 }
 
 // src/factory/map-run.ts
-var import_child_process41 = require("child_process");
-var import_fs127 = require("fs");
+var import_child_process40 = require("child_process");
+var import_fs120 = require("fs");
 var import_os24 = require("os");
-var import_path153 = require("path");
+var import_path146 = require("path");
 init_worktree_paths();
 init_prd();
 var CRITERIA_ITEM = /^\s*[-*]\s*\[[ xX]\]\s*(.+)$/;
@@ -124993,7 +120099,7 @@ function launchGate(outcomes, records) {
 }
 function currentBranch2(directory) {
   try {
-    return (0, import_child_process41.execFileSync)("git", ["rev-parse", "--abbrev-ref", "HEAD"], { cwd: directory, encoding: "utf8", timeout: 5e3, windowsHide: true }).trim() || "ralph/map-run";
+    return (0, import_child_process40.execFileSync)("git", ["rev-parse", "--abbrev-ref", "HEAD"], { cwd: directory, encoding: "utf8", timeout: 5e3, windowsHide: true }).trim() || "ralph/map-run";
   } catch {
     return "ralph/map-run";
   }
@@ -125030,21 +120136,21 @@ function composeMapPrd(directory, sessionId, plan, records, options = {}) {
   return { written, stories, prdPath };
 }
 function sessionDir(directory, sessionId) {
-  return (0, import_path153.join)(getOmcRoot(directory), "state", "sessions", sessionId);
+  return (0, import_path146.join)(getOmcRoot(directory), "state", "sessions", sessionId);
 }
 function writeMapRunSidecar(directory, sessionId, map, stories) {
   try {
     const dir = sessionDir(directory, sessionId);
-    (0, import_fs127.mkdirSync)(dir, { recursive: true });
+    (0, import_fs120.mkdirSync)(dir, { recursive: true });
     const sidecar = { map, stories: stories.map((s) => ({ ticket: s.ticket, id: s.id })) };
-    (0, import_fs127.writeFileSync)((0, import_path153.join)(dir, "map-run.json"), `${JSON.stringify(sidecar, null, 2)}
+    (0, import_fs120.writeFileSync)((0, import_path146.join)(dir, "map-run.json"), `${JSON.stringify(sidecar, null, 2)}
 `, "utf8");
   } catch {
   }
 }
 function readMapRunSidecar(directory, sessionId) {
   try {
-    const parsed = JSON.parse((0, import_fs127.readFileSync)((0, import_path153.join)(sessionDir(directory, sessionId), "map-run.json"), "utf8"));
+    const parsed = JSON.parse((0, import_fs120.readFileSync)((0, import_path146.join)(sessionDir(directory, sessionId), "map-run.json"), "utf8"));
     if (!parsed || typeof parsed !== "object") return null;
     const doc = parsed;
     if (!doc.map || !Array.isArray(doc.stories)) return null;
@@ -125114,10 +120220,10 @@ function appendMapDecisionPointer(ref, closed, gh) {
   const pointer = `
 - [Map run ${(/* @__PURE__ */ new Date()).toISOString().slice(0, 10)}](${ref.repo}/issues/${closed[0]}): ralph completed and verified ${closed.length} ticket(s) (#${closed.join(", #")}); each ticket holds the decision record.`;
   const next = body.replace(/\n## Decisions so far/, (m) => `${m}${pointer}`);
-  const dir = (0, import_path153.join)((0, import_os24.tmpdir)(), `omc-map-body-${process.pid}`);
-  (0, import_fs127.mkdirSync)(dir, { recursive: true });
-  const file = (0, import_path153.join)(dir, "body.md");
-  (0, import_fs127.writeFileSync)(file, next, "utf8");
+  const dir = (0, import_path146.join)((0, import_os24.tmpdir)(), `omc-map-body-${process.pid}`);
+  (0, import_fs120.mkdirSync)(dir, { recursive: true });
+  const file = (0, import_path146.join)(dir, "body.md");
+  (0, import_fs120.writeFileSync)(file, next, "utf8");
   gh(["issue", "edit", String(ref.number), "--repo", ref.repo, "--body-file", file]);
 }
 
@@ -125140,16 +120246,16 @@ function ralphAfkArgv(task, verifyCommands = [], sessionId = (0, import_crypto39
   return argv;
 }
 function materializeRalphSkill(directory) {
-  const target = (0, import_path154.join)(directory, ".claude", "skills", "ralph", "SKILL.md");
-  const source = (0, import_path154.join)(getSkillsDir(), "ralph", "SKILL.md");
-  if (!(0, import_fs128.existsSync)(source)) return null;
-  const bundled = (0, import_fs128.readFileSync)(source, "utf8");
-  if ((0, import_fs128.existsSync)(target)) {
-    const status = (0, import_fs128.readFileSync)(target, "utf8") === bundled ? "present" : "diverged";
+  const target = (0, import_path147.join)(directory, ".claude", "skills", "ralph", "SKILL.md");
+  const source = (0, import_path147.join)(getSkillsDir(), "ralph", "SKILL.md");
+  if (!(0, import_fs121.existsSync)(source)) return null;
+  const bundled = (0, import_fs121.readFileSync)(source, "utf8");
+  if ((0, import_fs121.existsSync)(target)) {
+    const status = (0, import_fs121.readFileSync)(target, "utf8") === bundled ? "present" : "diverged";
     return { status, path: target };
   }
-  (0, import_fs128.mkdirSync)((0, import_path154.join)(directory, ".claude", "skills", "ralph"), { recursive: true });
-  (0, import_fs128.copyFileSync)(source, target);
+  (0, import_fs121.mkdirSync)((0, import_path147.join)(directory, ".claude", "skills", "ralph"), { recursive: true });
+  (0, import_fs121.copyFileSync)(source, target);
   return { status: "created", path: target };
 }
 function ralphCommand(program3) {
@@ -125199,17 +120305,27 @@ Examples:
     console.log(`cwd ${process.cwd()}; verify: ${(options.verify ?? []).length > 0 ? options.verify.join(", ") : "(none declared)"}`);
     if (materialized?.status === "created") console.log(`ralph skill materialized: ${materialized.path} (consider gitignoring .claude/)`);
   });
-  cmd.command("verify").description("Judge the feedback state by diffing current failures against the session baseline (exit 0 clean, exit 1 new failures)").option("--json", "Output the judgment as JSON").option("--session <id>", "Session whose baseline to read (defaults to OMC_SESSION_ID, then a sole baseline under the state root)").option("--write-baseline", "Record the current failures as the session baseline instead of judging").addHelpText("after", `
+  cmd.command("verify").description("Judge the feedback state by diffing current failures against the session baseline (exit 0 clean, exit 1 new failures)").option("--json", "Output the judgment as JSON").option("--session <id>", "Session whose baseline to read (defaults to OMC_SESSION_ID, then a sole baseline under the state root)").option("--write-baseline", "Record the current failures as the session baseline instead of judging").option("--timeout <seconds>", "Per-command timeout in seconds (default 600; env OMC_RALPH_VERIFY_TIMEOUT_SECONDS)").addHelpText("after", `
 Examples:
   $ omc ralph verify --write-baseline     Record the baseline (Step 1f, first iteration)
   $ omc ralph verify                      Gate: exit 1 only when NEW failures appeared
   $ omc ralph verify --json               Machine-readable judgment
   $ omc ralph verify --session <id>       Judge another session's baseline
+  $ omc ralph verify --timeout 1800       Allow 30 minutes per feedback command
   Feedback commands come from the PRD's feedbackCommands, falling back to
   package.json build/lint/test scripts. Inside an \`omc ralph afk\` session only
   the launcher's declared --verify commands run. A missing baseline is not a failure:
-  verify reports the current signatures as a baseline candidate and exits 0.`).action((options) => {
-    process.exitCode = ralphVerify(options);
+  verify reports the current signatures as a baseline candidate and exits 0.
+  A command that exceeds the timeout is reported as timed out, not as a new
+  failure: its partial output is discarded. Concurrent runs for one session are
+  serialized; the second run exits 1 with a lock message.`).action((options) => {
+    const timeoutMs = resolveFeedbackTimeoutMs(options.timeout);
+    if (timeoutMs === null) {
+      console.error("omc ralph verify: --timeout must be a positive number of seconds");
+      process.exitCode = 1;
+      return;
+    }
+    process.exitCode = ralphVerify({ ...options, timeoutMs });
   });
   cmd.command("from-map").description("Plan a ralph run from a wayfinder map\u2019s frontier (tracker-only; writes nothing in this mode)").option("--map <repo#number>", "Map issue reference, e.g. owner/repo#46 (repo defaults to the current repository)").option("--repo <name>", "Repository override when --map carries only a number").option("--execute", "Act on the plan: claim auto tickets (with provenance), route human gates, draft criteria for criteria-less tickets and stop for human acceptance").option("--launch", "With --execute: compose the PRD from claimed tickets and launch the loop (refuses while drafted criteria await acceptance)").option("--finalize", "Write back: close verified source tickets with evidence comments and append the map pointer (needs --session)").option("--session <id>", "Session id for --launch/--finalize (defaults to a fresh id for --launch)").option("--json", "Output the plan as JSON").addHelpText("after", `
 Examples:
@@ -125317,6 +120433,9 @@ ${gate.blocked.map((b) => `  #${b.ticket}: ${b.reason}`).join("\n")}`);
     }
     report(`launched (session ${sessionId}); PRD at ${composed.prdPath}; finalize with --finalize --session ${sessionId}`);
   });
+  cmd.command("closeout").description("Record or verify the session's terminal closeout record (Step 7.5)").option("--deslop <status>", 'Record the closeout: "completed" or "skipped"').option("--check", "Verify the closeout record matches the current criteria revision").option("--json", "Output as JSON").option("--session <id>", "Session id (defaults to OMC_SESSION_ID)").addHelpText("after", "\nExamples:\n  $ omc ralph closeout --deslop completed   Record the closeout after Step 6 completes\n  $ omc ralph closeout --check              Verify the closeout gate for the next step\n  $ omc ralph closeout --check --json       Machine-readable judgment\n  The closeout is a terminal record tying session completion to the criteria\n  revision that was active at completion time. Its presence gates further\n  verification steps and is required for clean session closure.").action((options) => {
+    process.exitCode = ralphCloseout(options);
+  });
   return cmd;
 }
 function resolveFeedbackCommands(directory, sessionId) {
@@ -125336,7 +120455,7 @@ function resolveFeedbackCommands(directory, sessionId) {
     if (prd?.feedbackCommands?.length) return { commands: [...prd.feedbackCommands] };
   }
   try {
-    const pkg = JSON.parse((0, import_fs128.readFileSync)((0, import_path154.join)(directory, "package.json"), "utf8"));
+    const pkg = JSON.parse((0, import_fs121.readFileSync)((0, import_path147.join)(directory, "package.json"), "utf8"));
     const scripts = pkg.scripts ?? {};
     const commands = ["build", "typecheck", "lint", "test", "test:run"].filter((name) => typeof scripts[name] === "string").map((name) => `npm run ${name}`);
     return { commands };
@@ -125345,13 +120464,22 @@ function resolveFeedbackCommands(directory, sessionId) {
   }
 }
 var SHELL_MISSING_COMMAND_PATTERN = /^(?:[^:\r\n]*\/)?(?:sh|bash):\s*(?:(?:line\s+)?\d+:\s*)?[^:\r\n]+:\s*(?:command not found|not found)\s*$|^(?:zsh:\s*)?(?:(?:line\s+)?\d+:\s*)?command not found:\s*\S+\s*$|^['"][^'"\r\n]+['"] is not recognized as an internal or external command\b/im;
-function runFeedbackCommand(command, directory) {
+var DEFAULT_FEEDBACK_TIMEOUT_MS = 6e5;
+function resolveFeedbackTimeoutMs(raw) {
+  const value = raw ?? process.env.OMC_RALPH_VERIFY_TIMEOUT_SECONDS;
+  if (value === void 0 || value.trim() === "") return DEFAULT_FEEDBACK_TIMEOUT_MS;
+  const seconds = Number(value);
+  if (!Number.isFinite(seconds) || seconds <= 0) return null;
+  const timeoutMs = Math.round(seconds * 1e3);
+  return timeoutMs >= 1 ? timeoutMs : null;
+}
+function runFeedbackCommand(command, directory, options = {}) {
   try {
-    const result = (0, import_child_process42.spawnSync)(command, {
+    const result = (0, import_child_process41.spawnSync)(command, {
       shell: true,
       cwd: directory,
       encoding: "utf8",
-      timeout: 6e5,
+      timeout: options.timeoutMs ?? DEFAULT_FEEDBACK_TIMEOUT_MS,
       windowsHide: true,
       maxBuffer: 32 * 1024 * 1024
     });
@@ -125359,17 +120487,100 @@ function runFeedbackCommand(command, directory) {
 ${result.stderr ?? ""}`;
     const errorCode2 = result.error && "code" in result.error && typeof result.error.code === "string" ? result.error.code : void 0;
     const failedToSpawn = Boolean(result.error) && result.pid === 0;
+    if (errorCode2 === "ETIMEDOUT") {
+      return { signatures: [], timedOut: true };
+    }
+    if (result.status === 0 && !result.error) {
+      return { signatures: [] };
+    }
     const outputWithExecutionError = errorCode2 && errorCode2 !== "ENOENT" ? `${output}
 Command execution failed: ${errorCode2}` : output;
     const signatures = signatureLines(outputWithExecutionError);
     const hasShellMissingCommand = SHELL_MISSING_COMMAND_PATTERN.test(output);
     const otherSignatures = hasShellMissingCommand ? signatureLines(output.split(/\r?\n/).filter((line) => !SHELL_MISSING_COMMAND_PATTERN.test(line) && !/^>\s/.test(line) && !/^operable program or batch file\.?$/i.test(line)).join("\n")) : signatures;
     const unrunnable = failedToSpawn || result.status === 126 || result.status === 127 || !result.error && hasShellMissingCommand && otherSignatures.length === 0;
-    return { signatures: unrunnable ? [] : signatures, ...unrunnable ? { unrunnable: true } : {} };
+    const exitCode = !unrunnable && typeof result.status === "number" ? result.status : void 0;
+    return {
+      signatures: unrunnable ? [] : signatures,
+      ...exitCode !== void 0 ? { exitCode } : {},
+      ...unrunnable ? { unrunnable: true } : {}
+    };
   } catch (error2) {
     const errorCode2 = typeof error2 === "object" && error2 !== null && "code" in error2 && typeof error2.code === "string" ? error2.code : void 0;
     return errorCode2 === "ENOENT" ? { signatures: [], unrunnable: true } : { signatures: [`Command execution failed: ${errorCode2 ?? "unknown"}`] };
   }
+}
+function evaluateCloseoutGate(directory, stateRoot2, sessionId) {
+  if (!sessionId) return { required: false, satisfied: true, criteriaRevision: null, deslop: null };
+  const prdPath = findPrdPath(directory, sessionId || void 0);
+  if (!prdPath) return { required: false, satisfied: true, criteriaRevision: null, deslop: null };
+  const { prd } = readPrdFromPath(prdPath);
+  if (!prd || prd.userStories.length === 0 || !getPrdStatus(prd).allComplete) {
+    return { required: false, satisfied: true, criteriaRevision: null, deslop: null };
+  }
+  const criteriaRevision = getPrdGoverningCriteriaRevision(prd);
+  const record2 = sessionId ? readCloseout(closeoutPath(stateRoot2, sessionId)) : null;
+  return {
+    required: true,
+    satisfied: isCloseoutSatisfied(record2, criteriaRevision),
+    criteriaRevision,
+    deslop: record2?.deslop ?? null
+  };
+}
+function ralphCloseout(options, directory = process.cwd(), now = /* @__PURE__ */ new Date()) {
+  const stateRoot2 = getOmcRoot(directory);
+  const sessionId = options.session ?? process.env.OMC_SESSION_ID ?? "";
+  if (!sessionId) {
+    console.error("omc ralph closeout: no session id \u2014 pass --session <id> (or set OMC_SESSION_ID)");
+    return 1;
+  }
+  try {
+    validateSessionId(sessionId);
+  } catch (error3) {
+    console.error(`omc ralph closeout: ${error3 instanceof Error ? error3.message : String(error3)}`);
+    return 1;
+  }
+  const prdPath = findPrdPath(directory, sessionId);
+  if (!prdPath) {
+    console.error("omc ralph closeout: no PRD for this session \u2014 a closeout records a completed ralph run");
+    return 1;
+  }
+  const { prd, error: error2 } = readPrdFromPath(prdPath);
+  if (!prd) {
+    console.error(`omc ralph closeout: ${error2 ?? "invalid PRD"}`);
+    return 1;
+  }
+  const criteriaRevision = getPrdGoverningCriteriaRevision(prd);
+  const path30 = closeoutPath(stateRoot2, sessionId);
+  if (options.check) {
+    const record2 = readCloseout(path30);
+    const satisfied = isCloseoutSatisfied(record2, criteriaRevision);
+    if (options.json) {
+      console.log(JSON.stringify({ sessionId, satisfied, criteriaRevision, closeout: record2 }));
+    } else if (satisfied) {
+      console.log(`ralph closeout: recorded (deslop: ${record2?.deslop})`);
+    } else {
+      console.log("ralph closeout: no record matches the current criteria revision \u2014 run `omc ralph closeout --deslop completed|skipped`");
+    }
+    return satisfied ? 0 : 1;
+  }
+  if (!getPrdStatus(prd).allComplete) {
+    console.error("omc ralph closeout: the PRD still has incomplete stories \u2014 record the closeout only after Step 6 completes");
+    return 1;
+  }
+  if (!isDeslopStatus(options.deslop)) {
+    console.error("omc ralph closeout: pass --deslop completed or --deslop skipped (Step 7.5)");
+    return 1;
+  }
+  const written = writeCloseout(path30, { sessionId, deslop: options.deslop, criteriaRevision }, now);
+  if (options.json) {
+    console.log(JSON.stringify({ sessionId, written, path: path30, criteriaRevision, deslop: options.deslop }));
+  } else if (written) {
+    console.log(`ralph closeout: recorded (deslop: ${options.deslop}) at ${path30}`);
+  } else {
+    console.error(`omc ralph closeout: could not write ${path30}`);
+  }
+  return written ? 0 : 1;
 }
 function ralphVerify(options, directory = process.cwd(), now = /* @__PURE__ */ new Date()) {
   const stateRoot2 = getOmcRoot(directory);
@@ -125384,8 +120595,8 @@ function ralphVerify(options, directory = process.cwd(), now = /* @__PURE__ */ n
   }
   if (!sessionId) {
     try {
-      const sessionsRoot = (0, import_path154.join)(stateRoot2, "state", "sessions");
-      const candidates = (0, import_fs128.readdirSync)(sessionsRoot, { withFileTypes: true }).filter((entry2) => entry2.isDirectory() && (0, import_fs128.existsSync)(baselinePath(stateRoot2, entry2.name))).map((entry2) => entry2.name);
+      const sessionsRoot = (0, import_path147.join)(stateRoot2, "state", "sessions");
+      const candidates = (0, import_fs121.readdirSync)(sessionsRoot, { withFileTypes: true }).filter((entry2) => entry2.isDirectory() && (0, import_fs121.existsSync)(baselinePath(stateRoot2, entry2.name))).map((entry2) => entry2.name);
       if (candidates.length === 1) sessionId = candidates[0];
       else if (candidates.length > 1) {
         console.error(`omc ralph verify: ${candidates.length} baselines found under ${sessionsRoot} \u2014 pass --session <id>`);
@@ -125395,7 +120606,8 @@ function ralphVerify(options, directory = process.cwd(), now = /* @__PURE__ */ n
     }
   }
   const path30 = sessionId ? baselinePath(stateRoot2, sessionId) : "";
-  const baseline = path30 ? readBaseline(path30) : null;
+  const readCurrentBaseline = () => path30 ? readBaseline(path30) : null;
+  const baseline = readCurrentBaseline();
   const resolution = resolveFeedbackCommands(directory, sessionId || void 0);
   if (resolution.prdError) {
     console.error(`omc ralph verify: ${resolution.prdError}`);
@@ -125405,46 +120617,110 @@ function ralphVerify(options, directory = process.cwd(), now = /* @__PURE__ */ n
     return 1;
   }
   const commands = resolution.commands;
-  if (commands.length === 0) {
-    const message2 = "no feedback commands: declare feedbackCommands in the PRD or add package.json build/lint/test scripts";
-    if (options.json) console.log(JSON.stringify({ sessionId: sessionId || null, baselinePresent: Boolean(baseline), commands: [], newFailures: [], resolvedFailures: [], unrunnableCommands: [], note: message2 }));
-    else console.log(`ralph verify: ${message2}`);
+  const runGate = () => {
+    const gateBaseline = readCurrentBaseline();
+    const current = {};
+    for (const command of commands) current[command] = runFeedbackCommand(command, directory, { timeoutMs: options.timeoutMs });
+    const unrunnableCommands = Object.entries(current).filter(([, entry2]) => entry2.unrunnable).map(([command]) => command);
+    const timedOutCommands = Object.entries(current).filter(([, entry2]) => entry2.timedOut).map(([command]) => command);
+    if (options.writeBaseline) {
+      const result = path30 ? recordBaseline(path30, current, now) : { written: false, added: 0, removed: 0 };
+      const { written, previousPath } = result;
+      const transitionNote = result.becameUnrunnable?.length ? `, ${result.becameUnrunnable.length} command${result.becameUnrunnable.length === 1 ? "" : "s"} became unrunnable (${result.becameUnrunnable.join(", ")})` : "";
+      const note2 = written ? previousPath ? `baseline replaced: +${result.added} signature${result.added === 1 ? "" : "s"}, -${result.removed} signature${result.removed === 1 ? "" : "s"}${transitionNote} (previous saved at ${previousPath})` : `baseline recorded at ${path30}` : path30 ? "could not write a baseline" : "could not write a baseline (no session id; pass --session)";
+      if (options.json) console.log(JSON.stringify({ sessionId: sessionId || null, baselineWritten: written, previousPath: previousPath ?? null, added: result.added, removed: result.removed, becameUnrunnable: result.becameUnrunnable ?? [], commands, signatures: Object.fromEntries(Object.entries(current).map(([c, e]) => [c, e.signatures.length])), unrunnableCommands }));
+      else console.log(`ralph verify: ${note2}`);
+      return written ? 0 : 1;
+    }
+    const diff = diffAgainstBaseline(gateBaseline, current);
+    const newlyTimedOut = timedOutCommands.filter((command) => !gateBaseline?.commands[command]?.timedOut);
+    const closeout = evaluateCloseoutGate(directory, stateRoot2, sessionId || "");
+    const closeoutBlocked = closeout.required && !closeout.satisfied;
+    const closeoutNote = closeoutBlocked ? "the PRD is complete but no closeout record matches its criteria revision; run `omc ralph closeout --deslop completed|skipped` before Step 7.6" : null;
+    if (options.json) {
+      const noCommandsNote = commands.length === 0 ? "no feedback commands: declare feedbackCommands in the PRD or add package.json build/lint/test scripts" : null;
+      console.log(JSON.stringify({ sessionId: sessionId || null, baselinePresent: Boolean(gateBaseline), commands, newFailures: diff.newSignatures, resolvedFailures: diff.resolvedSignatures, unrunnableCommands, timedOutCommands, closeout, closeoutError: closeoutNote, ...noCommandsNote ? { note: noCommandsNote } : {} }));
+      return diff.newSignatures.length > 0 || newlyTimedOut.length > 0 || closeoutBlocked ? 1 : 0;
+    }
+    if (commands.length === 0) {
+      const message2 = "no feedback commands: declare feedbackCommands in the PRD or add package.json build/lint/test scripts";
+      if (closeoutBlocked) {
+        console.log(message2);
+        console.log(closeoutNote);
+        return 1;
+      } else {
+        console.log(message2);
+        return 0;
+      }
+    }
+    if (newlyTimedOut.length > 0) {
+      const budgetSeconds = Math.round((options.timeoutMs ?? DEFAULT_FEEDBACK_TIMEOUT_MS) / 1e3);
+      console.log(`ralph verify: ${newlyTimedOut.length} feedback command(s) timed out after ${budgetSeconds}s; the gate could not complete`);
+      for (const command of newlyTimedOut) console.log(`  timed out: ${command}`);
+      console.log("  raise the budget with --timeout <seconds> or OMC_RALPH_VERIFY_TIMEOUT_SECONDS");
+      const otherNew = diff.newSignatures.filter((signature) => !signature.endsWith(": <command timed out>"));
+      if (otherNew.length > 0 && gateBaseline) {
+        console.log(`ralph verify: ${otherNew.length} NEW failure(s) since baseline`);
+        for (const signature of otherNew) console.log(`  new: ${signature}`);
+      } else if (otherNew.length > 0) {
+        console.log(`ralph verify: no baseline for session ${sessionId || "(unknown)"} \u2014 ${otherNew.length} failure signature(s) reported as candidates, not regressions`);
+        for (const signature of otherNew) console.log(`  candidate: ${signature}`);
+      }
+      if (closeoutNote) console.log(`ralph verify: ${closeoutNote}`);
+      return 1;
+    }
+    if (!gateBaseline) {
+      console.log(`ralph verify: no baseline for session ${sessionId || "(unknown)"} \u2014 current failures can serve as the baseline; run with --write-baseline at startup`);
+      for (const signature of diff.newSignatures) console.log(`  candidate: ${signature}`);
+      if (closeoutNote) {
+        console.log(`ralph verify: ${closeoutNote}`);
+        return 1;
+      }
+      return 0;
+    }
+    if (diff.newSignatures.length > 0) {
+      console.log(`ralph verify: ${diff.newSignatures.length} NEW failure(s) since baseline`);
+      for (const signature of diff.newSignatures) console.log(`  new: ${signature}`);
+      if (closeoutNote) console.log(`ralph verify: ${closeoutNote}`);
+      return 1;
+    }
+    const stillUnrunnable = unrunnableCommands.filter((command) => gateBaseline.commands[command]?.unrunnable);
+    if (stillUnrunnable.length > 0) {
+      console.log(`ralph verify: ${stillUnrunnable.length} feedback command(s) remain unrunnable; no comparison was possible`);
+      for (const command of stillUnrunnable) console.log(`  unavailable: ${command}`);
+      if (closeoutNote) console.log(`ralph verify: ${closeoutNote}`);
+      return closeoutBlocked ? 1 : 0;
+    }
+    const note = diff.resolvedSignatures.length > 0 ? ` (${diff.resolvedSignatures.length} baseline failure(s) resolved)` : "";
+    if (closeoutBlocked) {
+      console.log(`ralph verify: ${closeoutNote}`);
+      return 1;
+    }
+    console.log(`ralph verify: clean vs baseline${note}${closeout.required ? " + closeout recorded" : ""}`);
     return 0;
+  };
+  if (!path30) return runGate();
+  if (options.writeBaseline) return runGate();
+  let lock = null;
+  let lockError = null;
+  try {
+    lock = acquireFileLockSync(lockPathFor(path30));
+  } catch (error2) {
+    lockError = error2 instanceof Error ? error2.message : String(error2);
   }
-  const current = {};
-  for (const command of commands) current[command] = runFeedbackCommand(command, directory);
-  const unrunnableCommands = Object.entries(current).filter(([, entry2]) => entry2.unrunnable).map(([command]) => command);
-  if (options.writeBaseline) {
-    const written = path30 ? writeBaseline(path30, current, now) : false;
-    const note2 = written ? `baseline recorded at ${path30}` : "could not write a baseline (no session id; pass --session)";
-    if (options.json) console.log(JSON.stringify({ sessionId: sessionId || null, baselineWritten: written, commands, signatures: Object.fromEntries(Object.entries(current).map(([c, e]) => [c, e.signatures.length])), unrunnableCommands }));
-    else console.log(`ralph verify: ${note2}`);
-    return written ? 0 : 1;
-  }
-  const diff = diffAgainstBaseline(baseline, current);
-  if (options.json) {
-    console.log(JSON.stringify({ sessionId: sessionId || null, baselinePresent: Boolean(baseline), commands, newFailures: diff.newSignatures, resolvedFailures: diff.resolvedSignatures, unrunnableCommands }));
-    return diff.newSignatures.length > 0 ? 1 : 0;
-  }
-  if (!baseline) {
-    console.log(`ralph verify: no baseline for session ${sessionId || "(unknown)"} \u2014 current failures can serve as the baseline; run with --write-baseline at startup`);
-    for (const signature of diff.newSignatures) console.log(`  candidate: ${signature}`);
-    return 0;
-  }
-  if (diff.newSignatures.length > 0) {
-    console.log(`ralph verify: ${diff.newSignatures.length} NEW failure(s) since baseline`);
-    for (const signature of diff.newSignatures) console.log(`  new: ${signature}`);
+  if (!lock) {
+    const message2 = lockError ? `could not acquire the session lock (${lockPathFor(path30)}): ${lockError}` : `another verify is running for session ${sessionId} (${lockPathFor(path30)})`;
+    console.error(`omc ralph verify: ${message2}`);
+    if (options.json) {
+      console.log(JSON.stringify({ sessionId: sessionId || null, baselinePresent: Boolean(readCurrentBaseline()), commands: [], newFailures: [], resolvedFailures: [], unrunnableCommands: [], error: message2 }));
+    }
     return 1;
   }
-  const stillUnrunnable = unrunnableCommands.filter((command) => baseline?.commands[command]?.unrunnable);
-  if (stillUnrunnable.length > 0) {
-    console.log(`ralph verify: ${stillUnrunnable.length} feedback command(s) remain unrunnable; no comparison was possible`);
-    for (const command of stillUnrunnable) console.log(`  unavailable: ${command}`);
-    return 0;
+  try {
+    return runGate();
+  } finally {
+    releaseFileLockSync(lock);
   }
-  const note = diff.resolvedSignatures.length > 0 ? ` (${diff.resolvedSignatures.length} baseline failure(s) resolved)` : "";
-  console.log(`ralph verify: clean vs baseline${note}`);
-  return 0;
 }
 
 // src/cli/commands/doctor-team-routing.ts
@@ -125536,8 +120812,8 @@ ${missing.length} provider${missing.length === 1 ? "" : "s"} missing (warn only 
 
 // src/cli/commands/capabilities.ts
 var import_crypto40 = require("crypto");
-var import_fs129 = require("fs");
-var import_path155 = require("path");
+var import_fs122 = require("fs");
+var import_path148 = require("path");
 init_zod();
 init_definitions();
 var CAPABILITIES_LOCK_SCHEMA_VERSION = "1.0";
@@ -125568,22 +120844,22 @@ function sha2562(value) {
   return (0, import_crypto40.createHash)("sha256").update(value).digest("hex");
 }
 function resolveLockfilePath(lockfile) {
-  return (0, import_path155.resolve)(process.cwd(), lockfile ?? DEFAULT_CAPABILITIES_LOCKFILE);
+  return (0, import_path148.resolve)(process.cwd(), lockfile ?? DEFAULT_CAPABILITIES_LOCKFILE);
 }
 function packageRoot() {
   if (typeof __dirname !== "undefined" && __dirname) {
-    const fromSrc = (0, import_path155.resolve)(__dirname, "..", "..", "..");
-    const fromDist = (0, import_path155.resolve)(__dirname, "..", "..");
-    if ((0, import_fs129.existsSync)((0, import_path155.join)(fromSrc, "package.json"))) return fromSrc;
-    if ((0, import_fs129.existsSync)((0, import_path155.join)(fromDist, "package.json"))) return fromDist;
+    const fromSrc = (0, import_path148.resolve)(__dirname, "..", "..", "..");
+    const fromDist = (0, import_path148.resolve)(__dirname, "..", "..");
+    if ((0, import_fs122.existsSync)((0, import_path148.join)(fromSrc, "package.json"))) return fromSrc;
+    if ((0, import_fs122.existsSync)((0, import_path148.join)(fromDist, "package.json"))) return fromDist;
   }
   return process.cwd();
 }
 function listSkillFiles(root2) {
-  const skillsDir = (0, import_path155.join)(root2, "skills");
-  if (!(0, import_fs129.existsSync)(skillsDir)) return [];
-  const names = (0, import_fs129.readdirSync)(skillsDir).sort((a, b) => a.localeCompare(b));
-  return names.map((name) => (0, import_path155.join)(skillsDir, name, "SKILL.md")).filter((path30) => (0, import_fs129.existsSync)(path30) && (0, import_fs129.statSync)(path30).isFile());
+  const skillsDir = (0, import_path148.join)(root2, "skills");
+  if (!(0, import_fs122.existsSync)(skillsDir)) return [];
+  const names = (0, import_fs122.readdirSync)(skillsDir).sort((a, b) => a.localeCompare(b));
+  return names.map((name) => (0, import_path148.join)(skillsDir, name, "SKILL.md")).filter((path30) => (0, import_fs122.existsSync)(path30) && (0, import_fs122.statSync)(path30).isFile());
 }
 function readSkillTitle(markdown) {
   const heading = markdown.split("\n").find((line) => line.startsWith("# "));
@@ -125591,7 +120867,7 @@ function readSkillTitle(markdown) {
 }
 function skillNameFromSkillFilePath(skillFilePath) {
   const normalizedPath = skillFilePath.replace(/\\/g, "/");
-  return (0, import_path155.basename)((0, import_path155.dirname)(normalizedPath)) || skillFilePath;
+  return (0, import_path148.basename)((0, import_path148.dirname)(normalizedPath)) || skillFilePath;
 }
 function collectCapabilitySurface(root2 = packageRoot()) {
   const tools = allCustomTools.map((tool2) => toSdkToolFormat(tool2)).map((tool2) => ({
@@ -125612,7 +120888,7 @@ function collectCapabilitySurface(root2 = packageRoot()) {
     defaultModel: agent.defaultModel ?? null
   })).sort((a, b) => a.name.localeCompare(b.name));
   const skills = listSkillFiles(root2).map((path30) => {
-    const markdown = (0, import_fs129.readFileSync)(path30, "utf-8");
+    const markdown = (0, import_fs122.readFileSync)(path30, "utf-8");
     return {
       name: skillNameFromSkillFilePath(path30),
       digest: sha2562(markdown),
@@ -125755,7 +121031,7 @@ function buildCapabilitiesLockfile() {
   };
 }
 function parseLockfile(path30) {
-  const parsed = JSON.parse((0, import_fs129.readFileSync)(path30, "utf-8"));
+  const parsed = JSON.parse((0, import_fs122.readFileSync)(path30, "utf-8"));
   if (parsed.schemaVersion !== CAPABILITIES_LOCK_SCHEMA_VERSION) {
     throw new Error(`unsupported capabilities lockfile schema: ${parsed.schemaVersion ?? "<missing>"}`);
   }
@@ -125844,15 +121120,15 @@ function printCheckReport(report, json) {
 async function capabilitiesLockCommand(options) {
   const lockfilePath = resolveLockfilePath(options.lockfile);
   const lockfile = buildCapabilitiesLockfile();
-  (0, import_fs129.mkdirSync)((0, import_path155.dirname)(lockfilePath), { recursive: true });
-  (0, import_fs129.writeFileSync)(lockfilePath, `${stableStringify(lockfile)}
+  (0, import_fs122.mkdirSync)((0, import_path148.dirname)(lockfilePath), { recursive: true });
+  (0, import_fs122.writeFileSync)(lockfilePath, `${stableStringify(lockfile)}
 `);
   printLockSummary(lockfilePath, lockfile, options.json);
   return lockfile.fixtureResults.every((result) => result.ok) ? 0 : 1;
 }
 async function capabilitiesCheckCommand(options) {
   const lockfilePath = resolveLockfilePath(options.lockfile);
-  if (!(0, import_fs129.existsSync)(lockfilePath)) {
+  if (!(0, import_fs122.existsSync)(lockfilePath)) {
     const report2 = {
       ok: false,
       lockfile: lockfilePath,
@@ -127126,7 +122402,7 @@ function integerOption(min, max = Number.MAX_SAFE_INTEGER) {
 
 // src/cli/commands/ralphthon.ts
 init_tmux_utils();
-var import_fs131 = require("fs");
+var import_fs124 = require("fs");
 
 // src/ralphthon/types.ts
 var RALPHTHON_DEFAULTS = {
@@ -127142,8 +122418,8 @@ var RALPHTHON_DEFAULTS = {
 var PRD_FILENAME2 = "ralphthon-prd.json";
 
 // src/ralphthon/prd.ts
-var import_fs130 = require("fs");
-var import_path156 = require("path");
+var import_fs123 = require("fs");
+var import_path149 = require("path");
 init_worktree_paths();
 var DEFAULT_PLANNING_CONTEXT = {
   brownfield: false,
@@ -127160,20 +122436,20 @@ function normalizePlanningContext(context) {
   };
 }
 function getRalphthonPrdPath(directory) {
-  return (0, import_path156.join)(getOmcRoot(directory), PRD_FILENAME2);
+  return (0, import_path149.join)(getOmcRoot(directory), PRD_FILENAME2);
 }
 function findRalphthonPrdPath(directory) {
-  const rootPath = (0, import_path156.join)(directory, PRD_FILENAME2);
-  if ((0, import_fs130.existsSync)(rootPath)) return rootPath;
+  const rootPath = (0, import_path149.join)(directory, PRD_FILENAME2);
+  if ((0, import_fs123.existsSync)(rootPath)) return rootPath;
   const omcPath = getRalphthonPrdPath(directory);
-  if ((0, import_fs130.existsSync)(omcPath)) return omcPath;
+  if ((0, import_fs123.existsSync)(omcPath)) return omcPath;
   return null;
 }
 function readRalphthonPrd(directory) {
   const prdPath = findRalphthonPrdPath(directory);
   if (!prdPath) return null;
   try {
-    const content = (0, import_fs130.readFileSync)(prdPath, "utf-8");
+    const content = (0, import_fs123.readFileSync)(prdPath, "utf-8");
     const prd = JSON.parse(content);
     if (!prd.stories || !Array.isArray(prd.stories)) return null;
     if (!prd.config) return null;
@@ -127187,9 +122463,9 @@ function writeRalphthonPrd(directory, prd) {
   let prdPath = findRalphthonPrdPath(directory);
   if (!prdPath) {
     const omcDir = getOmcRoot(directory);
-    if (!(0, import_fs130.existsSync)(omcDir)) {
+    if (!(0, import_fs123.existsSync)(omcDir)) {
       try {
-        (0, import_fs130.mkdirSync)(omcDir, { recursive: true });
+        (0, import_fs123.mkdirSync)(omcDir, { recursive: true });
       } catch {
         return false;
       }
@@ -127201,7 +122477,7 @@ function writeRalphthonPrd(directory, prd) {
       ...prd,
       planningContext: normalizePlanningContext(prd.planningContext)
     };
-    (0, import_fs130.writeFileSync)(prdPath, JSON.stringify(normalizedPrd, null, 2));
+    (0, import_fs123.writeFileSync)(prdPath, JSON.stringify(normalizedPrd, null, 2));
     return true;
   } catch {
     return false;
@@ -127968,7 +123244,7 @@ async function ralphthonCommand(args) {
     const pollMs = 5e3;
     let waited = 0;
     while (waited < maxWaitMs) {
-      if ((0, import_fs131.existsSync)(prdPath)) {
+      if ((0, import_fs124.existsSync)(prdPath)) {
         const prd = readRalphthonPrd(cwd2);
         if (prd && prd.stories.length > 0) {
           console.log(source_default.green("PRD generated successfully!"));
@@ -128019,15 +123295,15 @@ async function ralphthonCommand(args) {
   console.log(source_default.gray("Orchestrator running. Press Ctrl+C to stop."));
 }
 function sleep6(ms) {
-  return new Promise((resolve48) => setTimeout(resolve48, ms));
+  return new Promise((resolve49) => setTimeout(resolve49, ms));
 }
 
 // src/cli/commands/ultragoal.ts
-var import_promises31 = require("node:fs/promises");
+var import_promises30 = require("node:fs/promises");
 
 // src/goal-workflows/claude-goal-snapshot.ts
 var import_node_fs22 = require("node:fs");
-var import_promises29 = require("node:fs/promises");
+var import_promises28 = require("node:fs/promises");
 var import_node_path29 = require("node:path");
 var ClaudeGoalSnapshotError = class extends Error {
 };
@@ -128086,7 +123362,7 @@ async function readClaudeGoalSnapshotInput(raw, cwd2 = process.cwd()) {
       throw new ClaudeGoalSnapshotError(`Claude goal snapshot is neither valid JSON nor a readable path: ${trimmed}`);
     }
     try {
-      return parseClaudeGoalSnapshot(JSON.parse(await (0, import_promises29.readFile)(path30, "utf-8")));
+      return parseClaudeGoalSnapshot(JSON.parse(await (0, import_promises28.readFile)(path30, "utf-8")));
     } catch (error2) {
       throw new ClaudeGoalSnapshotError(`Claude goal snapshot path does not contain valid JSON: ${trimmed}${error2 instanceof Error ? ` (${error2.message})` : ""}`);
     }
@@ -128126,7 +123402,7 @@ function formatClaudeGoalReconciliation(reconciliation) {
 
 // src/ultragoal/artifacts.ts
 var import_node_fs23 = require("node:fs");
-var import_promises30 = require("node:fs/promises");
+var import_promises29 = require("node:fs/promises");
 var import_node_path30 = require("node:path");
 init_worktree_paths();
 var ULTRAGOAL_DIR = ".omc/ultragoal";
@@ -128156,7 +123432,7 @@ function ultragoalLedgerPath(cwd2, planId) {
 async function listUltragoalPlanIds(cwd2) {
   const dir = (0, import_node_path30.join)(getOmcRoot(cwd2), "ultragoal", ULTRAGOAL_PLANS_SUBDIR);
   try {
-    const entries = await (0, import_promises30.readdir)(dir, { withFileTypes: true });
+    const entries = await (0, import_promises29.readdir)(dir, { withFileTypes: true });
     return entries.filter((entry2) => entry2.isDirectory()).filter((entry2) => /^[a-zA-Z0-9][a-zA-Z0-9._-]*$/.test(entry2.name)).map((entry2) => entry2.name).sort();
   } catch {
     return [];
@@ -128210,7 +123486,7 @@ async function snapshotObjectiveMapsToUltragoalPlan(cwd2, snapshotObjective, pla
   if (textMentionsUltragoalPlanArtifact(actual)) return true;
   if (actual.length < 24) return false;
   try {
-    const brief = normalizeObjective2(await (0, import_promises30.readFile)(ultragoalBriefPath(cwd2, planId), "utf-8")).toLowerCase();
+    const brief = normalizeObjective2(await (0, import_promises29.readFile)(ultragoalBriefPath(cwd2, planId), "utf-8")).toLowerCase();
     if (!brief || brief.length < 24) return false;
     return brief.includes(actual) || actual.includes(brief);
   } catch {
@@ -128289,16 +123565,16 @@ function normalizeGoalId(title, index) {
   return `G${String(index + 1).padStart(3, "0")}${slug ? `-${slug}` : ""}`;
 }
 async function appendLedger(cwd2, entry2, planId) {
-  await (0, import_promises30.mkdir)(ultragoalDir(cwd2, planId), { recursive: true });
+  await (0, import_promises29.mkdir)(ultragoalDir(cwd2, planId), { recursive: true });
   const path30 = ultragoalLedgerPath(cwd2, planId);
-  await (0, import_promises30.appendFile)(path30, `${JSON.stringify(entry2)}
+  await (0, import_promises29.appendFile)(path30, `${JSON.stringify(entry2)}
 `);
 }
 async function readUltragoalPlan(cwd2, planId) {
   const path30 = ultragoalGoalsPath(cwd2, planId);
   let raw;
   try {
-    raw = await (0, import_promises30.readFile)(path30, "utf-8");
+    raw = await (0, import_promises29.readFile)(path30, "utf-8");
   } catch {
     const hint = planId ? `Pass --plan-id ${planId} to a previously-created plan, or run \`omc ultragoal create-goals --plan-id ${planId} ...\`.` : "Run `omc ultragoal create-goals ...` first.";
     throw new UltragoalError(`No ultragoal plan found at ${repoRelative(cwd2, path30)}. ${hint}`);
@@ -128311,8 +123587,8 @@ async function readUltragoalPlan(cwd2, planId) {
   return parsed;
 }
 async function writePlan(cwd2, plan) {
-  await (0, import_promises30.mkdir)(ultragoalDir(cwd2, plan.planId), { recursive: true });
-  await (0, import_promises30.writeFile)(ultragoalGoalsPath(cwd2, plan.planId), `${JSON.stringify(plan, null, 2)}
+  await (0, import_promises29.mkdir)(ultragoalDir(cwd2, plan.planId), { recursive: true });
+  await (0, import_promises29.writeFile)(ultragoalGoalsPath(cwd2, plan.planId), `${JSON.stringify(plan, null, 2)}
 `);
 }
 async function createUltragoalPlan(cwd2, options) {
@@ -128353,11 +123629,11 @@ async function createUltragoalPlan(cwd2, options) {
     goals: candidates
   };
   if (plan.claudeGoalMode === "aggregate") plan.claudeObjective = aggregateClaudeObjective(candidates, planId);
-  await (0, import_promises30.mkdir)(ultragoalDir(cwd2, planId), { recursive: true });
-  await (0, import_promises30.writeFile)(ultragoalBriefPath(cwd2, planId), options.brief.endsWith("\n") ? options.brief : `${options.brief}
+  await (0, import_promises29.mkdir)(ultragoalDir(cwd2, planId), { recursive: true });
+  await (0, import_promises29.writeFile)(ultragoalBriefPath(cwd2, planId), options.brief.endsWith("\n") ? options.brief : `${options.brief}
 `);
   await writePlan(cwd2, plan);
-  await (0, import_promises30.writeFile)(ultragoalLedgerPath(cwd2, planId), "");
+  await (0, import_promises29.writeFile)(ultragoalLedgerPath(cwd2, planId), "");
   await appendLedger(cwd2, { ts: now, event: "plan_created", message: `${candidates.length} goal(s) created` }, planId);
   return plan;
 }
@@ -128861,7 +124137,7 @@ async function readJsonInput(raw) {
   try {
     const trimmed = raw.trim();
     if (trimmed.startsWith("{") || trimmed.startsWith("[")) return JSON.parse(trimmed);
-    return JSON.parse(await (0, import_promises31.readFile)(trimmed, "utf-8"));
+    return JSON.parse(await (0, import_promises30.readFile)(trimmed, "utf-8"));
   } catch (error2) {
     const message2 = error2 instanceof Error ? error2.message : String(error2);
     throw new UltragoalError(`Invalid --quality-gate-json: ${message2}`);
@@ -128879,7 +124155,7 @@ async function ultragoalCommand(args) {
     }
     if (command === "create" || command === "create-goals") {
       const briefFile = readValue(rest, "--brief-file");
-      const brief = readValue(rest, "--brief") ?? (briefFile ? await (0, import_promises31.readFile)(briefFile, "utf-8") : void 0) ?? (hasFlag2(rest, "--from-stdin") ? await readStdin2() : void 0) ?? positionalText(rest);
+      const brief = readValue(rest, "--brief") ?? (briefFile ? await (0, import_promises30.readFile)(briefFile, "utf-8") : void 0) ?? (hasFlag2(rest, "--from-stdin") ? await readStdin2() : void 0) ?? positionalText(rest);
       if (!brief.trim()) throw new UltragoalError("Missing brief text. Pass --brief, --brief-file, --from-stdin, or positional text.");
       const goals = readRepeated(rest, "--goal").map(parseGoalArg);
       const plan = await createUltragoalPlan(cwd2, {
@@ -129408,14 +124684,14 @@ async function aliasRetirementCommand(args) {
 }
 
 // src/cli/commands/teleport.ts
-var import_child_process43 = require("child_process");
-var import_fs132 = require("fs");
+var import_child_process42 = require("child_process");
+var import_fs125 = require("fs");
 var import_os25 = require("os");
-var import_path157 = require("path");
+var import_path150 = require("path");
 init_loader();
 init_providers();
 init_worktree_cleanup_safety();
-var DEFAULT_WORKTREE_ROOT = (0, import_path157.join)((0, import_os25.homedir)(), "Workspace", "omc-worktrees");
+var DEFAULT_WORKTREE_ROOT = (0, import_path150.join)((0, import_os25.homedir)(), "Workspace", "omc-worktrees");
 var PACKAGE_JSON_NAME = "package.json";
 var PACKAGE_MANAGER_LOCKFILES = {
   pnpm: "pnpm-lock.yaml",
@@ -129424,14 +124700,14 @@ var PACKAGE_MANAGER_LOCKFILES = {
 };
 function readPackageJsonText(directory) {
   try {
-    return (0, import_fs132.readFileSync)((0, import_path157.join)(directory, PACKAGE_JSON_NAME), "utf-8");
+    return (0, import_fs125.readFileSync)((0, import_path150.join)(directory, PACKAGE_JSON_NAME), "utf-8");
   } catch {
     return null;
   }
 }
 function detectPackageManager(parentRepoRoot, worktreePath) {
   for (const [manager, lockfile] of Object.entries(PACKAGE_MANAGER_LOCKFILES)) {
-    if ((0, import_fs132.existsSync)((0, import_path157.join)(worktreePath, lockfile)) || (0, import_fs132.existsSync)((0, import_path157.join)(parentRepoRoot, lockfile))) {
+    if ((0, import_fs125.existsSync)((0, import_path150.join)(worktreePath, lockfile)) || (0, import_fs125.existsSync)((0, import_path150.join)(parentRepoRoot, lockfile))) {
       return manager;
     }
   }
@@ -129450,12 +124726,12 @@ function detectPackageManager(parentRepoRoot, worktreePath) {
   return "npm";
 }
 function symlinkNodeModules(parentRepoRoot, worktreePath) {
-  const sourceNodeModules = (0, import_path157.join)(parentRepoRoot, "node_modules");
-  const targetNodeModules = (0, import_path157.join)(worktreePath, "node_modules");
-  if (!(0, import_fs132.existsSync)(sourceNodeModules) || (0, import_fs132.existsSync)(targetNodeModules)) {
+  const sourceNodeModules = (0, import_path150.join)(parentRepoRoot, "node_modules");
+  const targetNodeModules = (0, import_path150.join)(worktreePath, "node_modules");
+  if (!(0, import_fs125.existsSync)(sourceNodeModules) || (0, import_fs125.existsSync)(targetNodeModules)) {
     return false;
   }
-  (0, import_fs132.symlinkSync)(sourceNodeModules, targetNodeModules, process.platform === "win32" ? "junction" : "dir");
+  (0, import_fs125.symlinkSync)(sourceNodeModules, targetNodeModules, process.platform === "win32" ? "junction" : "dir");
   return true;
 }
 function installDependencies(worktreePath, packageManager) {
@@ -129464,7 +124740,7 @@ function installDependencies(worktreePath, packageManager) {
     pnpm: ["install"],
     yarn: ["install"]
   };
-  (0, import_child_process43.execFileSync)(packageManager, argsByManager[packageManager], {
+  (0, import_child_process42.execFileSync)(packageManager, argsByManager[packageManager], {
     cwd: worktreePath,
     stdio: "inherit"
   });
@@ -129642,12 +124918,12 @@ function sanitize(str, maxLen = 30) {
 }
 function getCurrentRepo() {
   try {
-    const root2 = (0, import_child_process43.execFileSync)("git", ["rev-parse", "--show-toplevel"], {
+    const root2 = (0, import_child_process42.execFileSync)("git", ["rev-parse", "--show-toplevel"], {
       encoding: "utf-8",
       timeout: 5e3,
       windowsHide: true
     }).trim();
-    const remoteUrl = (0, import_child_process43.execFileSync)("git", ["remote", "get-url", "origin"], {
+    const remoteUrl = (0, import_child_process42.execFileSync)("git", ["remote", "get-url", "origin"], {
       encoding: "utf-8",
       timeout: 5e3,
       windowsHide: true
@@ -129670,27 +124946,27 @@ async function fetchProviderInfo(type, number3, provider, owner, repo) {
 }
 function createWorktree(repoRoot2, worktreePath, branchName, baseBranch) {
   try {
-    const parentDir = (0, import_path157.join)(worktreePath, "..");
-    if (!(0, import_fs132.existsSync)(parentDir)) {
-      (0, import_fs132.mkdirSync)(parentDir, { recursive: true });
+    const parentDir = (0, import_path150.join)(worktreePath, "..");
+    if (!(0, import_fs125.existsSync)(parentDir)) {
+      (0, import_fs125.mkdirSync)(parentDir, { recursive: true });
     }
-    if ((0, import_fs132.existsSync)(worktreePath)) {
+    if ((0, import_fs125.existsSync)(worktreePath)) {
       return { success: false, error: `Worktree already exists at ${worktreePath}` };
     }
-    (0, import_child_process43.execFileSync)("git", ["fetch", "origin", baseBranch], {
+    (0, import_child_process42.execFileSync)("git", ["fetch", "origin", baseBranch], {
       cwd: repoRoot2,
       stdio: "pipe",
       windowsHide: true
     });
     try {
-      (0, import_child_process43.execFileSync)("git", ["branch", branchName, `origin/${baseBranch}`], {
+      (0, import_child_process42.execFileSync)("git", ["branch", branchName, `origin/${baseBranch}`], {
         cwd: repoRoot2,
         stdio: "pipe",
         windowsHide: true
       });
     } catch {
     }
-    (0, import_child_process43.execFileSync)("git", ["worktree", "add", worktreePath, branchName], {
+    (0, import_child_process42.execFileSync)("git", ["worktree", "add", worktreePath, branchName], {
       cwd: repoRoot2,
       stdio: "pipe",
       windowsHide: true
@@ -129714,7 +124990,7 @@ async function teleportCommand(ref, options) {
     return { success: false, error: error2 };
   }
   const { owner, repo, root: repoRoot2 } = currentRepo;
-  const repoName = (0, import_path157.basename)(repoRoot2);
+  const repoName = (0, import_path150.basename)(repoRoot2);
   const config2 = loadConfig();
   const shouldSymlinkNodeModules = config2.teleport?.symlinkNodeModules ?? true;
   const effectiveProviderName = parsed.provider || currentRepo.provider;
@@ -129770,7 +125046,7 @@ async function teleportCommand(ref, options) {
       if (provider.prRefspec) {
         try {
           const refspec = provider.prRefspec.replace("{number}", String(parsed.number)).replace("{branch}", branchName);
-          (0, import_child_process43.execFileSync)(
+          (0, import_child_process42.execFileSync)(
             "git",
             ["fetch", "origin", refspec],
             { cwd: repoRoot2, stdio: ["pipe", "pipe", "pipe"], timeout: 3e4, windowsHide: true }
@@ -129779,7 +125055,7 @@ async function teleportCommand(ref, options) {
         }
       } else if (info.branch) {
         try {
-          (0, import_child_process43.execFileSync)(
+          (0, import_child_process42.execFileSync)(
             "git",
             ["fetch", "origin", `${info.branch}:${branchName}`],
             { cwd: repoRoot2, stdio: ["pipe", "pipe", "pipe"], timeout: 3e4, windowsHide: true }
@@ -129795,7 +125071,7 @@ async function teleportCommand(ref, options) {
       }
     }
   }
-  const worktreePath = (0, import_path157.join)(worktreeRoot, worktreeDirName);
+  const worktreePath = (0, import_path150.join)(worktreeRoot, worktreeDirName);
   if (!options.json) {
     console.log(source_default.gray(`  Branch: ${branchName}`));
     console.log(source_default.gray(`  Path: ${worktreePath}`));
@@ -129848,13 +125124,13 @@ function findWorktreeDirs(dir, maxDepth = 3, currentDepth = 0) {
   if (currentDepth >= maxDepth) return [];
   const results = [];
   try {
-    const entries = (0, import_fs132.readdirSync)(dir, { withFileTypes: true });
+    const entries = (0, import_fs125.readdirSync)(dir, { withFileTypes: true });
     for (const entry2 of entries) {
       if (!entry2.isDirectory()) continue;
-      const fullPath = (0, import_path157.join)(dir, entry2.name);
+      const fullPath = (0, import_path150.join)(dir, entry2.name);
       try {
-        const gitPath2 = (0, import_path157.join)(fullPath, ".git");
-        const stat2 = (0, import_fs132.statSync)(gitPath2);
+        const gitPath2 = (0, import_path150.join)(fullPath, ".git");
+        const stat2 = (0, import_fs125.statSync)(gitPath2);
         if (stat2.isFile()) {
           results.push(fullPath);
           continue;
@@ -129869,7 +125145,7 @@ function findWorktreeDirs(dir, maxDepth = 3, currentDepth = 0) {
 }
 async function teleportListCommand(options) {
   const worktreeRoot = DEFAULT_WORKTREE_ROOT;
-  if (!(0, import_fs132.existsSync)(worktreeRoot)) {
+  if (!(0, import_fs125.existsSync)(worktreeRoot)) {
     if (options.json) {
       console.log(JSON.stringify({ worktrees: [] }));
     } else {
@@ -129879,10 +125155,10 @@ async function teleportListCommand(options) {
   }
   const worktreeDirs = findWorktreeDirs(worktreeRoot);
   const worktrees = worktreeDirs.map((worktreePath) => {
-    const relativePath = (0, import_path157.relative)(worktreeRoot, worktreePath);
+    const relativePath = (0, import_path150.relative)(worktreeRoot, worktreePath);
     let branch = "unknown";
     try {
-      branch = (0, import_child_process43.execFileSync)("git", ["branch", "--show-current"], {
+      branch = (0, import_child_process42.execFileSync)("git", ["branch", "--show-current"], {
         cwd: worktreePath,
         encoding: "utf-8",
         windowsHide: true
@@ -129911,8 +125187,8 @@ async function teleportListCommand(options) {
 async function teleportRemoveCommand(pathOrName, options) {
   const worktreeRoot = DEFAULT_WORKTREE_ROOT;
   let worktreePath = pathOrName;
-  if (!(0, import_path157.isAbsolute)(pathOrName)) {
-    worktreePath = (0, import_path157.join)(worktreeRoot, pathOrName);
+  if (!(0, import_path150.isAbsolute)(pathOrName)) {
+    worktreePath = (0, import_path150.join)(worktreeRoot, pathOrName);
   }
   try {
     validateWorktreeRemovalTarget({
@@ -129931,7 +125207,7 @@ async function teleportRemoveCommand(pathOrName, options) {
   }
   try {
     if (!options.force) {
-      const status = (0, import_child_process43.execFileSync)("git", ["status", "--porcelain"], {
+      const status = (0, import_child_process42.execFileSync)("git", ["status", "--porcelain"], {
         cwd: worktreePath,
         encoding: "utf-8",
         windowsHide: true
@@ -129946,7 +125222,7 @@ async function teleportRemoveCommand(pathOrName, options) {
         return 1;
       }
     }
-    const gitDir = (0, import_child_process43.execFileSync)("git", ["rev-parse", "--git-dir"], {
+    const gitDir = (0, import_child_process42.execFileSync)("git", ["rev-parse", "--git-dir"], {
       cwd: worktreePath,
       encoding: "utf-8",
       windowsHide: true
@@ -129964,7 +125240,7 @@ async function teleportRemoveCommand(pathOrName, options) {
       mainRepoRoots: [mainRepo]
     });
     const args = options.force ? ["worktree", "remove", "--force", worktreePath] : ["worktree", "remove", worktreePath];
-    (0, import_child_process43.execFileSync)("git", args, {
+    (0, import_child_process42.execFileSync)("git", args, {
       cwd: mainRepo,
       stdio: "pipe",
       windowsHide: true
@@ -129990,22 +125266,22 @@ async function teleportRemoveCommand(pathOrName, options) {
 init_version();
 
 // src/lib/plugin-dir.ts
-var import_path158 = require("path");
+var import_path151 = require("path");
 function isCrossPlatformAbsolutePath(rawPath) {
-  return import_path158.posix.isAbsolute(rawPath) || import_path158.win32.isAbsolute(rawPath);
+  return import_path151.posix.isAbsolute(rawPath) || import_path151.win32.isAbsolute(rawPath);
 }
 function resolvePluginDirArg(rawPath) {
   if (!rawPath || rawPath.trim().length === 0) {
     throw new Error("--plugin-dir requires a non-empty path argument");
   }
-  return isCrossPlatformAbsolutePath(rawPath) ? rawPath : (0, import_path158.resolve)(rawPath);
+  return isCrossPlatformAbsolutePath(rawPath) ? rawPath : (0, import_path151.resolve)(rawPath);
 }
 
 // src/cli/launch.ts
-var import_child_process44 = require("child_process");
-var import_fs133 = require("fs");
+var import_child_process43 = require("child_process");
+var import_fs126 = require("fs");
 var import_os26 = require("os");
-var import_path159 = require("path");
+var import_path152 = require("path");
 init_atomic_write();
 init_file_lock();
 init_mcp_registry();
@@ -130051,37 +125327,37 @@ var SLACK_FLAG = "--slack";
 var WEBHOOK_FLAG = "--webhook";
 var OMC_RUNTIME_DIRNAME = ".omc-launch";
 function hasOmcMarkers(path30) {
-  if (!(0, import_fs133.existsSync)(path30)) return false;
-  const content = (0, import_fs133.readFileSync)(path30, "utf-8");
+  if (!(0, import_fs126.existsSync)(path30)) return false;
+  const content = (0, import_fs126.readFileSync)(path30, "utf-8");
   return content.includes("<!-- OMC:START -->") && content.includes("<!-- OMC:END -->");
 }
 function ensureMirroredPath(sourcePath, targetPath, options = {}) {
-  if (!(0, import_fs133.existsSync)(sourcePath)) return;
+  if (!(0, import_fs126.existsSync)(sourcePath)) return;
   try {
-    const sourceStat = (0, import_fs133.lstatSync)(sourcePath);
-    const targetExists = (0, import_fs133.existsSync)(targetPath);
+    const sourceStat = (0, import_fs126.lstatSync)(sourcePath);
+    const targetExists = (0, import_fs126.existsSync)(targetPath);
     if (targetExists) {
-      const targetStat = (0, import_fs133.lstatSync)(targetPath);
+      const targetStat = (0, import_fs126.lstatSync)(targetPath);
       if (targetStat.isSymbolicLink()) {
         return;
       }
-      (0, import_fs133.rmSync)(targetPath, { recursive: true, force: true });
+      (0, import_fs126.rmSync)(targetPath, { recursive: true, force: true });
     }
     if (sourceStat.isDirectory()) {
-      (0, import_fs133.symlinkSync)(sourcePath, targetPath, process.platform === "win32" ? "junction" : "dir");
+      (0, import_fs126.symlinkSync)(sourcePath, targetPath, process.platform === "win32" ? "junction" : "dir");
       return;
     }
-    (0, import_fs133.symlinkSync)(sourcePath, targetPath, "file");
+    (0, import_fs126.symlinkSync)(sourcePath, targetPath, "file");
   } catch {
     if (options.allowCopyFallback === false) {
       return;
     }
-    const sourceStat = (0, import_fs133.lstatSync)(sourcePath);
+    const sourceStat = (0, import_fs126.lstatSync)(sourcePath);
     if (sourceStat.isDirectory()) {
-      (0, import_fs133.cpSync)(sourcePath, targetPath, { recursive: true });
+      (0, import_fs126.cpSync)(sourcePath, targetPath, { recursive: true });
       return;
     }
-    (0, import_fs133.copyFileSync)(sourcePath, targetPath);
+    (0, import_fs126.copyFileSync)(sourcePath, targetPath);
   }
 }
 function isJsonObject(value) {
@@ -130092,7 +125368,7 @@ function hasOwn(value, key) {
 }
 function readJsonObject4(path30) {
   try {
-    const parsed = JSON.parse((0, import_fs133.readFileSync)(path30, "utf-8"));
+    const parsed = JSON.parse((0, import_fs126.readFileSync)(path30, "utf-8"));
     return isJsonObject(parsed) ? parsed : null;
   } catch {
     return null;
@@ -130136,27 +125412,27 @@ function hasLinkableCredentials(inspection) {
   return typeof source.accessToken === "string" && source.accessToken.trim().length > 0;
 }
 function resolveCredentialTarget(path30) {
-  let current = (0, import_path159.resolve)(path30);
+  let current = (0, import_path152.resolve)(path30);
   const visited = /* @__PURE__ */ new Set();
   while (true) {
     if (visited.has(current)) throw new Error("Claude credential symlink chain contains a cycle");
     visited.add(current);
     let stat2;
     try {
-      stat2 = (0, import_fs133.lstatSync)(current);
+      stat2 = (0, import_fs126.lstatSync)(current);
     } catch (error2) {
       const code = error2 && typeof error2 === "object" && "code" in error2 ? error2.code : void 0;
       if (code === "ENOENT" || code === "ENOTDIR") return null;
       throw error2;
     }
     if (!stat2.isSymbolicLink()) return current;
-    const target = (0, import_fs133.readlinkSync)(current);
-    current = (0, import_path159.isAbsolute)(target) ? (0, import_path159.resolve)(target) : (0, import_path159.resolve)((0, import_path159.dirname)(current), target);
+    const target = (0, import_fs126.readlinkSync)(current);
+    current = (0, import_path152.isAbsolute)(target) ? (0, import_path152.resolve)(target) : (0, import_path152.resolve)((0, import_path152.dirname)(current), target);
   }
 }
 function inspectCredentialFile(path30) {
   try {
-    (0, import_fs133.lstatSync)(path30);
+    (0, import_fs126.lstatSync)(path30);
   } catch (error2) {
     const code = error2 && typeof error2 === "object" && "code" in error2 ? error2.code : void 0;
     if (code !== "ENOENT" && code !== "ENOTDIR") {
@@ -130175,7 +125451,7 @@ function inspectCredentialFile(path30) {
   }
   let stat2;
   try {
-    stat2 = (0, import_fs133.lstatSync)(resolvedPath);
+    stat2 = (0, import_fs126.lstatSync)(resolvedPath);
   } catch {
     return { exists: true, regularFile: false, readable: false, valid: false, parsed: null, candidate: null, writePath: null };
   }
@@ -130184,7 +125460,7 @@ function inspectCredentialFile(path30) {
   }
   let parsed;
   try {
-    parsed = JSON.parse((0, import_fs133.readFileSync)(resolvedPath, "utf-8"));
+    parsed = JSON.parse((0, import_fs126.readFileSync)(resolvedPath, "utf-8"));
   } catch {
     return { exists: true, regularFile: true, readable: false, valid: false, parsed: null, candidate: null, writePath: resolvedPath };
   }
@@ -130266,15 +125542,15 @@ function compareOnboardingVersion(left, right) {
   }
   return 0;
 }
-function refreshRuntimeClaudeJson(baseConfigDir, runtimeClaudeJsonPath, sourceClaudeJson = readJsonObject4((0, import_path159.join)((0, import_path159.dirname)(baseConfigDir), ".claude.json"))) {
-  if (!sourceClaudeJson) return;
+function refreshRuntimeClaudeJson(baseConfigDir, runtimeClaudeJsonPath, sourceClaudeJson = readJsonObject4((0, import_path152.join)((0, import_path152.dirname)(baseConfigDir), ".claude.json")), mcpServersSourceJson = readJsonObject4(getClaudeMcpConfigPath(baseConfigDir))) {
+  if (!sourceClaudeJson && !mcpServersSourceJson) return;
   const runtimeClaudeJson = readJsonObject4(runtimeClaudeJsonPath) ?? {};
   let changed = false;
-  if (sourceClaudeJson.hasCompletedOnboarding === true && runtimeClaudeJson.hasCompletedOnboarding !== true) {
+  if (sourceClaudeJson?.hasCompletedOnboarding === true && runtimeClaudeJson.hasCompletedOnboarding !== true) {
     runtimeClaudeJson.hasCompletedOnboarding = true;
     changed = true;
   }
-  const sourceVersion = sourceClaudeJson.lastOnboardingVersion;
+  const sourceVersion = sourceClaudeJson?.lastOnboardingVersion;
   if (typeof sourceVersion === "string" || typeof sourceVersion === "number") {
     const runtimeHasVersion = hasOwn(runtimeClaudeJson, "lastOnboardingVersion");
     const compared = compareOnboardingVersion(sourceVersion, runtimeClaudeJson.lastOnboardingVersion);
@@ -130283,7 +125559,7 @@ function refreshRuntimeClaudeJson(baseConfigDir, runtimeClaudeJsonPath, sourceCl
       changed = true;
     }
   }
-  if (hasOwn(sourceClaudeJson, "oauthAccount")) {
+  if (sourceClaudeJson && hasOwn(sourceClaudeJson, "oauthAccount")) {
     const sourceAccount = sourceClaudeJson.oauthAccount;
     if (sourceAccount === null || sourceAccount === void 0) {
       if (hasOwn(runtimeClaudeJson, "oauthAccount")) {
@@ -130298,32 +125574,33 @@ function refreshRuntimeClaudeJson(baseConfigDir, runtimeClaudeJsonPath, sourceCl
       changed = true;
     }
   }
-  if (isJsonObject(sourceClaudeJson.mcpServers)) {
-    runtimeClaudeJson.mcpServers = sourceClaudeJson.mcpServers;
+  const sourceMcpServers = mcpServersSourceJson?.mcpServers;
+  if (isJsonObject(sourceMcpServers)) {
+    runtimeClaudeJson.mcpServers = sourceMcpServers;
     changed = true;
   }
   if (changed) {
-    (0, import_fs133.writeFileSync)(runtimeClaudeJsonPath, JSON.stringify(runtimeClaudeJson, null, 2));
+    (0, import_fs126.writeFileSync)(runtimeClaudeJsonPath, JSON.stringify(runtimeClaudeJson, null, 2));
   }
 }
 function ensureMirroredCredentials(sourcePath, targetPath, hasEligibleSourceCredentials) {
-  if (!(0, import_fs133.existsSync)(sourcePath)) return;
+  if (!(0, import_fs126.existsSync)(sourcePath)) return;
   const removeExistingTarget = () => {
     try {
-      (0, import_fs133.lstatSync)(targetPath);
-      (0, import_fs133.rmSync)(targetPath, { recursive: true, force: true });
+      (0, import_fs126.lstatSync)(targetPath);
+      (0, import_fs126.rmSync)(targetPath, { recursive: true, force: true });
     } catch {
     }
   };
   removeExistingTarget();
   try {
-    (0, import_fs133.symlinkSync)(sourcePath, targetPath, "file");
+    (0, import_fs126.symlinkSync)(sourcePath, targetPath, "file");
     return;
   } catch {
     removeExistingTarget();
   }
   try {
-    (0, import_fs133.linkSync)(sourcePath, targetPath);
+    (0, import_fs126.linkSync)(sourcePath, targetPath);
     return;
   } catch {
     removeExistingTarget();
@@ -130334,7 +125611,7 @@ function ensureMirroredCredentials(sourcePath, targetPath, hasEligibleSourceCred
 }
 function pathExists(path30) {
   try {
-    (0, import_fs133.lstatSync)(path30);
+    (0, import_fs126.lstatSync)(path30);
     return true;
   } catch {
     return false;
@@ -130344,7 +125621,7 @@ function reconcileRuntimeCredentials(baseConfigDir, runtimeCredentialsPath, sour
   const runtimeInspection = inspectCredentialFile(runtimeCredentialsPath);
   const runtimeCandidate = runtimeInspection.candidate;
   if (!runtimeCandidate) return;
-  const baseCredentialsPath = (0, import_path159.join)(baseConfigDir, ".credentials.json");
+  const baseCredentialsPath = (0, import_path152.join)(baseConfigDir, ".credentials.json");
   const baseInspection = inspectCredentialFile(baseCredentialsPath);
   if (!baseInspection.exists) return;
   if (!baseInspection.readable || !baseInspection.valid || !baseInspection.parsed) {
@@ -130370,57 +125647,59 @@ function swapRuntimeConfigDir(runtimeConfigDir, nextConfigDir) {
   const previousConfigDir = `${runtimeConfigDir}.prev`;
   let movedPrevious = false;
   try {
-    (0, import_fs133.rmSync)(previousConfigDir, { recursive: true, force: true });
+    (0, import_fs126.rmSync)(previousConfigDir, { recursive: true, force: true });
     if (pathExists(runtimeConfigDir)) {
-      (0, import_fs133.renameSync)(runtimeConfigDir, previousConfigDir);
+      (0, import_fs126.renameSync)(runtimeConfigDir, previousConfigDir);
       movedPrevious = true;
     }
-    (0, import_fs133.renameSync)(nextConfigDir, runtimeConfigDir);
+    (0, import_fs126.renameSync)(nextConfigDir, runtimeConfigDir);
   } catch (error2) {
     try {
       if (movedPrevious && !pathExists(runtimeConfigDir) && pathExists(previousConfigDir)) {
-        (0, import_fs133.renameSync)(previousConfigDir, runtimeConfigDir);
+        (0, import_fs126.renameSync)(previousConfigDir, runtimeConfigDir);
       }
     } catch {
     }
-    (0, import_fs133.rmSync)(nextConfigDir, { recursive: true, force: true });
+    (0, import_fs126.rmSync)(nextConfigDir, { recursive: true, force: true });
     throw error2;
   }
   try {
-    (0, import_fs133.rmSync)(previousConfigDir, { recursive: true, force: true });
+    (0, import_fs126.rmSync)(previousConfigDir, { recursive: true, force: true });
   } catch {
   }
 }
 function prepareOmcLaunchConfigDir(baseConfigDir = getClaudeConfigDir()) {
-  const companionPath = (0, import_path159.join)(baseConfigDir, "CLAUDE-omc.md");
+  const companionPath = (0, import_path152.join)(baseConfigDir, "CLAUDE-omc.md");
   if (!hasOmcMarkers(companionPath)) {
     return baseConfigDir;
   }
-  const runtimeConfigDir = (0, import_path159.join)(baseConfigDir, OMC_RUNTIME_DIRNAME);
+  const runtimeConfigDir = (0, import_path152.join)(baseConfigDir, OMC_RUNTIME_DIRNAME);
   const nextConfigDir = `${runtimeConfigDir}.next`;
-  const runtimeClaudeJsonPath = (0, import_path159.join)(runtimeConfigDir, ".claude.json");
-  const runtimeCredentialsPath = (0, import_path159.join)(runtimeConfigDir, ".credentials.json");
-  const sourceClaudeJsonPath = (0, import_path159.join)((0, import_path159.dirname)(baseConfigDir), ".claude.json");
-  const lifecycleLockPath = lockPathFor((0, import_path159.join)(baseConfigDir, ".omc-launch.prepare.lock"));
+  const runtimeClaudeJsonPath = (0, import_path152.join)(runtimeConfigDir, ".claude.json");
+  const runtimeCredentialsPath = (0, import_path152.join)(runtimeConfigDir, ".credentials.json");
+  const sourceClaudeJsonPath = (0, import_path152.join)((0, import_path152.dirname)(baseConfigDir), ".claude.json");
+  const mcpServersSourcePath = getClaudeMcpConfigPath(baseConfigDir);
+  const lifecycleLockPath = lockPathFor((0, import_path152.join)(baseConfigDir, ".omc-launch.prepare.lock"));
   return withFileLockSync(lifecycleLockPath, () => {
-    const preservedClaudeJson = pathExists(runtimeClaudeJsonPath) ? (0, import_fs133.readFileSync)(runtimeClaudeJsonPath) : null;
+    const preservedClaudeJson = pathExists(runtimeClaudeJsonPath) ? (0, import_fs126.readFileSync)(runtimeClaudeJsonPath) : null;
     const preservedRuntimeClaudeJson = readJsonObject4(runtimeClaudeJsonPath);
     const sourceClaudeJson = readJsonObject4(sourceClaudeJsonPath);
+    const mcpServersSourceJson = mcpServersSourcePath === sourceClaudeJsonPath ? sourceClaudeJson : readJsonObject4(mcpServersSourcePath);
     reconcileRuntimeCredentials(
       baseConfigDir,
       runtimeCredentialsPath,
       sourceClaudeJson,
       preservedRuntimeClaudeJson
     );
-    (0, import_fs133.rmSync)(nextConfigDir, { recursive: true, force: true });
+    (0, import_fs126.rmSync)(nextConfigDir, { recursive: true, force: true });
     try {
-      (0, import_fs133.mkdirSync)(nextConfigDir, { recursive: true });
-      const nextClaudeJsonPath = (0, import_path159.join)(nextConfigDir, ".claude.json");
+      (0, import_fs126.mkdirSync)(nextConfigDir, { recursive: true });
+      const nextClaudeJsonPath = (0, import_path152.join)(nextConfigDir, ".claude.json");
       if (preservedClaudeJson) {
-        (0, import_fs133.writeFileSync)(nextClaudeJsonPath, preservedClaudeJson);
+        (0, import_fs126.writeFileSync)(nextClaudeJsonPath, preservedClaudeJson);
       }
-      refreshRuntimeClaudeJson(baseConfigDir, nextClaudeJsonPath, sourceClaudeJson);
-      (0, import_fs133.copyFileSync)(companionPath, (0, import_path159.join)(nextConfigDir, "CLAUDE.md"));
+      refreshRuntimeClaudeJson(baseConfigDir, nextClaudeJsonPath, sourceClaudeJson, mcpServersSourceJson);
+      (0, import_fs126.copyFileSync)(companionPath, (0, import_path152.join)(nextConfigDir, "CLAUDE.md"));
       for (const entry2 of [
         "agents",
         "commands",
@@ -130439,42 +125718,39 @@ function prepareOmcLaunchConfigDir(baseConfigDir = getClaudeConfigDir()) {
         "settings.local.json"
       ]) {
         ensureMirroredPath(
-          (0, import_path159.join)(baseConfigDir, entry2),
-          (0, import_path159.join)(nextConfigDir, (0, import_path159.basename)(entry2))
+          (0, import_path152.join)(baseConfigDir, entry2),
+          (0, import_path152.join)(nextConfigDir, (0, import_path152.basename)(entry2))
         );
       }
-      const baseCredentialsPath = (0, import_path159.join)(baseConfigDir, ".credentials.json");
+      const baseCredentialsPath = (0, import_path152.join)(baseConfigDir, ".credentials.json");
       const baseCredentialInspection = inspectCredentialFile(baseCredentialsPath);
       ensureMirroredCredentials(
         baseCredentialsPath,
-        (0, import_path159.join)(nextConfigDir, ".credentials.json"),
+        (0, import_path152.join)(nextConfigDir, ".credentials.json"),
         hasLinkableCredentials(baseCredentialInspection)
       );
-      const runtimeSettingsPath = (0, import_path159.join)(nextConfigDir, "settings.json");
-      if ((0, import_fs133.existsSync)(runtimeSettingsPath)) {
+      const runtimeSettingsPath = (0, import_path152.join)(nextConfigDir, "settings.json");
+      if ((0, import_fs126.existsSync)(runtimeSettingsPath)) {
         try {
-          const rawSettings = JSON.parse((0, import_fs133.readFileSync)(runtimeSettingsPath, "utf-8"));
+          const rawSettings = JSON.parse((0, import_fs126.readFileSync)(runtimeSettingsPath, "utf-8"));
           const repaired = stripRetiredTeamMcpServers(rawSettings);
           if (repaired.changed) {
-            (0, import_fs133.writeFileSync)(runtimeSettingsPath, JSON.stringify(repaired.settings, null, 2));
+            (0, import_fs126.writeFileSync)(runtimeSettingsPath, JSON.stringify(repaired.settings, null, 2));
           }
         } catch {
         }
       }
-      (0, import_fs133.writeFileSync)(
-        (0, import_path159.join)(nextConfigDir, ".omc-launch-profile.json"),
+      (0, import_fs126.writeFileSync)(
+        (0, import_path152.join)(nextConfigDir, ".omc-launch-profile.json"),
         JSON.stringify({ sourceConfigDir: baseConfigDir, sourceClaudeMd: companionPath }, null, 2)
       );
     } catch (error2) {
-      (0, import_fs133.rmSync)(nextConfigDir, { recursive: true, force: true });
+      (0, import_fs126.rmSync)(nextConfigDir, { recursive: true, force: true });
       throw error2;
     }
     swapRuntimeConfigDir(runtimeConfigDir, nextConfigDir);
     return runtimeConfigDir;
   }, { timeoutMs: 5e3, retryDelayMs: 50 });
-}
-function isDefaultClaudeConfigDirPath2(configDir) {
-  return configDir === (0, import_path159.join)((0, import_os26.homedir)(), ".claude");
 }
 function extractNotifyFlag(args) {
   let notifyEnabled = true;
@@ -130622,6 +125898,7 @@ var MadmaxTmuxRequiredError = class extends Error {
     this.reason = reason;
     this.name = "MadmaxTmuxRequiredError";
   }
+  reason;
 };
 function abortMadmaxRequiresTmux(reason) {
   if (reason === "missing") {
@@ -130796,13 +126073,13 @@ function emptySensitiveEnvTransport() {
 function removeSensitiveEnvArtifacts(file, dir) {
   if (file) {
     try {
-      (0, import_fs133.rmSync)(file, { force: true });
+      (0, import_fs126.rmSync)(file, { force: true });
     } catch {
     }
   }
   if (dir) {
     try {
-      (0, import_fs133.rmSync)(dir, { recursive: true, force: true });
+      (0, import_fs126.rmSync)(dir, { recursive: true, force: true });
     } catch {
     }
   }
@@ -130821,16 +126098,16 @@ function buildSensitiveEnvFilePrefix(vars) {
       value: getProcessEnvironmentValue(name),
       encoded: nativeWindows ? escapeForCmdSet(getProcessEnvironmentValue(name)) : null
     }));
-    dir = (0, import_fs133.mkdtempSync)((0, import_path159.join)((0, import_os26.tmpdir)(), "omc-launch-env-"));
-    file = (0, import_path159.join)(dir, nativeWindows ? "env.cmd" : "env.sh");
+    dir = (0, import_fs126.mkdtempSync)((0, import_path152.join)((0, import_os26.tmpdir)(), "omc-launch-env-"));
+    file = (0, import_path152.join)(dir, nativeWindows ? "env.cmd" : "env.sh");
     const body = nativeWindows ? `@echo off\r
 ${values.map(({ name, encoded }) => `set "${name}=${encoded}"`).join("\r\n")}\r
 ` : `${values.map(({ name, value }) => `export ${name}=${quoteShellArg2(value)}`).join("\n")}
 `;
-    (0, import_fs133.writeFileSync)(file, body, { mode: 384 });
+    (0, import_fs126.writeFileSync)(file, body, { mode: 384 });
     try {
-      (0, import_fs133.chmodSync)(dir, 448);
-      (0, import_fs133.chmodSync)(file, 384);
+      (0, import_fs126.chmodSync)(dir, 448);
+      (0, import_fs126.chmodSync)(file, 384);
     } catch (error2) {
       if (!nativeWindows) throw error2;
     }
@@ -130862,7 +126139,7 @@ function canonicalTmuxEnvironmentName(name) {
     return normalizedName;
   }
   if (/^(?:HTTP|HTTPS|ALL|NO)_PROXY$/.test(normalizedName)) return normalizedName;
-  if (normalizedName === "NODE_EXTRA_CA_CERTS" || normalizedName === "NODE_TLS_REJECT_UNAUTHORIZED" || normalizedName.startsWith("SSL_CERT_") || normalizedName.endsWith("_CA_BUNDLE")) return normalizedName;
+  if (normalizedName === "NODEFAULTCURRENTDIRECTORYINEXEPATH" || normalizedName === "NODE_EXTRA_CA_CERTS" || normalizedName === "NODE_TLS_REJECT_UNAUTHORIZED" || normalizedName.startsWith("SSL_CERT_") || normalizedName.endsWith("_CA_BUNDLE")) return normalizedName;
   return null;
 }
 function getEffectiveTmuxEnvironment() {
@@ -130887,9 +126164,10 @@ function buildTmuxClaudeLaunch(args, options) {
   try {
     const rawClaudeCmd = nativeWindows ? buildTmuxShellCommandWithEnv("claude", args, withoutSensitiveEnv(forwardedEnv)) : buildTmuxShellCommand("claude", args);
     const envPrefix = forwardedEnvNames.length === 0 ? "" : nativeWindows ? transport.prefix : `${buildEnvExportPrefix(forwardedEnvNames)}${transport.prefix}`;
+    const windowsSecurityPrefix = nativeWindows ? 'set "NoDefaultCurrentDirectoryInExePath=1" && ' : "";
     const missingBinaryGuard = nativeWindows ? "(where claude >nul 2>nul || (echo [omc] Error: claude CLI not found in PATH. 1>&2 & exit /b 1)) && " : "command -v claude >/dev/null 2>&1 || { echo '[omc] Error: claude CLI not found in PATH.' >&2; exit 127; }; ";
     const command = wrapWithLoginShell(
-      `${envPrefix}${options.preflight}${missingBinaryGuard}${options.useExec ? "exec " : ""}${rawClaudeCmd}`
+      `${envPrefix}${options.preflight}${windowsSecurityPrefix}${missingBinaryGuard}${options.useExec ? "exec " : ""}${rawClaudeCmd}`
     );
     return { command, cleanup: transport.cleanup };
   } catch (error2) {
@@ -130946,7 +126224,7 @@ function runClaudeDirect(cwd2, args) {
     if (process.platform === "win32") {
       const comspec = process.env.COMSPEC || "cmd.exe";
       const commandLine = ["claude", ...args].map(quoteForCmd).join(" ");
-      const result = (0, import_child_process44.spawnSync)(comspec, ["/d", "/s", "/c", commandLine], {
+      const result = (0, import_child_process43.spawnSync)(comspec, ["/d", "/s", "/c", commandLine], {
         cwd: cwd2,
         stdio: "inherit",
         windowsVerbatimArguments: true
@@ -130960,7 +126238,7 @@ function runClaudeDirect(cwd2, args) {
         process.exit(result.status ?? 1);
       }
     } else {
-      (0, import_child_process44.execFileSync)("claude", args, {
+      (0, import_child_process43.execFileSync)("claude", args, {
         cwd: cwd2,
         stdio: "inherit"
       });
@@ -131043,7 +126321,7 @@ async function launchCommand(args) {
     process.exit(1);
   }
   const launchConfigDir = prepareOmcLaunchConfigDir();
-  if (isDefaultClaudeConfigDirPath2(launchConfigDir)) {
+  if (isDefaultClaudeConfigDirPath(launchConfigDir)) {
     delete process.env.CLAUDE_CONFIG_DIR;
   } else {
     process.env.CLAUDE_CONFIG_DIR = launchConfigDir;
@@ -131063,7 +126341,7 @@ async function launchCommand(args) {
 }
 
 // src/cli/interop.ts
-var import_child_process45 = require("child_process");
+var import_child_process44 = require("child_process");
 var import_crypto41 = require("crypto");
 init_tmux_utils();
 function readInteropRuntimeFlags(env2 = process.env) {
@@ -131087,7 +126365,7 @@ function validateInteropRuntimeFlags(flags) {
 }
 function isCodexAvailable() {
   try {
-    (0, import_child_process45.execFileSync)("codex", ["--version"], { stdio: "ignore" });
+    (0, import_child_process44.execFileSync)("codex", ["--version"], { stdio: "ignore" });
     return true;
   } catch {
     return false;
@@ -131177,11 +126455,11 @@ function interopCommand(options = {}) {
 }
 
 // src/cli/ask.ts
-var import_child_process46 = require("child_process");
-var import_fs134 = require("fs");
-var import_promises32 = require("fs/promises");
+var import_child_process45 = require("child_process");
+var import_fs127 = require("fs");
+var import_promises31 = require("fs/promises");
 var import_os27 = require("os");
-var import_path160 = require("path");
+var import_path153 = require("path");
 var import_url21 = require("url");
 init_security_config();
 var ASK_USAGE = [
@@ -131209,19 +126487,19 @@ function warnDeprecatedAlias(alias, canonical) {
 }
 function getPackageRoot() {
   if (typeof __dirname !== "undefined" && __dirname) {
-    const currentDirName = (0, import_path160.basename)(__dirname);
-    const parentDirName = (0, import_path160.basename)((0, import_path160.dirname)(__dirname));
+    const currentDirName = (0, import_path153.basename)(__dirname);
+    const parentDirName = (0, import_path153.basename)((0, import_path153.dirname)(__dirname));
     if (currentDirName === "bridge") {
-      return (0, import_path160.join)(__dirname, "..");
+      return (0, import_path153.join)(__dirname, "..");
     }
     if (currentDirName === "cli" && (parentDirName === "src" || parentDirName === "dist")) {
-      return (0, import_path160.join)(__dirname, "..", "..");
+      return (0, import_path153.join)(__dirname, "..", "..");
     }
   }
   try {
     const __filename4 = (0, import_url21.fileURLToPath)(importMetaUrl);
-    const __dirname2 = (0, import_path160.dirname)(__filename4);
-    return (0, import_path160.join)(__dirname2, "..", "..");
+    const __dirname2 = (0, import_path153.dirname)(__filename4);
+    return (0, import_path153.join)(__dirname2, "..", "..");
   } catch {
     return process.cwd();
   }
@@ -131229,36 +126507,36 @@ function getPackageRoot() {
 function resolveAskPromptsDir(cwd2, packageRoot2, env2 = process.env) {
   const codexHomeOverride = env2.CODEX_HOME?.trim();
   if (codexHomeOverride) {
-    return (0, import_path160.join)(codexHomeOverride, "prompts");
+    return (0, import_path153.join)(codexHomeOverride, "prompts");
   }
   try {
-    const scopePath = (0, import_path160.join)(cwd2, ".omx", "setup-scope.json");
-    if ((0, import_fs134.existsSync)(scopePath)) {
-      const parsed = JSON.parse((0, import_fs134.readFileSync)(scopePath, "utf-8"));
+    const scopePath = (0, import_path153.join)(cwd2, ".omx", "setup-scope.json");
+    if ((0, import_fs127.existsSync)(scopePath)) {
+      const parsed = JSON.parse((0, import_fs127.readFileSync)(scopePath, "utf-8"));
       if (parsed.scope === "project" || parsed.scope === "project-local") {
-        return (0, import_path160.join)(cwd2, ".codex", "prompts");
+        return (0, import_path153.join)(cwd2, ".codex", "prompts");
       }
     }
   } catch {
   }
-  return (0, import_path160.join)(packageRoot2, "agents");
+  return (0, import_path153.join)(packageRoot2, "agents");
 }
 async function resolveAgentPromptContent(role, promptsDir) {
   const normalizedRole = role.trim().toLowerCase();
   if (!SAFE_ROLE_PATTERN.test(normalizedRole)) {
     throw new Error(`[ask] invalid --agent-prompt role "${role}". Expected lowercase role names like "executor" or "test-engineer".`);
   }
-  if (!(0, import_fs134.existsSync)(promptsDir)) {
+  if (!(0, import_fs127.existsSync)(promptsDir)) {
     throw new Error(`[ask] prompts directory not found: ${promptsDir}.`);
   }
-  const promptPath = (0, import_path160.join)(promptsDir, `${normalizedRole}.md`);
-  if (!(0, import_fs134.existsSync)(promptPath)) {
-    const files = await (0, import_promises32.readdir)(promptsDir).catch(() => []);
+  const promptPath = (0, import_path153.join)(promptsDir, `${normalizedRole}.md`);
+  if (!(0, import_fs127.existsSync)(promptPath)) {
+    const files = await (0, import_promises31.readdir)(promptsDir).catch(() => []);
     const availableRoles = files.filter((file) => file.endsWith(".md")).map((file) => file.slice(0, -3)).sort();
     const availableSuffix = availableRoles.length > 0 ? ` Available roles: ${availableRoles.join(", ")}.` : "";
     throw new Error(`[ask] --agent-prompt role "${normalizedRole}" not found in ${promptsDir}.${availableSuffix}`);
   }
-  const content = (await (0, import_promises32.readFile)(promptPath, "utf-8")).trim();
+  const content = (await (0, import_promises31.readFile)(promptPath, "utf-8")).trim();
   if (!content) {
     throw new Error(`[ask] --agent-prompt role "${normalizedRole}" is empty: ${promptPath}`);
   }
@@ -131318,14 +126596,14 @@ function parseAskArgs(args) {
 function resolveAskAdvisorScriptPath(packageRoot2 = getPackageRoot(), env2 = process.env) {
   const canonical = env2[ASK_ADVISOR_SCRIPT_ENV]?.trim();
   if (canonical) {
-    return (0, import_path160.isAbsolute)(canonical) ? canonical : (0, import_path160.join)(packageRoot2, canonical);
+    return (0, import_path153.isAbsolute)(canonical) ? canonical : (0, import_path153.join)(packageRoot2, canonical);
   }
   const alias = env2[ASK_ADVISOR_SCRIPT_ENV_ALIAS]?.trim();
   if (alias) {
     warnDeprecatedAlias(ASK_ADVISOR_SCRIPT_ENV_ALIAS, ASK_ADVISOR_SCRIPT_ENV);
-    return (0, import_path160.isAbsolute)(alias) ? alias : (0, import_path160.join)(packageRoot2, alias);
+    return (0, import_path153.isAbsolute)(alias) ? alias : (0, import_path153.join)(packageRoot2, alias);
   }
-  return (0, import_path160.join)(packageRoot2, "scripts", "run-provider-advisor.js");
+  return (0, import_path153.join)(packageRoot2, "scripts", "run-provider-advisor.js");
 }
 function resolveSignalExitCode(signal) {
   if (!signal) return 1;
@@ -131345,7 +126623,7 @@ async function askCommand(args) {
   const packageRoot2 = getPackageRoot();
   const advisorScriptPath = resolveAskAdvisorScriptPath(packageRoot2);
   const promptsDir = resolveAskPromptsDir(process.cwd(), packageRoot2, process.env);
-  if (!(0, import_fs134.existsSync)(advisorScriptPath)) {
+  if (!(0, import_fs127.existsSync)(advisorScriptPath)) {
     throw new Error(`[ask] advisor script not found: ${advisorScriptPath}`);
   }
   let finalPrompt = parsed.prompt;
@@ -131355,7 +126633,7 @@ async function askCommand(args) {
 
 ${parsed.prompt}`;
   }
-  const child = (0, import_child_process46.spawnSync)(
+  const child = (0, import_child_process45.spawnSync)(
     process.execPath,
     [advisorScriptPath, parsed.provider, finalPrompt],
     {
@@ -131387,6 +126665,9 @@ var import_node_fs27 = require("node:fs");
 var import_node_path34 = require("node:path");
 init_descriptor();
 init_types10();
+
+// src/graph/runtime/executors/agent.ts
+init_windows_search();
 
 // src/graph/runtime/executors/authority.ts
 var BASE_ENV_ALLOWLIST = [
@@ -131469,6 +126750,7 @@ var AgentTimeoutError = class extends Error {
     this.timeoutMs = timeoutMs;
     this.name = "AgentTimeoutError";
   }
+  timeoutMs;
 };
 var AgentRunError = class extends Error {
 };
@@ -131518,6 +126800,7 @@ var AgentNodeExecutor = class {
   constructor(queryImpl) {
     this.queryImpl = queryImpl;
   }
+  queryImpl;
   kinds = ["agent"];
   async execute(context) {
     const node = context.node;
@@ -131567,7 +126850,7 @@ Goal: ${context.descriptor.goal}`;
           options: {
             abortController,
             cwd: process.cwd(),
-            env: buildAgentEnv(idempotencyKey),
+            env: childEnv(buildAgentEnv(idempotencyKey)),
             tools: [...READ_ONLY_AGENT_TOOLS],
             permissionMode: "dontAsk",
             canUseTool,
@@ -131645,6 +126928,7 @@ function failed(context, summary) {
 }
 
 // src/graph/runtime/executors/command.ts
+init_windows_search();
 var import_node_child_process14 = require("node:child_process");
 var STREAM_TAIL_CHARS = 2e3;
 var KILL_ESCALATION_MS = 5e3;
@@ -131685,21 +126969,21 @@ function terminateProcessTree(child, signal) {
   }
 }
 function runShellCommand(command, timeoutMs, stdoutTail, stderrTail, idempotencyKey) {
-  return new Promise((resolve48) => {
+  return new Promise((resolve49) => {
     let child;
     try {
       child = (0, import_node_child_process14.spawn)(command, {
         shell: true,
         windowsHide: true,
         cwd: process.cwd(),
-        env: buildCommandEnv(idempotencyKey),
+        env: childEnv(buildCommandEnv(idempotencyKey)),
         stdio: ["ignore", "pipe", "pipe"],
         // Detached => own process group => the NEGATIVE-pid group kill in
         // terminateProcessTree can reach grandchildren, not just the shell.
         ...process.platform === "win32" ? {} : { detached: true }
       });
     } catch (error2) {
-      resolve48({ timed_out: false, exit_code: null, infra_error: describeError2(error2) });
+      resolve49({ timed_out: false, exit_code: null, infra_error: describeError2(error2) });
       return;
     }
     let settled = false;
@@ -131714,7 +126998,7 @@ function runShellCommand(command, timeoutMs, stdoutTail, stderrTail, idempotency
       settled = true;
       if (timeoutTimer !== void 0) clearTimeout(timeoutTimer);
       if (escalationTimer !== void 0) clearTimeout(escalationTimer);
-      resolve48({ timed_out: timedOut, exit_code: exitCode, infra_error: infraError });
+      resolve49({ timed_out: timedOut, exit_code: exitCode, infra_error: infraError });
     };
     if (child.stdout) {
       child.stdout.setEncoding("utf8");
@@ -131867,8 +127151,8 @@ function createStdinApprovalGate(input) {
       return Promise.resolve(queued);
     }
     getInterface();
-    return new Promise((resolve48) => {
-      waitingReader = resolve48;
+    return new Promise((resolve49) => {
+      waitingReader = resolve49;
     });
   }
   return {
@@ -132305,9 +127589,9 @@ function lookoutCommand() {
 }
 
 // src/cli/commands/intake.ts
-var import_child_process48 = require("child_process");
-var import_fs138 = require("fs");
-var import_path165 = require("path");
+var import_child_process47 = require("child_process");
+var import_fs131 = require("fs");
+var import_path158 = require("path");
 init_worktree_paths();
 var HARBOR_LABELS = [
   "harbor:accepted",
@@ -132324,7 +127608,7 @@ var TASK_NAME = "OMC Intake";
 var CRONTAB_MARKER = "# omc-intake";
 var LOCK_STALE_MS4 = 2 * 36e5;
 var defaultIntakeRunner = (cmd, args, options) => {
-  const result = (0, import_child_process48.spawnSync)(cmd, args, {
+  const result = (0, import_child_process47.spawnSync)(cmd, args, {
     cwd: options.cwd,
     encoding: "utf8",
     stdio: ["pipe", "pipe", "pipe"],
@@ -132366,12 +127650,12 @@ ${create.stderr.trim().slice(0, 300)}` };
   return { ok: true };
 }
 function acquireIntakeLock(cwd2, now = Date.now()) {
-  const lockPath2 = (0, import_path165.join)(getOmcRoot(cwd2), "state", "intake-lock.json");
+  const lockPath2 = (0, import_path158.join)(getOmcRoot(cwd2), "state", "intake-lock.json");
   try {
-    if ((0, import_fs138.existsSync)(lockPath2)) {
+    if ((0, import_fs131.existsSync)(lockPath2)) {
       let started = 0;
       try {
-        started = Date.parse(JSON.parse((0, import_fs138.readFileSync)(lockPath2, "utf8")).startedAt ?? "") || 0;
+        started = Date.parse(JSON.parse((0, import_fs131.readFileSync)(lockPath2, "utf8")).startedAt ?? "") || 0;
       } catch {
         started = 0;
       }
@@ -132380,7 +127664,7 @@ function acquireIntakeLock(cwd2, now = Date.now()) {
       }
     }
     mkdirFor(lockPath2);
-    (0, import_fs138.writeFileSync)(lockPath2, JSON.stringify({ pid: process.pid, startedAt: new Date(now).toISOString() }, null, 2));
+    (0, import_fs131.writeFileSync)(lockPath2, JSON.stringify({ pid: process.pid, startedAt: new Date(now).toISOString() }, null, 2));
     return { ok: true };
   } catch (error2) {
     return { ok: false, reason: `cannot write intake lock: ${error2.message}` };
@@ -132388,13 +127672,13 @@ function acquireIntakeLock(cwd2, now = Date.now()) {
 }
 function releaseIntakeLock(cwd2) {
   try {
-    const lockPath2 = (0, import_path165.join)(getOmcRoot(cwd2), "state", "intake-lock.json");
-    if ((0, import_fs138.existsSync)(lockPath2)) (0, import_fs138.writeFileSync)(lockPath2, "", "utf8");
+    const lockPath2 = (0, import_path158.join)(getOmcRoot(cwd2), "state", "intake-lock.json");
+    if ((0, import_fs131.existsSync)(lockPath2)) (0, import_fs131.writeFileSync)(lockPath2, "", "utf8");
   } catch {
   }
 }
 function mkdirFor(path30) {
-  (0, import_fs138.mkdirSync)((0, import_path165.join)(path30, ".."), { recursive: true });
+  (0, import_fs131.mkdirSync)((0, import_path158.join)(path30, ".."), { recursive: true });
 }
 function parseSimpleCron(expr) {
   const fields = expr.trim().split(/\s+/);
@@ -132435,10 +127719,10 @@ function filterCrontabLines(existing, remove, installLine) {
   return kept.join("\n");
 }
 function buildScheduledCommand(cwd2) {
-  return `omc intake run --headless --allow-docket-only --cwd "${(0, import_path165.resolve)(cwd2)}"`;
+  return `omc intake run --headless --allow-docket-only --cwd "${(0, import_path158.resolve)(cwd2)}"`;
 }
 function runHeadlessIntake(options, runner = defaultIntakeRunner) {
-  const cwd2 = (0, import_path165.resolve)(options.cwd ?? process.cwd());
+  const cwd2 = (0, import_path158.resolve)(options.cwd ?? process.cwd());
   const tracker = checkTrackerReachable(cwd2, runner);
   if (!tracker.ok) return { exitCode: 1, message: `intake refused: ${tracker.reason}` };
   const labels = checkOrCreateHarborLabels(cwd2, runner);
@@ -132463,7 +127747,7 @@ ${(child.stderr || child.stdout).trim().slice(0, 600)}`
   }
 }
 function scheduleIntake(options, runner = defaultIntakeRunner) {
-  const cwd2 = (0, import_path165.resolve)(options.cwd ?? process.cwd());
+  const cwd2 = (0, import_path158.resolve)(options.cwd ?? process.cwd());
   const runCommand2 = buildScheduledCommand(cwd2);
   const plan = buildSchedulePlan(process.platform, options.cron, runCommand2);
   if ("refused" in plan) return { exitCode: 1, message: `intake schedule refused: ${plan.refused}` };
@@ -132512,21 +127796,21 @@ function intakeCommand() {
 }
 
 // src/cli/commands/factory.ts
-var import_fs140 = require("fs");
-var import_path169 = require("path");
+var import_fs133 = require("fs");
+var import_path162 = require("path");
 
 // src/factory/listener.ts
 var import_crypto44 = require("crypto");
 var import_http = require("http");
-var import_fs139 = require("fs");
-var import_path167 = require("path");
+var import_fs132 = require("fs");
+var import_path160 = require("path");
 init_routing();
 init_guardrails();
 init_spawn_next();
 
 // src/factory/watchdog.ts
-var fs28 = __toESM(require("fs"), 1);
-var import_path166 = require("path");
+var fs29 = __toESM(require("fs"), 1);
+var import_path159 = require("path");
 init_spawn_next();
 init_worktree_paths();
 var DEFAULT_STALL_THRESHOLD_MS = 30 * 60 * 1e3;
@@ -132535,7 +127819,7 @@ var LEDGER_FILE_PATTERN = /^chain-([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{
 function enqueuedSessions(factoryDir) {
   const advanced = /* @__PURE__ */ new Set();
   try {
-    for (const line of fs28.readFileSync((0, import_path166.join)(factoryDir, "chain-decisions.jsonl"), "utf8").split("\n")) {
+    for (const line of fs29.readFileSync((0, import_path159.join)(factoryDir, "chain-decisions.jsonl"), "utf8").split("\n")) {
       if (!line.trim()) continue;
       try {
         const record2 = JSON.parse(line);
@@ -132552,7 +127836,7 @@ function detectStalledLinks(factoryDir, opts = {}) {
   const now = opts.now?.getTime() ?? Date.now();
   let entries;
   try {
-    entries = fs28.readdirSync(factoryDir, { withFileTypes: true });
+    entries = fs29.readdirSync(factoryDir, { withFileTypes: true });
   } catch {
     return [];
   }
@@ -132565,7 +127849,7 @@ function detectStalledLinks(factoryDir, opts = {}) {
     const session = match[1];
     let ledger;
     try {
-      const parsed = JSON.parse(fs28.readFileSync((0, import_path166.join)(factoryDir, entry2.name), "utf8"));
+      const parsed = JSON.parse(fs29.readFileSync((0, import_path159.join)(factoryDir, entry2.name), "utf8"));
       if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) continue;
       ledger = parsed;
     } catch {
@@ -132575,7 +127859,7 @@ function detectStalledLinks(factoryDir, opts = {}) {
     if (advanced.has(session)) continue;
     let stalledForMs;
     try {
-      stalledForMs = now - fs28.statSync((0, import_path166.join)(factoryDir, entry2.name)).mtimeMs;
+      stalledForMs = now - fs29.statSync((0, import_path159.join)(factoryDir, entry2.name)).mtimeMs;
     } catch {
       continue;
     }
@@ -132591,11 +127875,11 @@ function detectStalledLinks(factoryDir, opts = {}) {
   return stalled;
 }
 function defaultAudit(cwd2) {
-  const dir = (0, import_path166.join)(getOmcRoot(cwd2), "state");
+  const dir = (0, import_path159.join)(getOmcRoot(cwd2), "state");
   return (record2) => {
     try {
-      fs28.mkdirSync(dir, { recursive: true });
-      fs28.appendFileSync((0, import_path166.join)(dir, "factory-listener-audit.jsonl"), `${JSON.stringify({ ...record2, at: (/* @__PURE__ */ new Date()).toISOString() })}
+      fs29.mkdirSync(dir, { recursive: true });
+      fs29.appendFileSync((0, import_path159.join)(dir, "factory-listener-audit.jsonl"), `${JSON.stringify({ ...record2, at: (/* @__PURE__ */ new Date()).toISOString() })}
 `, "utf8");
     } catch {
     }
@@ -132671,11 +127955,11 @@ function issueUrlMatchesRepo(issueUrl, repo) {
   return issueUrl.startsWith(`https://github.com/${repo}/issues/`);
 }
 function defaultAudit2(cwd2) {
-  const dir = (0, import_path167.join)(getOmcRoot(cwd2), "state");
+  const dir = (0, import_path160.join)(getOmcRoot(cwd2), "state");
   return (record2) => {
     try {
-      (0, import_fs139.mkdirSync)(dir, { recursive: true });
-      (0, import_fs139.appendFileSync)((0, import_path167.join)(dir, "factory-listener-audit.jsonl"), `${JSON.stringify({ ...record2, at: (/* @__PURE__ */ new Date()).toISOString() })}
+      (0, import_fs132.mkdirSync)(dir, { recursive: true });
+      (0, import_fs132.appendFileSync)((0, import_path160.join)(dir, "factory-listener-audit.jsonl"), `${JSON.stringify({ ...record2, at: (/* @__PURE__ */ new Date()).toISOString() })}
 `, "utf8");
     } catch {
     }
@@ -132688,7 +127972,7 @@ function scheduleStallCheck(cwd2, session, deps) {
   }
   const timer = setTimeout(() => {
     try {
-      const factoryDir = (0, import_path167.join)(getOmcRoot(cwd2), "state", "factory");
+      const factoryDir = (0, import_path160.join)(getOmcRoot(cwd2), "state", "factory");
       const stall = detectStalledLinks(factoryDir).find((s) => s.session === session);
       if (stall) flagStall(stall, { cwd: cwd2 });
     } catch {
@@ -132697,7 +127981,7 @@ function scheduleStallCheck(cwd2, session, deps) {
   timer.unref();
 }
 function spawnChainLink(req) {
-  const slot = acquireChainSlot(req.intentId, (0, import_path167.join)(getOmcRoot(req.config.cwd), "state", "factory"));
+  const slot = acquireChainSlot(req.intentId, (0, import_path160.join)(getOmcRoot(req.config.cwd), "state", "factory"));
   if (!slot.allowed) {
     req.audit({ kind: "discarded", reason: `guardrail: ${slot.reason}`, detail: slot.detail, intentId: req.intentId });
     return { status: 204, kind: "discarded", detail: `guardrail ${slot.reason}: ${slot.detail}` };
@@ -132708,9 +127992,9 @@ function spawnChainLink(req) {
   const spawnCtx = { cwd: req.config.cwd };
   try {
     try {
-      const factoryDir = (0, import_path167.join)(getOmcRoot(req.config.cwd), "state", "factory");
-      (0, import_fs139.mkdirSync)(factoryDir, { recursive: true });
-      (0, import_fs139.writeFileSync)((0, import_path167.join)(factoryDir, `chain-${nextSessionId}.json`), JSON.stringify({
+      const factoryDir = (0, import_path160.join)(getOmcRoot(req.config.cwd), "state", "factory");
+      (0, import_fs132.mkdirSync)(factoryDir, { recursive: true });
+      (0, import_fs132.writeFileSync)((0, import_path160.join)(factoryDir, `chain-${nextSessionId}.json`), JSON.stringify({
         intentId: req.intentId,
         stage: req.directive.stage,
         includeUserSettings,
@@ -132779,7 +128063,7 @@ function processCheckFailureEvent(event, config2, deps = {}) {
   });
 }
 function pidFilePath(cwd2) {
-  return (0, import_path167.join)(getOmcRoot(cwd2), "state", "factory-listener.json");
+  return (0, import_path160.join)(getOmcRoot(cwd2), "state", "factory-listener.json");
 }
 function startListener(config2, deps = {}) {
   if (!config2.secret?.trim()) {
@@ -132796,20 +128080,20 @@ function startListener(config2, deps = {}) {
       }
     });
   });
-  return new Promise((resolve48) => {
+  return new Promise((resolve49) => {
     server.listen(config2.port, host, () => {
-      (0, import_fs139.mkdirSync)((0, import_path167.join)(pidFilePath(config2.cwd), ".."), { recursive: true });
+      (0, import_fs132.mkdirSync)((0, import_path160.join)(pidFilePath(config2.cwd), ".."), { recursive: true });
       const addr = server.address();
       const portForLog = addr && typeof addr !== "string" ? addr.port : config2.port;
       const hostForLog = addr && typeof addr !== "string" ? addr.address : host;
-      (0, import_fs139.writeFileSync)(pidFilePath(config2.cwd), JSON.stringify({ pid: process.pid, port: portForLog, host: hostForLog, startedAt }, null, 2));
-      resolve48(server);
+      (0, import_fs132.writeFileSync)(pidFilePath(config2.cwd), JSON.stringify({ pid: process.pid, port: portForLog, host: hostForLog, startedAt }, null, 2));
+      resolve49(server);
     });
   });
 }
 function stopListener(server, cwd2) {
   try {
-    (0, import_fs139.unlinkSync)(pidFilePath(cwd2));
+    (0, import_fs132.unlinkSync)(pidFilePath(cwd2));
   } catch {
   }
   server.close();
@@ -132861,8 +128145,8 @@ function hasCheckSuite(event) {
 }
 
 // src/factory/status.ts
-var fs29 = __toESM(require("fs"), 1);
-var import_path168 = require("path");
+var fs30 = __toESM(require("fs"), 1);
+var import_path161 = require("path");
 init_chain_enqueuer();
 function intentSummary(map, intentId) {
   const existing = map.get(intentId);
@@ -132873,7 +128157,7 @@ function intentSummary(map, intentId) {
 }
 function readDecisions(factoryDir, intents) {
   try {
-    for (const line of fs29.readFileSync((0, import_path168.join)(factoryDir, "chain-decisions.jsonl"), "utf8").split("\n")) {
+    for (const line of fs30.readFileSync((0, import_path161.join)(factoryDir, "chain-decisions.jsonl"), "utf8").split("\n")) {
       if (!line.trim()) continue;
       let record2;
       try {
@@ -132896,7 +128180,7 @@ function readDecisions(factoryDir, intents) {
 function readStopMarkers(factoryDir, intents) {
   let entries;
   try {
-    entries = fs29.readdirSync(factoryDir);
+    entries = fs30.readdirSync(factoryDir);
   } catch {
     return;
   }
@@ -132905,7 +128189,7 @@ function readStopMarkers(factoryDir, intents) {
     if (!match) continue;
     let marker;
     try {
-      marker = JSON.parse(fs29.readFileSync((0, import_path168.join)(factoryDir, entry2), "utf8"));
+      marker = JSON.parse(fs30.readFileSync((0, import_path161.join)(factoryDir, entry2), "utf8"));
     } catch {
       continue;
     }
@@ -132923,7 +128207,7 @@ function readChainStatus(directory, now) {
   readStopMarkers(factoryDir, intents);
   let activeLedgers = 0;
   try {
-    activeLedgers = fs29.readdirSync(factoryDir).filter((entry2) => /^chain-[0-9a-f-]+\.json$/i.test(entry2)).length;
+    activeLedgers = fs30.readdirSync(factoryDir).filter((entry2) => /^chain-[0-9a-f-]+\.json$/i.test(entry2)).length;
   } catch {
   }
   return {
@@ -132971,7 +128255,7 @@ function factoryCommand() {
       process.exitCode = 1;
       return;
     }
-    const cwd2 = (0, import_path169.resolve)(options.cwd);
+    const cwd2 = (0, import_path162.resolve)(options.cwd);
     void startListener({ port: options.port, secret, whitelist, cwd: cwd2, host: options.host }).then((server) => {
       const addr = server.address();
       const port = addr && typeof addr !== "string" ? addr.port : options.port;
@@ -133017,13 +128301,13 @@ function buildRouteTableFull() {
 }
 function validateFactoryPrerequisites(cwd2) {
   const missing = [];
-  if (!(0, import_fs140.existsSync)((0, import_path169.join)(getOmcRoot(cwd2), "state"))) missing.push(".omc/state/");
-  if (!(0, import_fs140.existsSync)((0, import_path169.join)(cwd2, "docs", "design"))) missing.push("docs/design/");
+  if (!(0, import_fs133.existsSync)((0, import_path162.join)(getOmcRoot(cwd2), "state"))) missing.push(".omc/state/");
+  if (!(0, import_fs133.existsSync)((0, import_path162.join)(cwd2, "docs", "design"))) missing.push("docs/design/");
   return { ok: missing.length === 0, missing };
 }
 function runFactoryInit(options = {}) {
-  const cwd2 = (0, import_path169.resolve)(options.cwd ?? process.cwd());
-  const routesPath = (0, import_path169.join)(getOmcRoot(cwd2), "factory-routes.json");
+  const cwd2 = (0, import_path162.resolve)(options.cwd ?? process.cwd());
+  const routesPath = (0, import_path162.join)(getOmcRoot(cwd2), "factory-routes.json");
   const prerequisites = validateFactoryPrerequisites(cwd2);
   if (!prerequisites.ok) {
     return {
@@ -133031,7 +128315,7 @@ function runFactoryInit(options = {}) {
       message: `factory init refused: missing prerequisites (${prerequisites.missing.join(", ")}). Harbor needs .omc/state/ (run an OMC session or omc setup first); the shipyard layout needs docs/design/. Point --cwd at the project root.`
     };
   }
-  if ((0, import_fs140.existsSync)(routesPath) && !options.force) {
+  if ((0, import_fs133.existsSync)(routesPath) && !options.force) {
     return {
       exitCode: 1,
       message: `factory init refused: ${routesPath} already exists and the project route table is never overwritten. Read it first, then pass --force to replace it.`
@@ -133039,8 +128323,8 @@ function runFactoryInit(options = {}) {
   }
   const table = options.narrow === false ? buildRouteTableFull() : buildRouteTableNarrow();
   try {
-    (0, import_fs140.mkdirSync)((0, import_path169.join)(routesPath, ".."), { recursive: true });
-    (0, import_fs140.writeFileSync)(routesPath, `${JSON.stringify(table, null, 2)}
+    (0, import_fs133.mkdirSync)((0, import_path162.join)(routesPath, ".."), { recursive: true });
+    (0, import_fs133.writeFileSync)(routesPath, `${JSON.stringify(table, null, 2)}
 `, "utf8");
   } catch (error2) {
     return { exitCode: 1, message: `factory init failed: cannot write ${routesPath}: ${error2.message}` };
@@ -133191,21 +128475,22 @@ async function runHudWatchLoop(options) {
     if (shouldStop) {
       break;
     }
-    await new Promise((resolve48) => {
+    await new Promise((resolve49) => {
       const timer = setTimeout(() => {
         wakeSleep = null;
-        resolve48();
+        resolve49();
       }, options.intervalMs);
       wakeSleep = () => {
         clearTimeout(timer);
         wakeSleep = null;
-        resolve48();
+        resolve49();
       };
     });
   }
 }
 
 // src/cli/index.ts
+hardenWindowsExeSearch();
 var version2 = getRuntimePackageVersion();
 function applyPluginDirOption(rawPath) {
   if (!rawPath) return;
@@ -133225,6 +128510,20 @@ function applyPluginDirOption(rawPath) {
     );
   }
   process.env[OMC_PLUGIN_ROOT_ENV] = resolved;
+}
+function loadConfigForUpdate() {
+  try {
+    if (!(0, import_fs141.existsSync)(CONFIG_FILE)) return { silentAutoUpdate: false };
+    const parsed = JSON.parse((0, import_fs141.readFileSync)(CONFIG_FILE, "utf-8"));
+    if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
+      throw new Error("expected a JSON object");
+    }
+    return parsed;
+  } catch (error2) {
+    console.error(source_default.red(`Cannot read ${CONFIG_FILE}: ${error2 instanceof Error ? error2.message : String(error2)}`));
+    console.error(source_default.gray("Fix or remove the file, then run this command again."));
+    process.exit(1);
+  }
 }
 var program2 = new Command();
 warnIfWin32();
@@ -133280,8 +128579,8 @@ Examples:
     console.log(`  User:    ${paths.user}`);
     console.log(`  Project: ${paths.project}`);
     console.log(source_default.blue("\nFile status:"));
-    console.log(`  User:    ${(0, import_fs147.existsSync)(paths.user) ? source_default.green("exists") : source_default.gray("not found")}`);
-    console.log(`  Project: ${(0, import_fs147.existsSync)(paths.project) ? source_default.green("exists") : source_default.gray("not found")}`);
+    console.log(`  User:    ${(0, import_fs141.existsSync)(paths.user) ? source_default.green("exists") : source_default.gray("not found")}`);
+    console.log(`  Project: ${(0, import_fs141.existsSync)(paths.project) ? source_default.green("exists") : source_default.gray("not found")}`);
     return;
   }
   const config2 = loadConfig();
@@ -133324,7 +128623,7 @@ Profile types (use with --profile):
   webhook      Generic webhook (POST with JSON body)
 
 Examples:
-  $ omc config-stop-callback file --enable --path ${(0, import_path175.join)(getClaudeConfigDir(), "logs/{date}.md")}
+  $ omc config-stop-callback file --enable --path ${(0, import_path169.join)(getClaudeConfigDir(), "logs/{date}.md")}
   $ omc config-stop-callback telegram --enable --token <token> --chat <id>
   $ omc config-stop-callback discord --enable --webhook <url>
   $ omc config-stop-callback file --disable
@@ -133344,7 +128643,7 @@ Examples:
       console.error(source_default.gray(`Valid types: ${profileValidTypes.join(", ")}`));
       process.exit(1);
     }
-    const config3 = getOMCConfig();
+    const config3 = loadConfigForUpdate();
     config3.notificationProfiles = config3.notificationProfiles || {};
     const profileName = options.profile;
     const profile = config3.notificationProfiles[profileName] || { enabled: true };
@@ -133450,7 +128749,7 @@ Examples:
     }
     config3.notificationProfiles[profileName] = profile;
     try {
-      (0, import_fs147.writeFileSync)(CONFIG_FILE, JSON.stringify(config3, null, 2), "utf-8");
+      (0, import_fs141.writeFileSync)(CONFIG_FILE, JSON.stringify(config3, null, 2), "utf-8");
       console.log(source_default.green(`\u2713 Profile "${profileName}" \u2014 ${type} configured`));
       console.log(JSON.stringify(profile[type], null, 2));
     } catch (error2) {
@@ -133465,7 +128764,7 @@ Examples:
     console.error(source_default.gray(`Valid types: ${validTypes.join(", ")}`));
     process.exit(1);
   }
-  const config2 = getOMCConfig();
+  const config2 = loadConfigForUpdate();
   config2.stopHookCallbacks = config2.stopHookCallbacks || {};
   if (options.show) {
     const current = config2.stopHookCallbacks[type];
@@ -133508,8 +128807,9 @@ Examples:
     case "file": {
       const current = config2.stopHookCallbacks.file;
       config2.stopHookCallbacks.file = {
+        ...current,
         enabled: enabled ?? current?.enabled ?? false,
-        path: options.path ?? current?.path ?? (0, import_path175.join)(getClaudeConfigDir(), "session-logs/{session_id}.md"),
+        path: options.path ?? current?.path ?? (0, import_path169.join)(getClaudeConfigDir(), "session-logs/{session_id}.md"),
         format: options.format ?? current?.format ?? "markdown"
       };
       break;
@@ -133563,7 +128863,7 @@ Examples:
     }
   }
   try {
-    (0, import_fs147.writeFileSync)(CONFIG_FILE, JSON.stringify(config2, null, 2), "utf-8");
+    (0, import_fs141.writeFileSync)(CONFIG_FILE, JSON.stringify(config2, null, 2), "utf-8");
     console.log(source_default.green(`\u2713 Stop callback '${type}' configured`));
     console.log(JSON.stringify(config2.stopHookCallbacks[type], null, 2));
   } catch (error2) {
@@ -133582,7 +128882,7 @@ Examples:
 
   # Select profile at launch:
   $ OMC_NOTIFY_PROFILE=work claude`).action(async (name, options) => {
-  const config2 = getOMCConfig();
+  const config2 = loadConfigForUpdate();
   const profiles = config2.notificationProfiles || {};
   if (options.list || !name) {
     const names = Object.keys(profiles);
@@ -133625,7 +128925,7 @@ Active profile (OMC_NOTIFY_PROFILE): ${activeProfile}`));
       delete config2.notificationProfiles;
     }
     try {
-      (0, import_fs147.writeFileSync)(CONFIG_FILE, JSON.stringify(config2, null, 2), "utf-8");
+      (0, import_fs141.writeFileSync)(CONFIG_FILE, JSON.stringify(config2, null, 2), "utf-8");
       console.log(source_default.green(`\u2713 Profile "${name}" deleted`));
     } catch (error2) {
       console.error(source_default.red("Failed to write configuration:"), error2);

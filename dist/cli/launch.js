@@ -4,12 +4,12 @@
  */
 import { execFileSync, spawnSync } from 'child_process';
 import { chmodSync, cpSync, copyFileSync, existsSync, lstatSync, linkSync, mkdirSync, mkdtempSync, readFileSync, readlinkSync, renameSync, rmSync, symlinkSync, writeFileSync, } from 'fs';
-import { homedir, tmpdir } from 'os';
+import { tmpdir } from 'os';
 import { basename, dirname, isAbsolute, join, resolve } from 'path';
 import { atomicWriteJsonSync } from '../lib/atomic-write.js';
 import { lockPathFor, withFileLockSync } from '../lib/file-lock.js';
 import { resolvePluginDirArg } from '../lib/plugin-dir.js';
-import { stripRetiredTeamMcpServers } from '../installer/mcp-registry.js';
+import { getClaudeMcpConfigPath, isDefaultClaudeConfigDirPath, stripRetiredTeamMcpServers, } from '../installer/mcp-registry.js';
 import { getClaudeConfigDir } from '../utils/config-dir.js';
 import { resolveLaunchPolicy, buildTmuxSessionName, buildTmuxShellCommand, buildTmuxShellCommandWithEnv, escapeForCmdSet, isNativeWindowsShell, wrapWithLoginShell, isClaudeAvailable, isTmuxAvailable, quoteShellArg, quoteForCmd, tmuxExec, } from './tmux-utils.js';
 import { configureTmuxClipboardForCurrentSession, configureTmuxClipboardForSession } from './tmux-clipboard.js';
@@ -286,16 +286,16 @@ function compareOnboardingVersion(left, right) {
     }
     return 0;
 }
-function refreshRuntimeClaudeJson(baseConfigDir, runtimeClaudeJsonPath, sourceClaudeJson = readJsonObject(join(dirname(baseConfigDir), '.claude.json'))) {
-    if (!sourceClaudeJson)
+function refreshRuntimeClaudeJson(baseConfigDir, runtimeClaudeJsonPath, sourceClaudeJson = readJsonObject(join(dirname(baseConfigDir), '.claude.json')), mcpServersSourceJson = readJsonObject(getClaudeMcpConfigPath(baseConfigDir))) {
+    if (!sourceClaudeJson && !mcpServersSourceJson)
         return;
     const runtimeClaudeJson = readJsonObject(runtimeClaudeJsonPath) ?? {};
     let changed = false;
-    if (sourceClaudeJson.hasCompletedOnboarding === true && runtimeClaudeJson.hasCompletedOnboarding !== true) {
+    if (sourceClaudeJson?.hasCompletedOnboarding === true && runtimeClaudeJson.hasCompletedOnboarding !== true) {
         runtimeClaudeJson.hasCompletedOnboarding = true;
         changed = true;
     }
-    const sourceVersion = sourceClaudeJson.lastOnboardingVersion;
+    const sourceVersion = sourceClaudeJson?.lastOnboardingVersion;
     if (typeof sourceVersion === 'string' || typeof sourceVersion === 'number') {
         const runtimeHasVersion = hasOwn(runtimeClaudeJson, 'lastOnboardingVersion');
         const compared = compareOnboardingVersion(sourceVersion, runtimeClaudeJson.lastOnboardingVersion);
@@ -304,7 +304,7 @@ function refreshRuntimeClaudeJson(baseConfigDir, runtimeClaudeJsonPath, sourceCl
             changed = true;
         }
     }
-    if (hasOwn(sourceClaudeJson, 'oauthAccount')) {
+    if (sourceClaudeJson && hasOwn(sourceClaudeJson, 'oauthAccount')) {
         const sourceAccount = sourceClaudeJson.oauthAccount;
         if (sourceAccount === null || sourceAccount === undefined) {
             if (hasOwn(runtimeClaudeJson, 'oauthAccount')) {
@@ -322,8 +322,9 @@ function refreshRuntimeClaudeJson(baseConfigDir, runtimeClaudeJsonPath, sourceCl
             changed = true;
         }
     }
-    if (isJsonObject(sourceClaudeJson.mcpServers)) {
-        runtimeClaudeJson.mcpServers = sourceClaudeJson.mcpServers;
+    const sourceMcpServers = mcpServersSourceJson?.mcpServers;
+    if (isJsonObject(sourceMcpServers)) {
+        runtimeClaudeJson.mcpServers = sourceMcpServers;
         changed = true;
     }
     if (changed) {
@@ -446,6 +447,11 @@ export function prepareOmcLaunchConfigDir(baseConfigDir = getClaudeConfigDir()) 
     const runtimeClaudeJsonPath = join(runtimeConfigDir, '.claude.json');
     const runtimeCredentialsPath = join(runtimeConfigDir, '.credentials.json');
     const sourceClaudeJsonPath = join(dirname(baseConfigDir), '.claude.json');
+    // User-scoped MCP servers come from the file `omc setup` syncs the registry
+    // into: CLAUDE_MCP_CONFIG_PATH when set, otherwise the .claude.json Claude Code
+    // reads for this config dir (a CLAUDE_CONFIG_DIR profile's own file, or for the
+    // default ~/.claude the same ~/.claude.json as sourceClaudeJsonPath).
+    const mcpServersSourcePath = getClaudeMcpConfigPath(baseConfigDir);
     const lifecycleLockPath = lockPathFor(join(baseConfigDir, '.omc-launch.prepare.lock'));
     return withFileLockSync(lifecycleLockPath, () => {
         const preservedClaudeJson = pathExists(runtimeClaudeJsonPath)
@@ -453,6 +459,9 @@ export function prepareOmcLaunchConfigDir(baseConfigDir = getClaudeConfigDir()) 
             : null;
         const preservedRuntimeClaudeJson = readJsonObject(runtimeClaudeJsonPath);
         const sourceClaudeJson = readJsonObject(sourceClaudeJsonPath);
+        const mcpServersSourceJson = mcpServersSourcePath === sourceClaudeJsonPath
+            ? sourceClaudeJson
+            : readJsonObject(mcpServersSourcePath);
         reconcileRuntimeCredentials(baseConfigDir, runtimeCredentialsPath, sourceClaudeJson, preservedRuntimeClaudeJson);
         rmSync(nextConfigDir, { recursive: true, force: true });
         try {
@@ -461,7 +470,7 @@ export function prepareOmcLaunchConfigDir(baseConfigDir = getClaudeConfigDir()) 
             if (preservedClaudeJson) {
                 writeFileSync(nextClaudeJsonPath, preservedClaudeJson);
             }
-            refreshRuntimeClaudeJson(baseConfigDir, nextClaudeJsonPath, sourceClaudeJson);
+            refreshRuntimeClaudeJson(baseConfigDir, nextClaudeJsonPath, sourceClaudeJson, mcpServersSourceJson);
             copyFileSync(companionPath, join(nextConfigDir, 'CLAUDE.md'));
             for (const entry of [
                 'agents',
@@ -508,9 +517,6 @@ export function prepareOmcLaunchConfigDir(baseConfigDir = getClaudeConfigDir()) 
         swapRuntimeConfigDir(runtimeConfigDir, nextConfigDir);
         return runtimeConfigDir;
     }, { timeoutMs: 5000, retryDelayMs: 50 });
-}
-function isDefaultClaudeConfigDirPath(configDir) {
-    return configDir === join(homedir(), '.claude');
 }
 /**
  * Extract the OMC-specific --notify flag from launch args.
@@ -1092,7 +1098,8 @@ function canonicalTmuxEnvironmentName(name) {
     }
     if (/^(?:HTTP|HTTPS|ALL|NO)_PROXY$/.test(normalizedName))
         return normalizedName;
-    if (normalizedName === 'NODE_EXTRA_CA_CERTS'
+    if (normalizedName === 'NODEFAULTCURRENTDIRECTORYINEXEPATH'
+        || normalizedName === 'NODE_EXTRA_CA_CERTS'
         || normalizedName === 'NODE_TLS_REJECT_UNAUTHORIZED'
         || normalizedName.startsWith('SSL_CERT_')
         || normalizedName.endsWith('_CA_BUNDLE'))
@@ -1134,10 +1141,15 @@ function buildTmuxClaudeLaunch(args, options) {
             : nativeWindows
                 ? transport.prefix
                 : `${buildEnvExportPrefix(forwardedEnvNames)}${transport.prefix}`;
+        // On Windows, set NoDefaultCurrentDirectoryInExePath=1 BEFORE the 'where claude' check
+        // to prevent execution of planted executables in the current directory.
+        const windowsSecurityPrefix = nativeWindows
+            ? 'set "NoDefaultCurrentDirectoryInExePath=1" && '
+            : '';
         const missingBinaryGuard = nativeWindows
             ? '(where claude >nul 2>nul || (echo [omc] Error: claude CLI not found in PATH. 1>&2 & exit /b 1)) && '
             : "command -v claude >/dev/null 2>&1 || { echo '[omc] Error: claude CLI not found in PATH.' >&2; exit 127; }; ";
-        const command = wrapWithLoginShell(`${envPrefix}${options.preflight}${missingBinaryGuard}${options.useExec ? 'exec ' : ''}${rawClaudeCmd}`);
+        const command = wrapWithLoginShell(`${envPrefix}${options.preflight}${windowsSecurityPrefix}${missingBinaryGuard}${options.useExec ? 'exec ' : ''}${rawClaudeCmd}`);
         return { command, cleanup: transport.cleanup };
     }
     catch (error) {

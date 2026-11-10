@@ -627,6 +627,8 @@ OMC features like `omc team` and rate-limit detection require **tmux**:
 | Windows (WSL2) | tmux (inside WSL)                                     | `sudo apt install tmux` |
 
 > **Windows users:** [psmux](https://github.com/marlocarlo/psmux) provides a native `tmux` binary for Windows with 76 tmux-compatible commands. No WSL required.
+>
+> **Windows Node.js version (provider spawns):** On Windows, **Node 22+ (or 21.7+)** is recommended for provider spawns. Node 20's libuv 1.46 may resolve bare-name child process executables from the current working directory, which can cause unexpected behavior. See [#4746](https://github.com/Yeachan-Heo/oh-my-claudecode/issues/4746) for details.
 
 ### Optional: Multi-AI Orchestration
 

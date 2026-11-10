@@ -632,12 +632,48 @@ describe('buildTmuxClaudeCommand — pane process identity (issue #4005)', () =>
             const nativeCommand = command
                 .slice(shellCommandIndex + shellCommandMarker.length, -1)
                 .replace(/""/g, '"');
-            expect(nativeCommand).toMatch(/^\(where claude >nul 2>nul \|\| \(echo \[omc\] Error: claude CLI not found in PATH\. 1>&2 & exit \/b 1\)\) && /);
+            // Security: NoDefaultCurrentDirectoryInExePath must be set before where check
+            expect(nativeCommand).toMatch(/^set "NoDefaultCurrentDirectoryInExePath=1" && \(where claude >nul 2>nul \|\| \(echo \[omc\] Error: claude CLI not found in PATH\. 1>&2 & exit \/b 1\)\) && /);
             expect(nativeCommand).toContain(')) && exec set "CLAUDE_CONFIG_DIR=/tmp/omc-native-windows-test" && claude');
             const guardSeparator = nativeCommand.indexOf(')) && ');
             expect(guardSeparator).toBeGreaterThanOrEqual(0);
             const claudeIndex = nativeCommand.indexOf('claude', guardSeparator + ')) && '.length);
             expect(claudeIndex).toBeGreaterThan(guardSeparator);
+        }
+        finally {
+            for (const name of Object.keys(process.env))
+                delete process.env[name];
+            Object.assign(process.env, originalEnv);
+            Object.defineProperty(process, 'platform', { value: originalPlatform, configurable: true });
+            if (originalNativeWindowsImplementation) {
+                vi.mocked(isNativeWindowsShell).mockImplementation(originalNativeWindowsImplementation);
+            }
+            else {
+                vi.mocked(isNativeWindowsShell).mockReset();
+            }
+        }
+    });
+    it('sets NoDefaultCurrentDirectoryInExePath=1 in the Windows launch command before where claude check', () => {
+        const originalPlatform = process.platform;
+        const originalEnv = { ...process.env };
+        const originalNativeWindowsImplementation = vi.mocked(isNativeWindowsShell).getMockImplementation();
+        try {
+            for (const name of Object.keys(process.env))
+                delete process.env[name];
+            Object.defineProperty(process, 'platform', { value: 'win32', configurable: true });
+            vi.mocked(isNativeWindowsShell).mockReturnValue(true);
+            const command = buildTmuxClaudeCommand([]);
+            const shellCommandMarker = '/c "';
+            const shellCommandIndex = command.indexOf(shellCommandMarker);
+            expect(shellCommandIndex).toBeGreaterThanOrEqual(0);
+            const nativeCommand = command
+                .slice(shellCommandIndex + shellCommandMarker.length, -1)
+                .replace(/""/g, '"');
+            // Security requirement: NoDefaultCurrentDirectoryInExePath=1 must be set
+            // BEFORE the 'where claude' check to prevent execution of planted executables
+            expect(nativeCommand).toContain('set "NoDefaultCurrentDirectoryInExePath=1" && (where claude');
+            // Verify it appears at the start of the command
+            expect(nativeCommand).toMatch(/^set "NoDefaultCurrentDirectoryInExePath=1" &&/);
         }
         finally {
             for (const name of Object.keys(process.env))
@@ -1024,14 +1060,19 @@ describe('launchCommand — env var propagation', () => {
 });
 describe('prepareOmcLaunchConfigDir / launchCommand OMC companion loading', () => {
     const originalClaudeConfigDir = process.env.CLAUDE_CONFIG_DIR;
+    const originalClaudeMcpConfigPath = process.env.CLAUDE_MCP_CONFIG_PATH;
     const originalHome = process.env.HOME;
+    const originalUserProfile = process.env.USERPROFILE;
     let tempRoot = null;
     const originalClaudecode = process.env.CLAUDECODE;
     beforeEach(() => {
         vi.resetAllMocks();
         delete process.env.CLAUDECODE;
+        delete process.env.CLAUDE_MCP_CONFIG_PATH;
         tempRoot = mkdtempSync(join(tmpdir(), 'omc-launch-profile-'));
+        // homedir() reads USERPROFILE on Windows and HOME elsewhere.
         process.env.HOME = join(tempRoot, 'home');
+        process.env.USERPROFILE = join(tempRoot, 'home');
         execFileSync.mockReturnValue(Buffer.from(''));
         resolveLaunchPolicy.mockReturnValue('direct');
         // Clear CLAUDECODE to avoid "already inside CC session" exit
@@ -1048,11 +1089,23 @@ describe('prepareOmcLaunchConfigDir / launchCommand OMC companion loading', () =
         else {
             process.env.HOME = originalHome;
         }
+        if (originalUserProfile === undefined) {
+            delete process.env.USERPROFILE;
+        }
+        else {
+            process.env.USERPROFILE = originalUserProfile;
+        }
         if (originalClaudeConfigDir === undefined) {
             delete process.env.CLAUDE_CONFIG_DIR;
         }
         else {
             process.env.CLAUDE_CONFIG_DIR = originalClaudeConfigDir;
+        }
+        if (originalClaudeMcpConfigPath === undefined) {
+            delete process.env.CLAUDE_MCP_CONFIG_PATH;
+        }
+        else {
+            process.env.CLAUDE_MCP_CONFIG_PATH = originalClaudeMcpConfigPath;
         }
         if (originalClaudecode === undefined) {
             delete process.env.CLAUDECODE;
@@ -1223,10 +1276,12 @@ describe('prepareOmcLaunchConfigDir / launchCommand OMC companion loading', () =
         expect(readFileSync(join(rebuiltRuntimeDir, '.claude.json'), 'utf-8')).toBe('{"session":"keep-me"}');
     });
     it('seeds missing runtime .claude.json mcpServers from source .claude.json', () => {
-        const configDir = join(tempRoot, '.claude');
+        // The default layout: ~/.claude keeps its MCP servers in ~/.claude.json.
+        const homeDir = join(tempRoot, 'home');
+        const configDir = join(homeDir, '.claude');
         mkdirSync(configDir, { recursive: true });
         writeFileSync(join(configDir, 'CLAUDE-omc.md'), '<!-- OMC:START -->\n# OMC\n<!-- OMC:END -->\n');
-        writeFileSync(join(tempRoot, '.claude.json'), JSON.stringify({
+        writeFileSync(join(homeDir, '.claude.json'), JSON.stringify({
             mcpServers: {
                 github: { command: 'node', args: ['github-mcp.js'] },
             },
@@ -1240,11 +1295,111 @@ describe('prepareOmcLaunchConfigDir / launchCommand OMC companion loading', () =
             },
         });
     });
+    it('seeds runtime mcpServers from the .claude.json inside a CLAUDE_CONFIG_DIR profile, not ~/.claude.json', () => {
+        const homeDir = join(tempRoot, 'home');
+        const profileDir = join(homeDir, '.claude-work');
+        mkdirSync(profileDir, { recursive: true });
+        writeFileSync(join(profileDir, 'CLAUDE-omc.md'), '<!-- OMC:START -->\n# OMC\n<!-- OMC:END -->\n');
+        // ~/.claude.json belongs to the default profile. With CLAUDE_CONFIG_DIR set,
+        // Claude Code reads the profile's own .claude.json, and omc setup syncs the
+        // MCP registry into it.
+        writeFileSync(join(homeDir, '.claude.json'), JSON.stringify({
+            mcpServers: {
+                'personal-notes': { command: 'node', args: ['personal-notes.js'] },
+            },
+        }, null, 2));
+        writeFileSync(join(profileDir, '.claude.json'), JSON.stringify({
+            mcpServers: {
+                'work-docs': { command: 'node', args: ['work-docs.js'] },
+            },
+        }, null, 2));
+        process.env.CLAUDE_CONFIG_DIR = profileDir;
+        // No argument: the config dir comes from CLAUDE_CONFIG_DIR, as in launchCommand.
+        const runtimeDir = prepareOmcLaunchConfigDir();
+        const runtimeClaudeJson = JSON.parse(readFileSync(join(runtimeDir, '.claude.json'), 'utf-8'));
+        expect(runtimeDir).toBe(join(profileDir, '.omc-launch'));
+        expect(runtimeClaudeJson.mcpServers).toEqual({
+            'work-docs': { command: 'node', args: ['work-docs.js'] },
+        });
+    });
+    it('seeds runtime mcpServers from the profile .claude.json when no .claude.json sits beside the profile', () => {
+        const profileDir = join(tempRoot, 'profiles', 'work');
+        mkdirSync(profileDir, { recursive: true });
+        writeFileSync(join(profileDir, 'CLAUDE-omc.md'), '<!-- OMC:START -->\n# OMC\n<!-- OMC:END -->\n');
+        writeFileSync(join(profileDir, '.claude.json'), JSON.stringify({
+            mcpServers: {
+                'work-docs': { command: 'node', args: ['work-docs.js'] },
+            },
+        }, null, 2));
+        const runtimeDir = prepareOmcLaunchConfigDir(profileDir);
+        const runtimeClaudeJson = JSON.parse(readFileSync(join(runtimeDir, '.claude.json'), 'utf-8'));
+        expect(existsSync(join(tempRoot, 'profiles', '.claude.json'))).toBe(false);
+        expect(runtimeClaudeJson).toEqual({
+            mcpServers: {
+                'work-docs': { command: 'node', args: ['work-docs.js'] },
+            },
+        });
+    });
+    it('seeds runtime mcpServers from CLAUDE_MCP_CONFIG_PATH, the file omc setup syncs into, when it is set', () => {
+        const profilesDir = join(tempRoot, 'profiles');
+        const profileDir = join(profilesDir, 'work');
+        // Here the file next to the profile, which OMC used before it followed CLAUDE_CONFIG_DIR.
+        const mcpConfigPath = join(profilesDir, '.claude.json');
+        mkdirSync(profileDir, { recursive: true });
+        writeFileSync(join(profileDir, 'CLAUDE-omc.md'), '<!-- OMC:START -->\n# OMC\n<!-- OMC:END -->\n');
+        writeFileSync(join(profileDir, '.claude.json'), JSON.stringify({
+            mcpServers: {
+                'work-docs': { command: 'node', args: ['work-docs.js'] },
+            },
+        }, null, 2));
+        writeFileSync(mcpConfigPath, JSON.stringify({
+            mcpServers: {
+                'team-docs': { command: 'node', args: ['team-docs.js'] },
+            },
+        }, null, 2));
+        process.env.CLAUDE_CONFIG_DIR = profileDir;
+        process.env.CLAUDE_MCP_CONFIG_PATH = mcpConfigPath;
+        const runtimeDir = prepareOmcLaunchConfigDir();
+        const runtimeClaudeJson = JSON.parse(readFileSync(join(runtimeDir, '.claude.json'), 'utf-8'));
+        expect(runtimeClaudeJson.mcpServers).toEqual({
+            'team-docs': { command: 'node', args: ['team-docs.js'] },
+        });
+    });
+    it('seeds only runtime mcpServers from CLAUDE_MCP_CONFIG_PATH for the default ~/.claude', () => {
+        const homeDir = join(tempRoot, 'home');
+        const configDir = join(homeDir, '.claude');
+        const mcpConfigPath = join(tempRoot, 'custom', 'claude-mcp.json');
+        mkdirSync(configDir, { recursive: true });
+        mkdirSync(dirname(mcpConfigPath), { recursive: true });
+        writeFileSync(join(configDir, 'CLAUDE-omc.md'), '<!-- OMC:START -->\n# OMC\n<!-- OMC:END -->\n');
+        writeFileSync(join(homeDir, '.claude.json'), JSON.stringify({
+            hasCompletedOnboarding: true,
+            mcpServers: {
+                github: { command: 'node', args: ['github-mcp.js'] },
+            },
+        }, null, 2));
+        writeFileSync(mcpConfigPath, JSON.stringify({
+            mcpServers: {
+                'team-docs': { command: 'node', args: ['team-docs.js'] },
+            },
+        }, null, 2));
+        process.env.CLAUDE_MCP_CONFIG_PATH = mcpConfigPath;
+        const runtimeDir = prepareOmcLaunchConfigDir(configDir);
+        const runtimeClaudeJson = JSON.parse(readFileSync(join(runtimeDir, '.claude.json'), 'utf-8'));
+        // Onboarding state still comes from ~/.claude.json.
+        expect(runtimeClaudeJson).toEqual({
+            hasCompletedOnboarding: true,
+            mcpServers: {
+                'team-docs': { command: 'node', args: ['team-docs.js'] },
+            },
+        });
+    });
     it('refreshes runtime mcpServers from source while preserving runtime metadata', () => {
-        const configDir = join(tempRoot, '.claude');
+        const homeDir = join(tempRoot, 'home');
+        const configDir = join(homeDir, '.claude');
         mkdirSync(configDir, { recursive: true });
         writeFileSync(join(configDir, 'CLAUDE-omc.md'), '<!-- OMC:START -->\n# OMC\n<!-- OMC:END -->\n');
-        writeFileSync(join(tempRoot, '.claude.json'), JSON.stringify({
+        writeFileSync(join(homeDir, '.claude.json'), JSON.stringify({
             mcpServers: {
                 exa: { command: 'node', args: ['old-exa.js'] },
             },
@@ -1257,7 +1412,7 @@ describe('prepareOmcLaunchConfigDir / launchCommand OMC companion loading', () =
                 exa: { command: 'node', args: ['stale-exa.js'] },
             },
         }, null, 2));
-        writeFileSync(join(tempRoot, '.claude.json'), JSON.stringify({
+        writeFileSync(join(homeDir, '.claude.json'), JSON.stringify({
             mcpServers: {
                 exa: { command: 'node', args: ['new-exa.js'] },
                 playwright: { command: 'npx', args: ['@playwright/mcp'] },
@@ -1694,7 +1849,8 @@ describe('prepareOmcLaunchConfigDir / launchCommand OMC companion loading', () =
         expect(readlinkSync(second)).toBe(first);
     });
     it('preserves runtime .claude.json when source .claude.json is absent, invalid, or has no mcpServers', () => {
-        const configDir = join(tempRoot, '.claude');
+        const homeDir = join(tempRoot, 'home');
+        const configDir = join(homeDir, '.claude');
         mkdirSync(configDir, { recursive: true });
         writeFileSync(join(configDir, 'CLAUDE-omc.md'), '<!-- OMC:START -->\n# OMC\n<!-- OMC:END -->\n');
         const runtimeDir = prepareOmcLaunchConfigDir(configDir);
@@ -1702,11 +1858,11 @@ describe('prepareOmcLaunchConfigDir / launchCommand OMC companion loading', () =
         writeFileSync(runtimeClaudeJsonPath, '{"session":"keep-absent"}');
         prepareOmcLaunchConfigDir(configDir);
         expect(readFileSync(runtimeClaudeJsonPath, 'utf-8')).toBe('{"session":"keep-absent"}');
-        writeFileSync(join(tempRoot, '.claude.json'), '{not json');
+        writeFileSync(join(homeDir, '.claude.json'), '{not json');
         writeFileSync(runtimeClaudeJsonPath, '{"session":"keep-invalid"}');
         prepareOmcLaunchConfigDir(configDir);
         expect(readFileSync(runtimeClaudeJsonPath, 'utf-8')).toBe('{"session":"keep-invalid"}');
-        writeFileSync(join(tempRoot, '.claude.json'), JSON.stringify({ projects: {} }, null, 2));
+        writeFileSync(join(homeDir, '.claude.json'), JSON.stringify({ projects: {} }, null, 2));
         writeFileSync(runtimeClaudeJsonPath, '{"session":"keep-no-mcp"}');
         prepareOmcLaunchConfigDir(configDir);
         expect(readFileSync(runtimeClaudeJsonPath, 'utf-8')).toBe('{"session":"keep-no-mcp"}');

@@ -1,0 +1,28 @@
+stateDiagram-v2
+  direction LR
+  state "At the same time" as all {
+    state "Session" as r0 {
+      s0: Signed out
+      s1: Checking the password
+      s2: Signed in
+      [*] --> s0
+      s0 --> s1: YouSubmitAPassword [unless Locked out]
+      s1 --> s2: ThePasswordIsRight
+      s1 --> s0: ThePasswordIsWrong
+      s2 --> s0: YouSignOut
+    }
+    --
+    state "Tries" as r1 {
+      s3: No wrong tries
+      s4: 1 wrong try
+      s5: 2 wrong tries
+      s6: Locked out
+      [*] --> s3
+      s3 --> s4: ThePasswordIsWrong [when Checking the password]
+      s4 --> s3: ThePasswordIsRight [when Checking the password]
+      s4 --> s5: ThePasswordIsWrong [when Checking the password]
+      s5 --> s3: ThePasswordIsRight [when Checking the password]
+      s5 --> s6: ThePasswordIsWrong [when Checking the password]
+      s6 --> s3: S15MinutesPass
+    }
+  }

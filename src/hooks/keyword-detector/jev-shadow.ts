@@ -17,7 +17,7 @@ import {
   getAllKeywords,
   type KeywordType,
 } from './index.js';
-import { recordJudgment } from '../jev/index.js';
+import { noulAnswerIsYes, recordJudgment } from '../jev/index.js';
 import type { JevAnswer, ResolveResult } from '../jev/index.js';
 
 /**
@@ -32,6 +32,7 @@ export function recordSkillTriggerShadow(
   return recordJudgment<KeywordType[]>('skill-trigger', {
     state: { prompt, source: 'user-prompt-submit' },
     twin: () => getAllKeywords(prompt),
+    mapHeuristic: (keywords, questionSet) => keywords.length > 0 ? keywords[0] : 'none',
     mapAnswer: (answer: JevAnswer) => {
       // Jev Choice answer has { type: 'choice', choice: <keyword> | 'none' }
       const choice = (answer.choice as string | undefined)?.toLowerCase();
@@ -64,10 +65,11 @@ export function recordIntentShadow(
   return recordJudgment<boolean>('intent', {
     state: { prompt, mode_name: 'intent' },
     twin: () => INTENT_SLASH_PATTERN.test(prompt),
+    mapHeuristic: (result, questionSet) => result,
     mapAnswer: (answer: JevAnswer) => {
-      // Jev Noul answer has { type: 'noul', noul: boolean | undefined }
-      return answer.noul === true;
+      // Jev Noul answer: noul is the probability of "yes" (0-1)
+      return noulAnswerIsYes(answer);
     },
     fetchFn,
-  });
+  }) as Promise<ResolveResult<boolean>>;
 }

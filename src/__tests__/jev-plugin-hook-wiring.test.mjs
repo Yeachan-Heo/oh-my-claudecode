@@ -165,7 +165,7 @@ describe('plugin hook script Jev wiring (#4120)', () => {
     expect(readPoint(context, 'skill-trigger')).toMatchObject({
       point: 'skill-trigger',
       state: { source: 'user-prompt-submit' },
-      heuristic: ['ralph'],
+      heuristic: 'ralph',
     });
   });
 
@@ -179,7 +179,7 @@ describe('plugin hook script Jev wiring (#4120)', () => {
     expect(readPoint(context, 'task-size')).toMatchObject({
       point: 'task-size',
       state: { source: 'user-prompt-submit' },
-      heuristic: { size: 'large' },
+      heuristic: 'large',
     });
   });
 
@@ -203,7 +203,7 @@ describe('plugin hook script Jev wiring (#4120)', () => {
         subagent_type: 'oh-my-claudecode:executor',
         task: 'Fix the regression and add a test.',
       },
-      heuristic: { model: 'sonnet' },
+      heuristic: 'sonnet',
     });
   });
 
@@ -235,7 +235,7 @@ describe('plugin hook script Jev wiring (#4120)', () => {
     expect(entry).toMatchObject({
       point: 'loop-continuation',
       state: { mode_name: 'ralph', should_block: true },
-      heuristic: { mode: 'ralph', shouldBlock: true },
+      heuristic: false,
     });
     const logEntries = readFileSync(join(context.logDir, 'shadow.jsonl'), 'utf8')
       .trim()
@@ -243,6 +243,40 @@ describe('plugin hook script Jev wiring (#4120)', () => {
       .filter(Boolean)
       .map((line) => JSON.parse(line));
     expect(logEntries.filter((candidate) => candidate.point === 'loop-continuation')).toHaveLength(1);
+  });
+
+  // An empty value counts as unset, so a variable set in the parent shell cannot leak in.
+  it.each([
+    [{ OMC_JEV_EXCERPT_CHARS: '', OMC_JEV_EXCERPT_CHARS_LOOP_CONTINUATION: '' }, 2000],
+    [{ OMC_JEV_EXCERPT_CHARS: '50', OMC_JEV_EXCERPT_CHARS_LOOP_CONTINUATION: '' }, 2000],
+    [{ OMC_JEV_EXCERPT_CHARS_LOOP_CONTINUATION: '200' }, 200],
+  ])('sends loop-continuation the assistant message as the Stop hook bounds it (%j)', (overrides, expected) => {
+    const context = makeContext();
+    const sessionId = createRalphState(context);
+    runHook(context, 'persistent-mode.mjs', {
+      cwd: context.cwd,
+      session_id: sessionId,
+      last_assistant_message: 'a'.repeat(2500),
+    }, 'loop-continuation', overrides);
+
+    const entry = readPoint(context, 'loop-continuation');
+    expect(entry.state.last_assistant_message).toHaveLength(expected);
+  });
+
+  it.each([
+    [{ OMC_JEV_EXCERPT_CHARS: '', OMC_JEV_EXCERPT_CHARS_LEARNER_EXTRACTION: '' }, 2000],
+    [{ OMC_JEV_EXCERPT_CHARS: '50', OMC_JEV_EXCERPT_CHARS_LEARNER_EXTRACTION: '' }, 2000],
+    [{ OMC_JEV_EXCERPT_CHARS_LEARNER_EXTRACTION: '200' }, 200],
+  ])('bounds the learner-extraction assistant message by the point default or its variable (%j)', (overrides, expected) => {
+    const context = makeContext();
+    runHook(context, 'persistent-mode.mjs', {
+      cwd: context.cwd,
+      session_id: 'jev-session',
+      last_assistant_message: 'a'.repeat(2500),
+    }, 'learner-extraction', overrides);
+
+    const entry = readPoint(context, 'learner-extraction');
+    expect(entry.state.assistant_message).toHaveLength(expected);
   });
 
   it('does not fabricate a Ralph verdict when the plugin Stop hook has no verifier', () => {
@@ -268,7 +302,7 @@ describe('plugin hook script Jev wiring (#4120)', () => {
     expect(readPoint(context, 'learner-extraction')).toMatchObject({
       point: 'learner-extraction',
       state: { assistant_message: expect.stringContaining('race condition') },
-      heuristic: { detected: true },
+      heuristic: true,
     });
   });
 
@@ -289,8 +323,8 @@ describe('plugin hook script Jev wiring (#4120)', () => {
       expect(readPoint(context, point)).toMatchObject({
         point,
         heuristic: point === 'loop-continuation'
-          ? { mode: 'ralph', shouldBlock: true }
-          : { detected: true },
+          ? false
+          : true,
       });
       expect(readdirSync(context.root).filter((entry) => entry.startsWith('omc-jev-'))).toEqual([]);
     }
@@ -306,9 +340,10 @@ describe('plugin hook script Jev wiring (#4120)', () => {
       context_window: { used_percentage: 90 },
     }, 'context-pruning');
 
+    // The twin's action is not a valid answer to the staleness score question.
     expect(readPoint(context, 'context-pruning')).toMatchObject({
       point: 'context-pruning',
-      heuristic: 'compact',
+      heuristic: null,
       state: {
         action: 'compact',
         context_percent: 90,

@@ -1,54 +1,99 @@
 // Hook commands use the braced `${CLAUDE_PLUGIN_ROOT}` form.
 //
-// Claude Code substitutes the braced placeholder itself before handing the
-// command to a shell. The bare `$CLAUDE_PLUGIN_ROOT` form instead relies on the
-// shell expanding an environment variable, which only holds where a POSIX shell
-// actually runs the command. The Windows prefix invokes `node` directly with no
-// `sh` in front of it, so there the bare form is never expanded from the
-// environment and the plugin root resolves to nothing — `node` then tries to
-// load `<drive>:\scripts\run.cjs` and the CJS loader fails at session start.
+// Claude Code and Grok substitute the braced placeholder themselves. When
+// `args` is present they spawn `command` with no shell, so each path is one
+// argument and a plugin root that contains spaces cannot be split. The old
+// shell spelling
+//   node "${CLAUDE_PLUGIN_ROOT}"/scripts/run.cjs ...
+// is one string. PowerShell on Windows splits it after the closing quote, Node
+// receives the plugin directory as its script, and the hook exits at
+// package_json_reader. That spelling is accepted on input and repaired.
 //
-// Under `sh` both forms expand identically, so the braced form is a no-op on
-// Unix/macOS and the only form that can work on native Windows.
-export const WINDOWS_HOOK_PREFIX = 'node "${CLAUDE_PLUGIN_ROOT}"/scripts/run.cjs ';
+// Unix published caches still rewrite to find-node.sh. nvm/fnm often leave
+// `node` off PATH in non-interactive shells, and that rewrite runs under sh.
+// A git checkout does not rewrite the manifest (plugin-setup.mjs).
+
 export const UNIX_HOOK_PREFIX = 'sh "${CLAUDE_PLUGIN_ROOT}"/scripts/find-node.sh "${CLAUDE_PLUGIN_ROOT}"/scripts/run.cjs ';
 
-export function hookPrefixForPlatform(platform = process.platform) {
-  return platform === 'win32' ? WINDOWS_HOOK_PREFIX : UNIX_HOOK_PREFIX;
+const ROOT = String.raw`(?:\$\{CLAUDE_PLUGIN_ROOT\}|\$CLAUDE_PLUGIN_ROOT)`;
+const SCRIPT_NAME = /^[A-Za-z0-9._-]+\.mjs$/;
+
+const legacyFindNodePattern = new RegExp(
+  String.raw`^sh "${ROOT}\/scripts\/find-node\.sh" "${ROOT}\/scripts\/([^"\s]+)"?(.*)$`,
+);
+const currentFindNodePattern = new RegExp(
+  String.raw`^(?:"\/bin\/sh"|sh) "${ROOT}"\/scripts\/find-node\.sh "${ROOT}"\/scripts\/run\.cjs "${ROOT}"\/scripts\/([^"\s]+)"?(.*)$`,
+);
+const directRunCjsPattern = new RegExp(
+  String.raw`^node\s+"${ROOT}"\/scripts\/run\.cjs\s+"${ROOT}"\/scripts\/([^"\s]+)"?(.*)$`,
+);
+const absoluteNodeRunCjsPattern = new RegExp(
+  String.raw`^"([^"]*\/node|[A-Za-z]:\\[^"]*\\node(?:\.exe)?)"\s+"${ROOT}"\/scripts\/run\.cjs\s+"${ROOT}"\/scripts\/([^"\s]+)"?(.*)$`,
+);
+
+function tailTokens(tail) {
+  return String(tail ?? '').trim().split(/\s+/).filter(Boolean);
 }
 
-export function normalizeHookCommand(command, prefix = hookPrefixForPlatform()) {
-  // Both the bare and braced spellings are accepted on input so that manifests
-  // written by any earlier version are repaired rather than left alone; every
-  // branch emits the braced form.
-  const root = String.raw`(?:\$\{CLAUDE_PLUGIN_ROOT\}|\$CLAUDE_PLUGIN_ROOT)`;
+function sameArgs(left, right) {
+  if (!Array.isArray(left) || left.length !== right.length) return false;
+  return left.every((item, index) => item === right[index]);
+}
 
-  const legacyFindNodePattern = new RegExp(
-    String.raw`^sh "${root}\/scripts\/find-node\.sh" "${root}\/scripts\/([^"\s]+)"?(.*)$`,
-  );
-  const currentFindNodePattern = new RegExp(
-    String.raw`^(?:"\/bin\/sh"|sh) "${root}"\/scripts\/find-node\.sh "${root}"\/scripts\/run\.cjs "${root}"\/scripts\/([^"\s]+)"?(.*)$`,
-  );
-  const directRunCjsPattern = new RegExp(
-    String.raw`^node\s+"${root}"\/scripts\/run\.cjs\s+"${root}"\/scripts\/([^"\s]+)"?(.*)$`,
-  );
-  const absoluteNodeRunCjsPattern = new RegExp(
-    String.raw`^"([^"]*\/node|[A-Za-z]:\\[^"]*\\node(?:\.exe)?)"\s+"${root}"\/scripts\/run\.cjs\s+"${root}"\/scripts\/([^"\s]+)"?(.*)$`,
-  );
+/** Script basename plus tokens that follow it (`start` / `stop`). */
+export function parseHookInvocation(hook) {
+  if (!hook || typeof hook !== 'object') return null;
+  const command = typeof hook.command === 'string' ? hook.command : '';
+  const args = Array.isArray(hook.args) ? hook.args.filter((item) => typeof item === 'string') : [];
+
+  if (command === 'node' && args.length >= 2) {
+    const runner = args[0].replace(/\\/g, '/');
+    const script = args[1].replace(/\\/g, '/').split('/').pop();
+    if (runner.endsWith('/scripts/run.cjs') && SCRIPT_NAME.test(script)) {
+      return { script, extra: args.slice(2) };
+    }
+  }
 
   const match = command.match(currentFindNodePattern)
     ?? command.match(legacyFindNodePattern)
     ?? command.match(directRunCjsPattern);
-  if (match) return `${prefix}"\${CLAUDE_PLUGIN_ROOT}"/scripts/${match[1]}${match[2]}`;
+  if (match) return { script: match[1], extra: tailTokens(match[2]) };
 
-  const absNodeMatch = command.match(absoluteNodeRunCjsPattern);
-  if (absNodeMatch) return `${prefix}"\${CLAUDE_PLUGIN_ROOT}"/scripts/${absNodeMatch[2]}${absNodeMatch[3]}`;
+  const absolute = command.match(absoluteNodeRunCjsPattern);
+  if (absolute) return { script: absolute[2], extra: tailTokens(absolute[3]) };
+  return null;
+}
 
-  return command;
+export function windowsExecArgs(script, extra = []) {
+  return [
+    '${CLAUDE_PLUGIN_ROOT}/scripts/run.cjs',
+    `\${CLAUDE_PLUGIN_ROOT}/scripts/${script}`,
+    ...extra,
+  ];
+}
+
+export function unixShellCommand(script, extra = []) {
+  const tail = extra.length > 0 ? ` ${extra.join(' ')}` : '';
+  return `${UNIX_HOOK_PREFIX}"\${CLAUDE_PLUGIN_ROOT}"/scripts/${script}${tail}`;
+}
+
+export function hookPrefixForPlatform(platform = process.platform) {
+  return platform === 'win32' ? 'node' : UNIX_HOOK_PREFIX;
+}
+
+/**
+ * Rewrite one shell command to the Unix find-node form.
+ * Windows output is not a string: `normalizeHooksDataForPlatform` writes
+ * `command` plus `args` so no shell can split the plugin root.
+ */
+export function normalizeHookCommand(command, prefix = UNIX_HOOK_PREFIX) {
+  if (prefix !== UNIX_HOOK_PREFIX) return command;
+  const parsed = parseHookInvocation({ command });
+  if (!parsed) return command;
+  return unixShellCommand(parsed.script, parsed.extra);
 }
 
 export function normalizeHooksDataForPlatform(data, platform = process.platform) {
-  const prefix = hookPrefixForPlatform(platform);
   let patched = false;
 
   for (const groups of Object.values(data?.hooks ?? {})) {
@@ -56,12 +101,24 @@ export function normalizeHooksDataForPlatform(data, platform = process.platform)
     for (const group of groups) {
       if (!group || typeof group !== 'object' || !Array.isArray(group.hooks)) continue;
       for (const hook of group.hooks) {
-        if (!hook || typeof hook !== 'object' || typeof hook.command !== 'string') continue;
-        const nextCommand = normalizeHookCommand(hook.command, prefix);
-        if (hook.command !== nextCommand) {
-          hook.command = nextCommand;
+        const parsed = parseHookInvocation(hook);
+        if (!parsed) continue;
+
+        if (platform === 'win32') {
+          const nextArgs = windowsExecArgs(parsed.script, parsed.extra);
+          if (hook.command === 'node' && sameArgs(hook.args, nextArgs)) continue;
+          hook.command = 'node';
+          hook.args = nextArgs;
           patched = true;
+          continue;
         }
+
+        const nextCommand = unixShellCommand(parsed.script, parsed.extra);
+        const hadArgs = Array.isArray(hook.args);
+        if (hook.command === nextCommand && !hadArgs) continue;
+        hook.command = nextCommand;
+        if (hadArgs) delete hook.args;
+        patched = true;
       }
     }
   }

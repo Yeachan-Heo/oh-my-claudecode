@@ -42,7 +42,7 @@ vi.mock('../spawn-next.js', async (importOriginal) => {
   return { ...actual, executeSpawnNext: vi.fn(() => undefined) };
 });
 
-import { isManifestTerminal, mutateSessionEndJob, prepareCoreManifest, readSessionEndJob, sealCoreManifest, sealWikiManifest, takeSessionEndDiscoveryPage } from '../cleanup-manifest.js';
+import { claimSessionEndAction, claimSessionEndJob, isManifestTerminal, markSessionEndActionRunner, mutateSessionEndJob, releaseSessionEndJob, prepareCoreManifest, readSessionEndJob, sealCoreManifest, sealWikiManifest, takeSessionEndDiscoveryPage } from '../cleanup-manifest.js';
 import { processSessionEndWorker, reconcileSessionEndJobs, workerEnvironment } from '../worker.js';
 import { AFK_INCLUDE_USER_SETTINGS_ENV, executeSpawnNext } from '../spawn-next.js';
 
@@ -398,6 +398,34 @@ describe('SessionEnd durable worker', () => {
     expect(vi.getTimerCount()).toBe(0);
     await vi.advanceTimersByTimeAsync(30_000);
     expect(actionRunner.runSessionEndAction).toHaveBeenCalledTimes(3);
+  });
+
+  it('retries a claim refused by a still-bounded orphaned runner once the runner deadline passes', async () => {
+    vi.useFakeTimers();
+    actionRunner.runSessionEndAction.mockResolvedValue({ code: 'completed', completed: true });
+    const directory = project();
+    const sessionId = 'bounded-orphan-retry';
+    expect(prepareCoreManifest(directory, sessionId, { initialTeamNames: [] })).not.toBeNull();
+    expect(sealCoreManifest(directory, sessionId)).not.toBeNull();
+    expect(sealWikiManifest(directory, sessionId)).not.toBeNull();
+    // A previous worker lost its lease mid-action: ownership released, runner still started and bounded.
+    const owner = claimSessionEndJob(directory, sessionId, 'old-owner', 'old-identity', Date.now() + 5_000)!.owner!;
+    const claimed = claimSessionEndAction(directory, sessionId, 'old-owner', 'team-cleanup', Date.now() + 5_000)!;
+    expect(markSessionEndActionRunner(directory, sessionId, 'old-owner', 'team-cleanup', claimed.actions['team-cleanup'].runner!.runnerNonce, 'started')).not.toBeNull();
+    expect(releaseSessionEndJob(directory, sessionId, owner.nonce, owner.leaseGeneration)?.owner).toBeNull();
+
+    await processSessionEndWorker({ directory, sessionId });
+    expect(readSessionEndJob(directory, sessionId)).toMatchObject({ owner: null, actions: { callback: { status: 'pending' } } });
+    expect(vi.getTimerCount()).toBeGreaterThan(0);
+
+    await vi.advanceTimersByTimeAsync(5_001);
+    await vi.runAllTimersAsync();
+
+    expect(readSessionEndJob(directory, sessionId)).toMatchObject({
+      phase: 'complete',
+      owner: null,
+      actions: { 'team-cleanup': { status: 'completed', attempts: 2 }, callback: { status: 'completed' } },
+    });
   });
 
 });

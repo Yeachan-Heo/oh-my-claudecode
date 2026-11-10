@@ -173,15 +173,19 @@ export function checkWindowsUnsafePluginHooks(): ConflictReport['windowsUnsafePl
 
     try {
       const parsed = JSON.parse(readFileSync(hooksJsonPath, 'utf-8')) as {
-        hooks?: Record<string, Array<{ hooks?: Array<{ type?: string; command?: string }> }>>;
+        hooks?: Record<string, Array<{ hooks?: Array<{ type?: string; command?: string; args?: unknown }> }>>;
       };
 
       for (const [event, groups] of Object.entries(parsed.hooks ?? {})) {
         for (const group of groups) {
           for (const hook of group.hooks ?? []) {
             if (hook.type !== 'command' || typeof hook.command !== 'string') continue;
-            if (isWindowsUnsafePluginHookCommand(hook.command)) {
-              unsafe.push({ pluginRoot, event, command: hook.command });
+            const argText = Array.isArray(hook.args)
+              ? hook.args.filter((item): item is string => typeof item === 'string').join(' ')
+              : '';
+            const invocation = `${hook.command} ${argText}`.trim();
+            if (isWindowsUnsafePluginHookCommand(invocation)) {
+              unsafe.push({ pluginRoot, event, command: invocation });
             }
           }
         }
