@@ -32,7 +32,9 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 
 const SAFE_CONTINUE = { continue: true, suppressOutput: true };
-const DEFAULT_SAFETY_TIMEOUT_MS = 8500;
+// Below the 20 s hooks.json timeout minus the run.cjs cushion (1.5 s on Windows), so that the
+// Jev requests and the bridge delegation of one Stop event are not cut by this watchdog.
+const DEFAULT_SAFETY_TIMEOUT_MS = 18000;
 const SAFE_EXIT_FLUSH_TIMEOUT_MS = 100;
 /** Shared budget for all bridge delegation attempts inside one Stop event. */
 const BRIDGE_DELEGATION_TIMEOUT_MS = 6000;
@@ -1541,8 +1543,8 @@ function delegateToBridge(input) {
     candidates.push({ command: "omc-cli", args: ["--hook=persistent-mode"] });
   }
 
-  // One shared deadline. hooks.json allows 10s for this script and the run.cjs
-  // supervisor 9.5s, so a second candidate must not get a fresh budget; a
+  // One shared deadline. hooks.json allows 20s for this script and the run.cjs
+  // supervisor 19.5s, so a second candidate must not get a fresh budget; a
   // synchronous spawn also blocks this script's own watchdog.
   const deadline = Date.now() + BRIDGE_DELEGATION_TIMEOUT_MS;
 
