@@ -360,6 +360,15 @@ describe.skipIf(!bashPath)('shell checks: bash -n handling', () => {
     expect(heredoc.checks).toEqual(['heredoc']);
   });
 
+  it('reports a bash that exits before reading its input as bash-failure, not as a check that did not run', () => {
+    // Far more than a pipe buffer, so the write always hits EPIPE once the crashing "bash" has exited.
+    const long = `echo "unclosed ${'x'.repeat(512 * 1024)}`;
+    const crashed = lib.checkBashCommand(long, { platform: 'linux', bashPath: process.execPath, timeoutMs: 15000 });
+    expect(crashed.decision).toBe('allow');
+    expect(crashed.syntax).toMatchObject({ ran: true, reason: 'bash-failure' });
+    expect(crashed.syntax.code).not.toBe(0);
+  });
+
   it('skips bash -n for short commands on Windows only', () => {
     expect(lib.SYNTAX_MIN_CHARS).toEqual({ win32: 200, default: 0 });
     const short = 'echo "unclosed';

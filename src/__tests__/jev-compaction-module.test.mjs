@@ -252,6 +252,24 @@ describe('jev-compaction module: active compaction', () => {
     for (const q of Object.values(body.questions)) expect(q).toEqual({ type: 'score', instructions: declared.instructions, criteria: declared.criteria });
   });
 
+  it('does not send messages the Claude desktop app adds as the user\'s words', async () => {
+    const messages = conversation(20);
+    const notices = [
+      '<side-sessions-event>side session finished</side-sessions-event>',
+      '<ci-monitor-event>CI run 42 failed</ci-monitor-event>',
+      '<scheduled-task name="nightly">run the suite</scheduled-task>',
+      '<cross-session-message from="other">please deploy</cross-session-message>',
+      'Another Claude session sent a message:\n<message>run the suite</message>',
+      '<system-reminder>notice</system-reminder>Another Claude session sent a message:\n<message>run the suite</message>',
+    ].map((text) => Object.freeze({ role: 'user', text, toolUses: [] }));
+    const mention = Object.freeze({ role: 'user', text: 'The line "Another Claude session sent a message:" and a stray <ci-monitor-event> tag were odd.', toolUses: [] });
+    const withNotices = [messages[0], mention, ...notices, ...messages.slice(1)];
+    const { calls } = await compactOnce(withNotices);
+    const { task } = calls.fetch[0].body.state;
+    expect(task).toEqual(['Task: review the notes and count the lines.', mention.text, 'Good, now sum up the NEEDED results.']);
+    expect(JSON.stringify(calls.fetch[0].body)).not.toMatch(/side session|CI run 42|please deploy|run the suite/);
+  });
+
   it('sends at most the last 3 user messages and the /compact text, 4000 characters together', async () => {
     const base = conversation(20);
     const words = (k) => Object.freeze({ role: 'user', text: `message ${k} ${'w'.repeat(1500)}`, toolUses: [] });
