@@ -551,6 +551,35 @@ describe("jev advisory points: opt-in actions", () => {
       expect(existsSync(path)).toBe(false);
     }, 20000);
 
+    it.each([
+      ["with OMC_JEV_LOOP_RELEASE_ONLY", { OMC_JEV_LOOP_RELEASE_ONLY: "1" }],
+      ["without OMC_JEV_LOOP_RELEASE_ONLY", {}],
+    ])("releases an autopilot Stop silently when the mode is completed while Jev is answering (%s)", async (_label, env) => {
+      const sessionId = `sess-release-autopilot-done-${Object.keys(env).length}`;
+      const path = write(sessionId, "autopilot-state.json", state("autopilot", sessionId));
+      noul.task_complete = 0.95;
+      // What transitionPhase(..., "complete") persists: the file stays, inactive.
+      onTaskComplete = () => writeFileSync(path, JSON.stringify({
+        ...read(path), active: false, phase: "complete", current_phase: "complete", updated_at: "2099-01-01T00:00:00.000Z",
+      }));
+
+      const output = await stop(sessionId, env);
+      expect(output).toEqual({ continue: true, suppressOutput: true });
+      expect(read(path)).toMatchObject({ active: false, phase: "complete" });
+    }, 20000);
+
+    it("releases a Ralph Stop silently when the state becomes inactive while Jev is answering", async () => {
+      const sessionId = "sess-release-ralph-inactive";
+      const path = write(sessionId, "ralph-state.json", state("ralph", sessionId));
+      noul.task_complete = 0.95;
+      onTaskComplete = () => writeFileSync(path, JSON.stringify({ ...read(path), active: false }));
+
+      const output = await stop(sessionId, {});
+      expect(output).toEqual({ continue: true, suppressOutput: true });
+      expect(read(path)).toMatchObject({ active: false });
+      expect(read(path)).not.toHaveProperty("completed_at");
+    }, 20000);
+
     it("keeps blocking when the Ralph state changes while Jev is answering", async () => {
       const sessionId = "sess-release-stale";
       const path = write(sessionId, "ralph-state.json", state("ralph", sessionId));

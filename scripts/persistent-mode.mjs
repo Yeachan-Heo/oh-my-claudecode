@@ -257,15 +257,27 @@ function isJevLoopReleaseOnly() {
  * Outcome of a Jev "task complete" answer for one mode: null when Jev did not
  * say complete, with OMC_JEV_LOOP_RELEASE_ONLY "released" (without completing
  * the mode) or,
- * when cancel removed the state file while Jev was answering, "cancelled" (a
- * silent release, as for completeModeFromJev); otherwise the
+ * when the mode ended while Jev was answering, "cancelled" (a silent release,
+ * see isModeEndedSinceJevRequest); otherwise the
  * completeModeFromJev() outcome.
  */
 function jevCompletionOutcome(result, state, statePath) {
   if (!jevSaysTaskComplete(result)) return null;
   if (!isJevLoopReleaseOnly()) return completeModeFromJev(state, statePath);
   if (isStateUnchangedSinceJevRequest(state, statePath)) return "released";
-  return shouldWriteStateBack(statePath) ? null : "cancelled";
+  return isModeEndedSinceJevRequest(statePath) ? "cancelled" : null;
+}
+
+/**
+ * True when the mode ended while Jev was answering: cancel removed the state
+ * file (#2088), or another writer persisted it as inactive (for example
+ * transitionPhase(..., "complete") keeps the file with active: false). Such a
+ * Stop is released silently; a state that is still active but changed keeps
+ * blocking.
+ */
+function isModeEndedSinceJevRequest(statePath) {
+  if (!shouldWriteStateBack(statePath)) return true;
+  return readJsonFile(statePath)?.active === false;
 }
 
 /** Stop output for a release that leaves the mode active; see isJevLoopReleaseOnly(). */
@@ -294,8 +306,8 @@ function jevCompletionStopOutput(outcome, modeName) {
 /**
  * Persist the terminal state for a Jev-confirmed completion.
  * - "completed": the terminal state reached disk.
- * - "cancelled": the state file is gone, i.e. cancel removed it while Jev was
- *   answering (#2088); it is not written back.
+ * - "cancelled": the mode ended while Jev was answering (the state file is
+ *   gone, #2088, or now says active: false); it is not written back.
  * - null: the state changed meanwhile or the write failed; the caller keeps
  *   blocking, so Stop is never released while the file still says active: true.
  */
@@ -313,7 +325,7 @@ function completeModeFromJev(state, statePath) {
       return "completed";
     }
   }
-  return shouldWriteStateBack(statePath) ? null : "cancelled";
+  return isModeEndedSinceJevRequest(statePath) ? "cancelled" : null;
 }
 
 /**
