@@ -681,13 +681,20 @@ async function decide($, e, cfg, record, started) {
   }
   record.requests_ok = results.filter((r) => r.value).length;
   record.answered = answered;
+  // Enforce minimum answer ratio independently of transport failures
+  const hasInsufficientAnswers = !asked.length || answered / asked.length < PARTIAL_OK;
   if (failures.length) {
     record.failure = failures.map((f) => f.kind).join(',');
     noteFailures(failures, Date.now());
-    if (!asked.length || answered / asked.length < PARTIAL_OK) {
+    if (hasInsufficientAnswers) {
       session.failedInRow++;
       return { fallback: failures.every((f) => f.kind === 'timeout') ? 'timeout' : 'jev_error' };
     }
+  } else if (hasInsufficientAnswers) {
+    // HTTP 200 but with insufficient answers; check this even when there are no transport failures
+    record.failure = 'insufficient_answers';
+    session.failedInRow++;
+    return { fallback: 'jev_error' };
   }
   session.failedInRow = 0;
 
