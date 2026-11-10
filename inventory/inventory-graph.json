@@ -5,15 +5,25 @@
   "provenance": {
     "base": "05c800f40d1ad53b42a78609d2667ef4f726808b",
     "planningHead": "0a91273e61dbbd47eb0af4c02844409251e08398",
+<<<<<<< HEAD
     "head": "048278f31eedaa24e3bcfea827b310c78dc2c64f",
     "sourceSha256": "a0a32915adeeb3fe35005a894782b4c7f44610ce3afa82a3f9f8e9cbeda4e1b6",
+=======
+    "head": "424550db6903c7b372214243d6169ef4664da4e4",
+    "sourceSha256": "d3d5033f358d2a6a730c8dad5efa7904d731a69f51c1d6f1a10ea81022533271",
+>>>>>>> origin/dev
     "generatedAt": null,
     "generator": "scripts/generate-inventory-graph.mjs"
   },
   "base": "05c800f40d1ad53b42a78609d2667ef4f726808b",
   "planningHead": "0a91273e61dbbd47eb0af4c02844409251e08398",
+<<<<<<< HEAD
   "head": "048278f31eedaa24e3bcfea827b310c78dc2c64f",
   "sourceSha256": "a0a32915adeeb3fe35005a894782b4c7f44610ce3afa82a3f9f8e9cbeda4e1b6",
+=======
+  "head": "424550db6903c7b372214243d6169ef4664da4e4",
+  "sourceSha256": "d3d5033f358d2a6a730c8dad5efa7904d731a69f51c1d6f1a10ea81022533271",
+>>>>>>> origin/dev
   "counts": {
     "public": {
       "skills": 84,
@@ -890,8 +900,13 @@
       "scripts/lib/hud-cache-wrapper.sh",
       "scripts/lib/hud-wrapper-template.mjs",
       "scripts/lib/hud-wrapper-template.txt",
+<<<<<<< HEAD
       "scripts/lib/jev-breaker.d.mts",
       "scripts/lib/jev-breaker.mjs",
+=======
+      "scripts/lib/jev-compaction-state.mjs",
+      "scripts/lib/jev-mask.mjs",
+>>>>>>> origin/dev
       "scripts/lib/jev-shadow.mjs",
       "scripts/lib/model-routing-override-message.mjs",
       "scripts/lib/pre-tool-enforcer-preflight.mjs",
@@ -37035,6 +37050,11 @@
         "path": "hooks/hooks.json"
       },
       {
+        "id": "hooks/jev-compaction.mjs",
+        "kind": "other",
+        "path": "hooks/jev-compaction.mjs"
+      },
+      {
         "id": "missions/enhance-omc-performance/mission.md",
         "kind": "other",
         "path": "missions/enhance-omc-performance/mission.md"
@@ -37445,6 +37465,7 @@
         "path": "scripts/lib/hud-wrapper-template.txt"
       },
       {
+<<<<<<< HEAD
         "id": "scripts/lib/jev-breaker.d.mts",
         "kind": "script",
         "path": "scripts/lib/jev-breaker.d.mts"
@@ -37453,6 +37474,16 @@
         "id": "scripts/lib/jev-breaker.mjs",
         "kind": "script",
         "path": "scripts/lib/jev-breaker.mjs"
+=======
+        "id": "scripts/lib/jev-compaction-state.mjs",
+        "kind": "script",
+        "path": "scripts/lib/jev-compaction-state.mjs"
+      },
+      {
+        "id": "scripts/lib/jev-mask.mjs",
+        "kind": "script",
+        "path": "scripts/lib/jev-mask.mjs"
+>>>>>>> origin/dev
       },
       {
         "id": "scripts/lib/jev-shadow.mjs",
@@ -41335,9 +41366,20 @@
         "path": "src/__tests__/issue-3867-legacy-l-update.test.ts"
       },
       {
+<<<<<<< HEAD
         "id": "src/__tests__/jev-breaker-script.test.mjs",
         "kind": "src",
         "path": "src/__tests__/jev-breaker-script.test.mjs"
+=======
+        "id": "src/__tests__/jev-compaction-module.test.mjs",
+        "kind": "src",
+        "path": "src/__tests__/jev-compaction-module.test.mjs"
+      },
+      {
+        "id": "src/__tests__/jev-compaction-state.test.mjs",
+        "kind": "src",
+        "path": "src/__tests__/jev-compaction-state.test.mjs"
+>>>>>>> origin/dev
       },
       {
         "id": "src/__tests__/jev-eval-script.test.mjs",
@@ -48892,6 +48934,11 @@
         "kind": "imports"
       },
       {
+        "from": "hooks/jev-compaction.mjs",
+        "to": "scripts/lib/jev-mask.mjs",
+        "kind": "imports"
+      },
+      {
         "from": "scripts/audit-multirepo-e2e.mjs",
         "to": "external:node:child_process",
         "kind": "imports"
@@ -49727,31 +49774,65 @@
         "kind": "imports"
       },
       {
+<<<<<<< HEAD
         "from": "scripts/lib/jev-breaker.mjs",
         "to": "external:node:crypto",
         "kind": "imports"
       },
       {
         "from": "scripts/lib/jev-breaker.mjs",
+=======
+        "from": "scripts/lib/jev-compaction-state.mjs",
+>>>>>>> origin/dev
         "to": "external:node:fs",
         "kind": "imports"
       },
       {
+<<<<<<< HEAD
         "from": "scripts/lib/jev-breaker.mjs",
+=======
+        "from": "scripts/lib/jev-compaction-state.mjs",
+>>>>>>> origin/dev
         "to": "external:node:os",
         "kind": "imports"
       },
       {
+<<<<<<< HEAD
         "from": "scripts/lib/jev-breaker.mjs",
+=======
+        "from": "scripts/lib/jev-compaction-state.mjs",
+>>>>>>> origin/dev
         "to": "external:node:path",
         "kind": "imports"
       },
       {
+<<<<<<< HEAD
         "from": "scripts/lib/jev-breaker.mjs",
+=======
+        "from": "scripts/lib/jev-compaction-state.mjs",
+        "to": "external:node:url",
+        "kind": "imports"
+      },
+      {
+        "from": "scripts/lib/jev-compaction-state.mjs",
+        "to": "scripts/jev-resolve.mjs",
+        "kind": "imports"
+      },
+      {
+        "from": "scripts/lib/jev-compaction-state.mjs",
+>>>>>>> origin/dev
         "to": "scripts/lib/atomic-write.mjs",
         "kind": "imports"
       },
       {
+<<<<<<< HEAD
+=======
+        "from": "scripts/lib/jev-compaction-state.mjs",
+        "to": "scripts/lib/jev-mask.mjs",
+        "kind": "imports"
+      },
+      {
+>>>>>>> origin/dev
         "from": "scripts/lib/jev-shadow.mjs",
         "to": "external:node:child_process",
         "kind": "imports"
@@ -50284,6 +50365,11 @@
       {
         "from": "scripts/post-tool-use-failure.mjs",
         "to": "scripts/lib/atomic-write.mjs",
+        "kind": "imports"
+      },
+      {
+        "from": "scripts/post-tool-use-failure.mjs",
+        "to": "scripts/lib/jev-compaction-state.mjs",
         "kind": "imports"
       },
       {
@@ -55862,16 +55948,21 @@
         "kind": "type-imports"
       },
       {
+<<<<<<< HEAD
         "from": "src/__tests__/jev-breaker-script.test.mjs",
         "to": "external:node:child_process",
         "kind": "imports"
       },
       {
         "from": "src/__tests__/jev-breaker-script.test.mjs",
+=======
+        "from": "src/__tests__/jev-compaction-module.test.mjs",
+>>>>>>> origin/dev
         "to": "external:node:fs",
         "kind": "imports"
       },
       {
+<<<<<<< HEAD
         "from": "src/__tests__/jev-breaker-script.test.mjs",
         "to": "external:node:http",
         "kind": "imports"
@@ -55883,37 +55974,111 @@
       },
       {
         "from": "src/__tests__/jev-breaker-script.test.mjs",
+=======
+        "from": "src/__tests__/jev-compaction-module.test.mjs",
+>>>>>>> origin/dev
         "to": "external:node:path",
         "kind": "imports"
       },
       {
+<<<<<<< HEAD
         "from": "src/__tests__/jev-breaker-script.test.mjs",
+=======
+        "from": "src/__tests__/jev-compaction-module.test.mjs",
+>>>>>>> origin/dev
         "to": "external:node:url",
         "kind": "imports"
       },
       {
+<<<<<<< HEAD
         "from": "src/__tests__/jev-breaker-script.test.mjs",
+=======
+        "from": "src/__tests__/jev-compaction-module.test.mjs",
+>>>>>>> origin/dev
         "to": "external:vitest",
         "kind": "imports"
       },
       {
+<<<<<<< HEAD
         "from": "src/__tests__/jev-breaker-script.test.mjs",
+=======
+        "from": "src/__tests__/jev-compaction-module.test.mjs",
+        "to": "hooks/jev-compaction.mjs",
+        "kind": "imports"
+      },
+      {
+        "from": "src/__tests__/jev-compaction-module.test.mjs",
+>>>>>>> origin/dev
         "to": "scripts/jev-resolve.mjs",
         "kind": "imports"
       },
       {
+<<<<<<< HEAD
         "from": "src/__tests__/jev-breaker-script.test.mjs",
         "to": "scripts/lib/jev-breaker.mjs",
         "kind": "imports"
       },
       {
         "from": "src/__tests__/jev-breaker-script.test.mjs",
+=======
+        "from": "src/__tests__/jev-compaction-module.test.mjs",
+        "to": "scripts/lib/jev-mask.mjs",
+        "kind": "imports"
+      },
+      {
+        "from": "src/__tests__/jev-compaction-module.test.mjs",
+        "to": "src/hooks/jev/config.ts",
+        "kind": "imports"
+      },
+      {
+        "from": "src/__tests__/jev-compaction-module.test.mjs",
+>>>>>>> origin/dev
         "to": "src/hooks/jev/points.ts",
         "kind": "imports"
       },
       {
+<<<<<<< HEAD
         "from": "src/__tests__/jev-breaker-script.test.mjs",
         "to": "src/hooks/jev/resolver.ts",
+=======
+        "from": "src/__tests__/jev-compaction-state.test.mjs",
+        "to": "external:node:child_process",
+        "kind": "imports"
+      },
+      {
+        "from": "src/__tests__/jev-compaction-state.test.mjs",
+        "to": "external:node:fs",
+        "kind": "imports"
+      },
+      {
+        "from": "src/__tests__/jev-compaction-state.test.mjs",
+        "to": "external:node:os",
+        "kind": "imports"
+      },
+      {
+        "from": "src/__tests__/jev-compaction-state.test.mjs",
+        "to": "external:node:path",
+        "kind": "imports"
+      },
+      {
+        "from": "src/__tests__/jev-compaction-state.test.mjs",
+        "to": "external:node:url",
+        "kind": "imports"
+      },
+      {
+        "from": "src/__tests__/jev-compaction-state.test.mjs",
+        "to": "external:vitest",
+        "kind": "imports"
+      },
+      {
+        "from": "src/__tests__/jev-compaction-state.test.mjs",
+        "to": "scripts/lib/jev-compaction-state.mjs",
+        "kind": "imports"
+      },
+      {
+        "from": "src/__tests__/jev-compaction-state.test.mjs",
+        "to": "scripts/lib/jev-mask.mjs",
+>>>>>>> origin/dev
         "kind": "imports"
       },
       {
@@ -92448,12 +92613,22 @@
       }
     ],
     "stats": {
+<<<<<<< HEAD
       "nodeCount": 8249,
       "edgeCount": 8799,
+=======
+      "nodeCount": 8250,
+      "edgeCount": 8797,
+>>>>>>> origin/dev
       "importEdgeCount": 7351,
       "registerEdgeCount": 105
     }
   },
+<<<<<<< HEAD
   "inventorySha256": "a0ec93a6524faa474b609b158e56ce09636ae8fce003fe870ea2bd261ca079ae",
   "manifestSha256": "8339ab3c41f954ce4b2b14b69d2fd5a15a85bcc2d1f3c04f1e5be8cae134aff0"
+=======
+  "inventorySha256": "3f474e8ffd2c9489ced914c6438e9ff9453611476676f359b8fc2a0c46a2ca00",
+  "manifestSha256": "e000b4cf86bab203dc43f38a997a3dc29d19c0b3bc5ea6f9aefc7e4fb9e2fcd6"
+>>>>>>> origin/dev
 }

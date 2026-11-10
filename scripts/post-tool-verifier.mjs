@@ -1186,6 +1186,13 @@ async function main() {
     const directory = data.cwd || data.directory || process.cwd();
     const toolInput = data.tool_input || data.toolInput || {};
 
+    // Work-state registry of the opt-in Jev compaction point (changed files, git, open tasks, last error).
+    if ((process.env.OMC_JEV || '').includes('compaction')) {
+      try {
+        (await import(pathToFileURL(join(__dirname, 'lib', 'jev-compaction-state.mjs')).href)).recordCompactionState('post', data);
+      } catch { /* never breaks the hook */ }
+    }
+
     // Update session statistics
     const toolCount = updateStats(toolName, sessionId);
 

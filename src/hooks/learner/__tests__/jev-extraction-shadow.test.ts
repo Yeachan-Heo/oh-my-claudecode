@@ -16,6 +16,7 @@ const ENV_KEYS = [
   'OMC_JEV',
   'OMC_JEV_TIMEOUT_MS',
   'OMC_JEV_EXCERPT_CHARS',
+  'OMC_JEV_EXCERPT_CHARS_LEARNER_EXTRACTION',
   'OMC_JEV_LOG_DIR',
   'OMC_JEV_ENDPOINT',
 ] as const;
@@ -149,7 +150,7 @@ describe('learner-extraction shadow judgment point', () => {
   it('bounds the message excerpt in the logged state', async () => {
     process.env.TYPESAFE_API_KEY = TEST_KEY;
     process.env.OMC_JEV = 'learner-extraction';
-    process.env.OMC_JEV_EXCERPT_CHARS = '40';
+    process.env.OMC_JEV_EXCERPT_CHARS_LEARNER_EXTRACTION = '40';
     const { fetchFn } = stubFetch();
 
     await recordLearnerExtractionShadow(EXTRACTABLE, undefined, fetchFn);
