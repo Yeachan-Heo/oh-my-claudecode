@@ -595,7 +595,8 @@ async function blockedReason($, cfg, now) {
   if (session.failedInRow >= FAILURES_TO_OPEN) return 'circuit_open';
   if (now < session.pausedUntil) return 'paused';
   if (cfg.maxRequests && session.requests >= cfg.maxRequests) return 'cap';
-  if (cfg.shared && (await readSharedBreaker($, cfg.shared, now))) return 'breaker_open';
+  // Bounded like admission: a stalled shared volume falls back to "not open" after SHARED_OP_MS.
+  if (cfg.shared && (await sharedStep($, () => readSharedBreaker($, cfg.shared, now), undefined))) return 'breaker_open';
   return undefined;
 }
 
@@ -955,9 +956,13 @@ async function decide($, e, cfg, record, started) {
   const runs = [];
   let held;
   for (let b = 0; b * BATCH < asked.length; b++) {
+    // The process cap is checked and taken in one step, before any await: a concurrent compaction
+    // that passed blockedReason() meanwhile cannot also go over OMC_JEV_MAX_REQUESTS.
+    if (cfg.maxRequests && session.requests >= cfg.maxRequests) { held = { mode: 'process-cap' }; break; }
+    session.requests++;
     if (cfg.shared) {
       const admission = await admitRequest($, cfg.shared);
-      if (admission.skip) { held = admission.skip; break; }
+      if (admission.skip) { session.requests--; held = admission.skip; break; }
     }
     const batch = asked.slice(b * BATCH, (b + 1) * BATCH);
     const results = {};
@@ -976,7 +981,6 @@ async function decide($, e, cfg, record, started) {
     const state = boundExcerpts({ task: user.task, ...(user.instructions ? { compact_instructions: user.instructions } : {}), results }, cfg.excerptChars);
     const t0 = Date.now();
     const timeoutMs = Math.max(500, Math.min(REQUEST_MS, deadline - t0));
-    session.requests++;
     runs.push(
       withDeadline($, askJev($, cfg, state, questions), timeoutMs).then(async (r) => {
         await recordSharedFailure($, cfg, { ...r, short: timeoutMs < 1000 });
@@ -991,8 +995,9 @@ async function decide($, e, cfg, record, started) {
     for (const c of unscored) { c.asked = true; c.score = UNANSWERED_SCORE; }
     record.unscored = unscored.length;
     if (held.mode === 'circuit-open') Object.assign(record, { held: 'breaker', breaker_until: new Date(held.breaker.until).toISOString(), breaker_reason: held.breaker.reason });
+    else if (held.mode === 'process-cap') record.held = 'cap';
     else Object.assign(record, { held: 'rpm', rpm: { count: held.count, threshold: held.threshold, limit: held.limit } });
-    if (!runs.length) return { fallback: held.mode === 'circuit-open' ? 'breaker_open' : 'rpm' };
+    if (!runs.length) return { fallback: held.mode === 'circuit-open' ? 'breaker_open' : held.mode === 'process-cap' ? 'cap' : 'rpm' };
   }
   record.requests = runs.length;
   const results = await Promise.all(runs);

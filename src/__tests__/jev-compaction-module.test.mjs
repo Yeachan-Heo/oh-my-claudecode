@@ -41,7 +41,7 @@ function okResponse(json) {
   return { ok: true, status: 200, headers: {}, text: JSON.stringify(json) };
 }
 
-function fakeDollar({ env = ACTIVE_ENV, settingsEnv, respond = (body) => okResponse(scoreByMarker(body)), clockAfter, usage, messages = [], compactResult, writeThrows = false, diskPrefix, flakyBreakerRead = false, fsDelayMs = 0 } = {}) {
+function fakeDollar({ env = ACTIVE_ENV, settingsEnv, respond = (body) => okResponse(scoreByMarker(body)), clockAfter, usage, messages = [], compactResult, writeThrows = false, diskPrefix, flakyBreakerRead = false, stallBreakerRead = false, fsDelayMs = 0 } = {}) {
   const files = new Map();
   let flaked = false;
   const calls = { fetch: [], write: 0, toast: [], log: 0, compact: 0, usage: 0, messages: 0, settings: 0 };
@@ -52,6 +52,7 @@ function fakeDollar({ env = ACTIVE_ENV, settingsEnv, respond = (body) => okRespo
       read: async (p) => {
         if (fsDelayMs) await new Promise((resolve) => setTimeout(resolve, fsDelayMs));
         if (flakyBreakerRead && !flaked && p.endsWith('/breaker.json')) { flaked = true; throw new Error('EPERM'); }
+        if (stallBreakerRead && p.endsWith('/breaker.json')) return new Promise(() => {});
         if (diskPrefix && p.startsWith(diskPrefix)) return readFileSync(p, 'utf8'); if (!files.has(p)) throw new Error('ENOENT'); return files.get(p);
       },
       exists: async (p) => (diskPrefix && p.startsWith(diskPrefix) ? existsSync(p) : files.has(p)),
@@ -662,6 +663,23 @@ describe('jev-compaction module: shared breaker and request limit (OMC_JEV_BREAK
     expect(fake.calls.compact).toBe(0);
     expect(fake.calls.usage).toBe(0);
   });
+
+  it('(a) OMC_JEV_MAX_REQUESTS stays a hard cap when two compactions wait for shared admission at once', async () => {
+    await calmMinute();
+    const c = shared({ OMC_JEV_BREAKER: '1', OMC_JEV_MAX_RPM: '100', OMC_JEV_MAX_REQUESTS: '1' });
+    const handlers = load();
+    const runs = await Promise.all([0, 1].map(() => compactShared(c, conversation(30), { handlers, fsDelayMs: 20 })));
+    expect(runs.reduce((n, run) => n + run.calls.fetch.length, 0)).toBe(1);
+    expect(runs.reduce((n, run) => n + run.records()[0].requests, 0)).toBe(1);
+  });
+
+  it('(a) a stalled breaker read falls back to the built-in check within the shared step deadline', async () => {
+    const c = shared({ OMC_JEV_BREAKER: '1' });
+    const started = Date.now();
+    const run = await compactShared(c, conversation(30), { stallBreakerRead: true });
+    expect(run.out).toBeDefined();
+    expect(Date.now() - started).toBeLessThan(20_000);
+  }, 30_000);
 
   it('(a) a breaker that has expired, or one that is corrupt, holds nothing back', async () => {
     const c = shared({ OMC_JEV_BREAKER: '1' });
