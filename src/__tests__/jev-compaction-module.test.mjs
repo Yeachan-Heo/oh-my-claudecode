@@ -638,7 +638,7 @@ describe('jev-compaction module: mirrors and mods API', () => {
     const envReads = [...source.matchAll(/\$\.env\.get\(([^)]*)\)/g)].map((m) => m[1].trim());
     expect(envReads.length).toBeGreaterThan(5);
     for (const arg of envReads) expect(arg).toMatch(/^'[A-Z_]+'$/);
-    expect([...source.matchAll(/^\s*import\s.*from\s+'([^']+)'/gm)].map((m) => m[1])).toEqual(['../scripts/lib/jev-mask.mjs']);
+    expect([...source.matchAll(/^\s*import\s.*from\s+'([^']+)'/gm)].map((m) => m[1])).toEqual(['../scripts/lib/jev-mask.mjs', '../scripts/lib/jev-breaker.mjs']);
     expect(readFileSync(join(root, 'scripts', 'lib', 'jev-mask.mjs'), 'utf8')).not.toMatch(/^\s*import\s/m);
     expect(source).not.toMatch(/\bimport\s*\(|\brequire\s*\(|\bprocess\.(?:env|argv|cwd|exit|platform)\b/);
     expect(source).not.toMatch(/\$\.ui\.log\s*\(|\$\.clock\.sleep\s*\(/);

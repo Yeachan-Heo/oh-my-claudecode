@@ -46,6 +46,7 @@
  */
 
 import { maskSecrets } from '../scripts/lib/jev-mask.mjs';
+import * as JevBreaker from '../scripts/lib/jev-breaker.mjs';
 
 const POINT = 'compaction';
 // The last messages stay whole: the work in flight.
@@ -178,6 +179,7 @@ export function retryAfterMs(value, now = Date.now()) {
 export function classifyFailure(result, now = Date.now()) {
   if (result.timeout) return { kind: 'timeout', noResponse: true };
   if (result.error?.invalid) return { kind: 'invalid_response' };
+  if (result.error?.rateLimited) return { kind: 'rate_limited', pauseMs: PAUSE_DEFAULT_MS };
   const status = result.error && Number.isInteger(result.error.status) ? result.error.status : undefined;
   if (status === undefined) return { kind: 'no_response', noResponse: true };
   const header = retryAfterMs(result.error.retryAfter, now);
@@ -226,7 +228,7 @@ function freshState() {
   return {
     compacting: 0, pausedUntil: 0, pauseReason: null, failedInRow: 0, noResponseAt: [], requests: 0,
     turnCount: 0, lastAttempt: -Infinity, hostCannot: false, compactWindow: undefined, windowTurn: -Infinity,
-    cachedConfig: undefined, cachedAt: -Infinity,
+    cachedConfig: undefined, cachedAt: -Infinity, breakerSettings: undefined,
   };
 }
 let session = freshState();
@@ -263,10 +265,12 @@ async function readConfig($) {
     .split(',')
     .map((p) => p.trim())
     .filter(Boolean)
-    // A leading ~ matches both as written (in a command) and expanded to the home directory.
-    .flatMap((p) => (home && /^~(?=$|[\\/])/.test(p) ? [p, slash(home) + p.slice(1)] : [p]))
-    .map((p) => slash(p).toLowerCase());
-  return {
+    .map((p) => slash(p))
+    // A leading ~ matches both as written (in a command) and expanded to the home directory; regex now works on normalized paths.
+    .flatMap((p) => (home && /^~(?=$|\/)/.test(p) ? [p, slash(home) + p.slice(1)] : [p]))
+    .map((p) => p.toLowerCase());
+  
+  const cfg = {
     mode: pointMode(env.OMC_JEV, env.TYPESAFE_API_KEY),
     key: env.TYPESAFE_API_KEY,
     endpoint: env.OMC_JEV_ENDPOINT || DEFAULT_ENDPOINT,
@@ -278,6 +282,20 @@ async function readConfig($) {
     toast: String(env.OMC_JEV_COMPACT_TOAST ?? '').trim() === '1',
     privatePaths,
   };
+  
+  // Load shared breaker settings if OMC_JEV_BREAKER or OMC_JEV_MAX_RPM is set
+  const breakerEnv = {
+    OMC_JEV_BREAKER: env.OMC_JEV_BREAKER,
+    OMC_JEV_MAX_RPM: env.OMC_JEV_MAX_RPM,
+    OMC_JEV_ENDPOINT: env.OMC_JEV_ENDPOINT,
+    TYPESAFE_API_KEY: env.TYPESAFE_API_KEY,
+  };
+  const breakerSettings = JevBreaker.breakerSettings(breakerEnv, cfg.endpoint, cfg.key);
+  if (breakerSettings) {
+    session.breakerSettings = breakerSettings;
+  }
+  
+  return cfg;
 }
 
 // No request goes out: paused after a failure, breaker open, or OMC_JEV_MAX_REQUESTS used up.
@@ -285,6 +303,11 @@ function blockedReason(cfg, now) {
   if (session.failedInRow >= FAILURES_TO_OPEN) return 'circuit_open';
   if (now < session.pausedUntil) return 'paused';
   if (cfg.maxRequests && session.requests >= cfg.maxRequests) return 'cap';
+  // Check shared breaker if configured
+  if (session.breakerSettings) {
+    const openBreaker = JevBreaker.readBreaker(session.breakerSettings, now);
+    if (openBreaker) return 'breaker_open';
+  }
   return undefined;
 }
 
@@ -563,6 +586,17 @@ function withDeadline($, promise, ms) {
 }
 
 async function askJev($, cfg, state, questions) {
+  // Check shared breaker admission before making the request
+  if (session.breakerSettings) {
+    const admission = JevBreaker.admitRequest(session.breakerSettings, POINT);
+    if (admission.skip) {
+      // Request is rate-limited or breaker is still open; throw an error that will be caught
+      const rateLimited = new Error(`rate_limited: ${admission.skip.mode}`);
+      rateLimited.rateLimited = true;
+      throw rateLimited;
+    }
+  }
+  
   const response = await $.http.fetch(cfg.endpoint, {
     method: 'POST',
     headers: { 'content-type': 'application/json', authorization: `Bearer ${cfg.key}` },
@@ -572,6 +606,11 @@ async function askJev($, cfg, state, questions) {
     const failure = new Error(`HTTP ${response.status}`);
     failure.status = response.status;
     failure.retryAfter = response.headers?.['retry-after'];
+    // Record the failure with the shared breaker if configured
+    if (session.breakerSettings) {
+      const failureClass = JevBreaker.classifyFailure(failure);
+      JevBreaker.recordFailure(session.breakerSettings, failureClass);
+    }
     throw failure;
   }
   let body;
