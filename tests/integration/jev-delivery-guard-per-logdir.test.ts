@@ -27,6 +27,8 @@ describe('jev-delivery-guard per-logdir acknowledgments', () => {
     configDir = join(cwd, '.claude-config');
     env = {
       OMC_JEV_GUARD: '1',
+      OMC_JEV: 'model-routing:active',
+      TYPESAFE_API_KEY: 'test-key',
       PATH: process.env.PATH || '',
     };
   });
@@ -56,7 +58,7 @@ describe('jev-delivery-guard per-logdir acknowledgments', () => {
     expect(typeof result1 === 'object' || result1 === null).toBe(true);
   });
 
-  it('tracks different logDir entries independently', async () => {
+  it('tracks different logDir entries independently and displays per-directory reports', async () => {
     const now = Date.now();
     const sessionId = 'test2';
     const data = { session_id: sessionId };
@@ -65,13 +67,26 @@ describe('jev-delivery-guard per-logdir acknowledgments', () => {
     const sessionsDir = join(guardDir, 'sessions');
     mkdirSync(sessionsDir, { recursive: true });
 
-    const logDir1 = join(cwd, 'project-a');
-    const logDir2 = join(cwd, 'project-b');
+    const logDir1 = join(cwd, 'project-a', 'jev-logs');
+    const logDir2 = join(cwd, 'project-b', 'jev-logs');
     const sessionFile = join(sessionsDir, `${sessionId}.json`);
 
-    // Manually create a session record with per-logdir shown tracking
-    const shownTime1 = now - 3600000; // 1 hour ago
-    const shownTime2 = now - 7200000; // 2 hours ago
+    // Helper to get the daily file path for delivery results
+    const dailyFile = (logDir: string, kind: string) => {
+      const filename = kind === 'delivery.json' ? `${logDir.replace(/\//g, '_')}-delivery.json` : kind;
+      return join(guardDir, filename);
+    };
+
+    // Simulate two projects with delivery results
+    const ts1 = now - 3600000; // 1 hour ago
+    const ts2 = now - 1800000; // 30 minutes ago
+    
+    // Create delivery report for project 1 (shown earlier)
+    writeFileSync(dailyFile(logDir1, 'delivery.json'), JSON.stringify({ ts: ts1, share: 0.95, interrupted: 0 }), 'utf8');
+    // Create delivery report for project 2 (shown more recently)
+    writeFileSync(dailyFile(logDir2, 'delivery.json'), JSON.stringify({ ts: ts2, share: 0.85, interrupted: 0 }), 'utf8');
+
+    // Create a session record with per-logdir shown tracking - project 1 was already shown, project 2 was not
     const record = {
       start: now - 86400000,
       hooks: null,
@@ -79,13 +94,13 @@ describe('jev-delivery-guard per-logdir acknowledgments', () => {
       warnedHooks: null,
       warnedEnv: null,
       shownByLogDir: {
-        [logDir1]: shownTime1,
-        [logDir2]: shownTime2,
+        [logDir1]: ts1, // project 1 report already shown
+        // project 2 not shown yet, so its entry is absent
       },
     };
     writeFileSync(sessionFile, JSON.stringify(record), 'utf8');
 
-    // Call with logDir1 - should use its own shown timestamp
+    // First call with logDir1 - report already shown, should return null
     const result1 = promptCheck(data, {
       env,
       now,
@@ -93,8 +108,9 @@ describe('jev-delivery-guard per-logdir acknowledgments', () => {
       configDir,
       logDir: logDir1,
     });
+    expect(result1).toBeNull(); // already shown
 
-    // Call with logDir2 - should use its own shown timestamp (different from logDir1)
+    // Second call with logDir2 - report not yet shown, should return the message and update record
     const result2 = promptCheck(data, {
       env,
       now,
@@ -102,11 +118,19 @@ describe('jev-delivery-guard per-logdir acknowledgments', () => {
       configDir,
       logDir: logDir2,
     });
-
-    // Both calls should complete without error
-    // The function uses the per-logdir shown timestamp to determine if a report should be displayed
-    expect(result1 === null || typeof result1 === 'object').toBe(true);
-    expect(result2 === null || typeof result2 === 'object').toBe(true);
+    
+    // Project 2 report should be displayed since it hasn't been shown before
+    if (result2 !== null) {
+      expect(result2).toHaveProperty('text');
+      expect(result2).toHaveProperty('confirm');
+      // Confirm that we've seen the report
+      result2.confirm();
+      
+      // Verify the record was updated with project 2's shown timestamp
+      const updated = JSON.parse(readFileSync(sessionFile, 'utf8'));
+      expect(updated.shownByLogDir[logDir2]).toBe(ts2);
+      expect(updated.shownByLogDir[logDir1]).toBe(ts1); // project 1's timestamp unchanged
+    }
   });
 
   it('initializes shownByLogDir as empty object for new session records', async () => {

@@ -1,0 +1,1 @@
+{"provider":"gemini","jobId":"job2","slug":"test-prompt","status":"spawned","pid":12345,"promptFile":"/test/prompt.md","responseFile":"/test/response.md","model":"gpt-5.3-codex","agentRole":"architect","spawnedAt":"2026-11-10T17:31:57.963Z"}
