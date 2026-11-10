@@ -303,31 +303,46 @@ async function readConfig($) {
     USERPROFILE: await $.env.get('USERPROFILE'),
     HOME: await $.env.get('HOME'),
   };
-  // Only read settings if mode-determining vars are unset; if mode is 'off', skip settings read.
-  if ((env.OMC_JEV === undefined || env.TYPESAFE_API_KEY === undefined) && pointMode(env.OMC_JEV, env.TYPESAFE_API_KEY) !== 'off') {
+  // Read settings to fill activation values (OMC_JEV, TYPESAFE_API_KEY) and shared settings
+  // (OMC_JEV_BREAKER, OMC_JEV_MAX_RPM), but only if they're needed. With a deadline to prevent stalls.
+  if (env.OMC_JEV === undefined || env.TYPESAFE_API_KEY === undefined) {
     try {
-      const fromSettings = await withDeadline($, $.settings.read({ key: 'env' }), CONFIG_TTL_MS);
+      const result = await withDeadline($, $.settings.read({ key: 'env' }), CONFIG_TTL_MS);
+      const fromSettings = result && typeof result === 'object' ? (result.value || result) : result;
       if (fromSettings && typeof fromSettings === 'object') {
         for (const name of Object.keys(env)) if (env[name] === undefined && typeof fromSettings[name] === 'string') env[name] = fromSettings[name];
       }
     } catch { /* no settings: the process environment stands */ }
   }
-  const home = env.HOME || env.USERPROFILE;
-  const stateDir = env.OMC_JEV_LOG_DIR ? slash(env.OMC_JEV_LOG_DIR) : home ? `${slash(home)}/.omc/state/jev` : undefined;
+  // Short-circuit: if mode is 'off' after filling from settings, don't read breaker/rpm settings.
+  const mode = pointMode(env.OMC_JEV, env.TYPESAFE_API_KEY);
+  if (mode !== 'off' && (env.OMC_JEV_BREAKER === undefined || env.OMC_JEV_MAX_RPM === undefined)) {
+    try {
+      const result = await withDeadline($, $.settings.read({ key: 'env' }), CONFIG_TTL_MS);
+      const fromSettings = result && typeof result === 'object' ? (result.value || result) : result;
+      if (fromSettings && typeof fromSettings === 'object') {
+        for (const name of Object.keys(env)) if (env[name] === undefined && typeof fromSettings[name] === 'string') env[name] = fromSettings[name];
+      }
+    } catch { /* no settings: the process environment stands */ }
+  }
+  // Home for shared-state directory: HOME on POSIX (matching jev-breaker.mjs), USERPROFILE on Windows.
+  // Home for private-path expansion: preserve USERPROFILE for Windows compatibility.
+  const homeForState = env.HOME || env.USERPROFILE;
+  const homeForPrivatePaths = env.USERPROFILE || env.HOME;
+  const stateDir = env.OMC_JEV_LOG_DIR ? slash(env.OMC_JEV_LOG_DIR) : homeForState ? `${slash(homeForState)}/.omc/state/jev` : undefined;
   const privatePaths = String(env.OMC_JEV_COMPACT_PRIVATE_PATHS ?? '')
     .split(',')
     .map((p) => p.trim())
     .filter(Boolean)
     // A leading ~ matches both as written (in a command) and expanded to the home directory.
-    .flatMap((p) => (home && /^~(?=$|[\\/])/.test(p) ? [p, slash(home) + p.slice(1)] : [p]))
+    .flatMap((p) => (homeForPrivatePaths && /^~(?=$|[\\\/])/.test(p) ? [p, slash(homeForPrivatePaths) + p.slice(1)] : [p]))
     .map((p) => slash(p).toLowerCase());
-  const mode = pointMode(env.OMC_JEV, env.TYPESAFE_API_KEY);
   const endpoint = env.OMC_JEV_ENDPOINT || DEFAULT_ENDPOINT;
   return {
     mode,
     key: env.TYPESAFE_API_KEY,
     endpoint,
-    shared: mode === 'off' ? undefined : await sharedSettings(env, endpoint, home),
+    shared: mode === 'off' ? undefined : await sharedSettings(env, endpoint, homeForState),
     spoolDir: stateDir ? `${stateDir}/compaction-spool` : undefined,
     maxRequests: positiveInt(env.OMC_JEV_MAX_REQUESTS, 0),
     excerptChars: positiveInt(env.OMC_JEV_EXCERPT_CHARS_COMPACTION, DEFAULT_EXCERPT_CHARS),
