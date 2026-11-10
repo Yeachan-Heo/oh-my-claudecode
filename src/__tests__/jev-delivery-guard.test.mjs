@@ -467,6 +467,13 @@ describe('(c) the daily figures', () => {
     expect(deliveryMessage(null)).toBeNull();
   });
 
+  it('compares the unrounded delivery rate with the alert threshold at the 95% boundary', () => {
+    // 113/119 = 94.957983..%, rounds to 95%, but is below the 95% alert threshold
+    // This test verifies that deliveryMessage compares the unrounded rate, not the displayed rounded percent
+    const base = { ts: NOW, windowHours: 24, decisions: 119, withAgent: 119, delivered: 113, deliveredPercentFull: 94.957983, deliveredPercent: 95, interruptedAgentHooks: 0, interruptedOtherHooks: 0 };
+    expect(deliveryMessage(base)).toContain('113 of 119 Jev model decisions reached the agent (95 %');
+  });
+
   it('runs as a detached-style process and writes delivery.json', () => {
     const logDir = writeFixture();
     const run = spawnSync(NODE, [GUARD_SCRIPT, '--daily', '--config', configDir, '--log', logDir, '--now', new Date(NOW).toISOString(), '--print'], { encoding: 'utf8', timeout: 20000 });
