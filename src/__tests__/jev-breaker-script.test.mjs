@@ -196,7 +196,10 @@ describe('jev-breaker library', () => {
   });
 
   it('gives every registered judgment point a priority', () => {
-    expect(Object.keys(POINT_PRIORITY).sort()).toEqual(Object.keys(JUDGMENT_POINTS).sort());
+    // A point resolved by its own hooks module never asks this module for admission (`compaction`, issue #4927).
+    const outsideSharedBreaker = ['compaction'];
+    const registered = Object.keys(JUDGMENT_POINTS).filter((point) => !outsideSharedBreaker.includes(point));
+    expect(Object.keys(POINT_PRIORITY).sort()).toEqual(registered.sort());
     for (const priority of Object.values(POINT_PRIORITY)) expect(['high', 'medium', 'low']).toContain(priority);
   });
 
