@@ -257,6 +257,29 @@ describe("keyword-detector.mjs: OMC_JEV_TASK_SIZE_SLASH_ANYWHERE", () => {
     });
   });
 
+  describe("with OMC_JEV_TASK_SIZE_SLASH_ANYWHERE=1 but no active task-size decision", () => {
+    /** Ralph was kept and its persisted state still awaits confirmation (no slash confirmation). */
+    function expectAwaitingConfirmation(output: Awaited<ReturnType<typeof run>>) {
+      const context = output.hookSpecificOutput?.additionalContext ?? "";
+      expectModeKept(context, "ralph");
+      if (context.includes("No ralph state was activated.")) return;
+      const state = persistedRalphState();
+      expect(state, "ralph state was not persisted").not.toBeNull();
+      expect(state?.awaiting_confirmation).toBe(true);
+      expect(state?.invocation_source).toBeUndefined();
+    }
+
+    it.each([
+      ["shadow mode", "task-size"],
+      ["Jev off", "off"],
+    ])("a mid-prompt slash command does not confirm ralph in %s", async (_label, jev) => {
+      expectAwaitingConfirmation(await run("fix the typo and run /ralph now", {
+        OMC_JEV_TASK_SIZE_SLASH_ANYWHERE: "1",
+        OMC_JEV: jev,
+      }));
+    });
+  });
+
   describe("with OMC_JEV_TASK_SIZE_SLASH_ANYWHERE=1 and OMC_JEV_TASK_SIZE_PREFIX_WINS=1", () => {
     const BOTH = { OMC_JEV_TASK_SIZE_SLASH_ANYWHERE: "1", OMC_JEV_TASK_SIZE_PREFIX_WINS: "1" };
 
