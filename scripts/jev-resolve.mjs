@@ -197,20 +197,36 @@ export function parseJevEnv(point, env = process.env, permissionMode) {
   let activateAll = false;
   let active = false;
   let listed = false;
+  let off = false;
   for (const entry of raw.split(",")) {
     const token = entry.trim();
     if (!token) continue;
     const colon = token.lastIndexOf(":");
     const name = colon === -1 ? token : token.slice(0, colon);
     const isActive = colon !== -1 && token.slice(colon + 1) === "active";
+    const isOff = colon !== -1 && token.slice(colon + 1).trim().toLowerCase() === "off";
     if (name === "all") {
-      sawAll = true;
-      if (isActive) activateAll = true;
+      if (isOff) {
+        // `all:off` withdraws the wildcard instead of enabling it.
+        sawAll = false;
+        activateAll = false;
+      } else {
+        sawAll = true;
+        if (isActive) activateAll = true;
+      }
     } else if (name === point) {
-      listed = true;
-      if (isActive) active = true;
+      // `point:off` turns the point off even under `all`; a later non-off entry for the point turns it back on.
+      if (isOff) {
+        off = true;
+        active = false;
+      } else {
+        off = false;
+        listed = true;
+        if (isActive) active = true;
+      }
     }
   }
+  if (off) return "off";
   if (NAMED_ONLY_POINTS.has(point)) {
     sawAll = false;
     activateAll = false;

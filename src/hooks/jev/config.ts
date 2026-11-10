@@ -73,6 +73,8 @@ export interface JevConfig {
   allPoints: boolean;
   /** Points activated via env (`point:active` entries). */
   activatedPoints: ReadonlySet<string>;
+  /** Points named `point:off` (a later non-off entry for the point turns it back on): off even under `all` or `all:active`. */
+  offPoints: ReadonlySet<string>;
   /** `all:active`: every opted-in point is active. */
   activateAll: boolean;
   timeoutMs: number;
@@ -94,6 +96,7 @@ export function parseJevConfig(env: NodeJS.ProcessEnv = process.env): JevConfig 
   const masterOff = raw === 'off';
   const points = new Set<string>();
   const activatedPoints = new Set<string>();
+  const offPoints = new Set<string>();
   let allPoints = false;
   let activateAll = false;
   if (raw && raw !== 'off') {
@@ -103,10 +106,22 @@ export function parseJevConfig(env: NodeJS.ProcessEnv = process.env): JevConfig 
       const colon = token.lastIndexOf(':');
       const name = colon === -1 ? token : token.slice(0, colon);
       const isActive = colon !== -1 && token.slice(colon + 1) === 'active';
+      const isOff = colon !== -1 && token.slice(colon + 1).trim().toLowerCase() === 'off';
       if (name === 'all') {
-        allPoints = true;
-        if (isActive) activateAll = true;
+        if (isOff) {
+          // `all:off` withdraws the wildcard instead of enabling it.
+          allPoints = false;
+          activateAll = false;
+        } else {
+          allPoints = true;
+          if (isActive) activateAll = true;
+        }
+      } else if (isOff) {
+        points.delete(name);
+        activatedPoints.delete(name);
+        offPoints.add(name);
       } else {
+        offPoints.delete(name);
         points.add(name);
         if (isActive) activatedPoints.add(name);
       }
@@ -124,6 +139,7 @@ export function parseJevConfig(env: NodeJS.ProcessEnv = process.env): JevConfig 
     points,
     allPoints,
     activatedPoints,
+    offPoints,
     activateAll,
     timeoutMs: positiveInt(env.OMC_JEV_TIMEOUT_MS, DEFAULT_TIMEOUT_MS, MAX_TIMER_DELAY_MS),
     maxRequests: positiveInt(env.OMC_JEV_MAX_REQUESTS, 0),
@@ -212,6 +228,7 @@ export function pointState(
   activated: ReadonlySet<string> = ACTIVATED_POINTS,
 ): 'off' | 'shadow' | 'active' {
   if (!isJevEnabled(config)) return 'off';
+  if (config.offPoints.has(point)) return 'off';
   const namedOnly = NAMED_ONLY_POINTS.has(point);
   if ((namedOnly || !config.allPoints) && !config.points.has(point)) return 'off';
   return (activated.has(point) || (!namedOnly && config.activateAll) || config.activatedPoints.has(point))
