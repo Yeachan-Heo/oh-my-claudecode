@@ -261,6 +261,68 @@ describe('hook scripts with OMC_JEV_APPLIED_LOG=1', () => {
     expect(readLog(context, 'applied.jsonl')).toEqual([]);
   }, 60_000);
 
+  it('model-routing: OMC_JEV_MAX_EFFORT_ALWAYS caps the baseline effort too', async () => {
+    const always = { OMC_JEV_MAX_EFFORT_ALWAYS: '1', OMC_JEV_MAX_EFFORT: 'high' };
+    // Score 3 is high: with the cap on, the call would have run on high without Jev as well.
+    stubAnswers = { effort: { type: 'score', score: 3 } };
+    const same = makeContext();
+    const sameOutput = await runHook(same, 'pre-tool-enforcer.mjs', TASK_CALL(same.cwd, { effort: 'xhigh' }), 'model-routing', always);
+    expect(sameOutput.hookSpecificOutput.updatedInput).toMatchObject({ effort: 'high' });
+    expect(readLog(same, 'applied.jsonl')).toEqual([]);
+
+    // Score 1 is medium: the change is from the capped baseline (high), not from the incoming xhigh.
+    stubAnswers = { effort: { type: 'score', score: 1 } };
+    const lower = makeContext();
+    await runHook(lower, 'pre-tool-enforcer.mjs', TASK_CALL(lower.cwd, { effort: 'xhigh' }), 'model-routing', always);
+    expect(readLog(lower, 'applied.jsonl')).toEqual([
+      expect.objectContaining({ applied: { subagent_type: 'oh-my-claudecode:executor', effort: { from: 'high', to: 'medium', score: 1 } } }),
+    ]);
+
+    // Without the always-on variable the cap bounds only Jev's own answer: the baseline stays xhigh.
+    stubAnswers = { effort: { type: 'score', score: 3 } };
+    const capOnly = makeContext();
+    await runHook(capOnly, 'pre-tool-enforcer.mjs', TASK_CALL(capOnly.cwd, { effort: 'xhigh' }), 'model-routing', { OMC_JEV_MAX_EFFORT: 'high', OMC_JEV_MAX_EFFORT_ALWAYS: undefined });
+    expect(readLog(capOnly, 'applied.jsonl')).toEqual([
+      expect.objectContaining({ applied: { subagent_type: 'oh-my-claudecode:executor', effort: { from: 'xhigh', to: 'high', score: 3 } } }),
+    ]);
+  }, 90_000);
+
+  it('model-routing: with forceInherit a call without a model is compared with the session model', async () => {
+    const SESSION_MODEL = 'us.anthropic.claude-haiku-5-v1:0';
+    const inherit = {
+      OMC_ROUTING_FORCE_INHERIT: 'true',
+      OMC_JEV_MODEL_ROUTING_ALL_AGENTS: '1',
+      CLAUDE_MODEL: SESSION_MODEL,
+      ANTHROPIC_MODEL: undefined,
+      OMC_SUBAGENT_MODEL: undefined,
+      CLAUDE_CODE_BEDROCK_SONNET_MODEL: undefined,
+      CLAUDE_CODE_BEDROCK_OPUS_MODEL: undefined,
+      CLAUDE_CODE_BEDROCK_HAIKU_MODEL: undefined,
+      ANTHROPIC_DEFAULT_SONNET_MODEL: 'us.anthropic.claude-sonnet-5-v1:0',
+      ANTHROPIC_DEFAULT_OPUS_MODEL: 'us.anthropic.claude-opus-5-v1:0',
+      ANTHROPIC_DEFAULT_HAIKU_MODEL: SESSION_MODEL,
+    };
+    stubAnswers = { 'model-tier': { type: 'choice', choice: 'sonnet' } };
+    const unpinned = makeContext();
+    await runHook(unpinned, 'pre-tool-enforcer.mjs', TASK_CALL(unpinned.cwd, { subagent_type: 'general-purpose', model: undefined }), 'model-routing', inherit);
+    expect(readLog(unpinned, 'applied.jsonl')).toEqual([
+      expect.objectContaining({ applied: { subagent_type: 'general-purpose', model: { from: SESSION_MODEL, to: 'sonnet' } } }),
+    ]);
+
+    // An agent definition that names a tier still runs on that tier, so it stays the baseline:
+    // agents/executor.md names sonnet.
+    const definition = makeContext();
+    await runHook(definition, 'pre-tool-enforcer.mjs', TASK_CALL(definition.cwd, { model: undefined }), 'model-routing', inherit);
+    expect(readLog(definition, 'applied.jsonl')).toEqual([]);
+
+    stubAnswers = { 'model-tier': { type: 'choice', choice: 'opus' } };
+    const changed = makeContext();
+    await runHook(changed, 'pre-tool-enforcer.mjs', TASK_CALL(changed.cwd, { model: undefined }), 'model-routing', inherit);
+    expect(readLog(changed, 'applied.jsonl')).toEqual([
+      expect.objectContaining({ applied: { subagent_type: 'oh-my-claudecode:executor', model: { from: 'sonnet', to: 'opus' } } }),
+    ]);
+  }, 120_000);
+
   it('model-routing: no line for a call that a later check of the hook denies', async () => {
     stubAnswers = { 'model-tier': { type: 'choice', choice: 'opus' } };
     const context = makeContext();

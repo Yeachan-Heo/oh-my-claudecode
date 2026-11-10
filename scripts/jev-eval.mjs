@@ -27,6 +27,7 @@ import { resolveOmcStateRoot } from './lib/state-root.mjs';
 
 const MODES = ['shadow', 'active', 'degraded', 'off', 'cap', 'circuit-open'];
 const MAX_EXAMPLES = 5;
+const MAX_ROTATION_PASSES = 3;
 const BOUND_CHARS = 200;
 
 /**
@@ -302,21 +303,23 @@ async function main(argv, env = process.env, cwd = process.cwd()) {
   const path = logPath ?? await defaultLogPath(env, cwd);
   let report;
   if (includeRotated) {
-    const read = [];
-    // Rescan rotations after reading to detect any files created during the read.
-    // Hook writes may rotate logs while we read, so rescan and include any new files.
-    let allRotated = rotatedLogPaths(path);
-    report = analyzeLog(linesOfFiles([...allRotated, path], read), path);
-    
-    // After reading, rescan for new rotations and include any new files with deduplication
-    const readSet = new Set(read);
-    const postReadRotated = rotatedLogPaths(path).filter(f => !readSet.has(f));
-    if (postReadRotated.length > 0) {
-      // Reanalyze with all files including newly discovered rotations, using the line iterator
-      // to avoid spreading all lines into arguments (which causes RangeError on large logs)
-      report = analyzeLog(linesOfFiles(read.concat(postReadRotated), read), path);
+    // A hook can rotate the live log while it is being read: the renamed file is then in
+    // neither the list this pass started from nor the live file read at its end. Read again
+    // from a fresh listing, oldest first, until a pass sees no new rotated file (bounded, so
+    // a log that keeps rotating cannot loop forever). Each pass streams the files one at a time.
+    let read;
+    for (let pass = 1; ; pass += 1) {
+      const rotated = rotatedLogPaths(path);
+      read = [];
+      report = analyzeLog(linesOfFiles([...rotated, path], read), path);
+      const listed = new Set(rotated);
+      if (rotatedLogPaths(path).every((file) => listed.has(file))) break;
+      if (pass >= MAX_ROTATION_PASSES) {
+        console.error('jev-eval: the log rotated again during the last pass; the newest rotated file is not in this report');
+        break;
+      }
     }
-    
+
     if (read.length === 0) {
       console.log(`no shadow log at ${path} — nothing to evaluate (exit 0)`);
       return 0;

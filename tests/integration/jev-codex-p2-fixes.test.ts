@@ -1,233 +1,171 @@
 /**
- * Tests for Codex P2 fixes on PR #4931:
- * 1. jev-eval.mjs rescan must stream files instead of spreading all lines
- * 2. compaction.jsonl must be rotated with OMC_JEV_LOG_MAX_MB
- * 3. pre-tool-enforcer.mjs applied-log baseline must apply the always-on cap
+ * `jev-eval --include-rotated` while a hook rotates the log under it.
+ *
+ * A rotation that happens during the read renames the live log to a file that
+ * is in neither the listing the read started from nor the live file read last.
+ * The evaluator reads again from a fresh listing until a pass sees no new
+ * rotated file, one file in memory at a time. These tests make the rotation
+ * happen during the read: a preload (`node --require`) wraps `fs.readFileSync`
+ * in the evaluator process and, right after the Nth read of a named file,
+ * renames the live log and starts a new one. The production script is run
+ * unchanged.
  */
-import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
-import { readFileSync, writeFileSync, mkdirSync, rmSync } from 'node:fs';
-import { join } from 'node:path';
-import { execFileSync } from 'node:child_process';
+import { spawnSync } from 'node:child_process';
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { basename, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { afterAll, describe, expect, it } from 'vitest';
 
-const PROJECT_ROOT = fileURLToPath(new URL('../../', import.meta.url));
+const ROOT = fileURLToPath(new URL('../../', import.meta.url));
+const EVAL_SCRIPT = join(ROOT, 'scripts', 'jev-eval.mjs');
 
-describe('Codex P2 fixes for PR #4931', () => {
-  describe('1. jev-eval.mjs: Stream rescan instead of spreading all lines', () => {
-    let tempDir: string;
+interface RotationStep {
+  /** Path of the file whose read triggers the rotation. */
+  afterRead: string;
+  /** The rotation happens after this read of that file (1 = the first pass). */
+  nth: number;
+  live: string;
+  rotatedTo: string;
+  /** Content of the new live log. */
+  fresh: string;
+}
 
-    beforeEach(() => {
-      tempDir = join(PROJECT_ROOT, '.test-jev-eval-' + Math.random().toString(36).slice(2));
-      mkdirSync(tempDir, { recursive: true });
-    });
+const PRELOAD = `
+const fs = require('node:fs');
+const { syncBuiltinESMExports } = require('node:module');
+const steps = JSON.parse(process.env.JEV_TEST_ROTATIONS);
+const reads = new Map();
+const readFileSync = fs.readFileSync;
+fs.readFileSync = function (file, ...args) {
+  const result = readFileSync.call(this, file, ...args);
+  const key = String(file);
+  const count = (reads.get(key) || 0) + 1;
+  reads.set(key, count);
+  for (const step of steps) {
+    if (step.afterRead === key && step.nth === count) {
+      fs.renameSync(step.live, step.rotatedTo);
+      fs.writeFileSync(step.live, step.fresh);
+    }
+  }
+  return result;
+};
+syncBuiltinESMExports();
+`;
 
-    afterEach(() => {
-      try {
-        rmSync(tempDir, { recursive: true, force: true });
-      } catch {}
-    });
+const cleanups: string[] = [];
+afterAll(() => {
+  for (const dir of cleanups.splice(0)) {
+    try {
+      rmSync(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 });
+    } catch {
+      // A directory the OS still holds is left for the OS.
+    }
+  }
+});
 
-    it('should handle large rotated logs without stack overflow', () => {
-      // Create a large log file (simulate 150k lines that would cause RangeError)
-      const logPath = join(tempDir, 'shadow.jsonl');
-      const lines: string[] = [];
-      const NUM_LINES = 15000; // Smaller than 150k to avoid actual huge file, but demonstrates the issue
+const row = (point: string, count = 1) => `{"point":"${point}","mode":"shadow"}\n`.repeat(count);
 
-      for (let i = 0; i < NUM_LINES; i++) {
-        lines.push(
-          JSON.stringify({
-            ts: '2026-11-10T06:40:00.000Z',
-            point: 'model-routing',
-            mode: 'shadow',
-            state: { q: 'effort' },
-            heuristic: 'medium',
-            jev: 'high',
-            confidence: 0.8,
-          })
-        );
-      }
+function setup() {
+  const dir = mkdtempSync(join(tmpdir(), 'jev-eval-rotation-'));
+  cleanups.push(dir);
+  return {
+    dir,
+    live: join(dir, 'shadow.jsonl'),
+    rotated: (stamp: string) => join(dir, `shadow-20261110-${stamp}.jsonl`),
+  };
+}
 
-      writeFileSync(logPath, lines.join('\n') + '\n', 'utf8');
+function evaluate(dir: string, live: string, steps: RotationStep[]) {
+  const preload = join(dir, 'preload.cjs');
+  writeFileSync(preload, PRELOAD);
+  const child = spawnSync(process.execPath, ['--require', preload, EVAL_SCRIPT, live, '--include-rotated', '--json'], {
+    encoding: 'utf8',
+    maxBuffer: 1 << 26,
+    timeout: 60_000,
+    env: { ...process.env, JEV_TEST_ROTATIONS: JSON.stringify(steps) },
+  });
+  expect(child.error).toBeUndefined();
+  expect(child.status, child.stderr).toBe(0);
+  const report = JSON.parse(child.stdout);
+  const requests = Object.fromEntries(report.points.map((stats: { point: string; requests: number }) => [stats.point, stats.requests]));
+  return { report, requests, files: report.logFiles.map((file: string) => basename(file)), stderr: child.stderr };
+}
 
-      // Create a rotated file to simulate the --include-rotated scenario
-      const rotatedPath = join(tempDir, 'shadow-20261110-064000-1234.jsonl');
-      writeFileSync(rotatedPath, lines.slice(0, 1000).join('\n') + '\n', 'utf8');
+describe('jev-eval --include-rotated: the log rotates during the read', () => {
+  it('reads the generation that was renamed after the listing, once, oldest first', () => {
+    const { dir, live, rotated } = setup();
+    const first = rotated('070000-11');
+    const second = rotated('074000-22');
+    writeFileSync(first, row('intent', 2));
+    writeFileSync(live, row('model-routing', 3));
 
-      // Run jev-eval with --include-rotated flag
-      // This would fail with "RangeError: Maximum call stack size exceeded" if spreading all lines
-      const result = execFileSync('node', [join(PROJECT_ROOT, 'scripts/jev-eval.mjs'), logPath, '--include-rotated'], {
-        cwd: PROJECT_ROOT,
-        encoding: 'utf8',
-      });
+    // The hook rotates after the evaluator has read the first rotated file and before it reads the live log.
+    const { report, requests, files, stderr } = evaluate(dir, live, [
+      { afterRead: first, nth: 1, live, rotatedTo: second, fresh: row('task-size') },
+    ]);
 
-      // If we got here without a RangeError, the streaming fix is working
-      expect(result).toContain('points');
-      expect(result).toContain('shadow');
-    });
-
-    it('should rescan files created during initial read', () => {
-      const logPath = join(tempDir, 'shadow.jsonl');
-
-      // Create initial log
-      writeFileSync(
-        logPath,
-        JSON.stringify({
-          ts: '2026-11-10T06:40:00.000Z',
-          point: 'model-routing',
-          mode: 'shadow',
-          heuristic: 'medium',
-          jev: 'high',
-        }) + '\n',
-        'utf8'
-      );
-
-      // Create a rotated file that would be found during rescan
-      const rotatedPath = join(tempDir, 'shadow-20261110-064000-1234.jsonl');
-      writeFileSync(
-        rotatedPath,
-        JSON.stringify({
-          ts: '2026-11-10T06:39:00.000Z',
-          point: 'model-routing',
-          mode: 'shadow',
-          heuristic: 'low',
-          jev: 'medium',
-        }) + '\n',
-        'utf8'
-      );
-
-      // Run jev-eval with --include-rotated
-      const result = execFileSync('node', [join(PROJECT_ROOT, 'scripts/jev-eval.mjs'), logPath, '--include-rotated'], {
-        cwd: PROJECT_ROOT,
-        encoding: 'utf8',
-      });
-
-      // Check that both files were included
-      expect(result).toContain('files: 2');
-    });
+    expect(requests).toEqual({ intent: 2, 'model-routing': 3, 'task-size': 1 });
+    expect(stderr).toBe('');
+    expect(report.totalLines).toBe(6);
+    expect(report.malformed).toBe(0);
+    expect(files).toEqual([basename(first), basename(second), 'shadow.jsonl']);
   });
 
-  describe('2. compaction.jsonl: Apply rotation limit', () => {
-    let tempDir: string;
-    const API_KEY = 'test-key-123';
+  it('streams a generation of 150000 lines that rotates during the read', () => {
+    const { dir, live, rotated } = setup();
+    const first = rotated('070000-11');
+    const second = rotated('074000-22');
+    writeFileSync(first, row('intent'));
+    // 150000 lines in one file: spreading them into a push() call overflows the stack.
+    writeFileSync(live, row('model-routing', 150_000));
 
-    beforeEach(() => {
-      tempDir = join(PROJECT_ROOT, '.test-compaction-' + Math.random().toString(36).slice(2));
-      mkdirSync(tempDir, { recursive: true });
-      process.env.OMC_JEV_LOG_DIR = tempDir;
-      process.env.OMC_JEV_LOG_MAX_MB = '1'; // 1 MB limit
-    });
+    const { report, requests, files } = evaluate(dir, live, [
+      { afterRead: first, nth: 1, live, rotatedTo: second, fresh: row('task-size') },
+    ]);
 
-    afterEach(() => {
-      try {
-        rmSync(tempDir, { recursive: true, force: true });
-      } catch {}
-      delete process.env.OMC_JEV_LOG_DIR;
-      delete process.env.OMC_JEV_LOG_MAX_MB;
-    });
-
-    it('should rotate compaction.jsonl when it exceeds OMC_JEV_LOG_MAX_MB', async () => {
-      // Import the compaction module to test the appendRows function
-      const module = await import(join(PROJECT_ROOT, 'scripts/lib/jev-compaction-state.mjs'));
-
-      // Create large rows that will exceed 1 MB when accumulated
-      const rows: Record<string, unknown>[] = [];
-      for (let i = 0; i < 200; i++) {
-        rows.push({
-          ts: new Date().toISOString(),
-          session_id: `session-${i}`,
-          compaction: 'summary',
-          context: 'x'.repeat(5000), // Large context to trigger rotation
-          module: 'jev-compaction',
-        });
-      }
-
-      // Use the appendRows function to append rows
-      // This function is not exported, so we need to test it indirectly or modify the export
-      // For now, we'll verify that the rotation helper is imported and called
-
-      // Verify the imports in the file
-      const content = readFileSync(join(PROJECT_ROOT, 'scripts/lib/jev-compaction-state.mjs'), 'utf8');
-      expect(content).toContain('rotateJevLog');
-      expect(content).toContain('resolveJevLogMaxBytes');
-      expect(content).toContain('rotateJevLog(compactionPath, resolveJevLogMaxBytes(process.env))');
-    });
+    expect(requests).toEqual({ intent: 1, 'model-routing': 150_000, 'task-size': 1 });
+    expect(report.totalLines).toBe(150_002);
+    expect(files).toEqual([basename(first), basename(second), 'shadow.jsonl']);
   });
 
-  describe('3. pre-tool-enforcer.mjs: Apply always-on cap to baseline', () => {
-    const API_KEY = 'test-key-123';
+  it('reads again when a second rotation happens during the rescan', () => {
+    const { dir, live, rotated } = setup();
+    const first = rotated('070000-11');
+    const second = rotated('074000-22');
+    const third = rotated('075000-33');
+    writeFileSync(first, row('intent'));
+    writeFileSync(live, row('model-routing', 2));
 
-    it('should apply OMC_JEV_MAX_EFFORT_ALWAYS cap to baseline effort', async () => {
-      // Verify the fix is in place
-      const content = readFileSync(join(PROJECT_ROOT, 'scripts/pre-tool-enforcer.mjs'), 'utf8');
+    const { report, requests, files } = evaluate(dir, live, [
+      { afterRead: first, nth: 1, live, rotatedTo: second, fresh: row('task-size', 3) },
+      { afterRead: first, nth: 2, live, rotatedTo: third, fresh: row('skill-trigger', 4) },
+    ]);
 
-      // Check that the baseline effort is being capped
-      expect(content).toContain('baselineEffort');
-      expect(content).toContain('isMaxEffortAlwaysEnabled');
-      expect(content).toContain('capEffort(modifiedInput.effort, maxEffort())');
-
-      // Verify the logic: baseline effort is capped when ALWAYS is enabled
-      expect(content).toContain(
-        'const baselineEffort = typeof modifiedInput.effort === \'string\' && isMaxEffortAlwaysEnabled() ? capEffort(modifiedInput.effort, maxEffort()) : modifiedInput.effort'
-      );
-    });
-
-    it('should not overcount applied decisions when baseline is capped by always-on', () => {
-      // This test verifies the fix prevents incorrect applied-log entries
-      // When OMC_JEV_MAX_EFFORT_ALWAYS=1 and OMC_JEV_MAX_EFFORT=high:
-      // - incoming effort "xhigh" becomes "high" (capped)
-      // - if Jev returns score 3 (also "high"), it should NOT be recorded as an applied change
-      // - the baseline must be capped before comparing
-
-      const content = readFileSync(join(PROJECT_ROOT, 'scripts/pre-tool-enforcer.mjs'), 'utf8');
-
-      // Find the noteJevRouting call with baselineEffort
-      const noteJevRoutingCall = content.match(
-        /noteJevRouting\(\{\s*model:\s*baselineModel,\s*effort:\s*baselineEffort\s*\}/
-      );
-      expect(noteJevRoutingCall).toBeTruthy();
-
-      // Verify that baselineEffort is defined before the call
-      const beforeNotecall = content.substring(0, content.indexOf('noteJevRouting'));
-      expect(beforeNotecall).toContain('const baselineEffort');
-    });
+    expect(requests).toEqual({ intent: 1, 'model-routing': 2, 'task-size': 3, 'skill-trigger': 4 });
+    expect(report.totalLines).toBe(10);
+    expect(files).toEqual([basename(first), basename(second), basename(third), 'shadow.jsonl']);
   });
 
-  describe('Revert checks: fixes must fail when reverted', () => {
-    it('should fail if jev-eval.mjs reverts to spreading array', () => {
-      const content = readFileSync(join(PROJECT_ROOT, 'scripts/jev-eval.mjs'), 'utf8');
+  it('stops after three passes when the log keeps rotating', () => {
+    const { dir, live, rotated } = setup();
+    const first = rotated('070000-11');
+    writeFileSync(first, row('intent'));
+    writeFileSync(live, row('model-routing'));
 
-      // The fix uses linesOfFiles generator instead of spreading
-      // If reverted to: const allLines = []; ... allLines.push(...text.split('\n'));
-      // This check ensures we're using the generator pattern
+    // One rotation in each of the first three passes.
+    const steps: RotationStep[] = [1, 2, 3].map((nth) => ({
+      afterRead: first,
+      nth,
+      live,
+      rotatedTo: rotated(`07${nth}000-${nth}${nth}`),
+      fresh: row('task-size'),
+    }));
+    const { report, files, stderr } = evaluate(dir, live, steps);
 
-      const rescanSection = content.match(/if \(postReadRotated\.length > 0\) \{[\s\S]*?\n\s*\}/);
-      expect(rescanSection).toBeTruthy();
-
-      // Should contain linesOfFiles (generator) call, NOT array spread
-      const rescanCode = rescanSection![0];
-      expect(rescanCode).toContain('linesOfFiles');
-      expect(rescanCode).not.toContain('allLines.push(...');
-    });
-
-    it('should fail if compaction.jsonl rotation is removed', () => {
-      const content = readFileSync(join(PROJECT_ROOT, 'scripts/lib/jev-compaction-state.mjs'), 'utf8');
-
-      // Verify rotation is called on compaction path
-      expect(content).toContain('rotateJevLog(compactionPath, resolveJevLogMaxBytes(process.env))');
-      expect(content).toContain('rotateJevLog');
-      expect(content).toContain('resolveJevLogMaxBytes');
-    });
-
-    it('should fail if baseline effort cap is not applied', () => {
-      const content = readFileSync(join(PROJECT_ROOT, 'scripts/pre-tool-enforcer.mjs'), 'utf8');
-
-      // Must have the capping logic for baseline effort
-      expect(content).toMatch(
-        /const baselineEffort\s*=\s*typeof modifiedInput\.effort === 'string' && isMaxEffortAlwaysEnabled\(\)\s*\?\s*capEffort\(/
-      );
-
-      // Must pass baselineEffort to noteJevRouting
-      expect(content).toMatch(/noteJevRouting\(\{[^}]*effort:\s*baselineEffort/);
-    });
+    // The third pass listed the first two rotations; the one it caused is left for the next run.
+    expect(files).toEqual([basename(first), 'shadow-20261110-071000-11.jsonl', 'shadow-20261110-072000-22.jsonl', 'shadow.jsonl']);
+    expect(report.malformed).toBe(0);
+    expect(stderr).toContain('rotated again during the last pass');
   });
 });

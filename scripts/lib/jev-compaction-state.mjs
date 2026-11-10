@@ -198,13 +198,13 @@ export function renderRegistry(sessionId, agentId, env = process.env) {
   return text.length > REGISTRY_CHARS ? text.slice(0, REGISTRY_CHARS - 1) + '…' : text;
 }
 
-function appendRows(logDir, rows) {
+function appendRows(logDir, rows, env = process.env) {
   if (!rows.length) return true;
   try {
     mkdirSync(logDir, { recursive: true });
     const compactionPath = join(logDir, 'compaction.jsonl');
     // Apply the rotation limit to the compaction log like other Jev logs (OMC_JEV_LOG_MAX_MB)
-    rotateJevLog(compactionPath, resolveJevLogMaxBytes(process.env));
+    rotateJevLog(compactionPath, resolveJevLogMaxBytes(env));
     appendFileSync(compactionPath, rows.map((r) => JSON.stringify(r)).join('\n') + '\n', 'utf8');
     return true;
   } catch { return false; }
@@ -308,7 +308,7 @@ export function afterSessionStart(data, { logDir } = {}, env = process.env) {
         if (text) out.context = text;
       }
     }
-    if (appendRows(target, rows)) {
+    if (appendRows(target, rows, env)) {
       for (const x of merged) { try { rmSync(join(spoolDir, x.name), { force: true }); } catch { /* moved twice at worst */ } }
     }
     if (data.source === 'startup') {

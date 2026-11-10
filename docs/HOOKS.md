@@ -727,7 +727,7 @@ Before a line is appended, a file larger than the limit is renamed to `<name>-<Y
 node scripts/jev-eval.mjs --include-rotated
 ```
 
-The files are read one at a time, so their total size is not limited by memory, though each file is read whole, as the single log is today.
+The files are read one at a time, so their total size is not limited by memory, though each file is read whole, as the single log is today. A hook may rotate the log while `jev-eval` reads it; if a rotated file appeared during a pass, `jev-eval` reads everything again from a fresh listing (at most three passes; a log that still rotates during the last pass is reported on stderr), so a renamed file is not missed and no line is counted twice.
 
 #### Call ids and resolver failures
 
