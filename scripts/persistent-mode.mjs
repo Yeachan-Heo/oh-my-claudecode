@@ -2097,24 +2097,27 @@ async function main() {
           const loadedSnapshot = JSON.stringify(autopilot.state);
           const releaseOnly = isJevLoopReleaseOnly();
           const currentCount = autopilot.state.reinforcement_count || 0;
-          // Release-only keeps the mode active, so the counter stays capped while Jev evaluates every Stop.
+          const reinforcementLimitReached = currentCount >= 20;
+          // Release-only still asks Jev at the cap without advancing the bounded fallback counter.
           const newCount = releaseOnly ? Math.min(currentCount + 1, 20) : currentCount + 1;
           if (newCount <= 20) {
             const toolError = readLastToolError(stateDir);
             const errorGuidance = getToolErrorRetryGuidance(toolError);
-            const reinforced = { ...autopilot.state, reinforcement_count: newCount, last_checked_at: new Date().toISOString() };
-            let committed = false;
-            const locked = withStateFileLockSync(autopilot.path, () => {
-              const current = readJsonFile(autopilot.path);
-              if (!current || JSON.stringify(current) !== loadedSnapshot) return;
-              committed = writeJsonFile(autopilot.path, reinforced);
-            });
-            if (!locked.acquired || !committed) {
-              if (!locked.acquired) reportLockFailure('Autopilot state reinforcement');
-              console.log(JSON.stringify(SAFE_CONTINUE));
-              return;
+            if (!reinforcementLimitReached) {
+              const reinforced = { ...autopilot.state, reinforcement_count: newCount, last_checked_at: new Date().toISOString() };
+              let committed = false;
+              const locked = withStateFileLockSync(autopilot.path, () => {
+                const current = readJsonFile(autopilot.path);
+                if (!current || JSON.stringify(current) !== loadedSnapshot) return;
+                committed = writeJsonFile(autopilot.path, reinforced);
+              });
+              if (!locked.acquired || !committed) {
+                if (!locked.acquired) reportLockFailure('Autopilot state reinforcement');
+                console.log(JSON.stringify(SAFE_CONTINUE));
+                return;
+              }
+              autopilot.state = reinforced;
             }
-            autopilot.state = reinforced;
 
             const cancelGuidance = hasValidSessionId && autopilot.state.session_id === sessionId
               ? " When all phases are complete, run /oh-my-claudecode:cancel to cleanly exit and clean up this session's autopilot state files. If cancel fails, retry with /oh-my-claudecode:cancel --force."
@@ -2145,13 +2148,15 @@ async function main() {
               return;
             }
 
-            console.log(
-              JSON.stringify({
-                decision: "block",
-                reason: reason,
-              }),
-            );
-            return;
+            if (!reinforcementLimitReached || jevNoulOf(jevAutopilotResult, "task_complete") !== undefined) {
+              console.log(
+                JSON.stringify({
+                  decision: "block",
+                  reason: reason,
+                }),
+              );
+              return;
+            }
           }
         }
       }

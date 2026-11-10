@@ -572,11 +572,28 @@ describe("jev advisory points: opt-in actions", () => {
       expect(read(path)).toMatchObject({ active: true, reinforcement_count: 20 });
       expect(requests).toHaveLength(1);
 
+      noul.task_complete = 0.2;
       const second = await stop(sessionId, { OMC_JEV_LOOP_RELEASE_ONLY: "1" });
-      expect(String(second.systemMessage)).toContain("autopilot mode stays active");
+      expect(second.decision).toBe("block");
+      expect(String(second.reason)).toContain("[AUTOPILOT - Phase: qa]");
       expect(read(path)).toMatchObject({ active: true, reinforcement_count: 20 });
       expect(requests).toHaveLength(2);
     }, 40000);
+
+    it("keeps the reinforcement-cap fallback when release-only Jev has no answer", async () => {
+      const sessionId = "sess-release-autopilot-cap-degraded";
+      const path = write(
+        sessionId,
+        "autopilot-state.json",
+        state("autopilot", sessionId, { reinforcement_count: 20 }),
+      );
+      status = 500;
+
+      const output = await stop(sessionId, { OMC_JEV_LOOP_RELEASE_ONLY: "1" });
+      expect(output).toEqual({ continue: true, suppressOutput: true });
+      expect(read(path)).toMatchObject({ active: true, reinforcement_count: 20 });
+      expect(requests).toHaveLength(1);
+    }, 20000);
 
     it("a released child Ralph hands the Stop to the active autopilot", async () => {
       const sessionId = "sess-release-parent";
