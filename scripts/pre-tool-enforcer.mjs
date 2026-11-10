@@ -23,7 +23,6 @@ import { readStdin } from './lib/stdin.mjs';
 import { resolveConfiguredAgentModel } from './lib/agent-model-config.mjs';
 import { BOUNDED_GIT_TIMEOUT_MS } from './lib/bounded-git-timeout.mjs';
 import { isSkillVisibleToUser } from './lib/skill-entitlements.mjs';
-<<<<<<< HEAD
 import { isJevShadowOptedIn, recordJevShadow, setJevSessionId, jevNoulOf } from './lib/jev-shadow.mjs';
 import { resolveExcerptChars } from './jev-resolve.mjs';
 
