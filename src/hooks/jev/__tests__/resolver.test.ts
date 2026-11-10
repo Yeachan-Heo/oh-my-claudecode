@@ -13,6 +13,10 @@ const ENV_KEYS = [
   'OMC_JEV_EXCERPT_CHARS',
   'OMC_JEV_EXCERPT_CHARS_MODEL_ROUTING',
   'OMC_JEV_EXCERPT_CHARS_LOOP_CONTINUATION',
+  'OMC_JEV_EXCERPT_CHARS_TASK_SIZE',
+  'OMC_JEV_EXCERPT_CHARS_SKILL_TRIGGER',
+  'OMC_JEV_EXCERPT_CHARS_INTENT',
+  'OMC_JEV_EXCERPT_CHARS_LEARNER_EXTRACTION',
   'OMC_JEV_LOG_DIR',
   'OMC_JEV_ENDPOINT',
 ] as const;
@@ -270,7 +274,7 @@ describe('resolveJudgment', () => {
     process.env.OMC_JEV_EXCERPT_CHARS = '50';
     const long = 'a'.repeat(500);
     const { fetchFn, calls } = captureFetch(() => jevOk({ choice: 'x' }));
-    await call({ point: 'intent', state: { prompt: long, nested: { deep: long }, list: [long] }, fetchFn });
+    await call({ point: 'context-pruning', state: { prompt: long, nested: { deep: long }, list: [long] }, fetchFn });
     const body = JSON.parse(calls[0].init?.body as string);
     expect(body.state.prompt).toHaveLength(50);
     expect(body.state.nested.deep).toHaveLength(50);
@@ -295,6 +299,25 @@ describe('resolveJudgment', () => {
     expect(lowered.state.continuation_excerpt).toHaveLength(200);
   });
 
+  it.each([
+    ['task-size', 4000, 'OMC_JEV_EXCERPT_CHARS_TASK_SIZE'],
+    ['skill-trigger', 1000, 'OMC_JEV_EXCERPT_CHARS_SKILL_TRIGGER'],
+    ['intent', 1000, 'OMC_JEV_EXCERPT_CHARS_INTENT'],
+    ['learner-extraction', 2000, 'OMC_JEV_EXCERPT_CHARS_LEARNER_EXTRACTION'],
+  ])('bounds %s state to %i characters by default, whatever OMC_JEV_EXCERPT_CHARS is, and %s changes it', async (point, limit, variable) => {
+    process.env.TYPESAFE_API_KEY = 'test-key';
+    process.env.OMC_JEV = point;
+    process.env.OMC_JEV_EXCERPT_CHARS = '50';
+    const state = { prompt: 'a'.repeat(limit + 500) };
+    const { fetchFn, calls } = captureFetch(() => jevOk({ choice: 'x' }));
+    await call({ point, state, fetchFn });
+    process.env[variable] = '300';
+    await call({ point, state, fetchFn });
+    const [byDefault, lowered] = calls.map((entry) => JSON.parse(entry.init?.body as string));
+    expect(byDefault.state.prompt).toHaveLength(limit);
+    expect(lowered.state.prompt).toHaveLength(300);
+  });
+
   it('sends question definitions whole, whatever OMC_JEV_EXCERPT_CHARS is', async () => {
     process.env.TYPESAFE_API_KEY = 'test-key';
     process.env.OMC_JEV_EXCERPT_CHARS = '50';
@@ -303,7 +326,7 @@ describe('resolveJudgment', () => {
     };
     const { fetchFn, calls } = captureFetch(() => jevOk({ choice: 'haiku' }));
     await resolveJudgment({
-      point: 'intent',
+      point: 'context-pruning',
       state: { prompt: 'a'.repeat(500) },
       questions,
       twin: () => 'haiku',
