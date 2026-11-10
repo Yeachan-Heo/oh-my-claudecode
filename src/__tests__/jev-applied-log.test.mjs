@@ -309,8 +309,16 @@ describe('hook scripts with OMC_JEV_APPLIED_LOG=1', () => {
       expect.objectContaining({ applied: { subagent_type: 'general-purpose', model: { from: SESSION_MODEL, to: 'sonnet' } } }),
     ]);
 
+    // An alias that resolves to the session model itself (haiku here) changes nothing: it is set on the call, but not logged.
+    stubAnswers = { 'model-tier': { type: 'choice', choice: 'haiku' } };
+    const same = makeContext();
+    const sameOutput = await runHook(same, 'pre-tool-enforcer.mjs', TASK_CALL(same.cwd, { subagent_type: 'general-purpose', model: undefined }), 'model-routing', inherit);
+    expect(sameOutput.hookSpecificOutput.updatedInput).toMatchObject({ model: 'haiku' });
+    expect(readLog(same, 'applied.jsonl')).toEqual([]);
+
     // An agent definition that names a tier still runs on that tier, so it stays the baseline:
     // agents/executor.md names sonnet.
+    stubAnswers = { 'model-tier': { type: 'choice', choice: 'sonnet' } };
     const definition = makeContext();
     await runHook(definition, 'pre-tool-enforcer.mjs', TASK_CALL(definition.cwd, { model: undefined }), 'model-routing', inherit);
     expect(readLog(definition, 'applied.jsonl')).toEqual([]);
@@ -348,6 +356,27 @@ describe('hook scripts with OMC_JEV_APPLIED_LOG=1', () => {
     const [line] = readLog(context, 'applied.jsonl');
     expect(line).toMatchObject({ point: 'context-pruning', applied: { action: { from: 'warn', to: 'none' }, staleness: 'fresh', message: 'none' } });
   }, 60_000);
+
+  it('context-pruning: a stale answer leads to the critical message, then to a suppressed one inside the cooldown', async () => {
+    stubAnswers = { staleness: { type: 'score', score: 3 } };
+    const context = makeContext();
+    const input = {
+      cwd: context.cwd,
+      session_id: 'session-1',
+      tool_name: 'Read',
+      tool_response: 'A retained tool result with useful context.\nMore content.',
+      context_window: { used_percentage: 80 },
+    };
+    const first = await runHook(context, 'post-tool-verifier.mjs', input, 'context-pruning');
+    expect(JSON.stringify(first)).toContain('[OMC CRITICAL]');
+    const second = await runHook(context, 'post-tool-verifier.mjs', input, 'context-pruning');
+    expect(JSON.stringify(second)).not.toContain('[OMC CRITICAL]');
+    const applied = { action: { from: 'warn', to: 'compact' }, staleness: 'stale' };
+    expect(readLog(context, 'applied.jsonl')).toEqual([
+      expect.objectContaining({ point: 'context-pruning', applied: { ...applied, message: 'critical' } }),
+      expect.objectContaining({ point: 'context-pruning', applied: { ...applied, message: 'suppressed' } }),
+    ]);
+  }, 90_000);
 
   it('skill-trigger: the keywords Jev changed', async () => {
     stubAnswers = { 'skill-trigger': { type: 'choice', choice: 'none' } };
