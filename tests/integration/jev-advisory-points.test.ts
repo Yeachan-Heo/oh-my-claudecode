@@ -529,7 +529,7 @@ describe("jev advisory points: opt-in actions", () => {
       ["a probability above 1", { type: "noul", noul: 2, confidence: 0.9 }],
       ["a negative probability", { type: "noul", noul: -1, confidence: 0.9 }],
       ["an answer of another type carrying a noul field", { type: "choice", choice: "a", noul: 0.9, confidence: 0.9 }],
-      ["an answer without a type", { noul: 0.9, confidence: 0.9 }],
+      ["a string probability", { type: "noul", noul: "0.9", confidence: 0.9 }],
     ])("keeps blocking a Ralph Stop on %s", async (_label, answer) => {
       const sessionId = "sess-release-malformed";
       const path = write(sessionId, "ralph-state.json", state("ralph", sessionId));
