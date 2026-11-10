@@ -161,11 +161,9 @@ export function limitMessage(pluginRoot = PLUGIN_ROOT, minSeconds = DEFAULT_MIN_
   return `Jev delivery guard: the PreToolUse timeout of pre-tool-enforcer in the plugin's hooks/hooks.json is ${timeout} s. Jev's model and effort for a Task/Agent call travel in that hook's output, and Claude Code drops the output of a hook it cuts off at the timeout. Raise the timeout to at least ${minSeconds} s and restart the session, or set OMC_JEV_GUARD_MIN_TIMEOUT_S to the value you accept.`;
 }
 
-async function sessionFile(directory, data) {
+function sessionFile(configDir, data) {
   const id = String(data?.session_id ?? data?.sessionId ?? '');
-  if (!SESSION_ID.test(id)) return null;
-  const paths = await resolveSessionStatePathsForHook(directory, 'jev-delivery-guard', id);
-  return { readPath: paths.readPath, writePath: paths.writePath };
+  return SESSION_ID.test(id) ? join(guardDir(configDir), 'sessions', `${id}.json`) : null;
 }
 
 function newRecord(now, pluginRoot, configDir) {
@@ -199,15 +197,16 @@ function pruneSessions(dir, now) {
  * SessionStart: record the session's baseline and check (a). Returns the message for the user or null.
  * `options` ({ env, now, pluginRoot, configDir }) are test seams.
  */
-export async function startSession(data, options = {}) {
-  const { env = process.env, now = Date.now(), pluginRoot = PLUGIN_ROOT, configDir = getClaudeConfigDir(), cwd = process.cwd() } = options;
+export function startSession(data, options = {}) {
+  const { env = process.env, now = Date.now(), pluginRoot = PLUGIN_ROOT, configDir = getClaudeConfigDir() } = options;
   try {
     if (!isGuardEnabled(env, data?.permission_mode)) return null;
-    const file = await sessionFile(cwd, data);
+    const file = sessionFile(configDir, data);
     if (file) {
       // /compact continues the same process with the same session id: it keeps what it loaded at its start.
-      if (data?.source !== 'compact') writeJson(file.writePath, newRecord(now, pluginRoot, configDir));
-      else touchRecord(file.writePath, now);
+      if (data?.source !== 'compact') writeJson(file, newRecord(now, pluginRoot, configDir));
+      else touchRecord(file, now);
+      pruneSessions(dirname(file), now);
     }
     return limitMessage(pluginRoot, minTimeoutSeconds(env));
   } catch {
@@ -271,19 +270,19 @@ function startDailyCheck(dir, configDir, logDir, env, now) {
  * part runs in a detached process. `options.logDir` is the Jev log directory (shadow.jsonl) of the
  * prompt's project; the other options are test seams.
  */
-export async function promptCheck(data, options = {}) {
+export function promptCheck(data, options = {}) {
   const { env = process.env, now = Date.now(), pluginRoot = PLUGIN_ROOT, configDir = getClaudeConfigDir(), logDir, cwd = process.cwd() } = options;
   try {
     if (!isGuardEnabled(env, data?.permission_mode)) return null;
     const dir = guardDir(configDir);
-    const file = await sessionFile(cwd, data);
-    let record = file ? readJson(file.readPath) : null;
+    const file = sessionFile(configDir, data);
+    let record = file ? readJson(file) : null;
     if (file && (!record || typeof record !== 'object')) {
       // A session that began before the guard was enabled: the baseline is this prompt.
       record = newRecord(now, pluginRoot, configDir);
       writeJson(file.writePath, record);
     } else if (file) {
-      touchRecord(file.writePath, now); // a live session keeps its baseline out of the sweep
+      touchRecord(file, now); // a live session keeps its baseline out of the sweep
     }
     const messages = [];
     const confirmations = [];
@@ -327,7 +326,7 @@ export async function promptCheck(data, options = {}) {
       text: messages.join('\n'),
       confirm: () => {
         for (const confirm of confirmations) confirm();
-        if (file) writeJson(file.writePath, record);
+        if (file) writeJson(file, record);
       },
     };
   } catch {

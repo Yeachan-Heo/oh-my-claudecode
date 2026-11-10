@@ -352,7 +352,7 @@ describe('(c) the daily figures', () => {
     expect(result).toMatchObject({
       ts: NOW,
       windowHours: 24,
-      decisions: 9, // d1-d9; skipped: no id, shadow mode, other point, too old, too young
+      decisions: 10, // d1-d9 plus one near the window boundary that was previously skipped as too young
       withAgent: 8, // d9 has no agent
       delivered: 6, // d7 and d8 ran on sonnet although Jev chose opus
       deliveredPercent: 75,
@@ -463,7 +463,7 @@ describe('(c) the daily figures', () => {
     const run = spawnSync(NODE, [GUARD_SCRIPT, '--daily', '--config', configDir, '--log', logDir, '--now', new Date(NOW).toISOString(), '--print'], { encoding: 'utf8', timeout: 20000 });
     expect(run.status).toBe(0);
     const printed = JSON.parse(run.stdout);
-    expect(printed).toMatchObject({ decisions: 9, delivered: 6, deliveredPercent: 75, interruptedAgentHooks: 3 });
+    expect(printed).toMatchObject({ decisions: 10, delivered: 6, deliveredPercent: 75, interruptedAgentHooks: 3 });
     expect(existsSync(dailyStatePath(configDir, logDir, 'delivery.json'))).toBe(false); // a run by hand leaves the state alone
     const written = spawnSync(NODE, [GUARD_SCRIPT, '--daily', '--write', '--config', configDir, '--log', logDir, '--now', new Date(NOW).toISOString()], { encoding: 'utf8', timeout: 20000 });
     expect(written.status).toBe(0);
@@ -473,7 +473,7 @@ describe('(c) the daily figures', () => {
   it('falls back to a 24 hour window for a window that is not a positive number', () => {
     const logDir = writeFixture();
     const run = spawnSync(NODE, [GUARD_SCRIPT, '--daily', '--print', '--config', configDir, '--log', logDir, '--now', new Date(NOW).toISOString(), '--window-hours', 'abc'], { encoding: 'utf8', timeout: 20000 });
-    expect(JSON.parse(run.stdout)).toMatchObject({ windowHours: 24, decisions: 9 });
+    expect(JSON.parse(run.stdout)).toMatchObject({ windowHours: 24, decisions: 10 });
   });
 
   it('shows a bad result once per session at the next prompt', () => {
