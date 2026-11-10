@@ -26,8 +26,12 @@
  * Failures are classified by HTTP status and by whether a response arrived at
  * all, never by the response body, so any System One compatible endpoint
  * behaves the same. The one use of a body is the retry time of a 429 that has
- * no usable Retry-After header (retryAfterFromBody). Imported by scripts/jev-resolve.mjs, scripts/lib/jev-shadow.mjs
- * and src/hooks/jev/resolver.ts (types in jev-breaker.d.mts).
+ * no usable Retry-After header (retryAfterFromBody).
+ *
+ * Imported by scripts/jev-resolve.mjs, scripts/lib/jev-shadow.mjs
+ * and src/hooks/jev/resolver.ts (types in jev-breaker.d.mts). hooks/jev-compaction.mjs, a hooks
+ * module that cannot import Node, mirrors the file formats and rules through the host's $.fs and
+ * writes the same files.
  */
 
 import { createHash } from "node:crypto";
@@ -91,6 +95,8 @@ export const POINT_PRIORITY = {
   "learner-extraction": "low",
   "simplifier-trigger": "low",
   "context-pruning": "low",
+  // Resolved by hooks/jev-compaction.mjs, which mirrors this file's rules (a hooks module cannot import Node).
+  compaction: "medium",
 };
 /**
  * Share of the minute's limit a priority may use: low points stop at 60 % and

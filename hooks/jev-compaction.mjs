@@ -1,3 +1,4 @@
+/* global crypto, TextEncoder */
 /**
  * Jev compaction: a Claude Code hooks module ("mod") for the judgment point `compaction`.
  *
@@ -19,7 +20,8 @@
  *
  * The built-in summary (next(e)) also runs when the conversation is too short or its tool results
  * are too small for the removal to matter, while requests are paused after an endpoint failure, when
- * OMC_JEV_MAX_REQUESTS is used up, and when Jev fails, answers too little or does not answer in time.
+ * OMC_JEV_MAX_REQUESTS is used up, while the shared breaker is open or the shared request limit is
+ * used up, and when Jev fails, answers too little or does not answer in time.
  *
  * turn.complete. With OMC_JEV_COMPACT_AT_PERCENT (off when unset) the module asks the host to compact
  * once the context reaches that share of the compaction window: main loop only, at most once per
@@ -33,6 +35,20 @@
  * masking, with every string bounded by OMC_JEV_EXCERPT_CHARS_COMPACTION (default
  * DEFAULT_EXCERPT_CHARS). Results of calls on secret paths (and on OMC_JEV_COMPACT_PRIVATE_PATHS)
  * and results without text are never sent.
+ *
+ * Shared breaker and request limit (OMC_JEV_BREAKER=1, OMC_JEV_MAX_RPM=<n>): the same files and rules as
+ * the script side (scripts/lib/jev-breaker.mjs, see its header), under the same state directory and
+ * scope. A hooks module cannot import Node, so the file work goes through $.fs; the rules are mirrors.
+ * Before each request the module reads breaker.json (open: no request) and, with a limit, reserves a
+ * slot in the UTC minute's rpm file at medium priority (a refused request takes no slot). A request
+ * that fails opens the breaker by status alone (429 and 5xx; 401, 402, 403; Retry-After, for a 429
+ * without one the retry time in its body), and the third request without a response within a minute
+ * opens it too. $.fs can neither append nor delete: a line is added by writing the file whole and
+ * reading it back, which can lose a line another process added in between (so the limit can be
+ * exceeded when several sessions reserve in the same instant; this module's own file work is done one
+ * step after the other), and the per-minute files of old minutes stay (the script side removes them
+ * when it writes a new minute). Without these two variables nothing of this is read or written. The
+ * module's own pause, its three-failures stop and OMC_JEV_MAX_REQUESTS stay as they were.
  *
  * Quiet: no $.ui.log; a toast only with OMC_JEV_COMPACT_TOAST=1. One JSON file per event goes to the
  * spool directory (<state dir>/compaction-spool, $.fs cannot append); the classic SessionStart hook
@@ -92,8 +108,9 @@ const PROBE_MAX_CHARS = 5_000_000;
 const MENTION_MIN = 5;
 const DEFAULT_ENDPOINT = 'https://api.typesafe.ai/v1/systemone';
 const JEV_MODEL = 'jev-latest';
-// Pause after a failed request, by status only (response bodies are never read): Retry-After when the
-// response has it, else these defaults; three requests without a response within a minute pause too.
+// Pause after a failed request, by status only (a response body is read only for the retry time of a
+// 429 without a Retry-After, and only for the shared breaker): Retry-After when the response has it,
+// else these defaults; three requests without a response within a minute pause too.
 // Three failed compactions in a row stop the requests for the rest of the session, like the resolver's
 // per-point breaker.
 const PAUSE_DEFAULT_MS = 60_000;
@@ -102,6 +119,26 @@ const PAUSE_MAX_MS = 1_800_000;
 const NO_RESPONSE_TO_PAUSE = 3;
 const NO_RESPONSE_WINDOW_MS = 60_000;
 const FAILURES_TO_OPEN = 3;
+
+// Shared breaker and request limit: mirrors of the constants in scripts/lib/jev-breaker.mjs
+// (src/__tests__/jev-compaction-module.test.mjs locks the parity, with that library on the same files).
+// Seconds a breaker stays open when the response gives no usable Retry-After; a Retry-After above the
+// maximum is capped.
+const BREAKER_SECONDS = { transient: 60, account: 600, noResponse: 60 };
+const BREAKER_MAX_SECONDS = 1800;
+// A recorded no-response time further ahead of the clock than this is a corrupt line or a clock set back.
+const NO_RESPONSE_SKEW_MS = 5000;
+const SAME_OUTAGE_GAP_MS = 15 * 60_000;
+const EXTEND_MIN_MS = 5000;
+// Pause after writing the breaker before it is read back (a concurrent opener may have replaced it).
+const SETTLE_MS = 50;
+const CLOCK_SLACK_MS = 60_000;
+// `compaction` is a medium-priority point: it may use this share of the minute's limit.
+const MEDIUM_SHARE = 0.85;
+const RETRY_BODY_MAX_CHARS = 2000;
+const APPEND_TRIES = 3;
+// One step of file work on the shared state may take this long before the request goes on without it.
+const SHARED_OP_MS = 3000;
 
 // Mirror of the `compaction` score question in src/hooks/jev/points.ts (criteria low to high).
 export const QUESTION_INSTRUCTIONS =
@@ -224,7 +261,7 @@ function positiveInt(raw, fallback) {
 // Session state. A Claude Code process loads the module once per session and calls register once.
 function freshState() {
   return {
-    compacting: 0, pausedUntil: 0, pauseReason: null, failedInRow: 0, noResponseAt: [], requests: 0,
+    sharedQueue: Promise.resolve(), compacting: 0, pausedUntil: 0, pauseReason: null, failedInRow: 0, noResponseAt: [], requests: 0,
     turnCount: 0, lastAttempt: -Infinity, hostCannot: false, compactWindow: undefined, windowTurn: -Infinity,
     cachedConfig: undefined, cachedAt: -Infinity,
   };
@@ -246,10 +283,13 @@ async function readConfig($) {
     OMC_JEV_COMPACT_TARGET: await $.env.get('OMC_JEV_COMPACT_TARGET'),
     OMC_JEV_COMPACT_TOAST: await $.env.get('OMC_JEV_COMPACT_TOAST'),
     OMC_JEV_COMPACT_PRIVATE_PATHS: await $.env.get('OMC_JEV_COMPACT_PRIVATE_PATHS'),
+    OMC_JEV_BREAKER: await $.env.get('OMC_JEV_BREAKER'),
+    OMC_JEV_MAX_RPM: await $.env.get('OMC_JEV_MAX_RPM'),
+    OMC_JEV_BREAKER_DIR: await $.env.get('OMC_JEV_BREAKER_DIR'),
     USERPROFILE: await $.env.get('USERPROFILE'),
     HOME: await $.env.get('HOME'),
   };
-  if (env.OMC_JEV === undefined || env.TYPESAFE_API_KEY === undefined) {
+  if (env.OMC_JEV === undefined || env.TYPESAFE_API_KEY === undefined || env.OMC_JEV_BREAKER === undefined || env.OMC_JEV_MAX_RPM === undefined) {
     try {
       const fromSettings = await $.settings.read({ key: 'env' });
       if (fromSettings && typeof fromSettings === 'object') {
@@ -266,10 +306,13 @@ async function readConfig($) {
     // A leading ~ matches both as written (in a command) and expanded to the home directory.
     .flatMap((p) => (home && /^~(?=$|[\\/])/.test(p) ? [p, slash(home) + p.slice(1)] : [p]))
     .map((p) => slash(p).toLowerCase());
+  const mode = pointMode(env.OMC_JEV, env.TYPESAFE_API_KEY);
+  const endpoint = env.OMC_JEV_ENDPOINT || DEFAULT_ENDPOINT;
   return {
-    mode: pointMode(env.OMC_JEV, env.TYPESAFE_API_KEY),
+    mode,
     key: env.TYPESAFE_API_KEY,
-    endpoint: env.OMC_JEV_ENDPOINT || DEFAULT_ENDPOINT,
+    endpoint,
+    shared: mode === 'off' ? undefined : await sharedSettings(env, endpoint, home),
     spoolDir: stateDir ? `${stateDir}/compaction-spool` : undefined,
     maxRequests: positiveInt(env.OMC_JEV_MAX_REQUESTS, 0),
     excerptChars: positiveInt(env.OMC_JEV_EXCERPT_CHARS_COMPACTION, DEFAULT_EXCERPT_CHARS),
@@ -280,11 +323,279 @@ async function readConfig($) {
   };
 }
 
-// No request goes out: paused after a failure, breaker open, or OMC_JEV_MAX_REQUESTS used up.
-function blockedReason(cfg, now) {
+// --- shared breaker and request limit ----------------------------------------------------------
+// Mirrors of scripts/lib/jev-breaker.mjs (same files, same rules) through $.fs. Every function is
+// fail-open: a file system error never holds a request back and never throws.
+
+/** Mirror of parseMaxRpm: OMC_JEV_MAX_RPM as a positive integer, else undefined (no limit). */
+export function parseMaxRpm(raw) {
+  if (typeof raw !== 'string' || !/^[1-9]\d*$/.test(raw.trim())) return undefined;
+  const parsed = Number(raw.trim());
+  return Number.isSafeInteger(parsed) ? parsed : undefined;
+}
+
+/** Mirror of thresholdFor(limit, 'compaction'): a medium-priority point. */
+export function mediumThreshold(limit) {
+  return Math.max(1, Math.round(limit * MEDIUM_SHARE));
+}
+
+// {breaker, maxRpm, dir} for this endpoint and key, or undefined when neither OMC_JEV_BREAKER=1 nor
+// OMC_JEV_MAX_RPM is set. dir is <base>/<scope>, the scope the first 16 hex digits of the SHA-256 of
+// the endpoint, a newline and the key; the key itself is never written.
+async function sharedSettings(env, endpoint, home) {
+  const breaker = String(env.OMC_JEV_BREAKER ?? '').trim() === '1';
+  const maxRpm = parseMaxRpm(env.OMC_JEV_MAX_RPM);
+  if (!env.TYPESAFE_API_KEY || (!breaker && maxRpm === undefined)) return undefined;
+  // Asked for but not usable (no home directory, no crypto): nothing is shared and the record says so.
+  const unavailable = { unavailable: true, breaker: false, maxRpm: undefined, dir: undefined };
+  const base = env.OMC_JEV_BREAKER_DIR ? slash(env.OMC_JEV_BREAKER_DIR) : home ? `${slash(home)}/.omc/state/jev/breaker` : undefined;
+  if (!base) return unavailable;
+  try {
+    const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(`${endpoint}\n${env.TYPESAFE_API_KEY}`));
+    const scope = Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, '0')).join('').slice(0, 16);
+    return { breaker, maxRpm, dir: `${base}/${scope}` };
+  } catch {
+    return unavailable;
+  }
+}
+
+// One step of file work on the shared state after the other (this module writes whole files, so two
+// steps at once would lose each other's lines). A step that takes longer than SHARED_OP_MS (or throws)
+// ends with `fallback`, and the next step goes on.
+function sharedStep($, work, fallback) {
+  const done = session.sharedQueue.then(() => withDeadline($, work(), SHARED_OP_MS)).then((r) => ('value' in r ? r.value : fallback));
+  session.sharedQueue = done;
+  return done;
+}
+
+const minuteKey = (now) => new Date(now).toISOString().replace(/[-:T]/g, '').slice(0, 12);
+const pause = ($, ms) => new Promise((resolve) => { try { $.clock.after(ms, () => resolve(undefined)); } catch { resolve(undefined); } });
+async function readText($, path) {
+  try { return await $.fs.read(path); } catch { return undefined; }
+}
+
+// Adds one line to a file. $.fs cannot append, so the file is written whole and read back; a line
+// another process added between the read and the write is lost, and ours is written again when a
+// concurrent write took it away (at most APPEND_TRIES writes). Returns the text read last.
+async function appendLine($, path, line) {
+  let text = '';
+  for (let attempt = 0; attempt < APPEND_TRIES; attempt++) {
+    const current = (await readText($, path)) ?? '';
+    await $.fs.write(path, `${current === '' || current.endsWith('\n') ? current : `${current}\n`}${line}\n`);
+    text = (await readText($, path)) ?? '';
+    if (text.split('\n').includes(line)) return text;
+  }
+  return text;
+}
+
+// breaker.json as written, whatever its times; undefined when missing or unreadable. A partial text
+// (a write landing) is read again.
+async function readBreakerFile($, shared) {
+  const path = `${shared.dir}/breaker.json`;
+  for (let attempt = 0; attempt < 4; attempt++) {
+    const text = await readText($, path);
+    if (text === undefined) {
+      // Missing: closed. Present but unreadable (a rename landing): read again shortly.
+      let present = false;
+      try { present = await $.fs.exists(path); } catch { /* not there, or no check */ }
+      if (!present) return undefined;
+      if (attempt < 3) await pause($, 3);
+      continue;
+    }
+    try {
+      const state = JSON.parse(text);
+      return state && typeof state === 'object' ? state : undefined;
+    } catch {
+      if (attempt < 3) await pause($, 3);
+    }
+  }
+  return undefined;
+}
+
+// The open breaker {until, reason, since} (epoch ms), or undefined when it is closed, expired,
+// unreadable, corrupt, or OMC_JEV_BREAKER is not set.
+async function readSharedBreaker($, shared, now) {
+  if (!shared?.breaker) return undefined;
+  try {
+    const state = await readBreakerFile($, shared);
+    if (!state || !Number.isFinite(state.until) || state.until <= now) return undefined;
+    if (state.until > now + BREAKER_MAX_SECONDS * 1000 + CLOCK_SLACK_MS) return undefined;
+    const since = Number.isFinite(state.since) ? state.since : now;
+    if (since < 0 || since > now + CLOCK_SLACK_MS) return undefined;
+    return { until: state.until, reason: String(state.reason ?? ''), since: Math.min(since, now) };
+  } catch {
+    return undefined;
+  }
+}
+
+// Opens the breaker for `seconds`, or keeps it open at least that long; an open breaker is never
+// shortened. After each write the module pauses SETTLE_MS and reads the file again, and writes the
+// later end again when a concurrent opener replaced it with an earlier one (at most 3 writes).
+// `since` stays the start of the outage while it is extended or opens again within 15 minutes.
+async function openSharedBreaker($, shared, seconds, reason, now) {
+  try {
+    const until = now + Math.max(1, Math.min(seconds, BREAKER_MAX_SECONDS)) * 1000;
+    let since = now;
+    const previous = await readBreakerFile($, shared);
+    if (
+      previous &&
+      Number.isFinite(previous.until) &&
+      Number.isFinite(previous.since) &&
+      previous.since >= 0 &&
+      previous.since <= now &&
+      now - previous.until < SAME_OUTAGE_GAP_MS
+    ) {
+      since = previous.since;
+    }
+    for (let attempt = 0; attempt < 3; attempt++) {
+      if (attempt > 0) await pause($, SETTLE_MS);
+      const current = await readSharedBreaker($, shared, now);
+      if (current && current.until >= until - EXTEND_MIN_MS) return current;
+      await $.fs.write(`${shared.dir}/breaker.json`, JSON.stringify({ until, reason, since: current ? Math.min(current.since, since) : since }));
+    }
+    await pause($, SETTLE_MS);
+    return await readSharedBreaker($, shared, now);
+  } catch {
+    return undefined;
+  }
+}
+
+/** Mirror of retryAfterFromBody: the wait a 429 body states in words ("retry after 30 seconds", "Retry after ~178s"), else undefined. */
+export function retryAfterFromBody(text) {
+  if (typeof text !== 'string') return undefined;
+  const match = /\bretry[\s_-]*after\b\s*[:=]?\s*~?\s*(\d+(?:\.\d+)?)\s*(?:s|secs?|seconds?)\b/i.exec(text.slice(0, RETRY_BODY_MAX_CHARS));
+  return match ? Math.max(1, Math.ceil(Number(match[1]))) : undefined;
+}
+
+/**
+ * Mirror of classifyFailure of the shared breaker: {reason, opens, seconds?} for a failed request
+ * {status?, retryAfter?, body?, noResponse?}, or undefined when the failure says nothing about the
+ * endpoint (another 4xx, an invalid 2xx body).
+ */
+export function sharedFailureClass(failure, now = Date.now()) {
+  const status = Number.isInteger(failure?.status) ? failure.status : undefined;
+  if (status === undefined) return failure?.noResponse ? { reason: 'no-response', opens: false } : undefined;
+  let seconds;
+  if (status === 429 || (status >= 500 && status <= 599)) seconds = BREAKER_SECONDS.transient;
+  else if (status === 401 || status === 402 || status === 403) seconds = BREAKER_SECONDS.account;
+  else return undefined;
+  const header = retryAfterMs(failure.retryAfter, now);
+  const retry = header !== undefined ? Math.max(1, Math.ceil(header / 1000)) : status === 429 ? retryAfterFromBody(failure.body) : undefined;
+  return { reason: `http-${status}`, opens: true, seconds: Math.min(retry ?? seconds, BREAKER_MAX_SECONDS) };
+}
+
+// Requests without a response within the window, this one included, and the newest time recorded.
+// The window ends at the newest time, not at this clock (concurrent processes sample their clocks
+// before they append).
+async function noteNoResponse($, shared, now) {
+  try {
+    await appendLine($, `${shared.dir}/noresp-${minuteKey(now)}`, String(now));
+    const times = [];
+    for (const key of [minuteKey(now - 60_000), minuteKey(now), minuteKey(now + 60_000)]) {
+      const text = await readText($, `${shared.dir}/noresp-${key}`);
+      if (text === undefined) continue;
+      for (const line of text.split('\n')) {
+        const time = Number(line);
+        if (line && Number.isFinite(time) && time <= now + NO_RESPONSE_SKEW_MS) times.push(time);
+      }
+    }
+    const newest = times.reduce((latest, time) => Math.max(latest, time), now);
+    return { count: times.filter((time) => time > newest - NO_RESPONSE_WINDOW_MS).length, newest };
+  } catch {
+    return { count: 0, newest: now };
+  }
+}
+
+// Records a failed request (a sharedFailureClass result): opens or extends the breaker, or counts a
+// request without a response; the third within a minute opens it for a minute from the newest one.
+async function recordSharedFailureClass($, shared, failure, now) {
+  if (!shared?.breaker || !failure) return undefined;
+  if (failure.opens) return openSharedBreaker($, shared, failure.seconds, failure.reason, now);
+  if (failure.reason === 'no-response') {
+    const { count, newest } = await noteNoResponse($, shared, now);
+    if (count >= NO_RESPONSE_TO_PAUSE) return openSharedBreaker($, shared, BREAKER_SECONDS.noResponse, 'no-response', newest);
+  }
+  return undefined;
+}
+
+// A request that ended without a value (withDeadline's {timeout} or {error}), recorded with the shared
+// breaker, as one step of file work after the other.
+function recordSharedFailure($, cfg, result) {
+  if (!cfg.shared?.breaker || result.value) return Promise.resolve();
+  return sharedStep($, () => writeSharedFailure($, cfg, result), undefined);
+}
+async function writeSharedFailure($, cfg, result) {
+  try {
+    // A request that had less than a second because of the compaction's own deadline says nothing about the endpoint.
+    if (result.timeout && result.short) return;
+    const error = result.error;
+    let failure;
+    if (result.timeout) failure = { noResponse: true };
+    else if (error?.invalid) failure = undefined;
+    else if (error && Number.isInteger(error.status)) failure = { status: error.status, retryAfter: error.retryAfter, body: error.body };
+    else failure = { noResponse: true };
+    const now = Date.now();
+    await recordSharedFailureClass($, cfg.shared, sharedFailureClass(failure, now), now);
+  } catch { /* the breaker never breaks a compaction */ }
+}
+
+// Folds a minute file: a line "<token> <threshold>" is granted when fewer than <threshold> lines were
+// granted before it. With `token` the fold stops at that line. Returns {granted, ok} (ok undefined
+// when the token is absent or not given).
+function foldMinute(text, token) {
+  let granted = 0;
+  for (const line of String(text ?? '').split('\n')) {
+    const [lineToken, thresholdText] = line.split(' ');
+    if (!lineToken || thresholdText === undefined) continue;
+    const ok = granted < Number(thresholdText);
+    if (ok) granted += 1;
+    if (token !== undefined && lineToken === token) return { granted, ok };
+  }
+  return { granted, ok: undefined };
+}
+
+// Reserves one request in the current UTC minute: refused without writing anything when the minute
+// already reached the threshold; otherwise the line is added and the file folded again. ok is true
+// without a limit and whenever the files cannot be used.
+async function reserveRequest($, shared, now) {
+  const limit = shared.maxRpm;
+  if (limit === undefined) return { ok: true };
+  const threshold = mediumThreshold(limit);
+  try {
+    const path = `${shared.dir}/rpm-${minuteKey(now)}`;
+    const before = foldMinute(await readText($, path));
+    if (before.granted >= threshold) return { ok: false, count: before.granted, threshold, limit };
+    const token = randomId();
+    const { granted, ok } = foldMinute(await appendLine($, path, `${token} ${threshold}`), token);
+    if (ok === undefined) return { ok: true };
+    return { ok, count: granted, threshold, limit };
+  } catch {
+    return { ok: true };
+  }
+}
+
+// Admission of one request, right before the HTTP call: the open breaker first, then the limit.
+// Returns {skip: {mode: 'circuit-open', breaker}} or {skip: {mode: 'cap', count, threshold, limit}}
+// when the request must not go out, {} otherwise.
+function admitRequest($, shared) {
+  return sharedStep($, () => admitNow($, shared), {});
+}
+async function admitNow($, shared) {
+  const now = Date.now();
+  const open = await readSharedBreaker($, shared, now);
+  if (open) return { skip: { mode: 'circuit-open', breaker: open } };
+  const slot = await reserveRequest($, shared, now);
+  if (!slot.ok) return { skip: { mode: 'cap', count: slot.count, threshold: slot.threshold, limit: slot.limit } };
+  return {};
+}
+
+// No request goes out: paused after a failure, breaker open, OMC_JEV_MAX_REQUESTS used up, or the
+// shared breaker open.
+async function blockedReason($, cfg, now) {
   if (session.failedInRow >= FAILURES_TO_OPEN) return 'circuit_open';
   if (now < session.pausedUntil) return 'paused';
   if (cfg.maxRequests && session.requests >= cfg.maxRequests) return 'cap';
+  if (cfg.shared && (await readSharedBreaker($, cfg.shared, now))) return 'breaker_open';
   return undefined;
 }
 
@@ -572,6 +883,10 @@ async function askJev($, cfg, state, questions) {
     const failure = new Error(`HTTP ${response.status}`);
     failure.status = response.status;
     failure.retryAfter = response.headers?.['retry-after'];
+    // Only for the retry time of a 429 without a usable Retry-After, and only for the shared breaker.
+    if (cfg.shared?.breaker && response.status === 429 && retryAfterMs(failure.retryAfter) === undefined) {
+      failure.body = String(response.text ?? '').slice(0, RETRY_BODY_MAX_CHARS);
+    }
     throw failure;
   }
   let body;
@@ -621,7 +936,7 @@ async function decide($, e, cfg, record, started) {
   const removable = removableChars(candidates);
   record.max_reduction = before ? Math.round((removable / before) * 1000) / 1000 : 0;
   if (!before || removable / before < MIN_REDUCTION) return { fallback: 'too_few_results' };
-  const blocked = blockedReason(cfg, Date.now());
+  const blocked = await blockedReason($, cfg, Date.now());
   if (blocked) {
     if (blocked === 'paused') Object.assign(record, { paused_until: new Date(session.pausedUntil).toISOString(), pause_reason: session.pauseReason });
     return { fallback: blocked };
@@ -638,7 +953,12 @@ async function decide($, e, cfg, record, started) {
   const user = userTask(messages, typeof e.instructions === 'string' && e.instructions.trim() ? e.instructions : undefined);
   const deadline = started + TOTAL_MS;
   const runs = [];
+  let held;
   for (let b = 0; b * BATCH < asked.length; b++) {
+    if (cfg.shared) {
+      const admission = await admitRequest($, cfg.shared);
+      if (admission.skip) { held = admission.skip; break; }
+    }
     const batch = asked.slice(b * BATCH, (b + 1) * BATCH);
     const results = {};
     const questions = {};
@@ -655,8 +975,24 @@ async function decide($, e, cfg, record, started) {
     });
     const state = boundExcerpts({ task: user.task, ...(user.instructions ? { compact_instructions: user.instructions } : {}), results }, cfg.excerptChars);
     const t0 = Date.now();
+    const timeoutMs = Math.max(500, Math.min(REQUEST_MS, deadline - t0));
     session.requests++;
-    runs.push(withDeadline($, askJev($, cfg, state, questions), Math.max(500, Math.min(REQUEST_MS, deadline - t0))).then((r) => ({ ...r, batch, ms: Date.now() - t0 })));
+    runs.push(
+      withDeadline($, askJev($, cfg, state, questions), timeoutMs).then(async (r) => {
+        await recordSharedFailure($, cfg, { ...r, short: timeoutMs < 1000 });
+        return { ...r, batch, ms: Date.now() - t0 };
+      }),
+    );
+  }
+  if (held) {
+    // A request held back by the shared breaker or limit is no failure of the endpoint. The results it
+    // would have scored count as unanswered, as after a failed request: the budget decides about them.
+    const unscored = asked.slice(runs.length * BATCH);
+    for (const c of unscored) { c.asked = true; c.score = UNANSWERED_SCORE; }
+    record.unscored = unscored.length;
+    if (held.mode === 'circuit-open') Object.assign(record, { held: 'breaker', breaker_until: new Date(held.breaker.until).toISOString(), breaker_reason: held.breaker.reason });
+    else Object.assign(record, { held: 'rpm', rpm: { count: held.count, threshold: held.threshold, limit: held.limit } });
+    if (!runs.length) return { fallback: held.mode === 'circuit-open' ? 'breaker_open' : 'rpm' };
   }
   record.requests = runs.length;
   const results = await Promise.all(runs);
@@ -713,7 +1049,7 @@ async function compact($, e, next) {
   if (cfg.mode === 'off') return next(e);
   // An active point replaces the summary, so a summary computed ahead of time would be wasted; while
   // the breaker is open the summary will run, so the host may compute it ahead.
-  if (e.trigger === 'precompute') return cfg.mode === 'active' && !blockedReason(cfg, Date.now()) ? { skip: 'jev-compaction replaces the summary' } : next(e);
+  if (e.trigger === 'precompute') return cfg.mode === 'active' && !(await blockedReason($, cfg, Date.now())) ? { skip: 'jev-compaction replaces the summary' } : next(e);
   const started = Date.now();
   session.compacting++;
   try {
@@ -723,6 +1059,7 @@ async function compact($, e, next) {
       ts: isoNow(), point: POINT, event: 'compact', session_id: sessionId ?? null, agent_id: e.agentId ?? null,
       trigger: e.trigger, mode: cfg.mode, messages_before: Array.isArray(e.messages) ? e.messages.length : 0,
       chars_before: 0, target: cfg.target,
+      ...(cfg.shared?.unavailable ? { shared_unavailable: true } : {}),
     };
     let decision;
     try {
@@ -753,7 +1090,7 @@ async function ownThreshold($, e, next) {
     if (session.turnCount - session.lastAttempt < MIN_TURNS_BETWEEN) return result;
     if (!session.cachedConfig || Date.now() - session.cachedAt > CONFIG_TTL_MS) { session.cachedConfig = await readConfig($); session.cachedAt = Date.now(); }
     const cfg = session.cachedConfig;
-    if (cfg.mode !== 'active' || cfg.atPercent === undefined || blockedReason(cfg, Date.now())) return result;
+    if (cfg.mode !== 'active' || cfg.atPercent === undefined || (await blockedReason($, cfg, Date.now()))) return result;
     const usage = await $.session.usage();
     const tokens = usage?.context?.tokens;
     if (!Number.isFinite(tokens) || tokens <= 0) return result;
