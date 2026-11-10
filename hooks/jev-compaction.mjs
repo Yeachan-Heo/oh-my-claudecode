@@ -638,14 +638,28 @@ async function admitNow($, shared, deadline) {
   return {};
 }
 
-// No request goes out: paused after a failure, breaker open, OMC_JEV_MAX_REQUESTS used up, or the
-// shared breaker open.
+// Check if RPM capacity is available without reserving it (non-reserving peek).
+async function rpmCapacityAvailable($, shared, point, now) {
+  if (!shared?.maxRpm) return true; // No limit.
+  try {
+    const threshold = mediumThreshold(shared.maxRpm);
+    const path = `${shared.dir}/rpm-${minuteKey(now)}`;
+    const before = foldMinute(await readText($, path));
+    return before.granted < threshold;
+  } catch {
+    return true; // File system error: fail-open.
+  }
+}
+
+// No request goes out: paused after a failure, breaker open, OMC_JEV_MAX_REQUESTS used up, the
+// shared breaker open, or RPM capacity exhausted.
 async function blockedReason($, cfg, now) {
   if (session.failedInRow >= FAILURES_TO_OPEN) return 'circuit_open';
   if (now < session.pausedUntil) return 'paused';
   if (cfg.maxRequests && session.requests >= cfg.maxRequests) return 'cap';
   // Bounded like admission: a stalled shared volume falls back to "not open" after SHARED_OP_MS.
   if (cfg.shared && (await sharedStep($, () => readSharedBreaker($, cfg.shared, now), undefined))) return 'breaker_open';
+  if (cfg.shared && !(await rpmCapacityAvailable($, cfg.shared, 'compaction', now))) return 'rpm';
   return undefined;
 }
 
@@ -989,6 +1003,9 @@ async function decide($, e, cfg, record, started) {
   const blocked = await blockedReason($, cfg, Date.now());
   if (blocked) {
     if (blocked === 'paused') Object.assign(record, { paused_until: new Date(session.pausedUntil).toISOString(), pause_reason: session.pauseReason });
+    else if (blocked === 'rpm') Object.assign(record, { held: 'rpm' });
+    else if (blocked === 'breaker_open') Object.assign(record, { held: 'breaker' });
+    else if (blocked === 'cap') Object.assign(record, { held: 'cap' });
     return { fallback: blocked };
   }
 
@@ -996,12 +1013,12 @@ async function decide($, e, cfg, record, started) {
   const askable = [...candidates].sort((a, b) => b.resIdx - a.resIdx).filter((c) => !c.secret && c.textOnly);
   record.secret_skipped = candidates.filter((c) => c.secret).length;
   record.non_text = candidates.filter((c) => !c.textOnly).length;
-  const left = cfg.maxRequests ? cfg.maxRequests - session.requests : MAX_REQUESTS;
+  let left = cfg.maxRequests ? cfg.maxRequests - session.requests : MAX_REQUESTS;
   if (left <= 0) {
     Object.assign(record, { asked: 0, requests: 0, held: 'cap' });
     return { fallback: 'cap' };
   }
-  const asked = askable.slice(0, BATCH * Math.min(MAX_REQUESTS, left));
+  let asked = askable.slice(0, BATCH * Math.min(MAX_REQUESTS, left));
   record.asked = asked.length;
 
   const user = userTask(messages, typeof e.instructions === 'string' && e.instructions.trim() ? e.instructions : undefined);
@@ -1038,10 +1055,13 @@ async function decide($, e, cfg, record, started) {
       }),
     );
   }
-  // Recheck process cap: concurrent calls may both pass blockedReason() check; after one increments
-  // session.requests and returns, the second resumes with potentially exhausted capacity. If no requests
-  // were made and the cap is now reached, treat it as a cap hit so the built-in summary runs.
-  if (!runs.length && !held && cfg.maxRequests && session.requests >= cfg.maxRequests) {
+  // Recheck process cap: concurrent calls may both pass blockedReason() and the preliminary cap check,
+  // computing large asked arrays. If no requests were made and the cap is now reached, or if asked became
+  // empty after another call consumed the quota, treat it as a cap hit so the built-in summary runs.
+  if (!runs.length && !held && (cfg.maxRequests && session.requests >= cfg.maxRequests)) {
+    held = { mode: 'process-cap' };
+  }
+  if (!asked.length && !runs.length && !held) {
     held = { mode: 'process-cap' };
   }
   if (held) {
