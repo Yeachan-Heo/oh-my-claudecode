@@ -5,15 +5,15 @@
   "provenance": {
     "base": "05c800f40d1ad53b42a78609d2667ef4f726808b",
     "planningHead": "0a91273e61dbbd47eb0af4c02844409251e08398",
-    "head": "458a665fe8e1fa614a2928fd09007bc34a35c41c",
-    "sourceSha256": "b9ba437b09ffbaf51a5c3e66cfc158daf8ad05c9bc2b59bd91b213997a737d98",
+    "head": "12e820fa08cc2d0c33183876926994e47167d289",
+    "sourceSha256": "71a3ab70f35b1ee7ccc14d58174172262945c1c584d44cb54c1ef38c2f6f4561",
     "generatedAt": null,
     "generator": "scripts/generate-inventory-graph.mjs"
   },
   "base": "05c800f40d1ad53b42a78609d2667ef4f726808b",
   "planningHead": "0a91273e61dbbd47eb0af4c02844409251e08398",
-  "head": "458a665fe8e1fa614a2928fd09007bc34a35c41c",
-  "sourceSha256": "b9ba437b09ffbaf51a5c3e66cfc158daf8ad05c9bc2b59bd91b213997a737d98",
+  "head": "12e820fa08cc2d0c33183876926994e47167d289",
+  "sourceSha256": "71a3ab70f35b1ee7ccc14d58174172262945c1c584d44cb54c1ef38c2f6f4561",
   "counts": {
     "public": {
       "skills": 84,
@@ -48188,6 +48188,11 @@
         "path": "tests/integration/issue-4814-ralph-plugin-cli.test.ts"
       },
       {
+        "id": "tests/integration/issue-4933-fable-opt-in-routing.test.ts",
+        "kind": "other",
+        "path": "tests/integration/issue-4933-fable-opt-in-routing.test.ts"
+      },
+      {
         "id": "tests/integration/jev-active-mode-repro.test.ts",
         "kind": "other",
         "path": "tests/integration/jev-active-mode-repro.test.ts"
@@ -91190,6 +91195,46 @@
         "kind": "imports"
       },
       {
+        "from": "tests/integration/issue-4933-fable-opt-in-routing.test.ts",
+        "to": "external:node:child_process",
+        "kind": "imports"
+      },
+      {
+        "from": "tests/integration/issue-4933-fable-opt-in-routing.test.ts",
+        "to": "external:node:fs",
+        "kind": "imports"
+      },
+      {
+        "from": "tests/integration/issue-4933-fable-opt-in-routing.test.ts",
+        "to": "external:node:http",
+        "kind": "imports"
+      },
+      {
+        "from": "tests/integration/issue-4933-fable-opt-in-routing.test.ts",
+        "to": "external:node:http",
+        "kind": "type-imports"
+      },
+      {
+        "from": "tests/integration/issue-4933-fable-opt-in-routing.test.ts",
+        "to": "external:node:os",
+        "kind": "imports"
+      },
+      {
+        "from": "tests/integration/issue-4933-fable-opt-in-routing.test.ts",
+        "to": "external:node:path",
+        "kind": "imports"
+      },
+      {
+        "from": "tests/integration/issue-4933-fable-opt-in-routing.test.ts",
+        "to": "external:node:url",
+        "kind": "imports"
+      },
+      {
+        "from": "tests/integration/issue-4933-fable-opt-in-routing.test.ts",
+        "to": "external:vitest",
+        "kind": "imports"
+      },
+      {
         "from": "tests/integration/jev-active-mode-repro.test.ts",
         "to": "external:node:child_process",
         "kind": "imports"
@@ -92686,12 +92731,12 @@
       }
     ],
     "stats": {
-      "nodeCount": 8256,
-      "edgeCount": 8840,
-      "importEdgeCount": 7389,
+      "nodeCount": 8257,
+      "edgeCount": 8848,
+      "importEdgeCount": 7396,
       "registerEdgeCount": 105
     }
   },
-  "inventorySha256": "c7931f544f90dca9124319d31873fa1374ee8884c61f4e259ed19330196f41c4",
-  "manifestSha256": "8991038bcbcab4d8c27cdaa2e6ea3c6d3e349291f61187be5c930d6a80cab03a"
+  "inventorySha256": "23dcb3dc576c95b38813fde29f787c08a1d01845d2d1c5a93530966512789053",
+  "manifestSha256": "ee8ec6014fb1911bdd1c59c747603198be7391691a0dcb9eb5ce77b7a220f95b"
 }
