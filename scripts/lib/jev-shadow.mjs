@@ -24,6 +24,21 @@ import { parseJevEnv, resolveJevEndpoint, resolveJevTimeoutMs } from "../jev-res
 
 const SWEEP_THROTTLE_MS = 60 * 60 * 1000; // 1 hour
 const ACTIVE_RESOLVER_TIMEOUT_BUFFER_MS = 500;
+// model-routing decides the model and effort of a subagent call, and a lost
+// answer costs that choice, so its resolver gets 3 s more to start and finish
+// before spawnSync kills it (a cold start under load can take a second or more).
+const MODEL_ROUTING_RESOLVER_EXTRA_BUFFER_MS = 3000;
+
+/**
+ * Time the hook gives the resolver process beyond the request timeout
+ * (OMC_JEV_TIMEOUT_MS) before it kills it.
+ */
+export function activeResolverBufferMs(point) {
+  return (
+    ACTIVE_RESOLVER_TIMEOUT_BUFFER_MS +
+    (point === "model-routing" ? MODEL_ROUTING_RESOLVER_EXTRA_BUFFER_MS : 0)
+  );
+}
 
 // Opt-in shared breaker (OMC_JEV_BREAKER=1, see jev-breaker.mjs): the hook
 // shows one notice per session and outage. Without the variable the module is
@@ -505,7 +520,10 @@ export function recordJevShadow({ point, state, questions, heuristic, permission
               ? { ...process.env, OMC_JEV_HOOK_DEADLINE: String(spawnedAt + hookTimeoutMs - 100) }
               : process.env,
             encoding: "utf8",
-            timeout: hookTimeoutMs,
+            timeout: resolveJevTimeoutMs(
+              process.env,
+              activeResolverBufferMs(point),
+            ),
           },
         );
 
