@@ -41,9 +41,10 @@ function okResponse(json) {
   return { ok: true, status: 200, headers: {}, text: JSON.stringify(json) };
 }
 
-function fakeDollar({ env = ACTIVE_ENV, settingsEnv, respond = (body) => okResponse(scoreByMarker(body)), clockAfter, usage, messages = [], compactResult, writeThrows = false, diskPrefix, flakyBreakerRead = false, stallBreakerRead = false, fsDelayMs = 0 } = {}) {
+function fakeDollar({ env = ACTIVE_ENV, settingsEnv, respond = (body) => okResponse(scoreByMarker(body)), clockAfter, usage, messages = [], compactResult, writeThrows = false, diskPrefix, flakyBreakerRead = false, stallBreakerRead = false, stallRpmRead = false, rpmReadGate, fsDelayMs = 0 } = {}) {
   const files = new Map();
   let flaked = false;
+  let gated = false;
   const calls = { fetch: [], write: 0, toast: [], log: 0, compact: 0, usage: 0, messages: 0, settings: 0 };
   const $ = {
     env: { get: async (name) => env[name] },
@@ -53,6 +54,8 @@ function fakeDollar({ env = ACTIVE_ENV, settingsEnv, respond = (body) => okRespo
         if (fsDelayMs) await new Promise((resolve) => setTimeout(resolve, fsDelayMs));
         if (flakyBreakerRead && !flaked && p.endsWith('/breaker.json')) { flaked = true; throw new Error('EPERM'); }
         if (stallBreakerRead && p.endsWith('/breaker.json')) return new Promise(() => {});
+        if (stallRpmRead && /\/rpm-\d+$/.test(p)) return new Promise(() => {});
+        if (rpmReadGate && !gated && /\/rpm-\d+$/.test(p)) { gated = true; await rpmReadGate; }
         if (diskPrefix && p.startsWith(diskPrefix)) return readFileSync(p, 'utf8'); if (!files.has(p)) throw new Error('ENOENT'); return files.get(p);
       },
       exists: async (p) => (diskPrefix && p.startsWith(diskPrefix) ? existsSync(p) : files.has(p)),
@@ -348,6 +351,34 @@ describe('jev-compaction module: active compaction', () => {
     const sent = sentResults(run.calls).map((r) => r.input).join('\n');
     expect(sent).not.toMatch(/private/);
     expect(run.records()[0]).toMatchObject({ secret_skipped: 3 });
+  });
+
+  it('with every eligible result on a private path and no limit set, nothing is sent and the results are pruned without the built-in summary', async () => {
+    const messages = conversation(20, { tool: () => 'Read', input: () => ({ file_path: '/work/.env' }) });
+    const run = await compactOnce(messages, { env: ACTIVE_ENV });
+    expect(run.calls.fetch).toHaveLength(0);
+    expect(run.next.seen).toHaveLength(0);
+    expect(run.out).not.toBe(SUMMARY);
+    expect(run.out.messages.length).toBeGreaterThan(0);
+  });
+
+  it('home defaults with HOME and USERPROFILE both set: POSIX keeps spool and shared state under HOME, Windows under USERPROFILE, private paths expand against USERPROFILE', async () => {
+    const posixEnv = { ...ACTIVE_ENV, HOME: '/home/u', USERPROFILE: 'C:\\Users\\alice', OMC_JEV_BREAKER: '1' };
+    const posix = await compactOnce(conversation(20), { env: posixEnv });
+    expect(posix.records()).toHaveLength(1);
+    expect([...posix.files.keys()].filter((p) => p.includes('/.omc/state/jev/')).every((p) => p.startsWith('/home/u/.omc/state/jev/'))).toBe(true);
+    const winEnv = { ...posixEnv, OS: 'Windows_NT', HOME: 'C:\\git-home' };
+    const win = await compactOnce(conversation(20), { env: winEnv });
+    const winPaths = [...win.files.keys()].filter((p) => p.includes('/.omc/state/jev/'));
+    expect(winPaths.some((p) => p.startsWith('C:/Users/alice/.omc/state/jev/compaction-spool/'))).toBe(true);
+    expect(winPaths.every((p) => p.startsWith('C:/Users/alice/.omc/state/jev/'))).toBe(true);
+    const calls = { 3: ['Read', { file_path: 'C:/Users/alice/private/ledger.txt' }] };
+    const messages = conversation(20, {
+      tool: (i) => (calls[i] ? calls[i][0] : 'Bash'),
+      input: (i) => (calls[i] ? calls[i][1] : { command: `cat notes-${i}.txt` }),
+    });
+    const priv = await compactOnce(messages, { env: { ...winEnv, OMC_JEV_COMPACT_PRIVATE_PATHS: '~\\private' } });
+    expect(sentResults(priv.calls).map((r) => r.input).join('\n')).not.toMatch(/private/);
   });
 
   it('a result the user names in a recent message counts as needed, matched as a whole name', async () => {
@@ -698,6 +729,27 @@ describe('jev-compaction module: shared breaker and request limit (OMC_JEV_BREAK
     expect(run.out).toBeDefined();
     expect(Date.now() - started).toBeLessThan(20_000);
   }, 30_000);
+
+  it('(a) a stalled read of the per-minute limit file does not stall the preliminary guard: precompute answers within the shared step deadline', async () => {
+    const c = shared({ OMC_JEV_MAX_RPM: '10' });
+    const started = Date.now();
+    const run = await compactShared(c, conversation(30), { handlers: load(), stallRpmRead: true }, { trigger: 'precompute' });
+    expect(run.out).toBeDefined();
+    expect(Date.now() - started).toBeLessThan(6000);
+  }, 10_000);
+
+  it('(c) a timed-out step keeps its place in the shared queue until its I/O settles, and expired queued work writes nothing when that I/O finally completes', async () => {
+    await calmMinute();
+    const c = shared({ OMC_JEV_MAX_RPM: '10' });
+    let release;
+    const rpmReadGate = new Promise((resolve) => { release = resolve; });
+    const run = await compactShared(c, conversation(30), { handlers: load(), rpmReadGate });
+    expect(run.calls.fetch).toHaveLength(1);
+    release();
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    const written = existsSync(c.settings.dir) ? readdirSync(c.settings.dir).filter((n) => n.startsWith('rpm-')) : [];
+    expect(written).toEqual([]);
+  }, 20_000);
 
   it('(a) a breaker that has expired, or one that is corrupt, holds nothing back', async () => {
     const c = shared({ OMC_JEV_BREAKER: '1' });

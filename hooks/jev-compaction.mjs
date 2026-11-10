@@ -659,7 +659,8 @@ async function blockedReason($, cfg, now) {
   if (cfg.maxRequests && session.requests >= cfg.maxRequests) return 'cap';
   // Bounded like admission: a stalled shared volume falls back to "not open" after SHARED_OP_MS.
   if (cfg.shared && (await sharedStep($, () => readSharedBreaker($, cfg.shared, now), undefined))) return 'breaker_open';
-  if (cfg.shared && !(await rpmCapacityAvailable($, cfg.shared, 'compaction', now))) return 'rpm';
+  // The capacity peek is bounded the same way and fails open.
+  if (cfg.shared && !(await sharedStep($, () => rpmCapacityAvailable($, cfg.shared, 'compaction', now), true))) return 'rpm';
   return undefined;
 }
 
@@ -1054,15 +1055,6 @@ async function decide($, e, cfg, record, started) {
         return { ...r, batch, ms: Date.now() - t0 };
       }),
     );
-  }
-  // Recheck process cap: concurrent calls may both pass blockedReason() and the preliminary cap check,
-  // computing large asked arrays. If no requests were made and the cap is now reached, or if asked became
-  // empty after another call consumed the quota, treat it as a cap hit so the built-in summary runs.
-  if (!runs.length && !held && (cfg.maxRequests && session.requests >= cfg.maxRequests)) {
-    held = { mode: 'process-cap' };
-  }
-  if (!asked.length && !runs.length && !held) {
-    held = { mode: 'process-cap' };
   }
   if (held) {
     // A request held back by the shared breaker or limit is no failure of the endpoint. The results it
