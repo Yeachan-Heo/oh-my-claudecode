@@ -611,15 +611,21 @@ const MODEL_ROUTING_QUESTIONS = {
 // cap is not needed as a brake and would cut them where the work needs them.
 // Set a lower cap to restrict it.
 // When the point is active and Jev returns no usable effort score, an
-// explicit effort above the cap is lowered to the cap.
+// explicit effort above the cap is lowered to the cap. With
+// OMC_JEV_MAX_EFFORT_ALWAYS=1 the cap also bounds the explicit effort of every
+// other Task/Agent call (see capExplicitEffort).
 const EFFORT_LEVELS = ['low', 'medium', 'high', 'xhigh', 'max'];
 const DEFAULT_MAX_EFFORT = 'max';
+
+// The cap may be read more than once in one hook run; a bad value is reported once.
+let maxEffortWarned = false;
 
 function resolveMaxEffort(env = process.env) {
   const raw = String(env.OMC_JEV_MAX_EFFORT ?? '').trim().toLowerCase();
   if (EFFORT_LEVELS.includes(raw)) return raw;
   // A typo in a cap must not silently lift it to the most expensive level.
-  if (raw && env.OMC_JEV_QUIET !== '1') {
+  if (raw && env.OMC_JEV_QUIET !== '1' && !maxEffortWarned) {
+    maxEffortWarned = true;
     console.error('[jev] model-routing: OMC_JEV_MAX_EFFORT=' + raw.slice(0, 40) + ' is not one of ' + EFFORT_LEVELS.join(', ') + '; using ' + DEFAULT_MAX_EFFORT);
   }
   return DEFAULT_MAX_EFFORT;
@@ -627,6 +633,39 @@ function resolveMaxEffort(env = process.env) {
 
 function capEffort(effort, maxEffort) {
   return EFFORT_LEVELS.indexOf(effort.toLowerCase()) > EFFORT_LEVELS.indexOf(maxEffort) ? maxEffort : effort;
+}
+
+// OMC_JEV_MAX_EFFORT_ALWAYS=1 makes OMC_JEV_MAX_EFFORT a limit for every Task/Agent call,
+// not only for the effort the active model-routing point sets: an explicit effort above
+// the cap is lowered also when the point is off or in shadow mode, when Jev is not asked
+// about the call or gives no usable answer, and when the hook fails. Off by default.
+function isMaxEffortAlwaysEnabled(env = process.env) {
+  return ['1', 'true'].includes(String(env.OMC_JEV_MAX_EFFORT_ALWAYS ?? '').trim().toLowerCase());
+}
+
+// Returns a copy of the Task/Agent input with its effort lowered to the cap, or null
+// when the variable is off, the call has no effort, or its effort is within the cap.
+// No effort is ever added.
+function capExplicitEffort(toolInput) {
+  if (!isMaxEffortAlwaysEnabled() || !toolInput || typeof toolInput.effort !== 'string') return null;
+  const capped = capEffort(toolInput.effort, resolveMaxEffort());
+  return capped === toolInput.effort ? null : { ...toolInput, effort: capped };
+}
+
+// The same cap on main()'s error path, where every other change to the call is dropped.
+// The error may come before the hook input was parsed, so the raw input is parsed here.
+// Returns `{ input, toolInput }` (the parsed hook input and the capped call) or null.
+function capExplicitEffortAfterError(data, rawInput) {
+  if (!isMaxEffortAlwaysEnabled()) return null;
+  try {
+    const input = data && (data.toolInput || data.tool_input) ? data : JSON.parse(rawInput);
+    const toolName = input?.tool_name || input?.toolName;
+    if (toolName !== 'Task' && toolName !== 'Agent') return null;
+    const toolInput = capExplicitEffort(input.toolInput || input.tool_input);
+    return toolInput ? { input, toolInput } : null;
+  } catch {
+    return null;
+  }
 }
 
 function effortFromScore(score, maxEffort) {
@@ -2146,8 +2185,9 @@ async function main() {
   }
 
   let data = {};
+  let input = '';
   try {
-    const input = await readStdin();
+    input = await readStdin();
 
     const toolName = extractJsonField(input, 'tool_name') || extractJsonField(input, 'toolName', 'unknown');
     const directory = extractJsonField(input, 'cwd') || extractJsonField(input, 'directory', process.cwd());
@@ -2356,6 +2396,9 @@ async function main() {
       const jevUpdated = recordModelRoutingShadow(toolName, toolInput, updatedToolInput, data.permission_mode, data.transcript_path || data.transcriptPath || '', directory, data.session_id || data.sessionId || '', stateDir);
       // In active mode, Jev may override the model choice
       if (jevUpdated) updatedToolInput = jevUpdated;
+      // OMC_JEV_MAX_EFFORT_ALWAYS=1: the cap holds whether or not Jev set the effort.
+      const effortCapped = capExplicitEffort(updatedToolInput || toolInput);
+      if (effortCapped) updatedToolInput = effortCapped;
     }
 
     // Send notification when AskUserQuestion is about to execute (user input needed)
@@ -2507,8 +2550,18 @@ async function main() {
       }
     }, data, 2);
   } catch (error) {
-    // On error, always continue
-    emitPreToolUseOutput({ continue: true, suppressOutput: true }, data);
+    // On error, always continue. With OMC_JEV_MAX_EFFORT_ALWAYS=1 a Task/Agent call
+    // still does not run above the effort cap; nothing else in it is changed.
+    const capped = capExplicitEffortAfterError(data, input);
+    if (capped) {
+      emitPreToolUseOutput({
+        continue: true,
+        suppressOutput: true,
+        hookSpecificOutput: { hookEventName: 'PreToolUse', updatedInput: capped.toolInput },
+      }, capped.input);
+    } else {
+      emitPreToolUseOutput({ continue: true, suppressOutput: true }, data);
+    }
   }
 }
 
