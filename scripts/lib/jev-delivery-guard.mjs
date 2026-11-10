@@ -29,7 +29,7 @@
  *      delivered. Lines without tool_use_id are skipped: with a log that has none, only interruptions are reported.
  *      A model counts as delivered when it is the chosen tier's alias, a full model id that contains the
  *      tier as a whole word (claude-opus-4-8 for opus), or the id the tier resolves to in the configuration
- *      (the first set one of OMC_SUBAGENT_MODEL, CLAUDE_CODE_BEDROCK_<TIER>_MODEL, ANTHROPIC_DEFAULT_<TIER>_MODEL).
+ *      (the first set one of CLAUDE_CODE_BEDROCK_<TIER>_MODEL, ANTHROPIC_DEFAULT_<TIER>_MODEL).
  *
  * State: <config dir>/.omc/jev-guard/ (sessions/<id>.json and, per Jev log directory,
  * daily-<key>.json, daily-<key>.lock, delivery-<key>.json).
@@ -359,17 +359,18 @@ async function readDecisions(logDir, since, until) {
   return decisions;
 }
 
-// The variables that resolve a tier alias to a model id, in the order of pre-tool-enforcer.mjs
-// (TIER_TO_DEFAULT_ENV_KEYS) and src/config/models.ts: the first one that is set wins.
+// The variables Claude Code reads to resolve a tier alias to a model id; the first one that is set wins, as in
+// pre-tool-enforcer.mjs (TIER_TO_DEFAULT_ENV_KEYS). The OMC-internal ones (OMC_SUBAGENT_MODEL, OMC_MODEL_*) are left
+// out: Claude Code does not read them, so they do not change which model an alias runs on.
 const TIER_ENV_KEYS = {
-  haiku: ['OMC_SUBAGENT_MODEL', 'CLAUDE_CODE_BEDROCK_HAIKU_MODEL', 'ANTHROPIC_DEFAULT_HAIKU_MODEL'],
-  sonnet: ['OMC_SUBAGENT_MODEL', 'CLAUDE_CODE_BEDROCK_SONNET_MODEL', 'ANTHROPIC_DEFAULT_SONNET_MODEL'],
-  opus: ['OMC_SUBAGENT_MODEL', 'CLAUDE_CODE_BEDROCK_OPUS_MODEL', 'ANTHROPIC_DEFAULT_OPUS_MODEL'],
-  fable: ['OMC_SUBAGENT_MODEL', 'CLAUDE_CODE_BEDROCK_FABLE_MODEL', 'ANTHROPIC_DEFAULT_FABLE_MODEL'],
+  haiku: ['CLAUDE_CODE_BEDROCK_HAIKU_MODEL', 'ANTHROPIC_DEFAULT_HAIKU_MODEL'],
+  sonnet: ['CLAUDE_CODE_BEDROCK_SONNET_MODEL', 'ANTHROPIC_DEFAULT_SONNET_MODEL'],
+  opus: ['CLAUDE_CODE_BEDROCK_OPUS_MODEL', 'ANTHROPIC_DEFAULT_OPUS_MODEL'],
+  fable: ['CLAUDE_CODE_BEDROCK_FABLE_MODEL', 'ANTHROPIC_DEFAULT_FABLE_MODEL'],
 };
 const modelId = (value) => String(value ?? '').trim().toLowerCase().replace(/\[[^\]]*\]$/, ''); // "[1m]" is a context suffix, not part of the id
 const configuredTierModel = (tier, env) => {
-  for (const key of TIER_ENV_KEYS[tier] ?? []) {
+  for (const key of Object.hasOwn(TIER_ENV_KEYS, tier) ? TIER_ENV_KEYS[tier] : []) { // a tier name like "constructor" is no tier
     const value = modelId(env[key]);
     if (value) return value;
   }

@@ -278,11 +278,11 @@ describe('the sweep of old session records', () => {
     startSession(session('live'), options());
     const before = readFileSync(recordPath('live'), 'utf8');
     expect(promptCheck(session('live'), options({ now: NOW + 3 * DAY }))).toBeNull();
-    expect(statSync(recordPath('live')).mtimeMs).toBe(NOW + 3 * DAY);
+    expect(Math.abs(statSync(recordPath('live')).mtimeMs - (NOW + 3 * DAY))).toBeLessThan(2); // a file system may round to whole microseconds
     expect(readFileSync(recordPath('live'), 'utf8')).toBe(before);
-    // a /compact marks it too, before the sweep that /compact runs
-    startSession(session('live', 'compact'), options({ now: NOW + 16 * DAY }));
-    expect(statSync(recordPath('live')).mtimeMs).toBe(NOW + 16 * DAY);
+    // a /compact marks it too, before the sweep that /compact runs: untouched, the record would be 15 days old then
+    startSession(session('live', 'compact'), options({ now: NOW + 18 * DAY }));
+    expect(Math.abs(statSync(recordPath('live')).mtimeMs - (NOW + 18 * DAY))).toBeLessThan(2);
     expect(existsSync(recordPath('live'))).toBe(true);
   });
 });
@@ -348,7 +348,7 @@ function writeFixture() {
 describe('(c) the daily figures', () => {
   it('counts delivered decisions and interrupted hooks on known data', async () => {
     const logDir = writeFixture();
-    const result = await computeDelivery({ logDir, configDir, now: NOW });
+    const result = await computeDelivery({ logDir, configDir, now: NOW, env: {} });
     expect(result).toMatchObject({
       ts: NOW,
       windowHours: 24,
@@ -365,7 +365,7 @@ describe('(c) the daily figures', () => {
     const logDir = writeFixture();
     const sessionDir = join(configDir, 'projects', 'proj', 'sess');
     writeFileSync(join(sessionDir, 'subagents', 'agent-d1.meta.json'), JSON.stringify({ toolUseId: 'd1', model: 'opusx' }));
-    const result = await computeDelivery({ logDir, configDir, now: NOW });
+    const result = await computeDelivery({ logDir, configDir, now: NOW, env: {} });
     expect(result.delivered).toBe(5);
   });
 
@@ -388,11 +388,11 @@ describe('(c) the daily figures', () => {
       expect(await deliveredFor('sonnet', 'kimi-k2.6:cloud', { ANTHROPIC_DEFAULT_SONNET_MODEL: 'kimi-k2.6:cloud' })).toBe(true);
       expect(await deliveredFor('Sonnet', 'KIMI-K2.6:cloud[1m]', { ANTHROPIC_DEFAULT_SONNET_MODEL: 'kimi-k2.6:cloud' })).toBe(true);
       expect(await deliveredFor('opus', 'us.anthropic.claude-x-v1:0', { CLAUDE_CODE_BEDROCK_OPUS_MODEL: 'us.anthropic.claude-x-v1:0' })).toBe(true);
-      expect(await deliveredFor('haiku', 'glm-5', { OMC_SUBAGENT_MODEL: 'glm-5' })).toBe(true);
+      expect(await deliveredFor('haiku', 'glm-5', { ANTHROPIC_DEFAULT_HAIKU_MODEL: 'glm-5' })).toBe(true);
       expect(await deliveredFor('fable', 'fable-proxy-1', { ANTHROPIC_DEFAULT_FABLE_MODEL: 'fable-proxy-1' })).toBe(true);
     });
 
-    it('takes the first tier variable that is set, like src/config/models.ts', async () => {
+    it('takes the first tier variable that is set, in the order Claude Code reads them', async () => {
       const env = { CLAUDE_CODE_BEDROCK_SONNET_MODEL: 'bedrock-model-a', ANTHROPIC_DEFAULT_SONNET_MODEL: 'proxy-model-b' };
       expect(await deliveredFor('sonnet', 'bedrock-model-a', env)).toBe(true);
       expect(await deliveredFor('sonnet', 'proxy-model-b', env)).toBe(false);
@@ -407,6 +407,16 @@ describe('(c) the daily figures', () => {
       expect(await deliveredFor('sonnet', 'kimi', env)).toBe(false); // a part of the configured id is not the id
       expect(await deliveredFor('opus', 'opusx', env)).toBe(false);
       expect(await deliveredFor('opus', '', env)).toBe(false);
+    });
+
+    it('ignores the OMC-internal override, which Claude Code does not read for an alias', async () => {
+      // the agent inherited the session model: the override must not turn that into a delivery of any tier
+      const env = { OMC_SUBAGENT_MODEL: 'inherited-model', OMC_MODEL_LOW: 'inherited-model' };
+      for (const tier of ['haiku', 'sonnet', 'opus', 'fable']) expect(await deliveredFor(tier, 'inherited-model', env)).toBe(false);
+    });
+
+    it('survives a tier name that is no tier', async () => {
+      for (const tier of ['constructor', 'toString', '__proto__']) expect(await deliveredFor(tier, 'some-model', {})).toBe(false);
     });
 
     it('still matches the alias and a full id with the tier as a whole word', async () => {
@@ -426,7 +436,7 @@ describe('(c) the daily figures', () => {
     const logDir = writeFixture();
     for (const name of readdirSync(logDir)) if (name !== 'shadow.jsonl') rmSync(join(logDir, name));
     writeFileSync(join(logDir, 'shadow.jsonl'), JSON.stringify({ ts: new Date(NOW - HOUR).toISOString(), point: 'model-routing', mode: 'active', answers: { 'model-tier': { type: 'choice', choice: 'opus' } } }) + '\n');
-    const result = await computeDelivery({ logDir, configDir, now: NOW });
+    const result = await computeDelivery({ logDir, configDir, now: NOW, env: {} });
     expect(result).toMatchObject({ decisions: 0, withAgent: 0, deliveredPercent: null, interruptedAgentHooks: 3 });
     expect(deliveryMessage(result)).toContain('no active model-routing decision could be matched to an agent');
   });
