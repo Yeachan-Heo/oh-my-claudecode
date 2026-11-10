@@ -216,13 +216,12 @@ describe("issue #4933: opt-in fable model routing (subprocess)", () => {
       const modelRoutingRequest = result.jevRequests.find((req) =>
         req.questions && req.questions["model-tier"]
       );
-      if (modelRoutingRequest) {
-        const criteria = (modelRoutingRequest.questions["model-tier"] as Record<string, unknown>)?.criteria || {};
-        expect(
-          Object.keys(criteria),
-          `fable should NOT be in criteria with value="${value}"`
-        ).not.toContain("fable");
-      }
+      expect(modelRoutingRequest, `Should have model-tier question for value="${value}"`).toBeDefined();
+      const criteria = (modelRoutingRequest!.questions["model-tier"] as Record<string, unknown>)?.criteria || {};
+      expect(
+        Object.keys(criteria),
+        `fable should NOT be in criteria with value="${value}"`
+      ).not.toContain("fable");
     });
 
     // Test with '1' - should enable fable
@@ -232,10 +231,9 @@ describe("issue #4933: opt-in fable model routing (subprocess)", () => {
     const modelRoutingRequest1 = enabledResult1.jevRequests.find((req) =>
       req.questions && req.questions["model-tier"]
     );
-    if (modelRoutingRequest1) {
-      const criteria1 = (modelRoutingRequest1.questions["model-tier"] as Record<string, unknown>)?.criteria || {};
-      expect(Object.keys(criteria1), `fable should be in criteria with value="1"`).toContain("fable");
-    }
+    expect(modelRoutingRequest1, 'Should have model-tier question for value="1"').toBeDefined();
+    const criteria1 = (modelRoutingRequest1!.questions["model-tier"] as Record<string, unknown>)?.criteria || {};
+    expect(Object.keys(criteria1), `fable should be in criteria with value="1"`).toContain("fable");
 
     // Test with 'true' - should also enable fable
     const enabledResultTrue = await runEnforcer(agentInput(), {
@@ -244,10 +242,9 @@ describe("issue #4933: opt-in fable model routing (subprocess)", () => {
     const modelRoutingRequestTrue = enabledResultTrue.jevRequests.find((req) =>
       req.questions && req.questions["model-tier"]
     );
-    if (modelRoutingRequestTrue) {
-      const criteriaTrue = (modelRoutingRequestTrue.questions["model-tier"] as Record<string, unknown>)?.criteria || {};
-      expect(Object.keys(criteriaTrue), `fable should be in criteria with value="true"`).toContain("fable");
-    }
+    expect(modelRoutingRequestTrue, 'Should have model-tier question for value="true"').toBeDefined();
+    const criteriaTrue = (modelRoutingRequestTrue!.questions["model-tier"] as Record<string, unknown>)?.criteria || {};
+    expect(Object.keys(criteriaTrue), `fable should be in criteria with value="true"`).toContain("fable");
   }, 90000);
 
   it("should reject fable when Jev suggests it but opt-in is disabled", async () => {
@@ -256,17 +253,11 @@ describe("issue #4933: opt-in fable model routing (subprocess)", () => {
     });
 
     // Parse the output to check if fable was rejected
-    if (result.stdout) {
-      try {
-        const output = JSON.parse(result.stdout);
-        const routedModel = output.hookSpecificOutput?.updatedInput?.model;
-        // With opt-in disabled, fable should be rejected
-        expect(routedModel, "fable should not be accepted without opt-in").not.toBe("fable");
-      } catch {
-        // Output parsing failed, just check no explicit fable acceptance
-        expect(result.stderr, "Should not show fable acceptance").not.toMatch(/fable.*accepted|fable.*routed/i);
-      }
-    }
+    expect(result.stdout, `stderr: ${result.stderr}`).toBeTruthy();
+    const output = JSON.parse(result.stdout);
+    const routedModel = output.hookSpecificOutput?.updatedInput?.model;
+    // With opt-in disabled, fable should be rejected
+    expect(routedModel, "fable should not be accepted without opt-in").not.toBe("fable");
   }, 30000);
 
   it("should accept fable when Jev suggests it and opt-in is enabled", async () => {
@@ -275,16 +266,10 @@ describe("issue #4933: opt-in fable model routing (subprocess)", () => {
     });
 
     // Parse the output to check if fable was accepted
-    if (result.stdout) {
-      try {
-        const output = JSON.parse(result.stdout);
-        const routedModel = output.hookSpecificOutput?.updatedInput?.model;
-        // With opt-in enabled, fable should be accepted
-        expect(routedModel, "fable should be accepted with opt-in").toBe("fable");
-      } catch {
-        // Output parsing failed, just verify no rejection
-        expect(result.stderr, "Should not show fable rejection").not.toMatch(/fable.*invalid|fable.*rejected/i);
-      }
-    }
+    expect(result.stdout, `stderr: ${result.stderr}`).toBeTruthy();
+    const output = JSON.parse(result.stdout);
+    const routedModel = output.hookSpecificOutput?.updatedInput?.model;
+    // With opt-in enabled, fable should be accepted
+    expect(routedModel, "fable should be accepted with opt-in").toBe("fable");
   }, 30000);
 });
