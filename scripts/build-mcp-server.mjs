@@ -56,12 +56,6 @@ const buildConfig = {
     // Native modules that can't be bundled
     '@ast-grep/napi',
     'better-sqlite3',
-    // MCP SDK optional dependencies
-    'ajv-formats',
-    'zod-to-json-schema',
-    'fast-deep-equal',
-    'json-schema-traverse',
-    'fast-uri',
   ],
 };
 
