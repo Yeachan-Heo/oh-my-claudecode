@@ -713,15 +713,15 @@ function build(messages, candidates, keepFrom, group, stats) {
 function pairing(messages) {
   const open = new Set();
   const seen = new Set();
-  let orphanResults = 0;
+  const orphanResults = new Set();
   for (const m of messages) {
     for (const u of m.toolUses || []) { open.add(u.tool_use_id); seen.add(u.tool_use_id); }
     for (const r of m.toolResults || []) {
-      if (!seen.has(r.tool_use_id)) orphanResults++;
+      if (!seen.has(r.tool_use_id)) orphanResults.add(r.tool_use_id);
       open.delete(r.tool_use_id);
     }
   }
-  return { orphanResults, openCalls: open.size };
+  return { orphanResults, openCalls: open };
 }
 // Pairing as the host checks it before a request (measured on Claude Code 2.1.321). The host joins
 // consecutive user rows, and joins an assistant row to an earlier assistant message of the same
@@ -730,7 +730,8 @@ function pairing(messages) {
 // internal error]" in its place and drops the real result. A row a hook built gets a new message.id,
 // so it joins nothing; the rows with the engine's handle since the last user row with text are taken
 // as one message, also across a built assistant row (the host keeps joining by message.id past it).
-// Counts calls without a result in the next message and results without a call in the previous one.
+// Returns the ids of calls without a result in the next message (`u:<id>`) and of results without a
+// call in the previous one (`r:<id>`).
 function adjacencyBreaks(messages) {
   const msgs = [];
   let run = -1;
@@ -748,7 +749,7 @@ function adjacencyBreaks(messages) {
     if (last && last.role === 'user') last.results.push(...results);
     else msgs.push({ role: 'user', results });
   }
-  let breaks = 0;
+  const breaks = new Set();
   const seen = new Set();
   msgs.forEach((mm, k) => {
     if (mm.role !== 'assistant') return;
@@ -757,15 +758,17 @@ function adjacencyBreaks(messages) {
     const next = msgs[k + 1];
     if (!next) return;
     const got = new Set(next.role === 'user' ? next.results : []);
-    for (const id of uses) if (!got.has(id)) breaks++;
-    for (const id of got) if (!mm.uses.includes(id)) breaks++;
+    for (const id of uses) if (!got.has(id)) breaks.add(`u:${id}`);
+    for (const id of got) if (!mm.uses.includes(id)) breaks.add(`r:${id}`);
   });
   return breaks;
 }
+const subset = (x, y) => [...x].every((id) => y.has(id));
+// Every break of the built list (by id) is already a break of the list the host handed over.
 export function pairingOk(original, built) {
   const a = pairing(original);
   const b = pairing(built);
-  return b.orphanResults <= a.orphanResults && b.openCalls <= a.openCalls && adjacencyBreaks(built) <= adjacencyBreaks(original);
+  return subset(b.orphanResults, a.orphanResults) && subset(b.openCalls, a.openCalls) && subset(adjacencyBreaks(built), adjacencyBreaks(original));
 }
 
 // Resolves {value}, {timeout: true} or {error}; never rejects. $.clock.after is a timer, not the

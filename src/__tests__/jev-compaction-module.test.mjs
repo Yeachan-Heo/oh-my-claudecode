@@ -825,6 +825,10 @@ describe('jev-compaction module: what the host sends after the compaction', () =
     // The host joins a kept row to its message across a built row: b's message is then followed by the built row.
     const thought = [{ role: 'assistant', text: '', toolUses: [], handle: 'h0' }, call('a', 'h1'), call('b', 'h2'), res(['a'], 'h3'), res(['b'], 'h4')];
     expect(pairingOk(thought, [thought[0], { role: 'assistant', text: '[compacted] a', toolUses: [] }, call('b', 'h2'), res(['b'])])).toBe(false);
+    // Compared by id: one open call for another is not the same pairing, even with equal counts.
+    const lost = [call('a', 'h1'), call('b', 'h2'), res(['b'], 'h3')];
+    expect(pairingOk(lost, [call('a'), res(['a']), call('b')])).toBe(false);
+    expect(pairingOk(lost, lost)).toBe(true);
   });
 
   it('between turns no assistant row keeps its handle, so --resume joins nothing from before the compaction', async () => {
