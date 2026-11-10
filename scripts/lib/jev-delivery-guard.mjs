@@ -117,7 +117,7 @@ export function settingsEnvHash(configDir = getClaudeConfigDir()) {
   }
   const section = settings.env && typeof settings.env === 'object' ? settings.env : {};
   const pairs = Object.entries(section)
-    .filter(([key]) => /^(OMC_|ANTHROPIC_|TYPESAFE_|CLAUDE_CODE_BEDROCK_)/.test(key))
+    .filter(([key]) => /^(OMC_|ANTHROPIC_|TYPESAFE_)/.test(key))
     .map(([key, value]) => `${key}=${String(value)}`)
     .sort();
   return digest(JSON.stringify(pairs));
@@ -162,11 +162,7 @@ function pruneSessions(dir, now) {
     for (const name of readdirSync(dir)) {
       if (name === '.swept') continue;
       const path = join(dir, name);
-      try {
-        const stat = statSync(path);
-        // Only prune if not recently accessed (keep active session baselines)
-        if (now - Math.max(stat.mtimeMs, stat.atimeMs) > SESSION_RECORD_MAX_AGE_MS) unlinkSync(path);
-      } catch { /* removed meanwhile */ }
+      try { if (now - statSync(path).mtimeMs > SESSION_RECORD_MAX_AGE_MS) unlinkSync(path); } catch { /* removed meanwhile */ }
     }
   } catch { /* no directory yet */ }
 }
@@ -270,7 +266,7 @@ export function promptCheck(data, options = {}) {
         confirmations.push(() => { record.warnedHooks = hooks; });
       }
       if (settingsEnv && record.env && settingsEnv !== record.env && record.warnedEnv !== settingsEnv) {
-        reasons.push('the OMC_*, ANTHROPIC_*, CLAUDE_CODE_BEDROCK_* or TYPESAFE_* variables in the env section of settings.json changed');
+        reasons.push('the OMC_*, ANTHROPIC_* or TYPESAFE_* variables in the env section of settings.json changed');
         confirmations.push(() => { record.warnedEnv = settingsEnv; });
       }
       if (reasons.length > 0) messages.push(changedSinceStartMessage(reasons));
@@ -282,10 +278,6 @@ export function promptCheck(data, options = {}) {
           confirmations.push(() => { record.shown = result.ts; });
         }
       }
-    }
-    // Refresh the session file's mtime to keep it out of stale pruning
-    if (file && record && typeof record === 'object') {
-      try { writeFileSync(file, ''); writeJson(file, record); } catch { /* file may have been removed */ }
     }
     const state = readJson(dailyFile(dir, logDir, 'daily.json'));
     if (now - (Number(state?.lastStart) || 0) >= DAY_MS) startDailyCheck(dir, configDir, logDir, env, now);
@@ -346,21 +338,7 @@ async function readDecisions(logDir, since, until) {
 }
 
 // meta.json holds the alias the call was made with ("opus") or a resolved id ("claude-opus-4-8"): equal, or the alias is one of its words.
-// Also check if actual is a provider model that matches a configured tier alias mapping.
-const modelMatches = (actual, wanted, env = process.env) => {
-  if (actual === wanted || actual.split(/[^a-z0-9]+/).includes(wanted)) return true;
-  // Check if 'wanted' is a tier alias that maps to 'actual' in the configured provider models
-  const tierMappings = {
-    haiku: [env.CLAUDE_CODE_BEDROCK_HAIKU_MODEL, env.ANTHROPIC_DEFAULT_HAIKU_MODEL, 'claude-haiku'].filter(Boolean),
-    sonnet: [env.CLAUDE_CODE_BEDROCK_SONNET_MODEL, env.ANTHROPIC_DEFAULT_SONNET_MODEL, 'claude-sonnet'].filter(Boolean),
-    opus: [env.CLAUDE_CODE_BEDROCK_OPUS_MODEL, env.ANTHROPIC_DEFAULT_OPUS_MODEL, 'claude-opus'].filter(Boolean),
-    fable: [env.CLAUDE_CODE_BEDROCK_FABLE_MODEL, env.ANTHROPIC_DEFAULT_FABLE_MODEL, 'claude-fable'].filter(Boolean),
-  };
-  const aliases = Object.entries(tierMappings)
-    .filter(([alias]) => alias.toLowerCase() === wanted.toLowerCase())
-    .flatMap(([, models]) => models);
-  return aliases.some(model => actual === model || actual.split(/[^a-z0-9]+/).includes(model.split(/[^a-z0-9]+/)[0]));
-};
+const modelMatches = (actual, wanted) => actual === wanted || actual.split(/[^a-z0-9]+/).includes(wanted);
 
 // Models of the agents that ran in the window: tool use id -> model, from the agents' meta.json files.
 function readAgentModels(projectsDir, since) {
@@ -413,7 +391,7 @@ export async function computeDelivery({ logDir, configDir = getClaudeConfigDir()
   for (const [id, wanted] of decisions) {
     if (!models.has(id)) continue;
     result.withAgent++;
-    if (modelMatches(models.get(id), wanted, env)) result.delivered++;
+    if (modelMatches(models.get(id), wanted)) result.delivered++;
   }
   if (result.withAgent > 0) result.deliveredPercent = Math.round((1000 * result.delivered) / result.withAgent) / 10;
   const interrupted = await countInterruptions(projectsDir, since, now);
