@@ -38,6 +38,13 @@ describe('jevNoulOf', () => {
     ['a string noul', active({ answer: { type: 'noul', noul: '0.9' } })],
     ['a non-finite noul', active({ answer: { type: 'noul', noul: Number.NaN } })],
     ['an infinite noul', active({ answer: { type: 'noul', noul: Number.POSITIVE_INFINITY } })],
+    ['a negative noul', active({ answer: { type: 'noul', noul: -1 } })],
+    ['a noul just below 0', active({ answer: { type: 'noul', noul: -0.01 } })],
+    ['a noul above 1', active({ answer: { type: 'noul', noul: 2 } })],
+    ['a noul just above 1', active({ answer: { type: 'noul', noul: 1.01 } })],
+    ['a non-noul answer that carries a noul field', active({ answer: { type: 'choice', choice: 'a', noul: 0.9 } })],
+    ['a noul answer without a type', active({ answer: { noul: 0.9 } })],
+    ['an answers-map entry of another type', active({ answers: { q: { type: 'score', score: 2, noul: 0.9 } } })],
   ])('returns undefined for %s', (_label, result) => {
     expect(jevNoulOf(result, 'q')).toBeUndefined();
   });

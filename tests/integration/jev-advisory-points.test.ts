@@ -545,6 +545,21 @@ describe("jev advisory points: opt-in actions", () => {
       expect(read(path)).toMatchObject({ active: true, iteration: 3 });
     }, 20000);
 
+    it.each([
+      ["a phase transition", (current: Record<string, unknown>) => ({ ...current, phase: "validation", current_phase: "validation" })],
+      ["a generation stamp only", (current: Record<string, unknown>) => ({ ...current, _meta: { written_at: "2099-01-01T00:00:00.000Z" } })],
+    ])("keeps blocking when the autopilot state changes by %s while Jev is answering", async (_label, change) => {
+      const sessionId = `sess-release-autopilot-changed-${_label.split(" ")[0]}`;
+      const path = write(sessionId, "autopilot-state.json", state("autopilot", sessionId));
+      noul.task_complete = 0.95;
+      onTaskComplete = () => writeFileSync(path, JSON.stringify(change(read(path))));
+
+      const output = await stop(sessionId, { OMC_JEV_LOOP_RELEASE_ONLY: "1" });
+      expect(output.decision).toBe("block");
+      expect(String(output.reason)).toContain("[AUTOPILOT - Phase:");
+      expect(read(path)).toMatchObject({ active: true });
+    }, 20000);
+
     it("without the variable a complete answer still completes the mode", async () => {
       const sessionId = "sess-release-off";
       const path = write(sessionId, "ralph-state.json", state("ralph", sessionId));

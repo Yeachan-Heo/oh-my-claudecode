@@ -215,7 +215,8 @@ function readJsonFile(path) {
 /**
  * Check if the state file has been modified since it was last read.
  * Re-reads the state from disk and verifies that key identifiers
- * (session_id, iteration, updated_at) haven't changed.
+ * (session_id, iteration, updated_at, active, phase, current_phase and the
+ * _meta.written_at generation stamp) haven't changed.
  * Returns true if the state is safe to write (unchanged), false otherwise.
  */
 function isStateUnchangedSinceJevRequest(originalState, statePath) {
@@ -227,6 +228,10 @@ function isStateUnchangedSinceJevRequest(originalState, statePath) {
   if (originalState.session_id !== currentState.session_id) return false;
   if (originalState.iteration !== currentState.iteration) return false;
   if (originalState.updated_at !== currentState.updated_at) return false;
+  if (originalState.active !== currentState.active) return false;
+  if (originalState.phase !== currentState.phase) return false;
+  if (originalState.current_phase !== currentState.current_phase) return false;
+  if (originalState._meta?.written_at !== currentState._meta?.written_at) return false;
   
   return true;
 }
