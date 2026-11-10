@@ -26,7 +26,6 @@ import { spawn, spawnSync } from "child_process";
 import { join, dirname, resolve, normalize, sep } from "path";
 import { homedir } from "os";
 import { fileURLToPath, pathToFileURL } from "url";
-<<<<<<< HEAD
 import { isJevShadowOptedIn, recordJevShadow, setJevSessionId, jevNoulOf } from "./lib/jev-shadow.mjs";
 
 const __filename = fileURLToPath(import.meta.url);

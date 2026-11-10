@@ -25,7 +25,6 @@ import { execFileSync } from 'child_process';
 import { readStdin } from './lib/stdin.mjs';
 import { resolveOmcStateRoot } from './lib/state-root.mjs';
 import { BOUNDED_GIT_TIMEOUT_MS } from './lib/bounded-git-timeout.mjs';
-<<<<<<< HEAD
 import { recordJevShadow, setJevSessionId, jevNoulOf } from './lib/jev-shadow.mjs';
 
 const DEFAULT_EXTENSIONS = ['.ts', '.tsx', '.js', '.jsx', '.py', '.go', '.rs'];
