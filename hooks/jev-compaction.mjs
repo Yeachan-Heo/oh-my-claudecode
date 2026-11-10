@@ -72,6 +72,9 @@ const STATE_INPUT_CHARS = 300;
 const STATE_HEAD_CHARS = 1000;
 const STATE_TAIL_CHARS = 500;
 const USER_CHARS = 4000;
+// Text is cut before masking so a huge result or message costs bounded time; the cut keeps this much more
+// than the part that is used, so a secret that starts inside the used part is still seen whole.
+const MASK_SLACK_CHARS = 20000;
 const USER_MESSAGES = 3;
 // Mirror of POINT_DEFAULT_EXCERPT_CHARS.compaction in src/hooks/jev/config.ts: the longest string the
 // state holds (USER_CHARS), so the default bounds nothing the limits above do not already bound.
@@ -161,7 +164,13 @@ export function retryAfterMs(value, now = Date.now()) {
   const text = String(value ?? '').trim();
   if (!text) return undefined;
   if (/^\d+(\.\d+)?$/.test(text)) return Math.ceil(Number(text)) * 1000;
-  const at = Date.parse(text);
+  // The three HTTP-date forms (IMF-fixdate, RFC 850, asctime); any other text is not a Retry-After.
+  const httpDate =
+    /^[A-Za-z]{3}, \d{2} [A-Za-z]{3} \d{4} \d{2}:\d{2}:\d{2} GMT$/.test(text) ||
+    /^[A-Za-z]{6,9}, \d{2}-[A-Za-z]{3}-\d{2} \d{2}:\d{2}:\d{2} GMT$/.test(text) ||
+    /^[A-Za-z]{3} [A-Za-z]{3} [ \d]\d \d{2}:\d{2}:\d{2} \d{4}$/.test(text);
+  if (!httpDate) return undefined;
+  const at = Date.parse(/GMT$/.test(text) ? text : `${text} GMT`);
   return Number.isFinite(at) ? Math.max(0, at - now) : undefined;
 }
 
@@ -178,6 +187,14 @@ export function classifyFailure(result, now = Date.now()) {
   return { kind: `http_${status}` };
 }
 
+// First `head` and last `tail` characters of the masked text. A long text is masked only where those parts
+// come from (with MASK_SLACK_CHARS more on each side); the omitted count is of the original.
+function maskedHeadTail(text, head, tail) {
+  if (text.length <= head + tail + 2 * MASK_SLACK_CHARS) return headTail(maskSecrets(text), head, tail);
+  const first = maskSecrets(text.slice(0, head + MASK_SLACK_CHARS)).slice(0, head);
+  const last = maskSecrets(text.slice(-(tail + MASK_SLACK_CHARS))).slice(-tail);
+  return `${first}\n[... ${text.length - head - tail} chars omitted ...]\n${last}`;
+}
 const oneLine = (text) => String(text ?? '').replace(/\s+/g, ' ').trim();
 const clip = (text, max) => (text.length > max ? text.slice(0, max) : text);
 const headTail = (text, head, tail) =>
@@ -337,13 +354,13 @@ function userWords(m) {
 // messages, together USER_CHARS characters.
 function userTask(messages, instructions) {
   let left = USER_CHARS;
-  const instr = instructions ? clip(maskSecrets(instructions), left) : undefined;
+  const instr = instructions ? clip(maskSecrets(String(instructions).slice(0, left + MASK_SLACK_CHARS)), left) : undefined;
   if (instr) left -= instr.length;
   const picked = [];
   for (let i = messages.length - 1; i >= 0 && picked.length < USER_MESSAGES && left > 0; i--) {
     const words = userWords(messages[i]);
     if (!words) continue;
-    const text = clip(maskSecrets(words), left);
+    const text = clip(maskSecrets(words.slice(0, left + MASK_SLACK_CHARS)), left);
     picked.unshift(text);
     left -= text.length;
   }
@@ -629,8 +646,8 @@ async function decide($, e, cfg, record, started) {
       c.question = `r${k + 1}`;
       results[c.question] = {
         tool: c.use.tool,
-        input: clip(oneLine(maskSecrets(inputJson(c.use.input))), STATE_INPUT_CHARS),
-        result: headTail(maskSecrets(c.res.text || ''), STATE_HEAD_CHARS, STATE_TAIL_CHARS),
+        input: clip(oneLine(maskSecrets(inputJson(c.use.input).slice(0, STATE_INPUT_CHARS * 4 + MASK_SLACK_CHARS))), STATE_INPUT_CHARS),
+        result: maskedHeadTail(c.res.text || '', STATE_HEAD_CHARS, STATE_TAIL_CHARS),
         chars: c.resultChars,
         ...(c.res.isError ? { error: true } : {}),
       };
@@ -696,7 +713,7 @@ async function compact($, e, next) {
   if (cfg.mode === 'off') return next(e);
   // An active point replaces the summary, so a summary computed ahead of time would be wasted; while
   // the breaker is open the summary will run, so the host may compute it ahead.
-  if (e.trigger === 'precompute') return cfg.mode === 'active' && session.failedInRow < FAILURES_TO_OPEN ? { skip: 'jev-compaction replaces the summary' } : next(e);
+  if (e.trigger === 'precompute') return cfg.mode === 'active' && !blockedReason(cfg, Date.now()) ? { skip: 'jev-compaction replaces the summary' } : next(e);
   const started = Date.now();
   session.compacting++;
   try {

@@ -442,6 +442,16 @@ describe('jev-compaction module: endpoint failures', () => {
     expect(retryAfterMs('soon', now)).toBeUndefined();
   });
 
+  it('takes a Retry-After date only in the three HTTP forms, like the shared breaker', () => {
+    const now = Date.parse('2026-11-09T12:00:00Z');
+    expect(retryAfterMs('Mon, 09 Nov 2026 12:05:00 GMT', now)).toBe(300_000);
+    expect(retryAfterMs('Monday, 09-Nov-26 12:05:00 GMT', now)).toBe(300_000);
+    expect(retryAfterMs('Mon Nov  9 12:05:00 2026', now)).toBe(300_000);
+    expect(retryAfterMs('Nov 9 2026 12:05', now)).toBeUndefined();
+    expect(retryAfterMs('2026-11-09T12:05:00Z', now)).toBeUndefined();
+    expect(retryAfterMs('9/11/2026', now)).toBeUndefined();
+  });
+
   it('rounds a fractional Retry-After up to whole seconds, never down', () => {
     const now = Date.parse('2026-11-09T12:00:00Z');
     expect(retryAfterMs('1.5', now)).toBe(2000);
@@ -482,6 +492,30 @@ describe('jev-compaction module: endpoint failures', () => {
     // With the breaker open the host may compute the summary ahead of time again.
     const precompute = await compactOnce(conversation(30), { handlers }, { trigger: 'precompute' });
     expect(precompute.out).toBe(SUMMARY);
+  });
+
+  it('precompute passes through while requests are paused, since the summary will run then too', async () => {
+    const handlers = load();
+    const limited = () => ({ ok: false, status: 429, headers: { 'retry-after': '120' }, text: '' });
+    await compactOnce(conversation(30), { handlers, respond: limited });
+    const precompute = await compactOnce(conversation(30), { handlers }, { trigger: 'precompute' });
+    expect(precompute.out).toBe(SUMMARY);
+    expect(precompute.calls.fetch).toHaveLength(0);
+  });
+
+  it('masks a very long result only where its head and tail come from, and counts the omitted characters of the original', async () => {
+    const secretHead = 'sk-' + 'a1'.repeat(20);
+    const secretTail = 'ghp_' + 'Zx9'.repeat(10);
+    const huge = `HEAD-1 key ${secretHead} ` + 'x'.repeat(300_000) + ` TAIL-1 ${secretTail}`;
+    const { calls } = await compactOnce(conversation(30, { result: (i) => (i === 1 ? huge : `RESULT-${i} ${'x'.repeat(2000)}`) }), {});
+    const sent = sentResults(calls).find((r) => r.result.startsWith('HEAD-1'));
+    expect(sent).toBeDefined();
+    expect(sent.result).toContain('sk-***');
+    expect(sent.result).not.toContain(secretHead);
+    expect(sent.result.endsWith('ghp_***')).toBe(true);
+    expect(sent.result).toContain(`[... ${huge.length - 1500} chars omitted ...]`);
+    expect(sent.result.length).toBeLessThan(1600);
+    expect(JSON.stringify(calls.fetch[0].body)).not.toContain(secretTail);
   });
 
   it('an invalid body falls back; one failed batch of three still compacts with the rest', async () => {

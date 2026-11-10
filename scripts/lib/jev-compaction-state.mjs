@@ -1,3 +1,4 @@
+/* global process, Buffer */
 /**
  * Classic-hook side of the Jev compaction module (hooks/jev-compaction.mjs, point `compaction`).
  *
@@ -117,7 +118,8 @@ export function recordCompactionState(kind, data, env = process.env) {
     const sessionId = data?.session_id || data?.sessionId;
     if (!sessionId || !compactionEnabled(env)) return;
     const tool = String(data.tool_name || data.toolName || '');
-    const input = data.tool_input && typeof data.tool_input === 'object' ? data.tool_input : {};
+    const rawInput = data.tool_input ?? data.toolInput;
+    const input = rawInput && typeof rawInput === 'object' ? rawInput : {};
     const path = registryPath(sessionId, data.agent_id || data.agentId, env);
     const marker = path.replace(/\.jsonl$/, '.open-error.json');
     const events = [];
@@ -135,7 +137,7 @@ export function recordCompactionState(kind, data, env = process.env) {
         const file = input.file_path || input.notebook_path;
         if (typeof file === 'string' && file) events.push({ t: 'file', v: file });
       } else if (SHELL_TOOLS.has(tool) && typeof input.command === 'string' && GIT_CHANGE.test(input.command)) {
-        events.push({ t: 'git', v: oneLine(maskSecrets(input.command), 200) });
+        events.push({ t: 'git', v: oneLine(maskSecrets(input.command, { keepGitHashes: true }), 200) });
       } else if (tool === 'TodoWrite' && Array.isArray(input.todos)) {
         events.push({ t: 'tasks', v: input.todos.filter((x) => x && x.status !== 'completed').slice(0, MAX_TASKS).map((x) => ({ text: oneLine(x.content ?? x.activeForm, 150), status: String(x.status ?? '') })) });
       } else if (/(^|__)update_plan$/.test(tool) && Array.isArray(input.items)) {

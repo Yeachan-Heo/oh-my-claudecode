@@ -6,7 +6,7 @@
  * No imports and no Node APIs: the Claude Code hooks module hooks/jev-compaction.mjs imports this
  * file too, and a hooks module may import only plain files of its plugin.
  */
-export function maskSecrets(text) {
+export function maskSecrets(text, { keepGitHashes = false } = {}) {
   return String(text ?? '')
     .replace(/(-----BEGIN [A-Z ]*PRIVATE KEY-----)[\s\S]*?(-----END [A-Z ]*PRIVATE KEY-----|$)/g, '$1***')
     .replace(/(\/\/[^/\s:@]+:)[^/\s@]+@/g, '$1***@')
@@ -24,5 +24,6 @@ export function maskSecrets(text) {
     .replace(/\beyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}/g, 'eyJ***')
     .replace(/(\b[A-Za-z0-9_]*(?:KEY|TOKEN|SECRET|PASSWORD|PASSWD|PASS|PWD|CREDENTIALS?)[A-Za-z0-9_]*["'\]]*\s*[=:]\s*["']?)[^\s"'&;|)]+/gi, '$1***')
     .replace(/((?:api[_-]?key|access[_-]?key|client[_-]?secret|private[_-]?key|password|passwd|token|secret)["']?\s*[:=]\s*["']?)[^\s"'&;|,}]+/gi, '$1***')
-    .replace(/(^|[^A-Za-z0-9+_-])(?=[A-Za-z0-9+_-]*\d)(?=[A-Za-z0-9+_-]*[A-Za-z])[A-Za-z0-9+_-]{32,}={0,2}/g, '$1***');
+    .replace(/(^|[^A-Za-z0-9+_-])(?=[A-Za-z0-9+_-]*\d)(?=[A-Za-z0-9+_-]*[A-Za-z])([A-Za-z0-9+_-]{32,}={0,2})/g, (whole, before, token) =>
+      keepGitHashes && /^(?:[0-9a-f]{40}|[0-9a-f]{64})$/.test(token) ? whole : before + '***');
 }

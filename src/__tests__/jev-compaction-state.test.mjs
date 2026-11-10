@@ -13,6 +13,7 @@ import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { afterAll, describe, expect, it } from 'vitest';
 
+import { maskSecrets } from '../../scripts/lib/jev-mask.mjs';
 import { afterSessionStart, foldRegistry, MISSING_MESSAGE, recordCompactionState, REGISTRY_CHARS, registryPath, renderRegistry } from '../../scripts/lib/jev-compaction-state.mjs';
 
 const root = join(fileURLToPath(import.meta.url), '..', '..', '..');
@@ -36,6 +37,24 @@ function spoolRecord(spool, sid, record, ageMs = 0) {
   return name;
 }
 const logRows = (log) => (existsSync(log) ? readFileSync(log, 'utf8').trim().split('\n').filter(Boolean).map((l) => JSON.parse(l)) : []);
+
+describe('jev-compaction-state: secret masking keeps commit hashes in the registry', () => {
+  it('masks a 40-character hex string in general text but keeps it in the git lines of the registry', () => {
+    const { env, sid } = setup();
+    const sha = '0123456789abcdef0123456789abcdef01234567';
+    expect(maskSecrets('revert ' + sha)).toBe('revert ***');
+    expect(maskSecrets('revert ' + sha, { keepGitHashes: true })).toBe('revert ' + sha);
+    expect(maskSecrets('token ' + 'Ab3'.repeat(14), { keepGitHashes: true })).toBe('token ***');
+    post(env, sid, 'Bash', { command: 'git revert ' + sha });
+    expect(readFileSync(registryPath(sid, undefined, env), 'utf8')).toContain(sha);
+  });
+
+  it('reads the camelCase toolInput of a hook input too', () => {
+    const { env, sid } = setup();
+    recordCompactionState('post', { session_id: sid, tool_name: 'Write', toolInput: { file_path: '/p/camel.ts' } }, env);
+    expect(readFileSync(registryPath(sid, undefined, env), 'utf8')).toContain('/p/camel.ts');
+  });
+});
 
 describe('jev-compaction-state: registry', () => {
   it('writes nothing unless OMC_JEV names compaction (all:active is not enough)', () => {
