@@ -11,21 +11,22 @@
  *
  *  (a) startSession(): the smallest numeric timeout of the pre-tool-enforcer PreToolUse entries in the
  *      plugin's hooks.json is below OMC_JEV_GUARD_MIN_TIMEOUT_S (default 60) -> one message.
- *      Also records, per session id, a hash of hooks.json and of the OMC_* / ANTHROPIC_* keys of the
- *      settings.json `env` section. A /compact keeps the record (same process); a session without a
- *      record gets its baseline at its first prompt.
+ *      Also records, per session id, a hash of hooks.json and of the OMC_*, ANTHROPIC_* and TYPESAFE_*
+ *      keys of the `env` section of the user-level settings.json. A /compact keeps the record (same
+ *      process); a session without a record gets its baseline at its first prompt.
  *  (b) promptCheck(): hooks.json or those env keys differ from the session's record -> one message per
  *      change, "restart the session". Only hashes are stored (sha256, 16 hex digits); values never are.
  *  (c) promptCheck() also starts, at most once per 24 hours, a detached process (this file with
  *      --daily) that reads the session transcripts of the last 24 hours for interrupted PreToolUse
- *      hooks (lines with "timedOut":true: only the hook name, time and tool use id are read; nothing
- *      is stored) and, when shadow.jsonl lines carry a tool_use_id field, the share of
+ *      hooks (lines with "timedOut":true: only the hook name, command, time and tool use id are read;
+ *      nothing is stored) and, when shadow.jsonl lines carry a tool_use_id field, the share of
  *      active model-routing decisions whose model reached the agent (agent meta.json). The next prompt
  *      shows a message when any PreToolUse:Agent hook was interrupted or the share is below 95 %.
  *      Decisions the hook deliberately left alone (a `use` marker, forceInherit) count as not
  *      delivered. Lines without tool_use_id are skipped: with a log that has none, only interruptions are reported.
  *
- * State: <config dir>/.omc/jev-guard/ (sessions/<id>.json, daily.json, daily.lock, delivery.json).
+ * State: <config dir>/.omc/jev-guard/ (sessions/<id>.json and, per Jev log directory,
+ * daily-<key>.json, daily-<key>.lock, delivery-<key>.json).
  */
 
 import { spawn } from 'node:child_process';
@@ -41,6 +42,7 @@ import { getClaudeConfigDir } from './config-dir.mjs';
 export const DEFAULT_MIN_TIMEOUT_S = 60;
 export const DELIVERY_ALERT_PERCENT = 95;
 const DAY_MS = 24 * 3600 * 1000;
+const STALE_RESULT_MS = 2 * DAY_MS; // a daily result older than this is not shown
 const SESSION_RECORD_MAX_AGE_MS = 14 * DAY_MS;
 const LOCK_STALE_MS = 30 * 60 * 1000;
 const SETTLE_MS = 120 * 1000; // a decision younger than this may not have an agent yet
@@ -62,6 +64,13 @@ export function minTimeoutSeconds(env = process.env) {
 
 const guardDir = (configDir) => join(configDir, '.omc', 'jev-guard');
 const digest = (text) => createHash('sha256').update(text).digest('hex').slice(0, 16);
+// The daily check belongs to one Jev log directory (one project's log), so its files carry a key of it.
+const dailyFile = (dir, logDir, kind) => {
+  const [name, extension] = kind.split('.');
+  return join(dir, `${name}-${digest(String(logDir ?? ''))}.${extension}`);
+};
+/** Path of a daily-check state file (kind: daily.json, daily.lock or delivery.json) for a Jev log directory. */
+export const dailyStatePath = (configDir, logDir, kind) => dailyFile(guardDir(configDir), logDir, kind);
 
 function readJson(path) {
   try {
@@ -95,7 +104,7 @@ export function hooksJsonHash(pluginRoot = PLUGIN_ROOT) {
 }
 
 /**
- * Hash of the OMC_* and ANTHROPIC_* keys of the `env` section of settings.json (sorted key=value
+ * Hash of the OMC_*, ANTHROPIC_* and TYPESAFE_* keys of the `env` section of settings.json (sorted key=value
  * pairs), null when the file exists but cannot be parsed. The values may be API keys: only the hash
  * leaves this function. A missing file or section hashes like an empty one.
  */
@@ -108,7 +117,7 @@ export function settingsEnvHash(configDir = getClaudeConfigDir()) {
   }
   const section = settings.env && typeof settings.env === 'object' ? settings.env : {};
   const pairs = Object.entries(section)
-    .filter(([key]) => /^(OMC_|ANTHROPIC_)/.test(key))
+    .filter(([key]) => /^(OMC_|ANTHROPIC_|TYPESAFE_)/.test(key))
     .map(([key, value]) => `${key}=${String(value)}`)
     .sort();
   return digest(JSON.stringify(pairs));
@@ -190,13 +199,13 @@ export function deliveryMessage(result) {
   if (!(interrupted > 0 || (percent !== null && percent < DELIVERY_ALERT_PERCENT))) return null;
   const share = percent === null
     ? 'no active model-routing decision could be matched to an agent'
-    : `${result.delivered} of ${result.withAgent} Jev model decisions reached the agent (${percent} %)`;
-  return `Jev delivery guard: in the last ${result.windowHours} h ${share}; PreToolUse:Agent hooks interrupted: ${interrupted} (other PreToolUse hooks: ${Number(result.interruptedOtherHooks) || 0}). An interrupted hook loses Jev's model and effort for that call: check the pre-tool-enforcer timeout in hooks/hooks.json and restart sessions started before it was raised.`;
+    : `${result.delivered} of ${result.withAgent} Jev model decisions reached the agent (${percent} %; a call the hook leaves alone on purpose, such as a \`use\` marker or forceInherit, counts as not delivered)`;
+  return `Jev delivery guard: in the last ${result.windowHours} h ${share}; PreToolUse:Agent hooks interrupted: ${interrupted} (hooks of other commands: ${Number(result.interruptedOtherHooks) || 0}). An interrupted hook loses Jev's model and effort for that call: check the pre-tool-enforcer timeout in hooks/hooks.json and restart sessions started before it was raised.`;
 }
 
 // Takes the slot of the daily check: a lock file created exclusively; a lock older than 30 minutes is a dead check.
-function claimDailyCheck(dir, now) {
-  const lock = join(dir, 'daily.lock');
+function claimDailyCheck(dir, logDir, now) {
+  const lock = dailyFile(dir, logDir, 'daily.lock');
   for (let attempt = 0; attempt < 2; attempt++) {
     try { closeSync(openSync(lock, 'wx')); return lock; } catch { /* exists or no directory */ }
     try {
@@ -207,12 +216,12 @@ function claimDailyCheck(dir, now) {
 }
 
 function startDailyCheck(dir, configDir, logDir, env, now) {
-  const lock = claimDailyCheck(dir, now);
+  const lock = claimDailyCheck(dir, logDir, now);
   if (!lock) return;
   const release = () => { try { unlinkSync(lock); } catch { /* gone */ } };
-  if (!writeJson(join(dir, 'daily.json'), { lastStart: now })) return release();
+  if (!writeJson(dailyFile(dir, logDir, 'daily.json'), { lastStart: now })) return release();
   try {
-    const args = [SELF, '--daily', '--config', configDir];
+    const args = [SELF, '--daily', '--write', '--config', configDir];
     if (logDir) args.push('--log', logDir);
     const child = spawn(process.execPath, args, { detached: true, stdio: 'ignore', windowsHide: true, env });
     child.on('error', release);
@@ -245,18 +254,24 @@ export function promptCheck(data, options = {}) {
     if (record) {
       const hooks = hooksJsonHash(pluginRoot);
       const settingsEnv = settingsEnvHash(configDir);
+      // A part that could not be read at session start takes its baseline at the first prompt where it can.
+      if (file && ((hooks && !record.hooks) || (settingsEnv && !record.env))) {
+        record.hooks ??= hooks;
+        record.env ??= settingsEnv;
+        writeJson(file, record);
+      }
       const reasons = [];
       if (hooks && record.hooks && hooks !== record.hooks && record.warnedHooks !== hooks) {
         reasons.push("the plugin's hooks/hooks.json (hook entries and timeouts) changed");
         confirmations.push(() => { record.warnedHooks = hooks; });
       }
       if (settingsEnv && record.env && settingsEnv !== record.env && record.warnedEnv !== settingsEnv) {
-        reasons.push('the OMC_* or ANTHROPIC_* variables in the env section of settings.json changed');
+        reasons.push('the OMC_*, ANTHROPIC_* or TYPESAFE_* variables in the env section of settings.json changed');
         confirmations.push(() => { record.warnedEnv = settingsEnv; });
       }
       if (reasons.length > 0) messages.push(changedSinceStartMessage(reasons));
-      const result = readJson(join(dir, 'delivery.json'));
-      if (typeof result?.ts === 'number' && result.ts > (Number(record.shown) || 0)) {
+      const result = readJson(dailyFile(dir, logDir, 'delivery.json'));
+      if (typeof result?.ts === 'number' && result.ts > (Number(record.shown) || 0) && now - result.ts <= STALE_RESULT_MS) {
         const message = deliveryMessage(result);
         if (message) {
           messages.push(message);
@@ -264,7 +279,7 @@ export function promptCheck(data, options = {}) {
         }
       }
     }
-    const state = readJson(join(dir, 'daily.json'));
+    const state = readJson(dailyFile(dir, logDir, 'daily.json'));
     if (now - (Number(state?.lastStart) || 0) >= DAY_MS) startDailyCheck(dir, configDir, logDir, env, now);
     if (messages.length === 0) return null;
     return {
@@ -322,6 +337,9 @@ async function readDecisions(logDir, since, until) {
   return decisions;
 }
 
+// meta.json holds the alias the call was made with ("opus") or a resolved id ("claude-opus-4-8"): equal, or the alias is one of its words.
+const modelMatches = (actual, wanted) => actual === wanted || actual.split(/[^a-z0-9]+/).includes(wanted);
+
 // Models of the agents that ran in the window: tool use id -> model, from the agents' meta.json files.
 function readAgentModels(projectsDir, since) {
   const models = new Map();
@@ -345,10 +363,14 @@ async function countInterruptions(projectsDir, since, until) {
       const hookName = row?.attachment?.hookName;
       const at = Date.parse(row?.timestamp);
       if (typeof hookName !== 'string' || !hookName.startsWith('PreToolUse') || !(at > since && at <= until)) continue;
-      const key = `${hookName}|${row.attachment.toolUseID ?? `${row.timestamp}|${path}`}`;
+      const command = typeof row.attachment.command === 'string' ? row.attachment.command : '';
+      const key = `${hookName}|${command}|${row.attachment.toolUseID ?? `${row.timestamp}|${path}`}`;
       if (seen.has(key)) continue;
       seen.add(key);
-      if (hookName === 'PreToolUse:Agent') counts.agent++; else counts.other++;
+      // Every plugin's hook on the event has the same hookName. A record shows the hook's command, or only a
+      // label ("command hook 2") for a hook defined with args: the label cannot be told apart and counts as ours.
+      const foreign = command !== '' && !command.includes('pre-tool-enforcer') && !/^command hook \d+$/.test(command);
+      if (hookName === 'PreToolUse:Agent' && !foreign) counts.agent++; else counts.other++;
     }
   }
   return counts;
@@ -359,16 +381,17 @@ async function countInterruptions(projectsDir, since, until) {
  * Jev's active model-routing decisions (shadow.jsonl lines with a tool_use_id) whose model is the one
  * in the agent's meta.json. Decisions with no agent found are left out of the share.
  */
-export async function computeDelivery({ logDir, configDir = getClaudeConfigDir(), now = Date.now(), windowMs = DAY_MS } = {}) {
+export async function computeDelivery({ logDir, configDir = getClaudeConfigDir(), now = Date.now(), windowMs = DAY_MS, env = process.env } = {}) {
   const since = now - windowMs;
   const projectsDir = join(configDir, 'projects');
-  const decisions = await readDecisions(logDir, since, now);
+  // With forceInherit the hook leaves the model of some calls alone: the share would say nothing then.
+  const decisions = env.OMC_ROUTING_FORCE_INHERIT === 'true' ? new Map() : await readDecisions(logDir, since, now);
   const models = readAgentModels(projectsDir, since - 3600 * 1000);
   const result = { ts: now, windowHours: Math.round(windowMs / 360000) / 10, decisions: decisions.size, withAgent: 0, delivered: 0, deliveredPercent: null };
   for (const [id, wanted] of decisions) {
     if (!models.has(id)) continue;
     result.withAgent++;
-    if (models.get(id) === wanted) result.delivered++;
+    if (modelMatches(models.get(id), wanted)) result.delivered++;
   }
   if (result.withAgent > 0) result.deliveredPercent = Math.round((1000 * result.delivered) / result.withAgent) / 10;
   const interrupted = await countInterruptions(projectsDir, since, now);
@@ -382,19 +405,24 @@ async function runDailyCheck(argv) {
   try { setPriority(process.pid, 19); } catch { /* the priority stays normal */ }
   const configDir = value('--config') || getClaudeConfigDir();
   const dir = guardDir(configDir);
+  const hours = Number(value('--window-hours'));
+  const now = Date.parse(value('--now') ?? '');
   let result;
   try {
     result = await computeDelivery({
       logDir: value('--log'),
       configDir,
-      now: value('--now') ? Date.parse(value('--now')) : Date.now(),
-      windowMs: value('--window-hours') ? Number(value('--window-hours')) * 3600000 : DAY_MS,
+      now: Number.isFinite(now) ? now : Date.now(),
+      windowMs: hours > 0 ? hours * 3600000 : DAY_MS,
     });
   } catch (error) {
     result = { ts: Date.now(), error: String(error?.message ?? error).slice(0, 200) };
   }
-  writeJson(join(dir, 'delivery.json'), result);
-  try { unlinkSync(join(dir, 'daily.lock')); } catch { /* no lock */ }
+  // The detached check passes --write; a run by hand only prints (with --print) and leaves the state alone.
+  if (argv.includes('--write')) {
+    writeJson(dailyFile(dir, value('--log'), 'delivery.json'), result);
+    try { unlinkSync(dailyFile(dir, value('--log'), 'daily.lock')); } catch { /* no lock */ }
+  }
   if (argv.includes('--print')) console.log(JSON.stringify(result));
 }
 

@@ -16,6 +16,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import {
   computeDelivery,
+  dailyStatePath,
   deliveryMessage,
   isGuardEnabled,
   limitMessage,
@@ -152,13 +153,13 @@ describe('(b) changes after the session started', () => {
     expect(promptCheck(session(), options())).toBeNull();
   });
 
-  it('reports a change of OMC_* or ANTHROPIC_* variables in settings.json, never storing their values', () => {
+  it('reports a change of OMC_*, ANTHROPIC_* or TYPESAFE_* variables in settings.json, never storing their values', () => {
     writeSettings({ OMC_JEV: 'model-routing:active', ANTHROPIC_API_KEY: 'sk-first-secret' }, { theme: 'dark' });
     startSession(session(), options());
     expect(promptCheck(session(), options())).toBeNull();
     writeSettings({ OMC_JEV: 'model-routing:active', ANTHROPIC_API_KEY: 'sk-second-secret' }, { theme: 'dark' });
     const change = promptCheck(session(), options());
-    expect(change.text).toContain('OMC_* or ANTHROPIC_*');
+    expect(change.text).toContain('OMC_*, ANTHROPIC_* or TYPESAFE_*');
     expect(change.text).not.toContain('hooks/hooks.json');
     change.confirm();
     expect(promptCheck(session(), options())).toBeNull();
@@ -176,6 +177,23 @@ describe('(b) changes after the session started', () => {
     writeFileSync(join(configDir, 'settings.json'), '{ half written');
     expect(settingsEnvHash(configDir)).toBeNull();
     expect(promptCheck(session(), options())).toBeNull(); // no verdict from an unreadable file
+  });
+
+  it('reports the removal of the Jev key from the env of settings.json', () => {
+    writeSettings({ TYPESAFE_API_KEY: 'key-one' });
+    startSession(session(), options());
+    writeSettings({});
+    expect(promptCheck(session(), options()).text).toContain('TYPESAFE_*');
+  });
+
+  it('takes the baseline of a part that could not be read at session start from the first prompt where it reads', () => {
+    writeFileSync(join(configDir, 'settings.json'), '{ half written');
+    startSession(session(), options());
+    expect(promptCheck(session(), options())).toBeNull();
+    writeSettings({ OMC_JEV: 'model-routing:active' }); // readable now: this becomes the baseline, not a change
+    expect(promptCheck(session(), options())).toBeNull();
+    writeSettings({ OMC_JEV: 'all:active' });
+    expect(promptCheck(session(), options()).text).toContain('settings.json');
   });
 
   it('gives a session without a record its baseline at the first prompt', () => {
@@ -241,12 +259,14 @@ function writeFixture() {
   const nested = join(sessionDir, 'subagents', 'workflows', 'w1');
   mkdirSync(nested, { recursive: true });
   const meta = (id, model) => JSON.stringify({ toolUseId: id, model, agentType: 'executor' });
-  for (const id of ['d1', 'd2', 'd3', 'd4']) writeFileSync(join(sessionDir, 'subagents', `agent-${id}.meta.json`), meta(id, 'opus'));
+  for (const id of ['d1', 'd2']) writeFileSync(join(sessionDir, 'subagents', `agent-${id}.meta.json`), meta(id, 'opus'));
+  writeFileSync(join(sessionDir, 'subagents', 'agent-d3.meta.json'), meta('d3', 'claude-opus-4-8')); // the resolved id of the alias
+  writeFileSync(join(sessionDir, 'subagents', 'agent-d4.meta.json'), meta('d4', 'Claude-Opus-4-8[1m]'));
   writeFileSync(join(nested, 'agent-d5.meta.json'), meta('d5', 'opus')); // an agent spawned by an agent sits deeper
   writeFileSync(join(sessionDir, 'subagents', 'agent-d6.meta.json'), meta('d6', 'opus'));
   writeFileSync(join(sessionDir, 'subagents', 'agent-d7.meta.json'), meta('d7', 'sonnet'));
   writeFileSync(join(sessionDir, 'subagents', 'agent-d8.meta.json'), meta('d8', 'sonnet'));
-  const hook = (name, id, ms, timedOut = true) => JSON.stringify({ type: 'attachment', timestamp: iso(ms), attachment: { type: 'hook_non_blocking_error', hookName: name, toolUseID: id, timedOut } });
+  const hook = (name, id, ms, timedOut = true, command = 'command hook 1') => JSON.stringify({ type: 'attachment', timestamp: iso(ms), attachment: { type: 'hook_cancelled', hookName: name, toolUseID: id, hookEvent: name.split(':')[0], command, durationMs: 5100, timedOut, timeoutMs: 5000 } });
   writeFileSync(join(configDir, 'projects', 'proj', 'sess.jsonl'), [
     hook('PreToolUse:Agent', 't1', NOW - 5 * HOUR),
     hook('PreToolUse:Agent', 't2', NOW - 4 * HOUR),
@@ -254,6 +274,9 @@ function writeFixture() {
     hook('PostToolUse:Read', 't4', NOW - 4 * HOUR), // not a PreToolUse hook
     hook('PreToolUse:Agent', 't5', NOW - 4 * HOUR, false), // finished in time
     hook('PreToolUse:Agent', 't6', NOW - 40 * HOUR), // outside the window
+    hook('PreToolUse:Agent', 't7', NOW - 4 * HOUR, true, 'node "/plugins/other/scripts/toolgate.mjs"'), // another plugin's hook on the same event
+    hook('PreToolUse:Agent', 't8', NOW - 4 * HOUR, true, 'node "/plugins/omc/scripts/run.cjs" "/plugins/omc/scripts/pre-tool-enforcer.mjs"'), // named by its command
+    hook('PreToolUse:Agent', 't8', NOW - 4 * HOUR, true, 'node "/plugins/other/scripts/toolgate.mjs"'), // a second hook cut on the same call
   ].join('\n') + '\n');
   writeFileSync(join(nested, 'agent-w1.jsonl'), hook('PreToolUse:Agent', 't1', NOW - 5 * HOUR) + '\n'); // the same hook call seen again
   return logDir;
@@ -270,9 +293,23 @@ describe('(c) the daily figures', () => {
       withAgent: 8, // d9 has no agent
       delivered: 6, // d7 and d8 ran on sonnet although Jev chose opus
       deliveredPercent: 75,
-      interruptedAgentHooks: 2,
-      interruptedOtherHooks: 1,
+      interruptedAgentHooks: 3, // t1, t2 and t8 (the label of a hook defined with args cannot be told apart and counts as ours)
+      interruptedOtherHooks: 3, // t3 (a Bash hook), t7 and the second hook cut on t8 (both another plugin's command)
     });
+  });
+
+  it('matches the model by word, not by substring', async () => {
+    const logDir = writeFixture();
+    const sessionDir = join(configDir, 'projects', 'proj', 'sess');
+    writeFileSync(join(sessionDir, 'subagents', 'agent-d1.meta.json'), JSON.stringify({ toolUseId: 'd1', model: 'opusx' }));
+    const result = await computeDelivery({ logDir, configDir, now: NOW });
+    expect(result.delivered).toBe(5);
+  });
+
+  it('does not compute a share under forceInherit', async () => {
+    const logDir = writeFixture();
+    const result = await computeDelivery({ logDir, configDir, now: NOW, env: { OMC_ROUTING_FORCE_INHERIT: 'true' } });
+    expect(result).toMatchObject({ decisions: 0, deliveredPercent: null, interruptedAgentHooks: 3 });
   });
 
   it('reports interruptions without a share when the log has no tool_use_id', async () => {
@@ -280,7 +317,7 @@ describe('(c) the daily figures', () => {
     for (const name of readdirSync(logDir)) if (name !== 'shadow.jsonl') rmSync(join(logDir, name));
     writeFileSync(join(logDir, 'shadow.jsonl'), JSON.stringify({ ts: new Date(NOW - HOUR).toISOString(), point: 'model-routing', mode: 'active', answers: { 'model-tier': { type: 'choice', choice: 'opus' } } }) + '\n');
     const result = await computeDelivery({ logDir, configDir, now: NOW });
-    expect(result).toMatchObject({ decisions: 0, withAgent: 0, deliveredPercent: null, interruptedAgentHooks: 2 });
+    expect(result).toMatchObject({ decisions: 0, withAgent: 0, deliveredPercent: null, interruptedAgentHooks: 3 });
     expect(deliveryMessage(result)).toContain('no active model-routing decision could be matched to an agent');
   });
 
@@ -294,8 +331,8 @@ describe('(c) the daily figures', () => {
     const base = { ts: NOW, windowHours: 24, decisions: 100, withAgent: 100, delivered: 100, deliveredPercent: 100, interruptedAgentHooks: 0, interruptedOtherHooks: 0 };
     expect(deliveryMessage(base)).toBeNull();
     expect(deliveryMessage({ ...base, delivered: 95, deliveredPercent: 95 })).toBeNull();
-    expect(deliveryMessage({ ...base, delivered: 94, deliveredPercent: 94 })).toContain('94 of 100 Jev model decisions reached the agent (94 %)');
-    expect(deliveryMessage({ ...base, interruptedAgentHooks: 3, interruptedOtherHooks: 1 })).toMatch(/interrupted: 3 \(other PreToolUse hooks: 1\)/);
+    expect(deliveryMessage({ ...base, delivered: 94, deliveredPercent: 94 })).toContain('94 of 100 Jev model decisions reached the agent (94 %');
+    expect(deliveryMessage({ ...base, interruptedAgentHooks: 3, interruptedOtherHooks: 1 })).toMatch(/interrupted: 3 \(hooks of other commands: 1\)/);
     expect(deliveryMessage({ ...base, interruptedOtherHooks: 4 })).toBeNull(); // only PreToolUse:Agent raises the alarm
     expect(deliveryMessage({ ts: NOW, error: 'EACCES' })).toContain('daily check failed (EACCES)');
     expect(deliveryMessage(null)).toBeNull();
@@ -306,38 +343,65 @@ describe('(c) the daily figures', () => {
     const run = spawnSync(NODE, [GUARD_SCRIPT, '--daily', '--config', configDir, '--log', logDir, '--now', new Date(NOW).toISOString(), '--print'], { encoding: 'utf8', timeout: 20000 });
     expect(run.status).toBe(0);
     const printed = JSON.parse(run.stdout);
-    expect(printed).toMatchObject({ decisions: 9, delivered: 6, deliveredPercent: 75, interruptedAgentHooks: 2 });
-    expect(JSON.parse(readFileSync(join(configDir, '.omc', 'jev-guard', 'delivery.json'), 'utf8'))).toEqual(printed);
+    expect(printed).toMatchObject({ decisions: 9, delivered: 6, deliveredPercent: 75, interruptedAgentHooks: 3 });
+    expect(existsSync(dailyStatePath(configDir, logDir, 'delivery.json'))).toBe(false); // a run by hand leaves the state alone
+    const written = spawnSync(NODE, [GUARD_SCRIPT, '--daily', '--write', '--config', configDir, '--log', logDir, '--now', new Date(NOW).toISOString()], { encoding: 'utf8', timeout: 20000 });
+    expect(written.status).toBe(0);
+    expect(JSON.parse(readFileSync(dailyStatePath(configDir, logDir, 'delivery.json'), 'utf8'))).toEqual(printed);
+  });
+
+  it('falls back to a 24 hour window for a window that is not a positive number', () => {
+    const logDir = writeFixture();
+    const run = spawnSync(NODE, [GUARD_SCRIPT, '--daily', '--print', '--config', configDir, '--log', logDir, '--now', new Date(NOW).toISOString(), '--window-hours', 'abc'], { encoding: 'utf8', timeout: 20000 });
+    expect(JSON.parse(run.stdout)).toMatchObject({ windowHours: 24, decisions: 9 });
   });
 
   it('shows a bad result once per session at the next prompt', () => {
     writeHooks(60);
-    const dir = join(configDir, '.omc', 'jev-guard');
-    mkdirSync(dir, { recursive: true });
-    writeFileSync(join(dir, 'daily.json'), JSON.stringify({ lastStart: NOW })); // no new daily check now
+    const logDir = join(root, 'jev-log');
+    mkdirSync(join(configDir, '.omc', 'jev-guard'), { recursive: true });
+    writeFileSync(dailyStatePath(configDir, logDir, 'daily.json'), JSON.stringify({ lastStart: NOW })); // no new daily check now
     startSession(session(), options());
     startSession(session('other'), options());
-    writeFileSync(join(dir, 'delivery.json'), JSON.stringify({ ts: NOW - HOUR, windowHours: 24, decisions: 9, withAgent: 8, delivered: 6, deliveredPercent: 75, interruptedAgentHooks: 2, interruptedOtherHooks: 0 }));
-    const shown = promptCheck(session(), options());
-    expect(shown.text).toContain('6 of 8 Jev model decisions reached the agent (75 %)');
+    const bad = { ts: NOW - HOUR, windowHours: 24, decisions: 9, withAgent: 8, delivered: 6, deliveredPercent: 75, interruptedAgentHooks: 2, interruptedOtherHooks: 0 };
+    writeFileSync(dailyStatePath(configDir, logDir, 'delivery.json'), JSON.stringify(bad));
+    const shown = promptCheck(session(), options({ logDir }));
+    expect(shown.text).toContain('6 of 8 Jev model decisions reached the agent (75 %');
     shown.confirm();
-    expect(promptCheck(session(), options())).toBeNull();
-    expect(promptCheck(session('other'), options()).text).toContain('75 %');
+    expect(promptCheck(session(), options({ logDir }))).toBeNull();
+    expect(promptCheck(session('other'), options({ logDir })).text).toContain('75 %');
+    // the result belongs to that Jev log directory only
+    writeFileSync(dailyStatePath(configDir, join(root, 'other-log'), 'daily.json'), JSON.stringify({ lastStart: NOW }));
+    expect(promptCheck(session('other'), options({ logDir: join(root, 'other-log') }))).toBeNull();
+  });
+
+  it('does not show a result older than two days', () => {
+    writeHooks(60);
+    const logDir = join(root, 'jev-log');
+    mkdirSync(join(configDir, '.omc', 'jev-guard'), { recursive: true });
+    writeFileSync(dailyStatePath(configDir, logDir, 'daily.json'), JSON.stringify({ lastStart: NOW }));
+    startSession(session(), options());
+    writeFileSync(dailyStatePath(configDir, logDir, 'delivery.json'), JSON.stringify({ ts: NOW - 49 * HOUR, windowHours: 24, decisions: 0, withAgent: 0, delivered: 0, deliveredPercent: null, interruptedAgentHooks: 5, interruptedOtherHooks: 0 }));
+    expect(promptCheck(session(), options({ logDir }))).toBeNull();
+    writeFileSync(dailyStatePath(configDir, logDir, 'delivery.json'), JSON.stringify({ ts: NOW - 47 * HOUR, windowHours: 24, decisions: 0, withAgent: 0, delivered: 0, deliveredPercent: null, interruptedAgentHooks: 5, interruptedOtherHooks: 0 }));
+    expect(promptCheck(session(), options({ logDir })).text).toContain('interrupted: 5');
   });
 
   it('starts the daily process at most once per 24 hours', async () => {
     writeHooks(60);
     startSession(session(), options());
-    const dir = join(configDir, '.omc', 'jev-guard');
+    const logDir = join(root, 'jev-log');
+    const state = (kind) => dailyStatePath(configDir, logDir, kind);
     const start = Date.now();
-    promptCheck(session(), options({ now: start, env: { ...process.env, ...ON } }));
-    expect(JSON.parse(readFileSync(join(dir, 'daily.json'), 'utf8')).lastStart).toBe(start);
-    for (let i = 0; i < 100 && !existsSync(join(dir, 'delivery.json')); i++) await new Promise((resolve) => setTimeout(resolve, 100));
-    const result = JSON.parse(readFileSync(join(dir, 'delivery.json'), 'utf8'));
+    promptCheck(session(), options({ now: start, logDir, env: { ...process.env, ...ON } }));
+    expect(JSON.parse(readFileSync(state('daily.json'), 'utf8')).lastStart).toBe(start);
+    // the process writes the result first and releases its lock after
+    for (let i = 0; i < 150 && (!existsSync(state('delivery.json')) || existsSync(state('daily.lock'))); i++) await new Promise((resolve) => setTimeout(resolve, 100));
+    const result = JSON.parse(readFileSync(state('delivery.json'), 'utf8'));
     expect(result).toMatchObject({ decisions: 0, deliveredPercent: null, interruptedAgentHooks: 0 });
-    expect(existsSync(join(dir, 'daily.lock'))).toBe(false);
-    promptCheck(session(), options({ now: start + 23 * HOUR }));
-    expect(JSON.parse(readFileSync(join(dir, 'daily.json'), 'utf8')).lastStart).toBe(start);
+    expect(existsSync(state('daily.lock'))).toBe(false);
+    promptCheck(session(), options({ now: start + 23 * HOUR, logDir }));
+    expect(JSON.parse(readFileSync(state('daily.json'), 'utf8')).lastStart).toBe(start);
   });
 });
 
@@ -352,9 +416,8 @@ describe('the hook scripts', () => {
     mkdirSync(home, { recursive: true });
     execFileSync('git', ['init', '--quiet'], { cwd: project, stdio: 'ignore' });
     // keep the daily check out of these runs
-    const dir = join(configDir, '.omc', 'jev-guard');
-    mkdirSync(dir, { recursive: true });
-    writeFileSync(join(dir, 'daily.json'), JSON.stringify({ lastStart: Date.now() }));
+    mkdirSync(join(configDir, '.omc', 'jev-guard'), { recursive: true });
+    writeFileSync(dailyStatePath(configDir, join(root, 'jev-log'), 'daily.json'), JSON.stringify({ lastStart: Date.now() }));
   });
 
   const scriptEnv = (extra = {}) => ({
@@ -387,7 +450,7 @@ describe('the hook scripts', () => {
     expect(changed.continue).toBe(true);
     expect(changed.suppressOutput).toBeUndefined();
     expect(changed.systemMessage).toContain('Jev delivery guard');
-    expect(changed.systemMessage).toContain('OMC_* or ANTHROPIC_*');
+    expect(changed.systemMessage).toContain('OMC_*, ANTHROPIC_* or TYPESAFE_*');
     expect(runHook(KEYWORD_DETECTOR, prompt()).systemMessage).toBeUndefined();
   });
 
