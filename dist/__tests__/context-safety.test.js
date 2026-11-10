@@ -81,7 +81,7 @@ describe('context-safety hook (issues #1006, #1597)', () => {
 describe('context-safety hook matcher', () => {
     it('does not register a dedicated ExitPlanMode context-safety matcher', () => {
         const hooksJson = JSON.parse(readFileSync(HOOKS_PATH, 'utf-8'));
-        const contextSafetyHook = hooksJson.hooks.PreToolUse.find(entry => entry.hooks.some(hook => hook.command.includes('scripts/context-safety.mjs')));
+        const contextSafetyHook = hooksJson.hooks.PreToolUse.find(entry => entry.hooks.some(hook => [hook.command, ...(hook.args ?? [])].join(' ').includes('scripts/context-safety.mjs')));
         expect(contextSafetyHook).toBeUndefined();
     });
 });

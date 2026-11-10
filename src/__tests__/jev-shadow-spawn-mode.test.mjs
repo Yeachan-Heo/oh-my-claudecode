@@ -3,6 +3,7 @@
  * Ensures spawnMode is passed in request JSON so detached resolver
  * knows whether to operate in fallback (shadow) or active mode.
  */
+/* global process */
 
 import { describe, it, expect, beforeEach } from 'vitest';
 import { join } from 'node:path';

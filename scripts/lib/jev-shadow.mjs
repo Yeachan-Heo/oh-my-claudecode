@@ -520,7 +520,8 @@ export function recordJevShadow({ point, state, questions, heuristic, permission
             return undefined;
           }
         }
-        if (breakerSettings?.breaker) recordResolverEnded(point, result, Date.now() - spawnedAt);
+        // Only log resolver exit for actual failures (non-zero status or error), not for successful completions.
+        if (breakerSettings?.breaker && result.status !== 0) recordResolverEnded(point, result, Date.now() - spawnedAt);
       } finally {
         // Always clean up temp dir after active mode
         if (tempDir) {

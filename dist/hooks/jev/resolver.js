@@ -2,7 +2,9 @@
  * Judgment resolver - the single seam every judgment point consults.
  *
  * Dispatches a named judgment across the off | shadow | active tri-state:
- * - off / cap / circuit-open: twin decides, no fetch, no log
+ * - off / cap / circuit-open: twin decides, no fetch, no log (the opt-in
+ *   shared breaker and request limit of OMC_JEV_BREAKER / OMC_JEV_MAX_RPM
+ *   also return circuit-open / cap, and log the held-back call)
  * - shadow: twin decides; the Jev call is made (waited on unless
  *   blocking:false) and the comparison logged
  * - active: Jev answer decides; the twin result is preserved in the log
@@ -14,9 +16,33 @@
  */
 import { appendFile, mkdir } from 'node:fs/promises';
 import { join } from 'node:path';
-import { queryJev } from './client.js';
+import { JevClientError, queryJev } from './client.js';
 import { ACTIVATED_POINTS, boundExcerpts, excerptCharsFor, parseJevConfig, pointState } from './config.js';
 const CIRCUIT_FAILURE_THRESHOLD = 3;
+let breakerModule;
+/**
+ * The breaker and request limit shared with the hook scripts
+ * (scripts/lib/jev-breaker.mjs), or undefined when neither OMC_JEV_BREAKER=1
+ * nor OMC_JEV_MAX_RPM is set. The module is loaded only then; a module that
+ * fails to load means no shared breaker, never a failed judgment.
+ */
+async function loadSharedBreaker(endpoint, apiKey) {
+    const env = process.env;
+    try {
+        breakerModule ??= import('../../../scripts/lib/jev-breaker.mjs');
+        const breaker = await breakerModule;
+        const settings = breaker.breakerSettings(env, endpoint, apiKey);
+        return settings ? { breaker, settings } : undefined;
+    }
+    catch {
+        return undefined;
+    }
+}
+/** Whether OMC_JEV_BREAKER=1 or OMC_JEV_MAX_RPM asks for the shared breaker. Synchronous, so a call without them never yields before it sends. */
+function sharedBreakerWanted() {
+    const env = process.env;
+    return String(env.OMC_JEV_BREAKER ?? '').trim() === '1' || String(env.OMC_JEV_MAX_RPM ?? '').trim() !== '';
+}
 const runtime = {
     requestCount: 0,
     consecutiveFailures: new Map(),
@@ -128,6 +154,33 @@ export async function resolveJudgment(resolveJudgmentArgs) {
     // Only the state carries user text; question definitions are static (they must never embed user text) and go out whole.
     const boundedState = boundExcerpts(args.state, excerptCharsFor(args.point, config));
     const startedAt = Date.now();
+    // Opt-in breaker and request limit shared with every process of the machine.
+    const shared = sharedBreakerWanted() ? await loadSharedBreaker(config.endpoint, config.apiKey) : undefined;
+    if (shared) {
+        const { skip } = shared.breaker.admitRequest(shared.settings, args.point);
+        if (skip) {
+            const heuristic = twinAnswer();
+            const loggableHeuristic = extractHeuristicForLogging(heuristic, args.questions, args.mapHeuristic, args.questionSet);
+            await writeShadowLog({
+                ts: new Date().toISOString(),
+                point: args.point,
+                mode: skip.mode,
+                state: boundedState,
+                heuristic: loggableHeuristic,
+                jev: null,
+                answers: null,
+                ...shared.breaker.skipLogFields(skip),
+                durationMs: Date.now() - startedAt,
+            }, config.logDir);
+            return { answer: heuristic, source: 'twin', mode: skip.mode };
+        }
+    }
+    // Recheck the process cap after the shared-breaker await, as other processes may have made requests while waiting.
+    if (config.maxRequests > 0 && runtime.requestCount >= config.maxRequests) {
+        return { answer: twinAnswer(), source: 'twin', mode: 'cap' };
+    }
+    // Count the request after shared admission succeeds, so only admitted requests are counted.
+    runtime.requestCount += 1;
     const attempt = (async () => {
         try {
             return { ok: true, response: await queryJev(boundedState, args.questions, {
@@ -135,13 +188,22 @@ export async function resolveJudgment(resolveJudgmentArgs) {
                     apiKey: config.apiKey,
                     timeoutMs: config.timeoutMs,
                     fetchFn: args.fetchFn,
+                    ...(shared?.settings.breaker
+                        ? {
+                            bodyForRetry: (retryAfter) => shared.breaker.retryAfterSeconds(retryAfter) === undefined
+                                ? { maxChars: shared.breaker.RETRY_BODY_MAX_CHARS }
+                                : undefined,
+                        }
+                        : {}),
                 }) };
         }
         catch (error) {
+            if (shared && error instanceof JevClientError) {
+                shared.breaker.recordFailure(shared.settings, shared.breaker.classifyFailure(error));
+            }
             return { ok: false, error: error instanceof Error ? error.message : String(error) };
         }
     })();
-    runtime.requestCount += 1;
     // Non-blocking (detector-type) in shadow mode: return the twin now; log when Jev settles.
     if (mode === 'shadow' && args.blocking === false) {
         const heuristic = twinAnswer();

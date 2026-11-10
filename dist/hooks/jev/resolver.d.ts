@@ -2,7 +2,9 @@
  * Judgment resolver - the single seam every judgment point consults.
  *
  * Dispatches a named judgment across the off | shadow | active tri-state:
- * - off / cap / circuit-open: twin decides, no fetch, no log
+ * - off / cap / circuit-open: twin decides, no fetch, no log (the opt-in
+ *   shared breaker and request limit of OMC_JEV_BREAKER / OMC_JEV_MAX_RPM
+ *   also return circuit-open / cap, and log the held-back call)
  * - shadow: twin decides; the Jev call is made (waited on unless
  *   blocking:false) and the comparison logged
  * - active: Jev answer decides; the twin result is preserved in the log

@@ -274,6 +274,11 @@ export async function resolveJudgment<T>(resolveJudgmentArgs: ResolveJudgmentArg
     }
   }
 
+  // Recheck the process cap after the shared-breaker await, as other processes may have made requests while waiting.
+  if (config.maxRequests > 0 && runtime.requestCount >= config.maxRequests) {
+    return { answer: twinAnswer(), source: 'twin', mode: 'cap' };
+  }
+
   // Count the request after shared admission succeeds, so only admitted requests are counted.
   runtime.requestCount += 1;
 

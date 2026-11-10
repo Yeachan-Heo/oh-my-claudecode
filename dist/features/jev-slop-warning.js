@@ -9,10 +9,11 @@
  * pass their already-computed warning decision as the twin.
  *
  * Advisory point, shadow-only: the twin always decides; Jev's Noul answer is
- * recorded only. The point declaration lives in the jev registry
- * (hooks/jev/points.ts).
+ * recorded only. If the point is activated anyway, the returned answer is
+ * Jev's, read with noulAnswerIsYes(). The point declaration lives in the jev
+ * registry (hooks/jev/points.ts).
  */
-import { recordJudgment } from '../hooks/jev/index.js';
+import { noulAnswerIsYes, recordJudgment } from '../hooks/jev/index.js';
 /**
  * Record the shadow comparison for one tool input and return the twin
  * decision unchanged. With no TYPESAFE_API_KEY (or OMC_JEV not naming this
@@ -28,6 +29,7 @@ export function recordSlopWarningShadow(args) {
         },
         twin: () => args.warned,
         mapHeuristic: (result, questionSet) => result,
+        mapAnswer: noulAnswerIsYes,
         fetchFn: args.fetchFn,
     });
 }
