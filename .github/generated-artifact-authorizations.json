@@ -44123,12 +44123,12 @@
       ]
     },
     {
-      "pullNumber": 4945,
-      "targetRef": "dev",
-      "mergeBaseSha": "7c0127b22c8b59477d61dad9e2f5483caafb3ad9",
-      "headSha": "9cfec72ddf2211f666e41103b52c494310a0cf1f",
+      "pullNumber": 4929,
+      "targetRef": "main",
+      "mergeBaseSha": "a44b1061d89be2cd81d4cb06c1ac40faf2cc2640",
+      "headSha": "87f58391dd04098cf2deb58f5cd132796b6d1de5",
       "owner": "Yeachan-Heo",
-      "expiresAt": "2026-12-31T23:59:59.999Z",
+      "expiresAt": "2027-12-31T23:59:59.999Z",
       "generatedDelta": {
         "count": 1,
         "sha256": "b3caf5a2ac165b8667358dad0739c9bea2bb419a9fa02c85c670a26fa97dc3c4"
@@ -44143,17 +44143,23 @@
       ]
     },
     {
-      "pullNumber": 4955,
-      "targetRef": "dev",
-      "mergeBaseSha": "ab214cad9c31893b0625ef0864481f7480abebf7",
-      "headSha": "d3fe4895c215c88718806968a82028fee2643c2f",
+      "pullNumber": 4965,
+      "targetRef": "main",
+      "mergeBaseSha": "63d2a76b9bccab755879b9336078d19111e8d401",
+      "headSha": "15df22ef2c5bba59d21be5ae6757d7399be9f3d8",
       "owner": "Yeachan-Heo",
-      "expiresAt": "2026-12-31T23:59:59.999Z",
+      "expiresAt": "2027-12-31T23:59:59.999Z",
       "generatedDelta": {
-        "count": 3,
-        "sha256": "db9eb47e82b60ceeb5457c769c498367afbce6516a72709cf777ba662244eb3d"
+        "count": 4,
+        "sha256": "a82a8c0f4548928e15fab1e00b103ab0af0d8dfd6f9a6b3a1d1987e876fae34c"
       },
       "generatedFiles": [
+        {
+          "status": "modified",
+          "filename": "bridge/claude-md-coordinator.cjs",
+          "sha": "ac930c2274da615295978d39e52f5b8679dca160",
+          "previousFilename": null
+        },
         {
           "status": "modified",
           "filename": "bridge/cli.cjs",
