@@ -615,10 +615,15 @@ async function reserveRequest($, shared, now) {
 // awaiting shared state, and release it if the breaker or shared limit refuses the request.
 // Returns {skip: {mode: 'circuit-open', breaker}} or {skip: {mode: 'cap', count, threshold, limit}}
 // when the request must not go out, {} otherwise.
-async function admitRequest($, cfg) {
+async function admitRequest($, cfg, deadline) {
+  if (Date.now() >= deadline) return { skip: { mode: 'deadline' } };
   if (cfg.maxRequests && session.requests >= cfg.maxRequests) return { skip: { mode: 'process-cap' } };
   session.requests++;
-  const admission = cfg.shared ? await sharedStep($, () => admitNow($, cfg.shared), {}) : {};
+  const admission = cfg.shared ? await sharedStep($, () => admitNow($, cfg.shared), {}, Math.min(SHARED_OP_MS, deadline - Date.now())) : {};
+  if (Date.now() >= deadline) {
+    session.requests--;
+    return { skip: { mode: 'deadline' } };
+  }
   if (admission.skip) session.requests--;
   return admission;
 }
@@ -990,7 +995,10 @@ async function decide($, e, cfg, record, started) {
   record.secret_skipped = candidates.filter((c) => c.secret).length;
   record.non_text = candidates.filter((c) => !c.textOnly).length;
   const left = cfg.maxRequests ? cfg.maxRequests - session.requests : MAX_REQUESTS;
-  if (left <= 0) return { fallback: 'cap' };
+  if (left <= 0) {
+    Object.assign(record, { asked: 0, requests: 0, held: 'cap' });
+    return { fallback: 'cap' };
+  }
   const asked = askable.slice(0, BATCH * Math.min(MAX_REQUESTS, left));
   record.asked = asked.length;
 
@@ -999,7 +1007,7 @@ async function decide($, e, cfg, record, started) {
   const runs = [];
   let held;
   for (let b = 0; b * BATCH < asked.length; b++) {
-    const admission = await admitRequest($, cfg);
+    const admission = await admitRequest($, cfg, deadline);
     if (admission.skip) { held = admission.skip; break; }
     const batch = asked.slice(b * BATCH, (b + 1) * BATCH);
     const results = {};
@@ -1017,10 +1025,13 @@ async function decide($, e, cfg, record, started) {
     });
     const state = boundExcerpts({ task: user.task, ...(user.instructions ? { compact_instructions: user.instructions } : {}), results }, cfg.excerptChars);
     const t0 = Date.now();
-    const timeoutMs = Math.max(500, Math.min(REQUEST_MS, deadline - t0));
+    if (t0 >= deadline) { session.requests--; held = { mode: 'deadline' }; break; }
+    const timeoutMs = Math.min(REQUEST_MS, deadline - t0);
     runs.push(
       withDeadline($, askJev($, cfg, state, questions), timeoutMs).then(async (r) => {
-        await recordSharedFailure($, cfg, { ...r, short: timeoutMs < 1000 });
+        // Shared failure bookkeeping may finish later, but cannot extend this decision's budget.
+        const recording = recordSharedFailure($, cfg, { ...r, short: timeoutMs < 1000 });
+        if (Date.now() < deadline) await withDeadline($, recording, deadline - Date.now());
         return { ...r, batch, ms: Date.now() - t0 };
       }),
     );
@@ -1034,12 +1045,14 @@ async function decide($, e, cfg, record, started) {
     record.requests = runs.length;
     if (held.mode === 'circuit-open') Object.assign(record, { held: 'breaker', breaker_until: new Date(held.breaker.until).toISOString(), breaker_reason: held.breaker.reason });
     else if (held.mode === 'process-cap') record.held = 'cap';
+    else if (held.mode === 'deadline') record.held = 'deadline';
     else Object.assign(record, { held: 'rpm', rpm: { count: held.count, threshold: held.threshold, limit: held.limit } });
-    if (!runs.length) return { fallback: held.mode === 'circuit-open' ? 'breaker_open' : held.mode === 'process-cap' ? 'cap' : 'rpm' };
+    if (!runs.length) return { fallback: held.mode === 'circuit-open' ? 'breaker_open' : held.mode === 'process-cap' ? 'cap' : held.mode === 'deadline' ? 'timeout' : 'rpm' };
   }
   record.requests = runs.length;
   const results = await Promise.all(runs);
   record.jev_ms = results.map((r) => r.ms);
+  if (held?.mode === 'deadline') return { fallback: 'timeout' };
   let answered = 0;
   const failures = [];
   for (const r of results) {
