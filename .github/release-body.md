@@ -1,31 +1,30 @@
-# oh-my-claudecode v5.8.3: Bug Fixes
+# oh-my-claudecode v5.8.4: Hooks improvements, Jev enhancements, Teleport fix
 
 ## Release Notes
 
-Release with **2 bug fixes**, **6 other changes** across **8 merged PRs**.
+v5.8.4 is a patch release that adds opt-in shell command checks, improves Jev model routing, fixes worktree teleport for projects without package.json, and hardens Windows plugin hook spawning.
 
 ### Highlights
 
-- **fix(checkpoint): keep tracked files that match an ignore rule in snapshots** (#4904)
-- **fix(mcp-registry): do not write type field to Codex config (fixes #4899)** (#4903)
+- **feat(hooks): opt-in shell command checks for Bash and PowerShell** (#4925) — enable with `OMC_SHELL_CHECKS=1`
+- **feat(jev): let a use marker pin the model and effort of a model-routing call** (#4924)
+- **fix(teleport): skip the dependency step when the new worktree has no package.json** (#4919)
+
+### Features
+
+- **feat(hooks): opt-in shell command checks for Bash and PowerShell** (#4925)
+- **feat(jev): let a use marker pin the model and effort of a model-routing call** (#4924)
 
 ### Bug Fixes
 
-- **fix(checkpoint): keep tracked files that match an ignore rule in snapshots** (#4904)
-- **fix(mcp-registry): do not write type field to Codex config (fixes #4899)** (#4903)
-
-### Other Changes
-
-- **ci: repin sync PR #4907 authorization to signed head 11190730**
-- **chore(sync): leave base-owned authorization file to dev**
-- **ci: repin sync PR #4907 authorization to 672baa2c**
-- **ci: retrigger checks after authorization PR merge**
-- **ci: authorize generated artifacts for sync PR #4907 at edc27e05e**
-- **chore(inventory): regenerate after #4903** (#4905)
+- **fix(jev): Stop completion output, Noul probabilities, loop-continuation excerpt, parent-message notices** (#4923)
+- **fix(teleport): skip the dependency step when the new worktree has no package.json** (#4919)
+- **fix(types): add TypeScript declarations for hook-command-normalizer module**
+- **fix(hooks): spawn plugin hooks without a shell on Windows**
 
 ### Stats
 
-- **8 PRs merged** | **0 new features** | **2 bug fixes** | **0 security/hardening improvements** | **6 other changes**
+- **5 PRs merged** | **2 new features** | **4 bug fixes** | **0 security/hardening improvements** | **0 other changes**
 
 ### Install / Update
 
@@ -34,7 +33,7 @@ The npm CLI and the Claude Code marketplace/plugin are separate install tracks, 
 **CLI / runtime:**
 
 ```bash
-npm install -g oh-my-claude-sisyphus@5.8.3
+npm install -g oh-my-claude-sisyphus@5.8.4
 ```
 
 **Claude Code plugin:**
@@ -43,4 +42,4 @@ npm install -g oh-my-claude-sisyphus@5.8.3
 /plugin marketplace update omc
 ```
 
-**Full Changelog**: https://github.com/Yeachan-Heo/oh-my-claudecode/compare/v5.8.2...v5.8.3
+**Full Changelog**: https://github.com/Yeachan-Heo/oh-my-claudecode/compare/v5.8.3...v5.8.4
