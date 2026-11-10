@@ -81,6 +81,37 @@ describe('parseJevEnv tri-state parity', () => {
     expect(parseJevEnv('task-size', baseEnv({ OMC_JEV: 'all:active' }))).toBe('active');
   });
 
+  it('point:off turns one point off under all, all:active and its own earlier entries; a later non-off entry turns it back on', () => {
+    const cases = [
+      ['intent:off', 'off'],
+      ['all,intent:off', 'off'],
+      ['all:active,intent:off', 'off'],
+      ['intent:off,all:active', 'off'],
+      ['intent:active,intent:off', 'off'],
+      ['intent:off,intent:active', 'active'],
+      ['intent:off,intent', 'shadow'],
+      ['intent:active,intent', 'active'],
+      ['all:active,intent: off', 'off'],
+      ['all:active,intent:OFF', 'off'],
+      ['all:active,intent:off,intent:active', 'active'],
+      ['all:off', 'off'],
+      ['all:active,all:off', 'off'],
+      ['all:active,all:off,intent', 'shadow'],
+    ];
+    for (const [value, expected] of cases) {
+      const env = baseEnv({ OMC_JEV: value });
+      expect(parseJevEnv('intent', env), value).toBe(expected);
+      expect(pointState('intent', parseJevConfig(env)), value).toBe(expected);
+      // Other points keep the `all` semantics.
+      expect(parseJevEnv('task-size', env), value).toBe(pointState('task-size', parseJevConfig(env)));
+    }
+    expect(parseJevEnv('task-size', baseEnv({ OMC_JEV: 'all:active,intent:off' }))).toBe('active');
+    // Plan mode never turns an off point back on.
+    const planEnv = baseEnv({ OMC_JEV: 'all:active,intent:off', OMC_JEV_PLAN_MODE: 'shadow' });
+    expect(parseJevEnv('intent', planEnv, 'plan')).toBe('off');
+    expect(parseJevEnv('task-size', planEnv, 'plan')).toBe('shadow');
+  });
+
   it('named-only compaction: all and all:active leave it off; only its own entry enables it, in its own mode', () => {
     const cases = [
       ['all', 'off'],
@@ -89,6 +120,8 @@ describe('parseJevEnv tri-state parity', () => {
       ['all,compaction:active', 'active'],
       ['compaction', 'shadow'],
       ['compaction:active', 'active'],
+      ['compaction:off', 'off'],
+      ['compaction:active,compaction:off', 'off'],
       ['model-routing:active', 'off'],
     ];
     for (const [value, expected] of cases) {
