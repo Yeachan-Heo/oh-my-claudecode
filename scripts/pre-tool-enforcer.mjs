@@ -158,8 +158,12 @@ function readAgentDefinitionEffort(subagentType, onlyAgentsDir) {
   try {
     if (!agentFile) return null;
     const content = readFileSync(agentFile, 'utf-8').replace(/^\uFEFF/, '');
-    const match = /^\s*effort:\s*([^\s\n]+)/.test(content) && RegExp.$1;
-    return match && typeof match === 'string' ? match.trim() : null;
+    // Only the frontmatter block counts, like readAgentDefinitionModel: the file starts with
+    // `---`, and a body line that mentions `effort:` is not a declaration.
+    const fmMatch = content.match(/^---[\r\n]+([\s\S]*?)[\r\n]+---/);
+    if (!fmMatch) return null;
+    const effortMatch = fmMatch[1].match(/^effort:\s*(\S+)/m);
+    return effortMatch ? effortMatch[1].trim().replace(/^["']|["']$/g, '') : null;
   } catch { return null; }
 }
 
@@ -1064,9 +1068,9 @@ function recordModelRoutingShadow(toolName, toolInput, updatedToolInput, permiss
       ensureUpdated().effort = capEffort(currentEffort, maxEffort());
     }
     // What the agent would have run on without Jev: the call's model, else its definition's.
-    // When routing.forceInherit is enabled and the call is unpinned (no model),
-    // use the inherited session model as the baseline, not the agent definition model.
-    const inheritsSession = Boolean(unpinned && isForceInheritEnabled() && inheritedModel);
+    // A call that is unpinned (no model on the call or in any definition) runs on the
+    // inherited session model, with or without routing.forceInherit: that is the baseline.
+    const inheritsSession = Boolean(unpinned && inheritedModel);
     // A concrete model the call or its definition pins stays concrete: its tier alias may
     // resolve to a different version.
     const baselineModel = inheritsSession
@@ -1075,10 +1079,11 @@ function recordModelRoutingShadow(toolName, toolInput, updatedToolInput, permiss
     // Resolve the baseline effort: the effort the call would run on without Jev, checking
     // explicit call effort, agent definition effort, and inherited session effort in order.
     // Use the original baseEffort saved before any modifications, but resolve inherited values.
-    // Apply the always-on cap to the baseline effort before recording to avoid counting
-    // a no-Jev cap as a Jev-induced change when both baseline and result are capped the same way.
-    const baselineEffortRaw = baseEffort || resolveBaselineEffort(undefined, originalInput.subagent_type);
-    const baselineEffort = typeof baselineEffortRaw === 'string' && isMaxEffortAlwaysEnabled() ? capEffort(baselineEffortRaw, maxEffort()) : baselineEffortRaw;
+    // The always-on cap bounds only an explicit call effort (capExplicitEffort adds none to a
+    // call without one), so it is applied to that value before the inherited ones are resolved:
+    // an inherited effort stays as it is and a Jev change from it is recorded.
+    const explicitEffort = typeof baseEffort === 'string' && isMaxEffortAlwaysEnabled() ? capEffort(baseEffort, maxEffort()) : baseEffort;
+    const baselineEffort = explicitEffort || resolveBaselineEffort(undefined, originalInput.subagent_type);
     noteJevRouting({ model: baselineModel, effort: baselineEffort }, updatedToolInput, answers, originalInput.subagent_type);
   }
 

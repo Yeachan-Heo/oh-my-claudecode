@@ -331,6 +331,56 @@ describe('hook scripts with OMC_JEV_APPLIED_LOG=1', () => {
     ]);
   }, 120_000);
 
+  it('model-routing: an unpinned call is compared with the session model without forceInherit too', async () => {
+    const HAIKU = 'claude-haiku-4-5';
+    const env = {
+      OMC_ROUTING_FORCE_INHERIT: 'false',
+      OMC_JEV_MODEL_ROUTING_ALL_AGENTS: '1',
+      CLAUDE_MODEL: HAIKU,
+      ANTHROPIC_MODEL: undefined,
+      OMC_SUBAGENT_MODEL: undefined,
+      CLAUDE_CODE_BEDROCK_HAIKU_MODEL: undefined,
+      ANTHROPIC_DEFAULT_HAIKU_MODEL: HAIKU,
+    };
+    // The alias resolves to the model the call inherits anyway: nothing changed, nothing logged.
+    stubAnswers = { 'model-tier': { type: 'choice', choice: 'haiku' } };
+    const same = makeContext();
+    await runHook(same, 'pre-tool-enforcer.mjs', TASK_CALL(same.cwd, { subagent_type: 'general-purpose', model: undefined }), 'model-routing', env);
+    expect(readLog(same, 'applied.jsonl')).toEqual([]);
+
+    stubAnswers = { 'model-tier': { type: 'choice', choice: 'opus' } };
+    const changed = makeContext();
+    await runHook(changed, 'pre-tool-enforcer.mjs', TASK_CALL(changed.cwd, { subagent_type: 'general-purpose', model: undefined }), 'model-routing', { ...env, ANTHROPIC_DEFAULT_OPUS_MODEL: 'claude-opus-4-5' });
+    expect(readLog(changed, 'applied.jsonl')).toEqual([
+      expect.objectContaining({ applied: { subagent_type: 'general-purpose', model: { from: HAIKU, to: 'opus' } } }),
+    ]);
+  }, 90_000);
+
+  it('model-routing: OMC_JEV_MAX_EFFORT_ALWAYS does not cap an inherited session effort in the baseline', async () => {
+    const env = { OMC_JEV_MAX_EFFORT_ALWAYS: '1', OMC_JEV_MAX_EFFORT: 'medium', CLAUDE_CODE_EFFORT_LEVEL: 'high' };
+    // The call names no effort, so it runs on the inherited high; Jev's score 1 (medium) changes that.
+    stubAnswers = { effort: { type: 'score', score: 1 } };
+    const context = makeContext();
+    const output = await runHook(context, 'pre-tool-enforcer.mjs', TASK_CALL(context.cwd), 'model-routing', env);
+    expect(output.hookSpecificOutput.updatedInput).toMatchObject({ effort: 'medium' });
+    expect(readLog(context, 'applied.jsonl')).toEqual([
+      expect.objectContaining({ applied: { subagent_type: 'oh-my-claudecode:executor', effort: { from: 'high', to: 'medium', score: 1 } } }),
+    ]);
+  }, 60_000);
+
+  it('model-routing: an effort declared in the frontmatter of the agent definition is the baseline, over the session effort', async () => {
+    const context = makeContext();
+    const agents = join(context.root, 'plugin', 'agents');
+    mkdirSync(agents, { recursive: true });
+    // The `effort:` in the body is not a declaration.
+    writeFileSync(join(agents, 'executor.md'), '---\nname: executor\nmodel: sonnet\neffort: high\n---\n\neffort: low\nBody text.\n');
+    const env = { CLAUDE_PLUGIN_ROOT: join(context.root, 'plugin'), CLAUDE_CODE_EFFORT_LEVEL: 'low' };
+    // Score 2 is high: the agent already runs on high, so Jev changed nothing.
+    stubAnswers = { effort: { type: 'score', score: 2 } };
+    await runHook(context, 'pre-tool-enforcer.mjs', TASK_CALL(context.cwd, { model: undefined }), 'model-routing', env);
+    expect(readLog(context, 'applied.jsonl')).toEqual([]);
+  }, 60_000);
+
   it('model-routing: a call pinned to a concrete model is compared with that model, not its tier', async () => {
     const SONNET_DEFAULT = 'us.anthropic.claude-sonnet-5-v1:0';
     const env = {
