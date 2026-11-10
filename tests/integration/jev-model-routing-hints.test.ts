@@ -26,11 +26,11 @@ const BASE_HAIKU =
   "Haiku: mechanical work whose result follows directly from the data and is easy to check: look up, read, list, count, copy, compile a list, run a command and report the result, one obvious fix";
 const HINT_EFFORT =
   " Mechanical work gets the low level only when it is short: one action or a few. " +
-  "Mechanical work with a dozen or more items or steps gets the medium level, " +
+  "Mechanical work with more than ten items or steps gets the medium level, " +
   "and with several dozen or more, or when every item has to be checked, the high level.";
 const HINT_HAIKU = "; also when there are very many such actions or each one has to be checked";
 
-type Question = { instructions: string; criteria: Record<string, string> };
+type Question = { instructions: string; criteria: Record<string, string> | string[] };
 type Request = { state: Record<string, unknown>; questions: Record<string, Question> };
 
 function runEnforcer(input: Record<string, unknown>, env: NodeJS.ProcessEnv) {
@@ -143,7 +143,7 @@ describe("pre-tool-enforcer.mjs: model-routing hints", () => {
     return (output.hookSpecificOutput?.updatedInput ?? input.tool_input) as Record<string, unknown>;
   }
 
-  it("sends exactly the base questions without the variable", async () => {
+  it("sends the base texts of the two extended fields without the variable", async () => {
     await routedInput(agentInput(TASK));
     expect(requests).toHaveLength(1);
     const { questions } = requests[0];

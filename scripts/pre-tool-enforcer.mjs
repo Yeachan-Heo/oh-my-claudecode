@@ -604,11 +604,11 @@ const MODEL_ROUTING_QUESTIONS_BASE = {
 // OMC_JEV_MODEL_ROUTING_HINTS=1 adds two sentences to the effort question and a clause to
 // the Haiku description of the model-tier question, so that a large amount of mechanical work
 // is neither rated "low" nor sent to a more expensive model only because of its size.
-// Measured on Polish questions only; see docs/HOOKS.md. Off by default: the questions are
+// Measured on the Polish original of these texts only; see docs/HOOKS.md. Off by default: the questions are
 // then exactly the base questions above.
 const MODEL_ROUTING_HINT_EFFORT =
   ' Mechanical work gets the low level only when it is short: one action or a few. ' +
-  'Mechanical work with a dozen or more items or steps gets the medium level, ' +
+  'Mechanical work with more than ten items or steps gets the medium level, ' +
   'and with several dozen or more, or when every item has to be checked, the high level.';
 const MODEL_ROUTING_HINT_HAIKU = '; also when there are very many such actions or each one has to be checked';
 
