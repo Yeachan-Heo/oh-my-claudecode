@@ -619,7 +619,7 @@ async function admitRequest($, cfg, deadline) {
   if (Date.now() >= deadline) return { skip: { mode: 'deadline' } };
   if (cfg.maxRequests && session.requests >= cfg.maxRequests) return { skip: { mode: 'process-cap' } };
   session.requests++;
-  const admission = cfg.shared ? await sharedStep($, () => admitNow($, cfg.shared), {}, Math.min(SHARED_OP_MS, deadline - Date.now())) : {};
+  const admission = cfg.shared ? await sharedStep($, () => admitNow($, cfg.shared, deadline), {}, Math.min(SHARED_OP_MS, deadline - Date.now())) : {};
   if (Date.now() >= deadline) {
     session.requests--;
     return { skip: { mode: 'deadline' } };
@@ -627,10 +627,12 @@ async function admitRequest($, cfg, deadline) {
   if (admission.skip) session.requests--;
   return admission;
 }
-async function admitNow($, shared) {
+async function admitNow($, shared, deadline) {
   const now = Date.now();
   const open = await readSharedBreaker($, shared, now);
   if (open) return { skip: { mode: 'circuit-open', breaker: open } };
+  // Recheck deadline after I/O to avoid writing reservations after the compaction deadline has passed.
+  if (Date.now() >= deadline) return { skip: { mode: 'deadline' } };
   const slot = await reserveRequest($, shared, now);
   if (!slot.ok) return { skip: { mode: 'cap', count: slot.count, threshold: slot.threshold, limit: slot.limit } };
   return {};
