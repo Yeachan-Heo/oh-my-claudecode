@@ -59,12 +59,13 @@ describe('jev-delivery-guard per-logdir acknowledgments', () => {
     mkdirSync(join(guardDir, 'sessions'), { recursive: true });
 
     // First, trigger a session start which should create a record
-    const result1 = promptCheck(data, {
+    const result1 = await promptCheck(data, {
       env,
       now,
       pluginRoot: ROOT,
       configDir,
       logDir: join(cwd, 'project-a'),
+      cwd,
     });
 
     // Both calls should succeed without error
@@ -88,14 +89,16 @@ describe('jev-delivery-guard per-logdir acknowledgments', () => {
     const ts1 = now - 3600000; // 1 hour ago
     const ts2 = now - 1800000; // 30 minutes ago
     
-    // Create delivery report for project 1 (shown earlier)
+    // Create delivery report for project 1 (shown earlier, with bad delivery rate)
     const file1 = dailyFile(guardDir, logDir1, 'delivery.json');
-    writeFileSync(file1, JSON.stringify({ ts: ts1, share: 0.95, interrupted: 0 }), 'utf8');
-    // Create delivery report for project 2 (shown more recently)
+    writeFileSync(file1, JSON.stringify({ ts: ts1, windowHours: 24, decisions: 100, withAgent: 100, delivered: 90, deliveredPercent: 90, deliveredPercentFull: 90.5, interruptedAgentHooks: 0, interruptedOtherHooks: 0 }), 'utf8');
+    // Create delivery report for project 2 (shown more recently, with bad delivery rate)
     const file2 = dailyFile(guardDir, logDir2, 'delivery.json');
-    writeFileSync(file2, JSON.stringify({ ts: ts2, share: 0.85, interrupted: 0 }), 'utf8');
+    writeFileSync(file2, JSON.stringify({ ts: ts2, windowHours: 24, decisions: 100, withAgent: 100, delivered: 85, deliveredPercent: 85, deliveredPercentFull: 85.3, interruptedAgentHooks: 0, interruptedOtherHooks: 0 }), 'utf8');
 
     // Create a session record with per-logdir shown tracking - project 1 was already shown, project 2 was not
+    // Keys are resolved log directory paths, matching how promptCheck keys them
+    // Since logDir1 is already absolute, it's used as-is
     const record = {
       start: now - 86400000,
       hooks: null,
@@ -110,28 +113,31 @@ describe('jev-delivery-guard per-logdir acknowledgments', () => {
     writeFileSync(sessionFile, JSON.stringify(record), 'utf8');
 
     // First call with logDir1 - report already shown, should return null
-    const result1 = promptCheck(data, {
+    const result1 = await promptCheck(data, {
       env,
       now,
       pluginRoot: ROOT,
       configDir,
       logDir: logDir1,
+      cwd,
     });
     expect(result1).toBeNull(); // already shown
 
     // Second call with logDir2 - report not yet shown, should return the message and update record
-    const result2 = promptCheck(data, {
+    const result2 = await promptCheck(data, {
       env,
       now,
       pluginRoot: ROOT,
       configDir,
       logDir: logDir2,
+      cwd,
     });
     
-    // Project 2 report should be displayed since it hasn't been shown before
+    // Project 2 report should be displayed since it hasn't been shown before and has bad delivery
     if (result2 !== null) {
       expect(result2).toHaveProperty('text');
       expect(result2).toHaveProperty('confirm');
+      expect(result2.text).toContain('85');
       // Confirm that we've seen the report
       result2.confirm();
       
@@ -154,12 +160,13 @@ describe('jev-delivery-guard per-logdir acknowledgments', () => {
     const sessionFile = join(sessionsDir, `${sessionId}.json`);
 
     // Call promptCheck which should initialize the record
-    const result = promptCheck(data, {
+    const result = await promptCheck(data, {
       env,
       now,
       pluginRoot: ROOT,
       configDir,
       logDir: join(cwd, 'some-project'),
+      cwd,
     });
 
     // Verify the record was created with shownByLogDir

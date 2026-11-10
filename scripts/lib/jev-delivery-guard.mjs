@@ -43,7 +43,7 @@ import { dirname, join } from 'node:path';
 import { createInterface } from 'node:readline';
 import { fileURLToPath } from 'node:url';
 import { parseJevEnv } from '../jev-resolve.mjs';
-import { resolveOmcStateRoot } from './state-root.mjs';
+import { resolveOmcStateRoot, resolveSessionStatePathsForHook } from './state-root.mjs';
 import { getClaudeConfigDir } from './config-dir.mjs';
 
 export const DEFAULT_MIN_TIMEOUT_S = 60;
@@ -58,9 +58,9 @@ const SELF = fileURLToPath(import.meta.url);
 const PLUGIN_ROOT = join(dirname(SELF), '..', '..');
 
 /** The guard runs only when asked for and only while Jev decides the model of Task/Agent calls. */
-export function isGuardEnabled(env = process.env) {
+export function isGuardEnabled(env = process.env, permissionMode) {
   return ['1', 'true'].includes(String(env.OMC_JEV_GUARD ?? '').trim().toLowerCase())
-    && parseJevEnv('model-routing', env) === 'active';
+    && parseJevEnv('model-routing', env, permissionMode) === 'active';
 }
 
 /** OMC_JEV_GUARD_MIN_TIMEOUT_S: a positive number of seconds, else the default. */
@@ -161,9 +161,11 @@ export function limitMessage(pluginRoot = PLUGIN_ROOT, minSeconds = DEFAULT_MIN_
   return `Jev delivery guard: the PreToolUse timeout of pre-tool-enforcer in the plugin's hooks/hooks.json is ${timeout} s. Jev's model and effort for a Task/Agent call travel in that hook's output, and Claude Code drops the output of a hook it cuts off at the timeout. Raise the timeout to at least ${minSeconds} s and restart the session, or set OMC_JEV_GUARD_MIN_TIMEOUT_S to the value you accept.`;
 }
 
-function sessionFile(configDir, data) {
+async function sessionFile(directory, data) {
   const id = String(data?.session_id ?? data?.sessionId ?? '');
-  return SESSION_ID.test(id) ? join(guardDir(configDir), 'sessions', `${id}.json`) : null;
+  if (!SESSION_ID.test(id)) return null;
+  const paths = await resolveSessionStatePathsForHook(directory, 'jev-delivery-guard', id);
+  return { readPath: paths.readPath, writePath: paths.writePath };
 }
 
 function newRecord(now, pluginRoot, configDir) {
@@ -197,16 +199,15 @@ function pruneSessions(dir, now) {
  * SessionStart: record the session's baseline and check (a). Returns the message for the user or null.
  * `options` ({ env, now, pluginRoot, configDir }) are test seams.
  */
-export function startSession(data, options = {}) {
-  const { env = process.env, now = Date.now(), pluginRoot = PLUGIN_ROOT, configDir = getClaudeConfigDir() } = options;
+export async function startSession(data, options = {}) {
+  const { env = process.env, now = Date.now(), pluginRoot = PLUGIN_ROOT, configDir = getClaudeConfigDir(), cwd = process.cwd() } = options;
   try {
-    if (!isGuardEnabled(env)) return null;
-    const file = sessionFile(configDir, data);
+    if (!isGuardEnabled(env, data?.permission_mode)) return null;
+    const file = await sessionFile(cwd, data);
     if (file) {
       // /compact continues the same process with the same session id: it keeps what it loaded at its start.
-      if (data?.source !== 'compact') writeJson(file, newRecord(now, pluginRoot, configDir));
-      else touchRecord(file, now);
-      pruneSessions(dirname(file), now);
+      if (data?.source !== 'compact') writeJson(file.writePath, newRecord(now, pluginRoot, configDir));
+      else touchRecord(file.writePath, now);
     }
     return limitMessage(pluginRoot, minTimeoutSeconds(env));
   } catch {
@@ -270,19 +271,19 @@ function startDailyCheck(dir, configDir, logDir, env, now) {
  * part runs in a detached process. `options.logDir` is the Jev log directory (shadow.jsonl) of the
  * prompt's project; the other options are test seams.
  */
-export function promptCheck(data, options = {}) {
-  const { env = process.env, now = Date.now(), pluginRoot = PLUGIN_ROOT, configDir = getClaudeConfigDir(), logDir } = options;
+export async function promptCheck(data, options = {}) {
+  const { env = process.env, now = Date.now(), pluginRoot = PLUGIN_ROOT, configDir = getClaudeConfigDir(), logDir, cwd = process.cwd() } = options;
   try {
-    if (!isGuardEnabled(env)) return null;
+    if (!isGuardEnabled(env, data?.permission_mode)) return null;
     const dir = guardDir(configDir);
-    const file = sessionFile(configDir, data);
-    let record = file ? readJson(file) : null;
+    const file = await sessionFile(cwd, data);
+    let record = file ? readJson(file.readPath) : null;
     if (file && (!record || typeof record !== 'object')) {
       // A session that began before the guard was enabled: the baseline is this prompt.
       record = newRecord(now, pluginRoot, configDir);
-      writeJson(file, record);
+      writeJson(file.writePath, record);
     } else if (file) {
-      touchRecord(file, now); // a live session keeps its baseline out of the sweep
+      touchRecord(file.writePath, now); // a live session keeps its baseline out of the sweep
     }
     const messages = [];
     const confirmations = [];
@@ -306,7 +307,7 @@ export function promptCheck(data, options = {}) {
       }
       if (reasons.length > 0) messages.push(changedSinceStartMessage(reasons));
       const result = readJson(dailyFile(dir, logDir, 'delivery.json'));
-      const key = logDir || '';
+      const key = resolveLogDir(logDir, cwd);
       const prevShown = typeof record.shownByLogDir?.[key] === 'number' ? record.shownByLogDir[key] : 0;
       if (typeof result?.ts === 'number' && result.ts > prevShown && now - result.ts <= STALE_RESULT_MS) {
         const message = deliveryMessage(result);
@@ -326,7 +327,7 @@ export function promptCheck(data, options = {}) {
       text: messages.join('\n'),
       confirm: () => {
         for (const confirm of confirmations) confirm();
-        if (file) writeJson(file, record);
+        if (file) writeJson(file.writePath, record);
       },
     };
   } catch {
@@ -434,7 +435,8 @@ async function countInterruptions(projectsDir, since, until) {
       // Every plugin's hook on the event has the same hookName. A record shows the hook's command, or only a
       // label ("command hook 2") for a hook defined with args: the label cannot be told apart and counts as ours.
       const foreign = command !== '' && !command.includes('pre-tool-enforcer') && !/^command hook \d+$/.test(command);
-      if (hookName === 'PreToolUse:Agent' && !foreign) counts.agent++; else counts.other++;
+      // Both PreToolUse:Agent and PreToolUse:Task route through the same Jev path and produce the same model loss
+      if ((hookName === 'PreToolUse:Agent' || hookName === 'PreToolUse:Task') && !foreign) counts.agent++; else counts.other++;
     }
   }
   return counts;
@@ -487,8 +489,9 @@ async function runDailyCheck(argv) {
   const hours = Number(value('--window-hours'));
   const now = Date.parse(value('--now') ?? '');
   let result;
+  let logDir;
   try {
-    const logDir = value('--log') || (await resolveDefaultLogDir(process.env, process.cwd()));
+    logDir = value('--log') || (await resolveDefaultLogDir(process.env, process.cwd()));
     result = await computeDelivery({
       logDir,
       configDir,
@@ -500,8 +503,8 @@ async function runDailyCheck(argv) {
   }
   // The detached check passes --write; a run by hand only prints (with --print) and leaves the state alone.
   if (argv.includes('--write')) {
-    writeJson(dailyFile(dir, value('--log'), 'delivery.json'), result);
-    try { unlinkSync(dailyFile(dir, value('--log'), 'daily.lock')); } catch { /* no lock */ }
+    writeJson(dailyFile(dir, logDir, 'delivery.json'), result);
+    try { unlinkSync(dailyFile(dir, logDir, 'daily.lock')); } catch { /* no lock */ }
   }
   if (argv.includes('--print')) console.log(JSON.stringify(result));
 }
