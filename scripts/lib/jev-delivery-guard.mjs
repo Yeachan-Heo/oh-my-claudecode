@@ -12,8 +12,11 @@
  *  (a) startSession(): the smallest numeric timeout of the pre-tool-enforcer PreToolUse entries in the
  *      plugin's hooks.json is below OMC_JEV_GUARD_MIN_TIMEOUT_S (default 60) -> one message.
  *      Also records, per session id, a hash of hooks.json and of the OMC_*, ANTHROPIC_* and TYPESAFE_*
- *      keys of the `env` section of the user-level settings.json. A /compact keeps the record (same
- *      process); a session without a record gets its baseline at its first prompt.
+ *      keys and the Claude Code model-routing keys (CLAUDE_CODE_BEDROCK_*, CLAUDE_CODE_USE_*,
+ *      CLAUDE_CODE_SUBAGENT_MODEL, CLAUDE_MODEL) of the `env` section of the user-level settings.json.
+ *      A /compact keeps the record (same process); a session without a record gets its baseline at its
+ *      first prompt. Every prompt and every /compact marks the record as in use (its modification time),
+ *      so the sweep of records older than 14 days never takes the baseline of a live session.
  *  (b) promptCheck(): hooks.json or those env keys differ from the session's record -> one message per
  *      change, "restart the session". Only hashes are stored (sha256, 16 hex digits); values never are.
  *  (c) promptCheck() also starts, at most once per 24 hours, a detached process (this file with
@@ -24,6 +27,9 @@
  *      shows a message when any PreToolUse:Agent hook was interrupted or the share is below 95 %.
  *      Decisions the hook deliberately left alone (a `use` marker, forceInherit) count as not
  *      delivered. Lines without tool_use_id are skipped: with a log that has none, only interruptions are reported.
+ *      A model counts as delivered when it is the chosen tier's alias, a full model id that contains the
+ *      tier as a whole word (claude-opus-4-8 for opus), or the id the tier resolves to in the configuration
+ *      (the first set one of OMC_SUBAGENT_MODEL, CLAUDE_CODE_BEDROCK_<TIER>_MODEL, ANTHROPIC_DEFAULT_<TIER>_MODEL).
  *
  * State: <config dir>/.omc/jev-guard/ (sessions/<id>.json and, per Jev log directory,
  * daily-<key>.json, daily-<key>.lock, delivery-<key>.json).
@@ -31,7 +37,7 @@
 
 import { spawn } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { closeSync, createReadStream, existsSync, mkdirSync, openSync, readFileSync, readdirSync, renameSync, statSync, unlinkSync, writeFileSync } from 'node:fs';
+import { closeSync, createReadStream, existsSync, mkdirSync, openSync, readFileSync, readdirSync, renameSync, statSync, unlinkSync, utimesSync, writeFileSync } from 'node:fs';
 import { setPriority } from 'node:os';
 import { dirname, join } from 'node:path';
 import { createInterface } from 'node:readline';
@@ -103,8 +109,12 @@ export function hooksJsonHash(pluginRoot = PLUGIN_ROOT) {
   }
 }
 
+// Keys of the `env` section that decide the hooks' routing or the model a tier alias resolves to: the OMC, Anthropic
+// and Jev key variables, and the Claude Code provider and tier-model variables (Bedrock, Vertex, subagent model).
+const WATCHED_ENV_KEY = /^(OMC_|ANTHROPIC_|TYPESAFE_|CLAUDE_CODE_BEDROCK_|CLAUDE_CODE_USE_|CLAUDE_CODE_SUBAGENT_MODEL$|CLAUDE_MODEL$)/;
+
 /**
- * Hash of the OMC_*, ANTHROPIC_* and TYPESAFE_* keys of the `env` section of settings.json (sorted key=value
+ * Hash of the watched keys (WATCHED_ENV_KEY) of the `env` section of settings.json (sorted key=value
  * pairs), null when the file exists but cannot be parsed. The values may be API keys: only the hash
  * leaves this function. A missing file or section hashes like an empty one.
  */
@@ -117,7 +127,7 @@ export function settingsEnvHash(configDir = getClaudeConfigDir()) {
   }
   const section = settings.env && typeof settings.env === 'object' ? settings.env : {};
   const pairs = Object.entries(section)
-    .filter(([key]) => /^(OMC_|ANTHROPIC_|TYPESAFE_)/.test(key))
+    .filter(([key]) => WATCHED_ENV_KEY.test(key))
     .map(([key, value]) => `${key}=${String(value)}`)
     .sort();
   return digest(JSON.stringify(pairs));
@@ -153,6 +163,15 @@ function newRecord(now, pluginRoot, configDir) {
   return { start: now, hooks: hooksJsonHash(pluginRoot), env: settingsEnvHash(configDir), warnedHooks: null, warnedEnv: null, shown: 0 };
 }
 
+// Marks a session record as in use: the sweep reads its modification time. Only the time changes, never the content
+// (no truncating write, no reliance on the access time, which relatime and noatime mounts do not keep).
+function touchRecord(file, now) {
+  try {
+    const at = new Date(now);
+    utimesSync(file, at, at);
+  } catch { /* no record */ }
+}
+
 // At most once per 24 hours (a marker file): the directory grows with every headless run.
 function pruneSessions(dir, now) {
   try {
@@ -179,6 +198,7 @@ export function startSession(data, options = {}) {
     if (file) {
       // /compact continues the same process with the same session id: it keeps what it loaded at its start.
       if (data?.source !== 'compact') writeJson(file, newRecord(now, pluginRoot, configDir));
+      else touchRecord(file, now);
       pruneSessions(dirname(file), now);
     }
     return limitMessage(pluginRoot, minTimeoutSeconds(env));
@@ -248,6 +268,8 @@ export function promptCheck(data, options = {}) {
       // A session that began before the guard was enabled: the baseline is this prompt.
       record = newRecord(now, pluginRoot, configDir);
       writeJson(file, record);
+    } else if (file) {
+      touchRecord(file, now); // a live session keeps its baseline out of the sweep
     }
     const messages = [];
     const confirmations = [];
@@ -266,7 +288,7 @@ export function promptCheck(data, options = {}) {
         confirmations.push(() => { record.warnedHooks = hooks; });
       }
       if (settingsEnv && record.env && settingsEnv !== record.env && record.warnedEnv !== settingsEnv) {
-        reasons.push('the OMC_*, ANTHROPIC_* or TYPESAFE_* variables in the env section of settings.json changed');
+        reasons.push('the OMC_*, ANTHROPIC_* or TYPESAFE_* variables, or the Claude Code model-routing variables (CLAUDE_CODE_BEDROCK_*, CLAUDE_CODE_USE_*, CLAUDE_CODE_SUBAGENT_MODEL, CLAUDE_MODEL), in the env section of settings.json changed');
         confirmations.push(() => { record.warnedEnv = settingsEnv; });
       }
       if (reasons.length > 0) messages.push(changedSinceStartMessage(reasons));
@@ -337,8 +359,31 @@ async function readDecisions(logDir, since, until) {
   return decisions;
 }
 
-// meta.json holds the alias the call was made with ("opus") or a resolved id ("claude-opus-4-8"): equal, or the alias is one of its words.
-const modelMatches = (actual, wanted) => actual === wanted || actual.split(/[^a-z0-9]+/).includes(wanted);
+// The variables that resolve a tier alias to a model id, in the order of pre-tool-enforcer.mjs
+// (TIER_TO_DEFAULT_ENV_KEYS) and src/config/models.ts: the first one that is set wins.
+const TIER_ENV_KEYS = {
+  haiku: ['OMC_SUBAGENT_MODEL', 'CLAUDE_CODE_BEDROCK_HAIKU_MODEL', 'ANTHROPIC_DEFAULT_HAIKU_MODEL'],
+  sonnet: ['OMC_SUBAGENT_MODEL', 'CLAUDE_CODE_BEDROCK_SONNET_MODEL', 'ANTHROPIC_DEFAULT_SONNET_MODEL'],
+  opus: ['OMC_SUBAGENT_MODEL', 'CLAUDE_CODE_BEDROCK_OPUS_MODEL', 'ANTHROPIC_DEFAULT_OPUS_MODEL'],
+  fable: ['OMC_SUBAGENT_MODEL', 'CLAUDE_CODE_BEDROCK_FABLE_MODEL', 'ANTHROPIC_DEFAULT_FABLE_MODEL'],
+};
+const modelId = (value) => String(value ?? '').trim().toLowerCase().replace(/\[[^\]]*\]$/, ''); // "[1m]" is a context suffix, not part of the id
+const configuredTierModel = (tier, env) => {
+  for (const key of TIER_ENV_KEYS[tier] ?? []) {
+    const value = modelId(env[key]);
+    if (value) return value;
+  }
+  return '';
+};
+// meta.json holds the alias the call was made with ("opus"), a full id with the tier as a whole word
+// ("claude-opus-4-8"), or the id the configuration maps the tier to ("kimi-k2.6:cloud" for sonnet). Never a
+// prefix or a part of a word: "claude-opus-4-8" is not "haiku" and "opusx" is not "opus".
+const modelMatches = (actual, wanted, env = process.env) => {
+  const have = modelId(actual);
+  const tier = modelId(wanted);
+  if (!have || !tier) return false;
+  return have === tier || have.split(/[^a-z0-9]+/).includes(tier) || have === configuredTierModel(tier, env);
+};
 
 // Models of the agents that ran in the window: tool use id -> model, from the agents' meta.json files.
 function readAgentModels(projectsDir, since) {
@@ -391,7 +436,7 @@ export async function computeDelivery({ logDir, configDir = getClaudeConfigDir()
   for (const [id, wanted] of decisions) {
     if (!models.has(id)) continue;
     result.withAgent++;
-    if (modelMatches(models.get(id), wanted)) result.delivered++;
+    if (modelMatches(models.get(id), wanted, env)) result.delivered++;
   }
   if (result.withAgent > 0) result.deliveredPercent = Math.round((1000 * result.delivered) / result.withAgent) / 10;
   const interrupted = await countInterruptions(projectsDir, since, now);

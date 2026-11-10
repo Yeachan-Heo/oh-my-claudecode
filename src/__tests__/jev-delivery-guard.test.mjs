@@ -8,7 +8,7 @@
  */
 
 import { execFileSync, spawnSync } from 'node:child_process';
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, utimesSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -168,6 +168,34 @@ describe('(b) changes after the session started', () => {
     expect(stored).not.toContain('model-routing');
   });
 
+  it('reports a change of the Claude Code model-routing variables, never storing their values', () => {
+    for (const [key, before, after] of [
+      ['CLAUDE_CODE_BEDROCK_SONNET_MODEL', 'us.anthropic.claude-sonnet-first', 'us.anthropic.claude-sonnet-second'],
+      ['CLAUDE_CODE_USE_BEDROCK', '1', '0'],
+      ['CLAUDE_CODE_SUBAGENT_MODEL', 'model-first', 'model-second'],
+      ['CLAUDE_MODEL', 'model-first', 'model-second'],
+    ]) {
+      const id = `routing-${key}`;
+      writeSettings({ [key]: before });
+      startSession(session(id), options());
+      expect(promptCheck(session(id), options())).toBeNull();
+      writeSettings({ [key]: after });
+      const change = promptCheck(session(id), options());
+      expect(change, key).not.toBeNull();
+      expect(change.text).toContain('model-routing variables');
+      change.confirm();
+      expect(promptCheck(session(id), options())).toBeNull();
+      const stored = readFileSync(join(configDir, '.omc', 'jev-guard', 'sessions', `${id}.json`), 'utf8');
+      expect(stored).not.toContain('first');
+      expect(stored).not.toContain('second');
+    }
+    // a setting that is not about routing stays silent
+    writeSettings({ CLAUDE_CODE_MAX_OUTPUT_TOKENS: '1000' });
+    startSession(session('other'), options());
+    writeSettings({ CLAUDE_CODE_MAX_OUTPUT_TOKENS: '2000' });
+    expect(promptCheck(session('other'), options())).toBeNull();
+  });
+
   it('ignores other settings.json content and other env keys', () => {
     writeSettings({ OMC_JEV: 'model-routing:active', EDITOR: 'vim' }, { theme: 'dark' });
     startSession(session(), options());
@@ -221,6 +249,41 @@ describe('(b) changes after the session started', () => {
     expect(promptCheck(session('b'), options())).toBeNull();
     expect(promptCheck({ session_id: '../escape' }, options())).toBeNull();
     expect(promptCheck({}, options())).toBeNull();
+  });
+});
+
+describe('the sweep of old session records', () => {
+  const DAY = 24 * HOUR;
+  const recordPath = (id) => join(configDir, '.omc', 'jev-guard', 'sessions', `${id}.json`);
+  beforeEach(() => writeHooks(60));
+
+  it('removes a record nobody used for 14 days and keeps a live session\'s baseline, whatever its access time', () => {
+    startSession(session('live'), options());
+    startSession(session('idle'), options());
+    // the live session prompts every few days; the idle one never does
+    for (const day of [5, 10]) expect(promptCheck(session('live'), options({ now: NOW + day * DAY }))).toBeNull();
+    // the access time must not matter: set it to the far past, keep the modification time the prompt wrote
+    utimesSync(recordPath('live'), new Date(NOW - 60 * DAY), statSync(recordPath('live')).mtime);
+    const before = readFileSync(recordPath('live'), 'utf8');
+    startSession(session('new'), options({ now: NOW + 20 * DAY }));
+    expect(existsSync(recordPath('idle'))).toBe(false);
+    expect(existsSync(recordPath('live'))).toBe(true);
+    expect(readFileSync(recordPath('live'), 'utf8')).toBe(before);
+    // the baseline survived: a change since the session start is still reported
+    writeHooks(60, { extra: 1 });
+    expect(promptCheck(session('live'), options({ now: NOW + 20 * DAY })).text).toContain('hooks/hooks.json');
+  });
+
+  it('marks the record as in use by its time only, without rewriting it', () => {
+    startSession(session('live'), options());
+    const before = readFileSync(recordPath('live'), 'utf8');
+    expect(promptCheck(session('live'), options({ now: NOW + 3 * DAY }))).toBeNull();
+    expect(statSync(recordPath('live')).mtimeMs).toBe(NOW + 3 * DAY);
+    expect(readFileSync(recordPath('live'), 'utf8')).toBe(before);
+    // a /compact marks it too, before the sweep that /compact runs
+    startSession(session('live', 'compact'), options({ now: NOW + 16 * DAY }));
+    expect(statSync(recordPath('live')).mtimeMs).toBe(NOW + 16 * DAY);
+    expect(existsSync(recordPath('live'))).toBe(true);
   });
 });
 
@@ -304,6 +367,53 @@ describe('(c) the daily figures', () => {
     writeFileSync(join(sessionDir, 'subagents', 'agent-d1.meta.json'), JSON.stringify({ toolUseId: 'd1', model: 'opusx' }));
     const result = await computeDelivery({ logDir, configDir, now: NOW });
     expect(result.delivered).toBe(5);
+  });
+
+  describe('the model a tier resolves to', () => {
+    /** One decision for `wanted`, one agent that ran on `actual`; true when the share counts it as delivered under `env`. */
+    async function deliveredFor(wanted, actual, env = {}) {
+      const logDir = join(root, 'jev-log');
+      mkdirSync(logDir, { recursive: true });
+      const row = { ts: new Date(NOW - 3 * HOUR).toISOString(), point: 'model-routing', mode: 'active', tool_use_id: 'x1', answers: { 'model-tier': { type: 'choice', choice: wanted } } };
+      writeFileSync(join(logDir, 'shadow.jsonl'), JSON.stringify(row) + '\n');
+      const subagents = join(configDir, 'projects', 'proj', 'sess', 'subagents');
+      mkdirSync(subagents, { recursive: true });
+      writeFileSync(join(subagents, 'agent-x1.meta.json'), JSON.stringify({ toolUseId: 'x1', model: actual }));
+      const result = await computeDelivery({ logDir, configDir, now: NOW, env });
+      expect(result.withAgent).toBe(1);
+      return result.delivered === 1;
+    }
+
+    it('counts the id a tier is configured to as delivered, from any of the tier variables', async () => {
+      expect(await deliveredFor('sonnet', 'kimi-k2.6:cloud', { ANTHROPIC_DEFAULT_SONNET_MODEL: 'kimi-k2.6:cloud' })).toBe(true);
+      expect(await deliveredFor('Sonnet', 'KIMI-K2.6:cloud[1m]', { ANTHROPIC_DEFAULT_SONNET_MODEL: 'kimi-k2.6:cloud' })).toBe(true);
+      expect(await deliveredFor('opus', 'us.anthropic.claude-x-v1:0', { CLAUDE_CODE_BEDROCK_OPUS_MODEL: 'us.anthropic.claude-x-v1:0' })).toBe(true);
+      expect(await deliveredFor('haiku', 'glm-5', { OMC_SUBAGENT_MODEL: 'glm-5' })).toBe(true);
+      expect(await deliveredFor('fable', 'fable-proxy-1', { ANTHROPIC_DEFAULT_FABLE_MODEL: 'fable-proxy-1' })).toBe(true);
+    });
+
+    it('takes the first tier variable that is set, like src/config/models.ts', async () => {
+      const env = { CLAUDE_CODE_BEDROCK_SONNET_MODEL: 'bedrock-model-a', ANTHROPIC_DEFAULT_SONNET_MODEL: 'proxy-model-b' };
+      expect(await deliveredFor('sonnet', 'bedrock-model-a', env)).toBe(true);
+      expect(await deliveredFor('sonnet', 'proxy-model-b', env)).toBe(false);
+    });
+
+    it('does not count another tier\'s model, an unconfigured provider model, or a shared first word', async () => {
+      const env = { ANTHROPIC_DEFAULT_SONNET_MODEL: 'kimi-k2.6:cloud', ANTHROPIC_DEFAULT_HAIKU_MODEL: 'claude-haiku-4-5', ANTHROPIC_DEFAULT_OPUS_MODEL: 'claude-opus-4-8' };
+      expect(await deliveredFor('sonnet', 'kimi-k2.6:cloud', {})).toBe(false); // no configuration for the tier
+      expect(await deliveredFor('opus', 'kimi-k2.6:cloud', env)).toBe(false); // it is sonnet's model
+      expect(await deliveredFor('haiku', 'claude-opus-4-8', env)).toBe(false); // same first word "claude", another tier
+      expect(await deliveredFor('haiku', 'claude-sonnet-5', env)).toBe(false);
+      expect(await deliveredFor('sonnet', 'kimi', env)).toBe(false); // a part of the configured id is not the id
+      expect(await deliveredFor('opus', 'opusx', env)).toBe(false);
+      expect(await deliveredFor('opus', '', env)).toBe(false);
+    });
+
+    it('still matches the alias and a full id with the tier as a whole word', async () => {
+      expect(await deliveredFor('opus', 'opus')).toBe(true);
+      expect(await deliveredFor('opus', 'claude-opus-4-8')).toBe(true);
+      expect(await deliveredFor('haiku', 'claude-opus-4-8')).toBe(false);
+    });
   });
 
   it('does not compute a share under forceInherit', async () => {
