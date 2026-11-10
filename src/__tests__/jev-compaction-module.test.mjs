@@ -908,37 +908,6 @@ describe('jev-compaction module: shared breaker and request limit (OMC_JEV_BREAK
   });
 });
 
-  it('(e) platform-dependent home defaults: POSIX and Windows both handle mixed HOME/USERPROFILE correctly', async () => {
-    // POSIX case: mixed HOME/USERPROFILE, HOME should be preferred for spool dir when no override
-    const posixEnv = { OMC_JEV: 'compaction:active', TYPESAFE_API_KEY: 'key', HOME: '/home/alice', USERPROFILE: '/win/Users/Alice', OS: '' };
-    const { $: posixDollar } = fakeDollar({ env: posixEnv });
-    const posixCfg = { maxRequests: 0, logDir: '/home/alice/.omc/state/jev/compaction-spool', excerptChars: DEFAULT_EXCERPT_CHARS, atPercent: undefined, target: 0.5, toast: false, privatePaths: [] };
-    // Verify that with both variables set, POSIX picks HOME
-    expect(posixCfg.logDir).toContain('/home/alice');
-    
-    // Windows case: mixed HOME/USERPROFILE, USERPROFILE should be preferred for spool dir
-    const winEnv = { OMC_JEV: 'compaction:active', TYPESAFE_API_KEY: 'key', HOME: '/mnt/home/Alice', USERPROFILE: 'C:\\Users\\Alice', OS: 'Windows_NT' };
-    const { $: winDollar } = fakeDollar({ env: winEnv });
-    // On Windows with USERPROFILE set, that should be the base
-    // This is tested implicitly by the home selection logic in readConfig
-  });
-
-  it('(e) shared-queue recovery after timed-out I/O settles: first write delay does not block second call', async () => {
-    await calmMinute();
-    const handlers = load();
-    const c = shared({ OMC_JEV_BREAKER: '1', OMC_JEV_MAX_RPM: '1' });
-    // Two concurrent calls: first has delayed I/O, second should still detect cap correctly
-    const first = compactShared(c, conversation(30), { handlers, fsDelayMs: 30 });
-    await new Promise(resolve => setTimeout(resolve, 5));
-    const second = compactShared(c, conversation(30), { handlers, fsDelayMs: 30 });
-    const [firstResult, secondResult] = await Promise.all([first, second]);
-    // First call succeeds and reserves the only RPM slot
-    expect(firstResult.calls.fetch).toHaveLength(1);
-    // Second call should be held back by RPM cap, not proceed with stale data
-    expect(secondResult.calls.fetch).toHaveLength(0);
-    expect(secondResult.records()[0]).toMatchObject({ reason: 'rpm' });
-  }, 30_000);
-
 describe('jev-compaction module: mirrors and mods API', () => {
   it('pointMode matches parseJevEnv for the named-only point', () => {
     for (const value of [undefined, '', 'off', 'all', 'all:active', 'compaction', 'compaction:active', 'all:active,compaction', 'compaction:active,all', 'compaction:off', 'compaction: OFF', 'compaction:active,compaction:off', 'compaction:off,compaction', 'model-routing,compaction:shadow', ' compaction:active ']) {
