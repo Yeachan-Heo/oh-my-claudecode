@@ -2208,7 +2208,7 @@ async function main() {
         });
         const suppressedForSize = keywordsBeforeSize.filter((name) => !resolved.some((match) => match.name === name));
         if (suppressedForSize.length > 0) {
-          recordJevApplied('task-size', { size: 'small', confidence: jevTaskSizeResult.confidence, suppressed: suppressedForSize });
+          recordJevApplied('task-size', { size: jevTaskSizeResult.size, confidence: jevTaskSizeResult.confidence, suppressed: suppressedForSize });
         }
       }
     }

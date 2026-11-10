@@ -2555,7 +2555,8 @@ async function main() {
       }
     }, data, 2);
   } catch (error) {
-    // On error, always continue
+    // On error, always continue. A decision noted before the error is not applied, so it is not recorded either.
+    pendingJevRouting = undefined;
     emitPreToolUseOutput({ continue: true, suppressOutput: true }, data);
   }
 }
