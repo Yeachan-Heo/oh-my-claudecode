@@ -153,13 +153,13 @@ describe('(b) changes after the session started', () => {
     expect(promptCheck(session(), options())).toBeNull();
   });
 
-  it('reports a change of OMC_*, ANTHROPIC_* or TYPESAFE_* variables in settings.json, never storing their values', () => {
+  it('reports a change of OMC_*, ANTHROPIC_*, CLAUDE_CODE_BEDROCK_* or TYPESAFE_* variables in settings.json, never storing their values', () => {
     writeSettings({ OMC_JEV: 'model-routing:active', ANTHROPIC_API_KEY: 'sk-first-secret' }, { theme: 'dark' });
     startSession(session(), options());
     expect(promptCheck(session(), options())).toBeNull();
     writeSettings({ OMC_JEV: 'model-routing:active', ANTHROPIC_API_KEY: 'sk-second-secret' }, { theme: 'dark' });
     const change = promptCheck(session(), options());
-    expect(change.text).toContain('OMC_*, ANTHROPIC_* or TYPESAFE_*');
+    expect(change.text).toContain('OMC_*, ANTHROPIC_*, CLAUDE_CODE_BEDROCK_* or TYPESAFE_*');
     expect(change.text).not.toContain('hooks/hooks.json');
     change.confirm();
     expect(promptCheck(session(), options())).toBeNull();
@@ -450,7 +450,7 @@ describe('the hook scripts', () => {
     expect(changed.continue).toBe(true);
     expect(changed.suppressOutput).toBeUndefined();
     expect(changed.systemMessage).toContain('Jev delivery guard');
-    expect(changed.systemMessage).toContain('OMC_*, ANTHROPIC_* or TYPESAFE_*');
+    expect(changed.systemMessage).toContain('OMC_*, ANTHROPIC_*, CLAUDE_CODE_BEDROCK_* or TYPESAFE_*');
     expect(runHook(KEYWORD_DETECTOR, prompt()).systemMessage).toBeUndefined();
   });
 
