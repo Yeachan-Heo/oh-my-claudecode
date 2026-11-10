@@ -5,15 +5,15 @@
   "provenance": {
     "base": "05c800f40d1ad53b42a78609d2667ef4f726808b",
     "planningHead": "0a91273e61dbbd47eb0af4c02844409251e08398",
-    "head": "d6ba59fa78015f8246a4e1c2ae3c2602bcb4f284",
-    "sourceSha256": "cb7df3f1e7dc3a1cd4a927c84ac10cd16366ca86aeb245ef29bc4877900c38af",
+    "head": "391ca055a0bbe3963153915c417f578fcd096e4a",
+    "sourceSha256": "9c6e4b9e33f30bfb43b7ed84dc0b6d63316f79372fdb9566f1d66285858c9ac5",
     "generatedAt": null,
     "generator": "scripts/generate-inventory-graph.mjs"
   },
   "base": "05c800f40d1ad53b42a78609d2667ef4f726808b",
   "planningHead": "0a91273e61dbbd47eb0af4c02844409251e08398",
-  "head": "d6ba59fa78015f8246a4e1c2ae3c2602bcb4f284",
-  "sourceSha256": "cb7df3f1e7dc3a1cd4a927c84ac10cd16366ca86aeb245ef29bc4877900c38af",
+  "head": "391ca055a0bbe3963153915c417f578fcd096e4a",
+  "sourceSha256": "9c6e4b9e33f30bfb43b7ed84dc0b6d63316f79372fdb9566f1d66285858c9ac5",
   "counts": {
     "public": {
       "skills": 84,
@@ -28,8 +28,8 @@
       "toolFiles": 65,
       "libFiles": 49,
       "templateHooks": 25,
-      "srcFiles": 1446,
-      "total": 1471
+      "srcFiles": 1447,
+      "total": 1472
     },
     "generated": {
       "distFiles": 5639,
@@ -40774,6 +40774,11 @@
         "path": "src/__tests__/bridge-help-question-regex.test.ts"
       },
       {
+        "id": "src/__tests__/bridge-self-contained.test.ts",
+        "kind": "src",
+        "path": "src/__tests__/bridge-self-contained.test.ts"
+      },
+      {
         "id": "src/__tests__/chain-enqueuer-registration.test.ts",
         "kind": "src",
         "path": "src/__tests__/chain-enqueuer-registration.test.ts"
@@ -53392,6 +53397,31 @@
       },
       {
         "from": "src/__tests__/bridge-help-question-regex.test.ts",
+        "to": "external:vitest",
+        "kind": "imports"
+      },
+      {
+        "from": "src/__tests__/bridge-self-contained.test.ts",
+        "to": "external:node:child_process",
+        "kind": "imports"
+      },
+      {
+        "from": "src/__tests__/bridge-self-contained.test.ts",
+        "to": "external:node:fs",
+        "kind": "imports"
+      },
+      {
+        "from": "src/__tests__/bridge-self-contained.test.ts",
+        "to": "external:node:os",
+        "kind": "imports"
+      },
+      {
+        "from": "src/__tests__/bridge-self-contained.test.ts",
+        "to": "external:node:path",
+        "kind": "imports"
+      },
+      {
+        "from": "src/__tests__/bridge-self-contained.test.ts",
         "to": "external:vitest",
         "kind": "imports"
       },
@@ -92767,12 +92797,12 @@
       }
     ],
     "stats": {
-      "nodeCount": 8258,
-      "edgeCount": 8854,
-      "importEdgeCount": 7403,
+      "nodeCount": 8259,
+      "edgeCount": 8859,
+      "importEdgeCount": 7408,
       "registerEdgeCount": 105
     }
   },
-  "inventorySha256": "1a3ff6215037b3749296f7ebb72297a5ec3f39e1bc3ba796d3279fb8c71f201e",
-  "manifestSha256": "0abc3bf76fe6131084f4d470fee90a43318bc3c0491b1a7247e319a4c42cbfa5"
+  "inventorySha256": "e4ce537e8305ee5d8347da3ea6f387700dbe01720474ce1e7e6d9f55e4121d2a",
+  "manifestSha256": "e5b360299c7c6ee8ba6f1c1a8dcb1924893f9592365b4134b4fb7f0ee33f98d3"
 }
