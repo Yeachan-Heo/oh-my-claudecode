@@ -5,15 +5,15 @@
   "provenance": {
     "base": "05c800f40d1ad53b42a78609d2667ef4f726808b",
     "planningHead": "0a91273e61dbbd47eb0af4c02844409251e08398",
-    "head": "6fa281b7ebbc313ca79c3c43540883ee9bf35a05",
-    "sourceSha256": "5b64d7de420c56dae50b5ba331ce78fa0eb9709671b4c7b5a87d394eb14e501e",
+    "head": "0179a9f5f87999f99128ab7b86d7878937e3f019",
+    "sourceSha256": "ae370f940150f4b4e6877ba777bbafceaf0dec76869b6d0136ac54a65963eb4c",
     "generatedAt": null,
     "generator": "scripts/generate-inventory-graph.mjs"
   },
   "base": "05c800f40d1ad53b42a78609d2667ef4f726808b",
   "planningHead": "0a91273e61dbbd47eb0af4c02844409251e08398",
-  "head": "6fa281b7ebbc313ca79c3c43540883ee9bf35a05",
-  "sourceSha256": "5b64d7de420c56dae50b5ba331ce78fa0eb9709671b4c7b5a87d394eb14e501e",
+  "head": "0179a9f5f87999f99128ab7b86d7878937e3f019",
+  "sourceSha256": "ae370f940150f4b4e6877ba777bbafceaf0dec76869b6d0136ac54a65963eb4c",
   "counts": {
     "public": {
       "skills": 84,
@@ -48188,6 +48188,11 @@
         "path": "tests/integration/jev-active-mode-repro.test.ts"
       },
       {
+        "id": "tests/integration/jev-max-effort-always.test.ts",
+        "kind": "other",
+        "path": "tests/integration/jev-max-effort-always.test.ts"
+      },
+      {
         "id": "tests/integration/jev-model-routing-all-agents.test.ts",
         "kind": "other",
         "path": "tests/integration/jev-model-routing-all-agents.test.ts"
@@ -91190,6 +91195,46 @@
         "kind": "imports"
       },
       {
+        "from": "tests/integration/jev-max-effort-always.test.ts",
+        "to": "external:node:child_process",
+        "kind": "imports"
+      },
+      {
+        "from": "tests/integration/jev-max-effort-always.test.ts",
+        "to": "external:node:fs",
+        "kind": "imports"
+      },
+      {
+        "from": "tests/integration/jev-max-effort-always.test.ts",
+        "to": "external:node:http",
+        "kind": "imports"
+      },
+      {
+        "from": "tests/integration/jev-max-effort-always.test.ts",
+        "to": "external:node:http",
+        "kind": "type-imports"
+      },
+      {
+        "from": "tests/integration/jev-max-effort-always.test.ts",
+        "to": "external:node:os",
+        "kind": "imports"
+      },
+      {
+        "from": "tests/integration/jev-max-effort-always.test.ts",
+        "to": "external:node:path",
+        "kind": "imports"
+      },
+      {
+        "from": "tests/integration/jev-max-effort-always.test.ts",
+        "to": "external:node:url",
+        "kind": "imports"
+      },
+      {
+        "from": "tests/integration/jev-max-effort-always.test.ts",
+        "to": "external:vitest",
+        "kind": "imports"
+      },
+      {
         "from": "tests/integration/jev-model-routing-all-agents.test.ts",
         "to": "external:node:child_process",
         "kind": "imports"
@@ -92441,12 +92486,12 @@
       }
     ],
     "stats": {
-      "nodeCount": 8250,
-      "edgeCount": 8797,
-      "importEdgeCount": 7351,
+      "nodeCount": 8251,
+      "edgeCount": 8805,
+      "importEdgeCount": 7358,
       "registerEdgeCount": 105
     }
   },
-  "inventorySha256": "3f474e8ffd2c9489ced914c6438e9ff9453611476676f359b8fc2a0c46a2ca00",
-  "manifestSha256": "0f7a57a391396382ba8d7028d5d6de64b0a60903e9f3b93f64a907564ec299f7"
+  "inventorySha256": "e89bd6a2324194f4faa808c69710922f5b8ad163effc4c40f90c43a752b0e467",
+  "manifestSha256": "4e7f9e0c94c77a16a624ac020ce42a072e66ef9d7c2a10bb4d805fc168fab001"
 }
