@@ -648,3 +648,21 @@ const entries = await readLedger(path);
 - The verdict records what was actually exercised — never stronger than the evidence
 - Cells starting with a formula character are `'`-prefixed; tabs/newlines flatten; append-only, history is never rewritten
 - Vocabulary credit: pstack orch ledger (see docs/CREDITS.md)
+
+## Jev Task-Size Configuration
+
+Optional environment variables to customize heavy-mode suppression in active task-size mode (`OMC_JEV=task-size:active`). By default, `keyword-detector.mjs` drops heavy modes (`ralph`, `autopilot`, `ralplan`) when Jev answers `small` with confidence ≥ 0.9 AND the classifier agrees or a size prefix is found. Slash commands at prompt start are never suppressed.
+
+### Variables
+
+| Variable | Default | Behavior |
+|----------|---------|----------|
+| `OMC_JEV_TASK_SIZE_NOTICE` | unset | Set to `1` or `true` to report suppressed modes and their reasons in `additionalContext`, matching the TypeScript bridge's output format. Also enables use of `taskSizeDetection` word limits from config (default 50/200). |
+| `OMC_JEV_TASK_SIZE_PREFIX_WINS` | unset | Set to `1` or `true` to let a classifier size prefix (`quick:`, `simple:`, `tiny:`, `minor:`, `small:`, `just:`, `only:`) drop heavy modes regardless of Jev's confidence or answer. |
+| `OMC_JEV_TASK_SIZE_SLASH_ANYWHERE` | unset | Set to `1` or `true` to keep heavy modes from slash commands anywhere in the prompt (`/ralph`, `/omc:ralph`), not just at the start. Filenames (`/ralph.md`) and paths (`a/ralph`) are excluded. |
+
+### Implementation
+
+- Script: `scripts/keyword-detector.mjs`
+- Config keys read: `taskSizeDetection.enabled`, `taskSizeDetection.suppressHeavyModesForSmallTasks`, `taskSizeDetection.smallWordLimit`, `taskSizeDetection.largeWordLimit`
+- See `HOOKS.md` [Task size: heavy-mode suppression](HOOKS.md#task-size-heavy-mode-suppression) for full behavior documentation
