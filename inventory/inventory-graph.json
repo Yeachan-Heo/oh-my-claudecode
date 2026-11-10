@@ -5,15 +5,15 @@
   "provenance": {
     "base": "05c800f40d1ad53b42a78609d2667ef4f726808b",
     "planningHead": "0a91273e61dbbd47eb0af4c02844409251e08398",
-    "head": "424550db6903c7b372214243d6169ef4664da4e4",
-    "sourceSha256": "d3d5033f358d2a6a730c8dad5efa7904d731a69f51c1d6f1a10ea81022533271",
+    "head": "8d4931cc3589d436ad6e8238420e373518fd1486",
+    "sourceSha256": "c158b37785636426f4f5ab4f5839374b55d1d844e3070591e9ec22872700439f",
     "generatedAt": null,
     "generator": "scripts/generate-inventory-graph.mjs"
   },
   "base": "05c800f40d1ad53b42a78609d2667ef4f726808b",
   "planningHead": "0a91273e61dbbd47eb0af4c02844409251e08398",
-  "head": "424550db6903c7b372214243d6169ef4664da4e4",
-  "sourceSha256": "d3d5033f358d2a6a730c8dad5efa7904d731a69f51c1d6f1a10ea81022533271",
+  "head": "8d4931cc3589d436ad6e8238420e373518fd1486",
+  "sourceSha256": "c158b37785636426f4f5ab4f5839374b55d1d844e3070591e9ec22872700439f",
   "counts": {
     "public": {
       "skills": 84,
@@ -48183,6 +48183,11 @@
         "path": "tests/integration/issue-4814-ralph-plugin-cli.test.ts"
       },
       {
+        "id": "tests/integration/issue-4933-fable-opt-in-routing.test.ts",
+        "kind": "other",
+        "path": "tests/integration/issue-4933-fable-opt-in-routing.test.ts"
+      },
+      {
         "id": "tests/integration/jev-active-mode-repro.test.ts",
         "kind": "other",
         "path": "tests/integration/jev-active-mode-repro.test.ts"
@@ -91150,6 +91155,11 @@
         "kind": "imports"
       },
       {
+        "from": "tests/integration/issue-4933-fable-opt-in-routing.test.ts",
+        "to": "external:vitest",
+        "kind": "imports"
+      },
+      {
         "from": "tests/integration/jev-active-mode-repro.test.ts",
         "to": "external:node:child_process",
         "kind": "imports"
@@ -92441,12 +92451,12 @@
       }
     ],
     "stats": {
-      "nodeCount": 8250,
-      "edgeCount": 8797,
-      "importEdgeCount": 7351,
+      "nodeCount": 8251,
+      "edgeCount": 8798,
+      "importEdgeCount": 7352,
       "registerEdgeCount": 105
     }
   },
-  "inventorySha256": "3f474e8ffd2c9489ced914c6438e9ff9453611476676f359b8fc2a0c46a2ca00",
-  "manifestSha256": "e000b4cf86bab203dc43f38a997a3dc29d19c0b3bc5ea6f9aefc7e4fb9e2fcd6"
+  "inventorySha256": "b3fac8b1e01bd5c29c7a330e07b8c86ee4f6f0e6b3aeee342cf395571ef30bcf",
+  "manifestSha256": "91b096cdfb39b19252ad300d54c47402d04c79f4f36cdd53f7efbe30593ec016"
 }
