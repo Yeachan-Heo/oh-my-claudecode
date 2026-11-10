@@ -665,3 +665,125 @@ describe('jev-compaction module: mirrors and mods API', () => {
     expect(source).not.toMatch(/\$\.ui\.log\s*\(|\$\.clock\.sleep\s*\(/);
   });
 });
+
+describe('jev-compaction module: what the host sends after the compaction', () => {
+  // The host side, modelled from true message ids (measured on Claude Code 2.1.321), not from the
+  // module's own check. Claude Code writes one transcript row per content block, so one API message
+  // is several rows sharing a message.id (a thinking row reads as an assistant message with no text
+  // and no calls). Each fixture row carries the engine's handle, and `table` maps the handle to the
+  // row's message.id and API blocks. A row handed back with its handle is written as the engine has
+  // it; a row the hook built gets a new message.id and blocks from its text, calls and results.
+  const U = (text) => ({ role: 'user', text, blocks: [{ type: 'text', text }] });
+  const T = (id) => ({ role: 'assistant', id, text: '', blocks: [{ type: 'thinking', thinking: `thinking of ${id}`, signature: `sig-${id}` }] });
+  const X = (id, text) => ({ role: 'assistant', id, text, blocks: [{ type: 'text', text }] });
+  const C = (id, use, input = { command: `cat ${use}.txt` }) => ({ role: 'assistant', id, text: '', uses: [{ tool_use_id: use, tool: 'Bash', input }], blocks: [{ type: 'tool_use', id: use, name: 'Bash', input }] });
+  const S = (id, srv) => ({ role: 'assistant', id, text: '', blocks: [{ type: 'server_tool_use', id: srv, name: 'advisor', input: {} }, { type: 'advisor_tool_result', tool_use_id: srv, content: { type: 'advisor_result', text: 'advice' } }] });
+  const R = (use, text = `RESULT-${use} ${'x'.repeat(2000)}`) => ({ role: 'user', text: '', results: [{ tool_use_id: use, text, isError: false }], blocks: [{ type: 'tool_result', tool_use_id: use, content: text }] });
+
+  /** Rows of `n` single-call API messages (thinking, call, result), named from `from`. */
+  const singles = (n, from) => Array.from({ length: n }, (_, k) => [T(`m${from + k}`), C(`m${from + k}`, `t${from + k}`), R(`t${from + k}`)]).flat();
+
+  function transcript(rows) {
+    const table = new Map();
+    const messages = rows.map((r, k) => {
+      const handle = `h${k}`;
+      table.set(handle, { role: r.role, id: r.id, blocks: r.blocks });
+      return Object.freeze({ role: r.role, text: r.text, toolUses: r.uses ?? [], ...(r.results ? { toolResults: r.results } : {}), handle });
+    });
+    return { messages, table };
+  }
+
+  /** The rows the host writes after the compact boundary for the messages a hook returned. */
+  function hostWrite(messages, table) {
+    return messages.map((m, k) => (m.handle ? table.get(m.handle) : {
+      role: m.role,
+      id: m.role === 'assistant' ? `built-${k}` : undefined,
+      blocks: [
+        ...(m.text ? [{ type: 'text', text: m.text }] : []),
+        ...(m.toolUses || []).map((u) => ({ type: 'tool_use', id: u.tool_use_id, name: u.tool, input: u.input })),
+        ...(m.toolResults || []).map((r) => ({ type: 'tool_result', tool_use_id: r.tool_use_id, content: r.text })),
+      ],
+    }));
+  }
+
+  /** The request the host builds from rows: an assistant row joins an earlier assistant message of
+   * its message.id while only result-only user rows stand between them; consecutive user rows join. */
+  function hostRequest(rows) {
+    const msgs = [];
+    const open = new Map();
+    for (const r of rows) {
+      if (r.role === 'assistant') {
+        const k = open.get(r.id);
+        if (k !== undefined) { msgs[k].blocks.push(...r.blocks); continue; }
+        msgs.push({ role: 'assistant', id: r.id, blocks: [...r.blocks] });
+        open.set(r.id, msgs.length - 1);
+        continue;
+      }
+      if (!r.blocks.every((b) => b.type === 'tool_result')) open.clear();
+      const last = msgs[msgs.length - 1];
+      if (last && last.role === 'user') last.blocks.push(...r.blocks);
+      else msgs.push({ role: 'user', blocks: [...r.blocks] });
+    }
+    return msgs;
+  }
+
+  /** The host's pairing repair before a request: a call without its result in the next message gets
+   * "[Tool result missing due to internal error]" (missing), a result without its call in the
+   * previous message is dropped (dropped). */
+  function hostPairing(msgs) {
+    let missing = 0;
+    let dropped = 0;
+    const seen = new Set();
+    msgs.forEach((m, k) => {
+      if (m.role !== 'assistant') return;
+      const uses = m.blocks.filter((b) => b.type === 'tool_use' && !seen.has(b.id)).map((b) => b.id);
+      for (const id of uses) seen.add(id);
+      const next = msgs[k + 1];
+      if (!next) return;
+      const got = new Set(next.role === 'user' ? next.blocks.filter((b) => b.type === 'tool_result').map((b) => b.tool_use_id) : []);
+      for (const id of uses) if (!got.has(id)) missing++;
+      for (const id of got) if (!uses.includes(id)) dropped++;
+    });
+    return { missing, dropped };
+  }
+
+  async function compactHost(rows, options = {}) {
+    const { messages, table } = transcript(rows);
+    const handlers = load();
+    const fake = fakeDollar(options);
+    const api = hostRequest(messages.map((m) => table.get(m.handle))).map((m) => ({ role: m.role, content: m.blocks }));
+    fake.$.session.messages = async (opts) => { fake.calls.messages++; return opts?.as === 'api' ? (options.api ?? (() => api))(opts) : messages; };
+    const next = summaryNext();
+    const out = await handlers['session.compact'](fake.$, Object.freeze({ trigger: 'auto', messages }), next);
+    const written = hostWrite(out.messages, table);
+    return { out, next, messages, table, written, request: hostPairing(hostRequest(written)), ...fake };
+  }
+
+  const opening = [U('Task: review the notes and count the lines.')];
+  const closing = [U('Good, now sum up the NEEDED results.'), T('mz'), X('mz', 'Summary: done.')];
+
+  it('two parallel calls whose second call becomes a trace: the host would replace the kept result, so the module falls back', async () => {
+    const parallel = [T('mp'), C('mp', 'pa'), C('mp', 'pb'), R('pa', `RESULT-pa NEEDED ${'x'.repeat(2000)}`), R('pb')];
+    const run = await compactHost([...opening, ...parallel, ...singles(20, 1), ...closing]);
+    expect(run.records()[0]).toMatchObject({ result: 'fallback', reason: 'build_error' });
+    expect(run.next.seen).toHaveLength(1);
+    expect(run.request).toEqual({ missing: 0, dropped: 0 });
+    // The same calls in two API messages pair in the host's request, and the compaction stands.
+    const apart = [T('mpa'), C('mpa', 'pa'), R('pa', `RESULT-pa NEEDED ${'x'.repeat(2000)}`), T('mpb'), C('mpb', 'pb'), R('pb')];
+    const control = await compactHost([...opening, ...apart, ...singles(20, 1), ...closing]);
+    expect(control.records()[0]).toMatchObject({ result: 'jev' });
+    expect(resultOf(control.out.messages, 'pa')).toBeDefined();
+    expect(resultOf(control.out.messages, 'pb')).toBeUndefined();
+    expect(control.request).toEqual({ missing: 0, dropped: 0 });
+  });
+
+  it('pairingOk compares the pairing the host checks: each call with its result in the next message', () => {
+    const call = (id, handle) => ({ role: 'assistant', text: '', toolUses: [{ tool_use_id: id, tool: 'Bash', input: {} }], ...(handle ? { handle } : {}) });
+    const res = (ids, handle) => ({ role: 'user', text: '', toolUses: [], toolResults: ids.map((id) => ({ tool_use_id: id, text: 'r' })), ...(handle ? { handle } : {}) });
+    const original = [call('a', 'h1'), call('b', 'h2'), res(['a'], 'h3'), res(['b'], 'h4')];
+    expect(pairingOk(original, original)).toBe(true);
+    expect(pairingOk(original, [{ role: 'assistant', text: '', toolUses: [...call('a').toolUses, ...call('b').toolUses] }, res(['a', 'b'])])).toBe(true);
+    expect(pairingOk(original, [call('a'), call('b'), res(['a']), res(['b'])])).toBe(false);
+    expect(pairingOk(original, [call('a', 'h1'), { role: 'assistant', text: '[compacted] b', toolUses: [] }, res(['a'])])).toBe(false);
+  });
+});

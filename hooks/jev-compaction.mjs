@@ -554,10 +554,49 @@ function pairing(messages) {
   }
   return { orphanResults, openCalls: open.size };
 }
+// Pairing as the host checks it before a request (measured on Claude Code 2.1.321). The host joins
+// consecutive user rows, and joins an assistant row to an earlier assistant message of the same
+// message.id while only result-only user rows stand between them; then every call of assistant
+// message k needs its result in message k + 1, else the host puts "[Tool result missing due to
+// internal error]" in its place and drops the real result. A row a hook built gets a new message.id,
+// so it joins nothing; a run of rows with the engine's handle is taken as one message (a built
+// assistant row or a user row with text ends the run). Counts calls without a result in the next
+// message and results without a call in the previous one.
+function adjacencyBreaks(messages) {
+  const msgs = [];
+  let run = -1;
+  for (const m of messages) {
+    if (m.role === 'assistant') {
+      const uses = (m.toolUses || []).map((u) => u.tool_use_id);
+      if (m.handle && run >= 0) { msgs[run].uses.push(...uses); continue; }
+      msgs.push({ role: 'assistant', uses });
+      run = m.handle ? msgs.length - 1 : -1;
+      continue;
+    }
+    const results = (m.toolResults || []).map((r) => r.tool_use_id);
+    if (m.text || !results.length) run = -1;
+    const last = msgs[msgs.length - 1];
+    if (last && last.role === 'user') last.results.push(...results);
+    else msgs.push({ role: 'user', results });
+  }
+  let breaks = 0;
+  const seen = new Set();
+  msgs.forEach((mm, k) => {
+    if (mm.role !== 'assistant') return;
+    const uses = mm.uses.filter((id) => !seen.has(id));
+    for (const id of uses) seen.add(id);
+    const next = msgs[k + 1];
+    if (!next) return;
+    const got = new Set(next.role === 'user' ? next.results : []);
+    for (const id of uses) if (!got.has(id)) breaks++;
+    for (const id of got) if (!mm.uses.includes(id)) breaks++;
+  });
+  return breaks;
+}
 export function pairingOk(original, built) {
   const a = pairing(original);
   const b = pairing(built);
-  return b.orphanResults <= a.orphanResults && b.openCalls <= a.openCalls;
+  return b.orphanResults <= a.orphanResults && b.openCalls <= a.openCalls && adjacencyBreaks(built) <= adjacencyBreaks(original);
 }
 
 // Resolves {value}, {timeout: true} or {error}; never rejects. $.clock.after is a timer, not the
