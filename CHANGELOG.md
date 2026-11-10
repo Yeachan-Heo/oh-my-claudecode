@@ -1,28 +1,3 @@
-# oh-my-claudecode v5.8.5: Jev enhancements and hook improvements
-
-## Release Notes
-
-v5.8.5 is a patch release that adds opt-in environment variables to control Jev advisory point actions, extends hook timeouts for improved reliability, and improves flexibility in the loop-continuation workflow.
-
-### Features
-
-- **feat(jev): opt-in actions on advisory Jev points** (#4935) — introduces `OMC_JEV_SLOP_WARNING_APPLY`, `OMC_JEV_LEARNER_EXTRACTION_APPLY`, `OMC_JEV_SIMPLIFIER_TRIGGER_APPLY`, and `OMC_JEV_LOOP_RELEASE_ONLY` environment variables
-- **feat(jev): opt-in routing hints for large mechanical work** (#4960) — adds guidance for model selection in specific scenarios
-- **feat(hooks): improved hook timeout handling** — better hook execution under concurrent operations
-
-### Bug Fixes
-
-- **fix(jev): lengthen hook timeouts for hooks that wait for Jev** (#4961) — improved reliability for hooks waiting on Jev model routing
-- **fix(shell-checks): count a bash that exits before reading the command as bash-failure** (#4958)
-- **fix(test): set TMPDIR for grok/muse env vars test with Windows platform**
-- **fix(jev): restore vi.waitFor replacement polling utility in Jev integration tests**
-
-### Stats
-
-- **5 PRs merged** | **3 new features** | **4 bug fixes** | **0 security/hardening improvements** | **0 other changes**
-
----
-
 # oh-my-claudecode v5.8.4: Hooks improvements, Jev enhancements, Teleport fix
 
 ## Release Notes
