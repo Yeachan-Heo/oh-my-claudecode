@@ -351,6 +351,12 @@ describe('hook scripts with OMC_JEV_APPLIED_LOG=1', () => {
     const same = makeContext();
     await runHook(same, 'pre-tool-enforcer.mjs', TASK_CALL(same.cwd, { model: SONNET_DEFAULT }), 'model-routing', env);
     expect(readLog(same, 'applied.jsonl')).toEqual([]);
+
+    // The same on the native Anthropic provider, whose tier default is an ordinary model ID.
+    const NATIVE = 'claude-sonnet-4-5-20250929';
+    const native = makeContext();
+    await runHook(native, 'pre-tool-enforcer.mjs', TASK_CALL(native.cwd, { model: NATIVE }), 'model-routing', { ...env, ANTHROPIC_DEFAULT_SONNET_MODEL: NATIVE });
+    expect(readLog(native, 'applied.jsonl')).toEqual([]);
   }, 120_000);
 
   it('model-routing: no line for a call that a later check of the hook denies', async () => {

@@ -1038,7 +1038,10 @@ function noteJevRouting(before, updated, answers, subagentType) {
   const choice = answers['model-tier']?.choice;
   // Compare the models the call actually runs on: a tier alias that resolves to the baseline's
   // concrete model changes nothing, and one that resolves to another version does.
-  const routedModel = (id) => (isTierAlias(id) && resolveTierAliasToSafeModel(id)) || id;
+  // The tier default the alias selects, like src/config/models.ts resolveTierModelFromEnv: the first
+  // set variable, without the subagent-safety validation (an ordinary Anthropic ID counts too).
+  const routedModel = (id) => (isTierAlias(id)
+    && (TIER_TO_DEFAULT_ENV_KEYS[id.toLowerCase()] ?? []).map((key) => (process.env[key] || '').trim()).find(Boolean)) || id;
   if (typeof choice === 'string' && updated.model === choice.toLowerCase() && routedModel(updated.model) !== routedModel(before.model)) {
     applied.model = { from: before.model ?? null, to: updated.model };
   }
