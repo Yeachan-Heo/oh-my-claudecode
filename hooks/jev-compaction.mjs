@@ -141,16 +141,23 @@ export function pointMode(raw, key) {
   if (!key || value === 'off') return 'off';
   let listed = false;
   let active = false;
+  let off = false;
   for (const entry of value.split(',')) {
     const token = entry.trim();
     if (!token) continue;
     const colon = token.lastIndexOf(':');
     const name = colon === -1 ? token : token.slice(0, colon);
     if (name !== POINT) continue;
+    if (colon !== -1 && token.slice(colon + 1).trim().toLowerCase() === 'off') {
+      off = true;
+      active = false;
+      continue;
+    }
+    off = false;
     listed = true;
     if (colon !== -1 && token.slice(colon + 1) === 'active') active = true;
   }
-  if (!listed) return 'off';
+  if (off || !listed) return 'off';
   return active ? 'active' : 'shadow';
 }
 
