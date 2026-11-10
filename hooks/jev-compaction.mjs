@@ -300,6 +300,7 @@ async function readConfig($) {
     OMC_JEV_BREAKER: await $.env.get('OMC_JEV_BREAKER'),
     OMC_JEV_MAX_RPM: await $.env.get('OMC_JEV_MAX_RPM'),
     OMC_JEV_BREAKER_DIR: await $.env.get('OMC_JEV_BREAKER_DIR'),
+    OS: await $.env.get('OS'),
     USERPROFILE: await $.env.get('USERPROFILE'),
     HOME: await $.env.get('HOME'),
   };
@@ -327,7 +328,7 @@ async function readConfig($) {
   }
   // Home for shared-state directory: HOME on POSIX (matching jev-breaker.mjs), USERPROFILE on Windows.
   // Home for private-path expansion: preserve USERPROFILE for Windows compatibility.
-  const homeForState = env.HOME || env.USERPROFILE;
+  const homeForState = env.OS === 'Windows_NT' ? env.USERPROFILE || env.HOME : env.HOME || env.USERPROFILE;
   const homeForPrivatePaths = env.USERPROFILE || env.HOME;
   const stateDir = env.OMC_JEV_LOG_DIR ? slash(env.OMC_JEV_LOG_DIR) : homeForState ? `${slash(homeForState)}/.omc/state/jev` : undefined;
   const privatePaths = String(env.OMC_JEV_COMPACT_PRIVATE_PATHS ?? '')
