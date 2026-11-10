@@ -252,8 +252,11 @@ describe("issue #4933: opt-in fable model routing (subprocess)", () => {
       OMC_JEV_MODEL_ROUTING_FABLE: undefined,
     });
 
-    // Parse the output to check if fable was rejected
-    expect(result.stdout, `stderr: ${result.stderr}`).toBeTruthy();
+    // Validate subprocess success and output are present before parsing
+    expect(result.exitCode, `subprocess failed with stderr: ${result.stderr}`).toBe(0);
+    expect(result.stdout, "subprocess must produce valid JSON output").toBeTruthy();
+    
+    // Parse and validate the output to check if fable was rejected
     const output = JSON.parse(result.stdout);
     const routedModel = output.hookSpecificOutput?.updatedInput?.model;
     // With opt-in disabled, fable should be rejected
@@ -265,11 +268,48 @@ describe("issue #4933: opt-in fable model routing (subprocess)", () => {
       OMC_JEV_MODEL_ROUTING_FABLE: "1",
     });
 
-    // Parse the output to check if fable was accepted
-    expect(result.stdout, `stderr: ${result.stderr}`).toBeTruthy();
+    // Validate subprocess success and output are present before parsing
+    expect(result.exitCode, `subprocess failed with stderr: ${result.stderr}`).toBe(0);
+    expect(result.stdout, "subprocess must produce valid JSON output").toBeTruthy();
+    
+    // Parse and validate the output to check if fable was accepted
     const output = JSON.parse(result.stdout);
     const routedModel = output.hookSpecificOutput?.updatedInput?.model;
     // With opt-in enabled, fable should be accepted
     expect(routedModel, "fable should be accepted with opt-in").toBe("fable");
+  }, 30000);
+
+  it("should enforce opt-in gate for calls that explicitly name fable (opt-in enabled)", async () => {
+    const result = await runEnforcer(agentInput(TASK, { model: "fable" }), {
+      OMC_JEV_MODEL_ROUTING_FABLE: "1",
+      OMC_JEV_MODEL_ROUTING_ALL_AGENTS: undefined,
+    });
+
+    // Validate subprocess success and output are present before parsing
+    expect(result.exitCode, `subprocess failed with stderr: ${result.stderr}`).toBe(0);
+    expect(result.stdout, "subprocess must produce valid JSON output").toBeTruthy();
+    
+    // Parse and validate that explicit fable is accepted when opt-in is enabled
+    const output = JSON.parse(result.stdout);
+    const routedModel = output.hookSpecificOutput?.updatedInput?.model;
+    // With explicit model='fable' and opt-in enabled, fable should be preserved
+    expect(routedModel, "explicit fable should be accepted with opt-in").toBe("fable");
+  }, 30000);
+
+  it("should enforce opt-in gate for calls that explicitly name fable (opt-in disabled)", async () => {
+    const result = await runEnforcer(agentInput(TASK, { model: "fable" }), {
+      OMC_JEV_MODEL_ROUTING_FABLE: undefined,
+      OMC_JEV_MODEL_ROUTING_ALL_AGENTS: undefined,
+    });
+
+    // Validate subprocess success and output are present before parsing
+    expect(result.exitCode, `subprocess failed with stderr: ${result.stderr}`).toBe(0);
+    expect(result.stdout, "subprocess must produce valid JSON output").toBeTruthy();
+    
+    // Parse and validate that explicit fable is rejected when opt-in is disabled
+    const output = JSON.parse(result.stdout);
+    const routedModel = output.hookSpecificOutput?.updatedInput?.model;
+    // With explicit model='fable' but opt-in disabled, fable should be replaced with fallback
+    expect(routedModel, "explicit fable should be rejected without opt-in").not.toBe("fable");
   }, 30000);
 });
