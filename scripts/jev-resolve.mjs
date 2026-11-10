@@ -371,7 +371,7 @@ export async function resolveRequest(
   fetchFn = fetch,
 ) {
   const startedAt = Date.now();
-  const mode = parseJevEnv(request.point, env, request.permissionMode);
+  const mode = request.spawnMode ?? parseJevEnv(request.point, env, request.permissionMode);
   if (mode === "off") {
     return { mode, answer: null, answers: null, confidence: undefined, durationMs: 0 };
   }

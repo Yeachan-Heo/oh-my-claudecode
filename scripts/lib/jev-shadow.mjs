@@ -447,7 +447,7 @@ export function recordJevShadow({ point, state, questions, heuristic, permission
 
     writeFileSync(
       requestFile,
-      JSON.stringify({ point, state, questions, heuristic, permissionMode }),
+      JSON.stringify({ point, state, questions, heuristic, permissionMode, spawnMode }),
       {
         encoding: "utf8",
         mode: 0o600,

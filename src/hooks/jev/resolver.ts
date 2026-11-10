@@ -252,15 +252,11 @@ export async function resolveJudgment<T>(resolveJudgmentArgs: ResolveJudgmentArg
   const boundedState = boundExcerpts(args.state, excerptCharsFor(args.point, config));
   const startedAt = Date.now();
 
-  // Count the request before the first await, so concurrent calls see the cap.
-  runtime.requestCount += 1;
-
   // Opt-in breaker and request limit shared with every process of the machine.
   const shared = sharedBreakerWanted() ? await loadSharedBreaker(config.endpoint, config.apiKey) : undefined;
   if (shared) {
     const { skip } = shared.breaker.admitRequest(shared.settings, args.point);
     if (skip) {
-      runtime.requestCount -= 1; // held back: it takes no slot of OMC_JEV_MAX_REQUESTS
       const heuristic = twinAnswer();
       const loggableHeuristic = extractHeuristicForLogging(heuristic, args.questions, args.mapHeuristic, args.questionSet);
       await writeShadowLog({
@@ -277,6 +273,9 @@ export async function resolveJudgment<T>(resolveJudgmentArgs: ResolveJudgmentArg
       return { answer: heuristic, source: 'twin', mode: skip.mode };
     }
   }
+
+  // Count the request after shared admission succeeds, so only admitted requests are counted.
+  runtime.requestCount += 1;
 
   const attempt = (async () => {
     try {
