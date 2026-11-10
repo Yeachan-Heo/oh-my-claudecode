@@ -125,7 +125,7 @@ describe.skipIf(!onWindows)('shell checks: sentinels against the real Git Bash (
   // usr\bin\bash.exe started directly does not put Git's usr\bin on PATH; a test process started from PowerShell or cmd then has no
   // external `cat` (the here-document cases below need it). Put the directory of bash.exe first, under the key the environment already uses.
   const pathKey = Object.keys(process.env).find((key) => key.toLowerCase() === 'path') ?? 'PATH';
-  const gitBashEnv = { ...process.env, [pathKey]: `${dirname(GIT_BASH as string)}${delimiter}${process.env[pathKey] ?? ''}` };
+  const gitBashEnv = GIT_BASH ? { ...process.env, [pathKey]: `${dirname(GIT_BASH)}${delimiter}${process.env[pathKey] ?? ''}` } : process.env;
   const run = (args: string[], options: Record<string, unknown> = {}) => spawnSync(GIT_BASH as string, args, { encoding: 'utf8', windowsHide: true, timeout: 20000, env: gitBashEnv, ...options });
 
   it('Git Bash still cuts the -c argument at about 8190 characters (8185 passes, 8195 is cut)', () => {
