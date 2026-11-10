@@ -118,7 +118,14 @@ export const QUESTION_CRITERIA = [
 // user's words, so they are cut from the task sent to Jev.
 const HOST_BLOCK = /<(system-reminder|task-notification|teammate-message|command-name|command-message|command-args|local-command-stdout|local-command-stderr|local-command-caveat|bash-input|bash-stdout|bash-stderr)\b[^>]*>[\s\S]*?<\/\1>/g;
 const HOST_BLOCK_OPEN = /^<(?:system-reminder|task-notification|teammate-message|command-name|command-message|command-args|local-command-stdout|local-command-stderr|local-command-caveat|bash-input|bash-stdout|bash-stderr)\b/;
-const NOT_USER_PREFIXES = ['Base directory for this skill:', 'Caveat:', '[Request interrupted', 'This session is being continued from a previous conversation'];
+// Messages that start with one of these are not the user's words either: skill and interruption
+// notices, the session summary, and the notices the Claude desktop app adds as entries of their own
+// (side-session and CI-monitor events, scheduled tasks, messages from another session: the same
+// desktop-app notices scripts/pre-tool-enforcer.mjs skips).
+const NOT_USER_PREFIXES = [
+  'Base directory for this skill:', 'Caveat:', '[Request interrupted', 'This session is being continued from a previous conversation',
+  '<side-sessions-event>', '<ci-monitor-event>', '<scheduled-task', '<cross-session-message', 'Another Claude session sent a message:',
+];
 
 // Secret paths in the path and command fields of a call (a mention in a prompt or a result does not
 // count): SSH keys, git and gh credentials, Claude Code credentials, AWS credentials, .netrc, .env and
