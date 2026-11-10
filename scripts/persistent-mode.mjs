@@ -2144,11 +2144,13 @@ async function main() {
               phase,
             }, data.permission_mode);
 
+            // Capped: only a valid Jev answer given while the state is still current may block. The
+            // heartbeat write doubles as that check, so a state cancelled or changed meanwhile releases.
+            let refreshed = false;
             if (reinforcementLimitReached && jevNoulOf(jevAutopilotResult, "task_complete") !== undefined) {
-              // Capped: keep the count, refresh the heartbeat so isStaleState() does not end per-Stop judgment.
-              // Best effort under the same snapshot and lock checks; a changed or removed state is left alone.
+              // Keep the count, refresh the heartbeat so isStaleState() does not end per-Stop judgment.
+              // Same snapshot and lock checks; a changed or removed state is left alone.
               const heartbeat = { ...autopilot.state, last_checked_at: new Date().toISOString() };
-              let refreshed = false;
               withStateFileLockSync(autopilot.path, () => {
                 const current = readJsonFile(autopilot.path);
                 if (!current || JSON.stringify(current) !== loadedSnapshot) return;
@@ -2163,7 +2165,7 @@ async function main() {
               return;
             }
 
-            if (!reinforcementLimitReached || jevNoulOf(jevAutopilotResult, "task_complete") !== undefined) {
+            if (!reinforcementLimitReached || refreshed) {
               console.log(
                 JSON.stringify({
                   decision: "block",

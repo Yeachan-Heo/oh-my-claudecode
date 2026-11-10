@@ -642,6 +642,17 @@ describe("jev advisory points: opt-in actions", () => {
       }
     }, 40000);
 
+    it("releases a capped autopilot Stop when cancel removes the state while Jev answers incomplete", async () => {
+      const sessionId = "sess-release-cap-cancel";
+      const path = write(sessionId, "autopilot-state.json", state("autopilot", sessionId, { reinforcement_count: 20 }));
+      noul.task_complete = 0.2;
+      onTaskComplete = () => rmSync(path, { force: true });
+      const output = await stop(sessionId, { OMC_JEV_LOOP_RELEASE_ONLY: "1" });
+      expect(output).toEqual({ continue: true, suppressOutput: true });
+      expect(existsSync(path)).toBe(false);
+      expect(requests).toHaveLength(1);
+    }, 20000);
+
     it("leaves a capped autopilot state untouched when Jev is off", async () => {
       const sessionId = "sess-release-heartbeat-off";
       const staleish = new Date(Date.now() - 90 * 60 * 1000).toISOString();
