@@ -77,18 +77,13 @@ function warnTeleportDependencyFallback(message, json) {
     console.warn(chalk.yellow(message));
 }
 function bootstrapTeleportDependencies(parentRepoRoot, worktreePath, options) {
-    const worktreePackageJson = readPackageJsonText(worktreePath);
-    // No package.json at the worktree root (for example a Python, Go or Rust repository):
-    // there is nothing to install or link. One that exists but cannot be read still installs.
-    if (worktreePackageJson === null && !existsSync(join(worktreePath, PACKAGE_JSON_NAME))) {
-        return { mode: 'none' };
-    }
     const packageManager = detectPackageManager(parentRepoRoot, worktreePath);
     if (!options.symlinkNodeModules) {
         installDependencies(worktreePath, packageManager);
         return { mode: 'install', packageManager };
     }
     const parentPackageJson = readPackageJsonText(parentRepoRoot);
+    const worktreePackageJson = readPackageJsonText(worktreePath);
     if (!parentPackageJson || !worktreePackageJson) {
         warnTeleportDependencyFallback('Warning: could not read package.json for teleport dependency reuse; running full install instead.', options.json);
         installDependencies(worktreePath, packageManager);

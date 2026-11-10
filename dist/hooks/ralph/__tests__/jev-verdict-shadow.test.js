@@ -33,7 +33,7 @@ afterEach(async () => {
     }
     await rm(logDir, { recursive: true, force: true });
 });
-function stubFetch(noul = true) {
+function stubFetch() {
     const calls = [];
     const fetchFn = (async (url, init) => {
         const body = init?.body;
@@ -41,7 +41,7 @@ function stubFetch(noul = true) {
         return {
             ok: true,
             status: 200,
-            json: async () => ({ answers: { completion_criteria_met: { type: 'noul', noul, confidence: 0.9 } } }),
+            json: async () => ({ answers: { completion_criteria_met: { type: 'noul', noul: true, confidence: 0.9 } } }),
         };
     });
     return { fetchFn, calls };
@@ -139,27 +139,6 @@ describe('applyRalphVerdictShadow', () => {
         expect(entry.mode).toBe('degraded');
         expect(entry.heuristic).toBe(true);
         expect(entry.jev).toBeNull();
-    });
-});
-describe('applyRalphVerdictShadow in active mode', () => {
-    // The API returns noul as the probability that the completion criteria are
-    // met. The twin verdict is the opposite of Jev's, which shows that Jev decided.
-    it.each([
-        { noul: 0.92, expected: true },
-        { noul: 0.08, expected: false },
-    ])('reads a noul probability of $noul as verdict $expected', async ({ noul, expected }) => {
-        process.env.TYPESAFE_API_KEY = 'test-key-123';
-        process.env.OMC_JEV = 'ralph-verdict:active';
-        const { fetchFn, calls } = stubFetch(noul);
-        const verdict = await applyRalphVerdictShadow({
-            verdict: !expected,
-            prdContext: 'US-1: the hook exits 0',
-            claim: 'all stories complete',
-            criticMode: 'architect',
-            fetchFn,
-        });
-        expect(verdict).toBe(expected);
-        expect(calls).toHaveLength(1);
     });
 });
 //# sourceMappingURL=jev-verdict-shadow.test.js.map

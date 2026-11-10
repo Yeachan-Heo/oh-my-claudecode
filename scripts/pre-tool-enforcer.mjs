@@ -961,11 +961,7 @@ function recordModelRoutingShadow(toolName, toolInput, updatedToolInput, permiss
     const baselineModel = unpinned && isForceInheritEnabled() && inheritedModel
       ? inheritedModel
       : knownTier ? model : modifiedInput.model;
-    // Apply the always-on cap to the baseline effort before comparing.
-    const baselineEffort = isMaxEffortAlwaysEnabled() && typeof modifiedInput.effort === 'string'
-      ? capEffort(modifiedInput.effort, resolveMaxEffort())
-      : modifiedInput.effort;
-    noteJevRouting({ model: baselineModel, effort: baselineEffort }, updatedToolInput, answers, originalInput.subagent_type);
+    noteJevRouting({ model: baselineModel, effort: modifiedInput.effort }, updatedToolInput, answers, originalInput.subagent_type);
   }
 
   // The marker wins over the call's own values and over Jev's answers. The effort is still

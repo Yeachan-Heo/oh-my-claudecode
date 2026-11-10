@@ -251,67 +251,6 @@ describe('doctor-conflicts: hook ownership classification', () => {
             rmSync(pluginRoot, { recursive: true, force: true });
         }
     });
-    it('does not warn when plugin hooks use exec form', () => {
-        const pluginRoot = mkdtempSync(join(tmpdir(), 'omc-doctor-win-plugin-exec-'));
-        const originalPlatform = Object.getOwnPropertyDescriptor(process, 'platform');
-        try {
-            mkdirSync(join(pluginRoot, 'hooks'), { recursive: true });
-            writeFileSync(join(pluginRoot, 'hooks', 'hooks.json'), JSON.stringify({
-                hooks: {
-                    Stop: [{
-                            hooks: [{
-                                    type: 'command',
-                                    command: 'node',
-                                    args: [
-                                        '${CLAUDE_PLUGIN_ROOT}/scripts/run.cjs',
-                                        '${CLAUDE_PLUGIN_ROOT}/scripts/persistent-mode.mjs',
-                                    ],
-                                }],
-                        }],
-                },
-            }));
-            process.env.CLAUDE_PLUGIN_ROOT = pluginRoot;
-            Object.defineProperty(process, 'platform', { value: 'win32', configurable: true });
-            expect(checkWindowsUnsafePluginHooks()).toEqual([]);
-        }
-        finally {
-            delete process.env.CLAUDE_PLUGIN_ROOT;
-            if (originalPlatform) {
-                Object.defineProperty(process, 'platform', originalPlatform);
-            }
-            rmSync(pluginRoot, { recursive: true, force: true });
-        }
-    });
-    it('warns when find-node.sh appears only in hook args', () => {
-        const pluginRoot = mkdtempSync(join(tmpdir(), 'omc-doctor-win-plugin-args-'));
-        const originalPlatform = Object.getOwnPropertyDescriptor(process, 'platform');
-        try {
-            mkdirSync(join(pluginRoot, 'hooks'), { recursive: true });
-            writeFileSync(join(pluginRoot, 'hooks', 'hooks.json'), JSON.stringify({
-                hooks: {
-                    Stop: [{
-                            hooks: [{
-                                    type: 'command',
-                                    command: 'node',
-                                    args: ['${CLAUDE_PLUGIN_ROOT}/scripts/find-node.sh'],
-                                }],
-                        }],
-                },
-            }));
-            process.env.CLAUDE_PLUGIN_ROOT = pluginRoot;
-            Object.defineProperty(process, 'platform', { value: 'win32', configurable: true });
-            const unsafe = checkWindowsUnsafePluginHooks();
-            expect(unsafe).toHaveLength(1);
-            expect(unsafe[0].command).toContain('find-node.sh');
-        }
-        finally {
-            delete process.env.CLAUDE_PLUGIN_ROOT;
-            if (originalPlatform) {
-                Object.defineProperty(process, 'platform', originalPlatform);
-            }
-            rmSync(pluginRoot, { recursive: true, force: true });
-        }
-    });
     it('classifies non-OMC hooks as not OMC-owned', () => {
         const settings = {
             hooks: {

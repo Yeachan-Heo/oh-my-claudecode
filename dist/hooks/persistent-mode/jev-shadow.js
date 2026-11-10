@@ -13,17 +13,16 @@
  * line, so the point resolves once per question (Noul, Score); both calls
  * share the same twin decision and iteration state.
  */
-import { isJevStateOmitIdsEnabled, recordJudgment } from '../jev/index.js';
+import { recordJudgment } from '../jev/index.js';
 /**
  * Iteration metadata only: mode/session/iteration context, tool names, and
  * the continuation-message excerpt (bounded by OMC_JEV_EXCERPT_CHARS in the
- * resolver before send/log). Never whole file contents. Without session_id
- * under OMC_JEV_STATE_OMIT_IDS=1.
+ * resolver before send/log). Never whole file contents.
  */
 function buildLoopContinuationState(result, sessionId) {
     return {
         mode_name: result.mode,
-        ...(isJevStateOmitIdsEnabled() ? {} : { session_id: sessionId ?? null }),
+        session_id: sessionId ?? null,
         iteration: result.metadata?.iteration ?? null,
         phase: result.metadata?.phase ?? null,
         should_block: result.shouldBlock,
@@ -82,7 +81,6 @@ export async function applyLoopContinuationShadow(args) {
             twin: () => result,
             mapAnswer: mapTaskCompletionAnswer,
             mapHeuristic: mapHeuristicForLoopContinuation,
-            logContext: { session_id: args.sessionId },
             fetchFn: args.fetchFn,
         }),
         recordJudgment('loop-continuation', {
@@ -90,7 +88,6 @@ export async function applyLoopContinuationShadow(args) {
             twin: () => result,
             questionSet: 1,
             mapHeuristic: mapHeuristicForLoopContinuation,
-            logContext: { session_id: args.sessionId },
             fetchFn: args.fetchFn,
         }),
     ]);
