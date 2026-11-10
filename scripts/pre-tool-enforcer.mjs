@@ -105,6 +105,15 @@ const TIER_TO_DEFAULT_ENV_KEYS = {
   opus:   ['OMC_SUBAGENT_MODEL', 'CLAUDE_CODE_BEDROCK_OPUS_MODEL',   'ANTHROPIC_DEFAULT_OPUS_MODEL'],
   fable:  ['OMC_SUBAGENT_MODEL', 'CLAUDE_CODE_BEDROCK_FABLE_MODEL',  'ANTHROPIC_DEFAULT_FABLE_MODEL'],
 };
+// Tier-to-env-keys for applied-log comparisons: exclude OMC-internal keys like OMC_SUBAGENT_MODEL
+// because they don't reflect what CC itself would use when resolving the tier alias. Using OMC-internal
+// keys skews the applied-log to show model changes when the actual executed model is unchanged.
+const TIER_TO_DEFAULT_ENV_KEYS_FOR_APPLIED_LOG = {
+  haiku:  ['CLAUDE_CODE_BEDROCK_HAIKU_MODEL',  'ANTHROPIC_DEFAULT_HAIKU_MODEL'],
+  sonnet: ['CLAUDE_CODE_BEDROCK_SONNET_MODEL', 'ANTHROPIC_DEFAULT_SONNET_MODEL'],
+  opus:   ['CLAUDE_CODE_BEDROCK_OPUS_MODEL',   'ANTHROPIC_DEFAULT_OPUS_MODEL'],
+  fable:  ['CLAUDE_CODE_BEDROCK_FABLE_MODEL',  'ANTHROPIC_DEFAULT_FABLE_MODEL'],
+};
 function resolveTierAliasToSafeModel(tierAlias) {
   const keys = TIER_TO_DEFAULT_ENV_KEYS[(tierAlias || '').toLowerCase()];
   if (!keys) return '';
@@ -131,6 +140,41 @@ function normalizeToCcAlias(model) {
   if (lower.includes('fable'))  return 'fable';
   return null;
 }
+/**
+ * Read the `effort:` field from an OMC agent definition's YAML frontmatter.
+ * Returns the raw effort string (e.g. "high") or null if not found.
+ */
+function readAgentDefinitionEffort(subagentType, onlyAgentsDir) {
+  const agentType = (typeof subagentType === 'string' ? subagentType : '').replace(/^oh-my-claudecode:/, '');
+  if (!agentType) return null;
+  if (!/^[a-zA-Z0-9_-]+$/.test(agentType)) return null;
+  const pluginRoot = process.env.CLAUDE_PLUGIN_ROOT;
+  const scriptAgentsDir = join(dirname(fileURLToPath(import.meta.url)), '..', 'agents');
+  const candidateDirs = onlyAgentsDir ? [onlyAgentsDir] : [
+    ...(pluginRoot ? [join(pluginRoot, 'agents')] : []),
+    scriptAgentsDir,
+  ];
+  const agentFile = candidateDirs.map(d => join(d, `${agentType}.md`)).find(f => existsSync(f)) ?? null;
+  try {
+    if (!agentFile) return null;
+    const content = readFileSync(agentFile, 'utf-8').replace(/^\uFEFF/, '');
+    const match = /^\s*effort:\s*([^\s\n]+)/.test(content) && RegExp.$1;
+    return match && typeof match === 'string' ? match.trim() : null;
+  } catch { return null; }
+}
+
+/**
+ * Resolve the baseline effort for a call: the effort it would run on without Jev.
+ * Checks in order: explicit call effort, agent definition effort, session-level effort.
+ */
+function resolveBaselineEffort(callEffort, subagentType, directory) {
+  if (typeof callEffort === 'string') return callEffort;
+  const agentDefEffort = readAgentDefinitionEffort(subagentType, directory);
+  if (agentDefEffort) return agentDefEffort;
+  const sessionEffort = process.env.CLAUDE_CODE_EFFORT_LEVEL;
+  return sessionEffort || null;
+}
+
 /**
  * Read the `model:` field from an OMC agent definition's YAML frontmatter.
  * Returns the raw model string (e.g. "claude-opus-4-6") or null if not found.
@@ -1007,9 +1051,12 @@ function recordModelRoutingShadow(toolName, toolInput, updatedToolInput, permiss
     const baselineModel = inheritsSession
       ? inheritedModel
       : knownTier && !isTierAlias(selectedModel) ? selectedModel : knownTier ? model : modifiedInput.model;
+    // Resolve the baseline effort: the effort the call would run on without Jev, checking
+    // explicit call effort, agent definition effort, and inherited session effort in order.
     // Apply the always-on cap to the baseline effort before recording to avoid counting
     // a no-Jev cap as a Jev-induced change when both baseline and result are capped the same way.
-    const baselineEffort = typeof modifiedInput.effort === 'string' && isMaxEffortAlwaysEnabled() ? capEffort(modifiedInput.effort, maxEffort()) : modifiedInput.effort;
+    const baselineEffortRaw = resolveBaselineEffort(modifiedInput.effort, originalInput.subagent_type);
+    const baselineEffort = typeof baselineEffortRaw === 'string' && isMaxEffortAlwaysEnabled() ? capEffort(baselineEffortRaw, maxEffort()) : baselineEffortRaw;
     noteJevRouting({ model: baselineModel, effort: baselineEffort }, updatedToolInput, answers, originalInput.subagent_type);
   }
 
@@ -1061,7 +1108,7 @@ function noteJevRouting(before, updated, answers, subagentType) {
   // The tier default the alias selects, like src/config/models.ts resolveTierModelFromEnv: the first
   // set variable, without the subagent-safety validation (an ordinary Anthropic ID counts too).
   const routedModel = (id) => (isTierAlias(id)
-    && (TIER_TO_DEFAULT_ENV_KEYS[id.toLowerCase()] ?? []).map((key) => (process.env[key] || '').trim()).find(Boolean)) || id;
+    && (TIER_TO_DEFAULT_ENV_KEYS_FOR_APPLIED_LOG[id.toLowerCase()] ?? []).map((key) => (process.env[key] || '').trim()).find(Boolean)) || id;
   if (typeof choice === 'string' && updated.model === choice.toLowerCase() && routedModel(updated.model) !== routedModel(before.model)) {
     applied.model = { from: before.model ?? null, to: updated.model };
   }
@@ -2502,8 +2549,9 @@ async function main() {
     if (toolName === 'Task' || toolName === 'Agent') {
       const toolInput = data.toolInput || data.tool_input || {};
       // Extract inherited session model for Jev baseline when forceInherit is enabled
+      // or when model-routing-all-agents is enabled (both handle unpinned calls with inherited models)
       let inheritedModel = null;
-      if (isForceInheritEnabled()) {
+      if (isForceInheritEnabled() || isModelRoutingAllAgentsEnabled()) {
         const claudeModel = process.env.CLAUDE_MODEL || '';
         const anthropicModel = process.env.ANTHROPIC_MODEL || '';
         inheritedModel = claudeModel || anthropicModel || null;
