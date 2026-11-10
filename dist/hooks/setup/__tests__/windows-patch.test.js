@@ -48,8 +48,13 @@ describe('patchHooksJsonForWindows', () => {
         writeFileSync(hooksJsonPath, JSON.stringify(original, null, 2));
         patchHooksJsonForWindows(pluginRoot);
         const patched = JSON.parse(readFileSync(hooksJsonPath, 'utf-8'));
-        const cmd = patched.hooks.UserPromptSubmit[0].hooks[0].command;
-        expect(cmd).toBe('node "${CLAUDE_PLUGIN_ROOT}"/scripts/run.cjs "${CLAUDE_PLUGIN_ROOT}"/scripts/keyword-detector.mjs');
+        expect(patched.hooks.UserPromptSubmit[0].hooks[0]).toMatchObject({
+            command: 'node',
+            args: [
+                '${CLAUDE_PLUGIN_ROOT}/scripts/run.cjs',
+                '${CLAUDE_PLUGIN_ROOT}/scripts/keyword-detector.mjs',
+            ],
+        });
     });
     it('replaces current portable sh+find-node+run.cjs commands with the run.cjs wrapper', () => {
         const original = makeHooksJson([
@@ -58,8 +63,13 @@ describe('patchHooksJsonForWindows', () => {
         writeFileSync(hooksJsonPath, JSON.stringify(original, null, 2));
         patchHooksJsonForWindows(pluginRoot);
         const patched = JSON.parse(readFileSync(hooksJsonPath, 'utf-8'));
-        const cmd = patched.hooks.UserPromptSubmit[0].hooks[0].command;
-        expect(cmd).toBe('node "${CLAUDE_PLUGIN_ROOT}"/scripts/run.cjs "${CLAUDE_PLUGIN_ROOT}"/scripts/keyword-detector.mjs');
+        expect(patched.hooks.UserPromptSubmit[0].hooks[0]).toMatchObject({
+            command: 'node',
+            args: [
+                '${CLAUDE_PLUGIN_ROOT}/scripts/run.cjs',
+                '${CLAUDE_PLUGIN_ROOT}/scripts/keyword-detector.mjs',
+            ],
+        });
     });
     it('replaces current quoted /bin/sh+find-node+run.cjs commands with the run.cjs wrapper', () => {
         const original = makeHooksJson([
@@ -68,8 +78,13 @@ describe('patchHooksJsonForWindows', () => {
         writeFileSync(hooksJsonPath, JSON.stringify(original, null, 2));
         patchHooksJsonForWindows(pluginRoot);
         const patched = JSON.parse(readFileSync(hooksJsonPath, 'utf-8'));
-        const cmd = patched.hooks.UserPromptSubmit[0].hooks[0].command;
-        expect(cmd).toBe('node "${CLAUDE_PLUGIN_ROOT}"/scripts/run.cjs "${CLAUDE_PLUGIN_ROOT}"/scripts/keyword-detector.mjs');
+        expect(patched.hooks.UserPromptSubmit[0].hooks[0]).toMatchObject({
+            command: 'node',
+            args: [
+                '${CLAUDE_PLUGIN_ROOT}/scripts/run.cjs',
+                '${CLAUDE_PLUGIN_ROOT}/scripts/keyword-detector.mjs',
+            ],
+        });
     });
     it('preserves trailing arguments for current quoted /bin/sh+find-node+run.cjs commands', () => {
         const original = makeHooksJson([
@@ -78,8 +93,14 @@ describe('patchHooksJsonForWindows', () => {
         writeFileSync(hooksJsonPath, JSON.stringify(original, null, 2));
         patchHooksJsonForWindows(pluginRoot);
         const patched = JSON.parse(readFileSync(hooksJsonPath, 'utf-8'));
-        const cmd = patched.hooks.UserPromptSubmit[0].hooks[0].command;
-        expect(cmd).toBe('node "${CLAUDE_PLUGIN_ROOT}"/scripts/run.cjs "${CLAUDE_PLUGIN_ROOT}"/scripts/subagent-tracker.mjs start');
+        expect(patched.hooks.UserPromptSubmit[0].hooks[0]).toMatchObject({
+            command: 'node',
+            args: [
+                '${CLAUDE_PLUGIN_ROOT}/scripts/run.cjs',
+                '${CLAUDE_PLUGIN_ROOT}/scripts/subagent-tracker.mjs',
+                'start',
+            ],
+        });
     });
     it('preserves trailing arguments (e.g. subagent-tracker start)', () => {
         const original = makeHooksJson([
@@ -88,17 +109,51 @@ describe('patchHooksJsonForWindows', () => {
         writeFileSync(hooksJsonPath, JSON.stringify(original, null, 2));
         patchHooksJsonForWindows(pluginRoot);
         const patched = JSON.parse(readFileSync(hooksJsonPath, 'utf-8'));
-        const cmd = patched.hooks.UserPromptSubmit[0].hooks[0].command;
-        expect(cmd).toBe('node "${CLAUDE_PLUGIN_ROOT}"/scripts/run.cjs "${CLAUDE_PLUGIN_ROOT}"/scripts/subagent-tracker.mjs start');
+        expect(patched.hooks.UserPromptSubmit[0].hooks[0]).toMatchObject({
+            command: 'node',
+            args: [
+                '${CLAUDE_PLUGIN_ROOT}/scripts/run.cjs',
+                '${CLAUDE_PLUGIN_ROOT}/scripts/subagent-tracker.mjs',
+                'start',
+            ],
+        });
     });
-    it('is idempotent — already-patched commands are not double-modified', () => {
-        const already = makeHooksJson([
+    it('upgrades the PowerShell-split shell string to exec form', () => {
+        const original = makeHooksJson([
             'node "${CLAUDE_PLUGIN_ROOT}"/scripts/run.cjs "${CLAUDE_PLUGIN_ROOT}"/scripts/keyword-detector.mjs',
         ]);
+        writeFileSync(hooksJsonPath, JSON.stringify(original, null, 2));
+        patchHooksJsonForWindows(pluginRoot);
+        const patched = JSON.parse(readFileSync(hooksJsonPath, 'utf-8'));
+        expect(patched.hooks.UserPromptSubmit[0].hooks[0]).toMatchObject({
+            command: 'node',
+            args: [
+                '${CLAUDE_PLUGIN_ROOT}/scripts/run.cjs',
+                '${CLAUDE_PLUGIN_ROOT}/scripts/keyword-detector.mjs',
+            ],
+        });
+    });
+    it('is idempotent — exec-form commands are not rewritten', () => {
+        const already = {
+            description: 'test',
+            hooks: {
+                UserPromptSubmit: [{
+                        matcher: '*',
+                        hooks: [{
+                                type: 'command',
+                                command: 'node',
+                                timeout: 5,
+                                args: [
+                                    '${CLAUDE_PLUGIN_ROOT}/scripts/run.cjs',
+                                    '${CLAUDE_PLUGIN_ROOT}/scripts/keyword-detector.mjs',
+                                ],
+                            }],
+                    }],
+            },
+        };
         const json = JSON.stringify(already, null, 2);
         writeFileSync(hooksJsonPath, json);
         patchHooksJsonForWindows(pluginRoot);
-        // File should be unchanged (no write occurred)
         expect(readFileSync(hooksJsonPath, 'utf-8')).toBe(json);
     });
     it('patches all hooks across multiple event types', () => {
@@ -131,8 +186,20 @@ describe('patchHooksJsonForWindows', () => {
         writeFileSync(hooksJsonPath, JSON.stringify(data, null, 2));
         patchHooksJsonForWindows(pluginRoot);
         const patched = JSON.parse(readFileSync(hooksJsonPath, 'utf-8'));
-        expect(patched.hooks.UserPromptSubmit[0].hooks[0].command).toBe('node "${CLAUDE_PLUGIN_ROOT}"/scripts/run.cjs "${CLAUDE_PLUGIN_ROOT}"/scripts/keyword-detector.mjs');
-        expect(patched.hooks.SessionStart[0].hooks[0].command).toBe('node "${CLAUDE_PLUGIN_ROOT}"/scripts/run.cjs "${CLAUDE_PLUGIN_ROOT}"/scripts/session-start.mjs');
+        expect(patched.hooks.UserPromptSubmit[0].hooks[0]).toMatchObject({
+            command: 'node',
+            args: [
+                '${CLAUDE_PLUGIN_ROOT}/scripts/run.cjs',
+                '${CLAUDE_PLUGIN_ROOT}/scripts/keyword-detector.mjs',
+            ],
+        });
+        expect(patched.hooks.SessionStart[0].hooks[0]).toMatchObject({
+            command: 'node',
+            args: [
+                '${CLAUDE_PLUGIN_ROOT}/scripts/run.cjs',
+                '${CLAUDE_PLUGIN_ROOT}/scripts/session-start.mjs',
+            ],
+        });
     });
     it('patches every sh/find-node command in the bundled hooks manifest, including Stop and UserPromptSubmit', () => {
         copyFileSync(join(repoRoot, 'hooks', 'hooks.json'), hooksJsonPath);
@@ -144,10 +211,15 @@ describe('patchHooksJsonForWindows', () => {
             .map(command => ({ event, command }))));
         expect(commands.length).toBeGreaterThan(0);
         for (const { event, command } of commands) {
-            expect(command, event).toMatch(/^node "\$\{CLAUDE_PLUGIN_ROOT\}"\/scripts\/run\.cjs /);
+            expect(command, event).toBe('node');
             expect(command, event).not.toContain('find-node.sh');
             expect(command, event).not.toContain('/bin/sh');
-            expect(command, event).not.toMatch(/^sh /);
+        }
+        const hooks = Object.values(patched.hooks).flatMap(groups => groups.flatMap(group => group.hooks));
+        for (const hook of hooks) {
+            const args = hook.args ?? [];
+            expect(args[0]).toBe('${CLAUDE_PLUGIN_ROOT}/scripts/run.cjs');
+            expect(args[1]).toMatch(/^\$\{CLAUDE_PLUGIN_ROOT\}\/scripts\/.+\.mjs$/);
         }
         expect(commands.some(({ event }) => event === 'Stop')).toBe(true);
         expect(commands.some(({ event }) => event === 'UserPromptSubmit')).toBe(true);

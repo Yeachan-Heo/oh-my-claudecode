@@ -5,7 +5,7 @@
  * (judgment point, heuristic twin, shadow mode, degraded mode).
  */
 /** The five judgment points, in delivery order. */
-export type JudgmentPointName = 'intent' | 'loop-continuation' | 'skill-trigger' | 'model-routing' | 'context-pruning' | 'task-size' | 'ralph-verdict' | 'learner-extraction' | 'slop-warning' | 'simplifier-trigger';
+export type JudgmentPointName = 'intent' | 'loop-continuation' | 'skill-trigger' | 'model-routing' | 'context-pruning' | 'task-size' | 'ralph-verdict' | 'learner-extraction' | 'slop-warning' | 'simplifier-trigger' | 'compaction';
 /**
  * TypeSafe question shapes. The API rejects any other casing with HTTP 400,
  * so these literals are the wire values.
@@ -27,7 +27,8 @@ export interface JevAnswer {
     type: string;
     choice?: string;
     score?: number;
-    noul?: boolean;
+    /** Probability of "yes" (0-1), as the API returns it; read it with noulAnswerIsYes(). */
+    noul?: number | boolean;
     probabilities?: Record<string, number>;
     confidence?: number;
 }
@@ -38,6 +39,20 @@ export interface JevUsage {
 export interface JevResponse {
     answers: Record<string, JevAnswer>;
     usage?: JevUsage;
+}
+/**
+ * Ids of the hook call behind one judgment, written to the Jev logs with
+ * OMC_JEV_LOG_CONTEXT=1 and never sent to Jev. agent_id and agent_type are
+ * set for a tool call made inside a subagent; request_id is new per request.
+ */
+export interface JevLogContext {
+    tool_use_id?: string;
+    session_id?: string;
+    cwd?: string;
+    agent_id?: string;
+    agent_type?: string;
+    prompt_id?: string;
+    request_id?: string;
 }
 /**
  * Why the resolver answered the way it did.

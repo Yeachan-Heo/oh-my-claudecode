@@ -768,7 +768,7 @@ id=$(jq -r 'select(.point == "model-routing") | .request_id' .omc/state/jev/appl
 jq --arg id "$id" 'select(.request_id == $id)' .omc/state/jev/shadow.jsonl
 ```
 
-A `model-routing` line means the decision was handed to Claude Code, not decided: a call that a later check of the same hook denies, or a value other code replaced, has no line. An effort lowered only by `OMC_JEV_MAX_EFFORT` is the cap's doing and has no line. The log is a separate file because `jev-eval` counts every line of `shadow.jsonl` as a request; it is rotated with `OMC_JEV_LOG_MAX_MB` like the other Jev logs. Script hooks only: the points reached through the TypeScript resolver write no applied lines. Without the variable no file is written.
+A `model-routing` line means the decision was handed to Claude Code, not decided: a call that a later check of the same hook denies, or a value other code replaced, has no line. An effort lowered only by `OMC_JEV_MAX_EFFORT` is the cap's doing and has no line. The log is a separate file because `jev-eval` counts every line of `shadow.jsonl` as a request; it is rotated with `OMC_JEV_LOG_MAX_MB` like all Jev logs, including the optional `compaction.jsonl`. Script hooks only: the points reached through the TypeScript resolver write no applied lines. Without the variable no file is written.
 
 #### States without session ids
 

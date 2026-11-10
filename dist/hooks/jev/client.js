@@ -88,4 +88,18 @@ export function validateJevResponse(body) {
     }
     return body;
 }
+/** A Noul probability at or above this value reads as "yes". */
+export const NOUL_YES_THRESHOLD = 0.5;
+/**
+ * Read a Noul answer as yes/no. The API returns `noul` as the probability of
+ * "yes" (0-1), not as a boolean, so `noul === true` never matches a real
+ * answer. A boolean is still accepted; a missing or non-finite value reads as
+ * "no". Same rule as jevSaysTaskComplete() in scripts/persistent-mode.mjs.
+ */
+export function noulAnswerIsYes(answer) {
+    const noul = answer?.noul;
+    if (typeof noul === 'boolean')
+        return noul;
+    return typeof noul === 'number' && Number.isFinite(noul) && noul >= NOUL_YES_THRESHOLD;
+}
 //# sourceMappingURL=client.js.map

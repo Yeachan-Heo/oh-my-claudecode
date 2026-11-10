@@ -32,7 +32,7 @@ import { homedir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-import { parseJevEnv } from '../jev-resolve.mjs';
+import { parseJevEnv, rotateJevLog, resolveJevLogMaxBytes } from '../jev-resolve.mjs';
 import { atomicWriteFileSync } from './atomic-write.mjs';
 import { maskSecrets } from './jev-mask.mjs';
 
@@ -202,7 +202,9 @@ function appendRows(logDir, rows) {
   if (!rows.length) return true;
   try {
     mkdirSync(logDir, { recursive: true });
-    appendFileSync(join(logDir, 'compaction.jsonl'), rows.map((r) => JSON.stringify(r)).join('\n') + '\n', 'utf8');
+    const path = join(logDir, 'compaction.jsonl');
+    rotateJevLog(path, resolveJevLogMaxBytes(process.env));
+    appendFileSync(path, rows.map((r) => JSON.stringify(r)).join('\n') + '\n', 'utf8');
     return true;
   } catch { return false; }
 }

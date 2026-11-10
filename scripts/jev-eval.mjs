@@ -319,12 +319,7 @@ async function main(argv, env = process.env, cwd = process.cwd()) {
         }
       }
       // Reanalyze with all files including newly discovered rotations
-      const allLines = [];
-      for (const file of read) {
-        const text = readLogFile(file);
-        if (text !== null) allLines.push(...text.split('\n'));
-      }
-      report = analyzeLog(allLines, path);
+      report = analyzeLog(linesOfFiles(read, []), path);
     }
     
     if (read.length === 0) {

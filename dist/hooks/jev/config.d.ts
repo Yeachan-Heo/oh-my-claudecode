@@ -12,10 +12,20 @@
  * - OMC_JEV_EXCERPT_CHARS: max excerpt length sent in state, default 200
  * - OMC_JEV_EXCERPT_CHARS_<POINT>: the same limit for one point (point name
  *   upper-cased, dashes as underscores, e.g. OMC_JEV_EXCERPT_CHARS_MODEL_ROUTING).
- *   model-routing defaults to 12000 and ignores OMC_JEV_EXCERPT_CHARS; set its
- *   own variable to change it.
+ *   Points with their own default (POINT_DEFAULT_EXCERPT_CHARS: model-routing,
+ *   task-size, skill-trigger, intent, learner-extraction, loop-continuation)
+ *   ignore OMC_JEV_EXCERPT_CHARS; set the point's own variable to change them.
  * - OMC_JEV_ENDPOINT: base URL overlay (stub servers / tests)
- * - OMC_JEV_LOG_DIR: shadow-log directory override (tests)
+ * - OMC_JEV_LOG_DIR: directory of the Jev logs, default state/jev under the
+ *   state root; the hook scripts write their own logs there too
+ * - OMC_JEV_LOG_MAX_MB: size limit in MiB of each Jev log file; a larger
+ *   file is renamed before the next append (see rotateJevLog in
+ *   resolver.ts). Unset or not a canonical positive integer = no rotation
+ * - OMC_JEV_LOG_CONTEXT=1: shadow-log lines carry the ids of the hook call
+ *   (ResolveJudgmentArgs.logContext) and a request_id, and their `jev` and
+ *   confidence answer the first question only (see isJevLogContextEnabled)
+ * - OMC_JEV_STATE_OMIT_IDS=1: loop-continuation and simplifier-trigger send
+ *   their state without session_id and cwd (see isJevStateOmitIdsEnabled)
  * - OMC_JEV_QUIET=1: silence the env-activation stderr warning (hook
  *   processes are one-shot, so warn-once-per-process degrades to warn-every)
  *
@@ -33,6 +43,13 @@
 export declare const JEV_DEFAULT_ENDPOINT = "https://api.typesafe.ai/v1/systemone";
 /** Points currently promoted to active. Empty until the promotion ticket (07). */
 export declare const ACTIVATED_POINTS: ReadonlySet<string>;
+/**
+ * Points that `all` and `all:active` never enable: they send more than the
+ * bounded excerpts of the other points (`compaction` sends tool results and
+ * user messages from the conversation), so each needs its own entry in
+ * OMC_JEV. Mirror of NAMED_ONLY_POINTS in scripts/jev-resolve.mjs.
+ */
+export declare const NAMED_ONLY_POINTS: ReadonlySet<string>;
 export interface JevConfig {
     apiKey: string | null;
     masterOff: boolean;
@@ -52,20 +69,48 @@ export interface JevConfig {
     pointExcerptChars: Readonly<Record<string, number>>;
     endpoint: string;
     logDir: string;
+    /** Rotation limit of each log file in bytes (OMC_JEV_LOG_MAX_MB); 0 = no rotation. */
+    logMaxBytes: number;
+    /** OMC_JEV_LOG_CONTEXT=1: call ids in log lines, first-question `jev` (isJevLogContextEnabled). */
+    logContext: boolean;
 }
 export declare function parseJevConfig(env?: NodeJS.ProcessEnv): JevConfig;
 /**
  * Points whose state needs more than the global default to be judged at all.
  * model-routing judges the work behind the task, which 200 characters hide.
- * Mirror of POINT_DEFAULT_EXCERPT_CHARS in scripts/jev-resolve.mjs.
+ * loop-continuation judges whether the task is complete; the script hook
+ * (scripts/persistent-mode.mjs) sends the last assistant message, which it
+ * already bounds to 2000 characters, and a 200-character cut keeps only its
+ * opening. Here the state carries the continuation message only.
+ * compaction judges tool results by their start and end and the user's last
+ * messages (hooks/jev-compaction.mjs bounds them itself, at most 4000
+ * characters). task-size, skill-trigger and intent judge the user's prompt and
+ * learner-extraction the assistant message; a 200-character cut keeps only
+ * the opening of either. learner-extraction uses the same 2000 characters as
+ * loop-continuation. Mirror of POINT_DEFAULT_EXCERPT_CHARS in scripts/jev-resolve.mjs
+ * and DEFAULT_EXCERPT_CHARS in hooks/jev-compaction.mjs.
  */
 export declare const POINT_DEFAULT_EXCERPT_CHARS: Readonly<Record<string, number>>;
 /**
  * Excerpt limit for one point: its own variable, else the point's default
- * (model-routing only), else OMC_JEV_EXCERPT_CHARS. The global variable does
- * not apply to a point with its own default.
+ * (POINT_DEFAULT_EXCERPT_CHARS: model-routing, task-size, skill-trigger, intent, learner-extraction, loop-continuation, compaction), else OMC_JEV_EXCERPT_CHARS.
+ * The global variable does not apply to a point with its own default.
  */
 export declare function excerptCharsFor(point: string, config: JevConfig): number;
+/**
+ * OMC_JEV_LOG_CONTEXT=1 (or `true`): shadow-log lines carry the ids of the
+ * hook call and a request_id, and their `jev` and confidence belong to the
+ * first question only. Mirror of isJevLogContextEnabled in
+ * scripts/jev-resolve.mjs.
+ */
+export declare function isJevLogContextEnabled(env?: NodeJS.ProcessEnv): boolean;
+/**
+ * OMC_JEV_STATE_OMIT_IDS=1 (or `true`): the states sent to Jev leave out the
+ * ids that describe the session rather than the work: `session_id` in the
+ * loop-continuation state and `cwd` in the simplifier-trigger state. Mirror
+ * of isJevStateOmitIdsEnabled in scripts/jev-resolve.mjs.
+ */
+export declare function isJevStateOmitIdsEnabled(env?: NodeJS.ProcessEnv): boolean;
 /** Master gate: is Jev enabled at all, independent of per-point state? */
 export declare function isJevEnabled(config: JevConfig): boolean;
 /**
