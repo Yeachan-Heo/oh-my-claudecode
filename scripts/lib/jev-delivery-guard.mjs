@@ -361,6 +361,7 @@ async function* linesOf(path) {
 
 // Active model-routing decisions of the window that carry a tool_use_id field:
 // tool_use_id -> the model Jev chose. Rotated files (shadow-<stamp>-<pid>.jsonl) are read too.
+// Decisions within SETTLE_MS of the window upper bound are included: they may complete in later windows.
 async function readDecisions(logDir, since, until) {
   const decisions = new Map();
   if (!logDir) return decisions;
@@ -372,7 +373,7 @@ async function readDecisions(logDir, since, until) {
       const at = Date.parse(row?.ts);
       const choice = row?.answers?.['model-tier']?.choice;
       if (row.point !== 'model-routing' || row.mode !== 'active' || typeof row.tool_use_id !== 'string' || typeof choice !== 'string') continue;
-      if (at > since && at <= until - SETTLE_MS) decisions.set(row.tool_use_id, choice.toLowerCase());
+      if (at > since && at <= until) decisions.set(row.tool_use_id, choice.toLowerCase());
     }
   }
   return decisions;
@@ -398,6 +399,9 @@ const configuredTierModel = (tier, env) => {
 // meta.json holds the alias the call was made with ("opus"), a full id with the tier as a whole word
 // ("claude-opus-4-8"), or the id the configuration maps the tier to ("kimi-k2.6:cloud" for sonnet). Never a
 // prefix or a part of a word: "claude-opus-4-8" is not "haiku" and "opusx" is not "opus".
+// Note: when tier mappings change, this uses the current env to resolve the tier, which may differ from
+// the env when the decision was made. To fix false alarms from tier mapping changes, record the resolved
+// tier id in the Jev shadow log alongside the tier alias, so comparisons use the contemporaneous mapping.
 const modelMatches = (actual, wanted, env = process.env) => {
   const have = modelId(actual);
   const tier = modelId(wanted);
