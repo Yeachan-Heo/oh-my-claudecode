@@ -1898,7 +1898,7 @@ async function main() {
     try { data = JSON.parse(input); } catch {}
     const directory = data.cwd || data.directory || process.cwd();
     const sessionId = data.session_id || data.sessionId || '';
-    setJevSessionId(sessionId);
+    setJevSessionId(sessionId, data.agent_id || data.agentId);
     const omcRoot = await resolveOmcStateRoot(directory);
 
     const prompt = extractPrompt(input);

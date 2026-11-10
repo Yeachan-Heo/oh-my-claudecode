@@ -122,7 +122,7 @@ async function main() {
       process.stdout.write(JSON.stringify({ continue: true }) + '\n');
       return;
     }
-    setJevSessionId(data.session_id || data.sessionId);
+    setJevSessionId(data.session_id || data.sessionId, data.agent_id || data.agentId);
 
     const cwd = data.cwd || data.directory || process.cwd();
     const stateDir = join(await resolveOmcStateRoot(cwd), 'state');

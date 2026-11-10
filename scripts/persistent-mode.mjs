@@ -1583,7 +1583,7 @@ async function main() {
       writeSafeContinue();
       return;
     }
-    setJevSessionId(data.session_id || data.sessionId);
+    setJevSessionId(data.session_id || data.sessionId, data.agent_id || data.agentId);
 
     // The stop_hook_active guard runs after the Ralph state read: a forced
     // continuation re-enters here carrying the reviewer's verdict, and that

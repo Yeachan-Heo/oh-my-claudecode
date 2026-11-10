@@ -1182,7 +1182,7 @@ async function main() {
     const toolOutput = typeof rawResponse === 'string' ? rawResponse : JSON.stringify(rawResponse);
     const { clipped: clippedToolOutput, wasTruncated } = clipToolOutputForAnalysis(toolName, toolOutput);
     const sessionId = data.session_id || data.sessionId || 'unknown';
-    setJevSessionId(data.session_id || data.sessionId);
+    setJevSessionId(data.session_id || data.sessionId, data.agent_id || data.agentId);
     const directory = data.cwd || data.directory || process.cwd();
     const toolInput = data.tool_input || data.toolInput || {};
 

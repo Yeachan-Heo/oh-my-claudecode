@@ -2208,7 +2208,7 @@ async function main() {
         : typeof data.sessionId === 'string'
           ? data.sessionId
           : '';
-    setJevSessionId(sessionId);
+    setJevSessionId(sessionId, data.agent_id || data.agentId);
 
     const ultragoalDenyReason = evaluateUltragoalPreToolEnforcement(stateDir, directory, sessionId, data);
     if (ultragoalDenyReason) {

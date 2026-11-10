@@ -37,14 +37,19 @@ if (String(process.env.OMC_JEV_BREAKER ?? "").trim() === "1") {
   }
 }
 let jevSessionId;
+let jevInSubagent = false;
 
 /**
  * Tell the Jev channel which Claude Code session this hook call belongs to
  * (the hook input's session_id). Used only to show the breaker's outage
  * notice once per session; without it the notice is once per outage.
+ * agentId is the hook input's agent_id, present only for a call made inside a
+ * subagent: subagents share the session id, but their output never reaches the
+ * user, so a hook of a subagent does not show or use up the notice.
  */
-export function setJevSessionId(sessionId) {
+export function setJevSessionId(sessionId, agentId) {
   jevSessionId = typeof sessionId === "string" && sessionId ? sessionId : undefined;
+  jevInSubagent = typeof agentId === "string" && agentId !== "";
 }
 
 let outageNoticeArmed = false;
@@ -57,7 +62,7 @@ let outageNoticeArmed = false;
  * session and outage shows it. Never throws.
  */
 function armOutageNotice(settings, breaker) {
-  if (outageNoticeArmed || !settings || !breaker) return;
+  if (outageNoticeArmed || jevInSubagent || !settings || !breaker) return;
   outageNoticeArmed = true;
   try {
     const write = process.stdout.write;

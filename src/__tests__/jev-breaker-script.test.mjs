@@ -723,7 +723,7 @@ let lastHookStdout = '';
 let lastHookStderr = '';
 
 /** Run the hook asynchronously: a synchronous run would freeze the stub server in this process. */
-function runEnforcer(sessionId, env) {
+function runEnforcer(sessionId, env, agentId) {
   const cwd = makeGitTemp('enforcer-');
   const home = join(cwd, '.test-home');
   return new Promise((resolve, reject) => {
@@ -761,6 +761,7 @@ function runEnforcer(sessionId, env) {
     child.stdin.end(JSON.stringify({
       cwd,
       session_id: sessionId,
+      ...(agentId ? { agent_id: agentId } : {}),
       tool_name: 'Task',
       toolInput: {
         subagent_type: 'oh-my-claudecode:executor',
@@ -808,6 +809,19 @@ describe('outage notice in a hook script', () => {
     // The resolver held the requests back and logged them.
     const rows = await waitForRows(env, 3);
     expect(rows.map((row) => row.mode)).toEqual(['circuit-open', 'circuit-open', 'circuit-open']);
+  }, 60_000);
+
+  it('a hook inside a subagent neither shows nor uses up the notice of its session', async () => {
+    const env = jevEnv({ OMC_JEV: 'slop-warning', OMC_JEV_BREAKER: '1' });
+    const state = openBreakerFile(env);
+    // Subagents share the session id; their output does not reach the user.
+    const inAgent = await runEnforcer('session-a', env, 'agent-1');
+    expect(inAgent.systemMessage).toBeUndefined();
+    expect(lastHookStderr).not.toContain('Jev requests paused');
+    // The main thread of the same session still gets it, once.
+    expect((await runEnforcer('session-a', env)).systemMessage).toBe(outageMessage(state));
+    expect((await runEnforcer('session-a', env)).systemMessage).toBeUndefined();
+    expect((await runEnforcer('session-a', env, 'agent-2')).systemMessage).toBeUndefined();
   }, 60_000);
 
   it('without OMC_JEV_BREAKER an open breaker file changes nothing', async () => {
