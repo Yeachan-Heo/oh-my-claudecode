@@ -5,15 +5,15 @@
   "provenance": {
     "base": "05c800f40d1ad53b42a78609d2667ef4f726808b",
     "planningHead": "0a91273e61dbbd47eb0af4c02844409251e08398",
-    "head": "fabe9b5314dfffe7281af7bb35cf161679ad44a6",
-    "sourceSha256": "42fcf5a4583a5d7c4636e49c26ec29d73f9c405c76fb8b0b89ff01141903e000",
+    "head": "01bdba16b894d67035507e2845251d31f27a5e26",
+    "sourceSha256": "da62be37d6f259b63dfa240b0855617eeed590a1113ac9f995a32c1da9d4364c",
     "generatedAt": null,
     "generator": "scripts/generate-inventory-graph.mjs"
   },
   "base": "05c800f40d1ad53b42a78609d2667ef4f726808b",
   "planningHead": "0a91273e61dbbd47eb0af4c02844409251e08398",
-  "head": "fabe9b5314dfffe7281af7bb35cf161679ad44a6",
-  "sourceSha256": "42fcf5a4583a5d7c4636e49c26ec29d73f9c405c76fb8b0b89ff01141903e000",
+  "head": "01bdba16b894d67035507e2845251d31f27a5e26",
+  "sourceSha256": "da62be37d6f259b63dfa240b0855617eeed590a1113ac9f995a32c1da9d4364c",
   "counts": {
     "public": {
       "skills": 84,
@@ -28,8 +28,8 @@
       "toolFiles": 65,
       "libFiles": 49,
       "templateHooks": 25,
-      "srcFiles": 1446,
-      "total": 1471
+      "srcFiles": 1445,
+      "total": 1470
     },
     "generated": {
       "distFiles": 5639,
@@ -41363,11 +41363,6 @@
         "path": "src/__tests__/jev-resolve-script.test.mjs"
       },
       {
-        "id": "src/__tests__/jev-shadow-noul.test.mjs",
-        "kind": "src",
-        "path": "src/__tests__/jev-shadow-noul.test.mjs"
-      },
-      {
         "id": "src/__tests__/job-state-db.test.ts",
         "kind": "src",
         "path": "src/__tests__/job-state-db.test.ts"
@@ -48193,11 +48188,6 @@
         "path": "tests/integration/jev-active-mode-repro.test.ts"
       },
       {
-        "id": "tests/integration/jev-advisory-points.test.ts",
-        "kind": "other",
-        "path": "tests/integration/jev-advisory-points.test.ts"
-      },
-      {
         "id": "tests/integration/jev-max-effort-always.test.ts",
         "kind": "other",
         "path": "tests/integration/jev-max-effort-always.test.ts"
@@ -48221,6 +48211,21 @@
         "id": "tests/integration/jev-model-routing-marker.test.ts",
         "kind": "other",
         "path": "tests/integration/jev-model-routing-marker.test.ts"
+      },
+      {
+        "id": "tests/integration/jev-task-size-notice.test.ts",
+        "kind": "other",
+        "path": "tests/integration/jev-task-size-notice.test.ts"
+      },
+      {
+        "id": "tests/integration/jev-task-size-prefix.test.ts",
+        "kind": "other",
+        "path": "tests/integration/jev-task-size-prefix.test.ts"
+      },
+      {
+        "id": "tests/integration/jev-task-size-slash.test.ts",
+        "kind": "other",
+        "path": "tests/integration/jev-task-size-slash.test.ts"
       },
       {
         "id": "tests/integration/multirepo-workspace.test.ts",
@@ -56087,16 +56092,6 @@
       {
         "from": "src/__tests__/jev-resolve-script.test.mjs",
         "to": "src/hooks/jev/config.ts",
-        "kind": "imports"
-      },
-      {
-        "from": "src/__tests__/jev-shadow-noul.test.mjs",
-        "to": "external:vitest",
-        "kind": "imports"
-      },
-      {
-        "from": "src/__tests__/jev-shadow-noul.test.mjs",
-        "to": "scripts/lib/jev-shadow.mjs",
         "kind": "imports"
       },
       {
@@ -91215,51 +91210,6 @@
         "kind": "imports"
       },
       {
-        "from": "tests/integration/jev-advisory-points.test.ts",
-        "to": "external:node:child_process",
-        "kind": "imports"
-      },
-      {
-        "from": "tests/integration/jev-advisory-points.test.ts",
-        "to": "external:node:fs",
-        "kind": "imports"
-      },
-      {
-        "from": "tests/integration/jev-advisory-points.test.ts",
-        "to": "external:node:http",
-        "kind": "imports"
-      },
-      {
-        "from": "tests/integration/jev-advisory-points.test.ts",
-        "to": "external:node:http",
-        "kind": "type-imports"
-      },
-      {
-        "from": "tests/integration/jev-advisory-points.test.ts",
-        "to": "external:node:os",
-        "kind": "imports"
-      },
-      {
-        "from": "tests/integration/jev-advisory-points.test.ts",
-        "to": "external:node:path",
-        "kind": "imports"
-      },
-      {
-        "from": "tests/integration/jev-advisory-points.test.ts",
-        "to": "external:node:url",
-        "kind": "imports"
-      },
-      {
-        "from": "tests/integration/jev-advisory-points.test.ts",
-        "to": "external:vitest",
-        "kind": "imports"
-      },
-      {
-        "from": "tests/integration/jev-advisory-points.test.ts",
-        "to": "src/lib/worktree-paths.ts",
-        "kind": "imports"
-      },
-      {
         "from": "tests/integration/jev-max-effort-always.test.ts",
         "to": "external:node:child_process",
         "kind": "imports"
@@ -91466,6 +91416,126 @@
       },
       {
         "from": "tests/integration/jev-model-routing-marker.test.ts",
+        "to": "external:vitest",
+        "kind": "imports"
+      },
+      {
+        "from": "tests/integration/jev-task-size-notice.test.ts",
+        "to": "external:node:child_process",
+        "kind": "imports"
+      },
+      {
+        "from": "tests/integration/jev-task-size-notice.test.ts",
+        "to": "external:node:fs",
+        "kind": "imports"
+      },
+      {
+        "from": "tests/integration/jev-task-size-notice.test.ts",
+        "to": "external:node:http",
+        "kind": "imports"
+      },
+      {
+        "from": "tests/integration/jev-task-size-notice.test.ts",
+        "to": "external:node:http",
+        "kind": "type-imports"
+      },
+      {
+        "from": "tests/integration/jev-task-size-notice.test.ts",
+        "to": "external:node:os",
+        "kind": "imports"
+      },
+      {
+        "from": "tests/integration/jev-task-size-notice.test.ts",
+        "to": "external:node:path",
+        "kind": "imports"
+      },
+      {
+        "from": "tests/integration/jev-task-size-notice.test.ts",
+        "to": "external:node:url",
+        "kind": "imports"
+      },
+      {
+        "from": "tests/integration/jev-task-size-notice.test.ts",
+        "to": "external:vitest",
+        "kind": "imports"
+      },
+      {
+        "from": "tests/integration/jev-task-size-prefix.test.ts",
+        "to": "external:node:child_process",
+        "kind": "imports"
+      },
+      {
+        "from": "tests/integration/jev-task-size-prefix.test.ts",
+        "to": "external:node:fs",
+        "kind": "imports"
+      },
+      {
+        "from": "tests/integration/jev-task-size-prefix.test.ts",
+        "to": "external:node:http",
+        "kind": "imports"
+      },
+      {
+        "from": "tests/integration/jev-task-size-prefix.test.ts",
+        "to": "external:node:http",
+        "kind": "type-imports"
+      },
+      {
+        "from": "tests/integration/jev-task-size-prefix.test.ts",
+        "to": "external:node:os",
+        "kind": "imports"
+      },
+      {
+        "from": "tests/integration/jev-task-size-prefix.test.ts",
+        "to": "external:node:path",
+        "kind": "imports"
+      },
+      {
+        "from": "tests/integration/jev-task-size-prefix.test.ts",
+        "to": "external:node:url",
+        "kind": "imports"
+      },
+      {
+        "from": "tests/integration/jev-task-size-prefix.test.ts",
+        "to": "external:vitest",
+        "kind": "imports"
+      },
+      {
+        "from": "tests/integration/jev-task-size-slash.test.ts",
+        "to": "external:node:child_process",
+        "kind": "imports"
+      },
+      {
+        "from": "tests/integration/jev-task-size-slash.test.ts",
+        "to": "external:node:fs",
+        "kind": "imports"
+      },
+      {
+        "from": "tests/integration/jev-task-size-slash.test.ts",
+        "to": "external:node:http",
+        "kind": "imports"
+      },
+      {
+        "from": "tests/integration/jev-task-size-slash.test.ts",
+        "to": "external:node:http",
+        "kind": "type-imports"
+      },
+      {
+        "from": "tests/integration/jev-task-size-slash.test.ts",
+        "to": "external:node:os",
+        "kind": "imports"
+      },
+      {
+        "from": "tests/integration/jev-task-size-slash.test.ts",
+        "to": "external:node:path",
+        "kind": "imports"
+      },
+      {
+        "from": "tests/integration/jev-task-size-slash.test.ts",
+        "to": "external:node:url",
+        "kind": "imports"
+      },
+      {
+        "from": "tests/integration/jev-task-size-slash.test.ts",
         "to": "external:vitest",
         "kind": "imports"
       },
@@ -92551,12 +92621,12 @@
       }
     ],
     "stats": {
-      "nodeCount": 8253,
-      "edgeCount": 8816,
-      "importEdgeCount": 7368,
+      "nodeCount": 8254,
+      "edgeCount": 8829,
+      "importEdgeCount": 7379,
       "registerEdgeCount": 105
     }
   },
-  "inventorySha256": "69ebed8877b5ec81a5218232679f0c3a18e8eb8c7a0f31af6f2da2044d8b2d94",
-  "manifestSha256": "da7df1a12aa5cf7efe66118cfe701522ec3089f3980e44d4f5e4a420026f1f59"
+  "inventorySha256": "664d21dd8f4e9a85da3fb7330d831355966e1b3d71811364284493b55c031cf5",
+  "manifestSha256": "6983164e4f64b7db19be07d7258b5179712a8448517a8025f218dd5543da5039"
 }
