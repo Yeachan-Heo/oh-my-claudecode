@@ -6,7 +6,7 @@
  */
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { spawn } from "node:child_process";
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { createServer, type Server } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -86,6 +86,7 @@ describe("pre-tool-enforcer.mjs: applied-log regression for late hook failures",
       OMC_JEV: "model-routing:active",
       OMC_JEV_APPLIED_LOG: "1",
       OMC_JEV_LOG_DIR: join(cwd, "jev-logs"),
+      OMC_JEV_MAX_EFFORT: "medium",
       OMC_JEV_MAX_EFFORT_ALWAYS: "1",
     };
   });
@@ -98,6 +99,7 @@ describe("pre-tool-enforcer.mjs: applied-log regression for late hook failures",
   it("does not write applied row when exception occurs after Jev decision", async () => {
     // Create an invalid .omc config to trigger an error during getTodoStatus
     const omcDir = join(cwd, ".omc");
+    mkdirSync(omcDir, { recursive: true });
     writeFileSync(join(cwd, ".omc", "project-memory.json"), "invalid json {");
 
     const input = {
@@ -155,7 +157,7 @@ describe("pre-tool-enforcer.mjs: applied-log regression for late hook failures",
     const output = JSON.parse(result.stdout);
     if (output.hookSpecificOutput?.updatedInput?.effort) {
       // If effort was capped by always-on-cap, it should be in the output
-      expect(output.hookSpecificOutput.updatedInput.effort).toBe("max");
+      expect(output.hookSpecificOutput.updatedInput.effort).toBe("medium");
     }
   });
 });
