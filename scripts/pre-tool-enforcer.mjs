@@ -604,7 +604,7 @@ const MODEL_ROUTING_QUESTIONS_BASE = {
 function getModelRoutingQuestions(env = process.env) {
   const questions = JSON.parse(JSON.stringify(MODEL_ROUTING_QUESTIONS_BASE));
   if (isModelRoutingFableOptinEnabled(env)) {
-    questions['model-tier'].criteria.fable = 'Fable: ultra-lightweight reasoning for simple, focused tasks';
+    questions['model-tier'].criteria.fable = 'Fable: highest-complexity tier for exceptionally demanding reasoning tasks';
   }
   return questions;
 }

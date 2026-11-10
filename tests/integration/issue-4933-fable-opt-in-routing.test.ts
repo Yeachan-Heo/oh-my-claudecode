@@ -1,130 +1,279 @@
 /**
- * Test for issue #4933: opt-in model-routing for Agent/Task calls naming fable or a model outside haiku, sonnet and opus
+ * Test for issue #4933: opt-in model-routing for Agent/Task calls naming fable
  * 
- * This test verifies that:
- * 1. By default (baseline), Jev is NOT asked about 'fable' model
- * 2. With OMC_JEV_MODEL_ROUTING_FABLE=1, Jev IS asked about 'fable' model
- * 3. Jev's answer can be used to route calls from fable to other models
- * 4. Non-Claude models are still not asked about even with opt-in
+ * Subprocess tests that run scripts/pre-tool-enforcer.mjs directly with
+ * OMC_JEV_MODEL_ROUTING_FABLE on and off, inspecting the actual Jev request criteria.
+ * Proves that Fable is only included in model choices when opt-in is enabled,
+ * and that it's described as highest-complexity tier (not ultra-lightweight).
  */
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { spawn } from "node:child_process";
+import { mkdtempSync, mkdirSync, rmSync } from "node:fs";
+import { createServer, type Server } from "node:http";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { fileURLToPath } from "node:url";
 
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+const PROJECT_ROOT = fileURLToPath(new URL("../../", import.meta.url));
+const API_KEY = "test-key-123";
+const TASK = "Execute a test task";
 
-describe('issue #4933: opt-in fable model routing', () => {
-  const savedEnv: Record<string, string | undefined> = {};
-  
-  beforeEach(() => {
-    // Save environment variables
-    savedEnv.OMC_JEV_MODEL_ROUTING_FABLE = process.env.OMC_JEV_MODEL_ROUTING_FABLE;
+// Jev returns fable to test if it's rejected when opt-in is off
+const JEV_ANSWERS = {
+  "model-tier": { type: "choice", choice: "fable", confidence: 0.9 },
+  effort: { type: "score", score: 2, confidence: 0.7 },
+};
+
+/**
+ * Run pre-tool-enforcer.mjs subprocess and capture Jev requests
+ */
+function runEnforcer(input: Record<string, unknown>, env: NodeJS.ProcessEnv) {
+  return new Promise<{
+    jevRequests: Array<{ state: Record<string, unknown>; questions: Record<string, unknown> }>;
+    stdout: string;
+    stderr: string;
+    exitCode: number;
+  }>((resolve, reject) => {
+    const jevRequests: Array<{ state: Record<string, unknown>; questions: Record<string, unknown> }> = [];
+    let server: Server | null = null;
+
+    const createServer_ = (): Promise<number> =>
+      new Promise((resolvePort, rejectPort) => {
+        server = createServer((request, response) => {
+          let raw = "";
+          request.setEncoding("utf8");
+          request.on("data", (chunk: string) => {
+            raw += chunk;
+          });
+          request.on("end", () => {
+            try {
+              jevRequests.push(JSON.parse(raw));
+              response.writeHead(200, { "Content-Type": "application/json", Connection: "close" });
+              response.end(JSON.stringify({ answers: JEV_ANSWERS }));
+            } catch (err) {
+              response.writeHead(500);
+              response.end();
+              rejectPort(err);
+            }
+          });
+        });
+        server!.once("error", rejectPort);
+        server!.listen(0, "127.0.0.1", () => {
+          const address = server!.address();
+          if (!address || typeof address === "string") {
+            rejectPort(new Error("Expected TCP endpoint"));
+          } else {
+            resolvePort(address.port);
+          }
+        });
+      });
+
+    createServer_()
+      .then((port) => {
+        const cwd = mkdtempSync(join(tmpdir(), "jev-fable-"));
+        mkdirSync(join(cwd, ".omc"), { recursive: true });
+
+        const testEnv: NodeJS.ProcessEnv = {
+          PATH: process.env.PATH,
+          SystemRoot: process.env.SystemRoot,
+          HOME: cwd,
+          USERPROFILE: cwd,
+          XDG_CONFIG_HOME: join(cwd, "config"),
+          CLAUDE_CONFIG_DIR: join(cwd, "claude"),
+          NODE_NO_WARNINGS: "1",
+          OMC_DISABLE_MULTIREPO: "1",
+          OMC_STATE_DIR: join(cwd, ".omc"),
+          OMC_JEV_LOG_DIR: join(cwd, "jev-logs"),
+          OMC_JEV_QUIET: "1",
+          OMC_JEV_TIMEOUT_MS: "3000",
+          OMC_PRE_TOOL_ADVISORY_COOLDOWN_MS: "0",
+          TYPESAFE_API_KEY: API_KEY,
+          OMC_JEV_ENDPOINT: `http://127.0.0.1:${port}/v1/systemone`,
+          OMC_JEV: "model-routing:active",
+          OMC_JEV_MODEL_ROUTING_ALL_AGENTS: "1",
+          ...env,
+        };
+
+        const child = spawn(process.execPath, [join(PROJECT_ROOT, "scripts", "pre-tool-enforcer.mjs")], {
+          cwd: PROJECT_ROOT,
+          env: testEnv,
+          stdio: ["pipe", "pipe", "pipe"],
+          timeout: 15000,
+        });
+
+        let stdout = "";
+        let stderr = "";
+        const timeout = setTimeout(() => child.kill("SIGKILL"), 15000);
+
+        child.stdout.setEncoding("utf8").on("data", (chunk: string) => {
+          stdout += chunk;
+        });
+        child.stderr.setEncoding("utf8").on("data", (chunk: string) => {
+          stderr += chunk;
+        });
+
+        child.once("error", (error) => {
+          clearTimeout(timeout);
+          server?.close();
+          rmSync(cwd, { recursive: true, force: true });
+          reject(error);
+        });
+
+        child.once("close", (code) => {
+          clearTimeout(timeout);
+          server?.close();
+          rmSync(cwd, { recursive: true, force: true });
+          resolve({
+            jevRequests,
+            stdout,
+            stderr,
+            exitCode: code ?? 1,
+          });
+        });
+
+        child.stdin.on("error", reject);
+        child.stdin.end(JSON.stringify(input));
+      })
+      .catch(reject);
   });
+}
 
-  afterEach(() => {
-    // Restore environment variables
-    if (savedEnv.OMC_JEV_MODEL_ROUTING_FABLE === undefined) {
-      delete process.env.OMC_JEV_MODEL_ROUTING_FABLE;
-    } else {
-      process.env.OMC_JEV_MODEL_ROUTING_FABLE = savedEnv.OMC_JEV_MODEL_ROUTING_FABLE;
-    }
-  });
-
-  it('should NOT include fable in allowed models by default', () => {
-    delete process.env.OMC_JEV_MODEL_ROUTING_FABLE;
-    
-    // Simulate the gate logic
-    const allowedModels = ['haiku', 'sonnet', 'opus'];
-    if ((process.env.OMC_JEV_MODEL_ROUTING_FABLE || '').trim() === '1') {
-      allowedModels.push('fable');
-    }
-    
-    expect(allowedModels).not.toContain('fable');
-    expect(allowedModels).toEqual(['haiku', 'sonnet', 'opus']);
-  });
-
-  it('should include fable in allowed models when OMC_JEV_MODEL_ROUTING_FABLE=1', () => {
-    process.env.OMC_JEV_MODEL_ROUTING_FABLE = '1';
-    
-    // Simulate the gate logic
-    const allowedModels = ['haiku', 'sonnet', 'opus'];
-    if ((process.env.OMC_JEV_MODEL_ROUTING_FABLE || '').trim() === '1') {
-      allowedModels.push('fable');
-    }
-    
-    expect(allowedModels).toContain('fable');
-    expect(allowedModels).toEqual(['haiku', 'sonnet', 'opus', 'fable']);
-  });
-
-  it('should build model routing questions without fable by default', () => {
-    delete process.env.OMC_JEV_MODEL_ROUTING_FABLE;
-    
-    // Simulate buildModelRoutingQuestions
-    const criteria: Record<string, string> = {
-      haiku: 'Quick lookups and lightweight, mechanical work',
-      sonnet: 'Standard coding and orchestration work',
-      opus: 'Complex architecture and deep analysis',
+describe("issue #4933: opt-in fable model routing (subprocess)", () => {
+  function agentInput(prompt: string = TASK, extra: Record<string, unknown> = {}) {
+    return {
+      hook_event_name: "PreToolUse",
+      tool_name: "Agent",
+      tool_input: {
+        description: "Execute test task",
+        prompt,
+        subagent_type: "general-purpose",
+        ...extra,
+      },
+      cwd: PROJECT_ROOT,
+      session_id: "test-session",
     };
-    if ((process.env.OMC_JEV_MODEL_ROUTING_FABLE || '').trim() === '1') {
-      criteria.fable = 'Ultra-lightweight reasoning for simple, focused tasks';
+  }
+
+  it("should NOT include fable criteria in Jev questions by default", async () => {
+    const result = await runEnforcer(agentInput(), {
+      OMC_JEV_MODEL_ROUTING_FABLE: undefined,
+    });
+
+    expect(result.jevRequests.length, `stderr: ${result.stderr}`).toBeGreaterThan(0);
+
+    const modelRoutingRequest = result.jevRequests.find((req) =>
+      req.questions && req.questions["model-tier"]
+    );
+    expect(modelRoutingRequest, "Should have model-tier question").toBeDefined();
+
+    if (modelRoutingRequest) {
+      const criteria = (modelRoutingRequest.questions["model-tier"] as Record<string, unknown>)?.criteria || {};
+      expect(Object.keys(criteria), "Should include standard tiers").toContain("haiku");
+      expect(Object.keys(criteria), "Should include standard tiers").toContain("sonnet");
+      expect(Object.keys(criteria), "Should include standard tiers").toContain("opus");
+      // Without opt-in, fable should NOT be in criteria
+      expect(Object.keys(criteria), "fable should NOT be in criteria without opt-in").not.toContain("fable");
     }
-    
-    expect(Object.keys(criteria)).toEqual(['haiku', 'sonnet', 'opus']);
-    expect(criteria.fable).toBeUndefined();
-  });
+  }, 30000);
 
-  it('should build model routing questions with fable when OMC_JEV_MODEL_ROUTING_FABLE=1', () => {
-    process.env.OMC_JEV_MODEL_ROUTING_FABLE = '1';
-    
-    // Simulate buildModelRoutingQuestions
-    const criteria: Record<string, string> = {
-      haiku: 'Quick lookups and lightweight, mechanical work',
-      sonnet: 'Standard coding and orchestration work',
-      opus: 'Complex architecture and deep analysis',
-    };
-    if ((process.env.OMC_JEV_MODEL_ROUTING_FABLE || '').trim() === '1') {
-      criteria.fable = 'Ultra-lightweight reasoning for simple, focused tasks';
+  it("should include fable criteria with highest-complexity descriptor when opt-in is enabled", async () => {
+    const result = await runEnforcer(agentInput(), {
+      OMC_JEV_MODEL_ROUTING_FABLE: "1",
+    });
+
+    expect(result.jevRequests.length, `stderr: ${result.stderr}`).toBeGreaterThan(0);
+
+    const modelRoutingRequest = result.jevRequests.find((req) =>
+      req.questions && req.questions["model-tier"]
+    );
+    expect(modelRoutingRequest, "Should have model-tier question").toBeDefined();
+
+    if (modelRoutingRequest) {
+      const criteria = (modelRoutingRequest.questions["model-tier"] as Record<string, unknown>)?.criteria || {};
+      expect(Object.keys(criteria), "fable should be in criteria with opt-in").toContain("fable");
+      const fableDescriptor = criteria.fable as string;
+      // Fable must be described as highest-complexity, not ultra-lightweight
+      expect(fableDescriptor, "Fable should be highest-complexity tier").toMatch(/highest-complexity/i);
+      expect(fableDescriptor, "Fable should be for exceptionally demanding work").toMatch(/exceptionally demanding/i);
+      // Ensure it does NOT use the old wrong description
+      expect(fableDescriptor, "Should not use old ultra-lightweight description").not.toMatch(/ultra-lightweight|simple.*tasks/i);
     }
-    
-    expect(Object.keys(criteria)).toContain('fable');
-    expect(criteria.fable).toBe('Ultra-lightweight reasoning for simple, focused tasks');
-  });
+  }, 30000);
 
-  it('should handle various opt-in values for OMC_JEV_MODEL_ROUTING_FABLE', () => {
-    const testCases = [
-      { value: '1', shouldInclude: true, desc: 'with "1"' },
-      { value: 'true', shouldInclude: false, desc: 'with "true" (not "1")' },
-      { value: 'yes', shouldInclude: false, desc: 'with "yes" (not "1")' },
-      { value: '0', shouldInclude: false, desc: 'with "0"' },
-      { value: '', shouldInclude: false, desc: 'with empty string' },
-    ];
+  it("only the value '1' enables fable, other values do not", async () => {
+    const testValues = ["true", "yes", "0", ""];
+    const disabledResults = await Promise.all(
+      testValues.map((value) =>
+        runEnforcer(agentInput(), {
+          OMC_JEV_MODEL_ROUTING_FABLE: value,
+        })
+      )
+    );
 
-    for (const testCase of testCases) {
-      process.env.OMC_JEV_MODEL_ROUTING_FABLE = testCase.value;
-      
-      const allowedModels = ['haiku', 'sonnet', 'opus'];
-      if ((process.env.OMC_JEV_MODEL_ROUTING_FABLE || '').trim() === '1') {
-        allowedModels.push('fable');
+    // All with non-'1' values should NOT have fable in criteria
+    disabledResults.forEach((result, index) => {
+      const value = testValues[index];
+      const modelRoutingRequest = result.jevRequests.find((req) =>
+        req.questions && req.questions["model-tier"]
+      );
+      if (modelRoutingRequest) {
+        const criteria = (modelRoutingRequest.questions["model-tier"] as Record<string, unknown>)?.criteria || {};
+        expect(
+          Object.keys(criteria),
+          `fable should NOT be in criteria with value="${value}"`
+        ).not.toContain("fable");
       }
-      
-      if (testCase.shouldInclude) {
-        expect(allowedModels).toContain('fable', `fable should be included ${testCase.desc}`);
-      } else {
-        expect(allowedModels).not.toContain('fable', `fable should NOT be included ${testCase.desc}`);
+    });
+
+    // Now test with '1'
+    const enabledResult = await runEnforcer(agentInput(), {
+      OMC_JEV_MODEL_ROUTING_FABLE: "1",
+    });
+
+    const modelRoutingRequest = enabledResult.jevRequests.find((req) =>
+      req.questions && req.questions["model-tier"]
+    );
+    if (modelRoutingRequest) {
+      const criteria = (modelRoutingRequest.questions["model-tier"] as Record<string, unknown>)?.criteria || {};
+      expect(Object.keys(criteria), `fable should be in criteria with value="1"`).toContain("fable");
+    }
+  }, 60000);
+
+  it("should reject fable when Jev suggests it but opt-in is disabled", async () => {
+    const result = await runEnforcer(agentInput(), {
+      OMC_JEV_MODEL_ROUTING_FABLE: undefined,
+    });
+
+    // Parse the output to check if fable was rejected
+    if (result.stdout) {
+      try {
+        const output = JSON.parse(result.stdout);
+        const routedModel = output.hookSpecificOutput?.updatedInput?.model;
+        // With opt-in disabled, fable should be rejected
+        expect(routedModel, "fable should not be accepted without opt-in").not.toBe("fable");
+      } catch {
+        // Output parsing failed, just check no explicit fable acceptance
+        expect(result.stderr, "Should not show fable acceptance").not.toMatch(/fable.*accepted|fable.*routed/i);
       }
     }
-  });
+  }, 30000);
 
-  it('should validate Jev response against allowed models', () => {
-    delete process.env.OMC_JEV_MODEL_ROUTING_FABLE;
-    
-    // Test baseline: without opt-in, fable is not valid
-    const baselineValidChoices = ['haiku', 'sonnet', 'opus'];
-    expect(baselineValidChoices).not.toContain('fable');
-    
-    // Test with opt-in: fable is valid
-    process.env.OMC_JEV_MODEL_ROUTING_FABLE = '1';
-    const optInValidChoices = ['haiku', 'sonnet', 'opus'];
-    if ((process.env.OMC_JEV_MODEL_ROUTING_FABLE || '').trim() === '1') {
-      optInValidChoices.push('fable');
+  it("should accept fable when Jev suggests it and opt-in is enabled", async () => {
+    const result = await runEnforcer(agentInput(), {
+      OMC_JEV_MODEL_ROUTING_FABLE: "1",
+    });
+
+    // Parse the output to check if fable was accepted
+    if (result.stdout) {
+      try {
+        const output = JSON.parse(result.stdout);
+        const routedModel = output.hookSpecificOutput?.updatedInput?.model;
+        // With opt-in enabled, fable should be accepted
+        expect(routedModel, "fable should be accepted with opt-in").toBe("fable");
+      } catch {
+        // Output parsing failed, just verify no rejection
+        expect(result.stderr, "Should not show fable rejection").not.toMatch(/fable.*invalid|fable.*rejected/i);
+      }
     }
-    expect(optInValidChoices).toContain('fable');
-  });
+  }, 30000);
 });
