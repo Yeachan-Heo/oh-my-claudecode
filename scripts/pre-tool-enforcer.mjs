@@ -568,17 +568,31 @@ const SLOP_WARNING_QUESTIONS = {
   },
 };
 
-const MODEL_ROUTING_QUESTIONS = {
-  'model-tier': {
-    type: 'choice',
-    instructions: 'Which model tier should this delegated task use?',
-    criteria: {
-      haiku: 'Quick lookups and lightweight, mechanical work',
-      sonnet: 'Standard coding and orchestration work',
-      opus: 'Complex architecture and deep analysis',
+/**
+ * Build model-tier routing questions dynamically based on environment opt-ins.
+ * By default, includes haiku, sonnet, and opus.
+ * When OMC_JEV_MODEL_ROUTING_FABLE=1, also includes fable.
+ */
+function buildModelRoutingQuestions(env = process.env) {
+  const criteria = {
+    haiku: 'Quick lookups and lightweight, mechanical work',
+    sonnet: 'Standard coding and orchestration work',
+    opus: 'Complex architecture and deep analysis',
+  };
+  if ((env.OMC_JEV_MODEL_ROUTING_FABLE || '').trim() === '1') {
+    criteria.fable = 'Ultra-lightweight reasoning for simple, focused tasks';
+  }
+  return {
+    'model-tier': {
+      type: 'choice',
+      instructions: 'Which model tier should this delegated task use?',
+      criteria,
     },
-  },
-};
+  };
+}
+
+// Note: MODEL_ROUTING_QUESTIONS is now built dynamically in recordModelRoutingShadow
+// to respect OMC_JEV_MODEL_ROUTING_FABLE changes at runtime (issue #4933)
 
 function recordSlopWarningShadow(toolName, toolInput, warned, permissionMode) {
   recordJevShadow({
@@ -612,7 +626,14 @@ function recordModelRoutingShadow(toolName, toolInput, updatedToolInput, permiss
   const modifiedInput = boundModelRoutingInput(updatedToolInput || toolInput);
   const selectedModel = modifiedInput.model || readAgentDefinitionModel(originalInput.subagent_type);
   const model = isTierAlias(selectedModel) ? selectedModel.toLowerCase() : normalizeToCcAlias(selectedModel);
-  if (!['haiku', 'sonnet', 'opus'].includes(model)) return;
+  
+  // Gate: ask Jev about standard tiers (haiku, sonnet, opus) by default.
+  // With OMC_JEV_MODEL_ROUTING_FABLE=1, also ask about fable (issue #4933).
+  const allowedModels = ['haiku', 'sonnet', 'opus'];
+  if ((process.env.OMC_JEV_MODEL_ROUTING_FABLE || '').trim() === '1') {
+    allowedModels.push('fable');
+  }
+  if (!allowedModels.includes(model)) return;
   
   const heuristic = {
     originalInput,
@@ -628,7 +649,7 @@ function recordModelRoutingShadow(toolName, toolInput, updatedToolInput, permiss
       subagent_type: originalInput.subagent_type || '',
       task: originalInput.prompt || '',
     },
-    questions: MODEL_ROUTING_QUESTIONS,
+    questions: buildModelRoutingQuestions(process.env),
     heuristic,
     permissionMode,
   });
@@ -636,7 +657,11 @@ function recordModelRoutingShadow(toolName, toolInput, updatedToolInput, permiss
   // In active mode with valid answer, update the toolInput model to Jev's choice
   if (jevResult && jevResult.mode === 'active' && jevResult.answer) {
     const jevChoice = jevResult.answer.choice?.toLowerCase();
-    if (jevChoice && ['haiku', 'sonnet', 'opus'].includes(jevChoice)) {
+    const validChoices = ['haiku', 'sonnet', 'opus'];
+    if ((process.env.OMC_JEV_MODEL_ROUTING_FABLE || '').trim() === '1') {
+      validChoices.push('fable');
+    }
+    if (jevChoice && validChoices.includes(jevChoice)) {
       // Jev says use this tier; update the tool input
       if (!updatedToolInput) updatedToolInput = { ...toolInput };
       updatedToolInput.model = jevChoice;
