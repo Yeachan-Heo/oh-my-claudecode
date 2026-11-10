@@ -569,8 +569,8 @@ describe('jev-compaction module: own threshold (OMC_JEV_COMPACT_AT_PERCENT)', ()
     expect(fake.calls.compact).toBe(2);
   });
 
-  it('after a compaction of the main loop waits until the context grew by 10 % of the window from the first usage after it, from the threshold at most', async () => {
-    // Threshold 60 % of 200000 = 120000; the gate wants 10 % of 200000 = 20000 above min(first usage, 120000).
+  it('after a compaction of the main loop waits until the context grew by 10 % of the window from the lowest usage since it, from the threshold at most', async () => {
+    // Threshold 60 % of 200000 = 120000; the gate wants 10 % of 200000 = 20000 above min(lowest usage, 120000).
     let tokens = 130000;
     const usage = () => ({ context: { tokens, window: 200000 } });
     const summary = (handlers, fake, event = {}) => handlers['session.compact'](fake.$, Object.freeze({ trigger: 'auto', messages: conversation(2), ...event }), summaryNext());
@@ -606,6 +606,53 @@ describe('jev-compaction module: own threshold (OMC_JEV_COMPACT_AT_PERCENT)', ()
     expect(fake.calls.compact).toBe(1);
     await turn(handlers, fake);
     expect(fake.calls.compact).toBe(2);
+
+    // A first reading that still counts the request from before the compaction (180000) is not the base:
+    // the next one (52000) is, so 121000 asks. Taken from the first reading alone it would wait for 140000.
+    handlers = load();
+    fake = fakeDollar({ env, messages: conversation(40, { chars: 4000 }), usage });
+    await summary(handlers, fake);
+    tokens = 180000;
+    await turn(handlers, fake);
+    tokens = 52000;
+    await turn(handlers, fake);
+    tokens = 121000;
+    await turn(handlers, fake);
+    expect(fake.calls.compact).toBe(1);
+
+    // A compaction that ends just below the threshold (110000) waits for the same growth: 125000 waits,
+    // 130000 asks.
+    handlers = load();
+    fake = fakeDollar({ env, messages: conversation(40, { chars: 4000 }), usage });
+    await summary(handlers, fake);
+    tokens = 110000;
+    await turn(handlers, fake);
+    tokens = 125000;
+    for (let k = 0; k < 6; k++) await turn(handlers, fake);
+    expect(fake.calls.compact).toBe(0);
+    tokens = 130000;
+    await turn(handlers, fake);
+    expect(fake.calls.compact).toBe(1);
+  });
+
+  it('a compaction while requests are paused still gets its base: once the pause ends, 125000 asks after a summary that ended at 100000', async () => {
+    const handlers = load();
+    await compactOnce(conversation(30), { handlers, respond: () => ({ ok: false, status: 500, headers: {}, text: '' }) });
+    let tokens = 100000;
+    const fake = fakeDollar({ env, messages: conversation(40, { chars: 4000 }), usage: () => ({ context: { tokens, window: 200000 } }) });
+    await turn(handlers, fake);
+    expect(fake.calls.usage).toBe(1);
+    tokens = 125000;
+    for (let k = 0; k < 6; k++) await turn(handlers, fake);
+    expect(fake.calls.compact).toBe(0);
+    const realNow = Date.now;
+    Date.now = () => realNow() + 61_000;
+    try {
+      await turn(handlers, fake);
+    } finally {
+      Date.now = realNow;
+    }
+    expect(fake.calls.compact).toBe(1);
   });
 
   it('does not ask below the threshold or when the removable results are small; in shadow mode or without the variable it does not even read the usage', async () => {
@@ -630,7 +677,8 @@ describe('jev-compaction module: own threshold (OMC_JEV_COMPACT_AT_PERCENT)', ()
     await compactOnce(conversation(30), { handlers, respond: () => ({ ok: false, status: 401, headers: {}, text: '' }) });
     const fake = fakeDollar({ env, messages: conversation(40, { chars: 4000 }), usage: highUsage });
     await turn(handlers, fake);
-    expect(fake.calls.usage).toBe(0);
+    // The usage is read once: the compaction armed the growth gate, whose base is taken during a pause too.
+    expect(fake.calls.usage).toBe(1);
     expect(fake.calls.compact).toBe(0);
   });
 

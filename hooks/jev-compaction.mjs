@@ -35,7 +35,7 @@
  * MIN_TURNS_BETWEEN turns, never during a compaction, never while requests are paused, and only when
  * the removable tool results are worth it (a request that would end in the built-in summary is not
  * made). After a compaction of the main loop (this module's or the built-in summary) it also waits
- * until the context has grown by OWN_MIN_GAIN of the window from the first usage after it (from the
+ * until the context has grown by OWN_MIN_GAIN of the window from the lowest usage since it (from the
  * threshold at most).
  *
  * What goes to the endpoint: the /compact instructions and the last USER_MESSAGES user messages
@@ -254,7 +254,7 @@ function freshState() {
   return {
     compacting: 0, pausedUntil: 0, pauseReason: null, failedInRow: 0, noResponseAt: [], requests: 0,
     turnCount: 0, lastAttempt: -Infinity, hostCannot: false, compactWindow: undefined, windowTurn: -Infinity,
-    cachedConfig: undefined, cachedAt: -Infinity, growthPending: false, growthBase: undefined,
+    cachedConfig: undefined, cachedAt: -Infinity, growthArmed: false, growthBase: undefined,
   };
 }
 let session = freshState();
@@ -963,9 +963,9 @@ async function compact($, e, next) {
   // the breaker is open the summary will run, so the host may compute it ahead.
   if (e.trigger === 'precompute') return cfg.mode === 'active' && !blockedReason(cfg, Date.now()) ? { skip: 'jev-compaction replaces the summary' } : next(e);
   const started = Date.now();
-  // Any compaction of the main loop, this module's or the built-in summary, resets the own threshold's
-  // growth gate (ownThreshold).
-  if (e.agentId === undefined) session.growthPending = true;
+  // Any compaction of the main loop, this module's or the built-in summary, arms the own threshold's
+  // growth gate again (ownThreshold).
+  if (e.agentId === undefined) { session.growthArmed = true; session.growthBase = undefined; }
   session.compacting++;
   try {
     let sessionId;
@@ -1001,16 +1001,24 @@ async function ownThreshold($, e, next) {
   try {
     if (e.agentId !== undefined || session.compacting > 0 || session.hostCannot) return result;
     session.turnCount++;
-    // The first usage after a compaction is taken at once, not after MIN_TURNS_BETWEEN turns.
-    if (!session.growthPending && session.turnCount - session.lastAttempt < MIN_TURNS_BETWEEN) return result;
+    // While the growth gate is armed every turn reads the usage, not only every MIN_TURNS_BETWEEN turns.
+    if (!session.growthArmed && session.turnCount - session.lastAttempt < MIN_TURNS_BETWEEN) return result;
     if (!session.cachedConfig || Date.now() - session.cachedAt > CONFIG_TTL_MS) { session.cachedConfig = await readConfig($); session.cachedAt = Date.now(); }
+    // The base of the growth gate is the lowest usage since the compaction: the first reading may still
+    // count the request from before it. It is read before the pause check, so a compaction that ran
+    // while requests were paused still gets its base. The first reading never asks.
+    if (session.growthArmed && session.cachedConfig.mode === 'active' && session.cachedConfig.atPercent !== undefined) {
+      const reading = (await $.session.usage())?.context?.tokens;
+      if (!Number.isFinite(reading) || reading <= 0) return result;
+      const first = session.growthBase === undefined;
+      session.growthBase = first ? reading : Math.min(session.growthBase, reading);
+      if (first || session.turnCount - session.lastAttempt < MIN_TURNS_BETWEEN) return result;
+    }
     const cfg = session.cachedConfig;
     if (cfg.mode !== 'active' || cfg.atPercent === undefined || blockedReason(cfg, Date.now())) return result;
     const usage = await $.session.usage();
     const tokens = usage?.context?.tokens;
     if (!Number.isFinite(tokens) || tokens <= 0) return result;
-    // The first real usage after a compaction of the main loop is the base of the growth gate below.
-    if (session.growthPending) { session.growthBase = tokens; session.growthPending = false; return result; }
     // context.percent counts from the model's window; the threshold counts from the window the host
     // compacts at (rawMaxTokens).
     if (session.compactWindow === undefined || session.turnCount - session.windowTurn >= WINDOW_REFRESH_TURNS) {
@@ -1024,10 +1032,11 @@ async function ownThreshold($, e, next) {
     const window = session.compactWindow;
     if (!Number.isFinite(window) || window <= 0 || tokens * 100 < cfg.atPercent * window) return result;
     // After a compaction the context has to grow by OWN_MIN_GAIN of the window first, counted from the
-    // first usage after it and at most from the threshold: a compaction that ends above the threshold
+    // lowest usage since it and at most from the threshold: a compaction that ends above the threshold
     // would else be asked for again as soon as the turn gap allows (right away after /compact or the
-    // host's own compaction).
+    // host's own compaction), and one that ends just below it after a few thousand tokens.
     if (session.growthBase !== undefined && tokens - Math.min(session.growthBase, (cfg.atPercent * window) / 100) < OWN_MIN_GAIN * window) return result;
+    session.growthArmed = false;
     // The tokens include the fixed prefix (system prompt, tools, instructions): ask only when the
     // removable tool results are worth it, so the threshold never forces the built-in summary.
     session.lastAttempt = session.turnCount;
