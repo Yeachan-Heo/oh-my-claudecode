@@ -1,5 +1,6 @@
 {
   "description": "OMC orchestration hooks with async capabilities",
+  "modules": ["./jev-compaction.mjs"],
   "hooks": {
     "UserPromptSubmit": [
       {
