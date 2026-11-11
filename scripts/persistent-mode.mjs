@@ -26,7 +26,7 @@ import { spawn, spawnSync } from "child_process";
 import { join, dirname, resolve, normalize, sep } from "path";
 import { homedir } from "os";
 import { fileURLToPath, pathToFileURL } from "url";
-import { isJevShadowOptedIn, jevNoulOf, jevStateIds, recordJevApplied, recordJevShadow, setJevHookContext, setJevSessionId } from "./lib/jev-shadow.mjs";
+import { isJevShadowOptedIn, jevLastRequestId, jevNoulOf, jevStateIds, recordJevApplied, recordJevShadow, setJevHookContext, setJevSessionId } from "./lib/jev-shadow.mjs";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -81,6 +81,8 @@ async function releaseOutput(directory, sessionId, hasValidSessionId) {
   if (!markerPath) return SAFE_CONTINUE;
   if (existsSync(markerPath)) return SAFE_CONTINUE;
   if (!writeJsonFile(markerPath, { ts: new Date().toISOString(), noul: learnerHintNoul })) return SAFE_CONTINUE;
+  // OMC_JEV_APPLIED_LOG: the active answer added the hint to this Stop's output.
+  recordJevApplied("learner-extraction", { action: { from: "none", to: "hint", noul: learnerHintNoul } });
   return { ...SAFE_CONTINUE, systemMessage: LEARNER_HINT_MESSAGE };
 }
 
@@ -263,10 +265,18 @@ function isJevLoopReleaseOnly() {
  * see isModeEndedSinceJevRequest); otherwise the
  * completeModeFromJev() outcome.
  */
-function jevCompletionOutcome(result, state, statePath) {
+function jevCompletionOutcome(result, state, statePath, heuristicShouldBlock) {
   if (!jevSaysTaskComplete(result)) return null;
   if (!isJevLoopReleaseOnly()) return completeModeFromJev(state, statePath);
-  if (isStateUnchangedSinceJevRequest(state, statePath)) return "released";
+  if (isStateUnchangedSinceJevRequest(state, statePath)) {
+    // OMC_JEV_APPLIED_LOG: Record only when Jev's "task complete" actually released a Stop the heuristic would have blocked
+    // (a child Ralph under an active autopilot passes false: the autopilot handler decides that Stop).
+    if (heuristicShouldBlock) {
+      const modeName = /([^\\/]+)-state\.json$/.exec(statePath)?.[1] ?? null;
+      recordJevApplied("loop-continuation", { mode: modeName, block: { from: true, to: false }, noul: jevNoulOf(result, "task_complete") });
+    }
+    return "released";
+  }
   return isModeEndedSinceJevRequest(statePath) ? "cancelled" : null;
 }
 
@@ -1840,6 +1850,20 @@ async function main() {
     const swarmMarker = existsSync(join(stateDir, "swarm-active.marker"));
     const swarmSummary = readJsonFile(join(stateDir, "swarm-summary.json"));
 
+    // OMC_JEV_APPLIED_LOG: the noul of a child Ralph that Jev released while its autopilot parent decides the Stop;
+    // its row is written only if the parent then releases the Stop too.
+    let childRalphRelease = null;
+    // The request_id is kept because the parent's later request replaces the point's last one.
+    const takeChildRalphRelease = (result) => {
+      const noul = jevNoulOf(result, "task_complete");
+      return noul === undefined ? null : { noul, requestId: jevLastRequestId("loop-continuation") };
+    };
+    const writeChildRalphRelease = () => {
+      if (childRalphRelease === null) return;
+      recordJevApplied("loop-continuation", { mode: "ralph", block: { from: true, to: false }, noul: childRalphRelease.noul }, childRalphRelease.requestId);
+      childRalphRelease = null;
+    };
+
     // Priority 1: Ralph Loop (explicit persistence mode)
     // Skip if state is stale (older than 2 hours) - prevents blocking new sessions
     ralphPriority: if (
@@ -1931,7 +1955,7 @@ async function main() {
           };
           const jevResult = recordLoopContinuationShadow(judgmentState, heuristic, data.permission_mode);
 
-          const jevCompletion = jevCompletionOutcome(jevResult, ralph.state, ralph.path);
+          const jevCompletion = jevCompletionOutcome(jevResult, ralph.state, ralph.path, heuristic.shouldBlock && !hasActiveAutopilotForSession);
 
           if (jevCompletion) {
             if (!hasActiveAutopilotForSession) {
@@ -1942,6 +1966,7 @@ async function main() {
             // Ralph is a child workflow here, completed or cancelled; let the
             // active autopilot handler below decide Stop instead of releasing
             // the turn.
+            if (jevCompletion === "released") childRalphRelease = takeChildRalphRelease(jevResult);
             break ralphPriority;
           }
 
@@ -1979,7 +2004,7 @@ async function main() {
           maxIterations: ralph.state.max_iterations,
         }, data.permission_mode);
         
-        const jevCompletionAtExtend = jevCompletionOutcome(jevExtendResult, ralph.state, ralph.path);
+        const jevCompletionAtExtend = jevCompletionOutcome(jevExtendResult, ralph.state, ralph.path, !hasActiveAutopilotForSession);
 
         if (!jevCompletionAtExtend) {
           console.log(
@@ -1998,6 +2023,7 @@ async function main() {
 
         // Completed or cancelled child Ralph: continue into the active
         // autopilot handler below.
+        if (jevCompletionAtExtend === "released") childRalphRelease = takeChildRalphRelease(jevExtendResult);
         break ralphPriority;
       }
     }
@@ -2184,8 +2210,9 @@ async function main() {
               if (refreshed) autopilot.state = heartbeat;
             }
 
-            const jevAutopilotCompletion = jevCompletionOutcome(jevAutopilotResult, autopilot.state, autopilot.path);
+            const jevAutopilotCompletion = jevCompletionOutcome(jevAutopilotResult, autopilot.state, autopilot.path, !reinforcementLimitReached);
             if (jevAutopilotCompletion) {
+              if (jevAutopilotCompletion === "released") writeChildRalphRelease();
               console.log(JSON.stringify(jevCompletionStopOutput(jevAutopilotCompletion, "autopilot")));
               return;
             }
@@ -2393,6 +2420,8 @@ async function main() {
         recordIdleNotificationSent(stateDir);
       }
     }
+    // No mode blocked: a child Ralph that Jev released was what let this Stop through.
+    writeChildRalphRelease();
     console.log(JSON.stringify(await releaseOutput(directory, sessionId, hasValidSessionId)));
   } catch (error) {
     // On any error, allow stop rather than blocking forever
