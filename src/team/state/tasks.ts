@@ -162,7 +162,10 @@ export async function computeTaskReadiness(
 interface ClaimTaskDeps extends TaskReadDeps {
   teamName: string;
   cwd: string;
-  readTeamConfig: (teamName: string, cwd: string) => Promise<{ workers: Array<{ name: string }> } | null>;
+  readTeamConfig: (teamName: string, cwd: string) => Promise<{
+    workers: Array<{ name: string }>;
+    active_recovery?: { worker_name: string };
+  } | null>;
   withTaskClaimLock: <T>(teamName: string, taskId: string, cwd: string, fn: () => Promise<T>) => Promise<{ ok: true; value: T } | { ok: false }>;
   normalizeTask: (task: TeamTask) => TeamTaskV2;
   isTerminalTaskStatus: (status: TeamTaskStatus) => boolean;
@@ -428,16 +431,18 @@ export async function renewTaskClaim(
   workerName: string,
   deps: RenewTaskClaimDeps,
 ): Promise<RenewTaskClaimResult> {
-  // Fence renewals against active recovery marker to prevent delayed renewal from old attempt
-  // from interfering with recovery requeue. Recovery marker is committed before saga begins.
-  const teamConfig = await deps.readTeamConfig(deps.teamName, deps.cwd);
-  if (teamConfig?.active_recovery && teamConfig.active_recovery.worker_name === workerName) {
-    return { ok: false, error: 'claim_conflict' };
-  }
-
   const lock = await deps.withTaskClaimLock(deps.teamName, taskId, deps.cwd, async () => {
     const current = await deps.readTask(deps.teamName, taskId, deps.cwd);
     if (!current) return { ok: false as const, error: 'task_not_found' as const };
+
+    // Dead-worker recovery commits active_recovery before it reserves the task, so a
+    // delayed renewal from the old attempt must not move the lease the saga will requeue.
+    // Read under the claim lock: the reservation write needs the same lock, so a renewal
+    // either finishes before recovery touches the task or sees the marker.
+    const teamConfig = await deps.readTeamConfig(deps.teamName, deps.cwd);
+    if (teamConfig?.active_recovery?.worker_name === workerName) {
+      return { ok: false as const, error: 'claim_conflict' as const };
+    }
 
     const v = deps.normalizeTask(current);
     if (v.status === 'completed' || v.status === 'failed') return { ok: false as const, error: 'already_terminal' as const };

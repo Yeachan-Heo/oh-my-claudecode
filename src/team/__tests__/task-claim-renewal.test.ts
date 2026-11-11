@@ -30,6 +30,7 @@ import {
   teamRenewTaskClaim,
   teamTransitionTaskStatus,
 } from '../team-ops.js';
+import { renewTaskClaim } from '../state/tasks.js';
 import type { TeamTask } from '../types.js';
 
 const teamName = 'claim-renewal-team';
@@ -345,6 +346,25 @@ describe('teamRenewTaskClaim', () => {
     // Do not write any task file; use valid task ID that doesn't exist on disk
     const result = await teamRenewTaskClaim(teamName, 'task-999', 'token-1', 'worker-1', cwd);
     expect(result).toEqual({ ok: false, error: 'task_not_found' });
+  });
+
+  it('rejects renewal with claim_conflict and writes nothing when the claim lock is denied', async () => {
+    const writeAtomic = vi.fn(async () => {});
+    const readTask = vi.fn(async () => null);
+    const result = await renewTaskClaim('1', 'token-1', 'worker-1', {
+      teamName,
+      cwd,
+      readTask,
+      readTeamConfig: async () => ({ workers: [{ name: 'worker-1' }] }),
+      withTaskClaimLock: async () => ({ ok: false as const }),
+      normalizeTask: (value) => value as never,
+      isTerminalTaskStatus: () => false,
+      taskFilePath: () => taskPath(cwd, '1'),
+      writeAtomic,
+    });
+    expect(result).toEqual({ ok: false, error: 'claim_conflict' });
+    expect(readTask).not.toHaveBeenCalled();
+    expect(writeAtomic).not.toHaveBeenCalled();
   });
 
   it('fences renewal once dead-worker recovery is active for the owner', async () => {
