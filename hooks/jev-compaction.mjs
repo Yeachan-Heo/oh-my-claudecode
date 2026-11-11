@@ -17,8 +17,9 @@
  * removed result), so the model knows what it already did. Jev scores how much each result will still
  * be needed (the `compaction` score question in src/hooks/jev/points.ts, BATCH results per request,
  * up to MAX_REQUESTS requests in parallel). Results are ranked by score and kept while they fit the
- * target budget (OMC_JEV_COMPACT_TARGET of the characters before). In shadow mode the decision is
- * computed and logged, and the built-in summary runs.
+ * target budget (OMC_JEV_COMPACT_TARGET of the characters before, delivered messages that only the API
+ * form shows included). In shadow mode the decision is computed and logged, and the built-in summary
+ * runs.
  *
  * Assistant rows are rebuilt from their text, traces and kept calls (thinking and server blocks go, a
  * row left empty is dropped), so the host writes them with a new message.id and `--resume` cannot
@@ -183,23 +184,25 @@ const NOT_USER_PREFIXES = [
 // after the result row: `messages` does not show it (the host hands such rows back only with the
 // handle of the row before them), and the API form shows it as a text block of the user message with
 // the results, inside an optional <system-reminder ...> wrapper: "<who> sent a message while you were
-// working:" (the user: QUEUED_PREFIX, their words, then a fixed note, QUEUED_TAIL_AT; another session or
+// working:" (the user: QUEUED_PREFIX, their words, then a fixed note, QUEUED_TAIL; another session or
 // agent; the coordinator; a plugin), a teammate's <teammate-message>, or a background task
 // notification. A result row rebuilt without its handle would lose it, so build carries every such
-// block word for word into the rebuilt row; only QUEUED_PREFIX blocks count as the user's words. The
-// host frames an automatic continuation and a plugin's message sent as the user with QUEUED_PREFIX
-// too; the API form does not tell them apart, so they count as the user's.
+// block word for word into the rebuilt row, each in its own envelope (envelope); only QUEUED_PREFIX
+// blocks count as the user's words. The host frames an automatic continuation and a plugin's message
+// sent as the user with QUEUED_PREFIX too; the API form does not tell them apart, so they count as the
+// user's.
 const QUEUED_PREFIX = 'The user sent a new message while you were working:\n';
-const QUEUED_AT = /(?:^|\n)\s*(?:<system-reminder[^>]*>\s*)?The user sent a new message while you were working:\n/g; // QUEUED_PREFIX at the start of a line
-const QUEUED_TAIL_AT = /\n\nThis is how Claude Code surfaces messages/g; // the fixed note after the user's words
-// Closed messages of other senders: an agent's or another session's message, a teammate's, a task
-// notification, and a reminder whose first line is another sender's "... while you were working:".
-const OTHER_SPANS = [
-  /<(agent-message|cross-session-message|teammate-message|task-notification)\b[^>]*>[\s\S]*?<\/\1>/g,
-  /<system-reminder( id="[^"]*")?>\s*(?!The user sent a new message while you were working:\n)[^\n]* while you were working:\n[\s\S]*?<\/system-reminder\1>/g,
-];
+const QUEUED_TAIL = '\n\nThis is how Claude Code surfaces messages'; // the fixed note after the user's words
 const DELIVERY_WRAP = /^\s*<system-reminder[^>]*>\s*/;
+// The first line of another sender's frame: "<sender> sent a message (or a report) while you were
+// working:", and the bound conversation's "A message arrived ...", "Messages arrived ..." and
+// "Activity ... in the bound conversation ..." frames. A line that only ends with "while you were
+// working:" is no frame.
+const OTHER_FRAME = /^(?:.+ sent an? (?:new )?(?:message|report)|(?:A message|Messages) arrived .+|Activity (?:was observed )?in the bound conversation) while you were working(?:,.*)?:$/;
 const DELIVERY_OPENERS = ['Another Claude session sent a message', '<agent-message', '<cross-session-message', '<teammate-message', '<task-notification', '[MESSAGE FROM NON-USER SOURCE'];
+// An envelope in a row's text: the host's <system-reminder id="..."> and the one build writes around a
+// carried block, each closed only by the closing tag with its own id.
+const ENVELOPE_CLOSE = '</system-reminder id="';
 // A task notification's marker stands at its start (after its own reminders), not deep in a quoted file.
 const DELIVERY_NOTES = ['[SYSTEM NOTIFICATION - NOT USER INPUT]', '<task-notification>'];
 const DELIVERY_NOTE_CHARS = 300;
@@ -789,7 +792,7 @@ function messageChars(m) {
 function frameOf(text) {
   const t = text.replace(DELIVERY_WRAP, '');
   if (t.startsWith(QUEUED_PREFIX)) return 'user';
-  return / sent a message while you were working:$/.test(t.split('\n', 1)[0]) || DELIVERY_OPENERS.some((p) => t.startsWith(p)) ? 'other' : undefined;
+  return OTHER_FRAME.test(t.split('\n', 1)[0]) || DELIVERY_OPENERS.some((p) => t.startsWith(p)) ? 'other' : undefined;
 }
 
 // What a text block delivered with the results is: 'user', 'other' (another session, agent,
@@ -799,48 +802,85 @@ function deliveryOf(text) {
   return frameOf(text) || (DELIVERY_NOTES.some((k) => { const at = text.indexOf(k); return at >= 0 && at < DELIVERY_NOTE_CHARS; }) ? 'other' : undefined);
 }
 
-function isQueuedBlock(text) {
-  return deliveryOf(text) === 'user';
+// The envelopes of a text, in order: {from, to, text}. Read from the end, each closing tag with the
+// last opener of its id before it, so an envelope build appended (whose id nothing before it holds)
+// is found whole even when it quotes a closing tag that an opener without its closing tag earlier in
+// the text would take, and a quoted envelope inside one stays inside it. An unpaired tag is text.
+function envelopesOf(text) {
+  const found = [];
+  for (let end = text.length; end > 0;) {
+    const close = text.lastIndexOf(ENVELOPE_CLOSE, end - 1);
+    if (close < 0) break;
+    const q = text.indexOf('">', close + ENVELOPE_CLOSE.length);
+    const id = q < 0 || q + 2 > end ? '' : text.slice(close + ENVELOPE_CLOSE.length, q);
+    const open = /^[^"\n]{1,64}$/.test(id) ? text.lastIndexOf(`<system-reminder id="${id}">`, close) : -1;
+    if (open >= 0) found.unshift({ from: open, to: q + 2, text: text.slice(open, q + 2) });
+    end = open >= 0 ? open : close;
+  }
+  return found;
 }
 
-// The user's words in a text, by one rule for every quoted header. A user header counts only outside
-// every message of another sender: a closed one (OTHER_SPANS) or a frame of another sender at the
-// start of a line that never closes (an unwrapped coordinator or "[MESSAGE FROM NON-USER SOURCE]"
-// message), which takes the rest of the text. The user's words run from their header to the last
-// framing note of their block outside such a message, so the user may write the note's words too.
-function queuedWords(text) {
-  if (typeof text !== 'string') return [];
-  const closed = OTHER_SPANS.flatMap((re) => [...text.matchAll(re)].map((m) => [m.index, m.index + m[0].length]));
-  const inClosed = (i) => closed.some(([from, to]) => i >= from && i < to);
-  let open = text.length;
-  for (let at = 0; at < text.length;) {
-    const nl = text.indexOf('\n', at);
-    const end = nl < 0 ? text.length : nl;
-    if (!inClosed(at) && frameOf(`${text.slice(at, end)}\n`) === 'other') { open = at; break; }
-    at = end + 1;
+// A carried block as one envelope of the rebuilt row, so that a later compaction reads it as one
+// message whatever it quotes and whatever follows it: a block that is one envelope already stays as it
+// is; another gets an id that neither it nor the row's text holds (not the host's hex form, so the host
+// leaves the envelope as text).
+function envelope(block, text) {
+  const e = envelopesOf(block);
+  if (e.length === 1 && e[0].from === 0 && e[0].to === block.length) return block;
+  let k = 1;
+  while (block.includes(`id="jev-${k}"`) || text.includes(`id="jev-${k}"`)) k++;
+  return `<system-reminder id="jev-${k}">\n${block}\n</system-reminder id="jev-${k}">`;
+}
+
+const rawChars = (blocks) => blocks.reduce((n, t) => n + t.length, 0);
+
+// The delivered blocks a row does not show yet, and the row's text with each of them after it in its
+// own envelope.
+function carriedText(m, blocks = []) {
+  const own = blocks.filter((t) => !(m.text || '').includes(t));
+  return { own, text: own.reduce((text, t) => [text, envelope(t, text)].filter(Boolean).join('\n'), m.text || '') };
+}
+
+// The user's words in one delivered block: from the user's header to the last framing note of the
+// block (the user may write the note's words too); none for a block of another sender. Nothing inside
+// a block is read as a frame of its own, so a header another sender quotes is not the user's.
+function blockWords(block) {
+  if (frameOf(block) !== 'user') return [];
+  const body = block.replace(DELIVERY_WRAP, '').slice(QUEUED_PREFIX.length);
+  const tail = body.lastIndexOf(QUEUED_TAIL);
+  const words = (tail < 0 ? body.replace(/\s*<\/system-reminder[^>]*>\s*$/, '') : body.slice(0, tail)).trim();
+  return words ? [words] : [];
+}
+
+// Text outside envelopes (a row rebuilt before carried blocks got envelopes) split at each line that
+// opens a frame: one piece per delivered message.
+function piecesOf(text) {
+  const pieces = [];
+  for (const line of text.split('\n')) {
+    if (!pieces.length || frameOf(`${line}\n`)) pieces.push(line);
+    else pieces[pieces.length - 1] += `\n${line}`;
   }
-  const outside = (i) => i < open && !inClosed(i);
-  const headers = [...text.matchAll(QUEUED_AT)].map((h) => ({ start: h.index, from: h.index + h[0].length })).filter((h) => outside(h.from - QUEUED_PREFIX.length));
-  const tails = [...text.matchAll(QUEUED_TAIL_AT)].map((t) => t.index).filter(outside);
-  return headers.map((h, k) => {
-    const to = k + 1 < headers.length ? headers[k + 1].start : open;
-    const tail = tails.filter((i) => i >= h.from && i < to).pop();
-    if (tail !== undefined) return text.slice(h.from, tail).trim();
-    const cut = Math.min(to, ...closed.map(([from]) => from).filter((i) => i >= h.from));
-    return text.slice(h.from, cut).replace(/\s*<\/system-reminder[^>]*>[\s\S]*$/, '').trim();
-  }).filter(Boolean);
+  return pieces;
 }
 
 // The user's own words in a message: none for host notices and summaries; host blocks inside a
-// message are cut out. A result row (or a row opening with any delivered message, such as a row an
-// earlier compaction left with only the delivered blocks) gives only the user's queued messages it
-// shows, which a row rebuilt by an earlier compaction carries in its text.
+// message are cut out. A delivered message counts only as a whole block, by its opening frame (one
+// rule): each envelope of the text that holds a delivered message (the host's, or one a row rebuilt
+// by an earlier compaction carries), and the text outside them, read by its pieces (piecesOf) when it
+// opens with a frame or the row holds results. A result row's own text gives words only so.
 function userWords(m) {
   if (m.role !== 'user' || !m.text) return [];
-  if ((m.toolResults && m.toolResults.length) || deliveryOf(m.text)) return queuedWords(m.text);
-  const text = m.text.replace(HOST_BLOCK, '').trim();
-  if (!text || HOST_BLOCK_OPEN.test(text) || NOT_USER_PREFIXES.some((p) => text.startsWith(p))) return [];
-  return [text];
+  const delivered = envelopesOf(m.text).filter((e) => deliveryOf(e.text));
+  const outside = [];
+  let at = 0;
+  for (const e of delivered) { outside.push(m.text.slice(at, e.from)); at = e.to; }
+  outside.push(m.text.slice(at));
+  const own = outside.join('\n').trim();
+  const carried = delivered.flatMap((e) => blockWords(e.text));
+  if (deliveryOf(own) || (m.toolResults && m.toolResults.length)) return [...piecesOf(own).flatMap(blockWords), ...carried];
+  const text = own.replace(HOST_BLOCK, '').trim();
+  if (!text || HOST_BLOCK_OPEN.test(text) || NOT_USER_PREFIXES.some((p) => text.startsWith(p))) return carried;
+  return [text, ...carried];
 }
 
 // Messages delivered during a tool turn that the API form shows and `messages` does not (deliveryOf):
@@ -900,7 +940,7 @@ function userTask(messages, instructions, queued = new Map()) {
   if (instr) left -= instr.length;
   const picked = [];
   for (let i = messages.length - 1; i >= 0 && picked.length < USER_MESSAGES && left > 0; i--) {
-    const words = [...userWords(messages[i]), ...(queued.get(i) || []).filter(isQueuedBlock).flatMap(queuedWords)];
+    const words = [...userWords(messages[i]), ...(queued.get(i) || []).flatMap(blockWords)];
     for (let k = words.length - 1; k >= 0 && picked.length < USER_MESSAGES && left > 0; k--) {
       const text = clip(maskSecrets(words[k].slice(0, left + MASK_SLACK_CHARS)), left);
       picked.unshift(text);
@@ -1005,9 +1045,10 @@ const removableChars = (candidates) => candidates.reduce((s, c) => s + Math.max(
 // Rank and fill the budget: highest score first while the upgrade from a trace fits; a result that
 // does not fit whole and scores at least "may be useful" is cut to SHORT_CHARS when that fits; the rest
 // is traced. A result not asked about (secret path, no text, beyond the questions) is traced; a call
-// not longer than its trace and the task list stay whole.
-function allocate(candidates, before, target) {
-  const fixed = before - candidates.reduce((s, c) => s + c.fullCost - c.traceCost, 0);
+// not longer than its trace and the task list stay whole. `added`: characters the built list adds
+// whatever is decided (the envelopes of carried messages).
+function allocate(candidates, before, target, added = 0) {
+  const fixed = before + added - candidates.reduce((s, c) => s + c.fullCost - c.traceCost, 0);
   let avail = Math.floor(before * target) - fixed;
   const ranked = [...candidates].sort((a, b) => b.score - a.score || b.resIdx - a.resIdx);
   for (const c of ranked) {
@@ -1180,6 +1221,7 @@ function build(messages, candidates, keepFrom, group, stats, queued = new Map())
   stats.droppedAssistant = 0;
   stats.joinedRows = 0;
   stats.queuedCarried = 0;
+  stats.queuedKeptChars = 0;
   const merged = new Map();
   for (const [i, m] of messages.entries()) {
     if (m.role === 'assistant' && i < keepFrom) {
@@ -1206,7 +1248,12 @@ function build(messages, candidates, keepFrom, group, stats, queued = new Map())
     }
     if (m.role === 'user' && (m.toolResults || []).length) {
       const changed = m.toolResults.some((r) => byId.has(r.tool_use_id) && byId.get(r.tool_use_id).keep !== 'full');
-      if (!changed && !m.toolResults.every(textOnlyResult)) { stats.keptHandle++; out.push(m); continue; }
+      if (!changed && !m.toolResults.every(textOnlyResult)) {
+        stats.keptHandle++;
+        stats.queuedKeptChars += rawChars(carriedText(m, queued.get(i)).own);
+        out.push(m);
+        continue;
+      }
       const results = [];
       for (const r of m.toolResults) {
         const c = byId.get(r.tool_use_id);
@@ -1216,15 +1263,16 @@ function build(messages, candidates, keepFrom, group, stats, queued = new Map())
         else results.push({ tool_use_id: r.tool_use_id, text: '[non-text result (image or file) removed at compaction]', isError: Boolean(r.isError) });
       }
       if (!changed) stats.rebuiltUnchanged++;
-      // A message delivered after this row goes with the rebuilt row (a row that keeps its handle
-      // brings it back itself).
-      const own = (queued.get(i) || []).filter((t) => !(m.text || '').includes(t));
+      // A message delivered after this row goes with the rebuilt row, in its own envelope (a row that
+      // keeps its handle brings it back itself).
+      const { own, text } = carriedText(m, queued.get(i));
       stats.queuedCarried += own.length;
-      const text = [m.text || '', ...own].filter(Boolean).join('\n');
       if (!results.length && !text) continue;
       out.push({ role: 'user', text, toolUses: [], toolResults: results });
       continue;
     }
+    // A row kept as it is gets the messages delivered after it back from the host.
+    if (m.role === 'user') stats.queuedKeptChars += rawChars(carriedText(m, queued.get(i)).own);
     out.push(m);
   }
   return out;
@@ -1365,7 +1413,7 @@ function noteFailures(failures, now) {
 // Decides one compaction: {messages} to install or {fallback: reason}. Fills `record`; never calls next.
 async function decide($, e, cfg, record, started) {
   const messages = Array.isArray(e.messages) ? e.messages : [];
-  const before = messages.reduce((s, m) => s + messageChars(m), 0);
+  let before = messages.reduce((s, m) => s + messageChars(m), 0);
   record.chars_before = before;
   if (messages.length <= KEEP_LAST + 1) return { fallback: 'too_few_messages' };
   // The rows of one API message are rebuilt together (groupsOf); only the last message of an open tool
@@ -1378,6 +1426,18 @@ async function decide($, e, cfg, record, started) {
   if (api && !keptCallsIn(messages, keepFrom, api)) api = undefined;
   record.kept_from = messages.length - keepFrom;
   if (!api && keepFrom < messages.length) return { fallback: 'no_api_form' };
+  // Delivered messages no row shows are part of the context too (build carries them, a kept row gets
+  // them back from the host), so they count in the characters before and in the budget as fixed text,
+  // with the envelopes build adds.
+  const delivered = queuedOf(messages, api);
+  const queued = delivered ? delivered.rows : new Map();
+  let envelopes = 0;
+  for (const [i, blocks] of queued) {
+    const c = carriedText(messages[i], blocks);
+    before += rawChars(c.own);
+    envelopes += c.text.length - (messages[i].text || '').length - rawChars(c.own);
+  }
+  record.chars_before = before;
   const server = serverBlocks(messages, api, keepFrom);
   record.server_blocks = server.count;
   if (server.inTail) return { fallback: 'server_block_in_tail' };
@@ -1412,8 +1472,6 @@ async function decide($, e, cfg, record, started) {
   let asked = askable.slice(0, BATCH * Math.min(MAX_REQUESTS, left));
   record.asked = asked.length;
 
-  const delivered = queuedOf(messages, api);
-  const queued = delivered ? delivered.rows : new Map();
   Object.assign(record, { queued_user: delivered ? delivered.user : null, queued_other: delivered ? delivered.other : null });
   const user = userTask(messages, typeof e.instructions === 'string' && e.instructions.trim() ? e.instructions : undefined, queued);
   const deadline = started + TOTAL_MS;
@@ -1492,11 +1550,11 @@ async function decide($, e, cfg, record, started) {
   if (held?.mode === 'deadline') return { fallback: 'timeout' };
 
   record.mentioned = markMentioned(candidates, user);
-  allocate(candidates, before, cfg.target);
+  allocate(candidates, before, cfg.target, envelopes);
   const stats = {};
   const built = build(messages, candidates, keepFrom, group, stats, queued);
   if (!pairingOk(messages, built)) return { fallback: 'build_error' };
-  const after = built.reduce((s, m) => s + messageChars(m), 0);
+  const after = built.reduce((s, m) => s + messageChars(m), stats.queuedKeptChars);
   const hist = [0, 0, 0, 0];
   for (const c of asked) if (c.answered) hist[Math.min(3, Math.round(c.score * 3))]++;
   Object.assign(record, {
