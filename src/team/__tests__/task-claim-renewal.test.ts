@@ -22,9 +22,11 @@ const environmentIsolation = await vi.hoisted(async () => {
 });
 
 import { getOmcRoot } from '../../lib/worktree-paths.js';
+import { executeTeamApiOperation } from '../api-interop.js';
 import {
   teamClaimTask,
   teamCreateTask,
+  teamReleaseTaskClaim,
   teamRenewTaskClaim,
   teamTransitionTaskStatus,
 } from '../team-ops.js';
@@ -227,6 +229,174 @@ describe('teamRenewTaskClaim', () => {
         const onDisk = JSON.parse(await readFile(taskPath(cwd, '1'), 'utf8')) as TeamTask;
         expect(onDisk.version).toBe(5);
       }
+    }
+  });
+
+  it('allows renewal after a recovered task is released and reclaimed normally', async () => {
+    // A task recovered via recovery adoption keeps recovery_adoption metadata on disk.
+    // Once the adopted claim is released and an ordinary claim succeeds, the new claim
+    // is a plain lease and must be renewable; the stale adoption record must not
+    // reject the new claimant's valid token (recovery-reservation-claim sequence).
+    await writeTeamConfig(cwd);
+    await writeTask(cwd, task('1', 'in_progress', {
+      owner: 'worker-2',
+      version: 3,
+      claim: { owner: 'worker-2', token: 'token-2', leased_until: new Date(Date.now() + 60_000).toISOString() },
+      recovery_adoption: {
+        recovery_id: 'rec-1',
+        request_id: 'req-1',
+        continuation_sequence: 4,
+        checkpoint_path: '/tmp/checkpoint.json',
+        checkpoint_hash: 'hash',
+        replacement_worker: 'worker-2',
+        replacement_generation: 2,
+        adopted_at: timestamp,
+      },
+    }));
+
+    const released = await teamReleaseTaskClaim(teamName, 'task-1', 'token-2', 'worker-2', cwd);
+    expect(released).toEqual({ ok: true, task: expect.objectContaining({ status: 'pending' }) });
+
+    const claimed = await teamClaimTask(teamName, 'task-1', 'worker-1', null, cwd);
+    expect(claimed.ok).toBe(true);
+    if (!claimed.ok) return;
+    expect(claimed.task.recovery_adoption).toBeUndefined();
+    const onDiskAfterClaim = JSON.parse(await readFile(taskPath(cwd, '1'), 'utf8')) as TeamTask;
+    expect(onDiskAfterClaim.recovery_adoption).toBeUndefined();
+
+    const renewed = await teamRenewTaskClaim(teamName, 'task-1', claimed.claimToken, 'worker-1', cwd);
+    expect(renewed.ok).toBe(true);
+    if (renewed.ok) {
+      expect(Date.parse(renewed.task.claim!.leased_until)).toBeGreaterThan(Date.now() + 14 * 60_000);
+    }
+  });
+
+  it('still rejects renewal for a live recovery-adopted claim', async () => {
+    await writeTeamConfig(cwd);
+    await writeTask(cwd, task('1', 'in_progress', {
+      owner: 'worker-2',
+      claim: { owner: 'worker-2', token: 'token-2', leased_until: '2099-01-01T00:00:00.000Z' },
+      recovery_adoption: {
+        recovery_id: 'rec-1',
+        request_id: 'req-1',
+        continuation_sequence: 4,
+        checkpoint_path: '/tmp/checkpoint.json',
+        checkpoint_hash: 'hash',
+        replacement_worker: 'worker-2',
+        replacement_generation: 2,
+        adopted_at: timestamp,
+      },
+    }));
+    const result = await teamRenewTaskClaim(teamName, 'task-1', 'token-2', 'worker-2', cwd);
+    expect(result).toEqual({ ok: false, error: 'claim_conflict' });
+  });
+
+  it('still rejects renewal once the released adoption task is reserved for recovery', async () => {
+    await writeTeamConfig(cwd);
+    await writeTask(cwd, task('1', 'in_progress', {
+      owner: 'worker-2',
+      claim: { owner: 'worker-2', token: 'token-2', leased_until: new Date(Date.now() + 60_000).toISOString() },
+      recovery_adoption: {
+        recovery_id: 'rec-1',
+        request_id: 'req-1',
+        continuation_sequence: 4,
+        checkpoint_path: '/tmp/checkpoint.json',
+        checkpoint_hash: 'hash',
+        replacement_worker: 'worker-2',
+        replacement_generation: 2,
+        adopted_at: timestamp,
+      },
+    }));
+    const released = await teamReleaseTaskClaim(teamName, 'task-1', 'token-2', 'worker-2', cwd);
+    expect(released.ok).toBe(true);
+    const claimed = await teamClaimTask(teamName, 'task-1', 'worker-1', null, cwd);
+    expect(claimed.ok).toBe(true);
+    if (!claimed.ok) return;
+    // a later recovery reservation on the reclaimed task still blocks renewal
+    const onDisk = JSON.parse(await readFile(taskPath(cwd, '1'), 'utf8')) as TeamTask;
+    await writeTask(cwd, {
+      ...onDisk,
+      recovery_reservation: {
+        recovery_id: 'rec-2',
+        request_id: 'req-2',
+        continuation_sequence: 5,
+        checkpoint_path: '/tmp/checkpoint2.json',
+        checkpoint_hash: 'hash-2',
+        replacement_worker: 'worker-3',
+        replacement_generation: 3,
+        adoption_token_hash: 'adoption-hash-2',
+        reserved_at: timestamp,
+      },
+    });
+    const result = await teamRenewTaskClaim(teamName, 'task-1', claimed.claimToken, 'worker-1', cwd);
+    expect(result).toEqual({ ok: false, error: 'claim_conflict' });
+  });
+});
+
+describe('renew-task-claim api dispatch', () => {
+  let cwd: string;
+
+  beforeEach(async () => {
+    cwd = await mkdtemp(join(tmpdir(), 'omc-claim-renewal-api-'));
+  });
+
+  afterEach(async () => {
+    await rm(cwd, { recursive: true, force: true });
+  });
+
+  afterAll(() => {
+    process.env.HOME = environmentIsolation.previous.home;
+    process.env.USERPROFILE = environmentIsolation.previous.userProfile;
+    process.env.OMC_STATE_DIR = environmentIsolation.previous.stateDir;
+  });
+
+  it('rejects the public renew-task-claim dispatch when required fields are missing', async () => {
+    await writeTeamConfig(cwd);
+    const missingWorker = await executeTeamApiOperation('renew-task-claim', {
+      team_name: teamName,
+      task_id: '1',
+      claim_token: 'token-1',
+    }, cwd);
+    expect(missingWorker).toEqual({
+      ok: false,
+      operation: 'renew-task-claim',
+      error: { code: 'invalid_input', message: 'team_name, task_id, claim_token, worker are required' },
+    });
+
+    const missingToken = await executeTeamApiOperation('renew-task-claim', {
+      team_name: teamName,
+      task_id: '1',
+      worker: 'worker-1',
+    }, cwd);
+    expect(missingToken.ok).toBe(false);
+    if (!missingToken.ok) expect(missingToken.error.code).toBe('invalid_input');
+  });
+
+  it('renews a live claim through the public dispatch envelope', async () => {
+    await writeTeamConfig(cwd);
+    await writeTask(cwd, task('1', 'pending'));
+    const claimed = await teamClaimTask(teamName, 'task-1', 'worker-1', null, cwd);
+    if (!claimed.ok) throw new Error(`claim failed: ${claimed.error}`);
+    const originalLease = Date.parse(claimed.task.claim!.leased_until);
+
+    vi.useFakeTimers({ toFake: ['Date'] });
+    try {
+      vi.setSystemTime(originalLease - 60_000);
+      const result = await executeTeamApiOperation('renew-task-claim', {
+        team_name: teamName,
+        task_id: '1',
+        claim_token: claimed.claimToken,
+        worker: 'worker-1',
+      }, cwd);
+      expect(result.ok).toBe(true);
+      if (result.ok) {
+        expect(result.operation).toBe('renew-task-claim');
+        const data = result.data as { ok: boolean; task: TeamTask };
+        expect(data.ok).toBe(true);
+        expect(Date.parse(data.task.claim!.leased_until!)).toBeGreaterThan(originalLease);
+      }
+    } finally {
+      vi.useRealTimers();
     }
   });
 });

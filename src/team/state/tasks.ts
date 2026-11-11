@@ -214,6 +214,10 @@ export async function claimTask(
       ...v,
       status: 'in_progress',
       owner: workerName,
+      // An ordinary claim supersedes historical recovery-adoption metadata:
+      // the new lease is a plain claim, not a recovery adoption, so stale
+      // adoption records must not govern it (e.g. renewal after reclaim).
+      recovery_adoption: undefined,
       claim: {
         owner: workerName,
         token: claimToken,
