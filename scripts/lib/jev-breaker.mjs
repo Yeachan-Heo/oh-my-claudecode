@@ -349,36 +349,49 @@ export function classifyFailure(failure, now = Date.now()) {
 }
 
 /**
- * Requests the limit granted in the current UTC minute, the count it enforces;
+ * Requests the limit granted in the UTC minute of `now`, the count it enforces;
  * undefined without OMC_JEV_MAX_RPM. Fail-open like the rest of the limit.
  */
 export function rpmCount(settings, now = Date.now()) {
   if (settings?.maxRpm === undefined) return undefined;
-  return foldMinute(join(settings.dir, "rpm-" + minuteKey(now))).granted;
+  try {
+    return foldMinute(join(settings.dir, "rpm-" + minuteKey(now))).granted;
+  } catch {
+    return undefined;
+  }
 }
 
 /**
  * Extra shadow-log fields of a failed request (the failure as passed to
- * classifyFailure): `error` {status, kind, retry_s?}, with the same kind as the
- * breaker reason ("http-<status>", "no-response") and the block time the
- * breaker takes from the failure; and, under OMC_JEV_MAX_RPM, `rpm` {count,
- * limit}: the minute's granted requests against the limit, which tells a 429
- * caused by this machine (count at the limit) from a foreign one (below it).
+ * classifyFailure; `admittedAt` is the time the request was admitted):
+ * - `error` {status, kind, retry_s?}: the HTTP status (null without a
+ *   response) and the kind, the same name as the breaker reason ("http-<status>",
+ *   "no-response"). `retry_s` is the pause the failure calls for, given only
+ *   under OMC_JEV_BREAKER=1 and only for a failure that opens the breaker at
+ *   once; a breaker that is already open for longer keeps its later end.
+ * - under OMC_JEV_MAX_RPM, `rpm` {count, limit}: the requests this machine
+ *   started in the UTC minute the failed one was admitted in (itself
+ *   included) against the limit. Not a verdict on who caused a 429: it shows
+ *   at what count 429s arrive.
  * Empty for a failure that is neither an HTTP status nor a missing response.
  */
-export function failureLogFields(settings, failure, now = Date.now()) {
-  const status = Number.isInteger(failure?.status) ? failure.status : undefined;
-  let error;
-  if (status !== undefined) {
-    const seconds = classifyFailure(failure, now)?.seconds;
-    error = { status, kind: "http-" + status, ...(seconds !== undefined ? { retry_s: seconds } : {}) };
-  } else if (failure?.noResponse) {
-    error = { status: null, kind: "no-response" };
-  } else {
+export function failureLogFields(settings, failure, admittedAt = Date.now()) {
+  try {
+    const status = Number.isInteger(failure?.status) ? failure.status : undefined;
+    let error;
+    if (status !== undefined) {
+      const seconds = settings?.breaker ? classifyFailure(failure)?.seconds : undefined;
+      error = { status, kind: "http-" + status, ...(seconds !== undefined ? { retry_s: seconds } : {}) };
+    } else if (failure?.noResponse) {
+      error = { status: null, kind: "no-response" };
+    } else {
+      return {};
+    }
+    const count = rpmCount(settings, admittedAt);
+    return { error, ...(count !== undefined ? { rpm: { count, limit: settings.maxRpm } } : {}) };
+  } catch {
     return {};
   }
-  const count = rpmCount(settings, now);
-  return { error, ...(count !== undefined ? { rpm: { count, limit: settings.maxRpm } } : {}) };
 }
 
 /**

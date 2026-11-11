@@ -43,7 +43,7 @@ export function rpmCount(settings: BreakerSettings | undefined, now?: number): n
 export function failureLogFields(
   settings: BreakerSettings | undefined,
   failure: { status?: number; retryAfter?: string | null; body?: string; noResponse?: boolean } | undefined,
-  now?: number,
+  admittedAt?: number,
 ): {
   error?: { status: number | null; kind: string; retry_s?: number };
   rpm?: { count: number; limit: number };

@@ -174,7 +174,7 @@ describe('jev-breaker library', () => {
     expect(classifyFailure(undefined, now)).toBeUndefined();
   });
 
-  it('describes a failed request for the log: status, kind, block time, and under a limit the minute count', () => {
+  it('describes a failed request for the log: status, kind, block time under the breaker, and under a limit the minute count', () => {
     const now = Date.parse('2026-11-09T12:00:30Z');
     const plain = settingsFor(jevEnv({ OMC_JEV_BREAKER: '1' }));
     expect(failureLogFields(plain, { status: 429, retryAfter: '120' }, now)).toEqual({ error: { status: 429, kind: 'http-429', retry_s: 120 } });
@@ -192,10 +192,18 @@ describe('jev-breaker library', () => {
     reserveRequest(limited, 'model-routing', now);
     expect(rpmCount(limited, now)).toBe(2);
     expect(rpmCount(limited, now + 60_000)).toBe(0);
+    // The limit alone holds nothing back, so no block time is given; `now` is the minute of admission, not the clock of the call (2026-11-09 here).
     expect(failureLogFields(limited, { status: 429 }, now)).toEqual({
-      error: { status: 429, kind: 'http-429', retry_s: 60 },
+      error: { status: 429, kind: 'http-429' },
       rpm: { count: 2, limit: 5 },
     });
+    const both = settingsFor(jevEnv({ OMC_JEV_BREAKER: '1', OMC_JEV_MAX_RPM: '5' }));
+    expect(failureLogFields(both, { status: 429, retryAfter: '30' }, now)).toEqual({
+      error: { status: 429, kind: 'http-429', retry_s: 30 },
+      rpm: { count: 2, limit: 5 },
+    });
+    expect(failureLogFields(both, { status: 429 }, now + 60_000)).toMatchObject({ rpm: { count: 0, limit: 5 } });
+    expect(failureLogFields(both, { status: 429 }, Number.NaN)).toEqual({ error: { status: 429, kind: 'http-429', retry_s: 60 } }); // an unreadable count is left out, never thrown
   });
 
   it('honors Retry-After in seconds or as an HTTP date, capped at 30 minutes', () => {
@@ -618,7 +626,7 @@ describe('resolveRequest with the shared breaker and limit', () => {
     expect(logRows(invalid)[0]).not.toHaveProperty('error');
   });
 
-  it('under OMC_JEV_MAX_RPM a failed request logs the minute count against the limit: at the limit the 429 is ours, below it foreign', async () => {
+  it('under OMC_JEV_MAX_RPM a failed request logs the minute count against the limit, and no block time without the breaker', async () => {
     const { own, foreign } = await inOneMinute(async (dir) => {
       const own = jevEnv({ OMC_JEV_MAX_RPM: '2', OMC_JEV_BREAKER_DIR: join(dir, 'breaker-own'), OMC_JEV_LOG_DIR: join(dir, 'log-own') });
       const foreign = jevEnv({ OMC_JEV_MAX_RPM: '100', OMC_JEV_BREAKER_DIR: join(dir, 'breaker-foreign'), OMC_JEV_LOG_DIR: join(dir, 'log-foreign') });
@@ -633,7 +641,8 @@ describe('resolveRequest with the shared breaker and limit', () => {
     expect(success).toMatchObject({ mode: 'shadow' });
     expect(success).not.toHaveProperty('error');
     expect(success).not.toHaveProperty('rpm');
-    expect(failure).toMatchObject({ mode: 'degraded', error: { status: 429, kind: 'http-429', retry_s: 60 }, rpm: { count: 2, limit: 2 } });
+    expect(failure).toMatchObject({ mode: 'degraded', error: { status: 429, kind: 'http-429' }, rpm: { count: 2, limit: 2 } });
+    expect(failure.error).not.toHaveProperty('retry_s');
     expect(logRows(foreign)[1]).toMatchObject({ mode: 'degraded', error: { status: 429 }, rpm: { count: 2, limit: 100 } });
   });
 

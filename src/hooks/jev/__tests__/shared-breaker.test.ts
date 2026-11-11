@@ -247,8 +247,32 @@ describe('resolveJudgment with the shared breaker', () => {
     process.env.OMC_JEV_MAX_RPM = '5';
     const { fetchFn } = counting((n) => (n === 1 ? ok() : failed(429)));
     await judge(fetchFn);
+    expect(rows().pop()).not.toHaveProperty('rpm'); // a line of a successful request carries neither field
+    expect(rows().pop()).not.toHaveProperty('error');
     await judge(fetchFn);
-    expect(rows().pop()).toMatchObject({ mode: 'degraded', error: { status: 429, kind: 'http-429', retry_s: 60 }, rpm: { count: 2, limit: 5 } });
+    const last = rows().pop() as { error: object };
+    expect(last).toMatchObject({ mode: 'degraded', error: { status: 429, kind: 'http-429' }, rpm: { count: 2, limit: 5 } });
+    expect(last.error).not.toHaveProperty('retry_s'); // the limit alone holds nothing back
+  });
+
+  it('the same fields are logged by the non-blocking shadow and active paths; an invalid body adds none', async () => {
+    process.env.OMC_JEV_BREAKER = '1';
+    const waitForRows = async (n: number) => {
+      for (let i = 0; i < 100 && rows().length < n; i += 1) await new Promise((resolve) => setTimeout(resolve, 20));
+    };
+    const args = { point: 'model-routing', state: { task: 'x' }, questions: QUESTIONS, twin: () => TWIN, blocking: false };
+    await resolveJudgment({ ...args, fetchFn: counting(() => failed(503)).fetchFn });
+    await waitForRows(1);
+    expect(rows()[0]).toMatchObject({ mode: 'degraded', error: { status: 503, kind: 'http-503', retry_s: 60 } });
+    process.env.OMC_JEV_BREAKER_DIR = join(dir, 'breaker-active');
+    await resolveJudgment({ ...args, mode: 'active', fetchFn: counting(() => failed(500)).fetchFn });
+    await waitForRows(2);
+    expect(rows()[1]).toMatchObject({ mode: 'degraded', error: { status: 500, kind: 'http-500', retry_s: 60 } });
+    process.env.OMC_JEV_BREAKER_DIR = join(dir, 'breaker-invalid');
+    resetJevResolverState();
+    await judge((async () => ({ ok: true, status: 200, json: async () => ({}) })) as unknown as typeof fetch);
+    expect(rows()[2]).toMatchObject({ mode: 'degraded' });
+    expect(rows()[2]).not.toHaveProperty('error');
   });
 
   it('the in-process circuit still works with the shared breaker on (no-response failures)', async () => {
