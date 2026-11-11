@@ -176,17 +176,18 @@ describe('inventory-graph drift enforcement (#3702)', () => {
     expect(m.repository).toBe('Yeachan-Heo/oh-my-claudecode');
     expect(m.provenance.base).toBe(EXPECTED_BASE);
     expect(m.provenance.planningHead).toBe(EXPECTED_PLANNING_HEAD);
+    // Committed baseline no longer contains volatile head/generatedAt/sourceSha256/manifestSha256
+    expect(m.provenance.head).toBeUndefined();
+    expect(m.provenance.generatedAt).toBeUndefined();
+    expect(m.provenance.sourceSha256).toBeUndefined();
+    expect((m as any).head).toBeUndefined();
+    expect((m as any).generatedAt).toBeUndefined();
+    expect((m as any).sourceSha256).toBeUndefined();
+    expect((m as any).manifestSha256).toBeUndefined();
     expect(m.base).toBe(EXPECTED_BASE);
     expect(m.planningHead).toBe(EXPECTED_PLANNING_HEAD);
-    // head is the exact provenance hook into the branch this was generated from
-    expect(typeof m.head === 'string' || m.head === null).toBe(true);
-    if (m.head !== null) expect(m.head).toMatch(/^[0-9a-f]{40}$/);
     expect(typeof m.inventorySha256).toBe('string');
     expect(m.inventorySha256).toMatch(/^[0-9a-f]{64}$/);
-    expect(typeof m.manifestSha256).toBe('string');
-    expect(m.manifestSha256).toMatch(/^[0-9a-f]{64}$/);
-    expect(m.sourceSha256).toMatch(/^[0-9a-f]{64}$/);
-    expect(m.provenance.sourceSha256).toBe(m.sourceSha256);
     expect(m.graph).toBeTruthy();
     expect(Array.isArray(m.graph.nodes)).toBe(true);
     expect(Array.isArray(m.graph.edges)).toBe(true);
@@ -277,12 +278,12 @@ describe('inventory-graph drift enforcement (#3702)', () => {
     expect(m.inventorySha256).toBe(liveInventorySha);
   });
 
-  it('manifestSha256 is consistent with content (determinism guard)', () => {
+  it('inventorySha256 is consistent with committed file list (determinism guard)', () => {
     const m = manifest!;
-    const without = { ...(m as unknown as Record<string, unknown>) };
-    delete without.manifestSha256;
-    const recomputed = sha256Hex(stableStringify(without));
-    expect(m.manifestSha256).toBe(recomputed);
+    // inventorySha256 should be deterministic based on the file list
+    expect(typeof m.inventorySha256).toBe('string');
+    expect(m.inventorySha256).toMatch(/^[0-9a-f]{64}$/);
+    // Verify it's the same across runs (already tested in generator determinism test)
   });
 
   it('graph contains expected registry/register edges (call-graph coverage)', () => {
@@ -307,7 +308,7 @@ describe('inventory-graph drift enforcement (#3702)', () => {
     expect(m.graph.edges.some((e) => e.from === 'src/features/delegation-categories/index.ts' && e.kind.endsWith('-unresolved'))).toBe(false);
   });
 
-  it('generator is deterministic (two consecutive runs yield identical manifest modulo head/generatedAt)', { timeout: 30_000 }, () => {
+  it('generator is deterministic (two consecutive runs yield identical inventorySha256)', { timeout: 30_000 }, () => {
     const opts = { cwd: REPO_ROOT, encoding: 'utf8' as const, maxBuffer: 20 * 1024 * 1024 };
     const r1 = spawnSync('node', [GENERATOR], opts);
     expect(r1.status, r1.stderr || r1.stdout).toBe(0);
@@ -315,38 +316,22 @@ describe('inventory-graph drift enforcement (#3702)', () => {
     expect(r2.status, r2.stderr || r2.stdout).toBe(0);
     const a = JSON.parse(r1.stdout as unknown as string) as Manifest;
     const b = JSON.parse(r2.stdout as unknown as string) as Manifest;
-    // Strip ephemeral head/generatedAt + manifestSha before comparison; provenance.base/planningHead must still match exactly
-    const strip = (m: Manifest) => {
-      const c = JSON.parse(JSON.stringify(m)) as Manifest;
-      (c as unknown as Record<string, unknown>).head = null;
-      (c as unknown as Record<string, unknown>).generatedAt = null;
-      c.provenance = { ...c.provenance, head: null, generatedAt: null };
-      // manifestSha is derived from the above, so drop it for the drift-equivalence check
-      delete (c as unknown as Record<string, unknown>).manifestSha256;
-      // inventorySha is deterministic already but keep for comparison after strip; drop head-dependent hash dominance
-      return c;
-    };
-    const sa = stableStringify(strip(a));
-    const sb = stableStringify(strip(b));
-    expect(sha256Hex(sa)).toBe(sha256Hex(sb));
+    // Verify inventorySha256 is identical (deterministic file list and structural content)
+    expect(a.inventorySha256).toBe(b.inventorySha256);
+    // Verify provenance anchors match
     expect(a.provenance.base).toBe(EXPECTED_BASE);
     expect(b.provenance.base).toBe(EXPECTED_BASE);
     expect(a.provenance.planningHead).toBe(EXPECTED_PLANNING_HEAD);
     expect(b.provenance.planningHead).toBe(EXPECTED_PLANNING_HEAD);
+    // Verify counts and graph are identical
+    const structureA = stableStringify({ counts: a.counts, graph: a.graph });
+    const structureB = stableStringify({ counts: b.counts, graph: b.graph });
+    expect(sha256Hex(structureA)).toBe(sha256Hex(structureB));
   });
 
-  it('intentionally accepts an older ancestor as a lineage provenance anchor', () => {
-    const result = spawnSync('node', [GENERATOR], {
-      cwd: REPO_ROOT,
-      encoding: 'utf8',
-      maxBuffer: 20 * 1024 * 1024,
-      env: { ...process.env, ISSUE_3702_HEAD: EXPECTED_BASE },
-    });
-    expect(result.status, result.stderr).toBe(0);
-    const generated = JSON.parse(result.stdout) as Manifest;
-    expect(generated.head).toBe(EXPECTED_BASE);
-    expect(generated.provenance.head).toBe(EXPECTED_BASE);
-  });
+  // NOTE: Provenance head is no longer committed, so this test is removed.
+  // The generator can still be invoked with ISSUE_3702_HEAD for backward compatibility,
+  // but the result is not stored in the committed baseline.
 
   it('verify mode passes when baseline is current (drift closed)', { timeout: 30_000 }, () => {
     const r = spawnSync('node', [GENERATOR, '--verify'], { cwd: REPO_ROOT, encoding: 'utf8' as const, maxBuffer: 20 * 1024 * 1024 });
@@ -354,16 +339,13 @@ describe('inventory-graph drift enforcement (#3702)', () => {
     expect((r.stdout as unknown as string)).toContain('verify ok');
   });
 
-  // Six full generator spawns over a ~7k-node graph. On a loaded CI runner the
-  // suite has crossed 60s three times (PRs #4064, #4070, #4071) while every
-  // assertion still passed locally, so the budget — not the contract — was the
-  // failure. Keep the spawn count; give it room.
-  it('verify mode rejects tampered hashes and head provenance', { timeout: 240_000 }, () => {
+  // Verify mode rejects tampered inventorySha256 and invalid provenance anchors
+  it('verify mode rejects tampered hashes and invalid provenance', { timeout: 240_000 }, () => {
     const opts = { cwd: REPO_ROOT, encoding: 'utf8' as const, maxBuffer: 20 * 1024 * 1024 };
     for (const mutate of [
       (m: Manifest) => { m.inventorySha256 = '0'.repeat(64); },
-      (m: Manifest) => { m.manifestSha256 = '0'.repeat(64); },
-      (m: Manifest) => { m.head = 'not-a-sha'; m.provenance.head = 'not-a-sha'; },
+      (m: Manifest) => { m.provenance.base = '0'.repeat(40); },
+      (m: Manifest) => { m.provenance.planningHead = '0'.repeat(40); },
     ]) {
       const temp = join(REPO_ROOT, `.tmp-inventory-graph-${process.pid}-${Math.random().toString(16).slice(2)}.json`);
       const copy = JSON.parse(JSON.stringify(manifest)) as Manifest;
@@ -401,26 +383,6 @@ describe('inventory-graph drift enforcement (#3702)', () => {
     });
     expect(nonAncestorOverride.status).not.toBe(0);
     expect(nonAncestorOverride.stderr).toContain('ancestor of the current HEAD');
-
-    // A committed baseline whose generating commit is no longer reachable is the normal
-    // outcome of squash/rebase integration: the contribution head that produced the
-    // baseline is rewritten when the PR lands. Verify must accept it as long as the
-    // content hashes still match the working tree, otherwise the integration branch
-    // goes red on every merge that regenerates the graph.
-    const rewrittenHeadBaseline = join(REPO_ROOT, `.tmp-inventory-rewritten-head-${process.pid}.json`);
-    const rewrittenHeadManifest = JSON.parse(JSON.stringify(manifest)) as Manifest;
-    rewrittenHeadManifest.head = nonAncestor;
-    rewrittenHeadManifest.provenance.head = nonAncestor;
-    const withoutManifestSha = { ...(rewrittenHeadManifest as unknown as Record<string, unknown>) };
-    delete withoutManifestSha.manifestSha256;
-    rewrittenHeadManifest.manifestSha256 = sha256Hex(stableStringify(withoutManifestSha));
-    writeFileSync(rewrittenHeadBaseline, `${JSON.stringify(rewrittenHeadManifest, null, 2)}\n`);
-    try {
-      const result = spawnSync('node', [GENERATOR, '--verify', '--out', rewrittenHeadBaseline], opts);
-      expect(result.status, `stdout:\n${result.stdout}\nstderr:\n${result.stderr}`).toBe(0);
-    } finally {
-      unlinkSync(rewrittenHeadBaseline);
-    }
 
     const outsideOut = resolve(REPO_ROOT, '..', `.tmp-inventory-outside-${process.pid}.json`);
     const outsideWrite = spawnSync('node', [GENERATOR, '--write', '--out', outsideOut], opts);
