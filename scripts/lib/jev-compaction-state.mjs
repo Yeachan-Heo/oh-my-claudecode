@@ -31,6 +31,10 @@
  *    It runs only while the compaction point is enabled, and a session that is idle for longer than the
  *    days can find that a trace names a file that is gone.
  *
+ * 5. Pasted-text retention. With OMC_JEV_COMPACT_PASTES the module writes the pasted text it moves out of the conversation to
+ *    <state dir>/compaction-pastes/<session>/<hash>.txt (see its header). SessionStart (any source but `compact`) treats that
+ *    directory like the archive's (item 4) with OMC_JEV_PASTES_DAYS in place of OMC_JEV_ARCHIVE_DAYS.
+ *
  * <state dir> is OMC_JEV_LOG_DIR when set, else ~/.omc/state/jev: the module knows only the home
  * directory, not the project's state root. Registry text is masked with scripts/lib/jev-mask.mjs, the
  * masking the module uses for what it sends.
@@ -57,6 +61,7 @@ const MISSING_WINDOW_MS = 24 * 3600_000;
 const MISSING_TO_NOTIFY = 3;
 const MAX_AGE_MS = 7 * 24 * 3600_000;
 const ARCHIVE_DAYS_DEFAULT = 14;
+const PASTES_DAYS_DEFAULT = 14;
 const FILE_TOOLS = new Set(['Write', 'Edit', 'MultiEdit', 'NotebookEdit']);
 const SHELL_TOOLS = new Set(['Bash', 'PowerShell']);
 // git subcommands that change the repository or its remote (status, log and diff are not worth a line).
@@ -308,6 +313,47 @@ export function sweepArchive(sessionId, now = Date.now(), env = process.env) {
   return removed;
 }
 
+/** OMC_JEV_PASTES_DAYS: days a session directory of compaction-pastes is kept, a whole number from 1 to 99999 (unset or empty: the default); 0 or any other value: no removal. */
+export function pastesDays(env = process.env) {
+  const raw = String(env.OMC_JEV_PASTES_DAYS ?? '').trim();
+  if (!raw) return PASTES_DAYS_DEFAULT;
+  return /^[1-9]\d{0,4}$/.test(raw) ? Number(raw) : 0;
+}
+
+/**
+ * Same as sweepArchive for <state dir>/compaction-pastes and OMC_JEV_PASTES_DAYS: marks the current session's directory as live,
+ * removes the other session directories whose newest file is older than the days, returns the number removed. A link stays;
+ * without a session id nothing is touched or removed.
+ */
+export function sweepPastes(sessionId, now = Date.now(), env = process.env) {
+  const days = pastesDays(env);
+  if (!days || !sessionId) return 0;
+  const root = join(stateDirOf(env), 'compaction-pastes');
+  const current = safeName(sessionId);
+  const cutoff = now - days * 24 * 3600_000;
+  let removed = 0;
+  try {
+    try {
+      const marker = join(root, current, '.compaction');
+      if (lstatSync(join(root, current)).isDirectory()) {
+        writeFileSync(marker, `${new Date(now).toISOString()}\n`);
+        utimesSync(marker, new Date(now), new Date(now));
+      }
+    } catch { /* no directory of this session */ }
+    if (!lstatSync(root).isDirectory()) return 0;
+    for (const name of readdirSync(root)) {
+      if (name === current) continue;
+      const dir = join(root, name);
+      try {
+        if (!lstatSync(dir).isDirectory() || !archiveDirIsOld(dir, cutoff)) continue;
+        rmSync(dir, { recursive: true, force: true });
+        removed++;
+      } catch { /* in use or gone: the next start tries again */ }
+    }
+  } catch { /* no directory */ }
+  return removed;
+}
+
 // The session's spool files: [{name, record}], record undefined for an unreadable file.
 function readSpool(spoolDir, sessionId) {
   let names = [];
@@ -378,6 +424,7 @@ export function afterSessionStart(data, { logDir } = {}, env = process.env) {
       sweep(join(stateDir, 'compaction-registry'), now);
     }
     if (data.source !== 'compact') sweepArchive(sessionId, now, env);
+    if (data.source !== 'compact') sweepPastes(sessionId, now, env);
     return out;
   } catch { return {}; }
 }

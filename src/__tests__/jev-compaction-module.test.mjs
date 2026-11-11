@@ -9,12 +9,13 @@
  */
 
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, utimesSync, writeFileSync } from 'node:fs';
+import { createHash } from 'node:crypto';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { afterAll, describe, expect, it } from 'vitest';
 
-import { boundExcerpts, classifyFailure, DEFAULT_EXCERPT_CHARS, mediumThreshold, omitSecretLines, pairingOk, parseMaxRpm, pointMode, QUESTION_CRITERIA, QUESTION_INSTRUCTIONS, register, retryAfterFromBody, retryAfterMs, sharedFailureClass } from '../../hooks/jev-compaction.mjs';
+import { boundExcerpts, classifyFailure, DEFAULT_EXCERPT_CHARS, mediumThreshold, omitSecretLines, pairingOk, parseMaxRpm, pasteMode, pasteTags, pointMode, QUESTION_CRITERIA, QUESTION_INSTRUCTIONS, register, retryAfterFromBody, retryAfterMs, sharedFailureClass } from '../../hooks/jev-compaction.mjs';
 import { breakerSettings, classifyFailure as sharedClassifyFailure, parseMaxRpm as sharedParseMaxRpm, readBreaker, recordFailure, reserveRequest, retryAfterFromBody as sharedRetryAfterFromBody, thresholdFor } from '../../scripts/lib/jev-breaker.mjs';
 import { maskSecrets } from '../../scripts/lib/jev-mask.mjs';
 import { parseJevEnv, resolveExcerptChars, serializeQuestions } from '../../scripts/jev-resolve.mjs';
@@ -2369,5 +2370,385 @@ describe('jev-compaction module: archive of cut and removed results (OMC_JEV_COM
     const base = await compactOnce(messages, { env });
     expect(shadow.records()[0].archive_planned).toBe(active.records()[0].archive_written);
     expect(shadow.out.messages).toEqual(base.out.messages);
+  });
+});
+
+describe('jev-compaction module: pasted text (OMC_JEV_COMPACT_PASTES)', () => {
+  // A <pasted_content> tag says that the user pasted the text, not who wrote it. The rule under test: no sentence of the user leaves the
+  // conversation, so a tag moves to a file only when Jev, who read all of it, says that none of it is the user's own writing; text outside
+  // tags never moves; tags never join; the default is off.
+  const PASTES = { ...ACTIVE_ENV, OMC_JEV_COMPACT_PASTES: 'active' };
+  const DIR = `${STATE}/compaction-pastes/sess-1`;
+  const tag = (inner, id = 1) => `<pasted_content id="${id}">${inner}</pasted_content>`;
+  const filler = (word, n) => `${word} `.repeat(Math.ceil(n / (word.length + 1))).slice(0, n);
+  // A tag of exactly `n` characters.
+  const sized = (n, id = 1) => tag(filler('alpha', n - `<pasted_content id="${id}"></pasted_content>`.length), id);
+  const OUTSIDE = 'Please check the report below and tell me what you think of it.';
+  const MINE = 'MY-OWN-WORDS: I decided to keep option B, do not touch the cache.';
+
+  /** The first message, then the user messages `texts` one after the other, then 30 call/result pairs and a closing exchange. */
+  function withPastes(texts, options) {
+    const base = conversation(30, options);
+    const rows = texts.map((text, k) => Object.freeze({ role: 'user', text, toolUses: [], handle: `p${k}` }));
+    return [base[0], ...rows, ...base.slice(1)];
+  }
+
+  /** The API form of a conversation; a row in `images` also holds an image block. */
+  function apiOf(messages, images = []) {
+    return messages.map((m, i) => (m.role === 'assistant'
+      ? { role: 'assistant', content: [...(m.text ? [{ type: 'text', text: m.text }] : []), ...(m.toolUses || []).map((u) => ({ type: 'tool_use', id: u.tool_use_id, name: u.tool, input: u.input }))] }
+      : { role: 'user', content: m.toolResults?.length ? m.toolResults.map((r) => ({ type: 'tool_result', tool_use_id: r.tool_use_id, content: r.text })) : [{ type: 'text', text: m.text }, ...(images.includes(i) ? [{ type: 'image', source: {} }] : [])] }));
+  }
+
+  /** Jev's answer to the pasted-text question: `noul` is a probability or a function of the tag text; scoring is the usual one. */
+  const jevSays = (noul) => (body) => (body.questions.pasted
+    ? okResponse({ answers: { pasted: { type: 'noul', noul: typeof noul === 'function' ? noul(body.state.fragment.text) : noul } } })
+    : okResponse(scoreByMarker(body)));
+  const isPasteRequest = (c) => Boolean(c.body.questions.pasted);
+
+  async function compactPastes(messages, { env = PASTES, jev = jevSays(0.95), api, images, event, ...options } = {}) {
+    const handlers = load();
+    const fake = fakeDollar({ env, respond: jev, messages, ...options });
+    const form = api ?? apiOf(messages, images);
+    fake.$.session.messages = async (opts) => (opts?.as === 'api' ? form : messages);
+    const next = summaryNext();
+    const out = await handlers['session.compact'](fake.$, Object.freeze({ trigger: 'auto', messages, ...event }), next);
+    const requests = fake.calls.fetch.filter(isPasteRequest);
+    const written = [...fake.files.keys()].filter((path) => path.startsWith(`${STATE}/compaction-pastes/`));
+    return { out, next, handlers, requests, written, record: fake.records()[0], ...fake };
+  }
+
+  const userRow = (out, startsWith) => out.messages.find((m) => m.role === 'user' && m.text.startsWith(startsWith));
+  const withoutTimes = (record) => { const copy = { ...record }; for (const key of ['ts', 'duration_ms', 'jev_ms']) delete copy[key]; return copy; };
+
+  it('is off unless asked for: unset, off and any other value give the same conversation and record as without the module code', async () => {
+    const report = sized(3000);
+    const messages = withPastes([`${OUTSIDE} ${report}`]);
+    const runs = [];
+    for (const OMC_JEV_COMPACT_PASTES of [undefined, 'off', '', 'yes', '1', 'true']) {
+      runs.push(await compactPastes(messages, { env: { ...ACTIVE_ENV, ...(OMC_JEV_COMPACT_PASTES === undefined ? {} : { OMC_JEV_COMPACT_PASTES }) } }));
+    }
+    for (const run of runs) {
+      expect(run.requests).toHaveLength(0);
+      expect(run.written).toHaveLength(0);
+      expect(run.record).not.toHaveProperty('pastes');
+      expect(JSON.stringify(run.out.messages)).toBe(JSON.stringify(runs[0].out.messages));
+      expect(withoutTimes(run.record)).toEqual(withoutTimes(runs[0].record));
+      expect(run.calls.fetch).toHaveLength(runs[0].calls.fetch.length);
+    }
+    expect(userRow(runs[0].out, OUTSIDE).text).toBe(`${OUTSIDE} ${report}`);
+  });
+
+  it('reads OMC_JEV_COMPACT_PASTES as off, shadow or active in any case; anything else is off', () => {
+    expect([undefined, '', 'off', 'yes', '1', 'true', 'activ'].map(pasteMode)).toEqual(Array(7).fill('off'));
+    expect(['active', 'Active', ' SHADOW ', 'shadow'].map(pasteMode)).toEqual(['active', 'active', 'shadow', 'shadow']);
+  });
+
+  it('moves a whole tag that Jev, having read all of it, clears: the file holds the tag, the trace the first 200 and last 300 characters, the words outside stay', async () => {
+    const inner = `${filler('alpha', 1500)}${filler('omega', 1500)}`;
+    const report = tag(inner);
+    const messages = withPastes([`${OUTSIDE} ${report} Thanks, that is all.`]);
+    const off = await compactPastes(messages, { env: ACTIVE_ENV });
+    const run = await compactPastes(messages);
+    // Jev got the whole tag, once, with the pasted-text question.
+    expect(run.requests).toHaveLength(1);
+    expect(run.requests[0].body.state).toEqual({ fragment: { text: report, chars: report.length } });
+    expect(run.requests[0].body.questions.pasted).toMatchObject({ type: 'noul' });
+    // The file holds the tag, byte for byte, under a name made from its content.
+    expect(run.written).toHaveLength(1);
+    const [path] = run.written;
+    expect(path).toMatch(new RegExp(`^${DIR}/[0-9a-f]{32}\\.txt$`));
+    expect(run.files.get(path)).toBe(report);
+    // The row is rebuilt without its handle: the words around the tag, and the trace instead of the tag.
+    const row = userRow(run.out, OUTSIDE);
+    expect(row.handle).toBeUndefined();
+    const trace = row.text.slice(OUTSIDE.length + 1, row.text.length - ' Thanks, that is all.'.length);
+    expect(row.text).toBe(`${OUTSIDE} ${trace} Thanks, that is all.`);
+    const match = /^\[pasted text moved at compaction: (\d+) chars, full text in (\S+); start: ("(?:[^"\\]|\\.)*"); end: ("(?:[^"\\]|\\.)*")\]$/.exec(trace);
+    expect(match).not.toBeNull();
+    expect(Number(match[1])).toBe(report.length);
+    expect(match[2]).toBe(path);
+    expect(JSON.parse(match[3])).toBe(inner.slice(0, 200));
+    expect(JSON.parse(match[4])).toBe(inner.slice(-300));
+    expect(trace.length).toBeLessThan(report.length);
+    // The record counts it; the results kept and removed are the same as with the switch off.
+    expect(run.record.pastes).toMatchObject({ mode: 'active', tags: 1, asked: 1, yes: 1, written: 1, moved: 1, moved_chars: report.length, trace_chars: trace.length, installed: true });
+    for (const key of ['asked', 'requests', 'kept_full', 'kept_short', 'traced', 'score_hist', 'candidates']) expect(run.record[key]).toEqual(off.record[key]);
+    expect(run.record.chars_after).toBe(off.record.chars_after - (report.length - trace.length));
+    expect(run.out.messages).toHaveLength(off.out.messages.length);
+  });
+
+  it.each([
+    ['below the bar', 0.79],
+    ['no', 0.1],
+    ['no answer', undefined],
+    ['out of range', 2],
+    ['not a number', 'yes'],
+  ])('Jev says %s: the tag stays, nothing is written', async (_label, noul) => {
+    const text = `${OUTSIDE} ${sized(3000)}`;
+    const run = await compactPastes(withPastes([text]), { jev: jevSays(noul) });
+    expect(run.requests).toHaveLength(1);
+    expect(userRow(run.out, OUTSIDE).text).toBe(text);
+    expect(run.written).toHaveLength(0);
+    expect(run.record.pastes).toMatchObject({ asked: 1, yes: 0, moved: 0, installed: false });
+  });
+
+  it('moves a tag at 0.8 and keeps it when the request fails or times out', async () => {
+    const text = `${OUTSIDE} ${sized(3000)}`;
+    expect(userRow((await compactPastes(withPastes([text]), { jev: jevSays(0.8) })).out, OUTSIDE).text).not.toBe(text);
+    const failing = (body) => (body.questions.pasted ? { ok: false, status: 500, headers: {}, text: '' } : okResponse(scoreByMarker(body)));
+    const run = await compactPastes(withPastes([text]), { jev: failing });
+    expect(userRow(run.out, OUTSIDE).text).toBe(text);
+    expect(run.written).toHaveLength(0);
+    expect(run.record.pastes).toMatchObject({ asked: 1, unanswered: 1, moved: 0 });
+    // A failed request pauses the next ones like a failed scoring request.
+    const second = await run.handlers['session.compact'](fakeDollar({ env: PASTES, respond: jevSays(0.95), messages: [] }).$, Object.freeze({ trigger: 'auto', messages: withPastes([text]) }), summaryNext());
+    expect(second).toBe(SUMMARY);
+  });
+
+  it('a tag that ends with the user\'s own words stays when Jev sees them; when Jev errs the words in the last 300 characters still stand in the trace and every moved character was in the request', async () => {
+    const text = `${OUTSIDE} ${tag(`${filler('alpha', 3000)}\n\n${MINE}`)}`;
+    const careful = await compactPastes(withPastes([text]), { jev: jevSays((fragment) => (fragment.includes('MY-OWN-WORDS') ? 0.1 : 0.95)) });
+    expect(userRow(careful.out, OUTSIDE).text).toBe(text);
+    expect(careful.written).toHaveLength(0);
+    const wrong = await compactPastes(withPastes([text]));
+    const row = userRow(wrong.out, OUTSIDE);
+    expect(row.text).not.toBe(text);
+    expect(row.text).toContain(MINE);
+    expect(wrong.requests[0].body.state.fragment.text).toContain(MINE);
+    expect(wrong.files.get(wrong.written[0])).toContain(MINE);
+  });
+
+  it('never joins neighbouring tags: each is asked about and moved by itself, and a tag Jev refuses stays with the text between', async () => {
+    const command = tag(`${filler('beta', 2400)} ${MINE}`, 1);
+    const material = tag(filler('gamma', 3300), 2);
+    const text = `${OUTSIDE}\n${command}\n${material}`;
+    const run = await compactPastes(withPastes([text]), { jev: jevSays((fragment) => (fragment.includes('MY-OWN-WORDS') ? 0.05 : 0.95)) });
+    expect(run.requests.map((c) => c.body.state.fragment.text).sort()).toEqual([command, material].sort());
+    const row = userRow(run.out, OUTSIDE);
+    expect(row.text.startsWith(`${OUTSIDE}\n${command}\n[pasted text moved at compaction: ${material.length} chars`)).toBe(true);
+    expect(run.written).toHaveLength(1);
+    expect(run.files.get(run.written[0])).toBe(material);
+    // Both cleared: two traces, two files, the line break between them intact.
+    const both = await compactPastes(withPastes([text]));
+    const traces = [...userRow(both.out, OUTSIDE).text.matchAll(/\[pasted text moved at compaction: (\d+) chars/g)].map((m) => Number(m[1]));
+    expect(traces).toEqual([command.length, material.length]);
+    expect(both.written).toHaveLength(2);
+    expect(userRow(both.out, OUTSIDE).text).toMatch(/^Please check[^\n]*\n\[pasted text moved[^\n]*\]\n\[pasted text moved[^\n]*\]$/);
+  });
+
+  it('never touches text outside a tag: a quotation with the user\'s comment in the same paragraph, a list, a code block', async () => {
+    const quotation = `${filler('delta', 3000)} <- ${MINE}`;
+    const code = `\`\`\`\n${filler('epsilon', 2500)}\n\`\`\``;
+    const only = `${quotation}\n\n${code}`;
+    const run = await compactPastes(withPastes([only, `${OUTSIDE} ${sized(3000)}\n\n${quotation}\n\n${code}`]), { jev: jevSays(0.99) });
+    expect(userRow(run.out, filler('delta', 20)).text).toBe(only);
+    const row = userRow(run.out, OUTSIDE);
+    expect(row.text.endsWith(`\n\n${quotation}\n\n${code}`)).toBe(true);
+    expect(row.text).toContain('[pasted text moved at compaction');
+    expect(run.requests).toHaveLength(1);
+    for (const c of run.requests) expect(c.body.state.fragment.text).not.toContain('MY-OWN-WORDS');
+  });
+
+  it('keeps a message that is nothing but the paste (alone, with a keyword, with a few characters): it sends that text as the user\'s own instruction', async () => {
+    const report = sized(3000);
+    const near = (outside) => `${outside}\n${report}`;
+    const run = await compactPastes(withPastes([report, near('ultrathink'), near('x'.repeat(19)), `${report}\n${tag(filler('beta', 3000), 2)}`, near('x'.repeat(20))]));
+    expect(run.requests).toHaveLength(1);
+    expect(run.requests[0].body.state.fragment.text).toBe(report);
+    const kept = run.out.messages.filter((m) => m.role === 'user' && m.text.includes('<pasted_content'));
+    expect(kept.map((m) => m.text)).toEqual([report, near('ultrathink'), near('x'.repeat(19)), `${report}\n${tag(filler('beta', 3000), 2)}`]);
+    expect(run.record.pastes).toMatchObject({ tags: 6, kept_whole: 5, moved: 1 });
+  });
+
+  it('leaves the first and the newest user message, the last six messages, and rows with an image alone', async () => {
+    const report = sized(3000);
+    const text = (k) => `${OUTSIDE} ${k} ${report}`;
+    const base = conversation(30);
+    const first = Object.freeze({ ...base[0], text: text('first') });
+    const mid = [Object.freeze({ role: 'user', text: text('middle'), toolUses: [], handle: 'pm' }), Object.freeze({ role: 'user', text: text('image'), toolUses: [], handle: 'pi' })];
+    // The newest user message and the tail rows: a paste in the closing exchange.
+    const newest = Object.freeze({ ...base[base.length - 2], text: text('newest') });
+    const messages = [first, ...mid, ...base.slice(1, -2), newest, base[base.length - 1]];
+    const run = await compactPastes(messages, { images: [2] });
+    expect(run.requests).toHaveLength(1);
+    expect(userRow(run.out, `${OUTSIDE} first`).text).toBe(text('first'));
+    expect(userRow(run.out, `${OUTSIDE} newest`).text).toBe(text('newest'));
+    expect(userRow(run.out, `${OUTSIDE} image`).text).toBe(text('image'));
+    expect(userRow(run.out, `${OUTSIDE} middle`).text).toContain('[pasted text moved at compaction');
+    // The tail is the last six messages; a user message inside it stays even when it is not the newest.
+    const tail = conversation(30);
+    const inTail = [...tail.slice(0, -3), Object.freeze({ role: 'user', text: text('tail'), toolUses: [], handle: 'pt' }), ...tail.slice(-3)];
+    const second = await compactPastes([Object.freeze({ ...inTail[0] }), Object.freeze({ role: 'user', text: text('early'), toolUses: [], handle: 'pe' }), ...inTail.slice(1)]);
+    expect(userRow(second.out, `${OUTSIDE} tail`).text).toBe(text('tail'));
+    expect(userRow(second.out, `${OUTSIDE} early`).text).toContain('[pasted text moved at compaction');
+    expect(second.requests).toHaveLength(1);
+  });
+
+  it('moves nothing when an image message of the API form matches no row, or without the API form', async () => {
+    const report = sized(3000);
+    const messages = withPastes([`${OUTSIDE} ${report}`]);
+    const api = apiOf(messages);
+    api.splice(2, 0, { role: 'user', content: [{ type: 'text', text: 'A screenshot that no row shows.' }, { type: 'image', source: {} }] });
+    const unmatched = await compactPastes(messages, { api });
+    expect(unmatched.requests).toHaveLength(0);
+    expect(unmatched.record.pastes).toMatchObject({ reason: 'image_unmatched', moved: 0 });
+    const plain = await compactPastes(messages, { api: messages });
+    expect(plain.requests).toHaveLength(0);
+    expect(plain.record.pastes).toMatchObject({ reason: 'no_api_form' });
+    expect(userRow(plain.out, OUTSIDE).text).toBe(`${OUTSIDE} ${report}`);
+  });
+
+  it('a tag with a secret, a secret path or a private path goes neither to Jev nor to a file', async () => {
+    const key = 'sk-ant-api03-' + 'A1b2C3d4'.repeat(4);
+    const secrets = [`${filler('alpha', 3000)} ANTHROPIC key ${key}`, `${filler('alpha', 3000)} cat /home/u/.ssh/id_rsa`, `${filler('alpha', 3000)} password: hunter2`, `${filler('alpha', 3000)} see /srv/clients/acme/notes`];
+    const messages = withPastes([...secrets.map((s, k) => `${OUTSIDE} ${tag(s, k + 1)}`), `${OUTSIDE} PLAIN ${tag(filler('beta', 3000), 9)}`]);
+    const run = await compactPastes(messages, { env: { ...PASTES, OMC_JEV_COMPACT_PRIVATE_PATHS: '/srv/clients' } });
+    expect(run.requests).toHaveLength(1);
+    expect(run.requests[0].body.state.fragment.text).toContain('beta');
+    for (const c of run.calls.fetch) expect(JSON.stringify(c.body)).not.toMatch(/A1b2C3d4|\.ssh|hunter2|\/srv\/clients/);
+    for (const path of run.written) expect(run.files.get(path)).not.toMatch(/A1b2C3d4|\.ssh|hunter2|\/srv\/clients/);
+    expect(run.record.pastes).toMatchObject({ secret: 4, moved: 1 });
+    for (const s of secrets) expect(run.out.messages.some((m) => m.text.includes(s))).toBe(true);
+  });
+
+  it('a tag moves only between 2000 characters and the smaller of 30000 and OMC_JEV_EXCERPT_CHARS_COMPACTION; Jev never gets a cut tag', async () => {
+    const messages = withPastes([`${OUTSIDE} ${sized(1999)}`, `${OUTSIDE} ${sized(2000)}`, `${OUTSIDE} ${sized(4001)}`, `${OUTSIDE} ${sized(30001)}`]);
+    const byDefault = await compactPastes(messages);
+    expect(byDefault.requests.map((c) => c.body.state.fragment.text.length)).toEqual([2000]);
+    expect(byDefault.record.pastes).toMatchObject({ small: 1, too_long: 2, moved: 1 });
+    const raised = await compactPastes(messages, { env: { ...PASTES, OMC_JEV_EXCERPT_CHARS_COMPACTION: '100000' } });
+    expect(raised.requests.map((c) => c.body.state.fragment.text.length).sort((a, b) => b - a)).toEqual([4001, 2000]);
+    expect(raised.record.pastes).toMatchObject({ small: 1, too_long: 1, moved: 2 });
+    for (const c of [...byDefault.requests, ...raised.requests]) expect(c.body.state.fragment.chars).toBe(c.body.state.fragment.text.length);
+  });
+
+  it('asks about the largest four tags only; the rest stay', async () => {
+    const texts = [2500, 3500, 2600, 3900, 3100, 2200].map((n, k) => `${OUTSIDE} ${sized(n, k + 1)}`);
+    const run = await compactPastes(withPastes(texts));
+    expect(run.requests).toHaveLength(4);
+    expect(run.requests.map((c) => c.body.state.fragment.text.length).sort((a, b) => a - b)).toEqual([2600, 3100, 3500, 3900]);
+    expect(run.record.pastes).toMatchObject({ tags: 6, unasked: 2, asked: 4, moved: 4 });
+  });
+
+  it('shadow asks and counts but writes and changes nothing; active acts only while the point itself is active', async () => {
+    const text = `${OUTSIDE} ${sized(3000)}`;
+    const messages = withPastes([text]);
+    const off = await compactPastes(messages, { env: ACTIVE_ENV });
+    const shadow = await compactPastes(messages, { env: { ...ACTIVE_ENV, OMC_JEV_COMPACT_PASTES: 'shadow' } });
+    expect(shadow.requests).toHaveLength(1);
+    expect(shadow.written).toHaveLength(0);
+    expect(JSON.stringify(shadow.out.messages)).toBe(JSON.stringify(off.out.messages));
+    expect(shadow.record.pastes).toMatchObject({ mode: 'shadow', yes: 1, moved: 1, written: 0 });
+    expect(shadow.record.pastes).not.toHaveProperty('installed');
+    const pointShadow = await compactPastes(messages, { env: { ...PASTES, OMC_JEV: 'compaction' } });
+    expect(pointShadow.out).toBe(SUMMARY);
+    expect(pointShadow.written).toHaveLength(0);
+    expect(pointShadow.record.pastes).toMatchObject({ mode: 'shadow' });
+  });
+
+  it('only in the main loop, and not without the API form, a session id or a state directory', async () => {
+    const messages = withPastes([`${OUTSIDE} ${sized(3000)}`]);
+    const sub = await compactPastes(messages, { event: { agentId: 'sub-1' } });
+    expect(sub.requests).toHaveLength(0);
+    expect(sub.record).not.toHaveProperty('pastes');
+    const noDir = await compactPastes(messages, { env: { OMC_JEV: 'compaction:active', TYPESAFE_API_KEY: 'k', OMC_JEV_COMPACT_PASTES: 'active' } });
+    expect(noDir.requests).toHaveLength(0);
+    const noSession = await compactWith(messages, (fake) => { fake.$.session.id = async () => undefined; });
+    expect(noSession.calls.fetch.filter(isPasteRequest)).toHaveLength(0);
+    expect(noSession.record.pastes).toMatchObject({ reason: 'no_session', moved: 0 });
+  });
+
+  /** Like compactPastes, but `patch(fake)` may change the host's file interface or clock first. */
+  async function compactWith(messages, patch) {
+    const handlers = load();
+    const fake = fakeDollar({ env: PASTES, respond: jevSays(0.95), messages });
+    fake.$.session.messages = async (opts) => (opts?.as === 'api' ? apiOf(messages) : messages);
+    patch?.(fake);
+    const out = await handlers['session.compact'](fake.$, Object.freeze({ trigger: 'auto', messages }), summaryNext());
+    return { out, record: fake.records()[0], ...fake };
+  }
+  const inPastes = (path) => path.includes('/compaction-pastes/');
+
+  it('a file that cannot be written and read back whole in time leaves the tag: a write error, other content on read-back, a write that never ends', async () => {
+    const report = sized(3000);
+    const text = `${OUTSIDE} ${report}`;
+    const messages = withPastes([text]);
+    const stays = (run) => expect(userRow(run.out, OUTSIDE).text).toBe(text);
+    const refusing = await compactWith(messages, (fake) => {
+      const write = fake.$.fs.write;
+      fake.$.fs.write = (path, body) => (inPastes(path) ? Promise.reject(new Error('EACCES')) : write(path, body));
+    });
+    stays(refusing);
+    expect(refusing.record.pastes).toMatchObject({ yes: 1, write_failed: 1, written: 0, moved: 0, installed: false });
+    const garbling = await compactWith(messages, (fake) => {
+      const read = fake.$.fs.read;
+      fake.$.fs.read = async (path) => { const body = await read(path); return inPastes(path) ? `${body}!` : body; };
+    });
+    stays(garbling);
+    expect(garbling.record.pastes).toMatchObject({ write_failed: 1, moved: 0 });
+    // Two cleared tags and a write that never ends: the first stays after the cap, the second is not even tried. The clock is faked
+    // (timers of a second or more fire at once), so the test does not wait for the real host cap.
+    const two = withPastes([`${OUTSIDE} ${sized(3000, 1)}`, `${OUTSIDE} again ${sized(3100, 2)}`]);
+    let attempts = 0;
+    const stalled = await compactWith(two, (fake) => {
+      const write = fake.$.fs.write;
+      fake.$.fs.write = (path, body) => { if (!inPastes(path)) return write(path, body); attempts++; return new Promise(() => {}); };
+      fake.$.clock.after = (ms, fn) => { const t = setTimeout(fn, ms >= 1000 ? 50 : ms); return { cancel: () => clearTimeout(t) }; };
+    });
+    expect(attempts).toBe(1);
+    expect(stalled.record.pastes).toMatchObject({ yes: 2, timed_out: 2, written: 0, moved: 0 });
+    expect(stalled.record.result).toBe('jev');
+    expect(userRow(stalled.out, OUTSIDE).text).toBe(`${OUTSIDE} ${sized(3000, 1)}`);
+  });
+
+  it('names the file after the sha-256 of the tag: an identical file is reused without a write, a broken one is written again', async () => {
+    const report = sized(3000);
+    const messages = withPastes([`${OUTSIDE} ${report}`]);
+    const path = `${DIR}/${createHash('sha256').update(report).digest('hex').slice(0, 32)}.txt`;
+    const reused = await compactWith(messages, (fake) => fake.files.set(path, report));
+    expect(reused.record.pastes).toMatchObject({ reused: 1, written: 0, moved: 1, installed: true });
+    expect(reused.calls.write).toBe(1); // the record
+    const broken = await compactWith(messages, (fake) => fake.files.set(path, report.slice(0, 100)));
+    expect(broken.files.get(path)).toBe(report);
+    expect(broken.record.pastes).toMatchObject({ reused: 0, written: 1, moved: 1 });
+  });
+
+  it('writes no file when the compaction ends in the built-in summary, and the scoring request has the first claim on OMC_JEV_MAX_REQUESTS', async () => {
+    const messages = withPastes([`${OUTSIDE} ${sized(3000)}`]);
+    const scoringFails = (body) => (body.questions.pasted ? jevSays(0.95)(body) : { ok: false, status: 500, headers: {}, text: '' });
+    const failed = await compactPastes(messages, { jev: scoringFails });
+    expect(failed.out).toBe(SUMMARY);
+    expect(failed.written).toHaveLength(0);
+    expect(failed.record.pastes).toMatchObject({ yes: 1, moved: 0, installed: false });
+    const capped = await compactPastes(messages, { env: { ...PASTES, OMC_JEV_MAX_REQUESTS: '1' } });
+    expect(capped.calls.fetch).toHaveLength(1);
+    expect(capped.requests).toHaveLength(0);
+    expect(capped.record).toMatchObject({ result: 'jev' });
+    expect(capped.record.pastes).toMatchObject({ held: 1, moved: 0 });
+  });
+
+  it('a trace holds no tag, even when the pasted text held tags of its own, so the next compaction leaves it alone', async () => {
+    const text = `${OUTSIDE} <pasted_content id="1"><pasted_content id="9">${filler('alpha', 2900)}</pasted_content></pasted_content>`;
+    const run = await compactPastes(withPastes([text]));
+    const row = userRow(run.out, OUTSIDE);
+    expect(row.text).toContain('[pasted text moved at compaction');
+    expect(row.text).toContain('\\u003cpasted_content id=\\"9\\">alpha');
+    expect(pasteTags(row.text)).toEqual([]);
+    expect(row.text).not.toContain('<pasted_content');
+  });
+
+  it('pasteTags finds closed tags only, ends each at the first closing tag, never nests or joins them, and is linear on hostile text', () => {
+    expect(pasteTags('no tags')).toEqual([]);
+    expect(pasteTags('<pasted_content id="1">open only')).toEqual([]);
+    expect(pasteTags('<pasted_content_x>no</pasted_content_x>')).toEqual([]);
+    const text = 'a<pasted_content>one</pasted_content>b<pasted_content id="2">two <pasted_content>x</pasted_content> tail</pasted_content>';
+    const tags = pasteTags(text);
+    expect(tags.map((t) => text.slice(t.start, t.end))).toEqual(['<pasted_content>one</pasted_content>', '<pasted_content id="2">two <pasted_content>x</pasted_content>']);
+    expect(tags.map((t) => text.slice(t.from, t.to))).toEqual(['one', 'two <pasted_content>x']);
+    const started = performance.now();
+    expect(pasteTags('<pasted_content'.repeat(30000))).toEqual([]);
+    expect(pasteTags('<pasted_content>'.repeat(30000))).toEqual([]);
+    expect(performance.now() - started).toBeLessThan(5000);
   });
 });

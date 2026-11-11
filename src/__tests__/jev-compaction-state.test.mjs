@@ -14,7 +14,7 @@ import { fileURLToPath } from 'node:url';
 import { afterAll, describe, expect, it } from 'vitest';
 
 import { maskSecrets } from '../../scripts/lib/jev-mask.mjs';
-import { afterSessionStart, archiveDays, foldRegistry, MISSING_MESSAGE, recordCompactionState, REGISTRY_CHARS, registryPath, renderRegistry, sweepArchive } from '../../scripts/lib/jev-compaction-state.mjs';
+import { afterSessionStart, archiveDays, foldRegistry, MISSING_MESSAGE, pastesDays, recordCompactionState, REGISTRY_CHARS, registryPath, renderRegistry, sweepArchive, sweepPastes } from '../../scripts/lib/jev-compaction-state.mjs';
 
 const root = join(fileURLToPath(import.meta.url), '..', '..', '..');
 const NODE = process.execPath;
@@ -189,6 +189,80 @@ describe('jev-compaction-state: SessionStart', () => {
     afterSessionStart({ session_id: sid, source: 'startup' }, {}, env);
     expect(readdirSync(spool)).toEqual([]);
     expect(existsSync(registryPath('stale', undefined, env))).toBe(false);
+  });
+});
+
+describe('jev-compaction-state: pasted text kept for the traces of the module (OMC_JEV_COMPACT_PASTES)', () => {
+  const DAY = 24 * 3600_000;
+  const pastesRoot = (env) => join(env.OMC_JEV_LOG_DIR, 'compaction-pastes');
+  /** A session directory with one file last changed `ageDays` days ago. */
+  function pastes(env, session, ageDays, name = 'a1b2.txt') {
+    const dir = join(pastesRoot(env), session);
+    mkdirSync(dir, { recursive: true });
+    const file = join(dir, name);
+    writeFileSync(file, 'pasted');
+    const when = new Date(Date.now() - ageDays * DAY);
+    utimesSync(file, when, when);
+    utimesSync(dir, when, when);
+    return dir;
+  }
+
+  it('OMC_JEV_PASTES_DAYS is a whole number of days from 1 to 99999, 14 when unset; anything else keeps everything', () => {
+    expect(pastesDays({})).toBe(14);
+    expect(pastesDays({ OMC_JEV_PASTES_DAYS: '' })).toBe(14);
+    expect(pastesDays({ OMC_JEV_PASTES_DAYS: ' 3 ' })).toBe(3);
+    expect(pastesDays({ OMC_JEV_PASTES_DAYS: '99999' })).toBe(99999);
+    for (const bad of ['0', '-1', '1.5', '01', '100000', 'abc', '3d', '1e2', '+3']) expect(pastesDays({ OMC_JEV_PASTES_DAYS: bad })).toBe(0);
+  });
+
+  it('removes the session directories whose newest file is older than the days; keeps newer ones, the current session (and marks it), and links', () => {
+    const { env } = setup();
+    const old = pastes(env, 'old-session', 20);
+    const young = pastes(env, 'young-session', 3);
+    const mixed = pastes(env, 'mixed-session', 20, 'old.txt');
+    writeFileSync(join(mixed, 'new.txt'), 'fresh');
+    const mine = pastes(env, 'my-session', 40);
+    const target = join(tmp, `link-target-${n}`);
+    mkdirSync(target, { recursive: true });
+    let linked = true;
+    try { symlinkSync(target, join(pastesRoot(env), 'linked-session'), 'dir'); } catch { linked = false; }
+    expect(sweepPastes('my-session', Date.now(), env)).toBe(1);
+    expect(existsSync(old)).toBe(false);
+    expect(existsSync(young)).toBe(true);
+    expect(existsSync(mixed)).toBe(true);
+    expect(existsSync(mine)).toBe(true);
+    expect(Date.now() - statSync(join(mine, '.compaction')).mtimeMs).toBeLessThan(DAY);
+    expect(existsSync(join(mine, 'a1b2.txt'))).toBe(true);
+    if (linked) expect(existsSync(target)).toBe(true);
+    expect(sweepPastes('my-session', Date.now() + 30 * DAY, { ...env, OMC_JEV_PASTES_DAYS: '0' })).toBe(0);
+    expect(existsSync(young)).toBe(true);
+    expect(sweepPastes('my-session', Date.now() + 30 * DAY, { ...env, OMC_JEV_PASTES_DAYS: '5' })).toBe(2);
+    expect(existsSync(young)).toBe(false);
+    expect(existsSync(mine)).toBe(true);
+  });
+
+  it('removes and touches nothing without a session id, and does not fail without the directory', () => {
+    const { env } = setup();
+    const old = pastes(env, 'old-session', 20);
+    expect(sweepPastes(undefined, Date.now(), env)).toBe(0);
+    expect(sweepPastes('', Date.now(), env)).toBe(0);
+    expect(existsSync(old)).toBe(true);
+    expect(sweepPastes('x', Date.now(), { OMC_JEV_LOG_DIR: join(tmp, 'no-such-state-dir') })).toBe(0);
+  });
+
+  it('SessionStart sweeps at startup, on resume and on clear, but not after a compaction and not when the point is not named', () => {
+    const { env, sid } = setup();
+    const old = pastes(env, 'old-session', 20);
+    afterSessionStart({ session_id: sid, source: 'compact' }, {}, env);
+    expect(existsSync(old)).toBe(true);
+    afterSessionStart({ session_id: sid, source: 'startup' }, {}, { ...env, OMC_JEV: 'all:active' });
+    expect(existsSync(old)).toBe(true);
+    for (const source of ['startup', 'resume', 'clear']) {
+      const dir = pastes(env, `old-${source}`, 20);
+      afterSessionStart({ session_id: sid, source }, {}, env);
+      expect(existsSync(dir)).toBe(false);
+    }
+    expect(existsSync(old)).toBe(false);
   });
 });
 

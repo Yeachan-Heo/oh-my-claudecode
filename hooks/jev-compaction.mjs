@@ -53,6 +53,30 @@
  * blocks are masked), and a line cut at a head or tail edge that does not end within LINE_EDGE_CHARS as
  * LONG_LINE.
  *
+ * Pasted text (OMC_JEV_COMPACT_PASTES=off|shadow|active; off when unset or anything else; main loop only). A
+ * `<pasted_content>` tag in an older user message can move to a file and leave a trace: its length, the path, and its first
+ * PASTE_TRACE_HEAD and last PASTE_TRACE_TAIL characters word for word. The tag says that the user pasted the text, not who wrote
+ * it (notes, mails and commands of the user's own are pasted too), so nothing moves on the tag alone; no sentence of the user
+ * may leave the conversation. A tag moves only if every one of these holds:
+ * - it is a whole closed tag between PASTE_MIN_CHARS and the smaller of PASTE_MAX_CHARS and OMC_JEV_EXCERPT_CHARS_COMPACTION
+ *   characters, and moves by itself: neighbouring tags are never joined into one fragment, and nothing outside a tag is ever
+ *   removed (a quotation with the user's comment in the same paragraph, a code block, a list);
+ * - its message holds at least PASTE_OWN_MIN_CHARS characters of other words of the user: a message that is nothing but the
+ *   paste (or the paste and a keyword) sends that text as the user's own instruction and stays whole;
+ * - the message is not the first or the newest user message, lies before the last KEEP_LAST messages and the open tool loop,
+ *   and holds no image or file block (the API form of the conversation has to be available to tell);
+ * - it names no secret or private path and masking leaves it unchanged (it goes neither to Jev nor to a file otherwise);
+ * - Jev, who gets the whole tag (one request per tag, at most PASTE_MAX_ASKS of the largest, so every removed character was
+ *   read), says yes with a probability of PASTE_YES or more to "is all of it pasted material, none of it the user's own writing";
+ * - its file was written and read back whole, and the trace is shorter than the tag.
+ * Anything else, a failed or unanswered request included, leaves the tag in the conversation. Tool-result decisions do not depend
+ * on this: the results kept or removed are the same with the switch off, and a compaction that ends in the built-in summary
+ * moves nothing (the files are written only once the module's own result is certain). `shadow` asks and counts but writes
+ * nothing and changes nothing; `active` acts only while the point itself is active. Files:
+ * <state dir>/compaction-pastes/<session>/<sha256 of the tag, 32 hex>.txt, named by their content so two compactions write the
+ * same text; scripts/lib/jev-compaction-state.mjs removes old session directories (OMC_JEV_PASTES_DAYS). The record gets
+ * `pastes` with the counts (tags, why they stayed, requests, answers, files, characters moved, installed).
+ *
  * Shared breaker and request limit (OMC_JEV_BREAKER=1, OMC_JEV_MAX_RPM=<n>): the same files and rules as
  * the script side (scripts/lib/jev-breaker.mjs, see its header), under the same state directory and
  * scope. A hooks module cannot import Node, so the file work goes through $.fs; the rules are mirrors.
@@ -160,6 +184,28 @@ const ARCHIVE_ID = /^[A-Za-z0-9_-]{1,80}$/;
 // What a compaction writes in place of a result: a later compaction must not archive these as results.
 const SHORT_NOTE = '[result shortened at compaction: ';
 const NON_TEXT_NOTE = '[non-text result (image or file) removed at compaction]';
+// Pasted text (OMC_JEV_COMPACT_PASTES, see the header). A tag shorter than PASTE_MIN_CHARS would save little of its trace;
+// the cap keeps masking (quadratic patterns) and the request bounded. A message with fewer than PASTE_OWN_MIN_CHARS characters
+// of other words is the paste itself. Jev's "no part is the user's own" must reach PASTE_YES. A trace keeps the first and last
+// characters word for word (what comes at the end of a paste is often what the user typed last).
+const PASTE_MIN_CHARS = 2000;
+const PASTE_MAX_CHARS = 30000;
+const PASTE_OWN_MIN_CHARS = 20;
+const PASTE_YES = 0.8;
+const PASTE_MAX_ASKS = 4;
+const PASTE_TRACE_HEAD = 200;
+const PASTE_TRACE_TAIL = 300;
+const PASTE_QUESTIONS = {
+  pasted: {
+    type: 'noul',
+    instructions:
+      'Is state.fragment.text entirely text that the user pasted from elsewhere (an answer of another AI, a document, a log, the output of a command), with no part of it written by the user themselves: no instruction to the assistant, decision, answer, opinion, comment, question, note, draft or message of their own?',
+    criteria: {
+      true: 'Everything in it is pasted material; nothing in it is the user\'s own writing.',
+      false: 'The user wrote at least a part of it (even one sentence or a comment between quotations), or it cannot be told.',
+    },
+  },
+};
 const DEFAULT_ENDPOINT = 'https://api.typesafe.ai/v1/systemone';
 const JEV_MODEL = 'jev-latest';
 // Pause after a failed request, by status only (a response body is read only for the retry time of a
@@ -435,6 +481,7 @@ async function readConfig($) {
     OMC_JEV_COMPACT_TOAST: await $.env.get('OMC_JEV_COMPACT_TOAST'),
     OMC_JEV_COMPACT_PRIVATE_PATHS: await $.env.get('OMC_JEV_COMPACT_PRIVATE_PATHS'),
     OMC_JEV_COMPACT_ARCHIVE: await $.env.get('OMC_JEV_COMPACT_ARCHIVE'),
+    OMC_JEV_COMPACT_PASTES: await $.env.get('OMC_JEV_COMPACT_PASTES'),
     OMC_JEV_BREAKER: await $.env.get('OMC_JEV_BREAKER'),
     OMC_JEV_MAX_RPM: await $.env.get('OMC_JEV_MAX_RPM'),
     OMC_JEV_BREAKER_DIR: await $.env.get('OMC_JEV_BREAKER_DIR'),
@@ -494,6 +541,8 @@ async function readConfig($) {
     target: fraction(env.OMC_JEV_COMPACT_TARGET, DEFAULT_TARGET, 0.1, 0.9),
     toast: String(env.OMC_JEV_COMPACT_TOAST ?? '').trim() === '1',
     privatePaths,
+    pastes: pasteMode(env.OMC_JEV_COMPACT_PASTES),
+    pasteDir: stateDir ? `${stateDir}/compaction-pastes` : undefined,
   };
 }
 
@@ -558,7 +607,7 @@ async function readText($, path) {
 async function readTextSafe($, path) {
   try {
     return { text: await $.fs.read(path) };
-  } catch (err) {
+  } catch {
     try {
       const exists = await $.fs.exists(path);
       if (!exists) return { missing: true };
@@ -1851,6 +1900,205 @@ async function archiveResults($, dir, candidates, privatePaths, leftMs) {
   return summary;
 }
 
+// --- pasted text (OMC_JEV_COMPACT_PASTES) ----------------------------------------------------------
+// The rule is in the header: a whole tag moves only when Jev, who read all of it, says that no part of it is the user's own writing.
+
+/** OMC_JEV_COMPACT_PASTES as `off` (unset and any other value), `shadow` or `active`; case does not matter. */
+export function pasteMode(raw) {
+  const value = String(raw ?? '').trim().toLowerCase();
+  return value === 'shadow' || value === 'active' ? value : 'off';
+}
+
+/**
+ * The closed <pasted_content> tags of a text, in order: {start, end} of the whole tag and {from, to} of what is inside it.
+ * An unclosed tag is no tag, and a tag ends at the first closing tag, so tags never nest and never join.
+ */
+export function pasteTags(text) {
+  const open = /<pasted_content\b[^>]{0,200}>/g;
+  const close = /<\/pasted_content\b[^>]{0,200}>/g;
+  const tags = [];
+  for (let at = 0; ;) {
+    open.lastIndex = at;
+    const o = open.exec(text);
+    if (!o) break;
+    close.lastIndex = o.index + o[0].length;
+    const c = close.exec(text);
+    if (!c) break;
+    at = c.index + c[0].length;
+    tags.push({ start: o.index, end: at, from: o.index + o[0].length, to: c.index });
+  }
+  return tags;
+}
+
+// A `<` in an excerpt is written as the JSON unicode escape of `<`, so a tag inside the excerpt is no tag when the next compaction looks for tags.
+const quoted = (text) => JSON.stringify(text).replace(/</g, '\\u003c');
+/** What replaces a tag of `chars` characters: the file and the first and last characters of what is inside the tag, word for word. */
+export function pasteTrace(chars, inner, path) {
+  return `[pasted text moved at compaction: ${chars} chars, full text in ${path}; start: ${quoted(inner.slice(0, PASTE_TRACE_HEAD))}; end: ${quoted(inner.slice(-PASTE_TRACE_TAIL))}]`;
+}
+
+const sha256Hex = async (text) =>
+  Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(text))), (byte) => byte.toString(16).padStart(2, '0')).join('');
+
+// Rows of user messages that the host would rebuild without their image or file: an API user message holding a block besides text
+// and tool results is matched to its row by text (as much of it as is text, without [Image #N] and carriage returns). `unmatched`:
+// such a message with text that matches no row, so nothing can be told about any row.
+const rowText = (s) => String(s ?? '').replace(/\r\n?/g, '\n').replace(/\[Image #\d+\]/g, '').trim();
+function nonTextUserRows(messages, api) {
+  const withBlock = [];
+  for (const a of api) {
+    if (a?.role !== 'user' || !Array.isArray(a.content)) continue;
+    const blocks = a.content.filter((b) => b && typeof b === 'object');
+    if (blocks.some((b) => b.type !== 'text' && b.type !== 'tool_result')) {
+      withBlock.push(blocks.filter((b) => b.type === 'text' && typeof b.text === 'string').map((b) => rowText(b.text)).filter(Boolean));
+    }
+  }
+  const rows = new Set();
+  const matched = new Set();
+  messages.forEach((m, i) => {
+    const text = rowText(m.text);
+    if (m.role !== 'user' || !text) return;
+    withBlock.forEach((texts, k) => { if (texts.some((x) => text.includes(x) || x.includes(text))) { rows.add(i); matched.add(k); } });
+  });
+  return { rows, unmatched: withBlock.some((texts, k) => texts.length > 0 && !matched.has(k)) };
+}
+
+// The tags to ask about, the largest PASTE_MAX_ASKS that pass every check: [{row, tag, text, inner}]. What stays, and why, is counted in
+// `stats`; a reason says that nothing can move.
+function planPastes(messages, api, keepFrom, cfg, sessionId, stats) {
+  if (!cfg.pasteDir) { stats.reason = 'no_state_dir'; return []; }
+  if (!sessionId) { stats.reason = 'no_session'; return []; }
+  if (!api) { stats.reason = 'no_api_form'; return []; }
+  const images = nonTextUserRows(messages, api);
+  if (images.unmatched) { stats.reason = 'image_unmatched'; return []; }
+  const users = [];
+  messages.forEach((m, i) => { if (userWords(m)) users.push(i); });
+  const before = Math.min(keepFrom, Math.max(1, messages.length - KEEP_LAST));
+  const limit = Math.min(PASTE_MAX_CHARS, cfg.excerptChars);
+  const found = [];
+  // The first and the newest user message stay as they are.
+  for (const row of users.slice(1, -1)) {
+    if (row >= before || images.rows.has(row)) continue;
+    const text = messages[row].text;
+    const tags = pasteTags(text);
+    stats.tags += tags.length;
+    if (!tags.length) continue;
+    let rest = '';
+    let at = 0;
+    for (const t of tags) { rest += text.slice(at, t.start); at = t.end; }
+    if ((rest + text.slice(at)).replace(HOST_BLOCK, '').replace(/\s+/g, '').length < PASTE_OWN_MIN_CHARS) { stats.kept_whole += tags.length; continue; }
+    for (const tag of tags) {
+      const size = tag.end - tag.start;
+      if (size < PASTE_MIN_CHARS) { stats.small++; continue; }
+      if (size > limit) { stats.too_long++; continue; }
+      const whole = text.slice(tag.start, tag.end);
+      if (namesSecretPath(whole, cfg.privatePaths)) { stats.secret++; continue; }
+      found.push({ row, tag, text: whole, inner: text.slice(tag.from, tag.to) });
+    }
+  }
+  // Masking has quadratic patterns, so it runs on the largest tags only, until there are enough.
+  const jobs = [];
+  for (const job of found.sort((a, b) => b.text.length - a.text.length)) {
+    if (jobs.length >= PASTE_MAX_ASKS) stats.unasked++;
+    else if (maskSecrets(job.text) !== job.text) stats.secret++;
+    else jobs.push(job);
+  }
+  return jobs;
+}
+
+// The probability that no part of the tag is the user's own writing, from Jev's answer; undefined when there is none.
+// The tag goes whole (never cut, so every character that moves was read), as one request within the module's limits.
+async function askPaste($, cfg, text, deadline) {
+  const admission = await admitRequest($, cfg, deadline);
+  if (admission.skip) return { held: true };
+  const t0 = Date.now();
+  if (t0 >= deadline) { session.requests--; return { held: true }; }
+  const timeoutMs = Math.min(REQUEST_MS, deadline - t0);
+  const r = await withDeadline($, askJev($, cfg, { fragment: { text, chars: text.length } }, PASTE_QUESTIONS), timeoutMs);
+  const recording = recordSharedFailure($, cfg, { ...r, short: timeoutMs < 1000 });
+  if (Date.now() < deadline) await withDeadline($, recording, deadline - Date.now());
+  if (!r.value) { noteFailures([classifyFailure(r)], Date.now()); return {}; }
+  const noul = r.value.pasted?.noul;
+  return { p: typeof noul === 'boolean' ? Number(noul) : typeof noul === 'number' && noul >= 0 && noul <= 1 ? noul : undefined };
+}
+
+// Asks about the tags and marks the cleared ones (`yes`). Never rejects: a tag that cannot be asked about stays.
+async function askPastes($, cfg, jobs, sessionId, stats, deadline) {
+  await Promise.all(jobs.map(async (job) => {
+    try {
+      job.path = `${cfg.pasteDir}/${safeName(sessionId)}/${(await sha256Hex(job.text)).slice(0, 32)}.txt`;
+      job.trace = pasteTrace(job.text.length, job.inner, job.path);
+      if (job.trace.length >= job.text.length) { stats.too_short++; return; }
+      const r = await askPaste($, cfg, job.text, deadline);
+      if (r.held) { stats.held++; return; }
+      stats.asked++;
+      if (r.p === undefined) { stats.unanswered++; return; }
+      if (r.p >= PASTE_YES) { stats.yes++; job.yes = true; } else stats.no++;
+    } catch {
+      stats.unanswered++;
+    }
+  }));
+}
+
+// Plans the tags and starts the requests about them; `record.pastes` holds the counts from here on. `active` needs the point itself active.
+function startPastes($, cfg, record, messages, api, keepFrom, deadline) {
+  const mode = cfg.pastes === 'active' && cfg.mode === 'active' ? 'active' : 'shadow';
+  const stats = { mode, tags: 0, small: 0, kept_whole: 0, too_long: 0, secret: 0, too_short: 0, unasked: 0, asked: 0, held: 0, yes: 0, no: 0, unanswered: 0, written: 0, reused: 0, write_failed: 0, timed_out: 0, moved: 0, moved_chars: 0, trace_chars: 0, ...(mode === 'active' ? { installed: false } : {}) };
+  record.pastes = stats;
+  let jobs = [];
+  try { jobs = planPastes(messages, api, keepFrom, cfg, record.session_id, stats); } catch { stats.error = 1; }
+  return { stats, jobs, asks: askPastes($, cfg, jobs, record.session_id, stats, deadline) };
+}
+
+// A host file call capped at HOST_MS and at the time left; after one that hit its cap none starts.
+async function fsCall($, gate, work) {
+  const ms = Math.min(HOST_MS, gate.deadline - Date.now());
+  if (gate.stalled || ms <= 0) return { timeout: true };
+  const r = await withDeadline($, Promise.resolve().then(work), ms);
+  if (r.timeout) gate.stalled = true;
+  return r;
+}
+
+// Writes the text to the file and reads it back: 'written', 'reused' (the file held it already), or why not: 'timeout', 'write', 'read'.
+async function savePaste($, gate, path, text) {
+  const old = await fsCall($, gate, () => $.fs.read(path));
+  if (old.timeout) return 'timeout';
+  if (old.value === text) return 'reused';
+  const put = await fsCall($, gate, () => $.fs.write(path, text));
+  if (!('value' in put)) return put.timeout ? 'timeout' : 'write';
+  const back = await fsCall($, gate, () => $.fs.read(path));
+  if (back.timeout) return 'timeout';
+  return back.value === text ? 'written' : 'read';
+}
+
+// Once the module's own result is certain: writes the files of the tags Jev cleared (active) and returns the rebuilt user rows, each
+// by the row it replaces. A tag stays when its file could not be written and read back whole in time.
+async function movePastes($, mode, jobs, messages, stats, deadline) {
+  const gate = { deadline, stalled: false };
+  const moved = new Map();
+  for (const job of jobs.filter((j) => j.yes)) {
+    if (mode === 'active') {
+      const saved = await savePaste($, gate, job.path, job.text);
+      if (saved === 'written' || saved === 'reused') stats[saved]++;
+      else { stats[saved === 'timeout' ? 'timed_out' : 'write_failed']++; continue; }
+    }
+    stats.moved++;
+    stats.moved_chars += job.text.length;
+    stats.trace_chars += job.trace.length;
+    moved.set(job.row, [...(moved.get(job.row) ?? []), job]);
+  }
+  const swaps = new Map();
+  if (mode !== 'active') return swaps;
+  for (const [row, list] of moved) {
+    const m = messages[row];
+    let text = '';
+    let at = 0;
+    for (const j of list.sort((a, b) => a.tag.start - b.tag.start)) { text += m.text.slice(at, j.tag.start) + j.trace; at = j.tag.end; }
+    swaps.set(m, { role: m.role, text: text + m.text.slice(at), toolUses: m.toolUses || [] });
+  }
+  return swaps;
+}
+
 // Decides one compaction: {messages} to install or {fallback: reason}. Fills `record`; never calls next.
 async function decide($, e, cfg, record, started) {
   const messages = Array.isArray(e.messages) ? e.messages : [];
@@ -1955,7 +2203,9 @@ async function decide($, e, cfg, record, started) {
     if (!runs.length) return { fallback: held.mode === 'circuit-open' ? 'breaker_open' : held.mode === 'process-cap' ? 'cap' : held.mode === 'deadline' ? 'timeout' : 'rpm' };
   }
   record.requests = runs.length;
-  const results = await Promise.all(runs);
+  // Pasted text: the requests go out next to the scoring ones; the files wait for the result (below).
+  const pasted = cfg.pastes === 'off' || e.agentId !== undefined ? undefined : startPastes($, cfg, record, messages, api, keepFrom, deadline);
+  const [results] = await Promise.all([Promise.all(runs), pasted?.asks]);
   record.jev_ms = results.map((r) => r.ms);
   let answered = 0;
   const failures = [];
@@ -2005,8 +2255,12 @@ async function decide($, e, cfg, record, started) {
     Object.assign(record, { archive_planned: plan.planned, archive_skipped: plan.skipped });
   }
   const stats = {};
-  const built = build(messages, candidates, keepFrom, group, stats);
+  let built = build(messages, candidates, keepFrom, group, stats);
   if (!pairingOk(messages, built)) return { fallback: 'build_error' };
+  if (pasted) {
+    const swaps = await movePastes($, pasted.stats.mode, pasted.jobs, messages, pasted.stats, deadline).catch(() => { pasted.stats.error = 1; return new Map(); });
+    if (swaps.size) { built = built.map((m) => swaps.get(m) ?? m); pasted.stats.installed = true; }
+  }
   const after = built.reduce((s, m) => s + messageChars(m), 0);
   const hist = [0, 0, 0, 0];
   for (const c of asked) if (c.answered) hist[Math.min(3, Math.round(c.score * 3))]++;
