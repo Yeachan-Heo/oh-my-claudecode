@@ -321,6 +321,23 @@ describe('team task storage integrity', () => {
     expect(config.next_task_id).toBe(3);
   });
 
+  it('accepts a dependency on the orphaned id the lagging counter still points at', async () => {
+    await writeTeamConfig(cwd);
+    // Crash debris again: the file for id 1 exists while next_task_id is
+    // still 1. Depending on that orphan must not be misread as a self-link
+    // against the counter-derived id; the new task lands on the next free id.
+    await writeClaimedTask(cwd, '1');
+
+    const created = await teamCreateTask(teamName, {
+      subject: 'Follow-up', description: 'Waits on the orphaned task', status: 'pending',
+      blocked_by: ['1'],
+    }, cwd);
+
+    expect(created).toMatchObject({ id: '2', status: 'pending', blocked_by: ['1'] });
+    const config = JSON.parse(await readFile(join(teamRoot(cwd), 'config.json'), 'utf8'));
+    expect(config.next_task_id).toBe(3);
+  });
+
   it('persists create dependencies and keeps updates canonical', async () => {
     await writeTeamConfig(cwd);
     const predecessor = await teamCreateTask(teamName, {

@@ -506,7 +506,12 @@ export async function teamCreateTask(
   };
   validateTaskDependencies(requestedDependencies, 'invalid_task_dependencies');
   const preflightConfig = await teamReadConfig(teamName, cwd);
-  if (preflightConfig?.next_task_id !== undefined) {
+  if (preflightConfig?.next_task_id !== undefined
+    // When the counter's own file already exists (crash debris), probing
+    // below advances past it, so the counter is not a reliable predictor of
+    // the assigned id and a self-link against it may be a valid dependency
+    // on the orphan. Only preflight self-links the counter can still know.
+    && !existsSync(canonicalTaskFilePath(teamName, String(preflightConfig.next_task_id), cwd))) {
     validateTaskDependencies({
       ...requestedDependencies,
       id: String(preflightConfig.next_task_id),
