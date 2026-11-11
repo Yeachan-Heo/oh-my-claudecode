@@ -448,4 +448,54 @@ describe('writeRepaired / repairTranscript', () => {
     copyFileSync(path, copy);
     expect(repairTranscript(copy).rowsToRepair).toBe(0);
   });
+
+  it('preserves mode correctly with umask', () => {
+    // Set umask to 022, then create a file that will have mode 0644 (0666 - 022).
+    const oldUmask = process.umask(0o022);
+    try {
+      const { path } = writeTranscript(compactedTranscript());
+      // Verify the file was created with the umask-affected mode.
+      let stat = statSync(path);
+      const originalMode = stat.mode & 0o777;
+      expect(originalMode).toBe(0o644);
+      // Run repair and verify the mode is preserved.
+      const report = repairTranscript(path, { write: true });
+      expect(report.written).toBe(true);
+      stat = statSync(path);
+      const repairedMode = stat.mode & 0o777;
+      expect(repairedMode).toBe(originalMode);
+    } finally {
+      process.umask(oldUmask);
+    }
+  });
+});
+
+describe('large piped reports', () => {
+  it('fully drains large JSON output when spawned via CLI', () => {
+    // Generate a transcript with many fixes to create a large JSON report that exceeds typical pipe buffers.
+    const lines = [
+      '{this line is not json',
+      row('user', 1, null, userMessage('start')),
+    ];
+    // Create 20 messages with server_tool_use blocks that will be off-chain to maximize repair fixes.
+    for (let i = 2; i <= 1000; i += 1) {
+      lines.push(row('assistant', i, i - 1 === 1 ? 1 : i - 1, assistant(`msg_01${'A'.repeat(20)}${String(i).padStart(3, '0')}`, block.server(`srvtoolu_${String(i).padStart(5, '0')}`))));
+    }
+    // Add chain leaf and compaction boundary.
+    lines.push(row('user', 1001, 1000, userMessage('end')));
+    lines.push(row('system', 1002, null, null, { subtype: 'compact_boundary', logicalParentUuid: `00000000-0000-4000-8000-${String(1001).padStart(12, '0')}` }));
+    // Add duplicate rows to trigger repairs.
+    for (let i = 2; i <= 1000; i += 1) {
+      lines.push(row('assistant', 1002 + i, 1002 + i - 1, assistant(`msg_01${'A'.repeat(20)}${String(i).padStart(3, '0')}`, block.server(`srvtoolu_${String(i).padStart(5, '0')}`))));
+    }
+    const { path } = writeTranscript(`${lines.join('\n')}\n`);
+    const result = run(path, '--json');
+    expect(result.code).toBe(1); // check only, not repaired
+    // Parse the JSON and verify it's complete and not truncated.
+    const reports = JSON.parse(result.out);
+    expect(Array.isArray(reports)).toBe(true);
+    expect(reports[0].path).toBe(path);
+    // The 20,000-fix scenario from the finding generates ~2.8MB JSON; ensure we get a significant fix count.
+    expect(reports[0].rowsToRepair).toBeGreaterThan(100);
+  });
 });
