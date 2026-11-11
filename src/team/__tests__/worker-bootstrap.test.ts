@@ -351,6 +351,13 @@ describe('worker-bootstrap', () => {
       expect(overlay).not.toContain('Read your task file at');
     });
 
+    it('tells long-running workers how to renew the claim before the 15-minute lease lapses', () => {
+      const overlay = generateWorkerOverlay(baseParams);
+      expect(overlay).toContain('team api renew-task-claim --input');
+      expect(overlay).toContain('claim_token');
+      expect(overlay).toContain('renew its claim before the 15-minute lease lapses');
+    });
+
     it('renders required task versions in ordinary and adopted checkpoint commands', () => {
       expect(generateWorkerOverlay(baseParams)).toContain('\\"task_version\\":<current_task_version>');
       const recovery = renderRecoveryContinuationInstruction({ teamName: 'test-team', workerName: 'worker-1',
