@@ -5,15 +5,15 @@
   "provenance": {
     "base": "05c800f40d1ad53b42a78609d2667ef4f726808b",
     "planningHead": "0a91273e61dbbd47eb0af4c02844409251e08398",
-    "head": "2b2d758f1ba9e72fcbe1c54fc11d8b5ffadd9381",
-    "sourceSha256": "3a755ab79c320c39ac47afd32b16eb585d0c2273a07758895c1b040df7533cdf",
+    "head": "56d4f7e502fbc0495a65dbe59df2f746e2b4494f",
+    "sourceSha256": "c2967d857014bd098afd32461629f058e2eee9edf6aea952507d19ef47136a77",
     "generatedAt": null,
     "generator": "scripts/generate-inventory-graph.mjs"
   },
   "base": "05c800f40d1ad53b42a78609d2667ef4f726808b",
   "planningHead": "0a91273e61dbbd47eb0af4c02844409251e08398",
-  "head": "2b2d758f1ba9e72fcbe1c54fc11d8b5ffadd9381",
-  "sourceSha256": "3a755ab79c320c39ac47afd32b16eb585d0c2273a07758895c1b040df7533cdf",
+  "head": "56d4f7e502fbc0495a65dbe59df2f746e2b4494f",
+  "sourceSha256": "c2967d857014bd098afd32461629f058e2eee9edf6aea952507d19ef47136a77",
   "counts": {
     "public": {
       "skills": 84,
@@ -23,25 +23,25 @@
       "total": 133
     },
     "internal": {
-      "hookFiles": 339,
+      "hookFiles": 342,
       "featureFiles": 95,
       "toolFiles": 65,
       "libFiles": 49,
       "templateHooks": 25,
-      "srcFiles": 1469,
-      "total": 1494
+      "srcFiles": 1474,
+      "total": 1499
     },
     "generated": {
-      "distFiles": 5651,
+      "distFiles": 5639,
       "bridgeFiles": 8,
-      "total": 5659
+      "total": 5647
     },
     "prompt": {
       "promptLikeFiles": 63
     },
     "skills": 84,
     "commands": 21,
-    "hookFiles": 339,
+    "hookFiles": 342,
     "workflows": 8,
     "agentDefinitions": 18,
     "promptLikeFiles": 63
@@ -288,7 +288,9 @@
       "src/hooks/jev/__tests__/log-context.test.ts",
       "src/hooks/jev/__tests__/log-rotation.test.ts",
       "src/hooks/jev/__tests__/points-wire-shape.test.ts",
+      "src/hooks/jev/__tests__/resolver-request-count.test.ts",
       "src/hooks/jev/__tests__/resolver.test.ts",
+      "src/hooks/jev/__tests__/shared-breaker.test.ts",
       "src/hooks/jev/__tests__/state-omit-ids.test.ts",
       "src/hooks/jev/client.ts",
       "src/hooks/jev/config.ts",
@@ -377,6 +379,7 @@
       "src/hooks/project-memory/__tests__/learner.test.ts",
       "src/hooks/project-memory/__tests__/pre-compact-storage.test.ts",
       "src/hooks/project-memory/__tests__/pre-compact.test.ts",
+      "src/hooks/project-memory/__tests__/rescan-concurrency.test.ts",
       "src/hooks/project-memory/__tests__/storage.test.ts",
       "src/hooks/project-memory/constants.ts",
       "src/hooks/project-memory/detector.ts",
@@ -893,6 +896,8 @@
       "scripts/lib/hud-cache-wrapper.sh",
       "scripts/lib/hud-wrapper-template.mjs",
       "scripts/lib/hud-wrapper-template.txt",
+      "scripts/lib/jev-breaker.d.mts",
+      "scripts/lib/jev-breaker.mjs",
       "scripts/lib/jev-compaction-state.mjs",
       "scripts/lib/jev-delivery-guard.mjs",
       "scripts/lib/jev-mask.mjs",
@@ -1043,10 +1048,6 @@
       "dist/__tests__/bridge-help-question-regex.test.d.ts.map",
       "dist/__tests__/bridge-help-question-regex.test.js",
       "dist/__tests__/bridge-help-question-regex.test.js.map",
-      "dist/__tests__/bridge-self-contained.test.d.ts",
-      "dist/__tests__/bridge-self-contained.test.d.ts.map",
-      "dist/__tests__/bridge-self-contained.test.js",
-      "dist/__tests__/bridge-self-contained.test.js.map",
       "dist/__tests__/chain-enqueuer-registration.test.d.ts",
       "dist/__tests__/chain-enqueuer-registration.test.d.ts.map",
       "dist/__tests__/chain-enqueuer-registration.test.js",
@@ -3812,10 +3813,6 @@
       "dist/hooks/permission-handler/index.d.ts.map",
       "dist/hooks/permission-handler/index.js",
       "dist/hooks/permission-handler/index.js.map",
-      "dist/hooks/persistent-mode/__tests__/architect-approval-transcript.test.d.ts",
-      "dist/hooks/persistent-mode/__tests__/architect-approval-transcript.test.d.ts.map",
-      "dist/hooks/persistent-mode/__tests__/architect-approval-transcript.test.js",
-      "dist/hooks/persistent-mode/__tests__/architect-approval-transcript.test.js.map",
       "dist/hooks/persistent-mode/__tests__/cancel-race.test.d.ts",
       "dist/hooks/persistent-mode/__tests__/cancel-race.test.d.ts.map",
       "dist/hooks/persistent-mode/__tests__/cancel-race.test.js",
@@ -4817,10 +4814,6 @@
       "dist/installer/__tests__/bundled-skill-sync.test.d.ts.map",
       "dist/installer/__tests__/bundled-skill-sync.test.js",
       "dist/installer/__tests__/bundled-skill-sync.test.js.map",
-      "dist/installer/__tests__/claude-mcp-config-path.test.d.ts",
-      "dist/installer/__tests__/claude-mcp-config-path.test.d.ts.map",
-      "dist/installer/__tests__/claude-mcp-config-path.test.js",
-      "dist/installer/__tests__/claude-mcp-config-path.test.js.map",
       "dist/installer/__tests__/claude-md-analysis.test.d.ts",
       "dist/installer/__tests__/claude-md-analysis.test.d.ts.map",
       "dist/installer/__tests__/claude-md-analysis.test.js",
@@ -6737,7 +6730,9 @@
       "src/hooks/jev/__tests__/log-context.test.ts",
       "src/hooks/jev/__tests__/log-rotation.test.ts",
       "src/hooks/jev/__tests__/points-wire-shape.test.ts",
+      "src/hooks/jev/__tests__/resolver-request-count.test.ts",
       "src/hooks/jev/__tests__/resolver.test.ts",
+      "src/hooks/jev/__tests__/shared-breaker.test.ts",
       "src/hooks/jev/__tests__/state-omit-ids.test.ts",
       "src/hooks/jev/client.ts",
       "src/hooks/jev/config.ts",
@@ -6826,6 +6821,7 @@
       "src/hooks/project-memory/__tests__/learner.test.ts",
       "src/hooks/project-memory/__tests__/pre-compact-storage.test.ts",
       "src/hooks/project-memory/__tests__/pre-compact.test.ts",
+      "src/hooks/project-memory/__tests__/rescan-concurrency.test.ts",
       "src/hooks/project-memory/__tests__/storage.test.ts",
       "src/hooks/project-memory/constants.ts",
       "src/hooks/project-memory/detector.ts",
@@ -8481,26 +8477,6 @@
         "id": "dist/__tests__/bridge-help-question-regex.test.js.map",
         "kind": "generated-dist",
         "path": "dist/__tests__/bridge-help-question-regex.test.js.map"
-      },
-      {
-        "id": "dist/__tests__/bridge-self-contained.test.d.ts",
-        "kind": "generated-dist",
-        "path": "dist/__tests__/bridge-self-contained.test.d.ts"
-      },
-      {
-        "id": "dist/__tests__/bridge-self-contained.test.d.ts.map",
-        "kind": "generated-dist",
-        "path": "dist/__tests__/bridge-self-contained.test.d.ts.map"
-      },
-      {
-        "id": "dist/__tests__/bridge-self-contained.test.js",
-        "kind": "generated-dist",
-        "path": "dist/__tests__/bridge-self-contained.test.js"
-      },
-      {
-        "id": "dist/__tests__/bridge-self-contained.test.js.map",
-        "kind": "generated-dist",
-        "path": "dist/__tests__/bridge-self-contained.test.js.map"
       },
       {
         "id": "dist/__tests__/chain-enqueuer-registration.test.d.ts",
@@ -22328,26 +22304,6 @@
         "path": "dist/hooks/permission-handler/index.js.map"
       },
       {
-        "id": "dist/hooks/persistent-mode/__tests__/architect-approval-transcript.test.d.ts",
-        "kind": "generated-dist",
-        "path": "dist/hooks/persistent-mode/__tests__/architect-approval-transcript.test.d.ts"
-      },
-      {
-        "id": "dist/hooks/persistent-mode/__tests__/architect-approval-transcript.test.d.ts.map",
-        "kind": "generated-dist",
-        "path": "dist/hooks/persistent-mode/__tests__/architect-approval-transcript.test.d.ts.map"
-      },
-      {
-        "id": "dist/hooks/persistent-mode/__tests__/architect-approval-transcript.test.js",
-        "kind": "generated-dist",
-        "path": "dist/hooks/persistent-mode/__tests__/architect-approval-transcript.test.js"
-      },
-      {
-        "id": "dist/hooks/persistent-mode/__tests__/architect-approval-transcript.test.js.map",
-        "kind": "generated-dist",
-        "path": "dist/hooks/persistent-mode/__tests__/architect-approval-transcript.test.js.map"
-      },
-      {
         "id": "dist/hooks/persistent-mode/__tests__/cancel-race.test.d.ts",
         "kind": "generated-dist",
         "path": "dist/hooks/persistent-mode/__tests__/cancel-race.test.d.ts"
@@ -27351,26 +27307,6 @@
         "id": "dist/installer/__tests__/bundled-skill-sync.test.js.map",
         "kind": "generated-dist",
         "path": "dist/installer/__tests__/bundled-skill-sync.test.js.map"
-      },
-      {
-        "id": "dist/installer/__tests__/claude-mcp-config-path.test.d.ts",
-        "kind": "generated-dist",
-        "path": "dist/installer/__tests__/claude-mcp-config-path.test.d.ts"
-      },
-      {
-        "id": "dist/installer/__tests__/claude-mcp-config-path.test.d.ts.map",
-        "kind": "generated-dist",
-        "path": "dist/installer/__tests__/claude-mcp-config-path.test.d.ts.map"
-      },
-      {
-        "id": "dist/installer/__tests__/claude-mcp-config-path.test.js",
-        "kind": "generated-dist",
-        "path": "dist/installer/__tests__/claude-mcp-config-path.test.js"
-      },
-      {
-        "id": "dist/installer/__tests__/claude-mcp-config-path.test.js.map",
-        "kind": "generated-dist",
-        "path": "dist/installer/__tests__/claude-mcp-config-path.test.js.map"
       },
       {
         "id": "dist/installer/__tests__/claude-md-analysis.test.d.ts",
@@ -37543,6 +37479,16 @@
         "path": "scripts/lib/hud-wrapper-template.txt"
       },
       {
+        "id": "scripts/lib/jev-breaker.d.mts",
+        "kind": "script",
+        "path": "scripts/lib/jev-breaker.d.mts"
+      },
+      {
+        "id": "scripts/lib/jev-breaker.mjs",
+        "kind": "script",
+        "path": "scripts/lib/jev-breaker.mjs"
+      },
+      {
         "id": "scripts/lib/jev-compaction-state.mjs",
         "kind": "script",
         "path": "scripts/lib/jev-compaction-state.mjs"
@@ -41448,6 +41394,11 @@
         "path": "src/__tests__/jev-applied-log.test.mjs"
       },
       {
+        "id": "src/__tests__/jev-breaker-script.test.mjs",
+        "kind": "src",
+        "path": "src/__tests__/jev-breaker-script.test.mjs"
+      },
+      {
         "id": "src/__tests__/jev-compaction-module.test.mjs",
         "kind": "src",
         "path": "src/__tests__/jev-compaction-module.test.mjs"
@@ -41506,6 +41457,11 @@
         "id": "src/__tests__/jev-shadow-noul.test.mjs",
         "kind": "src",
         "path": "src/__tests__/jev-shadow-noul.test.mjs"
+      },
+      {
+        "id": "src/__tests__/jev-shadow-spawn-mode.test.mjs",
+        "kind": "src",
+        "path": "src/__tests__/jev-shadow-spawn-mode.test.mjs"
       },
       {
         "id": "src/__tests__/jev-state-omit-ids.test.mjs",
@@ -44288,9 +44244,19 @@
         "path": "src/hooks/jev/__tests__/points-wire-shape.test.ts"
       },
       {
+        "id": "src/hooks/jev/__tests__/resolver-request-count.test.ts",
+        "kind": "hook",
+        "path": "src/hooks/jev/__tests__/resolver-request-count.test.ts"
+      },
+      {
         "id": "src/hooks/jev/__tests__/resolver.test.ts",
         "kind": "hook",
         "path": "src/hooks/jev/__tests__/resolver.test.ts"
+      },
+      {
+        "id": "src/hooks/jev/__tests__/shared-breaker.test.ts",
+        "kind": "hook",
+        "path": "src/hooks/jev/__tests__/shared-breaker.test.ts"
       },
       {
         "id": "src/hooks/jev/__tests__/state-omit-ids.test.ts",
@@ -44731,6 +44697,11 @@
         "id": "src/hooks/project-memory/__tests__/pre-compact.test.ts",
         "kind": "hook",
         "path": "src/hooks/project-memory/__tests__/pre-compact.test.ts"
+      },
+      {
+        "id": "src/hooks/project-memory/__tests__/rescan-concurrency.test.ts",
+        "kind": "hook",
+        "path": "src/hooks/project-memory/__tests__/rescan-concurrency.test.ts"
       },
       {
         "id": "src/hooks/project-memory/__tests__/storage.test.ts",
@@ -49811,6 +49782,11 @@
       },
       {
         "from": "scripts/jev-resolve.mjs",
+        "to": "scripts/lib/jev-breaker.mjs",
+        "kind": "imports"
+      },
+      {
+        "from": "scripts/jev-resolve.mjs",
         "to": "scripts/lib/state-root.mjs",
         "kind": "imports"
       },
@@ -50027,6 +50003,31 @@
       {
         "from": "scripts/lib/hud-wrapper-template.mjs",
         "to": "external:node:url",
+        "kind": "imports"
+      },
+      {
+        "from": "scripts/lib/jev-breaker.mjs",
+        "to": "external:node:crypto",
+        "kind": "imports"
+      },
+      {
+        "from": "scripts/lib/jev-breaker.mjs",
+        "to": "external:node:fs",
+        "kind": "imports"
+      },
+      {
+        "from": "scripts/lib/jev-breaker.mjs",
+        "to": "external:node:os",
+        "kind": "imports"
+      },
+      {
+        "from": "scripts/lib/jev-breaker.mjs",
+        "to": "external:node:path",
+        "kind": "imports"
+      },
+      {
+        "from": "scripts/lib/jev-breaker.mjs",
+        "to": "scripts/lib/atomic-write.mjs",
         "kind": "imports"
       },
       {
@@ -56300,8 +56301,68 @@
         "kind": "imports"
       },
       {
+        "from": "src/__tests__/jev-breaker-script.test.mjs",
+        "to": "external:node:child_process",
+        "kind": "imports"
+      },
+      {
+        "from": "src/__tests__/jev-breaker-script.test.mjs",
+        "to": "external:node:fs",
+        "kind": "imports"
+      },
+      {
+        "from": "src/__tests__/jev-breaker-script.test.mjs",
+        "to": "external:node:http",
+        "kind": "imports"
+      },
+      {
+        "from": "src/__tests__/jev-breaker-script.test.mjs",
+        "to": "external:node:os",
+        "kind": "imports"
+      },
+      {
+        "from": "src/__tests__/jev-breaker-script.test.mjs",
+        "to": "external:node:path",
+        "kind": "imports"
+      },
+      {
+        "from": "src/__tests__/jev-breaker-script.test.mjs",
+        "to": "external:node:url",
+        "kind": "imports"
+      },
+      {
+        "from": "src/__tests__/jev-breaker-script.test.mjs",
+        "to": "external:vitest",
+        "kind": "imports"
+      },
+      {
+        "from": "src/__tests__/jev-breaker-script.test.mjs",
+        "to": "scripts/jev-resolve.mjs",
+        "kind": "imports"
+      },
+      {
+        "from": "src/__tests__/jev-breaker-script.test.mjs",
+        "to": "scripts/lib/jev-breaker.mjs",
+        "kind": "imports"
+      },
+      {
+        "from": "src/__tests__/jev-breaker-script.test.mjs",
+        "to": "src/hooks/jev/points.ts",
+        "kind": "imports"
+      },
+      {
+        "from": "src/__tests__/jev-breaker-script.test.mjs",
+        "to": "src/hooks/jev/resolver.ts",
+        "kind": "imports"
+      },
+      {
         "from": "src/__tests__/jev-compaction-module.test.mjs",
         "to": "external:node:fs",
+        "kind": "imports"
+      },
+      {
+        "from": "src/__tests__/jev-compaction-module.test.mjs",
+        "to": "external:node:os",
         "kind": "imports"
       },
       {
@@ -56327,6 +56388,11 @@
       {
         "from": "src/__tests__/jev-compaction-module.test.mjs",
         "to": "scripts/jev-resolve.mjs",
+        "kind": "imports"
+      },
+      {
+        "from": "src/__tests__/jev-compaction-module.test.mjs",
+        "to": "scripts/lib/jev-breaker.mjs",
         "kind": "imports"
       },
       {
@@ -56737,6 +56803,21 @@
       {
         "from": "src/__tests__/jev-shadow-noul.test.mjs",
         "to": "scripts/lib/jev-shadow.mjs",
+        "kind": "imports"
+      },
+      {
+        "from": "src/__tests__/jev-shadow-spawn-mode.test.mjs",
+        "to": "external:node:path",
+        "kind": "imports"
+      },
+      {
+        "from": "src/__tests__/jev-shadow-spawn-mode.test.mjs",
+        "to": "external:node:url",
+        "kind": "imports"
+      },
+      {
+        "from": "src/__tests__/jev-shadow-spawn-mode.test.mjs",
+        "to": "external:vitest",
         "kind": "imports"
       },
       {
@@ -70770,6 +70851,41 @@
         "kind": "type-imports"
       },
       {
+        "from": "src/hooks/jev/__tests__/resolver-request-count.test.ts",
+        "to": "external:node:fs/promises",
+        "kind": "imports"
+      },
+      {
+        "from": "src/hooks/jev/__tests__/resolver-request-count.test.ts",
+        "to": "external:node:os",
+        "kind": "imports"
+      },
+      {
+        "from": "src/hooks/jev/__tests__/resolver-request-count.test.ts",
+        "to": "external:node:path",
+        "kind": "imports"
+      },
+      {
+        "from": "src/hooks/jev/__tests__/resolver-request-count.test.ts",
+        "to": "external:vitest",
+        "kind": "imports"
+      },
+      {
+        "from": "src/hooks/jev/__tests__/resolver-request-count.test.ts",
+        "to": "scripts/lib/jev-breaker.mjs",
+        "kind": "imports"
+      },
+      {
+        "from": "src/hooks/jev/__tests__/resolver-request-count.test.ts",
+        "to": "src/hooks/jev/resolver.ts",
+        "kind": "imports"
+      },
+      {
+        "from": "src/hooks/jev/__tests__/resolver-request-count.test.ts",
+        "to": "src/hooks/jev/types.ts",
+        "kind": "type-imports"
+      },
+      {
         "from": "src/hooks/jev/__tests__/resolver.test.ts",
         "to": "external:node:fs/promises",
         "kind": "imports"
@@ -70796,6 +70912,46 @@
       },
       {
         "from": "src/hooks/jev/__tests__/resolver.test.ts",
+        "to": "src/hooks/jev/types.ts",
+        "kind": "type-imports"
+      },
+      {
+        "from": "src/hooks/jev/__tests__/shared-breaker.test.ts",
+        "to": "external:node:fs",
+        "kind": "imports"
+      },
+      {
+        "from": "src/hooks/jev/__tests__/shared-breaker.test.ts",
+        "to": "external:node:fs/promises",
+        "kind": "imports"
+      },
+      {
+        "from": "src/hooks/jev/__tests__/shared-breaker.test.ts",
+        "to": "external:node:os",
+        "kind": "imports"
+      },
+      {
+        "from": "src/hooks/jev/__tests__/shared-breaker.test.ts",
+        "to": "external:node:path",
+        "kind": "imports"
+      },
+      {
+        "from": "src/hooks/jev/__tests__/shared-breaker.test.ts",
+        "to": "external:vitest",
+        "kind": "imports"
+      },
+      {
+        "from": "src/hooks/jev/__tests__/shared-breaker.test.ts",
+        "to": "src/hooks/jev/client.ts",
+        "kind": "imports"
+      },
+      {
+        "from": "src/hooks/jev/__tests__/shared-breaker.test.ts",
+        "to": "src/hooks/jev/resolver.ts",
+        "kind": "imports"
+      },
+      {
+        "from": "src/hooks/jev/__tests__/shared-breaker.test.ts",
         "to": "src/hooks/jev/types.ts",
         "kind": "type-imports"
       },
@@ -70913,6 +71069,16 @@
         "from": "src/hooks/jev/resolver.ts",
         "to": "external:node:path",
         "kind": "imports"
+      },
+      {
+        "from": "src/hooks/jev/resolver.ts",
+        "to": "scripts/lib/jev-breaker.mjs",
+        "kind": "imports"
+      },
+      {
+        "from": "src/hooks/jev/resolver.ts",
+        "to": "scripts/lib/jev-breaker.mjs",
+        "kind": "type-imports"
       },
       {
         "from": "src/hooks/jev/resolver.ts",
@@ -73083,6 +73249,56 @@
         "from": "src/hooks/project-memory/__tests__/pre-compact.test.ts",
         "to": "src/hooks/rules-injector/finder.ts",
         "kind": "imports"
+      },
+      {
+        "from": "src/hooks/project-memory/__tests__/rescan-concurrency.test.ts",
+        "to": "external:fs/promises",
+        "kind": "imports"
+      },
+      {
+        "from": "src/hooks/project-memory/__tests__/rescan-concurrency.test.ts",
+        "to": "external:os",
+        "kind": "imports"
+      },
+      {
+        "from": "src/hooks/project-memory/__tests__/rescan-concurrency.test.ts",
+        "to": "external:path",
+        "kind": "imports"
+      },
+      {
+        "from": "src/hooks/project-memory/__tests__/rescan-concurrency.test.ts",
+        "to": "external:vitest",
+        "kind": "imports"
+      },
+      {
+        "from": "src/hooks/project-memory/__tests__/rescan-concurrency.test.ts",
+        "to": "src/features/context-injector/collector.ts",
+        "kind": "imports"
+      },
+      {
+        "from": "src/hooks/project-memory/__tests__/rescan-concurrency.test.ts",
+        "to": "src/hooks/project-memory/constants.ts",
+        "kind": "imports"
+      },
+      {
+        "from": "src/hooks/project-memory/__tests__/rescan-concurrency.test.ts",
+        "to": "src/hooks/project-memory/index.ts",
+        "kind": "imports"
+      },
+      {
+        "from": "src/hooks/project-memory/__tests__/rescan-concurrency.test.ts",
+        "to": "src/hooks/project-memory/learner.ts",
+        "kind": "imports"
+      },
+      {
+        "from": "src/hooks/project-memory/__tests__/rescan-concurrency.test.ts",
+        "to": "src/hooks/project-memory/storage.ts",
+        "kind": "imports"
+      },
+      {
+        "from": "src/hooks/project-memory/__tests__/rescan-concurrency.test.ts",
+        "to": "src/hooks/project-memory/types.ts",
+        "kind": "type-imports"
       },
       {
         "from": "src/hooks/project-memory/__tests__/storage.test.ts",
@@ -94111,12 +94327,12 @@
       }
     ],
     "stats": {
-      "nodeCount": 8303,
-      "edgeCount": 9074,
-      "importEdgeCount": 7607,
+      "nodeCount": 8298,
+      "edgeCount": 9123,
+      "importEdgeCount": 7652,
       "registerEdgeCount": 105
     }
   },
-  "inventorySha256": "8848801826a2da1cf4ae2ae5df1146a55adc2f824fe5a96e0a979d0b41b594ba",
-  "manifestSha256": "44c7d5097264f11ef3ccf8d13e89ab424f03395fdc1b014002c6c0604a75b51f"
+  "inventorySha256": "8052560f0b9c4008258c257af9bfec610abcba96f0b0c9abde8166a9cf56aba5",
+  "manifestSha256": "fa9ecf7d0b1176da11ec2a141ebcb3b9db80d7a01276057363bcbdd5b5b57177"
 }

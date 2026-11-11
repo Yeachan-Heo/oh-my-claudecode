@@ -343,9 +343,9 @@ export async function resolveJudgment<T>(resolveJudgmentArgs: ResolveJudgmentArg
       };
       // For nonblocking shadow calls, don't wait for the log write to complete.
       if (args.blocking === false) {
-        void writeShadowLog(logEntry, config.logDir);
+        void writeShadowLog(logEntry, config);
       } else {
-        await writeShadowLog(logEntry, config.logDir);
+        await writeShadowLog(logEntry, config);
       }
       return { answer: heuristic, source: 'twin', mode: skip.mode };
     }
