@@ -4,6 +4,8 @@ export interface BreakerSettings {
   dir: string;
   /** Pause after a breaker write in milliseconds (tests only; default 50). */
   settleMs?: number;
+  /** OMC_JEV_HOOK_DEADLINE (epoch ms): the hook kills this resolver 100 ms later, so a breaker write ends before that. */
+  hookDeadline?: number;
 }
 
 export interface OpenBreaker {
