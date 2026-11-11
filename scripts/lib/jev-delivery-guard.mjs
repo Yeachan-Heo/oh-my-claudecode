@@ -241,23 +241,30 @@ function claimDailyCheck(dir, logDir, now) {
   return null;
 }
 
-export function startDailyCheck(dir, configDir, logDir, env, now) {
+export function startDailyCheck(dir, configDir, logDir, env, now, spawnWorker = spawn) {
   const lock = claimDailyCheck(dir, logDir, now);
   if (!lock) return;
   const release = () => { try { unlinkSync(lock); } catch { /* gone */ } };
   // Re-read daily.json after acquiring the lock: another session may have started the check
   // while we were waiting for the lock, so verify that we haven't missed the daily slot.
-  const state = readJson(dailyFile(dir, logDir, 'daily.json'));
+  const dailyPath = dailyFile(dir, logDir, 'daily.json');
+  const state = readJson(dailyPath);
   if (typeof state?.lastStart === 'number' && now - state.lastStart < DAY_MS) return release();
-  if (!writeJson(dailyFile(dir, logDir, 'daily.json'), { lastStart: now })) return release();
+  if (!writeJson(dailyPath, { lastStart: now })) return release();
+  // A worker that cannot be started must not use up the slot of the day: put the previous state back.
+  const giveUp = () => {
+    release();
+    if (state && typeof state === 'object') writeJson(dailyPath, state);
+    else { try { unlinkSync(dailyPath); } catch { /* gone */ } }
+  };
   try {
     const args = [SELF, '--daily', '--write', '--config', configDir];
     if (logDir) args.push('--log', logDir);
-    const child = spawn(process.execPath, args, { detached: true, stdio: 'ignore', windowsHide: true, env });
-    child.on('error', release);
+    const child = spawnWorker(process.execPath, args, { detached: true, stdio: 'ignore', windowsHide: true, env });
+    child.on('error', giveUp);
     child.unref();
   } catch {
-    release();
+    giveUp();
   }
 }
 

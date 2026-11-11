@@ -600,6 +600,39 @@ describe('regression coverage for the review findings', () => {
     expect(existsSync(dailyStatePath(configDir, logDir, 'delivery.json'))).toBe(false);
   });
 
+  describe('a daily worker that cannot be started', () => {
+    const failingSpawns = {
+      'throws while spawning': () => { throw Object.assign(new Error('spawn EMFILE'), { code: 'EMFILE' }); },
+      'reports an error event': () => {
+        const handlers = {};
+        queueMicrotask(() => handlers.error?.(Object.assign(new Error('spawn EAGAIN'), { code: 'EAGAIN' })));
+        return { on: (name, fn) => { handlers[name] = fn; }, unref: () => {} };
+      },
+    };
+    for (const [label, spawnWorker] of Object.entries(failingSpawns)) {
+      it(`gives the slot of the day back when the spawn ${label}`, async () => {
+        const logDir = join(root, 'jev-log');
+        const dir = guardState();
+        mkdirSync(dir, { recursive: true });
+        const older = NOW - 2 * 24 * HOUR; // a finished slot of an earlier day
+        writeFileSync(dailyStatePath(configDir, logDir, 'daily.json'), JSON.stringify({ lastStart: older }));
+        startDailyCheck(dir, configDir, logDir, { ...process.env }, NOW, spawnWorker);
+        await new Promise((resolve) => setTimeout(resolve, 10));
+        expect(JSON.parse(readFileSync(dailyStatePath(configDir, logDir, 'daily.json'), 'utf8')).lastStart).toBe(older);
+        expect(existsSync(dailyStatePath(configDir, logDir, 'daily.lock'))).toBe(false);
+      });
+    }
+
+    it('removes the new timestamp when there was no earlier state', async () => {
+      const logDir = join(root, 'jev-log');
+      const dir = guardState();
+      mkdirSync(dir, { recursive: true });
+      startDailyCheck(dir, configDir, logDir, { ...process.env }, NOW, failingSpawns['throws while spawning']);
+      expect(existsSync(dailyStatePath(configDir, logDir, 'daily.json'))).toBe(false);
+      expect(existsSync(dailyStatePath(configDir, logDir, 'daily.lock'))).toBe(false);
+    });
+  });
+
   describe('a relative OMC_JEV_LOG_DIR in two working directories', () => {
     it('keeps daily state and displayed-report acknowledgments apart, including an older report in the second project', () => {
       writeHooks(60);
