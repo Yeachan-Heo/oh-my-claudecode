@@ -326,9 +326,11 @@ async function readConfig($) {
       }
     } catch { /* no settings: the process environment stands */ }
   }
-  // Home for shared-state directory: HOME on POSIX (matching jev-breaker.mjs), USERPROFILE on Windows.
+  // Home for shared-state directory: HOME on POSIX (matching jev-breaker.mjs, which uses os.homedir()),
+  // USERPROFILE on Windows. On POSIX, do not use USERPROFILE as a fallback when HOME is unset,
+  // because os.homedir() does not use USERPROFILE and the breaker state would be in a different location.
   // Home for private-path expansion: preserve USERPROFILE for Windows compatibility.
-  const homeForState = env.OS === 'Windows_NT' ? env.USERPROFILE || env.HOME : env.HOME || env.USERPROFILE;
+  const homeForState = env.OS === 'Windows_NT' ? env.USERPROFILE || env.HOME : env.HOME;
   const homeForPrivatePaths = env.USERPROFILE || env.HOME;
   const stateDir = env.OMC_JEV_LOG_DIR ? slash(env.OMC_JEV_LOG_DIR) : homeForState ? `${slash(homeForState)}/.omc/state/jev` : undefined;
   const privatePaths = String(env.OMC_JEV_COMPACT_PRIVATE_PATHS ?? '')
