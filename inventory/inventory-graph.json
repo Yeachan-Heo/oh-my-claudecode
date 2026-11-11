@@ -5,15 +5,15 @@
   "provenance": {
     "base": "05c800f40d1ad53b42a78609d2667ef4f726808b",
     "planningHead": "0a91273e61dbbd47eb0af4c02844409251e08398",
-    "head": "c99914be61ca64939d2a015b5f29a8be022854c6",
-    "sourceSha256": "78e43d07075901c303d90eb69bb1d61a9eca2ed9cd0394278052edf8657916cf",
+    "head": "b70afca239e0f56288fe039dcfc31d86c865d045",
+    "sourceSha256": "6937657009d4d75760d9303154bbf37be1fe594e4039fde6ba2542779e7f4a6f",
     "generatedAt": null,
     "generator": "scripts/generate-inventory-graph.mjs"
   },
   "base": "05c800f40d1ad53b42a78609d2667ef4f726808b",
   "planningHead": "0a91273e61dbbd47eb0af4c02844409251e08398",
-  "head": "c99914be61ca64939d2a015b5f29a8be022854c6",
-  "sourceSha256": "78e43d07075901c303d90eb69bb1d61a9eca2ed9cd0394278052edf8657916cf",
+  "head": "b70afca239e0f56288fe039dcfc31d86c865d045",
+  "sourceSha256": "6937657009d4d75760d9303154bbf37be1fe594e4039fde6ba2542779e7f4a6f",
   "counts": {
     "public": {
       "skills": 84,
@@ -50026,6 +50026,11 @@
         "kind": "imports"
       },
       {
+        "from": "scripts/lib/jev-breaker.mjs",
+        "to": "scripts/lib/atomic-write.mjs",
+        "kind": "imports"
+      },
+      {
         "from": "scripts/lib/jev-compaction-state.mjs",
         "to": "external:node:fs",
         "kind": "imports"
@@ -94338,11 +94343,11 @@
     ],
     "stats": {
       "nodeCount": 8298,
-      "edgeCount": 9125,
-      "importEdgeCount": 7654,
+      "edgeCount": 9126,
+      "importEdgeCount": 7655,
       "registerEdgeCount": 105
     }
   },
   "inventorySha256": "8052560f0b9c4008258c257af9bfec610abcba96f0b0c9abde8166a9cf56aba5",
-  "manifestSha256": "0ea9fadb429d7f58749823d2ae78b330a21056ab67d9cd265aedba6ccb405c2c"
+  "manifestSha256": "fda357563a09cef00708e79c602cc12edbabcde1472cfd20b0e19e6c0236b09c"
 }
