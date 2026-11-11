@@ -263,6 +263,22 @@ describe('plugin hook script Jev wiring (#4120)', () => {
     expect(entry.state.last_assistant_message).toHaveLength(expected);
   });
 
+  it.each([
+    [{ OMC_JEV_EXCERPT_CHARS: '', OMC_JEV_EXCERPT_CHARS_LEARNER_EXTRACTION: '' }, 2000],
+    [{ OMC_JEV_EXCERPT_CHARS: '50', OMC_JEV_EXCERPT_CHARS_LEARNER_EXTRACTION: '' }, 2000],
+    [{ OMC_JEV_EXCERPT_CHARS_LEARNER_EXTRACTION: '200' }, 200],
+  ])('bounds the learner-extraction assistant message by the point default or its variable (%j)', (overrides, expected) => {
+    const context = makeContext();
+    runHook(context, 'persistent-mode.mjs', {
+      cwd: context.cwd,
+      session_id: 'jev-session',
+      last_assistant_message: 'a'.repeat(2500),
+    }, 'learner-extraction', overrides);
+
+    const entry = readPoint(context, 'learner-extraction');
+    expect(entry.state.assistant_message).toHaveLength(expected);
+  });
+
   it('does not fabricate a Ralph verdict when the plugin Stop hook has no verifier', () => {
     const context = makeContext();
     const sessionId = createRalphState(context);

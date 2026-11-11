@@ -4,7 +4,7 @@
  * the call or the agent definition names haiku, sonnet or opus;
  * OMC_JEV_MODEL_ROUTING_ALL_AGENTS=1 also asks for calls with no model.
  */
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { spawn } from "node:child_process";
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { createServer, type Server } from "node:http";
@@ -49,6 +49,28 @@ function runEnforcer(input: Record<string, unknown>, env: NodeJS.ProcessEnv, cwd
     child.stdin.on("error", reject);
     child.stdin.end(JSON.stringify(input));
   });
+}
+
+// Polling utility to wait for a condition to be true (replacement for vi.waitFor which is not available in vitest 4.1.11)
+async function waitFor(
+  condition: () => void,
+  options: { timeout?: number; interval?: number } = {},
+): Promise<void> {
+  const { timeout = 5000, interval = 50 } = options;
+  const startTime = Date.now();
+
+  while (Date.now() - startTime < timeout) {
+    try {
+      condition();
+      return; // Condition passed
+    } catch (error) {
+      // Condition failed, retry after interval
+      await new Promise((resolve) => setTimeout(resolve, interval));
+    }
+  }
+
+  // Last attempt before timeout
+  condition();
 }
 
 describe("pre-tool-enforcer.mjs: Jev model-routing for every agent call", () => {
@@ -232,7 +254,7 @@ describe("pre-tool-enforcer.mjs: Jev model-routing for every agent call", () => 
     const input = agentInput();
     const routed = await routedInput(input, { OMC_JEV: "model-routing", OMC_JEV_MODEL_ROUTING_ALL_AGENTS: "1" });
     expect(routed).toEqual(input.tool_input);
-    await vi.waitFor(
+    await waitFor(
       () => {
         const entries = readFileSync(join(cwd, "jev-logs", "shadow.jsonl"), "utf8")
           .trim()

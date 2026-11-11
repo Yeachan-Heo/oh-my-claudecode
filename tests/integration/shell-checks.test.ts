@@ -11,7 +11,7 @@ import { describe, expect, it } from 'vitest';
 import { spawnSync } from 'node:child_process';
 import { existsSync, mkdtempSync, readFileSync, readdirSync, rmSync, truncateSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { delimiter, dirname, join } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
 const ROOT = fileURLToPath(new URL('../../', import.meta.url));
@@ -122,7 +122,11 @@ describe.skipIf(!bashPath)('shell checks: length boundary', () => {
 
 // Each sentinel starts Git Bash up to 32 times (about 0.1-1 s each on Windows), more than the default 30 s test timeout allows.
 describe.skipIf(!onWindows)('shell checks: sentinels against the real Git Bash (Windows only)', { timeout: 180_000 }, () => {
-  const run = (args: string[], options: Record<string, unknown> = {}) => spawnSync(GIT_BASH as string, args, { encoding: 'utf8', windowsHide: true, timeout: 20000, ...options });
+  // usr\bin\bash.exe started directly does not put Git's usr\bin on PATH; a test process started from PowerShell or cmd then has no
+  // external `cat` (the here-document cases below need it). Put the directory of bash.exe first, under the key the environment already uses.
+  const pathKey = Object.keys(process.env).find((key) => key.toLowerCase() === 'path') ?? 'PATH';
+  const gitBashEnv = GIT_BASH ? { ...process.env, [pathKey]: `${dirname(GIT_BASH)}${delimiter}${process.env[pathKey] ?? ''}` } : process.env;
+  const run = (args: string[], options: Record<string, unknown> = {}) => spawnSync(GIT_BASH as string, args, { encoding: 'utf8', windowsHide: true, timeout: 20000, env: gitBashEnv, ...options });
 
   it('Git Bash still cuts the -c argument at about 8190 characters (8185 passes, 8195 is cut)', () => {
     const output = (n: number) => run(['-c', `echo ${'x'.repeat(n - 15)}; echo END`]).stdout;
@@ -354,6 +358,15 @@ describe.skipIf(!bashPath)('shell checks: bash -n handling', () => {
     const heredoc = lib.checkBashCommand("cat <<'EOF'\nno end", { platform: 'linux', bashPath: process.execPath, timeoutMs: 15000 });
     expect(heredoc.decision).toBe('deny');
     expect(heredoc.checks).toEqual(['heredoc']);
+  });
+
+  it('reports a bash that exits before reading its input as bash-failure, not as a check that did not run', () => {
+    // Far more than a pipe buffer, so the write always hits EPIPE once the crashing "bash" has exited.
+    const long = `echo "unclosed ${'x'.repeat(512 * 1024)}`;
+    const crashed = lib.checkBashCommand(long, { platform: 'linux', bashPath: process.execPath, timeoutMs: 15000 });
+    expect(crashed.decision).toBe('allow');
+    expect(crashed.syntax).toMatchObject({ ran: true, reason: 'bash-failure' });
+    expect(crashed.syntax.code).not.toBe(0);
   });
 
   it('skips bash -n for short commands on Windows only', () => {

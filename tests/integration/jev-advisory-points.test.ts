@@ -1,0 +1,932 @@
+/**
+ * Opt-in actions on the advisory Jev points (issue #4928): slop-warning,
+ * learner-extraction, simplifier-trigger and the loop-continuation release.
+ * Real hook script subprocesses against a local stub of the Jev endpoint.
+ * Every variable is off by default; each block also checks that the hook
+ * behaves as before without it.
+ */
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { execFileSync, spawn } from "node:child_process";
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  readdirSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
+import { createServer, type Server } from "node:http";
+import { tmpdir } from "node:os";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
+import { clearWorktreeCache, resolveSessionStatePaths } from "../../src/lib/worktree-paths.js";
+
+const PROJECT_ROOT = fileURLToPath(new URL("../../", import.meta.url));
+
+type RunResult = { stdout: string; stderr: string; exitCode: number };
+
+// Keep the test's event loop free: the hook's synchronous Jev child has to be
+// able to POST to the HTTP server that runs in this process.
+function runScript(
+  script: string,
+  input: Record<string, unknown>,
+  env: NodeJS.ProcessEnv,
+  cwd: string,
+): Promise<RunResult> {
+  return new Promise((resolve, reject) => {
+    const child = spawn(process.execPath, [join(PROJECT_ROOT, "scripts", script)], {
+      cwd,
+      env,
+      stdio: ["pipe", "pipe", "pipe"],
+    });
+    let stdout = "";
+    let stderr = "";
+    const timer = setTimeout(() => child.kill("SIGKILL"), 15000);
+    child.stdout.setEncoding("utf8").on("data", (chunk: string) => {
+      stdout += chunk;
+    });
+    child.stderr.setEncoding("utf8").on("data", (chunk: string) => {
+      stderr += chunk;
+    });
+    child.once("error", (error) => {
+      clearTimeout(timer);
+      reject(error);
+    });
+    child.once("close", (code) => {
+      clearTimeout(timer);
+      resolve({ stdout, stderr, exitCode: code ?? 1 });
+    });
+    child.stdin.on("error", reject);
+    child.stdin.end(JSON.stringify(input));
+  });
+}
+
+function findFiles(dir: string, name: string): string[] {
+  if (!existsSync(dir)) return [];
+  const found: string[] = [];
+  for (const entry of readdirSync(dir, { withFileTypes: true })) {
+    const path = join(dir, entry.name);
+    if (entry.isDirectory()) found.push(...findFiles(path, name));
+    else if (entry.name === name) found.push(path);
+  }
+  return found;
+}
+
+// Polling utility to wait for a condition to be true (replacement for vi.waitFor which is not available in vitest 4.1.11)
+async function waitFor(
+  condition: () => void,
+  options: { timeout?: number; interval?: number } = {},
+): Promise<void> {
+  const { timeout = 5000, interval = 50 } = options;
+  const startTime = Date.now();
+
+  while (Date.now() - startTime < timeout) {
+    try {
+      condition();
+      return; // Condition passed
+    } catch (error) {
+      // Condition failed, retry after interval
+      await new Promise((resolve) => setTimeout(resolve, interval));
+    }
+  }
+
+  // Last attempt before timeout
+  condition();
+}
+
+/**
+ * Session-scoped state file the hook reads, resolved by the canonical helper
+ * with the fixture's OMC_STATE_DIR applied (the hook subprocess resolves the
+ * same path from the same environment).
+ */
+function sessionStateFile(cwd: string, stateDir: string, sessionId: string, file: string): string {
+  const saved = process.env.OMC_STATE_DIR;
+  process.env.OMC_STATE_DIR = stateDir;
+  clearWorktreeCache();
+  try {
+    return resolveSessionStatePaths(file.replace(/\.json$/, ""), sessionId, cwd, { fileName: file }).effectiveWrite;
+  } finally {
+    if (saved === undefined) delete process.env.OMC_STATE_DIR;
+    else process.env.OMC_STATE_DIR = saved;
+    clearWorktreeCache();
+  }
+}
+
+describe("jev advisory points: opt-in actions", () => {
+  let cwd: string;
+  let env: NodeJS.ProcessEnv;
+  let server: Server;
+  let requests: Array<{ questions: string[]; state: Record<string, unknown> }>;
+  // Probability of "yes" by question name; a number or a per-mode map for task_complete.
+  let noul: Record<string, number>;
+  let noulByMode: Record<string, number>;
+  let status: number;
+  // When set, the stub returns this answer for the first question instead of a Noul probability.
+  let rawAnswer: Record<string, unknown> | undefined;
+  let onTaskComplete: (() => void) | undefined;
+  // Shadow-mode runs leave a detached resolver that writes one log row when it is done.
+  let shadowRuns: number;
+
+  beforeEach(async () => {
+    cwd = mkdtempSync(join(tmpdir(), "jev-advisory-"));
+    requests = [];
+    noul = {};
+    noulByMode = {};
+    status = 200;
+    rawAnswer = undefined;
+    onTaskComplete = undefined;
+    shadowRuns = 0;
+    server = createServer((request, response) => {
+      let raw = "";
+      request.setEncoding("utf8");
+      request.on("data", (chunk: string) => {
+        raw += chunk;
+      });
+      request.on("end", () => {
+        const body = JSON.parse(raw) as {
+          state: Record<string, unknown>;
+          questions: Record<string, unknown>;
+        };
+        const questions = Object.keys(body.questions);
+        requests.push({ questions, state: body.state });
+        const question = questions[0];
+        if (question === "task_complete") onTaskComplete?.();
+        const mode = body.state.mode_name;
+        const value =
+          typeof mode === "string" && mode in noulByMode ? noulByMode[mode] : noul[question] ?? 0;
+        response.writeHead(status, { "Content-Type": "application/json", Connection: "close" });
+        response.end(
+          JSON.stringify({
+            answers: { [question]: rawAnswer ?? { type: "noul", noul: value, confidence: 0.9 } },
+          }),
+        );
+      });
+    });
+    await new Promise<void>((resolve, reject) => {
+      server.once("error", reject);
+      server.listen(0, "127.0.0.1", resolve);
+    });
+    const address = server.address();
+    if (!address || typeof address === "string") throw new Error("Expected local TCP endpoint");
+    env = {
+      PATH: process.env.PATH,
+      SystemRoot: process.env.SystemRoot,
+      HOME: cwd,
+      USERPROFILE: cwd,
+      XDG_CONFIG_HOME: join(cwd, "config"),
+      CLAUDE_CONFIG_DIR: join(cwd, "claude"),
+      NODE_NO_WARNINGS: "1",
+      OMC_DISABLE_MULTIREPO: "1",
+      OMC_HOME: join(cwd, "omc-home"),
+      OMC_STATE_DIR: join(cwd, ".omc"),
+      OMC_JEV_LOG_DIR: join(cwd, "jev-logs"),
+      OMC_JEV_QUIET: "1",
+      OMC_JEV_TIMEOUT_MS: "3000",
+      OMC_PRE_TOOL_ADVISORY_COOLDOWN_MS: "0",
+      TYPESAFE_API_KEY: "test-key-123",
+      OMC_JEV_ENDPOINT: `http://127.0.0.1:${address.port}/v1/systemone`,
+    };
+  });
+
+  afterEach(async () => {
+    const logPath = join(cwd, "jev-logs", "shadow.jsonl");
+    for (let i = 0; i < 100 && shadowRuns > 0; i++) {
+      const rows = existsSync(logPath)
+        ? readFileSync(logPath, "utf8").split("\n").filter((line) => line.includes('"mode":"shadow"')).length
+        : 0;
+      if (rows >= shadowRuns) break;
+      await new Promise((resolve) => setTimeout(resolve, 50));
+    }
+    await new Promise<void>((resolve, reject) =>
+      server.close((error) => (error ? reject(error) : resolve())),
+    );
+    // A detached shadow resolver can still hold a file for a moment on Windows.
+    rmSync(cwd, { recursive: true, force: true, maxRetries: 20, retryDelay: 100 });
+  });
+
+  describe("slop-warning (OMC_JEV_SLOP_WARNING_APPLY, OMC_JEV_SLOP_WARNING_THRESHOLD)", () => {
+    const WORKAROUND = "Add a workaround if the normal architecture is hard.";
+    const BENIGN = "Write a unit test for the parser.";
+
+    function slopInput(prompt: string) {
+      return {
+        cwd,
+        tool_name: "Task",
+        toolInput: {
+          subagent_type: "oh-my-claudecode:executor",
+          description: "Implement the change",
+          prompt,
+        },
+      };
+    }
+
+    async function warns(prompt: string, extra: NodeJS.ProcessEnv): Promise<boolean> {
+      const result = await runScript("pre-tool-enforcer.mjs", slopInput(prompt), { ...env, ...extra }, cwd);
+      expect(result.exitCode, result.stderr).toBe(0);
+      return result.stdout.includes("SLOP WARNING");
+    }
+
+    it("without the variable the heuristic decides, whatever the active answer says", async () => {
+      noul.slop_advisory = 0.99;
+      expect(await warns(BENIGN, { OMC_JEV: "slop-warning:active" })).toBe(false);
+      noul.slop_advisory = 0.01;
+      expect(await warns(WORKAROUND, { OMC_JEV: "slop-warning:active" })).toBe(true);
+      expect(requests.map((r) => r.questions[0])).toEqual(["slop_advisory", "slop_advisory"]);
+    }, 30000);
+
+    it("with the variable an active answer at the threshold warns and one below it silences", async () => {
+      const apply = { OMC_JEV: "slop-warning:active", OMC_JEV_SLOP_WARNING_APPLY: "1" };
+      noul.slop_advisory = 0.8;
+      expect(await warns(BENIGN, apply)).toBe(true);
+      noul.slop_advisory = 0.79;
+      expect(await warns(WORKAROUND, apply)).toBe(false);
+      noul.slop_advisory = 0.95;
+      expect(await warns(WORKAROUND, apply)).toBe(true);
+    }, 45000);
+
+    it("the threshold variable moves the cut", async () => {
+      noul.slop_advisory = 0.6;
+      const apply = { OMC_JEV: "slop-warning:active", OMC_JEV_SLOP_WARNING_APPLY: "true" };
+      expect(await warns(BENIGN, apply)).toBe(false);
+      expect(await warns(BENIGN, { ...apply, OMC_JEV_SLOP_WARNING_THRESHOLD: "0.5" })).toBe(true);
+      expect(await warns(BENIGN, { ...apply, OMC_JEV_SLOP_WARNING_THRESHOLD: "0.7" })).toBe(false);
+    }, 45000);
+
+    it("an invalid threshold is reported and the default 0.8 is used", async () => {
+      const apply = {
+        OMC_JEV: "slop-warning:active",
+        OMC_JEV_SLOP_WARNING_APPLY: "1",
+        OMC_JEV_SLOP_WARNING_THRESHOLD: "banana",
+        OMC_JEV_QUIET: "0",
+      };
+      noul.slop_advisory = 0.85;
+      const result = await runScript("pre-tool-enforcer.mjs", slopInput(BENIGN), { ...env, ...apply }, cwd);
+      expect(result.stdout).toContain("SLOP WARNING");
+      expect(result.stderr).toContain("OMC_JEV_SLOP_WARNING_THRESHOLD=banana");
+      noul.slop_advisory = 0.75;
+      expect(await warns(BENIGN, apply)).toBe(false);
+      for (const bad of ["0", "1.5", "-1"]) {
+        noul.slop_advisory = 0.85;
+        expect(await warns(BENIGN, { ...apply, OMC_JEV_SLOP_WARNING_THRESHOLD: bad })).toBe(true);
+        noul.slop_advisory = 0.75;
+        expect(await warns(BENIGN, { ...apply, OMC_JEV_SLOP_WARNING_THRESHOLD: bad })).toBe(false);
+      }
+    }, 90000);
+
+    it("an HTTP error and plan mode with OMC_JEV_PLAN_MODE=off keep the heuristic", async () => {
+      noul.slop_advisory = 0.99;
+      status = 500;
+      const apply = { OMC_JEV: "slop-warning:active", OMC_JEV_SLOP_WARNING_APPLY: "1" };
+      expect(await warns(BENIGN, apply)).toBe(false);
+      expect(await warns(WORKAROUND, apply)).toBe(true);
+      // Plan mode with OMC_JEV_PLAN_MODE=off sends no request, so the heuristic decides.
+      status = 200;
+      requests.length = 0;
+      const planInput = { ...slopInput(BENIGN), permission_mode: "plan" };
+      const result = await runScript(
+        "pre-tool-enforcer.mjs",
+        planInput,
+        { ...env, ...apply, OMC_JEV_PLAN_MODE: "off" },
+        cwd,
+      );
+      expect(result.stdout).not.toContain("SLOP WARNING");
+      expect(requests).toHaveLength(0);
+    }, 45000);
+
+    it("shadow mode and an unreachable endpoint keep the heuristic even with the variable", async () => {
+      noul.slop_advisory = 0.99;
+      shadowRuns += 1;
+      expect(
+        await warns(BENIGN, { OMC_JEV: "slop-warning", OMC_JEV_SLOP_WARNING_APPLY: "1" }),
+      ).toBe(false);
+      const unreachable = {
+        OMC_JEV: "slop-warning:active",
+        OMC_JEV_SLOP_WARNING_APPLY: "1",
+        OMC_JEV_ENDPOINT: "http://127.0.0.1:9",
+      };
+      expect(await warns(BENIGN, unreachable)).toBe(false);
+      expect(await warns(WORKAROUND, unreachable)).toBe(true);
+    }, 45000);
+  });
+
+  describe("learner-extraction (OMC_JEV_LEARNER_HINT)", () => {
+    const MESSAGE =
+      "The issue was caused by a race condition. I fixed it by adding proper locking.";
+
+    function stopInput(sessionId: string) {
+      return { cwd, sessionId, directory: cwd, last_assistant_message: MESSAGE };
+    }
+
+    async function stop(sessionId: string, extra: NodeJS.ProcessEnv): Promise<Record<string, unknown>> {
+      const result = await runScript("persistent-mode.mjs", stopInput(sessionId), { ...env, ...extra }, cwd);
+      expect(result.exitCode, result.stderr).toBe(0);
+      return JSON.parse(result.stdout) as Record<string, unknown>;
+    }
+
+    it("without the variable the Stop output is the plain release", async () => {
+      noul.extractable_moment = 0.95;
+      const output = await stop("sess-learner-off", { OMC_JEV: "learner-extraction:active" });
+      expect(output).toEqual({ continue: true, suppressOutput: true });
+      expect(requests).toHaveLength(1);
+      expect(findFiles(cwd, "jev-learner-hint.json")).toEqual([]);
+    }, 20000);
+
+    it("with the variable an active answer of 0.8 or more adds the hint once per session", async () => {
+      const hint = { OMC_JEV: "learner-extraction:active", OMC_JEV_LEARNER_HINT: "1" };
+      noul.extractable_moment = 0.8;
+      const first = await stop("sess-learner-a", hint);
+      expect(first).toMatchObject({ continue: true, suppressOutput: true });
+      expect(String(first.systemMessage)).toContain("/oh-my-claudecode:remember");
+      expect(findFiles(cwd, "jev-learner-hint.json")).toHaveLength(1);
+
+      const again = await stop("sess-learner-a", hint);
+      expect(again).toEqual({ continue: true, suppressOutput: true });
+
+      const other = await stop("sess-learner-b", hint);
+      expect(String(other.systemMessage)).toContain("/oh-my-claudecode:remember");
+      expect(findFiles(cwd, "jev-learner-hint.json")).toHaveLength(2);
+    }, 40000);
+
+    it("an answer below 0.8, shadow mode and a degraded call add nothing", async () => {
+      noul.extractable_moment = 0.79;
+      const below = await stop("sess-learner-low", {
+        OMC_JEV: "learner-extraction:active",
+        OMC_JEV_LEARNER_HINT: "1",
+      });
+      expect(below).toEqual({ continue: true, suppressOutput: true });
+      expect(requests.map((r) => r.questions[0])).toEqual(["extractable_moment"]);
+
+      noul.extractable_moment = 0.99;
+      shadowRuns += 1;
+      const shadow = await stop("sess-learner-shadow", {
+        OMC_JEV: "learner-extraction",
+        OMC_JEV_LEARNER_HINT: "1",
+      });
+      expect(shadow).toEqual({ continue: true, suppressOutput: true });
+
+      const degraded = await stop("sess-learner-down", {
+        OMC_JEV: "learner-extraction:active",
+        OMC_JEV_LEARNER_HINT: "1",
+        OMC_JEV_ENDPOINT: "http://127.0.0.1:9",
+      });
+      expect(degraded).toEqual({ continue: true, suppressOutput: true });
+      expect(findFiles(cwd, "jev-learner-hint.json")).toEqual([]);
+    }, 40000);
+
+    it("a blocked Stop carries no hint and does not use up the session's hint", async () => {
+      const sessionId = "sess-learner-block";
+      const now = new Date().toISOString();
+      const ralphPath = sessionStateFile(cwd, String(env.OMC_STATE_DIR), sessionId, "ralph-state.json");
+      mkdirSync(dirname(ralphPath), { recursive: true });
+      writeFileSync(
+        ralphPath,
+        JSON.stringify({
+          active: true,
+          mode: "ralph",
+          iteration: 1,
+          max_iterations: 5,
+          session_id: sessionId,
+          project_path: cwd,
+          started_at: now,
+          last_checked_at: now,
+          updated_at: now,
+        }),
+      );
+      noul.extractable_moment = 0.95;
+      const output = await stop(sessionId, {
+        OMC_JEV: "learner-extraction:active",
+        OMC_JEV_LEARNER_HINT: "1",
+      });
+      expect(output.decision).toBe("block");
+      expect(output).not.toHaveProperty("systemMessage");
+      expect(requests.map((r) => r.questions[0])).toContain("extractable_moment");
+      expect(findFiles(cwd, "jev-learner-hint.json")).toEqual([]);
+
+      // Once the mode is gone, the next Stop of the same session shows the hint.
+      rmSync(ralphPath, { force: true });
+      const later = await stop(sessionId, {
+        OMC_JEV: "learner-extraction:active",
+        OMC_JEV_LEARNER_HINT: "1",
+      });
+      expect(String(later.systemMessage)).toContain("/oh-my-claudecode:remember");
+    }, 40000);
+  });
+
+  describe("simplifier-trigger (OMC_JEV_SIMPLIFIER_APPLY)", () => {
+    const git = (...args: string[]) =>
+      execFileSync(
+        "git",
+        ["-c", "user.name=Test", "-c", "user.email=test@example.com", ...args],
+        { cwd, stdio: "pipe" },
+      );
+
+    beforeEach(() => {
+      execFileSync("git", ["init", "-q"], { cwd, stdio: "pipe" });
+      mkdirSync(env.OMC_HOME as string, { recursive: true });
+      writeFileSync(
+        join(env.OMC_HOME as string, "config.json"),
+        JSON.stringify({ codeSimplifier: { enabled: true } }),
+      );
+      writeFileSync(join(cwd, "app.ts"), "export const a = 1;\n");
+      git("add", "app.ts");
+      git("commit", "-q", "-m", "init");
+      writeFileSync(join(cwd, "app.ts"), "export const a = 2;\n");
+    });
+
+    async function stop(extra: NodeJS.ProcessEnv): Promise<Record<string, unknown>> {
+      const result = await runScript(
+        "code-simplifier.mjs",
+        { cwd, session_id: "sess-simplifier" },
+        { ...env, ...extra },
+        cwd,
+      );
+      expect(result.exitCode, result.stderr).toBe(0);
+      return JSON.parse(result.stdout) as Record<string, unknown>;
+    }
+
+    it("without the variable the reminder is sent whatever the active answer says", async () => {
+      noul.simplification_worthy = 0.01;
+      const output = await stop({ OMC_JEV: "simplifier-trigger:active" });
+      expect(output.decision).toBe("block");
+      expect(String(output.reason)).toContain("[CODE SIMPLIFIER]");
+      expect(requests).toHaveLength(1);
+    }, 20000);
+
+    it("with the variable an active answer below 0.5 skips the reminder and writes no marker", async () => {
+      const apply = { OMC_JEV: "simplifier-trigger:active", OMC_JEV_SIMPLIFIER_APPLY: "1" };
+      noul.simplification_worthy = 0.49;
+      expect(await stop(apply)).toEqual({ continue: true });
+      expect(findFiles(cwd, "code-simplifier-triggered.marker")).toEqual([]);
+      // The next Stop asks again and can send the reminder.
+      noul.simplification_worthy = 0.5;
+      const output = await stop(apply);
+      expect(output.decision).toBe("block");
+      expect(requests).toHaveLength(2);
+    }, 40000);
+
+    it("shadow mode and a degraded call keep the reminder", async () => {
+      noul.simplification_worthy = 0.01;
+      shadowRuns += 1;
+      const shadow = await stop({ OMC_JEV: "simplifier-trigger", OMC_JEV_SIMPLIFIER_APPLY: "1" });
+      expect(shadow.decision).toBe("block");
+      rmSync(join(cwd, ".omc"), { recursive: true, force: true });
+      const degraded = await stop({
+        OMC_JEV: "simplifier-trigger:active",
+        OMC_JEV_SIMPLIFIER_APPLY: "1",
+        OMC_JEV_ENDPOINT: "http://127.0.0.1:9",
+      });
+      expect(degraded.decision).toBe("block");
+    }, 40000);
+  });
+
+  describe("loop-continuation release (OMC_JEV_LOOP_RELEASE_ONLY)", () => {
+    function state(mode: "ralph" | "autopilot", sessionId: string, overrides: Record<string, unknown> = {}) {
+      const now = new Date().toISOString();
+      return {
+        active: true,
+        mode,
+        ...(mode === "ralph"
+          ? { iteration: 1, max_iterations: 5 }
+          : { phase: "qa", current_phase: "qa", reinforcement_count: 0 }),
+        session_id: sessionId,
+        project_path: cwd,
+        started_at: now,
+        last_checked_at: now,
+        updated_at: now,
+        ...overrides,
+      };
+    }
+
+    function write(sessionId: string, file: string, content: Record<string, unknown>): string {
+      const path = sessionStateFile(cwd, String(env.OMC_STATE_DIR), sessionId, file);
+      mkdirSync(dirname(path), { recursive: true });
+      writeFileSync(path, JSON.stringify(content, null, 2));
+      return path;
+    }
+
+    const read = (path: string) => JSON.parse(readFileSync(path, "utf8")) as Record<string, unknown>;
+
+    async function stop(sessionId: string, extra: NodeJS.ProcessEnv): Promise<Record<string, unknown>> {
+      const result = await runScript(
+        "persistent-mode.mjs",
+        { cwd, sessionId, directory: cwd, last_assistant_message: "The implementation is complete." },
+        { ...env, OMC_JEV: "loop-continuation:active", ...extra },
+        cwd,
+      );
+      expect(result.exitCode, result.stderr).toBe(0);
+      const output = JSON.parse(result.stdout) as Record<string, unknown>;
+      if ("decision" in output) expect(["approve", "block"]).toContain(output.decision);
+      return output;
+    }
+
+    it("releases a Ralph Stop and leaves the mode active, then asks again at the next Stop", async () => {
+      const sessionId = "sess-release-ralph";
+      const path = write(sessionId, "ralph-state.json", state("ralph", sessionId));
+      noul.task_complete = 0.95;
+
+      const first = await stop(sessionId, { OMC_JEV_LOOP_RELEASE_ONLY: "1" });
+      expect(first).not.toHaveProperty("decision");
+      expect(first).toMatchObject({ continue: true, suppressOutput: true });
+      expect(String(first.systemMessage)).toContain("[JEV-COMPLETION]");
+      expect(String(first.systemMessage)).toContain("ralph mode stays active");
+      expect(String(first.systemMessage)).toContain("/oh-my-claudecode:cancel");
+      expect(read(path)).toMatchObject({ active: true, iteration: 2 });
+      expect(read(path)).not.toHaveProperty("completed_at");
+      expect(read(path).phase).not.toBe("complete");
+
+      const second = await stop(sessionId, { OMC_JEV_LOOP_RELEASE_ONLY: "true" });
+      expect(String(second.systemMessage)).toContain("ralph mode stays active");
+      expect(read(path)).toMatchObject({ active: true, iteration: 3 });
+      expect(requests.map((r) => r.questions[0])).toEqual(["task_complete", "task_complete"]);
+
+      noul.task_complete = 0.2;
+      const third = await stop(sessionId, { OMC_JEV_LOOP_RELEASE_ONLY: "1" });
+      expect(third.decision).toBe("block");
+      expect(read(path)).toMatchObject({ active: true, iteration: 4 });
+    }, 60000);
+
+    it.each([
+      ["a probability above 1", { type: "noul", noul: 2, confidence: 0.9 }],
+      ["a negative probability", { type: "noul", noul: -1, confidence: 0.9 }],
+      ["an answer of another type carrying a noul field", { type: "choice", choice: "a", noul: 0.9, confidence: 0.9 }],
+      ["a string probability", { type: "noul", noul: "0.9", confidence: 0.9 }],
+    ])("keeps blocking a Ralph Stop on %s", async (_label, answer) => {
+      const sessionId = "sess-release-malformed";
+      const path = write(sessionId, "ralph-state.json", state("ralph", sessionId));
+      rawAnswer = answer;
+      const output = await stop(sessionId, { OMC_JEV_LOOP_RELEASE_ONLY: "1" });
+      expect(output.decision).toBe("block");
+      expect(JSON.stringify(output)).not.toContain("[JEV-COMPLETION]");
+      expect(read(path)).toMatchObject({ active: true, iteration: 2 });
+      expect(read(path)).not.toHaveProperty("completed_at");
+    }, 20000);
+
+    it("releases silently when cancel removes the state while Jev is answering", async () => {
+      const sessionId = "sess-release-cancel";
+      const path = write(sessionId, "ralph-state.json", state("ralph", sessionId));
+      noul.task_complete = 0.95;
+      onTaskComplete = () => rmSync(path, { force: true });
+      const output = await stop(sessionId, { OMC_JEV_LOOP_RELEASE_ONLY: "1" });
+      expect(output).toEqual({ continue: true, suppressOutput: true });
+      expect(existsSync(path)).toBe(false);
+    }, 20000);
+
+    it.each([
+      ["with OMC_JEV_LOOP_RELEASE_ONLY", { OMC_JEV_LOOP_RELEASE_ONLY: "1" }],
+      ["without OMC_JEV_LOOP_RELEASE_ONLY", {}],
+    ])("releases an autopilot Stop silently when the mode is completed while Jev is answering (%s)", async (_label, env) => {
+      const sessionId = `sess-release-autopilot-done-${Object.keys(env).length}`;
+      const path = write(sessionId, "autopilot-state.json", state("autopilot", sessionId));
+      noul.task_complete = 0.95;
+      // What transitionPhase(..., "complete") persists: the file stays, inactive.
+      onTaskComplete = () => writeFileSync(path, JSON.stringify({
+        ...read(path), active: false, phase: "complete", current_phase: "complete", updated_at: "2099-01-01T00:00:00.000Z",
+      }));
+
+      const output = await stop(sessionId, env);
+      expect(output).toEqual({ continue: true, suppressOutput: true });
+      expect(read(path)).toMatchObject({ active: false, phase: "complete" });
+    }, 20000);
+
+    it("releases a Ralph Stop silently when the state becomes inactive while Jev is answering", async () => {
+      const sessionId = "sess-release-ralph-inactive";
+      const path = write(sessionId, "ralph-state.json", state("ralph", sessionId));
+      noul.task_complete = 0.95;
+      onTaskComplete = () => writeFileSync(path, JSON.stringify({ ...read(path), active: false }));
+
+      const output = await stop(sessionId, {});
+      expect(output).toEqual({ continue: true, suppressOutput: true });
+      expect(read(path)).toMatchObject({ active: false });
+      expect(read(path)).not.toHaveProperty("completed_at");
+    }, 20000);
+
+    it("keeps blocking when the Ralph state changes while Jev is answering", async () => {
+      const sessionId = "sess-release-stale";
+      const path = write(sessionId, "ralph-state.json", state("ralph", sessionId));
+      noul.task_complete = 0.95;
+      onTaskComplete = () => {
+        const current = read(path);
+        writeFileSync(path, JSON.stringify({ ...current, iteration: Number(current.iteration) + 1 }));
+      };
+
+      const output = await stop(sessionId, { OMC_JEV_LOOP_RELEASE_ONLY: "1" });
+      expect(output.decision).toBe("block");
+      expect(String(output.reason)).toContain("[RALPH LOOP - ITERATION");
+      expect(read(path)).toMatchObject({ active: true, iteration: 3 });
+    }, 20000);
+
+    it.each([
+      ["a phase transition", (current: Record<string, unknown>) => ({ ...current, phase: "validation", current_phase: "validation" })],
+      ["a generation stamp only", (current: Record<string, unknown>) => ({ ...current, _meta: { written_at: "2099-01-01T00:00:00.000Z" } })],
+    ])("keeps blocking when the autopilot state changes by %s while Jev is answering", async (_label, change) => {
+      const sessionId = `sess-release-autopilot-changed-${_label.split(" ")[0]}`;
+      const path = write(sessionId, "autopilot-state.json", state("autopilot", sessionId));
+      noul.task_complete = 0.95;
+      onTaskComplete = () => writeFileSync(path, JSON.stringify(change(read(path))));
+
+      const output = await stop(sessionId, { OMC_JEV_LOOP_RELEASE_ONLY: "1" });
+      expect(output.decision).toBe("block");
+      expect(String(output.reason)).toContain("[AUTOPILOT - Phase:");
+      expect(read(path)).toMatchObject({ active: true });
+    }, 20000);
+
+    it("without the variable a complete answer still completes the mode", async () => {
+      const sessionId = "sess-release-off";
+      const path = write(sessionId, "ralph-state.json", state("ralph", sessionId));
+      noul.task_complete = 0.95;
+      const output = await stop(sessionId, {});
+      expect(String(output.systemMessage)).toContain("ralph mode exited");
+      expect(read(path)).toMatchObject({ active: false, phase: "complete" });
+    }, 20000);
+
+    it("releases at the iteration limit without completing the extended mode", async () => {
+      const sessionId = "sess-release-extend";
+      const path = write(
+        sessionId,
+        "ralph-state.json",
+        state("ralph", sessionId, { iteration: 3, max_iterations: 3 }),
+      );
+      noul.task_complete = 0.95;
+      const output = await stop(sessionId, { OMC_JEV_LOOP_RELEASE_ONLY: "1" });
+      expect(String(output.systemMessage)).toContain("ralph mode stays active");
+      expect(read(path)).toMatchObject({ active: true, max_iterations: 13 });
+      expect(read(path).phase).not.toBe("complete");
+    }, 20000);
+
+    it("releases an autopilot Stop and keeps its reinforcement count", async () => {
+      const sessionId = "sess-release-autopilot";
+      const path = write(sessionId, "autopilot-state.json", state("autopilot", sessionId));
+      noul.task_complete = 0.95;
+      const output = await stop(sessionId, { OMC_JEV_LOOP_RELEASE_ONLY: "1" });
+      expect(String(output.systemMessage)).toContain("autopilot mode stays active");
+      expect(read(path)).toMatchObject({ active: true, phase: "qa", reinforcement_count: 1 });
+    }, 20000);
+
+    it("keeps asking Jev after release-only autopilot passes the reinforcement cap", async () => {
+      const sessionId = "sess-release-autopilot-cap";
+      const path = write(
+        sessionId,
+        "autopilot-state.json",
+        state("autopilot", sessionId, { reinforcement_count: 19 }),
+      );
+      noul.task_complete = 0.95;
+
+      const first = await stop(sessionId, { OMC_JEV_LOOP_RELEASE_ONLY: "1" });
+      expect(String(first.systemMessage)).toContain("autopilot mode stays active");
+      expect(read(path)).toMatchObject({ active: true, reinforcement_count: 20 });
+      expect(requests).toHaveLength(1);
+
+      noul.task_complete = 0.2;
+      const second = await stop(sessionId, { OMC_JEV_LOOP_RELEASE_ONLY: "1" });
+      expect(second.decision).toBe("block");
+      expect(String(second.reason)).toContain("[AUTOPILOT - Phase: qa]");
+      expect(read(path)).toMatchObject({ active: true, reinforcement_count: 20 });
+      expect(requests).toHaveLength(2);
+    }, 40000);
+
+    it("keeps the reinforcement-cap fallback when release-only Jev has no answer", async () => {
+      const sessionId = "sess-release-autopilot-cap-degraded";
+      const staleish = new Date(Date.now() - 90 * 60 * 1000).toISOString();
+      const path = write(
+        sessionId,
+        "autopilot-state.json",
+        state("autopilot", sessionId, { reinforcement_count: 20, last_checked_at: staleish }),
+      );
+      status = 500;
+
+      const output = await stop(sessionId, { OMC_JEV_LOOP_RELEASE_ONLY: "1" });
+      expect(output).toEqual({ continue: true, suppressOutput: true });
+      // No valid answer, no heartbeat: the state can still go stale.
+      expect(read(path)).toMatchObject({ active: true, reinforcement_count: 20, last_checked_at: staleish });
+      expect(requests).toHaveLength(1);
+    }, 20000);
+
+    it("refreshes the heartbeat of a capped autopilot after an active answer and keeps the count", async () => {
+      const staleish = new Date(Date.now() - 90 * 60 * 1000).toISOString();
+      const startedAt = Date.now();
+      for (const [answer, sessionId] of [
+        [0.2, "sess-release-heartbeat-block"],
+        [0.95, "sess-release-heartbeat-release"],
+      ] as const) {
+        const path = write(
+          sessionId,
+          "autopilot-state.json",
+          state("autopilot", sessionId, {
+            reinforcement_count: 20,
+            started_at: staleish,
+            last_checked_at: staleish,
+            updated_at: staleish,
+          }),
+        );
+        noul.task_complete = answer;
+        const output = await stop(sessionId, { OMC_JEV_LOOP_RELEASE_ONLY: "1" });
+        expect(output.decision === "block").toBe(answer < 0.5);
+        const after = read(path);
+        expect(after).toMatchObject({ active: true, reinforcement_count: 20 });
+        expect(Date.parse(String(after.last_checked_at))).toBeGreaterThanOrEqual(startedAt);
+      }
+    }, 40000);
+
+    it("releases a capped autopilot Stop when cancel removes the state while Jev answers incomplete", async () => {
+      const sessionId = "sess-release-cap-cancel";
+      const path = write(sessionId, "autopilot-state.json", state("autopilot", sessionId, { reinforcement_count: 20 }));
+      noul.task_complete = 0.2;
+      onTaskComplete = () => rmSync(path, { force: true });
+      const output = await stop(sessionId, { OMC_JEV_LOOP_RELEASE_ONLY: "1" });
+      expect(output).toEqual({ continue: true, suppressOutput: true });
+      expect(existsSync(path)).toBe(false);
+      expect(requests).toHaveLength(1);
+    }, 20000);
+
+    it("leaves a capped autopilot state untouched when Jev is off", async () => {
+      const sessionId = "sess-release-heartbeat-off";
+      const staleish = new Date(Date.now() - 90 * 60 * 1000).toISOString();
+      const path = write(
+        sessionId,
+        "autopilot-state.json",
+        state("autopilot", sessionId, { reinforcement_count: 20, last_checked_at: staleish }),
+      );
+      const output = await stop(sessionId, { OMC_JEV: "off", OMC_JEV_LOOP_RELEASE_ONLY: "1" });
+      expect(output).toEqual({ continue: true, suppressOutput: true });
+      expect(read(path)).toMatchObject({ reinforcement_count: 20, last_checked_at: staleish });
+      expect(requests).toHaveLength(0);
+    }, 20000);
+
+    it("logs the capped autopilot release as a non-comparable heuristic in active mode and a blocking one below the cap", async () => {
+      const readRows = () => {
+        const logPath = join(cwd, "jev-logs", "shadow.jsonl");
+        return (existsSync(logPath) ? readFileSync(logPath, "utf8").split("\n") : [])
+          .filter(Boolean)
+          .map((line) => JSON.parse(line) as { mode: string; heuristic: unknown })
+          .filter((row) => row.mode === "active");
+      };
+      noul.task_complete = 0.2;
+      const capped = "sess-release-log-active-capped";
+      write(capped, "autopilot-state.json", state("autopilot", capped, { reinforcement_count: 20 }));
+      await stop(capped, { OMC_JEV_LOOP_RELEASE_ONLY: "1" });
+      expect(readRows().map((row) => row.heuristic)).toEqual([null]);
+      expect(requests[0].state).toMatchObject({ should_block: false });
+
+      const below = "sess-release-log-active-below";
+      write(below, "autopilot-state.json", state("autopilot", below, { reinforcement_count: 5 }));
+      await stop(below, { OMC_JEV_LOOP_RELEASE_ONLY: "1" });
+      expect(readRows().map((row) => row.heuristic)).toEqual([null, false]);
+      expect(requests[1].state).toMatchObject({ should_block: true });
+    }, 40000);
+
+    it("logs the capped autopilot release as a non-comparable heuristic in shadow mode", async () => {
+      const sessionId = "sess-release-autopilot-cap-shadow";
+      write(sessionId, "autopilot-state.json", state("autopilot", sessionId, { reinforcement_count: 20 }));
+      noul.task_complete = 0.95;
+      shadowRuns += 1;
+
+      const output = await stop(sessionId, { OMC_JEV: "loop-continuation", OMC_JEV_LOOP_RELEASE_ONLY: "1" });
+      expect(output).toEqual({ continue: true, suppressOutput: true });
+      await waitFor(
+        () => {
+          const logPath = join(cwd, "jev-logs", "shadow.jsonl");
+          const entry = (existsSync(logPath) ? readFileSync(logPath, "utf8").trim().split("\n") : [])
+            .filter(Boolean)
+            .map((line) => JSON.parse(line) as { point: string; mode: string; heuristic: unknown; state?: { should_block?: boolean } })
+            .find((line) => line.point === "loop-continuation" && line.mode === "shadow");
+          expect(entry).toBeDefined();
+          expect(entry?.heuristic).toBeNull();
+          expect(entry?.state?.should_block).toBe(false);
+        },
+        { timeout: 10000, interval: 50 },
+      );
+    }, 20000);
+
+    it("a released child Ralph hands the Stop to the active autopilot", async () => {
+      const sessionId = "sess-release-parent";
+      const ralphPath = write(sessionId, "ralph-state.json", state("ralph", sessionId));
+      const autopilotPath = write(sessionId, "autopilot-state.json", state("autopilot", sessionId));
+      noulByMode = { ralph: 0.95, autopilot: 0.2 };
+      const output = await stop(sessionId, { OMC_JEV_LOOP_RELEASE_ONLY: "1" });
+      expect(output.decision).toBe("block");
+      expect(String(output.reason)).toContain("[AUTOPILOT - Phase: qa]");
+      expect(read(ralphPath)).toMatchObject({ active: true });
+      expect(read(autopilotPath)).toMatchObject({ active: true, reinforcement_count: 1 });
+    }, 20000);
+  });
+
+  describe("intent (OMC_JEV_INTENT_APPLY)", () => {
+    function input(prompt: string) {
+      return { prompt, cwd, session_id: "test-sess-intent" };
+    }
+
+    async function detectIntent(prompt: string, extra: NodeJS.ProcessEnv): Promise<{ stdout: string; stderr: string; exitCode: number }> {
+      const result = await runScript("keyword-detector.mjs", input(prompt), { ...env, ...extra }, cwd);
+      expect(result.exitCode, result.stderr).toBe(0);
+      return result;
+    }
+
+    it("without the variable the heuristic decides, whatever the active answer says", async () => {
+      const intentPrompt =
+        "Our support team is seeing a pattern where users from certain time zones cannot schedule meetings. " +
+        "They report seeing an error about 'invalid time' even though the time is valid. " +
+        "This affects a subset of our customer base and needs investigation.";
+      const otherPrompt = "Fix the typo in the README.";
+
+      noul.intent = 0.99;
+      let result = await detectIntent(intentPrompt, { OMC_JEV: "intent:active" });
+      expect(result.stdout).not.toContain("intent");
+      expect(requests.map((r) => r.questions[0])).toContain("intent");
+
+      requests.length = 0;
+      noul.intent = 0.01;
+      result = await detectIntent(otherPrompt, { OMC_JEV: "intent:active" });
+      expect(result.stdout).not.toContain("intent");
+      expect(requests.length).toBeGreaterThan(0);
+    }, 30000);
+
+    it("with the variable an active answer at 0.5 or above invokes the intent skill", async () => {
+      const intentPrompt =
+        "The payment processing endpoint started returning 503 errors sporadically. " +
+        "We cannot process charges, affecting revenue. We need to understand the root cause.";
+
+      const apply = { OMC_JEV: "intent:active", OMC_JEV_INTENT_APPLY: "1" };
+      noul.intent = 0.8;
+      let result = await detectIntent(intentPrompt, apply);
+      expect(result.stdout).toContain("intent");
+
+      requests.length = 0;
+      noul.intent = 0.49;
+      result = await detectIntent(intentPrompt, apply);
+      expect(result.stdout).not.toContain("intent");
+
+      requests.length = 0;
+      noul.intent = 0.5;
+      result = await detectIntent(intentPrompt, apply);
+      expect(result.stdout).toContain("intent");
+    }, 45000);
+
+    it("with the variable a boolean true answer invokes the intent skill", async () => {
+      const intentPrompt =
+        "Checkout fails for customers paying in euros. We need to find out why before Friday.";
+      const apply = { OMC_JEV: "intent:active", OMC_JEV_INTENT_APPLY: "1" };
+
+      rawAnswer = { type: "noul", noul: true, confidence: 0.9 };
+      let result = await detectIntent(intentPrompt, apply);
+      expect(result.stdout).toContain("intent");
+
+      rawAnswer = { type: "noul", noul: false, confidence: 0.9 };
+      result = await detectIntent(intentPrompt, apply);
+      expect(result.stdout).not.toContain("intent");
+    }, 30000);
+
+    it("keywordDetector.disabled keeps intent off even with a positive active answer", async () => {
+      const intentPrompt =
+        "Invoices are emailed twice to some customers. We need to understand the cause.";
+      const apply = { OMC_JEV: "intent:active", OMC_JEV_INTENT_APPLY: "1" };
+      noul.intent = 0.99;
+
+      let result = await detectIntent(intentPrompt, apply);
+      expect(result.stdout).toContain("intent");
+
+      mkdirSync(join(cwd, ".claude"), { recursive: true });
+      writeFileSync(
+        join(cwd, ".claude", "omc.jsonc"),
+        JSON.stringify({ keywordDetector: { disabled: ["intent"] } }),
+      );
+      result = await detectIntent(intentPrompt, apply);
+      expect(result.stdout).not.toContain("intent");
+    }, 30000);
+
+    it("shadow mode and a degraded call keep the heuristic", async () => {
+      const intentPrompt =
+        "We have a data inconsistency issue where the user profile cache and the database don't sync. " +
+        "This is causing user-facing bugs.";
+
+      noul.intent = 0.99;
+      shadowRuns += 1;
+      let result = await detectIntent(intentPrompt, {
+        OMC_JEV: "intent",
+        OMC_JEV_INTENT_APPLY: "1",
+      });
+      expect(result.stdout).not.toContain("intent");
+
+      requests.length = 0;
+      const degraded = {
+        OMC_JEV: "intent:active",
+        OMC_JEV_INTENT_APPLY: "1",
+        OMC_JEV_ENDPOINT: "http://127.0.0.1:9",
+      };
+      result = await detectIntent(intentPrompt, degraded);
+      expect(result.stdout).not.toContain("intent");
+    }, 45000);
+
+    it("an HTTP error keeps the heuristic even with the variable", async () => {
+      const intentPrompt =
+        "The API response times have increased significantly over the past week. " +
+        "Customers are experiencing timeouts.";
+
+      noul.intent = 0.99;
+      status = 500;
+      const apply = { OMC_JEV: "intent:active", OMC_JEV_INTENT_APPLY: "1" };
+      const result = await detectIntent(intentPrompt, apply);
+      expect(result.stdout).not.toContain("intent");
+    }, 30000);
+  });
+});

@@ -5,7 +5,7 @@
  * (judgment point, heuristic twin, shadow mode, degraded mode).
  */
 /** The five judgment points, in delivery order. */
-export type JudgmentPointName = 'intent' | 'loop-continuation' | 'skill-trigger' | 'model-routing' | 'context-pruning' | 'task-size' | 'ralph-verdict' | 'learner-extraction' | 'slop-warning' | 'simplifier-trigger';
+export type JudgmentPointName = 'intent' | 'loop-continuation' | 'skill-trigger' | 'model-routing' | 'context-pruning' | 'task-size' | 'ralph-verdict' | 'learner-extraction' | 'slop-warning' | 'simplifier-trigger' | 'compaction';
 /**
  * TypeSafe question shapes. The API rejects any other casing with HTTP 400,
  * so these literals are the wire values.
@@ -27,7 +27,8 @@ export interface JevAnswer {
     type: string;
     choice?: string;
     score?: number;
-    noul?: boolean;
+    /** Probability of "yes" (0-1), as the API returns it; read it with noulAnswerIsYes(). */
+    noul?: number | boolean;
     probabilities?: Record<string, number>;
     confidence?: number;
 }

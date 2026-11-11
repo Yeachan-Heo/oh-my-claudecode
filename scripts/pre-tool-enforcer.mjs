@@ -23,7 +23,7 @@ import { readStdin } from './lib/stdin.mjs';
 import { resolveConfiguredAgentModel } from './lib/agent-model-config.mjs';
 import { BOUNDED_GIT_TIMEOUT_MS } from './lib/bounded-git-timeout.mjs';
 import { isSkillVisibleToUser } from './lib/skill-entitlements.mjs';
-import { isJevShadowOptedIn, recordJevShadow } from './lib/jev-shadow.mjs';
+import { isJevShadowOptedIn, jevNoulOf, recordJevShadow } from './lib/jev-shadow.mjs';
 import { resolveExcerptChars } from './jev-resolve.mjs';
 
 // Inlined from src/config/models.ts — avoids a dist/ import so the hook works
@@ -569,7 +569,7 @@ const SLOP_WARNING_QUESTIONS = {
   },
 };
 
-const MODEL_ROUTING_QUESTIONS = {
+const MODEL_ROUTING_QUESTIONS_BASE = {
   'model-tier': {
     type: 'choice',
     instructions:
@@ -601,6 +601,31 @@ const MODEL_ROUTING_QUESTIONS = {
   },
 };
 
+// OMC_JEV_MODEL_ROUTING_HINTS=1 adds two sentences to the effort question and a clause to
+// the Haiku description of the model-tier question, so that a large amount of mechanical work
+// is neither rated "low" nor sent to a more expensive model only because of its size.
+// Measured on the Polish original of these texts only; see docs/HOOKS.md. Off by default: the questions are
+// then exactly the base questions above.
+const MODEL_ROUTING_HINT_EFFORT =
+  ' Mechanical work gets the low level only when it is short: one action or a few. ' +
+  'Mechanical work with more than ten items or steps gets the medium level, ' +
+  'and with several dozen or more, or when every item has to be checked, the high level.';
+const MODEL_ROUTING_HINT_HAIKU = '; also when there are very many such actions or each one has to be checked';
+
+function getModelRoutingQuestions(env = process.env) {
+  const questions = JSON.parse(JSON.stringify(MODEL_ROUTING_QUESTIONS_BASE));
+  if (isModelRoutingHintsEnabled(env)) {
+    questions.effort.instructions += MODEL_ROUTING_HINT_EFFORT;
+    questions['model-tier'].criteria.haiku += MODEL_ROUTING_HINT_HAIKU;
+  }
+  if (isModelRoutingFableOptinEnabled(env)) {
+    questions['model-tier'].criteria.fable = 'Fable: highest-complexity tier for exceptionally demanding reasoning tasks';
+  }
+  return questions;
+}
+
+const MODEL_ROUTING_QUESTIONS = getModelRoutingQuestions();
+
 // Subagent reasoning effort chosen by the model-routing "effort" score (0-4).
 // The five criteria are ordered low, medium, high, xhigh, max, so the score is
 // the expected value over that scale. It is rounded to the nearest level; an
@@ -611,15 +636,21 @@ const MODEL_ROUTING_QUESTIONS = {
 // cap is not needed as a brake and would cut them where the work needs them.
 // Set a lower cap to restrict it.
 // When the point is active and Jev returns no usable effort score, an
-// explicit effort above the cap is lowered to the cap.
+// explicit effort above the cap is lowered to the cap. With
+// OMC_JEV_MAX_EFFORT_ALWAYS=1 the cap also bounds the explicit effort of every
+// other Task/Agent call (see capExplicitEffort).
 const EFFORT_LEVELS = ['low', 'medium', 'high', 'xhigh', 'max'];
 const DEFAULT_MAX_EFFORT = 'max';
+
+// The cap may be read more than once in one hook run; a bad value is reported once.
+let maxEffortWarned = false;
 
 function resolveMaxEffort(env = process.env) {
   const raw = String(env.OMC_JEV_MAX_EFFORT ?? '').trim().toLowerCase();
   if (EFFORT_LEVELS.includes(raw)) return raw;
   // A typo in a cap must not silently lift it to the most expensive level.
-  if (raw && env.OMC_JEV_QUIET !== '1') {
+  if (raw && env.OMC_JEV_QUIET !== '1' && !maxEffortWarned) {
+    maxEffortWarned = true;
     console.error('[jev] model-routing: OMC_JEV_MAX_EFFORT=' + raw.slice(0, 40) + ' is not one of ' + EFFORT_LEVELS.join(', ') + '; using ' + DEFAULT_MAX_EFFORT);
   }
   return DEFAULT_MAX_EFFORT;
@@ -629,6 +660,39 @@ function capEffort(effort, maxEffort) {
   return EFFORT_LEVELS.indexOf(effort.toLowerCase()) > EFFORT_LEVELS.indexOf(maxEffort) ? maxEffort : effort;
 }
 
+// OMC_JEV_MAX_EFFORT_ALWAYS=1 makes OMC_JEV_MAX_EFFORT a limit for every Task/Agent call,
+// not only for the effort the active model-routing point sets: an explicit effort above
+// the cap is lowered also when the point is off or in shadow mode, when Jev is not asked
+// about the call or gives no usable answer, and when the hook fails. Off by default.
+function isMaxEffortAlwaysEnabled(env = process.env) {
+  return ['1', 'true'].includes(String(env.OMC_JEV_MAX_EFFORT_ALWAYS ?? '').trim().toLowerCase());
+}
+
+// Returns a copy of the Task/Agent input with its effort lowered to the cap, or null
+// when the variable is off, the call has no effort, or its effort is within the cap.
+// No effort is ever added.
+function capExplicitEffort(toolInput) {
+  if (!isMaxEffortAlwaysEnabled() || !toolInput || typeof toolInput.effort !== 'string') return null;
+  const capped = capEffort(toolInput.effort, resolveMaxEffort());
+  return capped === toolInput.effort ? null : { ...toolInput, effort: capped };
+}
+
+// The same cap on main()'s error path, where every other change to the call is dropped.
+// The error may come before the hook input was parsed, so the raw input is parsed here.
+// Returns `{ input, toolInput }` (the parsed hook input and the capped call) or null.
+function capExplicitEffortAfterError(data, rawInput) {
+  if (!isMaxEffortAlwaysEnabled()) return null;
+  try {
+    const input = data && (data.toolInput || data.tool_input) ? data : JSON.parse(rawInput);
+    const toolName = input?.tool_name || input?.toolName;
+    if (toolName !== 'Task' && toolName !== 'Agent') return null;
+    const toolInput = capExplicitEffort(input.toolInput || input.tool_input);
+    return toolInput ? { input, toolInput } : null;
+  } catch {
+    return null;
+  }
+}
+
 function effortFromScore(score, maxEffort) {
   const below = Math.floor(score);
   const fraction = score - below;
@@ -636,8 +700,29 @@ function effortFromScore(score, maxEffort) {
   return capEffort(EFFORT_LEVELS[index], maxEffort);
 }
 
+// OMC_JEV_SLOP_WARNING_APPLY=1 lets the active `slop-warning` answer decide whether the
+// warning is shown. Off by default: the heuristic decides and the answer is only logged.
+function isSlopWarningApplyEnabled(env = process.env) {
+  return ['1', 'true'].includes(String(env.OMC_JEV_SLOP_WARNING_APPLY ?? '').trim().toLowerCase());
+}
+
+// Probability of "yes" at or above which the active answer warns. Default 0.8;
+// OMC_JEV_SLOP_WARNING_THRESHOLD overrides it with a number above 0 up to 1.
+const DEFAULT_SLOP_WARNING_THRESHOLD = 0.8;
+
+function resolveSlopWarningThreshold(env = process.env) {
+  const raw = String(env.OMC_JEV_SLOP_WARNING_THRESHOLD ?? '').trim();
+  if (!raw) return DEFAULT_SLOP_WARNING_THRESHOLD;
+  const value = Number(raw);
+  if (Number.isFinite(value) && value > 0 && value <= 1) return value;
+  if (env.OMC_JEV_QUIET !== '1') {
+    console.error('[jev] slop-warning: OMC_JEV_SLOP_WARNING_THRESHOLD=' + raw.slice(0, 40) + ' is not a number above 0 up to 1; using ' + DEFAULT_SLOP_WARNING_THRESHOLD);
+  }
+  return DEFAULT_SLOP_WARNING_THRESHOLD;
+}
+
 function recordSlopWarningShadow(toolName, toolInput, warned, permissionMode) {
-  recordJevShadow({
+  return recordJevShadow({
     point: 'slop-warning',
     state: { toolName, toolInput },
     questions: SLOP_WARNING_QUESTIONS,
@@ -672,6 +757,16 @@ function isUnpinnedModel(model) {
 
 function isModelRoutingAllAgentsEnabled(env = process.env) {
   return ['1', 'true'].includes(String(env.OMC_JEV_MODEL_ROUTING_ALL_AGENTS ?? '').trim().toLowerCase());
+}
+
+// OMC_JEV_MODEL_ROUTING_HINTS=1 adds the routing hints to the model-routing questions.
+function isModelRoutingHintsEnabled(env = process.env) {
+  return ['1', 'true'].includes(String(env.OMC_JEV_MODEL_ROUTING_HINTS ?? '').trim().toLowerCase());
+}
+
+// OMC_JEV_MODEL_ROUTING_FABLE=1 enables fable as an opt-in model choice.
+function isModelRoutingFableOptinEnabled(env = process.env) {
+  return ['1', 'true'].includes(String(env.OMC_JEV_MODEL_ROUTING_FABLE ?? '').trim().toLowerCase());
 }
 
 // The `model:` an agent definition declares, searched the way Claude Code finds the
@@ -838,7 +933,11 @@ function recordModelRoutingShadow(toolName, toolInput, updatedToolInput, permiss
   // about a call whose model is known, whether the call or the marker named it.
   const selectedModel = marker?.model || modifiedInput.model || readAgentDefinitionModel(originalInput.subagent_type);
   const model = isTierAlias(selectedModel) ? selectedModel.toLowerCase() : normalizeToCcAlias(selectedModel);
-  const knownTier = ['haiku', 'sonnet', 'opus'].includes(model);
+  const allowedTiers = ['haiku', 'sonnet', 'opus'];
+  if (isModelRoutingFableOptinEnabled()) {
+    allowedTiers.push('fable');
+  }
+  const knownTier = allowedTiers.includes(model);
   // A call with no model of its own and no model in a plugin, project or user agent
   // definition is unpinned; only OMC_JEV_MODEL_ROUTING_ALL_AGENTS asks about those.
   const unpinned = !knownTier && isModelRoutingAllAgentsEnabled()
@@ -900,7 +999,11 @@ function recordModelRoutingShadow(toolName, toolInput, updatedToolInput, permiss
     // and a tier alias the provider cannot resolve is denied: set the alias on such a call
     // only when it resolves to a provider model.
     const inheritsSessionModel = unpinned && isForceInheritEnabled() && !resolveTierAliasToSafeModel(jevChoice);
-    if (jevChoice && ['haiku', 'sonnet', 'opus'].includes(jevChoice) && !inheritsSessionModel) {
+    const allowedJevChoices = ['haiku', 'sonnet', 'opus'];
+    if (isModelRoutingFableOptinEnabled()) {
+      allowedJevChoices.push('fable');
+    }
+    if (jevChoice && allowedJevChoices.includes(jevChoice) && !inheritsSessionModel) {
       ensureUpdated().model = jevChoice;
     }
 
@@ -956,8 +1059,13 @@ function generateSlopWarning(data, toolName) {
   const inspectedText = collectStringValues(toolInput)
     .concat(collectStringValues(promptLikeFields))
     .join('\n');
-  const warned = shouldWarnForSlopFallbackLanguage(data, toolName, inspectedText);
-  recordSlopWarningShadow(toolName, data.toolInput || data.tool_input || {}, warned, data.permission_mode);
+  let warned = shouldWarnForSlopFallbackLanguage(data, toolName, inspectedText);
+  const jevResult = recordSlopWarningShadow(toolName, data.toolInput || data.tool_input || {}, warned, data.permission_mode);
+  if (isSlopWarningApplyEnabled()) {
+    // Only an active answer decides; shadow, degraded and missing answers keep the heuristic.
+    const noul = jevNoulOf(jevResult, 'slop_advisory');
+    if (noul !== undefined) warned = noul >= resolveSlopWarningThreshold();
+  }
   if (!warned) return '';
 
   return '[SLOP WARNING] Detected fallback/workaround language in this tool input. ' +
@@ -2146,8 +2254,9 @@ async function main() {
   }
 
   let data = {};
+  let input = '';
   try {
-    const input = await readStdin();
+    input = await readStdin();
 
     const toolName = extractJsonField(input, 'tool_name') || extractJsonField(input, 'toolName', 'unknown');
     const directory = extractJsonField(input, 'cwd') || extractJsonField(input, 'directory', process.cwd());
@@ -2356,6 +2465,9 @@ async function main() {
       const jevUpdated = recordModelRoutingShadow(toolName, toolInput, updatedToolInput, data.permission_mode, data.transcript_path || data.transcriptPath || '', directory, data.session_id || data.sessionId || '', stateDir);
       // In active mode, Jev may override the model choice
       if (jevUpdated) updatedToolInput = jevUpdated;
+      // OMC_JEV_MAX_EFFORT_ALWAYS=1: the cap holds whether or not Jev set the effort.
+      const effortCapped = capExplicitEffort(updatedToolInput || toolInput);
+      if (effortCapped) updatedToolInput = effortCapped;
     }
 
     // Send notification when AskUserQuestion is about to execute (user input needed)
@@ -2507,8 +2619,18 @@ async function main() {
       }
     }, data, 2);
   } catch (error) {
-    // On error, always continue
-    emitPreToolUseOutput({ continue: true, suppressOutput: true }, data);
+    // On error, always continue. With OMC_JEV_MAX_EFFORT_ALWAYS=1 a Task/Agent call
+    // still does not run above the effort cap; nothing else in it is changed.
+    const capped = capExplicitEffortAfterError(data, input);
+    if (capped) {
+      emitPreToolUseOutput({
+        continue: true,
+        suppressOutput: true,
+        hookSpecificOutput: { hookEventName: 'PreToolUse', updatedInput: capped.toolInput },
+      }, capped.input);
+    } else {
+      emitPreToolUseOutput({ continue: true, suppressOutput: true }, data);
+    }
   }
 }
 

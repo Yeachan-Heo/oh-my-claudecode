@@ -1,5 +1,6 @@
 {
   "description": "OMC orchestration hooks with async capabilities",
+  "modules": ["./jev-compaction.mjs"],
   "hooks": {
     "UserPromptSubmit": [
       {
@@ -113,7 +114,7 @@
           {
             "type": "command",
             "command": "node",
-            "timeout": 5,
+            "timeout": 60,
             "args": [
               "${CLAUDE_PLUGIN_ROOT}/scripts/run.cjs",
               "${CLAUDE_PLUGIN_ROOT}/scripts/pre-tool-enforcer.mjs"
@@ -159,7 +160,7 @@
           {
             "type": "command",
             "command": "node",
-            "timeout": 5,
+            "timeout": 10,
             "args": [
               "${CLAUDE_PLUGIN_ROOT}/scripts/run.cjs",
               "${CLAUDE_PLUGIN_ROOT}/scripts/post-tool-verifier.mjs"
@@ -319,7 +320,7 @@
           {
             "type": "command",
             "command": "node",
-            "timeout": 10,
+            "timeout": 20,
             "args": [
               "${CLAUDE_PLUGIN_ROOT}/scripts/run.cjs",
               "${CLAUDE_PLUGIN_ROOT}/scripts/persistent-mode.mjs"
@@ -337,7 +338,7 @@
           {
             "type": "command",
             "command": "node",
-            "timeout": 5,
+            "timeout": 10,
             "args": [
               "${CLAUDE_PLUGIN_ROOT}/scripts/run.cjs",
               "${CLAUDE_PLUGIN_ROOT}/scripts/code-simplifier.mjs"

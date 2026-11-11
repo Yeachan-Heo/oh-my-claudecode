@@ -41,8 +41,8 @@ export const APOSTROPHE_EXTRA = 4;
 export const LENGTH_CUT_AT = 8190; // where Git Bash cuts the -c argument (measured: 8185 passes, 8195 is cut)
 export const TRUNCATION_CAUSE_AT = 7500; // errors.jsonl: an unexpected EOF of a command this long (effective) counts as truncation
 export const SYNTAX_TIMEOUT_MS = 1000;
-// OMC_SHELL_SYNTAX_TIMEOUT_MS: limit of bash -n in the hook (100-3000 ms, default 1000). pre-tool-enforcer has a 5 s budget, and a
-// blocked spawnSync cannot be interrupted, so the limit stays well below it.
+// OMC_SHELL_SYNTAX_TIMEOUT_MS: limit of bash -n in the hook (100-3000 ms, default 1000). a blocked spawnSync cannot be interrupted, and
+// pre-tool-enforcer may wait for Jev requests too, so the limit stays small.
 export function syntaxTimeoutMs(env = process.env) {
   const value = Number(env.OMC_SHELL_SYNTAX_TIMEOUT_MS);
   return Number.isFinite(value) && value >= 100 && value <= 3000 ? value : SYNTAX_TIMEOUT_MS;
@@ -825,7 +825,9 @@ export function bashSyntaxCheck(text, { platform = process.platform, env = proce
   const r = spawnSync(bash, ['--norc', '--noprofile', '-O', 'extglob', '-n'], { input: text, encoding: 'utf8', timeout: timeoutMs, windowsHide: true, env: childEnv, maxBuffer: 1024 * 1024 });
   const ms = Number(process.hrtime.bigint() - started) / 1e6;
   if (r.error && r.error.code === 'ETIMEDOUT') return { ran: true, timedOut: true, ms };
-  if (r.error) return { ran: false, reason: String(r.error.code || r.error.message), ms };
+  // EPIPE with an exit status: bash exited before reading all of the input. It still ran, so its
+  // status decides below (a crashed bash is a bash-failure, not a missing check).
+  if (r.error && !(r.error.code === 'EPIPE' && r.status !== null)) return { ran: false, reason: String(r.error.code || r.error.message), ms };
   if (r.status === null) return { ran: true, timedOut: true, ms };
   const stderr = String(r.stderr || '');
   const heredoc = /warning: here-document at line \d+ delimited by end-of-file \(wanted `([^']*)'\)/.exec(stderr);

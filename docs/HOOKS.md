@@ -131,7 +131,7 @@ Fires immediately before Claude uses a tool.
 
 | Script | Role | Timeout |
 |--------|------|---------|
-| `pre-tool-enforcer.mjs` | Validates rules before tool use | 5s |
+| `pre-tool-enforcer.mjs` | Validates rules before tool use | 60s |
 
 Runs on all tool calls (`matcher: "*"`). Enforces agent permission restrictions (e.g., blocking Write/Edit for read-only agents).
 Denies Task/Agent calls whose `subagent_type` names a bundled skill (issue #3667): instead of Claude Code's generic native "Agent type not found", the hook returns a precise error naming the Skill tool and the correct identifier, and forbids closest-match agent substitution.
@@ -154,7 +154,7 @@ Fires after a tool use completes.
 
 | Script | Role | Timeout |
 |--------|------|---------|
-| `post-tool-verifier.mjs` | Verifies tool results and injects additional context | 5s |
+| `post-tool-verifier.mjs` | Verifies tool results and injects additional context | 10s |
 | `project-memory-posttool.mjs` | Updates project memory | 3s |
 | `post-tool-rules-injector.mjs` | Injects matching project rules | 3s |
 | `post-tool-directory-context-injector.mjs` | Injects the README.md and AGENTS.md files from the file's directory up to the working directory, for Read, Write, Edit, and MultiEdit | 3s |
@@ -212,8 +212,8 @@ Fires when Claude finishes a response.
 |--------|------|---------|
 | `context-guard-stop.mjs` | Monitors context usage | 5s |
 | `workflow-drift-guard.mjs` | Blocks narrow structured-question and fake-completion drift | 3s |
-| `persistent-mode.mjs` | Maintains active mode state (ralph, team, etc.) | 10s |
-| `code-simplifier.mjs` | Auto-simplifies modified files (opt-in) | 5s |
+| `persistent-mode.mjs` | Maintains active mode state (ralph, team, etc.) | 20s |
+| `code-simplifier.mjs` | Auto-simplifies modified files (opt-in) | 10s |
 
 `persistent-mode` injects a reinforcement message like "The boulder never stops" when an active execution mode is running, prompting continued work. A fresh unconfirmed ultragoal is exempt while Claude `/goal` confirmation is pending; confirmed runs remain fail-closed.
 
@@ -379,7 +379,7 @@ A denial is a PreToolUse `permissionDecision: "deny"` whose reason starts with `
 |----------|---------|-------------|
 | `OMC_SHELL_CHECKS` | (unset) | `1` enables the checks and the error log. Any other value leaves everything off. |
 | `OMC_SHELL_CHECKS_LENGTH_LIMIT` | `7700` | Effective length from which `length` denies on Windows (1000-100000; other values use the default). |
-| `OMC_SHELL_SYNTAX_TIMEOUT_MS` | `1000` | Time limit of the `bash -n` check in milliseconds (100-3000, so that a hung `bash` stays inside the 5 s hook budget; other values use the default). |
+| `OMC_SHELL_SYNTAX_TIMEOUT_MS` | `1000` | Time limit of the `bash -n` check in milliseconds (100-3000, so that a hung `bash` cannot use up the hook timeout; other values use the default). |
 | `OMC_SHELL_CHECKS_LOG_DIR` | `<state root>/state/shell-checks` | Log directory override. |
 
 #### Stale Run Reporter (`stale-run-reporter.mjs`)
@@ -618,24 +618,35 @@ export OMC_JEV="point1,point2:active,all"
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `TYPESAFE_API_KEY` | (absent) | API key for TypeSafe System One. Required to enable Jev; the key alone does not enable any points. |
-| `OMC_JEV` | (absent) | Per-point opt-in: `point`, `point:active`, `all` (every point, shadow), or `all:active` (every point, active). Comma-separated; unknown point names are ignored. |
-| `OMC_JEV_TIMEOUT_MS` | `2000` | Per-call timeout in milliseconds (single round-trip measured at 465–605 ms; default allows margin). |
+| `OMC_JEV` | (absent) | Per-point opt-in: `point`, `point:active`, `all` (every point, shadow), `all:active` (every point, active), or `point:off` (that point off, also under `all` and `all:active`). Comma-separated; unknown point names are ignored. |
+| `OMC_JEV_TIMEOUT_MS` | `2000` | Per-call timeout in milliseconds (single round-trip measured at 465–605 ms; default allows margin). In active mode the requests of one hook process add up: each waits up to this value plus the resolver buffer (500 ms; 3500 ms for `model-routing`), and the resolver process needs time to start (0.5-1.2 s on a busy Windows laptop). The timeouts in `hooks/hooks.json` of the hooks that wait for Jev (`pre-tool-enforcer`, `post-tool-verifier`, `persistent-mode`, `code-simplifier`) are sized for the default. If you raise this value, check that the sum over the requests of one hook (`persistent-mode` also waits up to 6 s for the bridge) still fits the hook timeout minus the `run.cjs` cushion (0.5 s POSIX, 1.5 s Windows); otherwise `run.cjs` stops the hook and drops its whole output. `keyword-detector.mjs` is capped at 8 s by `run.cjs` whatever its manifest timeout says, so with three active points (`skill-trigger`, `intent`, `task-size`) at the defaults it can still be stopped. |
 | `OMC_JEV_MAX_REQUESTS` | `0` (unlimited) | Maximum Jev requests per process. When reached, heuristic twins run for remaining calls. |
-| `OMC_JEV_EXCERPT_CHARS` | `200` | Maximum string length sent in state and shadow log. Recursively bounds all strings in the judgment state; question definitions are static text and are sent whole. Does not apply to `model-routing` and `loop-continuation`, which have their own defaults (next row). |
-| `OMC_JEV_EXCERPT_CHARS_<POINT>` | (unset) | The same limit for one point: the point name upper-cased with dashes as underscores, for example `OMC_JEV_EXCERPT_CHARS_MODEL_ROUTING` (the variable name itself must be upper case). Order for a point: its own variable, then the point's default (`model-routing`: `12000`; `loop-continuation`: `2000`, the length to which `persistent-mode.mjs` already cuts the last assistant message), then `OMC_JEV_EXCERPT_CHARS`. An invalid value is ignored. To send less of the `loop-continuation` state, set `OMC_JEV_EXCERPT_CHARS_LOOP_CONTINUATION`, for example to `200`, the limit of earlier releases. |
+| `OMC_JEV_EXCERPT_CHARS` | `200` | Maximum string length sent in state and shadow log. Recursively bounds all strings in the judgment state; question definitions are static text and are sent whole. Does not apply to the points that have their own default (next row). |
+| `OMC_JEV_EXCERPT_CHARS_<POINT>` | (unset) | The same limit for one point: the point name upper-cased with dashes as underscores, for example `OMC_JEV_EXCERPT_CHARS_MODEL_ROUTING` (the variable name itself must be upper case). Order for a point: its own variable, then the point's default, then `OMC_JEV_EXCERPT_CHARS`. Point defaults: `model-routing` `12000`; `task-size` `4000`; `skill-trigger` and `intent` `1000`; `learner-extraction` and `loop-continuation` `2000` (the length to which `persistent-mode.mjs` cuts the last assistant message it sends for `loop-continuation`). An invalid value is ignored. To send less of one of these points, set its own variable, for example `OMC_JEV_EXCERPT_CHARS_TASK_SIZE=200`, the limit of earlier releases; `OMC_JEV_EXCERPT_CHARS` alone does not reach a point that has its own default. |
 | `OMC_JEV_ENDPOINT` | `https://api.typesafe.ai/v1/systemone` | Override for stub servers or tests. |
 | `OMC_JEV_LOG_DIR` | `.omc/state/jev` | Shadow-log directory override (test only). |
 | `OMC_JEV_QUIET` | (unset) | Set to `1` to silence the env-activation stderr warning. |
-| `OMC_JEV_MAX_EFFORT` | `max` | Cap for the subagent reasoning effort set by the active `model-routing` point: `low`, `medium`, `high`, `xhigh`, or `max`, case-insensitive, surrounding spaces ignored. Other values use the default. A lower cap lowers the mapping: `high` restores the cap of earlier releases. A value that is set but not one of these is reported on stderr (unless `OMC_JEV_QUIET=1`) and the default is used. See [Model routing: subagent effort](#model-routing-subagent-effort). |
+| `OMC_JEV_MAX_EFFORT` | `max` | Cap for the subagent reasoning effort set by the active `model-routing` point: `low`, `medium`, `high`, `xhigh`, or `max`, case-insensitive, surrounding spaces ignored. Other values use the default. A lower cap lowers the mapping: `high` restores the cap of earlier releases. A value that is set but not one of these is reported on stderr (unless `OMC_JEV_QUIET=1`) and the default is used. With `OMC_JEV_MAX_EFFORT_ALWAYS=1` the cap also lowers the explicit effort of every other Task/Agent call. See [Model routing: subagent effort](#model-routing-subagent-effort). |
+| `OMC_JEV_MAX_EFFORT_ALWAYS` | (unset) | Set to `1` or `true` to apply `OMC_JEV_MAX_EFFORT` to the explicit `effort` of every Task/Agent call, not only to the effort the active `model-routing` point sets: also when the point is off or in shadow mode, when Jev is not asked about the call or gives no usable answer, and when the hook fails. Script hooks only. See [Model routing: subagent effort](#model-routing-subagent-effort). |
 | `OMC_JEV_MODEL_ROUTING_CONTEXT` | (unset) | Set to `1` or `true` to add two fields to the `model-routing` state: the Task/Agent call's `description` and `parent_last_user_message`, the last real user message of the parent session (read from the tail of its transcript; tool results, hook-injected reminders and system notices are skipped). Both are bounded by the point's excerpt limit. Script hooks only; the TypeScript resolver ignores it. See [Model routing: what Jev sees](#model-routing-what-jev-sees). |
 | `OMC_JEV_MODEL_ROUTING_ALL_AGENTS` | (unset) | Set to `1` or `true` to ask the `model-routing` point about Task/Agent calls that name no model (a `general-purpose` agent without one, `model: "inherit"`) as well. By default Jev is asked only when the call or the agent definition names `haiku`, `sonnet`, or `opus`. Calls and agent definitions that name any other model (for example `fable`) are left alone. Script hooks only. See [Model routing: what Jev sees](#model-routing-what-jev-sees). |
 | `OMC_JEV_MODEL_ROUTING_MARKER` | (unset) | Set to `1` or `true` to let the first line of a Task/Agent prompt pin the model and the effort of that call: `use <model>`, `use <model> <effort>`, or `use <effort>`. The marker replaces Jev's answer for what it names, is removed from the prompt the agent receives, and each use is logged to `overrides.jsonl`. `max` is never accepted from a marker. Script hooks only. See [Model routing: the `use` marker](#model-routing-the-use-marker). |
+| `OMC_JEV_MODEL_ROUTING_HINTS` | (unset) | Set to `1` or `true` to add two hints to the `model-routing` questions: two sentences in the effort question (mechanical work gets `low` only when it is short, more than ten items or steps get `medium`, several dozen or more, or a check of every item, get `high`) and a clause at the end of the Haiku description of the model-tier question ("also when there are very many such actions or each one has to be checked"). Off, the questions sent to Jev are unchanged. Script hooks only; the TypeScript resolver ignores it. See [Model routing: what Jev sees](#model-routing-what-jev-sees-and-which-calls-are-asked). |
+| `OMC_JEV_TASK_SIZE_NOTICE` | (unset) | Set to `1` or `true` to make the active `task-size` point of the hook script report what it did: suppressed heavy modes with the reason, as the TypeScript bridge does, and heavy modes kept although Jev rated the task small (script only). The classifier check behind the suppression also uses the `taskSizeDetection` word limits. Which modes are suppressed by default limits does not change. Script hooks only. See [Task size: heavy-mode suppression](#task-size-heavy-mode-suppression). |
+| `OMC_JEV_TASK_SIZE_PREFIX_WINS` | (unset) | Set to `1` or `true` so that a size prefix of the classifier (`quick:`, `simple:`, `tiny:`, `minor:`, `small:`, `just:`, `only:`) makes the active `task-size` point of the hook script drop heavy modes whatever size Jev answers. Script hooks only. See [Task size: heavy-mode suppression](#task-size-heavy-mode-suppression). |
+| `OMC_JEV_TASK_SIZE_SLASH_ANYWHERE` | (unset) | Set to `1` or `true` so that a heavy mode typed as a slash command anywhere in the prompt, also as `/omc:<mode>`, is never dropped by the active `task-size` point of the hook script. By default only a slash command at the start of the prompt keeps its mode. Script hooks only. See [Task size: heavy-mode suppression](#task-size-heavy-mode-suppression). |
+| `OMC_JEV_SLOP_WARNING_APPLY` | (unset) | Set to `1` or `true` to let an active `slop-warning` answer decide whether `[SLOP WARNING]` is shown. Script hook `pre-tool-enforcer.mjs` only. See [Advisory points: opt-in actions](#advisory-points-opt-in-actions). |
+| `OMC_JEV_SLOP_WARNING_THRESHOLD` | `0.8` | Probability of "yes" at or above which the active `slop-warning` answer warns, a number above 0 up to 1. Used only with `OMC_JEV_SLOP_WARNING_APPLY`. A value that is set but invalid is reported on stderr (unless `OMC_JEV_QUIET=1`) and the default is used. |
+| `OMC_JEV_LEARNER_HINT` | (unset) | Set to `1` or `true` to add a `/oh-my-claudecode:remember` hint to the Stop output when the active `learner-extraction` answer is 0.8 or more, at most once per session. Script hook `persistent-mode.mjs` only. See [Advisory points: opt-in actions](#advisory-points-opt-in-actions). |
+| `OMC_JEV_SIMPLIFIER_APPLY` | (unset) | Set to `1` or `true` to skip the code-simplifier reminder when the active `simplifier-trigger` answer is below 0.5. Script hook `code-simplifier.mjs` only. See [Advisory points: opt-in actions](#advisory-points-opt-in-actions). |
+| `OMC_JEV_INTENT_APPLY` | (unset) | Set to `1` or `true` to invoke the intent skill when the active `intent` answer is 0.5 or more (a boolean `true` counts as 1). `keywordDetector.disabled: ["intent"]` still wins. Script hook `keyword-detector.mjs` only. See [Advisory points: opt-in actions](#advisory-points-opt-in-actions). |
+| `OMC_JEV_LOOP_RELEASE_ONLY` | (unset) | Set to `1` or `true` so that an active `loop-continuation` "task complete" answer releases only the Stop it was asked about and leaves the Ralph or autopilot state active. Script hook `persistent-mode.mjs` only. See [Advisory points: opt-in actions](#advisory-points-opt-in-actions). |
 | `OMC_JEV_PLAN_MODE` | (unset) | Behavior while Claude Code is in plan mode (`permission_mode: "plan"`): `shadow` runs every opted-in point in shadow, `off` disables every point. Unset or any other value changes nothing. See [Plan mode](#plan-mode). |
 | `OMC_JEV=off` | — | Master switch: disables every point regardless of key or other config. |
 
 #### Point Activation Syntax
 
-`OMC_JEV` accepts comma-separated entries with three syntax forms:
+`OMC_JEV` accepts comma-separated entries:
 
 ```bash
 # Shadow mode (Jev runs but decision is not used, heuristic twin is authoritative)
@@ -649,6 +660,10 @@ export OMC_JEV="all"
 
 # Wildcard: all registered points in active
 export OMC_JEV="all:active"
+
+# Turn one point off while the rest stay on (a later non-off entry for the same point turns it back on;
+# the suffix is case-insensitive; `all:off` withdraws the wildcard)
+export OMC_JEV="all:active,intent:off"
 
 # Master disable
 export OMC_JEV="off"
@@ -677,7 +692,7 @@ Each judgment point operates in one of three states:
 
 | State | Behavior | When It Occurs |
 |-------|----------|----------------|
-| **off** | Point does not run; heuristic twin is used | No `TYPESAFE_API_KEY`, `OMC_JEV=off`, or point not opted in |
+| **off** | Point does not run; heuristic twin is used | No `TYPESAFE_API_KEY`, `OMC_JEV=off`, a `point:off` entry, or point not opted in |
 | **shadow** | Both Jev and heuristic run; Jev answer is logged but NOT acted on; heuristic is authoritative; fire-and-forget for non-blocking points | Point is opted in but not activated; Jev unavailable, times out, or over budget |
 | **active** | Jev answer IS acted on; blocking points gate behavior, non-blocking points wait (bounded by `OMC_JEV_TIMEOUT_MS`) | Point is opted in and activated via env `:active` or code-time `ACTIVATED_POINTS` |
 
@@ -735,7 +750,7 @@ Every registered judgment point with its lifecycle hook, decision type, and bloc
 **Activated**: asterisk (`*`) means the point is in `ACTIVATED_POINTS` (empty in all releases; promoted by ticket 07). Use `OMC_JEV=<point>:active` to activate via environment instead.
 
 **Advisory vs. Blocking**:
-- **Advisory points** (Blocking=No): Jev answers are recorded in shadow log but do not affect workflow. Useful for collecting calibration data.
+- **Advisory points** (Blocking=No): Jev answers are recorded in shadow log but do not affect workflow, except where you opt in to an action (see [Advisory points: opt-in actions](#advisory-points-opt-in-actions)). Useful for collecting calibration data.
 - **Blocking points** (Blocking=Yes): In active mode, Jev's yes/no answer gates behavior (e.g., ralph stops when `ralph-verdict` decides completion is met). Timeout, unavailability, or budget exhaustion reverts to heuristic twin.
 
 ### Model routing: subagent effort
@@ -771,9 +786,12 @@ This needs a Claude Code version whose Agent/Task tool schema has an `effort` fi
 - As with the model, Jev's effort replaces an explicit `effort` in the call.
 - `OMC_JEV_MAX_EFFORT` defaults to `max`, so the mapping is not capped. `xhigh` and `max` can spend several times the tokens of `high` on a delegated call, but the calibrated question gives them for a minority of briefs. Set the cap to `high` or lower to hold every delegated call at that level: a lower cap such as `medium` lowers every level above it.
 - When the point is active and Jev returns no usable effort score, an explicit `effort` above the cap is lowered to the cap; with the default cap (`max`) nothing is lowered, and with `OMC_JEV_MAX_EFFORT=high`, for example, `max` becomes `high`.
-- Shadow mode, a degraded call (timeout, HTTP error, invalid response), and plan mode with `OMC_JEV_PLAN_MODE` leave the call exactly as it was, explicit effort included.
+- Shadow mode, a degraded call (timeout, HTTP error, invalid response), and plan mode with `OMC_JEV_PLAN_MODE` leave the call exactly as it was, explicit effort included, unless `OMC_JEV_MAX_EFFORT_ALWAYS=1` is set (next item).
+- `OMC_JEV_MAX_EFFORT_ALWAYS=1` makes the cap a limit for every Task/Agent call. An explicit `effort` above `OMC_JEV_MAX_EFFORT` is lowered to the cap whether or not Jev sets the effort: in shadow mode and plan mode, with the point off, with `OMC_JEV=off` or without `TYPESAFE_API_KEY`, for a call Jev is not asked about (a model other than haiku, sonnet or opus, or no model without `OMC_JEV_MODEL_ROUTING_ALL_AGENTS`), after a degraded call, and when the hook itself fails with an error (the error path then changes only `effort`). An effort within the cap, an effort that is not one of the five levels, and a call without `effort` are left alone; no effort is added. With the default cap (`max`) it changes nothing. The cap needs the hook to run to the end or to its error path: with `DISABLE_OMC=1` or `OMC_SKIP_HOOKS=pre-tool-use`, and when Claude Code stops the hook at its timeout, the call keeps its effort. Without the variable the cap applies only as described above.
 
 Example: `OMC_JEV=model-routing:active` with `OMC_JEV_MAX_EFFORT=medium`. A call `{ "subagent_type": "executor", "model": "haiku", "effort": "max", ... }` and the answers `{ "effort": { "type": "score", "score": 2.3, ... }, "model-tier": { "type": "choice", "choice": "opus", ... } }` run with `"model": "opus", "effort": "medium"`. With the default cap and the effort score 2.9 the same call runs with `"effort": "xhigh"`, and with the score 3.7 with `"effort": "max"`.
+
+Example: `OMC_JEV_MAX_EFFORT=high` with `OMC_JEV_MAX_EFFORT_ALWAYS=1`. A call `{ "subagent_type": "executor", "model": "fable", "effort": "max", ... }`, which Jev is not asked about, runs with `"effort": "high"`, with or without `OMC_JEV`. Without `OMC_JEV_MAX_EFFORT_ALWAYS` it runs with `"effort": "max"`.
 
 ### Model routing: what Jev sees and which calls are asked
 
@@ -782,8 +800,9 @@ By default the `model-routing` state is `tool_name`, `subagent_type` and up to 1
 - `OMC_JEV_EXCERPT_CHARS_MODEL_ROUTING=<n>` sets the limit for the task and for the extra fields below. The fields that decide the routing (`subagent_type`, `model`, `effort`, `resume`) always keep a fixed 500 characters in the hook.
 - `OMC_JEV_MODEL_ROUTING_CONTEXT=1` adds `description` and `parent_last_user_message` to the state. The message is the user's own last real message in the parent session, a new kind of data next to the task, and it leaves your machine like the task does, so enable it only where that is acceptable. Both fields are also written to the local shadow log (`state`), and the message, before it is cut, to the short-lived request file in the temporary directory. The hook reads it from the tail of the session's own transcript (`<session_id>.jsonl`, a regular file, not a symlink), skips tool results, hook-injected reminders, compact summaries, sidechain entries, task, teammate and command notices, interruption markers, and the notices of the Claude desktop app (side-session and CI-monitor events, scheduled tasks, messages from another Claude session), cuts it to 4000 characters and then to the point limit. When no matching transcript is found, only the description is added.
 - `OMC_JEV_MODEL_ROUTING_ALL_AGENTS=1` asks about calls that name no model too: calls to `general-purpose` without a model and calls to an agent whose definition (plugin, project or user) has no `model:` field or says `inherit`. Without it those calls never reach Jev, so Jev can set neither their model nor their effort. A call that names any other model than haiku, sonnet or opus (`fable`, a non-Claude proxy model), or an agent definition that does, is left alone; a provider-specific Claude ID such as `us.anthropic.claude-sonnet-...` counts as its tier and is routed with or without the variable. In shadow mode the comparison is logged with a null heuristic (there is no twin tier to compare); in active mode Jev's answers set the model and the effort as usual. With `forceInherit` a call without a model keeps inheriting the session model unless the provider resolves the tier alias Jev picks (`ANTHROPIC_DEFAULT_<TIER>_MODEL` and the other variables the hook already checks); its effort is still set.
+- `OMC_JEV_MODEL_ROUTING_HINTS=1` changes the questions, not the state. The effort question gets two more sentences: "Mechanical work gets the low level only when it is short: one action or a few. Mechanical work with more than ten items or steps gets the medium level, and with several dozen or more, or when every item has to be checked, the high level." The Haiku description of the model-tier question gets the clause "; also when there are very many such actions or each one has to be checked". The other descriptions and the five effort levels are not touched. Without the variable the questions are exactly as before. The texts were measured only in their Polish original, and the English wording is a translation that has not been measured (74 logged tasks, 98 labelled tasks): together they moved 6 of 74 tasks from `medium` to `high` and 6 of 74 from Sonnet to Haiku, with an estimated cost 2.6% lower, and agreement with hand labels was not better (model 89 of 98 with the hints against 91 of 98 without, effort 65 of 84 against 66 of 84). Treat these numbers as a hint for the English wording, not as proof, and check the effect on your own calls in the shadow log before relying on it. The hook builds the questions once per process, so the variable is read at start. A `use` marker (`OMC_JEV_MODEL_ROUTING_MARKER`) removes the question it settles as before, and the cap `OMC_JEV_MAX_EFFORT` and `OMC_JEV_MAX_EFFORT_ALWAYS` apply to the resulting effort as before.
 
-All three are off by default, and nothing changes without them.
+All four are off by default, and nothing changes without them.
 
 ### Model routing: the `use` marker
 
@@ -810,6 +829,20 @@ Example: `OMC_JEV=model-routing:active`, a call with `"model": "haiku"` and the 
 
 Without the variable the hook behaves exactly as before: the line stays in the prompt and Jev decides.
 
+### Advisory points: opt-in actions
+
+`slop-warning`, `learner-extraction` and `simplifier-trigger` record the active answer and discard it. Four variables let the plugin hook scripts act on it. All are off by default; without them every hook output is exactly as before. None of them adds a question, a field or a kind of data to what is sent to Jev: they change only what the hook does with an answer that an active point already asked for. Two of them can raise the number of requests, because the hook asks again at a later Stop (see the table). They have no effect in shadow mode, with `OMC_JEV_PLAN_MODE` set to `shadow`, or when the request degrades (timeout, HTTP error, invalid response): the heuristic decides then. A Noul answer is read as a probability of "yes" from 0 to 1 (a boolean maps to 1 or 0).
+
+| Variable | Point (activate with `OMC_JEV=<point>:active`) | What an active answer does |
+|----------|-----------------------------------------------|----------------------------|
+| `OMC_JEV_SLOP_WARNING_APPLY=1` | `slop-warning` (`pre-tool-enforcer.mjs`) | Decides whether `[SLOP WARNING]` is added to the tool call: shown at or above `OMC_JEV_SLOP_WARNING_THRESHOLD` (default 0.8), not shown below it, in place of the pattern heuristic. |
+| `OMC_JEV_LEARNER_HINT=1` | `learner-extraction` (`persistent-mode.mjs`) | At 0.8 or more, adds a `systemMessage` that points to `/oh-my-claudecode:remember` to the Stop output when the hook has nothing else to say, at most once per session (marker `jev-learner-hint.json` in the session state directory). It is not added when a mode blocks or releases the Stop, on the early exits (context limit, user abort, authentication error, scheduled wakeup, pending async work, re-entry with `stop_hook_active`), when the payload has no valid session id, or when `dist/hooks/learner/detector.js` is missing. Each Stop hook runs on its own, so the hint can accompany a Stop that another hook, such as the code simplifier, blocks. The 0.8 cut was measured on up to 2000 characters of the message; with a shorter excerpt (`OMC_JEV_EXCERPT_CHARS_LEARNER_EXTRACTION`) it is unmeasured. |
+| `OMC_JEV_SIMPLIFIER_APPLY=1` | `simplifier-trigger` (`code-simplifier.mjs`) | Below 0.5 the Stop is not blocked with the simplifier reminder. No trigger marker is written, so the next Stop asks again while files stay modified. |
+| `OMC_JEV_INTENT_APPLY=1` | `intent` (`keyword-detector.mjs`) | At 0.5 or more the intent skill is invoked, unless `keywordDetector.disabled` lists `intent`. Below 0.5, without the variable, in shadow mode or when the call fails, only the slash-command heuristic decides. |
+| `OMC_JEV_LOOP_RELEASE_ONLY=1` | `loop-continuation` (`persistent-mode.mjs`) | At 0.5 or more ("task complete") the Stop is released with a `[JEV-COMPLETION]` `systemMessage`, but the Ralph or autopilot state is **not** completed: it stays active with its counter already advanced, the next Stop asks Jev again, and `/oh-my-claudecode:cancel` ends the loop. Without the variable the mode is completed (the state is written inactive with phase `complete`) and the Stop is released with a `[JEV-COMPLETION]` message saying the mode exited. A Ralph that runs under an active autopilot hands the Stop to the autopilot handler, as a completed one does. If `/oh-my-claudecode:cancel` removes the state file while Jev is answering, the Stop is released silently, as without the variable. An autopilot at its reinforcement cap of 20 keeps its count and, while the loop-continuation answer is active, keeps asking Jev on every Stop (each valid answer refreshes its heartbeat so the state does not go stale); with Jev off, in shadow mode or degraded, the capped fallback releases the Stop as without the variable, and the shadow log records that release as a non-comparable heuristic. Every Stop asks again, and under an active autopilot a Ralph and the autopilot each ask, one after the other, so keep `OMC_JEV_TIMEOUT_MS` low enough for the Stop hook's total time budget. |
+
+The `slop-warning` answer replaces the heuristic in both directions: it can add a warning where the pattern heuristic found none, and remove one the heuristic would have shown, so the threshold is the setting to tune. The TypeScript mirrors (`src/hooks/*/jev-shadow.ts`, `src/features/jev-slop-warning.ts`) keep recording only.
+
 ### Context pruning: staleness score
 
 `post-tool-verifier.mjs` asks the `context-pruning` point only for large-output tools (read, grep, glob, bash, webfetch, and the task tools) and only once context usage reaches the warning threshold (default 70%). The `staleness` question is a Score 0-3, and a score answer carries no `choice`, so in active mode the score is rounded to the nearest label and mapped to an action:
@@ -824,6 +857,23 @@ Without the variable the hook behaves exactly as before: the line stays in the p
 - Jev changes the level only below the critical threshold (default 90%). At or above it the hook always emits `[OMC CRITICAL]` and asks for `/compact`, whatever Jev answers, subject to the usual warning cooldown.
 - A score outside 0-3, a non-numeric score, or an answer of another type is ignored and the heuristic action stays, even when that answer carries a `choice`. In a score answer, a string `choice` that names one of the four labels, matched case-insensitively, takes precedence over the score.
 
+### Task size: heavy-mode suppression
+
+In active mode (`OMC_JEV=task-size:active`), `keyword-detector.mjs` drops the heavy modes `ralph`, `autopilot` and `ralplan` detected in a prompt (`team` is on the list too, but the script no longer detects it in the text, so it is never dropped) when all of these hold: `taskSizeDetection.enabled` and `taskSizeDetection.suppressHeavyModesForSmallTasks` are not `false`, Jev answers `small` with a confidence of at least 0.9, and the classifier (`classifyTaskSize`) also rates the prompt small or the prompt starts with a size prefix (`quick:`, `small:`, `tiny:`, `minimal:`, `fast:`, `speed:`, `urgent:`). A mode typed as a slash command at the start of the prompt (`/ralph`, `/oh-my-claudecode:ralph`) is never dropped. By default the hook drops the modes silently, and the classifier check uses the default word limits (50 and 200).
+
+`OMC_JEV_TASK_SIZE_NOTICE=1` (or `true`) changes two things:
+
+- The outcome is added to `additionalContext`. Dropped modes, as the TypeScript bridge (`src/hooks/bridge.ts`) reports them: `[TASK-SIZE: SMALL] Heavy orchestration mode(s) suppressed: ralph.` with the reason (Jev's confidence and the classifier's reason, or the size prefix) and how to run the mode anyway. Heavy modes kept although Jev rated the task small, which the bridge never does because it drops heavy modes on any `small` answer: `[TASK-SIZE] Heavy mode(s) kept although Jev rated this task small: ralph (Jev confidence 0.5 is below 0.9).`, with the reason for each mode (confidence below 0.9 or none given, the classifier does not rate the task small and there is no size prefix, or a slash command).
+- The classifier check uses `taskSizeDetection.smallWordLimit` and `taskSizeDetection.largeWordLimit` from the user and project config, which the bridge also reads. Without them in the config the limits stay 50 and 200. The `heuristic` written to the shadow log keeps the default limits, as the bridge's twin does.
+
+With the default limits, which modes are dropped does not change. Shadow mode, a degraded call, Jev answers other than `small` and the two config opt-outs add nothing. An approved follow-up shortcut after `ralplan` (a short `team` or `ralph` prompt that launches the approved plan) is handled after this step and prints its own output, so a task-size note is not shown for it.
+
+`OMC_JEV_TASK_SIZE_PREFIX_WINS=1` (or `true`): a size prefix of the classifier (`quick:`, `simple:`, `tiny:`, `minor:`, `small:`, `just:`, `only:`), which `classifyTaskSize` always rates small, drops the heavy modes whatever size Jev answers and whatever its confidence. The point must still be active and Jev must still answer: a degraded call drops nothing. The other prefixes above (`minimal:`, `fast:`, `speed:`, `urgent:`) keep needing a `small` answer with a confidence of at least 0.9. A slash command at the start of the prompt still keeps its mode. With `OMC_JEV_TASK_SIZE_NOTICE=1` the notice names the prefix as the reason when it won over another answer.
+
+`OMC_JEV_TASK_SIZE_SLASH_ANYWHERE=1` (or `true`): a heavy mode typed as a slash command anywhere in the prompt is never dropped, also through the `/omc:` alias: `/ralph`, `/oh-my-claudecode:ralph` and `/omc:ralph` at the start, after whitespace, or after an opening parenthesis or quote, and followed by whitespace, the end of the prompt, a closing parenthesis, a closing square bracket or a quote, `?`, `!`, `,`, `;`, `:`, or a `.` that is not followed by a letter, digit or underscore. A mode name inside a path (`a/ralph`) or a file name (`/ralph.md`) is not a slash command. The check reads the prompt after code blocks, inline code, quoted lines and pasted payloads are removed, as keyword detection does, so a `/ralph` quoted there does not count. The slash command also keeps its mode when a size prefix wins under `OMC_JEV_TASK_SIZE_PREFIX_WINS`. With `OMC_JEV_TASK_SIZE_NOTICE=1` the notice says that a slash command anywhere in the prompt keeps its mode. When an active task-size decision applies, such a slash command also counts as the user's confirmation, so ralph arms no awaiting-confirmation window; in shadow mode or with Jev off a mid-prompt slash command keeps that window. In every other case only `/ralph` or `/oh-my-claudecode:ralph` at the start of the prompt as typed, before inline code is removed, confirms ralph.
+
+Shadow mode, the TypeScript bridge and the other task-size rules do not change.
+
 ### Request Budget and Latency
 
 Set limits to control cost and latency:
@@ -835,7 +885,8 @@ export OMC_JEV_MAX_REQUESTS=100
 # Raise timeout for slow networks
 export OMC_JEV_TIMEOUT_MS=5000
 
-# Truncate large state excerpts
+# Truncate large state excerpts (points that have their own default, see the
+# variable table, need their own variable, e.g. OMC_JEV_EXCERPT_CHARS_TASK_SIZE=500)
 export OMC_JEV_EXCERPT_CHARS=500
 ```
 
