@@ -7,7 +7,7 @@
  */
 
 import { execFileSync } from 'node:child_process';
-import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, symlinkSync, utimesSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, symlinkSync, utimesSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -306,6 +306,20 @@ describe('jev-compaction-state: retention of the result archive', () => {
     expect(readdirSync(dirs.current).sort()).toEqual(['.compaction', 't1.txt']);
   });
 
+  it('a session that starts or resumes after the days keeps its files: its marker is touched first, so the next start of another session does not remove them', () => {
+    const { env } = setup();
+    const dirs = layout(env);
+    expect(existsSync(join(dirs.current, '.compaction'))).toBe(true);
+    // the current session has been idle for 90 days; without the marker the next start of another session would remove it
+    expect(sweepArchive('current-session', NOW, env)).toBe(1);
+    expect(statSync(join(dirs.current, '.compaction')).mtimeMs).toBe(NOW);
+    expect(sweepArchive('another-session', NOW + 3600_000, env)).toBe(0);
+    expect(existsSync(dirs.current)).toBe(true);
+    // a directory of the session is not created by the sweep, and a session without one is left alone
+    expect(sweepArchive('no-archive-yet', NOW, env)).toBe(0);
+    expect(existsSync(join(env.OMC_JEV_LOG_DIR, 'compaction-archive', 'no-archive-yet'))).toBe(false);
+  });
+
   it('removes nothing without a session id', () => {
     const { env } = setup();
     const dirs = layout(env);
@@ -315,7 +329,7 @@ describe('jev-compaction-state: retention of the result archive', () => {
   });
 
   it('follows OMC_JEV_ARCHIVE_DAYS: a number of days, 14 when unset, nothing for 0 or a value that is not a whole number of days', () => {
-    expect([undefined, '', ' 7 ', '0', '-3', '2.5', 'abc', '99999', '100000'].map((v) => archiveDays({ OMC_JEV_ARCHIVE_DAYS: v }))).toEqual([14, 14, 7, 0, 0, 0, 0, 99999, 0]);
+    expect([undefined, '', ' 7 ', '1', '0', '014', '-3', '2.5', 'abc', '99999', '100000'].map((v) => archiveDays({ OMC_JEV_ARCHIVE_DAYS: v }))).toEqual([14, 14, 7, 1, 0, 0, 0, 0, 0, 99999, 0]);
     for (const value of ['0', 'soon', '1.5']) {
       const { env } = setup();
       const dirs = layout(env);

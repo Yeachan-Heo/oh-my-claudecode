@@ -69,14 +69,18 @@
  * item that is cut or traced goes whole to <state dir>/compaction-archive/<session>/<tool_use_id>.txt (the call's
  * input masked, the result unchanged), and its trace or cut ends with `; full call and result: <path>`, so the model
  * can read the text back. A result is archived only when it holds nothing the masking would change and names no
- * secret or private path (not even in a line), its call touches none, it is not a held background output, and it
- * fits the host's write limit; otherwise its trace names no file. A trace names its file only after the write was
- * read back. $.fs has no delete, rename or append: a file of the same name is reused only when its text equals the
- * content, any other is written again. The archive gets at most ARCHIVE_BUDGET_MS and never runs past the
- * compaction's TOTAL_MS; every host call is capped at HOST_MS and after one that hit its cap no call starts. The
- * classic SessionStart hook removes session directories whose newest file is older than OMC_JEV_ARCHIVE_DAYS days
- * (scripts/lib/jev-compaction-state.mjs). Without the variable nothing of this is read or written, and the result
- * and the record are as before.
+ * secret or private path (not even in a line), its call touches none, it is not a held background output, and the
+ * result and the call's input are each at most ARCHIVE_MAX_CHARS characters (the masking has quadratic patterns and
+ * cannot be interrupted, so it is run on bounded text only, and at most ARCHIVE_SCAN_MS per compaction); otherwise
+ * its trace names no file. The files are plain text for as long as OMC_JEV_ARCHIVE_DAYS keeps them, in a directory
+ * whose permissions $.fs.write decides: keep the state directory private. A trace names its file only after the
+ * write was read back. $.fs has no delete, rename, append or link check: a file of the same name is reused only when
+ * its text equals the content, any other is written again, and a second result of one tool_use_id is not archived.
+ * The archive gets at most ARCHIVE_BUDGET_MS for writing; no host call starts after the compaction's TOTAL_MS and
+ * each is capped at HOST_MS or at the time left to TOTAL_MS, whichever is less, and after one that hit its cap no call
+ * starts. The classic SessionStart hook removes session directories whose newest file is older than
+ * OMC_JEV_ARCHIVE_DAYS days (scripts/lib/jev-compaction-state.mjs). Without the variable nothing of this is read or
+ * written, and the result and the record are as before.
  *
  * Quiet: no $.ui.log; a toast only with OMC_JEV_COMPACT_TOAST=1. One JSON file per event goes to the
  * spool directory (<state dir>/compaction-spool, $.fs cannot append); the classic SessionStart hook
@@ -137,13 +141,17 @@ const PROBE_MAX_CHARS = 5_000_000;
 // A file or URL named in the last user messages counts as needed when its name has at least this
 // many characters (shorter names match too much text).
 const MENTION_MIN = 5;
-// Archive: the host's $.fs.write limit in UTF-8 bytes; the archive's own time limit and parallelism; the file in a
-// session directory that every archiving compaction rewrites, so the retention sees a live session by its newest file.
-const ARCHIVE_MAX_BYTES = 4_194_304;
+// Archive: the longest result, and the longest call input, that is archived, in characters (the masking runs on all of
+// it); the time the masking of a compaction's candidates may take; the archive's own write budget; its parallelism; the
+// file in a session directory that every archiving compaction rewrites, so the retention sees a live session by its
+// newest file. The files stay far below the host's $.fs.write limit of 4 MiB.
+const ARCHIVE_MAX_CHARS = 50_000;
+const ARCHIVE_SCAN_MS = 1000;
 const ARCHIVE_BUDGET_MS = 1500;
 const ARCHIVE_PARALLEL = 8;
 const ARCHIVE_MARKER = '.compaction';
 const ARCHIVE_LABEL = 'full call and result: ';
+const ARCHIVE_HEAD = '[Jev compaction archive]';
 // Session and tool_use ids become file names, so only these are archived (a UUID and `toolu_...` pass).
 const ARCHIVE_ID = /^[A-Za-z0-9_-]{1,80}$/;
 // What a compaction writes in place of a result: a later compaction must not archive these as results.
@@ -1422,12 +1430,24 @@ function archiveModeIn(cfg, sessionId) {
   return cfg.archive === 'active' && cfg.mode === 'active' && ARCHIVE_ID.test(String(sessionId ?? '')) ? 'active' : 'shadow';
 }
 
-const isProduct = (text) => text.startsWith(NON_TEXT_NOTE) || text.includes(`\n${SHORT_NOTE}`);
+// The text of a cut, of the placeholder of a non-text result and of an archive file: not a result to archive.
+const isProduct = (text) => text.startsWith(NON_TEXT_NOTE) || text.startsWith(ARCHIVE_HEAD) || text.includes(`\n${SHORT_NOTE}`);
+
+// A second candidate of one tool_use_id would write the same file with another text: only the first is archived.
+function markDuplicates(candidates) {
+  const seen = new Set();
+  for (const c of candidates) {
+    if (seen.has(c.id) && c.archiveWhy === undefined) c.archiveWhy = 'duplicate_id';
+    seen.add(c.id);
+  }
+}
 
 // Why a candidate is not archived, '' when it is. A result that holds anything the masking would change or names a
 // secret or private path (in any line) is not archived, and neither is the result of a call that touches one: the file
-// holds the result unchanged. Memoized on the candidate.
-function archiveSkip(c, privatePaths) {
+// holds the result unchanged. The masking is quadratic on some text and cannot be interrupted, so it runs only on a
+// result and an input of at most ARCHIVE_MAX_CHARS, and not at all once `until` (epoch ms) has passed. Memoized on the
+// candidate, with the masked input.
+function archiveSkip(c, privatePaths, until) {
   if (c.archiveWhy !== undefined) return c.archiveWhy;
   const text = typeof c.res?.text === 'string' ? c.res.text : '';
   let why = '';
@@ -1436,9 +1456,12 @@ function archiveSkip(c, privatePaths) {
   else if (!c.textOnly) why = 'no_text';
   else if (!text) why = 'empty';
   else if (isProduct(text)) why = 'after_compaction';
-  else if (text.length > ARCHIVE_MAX_BYTES) why = 'too_large';
+  else if (text.length > ARCHIVE_MAX_CHARS || inputJson(c.use.input).length > ARCHIVE_MAX_CHARS) why = 'too_large';
   else if (anySecretPath(c.use.input, privatePaths)) why = 'secret';
-  else if (namesSecretPath(text, privatePaths) || maskSecrets(text) !== text) why = 'secret_in_result';
+  else if (namesSecretPath(text, privatePaths)) why = 'secret_in_result';
+  else if (until !== undefined && Date.now() >= until) why = 'time';
+  else if (maskSecrets(text) !== text) why = 'secret_in_result';
+  else c.archiveInput = maskSecrets(JSON.stringify(c.use.input ?? {}, null, 2) ?? '');
   c.archiveWhy = why;
   return why;
 }
@@ -1446,19 +1469,23 @@ function archiveSkip(c, privatePaths) {
 // Before the allocation counts the length of a trace and of a cut: the path of every candidate that can be archived,
 // and the one an earlier compaction's cut already names (its file exists; the cut then keeps pointing at it).
 function planArchive(candidates, dir, privatePaths) {
+  markDuplicates(candidates);
+  const until = Date.now() + ARCHIVE_SCAN_MS;
   for (const c of candidates) {
     const path = `${dir}/${c.id}.txt`;
-    const why = archiveSkip(c, privatePaths);
+    const why = archiveSkip(c, privatePaths, until);
     if (!why || (why === 'after_compaction' && c.res.text.includes(`; ${ARCHIVE_LABEL}${path}`))) { c.archivePath = path; price(c); }
   }
 }
 
 // Shadow: what archiveResults would try, with no file touched.
 function archivePlan(candidates, privatePaths) {
+  markDuplicates(candidates);
+  const until = Date.now() + ARCHIVE_SCAN_MS;
   const plan = { planned: 0, skipped: {} };
   for (const c of candidates) {
     if (c.keep === 'full') continue;
-    const why = archiveSkip(c, privatePaths);
+    const why = archiveSkip(c, privatePaths, until);
     if (why) plan.skipped[why] = (plan.skipped[why] || 0) + 1;
     else plan.planned++;
   }
@@ -1466,62 +1493,62 @@ function archivePlan(candidates, privatePaths) {
 }
 
 function archiveContentOf(c) {
-  let input = '';
-  try { input = JSON.stringify(c.use.input ?? {}, null, 2) ?? ''; } catch { /* no input in the file */ }
-  return `[Jev compaction archive] call ${oneLine(c.use.tool)}, tool_use_id ${c.id}\n--- input (masked) ---\n${maskSecrets(input)}\n`
+  return `${ARCHIVE_HEAD} call ${oneLine(c.use.tool)}, tool_use_id ${c.id}\n--- input (masked) ---\n${c.archiveInput}\n`
     + `--- ${c.res.isError ? 'error' : 'result'} (${c.res.text.length} chars, unchanged) ---\n${c.res.text}`;
 }
 
-// One host call capped at HOST_MS: {value}, {timeout} or {error}; never rejects.
-function hostCall($, call) {
+// One host call capped at `ms` (at most HOST_MS): {value}, {timeout} or {error}; never rejects.
+function hostCall($, call, ms = HOST_MS) {
   let promise;
   try { promise = Promise.resolve(call()); } catch (error) { return Promise.resolve({ error }); }
-  return withDeadline($, promise, HOST_MS);
+  return withDeadline($, promise, Math.min(HOST_MS, ms));
 }
 
 // One candidate: {id, path?, reused?, rewritten?, skipped?, error?, bytes?}. `lim` = {writeBy, hardEnd, stalled}: no write
-// starts at or after writeBy, no read after hardEnd, and none at all once a host call hit its HOST_MS cap.
+// starts at or after writeBy, no host call after hardEnd (the end of the compaction's time) or once one hit its cap, and
+// a call is capped at the time left to hardEnd. A call that cannot start, or a write whose read-back cannot, gives `time`.
 async function archiveOne($, c, privatePaths, lim) {
   const out = { id: c.id };
   const why = archiveSkip(c, privatePaths);
-  const late = (end) => lim.stalled || Date.now() >= end;
+  const call = (fn) => {
+    const left = lim.hardEnd - Date.now();
+    return lim.stalled || left <= 0 ? Promise.resolve({ late: true }) : hostCall($, fn, left);
+  };
   const failed = (r) => {
-    if (r.timeout) { lim.stalled = true; out.error = 'host_timeout'; } else out.error = clip(oneLine(String(r.error?.message ?? r.error)), 200);
+    if (r.late) out.skipped = 'time';
+    else if (r.timeout) { lim.stalled = true; out.error = 'host_timeout'; } else out.error = clip(oneLine(String(r.error?.message ?? r.error)), 200);
     return out;
   };
   if (!c.archivePath) { out.skipped = why; return out; }
-  if (late(lim.hardEnd)) { out.skipped = 'time'; return out; }
   if (why) { // a cut of an earlier compaction: its file stays the pointer when it is still there
-    const r = await hostCall($, () => $.fs.read(c.archivePath));
-    if (r.timeout) return failed(r);
+    const r = await call(() => $.fs.read(c.archivePath));
+    if (r.late || r.timeout) return failed(r);
     if (r.error) out.skipped = why;
     else { out.path = c.archivePath; out.reused = true; }
     return out;
   }
   const content = archiveContentOf(c);
-  const bytes = new TextEncoder().encode(content).length;
-  if (bytes > ARCHIVE_MAX_BYTES) { out.skipped = 'too_large'; return out; }
   // A file of the name is reused only when its text is the content; any other (a write that failed its read-back, a
   // file of another version) is written again.
-  const existing = await hostCall($, () => $.fs.read(c.archivePath));
-  if (existing.timeout) return failed(existing);
+  const existing = await call(() => $.fs.read(c.archivePath));
+  if (existing.late || existing.timeout) return failed(existing);
   if (!existing.error && existing.value === content) { out.path = c.archivePath; out.reused = true; return out; }
-  if (late(lim.writeBy)) { out.skipped = 'time'; return out; }
-  const w = await hostCall($, () => $.fs.write(c.archivePath, content));
-  if (w.timeout || w.error) return failed(w);
-  const back = await hostCall($, () => $.fs.read(c.archivePath));
-  if (back.timeout || back.error) return failed(back);
+  if (Date.now() >= lim.writeBy) { out.skipped = 'time'; return out; }
+  const w = await call(() => $.fs.write(c.archivePath, content));
+  if (w.late || w.timeout || w.error) return failed(w);
+  const back = await call(() => $.fs.read(c.archivePath));
+  if (back.late || back.timeout || back.error) return failed(back);
   if (back.value !== content) { out.error = 'read_back_differs'; return out; }
   out.path = c.archivePath;
-  out.bytes = bytes;
+  out.bytes = new TextEncoder().encode(content).length;
   if (!existing.error) out.rewritten = true;
   return out;
 }
 
 // Archives the candidates that are cut or traced. Never throws. No write starts later than min(ARCHIVE_BUDGET_MS, leftMs)
-// after the start and no read later than leftMs (the time the compaction has left); items past that get `time`, items
-// whose host call hit its cap `host_timeout`; both count in timed_out. Returns the counts and `paths`: tool_use_id -> path
-// of the items whose file is there and may be named in a trace.
+// after the start and no host call later than leftMs (the time the compaction has left); items past that get `time`,
+// items whose host call hit its cap `host_timeout`; both count in timed_out. Returns the counts and `paths`: tool_use_id
+// -> path of the items whose file is there and may be named in a trace.
 async function archiveResults($, dir, candidates, privatePaths, leftMs) {
   const started = Date.now();
   const left = Math.max(0, leftMs);
@@ -1530,8 +1557,8 @@ async function archiveResults($, dir, candidates, privatePaths, leftMs) {
   const items = candidates.filter((c) => c.keep !== 'full');
   const results = [];
   try {
-    if (items.some((c) => c.archivePath) && !lim.stalled && Date.now() < lim.writeBy) {
-      const w = await hostCall($, () => $.fs.write(`${dir}/${ARCHIVE_MARKER}`, `${isoNow()}\n`));
+    if (items.some((c) => c.archivePath) && Date.now() < lim.writeBy) {
+      const w = await hostCall($, () => $.fs.write(`${dir}/${ARCHIVE_MARKER}`, `${isoNow()}\n`), lim.hardEnd - Date.now());
       if (w.timeout) lim.stalled = true;
       summary.marker = !w.timeout && !w.error;
     }

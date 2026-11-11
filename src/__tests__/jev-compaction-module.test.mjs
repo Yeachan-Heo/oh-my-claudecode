@@ -41,7 +41,7 @@ function okResponse(json) {
   return { ok: true, status: 200, headers: {}, text: JSON.stringify(json) };
 }
 
-function fakeDollar({ env = ACTIVE_ENV, settingsEnv, respond = (body) => okResponse(scoreByMarker(body)), clockAfter, usage, messages = [], compactResult, writeThrows = false, diskPrefix, flakyBreakerRead = false, stallBreakerRead = false, stallRpmRead = false, rpmReadGate, rpmReadGates = {}, fsDelayMs = 0, initialFiles = {}, stallWrite } = {}) {
+function fakeDollar({ env = ACTIVE_ENV, settingsEnv, respond = (body) => okResponse(scoreByMarker(body)), clockAfter, usage, messages = [], compactResult, writeThrows = false, diskPrefix, flakyBreakerRead = false, stallBreakerRead = false, stallRpmRead = false, rpmReadGate, rpmReadGates = {}, fsDelayMs = 0, initialFiles = {}, stallWrite, stallRead, onFs } = {}) {
   const files = new Map(Object.entries(initialFiles));
   let flaked = false;
   let gated = false;
@@ -52,6 +52,8 @@ function fakeDollar({ env = ACTIVE_ENV, settingsEnv, respond = (body) => okRespo
     settings: { read: async ({ key }) => { calls.settings++; return key === 'env' ? settingsEnv : undefined; } },
     fs: {
       read: async (p) => {
+        onFs?.('read', p);
+        { const hang = stallRead?.('read', p); if (hang) return hang; }
         if (fsDelayMs) await new Promise((resolve) => setTimeout(resolve, fsDelayMs));
         if (flakyBreakerRead && !flaked && p.endsWith('/breaker.json')) { flaked = true; throw new Error('EPERM'); }
         if (stallBreakerRead && p.endsWith('/breaker.json')) return new Promise(() => {});
@@ -62,6 +64,7 @@ function fakeDollar({ env = ACTIVE_ENV, settingsEnv, respond = (body) => okRespo
       },
       exists: async (p) => (diskPrefix && p.startsWith(diskPrefix) ? existsSync(p) : files.has(p)),
       write: async (p, text) => {
+        onFs?.('write', p);
         if (fsDelayMs) await new Promise((resolve) => setTimeout(resolve, fsDelayMs));
         if (stallWrite?.(p)) return new Promise(() => {});
         if (diskPrefix && p.startsWith(diskPrefix)) { mkdirSync(dirname(p), { recursive: true }); writeFileSync(p, text); return; }
@@ -1707,6 +1710,16 @@ describe('jev-compaction module: archive of cut and removed results (OMC_JEV_COM
       expect([...run.files.keys()].some((p) => p.includes('compaction-archive'))).toBe(false);
     }
     expect(JSON.stringify(base.out)).not.toContain('full call and result');
+    // the same result and record as before the archive existed, frozen (not only equal to this branch's own other runs)
+    expect(timeless(base.records()[0])).toEqual({
+      point: 'compaction', event: 'compact', session_id: 'sess-1', agent_id: null, trigger: 'auto', mode: 'active', messages_before: 63, chars_before: 61653,
+      target: 0.3, kept_from: 0, server_blocks: null, candidates: 28, max_reduction: 0.899, secret_skipped: 0, secret_held: 0, task_output_held: 0, non_text: 0,
+      asked: 28, requests: 1, requests_ok: 1, answered: 28, mentioned: 0, messages_after: 41, chars_after: 18143, reduction: 0.706, kept_full: 6, kept_short: 0,
+      traced: 22, rebuilt_unchanged: 8, kept_handle: 0, rebuilt_assistant: 31, dropped_assistant: 0, joined_rows: 0, score_hist: [24, 0, 1, 3], unanswered: 0, result: 'jev',
+    });
+    expect(base.out.messages.slice(1, 3).map((m) => m.text)).toEqual(['Step 1.\n[compacted] Bash(cat notes-1.txt) - result of 2009 chars removed', 'Step 2.\n[compacted] Bash(cat notes-2.txt) - result of 2009 chars removed']);
+    const cut = await compactOnce(conversation(30, { chars: 3000, needed: [25, 26, 27, 28], maybe: [2] }), { env: { ...ACTIVE_ENV, OMC_JEV_COMPACT_TARGET: '0.2' } });
+    expect(resultOf(cut.out.messages, 't2').text).toMatch(/^RESULT-2 MAYBE x{285}\n\[result shortened at compaction: kept 300 of 3015 chars\]$/);
   });
 
   it('active: every cut or traced result goes whole to <state>/compaction-archive/<session>/<tool_use_id>.txt with its masked call, and its trace or cut names the file', async () => {
@@ -1788,28 +1801,78 @@ describe('jev-compaction module: archive of cut and removed results (OMC_JEV_COM
     const messages = conversation(30);
     const started = Date.now();
     const run = await compactOnce(messages, { env: archiveEnv, stallWrite: (p) => p.includes('/compaction-archive/') });
-    expect(Date.now() - started).toBeLessThan(5000);
+    expect(Date.now() - started).toBeLessThan(7000);
     expect(run.out.messages.length).toBeGreaterThan(0);
     expect(JSON.stringify(run.out)).not.toContain('full call and result');
     expect(archived(run.files)).toHaveLength(0);
     const record = run.records()[0];
     expect(record).toMatchObject({ result: 'jev', archive_written: 0, archive_marker: false });
     expect(record.archive_timed_out).toBe(record.traced);
-    expect(record.archive_ms).toBeLessThan(3500);
+    expect(record.archive_ms).toBeLessThan(4500);
   }, 15000);
 
-  it('no write starts after the archive budget: a slow host archives the first results and the rest get no path', async () => {
-    const messages = conversation(40);
-    const run = await compactOnce(messages, { env: archiveEnv, fsDelayMs: 450 });
+  it('no write starts after the archive budget: on a slow host the first results are archived and the rest get no path (virtual clock)', async () => {
+    const real = Date.now;
+    let skew = 0;
+    Date.now = () => real() + skew;
+    try {
+      const writes = [];
+      const onFs = (kind, path) => {
+        if (!path.includes('/compaction-archive/')) return;
+        if (kind !== 'write') return;
+        writes.push(Date.now());
+        skew += 450;
+      };
+      const run = await compactOnce(conversation(40), { env: archiveEnv, onFs });
+      const record = run.records()[0];
+      expect(record.archive_written).toBeGreaterThan(0);
+      expect(record.archive_timed_out).toBeGreaterThan(0);
+      expect(record.archive_written + record.archive_timed_out).toBe(record.traced);
+      // the first write is the marker, at the start of the archive; the writes of the eight workers follow one another
+      for (const t of writes) expect(t).toBeLessThan(writes[0] + 1500 + 50);
+      const named = run.out.messages.flatMap((m) => (m.text || '').split('\n')).filter((l) => l.includes('full call and result: '));
+      expect(named).toHaveLength(record.archive_written);
+      for (const line of named) expect(run.files.has(line.split('full call and result: ')[1])).toBe(true);
+    } finally { Date.now = real; }
+  });
+
+  it('no host call starts after the compaction\'s own time, and one that stalls is cut at the time left (virtual clock for the time Jev took)', async () => {
+    const real = Date.now;
+    let skew = 0;
+    Date.now = () => real() + skew;
+    try {
+      // Jev answers after 8.1 s of the 8 s: no time is left, so no archive call is made at all
+      let archiveCalls = 0;
+      const onFs = (_kind, path) => { if (path.includes('/compaction-archive/')) archiveCalls++; };
+      const respond = (body) => { skew += 8100; return okResponse(scoreByMarker(body)); };
+      const late = await compactOnce(conversation(30), { env: archiveEnv, respond, onFs });
+      expect(archiveCalls).toBe(0);
+      expect(JSON.stringify(late.out)).not.toContain('full call and result');
+      expect(late.records()[0]).toMatchObject({ result: 'jev', archive_written: 0, archive_marker: false });
+      expect(late.records()[0].archive_timed_out).toBe(late.records()[0].traced);
+      // 0.6 s are left and the host never answers a read: the archive ends with the time left, not after the 2 s cap
+      skew = 0;
+      const stall = (kind, path) => (kind === 'read' && path.includes('/compaction-archive/') ? new Promise(() => {}) : undefined);
+      const respond2 = (body) => { skew += 7400; return okResponse(scoreByMarker(body)); };
+      const run = await compactOnce(conversation(30), { env: archiveEnv, respond: respond2, stallRead: stall });
+      const record = run.records()[0];
+      expect(record.archive_ms).toBeLessThan(1500);
+      expect(record.archive_written).toBe(0);
+      expect(record.archive_timed_out).toBe(record.traced);
+      expect(JSON.stringify(run.out)).not.toContain('full call and result');
+    } finally { Date.now = real; }
+  });
+
+  it('a host that never answers a read cannot hold the compaction: the first read is cut at the cap and no call starts after it', async () => {
+    let reads = 0;
+    const started = Date.now();
+    const run = await compactOnce(conversation(30), { env: archiveEnv, stallRead: (_kind, path) => { if (path.includes('/compaction-archive/') && path.endsWith('.txt')) reads++; return path.includes('/compaction-archive/') && path.endsWith('.txt') ? new Promise(() => {}) : undefined; } });
+    expect(Date.now() - started).toBeLessThan(7000);
+    expect(reads).toBeLessThanOrEqual(8);
     const record = run.records()[0];
-    expect(record.archive_written).toBeGreaterThan(0);
-    expect(record.archive_timed_out).toBeGreaterThan(0);
-    expect(record.archive_written + record.archive_timed_out).toBe(record.traced);
-    // the marker, one full wave of eight (read, write, read), then one read per wave of the rest before it is skipped
-    expect(record.archive_ms).toBeLessThan(450 + 3 * 450 + 450 * Math.ceil(record.traced / 8) + 600);
-    const named = run.out.messages.flatMap((m) => (m.text || '').split('\n')).filter((l) => l.includes('full call and result: '));
-    expect(named).toHaveLength(record.archive_written);
-    for (const line of named) expect(run.files.has(line.split('full call and result: ')[1])).toBe(true);
+    expect(record).toMatchObject({ archive_written: 0 });
+    expect(record.archive_timed_out).toBe(record.traced);
+    expect(JSON.stringify(run.out)).not.toContain('full call and result');
   }, 20000);
 
   it('a file of the same name is reused only when its text is the content: another text, even of the same length, is overwritten and the trace names the right text', async () => {
@@ -1852,12 +1915,87 @@ describe('jev-compaction module: archive of cut and removed results (OMC_JEV_COM
     expect(gone.files.has(path)).toBe(false);
   });
 
-  it('a result over the host\'s write limit is not archived and its trace names no file', async () => {
-    const huge = 'z '.repeat(2_200_000);
-    const messages = conversation(20, { result: (i) => (i === 3 ? huge : `RESULT-${i} ${'x'.repeat(2000)}`) });
+  it('a result or a call input over 50 000 characters is not archived, and the archive adds no masking time for it (password, KEY and mysql runs)', async () => {
+    // the oldest results: with more than 240 candidates they are not among the ones sent to Jev, whose own masking is slow on them too
+    const long = { 1: 'password'.repeat(6500), 2: 'KEY'.repeat(17400), 3: 'mysql '.repeat(8700) };
+    const messages = conversation(250, { input: (i) => (i === 4 ? { command: `echo ${long[1]}` } : { command: `cat notes-${i}.txt` }), result: (i) => long[i] ?? `RESULT-${i} ${'x'.repeat(500)}` });
+    const t0 = Date.now();
+    await compactOnce(messages);
+    const base = Date.now() - t0;
+    const t1 = Date.now();
     const run = await compactOnce(messages, { env: archiveEnv });
+    const active = Date.now() - t1;
+    const shadow = await compactOnce(messages, { env: { ...ACTIVE_ENV, OMC_JEV_COMPACT_ARCHIVE: 'shadow' } });
+    for (const i of [1, 2, 3, 4]) expect(run.files.has(`${ARCHIVE}/t${i}.txt`)).toBe(false);
+    expect(run.records()[0].archive_skipped).toMatchObject({ too_large: 4 });
+    expect(shadow.records()[0].archive_skipped).toMatchObject({ too_large: 4 });
+    // masking the whole of each would take seconds longer than the module's own masking of a window of it
+    expect(active - base).toBeLessThan(1500);
+  }, 60000);
+
+  it('the masking of the archive is bounded in time: once about a second of it is spent, the rest of the candidates are skipped as `time`', async () => {
+    const slow = 'password'.repeat(6000); // 48 000 characters, under the limit, slow to mask
+    const t = Date.now();
+    maskSecrets(slow);
+    const one = Date.now() - t;
+    const messages = conversation(250, { result: (i) => (i <= 4 ? `${slow} ${i}` : `RESULT-${i} ${'x'.repeat(500)}`) });
+    const t0 = Date.now();
+    await compactOnce(messages);
+    const base = Date.now() - t0;
+    const t1 = Date.now();
+    const run = await compactOnce(messages, { env: archiveEnv });
+    const active = Date.now() - t1;
+    // unbounded, the four would take four times `one` more; bounded they take about two
+    expect(active - base).toBeLessThan(3 * one + 400);
+    if (one > 400) expect(run.records()[0].archive_skipped.time).toBeGreaterThanOrEqual(1);
+  }, 90000);
+
+  it('an id that is not a file name is never archived: no file outside the session directory, the trace names none', async () => {
+    const evil = ['../../evil', 'a/b', 'x'.repeat(81), 'tool use', '..'];
+    const m = [{ role: 'user', text: 'Task: look.', toolUses: [] }];
+    evil.forEach((id, i) => {
+      m.push({ role: 'assistant', text: `Step ${i}.`, toolUses: [{ tool_use_id: id, tool: 'Bash', input: { command: `cat notes-${i}.txt` } }] });
+      m.push({ role: 'user', text: '', toolUses: [], toolResults: [{ tool_use_id: id, text: `RESULT-${i} ${'x'.repeat(2000)}`, isError: false }] });
+    });
+    for (let i = 10; i < 30; i++) {
+      m.push({ role: 'assistant', text: `Step ${i}.`, toolUses: [{ tool_use_id: `ok${i}`, tool: 'Bash', input: { command: `cat notes-${i}.txt` } }] });
+      m.push({ role: 'user', text: '', toolUses: [], toolResults: [{ tool_use_id: `ok${i}`, text: `RESULT-${i} ${'x'.repeat(2000)}`, isError: false }] });
+    }
+    m.push({ role: 'user', text: 'Sum up.', toolUses: [] }, { role: 'assistant', text: 'Done.', toolUses: [] });
+    const messages = m.map((x, k) => Object.freeze({ ...x, handle: `h${k}` }));
+    const run = await compactOnce(messages, { env: archiveEnv });
+    expect([...run.files.keys()].filter((p) => p.includes('compaction-archive')).every((p) => /\/compaction-archive\/sess-1\/(?:\.compaction|ok\d+\.txt)$/.test(p))).toBe(true);
+    expect(run.records()[0].archive_skipped).toMatchObject({ bad_id: 5 });
+    for (let i = 0; i < 5; i++) expect(traceOf(run.out.messages, i)).not.toContain('full call and result');
+  });
+
+  it('two results of one tool_use_id are not written to one file: the first is archived, the second is skipped', async () => {
+    const m = [{ role: 'user', text: 'Task: look.', toolUses: [] }];
+    const use = { tool_use_id: 'dup', tool: 'Bash', input: { command: 'cat notes-dup.txt' } };
+    m.push({ role: 'assistant', text: 'Step a.', toolUses: [use] }, { role: 'assistant', text: 'Step b.', toolUses: [use] });
+    m.push({ role: 'user', text: '', toolUses: [], toolResults: [{ tool_use_id: 'dup', text: `FIRST ${'x'.repeat(2000)}`, isError: false }] });
+    m.push({ role: 'user', text: '', toolUses: [], toolResults: [{ tool_use_id: 'dup', text: `SECOND ${'y'.repeat(2000)}`, isError: false }] });
+    for (let i = 10; i < 30; i++) {
+      m.push({ role: 'assistant', text: `Step ${i}.`, toolUses: [{ tool_use_id: `ok${i}`, tool: 'Bash', input: { command: `cat notes-${i}.txt` } }] });
+      m.push({ role: 'user', text: '', toolUses: [], toolResults: [{ tool_use_id: `ok${i}`, text: `RESULT-${i} ${'x'.repeat(2000)}`, isError: false }] });
+    }
+    m.push({ role: 'user', text: 'Sum up.', toolUses: [] }, { role: 'assistant', text: 'Done.', toolUses: [] });
+    const messages = m.map((x, k) => Object.freeze({ ...x, handle: `h${k}` }));
+    const run = await compactOnce(messages, { env: archiveEnv });
+    const record = run.records()[0];
+    expect(record.candidates).toBe(20);
+    expect(record.archive_skipped).toMatchObject({ duplicate_id: 1 });
+    expect(run.files.get(`${ARCHIVE}/dup.txt`)).toContain('FIRST');
+    expect(run.files.get(`${ARCHIVE}/dup.txt`)).not.toContain('SECOND');
+    const lines = run.out.messages.flatMap((x) => (x.text || '').split('\n')).filter((l) => l.startsWith('[compacted] Bash(cat notes-dup.txt)'));
+    expect(lines.filter((l) => l.includes('full call and result: ')).length).toBeLessThanOrEqual(1);
+  });
+
+  it('the text of an archive file (a Read of it) is not archived again', async () => {
+    const archiveFile = `[Jev compaction archive] call Bash, tool_use_id t9\n--- input (masked) ---\n{}\n--- result (5 chars, unchanged) ---\nhello`;
+    const messages = conversation(20, { result: (i) => (i === 3 ? archiveFile + ' '.repeat(2000) : `RESULT-${i} ${'x'.repeat(2000)}`) });
+    const run = await compactOnce(messages, { env: archiveEnv, });
     expect(run.files.has(`${ARCHIVE}/t3.txt`)).toBe(false);
-    expect(traceOf(run.out.messages, 3)).not.toContain('full call and result');
-    expect(run.records()[0].archive_skipped).toMatchObject({ too_large: 1 });
+    expect(run.records()[0].archive_skipped).toMatchObject({ after_compaction: 1 });
   });
 });
