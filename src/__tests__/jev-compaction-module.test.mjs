@@ -510,6 +510,25 @@ describe('jev-compaction module: active compaction', () => {
     }
   });
 
+  it('with parallel results in rows of their own, a message belongs to the result row before it: after a row that keeps its handle the host brings it back, after a rebuilt one it is carried', async () => {
+    const words = 'Message between the two results.';
+    const base = conversation(20);
+    const tail = [
+      Object.freeze({ role: 'assistant', text: 'Two at once.', toolUses: [{ tool_use_id: 'img', tool: 'Screenshot', input: {} }, { tool_use_id: 'q', tool: 'Bash', input: { command: 'cat q.txt' } }], handle: 'hpar' }),
+      Object.freeze({ role: 'user', text: '', toolUses: [], toolResults: [{ tool_use_id: 'img', text: '', result: [{ type: 'image' }] }], handle: 'himg' }),
+      Object.freeze({ role: 'user', text: '', toolUses: [], toolResults: [{ tool_use_id: 'q', text: 'RESULT-q', isError: false }], handle: 'hq' }),
+    ];
+    const messages = [...base.slice(0, -2), ...tail, ...base.slice(-2)];
+    const before = await compactWithApi(messages, apiOf(messages, { img: [framed(words)] }));
+    expect(apiOf(messages, { img: [framed(words)] }).find((a) => a.content.some((b) => b.tool_use_id === 'img')).content.map((b) => b.type)).toEqual(['tool_result', 'text', 'tool_result', 'text']);
+    expect(before.records()[0]).toMatchObject({ result: 'jev', kept_handle: 1, queued_user: 1, queued_carried: 0 });
+    expect(before.out.messages).toContain(tail[1]);
+    expect(count(before.out.messages, framed(words))).toBe(0);
+    const after = await compactWithApi(messages, apiOf(messages, { q: [framed(words)] }));
+    expect(after.records()[0]).toMatchObject({ result: 'jev', queued_user: 1, queued_carried: 1 });
+    expect(after.out.messages.find((m) => (m.text || '').includes(framed(words))).toolResults.map((r) => r.tool_use_id)).toEqual(['q']);
+  });
+
   it('a delivery equal to the text of an earlier row (a block a previous compaction carried) is still carried at its own result', async () => {
     const words = 'continue';
     const base = conversation(30);

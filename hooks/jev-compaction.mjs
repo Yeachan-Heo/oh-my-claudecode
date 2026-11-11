@@ -886,9 +886,11 @@ function userWords(m) {
 // Messages delivered during a tool turn that the API form shows and `messages` does not (deliveryOf):
 // row -> its blocks, word for word, with the counts by kind; null without the API form (they cannot
 // be seen then). A block belongs to the row the host wrote the attachment after, whose handle brings
-// it back: the last row holding a result of its API message, or a later user row of the same message
-// whose text stands before the block (a row shown after the results, such as an interruption notice).
-// A block equal to a row's text is shown already.
+// it back: the row of the result or of the shown text that stands last before the block in its API
+// message (the API form keeps the order of the rows it joins, so with parallel results in rows of
+// their own that is the result before it, and a row shown after the results, such as an
+// interruption notice, takes the blocks after its text). A block equal to a row's text is shown
+// already.
 function queuedOf(messages, api) {
   if (!api) return null;
   const rows = new Map();
@@ -913,13 +915,14 @@ function queuedOf(messages, api) {
     if (row === undefined) continue;
     let anchor = row;
     for (const b of a.content) {
+      if (b?.type === 'tool_result' && rowOfResult.has(b.tool_use_id)) anchor = rowOfResult.get(b.tool_use_id);
       if (b?.type !== 'text') continue;
       // Shown already only by a row of this API message: a result row of it, or a later user row
       // right after them. The same text elsewhere (a block an earlier compaction carried, a repeated
       // "continue") is another delivery.
       const r = (rowsOfText.get(b.text) || []).find((k) => k >= first && messages.slice(row + 1, k + 1).every((x) => x.role === 'user'));
       if (r !== undefined) {
-        anchor = Math.max(anchor, r);
+        anchor = r;
         continue;
       }
       const kind = deliveryOf(b.text);
