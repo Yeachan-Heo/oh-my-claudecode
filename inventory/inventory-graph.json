@@ -5,15 +5,15 @@
   "provenance": {
     "base": "05c800f40d1ad53b42a78609d2667ef4f726808b",
     "planningHead": "0a91273e61dbbd47eb0af4c02844409251e08398",
-    "head": "7408983159281607a02f689542c533df6bd9e43b",
-    "sourceSha256": "dca51c489e2b7fe3b429c71db14d3263fcb15f13657a6fbedffdae6a0fd4f8ef",
+    "head": "db1129afa6e14b3db1a196ffe6e312499e964997",
+    "sourceSha256": "a539a599a125f77619e31d1c382bd2575646ed02308f36b93c7d71ee28934e04",
     "generatedAt": null,
     "generator": "scripts/generate-inventory-graph.mjs"
   },
   "base": "05c800f40d1ad53b42a78609d2667ef4f726808b",
   "planningHead": "0a91273e61dbbd47eb0af4c02844409251e08398",
-  "head": "7408983159281607a02f689542c533df6bd9e43b",
-  "sourceSha256": "dca51c489e2b7fe3b429c71db14d3263fcb15f13657a6fbedffdae6a0fd4f8ef",
+  "head": "db1129afa6e14b3db1a196ffe6e312499e964997",
+  "sourceSha256": "a539a599a125f77619e31d1c382bd2575646ed02308f36b93c7d71ee28934e04",
   "counts": {
     "public": {
       "skills": 84,
@@ -23,13 +23,13 @@
       "total": 133
     },
     "internal": {
-      "hookFiles": 343,
+      "hookFiles": 342,
       "featureFiles": 95,
       "toolFiles": 65,
       "libFiles": 49,
       "templateHooks": 25,
-      "srcFiles": 1475,
-      "total": 1500
+      "srcFiles": 1474,
+      "total": 1499
     },
     "generated": {
       "distFiles": 5639,
@@ -41,7 +41,7 @@
     },
     "skills": 84,
     "commands": 21,
-    "hookFiles": 343,
+    "hookFiles": 342,
     "workflows": 8,
     "agentDefinitions": 18,
     "promptLikeFiles": 63
@@ -298,7 +298,6 @@
       "src/hooks/jev/points.ts",
       "src/hooks/jev/resolver.ts",
       "src/hooks/jev/types.ts",
-      "src/hooks/keyword-detector/__tests__/autopilot-command-parity.test.ts",
       "src/hooks/keyword-detector/__tests__/index.test.ts",
       "src/hooks/keyword-detector/__tests__/jev-shadow.test.ts",
       "src/hooks/keyword-detector/index.ts",
@@ -6741,7 +6740,6 @@
       "src/hooks/jev/points.ts",
       "src/hooks/jev/resolver.ts",
       "src/hooks/jev/types.ts",
-      "src/hooks/keyword-detector/__tests__/autopilot-command-parity.test.ts",
       "src/hooks/keyword-detector/__tests__/index.test.ts",
       "src/hooks/keyword-detector/__tests__/jev-shadow.test.ts",
       "src/hooks/keyword-detector/index.ts",
@@ -44296,11 +44294,6 @@
         "path": "src/hooks/jev/types.ts"
       },
       {
-        "id": "src/hooks/keyword-detector/__tests__/autopilot-command-parity.test.ts",
-        "kind": "hook",
-        "path": "src/hooks/keyword-detector/__tests__/autopilot-command-parity.test.ts"
-      },
-      {
         "id": "src/hooks/keyword-detector/__tests__/index.test.ts",
         "kind": "hook",
         "path": "src/hooks/keyword-detector/__tests__/index.test.ts"
@@ -71113,46 +71106,6 @@
         "kind": "type-imports"
       },
       {
-        "from": "src/hooks/keyword-detector/__tests__/autopilot-command-parity.test.ts",
-        "to": "external:node:child_process",
-        "kind": "imports"
-      },
-      {
-        "from": "src/hooks/keyword-detector/__tests__/autopilot-command-parity.test.ts",
-        "to": "external:node:fs",
-        "kind": "imports"
-      },
-      {
-        "from": "src/hooks/keyword-detector/__tests__/autopilot-command-parity.test.ts",
-        "to": "external:node:os",
-        "kind": "imports"
-      },
-      {
-        "from": "src/hooks/keyword-detector/__tests__/autopilot-command-parity.test.ts",
-        "to": "external:node:path",
-        "kind": "imports"
-      },
-      {
-        "from": "src/hooks/keyword-detector/__tests__/autopilot-command-parity.test.ts",
-        "to": "external:node:url",
-        "kind": "imports"
-      },
-      {
-        "from": "src/hooks/keyword-detector/__tests__/autopilot-command-parity.test.ts",
-        "to": "external:vitest",
-        "kind": "imports"
-      },
-      {
-        "from": "src/hooks/keyword-detector/__tests__/autopilot-command-parity.test.ts",
-        "to": "src/hooks/keyword-detector/index.ts",
-        "kind": "imports"
-      },
-      {
-        "from": "src/hooks/keyword-detector/__tests__/autopilot-command-parity.test.ts",
-        "to": "src/installer/index.ts",
-        "kind": "imports"
-      },
-      {
         "from": "src/hooks/keyword-detector/__tests__/index.test.ts",
         "to": "external:vitest",
         "kind": "imports"
@@ -94419,12 +94372,12 @@
       }
     ],
     "stats": {
-      "nodeCount": 8300,
-      "edgeCount": 9139,
-      "importEdgeCount": 7668,
+      "nodeCount": 8299,
+      "edgeCount": 9131,
+      "importEdgeCount": 7660,
       "registerEdgeCount": 105
     }
   },
-  "inventorySha256": "aad80b2660bad5afc74ca77b713b2de5f069654961623ee3f46a78b83ae65890",
-  "manifestSha256": "9fc559c70f37d056497307ba1e4637031f69f7ffcdb076b4a1fb9bfe9cf5d9aa"
+  "inventorySha256": "50bfd45f3d8edef9f44c61f332b2b85b6e4c644a54b7a9189af991ec28a7412d",
+  "manifestSha256": "f20fb5c1ff8770c331a86347fdafea9ec924c5652a233c4c3d2d1baa183139cf"
 }
