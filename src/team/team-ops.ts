@@ -42,6 +42,7 @@ import type {
   ClaimTaskResult,
   TransitionTaskResult,
   ReleaseTaskClaimResult,
+  RenewTaskClaimResult,
   TaskReadiness,
   TeamSummary,
   TeamSummaryPerformance,
@@ -65,6 +66,7 @@ import {
   requeueRecoveredTask as requeueRecoveredTaskImpl,
   transitionTaskStatus as transitionTaskStatusImpl,
   releaseTaskClaim as releaseTaskClaimImpl,
+  renewTaskClaim as renewTaskClaimImpl,
   listTasks as listTasksImpl,
   createTaskRecord,
   validateTaskDependencies,
@@ -94,6 +96,7 @@ export type {
   ClaimTaskResult,
   TransitionTaskResult,
   ReleaseTaskClaimResult,
+  RenewTaskClaimResult,
   TaskReadiness,
   TeamSummary,
   ShutdownAck,
@@ -748,6 +751,26 @@ export async function teamReleaseTaskClaim(
   cwd: string,
 ): Promise<ReleaseTaskClaimResult> {
   return releaseTaskClaimImpl(taskId, claimToken, workerName, {
+    teamName,
+    cwd,
+    readTask: teamReadTask,
+    readTeamConfig: teamReadConfig as (tn: string, c: string) => Promise<{ workers: Array<{ name: string }> } | null>,
+    withTaskClaimLock,
+    normalizeTask,
+    isTerminalTaskStatus: isTerminalTeamTaskStatus,
+    taskFilePath: (tn: string, tid: string, c: string) => canonicalTaskFilePath(tn, tid, c),
+    writeAtomic,
+  });
+}
+
+export async function teamRenewTaskClaim(
+  teamName: string,
+  taskId: string,
+  claimToken: string,
+  workerName: string,
+  cwd: string,
+): Promise<RenewTaskClaimResult> {
+  return renewTaskClaimImpl(taskId, claimToken, workerName, {
     teamName,
     cwd,
     readTask: teamReadTask,
