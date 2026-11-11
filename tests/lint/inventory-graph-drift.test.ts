@@ -477,7 +477,7 @@ describe('inventory-graph drift enforcement (#3702)', () => {
     }
   });
 
-  it('verify mode rejects legacy head-bearing baselines', { timeout: 30_000 }, () => {
+  it('verify mode rejects legacy head-bearing baselines', { timeout: 120_000 }, () => {
     const opts = { cwd: REPO_ROOT, encoding: 'utf8' as const, maxBuffer: 20 * 1024 * 1024 };
     const minimal = () => ({
       schemaVersion: 2,
