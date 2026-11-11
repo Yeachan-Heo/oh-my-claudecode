@@ -214,6 +214,16 @@ vi.mock('../monitor.js', () => ({
 }));
 
 vi.mock('../tmux-session.js', () => ({
+  // Provider routing helpers stay real: the module cannot be partially
+  // imported here because its imports hit this suite's other mocks.
+  isHerdrSessionTarget: (value?: string | null) => typeof value === 'string' && value.trim().startsWith('herdr:'),
+  providerForTeamTarget: (sessionName?: string | null, paneId?: string | null) => {
+    if ((typeof sessionName === 'string' && sessionName.trim().startsWith('herdr:'))
+      || (typeof paneId === 'string' && /^w[0-9a-z]+:p[0-9a-z]+$/i.test(paneId.trim()))) return 'herdr';
+    if ((typeof sessionName === 'string' && sessionName.startsWith('cmux:'))
+      || (typeof paneId === 'string' && paneId.trim().length > 0 && !paneId.trim().startsWith('%'))) return 'cmux';
+    return 'tmux';
+  },
   sanitizeName: tmuxSessionMocks.sanitizeName,
   getWorkerLiveness: tmuxSessionMocks.getWorkerLiveness,
   getOwnedWorkerLiveness: tmuxSessionMocks.getOwnedWorkerLiveness,

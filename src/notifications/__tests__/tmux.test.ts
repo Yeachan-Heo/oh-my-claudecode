@@ -1,16 +1,27 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
+const herdrMocks = vi.hoisted(() => ({
+  listHerdrTeams: vi.fn(),
+}));
+
 vi.mock("../../cli/tmux-utils.js", async (importOriginal) => {
   const actual = await importOriginal<typeof import("../../cli/tmux-utils.js")>();
   return { ...actual, tmuxShell: vi.fn() };
+});
+
+vi.mock("../../team/herdr-session.js", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../../team/herdr-session.js")>();
+  return { ...actual, listHerdrTeams: herdrMocks.listHerdrTeams };
 });
 
 import { tmuxShell } from "../../cli/tmux-utils.js";
 import {
   getCurrentTmuxSession,
   getCurrentTmuxPaneId,
+  getCurrentHerdrPaneId,
   formatTmuxInfo,
   getTeamTmuxSessions,
+  getTeamHerdrWorkspaces,
 } from "../tmux.js";
 
 const mockTmuxShell = vi.mocked(tmuxShell);
@@ -200,5 +211,62 @@ describe("getTeamTmuxSessions", () => {
       throw new Error("no server running");
     });
     expect(getTeamTmuxSessions("myteam")).toEqual([]);
+  });
+});
+
+describe("herdr pane context", () => {
+  const originalEnv = process.env;
+
+  beforeEach(() => {
+    process.env = { ...originalEnv };
+    vi.resetAllMocks();
+  });
+
+  afterEach(() => {
+    process.env = originalEnv;
+  });
+
+  it("validates the HERDR_PANE_ID grammar before use", () => {
+    process.env.HERDR_PANE_ID = "w9:p12";
+    expect(getCurrentHerdrPaneId()).toBe("w9:p12");
+    process.env.HERDR_PANE_ID = "%3";
+    expect(getCurrentHerdrPaneId()).toBeNull();
+    delete process.env.HERDR_PANE_ID;
+    expect(getCurrentHerdrPaneId()).toBeNull();
+  });
+
+  it("routes pane id and session detection to the herdr pane", () => {
+    process.env.HERDR_PANE_ID = "w9:p12";
+    delete process.env.TMUX;
+    delete process.env.TMUX_PANE;
+
+    expect(getCurrentTmuxPaneId()).toBe("w9:p12");
+    expect(getCurrentTmuxSession()).toBe("herdr:w9");
+    expect(formatTmuxInfo()).toBe("herdr: w9");
+    expect(mockTmuxShell).not.toHaveBeenCalled();
+  });
+
+  it("keeps tmux detection when HERDR_PANE_ID is absent or malformed", () => {
+    delete process.env.HERDR_PANE_ID;
+    process.env.TMUX = "/tmp/tmux-1000/default,1234,0";
+    process.env.TMUX_PANE = "%5";
+    expect(getCurrentTmuxPaneId()).toBe("%5");
+
+    process.env.HERDR_PANE_ID = "not-a-pane";
+    mockTmuxShell.mockReturnValueOnce("%5 tmux-session\n");
+    expect(getCurrentTmuxSession()).toBe("tmux-session");
+  });
+
+  it("lists herdr team workspaces for a team", async () => {
+    herdrMocks.listHerdrTeams.mockResolvedValue([
+      { workspaceId: "w2", teamName: "myteam", label: "omc-team-myteam" },
+      { workspaceId: "w3", teamName: "other", label: "omc-team-other" },
+    ]);
+    await expect(getTeamHerdrWorkspaces("myteam")).resolves.toEqual([
+      { workspaceId: "w2", teamName: "myteam", label: "omc-team-myteam" },
+    ]);
+    await expect(getTeamHerdrWorkspaces("")).resolves.toEqual([]);
+    herdrMocks.listHerdrTeams.mockRejectedValue(new Error("server_not_running"));
+    await expect(getTeamHerdrWorkspaces("myteam")).resolves.toEqual([]);
   });
 });

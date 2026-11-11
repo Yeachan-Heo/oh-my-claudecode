@@ -5,15 +5,15 @@
   "provenance": {
     "base": "05c800f40d1ad53b42a78609d2667ef4f726808b",
     "planningHead": "0a91273e61dbbd47eb0af4c02844409251e08398",
-    "head": "fb48fce5c25e33592c24afdc276d8aed3c651004",
-    "sourceSha256": "df56752f18a86d25c05efc7e250f945ff2ff61baf198209323d18fa68b48a925",
+    "head": "af15a98918a38ea1b119a292bb55deabbb6bf7bc",
+    "sourceSha256": "d7b4906d5d8b64e9752d0851ec182d90fedcd44f7de9eadb81ee9550f6a34278",
     "generatedAt": null,
     "generator": "scripts/generate-inventory-graph.mjs"
   },
   "base": "05c800f40d1ad53b42a78609d2667ef4f726808b",
   "planningHead": "0a91273e61dbbd47eb0af4c02844409251e08398",
-  "head": "fb48fce5c25e33592c24afdc276d8aed3c651004",
-  "sourceSha256": "df56752f18a86d25c05efc7e250f945ff2ff61baf198209323d18fa68b48a925",
+  "head": "af15a98918a38ea1b119a292bb55deabbb6bf7bc",
+  "sourceSha256": "d7b4906d5d8b64e9752d0851ec182d90fedcd44f7de9eadb81ee9550f6a34278",
   "counts": {
     "public": {
       "skills": 84,
@@ -28,8 +28,8 @@
       "toolFiles": 65,
       "libFiles": 49,
       "templateHooks": 25,
-      "srcFiles": 1450,
-      "total": 1475
+      "srcFiles": 1461,
+      "total": 1486
     },
     "generated": {
       "distFiles": 5639,
@@ -36405,6 +36405,11 @@
         "path": "docs/SYNC-SYSTEM.md"
       },
       {
+        "id": "docs/TEAM-MULTIPLEXER.md",
+        "kind": "other",
+        "path": "docs/TEAM-MULTIPLEXER.md"
+      },
+      {
         "id": "docs/TEAM-WORKTREE-MODE.md",
         "kind": "other",
         "path": "docs/TEAM-WORKTREE-MODE.md"
@@ -41795,6 +41800,16 @@
         "path": "src/__tests__/rate-limit-wait/daemon.test.ts"
       },
       {
+        "id": "src/__tests__/rate-limit-wait/herdr-daemon.test.ts",
+        "kind": "src",
+        "path": "src/__tests__/rate-limit-wait/herdr-daemon.test.ts"
+      },
+      {
+        "id": "src/__tests__/rate-limit-wait/herdr-detector.test.ts",
+        "kind": "src",
+        "path": "src/__tests__/rate-limit-wait/herdr-detector.test.ts"
+      },
+      {
         "id": "src/__tests__/rate-limit-wait/integration.test.ts",
         "kind": "src",
         "path": "src/__tests__/rate-limit-wait/integration.test.ts"
@@ -42485,6 +42500,11 @@
         "path": "src/cli/__tests__/doctor-team-routing.test.ts"
       },
       {
+        "id": "src/cli/__tests__/herdr-no-raw-calls.test.ts",
+        "kind": "src",
+        "path": "src/cli/__tests__/herdr-no-raw-calls.test.ts"
+      },
+      {
         "id": "src/cli/__tests__/hud-watch.test.ts",
         "kind": "src",
         "path": "src/cli/__tests__/hud-watch.test.ts"
@@ -42493,6 +42513,16 @@
         "id": "src/cli/__tests__/integer-option.test.ts",
         "kind": "src",
         "path": "src/cli/__tests__/integer-option.test.ts"
+      },
+      {
+        "id": "src/cli/__tests__/interop-herdr.test.ts",
+        "kind": "src",
+        "path": "src/cli/__tests__/interop-herdr.test.ts"
+      },
+      {
+        "id": "src/cli/__tests__/launch-herdr.test.ts",
+        "kind": "src",
+        "path": "src/cli/__tests__/launch-herdr.test.ts"
       },
       {
         "id": "src/cli/__tests__/launch-secure-transport.test.ts",
@@ -46235,6 +46265,11 @@
         "path": "src/notifications/__tests__/reply-config.test.ts"
       },
       {
+        "id": "src/notifications/__tests__/reply-herdr.test.ts",
+        "kind": "src",
+        "path": "src/notifications/__tests__/reply-herdr.test.ts"
+      },
+      {
         "id": "src/notifications/__tests__/reply-listener.test.ts",
         "kind": "src",
         "path": "src/notifications/__tests__/reply-listener.test.ts"
@@ -46695,6 +46730,16 @@
         "path": "src/team/__tests__/helpers/git-fixture.ts"
       },
       {
+        "id": "src/team/__tests__/herdr-session-realherdr.test.ts",
+        "kind": "src",
+        "path": "src/team/__tests__/herdr-session-realherdr.test.ts"
+      },
+      {
+        "id": "src/team/__tests__/herdr-session.test.ts",
+        "kind": "src",
+        "path": "src/team/__tests__/herdr-session.test.ts"
+      },
+      {
         "id": "src/team/__tests__/idle-nudge.test.ts",
         "kind": "src",
         "path": "src/team/__tests__/idle-nudge.test.ts"
@@ -47040,9 +47085,19 @@
         "path": "src/team/__tests__/tmux-session-prereqs.test.ts"
       },
       {
+        "id": "src/team/__tests__/tmux-session.create-team-herdr.test.ts",
+        "kind": "src",
+        "path": "src/team/__tests__/tmux-session.create-team-herdr.test.ts"
+      },
+      {
         "id": "src/team/__tests__/tmux-session.create-team.test.ts",
         "kind": "src",
         "path": "src/team/__tests__/tmux-session.create-team.test.ts"
+      },
+      {
+        "id": "src/team/__tests__/tmux-session.herdr-arms.test.ts",
+        "kind": "src",
+        "path": "src/team/__tests__/tmux-session.herdr-arms.test.ts"
       },
       {
         "id": "src/team/__tests__/tmux-session.kill-team-session.test.ts",
@@ -47198,6 +47253,11 @@
         "id": "src/team/governance.ts",
         "kind": "src",
         "path": "src/team/governance.ts"
+      },
+      {
+        "id": "src/team/herdr-session.ts",
+        "kind": "src",
+        "path": "src/team/herdr-session.ts"
       },
       {
         "id": "src/team/idle-nudge.ts",
@@ -58227,6 +58287,61 @@
         "kind": "type-imports"
       },
       {
+        "from": "src/__tests__/rate-limit-wait/herdr-daemon.test.ts",
+        "to": "external:node:fs",
+        "kind": "imports"
+      },
+      {
+        "from": "src/__tests__/rate-limit-wait/herdr-daemon.test.ts",
+        "to": "external:node:os",
+        "kind": "imports"
+      },
+      {
+        "from": "src/__tests__/rate-limit-wait/herdr-daemon.test.ts",
+        "to": "external:node:path",
+        "kind": "imports"
+      },
+      {
+        "from": "src/__tests__/rate-limit-wait/herdr-daemon.test.ts",
+        "to": "external:vitest",
+        "kind": "imports"
+      },
+      {
+        "from": "src/__tests__/rate-limit-wait/herdr-daemon.test.ts",
+        "to": "src/features/rate-limit-wait/daemon-state.ts",
+        "kind": "imports"
+      },
+      {
+        "from": "src/__tests__/rate-limit-wait/herdr-daemon.test.ts",
+        "to": "src/features/rate-limit-wait/daemon.ts",
+        "kind": "imports"
+      },
+      {
+        "from": "src/__tests__/rate-limit-wait/herdr-daemon.test.ts",
+        "to": "src/features/rate-limit-wait/types.ts",
+        "kind": "type-imports"
+      },
+      {
+        "from": "src/__tests__/rate-limit-wait/herdr-detector.test.ts",
+        "to": "external:vitest",
+        "kind": "imports"
+      },
+      {
+        "from": "src/__tests__/rate-limit-wait/herdr-detector.test.ts",
+        "to": "src/cli/tmux-utils.ts",
+        "kind": "imports"
+      },
+      {
+        "from": "src/__tests__/rate-limit-wait/herdr-detector.test.ts",
+        "to": "src/features/rate-limit-wait/tmux-detector.ts",
+        "kind": "imports"
+      },
+      {
+        "from": "src/__tests__/rate-limit-wait/herdr-detector.test.ts",
+        "to": "src/features/rate-limit-wait/types.ts",
+        "kind": "type-imports"
+      },
+      {
         "from": "src/__tests__/rate-limit-wait/integration.test.ts",
         "to": "external:child_process",
         "kind": "imports"
@@ -61537,6 +61652,21 @@
         "kind": "imports"
       },
       {
+        "from": "src/cli/__tests__/herdr-no-raw-calls.test.ts",
+        "to": "external:child_process",
+        "kind": "imports"
+      },
+      {
+        "from": "src/cli/__tests__/herdr-no-raw-calls.test.ts",
+        "to": "external:path",
+        "kind": "imports"
+      },
+      {
+        "from": "src/cli/__tests__/herdr-no-raw-calls.test.ts",
+        "to": "external:vitest",
+        "kind": "imports"
+      },
+      {
         "from": "src/cli/__tests__/hud-watch.test.ts",
         "to": "external:vitest",
         "kind": "imports"
@@ -61574,6 +61704,46 @@
       {
         "from": "src/cli/__tests__/integer-option.test.ts",
         "to": "src/cli/utils/integer-option.ts",
+        "kind": "imports"
+      },
+      {
+        "from": "src/cli/__tests__/interop-herdr.test.ts",
+        "to": "external:child_process",
+        "kind": "imports"
+      },
+      {
+        "from": "src/cli/__tests__/interop-herdr.test.ts",
+        "to": "external:vitest",
+        "kind": "imports"
+      },
+      {
+        "from": "src/cli/__tests__/interop-herdr.test.ts",
+        "to": "src/cli/interop.ts",
+        "kind": "imports"
+      },
+      {
+        "from": "src/cli/__tests__/interop-herdr.test.ts",
+        "to": "src/cli/tmux-utils.ts",
+        "kind": "imports"
+      },
+      {
+        "from": "src/cli/__tests__/launch-herdr.test.ts",
+        "to": "external:child_process",
+        "kind": "imports"
+      },
+      {
+        "from": "src/cli/__tests__/launch-herdr.test.ts",
+        "to": "external:vitest",
+        "kind": "imports"
+      },
+      {
+        "from": "src/cli/__tests__/launch-herdr.test.ts",
+        "to": "src/cli/launch.ts",
+        "kind": "imports"
+      },
+      {
+        "from": "src/cli/__tests__/launch-herdr.test.ts",
+        "to": "src/cli/tmux-utils.ts",
         "kind": "imports"
       },
       {
@@ -63577,6 +63747,16 @@
         "kind": "imports"
       },
       {
+        "from": "src/cli/interop.ts",
+        "to": "src/team/herdr-session.ts",
+        "kind": "imports"
+      },
+      {
+        "from": "src/cli/interop.ts",
+        "to": "src/team/tmux-session.ts",
+        "kind": "imports"
+      },
+      {
         "from": "src/cli/launch.ts",
         "to": "external:child_process",
         "kind": "imports"
@@ -63634,6 +63814,16 @@
       {
         "from": "src/cli/launch.ts",
         "to": "src/lib/plugin-dir.ts",
+        "kind": "imports"
+      },
+      {
+        "from": "src/cli/launch.ts",
+        "to": "src/team/herdr-session.ts",
+        "kind": "imports"
+      },
+      {
+        "from": "src/cli/launch.ts",
+        "to": "src/team/tmux-session.ts",
         "kind": "imports"
       },
       {
@@ -65733,7 +65923,17 @@
       },
       {
         "from": "src/features/rate-limit-wait/daemon.ts",
+        "to": "src/features/rate-limit-wait/types.ts",
+        "kind": "type-imports"
+      },
+      {
+        "from": "src/features/rate-limit-wait/daemon.ts",
         "to": "src/platform/index.ts",
+        "kind": "imports"
+      },
+      {
+        "from": "src/features/rate-limit-wait/daemon.ts",
+        "to": "src/team/tmux-session.ts",
         "kind": "imports"
       },
       {
@@ -65815,6 +66015,21 @@
         "from": "src/features/rate-limit-wait/tmux-detector.ts",
         "to": "src/features/rate-limit-wait/types.ts",
         "kind": "type-imports"
+      },
+      {
+        "from": "src/features/rate-limit-wait/tmux-detector.ts",
+        "to": "src/team/herdr-session.ts",
+        "kind": "imports"
+      },
+      {
+        "from": "src/features/rate-limit-wait/tmux-detector.ts",
+        "to": "src/team/herdr-session.ts",
+        "kind": "type-imports"
+      },
+      {
+        "from": "src/features/rate-limit-wait/tmux-detector.ts",
+        "to": "src/team/tmux-session.ts",
+        "kind": "imports"
       },
       {
         "from": "src/features/rate-limit-wait/types.ts",
@@ -80607,6 +80822,16 @@
         "kind": "imports"
       },
       {
+        "from": "src/notifications/__tests__/reply-herdr.test.ts",
+        "to": "external:vitest",
+        "kind": "imports"
+      },
+      {
+        "from": "src/notifications/__tests__/reply-herdr.test.ts",
+        "to": "src/notifications/reply-listener.ts",
+        "kind": "imports"
+      },
+      {
         "from": "src/notifications/__tests__/reply-listener.test.ts",
         "to": "external:fs",
         "kind": "imports"
@@ -81022,6 +81247,16 @@
         "kind": "type-exports"
       },
       {
+        "from": "src/notifications/index.ts",
+        "to": "src/team/herdr-session.ts",
+        "kind": "imports"
+      },
+      {
+        "from": "src/notifications/index.ts",
+        "to": "src/team/tmux-session.ts",
+        "kind": "imports"
+      },
+      {
         "from": "src/notifications/reply-listener.ts",
         "to": "external:child_process",
         "kind": "imports"
@@ -81108,12 +81343,27 @@
       },
       {
         "from": "src/notifications/reply-listener.ts",
+        "to": "src/notifications/tmux.ts",
+        "kind": "imports"
+      },
+      {
+        "from": "src/notifications/reply-listener.ts",
         "to": "src/notifications/types.ts",
         "kind": "type-imports"
       },
       {
         "from": "src/notifications/reply-listener.ts",
         "to": "src/platform/index.ts",
+        "kind": "imports"
+      },
+      {
+        "from": "src/notifications/reply-listener.ts",
+        "to": "src/team/herdr-session.ts",
+        "kind": "imports"
+      },
+      {
+        "from": "src/notifications/reply-listener.ts",
+        "to": "src/team/tmux-session.ts",
         "kind": "imports"
       },
       {
@@ -81189,6 +81439,16 @@
       {
         "from": "src/notifications/tmux.ts",
         "to": "src/cli/tmux-utils.ts",
+        "kind": "imports"
+      },
+      {
+        "from": "src/notifications/tmux.ts",
+        "to": "src/team/herdr-session.ts",
+        "kind": "imports"
+      },
+      {
+        "from": "src/notifications/tmux.ts",
+        "to": "src/team/tmux-session.ts",
         "kind": "imports"
       },
       {
@@ -82725,6 +82985,56 @@
         "from": "src/team/__tests__/helpers/git-fixture.ts",
         "to": "src/team/merge-orchestrator.ts",
         "kind": "type-imports"
+      },
+      {
+        "from": "src/team/__tests__/herdr-session-realherdr.test.ts",
+        "to": "external:child_process",
+        "kind": "imports"
+      },
+      {
+        "from": "src/team/__tests__/herdr-session-realherdr.test.ts",
+        "to": "external:fs",
+        "kind": "imports"
+      },
+      {
+        "from": "src/team/__tests__/herdr-session-realherdr.test.ts",
+        "to": "external:os",
+        "kind": "imports"
+      },
+      {
+        "from": "src/team/__tests__/herdr-session-realherdr.test.ts",
+        "to": "external:path",
+        "kind": "imports"
+      },
+      {
+        "from": "src/team/__tests__/herdr-session-realherdr.test.ts",
+        "to": "external:util",
+        "kind": "imports"
+      },
+      {
+        "from": "src/team/__tests__/herdr-session-realherdr.test.ts",
+        "to": "external:vitest",
+        "kind": "imports"
+      },
+      {
+        "from": "src/team/__tests__/herdr-session-realherdr.test.ts",
+        "to": "src/team/herdr-session.ts",
+        "kind": "imports"
+      },
+      {
+        "from": "src/team/__tests__/herdr-session.test.ts",
+        "to": "external:vitest",
+        "kind": "imports"
+      },
+      {
+        "from": "src/team/__tests__/herdr-session.test.ts",
+        "to": "src/team/herdr-session.ts",
+        "kind": "imports"
+      },
+      {
+        "from": "src/team/__tests__/herdr-session.test.ts",
+        "to": "src/team/tmux-session.ts",
+        "kind": "imports"
       },
       {
         "from": "src/team/__tests__/idle-nudge.test.ts",
@@ -84982,6 +85292,16 @@
         "kind": "imports"
       },
       {
+        "from": "src/team/__tests__/tmux-session.create-team-herdr.test.ts",
+        "to": "external:vitest",
+        "kind": "imports"
+      },
+      {
+        "from": "src/team/__tests__/tmux-session.create-team-herdr.test.ts",
+        "to": "src/team/tmux-session.ts",
+        "kind": "imports"
+      },
+      {
         "from": "src/team/__tests__/tmux-session.create-team.test.ts",
         "to": "external:vitest",
         "kind": "imports"
@@ -84995,6 +85315,31 @@
         "from": "src/team/__tests__/tmux-session.create-team.test.ts",
         "to": "src/team/tmux-session.ts",
         "kind": "imports"
+      },
+      {
+        "from": "src/team/__tests__/tmux-session.herdr-arms.test.ts",
+        "to": "external:node:fs",
+        "kind": "imports"
+      },
+      {
+        "from": "src/team/__tests__/tmux-session.herdr-arms.test.ts",
+        "to": "external:vitest",
+        "kind": "imports"
+      },
+      {
+        "from": "src/team/__tests__/tmux-session.herdr-arms.test.ts",
+        "to": "src/team/mailbox-notification-guard.ts",
+        "kind": "type-imports"
+      },
+      {
+        "from": "src/team/__tests__/tmux-session.herdr-arms.test.ts",
+        "to": "src/team/tmux-session.ts",
+        "kind": "imports"
+      },
+      {
+        "from": "src/team/__tests__/tmux-session.herdr-arms.test.ts",
+        "to": "src/team/tmux-session.ts",
+        "kind": "type-imports"
       },
       {
         "from": "src/team/__tests__/tmux-session.kill-team-session.test.ts",
@@ -85945,6 +86290,31 @@
         "from": "src/team/governance.ts",
         "to": "src/team/types.ts",
         "kind": "type-imports"
+      },
+      {
+        "from": "src/team/herdr-session.ts",
+        "to": "external:node:child_process",
+        "kind": "imports"
+      },
+      {
+        "from": "src/team/herdr-session.ts",
+        "to": "external:node:crypto",
+        "kind": "imports"
+      },
+      {
+        "from": "src/team/herdr-session.ts",
+        "to": "external:node:fs",
+        "kind": "imports"
+      },
+      {
+        "from": "src/team/herdr-session.ts",
+        "to": "external:node:path",
+        "kind": "imports"
+      },
+      {
+        "from": "src/team/herdr-session.ts",
+        "to": "external:node:util",
+        "kind": "imports"
       },
       {
         "from": "src/team/idle-nudge.ts",
@@ -86923,6 +87293,11 @@
       },
       {
         "from": "src/team/runtime-v2.ts",
+        "to": "src/team/herdr-session.ts",
+        "kind": "imports"
+      },
+      {
+        "from": "src/team/runtime-v2.ts",
         "to": "src/team/leader-inbox.ts",
         "kind": "imports"
       },
@@ -87225,6 +87600,11 @@
         "from": "src/team/scaling.ts",
         "to": "src/team/git-worktree.ts",
         "kind": "type-imports"
+      },
+      {
+        "from": "src/team/scaling.ts",
+        "to": "src/team/herdr-session.ts",
+        "kind": "imports"
       },
       {
         "from": "src/team/scaling.ts",
@@ -87643,8 +88023,23 @@
       },
       {
         "from": "src/team/tmux-session.ts",
+        "to": "src/config/loader.ts",
+        "kind": "imports"
+      },
+      {
+        "from": "src/team/tmux-session.ts",
         "to": "src/graph/runtime/native-contained-fs.ts",
         "kind": "imports"
+      },
+      {
+        "from": "src/team/tmux-session.ts",
+        "to": "src/team/herdr-session.ts",
+        "kind": "imports"
+      },
+      {
+        "from": "src/team/tmux-session.ts",
+        "to": "src/team/herdr-session.ts",
+        "kind": "type-imports"
       },
       {
         "from": "src/team/tmux-session.ts",
@@ -93073,12 +93468,12 @@
       }
     ],
     "stats": {
-      "nodeCount": 8267,
-      "edgeCount": 8906,
-      "importEdgeCount": 7452,
+      "nodeCount": 8279,
+      "edgeCount": 8973,
+      "importEdgeCount": 7512,
       "registerEdgeCount": 105
     }
   },
-  "inventorySha256": "e3b0aab50cdfd387c01701ca2e17d53ddb7474dbf75ef5c4629ad2255f293ac9",
-  "manifestSha256": "42c604495e47c3e9961ead3a42f757806e931270533b4aabc3cb758b20bec6c2"
+  "inventorySha256": "e6e85a6b0732ec6351374e41ab299d7cffa779c1c51454981b546fdb8a24c4fb",
+  "manifestSha256": "bb6c4e5942fcd320a6696bac48d42360d5ea2b5849995ce34e2ec2426c7c54ba"
 }
