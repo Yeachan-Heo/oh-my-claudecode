@@ -54,12 +54,12 @@ describe('jev-delivery-guard per-logdir acknowledgments', () => {
     const now = Date.now();
     const data = { session_id: 'test1' };
 
-    // Ensure the jev-guard directory exists
-    const guardDir = join(configDir, '.omc', 'jev-guard');
-    mkdirSync(join(guardDir, 'sessions'), { recursive: true });
+    // Ensure the jev-delivery directory exists
+    const deliveryDir = join(configDir, '.omc', 'jev-delivery');
+    mkdirSync(deliveryDir, { recursive: true });
 
     const logDir = join(cwd, 'project-a');
-    writeFileSync(dailyFile(guardDir, logDir, 'daily.json'), JSON.stringify({ lastStart: now }), 'utf8'); // no new daily check here
+    writeFileSync(dailyFile(deliveryDir, logDir, 'daily.json'), JSON.stringify({ lastStart: now }), 'utf8'); // no new daily check here
 
     // The first prompt of a session without a record creates it; there is no report to show yet
     const result1 = promptCheck(data, {
@@ -72,7 +72,8 @@ describe('jev-delivery-guard per-logdir acknowledgments', () => {
     });
 
     expect(result1).toBeNull();
-    const record = JSON.parse(readFileSync(join(guardDir, 'sessions', 'test1.json'), 'utf8'));
+    const sessionFile = join(configDir, '.omc', 'state', 'sessions', 'test1', 'jev-guard-state.json');
+    const record = JSON.parse(readFileSync(sessionFile, 'utf8'));
     expect(record.shownByLogDir).toEqual({});
   });
 
@@ -81,28 +82,28 @@ describe('jev-delivery-guard per-logdir acknowledgments', () => {
     const sessionId = 'test2';
     const data = { session_id: sessionId };
 
-    const guardDir = join(configDir, '.omc', 'jev-guard');
-    const sessionsDir = join(guardDir, 'sessions');
-    mkdirSync(sessionsDir, { recursive: true });
+    const deliveryDir = join(configDir, '.omc', 'jev-delivery');
+    mkdirSync(deliveryDir, { recursive: true });
 
     const logDir1 = join(cwd, 'project-a', 'jev-logs');
     const logDir2 = join(cwd, 'project-b', 'jev-logs');
-    const sessionFile = join(sessionsDir, `${sessionId}.json`);
+    const sessionFile = join(configDir, '.omc', 'state', 'sessions', sessionId, 'jev-guard-state.json');
     // No new daily check in this test: both directories were checked a moment ago.
-    for (const dir of [logDir1, logDir2]) writeFileSync(dailyFile(guardDir, dir, 'daily.json'), JSON.stringify({ lastStart: now }), 'utf8');
+    for (const dir of [logDir1, logDir2]) writeFileSync(dailyFile(deliveryDir, dir, 'daily.json'), JSON.stringify({ lastStart: now }), 'utf8');
 
     // Simulate two projects with delivery results
     const ts1 = now - 3600000; // 1 hour ago
     const ts2 = now - 1800000; // 30 minutes ago
     
     // Create delivery report for project 1 (shown earlier, with bad delivery rate)
-    const file1 = dailyFile(guardDir, logDir1, 'delivery.json');
+    const file1 = dailyFile(deliveryDir, logDir1, 'delivery.json');
     writeFileSync(file1, JSON.stringify({ ts: ts1, windowHours: 24, decisions: 100, withAgent: 100, delivered: 90, deliveredPercent: 90, deliveredPercentFull: 90.5, interruptedAgentHooks: 0, interruptedOtherHooks: 0 }), 'utf8');
     // Create delivery report for project 2 (shown more recently, with bad delivery rate)
-    const file2 = dailyFile(guardDir, logDir2, 'delivery.json');
+    const file2 = dailyFile(deliveryDir, logDir2, 'delivery.json');
     writeFileSync(file2, JSON.stringify({ ts: ts2, windowHours: 24, decisions: 100, withAgent: 100, delivered: 85, deliveredPercent: 85, deliveredPercentFull: 85.3, interruptedAgentHooks: 0, interruptedOtherHooks: 0 }), 'utf8');
 
     // Create a session record with per-logdir shown tracking - project 1 was already shown, project 2 was not
+    mkdirSync(join(configDir, '.omc', 'state', 'sessions', sessionId), { recursive: true });
     const record = {
       start: now - 86400000,
       hooks: null,
@@ -154,11 +155,10 @@ describe('jev-delivery-guard per-logdir acknowledgments', () => {
     const sessionId = 'test3';
     const data = { session_id: sessionId };
 
-    const guardDir = join(configDir, '.omc', 'jev-guard');
-    const sessionsDir = join(guardDir, 'sessions');
-    mkdirSync(sessionsDir, { recursive: true });
+    const deliveryDir = join(configDir, '.omc', 'jev-delivery');
+    mkdirSync(deliveryDir, { recursive: true });
 
-    const sessionFile = join(sessionsDir, `${sessionId}.json`);
+    const sessionFile = join(configDir, '.omc', 'state', 'sessions', sessionId, 'jev-guard-state.json');
 
     // Call promptCheck which should initialize the record
     const result = promptCheck(data, {
