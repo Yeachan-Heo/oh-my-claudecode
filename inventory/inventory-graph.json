@@ -5,15 +5,15 @@
   "provenance": {
     "base": "05c800f40d1ad53b42a78609d2667ef4f726808b",
     "planningHead": "0a91273e61dbbd47eb0af4c02844409251e08398",
-    "head": "c6721f61eedd5cbb5215d49f17b7fbd35ee1a9f0",
-    "sourceSha256": "aa9e963c420872a57ad0490314ff820a4007efb8373ed1601a22adf7d2e7ea0c",
+    "head": "680bd189d04fa4c3766f9a912b1ffacfbb200eb4",
+    "sourceSha256": "5e00e48506effed87266f6b8414f1d2093b4ea1c55acb443860802727f2dd00c",
     "generatedAt": null,
     "generator": "scripts/generate-inventory-graph.mjs"
   },
   "base": "05c800f40d1ad53b42a78609d2667ef4f726808b",
   "planningHead": "0a91273e61dbbd47eb0af4c02844409251e08398",
-  "head": "c6721f61eedd5cbb5215d49f17b7fbd35ee1a9f0",
-  "sourceSha256": "aa9e963c420872a57ad0490314ff820a4007efb8373ed1601a22adf7d2e7ea0c",
+  "head": "680bd189d04fa4c3766f9a912b1ffacfbb200eb4",
+  "sourceSha256": "5e00e48506effed87266f6b8414f1d2093b4ea1c55acb443860802727f2dd00c",
   "counts": {
     "public": {
       "skills": 84,
@@ -23,13 +23,13 @@
       "total": 133
     },
     "internal": {
-      "hookFiles": 336,
+      "hookFiles": 337,
       "featureFiles": 95,
       "toolFiles": 65,
       "libFiles": 49,
       "templateHooks": 25,
-      "srcFiles": 1448,
-      "total": 1473
+      "srcFiles": 1449,
+      "total": 1474
     },
     "generated": {
       "distFiles": 5639,
@@ -41,7 +41,7 @@
     },
     "skills": 84,
     "commands": 21,
-    "hookFiles": 336,
+    "hookFiles": 337,
     "workflows": 8,
     "agentDefinitions": 18,
     "promptLikeFiles": 63
@@ -374,6 +374,7 @@
       "src/hooks/project-memory/__tests__/learner.test.ts",
       "src/hooks/project-memory/__tests__/pre-compact-storage.test.ts",
       "src/hooks/project-memory/__tests__/pre-compact.test.ts",
+      "src/hooks/project-memory/__tests__/rescan-concurrency.test.ts",
       "src/hooks/project-memory/__tests__/storage.test.ts",
       "src/hooks/project-memory/constants.ts",
       "src/hooks/project-memory/detector.ts",
@@ -6806,6 +6807,7 @@
       "src/hooks/project-memory/__tests__/learner.test.ts",
       "src/hooks/project-memory/__tests__/pre-compact-storage.test.ts",
       "src/hooks/project-memory/__tests__/pre-compact.test.ts",
+      "src/hooks/project-memory/__tests__/rescan-concurrency.test.ts",
       "src/hooks/project-memory/__tests__/storage.test.ts",
       "src/hooks/project-memory/constants.ts",
       "src/hooks/project-memory/detector.ts",
@@ -44558,6 +44560,11 @@
         "path": "src/hooks/project-memory/__tests__/pre-compact.test.ts"
       },
       {
+        "id": "src/hooks/project-memory/__tests__/rescan-concurrency.test.ts",
+        "kind": "hook",
+        "path": "src/hooks/project-memory/__tests__/rescan-concurrency.test.ts"
+      },
+      {
         "id": "src/hooks/project-memory/__tests__/storage.test.ts",
         "kind": "hook",
         "path": "src/hooks/project-memory/__tests__/storage.test.ts"
@@ -72195,6 +72202,56 @@
         "kind": "imports"
       },
       {
+        "from": "src/hooks/project-memory/__tests__/rescan-concurrency.test.ts",
+        "to": "external:fs/promises",
+        "kind": "imports"
+      },
+      {
+        "from": "src/hooks/project-memory/__tests__/rescan-concurrency.test.ts",
+        "to": "external:os",
+        "kind": "imports"
+      },
+      {
+        "from": "src/hooks/project-memory/__tests__/rescan-concurrency.test.ts",
+        "to": "external:path",
+        "kind": "imports"
+      },
+      {
+        "from": "src/hooks/project-memory/__tests__/rescan-concurrency.test.ts",
+        "to": "external:vitest",
+        "kind": "imports"
+      },
+      {
+        "from": "src/hooks/project-memory/__tests__/rescan-concurrency.test.ts",
+        "to": "src/features/context-injector/collector.ts",
+        "kind": "imports"
+      },
+      {
+        "from": "src/hooks/project-memory/__tests__/rescan-concurrency.test.ts",
+        "to": "src/hooks/project-memory/constants.ts",
+        "kind": "imports"
+      },
+      {
+        "from": "src/hooks/project-memory/__tests__/rescan-concurrency.test.ts",
+        "to": "src/hooks/project-memory/index.ts",
+        "kind": "imports"
+      },
+      {
+        "from": "src/hooks/project-memory/__tests__/rescan-concurrency.test.ts",
+        "to": "src/hooks/project-memory/learner.ts",
+        "kind": "imports"
+      },
+      {
+        "from": "src/hooks/project-memory/__tests__/rescan-concurrency.test.ts",
+        "to": "src/hooks/project-memory/storage.ts",
+        "kind": "imports"
+      },
+      {
+        "from": "src/hooks/project-memory/__tests__/rescan-concurrency.test.ts",
+        "to": "src/hooks/project-memory/types.ts",
+        "kind": "type-imports"
+      },
+      {
         "from": "src/hooks/project-memory/__tests__/storage.test.ts",
         "to": "external:fs/promises",
         "kind": "imports"
@@ -92831,12 +92888,12 @@
       }
     ],
     "stats": {
-      "nodeCount": 8260,
-      "edgeCount": 8865,
-      "importEdgeCount": 7412,
+      "nodeCount": 8261,
+      "edgeCount": 8875,
+      "importEdgeCount": 7421,
       "registerEdgeCount": 105
     }
   },
-  "inventorySha256": "a6bc1a36066b6e9d37b02f940c1f61d6c1422f17d89b04ceb1cb5d7073fc6166",
-  "manifestSha256": "0c392ad9aebd60b7439abd23a1efaf9b9e154a72ace04bf93ba5f31993b12251"
+  "inventorySha256": "d78c2fafefc22d289d09f631740998ea6749e67c2d458662e9a1a9ca37c658bc",
+  "manifestSha256": "3c1e25776492478590b3a3ebe3454b280b9e6f455cfe254ea63a72a61d2814cf"
 }
