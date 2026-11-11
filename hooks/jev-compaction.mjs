@@ -1010,13 +1010,22 @@ function blockWords(block) {
 // The end of a user's block that opens at `from` in a row's text: the end of the line of its framing
 // note, the last one before the first user's header after its first note (a header the user quotes
 // before the note stays in the block, and the user may write the note's words too); -1 without a
-// note. Each call reads only up to that header, so the blocks of a row stay linear.
-function userBlockEnd(text, from) {
+// note. A note inside an envelope that holds a delivered message (`spans`, in text order) is that
+// message's, not the user's, so a block stops before a carried envelope that quotes the note. Each call
+// reads only up to that header and skips an envelope in one step, so the blocks of a row stay linear.
+function userBlockEnd(text, from, spans = []) {
   const first = text.indexOf(QUEUED_TAIL, from);
   if (first < 0) return -1;
   const next = text.indexOf(QUEUED_PREFIX, first + QUEUED_TAIL.length);
   const limit = next < 0 ? text.length : next;
-  const t = first + text.slice(first, limit).lastIndexOf(QUEUED_TAIL);
+  const inside = (i) => {
+    let lo = 0;
+    for (let hi = spans.length; lo < hi;) { const mid = (lo + hi) >> 1; if (spans[mid].from <= i) lo = mid + 1; else hi = mid; }
+    return lo > 0 && i < spans[lo - 1].to ? spans[lo - 1] : undefined;
+  };
+  let t = text.lastIndexOf(QUEUED_TAIL, limit - QUEUED_TAIL.length);
+  for (let e; t >= from && (e = inside(t)); t = text.lastIndexOf(QUEUED_TAIL, e.from - 1));
+  if (t < from) return -1;
   const nl = text.indexOf('\n', t + QUEUED_TAIL.length);
   return nl < 0 ? text.length : Math.min(nl, limit);
 }
@@ -1056,7 +1065,7 @@ function deliveredOf(text) {
     }
     const nl = text.indexOf('\n', p);
     const stop = Math.min(nl < 0 ? text.length : nl, k < all.length ? all[k].from : text.length);
-    if (p >= end && p < lastTail && frameOf(`${text.slice(p, stop)}\n`) === 'user') end = userBlockEnd(text, p);
+    if (p >= end && p < lastTail && frameOf(`${text.slice(p, stop)}\n`) === 'user') end = userBlockEnd(text, p, all);
     p = stop === nl ? nl + 1 : stop;
   }
   return out;
@@ -1647,12 +1656,7 @@ async function decide($, e, cfg, record, started) {
   Object.assign(record, { queued_user: delivered ? delivered.user : null, queued_other: delivered ? delivered.other : null });
   if (!api && keepFrom < messages.length) return { fallback: 'no_api_form' };
   const queued = delivered ? delivered.rows : new Map();
-  let envelopes = 0;
-  for (const [i, blocks] of queued) {
-    const c = carriedText(messages[i], blocks);
-    before += rawChars(c.own);
-    envelopes += c.text.length - (messages[i].text || '').length - rawChars(c.own);
-  }
+  for (const blocks of queued.values()) before += rawChars(blocks);
   record.chars_before = before;
   const server = serverBlocks(messages, api, keepFrom);
   record.server_blocks = server.count;
@@ -1664,6 +1668,17 @@ async function decide($, e, cfg, record, started) {
   // Results of the calls that keep their handles stay whole (a built row may not stand among them).
   const candidates = findCandidates(messages, cfg.privatePaths).filter((c) => c.useIdx < keepFrom);
   record.candidates = candidates.length;
+  // The envelopes build adds go only into rows it rebuilds: a result row whose results are all text, or
+  // one with a result that may change (a candidate). A row kept by its handle gets its blocks back from
+  // the host as they were.
+  const changing = new Set(candidates.map((c) => c.resIdx));
+  let envelopes = 0;
+  for (const [i, blocks] of queued) {
+    const m = messages[i];
+    if (!(m.toolResults || []).length || !(m.toolResults.every(textOnlyResult) || changing.has(i))) continue;
+    const c = carriedText(m, blocks);
+    envelopes += c.text.length - (m.text || '').length - rawChars(c.own);
+  }
   const removable = removableChars(candidates);
   record.max_reduction = before ? Math.round((removable / before) * 1000) / 1000 : 0;
   if (!before || removable / before < MIN_REDUCTION) return { fallback: 'too_few_results' };

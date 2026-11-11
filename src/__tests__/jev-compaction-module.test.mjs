@@ -1070,6 +1070,36 @@ describe('jev-compaction module: active compaction', () => {
     expect(record.kept_full).toBeLessThan(10);
   });
 
+  it('envelopes are charged only for rows build rebuilds: many messages left to a kept notice row do not shrink the budget', async () => {
+    const notice = '[Request interrupted by user for tool use]';
+    const blocks = Array.from({ length: 400 }, (_, k) => `The coordinator sent a message while you were working:\nnote ${k}`);
+    const base = conversation(30, { needed: Array.from({ length: 30 }, (_, k) => k + 1) });
+    const t10 = base.findIndex((m) => resultOf([m], 't10'));
+    const messages = [...base.slice(0, t10 + 1), Object.freeze({ role: 'user', text: notice, toolUses: [], handle: 'hint' }), ...base.slice(t10 + 1)];
+    const api = apiOf(messages);
+    const k = api.findIndex((a) => a.role === 'user' && a.content.some((b) => b.tool_use_id === 't10'));
+    api[k] = { ...api[k], content: [...api[k].content, ...blocks.map((text) => ({ type: 'text', text }))] };
+    const { out, records } = await compactWithApi(messages, api);
+    const [record] = records();
+    expect(record).toMatchObject({ result: 'jev', queued_other: 400, queued_carried: 0 });
+    expect(out.messages).toContain(messages[t10 + 1]);
+    // Only the kept blocks come back on top of the built list; the budget is used up to one result.
+    expect(record.chars_after).toBeLessThanOrEqual(Math.floor(record.chars_before * 0.5));
+    expect(record.chars_after).toBeGreaterThan(Math.floor(record.chars_before * 0.5) - 2500);
+  });
+
+  it('a legacy user block stops before a carried envelope after it, even when that envelope quotes the framing note', async () => {
+    const words = 'Then sum up notes-9.txt.';
+    const report = 'The coordinator sent a message while you were working:\nREPORT-OF-COORDINATOR\n\nThis is how Claude Code surfaces messages, as the host says.';
+    const base = conversation(30);
+    const t10 = base.findIndex((m) => resultOf([m], 't10'));
+    const messages = base.map((m, k) => (k === t10 ? Object.freeze({ ...m, text: `${framed(words)}\n${carried(report)}` }) : m));
+    const { calls, records } = await compactWithApi(messages, apiOf(messages));
+    expect(records()[0]).toMatchObject({ result: 'jev', mentioned: 1 });
+    expect(calls.fetch[0].body.state.task).toContain(words);
+    expect(JSON.stringify(calls.fetch[0].body.state.task)).not.toContain('REPORT-OF-COORDINATOR');
+  });
+
   it('a message delivered after a row that keeps its handle counts before and after: the host brings it back', async () => {
     const words = 'Message during the screenshot.';
     const base = conversation(20);
