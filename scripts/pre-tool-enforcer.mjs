@@ -2712,6 +2712,8 @@ async function main() {
     }
 
     const { warning: slopWarning, appliedAction } = generateSlopWarning(data, toolName);
+    // A suppressed warning is applied as soon as it is decided; an added one only once it reaches the output.
+    if (appliedAction && appliedAction.action.to === 'none') recordJevApplied('slop-warning', appliedAction);
     let message;
     if (BUILT_IN_TASK_LIST_TOOL_NAMES.has(toolName)) {
       emitPreToolUseOutput({ continue: true, suppressOutput: true }, data);
@@ -2761,7 +2763,7 @@ async function main() {
         ...(updatedToolInput ? { updatedInput: updatedToolInput } : {})
       }
     }, data, 2);
-    if (slopWarning && appliedAction) {
+    if (slopWarning && appliedAction && appliedAction.action.to === 'warn') {
       recordJevApplied('slop-warning', appliedAction);
     }
   } catch (error) {
