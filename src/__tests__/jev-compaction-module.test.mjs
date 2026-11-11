@@ -440,6 +440,27 @@ describe('jev-compaction module: active compaction', () => {
     expect(run.records()[0]).toMatchObject({ secret_skipped: 3 });
   });
 
+  it('recognizes .env paths with punctuation delimiters (colon, comma) as secret paths', () => {
+    expect(omitSecretLines('/repo/.env:2:shortsecret', [])).toBe('[line omitted: secret path]');
+    expect(omitSecretLines('ERROR: /repo/.env:2:value', [])).toBe('[line omitted: secret path]');
+    expect(omitSecretLines('/repo/.env, other-file.txt', [])).toBe('[line omitted: secret path]');
+    expect(omitSecretLines('files: /repo/.env, /repo/src', [])).toBe('[line omitted: secret path]');
+    expect(omitSecretLines('/repo/.env.example:1:notasecret', [])).toBe('/repo/.env.example:1:notasecret');
+    expect(omitSecretLines('/repo/.env.example, other', [])).toBe('/repo/.env.example, other');
+  });
+
+  it('holds a TaskOutput result whose background call is not in the conversation: never sent, kept as if its request were held back', async () => {
+    const messages = conversation(20, {
+      tool: (i) => (i === 5 ? 'TaskOutput' : 'Bash'),
+      input: (i) => (i === 3 ? { command: 'process data' } : i === 5 ? { task_id: 'bg-task-123' } : { command: `cat notes-${i}.txt` }),
+      result: (i) => (i === 5 ? `HELD-TASK-OUTPUT ${'x'.repeat(2000)}` : `RESULT-${i} ${'x'.repeat(2000)}`),
+    });
+    const run = await compactOnce(messages);
+    expect(JSON.stringify(run.calls.fetch.map((c) => c.body))).not.toMatch(/HELD-|bg-task-123/);
+    expect(resultOf(run.out.messages, 't5')?.text).toBe(resultOf(messages, 't5').text);
+    expect(run.records()[0]).toMatchObject({ secret_held: 1, secret_skipped: 0 });
+  });
+
   it('reads a run of a million slashes or backslashes in linear time, in a private-path check and in a command\'s file names', async () => {
     const pp = ['/home/u/secret-notes'];
     for (const s of ['/'.repeat(1_000_000), '\\'.repeat(1_000_000), `a${'/'.repeat(1_000_000)}!`, `${'\\/'.repeat(500_000)}x.md`]) {
