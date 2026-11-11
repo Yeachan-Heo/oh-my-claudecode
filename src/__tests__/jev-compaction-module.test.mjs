@@ -1461,6 +1461,37 @@ describe('jev-compaction module: moment chosen by Jev (OMC_JEV_COMPACT_AT_PERCEN
     expect(own(fake)).toEqual([expect.objectContaining({ result: 'not_now', reason: 'state_changed', jev_noul: 0.9 })]);
   });
 
+  it('a turn that ends while the first one still reads the transcript makes its decision stale, a closed task or a yes of Jev alike', async () => {
+    for (const closed of [true, false]) {
+      let release;
+      const gate = new Promise((resolve) => { release = resolve; });
+      const base = closed ? withClosedTask() : conversation(40, { chars: 6000 });
+      const handlers = load();
+      const fake = fakeDollar({ env, messages: base, usage: usageAt(() => 130000), respond: momentRespond(0.95) });
+      fake.$.session.messages = async () => { await gate; return base; };
+      const first = turn(handlers, fake);
+      for (let k = 0; k < 2000 && fake.calls.usage < 1; k++) await new Promise((resolve) => setTimeout(resolve, 5));
+      // The second turn ends during the read: it counts as a turn and leaves at once, as the first decision is busy.
+      await turn(handlers, fake);
+      release();
+      await first;
+      expect(fake.calls.compact, `closed ${closed}`).toBe(0);
+      expect(own(fake), `closed ${closed}`).toEqual([expect.objectContaining({ result: 'not_now', reason: 'state_changed' })]);
+    }
+  });
+
+  it('a TaskUpdate to completed whose result is an error closes nothing', async () => {
+    const close = [{ tool_use_id: 'u1', tool: 'TaskUpdate', input: { taskId: '1', status: 'completed' } }];
+    for (const [isError, asks] of [[true, 0], [false, 1]]) {
+      const base = withCalls(close);
+      const messages = frozen(base.map((m) => (m.toolResults ? { ...m, toolResults: m.toolResults.map((r) => ({ ...r, isError })) } : m)));
+      const fake = fakeDollar({ env, messages, usage: usageAt(() => 130000), respond: momentRespond(0.1) });
+      await turn(load(), fake);
+      expect(fake.calls.compact, `isError ${isError}`).toBe(asks);
+      expect(momentCalls(fake.calls), `isError ${isError}`).toHaveLength(1 - asks);
+    }
+  });
+
   it('the decision stays within 8 s of the turn\'s end: the question gets only what is left, and past it nothing is requested', async () => {
     const realNow = Date.now;
     let skew = 0;

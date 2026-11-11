@@ -1688,7 +1688,7 @@ async function compact($, e, next) {
 }
 
 // OMC_JEV_COMPACT_AT_PERCENT=jev. Closing calls of the transcript, [{id, idx}] in order: a TaskUpdate to a
-// done status, or a task-list call (TASK_LIST) whose list holds more done items than the call of the same
+// done status whose result is no error, or a task-list call (TASK_LIST) whose list holds more done items than the call of the same
 // tool before it. `listDone` holds the done items of the newest list call per tool at the last read, so a
 // list call whose predecessor a compaction removed is still compared with it. Returns the closings and
 // the done items of the newest list call per tool now.
@@ -1700,10 +1700,13 @@ function doneItems(input) {
 function closingCalls(messages, listDone) {
   const doneBefore = new Map(listDone);
   const closing = [];
+  // A TaskUpdate closes a task only when its own result came back without an error.
+  const succeeded = new Set();
+  for (const m of messages) if (m.role === 'user') for (const r of m.toolResults || []) if (!r.isError) succeeded.add(r.tool_use_id);
   messages.forEach((m, idx) => {
     if (m.role !== 'assistant') return;
     for (const u of m.toolUses || []) {
-      if (u.tool === 'TaskUpdate') { if (DONE_STATUS.test(String(u.input?.status ?? ''))) closing.push({ id: u.tool_use_id, idx }); continue; }
+      if (u.tool === 'TaskUpdate') { if (DONE_STATUS.test(String(u.input?.status ?? '')) && succeeded.has(u.tool_use_id)) closing.push({ id: u.tool_use_id, idx }); continue; }
       const n = TASK_LIST.test(u.tool || '') ? doneItems(u.input) : undefined;
       if (!n) continue;
       if (n.done > (doneBefore.get(u.tool) ?? 0)) closing.push({ id: u.tool_use_id, idx });
@@ -1776,6 +1779,8 @@ async function ownThreshold($, e, next) {
   try {
     if (e.agentId !== undefined || session.compacting > 0 || session.hostCannot) return result;
     session.turnCount++;
+    // The turn this decision belongs to: a turn that ends during a host read below moves the counter on.
+    const turn = session.turnCount;
     // While the growth gate is armed every turn reads the usage, not only every MIN_TURNS_BETWEEN turns.
     if (!session.growthArmed && session.turnCount - session.lastAttempt < MIN_TURNS_BETWEEN) return result;
     if (!session.cachedConfig || Date.now() - session.cachedAt > CONFIG_TTL_MS) { session.cachedConfig = await readConfig($); session.cachedAt = Date.now(); }
@@ -1859,10 +1864,14 @@ async function ownThreshold($, e, next) {
       if (!closed && session.turnCount - session.lastAsk < MIN_TURNS_BETWEEN) return result;
       // The shared state only now, with a request or a question to make.
       if (await blockedReason($, cfg, Date.now())) return result;
-      if (closed) moment = 'task';
-      else {
+      if (closed) {
+        if (session.turnCount !== turn) {
+          await ownRecord({ result: 'not_now', reason: 'state_changed', tokens, window, level });
+          return result;
+        }
+        moment = 'task';
+      } else {
         session.lastAsk = session.turnCount;
-        const turn = session.turnCount;
         const ask = await askMoment($, cfg, messages, e.answer, tokens, window, until);
         extra = { ...(ask.noul !== undefined ? { jev_noul: ask.noul } : {}), ...(ask.answer_skipped ? { answer_skipped: ask.answer_skipped } : {}) };
         if (!(ask.noul >= MOMENT_YES)) {
