@@ -8,7 +8,7 @@
  * `next` that stands for the built-in summary. The transport stub is the only fake of the Jev side.
  */
 
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, utimesSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -41,8 +41,9 @@ function okResponse(json) {
   return { ok: true, status: 200, headers: {}, text: JSON.stringify(json) };
 }
 
-function fakeDollar({ env = ACTIVE_ENV, settingsEnv, respond = (body) => okResponse(scoreByMarker(body)), clockAfter, usage, messages = [], compactResult, writeThrows = false, diskPrefix, flakyBreakerRead = false, stallBreakerRead = false, stallRpmRead = false, rpmReadGate, rpmReadGates = {}, fsDelayMs = 0 } = {}) {
+function fakeDollar({ env = ACTIVE_ENV, settingsEnv, respond = (body) => okResponse(scoreByMarker(body)), clockAfter, usage, messages = [], compactResult, writeThrows = false, diskPrefix, flakyBreakerRead = false, stallBreakerRead = false, stallRpmRead = false, rpmReadGate, rpmReadGates = {}, fsDelayMs = 0, brokenBreakerRead = false, breakerWriteDelayMs = 0 } = {}) {
   const files = new Map();
+  const mtimes = new Map();
   let flaked = false;
   let gated = false;
   let rpmReads = 0;
@@ -54,6 +55,7 @@ function fakeDollar({ env = ACTIVE_ENV, settingsEnv, respond = (body) => okRespo
       read: async (p) => {
         if (fsDelayMs) await new Promise((resolve) => setTimeout(resolve, fsDelayMs));
         if (flakyBreakerRead && !flaked && p.endsWith('/breaker.json')) { flaked = true; throw new Error('EPERM'); }
+        if (brokenBreakerRead && p.endsWith('/breaker.json')) throw Object.assign(new Error('EPERM'), { code: 'EPERM' });
         if (stallBreakerRead && p.endsWith('/breaker.json')) return new Promise(() => {});
         if (stallRpmRead && /\/rpm-\d+$/.test(p)) return new Promise(() => {});
         if (rpmReadGate && !gated && /\/rpm-\d+$/.test(p)) { gated = true; await rpmReadGate; }
@@ -61,10 +63,16 @@ function fakeDollar({ env = ACTIVE_ENV, settingsEnv, respond = (body) => okRespo
         if (diskPrefix && p.startsWith(diskPrefix)) return readFileSync(p, 'utf8'); if (!files.has(p)) throw new Error('ENOENT'); return files.get(p);
       },
       exists: async (p) => (diskPrefix && p.startsWith(diskPrefix) ? existsSync(p) : files.has(p)),
+      stat: async (p) => {
+        if (diskPrefix && p.startsWith(diskPrefix)) { const st = statSync(p); return { kind: st.isDirectory() ? 'dir' : 'file', size: st.size, mtimeMs: st.mtimeMs, isLink: false }; }
+        if (!files.has(p)) throw Object.assign(new Error('ENOENT'), { code: 'ENOENT' });
+        return { kind: 'file', size: files.get(p).length, mtimeMs: mtimes.get(p), isLink: false };
+      },
       write: async (p, text) => {
         if (fsDelayMs) await new Promise((resolve) => setTimeout(resolve, fsDelayMs));
+        if (breakerWriteDelayMs && p.endsWith('/breaker.json')) await new Promise((resolve) => setTimeout(resolve, breakerWriteDelayMs));
         if (diskPrefix && p.startsWith(diskPrefix)) { mkdirSync(dirname(p), { recursive: true }); writeFileSync(p, text); return; }
-        calls.write++; if (writeThrows) throw new Error('EACCES'); files.set(p, text);
+        calls.write++; if (writeThrows) throw new Error('EACCES'); files.set(p, text); mtimes.set(p, Date.now());
       },
       list: async () => [],
     },
@@ -792,7 +800,7 @@ describe('jev-compaction module: shared breaker and request limit (OMC_JEV_BREAK
   // runs after a request without a response outlives the compaction's own budget; it finishes on its
   // own, so a test reads the breaker once it is there instead of at the moment the compaction returns.
   async function openBreakerOf(c) {
-    for (let waited = 0; waited < 3000; waited += 20) {
+    for (let waited = 0; waited < 6000; waited += 20) {
       const open = readBreaker(c.settings, Date.now());
       if (open) return open;
       await new Promise((resolve) => setTimeout(resolve, 20));
@@ -998,6 +1006,62 @@ describe('jev-compaction module: shared breaker and request limit (OMC_JEV_BREAK
     expect(run.calls.fetch).toHaveLength(1);
     expect(first).toBeDefined();
     expect(readBreaker(c.settings, Date.now())).toEqual(first);
+  });
+
+  it('(a) a breaker file the module cannot read is not written over: a shorter breaker never replaces a longer one it could not see', async () => {
+    const c = shared({ OMC_JEV_BREAKER: '1' });
+    const longer = openByScripts(c, 402);
+    expect(longer).toMatchObject({ reason: 'http-402' });
+    // Every read of breaker.json fails (a rename landing, a scanner holding the file): the request goes out (fail-open) and gets a 429.
+    const run = await compactShared(c, conversation(30), { brokenBreakerRead: true, respond: () => ({ ok: false, status: 429, headers: {}, text: '' }) });
+    expect(run.calls.fetch).toHaveLength(1);
+    expect(JSON.parse(readFileSync(`${c.settings.dir}/breaker.json`, 'utf8'))).toEqual(longer);
+  });
+
+  it('(a) a breaker file that does not parse is a write in progress for a second, then corrupt', async () => {
+    const c = shared({ OMC_JEV_BREAKER: '1' });
+    mkdirSync(c.settings.dir, { recursive: true });
+    const file = `${c.settings.dir}/breaker.json`;
+    const tooMany = () => ({ ok: false, status: 429, headers: {}, text: '' });
+    writeFileSync(file, '');
+    // Written "now" for the next 1.5 s (mtime half a second ahead), however long the compaction takes to reach its breaker write.
+    const soon = new Date(Date.now() + 500);
+    utimesSync(file, soon, soon);
+    await compactShared(c, conversation(30), { respond: tooMany });
+    expect(readFileSync(file, 'utf8')).toBe('');
+    const old = new Date(Date.now() - 60_000);
+    utimesSync(file, old, old);
+    await compactShared(c, conversation(30), { respond: tooMany });
+    expect(readBreaker(c.settings, Date.now())).toMatchObject({ reason: 'http-429' });
+  });
+
+  it('(a) the module waits for the lock of a script opener and keeps the longer end that opener writes', async () => {
+    const c = shared({ OMC_JEV_BREAKER: '1' });
+    mkdirSync(c.settings.dir, { recursive: true });
+    const lock = `${c.settings.dir}/breaker.json.lock`;
+    let wrote;
+    // When the 429 arrives, a script process holds the lock: it writes a 402 for ten minutes 100 ms later and removes the lock.
+    // The module's own write of breaker.json takes 150 ms, so without the lock its shorter end would land last.
+    const run = await compactShared(c, conversation(30), {
+      breakerWriteDelayMs: 150,
+      respond: () => {
+        writeFileSync(lock, JSON.stringify({ token: 'script', ts: Date.now() }));
+        setTimeout(() => {
+          wrote = { until: Date.now() + 600_000, reason: 'http-402', since: Date.now() };
+          writeFileSync(`${c.settings.dir}/breaker.json`, JSON.stringify(wrote));
+          rmSync(lock);
+        }, 100);
+        return { ok: false, status: 429, headers: {}, text: '' };
+      },
+    });
+    expect(run.calls.fetch).toHaveLength(1);
+    await new Promise((resolve) => setTimeout(resolve, 300));
+    expect(JSON.parse(readFileSync(`${c.settings.dir}/breaker.json`, 'utf8'))).toEqual(wrote);
+    // The module took the lock after the script process removed it, and marks it released (it cannot remove files); the next
+    // script opener removes it.
+    const left = JSON.parse(readFileSync(lock, 'utf8'));
+    expect(left).toMatchObject({ released: true });
+    expect(left.token).toMatch(/^compaction-/);
   });
 
   it('(b) three requests without a response within a minute open the shared breaker for a minute; two do not', async () => {
