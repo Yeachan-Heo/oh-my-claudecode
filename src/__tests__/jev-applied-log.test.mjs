@@ -765,6 +765,29 @@ describe('hook scripts with OMC_JEV_APPLIED_LOG=1', () => {
     expect(modes).not.toContain('ralph');
   }, 60_000);
 
+  it('loop-continuation: a child Ralph at its iteration limit, released by Jev, writes no row while its autopilot parent blocks the Stop', async () => {
+    stubAnswers = { task_complete: { type: 'noul', noul: 0.9 } };
+    const context = makeContext();
+    const ralphPath = ralphState(context, 'jev-session');
+    const ralph = JSON.parse(readFileSync(ralphPath, 'utf8'));
+    writeFileSync(ralphPath, JSON.stringify({ ...ralph, iteration: ralph.max_iterations }));
+    const stateDir = join(context.cwd, '.omc', 'state', 'sessions', 'jev-session');
+    writeFileSync(join(stateDir, 'autopilot-state.json'), JSON.stringify({
+      active: true,
+      session_id: 'jev-session',
+      project_path: context.cwd,
+      phase: 'execution',
+      reinforcement_count: 0,
+      started_at: new Date().toISOString(),
+      last_checked_at: new Date().toISOString(),
+      prompt: 'Complete the bounded task and verify the result.',
+    }));
+    await runHook(context, 'persistent-mode.mjs', { cwd: context.cwd, session_id: 'jev-session', last_assistant_message: 'The task is complete.' }, 'loop-continuation', { OMC_JEV_LOOP_RELEASE_ONLY: '1' });
+    expect(JSON.parse(readFileSync(ralphPath, 'utf8')).max_iterations).toBe(ralph.max_iterations + 10);
+    const modes = readLog(context, 'applied.jsonl').map((line) => line.applied.mode);
+    expect(modes).not.toContain('ralph');
+  }, 60_000);
+
   describe('learner-extraction hint', () => {
     const MESSAGE = 'The issue was caused by a race condition. I fixed it by adding proper locking.';
     const stop = (context, sessionId, overrides = {}) => runHook(context, 'persistent-mode.mjs', { cwd: context.cwd, session_id: sessionId, last_assistant_message: MESSAGE }, 'learner-extraction', { OMC_JEV_LEARNER_HINT: '1', ...overrides });
