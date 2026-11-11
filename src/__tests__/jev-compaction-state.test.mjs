@@ -7,14 +7,14 @@
  */
 
 import { execFileSync } from 'node:child_process';
-import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, utimesSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, symlinkSync, utimesSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { afterAll, describe, expect, it } from 'vitest';
 
 import { maskSecrets } from '../../scripts/lib/jev-mask.mjs';
-import { afterSessionStart, foldRegistry, MISSING_MESSAGE, recordCompactionState, REGISTRY_CHARS, registryPath, renderRegistry } from '../../scripts/lib/jev-compaction-state.mjs';
+import { afterSessionStart, archiveDays, foldRegistry, MISSING_MESSAGE, recordCompactionState, REGISTRY_CHARS, registryPath, renderRegistry, sweepArchive } from '../../scripts/lib/jev-compaction-state.mjs';
 
 const root = join(fileURLToPath(import.meta.url), '..', '..', '..');
 const NODE = process.execPath;
@@ -270,5 +270,96 @@ describe('jev-compaction-state: hook entry points', () => {
     expect(context).toContain('lint failed');
     const rows = logRows(join(cwd, '.omc', 'state', 'jev', 'compaction.jsonl'));
     expect(rows).toEqual([expect.objectContaining({ result: 'fallback', reason: 'timeout', session_id: sid })]);
+  });
+});
+
+describe('jev-compaction-state: retention of the result archive', () => {
+  const DAY = 24 * 3600_000;
+  const NOW = Date.UTC(2026, 10, 11, 12, 0, 0);
+  // A session directory with the given files, each last changed `age` days ago (the directory itself as old as its oldest change).
+  function sessionDir(env, name, files, now = NOW) {
+    const dir = join(env.OMC_JEV_LOG_DIR, 'compaction-archive', name);
+    mkdirSync(dir, { recursive: true });
+    for (const [file, age] of Object.entries(files)) {
+      writeFileSync(join(dir, file), 'archived');
+      const t = new Date(now - age * DAY);
+      utimesSync(join(dir, file), t, t);
+    }
+    const oldest = new Date(now - Math.max(...Object.values(files)) * DAY);
+    utimesSync(dir, oldest, oldest);
+    return dir;
+  }
+  const layout = (env, now = NOW, current = 'current-session') => ({
+    dead: sessionDir(env, 'dead-session', { 't1.txt': 40, 't2.txt': 30 }, now),
+    markerFresh: sessionDir(env, 'marker-fresh', { 't1.txt': 40, '.compaction': 2 }, now),
+    fileFresh: sessionDir(env, 'file-fresh', { 't1.txt': 40, 't2.txt': 1 }, now),
+    current: sessionDir(env, current, { 't1.txt': 90, '.compaction': 90 }, now),
+    young: sessionDir(env, 'young', { 't1.txt': 5 }, now),
+  });
+
+  it('removes a session directory whose newest file is older than the days, and keeps one with a fresh marker or file, a young one and the current session', () => {
+    const { env } = setup();
+    const dirs = layout(env);
+    expect(sweepArchive('current-session', NOW, env)).toBe(1);
+    expect(existsSync(dirs.dead)).toBe(false);
+    for (const kept of ['markerFresh', 'fileFresh', 'current', 'young']) expect(existsSync(dirs[kept])).toBe(true);
+    expect(readdirSync(dirs.current).sort()).toEqual(['.compaction', 't1.txt']);
+  });
+
+  it('removes nothing without a session id', () => {
+    const { env } = setup();
+    const dirs = layout(env);
+    expect(sweepArchive(undefined, NOW, env)).toBe(0);
+    expect(sweepArchive('', NOW, env)).toBe(0);
+    for (const dir of Object.values(dirs)) expect(existsSync(dir)).toBe(true);
+  });
+
+  it('follows OMC_JEV_ARCHIVE_DAYS: a number of days, 14 when unset, nothing for 0 or a value that is not a whole number of days', () => {
+    expect([undefined, '', ' 7 ', '0', '-3', '2.5', 'abc', '99999', '100000'].map((v) => archiveDays({ OMC_JEV_ARCHIVE_DAYS: v }))).toEqual([14, 14, 7, 0, 0, 0, 0, 99999, 0]);
+    for (const value of ['0', 'soon', '1.5']) {
+      const { env } = setup();
+      const dirs = layout(env);
+      expect(sweepArchive('current-session', NOW, { ...env, OMC_JEV_ARCHIVE_DAYS: value })).toBe(0);
+      for (const dir of Object.values(dirs)) expect(existsSync(dir)).toBe(true);
+    }
+    const { env } = setup();
+    const dirs = layout(env);
+    expect(sweepArchive('current-session', NOW, { ...env, OMC_JEV_ARCHIVE_DAYS: '3' })).toBe(2);
+    expect(existsSync(dirs.young)).toBe(false);
+    expect(existsSync(dirs.dead)).toBe(false);
+    expect(existsSync(dirs.markerFresh)).toBe(true);
+  });
+
+  it('never follows or removes a link, and leaves a plain file and a missing archive alone', () => {
+    const { env, dir } = setup();
+    expect(sweepArchive('s', NOW, env)).toBe(0);
+    const outside = join(dir, 'outside');
+    mkdirSync(outside, { recursive: true });
+    writeFileSync(join(outside, 'keep.txt'), 'x');
+    const old = new Date(NOW - 90 * DAY);
+    utimesSync(join(outside, 'keep.txt'), old, old);
+    utimesSync(outside, old, old);
+    const root = join(env.OMC_JEV_LOG_DIR, 'compaction-archive');
+    mkdirSync(root, { recursive: true });
+    symlinkSync(outside, join(root, 'linked'), 'dir');
+    writeFileSync(join(root, 'stray.txt'), 'x');
+    expect(sweepArchive('s', NOW, env)).toBe(0);
+    expect(readFileSync(join(outside, 'keep.txt'), 'utf8')).toBe('x');
+    expect(existsSync(join(root, 'linked'))).toBe(true);
+    expect(existsSync(join(root, 'stray.txt'))).toBe(true);
+  });
+
+  it('runs at SessionStart for a startup or a resume, never right after a compaction, and only for the named point', () => {
+    for (const [source, removed] of [['startup', true], ['resume', true], ['clear', true], ['compact', false]]) {
+      const { env, sid } = setup();
+      const dirs = layout(env, Date.now(), sid);
+      afterSessionStart({ session_id: sid, source }, {}, env);
+      expect(existsSync(dirs.dead)).toBe(!removed);
+      for (const kept of ['markerFresh', 'fileFresh', 'current', 'young']) expect(existsSync(dirs[kept])).toBe(true);
+    }
+    const { env, sid } = setup();
+    const dirs = layout(env, Date.now(), sid);
+    afterSessionStart({ session_id: sid, source: 'startup' }, {}, { ...env, OMC_JEV: 'all:active' });
+    expect(existsSync(dirs.dead)).toBe(true);
   });
 });

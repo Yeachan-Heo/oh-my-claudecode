@@ -65,6 +65,19 @@
  * when it writes a new minute). Without these two variables nothing of this is read or written. The
  * module's own pause, its three-failures stop and OMC_JEV_MAX_REQUESTS stay as they were.
  *
+ * Archive (OMC_JEV_COMPACT_ARCHIVE=active; off by default, `shadow` only counts): the call and result of every
+ * item that is cut or traced goes whole to <state dir>/compaction-archive/<session>/<tool_use_id>.txt (the call's
+ * input masked, the result unchanged), and its trace or cut ends with `; full call and result: <path>`, so the model
+ * can read the text back. A result is archived only when it holds nothing the masking would change and names no
+ * secret or private path (not even in a line), its call touches none, it is not a held background output, and it
+ * fits the host's write limit; otherwise its trace names no file. A trace names its file only after the write was
+ * read back. $.fs has no delete, rename or append: a file of the same name is reused only when its text equals the
+ * content, any other is written again. The archive gets at most ARCHIVE_BUDGET_MS and never runs past the
+ * compaction's TOTAL_MS; every host call is capped at HOST_MS and after one that hit its cap no call starts. The
+ * classic SessionStart hook removes session directories whose newest file is older than OMC_JEV_ARCHIVE_DAYS days
+ * (scripts/lib/jev-compaction-state.mjs). Without the variable nothing of this is read or written, and the result
+ * and the record are as before.
+ *
  * Quiet: no $.ui.log; a toast only with OMC_JEV_COMPACT_TOAST=1. One JSON file per event goes to the
  * spool directory (<state dir>/compaction-spool, $.fs cannot append); the classic SessionStart hook
  * (scripts/lib/jev-compaction-state.mjs) moves those records to compaction.jsonl next to shadow.jsonl.
@@ -124,6 +137,18 @@ const PROBE_MAX_CHARS = 5_000_000;
 // A file or URL named in the last user messages counts as needed when its name has at least this
 // many characters (shorter names match too much text).
 const MENTION_MIN = 5;
+// Archive: the host's $.fs.write limit in UTF-8 bytes; the archive's own time limit and parallelism; the file in a
+// session directory that every archiving compaction rewrites, so the retention sees a live session by its newest file.
+const ARCHIVE_MAX_BYTES = 4_194_304;
+const ARCHIVE_BUDGET_MS = 1500;
+const ARCHIVE_PARALLEL = 8;
+const ARCHIVE_MARKER = '.compaction';
+const ARCHIVE_LABEL = 'full call and result: ';
+// Session and tool_use ids become file names, so only these are archived (a UUID and `toolu_...` pass).
+const ARCHIVE_ID = /^[A-Za-z0-9_-]{1,80}$/;
+// What a compaction writes in place of a result: a later compaction must not archive these as results.
+const SHORT_NOTE = '[result shortened at compaction: ';
+const NON_TEXT_NOTE = '[non-text result (image or file) removed at compaction]';
 const DEFAULT_ENDPOINT = 'https://api.typesafe.ai/v1/systemone';
 const JEV_MODEL = 'jev-latest';
 // Pause after a failed request, by status only (a response body is read only for the retry time of a
@@ -361,6 +386,7 @@ async function readConfig($) {
     OMC_JEV_COMPACT_TARGET: await $.env.get('OMC_JEV_COMPACT_TARGET'),
     OMC_JEV_COMPACT_TOAST: await $.env.get('OMC_JEV_COMPACT_TOAST'),
     OMC_JEV_COMPACT_PRIVATE_PATHS: await $.env.get('OMC_JEV_COMPACT_PRIVATE_PATHS'),
+    OMC_JEV_COMPACT_ARCHIVE: await $.env.get('OMC_JEV_COMPACT_ARCHIVE'),
     OMC_JEV_BREAKER: await $.env.get('OMC_JEV_BREAKER'),
     OMC_JEV_MAX_RPM: await $.env.get('OMC_JEV_MAX_RPM'),
     OMC_JEV_BREAKER_DIR: await $.env.get('OMC_JEV_BREAKER_DIR'),
@@ -412,6 +438,8 @@ async function readConfig($) {
     endpoint,
     shared: mode === 'off' ? undefined : await sharedSettings(env, endpoint, homeForState),
     spoolDir: stateDir ? `${stateDir}/compaction-spool` : undefined,
+    archive: archiveModeOf(env.OMC_JEV_COMPACT_ARCHIVE),
+    archiveDir: stateDir ? `${stateDir}/compaction-archive` : undefined,
     maxRequests: positiveInt(env.OMC_JEV_MAX_REQUESTS, 0),
     excerptChars: positiveInt(env.OMC_JEV_EXCERPT_CHARS_COMPACTION, DEFAULT_EXCERPT_CHARS),
     atPercent: fraction(env.OMC_JEV_COMPACT_AT_PERCENT, undefined, 1, 99),
@@ -955,13 +983,23 @@ function markMentioned(candidates, user) {
   return n;
 }
 
+// Where the full text is, when the item is archived (c.archivePath, set only with the archive active).
+const archiveRef = (c) => (c.archivePath ? `; ${ARCHIVE_LABEL}${c.archivePath}` : '');
+
 function traceLine(c) {
   const what = !c.textOnly ? 'non-text result (image or file) removed' : `${c.res.isError ? 'error' : 'result'} of ${c.resultChars} chars removed`;
-  return `[compacted] ${c.use.tool}(${clip(c.summary, TRACE_INPUT_CHARS)}) - ${what}`;
+  return `[compacted] ${c.use.tool}(${clip(c.summary, TRACE_INPUT_CHARS)}) - ${what}${archiveRef(c)}`;
 }
 
 function shortText(c) {
-  return `${c.res.text.slice(0, SHORT_CHARS)}\n[result shortened at compaction: kept ${SHORT_CHARS} of ${c.resultChars} chars]`;
+  return `${c.res.text.slice(0, SHORT_CHARS)}\n${SHORT_NOTE}kept ${SHORT_CHARS} of ${c.resultChars} chars${archiveRef(c)}]`;
+}
+
+// The lengths the allocation counts for the trace and the cut.
+function price(c) {
+  c.trace = traceLine(c);
+  c.traceCost = c.trace.length + 1; // the newline that joins it to the assistant text
+  c.shortCost = c.resultChars > SHORT_CHARS ? c.inputChars + shortText(c).length : c.fullCost;
 }
 
 // The task list stays: every TaskCreate and TaskUpdate call, the newest TodoWrite call and the newest
@@ -995,10 +1033,8 @@ function findCandidates(messages, privatePaths) {
         textOnly: textOnlyResult(r),
         score: 0, asked: false, answered: false,
       };
-      c.trace = traceLine(c);
       c.fullCost = c.inputChars + c.resultChars;
-      c.traceCost = c.trace.length + 1; // the newline that joins it to the assistant text
-      c.shortCost = c.resultChars > SHORT_CHARS ? c.inputChars + shortText(c).length : c.fullCost;
+      price(c);
       c.task = TASK_STEP.test(c.use.tool || '');
       out.push(c);
     }
@@ -1227,7 +1263,7 @@ function build(messages, candidates, keepFrom, group, stats) {
         if (c && c.keep === 'trace') continue;
         if (c && c.keep === 'short') results.push({ tool_use_id: r.tool_use_id, text: shortText(c), isError: Boolean(r.isError) });
         else if (textOnlyResult(r)) results.push({ tool_use_id: r.tool_use_id, text: r.text || '', isError: Boolean(r.isError) });
-        else results.push({ tool_use_id: r.tool_use_id, text: '[non-text result (image or file) removed at compaction]', isError: Boolean(r.isError) });
+        else results.push({ tool_use_id: r.tool_use_id, text: NON_TEXT_NOTE, isError: Boolean(r.isError) });
       }
       if (!changed) stats.rebuiltUnchanged++;
       if (!results.length && !m.text) continue;
@@ -1371,6 +1407,158 @@ function noteFailures(failures, now) {
   }
 }
 
+// --- archive of cut and removed results ---------------------------------------------------------
+// OMC_JEV_COMPACT_ARCHIVE (see the header): the switch is `active` or `shadow` (any case, spaces trimmed),
+// anything else is off.
+function archiveModeOf(raw) {
+  const v = String(raw ?? '').trim().toLowerCase();
+  return v === 'active' || v === 'shadow' ? v : 'off';
+}
+
+// `active` needs an active compaction and a session id that is a file name; the switch on otherwise is `shadow`
+// (counts only: no file, no path in a trace, the conversation built as without the archive).
+function archiveModeIn(cfg, sessionId) {
+  if (cfg.archive === 'off' || !cfg.archiveDir) return 'off';
+  return cfg.archive === 'active' && cfg.mode === 'active' && ARCHIVE_ID.test(String(sessionId ?? '')) ? 'active' : 'shadow';
+}
+
+const isProduct = (text) => text.startsWith(NON_TEXT_NOTE) || text.includes(`\n${SHORT_NOTE}`);
+
+// Why a candidate is not archived, '' when it is. A result that holds anything the masking would change or names a
+// secret or private path (in any line) is not archived, and neither is the result of a call that touches one: the file
+// holds the result unchanged. Memoized on the candidate.
+function archiveSkip(c, privatePaths) {
+  if (c.archiveWhy !== undefined) return c.archiveWhy;
+  const text = typeof c.res?.text === 'string' ? c.res.text : '';
+  let why = '';
+  if (!ARCHIVE_ID.test(String(c.id ?? ''))) why = 'bad_id';
+  else if (c.secret || c.proseSecret || c.taskOutput) why = 'secret';
+  else if (!c.textOnly) why = 'no_text';
+  else if (!text) why = 'empty';
+  else if (isProduct(text)) why = 'after_compaction';
+  else if (text.length > ARCHIVE_MAX_BYTES) why = 'too_large';
+  else if (anySecretPath(c.use.input, privatePaths)) why = 'secret';
+  else if (namesSecretPath(text, privatePaths) || maskSecrets(text) !== text) why = 'secret_in_result';
+  c.archiveWhy = why;
+  return why;
+}
+
+// Before the allocation counts the length of a trace and of a cut: the path of every candidate that can be archived,
+// and the one an earlier compaction's cut already names (its file exists; the cut then keeps pointing at it).
+function planArchive(candidates, dir, privatePaths) {
+  for (const c of candidates) {
+    const path = `${dir}/${c.id}.txt`;
+    const why = archiveSkip(c, privatePaths);
+    if (!why || (why === 'after_compaction' && c.res.text.includes(`; ${ARCHIVE_LABEL}${path}`))) { c.archivePath = path; price(c); }
+  }
+}
+
+// Shadow: what archiveResults would try, with no file touched.
+function archivePlan(candidates, privatePaths) {
+  const plan = { planned: 0, skipped: {} };
+  for (const c of candidates) {
+    if (c.keep === 'full') continue;
+    const why = archiveSkip(c, privatePaths);
+    if (why) plan.skipped[why] = (plan.skipped[why] || 0) + 1;
+    else plan.planned++;
+  }
+  return plan;
+}
+
+function archiveContentOf(c) {
+  let input = '';
+  try { input = JSON.stringify(c.use.input ?? {}, null, 2) ?? ''; } catch { /* no input in the file */ }
+  return `[Jev compaction archive] call ${oneLine(c.use.tool)}, tool_use_id ${c.id}\n--- input (masked) ---\n${maskSecrets(input)}\n`
+    + `--- ${c.res.isError ? 'error' : 'result'} (${c.res.text.length} chars, unchanged) ---\n${c.res.text}`;
+}
+
+// One host call capped at HOST_MS: {value}, {timeout} or {error}; never rejects.
+function hostCall($, call) {
+  let promise;
+  try { promise = Promise.resolve(call()); } catch (error) { return Promise.resolve({ error }); }
+  return withDeadline($, promise, HOST_MS);
+}
+
+// One candidate: {id, path?, reused?, rewritten?, skipped?, error?, bytes?}. `lim` = {writeBy, hardEnd, stalled}: no write
+// starts at or after writeBy, no read after hardEnd, and none at all once a host call hit its HOST_MS cap.
+async function archiveOne($, c, privatePaths, lim) {
+  const out = { id: c.id };
+  const why = archiveSkip(c, privatePaths);
+  const late = (end) => lim.stalled || Date.now() >= end;
+  const failed = (r) => {
+    if (r.timeout) { lim.stalled = true; out.error = 'host_timeout'; } else out.error = clip(oneLine(String(r.error?.message ?? r.error)), 200);
+    return out;
+  };
+  if (!c.archivePath) { out.skipped = why; return out; }
+  if (late(lim.hardEnd)) { out.skipped = 'time'; return out; }
+  if (why) { // a cut of an earlier compaction: its file stays the pointer when it is still there
+    const r = await hostCall($, () => $.fs.read(c.archivePath));
+    if (r.timeout) return failed(r);
+    if (r.error) out.skipped = why;
+    else { out.path = c.archivePath; out.reused = true; }
+    return out;
+  }
+  const content = archiveContentOf(c);
+  const bytes = new TextEncoder().encode(content).length;
+  if (bytes > ARCHIVE_MAX_BYTES) { out.skipped = 'too_large'; return out; }
+  // A file of the name is reused only when its text is the content; any other (a write that failed its read-back, a
+  // file of another version) is written again.
+  const existing = await hostCall($, () => $.fs.read(c.archivePath));
+  if (existing.timeout) return failed(existing);
+  if (!existing.error && existing.value === content) { out.path = c.archivePath; out.reused = true; return out; }
+  if (late(lim.writeBy)) { out.skipped = 'time'; return out; }
+  const w = await hostCall($, () => $.fs.write(c.archivePath, content));
+  if (w.timeout || w.error) return failed(w);
+  const back = await hostCall($, () => $.fs.read(c.archivePath));
+  if (back.timeout || back.error) return failed(back);
+  if (back.value !== content) { out.error = 'read_back_differs'; return out; }
+  out.path = c.archivePath;
+  out.bytes = bytes;
+  if (!existing.error) out.rewritten = true;
+  return out;
+}
+
+// Archives the candidates that are cut or traced. Never throws. No write starts later than min(ARCHIVE_BUDGET_MS, leftMs)
+// after the start and no read later than leftMs (the time the compaction has left); items past that get `time`, items
+// whose host call hit its cap `host_timeout`; both count in timed_out. Returns the counts and `paths`: tool_use_id -> path
+// of the items whose file is there and may be named in a trace.
+async function archiveResults($, dir, candidates, privatePaths, leftMs) {
+  const started = Date.now();
+  const left = Math.max(0, leftMs);
+  const lim = { writeBy: started + Math.min(ARCHIVE_BUDGET_MS, left), hardEnd: started + left, stalled: false };
+  const summary = { written: 0, reused: 0, rewritten: 0, bytes: 0, skipped: {}, errors: 0, timed_out: 0, marker: false, ms: 0, paths: new Map() };
+  const items = candidates.filter((c) => c.keep !== 'full');
+  const results = [];
+  try {
+    if (items.some((c) => c.archivePath) && !lim.stalled && Date.now() < lim.writeBy) {
+      const w = await hostCall($, () => $.fs.write(`${dir}/${ARCHIVE_MARKER}`, `${isoNow()}\n`));
+      if (w.timeout) lim.stalled = true;
+      summary.marker = !w.timeout && !w.error;
+    }
+    let next = 0;
+    const worker = async () => {
+      while (next < items.length) {
+        const k = next++;
+        try { results[k] = await archiveOne($, items[k], privatePaths, lim); } catch (error) { results[k] = { id: items[k].id, error: clip(oneLine(String(error?.message ?? error)), 200) }; }
+      }
+    };
+    await Promise.all(Array.from({ length: Math.min(ARCHIVE_PARALLEL, items.length) }, worker));
+  } catch { /* the archive never breaks a compaction */ }
+  for (const r of results) {
+    if (!r) continue;
+    if (r.skipped) summary.skipped[r.skipped] = (summary.skipped[r.skipped] || 0) + 1;
+    else if (r.error) summary.errors++;
+    else {
+      summary.paths.set(r.id, r.path);
+      if (r.reused) summary.reused++;
+      else { summary.written++; summary.bytes += r.bytes; if (r.rewritten) summary.rewritten++; }
+    }
+    if (r.skipped === 'time' || r.error === 'host_timeout') summary.timed_out++;
+  }
+  summary.ms = Date.now() - started;
+  return summary;
+}
+
 // Decides one compaction: {messages} to install or {fallback: reason}. Fills `record`; never calls next.
 async function decide($, e, cfg, record, started) {
   const messages = Array.isArray(e.messages) ? e.messages : [];
@@ -1504,7 +1692,24 @@ async function decide($, e, cfg, record, started) {
   if (held?.mode === 'deadline') return { fallback: 'timeout' };
 
   record.mentioned = markMentioned(candidates, user);
+  // The archive: the planned path goes into every trace and cut before the allocation counts their lengths; after it the
+  // files are written, and a trace or cut keeps its path only when its file is there.
+  const archive = archiveModeIn(cfg, record.session_id);
+  const archiveDir = archive === 'active' ? `${cfg.archiveDir}/${record.session_id}` : undefined;
+  if (archiveDir) planArchive(candidates, archiveDir, cfg.privatePaths);
   allocate(candidates, before, cfg.target);
+  if (archive !== 'off') record.archive_mode = archive;
+  if (archiveDir) {
+    const done = await archiveResults($, archiveDir, candidates, cfg.privatePaths, deadline - Date.now());
+    for (const c of candidates) if (c.archivePath && (c.keep === 'full' || !done.paths.has(c.id))) { c.archivePath = undefined; price(c); }
+    Object.assign(record, {
+      archive_ms: done.ms, archive_written: done.written, archive_reused: done.reused, archive_rewritten: done.rewritten, archive_bytes: done.bytes,
+      archive_skipped: done.skipped, archive_errors: done.errors, archive_timed_out: done.timed_out, archive_marker: done.marker,
+    });
+  } else if (archive === 'shadow') {
+    const plan = archivePlan(candidates, cfg.privatePaths);
+    Object.assign(record, { archive_planned: plan.planned, archive_skipped: plan.skipped });
+  }
   const stats = {};
   const built = build(messages, candidates, keepFrom, group, stats);
   if (!pairingOk(messages, built)) return { fallback: 'build_error' };

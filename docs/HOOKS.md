@@ -797,6 +797,15 @@ A `model-routing` line means the decision was handed to Claude Code, not decided
 
 With the compaction point enabled, Jev's compaction module (if installed in the plugin) writes one JSON record per compaction to `compaction.jsonl` in the Jev log directory (next to `shadow.jsonl`), appended during SessionStart. Each line is `{ts, session_id, agent_id, compaction, context, systemMessage, …}`, recording metadata about the compaction source and any registry-based context sent to Claude. The file grows with every compaction and is rotated with `OMC_JEV_LOG_MAX_MB` like the other Jev logs.
 
+#### Compaction archive
+
+By default the compaction module keeps a one-line trace for every tool result it removes, and the removed text is gone. With `OMC_JEV_COMPACT_ARCHIVE=active` (and `compaction:active` in `OMC_JEV`) the module first writes the call and its result, whole, to `compaction-archive/<session_id>/<tool_use_id>.txt` in the Jev state directory (`OMC_JEV_LOG_DIR`, else `~/.omc/state/jev`), and the trace or the cut ends with `; full call and result: <path>`, so the model can read the text back. The input in the file head is masked; the result is written unchanged, so a result is archived only when masking would not change it and it names no secret or private path (`OMC_JEV_COMPACT_PRIVATE_PATHS` counts), and the result of a call on such a path or of a held background output is never archived; those traces name no file. A trace names its file only after the write was read back. The archive gets at most 1.5 s and never runs past the compaction's own 8 s. `OMC_JEV_COMPACT_ARCHIVE=shadow` only counts what `active` would do (`archive_planned`, `archive_skipped` in the compaction record). Unset or any other value: no file, no path, the same result and record as without the variable.
+
+| Variable | Default | Meaning |
+|---|---|---|
+| `OMC_JEV_COMPACT_ARCHIVE` | `off` | `off`, `shadow` or `active`, as above. The record of an archiving compaction adds `archive_mode`, `archive_written`, `archive_reused`, `archive_rewritten`, `archive_bytes`, `archive_skipped`, `archive_errors`, `archive_timed_out`, `archive_marker` and `archive_ms`. |
+| `OMC_JEV_ARCHIVE_DAYS` | `14` | SessionStart removes the session directories of the archive whose newest file is older than this many days. `0` or a value that is not a whole number of days: nothing is removed. The current session's directory is never removed, and without a session id nothing is. |
+
 #### States without session ids
 
 Two states sent to Jev carry an id of the session rather than of the work: the `loop-continuation` state has `session_id`, and the `simplifier-trigger` state has `cwd`, the project path. Neither helps the judgment, and both leave the machine with the request. With `OMC_JEV_STATE_OMIT_IDS=1` the hook scripts and the TypeScript points leave them out of the state. They are then also missing from the state recorded in `shadow.jsonl`; set `OMC_JEV_LOG_CONTEXT=1` as well to keep them in the log line, as the top-level `session_id` and `cwd` fields, without sending them. Without the variable the states are unchanged.

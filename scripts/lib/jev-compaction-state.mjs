@@ -22,12 +22,19 @@
  *    REGISTRY_CHARS characters); after a Jev compaction the messages stayed verbatim, so it is left
  *    out. MISSING_TO_NOTIFY `module_missing` within a day give one systemMessage.
  *
+ * 4. Archive retention. With OMC_JEV_COMPACT_ARCHIVE the module writes the cut and removed results to
+ *    <state dir>/compaction-archive/<session>/<tool_use_id>.txt (see its header). SessionStart (any source
+ *    but `compact`) removes the session directories whose newest file (the module touches `.compaction` at
+ *    every archiving compaction) is older than OMC_JEV_ARCHIVE_DAYS days (default 14; `0` or a value that is
+ *    not a whole number of days keeps everything). The current session's directory, a link and anything
+ *    outside the archive directory stay, and without a session id nothing is removed.
+ *
  * <state dir> is OMC_JEV_LOG_DIR when set, else ~/.omc/state/jev: the module knows only the home
  * directory, not the project's state root. Registry text is masked with scripts/lib/jev-mask.mjs, the
  * masking the module uses for what it sends.
  */
 
-import { appendFileSync, closeSync, existsSync, mkdirSync, openSync, readdirSync, readFileSync, readSync, rmSync, statSync } from 'node:fs';
+import { appendFileSync, closeSync, existsSync, lstatSync, mkdirSync, openSync, readdirSync, readFileSync, readSync, rmSync, statSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -47,6 +54,7 @@ const RECORD_MATCH_MS = 15 * 60_000;
 const MISSING_WINDOW_MS = 24 * 3600_000;
 const MISSING_TO_NOTIFY = 3;
 const MAX_AGE_MS = 7 * 24 * 3600_000;
+const ARCHIVE_DAYS_DEFAULT = 14;
 const FILE_TOOLS = new Set(['Write', 'Edit', 'MultiEdit', 'NotebookEdit']);
 const SHELL_TOOLS = new Set(['Bash', 'PowerShell']);
 // git subcommands that change the repository or its remote (status, log and diff are not worth a line).
@@ -246,6 +254,47 @@ function sweep(dir, now) {
   } catch { /* no directory */ }
 }
 
+/** OMC_JEV_ARCHIVE_DAYS: whole days an archive session directory is kept (unset or empty: the default); 0 or any other value: no removal. */
+export function archiveDays(env = process.env) {
+  const raw = String(env.OMC_JEV_ARCHIVE_DAYS ?? '').trim();
+  if (!raw) return ARCHIVE_DAYS_DEFAULT;
+  return /^[1-9]\d{0,4}$/.test(raw) ? Number(raw) : 0;
+}
+
+// Does the directory hold no file (nor itself) changed since `cutoff`? Looks at the newest first by stopping at the first newer one;
+// a directory that cannot be read counts as new.
+function archiveDirIsOld(dir, cutoff) {
+  try {
+    if (statSync(dir).mtimeMs >= cutoff) return false;
+    for (const name of readdirSync(dir)) if (lstatSync(join(dir, name)).mtimeMs >= cutoff) return false;
+    return true;
+  } catch { return false; }
+}
+
+/**
+ * Removes the session directories of <state dir>/compaction-archive whose newest file is older than OMC_JEV_ARCHIVE_DAYS days.
+ * Returns the number removed. The current session's directory stays, so does a link; without a session id nothing is removed.
+ */
+export function sweepArchive(sessionId, now = Date.now(), env = process.env) {
+  const days = archiveDays(env);
+  if (!days || !sessionId) return 0;
+  const root = join(stateDirOf(env), 'compaction-archive');
+  const cutoff = now - days * 24 * 3600_000;
+  let removed = 0;
+  try {
+    for (const name of readdirSync(root)) {
+      if (name === safeName(sessionId)) continue;
+      const dir = join(root, name);
+      try {
+        if (!lstatSync(dir).isDirectory() || !archiveDirIsOld(dir, cutoff)) continue;
+        rmSync(dir, { recursive: true, force: true });
+        removed++;
+      } catch { /* in use or gone: the next start tries again */ }
+    }
+  } catch { /* no archive */ }
+  return removed;
+}
+
 // The session's spool files: [{name, record}], record undefined for an unreadable file.
 function readSpool(spoolDir, sessionId) {
   let names = [];
@@ -315,6 +364,7 @@ export function afterSessionStart(data, { logDir } = {}, env = process.env) {
       sweep(spoolDir, now);
       sweep(join(stateDir, 'compaction-registry'), now);
     }
+    if (data.source !== 'compact') sweepArchive(sessionId, now, env);
     return out;
   } catch { return {}; }
 }
