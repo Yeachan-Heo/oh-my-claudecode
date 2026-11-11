@@ -44299,28 +44299,15 @@
     {
       "pullNumber": 5009,
       "targetRef": "main",
-      "mergeBaseSha": "453d3dedf3e1634156195c8aa09a901c802ba542",
-      "headSha": "ca2946477d491c8b494b436502bf184fc7d04410",
+      "mergeBaseSha": "b735e41dbc5d666289f2702dd642a1fc0e1db3cb",
+      "headSha": "69abbf21ed112295c8576eccface943e20002dd3",
       "owner": "Yeachan-Heo",
       "expiresAt": "2026-12-31T23:59:59.999Z",
       "generatedDelta": {
-        "count": 2,
-        "sha256": "0000000000000000000000000000000000000000000000000000000000000000"
+        "count": 0,
+        "sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
       },
-      "generatedFiles": [
-        {
-          "status": "added",
-          "filename": "bridge/gyoshu_bridge.py",
-          "sha": "0c989ea3ad28580924b99090bfde2cc26e93a2e0",
-          "previousFilename": null
-        },
-        {
-          "status": "added",
-          "filename": "bridge/run-mcp-server.sh",
-          "sha": "8bea27d63b0e0fb492a573dd14d33f4aae806938",
-          "previousFilename": null
-        }
-      ]
+      "generatedFiles": []
     }
   ]
 }
