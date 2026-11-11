@@ -42,7 +42,10 @@ function writePlaybook(root: string, file: string, body: string): void {
 }
 
 function runChecker(root: string, skillsRoot: string) {
-  return spawnSync('node', [CHECKER, root, '--skills-root', skillsRoot], { encoding: 'utf8' });
+  // Isolate user config to ensure test doesn't pick up real user-level playbooks.
+  const env = { ...process.env };
+  delete env.CLAUDE_CONFIG_DIR;
+  return spawnSync('node', [CHECKER, root, '--skills-root', skillsRoot], { encoding: 'utf8', env });
 }
 
 describe('check-omc-playbooks', () => {

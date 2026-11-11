@@ -151,11 +151,13 @@ async function main() {
   // every repository without a copy per project. It lives beside the
   // user-level skills tree this checker already reads, under the same
   // ${CLAUDE_CONFIG_DIR:-$HOME/.claude} resolver.
-  const userPlaybooksDir = join(
-    process.env.CLAUDE_CONFIG_DIR ?? join(homedir(), ".claude"),
-    "omc",
-    "playbooks",
-  );
+  // Normalize CLAUDE_CONFIG_DIR: expand ~ and resolve to absolute path.
+  let configDir = process.env.CLAUDE_CONFIG_DIR ?? join(homedir(), ".claude");
+  if (configDir.startsWith("~")) {
+    configDir = join(homedir(), configDir.slice(1));
+  }
+  configDir = resolve(configDir);
+  const userPlaybooksDir = join(configDir, "omc", "playbooks");
   const hasProjectPlaybooks = existsSync(playbooksDir);
   const hasUserPlaybooks = existsSync(userPlaybooksDir);
   if (!hasProjectPlaybooks && !hasUserPlaybooks) {
