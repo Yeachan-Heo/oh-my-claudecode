@@ -789,7 +789,7 @@ function messageChars(m) {
 function frameOf(text) {
   const t = text.replace(DELIVERY_WRAP, '');
   if (t.startsWith(QUEUED_PREFIX)) return 'user';
-  return / while you were working:$/.test(t.split('\n', 1)[0]) || DELIVERY_OPENERS.some((p) => t.startsWith(p)) ? 'other' : undefined;
+  return / sent a message while you were working:$/.test(t.split('\n', 1)[0]) || DELIVERY_OPENERS.some((p) => t.startsWith(p)) ? 'other' : undefined;
 }
 
 // What a text block delivered with the results is: 'user', 'other' (another session, agent,

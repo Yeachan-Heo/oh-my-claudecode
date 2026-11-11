@@ -570,6 +570,17 @@ describe('jev-compaction module: active compaction', () => {
     expect(JSON.stringify([...first.calls.fetch, ...second.calls.fetch].map((c) => c.body.state.task))).not.toMatch(/QUOTED-BY-/);
   });
 
+  it('a normal user message that happens to end with "while you were working:" is not misclassified as an other delivery', async () => {
+    // Thread 3 regression: frameOf should not misclassify normal user prompts that end with " while you were working:"
+    const userMessage = 'Please explain what changed while you were working:';
+    const framed = (words) => `The user sent a new message while you were working:\n${words}\n\nThis is how Claude Code surfaces messages the user sends mid-turn.`;
+    const messages = conversation(30);
+    const first = await compactWithApi(messages, apiOf(messages, { t10: [framed(userMessage)] }));
+    // The message should be recognized as user queued words, not excluded
+    expect(first.calls.fetch[0].body.state.task).toContain(userMessage);
+    expect(first.records()[0]).toMatchObject({ queued_user: 1 });
+  });
+
   it('without the API form the delivered messages cannot be seen, and the record says so', async () => {
     const messages = conversation(30);
     const { out, records } = await compactWithApi(messages, messages);
