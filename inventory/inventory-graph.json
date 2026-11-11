@@ -5,15 +5,15 @@
   "provenance": {
     "base": "05c800f40d1ad53b42a78609d2667ef4f726808b",
     "planningHead": "0a91273e61dbbd47eb0af4c02844409251e08398",
-    "head": "0d9fea04b26132ab460780293b951e434d63ac22",
-    "sourceSha256": "eec6f54dba6e83c920d5f053d2e1edd173a83cea7751e1e1ff69a9ed7a8ec35e",
+    "head": "84df1f41162783260f9617762e37599878429f99",
+    "sourceSha256": "fd8b5c0f687f6f58b3ecc7547d31d365a02dc764aa93ba9160992cde77b328c9",
     "generatedAt": null,
     "generator": "scripts/generate-inventory-graph.mjs"
   },
   "base": "05c800f40d1ad53b42a78609d2667ef4f726808b",
   "planningHead": "0a91273e61dbbd47eb0af4c02844409251e08398",
-  "head": "0d9fea04b26132ab460780293b951e434d63ac22",
-  "sourceSha256": "eec6f54dba6e83c920d5f053d2e1edd173a83cea7751e1e1ff69a9ed7a8ec35e",
+  "head": "84df1f41162783260f9617762e37599878429f99",
+  "sourceSha256": "fd8b5c0f687f6f58b3ecc7547d31d365a02dc764aa93ba9160992cde77b328c9",
   "counts": {
     "public": {
       "skills": 84,
@@ -74647,6 +74647,16 @@
       },
       {
         "from": "src/hooks/session-end/__tests__/callbacks.test.ts",
+        "to": "external:os",
+        "kind": "imports"
+      },
+      {
+        "from": "src/hooks/session-end/__tests__/callbacks.test.ts",
+        "to": "external:path",
+        "kind": "imports"
+      },
+      {
+        "from": "src/hooks/session-end/__tests__/callbacks.test.ts",
         "to": "external:vitest",
         "kind": "imports"
       },
@@ -94333,11 +94343,11 @@
     ],
     "stats": {
       "nodeCount": 8298,
-      "edgeCount": 9124,
-      "importEdgeCount": 7653,
+      "edgeCount": 9126,
+      "importEdgeCount": 7655,
       "registerEdgeCount": 105
     }
   },
   "inventorySha256": "8052560f0b9c4008258c257af9bfec610abcba96f0b0c9abde8166a9cf56aba5",
-  "manifestSha256": "b5aecd51a09f0f16e9bf5d89f359f12ddce2b6cdef683801662ef6ab0bcc7943"
+  "manifestSha256": "8dab34a178b1212d3cb20eea81741bfbf050c3d5d49c39b810c21a3b28982abf"
 }
