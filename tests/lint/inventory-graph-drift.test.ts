@@ -459,6 +459,8 @@ describe('inventory-graph drift enforcement (#3702)', () => {
       expect(written.repository).toBeDefined();
       expect(written.provenance).toBeDefined();
       // No volatile fields in committed baseline
+      expect(written.head).toBeUndefined();
+      expect(written.generatedAt).toBeUndefined();
       expect(written.provenance.head).toBeUndefined();
       expect(written.provenance.generatedAt).toBeUndefined();
       expect(written.provenance.sourceSha256).toBeUndefined();
@@ -477,36 +479,27 @@ describe('inventory-graph drift enforcement (#3702)', () => {
 
   it('verify mode rejects legacy head-bearing baselines', { timeout: 30_000 }, () => {
     const opts = { cwd: REPO_ROOT, encoding: 'utf8' as const, maxBuffer: 20 * 1024 * 1024 };
-    // Test rejection of legacy baseline with top-level head
-    const legacyTopHead = {
+    const minimal = () => ({
       schemaVersion: 2,
       repository: 'Yeachan-Heo/oh-my-claudecode',
-      provenance: { base: EXPECTED_BASE, planningHead: EXPECTED_PLANNING_HEAD, generator: 'scripts/generate-inventory-graph.mjs' },
-      head: '0'.repeat(40),
-    };
-    const tempTopHead = join(REPO_ROOT, `.tmp-legacy-top-${process.pid}-${Math.random().toString(16).slice(2)}.json`);
-    try {
-      writeFileSync(tempTopHead, JSON.stringify(legacyTopHead, null, 2));
-      const resultTopHead = spawnSync('node', [GENERATOR, '--verify', '--out', tempTopHead], opts);
-      expect(resultTopHead.status, `should reject legacy top-level head: ${resultTopHead.stdout}`).not.toBe(0);
-    } finally {
-      if (existsSync(tempTopHead)) unlinkSync(tempTopHead);
-    }
-    
-    // Test rejection of legacy baseline with provenance.head
-    const legacyProvHead = {
-      schemaVersion: 2,
-      repository: 'Yeachan-Heo/oh-my-claudecode',
-      provenance: { base: EXPECTED_BASE, planningHead: EXPECTED_PLANNING_HEAD, generator: 'scripts/generate-inventory-graph.mjs', head: '0'.repeat(40) },
-    };
-    const tempProvHead = join(REPO_ROOT, `.tmp-legacy-prov-${process.pid}-${Math.random().toString(16).slice(2)}.json`);
-    try {
-      writeFileSync(tempProvHead, JSON.stringify(legacyProvHead, null, 2));
-      const resultProvHead = spawnSync('node', [GENERATOR, '--verify', '--out', tempProvHead], opts);
-      expect(resultProvHead.status, `should reject provenance.head: ${resultProvHead.stdout}`).not.toBe(0);
-      expect(resultProvHead.stderr).toContain('old format');
-    } finally {
-      if (existsSync(tempProvHead)) unlinkSync(tempProvHead);
+      provenance: { base: EXPECTED_BASE, planningHead: EXPECTED_PLANNING_HEAD, generator: 'scripts/generate-inventory-graph.mjs' } as Record<string, unknown>,
+    });
+    const cases: Array<[string, Record<string, unknown>]> = [
+      ['top-level head', { ...minimal(), head: '0'.repeat(40) }],
+      ['top-level null head', { ...minimal(), head: null }],
+      ['provenance.head', (() => { const m = minimal(); m.provenance.head = '0'.repeat(40); return m; })()],
+      ['null provenance.head', (() => { const m = minimal(); m.provenance.head = null; return m; })()],
+    ];
+    for (const [label, baseline] of cases) {
+      const temp = join(REPO_ROOT, `.tmp-legacy-${process.pid}-${Math.random().toString(16).slice(2)}.json`);
+      try {
+        writeFileSync(temp, JSON.stringify(baseline, null, 2));
+        const result = spawnSync('node', [GENERATOR, '--verify', '--out', temp], opts);
+        expect(result.status, `should reject ${label}: ${result.stderr}`).toBe(1);
+        expect(result.stderr, label).toContain('baseline is in old format');
+      } finally {
+        if (existsSync(temp)) unlinkSync(temp);
+      }
     }
   });
 });
