@@ -5,15 +5,15 @@
   "provenance": {
     "base": "05c800f40d1ad53b42a78609d2667ef4f726808b",
     "planningHead": "0a91273e61dbbd47eb0af4c02844409251e08398",
-    "head": "b4ce83d640855db9ff744db4ea0816411318acd2",
-    "sourceSha256": "b138317e34d9ce1f6aa4604362c0d765e82687a1eeabeb57e1aaa18feb397973",
+    "head": "62d16651b5df776ed9855adf0b171a5b8db8cf07",
+    "sourceSha256": "9f81df04e22880c309d5b56d767cc1256103fb14bc31a9d2ce186ad0ca0ff842",
     "generatedAt": null,
     "generator": "scripts/generate-inventory-graph.mjs"
   },
   "base": "05c800f40d1ad53b42a78609d2667ef4f726808b",
   "planningHead": "0a91273e61dbbd47eb0af4c02844409251e08398",
-  "head": "b4ce83d640855db9ff744db4ea0816411318acd2",
-  "sourceSha256": "b138317e34d9ce1f6aa4604362c0d765e82687a1eeabeb57e1aaa18feb397973",
+  "head": "62d16651b5df776ed9855adf0b171a5b8db8cf07",
+  "sourceSha256": "9f81df04e22880c309d5b56d767cc1256103fb14bc31a9d2ce186ad0ca0ff842",
   "counts": {
     "public": {
       "skills": 84,
@@ -32,9 +32,9 @@
       "total": 1473
     },
     "generated": {
-      "distFiles": 5639,
-      "bridgeFiles": 8,
-      "total": 5647
+      "distFiles": 5651,
+      "bridgeFiles": 9,
+      "total": 5660
     },
     "prompt": {
       "promptLikeFiles": 63
@@ -1038,6 +1038,10 @@
       "dist/__tests__/bridge-help-question-regex.test.d.ts.map",
       "dist/__tests__/bridge-help-question-regex.test.js",
       "dist/__tests__/bridge-help-question-regex.test.js.map",
+      "dist/__tests__/bridge-self-contained.test.d.ts",
+      "dist/__tests__/bridge-self-contained.test.d.ts.map",
+      "dist/__tests__/bridge-self-contained.test.js",
+      "dist/__tests__/bridge-self-contained.test.js.map",
       "dist/__tests__/chain-enqueuer-registration.test.d.ts",
       "dist/__tests__/chain-enqueuer-registration.test.d.ts.map",
       "dist/__tests__/chain-enqueuer-registration.test.js",
@@ -3803,6 +3807,10 @@
       "dist/hooks/permission-handler/index.d.ts.map",
       "dist/hooks/permission-handler/index.js",
       "dist/hooks/permission-handler/index.js.map",
+      "dist/hooks/persistent-mode/__tests__/architect-approval-transcript.test.d.ts",
+      "dist/hooks/persistent-mode/__tests__/architect-approval-transcript.test.d.ts.map",
+      "dist/hooks/persistent-mode/__tests__/architect-approval-transcript.test.js",
+      "dist/hooks/persistent-mode/__tests__/architect-approval-transcript.test.js.map",
       "dist/hooks/persistent-mode/__tests__/cancel-race.test.d.ts",
       "dist/hooks/persistent-mode/__tests__/cancel-race.test.d.ts.map",
       "dist/hooks/persistent-mode/__tests__/cancel-race.test.js",
@@ -4804,6 +4812,10 @@
       "dist/installer/__tests__/bundled-skill-sync.test.d.ts.map",
       "dist/installer/__tests__/bundled-skill-sync.test.js",
       "dist/installer/__tests__/bundled-skill-sync.test.js.map",
+      "dist/installer/__tests__/claude-mcp-config-path.test.d.ts",
+      "dist/installer/__tests__/claude-mcp-config-path.test.d.ts.map",
+      "dist/installer/__tests__/claude-mcp-config-path.test.js",
+      "dist/installer/__tests__/claude-mcp-config-path.test.js.map",
       "dist/installer/__tests__/claude-md-analysis.test.d.ts",
       "dist/installer/__tests__/claude-md-analysis.test.d.ts.map",
       "dist/installer/__tests__/claude-md-analysis.test.js",
@@ -6611,6 +6623,7 @@
       "dist/workflow/registry.js.map"
     ],
     "bridgeFiles": [
+      "bridge/__pycache__/gyoshu_bridge.cpython-314.pyc",
       "bridge/claude-md-coordinator.cjs",
       "bridge/cli.cjs",
       "bridge/gyoshu_bridge.py",
@@ -7963,6 +7976,11 @@
         "path": "bin/oh-my-claudecode.js"
       },
       {
+        "id": "bridge/__pycache__/gyoshu_bridge.cpython-314.pyc",
+        "kind": "generated-bridge",
+        "path": "bridge/__pycache__/gyoshu_bridge.cpython-314.pyc"
+      },
+      {
         "id": "bridge/claude-md-coordinator.cjs",
         "kind": "generated-bridge",
         "path": "bridge/claude-md-coordinator.cjs"
@@ -8461,6 +8479,26 @@
         "id": "dist/__tests__/bridge-help-question-regex.test.js.map",
         "kind": "generated-dist",
         "path": "dist/__tests__/bridge-help-question-regex.test.js.map"
+      },
+      {
+        "id": "dist/__tests__/bridge-self-contained.test.d.ts",
+        "kind": "generated-dist",
+        "path": "dist/__tests__/bridge-self-contained.test.d.ts"
+      },
+      {
+        "id": "dist/__tests__/bridge-self-contained.test.d.ts.map",
+        "kind": "generated-dist",
+        "path": "dist/__tests__/bridge-self-contained.test.d.ts.map"
+      },
+      {
+        "id": "dist/__tests__/bridge-self-contained.test.js",
+        "kind": "generated-dist",
+        "path": "dist/__tests__/bridge-self-contained.test.js"
+      },
+      {
+        "id": "dist/__tests__/bridge-self-contained.test.js.map",
+        "kind": "generated-dist",
+        "path": "dist/__tests__/bridge-self-contained.test.js.map"
       },
       {
         "id": "dist/__tests__/chain-enqueuer-registration.test.d.ts",
@@ -22288,6 +22326,26 @@
         "path": "dist/hooks/permission-handler/index.js.map"
       },
       {
+        "id": "dist/hooks/persistent-mode/__tests__/architect-approval-transcript.test.d.ts",
+        "kind": "generated-dist",
+        "path": "dist/hooks/persistent-mode/__tests__/architect-approval-transcript.test.d.ts"
+      },
+      {
+        "id": "dist/hooks/persistent-mode/__tests__/architect-approval-transcript.test.d.ts.map",
+        "kind": "generated-dist",
+        "path": "dist/hooks/persistent-mode/__tests__/architect-approval-transcript.test.d.ts.map"
+      },
+      {
+        "id": "dist/hooks/persistent-mode/__tests__/architect-approval-transcript.test.js",
+        "kind": "generated-dist",
+        "path": "dist/hooks/persistent-mode/__tests__/architect-approval-transcript.test.js"
+      },
+      {
+        "id": "dist/hooks/persistent-mode/__tests__/architect-approval-transcript.test.js.map",
+        "kind": "generated-dist",
+        "path": "dist/hooks/persistent-mode/__tests__/architect-approval-transcript.test.js.map"
+      },
+      {
         "id": "dist/hooks/persistent-mode/__tests__/cancel-race.test.d.ts",
         "kind": "generated-dist",
         "path": "dist/hooks/persistent-mode/__tests__/cancel-race.test.d.ts"
@@ -27291,6 +27349,26 @@
         "id": "dist/installer/__tests__/bundled-skill-sync.test.js.map",
         "kind": "generated-dist",
         "path": "dist/installer/__tests__/bundled-skill-sync.test.js.map"
+      },
+      {
+        "id": "dist/installer/__tests__/claude-mcp-config-path.test.d.ts",
+        "kind": "generated-dist",
+        "path": "dist/installer/__tests__/claude-mcp-config-path.test.d.ts"
+      },
+      {
+        "id": "dist/installer/__tests__/claude-mcp-config-path.test.d.ts.map",
+        "kind": "generated-dist",
+        "path": "dist/installer/__tests__/claude-mcp-config-path.test.d.ts.map"
+      },
+      {
+        "id": "dist/installer/__tests__/claude-mcp-config-path.test.js",
+        "kind": "generated-dist",
+        "path": "dist/installer/__tests__/claude-mcp-config-path.test.js"
+      },
+      {
+        "id": "dist/installer/__tests__/claude-mcp-config-path.test.js.map",
+        "kind": "generated-dist",
+        "path": "dist/installer/__tests__/claude-mcp-config-path.test.js.map"
       },
       {
         "id": "dist/installer/__tests__/claude-md-analysis.test.d.ts",
@@ -92831,12 +92909,12 @@
       }
     ],
     "stats": {
-      "nodeCount": 8260,
+      "nodeCount": 8273,
       "edgeCount": 8865,
       "importEdgeCount": 7412,
       "registerEdgeCount": 105
     }
   },
   "inventorySha256": "a6bc1a36066b6e9d37b02f940c1f61d6c1422f17d89b04ceb1cb5d7073fc6166",
-  "manifestSha256": "d914eb52c31bc7f53dd0f4f584bfb903b5b67c7c493803e0ee894e20337df42d"
+  "manifestSha256": "4214cfe5df5c5bac0b5d9c1297ba4d41ca91739912c0b84855aba0bae5b0f198"
 }
