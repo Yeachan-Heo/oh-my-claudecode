@@ -41,11 +41,18 @@ function writePlaybook(root: string, file: string, body: string): void {
   writeFileSync(join(root, '.omc', 'playbooks', file), body);
 }
 
+// Every fixture gets its own empty user config: dropping CLAUDE_CONFIG_DIR alone falls back to the
+// real ~/.claude, whose personal playbooks would leak into these runs.
 function runChecker(root: string, skillsRoot: string) {
-  // Isolate user config to ensure test doesn't pick up real user-level playbooks.
-  const env = { ...process.env };
-  delete env.CLAUDE_CONFIG_DIR;
-  return spawnSync('node', [CHECKER, root, '--skills-root', skillsRoot], { encoding: 'utf8', env });
+  const configDir = mkdtempSync(join(tmpdir(), 'omc-playbooks-config-'));
+  try {
+    return spawnSync('node', [CHECKER, root, '--skills-root', skillsRoot], {
+      encoding: 'utf8',
+      env: { ...process.env, CLAUDE_CONFIG_DIR: configDir },
+    });
+  } finally {
+    rmSync(configDir, { recursive: true, force: true });
+  }
 }
 
 describe('check-omc-playbooks', () => {
@@ -440,6 +447,31 @@ describe('check-omc-playbooks', () => {
     expect(r.status).toBe(1);
     expect(r.stderr).toContain('does not appear in any extended skill');
     rmSync(root, { recursive: true, force: true });
+  });
+
+  it('keeps the shared helper isolated from the real user config', () => {
+    const { root, skillsRoot } = buildProject();
+    const home = join(root, 'fake-home');
+    mkdirSync(join(home, '.claude', 'omc', 'playbooks'), { recursive: true });
+    writeFileSync(
+      join(home, '.claude', 'omc', 'playbooks', 'personal.md'),
+      '---\nextends: not-a-bundled-skill\nwhen: A personal playbook.\n---\n\n**After** "x" y.\n',
+    );
+    const saved = { HOME: process.env.HOME, USERPROFILE: process.env.USERPROFILE, CLAUDE_CONFIG_DIR: process.env.CLAUDE_CONFIG_DIR };
+    process.env.HOME = home;
+    process.env.USERPROFILE = home;
+    process.env.CLAUDE_CONFIG_DIR = join(home, '.claude');
+    try {
+      const r = runChecker(root, skillsRoot);
+      expect(r.status, r.stderr).toBe(0);
+      expect(r.stderr).not.toContain('personal.md');
+    } finally {
+      for (const [k, v] of Object.entries(saved)) {
+        if (v === undefined) delete process.env[k];
+        else process.env[k] = v;
+      }
+      rmSync(root, { recursive: true, force: true });
+    }
   });
 
   it('validates a user-level playbook with no project playbooks present', () => {
