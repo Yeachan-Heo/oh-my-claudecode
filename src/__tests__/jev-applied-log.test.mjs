@@ -200,9 +200,47 @@ describe('hook scripts with OMC_JEV_APPLIED_LOG=1', () => {
     expect(lines[0]).toEqual({
       ts: expect.any(String),
       point: 'model-routing',
-      applied: { subagent_type: 'oh-my-claudecode:executor', model: { from: 'sonnet', to: 'opus' }, effort: { from: null, to: 'xhigh', score: 3 } },
+      applied: { subagent_type: 'oh-my-claudecode:executor', model: { from: 'sonnet', to: 'opus' }, effort: { from: null, to: 'xhigh', score: 3, confidence: null } },
     });
   }, 60_000);
+
+  it('model-routing: the effort answer\'s confidence is logged, null when the answer has none or an invalid one', async () => {
+    stubAnswers = { effort: { type: 'score', score: 3, confidence: 0.8 } };
+    const given = makeContext();
+    await runHook(given, 'pre-tool-enforcer.mjs', TASK_CALL(given.cwd), 'model-routing');
+    expect(readLog(given, 'applied.jsonl')[0].applied.effort).toEqual({ from: null, to: 'xhigh', score: 3, confidence: 0.8 });
+
+    stubAnswers = { effort: { type: 'score', score: 3, confidence: 7 } };
+    const invalid = makeContext();
+    await runHook(invalid, 'pre-tool-enforcer.mjs', TASK_CALL(invalid.cwd), 'model-routing');
+    expect(readLog(invalid, 'applied.jsonl')[0].applied.effort.confidence).toBeNull();
+  }, 90_000);
+
+  it('model-routing: an effort set on a call with a name (a team member) is marked as not known to be delivered', async () => {
+    stubAnswers = { effort: { type: 'score', score: 3, confidence: 0.9 } };
+    const named = makeContext();
+    await runHook(named, 'pre-tool-enforcer.mjs', TASK_CALL(named.cwd, { name: 'reviewer' }), 'model-routing');
+    expect(readLog(named, 'applied.jsonl')[0].applied.effort).toEqual({ from: null, to: 'xhigh', score: 3, confidence: 0.9, delivered: 'unknown-team-member' });
+
+    const unnamed = makeContext();
+    await runHook(unnamed, 'pre-tool-enforcer.mjs', TASK_CALL(unnamed.cwd, { name: '  ' }), 'model-routing');
+    expect(readLog(unnamed, 'applied.jsonl')[0].applied.effort).not.toHaveProperty('delivered');
+  }, 90_000);
+
+  it('model-routing: an answer that changes nothing sends no updatedInput, with or without the applied log', async () => {
+    stubAnswers = { 'model-tier': { type: 'choice', choice: 'sonnet' }, effort: { type: 'score', score: 3 } };
+    for (const overrides of [{}, { OMC_JEV_APPLIED_LOG: undefined }]) {
+      const context = makeContext();
+      const output = await runHook(context, 'pre-tool-enforcer.mjs', TASK_CALL(context.cwd, { effort: 'xhigh' }), 'model-routing', overrides);
+      expect(output?.hookSpecificOutput?.updatedInput).toBeUndefined();
+      expect(readLog(context, 'applied.jsonl')).toEqual([]);
+      expect(readLog(context, 'shadow.jsonl')).toHaveLength(1);
+    }
+    // The same answers on a call they do change still send the new values.
+    const changed = makeContext();
+    const output = await runHook(changed, 'pre-tool-enforcer.mjs', TASK_CALL(changed.cwd, { effort: 'low' }), 'model-routing');
+    expect(output.hookSpecificOutput.updatedInput).toMatchObject({ model: 'sonnet', effort: 'xhigh' });
+  }, 120_000);
 
   it('model-routing: the line and the shadow line share one request_id with OMC_JEV_LOG_CONTEXT=1', async () => {
     stubAnswers = { 'model-tier': { type: 'choice', choice: 'haiku' } };
@@ -275,7 +313,7 @@ describe('hook scripts with OMC_JEV_APPLIED_LOG=1', () => {
     const lower = makeContext();
     await runHook(lower, 'pre-tool-enforcer.mjs', TASK_CALL(lower.cwd, { effort: 'xhigh' }), 'model-routing', always);
     expect(readLog(lower, 'applied.jsonl')).toEqual([
-      expect.objectContaining({ applied: { subagent_type: 'oh-my-claudecode:executor', effort: { from: 'high', to: 'medium', score: 1 } } }),
+      expect.objectContaining({ applied: { subagent_type: 'oh-my-claudecode:executor', effort: { from: 'high', to: 'medium', score: 1, confidence: null } } }),
     ]);
 
     // Without the always-on variable the cap bounds only Jev's own answer: the baseline stays xhigh.
@@ -283,7 +321,7 @@ describe('hook scripts with OMC_JEV_APPLIED_LOG=1', () => {
     const capOnly = makeContext();
     await runHook(capOnly, 'pre-tool-enforcer.mjs', TASK_CALL(capOnly.cwd, { effort: 'xhigh' }), 'model-routing', { OMC_JEV_MAX_EFFORT: 'high', OMC_JEV_MAX_EFFORT_ALWAYS: undefined });
     expect(readLog(capOnly, 'applied.jsonl')).toEqual([
-      expect.objectContaining({ applied: { subagent_type: 'oh-my-claudecode:executor', effort: { from: 'xhigh', to: 'high', score: 3 } } }),
+      expect.objectContaining({ applied: { subagent_type: 'oh-my-claudecode:executor', effort: { from: 'xhigh', to: 'high', score: 3, confidence: null } } }),
     ]);
   }, 90_000);
 
@@ -364,7 +402,7 @@ describe('hook scripts with OMC_JEV_APPLIED_LOG=1', () => {
     const output = await runHook(context, 'pre-tool-enforcer.mjs', TASK_CALL(context.cwd), 'model-routing', env);
     expect(output.hookSpecificOutput.updatedInput).toMatchObject({ effort: 'medium' });
     expect(readLog(context, 'applied.jsonl')).toEqual([
-      expect.objectContaining({ applied: { subagent_type: 'oh-my-claudecode:executor', effort: { from: 'high', to: 'medium', score: 1 } } }),
+      expect.objectContaining({ applied: { subagent_type: 'oh-my-claudecode:executor', effort: { from: 'high', to: 'medium', score: 1, confidence: null } } }),
     ]);
   }, 60_000);
 
@@ -398,7 +436,7 @@ describe('hook scripts with OMC_JEV_APPLIED_LOG=1', () => {
     });
     expect(output.hookSpecificOutput.updatedInput).toMatchObject({ effort: 'high' });
     expect(readLog(context, 'applied.jsonl')).toEqual([
-      expect.objectContaining({ applied: { subagent_type: 'review-agent', effort: { from: 'low', to: 'high', score: 2 } } }),
+      expect.objectContaining({ applied: { subagent_type: 'review-agent', effort: { from: 'low', to: 'high', score: 2, confidence: null } } }),
     ]);
   }, 90_000);
 
@@ -420,7 +458,7 @@ describe('hook scripts with OMC_JEV_APPLIED_LOG=1', () => {
     const lower = await runHook(context, 'pre-tool-enforcer.mjs', input, 'model-routing', env);
     expect(lower.hookSpecificOutput.updatedInput).toMatchObject({ effort: 'low' });
     expect(readLog(context, 'applied.jsonl')).toEqual([
-      expect.objectContaining({ applied: { subagent_type: 'review-agent', effort: { from: 'high', to: 'low', score: 0 } } }),
+      expect.objectContaining({ applied: { subagent_type: 'review-agent', effort: { from: 'high', to: 'low', score: 0, confidence: null } } }),
     ]);
   }, 90_000);
 

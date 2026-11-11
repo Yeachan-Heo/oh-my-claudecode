@@ -778,7 +778,7 @@ Without the variable, log lines, requests and resolver results are exactly as be
 
 | Point | Line written when | `applied` |
 |-------|-------------------|-----------|
-| `model-routing` | the hook output carries Jev's model or effort in `updatedInput` and it differs from what the agent would have run on (the call's model, else the one its agent definition names) | `subagent_type`, and `model` and/or `effort` as `{from, to}`; `effort` also has the `score` |
+| `model-routing` | the hook output carries Jev's model or effort in `updatedInput` and it differs from what the agent would have run on (the call's model, else the one its agent definition names) | `subagent_type`, and `model` and/or `effort` as `{from, to}`; `effort` also has the `score`, the answer's `confidence` (0-1, else `null`) and, for a call with a `name` (a team member, to which Claude Code may not apply a spawn-time effort), `delivered: "unknown-team-member"` |
 | `context-pruning` | Jev's staleness changed the compaction action | `action: {from, to}`, `staleness`, and `message`: what the hook printed (`none`, `warning`, `critical`, or `suppressed` by the warning cooldown) |
 | `skill-trigger` | Jev's choice changed the triggered keywords (a later `task-size` suppression has its own line) | `keywords: {from, to}`, `choice` |
 | `task-size` | Jev's `small` suppressed heavy modes (not when a size prefix won over another answer under `OMC_JEV_TASK_SIZE_PREFIX_WINS`) | `size`, `confidence`, `suppressed` (the keywords removed) |
@@ -792,7 +792,7 @@ id=$(jq -r 'select(.point == "model-routing") | .request_id' .omc/state/jev/appl
 jq --arg id "$id" 'select(.request_id == $id)' .omc/state/jev/shadow.jsonl
 ```
 
-A `model-routing` line means the decision was handed to Claude Code, not decided: a call that a later check of the same hook denies, or a value other code replaced, has no line. An effort lowered only by `OMC_JEV_MAX_EFFORT` is the cap's doing and has no line. A call without a model that inherits the session model under `forceInherit` is compared with that model, so a tier alias that resolves to it has no line either. The log is a separate file because `jev-eval` counts every line of `shadow.jsonl` as a request; it is rotated with `OMC_JEV_LOG_MAX_MB` like the other Jev logs. Script hooks only: the points reached through the TypeScript resolver write no applied lines. Without the variable no file is written.
+A `model-routing` line means the decision was handed to Claude Code, not decided: a call that a later check of the same hook denies, or a value other code replaced, has no line. An effort lowered only by `OMC_JEV_MAX_EFFORT` is the cap's doing and has no line. An active answer that changes nothing on the call (the same model and effort) also sends no `updatedInput`, with or without the log. A call without a model that inherits the session model under `forceInherit` is compared with that model, so a tier alias that resolves to it has no line either. The log is a separate file because `jev-eval` counts every line of `shadow.jsonl` as a request; it is rotated with `OMC_JEV_LOG_MAX_MB` like the other Jev logs. Script hooks only: the points reached through the TypeScript resolver write no applied lines. Without the variable no file is written.
 
 #### Compaction log
 
