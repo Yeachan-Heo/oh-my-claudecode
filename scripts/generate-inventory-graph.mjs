@@ -351,6 +351,8 @@ function listTrackedFiles(root) {
  * This is what should be committed to git to avoid merge conflicts.
  */
 function toCommitBaseline(manifest) {
+  // Minimal baseline: only provenance anchors, no derived data (counts, graph, hashes).
+  // This prevents merge conflicts when multiple PRs regenerate inventory in parallel.
   return {
     schemaVersion: manifest.schemaVersion,
     repository: manifest.repository,
@@ -359,16 +361,6 @@ function toCommitBaseline(manifest) {
       planningHead: manifest.provenance.planningHead,
       generator: manifest.provenance.generator,
     },
-    // Keep seed-parity top-level for tooling compat
-    base: manifest.base,
-    planningHead: manifest.planningHead,
-    counts: manifest.counts,
-    public: manifest.public,
-    internal: manifest.internal,
-    generated: manifest.generated,
-    paths: manifest.paths,
-    graph: manifest.graph,
-    inventorySha256: manifest.inventorySha256,
   };
 }
 
