@@ -294,6 +294,7 @@ export function sweepArchive(sessionId, now = Date.now(), env = process.env) {
         utimesSync(marker, new Date(now), new Date(now));
       }
     } catch { /* no directory of this session */ }
+    if (!lstatSync(root).isDirectory()) return 0; // a link as the root would lead the sweep out of the state tree
     for (const name of readdirSync(root)) {
       if (name === current) continue;
       const dir = join(root, name);

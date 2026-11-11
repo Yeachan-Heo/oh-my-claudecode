@@ -363,6 +363,21 @@ describe('jev-compaction-state: retention of the result archive', () => {
     expect(existsSync(join(root, 'stray.txt'))).toBe(true);
   });
 
+  it('does not follow a link as the archive root: the old directories it leads to stay', () => {
+    const { env, dir } = setup();
+    const outside = join(dir, 'outside');
+    const dead = join(outside, 'dead-session');
+    mkdirSync(dead, { recursive: true });
+    writeFileSync(join(dead, 't1.txt'), 'x');
+    const old = new Date(NOW - 90 * DAY);
+    utimesSync(join(dead, 't1.txt'), old, old);
+    utimesSync(dead, old, old);
+    mkdirSync(env.OMC_JEV_LOG_DIR, { recursive: true });
+    symlinkSync(outside, join(env.OMC_JEV_LOG_DIR, 'compaction-archive'), 'dir');
+    expect(sweepArchive('s', NOW, env)).toBe(0);
+    expect(existsSync(join(dead, 't1.txt'))).toBe(true);
+  });
+
   it('runs at SessionStart for a startup or a resume, never right after a compaction, and only for the named point', () => {
     for (const [source, removed] of [['startup', true], ['resume', true], ['clear', true], ['compact', false]]) {
       const { env, sid } = setup();

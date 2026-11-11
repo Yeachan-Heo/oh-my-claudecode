@@ -150,7 +150,6 @@ const ARCHIVE_SCAN_MS = 1000;
 const ARCHIVE_BUDGET_MS = 1500;
 const ARCHIVE_PARALLEL = 8;
 const ARCHIVE_MAX_FILES = BATCH * MAX_REQUESTS; // files written by one compaction
-const ARCHIVE_ROUNDS = 4;
 const ARCHIVE_MARKER = '.compaction';
 const ARCHIVE_LABEL = 'full call and result: ';
 const ARCHIVE_HEAD = '[Jev compaction archive]';
@@ -1624,13 +1623,26 @@ function planArchive(candidates, dir, privatePaths, scan) {
 }
 
 // Shadow: what archiveResults would try, with no file touched.
-function archivePlan(candidates, privatePaths) {
+function archivePlan(candidates, dir, privatePaths, before, target) {
   const plan = { planned: 0, skipped: {} };
-  archiveWalk(candidates, privatePaths, newArchiveScan(), (_c, why) => {
-    if (why) plan.skipped[why] = (plan.skipped[why] || 0) + 1;
+  const sim = candidates.map((c) => ({ ...c })); // the paths make traces longer: the same rounds as in active mode, on copies
+  planArchiveRounds(sim, dir, privatePaths, before, target);
+  for (const c of sim) {
+    if (c.keep === 'full') continue;
+    if (c.archiveWhy) plan.skipped[c.archiveWhy] = (plan.skipped[c.archiveWhy] || 0) + 1;
     else plan.planned++;
-  });
+  }
   return plan;
+}
+
+// The first allocation (without paths) tells which results stay whole, so they use none of the scan time. A path makes a
+// trace longer, which can cut one more result: those are judged in the next round, until none is new (every round
+// judges at least one candidate, so there are at most as many rounds as candidates).
+function planArchiveRounds(candidates, dir, privatePaths, before, target) {
+  allocate(candidates, before, target);
+  const scan = newArchiveScan();
+  while (planArchive(candidates, dir, privatePaths, scan)) allocate(candidates, before, target);
+  for (const c of candidates) if (c.keep !== 'full' && c.archiveWhy === undefined) c.archiveWhy = 'time';
 }
 
 function archiveContentOf(c) {
@@ -1864,27 +1876,20 @@ async function decide($, e, cfg, record, started) {
   // files are written, and a trace or cut keeps its path only when its file is there.
   const archive = archiveModeIn(cfg, record.session_id);
   const archiveDir = archive === 'active' ? `${cfg.archiveDir}/${record.session_id}` : undefined;
-  allocate(candidates, before, cfg.target);
-  if (archiveDir) {
-    // The first allocation (without paths) tells which results stay whole, so they use none of the scan time. A path
-    // makes a trace longer, which can cut one more result: those are judged in the next round (at most ARCHIVE_ROUNDS).
-    const scan = newArchiveScan();
-    for (let round = 0; round < ARCHIVE_ROUNDS; round++) {
-      if (!planArchive(candidates, archiveDir, cfg.privatePaths, scan)) break;
-      allocate(candidates, before, cfg.target);
-    }
-    for (const c of candidates) if (c.keep !== 'full' && c.archiveWhy === undefined) c.archiveWhy = 'time';
-  }
+  if (archiveDir) planArchiveRounds(candidates, archiveDir, cfg.privatePaths, before, cfg.target);
+  else allocate(candidates, before, cfg.target);
   if (archive !== 'off') record.archive_mode = archive;
   if (archiveDir) {
     const done = await archiveResults($, archiveDir, candidates, cfg.privatePaths, deadline - Date.now());
-    for (const c of candidates) if (c.archivePath && (c.keep === 'full' || !done.paths.has(c.id))) { c.archivePath = undefined; price(c); }
+    let pruned = false;
+    for (const c of candidates) if (c.archivePath && (c.keep === 'full' || !done.paths.has(c.id))) { c.archivePath = undefined; price(c); pruned = true; }
+    if (pruned) allocate(candidates, before, cfg.target); // without the paths that did not come about, fewer results need to be cut
     Object.assign(record, {
       archive_ms: done.ms, archive_written: done.written, archive_reused: done.reused, archive_rewritten: done.rewritten, archive_bytes: done.bytes,
       archive_skipped: done.skipped, archive_errors: done.errors, archive_timed_out: done.timed_out, archive_marker: done.marker,
     });
   } else if (archive === 'shadow') {
-    const plan = archivePlan(candidates, cfg.privatePaths);
+    const plan = archivePlan(candidates, `${cfg.archiveDir}/${safeName(record.session_id)}`, cfg.privatePaths, before, cfg.target);
     Object.assign(record, { archive_planned: plan.planned, archive_skipped: plan.skipped });
   }
   const stats = {};

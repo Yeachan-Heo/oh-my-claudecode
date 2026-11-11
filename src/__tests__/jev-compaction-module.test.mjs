@@ -1876,7 +1876,7 @@ describe('jev-compaction module: archive of cut and removed results (OMC_JEV_COM
     expect(shadow.out).toEqual(base.out);
     expect([...shadow.files.keys()].some((p) => p.includes('compaction-archive'))).toBe(false);
     const planned = shadow.records()[0];
-    expect(planned).toMatchObject({ archive_mode: 'shadow', archive_planned: base.records()[0].traced, archive_skipped: {} });
+    expect(planned).toMatchObject({ archive_mode: 'shadow', archive_planned: (await compactOnce(messages, { env: { ...ACTIVE_ENV, OMC_JEV_COMPACT_ARCHIVE: 'active' } })).records()[0].archive_written, archive_skipped: {} });
     expect(planned.archive_written).toBeUndefined();
     const inShadowCompaction = await compactOnce(messages, { env: { ...ACTIVE_ENV, OMC_JEV: 'compaction', OMC_JEV_COMPACT_ARCHIVE: 'active' } });
     expect([...inShadowCompaction.files.keys()].some((p) => p.includes('compaction-archive'))).toBe(false);
@@ -1900,7 +1900,7 @@ describe('jev-compaction module: archive of cut and removed results (OMC_JEV_COM
     expect(archived(run.files)).toHaveLength(0);
     const record = run.records()[0];
     expect(record).toMatchObject({ result: 'jev', archive_written: 0, archive_marker: false });
-    expect(record.archive_timed_out).toBe(record.traced);
+    expect(record.archive_timed_out).toBeGreaterThanOrEqual(record.traced) // the allocation is repeated without the paths that did not come about;
     expect(record.archive_ms).toBeLessThan(4500);
   }, 15000);
 
@@ -1920,7 +1920,7 @@ describe('jev-compaction module: archive of cut and removed results (OMC_JEV_COM
       const record = run.records()[0];
       expect(record.archive_written).toBeGreaterThan(0);
       expect(record.archive_timed_out).toBeGreaterThan(0);
-      expect(record.archive_written + record.archive_timed_out).toBe(record.traced);
+      expect(record.archive_written + record.archive_timed_out).toBeGreaterThanOrEqual(record.traced);
       // the first write is the marker, at the start of the archive; the writes of the eight workers follow one another
       for (const t of writes) expect(t).toBeLessThan(writes[0] + 1500 + 50);
       const named = run.out.messages.flatMap((m) => (m.text || '').split('\n')).filter((l) => l.includes('full call and result: '));
@@ -1942,7 +1942,7 @@ describe('jev-compaction module: archive of cut and removed results (OMC_JEV_COM
       expect(archiveCalls).toBe(0);
       expect(JSON.stringify(late.out)).not.toContain('full call and result');
       expect(late.records()[0]).toMatchObject({ result: 'jev', archive_written: 0, archive_marker: false });
-      expect(late.records()[0].archive_timed_out).toBe(late.records()[0].traced);
+      expect(late.records()[0].archive_timed_out).toBeGreaterThanOrEqual(late.records()[0].traced);
       // 0.6 s are left and the host never answers a read: the archive ends with the time left, not after the 2 s cap
       skew = 0;
       const stall = (kind, path) => (kind === 'read' && path.includes('/compaction-archive/') ? new Promise(() => {}) : undefined);
@@ -1951,7 +1951,7 @@ describe('jev-compaction module: archive of cut and removed results (OMC_JEV_COM
       const record = run.records()[0];
       expect(record.archive_ms).toBeLessThan(1500);
       expect(record.archive_written).toBe(0);
-      expect(record.archive_timed_out).toBe(record.traced);
+      expect(record.archive_timed_out).toBeGreaterThanOrEqual(record.traced);
       expect(JSON.stringify(run.out)).not.toContain('full call and result');
     } finally { Date.now = real; }
   });
@@ -1964,7 +1964,7 @@ describe('jev-compaction module: archive of cut and removed results (OMC_JEV_COM
     expect(reads).toBeLessThanOrEqual(8);
     const record = run.records()[0];
     expect(record).toMatchObject({ archive_written: 0 });
-    expect(record.archive_timed_out).toBe(record.traced);
+    expect(record.archive_timed_out).toBeGreaterThanOrEqual(record.traced);
     expect(JSON.stringify(run.out)).not.toContain('full call and result');
   }, 20000);
 
@@ -2143,4 +2143,33 @@ describe('jev-compaction module: archive of cut and removed results (OMC_JEV_COM
     expect(record.archive_skipped?.time).toBeUndefined();
     expect(record.archive_written + (record.archive_skipped?.cap ?? 0)).toBe(record.traced);
   }, 90000);
+
+  it('the paths are planned until the allocation stops cutting more results: no cut result is left without a verdict (kept_full)', async () => {
+    const run = await compactOnce(conversation(12, { chars: 150 }), { env: { ...archiveEnv, OMC_JEV_COMPACT_TARGET: '0.815' } });
+    const record = run.records()[0];
+    expect(record.archive_skipped?.kept_full).toBeUndefined();
+    expect(record.archive_written).toBe(record.traced + record.kept_short);
+  });
+
+  it('when every archive write fails, the allocation is the one of a run without the archive (fail-open)', async () => {
+    const messages = conversation(8, { chars: 100 });
+    const env = { ...ACTIVE_ENV, OMC_JEV_COMPACT_TARGET: '0.7' };
+    const off = await compactOnce(messages, { env });
+    const fake = fakeDollar({ env: { ...env, OMC_JEV_COMPACT_ARCHIVE: 'active' } });
+    const write = fake.$.fs.write;
+    fake.$.fs.write = async (p, text) => { if (p.includes('/compaction-archive/')) throw new Error('EACCES'); return write(p, text); };
+    await load()['session.compact'](fake.$, Object.freeze({ trigger: 'auto', messages }), summaryNext());
+    expect(off.records()[0].kept_full).toBeGreaterThan(0);
+    expect(fake.records()[0]).toMatchObject({ kept_full: off.records()[0].kept_full, traced: off.records()[0].traced, archive_written: 0 });
+  });
+
+  it('shadow plans what active writes when the paths cut one more result (the same rounds on copies, the conversation as without the archive)', async () => {
+    const messages = conversation(8, { chars: 150 });
+    const env = { ...ACTIVE_ENV, OMC_JEV_COMPACT_TARGET: '0.625' };
+    const active = await compactOnce(messages, { env: { ...env, OMC_JEV_COMPACT_ARCHIVE: 'active' } });
+    const shadow = await compactOnce(messages, { env: { ...env, OMC_JEV_COMPACT_ARCHIVE: 'shadow' } });
+    const base = await compactOnce(messages, { env });
+    expect(shadow.records()[0].archive_planned).toBe(active.records()[0].archive_written);
+    expect(shadow.out.messages).toEqual(base.out.messages);
+  });
 });
