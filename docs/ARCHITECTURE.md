@@ -315,7 +315,7 @@ cross-ranked; the ticket fails when either axis fails.
 
 | Keyword | Effect |
 |---------|--------|
-| `autopilot <command>`, `build me`, `I want a`, `handle it all`, `end to end`, `e2e this` | Autonomous execution pipeline |
+| `autopilot`, `build me`, `I want a`, `handle it all`, `end to end`, `e2e this` | Autonomous execution pipeline |
 | `ralph`, `don't stop`, `must complete`, `until done` | Loop until verified complete |
 | `ralplan` | Consensus-based planning |
 | `deep interview`, `ouroboros` | Socratic deep interview |

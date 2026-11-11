@@ -163,7 +163,7 @@ Do not ask for confirmation — just read the skill file and follow its instruct
 | Keyword(s) | Skill | Action |
 |-------------|-------|--------|
 | "ralph", "don't stop", "must complete", "keep going" | `$ralph` | Read `~/.agents/skills/ralph/SKILL.md`, execute persistence loop |
-| "autopilot <command>", "build me", "I want a" | `$autopilot` | Read `~/.agents/skills/autopilot/SKILL.md`, execute autonomous pipeline |
+| "autopilot", "build me", "I want a" | `$autopilot` | Read `~/.agents/skills/autopilot/SKILL.md`, execute autonomous pipeline |
 | "plan this", "plan the", "let's plan" | `$plan` | Read `~/.agents/skills/plan/SKILL.md`, start planning workflow |
 | "interview", "deep interview", "gather requirements", "interview me", "don't assume", "ouroboros" | `$deep-interview` | Read `~/.agents/skills/deep-interview/SKILL.md`, run Ouroboros-inspired Socratic ambiguity-gated interview workflow |
 | "ralplan", "consensus plan" | `$ralplan` | Read `~/.agents/skills/ralplan/SKILL.md`, start consensus planning with RALPLAN-DR structured deliberation (short by default, `--deliberate` for high-risk) |
@@ -173,7 +173,6 @@ Do not ask for confirmation — just read the skill file and follow its instruct
 
 Detection rules:
 - Keywords are case-insensitive and match anywhere in the user's message
-- The autopilot aliases (`autopilot`, `auto-pilot`, `full auto`, `fullsend`) match only as a command (`autopilot test the API`, `use autopilot`, `turn autopilot on`); a bare mention such as `the autopilot run failed` or `don't use autopilot` does not activate it
 - If multiple keywords match, use the most specific (longest match)
 - Conflict resolution: explicit `$name` invocation overrides keyword detection
 - The rest of the user's message (after keyword extraction) becomes the task description
