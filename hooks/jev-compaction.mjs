@@ -970,26 +970,30 @@ function envelopesOf(text) {
   return found.reverse();
 }
 
-// A carried block as one envelope of the rebuilt row, so that a later compaction reads it as one
-// message whatever it quotes and whatever follows it: a block that is one envelope already stays as it
-// is; another gets an id that neither it nor the row's text holds (not the host's hex form, so the host
-// leaves the envelope as text).
-function envelope(block, text) {
-  const e = envelopesOf(block);
-  if (e.length === 1 && e[0].from === 0 && e[0].to === block.length) return block;
-  const taken = new Set([...`${block}\n${text}`.matchAll(/id="jev-(\d+)"/g)].map((m) => m[1]));
-  let k = 1;
-  while (taken.has(String(k))) k++;
-  return `<system-reminder id="jev-${k}">\n${block}\n</system-reminder id="jev-${k}">`;
-}
-
 const rawChars = (blocks) => blocks.reduce((n, t) => n + t.length, 0);
 
 // The delivered blocks of a row (queuedOf left out the ones a row shows), and the row's text with each
-// of them after it in its own envelope. A copy an earlier compaction carried into the row's text does
-// not hide a new delivery of the same text.
+// of them after it as one envelope, so that a later compaction reads it as one message whatever it
+// quotes and whatever follows it. A block that is one envelope already stays as it is; another gets the
+// lowest jev id that neither it nor the row's text so far holds (not the host's hex form, so the host
+// leaves the envelope as text). The ids are collected in one pass over each block and the text is
+// joined once, so many blocks stay linear. A copy an earlier compaction carried into the row's text
+// does not hide a new delivery of the same text.
 function carriedText(m, blocks = []) {
-  return { own: blocks, text: blocks.reduce((text, t) => [text, envelope(t, text)].filter(Boolean).join('\n'), m.text || '') };
+  const parts = m.text ? [m.text] : [];
+  const taken = new Set();
+  const note = (text) => { for (const x of text.matchAll(/id="jev-(\d+)"/g)) taken.add(x[1]); };
+  note(m.text || '');
+  let k = 1;
+  for (const block of blocks) {
+    note(block);
+    const e = envelopesOf(block);
+    if (e.length === 1 && e[0].from === 0 && e[0].to === block.length) { parts.push(block); continue; }
+    while (taken.has(String(k))) k++;
+    taken.add(String(k));
+    parts.push(`<system-reminder id="jev-${k}">\n${block}\n</system-reminder id="jev-${k}">`);
+  }
+  return { own: blocks, text: parts.join('\n') };
 }
 
 // The user's words in one delivered block: from the user's header to the last framing note of the
@@ -1004,17 +1008,21 @@ function blockWords(block) {
 }
 
 // The end of a user's block that opens at `from` in a row's text: the end of the line of its framing
-// note (the first one after its header); -1 without one.
+// note, the last one before the next user's header (the user may write the note's words too); -1
+// without one. Each call reads only up to the next header, so the blocks of a row stay linear.
 function userBlockEnd(text, from) {
-  const t = text.indexOf(QUEUED_TAIL, from);
+  const h = text.indexOf(QUEUED_PREFIX, from);
+  const next = h < 0 ? -1 : text.indexOf(QUEUED_PREFIX, h + 1);
+  const limit = next < 0 ? text.length : next;
+  const t = text.slice(from, limit).lastIndexOf(QUEUED_TAIL);
   if (t < 0) return -1;
-  const nl = text.indexOf('\n', t + QUEUED_TAIL.length);
-  return nl < 0 ? text.length : nl;
+  const nl = text.indexOf('\n', from + t + QUEUED_TAIL.length);
+  return nl < 0 ? text.length : Math.min(nl, limit);
 }
 
 // Text outside envelopes (a row rebuilt before carried blocks got envelopes) split at each line that
-// opens a frame: one piece per delivered message. A user's block runs to its framing note, so a frame
-// line the user quotes before the note stays in it.
+// opens a frame: one piece per delivered message. A user's block runs to its framing note
+// (userBlockEnd), so a frame line the user quotes before the note stays in it.
 function piecesOf(text) {
   const pieces = [];
   const lastTail = text.lastIndexOf(QUEUED_TAIL);
