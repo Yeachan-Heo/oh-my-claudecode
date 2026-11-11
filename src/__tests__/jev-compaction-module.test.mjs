@@ -806,7 +806,8 @@ describe('jev-compaction module: shared breaker and request limit (OMC_JEV_BREAK
     const fake = fakeDollar({ env: c.env, diskPrefix, messages: conversation(40, { chars: 4000 }), usage: () => ({ context: { tokens: 130000, window: 200000 } }) });
     await handlers['turn.complete'](fake.$, { isAborted: false }, async () => 'ok');
     expect(fake.calls.compact).toBe(0);
-    expect(fake.calls.usage).toBe(0);
+    // The summary armed the growth gate, whose base is read during a pause too (#4978); it never asks.
+    expect(fake.calls.usage).toBe(1);
   });
 
   it('(a) OMC_JEV_MAX_REQUESTS stays a hard cap when two compactions wait for shared admission at once', async () => {
