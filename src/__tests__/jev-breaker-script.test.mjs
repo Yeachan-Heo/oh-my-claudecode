@@ -765,7 +765,9 @@ describe('shared between processes', () => {
     const before = Date.now();
     const first = await runResolver(request(), env);
     expect(first).toMatchObject({ mode: 'degraded', breaker: { reason: 'http-429' } });
-    expect(Math.round((first.breaker.until - before) / 1000)).toBe(45);
+    // The breaker closes 45 s after the failure, which happened between `before` and now (a loaded machine delays the process start).
+    expect(first.breaker.until).toBeGreaterThanOrEqual(before + 45_000);
+    expect(first.breaker.until).toBeLessThanOrEqual(Date.now() + 45_000);
   }, 60_000);
 
   it('a very large 429 body is read only as far as the first 2000 characters', async () => {
@@ -773,13 +775,16 @@ describe('shared between processes', () => {
     const env = jevEnv({ OMC_JEV_BREAKER: '1', OMC_JEV_ENDPOINT: stub.endpoint, OMC_JEV_TIMEOUT_MS: '10000' });
     const before = Date.now();
     const first = await runResolver(request(), env);
-    expect(Math.round((first.breaker.until - before) / 1000)).toBe(45);
+    expect(first.breaker.until).toBeGreaterThanOrEqual(before + 45_000);
+    expect(first.breaker.until).toBeLessThanOrEqual(Date.now() + 45_000);
     // The phrase beyond the first 2000 characters is not looked at.
     const late = await startStub(() => ({ status: 429, body: 'x'.repeat(2500) + ' retry after ~45s' }));
     const lateEnv = jevEnv({ OMC_JEV_BREAKER: '1', OMC_JEV_ENDPOINT: late.endpoint, OMC_JEV_TIMEOUT_MS: '10000', OMC_JEV_BREAKER_DIR: join(caseDir, 'late') });
+    const lateBefore = Date.now();
     const second = await runResolver(request(), lateEnv);
-    expect(Math.round((second.breaker.until - Date.now()) / 1000)).toBeGreaterThanOrEqual(58);
-    expect(Math.round((second.breaker.until - Date.now()) / 1000)).toBeLessThanOrEqual(60);
+    // The default minute, not the 45 s in the body.
+    expect(second.breaker.until).toBeGreaterThanOrEqual(lateBefore + 60_000);
+    expect(second.breaker.until).toBeLessThanOrEqual(Date.now() + 60_000);
   }, 60_000);
 
   it('a limit of 10 lets exactly 10 of 30 concurrent processes send their request', async () => {
