@@ -88,6 +88,23 @@ function loadManifest(): Manifest {
   return JSON.parse(result.stdout) as Manifest;
 }
 
+function loadCommittedBaseline(): { schemaVersion: number; repository: string; provenance: { base: string; planningHead: string; generator: string } } {
+  // Load the committed minimal baseline (without volatile fields)
+  const content = readFileSync(BASELINE, 'utf8');
+  return JSON.parse(content);
+}
+
+function buildProvenanceFixture(): Manifest {
+  // Build a fixture for testing: same as committed minimal baseline
+  // This is the format that should be verified: schemaVersion, repository, provenance only
+  const baseline = loadCommittedBaseline();
+  return {
+    schemaVersion: baseline.schemaVersion,
+    repository: baseline.repository,
+    provenance: baseline.provenance,
+  } as Manifest;
+}
+
 function collectRegisteredAgents(): string[] {
   const source = readFileSync(join(REPO_ROOT, 'src/workflow/registry.ts'), 'utf8');
   const start = source.indexOf('export const WORKFLOW_ROLES');
@@ -348,18 +365,52 @@ describe('inventory-graph drift enforcement (#3702)', () => {
   // Verify mode rejects tampered inventorySha256 and invalid provenance anchors
   it('verify mode rejects tampered hashes and invalid provenance', { timeout: 240_000 }, () => {
     const opts = { cwd: REPO_ROOT, encoding: 'utf8' as const, maxBuffer: 20 * 1024 * 1024 };
-    for (const mutate of [
-      (m: Manifest) => { m.inventorySha256 = '0'.repeat(64); },
-      (m: Manifest) => { m.provenance.base = '0'.repeat(40); },
-      (m: Manifest) => { m.provenance.planningHead = '0'.repeat(40); },
-    ]) {
-      const temp = join(REPO_ROOT, `.tmp-inventory-graph-${process.pid}-${Math.random().toString(16).slice(2)}.json`);
-      const copy = JSON.parse(JSON.stringify(manifest)) as Manifest;
-      mutate(copy);
+    const baselineFixture = buildProvenanceFixture();
+    
+    // Test unmodified fixture verifies (baseline is current)
+    const tempBaseline = join(REPO_ROOT, `.tmp-inventory-baseline-${process.pid}-${Math.random().toString(16).slice(2)}.json`);
+    try {
+      writeFileSync(tempBaseline, `${JSON.stringify(baselineFixture, null, 2)}\n`);
+      const baselineResult = spawnSync('node', [GENERATOR, '--verify', '--out', tempBaseline], opts);
+      expect(baselineResult.status, `unmodified baseline should verify: ${baselineResult.stderr}`).toBe(0);
+    } finally {
+      unlinkSync(tempBaseline);
+    }
+    
+    // Test that tampering with provenance fields causes specific diagnostics
+    const tamperedTests = [
+      {
+        name: 'inventorySha256',
+        mutate: (m: Manifest) => { m.inventorySha256 = '0'.repeat(64); },
+        expectError: true,
+      },
+      {
+        name: 'provenance.base',
+        mutate: (m: Manifest) => { m.provenance.base = '0'.repeat(40); },
+        expectError: true,
+        expectDiagnostic: 'provenance.base mismatch',
+      },
+      {
+        name: 'provenance.planningHead',
+        mutate: (m: Manifest) => { m.provenance.planningHead = '0'.repeat(40); },
+        expectError: true,
+        expectDiagnostic: 'provenance.planningHead mismatch',
+      },
+    ];
+    
+    for (const test of tamperedTests) {
+      const temp = join(REPO_ROOT, `.tmp-inventory-${test.name}-${process.pid}-${Math.random().toString(16).slice(2)}.json`);
+      const copy = JSON.parse(JSON.stringify(baselineFixture)) as Manifest;
+      test.mutate(copy);
       writeFileSync(temp, `${JSON.stringify(copy, null, 2)}\n`);
       try {
         const result = spawnSync('node', [GENERATOR, '--verify', '--out', temp], opts);
-        expect(result.status, `tampered baseline unexpectedly passed: ${result.stdout}`).not.toBe(0);
+        if (test.expectError) {
+          expect(result.status, `tampered ${test.name} unexpectedly passed: ${result.stdout}`).not.toBe(0);
+          if (test.expectDiagnostic) {
+            expect(result.stderr, `missing expected diagnostic for ${test.name}`).toContain(test.expectDiagnostic);
+          }
+        }
       } finally {
         unlinkSync(temp);
       }
@@ -398,11 +449,8 @@ describe('inventory-graph drift enforcement (#3702)', () => {
 
   it('--write produces minimal baseline without volatile fields', { timeout: 30_000 }, () => {
     const temp = join(REPO_ROOT, `.tmp-write-check-${process.pid}-${Math.random().toString(16).slice(2)}.json`);
-    const result = spawnSync('node', [GENERATOR, '--write', '--out', temp], {
-      cwd: REPO_ROOT,
-      encoding: 'utf8' as const,
-      maxBuffer: 20 * 1024 * 1024,
-    });
+    const opts = { cwd: REPO_ROOT, encoding: 'utf8' as const, maxBuffer: 20 * 1024 * 1024 };
+    const result = spawnSync('node', [GENERATOR, '--write', '--out', temp], opts);
     try {
       expect(result.status, `write failed: ${result.stderr}`).toBe(0);
       const written = JSON.parse(readFileSync(temp, 'utf8'));
@@ -418,6 +466,10 @@ describe('inventory-graph drift enforcement (#3702)', () => {
       expect(written.graph).toBeUndefined();
       expect(written.counts).toBeUndefined();
       expect(written.inventorySha256).toBeUndefined();
+      
+      // Verify the written baseline passes verification (in-repo round trip)
+      const verifyResult = spawnSync('node', [GENERATOR, '--verify', '--out', temp], opts);
+      expect(verifyResult.status, `written baseline failed verification: ${verifyResult.stderr}`).toBe(0);
     } finally {
       if (existsSync(temp)) unlinkSync(temp);
     }
