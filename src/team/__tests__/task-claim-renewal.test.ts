@@ -339,6 +339,47 @@ describe('teamRenewTaskClaim', () => {
     const result = await teamRenewTaskClaim(teamName, 'task-1', claimed.claimToken, 'worker-1', cwd);
     expect(result).toEqual({ ok: false, error: 'claim_conflict' });
   });
+
+  it('rejects renewal with task_not_found error when the task does not exist', async () => {
+    await writeTeamConfig(cwd);
+    // Do not write any task file; use valid task ID that doesn't exist on disk
+    const result = await teamRenewTaskClaim(teamName, 'task-999', 'token-1', 'worker-1', cwd);
+    expect(result).toEqual({ ok: false, error: 'task_not_found' });
+  });
+
+  it('fences renewal once dead-worker recovery is active for the owner', async () => {
+    // Regression test: when recoverDeadWorkerV2 has persisted active_recovery marker,
+    // a delayed renew-task-claim from old attempt must not update leased_until.
+    // This prevents interference with recovery requeue saga which expects stable task state.
+    await writeTeamConfig(cwd);
+    await writeTask(cwd, task('1', 'in_progress', {
+      owner: 'worker-1',
+      claim: { owner: 'worker-1', token: 'token-1', leased_until: '2099-01-01T00:00:00.000Z' },
+    }));
+
+    // Simulate active recovery marker in team config
+    const teamConfigPath = join(teamRoot(cwd), 'config.json');
+    const cfg = JSON.parse(await readFile(teamConfigPath, 'utf8')) as Record<string, unknown>;
+    cfg.active_recovery = {
+      request_id: 'req-recovery-1',
+      recovery_id: 'rec-1',
+      worker_name: 'worker-1',
+      owner_epoch: 1,
+      owner_nonce: 'nonce-1',
+      phase: 'reserved',
+      state_revision: 2,
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+    };
+    await writeFile(teamConfigPath, JSON.stringify(cfg, null, 2));
+
+    const result = await teamRenewTaskClaim(teamName, 'task-1', 'token-1', 'worker-1', cwd);
+    expect(result).toEqual({ ok: false, error: 'claim_conflict' });
+
+    // Verify task state was not written
+    const onDisk = JSON.parse(await readFile(taskPath(cwd, '1'), 'utf8')) as TeamTask;
+    expect(onDisk.claim?.leased_until).toBe('2099-01-01T00:00:00.000Z');
+  });
 });
 
 describe('renew-task-claim api dispatch', () => {

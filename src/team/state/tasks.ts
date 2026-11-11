@@ -428,6 +428,13 @@ export async function renewTaskClaim(
   workerName: string,
   deps: RenewTaskClaimDeps,
 ): Promise<RenewTaskClaimResult> {
+  // Fence renewals against active recovery marker to prevent delayed renewal from old attempt
+  // from interfering with recovery requeue. Recovery marker is committed before saga begins.
+  const teamConfig = await deps.readTeamConfig(deps.teamName, deps.cwd);
+  if (teamConfig?.active_recovery && teamConfig.active_recovery.worker_name === workerName) {
+    return { ok: false, error: 'claim_conflict' };
+  }
+
   const lock = await deps.withTaskClaimLock(deps.teamName, taskId, deps.cwd, async () => {
     const current = await deps.readTask(deps.teamName, taskId, deps.cwd);
     if (!current) return { ok: false as const, error: 'task_not_found' as const };
