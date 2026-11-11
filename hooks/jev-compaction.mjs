@@ -193,7 +193,7 @@ const NOT_USER_PREFIXES = [
 // user's.
 const QUEUED_PREFIX = 'The user sent a new message while you were working:\n';
 const QUEUED_TAIL = '\n\nThis is how Claude Code surfaces messages'; // the fixed note after the user's words
-const DELIVERY_WRAP = /^\s*<system-reminder[^>]*>\s*/;
+const DELIVERY_WRAP = /^(?:\s*<system-reminder[^>]*>)+\s*/; // a wrapper, also the envelope build writes around a wrapped block
 // The first line of another sender's frame: "<sender> sent a message (or a report) while you were
 // working:", and the bound conversation's "A message arrived ...", "Messages arrived ..." and
 // "Activity ... in the bound conversation ..." frames. A line that only ends with "while you were
@@ -848,7 +848,7 @@ function blockWords(block) {
   if (frameOf(block) !== 'user') return [];
   const body = block.replace(DELIVERY_WRAP, '').slice(QUEUED_PREFIX.length);
   const tail = body.lastIndexOf(QUEUED_TAIL);
-  const words = (tail < 0 ? body.replace(/\s*<\/system-reminder[^>]*>\s*$/, '') : body.slice(0, tail)).trim();
+  const words = (tail < 0 ? body.replace(/(?:\s*<\/system-reminder[^>]*>)+\s*$/, '') : body.slice(0, tail)).trim();
   return words ? [words] : [];
 }
 

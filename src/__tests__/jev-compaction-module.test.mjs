@@ -421,7 +421,7 @@ describe('jev-compaction module: active compaction', () => {
 
   it('keeps a message the user typed during a tool turn word for word in its rebuilt row and counts it as theirs', async () => {
     const words = 'Turn 10: also run tail -2 notes-7.txt, then answer in one sentence.';
-    for (const shown of [framed(words), `<system-reminder id="3ddbffe2">\n${framed(words)}\n</system-reminder id="3ddbffe2">`]) {
+    for (const shown of [framed(words), `<system-reminder id="3ddbffe2">\n${framed(words)}\n</system-reminder id="3ddbffe2">`, `<system-reminder>\n${framed(words)}\n</system-reminder>`]) {
       const messages = conversation(30);
       const { out, calls, records } = await compactWithApi(messages, apiOf(messages, { t10: [shown] }));
       const at = out.messages.flatMap((m, k) => ((m.text || '').includes(shown) ? [k] : []));
@@ -435,6 +435,11 @@ describe('jev-compaction module: active compaction', () => {
       expect(calls.fetch[0].body.state.task).toEqual(['Task: review the notes and count the lines.', words, 'Good, now sum up the NEEDED results.']);
       expect(resultOf(out.messages, 't7')?.text).toBe(resultOf(messages, 't7').text);
       expect(records()[0]).toMatchObject({ result: 'jev', queued_user: 1, queued_other: 0, queued_carried: 1 });
+      // At the next compaction the carried block (in its envelope, inside its own wrapper) still gives the user's words.
+      const again = out.messages.map((m, k) => Object.freeze({ ...m, handle: `p${k}` }));
+      const second = await compactWithApi(again, apiOf(again));
+      expect(second.calls.fetch[0].body.state.task).toContain(words);
+      expect(count(second.out.messages, shown)).toBe(1);
     }
   });
 
