@@ -188,11 +188,11 @@ program
   .description('Launch split-pane tmux session with Claude Code (OMC) and Codex (OMX)')
   .addHelpText('after', `
 Requirements:
-  - Must be running inside a tmux session
+  - Must be running inside a tmux session (or a Herdr pane / herdr backend)
   - Claude CLI must be installed
   - Codex CLI recommended (graceful fallback if missing)`)
-  .action(() => {
-    interopCommand();
+  .action(async () => {
+    await interopCommand();
   });
 
 /**

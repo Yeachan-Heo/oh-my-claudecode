@@ -9,6 +9,13 @@ import { execFileSync } from 'child_process';
 import { randomUUID } from 'crypto';
 import { isTmuxAvailable, isClaudeAvailable, tmuxExec } from './tmux-utils.js';
 import { initInteropSession, getInteropDir } from '../interop/shared-state.js';
+import {
+  ensureHerdrServer,
+  herdrCreateWorkerTab,
+  herdrRunPaneCommand,
+  herdrWorkspaceIdFromPaneId,
+} from '../team/herdr-session.js';
+import { isHerdrPaneId, resolveTeamMultiplexer } from '../team/tmux-session.js';
 
 export type InteropMode = 'off' | 'observe' | 'active';
 
@@ -55,9 +62,99 @@ function isCodexAvailable(): boolean {
 }
 
 /**
- * Launch interop session with split tmux panes
+ * Resolve the Herdr pane context: OMC itself running inside a Herdr pane
+ * (grammar-validated HERDR_PANE_ID), or the multiplexer being elected to
+ * herdr. Either routes the interop side-by-side to the Herdr backend.
  */
-export function launchInteropSession(cwd: string = process.cwd()): void {
+function resolveInteropHerdrContext(
+  env: NodeJS.ProcessEnv = process.env,
+): { herdrPaneId: string | null; elected: boolean } {
+  const paneId = env.HERDR_PANE_ID?.trim();
+  return {
+    herdrPaneId: paneId && isHerdrPaneId(paneId) ? paneId : null,
+    elected: resolveTeamMultiplexer(undefined, env) === 'herdr',
+  };
+}
+
+/**
+ * Launch the interop side-by-side on Herdr: the Codex CLI becomes a tab in
+ * the SAME workspace as the invoking pane (workspace id from the pane id
+ * prefix), so the Herdr sidebar keeps both agents together. No attach is
+ * attempted — the user is already in the Herdr TUI.
+ */
+async function launchInteropHerdrSession(
+  cwd: string,
+  herdrPaneId: string | null,
+  options: { hasCodex: boolean; hasClaude: boolean },
+): Promise<void> {
+  if (!options.hasClaude) {
+    console.error('Error: claude CLI is not available. Install Claude Code CLI first.');
+    process.exit(1);
+  }
+  if (!options.hasCodex) {
+    console.warn('Warning: codex CLI is not available. Only Claude Code will be launched.');
+    console.warn('Install oh-my-codex (npm install -g @openai/codex) for full interop support.\n');
+  }
+
+  const sessionId = `interop-${randomUUID().split('-')[0]}`;
+  initInteropSession(sessionId, cwd, options.hasCodex ? cwd : undefined);
+
+  console.log(`Initializing interop session: ${sessionId}`);
+  console.log(`Working directory: ${cwd}`);
+  console.log(`Config saved to: ${getInteropDir(cwd)}/config.json\n`);
+
+  if (!options.hasCodex) {
+    console.log('Claude Code is ready in this pane.');
+    console.log('Install oh-my-codex to enable split-pane interop mode.');
+    console.log('\nInstall: npm install -g @openai/codex');
+    return;
+  }
+
+  if (!herdrPaneId) {
+    console.error('Error: Interop on the herdr backend requires running inside a Herdr pane.');
+    console.error('Start Herdr first (run `herdr`) and re-run `omc interop` from a pane.');
+    process.exit(1);
+  }
+
+  const workspaceId = herdrWorkspaceIdFromPaneId(herdrPaneId);
+  let allocatedPaneId: string | undefined;
+  try {
+    console.log(`Creating Codex tab in Herdr workspace ${workspaceId}`);
+    await ensureHerdrServer();
+    const tab = await herdrCreateWorkerTab(workspaceId, cwd, 'codex');
+    allocatedPaneId = tab.paneId;
+    await herdrRunPaneCommand(tab.paneId, 'codex');
+
+    console.log('\nInterop session ready!');
+    console.log('- This pane: Claude Code (OMC)');
+    console.log(`- Codex CLI: tab ${tab.paneId} in workspace ${workspaceId}`);
+    console.log('\nYou can now use interop MCP tools to communicate between the two:');
+    console.log('- interop_send_task: Send tasks between tools');
+    console.log('- interop_read_results: Check task results');
+    console.log('- interop_send_message: Send messages');
+    console.log('- interop_read_messages: Read messages');
+  } catch (error) {
+    // Close the allocated pane before exiting if command delivery failed
+    if (allocatedPaneId) {
+      try {
+        // Import herdrClosePane dynamically to avoid circular dependency
+        const { herdrClosePane } = await import('../team/herdr-session.js');
+        await herdrClosePane(allocatedPaneId);
+      } catch (cleanupError) {
+        // Cleanup failure is logged but doesn't prevent exit
+        console.error('Warning: Failed to close allocated interop pane:', cleanupError instanceof Error ? cleanupError.message : String(cleanupError));
+      }
+    }
+    console.error('Error creating Codex tab:', error instanceof Error ? error.message : String(error));
+    process.exit(1);
+  }
+}
+
+/**
+ * Launch interop session with split tmux panes (or a Herdr side-by-side tab
+ * when running inside Herdr / the herdr backend is elected)
+ */
+export async function launchInteropSession(cwd: string = process.cwd()): Promise<void> {
   const flags = readInteropRuntimeFlags();
   const flagCheck = validateInteropRuntimeFlags(flags);
 
@@ -66,6 +163,18 @@ export function launchInteropSession(cwd: string = process.cwd()): void {
     console.error(`Error: ${flagCheck.reason}`);
     console.error('Refusing to start interop in invalid flag configuration.');
     process.exit(1);
+  }
+
+  // Herdr context (inside a Herdr pane, or the herdr backend elected):
+  // the Codex side-by-side becomes a tab of the current Herdr workspace and
+  // the tmux prerequisites below do not apply.
+  const herdrContext = resolveInteropHerdrContext();
+  if (herdrContext.herdrPaneId || herdrContext.elected) {
+    await launchInteropHerdrSession(cwd, herdrContext.herdrPaneId, {
+      hasCodex: isCodexAvailable(),
+      hasClaude: isClaudeAvailable(),
+    });
+    return;
   }
 
   // Check prerequisites
@@ -161,7 +270,7 @@ export function launchInteropSession(cwd: string = process.cwd()): void {
 /**
  * CLI entry point for interop command
  */
-export function interopCommand(options: { cwd?: string } = {}): void {
+export async function interopCommand(options: { cwd?: string } = {}): Promise<void> {
   const cwd = options.cwd || process.cwd();
-  launchInteropSession(cwd);
+  await launchInteropSession(cwd);
 }

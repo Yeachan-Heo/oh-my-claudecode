@@ -1923,6 +1923,41 @@ const TASK_SIZE_QUESTIONS = {
 
 const INTENT_SLASH_PATTERN = /^\s*\/(?:oh-my-claudecode:|omc:)?intent(?=\s|$|[?!.,;:])/i;
 
+/**
+ * Jev delivery guard (scripts/lib/jev-delivery-guard.mjs). Loaded only when OMC_JEV_GUARD is 1 or
+ * true. A message for the user joins the single JSON this hook prints, as systemMessage
+ * (suppressOutput would hide it, so it is dropped from that output); it counts as shown only once
+ * printed. Any failure leaves the hook unchanged.
+ */
+async function attachJevDeliveryGuardMessage(data, omcRoot) {
+  if (!['1', 'true'].includes(String(process.env.OMC_JEV_GUARD ?? '').trim().toLowerCase())) return;
+  try {
+    const { promptCheck } = await import('./lib/jev-delivery-guard.mjs');
+    let pending = promptCheck(data, { logDir: process.env.OMC_JEV_LOG_DIR || join(omcRoot, 'state', 'jev') });
+    if (!pending) return;
+    const print = console.log.bind(console);
+    console.log = (...args) => {
+      let shown = null;
+      if (pending && typeof args[0] === 'string') {
+        try {
+          const output = JSON.parse(args[0]);
+          if (output && typeof output === 'object' && !Array.isArray(output)) {
+            output.systemMessage = [output.systemMessage, pending.text].filter(Boolean).join('\n');
+            delete output.suppressOutput;
+            args[0] = JSON.stringify(output);
+            shown = pending;
+            pending = null;
+          }
+        } catch { /* not JSON: printed as it is */ }
+      }
+      print(...args);
+      if (shown) {
+        try { shown.confirm(); } catch { /* the guard never breaks the hook */ }
+      }
+    };
+  } catch { /* the guard never breaks the hook */ }
+}
+
 // Main
 async function main() {
   // Skip guard: check OMC_SKIP_HOOKS env var (see issue #838)
@@ -1956,6 +1991,7 @@ async function main() {
     const sessionId = data.session_id || data.sessionId || '';
     setJevSessionId(sessionId, data.agent_id || data.agentId);
     const omcRoot = await resolveOmcStateRoot(directory);
+    await attachJevDeliveryGuardMessage(data, omcRoot);
 
     const prompt = extractPrompt(input);
     if (!prompt) {

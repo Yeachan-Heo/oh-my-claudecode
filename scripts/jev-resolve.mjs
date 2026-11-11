@@ -528,6 +528,7 @@ export async function resolveRequest(
       answers: entryMode === "degraded" ? null : jevAnswers,
       confidence,
       durationMs,
+      ...(request.tool_use_id ? { tool_use_id: request.tool_use_id } : {}),
     },
     await logDirFor(env),
   );
