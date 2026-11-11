@@ -9,7 +9,9 @@
  * scripts/jev-resolve.mjs and src/hooks/jev/config.ts).
  *
  * session.compact (auto, /compact, a plugin's request; main loop and subagents). The first message,
- * the last KEEP_LAST messages, every user message and every assistant text stay word for word. Other
+ * the last KEEP_LAST messages, every user message (also one typed during a tool turn, which only the
+ * API form shows, like the messages of other sessions and the task notifications delivered then) and
+ * every assistant text stay word for word. Other
  * tool results are kept whole, shortened to SHORT_CHARS characters, or removed together with their
  * call; a removed call stays as a one-line trace (tool, input up to TRACE_INPUT_CHARS, size of the
  * removed result), so the model knows what it already did. Jev scores how much each result will still
@@ -177,6 +179,24 @@ const NOT_USER_PREFIXES = [
   'Base directory for this skill:', 'Caveat:', '[Request interrupted', 'This session is being continued from a previous conversation',
   '<side-sessions-event>', '<ci-monitor-event>', '<scheduled-task', '<cross-session-message', 'Another Claude session sent a message:',
 ];
+// Messages delivered while a tool turn runs. Claude Code keeps such a message as an attachment row
+// after the result row: `messages` does not show it (the host hands such rows back only with the
+// handle of the row before them), and the API form shows it as a text block of the user message with
+// the results, inside an optional <system-reminder ...> wrapper: "<who> sent a message while you were
+// working:" (the user: QUEUED_PREFIX, their words, then a fixed note, QUEUED_TAIL; another session or
+// agent; the coordinator; a plugin), a teammate's <teammate-message>, or a background task
+// notification. A result row rebuilt without its handle would lose it, so build carries every such
+// block word for word into the rebuilt row; only QUEUED_PREFIX blocks count as the user's words. The
+// host frames an automatic continuation and a plugin's message sent as the user with QUEUED_PREFIX
+// too; the API form does not tell them apart, so they count as the user's.
+const QUEUED_PREFIX = 'The user sent a new message while you were working:\n';
+const QUEUED_AT = /(?:^|\n)\s*(?:<system-reminder[^>]*>\s*)?The user sent a new message while you were working:\n/; // QUEUED_PREFIX at the start of a line
+const QUEUED_TAIL = '\n\nThis is how Claude Code surfaces messages';
+const DELIVERY_WRAP = /^\s*<system-reminder[^>]*>\s*/;
+const DELIVERY_OPENERS = ['Another Claude session sent a message', '<agent-message', '<cross-session-message', '<teammate-message', '[MESSAGE FROM NON-USER SOURCE'];
+// A task notification's marker stands at its start (after its own reminders), not deep in a quoted file.
+const DELIVERY_NOTES = ['[SYSTEM NOTIFICATION - NOT USER INPUT]', '<task-notification>'];
+const DELIVERY_NOTE_CHARS = 300;
 
 // Secret paths in the path and command fields of a call (a mention in a prompt or a result does not
 // count): SSH keys, git and gh credentials, Claude Code credentials, AWS credentials, .netrc, .env and
@@ -758,28 +778,94 @@ function messageChars(m) {
   return n;
 }
 
-// The user's own words in a message: '' for tool results, host notices and summaries; host blocks
-// inside a message are cut out.
+// What a text block delivered with the results is: 'user', 'other' (another session, agent,
+// coordinator, plugin, teammate, task notification) or undefined (a reminder that may go).
+function deliveryOf(text) {
+  if (typeof text !== 'string') return undefined;
+  const t = text.replace(DELIVERY_WRAP, '');
+  if (t.startsWith(QUEUED_PREFIX)) return 'user';
+  if (/ while you were working:$/.test(t.split('\n', 1)[0]) || DELIVERY_OPENERS.some((p) => t.startsWith(p))) return 'other';
+  return DELIVERY_NOTES.some((k) => { const at = text.indexOf(k); return at >= 0 && at < DELIVERY_NOTE_CHARS; }) ? 'other' : undefined;
+}
+
+function isQueuedBlock(text) {
+  return deliveryOf(text) === 'user';
+}
+
+// The user's words of every queued message block starting a line of a text.
+function queuedWords(text) {
+  if (typeof text !== 'string') return [];
+  return text.split(QUEUED_AT).slice(1).map((part) => {
+    const end = part.indexOf(QUEUED_TAIL);
+    return (end >= 0 ? part.slice(0, end) : part.replace(/\s*<\/system-reminder[^>]*>[\s\S]*$/, '')).trim();
+  }).filter(Boolean);
+}
+
+// The user's own words in a message: none for host notices and summaries; host blocks inside a
+// message are cut out. A result row (or a row opening with a queued message) gives only the queued
+// messages it shows, which a row rebuilt by an earlier compaction carries in its text.
 function userWords(m) {
-  if (m.role !== 'user' || (m.toolResults && m.toolResults.length) || !m.text) return '';
+  if (m.role !== 'user' || !m.text) return [];
+  if ((m.toolResults && m.toolResults.length) || isQueuedBlock(m.text)) return queuedWords(m.text);
   const text = m.text.replace(HOST_BLOCK, '').trim();
-  if (!text || HOST_BLOCK_OPEN.test(text) || NOT_USER_PREFIXES.some((p) => text.startsWith(p))) return '';
-  return text;
+  if (!text || HOST_BLOCK_OPEN.test(text) || NOT_USER_PREFIXES.some((p) => text.startsWith(p))) return [];
+  return [text];
+}
+
+// Messages delivered during a tool turn that the API form shows and `messages` does not (deliveryOf):
+// row -> its blocks, word for word, with the counts by kind; null without the API form (they cannot
+// be seen then). A block belongs to the row the host wrote the attachment after, whose handle brings
+// it back: the last row holding a result of its API message, or a later user row of the same message
+// whose text stands before the block (a row shown after the results, such as an interruption notice).
+// A block equal to a row's text is shown already.
+function queuedOf(messages, api) {
+  if (!api) return null;
+  const rows = new Map();
+  const counts = { user: 0, other: 0 };
+  const rowOfResult = new Map();
+  const rowsOfText = new Map();
+  messages.forEach((m, i) => {
+    if (m.role !== 'user') return;
+    if (m.text) rowsOfText.set(m.text, [...(rowsOfText.get(m.text) || []), i]);
+    for (const r of m.toolResults || []) if (!rowOfResult.has(r.tool_use_id)) rowOfResult.set(r.tool_use_id, i);
+  });
+  for (const a of api) {
+    if (a.role !== 'user' || !Array.isArray(a.content)) continue;
+    let row;
+    for (const b of a.content) if (b?.type === 'tool_result' && rowOfResult.has(b.tool_use_id)) row = Math.max(row ?? -1, rowOfResult.get(b.tool_use_id));
+    if (row === undefined) continue;
+    let anchor = row;
+    for (const b of a.content) {
+      if (b?.type !== 'text') continue;
+      if (rowsOfText.has(b.text)) {
+        const r = rowsOfText.get(b.text).find((k) => k > row && messages.slice(row + 1, k + 1).every((x) => x.role === 'user'));
+        if (r !== undefined) anchor = Math.max(anchor, r);
+        continue;
+      }
+      const kind = deliveryOf(b.text);
+      if (!kind) continue;
+      rows.set(anchor, [...(rows.get(anchor) || []), b.text]);
+      counts[kind]++;
+    }
+  }
+  return { rows, ...counts };
 }
 
 // The task for the state: the /compact instructions first, then the last USER_MESSAGES user
-// messages, together USER_CHARS characters.
-function userTask(messages, instructions) {
+// messages, together USER_CHARS characters. A message the user typed during a tool turn (queuedOf)
+// counts as one, after its row; other delivered messages do not.
+function userTask(messages, instructions, queued = new Map()) {
   let left = USER_CHARS;
   const instr = instructions ? clip(maskSecrets(String(instructions).slice(0, left + MASK_SLACK_CHARS)), left) : undefined;
   if (instr) left -= instr.length;
   const picked = [];
   for (let i = messages.length - 1; i >= 0 && picked.length < USER_MESSAGES && left > 0; i--) {
-    const words = userWords(messages[i]);
-    if (!words) continue;
-    const text = clip(maskSecrets(words.slice(0, left + MASK_SLACK_CHARS)), left);
-    picked.unshift(text);
-    left -= text.length;
+    const words = [...userWords(messages[i]), ...(queued.get(i) || []).filter(isQueuedBlock).flatMap(queuedWords)];
+    for (let k = words.length - 1; k >= 0 && picked.length < USER_MESSAGES && left > 0; k--) {
+      const text = clip(maskSecrets(words[k].slice(0, left + MASK_SLACK_CHARS)), left);
+      picked.unshift(text);
+      left -= text.length;
+    }
   }
   return { task: picked, instructions: instr };
 }
@@ -1044,7 +1130,7 @@ function serverBlocks(messages, api, keepFrom) {
 // the one message of its group (groupsOf), placed at the group's first row with content, so the result
 // rows that follow pair with it and the host gives it a new message.id; from keepFrom on
 // (openLoopStart) the rows keep their handles.
-function build(messages, candidates, keepFrom, group, stats) {
+function build(messages, candidates, keepFrom, group, stats, queued = new Map()) {
   const byId = new Map();
   for (const c of candidates) byId.set(c.id, c);
   const out = [];
@@ -1053,6 +1139,7 @@ function build(messages, candidates, keepFrom, group, stats) {
   stats.rebuiltAssistant = 0;
   stats.droppedAssistant = 0;
   stats.joinedRows = 0;
+  stats.queuedCarried = 0;
   const merged = new Map();
   for (const [i, m] of messages.entries()) {
     if (m.role === 'assistant' && i < keepFrom) {
@@ -1089,8 +1176,13 @@ function build(messages, candidates, keepFrom, group, stats) {
         else results.push({ tool_use_id: r.tool_use_id, text: '[non-text result (image or file) removed at compaction]', isError: Boolean(r.isError) });
       }
       if (!changed) stats.rebuiltUnchanged++;
-      if (!results.length && !m.text) continue;
-      out.push({ role: 'user', text: m.text || '', toolUses: [], toolResults: results });
+      // A message delivered after this row goes with the rebuilt row (a row that keeps its handle
+      // brings it back itself).
+      const own = (queued.get(i) || []).filter((t) => !(m.text || '').includes(t));
+      stats.queuedCarried += own.length;
+      const text = [m.text || '', ...own].filter(Boolean).join('\n');
+      if (!results.length && !text) continue;
+      out.push({ role: 'user', text, toolUses: [], toolResults: results });
       continue;
     }
     out.push(m);
@@ -1280,7 +1372,10 @@ async function decide($, e, cfg, record, started) {
   let asked = askable.slice(0, BATCH * Math.min(MAX_REQUESTS, left));
   record.asked = asked.length;
 
-  const user = userTask(messages, typeof e.instructions === 'string' && e.instructions.trim() ? e.instructions : undefined);
+  const delivered = queuedOf(messages, api);
+  const queued = delivered ? delivered.rows : new Map();
+  Object.assign(record, { queued_user: delivered ? delivered.user : null, queued_other: delivered ? delivered.other : null });
+  const user = userTask(messages, typeof e.instructions === 'string' && e.instructions.trim() ? e.instructions : undefined, queued);
   const deadline = started + TOTAL_MS;
   const runs = [];
   let held;
@@ -1359,7 +1454,7 @@ async function decide($, e, cfg, record, started) {
   record.mentioned = markMentioned(candidates, user);
   allocate(candidates, before, cfg.target);
   const stats = {};
-  const built = build(messages, candidates, keepFrom, group, stats);
+  const built = build(messages, candidates, keepFrom, group, stats, queued);
   if (!pairingOk(messages, built)) return { fallback: 'build_error' };
   const after = built.reduce((s, m) => s + messageChars(m), 0);
   const hist = [0, 0, 0, 0];
@@ -1376,6 +1471,7 @@ async function decide($, e, cfg, record, started) {
     rebuilt_assistant: stats.rebuiltAssistant,
     dropped_assistant: stats.droppedAssistant,
     joined_rows: stats.joinedRows,
+    queued_carried: stats.queuedCarried,
     score_hist: hist,
     unanswered: asked.length - answered,
   });

@@ -390,6 +390,128 @@ describe('jev-compaction module: active compaction', () => {
     expect(records()[0].mentioned).toBe(1);
   });
 
+  // Messages delivered during a tool turn. Claude Code keeps such a message as an attachment row after
+  // the result row; the API form shows it as a text block of the user message holding the results,
+  // `messages` does not. apiOf builds the API form as the host does (consecutive user rows join) and
+  // adds `extra` blocks after the results of the message holding a given result.
+  const framed = (words) => `The user sent a new message while you were working:\n${words}\n\nThis is how Claude Code surfaces messages the user sends mid-turn — within the running turn, often alongside the next tool result, rather than as a separate conversation turn. Address the message above as you continue this turn.`;
+  const apiOf = (messages, extra = {}) => {
+    const api = [];
+    for (const m of messages) {
+      const content = m.role === 'assistant'
+        ? [...(m.text ? [{ type: 'text', text: m.text }] : []), ...m.toolUses.map((u) => ({ type: 'tool_use', id: u.tool_use_id, name: u.tool, input: u.input }))]
+        : [...(m.toolResults || []).map((r) => ({ type: 'tool_result', tool_use_id: r.tool_use_id, content: r.text })), ...(m.text ? [{ type: 'text', text: m.text }] : [])];
+      const last = api[api.length - 1];
+      if (m.role === 'user' && last?.role === 'user') last.content.push(...content);
+      else api.push({ role: m.role, content });
+      for (const [id, blocks] of Object.entries(extra)) if (resultOf([m], id)) api[api.length - 1].content.push(...blocks.map((text) => ({ type: 'text', text })));
+    }
+    return api;
+  };
+  const compactWithApi = async (messages, api, options = {}) => {
+    const fake = fakeDollar(options);
+    fake.$.session.messages = async (opts) => (opts?.as === 'api' ? api : messages);
+    const out = await load()['session.compact'](fake.$, Object.freeze({ trigger: 'auto', messages }), summaryNext());
+    return { out, ...fake };
+  };
+  const step = (out, i) => out.findIndex((m) => m.role === 'assistant' && (m.text || '').split('\n').includes(`Step ${i}.`));
+  const count = (out, text) => out.filter((m) => (m.text || '').includes(text)).length;
+
+  it('keeps a message the user typed during a tool turn word for word in its rebuilt row and counts it as theirs', async () => {
+    const words = 'Turn 10: also run tail -2 notes-7.txt, then answer in one sentence.';
+    for (const shown of [framed(words), `<system-reminder id="3ddbffe2">\n${framed(words)}\n</system-reminder id="3ddbffe2">`]) {
+      const messages = conversation(30);
+      const { out, calls, records } = await compactWithApi(messages, apiOf(messages, { t10: [shown] }));
+      const at = out.messages.flatMap((m, k) => ((m.text || '').includes(shown) ? [k] : []));
+      expect(at).toHaveLength(1);
+      expect(out.messages[at[0]]).toMatchObject({ role: 'user' });
+      expect(out.messages[at[0]].handle).toBeUndefined();
+      expect(step(out.messages, 10)).toBeLessThan(at[0]);
+      expect(at[0]).toBeLessThan(step(out.messages, 11));
+      expect(pairingOk(messages, out.messages)).toBe(true);
+      // The user's words count as theirs: in the task sent to Jev, and the file they name is kept.
+      expect(calls.fetch[0].body.state.task).toEqual(['Task: review the notes and count the lines.', words, 'Good, now sum up the NEEDED results.']);
+      expect(resultOf(out.messages, 't7')?.text).toBe(resultOf(messages, 't7').text);
+      expect(records()[0]).toMatchObject({ result: 'jev', queued_user: 1, queued_other: 0, queued_carried: 1 });
+    }
+  });
+
+  it('a row whose results all become traces stays with the delivered message alone; a second compaction keeps it once', async () => {
+    const words = 'Turn 10: then answer in one sentence.';
+    const needed = Array.from({ length: 30 }, (_, k) => k + 1).filter((i) => i !== 10);
+    const messages = conversation(30, { needed });
+    const first = await compactWithApi(messages, apiOf(messages, { t10: [framed(words)] }));
+    expect(resultOf(first.out.messages, 't10')).toBeUndefined();
+    const row = first.out.messages.find((m) => (m.text || '').includes(framed(words)));
+    expect(row).toMatchObject({ role: 'user', text: framed(words), toolResults: [] });
+    expect(pairingOk(messages, first.out.messages)).toBe(true);
+    // The block is now the row's own text: shown in `messages`, counted as the user's, not carried twice.
+    const again = first.out.messages.map((m, k) => Object.freeze({ ...m, handle: `p${k}` }));
+    const second = await compactWithApi(again, apiOf(again));
+    expect(count(second.out.messages, framed(words))).toBe(1);
+    expect(second.calls.fetch[0].body.state.task).toContain(words);
+    expect(second.records()[0]).toMatchObject({ queued_user: 0, queued_carried: 0 });
+  });
+
+  it('carries two messages of the user, a message of another session and a task notification of one turn, in order; only the user\'s count as theirs, a plain reminder goes', async () => {
+    const w1 = 'First message during the turn: also check notes-7.txt.';
+    const w2 = 'Second message during the turn: then one sentence.';
+    const peer = '<system-reminder id="c4c2c2c9">\nAnother Claude session sent a message while you were working:\n<agent-message from="worker">\nREPORT-OF-AGENT: done. The user sent a new message while you were working: quoted mid-sentence.\n</agent-message>\n</system-reminder id="c4c2c2c9">';
+    const note = '<system-reminder>\n[SYSTEM NOTIFICATION - NOT USER INPUT]\n<task-notification>\n<summary>Agent "worker" finished</summary>\n<result>RESULT-OF-TASK</result>\n</task-notification>\n</system-reminder>';
+    const reminder = '<system-reminder>\nCalled the Read tool with the following input: {"file_path":"/x"}\n</system-reminder>';
+    const blocks = [framed(w1), peer, note, reminder, framed(w2)];
+    const messages = conversation(30);
+    const { out, calls, records } = await compactWithApi(messages, apiOf(messages, { t10: blocks }));
+    for (const b of [framed(w1), peer, note, framed(w2)]) expect([b.slice(0, 40), count(out.messages, b)]).toEqual([b.slice(0, 40), 1]);
+    const row = out.messages.find((m) => (m.text || '').includes(peer)).text;
+    expect(row.indexOf(framed(w1))).toBeLessThan(row.indexOf(peer));
+    expect(row.indexOf(note)).toBeLessThan(row.indexOf(framed(w2)));
+    expect(count(out.messages, 'Called the Read tool')).toBe(0);
+    expect(calls.fetch[0].body.state.task).toEqual([w1, w2, 'Good, now sum up the NEEDED results.']);
+    expect(JSON.stringify(calls.fetch.map((c) => c.body.state.task))).not.toContain('REPORT-OF-AGENT');
+    expect(records()[0]).toMatchObject({ result: 'jev', queued_user: 2, queued_other: 2, queued_carried: 4 });
+    expect(pairingOk(messages, out.messages)).toBe(true);
+  });
+
+  it('inside an open tool loop a message at the last result row stays there, after the kept calls', async () => {
+    const words = 'Message during the open loop: stop after this step.';
+    const base = conversation(20).slice(0, -2);
+    const messages = [...base, Object.freeze({ role: 'assistant', text: '', toolUses: [{ tool_use_id: 'q1', tool: 'Bash', input: { command: 'cat q1.txt' } }, { tool_use_id: 'q2', tool: 'Bash', input: { command: 'cat q2.txt' } }], handle: 'hq' }), Object.freeze({ role: 'user', text: '', toolUses: [], toolResults: [{ tool_use_id: 'q1', text: `RESULT-q1 ${'x'.repeat(2000)}`, isError: false }, { tool_use_id: 'q2', text: `RESULT-q2 ${'x'.repeat(2000)}`, isError: false }], handle: 'hr' })];
+    const { out, records } = await compactWithApi(messages, apiOf(messages, { q2: [framed(words)] }));
+    expect(records()[0]).toMatchObject({ result: 'jev', kept_from: 2, queued_user: 1, queued_carried: 1 });
+    expect(out.messages).toContain(messages[messages.length - 2]);
+    const last = out.messages[out.messages.length - 1];
+    expect(last).toMatchObject({ role: 'user', text: framed(words) });
+    expect(last.toolResults.map((r) => r.tool_use_id)).toEqual(['q1', 'q2']);
+    expect(count(out.messages, framed(words))).toBe(1);
+    expect(pairingOk(messages, out.messages)).toBe(true);
+  });
+
+  it('a message delivered after a user row that keeps its handle is left to that row; one before it goes with the rebuilt result row', async () => {
+    const words = 'Message during the turn.';
+    const notice = '[Request interrupted by user for tool use]';
+    for (const [afterNotice, carried] of [[true, 0], [false, 1]]) {
+      const base = conversation(30);
+      const t10 = base.findIndex((m) => resultOf([m], 't10'));
+      const messages = [...base.slice(0, t10 + 1), Object.freeze({ role: 'user', text: notice, toolUses: [], handle: 'hint' }), ...base.slice(t10 + 1)];
+      const api = apiOf(messages);
+      const k = api.findIndex((a) => a.role === 'user' && a.content.some((b) => b.tool_use_id === 't10'));
+      const results = api[k].content.filter((b) => b.type === 'tool_result');
+      api[k] = { role: 'user', content: afterNotice ? [...results, { type: 'text', text: notice }, { type: 'text', text: framed(words) }] : [...results, { type: 'text', text: framed(words) }, { type: 'text', text: notice }] };
+      const { out, records } = await compactWithApi(messages, api);
+      expect(out.messages).toContain(messages[t10 + 1]);
+      expect([afterNotice, count(out.messages, framed(words))]).toEqual([afterNotice, carried]);
+      expect(records()[0]).toMatchObject({ queued_user: 1, queued_carried: carried });
+    }
+  });
+
+  it('without the API form the delivered messages cannot be seen, and the record says so', async () => {
+    const messages = conversation(30);
+    const { out, records } = await compactWithApi(messages, messages);
+    expect(out.messages.length).toBeGreaterThan(0);
+    expect(records()[0]).toMatchObject({ result: 'jev', queued_user: null, queued_other: null, queued_carried: 0 });
+  });
+
   it('keeps the task list whole: every TaskCreate/TaskUpdate and the newest TodoWrite with every later call of that tool', async () => {
     const input = (i) => (i === 3 || i === 12 ? { todos: [{ content: `todo ${i}`, status: 'pending' }] } : i === 7 ? { subject: 'task seven' } : { command: `cat notes-${i}.txt` });
     const tool = (i) => (i === 3 || i === 12 ? 'TodoWrite' : i === 7 ? 'TaskCreate' : 'Bash');
