@@ -312,6 +312,20 @@ describe('strict team job and pane artifact identity', () => {
     }, INSTANCE_ID)).toBe(true);
   });
 
+  it('accepts an untracked leader only for a Herdr team', () => {
+    const artifact = (sessionName: string, leaderPaneId: string) => ({
+      instanceId: INSTANCE_ID,
+      paneIds: ['w2:p2'],
+      leaderPaneId,
+      sessionName,
+      workers: [{ workerName: 'worker-1', paneId: 'w2:p2', launchAttemptId: 'attempt-1' }],
+    });
+    expect(isValidTeamPaneArtifact(artifact('herdr:w2', ''), INSTANCE_ID)).toBe(true);
+    expect(isValidTeamPaneArtifact(artifact('herdr:w2', '  '), INSTANCE_ID)).toBe(false);
+    expect(isValidTeamPaneArtifact(artifact('leader-session:0', ''), INSTANCE_ID)).toBe(false);
+    expect(isValidTeamPaneArtifact({ ...artifact('herdr:w2', ''), instanceId: OTHER_INSTANCE_ID }, INSTANCE_ID)).toBe(false);
+  });
+
   it('rejects missing or foreign identity and pane-only success evidence', () => {
     const baseJob = {
       status: 'running' as const,

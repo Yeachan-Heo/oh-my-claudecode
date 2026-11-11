@@ -10,6 +10,7 @@ import {
   loadProjectMemory,
   saveProjectMemory,
   shouldRescan,
+  withProjectMemoryLock,
 } from "./storage.js";
 import { detectProjectEnvironment } from "./detector.js";
 import { formatContextSummary } from "./formatter.js";
@@ -82,8 +83,18 @@ export async function registerProjectMemoryContext(
     if (!memory || shouldRescan(memory)) {
       const existing = memory;
       const detected = await detectProjectEnvironment(projectRoot);
-      memory = existing ? applyRescanMerge(detected, existing) : detected;
-      await saveProjectMemory(projectRoot, memory);
+      // Detection is slow, so a locked writer (addCustomNote,
+      // learnFromToolOutput) may persist user data after the read above.
+      // Re-read the latest state and publish under the same lock those
+      // writers use, instead of overwriting their writes with the stale
+      // snapshot.
+      memory = await withProjectMemoryLock(projectRoot, async () => {
+        const latest = await loadProjectMemory(projectRoot);
+        const base = latest ?? existing;
+        const merged = base ? applyRescanMerge(detected, base) : detected;
+        await saveProjectMemory(projectRoot, merged);
+        return merged;
+      });
     }
 
     const content = formatContextSummary(memory, {
@@ -125,8 +136,15 @@ export async function rescanProjectEnvironment(
 ): Promise<void> {
   const existing = await loadProjectMemory(projectRoot);
   const detected = await detectProjectEnvironment(projectRoot);
-  const memory = existing ? applyRescanMerge(detected, existing) : detected;
-  await saveProjectMemory(projectRoot, memory);
+  // Same concurrency contract as registerProjectMemoryContext: detection runs
+  // unlocked, but the merge-and-save must re-read the latest state under the
+  // lock so concurrent locked writes survive.
+  await withProjectMemoryLock(projectRoot, async () => {
+    const latest = await loadProjectMemory(projectRoot);
+    const base = latest ?? existing;
+    const memory = base ? applyRescanMerge(detected, base) : detected;
+    await saveProjectMemory(projectRoot, memory);
+  });
 }
 
 function getScopeKey(projectRoot: string, workingDirectory: string): string {

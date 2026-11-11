@@ -25,7 +25,7 @@ import { execFileSync } from 'child_process';
 import { readStdin } from './lib/stdin.mjs';
 import { resolveOmcStateRoot } from './lib/state-root.mjs';
 import { BOUNDED_GIT_TIMEOUT_MS } from './lib/bounded-git-timeout.mjs';
-import { jevNoulOf, recordJevShadow } from './lib/jev-shadow.mjs';
+import { jevNoulOf, jevStateIds, recordJevApplied, recordJevShadow, setJevHookContext, setJevSessionId } from './lib/jev-shadow.mjs';
 
 const DEFAULT_EXTENSIONS = ['.ts', '.tsx', '.js', '.jsx', '.py', '.go', '.rs'];
 const DEFAULT_MAX_FILES = 10;
@@ -130,8 +130,10 @@ async function main() {
       process.stdout.write(JSON.stringify({ continue: true }) + '\n');
       return;
     }
+    setJevSessionId(data.session_id || data.sessionId, data.agent_id || data.agentId);
 
     const cwd = data.cwd || data.directory || process.cwd();
+    await setJevHookContext(data);
     const stateDir = join(await resolveOmcStateRoot(cwd), 'state');
     const config = readOmcConfig();
 
@@ -164,7 +166,7 @@ async function main() {
 
     const jevResult = recordJevShadow({
       point: 'simplifier-trigger',
-      state: { cwd, files, source: 'code-simplifier-stop' },
+      state: { ...jevStateIds({ cwd }), files, source: 'code-simplifier-stop' },
       questions: SIMPLIFIER_TRIGGER_QUESTIONS,
       heuristic: true,
       permissionMode: data.permission_mode,
@@ -175,6 +177,9 @@ async function main() {
     if (isSimplifierApplyEnabled()) {
       const noul = jevNoulOf(jevResult, 'simplification_worthy');
       if (noul !== undefined && noul < SIMPLIFIER_SKIP_BELOW) {
+        recordJevApplied('simplifier-trigger', {
+          action: { from: 'remind', to: 'skip', noul },
+        });
         process.stdout.write(JSON.stringify({ continue: true }) + '\n');
         return;
       }

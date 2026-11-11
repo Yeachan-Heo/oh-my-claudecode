@@ -5,15 +5,15 @@
   "provenance": {
     "base": "05c800f40d1ad53b42a78609d2667ef4f726808b",
     "planningHead": "0a91273e61dbbd47eb0af4c02844409251e08398",
-    "head": "62d16651b5df776ed9855adf0b171a5b8db8cf07",
-    "sourceSha256": "9f81df04e22880c309d5b56d767cc1256103fb14bc31a9d2ce186ad0ca0ff842",
+    "head": "7cf03267a023bd97082db7c770af2b15fb7b7f89",
+    "sourceSha256": "8393bb259f13a254ed3610c79c5ecba2077de5e2ace78258233badd2b4053450",
     "generatedAt": null,
     "generator": "scripts/generate-inventory-graph.mjs"
   },
   "base": "05c800f40d1ad53b42a78609d2667ef4f726808b",
   "planningHead": "0a91273e61dbbd47eb0af4c02844409251e08398",
-  "head": "62d16651b5df776ed9855adf0b171a5b8db8cf07",
-  "sourceSha256": "9f81df04e22880c309d5b56d767cc1256103fb14bc31a9d2ce186ad0ca0ff842",
+  "head": "7cf03267a023bd97082db7c770af2b15fb7b7f89",
+  "sourceSha256": "8393bb259f13a254ed3610c79c5ecba2077de5e2ace78258233badd2b4053450",
   "counts": {
     "public": {
       "skills": 84,
@@ -23,25 +23,25 @@
       "total": 133
     },
     "internal": {
-      "hookFiles": 336,
+      "hookFiles": 342,
       "featureFiles": 95,
       "toolFiles": 65,
       "libFiles": 49,
       "templateHooks": 25,
-      "srcFiles": 1448,
-      "total": 1473
+      "srcFiles": 1474,
+      "total": 1499
     },
     "generated": {
-      "distFiles": 5651,
-      "bridgeFiles": 9,
-      "total": 5660
+      "distFiles": 5639,
+      "bridgeFiles": 8,
+      "total": 5647
     },
     "prompt": {
       "promptLikeFiles": 63
     },
     "skills": 84,
     "commands": 21,
-    "hookFiles": 336,
+    "hookFiles": 342,
     "workflows": 8,
     "agentDefinitions": 18,
     "promptLikeFiles": 63
@@ -285,8 +285,13 @@
       "src/hooks/index.ts",
       "src/hooks/jev/__tests__/active-mode.test.ts",
       "src/hooks/jev/__tests__/client.test.ts",
+      "src/hooks/jev/__tests__/log-context.test.ts",
+      "src/hooks/jev/__tests__/log-rotation.test.ts",
       "src/hooks/jev/__tests__/points-wire-shape.test.ts",
+      "src/hooks/jev/__tests__/resolver-request-count.test.ts",
       "src/hooks/jev/__tests__/resolver.test.ts",
+      "src/hooks/jev/__tests__/shared-breaker.test.ts",
+      "src/hooks/jev/__tests__/state-omit-ids.test.ts",
       "src/hooks/jev/client.ts",
       "src/hooks/jev/config.ts",
       "src/hooks/jev/index.ts",
@@ -374,6 +379,7 @@
       "src/hooks/project-memory/__tests__/learner.test.ts",
       "src/hooks/project-memory/__tests__/pre-compact-storage.test.ts",
       "src/hooks/project-memory/__tests__/pre-compact.test.ts",
+      "src/hooks/project-memory/__tests__/rescan-concurrency.test.ts",
       "src/hooks/project-memory/__tests__/storage.test.ts",
       "src/hooks/project-memory/constants.ts",
       "src/hooks/project-memory/detector.ts",
@@ -871,6 +877,7 @@
       "scripts/graph-agent-demo.mjs",
       "scripts/inventory-issue-3698.mjs",
       "scripts/jev-eval.mjs",
+      "scripts/jev-repair-transcript.mjs",
       "scripts/jev-resolve.mjs",
       "scripts/keyword-detector.mjs",
       "scripts/lib/agent-model-config.mjs",
@@ -889,7 +896,10 @@
       "scripts/lib/hud-cache-wrapper.sh",
       "scripts/lib/hud-wrapper-template.mjs",
       "scripts/lib/hud-wrapper-template.txt",
+      "scripts/lib/jev-breaker.d.mts",
+      "scripts/lib/jev-breaker.mjs",
       "scripts/lib/jev-compaction-state.mjs",
+      "scripts/lib/jev-delivery-guard.mjs",
       "scripts/lib/jev-mask.mjs",
       "scripts/lib/jev-shadow.mjs",
       "scripts/lib/model-routing-override-message.mjs",
@@ -1038,10 +1048,6 @@
       "dist/__tests__/bridge-help-question-regex.test.d.ts.map",
       "dist/__tests__/bridge-help-question-regex.test.js",
       "dist/__tests__/bridge-help-question-regex.test.js.map",
-      "dist/__tests__/bridge-self-contained.test.d.ts",
-      "dist/__tests__/bridge-self-contained.test.d.ts.map",
-      "dist/__tests__/bridge-self-contained.test.js",
-      "dist/__tests__/bridge-self-contained.test.js.map",
       "dist/__tests__/chain-enqueuer-registration.test.d.ts",
       "dist/__tests__/chain-enqueuer-registration.test.d.ts.map",
       "dist/__tests__/chain-enqueuer-registration.test.js",
@@ -3807,10 +3813,6 @@
       "dist/hooks/permission-handler/index.d.ts.map",
       "dist/hooks/permission-handler/index.js",
       "dist/hooks/permission-handler/index.js.map",
-      "dist/hooks/persistent-mode/__tests__/architect-approval-transcript.test.d.ts",
-      "dist/hooks/persistent-mode/__tests__/architect-approval-transcript.test.d.ts.map",
-      "dist/hooks/persistent-mode/__tests__/architect-approval-transcript.test.js",
-      "dist/hooks/persistent-mode/__tests__/architect-approval-transcript.test.js.map",
       "dist/hooks/persistent-mode/__tests__/cancel-race.test.d.ts",
       "dist/hooks/persistent-mode/__tests__/cancel-race.test.d.ts.map",
       "dist/hooks/persistent-mode/__tests__/cancel-race.test.js",
@@ -4812,10 +4814,6 @@
       "dist/installer/__tests__/bundled-skill-sync.test.d.ts.map",
       "dist/installer/__tests__/bundled-skill-sync.test.js",
       "dist/installer/__tests__/bundled-skill-sync.test.js.map",
-      "dist/installer/__tests__/claude-mcp-config-path.test.d.ts",
-      "dist/installer/__tests__/claude-mcp-config-path.test.d.ts.map",
-      "dist/installer/__tests__/claude-mcp-config-path.test.js",
-      "dist/installer/__tests__/claude-mcp-config-path.test.js.map",
       "dist/installer/__tests__/claude-md-analysis.test.d.ts",
       "dist/installer/__tests__/claude-md-analysis.test.d.ts.map",
       "dist/installer/__tests__/claude-md-analysis.test.js",
@@ -6623,7 +6621,6 @@
       "dist/workflow/registry.js.map"
     ],
     "bridgeFiles": [
-      "bridge/__pycache__/gyoshu_bridge.cpython-314.pyc",
       "bridge/claude-md-coordinator.cjs",
       "bridge/cli.cjs",
       "bridge/gyoshu_bridge.py",
@@ -6730,8 +6727,13 @@
       "src/hooks/index.ts",
       "src/hooks/jev/__tests__/active-mode.test.ts",
       "src/hooks/jev/__tests__/client.test.ts",
+      "src/hooks/jev/__tests__/log-context.test.ts",
+      "src/hooks/jev/__tests__/log-rotation.test.ts",
       "src/hooks/jev/__tests__/points-wire-shape.test.ts",
+      "src/hooks/jev/__tests__/resolver-request-count.test.ts",
       "src/hooks/jev/__tests__/resolver.test.ts",
+      "src/hooks/jev/__tests__/shared-breaker.test.ts",
+      "src/hooks/jev/__tests__/state-omit-ids.test.ts",
       "src/hooks/jev/client.ts",
       "src/hooks/jev/config.ts",
       "src/hooks/jev/index.ts",
@@ -6819,6 +6821,7 @@
       "src/hooks/project-memory/__tests__/learner.test.ts",
       "src/hooks/project-memory/__tests__/pre-compact-storage.test.ts",
       "src/hooks/project-memory/__tests__/pre-compact.test.ts",
+      "src/hooks/project-memory/__tests__/rescan-concurrency.test.ts",
       "src/hooks/project-memory/__tests__/storage.test.ts",
       "src/hooks/project-memory/constants.ts",
       "src/hooks/project-memory/detector.ts",
@@ -7976,11 +7979,6 @@
         "path": "bin/oh-my-claudecode.js"
       },
       {
-        "id": "bridge/__pycache__/gyoshu_bridge.cpython-314.pyc",
-        "kind": "generated-bridge",
-        "path": "bridge/__pycache__/gyoshu_bridge.cpython-314.pyc"
-      },
-      {
         "id": "bridge/claude-md-coordinator.cjs",
         "kind": "generated-bridge",
         "path": "bridge/claude-md-coordinator.cjs"
@@ -8479,26 +8477,6 @@
         "id": "dist/__tests__/bridge-help-question-regex.test.js.map",
         "kind": "generated-dist",
         "path": "dist/__tests__/bridge-help-question-regex.test.js.map"
-      },
-      {
-        "id": "dist/__tests__/bridge-self-contained.test.d.ts",
-        "kind": "generated-dist",
-        "path": "dist/__tests__/bridge-self-contained.test.d.ts"
-      },
-      {
-        "id": "dist/__tests__/bridge-self-contained.test.d.ts.map",
-        "kind": "generated-dist",
-        "path": "dist/__tests__/bridge-self-contained.test.d.ts.map"
-      },
-      {
-        "id": "dist/__tests__/bridge-self-contained.test.js",
-        "kind": "generated-dist",
-        "path": "dist/__tests__/bridge-self-contained.test.js"
-      },
-      {
-        "id": "dist/__tests__/bridge-self-contained.test.js.map",
-        "kind": "generated-dist",
-        "path": "dist/__tests__/bridge-self-contained.test.js.map"
       },
       {
         "id": "dist/__tests__/chain-enqueuer-registration.test.d.ts",
@@ -22326,26 +22304,6 @@
         "path": "dist/hooks/permission-handler/index.js.map"
       },
       {
-        "id": "dist/hooks/persistent-mode/__tests__/architect-approval-transcript.test.d.ts",
-        "kind": "generated-dist",
-        "path": "dist/hooks/persistent-mode/__tests__/architect-approval-transcript.test.d.ts"
-      },
-      {
-        "id": "dist/hooks/persistent-mode/__tests__/architect-approval-transcript.test.d.ts.map",
-        "kind": "generated-dist",
-        "path": "dist/hooks/persistent-mode/__tests__/architect-approval-transcript.test.d.ts.map"
-      },
-      {
-        "id": "dist/hooks/persistent-mode/__tests__/architect-approval-transcript.test.js",
-        "kind": "generated-dist",
-        "path": "dist/hooks/persistent-mode/__tests__/architect-approval-transcript.test.js"
-      },
-      {
-        "id": "dist/hooks/persistent-mode/__tests__/architect-approval-transcript.test.js.map",
-        "kind": "generated-dist",
-        "path": "dist/hooks/persistent-mode/__tests__/architect-approval-transcript.test.js.map"
-      },
-      {
         "id": "dist/hooks/persistent-mode/__tests__/cancel-race.test.d.ts",
         "kind": "generated-dist",
         "path": "dist/hooks/persistent-mode/__tests__/cancel-race.test.d.ts"
@@ -27349,26 +27307,6 @@
         "id": "dist/installer/__tests__/bundled-skill-sync.test.js.map",
         "kind": "generated-dist",
         "path": "dist/installer/__tests__/bundled-skill-sync.test.js.map"
-      },
-      {
-        "id": "dist/installer/__tests__/claude-mcp-config-path.test.d.ts",
-        "kind": "generated-dist",
-        "path": "dist/installer/__tests__/claude-mcp-config-path.test.d.ts"
-      },
-      {
-        "id": "dist/installer/__tests__/claude-mcp-config-path.test.d.ts.map",
-        "kind": "generated-dist",
-        "path": "dist/installer/__tests__/claude-mcp-config-path.test.d.ts.map"
-      },
-      {
-        "id": "dist/installer/__tests__/claude-mcp-config-path.test.js",
-        "kind": "generated-dist",
-        "path": "dist/installer/__tests__/claude-mcp-config-path.test.js"
-      },
-      {
-        "id": "dist/installer/__tests__/claude-mcp-config-path.test.js.map",
-        "kind": "generated-dist",
-        "path": "dist/installer/__tests__/claude-mcp-config-path.test.js.map"
       },
       {
         "id": "dist/installer/__tests__/claude-md-analysis.test.d.ts",
@@ -36481,6 +36419,11 @@
         "path": "docs/SYNC-SYSTEM.md"
       },
       {
+        "id": "docs/TEAM-MULTIPLEXER.md",
+        "kind": "other",
+        "path": "docs/TEAM-MULTIPLEXER.md"
+      },
+      {
         "id": "docs/TEAM-WORKTREE-MODE.md",
         "kind": "other",
         "path": "docs/TEAM-WORKTREE-MODE.md"
@@ -36939,6 +36882,11 @@
         "id": "external:node:process",
         "kind": "external",
         "path": "node:process"
+      },
+      {
+        "id": "external:node:readline",
+        "kind": "external",
+        "path": "node:readline"
       },
       {
         "id": "external:node:stream",
@@ -37436,6 +37384,11 @@
         "path": "scripts/jev-eval.mjs"
       },
       {
+        "id": "scripts/jev-repair-transcript.mjs",
+        "kind": "script",
+        "path": "scripts/jev-repair-transcript.mjs"
+      },
+      {
         "id": "scripts/jev-resolve.mjs",
         "kind": "script",
         "path": "scripts/jev-resolve.mjs"
@@ -37526,9 +37479,24 @@
         "path": "scripts/lib/hud-wrapper-template.txt"
       },
       {
+        "id": "scripts/lib/jev-breaker.d.mts",
+        "kind": "script",
+        "path": "scripts/lib/jev-breaker.d.mts"
+      },
+      {
+        "id": "scripts/lib/jev-breaker.mjs",
+        "kind": "script",
+        "path": "scripts/lib/jev-breaker.mjs"
+      },
+      {
         "id": "scripts/lib/jev-compaction-state.mjs",
         "kind": "script",
         "path": "scripts/lib/jev-compaction-state.mjs"
+      },
+      {
+        "id": "scripts/lib/jev-delivery-guard.mjs",
+        "kind": "script",
+        "path": "scripts/lib/jev-delivery-guard.mjs"
       },
       {
         "id": "scripts/lib/jev-mask.mjs",
@@ -41421,6 +41389,16 @@
         "path": "src/__tests__/issue-3867-legacy-l-update.test.ts"
       },
       {
+        "id": "src/__tests__/jev-applied-log.test.mjs",
+        "kind": "src",
+        "path": "src/__tests__/jev-applied-log.test.mjs"
+      },
+      {
+        "id": "src/__tests__/jev-breaker-script.test.mjs",
+        "kind": "src",
+        "path": "src/__tests__/jev-breaker-script.test.mjs"
+      },
+      {
         "id": "src/__tests__/jev-compaction-module.test.mjs",
         "kind": "src",
         "path": "src/__tests__/jev-compaction-module.test.mjs"
@@ -41429,6 +41407,11 @@
         "id": "src/__tests__/jev-compaction-state.test.mjs",
         "kind": "src",
         "path": "src/__tests__/jev-compaction-state.test.mjs"
+      },
+      {
+        "id": "src/__tests__/jev-delivery-guard.test.mjs",
+        "kind": "src",
+        "path": "src/__tests__/jev-delivery-guard.test.mjs"
       },
       {
         "id": "src/__tests__/jev-eval-script.test.mjs",
@@ -41441,9 +41424,29 @@
         "path": "src/__tests__/jev-hook-timeouts.test.mjs"
       },
       {
+        "id": "src/__tests__/jev-log-context-hooks.test.mjs",
+        "kind": "src",
+        "path": "src/__tests__/jev-log-context-hooks.test.mjs"
+      },
+      {
+        "id": "src/__tests__/jev-log-context.test.mjs",
+        "kind": "src",
+        "path": "src/__tests__/jev-log-context.test.mjs"
+      },
+      {
+        "id": "src/__tests__/jev-log-rotation.test.mjs",
+        "kind": "src",
+        "path": "src/__tests__/jev-log-rotation.test.mjs"
+      },
+      {
         "id": "src/__tests__/jev-plugin-hook-wiring.test.mjs",
         "kind": "src",
         "path": "src/__tests__/jev-plugin-hook-wiring.test.mjs"
+      },
+      {
+        "id": "src/__tests__/jev-repair-transcript-script.test.mjs",
+        "kind": "src",
+        "path": "src/__tests__/jev-repair-transcript-script.test.mjs"
       },
       {
         "id": "src/__tests__/jev-resolve-script.test.mjs",
@@ -41454,6 +41457,16 @@
         "id": "src/__tests__/jev-shadow-noul.test.mjs",
         "kind": "src",
         "path": "src/__tests__/jev-shadow-noul.test.mjs"
+      },
+      {
+        "id": "src/__tests__/jev-shadow-spawn-mode.test.mjs",
+        "kind": "src",
+        "path": "src/__tests__/jev-shadow-spawn-mode.test.mjs"
+      },
+      {
+        "id": "src/__tests__/jev-state-omit-ids.test.mjs",
+        "kind": "src",
+        "path": "src/__tests__/jev-state-omit-ids.test.mjs"
       },
       {
         "id": "src/__tests__/job-state-db.test.ts",
@@ -41844,6 +41857,16 @@
         "id": "src/__tests__/rate-limit-wait/daemon.test.ts",
         "kind": "src",
         "path": "src/__tests__/rate-limit-wait/daemon.test.ts"
+      },
+      {
+        "id": "src/__tests__/rate-limit-wait/herdr-daemon.test.ts",
+        "kind": "src",
+        "path": "src/__tests__/rate-limit-wait/herdr-daemon.test.ts"
+      },
+      {
+        "id": "src/__tests__/rate-limit-wait/herdr-detector.test.ts",
+        "kind": "src",
+        "path": "src/__tests__/rate-limit-wait/herdr-detector.test.ts"
       },
       {
         "id": "src/__tests__/rate-limit-wait/integration.test.ts",
@@ -42536,6 +42559,11 @@
         "path": "src/cli/__tests__/doctor-team-routing.test.ts"
       },
       {
+        "id": "src/cli/__tests__/herdr-no-raw-calls.test.ts",
+        "kind": "src",
+        "path": "src/cli/__tests__/herdr-no-raw-calls.test.ts"
+      },
+      {
         "id": "src/cli/__tests__/hud-watch.test.ts",
         "kind": "src",
         "path": "src/cli/__tests__/hud-watch.test.ts"
@@ -42544,6 +42572,16 @@
         "id": "src/cli/__tests__/integer-option.test.ts",
         "kind": "src",
         "path": "src/cli/__tests__/integer-option.test.ts"
+      },
+      {
+        "id": "src/cli/__tests__/interop-herdr.test.ts",
+        "kind": "src",
+        "path": "src/cli/__tests__/interop-herdr.test.ts"
+      },
+      {
+        "id": "src/cli/__tests__/launch-herdr.test.ts",
+        "kind": "src",
+        "path": "src/cli/__tests__/launch-herdr.test.ts"
       },
       {
         "id": "src/cli/__tests__/launch-secure-transport.test.ts",
@@ -44191,14 +44229,39 @@
         "path": "src/hooks/jev/__tests__/client.test.ts"
       },
       {
+        "id": "src/hooks/jev/__tests__/log-context.test.ts",
+        "kind": "hook",
+        "path": "src/hooks/jev/__tests__/log-context.test.ts"
+      },
+      {
+        "id": "src/hooks/jev/__tests__/log-rotation.test.ts",
+        "kind": "hook",
+        "path": "src/hooks/jev/__tests__/log-rotation.test.ts"
+      },
+      {
         "id": "src/hooks/jev/__tests__/points-wire-shape.test.ts",
         "kind": "hook",
         "path": "src/hooks/jev/__tests__/points-wire-shape.test.ts"
       },
       {
+        "id": "src/hooks/jev/__tests__/resolver-request-count.test.ts",
+        "kind": "hook",
+        "path": "src/hooks/jev/__tests__/resolver-request-count.test.ts"
+      },
+      {
         "id": "src/hooks/jev/__tests__/resolver.test.ts",
         "kind": "hook",
         "path": "src/hooks/jev/__tests__/resolver.test.ts"
+      },
+      {
+        "id": "src/hooks/jev/__tests__/shared-breaker.test.ts",
+        "kind": "hook",
+        "path": "src/hooks/jev/__tests__/shared-breaker.test.ts"
+      },
+      {
+        "id": "src/hooks/jev/__tests__/state-omit-ids.test.ts",
+        "kind": "hook",
+        "path": "src/hooks/jev/__tests__/state-omit-ids.test.ts"
       },
       {
         "id": "src/hooks/jev/client.ts",
@@ -44634,6 +44697,11 @@
         "id": "src/hooks/project-memory/__tests__/pre-compact.test.ts",
         "kind": "hook",
         "path": "src/hooks/project-memory/__tests__/pre-compact.test.ts"
+      },
+      {
+        "id": "src/hooks/project-memory/__tests__/rescan-concurrency.test.ts",
+        "kind": "hook",
+        "path": "src/hooks/project-memory/__tests__/rescan-concurrency.test.ts"
       },
       {
         "id": "src/hooks/project-memory/__tests__/storage.test.ts",
@@ -46286,6 +46354,11 @@
         "path": "src/notifications/__tests__/reply-config.test.ts"
       },
       {
+        "id": "src/notifications/__tests__/reply-herdr.test.ts",
+        "kind": "src",
+        "path": "src/notifications/__tests__/reply-herdr.test.ts"
+      },
+      {
         "id": "src/notifications/__tests__/reply-listener.test.ts",
         "kind": "src",
         "path": "src/notifications/__tests__/reply-listener.test.ts"
@@ -46746,6 +46819,16 @@
         "path": "src/team/__tests__/helpers/git-fixture.ts"
       },
       {
+        "id": "src/team/__tests__/herdr-session-realherdr.test.ts",
+        "kind": "src",
+        "path": "src/team/__tests__/herdr-session-realherdr.test.ts"
+      },
+      {
+        "id": "src/team/__tests__/herdr-session.test.ts",
+        "kind": "src",
+        "path": "src/team/__tests__/herdr-session.test.ts"
+      },
+      {
         "id": "src/team/__tests__/idle-nudge.test.ts",
         "kind": "src",
         "path": "src/team/__tests__/idle-nudge.test.ts"
@@ -47091,9 +47174,19 @@
         "path": "src/team/__tests__/tmux-session-prereqs.test.ts"
       },
       {
+        "id": "src/team/__tests__/tmux-session.create-team-herdr.test.ts",
+        "kind": "src",
+        "path": "src/team/__tests__/tmux-session.create-team-herdr.test.ts"
+      },
+      {
         "id": "src/team/__tests__/tmux-session.create-team.test.ts",
         "kind": "src",
         "path": "src/team/__tests__/tmux-session.create-team.test.ts"
+      },
+      {
+        "id": "src/team/__tests__/tmux-session.herdr-arms.test.ts",
+        "kind": "src",
+        "path": "src/team/__tests__/tmux-session.herdr-arms.test.ts"
       },
       {
         "id": "src/team/__tests__/tmux-session.kill-team-session.test.ts",
@@ -47249,6 +47342,11 @@
         "id": "src/team/governance.ts",
         "kind": "src",
         "path": "src/team/governance.ts"
+      },
+      {
+        "id": "src/team/herdr-session.ts",
+        "kind": "src",
+        "path": "src/team/herdr-session.ts"
       },
       {
         "id": "src/team/idle-nudge.ts",
@@ -48291,6 +48389,31 @@
         "path": "tests/integration/jev-advisory-points.test.ts"
       },
       {
+        "id": "tests/integration/jev-applied-log-late-failure.test.ts",
+        "kind": "other",
+        "path": "tests/integration/jev-applied-log-late-failure.test.ts"
+      },
+      {
+        "id": "tests/integration/jev-codex-p2-fixes.test.ts",
+        "kind": "other",
+        "path": "tests/integration/jev-codex-p2-fixes.test.ts"
+      },
+      {
+        "id": "tests/integration/jev-context-pruning-applied-log.test.ts",
+        "kind": "other",
+        "path": "tests/integration/jev-context-pruning-applied-log.test.ts"
+      },
+      {
+        "id": "tests/integration/jev-delivery-guard-handoff.test.ts",
+        "kind": "other",
+        "path": "tests/integration/jev-delivery-guard-handoff.test.ts"
+      },
+      {
+        "id": "tests/integration/jev-delivery-guard-per-logdir.test.ts",
+        "kind": "other",
+        "path": "tests/integration/jev-delivery-guard-per-logdir.test.ts"
+      },
+      {
         "id": "tests/integration/jev-max-effort-always.test.ts",
         "kind": "other",
         "path": "tests/integration/jev-max-effort-always.test.ts"
@@ -48319,6 +48442,11 @@
         "id": "tests/integration/jev-model-routing-marker.test.ts",
         "kind": "other",
         "path": "tests/integration/jev-model-routing-marker.test.ts"
+      },
+      {
+        "id": "tests/integration/jev-shadow-spawn-failure.test.ts",
+        "kind": "other",
+        "path": "tests/integration/jev-shadow-spawn-failure.test.ts"
       },
       {
         "id": "tests/integration/jev-task-size-notice.test.ts",
@@ -49618,6 +49746,16 @@
         "kind": "imports"
       },
       {
+        "from": "scripts/jev-repair-transcript.mjs",
+        "to": "external:node:fs",
+        "kind": "imports"
+      },
+      {
+        "from": "scripts/jev-repair-transcript.mjs",
+        "to": "external:node:url",
+        "kind": "imports"
+      },
+      {
         "from": "scripts/jev-resolve.mjs",
         "to": "external:node:fs",
         "kind": "imports"
@@ -49640,6 +49778,11 @@
       {
         "from": "scripts/jev-resolve.mjs",
         "to": "external:node:url",
+        "kind": "imports"
+      },
+      {
+        "from": "scripts/jev-resolve.mjs",
+        "to": "scripts/lib/jev-breaker.mjs",
         "kind": "imports"
       },
       {
@@ -49695,6 +49838,11 @@
       {
         "from": "scripts/keyword-detector.mjs",
         "to": "scripts/lib/config-dir.mjs",
+        "kind": "imports"
+      },
+      {
+        "from": "scripts/keyword-detector.mjs",
+        "to": "scripts/lib/jev-delivery-guard.mjs",
         "kind": "imports"
       },
       {
@@ -49858,6 +50006,31 @@
         "kind": "imports"
       },
       {
+        "from": "scripts/lib/jev-breaker.mjs",
+        "to": "external:node:crypto",
+        "kind": "imports"
+      },
+      {
+        "from": "scripts/lib/jev-breaker.mjs",
+        "to": "external:node:fs",
+        "kind": "imports"
+      },
+      {
+        "from": "scripts/lib/jev-breaker.mjs",
+        "to": "external:node:os",
+        "kind": "imports"
+      },
+      {
+        "from": "scripts/lib/jev-breaker.mjs",
+        "to": "external:node:path",
+        "kind": "imports"
+      },
+      {
+        "from": "scripts/lib/jev-breaker.mjs",
+        "to": "scripts/lib/atomic-write.mjs",
+        "kind": "imports"
+      },
+      {
         "from": "scripts/lib/jev-compaction-state.mjs",
         "to": "external:node:fs",
         "kind": "imports"
@@ -49893,8 +50066,63 @@
         "kind": "imports"
       },
       {
+        "from": "scripts/lib/jev-delivery-guard.mjs",
+        "to": "external:node:child_process",
+        "kind": "imports"
+      },
+      {
+        "from": "scripts/lib/jev-delivery-guard.mjs",
+        "to": "external:node:crypto",
+        "kind": "imports"
+      },
+      {
+        "from": "scripts/lib/jev-delivery-guard.mjs",
+        "to": "external:node:fs",
+        "kind": "imports"
+      },
+      {
+        "from": "scripts/lib/jev-delivery-guard.mjs",
+        "to": "external:node:os",
+        "kind": "imports"
+      },
+      {
+        "from": "scripts/lib/jev-delivery-guard.mjs",
+        "to": "external:node:path",
+        "kind": "imports"
+      },
+      {
+        "from": "scripts/lib/jev-delivery-guard.mjs",
+        "to": "external:node:readline",
+        "kind": "imports"
+      },
+      {
+        "from": "scripts/lib/jev-delivery-guard.mjs",
+        "to": "external:node:url",
+        "kind": "imports"
+      },
+      {
+        "from": "scripts/lib/jev-delivery-guard.mjs",
+        "to": "scripts/jev-resolve.mjs",
+        "kind": "imports"
+      },
+      {
+        "from": "scripts/lib/jev-delivery-guard.mjs",
+        "to": "scripts/lib/config-dir.mjs",
+        "kind": "imports"
+      },
+      {
+        "from": "scripts/lib/jev-delivery-guard.mjs",
+        "to": "scripts/lib/state-root.mjs",
+        "kind": "imports"
+      },
+      {
         "from": "scripts/lib/jev-shadow.mjs",
         "to": "external:node:child_process",
+        "kind": "imports"
+      },
+      {
+        "from": "scripts/lib/jev-shadow.mjs",
+        "to": "external:node:crypto",
         "kind": "imports"
       },
       {
@@ -49920,6 +50148,11 @@
       {
         "from": "scripts/lib/jev-shadow.mjs",
         "to": "scripts/jev-resolve.mjs",
+        "kind": "imports"
+      },
+      {
+        "from": "scripts/lib/jev-shadow.mjs",
+        "to": "scripts/lib/jev-breaker.mjs",
         "kind": "imports"
       },
       {
@@ -56028,8 +56261,113 @@
         "kind": "type-imports"
       },
       {
+        "from": "src/__tests__/jev-applied-log.test.mjs",
+        "to": "external:node:child_process",
+        "kind": "imports"
+      },
+      {
+        "from": "src/__tests__/jev-applied-log.test.mjs",
+        "to": "external:node:fs",
+        "kind": "imports"
+      },
+      {
+        "from": "src/__tests__/jev-applied-log.test.mjs",
+        "to": "external:node:http",
+        "kind": "imports"
+      },
+      {
+        "from": "src/__tests__/jev-applied-log.test.mjs",
+        "to": "external:node:os",
+        "kind": "imports"
+      },
+      {
+        "from": "src/__tests__/jev-applied-log.test.mjs",
+        "to": "external:node:path",
+        "kind": "imports"
+      },
+      {
+        "from": "src/__tests__/jev-applied-log.test.mjs",
+        "to": "external:node:process",
+        "kind": "imports"
+      },
+      {
+        "from": "src/__tests__/jev-applied-log.test.mjs",
+        "to": "external:node:url",
+        "kind": "imports"
+      },
+      {
+        "from": "src/__tests__/jev-applied-log.test.mjs",
+        "to": "external:vitest",
+        "kind": "imports"
+      },
+      {
+        "from": "src/__tests__/jev-applied-log.test.mjs",
+        "to": "scripts/lib/jev-shadow.mjs",
+        "kind": "imports"
+      },
+      {
+        "from": "src/__tests__/jev-breaker-script.test.mjs",
+        "to": "external:node:child_process",
+        "kind": "imports"
+      },
+      {
+        "from": "src/__tests__/jev-breaker-script.test.mjs",
+        "to": "external:node:fs",
+        "kind": "imports"
+      },
+      {
+        "from": "src/__tests__/jev-breaker-script.test.mjs",
+        "to": "external:node:http",
+        "kind": "imports"
+      },
+      {
+        "from": "src/__tests__/jev-breaker-script.test.mjs",
+        "to": "external:node:os",
+        "kind": "imports"
+      },
+      {
+        "from": "src/__tests__/jev-breaker-script.test.mjs",
+        "to": "external:node:path",
+        "kind": "imports"
+      },
+      {
+        "from": "src/__tests__/jev-breaker-script.test.mjs",
+        "to": "external:node:url",
+        "kind": "imports"
+      },
+      {
+        "from": "src/__tests__/jev-breaker-script.test.mjs",
+        "to": "external:vitest",
+        "kind": "imports"
+      },
+      {
+        "from": "src/__tests__/jev-breaker-script.test.mjs",
+        "to": "scripts/jev-resolve.mjs",
+        "kind": "imports"
+      },
+      {
+        "from": "src/__tests__/jev-breaker-script.test.mjs",
+        "to": "scripts/lib/jev-breaker.mjs",
+        "kind": "imports"
+      },
+      {
+        "from": "src/__tests__/jev-breaker-script.test.mjs",
+        "to": "src/hooks/jev/points.ts",
+        "kind": "imports"
+      },
+      {
+        "from": "src/__tests__/jev-breaker-script.test.mjs",
+        "to": "src/hooks/jev/resolver.ts",
+        "kind": "imports"
+      },
+      {
         "from": "src/__tests__/jev-compaction-module.test.mjs",
         "to": "external:node:fs",
+        "kind": "imports"
+      },
+      {
+        "from": "src/__tests__/jev-compaction-module.test.mjs",
+        "to": "external:node:os",
         "kind": "imports"
       },
       {
@@ -56055,6 +56393,11 @@
       {
         "from": "src/__tests__/jev-compaction-module.test.mjs",
         "to": "scripts/jev-resolve.mjs",
+        "kind": "imports"
+      },
+      {
+        "from": "src/__tests__/jev-compaction-module.test.mjs",
+        "to": "scripts/lib/jev-breaker.mjs",
         "kind": "imports"
       },
       {
@@ -56113,6 +56456,41 @@
         "kind": "imports"
       },
       {
+        "from": "src/__tests__/jev-delivery-guard.test.mjs",
+        "to": "external:node:child_process",
+        "kind": "imports"
+      },
+      {
+        "from": "src/__tests__/jev-delivery-guard.test.mjs",
+        "to": "external:node:fs",
+        "kind": "imports"
+      },
+      {
+        "from": "src/__tests__/jev-delivery-guard.test.mjs",
+        "to": "external:node:os",
+        "kind": "imports"
+      },
+      {
+        "from": "src/__tests__/jev-delivery-guard.test.mjs",
+        "to": "external:node:path",
+        "kind": "imports"
+      },
+      {
+        "from": "src/__tests__/jev-delivery-guard.test.mjs",
+        "to": "external:node:url",
+        "kind": "imports"
+      },
+      {
+        "from": "src/__tests__/jev-delivery-guard.test.mjs",
+        "to": "external:vitest",
+        "kind": "imports"
+      },
+      {
+        "from": "src/__tests__/jev-delivery-guard.test.mjs",
+        "to": "scripts/lib/jev-delivery-guard.mjs",
+        "kind": "imports"
+      },
+      {
         "from": "src/__tests__/jev-eval-script.test.mjs",
         "to": "external:node:child_process",
         "kind": "imports"
@@ -56168,6 +56546,146 @@
         "kind": "imports"
       },
       {
+        "from": "src/__tests__/jev-log-context-hooks.test.mjs",
+        "to": "external:node:child_process",
+        "kind": "imports"
+      },
+      {
+        "from": "src/__tests__/jev-log-context-hooks.test.mjs",
+        "to": "external:node:fs",
+        "kind": "imports"
+      },
+      {
+        "from": "src/__tests__/jev-log-context-hooks.test.mjs",
+        "to": "external:node:http",
+        "kind": "imports"
+      },
+      {
+        "from": "src/__tests__/jev-log-context-hooks.test.mjs",
+        "to": "external:node:os",
+        "kind": "imports"
+      },
+      {
+        "from": "src/__tests__/jev-log-context-hooks.test.mjs",
+        "to": "external:node:path",
+        "kind": "imports"
+      },
+      {
+        "from": "src/__tests__/jev-log-context-hooks.test.mjs",
+        "to": "external:node:process",
+        "kind": "imports"
+      },
+      {
+        "from": "src/__tests__/jev-log-context-hooks.test.mjs",
+        "to": "external:node:url",
+        "kind": "imports"
+      },
+      {
+        "from": "src/__tests__/jev-log-context-hooks.test.mjs",
+        "to": "external:vitest",
+        "kind": "imports"
+      },
+      {
+        "from": "src/__tests__/jev-log-context.test.mjs",
+        "to": "external:node:child_process",
+        "kind": "imports"
+      },
+      {
+        "from": "src/__tests__/jev-log-context.test.mjs",
+        "to": "external:node:fs",
+        "kind": "imports"
+      },
+      {
+        "from": "src/__tests__/jev-log-context.test.mjs",
+        "to": "external:node:http",
+        "kind": "imports"
+      },
+      {
+        "from": "src/__tests__/jev-log-context.test.mjs",
+        "to": "external:node:os",
+        "kind": "imports"
+      },
+      {
+        "from": "src/__tests__/jev-log-context.test.mjs",
+        "to": "external:node:path",
+        "kind": "imports"
+      },
+      {
+        "from": "src/__tests__/jev-log-context.test.mjs",
+        "to": "external:node:url",
+        "kind": "imports"
+      },
+      {
+        "from": "src/__tests__/jev-log-context.test.mjs",
+        "to": "external:vitest",
+        "kind": "imports"
+      },
+      {
+        "from": "src/__tests__/jev-log-context.test.mjs",
+        "to": "scripts/jev-resolve.mjs",
+        "kind": "imports"
+      },
+      {
+        "from": "src/__tests__/jev-log-context.test.mjs",
+        "to": "src/hooks/jev/config.ts",
+        "kind": "imports"
+      },
+      {
+        "from": "src/__tests__/jev-log-context.test.mjs",
+        "to": "src/hooks/jev/resolver.ts",
+        "kind": "imports"
+      },
+      {
+        "from": "src/__tests__/jev-log-rotation.test.mjs",
+        "to": "external:node:child_process",
+        "kind": "imports"
+      },
+      {
+        "from": "src/__tests__/jev-log-rotation.test.mjs",
+        "to": "external:node:fs",
+        "kind": "imports"
+      },
+      {
+        "from": "src/__tests__/jev-log-rotation.test.mjs",
+        "to": "external:node:http",
+        "kind": "imports"
+      },
+      {
+        "from": "src/__tests__/jev-log-rotation.test.mjs",
+        "to": "external:node:os",
+        "kind": "imports"
+      },
+      {
+        "from": "src/__tests__/jev-log-rotation.test.mjs",
+        "to": "external:node:path",
+        "kind": "imports"
+      },
+      {
+        "from": "src/__tests__/jev-log-rotation.test.mjs",
+        "to": "external:node:url",
+        "kind": "imports"
+      },
+      {
+        "from": "src/__tests__/jev-log-rotation.test.mjs",
+        "to": "external:vitest",
+        "kind": "imports"
+      },
+      {
+        "from": "src/__tests__/jev-log-rotation.test.mjs",
+        "to": "scripts/jev-eval.mjs",
+        "kind": "imports"
+      },
+      {
+        "from": "src/__tests__/jev-log-rotation.test.mjs",
+        "to": "scripts/jev-resolve.mjs",
+        "kind": "imports"
+      },
+      {
+        "from": "src/__tests__/jev-log-rotation.test.mjs",
+        "to": "src/hooks/jev/config.ts",
+        "kind": "imports"
+      },
+      {
         "from": "src/__tests__/jev-plugin-hook-wiring.test.mjs",
         "to": "external:node:child_process",
         "kind": "imports"
@@ -56200,6 +56718,41 @@
       {
         "from": "src/__tests__/jev-plugin-hook-wiring.test.mjs",
         "to": "external:vitest",
+        "kind": "imports"
+      },
+      {
+        "from": "src/__tests__/jev-repair-transcript-script.test.mjs",
+        "to": "external:node:child_process",
+        "kind": "imports"
+      },
+      {
+        "from": "src/__tests__/jev-repair-transcript-script.test.mjs",
+        "to": "external:node:fs",
+        "kind": "imports"
+      },
+      {
+        "from": "src/__tests__/jev-repair-transcript-script.test.mjs",
+        "to": "external:node:os",
+        "kind": "imports"
+      },
+      {
+        "from": "src/__tests__/jev-repair-transcript-script.test.mjs",
+        "to": "external:node:path",
+        "kind": "imports"
+      },
+      {
+        "from": "src/__tests__/jev-repair-transcript-script.test.mjs",
+        "to": "external:node:url",
+        "kind": "imports"
+      },
+      {
+        "from": "src/__tests__/jev-repair-transcript-script.test.mjs",
+        "to": "external:vitest",
+        "kind": "imports"
+      },
+      {
+        "from": "src/__tests__/jev-repair-transcript-script.test.mjs",
+        "to": "scripts/jev-repair-transcript.mjs",
         "kind": "imports"
       },
       {
@@ -56255,6 +56808,71 @@
       {
         "from": "src/__tests__/jev-shadow-noul.test.mjs",
         "to": "scripts/lib/jev-shadow.mjs",
+        "kind": "imports"
+      },
+      {
+        "from": "src/__tests__/jev-shadow-spawn-mode.test.mjs",
+        "to": "external:node:path",
+        "kind": "imports"
+      },
+      {
+        "from": "src/__tests__/jev-shadow-spawn-mode.test.mjs",
+        "to": "external:node:url",
+        "kind": "imports"
+      },
+      {
+        "from": "src/__tests__/jev-shadow-spawn-mode.test.mjs",
+        "to": "external:vitest",
+        "kind": "imports"
+      },
+      {
+        "from": "src/__tests__/jev-state-omit-ids.test.mjs",
+        "to": "external:node:child_process",
+        "kind": "imports"
+      },
+      {
+        "from": "src/__tests__/jev-state-omit-ids.test.mjs",
+        "to": "external:node:fs",
+        "kind": "imports"
+      },
+      {
+        "from": "src/__tests__/jev-state-omit-ids.test.mjs",
+        "to": "external:node:http",
+        "kind": "imports"
+      },
+      {
+        "from": "src/__tests__/jev-state-omit-ids.test.mjs",
+        "to": "external:node:os",
+        "kind": "imports"
+      },
+      {
+        "from": "src/__tests__/jev-state-omit-ids.test.mjs",
+        "to": "external:node:path",
+        "kind": "imports"
+      },
+      {
+        "from": "src/__tests__/jev-state-omit-ids.test.mjs",
+        "to": "external:node:process",
+        "kind": "imports"
+      },
+      {
+        "from": "src/__tests__/jev-state-omit-ids.test.mjs",
+        "to": "external:node:url",
+        "kind": "imports"
+      },
+      {
+        "from": "src/__tests__/jev-state-omit-ids.test.mjs",
+        "to": "external:vitest",
+        "kind": "imports"
+      },
+      {
+        "from": "src/__tests__/jev-state-omit-ids.test.mjs",
+        "to": "scripts/jev-resolve.mjs",
+        "kind": "imports"
+      },
+      {
+        "from": "src/__tests__/jev-state-omit-ids.test.mjs",
+        "to": "src/hooks/jev/config.ts",
         "kind": "imports"
       },
       {
@@ -57889,6 +58507,11 @@
       },
       {
         "from": "src/__tests__/ralph-prd-mandatory.test.ts",
+        "to": "external:child_process",
+        "kind": "imports"
+      },
+      {
+        "from": "src/__tests__/ralph-prd-mandatory.test.ts",
         "to": "external:fs",
         "kind": "imports"
       },
@@ -58129,6 +58752,61 @@
       },
       {
         "from": "src/__tests__/rate-limit-wait/daemon.test.ts",
+        "to": "src/features/rate-limit-wait/types.ts",
+        "kind": "type-imports"
+      },
+      {
+        "from": "src/__tests__/rate-limit-wait/herdr-daemon.test.ts",
+        "to": "external:node:fs",
+        "kind": "imports"
+      },
+      {
+        "from": "src/__tests__/rate-limit-wait/herdr-daemon.test.ts",
+        "to": "external:node:os",
+        "kind": "imports"
+      },
+      {
+        "from": "src/__tests__/rate-limit-wait/herdr-daemon.test.ts",
+        "to": "external:node:path",
+        "kind": "imports"
+      },
+      {
+        "from": "src/__tests__/rate-limit-wait/herdr-daemon.test.ts",
+        "to": "external:vitest",
+        "kind": "imports"
+      },
+      {
+        "from": "src/__tests__/rate-limit-wait/herdr-daemon.test.ts",
+        "to": "src/features/rate-limit-wait/daemon-state.ts",
+        "kind": "imports"
+      },
+      {
+        "from": "src/__tests__/rate-limit-wait/herdr-daemon.test.ts",
+        "to": "src/features/rate-limit-wait/daemon.ts",
+        "kind": "imports"
+      },
+      {
+        "from": "src/__tests__/rate-limit-wait/herdr-daemon.test.ts",
+        "to": "src/features/rate-limit-wait/types.ts",
+        "kind": "type-imports"
+      },
+      {
+        "from": "src/__tests__/rate-limit-wait/herdr-detector.test.ts",
+        "to": "external:vitest",
+        "kind": "imports"
+      },
+      {
+        "from": "src/__tests__/rate-limit-wait/herdr-detector.test.ts",
+        "to": "src/cli/tmux-utils.ts",
+        "kind": "imports"
+      },
+      {
+        "from": "src/__tests__/rate-limit-wait/herdr-detector.test.ts",
+        "to": "src/features/rate-limit-wait/tmux-detector.ts",
+        "kind": "imports"
+      },
+      {
+        "from": "src/__tests__/rate-limit-wait/herdr-detector.test.ts",
         "to": "src/features/rate-limit-wait/types.ts",
         "kind": "type-imports"
       },
@@ -61443,6 +62121,21 @@
         "kind": "imports"
       },
       {
+        "from": "src/cli/__tests__/herdr-no-raw-calls.test.ts",
+        "to": "external:child_process",
+        "kind": "imports"
+      },
+      {
+        "from": "src/cli/__tests__/herdr-no-raw-calls.test.ts",
+        "to": "external:path",
+        "kind": "imports"
+      },
+      {
+        "from": "src/cli/__tests__/herdr-no-raw-calls.test.ts",
+        "to": "external:vitest",
+        "kind": "imports"
+      },
+      {
         "from": "src/cli/__tests__/hud-watch.test.ts",
         "to": "external:vitest",
         "kind": "imports"
@@ -61480,6 +62173,46 @@
       {
         "from": "src/cli/__tests__/integer-option.test.ts",
         "to": "src/cli/utils/integer-option.ts",
+        "kind": "imports"
+      },
+      {
+        "from": "src/cli/__tests__/interop-herdr.test.ts",
+        "to": "external:child_process",
+        "kind": "imports"
+      },
+      {
+        "from": "src/cli/__tests__/interop-herdr.test.ts",
+        "to": "external:vitest",
+        "kind": "imports"
+      },
+      {
+        "from": "src/cli/__tests__/interop-herdr.test.ts",
+        "to": "src/cli/interop.ts",
+        "kind": "imports"
+      },
+      {
+        "from": "src/cli/__tests__/interop-herdr.test.ts",
+        "to": "src/cli/tmux-utils.ts",
+        "kind": "imports"
+      },
+      {
+        "from": "src/cli/__tests__/launch-herdr.test.ts",
+        "to": "external:child_process",
+        "kind": "imports"
+      },
+      {
+        "from": "src/cli/__tests__/launch-herdr.test.ts",
+        "to": "external:vitest",
+        "kind": "imports"
+      },
+      {
+        "from": "src/cli/__tests__/launch-herdr.test.ts",
+        "to": "src/cli/launch.ts",
+        "kind": "imports"
+      },
+      {
+        "from": "src/cli/__tests__/launch-herdr.test.ts",
+        "to": "src/cli/tmux-utils.ts",
         "kind": "imports"
       },
       {
@@ -63483,6 +64216,16 @@
         "kind": "imports"
       },
       {
+        "from": "src/cli/interop.ts",
+        "to": "src/team/herdr-session.ts",
+        "kind": "imports"
+      },
+      {
+        "from": "src/cli/interop.ts",
+        "to": "src/team/tmux-session.ts",
+        "kind": "imports"
+      },
+      {
         "from": "src/cli/launch.ts",
         "to": "external:child_process",
         "kind": "imports"
@@ -63540,6 +64283,16 @@
       {
         "from": "src/cli/launch.ts",
         "to": "src/lib/plugin-dir.ts",
+        "kind": "imports"
+      },
+      {
+        "from": "src/cli/launch.ts",
+        "to": "src/team/herdr-session.ts",
+        "kind": "imports"
+      },
+      {
+        "from": "src/cli/launch.ts",
+        "to": "src/team/tmux-session.ts",
         "kind": "imports"
       },
       {
@@ -65639,7 +66392,17 @@
       },
       {
         "from": "src/features/rate-limit-wait/daemon.ts",
+        "to": "src/features/rate-limit-wait/types.ts",
+        "kind": "type-imports"
+      },
+      {
+        "from": "src/features/rate-limit-wait/daemon.ts",
         "to": "src/platform/index.ts",
+        "kind": "imports"
+      },
+      {
+        "from": "src/features/rate-limit-wait/daemon.ts",
+        "to": "src/team/tmux-session.ts",
         "kind": "imports"
       },
       {
@@ -65721,6 +66484,21 @@
         "from": "src/features/rate-limit-wait/tmux-detector.ts",
         "to": "src/features/rate-limit-wait/types.ts",
         "kind": "type-imports"
+      },
+      {
+        "from": "src/features/rate-limit-wait/tmux-detector.ts",
+        "to": "src/team/herdr-session.ts",
+        "kind": "imports"
+      },
+      {
+        "from": "src/features/rate-limit-wait/tmux-detector.ts",
+        "to": "src/team/herdr-session.ts",
+        "kind": "type-imports"
+      },
+      {
+        "from": "src/features/rate-limit-wait/tmux-detector.ts",
+        "to": "src/team/tmux-session.ts",
+        "kind": "imports"
       },
       {
         "from": "src/features/rate-limit-wait/types.ts",
@@ -69988,6 +70766,71 @@
         "kind": "type-imports"
       },
       {
+        "from": "src/hooks/jev/__tests__/log-context.test.ts",
+        "to": "external:node:fs/promises",
+        "kind": "imports"
+      },
+      {
+        "from": "src/hooks/jev/__tests__/log-context.test.ts",
+        "to": "external:node:os",
+        "kind": "imports"
+      },
+      {
+        "from": "src/hooks/jev/__tests__/log-context.test.ts",
+        "to": "external:node:path",
+        "kind": "imports"
+      },
+      {
+        "from": "src/hooks/jev/__tests__/log-context.test.ts",
+        "to": "external:vitest",
+        "kind": "imports"
+      },
+      {
+        "from": "src/hooks/jev/__tests__/log-context.test.ts",
+        "to": "src/hooks/jev/resolver.ts",
+        "kind": "imports"
+      },
+      {
+        "from": "src/hooks/jev/__tests__/log-context.test.ts",
+        "to": "src/hooks/jev/types.ts",
+        "kind": "type-imports"
+      },
+      {
+        "from": "src/hooks/jev/__tests__/log-rotation.test.ts",
+        "to": "external:node:fs/promises",
+        "kind": "imports"
+      },
+      {
+        "from": "src/hooks/jev/__tests__/log-rotation.test.ts",
+        "to": "external:node:os",
+        "kind": "imports"
+      },
+      {
+        "from": "src/hooks/jev/__tests__/log-rotation.test.ts",
+        "to": "external:node:path",
+        "kind": "imports"
+      },
+      {
+        "from": "src/hooks/jev/__tests__/log-rotation.test.ts",
+        "to": "external:vitest",
+        "kind": "imports"
+      },
+      {
+        "from": "src/hooks/jev/__tests__/log-rotation.test.ts",
+        "to": "src/hooks/jev/config.ts",
+        "kind": "imports"
+      },
+      {
+        "from": "src/hooks/jev/__tests__/log-rotation.test.ts",
+        "to": "src/hooks/jev/resolver.ts",
+        "kind": "imports"
+      },
+      {
+        "from": "src/hooks/jev/__tests__/log-rotation.test.ts",
+        "to": "src/hooks/jev/types.ts",
+        "kind": "type-imports"
+      },
+      {
         "from": "src/hooks/jev/__tests__/points-wire-shape.test.ts",
         "to": "external:vitest",
         "kind": "imports"
@@ -70009,6 +70852,41 @@
       },
       {
         "from": "src/hooks/jev/__tests__/points-wire-shape.test.ts",
+        "to": "src/hooks/jev/types.ts",
+        "kind": "type-imports"
+      },
+      {
+        "from": "src/hooks/jev/__tests__/resolver-request-count.test.ts",
+        "to": "external:node:fs/promises",
+        "kind": "imports"
+      },
+      {
+        "from": "src/hooks/jev/__tests__/resolver-request-count.test.ts",
+        "to": "external:node:os",
+        "kind": "imports"
+      },
+      {
+        "from": "src/hooks/jev/__tests__/resolver-request-count.test.ts",
+        "to": "external:node:path",
+        "kind": "imports"
+      },
+      {
+        "from": "src/hooks/jev/__tests__/resolver-request-count.test.ts",
+        "to": "external:vitest",
+        "kind": "imports"
+      },
+      {
+        "from": "src/hooks/jev/__tests__/resolver-request-count.test.ts",
+        "to": "scripts/lib/jev-breaker.mjs",
+        "kind": "imports"
+      },
+      {
+        "from": "src/hooks/jev/__tests__/resolver-request-count.test.ts",
+        "to": "src/hooks/jev/resolver.ts",
+        "kind": "imports"
+      },
+      {
+        "from": "src/hooks/jev/__tests__/resolver-request-count.test.ts",
         "to": "src/hooks/jev/types.ts",
         "kind": "type-imports"
       },
@@ -70041,6 +70919,86 @@
         "from": "src/hooks/jev/__tests__/resolver.test.ts",
         "to": "src/hooks/jev/types.ts",
         "kind": "type-imports"
+      },
+      {
+        "from": "src/hooks/jev/__tests__/shared-breaker.test.ts",
+        "to": "external:node:fs",
+        "kind": "imports"
+      },
+      {
+        "from": "src/hooks/jev/__tests__/shared-breaker.test.ts",
+        "to": "external:node:fs/promises",
+        "kind": "imports"
+      },
+      {
+        "from": "src/hooks/jev/__tests__/shared-breaker.test.ts",
+        "to": "external:node:os",
+        "kind": "imports"
+      },
+      {
+        "from": "src/hooks/jev/__tests__/shared-breaker.test.ts",
+        "to": "external:node:path",
+        "kind": "imports"
+      },
+      {
+        "from": "src/hooks/jev/__tests__/shared-breaker.test.ts",
+        "to": "external:vitest",
+        "kind": "imports"
+      },
+      {
+        "from": "src/hooks/jev/__tests__/shared-breaker.test.ts",
+        "to": "src/hooks/jev/client.ts",
+        "kind": "imports"
+      },
+      {
+        "from": "src/hooks/jev/__tests__/shared-breaker.test.ts",
+        "to": "src/hooks/jev/resolver.ts",
+        "kind": "imports"
+      },
+      {
+        "from": "src/hooks/jev/__tests__/shared-breaker.test.ts",
+        "to": "src/hooks/jev/types.ts",
+        "kind": "type-imports"
+      },
+      {
+        "from": "src/hooks/jev/__tests__/state-omit-ids.test.ts",
+        "to": "external:node:fs",
+        "kind": "imports"
+      },
+      {
+        "from": "src/hooks/jev/__tests__/state-omit-ids.test.ts",
+        "to": "external:node:os",
+        "kind": "imports"
+      },
+      {
+        "from": "src/hooks/jev/__tests__/state-omit-ids.test.ts",
+        "to": "external:node:path",
+        "kind": "imports"
+      },
+      {
+        "from": "src/hooks/jev/__tests__/state-omit-ids.test.ts",
+        "to": "external:vitest",
+        "kind": "imports"
+      },
+      {
+        "from": "src/hooks/jev/__tests__/state-omit-ids.test.ts",
+        "to": "src/hooks/code-simplifier/jev-shadow.ts",
+        "kind": "imports"
+      },
+      {
+        "from": "src/hooks/jev/__tests__/state-omit-ids.test.ts",
+        "to": "src/hooks/jev/resolver.ts",
+        "kind": "imports"
+      },
+      {
+        "from": "src/hooks/jev/__tests__/state-omit-ids.test.ts",
+        "to": "src/hooks/persistent-mode/index.ts",
+        "kind": "type-imports"
+      },
+      {
+        "from": "src/hooks/jev/__tests__/state-omit-ids.test.ts",
+        "to": "src/hooks/persistent-mode/jev-shadow.ts",
+        "kind": "imports"
       },
       {
         "from": "src/hooks/jev/client.ts",
@@ -70099,6 +71057,16 @@
       },
       {
         "from": "src/hooks/jev/resolver.ts",
+        "to": "external:node:crypto",
+        "kind": "imports"
+      },
+      {
+        "from": "src/hooks/jev/resolver.ts",
+        "to": "external:node:fs",
+        "kind": "imports"
+      },
+      {
+        "from": "src/hooks/jev/resolver.ts",
         "to": "external:node:fs/promises",
         "kind": "imports"
       },
@@ -70109,6 +71077,16 @@
       },
       {
         "from": "src/hooks/jev/resolver.ts",
+        "to": "scripts/lib/jev-breaker.mjs",
+        "kind": "imports"
+      },
+      {
+        "from": "src/hooks/jev/resolver.ts",
+        "to": "scripts/lib/jev-breaker.mjs",
+        "kind": "type-imports"
+      },
+      {
+        "from": "src/hooks/jev/resolver.ts",
         "to": "src/hooks/jev/client.ts",
         "kind": "imports"
       },
@@ -70116,6 +71094,11 @@
         "from": "src/hooks/jev/resolver.ts",
         "to": "src/hooks/jev/config.ts",
         "kind": "imports"
+      },
+      {
+        "from": "src/hooks/jev/resolver.ts",
+        "to": "src/hooks/jev/config.ts",
+        "kind": "type-imports"
       },
       {
         "from": "src/hooks/jev/resolver.ts",
@@ -72271,6 +73254,56 @@
         "from": "src/hooks/project-memory/__tests__/pre-compact.test.ts",
         "to": "src/hooks/rules-injector/finder.ts",
         "kind": "imports"
+      },
+      {
+        "from": "src/hooks/project-memory/__tests__/rescan-concurrency.test.ts",
+        "to": "external:fs/promises",
+        "kind": "imports"
+      },
+      {
+        "from": "src/hooks/project-memory/__tests__/rescan-concurrency.test.ts",
+        "to": "external:os",
+        "kind": "imports"
+      },
+      {
+        "from": "src/hooks/project-memory/__tests__/rescan-concurrency.test.ts",
+        "to": "external:path",
+        "kind": "imports"
+      },
+      {
+        "from": "src/hooks/project-memory/__tests__/rescan-concurrency.test.ts",
+        "to": "external:vitest",
+        "kind": "imports"
+      },
+      {
+        "from": "src/hooks/project-memory/__tests__/rescan-concurrency.test.ts",
+        "to": "src/features/context-injector/collector.ts",
+        "kind": "imports"
+      },
+      {
+        "from": "src/hooks/project-memory/__tests__/rescan-concurrency.test.ts",
+        "to": "src/hooks/project-memory/constants.ts",
+        "kind": "imports"
+      },
+      {
+        "from": "src/hooks/project-memory/__tests__/rescan-concurrency.test.ts",
+        "to": "src/hooks/project-memory/index.ts",
+        "kind": "imports"
+      },
+      {
+        "from": "src/hooks/project-memory/__tests__/rescan-concurrency.test.ts",
+        "to": "src/hooks/project-memory/learner.ts",
+        "kind": "imports"
+      },
+      {
+        "from": "src/hooks/project-memory/__tests__/rescan-concurrency.test.ts",
+        "to": "src/hooks/project-memory/storage.ts",
+        "kind": "imports"
+      },
+      {
+        "from": "src/hooks/project-memory/__tests__/rescan-concurrency.test.ts",
+        "to": "src/hooks/project-memory/types.ts",
+        "kind": "type-imports"
       },
       {
         "from": "src/hooks/project-memory/__tests__/storage.test.ts",
@@ -80513,6 +81546,16 @@
         "kind": "imports"
       },
       {
+        "from": "src/notifications/__tests__/reply-herdr.test.ts",
+        "to": "external:vitest",
+        "kind": "imports"
+      },
+      {
+        "from": "src/notifications/__tests__/reply-herdr.test.ts",
+        "to": "src/notifications/reply-listener.ts",
+        "kind": "imports"
+      },
+      {
         "from": "src/notifications/__tests__/reply-listener.test.ts",
         "to": "external:fs",
         "kind": "imports"
@@ -80928,6 +81971,16 @@
         "kind": "type-exports"
       },
       {
+        "from": "src/notifications/index.ts",
+        "to": "src/team/herdr-session.ts",
+        "kind": "imports"
+      },
+      {
+        "from": "src/notifications/index.ts",
+        "to": "src/team/tmux-session.ts",
+        "kind": "imports"
+      },
+      {
         "from": "src/notifications/reply-listener.ts",
         "to": "external:child_process",
         "kind": "imports"
@@ -81014,12 +82067,27 @@
       },
       {
         "from": "src/notifications/reply-listener.ts",
+        "to": "src/notifications/tmux.ts",
+        "kind": "imports"
+      },
+      {
+        "from": "src/notifications/reply-listener.ts",
         "to": "src/notifications/types.ts",
         "kind": "type-imports"
       },
       {
         "from": "src/notifications/reply-listener.ts",
         "to": "src/platform/index.ts",
+        "kind": "imports"
+      },
+      {
+        "from": "src/notifications/reply-listener.ts",
+        "to": "src/team/herdr-session.ts",
+        "kind": "imports"
+      },
+      {
+        "from": "src/notifications/reply-listener.ts",
+        "to": "src/team/tmux-session.ts",
         "kind": "imports"
       },
       {
@@ -81095,6 +82163,16 @@
       {
         "from": "src/notifications/tmux.ts",
         "to": "src/cli/tmux-utils.ts",
+        "kind": "imports"
+      },
+      {
+        "from": "src/notifications/tmux.ts",
+        "to": "src/team/herdr-session.ts",
+        "kind": "imports"
+      },
+      {
+        "from": "src/notifications/tmux.ts",
+        "to": "src/team/tmux-session.ts",
         "kind": "imports"
       },
       {
@@ -82631,6 +83709,56 @@
         "from": "src/team/__tests__/helpers/git-fixture.ts",
         "to": "src/team/merge-orchestrator.ts",
         "kind": "type-imports"
+      },
+      {
+        "from": "src/team/__tests__/herdr-session-realherdr.test.ts",
+        "to": "external:child_process",
+        "kind": "imports"
+      },
+      {
+        "from": "src/team/__tests__/herdr-session-realherdr.test.ts",
+        "to": "external:fs",
+        "kind": "imports"
+      },
+      {
+        "from": "src/team/__tests__/herdr-session-realherdr.test.ts",
+        "to": "external:os",
+        "kind": "imports"
+      },
+      {
+        "from": "src/team/__tests__/herdr-session-realherdr.test.ts",
+        "to": "external:path",
+        "kind": "imports"
+      },
+      {
+        "from": "src/team/__tests__/herdr-session-realherdr.test.ts",
+        "to": "external:util",
+        "kind": "imports"
+      },
+      {
+        "from": "src/team/__tests__/herdr-session-realherdr.test.ts",
+        "to": "external:vitest",
+        "kind": "imports"
+      },
+      {
+        "from": "src/team/__tests__/herdr-session-realherdr.test.ts",
+        "to": "src/team/herdr-session.ts",
+        "kind": "imports"
+      },
+      {
+        "from": "src/team/__tests__/herdr-session.test.ts",
+        "to": "external:vitest",
+        "kind": "imports"
+      },
+      {
+        "from": "src/team/__tests__/herdr-session.test.ts",
+        "to": "src/team/herdr-session.ts",
+        "kind": "imports"
+      },
+      {
+        "from": "src/team/__tests__/herdr-session.test.ts",
+        "to": "src/team/tmux-session.ts",
+        "kind": "imports"
       },
       {
         "from": "src/team/__tests__/idle-nudge.test.ts",
@@ -84888,6 +86016,16 @@
         "kind": "imports"
       },
       {
+        "from": "src/team/__tests__/tmux-session.create-team-herdr.test.ts",
+        "to": "external:vitest",
+        "kind": "imports"
+      },
+      {
+        "from": "src/team/__tests__/tmux-session.create-team-herdr.test.ts",
+        "to": "src/team/tmux-session.ts",
+        "kind": "imports"
+      },
+      {
         "from": "src/team/__tests__/tmux-session.create-team.test.ts",
         "to": "external:vitest",
         "kind": "imports"
@@ -84901,6 +86039,31 @@
         "from": "src/team/__tests__/tmux-session.create-team.test.ts",
         "to": "src/team/tmux-session.ts",
         "kind": "imports"
+      },
+      {
+        "from": "src/team/__tests__/tmux-session.herdr-arms.test.ts",
+        "to": "external:node:fs",
+        "kind": "imports"
+      },
+      {
+        "from": "src/team/__tests__/tmux-session.herdr-arms.test.ts",
+        "to": "external:vitest",
+        "kind": "imports"
+      },
+      {
+        "from": "src/team/__tests__/tmux-session.herdr-arms.test.ts",
+        "to": "src/team/mailbox-notification-guard.ts",
+        "kind": "type-imports"
+      },
+      {
+        "from": "src/team/__tests__/tmux-session.herdr-arms.test.ts",
+        "to": "src/team/tmux-session.ts",
+        "kind": "imports"
+      },
+      {
+        "from": "src/team/__tests__/tmux-session.herdr-arms.test.ts",
+        "to": "src/team/tmux-session.ts",
+        "kind": "type-imports"
       },
       {
         "from": "src/team/__tests__/tmux-session.kill-team-session.test.ts",
@@ -85851,6 +87014,31 @@
         "from": "src/team/governance.ts",
         "to": "src/team/types.ts",
         "kind": "type-imports"
+      },
+      {
+        "from": "src/team/herdr-session.ts",
+        "to": "external:node:child_process",
+        "kind": "imports"
+      },
+      {
+        "from": "src/team/herdr-session.ts",
+        "to": "external:node:crypto",
+        "kind": "imports"
+      },
+      {
+        "from": "src/team/herdr-session.ts",
+        "to": "external:node:fs",
+        "kind": "imports"
+      },
+      {
+        "from": "src/team/herdr-session.ts",
+        "to": "external:node:path",
+        "kind": "imports"
+      },
+      {
+        "from": "src/team/herdr-session.ts",
+        "to": "external:node:util",
+        "kind": "imports"
       },
       {
         "from": "src/team/idle-nudge.ts",
@@ -86829,6 +88017,11 @@
       },
       {
         "from": "src/team/runtime-v2.ts",
+        "to": "src/team/herdr-session.ts",
+        "kind": "imports"
+      },
+      {
+        "from": "src/team/runtime-v2.ts",
         "to": "src/team/leader-inbox.ts",
         "kind": "imports"
       },
@@ -87131,6 +88324,11 @@
         "from": "src/team/scaling.ts",
         "to": "src/team/git-worktree.ts",
         "kind": "type-imports"
+      },
+      {
+        "from": "src/team/scaling.ts",
+        "to": "src/team/herdr-session.ts",
+        "kind": "imports"
       },
       {
         "from": "src/team/scaling.ts",
@@ -87549,8 +88747,23 @@
       },
       {
         "from": "src/team/tmux-session.ts",
+        "to": "src/config/loader.ts",
+        "kind": "imports"
+      },
+      {
+        "from": "src/team/tmux-session.ts",
         "to": "src/graph/runtime/native-contained-fs.ts",
         "kind": "imports"
+      },
+      {
+        "from": "src/team/tmux-session.ts",
+        "to": "src/team/herdr-session.ts",
+        "kind": "imports"
+      },
+      {
+        "from": "src/team/tmux-session.ts",
+        "to": "src/team/herdr-session.ts",
+        "kind": "type-imports"
       },
       {
         "from": "src/team/tmux-session.ts",
@@ -91458,6 +92671,186 @@
         "kind": "imports"
       },
       {
+        "from": "tests/integration/jev-applied-log-late-failure.test.ts",
+        "to": "external:node:child_process",
+        "kind": "imports"
+      },
+      {
+        "from": "tests/integration/jev-applied-log-late-failure.test.ts",
+        "to": "external:node:fs",
+        "kind": "imports"
+      },
+      {
+        "from": "tests/integration/jev-applied-log-late-failure.test.ts",
+        "to": "external:node:http",
+        "kind": "imports"
+      },
+      {
+        "from": "tests/integration/jev-applied-log-late-failure.test.ts",
+        "to": "external:node:http",
+        "kind": "type-imports"
+      },
+      {
+        "from": "tests/integration/jev-applied-log-late-failure.test.ts",
+        "to": "external:node:os",
+        "kind": "imports"
+      },
+      {
+        "from": "tests/integration/jev-applied-log-late-failure.test.ts",
+        "to": "external:node:path",
+        "kind": "imports"
+      },
+      {
+        "from": "tests/integration/jev-applied-log-late-failure.test.ts",
+        "to": "external:node:url",
+        "kind": "imports"
+      },
+      {
+        "from": "tests/integration/jev-applied-log-late-failure.test.ts",
+        "to": "external:vitest",
+        "kind": "imports"
+      },
+      {
+        "from": "tests/integration/jev-codex-p2-fixes.test.ts",
+        "to": "external:node:child_process",
+        "kind": "imports"
+      },
+      {
+        "from": "tests/integration/jev-codex-p2-fixes.test.ts",
+        "to": "external:node:fs",
+        "kind": "imports"
+      },
+      {
+        "from": "tests/integration/jev-codex-p2-fixes.test.ts",
+        "to": "external:node:os",
+        "kind": "imports"
+      },
+      {
+        "from": "tests/integration/jev-codex-p2-fixes.test.ts",
+        "to": "external:node:path",
+        "kind": "imports"
+      },
+      {
+        "from": "tests/integration/jev-codex-p2-fixes.test.ts",
+        "to": "external:node:url",
+        "kind": "imports"
+      },
+      {
+        "from": "tests/integration/jev-codex-p2-fixes.test.ts",
+        "to": "external:vitest",
+        "kind": "imports"
+      },
+      {
+        "from": "tests/integration/jev-context-pruning-applied-log.test.ts",
+        "to": "external:node:child_process",
+        "kind": "imports"
+      },
+      {
+        "from": "tests/integration/jev-context-pruning-applied-log.test.ts",
+        "to": "external:node:fs",
+        "kind": "imports"
+      },
+      {
+        "from": "tests/integration/jev-context-pruning-applied-log.test.ts",
+        "to": "external:node:http",
+        "kind": "imports"
+      },
+      {
+        "from": "tests/integration/jev-context-pruning-applied-log.test.ts",
+        "to": "external:node:http",
+        "kind": "type-imports"
+      },
+      {
+        "from": "tests/integration/jev-context-pruning-applied-log.test.ts",
+        "to": "external:node:os",
+        "kind": "imports"
+      },
+      {
+        "from": "tests/integration/jev-context-pruning-applied-log.test.ts",
+        "to": "external:node:path",
+        "kind": "imports"
+      },
+      {
+        "from": "tests/integration/jev-context-pruning-applied-log.test.ts",
+        "to": "external:node:url",
+        "kind": "imports"
+      },
+      {
+        "from": "tests/integration/jev-context-pruning-applied-log.test.ts",
+        "to": "external:vitest",
+        "kind": "imports"
+      },
+      {
+        "from": "tests/integration/jev-delivery-guard-handoff.test.ts",
+        "to": "external:node:child_process",
+        "kind": "imports"
+      },
+      {
+        "from": "tests/integration/jev-delivery-guard-handoff.test.ts",
+        "to": "external:node:fs",
+        "kind": "imports"
+      },
+      {
+        "from": "tests/integration/jev-delivery-guard-handoff.test.ts",
+        "to": "external:node:http",
+        "kind": "imports"
+      },
+      {
+        "from": "tests/integration/jev-delivery-guard-handoff.test.ts",
+        "to": "external:node:http",
+        "kind": "type-imports"
+      },
+      {
+        "from": "tests/integration/jev-delivery-guard-handoff.test.ts",
+        "to": "external:node:os",
+        "kind": "imports"
+      },
+      {
+        "from": "tests/integration/jev-delivery-guard-handoff.test.ts",
+        "to": "external:node:path",
+        "kind": "imports"
+      },
+      {
+        "from": "tests/integration/jev-delivery-guard-handoff.test.ts",
+        "to": "external:node:url",
+        "kind": "imports"
+      },
+      {
+        "from": "tests/integration/jev-delivery-guard-handoff.test.ts",
+        "to": "external:vitest",
+        "kind": "imports"
+      },
+      {
+        "from": "tests/integration/jev-delivery-guard-per-logdir.test.ts",
+        "to": "external:node:crypto",
+        "kind": "imports"
+      },
+      {
+        "from": "tests/integration/jev-delivery-guard-per-logdir.test.ts",
+        "to": "external:node:fs",
+        "kind": "imports"
+      },
+      {
+        "from": "tests/integration/jev-delivery-guard-per-logdir.test.ts",
+        "to": "external:node:os",
+        "kind": "imports"
+      },
+      {
+        "from": "tests/integration/jev-delivery-guard-per-logdir.test.ts",
+        "to": "external:node:path",
+        "kind": "imports"
+      },
+      {
+        "from": "tests/integration/jev-delivery-guard-per-logdir.test.ts",
+        "to": "external:node:url",
+        "kind": "imports"
+      },
+      {
+        "from": "tests/integration/jev-delivery-guard-per-logdir.test.ts",
+        "to": "external:vitest",
+        "kind": "imports"
+      },
+      {
         "from": "tests/integration/jev-max-effort-always.test.ts",
         "to": "external:node:child_process",
         "kind": "imports"
@@ -91704,6 +93097,36 @@
       },
       {
         "from": "tests/integration/jev-model-routing-marker.test.ts",
+        "to": "external:vitest",
+        "kind": "imports"
+      },
+      {
+        "from": "tests/integration/jev-shadow-spawn-failure.test.ts",
+        "to": "external:node:child_process",
+        "kind": "imports"
+      },
+      {
+        "from": "tests/integration/jev-shadow-spawn-failure.test.ts",
+        "to": "external:node:fs",
+        "kind": "imports"
+      },
+      {
+        "from": "tests/integration/jev-shadow-spawn-failure.test.ts",
+        "to": "external:node:os",
+        "kind": "imports"
+      },
+      {
+        "from": "tests/integration/jev-shadow-spawn-failure.test.ts",
+        "to": "external:node:path",
+        "kind": "imports"
+      },
+      {
+        "from": "tests/integration/jev-shadow-spawn-failure.test.ts",
+        "to": "external:node:url",
+        "kind": "imports"
+      },
+      {
+        "from": "tests/integration/jev-shadow-spawn-failure.test.ts",
         "to": "external:vitest",
         "kind": "imports"
       },
@@ -92909,12 +94332,12 @@
       }
     ],
     "stats": {
-      "nodeCount": 8273,
-      "edgeCount": 8865,
-      "importEdgeCount": 7412,
+      "nodeCount": 8298,
+      "edgeCount": 9124,
+      "importEdgeCount": 7653,
       "registerEdgeCount": 105
     }
   },
-  "inventorySha256": "a6bc1a36066b6e9d37b02f940c1f61d6c1422f17d89b04ceb1cb5d7073fc6166",
-  "manifestSha256": "4214cfe5df5c5bac0b5d9c1297ba4d41ca91739912c0b84855aba0bae5b0f198"
+  "inventorySha256": "8052560f0b9c4008258c257af9bfec610abcba96f0b0c9abde8166a9cf56aba5",
+  "manifestSha256": "2ddd869ab1e00f63c04f8beff97ced78cccab3e939ef63b04667a7c87701d54d"
 }

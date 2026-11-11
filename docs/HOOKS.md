@@ -611,20 +611,31 @@ export TYPESAFE_API_KEY="your-api-key"
 
 # 2. Explicitly opt in to judgment points
 export OMC_JEV="point1,point2:active,all"
+
+# Optional: another endpoint that implements the same API, such as a proxy
+export OMC_JEV_ENDPOINT="https://jev-proxy.example.com/v1/systemone"
 ```
 
 #### Environment Variables
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `TYPESAFE_API_KEY` | (absent) | API key for TypeSafe System One. Required to enable Jev; the key alone does not enable any points. |
+| `TYPESAFE_API_KEY` | (absent) | API key for the Jev API at `OMC_JEV_ENDPOINT` (TypeSafe System One by default). Required to enable Jev; the key alone does not enable any points. |
 | `OMC_JEV` | (absent) | Per-point opt-in: `point`, `point:active`, `all` (every point, shadow), `all:active` (every point, active), or `point:off` (that point off, also under `all` and `all:active`). Comma-separated; unknown point names are ignored. |
 | `OMC_JEV_TIMEOUT_MS` | `2000` | Per-call timeout in milliseconds (single round-trip measured at 465–605 ms; default allows margin). In active mode the requests of one hook process add up: each waits up to this value plus the resolver buffer (500 ms; 3500 ms for `model-routing`), and the resolver process needs time to start (0.5-1.2 s on a busy Windows laptop). The timeouts in `hooks/hooks.json` of the hooks that wait for Jev (`pre-tool-enforcer`, `post-tool-verifier`, `persistent-mode`, `code-simplifier`) are sized for the default. If you raise this value, check that the sum over the requests of one hook (`persistent-mode` also waits up to 6 s for the bridge) still fits the hook timeout minus the `run.cjs` cushion (0.5 s POSIX, 1.5 s Windows); otherwise `run.cjs` stops the hook and drops its whole output. `keyword-detector.mjs` is capped at 8 s by `run.cjs` whatever its manifest timeout says, so with three active points (`skill-trigger`, `intent`, `task-size`) at the defaults it can still be stopped. |
 | `OMC_JEV_MAX_REQUESTS` | `0` (unlimited) | Maximum Jev requests per process. When reached, heuristic twins run for remaining calls. |
+| `OMC_JEV_BREAKER` | (unset) | Set to `1` to share one circuit breaker between every process of the machine, hook scripts included: after HTTP 429, 401, 402, 403, any 5xx, or three requests without a response within a minute, no request is sent until it closes. The `compaction` point honors it too (through its hooks module). See [Shared breaker and request limit](#shared-breaker-and-request-limit). |
+| `OMC_JEV_MAX_RPM` | (unset, no limit) | Maximum Jev requests per UTC minute for the machine and endpoint/key, a positive integer (`0` or any other value means no limit). Low-priority points stop at 60 % of it and medium ones at 85 %. The `compaction` point counts against it too, as a medium point. See [Shared breaker and request limit](#shared-breaker-and-request-limit). |
+| `OMC_JEV_BREAKER_DIR` | `~/.omc/state/jev/breaker` | State directory of the shared breaker and request limit (test only). |
+| `OMC_JEV_HOOK_DEADLINE` | (set by the hook) | With `OMC_JEV_BREAKER=1`, the moment (epoch milliseconds) an active-mode hook will kill its resolver, less 100 ms. The resolver ends its request by then. Not meant to be set by hand. See [Shared breaker and request limit](#shared-breaker-and-request-limit). |
 | `OMC_JEV_EXCERPT_CHARS` | `200` | Maximum string length sent in state and shadow log. Recursively bounds all strings in the judgment state; question definitions are static text and are sent whole. Does not apply to the points that have their own default (next row). |
 | `OMC_JEV_EXCERPT_CHARS_<POINT>` | (unset) | The same limit for one point: the point name upper-cased with dashes as underscores, for example `OMC_JEV_EXCERPT_CHARS_MODEL_ROUTING` (the variable name itself must be upper case). Order for a point: its own variable, then the point's default, then `OMC_JEV_EXCERPT_CHARS`. Point defaults: `model-routing` `12000`; `task-size` `4000`; `skill-trigger` and `intent` `1000`; `learner-extraction` and `loop-continuation` `2000` (the length to which `persistent-mode.mjs` cuts the last assistant message it sends for `loop-continuation`). An invalid value is ignored. To send less of one of these points, set its own variable, for example `OMC_JEV_EXCERPT_CHARS_TASK_SIZE=200`, the limit of earlier releases; `OMC_JEV_EXCERPT_CHARS` alone does not reach a point that has its own default. |
-| `OMC_JEV_ENDPOINT` | `https://api.typesafe.ai/v1/systemone` | Override for stub servers or tests. |
-| `OMC_JEV_LOG_DIR` | `.omc/state/jev` | Shadow-log directory override (test only). |
+| `OMC_JEV_ENDPOINT` | `https://api.typesafe.ai/v1/systemone` | Address of the Jev API. Any endpoint that implements the same API works, for example a proxy or gateway in front of it, or a stub server in tests. `TYPESAFE_API_KEY` is sent to this address as a bearer token. |
+| `OMC_JEV_LOG_DIR` | `.omc/state/jev` | Directory of the Jev logs: `shadow.jsonl` and the files the hook scripts write next to it. The default is `state/jev` under the project's state root, so it follows `OMC_STATE_DIR`; set this variable to keep the logs of every project in one place. |
+| `OMC_JEV_LOG_MAX_MB` | (unset) | Size limit in megabytes (MiB) for each Jev log file. Before a line is appended, a file larger than the limit is renamed and the line starts a new file. Unset, `0`, a value that is not a canonical positive integer (a sign, spaces, a decimal point, an exponent or a leading zero), or a value above `8589934591`: no rotation, the log grows as before. See [Log rotation](#log-rotation). |
+| `OMC_JEV_LOG_CONTEXT` | (unset) | Set to `1` or `true` to add the ids of the hook call to every Jev log line (`tool_use_id`, `session_id`, `cwd`, `agent_id`, `agent_type`, `prompt_id`, and a `request_id` for each request), to log active-mode resolver processes that end without a line, and to log `jev` and `confidence` for the first question only. The ids stay in the local log and are never sent to Jev. See [Call ids and resolver failures](#call-ids-and-resolver-failures). |
+| `OMC_JEV_APPLIED_LOG` | (unset) | Set to `1` or `true` to log every active Jev answer that changed what a hook script does to `applied.jsonl`, next to `shadow.jsonl`. See [Applied log](#applied-log). |
+| `OMC_JEV_STATE_OMIT_IDS` | (unset) | Set to `1` or `true` to leave `session_id` out of the `loop-continuation` state and `cwd` out of the `simplifier-trigger` state, so neither is sent to Jev. With `OMC_JEV_LOG_CONTEXT=1` both stay in the local log line. See [States without session ids](#states-without-session-ids). |
 | `OMC_JEV_QUIET` | (unset) | Set to `1` to silence the env-activation stderr warning. |
 | `OMC_JEV_MAX_EFFORT` | `max` | Cap for the subagent reasoning effort set by the active `model-routing` point: `low`, `medium`, `high`, `xhigh`, or `max`, case-insensitive, surrounding spaces ignored. Other values use the default. A lower cap lowers the mapping: `high` restores the cap of earlier releases. A value that is set but not one of these is reported on stderr (unless `OMC_JEV_QUIET=1`) and the default is used. With `OMC_JEV_MAX_EFFORT_ALWAYS=1` the cap also lowers the explicit effort of every other Task/Agent call. See [Model routing: subagent effort](#model-routing-subagent-effort). |
 | `OMC_JEV_MAX_EFFORT_ALWAYS` | (unset) | Set to `1` or `true` to apply `OMC_JEV_MAX_EFFORT` to the explicit `effort` of every Task/Agent call, not only to the effort the active `model-routing` point sets: also when the point is off or in shadow mode, when Jev is not asked about the call or gives no usable answer, and when the hook fails. Script hooks only. See [Model routing: subagent effort](#model-routing-subagent-effort). |
@@ -635,6 +646,8 @@ export OMC_JEV="point1,point2:active,all"
 | `OMC_JEV_TASK_SIZE_NOTICE` | (unset) | Set to `1` or `true` to make the active `task-size` point of the hook script report what it did: suppressed heavy modes with the reason, as the TypeScript bridge does, and heavy modes kept although Jev rated the task small (script only). The classifier check behind the suppression also uses the `taskSizeDetection` word limits. Which modes are suppressed by default limits does not change. Script hooks only. See [Task size: heavy-mode suppression](#task-size-heavy-mode-suppression). |
 | `OMC_JEV_TASK_SIZE_PREFIX_WINS` | (unset) | Set to `1` or `true` so that a size prefix of the classifier (`quick:`, `simple:`, `tiny:`, `minor:`, `small:`, `just:`, `only:`) makes the active `task-size` point of the hook script drop heavy modes whatever size Jev answers. Script hooks only. See [Task size: heavy-mode suppression](#task-size-heavy-mode-suppression). |
 | `OMC_JEV_TASK_SIZE_SLASH_ANYWHERE` | (unset) | Set to `1` or `true` so that a heavy mode typed as a slash command anywhere in the prompt, also as `/omc:<mode>`, is never dropped by the active `task-size` point of the hook script. By default only a slash command at the start of the prompt keeps its mode. Script hooks only. See [Task size: heavy-mode suppression](#task-size-heavy-mode-suppression). |
+| `OMC_JEV_GUARD` | (unset) | Set to `1` or `true` to turn on the delivery guard while the `model-routing` point is active: a message when the `pre-tool-enforcer` timeout is too short, when `hooks/hooks.json` or the `OMC_*`, `ANTHROPIC_*`, `TYPESAFE_*` and Claude Code model-routing variables in the `env` section of the user-level `settings.json` changed after the session started, and once a day a check of interrupted hooks and delivered Jev decisions. Script hooks only. See [Delivery guard](#delivery-guard). |
+| `OMC_JEV_GUARD_MIN_TIMEOUT_S` | `60` | Seconds the delivery guard requires of the `pre-tool-enforcer` PreToolUse timeout in `hooks/hooks.json`; a lower timeout gets a message at session start. Not a positive number: the default. |
 | `OMC_JEV_SLOP_WARNING_APPLY` | (unset) | Set to `1` or `true` to let an active `slop-warning` answer decide whether `[SLOP WARNING]` is shown. Script hook `pre-tool-enforcer.mjs` only. See [Advisory points: opt-in actions](#advisory-points-opt-in-actions). |
 | `OMC_JEV_SLOP_WARNING_THRESHOLD` | `0.8` | Probability of "yes" at or above which the active `slop-warning` answer warns, a number above 0 up to 1. Used only with `OMC_JEV_SLOP_WARNING_APPLY`. A value that is set but invalid is reported on stderr (unless `OMC_JEV_QUIET=1`) and the default is used. |
 | `OMC_JEV_LEARNER_HINT` | (unset) | Set to `1` or `true` to add a `/oh-my-claudecode:remember` hint to the Stop output when the active `learner-extraction` answer is 0.8 or more, at most once per session. Script hook `persistent-mode.mjs` only. See [Advisory points: opt-in actions](#advisory-points-opt-in-actions). |
@@ -711,15 +724,82 @@ Each line is a JSON record with:
 - `ts`: ISO timestamp
 - `point`: judgment-point name
 - `state`: the bounded state passed to the judgment
-- `mode`: `"shadow"`, `"active"`, or `"degraded"`
+- `mode`: `"shadow"`, `"active"`, or `"degraded"`; with the opt-in shared breaker or request limit also `"circuit-open"` or `"cap"` for a call they held back (no request was sent), with `reason` and either `until` (the breaker) or `priority` and `rpm` (the limit)
 - `heuristic`: the heuristic twin's result
-- `jev`: Jev's first answer, or `null` when the request degrades. In a Noul answer, `noul` is the probability of "yes" from 0 to 1; the hook scripts and `scripts/jev-eval.mjs` read 0.5 or more as yes.
+- `jev`: Jev's first answer, or `null` when the request degrades (with `OMC_JEV_LOG_CONTEXT`, also `null` when Jev did not answer the first question). In a Noul answer, `noul` is the probability of "yes" from 0 to 1; the hook scripts and `scripts/jev-eval.mjs` read 0.5 or more as yes.
 - `answers`: every Jev answer by question name, or `null` when the request degrades. Points that ask more than one question in one request, such as `model-routing`, are read from this map: the API does not guarantee the order of its answers.
 - `confidence`: Jev's confidence when provided
 - `durationMs`: elapsed request time
 - `usage`: Jev-reported token usage when available
 
 Use shadow logs to collect evidence for promotion decisions (ticket 07) and to debug mismatches.
+
+#### Log rotation
+
+The shadow log is append-only and grows with every judgment: with many points opted in, a busy machine can add several megabytes a day. Set `OMC_JEV_LOG_MAX_MB` to cap the size of each file:
+
+```bash
+export OMC_JEV_LOG_MAX_MB=50
+```
+
+Before a line is appended, a file larger than the limit is renamed to `<name>-<YYYYMMDD-HHmmss>-<pid>.jsonl` in the same directory (UTC time and the writing process ID, for example `shadow-20261109-143005-4242.jsonl`), and the line starts a new `shadow.jsonl`. Both writers rotate the same way: the plugin hook scripts (`scripts/jev-resolve.mjs`) and the TypeScript resolver. The process ID in the name keeps the writers of one machine apart, and an existing name is skipped. A failed rename (another process rotated first, or the file is locked) is ignored and the line is appended anyway: rotation never costs a line and never affects a hook. A rotated file is above the limit, usually by about one line (two processes that rotate the same file at once can leave a small one); the first rotation after the variable is set renames the whole existing log, and a file whose renames keep failing keeps growing until a rename succeeds. Rotated files are never deleted; remove old ones yourself. Code that writes another file to the Jev log directory should call the same helper (`rotateJevLog` with `resolveJevLogMaxBytes()` in the scripts, `config.logMaxBytes` in TypeScript) before each append, so the same variable caps it; in the hook scripts `appendJevLogLine(fileName, entry)` from `scripts/lib/jev-shadow.mjs` does both, in the same directory as the resolver.
+
+`jev-eval` reads only `shadow.jsonl` by default. Pass `--include-rotated` to read the rotated files of the same log first, oldest first:
+
+```bash
+node scripts/jev-eval.mjs --include-rotated
+```
+
+The files are read one at a time, so their total size is not limited by memory, though each file is read whole, as the single log is today. A hook may rotate the log while `jev-eval` reads it; if a rotated file appeared during a pass, `jev-eval` reads everything again from a fresh listing (at most three passes; a log that still rotates during the last pass is reported on stderr), so a renamed file is not missed and no line is counted twice.
+
+#### Call ids and resolver failures
+
+With `OMC_JEV_LOG_CONTEXT=1` every line written to the Jev logs names the hook call it belongs to, right after `point`:
+
+- `tool_use_id`: the tool call (PreToolUse and PostToolUse hooks)
+- `session_id`: the Claude Code session
+- `cwd`: the hook input's working directory (the hook process's own when the input has none)
+- `agent_id`, `agent_type`: the subagent, for a tool call made inside one
+- `prompt_id`: when the host sends one
+- `request_id`: a new UUID for each Jev request; the resolver also returns it to the hook, so any later line about the same request can carry the same value
+
+The ids come from the hook input. Only non-empty strings are kept, each cut to 1000 characters, and a field the host does not send is left out. They travel in the request file the hook hands to the resolver and end up in the local log only: the body sent to Jev is still `state`, `questions` and `model`. `cwd` is a local path, so keep that in mind before you share a log.
+
+In active mode a hook waits for its resolver for `OMC_JEV_TIMEOUT_MS` plus 500 ms. A resolver killed at that limit (for example after a slow cold start) or ended with a non-zero status writes no line, so with the variable the hook writes one for it: `ts`, `point`, the ids, `mode: "degraded"`, `reason` (`resolver-timeout`, `resolver-spawn` when it could not be started, or `resolver-exit`), `status` or `signal` when there is one, and `durationMs`, with no state and no answers. `jev-eval` counts it as a degraded request. A resolver killed just after writing its own line leaves two lines with one `request_id`.
+
+The variable also changes `jev` and `confidence`: they belong to the first question of the request and are `null` (and absent) when Jev did not answer it, instead of the first answer in server order. `jev-eval` compares `heuristic`, which always answers the first question, with `jev`, so such a line is no longer compared with the answer to another question. The answer the hook acts on does not change.
+
+Without the variable, log lines, requests and resolver results are exactly as before. To find the log directory, a hook process resolves it once, the way the resolver does, when this variable or `OMC_JEV_APPLIED_LOG` is set and Jev can send requests; with the plugin's built `dist` the lookup is cached, without it the fallback can spawn `git` up to three times, and setting `OMC_JEV_LOG_DIR` skips it. The TypeScript resolver follows the same variable for its own lines and logs the ids a caller passes as `logContext`: the `loop-continuation` and `simplifier-trigger` points pass their `session_id` and `cwd`, the other TypeScript callers pass none yet, so their lines carry only `request_id`.
+
+#### Applied log
+
+`shadow.jsonl` records every answer, but not whether an active answer changed anything: most active answers agree with the heuristic, and some are not used at all. With `OMC_JEV_APPLIED_LOG=1` a hook script that acted on an active answer writes one line to `applied.jsonl`, next to `shadow.jsonl`, only when the answer changed what the hook does:
+
+| Point | Line written when | `applied` |
+|-------|-------------------|-----------|
+| `model-routing` | the hook output carries Jev's model or effort in `updatedInput` and it differs from what the agent would have run on (the call's model, else the one its agent definition names) | `subagent_type`, and `model` and/or `effort` as `{from, to}`; `effort` also has the `score` |
+| `context-pruning` | Jev's staleness changed the compaction action | `action: {from, to}`, `staleness`, and `message`: what the hook printed (`none`, `warning`, `critical`, or `suppressed` by the warning cooldown) |
+| `skill-trigger` | Jev's choice changed the triggered keywords (a later `task-size` suppression has its own line) | `keywords: {from, to}`, `choice` |
+| `task-size` | Jev's `small` suppressed heavy modes (not when a size prefix won over another answer under `OMC_JEV_TASK_SIZE_PREFIX_WINS`) | `size`, `confidence`, `suppressed` (the keywords removed) |
+| `loop-continuation` | Jev's "task complete" ended the mode (another active mode can still block the stop) | `mode`, `completed: {from: false, to: true}` |
+
+Each line is `{ts, point, applied}`. With `OMC_JEV_LOG_CONTEXT=1` as well, the ids of the hook call and the `request_id` of the request follow `point`, so the line joins the request's `shadow.jsonl` line, which holds the answer itself:
+
+```bash
+# The shadow line behind the last model-routing decision that was applied
+id=$(jq -r 'select(.point == "model-routing") | .request_id' .omc/state/jev/applied.jsonl | tail -n 1)
+jq --arg id "$id" 'select(.request_id == $id)' .omc/state/jev/shadow.jsonl
+```
+
+A `model-routing` line means the decision was handed to Claude Code, not decided: a call that a later check of the same hook denies, or a value other code replaced, has no line. An effort lowered only by `OMC_JEV_MAX_EFFORT` is the cap's doing and has no line. A call without a model that inherits the session model under `forceInherit` is compared with that model, so a tier alias that resolves to it has no line either. The log is a separate file because `jev-eval` counts every line of `shadow.jsonl` as a request; it is rotated with `OMC_JEV_LOG_MAX_MB` like the other Jev logs. Script hooks only: the points reached through the TypeScript resolver write no applied lines. Without the variable no file is written.
+
+#### Compaction log
+
+With the compaction point enabled, Jev's compaction module (if installed in the plugin) writes one JSON record per compaction to `compaction.jsonl` in the Jev log directory (next to `shadow.jsonl`), appended during SessionStart. Each line is `{ts, session_id, agent_id, compaction, context, systemMessage, …}`, recording metadata about the compaction source and any registry-based context sent to Claude. The file grows with every compaction and is rotated with `OMC_JEV_LOG_MAX_MB` like the other Jev logs.
+
+#### States without session ids
+
+Two states sent to Jev carry an id of the session rather than of the work: the `loop-continuation` state has `session_id`, and the `simplifier-trigger` state has `cwd`, the project path. Neither helps the judgment, and both leave the machine with the request. With `OMC_JEV_STATE_OMIT_IDS=1` the hook scripts and the TypeScript points leave them out of the state. They are then also missing from the state recorded in `shadow.jsonl`; set `OMC_JEV_LOG_CONTEXT=1` as well to keep them in the log line, as the top-level `session_id` and `cwd` fields, without sending them. Without the variable the states are unchanged.
 
 ### Heuristic Fallback on Failure
 
@@ -729,6 +809,48 @@ Jev never blocks the workflow:
 - **Over budget**: If `OMC_JEV_MAX_REQUESTS` is reached, all remaining calls use heuristic twins.
 - **Unavailable**: If the API is unreachable or returns an error, heuristic twin is used and the failure is logged.
 - **Blocking points**: Even in active mode, if Jev fails, the heuristic twin's decision is used and the workflow continues.
+
+### Shared breaker and request limit
+
+Each plugin hook runs as a fresh process, so the resolver's own breaker (three consecutive failures of a point) and `OMC_JEV_MAX_REQUESTS` count one hook call at a time. During an outage every opted-in point of every hook keeps sending requests to an endpoint that already refuses them. Two opt-in variables share the protection between all processes of the machine through small files in `~/.omc/state/jev/breaker/<scope>/`, where `<scope>` is a hash of `OMC_JEV_ENDPOINT` and `TYPESAFE_API_KEY` (the key itself is never written, and a new key or another endpoint starts with a closed breaker). The hook scripts, the TypeScript resolver and the compaction hooks module read and write the same state.
+
+`OMC_JEV_BREAKER=1` opens the breaker when a response or a missing response shows that the endpoint cannot serve requests:
+
+| Failure | Breaker open for |
+|---------|------------------|
+| HTTP 429, any 5xx | `Retry-After`, else 60 s |
+| HTTP 401, 402, 403 (key or account) | `Retry-After`, else 10 minutes |
+| Three requests without any HTTP response (timeout, network error) within 60 s | 60 s |
+| Any other status, an invalid response body | not opened |
+
+`Retry-After` is read as seconds (a decimal value is rounded up) or as an HTTP date and capped at 30 minutes; any other form uses the default. Failures are classified by the status code and the presence of a response, so any System One compatible endpoint behaves the same; the one use of a response body is the fallback below. A later failure only extends a breaker, never shortens it. Several processes may open it at the same moment and there is no lock: each opener pauses 50 ms after its write (synchronously, so opening costs at least that long) and reads the file again, and when a concurrent opener replaced it with an earlier end, it writes its own later end again (at most three writes). An opener that is held up for longer than 50 ms between reading the file and writing it can still shorten the breaker. A request counts as without a response only in the resolver that sent it: a call held back by the breaker or the limit never counts, and neither does a resolver that its hook killed.
+
+**Retry time from the body of a 429 (fallback).** An HTTP 429 without a usable `Retry-After` header may state the wait in its body. With `OMC_JEV_BREAKER=1` only, the resolver then reads the first 2000 characters of that body and drops the rest of the stream (nothing is read for any other status, when the header is usable, or without the breaker) and looks for the phrase "retry after" followed by a number of seconds, for example `Retry after ~178s`, `retry after 30 seconds` or `retry_after: 12 s`. That number replaces the default minute, with the same 30-minute ceiling as the header; a body without the phrase, or with another unit, changes nothing.
+
+**Hook deadline.** An active-mode hook kills its resolver after `OMC_JEV_TIMEOUT_MS` plus 500 ms; exception: `model-routing` gets a 3500 ms buffer (documented in the variable table above). With `OMC_JEV_BREAKER=1` the hook passes that moment, less 100 ms, to the resolver in `OMC_JEV_HOOK_DEADLINE` (epoch milliseconds; set by the hook, not meant to be set by hand), and the resolver ends its own request by then at the latest (not earlier than 200 ms after it starts; a request that had less than a second because of this is not counted as a missing response). A slow process start therefore cannot push the resolver's own timeout, which records the missing response, past the kill. If the resolver is killed anyway, or ends without a result, the hook cannot count it; it appends one line with `mode: "degraded"` and `reason: "resolver-timeout"` or `"resolver-exit"` to `shadow.jsonl`, with `exit_status`, `exit_signal` and `spawn_error` when the process had them and `durationMs`, but no request content. That line is written only when `OMC_JEV_LOG_DIR` is set; without it the hook writes nothing, because the default per-project directory is resolved asynchronously, by the resolver alone. A failure that arrives in the last 100 ms before the kill may leave the notice out of that hook call and this line in place of the resolver's own. A resolver that is killed after it printed its whole result (an unfinished response body can keep the process alive) is treated as finished: the hook uses that result and adds no second line for the same request.
+
+`OMC_JEV_MAX_RPM=<n>` allows at most `n` requests per UTC minute for the machine (per endpoint and key). Points have a priority: low points stop at 60 % of `n` and medium points at 85 %, so the rest of the minute stays for the points that gate or route work. A request that is held back takes no slot. Every priority keeps at least one request a minute, so the tiers overlap for `n` of 3 or less.
+
+| Priority | Points |
+|----------|--------|
+| high | `model-routing`, `loop-continuation`, `ralph-verdict` |
+| medium | `intent`, `skill-trigger`, `task-size`, `compaction` (and any point not listed) |
+| low | `slop-warning`, `learner-extraction`, `simplifier-trigger`, `context-pruning` |
+
+The window is the calendar minute, so a burst at the turn of a minute can send up to twice `n` within a few seconds.
+
+**Also covered: `compaction`.** The `compaction` point is resolved by its own hooks module (`hooks/jev-compaction.mjs`), which cannot import Node and reaches files and the network only through the host's `$` interface. With `OMC_JEV_BREAKER=1` it reads `breaker.json` before each request and opens it after the failures in the table above (an HTTP 429 without a usable `Retry-After` header is read for its retry time in the same way, from the first 2000 characters of its body), and with `OMC_JEV_MAX_RPM` it reserves a slot in the same per-minute file as a medium-priority point; it uses the same state directory, scope and file formats as the scripts, so both sides see one breaker and one count. A compaction whose first request is held back ends with the built-in summary (reason `breaker_open` or `rpm` in the compaction record). When a later request of the same compaction is held back, the results it would have scored count as unanswered, as after a failed request, and the budget decides about them (`held` and `unscored` in the record); a held-back request is never counted as a failure of the endpoint. The module can neither append to nor delete a file, so it writes the per-minute files whole, reads them back, and does its own file work one step after the other; a line that another process adds at the very same moment may still be lost, so the limit can be exceeded when several sessions reserve at once. The files of old minutes stay in the state directory (the script side removes them when it writes a new minute file). Its own pause after failures, its three-failures stop and `OMC_JEV_MAX_REQUESTS` (see the header of the module) stay in force as well. Without `OMC_JEV_BREAKER=1` and `OMC_JEV_MAX_RPM` the module reads and writes none of these files.
+
+A call held back by either ends like a failed call: the heuristic twin decides, the resolver returns mode `circuit-open` or `cap`, and the shadow log gets a line with that mode (see [Shadow Log Location](#shadow-log-location)); `jev-eval` counts these lines in their mode but not in the latency figures. While the breaker is open, an active-mode hook does not wait for the resolver: it runs in the background, as in shadow mode, only to log the held-back call. It is started in shadow mode and stays in it even if the breaker has closed by the time it runs, so a request it then sends is logged as `shadow`, not as an active decision.
+
+While the breaker is open, the hook scripts add one `systemMessage` per session and outage to their own output and write the same line to stderr, for example `[OMC] Jev requests paused until 14:33 (HTTP 429); hooks decide without Jev until then.` (local time, rounded up to the minute). A hook that runs inside a subagent (its input has an `agent_id`) shows no notice and does not use it up: subagents share the session id, but their output does not reach the user, so the notice waits for the next hook of the main thread. The breaker is one outage while it is extended or opens again within 15 minutes of closing. Points reached only through the TypeScript resolver follow the breaker and the limit but show no notice.
+
+```bash
+export OMC_JEV_BREAKER=1
+export OMC_JEV_MAX_RPM=60   # requests per minute for this machine
+```
+
+When neither variable is set, nothing is read or written and the behavior is the same as before. Every file operation is fail-open: a state directory that cannot be used never holds a request back.
 
 ### Judgment Points Registry
 
@@ -823,7 +945,7 @@ In active mode Jev replaces the model and the effort of a delegated call, an exp
 - The effort from a marker is capped by `OMC_JEV_MAX_EFFORT` like Jev's; the log row then has `"capped": true` and the requested level.
 - With `forceInherit` a marker model is set only when the provider resolves its tier alias (`OMC_SUBAGENT_MODEL`, `CLAUDE_CODE_BEDROCK_<TIER>_MODEL`, `ANTHROPIC_DEFAULT_<TIER>_MODEL`; `fable` included), as for any tier alias the hook checks under `forceInherit`. A marker with an effort still sets the effort and the log row has `"rejected": ["force-inherit"]`; a marker that names only such a model changes nothing and stays in the prompt, like `use max`. The `forceInherit` denials of the call's own model run before the marker is read.
 - The marker is an explicit instruction, so it applies in shadow mode too and when the `model-routing` point is off or there is no `TYPESAFE_API_KEY`. In shadow mode the Jev request still goes out for the questions the marker leaves open and its answers change nothing.
-- Every use is logged as one line in `overrides.jsonl` in the Jev log directory, next to `shadow.jsonl` but separate from it, because `jev-eval` counts every line of `shadow.jsonl` as a Jev request. A row carries `ts`, `point`, `session_id`, `subagent_type`, the literal `marker` line, `override` (`model`, `effort`, or `both`), the `model` and `effort` `from` and `to`, and `rejected` when something was refused. The row is written when the hook decides, so a call that a later check denies still has its row.
+- Every use is logged as one line in `overrides.jsonl` in the Jev log directory, next to `shadow.jsonl` but separate from it, because `jev-eval` counts every line of `shadow.jsonl` as a Jev request. A row carries `ts`, `point`, `session_id`, `subagent_type`, the literal `marker` line, `override` (`model`, `effort`, or `both`), the `model` and `effort` `from` and `to`, and `rejected` when something was refused. The row is written when the hook decides, so a call that a later check denies still has its row. With `OMC_JEV_LOG_MAX_MB` the file is rotated like the other Jev logs.
 
 Example: `OMC_JEV=model-routing:active`, a call with `"model": "haiku"` and the prompt `use sonnet low` then the task. The hook sends no request to Jev, and the call runs with `"model": "sonnet", "effort": "low"` and the task alone as its prompt. The same call with the prompt `use sonnet` runs on sonnet with the effort Jev chooses for the task.
 
@@ -873,6 +995,26 @@ With the default limits, which modes are dropped does not change. Shadow mode, a
 `OMC_JEV_TASK_SIZE_SLASH_ANYWHERE=1` (or `true`): a heavy mode typed as a slash command anywhere in the prompt is never dropped, also through the `/omc:` alias: `/ralph`, `/oh-my-claudecode:ralph` and `/omc:ralph` at the start, after whitespace, or after an opening parenthesis or quote, and followed by whitespace, the end of the prompt, a closing parenthesis, a closing square bracket or a quote, `?`, `!`, `,`, `;`, `:`, or a `.` that is not followed by a letter, digit or underscore. A mode name inside a path (`a/ralph`) or a file name (`/ralph.md`) is not a slash command. The check reads the prompt after code blocks, inline code, quoted lines and pasted payloads are removed, as keyword detection does, so a `/ralph` quoted there does not count. The slash command also keeps its mode when a size prefix wins under `OMC_JEV_TASK_SIZE_PREFIX_WINS`. With `OMC_JEV_TASK_SIZE_NOTICE=1` the notice says that a slash command anywhere in the prompt keeps its mode. When an active task-size decision applies, such a slash command also counts as the user's confirmation, so ralph arms no awaiting-confirmation window; in shadow mode or with Jev off a mid-prompt slash command keeps that window. In every other case only `/ralph` or `/oh-my-claudecode:ralph` at the start of the prompt as typed, before inline code is removed, confirms ralph.
 
 Shadow mode, the TypeScript bridge and the other task-size rules do not change.
+
+### Delivery guard
+
+In active mode the model and effort Jev picks for a Task/Agent call travel in the output of the `pre-tool-enforcer` PreToolUse hook. When Claude Code cuts that hook off at its `hooks.json` timeout, it drops the output: the Jev log still shows the correct answer, and only the hand-over is lost. Claude Code also reads `hooks/hooks.json` and the `env` section of `settings.json` once, at session start, so a session that started before such a change keeps the old values. `OMC_JEV_GUARD=1` (or `true`) turns on three checks. They run only while `model-routing` is active, use no network, never ask Jev, and never break a hook (a failure of the guard changes nothing).
+
+| Check | When | Message when |
+|-------|------|--------------|
+| Timeout | session start | the smallest numeric timeout of the `pre-tool-enforcer` PreToolUse entries in the plugin's `hooks/hooks.json` is below `OMC_JEV_GUARD_MIN_TIMEOUT_S` (default 60). An entry without a `timeout` field, or a plugin file without such an entry (hooks installed through `settings.json`), gives no message. |
+| Changed since start | each prompt | `hooks/hooks.json` or the `OMC_*`, `ANTHROPIC_*` and `TYPESAFE_*` keys and the Claude Code model-routing keys (`CLAUDE_CODE_BEDROCK_*`, `CLAUDE_CODE_USE_*`, `CLAUDE_CODE_SUBAGENT_MODEL`, `CLAUDE_MODEL`) of the `env` section of the user-level `settings.json` (`<Claude config dir>/settings.json`; project and local settings are not read) differ from what the session saw at start. One message per change and session: restart the session. Hook scripts load on every call, so a change to scripts alone needs no restart and gives no message. |
+| Daily check | prompt, at most once per 24 hours and Jev log directory | a detached process finds an interrupted `PreToolUse:Agent` hook in the last 24 hours, or fewer than 95 % of the active `model-routing` decisions reached an agent with the model Jev chose; the next prompt of each session shows the result once, for up to two days. If the check itself fails, the message says so and the check runs again after 24 hours. |
+
+How the daily check reads data:
+
+- Interrupted hooks: the session transcripts under `<Claude config dir>/projects` are scanned for hook attachments with `"timedOut":true`. Only the hook name, command, time and tool use id of such lines are read; nothing from a transcript is stored or printed. Every plugin's hook on the event has the hook name `PreToolUse:Agent`; a record counts as another command's when its `command` is neither `pre-tool-enforcer` nor the label Claude Code shows for a hook defined with `args` (`command hook N`), so such labelled hooks of other plugins are counted too.
+- Delivered decisions: `shadow.jsonl` lines of the Jev log directory of the project of the prompt (`OMC_JEV_LOG_DIR`, else `.omc/state/jev`), and rotated `shadow-<stamp>-<pid>.jsonl` files next to it if there are any, that carry a `tool_use_id` field are joined to the `agent-*.meta.json` files of the agents on `toolUseId` and compared on the model: the alias, a full id that contains the alias as a whole word (`claude-opus-4-8` for `opus`), or the id the configuration maps the tier to (the first set of `CLAUDE_CODE_BEDROCK_<TIER>_MODEL`, `ANTHROPIC_DEFAULT_<TIER>_MODEL`, the variables Claude Code reads for a tier alias; such as `kimi-k2.6:cloud` for a proxy). Never a prefix: a `claude-opus-...` agent is not a `haiku` delivery. The detached check inherits the environment of the session; a run by hand reads the environment of its own shell, so set the same variables there to get the same figures. Decisions younger than two minutes and decisions with no agent found are left out. A call the hook deliberately left alone (a `use` marker, `forceInherit` in the configuration) counts as not delivered; with `OMC_ROUTING_FORCE_INHERIT=true` the share is not computed. Lines without a `tool_use_id` are skipped, so with a log that does not record tool use ids the share stays empty and the check reports interruptions only.
+- Each project has its own Jev log directory, so each gets its own daily slot and result.
+
+State is kept under `<Claude config dir>/.omc/jev-guard/`: a record per session id with the start time and the two hashes (sha256, 16 hex digits; the values behind them, which can be API keys, are never stored), plus the files of the daily check (`daily-<key>.json`, `daily-<key>.lock`, `delivery-<key>.json`). A session that starts without a record, or after `/clear`, takes its baseline at that moment, so a change made before then is not reported. Records not used for 14 days are swept once a day; every prompt and every `/compact` marks the session's record as in use (its modification time only, the content is not rewritten), so a live session keeps its baseline. The daily process runs at the lowest priority. Run it by hand with `node scripts/lib/jev-delivery-guard.mjs --daily --print [--config <Claude config dir>] [--log <Jev log dir>] [--window-hours <n>]`: it prints the figures and leaves the state alone unless `--write` is given.
+
+Without the variable no file is read or written and the hooks behave exactly as before.
 
 ### Request Budget and Latency
 
@@ -940,6 +1082,10 @@ Read the shadow log for a point:
 
 ```bash
 jq 'select(.point == "model-routing")' .omc/state/jev/shadow.jsonl
+
+# With OMC_JEV_LOG_MAX_MB set: rotated files too, oldest first
+# (jq reports an error for the pattern until the first file has been rotated)
+jq 'select(.point == "model-routing")' .omc/state/jev/shadow-[0-9]*.jsonl .omc/state/jev/shadow.jsonl
 ```
 
 #### Verify Jev is Running
@@ -957,6 +1103,19 @@ If this does not appear, the point is not activated or Jev is disabled.
 ```bash
 export OMC_JEV_QUIET=1  # Suppress the activation message
 ```
+
+#### Repair a Transcript That Will Not Resume After a Compaction
+
+With the `compaction` point active, a resumed session (or a message to a finished subagent) can fail with `API Error: 400 ... server_tool_use ids must be unique per assistant turn`. The module hands some assistant rows back to Claude Code unchanged; the host writes them behind the compaction boundary as copies with the same `message.id`, and on resume it joins all rows of one `message.id` from the file, including the originals before the boundary.
+
+`scripts/jev-repair-transcript.mjs` finds those rows and gives them a new `message.id` (same length, nothing else changes; the rows of one message between the same two compaction boundaries share the new id). It only checks by default:
+
+```bash
+node scripts/jev-repair-transcript.mjs ~/.claude/projects/<project>/<session>.jsonl          # list the rows, exit 1 if any
+node scripts/jev-repair-transcript.mjs ~/.claude/projects/<project>/<session>.jsonl --write  # repair
+```
+
+`--write` first saves a copy next to the file (`<file>.pre-repair`, then `.pre-repair.1` and so on; an existing copy is never overwritten) and replaces the file with one rename. Close the session first: a change found just before the rename stops the write (nothing is written), but a row appended after that check would be lost. A second run finds nothing to change. Exit codes: 0 nothing to repair (or repaired), 1 rows need repair, 2 usage error, unreadable file, a write error or a row that cannot be repaired safely (a row off the chain that is not a copy from before a compaction, or a chain that repeats a `server_tool_use` id by itself).
 
 ### References
 
