@@ -686,7 +686,7 @@ describe('jev-compaction module: active compaction', () => {
 
   it('joins the .config parts of the gh credentials (a root and a relative path, segments, three fields, nested objects, CRLF) and a private path in three parts before it classifies them; a relative path that is not a secret stays clean; the joins stay bounded', async () => {
     const runCalls = async (calls, env) => {
-      const messages = conversation(32, {
+      const messages = conversation(40, {
         tool: (i) => (calls[i] ? calls[i][0] : 'Bash'),
         input: (i) => (calls[i] ? calls[i][1] : { command: `cat notes-${i}.txt` }),
         result: (i) => (calls[i] ? `MCP-${i}-END ${'x'.repeat(2000)}` : `RESULT-${i} ${'x'.repeat(2000)}`),
@@ -705,14 +705,17 @@ describe('jev-compaction module: active compaction', () => {
       13: ['mcp__fs__read', { root: '~', relative: '.ssh/deploy_key' }],
       15: ['mcp__fs__read', { '/home/u': '.config/gh/hosts.yml' }],
       17: ['mcp__fs__read', { dirs: Array.from({ length: 1000 }, () => '/srv/a/.config'), subs: Array.from({ length: 1000 }, () => 'gh') }],
+      19: ['mcp__fs__read', { segments: ['/home/u/.config', '/gh', '/hosts.yml'] }],
+      31: ['mcp__fs__read', { base: '$HOME', relative: '.config/gh/hosts.yml' }],
       21: ['mcp__fs__read', { root: '/home/u', relative: '.configs/x' }],
       23: ['mcp__fs__read', { root: '/home/u', relative: '.config/gh/other.yml' }],
       25: ['mcp__fs__read', { segments: ['/home/u', '.config', 'gh', 'other.yml'] }],
       27: ['mcp__fs__read', { directory: '/home/u/.config', name: 'app.json' }],
       29: ['mcp__fs__read', { note: 'gh', name: 'hosts.yml' }],
+      33: ['mcp__fs__list', { files: Array.from({ length: 60 }, (_, k) => `/repo/app${k}.config.js`) }],
     };
-    const secret = [3, 5, 7, 9, 11, 13, 15, 17];
-    const clean = [21, 23, 25, 27, 29];
+    const secret = [3, 5, 7, 9, 11, 13, 15, 17, 19, 31];
+    const clean = [21, 23, 25, 27, 29, 33];
     const first = await runCalls(calls, ACTIVE_ENV);
     for (const i of secret) expect(first.body).not.toContain(`MCP-${i}-END`);
     for (const i of clean) expect(first.body).toContain(`MCP-${i}-END`);

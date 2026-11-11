@@ -253,8 +253,8 @@ const LONG_LINE = '[line omitted: too long to check]';
 // so such a call is held back even when its file is known_hosts (fail closed; one traced result costs less than a key sent).
 const JOIN_EDGE_CHARS = 300;
 const JOIN_PARTS_MAX = 3;
-const JOIN_DIR = /\.(?:ssh|aws|config)/i;
-const JOIN_ROOT = /[/~]|^\.{0,2}$/;
+const JOIN_DIR = /\.(?:ssh|aws)|(?:^|\/)\.config(?:\/|$)/i;
+const JOIN_ROOT = /[/~$%]|:$|^\.{0,2}$/;
 const JOIN_GH_DIR = /\.config\/gh\/?$/i;
 
 /** Mirror of parseJevEnv(POINT) in scripts/jev-resolve.mjs for a named-only point. */
@@ -983,7 +983,7 @@ function anySecretPath(input, privatePaths) {
     for (const [j, b] of parts.entries()) {
       if (used.includes(j) || !b.first) continue;
       if (++joins > SECRET_WALK_MAX) return true;
-      const path = `${end}/${b.first}`;
+      const path = `${end}/${b.first}`.replace(/\/{2,}/g, '/');
       if (namesSecretPath(path, privatePaths)) return true;
       const cut = path.replace(/\/$/, '');
       if (used.length < JOIN_PARTS_MAX - 1 && (JOIN_GH_DIR.test(cut) || wantsChild(cut)) && joined(cut, [...used, j])) return true;
