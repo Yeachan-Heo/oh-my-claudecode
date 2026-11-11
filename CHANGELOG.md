@@ -1,3 +1,20 @@
+# oh-my-claudecode v5.8.7: Release consistency fixes
+
+## Release Notes
+
+v5.8.7 is a patch release that restores missing bridge files and updates release documentation for v5.8.6.
+
+### Bug Fixes
+
+- **fix(release): restore bridge files missing from v5.8.6 release** (#5000) — restores gyoshu_bridge.py and run-mcp-server.sh required for python-repl functionality
+- **docs: advertise v5.8.6 in CLAUDE.md** (#5003) — adds v5.8.6 version declaration to release-boundary verification
+
+### Stats
+
+- **2 fixes** | **0 new features** | **0 security/hardening improvements**
+
+---
+
 # oh-my-claudecode v5.8.6: Plugin payload sync optimization
 
 ## Release Notes
