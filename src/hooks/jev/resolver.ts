@@ -137,7 +137,10 @@ interface ShadowLogEntry {
   until?: string;
   /** Held-back call under the request limit: the point's priority and the minute's count. */
   priority?: string;
-  rpm?: { count: number; threshold: number; limit: number };
+  /** Held-back call: the minute's count, the point's threshold and the limit. Failed call (degraded): the count and the limit. */
+  rpm?: { count: number; threshold?: number; limit: number };
+  /** Failed call under the shared breaker or limit: HTTP status (null without a response), kind (http-<status>, no-response) and the block time in seconds when the failure opens the breaker. */
+  error?: { status: number | null; kind: string; retry_s?: number };
   durationMs: number;
   /** Jev-reported token usage; absent on degraded lines. */
   usage?: JevUsage;
@@ -311,9 +314,17 @@ export async function resolveJudgment<T>(resolveJudgmentArgs: ResolveJudgmentArg
       if (shared && error instanceof JevClientError) {
         shared.breaker.recordFailure(shared.settings, shared.breaker.classifyFailure(error));
       }
-      return { ok: false as const, error: error instanceof Error ? error.message : String(error) };
+      return {
+        ok: false as const,
+        error: error instanceof Error ? error.message : String(error),
+        failure: error instanceof JevClientError ? error : undefined,
+      };
     }
   })();
+
+  // Under the shared breaker or limit a failed call logs why it failed.
+  const failureFields = (failure: JevClientError | undefined) =>
+    shared && failure ? shared.breaker.failureLogFields(shared.settings, failure) : {};
 
   // Non-blocking (detector-type) in shadow mode: return the twin now; log when Jev settles.
   if (mode === 'shadow' && args.blocking === false) {
@@ -325,7 +336,7 @@ export async function resolveJudgment<T>(resolveJudgmentArgs: ResolveJudgmentArg
         void writeShadowLog(buildLogEntry(args.point, boundedState, startedAt, 'shadow', loggableHeuristic, outcome.response, args.questions), config.logDir);
       } else {
         recordFailure(args.point);
-        void writeShadowLog(buildLogEntry(args.point, boundedState, startedAt, 'degraded', loggableHeuristic, null), config.logDir);
+        void writeShadowLog(buildLogEntry(args.point, boundedState, startedAt, 'degraded', loggableHeuristic, null, undefined, failureFields(outcome.failure)), config.logDir);
       }
       // Belt-and-braces: a future throw in this callback must never become an
       // unhandled rejection that kills a one-shot hook process.
@@ -341,7 +352,7 @@ export async function resolveJudgment<T>(resolveJudgmentArgs: ResolveJudgmentArg
     const outcome = await attempt;
     if (!outcome.ok) {
       recordFailure(args.point);
-      await writeShadowLog(buildLogEntry(args.point, boundedState, startedAt, 'degraded', loggableHeuristic, null), config.logDir);
+      await writeShadowLog(buildLogEntry(args.point, boundedState, startedAt, 'degraded', loggableHeuristic, null, undefined, failureFields(outcome.failure)), config.logDir);
       return { answer: heuristic, source: 'twin', mode: 'degraded' };
     }
     recordSuccess(args.point);
@@ -357,7 +368,7 @@ export async function resolveJudgment<T>(resolveJudgmentArgs: ResolveJudgmentArg
     console.error('[jev] ' + args.point + ': degraded - ' + outcome.error);
     const heuristic = twinAnswer();
     const loggableHeuristic = extractHeuristicForLogging(heuristic, args.questions, args.mapHeuristic, args.questionSet);
-    await writeShadowLog(buildLogEntry(args.point, boundedState, startedAt, 'degraded', loggableHeuristic, null), config.logDir);
+    await writeShadowLog(buildLogEntry(args.point, boundedState, startedAt, 'degraded', loggableHeuristic, null, undefined, failureFields(outcome.failure)), config.logDir);
     return { answer: heuristic, source: 'twin', mode: 'degraded' };
   }
 
@@ -382,6 +393,7 @@ function buildLogEntry(
   heuristic: unknown,
   response: JevResponse | null,
   questions?: JevQuestions,
+  extra: Pick<ShadowLogEntry, 'error' | 'rpm'> = {},
 ): ShadowLogEntry {
   const jev = response ? firstAnswer(response, questions ?? {}) : null;
   const safeUsage = sanitizeUsage(response?.usage);
@@ -395,6 +407,7 @@ function buildLogEntry(
     answers: response ? response.answers : null,
     confidence: jev?.confidence,
     durationMs: Date.now() - startedAt,
+    ...extra,
     ...(safeUsage ? { usage: safeUsage } : {}),
   };
 }

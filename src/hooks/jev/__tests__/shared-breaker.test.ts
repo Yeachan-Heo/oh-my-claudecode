@@ -219,6 +219,38 @@ describe('resolveJudgment with the shared breaker', () => {
     expect(rows().pop()).toMatchObject({ mode: 'cap', reason: 'rpm', priority: 'high', rpm: { count: 1, threshold: 1, limit: 1 } });
   });
 
+  it('a failed call logs why it failed; under OMC_JEV_MAX_RPM also the minute count against the limit; without the variables nothing is added', async () => {
+    const plain = counting(() => failed(429, '120'));
+    await judge(plain.fetchFn);
+    expect(rows().pop()).toMatchObject({ mode: 'degraded' });
+    expect(rows().pop()).not.toHaveProperty('error');
+    expect(rows().pop()).not.toHaveProperty('rpm');
+
+    process.env.OMC_JEV_BREAKER = '1';
+    await judge(counting(() => failed(500)).fetchFn);
+    expect(rows().pop()).toMatchObject({ mode: 'degraded', error: { status: 500, kind: 'http-500', retry_s: 60 } });
+    expect(rows().pop()).not.toHaveProperty('rpm');
+    process.env.OMC_JEV_BREAKER_DIR = join(dir, 'breaker-2');
+    await judge(counting(() => failed(404)).fetchFn);
+    expect(rows().pop()).toMatchObject({ mode: 'degraded', error: { status: 404, kind: 'http-404' } });
+    expect((rows().pop() as { error: object }).error).not.toHaveProperty('retry_s');
+    process.env.OMC_JEV_BREAKER_DIR = join(dir, 'breaker-3');
+    resetJevResolverState(); // three failures in a row opened the in-process circuit of the point
+    await judge((async () => { throw new TypeError('fetch failed'); }) as unknown as typeof fetch);
+    expect(rows().pop()).toMatchObject({ mode: 'degraded', error: { status: null, kind: 'no-response' } });
+
+    const left = 60_000 - (Date.now() % 60_000);
+    if (left < 3000) await new Promise((resolve) => setTimeout(resolve, left + 50));
+    delete process.env.OMC_JEV_BREAKER;
+    resetJevResolverState();
+    process.env.OMC_JEV_BREAKER_DIR = join(dir, 'breaker-4');
+    process.env.OMC_JEV_MAX_RPM = '5';
+    const { fetchFn } = counting((n) => (n === 1 ? ok() : failed(429)));
+    await judge(fetchFn);
+    await judge(fetchFn);
+    expect(rows().pop()).toMatchObject({ mode: 'degraded', error: { status: 429, kind: 'http-429', retry_s: 60 }, rpm: { count: 2, limit: 5 } });
+  });
+
   it('the in-process circuit still works with the shared breaker on (no-response failures)', async () => {
     process.env.OMC_JEV_BREAKER = '1';
     const { fetchFn, count } = counting(() => {

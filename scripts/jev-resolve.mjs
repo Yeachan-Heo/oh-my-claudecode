@@ -528,6 +528,8 @@ export async function resolveRequest(
       answers: entryMode === "degraded" ? null : jevAnswers,
       confidence,
       durationMs,
+      // Under the shared breaker or limit a failed request says why it failed (and the minute's count against the limit).
+      ...(guard && failure ? guard.breaker.failureLogFields(guard.settings, failure) : {}),
       ...(request.tool_use_id ? { tool_use_id: request.tool_use_id } : {}),
     },
     await logDirFor(env),

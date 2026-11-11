@@ -39,6 +39,15 @@ export function classifyFailure(
   failure: { status?: number; retryAfter?: string | null; body?: string; noResponse?: boolean } | undefined,
   now?: number,
 ): FailureClass | undefined;
+export function rpmCount(settings: BreakerSettings | undefined, now?: number): number | undefined;
+export function failureLogFields(
+  settings: BreakerSettings | undefined,
+  failure: { status?: number; retryAfter?: string | null; body?: string; noResponse?: boolean } | undefined,
+  now?: number,
+): {
+  error?: { status: number | null; kind: string; retry_s?: number };
+  rpm?: { count: number; limit: number };
+};
 export function recordFailure(settings: BreakerSettings | undefined, failure: FailureClass | undefined, now?: number): OpenBreaker | undefined;
 export function minuteKey(now?: number): string;
 export function reserveRequest(

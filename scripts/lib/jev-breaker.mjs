@@ -349,6 +349,39 @@ export function classifyFailure(failure, now = Date.now()) {
 }
 
 /**
+ * Requests the limit granted in the current UTC minute, the count it enforces;
+ * undefined without OMC_JEV_MAX_RPM. Fail-open like the rest of the limit.
+ */
+export function rpmCount(settings, now = Date.now()) {
+  if (settings?.maxRpm === undefined) return undefined;
+  return foldMinute(join(settings.dir, "rpm-" + minuteKey(now))).granted;
+}
+
+/**
+ * Extra shadow-log fields of a failed request (the failure as passed to
+ * classifyFailure): `error` {status, kind, retry_s?}, with the same kind as the
+ * breaker reason ("http-<status>", "no-response") and the block time the
+ * breaker takes from the failure; and, under OMC_JEV_MAX_RPM, `rpm` {count,
+ * limit}: the minute's granted requests against the limit, which tells a 429
+ * caused by this machine (count at the limit) from a foreign one (below it).
+ * Empty for a failure that is neither an HTTP status nor a missing response.
+ */
+export function failureLogFields(settings, failure, now = Date.now()) {
+  const status = Number.isInteger(failure?.status) ? failure.status : undefined;
+  let error;
+  if (status !== undefined) {
+    const seconds = classifyFailure(failure, now)?.seconds;
+    error = { status, kind: "http-" + status, ...(seconds !== undefined ? { retry_s: seconds } : {}) };
+  } else if (failure?.noResponse) {
+    error = { status: null, kind: "no-response" };
+  } else {
+    return {};
+  }
+  const count = rpmCount(settings, now);
+  return { error, ...(count !== undefined ? { rpm: { count, limit: settings.maxRpm } } : {}) };
+}
+
+/**
  * Requests without a response within the window, this one included, and the
  * newest time recorded: {count, newest}. The window ends at the newest time,
  * not at this call's own clock: concurrent processes sample their clock before

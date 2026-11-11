@@ -22,6 +22,7 @@ import {
   admitRequest,
   breakerSettings,
   classifyFailure,
+  failureLogFields,
   minuteKey,
   outageMessage,
   readBreaker,
@@ -29,6 +30,7 @@ import {
   reserveRequest,
   retryAfterFromBody,
   retryAfterSeconds,
+  rpmCount,
   thresholdFor,
 } from '../../scripts/lib/jev-breaker.mjs';
 import { resolveRequest, resolveRequestTimeoutMs } from '../../scripts/jev-resolve.mjs';
@@ -170,6 +172,30 @@ describe('jev-breaker library', () => {
     expect(classifyFailure({ noResponse: true }, now)).toEqual({ reason: 'no-response', opens: false });
     expect(classifyFailure({}, now)).toBeUndefined();
     expect(classifyFailure(undefined, now)).toBeUndefined();
+  });
+
+  it('describes a failed request for the log: status, kind, block time, and under a limit the minute count', () => {
+    const now = Date.parse('2026-11-09T12:00:30Z');
+    const plain = settingsFor(jevEnv({ OMC_JEV_BREAKER: '1' }));
+    expect(failureLogFields(plain, { status: 429, retryAfter: '120' }, now)).toEqual({ error: { status: 429, kind: 'http-429', retry_s: 120 } });
+    expect(failureLogFields(plain, { status: 503 }, now)).toEqual({ error: { status: 503, kind: 'http-503', retry_s: 60 } });
+    expect(failureLogFields(plain, { status: 403 }, now)).toEqual({ error: { status: 403, kind: 'http-403', retry_s: 600 } });
+    expect(failureLogFields(plain, { status: 404 }, now)).toEqual({ error: { status: 404, kind: 'http-404' } });
+    expect(failureLogFields(plain, { noResponse: true }, now)).toEqual({ error: { status: null, kind: 'no-response' } });
+    expect(failureLogFields(plain, {}, now)).toEqual({});
+    expect(failureLogFields(plain, undefined, now)).toEqual({});
+    expect(rpmCount(plain, now)).toBeUndefined();
+
+    const limited = settingsFor(jevEnv({ OMC_JEV_MAX_RPM: '5' }));
+    expect(rpmCount(limited, now)).toBe(0);
+    reserveRequest(limited, 'model-routing', now);
+    reserveRequest(limited, 'model-routing', now);
+    expect(rpmCount(limited, now)).toBe(2);
+    expect(rpmCount(limited, now + 60_000)).toBe(0);
+    expect(failureLogFields(limited, { status: 429 }, now)).toEqual({
+      error: { status: 429, kind: 'http-429', retry_s: 60 },
+      rpm: { count: 2, limit: 5 },
+    });
   });
 
   it('honors Retry-After in seconds or as an HTTP date, capped at 30 minutes', () => {
@@ -571,6 +597,44 @@ describe('resolveRequest with the shared breaker and limit', () => {
     expect((await resolveRequest(request(), env, fetchFn)).mode).toBe('circuit-open');
     expect((await resolveRequest(request(), { ...env, TYPESAFE_API_KEY: 'new-key' }, fetchFn)).mode).toBe('shadow');
     expect(calls).toHaveLength(2);
+  });
+
+  it('a failed request logs why it failed: status, kind and block time; a response that is not an HTTP error or a missing response logs nothing', async () => {
+    const env = jevEnv({ OMC_JEV_BREAKER: '1', OMC_JEV_BREAKER_DIR: join(caseDir, 'breaker-a') });
+    await resolveRequest(request(), env, countingFetch(() => errorResponse(429, { 'Retry-After': '120' })).fetchFn);
+    const notFound = jevEnv({ OMC_JEV_BREAKER: '1', OMC_JEV_BREAKER_DIR: join(caseDir, 'breaker-b'), OMC_JEV_LOG_DIR: join(caseDir, 'log-b') });
+    await resolveRequest(request(), notFound, countingFetch(() => errorResponse(404)).fetchFn);
+    const network = jevEnv({ OMC_JEV_BREAKER: '1', OMC_JEV_BREAKER_DIR: join(caseDir, 'breaker-c'), OMC_JEV_LOG_DIR: join(caseDir, 'log-c') });
+    await resolveRequest(request(), network, async () => { throw new TypeError('fetch failed'); });
+    const invalid = jevEnv({ OMC_JEV_BREAKER: '1', OMC_JEV_BREAKER_DIR: join(caseDir, 'breaker-d'), OMC_JEV_LOG_DIR: join(caseDir, 'log-d') });
+    await resolveRequest(request(), invalid, async () => ({ ok: true, status: 200, json: async () => ({ nope: true }) }));
+    const [rateLimited] = logRows(env);
+    expect(rateLimited).toMatchObject({ mode: 'degraded', error: { status: 429, kind: 'http-429', retry_s: 120 } });
+    expect(rateLimited).not.toHaveProperty('rpm');
+    expect(logRows(notFound)[0]).toMatchObject({ mode: 'degraded', error: { status: 404, kind: 'http-404' } });
+    expect(logRows(notFound)[0].error).not.toHaveProperty('retry_s');
+    expect(logRows(network)[0]).toMatchObject({ mode: 'degraded', error: { status: null, kind: 'no-response' } });
+    expect(logRows(invalid)[0]).toMatchObject({ mode: 'degraded' });
+    expect(logRows(invalid)[0]).not.toHaveProperty('error');
+  });
+
+  it('under OMC_JEV_MAX_RPM a failed request logs the minute count against the limit: at the limit the 429 is ours, below it foreign', async () => {
+    const { own, foreign } = await inOneMinute(async (dir) => {
+      const own = jevEnv({ OMC_JEV_MAX_RPM: '2', OMC_JEV_BREAKER_DIR: join(dir, 'breaker-own'), OMC_JEV_LOG_DIR: join(dir, 'log-own') });
+      const foreign = jevEnv({ OMC_JEV_MAX_RPM: '100', OMC_JEV_BREAKER_DIR: join(dir, 'breaker-foreign'), OMC_JEV_LOG_DIR: join(dir, 'log-foreign') });
+      for (const env of [own, foreign]) {
+        const { fetchFn } = countingFetch((n) => (n === 1 ? okResponse() : errorResponse(429)));
+        await resolveRequest(request('model-routing'), env, fetchFn);
+        await resolveRequest(request('model-routing'), env, fetchFn);
+      }
+      return { own, foreign };
+    });
+    const [success, failure] = logRows(own);
+    expect(success).toMatchObject({ mode: 'shadow' });
+    expect(success).not.toHaveProperty('error');
+    expect(success).not.toHaveProperty('rpm');
+    expect(failure).toMatchObject({ mode: 'degraded', error: { status: 429, kind: 'http-429', retry_s: 60 }, rpm: { count: 2, limit: 2 } });
+    expect(logRows(foreign)[1]).toMatchObject({ mode: 'degraded', error: { status: 429 }, rpm: { count: 2, limit: 100 } });
   });
 
   it('OMC_JEV_MAX_RPM holds back low-priority points first and logs them as cap', async () => {
