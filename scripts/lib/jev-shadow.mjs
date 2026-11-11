@@ -325,7 +325,7 @@ export function jevNoulOf(result, questionName) {
  * permissionMode is the hook input's permission_mode; it travels in the
  * request so the resolver logs the same mode the caller acted on.
  */
-export function recordJevShadow({ point, state, questions, heuristic, permissionMode }) {
+export function recordJevShadow({ point, state, questions, heuristic, permissionMode, toolUseId }) {
   const mode = jevModeFor(point, process.env, permissionMode);
   if (mode === "off") return undefined;
 
@@ -360,7 +360,7 @@ export function recordJevShadow({ point, state, questions, heuristic, permission
 
     writeFileSync(
       requestFile,
-      JSON.stringify({ point, state, questions, heuristic, permissionMode }),
+      JSON.stringify({ point, state, questions, heuristic, permissionMode, ...(toolUseId ? { tool_use_id: toolUseId } : {}) }),
       {
         encoding: "utf8",
         mode: 0o600,

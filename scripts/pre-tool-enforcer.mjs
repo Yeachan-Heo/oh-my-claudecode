@@ -912,7 +912,7 @@ function boundModelRoutingInput(toolInput) {
   return bounded;
 }
 
-function recordModelRoutingShadow(toolName, toolInput, updatedToolInput, permissionMode, transcriptPath, directory, sessionId, stateDir) {
+function recordModelRoutingShadow(toolName, toolInput, updatedToolInput, permissionMode, transcriptPath, directory, sessionId, stateDir, toolUseId) {
   // OMC_JEV_MODEL_ROUTING_MARKER: a `use` line in the prompt pins the model and/or the effort.
   // The marker is the caller's own instruction, so it works whether or not the point is on;
   // Jev is then asked only the questions the marker leaves open.
@@ -974,6 +974,7 @@ function recordModelRoutingShadow(toolName, toolInput, updatedToolInput, permiss
     questions,
     heuristic,
     permissionMode,
+    toolUseId,
   });
 
   const ensureUpdated = () => {
@@ -2462,7 +2463,7 @@ async function main() {
 
     if (toolName === 'Task' || toolName === 'Agent') {
       const toolInput = data.toolInput || data.tool_input || {};
-      const jevUpdated = recordModelRoutingShadow(toolName, toolInput, updatedToolInput, data.permission_mode, data.transcript_path || data.transcriptPath || '', directory, data.session_id || data.sessionId || '', stateDir);
+      const jevUpdated = recordModelRoutingShadow(toolName, toolInput, updatedToolInput, data.permission_mode, data.transcript_path || data.transcriptPath || '', directory, data.session_id || data.sessionId || '', stateDir, data.tool_use_id || data.toolUseID);
       // In active mode, Jev may override the model choice
       if (jevUpdated) updatedToolInput = jevUpdated;
       // OMC_JEV_MAX_EFFORT_ALWAYS=1: the cap holds whether or not Jev set the effort.
