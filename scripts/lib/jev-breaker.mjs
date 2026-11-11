@@ -427,6 +427,8 @@ function takeLock(lockPath, deadline) {
   // A removal or a vanished lock is followed by an immediate try, but not twice in a row.
   let quickBefore = false;
   for (;;) {
+    // Checked before every create, the first included: a lock created after the deadline can be held when the process is killed.
+    if (Date.now() >= deadline) return undefined;
     let code;
     try {
       const fd = openSync(lockPath, "wx");

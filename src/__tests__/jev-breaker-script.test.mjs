@@ -516,6 +516,15 @@ describe('jev-breaker library', () => {
     expect(existsSync(join(settings.dir, 'breaker.json'))).toBe(false);
   }, 30_000);
 
+  it('does not create the lock once the hook deadline has passed: no lock left to hold the others back, nothing written', async () => {
+    const settings = breakerSettings({ OMC_JEV_BREAKER: '1', OMC_JEV_BREAKER_DIR: join(caseDir, 'breaker') }, ENDPOINT, 'k');
+    // The deadline of the hook (and its kill margin) is over before the opener starts: a free lock must not be created.
+    const child = await openInChild('late', String(() => {}), 429, { TEST_DEADLINE_IN_MS: '-1000' });
+    expect(child.opened).toBeNull();
+    expect(existsSync(join(settings.dir, 'breaker.json'))).toBe(false);
+    expect(existsSync(join(settings.dir, 'breaker.json.lock'))).toBe(false);
+  }, 30_000);
+
   it('removes temp files of a killed write after five minutes, not earlier', () => {
     const settings = breakerSettings({ OMC_JEV_BREAKER: '1', OMC_JEV_BREAKER_DIR: caseDir }, ENDPOINT, 'k');
     mkdirSync(settings.dir, { recursive: true });
