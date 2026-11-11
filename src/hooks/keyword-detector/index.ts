@@ -41,13 +41,18 @@ export interface DetectedKeyword {
   position: number;
 }
 
+// The Latin aliases need a command (see findActionableAutopilotAliasMatch); the
+// creation phrases and the Korean and Japanese aliases keep the generic check.
+const AUTOPILOT_ALIAS_PATTERN = /\b(autopilot|auto[\s-]?pilot|fullsend|full\s+auto)\b/i;
+const AUTOPILOT_OTHER_PATTERN = /\b(?:build|create|make)\s+me\s+(?:an?\s+)?(?:app|feature|project|tool|plugin|website|api|server|cli|script|system|service|dashboard|bot|extension)\b|\bi\s+want\s+an?\s+(?:app|feature|project|tool|plugin|website|api|server|cli|script|system|service|dashboard|bot|extension)\b|(오토파일럿)|(オートパイロット)/i;
+
 /**
  * Keyword patterns for each mode
  */
 const KEYWORD_PATTERNS: Record<KeywordType, RegExp> = {
   cancel: /\b(cancelomc|stopomc)\b/i,
   ralph: /\b(ralph)\b(?!-)|(랄프)(?!로렌)|(ラルフ)(?!・?ローレン)/i,
-  autopilot: /\b(autopilot|auto[\s-]?pilot|fullsend|full\s+auto)\b|\b(?:build|create|make)\s+me\s+(?:an?\s+)?(?:app|feature|project|tool|plugin|website|api|server|cli|script|system|service|dashboard|bot|extension)\b|\bi\s+want\s+an?\s+(?:app|feature|project|tool|plugin|website|api|server|cli|script|system|service|dashboard|bot|extension)\b|(오토파일럿)|(オートパイロット)/i,
+  autopilot: new RegExp(`${AUTOPILOT_ALIAS_PATTERN.source}|${AUTOPILOT_OTHER_PATTERN.source}`, 'i'),
   // Team keyword detection disabled — team mode is now explicit-only via /team skill.
   // This prevents infinite spawning when Claude workers receive prompts containing "team".
   team: /(?!x)x/,  // never-match placeholder (type system requires the key)
@@ -853,6 +858,121 @@ function findActionableKeywordMatch(
   return null;
 }
 
+// The Latin autopilot aliases (autopilot, auto pilot, auto-pilot, full auto, fullsend) start the
+// mode only as a command, like ralph and ralplan. Without this, a foreign sentence pasted into a
+// prompt ("Add tests (autopilot at cap; ...)") armed the mode, because the generic
+// hasActionableKeyword treats every mention outside quotes and help questions as a command.
+// A command is: the alias opens the prompt or a line behind $ / ! (or stands alone on a line); a
+// command verb or a colon plus verb follows it; or an activation phrase (use, run, turn on,
+// please, let's, I want, ...) stands before it. Not a command: a negation before it (don't, never,
+// without), a reference label line ("Docs: use autopilot ..."), a noun use ("the autopilot run
+// failed") and a commit-log line. For "full auto" and "fullsend", which are ordinary hardware
+// phrases, only a verb or phrase directly before, or a colon plus verb after, counts. Lines in Korean, Japanese, Chinese or
+// Thai keep the generic check, as before. At most AUTOPILOT_MAX_CANDIDATES commands are checked
+// with isInformationalKeywordContext, whose cost is linear in the text length.
+const AUTOPILOT_COMMAND_VERBS = 'fix|debug|investigate|resolve|handle|patch|address|implement|build|create|make|run|start|enable|activate|invoke|trigger|launch|plan|add|write|refactor|update|remove|migrate|finish|continue|do|go|test|review|check|verify|audit|analy[sz]e|inspect|deploy|install|configure|document|explain|find|search|generate|convert|ship|release|merge|prepare|design|draft|upgrade|rename|clean|optimi[sz]e|rewrite|summari[sz]e|compare';
+const AUTOPILOT_NOT_A_COMMAND_AFTER = '(?!\\s+(?:\\d|failed|fails|was|were|is|are|has|had|step|phase|looks|takes|keeps|crashed|hangs|hung|errored|timed\\s+out|exit|status|log|ok|okay|suite|mode|output|report|results?|summary)(?![\\p{L}\\d]))';
+const AUTOPILOT_COMMAND_AFTER = new RegExp(`^(?:[ \\t]*[,;\\u2014\\u2013][ \\t]*|[ \\t]+-[ \\t]+|[ \\t]+)(?:${AUTOPILOT_COMMAND_VERBS})(?![\\p{L}\\d])${AUTOPILOT_NOT_A_COMMAND_AFTER}`, 'iu');
+// After an explicit colon any verb starts a command ("autopilot: test the API"); a status line
+// ("autopilot: waiting for a task", "autopilot: complete") has a gerund, a past tense or no object.
+const AUTOPILOT_COLON_COMMAND = new RegExp(`^[ \\t]*[:\\uFF1A][ \\t]*(?:(?:${AUTOPILOT_COMMAND_VERBS})(?![\\p{L}\\d])${AUTOPILOT_NOT_A_COMMAND_AFTER}|(?!(?!(?:bring|ping|seed|feed|embed|proceed|succeed|speed|need|shred|string|swing|sing|ring|fling|sling|sting|wring|spring|cling)(?![\\p{L}\\d]))\\p{L}*(?:ing|ed)(?![\\p{L}\\d]))\\p{L}{2,}(?![\\p{L}\\d])${AUTOPILOT_NOT_A_COMMAND_AFTER}[ \\t]+\\S)`, 'iu');
+const AUTOPILOT_ALONE_ON_LINE = /^[ \t]*[.!]?[ \t]*(?:\r?\n|$)/;
+const AUTOPILOT_NEGATION_BEFORE = /(?<![\p{L}\d])(?:don['’]?t|do\s+not|never|not|without)\s+(?!(?:stop|quit|forget|fail|hesitat\w*|delay\w*|wait\w*|paus\w*|ask\w*)(?![\p{L}\d]))(?:(?!(?:so|but|and|then|instead|because|now|mind)(?![\p{L}]))[\p{L}'’]+\s+){0,2}$/iu;
+const AUTOPILOT_REFERENCE_LABEL_LINE = /^[ \t]*(?:docs?|documentation|summary|status|logs?|release\s+notes|changelog|readme|examples?|output|result|results|description|title|commit|trigger|triggers|keywords?)[ \t]*:/i;
+const AUTOPILOT_NOUN_USE_BEFORE = /(?<![\p{L}\d])(?:the|a|an|this|that|these|those|last|previous|our|my|its|your|their)\s+$/iu;
+const AUTOPILOT_COMMIT_LINE_BEFORE = /(?<![\p{L}\d])[0-9a-f]{7,40}\s+$/iu;
+const AUTOPILOT_ASCII_FREE_SCRIPTS = /[\p{Script=Hangul}\p{Script=Hiragana}\p{Script=Katakana}\p{Script=Han}\p{Script=Thai}]/u;
+const AUTOPILOT_PHRASE_BEFORE = /(?<![\p{L}\d])(?:turn\s+on|switch\s+to|set|go(?:\s+with|\s+for)?|i\s+(?:want|need|would\s+like)(?:\s+to\s+use)?)\s+(?:the\s+|a\s+)?$/iu;
+const AUTOPILOT_VERB_DIRECTLY_BEFORE = /(?<![\p{L}\d])(?:use|run|start|enable|activate|invoke|trigger|launch|turn\s+on)\s+$/iu;
+const AUTOPILOT_VERB_ARTICLE_BEFORE = /(?<![\p{L}\d])(?:use|run|start|enable|activate|invoke|trigger|launch)\s+(?:the|a)\s+$/iu;
+// "do not stop using autopilot" asks to keep it running, so the negation does not cancel it.
+const AUTOPILOT_KEEP_USING_BEFORE = /(?<![\p{L}\d])(?:don['’]?t|do\s+not|never)\s+(?:ever\s+)?(?:stop|quit)\s+using\s+$/iu;
+// The separable form "turn autopilot on": "turn" before the alias and "on" right after it.
+const AUTOPILOT_TURN_BEFORE = /(?<![\p{L}\d])turn\s+(?:the\s+|a\s+)?$/iu;
+const AUTOPILOT_ON_AFTER = /^[ \t]+on(?![\p{L}\d])/iu;
+// Colon plus command verb, the one suffix form that also counts for full auto and fullsend mid-line.
+const AUTOPILOT_COLON_VERB = new RegExp(`^[ \\t]*[:\\uFF1A][ \\t]*(?:${AUTOPILOT_COMMAND_VERBS})(?![\\p{L}\\d])${AUTOPILOT_NOT_A_COMMAND_AFTER}`, 'iu');
+const AUTOPILOT_NAMESPACE_PREFIX = /^\s*\/?(?:oh-my-(?:claudecode|codex)|omc):\s*$/i;
+const AUTOPILOT_MAX_MATCHES = 1000;
+const AUTOPILOT_MAX_CANDIDATES = 20;
+
+function hasExplicitAutopilotInvocationContext(
+  text: string,
+  position: number,
+  keywordLength: number,
+  keywordText: string,
+): boolean {
+  if (hasDirectInvocationPrefix(text, position) || AUTOPILOT_NAMESPACE_PREFIX.test(text.slice(getLineBounds(text, position).start, position))) return true;
+  const { start: lineStart, end: lineEnd } = getLineBounds(text, position);
+  const headStart = Math.max(lineStart, position - 80);
+  const tail = text.slice(headStart, position);
+  const afterKeyword = text.slice(position + keywordLength, position + keywordLength + 60);
+  const lineHead = text.slice(lineStart, Math.min(position, lineStart + 80));
+  if (AUTOPILOT_ASCII_FREE_SCRIPTS.test(text.slice(lineStart, Math.min(lineEnd, lineStart + 400)))) return true;
+  if (AUTOPILOT_NEGATION_BEFORE.test(tail)) return false;
+  if (AUTOPILOT_REFERENCE_LABEL_LINE.test(lineHead)) return false;
+  if (AUTOPILOT_TURN_BEFORE.test(tail) && AUTOPILOT_ON_AFTER.test(afterKeyword)) return true;
+  if (AUTOPILOT_KEEP_USING_BEFORE.test(tail)) return true;
+  const isHardwarePhrase = /^(?:full\s*auto|fullsend)$/i.test((keywordText || '').trim());
+  const atLineStart = /^[ \t]*(?:[$/!][ \t]*)?$/.test(lineHead);
+  if (atLineStart && (/[$/!]/.test(lineHead) || AUTOPILOT_ALONE_ON_LINE.test(afterKeyword))) return true;
+  if (isHardwarePhrase) {
+    return (atLineStart && (AUTOPILOT_COLON_COMMAND.test(afterKeyword) || AUTOPILOT_COMMAND_AFTER.test(afterKeyword)))
+      || AUTOPILOT_COLON_VERB.test(afterKeyword)
+      || AUTOPILOT_VERB_DIRECTLY_BEFORE.test(tail)
+      || AUTOPILOT_PHRASE_BEFORE.test(tail)
+      || AUTOPILOT_VERB_ARTICLE_BEFORE.test(tail)
+      || hasConversationalInvocationNearKeyword(text, position, keywordLength, keywordText);
+  }
+  if (AUTOPILOT_COLON_COMMAND.test(afterKeyword)) return true;
+  if (AUTOPILOT_PHRASE_BEFORE.test(tail) || AUTOPILOT_VERB_ARTICLE_BEFORE.test(tail)) return true;
+  if (AUTOPILOT_NOUN_USE_BEFORE.test(tail) || AUTOPILOT_COMMIT_LINE_BEFORE.test(tail)) return false;
+  if (AUTOPILOT_COMMAND_AFTER.test(afterKeyword)) return true;
+  if (hasConversationalInvocationNearKeyword(text, position, keywordLength, keywordText)) return true;
+  return hasActivationIntentNearKeyword(text.slice(Math.max(lineStart, position - INFORMATIONAL_CONTEXT_WINDOW), Math.min(lineEnd, position + keywordLength + INFORMATIONAL_CONTEXT_WINDOW)), keywordText);
+}
+
+function findActionableAutopilotAliasMatch(
+  text: string,
+  pattern: RegExp,
+): Omit<DetectedKeyword, 'type'> | null {
+  const flags = pattern.flags.includes('g') ? pattern.flags : `${pattern.flags}g`;
+  const globalPattern = new RegExp(pattern.source, flags);
+  let scanned = 0;
+  let candidates = 0;
+
+  for (const match of text.matchAll(globalPattern)) {
+    if (match.index === undefined) continue;
+    if (++scanned > AUTOPILOT_MAX_MATCHES) break;
+
+    const keyword = match[0];
+    if (!hasExplicitAutopilotInvocationContext(text, match.index, keyword.length, keyword)) continue;
+    if (++candidates > AUTOPILOT_MAX_CANDIDATES) {
+      // Past the budget skip the costly informational check, but a slash or shell-prefixed command still counts.
+      if (/^[ \t]*[$/!][ \t]*$/.test(text.slice(getLineBounds(text, match.index).start, match.index))) {
+        return { keyword, position: match.index };
+      }
+      continue;
+    }
+    if (isInformationalKeywordContext(text, match.index, keyword.length, keyword)) continue;
+
+    return { keyword, position: match.index };
+  }
+
+  return null;
+}
+
+function findActionableAutopilotMatch(
+  text: string,
+): Omit<DetectedKeyword, 'type'> | null {
+  // Only the Latin aliases need a command; the creation phrases and the
+  // Korean and Japanese aliases keep the generic check.
+  return (
+    findActionableAutopilotAliasMatch(text, AUTOPILOT_ALIAS_PATTERN) ??
+    findActionableKeywordMatch(text, AUTOPILOT_OTHER_PATTERN)
+  );
+}
+
 function findActionableRalplanMatch(
   text: string,
   pattern: RegExp,
@@ -950,7 +1070,9 @@ export function detectKeywordsWithType(
     const match =
       type === 'ralplan'
         ? findActionableRalplanMatch(cleanedText, pattern)
-        : findActionableKeywordMatch(cleanedText, pattern);
+        : type === 'autopilot'
+          ? findActionableAutopilotMatch(cleanedText)
+          : findActionableKeywordMatch(cleanedText, pattern);
 
     if (match) {
       detected.push({
