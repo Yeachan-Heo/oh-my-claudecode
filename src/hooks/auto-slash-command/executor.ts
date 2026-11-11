@@ -245,7 +245,7 @@ export function findCommand(commandName: string): CommandInfo | null {
  * Resolve $ARGUMENTS placeholder in command content
  */
 function resolveArguments(content: string, args: string): string {
-  return content.replace(/\$ARGUMENTS/g, args || '(no arguments provided)');
+  return content.replace(/\$ARGUMENTS/g, () => args || '(no arguments provided)');
 }
 
 function validateLiveDataArguments(args: string): string | null {
