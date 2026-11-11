@@ -44173,6 +44173,128 @@
           "previousFilename": null
         }
       ]
+    },
+    {
+      "pullNumber": 4988,
+      "targetRef": "main",
+      "mergeBaseSha": "a18ef4e947ab7c676b0fd06be324389ed5bf0f26",
+      "headSha": "0d95df593f21316008ac93b7f89338f544e0ab99",
+      "owner": "Yeachan-Heo",
+      "expiresAt": "2027-12-31T00:00:00.000Z",
+      "generatedDelta": {
+        "count": 18,
+        "sha256": "f2c76fd5fe9107145b068ddb235eac4a31646ed46b8e0a831d72a3f585f015c3"
+      },
+      "generatedFiles": [
+        {
+          "status": "added",
+          "filename": "bridge/__pycache__/gyoshu_bridge.cpython-314.pyc",
+          "sha": "0aa393492f58fccdf408c2475ef3c379d72338c1",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "bridge/claude-md-coordinator.cjs",
+          "sha": "e51be05d7e8c5362fd285f94d5570e2896366ef4",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "bridge/cli.cjs",
+          "sha": "9705d7308f02602c98f2ca347ad13444b97a2124",
+          "previousFilename": null
+        },
+        {
+          "status": "added",
+          "filename": "dist/__tests__/bridge-self-contained.test.d.ts",
+          "sha": "bf997261405bf24374eee856b6e6ca0174b36b31",
+          "previousFilename": null
+        },
+        {
+          "status": "added",
+          "filename": "dist/__tests__/bridge-self-contained.test.d.ts.map",
+          "sha": "f2ee75aa02dd187af45d7ff44725baf3cc6f79dd",
+          "previousFilename": null
+        },
+        {
+          "status": "added",
+          "filename": "dist/__tests__/bridge-self-contained.test.js",
+          "sha": "fa2c7a4b1f8cd6605ebc3931c137c997d4e8a06f",
+          "previousFilename": null
+        },
+        {
+          "status": "added",
+          "filename": "dist/__tests__/bridge-self-contained.test.js.map",
+          "sha": "027ee6e5cb73f48991db61ee2d01f940a76add93",
+          "previousFilename": null
+        },
+        {
+          "status": "added",
+          "filename": "dist/hooks/persistent-mode/__tests__/architect-approval-transcript.test.d.ts",
+          "sha": "d9977f998d2c0aa98c533278b517091a7e62ac21",
+          "previousFilename": null
+        },
+        {
+          "status": "added",
+          "filename": "dist/hooks/persistent-mode/__tests__/architect-approval-transcript.test.d.ts.map",
+          "sha": "35cff2ebea12282cb446ed4ffa92d1afe08f1788",
+          "previousFilename": null
+        },
+        {
+          "status": "added",
+          "filename": "dist/hooks/persistent-mode/__tests__/architect-approval-transcript.test.js",
+          "sha": "67dd03f01512c5a5d7cc1b1081640a1df4121202",
+          "previousFilename": null
+        },
+        {
+          "status": "added",
+          "filename": "dist/hooks/persistent-mode/__tests__/architect-approval-transcript.test.js.map",
+          "sha": "da9e96f50b3c614a23fed61cefa9ce1f9bee0dd7",
+          "previousFilename": null
+        },
+        {
+          "status": "added",
+          "filename": "dist/installer/__tests__/claude-mcp-config-path.test.d.ts",
+          "sha": "0ca2ad8a4bff3dc26e9941fb2144ba760e4f00d0",
+          "previousFilename": null
+        },
+        {
+          "status": "added",
+          "filename": "dist/installer/__tests__/claude-mcp-config-path.test.d.ts.map",
+          "sha": "2ec2152c4831f8778515da98d6f221ea9b25da68",
+          "previousFilename": null
+        },
+        {
+          "status": "added",
+          "filename": "dist/installer/__tests__/claude-mcp-config-path.test.js",
+          "sha": "6a8aee290b1f50c0e0e515346d93cc91c8f664ba",
+          "previousFilename": null
+        },
+        {
+          "status": "added",
+          "filename": "dist/installer/__tests__/claude-mcp-config-path.test.js.map",
+          "sha": "b2c8a8917253f87cddb220008a49ffb955c7a015",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/installer/index.d.ts.map",
+          "sha": "0e42e36ee5b10e8a4d7a1b8c67d5d9e326ae80ba",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/installer/index.js",
+          "sha": "fb88c1744ccea7460abe22ff318d87024675e485",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/installer/index.js.map",
+          "sha": "e6add39a011c5d37e0362f21a703a0d074266d7b",
+          "previousFilename": null
+        }
+      ]
     }
   ]
 }
