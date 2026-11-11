@@ -865,6 +865,26 @@ describe('jev-compaction module: active compaction', () => {
     }
   });
 
+  it('a prompt that only begins like another session\'s message stays the user\'s', async () => {
+    const typed = 'Another Claude session sent a message that mentions notes-9.txt; explain it';
+    const base = conversation(30);
+    const messages = [...base.slice(0, -2), Object.freeze({ role: 'user', text: typed, toolUses: [], handle: 'hp' }), ...base.slice(-2)];
+    const { out, calls, records } = await compactWithApi(messages, apiOf(messages));
+    expect(records()[0]).toMatchObject({ result: 'jev', mentioned: 1 });
+    expect(calls.fetch[0].body.state.task).toContain(typed);
+    expect(resultOf(out.messages, 't9')?.text).toBe(resultOf(messages, 't9').text);
+  });
+
+  it('a user\'s block that writes the note\'s words and then quotes a user\'s header runs to the host\'s footer', async () => {
+    const words = 'Check notes-9.txt first.\n\nThis is how Claude Code surfaces messages, I wrote that myself.\nQuoted:\nThe user sent a new message while you were working:\nold one';
+    const base = conversation(30);
+    const messages = [...base.slice(0, -2), Object.freeze({ role: 'user', text: framed(words), toolUses: [], handle: 'hq' }), Object.freeze({ role: 'user', text: 'One more thing.', toolUses: [], handle: 'hm' }), ...base.slice(-2)];
+    const { out, calls, records } = await compactWithApi(messages, apiOf(messages));
+    expect(records()[0]).toMatchObject({ result: 'jev', mentioned: 1 });
+    expect(calls.fetch[0].body.state.task).toContain(words);
+    expect(resultOf(out.messages, 't9')?.text).toBe(resultOf(messages, 't9').text);
+  });
+
   it('a user\'s header quoted in a user\'s block before its framing note stays in the block', async () => {
     const words = 'Please check notes-9.txt first.\nTranscript:\nThe user sent a new message while you were working:\nold one\nThe user sent a new message while you were working:\nold two';
     const base = conversation(30);
@@ -937,6 +957,39 @@ describe('jev-compaction module: active compaction', () => {
     const after = await compactWithApi(messages, apiOf(messages, { q: [framed(words)] }));
     expect(after.records()[0]).toMatchObject({ result: 'jev', queued_user: 1, queued_carried: 1 });
     expect(after.out.messages.find((m) => (m.text || '').includes(framed(words))).toolResults.map((r) => r.tool_use_id)).toEqual(['q']);
+  });
+
+  it('a hidden block and a shown row with the same text are matched at their API positions: the shown row after the second result shows the second one', async () => {
+    const words = 'Same words twice.';
+    const base = conversation(20);
+    const tail = [
+      Object.freeze({ role: 'assistant', text: 'Two at once.', toolUses: [{ tool_use_id: 'img', tool: 'Screenshot', input: {} }, { tool_use_id: 'q', tool: 'Bash', input: { command: 'cat q.txt' } }], handle: 'hpar' }),
+      Object.freeze({ role: 'user', text: '', toolUses: [], toolResults: [{ tool_use_id: 'img', text: '', result: [{ type: 'image' }] }], handle: 'himg' }),
+      Object.freeze({ role: 'user', text: '', toolUses: [], toolResults: [{ tool_use_id: 'q', text: 'RESULT-q', isError: false }], handle: 'hq' }),
+      Object.freeze({ role: 'user', text: framed(words), toolUses: [], handle: 'hv' }),
+    ];
+    const messages = [...base.slice(0, -2), ...tail, ...base.slice(-2)];
+    const api = apiOf(messages, { img: [framed(words)] });
+    expect(api.find((a) => a.content.some((b) => b.tool_use_id === 'img')).content.map((b) => b.text ?? b.tool_use_id).slice(0, 4)).toEqual(['img', framed(words), 'q', framed(words)]);
+    const { out, records } = await compactWithApi(messages, api);
+    expect(records()[0]).toMatchObject({ result: 'jev', kept_handle: 1, queued_user: 1, queued_carried: 0 });
+    expect(out.messages).toContain(tail[1]);
+    expect(out.messages).toContain(tail[3]);
+    expect(count(out.messages, framed(words))).toBe(1);
+  });
+
+  it('many shown rows with the same text in one API message are matched in linear time', async () => {
+    const notice = '[Request interrupted by user for tool use]';
+    const base = conversation(30, { chars: 40000 });
+    const t10 = base.findIndex((m) => resultOf([m], 't10'));
+    const notices = Array.from({ length: 20000 }, (_, k) => Object.freeze({ role: 'user', text: notice, toolUses: [], handle: `n${k}` }));
+    const messages = [...base.slice(0, t10 + 1), ...notices, ...base.slice(t10 + 1)];
+    const api = apiOf(messages);
+    expect(api.find((a) => a.content.some((b) => b.tool_use_id === 't10')).content).toHaveLength(20001);
+    const t0 = performance.now();
+    const { records } = await compactWithApi(messages, api);
+    expect(performance.now() - t0).toBeLessThan(2000);
+    expect(records()[0]).toMatchObject({ result: 'jev', queued_user: 0, queued_other: 0 });
   });
 
   it('a delivery equal to the text of an earlier row (a block a previous compaction carried) is still carried at its own result', async () => {

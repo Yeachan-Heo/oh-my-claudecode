@@ -205,13 +205,14 @@ const NOT_USER_PREFIXES = [
 // user's.
 const QUEUED_PREFIX = 'The user sent a new message while you were working:\n';
 const QUEUED_TAIL = '\n\nThis is how Claude Code surfaces messages'; // the fixed note after the user's words
+const QUEUED_FOOTER = `${QUEUED_TAIL} the user sends mid-turn`; // the start of the host's whole note, which a user rarely writes
 const DELIVERY_WRAP = /^(?:\s*<system-reminder[^>]*>)+\s*/; // a wrapper, also the envelope build writes around a wrapped block
 // The first line of another sender's frame: "<sender> sent a message (or a report) while you were
 // working:", and the bound conversation's "A message arrived ...", "Messages arrived ..." and
 // "Activity ... in the bound conversation ..." frames. A line that only ends with "while you were
 // working:" is no frame.
 const OTHER_FRAME = /^(?:.+ sent an? (?:new )?(?:message|report)|(?:A message|Messages) arrived .+|Activity (?:was observed )?in the bound conversation) while you were working(?:,.*)?:$/;
-const DELIVERY_OPENERS = ['Another Claude session sent a message', '<agent-message', '<cross-session-message', '<teammate-message', '<task-notification', '[MESSAGE FROM NON-USER SOURCE'];
+const DELIVERY_OPENERS = ['Another Claude session sent a message:', '<agent-message', '<cross-session-message', '<teammate-message', '<task-notification', '[MESSAGE FROM NON-USER SOURCE'];
 // An envelope in a row's text: the host's <system-reminder id="..."> and the one build writes around a
 // carried block, each closed only by the closing tag with its own id.
 const ENVELOPE_CLOSE = '</system-reminder id="';
@@ -1126,11 +1127,14 @@ function blockWords(block) {
 // The end of a user's block that opens at `from` in a row's text: the end of the line of its framing
 // note, the last one before the first user's header after its first note (a header the user quotes
 // before the note stays in the block, and the user may write the note's words too); -1 without a
-// note. A note inside an envelope that holds a delivered message (`spans`, in text order) is that
+// note. The first note is the host's whole footer when the text has one after `from` (`footers`, its
+// positions in order), so the note's opening words the user writes do not end the search early. A note inside an envelope that holds a delivered message (`spans`, in text order) is that
 // message's, not the user's, so a block stops before a carried envelope that quotes the note. Each call
 // reads only up to that header and skips an envelope in one step, so the blocks of a row stay linear.
-function userBlockEnd(text, from, spans = []) {
-  const first = text.indexOf(QUEUED_TAIL, from);
+function userBlockEnd(text, from, spans = [], footers = []) {
+  let f = 0;
+  for (let hi = footers.length; f < hi;) { const mid = (f + hi) >> 1; if (footers[mid] < from) f = mid + 1; else hi = mid; }
+  const first = f < footers.length ? footers[f] : text.indexOf(QUEUED_TAIL, from);
   if (first < 0) return -1;
   const next = text.indexOf(QUEUED_PREFIX, first + QUEUED_TAIL.length);
   const limit = next < 0 ? text.length : next;
@@ -1146,11 +1150,19 @@ function userBlockEnd(text, from, spans = []) {
   return nl < 0 ? text.length : Math.min(nl, limit);
 }
 
+// The positions of `s` in `text`, in order.
+function positionsOf(text, s) {
+  const out = [];
+  for (let i = text.indexOf(s); i >= 0; i = text.indexOf(s, i + s.length)) out.push(i);
+  return out;
+}
+
 // Text outside envelopes (a row rebuilt before carried blocks got envelopes) split at each line that
 // opens a frame: one piece per delivered message. A user's block runs to its framing note
 // (userBlockEnd), so a frame line the user quotes before the note stays in it.
 function piecesOf(text) {
   const pieces = [];
+  const footers = positionsOf(text, QUEUED_FOOTER);
   const lastTail = text.lastIndexOf(QUEUED_TAIL);
   let end = -1;
   let at = 0;
@@ -1158,7 +1170,7 @@ function piecesOf(text) {
     const frame = at >= end ? frameOf(`${line}\n`) : undefined;
     if (!pieces.length || frame) {
       pieces.push(line);
-      end = frame === 'user' && at < lastTail ? userBlockEnd(text, at) : -1;
+      end = frame === 'user' && at < lastTail ? userBlockEnd(text, at, [], footers) : -1;
     } else pieces[pieces.length - 1] += `\n${line}`;
     at += line.length + 1;
   }
@@ -1169,6 +1181,7 @@ function piecesOf(text) {
 // its framing note: that one is a quote the user pasted and stays in their block.
 function deliveredOf(text) {
   const all = envelopesOf(text).filter((e) => deliveryOf(e.text));
+  const footers = positionsOf(text, QUEUED_FOOTER);
   const lastTail = text.lastIndexOf(QUEUED_TAIL);
   const out = [];
   let end = -1;
@@ -1181,7 +1194,7 @@ function deliveredOf(text) {
     }
     const nl = text.indexOf('\n', p);
     const stop = Math.min(nl < 0 ? text.length : nl, k < all.length ? all[k].from : text.length);
-    if (p >= end && p < lastTail && frameOf(`${text.slice(p, stop)}\n`) === 'user') end = userBlockEnd(text, p, all);
+    if (p >= end && p < lastTail && frameOf(`${text.slice(p, stop)}\n`) === 'user') end = userBlockEnd(text, p, all, footers);
     p = stop === nl ? nl + 1 : stop;
   }
   return out;
@@ -1217,43 +1230,50 @@ function userWords(m) {
 // it back: the row of the result or of the shown text that stands last before the block in its API
 // message (the API form keeps the order of the rows it joins, so with parallel results in rows of
 // their own that is the result before it, and a row shown after the results, such as an
-// interruption notice, takes the blocks after its text). A block equal to a row's text is shown
-// already; each row shows one block, matched in API order.
+// interruption notice, takes the blocks after its text). A block is shown already only by the row at
+// its position in the API form (matchShown).
 function queuedOf(messages, api) {
   if (!api) return null;
   const rows = new Map();
   const counts = { user: 0, other: 0 };
   const rowOfResult = new Map();
-  const rowsOfText = new Map();
-  const shown = new Set();
   messages.forEach((m, i) => {
     if (m.role !== 'user') return;
-    if (m.text) rowsOfText.set(m.text, [...(rowsOfText.get(m.text) || []), i]);
     for (const r of m.toolResults || []) if (!rowOfResult.has(r.tool_use_id)) rowOfResult.set(r.tool_use_id, i);
   });
+  // The first row at or after each index that the API form shows a block of (text or results), or an
+  // assistant row, which ends a user message; messages.length when none.
+  const nextAt = new Array(messages.length + 1).fill(messages.length);
+  for (let i = messages.length - 1; i >= 0; i--) {
+    const m = messages[i];
+    nextAt[i] = m.role !== 'user' || m.text || (m.toolResults || []).length ? i : nextAt[i + 1];
+  }
+  const shown = new Set();
+  // The API form joins the rows of one message in order, each row's results before its text. So a text
+  // block at row `at` (the row of the block before it) is shown by that row's own text not matched
+  // yet, or by the next row when that row has text and no results; otherwise no row shows it. The
+  // same text elsewhere (a block an earlier compaction carried, a repeated "continue") is another
+  // delivery, and two rows with the same text show two blocks.
+  const matchShown = (at, text) => {
+    if (!shown.has(at) && messages[at].text === text) return at;
+    const k = nextAt[at + 1];
+    const m = messages[k];
+    return m && m.role === 'user' && !(m.toolResults || []).length && m.text === text ? k : undefined;
+  };
   for (const a of api) {
     if (a.role !== 'user' || !Array.isArray(a.content)) continue;
     let row;
-    let first;
-    for (const b of a.content) {
-      if (b?.type !== 'tool_result' || !rowOfResult.has(b.tool_use_id)) continue;
-      const r = rowOfResult.get(b.tool_use_id);
-      row = Math.max(row ?? r, r);
-      first = Math.min(first ?? r, r);
-    }
+    for (const b of a.content) if (b?.type === 'tool_result' && rowOfResult.has(b.tool_use_id)) row = Math.max(row ?? 0, rowOfResult.get(b.tool_use_id));
     if (row === undefined) continue;
     let anchor = row;
+    let at;
     for (const b of a.content) {
-      if (b?.type === 'tool_result' && rowOfResult.has(b.tool_use_id)) anchor = rowOfResult.get(b.tool_use_id);
+      if (b?.type === 'tool_result' && rowOfResult.has(b.tool_use_id)) at = anchor = rowOfResult.get(b.tool_use_id);
       if (b?.type !== 'text') continue;
-      // Shown already only by a row of this API message: a result row of it, or a later user row
-      // right after them. The same text elsewhere (a block an earlier compaction carried, a repeated
-      // "continue") is another delivery. Two rows with the same text are two blocks: the first row not
-      // matched yet shows this one.
-      const r = (rowsOfText.get(b.text) || []).find((k) => k >= first && !shown.has(k) && messages.slice(row + 1, k + 1).every((x) => x.role === 'user'));
+      const r = at === undefined ? undefined : matchShown(at, b.text);
       if (r !== undefined) {
         shown.add(r);
-        anchor = r;
+        at = anchor = r;
         continue;
       }
       const kind = deliveryOf(b.text);
