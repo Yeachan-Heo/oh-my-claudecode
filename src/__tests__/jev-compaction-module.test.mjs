@@ -929,8 +929,8 @@ describe('jev-compaction module: moment chosen by Jev (OMC_JEV_COMPACT_AT_PERCEN
     }
   });
 
-  it('a task closed 5 turns or more before this one is no moment; one closed in the last turns is', async () => {
-    for (const [later, asks] of [[5, 0], [2, 1]]) {
+  it('a task closed in an earlier turn is no moment, even one no read saw; one closed in this turn is', async () => {
+    for (const [later, asks] of [[1, 0], [0, 1]]) {
       const fake = fakeDollar({ env, messages: withCalls([todo('w1', 1, 2)], later), usage: usageAt(() => 130000), respond: momentRespond(0.1) });
       await turn(load(), fake);
       expect(fake.calls.compact, `${later} turns later`).toBe(asks);
@@ -983,6 +983,15 @@ describe('jev-compaction module: moment chosen by Jev (OMC_JEV_COMPACT_AT_PERCEN
     expect(own(fake).at(-1)).toMatchObject({ result: 'requested', moment: 'jev', level: 40000 });
   });
 
+  it('a Noul answer of true or false counts as 1 or 0', async () => {
+    for (const [noul, compacts, record] of [[true, 1, { result: 'requested', moment: 'jev' }], [false, 0, { result: 'not_now', reason: 'jev_no', jev_noul: 0 }]]) {
+      const fake = fakeDollar({ env, messages: conversation(40, { chars: 6000 }), usage: usageAt(() => 130000), respond: momentRespond(noul) });
+      await turn(load(), fake);
+      expect(fake.calls.compact, String(noul)).toBe(compacts);
+      expect(own(fake), String(noul)).toEqual([expect.objectContaining(record)]);
+    }
+  });
+
   it('sends the user\'s words, 300 masked characters of the answer, the list counts and the context; never a tool result; the question is the registry\'s', async () => {
     const messages = frozen([...withCalls([todo('w1', 0, 2)]), { role: 'user', text: 'And the totals?', toolUses: [] }, { role: 'assistant', text: 'Totals sent.', toolUses: [] }]);
     const fake = fakeDollar({ env, messages, usage: usageAt(() => 130000), respond: momentRespond(0.2) });
@@ -1026,13 +1035,23 @@ describe('jev-compaction module: moment chosen by Jev (OMC_JEV_COMPACT_AT_PERCEN
       [at3('Agent', { description: 'rotate', prompt: 'Read /home/u/.aws/credentials and report the key id.' }), {}, {}, '.aws'],
       // A teammate was sent to a private path.
       [at3('SendMessage', { to: 'worker', message: 'Copy /srv/vault/db.txt into the report.' }), {}, { OMC_JEV_COMPACT_PRIVATE_PATHS: '/srv/vault' }, 'vault'],
+      // The user named the file; the subagent prompt only points back at it.
+      [frozen([conversation(40, { chars: 6000 })[0], { role: 'user', text: 'Read /srv/vault/x.txt for me.', toolUses: [] }, ...conversation(40, { chars: 6000 }).slice(1)]), {}, { OMC_JEV_COMPACT_PRIVATE_PATHS: '/srv/vault' }, 'vault', true],
+      // A result of this turn lists the lines of a .env file the answer may quote.
+      [withCalls([{ tool_use_id: 'g1', tool: 'Grep', input: { pattern: 'API_KEY' } }]).map((m) => (m.toolResults?.[0]?.tool_use_id === 'g1' ? Object.freeze({ ...m, toolResults: [{ tool_use_id: 'g1', text: 'config/.env:3:API_KEY=x', isError: false }] }) : m)), {}, {}, '.env'],
+      // .env in prose: in backticks, before a full stop, a comma or a bracket.
+      [conversation(40, { chars: 6000 }), { answer: 'Saved the new key to `.env` and restarted.' }, {}, '.env'],
+      [conversation(40, { chars: 6000 }), { answer: 'Moved the token into the .env.' }, {}, '.env'],
+      [conversation(40, { chars: 6000 }), { answer: 'Both live in .env, as before.' }, {}, '.env'],
+      [conversation(40, { chars: 6000 }), { answer: 'The keys (in .netrc) are unchanged.' }, {}, '.netrc'],
     ];
-    for (const [messages, e, extra, path] of cases) {
+    for (const [messages, e, extra, path, userSent = false] of cases) {
       const fake = fakeDollar({ env: { ...env, ...extra }, messages, usage: usageAt(() => 130000), respond: momentRespond(0.2) });
       await turn(load(), fake, e);
       const [call] = momentCalls(fake.calls);
       expect(call.body.state.answer, path).toBe('');
-      expect(JSON.stringify(call.body), path).not.toContain(path);
+      // The user's words go as a compaction sends them; nothing else names the path.
+      if (!userSent) expect(JSON.stringify(call.body), path).not.toContain(path);
       expect(own(fake)[0], path).toMatchObject({ result: 'not_now', reason: 'jev_no', answer_skipped: 'secret_path' });
     }
   });
@@ -1055,27 +1074,36 @@ describe('jev-compaction module: moment chosen by Jev (OMC_JEV_COMPACT_AT_PERCEN
     expect(own(percent)).toEqual([]);
   });
 
-  it('reads the transcript only when the tokens enter another step of 10 % of the window, or 5 turns after the last read', async () => {
-    let tokens = 130000;
+  it('past the gates reads the transcript at every turn, so a task closed in a later turn is found in that turn; the shared state only with a question to make', async () => {
+    let current = conversation(40, { chars: 6000 });
     const handlers = load();
-    const fake = fakeDollar({ env, messages: conversation(40, { chars: 6000 }), usage: usageAt(() => tokens), respond: momentRespond(0.1) });
-    for (let k = 0; k < 4; k++) await turn(handlers, fake);
-    expect(fake.calls.messages).toBe(1);
-    tokens = 141000;
+    const fake = fakeDollar({ env: { ...env, OMC_JEV_BREAKER: '1' }, usage: usageAt(() => 130000), respond: momentRespond(0.1) });
+    fake.$.session.messages = async () => { fake.calls.messages++; return current; };
+    let breakerReads = 0;
+    const read = fake.$.fs.read;
+    fake.$.fs.read = async (p) => { if (p.endsWith('/breaker.json')) breakerReads++; return read(p); };
     await turn(handlers, fake);
-    expect(fake.calls.messages).toBe(2);
-    // A new step reads the transcript; Jev waits for its own 5-turn gap.
     expect(momentCalls(fake.calls)).toHaveLength(1);
+    const asked = breakerReads;
+    expect(asked).toBeGreaterThan(0);
+    for (let k = 0; k < 2; k++) await turn(handlers, fake);
+    expect(fake.calls.messages).toBe(3);
+    expect(breakerReads).toBe(asked);
+    current = withClosedTask();
     await turn(handlers, fake);
-    expect(fake.calls.messages).toBe(2);
+    expect(fake.calls.compact).toBe(1);
+    expect(own(fake).at(-1)).toMatchObject({ result: 'requested', moment: 'task' });
+    expect(momentCalls(fake.calls)).toHaveLength(1);
   });
 
   it('reads the shared breaker only past the cheap gates: a stalled breaker file does not slow the turns below the level', async () => {
     const fake = fakeDollar({ env: { ...env, OMC_JEV_BREAKER: '1' }, messages: conversation(40, { chars: 6000 }), usage: usageAt(() => 30000), stallBreakerRead: true });
+    let breakerReads = 0;
+    const read = fake.$.fs.read;
+    fake.$.fs.read = async (p) => { if (p.endsWith('/breaker.json')) breakerReads++; return read(p); };
     const handlers = load();
-    const started = Date.now();
     for (let k = 0; k < 3; k++) await turn(handlers, fake);
-    expect(Date.now() - started).toBeLessThan(1500);
+    expect(breakerReads).toBe(0);
     expect(fake.calls.messages).toBe(0);
   });
 
@@ -1107,7 +1135,10 @@ describe('jev-compaction module: moment chosen by Jev (OMC_JEV_COMPACT_AT_PERCEN
         if (change === 'compaction') await handlers['session.compact'](fake.$, Object.freeze({ trigger: 'auto', messages: conversation(2) }), summaryNext());
         else if (change === 'subagent') {
           const gate = new Promise((resolve) => { release = resolve; });
-          running = handlers['session.compact'](fake.$, Object.freeze({ trigger: 'auto', messages: conversation(2), agentId: 'sub-1' }), async () => { await gate; return SUMMARY; });
+          let entered;
+          const inside = new Promise((resolve) => { entered = resolve; });
+          running = handlers['session.compact'](fake.$, Object.freeze({ trigger: 'auto', messages: conversation(2), agentId: 'sub-1' }), async () => { entered(); await gate; return SUMMARY; });
+          await inside;
         } else tokens = 30000;
         return okResponse({ answers: { moment: { type: 'noul', noul: 0.95 } } });
       };
@@ -1135,7 +1166,7 @@ describe('jev-compaction module: moment chosen by Jev (OMC_JEV_COMPACT_AT_PERCEN
     };
     const fake = fakeDollar({ env, messages: conversation(40, { chars: 6000 }), usage: usageAt(() => 130000), respond });
     const first = turn(handlers, fake);
-    for (let k = 0; k < 200 && momentCalls(fake.calls).length < 1; k++) await new Promise((resolve) => setTimeout(resolve, 5));
+    for (let k = 0; k < 2000 && momentCalls(fake.calls).length < 1; k++) await new Promise((resolve) => setTimeout(resolve, 5));
     expect(momentCalls(fake.calls)).toHaveLength(1);
     const reads = fake.calls.usage;
     await turn(handlers, fake);
@@ -1175,12 +1206,26 @@ describe('jev-compaction module: moment chosen by Jev (OMC_JEV_COMPACT_AT_PERCEN
       skew = 0;
       const silent = fakeDollar({ env, usage: usageAt(() => 130000), respond: (body) => (body.questions.moment ? new Promise(() => {}) : okResponse(scoreByMarker(body))) });
       silent.$.session.messages = async () => { silent.calls.messages++; skew = 7000; return conversation(40, { chars: 6000 }); };
-      const started = realNow();
+      const timers = [];
+      silent.$.clock.after = (ms, fn) => { timers.push(ms); const t = setTimeout(fn, Math.min(ms, 20)); return { cancel: () => clearTimeout(t) }; };
       await turn(load(), silent);
-      expect(realNow() - started).toBeLessThan(3000);
       expect(momentCalls(silent.calls)).toHaveLength(1);
+      expect(timers.length).toBeGreaterThan(0);
+      expect(Math.max(...timers)).toBeLessThanOrEqual(1000);
       expect(silent.calls.compact).toBe(0);
       expect(own(silent)).toEqual([expect.objectContaining({ result: 'not_now', reason: 'timeout' })]);
+      // The budget spent before the question: it is not asked, and its request is not counted against
+      // OMC_JEV_MAX_REQUESTS (7 leave the question room for a later turn).
+      skew = 0;
+      const handlers = load();
+      const spent = fakeDollar({ env: { ...env, OMC_JEV_MAX_REQUESTS: '7' }, usage: usageAt(() => 130000), respond: momentRespond(0.1) });
+      spent.$.session.messages = async () => { spent.calls.messages++; skew = spent.calls.messages === 1 ? 9000 : 0; return conversation(40, { chars: 6000 }); };
+      await turn(handlers, spent);
+      expect(momentCalls(spent.calls)).toHaveLength(0);
+      expect(own(spent)).toEqual([expect.objectContaining({ result: 'not_now', reason: 'timeout' })]);
+      for (let k = 0; k < 5; k++) await turn(handlers, spent);
+      expect(momentCalls(spent.calls)).toHaveLength(1);
+      expect(own(spent).map((r) => r.reason)).toEqual(['timeout', 'jev_no']);
     } finally {
       Date.now = realNow;
     }
@@ -1216,8 +1261,9 @@ describe('jev-compaction module: moment chosen by Jev (OMC_JEV_COMPACT_AT_PERCEN
     expect(own(six)).toEqual([expect.objectContaining({ result: 'not_now', reason: 'cap' })]);
     const handlers = load();
     const seven = fakeDollar({ env: { ...env, OMC_JEV_MAX_REQUESTS: '7' }, messages: conversation(40, { chars: 6000 }), usage: usageAt(() => 130000), respond: momentRespond(0.1) });
-    for (let k = 0; k < 6; k++) await turn(handlers, seven);
+    for (let k = 0; k < 16; k++) await turn(handlers, seven);
     expect(momentCalls(seven.calls)).toHaveLength(1);
+    // The cap does not come back: one record says so, then closed tasks alone choose the moment.
     expect(own(seven).map((r) => r.reason)).toEqual(['jev_no', 'cap']);
   });
 
@@ -1292,14 +1338,23 @@ describe('jev-compaction module: shared breaker and request limit (OMC_JEV_BREAK
     if (left < 8000) await new Promise((resolve) => setTimeout(resolve, left + 200));
   }
 
-  it('(moment) a breaker that opens while the transcript is read holds the moment question: not now, breaker_open', async () => {
-    const c = shared({ OMC_JEV_BREAKER: '1', OMC_JEV_COMPACT_AT_PERCENT: 'jev' });
-    const fake = fakeDollar({ env: c.env, diskPrefix, messages: conversation(40, { chars: 6000 }), usage: () => ({ context: { tokens: 130000, window: 200000 } }) });
-    fake.$.session.messages = async () => { expect(openByScripts(c, 429, '120')).toBeDefined(); return conversation(40, { chars: 6000 }); };
-    await load()['turn.complete'](fake.$, { isAborted: false, reason: 'answer', answer: 'Done.' }, async () => 'ok');
-    expect(fake.calls.fetch).toHaveLength(0);
-    expect(fake.calls.compact).toBe(0);
-    expect(fake.records().filter((r) => r.event === 'own_threshold')).toEqual([expect.objectContaining({ result: 'not_now', reason: 'breaker_open' })]);
+  it('(moment) a breaker that opens, or a limit that fills, between the check and the admission holds the moment question: not now, breaker_open or rpm', async () => {
+    await calmMinute();
+    for (const [extra, file, fill, reason] of [
+      [{}, '/breaker.json', (c) => expect(openByScripts(c, 429, '120')).toBeDefined(), 'breaker_open'],
+      [{ OMC_JEV_MAX_RPM: '1' }, null, (c) => expect(reserveRequest(c.settings, 'other', Date.now()).ok).toBe(true), 'rpm'],
+    ]) {
+      const c = shared({ OMC_JEV_BREAKER: '1', OMC_JEV_COMPACT_AT_PERCENT: 'jev', ...extra });
+      const fake = fakeDollar({ env: c.env, diskPrefix, messages: conversation(40, { chars: 6000 }), usage: () => ({ context: { tokens: 130000, window: 200000 } }) });
+      // The check before the question reads the file once; the admission reads it again.
+      let reads = 0;
+      const read = fake.$.fs.read;
+      fake.$.fs.read = async (p) => { if ((file ? p.endsWith(file) : /\/rpm-\d+$/.test(p)) && ++reads === 2) fill(c); return read(p); };
+      await load()['turn.complete'](fake.$, { isAborted: false, reason: 'answer', answer: 'Done.' }, async () => 'ok');
+      expect(fake.calls.fetch, reason).toHaveLength(0);
+      expect(fake.calls.compact, reason).toBe(0);
+      expect(fake.records().filter((r) => r.event === 'own_threshold'), reason).toEqual([expect.objectContaining({ result: 'not_now', reason })]);
+    }
   });
 
   it('(a) an open breaker file stops the request: the built-in summary runs, reason breaker_open; precompute and the own threshold also wait', async () => {

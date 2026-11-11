@@ -53,23 +53,25 @@
  * request once the context is large enough for a compaction to the target to free OWN_MIN_GAIN of the
  * window, and after a compaction once it grew by OWN_MIN_GAIN of the window from the lowest usage since
  * it; the removable results must be worth that much too (with the target the compaction would aim at).
- * It then asks the host to compact when a task of the list closed in the last MIN_TURNS_BETWEEN turns
- * and was not counted before (a TaskUpdate to completed, or a TodoWrite or update_plan list with more
- * done items than the list before it), else when Jev answers the moment question with at least
- * MOMENT_YES. Jev is asked at most once per MIN_TURNS_BETWEEN turns, never after an interrupted, refused
- * or failed turn, and one moment is decided at a time; a compaction of the main loop or a newer turn
- * while Jev answers makes the answer stale. The transcript is read only when the tokens enter another
- * step of OWN_MIN_GAIN of the window or MIN_TURNS_BETWEEN turns after the last read. Every request and
- * every "not now" leaves an own_threshold record, and the compaction a request starts carries
- * own_request. The moment question is a request of this point (the same admission and failure handling
- * as a compaction's, within REQUEST_MS; under OMC_JEV_MAX_REQUESTS it is not asked once fewer than
- * MAX_REQUESTS + 1 requests are left, so a compaction keeps its requests) and sends the user's words as
- * a compaction does (below), the first MOMENT_HEAD_CHARS and last MOMENT_TAIL_CHARS characters of the
- * answer that ended the turn, masked (left out when the answer, or any call of the conversation in its
- * path and command fields or any text of its input, names a secret or private path), the done and
- * total items of the newest task list, and the tokens and window; no tool result. The whole decision
- * stays within MOMENT_BUDGET_MS of the turn's end, under the host's hook budget: the question gets what
- * is left of it, and past it no request goes out (a "not now" with reason timeout).
+ * Past those gates the transcript is read at every turn. The module asks the host to compact when a task
+ * of the list closed in this turn (a TaskUpdate to completed, or a TodoWrite or update_plan list with
+ * more done items than the list before it; a closing seen at an earlier read never counts again), else
+ * when Jev answers the moment question with at least MOMENT_YES. Jev is asked at most once per
+ * MIN_TURNS_BETWEEN turns, never after an interrupted, refused or failed turn, and one moment is decided
+ * at a time; a compaction of the main loop or a newer turn while Jev answers makes the answer stale. The
+ * shared breaker and limit are read only with a request or a question to make. Every request and every
+ * "not now" leaves an own_threshold record (the request cap once per process), and the compaction a
+ * request starts carries own_request. The moment question is a request of this point (the same
+ * admission and failure handling as a compaction's, within REQUEST_MS; under OMC_JEV_MAX_REQUESTS it is
+ * not asked once fewer than MAX_REQUESTS + 1 requests are left, so a compaction keeps its requests) and
+ * sends the user's words as a compaction does (below), the first MOMENT_HEAD_CHARS and last
+ * MOMENT_TAIL_CHARS characters of the answer that ended the turn, masked (left out when a secret or
+ * private path is named by the answer, the user's words, a result of this turn, or any call of the
+ * conversation in its path and command fields or any text of its input), the done and total items of
+ * the newest task list, and the tokens and window; no tool result. The host's hook budget pauses for
+ * host calls, so the module bounds the decision itself: from the end of the turn to the request it
+ * takes at most MOMENT_BUDGET_MS, the question gets what is left of it, and past it no request goes out
+ * (a "not now" with reason timeout).
  *
  * What goes to the endpoint: the /compact instructions and the last USER_MESSAGES user messages
  * (together USER_CHARS characters), and for each scored result its tool, its input (STATE_INPUT_CHARS)
@@ -151,9 +153,10 @@ const MOMENT_TAIL_CHARS = 100;
 // A moment decision (Jev's answer, the compaction it asks for) that has not settled in this time no
 // longer holds the next one back.
 const MOMENT_STALE_MS = 5 * 60_000;
-// The host gives a turn.complete hook 10 s of its own time (the time under next() does not count) and
-// then stops waiting for it. A moment decision, from the end of the turn to the request to compact,
-// stays within this, so the question gets only what is left of it and no request goes out late.
+// The host's 10 s budget of a hook counts its own time only: it pauses for next() and for every host
+// call ($.session.*, $.http.fetch), so it never bounds the waits of a moment decision. The module does:
+// from the end of the turn to the request to compact the decision takes at most this, the question gets
+// only what is left of it, and no request goes out on a reading older than that.
 const MOMENT_BUDGET_MS = 8000;
 // OMC_JEV_COMPACT_FLEX: loops whose growth start is kept (the main loop and the newest subagents).
 const AFTER_LOOPS_MAX = 64;
@@ -352,7 +355,7 @@ function freshState() {
     // OMC_JEV_COMPACT_AT_PERCENT=jev: main-loop compactions under way, the moment of the request in
     // flight, the last read {turn, step}, the closing calls counted already, the done items of the newest
     // list call per tool at the last read, the turn of the last question, the decision under way.
-    compactingMain: 0, ownRequested: undefined, momentRead: undefined, momentSeen: new Set(), listDone: new Map(), lastAsk: -Infinity, momentBusy: undefined,
+    compactingMain: 0, ownRequested: undefined, momentSeen: new Set(), listDone: new Map(), lastAsk: -Infinity, momentBusy: undefined, momentCapNoted: false,
   };
 }
 let session = freshState();
@@ -1492,7 +1495,7 @@ async function compact($, e, next) {
   // was, so the gate stays as it was too. With OMC_JEV_COMPACT_FLEX the characters it left start the
   // growth of the loop's next compaction.
   const armGrowthGate = (out, source = 'summary') => {
-    if (e.agentId === undefined && !out?.skip) { session.growthArmed = true; session.growthBase = undefined; session.momentRead = undefined; }
+    if (e.agentId === undefined && !out?.skip) { session.growthArmed = true; session.growthBase = undefined; }
     if (cfg.flex && out && !out.skip) {
       const key = e.agentId ?? '';
       session.lastAfter.delete(key);
@@ -1570,11 +1573,13 @@ function turnsStart(messages, turns) {
   return 0;
 }
 
+// SECRET_PATH's .env and .netrc in prose: also in backticks, before a full stop, a comma or a bracket.
+const PROSE_SECRET_FILE = /(?:^|[^\w.-])\.(?:env(?!\.example\b)(?:rc|\.[\w-]+)?|netrc)(?![\w-])/i;
 // A secret or private path anywhere in a text or in the strings of a call's input, a prompt or a
 // message included (touchesSecretPath reads the path and command fields only).
 function namesSecretPath(value, privatePaths, depth = 0) {
   if (typeof value === 'string') {
-    if (SECRET_PATH.test(value)) return true;
+    if (SECRET_PATH.test(value) || PROSE_SECRET_FILE.test(value)) return true;
     const text = slash(value).toLowerCase();
     return privatePaths.some((p) => text.includes(p));
   }
@@ -1601,10 +1606,14 @@ async function askMoment($, cfg, messages, answer, tokens, window, until) {
     for (const u of m.toolUses || []) { const n = TASK_LIST.test(u.tool || '') ? doneItems(u.input) : undefined; if (n) list = n; }
   }
   // The answer may quote a file read in any earlier turn, by this loop or by a subagent or teammate a
-  // prompt sent there, so a secret or private path in the answer or in any call of the conversation
-  // (its path and command fields, or any text of its input) leaves it out.
+  // prompt sent there, so a secret or private path in the answer, in the user's words, in any call of the
+  // conversation (its path and command fields, or any text of its input) or in a result of this turn
+  // leaves it out.
   const text = typeof answer === 'string' ? answer : '';
-  const secret = namesSecretPath(text, cfg.privatePaths) || messages.some((m) => m.role === 'assistant' && (m.toolUses || []).some((u) => touchesSecretPath(u.tool, u.input, cfg.privatePaths) || namesSecretPath(u.input, cfg.privatePaths)));
+  const start = turnsStart(messages, 1);
+  const secret = namesSecretPath(text, cfg.privatePaths) || messages.some((m, i) => (m.role === 'assistant'
+    ? (m.toolUses || []).some((u) => touchesSecretPath(u.tool, u.input, cfg.privatePaths) || namesSecretPath(u.input, cfg.privatePaths))
+    : namesSecretPath(userWords(m), cfg.privatePaths) || (i >= start && (m.toolResults || []).some((r) => namesSecretPath(r.text, cfg.privatePaths)))));
   const skipped = secret ? { answer_skipped: 'secret_path' } : {};
   const state = boundExcerpts({
     task: userTask(messages).task,
@@ -1684,16 +1693,7 @@ async function ownThreshold($, e, next) {
     // is no threshold to count from, so the growth counts from the lowest usage alone.
     if (session.growthBase !== undefined && tokens - (cfg.atJev ? session.growthBase : Math.min(session.growthBase, (cfg.atPercent * window) / 100)) < OWN_MIN_GAIN * window) return result;
     session.growthArmed = false;
-    if (cfg.atJev) {
-      // The transcript only when the tokens entered another step of OWN_MIN_GAIN of the window, or
-      // MIN_TURNS_BETWEEN turns after the last read.
-      const step = Math.floor(tokens / (OWN_MIN_GAIN * window));
-      if (session.momentRead && session.momentRead.step === step && session.turnCount - session.momentRead.turn < MIN_TURNS_BETWEEN) return result;
-      if (await blockedReason($, cfg, Date.now())) return result;
-      session.momentRead = { turn: session.turnCount, step };
-    } else {
-      session.lastAttempt = session.turnCount;
-    }
+    if (!cfg.atJev) session.lastAttempt = session.turnCount;
     // The tokens include the fixed prefix (system prompt, tools, instructions): ask only when the
     // removable tool results are worth it, so the threshold never forces the built-in summary. With jev
     // the compaction frees them only down to the target it would aim at.
@@ -1701,10 +1701,11 @@ async function ownThreshold($, e, next) {
     const before = messages.reduce((s, m) => s + messageChars(m), 0);
     let closed = false;
     if (cfg.atJev) {
-      // A task closed in the last MIN_TURNS_BETWEEN turns and not counted at an earlier read chooses the
-      // moment; every closing is seen at this read, whatever the gates below decide.
+      // A task closed in this turn and not counted at an earlier read chooses the moment; every closing
+      // is seen at this read, whatever the gates below decide. Above the level the transcript is read at
+      // every turn, so a closing is found in its own turn.
       const found = closingCalls(messages, session.listDone);
-      const recent = turnsStart(messages, MIN_TURNS_BETWEEN);
+      const recent = turnsStart(messages, 1);
       closed = found.closing.some((c) => c.idx >= recent && !session.momentSeen.has(c.id));
       session.momentSeen = new Set(found.closing.map((c) => c.id));
       session.listDone = found.listDone;
@@ -1722,15 +1723,20 @@ async function ownThreshold($, e, next) {
     if (cfg.atJev) {
       // A closed task chooses the moment at once; else Jev, at most once per MIN_TURNS_BETWEEN turns.
       let extra = {};
+      if (!closed && session.turnCount - session.lastAsk < MIN_TURNS_BETWEEN) return result;
+      // The shared state only now, with a request or a question to make.
+      if (await blockedReason($, cfg, Date.now())) return result;
       if (closed) moment = 'task';
       else {
-        if (session.turnCount - session.lastAsk < MIN_TURNS_BETWEEN) return result;
         session.lastAsk = session.turnCount;
         const turn = session.turnCount;
         const ask = await askMoment($, cfg, messages, e.answer, tokens, window, until);
         extra = { ...(ask.noul !== undefined ? { jev_noul: ask.noul } : {}), ...(ask.answer_skipped ? { answer_skipped: ask.answer_skipped } : {}) };
         if (!(ask.noul >= MOMENT_YES)) {
-          await ownRecord({ result: 'not_now', reason: ask.reason ?? 'jev_no', ...extra, tokens, window, level });
+          // The request cap does not come back in a process: one record says so, then closed tasks alone
+          // choose the moment.
+          if (ask.reason !== 'cap' || !session.momentCapNoted) await ownRecord({ result: 'not_now', reason: ask.reason ?? 'jev_no', ...extra, tokens, window, level });
+          if (ask.reason === 'cap') session.momentCapNoted = true;
           return result;
         }
         // Jev's answer took time: a compaction of the main loop meanwhile (the host's, /compact) or a newer
