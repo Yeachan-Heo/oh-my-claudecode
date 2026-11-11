@@ -372,10 +372,12 @@ export function rpmCount(settings, now = Date.now()) {
  * - under OMC_JEV_MAX_RPM, `rpm` {count, limit}: the requests this machine
  *   started in the UTC minute the failed one was admitted in (itself
  *   included) against the limit. Not a verdict on who caused a 429: it shows
- *   at what count 429s arrive.
+ *   at what count 429s arrive. When rpmAtAdmit is provided, it uses that
+ *   snapshot instead of re-querying, so the count reflects the moment of
+ *   admission, not the moment of failure.
  * Empty for a failure that is neither an HTTP status nor a missing response.
  */
-export function failureLogFields(settings, failure, admittedAt = Date.now()) {
+export function failureLogFields(settings, failure, admittedAt = Date.now(), rpmAtAdmit) {
   try {
     const status = Number.isInteger(failure?.status) ? failure.status : undefined;
     let error;
@@ -387,8 +389,8 @@ export function failureLogFields(settings, failure, admittedAt = Date.now()) {
     } else {
       return {};
     }
-    const count = rpmCount(settings, admittedAt);
-    return { error, ...(count !== undefined ? { rpm: { count, limit: settings.maxRpm } } : {}) };
+    const count = rpmAtAdmit?.count ?? rpmCount(settings, admittedAt);
+    return { error, ...(count !== undefined ? { rpm: { count, limit: rpmAtAdmit?.limit ?? settings.maxRpm } } : {}) };
   } catch {
     return {};
   }
@@ -500,7 +502,8 @@ export function reserveRequest(settings, point, now = Date.now()) {
  * Admission of one request, called right before the HTTP call: the open
  * breaker first, then the limit. Returns {skip} when the request must not go
  * out: {mode: "circuit-open", breaker} or {mode: "cap", priority, count,
- * threshold, limit}; {} otherwise.
+ * threshold, limit}; {rpmAtAdmit} when the limit is active and the request is
+ * admitted, where rpmAtAdmit is {count, threshold, limit}; {} otherwise.
  */
 export function admitRequest(settings, point, now = Date.now()) {
   const open = readBreaker(settings, now);
@@ -508,6 +511,9 @@ export function admitRequest(settings, point, now = Date.now()) {
   const slot = reserveRequest(settings, point, now);
   if (!slot.ok) {
     return { skip: { mode: "cap", priority: slot.priority, count: slot.count, threshold: slot.threshold, limit: slot.limit } };
+  }
+  if (slot.count !== undefined) {
+    return { rpmAtAdmit: { count: slot.count, threshold: slot.threshold, limit: slot.limit } };
   }
   return {};
 }

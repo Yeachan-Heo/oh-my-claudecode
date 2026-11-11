@@ -22,6 +22,12 @@ export type AdmissionSkip =
   | { mode: 'circuit-open'; breaker: OpenBreaker }
   | { mode: 'cap'; priority: string; count: number; threshold: number; limit: number };
 
+export interface RpmAtAdmit {
+  count: number;
+  threshold: number;
+  limit: number;
+}
+
 export const BREAKER_SECONDS: { transient: number; account: number; noResponse: number };
 export const BREAKER_MAX_SECONDS: number;
 export const POINT_PRIORITY: Readonly<Record<string, 'high' | 'medium' | 'low'>>;
@@ -44,6 +50,7 @@ export function failureLogFields(
   settings: BreakerSettings | undefined,
   failure: { status?: number; retryAfter?: string | null; body?: string; noResponse?: boolean } | undefined,
   admittedAt?: number,
+  rpmAtAdmit?: RpmAtAdmit,
 ): {
   error?: { status: number | null; kind: string; retry_s?: number };
   rpm?: { count: number; limit: number };
@@ -55,7 +62,7 @@ export function reserveRequest(
   point: string,
   now?: number,
 ): { ok: boolean; priority?: string; count?: number; threshold?: number; limit?: number };
-export function admitRequest(settings: BreakerSettings | undefined, point: string, now?: number): { skip?: AdmissionSkip };
+export function admitRequest(settings: BreakerSettings | undefined, point: string, now?: number): { skip?: AdmissionSkip; rpmAtAdmit?: RpmAtAdmit };
 export function skipLogFields(skip: AdmissionSkip): {
   reason: string;
   until?: string;
