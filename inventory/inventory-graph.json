@@ -5,15 +5,15 @@
   "provenance": {
     "base": "05c800f40d1ad53b42a78609d2667ef4f726808b",
     "planningHead": "0a91273e61dbbd47eb0af4c02844409251e08398",
-    "head": "515fac705e2a75629d19a8641d3faadf6de17d39",
-    "sourceSha256": "04e637e9dcfeae931aff53632aed9911dd5bd939518f2bc207ebdc9bd09eea6c",
+    "head": "c6721f61eedd5cbb5215d49f17b7fbd35ee1a9f0",
+    "sourceSha256": "96b47159cc8ed8e5a68715ddb88008aec6c86f1a0108ecb9b2a981fff786e3fb",
     "generatedAt": null,
     "generator": "scripts/generate-inventory-graph.mjs"
   },
   "base": "05c800f40d1ad53b42a78609d2667ef4f726808b",
   "planningHead": "0a91273e61dbbd47eb0af4c02844409251e08398",
-  "head": "515fac705e2a75629d19a8641d3faadf6de17d39",
-  "sourceSha256": "04e637e9dcfeae931aff53632aed9911dd5bd939518f2bc207ebdc9bd09eea6c",
+  "head": "c6721f61eedd5cbb5215d49f17b7fbd35ee1a9f0",
+  "sourceSha256": "96b47159cc8ed8e5a68715ddb88008aec6c86f1a0108ecb9b2a981fff786e3fb",
   "counts": {
     "public": {
       "skills": 84,
@@ -28,8 +28,8 @@
       "toolFiles": 65,
       "libFiles": 49,
       "templateHooks": 25,
-      "srcFiles": 1448,
-      "total": 1473
+      "srcFiles": 1449,
+      "total": 1474
     },
     "generated": {
       "distFiles": 5639,
@@ -871,6 +871,7 @@
       "scripts/graph-agent-demo.mjs",
       "scripts/inventory-issue-3698.mjs",
       "scripts/jev-eval.mjs",
+      "scripts/jev-repair-transcript.mjs",
       "scripts/jev-resolve.mjs",
       "scripts/keyword-detector.mjs",
       "scripts/lib/agent-model-config.mjs",
@@ -37358,6 +37359,11 @@
         "path": "scripts/jev-eval.mjs"
       },
       {
+        "id": "scripts/jev-repair-transcript.mjs",
+        "kind": "script",
+        "path": "scripts/jev-repair-transcript.mjs"
+      },
+      {
         "id": "scripts/jev-resolve.mjs",
         "kind": "script",
         "path": "scripts/jev-resolve.mjs"
@@ -41366,6 +41372,11 @@
         "id": "src/__tests__/jev-plugin-hook-wiring.test.mjs",
         "kind": "src",
         "path": "src/__tests__/jev-plugin-hook-wiring.test.mjs"
+      },
+      {
+        "id": "src/__tests__/jev-repair-transcript-script.test.mjs",
+        "kind": "src",
+        "path": "src/__tests__/jev-repair-transcript-script.test.mjs"
       },
       {
         "id": "src/__tests__/jev-resolve-script.test.mjs",
@@ -49540,6 +49551,16 @@
         "kind": "imports"
       },
       {
+        "from": "scripts/jev-repair-transcript.mjs",
+        "to": "external:node:fs",
+        "kind": "imports"
+      },
+      {
+        "from": "scripts/jev-repair-transcript.mjs",
+        "to": "external:node:url",
+        "kind": "imports"
+      },
+      {
         "from": "scripts/jev-resolve.mjs",
         "to": "external:node:fs",
         "kind": "imports"
@@ -56122,6 +56143,41 @@
       {
         "from": "src/__tests__/jev-plugin-hook-wiring.test.mjs",
         "to": "external:vitest",
+        "kind": "imports"
+      },
+      {
+        "from": "src/__tests__/jev-repair-transcript-script.test.mjs",
+        "to": "external:node:child_process",
+        "kind": "imports"
+      },
+      {
+        "from": "src/__tests__/jev-repair-transcript-script.test.mjs",
+        "to": "external:node:fs",
+        "kind": "imports"
+      },
+      {
+        "from": "src/__tests__/jev-repair-transcript-script.test.mjs",
+        "to": "external:node:os",
+        "kind": "imports"
+      },
+      {
+        "from": "src/__tests__/jev-repair-transcript-script.test.mjs",
+        "to": "external:node:path",
+        "kind": "imports"
+      },
+      {
+        "from": "src/__tests__/jev-repair-transcript-script.test.mjs",
+        "to": "external:node:url",
+        "kind": "imports"
+      },
+      {
+        "from": "src/__tests__/jev-repair-transcript-script.test.mjs",
+        "to": "external:vitest",
+        "kind": "imports"
+      },
+      {
+        "from": "src/__tests__/jev-repair-transcript-script.test.mjs",
+        "to": "scripts/jev-repair-transcript.mjs",
         "kind": "imports"
       },
       {
@@ -92831,12 +92887,12 @@
       }
     ],
     "stats": {
-      "nodeCount": 8260,
-      "edgeCount": 8865,
-      "importEdgeCount": 7412,
+      "nodeCount": 8262,
+      "edgeCount": 8874,
+      "importEdgeCount": 7421,
       "registerEdgeCount": 105
     }
   },
-  "inventorySha256": "a6bc1a36066b6e9d37b02f940c1f61d6c1422f17d89b04ceb1cb5d7073fc6166",
-  "manifestSha256": "d898096fc0f530822df97a7e6fb05f93a2a9d6e3e94df53bcb75580a1fd89fea"
+  "inventorySha256": "a2c9f05f10c964c04cf62f90f1fe9e42e883e8d5b9de162acddd704e4173df72",
+  "manifestSha256": "05a657aa7e6937fdbfa0f0b334db4cb6e29108d0c27863110227b09501446d75"
 }
