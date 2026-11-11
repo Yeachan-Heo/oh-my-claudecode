@@ -241,9 +241,9 @@ describe("Project Memory rescan concurrency", () => {
     const detectionEntered = new Promise<void>((resolve) => {
       detectorGate.entered = resolve;
     });
-    let releaseWriter: (() => void) | null = null;
+    let releaseWriter: (() => void) | undefined;
     const writerLocked = new Promise<void>((resolve) => {
-      releaseWriter = resolve;
+      releaseWriter = () => resolve();
     });
 
     detectorGate.detected = makeMemory(tempDir, {
@@ -268,7 +268,7 @@ describe("Project Memory rescan concurrency", () => {
       const existing = await loadProjectMemory(tempDir);
       await saveProjectMemory(tempDir, {
         ...existing!,
-        customNotes: [...(existing?.customNotes ?? []), { id: "test", created: Date.now(), content: noteContent }],
+        customNotes: [...(existing?.customNotes ?? []), { timestamp: Date.now(), source: "manual", category: "test", content: noteContent }],
       });
       // Hold the lock until told to release.
       await writerLocked;
@@ -283,7 +283,7 @@ describe("Project Memory rescan concurrency", () => {
     await new Promise((r) => setTimeout(r, 50));
 
     // Release the writer lock.
-    releaseWriter?.();
+    releaseWriter?.()
 
     // Both tasks should complete: writer finishes, rescan acquires lock and merges.
     await writerTask;
