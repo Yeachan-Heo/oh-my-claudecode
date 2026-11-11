@@ -47231,12 +47231,12 @@ function syncInstalledPluginPayload() {
   if (targetRoots.length === 0) {
     return { synced: false, errors: [], sourceRoot: null, targetRoots: [] };
   }
-  if (targetRoots.every((root2) => validatePluginSyncPayload(root2).length === 0)) {
-    return { synced: false, errors: [], sourceRoot: null, targetRoots };
-  }
   const sourceResolution = resolveBestPluginSyncSource(targetRoots);
   const sourceRoot = sourceResolution.sourceRoot;
   if (!sourceRoot) {
+    if (targetRoots.every((root2) => validatePluginSyncPayload(root2).length === 0)) {
+      return { synced: false, errors: [], sourceRoot: null, targetRoots };
+    }
     return {
       synced: false,
       errors: [

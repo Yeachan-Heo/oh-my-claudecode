@@ -1794,15 +1794,15 @@ export function syncInstalledPluginPayload() {
     if (targetRoots.length === 0) {
         return { synced: false, errors: [], sourceRoot: null, targetRoots: [] };
     }
-    // If all target roots already have complete plugin payloads, skip sync.
-    // This avoids unnecessary file system operations and is the correct behavior:
-    // complete payloads do not need to be repaired from a source.
-    if (targetRoots.every(root => validatePluginSyncPayload(root).length === 0)) {
-        return { synced: false, errors: [], sourceRoot: null, targetRoots };
-    }
     const sourceResolution = resolveBestPluginSyncSource(targetRoots);
     const sourceRoot = sourceResolution.sourceRoot;
     if (!sourceRoot) {
+        // If all target roots have complete plugin payloads, we can skip sync
+        // and return without errors. Complete payloads don't need to be repaired
+        // from a source; they just need deduplication cleanup which happens separately.
+        if (targetRoots.every(root => validatePluginSyncPayload(root).length === 0)) {
+            return { synced: false, errors: [], sourceRoot: null, targetRoots };
+        }
         return {
             synced: false,
             errors: [
