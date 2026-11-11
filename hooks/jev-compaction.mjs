@@ -183,7 +183,7 @@ const NOT_USER_PREFIXES = [
 // after the result row: `messages` does not show it (the host hands such rows back only with the
 // handle of the row before them), and the API form shows it as a text block of the user message with
 // the results, inside an optional <system-reminder ...> wrapper: "<who> sent a message while you were
-// working:" (the user: QUEUED_PREFIX, their words, then a fixed note, QUEUED_TAIL; another session or
+// working:" (the user: QUEUED_PREFIX, their words, then a fixed note, QUEUED_TAIL_AT; another session or
 // agent; the coordinator; a plugin), a teammate's <teammate-message>, or a background task
 // notification. A result row rebuilt without its handle would lose it, so build carries every such
 // block word for word into the rebuilt row; only QUEUED_PREFIX blocks count as the user's words. The
@@ -191,16 +191,15 @@ const NOT_USER_PREFIXES = [
 // too; the API form does not tell them apart, so they count as the user's.
 const QUEUED_PREFIX = 'The user sent a new message while you were working:\n';
 const QUEUED_AT = /(?:^|\n)\s*(?:<system-reminder[^>]*>\s*)?The user sent a new message while you were working:\n/g; // QUEUED_PREFIX at the start of a line
-// Closed envelopes of other senders: an agent's or another session's message, a teammate's, a task
+const QUEUED_TAIL_AT = /\n\nThis is how Claude Code surfaces messages/g; // the fixed note after the user's words
+// Closed messages of other senders: an agent's or another session's message, a teammate's, a task
 // notification, and a reminder whose first line is another sender's "... while you were working:".
-// A user header quoted inside one (an agent report quoting a transcript) is not the user's.
 const OTHER_SPANS = [
   /<(agent-message|cross-session-message|teammate-message|task-notification)\b[^>]*>[\s\S]*?<\/\1>/g,
   /<system-reminder( id="[^"]*")?>\s*(?!The user sent a new message while you were working:\n)[^\n]* while you were working:\n[\s\S]*?<\/system-reminder\1>/g,
 ];
-const QUEUED_TAIL = '\n\nThis is how Claude Code surfaces messages';
 const DELIVERY_WRAP = /^\s*<system-reminder[^>]*>\s*/;
-const DELIVERY_OPENERS = ['Another Claude session sent a message', '<agent-message', '<cross-session-message', '<teammate-message', '[MESSAGE FROM NON-USER SOURCE'];
+const DELIVERY_OPENERS = ['Another Claude session sent a message', '<agent-message', '<cross-session-message', '<teammate-message', '<task-notification', '[MESSAGE FROM NON-USER SOURCE'];
 // A task notification's marker stands at its start (after its own reminders), not deep in a quoted file.
 const DELIVERY_NOTES = ['[SYSTEM NOTIFICATION - NOT USER INPUT]', '<task-notification>'];
 const DELIVERY_NOTE_CHARS = 300;
@@ -785,30 +784,50 @@ function messageChars(m) {
   return n;
 }
 
+// The frame a text opens with, after an optional <system-reminder ...> wrapper: 'user', 'other'
+// (another session, agent, coordinator, plugin, teammate) or undefined.
+function frameOf(text) {
+  const t = text.replace(DELIVERY_WRAP, '');
+  if (t.startsWith(QUEUED_PREFIX)) return 'user';
+  return / while you were working:$/.test(t.split('\n', 1)[0]) || DELIVERY_OPENERS.some((p) => t.startsWith(p)) ? 'other' : undefined;
+}
+
 // What a text block delivered with the results is: 'user', 'other' (another session, agent,
 // coordinator, plugin, teammate, task notification) or undefined (a reminder that may go).
 function deliveryOf(text) {
   if (typeof text !== 'string') return undefined;
-  const t = text.replace(DELIVERY_WRAP, '');
-  if (t.startsWith(QUEUED_PREFIX)) return 'user';
-  if (/ while you were working:$/.test(t.split('\n', 1)[0]) || DELIVERY_OPENERS.some((p) => t.startsWith(p))) return 'other';
-  return DELIVERY_NOTES.some((k) => { const at = text.indexOf(k); return at >= 0 && at < DELIVERY_NOTE_CHARS; }) ? 'other' : undefined;
+  return frameOf(text) || (DELIVERY_NOTES.some((k) => { const at = text.indexOf(k); return at >= 0 && at < DELIVERY_NOTE_CHARS; }) ? 'other' : undefined);
 }
 
 function isQueuedBlock(text) {
   return deliveryOf(text) === 'user';
 }
 
-// The user's words of every queued message block starting a line of a text.
+// The user's words in a text, by one rule for every quoted header. A user header counts only outside
+// every message of another sender: a closed one (OTHER_SPANS) or a frame of another sender at the
+// start of a line that never closes (an unwrapped coordinator or "[MESSAGE FROM NON-USER SOURCE]"
+// message), which takes the rest of the text. The user's words run from their header to the last
+// framing note of their block outside such a message, so the user may write the note's words too.
 function queuedWords(text) {
   if (typeof text !== 'string') return [];
-  const spans = OTHER_SPANS.flatMap((re) => [...text.matchAll(re)].map((m) => [m.index, m.index + m[0].length]));
-  const headers = [...text.matchAll(QUEUED_AT)];
+  const closed = OTHER_SPANS.flatMap((re) => [...text.matchAll(re)].map((m) => [m.index, m.index + m[0].length]));
+  const inClosed = (i) => closed.some(([from, to]) => i >= from && i < to);
+  let open = text.length;
+  for (let at = 0; at < text.length;) {
+    const nl = text.indexOf('\n', at);
+    const end = nl < 0 ? text.length : nl;
+    if (!inClosed(at) && frameOf(`${text.slice(at, end)}\n`) === 'other') { open = at; break; }
+    at = end + 1;
+  }
+  const outside = (i) => i < open && !inClosed(i);
+  const headers = [...text.matchAll(QUEUED_AT)].map((h) => ({ start: h.index, from: h.index + h[0].length })).filter((h) => outside(h.from - QUEUED_PREFIX.length));
+  const tails = [...text.matchAll(QUEUED_TAIL_AT)].map((t) => t.index).filter(outside);
   return headers.map((h, k) => {
-    if (spans.some(([from, to]) => h.index >= from && h.index < to)) return '';
-    const part = text.slice(h.index + h[0].length, k + 1 < headers.length ? headers[k + 1].index : text.length);
-    const end = part.indexOf(QUEUED_TAIL);
-    return (end >= 0 ? part.slice(0, end) : part.replace(/\s*<\/system-reminder[^>]*>[\s\S]*$/, '')).trim();
+    const to = k + 1 < headers.length ? headers[k + 1].start : open;
+    const tail = tails.filter((i) => i >= h.from && i < to).pop();
+    if (tail !== undefined) return text.slice(h.from, tail).trim();
+    const cut = Math.min(to, ...closed.map(([from]) => from).filter((i) => i >= h.from));
+    return text.slice(h.from, cut).replace(/\s*<\/system-reminder[^>]*>[\s\S]*$/, '').trim();
   }).filter(Boolean);
 }
 
