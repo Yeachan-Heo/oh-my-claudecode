@@ -834,11 +834,11 @@ function envelope(block, text) {
 
 const rawChars = (blocks) => blocks.reduce((n, t) => n + t.length, 0);
 
-// The delivered blocks a row does not show yet, and the row's text with each of them after it in its
-// own envelope.
+// The delivered blocks of a row (queuedOf left out the ones a row shows), and the row's text with each
+// of them after it in its own envelope. A copy an earlier compaction carried into the row's text does
+// not hide a new delivery of the same text.
 function carriedText(m, blocks = []) {
-  const own = blocks.filter((t) => !(m.text || '').includes(t));
-  return { own, text: own.reduce((text, t) => [text, envelope(t, text)].filter(Boolean).join('\n'), m.text || '') };
+  return { own: blocks, text: blocks.reduce((text, t) => [text, envelope(t, text)].filter(Boolean).join('\n'), m.text || '') };
 }
 
 // The user's words in one delivered block: from the user's header to the last framing note of the

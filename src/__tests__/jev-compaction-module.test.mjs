@@ -447,17 +447,20 @@ describe('jev-compaction module: active compaction', () => {
     const words = 'Turn 10: then answer in one sentence.';
     const needed = Array.from({ length: 30 }, (_, k) => k + 1).filter((i) => i !== 10);
     const messages = conversation(30, { needed });
-    const first = await compactWithApi(messages, apiOf(messages, { t10: [framed(words)] }));
-    expect(resultOf(first.out.messages, 't10')).toBeUndefined();
-    const row = first.out.messages.find((m) => (m.text || '').includes(framed(words)));
-    expect(row).toMatchObject({ role: 'user', text: carried(framed(words)), toolResults: [] });
-    expect(pairingOk(messages, first.out.messages)).toBe(true);
-    // The block is now the row's own text: shown in `messages`, counted as the user's, not carried twice.
-    const again = first.out.messages.map((m, k) => Object.freeze({ ...m, handle: `p${k}` }));
-    const second = await compactWithApi(again, apiOf(again));
-    expect(count(second.out.messages, framed(words))).toBe(1);
-    expect(second.calls.fetch[0].body.state.task).toContain(words);
-    expect(second.records()[0]).toMatchObject({ queued_user: 0, queued_carried: 0 });
+    // Also a block the host wrapped in a plain <system-reminder>, which build wraps once more.
+    for (const shown of [framed(words), `<system-reminder>\n${framed(words)}\n</system-reminder>`]) {
+      const first = await compactWithApi(messages, apiOf(messages, { t10: [shown] }));
+      expect(resultOf(first.out.messages, 't10')).toBeUndefined();
+      const row = first.out.messages.find((m) => (m.text || '').includes(framed(words)));
+      expect(row).toMatchObject({ role: 'user', text: carried(shown), toolResults: [] });
+      expect(pairingOk(messages, first.out.messages)).toBe(true);
+      // The block is now the row's own text: shown in `messages`, counted as the user's, not carried twice.
+      const again = first.out.messages.map((m, k) => Object.freeze({ ...m, handle: `p${k}` }));
+      const second = await compactWithApi(again, apiOf(again));
+      expect(count(second.out.messages, framed(words))).toBe(1);
+      expect(second.calls.fetch[0].body.state.task).toContain(words);
+      expect(second.records()[0]).toMatchObject({ queued_user: 0, queued_carried: 0 });
+    }
   });
 
   it('carries two messages of the user, a message of another session and a task notification of one turn, in order; only the user\'s count as theirs, a plain reminder goes', async () => {
@@ -513,6 +516,20 @@ describe('jev-compaction module: active compaction', () => {
       expect(records()[0].chars_before).toBe(chars(messages) + framed(words).length);
       if (afterNotice) expect(records()[0].chars_after).toBe(chars(out.messages) + framed(words).length);
     }
+  });
+
+  it('the same message delivered again after a row that already carries a copy is carried again, not hidden by the copy', async () => {
+    const words = 'continue';
+    const messages = conversation(30, { needed: [10] });
+    const first = await compactWithApi(messages, apiOf(messages, { t10: [framed(words)] }));
+    const again = first.out.messages.map((m, k) => Object.freeze({ ...m, handle: `p${k}` }));
+    const row = again.find((m) => resultOf([m], 't10'));
+    expect(row.text).toBe(carried(framed(words)));
+    const second = await compactWithApi(again, apiOf(again, { t10: [framed(words)] }));
+    expect(second.records()[0]).toMatchObject({ result: 'jev', queued_user: 1, queued_carried: 1 });
+    const rebuilt = second.out.messages.find((m) => resultOf([m], 't10'));
+    expect(rebuilt.handle).toBeUndefined();
+    expect(rebuilt.text).toBe([carried(framed(words)), carried(framed(words), 2)].join('\n'));
   });
 
   it('with parallel results in rows of their own, a message belongs to the result row before it: after a row that keeps its handle the host brings it back, after a rebuilt one it is carried', async () => {
