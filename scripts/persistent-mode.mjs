@@ -265,13 +265,15 @@ function isJevLoopReleaseOnly() {
  * see isModeEndedSinceJevRequest); otherwise the
  * completeModeFromJev() outcome.
  */
-function jevCompletionOutcome(result, state, statePath) {
+function jevCompletionOutcome(result, state, statePath, heuristicShouldBlock) {
   if (!jevSaysTaskComplete(result)) return null;
   if (!isJevLoopReleaseOnly()) return completeModeFromJev(state, statePath);
   if (isStateUnchangedSinceJevRequest(state, statePath)) {
-    // OMC_JEV_APPLIED_LOG: Jev's "task complete" released this Stop, which the heuristic would have blocked.
-    const modeName = /([^\\/]+)-state\.json$/.exec(statePath)?.[1] ?? null;
-    recordJevApplied("loop-continuation", { mode: modeName, block: { from: true, to: false }, noul: jevNoulOf(result, "task_complete") });
+    // OMC_JEV_APPLIED_LOG: Record only when Jev's "task complete" actually released a Stop the heuristic would have blocked.
+    if (heuristicShouldBlock) {
+      const modeName = /([^\\/]+)-state\.json$/.exec(statePath)?.[1] ?? null;
+      recordJevApplied("loop-continuation", { mode: modeName, block: { from: true, to: false }, noul: jevNoulOf(result, "task_complete") });
+    }
     return "released";
   }
   return isModeEndedSinceJevRequest(statePath) ? "cancelled" : null;
@@ -1938,7 +1940,7 @@ async function main() {
           };
           const jevResult = recordLoopContinuationShadow(judgmentState, heuristic, data.permission_mode);
 
-          const jevCompletion = jevCompletionOutcome(jevResult, ralph.state, ralph.path);
+          const jevCompletion = jevCompletionOutcome(jevResult, ralph.state, ralph.path, heuristic.shouldBlock);
 
           if (jevCompletion) {
             if (!hasActiveAutopilotForSession) {
@@ -1986,7 +1988,7 @@ async function main() {
           maxIterations: ralph.state.max_iterations,
         }, data.permission_mode);
         
-        const jevCompletionAtExtend = jevCompletionOutcome(jevExtendResult, ralph.state, ralph.path);
+        const jevCompletionAtExtend = jevCompletionOutcome(jevExtendResult, ralph.state, ralph.path, true);
 
         if (!jevCompletionAtExtend) {
           console.log(
@@ -2191,7 +2193,7 @@ async function main() {
               if (refreshed) autopilot.state = heartbeat;
             }
 
-            const jevAutopilotCompletion = jevCompletionOutcome(jevAutopilotResult, autopilot.state, autopilot.path);
+            const jevAutopilotCompletion = jevCompletionOutcome(jevAutopilotResult, autopilot.state, autopilot.path, !reinforcementLimitReached);
             if (jevAutopilotCompletion) {
               console.log(JSON.stringify(jevCompletionStopOutput(jevAutopilotCompletion, "autopilot")));
               return;
