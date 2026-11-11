@@ -1009,7 +1009,8 @@ describe('jev-compaction module: active compaction', () => {
       Array.from({ length: n }, (_, k) => `</system-reminder id="k${k}">`).join(''),
     ];
     for (const junk of prompts) {
-      const typed = `Why does notes-9.txt end like this? ${junk}`;
+      // The junk is a line of its own: a line too long to check is not read (LONG_LINE), so the question stays on the line before.
+      const typed = `Why does notes-9.txt end like this?\n${junk}`;
       const base = conversation(30, { chars: 80_000 });
       const messages = [...base.slice(0, -2), Object.freeze({ role: 'user', text: typed, toolUses: [], handle: 'htyped' }), ...base.slice(-2)];
       const t0 = performance.now();
