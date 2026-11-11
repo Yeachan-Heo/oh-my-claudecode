@@ -1783,6 +1783,20 @@ function noteFailures(failures, now) {
   }
 }
 
+// The characters build adds in envelopes to the rows it rebuilds: a result row whose results are all text,
+// or one with a result that may change (a candidate); a row kept by its handle gets its blocks back as they were.
+function envelopeChars(messages, queued, candidates) {
+  const changing = new Set(candidates.map((c) => c.resIdx));
+  let envelopes = 0;
+  for (const [i, blocks] of queued) {
+    const m = messages[i];
+    if (!(m.toolResults || []).length || !(m.toolResults.every(textOnlyResult) || changing.has(i))) continue;
+    const c = carriedText(m, blocks);
+    envelopes += c.text.length - (m.text || '').length - rawChars(c.own);
+  }
+  return envelopes;
+}
+
 // Decides one compaction: {messages} to install or {fallback: reason}. Fills `record`; never calls next.
 async function decide($, e, cfg, record, started) {
   const messages = Array.isArray(e.messages) ? e.messages : [];
@@ -1820,17 +1834,7 @@ async function decide($, e, cfg, record, started) {
   // Results of the calls that keep their handles stay whole (a built row may not stand among them).
   const candidates = findCandidates(messages, cfg.privatePaths).filter((c) => c.useIdx < keepFrom);
   record.candidates = candidates.length;
-  // The envelopes build adds go only into rows it rebuilds: a result row whose results are all text, or
-  // one with a result that may change (a candidate). A row kept by its handle gets its blocks back from
-  // the host as they were.
-  const changing = new Set(candidates.map((c) => c.resIdx));
-  let envelopes = 0;
-  for (const [i, blocks] of queued) {
-    const m = messages[i];
-    if (!(m.toolResults || []).length || !(m.toolResults.every(textOnlyResult) || changing.has(i))) continue;
-    const c = carriedText(m, blocks);
-    envelopes += c.text.length - (m.text || '').length - rawChars(c.own);
-  }
+  const envelopes = envelopeChars(messages, queued, candidates);
   const removable = removableChars(candidates);
   // The envelopes build adds stay in every rebuilt row, so they come off what the results can give back.
   const net = removable - envelopes;
@@ -2067,7 +2071,8 @@ async function ownThreshold($, e, next) {
     const delivered = queuedOf(messages, api);
     let before = messages.reduce((s, m) => s + messageChars(m), 0);
     if (delivered) for (const blocks of delivered.rows.values()) before += rawChars(blocks);
-    const removable = removableChars(findCandidates(messages, cfg.privatePaths));
+    const candidates = findCandidates(messages, cfg.privatePaths);
+    const removable = removableChars(candidates) - (delivered ? envelopeChars(messages, delivered.rows, candidates) : 0);
     if (!before || removable / before < MIN_REDUCTION || removable / CHARS_PER_TOKEN < OWN_MIN_GAIN * window) return result;
     let reason;
     let detailText = '';

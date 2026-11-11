@@ -1521,6 +1521,23 @@ describe('jev-compaction module: own threshold (OMC_JEV_COMPACT_AT_PERCENT)', ()
     }
   });
 
+  it('takes the envelopes build adds off the removable characters before asking: many short deliveries do not force the summary', async () => {
+    const blocks = Array.from({ length: 4000 }, (_, k) => `The coordinator sent a message while you were working:\nn${k}`);
+    const messages = conversation(30, { chars: 8000 });
+    const api = [];
+    for (const m of messages) {
+      const content = m.role === 'assistant'
+        ? [...(m.text ? [{ type: 'text', text: m.text }] : []), ...m.toolUses.map((u) => ({ type: 'tool_use', id: u.tool_use_id, name: u.tool, input: u.input }))]
+        : [...(m.toolResults || []).map((r) => ({ type: 'tool_result', tool_use_id: r.tool_use_id, content: r.text })), ...(m.text ? [{ type: 'text', text: m.text }] : []), ...(resultOf([m], 't10') ? blocks.map((text) => ({ type: 'text', text })) : [])];
+      if (m.role === 'user' && api[api.length - 1]?.role === 'user') api[api.length - 1].content.push(...content);
+      else api.push({ role: m.role, content });
+    }
+    const fake = fakeDollar({ env, messages, usage: highUsage });
+    fake.$.session.messages = async (opts) => (opts?.as === 'api' ? api : messages);
+    await turn(load(), fake);
+    expect(fake.calls.compact).toBe(0);
+  });
+
   it('after a compaction of the main loop waits until the context grew by 10 % of the window from the lowest usage since it, from the threshold at most', async () => {
     // Threshold 60 % of 200000 = 120000; the gate wants 10 % of 200000 = 20000 above min(lowest usage, 120000).
     let tokens = 130000;
