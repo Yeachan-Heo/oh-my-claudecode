@@ -1007,7 +1007,9 @@ function piecesOf(text) {
 // rule): each envelope of the text that holds a delivered message (the host's, or one a row rebuilt
 // by an earlier compaction carries), and the text outside them, read by its pieces (piecesOf) when it
 // opens with a delivered message (opensDelivery) or the row holds results. A result row's own text
-// gives words only so.
+// gives words only so. An envelope counts as carried only in such a row or in one whose text outside
+// the envelopes gives no words of the user (build carries blocks only into result rows); in a prompt
+// the user typed it is a quote they pasted.
 function userWords(m) {
   if (m.role !== 'user' || !m.text) return [];
   const delivered = envelopesOf(m.text).filter((e) => deliveryOf(e.text));
@@ -1020,7 +1022,8 @@ function userWords(m) {
   if (opensDelivery(own) || (m.toolResults && m.toolResults.length)) return [...piecesOf(own).flatMap(blockWords), ...carried];
   const text = own.replace(HOST_BLOCK, '').trim();
   if (!text || HOST_BLOCK_OPEN.test(text) || NOT_USER_PREFIXES.some((p) => text.startsWith(p))) return carried;
-  return [text, ...carried];
+  // A prompt the user typed: an envelope in it is a quote they pasted, so the whole prompt is theirs.
+  return [m.text.replace(HOST_BLOCK, '').trim()];
 }
 
 // Messages delivered during a tool turn that the API form shows and `messages` does not (deliveryOf):
