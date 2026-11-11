@@ -333,8 +333,14 @@ export function cleanupTransientState(directory: string, endingSessionId?: strin
           try {
             const stats = fs.statSync(fullPath);
             if (stats.mtimeMs < Date.now() - tmpFileGraceMs) {
-              fs.unlinkSync(fullPath);
-              filesRemoved++;
+              // Re-stat immediately before unlink: another session may have
+              // republished the same fixed-name temp between the first stat
+              // and now, and unlinking it would break its rename.
+              const latest = fs.statSync(fullPath);
+              if (latest.mtimeMs < Date.now() - tmpFileGraceMs) {
+                fs.unlinkSync(fullPath);
+                filesRemoved++;
+              }
             }
           } catch (_error) {
             // Temp vanished mid-sweep or is unreadable; skip it.
