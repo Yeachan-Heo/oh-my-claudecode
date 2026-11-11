@@ -1266,9 +1266,11 @@ explicitly enabled via the global OMC config file:
 
 Use these trigger phrases in natural language prompts to activate enhanced modes:
 
+The autopilot aliases (`autopilot`, `auto-pilot`, `full auto`, `fullsend`) start the mode only as a command (for example `autopilot test the API` or `use autopilot`); a bare mention such as `the autopilot run failed` does not.
+
 | Keyword                                                                        | Effect                                                                                        |
 | ------------------------------------------------------------------------------ | --------------------------------------------------------------------------------------------- |
-| `autopilot`, `build me`, `I want a`, `handle it all`, `end to end`, `e2e this` | Full autonomous execution                                                                     |
+| `autopilot <command>`, `build me`, `I want a`, `handle it all`, `end to end`, `e2e this` | Full autonomous execution                                                                     |
 | `deslop`, `anti-slop`, cleanup/refactor + slop smells                          | Anti-slop cleanup workflow (`ai-slop-cleaner`)                                                |
 | `ralph`, `don't stop`, `must complete`, `until done`                           | Persistence until verified complete                                                           |
 | `ralplan`                                                                      | Iterative planning consensus with structured deliberation (`--deliberate` for high-risk mode) |
