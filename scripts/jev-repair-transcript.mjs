@@ -41,7 +41,6 @@ import {
   renameSync,
   statSync,
   unlinkSync,
-  writeFileSync,
   writeSync,
 } from 'node:fs';
 import { pathToFileURL } from 'node:url';
@@ -209,8 +208,15 @@ export function writeRepaired(path, original, repaired) {
   let fd = null;
   let created = false;
   try {
-    writeFileSync(backup, original, { flag: 'wx', mode });
+    // Marked as created as soon as the exclusive open succeeds, so a write that fails afterwards (ENOSPC,
+    // EFBIG) removes the truncated copy instead of leaving it under the backup name.
+    fd = openSync(backup, 'wx', mode);
     backupCreated = true;
+    let copied = 0;
+    while (copied < original.length) copied += writeSync(fd, original, copied, original.length - copied);
+    fsyncSync(fd);
+    closeSync(fd);
+    fd = null;
     const temp = `${path}.repair-${process.pid}.tmp`;
     fd = openSync(temp, 'wx', mode);
     created = true;

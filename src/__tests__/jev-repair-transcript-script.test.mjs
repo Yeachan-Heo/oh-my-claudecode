@@ -7,7 +7,7 @@
  */
 
 import { spawnSync } from 'node:child_process';
-import { copyFileSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, utimesSync, writeFileSync } from 'node:fs';
+import { chmodSync, copyFileSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, utimesSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -402,6 +402,39 @@ describe('writeRepaired / repairTranscript', () => {
     expect(() => writeRepaired(path, original, repaired)).toThrow(/changed while it was being repaired/);
     expect(readFileSync(path).equals(appended)).toBe(true);
     expect(readdirSync(dir)).toEqual(['transcript.jsonl']);
+  });
+
+  it('restores a file mode that the current umask would narrow', () => {
+    const { path } = writeTranscript(compactedTranscript());
+    chmodSync(path, 0o666);
+    const previous = process.umask(0o022);
+    try {
+      expect(repairTranscript(path, { write: true }).written).toBe(true);
+    } finally {
+      process.umask(previous);
+    }
+    expect(statSync(path).mode & 0o777).toBe(0o666);
+  });
+
+  it('removes a backup whose write fails after it was created, and leaves the transcript untouched', () => {
+    const { dir, path } = writeTranscript(compactedTranscript());
+    const before = readFileSync(path);
+    // Fail every write into the backup after its exclusive open, as a full disk would.
+    const preload = join(dir, 'enospc.mjs');
+    writeFileSync(preload, [
+      "import fs from 'node:fs';",
+      "import { syncBuiltinESMExports } from 'node:module';",
+      'const backups = new Set();',
+      'const { openSync, writeSync } = fs;',
+      "fs.openSync = (p, ...rest) => { const fd = openSync(p, ...rest); if (String(p).endsWith('.pre-repair')) backups.add(fd); return fd; };",
+      "fs.writeSync = (fd, ...rest) => { if (backups.has(fd)) throw Object.assign(new Error('ENOSPC: no space left on device'), { code: 'ENOSPC' }); return writeSync(fd, ...rest); };",
+      'syncBuiltinESMExports();',
+    ].join('\n'));
+    const result = spawnSync(NODE, ['--import', preload, SCRIPT, path, '--write'], { encoding: 'utf8' });
+    expect(result.status).not.toBe(0);
+    expect(result.stdout).toMatch(/ERROR write failed: ENOSPC/);
+    expect(readFileSync(path).equals(before)).toBe(true);
+    expect(readdirSync(dir).sort()).toEqual(['enospc.mjs', 'transcript.jsonl']);
   });
 
   it('keeps the file mode and returns the report', () => {
