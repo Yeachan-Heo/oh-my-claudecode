@@ -4,10 +4,43 @@
  */
 
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
-import * as fs from 'fs/promises';
-import * as fsSync from 'fs';
 import * as path from 'path';
 import * as os from 'os';
+import { tmpdir } from 'os';
+import { rmSync } from 'fs';
+
+const fsPromisesControl = vi.hoisted(() => ({
+  renameHook: undefined as undefined | ((from: string | URL, to: string | URL) => Promise<void>),
+}));
+
+const fsSyncControl = vi.hoisted(() => ({
+  renameSyncHook: undefined as undefined | ((src: string, dst: string) => void),
+}));
+
+vi.mock('fs/promises', async importOriginal => {
+  const actual = await importOriginal<typeof import('fs/promises')>();
+  return {
+    ...actual,
+    rename: async (from: string | URL, to: string | URL) => {
+      await fsPromisesControl.renameHook?.(from, to);
+      return actual.rename(from, to);
+    },
+  };
+});
+
+vi.mock('fs', async importOriginal => {
+  const actual = await importOriginal<typeof import('fs')>();
+  return {
+    ...actual,
+    renameSync: (src: string, dst: string) => {
+      fsSyncControl.renameSyncHook?.(src, dst);
+      return actual.renameSync(src, dst);
+    },
+  };
+});
+
+import * as fs from 'fs/promises';
+import * as fsSync from 'fs';
 import {
   atomicWriteJson,
   atomicWriteJsonSync,
@@ -19,12 +52,14 @@ describe('atomic write retry logic for Windows rename errors', () => {
   let tmpDir: string;
 
   beforeEach(async () => {
-    tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), 'atomic-write-test-'));
+    tmpDir = await fs.mkdtemp(path.join(tmpdir(), 'atomic-write-test-'));
   });
 
   afterEach(async () => {
+    fsPromisesControl.renameHook = undefined;
+    fsSyncControl.renameSyncHook = undefined;
     try {
-      await fs.rm(tmpDir, { recursive: true, force: true });
+      rmSync(tmpDir, { recursive: true, force: true });
     } catch {
       // Best effort cleanup
     }
@@ -32,148 +67,109 @@ describe('atomic write retry logic for Windows rename errors', () => {
 
   describe('shouldRetryRename behavior', () => {
     it('retries EPERM on Windows only', async () => {
-      const originalPlatform = process.platform;
       const filePath = path.join(tmpDir, 'test.json');
       const testData = { test: 'data' };
-
-      // Mock fs.rename to simulate EPERM error
-      const originalRename = fs.rename;
       let attemptCount = 0;
 
       // Only test on Windows
-      if (originalPlatform === 'win32') {
-        try {
-          vi.spyOn(fs, 'rename').mockImplementation(async (src, dst) => {
-            attemptCount++;
-            if (attemptCount < 3) {
-              const error = new Error('EPERM: operation not permitted') as NodeJS.ErrnoException;
-              error.code = 'EPERM';
-              throw error;
-            }
-            // Succeed on third attempt
-            return originalRename(src, dst);
-          });
+      if (process.platform === 'win32') {
+        fsPromisesControl.renameHook = async (from, to) => {
+          attemptCount++;
+          if (attemptCount < 3) {
+            const error = new Error('EPERM: operation not permitted') as NodeJS.ErrnoException;
+            error.code = 'EPERM';
+            throw error;
+          }
+        };
 
-          await atomicWriteJson(filePath, testData);
-          expect(attemptCount).toBe(3);
+        await atomicWriteJson(filePath, testData);
+        expect(attemptCount).toBe(3);
 
-          const content = await fs.readFile(filePath, 'utf-8');
-          expect(JSON.parse(content)).toEqual(testData);
-        } finally {
-          vi.restoreAllMocks();
-        }
-      } else {
-        // On non-Windows, retry should not happen
-        expect(originalPlatform).not.toBe('win32');
+        const content = await fs.readFile(filePath, 'utf-8');
+        expect(JSON.parse(content)).toEqual(testData);
       }
     });
 
     it('retries EBUSY on Windows only', async () => {
       const filePath = path.join(tmpDir, 'test-busy.json');
       const testData = { test: 'busy' };
-      const originalPlatform = process.platform;
 
-      if (originalPlatform === 'win32') {
-        const originalRename = fs.rename;
+      if (process.platform === 'win32') {
         let attemptCount = 0;
 
-        try {
-          vi.spyOn(fs, 'rename').mockImplementation(async (src, dst) => {
-            attemptCount++;
-            if (attemptCount === 1) {
-              const error = new Error('EBUSY: resource busy') as NodeJS.ErrnoException;
-              error.code = 'EBUSY';
-              throw error;
-            }
-            return originalRename(src, dst);
-          });
+        fsPromisesControl.renameHook = async (from, to) => {
+          attemptCount++;
+          if (attemptCount === 1) {
+            const error = new Error('EBUSY: resource busy') as NodeJS.ErrnoException;
+            error.code = 'EBUSY';
+            throw error;
+          }
+        };
 
-          await atomicWriteJson(filePath, testData);
-          expect(attemptCount).toBe(2);
+        await atomicWriteJson(filePath, testData);
+        expect(attemptCount).toBe(2);
 
-          const content = await fs.readFile(filePath, 'utf-8');
-          expect(JSON.parse(content)).toEqual(testData);
-        } finally {
-          vi.restoreAllMocks();
-        }
+        const content = await fs.readFile(filePath, 'utf-8');
+        expect(JSON.parse(content)).toEqual(testData);
       }
     });
 
     it('retries EACCES on Windows only', async () => {
       const filePath = path.join(tmpDir, 'test-access.json');
       const testData = { test: 'access' };
-      const originalPlatform = process.platform;
 
-      if (originalPlatform === 'win32') {
-        const originalRename = fs.rename;
+      if (process.platform === 'win32') {
         let attemptCount = 0;
 
-        try {
-          vi.spyOn(fs, 'rename').mockImplementation(async (src, dst) => {
-            attemptCount++;
-            if (attemptCount === 1) {
-              const error = new Error('EACCES: permission denied') as NodeJS.ErrnoException;
-              error.code = 'EACCES';
-              throw error;
-            }
-            return originalRename(src, dst);
-          });
+        fsPromisesControl.renameHook = async (from, to) => {
+          attemptCount++;
+          if (attemptCount === 1) {
+            const error = new Error('EACCES: permission denied') as NodeJS.ErrnoException;
+            error.code = 'EACCES';
+            throw error;
+          }
+        };
 
-          await atomicWriteJson(filePath, testData);
-          expect(attemptCount).toBe(2);
+        await atomicWriteJson(filePath, testData);
+        expect(attemptCount).toBe(2);
 
-          const content = await fs.readFile(filePath, 'utf-8');
-          expect(JSON.parse(content)).toEqual(testData);
-        } finally {
-          vi.restoreAllMocks();
-        }
+        const content = await fs.readFile(filePath, 'utf-8');
+        expect(JSON.parse(content)).toEqual(testData);
       }
     });
 
     it('does not retry other error codes', async () => {
       const filePath = path.join(tmpDir, 'test-noretry.json');
       const testData = { test: 'noretry' };
-      const originalPlatform = process.platform;
 
-      if (originalPlatform === 'win32') {
-        const originalRename = fs.rename;
+      if (process.platform === 'win32') {
+        fsPromisesControl.renameHook = async (from, to) => {
+          const error = new Error('ENOENT: no such file') as NodeJS.ErrnoException;
+          error.code = 'ENOENT';
+          throw error;
+        };
 
-        try {
-          vi.spyOn(fs, 'rename').mockImplementation(async (src, dst) => {
-            const error = new Error('ENOENT: no such file') as NodeJS.ErrnoException;
-            error.code = 'ENOENT';
-            throw error;
-          });
-
-          await expect(atomicWriteJson(filePath, testData)).rejects.toThrow('ENOENT');
-        } finally {
-          vi.restoreAllMocks();
-        }
+        await expect(atomicWriteJson(filePath, testData)).rejects.toThrow('ENOENT');
       }
     });
 
     it('fails after max retry attempts', async () => {
       const filePath = path.join(tmpDir, 'test-maxretry.json');
       const testData = { test: 'maxretry' };
-      const originalPlatform = process.platform;
 
-      if (originalPlatform === 'win32') {
-        try {
-          vi.spyOn(fs, 'rename').mockImplementation(async (src, dst) => {
-            const error = new Error('EPERM: operation not permitted') as NodeJS.ErrnoException;
-            error.code = 'EPERM';
-            throw error;
-          });
+      if (process.platform === 'win32') {
+        fsPromisesControl.renameHook = async (from, to) => {
+          const error = new Error('EPERM: operation not permitted') as NodeJS.ErrnoException;
+          error.code = 'EPERM';
+          throw error;
+        };
 
-          await expect(atomicWriteJson(filePath, testData)).rejects.toThrow('EPERM');
+        await expect(atomicWriteJson(filePath, testData)).rejects.toThrow('EPERM');
 
-          // Temp file should be cleaned up
-          const tempFiles = await fs.readdir(path.dirname(filePath));
-          const tmpCount = tempFiles.filter(f => f.includes('.tmp.')).length;
-          expect(tmpCount).toBe(0);
-        } finally {
-          vi.restoreAllMocks();
-        }
+        // Temp file should be cleaned up
+        const tempFiles = await fs.readdir(path.dirname(filePath));
+        const tmpCount = tempFiles.filter(f => f.includes('.tmp.')).length;
+        expect(tmpCount).toBe(0);
       }
     });
   });
@@ -182,56 +178,44 @@ describe('atomic write retry logic for Windows rename errors', () => {
     it('retries EPERM on sync rename on Windows', async () => {
       const filePath = path.join(tmpDir, 'sync-test.txt');
       const content = 'test content';
-      const originalPlatform = process.platform;
 
-      if (originalPlatform === 'win32') {
-        const originalRenameSync = fsSync.renameSync;
+      if (process.platform === 'win32') {
         let attemptCount = 0;
 
-        try {
-          vi.spyOn(fsSync, 'renameSync').mockImplementation((src, dst) => {
-            attemptCount++;
-            if (attemptCount < 2) {
-              const error = new Error('EPERM: operation not permitted') as NodeJS.ErrnoException;
-              error.code = 'EPERM';
-              throw error;
-            }
-            return originalRenameSync(src, dst);
-          });
+        fsSyncControl.renameSyncHook = (src, dst) => {
+          attemptCount++;
+          if (attemptCount < 2) {
+            const error = new Error('EPERM: operation not permitted') as NodeJS.ErrnoException;
+            error.code = 'EPERM';
+            throw error;
+          }
+        };
 
-          atomicWriteFileSync(filePath, content);
-          expect(attemptCount).toBeGreaterThanOrEqual(2);
+        atomicWriteFileSync(filePath, content);
+        expect(attemptCount).toBeGreaterThanOrEqual(2);
 
-          const fileContent = fsSync.readFileSync(filePath, 'utf-8');
-          expect(fileContent).toBe(content);
-        } finally {
-          vi.restoreAllMocks();
-        }
+        const fileContent = fsSync.readFileSync(filePath, 'utf-8');
+        expect(fileContent).toBe(content);
       }
     });
 
     it('sync write cleans up temp file after max retries', async () => {
       const filePath = path.join(tmpDir, 'sync-maxretry.txt');
       const content = 'test content';
-      const originalPlatform = process.platform;
 
-      if (originalPlatform === 'win32') {
-        try {
-          vi.spyOn(fsSync, 'renameSync').mockImplementation((src, dst) => {
-            const error = new Error('EPERM: operation not permitted') as NodeJS.ErrnoException;
-            error.code = 'EPERM';
-            throw error;
-          });
+      if (process.platform === 'win32') {
+        fsSyncControl.renameSyncHook = (src, dst) => {
+          const error = new Error('EPERM: operation not permitted') as NodeJS.ErrnoException;
+          error.code = 'EPERM';
+          throw error;
+        };
 
-          expect(() => atomicWriteFileSync(filePath, content)).toThrow('EPERM');
+        expect(() => atomicWriteFileSync(filePath, content)).toThrow('EPERM');
 
-          // Temp file should be cleaned up in finally block
-          const files = fsSync.readdirSync(path.dirname(filePath));
-          const tmpCount = files.filter(f => f.includes('.tmp.')).length;
-          expect(tmpCount).toBe(0);
-        } finally {
-          vi.restoreAllMocks();
-        }
+        // Temp file should be cleaned up in finally block
+        const files = fsSync.readdirSync(path.dirname(filePath));
+        const tmpCount = files.filter(f => f.includes('.tmp.')).length;
+        expect(tmpCount).toBe(0);
       }
     });
   });
@@ -240,34 +224,27 @@ describe('atomic write retry logic for Windows rename errors', () => {
     it('retries EPERM on batch sync rename on Windows', async () => {
       const filePath1 = path.join(tmpDir, 'batch-test-1.txt');
       const filePath2 = path.join(tmpDir, 'batch-test-2.txt');
-      const originalPlatform = process.platform;
 
-      if (originalPlatform === 'win32') {
-        const originalRenameSync = fsSync.renameSync;
+      if (process.platform === 'win32') {
         let attemptCount = 0;
 
-        try {
-          vi.spyOn(fsSync, 'renameSync').mockImplementation((src, dst) => {
-            attemptCount++;
-            // Fail first two attempts only for the first file
-            if (attemptCount <= 2) {
-              const error = new Error('EBUSY: resource busy') as NodeJS.ErrnoException;
-              error.code = 'EBUSY';
-              throw error;
-            }
-            return originalRenameSync(src, dst);
-          });
+        fsSyncControl.renameSyncHook = (src, dst) => {
+          attemptCount++;
+          // Fail first two attempts only for the first file
+          if (attemptCount <= 2) {
+            const error = new Error('EBUSY: resource busy') as NodeJS.ErrnoException;
+            error.code = 'EBUSY';
+            throw error;
+          }
+        };
 
-          atomicWriteBatchSync([
-            { path: filePath1, content: 'content1' },
-            { path: filePath2, content: 'content2' },
-          ]);
+        atomicWriteBatchSync([
+          { path: filePath1, content: 'content1' },
+          { path: filePath2, content: 'content2' },
+        ]);
 
-          expect(fsSync.readFileSync(filePath1, 'utf-8')).toBe('content1');
-          expect(fsSync.readFileSync(filePath2, 'utf-8')).toBe('content2');
-        } finally {
-          vi.restoreAllMocks();
-        }
+        expect(fsSync.readFileSync(filePath1, 'utf-8')).toBe('content1');
+        expect(fsSync.readFileSync(filePath2, 'utf-8')).toBe('content2');
       }
     });
   });
