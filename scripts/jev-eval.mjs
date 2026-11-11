@@ -8,17 +8,20 @@
  * agreement rate over COMPARABLE pairs only, bounded disagreement examples,
  * mean/p95 durationMs, and usage sums when lines carry usage data.
  *
- * Usage: node scripts/jev-eval.mjs [logPath] [--json]
+ * Usage: node scripts/jev-eval.mjs [logPath] [--json] [--include-rotated]
  *   logPath  defaults to the state root's jev/shadow.jsonl (mirrors the
  *            resolution in src/hooks/jev/config.ts)
+ *   --include-rotated  also reads the files that OMC_JEV_LOG_MAX_MB rotation
+ *            renamed next to logPath, oldest first, before logPath itself,
+ *            one file in memory at a time
  *
  * Pure Node, zero dependencies, reads the log only. Never writes anything.
  * Exit codes: 0 on success (including empty/missing log), 1 on usage error.
  */
 
 import { execFileSync } from 'node:child_process';
-import { existsSync, readFileSync } from 'node:fs';
-import { join } from 'node:path';
+import { existsSync, readdirSync, readFileSync } from 'node:fs';
+import { basename, dirname, join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { resolveOmcStateRoot } from './lib/state-root.mjs';
 
@@ -27,6 +30,7 @@ const MODES = ['shadow', 'active', 'degraded', 'off', 'cap', 'circuit-open'];
 // count in their mode, not as latency samples.
 const HELD_BACK_MODES = new Set(['cap', 'circuit-open']);
 const MAX_EXAMPLES = 5;
+const MAX_ROTATION_PASSES = 3;
 const BOUND_CHARS = 200;
 
 /**
@@ -111,15 +115,16 @@ function newPointStats(point) {
 }
 
 /**
- * Parse JSONL text and compute the full per-point report.
- * Malformed (unparseable or unattributable) lines are counted, never fatal.
+ * Parse JSONL text (or an iterable of lines) and compute the full per-point
+ * report. Malformed (unparseable or unattributable) lines are counted, never
+ * fatal.
  */
 export function analyzeLog(text, logPath) {
   const byPoint = new Map();
   let totalLines = 0;
   let malformed = 0;
 
-  for (const line of text.split('\n')) {
+  for (const line of typeof text === 'string' ? text.split('\n') : text) {
     const trimmed = line.trim();
     if (!trimmed) continue;
     totalLines += 1;
@@ -202,6 +207,9 @@ export function formatReport(report) {
     `lines: ${report.totalLines}  malformed: ${report.malformed}  points: ${report.points.length}`,
     '',
   ];
+  if (Array.isArray(report.logFiles)) {
+    lines.splice(1, 0, `files: ${report.logFiles.length} (rotated logs included, oldest first)`);
+  }
   for (const stats of report.points) {
     const modeSummary = MODES.filter((m) => stats.modes[m] > 0)
       .map((m) => `${m}=${stats.modes[m]}`)
@@ -226,15 +234,65 @@ export function formatReport(report) {
 }
 
 function usage() {
-  return 'usage: node scripts/jev-eval.mjs [logPath] [--json]';
+  return 'usage: node scripts/jev-eval.mjs [logPath] [--json] [--include-rotated]';
+}
+
+/**
+ * Files that log rotation (OMC_JEV_LOG_MAX_MB, rotateJevLog in
+ * jev-resolve.mjs and resolver.ts) renamed from logPath:
+ * <name>-<YYYYMMDD-HHmmss>-<pid>.jsonl in the same directory, oldest first.
+ */
+export function rotatedLogPaths(logPath) {
+  const dir = dirname(logPath);
+  const name = basename(logPath).replace(/\.jsonl$/, '');
+  const prefix = name + '-';
+  let entries;
+  try {
+    entries = readdirSync(dir);
+  } catch {
+    return [];
+  }
+  return entries
+    .filter((entry) => entry.startsWith(prefix) && /^\d{8}-\d{6}-\d+\.jsonl$/.test(entry.slice(prefix.length)))
+    .sort()
+    .map((entry) => join(dir, entry));
+}
+
+/**
+ * Read a log file, or null when it is gone: a hook can rotate the live log
+ * between the existence check and the read.
+ */
+function readLogFile(file) {
+  try {
+    return readFileSync(file, 'utf8');
+  } catch (error) {
+    if (error && error.code === 'ENOENT') return null;
+    throw error;
+  }
+}
+
+/**
+ * Lines of several log files, one file in memory at a time, so the total is
+ * not bound by the maximum string length. `read` collects the files read.
+ */
+function* linesOfFiles(files, read) {
+  for (const file of files) {
+    const text = readLogFile(file);
+    if (text === null) continue;
+    read.push(file);
+    yield* text.split('\n');
+  }
 }
 
 async function main(argv, env = process.env, cwd = process.cwd()) {
   let json = false;
+  let includeRotated = false;
   let logPath = null;
   for (const arg of argv) {
     if (arg === '--json') {
       json = true;
+    } else if (arg === '--include-rotated') {
+      includeRotated = true;
     } else if (arg.startsWith('--')) {
       console.error(`unknown flag: ${arg}\n${usage()}`);
       return 1;
@@ -247,17 +305,47 @@ async function main(argv, env = process.env, cwd = process.cwd()) {
   }
 
   const path = logPath ?? await defaultLogPath(env, cwd);
-  if (!existsSync(path)) {
-    console.log(`no shadow log at ${path} — nothing to evaluate (exit 0)`);
-    return 0;
-  }
-  const text = readFileSync(path, 'utf8');
-  if (!text.trim()) {
-    console.log(`shadow log at ${path} is empty — nothing to evaluate (exit 0)`);
-    return 0;
+  let report;
+  if (includeRotated) {
+    // A hook can rotate the live log while it is being read: the renamed file is then in
+    // neither the list this pass started from nor the live file read at its end. Read again
+    // from a fresh listing, oldest first, until a pass sees no new rotated file (bounded, so
+    // a log that keeps rotating cannot loop forever). Each pass streams the files one at a time.
+    let read;
+    for (let pass = 1; ; pass += 1) {
+      const rotated = rotatedLogPaths(path);
+      read = [];
+      report = analyzeLog(linesOfFiles([...rotated, path], read), path);
+      const listed = new Set(rotated);
+      if (rotatedLogPaths(path).every((file) => listed.has(file))) break;
+      if (pass >= MAX_ROTATION_PASSES) {
+        console.error('jev-eval: the log rotated again during the last pass; the newest rotated file is not in this report');
+        break;
+      }
+    }
+
+    if (read.length === 0) {
+      console.log(`no shadow log at ${path} — nothing to evaluate (exit 0)`);
+      return 0;
+    }
+    if (report.totalLines === 0) {
+      console.log(`shadow log at ${path} is empty — nothing to evaluate (exit 0)`);
+      return 0;
+    }
+    report.logFiles = read;
+  } else {
+    const text = existsSync(path) ? readLogFile(path) : null;
+    if (text === null) {
+      console.log(`no shadow log at ${path} — nothing to evaluate (exit 0)`);
+      return 0;
+    }
+    if (!text.trim()) {
+      console.log(`shadow log at ${path} is empty — nothing to evaluate (exit 0)`);
+      return 0;
+    }
+    report = analyzeLog(text, path);
   }
 
-  const report = analyzeLog(text, path);
   if (json) {
     console.log(JSON.stringify(report, null, 2));
   } else {
