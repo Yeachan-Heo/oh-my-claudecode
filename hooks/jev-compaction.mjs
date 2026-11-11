@@ -65,9 +65,11 @@
  * as a compaction's, within REQUEST_MS; under OMC_JEV_MAX_REQUESTS it is not asked once fewer than
  * MAX_REQUESTS + 1 requests are left, so a compaction keeps its requests) and sends the user's words as
  * a compaction does (below), the first MOMENT_HEAD_CHARS and last MOMENT_TAIL_CHARS characters of the
- * answer that ended the turn, masked (left out when any call of the conversation touched a secret or
- * private path), the done and total items of the newest task list, and the tokens and window; no tool
- * result.
+ * answer that ended the turn, masked (left out when the answer, or any call of the conversation in its
+ * path and command fields or any text of its input, names a secret or private path), the done and
+ * total items of the newest task list, and the tokens and window; no tool result. The whole decision
+ * stays within MOMENT_BUDGET_MS of the turn's end, under the host's hook budget: the question gets what
+ * is left of it, and past it no request goes out (a "not now" with reason timeout).
  *
  * What goes to the endpoint: the /compact instructions and the last USER_MESSAGES user messages
  * (together USER_CHARS characters), and for each scored result its tool, its input (STATE_INPUT_CHARS)
@@ -149,6 +151,10 @@ const MOMENT_TAIL_CHARS = 100;
 // A moment decision (Jev's answer, the compaction it asks for) that has not settled in this time no
 // longer holds the next one back.
 const MOMENT_STALE_MS = 5 * 60_000;
+// The host gives a turn.complete hook 10 s of its own time (the time under next() does not count) and
+// then stops waiting for it. A moment decision, from the end of the turn to the request to compact,
+// stays within this, so the question gets only what is left of it and no request goes out late.
+const MOMENT_BUDGET_MS = 8000;
 // OMC_JEV_COMPACT_FLEX: loops whose growth start is kept (the main loop and the newest subagents).
 const AFTER_LOOPS_MAX = 64;
 const WINDOW_REFRESH_TURNS = 20;
@@ -1564,16 +1570,29 @@ function turnsStart(messages, turns) {
   return 0;
 }
 
+// A secret or private path anywhere in a text or in the strings of a call's input, a prompt or a
+// message included (touchesSecretPath reads the path and command fields only).
+function namesSecretPath(value, privatePaths, depth = 0) {
+  if (typeof value === 'string') {
+    if (SECRET_PATH.test(value)) return true;
+    const text = slash(value).toLowerCase();
+    return privatePaths.some((p) => text.includes(p));
+  }
+  if (!value || typeof value !== 'object' || depth > 8) return false;
+  return Object.values(value).some((v) => namesSecretPath(v, privatePaths, depth + 1));
+}
+
 const MOMENT_QUESTION = { type: 'noul', instructions: MOMENT_INSTRUCTIONS, criteria: MOMENT_CRITERIA };
 const MOMENT_HELD = { deadline: 'timeout', 'process-cap': 'cap', 'circuit-open': 'breaker_open', cap: 'rpm' };
 
 // Jev's answer to the moment question: {noul} or {reason}, with answer_skipped when the turn's answer was
 // left out. A request of this point like a compaction's: the same admission (OMC_JEV_MAX_REQUESTS, the
 // shared breaker and limit) and the same failure handling (the module's pause, the shared breaker), all
-// within REQUEST_MS. Under OMC_JEV_MAX_REQUESTS it leaves the requests of one whole compaction.
-async function askMoment($, cfg, messages, answer, tokens, window) {
+// within REQUEST_MS and before `until`. Under OMC_JEV_MAX_REQUESTS it leaves the requests of one whole
+// compaction.
+async function askMoment($, cfg, messages, answer, tokens, window, until) {
   if (cfg.maxRequests && cfg.maxRequests - session.requests <= MAX_REQUESTS) return { reason: 'cap' };
-  const deadline = Date.now() + REQUEST_MS;
+  const deadline = Math.min(Date.now() + REQUEST_MS, until);
   const admission = await admitRequest($, cfg, deadline);
   if (admission.skip) return { reason: MOMENT_HELD[admission.skip.mode] ?? 'held' };
   let list;
@@ -1581,13 +1600,15 @@ async function askMoment($, cfg, messages, answer, tokens, window) {
     if (m.role !== 'assistant') continue;
     for (const u of m.toolUses || []) { const n = TASK_LIST.test(u.tool || '') ? doneItems(u.input) : undefined; if (n) list = n; }
   }
-  // The answer may quote a file read in any earlier turn, so any call of the conversation on a secret or
-  // private path leaves it out.
-  const secret = messages.some((m) => m.role === 'assistant' && (m.toolUses || []).some((u) => touchesSecretPath(u.tool, u.input, cfg.privatePaths)));
+  // The answer may quote a file read in any earlier turn, by this loop or by a subagent or teammate a
+  // prompt sent there, so a secret or private path in the answer or in any call of the conversation
+  // (its path and command fields, or any text of its input) leaves it out.
+  const text = typeof answer === 'string' ? answer : '';
+  const secret = namesSecretPath(text, cfg.privatePaths) || messages.some((m) => m.role === 'assistant' && (m.toolUses || []).some((u) => touchesSecretPath(u.tool, u.input, cfg.privatePaths) || namesSecretPath(u.input, cfg.privatePaths)));
   const skipped = secret ? { answer_skipped: 'secret_path' } : {};
   const state = boundExcerpts({
     task: userTask(messages).task,
-    answer: secret ? '' : maskedHeadTail(typeof answer === 'string' ? answer : '', MOMENT_HEAD_CHARS, MOMENT_TAIL_CHARS),
+    answer: secret ? '' : maskedHeadTail(text, MOMENT_HEAD_CHARS, MOMENT_TAIL_CHARS),
     context: { tokens, window },
     ...(list ? { list } : {}),
   }, cfg.excerptChars);
@@ -1608,6 +1629,7 @@ async function askMoment($, cfg, messages, answer, tokens, window) {
 
 async function ownThreshold($, e, next) {
   const result = await next(e);
+  const until = Date.now() + MOMENT_BUDGET_MS;
   let busy;
   try {
     if (e.agentId !== undefined || session.compacting > 0 || session.hostCannot) return result;
@@ -1699,25 +1721,32 @@ async function ownThreshold($, e, next) {
     let moment;
     if (cfg.atJev) {
       // A closed task chooses the moment at once; else Jev, at most once per MIN_TURNS_BETWEEN turns.
+      let extra = {};
       if (closed) moment = 'task';
       else {
         if (session.turnCount - session.lastAsk < MIN_TURNS_BETWEEN) return result;
         session.lastAsk = session.turnCount;
         const turn = session.turnCount;
-        const ask = await askMoment($, cfg, messages, e.answer, tokens, window);
-        const extra = { ...(ask.noul !== undefined ? { jev_noul: ask.noul } : {}), ...(ask.answer_skipped ? { answer_skipped: ask.answer_skipped } : {}) };
+        const ask = await askMoment($, cfg, messages, e.answer, tokens, window, until);
+        extra = { ...(ask.noul !== undefined ? { jev_noul: ask.noul } : {}), ...(ask.answer_skipped ? { answer_skipped: ask.answer_skipped } : {}) };
         if (!(ask.noul >= MOMENT_YES)) {
           await ownRecord({ result: 'not_now', reason: ask.reason ?? 'jev_no', ...extra, tokens, window, level });
           return result;
         }
         // Jev's answer took time: a compaction of the main loop meanwhile (the host's, /compact) or a newer
         // turn makes it stale, and the context is read anew.
-        const fresh = (await withDeadline($, Promise.resolve().then(() => $.session.usage()), HOST_MS)).value?.context?.tokens;
-        if (session.compactingMain > 0 || session.growthArmed || session.turnCount !== turn || !(fresh >= level)) {
+        const left = until - Date.now();
+        const fresh = left > 0 ? (await withDeadline($, Promise.resolve().then(() => $.session.usage()), Math.min(HOST_MS, left))).value?.context?.tokens : undefined;
+        if (Date.now() < until && (session.compactingMain > 0 || session.growthArmed || session.turnCount !== turn || !(fresh >= level))) {
           await ownRecord({ result: 'not_now', reason: 'state_changed', ...extra, tokens: Number.isFinite(fresh) ? fresh : tokens, window, level });
           return result;
         }
         moment = 'jev';
+      }
+      // Past the budget the host no longer waits for this hook: the request would run unattended.
+      if (Date.now() >= until) {
+        await ownRecord({ result: 'not_now', reason: 'timeout', moment, ...extra, tokens, window, level });
+        return result;
       }
       session.lastAttempt = session.turnCount;
       session.ownRequested = moment;

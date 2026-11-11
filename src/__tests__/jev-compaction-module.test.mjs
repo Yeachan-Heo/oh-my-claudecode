@@ -840,6 +840,18 @@ describe('jev-compaction module: elastic target (OMC_JEV_COMPACT_FLEX=active)', 
     expect(after.records()[0]).not.toHaveProperty('growth_start_chars');
   });
 
+  it('keeps the growth start of the main loop and of the newest 63 subagents', async () => {
+    const handlers = load();
+    await compactOnce(conversation(2), { handlers, env: flexEnv });
+    for (let k = 1; k <= 64; k++) await compactOnce(conversation(2), { handlers, env: flexEnv }, { agentId: `sub-${k}` });
+    const oldest = await compactOnce(conversation(30), { handlers, env: flexEnv }, { agentId: 'sub-1' });
+    expect(oldest.records()[0]).toMatchObject({ target_source: 'rule', target_why: 'first' });
+    const newest = await compactOnce(conversation(30), { handlers, env: flexEnv }, { agentId: 'sub-64' });
+    expect(newest.records()[0]).toMatchObject({ growth_start_chars: 7, growth_start_source: 'summary' });
+    const main = await compactOnce(conversation(30), { handlers, env: flexEnv });
+    expect(main.records()[0]).toMatchObject({ growth_start_chars: 7, growth_start_source: 'summary' });
+  });
+
   it('only the exact value `active` turns it on', async () => {
     for (const value of ['on', '1', 'true', 'ACTIVE']) {
       const handlers = load();
@@ -1005,6 +1017,26 @@ describe('jev-compaction module: moment chosen by Jev (OMC_JEV_COMPACT_AT_PERCEN
     expect(own(empty)[0]).not.toHaveProperty('answer_skipped');
   });
 
+  it('a secret or private path in the answer, or in a prompt or message the conversation sent, leaves the answer out too', async () => {
+    const at3 = (tool, input) => conversation(40, { chars: 6000, tool: (i) => (i === 3 ? tool : 'Bash'), input: (i) => (i === 3 ? input : { command: `cat notes-${i}.txt` }) });
+    const cases = [
+      // The answer names a key file no call of this loop opened (a subagent did).
+      [conversation(40, { chars: 6000 }), { answer: 'Saved the new key to /home/u/.ssh/id_ed25519 as asked.' }, {}, '.ssh'],
+      // A subagent was sent to a credentials file: its report may be quoted in the answer.
+      [at3('Agent', { description: 'rotate', prompt: 'Read /home/u/.aws/credentials and report the key id.' }), {}, {}, '.aws'],
+      // A teammate was sent to a private path.
+      [at3('SendMessage', { to: 'worker', message: 'Copy /srv/vault/db.txt into the report.' }), {}, { OMC_JEV_COMPACT_PRIVATE_PATHS: '/srv/vault' }, 'vault'],
+    ];
+    for (const [messages, e, extra, path] of cases) {
+      const fake = fakeDollar({ env: { ...env, ...extra }, messages, usage: usageAt(() => 130000), respond: momentRespond(0.2) });
+      await turn(load(), fake, e);
+      const [call] = momentCalls(fake.calls);
+      expect(call.body.state.answer, path).toBe('');
+      expect(JSON.stringify(call.body), path).not.toContain(path);
+      expect(own(fake)[0], path).toMatchObject({ result: 'not_now', reason: 'jev_no', answer_skipped: 'secret_path' });
+    }
+  });
+
   it('an interrupted, refused or failed turn never chooses the moment; shadow mode leaves it off and a percent keeps the percent rules', async () => {
     for (const e of [{ isAborted: true, reason: 'aborted' }, { reason: 'refusal' }, { reason: 'error' }]) {
       const fake = fakeDollar({ env, messages: withClosedTask(), usage: usageAt(() => 130000) });
@@ -1066,16 +1098,22 @@ describe('jev-compaction module: moment chosen by Jev (OMC_JEV_COMPACT_AT_PERCEN
       let tokens = 130000;
       const handlers = load();
       let fake;
+      let release;
+      let running;
       const respond = async (body) => {
         if (!body.questions.moment) return okResponse(scoreByMarker(body));
-        // While Jev answers, the host compacts on its own, the context shrinks below the level, or a subagent compacts.
+        // While Jev answers, the host compacts on its own, the context shrinks below the level, or a
+        // subagent starts a compaction that is still running when the answer comes.
         if (change === 'compaction') await handlers['session.compact'](fake.$, Object.freeze({ trigger: 'auto', messages: conversation(2) }), summaryNext());
-        else if (change === 'subagent') await handlers['session.compact'](fake.$, Object.freeze({ trigger: 'auto', messages: conversation(2), agentId: 'sub-1' }), summaryNext());
-        else tokens = 30000;
+        else if (change === 'subagent') {
+          const gate = new Promise((resolve) => { release = resolve; });
+          running = handlers['session.compact'](fake.$, Object.freeze({ trigger: 'auto', messages: conversation(2), agentId: 'sub-1' }), async () => { await gate; return SUMMARY; });
+        } else tokens = 30000;
         return okResponse({ answers: { moment: { type: 'noul', noul: 0.95 } } });
       };
       fake = fakeDollar({ env, messages: conversation(40, { chars: 6000 }), usage: usageAt(() => tokens), respond });
       await turn(handlers, fake);
+      if (release) { release(); await running; }
       if (change === 'subagent') {
         expect(fake.calls.compact).toBe(1);
         expect(own(fake)).toEqual([expect.objectContaining({ result: 'requested', moment: 'jev' })]);
@@ -1114,6 +1152,38 @@ describe('jev-compaction module: moment chosen by Jev (OMC_JEV_COMPACT_AT_PERCEN
     await first;
     expect(fake.calls.compact).toBe(0);
     expect(own(fake)).toEqual([expect.objectContaining({ result: 'not_now', reason: 'state_changed', jev_noul: 0.9 })]);
+  });
+
+  it('the decision stays within 8 s of the turn\'s end: the question gets only what is left, and past it nothing is requested', async () => {
+    const realNow = Date.now;
+    let skew = 0;
+    Date.now = () => realNow() + skew;
+    try {
+      // Jev says yes once the budget is spent: not now, reason timeout, and no request to compact.
+      const late = fakeDollar({ env, messages: conversation(40, { chars: 6000 }), usage: usageAt(() => 130000), respond: (body) => { if (body.questions.moment) skew = 9000; return momentRespond(0.95)(body); } });
+      await turn(load(), late);
+      expect(late.calls.compact).toBe(0);
+      expect(own(late)).toEqual([expect.objectContaining({ result: 'not_now', reason: 'timeout', moment: 'jev', jev_noul: 0.95 })]);
+      // A closed task found after the budget is spent (a slow transcript read): the same.
+      skew = 0;
+      const slow = fakeDollar({ env, usage: usageAt(() => 130000) });
+      slow.$.session.messages = async () => { slow.calls.messages++; skew = 9000; return withClosedTask(); };
+      await turn(load(), slow);
+      expect(slow.calls.compact).toBe(0);
+      expect(own(slow)).toEqual([expect.objectContaining({ result: 'not_now', reason: 'timeout', moment: 'task' })]);
+      // 7 s of the 8 went to the transcript: a silent Jev is given up after the second that is left, not REQUEST_MS.
+      skew = 0;
+      const silent = fakeDollar({ env, usage: usageAt(() => 130000), respond: (body) => (body.questions.moment ? new Promise(() => {}) : okResponse(scoreByMarker(body))) });
+      silent.$.session.messages = async () => { silent.calls.messages++; skew = 7000; return conversation(40, { chars: 6000 }); };
+      const started = realNow();
+      await turn(load(), silent);
+      expect(realNow() - started).toBeLessThan(3000);
+      expect(momentCalls(silent.calls)).toHaveLength(1);
+      expect(silent.calls.compact).toBe(0);
+      expect(own(silent)).toEqual([expect.objectContaining({ result: 'not_now', reason: 'timeout' })]);
+    } finally {
+      Date.now = realNow;
+    }
   });
 
   it('own_request goes only to the plugin compaction it asked for; a refusal by the host clears it', async () => {
@@ -1221,6 +1291,16 @@ describe('jev-compaction module: shared breaker and request limit (OMC_JEV_BREAK
     const left = 60_000 - (Date.now() % 60_000);
     if (left < 8000) await new Promise((resolve) => setTimeout(resolve, left + 200));
   }
+
+  it('(moment) a breaker that opens while the transcript is read holds the moment question: not now, breaker_open', async () => {
+    const c = shared({ OMC_JEV_BREAKER: '1', OMC_JEV_COMPACT_AT_PERCENT: 'jev' });
+    const fake = fakeDollar({ env: c.env, diskPrefix, messages: conversation(40, { chars: 6000 }), usage: () => ({ context: { tokens: 130000, window: 200000 } }) });
+    fake.$.session.messages = async () => { expect(openByScripts(c, 429, '120')).toBeDefined(); return conversation(40, { chars: 6000 }); };
+    await load()['turn.complete'](fake.$, { isAborted: false, reason: 'answer', answer: 'Done.' }, async () => 'ok');
+    expect(fake.calls.fetch).toHaveLength(0);
+    expect(fake.calls.compact).toBe(0);
+    expect(fake.records().filter((r) => r.event === 'own_threshold')).toEqual([expect.objectContaining({ result: 'not_now', reason: 'breaker_open' })]);
+  });
 
   it('(a) an open breaker file stops the request: the built-in summary runs, reason breaker_open; precompute and the own threshold also wait', async () => {
     const c = shared({ OMC_JEV_BREAKER: '1', OMC_JEV_COMPACT_AT_PERCENT: '60' });
