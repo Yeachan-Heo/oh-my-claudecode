@@ -6,14 +6,14 @@
     "base": "05c800f40d1ad53b42a78609d2667ef4f726808b",
     "planningHead": "0a91273e61dbbd47eb0af4c02844409251e08398",
     "head": "f35b7f3135e704be1193ef50f684f46b0ba5bda5",
-    "sourceSha256": "062cc88cf1fb69952d69649c44a0879abf3583d893e8fddfbc9c590220280135",
+    "sourceSha256": "e1bba49c182fe8699aa5843655521960e524debb648e4027cafcdfe350c5ee84",
     "generatedAt": null,
     "generator": "scripts/generate-inventory-graph.mjs"
   },
   "base": "05c800f40d1ad53b42a78609d2667ef4f726808b",
   "planningHead": "0a91273e61dbbd47eb0af4c02844409251e08398",
   "head": "f35b7f3135e704be1193ef50f684f46b0ba5bda5",
-  "sourceSha256": "062cc88cf1fb69952d69649c44a0879abf3583d893e8fddfbc9c590220280135",
+  "sourceSha256": "e1bba49c182fe8699aa5843655521960e524debb648e4027cafcdfe350c5ee84",
   "counts": {
     "public": {
       "skills": 84,
@@ -50026,6 +50026,11 @@
         "kind": "imports"
       },
       {
+        "from": "scripts/lib/jev-breaker.mjs",
+        "to": "scripts/lib/atomic-write.mjs",
+        "kind": "imports"
+      },
+      {
         "from": "scripts/lib/jev-compaction-state.mjs",
         "to": "external:node:fs",
         "kind": "imports"
@@ -94328,11 +94333,11 @@
     ],
     "stats": {
       "nodeCount": 8298,
-      "edgeCount": 9123,
-      "importEdgeCount": 7652,
+      "edgeCount": 9124,
+      "importEdgeCount": 7653,
       "registerEdgeCount": 105
     }
   },
   "inventorySha256": "8052560f0b9c4008258c257af9bfec610abcba96f0b0c9abde8166a9cf56aba5",
-  "manifestSha256": "c9ca78a81a3e4f70ec11397608e9f88421369c2643ffa631a3c46f7b5a93f297"
+  "manifestSha256": "ab88a3b9c87cf8b96faf501c7e9517a4c750539d088fb8942223cd96badb926f"
 }
