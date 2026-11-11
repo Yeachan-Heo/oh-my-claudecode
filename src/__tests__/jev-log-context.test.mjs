@@ -1,4 +1,4 @@
-/* global process */
+/* global process, setTimeout */
 /**
  * Tests for OMC_JEV_LOG_CONTEXT on the script side: jevLogContextOf and the
  * shadow-log line of resolveRequest in scripts/jev-resolve.mjs, the request
@@ -179,6 +179,24 @@ describe('resolveRequest shadow-log line', () => {
     await resolveRequest(request, envFor(dir, { OMC_JEV_LOG_CONTEXT: 'true' }), failing);
     const [line] = readLines(join(dir, 'shadow.jsonl'));
     expect(line).toMatchObject({ mode: 'degraded', session_id: 'session-1', request_id: 'req-1', jev: null, answers: null });
+  });
+
+  it('logs a call held back by the shared request limit with its ids and echoes request_id', async () => {
+    const dir = freshDir();
+    const left = 60_000 - (Date.now() % 60_000);
+    if (left < 3000) await new Promise((resolve) => setTimeout(resolve, left + 50));
+    const env = envFor(dir, {
+      OMC_JEV: 'model-routing:active',
+      OMC_JEV_LOG_CONTEXT: '1',
+      OMC_JEV_MAX_RPM: '1',
+      OMC_JEV_BREAKER_DIR: join(dir, 'breaker'),
+    });
+    const { fn } = fetchAnswering({ route: { type: 'choice', choice: 'opus' } });
+    await resolveRequest(request, env, fn); // takes the only slot of the minute
+    const held = await resolveRequest(request, env, fn);
+    expect(held).toMatchObject({ mode: 'cap', request_id: 'req-1' });
+    const line = readLines(join(dir, 'shadow.jsonl')).pop();
+    expect(line).toMatchObject({ mode: 'cap', tool_use_id: 'toolu_01', session_id: 'session-1', request_id: 'req-1', jev: null, answers: null });
   });
 
   it('ignores a context that is not an object and values that are not strings', async () => {

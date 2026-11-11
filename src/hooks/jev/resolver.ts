@@ -333,6 +333,7 @@ export async function resolveJudgment<T>(resolveJudgmentArgs: ResolveJudgmentArg
       const logEntry = {
         ts: new Date().toISOString(),
         point: args.point,
+        ...logFields,
         mode: skip.mode,
         state: boundedState,
         heuristic: loggableHeuristic,

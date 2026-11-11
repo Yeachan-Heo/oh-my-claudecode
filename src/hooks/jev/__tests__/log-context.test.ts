@@ -6,7 +6,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { resetJevResolverState, resolveJudgment } from '../resolver.js';
 import type { JevQuestions } from '../types.js';
 
-const ENV_KEYS = ['TYPESAFE_API_KEY', 'OMC_JEV', 'OMC_JEV_LOG_DIR', 'OMC_JEV_LOG_CONTEXT', 'OMC_JEV_ENDPOINT', 'OMC_JEV_QUIET'] as const;
+const ENV_KEYS = ['TYPESAFE_API_KEY', 'OMC_JEV', 'OMC_JEV_LOG_DIR', 'OMC_JEV_LOG_CONTEXT', 'OMC_JEV_ENDPOINT', 'OMC_JEV_QUIET', 'OMC_JEV_MAX_RPM', 'OMC_JEV_BREAKER_DIR'] as const;
 const QUESTIONS: JevQuestions = {
   route: { type: 'choice', criteria: { haiku: 'simple', sonnet: 'standard', opus: 'complex' } },
   effort: { type: 'score', criteria: { low: 'low', high: 'high' } },
@@ -87,5 +87,19 @@ describe('resolver shadow-log line with OMC_JEV_LOG_CONTEXT', () => {
     await resolveJudgment({ point: 'model-routing', state: { task: 'x' }, questions: QUESTIONS, twin: () => 'sonnet', fetchFn: failing, logContext: { sessionId: 'session-2' } });
     const [line] = await readLines();
     expect(line).toMatchObject({ mode: 'degraded', session_id: 'session-2', request_id: expect.stringMatching(UUID), jev: null });
+  });
+
+  it('logs a call held back by the shared request limit with its ids', async () => {
+    const left = 60_000 - (Date.now() % 60_000);
+    if (left < 3000) await new Promise((resolve) => setTimeout(resolve, left + 50));
+    process.env.OMC_JEV_LOG_CONTEXT = '1';
+    process.env.OMC_JEV_MAX_RPM = '1';
+    process.env.OMC_JEV_BREAKER_DIR = join(logDir, 'breaker');
+    const { fn } = fetchAnswering({ route: { type: 'choice', choice: 'opus' } });
+    const judge = () => resolveJudgment({ point: 'model-routing', state: { task: 'x' }, questions: QUESTIONS, twin: () => 'sonnet', fetchFn: fn, logContext: HOOK_INPUT });
+    expect((await judge()).mode).toBe('shadow');
+    expect((await judge()).mode).toBe('cap');
+    const line = (await readLines()).pop();
+    expect(line).toMatchObject({ mode: 'cap', tool_use_id: 'toolu_01', session_id: 'session-1', request_id: expect.stringMatching(UUID), jev: null });
   });
 });

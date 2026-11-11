@@ -526,6 +526,7 @@ export async function resolveRequest(
         {
           ts: new Date().toISOString(),
           point: request.point,
+          ...logContext,
           mode: skip.mode,
           state: bound.state,
           heuristic: comparableHeuristic(request.heuristic, request.questions),
@@ -535,11 +536,13 @@ export async function resolveRequest(
           durationMs,
         },
         await logDirFor(env),
+        resolveJevLogMaxBytes(env),
       );
       return {
         mode: skip.mode,
         answer: null,
         answers: null,
+        ...(logContext?.request_id ? { request_id: logContext.request_id } : {}),
         confidence: undefined,
         durationMs,
         ...(skip.breaker ? { breaker: skip.breaker } : {}),
