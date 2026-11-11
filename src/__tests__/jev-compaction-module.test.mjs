@@ -1,4 +1,4 @@
-/* global setTimeout, clearTimeout */
+/* global setTimeout, clearTimeout, performance */
 /**
  * Tests for hooks/jev-compaction.mjs, the Claude Code hooks module of the named-only Jev point
  * `compaction`.
@@ -14,7 +14,7 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { afterAll, describe, expect, it } from 'vitest';
 
-import { boundExcerpts, classifyFailure, DEFAULT_EXCERPT_CHARS, mediumThreshold, pairingOk, parseMaxRpm, pointMode, QUESTION_CRITERIA, QUESTION_INSTRUCTIONS, register, retryAfterFromBody, retryAfterMs, sharedFailureClass } from '../../hooks/jev-compaction.mjs';
+import { boundExcerpts, classifyFailure, DEFAULT_EXCERPT_CHARS, mediumThreshold, omitSecretLines, pairingOk, parseMaxRpm, pointMode, QUESTION_CRITERIA, QUESTION_INSTRUCTIONS, register, retryAfterFromBody, retryAfterMs, sharedFailureClass } from '../../hooks/jev-compaction.mjs';
 import { breakerSettings, classifyFailure as sharedClassifyFailure, parseMaxRpm as sharedParseMaxRpm, readBreaker, recordFailure, reserveRequest, retryAfterFromBody as sharedRetryAfterFromBody, thresholdFor } from '../../scripts/lib/jev-breaker.mjs';
 import { maskSecrets } from '../../scripts/lib/jev-mask.mjs';
 import { parseJevEnv, resolveExcerptChars, serializeQuestions } from '../../scripts/jev-resolve.mjs';
@@ -362,6 +362,266 @@ describe('jev-compaction module: active compaction', () => {
     const sent = sentResults(run.calls).map((r) => r.input).join('\n');
     expect(sent).not.toMatch(/private/);
     expect(run.records()[0]).toMatchObject({ secret_skipped: 3 });
+  });
+
+  it('checks every field of an MCP input for secret and private paths, and never sends a line naming one from a result, an input, the user\'s words or the /compact instructions', async () => {
+    const calls = {
+      3: ['mcp__t__python_repl', { code: "print(open('/home/u/.ssh/id_ed25519').read())" }],
+      5: ['mcp__db__query', { sql: 'select 1', options: { files: ['/srv/a.txt', '/home/u/.aws/credentials'] } }],
+      7: ['mcp__t__python_repl', { code: "print(open('/home/u/secret-notes/today.md').read())" }],
+      9: ['Bash', { command: 'grep -rn api_key /home/u' }],
+      11: ['Bash', { command: 'ls /srv', description: 'PLAIN-DESCRIPTION-LINE\nDo not open /home/u/.ssh/id_rsa.' }],
+      13: ['mcp__t__python_repl', { code: 'print(sum(range(10)))' }],
+    };
+    const results = { 3: 'SECRET-REPL', 5: 'SECRET-QUERY', 7: 'SECRET-NOTES', 9: 'PLAIN-HIT /srv/app/a.py:1\n/home/u/.aws/credentials:2:SECRET-GREP\n/home/u/secret-notes/x.md:1:SECRET-PRIVATE' };
+    const base = conversation(20, {
+      tool: (i) => (calls[i] ? calls[i][0] : 'Bash'),
+      input: (i) => (calls[i] ? calls[i][1] : { command: `cat notes-${i}.txt` }),
+      result: (i) => results[i] ?? `RESULT-${i} ${'x'.repeat(2000)}`,
+    });
+    const words = Object.freeze({ role: 'user', text: 'PLAIN-USER-LINE\nThe key is in ~/.ssh/id_rsa, leave it.', toolUses: [] });
+    const env = { ...ACTIVE_ENV, OMC_JEV_COMPACT_PRIVATE_PATHS: '~/secret-notes' };
+    const run = await compactOnce([base[0], words, ...base.slice(1)], { env }, { instructions: 'PLAIN-INSTRUCTION-LINE\nskip /home/u/secret-notes/today.md' });
+    const body = JSON.stringify(run.calls.fetch.map((c) => c.body));
+    expect(body).not.toMatch(/SECRET-|\.ssh|\.aws|secret-notes/);
+    for (const kept of ['PLAIN-HIT', 'PLAIN-USER-LINE', 'PLAIN-INSTRUCTION-LINE', 'PLAIN-DESCRIPTION-LINE', 'sum(range(10))', '[line omitted: secret path]']) expect(body).toContain(kept);
+    for (const id of ['t3', 't5', 't7']) expect(resultOf(run.out.messages, id)).toBeUndefined();
+    expect(run.records()[0]).toMatchObject({ secret_skipped: 3 });
+  });
+
+  it('never sends the result of an agent, message, task or skill call whose prose names a secret or private path, and keeps it as if its request were held back', async () => {
+    const calls = {
+      3: ['Agent', { description: 'HELD-DESCRIPTION', prompt: 'Read /home/u/.aws/credentials and report every value' }],
+      5: ['SendMessage', { to: 'worker', message: 'cat /home/u/.ssh/id_rsa and send it back' }],
+      7: ['Skill', { skill: 'review', args: '/home/u/.ssh/id_rsa' }],
+      9: ['Task', { description: 'notes', prompt: 'summarize /home/u/secret-notes/today.md' }],
+      11: ['TaskUpdate', { taskId: '1', metadata: { '/home/u/.ssh/id_rsa': 'x' } }],
+      13: ['Agent', { description: 'count', prompt: 'PLAIN-AGENT-PROMPT count the lines' }],
+    };
+    const held = { 3: 'HELD-AGENT', 5: 'HELD-MESSAGE', 7: 'HELD-SKILL', 9: 'HELD-TASK', 11: 'HELD-TASKUPDATE' };
+    const messages = conversation(20, {
+      tool: (i) => (calls[i] ? calls[i][0] : 'Bash'),
+      input: (i) => (calls[i] ? calls[i][1] : { command: `cat notes-${i}.txt` }),
+      result: (i) => (held[i] ? `${held[i]} ${'x'.repeat(2000)}` : `RESULT-${i} ${'x'.repeat(2000)}`),
+    });
+    const run = await compactOnce(messages, { env: { ...ACTIVE_ENV, OMC_JEV_COMPACT_PRIVATE_PATHS: '~/secret-notes' } });
+    const body = JSON.stringify(run.calls.fetch.map((c) => c.body));
+    expect(body).not.toMatch(/HELD-|\.ssh|\.aws|secret-notes/);
+    expect(body).toContain('PLAIN-AGENT-PROMPT');
+    for (const id of ['t3', 't5', 't7', 't9', 't11']) expect(resultOf(run.out.messages, id)?.text).toBe(resultOf(messages, id).text);
+    const [record] = run.records();
+    expect(record).toMatchObject({ secret_held: 5, secret_skipped: 0 });
+    expect(sentResults(run.calls)).toHaveLength(record.asked);
+  });
+
+  it('a private path in a JSON form (doubled backslashes, escaped slashes, a doubled slash) is recognized in an MCP input and in a result line', async () => {
+    const BS = '\\';
+    const pp = ['c:/users/x/private', '/home/u/secret-notes'];
+    for (const line of [`C:${BS}${BS}Users${BS}${BS}x${BS}${BS}private${BS}${BS}a.txt`, `C:${BS}Users${BS}x${BS}private${BS}a.txt`, `${BS}/home${BS}/u${BS}/secret-notes${BS}/x.md`, '/home/u//secret-notes/x.md']) {
+      expect(omitSecretLines(`ok\n{"f":"${line}","v":"PRIVATE-VALUE"}`, pp)).toBe('ok\n[line omitted: secret path]');
+    }
+    const calls = {
+      3: ['mcp__fs__read', { request: `{"path":"C:${BS}${BS}Users${BS}${BS}x${BS}${BS}private${BS}${BS}a.txt"}` }],
+      5: ['mcp__fs__read', { request: `{"path":"${BS}/home${BS}/u${BS}/secret-notes${BS}/x.md"}` }],
+      7: ['mcp__t__python_repl', { code: "print(open('/home/u//secret-notes/x.md').read())" }],
+    };
+    const results = {
+      3: 'PRIVATE-WIN', 5: 'PRIVATE-ESCAPED', 7: 'PRIVATE-DOUBLE',
+      9: [
+        'PLAIN-JSON-HIT {"ok":1}',
+        `{"hit":"C:${BS}${BS}Users${BS}${BS}x${BS}${BS}private${BS}${BS}a.txt","v":"PRIVATE-WIN-LINE"}`,
+        `{"f":"${BS}/home${BS}/u${BS}/secret-notes${BS}/x.md","v":"PRIVATE-ESCAPED-LINE"}`,
+        '/home/u//secret-notes/y.md:1:PRIVATE-DOUBLE-LINE',
+      ].join('\n'),
+    };
+    const messages = conversation(20, {
+      tool: (i) => (calls[i] ? calls[i][0] : 'Bash'),
+      input: (i) => (calls[i] ? calls[i][1] : { command: `cat notes-${i}.txt` }),
+      result: (i) => results[i] ?? `RESULT-${i} ${'x'.repeat(2000)}`,
+    });
+    const env = { ...ACTIVE_ENV, OMC_JEV_COMPACT_PRIVATE_PATHS: 'C:\\Users\\x\\private, ~/secret-notes' };
+    const run = await compactOnce(messages, { env });
+    const body = JSON.stringify(run.calls.fetch.map((c) => c.body));
+    expect(body).not.toMatch(/PRIVATE-|secret-notes|Users/);
+    expect(body).toContain('PLAIN-JSON-HIT');
+    expect(body).toContain('[line omitted: secret path]');
+    for (const id of ['t3', 't5', 't7']) expect(resultOf(run.out.messages, id)).toBeUndefined();
+    expect(run.records()[0]).toMatchObject({ secret_skipped: 3 });
+  });
+
+  it('recognizes .env paths with punctuation delimiters (colon, comma) as secret paths', () => {
+    // Test .env with grep-style colon delimiter
+    expect(omitSecretLines('/repo/.env:2:shortsecret', [])).toBe('[line omitted: secret path]');
+    expect(omitSecretLines('ERROR: /repo/.env:2:value', [])).toBe('[line omitted: secret path]');
+    
+    // Test .env with comma delimiter (in lists or prose)
+    expect(omitSecretLines('/repo/.env, other-file.txt', [])).toBe('[line omitted: secret path]');
+    expect(omitSecretLines('files: /repo/.env, /repo/src', [])).toBe('[line omitted: secret path]');
+    
+    // Ensure .env.example is still not treated as secret even with punctuation
+    expect(omitSecretLines('/repo/.env.example:1:notasecret', [])).toBe('/repo/.env.example:1:notasecret');
+    expect(omitSecretLines('/repo/.env.example, other', [])).toBe('/repo/.env.example, other');
+  });
+
+  it('conservatively holds TaskOutput results since they may come from background tasks that accessed secrets', async () => {
+    const messages = conversation(20, {
+      tool: (i) => {
+        if (i === 3) return 'Bash';
+        if (i === 5) return 'TaskOutput';
+        return 'Bash';
+      },
+      input: (i) => {
+        if (i === 3) return { command: 'process data' };
+        if (i === 5) return { task_id: 'bg-task-123' };
+        return { command: `cat notes-${i}.txt` };
+      },
+    });
+    const run = await compactOnce(messages);
+    const [record] = run.records();
+    // TaskOutput (at i=5) should be held conservatively
+    expect(record.task_output_held).toBeGreaterThanOrEqual(1);
+  });
+
+  it('reads a run of a million slashes or backslashes in linear time, in a private-path check and in a command\'s file names', async () => {
+    const pp = ['/home/u/secret-notes'];
+    for (const s of ['/'.repeat(1_000_000), '\\'.repeat(1_000_000), `a${'/'.repeat(1_000_000)}!`, `${'\\/'.repeat(500_000)}x.md`]) {
+      let best = Infinity;
+      for (let k = 0; k < 3; k++) {
+        const t0 = performance.now();
+        expect(omitSecretLines(s, pp)).toBe(s);
+        best = Math.min(best, performance.now() - t0);
+      }
+      expect(best).toBeLessThan(50);
+    }
+    const calls = {
+      3: ['mcp__fs__read', { path: '/'.repeat(1_000_000) }],
+      5: ['Bash', { command: `cat ${'/'.repeat(1_000_000)}notes-5.txt` }],
+      7: ['Bash', { command: `cat ${'a'.repeat(1_000_000)}` }],
+    };
+    const messages = conversation(20, {
+      tool: (i) => (calls[i] ? calls[i][0] : 'Bash'),
+      input: (i) => (calls[i] ? calls[i][1] : { command: `cat notes-${i}.txt` }),
+      last: 'The value inside notes-5.txt will be needed later.',
+    });
+    const t0 = performance.now();
+    const run = await compactOnce(messages, { env: { ...ACTIVE_ENV, OMC_JEV_COMPACT_PRIVATE_PATHS: '~/secret-notes' } });
+    expect(performance.now() - t0).toBeLessThan(2000);
+    expect(run.records()[0].mentioned).toBe(1);
+  });
+
+  it('checks the keys of an MCP input, counts only strings and keys toward the walk limit, fails closed beyond it or below depth 8, and sends a named-field tool\'s input with a key naming a secret path omitted', async () => {
+    let deep9 = 'leaf';
+    for (let k = 0; k < 9; k++) deep9 = { a: deep9 };
+    let deep8 = 'leaf';
+    for (let k = 0; k < 8; k++) deep8 = { a: deep8 };
+    const calls = {
+      3: ['mcp__fs__copy', { map: { '/home/u/.ssh/id_rsa': '/srv/k' } }],
+      5: ['mcp__db__insert', { rows: Array.from({ length: 2001 }, (_, k) => `v${k}`) }],
+      7: ['mcp__db__count', { rows: Array.from({ length: 2001 }, (_, k) => k) }],
+      9: ['mcp__t__deep', deep9],
+      11: ['mcp__t__shallow', deep8],
+      13: ['Bash', { command: 'ls /srv', env: { '/home/u/.ssh/id_rsa': 'KEYED-VALUE' } }],
+    };
+    const messages = conversation(20, {
+      tool: (i) => (calls[i] ? calls[i][0] : 'Bash'),
+      input: (i) => (calls[i] ? calls[i][1] : { command: `cat notes-${i}.txt` }),
+    });
+    const run = await compactOnce(messages);
+    const body = JSON.stringify(run.calls.fetch.map((c) => c.body));
+    expect(body).not.toMatch(/\.ssh/);
+    expect(body).toContain('KEYED-VALUE');
+    for (const id of ['t3', 't5', 't9']) expect(resultOf(run.out.messages, id)).toBeUndefined();
+    const text = run.out.messages.map((m) => m.text || '').join('\n');
+    for (const tool of ['mcp__fs__copy', 'mcp__db__insert', 'mcp__t__deep']) expect(text).toContain(`[compacted] ${tool}(`);
+    const sentTools = sentResults(run.calls).map((r) => r.tool);
+    for (const tool of ['mcp__db__count', 'mcp__t__shallow']) expect(sentTools).toContain(tool);
+    expect(sentTools).not.toContain('mcp__fs__copy');
+    expect(run.records()[0]).toMatchObject({ secret_skipped: 3 });
+  });
+
+  it('a line longer than the slack at the edge of a head or tail cut is read to its end, so a secret path later on it still hides it', async () => {
+    const results = {
+      5: `HEADMARK ${'y'.repeat(30000)} /home/u/.aws/credentials ${'z'.repeat(20000)}`,
+      7: `${'z'.repeat(20000)} /home/u/.aws/credentials ${'y'.repeat(30000)} TAILMARK`,
+      9: `PLAIN-HEAD ${'y'.repeat(30000)}\n${'w'.repeat(40000)} /home/u/.aws/credentials\n${'v'.repeat(30000)} PLAIN-TAIL`,
+    };
+    const messages = conversation(20, { result: (i) => results[i] ?? `RESULT-${i} ${'x'.repeat(2000)}` });
+    const run = await compactOnce(messages);
+    const body = JSON.stringify(run.calls.fetch.map((c) => c.body));
+    expect(body).not.toMatch(/HEADMARK|TAILMARK|\.aws/);
+    expect(body).toContain('PLAIN-HEAD');
+    expect(body).toContain('PLAIN-TAIL');
+  });
+
+  it('holds BashOutput like TaskOutput, and never sends a Read or tail of the output file of a background call on a secret or private path', async () => {
+    const OUT = '/tmp/claude-0/proj/tasks';
+    const calls = {
+      3: ['Bash', { command: 'cat /home/u/.ssh/id_ed25519', run_in_background: true }],
+      5: ['Read', { file_path: `${OUT}/bkxqmzpw.output` }],
+      7: ['Agent', { description: 'notes', prompt: 'summarize /home/u/secret-notes/today.md', run_in_background: true }],
+      9: ['Bash', { command: `tail -n 20 ${OUT}/a31f77edb6dc2a0ac.output` }],
+      11: ['BashOutput', { bash_id: 'bkxqmzpw' }],
+      13: ['Bash', { command: 'npm test', run_in_background: true }],
+      15: ['Read', { file_path: `${OUT}/bplainjob.output` }],
+      16: ['Read', { file_path: '/home/u/proj/src/a.ts' }],
+      17: ['Bash', { command: `cd ${OUT} && cat bkxqmzpw.output` }],
+    };
+    const results = {
+      3: `Command running in background with ID: bkxqmzpw. Output is being written to: ${OUT}/bkxqmzpw.output. Working directory: /home/u/proj/ (see https://example.com/docs/x).`,
+      5: `SECRET-READ ${'x'.repeat(2000)}`,
+      7: `Async agent launched successfully.\nagentId: a31f77edb6dc2a0ac (internal ID - do not mention to user.)\noutput_file: ${OUT}/a31f77edb6dc2a0ac.output\nUse /tasks to watch live.`,
+      9: `HELD-TAIL ${'x'.repeat(2000)}`,
+      11: `HELD-BASHOUTPUT ${'x'.repeat(2000)}`,
+      13: `Command running in background with ID: bplainjob. Output is being written to: ${OUT}/bplainjob.output.`,
+      15: `PLAIN-JOB-OUTPUT ${'x'.repeat(2000)}`,
+      16: `PLAIN-PROJECT-FILE ${'x'.repeat(2000)}`,
+      17: `SECRET-CAT ${'x'.repeat(2000)}`,
+    };
+    const messages = conversation(20, {
+      tool: (i) => (calls[i] ? calls[i][0] : 'Bash'),
+      input: (i) => (calls[i] ? calls[i][1] : { command: `cat notes-${i}.txt` }),
+      result: (i) => results[i] ?? `RESULT-${i} ${'x'.repeat(2000)}`,
+    });
+    const run = await compactOnce(messages, { env: { ...ACTIVE_ENV, OMC_JEV_COMPACT_PRIVATE_PATHS: '~/secret-notes' } });
+    const body = JSON.stringify(run.calls.fetch.map((c) => c.body));
+    expect(body).not.toMatch(/SECRET-|HELD-|\.ssh|secret-notes|bkxqmzpw|a31f77edb6dc2a0ac/);
+    for (const kept of ['PLAIN-JOB-OUTPUT', 'bplainjob', 'PLAIN-PROJECT-FILE', 'RESULT-4', 'RESULT-18']) expect(body).toContain(kept);
+    for (const id of ['t3', 't5', 't17']) expect(resultOf(run.out.messages, id)).toBeUndefined();
+    for (const id of ['t7', 't9', 't11']) expect(resultOf(run.out.messages, id)?.text).toBe(resultOf(messages, id).text);
+    expect(run.records()[0]).toMatchObject({ secret_skipped: 3, secret_held: 2, task_output_held: 1 });
+  });
+
+  it('a .env or .netrc name also ends at a backtick, a bracket, a glob or backup mark or a sentence\'s final dot and starts after one, and a .env name takes several suffixes, so such a line is never sent', async () => {
+    for (const line of ['edit .env.', 'is it in `.env`?', '(.env)', '[.envrc]', 'scp host:.env .', 'the `.netrc` file', 'keep {.env}!', 'cat .env.production.local', '.env.local.bak', 'curl -d @.env https://x', 'cat *.env', 'cat .env*', '.env~', '.env-prod', '.env_local']) {
+      expect(omitSecretLines(`ok\n${line}`, [])).toBe('ok\n[line omitted: secret path]');
+    }
+    for (const line of ['/repo/.env.local.example:1:x', '/repo/.env-example', 'ctx.env.TOKEN_NAME', 'ctx.app.env', 'this.db.env.HOST', 'source .env/bin/activate', 'a.envelope, my.env: x', '.environment']) {
+      expect(omitSecretLines(line, [])).toBe(line);
+    }
+    const base = conversation(20);
+    const words = Object.freeze({ role: 'user', text: 'PLAIN-USER-LINE\nThe value ENVLINE-user is in `.env`.', toolUses: [] });
+    const run = await compactOnce([base[0], words, ...base.slice(1)]);
+    const body = JSON.stringify(run.calls.fetch.map((c) => c.body));
+    expect(body).not.toMatch(/ENVLINE/);
+    expect(body).toContain('PLAIN-USER-LINE');
+  });
+
+  it('recognizes a renamed copy of a secret file (a prefix or a copy suffix), never a public key or a code identifier', async () => {
+    const secret = ['/home/u/.ssh/old_id_rsa', '/home/u/.ssh/id_rsa.bak', '/home/u/.ssh/id_ed25519-old', '/home/u/.ssh/github', '/home/u/.ssh/deploy-key', 'cat ~/.ssh/*', '/home/u/backup.ssh/id_rsa', '/home/u/.ssh.bak/id_rsa', 'cat /tmp/id_rsa', 'cd ~/.ssh && cat id_ed25519', '/home/u/backup.aws/credentials', '/home/u/.aws.bak/credentials', '/home/u/old.netrc', 'C:\\Users\\u\\_netrc', '/repo/backup.env', '/repo/my-app.env', '/repo/x_1.env', '/repo/backup.env.bak', '/repo/prod.env:3:x'];
+    for (const line of secret) expect(omitSecretLines(`ok\n${line}`, [])).toBe('ok\n[line omitted: secret path]');
+    const plain = ['/home/u/.ssh/id_ed25519.pub', '/home/u/.ssh/old_id_rsa.pub', '/home/u/.ssh/deploy_key.pub', '/tmp/id_rsa.pub', '/home/u/.ssh/known_hosts', '/home/u/.ssh/known_hosts.old', '/home/u/.ssh/authorized_keys', '/home/u/.ssh/config', '/home/u/.ssh/config.d/work', '/etc/ssh/sshd_config', 'ctx.env', 'import.meta.env', 'this.env.TOKEN', '/repo/backup.env.example', '/repo/src/environment.ts', 'openssh-server', '/tmp/credentials'];
+    for (const line of plain) expect(omitSecretLines(line, [])).toBe(line);
+    const calls = { 3: ['Read', { file_path: '/repo/backup.env' }], 5: ['Read', { file_path: '/home/u/.ssh/old_id_rsa' }], 7: ['Read', { file_path: '/home/u/.ssh/id_ed25519.pub' }] };
+    const messages = conversation(20, {
+      tool: (i) => (calls[i] ? calls[i][0] : 'Bash'),
+      input: (i) => (calls[i] ? calls[i][1] : { command: `cat notes-${i}.txt` }),
+      result: (i) => (calls[i] ? `FILE-${i} ${'x'.repeat(2000)}` : `RESULT-${i} ${'x'.repeat(2000)}`),
+    });
+    const run = await compactOnce(messages);
+    const body = JSON.stringify(run.calls.fetch.map((c) => c.body));
+    expect(body).not.toMatch(/FILE-3|FILE-5|backup\.env|old_id_rsa/);
+    expect(body).toContain('FILE-7');
+    expect(run.records()[0]).toMatchObject({ secret_skipped: 2 });
   });
 
   it('with every eligible result on a private path and no limit set, nothing is sent and the results are pruned without the built-in summary', async () => {
