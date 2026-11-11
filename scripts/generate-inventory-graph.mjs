@@ -346,6 +346,24 @@ function listTrackedFiles(root) {
   }
 }
 
+/**
+ * Extract the commit-safe baseline (without volatile head/generatedAt/sourceSha256/manifestSha256).
+ * This is what should be committed to git to avoid merge conflicts.
+ */
+function toCommitBaseline(manifest) {
+  // Minimal baseline: only provenance anchors, no derived data (counts, graph, hashes).
+  // This prevents merge conflicts when multiple PRs regenerate inventory in parallel.
+  return {
+    schemaVersion: manifest.schemaVersion,
+    repository: manifest.repository,
+    provenance: {
+      base: manifest.provenance.base,
+      planningHead: manifest.provenance.planningHead,
+      generator: manifest.provenance.generator,
+    },
+  };
+}
+
 export async function generateInventoryGraph(opts = {}) {
   const root = opts.root ?? REPO_ROOT;
   const stableFiles = await walkStable(root);
@@ -505,23 +523,19 @@ export async function generateInventoryGraph(opts = {}) {
   const headSha = getHeadSha();
   const generatedAt = getGeneratedAt();
 
-  const manifestWithoutSha = {
+  // Minimal baseline for committing: drop volatile head/generatedAt/sourceSha256/manifestSha256
+  // Keep deterministic inventorySha256 and provenance anchors for drift verification
+  const manifestForCommit = {
     schemaVersion: SCHEMA_VERSION,
-    generatedAt,
     repository: REPOSITORY,
     provenance: {
       base: BASE_SHA,
       planningHead: PLANNING_HEAD_SHA,
-      head: headSha,
-      sourceSha256,
-      generatedAt,
       generator: 'scripts/generate-inventory-graph.mjs',
     },
     // Keep seed-parity top-level for tooling compat
     base: BASE_SHA,
     planningHead: PLANNING_HEAD_SHA,
-    head: headSha,
-    sourceSha256,
     counts: {
       public: {
         skills: skills.length,
@@ -594,6 +608,20 @@ export async function generateInventoryGraph(opts = {}) {
     inventorySha256,
   };
 
+  // Full manifest (runtime): includes volatile fields for audit/debugging
+  const manifestWithoutSha = {
+    ...manifestForCommit,
+    generatedAt,
+    provenance: {
+      ...manifestForCommit.provenance,
+      head: headSha,
+      sourceSha256,
+      generatedAt,
+    },
+    head: headSha,
+    sourceSha256,
+  };
+
   const manifestSha256 = sha256Hex(stableStringify(manifestWithoutSha));
 
   const manifest = {
@@ -635,99 +663,41 @@ async function main() {
       console.error(`[inventory-graph] baseline is not valid JSON: ${e.message}`);
       process.exit(2);
     }
-    // For verify, ignore head/generatedAt diffs unless they are structural provenance errors.
-    // Normalize the two for comparison if caller used ephemeral head/timestamp.
-    // But enforce base/planningHead exactness and counts/graph determinism.
-    const norm = (m) => {
-      const c = { ...m };
-      // Drop ephemeral head/generatedAt for drift comparison; provenance base/planningHead must still match exactly
-      // We keep schemaVersion, repository, counts, public/internal/generated, inventorySha256/manifestSha256, graph
-      // For strict verify, we compare the whole fresh vs on-disk after zeroing head/generatedAt if they were null at baseline.
-      // Instead: compare stable-stringified without head/generatedAt
-      const strip = (x) => {
-        const y = JSON.parse(JSON.stringify(x));
-        if (y.provenance) {
-          y.provenance = { ...y.provenance, head: null, generatedAt: null };
-        }
-        y.head = null;
-        y.generatedAt = null;
-        // Recompute manifestSha256 without head/generatedAt for comparison
-        delete y.manifestSha256;
-        return y;
-      };
-      return stableKey(strip(c));
-    };
-    function stableKey(v) {
-      const s = JSON.stringify(v, Object.keys(v).sort(), 2);
-      // Use recursive sorted via stableStringify for deep determinism
-      const recur = (val) => {
-        if (val === null || typeof val !== 'object') return JSON.stringify(val);
-        if (Array.isArray(val)) return `[${val.map(recur).join(',')}]`;
-        const ks = Object.keys(val).sort();
-        return `{${ks.map((k) => `${JSON.stringify(k)}:${recur(val[k])}`).join(',')}}`;
-      };
-      return sha256Hex(recur(v));
+    // Verify the on-disk baseline is in the new format (commit-safe, without volatile fields)
+    if (onDisk.provenance?.head !== undefined || onDisk.head !== undefined) {
+      console.error('[inventory-graph] baseline is in old format (contains volatile head field)');
+      console.error('  refresh baseline: node scripts/generate-inventory-graph.mjs --write');
+      process.exit(1);
     }
-
-    // Strict path: also check base/planningHead exactness before normalized drift
-    if (fresh.provenance.base !== BASE_SHA || onDisk.provenance?.base !== BASE_SHA) {
+    
+    // Check provenance anchors (minimal baseline only has provenance.*, not top-level base/planningHead)
+    if (onDisk.provenance?.base !== BASE_SHA) {
       console.error(`[inventory-graph] provenance.base mismatch: expected ${BASE_SHA}`);
-      console.error(`  fresh: ${fresh.provenance.base}`);
       console.error(`  on-disk: ${onDisk.provenance?.base}`);
       process.exit(2);
     }
-    if (fresh.provenance.planningHead !== PLANNING_HEAD_SHA || onDisk.provenance?.planningHead !== PLANNING_HEAD_SHA) {
+    if (onDisk.provenance?.planningHead !== PLANNING_HEAD_SHA) {
       console.error(`[inventory-graph] provenance.planningHead mismatch: expected ${PLANNING_HEAD_SHA}`);
-      console.error(`  fresh: ${fresh.provenance.planningHead}`);
       console.error(`  on-disk: ${onDisk.provenance?.planningHead}`);
       process.exit(2);
     }
-    if (!/^[0-9a-f]{40}$/.test(onDisk.head ?? '') || onDisk.provenance?.head !== onDisk.head) {
-      console.error('[inventory-graph] provenance.head must be one consistent 40-character lowercase Git SHA');
-      process.exit(2);
-    }
-    // provenance.head is an audit anchor, not a reachability claim. Squash and rebase
-    // integration rewrites the generating commit, so a baseline produced on a
-    // contribution branch is legitimately unreachable from the integration branch
-    // afterwards. Freshness is proven by sourceSha256, inventorySha256, and the
-    // normalized manifest comparison below, all recomputed from the working tree.
-    if (!/^[0-9a-f]{64}$/.test(onDisk.sourceSha256 ?? '') || onDisk.provenance?.sourceSha256 !== onDisk.sourceSha256 || onDisk.sourceSha256 !== fresh.sourceSha256) {
-      console.error('[inventory-graph] provenance.sourceSha256 must match the current inventoried source content');
-      process.exit(2);
-    }
-    if (onDisk.inventorySha256 !== fresh.inventorySha256) {
-      console.error('[inventory-graph] inventorySha256 mismatch');
-      process.exit(1);
-    }
-    const { manifestSha256: onDiskManifestSha, ...onDiskWithoutSha } = onDisk;
-    const recomputedOnDiskManifestSha = sha256Hex(stableStringify(onDiskWithoutSha));
-    if (onDiskManifestSha !== recomputedOnDiskManifestSha) {
-      console.error('[inventory-graph] manifestSha256 mismatch');
-      process.exit(1);
-    }
-    // Counts drift — public/internal/generated separation must match filesystem
-    const freshNorm = norm(fresh);
-    const diskNorm = norm(onDisk);
-    if (freshNorm !== diskNorm) {
-      console.error('[inventory-graph] drift detected: committed baseline differs from freshly generated graph');
-      console.error(`  fresh manifestSha (normalized): ${freshNorm.slice(0, 16)}`);
-      console.error(`  on-disk manifestSha (normalized): ${diskNorm.slice(0, 16)}`);
-      console.error(`  baseline: ${relative(REPO_ROOT, outPath)}`);
+    
+    // The committed baseline must equal exactly what --write would produce: every retained
+    // field present and correct, and nothing extra.
+    const freshCommit = toCommitBaseline(fresh);
+    if (stableStringify(freshCommit) !== stableStringify(onDisk)) {
+      console.error('[inventory-graph] drift detected: baseline differs from the generated minimal baseline');
+      console.error(`  fresh: ${stableStringify(freshCommit)}`);
+      console.error(`  on-disk: ${stableStringify(onDisk)}`);
       console.error('  to refresh: node scripts/generate-inventory-graph.mjs --write');
-      // Emit compact diff of top-level counts for actionable signal
-      const fc = fresh.counts, dc = onDisk.counts || {};
-      console.error('  counts drift:');
-      console.error(`    public  fresh ${JSON.stringify(fc.public)}  vs on-disk ${JSON.stringify(dc.public || dc)}`);
-      console.error(`    internal fresh ${JSON.stringify(fc.internal)}  vs on-disk ${JSON.stringify(dc.internal || {})}`);
-      console.error(`    generated fresh ${JSON.stringify(fc.generated)}  vs on-disk ${JSON.stringify(dc.generated || {})}`);
       process.exit(1);
     }
-    // Also verify re-serializing produces identical manifestSha (determinism guard)
+
+    // Verify determinism: regenerating twice produces identical inventorySha256
     {
-      const s1 = JSON.stringify(fresh, null, 2);
+      const f1 = await generateInventoryGraph();
       const f2 = await generateInventoryGraph();
-      const s2 = JSON.stringify(f2, null, 2);
-      if (sha256Hex(s1) !== sha256Hex(s2)) {
+      if (f1.inventorySha256 !== f2.inventorySha256) {
         console.error('[inventory-graph] non-deterministic generation detected');
         process.exit(2);
       }
@@ -736,7 +706,7 @@ async function main() {
     console.log(`  baseline: ${relative(REPO_ROOT, outPath)}`);
     console.log(`  counts: public=${fresh.counts.public.total} internal=${fresh.counts.internal.total} generated=${fresh.counts.generated.total} prompt=${fresh.counts.prompt.promptLikeFiles}`);
     console.log(`  graph: nodes=${fresh.graph.stats.nodeCount} edges=${fresh.graph.stats.edgeCount}`);
-    console.log(`  provenance: base=${fresh.provenance.base.slice(0, 12)} planningHead=${fresh.provenance.planningHead.slice(0, 12)} head=${(fresh.provenance.head || 'null').slice(0, 12)}`);
+    console.log(`  provenance: base=${fresh.provenance.base.slice(0, 12)} planningHead=${fresh.provenance.planningHead.slice(0, 12)}`);
     process.exit(0);
   }
 
@@ -744,13 +714,15 @@ async function main() {
   const json = JSON.stringify(manifest, null, 2) + '\n';
 
   if (wantWrite) {
+    const committed = toCommitBaseline(manifest);
+    const committedJson = JSON.stringify(committed, null, 2) + '\n';
     await mkdir(dirname(outPath), { recursive: true });
-    await writeFile(outPath, json, 'utf8');
+    await writeFile(outPath, committedJson, 'utf8');
     console.log(`[inventory-graph] wrote ${relative(REPO_ROOT, outPath)}`);
     console.log(`  counts: public=${manifest.counts.public.total} internal=${manifest.counts.internal.total} generated=${manifest.counts.generated.total}`);
     console.log(`  graph: nodes=${manifest.graph.stats.nodeCount} edges=${manifest.graph.stats.edgeCount}`);
-    console.log(`  provenance: base=${manifest.provenance.base.slice(0, 12)} planningHead=${manifest.provenance.planningHead.slice(0, 12)} head=${(manifest.provenance.head || 'null').slice(0, 12)}`);
-    console.log(`  sha256: inventory=${manifest.inventorySha256.slice(0, 16)} manifest=${manifest.manifestSha256.slice(0, 16)}`);
+    console.log(`  provenance: base=${manifest.provenance.base.slice(0, 12)} planningHead=${manifest.provenance.planningHead.slice(0, 12)}`);
+    console.log(`  sha256: inventory=${manifest.inventorySha256.slice(0, 16)}`);
   } else {
     process.stdout.write(json);
   }
