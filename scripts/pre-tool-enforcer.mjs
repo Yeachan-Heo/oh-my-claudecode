@@ -977,6 +977,7 @@ function boundModelRoutingInput(toolInput) {
 }
 
 function recordModelRoutingShadow(toolName, toolInput, updatedToolInput, permissionMode, transcriptPath, directory, sessionId, stateDir, toolUseId, inheritedModel = null) {
+  const incomingUpdated = updatedToolInput;
   // OMC_JEV_MODEL_ROUTING_MARKER: a `use` line in the prompt pins the model and/or the effort.
   // The marker is the caller's own instruction, so it works whether or not the point is on;
   // Jev is then asked only the questions the marker leaves open.
@@ -1099,7 +1100,7 @@ function recordModelRoutingShadow(toolName, toolInput, updatedToolInput, permiss
     // an inherited effort stays as it is and a Jev change from it is recorded.
     const explicitEffort = typeof baseEffort === 'string' && isMaxEffortAlwaysEnabled() ? capEffort(baseEffort, maxEffort()) : baseEffort;
     const baselineEffort = explicitEffort || resolveBaselineEffort(undefined, originalInput.subagent_type, directory);
-    noteJevRouting({ model: baselineModel, effort: baselineEffort }, updatedToolInput, answers, originalInput.subagent_type);
+    noteJevRouting({ model: baselineModel, effort: baselineEffort }, updatedToolInput, answers, originalInput.subagent_type, typeof toolInput.name === 'string' && toolInput.name.trim() !== '');
   }
 
   // The marker wins over the call's own values and over Jev's answers. The effort is still
@@ -1128,6 +1129,13 @@ function recordModelRoutingShadow(toolName, toolInput, updatedToolInput, permiss
     recordModelRoutingOverride(stateDir, row);
   }
 
+  // A copy of the call's input that no answer and no marker changed is not sent back: an
+  // updatedInput identical to the input would only make Claude Code replace the call with itself.
+  if (updatedToolInput && updatedToolInput !== incomingUpdated) {
+    const keys = new Set([...Object.keys(toolInput), ...Object.keys(updatedToolInput)]);
+    const unchanged = [...keys].every((key) => JSON.stringify(toolInput[key]) === JSON.stringify(updatedToolInput[key]));
+    if (unchanged) return incomingUpdated;
+  }
   return updatedToolInput;
 }
 
@@ -1140,7 +1148,7 @@ function recordModelRoutingShadow(toolName, toolInput, updatedToolInput, permiss
 // alone is the cap's doing, not Jev's, and is not recorded.
 let pendingJevRouting;
 
-function noteJevRouting(before, updated, answers, subagentType) {
+function noteJevRouting(before, updated, answers, subagentType, teamMember = false) {
   pendingJevRouting = undefined;
   if (!updated || !isJevAppliedLogEnabled()) return;
   const applied = {};
@@ -1163,7 +1171,16 @@ function noteJevRouting(before, updated, answers, subagentType) {
   }
   const score = answers.effort?.type === 'score' ? answers.effort.score : undefined;
   if (typeof score === 'number' && Number.isFinite(score) && score >= 0 && score <= 4 && updated.effort !== before.effort) {
-    applied.effort = { from: before.effort ?? null, to: updated.effort, score };
+    // The confidence of the effort answer (0-1, else null). A call with a name is a team member:
+    // Claude Code may not apply a spawn-time effort to it, so the line says the delivery is unknown.
+    const confidence = answers.effort.confidence;
+    applied.effort = {
+      from: before.effort ?? null,
+      to: updated.effort,
+      score,
+      confidence: typeof confidence === 'number' && confidence >= 0 && confidence <= 1 ? confidence : null,
+      ...(teamMember ? { delivered: 'unknown-team-member' } : {}),
+    };
   }
   if (applied.model || applied.effort) pendingJevRouting = { subagent_type: subagentType || null, ...applied };
 }
