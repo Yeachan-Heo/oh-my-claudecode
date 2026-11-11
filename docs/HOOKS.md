@@ -493,6 +493,8 @@ These keywords invoke a skill and create a state file.
 | `ralplan` | ralplan | Consensus-based iterative planning |
 | `deep interview`, `ouroboros` | deep-interview | Socratic deep interview |
 
+The Latin aliases `autopilot`, `auto-pilot`, `full auto` and `fullsend` start autopilot only as a command, like `ralph` and `ralplan`: the alias opens the prompt, a command verb or `:` follows it, or a phrase such as `use`, `run`, `turn on`, `please` or `I want` stands before it. A bare mention (`the autopilot run failed`, `Docs: use autopilot ...`, `don't use autopilot`) does not start it.
+
 ### AI Slop Cleanup Keywords
 
 Supports two pattern types:

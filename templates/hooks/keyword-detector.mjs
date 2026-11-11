@@ -918,6 +918,80 @@ function hasActionableRalphKeyword(text, pattern) {
   return false;
 }
 
+// The Latin autopilot aliases (autopilot, auto pilot, auto-pilot, full auto, fullsend) start the
+// mode only as a command, like ralph and ralplan. Without this, a foreign sentence pasted into a
+// prompt ("Add tests (autopilot at cap; ...)") armed the mode, because the generic
+// hasActionableKeyword treats every mention outside quotes and help questions as a command.
+// A command is: the alias opens the prompt or a line behind $ / ! (or stands alone on a line); a
+// command verb or a colon plus verb follows it; or an activation phrase (use, run, turn on,
+// please, let's, I want, ...) stands before it. Not a command: a negation before it (don't, never,
+// without), a reference label line ("Docs: use autopilot ..."), a noun use ("the autopilot run
+// failed") and a commit-log line. For "full auto" and "fullsend", which are ordinary hardware
+// phrases, only a verb or phrase directly before counts. Lines in Korean, Japanese, Chinese or
+// Thai keep the generic check, as before. At most AUTOPILOT_MAX_CANDIDATES commands are checked
+// with isInformationalKeywordContext, whose cost is linear in the text length.
+const AUTOPILOT_COMMAND_VERBS = 'fix|debug|investigate|resolve|handle|patch|address|implement|build|create|make|run|start|enable|activate|invoke|trigger|launch|plan|add|write|refactor|update|remove|migrate|finish|continue|do|go';
+const AUTOPILOT_NOT_A_COMMAND_AFTER = '(?!\\s+(?:\\d|failed|fails|was|were|is|are|has|had|step|phase|looks|takes|keeps|crashed|hangs|hung|errored|timed\\s+out|exit|status|log|ok|okay)(?![\\p{L}\\d]))';
+const AUTOPILOT_COMMAND_AFTER = new RegExp(`^[ \\t]+(?:${AUTOPILOT_COMMAND_VERBS})(?![\\p{L}\\d])${AUTOPILOT_NOT_A_COMMAND_AFTER}`, 'iu');
+const AUTOPILOT_COLON_COMMAND = new RegExp(`^[ \\t]*[:\\uFF1A][ \\t]*(?:${AUTOPILOT_COMMAND_VERBS})(?![\\p{L}\\d])${AUTOPILOT_NOT_A_COMMAND_AFTER}`, 'iu');
+const AUTOPILOT_ALONE_ON_LINE = /^[ \t]*[.!]?[ \t]*(?:\r?\n|$)/;
+const AUTOPILOT_NEGATION_BEFORE = /(?<![\p{L}\d])(?:don['’]?t|do\s+not|never|not|without)\s+(?:(?!(?:so|but|and|then|instead|because|now|mind)(?![\p{L}]))[\p{L}'’]+\s+){0,2}$/iu;
+const AUTOPILOT_REFERENCE_LABEL_LINE = /^[ \t]*(?:docs?|documentation|summary|status|logs?|release\s+notes|changelog|readme|examples?|output|result|results|description|title|commit|trigger|triggers|keywords?)[ \t]*:/i;
+const AUTOPILOT_NOUN_USE_BEFORE = /(?<![\p{L}\d])(?:the|a|an|this|that|these|those|last|previous|our|my|its|your|their)\s+$/iu;
+const AUTOPILOT_COMMIT_LINE_BEFORE = /(?<![\p{L}\d])[0-9a-f]{7,40}\s+$/i;
+const AUTOPILOT_ASCII_FREE_SCRIPTS = /[\p{Script=Hangul}\p{Script=Hiragana}\p{Script=Katakana}\p{Script=Han}\p{Script=Thai}]/u;
+const AUTOPILOT_PHRASE_BEFORE = /(?<![\p{L}\d])(?:turn\s+on|switch\s+to|set|go(?:\s+with|\s+for)?|i\s+(?:want|need|would\s+like)(?:\s+to\s+use)?)\s+(?:the\s+|a\s+)?$/iu;
+const AUTOPILOT_VERB_DIRECTLY_BEFORE = /(?<![\p{L}\d])(?:use|run|start|enable|activate|invoke|trigger|launch|turn\s+on)\s+$/iu;
+const AUTOPILOT_NAMESPACE_PREFIX = /^\s*\/?(?:oh-my-(?:claudecode|codex)|omc):\s*$/i;
+const AUTOPILOT_MAX_MATCHES = 1000;
+const AUTOPILOT_MAX_CANDIDATES = 20;
+
+function hasExplicitAutopilotInvocationContext(text, position, keywordLength, keywordText) {
+  if (hasDirectInvocationPrefix(text, position) || AUTOPILOT_NAMESPACE_PREFIX.test(text.slice(0, position))) return true;
+  const { start: lineStart, end: lineEnd } = getLineBounds(text, position);
+  const headStart = Math.max(lineStart, position - 80);
+  const tail = text.slice(headStart, position);
+  const afterKeyword = text.slice(position + keywordLength, position + keywordLength + 60);
+  const lineHead = text.slice(lineStart, Math.min(position, lineStart + 80));
+  if (AUTOPILOT_ASCII_FREE_SCRIPTS.test(text.slice(lineStart, Math.min(lineEnd, lineStart + 400)))) return true;
+  if (AUTOPILOT_NEGATION_BEFORE.test(tail)) return false;
+  if (AUTOPILOT_REFERENCE_LABEL_LINE.test(lineHead)) return false;
+  const isHardwarePhrase = /^(?:full\s*auto|fullsend)$/i.test((keywordText || '').trim());
+  const atLineStart = /^[ \t]*(?:[$/!][ \t]*)?$/.test(lineHead);
+  if (atLineStart && (/[$/!]/.test(lineHead) || AUTOPILOT_ALONE_ON_LINE.test(afterKeyword))) return true;
+  if (isHardwarePhrase) {
+    return (atLineStart && (AUTOPILOT_COLON_COMMAND.test(afterKeyword) || AUTOPILOT_COMMAND_AFTER.test(afterKeyword)))
+      || AUTOPILOT_VERB_DIRECTLY_BEFORE.test(tail)
+      || AUTOPILOT_PHRASE_BEFORE.test(tail)
+      || hasConversationalInvocationNearKeyword(text, position, keywordLength, keywordText);
+  }
+  if (AUTOPILOT_COLON_COMMAND.test(afterKeyword)) return true;
+  if (AUTOPILOT_NOUN_USE_BEFORE.test(tail) || AUTOPILOT_COMMIT_LINE_BEFORE.test(tail)) return false;
+  if (AUTOPILOT_COMMAND_AFTER.test(afterKeyword)) return true;
+  if (AUTOPILOT_PHRASE_BEFORE.test(tail)) return true;
+  if (hasConversationalInvocationNearKeyword(text, position, keywordLength, keywordText)) return true;
+  return hasActivationIntentNearKeyword(text.slice(Math.max(lineStart, position - INFORMATIONAL_CONTEXT_WINDOW), Math.min(lineEnd, position + keywordLength + INFORMATIONAL_CONTEXT_WINDOW)), keywordText);
+}
+
+function hasActionableAutopilotKeyword(text, pattern) {
+  const searchText = looksLikeSystemEcho(text)
+    ? stripSystemEchoes(text)
+    : text;
+  const flags = pattern.flags.includes('g') ? pattern.flags : `${pattern.flags}g`;
+  const globalPattern = new RegExp(pattern.source, flags);
+  let scanned = 0;
+  let candidates = 0;
+  for (const match of searchText.matchAll(globalPattern)) {
+    if (match.index === undefined) continue;
+    if (++scanned > AUTOPILOT_MAX_MATCHES) break;
+    if (!hasExplicitAutopilotInvocationContext(searchText, match.index, match[0].length, match[0])) continue;
+    if (++candidates > AUTOPILOT_MAX_CANDIDATES) break;
+    if (isInformationalKeywordContext(searchText, match.index, match[0].length, match[0])) continue;
+    return true;
+  }
+  return false;
+}
+
 function hasActionableRalplanKeyword(text, pattern) {
   // Same echo guard as hasActionableKeyword.
   const searchText = looksLikeSystemEcho(text)
@@ -1691,7 +1765,8 @@ async function main() {
     }
 
     // Autopilot keywords
-    if (hasActionableKeyword(cleanPrompt, /\b(autopilot|auto[\s-]?pilot|fullsend|full\s+auto)\b|(오토파일럿)|(オートパイロット)/i) ||
+    if (hasActionableAutopilotKeyword(cleanPrompt, /\b(autopilot|auto[\s-]?pilot|fullsend|full\s+auto)\b/i) ||
+        hasActionableKeyword(cleanPrompt, /(오토파일럿)|(オートパイロット)/i) ||
         hasActionableKeyword(cleanPrompt, /\b(build|create|make)\s+me\s+(an?\s+)?(app|feature|project|tool|plugin|website|api|server|cli|script|system|service|dashboard|bot|extension)\b/i) ||
         hasActionableKeyword(cleanPrompt, /\bi\s+want\s+a\s+(app|feature|project|tool|plugin|website|api|server|cli|script|system|service|dashboard|bot|extension)\b/i) ||
         hasActionableKeyword(cleanPrompt, /\bi\s+want\s+an\s+(app|feature|project|tool|plugin|website|api|server|cli|script|system|service|dashboard|bot|extension)\b/i)) {

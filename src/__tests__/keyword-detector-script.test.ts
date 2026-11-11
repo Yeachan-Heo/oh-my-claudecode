@@ -1597,3 +1597,100 @@ describe('keyword-detector.mjs #4551 regression tests', () => {
     });
   });
 });
+
+describe.each([
+  ['script', SCRIPT_PATH],
+  ['template', TEMPLATE_PATH],
+])('%s keyword-detector: autopilot needs a command, not a mention', (_label, detectorPath) => {
+  function autopilotActivated(prompt: string): boolean {
+    const cwd = mkdtempSync(join(tmpdir(), 'keyword-detector-autopilot-command-'));
+    const sessionId = 'session-autopilot-command';
+    try {
+      runKeywordDetector(prompt, cwd, sessionId, {}, detectorPath);
+      return existsSync(join(cwd, '.omc', 'state', 'sessions', sessionId, 'autopilot-state.json'));
+    } finally {
+      rmSync(cwd, { recursive: true, force: true });
+    }
+  }
+
+  it.each([
+    // A question the English help-question guard does not recognise, followed by pasted agent text.
+    'a co to jest?\n\nAdd tests (autopilot at cap; ralph at cap) for the state reader.',
+    'a co to jest?\n\nSummary: the fix keeps autopilot at the cap and reuses the existing guard.',
+    'Status:\nautopilot: complete',
+    'Log:\nAutopilot: waiting for child task',
+    'Log:\nautopilot: build failed on step 2',
+    'Docs: use autopilot to run long tasks',
+    'Release notes: autopilot fix for state reader',
+    "don't use autopilot for this one",
+    'never run autopilot on the production branch',
+    'The pump ran in full auto overnight.',
+    'Last night autopilot hung on step 3 of the migration.',
+    'The last autopilot run failed with exit 1',
+    'the autopilot plan looks wrong to me',
+    'CI said autopilot build failed on step 2',
+    'git log:\nabc1234 autopilot fix cap overflow',
+  ])('does not activate autopilot from a mention: %j', (prompt) => {
+    expect(autopilotActivated(prompt)).toBe(false);
+  });
+
+  it.each([
+    'autopilot fix the parser',
+    'autopilot: build a todo CLI',
+    '/autopilot fix the parser',
+    '/omc:autopilot add logging',
+    '$autopilot',
+    'turn on autopilot for this repo',
+    'please use autopilot to fix the parser',
+    'use autopilot to fix the parser',
+    'I want autopilot on this task',
+    'hey autopilot fix the parser',
+    'ok, autopilot add a login page',
+    'first a question\nautopilot: build a todo CLI',
+    'Here is the spec: a todo CLI with tests.\n\nautopilot',
+    'Here is the spec: a todo CLI with tests.\n\n$autopilot',
+    'Here is the spec: a todo CLI with tests.\n\n/autopilot add tests',
+    'Here is the spec: a todo CLI with tests.\n\nautopilot: do it',
+    'Here is the spec: a todo CLI with tests.\n\nfullsend',
+    'Tests are not passing yet so please run autopilot to fix them',
+    'that did not work so run autopilot instead',
+    'never mind, autopilot fix the parser',
+    'Task: please use autopilot to fix the parser',
+    'Goal: use autopilot to build a todo CLI',
+    'use full auto on this task',
+    "let's go full auto on this",
+    'please fullsend this',
+    '이거 autopilot 으로 해줘',
+    'このバグをautopilotで直して',
+    '请用autopilot修复这个bug',
+  ])('still activates autopilot for a command: %j', (prompt) => {
+    expect(autopilotActivated(prompt)).toBe(true);
+  });
+
+  it('still activates autopilot for a command that follows many pasted mentions', () => {
+    const logs = Array.from({ length: 60 }, (_, i) => `step ${i} autopilot ok`).join('\n');
+    expect(autopilotActivated(`${logs}\nplease use autopilot to fix this`)).toBe(true);
+  });
+
+  it('arms no heavy mode from pasted text that mentions several of them', () => {
+    const cwd = mkdtempSync(join(tmpdir(), 'keyword-detector-autopilot-others-'));
+    try {
+      const pasted = 'a co to jest?\n\nAdd tests (autopilot at cap; ralph at cap; ralplan at cap) for the state reader.';
+      const context = runKeywordDetector(pasted, cwd, 'session-autopilot-others', {}, detectorPath).hookSpecificOutput?.additionalContext ?? '';
+      for (const mode of ['AUTOPILOT', 'RALPH', 'RALPLAN']) {
+        expect(context).not.toContain(`[MAGIC KEYWORD: ${mode}]`);
+      }
+    } finally {
+      rmSync(cwd, { recursive: true, force: true });
+    }
+  });
+
+  it('stays fast when thousands of commands are all help questions', () => {
+    // Every mention passes the cheap command check, so only the cap on the
+    // linear informational check keeps this prompt from taking seconds.
+    const prompt = 'what is use autopilot? '.repeat(10000);
+    const started = Date.now();
+    expect(autopilotActivated(prompt)).toBe(false);
+    expect(Date.now() - started).toBeLessThan(3000);
+  });
+});
