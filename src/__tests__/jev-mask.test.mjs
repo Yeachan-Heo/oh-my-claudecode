@@ -1,16 +1,21 @@
 /* global performance */
 /**
- * Tests for scripts/lib/jev-mask.mjs: time linear in the text length on the shapes that used to take
- * seconds (one rule rescanning the same text from every start), and the masking those rules keep.
+ * Tests for maskSecrets in scripts/lib/jev-mask.mjs and its copy in scripts/lib/shell-checks.mjs: time linear in the
+ * text length on the shapes that used to take seconds (one rule rescanning the same text from every start), and the
+ * masking those rules keep.
  */
 
 import { describe, expect, it } from 'vitest';
 
 import { maskSecrets } from '../../scripts/lib/jev-mask.mjs';
+import { maskSecrets as shellChecksMaskSecrets } from '../../scripts/lib/shell-checks.mjs';
 
 const repeat = (unit, n) => unit.repeat(Math.ceil(n / unit.length)).slice(0, n);
 
-describe('maskSecrets', () => {
+describe.each([
+  ['jev-mask.mjs', maskSecrets],
+  ['shell-checks.mjs', shellChecksMaskSecrets],
+])('maskSecrets of %s', (_file, mask) => {
   it('masks a text of 100 000 and of 1 000 000 characters in at most 1 ms per 1000 characters, also when one rule matches from every word', () => {
     const shapes = {
       'Authorization: and only spaces': (n) => 'authorization:' + ' '.repeat(n - 14),
@@ -31,11 +36,14 @@ describe('maskSecrets', () => {
     for (const n of [100_000, 1_000_000]) {
       for (const [name, make] of Object.entries(shapes)) {
         const text = make(n);
-        const t0 = performance.now();
-        const masked = maskSecrets(text);
-        const ms = performance.now() - t0;
-        expect({ name, n, slow: ms >= n / 1000 }).toEqual({ name, n, slow: false });
-        expect(masked).toBe(text);
+        // The fastest of up to three runs, so one pause of a busy runner does not fail the test.
+        let best = Infinity;
+        for (let run = 0; run < 3 && best >= n / 1000; run++) {
+          const t0 = performance.now();
+          expect(mask(text)).toBe(text);
+          best = Math.min(best, performance.now() - t0);
+        }
+        expect(best, `${name}, ${n} characters: ${Math.round(best)} ms`).toBeLessThan(n / 1000);
       }
     }
   });
@@ -50,15 +58,21 @@ describe('maskSecrets', () => {
       ['mysql -uroot -pS3cret db', 'mysql -uroot -p*** db'],
       ['mysql -p"quoted" -pSecond', 'mysql -p"quoted" -p***'],
       ['mysql db\n-pS3cret', 'mysql db\n-p***'],
+      ['mysql a\nmysql -pB', 'mysql a\nmysql -p***'],
       ['mysql db; echo -pX', 'mysql db; echo -pX'],
       ['mysql a | mysql -pB', 'mysql a | mysql -p***'],
       ['mysql mysql -pX', 'mysql mysql -p***'],
       ['mysqldump -pA db && mysql -pB', 'mysqldump -p*** db && mysql -p***'],
+      ['mysqladmin -pB ping', 'mysqladmin -p*** ping'],
+      ['mariadb -u r -pB', 'mariadb -u r -p***'],
       ['eyJaaaaaaaa.bbbbbbbb.cccccccc', 'eyJ***'],
       ['id=eyJ-eyJaaaaaaaa.bbbbbbbb.cccccccc!', 'id=eyJ***!'],
       ['eyJaa.eyJbbbbbbbb.cccccccc.dddddddd', 'eyJaa.eyJ***'],
       ['eyJaaaaaaaa.bbbbbbbb', 'eyJaaaaaaaa.bbbbbbbb'],
+      ['eyJaaaaaaaa.bbbbbbbb.cc', 'eyJaaaaaaaa.bbbbbbbb.cc'],
       ['DB_PASSWORD=hunter2', 'DB_PASSWORD=***'],
+      ['db_pass: x', 'db_pass: ***'],
+      ['my_pwd=abc', 'my_pwd=***'],
       ['x=PASSWORD=abc', 'x=PASSWORD=***'],
       ['passwordpassword=1', 'passwordpassword=***'],
       ['export GITHUB_TOKEN="abc"', 'export GITHUB_TOKEN="***"'],
@@ -66,6 +80,6 @@ describe('maskSecrets', () => {
       ['KEY KEY: v', 'KEY KEY: ***'],
       ['name=value', 'name=value'],
     ];
-    for (const [text, masked] of cases) expect({ text, masked: maskSecrets(text) }).toEqual({ text, masked });
+    for (const [text, masked] of cases) expect({ text, masked: mask(text) }).toEqual({ text, masked });
   });
 });
