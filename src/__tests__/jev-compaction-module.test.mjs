@@ -684,6 +684,47 @@ describe('jev-compaction module: active compaction', () => {
     expect(run.records()[0]).toMatchObject({ secret_skipped: secret.length });
   });
 
+  it('joins the .config parts of the gh credentials (a root and a relative path, segments, three fields, nested objects, CRLF) and a private path in three parts before it classifies them; a relative path that is not a secret stays clean; the joins stay bounded', async () => {
+    const runCalls = async (calls, env) => {
+      const messages = conversation(32, {
+        tool: (i) => (calls[i] ? calls[i][0] : 'Bash'),
+        input: (i) => (calls[i] ? calls[i][1] : { command: `cat notes-${i}.txt` }),
+        result: (i) => (calls[i] ? `MCP-${i}-END ${'x'.repeat(2000)}` : `RESULT-${i} ${'x'.repeat(2000)}`),
+      });
+      const t0 = performance.now();
+      const run = await compactOnce(messages, { env });
+      expect(performance.now() - t0).toBeLessThan(2000);
+      return { run, body: JSON.stringify(run.calls.fetch.map((c) => c.body)) };
+    };
+    const calls = {
+      3: ['mcp__fs__read', { root: '/home/u', relative: '.config/gh/hosts.yml' }],
+      5: ['mcp__fs__read', { segments: ['/home/u', '.config', 'gh', 'hosts.yml'] }],
+      7: ['mcp__fs__read', { directory: '/home/u/.config', sub: 'gh', name: 'hosts.yml' }],
+      9: ['mcp__fs__read', { directory: 'C:\\Users\\u\r\n', name: '.config\\gh\\hosts.yml\r\n' }],
+      11: ['mcp__fs__read', { location: { root: '/home/u' }, file: { relative: '.config/gh/hosts.yml' } }],
+      13: ['mcp__fs__read', { root: '~', relative: '.ssh/deploy_key' }],
+      15: ['mcp__fs__read', { '/home/u': '.config/gh/hosts.yml' }],
+      17: ['mcp__fs__read', { dirs: Array.from({ length: 1000 }, () => '/srv/a/.config'), subs: Array.from({ length: 1000 }, () => 'gh') }],
+      21: ['mcp__fs__read', { root: '/home/u', relative: '.configs/x' }],
+      23: ['mcp__fs__read', { root: '/home/u', relative: '.config/gh/other.yml' }],
+      25: ['mcp__fs__read', { segments: ['/home/u', '.config', 'gh', 'other.yml'] }],
+      27: ['mcp__fs__read', { directory: '/home/u/.config', name: 'app.json' }],
+      29: ['mcp__fs__read', { note: 'gh', name: 'hosts.yml' }],
+    };
+    const secret = [3, 5, 7, 9, 11, 13, 15, 17];
+    const clean = [21, 23, 25, 27, 29];
+    const first = await runCalls(calls, ACTIVE_ENV);
+    for (const i of secret) expect(first.body).not.toContain(`MCP-${i}-END`);
+    for (const i of clean) expect(first.body).toContain(`MCP-${i}-END`);
+    for (const i of secret) expect(resultOf(first.run.out.messages, `t${i}`)).toBeUndefined();
+    expect(first.run.records()[0]).toMatchObject({ secret_skipped: secret.length });
+    // A private path given in three parts (its first two parts are a prefix of it).
+    const second = await runCalls({ 3: ['mcp__fs__read', { segments: ['/home', 'u', 'secret-notes/today.md'] }], 5: ['mcp__fs__read', { segments: ['/home', 'u', 'public/today.md'] }] }, { ...ACTIVE_ENV, OMC_JEV_COMPACT_PRIVATE_PATHS: '~/secret-notes' });
+    expect(second.body).not.toContain('MCP-3-END');
+    expect(second.body).toContain('MCP-5-END');
+    expect(second.run.records()[0]).toMatchObject({ secret_skipped: 1 });
+  });
+
   it('a user or /compact line too long to check whole is omitted, and one read to its end is omitted when it names a secret path, so its start is never sent', async () => {
     const base = conversation(20, { chars: 20_000 });
     const near = Object.freeze({ role: 'user', text: `PLAIN-USER-LINE\nLOWSECRET-USER ${'y'.repeat(30_000)} /home/u/.aws/credentials`, toolUses: [] });
@@ -723,6 +764,19 @@ describe('jev-compaction module: active compaction', () => {
     expect(body).toContain('PLAIN-DOC-READ');
     expect(resultOf(run.out.messages, 't40')).toBeUndefined();
     expect(run.records()[0]).toMatchObject({ secret_skipped: launches + 1 });
+  });
+
+  it('indexes the output files of background calls in linear time when thousands of them end in the same name', async () => {
+    const launches = 190;
+    const paths = (i) => Array.from({ length: 160 }, (_, k) => `/t/d${i}x${k}/same.output`).join(' ');
+    const messages = conversation(launches + 5, {
+      input: (i) => (i <= launches ? { command: 'cat /home/u/.ssh/id_ed25519', run_in_background: true } : { command: `cat notes-${i}.txt` }),
+      result: (i) => (i <= launches ? `Command running in background with ID: bjob${i}. Output is being written to: ${paths(i)}` : `RESULT-${i} ${'x'.repeat(2000)}`),
+    });
+    const t0 = performance.now();
+    const run = await compactOnce(messages);
+    expect(performance.now() - t0).toBeLessThan(1500);
+    expect(run.records()[0]).toMatchObject({ secret_skipped: launches });
   });
 
   it('a .ssh directory copy (.ssh.bak, .ssh2, .ssh-old) is a secret path, a directory whose name merely starts with .ssh is not', async () => {

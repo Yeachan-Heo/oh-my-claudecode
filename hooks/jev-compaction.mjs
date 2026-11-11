@@ -245,9 +245,17 @@ const LONG_LINE = '[line omitted: too long to check]';
 // The last line of a string or key whose last two segments name .ssh, .aws or .config, or which ends with a private
 // path up to one of its slashes, is joined by a slash with the first line of every other string and key of the input.
 // A secret path the join makes spans that slash, so only JOIN_EDGE_CHARS (and the length of the longest private path)
-// on each side of it are read.
+// on each side of it are read. A join that ends at a directory that still wants a child (`.config/gh`, a private path
+// cut at a slash) is joined again with every other string (`['/home/u', '.config', 'gh', 'hosts.yml']`, three parts, at
+// most JOIN_PARTS_MAX of them). A string whose start is a secret path under a root (`.config/gh/hosts.yml`) is joined
+// with every string that is a path (JOIN_ROOT: `{ root: '/home/u', relative: '.config/gh/hosts.yml' }`). The joins are
+// not narrowed by what the other strings look like: an option next to a .ssh directory (`encoding: 'utf-8'`) is joined too,
+// so such a call is held back even when its file is known_hosts (fail closed; one traced result costs less than a key sent).
 const JOIN_EDGE_CHARS = 300;
+const JOIN_PARTS_MAX = 3;
 const JOIN_DIR = /\.(?:ssh|aws|config)/i;
+const JOIN_ROOT = /[/~]|^\.{0,2}$/;
+const JOIN_GH_DIR = /\.config\/gh\/?$/i;
 
 /** Mirror of parseJevEnv(POINT) in scripts/jev-resolve.mjs for a named-only point. */
 export function pointMode(raw, key) {
@@ -939,9 +947,9 @@ function sentInputJson(input, privatePaths) {
   try { return JSON.stringify(input ?? {}, (_k, v) => clean(v)) ?? ''; } catch { return ''; }
 }
 
-// Does any string or key of the input name a secret or private path, or a join of two of them (a path in parts, see
-// JOIN_DIR)? At most SECRET_WALK_MAX strings and keys and SECRET_WALK_MAX joins, depth 8; beyond that it counts as yes
-// (fail closed).
+// Does any string or key of the input name a secret or private path, or a join of two or three of them (a path in
+// parts, see JOIN_DIR)? At most SECRET_WALK_MAX strings and keys and SECRET_WALK_MAX joins, depth 8; beyond that it
+// counts as yes (fail closed).
 function anySecretPath(input, privatePaths) {
   let seen = 0;
   const parts = [];
@@ -966,14 +974,35 @@ function anySecretPath(input, privatePaths) {
   if (walk(input, 0)) return true;
   // A private path cut at one of its slashes: the end of a string that is its first part.
   const prefixes = privatePaths.flatMap((p) => [...p.matchAll(/(?<=.)\//g)].map((m) => p.slice(0, m.index)));
+  const wantsChild = (end) => prefixes.length > 0 && prefixes.some((x) => end.toLowerCase().endsWith(x));
+  const endOf = (a) => (a.last.startsWith('/') ? a.last : `/${a.last}`).replace(/\/$/, '');
   let joins = 0;
-  for (const [i, a] of parts.entries()) {
-    const end = (a.last.startsWith('/') ? a.last : `/${a.last}`).replace(/\/$/, '');
-    if (!JOIN_DIR.test(end.split('/').slice(-2).join('/')) && !prefixes.some((x) => end.toLowerCase().endsWith(x))) continue;
+  // `end` joined by a slash with the first line of every part not in `used`; a join that still wants a child (a private
+  // path cut at a slash, `.config/gh`) is joined again, up to JOIN_PARTS_MAX parts.
+  const joined = (end, used) => {
     for (const [j, b] of parts.entries()) {
-      if (i === j || !b.first) continue;
+      if (used.includes(j) || !b.first) continue;
       if (++joins > SECRET_WALK_MAX) return true;
-      if (namesSecretPath(`${end}/${b.first}`, privatePaths)) return true;
+      const path = `${end}/${b.first}`;
+      if (namesSecretPath(path, privatePaths)) return true;
+      const cut = path.replace(/\/$/, '');
+      if (used.length < JOIN_PARTS_MAX - 1 && (JOIN_GH_DIR.test(cut) || wantsChild(cut)) && joined(cut, [...used, j])) return true;
+    }
+    return false;
+  };
+  for (const [i, a] of parts.entries()) {
+    const end = endOf(a);
+    if ((JOIN_DIR.test(end.split('/').slice(-2).join('/')) || wantsChild(end)) && joined(end, [i])) return true;
+  }
+  // A part that is a secret path under a root (`.config/gh/hosts.yml`) is joined with every part that is a path.
+  const roots = parts.flatMap((a, i) => (JOIN_ROOT.test(a.last) ? [i] : []));
+  if (!roots.length) return false;
+  for (const [j, b] of parts.entries()) {
+    if (!b.first || !SECRET_PATH.test(`/${b.first}`)) continue;
+    for (const i of roots) {
+      if (i === j) continue;
+      if (++joins > SECRET_WALK_MAX) return true;
+      if (namesSecretPath(`${endOf(parts[i])}/${b.first}`, privatePaths)) return true;
     }
   }
   return false;
@@ -1018,7 +1047,11 @@ function fileIndex(files) {
     let k = f.length;
     while (k > 0 && FILE_NAME_CHAR.test(f[k - 1])) k--;
     if (k === f.length) other.push(f);
-    else byRun.set(f.slice(k), [...(byRun.get(f.slice(k)) ?? []), f]);
+    else {
+      const run = f.slice(k);
+      if (byRun.has(run)) byRun.get(run).push(f);
+      else byRun.set(run, [f]);
+    }
   }
   return { byRun, other, size: files.size };
 }
