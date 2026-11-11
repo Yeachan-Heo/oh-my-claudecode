@@ -5,15 +5,15 @@
   "provenance": {
     "base": "05c800f40d1ad53b42a78609d2667ef4f726808b",
     "planningHead": "0a91273e61dbbd47eb0af4c02844409251e08398",
-    "head": "c399566c85504c7d5701ec2c08bb2055a9572893",
-    "sourceSha256": "4cd3c910a9405cbc3bbccdbd461ae3a513fbffc2b3f0ee5b0477c80b10cad578",
+    "head": "ce6cdd6650e593362ff0ecc95f296b7fc9c51b8b",
+    "sourceSha256": "1fde75397366d49ddf7d785f9233c2a56c4b29633088484bd60282c704820468",
     "generatedAt": null,
     "generator": "scripts/generate-inventory-graph.mjs"
   },
   "base": "05c800f40d1ad53b42a78609d2667ef4f726808b",
   "planningHead": "0a91273e61dbbd47eb0af4c02844409251e08398",
-  "head": "c399566c85504c7d5701ec2c08bb2055a9572893",
-  "sourceSha256": "4cd3c910a9405cbc3bbccdbd461ae3a513fbffc2b3f0ee5b0477c80b10cad578",
+  "head": "ce6cdd6650e593362ff0ecc95f296b7fc9c51b8b",
+  "sourceSha256": "1fde75397366d49ddf7d785f9233c2a56c4b29633088484bd60282c704820468",
   "counts": {
     "public": {
       "skills": 84,
@@ -28,8 +28,8 @@
       "toolFiles": 65,
       "libFiles": 49,
       "templateHooks": 25,
-      "srcFiles": 1475,
-      "total": 1500
+      "srcFiles": 1476,
+      "total": 1501
     },
     "generated": {
       "distFiles": 5639,
@@ -40739,6 +40739,11 @@
         "path": "src/__tests__/agent-registry.test.ts"
       },
       {
+        "id": "src/__tests__/arguments-literal-substitution.test.ts",
+        "kind": "src",
+        "path": "src/__tests__/arguments-literal-substitution.test.ts"
+      },
+      {
         "id": "src/__tests__/artifact-descriptor-handoff.test.ts",
         "kind": "src",
         "path": "src/__tests__/artifact-descriptor-handoff.test.ts"
@@ -53328,6 +53333,36 @@
       {
         "from": "src/__tests__/agent-registry.test.ts",
         "to": "src/utils/frontmatter.ts",
+        "kind": "imports"
+      },
+      {
+        "from": "src/__tests__/arguments-literal-substitution.test.ts",
+        "to": "external:node:fs",
+        "kind": "imports"
+      },
+      {
+        "from": "src/__tests__/arguments-literal-substitution.test.ts",
+        "to": "external:node:os",
+        "kind": "imports"
+      },
+      {
+        "from": "src/__tests__/arguments-literal-substitution.test.ts",
+        "to": "external:node:path",
+        "kind": "imports"
+      },
+      {
+        "from": "src/__tests__/arguments-literal-substitution.test.ts",
+        "to": "external:vitest",
+        "kind": "imports"
+      },
+      {
+        "from": "src/__tests__/arguments-literal-substitution.test.ts",
+        "to": "src/commands/index.ts",
+        "kind": "imports"
+      },
+      {
+        "from": "src/__tests__/arguments-literal-substitution.test.ts",
+        "to": "src/hooks/auto-slash-command/executor.ts",
         "kind": "imports"
       },
       {
@@ -94427,12 +94462,12 @@
       }
     ],
     "stats": {
-      "nodeCount": 8300,
-      "edgeCount": 9141,
-      "importEdgeCount": 7669,
+      "nodeCount": 8301,
+      "edgeCount": 9147,
+      "importEdgeCount": 7675,
       "registerEdgeCount": 105
     }
   },
-  "inventorySha256": "2dabacae90c6d83ef75bc66a7a2670641306f5e7f4aa096cd18e0c57689c9b77",
-  "manifestSha256": "8696ef08ab830fdbffb6df445e087fd0987e67e9954a44699f71036bc4c82d3d"
+  "inventorySha256": "17bd4843336901c6fa2b654bea306073342c2ae6603e9f6a5d1673f8688b7e7e",
+  "manifestSha256": "c44108523f99e59078820a749bd9bf138580c285701220cf577f5fd0bd64646c"
 }
