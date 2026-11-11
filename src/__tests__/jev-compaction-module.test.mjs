@@ -41,10 +41,11 @@ function okResponse(json) {
   return { ok: true, status: 200, headers: {}, text: JSON.stringify(json) };
 }
 
-function fakeDollar({ env = ACTIVE_ENV, settingsEnv, respond = (body) => okResponse(scoreByMarker(body)), clockAfter, usage, messages = [], compactResult, writeThrows = false, diskPrefix, flakyBreakerRead = false, stallBreakerRead = false, stallRpmRead = false, rpmReadGate, fsDelayMs = 0 } = {}) {
+function fakeDollar({ env = ACTIVE_ENV, settingsEnv, respond = (body) => okResponse(scoreByMarker(body)), clockAfter, usage, messages = [], compactResult, writeThrows = false, diskPrefix, flakyBreakerRead = false, stallBreakerRead = false, stallRpmRead = false, rpmReadGate, rpmReadGates = {}, fsDelayMs = 0 } = {}) {
   const files = new Map();
   let flaked = false;
   let gated = false;
+  let rpmReads = 0;
   const calls = { fetch: [], write: 0, toast: [], log: 0, compact: 0, usage: 0, messages: 0, settings: 0 };
   const $ = {
     env: { get: async (name) => env[name] },
@@ -56,6 +57,7 @@ function fakeDollar({ env = ACTIVE_ENV, settingsEnv, respond = (body) => okRespo
         if (stallBreakerRead && p.endsWith('/breaker.json')) return new Promise(() => {});
         if (stallRpmRead && /\/rpm-\d+$/.test(p)) return new Promise(() => {});
         if (rpmReadGate && !gated && /\/rpm-\d+$/.test(p)) { gated = true; await rpmReadGate; }
+        if (/\/rpm-\d+$/.test(p)) { rpmReads += 1; if (rpmReadGates[rpmReads]) await rpmReadGates[rpmReads]; }
         if (diskPrefix && p.startsWith(diskPrefix)) return readFileSync(p, 'utf8'); if (!files.has(p)) throw new Error('ENOENT'); return files.get(p);
       },
       exists: async (p) => (diskPrefix && p.startsWith(diskPrefix) ? existsSync(p) : files.has(p)),
@@ -846,6 +848,46 @@ describe('jev-compaction module: shared breaker and request limit (OMC_JEV_BREAK
     await new Promise((resolve) => setTimeout(resolve, 100));
     const written = existsSync(c.settings.dir) ? readdirSync(c.settings.dir).filter((n) => n.startsWith('rpm-')) : [];
     expect(written).toEqual([]);
+  }, 20_000);
+
+  // Read 1 is the preliminary peek; 2-4 are the first batch's reservation (read, append, read back); 5 is
+  // the second batch's reservation read. Holding the peek past the first step's 3 s budget puts the second
+  // batch's admission into the last 2 s before the 8 s deadline, so its stalled read expires the decision.
+  const reservationPastDeadline = (respond) => {
+    const gates = {};
+    const timers = [];
+    gates[1] = new Promise((resolve) => timers.push(setTimeout(resolve, 5500)));
+    let release;
+    gates[5] = new Promise((resolve) => { release = resolve; });
+    return { rpmReadGates: gates, respond, release: () => { timers.forEach(clearTimeout); release(); } };
+  };
+  const grants = (c) => (existsSync(c.settings.dir) ? readdirSync(c.settings.dir).filter((n) => n.startsWith('rpm-')) : [])
+    .flatMap((n) => readFileSync(join(c.settings.dir, n), 'utf8').split('\n').filter(Boolean));
+
+  it('(c) a reservation read that outlives the decision deadline writes no slot when it completes', async () => {
+    await calmMinute();
+    const c = shared({ OMC_JEV_MAX_RPM: '10' });
+    const gate = reservationPastDeadline();
+    const run = await compactShared(c, conversation(80), { handlers: load(), rpmReadGates: gate.rpmReadGates });
+    expect(run.calls.fetch).toHaveLength(1);
+    expect(run.records()[0]).toMatchObject({ held: 'deadline', requests: 1 });
+    gate.release();
+    await new Promise((resolve) => setTimeout(resolve, 200));
+    expect(grants(c)).toHaveLength(1);
+  }, 20_000);
+
+  it('(a) a deadline hold still records the failures of the requests that went out: the local pause stands', async () => {
+    await calmMinute();
+    const c = shared({ OMC_JEV_MAX_RPM: '10' });
+    const handlers = load();
+    const gate = reservationPastDeadline(() => ({ ok: false, status: 401, headers: {}, text: '' }));
+    const run = await compactShared(c, conversation(80), { handlers, rpmReadGates: gate.rpmReadGates, respond: gate.respond });
+    gate.release();
+    expect(run.calls.fetch).toHaveLength(1);
+    expect(run.records()[0]).toMatchObject({ result: 'fallback', reason: 'timeout', held: 'deadline' });
+    const next = await compactShared(c, conversation(30), { handlers });
+    expect(next.calls.fetch).toHaveLength(0);
+    expect(next.records()[0]).toMatchObject({ result: 'fallback', reason: 'paused', pause_reason: 'http_401' });
   }, 20_000);
 
   it('(a) a breaker that has expired, or one that is corrupt, holds nothing back', async () => {

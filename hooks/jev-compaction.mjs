@@ -609,8 +609,8 @@ function foldMinute(text, token) {
 
 // Reserves one request in the current UTC minute: refused without writing anything when the minute
 // already reached the threshold; otherwise the line is added and the file folded again. ok is true
-// without a limit and whenever the files cannot be used. If deadline is passed, returns { ok: true }
-// without modifying the RPM state to avoid reserving a slot that will not be used.
+// without a limit and whenever the files cannot be used. A read that outlives the decision deadline
+// returns {expired: true} without writing: the caller already gave up, so no request will use the slot.
 async function reserveRequest($, shared, now, deadline) {
   const limit = shared.maxRpm;
   if (limit === undefined) return { ok: true };
@@ -618,8 +618,7 @@ async function reserveRequest($, shared, now, deadline) {
   try {
     const path = `${shared.dir}/rpm-${minuteKey(now)}`;
     const before = foldMinute(await readText($, path));
-    // If deadline has passed, don't consume an RPM slot since the request will not be sent.
-    if (deadline !== undefined && Date.now() >= deadline) return { ok: true };
+    if (Date.now() >= deadline) return { expired: true };
     if (before.granted >= threshold) return { ok: false, count: before.granted, threshold, limit };
     const token = randomId();
     const { granted, ok } = foldMinute(await appendLine($, path, `${token} ${threshold}`), token);
@@ -653,11 +652,11 @@ async function admitNow($, shared, deadline) {
   // Recheck deadline after I/O to avoid writing reservations after the compaction deadline has passed.
   if (Date.now() >= deadline) return { skip: { mode: 'deadline' } };
   const slot = await reserveRequest($, shared, now, deadline);
+  if (slot.expired) return { skip: { mode: 'deadline' } };
   if (!slot.ok) return { skip: { mode: 'cap', count: slot.count, threshold: slot.threshold, limit: slot.limit } };
   return {};
 }
 
-// Check if RPM capacity is available without reserving it (non-reserving peek).
 // Check if RPM capacity is available without reserving it (non-reserving peek).
 async function rpmCapacityAvailable($, shared, point, now) {
   if (!shared?.maxRpm) return true; // No limit.
@@ -1297,7 +1296,7 @@ async function decide($, e, cfg, record, started) {
     // A request held back by the shared breaker or limit is no failure of the endpoint. The results it
     // would have scored count as unanswered, as after a failed request: the budget decides about them.
     const unscored = asked.slice(runs.length * BATCH);
-      for (const c of unscored) { c.asked = true; c.score = UNANSWERED_SCORE; }
+    for (const c of unscored) { c.asked = true; c.score = UNANSWERED_SCORE; }
     record.unscored = unscored.length;
     record.requests = runs.length;
     if (held.mode === 'circuit-open') Object.assign(record, { held: 'breaker', breaker_until: new Date(held.breaker.until).toISOString(), breaker_reason: held.breaker.reason });
@@ -1327,7 +1326,7 @@ async function decide($, e, cfg, record, started) {
     noteFailures(failures, Date.now());
     if (!asked.length || answered / asked.length < PARTIAL_OK) {
       session.failedInRow++;
-      // If deadline hit, return before building the compaction, but after recording failures.
+      // A deadline hold still records the failures of the requests that did go out.
       if (held?.mode === 'deadline') return { fallback: 'timeout' };
       return { fallback: failures.every((f) => f.kind === 'timeout') ? 'timeout' : 'jev_error' };
     }
