@@ -4,6 +4,7 @@ import {
   mkdirSync,
   mkdtempSync,
   rmSync,
+  utimesSync,
   writeFileSync,
 } from 'fs';
 import { tmpdir } from 'os';
@@ -127,5 +128,69 @@ describe('cleanupTransientState — session-scoped hud-stdin-cache', () => {
 
     expect(existsSync(join(other, 'hud-stdin-cache.json'))).toBe(true);
     expect(existsSync(other)).toBe(true);
+  });
+});
+
+describe('cleanupTransientState — .tmp sweep spares in-flight publication temps', () => {
+  let tmpRoot: string;
+  let previousHome: string | undefined;
+  let previousUserProfile: string | undefined;
+
+  beforeEach(() => {
+    tmpRoot = mkdtempSync(join(tmpdir(), 'omc-session-end-tmp-'));
+    previousHome = process.env.HOME;
+    previousUserProfile = process.env.USERPROFILE;
+    process.env.HOME = tmpRoot;
+    process.env.USERPROFILE = tmpRoot;
+  });
+
+  afterEach(() => {
+    if (previousHome === undefined) delete process.env.HOME;
+    else process.env.HOME = previousHome;
+    if (previousUserProfile === undefined) delete process.env.USERPROFILE;
+    else process.env.USERPROFILE = previousUserProfile;
+    rmSync(tmpRoot, { recursive: true, force: true });
+  });
+
+  it('keeps a freshly written .tmp that a concurrent session may still be publishing', () => {
+    // Atomic writers (e.g. ralph state) write <file>.tmp and rename it into
+    // place immediately. A SessionEnd in another session must not unlink a
+    // temp that is only milliseconds old — that would break the rename and
+    // silently drop the other session's state update.
+    const other = join(tmpRoot, '.omc', 'state', 'sessions', 'session-other');
+    mkdirSync(other, { recursive: true });
+    const inflight = join(other, 'ralph-state.json.tmp');
+    writeFileSync(inflight, '{"awaiting_confirmation":true}');
+
+    cleanupTransientState(tmpRoot, 'session-ending');
+
+    expect(existsSync(inflight)).toBe(true);
+  });
+
+  it('still removes .tmp files older than the in-flight grace window', () => {
+    const other = join(tmpRoot, '.omc', 'state', 'sessions', 'session-other');
+    mkdirSync(other, { recursive: true });
+    const stale = join(other, 'ralph-state.json.tmp');
+    writeFileSync(stale, '{"awaiting_confirmation":true}');
+    const tenMinutesAgo = new Date(Date.now() - 10 * 60 * 1000);
+    utimesSync(stale, tenMinutesAgo, tenMinutesAgo);
+
+    const removed = cleanupTransientState(tmpRoot, 'session-ending');
+
+    expect(existsSync(stale)).toBe(false);
+    expect(removed).toBeGreaterThanOrEqual(1);
+  });
+
+  it('removes aged .tmp files in nested directories below .omc/', () => {
+    const nested = join(tmpRoot, '.omc', 'state', 'sessions', 'session-other', 'nested');
+    mkdirSync(nested, { recursive: true });
+    const stale = join(nested, 'checkpoint.json.tmp');
+    writeFileSync(stale, '{}');
+    const oneHourAgo = new Date(Date.now() - 60 * 60 * 1000);
+    utimesSync(stale, oneHourAgo, oneHourAgo);
+
+    cleanupTransientState(tmpRoot, 'session-ending');
+
+    expect(existsSync(stale)).toBe(false);
   });
 });
