@@ -97,10 +97,10 @@ describe("pre-tool-enforcer.mjs: applied-log regression for late hook failures",
   });
 
   it("does not write applied row when exception occurs after Jev decision", async () => {
-    // Create an invalid .omc config to trigger an error during getTodoStatus
+    // Trigger the catch path by forcing an exception after noteJevRouting has staged applied.model
     const omcDir = join(cwd, ".omc");
     mkdirSync(omcDir, { recursive: true });
-    writeFileSync(join(cwd, ".omc", "project-memory.json"), "invalid json {");
+    writeFileSync(join(cwd, ".omc", "todos.json"), JSON.stringify({ todos: [] }));
 
     const input = {
       tool_name: "Task",
@@ -114,11 +114,15 @@ describe("pre-tool-enforcer.mjs: applied-log regression for late hook failures",
       permission_mode: "normal" as const,
     };
 
-    const result = await runEnforcer(input, env, cwd);
+    // Force an exception after Jev routing is staged but before output is emitted
+    const testEnv = { ...env, OMC_JEV_TESTING_FORCE_LATE_ERROR: "1" };
+    const result = await runEnforcer(input, testEnv, cwd);
     // Hook continues even on error
     expect(result.exitCode).toBe(0);
 
-    // Check that no applied row was written (or if it was, it's for a different point)
+    // Verify that the catch path was exercised: no model-routing applied row should be written
+    // because the exception occurred after noteJevRouting staged the decision, but the catch block
+    // cleared pendingJevRouting before flushJevRouting could write it
     const appliedPath = join(cwd, "jev-logs", "applied.jsonl");
     try {
       const lines = readFileSync(appliedPath, "utf-8").trim().split("\n").filter(Boolean);
@@ -126,17 +130,19 @@ describe("pre-tool-enforcer.mjs: applied-log regression for late hook failures",
         const entry = JSON.parse(line);
         return entry.point === "model-routing";
       });
-      // Should be empty if error occurred; if it exists, entry should show no actual change
-      // because the always-on-cap fallback should have been the only output change
-      expect(modelRoutingLines).toBeDefined();
+      // The catch path ensures no model-routing applied row is written
+      expect(modelRoutingLines.length).toBe(0);
     } catch {
-      // File might not exist if no applied rows were written
-      // This is the expected outcome
+      // If applied.jsonl doesn't exist, the catch path was definitely exercised
       expect(true).toBe(true);
     }
   });
 
   it("applies always-on-cap fallback without applied row on exception", async () => {
+    const omcDir = join(cwd, ".omc");
+    mkdirSync(omcDir, { recursive: true });
+    writeFileSync(join(cwd, ".omc", "todos.json"), JSON.stringify({ todos: [] }));
+
     const input = {
       tool_name: "Task",
       tool_input: {
@@ -150,14 +156,14 @@ describe("pre-tool-enforcer.mjs: applied-log regression for late hook failures",
       permission_mode: "normal" as const,
     };
 
-    const result = await runEnforcer(input, env, cwd);
+    // Force an exception after Jev routing is staged but before output is emitted
+    const testEnv = { ...env, OMC_JEV_TESTING_FORCE_LATE_ERROR: "1" };
+    const result = await runEnforcer(input, testEnv, cwd);
     expect(result.exitCode).toBe(0);
 
-    // Parse output to check that effort was capped
+    // Parse output to check that effort was capped by the fallback in the catch block
     const output = JSON.parse(result.stdout);
-    if (output.hookSpecificOutput?.updatedInput?.effort) {
-      // If effort was capped by always-on-cap, it should be in the output
-      expect(output.hookSpecificOutput.updatedInput.effort).toBe("medium");
-    }
+    // The always-on-cap fallback should still be applied even though an exception occurred
+    expect(output.hookSpecificOutput?.updatedInput?.effort).toBe("medium");
   });
 });

@@ -114,6 +114,13 @@ const TIER_TO_DEFAULT_ENV_KEYS_FOR_APPLIED_LOG = {
   opus:   ['CLAUDE_CODE_BEDROCK_OPUS_MODEL',   'ANTHROPIC_DEFAULT_OPUS_MODEL'],
   fable:  ['CLAUDE_CODE_BEDROCK_FABLE_MODEL',  'ANTHROPIC_DEFAULT_FABLE_MODEL'],
 };
+// Built-in tier-to-model defaults, matching src/config/models.ts BUILTIN_TIER_MODEL_DEFAULTS
+const BUILTIN_TIER_MODEL_DEFAULTS = {
+  haiku:  'claude-haiku-4-5',
+  sonnet: 'claude-sonnet-5',
+  opus:   'claude-opus-4-8',
+  fable:  'claude-fable-5',
+};
 function resolveTierAliasToSafeModel(tierAlias) {
   const keys = TIER_TO_DEFAULT_ENV_KEYS[(tierAlias || '').toLowerCase()];
   if (!keys) return '';
@@ -1140,9 +1147,16 @@ function noteJevRouting(before, updated, answers, subagentType) {
   // Compare the models the call actually runs on: a tier alias that resolves to the baseline's
   // concrete model changes nothing, and one that resolves to another version does.
   // The tier default the alias selects, like src/config/models.ts resolveTierModelFromEnv: the first
-  // set variable, without the subagent-safety validation (an ordinary Anthropic ID counts too).
-  const routedModel = (id) => (isTierAlias(id)
-    && (TIER_TO_DEFAULT_ENV_KEYS_FOR_APPLIED_LOG[id.toLowerCase()] ?? []).map((key) => (process.env[key] || '').trim()).find(Boolean)) || id;
+  // set variable, or the built-in default if no variable is set.
+  const routedModel = (id) => {
+    if (!isTierAlias(id)) return id;
+    const tier = id.toLowerCase();
+    // Check environment variables first
+    const envValue = (TIER_TO_DEFAULT_ENV_KEYS_FOR_APPLIED_LOG[tier] ?? []).map((key) => (process.env[key] || '').trim()).find(Boolean);
+    if (envValue) return envValue;
+    // Fall back to built-in default if no env variable is set
+    return BUILTIN_TIER_MODEL_DEFAULTS[tier] || id;
+  };
   if (typeof choice === 'string' && updated.model === choice.toLowerCase() && routedModel(updated.model) !== routedModel(before.model)) {
     applied.model = { from: before.model ?? null, to: updated.model };
   }
@@ -2608,6 +2622,10 @@ async function main() {
       const jevUpdated = recordModelRoutingShadow(toolName, toolInput, updatedToolInput, data.permission_mode, data.transcript_path || data.transcriptPath || '', directory, data.session_id || data.sessionId || '', stateDir, inheritedModel);
       // In active mode, Jev may override the model choice
       if (jevUpdated) updatedToolInput = jevUpdated;
+      // Test-only: force exception after Jev routing is staged to verify catch path
+      if (process.env.OMC_JEV_TESTING_FORCE_LATE_ERROR === '1') {
+        throw new Error('Test-forced error after Jev routing staging');
+      }
       // OMC_JEV_MAX_EFFORT_ALWAYS=1: the cap holds whether or not Jev set the effort.
       const effortCapped = capExplicitEffort(updatedToolInput || toolInput);
       if (effortCapped) updatedToolInput = effortCapped;
