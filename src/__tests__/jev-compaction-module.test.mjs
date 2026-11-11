@@ -41,7 +41,7 @@ function okResponse(json) {
   return { ok: true, status: 200, headers: {}, text: JSON.stringify(json) };
 }
 
-function fakeDollar({ env = ACTIVE_ENV, settingsEnv, respond = (body) => okResponse(scoreByMarker(body)), clockAfter, usage, messages = [], compactResult, writeThrows = false, diskPrefix, flakyBreakerRead = false, stallBreakerRead = false, stallRpmRead = false, rpmReadGate, rpmReadGates = {}, fsDelayMs = 0, brokenBreakerRead = false, breakerWriteDelayMs = 0 } = {}) {
+function fakeDollar({ env = ACTIVE_ENV, settingsEnv, respond = (body) => okResponse(scoreByMarker(body)), clockAfter, usage, messages = [], compactResult, writeThrows = false, diskPrefix, flakyBreakerRead = false, stallBreakerRead = false, stallRpmRead = false, rpmReadGate, rpmReadGates = {}, fsDelayMs = 0, brokenBreakerRead = false, breakerWriteDelayMs = 0, lockReadDelayMs = 0 } = {}) {
   const files = new Map();
   const mtimes = new Map();
   let flaked = false;
@@ -54,6 +54,7 @@ function fakeDollar({ env = ACTIVE_ENV, settingsEnv, respond = (body) => okRespo
     fs: {
       read: async (p) => {
         if (fsDelayMs) await new Promise((resolve) => setTimeout(resolve, fsDelayMs));
+        if (lockReadDelayMs && p.endsWith('/breaker.json.lock')) await new Promise((resolve) => setTimeout(resolve, lockReadDelayMs));
         if (flakyBreakerRead && !flaked && p.endsWith('/breaker.json')) { flaked = true; throw new Error('EPERM'); }
         if (brokenBreakerRead && p.endsWith('/breaker.json')) throw Object.assign(new Error('EPERM'), { code: 'EPERM' });
         if (stallBreakerRead && p.endsWith('/breaker.json')) return new Promise(() => {});
@@ -1063,6 +1064,16 @@ describe('jev-compaction module: shared breaker and request limit (OMC_JEV_BREAK
     expect(left).toMatchObject({ released: true });
     expect(left.token).toMatch(/^compaction-/);
   });
+
+  it('(a) a host read of the lock that outlives the wait neither writes the module\'s lock nor opens the breaker', async () => {
+    const c = shared({ OMC_JEV_BREAKER: '1' });
+    mkdirSync(c.settings.dir, { recursive: true });
+    // The first read of the (absent) lock returns after the 1.5 s wait is over and reports the path free.
+    await compactShared(c, conversation(30), { lockReadDelayMs: 1800, respond: () => ({ ok: false, status: 429, headers: {}, text: '' }) });
+    await new Promise((resolve) => setTimeout(resolve, 2500));
+    expect(existsSync(`${c.settings.dir}/breaker.json.lock`)).toBe(false);
+    expect(existsSync(`${c.settings.dir}/breaker.json`)).toBe(false);
+  }, 20_000);
 
   it('(b) three requests without a response within a minute open the shared breaker for a minute; two do not', async () => {
     const two = shared({ OMC_JEV_BREAKER: '1' });

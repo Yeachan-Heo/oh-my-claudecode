@@ -548,15 +548,23 @@ async function holdsLock($, path, token) {
   try { return JSON.parse(await $.fs.read(path)).token === token; } catch { return false; }
 }
 // The module's token, or undefined when the lock stays taken until `deadline` or its write is refused LOCK_REFUSALS_TO_GIVE_UP times in a row.
+// The deadline is checked before every acquisition step and before a token is returned: a host read that was delayed past it
+// neither writes a token nor hands one out, and a token written just before the deadline is released.
 async function takeLock($, path, deadline) {
   const token = `compaction-${randomId()}`;
   let refusals = 0;
   let wroteToken = false;
+  const expire = async () => {
+    if (wroteToken) await releaseLock($, path, token);
+    return undefined;
+  };
   for (;;) {
     // A confirming read that hit the moment a script opener moved the lock away and linked it back must not leave the module
     // waiting on its own token.
-    if (wroteToken && (await holdsLock($, path, token))) return token;
+    if (wroteToken && (await holdsLock($, path, token))) return Date.now() < deadline ? token : expire();
+    if (Date.now() >= deadline) return expire();
     if (await lockFree($, path, Date.now())) {
+      if (Date.now() >= deadline) return expire();
       let written = false;
       try {
         await $.fs.write(path, JSON.stringify({ token, ts: Date.now() }));
@@ -570,10 +578,10 @@ async function takeLock($, path, deadline) {
       if (written) {
         wroteToken = true;
         await pause($, LOCK_CONFIRM_MS);
-        if (await holdsLock($, path, token)) return token;
+        if (await holdsLock($, path, token)) return Date.now() < deadline ? token : expire();
       }
     }
-    if (Date.now() >= deadline) return undefined;
+    if (Date.now() >= deadline) return expire();
     await pause($, LOCK_POLL_MS);
   }
 }
