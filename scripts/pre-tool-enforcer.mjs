@@ -994,7 +994,12 @@ function recordModelRoutingShadow(toolName, toolInput, updatedToolInput, permiss
       baseModel = process.env.CLAUDE_MODEL || process.env.ANTHROPIC_MODEL || null;
     } else {
       // Normal case: use agent definition model as baseline
-      baseModel = readAgentDefinitionModel(originalInput.subagent_type) || null;
+      try {
+        baseModel = readAgentDefinitionModel(originalInput.subagent_type) || null;
+      } catch {
+        // If reading agent definition fails, baseline is null
+        baseModel = null;
+      }
     }
   }
   // The baseline effort should be capped if OMC_JEV_MAX_EFFORT_ALWAYS is enabled
