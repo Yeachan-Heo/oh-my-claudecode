@@ -11,6 +11,8 @@ const WORKER_ARG = '--omc-session-end-worker';
 const MAX_WORKER_MS = 10_000;
 const RELEASE_RETRY_DELAYS_MS = [0, 250, 1_000];
 const RELEASE_RETRY_BUDGET_MS = 6_000;
+/** Worst-case wait in cleanup-manifest withLock before it gives up; a retry starts only if one more fits the budget. */
+const RELEASE_LOCK_WAIT_MS = 5_000;
 export interface SessionEndWorkerPayload { directory: string; sessionId: string; }
 
 /** Durable OpenClaw routing is supplied from the manifest to the action runner, never from worker ambient state. */
@@ -134,7 +136,7 @@ async function releaseOwnedJob(payload: SessionEndWorkerPayload, nonce: string, 
     const job = readSessionEndJob(payload.directory, payload.sessionId);
     if (job && job.owner?.nonce !== nonce) return null;
     if (job?.owner) leaseGeneration = job.owner.leaseGeneration;
-    if (delay === null || Date.now() >= giveUpAt) {
+    if (delay === null || Date.now() + delay + RELEASE_LOCK_WAIT_MS > giveUpAt) {
       recordSessionEndWorkerExit(payload.directory, { sessionId: payload.sessionId, pid: process.pid, outcome: 'release-failed', exitReason, ownerNonce: nonce, leaseGeneration, revision: job?.revision, phase: job?.phase });
       return null;
     }

@@ -32,7 +32,7 @@ const actionRunner = vi.hoisted(() => ({
   }),
 }));
 
-const releaseFaults = vi.hoisted(() => ({ remaining: 0 }));
+const releaseFaults = vi.hoisted(() => ({ remaining: 0, stallMs: 0, calls: 0 }));
 
 vi.mock('../index.js', () => actions);
 vi.mock('../cleanup-manifest.js', async (importOriginal) => {
@@ -40,7 +40,8 @@ vi.mock('../cleanup-manifest.js', async (importOriginal) => {
   return {
     ...actual,
     releaseSessionEndJob: (...args: Parameters<typeof actual.releaseSessionEndJob>) => {
-      if (releaseFaults.remaining > 0) { releaseFaults.remaining--; return null; }
+      releaseFaults.calls++;
+      if (releaseFaults.remaining > 0) { releaseFaults.remaining--; if (releaseFaults.stallMs) vi.setSystemTime(Date.now() + releaseFaults.stallMs); return null; }
       return actual.releaseSessionEndJob(...args);
     },
   };
@@ -75,6 +76,8 @@ function project(): string {
 afterEach(() => {
   vi.clearAllMocks();
   releaseFaults.remaining = 0;
+  releaseFaults.stallMs = 0;
+  releaseFaults.calls = 0;
   processIdentity.getProcessStartIdentity.mockResolvedValue('test-process-start');
   for (const directory of directories.splice(0)) rmSync(directory, { recursive: true, force: true });
   vi.useRealTimers();
@@ -170,6 +173,21 @@ describe('SessionEnd durable worker', () => {
       revision: expect.any(Number),
       phase: job.phase,
     });
+  });
+
+  it('does not start a release retry that a full lock wait would push past the budget (#4844)', async () => {
+    const directory = project();
+    const sessionId = 'release-lock-stall';
+    expect(prepareCoreManifest(directory, sessionId, { initialTeamNames: [] })).not.toBeNull();
+    expect(sealCoreManifest(directory, sessionId)).not.toBeNull();
+    expect(sealWikiManifest(directory, sessionId)).not.toBeNull();
+    releaseFaults.remaining = Number.POSITIVE_INFINITY;
+    releaseFaults.stallMs = 4_800;
+
+    await processSessionEndWorker({ directory, sessionId });
+
+    expect(releaseFaults.calls).toBe(1);
+    expect(existsSync(join(sessionEndJobsDirectory(directory), 'worker-exits.jsonl'))).toBe(true);
   });
 
   it('records the exit when the manifest cannot be read back (#4844)', async () => {
