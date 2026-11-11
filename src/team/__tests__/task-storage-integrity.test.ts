@@ -298,6 +298,29 @@ describe('team task storage integrity', () => {
     expect(await readFile(path, 'utf8')).toBe(before);
   });
 
+  it('never overwrites an orphaned published task when the counter lags behind', async () => {
+    await writeTeamConfig(cwd);
+    // Simulate the crash window: the task file was published but the config
+    // commit that advances next_task_id never landed, so the counter still
+    // points at an id whose file already exists.
+    await writeClaimedTask(cwd, '1');
+    const orphaned = await readFile(taskPath(cwd, '1'), 'utf8');
+
+    const created = await teamCreateTask(teamName, {
+      subject: 'Created after crash', description: 'Must not reuse id 1', status: 'pending',
+    }, cwd);
+
+    expect(created).toMatchObject({ id: '2', status: 'pending' });
+    expect(await readFile(taskPath(cwd, '1'), 'utf8')).toBe(orphaned);
+    await expect(teamReadTask(teamName, '1', cwd))
+      .resolves.toMatchObject({ status: 'in_progress', owner: 'worker-1' });
+    // The orphaned task keeps its original claim and can still complete.
+    await expect(teamTransitionTaskStatus(teamName, '1', 'in_progress', 'completed', 'token-1', cwd))
+      .resolves.toMatchObject({ ok: true, task: { status: 'completed' } });
+    const config = JSON.parse(await readFile(join(teamRoot(cwd), 'config.json'), 'utf8'));
+    expect(config.next_task_id).toBe(3);
+  });
+
   it('persists create dependencies and keeps updates canonical', async () => {
     await writeTeamConfig(cwd);
     const predecessor = await teamCreateTask(teamName, {
