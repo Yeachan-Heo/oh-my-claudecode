@@ -258,7 +258,7 @@ describe('installer legacy agent sync gating (issue #1502)', () => {
     expect(installer.getInstalledOmcPluginRoots()).toEqual([pluginInstallPath]);
     expect(installer.hasPluginProvidedAgentFiles()).toBe(true);
 
-    const result = installer.install({ skipClaudeCheck: true, skipHud: true, skipPluginPayloadSync: true });
+    const result = installer.install({ skipClaudeCheck: true, skipHud: true });
     expect(result.success).toBe(true);
     expect(result.installedAgents).toEqual([]);
     expect(existsSync(join(claudeConfigDir, 'agents'))).toBe(false);
@@ -286,7 +286,7 @@ describe('installer legacy agent sync gating (issue #1502)', () => {
     expect(installer.getInstalledOmcPluginRoots()).toEqual([exactRoot]);
     expect(installer.hasPluginProvidedAgentFiles()).toBe(true);
 
-    const result = installer.install({ skipClaudeCheck: true, skipHud: true, skipPluginPayloadSync: true });
+    const result = installer.install({ skipClaudeCheck: true, skipHud: true });
     expect(result.success).toBe(true);
     expect(result.installedAgents).toEqual([]);
     expect(existsSync(join(claudeConfigDir, 'agents'))).toBe(false);
