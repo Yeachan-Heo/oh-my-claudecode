@@ -71,8 +71,6 @@ export function minTimeoutSeconds(env = process.env) {
 
 // Non-session state for Jev delivery (daily checks, not bound to a session ID).
 const jevDeliveryDir = (configDir) => join(configDir, '.omc', 'jev-delivery');
-// Session-scoped state follows the canonical resolver's structure: .omc/state/sessions/<sessionId>/
-const sessionStateDir = (configDir, sessionId) => join(configDir, '.omc', 'state', 'sessions', String(sessionId));
 const digest = (text) => createHash('sha256').update(text).digest('hex').slice(0, 16);
 // A relative log path means a different directory in each working directory: resolve it with the platform's own path
 // rules (drive letters, UNC shares) before it becomes a state key, so two projects never share one.
@@ -84,6 +82,26 @@ const dailyFile = (dir, logDir, kind, cwd) => {
 };
 /** Path of a daily-check state file (kind: daily.json, daily.lock or delivery.json) for a Jev log directory. */
 export const dailyStatePath = (configDir, logDir, kind, cwd) => dailyFile(jevDeliveryDir(configDir), logDir, kind, cwd);
+
+/**
+ * Resolve session-scoped state paths, following the canonical structure (.omc/state/sessions/<id>/).
+ * Reads from the new path if it exists, falls back to the old path for backward compatibility.
+ * Validates session ID to prevent directory traversal attacks.
+ * Returns { readPath, writePath } where readPath probes both locations and writePath targets the canonical location.
+ */
+function resolveSessionStatePath(configDir, sessionId) {
+  // Strict validation: reject '..' and path separators to prevent directory traversal
+  const normalizedId = String(sessionId).trim();
+  if (!normalizedId || normalizedId.includes('..') || normalizedId.includes('/') || normalizedId.includes('\\')) {
+    return null;
+  }
+  const sessionScopedDir = join(configDir, '.omc', 'state', 'sessions', normalizedId);
+  const newPath = join(sessionScopedDir, 'jev-guard-state.json');
+  const legacyPath = join(configDir, '.omc', 'jev-guard', 'sessions', `${normalizedId}.json`);
+  // readPath prefers new path but falls back to legacy path for migration compatibility
+  const readPath = existsSync(newPath) ? newPath : legacyPath;
+  return { readPath, writePath: newPath, sessionScopedDir };
+}
 
 function readJson(path) {
   try {
@@ -167,7 +185,8 @@ export function limitMessage(pluginRoot = PLUGIN_ROOT, minSeconds = DEFAULT_MIN_
 
 function sessionFile(configDir, data) {
   const id = String(data?.session_id ?? data?.sessionId ?? '');
-  return SESSION_ID.test(id) ? join(sessionStateDir(configDir, id), 'jev-guard-state.json') : null;
+  const paths = id ? resolveSessionStatePath(configDir, id) : null;
+  return paths?.writePath ?? null;
 }
 
 function newRecord(now, pluginRoot, configDir) {
@@ -211,12 +230,18 @@ export function startSession(data, options = {}) {
   const { env = process.env, now = Date.now(), pluginRoot = PLUGIN_ROOT, configDir = getClaudeConfigDir() } = options;
   try {
     if (!isGuardEnabled(env, data?.permission_mode)) return null;
-    const file = sessionFile(configDir, data);
-    if (file) {
-      // /compact continues the same process with the same session id: it keeps what it loaded at its start.
-      if (data?.source !== 'compact') writeJson(file, newRecord(now, pluginRoot, configDir));
-      else touchRecord(file, now);
-      pruneSessions(configDir, now);
+    const id = String(data?.session_id ?? data?.sessionId ?? '');
+    if (id) {
+      const paths = resolveSessionStatePath(configDir, id);
+      if (paths) {
+        // /compact continues the same process with the same session id: it keeps what it loaded at its start.
+        if (data?.source !== 'compact') {
+          mkdirSync(paths.sessionScopedDir, { recursive: true });
+          writeJson(paths.writePath, newRecord(now, pluginRoot, configDir));
+        }
+        else touchRecord(paths.writePath, now);
+        pruneSessions(configDir, now);
+      }
     }
     return limitMessage(pluginRoot, minTimeoutSeconds(env));
   } catch {
@@ -307,11 +332,14 @@ export function promptCheck(data, options = {}) {
   try {
     if (!isGuardEnabled(env, data?.permission_mode)) return null;
     const dir = jevDeliveryDir(configDir);
-    const file = sessionFile(configDir, data);
-    let record = file ? readJson(file) : null;
+    const id = String(data?.session_id ?? data?.sessionId ?? '');
+    const paths = id ? resolveSessionStatePath(configDir, id) : null;
+    const file = paths?.writePath ?? null;
+    let record = paths ? readJson(paths.readPath) : null;  // Read from readPath which falls back to legacy path
     if (file && (!record || typeof record !== 'object')) {
       // A session that began before the guard was enabled: the baseline is this prompt.
       record = newRecord(now, pluginRoot, configDir);
+      mkdirSync(dirname(file), { recursive: true });
       writeJson(file, record);
     } else if (file) {
       touchRecord(file, now); // a live session keeps its baseline out of the sweep
@@ -326,6 +354,7 @@ export function promptCheck(data, options = {}) {
       if (file && ((hooks && !record.hooks) || (settingsEnv && !record.env))) {
         record.hooks ??= hooks;
         record.env ??= settingsEnv;
+        mkdirSync(dirname(file), { recursive: true });
         writeJson(file, record);
       }
       const reasons = [];
@@ -365,6 +394,7 @@ export function promptCheck(data, options = {}) {
     if (now - (Number(state?.lastStart) || 0) >= DAY_MS) startDailyCheck(dir, configDir, logDir, env, now);
     // Persist cleared warnedHooks/warnedEnv even if no warning was generated
     if (recordModified && file && messages.length === 0) {
+      mkdirSync(dirname(file), { recursive: true });
       writeJson(file, record);
     }
     if (messages.length === 0) return null;
@@ -372,7 +402,10 @@ export function promptCheck(data, options = {}) {
       text: messages.join('\n'),
       confirm: () => {
         for (const confirm of confirmations) confirm();
-        if (file) writeJson(file, record);
+        if (file) {
+          mkdirSync(dirname(file), { recursive: true });
+          writeJson(file, record);
+        }
       },
     };
   } catch {
