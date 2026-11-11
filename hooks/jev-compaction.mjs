@@ -150,8 +150,16 @@ const BREAKER_MAX_SECONDS = 1800;
 const NO_RESPONSE_SKEW_MS = 5000;
 const SAME_OUTAGE_GAP_MS = 15 * 60_000;
 const EXTEND_MIN_MS = 5000;
-// Pause after writing the breaker before it is read back (a concurrent opener may have replaced it).
+// Pause after writing the breaker before it is read back (a writer without the lock may have replaced it).
 const SETTLE_MS = 50;
+// breaker.json.lock (see takeLock): a lock older than LOCK_STALE_MS is of a process that died or hangs, and a breaker.json that does not
+// parse and was written less than LOCK_STALE_MS ago is a write in progress; LOCK_WAIT_MS is the longest wait for the lock. The module
+// reads its token back LOCK_CONFIRM_MS after writing it, and gives up after LOCK_REFUSALS_TO_GIVE_UP refused writes of the lock in a row.
+const LOCK_STALE_MS = 1000;
+const LOCK_WAIT_MS = 1500;
+const LOCK_POLL_MS = 5;
+const LOCK_CONFIRM_MS = 20;
+const LOCK_REFUSALS_TO_GIVE_UP = 3;
 const CLOCK_SLACK_MS = 60_000;
 // `compaction` is a medium-priority point: it may use this share of the minute's limit.
 const MEDIUM_SHARE = 0.85;
@@ -533,28 +541,44 @@ async function appendLine($, path, line) {
   return text;
 }
 
-// breaker.json as written, whatever its times; undefined when missing or unreadable. A partial text
-// (a write landing) is read again.
-async function readBreakerFile($, shared) {
+// A read or stat error means the file is missing only with ENOENT or when $.fs.exists says so.
+const isMissing = async ($, path, error) => {
+  if (error?.code === 'ENOENT') return true;
+  try { return !(await $.fs.exists(path)); } catch { return false; }
+};
+
+// breaker.json as read, in up to 4 attempts 3 ms apart (mirror of readBreakerState in jev-breaker.mjs): {state} (the file as written,
+// whatever its times; undefined when missing or not an object); {unreadable: true} when a read failed in any attempt, or the text does
+// not parse in a file written less than LOCK_STALE_MS ago (a write in progress; no usable mtime counts as fresh): readers treat it as
+// closed, but nothing is written over it; {state: undefined, corrupt: true} when no attempt parsed in an older file (replaced).
+async function readBreakerState($, shared) {
   const path = `${shared.dir}/breaker.json`;
+  let failed = false;
+  let fresh = false;
   for (let attempt = 0; attempt < 4; attempt++) {
-    const text = await readText($, path);
-    if (text === undefined) {
-      // Missing: closed. Present but unreadable (a rename landing): read again shortly.
-      let present = false;
-      try { present = await $.fs.exists(path); } catch { /* not there, or no check */ }
-      if (!present) return undefined;
-      if (attempt < 3) await pause($, 3);
+    if (attempt > 0) await pause($, 3);
+    let text;
+    try {
+      text = await $.fs.read(path);
+    } catch (error) {
+      if (await isMissing($, path, error)) return { state: undefined };
+      failed = true;
       continue;
     }
     try {
       const state = JSON.parse(text);
-      return state && typeof state === 'object' ? state : undefined;
+      return { state: state && typeof state === 'object' ? state : undefined };
     } catch {
-      if (attempt < 3) await pause($, 3);
+      try {
+        const mtime = (await $.fs.stat(path)).mtimeMs;
+        fresh = !Number.isFinite(mtime) || Math.abs(Date.now() - mtime) <= LOCK_STALE_MS;
+      } catch (error) {
+        if (await isMissing($, path, error)) return { state: undefined };
+        fresh = true;
+      }
     }
   }
-  return undefined;
+  return failed || fresh ? { unreadable: true } : { state: undefined, corrupt: true };
 }
 
 // The open breaker {until, reason, since} (epoch ms), or undefined when it is closed, expired,
@@ -562,44 +586,136 @@ async function readBreakerFile($, shared) {
 async function readSharedBreaker($, shared, now) {
   if (!shared?.breaker) return undefined;
   try {
-    const state = await readBreakerFile($, shared);
-    if (!state || !Number.isFinite(state.until) || state.until <= now) return undefined;
-    if (state.until > now + BREAKER_MAX_SECONDS * 1000 + CLOCK_SLACK_MS) return undefined;
-    const since = Number.isFinite(state.since) ? state.since : now;
-    if (since < 0 || since > now + CLOCK_SLACK_MS) return undefined;
-    return { until: state.until, reason: String(state.reason ?? ''), since: Math.min(since, now) };
+    return breakerOf((await readBreakerState($, shared)).state, now);
   } catch {
     return undefined;
   }
 }
 
+// The open breaker that a breaker.json state holds at `now`, by the rules of readSharedBreaker.
+function breakerOf(state, now) {
+  if (!state || !Number.isFinite(state.until) || state.until <= now) return undefined;
+  if (state.until > now + BREAKER_MAX_SECONDS * 1000 + CLOCK_SLACK_MS) return undefined;
+  const since = Number.isFinite(state.since) ? state.since : now;
+  if (since < 0 || since > now + CLOCK_SLACK_MS) return undefined;
+  return { until: state.until, reason: String(state.reason ?? ''), since: Math.min(since, now) };
+}
+
+// breaker.json.lock of jev-breaker.mjs, which creates it exclusively and removes it. $.fs has neither, so the module writes its token
+// when the lock is free, reads it back after LOCK_CONFIRM_MS (a script process that created the lock in the same moment finds the
+// module's token before its write and starts over), checks it again right before its write, and marks the lock released afterwards
+// (the next script opener removes the file). Free: missing, released, or older than LOCK_STALE_MS by its ts, else by its mtime (text not
+// written yet, unreadable or corrupt); no usable mtime: taken.
+async function lockFree($, path) {
+  let text;
+  try { text = await $.fs.read(path); } catch (error) { if (await isMissing($, path, error)) return true; }
+  let lock;
+  try { lock = text === undefined ? undefined : JSON.parse(text); } catch { lock = undefined; }
+  if (lock && lock.released === true) return true;
+  let at = lock && Number.isFinite(lock.ts) ? lock.ts : undefined;
+  if (at === undefined) {
+    try { at = (await $.fs.stat(path)).mtimeMs; } catch (error) { return isMissing($, path, error); }
+  }
+  // The clock is read after the host reads: a lock created while a slow read was under way is as young as it is, not ahead of an earlier sample.
+  return Number.isFinite(at) && Math.abs(Date.now() - at) > LOCK_STALE_MS;
+}
+async function holdsLock($, path, token) {
+  try { return JSON.parse(await $.fs.read(path)).token === token; } catch { return false; }
+}
+// The module's token, or undefined when the lock stays taken until `deadline` or its write is refused LOCK_REFUSALS_TO_GIVE_UP times in a row.
+// The deadline is checked before every acquisition step and before a token is returned: a host read that was delayed past it
+// neither writes a token nor hands one out, and a token written just before the deadline is released.
+async function takeLock($, path, deadline) {
+  const token = `compaction-${randomId()}`;
+  let refusals = 0;
+  let wroteToken = false;
+  const expire = async () => {
+    if (wroteToken) await releaseLock($, path, token);
+    return undefined;
+  };
+  for (;;) {
+    // A confirming read that hit the moment a script opener moved the lock away and linked it back must not leave the module
+    // waiting on its own token.
+    if (wroteToken && (await holdsLock($, path, token))) return Date.now() < deadline ? token : expire();
+    if (Date.now() >= deadline) return expire();
+    if (await lockFree($, path)) {
+      if (Date.now() >= deadline) return expire();
+      let written = false;
+      try {
+        await $.fs.write(path, JSON.stringify({ token, ts: Date.now() }));
+        written = true;
+        refusals = 0;
+      } catch {
+        // EBUSY or EPERM while a script process removes the lock: keep polling, as the script side does.
+        refusals += 1;
+        if (refusals >= LOCK_REFUSALS_TO_GIVE_UP) return undefined;
+      }
+      if (written) {
+        wroteToken = true;
+        await pause($, LOCK_CONFIRM_MS);
+        if (await holdsLock($, path, token)) return Date.now() < deadline ? token : expire();
+      }
+    }
+    if (Date.now() >= deadline) return expire();
+    await pause($, LOCK_POLL_MS);
+  }
+}
+async function releaseLock($, path, token) {
+  try {
+    if (await holdsLock($, path, token)) await $.fs.write(path, JSON.stringify({ token, ts: Date.now(), released: true }));
+  } catch { /* a lock left behind goes stale */ }
+}
+
 // Opens the breaker for `seconds`, or keeps it open at least that long; an open breaker is never
-// shortened. After each write the module pauses SETTLE_MS and reads the file again, and writes the
-// later end again when a concurrent opener replaced it with an earlier one (at most 3 writes).
-// `since` stays the start of the outage while it is extended or opens again within 15 minutes.
+// shortened. The read, the comparison and the write happen under breaker.json.lock (see takeLock), so
+// an opener held up between its read and its write holds the others back instead of overwriting them.
+// A breaker.json that is there but cannot be read is not a closed breaker: nothing is written over it.
+// When the lock stays taken for LOCK_WAIT_MS nothing is written. After each write the module pauses
+// SETTLE_MS and reads the file again under the lock, and writes the later end again when a writer that
+// does not take the lock replaced it with an earlier one (at most 3 writes). `since` stays the start of
+// the outage while it is extended or opens again within 15 minutes.
 async function openSharedBreaker($, shared, seconds, reason, now) {
   try {
     const until = now + Math.max(1, Math.min(seconds, BREAKER_MAX_SECONDS)) * 1000;
+    const path = `${shared.dir}/breaker.json`;
+    const lockPath = `${path}.lock`;
+    const deadline = Date.now() + LOCK_WAIT_MS;
     let since = now;
-    const previous = await readBreakerFile($, shared);
-    if (
-      previous &&
-      Number.isFinite(previous.until) &&
-      Number.isFinite(previous.since) &&
-      previous.since >= 0 &&
-      previous.since <= now &&
-      now - previous.until < SAME_OUTAGE_GAP_MS
-    ) {
-      since = previous.since;
-    }
+    let read = false;
+    let written;
     for (let attempt = 0; attempt < 3; attempt++) {
-      if (attempt > 0) await pause($, SETTLE_MS);
-      const current = await readSharedBreaker($, shared, now);
-      if (current && current.until >= until - EXTEND_MIN_MS) return current;
-      await $.fs.write(`${shared.dir}/breaker.json`, JSON.stringify({ until, reason, since: current ? Math.min(current.since, since) : since }));
+      if (written) await pause($, SETTLE_MS);
+      const token = await takeLock($, lockPath, deadline);
+      if (!token) break;
+      try {
+        const onDisk = await readBreakerState($, shared);
+        if (onDisk.unreadable) break;
+        if (!read) {
+          read = true;
+          const previous = onDisk.state;
+          if (
+            previous &&
+            Number.isFinite(previous.until) &&
+            Number.isFinite(previous.since) &&
+            previous.since >= 0 &&
+            previous.since <= now &&
+            now - previous.until < SAME_OUTAGE_GAP_MS
+          ) {
+            since = previous.since;
+          }
+        }
+        const current = breakerOf(onDisk.state, now);
+        if (current && current.until >= until - EXTEND_MIN_MS) return current;
+        const state = { until, reason, since: current ? Math.min(current.since, since) : since };
+        // The lock was taken over (stale, or a script opener in the same moment): read again.
+        if (!(await holdsLock($, lockPath, token))) continue;
+        await $.fs.write(path, JSON.stringify(state));
+        written = state;
+      } finally {
+        await releaseLock($, lockPath, token);
+      }
     }
-    await pause($, SETTLE_MS);
-    return await readSharedBreaker($, shared, now);
+    return (await readSharedBreaker($, shared, now)) ?? written;
   } catch {
     return undefined;
   }
