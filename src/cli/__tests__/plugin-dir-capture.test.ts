@@ -117,8 +117,10 @@ describe('launchCommand → child env propagation (OMC_PLUGIN_ROOT)', () => {
       CLAUDE_CONFIG_DIR: process.env.CLAUDE_CONFIG_DIR,
       CLAUDECODE: process.env.CLAUDECODE,
       OMC_NOTIFY: process.env.OMC_NOTIFY,
+      OMC_TEAM_MULTIPLEXER: process.env.OMC_TEAM_MULTIPLEXER,
     };
     savedCwd = process.cwd();
+    process.env.OMC_TEAM_MULTIPLEXER = 'tmux';
     delete process.env[OMC_PLUGIN_ROOT_ENV];
     delete process.env.CLAUDECODE;
     process.env.CLAUDE_CONFIG_DIR = tmpConfigDir;

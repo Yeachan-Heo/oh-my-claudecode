@@ -549,6 +549,14 @@ export function validateTeamConfig(config: PluginConfig): void {
         );
       }
     }
+    if (ops.multiplexer !== undefined) {
+      const allowed = new Set(["tmux", "herdr"]);
+      if (typeof ops.multiplexer !== "string" || !allowed.has(ops.multiplexer)) {
+        throw new Error(
+          `[OMC] team.ops.multiplexer: invalid value "${String(ops.multiplexer)}". Allowed: tmux, herdr`,
+        );
+      }
+    }
   }
 
   const roleRouting = team.roleRouting as Record<string, unknown> | undefined;
@@ -1463,6 +1471,17 @@ export function generateConfigSchema(): object {
               monitorIntervalMs: { type: "integer", minimum: 1 },
               shutdownTimeoutMs: { type: "integer", minimum: 1 },
               costMode: { type: "string", enum: ["normal", "downgrade"] },
+              worktreeMode: {
+                type: "string",
+                enum: ["disabled", "off", "detached", "branch", "named"],
+                default: "disabled",
+              },
+              multiplexer: {
+                type: "string",
+                enum: ["tmux", "herdr"],
+                default: "tmux",
+                description: "Multiplexer backend for team worker panes",
+              },
             },
           },
           roleRouting: {
