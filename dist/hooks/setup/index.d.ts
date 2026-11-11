@@ -40,18 +40,29 @@ export declare function validateConfigFiles(directory: string): string[];
  */
 export declare function setEnvironmentVariables(): string[];
 /**
- * On Windows, rewrite hook invocations to `command: node` plus `args`.
+ * On Windows, replace sh+find-node.sh hook invocations with direct node calls.
  *
- * The sh->find-node.sh->node chain (v4.3.4, issue #892) is only needed on
- * Unix, where nvm/fnm may not expose `node` on PATH. On Windows that chain
- * triggers Claude Code UI bug #17088. The later shell string
- * `node "${CLAUDE_PLUGIN_ROOT}"/scripts/run.cjs ...` avoids #17088 and still
- * breaks under PowerShell: the shell splits the quoted root from `/scripts`,
- * and Node loads the plugin directory. Exec form spawns `node` with each
- * path as one argument and no shell (#4042, Grok on Windows).
+ * The sh->find-node.sh->node chain introduced in v4.3.4 (issue #892) is only
+ * needed on Unix where nvm/fnm may not expose `node` on PATH in non-interactive
+ * shells.  On Windows (MSYS2 / Git Bash) the same chain triggers Claude Code UI
+ * bug #17088, which mislabels every successful hook as an error.
  *
- * Input may be find-node.sh, the split shell string, or exec form. Exec form
- * is left unchanged. The file is written only when a command changed.
+ * This function reads the plugin's hooks.json and rewrites every command of the
+ * current form:
+ *   sh "${CLAUDE_PLUGIN_ROOT}"/scripts/find-node.sh "${CLAUDE_PLUGIN_ROOT}"/scripts/run.cjs "${CLAUDE_PLUGIN_ROOT}"/scripts/X.mjs [args]
+ * or stale absolute-shell cache form:
+ *   "/bin/sh" "${CLAUDE_PLUGIN_ROOT}"/scripts/find-node.sh ... [args]
+ * or legacy form:
+ *   sh "${CLAUDE_PLUGIN_ROOT}/scripts/find-node.sh" "${CLAUDE_PLUGIN_ROOT}/scripts/X.mjs" [args]
+ * to:
+ *   node "${CLAUDE_PLUGIN_ROOT}"/scripts/run.cjs "${CLAUDE_PLUGIN_ROOT}"/scripts/X.mjs [args]
+ *
+ * The braced placeholder is required: Claude Code substitutes it itself, while
+ * the bare `$CLAUDE_PLUGIN_ROOT` spelling only expands when a POSIX shell runs
+ * the command — which the direct-node Windows form deliberately avoids (#4042).
+ *
+ * The file is only written when at least one command was actually changed, so
+ * the function is safe to call on every init (idempotent after first patch).
  */
 export declare function patchHooksJsonForWindows(pluginRoot: string): void;
 /**

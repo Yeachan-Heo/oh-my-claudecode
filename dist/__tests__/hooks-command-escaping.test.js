@@ -19,34 +19,32 @@ function expandHookCommandArgv(command, pluginRoot) {
 function getHookCommands() {
     const raw = JSON.parse(readFileSync(hooksJsonPath, 'utf-8'));
     return Object.entries(raw.hooks ?? {}).flatMap(([event, groups]) => groups.flatMap(group => (group.hooks ?? [])
-        .filter((hook) => typeof hook.command === 'string')
-        .map(hook => ({ event, command: hook.command, args: hook.args }))));
+        .map(hook => hook.command)
+        .filter((command) => typeof command === 'string')
+        .map(command => ({ event, command }))));
 }
 describe('hooks.json command escaping', () => {
-    it('uses exec form so a shell cannot split the plugin root', () => {
-        for (const hook of getHookCommands()) {
-            expect(hook.command).toBe('node');
-            expect(hook.args?.[0]).toBe('${CLAUDE_PLUGIN_ROOT}/scripts/run.cjs');
-            expect(hook.args?.[1]).toMatch(/^\$\{CLAUDE_PLUGIN_ROOT\}\/scripts\/[A-Za-z0-9._-]+\.mjs$/);
-            expect(JSON.stringify(hook)).not.toContain('find-node.sh');
-            expect(hook.command).not.toMatch(/^sh /);
-            expect(JSON.stringify(hook)).not.toContain('/bin/sh');
+    it('uses portable hook commands without absolute /bin/sh or pre-expanded ${...} placeholders', () => {
+        for (const { command } of getHookCommands()) {
+            expect(command).toMatch(/^node "\$\{CLAUDE_PLUGIN_ROOT\}"\/scripts\/run\.cjs "\$\{CLAUDE_PLUGIN_ROOT\}"\/scripts\/[^\s]+/);
+            expect(command).not.toContain('find-node.sh');
+            expect(command).not.toMatch(/^sh /);
+            expect(command).not.toContain('/bin/sh');
+            expect(command).not.toContain('${CLAUDE_PLUGIN_ROOT}/scripts/run.cjs');
+            expect(command).not.toContain('${CLAUDE_PLUGIN_ROOT}/scripts/');
         }
     });
-    it('keeps a plugin root that contains spaces inside one argument', () => {
+    it('keeps Windows-style plugin roots with spaces intact when bash expands the command', () => {
         const pluginRoot = '/c/Users/First Last/.claude/plugins/cache/omc/oh-my-claudecode/4.7.10';
-        for (const hook of getHookCommands()) {
-            const argv = [
-                hook.command,
-                ...(hook.args ?? []).map(arg => arg.split('${CLAUDE_PLUGIN_ROOT}').join(pluginRoot)),
-            ];
+        for (const { command } of getHookCommands()) {
+            const argv = expandHookCommandArgv(command, pluginRoot);
             expect(argv[0]).toBe('node');
             expect(argv[1]).toBe(`${pluginRoot}/scripts/run.cjs`);
             expect(argv[2]).toContain(`${pluginRoot}/scripts/`);
             expect(argv[1]).toContain('First Last');
             expect(argv[2]).toContain('First Last');
-            expect(argv.some(arg => arg === '/c/Users/First')).toBe(false);
-            expect(argv.some(arg => arg.endsWith('Last/.claude/plugins/cache/omc/oh-my-claudecode/4.7.10/scripts/run.cjs') && !arg.includes('First Last'))).toBe(false);
+            expect(argv).not.toContain('/c/Users/First');
+            expect(argv).not.toContain('Last/.claude/plugins/cache/omc/oh-my-claudecode/4.7.10/scripts/run.cjs');
         }
     });
     it('find-node bootstrap can execute when node is absent from PATH', () => {
