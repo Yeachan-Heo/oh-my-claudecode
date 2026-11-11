@@ -682,23 +682,17 @@ async function main() {
       process.exit(2);
     }
     
-    // Compare structural content (inventorySha256, counts, graph, public, internal, generated)
-    // by extracting the commit baseline from fresh
+    // The committed baseline must equal exactly what --write would produce: every retained
+    // field present and correct, and nothing extra.
     const freshCommit = toCommitBaseline(fresh);
-    
-    if (freshCommit.inventorySha256 !== onDisk.inventorySha256) {
-      console.error('[inventory-graph] drift detected: inventorySha256 mismatch');
-      console.error(`  fresh: ${freshCommit.inventorySha256}`);
-      console.error(`  on-disk: ${onDisk.inventorySha256}`);
+    if (stableStringify(freshCommit) !== stableStringify(onDisk)) {
+      console.error('[inventory-graph] drift detected: baseline differs from the generated minimal baseline');
+      console.error(`  fresh: ${stableStringify(freshCommit)}`);
+      console.error(`  on-disk: ${stableStringify(onDisk)}`);
       console.error('  to refresh: node scripts/generate-inventory-graph.mjs --write');
       process.exit(1);
     }
-    
-    // Minimal baseline only has provenance; verify determinism of full manifest instead.
-    // The committed baseline is read-only anchor info, so drifting baseline (new provenance)
-    // is normal and expected, but the generated manifest hash should remain stable.
-    // (The test suite will regenerate the baseline when provenance changes.)
-    
+
     // Verify determinism: regenerating twice produces identical inventorySha256
     {
       const f1 = await generateInventoryGraph();

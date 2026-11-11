@@ -502,4 +502,30 @@ describe('inventory-graph drift enforcement (#3702)', () => {
       }
     }
   });
+
+  it('verify mode rejects minimal baselines missing or adding retained fields', { timeout: 120_000 }, () => {
+    const opts = { cwd: REPO_ROOT, encoding: 'utf8' as const, maxBuffer: 20 * 1024 * 1024 };
+    const anchors = { base: EXPECTED_BASE, planningHead: EXPECTED_PLANNING_HEAD };
+    const cases: Array<[string, Record<string, unknown>]> = [
+      ['anchors only', { provenance: { ...anchors } }],
+      ['missing generator', { schemaVersion: 2, repository: 'Yeachan-Heo/oh-my-claudecode', provenance: { ...anchors } }],
+      ['extra inventorySha256', {
+        schemaVersion: 2,
+        repository: 'Yeachan-Heo/oh-my-claudecode',
+        provenance: { ...anchors, generator: 'scripts/generate-inventory-graph.mjs' },
+        inventorySha256: '0'.repeat(64),
+      }],
+    ];
+    for (const [label, baseline] of cases) {
+      const temp = join(REPO_ROOT, `.tmp-malformed-${process.pid}-${Math.random().toString(16).slice(2)}.json`);
+      try {
+        writeFileSync(temp, JSON.stringify(baseline, null, 2));
+        const result = spawnSync('node', [GENERATOR, '--verify', '--out', temp], opts);
+        expect(result.status, `should reject ${label}: ${result.stderr}`).toBe(1);
+        expect(result.stderr, label).toContain('baseline differs from the generated minimal baseline');
+      } finally {
+        if (existsSync(temp)) unlinkSync(temp);
+      }
+    }
+  });
 });
