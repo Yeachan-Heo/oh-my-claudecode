@@ -1364,8 +1364,13 @@ function keptCallsIn(messages, keepFrom, api) {
   return messages.every((m, i) => i < keepFrom || m.role !== 'assistant' || (m.toolUses || []).every((u) => ids.has(u.tool_use_id)));
 }
 
+// Blocks a kept assistant message may carry and still keep its handle: text, client calls and signed
+// thinking. Anything else (redacted_thinking, or an opaque output block such as container_upload that
+// serverBlocks() does not classify) runs the summary.
+const KEEPABLE_TAIL_BLOCKS = new Set(['text', 'tool_use', 'thinking']);
+
 // Whether an assistant API message of the rows that keep their handles (from keepFrom on) carries a
-// redacted_thinking block. Those rows stand in the API form from the first message holding one of their
+// block outside KEEPABLE_TAIL_BLOCKS. Those rows stand in the API form from the first message holding one of their
 // calls, together with the assistant messages right before it (no user message between: one turn for
 // the API, e.g. after split message ids), to the end. No such rows: false; rows whose message the API
 // form does not show: true (the summary).
@@ -1377,7 +1382,7 @@ export function tailRedacted(messages, api, keepFrom) {
   let first = Array.isArray(api) ? api.findIndex(holds) : -1;
   if (first < 0) return true;
   while (first > 0 && api[first - 1] && api[first - 1].role === 'assistant') first--;
-  return api.slice(first).some((a) => a && a.role === 'assistant' && Array.isArray(a.content) && a.content.some((b) => b && b.type === 'redacted_thinking'));
+  return api.slice(first).some((a) => a && a.role === 'assistant' && Array.isArray(a.content) && a.content.some((b) => !b || !KEEPABLE_TAIL_BLOCKS.has(b.type)));
 }
 
 // A block the API runs itself: server_tool_use, mcp_tool_use and their results

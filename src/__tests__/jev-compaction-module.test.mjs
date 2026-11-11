@@ -2006,6 +2006,9 @@ describe('jev-compaction module: what the host sends after the compaction', () =
       ['in the message with the call (no thinking-only row)', [A(red, use('b')), Res('b')], 3, true],
       ['before a user message (the step before)', [A(red, use('a')), Res('a'), A(thought, use('b')), Res('b')], 3, false],
       ['plain thinking', [A(thought), A(thought, use('b')), Res('b')], 3, false],
+      ['an opaque output block in the kept group', [A({ type: 'container_upload', file_id: 'f' }), A(thought, use('b')), Res('b')], 3, true],
+      ['an unknown block next to the kept call', [A({ type: 'some_future_block' }, use('b')), Res('b')], 3, true],
+      ['text, calls and signed thinking only', [A({ type: 'text', text: 'ok' }, thought, use('b')), Res('b')], 3, false],
       ['no kept rows', [A(red, use('a')), Res('a')], 5, false],
       ['kept rows the API form does not show', [A(red, use('a')), Res('a')], 3, true],
     ];
