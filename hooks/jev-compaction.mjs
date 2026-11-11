@@ -802,6 +802,10 @@ function deliveryOf(text) {
   return frameOf(text) || (DELIVERY_NOTES.some((k) => { const at = text.indexOf(k); return at >= 0 && at < DELIVERY_NOTE_CHARS; }) ? 'other' : undefined);
 }
 
+// A row's own text that opens with a delivered message: a frame, or a task notification's marker at its
+// start (after an optional wrapper). A prompt that quotes the marker further on stays the user's.
+const opensDelivery = (text) => frameOf(text) || DELIVERY_NOTES.some((k) => text.replace(DELIVERY_WRAP, '').startsWith(k));
+
 // The envelopes of a text, in order: {from, to, text}. Read from the end, each closing tag with the
 // last opener of its id before it, so an envelope build appended (whose id nothing before it holds)
 // is found whole even when it quotes a closing tag that an opener without its closing tag earlier in
@@ -867,7 +871,8 @@ function piecesOf(text) {
 // message are cut out. A delivered message counts only as a whole block, by its opening frame (one
 // rule): each envelope of the text that holds a delivered message (the host's, or one a row rebuilt
 // by an earlier compaction carries), and the text outside them, read by its pieces (piecesOf) when it
-// opens with a frame or the row holds results. A result row's own text gives words only so.
+// opens with a delivered message (opensDelivery) or the row holds results. A result row's own text
+// gives words only so.
 function userWords(m) {
   if (m.role !== 'user' || !m.text) return [];
   const delivered = envelopesOf(m.text).filter((e) => deliveryOf(e.text));
@@ -877,7 +882,7 @@ function userWords(m) {
   outside.push(m.text.slice(at));
   const own = outside.join('\n').trim();
   const carried = delivered.flatMap((e) => blockWords(e.text));
-  if (deliveryOf(own) || (m.toolResults && m.toolResults.length)) return [...piecesOf(own).flatMap(blockWords), ...carried];
+  if (opensDelivery(own) || (m.toolResults && m.toolResults.length)) return [...piecesOf(own).flatMap(blockWords), ...carried];
   const text = own.replace(HOST_BLOCK, '').trim();
   if (!text || HOST_BLOCK_OPEN.test(text) || NOT_USER_PREFIXES.some((p) => text.startsWith(p))) return carried;
   return [text, ...carried];

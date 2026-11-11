@@ -534,6 +534,19 @@ describe('jev-compaction module: active compaction', () => {
     expect(count(out.messages, framed(words))).toBe(0);
   });
 
+  it('a prompt that quotes a task notification marker stays the user\'s; a row that opens with the marker does not', async () => {
+    const typed = 'Why did notes-8.txt print [SYSTEM NOTIFICATION - NOT USER INPUT] and <task-notification> in the middle?';
+    const note = '[SYSTEM NOTIFICATION - NOT USER INPUT]\n<task-notification>\n<result>WORDS-OF-TASK</result>\n</task-notification>';
+    const base = conversation(30);
+    const messages = [...base.slice(0, -2), Object.freeze({ role: 'user', text: note, toolUses: [], handle: 'hnote' }), Object.freeze({ role: 'user', text: typed, toolUses: [], handle: 'htyped' }), ...base.slice(-2)];
+    const { out, calls, records } = await compactWithApi(messages, apiOf(messages));
+    expect(records()[0]).toMatchObject({ result: 'jev', mentioned: 1 });
+    expect(calls.fetch[0].body.state.task).toContain(typed);
+    expect(JSON.stringify(calls.fetch[0].body.state.task)).not.toContain('WORDS-OF-TASK');
+    expect(calls.fetch[0].body.state.task.filter((t) => t.startsWith('[SYSTEM NOTIFICATION'))).toEqual([]);
+    expect(resultOf(out.messages, 't8')?.text).toBe(resultOf(messages, 't8').text);
+  });
+
   it('the same message delivered again after a row that already carries a copy is carried again, not hidden by the copy', async () => {
     const words = 'continue';
     const messages = conversation(30, { needed: [10] });
