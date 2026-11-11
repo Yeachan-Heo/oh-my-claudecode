@@ -963,9 +963,13 @@ async function compact($, e, next) {
   // the breaker is open the summary will run, so the host may compute it ahead.
   if (e.trigger === 'precompute') return cfg.mode === 'active' && !blockedReason(cfg, Date.now()) ? { skip: 'jev-compaction replaces the summary' } : next(e);
   const started = Date.now();
-  // Any compaction of the main loop, this module's or the built-in summary, arms the own threshold's
-  // growth gate again (ownThreshold).
-  if (e.agentId === undefined) { session.growthArmed = true; session.growthBase = undefined; }
+  // Any compaction of the main loop that actually replaced the messages, this module's or the built-in
+  // summary, arms the own threshold's growth gate again (ownThreshold). A skip leaves the context as it
+  // was, so the gate stays as it was too.
+  const armGrowthGate = (out) => {
+    if (e.agentId === undefined && !out?.skip) { session.growthArmed = true; session.growthBase = undefined; }
+    return out;
+  };
   session.compacting++;
   try {
     let sessionId;
@@ -988,9 +992,9 @@ async function compact($, e, next) {
     // Written before next(e): the classic SessionStart:compact hook can run while the built-in summary
     // is still being installed.
     await writeRecord($, cfg, record);
-    if (decision.fallback || cfg.mode !== 'active') return await next(e);
+    if (decision.fallback || cfg.mode !== 'active') return armGrowthGate(await next(e));
     if (cfg.toast) { try { $.ui.toast(`Jev compaction: ${decision.before} -> ${decision.after} chars`); } catch { /* optional */ } }
-    return { messages: decision.messages };
+    return armGrowthGate({ messages: decision.messages });
   } finally {
     session.compacting--;
   }
