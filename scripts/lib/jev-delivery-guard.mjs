@@ -37,7 +37,7 @@
 
 import { spawn } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { closeSync, createReadStream, existsSync, mkdirSync, openSync, readFileSync, readdirSync, renameSync, statSync, unlinkSync, utimesSync, writeFileSync } from 'node:fs';
+import { closeSync, createReadStream, existsSync, mkdirSync, openSync, readFileSync, readdirSync, renameSync, rmSync, statSync, unlinkSync, utimesSync, writeFileSync } from 'node:fs';
 import { setPriority } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { createInterface } from 'node:readline';
@@ -69,7 +69,10 @@ export function minTimeoutSeconds(env = process.env) {
   return Number.isFinite(value) && value > 0 ? value : DEFAULT_MIN_TIMEOUT_S;
 }
 
-const guardDir = (configDir) => join(configDir, '.omc', 'jev-guard');
+// Non-session state for Jev delivery (daily checks, not bound to a session ID).
+const jevDeliveryDir = (configDir) => join(configDir, '.omc', 'jev-delivery');
+// Session-scoped state follows the canonical resolver's structure: .omc/state/sessions/<sessionId>/
+const sessionStateDir = (configDir, sessionId) => join(configDir, '.omc', 'state', 'sessions', String(sessionId));
 const digest = (text) => createHash('sha256').update(text).digest('hex').slice(0, 16);
 // A relative log path means a different directory in each working directory: resolve it with the platform's own path
 // rules (drive letters, UNC shares) before it becomes a state key, so two projects never share one.
@@ -80,7 +83,7 @@ const dailyFile = (dir, logDir, kind, cwd) => {
   return join(dir, `${name}-${digest(resolveLogDir(logDir, cwd))}.${extension}`);
 };
 /** Path of a daily-check state file (kind: daily.json, daily.lock or delivery.json) for a Jev log directory. */
-export const dailyStatePath = (configDir, logDir, kind, cwd) => dailyFile(guardDir(configDir), logDir, kind, cwd);
+export const dailyStatePath = (configDir, logDir, kind, cwd) => dailyFile(jevDeliveryDir(configDir), logDir, kind, cwd);
 
 function readJson(path) {
   try {
@@ -104,12 +107,16 @@ function writeJson(path, value) {
   }
 }
 
-/** Hash of the plugin's hooks/hooks.json, or null when it cannot be read. */
+/** Hash of the plugin's hooks/hooks.json, 'missing' when absent/unreadable, or null on transient error. */
 export function hooksJsonHash(pluginRoot = PLUGIN_ROOT) {
   try {
-    return digest(readFileSync(join(pluginRoot, 'hooks', 'hooks.json')));
+    const path = join(pluginRoot, 'hooks', 'hooks.json');
+    if (existsSync(path)) {
+      return digest(readFileSync(path));
+    }
+    return 'missing'; // Stable hash for absent manifest: the session baseline records "manifest deleted"
   } catch {
-    return null;
+    return null; // Transient read error: do not update baseline
   }
 }
 
@@ -160,7 +167,7 @@ export function limitMessage(pluginRoot = PLUGIN_ROOT, minSeconds = DEFAULT_MIN_
 
 function sessionFile(configDir, data) {
   const id = String(data?.session_id ?? data?.sessionId ?? '');
-  return SESSION_ID.test(id) ? join(guardDir(configDir), 'sessions', `${id}.json`) : null;
+  return SESSION_ID.test(id) ? join(sessionStateDir(configDir, id), 'jev-guard-state.json') : null;
 }
 
 function newRecord(now, pluginRoot, configDir) {
@@ -176,16 +183,22 @@ function touchRecord(file, now) {
   } catch { /* no record */ }
 }
 
-// At most once per 24 hours (a marker file): the directory grows with every headless run.
-function pruneSessions(dir, now) {
+// At most once per 24 hours (a marker file): the sessions directory grows with every headless run.
+function pruneSessions(configDir, now) {
   try {
+    const dir = join(configDir, '.omc', 'state', 'sessions');
     const marker = join(dir, '.swept');
     try { if (now - statSync(marker).mtimeMs < DAY_MS) return; } catch { /* never swept */ }
     writeFileSync(marker, String(now));
-    for (const name of readdirSync(dir)) {
-      if (name === '.swept') continue;
-      const path = join(dir, name);
-      try { if (now - statSync(path).mtimeMs > SESSION_RECORD_MAX_AGE_MS) unlinkSync(path); } catch { /* removed meanwhile */ }
+    for (const sessionId of readdirSync(dir)) {
+      if (sessionId === '.swept') continue;
+      const sessionDir = join(dir, sessionId);
+      try {
+        // Check the mtime of the session state file, not the directory
+        const stateFile = join(sessionDir, 'jev-guard-state.json');
+        const mtime = statSync(stateFile).mtimeMs;
+        if (now - mtime > SESSION_RECORD_MAX_AGE_MS) rmSync(sessionDir, { recursive: true, force: true });
+      } catch { /* no state file or removed meanwhile */ }
     }
   } catch { /* no directory yet */ }
 }
@@ -203,7 +216,7 @@ export function startSession(data, options = {}) {
       // /compact continues the same process with the same session id: it keeps what it loaded at its start.
       if (data?.source !== 'compact') writeJson(file, newRecord(now, pluginRoot, configDir));
       else touchRecord(file, now);
-      pruneSessions(dirname(file), now);
+      pruneSessions(configDir, now);
     }
     return limitMessage(pluginRoot, minTimeoutSeconds(env));
   } catch {
@@ -230,12 +243,25 @@ export function deliveryMessage(result) {
 }
 
 // Takes the slot of the daily check: a lock file created exclusively; a lock older than 30 minutes is a dead check.
+// Serializes stale-lock reclamation to prevent two sessions from both reclaiming and starting workers.
 function claimDailyCheck(dir, logDir, now) {
   const lock = dailyFile(dir, logDir, 'daily.lock');
   for (let attempt = 0; attempt < 2; attempt++) {
     try { closeSync(openSync(lock, 'wx')); return lock; } catch { /* exists or no directory */ }
     try {
-      if (now - statSync(lock).mtimeMs > LOCK_STALE_MS) unlinkSync(lock); else return null;
+      const stat = statSync(lock);
+      if (now - stat.mtimeMs > LOCK_STALE_MS) {
+        // Stale lock: serialize reclamation by creating a replacement lock first, then deleting the old one.
+        // This ensures only one session claims the slot after a stale lock is reclaimed.
+        const tmpLock = `${lock}.${process.pid}.tmp`;
+        try {
+          closeSync(openSync(tmpLock, 'wx')); // Claim a temp lock
+          unlinkSync(lock); // Delete the stale lock
+          try { renameSync(tmpLock, lock); return lock; } catch { unlinkSync(tmpLock); } // Atomic swap or fail
+        } catch { /* temp lock failed, another session is reclaiming */ }
+      } else {
+        return null; // Fresh lock exists
+      }
     } catch { mkdirSync(dir, { recursive: true }); }
   }
   return null;
@@ -280,7 +306,7 @@ export function promptCheck(data, options = {}) {
   const logDir = resolveLogDir(options.logDir, cwd);
   try {
     if (!isGuardEnabled(env, data?.permission_mode)) return null;
-    const dir = guardDir(configDir);
+    const dir = jevDeliveryDir(configDir);
     const file = sessionFile(configDir, data);
     let record = file ? readJson(file) : null;
     if (file && (!record || typeof record !== 'object')) {
@@ -292,6 +318,7 @@ export function promptCheck(data, options = {}) {
     }
     const messages = [];
     const confirmations = [];
+    let recordModified = false;
     if (record) {
       const hooks = hooksJsonHash(pluginRoot);
       const settingsEnv = settingsEnvHash(configDir);
@@ -302,6 +329,15 @@ export function promptCheck(data, options = {}) {
         writeJson(file, record);
       }
       const reasons = [];
+      // P2: Reset dedupe when configuration returns to baseline
+      if (hooks && record.hooks === hooks && record.warnedHooks !== null) {
+        record.warnedHooks = null;
+        recordModified = true;
+      }
+      if (settingsEnv && record.env === settingsEnv && record.warnedEnv !== null) {
+        record.warnedEnv = null;
+        recordModified = true;
+      }
       if (hooks && record.hooks && hooks !== record.hooks && record.warnedHooks !== hooks) {
         reasons.push("the plugin's hooks/hooks.json (hook entries and timeouts) changed");
         confirmations.push(() => { record.warnedHooks = hooks; });
@@ -327,6 +363,10 @@ export function promptCheck(data, options = {}) {
     }
     const state = readJson(dailyFile(dir, logDir, 'daily.json'));
     if (now - (Number(state?.lastStart) || 0) >= DAY_MS) startDailyCheck(dir, configDir, logDir, env, now);
+    // Persist cleared warnedHooks/warnedEnv even if no warning was generated
+    if (recordModified && file && messages.length === 0) {
+      writeJson(file, record);
+    }
     if (messages.length === 0) return null;
     return {
       text: messages.join('\n'),
@@ -498,7 +538,7 @@ async function runDailyCheck(argv) {
   const value = (name) => { const i = argv.indexOf(name); return i === -1 ? undefined : argv[i + 1]; };
   try { setPriority(process.pid, 19); } catch { /* the priority stays normal */ }
   const configDir = value('--config') || getClaudeConfigDir();
-  const dir = guardDir(configDir);
+  const dir = jevDeliveryDir(configDir);
   const hours = Number(value('--window-hours'));
   const now = Date.parse(value('--now') ?? '');
   let result;
