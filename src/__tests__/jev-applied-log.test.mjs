@@ -752,7 +752,7 @@ describe('hook scripts with OMC_JEV_APPLIED_LOG=1', () => {
   const NOT_COMPLETE = { task_complete: { type: 'noul', noul: 0.1 } };
 
   /** A child Ralph (optionally at its iteration limit) under an autopilot parent with the given reinforcement count. */
-  async function childRalphUnderAutopilot(ralphAnswers, parentAnswers, { atLimit = false, reinforcementCount = 0 } = {}) {
+  async function childRalphUnderAutopilot(ralphAnswers, parentAnswers, { atLimit = false, reinforcementCount = 0, env = {} } = {}) {
     stubQueue = [ralphAnswers, parentAnswers];
     const context = makeContext();
     const ralphPath = ralphState(context, 'jev-session');
@@ -769,10 +769,11 @@ describe('hook scripts with OMC_JEV_APPLIED_LOG=1', () => {
       last_checked_at: new Date().toISOString(),
       prompt: 'Complete the bounded task and verify the result.',
     }));
-    const output = await runHook(context, 'persistent-mode.mjs', { cwd: context.cwd, session_id: 'jev-session', last_assistant_message: 'The task is complete.' }, 'loop-continuation', { OMC_JEV_LOOP_RELEASE_ONLY: '1' });
+    const output = await runHook(context, 'persistent-mode.mjs', { cwd: context.cwd, session_id: 'jev-session', last_assistant_message: 'The task is complete.' }, 'loop-continuation', { OMC_JEV_LOOP_RELEASE_ONLY: '1', ...env });
     stubQueue = [];
     if (atLimit) expect(JSON.parse(readFileSync(ralphPath, 'utf8')).max_iterations).toBe(ralph.max_iterations + 10);
-    return { output, modes: readLog(context, 'applied.jsonl').map((line) => line.applied.mode) };
+    const lines = readLog(context, 'applied.jsonl');
+    return { output, context, lines, modes: lines.map((line) => line.applied.mode) };
   }
 
   for (const atLimit of [false, true]) {
@@ -797,6 +798,49 @@ describe('hook scripts with OMC_JEV_APPLIED_LOG=1', () => {
     }, 60_000);
   }
 
+  it('loop-continuation: an uncapped autopilot released by Jev writes its own row', async () => {
+    stubAnswers = COMPLETE;
+    const context = makeContext();
+    execFileSync('git', ['init'], { cwd: context.cwd, stdio: 'ignore' });
+    const stateDir = join(context.cwd, '.omc', 'state', 'sessions', 'jev-session');
+    mkdirSync(stateDir, { recursive: true });
+    writeFileSync(join(stateDir, 'autopilot-state.json'), JSON.stringify({
+      active: true,
+      session_id: 'jev-session',
+      project_path: context.cwd,
+      phase: 'execution',
+      reinforcement_count: 0,
+      started_at: new Date().toISOString(),
+      last_checked_at: new Date().toISOString(),
+      prompt: 'Complete the bounded task and verify the result.',
+    }));
+    const output = await runHook(context, 'persistent-mode.mjs', { cwd: context.cwd, session_id: 'jev-session', last_assistant_message: 'The task is complete.' }, 'loop-continuation', { OMC_JEV_LOOP_RELEASE_ONLY: '1' });
+    expect(String(output.systemMessage)).toContain('[JEV-COMPLETION]');
+    const lines = readLog(context, 'applied.jsonl');
+    expect(lines).toHaveLength(1);
+    expect(lines[0]).toMatchObject({ point: 'loop-continuation', applied: { mode: 'autopilot', block: { from: true, to: false }, noul: 0.9 } });
+  }, 60_000);
+
+  it('loop-continuation: a child Ralph row carries the Ralph request_id, not the autopilot parent\'s (OMC_JEV_LOG_CONTEXT=1)', async () => {
+    const { lines, context } = await childRalphUnderAutopilot(COMPLETE, COMPLETE, { env: { OMC_JEV_LOG_CONTEXT: '1' } });
+    expect(lines.map((line) => line.applied.mode)).toEqual(['autopilot', 'ralph']);
+    const [autopilotRow, ralphRow] = lines;
+    expect(ralphRow.request_id).toMatch(UUID);
+    expect(autopilotRow.request_id).toMatch(UUID);
+    expect(ralphRow.request_id).not.toBe(autopilotRow.request_id);
+    // The shadow lines in request order: the Ralph request came first, the parent's second.
+    const requestIds = readLog(context, 'shadow.jsonl').map((line) => line.request_id);
+    expect(requestIds.indexOf(ralphRow.request_id)).toBeLessThan(requestIds.indexOf(autopilotRow.request_id));
+    expect(requestIds.indexOf(ralphRow.request_id)).toBeGreaterThanOrEqual(0);
+  }, 60_000);
+
+  it('loop-continuation: a child Ralph released by Jev writes its row when the capped autopilot parent has no valid answer and the Stop is released', async () => {
+    const { output, modes } = await childRalphUnderAutopilot(COMPLETE, {}, { reinforcementCount: 20 });
+    expect(output.decision).toBeUndefined();
+    expect(output.systemMessage).toBeUndefined();
+    expect(modes).toEqual(['ralph']);
+  }, 60_000);
+
   describe('learner-extraction hint', () => {
     const MESSAGE = 'The issue was caused by a race condition. I fixed it by adding proper locking.';
     const stop = (context, sessionId, overrides = {}) => runHook(context, 'persistent-mode.mjs', { cwd: context.cwd, session_id: sessionId, last_assistant_message: MESSAGE }, 'learner-extraction', { OMC_JEV_LEARNER_HINT: '1', ...overrides });
@@ -811,6 +855,16 @@ describe('hook scripts with OMC_JEV_APPLIED_LOG=1', () => {
       const again = await stop(context, 'learner-session');
       expect(again.systemMessage).toBeUndefined();
       expect(readLog(context, 'applied.jsonl')).toHaveLength(1);
+    }, 60_000);
+
+    it('writes no row when a blocking mode keeps the Stop from being released', async () => {
+      stubAnswers = { extractable_moment: { type: 'noul', noul: 0.9 } };
+      const context = makeContext();
+      ralphState(context, 'learner-session');
+      const output = await stop(context, 'learner-session');
+      expect(output.decision).toBe('block');
+      expect(output.systemMessage).toBeUndefined();
+      expect(readLog(context, 'applied.jsonl')).toEqual([]);
     }, 60_000);
 
     it.each([

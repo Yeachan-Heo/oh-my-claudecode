@@ -26,7 +26,7 @@ import { spawn, spawnSync } from "child_process";
 import { join, dirname, resolve, normalize, sep } from "path";
 import { homedir } from "os";
 import { fileURLToPath, pathToFileURL } from "url";
-import { isJevShadowOptedIn, jevNoulOf, jevStateIds, recordJevApplied, recordJevShadow, setJevHookContext, setJevSessionId } from "./lib/jev-shadow.mjs";
+import { isJevShadowOptedIn, jevLastRequestId, jevNoulOf, jevStateIds, recordJevApplied, recordJevShadow, setJevHookContext, setJevSessionId } from "./lib/jev-shadow.mjs";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -1853,6 +1853,16 @@ async function main() {
     // OMC_JEV_APPLIED_LOG: the noul of a child Ralph that Jev released while its autopilot parent decides the Stop;
     // its row is written only if the parent then releases the Stop too.
     let childRalphRelease = null;
+    // The request_id is kept because the parent's later request replaces the point's last one.
+    const takeChildRalphRelease = (result) => {
+      const noul = jevNoulOf(result, "task_complete");
+      return noul === undefined ? null : { noul, requestId: jevLastRequestId("loop-continuation") };
+    };
+    const writeChildRalphRelease = () => {
+      if (childRalphRelease === null) return;
+      recordJevApplied("loop-continuation", { mode: "ralph", block: { from: true, to: false }, noul: childRalphRelease.noul }, childRalphRelease.requestId);
+      childRalphRelease = null;
+    };
 
     // Priority 1: Ralph Loop (explicit persistence mode)
     // Skip if state is stale (older than 2 hours) - prevents blocking new sessions
@@ -1956,7 +1966,7 @@ async function main() {
             // Ralph is a child workflow here, completed or cancelled; let the
             // active autopilot handler below decide Stop instead of releasing
             // the turn.
-            if (jevCompletion === "released") childRalphRelease = jevNoulOf(jevResult, "task_complete") ?? null;
+            if (jevCompletion === "released") childRalphRelease = takeChildRalphRelease(jevResult);
             break ralphPriority;
           }
 
@@ -2013,7 +2023,7 @@ async function main() {
 
         // Completed or cancelled child Ralph: continue into the active
         // autopilot handler below.
-        if (jevCompletionAtExtend === "released") childRalphRelease = jevNoulOf(jevExtendResult, "task_complete") ?? null;
+        if (jevCompletionAtExtend === "released") childRalphRelease = takeChildRalphRelease(jevExtendResult);
         break ralphPriority;
       }
     }
@@ -2202,9 +2212,7 @@ async function main() {
 
             const jevAutopilotCompletion = jevCompletionOutcome(jevAutopilotResult, autopilot.state, autopilot.path, !reinforcementLimitReached);
             if (jevAutopilotCompletion) {
-              if (jevAutopilotCompletion === "released" && childRalphRelease !== null) {
-                recordJevApplied("loop-continuation", { mode: "ralph", block: { from: true, to: false }, noul: childRalphRelease });
-              }
+              if (jevAutopilotCompletion === "released") writeChildRalphRelease();
               console.log(JSON.stringify(jevCompletionStopOutput(jevAutopilotCompletion, "autopilot")));
               return;
             }
@@ -2412,6 +2420,8 @@ async function main() {
         recordIdleNotificationSent(stateDir);
       }
     }
+    // No mode blocked: a child Ralph that Jev released was what let this Stop through.
+    writeChildRalphRelease();
     console.log(JSON.stringify(await releaseOutput(directory, sessionId, hasValidSessionId)));
   } catch (error) {
     // On any error, allow stop rather than blocking forever
