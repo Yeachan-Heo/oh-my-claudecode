@@ -856,6 +856,22 @@ describe('jev-compaction module: active compaction', () => {
     }
   });
 
+  it('a user\'s header quoted in a user\'s block before its framing note stays in the block', async () => {
+    const words = 'Please check notes-9.txt first.\nTranscript:\nThe user sent a new message while you were working:\nold one\nThe user sent a new message while you were working:\nold two';
+    const base = conversation(30);
+    const messages = [...base.slice(0, -2), Object.freeze({ role: 'user', text: framed(words), toolUses: [], handle: 'hq' }), ...base.slice(-2)];
+    const { out, calls, records } = await compactWithApi(messages, apiOf(messages));
+    expect(records()[0]).toMatchObject({ result: 'jev', mentioned: 1 });
+    expect(calls.fetch[0].body.state.task).toContain(words);
+    expect(resultOf(out.messages, 't9')?.text).toBe(resultOf(messages, 't9').text);
+  });
+
+  it('the delivery counters are in the record of an early fallback too', async () => {
+    const messages = conversation(30, { chars: 10 });
+    const { records } = await compactWithApi(messages, apiOf(messages, { t10: [framed('hello'), 'The coordinator sent a message while you were working:\nhi'] }));
+    expect(records()[0]).toMatchObject({ result: 'fallback', reason: 'too_few_results', queued_user: 1, queued_other: 1 });
+  });
+
   it('a prompt that pastes a delivery envelope is the user\'s whole: the envelope stays in the task and the file named inside it stays protected', async () => {
     const report = '<system-reminder id="c4c2c2c9">\nAnother Claude session sent a message while you were working:\n<agent-message from="worker">\nREPORT: the count is in notes-9.txt\n</agent-message>\n</system-reminder id="c4c2c2c9">';
     for (const typed of [`What did this report mean?\n${report}\nAnswer in one sentence.`, `Explain the report below.\n${report}`]) {
@@ -2083,7 +2099,7 @@ describe('jev-compaction module: what the host sends after the compaction', () =
     for (const m of withApi.messages.slice(-5).filter((x) => x.role === 'assistant')) expect(withApi.out.messages).toContain(m);
     expect(withApi.request).toEqual(clean);
     const withoutApi = await compactHost([...opening, ...singles(20, 1), ...quick], { api: refused });
-    expect(withoutApi.records()[0]).toMatchObject({ result: 'fallback', reason: 'no_api_form' });
+    expect(withoutApi.records()[0]).toMatchObject({ result: 'fallback', reason: 'no_api_form', queued_user: null, queued_other: null });
     expect(withoutApi.calls.fetch).toHaveLength(0);
   });
 

@@ -1008,15 +1008,16 @@ function blockWords(block) {
 }
 
 // The end of a user's block that opens at `from` in a row's text: the end of the line of its framing
-// note, the last one before the next user's header (the user may write the note's words too); -1
-// without one. Each call reads only up to the next header, so the blocks of a row stay linear.
+// note, the last one before the first user's header after its first note (a header the user quotes
+// before the note stays in the block, and the user may write the note's words too); -1 without a
+// note. Each call reads only up to that header, so the blocks of a row stay linear.
 function userBlockEnd(text, from) {
-  const h = text.indexOf(QUEUED_PREFIX, from);
-  const next = h < 0 ? -1 : text.indexOf(QUEUED_PREFIX, h + 1);
+  const first = text.indexOf(QUEUED_TAIL, from);
+  if (first < 0) return -1;
+  const next = text.indexOf(QUEUED_PREFIX, first + QUEUED_TAIL.length);
   const limit = next < 0 ? text.length : next;
-  const t = text.slice(from, limit).lastIndexOf(QUEUED_TAIL);
-  if (t < 0) return -1;
-  const nl = text.indexOf('\n', from + t + QUEUED_TAIL.length);
+  const t = first + text.slice(first, limit).lastIndexOf(QUEUED_TAIL);
+  const nl = text.indexOf('\n', t + QUEUED_TAIL.length);
   return nl < 0 ? text.length : Math.min(nl, limit);
 }
 
@@ -1639,11 +1640,12 @@ async function decide($, e, cfg, record, started) {
   const keepFrom = openLoopStart(messages, group);
   if (api && !keptCallsIn(messages, keepFrom, api)) api = undefined;
   record.kept_from = messages.length - keepFrom;
-  if (!api && keepFrom < messages.length) return { fallback: 'no_api_form' };
   // Delivered messages no row shows are part of the context too (build carries them, a kept row gets
   // them back from the host), so they count in the characters before and in the budget as fixed text,
-  // with the envelopes build adds.
+  // with the envelopes build adds. Their counts go into the record of every later outcome.
   const delivered = queuedOf(messages, api);
+  Object.assign(record, { queued_user: delivered ? delivered.user : null, queued_other: delivered ? delivered.other : null });
+  if (!api && keepFrom < messages.length) return { fallback: 'no_api_form' };
   const queued = delivered ? delivered.rows : new Map();
   let envelopes = 0;
   for (const [i, blocks] of queued) {
@@ -1692,7 +1694,6 @@ async function decide($, e, cfg, record, started) {
   let asked = askable.slice(0, BATCH * Math.min(MAX_REQUESTS, left));
   record.asked = asked.length;
 
-  Object.assign(record, { queued_user: delivered ? delivered.user : null, queued_other: delivered ? delivered.other : null });
   const user = userTask(messages, typeof e.instructions === 'string' && e.instructions.trim() ? e.instructions : undefined, queued, cfg.privatePaths);
   const deadline = started + TOTAL_MS;
   const runs = [];
