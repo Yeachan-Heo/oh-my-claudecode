@@ -381,6 +381,27 @@ describe('hook scripts with OMC_JEV_APPLIED_LOG=1', () => {
     expect(readLog(context, 'applied.jsonl')).toEqual([]);
   }, 60_000);
 
+  it.each(['project', 'user'])('model-routing: a winning %s agent without effort inherits the session, not a lower scope', async (scope) => {
+    const context = makeContext();
+    const projectAgents = join(context.cwd, '.claude', 'agents');
+    const userAgents = join(context.home, '.claude', 'agents');
+    const pluginAgents = join(context.root, 'plugin', 'agents');
+    for (const agents of [projectAgents, userAgents, pluginAgents]) mkdirSync(agents, { recursive: true });
+    const withEffort = '---\nname: review-agent\nmodel: sonnet\neffort: high\n---\nReview the change.\n';
+    writeFileSync(join(pluginAgents, 'review-agent.md'), withEffort);
+    writeFileSync(join(userAgents, 'review-agent.md'), withEffort);
+    writeFileSync(join(scope === 'project' ? projectAgents : userAgents, 'review-agent.md'), '---\nname: review-agent\nmodel: sonnet\n---\nReview the change.\n');
+    stubAnswers = { effort: { type: 'score', score: 2 } };
+    const output = await runHook(context, 'pre-tool-enforcer.mjs', TASK_CALL(context.cwd, { subagent_type: 'review-agent' }), 'model-routing', {
+      CLAUDE_PLUGIN_ROOT: join(context.root, 'plugin'),
+      CLAUDE_CODE_EFFORT_LEVEL: 'low',
+    });
+    expect(output.hookSpecificOutput.updatedInput).toMatchObject({ effort: 'high' });
+    expect(readLog(context, 'applied.jsonl')).toEqual([
+      expect.objectContaining({ applied: { subagent_type: 'review-agent', effort: { from: 'low', to: 'high', score: 2 } } }),
+    ]);
+  }, 90_000);
+
   it.each(['project', 'user'])('model-routing: %s agent effort overrides the session effort in the applied baseline', async (scope) => {
     const context = makeContext();
     const agents = join(scope === 'project' ? context.cwd : context.home, '.claude', 'agents');

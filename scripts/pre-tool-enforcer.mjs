@@ -173,17 +173,17 @@ function readAgentDefinitionEffort(subagentType, onlyAgentsDir) {
  */
 function resolveBaselineEffort(callEffort, subagentType, directory) {
   if (typeof callEffort === 'string') return callEffort;
-  const agentDefEffort = readAgentDefinitionEffort(subagentType);
-  if (agentDefEffort) return agentDefEffort;
-  // Mirror readNativeAgentDefinitionModel: bare names also resolve project/user agents.
+  const sessionEffort = process.env.CLAUDE_CODE_EFFORT_LEVEL || null;
+  // Resolve the winning definition before reading effort: a missing field does not
+  // allow a lower-priority definition of the same bare name to take over.
   if (typeof subagentType === 'string' && /^[a-zA-Z0-9_-]+$/.test(subagentType)) {
     for (const agentsDir of [join(directory || process.cwd(), '.claude', 'agents'), join(getClaudeConfigDir(), 'agents')]) {
-      const effort = readAgentDefinitionEffort(subagentType, agentsDir);
-      if (effort) return effort;
+      if (existsSync(join(agentsDir, `${subagentType}.md`))) {
+        return readAgentDefinitionEffort(subagentType, agentsDir) || sessionEffort;
+      }
     }
   }
-  const sessionEffort = process.env.CLAUDE_CODE_EFFORT_LEVEL;
-  return sessionEffort || null;
+  return readAgentDefinitionEffort(subagentType) || sessionEffort;
 }
 
 /**
@@ -1183,6 +1183,7 @@ function generateSlopWarning(data, toolName) {
     .concat(collectStringValues(promptLikeFields))
     .join('\n');
   let warned = shouldWarnForSlopFallbackLanguage(data, toolName, inspectedText);
+  let appliedAction = null;
   const jevResult = recordSlopWarningShadow(toolName, data.toolInput || data.tool_input || {}, warned, data.permission_mode);
   if (isSlopWarningApplyEnabled()) {
     // Only an active answer decides; shadow, degraded and missing answers keep the heuristic.
@@ -1190,19 +1191,20 @@ function generateSlopWarning(data, toolName) {
     if (noul !== undefined) {
       const activeWarning = noul >= resolveSlopWarningThreshold();
       if (activeWarning !== warned) {
-        recordJevApplied('slop-warning', {
+        appliedAction = {
           action: { from: warned ? 'warn' : 'none', to: activeWarning ? 'warn' : 'none', noul },
-        });
+        };
       }
       warned = activeWarning;
     }
   }
-  if (!warned) return '';
+  if (!warned) return { warning: '', appliedAction };
 
-  return '[SLOP WARNING] Detected fallback/workaround language in this tool input. ' +
+  const warning = '[SLOP WARNING] Detected fallback/workaround language in this tool input. ' +
     'Do not make potential slop: avoid ad-hoc fallback layers, workaround shims, or environment-specific patches unless explicitly justified. ' +
     'For architecture concerns, consult the architect for a concrete design first. ' +
     'If this seems environment-specific, ask the user to confirm constraints before proceeding.';
+  return { warning, appliedAction };
 }
 
 function combineHookMessages(...messages) {
@@ -2709,7 +2711,7 @@ async function main() {
       }
     }
 
-    const slopWarning = generateSlopWarning(data, toolName);
+    const { warning: slopWarning, appliedAction } = generateSlopWarning(data, toolName);
     let message;
     if (BUILT_IN_TASK_LIST_TOOL_NAMES.has(toolName)) {
       emitPreToolUseOutput({ continue: true, suppressOutput: true }, data);
@@ -2759,6 +2761,9 @@ async function main() {
         ...(updatedToolInput ? { updatedInput: updatedToolInput } : {})
       }
     }, data, 2);
+    if (slopWarning && appliedAction) {
+      recordJevApplied('slop-warning', appliedAction);
+    }
   } catch (error) {
     // On error, always continue. A decision noted before the error is not applied, so it is not recorded either.
     pendingJevRouting = undefined;
