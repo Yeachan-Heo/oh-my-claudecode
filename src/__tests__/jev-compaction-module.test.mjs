@@ -2091,4 +2091,56 @@ describe('jev-compaction module: archive of cut and removed results (OMC_JEV_COM
     expect(run.files.has(`${ARCHIVE}/t3.txt`)).toBe(false);
     expect(run.records()[0].archive_skipped).toMatchObject({ after_compaction: 1 });
   });
+
+  it('the text of an archive file read back with line numbers (a Read of it) is not archived again either', async () => {
+    const head = '[Jev compaction archive] call Bash, tool_use_id t9';
+    const numbered = (arrow) => `     1${arrow}${head}\n     2${arrow}--- input (masked) ---\n     3${arrow}{}\n     4${arrow}--- result (5 chars, unchanged) ---\n     5${arrow}hello`;
+    const messages = conversation(20, { result: (i) => (i === 3 ? numbered('\u2192') + ' '.repeat(2000) : i === 4 ? numbered('\t') + ' '.repeat(2000) : `RESULT-${i} ${'x'.repeat(2000)}`) });
+    const run = await compactOnce(messages, { env: archiveEnv });
+    expect(run.files.has(`${ARCHIVE}/t3.txt`)).toBe(false);
+    expect(run.files.has(`${ARCHIVE}/t4.txt`)).toBe(false);
+    expect(run.records()[0].archive_skipped).toMatchObject({ after_compaction: 2 });
+  });
+
+  it('a call input is measured as the archive file holds it (indented): nested empty objects of 48 000 compact characters are not archived', async () => {
+    const nest = (depth, inner) => (depth ? [nest(depth - 1, inner)] : inner);
+    const input = { command: 'cat notes-3.txt', items: nest(5, Array.from({ length: 16000 }, () => ({}))) };
+    expect(JSON.stringify(input).length).toBeLessThan(50_000);
+    expect(JSON.stringify(input, null, 2).length).toBeGreaterThan(100_000);
+    const messages = conversation(20, { input: (i) => (i === 3 ? input : { command: `cat notes-${i}.txt` }) });
+    const run = await compactOnce(messages, { env: archiveEnv });
+    expect(run.files.has(`${ARCHIVE}/t3.txt`)).toBe(false);
+    expect(run.records()[0].archive_skipped).toMatchObject({ too_large: 1 });
+    const shadow = await compactOnce(messages, { env: { ...ACTIVE_ENV, OMC_JEV_COMPACT_ARCHIVE: 'shadow' } });
+    expect(shadow.records()[0].archive_skipped).toMatchObject({ too_large: 1 });
+  });
+
+  it('one compaction writes at most 240 files: the newest results are archived, the rest are skipped as `cap`', async () => {
+    const messages = conversation(300, { chars: 600 });
+    const run = await compactOnce(messages, { env: { ...archiveEnv, OMC_JEV_COMPACT_TARGET: '0.1' } });
+    const record = run.records()[0];
+    expect(archived(run.files)).toHaveLength(240);
+    expect(record.archive_written).toBe(240);
+    expect(record.archive_skipped.cap).toBe(record.traced + record.kept_short - 240);
+    expect(run.files.has(`${ARCHIVE}/t250.txt`)).toBe(true);
+    expect(run.files.has(`${ARCHIVE}/t1.txt`)).toBe(false);
+    const shadow = await compactOnce(messages, { env: { ...ACTIVE_ENV, OMC_JEV_COMPACT_TARGET: '0.1', OMC_JEV_COMPACT_ARCHIVE: 'shadow' } });
+    expect(shadow.records()[0].archive_planned).toBe(240);
+  }, 60000);
+
+  it('results that stay whole use none of the scan time: slow-to-mask task-list results do not make the traced ones `time`', async () => {
+    const slow = 'password'.repeat(6000);
+    maskSecrets(slow); // the first run is cold, the time of the second is the one that counts
+    const t = Date.now();
+    maskSecrets(slow);
+    const one = Date.now() - t;
+    const n = Math.min(40, Math.max(2, Math.ceil(2000 / Math.max(one, 1)) + 1));
+    // the oldest results: with more than 240 candidates they are not among the ones sent to Jev, whose own masking is slow on them too
+    const messages = conversation(250, { tool: (i) => (i <= n ? 'TaskUpdate' : 'Bash'), result: (i) => (i <= n ? `${slow} ${i}` : `RESULT-${i} ${'x'.repeat(2000)}`) });
+    const run = await compactOnce(messages, { env: archiveEnv });
+    const record = run.records()[0];
+    for (let i = 1; i <= n; i++) expect(run.files.has(`${ARCHIVE}/t${i}.txt`)).toBe(false);
+    expect(record.archive_skipped?.time).toBeUndefined();
+    expect(record.archive_written + (record.archive_skipped?.cap ?? 0)).toBe(record.traced);
+  }, 90000);
 });

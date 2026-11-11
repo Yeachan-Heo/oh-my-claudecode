@@ -72,7 +72,7 @@
  * secret or private path (not even in a line), its call touches none, it is not a held background output, and the
  * result and the call's input are each at most ARCHIVE_MAX_CHARS characters (the masking has quadratic patterns and
  * cannot be interrupted, so it is run on bounded text only, and at most ARCHIVE_SCAN_MS per compaction); otherwise
- * its trace names no file. The files are plain text for as long as OMC_JEV_ARCHIVE_DAYS keeps them, in a directory
+ * its trace names no file; one compaction writes at most ARCHIVE_MAX_FILES files, newest results first. The files are plain text for as long as OMC_JEV_ARCHIVE_DAYS keeps them, in a directory
  * whose permissions $.fs.write decides: keep the state directory private. A trace names its file only after the
  * write was read back. $.fs has no delete, rename, append or link check: a file of the same name is reused only when
  * its text equals the content, any other is written again, and a second result of one tool_use_id is not archived.
@@ -149,6 +149,8 @@ const ARCHIVE_MAX_CHARS = 50_000;
 const ARCHIVE_SCAN_MS = 1000;
 const ARCHIVE_BUDGET_MS = 1500;
 const ARCHIVE_PARALLEL = 8;
+const ARCHIVE_MAX_FILES = BATCH * MAX_REQUESTS; // files written by one compaction
+const ARCHIVE_ROUNDS = 4;
 const ARCHIVE_MARKER = '.compaction';
 const ARCHIVE_LABEL = 'full call and result: ';
 const ARCHIVE_HEAD = '[Jev compaction archive]';
@@ -1547,7 +1549,9 @@ function archiveModeIn(cfg, sessionId) {
 }
 
 // The text of a cut, of the placeholder of a non-text result and of an archive file: not a result to archive.
-const isProduct = (text) => text.startsWith(NON_TEXT_NOTE) || text.startsWith(ARCHIVE_HEAD) || text.includes(`\n${SHORT_NOTE}`);
+// A Read of an archive file puts a line number in front of the head (`     1<tab>` or `     1\u2192`).
+const ARCHIVE_READ = new RegExp(`^\\s*\\d+[\\t\\u2192]${escapeRegExp(ARCHIVE_HEAD)}`);
+const isProduct = (text) => text.startsWith(NON_TEXT_NOTE) || text.startsWith(ARCHIVE_HEAD) || ARCHIVE_READ.test(text) || text.includes(`\n${SHORT_NOTE}`);
 
 // A second candidate of one tool_use_id would write the same file with another text: only the first is archived.
 function markDuplicates(candidates) {
@@ -1556,6 +1560,11 @@ function markDuplicates(candidates) {
     if (seen.has(c.id) && c.archiveWhy === undefined) c.archiveWhy = 'duplicate_id';
     seen.add(c.id);
   }
+}
+
+// The input as the archive file holds it (indented, which is longer than the compact form the rest of the module counts).
+function archiveInputJson(input) {
+  try { return JSON.stringify(input ?? {}, null, 2) ?? ''; } catch { return ''; }
 }
 
 // Why a candidate is not archived, '' when it is. A result that holds anything the masking would change or names a
@@ -1572,39 +1581,55 @@ function archiveSkip(c, privatePaths, until) {
   else if (!c.textOnly) why = 'no_text';
   else if (!text) why = 'empty';
   else if (isProduct(text)) why = 'after_compaction';
-  else if (text.length > ARCHIVE_MAX_CHARS || inputJson(c.use.input).length > ARCHIVE_MAX_CHARS) why = 'too_large';
+  else if (text.length > ARCHIVE_MAX_CHARS || archiveInputJson(c.use.input).length > ARCHIVE_MAX_CHARS) why = 'too_large';
   else if (anySecretPath(c.use.input, privatePaths)) why = 'secret';
   else if (namesSecretPath(text, privatePaths)) why = 'secret_in_result';
   else if (until !== undefined && Date.now() >= until) why = 'time';
   else if (maskSecrets(text) !== text) why = 'secret_in_result';
-  else c.archiveInput = maskSecrets(JSON.stringify(c.use.input ?? {}, null, 2) ?? '');
+  else c.archiveInput = maskSecrets(archiveInputJson(c.use.input));
   c.archiveWhy = why;
   return why;
 }
 
-// Before the allocation counts the length of a trace and of a cut: the path of every candidate that can be archived,
-// and the one an earlier compaction's cut already names (its file exists; the cut then keeps pointing at it).
-function planArchive(candidates, dir, privatePaths) {
+// What the archive would try, newest result first: `each(candidate, why, fresh)` for every one that is not kept whole (a
+// result that stays whole is not archived and uses none of the scan time; `fresh` = judged now, not in an earlier walk).
+// `scan` = {until, planned} is shared by the walks of one compaction: at most ARCHIVE_MAX_FILES come through with an
+// empty `why`, the rest get `cap`.
+function archiveWalk(candidates, privatePaths, scan, each) {
   markDuplicates(candidates);
-  const until = Date.now() + ARCHIVE_SCAN_MS;
-  for (const c of candidates) {
-    const path = `${dir}/${c.id}.txt`;
-    const why = archiveSkip(c, privatePaths, until);
-    if (!why || (why === 'after_compaction' && c.res.text.includes(`; ${ARCHIVE_LABEL}${path}`))) { c.archivePath = path; price(c); }
+  for (const c of [...candidates].sort((a, b) => b.resIdx - a.resIdx)) {
+    if (c.keep === 'full') { c.archiveWhy ??= 'kept_full'; continue; }
+    if (c.archiveWhy === 'kept_full') c.archiveWhy = undefined;
+    const fresh = c.archiveWhy === undefined;
+    let why = archiveSkip(c, privatePaths, scan.until);
+    if (fresh && !why && scan.planned++ >= ARCHIVE_MAX_FILES) why = c.archiveWhy = 'cap';
+    each(c, why, fresh);
   }
+}
+
+const newArchiveScan = () => ({ until: Date.now() + ARCHIVE_SCAN_MS, planned: 0 });
+
+// Before the allocation counts the length of a trace and of a cut: the path of every candidate that can be archived,
+// and the one an earlier compaction's cut already names (its file exists; the cut then keeps pointing at it). Needs
+// `keep` of an allocation; returns how many candidates it judged for the first time.
+function planArchive(candidates, dir, privatePaths, scan) {
+  let judged = 0;
+  archiveWalk(candidates, privatePaths, scan, (c, why, fresh) => {
+    if (!fresh) return;
+    judged++;
+    const path = `${dir}/${c.id}.txt`;
+    if (!why || (why === 'after_compaction' && c.res.text.includes(`; ${ARCHIVE_LABEL}${path}`))) { c.archivePath = path; price(c); }
+  });
+  return judged;
 }
 
 // Shadow: what archiveResults would try, with no file touched.
 function archivePlan(candidates, privatePaths) {
-  markDuplicates(candidates);
-  const until = Date.now() + ARCHIVE_SCAN_MS;
   const plan = { planned: 0, skipped: {} };
-  for (const c of candidates) {
-    if (c.keep === 'full') continue;
-    const why = archiveSkip(c, privatePaths, until);
+  archiveWalk(candidates, privatePaths, newArchiveScan(), (_c, why) => {
     if (why) plan.skipped[why] = (plan.skipped[why] || 0) + 1;
     else plan.planned++;
-  }
+  });
   return plan;
 }
 
@@ -1839,8 +1864,17 @@ async function decide($, e, cfg, record, started) {
   // files are written, and a trace or cut keeps its path only when its file is there.
   const archive = archiveModeIn(cfg, record.session_id);
   const archiveDir = archive === 'active' ? `${cfg.archiveDir}/${record.session_id}` : undefined;
-  if (archiveDir) planArchive(candidates, archiveDir, cfg.privatePaths);
   allocate(candidates, before, cfg.target);
+  if (archiveDir) {
+    // The first allocation (without paths) tells which results stay whole, so they use none of the scan time. A path
+    // makes a trace longer, which can cut one more result: those are judged in the next round (at most ARCHIVE_ROUNDS).
+    const scan = newArchiveScan();
+    for (let round = 0; round < ARCHIVE_ROUNDS; round++) {
+      if (!planArchive(candidates, archiveDir, cfg.privatePaths, scan)) break;
+      allocate(candidates, before, cfg.target);
+    }
+    for (const c of candidates) if (c.keep !== 'full' && c.archiveWhy === undefined) c.archiveWhy = 'time';
+  }
   if (archive !== 'off') record.archive_mode = archive;
   if (archiveDir) {
     const done = await archiveResults($, archiveDir, candidates, cfg.privatePaths, deadline - Date.now());
