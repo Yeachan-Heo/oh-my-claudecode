@@ -685,6 +685,11 @@ function requestLogContext(point) {
   return context;
 }
 
+/** request_id of this process's last request for the point (OMC_JEV_LOG_CONTEXT=1), to pass to a later recordJevApplied. */
+export function jevLastRequestId(point) {
+  return lastRequestIds.get(point);
+}
+
 /**
  * Record that this hook acted on an active Jev answer: one line in
  * applied.jsonl next to shadow.jsonl, {ts, point, ...ids, applied}, where
@@ -695,12 +700,12 @@ function requestLogContext(point) {
  * only when the answer really changed what the hook does. With
  * OMC_JEV_LOG_CONTEXT=1 the line carries the hook call's ids and the
  * request_id of this process's last request for the point, which is also in
- * that request's shadow.jsonl line. Only with OMC_JEV_APPLIED_LOG=1; never
- * throws.
+ * that request's shadow.jsonl line; a caller that records after a later request
+ * for the same point passes the earlier request's id (jevLastRequestId) as
+ * `requestId`. Only with OMC_JEV_APPLIED_LOG=1; never throws.
  */
-export function recordJevApplied(point, applied) {
+export function recordJevApplied(point, applied, requestId = lastRequestIds.get(point)) {
   if (!isJevAppliedLogEnabled(process.env)) return;
-  const requestId = lastRequestIds.get(point);
   appendJevLogLine("applied.jsonl", {
     ts: new Date().toISOString(),
     point,
