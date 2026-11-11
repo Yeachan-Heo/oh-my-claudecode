@@ -207,6 +207,8 @@ const DELIVERY_OPENERS = ['Another Claude session sent a message', '<agent-messa
 // An envelope in a row's text: the host's <system-reminder id="..."> and the one build writes around a
 // carried block, each closed only by the closing tag with its own id.
 const ENVELOPE_CLOSE = '</system-reminder id="';
+const ENVELOPE_OPEN = /<system-reminder id="(?=([^"\n]{1,64})">)/g; // every opener, also one inside another's id
+const ENVELOPE_ID = /([^"\n]{1,64})">/y; // the id and end of a closing tag, read where the tag starts
 // A task notification's marker stands at its start (after its own reminders), not deep in a quoted file.
 const DELIVERY_NOTES = ['[SYSTEM NOTIFICATION - NOT USER INPUT]', '<task-notification>'];
 const DELIVERY_NOTE_CHARS = 300;
@@ -945,18 +947,27 @@ const opensDelivery = (text) => frameOf(text) || DELIVERY_NOTES.some((k) => text
 // last opener of its id before it, so an envelope build appended (whose id nothing before it holds)
 // is found whole even when it quotes a closing tag that an opener without its closing tag earlier in
 // the text would take, and a quoted envelope inside one stays inside it. An unpaired tag is text.
+// The openers are indexed in one pass and each closing tag reads only its own id, so a text full of
+// unpaired tags (a truncated transcript pasted in) is read in linear time.
 function envelopesOf(text) {
+  const openers = new Map();
+  for (const o of text.matchAll(ENVELOPE_OPEN)) { const at = openers.get(o[1]); if (at) at.push(o.index); else openers.set(o[1], [o.index]); }
   const found = [];
   for (let end = text.length; end > 0;) {
     const close = text.lastIndexOf(ENVELOPE_CLOSE, end - 1);
     if (close < 0) break;
-    const q = text.indexOf('">', close + ENVELOPE_CLOSE.length);
-    const id = q < 0 || q + 2 > end ? '' : text.slice(close + ENVELOPE_CLOSE.length, q);
-    const open = /^[^"\n]{1,64}$/.test(id) ? text.lastIndexOf(`<system-reminder id="${id}">`, close) : -1;
-    if (open >= 0) found.unshift({ from: open, to: q + 2, text: text.slice(open, q + 2) });
+    ENVELOPE_ID.lastIndex = close + ENVELOPE_CLOSE.length;
+    const id = ENVELOPE_ID.exec(text);
+    const to = ENVELOPE_ID.lastIndex;
+    const at = id && to <= end ? openers.get(id[1]) || [] : [];
+    // The last opener of this id before the closing tag (the openers stand in text order).
+    let lo = 0;
+    for (let hi = at.length; lo < hi;) { const mid = (lo + hi) >> 1; if (at[mid] < close) lo = mid + 1; else hi = mid; }
+    const open = lo > 0 ? at[lo - 1] : -1;
+    if (open >= 0) found.push({ from: open, to, text: text.slice(open, to) });
     end = open >= 0 ? open : close;
   }
-  return found;
+  return found.reverse();
 }
 
 // A carried block as one envelope of the rebuilt row, so that a later compaction reads it as one
@@ -966,8 +977,9 @@ function envelopesOf(text) {
 function envelope(block, text) {
   const e = envelopesOf(block);
   if (e.length === 1 && e[0].from === 0 && e[0].to === block.length) return block;
+  const taken = new Set([...`${block}\n${text}`.matchAll(/id="jev-(\d+)"/g)].map((m) => m[1]));
   let k = 1;
-  while (block.includes(`id="jev-${k}"`) || text.includes(`id="jev-${k}"`)) k++;
+  while (taken.has(String(k))) k++;
   return `<system-reminder id="jev-${k}">\n${block}\n</system-reminder id="jev-${k}">`;
 }
 

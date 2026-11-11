@@ -794,6 +794,32 @@ describe('jev-compaction module: active compaction', () => {
     expect(count(out.messages, framed(words))).toBe(0);
   });
 
+  it('reads a text full of unpaired envelope tags, and a carried block full of envelope ids, in linear time', async () => {
+    const n = 40_000;
+    const prompts = [
+      '</system-reminder id="x">'.repeat(n),
+      '</system-reminder id="'.repeat(n),
+      Array.from({ length: n }, (_, k) => `</system-reminder id="k${k}">`).join(''),
+    ];
+    for (const junk of prompts) {
+      const typed = `Why does notes-9.txt end like this? ${junk}`;
+      const base = conversation(30, { chars: 80_000 });
+      const messages = [...base.slice(0, -2), Object.freeze({ role: 'user', text: typed, toolUses: [], handle: 'htyped' }), ...base.slice(-2)];
+      const t0 = performance.now();
+      const { records } = await compactWithApi(messages, apiOf(messages));
+      expect(performance.now() - t0).toBeLessThan(2000);
+      expect(records()[0]).toMatchObject({ result: 'jev', mentioned: 1 });
+    }
+    // A delivered block that holds the ids build would pick and many unpaired closing tags: carried in an envelope of its own.
+    const block = `Another Claude session sent a message while you were working:\n${Array.from({ length: n }, (_, k) => `<system-reminder id="jev-${k + 1}">`).join('')}${'</system-reminder id="y">'.repeat(n)}`;
+    const messages = conversation(30, { chars: 160_000 });
+    const t0 = performance.now();
+    const { out, records } = await compactWithApi(messages, apiOf(messages, { t10: [block] }));
+    expect(performance.now() - t0).toBeLessThan(2000);
+    expect(records()[0]).toMatchObject({ result: 'jev', queued_other: 1, queued_carried: 1 });
+    expect(count(out.messages, carried(block, n + 1))).toBe(1);
+  });
+
   it('a prompt that pastes a delivery envelope is the user\'s whole: the envelope stays in the task and the file named inside it stays protected', async () => {
     const report = '<system-reminder id="c4c2c2c9">\nAnother Claude session sent a message while you were working:\n<agent-message from="worker">\nREPORT: the count is in notes-9.txt\n</agent-message>\n</system-reminder id="c4c2c2c9">';
     for (const typed of [`What did this report mean?\n${report}\nAnswer in one sentence.`, `Explain the report below.\n${report}`]) {
