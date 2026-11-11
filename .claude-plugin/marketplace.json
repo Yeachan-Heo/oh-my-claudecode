@@ -10,9 +10,9 @@
     {
       "name": "oh-my-claudecode",
       "description": "Claude Code native multi-agent orchestration with intelligent model routing across agents and skills. Zero learning curve. Maximum power.",
-      "version": "5.8.5",
-      "author": {
-        "name": "Yeachan Heo",
+      "version": "5.8.6",
+        "author": {
+          "name": "Yeachan Heo",
         "email": "hurrc04@gmail.com"
       },
       "source": "./",
@@ -27,5 +27,5 @@
       ]
     }
   ],
-  "version": "5.8.5"
+  "version": "5.8.6"
 }

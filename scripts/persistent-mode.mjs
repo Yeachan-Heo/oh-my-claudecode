@@ -26,7 +26,7 @@ import { spawn, spawnSync } from "child_process";
 import { join, dirname, resolve, normalize, sep } from "path";
 import { homedir } from "os";
 import { fileURLToPath, pathToFileURL } from "url";
-import { isJevShadowOptedIn, jevNoulOf, recordJevShadow } from "./lib/jev-shadow.mjs";
+import { isJevShadowOptedIn, jevNoulOf, jevStateIds, recordJevApplied, recordJevShadow, setJevHookContext, setJevSessionId } from "./lib/jev-shadow.mjs";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -324,6 +324,9 @@ function completeModeFromJev(state, statePath) {
     };
     if (shouldWriteStateBack(statePath) && writeJsonFile(statePath, terminalState)) {
       Object.assign(state, terminalState);
+      // OMC_JEV_APPLIED_LOG: Jev's "task complete" ended the mode instead of blocking the stop.
+      const modeName = /([^\\/]+)-state\.json$/.exec(statePath)?.[1] ?? null;
+      recordJevApplied("loop-continuation", { mode: modeName, completed: { from: false, to: true } });
       return "completed";
     }
   }
@@ -1669,10 +1672,13 @@ async function main() {
       writeSafeContinue();
       return;
     }
+    setJevSessionId(data.session_id || data.sessionId, data.agent_id || data.agentId);
 
     // The stop_hook_active guard runs after the Ralph state read: a forced
     // continuation re-enters here carrying the reviewer's verdict, and that
     // verdict still has to be consumed. See the guard below.
+
+    await setJevHookContext(data);
 
     // Stop supplies the assistant response text directly; only load the
     // existing detector when this advisory point is explicitly enabled.
@@ -1916,7 +1922,7 @@ async function main() {
           };
           const judgmentState = {
             mode_name: "ralph",
-            session_id: sessionId || null,
+            ...jevStateIds({ session_id: sessionId || null }),
             iteration: ralph.state.iteration,
             phase: null,
             should_block: true,
@@ -1960,7 +1966,7 @@ async function main() {
         const ralphExtendedReason = `[RALPH LOOP - EXTENDED] Max iterations reached; extending to ${ralph.state.max_iterations} and continuing. When FULLY complete (after Architect verification), run /oh-my-claudecode:cancel (or --force).`;
         const jevExtendResult = recordLoopContinuationShadow({
           mode_name: "ralph",
-          session_id: sessionId || null,
+          ...jevStateIds({ session_id: sessionId || null }),
           iteration: ralph.state.iteration,
           phase: null,
           should_block: true,
@@ -2149,7 +2155,7 @@ async function main() {
 
             const jevAutopilotResult = recordLoopContinuationShadow({
               mode_name: "autopilot",
-              session_id: sessionId || null,
+              ...jevStateIds({ session_id: sessionId || null }),
               iteration: newCount,
               phase,
               // At the cap (release-only) the fallback releases Stop unless Jev answers.

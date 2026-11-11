@@ -1,3 +1,19 @@
+# oh-my-claudecode v5.8.6: Plugin payload sync optimization
+
+## Release Notes
+
+v5.8.6 is a patch release that optimizes the plugin payload sync process by skipping unnecessary sync operations when payloads are already complete.
+
+### Bug Fixes
+
+- **fix(installer): skip plugin payload sync when payloads are complete** (#1502) — improves performance by avoiding unnecessary file system operations when plugin payloads are already valid
+
+### Stats
+
+- **1 fix** | **0 new features** | **0 security/hardening improvements**
+
+---
+
 # oh-my-claudecode v5.8.5: Jev enhancements and hook improvements
 
 ## Release Notes

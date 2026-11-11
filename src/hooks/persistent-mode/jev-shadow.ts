@@ -14,7 +14,7 @@
  * share the same twin decision and iteration state.
  */
 
-import { noulAnswerIsYes, recordJudgment } from '../jev/index.js';
+import { isJevStateOmitIdsEnabled, noulAnswerIsYes, recordJudgment } from '../jev/index.js';
 import type { JevAnswer } from '../jev/index.js';
 import type { PersistentModeResult } from './index.js';
 
@@ -22,12 +22,13 @@ import type { PersistentModeResult } from './index.js';
  * Iteration metadata only: mode/session/iteration context, tool names, and
  * the continuation-message excerpt (bounded by the point's excerpt limit in the
  * resolver before send/log: 2000 characters by default, or
- * OMC_JEV_EXCERPT_CHARS_LOOP_CONTINUATION). Never whole file contents.
+ * OMC_JEV_EXCERPT_CHARS_LOOP_CONTINUATION). Never whole file contents. Without
+ * session_id under OMC_JEV_STATE_OMIT_IDS=1.
  */
 function buildLoopContinuationState(result: PersistentModeResult, sessionId?: string): Record<string, unknown> {
   return {
     mode_name: result.mode,
-    session_id: sessionId ?? null,
+    ...(isJevStateOmitIdsEnabled() ? {} : { session_id: sessionId ?? null }),
     iteration: result.metadata?.iteration ?? null,
     phase: result.metadata?.phase ?? null,
     should_block: result.shouldBlock,
@@ -97,6 +98,7 @@ export async function applyLoopContinuationShadow(args: LoopContinuationShadowAr
       twin: () => result,
       mapAnswer: mapTaskCompletionAnswer,
       mapHeuristic: mapHeuristicForLoopContinuation,
+      logContext: { session_id: args.sessionId },
       fetchFn: args.fetchFn,
     }),
     recordJudgment<PersistentModeResult>('loop-continuation', {
@@ -104,6 +106,7 @@ export async function applyLoopContinuationShadow(args: LoopContinuationShadowAr
       twin: () => result,
       questionSet: 1,
       mapHeuristic: mapHeuristicForLoopContinuation,
+      logContext: { session_id: args.sessionId },
       fetchFn: args.fetchFn,
     }),
   ]);

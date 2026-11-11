@@ -8,10 +8,16 @@ import type { TeamConfig } from '../../team/types.js';
 import type { MailboxNotificationTarget } from '../../team/mailbox-notification-guard.js';
 
 const ownership = vi.hoisted(() => ({ verify: vi.fn() }));
+const herdr = vi.hoisted(() => ({ workspaceExists: vi.fn() }));
 
 vi.mock('../../team/tmux-session.js', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../../team/tmux-session.js')>();
   return { ...actual, verifyTeamTargetOwnership: ownership.verify };
+});
+
+vi.mock('../../team/herdr-session.js', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../../team/herdr-session.js')>();
+  return { ...actual, herdrWorkspaceExists: herdr.workspaceExists };
 });
 
 const { teamResumeByName } = await import('../team.js');
@@ -62,6 +68,7 @@ describe('omc team resume on a runtime v2 team', () => {
     savedFlag = process.env.OMC_RUNTIME_V2;
     delete process.env.OMC_RUNTIME_V2;
     ownership.verify.mockReset().mockResolvedValue({ kind: 'unavailable' });
+    herdr.workspaceExists.mockReset().mockResolvedValue('missing');
     cwd = mkdtempSync(join(tmpdir(), 'omc-team-resume-'));
     writeConfig(v2Config());
   });
@@ -123,6 +130,56 @@ describe('omc team resume on a runtime v2 team', () => {
       writeConfig(tmuxConfig({ tmux_server_identity: undefined }));
 
       expect(await teamResumeByName('demo', cwd)).toMatchObject({ resumed: false });
+    });
+  });
+
+  describe('herdr team', () => {
+    const HERDR_SESSION = 'herdr:workspace:abc123';
+    const herdrConfig = (overrides: Partial<TeamConfig> = {}) => v2Config({
+      tmux_session: HERDR_SESSION,
+      leader_pane_id: 'w1:p1',
+      workers: [{ name: 'worker-1', index: 1, role: 'executor', assigned_tasks: [], pane_id: 'w1:p2' }],
+      ...overrides,
+    });
+
+    beforeEach(() => {
+      herdr.workspaceExists.mockReset().mockResolvedValue('missing');
+    });
+
+    it('resumes when the Herdr workspace exists', async () => {
+      herdr.workspaceExists.mockResolvedValue('exists');
+      writeConfig(herdrConfig());
+
+      expect(await teamResumeByName('demo', cwd)).toMatchObject({
+        resumed: true,
+        sessionName: HERDR_SESSION,
+        leaderPaneId: 'w1:p1',
+        workerPaneIds: ['w1:p2'],
+      });
+    });
+
+    it('does not resume when the Herdr workspace is missing', async () => {
+      herdr.workspaceExists.mockResolvedValue('missing');
+      writeConfig(herdrConfig());
+
+      expect(await teamResumeByName('demo', cwd)).toMatchObject({ teamName: 'demo', resumed: false });
+    });
+
+    it('does not resume when the Herdr workspace query fails', async () => {
+      herdr.workspaceExists.mockRejectedValue(new Error('provider query failed'));
+      writeConfig(herdrConfig());
+
+      expect(await teamResumeByName('demo', cwd)).toMatchObject({ teamName: 'demo', resumed: false });
+    });
+
+    it('resumes with an external leader (no leader_pane_id check required)', async () => {
+      herdr.workspaceExists.mockResolvedValue('exists');
+      writeConfig(herdrConfig({ leader_pane_id: undefined }));
+
+      expect(await teamResumeByName('demo', cwd)).toMatchObject({
+        resumed: true,
+        sessionName: HERDR_SESSION,
+      });
     });
   });
 
