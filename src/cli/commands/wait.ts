@@ -267,7 +267,9 @@ export async function waitDetectCommand(options: WaitDetectOptions): Promise<voi
     process.exit(1);
   }
 
-  console.log(chalk.blue('Scanning for blocked Claude Code sessions...\n'));
+  if (!options.json) {
+    console.log(chalk.blue('Scanning for blocked Claude Code sessions...\n'));
+  }
 
   const config: DaemonConfig = {
     paneLinesToCapture: options.lines,
