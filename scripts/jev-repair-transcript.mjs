@@ -32,6 +32,7 @@
  */
 
 import {
+  chmodSync,
   closeSync,
   existsSync,
   fsyncSync,
@@ -204,11 +205,13 @@ function freeBackupPath(path) {
 export function writeRepaired(path, original, repaired) {
   const mode = statSync(path).mode & 0o777;
   const backup = freeBackupPath(path);
-  writeFileSync(backup, original, { flag: 'wx', mode });
-  const temp = `${path}.repair-${process.pid}.tmp`;
+  let backupCreated = false;
   let fd = null;
   let created = false;
   try {
+    writeFileSync(backup, original, { flag: 'wx', mode });
+    backupCreated = true;
+    const temp = `${path}.repair-${process.pid}.tmp`;
     fd = openSync(temp, 'wx', mode);
     created = true;
     let written = 0;
@@ -216,21 +219,24 @@ export function writeRepaired(path, original, repaired) {
     fsyncSync(fd);
     closeSync(fd);
     fd = null;
+    chmodSync(temp, mode);
     if (!readFileSync(path).equals(original)) throw new RepairError(`${path} changed while it was being repaired (is the session still running?); nothing was written`);
     renameSync(temp, path);
   } catch (error) {
     if (fd !== null) closeSync(fd);
     if (created) {
       try {
-        unlinkSync(temp);
+        unlinkSync(`${path}.repair-${process.pid}.tmp`);
       } catch {
         // no temporary file left
       }
     }
-    try {
-      unlinkSync(backup); // the copy belongs to this write only
-    } catch {
-      // no copy left
+    if (backupCreated) {
+      try {
+        unlinkSync(backup); // the copy belongs to this write only
+      } catch {
+        // no backup left
+      }
     }
     throw error;
   }
@@ -316,4 +322,4 @@ export function main(argv) {
 }
 
 const isMain = Boolean(process.argv[1]) && import.meta.url === pathToFileURL(process.argv[1]).href;
-if (isMain) process.exit(main(process.argv.slice(2)));
+if (isMain) process.exitCode = main(process.argv.slice(2));
