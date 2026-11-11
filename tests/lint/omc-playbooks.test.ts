@@ -438,4 +438,67 @@ describe('check-omc-playbooks', () => {
     expect(r.stderr).toContain('does not appear in any extended skill');
     rmSync(root, { recursive: true, force: true });
   });
+
+  it('validates a user-level playbook with no project playbooks present', () => {
+    const { root, skillsRoot } = buildProject();
+    rmSync(join(root, '.omc', 'playbooks'), { recursive: true, force: true });
+    const configDir = join(root, 'user-config');
+    mkdirSync(join(configDir, 'omc', 'playbooks'), { recursive: true });
+    writeFileSync(
+      join(configDir, 'omc', 'playbooks', 'user-flow.md'),
+      '---\nextends: tdd\nwhen: The user-level flow applies in every repository.\n---\n\n**After** "Write the failing test first." report the artifact path.\n',
+    );
+    const r = spawnSync('node', [CHECKER, root, '--skills-root', skillsRoot], {
+      encoding: 'utf8',
+      env: { ...process.env, CLAUDE_CONFIG_DIR: configDir },
+    });
+    expect(r.status).toBe(0);
+    expect(r.stdout).toContain('1 user playbook(s) valid');
+    rmSync(root, { recursive: true, force: true });
+  });
+
+  it('prefixes user-level problems with user/ and reports both scopes in the summary', () => {
+    const { root, skillsRoot } = buildProject();
+    const configDir = join(root, 'user-config');
+    mkdirSync(join(configDir, 'omc', 'playbooks'), { recursive: true });
+    writeFileSync(
+      join(configDir, 'omc', 'playbooks', 'drifted-user.md'),
+      '---\nextends: tdd\nwhen: A drifted user-level playbook.\n---\n\n**After** "Write the failing test second." nothing.\n',
+    );
+    writePlaybook(
+      root,
+      'clean-project.md',
+      '---\nextends: tdd\nwhen: A clean project-level playbook.\n---\n\n**After** "Write the failing test first." report the artifact path.\n',
+    );
+    const r = spawnSync('node', [CHECKER, root, '--skills-root', skillsRoot], {
+      encoding: 'utf8',
+      env: { ...process.env, CLAUDE_CONFIG_DIR: configDir },
+    });
+    expect(r.status).toBe(1);
+    expect(r.stderr).toContain('user/drifted-user.md');
+    expect(r.stderr).toContain('does not appear in any extended skill');
+    rmSync(root, { recursive: true, force: true });
+  });
+
+  it('counts project and user playbooks separately in the summary', () => {
+    const { root, skillsRoot } = buildProject();
+    const configDir = join(root, 'user-config');
+    mkdirSync(join(configDir, 'omc', 'playbooks'), { recursive: true });
+    writeFileSync(
+      join(configDir, 'omc', 'playbooks', 'user-flow.md'),
+      '---\nextends: tdd\nwhen: The user-level flow applies in every repository.\n---\n\n**After** "Write the failing test first." report the artifact path.\n',
+    );
+    writePlaybook(
+      root,
+      'clean-project.md',
+      '---\nextends: tdd\nwhen: A clean project-level playbook.\n---\n\n**After** "Write the failing test first." report the artifact path.\n',
+    );
+    const r = spawnSync('node', [CHECKER, root, '--skills-root', skillsRoot], {
+      encoding: 'utf8',
+      env: { ...process.env, CLAUDE_CONFIG_DIR: configDir },
+    });
+    expect(r.status).toBe(0);
+    expect(r.stdout).toContain('1 project + 1 user playbook(s) valid');
+    rmSync(root, { recursive: true, force: true });
+  });
 });

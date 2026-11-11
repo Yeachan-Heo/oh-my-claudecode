@@ -23,17 +23,19 @@
  * exit 1 with one line per problem.
  */
 
-import { existsSync, readFileSync, readdirSync, statSync } from 'node:fs';
-import { join, resolve, dirname } from 'node:path';
-import { homedir } from 'node:os';
-import { resolveOmcStateRoot } from './lib/state-root.mjs';
-import { stripLeadingUtf8Bom } from './lib/utf8-bom.mjs';
+import { existsSync, readFileSync, readdirSync, statSync } from "node:fs";
+import { join, resolve, dirname } from "node:path";
+import { homedir } from "node:os";
+import { resolveOmcStateRoot } from "./lib/state-root.mjs";
+import { stripLeadingUtf8Bom } from "./lib/utf8-bom.mjs";
 
 const args = process.argv.slice(2);
-const allowArchiveOnly = args.includes('--allow-archive-only');
-const skillsRootFlag = readFlagValue('--skills-root');
+const allowArchiveOnly = args.includes("--allow-archive-only");
+const skillsRootFlag = readFlagValue("--skills-root");
 const projectRoot = resolve(
-  args.find((a) => !a.startsWith('--') && a !== readFlagValue('--skills-root')) ?? '.',
+  args.find(
+    (a) => !a.startsWith("--") && a !== readFlagValue("--skills-root"),
+  ) ?? ".",
 );
 
 function readFlagValue(flag) {
@@ -46,16 +48,18 @@ function resolveSkillsRoot() {
   // Local `--plugin-dir` mode (documented in CONTRIBUTING) sets OMC_PLUGIN_ROOT
   // instead of CLAUDE_PLUGIN_ROOT and copies nothing into the config dir —
   // bundled skills live only under that root, so it must be honored.
-  if (process.env.OMC_PLUGIN_ROOT) return join(process.env.OMC_PLUGIN_ROOT, 'skills');
-  if (process.env.CLAUDE_PLUGIN_ROOT) return join(process.env.CLAUDE_PLUGIN_ROOT, 'skills');
-  const configDir = process.env.CLAUDE_CONFIG_DIR ?? join(homedir(), '.claude');
-  return join(configDir, 'skills');
+  if (process.env.OMC_PLUGIN_ROOT)
+    return join(process.env.OMC_PLUGIN_ROOT, "skills");
+  if (process.env.CLAUDE_PLUGIN_ROOT)
+    return join(process.env.CLAUDE_PLUGIN_ROOT, "skills");
+  const configDir = process.env.CLAUDE_CONFIG_DIR ?? join(homedir(), ".claude");
+  return join(configDir, "skills");
 }
 
 const ANCHOR_RE = /\*\*(After|Before|Replace|In)\*\*\s+"((?:\\.|[^"\\])*)"/g;
 
 function unescapeAnchor(value) {
-  return value.replace(/\\(["\\])/g, '$1');
+  return value.replace(/\\(["\\])/g, "$1");
 }
 
 /**
@@ -71,12 +75,12 @@ function resolveSkillBodyPath(skillsRoot, base) {
   // may also nest it under `skills/`. Probe both, prefer an archive over
   // the compact shim.
   for (const archived of [
-    join(skillsRoot, 'skill-bodies', base, 'SKILL.md'),
-    join(dirname(resolve(skillsRoot)), 'skill-bodies', base, 'SKILL.md'),
+    join(skillsRoot, "skill-bodies", base, "SKILL.md"),
+    join(dirname(resolve(skillsRoot)), "skill-bodies", base, "SKILL.md"),
   ]) {
     if (existsSync(archived)) return archived;
   }
-  return join(skillsRoot, base, 'SKILL.md');
+  return join(skillsRoot, base, "SKILL.md");
 }
 
 function parseFrontmatter(source) {
@@ -103,10 +107,14 @@ function buildSkillIndex(skillsRoot) {
     // YAML quotes the way the runtime frontmatter parser does, or a quoted
     // `name: "omc-plan"` indexes under the quoted scalar and rejects extends
     // targets the runtime would accept.
-    const raw = parseFrontmatter(stripLeadingUtf8Bom(readFileSync(bodyPath, 'utf8'))).name;
+    const raw = parseFrontmatter(
+      stripLeadingUtf8Bom(readFileSync(bodyPath, "utf8")),
+    ).name;
     const registeredName =
-      typeof raw === 'string' && raw.length > 1
-        && ((raw.startsWith('"') && raw.endsWith('"')) || (raw.startsWith("'") && raw.endsWith("'")))
+      typeof raw === "string" &&
+      raw.length > 1 &&
+      ((raw.startsWith('"') && raw.endsWith('"')) ||
+        (raw.startsWith("'") && raw.endsWith("'")))
         ? raw.slice(1, -1)
         : raw;
     if (registeredName) index.set(registeredName, bodyPath);
@@ -123,151 +131,231 @@ async function main() {
   // root, or a missing path's canonical root) and silently validate an
   // unrelated project.
   if (!statSync(projectRoot, { throwIfNoEntry: false })?.isDirectory()) {
-    console.error(`check-omc-playbooks: project root does not exist or is not a directory: ${projectRoot}`);
+    console.error(
+      `check-omc-playbooks: project root does not exist or is not a directory: ${projectRoot}`,
+    );
     return 1;
   }
   // Producers resolve the directory through the checker so a playbook lands
   // where validation looks, even when OMC_STATE_DIR or a workspace marker
   // redirects state away from the checkout's literal .omc/.
-  if (args.includes('--print-playbooks-dir')) {
-    console.log(join(await resolveOmcStateRoot(projectRoot), 'playbooks'));
+  if (args.includes("--print-playbooks-dir")) {
+    console.log(join(await resolveOmcStateRoot(projectRoot), "playbooks"));
     return 0;
   }
-  const playbooksDir = join(await resolveOmcStateRoot(projectRoot), 'playbooks');
-  if (!existsSync(playbooksDir)) {
-    console.log('check-omc-playbooks: no .omc/playbooks directory — nothing to check');
+  const playbooksDir = join(
+    await resolveOmcStateRoot(projectRoot),
+    "playbooks",
+  );
+  // A user-level playbook (pstack #454's idea) extends a bundled skill in
+  // every repository without a copy per project. It lives beside the
+  // user-level skills tree this checker already reads, under the same
+  // ${CLAUDE_CONFIG_DIR:-$HOME/.claude} resolver.
+  const userPlaybooksDir = join(
+    process.env.CLAUDE_CONFIG_DIR ?? join(homedir(), ".claude"),
+    "omc",
+    "playbooks",
+  );
+  const hasProjectPlaybooks = existsSync(playbooksDir);
+  const hasUserPlaybooks = existsSync(userPlaybooksDir);
+  if (!hasProjectPlaybooks && !hasUserPlaybooks) {
+    console.log(
+      `check-omc-playbooks: no playbooks to check — neither ${playbooksDir} nor ${userPlaybooksDir} exists`,
+    );
     return 0;
   }
   const skillsRoot = resolveSkillsRoot();
   const problems = [];
-  let files;
-  let symlinked = [];
-  try {
-    const dirents = readdirSync(playbooksDir, { withFileTypes: true });
-    // A symlinked playbook would otherwise vanish from this filter and the
-    // checker could exit 0 with "nothing to check" while an invalid target
-    // sits behind the link — reject it instead of skipping silently.
-    symlinked = dirents.filter((e) => e.isSymbolicLink() && e.name.endsWith('.md')).map((e) => e.name);
-    files = dirents
-      .filter((e) => e.isFile() && e.name.endsWith('.md'))
-      .map((e) => e.name)
-      .sort();
-  } catch (error) {
-    if (error && error.code === 'ENOTDIR') {
-      console.error(`check-omc-playbooks: ${playbooksDir} is not a directory`);
-      return 1;
+  // Each source is one playbook directory: the project's, then the user's.
+  // User-dir problems carry a `user/` prefix so a shared playbook's issues
+  // are attributable when the same name exists in both scopes.
+  const sources = [];
+  for (const [dir, label, present] of [
+    [playbooksDir, "", hasProjectPlaybooks],
+    [userPlaybooksDir, "user/", hasUserPlaybooks],
+  ]) {
+    if (!present) continue;
+    try {
+      const dirents = readdirSync(dir, { withFileTypes: true });
+      // A symlinked playbook would otherwise vanish from this filter and the
+      // checker could exit 0 with "nothing to check" while an invalid target
+      // sits behind the link — reject it instead of skipping silently.
+      sources.push({
+        dir,
+        label,
+        symlinked: dirents
+          .filter((e) => e.isSymbolicLink() && e.name.endsWith(".md"))
+          .map((e) => e.name),
+        files: dirents
+          .filter((e) => e.isFile() && e.name.endsWith(".md"))
+          .map((e) => e.name)
+          .sort(),
+      });
+    } catch (error) {
+      if (error && error.code === "ENOTDIR") {
+        console.error(`check-omc-playbooks: ${dir} is not a directory`);
+        return 1;
+      }
+      throw error;
     }
-    throw error;
   }
   const skillIndex = buildSkillIndex(skillsRoot);
-  for (const name of symlinked) {
-    problems.push(`${name}: is a symlink; playbooks must be regular files`);
+  for (const source of sources) {
+    for (const name of source.symlinked) {
+      problems.push(
+        `${source.label}${name}: is a symlink; playbooks must be regular files`,
+      );
+    }
   }
 
-  if (files.length === 0 && symlinked.length === 0) {
-    console.log('check-omc-playbooks: no project playbooks — nothing to check');
+  const totalCount = sources.reduce(
+    (n, s) => n + s.files.length + s.symlinked.length,
+    0,
+  );
+  if (totalCount === 0) {
+    console.log("check-omc-playbooks: no playbooks — nothing to check");
     return 0;
   }
 
-  for (const file of files) {
-    // Project playbooks can carry a UTF-8 BOM just like bundled skills;
-    // strip it before parsing or the frontmatter block is invisible.
-    const source = readFileSync(join(playbooksDir, file), 'utf8');
-    const fields = parseFrontmatter(stripLeadingUtf8Bom(source));
-    const extendsValue = fields.extends;
-    // One error per problem: record both missing required fields before
-    // deciding whether anchor validation can run at all.
-    const missingExtends = !extendsValue;
-    if (missingExtends) {
-      problems.push(`${file}: frontmatter is missing an "extends:" field`);
-    }
-    // A YAML placeholder such as when: "" parses to the quote characters;
-    // decode and trim so a semantically empty trigger sentence counts as
-    // missing.
-    const whenValue =
-      typeof fields.when === 'string' ? fields.when.replace(/^['"]+|['"]+$/g, '').trim() : fields.when;
-    if (!whenValue) {
-      problems.push(`${file}: frontmatter is missing a "when:" field`);
-    }
-    if (missingExtends) continue;
-    // Decode a quoted extends scalar the way the runtime frontmatter parser
-    // does, or `extends: "tdd"` splits to `"tdd"` and fails the name regex.
-    const extendsDecoded =
-      typeof extendsValue === 'string' && extendsValue.length > 1
-        && ((extendsValue.startsWith('"') && extendsValue.endsWith('"'))
-          || (extendsValue.startsWith("'") && extendsValue.endsWith("'")))
-        ? extendsValue.slice(1, -1)
-        : extendsValue;
-    const baseNames = extendsDecoded.split(',').map((s) => s.trim()).filter(Boolean);
-    if (baseNames.length === 0) {
-      problems.push(`${file}: "extends:" lists no skills (empty or separators only)`);
-      continue;
-    }
-    // Collect every base body first: an anchor belongs to whichever extended
-    // skill contains it, so each anchor is checked against the union — an
-    // anchor quoting one base must not be demanded of the others.
-    const baseBodies = new Map();
-    let allBasesFound = true;
-    for (const base of baseNames) {
-      // A canonical bundled-skill name only — no separators, no dots, so the
-      // resolved path cannot leave the skills root.
-      if (!/^[a-z0-9][a-z0-9-]*$/.test(base)) {
-        problems.push(`${file}: invalid extended skill name "${base}" (must be a bundled skill name, not a path)`);
-        allBasesFound = false;
-        continue;
-      }
-      const skillPath = skillIndex.get(base);
-      if (!skillPath || !existsSync(skillPath)) {
-        problems.push(`${file}: extends "${base}" but no bundled skill named "${base}" exists (skills root: ${skillsRoot})`);
-        allBasesFound = false;
-        continue;
-      }
-      const resolvedBody = readFileSync(skillPath, 'utf8');
-      if (resolvedBody.includes('<!-- OMC:COMPACT-PLUGIN-SKILL -->') && !allowArchiveOnly) {
+  for (const source of sources) {
+    for (const file of source.files) {
+      // Project playbooks can carry a UTF-8 BOM just like bundled skills;
+      // strip it before parsing or the frontmatter block is invisible.
+      const fileLabel = `${source.label}${file}`;
+      const playbookSource = readFileSync(join(source.dir, file), "utf8");
+      const fields = parseFrontmatter(stripLeadingUtf8Bom(playbookSource));
+      const extendsValue = fields.extends;
+      // One error per problem: record both missing required fields before
+      // deciding whether anchor validation can run at all.
+      const missingExtends = !extendsValue;
+      if (missingExtends) {
         problems.push(
-          `${file}: extends "${base}" resolves to an archive-only compact shim (no editable source at this install); extend the source skill tree or pass --allow-archive-only if this install is intentionally archive-only`,
+          `${fileLabel}: frontmatter is missing an "extends:" field`,
         );
-        allBasesFound = false;
+      }
+      // A YAML placeholder such as when: "" parses to the quote characters;
+      // decode and trim so a semantically empty trigger sentence counts as
+      // missing.
+      const whenValue =
+        typeof fields.when === "string"
+          ? fields.when.replace(/^['"]+|['"]+$/g, "").trim()
+          : fields.when;
+      if (!whenValue) {
+        problems.push(`${fileLabel}: frontmatter is missing a "when:" field`);
+      }
+      if (missingExtends) continue;
+      // Decode a quoted extends scalar the way the runtime frontmatter parser
+      // does, or `extends: "tdd"` splits to `"tdd"` and fails the name regex.
+      const extendsDecoded =
+        typeof extendsValue === "string" &&
+        extendsValue.length > 1 &&
+        ((extendsValue.startsWith('"') && extendsValue.endsWith('"')) ||
+          (extendsValue.startsWith("'") && extendsValue.endsWith("'")))
+          ? extendsValue.slice(1, -1)
+          : extendsValue;
+      const baseNames = extendsDecoded
+        .split(",")
+        .map((s) => s.trim())
+        .filter(Boolean);
+      if (baseNames.length === 0) {
+        problems.push(
+          `${fileLabel}: "extends:" lists no skills (empty or separators only)`,
+        );
         continue;
       }
-      baseBodies.set(base, resolvedBody);
-    }
-    if (allBasesFound) {
-      ANCHOR_RE.lastIndex = 0;
-      // The BOM is stripped before the frontmatter fence is removed, or a
-      // BOM-prefixed `---` leaves the frontmatter inside the anchor-scanned
-      // body.
-      const body = stripLeadingUtf8Bom(source).replace(/^---\r?\n[\s\S]*?\r?\n---(?:\r?\n|$)/, '');
-      let anchor;
-      while ((anchor = ANCHOR_RE.exec(body)) !== null) {
-        const quoted = unescapeAnchor(anchor[2]);
-        if (!quoted.trim()) {
-          problems.push(`${file}: ${anchor[1]} anchor must not be empty`);
+      // Collect every base body first: an anchor belongs to whichever extended
+      // skill contains it, so each anchor is checked against the union — an
+      // anchor quoting one base must not be demanded of the others.
+      const baseBodies = new Map();
+      let allBasesFound = true;
+      for (const base of baseNames) {
+        // A canonical bundled-skill name only — no separators, no dots, so the
+        // resolved path cannot leave the skills root.
+        if (!/^[a-z0-9][a-z0-9-]*$/.test(base)) {
+          problems.push(
+            `${fileLabel}: invalid extended skill name "${base}" (must be a bundled skill name, not a path)`,
+          );
+          allBasesFound = false;
           continue;
         }
-        const presentIn = [...baseBodies.entries()].filter(([, body]) => body.includes(quoted)).map(([name]) => name);
-        if (presentIn.length === 0) {
+        const skillPath = skillIndex.get(base);
+        if (!skillPath || !existsSync(skillPath)) {
           problems.push(
-            `${file}: ${anchor[1]} anchor "${quoted}" does not appear in any extended skill (${baseNames.join(', ')}) — the bundled step text changed; re-anchor the change`,
+            `${fileLabel}: extends "${base}" but no bundled skill named "${base}" exists (skills root: ${skillsRoot})`,
           );
+          allBasesFound = false;
+          continue;
         }
-      }
-      for (const [lineNo, line] of body.split('\n').entries()) {
-        const m = line.match(/\*\*(After|Before|Replace|In)\*\*\s+"(?:\\.|[^"\\])*$/);
-        if (m) {
+        const resolvedBody = readFileSync(skillPath, "utf8");
+        if (
+          resolvedBody.includes("<!-- OMC:COMPACT-PLUGIN-SKILL -->") &&
+          !allowArchiveOnly
+        ) {
           problems.push(
-            `${file}:${lineNo + 1}: malformed ${m[1]} anchor marker — opening quote without a closing quote on the same line`,
+            `${fileLabel}: extends "${base}" resolves to an archive-only compact shim (no editable source at this install); extend the source skill tree or pass --allow-archive-only if this install is intentionally archive-only`,
           );
+          allBasesFound = false;
+          continue;
+        }
+        baseBodies.set(base, resolvedBody);
+      }
+      if (allBasesFound) {
+        ANCHOR_RE.lastIndex = 0;
+        // The BOM is stripped before the frontmatter fence is removed, or a
+        // BOM-prefixed `---` leaves the frontmatter inside the anchor-scanned
+        // body.
+        const body = stripLeadingUtf8Bom(playbookSource).replace(
+          /^---\r?\n[\s\S]*?\r?\n---(?:\r?\n|$)/,
+          "",
+        );
+        let anchor;
+        while ((anchor = ANCHOR_RE.exec(body)) !== null) {
+          const quoted = unescapeAnchor(anchor[2]);
+          if (!quoted.trim()) {
+            problems.push(
+              `${fileLabel}: ${anchor[1]} anchor must not be empty`,
+            );
+            continue;
+          }
+          const presentIn = [...baseBodies.entries()]
+            .filter(([, body]) => body.includes(quoted))
+            .map(([name]) => name);
+          if (presentIn.length === 0) {
+            problems.push(
+              `${fileLabel}: ${anchor[1]} anchor "${quoted}" does not appear in any extended skill (${baseNames.join(", ")}) — the bundled step text changed; re-anchor the change`,
+            );
+          }
+        }
+        for (const [lineNo, line] of body.split("\n").entries()) {
+          const m = line.match(
+            /\*\*(After|Before|Replace|In)\*\*\s+"(?:\\.|[^"\\])*$/,
+          );
+          if (m) {
+            problems.push(
+              `${fileLabel}:${lineNo + 1}: malformed ${m[1]} anchor marker — opening quote without a closing quote on the same line`,
+            );
+          }
         }
       }
     }
   }
 
   if (problems.length > 0) {
-    for (const problem of problems) console.error(`check-omc-playbooks: ${problem}`);
+    for (const problem of problems)
+      console.error(`check-omc-playbooks: ${problem}`);
     return 1;
   }
-  console.log(`check-omc-playbooks: ${files.length} project playbook(s) valid against ${skillsRoot}`);
+  const projectCount = sources
+    .filter((s) => !s.label)
+    .reduce((n, s) => n + s.files.length, 0);
+  const userCount = sources
+    .filter((s) => s.label)
+    .reduce((n, s) => n + s.files.length, 0);
+  const summary =
+    userCount > 0
+      ? `${projectCount} project + ${userCount} user playbook(s) valid against ${skillsRoot}`
+      : `${projectCount} project playbook(s) valid against ${skillsRoot}`;
+  console.log(`check-omc-playbooks: ${summary}`);
   return 0;
 }
 
