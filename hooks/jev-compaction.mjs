@@ -1132,17 +1132,23 @@ function blockWords(block) {
 // message's, not the user's, so a block stops before a carried envelope that quotes the note. Each call
 // reads only up to that header and skips an envelope in one step, so the blocks of a row stay linear.
 function userBlockEnd(text, from, spans = [], footers = []) {
-  let f = 0;
-  for (let hi = footers.length; f < hi;) { const mid = (f + hi) >> 1; if (footers[mid] < from) f = mid + 1; else hi = mid; }
-  const first = f < footers.length ? footers[f] : text.indexOf(QUEUED_TAIL, from);
-  if (first < 0) return -1;
-  const next = text.indexOf(QUEUED_PREFIX, first + QUEUED_TAIL.length);
-  const limit = next < 0 ? text.length : next;
   const inside = (i) => {
     let lo = 0;
     for (let hi = spans.length; lo < hi;) { const mid = (lo + hi) >> 1; if (spans[mid].from <= i) lo = mid + 1; else hi = mid; }
     return lo > 0 && i < spans[lo - 1].to ? spans[lo - 1] : undefined;
   };
+  // The first footer after `from` outside every envelope (one in an envelope is that message's).
+  const footerFrom = (i) => {
+    let f = 0;
+    for (let hi = footers.length; f < hi;) { const mid = (f + hi) >> 1; if (footers[mid] < i) f = mid + 1; else hi = mid; }
+    return f;
+  };
+  let f = footerFrom(from);
+  for (let e; f < footers.length && (e = inside(footers[f])); f = footerFrom(e.to));
+  const first = f < footers.length ? footers[f] : text.indexOf(QUEUED_TAIL, from);
+  if (first < 0) return -1;
+  const next = text.indexOf(QUEUED_PREFIX, first + QUEUED_TAIL.length);
+  const limit = next < 0 ? text.length : next;
   let t = text.lastIndexOf(QUEUED_TAIL, limit - QUEUED_TAIL.length);
   for (let e; t >= from && (e = inside(t)); t = text.lastIndexOf(QUEUED_TAIL, e.from - 1));
   if (t < from) return -1;
@@ -1163,6 +1169,7 @@ function positionsOf(text, s) {
 function piecesOf(text) {
   const pieces = [];
   const footers = positionsOf(text, QUEUED_FOOTER);
+  const spans = envelopesOf(text).filter((e) => deliveryOf(e.text)); // envelopes the user pasted
   const lastTail = text.lastIndexOf(QUEUED_TAIL);
   let end = -1;
   let at = 0;
@@ -1170,7 +1177,7 @@ function piecesOf(text) {
     const frame = at >= end ? frameOf(`${line}\n`) : undefined;
     if (!pieces.length || frame) {
       pieces.push(line);
-      end = frame === 'user' && at < lastTail ? userBlockEnd(text, at, [], footers) : -1;
+      end = frame === 'user' && at < lastTail ? userBlockEnd(text, at, spans, footers) : -1;
     } else pieces[pieces.length - 1] += `\n${line}`;
     at += line.length + 1;
   }
@@ -1220,8 +1227,13 @@ function userWords(m) {
   if (opensDelivery(own) || (m.toolResults && m.toolResults.length)) return [...piecesOf(own).flatMap(blockWords), ...carried];
   const text = own.replace(HOST_BLOCK, '').trim();
   if (!text || HOST_BLOCK_OPEN.test(text) || NOT_USER_PREFIXES.some((p) => text.startsWith(p))) return carried;
-  // A prompt the user typed: an envelope in it is a quote they pasted, so the whole prompt is theirs.
-  return [m.text.replace(HOST_BLOCK, '').trim()];
+  // A prompt the user typed: an envelope in it is a quote they pasted, so the whole prompt is theirs,
+  // except the jev envelopes build appends at the end of a row it rebuilt (a result row whose results
+  // all became traces keeps its own text before them): those stay messages of their senders.
+  let cut = m.text.length;
+  for (let k = delivered.length - 1; k >= 0 && /^<system-reminder id="jev-\d+">/.test(delivered[k].text) && !m.text.slice(delivered[k].to, cut).trim(); k--) cut = delivered[k].from;
+  const typed = m.text.slice(0, cut).replace(HOST_BLOCK, '').trim();
+  return [...(typed ? [typed] : []), ...delivered.filter((e) => e.from >= cut).flatMap((e) => blockWords(e.text))];
 }
 
 // Messages delivered during a tool turn that the API form shows and `messages` does not (deliveryOf):
@@ -1278,7 +1290,8 @@ function queuedOf(messages, api) {
       }
       const kind = deliveryOf(b.text);
       if (!kind) continue;
-      rows.set(anchor, [...(rows.get(anchor) || []), b.text]);
+      if (!rows.has(anchor)) rows.set(anchor, []);
+      rows.get(anchor).push(b.text);
       counts[kind]++;
     }
   }
@@ -2039,7 +2052,12 @@ async function ownThreshold($, e, next) {
     // removable tool results are worth it, so the threshold never forces the built-in summary.
     session.lastAttempt = session.turnCount;
     const messages = await $.session.messages();
-    const before = messages.reduce((s, m) => s + messageChars(m), 0);
+    // Messages delivered during a tool turn are in the API form only; decide counts them, so the
+    // preflight does too (else it could ask for a compaction that decide hands back to the summary).
+    const api = apiFormOf((await withDeadline($, Promise.resolve().then(() => $.session.messages({ as: 'api' })), HOST_MS)).value);
+    const delivered = queuedOf(messages, api);
+    let before = messages.reduce((s, m) => s + messageChars(m), 0);
+    if (delivered) for (const blocks of delivered.rows.values()) before += rawChars(blocks);
     const removable = removableChars(findCandidates(messages, cfg.privatePaths));
     if (!before || removable / before < MIN_REDUCTION || removable / CHARS_PER_TOKEN < OWN_MIN_GAIN * window) return result;
     let reason;
