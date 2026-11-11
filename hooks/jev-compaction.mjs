@@ -46,11 +46,8 @@
  * masking, with every string bounded by OMC_JEV_EXCERPT_CHARS_COMPACTION (default
  * DEFAULT_EXCERPT_CHARS). Results of calls on secret paths (and on OMC_JEV_COMPACT_PRIVATE_PATHS)
  * and results without text are never sent; neither is the result of an agent, message or task call
- * whose prose names such a path (it is kept as if unanswered). The output of such a call started in
- * the background stays out the same way when a later call reads it (TaskOutput or BashOutput by its
- * id, a Read or `tail` of its output file), and so does what TaskOutput or BashOutput returns for a
- * background call this conversation does not hold. A line naming such a path in a result, an input,
- * the user's words or the /compact instructions is sent as SECRET_LINE.
+ * whose prose names such a path (it is kept as if unanswered). A line naming such a path in a result,
+ * an input, the user's words or the /compact instructions is sent as SECRET_LINE.
  *
  * Shared breaker and request limit (OMC_JEV_BREAKER=1, OMC_JEV_MAX_RPM=<n>): the same files and rules as
  * the script side (scripts/lib/jev-breaker.mjs, see its header), under the same state directory and
@@ -183,12 +180,10 @@ const NOT_USER_PREFIXES = [
   '<side-sessions-event>', '<ci-monitor-event>', '<scheduled-task', '<cross-session-message', 'Another Claude session sent a message:',
 ];
 
-// Secret paths: SSH keys, git and gh credentials, Claude Code credentials, AWS credentials, .netrc, .env and
-// .envrc files (.env.example is not a secret). A .netrc or .env name starts after a separator, a quote, or a
-// shell or prose delimiter, never inside a word (`ctx.env`). A .env name ends before such a delimiter or a
-// dot that ends a sentence (`/repo/.env:2:` of grep, "edit .env, then", "in `.env`."), not before a slash (a
-// `.env/` directory).
-const SECRET_PATH = /[\\/]\.ssh[\\/]+(?:id_[a-z0-9_]+|[^\s"'\\/]*_key)\b|\.git-credentials\b|[\\/]\.config[\\/]+gh[\\/]+hosts\.ya?ml\b|\.credentials\.json\b|[\\/]\.aws[\\/]+credentials\b|(?:^|[\s"'`\\/=;|&<>()[\]{},:])\.netrc\b|(?:^|[\s"'`\\/=;|&<>()[\]{},:])\.env(?!\.example)(?:rc|\.[a-z0-9_-]+)?(?=$|[\s"'`;|&<>()[\]{},:!?]|\.(?![a-z0-9_-]))/i;
+// Secret paths in the path and command fields of a call (a mention in a prompt or a result does not
+// count): SSH keys, git and gh credentials, Claude Code credentials, AWS credentials, .netrc, .env and
+// .envrc files (.env.example is not a secret).
+const SECRET_PATH = /[\\/]\.ssh[\\/]+(?:id_[a-z0-9_]+|[^\s"'\\/]*_key)\b|\.git-credentials\b|[\\/]\.config[\\/]+gh[\\/]+hosts\.ya?ml\b|\.credentials\.json\b|[\\/]\.aws[\\/]+credentials\b|(?:^|[\s"'\\/=])\.netrc\b|(?:^|[\s"'\\/=;|&<>])\.env(?!\.example)(?:rc|\.[a-z0-9_-]+)?(?=$|[\s"':,;|&)<>])/i;
 // Fields that name a path or run a command, in any tool (built-in or MCP).
 const PATH_FIELDS = ['file_path', 'notebook_path', 'path', 'command'];
 const TOOL_PATH_FIELDS = { Glob: ['pattern'], Grep: ['glob'] };
@@ -200,10 +195,6 @@ const NAMED_FIELD_TOOLS = new Set(['Read', 'Write', 'Edit', 'MultiEdit', 'Notebo
 // not make the call a trace, since the result is the agent's own report, but the result is not sent either:
 // it is kept as if its request had been held back (UNANSWERED_SCORE), because the agent may have read the path.
 const PROSE_TOOLS = new Set(['Agent', 'Task', 'SendMessage', 'TaskCreate', 'TaskUpdate', 'TaskStop', 'TodoWrite', 'AskUserQuestion', 'ExitPlanMode', 'Skill']);
-// Tools that return the output of a call started in the background, by the id that call's result gave.
-const OUTPUT_TOOLS = new Set(['TaskOutput', 'BashOutput']);
-// The shortest word of a background call's result a later call can name it by (its id, its output file).
-const LINK_WORD_MIN = 6;
 const SECRET_WALK_MAX = 2000;
 // A line longer than MASK_SLACK_CHARS at the edge of a head or tail cut is read up to LINE_EDGE_CHARS further, so
 // a secret path later on that line still hides it.
@@ -797,63 +788,6 @@ function anySecretPath(input, privatePaths) {
   return walk(input, 0);
 }
 
-// The words of a background call's result: its id and its output file, with the host's own words around them.
-const LINK_SPLIT = /[\s"'`|;&<>()[\]{},=]+/;
-const linkWord = (w) => w.replace(/[.:]+$/, '').replace(/[\\/]+/g, '/').toLowerCase();
-function resultWords(text) {
-  return new Set(String(text ?? '').split(LINK_SPLIT).map(linkWord).filter((w) => w.length >= LINK_WORD_MIN));
-}
-
-// What a call can name a background call by: every string of its input whole (a TaskOutput id, a Read of the output
-// file) and every word of it with a slash (`tail` of the output file); keys are field names (`command`), not names.
-// Beyond SECRET_WALK_MAX strings and keys or below depth 8 it is undefined: the call counts as naming every
-// background call (fail closed).
-function inputNames(input) {
-  const out = [];
-  let seen = 0;
-  const walk = (v, depth) => {
-    if (depth > 8) return false;
-    if (typeof v === 'string') {
-      if (++seen > SECRET_WALK_MAX) return false;
-      out.push(linkWord(v.trim()));
-      for (const w of v.split(LINK_SPLIT)) if (/[\\/]/.test(w)) out.push(linkWord(w));
-      return true;
-    }
-    if (Array.isArray(v)) return v.every((x) => walk(x, depth + 1));
-    if (v && typeof v === 'object') return Object.values(v).every((x) => ++seen <= SECRET_WALK_MAX && walk(x, depth + 1));
-    return true;
-  };
-  return walk(input, 0) ? out : undefined;
-}
-
-// Secrecy of every call in the conversation, in order: `secret` (a trace without a request) and `held` (kept as if
-// its request were held back, never sent). A call started with run_in_background hands its output on later: to
-// TaskOutput or BashOutput by its id, to a Read or `tail` of its output file, to a SendMessage to the agent. A later
-// call that names a word of its result (inputNames, resultWords) takes on its secrecy. A TaskOutput or BashOutput
-// call that names no background call of this conversation (one an earlier compaction removed, one the user sent to
-// the background) is held: what it returns is not known.
-function callSecrecy(messages, privatePaths) {
-  const results = new Map();
-  for (const m of messages) if (m.role === 'user') for (const r of m.toolResults || []) results.set(r.tool_use_id, r.text || '');
-  const background = [];
-  const out = new Map();
-  for (const m of messages) {
-    if (m.role !== 'assistant') continue;
-    for (const u of m.toolUses || []) {
-      const s = { secret: touchesSecretPath(u.tool, u.input, privatePaths), held: PROSE_TOOLS.has(u.tool) && anySecretPath(u.input, privatePaths) };
-      if (background.length || OUTPUT_TOOLS.has(u.tool)) {
-        const names = inputNames(u.input);
-        const named = background.filter((b) => !names || names.some((n) => b.words.has(n)));
-        for (const b of named) { s.secret ||= b.secret; s.held ||= b.held; }
-        if (OUTPUT_TOOLS.has(u.tool) && !named.length) s.held = true;
-      }
-      out.set(u.tool_use_id, s);
-      if (u.input?.run_in_background === true && results.has(u.tool_use_id)) background.push({ ...s, words: resultWords(results.get(u.tool_use_id)) });
-    }
-  }
-  return out;
-}
-
 function touchesSecretPath(tool, input, privatePaths) {
   if (!input || typeof input !== 'object') return false;
   const values = [];
@@ -968,7 +902,6 @@ const TASK_LIST = /^TodoWrite$|(?:^|__)update_plan$/;
 // Candidates: tool results outside the first message and the last KEEP_LAST messages whose call is
 // in an earlier assistant message.
 function findCandidates(messages, privatePaths) {
-  const secrecy = callSecrecy(messages, privatePaths);
   const uses = new Map();
   messages.forEach((m, i) => { if (m.role === 'assistant') for (const u of m.toolUses || []) uses.set(u.tool_use_id, { i, u }); });
   const tailStart = Math.max(1, messages.length - KEEP_LAST);
@@ -984,8 +917,9 @@ function findCandidates(messages, privatePaths) {
         summary: inputSummary(found.u.tool, found.u.input),
         inputChars: (found.u.tool || '').length + inputJson(found.u.input).length,
         resultChars: (r.text || '').length,
-        secret: secrecy.get(r.tool_use_id)?.secret ?? false,
-        secretHeld: secrecy.get(r.tool_use_id)?.held ?? false,
+        secret: touchesSecretPath(found.u.tool, found.u.input, privatePaths),
+        proseSecret: PROSE_TOOLS.has(found.u.tool) && anySecretPath(found.u.input, privatePaths),
+        taskOutput: found.u.tool === 'TaskOutput',
         textOnly: textOnlyResult(r),
         score: 0, asked: false, answered: false,
       };
@@ -1404,12 +1338,14 @@ async function decide($, e, cfg, record, started) {
   }
 
   // Newest results first; only text results of calls outside secret paths are asked about.
-  const askable = [...candidates].sort((a, b) => b.resIdx - a.resIdx).filter((c) => !c.secret && !c.secretHeld && c.textOnly);
+  const askable = [...candidates].sort((a, b) => b.resIdx - a.resIdx).filter((c) => !c.secret && !c.proseSecret && !c.taskOutput && c.textOnly);
   record.secret_skipped = candidates.filter((c) => c.secret).length;
-  // A prose call that names a secret path, or a call that reads the output of such a background call or of one not
-  // known (callSecrecy): its result is never sent; it stays as if its request were held back.
+  // A prose call that names a secret path: its result is never sent; it stays as if its request were held back.
   record.secret_held = 0;
-  for (const c of candidates) if (c.secretHeld && !c.secret && c.textOnly) { c.asked = true; c.score = UNANSWERED_SCORE; record.secret_held++; }
+  for (const c of candidates) if (c.proseSecret && !c.secret && c.textOnly) { c.asked = true; c.score = UNANSWERED_SCORE; record.secret_held++; }
+  // A TaskOutput result whose source task may have accessed a secret: conservatively hold it.
+  record.task_output_held = 0;
+  for (const c of candidates) if (c.taskOutput && !c.secret && c.textOnly) { c.asked = true; c.score = UNANSWERED_SCORE; record.task_output_held++; }
   record.non_text = candidates.filter((c) => !c.textOnly).length;
   let left = cfg.maxRequests ? cfg.maxRequests - session.requests : MAX_REQUESTS;
   if (left <= 0) {
