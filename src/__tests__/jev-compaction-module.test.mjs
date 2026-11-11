@@ -440,6 +440,39 @@ describe('jev-compaction module: active compaction', () => {
     expect(run.records()[0]).toMatchObject({ secret_skipped: 3 });
   });
 
+  it('recognizes .env paths with punctuation delimiters (colon, comma) as secret paths', () => {
+    // Test .env with grep-style colon delimiter
+    expect(omitSecretLines('/repo/.env:2:shortsecret', [])).toBe('[line omitted: secret path]');
+    expect(omitSecretLines('ERROR: /repo/.env:2:value', [])).toBe('[line omitted: secret path]');
+    
+    // Test .env with comma delimiter (in lists or prose)
+    expect(omitSecretLines('/repo/.env, other-file.txt', [])).toBe('[line omitted: secret path]');
+    expect(omitSecretLines('files: /repo/.env, /repo/src', [])).toBe('[line omitted: secret path]');
+    
+    // Ensure .env.example is still not treated as secret even with punctuation
+    expect(omitSecretLines('/repo/.env.example:1:notasecret', [])).toBe('/repo/.env.example:1:notasecret');
+    expect(omitSecretLines('/repo/.env.example, other', [])).toBe('/repo/.env.example, other');
+  });
+
+  it('conservatively holds TaskOutput results since they may come from background tasks that accessed secrets', async () => {
+    const messages = conversation(20, {
+      tool: (i) => {
+        if (i === 3) return 'Bash';
+        if (i === 5) return 'TaskOutput';
+        return 'Bash';
+      },
+      input: (i) => {
+        if (i === 3) return { command: 'process data' };
+        if (i === 5) return { task_id: 'bg-task-123' };
+        return { command: `cat notes-${i}.txt` };
+      },
+    });
+    const run = await compactOnce(messages);
+    const [record] = run.records();
+    // TaskOutput (at i=5) should be held conservatively
+    expect(record.task_output_held).toBeGreaterThanOrEqual(1);
+  });
+
   it('reads a run of a million slashes or backslashes in linear time, in a private-path check and in a command\'s file names', async () => {
     const pp = ['/home/u/secret-notes'];
     for (const s of ['/'.repeat(1_000_000), '\\'.repeat(1_000_000), `a${'/'.repeat(1_000_000)}!`, `${'\\/'.repeat(500_000)}x.md`]) {

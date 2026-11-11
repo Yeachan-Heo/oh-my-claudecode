@@ -183,7 +183,7 @@ const NOT_USER_PREFIXES = [
 // Secret paths in the path and command fields of a call (a mention in a prompt or a result does not
 // count): SSH keys, git and gh credentials, Claude Code credentials, AWS credentials, .netrc, .env and
 // .envrc files (.env.example is not a secret).
-const SECRET_PATH = /[\\/]\.ssh[\\/]+(?:id_[a-z0-9_]+|[^\s"'\\/]*_key)\b|\.git-credentials\b|[\\/]\.config[\\/]+gh[\\/]+hosts\.ya?ml\b|\.credentials\.json\b|[\\/]\.aws[\\/]+credentials\b|(?:^|[\s"'\\/=])\.netrc\b|(?:^|[\s"'\\/=;|&<>])\.env(?!\.example)(?:rc|\.[a-z0-9_-]+)?(?=$|[\s"';|&)<>])/i;
+const SECRET_PATH = /[\\/]\.ssh[\\/]+(?:id_[a-z0-9_]+|[^\s"'\\/]*_key)\b|\.git-credentials\b|[\\/]\.config[\\/]+gh[\\/]+hosts\.ya?ml\b|\.credentials\.json\b|[\\/]\.aws[\\/]+credentials\b|(?:^|[\s"'\\/=])\.netrc\b|(?:^|[\s"'\\/=;|&<>])\.env(?!\.example)(?:rc|\.[a-z0-9_-]+)?(?=$|[\s"':,;|&)<>])/i;
 // Fields that name a path or run a command, in any tool (built-in or MCP).
 const PATH_FIELDS = ['file_path', 'notebook_path', 'path', 'command'];
 const TOOL_PATH_FIELDS = { Glob: ['pattern'], Grep: ['glob'] };
@@ -919,6 +919,7 @@ function findCandidates(messages, privatePaths) {
         resultChars: (r.text || '').length,
         secret: touchesSecretPath(found.u.tool, found.u.input, privatePaths),
         proseSecret: PROSE_TOOLS.has(found.u.tool) && anySecretPath(found.u.input, privatePaths),
+        taskOutput: found.u.tool === 'TaskOutput',
         textOnly: textOnlyResult(r),
         score: 0, asked: false, answered: false,
       };
@@ -1337,11 +1338,14 @@ async function decide($, e, cfg, record, started) {
   }
 
   // Newest results first; only text results of calls outside secret paths are asked about.
-  const askable = [...candidates].sort((a, b) => b.resIdx - a.resIdx).filter((c) => !c.secret && !c.proseSecret && c.textOnly);
+  const askable = [...candidates].sort((a, b) => b.resIdx - a.resIdx).filter((c) => !c.secret && !c.proseSecret && !c.taskOutput && c.textOnly);
   record.secret_skipped = candidates.filter((c) => c.secret).length;
   // A prose call that names a secret path: its result is never sent; it stays as if its request were held back.
   record.secret_held = 0;
   for (const c of candidates) if (c.proseSecret && !c.secret && c.textOnly) { c.asked = true; c.score = UNANSWERED_SCORE; record.secret_held++; }
+  // A TaskOutput result whose source task may have accessed a secret: conservatively hold it.
+  record.task_output_held = 0;
+  for (const c of candidates) if (c.taskOutput && !c.secret && c.textOnly) { c.asked = true; c.score = UNANSWERED_SCORE; record.task_output_held++; }
   record.non_text = candidates.filter((c) => !c.textOnly).length;
   let left = cfg.maxRequests ? cfg.maxRequests - session.requests : MAX_REQUESTS;
   if (left <= 0) {
