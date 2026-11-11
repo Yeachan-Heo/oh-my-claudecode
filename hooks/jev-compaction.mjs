@@ -45,7 +45,9 @@
  * and the result's first STATE_HEAD_CHARS and last STATE_TAIL_CHARS characters, all after secret
  * masking, with every string bounded by OMC_JEV_EXCERPT_CHARS_COMPACTION (default
  * DEFAULT_EXCERPT_CHARS). Results of calls on secret paths (and on OMC_JEV_COMPACT_PRIVATE_PATHS)
- * and results without text are never sent.
+ * and results without text are never sent; neither is the result of an agent, message or task call
+ * whose prose names such a path (it is kept as if unanswered). A line naming such a path in a result,
+ * an input, the user's words or the /compact instructions is sent as SECRET_LINE.
  *
  * Shared breaker and request limit (OMC_JEV_BREAKER=1, OMC_JEV_MAX_RPM=<n>): the same files and rules as
  * the script side (scripts/lib/jev-breaker.mjs, see its header), under the same state directory and
@@ -185,6 +187,21 @@ const SECRET_PATH = /[\\/]\.ssh[\\/]+(?:id_[a-z0-9_]+|[^\s"'\\/]*_key)\b|\.git-c
 // Fields that name a path or run a command, in any tool (built-in or MCP).
 const PATH_FIELDS = ['file_path', 'notebook_path', 'path', 'command'];
 const TOOL_PATH_FIELDS = { Glob: ['pattern'], Grep: ['glob'] };
+// Built-in tools whose path fields are the ones above. Any other tool (MCP, unknown) can open a path from any
+// field (`code`, `sql`, a nested option), so every string and key of its input is checked, at most
+// SECRET_WALK_MAX strings and keys; a larger or deeper input counts as touching a secret path.
+const NAMED_FIELD_TOOLS = new Set(['Read', 'Write', 'Edit', 'MultiEdit', 'NotebookEdit', 'Grep', 'Glob', 'LS', 'Bash', 'PowerShell', 'Monitor', 'WebFetch', 'WebSearch']);
+// Tools whose input is prose (an agent prompt, a message, a task). A secret or private path anywhere in it does
+// not make the call a trace, since the result is the agent's own report, but the result is not sent either:
+// it is kept as if its request had been held back (UNANSWERED_SCORE), because the agent may have read the path.
+const PROSE_TOOLS = new Set(['Agent', 'Task', 'SendMessage', 'TaskCreate', 'TaskUpdate', 'TaskStop', 'TodoWrite', 'AskUserQuestion', 'ExitPlanMode', 'Skill']);
+const SECRET_WALK_MAX = 2000;
+// A line longer than MASK_SLACK_CHARS at the edge of a head or tail cut is read up to LINE_EDGE_CHARS further, so
+// a secret path later on that line still hides it.
+const LINE_EDGE_CHARS = 4 * MASK_SLACK_CHARS;
+// What Jev gets instead of a line that names a secret or private path (the path and the rest of the line,
+// such as a grep hit, stay out).
+const SECRET_LINE = '[line omitted: secret path]';
 
 /** Mirror of parseJevEnv(POINT) in scripts/jev-resolve.mjs for a named-only point. */
 export function pointMode(raw, key) {
@@ -254,10 +271,18 @@ export function classifyFailure(result, now = Date.now()) {
 
 // First `head` and last `tail` characters of the masked text. A long text is masked only where those parts
 // come from (with MASK_SLACK_CHARS more on each side); the omitted count is of the original.
-function maskedHeadTail(text, head, tail) {
-  if (text.length <= head + tail + 2 * MASK_SLACK_CHARS) return headTail(maskSecrets(text), head, tail);
-  const first = maskSecrets(text.slice(0, head + MASK_SLACK_CHARS)).slice(0, head);
-  const last = maskSecrets(text.slice(-(tail + MASK_SLACK_CHARS))).slice(-tail);
+function maskedHeadTail(text, head, tail, privatePaths = []) {
+  const clean = (part) => maskSecrets(omitSecretLines(part, privatePaths));
+  if (text.length <= head + tail + 2 * MASK_SLACK_CHARS) return headTail(clean(text), head, tail);
+  // Each part is widened to whole lines (at most LINE_EDGE_CHARS more), so omitSecretLines sees the line its edge falls in.
+  let end = head + MASK_SLACK_CHARS;
+  const nl = text.indexOf('\n', end);
+  end = nl < 0 ? Math.min(text.length, end + LINE_EDGE_CHARS) : Math.min(nl, end + LINE_EDGE_CHARS);
+  let start = text.length - tail - MASK_SLACK_CHARS;
+  const pl = text.lastIndexOf('\n', start);
+  start = pl < 0 ? Math.max(0, start - LINE_EDGE_CHARS) : Math.max(pl + 1, start - LINE_EDGE_CHARS);
+  const first = clean(text.slice(0, end)).slice(0, head);
+  const last = clean(text.slice(start)).slice(-tail);
   return `${first}\n[... ${text.length - head - tail} chars omitted ...]\n${last}`;
 }
 const oneLine = (text) => String(text ?? '').replace(/\s+/g, ' ').trim();
@@ -353,7 +378,8 @@ async function readConfig($) {
     .filter(Boolean)
     // A leading ~ matches both as written (in a command) and expanded to the home directory.
     .flatMap((p) => (homeForPrivatePaths && /^~(?=$|[\\/])/.test(p) ? [p, slash(homeForPrivatePaths) + p.slice(1)] : [p]))
-    .map((p) => slash(p).toLowerCase());
+    // Runs of slashes and backslashes as one slash, as in namesSecretPath.
+    .map((p) => p.replace(/[\\/]+/g, '/').replace(/\/$/, '').toLowerCase());
   const endpoint = env.OMC_JEV_ENDPOINT || DEFAULT_ENDPOINT;
   return {
     mode,
@@ -722,17 +748,55 @@ function inputSummary(tool, input) {
   return oneLine(text);
 }
 
+function namesSecretPath(value, privatePaths) {
+  if (SECRET_PATH.test(value)) return true;
+  if (!privatePaths.length) return false;
+  // Every run of slashes and backslashes as one slash: a Windows path, its JSON form (C:\\Users\\x), an escaped
+  // slash (\/home\/u) and a doubled slash all compare equal to the private path (linear, unlike slash()).
+  const v = String(value).replace(/[\\/]+/g, '/').toLowerCase();
+  return privatePaths.some((p) => v.includes(p));
+}
+
+// The text with every line that names a secret or private path replaced by SECRET_LINE (exported for tests).
+export function omitSecretLines(text, privatePaths) {
+  const s = String(text ?? '');
+  if (!namesSecretPath(s, privatePaths)) return s;
+  return s.split('\n').map((line) => (namesSecretPath(line, privatePaths) ? SECRET_LINE : line)).join('\n');
+}
+
+// The input of a call as sent: every string and every key through omitSecretLines.
+function sentInputJson(input, privatePaths) {
+  const clean = (v) => {
+    if (typeof v === 'string') return omitSecretLines(v, privatePaths);
+    if (v && typeof v === 'object' && !Array.isArray(v)) return Object.fromEntries(Object.entries(v).map(([k, x]) => [omitSecretLines(k, privatePaths), x]));
+    return v;
+  };
+  try { return JSON.stringify(input ?? {}, (_k, v) => clean(v)) ?? ''; } catch { return ''; }
+}
+
+// Does any string or key of the input name a secret or private path? At most SECRET_WALK_MAX strings and keys,
+// depth 8; beyond that it counts as yes (fail closed).
+function anySecretPath(input, privatePaths) {
+  let seen = 0;
+  const walk = (v, depth) => {
+    if (depth > 8) return true;
+    if (typeof v === 'string') return ++seen > SECRET_WALK_MAX || namesSecretPath(v, privatePaths);
+    if (Array.isArray(v)) return v.some((x) => walk(x, depth + 1));
+    if (v && typeof v === 'object') return Object.entries(v).some(([k, x]) => ++seen > SECRET_WALK_MAX || namesSecretPath(k, privatePaths) || walk(x, depth + 1));
+    return false;
+  };
+  return walk(input, 0);
+}
+
 function touchesSecretPath(tool, input, privatePaths) {
   if (!input || typeof input !== 'object') return false;
   const values = [];
   for (const f of [...PATH_FIELDS, ...(TOOL_PATH_FIELDS[tool] || [])]) if (typeof input[f] === 'string') values.push(input[f]);
   if (Array.isArray(input.paths)) for (const p of input.paths) if (typeof p === 'string') values.push(p);
   if (typeof input.url === 'string' && /^file:/i.test(input.url)) values.push(input.url);
-  return values.some((v) => {
-    if (SECRET_PATH.test(v)) return true;
-    const value = slash(v).toLowerCase();
-    return privatePaths.some((p) => value.includes(p));
-  });
+  if (values.some((v) => namesSecretPath(v, privatePaths))) return true;
+  if (NAMED_FIELD_TOOLS.has(tool) || PROSE_TOOLS.has(tool)) return false;
+  return anySecretPath(input, privatePaths);
 }
 
 // A result the host can rebuild from its text alone: anything but an image or another binary record.
@@ -769,15 +833,16 @@ function userWords(m) {
 
 // The task for the state: the /compact instructions first, then the last USER_MESSAGES user
 // messages, together USER_CHARS characters.
-function userTask(messages, instructions) {
+function userTask(messages, instructions, privatePaths = []) {
   let left = USER_CHARS;
-  const instr = instructions ? clip(maskSecrets(String(instructions).slice(0, left + MASK_SLACK_CHARS)), left) : undefined;
+  const clean = (text) => maskSecrets(omitSecretLines(text, privatePaths));
+  const instr = instructions ? clip(clean(String(instructions).slice(0, left + MASK_SLACK_CHARS)), left) : undefined;
   if (instr) left -= instr.length;
   const picked = [];
   for (let i = messages.length - 1; i >= 0 && picked.length < USER_MESSAGES && left > 0; i--) {
     const words = userWords(messages[i]);
     if (!words) continue;
-    const text = clip(maskSecrets(words.slice(0, left + MASK_SLACK_CHARS)), left);
+    const text = clip(clean(words.slice(0, left + MASK_SLACK_CHARS)), left);
     picked.unshift(text);
     left -= text.length;
   }
@@ -793,11 +858,13 @@ function targetsOf(input) {
   const i = input && typeof input === 'object' ? input : {};
   const out = new Set();
   for (const k of ['file_path', 'notebook_path', 'path', 'url']) if (typeof i[k] === 'string') out.add(i[k]);
-  if (typeof i.command === 'string') for (const m of i.command.matchAll(/[^\s"'`|;&<>()]+\.[A-Za-z0-9]{1,6}\b|https?:\/\/[^\s"'`]+/g)) out.add(m[0]);
+  // A file name starts only where a token starts (the same matches: from inside a token the pattern read on to the
+  // token's end, quadratic on a long token), and runs of slashes are joined before the trailing one is cut.
+  if (typeof i.command === 'string') for (const m of i.command.matchAll(/(?<![^\s"'`|;&<>()])[^\s"'`|;&<>()]+\.[A-Za-z0-9]{1,6}\b|https?:\/\/[^\s"'`]+/g)) out.add(m[0]);
   const names = new Set();
   for (const t of out) {
     if (/^https?:/i.test(t)) names.add(t.toLowerCase());
-    const base = t.replace(/[\\/]+$/, '').split(/[\\/]/).pop().toLowerCase();
+    const base = t.replace(/[\\/]+/g, '/').replace(/\/$/, '').split('/').pop().toLowerCase();
     if (base.length >= MENTION_MIN) names.add(base);
   }
   return names;
@@ -851,6 +918,7 @@ function findCandidates(messages, privatePaths) {
         inputChars: (found.u.tool || '').length + inputJson(found.u.input).length,
         resultChars: (r.text || '').length,
         secret: touchesSecretPath(found.u.tool, found.u.input, privatePaths),
+        proseSecret: PROSE_TOOLS.has(found.u.tool) && anySecretPath(found.u.input, privatePaths),
         textOnly: textOnlyResult(r),
         score: 0, asked: false, answered: false,
       };
@@ -1269,8 +1337,11 @@ async function decide($, e, cfg, record, started) {
   }
 
   // Newest results first; only text results of calls outside secret paths are asked about.
-  const askable = [...candidates].sort((a, b) => b.resIdx - a.resIdx).filter((c) => !c.secret && c.textOnly);
+  const askable = [...candidates].sort((a, b) => b.resIdx - a.resIdx).filter((c) => !c.secret && !c.proseSecret && c.textOnly);
   record.secret_skipped = candidates.filter((c) => c.secret).length;
+  // A prose call that names a secret path: its result is never sent; it stays as if its request were held back.
+  record.secret_held = 0;
+  for (const c of candidates) if (c.proseSecret && !c.secret && c.textOnly) { c.asked = true; c.score = UNANSWERED_SCORE; record.secret_held++; }
   record.non_text = candidates.filter((c) => !c.textOnly).length;
   let left = cfg.maxRequests ? cfg.maxRequests - session.requests : MAX_REQUESTS;
   if (left <= 0) {
@@ -1280,7 +1351,7 @@ async function decide($, e, cfg, record, started) {
   let asked = askable.slice(0, BATCH * Math.min(MAX_REQUESTS, left));
   record.asked = asked.length;
 
-  const user = userTask(messages, typeof e.instructions === 'string' && e.instructions.trim() ? e.instructions : undefined);
+  const user = userTask(messages, typeof e.instructions === 'string' && e.instructions.trim() ? e.instructions : undefined, cfg.privatePaths);
   const deadline = started + TOTAL_MS;
   const runs = [];
   let held;
@@ -1294,8 +1365,8 @@ async function decide($, e, cfg, record, started) {
       c.question = `r${k + 1}`;
       results[c.question] = {
         tool: c.use.tool,
-        input: clip(oneLine(maskSecrets(inputJson(c.use.input).slice(0, STATE_INPUT_CHARS * 4 + MASK_SLACK_CHARS))), STATE_INPUT_CHARS),
-        result: maskedHeadTail(c.res.text || '', STATE_HEAD_CHARS, STATE_TAIL_CHARS),
+        input: clip(oneLine(maskSecrets(sentInputJson(c.use.input, cfg.privatePaths).slice(0, STATE_INPUT_CHARS * 4 + MASK_SLACK_CHARS))), STATE_INPUT_CHARS),
+        result: maskedHeadTail(c.res.text || '', STATE_HEAD_CHARS, STATE_TAIL_CHARS, cfg.privatePaths),
         chars: c.resultChars,
         ...(c.res.isError ? { error: true } : {}),
       };
