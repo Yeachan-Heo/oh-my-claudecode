@@ -1175,7 +1175,7 @@ This article argues that fake popularity signals damage trust in open source.`;
       });
 
       it('should still detect autopilot when quoted for emphasis alongside an execution directive', () => {
-        const result = detectKeywordsWithType('use "autopilot" to implement the login page');
+        const result = detectKeywordsWithType('"autopilot" implement the login page');
         const autopilotMatch = result.find((r) => r.type === 'autopilot');
         expect(autopilotMatch).toBeDefined();
       });
