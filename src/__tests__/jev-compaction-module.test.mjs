@@ -1982,6 +1982,17 @@ describe('jev-compaction module: what the host sends after the compaction', () =
     expect(sub.records()[0]).toMatchObject({ result: 'jev', server_blocks: null, agent_id: 'sub-1' });
     expect(sub.asked).toEqual([{ as: 'api', agentId: 'sub-1' }]);
   });
+
+  it('with pasted text moved (OMC_JEV_COMPACT_PASTES=active) the rebuilt user row joins the user rows around it: nothing missing, nothing repeated on resume', async () => {
+    const paste = `Please check the report below. <pasted_content id="1">${'alpha '.repeat(500)}</pasted_content>`;
+    const respond = (body) => (body.questions.pasted ? okResponse({ answers: { pasted: { type: 'noul', noul: 0.95 } } }) : okResponse(scoreByMarker(body)));
+    const run = await compactHost([...opening, U(paste), ...singles(20, 1), ...closing], { env: { ...ACTIVE_ENV, OMC_JEV_COMPACT_PASTES: 'active' }, respond });
+    expect(run.records()[0]).toMatchObject({ result: 'jev', pastes: { moved: 1, installed: true } });
+    expect(run.written.some((r) => r.role === 'user' && r.blocks.some((b) => b.type === 'text' && b.text.startsWith('Please check the report below. [pasted text moved at compaction')))).toBe(true);
+    expect(run.written.some((r) => r.blocks.some((b) => b.type === 'text' && b.text.includes('<pasted_content')))).toBe(false);
+    expect(run.request).toEqual(clean);
+    expect(run.resumed).toEqual(noReplay);
+  });
 });
 
 describe('jev-compaction module: archive of cut and removed results (OMC_JEV_COMPACT_ARCHIVE)', () => {
@@ -2473,6 +2484,8 @@ describe('jev-compaction module: pasted text (OMC_JEV_COMPACT_PASTES)', () => {
     expect(trace.length).toBeLessThan(report.length);
     // The record counts it; the results kept and removed are the same as with the switch off.
     expect(run.record.pastes).toMatchObject({ mode: 'active', tags: 1, asked: 1, yes: 1, written: 1, moved: 1, moved_chars: report.length, trace_chars: trace.length, installed: true });
+    expect(run.record.pastes.answers).toEqual([{ name: createHash('sha256').update(report).digest('hex').slice(0, 32), chars: report.length, p: 0.95 }]);
+    expect(path.endsWith(`/${run.record.pastes.answers[0].name}.txt`)).toBe(true);
     for (const key of ['asked', 'requests', 'kept_full', 'kept_short', 'traced', 'score_hist', 'candidates']) expect(run.record[key]).toEqual(off.record[key]);
     expect(run.record.chars_after).toBe(off.record.chars_after - (report.length - trace.length));
     expect(run.out.messages).toHaveLength(off.out.messages.length);

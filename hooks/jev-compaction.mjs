@@ -67,7 +67,8 @@
  *   and holds no image or file block (the API form of the conversation has to be available to tell);
  * - it names no secret or private path and masking leaves it unchanged (it goes neither to Jev nor to a file otherwise);
  * - Jev, who gets the whole tag (one request per tag, at most PASTE_MAX_ASKS of the largest, so every removed character was
- *   read), says yes with a probability of PASTE_YES or more to "is all of it pasted material, none of it the user's own writing";
+ *   read), says yes with a probability of PASTE_YES or more to "is all of it pasted material, none of it the user's own writing"
+ *   (the requests start after the scoring ones and count against OMC_JEV_MAX_REQUESTS, the breaker and OMC_JEV_MAX_RPM);
  * - its file was written and read back whole, and the trace is shorter than the tag.
  * Anything else, a failed or unanswered request included, leaves the tag in the conversation. Tool-result decisions do not depend
  * on this: the results kept or removed are the same with the switch off, and a compaction that ends in the built-in summary
@@ -75,7 +76,8 @@
  * nothing and changes nothing; `active` acts only while the point itself is active. Files:
  * <state dir>/compaction-pastes/<session>/<sha256 of the tag, 32 hex>.txt, named by their content so two compactions write the
  * same text; scripts/lib/jev-compaction-state.mjs removes old session directories (OMC_JEV_PASTES_DAYS). The record gets
- * `pastes` with the counts (tags, why they stayed, requests, answers, files, characters moved, installed).
+ * `pastes` with the counts (tags, why they stayed, requests, answers, files, characters moved, installed) and, for each tag
+ * asked about, the name its file has (so shadow can be checked against the transcript), its size and Jev's probability.
  *
  * Shared breaker and request limit (OMC_JEV_BREAKER=1, OMC_JEV_MAX_RPM=<n>): the same files and rules as
  * the script side (scripts/lib/jev-breaker.mjs, see its header), under the same state directory and
@@ -2026,12 +2028,14 @@ async function askPaste($, cfg, text, deadline) {
 async function askPastes($, cfg, jobs, sessionId, stats, deadline) {
   await Promise.all(jobs.map(async (job) => {
     try {
-      job.path = `${cfg.pasteDir}/${safeName(sessionId)}/${(await sha256Hex(job.text)).slice(0, 32)}.txt`;
+      const name = (await sha256Hex(job.text)).slice(0, 32);
+      job.path = `${cfg.pasteDir}/${safeName(sessionId)}/${name}.txt`;
       job.trace = pasteTrace(job.text.length, job.inner, job.path);
       if (job.trace.length >= job.text.length) { stats.too_short++; return; }
       const r = await askPaste($, cfg, job.text, deadline);
       if (r.held) { stats.held++; return; }
       stats.asked++;
+      stats.answers.push({ name, chars: job.text.length, p: r.p ?? null });
       if (r.p === undefined) { stats.unanswered++; return; }
       if (r.p >= PASTE_YES) { stats.yes++; job.yes = true; } else stats.no++;
     } catch {
@@ -2043,7 +2047,7 @@ async function askPastes($, cfg, jobs, sessionId, stats, deadline) {
 // Plans the tags and starts the requests about them; `record.pastes` holds the counts from here on. `active` needs the point itself active.
 function startPastes($, cfg, record, messages, api, keepFrom, deadline) {
   const mode = cfg.pastes === 'active' && cfg.mode === 'active' ? 'active' : 'shadow';
-  const stats = { mode, tags: 0, small: 0, kept_whole: 0, too_long: 0, secret: 0, too_short: 0, unasked: 0, asked: 0, held: 0, yes: 0, no: 0, unanswered: 0, written: 0, reused: 0, write_failed: 0, timed_out: 0, moved: 0, moved_chars: 0, trace_chars: 0, ...(mode === 'active' ? { installed: false } : {}) };
+  const stats = { mode, tags: 0, small: 0, kept_whole: 0, too_long: 0, secret: 0, too_short: 0, unasked: 0, asked: 0, held: 0, yes: 0, no: 0, unanswered: 0, written: 0, reused: 0, write_failed: 0, timed_out: 0, moved: 0, moved_chars: 0, trace_chars: 0, answers: [], ...(mode === 'active' ? { installed: false } : {}) };
   record.pastes = stats;
   let jobs = [];
   try { jobs = planPastes(messages, api, keepFrom, cfg, record.session_id, stats); } catch { stats.error = 1; }
