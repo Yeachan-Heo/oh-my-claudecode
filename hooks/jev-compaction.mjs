@@ -802,11 +802,12 @@ function queuedWords(text) {
 }
 
 // The user's own words in a message: none for host notices and summaries; host blocks inside a
-// message are cut out. A result row (or a row opening with a queued message) gives only the queued
-// messages it shows, which a row rebuilt by an earlier compaction carries in its text.
+// message are cut out. A result row (or a row opening with any delivered message, such as a row an
+// earlier compaction left with only the delivered blocks) gives only the user's queued messages it
+// shows, which a row rebuilt by an earlier compaction carries in its text.
 function userWords(m) {
   if (m.role !== 'user' || !m.text) return [];
-  if ((m.toolResults && m.toolResults.length) || isQueuedBlock(m.text)) return queuedWords(m.text);
+  if ((m.toolResults && m.toolResults.length) || deliveryOf(m.text)) return queuedWords(m.text);
   const text = m.text.replace(HOST_BLOCK, '').trim();
   if (!text || HOST_BLOCK_OPEN.test(text) || NOT_USER_PREFIXES.some((p) => text.startsWith(p))) return [];
   return [text];
@@ -832,14 +833,23 @@ function queuedOf(messages, api) {
   for (const a of api) {
     if (a.role !== 'user' || !Array.isArray(a.content)) continue;
     let row;
-    for (const b of a.content) if (b?.type === 'tool_result' && rowOfResult.has(b.tool_use_id)) row = Math.max(row ?? -1, rowOfResult.get(b.tool_use_id));
+    let first;
+    for (const b of a.content) {
+      if (b?.type !== 'tool_result' || !rowOfResult.has(b.tool_use_id)) continue;
+      const r = rowOfResult.get(b.tool_use_id);
+      row = Math.max(row ?? r, r);
+      first = Math.min(first ?? r, r);
+    }
     if (row === undefined) continue;
     let anchor = row;
     for (const b of a.content) {
       if (b?.type !== 'text') continue;
-      if (rowsOfText.has(b.text)) {
-        const r = rowsOfText.get(b.text).find((k) => k > row && messages.slice(row + 1, k + 1).every((x) => x.role === 'user'));
-        if (r !== undefined) anchor = Math.max(anchor, r);
+      // Shown already only by a row of this API message: a result row of it, or a later user row
+      // right after them. The same text elsewhere (a block an earlier compaction carried, a repeated
+      // "continue") is another delivery.
+      const r = (rowsOfText.get(b.text) || []).find((k) => k >= first && messages.slice(row + 1, k + 1).every((x) => x.role === 'user'));
+      if (r !== undefined) {
+        anchor = Math.max(anchor, r);
         continue;
       }
       const kind = deliveryOf(b.text);

@@ -505,6 +505,35 @@ describe('jev-compaction module: active compaction', () => {
     }
   });
 
+  it('a delivery equal to the text of an earlier row (a block a previous compaction carried) is still carried at its own result', async () => {
+    const words = 'continue';
+    const base = conversation(30);
+    const t3 = base.findIndex((m) => resultOf([m], 't3'));
+    const messages = [...base.slice(0, t3 + 1), Object.freeze({ role: 'user', text: framed(words), toolUses: [], handle: 'hcarried' }), ...base.slice(t3 + 1)];
+    const { out, records } = await compactWithApi(messages, apiOf(messages, { t10: [framed(words)] }));
+    const at = out.messages.flatMap((m, k) => ((m.text || '').includes(framed(words)) ? [k] : []));
+    expect(at).toHaveLength(2);
+    expect(step(out.messages, 10)).toBeLessThan(at[1]);
+    expect(at[1]).toBeLessThan(step(out.messages, 11));
+    expect(records()[0]).toMatchObject({ result: 'jev', queued_user: 1, queued_carried: 1 });
+    expect(pairingOk(messages, out.messages)).toBe(true);
+  });
+
+  it('a text-only row opening with an unwrapped message of another session or the coordinator gives no user words', async () => {
+    const peer = 'Another Claude session sent a message while you were working:\n<agent-message from="worker">REPORT-OF-AGENT</agent-message>';
+    const coordinator = 'The coordinator sent a message while you were working:\nWORDS-OF-COORDINATOR';
+    const base = conversation(30);
+    const messages = [...base.slice(0, -2), Object.freeze({ role: 'user', text: peer, toolUses: [], handle: 'hpeer' }), Object.freeze({ role: 'user', text: coordinator, toolUses: [], handle: 'hcoord' }), ...base.slice(-2)];
+    const { out, calls, records } = await compactWithApi(messages, apiOf(messages));
+    expect(records()[0]).toMatchObject({ result: 'jev' });
+    const task = JSON.stringify(calls.fetch.map((c) => c.body.state.task));
+    expect(task).not.toContain('REPORT-OF-AGENT');
+    expect(task).not.toContain('WORDS-OF-COORDINATOR');
+    expect(calls.fetch[0].body.state.task).toContain('Good, now sum up the NEEDED results.');
+    expect(count(out.messages, 'REPORT-OF-AGENT')).toBe(1);
+    expect(count(out.messages, 'WORDS-OF-COORDINATOR')).toBe(1);
+  });
+
   it('without the API form the delivered messages cannot be seen, and the record says so', async () => {
     const messages = conversation(30);
     const { out, records } = await compactWithApi(messages, messages);
