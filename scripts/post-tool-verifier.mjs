@@ -18,7 +18,7 @@ import { resolveOmcStateRoot } from './lib/state-root.mjs';
 import { readStdin } from './lib/stdin.mjs';
 import { resolveContextPercent } from './lib/context-usage.mjs';
 import { BOUNDED_GIT_TIMEOUT_MS } from './lib/bounded-git-timeout.mjs';
-import { recordJevShadow, setJevSessionId } from './lib/jev-shadow.mjs';
+import { recordJevApplied, recordJevShadow, setJevHookContext, setJevSessionId } from './lib/jev-shadow.mjs';
 import { initializeRalphStateForSkill } from './lib/ralph-startup.mjs';
 
 const SKIP_HOOKS = (process.env.OMC_SKIP_HOOKS || '').split(',').map(s => s.trim());
@@ -614,8 +614,11 @@ async function maybeBuildPreemptiveCompactionMessage(toolName, data, directory) 
   // critical threshold: at or above it the hook always asks for /compact.
   // The Jev call above still runs there so the shadow log keeps the
   // comparison; it is the rare case and is bounded by OMC_JEV_TIMEOUT_MS.
+  // OMC_JEV_APPLIED_LOG: the action Jev changed, written with the message it led to.
+  let appliedPruning;
   if (jevResult && jevResult.mode === 'active' && jevResult.answer && percentUsed < criticalThreshold) {
     const label = stalenessLabelOf(jevResult.answer);
+    const heuristicAction = action;
     // Map staleness to action: fresh/recent -> none, aging -> warn, stale -> compact
     if (label === 'fresh' || label === 'recent') {
       action = 'none';
@@ -625,10 +628,14 @@ async function maybeBuildPreemptiveCompactionMessage(toolName, data, directory) 
       action = 'compact';
     }
     // Otherwise keep the heuristic action
+    if (action !== heuristicAction) {
+      appliedPruning = { action: { from: heuristicAction, to: action }, staleness: label };
+    }
   }
 
   // Build message based on the computed action
   if (action === 'none') {
+    if (appliedPruning) recordJevApplied('context-pruning', { ...appliedPruning, message: 'none' });
     return '';
   }
 
@@ -637,10 +644,12 @@ async function maybeBuildPreemptiveCompactionMessage(toolName, data, directory) 
   const severity = action === 'compact' ? 'critical' : 'warning';
 
   if (shouldSuppressPreemptiveWarning(directory, sessionId, severity, now)) {
+    if (appliedPruning) recordJevApplied('context-pruning', { ...appliedPruning, message: 'suppressed' });
     return '';
   }
 
   writePreemptiveCooldownState(directory, sessionId, severity, now);
+  if (appliedPruning) recordJevApplied('context-pruning', { ...appliedPruning, message: severity });
   return buildPreemptiveContextMessage(percentUsed, severity);
 }
 
@@ -1161,6 +1170,7 @@ async function main() {
   try {
     const input = await readStdin();
     const data = JSON.parse(input);
+    await setJevHookContext(data);
 
     // Opt-in shell checks (OMC_SHELL_CHECKS=1): record known Bash/PowerShell error classes. Never affects the hook.
     if (process.env.OMC_SHELL_CHECKS === '1' && (data?.tool_name === 'Bash' || data?.tool_name === 'PowerShell')) {

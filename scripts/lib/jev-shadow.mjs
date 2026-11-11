@@ -1,6 +1,7 @@
 /* global process, URL */
 
 import { spawn, spawnSync } from "node:child_process";
+import { randomUUID } from "node:crypto";
 import {
   appendFileSync,
   closeSync,
@@ -20,7 +21,17 @@ import {
 import { homedir, tmpdir } from "node:os";
 import { basename, dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { parseJevEnv, resolveJevEndpoint, resolveJevTimeoutMs } from "../jev-resolve.mjs";
+import {
+  isJevLogContextEnabled,
+  isJevStateOmitIdsEnabled,
+  jevLogContextOf,
+  parseJevEnv,
+  resolveJevEndpoint,
+  resolveJevLogDir,
+  resolveJevLogMaxBytes,
+  resolveJevTimeoutMs,
+  rotateJevLog,
+} from "../jev-resolve.mjs";
 
 const SWEEP_THROTTLE_MS = 60 * 60 * 1000; // 1 hour
 const ACTIVE_RESOLVER_TIMEOUT_BUFFER_MS = 500;
@@ -486,10 +497,12 @@ export function recordJevShadow({ point, state, questions, heuristic, permission
   try {
     tempDir = mkdtempSync(join(tmpdir(), "omc-jev-"));
     requestFile = join(tempDir, "request.json");
+    const logContext = requestLogContext(point);
+    const startedAt = Date.now();
 
     writeFileSync(
       requestFile,
-      JSON.stringify({ point, state, questions, heuristic, permissionMode, spawnMode, ...(toolUseId ? { tool_use_id: toolUseId } : {}) }),
+      JSON.stringify({ point, state, questions, heuristic, permissionMode, spawnMode, ...(toolUseId ? { tool_use_id: toolUseId } : {}), ...(logContext ? { context: logContext } : {}) }),
       {
         encoding: "utf8",
         mode: 0o600,
@@ -570,6 +583,7 @@ export function recordJevShadow({ point, state, questions, heuristic, permission
             resolverWroteRow = true;
           }
         }
+        if (result.status !== 0) recordResolverFailure(point, result, Date.now() - startedAt, logContext);
         // Only log resolver exit for actual failures (non-zero status or error), not for successful completions
         // and not when the resolver already wrote its own row.
         if (breakerSettings?.breaker && result.status !== 0 && !resolverWroteRow) recordResolverEnded(point, result, Date.now() - spawnedAt);
@@ -596,4 +610,143 @@ export function recordJevShadow({ point, state, questions, heuristic, permission
     }
   }
   return undefined;
+}
+
+// OMC_JEV_LOG_CONTEXT=1: the ids of the hook call being judged, for the Jev
+// logs only (they are never sent to Jev), and the log directory for the lines
+// a hook writes itself. Set once per hook process by setJevHookContext.
+let hookLogContext;
+let hookLogDir;
+// request_id of the last request per point in this process, for applied.jsonl.
+const lastRequestIds = new Map();
+
+/**
+ * OMC_JEV_APPLIED_LOG=1 (or `true`): a hook that acts on an active Jev answer
+ * writes what the answer changed to applied.jsonl (see recordJevApplied).
+ */
+export function isJevAppliedLogEnabled(env = process.env) {
+  return ["1", "true"].includes(String(env.OMC_JEV_APPLIED_LOG ?? "").trim().toLowerCase());
+}
+
+/**
+ * Ids a hook puts into a Jev state (session_id, cwd), or nothing with
+ * OMC_JEV_STATE_OMIT_IDS=1: then they reach the log only, with
+ * OMC_JEV_LOG_CONTEXT=1, and are never sent to Jev. Spread it into the state.
+ */
+export function jevStateIds(ids) {
+  return isJevStateOmitIdsEnabled(process.env) ? {} : ids;
+}
+
+/** True when this configuration can send a Jev request at all (a key and OMC_JEV entries). */
+function mayRequestJev(env) {
+  const raw = (env.OMC_JEV || "").trim();
+  return Boolean(env.TYPESAFE_API_KEY) && raw !== "" && raw !== "off";
+}
+
+/**
+ * Tell the Jev channel which hook call it judges: the hook input's
+ * tool_use_id, session_id, cwd (the process's working directory when the
+ * input has none), agent_id, agent_type and prompt_id. Call it once after the
+ * hook input is parsed, before any recordJevShadow call. It does something
+ * only with OMC_JEV_LOG_CONTEXT=1 or OMC_JEV_APPLIED_LOG=1 and a configuration
+ * that can send Jev requests: it keeps the ids (OMC_JEV_LOG_CONTEXT only) and
+ * resolves the Jev log directory, as the resolver does. Never throws.
+ */
+export async function setJevHookContext(data) {
+  hookLogContext = undefined;
+  hookLogDir = undefined;
+  lastRequestIds.clear();
+  const logContext = isJevLogContextEnabled(process.env);
+  if ((!logContext && !isJevAppliedLogEnabled(process.env)) || !mayRequestJev(process.env)) return;
+  if (logContext) {
+    const context = jevLogContextOf(data);
+    delete context.request_id;
+    if (context.cwd === undefined) {
+      try {
+        context.cwd = process.cwd();
+      } catch {
+        // No working directory: the field is left out.
+      }
+    }
+    hookLogContext = context;
+  }
+  try {
+    hookLogDir = await resolveJevLogDir(process.env);
+  } catch {
+    // Without a log directory the hook writes no lines itself.
+  }
+}
+
+/** The ids of one request: the hook call's and a new request_id. Undefined without OMC_JEV_LOG_CONTEXT=1. */
+function requestLogContext(point) {
+  if (!isJevLogContextEnabled(process.env)) return undefined;
+  const context = { ...hookLogContext, request_id: randomUUID() };
+  lastRequestIds.set(point, context.request_id);
+  return context;
+}
+
+/**
+ * Record that this hook acted on an active Jev answer: one line in
+ * applied.jsonl next to shadow.jsonl, {ts, point, ...ids, applied}, where
+ * `applied` says what the answer changed, typically as {from, to}. Advisory
+ * actions use {action: {from, to, noul}} for warning/reminder decisions and
+ * the active answer's probability. Routing fields and advisory metadata are
+ * accepted unchanged; this helper does not decide whether behavior changed. Call it
+ * only when the answer really changed what the hook does. With
+ * OMC_JEV_LOG_CONTEXT=1 the line carries the hook call's ids and the
+ * request_id of this process's last request for the point, which is also in
+ * that request's shadow.jsonl line. Only with OMC_JEV_APPLIED_LOG=1; never
+ * throws.
+ */
+export function recordJevApplied(point, applied) {
+  if (!isJevAppliedLogEnabled(process.env)) return;
+  const requestId = lastRequestIds.get(point);
+  appendJevLogLine("applied.jsonl", {
+    ts: new Date().toISOString(),
+    point,
+    ...(isJevLogContextEnabled(process.env) ? { ...hookLogContext, ...(requestId ? { request_id: requestId } : {}) } : {}),
+    applied,
+  });
+}
+
+/**
+ * Append one line to a Jev log file in the hook's log directory
+ * (OMC_JEV_LOG_DIR when setJevHookContext did not resolve one), rotated like
+ * the resolver's lines (OMC_JEV_LOG_MAX_MB). Every file a hook script writes
+ * next to shadow.jsonl goes through this. Never throws.
+ */
+export function appendJevLogLine(fileName, entry) {
+  const logDir = hookLogDir || process.env.OMC_JEV_LOG_DIR;
+  if (!logDir) return;
+  try {
+    mkdirSync(logDir, { recursive: true });
+    const path = join(logDir, fileName);
+    rotateJevLog(path, resolveJevLogMaxBytes(process.env));
+    appendFileSync(path, JSON.stringify(entry) + "\n", "utf8");
+  } catch {
+    // Best-effort logging: a logging failure must never affect the hook.
+  }
+}
+
+/**
+ * An active-mode resolver that the hook killed at its time limit
+ * (resolver-timeout), that could not be started (resolver-spawn), or that
+ * ended with a non-zero status or a signal (resolver-exit) wrote no
+ * shadow-log line. With OMC_JEV_LOG_CONTEXT=1 the hook writes one for it: the
+ * request's ids, mode "degraded", the reason, the exit status or signal when
+ * there is one, and the time waited; no state and no answers.
+ */
+function recordResolverFailure(point, result, durationMs, logContext) {
+  if (!logContext) return;
+  const code = result?.error?.code;
+  appendJevLogLine("shadow.jsonl", {
+    ts: new Date().toISOString(),
+    point,
+    ...logContext,
+    mode: "degraded",
+    reason: code === "ETIMEDOUT" ? "resolver-timeout" : result?.error ? "resolver-spawn" : "resolver-exit",
+    ...(typeof result?.status === "number" ? { status: result.status } : {}),
+    ...(result?.signal ? { signal: result.signal } : {}),
+    durationMs,
+  });
 }

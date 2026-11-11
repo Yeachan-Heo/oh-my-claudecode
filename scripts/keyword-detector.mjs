@@ -31,7 +31,7 @@ import { atomicWriteFileSync, getStateFileLockFailureMessage, recoverEmergencySt
 import { readStdin } from './lib/stdin.mjs';
 import { resolveOmcStateRoot, resolveSessionStatePathsForHook } from './lib/state-root.mjs';
 import { parseWorkflowInvocation, selectWorkflowProfile, createWorkflowState, isValidWorkflowTrackingState, isWorkflowRuntimeSupported, resolveWorkflowStagePrompt, takeWorkflowTranscriptFailure } from './lib/workflow-profile-runtime.mjs';
-import { isJevShadowOptedIn, jevNoulOf, recordJevShadow, setJevSessionId } from './lib/jev-shadow.mjs';
+import { isJevShadowOptedIn, jevNoulOf, recordJevApplied, recordJevShadow, setJevHookContext, setJevSessionId } from './lib/jev-shadow.mjs';
 import { initializeRalphStateForSkill, createPrdScaffold } from './lib/ralph-startup.mjs';
 
 // Resolve OMC package root: CLAUDE_PLUGIN_ROOT (plugin system) or derive from this script's location
@@ -1987,6 +1987,7 @@ async function main() {
 
     let data = {};
     try { data = JSON.parse(input); } catch {}
+    await setJevHookContext(data);
     const directory = data.cwd || data.directory || process.cwd();
     const sessionId = data.session_id || data.sessionId || '';
     setJevSessionId(sessionId, data.agent_id || data.agentId);
@@ -2181,6 +2182,7 @@ async function main() {
     }
 
     // Resolve conflicts
+    let pendingSkillTriggerApplied;
     let resolved = resolveConflicts(uniqueMatches);
     if (NO_IMPLEMENT_PATTERN.test(cleanPrompt) && !/^\s*\//.test(prompt)) {
       resolved = resolved.filter((m) => !CODE_EDITING_SKILLS.has(m.name));
@@ -2200,6 +2202,7 @@ async function main() {
       // In active mode, use Jev's skill choice
       if (jevResult && jevResult.mode === 'active' && jevResult.answer) {
         const jevChoice = jevResult.answer.choice?.toLowerCase();
+        const keywordsBefore = resolved.map((match) => match.name);
         if (jevChoice && jevChoice !== 'none') {
           // Override with Jev's chosen skill
           const matchedKeyword = uniqueMatches.find((m) => m.name === jevChoice);
@@ -2207,6 +2210,11 @@ async function main() {
         } else if (jevChoice === 'none') {
           // Jev says no trigger
           resolved = [];
+        }
+        const keywordsAfter = resolved.map((match) => match.name);
+        if (keywordsAfter.join(',') !== keywordsBefore.join(',')) {
+          // Staged: the follow-up routing below can end the hook without using the keywords.
+          pendingSkillTriggerApplied = { keywords: { from: keywordsBefore, to: keywordsAfter }, choice: jevChoice };
         }
       }
     }
@@ -2336,6 +2344,7 @@ async function main() {
       
       if (shouldSuppressForSize) {
         // Filter out non-slash-invoked heavy keywords
+        const keywordsBeforeSize = resolved.map((match) => match.name);
         // (slash invocations already collected in slashInvokedByAnyRule)
         resolved = resolved.filter(keyword => {
           if (!HEAVY_KEYWORDS.has(keyword.name)) {
@@ -2351,6 +2360,12 @@ async function main() {
         });
         const prefixWon = classifierSizePrefix &&
           !(jevTaskSizeResult.size === 'small' && jevTaskSizeResult.confidence >= 0.9);
+        // A size prefix that won over another answer (OMC_JEV_TASK_SIZE_PREFIX_WINS) dropped the
+        // modes, not Jev's small answer: no applied line.
+        const suppressedForSize = keywordsBeforeSize.filter((name) => !resolved.some((match) => match.name === name));
+        if (suppressedForSize.length > 0 && !prefixWon) {
+          recordJevApplied('task-size', { size: jevTaskSizeResult.size, confidence: jevTaskSizeResult.confidence, suppressed: suppressedForSize });
+        }
         suppressionReason = prefixWon
           ? `size prefix "${heuristicTaskSize.escapePrefixUsed}" (Jev active-mode classification: ${jevTaskSizeResult.size}, confidence ${jevSizeConfidence ?? 'not given'})`
           : heuristicSaysSmall
@@ -2455,6 +2470,9 @@ async function main() {
         }
       }
     }
+
+    // The keywords reach the rest of the hook: now the skill-trigger application counts.
+    if (pendingSkillTriggerApplied) recordJevApplied('skill-trigger', pendingSkillTriggerApplied);
 
     // Nothing left to act on (no keywords, or all opted out) - pass through.
     // Keep this after approved follow-up handling so short post-ralplan
