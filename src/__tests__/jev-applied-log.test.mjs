@@ -656,6 +656,65 @@ describe('hook scripts with OMC_JEV_APPLIED_LOG=1', () => {
     }, 60_000);
   });
 
+  function ralphState(context, sessionId) {
+    execFileSync('git', ['init'], { cwd: context.cwd, stdio: 'ignore' });
+    const stateDir = join(context.cwd, '.omc', 'state', 'sessions', sessionId);
+    mkdirSync(stateDir, { recursive: true });
+    const path = join(stateDir, 'ralph-state.json');
+    writeFileSync(path, JSON.stringify({
+      active: true,
+      session_id: sessionId,
+      project_path: context.cwd,
+      iteration: 1,
+      max_iterations: 5,
+      started_at: new Date().toISOString(),
+      last_checked_at: new Date().toISOString(),
+      prompt: 'Complete the bounded task and verify the result.',
+    }));
+    return path;
+  }
+
+  it('loop-continuation: a release with OMC_JEV_LOOP_RELEASE_ONLY writes the stop it let go, not a completion', async () => {
+    stubAnswers = { task_complete: { type: 'noul', noul: 0.9 } };
+    const context = makeContext();
+    const path = ralphState(context, 'jev-session');
+    await runHook(context, 'persistent-mode.mjs', { cwd: context.cwd, session_id: 'jev-session', last_assistant_message: 'The task is complete.' }, 'loop-continuation', { OMC_JEV_LOOP_RELEASE_ONLY: '1' });
+    const lines = readLog(context, 'applied.jsonl');
+    expect(lines).toHaveLength(1);
+    expect(lines[0]).toMatchObject({ point: 'loop-continuation', applied: { mode: 'ralph', block: { from: true, to: false }, noul: 0.9 } });
+    expect(lines[0].applied).not.toHaveProperty('completed');
+    expect(JSON.parse(readFileSync(path, 'utf8')).active).toBe(true);
+  }, 60_000);
+
+  describe('learner-extraction hint', () => {
+    const MESSAGE = 'The issue was caused by a race condition. I fixed it by adding proper locking.';
+    const stop = (context, sessionId, overrides = {}) => runHook(context, 'persistent-mode.mjs', { cwd: context.cwd, session_id: sessionId, last_assistant_message: MESSAGE }, 'learner-extraction', { OMC_JEV_LEARNER_HINT: '1', ...overrides });
+
+    it('writes one row when the hint reaches the Stop output, and none for the second Stop of the session', async () => {
+      stubAnswers = { extractable_moment: { type: 'noul', noul: 0.9 } };
+      const context = makeContext();
+      const first = await stop(context, 'learner-session');
+      expect(String(first.systemMessage)).toContain('/oh-my-claudecode:remember');
+      expect(readLog(context, 'applied.jsonl')).toHaveLength(1);
+      expect(readLog(context, 'applied.jsonl')[0]).toMatchObject({ point: 'learner-extraction', applied: { action: { from: 'none', to: 'hint', noul: 0.9 } } });
+      const again = await stop(context, 'learner-session');
+      expect(again.systemMessage).toBeUndefined();
+      expect(readLog(context, 'applied.jsonl')).toHaveLength(1);
+    }, 60_000);
+
+    it.each([
+      ['below the threshold', 0.5, {}],
+      ['the hint disabled', 0.9, { OMC_JEV_LEARNER_HINT: undefined }],
+      ['shadow mode', 0.9, { OMC_JEV: 'learner-extraction' }],
+    ])('writes no row with %s', async (_label, noul, overrides) => {
+      stubAnswers = { extractable_moment: { type: 'noul', noul } };
+      const context = makeContext();
+      const output = await stop(context, 'learner-session', overrides);
+      expect(output.systemMessage).toBeUndefined();
+      expect(readLog(context, 'applied.jsonl')).toEqual([]);
+    }, 60_000);
+  });
+
   it('loop-continuation: the mode Jev\'s "task complete" ended', async () => {
     stubAnswers = { task_complete: { type: 'noul', noul: 0.9 } };
     const context = makeContext();

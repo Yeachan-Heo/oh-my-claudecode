@@ -81,6 +81,8 @@ async function releaseOutput(directory, sessionId, hasValidSessionId) {
   if (!markerPath) return SAFE_CONTINUE;
   if (existsSync(markerPath)) return SAFE_CONTINUE;
   if (!writeJsonFile(markerPath, { ts: new Date().toISOString(), noul: learnerHintNoul })) return SAFE_CONTINUE;
+  // OMC_JEV_APPLIED_LOG: the active answer added the hint to this Stop's output.
+  recordJevApplied("learner-extraction", { action: { from: "none", to: "hint", noul: learnerHintNoul } });
   return { ...SAFE_CONTINUE, systemMessage: LEARNER_HINT_MESSAGE };
 }
 
@@ -266,7 +268,12 @@ function isJevLoopReleaseOnly() {
 function jevCompletionOutcome(result, state, statePath) {
   if (!jevSaysTaskComplete(result)) return null;
   if (!isJevLoopReleaseOnly()) return completeModeFromJev(state, statePath);
-  if (isStateUnchangedSinceJevRequest(state, statePath)) return "released";
+  if (isStateUnchangedSinceJevRequest(state, statePath)) {
+    // OMC_JEV_APPLIED_LOG: Jev's "task complete" released this Stop, which the heuristic would have blocked.
+    const modeName = /([^\\/]+)-state\.json$/.exec(statePath)?.[1] ?? null;
+    recordJevApplied("loop-continuation", { mode: modeName, block: { from: true, to: false }, noul: jevNoulOf(result, "task_complete") });
+    return "released";
+  }
   return isModeEndedSinceJevRequest(statePath) ? "cancelled" : null;
 }
 
