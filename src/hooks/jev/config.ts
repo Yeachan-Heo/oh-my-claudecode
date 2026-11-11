@@ -9,13 +9,22 @@
  * - OMC_JEV_TIMEOUT_MS: per-call timeout, default 2000 (measured single-question
  *   round-trips are 465-605 ms, so a sub-second default degrades every call)
  * - OMC_JEV_MAX_REQUESTS: per-process request cap (0/absent = unlimited)
+ * - OMC_JEV_BREAKER=1: circuit breaker shared by every process of the machine
+ *   (opt-in; read by scripts/lib/jev-breaker.mjs, not parsed here)
+ * - OMC_JEV_MAX_RPM: requests per UTC minute for the machine, by point
+ *   priority (opt-in; absent = no limit; also read by jev-breaker.mjs)
+ * - OMC_JEV_BREAKER_DIR: state directory of both (tests)
  * - OMC_JEV_EXCERPT_CHARS: max excerpt length sent in state, default 200
  * - OMC_JEV_EXCERPT_CHARS_<POINT>: the same limit for one point (point name
  *   upper-cased, dashes as underscores, e.g. OMC_JEV_EXCERPT_CHARS_MODEL_ROUTING).
+ *   model-routing defaults to 12000 and loop-continuation to 2000; both ignore
+ *   OMC_JEV_EXCERPT_CHARS; set the point's own variable to change them.
  *   Points with their own default (POINT_DEFAULT_EXCERPT_CHARS: model-routing,
  *   task-size, skill-trigger, intent, learner-extraction, loop-continuation)
- *   ignore OMC_JEV_EXCERPT_CHARS; set the point's own variable to change them.
- * - OMC_JEV_ENDPOINT: base URL overlay (stub servers / tests)
+ *   ignore OMC_JEV_EXCERPT_CHARS.
+ * - OMC_JEV_ENDPOINT: address of the Jev API (default JEV_DEFAULT_ENDPOINT);
+ *   base URL overlay for stub servers and tests. TYPESAFE_API_KEY is sent as
+ *   a bearer token.
  * - OMC_JEV_LOG_DIR: shadow-log directory override (tests)
  * - OMC_JEV_QUIET=1: silence the env-activation stderr warning (hook
  *   processes are one-shot, so warn-once-per-process degrades to warn-every)

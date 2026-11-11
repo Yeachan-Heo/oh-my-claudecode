@@ -26,7 +26,7 @@ import { spawn, spawnSync } from "child_process";
 import { join, dirname, resolve, normalize, sep } from "path";
 import { homedir } from "os";
 import { fileURLToPath, pathToFileURL } from "url";
-import { isJevShadowOptedIn, jevNoulOf, recordJevShadow } from "./lib/jev-shadow.mjs";
+import { isJevShadowOptedIn, recordJevShadow, setJevSessionId, jevNoulOf } from "./lib/jev-shadow.mjs";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -1669,6 +1669,7 @@ async function main() {
       writeSafeContinue();
       return;
     }
+    setJevSessionId(data.session_id || data.sessionId, data.agent_id || data.agentId);
 
     // The stop_hook_active guard runs after the Ralph state read: a forced
     // continuation re-enters here carrying the reviewer's verdict, and that

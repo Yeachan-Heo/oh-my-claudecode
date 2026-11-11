@@ -23,7 +23,7 @@ import { readStdin } from './lib/stdin.mjs';
 import { resolveConfiguredAgentModel } from './lib/agent-model-config.mjs';
 import { BOUNDED_GIT_TIMEOUT_MS } from './lib/bounded-git-timeout.mjs';
 import { isSkillVisibleToUser } from './lib/skill-entitlements.mjs';
-import { isJevShadowOptedIn, jevNoulOf, recordJevShadow } from './lib/jev-shadow.mjs';
+import { isJevShadowOptedIn, recordJevShadow, setJevSessionId, jevNoulOf } from './lib/jev-shadow.mjs';
 import { resolveExcerptChars } from './jev-resolve.mjs';
 
 // Inlined from src/config/models.ts — avoids a dist/ import so the hook works
@@ -2318,6 +2318,7 @@ async function main() {
         : typeof data.sessionId === 'string'
           ? data.sessionId
           : '';
+    setJevSessionId(sessionId, data.agent_id || data.agentId);
 
     const ultragoalDenyReason = evaluateUltragoalPreToolEnforcement(stateDir, directory, sessionId, data);
     if (ultragoalDenyReason) {

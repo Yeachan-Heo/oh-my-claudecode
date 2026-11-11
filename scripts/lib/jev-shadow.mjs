@@ -2,6 +2,7 @@
 
 import { spawn, spawnSync } from "node:child_process";
 import {
+  appendFileSync,
   closeSync,
   constants,
   fstatSync,
@@ -19,7 +20,7 @@ import {
 import { homedir, tmpdir } from "node:os";
 import { basename, dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { parseJevEnv, resolveJevTimeoutMs } from "../jev-resolve.mjs";
+import { parseJevEnv, resolveJevEndpoint, resolveJevTimeoutMs } from "../jev-resolve.mjs";
 
 const SWEEP_THROTTLE_MS = 60 * 60 * 1000; // 1 hour
 const ACTIVE_RESOLVER_TIMEOUT_BUFFER_MS = 500;
@@ -37,6 +38,126 @@ export function activeResolverBufferMs(point) {
     ACTIVE_RESOLVER_TIMEOUT_BUFFER_MS +
     (point === "model-routing" ? MODEL_ROUTING_RESOLVER_EXTRA_BUFFER_MS : 0)
   );
+}
+
+// Opt-in shared breaker (OMC_JEV_BREAKER=1, see jev-breaker.mjs): the hook
+// shows one notice per session and outage. Without the variable the module is
+// not loaded; a module that fails to load means no notice, never a failed hook.
+let jevBreaker;
+if (String(process.env.OMC_JEV_BREAKER ?? "").trim() === "1") {
+  try {
+    jevBreaker = await import("./jev-breaker.mjs");
+  } catch {
+    jevBreaker = undefined;
+  }
+}
+let jevSessionId;
+let jevInSubagent = false;
+
+/**
+ * Tell the Jev channel which Claude Code session this hook call belongs to
+ * (the hook input's session_id). Used only to show the breaker's outage
+ * notice once per session; without it the notice is once per outage.
+ * agentId is the hook input's agent_id, present only for a call made inside a
+ * subagent: subagents share the session id, but their output never reaches the
+ * user, so a hook of a subagent does not show or use up the notice.
+ */
+export function setJevSessionId(sessionId, agentId) {
+  jevSessionId = typeof sessionId === "string" && sessionId ? sessionId : undefined;
+  jevInSubagent = typeof agentId === "string" && agentId !== "";
+}
+
+let outageNoticeArmed = false;
+
+/**
+ * Add the breaker's outage notice to this hook's own output: the first JSON
+ * object the hook writes to stdout gets a `systemMessage` (appended to one it
+ * already has). The notice is claimed only when that write happens, so a hook
+ * that exits without output does not use it up, and only one process per
+ * session and outage shows it. Never throws.
+ */
+function armOutageNotice(settings, breaker) {
+  if (outageNoticeArmed || jevInSubagent || !settings || !breaker) return;
+  outageNoticeArmed = true;
+  try {
+    const write = process.stdout.write;
+    let done = false;
+    process.stdout.write = function writeWithJevNotice(chunk, ...rest) {
+      if (!done && typeof chunk === "string" && chunk.trimStart().startsWith("{")) {
+        try {
+          const output = JSON.parse(chunk);
+          if (output && typeof output === "object" && !Array.isArray(output)) {
+            done = true;
+            process.stdout.write = write;
+            // The file's state at write time: concurrent openers may have
+            // extended it, and a breaker that closed meanwhile needs no notice.
+            const shown = jevBreaker.readBreaker(settings);
+            const message = shown && jevBreaker.claimOutageNotice(settings, jevSessionId, shown);
+            if (message) {
+              // Also on stderr, for hosts that do not display systemMessage.
+              process.stderr.write(message + "\n");
+              output.systemMessage = typeof output.systemMessage === "string" && output.systemMessage
+                ? output.systemMessage + "\n" + message
+                : message;
+              const indent = /^\{\r?\n( +)"/.exec(chunk.trimStart())?.[1].length ?? 0;
+              chunk = JSON.stringify(output, null, indent) + (chunk.endsWith("\n") ? "\n" : "");
+            }
+          }
+        } catch {
+          // Not one JSON object: written unchanged.
+        }
+      }
+      return write.call(this, chunk, ...rest);
+    };
+  } catch {
+    // The notice is advisory.
+  }
+}
+
+/**
+ * The resolver of an active hook was killed after the hook's time limit or
+ * ended without a result, so it wrote no row itself: append
+ * {ts, point, mode:"degraded", reason, exit_status?, exit_signal?,
+ * spawn_error?, durationMs} to shadow.jsonl (how the process ended, no request
+ * content, no stderr). Only with OMC_JEV_BREAKER=1, and only when
+ * OMC_JEV_LOG_DIR is set (the default per-project directory is resolved
+ * asynchronously, by the resolver alone). Never throws.
+ */
+function recordResolverEnded(point, result, durationMs) {
+  try {
+    const logDir = process.env.OMC_JEV_LOG_DIR;
+    if (!logDir) return;
+    mkdirSync(logDir, { recursive: true });
+    const code = result?.error?.code;
+    const how = {};
+    if (Number.isInteger(result?.status)) how.exit_status = result.status;
+    if (typeof result?.signal === "string") how.exit_signal = result.signal;
+    if (typeof code === "string" && code !== "ETIMEDOUT") how.spawn_error = code;
+    appendFileSync(
+      join(logDir, "shadow.jsonl"),
+      JSON.stringify({
+        ts: new Date().toISOString(),
+        point,
+        mode: "degraded",
+        reason: code === "ETIMEDOUT" ? "resolver-timeout" : "resolver-exit",
+        ...how,
+        durationMs,
+      }) + "\n",
+      "utf8",
+    );
+  } catch {
+    // A logging failure must never affect the hook.
+  }
+}
+
+/** Breaker settings for this hook process, or undefined without OMC_JEV_BREAKER=1. */
+function hookBreakerSettings() {
+  if (!jevBreaker) return undefined;
+  try {
+    return jevBreaker.breakerSettings(process.env, resolveJevEndpoint(process.env), process.env.TYPESAFE_API_KEY);
+  } catch {
+    return undefined;
+  }
 }
 
 /**
@@ -318,6 +439,7 @@ export function jevNoulOf(result, questionName) {
  * Fire-and-record one script-side judgment.
  * - Shadow mode: fire-and-forget, returns undefined immediately
  * - Active mode: waits (sync) for Jev answer, returns { mode, answer, answers, ... }
+ *   (not while the opt-in shared breaker is open: then as in shadow mode)
  *   (`answers` maps every question name to its answer; read multi-question
  *   points by name, never by position)
  * - Off mode: returns undefined
@@ -328,6 +450,13 @@ export function jevNoulOf(result, questionName) {
 export function recordJevShadow({ point, state, questions, heuristic, permissionMode, toolUseId }) {
   const mode = jevModeFor(point, process.env, permissionMode);
   if (mode === "off") return undefined;
+  // Opt-in shared breaker: the resolver holds the call back itself and logs
+  // it. While the breaker is open an active hook does not wait for that: the
+  // resolver runs in the background as in shadow mode and the twin decides.
+  const breakerSettings = hookBreakerSettings();
+  const openBreaker = breakerSettings && jevBreaker.readBreaker(breakerSettings);
+  if (openBreaker) armOutageNotice(breakerSettings, openBreaker);
+  const spawnMode = openBreaker ? "shadow" : mode;
 
   // Throttled best-effort sweep of stale temp directories (once per hour)
   // This cleans up leftovers from killed resolvers that couldn't clean themselves
@@ -360,14 +489,14 @@ export function recordJevShadow({ point, state, questions, heuristic, permission
 
     writeFileSync(
       requestFile,
-      JSON.stringify({ point, state, questions, heuristic, permissionMode, ...(toolUseId ? { tool_use_id: toolUseId } : {}) }),
+      JSON.stringify({ point, state, questions, heuristic, permissionMode, spawnMode, ...(toolUseId ? { tool_use_id: toolUseId } : {}) }),
       {
         encoding: "utf8",
         mode: 0o600,
       },
     );
 
-    if (mode === "shadow") {
+    if (spawnMode === "shadow") {
       // Fire-and-forget for shadow mode
       const child = spawn(
         process.execPath,
@@ -396,8 +525,13 @@ export function recordJevShadow({ point, state, questions, heuristic, permission
     }
 
     // Active mode: spawn synchronously and read result
-    if (mode === "active") {
+    if (spawnMode === "active") {
       try {
+        const hookTimeoutMs = resolveJevTimeoutMs(
+          process.env,
+          activeResolverBufferMs(point),
+        );
+        const spawnedAt = Date.now();
         const result = spawnSync(
           process.execPath,
           [
@@ -407,23 +541,38 @@ export function recordJevShadow({ point, state, questions, heuristic, permission
           ],
           {
             stdio: ["ignore", "pipe", "ignore"],
-            env: process.env,
+            // With the breaker the resolver learns when this hook kills it and
+            // ends its own request 100 ms earlier (OMC_JEV_HOOK_DEADLINE).
+            env: breakerSettings?.breaker
+              ? { ...process.env, OMC_JEV_HOOK_DEADLINE: String(spawnedAt + hookTimeoutMs - 100) }
+              : process.env,
             encoding: "utf8",
-            timeout: resolveJevTimeoutMs(
-              process.env,
-              activeResolverBufferMs(point),
-            ),
+            timeout: hookTimeoutMs,
           },
         );
 
-        if (result.status === 0 && result.stdout) {
+        // With the breaker, a resolver killed at the limit may already have written its row and printed its
+        // whole result (an unfinished response body keeps the process alive): that result counts, and the
+        // hook adds no second row for the same request.
+        const keptAlive = Boolean(breakerSettings?.breaker) && result.error?.code === "ETIMEDOUT";
+        let resolverWroteRow = false;
+        if (result.stdout && (result.status === 0 || keptAlive)) {
           try {
-            return JSON.parse(result.stdout);
+            const parsed = JSON.parse(result.stdout);
+            // This request opened the shared breaker.
+            if (breakerSettings && parsed?.breaker) armOutageNotice(breakerSettings, parsed.breaker);
+            resolverWroteRow = Boolean(parsed?.reason); // Resolver row has a reason field.
+            return parsed;
           } catch {
-            // Parse error: fall back to heuristic
-            return undefined;
+            // Parse error: fall back to heuristic (output cut by the kill: recorded below)
+            if (!keptAlive) return undefined;
+            // If keptAlive and we have stdout (even if unparseable), assume resolver tried to write a row.
+            resolverWroteRow = true;
           }
         }
+        // Only log resolver exit for actual failures (non-zero status or error), not for successful completions
+        // and not when the resolver already wrote its own row.
+        if (breakerSettings?.breaker && result.status !== 0 && !resolverWroteRow) recordResolverEnded(point, result, Date.now() - spawnedAt);
       } finally {
         // Always clean up temp dir after active mode
         if (tempDir) {

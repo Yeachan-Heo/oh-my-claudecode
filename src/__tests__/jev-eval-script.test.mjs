@@ -137,6 +137,24 @@ describe('analyzeLog per-point stats', () => {
   });
 });
 
+describe('calls held back by the cap or an open breaker', () => {
+  it('count in their mode but not as latency samples', () => {
+    const text = [
+      entry('slop-warning', 'shadow', false, { type: 'noul', noul: false }, 1000),
+      entry('slop-warning', 'circuit-open', false, null, 2),
+      entry('slop-warning', 'cap', false, null, 3),
+      entry('task-size', 'circuit-open', 'small', null, 1),
+    ].join('\n') + '\n';
+    const report = analyzeLog(text, 'held-back.jsonl');
+    const slop = report.points.find((p) => p.point === 'slop-warning');
+    expect(slop.requests).toBe(3);
+    expect(slop.modes).toMatchObject({ shadow: 1, cap: 1, 'circuit-open': 1 });
+    expect(slop.durationMs).toEqual({ mean: 1000, p95: 1000 });
+    const taskSize = report.points.find((p) => p.point === 'task-size');
+    expect(taskSize.durationMs).toEqual({ mean: 0, p95: 0 });
+  });
+});
+
 describe('CLI surface', () => {
   it('--json on a fixture log produces parseable per-point output', () => {
     const path = writeFixture('fixture.jsonl', FIXTURE);

@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-/* global process, console, fetch, AbortController, setTimeout, clearTimeout, Buffer */
+/* global process, console, fetch, AbortController, setTimeout, clearTimeout, Buffer, TextDecoder */
 /**
  * Jev script-side judgment channel (ADR 03671, ticket 15).
  *
@@ -8,7 +8,9 @@
  * request to stdin and reads one JSON result from stdout.
  *
  * Request:  { point, state, questions, heuristic, permissionMode? }
- * Result:   { mode, answer, answers, confidence, durationMs }
+ * Result:   { mode, answer, answers, confidence, durationMs, breaker? }
+ * (`breaker`, only with OMC_JEV_BREAKER=1: the shared breaker {until, reason,
+ * since} when it is open after this call)
  *
  * `answer` is the answer to the request's first question (the first answer
  * in server order when that name is missing). `answers` maps every question
@@ -17,10 +19,15 @@
  *
  * mode mirrors the resolver's ResolveMode contract: off (config gates),
  * shadow (twin decides, comparison recorded), active (Jev decides), degraded
- * (a Jev call was attempted and failed - caller falls back to its twin).
+ * (a Jev call was attempted and failed - caller falls back to its twin),
+ * circuit-open and cap (the shared breaker or request limit held the call
+ * back - caller falls back to its twin, as for degraded).
  * The calling script computes its own heuristic twin; this child never sees
- * the twin's code. Request cap and circuit breaker are in-process resolver
- * runtime - meaningless for a one-shot child and intentionally omitted.
+ * the twin's code. The TS resolver's request cap and circuit breaker are
+ * in-process runtime - meaningless for a one-shot child and omitted here.
+ * Their cross-process counterpart is opt-in: OMC_JEV_BREAKER=1 and
+ * OMC_JEV_MAX_RPM=<n> share a breaker and a per-minute limit between all
+ * processes through files (lib/jev-breaker.mjs); without them nothing changes.
  * Degrade-never-block: any failure exits 0 with mode:"degraded" so a hook
  * process is never killed by a Jev outage.
  *
@@ -272,6 +279,99 @@ async function logDirFor(env) {
   return join(omcRoot, "state", "jev");
 }
 
+/** The Jev endpoint every channel sends to. Mirror of `endpoint` in config.ts. */
+export function resolveJevEndpoint(env = process.env) {
+  return env.OMC_JEV_ENDPOINT || DEFAULT_ENDPOINT;
+}
+
+/**
+ * The shared breaker and request limit (lib/jev-breaker.mjs) for this
+ * endpoint and key: {breaker, settings}, or undefined when neither
+ * OMC_JEV_BREAKER=1 nor OMC_JEV_MAX_RPM is set. The module is loaded only
+ * then; a module that fails to load means no breaker, never a failed request.
+ */
+export async function loadJevBreaker(env = process.env) {
+  if (String(env.OMC_JEV_BREAKER ?? "").trim() !== "1" && !String(env.OMC_JEV_MAX_RPM ?? "").trim()) return undefined;
+  try {
+    const breaker = await import("./lib/jev-breaker.mjs");
+    const settings = breaker.breakerSettings(env, resolveJevEndpoint(env), env.TYPESAFE_API_KEY);
+    return settings ? { breaker, settings } : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * The first `maxChars` characters of a failed response's body, or undefined
+ * when it cannot be read within a second. The stream is read only as far as
+ * needed and then cancelled. Never throws.
+ */
+async function readErrorBody(response, maxChars) {
+  let timer;
+  let reader;
+  try {
+    const read = async () => {
+      if (typeof response.body?.getReader !== "function") return String(await response.text()).slice(0, maxChars);
+      reader = response.body.getReader();
+      const decoder = new TextDecoder();
+      let text = "";
+      while (text.length < maxChars) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        text += decoder.decode(value, { stream: true });
+      }
+      return text.slice(0, maxChars);
+    };
+    return await Promise.race([
+      read(),
+      new Promise((resolve) => {
+        timer = setTimeout(() => resolve(undefined), 1000);
+      }),
+    ]);
+  } catch {
+    return undefined;
+  } finally {
+    if (timer) clearTimeout(timer);
+    try {
+      await reader?.cancel();
+    } catch {
+      // The body is not needed any more.
+    }
+  }
+}
+
+/**
+ * Drop the unread rest of a failed response's body, so an endpoint that never
+ * ends it cannot keep this process alive after it has printed its result
+ * (an active hook waits for the process to end). Never throws.
+ */
+function dropBody(response) {
+  try {
+    response.body?.cancel().catch(() => {});
+  } catch {
+    // Not a real stream (a test double), or already locked: nothing to drop.
+  }
+}
+
+/** A request that ran shorter than this because of the hook deadline is not counted as a missing response. */
+const MIN_COUNTED_REQUEST_MS = 1000;
+
+/**
+ * Timeout of one request in the resolver process. With OMC_JEV_BREAKER=1 an
+ * active hook passes the moment it kills this process, less 100 ms, in
+ * OMC_JEV_HOOK_DEADLINE (epoch ms); the request then ends by that time at the
+ * latest (but not within the first 200 ms), so a slow process start cannot
+ * push the resolver's own timeout, which records the missing response, past
+ * the kill.
+ */
+export function resolveRequestTimeoutMs(env = process.env, now = Date.now()) {
+  const timeoutMs = resolveJevTimeoutMs(env);
+  if (String(env.OMC_JEV_BREAKER ?? "").trim() !== "1") return timeoutMs;
+  const deadline = Number(env.OMC_JEV_HOOK_DEADLINE);
+  if (!Number.isFinite(deadline) || deadline <= 0) return timeoutMs;
+  return Math.max(200, Math.min(timeoutMs, deadline - now));
+}
+
 /**
  * Mirror of the resolver's shadow-log entry (ShadowLogEntry): the jev-eval
  * tool compares lines regardless of which side wrote them.
@@ -300,7 +400,7 @@ export async function resolveRequest(
   fetchFn = fetch,
 ) {
   const startedAt = Date.now();
-  const mode = parseJevEnv(request.point, env, request.permissionMode);
+  const mode = request.spawnMode ?? parseJevEnv(request.point, env, request.permissionMode);
   if (mode === "off") {
     return { mode, answer: null, answers: null, confidence: undefined, durationMs: 0 };
   }
@@ -312,9 +412,40 @@ export async function resolveRequest(
     state: boundExcerpts(request.state, resolveExcerptChars(request.point, env)),
     questions: request.questions,
   };
+  // Opt-in shared breaker and request limit: a held-back call is logged and
+  // ends like a failed one (the caller uses its twin), without a fetch.
+  const guard = await loadJevBreaker(env);
+  if (guard) {
+    const { skip } = guard.breaker.admitRequest(guard.settings, request.point);
+    if (skip) {
+      const durationMs = Date.now() - startedAt;
+      await writeShadowLog(
+        {
+          ts: new Date().toISOString(),
+          point: request.point,
+          mode: skip.mode,
+          state: bound.state,
+          heuristic: comparableHeuristic(request.heuristic, request.questions),
+          jev: null,
+          answers: null,
+          ...guard.breaker.skipLogFields(skip),
+          durationMs,
+        },
+        await logDirFor(env),
+      );
+      return {
+        mode: skip.mode,
+        answer: null,
+        answers: null,
+        confidence: undefined,
+        durationMs,
+        ...(skip.breaker ? { breaker: skip.breaker } : {}),
+      };
+    }
+  }
   const controller = new AbortController();
   let timer;
-  const timeoutMs = resolveJevTimeoutMs(env);
+  const timeoutMs = resolveRequestTimeoutMs(env);
   const timeoutPromise = new Promise((resolve, reject) => {
     timer = setTimeout(() => {
       controller.abort();
@@ -325,9 +456,13 @@ export async function resolveRequest(
   let jevAnswers = null;
   let confidence;
   let entryMode = mode;
+  // What the breaker needs to classify a failure: the HTTP status and
+  // Retry-After, or that no response arrived at all (timeout, network error).
+  let failure;
+  let responded = false;
   try {
     const response = await Promise.race([
-      fetchFn(env.OMC_JEV_ENDPOINT || DEFAULT_ENDPOINT, {
+      fetchFn(resolveJevEndpoint(env), {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -342,8 +477,19 @@ export async function resolveRequest(
       }),
       timeoutPromise,
     ]);
-    if (!response.ok)
+    responded = true;
+    if (!response.ok) {
+      if (guard) {
+        const retryAfter = response.headers?.get?.("retry-after") ?? undefined;
+        failure = { status: response.status, retryAfter };
+        // A 429 without a usable Retry-After may state the time in its body.
+        if (guard.settings.breaker && response.status === 429 && guard.breaker.retryAfterSeconds(retryAfter) === undefined) {
+          failure.body = await readErrorBody(response, guard.breaker.RETRY_BODY_MAX_CHARS);
+        }
+        dropBody(response);
+      }
       throw new Error("jev request failed: HTTP " + response.status);
+    }
     const body = validateJevResponse(await response.json());
     const firstQuestion = Object.keys(request.questions ?? {})[0];
     jevAnswer =
@@ -360,10 +506,17 @@ export async function resolveRequest(
         ": degraded - " +
         (error instanceof Error ? error.message : String(error)),
     );
+    // A request that had less than a second (a slow process start used up the rest before the hook's
+    // deadline) says little about the endpoint and is not counted as a missing response.
+    if (guard && !responded && timeoutMs >= Math.min(resolveJevTimeoutMs(env), MIN_COUNTED_REQUEST_MS)) failure = { noResponse: true };
   } finally {
     if (timer) clearTimeout(timer);
   }
   const durationMs = Date.now() - startedAt;
+  // Tell the breaker before the log write, so concurrent callers see it at once.
+  const opened = guard && failure
+    ? guard.breaker.recordFailure(guard.settings, guard.breaker.classifyFailure(failure))
+    : undefined;
   await writeShadowLog(
     {
       ts: new Date().toISOString(),
@@ -385,6 +538,7 @@ export async function resolveRequest(
     answers: entryMode === "degraded" ? null : jevAnswers,
     confidence,
     durationMs,
+    ...(opened ? { breaker: opened } : {}),
   };
 }
 
