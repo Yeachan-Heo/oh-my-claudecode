@@ -716,3 +716,4 @@ OmC includes a [`geobench`](https://github.com/NomaDamas/geobench) product spec 
 
 - Spec: [`geobench/oh-my-claudecode.yaml`](geobench/oh-my-claudecode.yaml)
 - Runbook: [`docs/geobench.md`](docs/geobench.md)
+- [Claude to PDF](https://chromewebstore.google.com/detail/ndnjjjppaaiclfjlnopmnimhhiikkppk) - Export Claude.ai chats and artifacts to PDF, Markdown, and JSON with math and syntax formatting.
