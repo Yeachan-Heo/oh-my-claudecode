@@ -1062,7 +1062,7 @@ function hasActionableRalphKeyword(text, pattern) {
 // with isInformationalKeywordContext, whose cost is linear in the text length.
 const AUTOPILOT_COMMAND_VERBS = 'fix|debug|investigate|resolve|handle|patch|address|implement|build|create|make|run|start|enable|activate|invoke|trigger|launch|plan|add|write|refactor|update|remove|migrate|finish|continue|do|go|test|review|check|verify|audit|analy[sz]e|inspect|deploy|install|configure|document|explain|find|search|generate|convert|ship|release|merge|prepare|design|draft|upgrade|rename|clean|optimi[sz]e|rewrite|summari[sz]e|compare';
 const AUTOPILOT_NOT_A_COMMAND_AFTER = '(?!\\s+(?:\\d|failed|fails|was|were|is|are|has|had|step|phase|looks|takes|keeps|crashed|hangs|hung|errored|timed\\s+out|exit|status|log|ok|okay|suite|mode|output|report|results?|summary)(?![\\p{L}\\d]))';
-const AUTOPILOT_COMMAND_AFTER = new RegExp(`^[ \\t]+(?:${AUTOPILOT_COMMAND_VERBS})(?![\\p{L}\\d])${AUTOPILOT_NOT_A_COMMAND_AFTER}`, 'iu');
+const AUTOPILOT_COMMAND_AFTER = new RegExp(`^(?:[ \\t]*[,;\\u2014\\u2013][ \\t]*|[ \\t]+-[ \\t]+|[ \\t]+)(?:${AUTOPILOT_COMMAND_VERBS})(?![\\p{L}\\d])${AUTOPILOT_NOT_A_COMMAND_AFTER}`, 'iu');
 // After an explicit colon any verb starts a command ("autopilot: test the API"); a status line
 // ("autopilot: waiting for a task", "autopilot: complete") has a gerund, a past tense or no object.
 const AUTOPILOT_COLON_COMMAND = new RegExp(`^[ \\t]*[:\\uFF1A][ \\t]*(?:(?:${AUTOPILOT_COMMAND_VERBS})(?![\\p{L}\\d])${AUTOPILOT_NOT_A_COMMAND_AFTER}|(?!(?!(?:bring|ping|seed|feed|embed|proceed|succeed|speed|need|shred|string|swing|sing|ring|fling|sling|sting|wring|spring|cling)(?![\\p{L}\\d]))\\p{L}*(?:ing|ed)(?![\\p{L}\\d]))\\p{L}{2,}(?![\\p{L}\\d])${AUTOPILOT_NOT_A_COMMAND_AFTER}[ \\t]+\\S)`, 'iu');
@@ -1119,7 +1119,11 @@ function hasActionableAutopilotKeyword(text, pattern) {
     if (match.index === undefined) continue;
     if (++scanned > AUTOPILOT_MAX_MATCHES) break;
     if (!hasExplicitAutopilotInvocationContext(searchText, match.index, match[0].length, match[0])) continue;
-    if (++candidates > AUTOPILOT_MAX_CANDIDATES) break;
+    if (++candidates > AUTOPILOT_MAX_CANDIDATES) {
+      // Past the budget skip the costly informational check, but a slash or shell-prefixed command still counts.
+      if (/^[ \t]*[$/!][ \t]*$/.test(searchText.slice(getLineBounds(searchText, match.index).start, match.index))) return true;
+      continue;
+    }
     if (isInformationalKeywordContext(searchText, match.index, match[0].length, match[0])) continue;
     return true;
   }

@@ -336,10 +336,24 @@ describe('keyword-detector.mjs mode-message dispatch', () => {
   });
 
   it.each([
+    'Fix the cron first.\nautopilot, fix the parser',
+    'Fix the cron first.\nautopilot; fix the parser',
+    'Fix the cron first.\nautopilot \u2014 fix the parser',
+    'Fix the cron first.\nautopilot - fix the parser',
+    `${'please autopilot? what is it?\n'.repeat(25)}Then do the work.\n/autopilot fix the bug`,
+  ])('activates autopilot for the separator or late slash command "%s" in both shipped hooks', (prompt) => {
+    for (const detectorPath of [SCRIPT_PATH, TEMPLATE_PATH]) {
+      const output = runKeywordDetector(prompt, process.cwd(), 'session-5007-separator', {}, detectorPath);
+      expect(output.hookSpecificOutput?.additionalContext ?? '').toContain('[MAGIC KEYWORD: AUTOPILOT]');
+    }
+  });
+
+  it.each([
     'Fix the cron first.\nautopilot: waiting for a task',
     'Fix the cron first.\nautopilot: complete',
     'Fix the cron first.\nautopilot test suite is red',
     'Fix the cron first.\nautopilot review is done',
+    'Fix the cron first.\nautopilot, which is nice',
     'The full auto mode is neat',
   ])('does not activate autopilot for the status or prose line "%s" in both shipped hooks', (prompt) => {
     for (const detectorPath of [SCRIPT_PATH, TEMPLATE_PATH]) {
