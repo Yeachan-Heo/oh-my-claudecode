@@ -1003,28 +1003,67 @@ function blockWords(block) {
   return words ? [words] : [];
 }
 
+// The end of a user's block that opens at `from` in a row's text: the end of the line of its framing
+// note (the first one after its header); -1 without one.
+function userBlockEnd(text, from) {
+  const t = text.indexOf(QUEUED_TAIL, from);
+  if (t < 0) return -1;
+  const nl = text.indexOf('\n', t + QUEUED_TAIL.length);
+  return nl < 0 ? text.length : nl;
+}
+
 // Text outside envelopes (a row rebuilt before carried blocks got envelopes) split at each line that
-// opens a frame: one piece per delivered message.
+// opens a frame: one piece per delivered message. A user's block runs to its framing note, so a frame
+// line the user quotes before the note stays in it.
 function piecesOf(text) {
   const pieces = [];
+  const lastTail = text.lastIndexOf(QUEUED_TAIL);
+  let end = -1;
+  let at = 0;
   for (const line of text.split('\n')) {
-    if (!pieces.length || frameOf(`${line}\n`)) pieces.push(line);
-    else pieces[pieces.length - 1] += `\n${line}`;
+    const frame = at >= end ? frameOf(`${line}\n`) : undefined;
+    if (!pieces.length || frame) {
+      pieces.push(line);
+      end = frame === 'user' && at < lastTail ? userBlockEnd(text, at) : -1;
+    } else pieces[pieces.length - 1] += `\n${line}`;
+    at += line.length + 1;
   }
   return pieces;
+}
+
+// The envelopes of a row's text that hold a delivered message, except one inside a user's block before
+// its framing note: that one is a quote the user pasted and stays in their block.
+function deliveredOf(text) {
+  const all = envelopesOf(text).filter((e) => deliveryOf(e.text));
+  const lastTail = text.lastIndexOf(QUEUED_TAIL);
+  const out = [];
+  let end = -1;
+  let k = 0;
+  for (let p = 0; p < text.length;) {
+    if (k < all.length && all[k].from <= p) {
+      if (all[k].from >= end) { out.push(all[k]); p = Math.max(p, all[k].to); }
+      k++;
+      continue;
+    }
+    const nl = text.indexOf('\n', p);
+    const stop = Math.min(nl < 0 ? text.length : nl, k < all.length ? all[k].from : text.length);
+    if (p >= end && p < lastTail && frameOf(`${text.slice(p, stop)}\n`) === 'user') end = userBlockEnd(text, p);
+    p = stop === nl ? nl + 1 : stop;
+  }
+  return out;
 }
 
 // The user's own words in a message: none for host notices and summaries; host blocks inside a
 // message are cut out. A delivered message counts only as a whole block, by its opening frame (one
 // rule): each envelope of the text that holds a delivered message (the host's, or one a row rebuilt
-// by an earlier compaction carries), and the text outside them, read by its pieces (piecesOf) when it
+// by an earlier compaction carries; deliveredOf), and the text outside them, read by its pieces (piecesOf) when it
 // opens with a delivered message (opensDelivery) or the row holds results. A result row's own text
 // gives words only so. An envelope counts as carried only in such a row or in one whose text outside
 // the envelopes gives no words of the user (build carries blocks only into result rows); in a prompt
 // the user typed it is a quote they pasted.
 function userWords(m) {
   if (m.role !== 'user' || !m.text) return [];
-  const delivered = envelopesOf(m.text).filter((e) => deliveryOf(e.text));
+  const delivered = deliveredOf(m.text);
   const outside = [];
   let at = 0;
   for (const e of delivered) { outside.push(m.text.slice(at, e.from)); at = e.to; }
