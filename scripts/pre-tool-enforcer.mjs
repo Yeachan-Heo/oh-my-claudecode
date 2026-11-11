@@ -1064,7 +1064,7 @@ function recordModelRoutingShadow(toolName, toolInput, updatedToolInput, permiss
       if (modelChanged) {
         applied.model = { from: baseModel ?? null, to: jevChoice };
       }
-      if (effortChangedByJev) {
+      if (effortChangedByJev && typeof jevAppliedEffort === 'string') {
         applied.effort = { from: baseEffort ?? null, to: jevAppliedEffort, score: effortScore };
       }
       recordJevApplied('model-routing', applied);
