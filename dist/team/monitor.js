@@ -1,0 +1,1089 @@
+/**
+ * Snapshot-based team monitor — mirrors OMX monitorTeam semantics.
+ *
+ * Reads team config, tasks, worker heartbeats/status, computes deltas
+ * against previous snapshot, emits events, delivers mailbox messages,
+ * and persists the new snapshot for the next cycle.
+ *
+ * NO polling watchdog. The caller (runtime-v2 or runtime-cli) drives
+ * the monitor loop.
+ */
+import { existsSync } from 'fs';
+import { readFile, mkdir, rm, writeFile, rename } from 'fs/promises';
+import { randomUUID } from 'node:crypto';
+import { dirname } from 'path';
+import { performance } from 'perf_hooks';
+import { CANONICAL_TEAM_ROLES, KNOWN_AGENT_NAMES } from '../shared/types.js';
+import { WORKER_NAME_SAFE_PATTERN } from './contracts.js';
+import { TeamPaths, absPath, canonicalTeamCwd, canonicalTeamStatePath } from './state-paths.js';
+import { withProcessIdentityFileLock } from './process-identity-lock.js';
+import { normalizeTeamManifest, resolveMaxWorkers } from './governance.js';
+import { canonicalizeTeamConfigWorkers } from './worker-canonicalization.js';
+import { assertTeamInstanceUnderLock, createTeamInstanceBinding, disposeTeamInstanceUnderLock } from './team-instance.js';
+import { isValidLeaderSessionId, isValidTeamInstanceId, isValidTmuxServerIdentity } from './types.js';
+// ---------------------------------------------------------------------------
+// State I/O helpers (self-contained, no external deps beyond fs)
+// ---------------------------------------------------------------------------
+async function readJsonSafe(filePath) {
+    try {
+        if (!existsSync(filePath))
+            return null;
+        const raw = await readFile(filePath, 'utf-8');
+        return JSON.parse(raw);
+    }
+    catch {
+        return null;
+    }
+}
+async function readJsonFileState(filePath) {
+    try {
+        return { kind: 'value', value: JSON.parse(await readFile(filePath, 'utf8')) };
+    }
+    catch (error) {
+        return error.code === 'ENOENT' ? { kind: 'missing' } : { kind: 'invalid' };
+    }
+}
+async function writeAtomic(filePath, data) {
+    await mkdir(dirname(filePath), { recursive: true });
+    const tmpPath = `${filePath}.${process.pid}.${randomUUID()}.tmp`;
+    try {
+        await writeFile(tmpPath, data, 'utf-8');
+        await rename(tmpPath, filePath);
+    }
+    finally {
+        await rm(tmpPath, { force: true }).catch(() => undefined);
+    }
+}
+// ---------------------------------------------------------------------------
+// Config / Manifest readers
+// ---------------------------------------------------------------------------
+function configFromManifest(manifest) {
+    assertValidTmuxServerIdentity(manifest.tmux_server_identity);
+    return {
+        name: manifest.name,
+        instance_id: manifest.instance_id,
+        tmux_server_identity: manifest.tmux_server_identity,
+        task: manifest.task,
+        agent_type: 'claude',
+        policy: manifest.policy,
+        governance: manifest.governance,
+        worker_launch_mode: manifest.policy.worker_launch_mode,
+        worker_count: manifest.worker_count,
+        max_workers: 20,
+        workers: manifest.workers,
+        created_at: manifest.created_at,
+        tmux_session: manifest.tmux_session,
+        next_task_id: manifest.next_task_id,
+        leader_cwd: manifest.leader_cwd,
+        team_state_root: manifest.team_state_root,
+        workspace_mode: manifest.workspace_mode,
+        worktree_mode: manifest.worktree_mode,
+        leader_pane_id: manifest.leader_pane_id,
+        hud_pane_id: manifest.hud_pane_id,
+        resize_hook_name: manifest.resize_hook_name,
+        resize_hook_target: manifest.resize_hook_target,
+        next_worker_index: manifest.next_worker_index,
+        resolved_routing: manifest.resolved_routing,
+        resolved_routing_roles: manifest.resolved_routing_roles,
+        external_models_defaults: manifest.external_models_defaults,
+        service_descriptor: manifest.service_descriptor,
+    };
+}
+function isRecord(value) {
+    return value !== null && typeof value === 'object' && !Array.isArray(value);
+}
+function isNonEmptyString(value) {
+    return typeof value === 'string' && value.trim().length > 0;
+}
+function isOptionalExternalModelsDefaults(value) {
+    if (value === undefined)
+        return true;
+    if (!isRecord(value))
+        return false;
+    const allowed = new Set(['provider', 'codexModel', 'geminiModel', 'grokModel', 'antigravityModel', 'cursorModel']);
+    if (Object.keys(value).some(key => !allowed.has(key)))
+        return false;
+    if (value.provider !== undefined && !['codex', 'gemini', 'antigravity'].includes(value.provider))
+        return false;
+    return ['codexModel', 'geminiModel', 'grokModel', 'antigravityModel', 'cursorModel']
+        .every(key => value[key] === undefined || value[key] === '' || isNonEmptyString(value[key]));
+}
+function isOptionalRoutingRoles(value) {
+    return value === undefined || (Array.isArray(value)
+        && value.every(role => CANONICAL_TEAM_ROLES.includes(role)));
+}
+function isSafeCounter(value) {
+    return typeof value === 'number' && Number.isSafeInteger(value) && value >= 0;
+}
+export function isValidPersistedMaxWorkers(value) {
+    return value === undefined || (isSafeCounter(value) && value >= 1);
+}
+function isTimestamp(value) {
+    return typeof value === 'string' && Number.isFinite(Date.parse(value));
+}
+function isStringArray(value) {
+    return Array.isArray(value) && value.every(item => typeof item === 'string');
+}
+function isWorkerInfo(value) {
+    if (!isRecord(value) || typeof value.name !== 'string' || !WORKER_NAME_SAFE_PATTERN.test(value.name) || !isSafeCounter(value.index) || value.index < 1)
+        return false;
+    return (value.role === undefined || typeof value.role === 'string')
+        && (value.assigned_tasks === undefined || isStringArray(value.assigned_tasks))
+        && (value.worker_cli === undefined || ['claude', 'codex', 'gemini', 'cursor', 'grok', 'antigravity'].includes(value.worker_cli))
+        && (value.pid === undefined || (isSafeCounter(value.pid) && value.pid > 0))
+        && (value.pane_id === undefined || typeof value.pane_id === 'string')
+        && (value.working_dir === undefined || typeof value.working_dir === 'string')
+        && (value.worktree_repo_root === undefined || typeof value.worktree_repo_root === 'string')
+        && (value.worktree_path === undefined || typeof value.worktree_path === 'string')
+        && (value.worktree_branch === undefined || typeof value.worktree_branch === 'string')
+        && (value.worktree_detached === undefined || typeof value.worktree_detached === 'boolean')
+        && (value.worktree_created === undefined || typeof value.worktree_created === 'boolean')
+        && (value.team_state_root === undefined || typeof value.team_state_root === 'string')
+        && (value.output_file === undefined || typeof value.output_file === 'string')
+        && (value.recovery_id === undefined || isNonEmptyString(value.recovery_id))
+        && (value.replacement_generation === undefined || isSafeCounter(value.replacement_generation))
+        && (value.pane_attempt_id === undefined || isNonEmptyString(value.pane_attempt_id))
+        && (value.operational_state === undefined || ['starting', 'active', 'dead', 'stopped'].includes(value.operational_state))
+        && (value.launch_attempt_id === undefined || isNonEmptyString(value.launch_attempt_id))
+        && (value.launch_descriptor === undefined || isLaunchDescriptor(value.launch_descriptor));
+}
+function isLaunchDescriptor(value) {
+    return isRecord(value) && value.schema_version === 1
+        && ['claude', 'codex', 'gemini', 'cursor', 'grok', 'antigravity'].includes(value.provider)
+        && (value.model === null || typeof value.model === 'string')
+        && isNonEmptyString(value.binary) && isStringArray(value.args);
+}
+function isOwnerEpoch(value) {
+    return isRecord(value) && isSafeCounter(value.epoch) && value.epoch > 0 && isNonEmptyString(value.nonce)
+        && isSafeCounter(value.pid) && value.pid > 0 && isNonEmptyString(value.process_started_at) && isTimestamp(value.created_at);
+}
+function isRecoveryAttempt(value) {
+    return isRecord(value) && isNonEmptyString(value.request_id) && isNonEmptyString(value.recovery_id)
+        && isNonEmptyString(value.worker_name) && isSafeCounter(value.owner_epoch) && value.owner_epoch > 0
+        && isNonEmptyString(value.owner_nonce) && ['reserved', 'requeued', 'ready', 'active', 'services_pending', 'adopted', 'failed'].includes(value.phase)
+        && (value.original_pane_id === undefined || typeof value.original_pane_id === 'string')
+        && isSafeCounter(value.state_revision) && isTimestamp(value.created_at) && isTimestamp(value.updated_at);
+}
+function isScaleUpAttempt(value) {
+    return isRecord(value) && isNonEmptyString(value.operation_id) && ['reserved', 'effects', 'committed', 'failed'].includes(value.phase)
+        && (value.instance_id === undefined || isValidTeamInstanceId(value.instance_id))
+        && isSafeCounter(value.pid) && value.pid > 0 && isNonEmptyString(value.process_started_at) && isSafeCounter(value.state_revision)
+        && isTimestamp(value.created_at) && isTimestamp(value.updated_at)
+        && (value.failure_reason === undefined || typeof value.failure_reason === 'string');
+}
+function isScaleDownAttempt(value) {
+    return isRecord(value) && isNonEmptyString(value.operation_id) && ['draining', 'effects', 'failed'].includes(value.phase)
+        && (value.instance_id === undefined || isValidTeamInstanceId(value.instance_id))
+        && isSafeCounter(value.pid) && value.pid > 0 && isNonEmptyString(value.process_started_at) && Array.isArray(value.workers)
+        && value.workers.every(worker => isRecord(worker) && isNonEmptyString(worker.name)
+            && (worker.pane_id === undefined || typeof worker.pane_id === 'string')
+            && (worker.worktree_path === undefined || typeof worker.worktree_path === 'string')
+            && (worker.worktree_created === undefined || typeof worker.worktree_created === 'boolean')
+            && (worker.launch_attempt_id === undefined || isNonEmptyString(worker.launch_attempt_id))
+            && (worker.provider === undefined || ['claude', 'codex', 'gemini', 'cursor', 'grok', 'antigravity'].includes(worker.provider))
+            && (worker.launch_descriptor === undefined || isLaunchDescriptor(worker.launch_descriptor)))
+        && isSafeCounter(value.state_revision) && isTimestamp(value.created_at) && isTimestamp(value.updated_at)
+        && (value.failure_reason === undefined || typeof value.failure_reason === 'string');
+}
+function isServiceDescriptor(value) {
+    return isRecord(value) && value.schema_version === 1 && isSafeCounter(value.service_generation)
+        && isNonEmptyString(value.service_attempt_id) && typeof value.auto_merge_enabled === 'boolean'
+        && isNonEmptyString(value.workspace_root) && (value.leader_branch === undefined || typeof value.leader_branch === 'string')
+        && ['disabled', 'worker-auto-commit-v1'].includes(value.cadence_policy);
+}
+function isShutdownAttempt(value) {
+    return isRecord(value) && isNonEmptyString(value.nonce) && isSafeCounter(value.pid) && value.pid > 0
+        && isNonEmptyString(value.process_started_at) && isSafeCounter(value.state_revision) && isTimestamp(value.created_at)
+        && (value.instance_id === undefined || isValidTeamInstanceId(value.instance_id));
+}
+function isAllDeadRecovery(value) {
+    return isRecord(value) && isTimestamp(value.detected_at) && isTimestamp(value.deadline_at) && isSafeCounter(value.state_revision);
+}
+function isTeamConfig(value, requireRevision, expectedTeamName) {
+    if (!isRecord(value) || !isNonEmptyString(value.name) || (expectedTeamName !== undefined && value.name !== expectedTeamName)
+        || (value.instance_id !== undefined && !isValidTeamInstanceId(value.instance_id))
+        || (value.tmux_server_identity !== undefined && !isValidTmuxServerIdentity(value.tmux_server_identity))
+        || !isNonEmptyString(value.agent_type)
+        || (value.task !== undefined && typeof value.task !== 'string')
+        || (value.worker_launch_mode !== undefined && !['interactive', 'prompt'].includes(value.worker_launch_mode))
+        || !isSafeCounter(value.worker_count)
+        || !isValidPersistedMaxWorkers(value.max_workers)
+        || !Array.isArray(value.workers) || value.worker_count !== value.workers.length
+        || !value.workers.every(isWorkerInfo) || !hasUniqueWorkerIdentity(value.workers)
+        || !isTimestamp(value.created_at) || !isNonEmptyString(value.tmux_session)
+        || (value.leader_session_id !== undefined && !isValidLeaderSessionId(value.leader_session_id))
+        || (value.next_task_id !== undefined && !isSafeCounter(value.next_task_id))
+        || !isOptionalPolicy(value.policy) || !isOptionalGovernance(value.governance)
+        || !isOptionalWorkspaceShape(value) || !isOptionalPaneShape(value)
+        || !isOptionalRouting(value.resolved_routing)
+        || !isOptionalRoutingRoles(value.resolved_routing_roles)
+        || !isOptionalExternalModelsDefaults(value.external_models_defaults))
+        return false;
+    if (requireRevision ? !isSafeCounter(value.state_revision) : value.state_revision !== undefined && !isSafeCounter(value.state_revision))
+        return false;
+    if (!requireRevision && Object.hasOwn(value, 'state_revision'))
+        return false;
+    return (value.lifecycle_state === undefined || ['starting', 'active', 'shutting_down', 'stopped'].includes(value.lifecycle_state))
+        && (value.runtime_owner_epoch === undefined || isOwnerEpoch(value.runtime_owner_epoch))
+        && (value.active_recovery === undefined || isRecoveryAttempt(value.active_recovery))
+        && (value.last_recovery === undefined || isRecoveryAttempt(value.last_recovery))
+        && (value.active_scale_up === undefined || isScaleUpAttempt(value.active_scale_up))
+        && (value.active_scale_down === undefined || isScaleDownAttempt(value.active_scale_down))
+        && (value.service_descriptor === undefined || isServiceDescriptor(value.service_descriptor))
+        && (value.shutdown_attempt === undefined || isShutdownAttempt(value.shutdown_attempt))
+        && (value.all_dead_recovery === undefined || isAllDeadRecovery(value.all_dead_recovery))
+        && hasMatchingLifecycleInstanceIdentity(value)
+        && hasMatchingActiveFenceRevisions(value);
+}
+/**
+ * A newly written lifecycle fence may carry the instance UUID, but a legacy
+ * fence may omit it and remain readable for diagnosis. A present fence UUID
+ * is never allowed to disagree with the authoritative config UUID.
+ */
+function hasMatchingLifecycleInstanceIdentity(value) {
+    const configId = value.instance_id;
+    return [value.shutdown_attempt, value.active_scale_up, value.active_scale_down].every(attempt => {
+        if (attempt === undefined || !isRecord(attempt) || attempt.instance_id === undefined)
+            return true;
+        return typeof configId === 'string'
+            && isValidTeamInstanceId(configId)
+            && typeof attempt.instance_id === 'string'
+            && isValidTeamInstanceId(attempt.instance_id)
+            && configId.toLowerCase() === attempt.instance_id.toLowerCase();
+    });
+}
+function hasUniqueWorkerIdentity(workers) {
+    const names = new Set();
+    const indices = new Set();
+    return workers.every(worker => {
+        if (!isRecord(worker) || typeof worker.name !== 'string' || !WORKER_NAME_SAFE_PATTERN.test(worker.name) || typeof worker.index !== 'number')
+            return false;
+        if (names.has(worker.name) || indices.has(worker.index))
+            return false;
+        names.add(worker.name);
+        indices.add(worker.index);
+        return true;
+    });
+}
+function isOptionalPolicy(value) {
+    return value === undefined || (isRecord(value)
+        && ['split_pane', 'auto'].includes(value.display_mode)
+        && ['interactive', 'prompt'].includes(value.worker_launch_mode)
+        && ['hook_preferred_with_fallback', 'transport_direct'].includes(value.dispatch_mode)
+        && isSafeCounter(value.dispatch_ack_timeout_ms));
+}
+function isOptionalGovernance(value) {
+    return value === undefined || (isRecord(value)
+        && typeof value.delegation_only === 'boolean'
+        && typeof value.plan_approval_required === 'boolean'
+        && typeof value.nested_teams_allowed === 'boolean'
+        && typeof value.one_team_per_leader_session === 'boolean'
+        && typeof value.cleanup_requires_all_workers_inactive === 'boolean');
+}
+function isOptionalWorkspaceShape(value) {
+    return (value.leader_cwd === undefined || typeof value.leader_cwd === 'string')
+        && (value.team_state_root === undefined || typeof value.team_state_root === 'string')
+        && (value.workspace_mode === undefined || ['single', 'worktree'].includes(value.workspace_mode))
+        && (value.worktree_mode === undefined || ['disabled', 'detached', 'named'].includes(value.worktree_mode))
+        && (value.lifecycle_profile === undefined || ['default', 'linked_ralph'].includes(value.lifecycle_profile));
+}
+function isOptionalPaneShape(value) {
+    return (value.leader_pane_id === undefined || value.leader_pane_id === null || typeof value.leader_pane_id === 'string')
+        && (value.hud_pane_id === undefined || value.hud_pane_id === null || typeof value.hud_pane_id === 'string')
+        && (value.resize_hook_name === undefined || value.resize_hook_name === null || typeof value.resize_hook_name === 'string')
+        && (value.resize_hook_target === undefined || value.resize_hook_target === null || typeof value.resize_hook_target === 'string')
+        && (value.next_worker_index === undefined || (isSafeCounter(value.next_worker_index) && value.next_worker_index > 0));
+}
+function isOptionalRouting(value) {
+    if (value === undefined)
+        return true;
+    if (!isRecord(value) || Object.keys(value).length !== CANONICAL_TEAM_ROLES.length)
+        return false;
+    return CANONICAL_TEAM_ROLES.every(role => isResolvedRoleRoute(value[role]));
+}
+function isResolvedRoleRoute(value) {
+    return isRecord(value) && isRoleAssignment(value.primary, true) && isRoleAssignment(value.fallback);
+}
+function isRoleAssignment(value, allowEmptyExternalModel = false) {
+    const provider = isRecord(value) ? value.provider : undefined;
+    return isRecord(value)
+        && ['claude', 'codex', 'gemini', 'grok', 'cursor', 'antigravity'].includes(provider)
+        && (isNonEmptyString(value.model) || (allowEmptyExternalModel && provider !== 'claude' && value.model === ''))
+        && KNOWN_AGENT_NAMES.some(agent => agent === value.agent);
+}
+function hasMatchingActiveFenceRevisions(value) {
+    if (!isSafeCounter(value.state_revision))
+        return true;
+    const revision = value.state_revision;
+    return [value.active_recovery, value.active_scale_up, value.active_scale_down, value.shutdown_attempt, value.all_dead_recovery]
+        .every(fence => fence === undefined || (isRecord(fence) && fence.state_revision === revision));
+}
+export function alignActiveFenceRevisions(config, revision) {
+    return {
+        ...config,
+        ...(config.active_recovery ? { active_recovery: { ...config.active_recovery, state_revision: revision } } : {}),
+        ...(config.active_scale_up ? { active_scale_up: { ...config.active_scale_up, state_revision: revision } } : {}),
+        ...(config.active_scale_down ? { active_scale_down: { ...config.active_scale_down, state_revision: revision } } : {}),
+        ...(config.shutdown_attempt ? { shutdown_attempt: { ...config.shutdown_attempt, state_revision: revision } } : {}),
+        ...(config.all_dead_recovery ? { all_dead_recovery: { ...config.all_dead_recovery, state_revision: revision } } : {}),
+    };
+}
+/** Accept only a complete revisioned authoritative config; return null for malformed values. */
+export function validateRevisionedTeamConfig(value, expectedTeamName) {
+    return isTeamConfig(value, true, expectedTeamName) ? value : null;
+}
+/** Legacy configs predate revision authority and require the complete historical core shape. */
+export function validateLegacyTeamConfig(value, expectedTeamName) {
+    return isTeamConfig(value, false, expectedTeamName) ? value : null;
+}
+function isPendingTeamInstanceConfig(value, binding) {
+    if (!isRecord(value)
+        || Object.keys(value).some(key => !['name', 'instance_id', 'leader_cwd', 'team_state_root', 'lifecycle_state'].includes(key))
+        || value.name !== binding.team_name
+        || !isValidTeamInstanceId(value.instance_id)
+        || typeof value.leader_cwd !== 'string'
+        || typeof value.team_state_root !== 'string'
+        || value.lifecycle_state !== 'starting')
+        return false;
+    return canonicalTeamCwd(value.leader_cwd) === binding.cwd
+        && canonicalTeamStatePath(binding.cwd, value.team_state_root) === binding.state_root;
+}
+/**
+ * Instance and tmux-server identities are immutable once they appear in
+ * authoritative state. Legacy state with no identity remains readable, but it
+ * cannot be upgraded by a CAS writer because that would turn unknown
+ * ownership into delete authority.
+ */
+export function assertTeamInstanceConfigImmutable(current, proposed) {
+    const currentId = current.instance_id;
+    const proposedId = proposed.instance_id;
+    if (currentId === undefined && proposedId !== undefined)
+        throw new Error('team_instance_identity_unknown');
+    if (currentId !== undefined && (proposedId === undefined || currentId.toLowerCase() !== proposedId.toLowerCase())) {
+        throw new Error('team_instance_mismatch');
+    }
+    const currentServerIdentity = current.tmux_server_identity;
+    const proposedServerIdentity = proposed.tmux_server_identity;
+    if (currentServerIdentity !== undefined && !isValidTmuxServerIdentity(currentServerIdentity)) {
+        throw new Error('tmux_server_identity_invalid');
+    }
+    if (proposedServerIdentity !== undefined && !isValidTmuxServerIdentity(proposedServerIdentity)) {
+        throw new Error('tmux_server_identity_invalid');
+    }
+    if (currentServerIdentity === undefined && proposedServerIdentity === undefined)
+        return;
+    if (currentServerIdentity === undefined || proposedServerIdentity === undefined) {
+        throw new Error('tmux_server_identity_immutable');
+    }
+    if (!sameTmuxServerIdentity(currentServerIdentity, proposedServerIdentity)) {
+        throw new Error('tmux_server_identity_immutable');
+    }
+}
+function assertLeaderSessionIdImmutable(current, proposed) {
+    const currentId = current.leader_session_id;
+    const proposedId = proposed.leader_session_id;
+    if (currentId === undefined && proposedId === undefined)
+        return;
+    if (currentId === undefined || proposedId === undefined || currentId !== proposedId) {
+        throw new Error('leader_session_id_immutable');
+    }
+}
+function sameTmuxServerIdentity(a, b) {
+    return a.socket_path === b.socket_path
+        && a.server_pid === b.server_pid
+        && a.process_started_at === b.process_started_at;
+}
+function assertMatchingProjectionIdentity(config, manifest) {
+    if (!config || !manifest)
+        return;
+    if ((config.instance_id !== undefined && !isValidTeamInstanceId(config.instance_id))
+        || (manifest.instance_id !== undefined && !isValidTeamInstanceId(manifest.instance_id))) {
+        throw new Error('invalid_persisted_state');
+    }
+    if ((config.instance_id === undefined) !== (manifest.instance_id === undefined)
+        || (config.instance_id !== undefined && manifest.instance_id !== undefined
+            && config.instance_id.toLowerCase() !== manifest.instance_id.toLowerCase())) {
+        throw new Error('invalid_persisted_state');
+    }
+    const configServerIdentity = config.tmux_server_identity;
+    const manifestServerIdentity = manifest.tmux_server_identity;
+    assertValidTmuxServerIdentity(configServerIdentity);
+    assertValidTmuxServerIdentity(manifestServerIdentity);
+    if (configServerIdentity === undefined && manifestServerIdentity === undefined)
+        return;
+    if (configServerIdentity === undefined || manifestServerIdentity === undefined
+        || !sameTmuxServerIdentity(configServerIdentity, manifestServerIdentity)) {
+        throw new Error('tmux_server_identity_mismatch');
+    }
+}
+function assertValidTmuxServerIdentity(value) {
+    if (value !== undefined && !isValidTmuxServerIdentity(value)) {
+        throw new Error('tmux_server_identity_invalid');
+    }
+}
+async function assertPersistedConfigPathBinding(teamName, cwd, includeManifestWhenAbsent = false) {
+    const state = await readJsonFileState(absPath(cwd, TeamPaths.config(teamName)));
+    if (state.kind === 'invalid')
+        throw new Error('invalid_persisted_state');
+    if (state.kind === 'value') {
+        const valid = Object.hasOwn(state.value, 'state_revision')
+            ? validateRevisionedTeamConfig(state.value, teamName)
+            : validateLegacyTeamConfig(state.value, teamName);
+        if (!valid)
+            throw new Error('invalid_persisted_state');
+        const manifestState = await readJsonFileState(absPath(cwd, TeamPaths.manifest(teamName)));
+        if (manifestState.kind === 'invalid')
+            throw new Error('invalid_persisted_state');
+        if (manifestState.kind === 'value')
+            assertMatchingProjectionIdentity(valid, manifestState.value);
+        return;
+    }
+    if (!includeManifestWhenAbsent)
+        return;
+    const manifestState = await readJsonFileState(absPath(cwd, TeamPaths.manifest(teamName)));
+    if (manifestState.kind === 'invalid')
+        throw new Error('invalid_persisted_state');
+    if (manifestState.kind === 'value' && !validateLegacyTeamConfig(configFromManifest(normalizeTeamManifest(manifestState.value)), teamName)) {
+        throw new Error('invalid_persisted_state');
+    }
+}
+export async function readTeamConfig(teamName, cwd) {
+    const [configState, manifestState] = await Promise.all([
+        readJsonFileState(absPath(cwd, TeamPaths.config(teamName))),
+        readJsonFileState(absPath(cwd, TeamPaths.manifest(teamName))),
+    ]);
+    if (configState.kind === 'invalid')
+        throw new Error('invalid_persisted_state');
+    const config = configState.kind === 'value' ? configState.value : null;
+    const manifest = manifestState.kind === 'value' ? normalizeTeamManifest(manifestState.value) : null;
+    if (manifest)
+        assertValidTmuxServerIdentity(manifest.tmux_server_identity);
+    if (config && manifest)
+        assertMatchingProjectionIdentity(config, manifest);
+    if (config && Object.hasOwn(config, 'state_revision')) {
+        const revisioned = validateRevisionedTeamConfig(config, teamName);
+        if (!revisioned)
+            throw new Error('invalid_persisted_state');
+        return canonicalizeTeamConfigWorkers(revisioned);
+    }
+    if (config && !validateLegacyTeamConfig(config, teamName))
+        throw new Error('invalid_persisted_state');
+    if (manifestState.kind === 'invalid')
+        throw new Error('invalid_persisted_state');
+    if (!config && !manifest)
+        return null;
+    if (!manifest)
+        return config ? canonicalizeTeamConfigWorkers(config) : null;
+    if (!config)
+        return canonicalizeTeamConfigWorkers(configFromManifest(manifest));
+    return canonicalizeTeamConfigWorkers({
+        ...configFromManifest(manifest),
+        ...config,
+        workers: [...(config.workers ?? []), ...(manifest.workers ?? [])],
+        worker_count: Math.max(config.worker_count ?? 0, manifest.worker_count ?? 0),
+        next_task_id: Math.max(config.next_task_id ?? 1, manifest.next_task_id ?? 1),
+        max_workers: resolveMaxWorkers(config.max_workers),
+    });
+}
+/** Recovery readers keep revisioned config authoritative without changing legacy reads. */
+export async function readRevisionedTeamConfig(teamName, cwd) {
+    const [state, manifestState] = await Promise.all([
+        readJsonFileState(absPath(cwd, TeamPaths.config(teamName))),
+        readJsonFileState(absPath(cwd, TeamPaths.manifest(teamName))),
+    ]);
+    if (state.kind === 'invalid')
+        throw new Error('invalid_persisted_state');
+    if (state.kind === 'missing')
+        return null;
+    const revisioned = validateRevisionedTeamConfig(state.value, teamName);
+    if (revisioned) {
+        if (manifestState.kind === 'invalid')
+            throw new Error('invalid_persisted_state');
+        if (manifestState.kind === 'value')
+            assertMatchingProjectionIdentity(revisioned, manifestState.value);
+        return { config: canonicalizeTeamConfigWorkers(revisioned), stateRevision: revisioned.state_revision };
+    }
+    if (!validateLegacyTeamConfig(state.value, teamName))
+        throw new Error('invalid_persisted_state');
+    return null;
+}
+/** Reject a stale recovery writer before projecting config/manifest. */
+export function withTeamConfigMutationLock(teamName, cwd, fn) {
+    return withProcessIdentityFileLock(absPath(cwd, TeamPaths.configMutationLock(teamName)), fn);
+}
+/** Establish revision authority from a locked re-read of a legacy config. */
+export async function migrateTeamConfigRevision(teamName, cwd) {
+    await assertPersistedConfigPathBinding(teamName, cwd, true);
+    return withTeamConfigMutationLock(teamName, cwd, async () => {
+        const configState = await readJsonFileState(absPath(cwd, TeamPaths.config(teamName)));
+        if (configState.kind === 'invalid')
+            throw new Error('invalid_persisted_state');
+        let current;
+        if (configState.kind === 'value') {
+            const legacy = validateLegacyTeamConfig(configState.value, teamName);
+            if (legacy) {
+                current = legacy;
+            }
+            else {
+                const revisioned = validateRevisionedTeamConfig(configState.value, teamName);
+                if (!revisioned)
+                    throw new Error('invalid_persisted_state');
+                return { config: canonicalizeTeamConfigWorkers(revisioned), stateRevision: revisioned.state_revision };
+            }
+        }
+        else {
+            const manifestState = await readJsonFileState(absPath(cwd, TeamPaths.manifest(teamName)));
+            if (manifestState.kind === 'invalid')
+                throw new Error('invalid_persisted_state');
+            if (manifestState.kind === 'missing')
+                return null;
+            current = configFromManifest(normalizeTeamManifest(manifestState.value));
+        }
+        const revisioned = validateRevisionedTeamConfig(current, teamName);
+        if (revisioned)
+            return { config: canonicalizeTeamConfigWorkers(revisioned), stateRevision: revisioned.state_revision };
+        if (!validateLegacyTeamConfig(current, teamName))
+            throw new Error('invalid_persisted_state');
+        current.state_revision = 0;
+        current.lifecycle_state ??= 'active';
+        if (!validateRevisionedTeamConfig(current, teamName))
+            throw new Error('invalid_persisted_state');
+        await saveTeamConfigUnlocked(current, cwd);
+        return { config: canonicalizeTeamConfigWorkers(current), stateRevision: 0 };
+    });
+}
+const SCALE_UP_PHASES = ['reserved', 'effects', 'committed', 'failed'];
+const SCALE_DOWN_PHASES = ['draining', 'effects', 'failed'];
+const RECOVERY_PHASES = ['reserved', 'requeued', 'ready', 'active', 'services_pending', 'adopted', 'failed'];
+function phaseIndex(phases, phase) {
+    return typeof phase === 'string' ? phases.indexOf(phase) : -1;
+}
+function sameScaleOwner(a, b) {
+    return a.operation_id === b.operation_id && a.pid === b.pid && a.process_started_at === b.process_started_at;
+}
+function sameRecoveryAttempt(a, b) {
+    // Stable attempt identity. owner_epoch/nonce may rebind when the runtime owner
+    // rebinds; that is not foreign recovery substitution.
+    return a.recovery_id === b.recovery_id && a.request_id === b.request_id
+        && a.worker_name === b.worker_name;
+}
+function sameShutdownOwner(a, b) {
+    const aInstanceId = typeof a.instance_id === 'string' ? a.instance_id.toLowerCase() : undefined;
+    const bInstanceId = typeof b.instance_id === 'string' ? b.instance_id.toLowerCase() : undefined;
+    return a.nonce === b.nonce && a.pid === b.pid && a.process_started_at === b.process_started_at
+        && aInstanceId === bInstanceId;
+}
+function sameAllDead(a, b) {
+    // Grace deadline is the durable identity; detected_at may refresh on reload.
+    return a.deadline_at === b.deadline_at;
+}
+/**
+ * Trust boundary: a proposed config may only retain/replace active fences when
+ * ownership identity matches the authoritative fence and the phase transition is
+ * allowed, or when an explicit reclaim/release authorization is supplied.
+ * Revision rebasing alone must never launder foreign ownership.
+ */
+export function assertActiveFenceOwnershipTransition(current, proposed, options = {}) {
+    const reclaim = options.reclaim ?? {};
+    const release = options.release ?? {};
+    const checkScaleLike = (family, cur, next, phases, preserveWorkers) => {
+        if (cur && !next) {
+            if (!release[family])
+                throw new Error('invalid_persisted_state');
+            return;
+        }
+        if (!cur && next)
+            return; // fresh install on empty slot
+        if (cur && next) {
+            if (sameScaleOwner(cur, next)) {
+                const from = phaseIndex(phases, cur.phase);
+                const to = phaseIndex(phases, next.phase);
+                if (from < 0 || to < 0)
+                    throw new Error('invalid_persisted_state');
+                // Same-owner scale-down resume: failed → draining re-enters cleanup for the
+                // exact operation/workers. This is the only authorized backward phase move.
+                const scaleDownFailedResume = family === 'active_scale_down'
+                    && cur.phase === 'failed'
+                    && next.phase === 'draining';
+                if (!scaleDownFailedResume && to < from)
+                    throw new Error('invalid_persisted_state');
+                if (family === 'active_scale_up' && cur.phase === 'committed' && next.phase !== 'committed') {
+                    throw new Error('invalid_persisted_state');
+                }
+                if (preserveWorkers && JSON.stringify(cur.workers) !== JSON.stringify(next.workers)) {
+                    throw new Error('invalid_persisted_state');
+                }
+                return;
+            }
+            if (!reclaim[family])
+                throw new Error('invalid_persisted_state');
+        }
+    };
+    checkScaleLike('active_scale_up', current.active_scale_up, proposed.active_scale_up, SCALE_UP_PHASES, false);
+    checkScaleLike('active_scale_down', current.active_scale_down, proposed.active_scale_down, SCALE_DOWN_PHASES, true);
+    {
+        const cur = current.active_recovery;
+        const next = proposed.active_recovery;
+        if (cur && !next) {
+            if (!release.active_recovery)
+                throw new Error('invalid_persisted_state');
+        }
+        else if (cur && next) {
+            if (sameRecoveryAttempt(cur, next)) {
+                const from = phaseIndex(RECOVERY_PHASES, cur.phase);
+                const to = phaseIndex(RECOVERY_PHASES, next.phase);
+                if (from < 0 || to < 0 || to < from)
+                    throw new Error('invalid_persisted_state');
+            }
+            else if (!reclaim.active_recovery) {
+                throw new Error('invalid_persisted_state');
+            }
+        }
+    }
+    {
+        const cur = current.shutdown_attempt;
+        const next = proposed.shutdown_attempt;
+        if (cur && !next) {
+            if (!release.shutdown_attempt)
+                throw new Error('invalid_persisted_state');
+        }
+        else if (cur && next) {
+            if (!sameShutdownOwner(cur, next) && !reclaim.shutdown_attempt) {
+                throw new Error('invalid_persisted_state');
+            }
+        }
+    }
+    {
+        const cur = current.all_dead_recovery;
+        const next = proposed.all_dead_recovery;
+        if (cur && !next) {
+            if (!release.all_dead_recovery)
+                throw new Error('invalid_persisted_state');
+        }
+        else if (cur && next) {
+            if (!sameAllDead(cur, next) && !reclaim.all_dead_recovery) {
+                throw new Error('invalid_persisted_state');
+            }
+        }
+    }
+}
+export async function saveTeamConfigAtRevision(config, expectedRevision, cwd, afterCommit, options = {}) {
+    if (typeof config.state_revision !== 'number' || !Number.isSafeInteger(config.state_revision)) {
+        throw new Error('invalid_persisted_state');
+    }
+    // Shape-validate the proposed config with fences already carrying their intended revision
+    // numbers (callers set state_revision on fences). Do NOT align yet — alignment before
+    // ownership comparison would launder foreign fences onto a matching revision.
+    if (!validateRevisionedTeamConfig(alignActiveFenceRevisions(config, config.state_revision), config.name)) {
+        throw new Error('invalid_persisted_state');
+    }
+    await assertPersistedConfigPathBinding(config.name, cwd);
+    return withTeamConfigMutationLock(config.name, cwd, async () => {
+        const current = await readRevisionedTeamConfig(config.name, cwd);
+        if (!current || current.stateRevision !== expectedRevision)
+            return false;
+        // Trust boundary: compare ownership/phase against authoritative fences BEFORE rebasing.
+        assertTeamInstanceConfigImmutable(current.config, config);
+        assertLeaderSessionIdImmutable(current.config, config);
+        assertActiveFenceOwnershipTransition(current.config, config, options);
+        const locked = alignActiveFenceRevisions(config, config.state_revision);
+        if (!validateRevisionedTeamConfig(locked, locked.name))
+            throw new Error('invalid_persisted_state');
+        await saveTeamConfigUnlocked(locked, cwd);
+        const verified = await readRevisionedTeamConfig(locked.name, cwd);
+        if (verified?.stateRevision !== locked.state_revision)
+            return false;
+        Object.assign(config, locked);
+        await afterCommit?.();
+        return true;
+    });
+}
+export async function readTeamManifest(teamName, cwd) {
+    const state = await readJsonFileState(absPath(cwd, TeamPaths.manifest(teamName)));
+    if (state.kind === 'invalid')
+        throw new Error('invalid_persisted_state');
+    if (state.kind === 'missing')
+        return null;
+    const manifest = normalizeTeamManifest(state.value);
+    assertValidTmuxServerIdentity(manifest.tmux_server_identity);
+    return manifest;
+}
+// ---------------------------------------------------------------------------
+// Worker status / heartbeat readers
+// ---------------------------------------------------------------------------
+export async function readWorkerStatus(teamName, workerName, cwd) {
+    const data = await readJsonSafe(absPath(cwd, TeamPaths.workerStatus(teamName, workerName)));
+    return data ?? { state: 'unknown', updated_at: '' };
+}
+export async function writeWorkerStatus(teamName, workerName, status, cwd) {
+    const launchAttemptId = process.env.OMC_WORKER_LAUNCH_ATTEMPT_ID;
+    const persisted = launchAttemptId && !status.launch_attempt_id
+        ? { ...status, launch_attempt_id: launchAttemptId }
+        : status;
+    await writeAtomic(absPath(cwd, TeamPaths.workerStatus(teamName, workerName)), JSON.stringify(persisted, null, 2));
+}
+export async function readWorkerHeartbeat(teamName, workerName, cwd) {
+    return readJsonSafe(absPath(cwd, TeamPaths.heartbeat(teamName, workerName)));
+}
+// ---------------------------------------------------------------------------
+// Phase state persistence
+// ---------------------------------------------------------------------------
+export async function readTeamPhaseState(teamName, cwd) {
+    const p = absPath(cwd, TeamPaths.phaseState(teamName));
+    if (!existsSync(p))
+        return null;
+    try {
+        const raw = await readFile(p, 'utf-8');
+        const parsed = JSON.parse(raw);
+        if (!parsed || typeof parsed !== 'object')
+            return null;
+        return {
+            current_phase: parsed.current_phase ?? 'executing',
+            max_fix_attempts: typeof parsed.max_fix_attempts === 'number' ? parsed.max_fix_attempts : 3,
+            current_fix_attempt: typeof parsed.current_fix_attempt === 'number' ? parsed.current_fix_attempt : 0,
+            transitions: Array.isArray(parsed.transitions) ? parsed.transitions : [],
+            updated_at: typeof parsed.updated_at === 'string' ? parsed.updated_at : new Date().toISOString(),
+        };
+    }
+    catch {
+        return null;
+    }
+}
+export async function writeTeamPhaseState(teamName, phaseState, cwd) {
+    await writeAtomic(absPath(cwd, TeamPaths.phaseState(teamName)), JSON.stringify(phaseState, null, 2));
+}
+// ---------------------------------------------------------------------------
+// Shutdown request / ack I/O
+// ---------------------------------------------------------------------------
+export async function writeShutdownRequest(teamName, workerName, fromWorker, cwd) {
+    const data = {
+        from: fromWorker,
+        requested_at: new Date().toISOString(),
+    };
+    await writeAtomic(absPath(cwd, TeamPaths.shutdownRequest(teamName, workerName)), JSON.stringify(data, null, 2));
+}
+export async function readShutdownAck(teamName, workerName, cwd, requestedAfter) {
+    const ack = await readJsonSafe(absPath(cwd, TeamPaths.shutdownAck(teamName, workerName)));
+    if (!isRecord(ack) || (ack.status !== 'accept' && ack.status !== 'reject'))
+        return null;
+    if ((ack.reason !== undefined && typeof ack.reason !== 'string')
+        || (ack.updated_at !== undefined && !isTimestamp(ack.updated_at)))
+        return null;
+    if (requestedAfter !== undefined) {
+        if (!isTimestamp(requestedAfter) || ack.updated_at === undefined)
+            return null;
+        if (Date.parse(ack.updated_at) < Date.parse(requestedAfter)) {
+            return null; // Stale ack from a previous request
+        }
+    }
+    return ack;
+}
+// ---------------------------------------------------------------------------
+// Worker identity I/O
+// ---------------------------------------------------------------------------
+export async function writeWorkerIdentity(teamName, workerName, workerInfo, cwd) {
+    await writeAtomic(absPath(cwd, TeamPaths.workerIdentity(teamName, workerName)), JSON.stringify(workerInfo, null, 2));
+}
+// ---------------------------------------------------------------------------
+// Worker inbox I/O
+// ---------------------------------------------------------------------------
+export async function writeWorkerInbox(teamName, workerName, content, cwd) {
+    await writeAtomic(absPath(cwd, TeamPaths.inbox(teamName, workerName)), content);
+}
+// ---------------------------------------------------------------------------
+// Team summary (lightweight status for HUD/monitoring)
+// ---------------------------------------------------------------------------
+export async function getTeamSummary(teamName, cwd) {
+    const summaryStartMs = performance.now();
+    const config = await readTeamConfig(teamName, cwd);
+    if (!config)
+        return null;
+    const tasksStartMs = performance.now();
+    const { teamListTasks } = await import('./team-ops.js');
+    const tasks = await teamListTasks(teamName, cwd);
+    const tasksLoadedMs = performance.now() - tasksStartMs;
+    const counts = { total: tasks.length, pending: 0, blocked: 0, in_progress: 0, completed: 0, failed: 0 };
+    for (const t of tasks) {
+        if (t.status === 'pending')
+            counts.pending++;
+        else if (t.status === 'blocked')
+            counts.blocked++;
+        else if (t.status === 'in_progress')
+            counts.in_progress++;
+        else if (t.status === 'completed')
+            counts.completed++;
+        else if (t.status === 'failed')
+            counts.failed++;
+    }
+    const workerSummaries = [];
+    const nonReportingWorkers = [];
+    const workerPollStartMs = performance.now();
+    const workerSignals = await Promise.all(config.workers.map(async (worker) => {
+        const [hb, status] = await Promise.all([
+            readWorkerHeartbeat(teamName, worker.name, cwd),
+            readWorkerStatus(teamName, worker.name, cwd),
+        ]);
+        return { worker, hb, status };
+    }));
+    const workersPolledMs = performance.now() - workerPollStartMs;
+    for (const { worker, hb, status } of workerSignals) {
+        const alive = hb?.alive ?? false;
+        const lastTurnAt = hb?.last_turn_at ?? null;
+        const turnsWithoutProgress = 0; // Simplified; full delta tracking done in monitorTeam
+        if (alive && status.state === 'working' && (hb?.turn_count ?? 0) > 5) {
+            nonReportingWorkers.push(worker.name);
+        }
+        workerSummaries.push({
+            name: worker.name,
+            alive,
+            lastTurnAt,
+            turnsWithoutProgress,
+            working_dir: worker.working_dir,
+            worktree_repo_root: worker.worktree_repo_root,
+            worktree_path: worker.worktree_path,
+            worktree_branch: worker.worktree_branch,
+            worktree_detached: worker.worktree_detached,
+            worktree_created: worker.worktree_created,
+            team_state_root: worker.team_state_root,
+        });
+    }
+    const perf = {
+        total_ms: Number((performance.now() - summaryStartMs).toFixed(2)),
+        tasks_loaded_ms: Number(tasksLoadedMs.toFixed(2)),
+        workers_polled_ms: Number(workersPolledMs.toFixed(2)),
+        task_count: tasks.length,
+        worker_count: config.workers.length,
+    };
+    return {
+        teamName: config.name,
+        workerCount: config.worker_count,
+        team_state_root: config.team_state_root,
+        workspace_mode: config.workspace_mode,
+        worktree_mode: config.worktree_mode,
+        tasks: counts,
+        workers: workerSummaries,
+        nonReportingWorkers,
+        performance: perf,
+    };
+}
+// ---------------------------------------------------------------------------
+// Team config save
+// ---------------------------------------------------------------------------
+async function saveTeamConfigUnlocked(config, cwd) {
+    const manifestPath = absPath(cwd, TeamPaths.manifest(config.name));
+    const manifestState = await readJsonFileState(manifestPath);
+    if (manifestState.kind === 'invalid')
+        throw new Error('invalid_persisted_state');
+    const existingManifest = manifestState.kind === 'value' ? manifestState.value : null;
+    if (existingManifest) {
+        assertTeamInstanceConfigImmutable(existingManifest, config);
+        const nextManifest = normalizeTeamManifest({
+            ...existingManifest,
+            instance_id: config.instance_id ?? existingManifest.instance_id,
+            tmux_server_identity: config.tmux_server_identity,
+            workers: config.workers,
+            worker_count: config.worker_count,
+            tmux_session: config.tmux_session,
+            next_task_id: config.next_task_id,
+            created_at: config.created_at,
+            leader: {
+                ...(existingManifest.leader ?? { worker_id: 'leader', role: 'leader' }),
+                session_id: config.leader_session_id
+                    ?? existingManifest.leader?.session_id
+                    ?? config.tmux_session,
+            },
+            leader_cwd: config.leader_cwd,
+            team_state_root: config.team_state_root,
+            workspace_mode: config.workspace_mode,
+            worktree_mode: config.worktree_mode,
+            leader_pane_id: config.leader_pane_id,
+            hud_pane_id: config.hud_pane_id,
+            resize_hook_name: config.resize_hook_name,
+            resize_hook_target: config.resize_hook_target,
+            next_worker_index: config.next_worker_index,
+            resolved_routing: config.resolved_routing ?? existingManifest.resolved_routing,
+            resolved_routing_roles: config.resolved_routing_roles ?? existingManifest.resolved_routing_roles,
+            external_models_defaults: config.external_models_defaults ?? existingManifest.external_models_defaults,
+            policy: config.policy ?? existingManifest.policy,
+            governance: config.governance ?? existingManifest.governance,
+            state_revision: config.state_revision,
+            service_descriptor: config.service_descriptor,
+        });
+        // Config is authoritative. Publish its projection first so a projection
+        // failure cannot leave callers uncertain whether the config commit won.
+        await writeAtomic(manifestPath, JSON.stringify(nextManifest, null, 2));
+    }
+    await writeAtomic(absPath(cwd, TeamPaths.config(config.name)), JSON.stringify(config, null, 2));
+}
+/**
+ * Atomically replace the identity-bearing `starting` projection written by
+ * startup with the first complete revisioned config.
+ *
+ * The caller MUST already hold `teamInstanceLifecycleLockPath(cwd, teamName)`
+ * for the entire reservation/effects transaction. This function acquires only
+ * the existing config-mutation lock and intentionally does not acquire the
+ * lifecycle lock recursively.
+ */
+export async function commitInitialTeamConfigUnderLock(config, cwd, instance) {
+    if (canonicalTeamCwd(cwd) !== instance.cwd
+        || config.name !== instance.team_name
+        || config.instance_id === undefined
+        || config.instance_id.toLowerCase() !== instance.instance_id) {
+        throw new Error('team_instance_mismatch');
+    }
+    if (config.state_revision !== 0 || !validateRevisionedTeamConfig(config, config.name)) {
+        throw new Error('invalid_persisted_state');
+    }
+    // Preflight the state/authority paths before the config-mutation lock can
+    // create its first directory entry; repeat under that lock below.
+    await assertTeamInstanceUnderLock(instance);
+    await withTeamConfigMutationLock(config.name, instance.cwd, async () => {
+        const pendingState = await readJsonFileState(absPath(instance.cwd, TeamPaths.config(config.name)));
+        if (pendingState.kind === 'missing')
+            throw new Error('team_instance_startup_config_missing');
+        if (pendingState.kind === 'invalid' || !isPendingTeamInstanceConfig(pendingState.value, instance)) {
+            throw new Error('team_instance_startup_config_invalid');
+        }
+        const assertion = await assertTeamInstanceUnderLock(instance);
+        if (assertion.reservation.instance_id !== instance.instance_id
+            || assertion.reservation.phase !== 'pending'
+            || assertion.observed_state !== 'bound') {
+            throw new Error('team_instance_mismatch');
+        }
+        const manifestState = await readJsonFileState(absPath(instance.cwd, TeamPaths.manifest(config.name)));
+        if (manifestState.kind === 'invalid' || manifestState.kind === 'value') {
+            throw new Error('invalid_persisted_state');
+        }
+        await saveTeamConfigUnlocked(config, instance.cwd);
+        const persisted = await readJsonFileState(absPath(instance.cwd, TeamPaths.config(config.name)));
+        if (persisted.kind !== 'value'
+            || !validateRevisionedTeamConfig(persisted.value, config.name)
+            || persisted.value.state_revision !== 0
+            || persisted.value.instance_id?.toLowerCase() !== instance.instance_id) {
+            throw new Error('team_instance_startup_config_commit_unverified');
+        }
+    });
+}
+export async function saveTeamConfig(config, cwd, expectedRevision) {
+    const inputIsRevisioned = Object.hasOwn(config, 'state_revision');
+    if (!(inputIsRevisioned ? validateRevisionedTeamConfig(config, config.name) : validateLegacyTeamConfig(config, config.name))) {
+        throw new Error('invalid_persisted_state');
+    }
+    await assertPersistedConfigPathBinding(config.name, cwd);
+    await withTeamConfigMutationLock(config.name, cwd, async () => {
+        const currentState = await readJsonFileState(absPath(cwd, TeamPaths.config(config.name)));
+        if (currentState.kind === 'invalid')
+            throw new Error('invalid_persisted_state');
+        const current = currentState.kind === 'value' ? currentState.value : null;
+        if (current && Object.hasOwn(current, 'state_revision') && !validateRevisionedTeamConfig(current, config.name))
+            throw new Error('invalid_persisted_state');
+        if (current && !Object.hasOwn(current, 'state_revision') && !validateLegacyTeamConfig(current, config.name))
+            throw new Error('invalid_persisted_state');
+        if (current) {
+            assertTeamInstanceConfigImmutable(current, config);
+            assertLeaderSessionIdImmutable(current, config);
+        }
+        if (!current && config.tmux_server_identity !== undefined) {
+            throw new Error('tmux_server_identity_immutable');
+        }
+        const currentRevision = current?.state_revision;
+        let nextRevision;
+        if (typeof currentRevision === 'number' && Number.isSafeInteger(currentRevision)) {
+            if (expectedRevision !== currentRevision || config.state_revision !== expectedRevision) {
+                throw new Error('stale_state_revision');
+            }
+            nextRevision = currentRevision + 1;
+        }
+        else if (current) {
+            if (expectedRevision !== undefined)
+                throw new Error('stale_state_revision');
+            nextRevision = 0;
+        }
+        else {
+            nextRevision = config.state_revision ?? 0;
+        }
+        const committed = alignActiveFenceRevisions({ ...config, state_revision: nextRevision }, nextRevision);
+        if (!validateRevisionedTeamConfig(committed, config.name))
+            throw new Error('invalid_persisted_state');
+        await saveTeamConfigUnlocked(committed, cwd);
+        Object.assign(config, committed);
+    });
+}
+// ---------------------------------------------------------------------------
+// Scaling lock (file-based mutex for scale up/down)
+// ---------------------------------------------------------------------------
+export async function withScalingLock(teamName, cwd, fn, timeoutMs = 10_000) {
+    return withProcessIdentityFileLock(absPath(cwd, TeamPaths.scalingLock(teamName)), fn, timeoutMs);
+}
+/**
+ * Compare two consecutive monitor snapshots and derive events.
+ * O(N) where N = max(task count, worker count).
+ */
+export function diffSnapshots(prev, current) {
+    const events = [];
+    // Task status transitions
+    for (const [taskId, currentStatus] of Object.entries(current.taskStatusById)) {
+        const prevStatus = prev.taskStatusById[taskId];
+        if (!prevStatus || prevStatus === currentStatus)
+            continue;
+        if (currentStatus === 'completed' && !prev.completedEventTaskIds[taskId]) {
+            events.push({
+                type: 'task_completed',
+                worker: 'leader-fixed',
+                task_id: taskId,
+                reason: `status_transition:${prevStatus}->${currentStatus}`,
+            });
+        }
+        else if (currentStatus === 'failed') {
+            events.push({
+                type: 'task_failed',
+                worker: 'leader-fixed',
+                task_id: taskId,
+                reason: `status_transition:${prevStatus}->${currentStatus}`,
+            });
+        }
+    }
+    // Worker state transitions
+    for (const [workerName, currentAlive] of Object.entries(current.workerAliveByName)) {
+        const prevAlive = prev.workerAliveByName[workerName];
+        const currentLiveness = current.workerLivenessByName?.[workerName] ?? (currentAlive ? 'alive' : 'dead');
+        if (prevAlive === true && currentLiveness === 'dead') {
+            events.push({
+                type: 'worker_stopped',
+                worker: workerName,
+                reason: 'pane_exited',
+            });
+        }
+    }
+    for (const [workerName, currentState] of Object.entries(current.workerStateByName)) {
+        const prevState = prev.workerStateByName[workerName];
+        if (prevState === 'working' && currentState === 'idle') {
+            events.push({
+                type: 'worker_idle',
+                worker: workerName,
+                reason: `state_transition:${prevState}->${currentState}`,
+            });
+        }
+    }
+    return events;
+}
+// ---------------------------------------------------------------------------
+// State cleanup
+// ---------------------------------------------------------------------------
+/**
+ * Cleanup entry point retained for monitor callers.  It deliberately requires
+ * the immutable instance id and caller-owned final-state proof; callers must
+ * already hold `teamInstanceLifecycleLockPath(cwd, teamName)`.  The under-lock
+ * call avoids recursively acquiring the same external name lock.
+ */
+export async function cleanupTeamState(teamName, cwd, instanceId, authorization) {
+    try {
+        const binding = createTeamInstanceBinding({ teamName, cwd, instanceId });
+        await disposeTeamInstanceUnderLock(binding, authorization);
+        return true;
+    }
+    catch {
+        return false;
+    }
+}
+//# sourceMappingURL=monitor.js.map

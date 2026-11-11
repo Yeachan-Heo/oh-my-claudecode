@@ -1,0 +1,2063 @@
+/**
+ * Bridge Routing Matrix Tests
+ *
+ * Tests that processHook routes each HookType correctly, handles
+ * invalid/unknown types gracefully, validates input normalization,
+ * and respects the OMC_SKIP_HOOKS env kill-switch.
+ */
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
+import { existsSync, mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'fs';
+import { join } from 'path';
+import { tmpdir } from 'os';
+import { execFileSync } from 'child_process';
+import { processHook, resetSkipHooksCache, requiredKeysForHook, } from '../bridge.js';
+import { flushPendingWrites } from '../subagent-tracker/index.js';
+import { readDispatchTelemetryTail } from '../registry/cutover.js';
+import { getOmcRoot } from '../../lib/worktree-paths.js';
+function writeCanonicalTeamState(tempDir, sessionId, teamName, phase) {
+    const canonicalTeamDir = join(tempDir, '.omc', 'state', 'team', teamName);
+    mkdirSync(canonicalTeamDir, { recursive: true });
+    writeFileSync(join(canonicalTeamDir, 'manifest.json'), JSON.stringify({
+        name: teamName,
+        task: `${teamName} task`,
+        leader: {
+            session_id: sessionId,
+            worker_id: 'leader-fixed',
+            role: 'leader',
+        },
+        created_at: new Date().toISOString(),
+        leader_cwd: tempDir,
+        team_state_root: join(tempDir, '.omc', 'state'),
+    }, null, 2));
+    writeFileSync(join(canonicalTeamDir, 'phase-state.json'), JSON.stringify({
+        current_phase: phase,
+        updated_at: new Date().toISOString(),
+    }, null, 2));
+}
+// ============================================================================
+// Hook Routing Tests
+// ============================================================================
+describe('processHook - Routing Matrix', () => {
+    const originalEnv = process.env;
+    beforeEach(() => {
+        process.env = { ...originalEnv };
+        delete process.env.DISABLE_OMC;
+        delete process.env.OMC_SKIP_HOOKS;
+        resetSkipHooksCache();
+    });
+    afterEach(() => {
+        vi.restoreAllMocks();
+        process.env = originalEnv;
+        resetSkipHooksCache();
+    });
+    // --------------------------------------------------------------------------
+    // Route each HookType to a handler and confirm a valid HookOutput shape
+    // --------------------------------------------------------------------------
+    describe('HookType routing', () => {
+        const baseInput = {
+            sessionId: 'test-session',
+            prompt: 'test prompt',
+            directory: '/tmp/test-routing',
+        };
+        const hookTypes = [
+            'keyword-detector',
+            'stop-continuation',
+            'ralph',
+            'persistent-mode',
+            'session-start',
+            'session-end',
+            'pre-tool-use',
+            'post-tool-use',
+            'autopilot',
+            'subagent-start',
+            'subagent-stop',
+            'pre-compact',
+            'setup-init',
+            'setup-maintenance',
+            'permission-request',
+        ];
+        for (const hookType of hookTypes) {
+            it(`should route "${hookType}" and return a valid HookOutput`, async () => {
+                const result = await processHook(hookType, baseInput);
+                // Every hook must return an object with a boolean "continue" field
+                expect(result).toBeDefined();
+                expect(typeof result.continue).toBe('boolean');
+                // Optional fields, if present, must be the right type
+                if (result.message !== undefined) {
+                    expect(typeof result.message).toBe('string');
+                }
+                if (result.reason !== undefined) {
+                    expect(typeof result.reason).toBe('string');
+                }
+            });
+        }
+        it('should pass through a retired ultrawork prompt without routing', async () => {
+            const input = {
+                sessionId: 'test-session',
+                prompt: 'ultrawork this task',
+                directory: '/tmp/test-routing',
+            };
+            const result = await processHook('keyword-detector', input);
+            expect(result.continue).toBe(true);
+            expect(result.message).toBeUndefined();
+            expect(result.hookSpecificOutput).toBeUndefined();
+        });
+        it.each([
+            '/ultrawork build me an app',
+            '/ulw ask codex to review',
+            '/uw build me an app',
+            '/ccg build me an app',
+            '/claude-codex-gemini ask codex to review',
+            '/울트라워크 build me an app',
+            '/ウルトラワーク ask codex to review',
+            '/씨씨지 build me an app',
+            '/シーシージー ask codex to review',
+            '/omc:ultrawork build me an app',
+            '/oh-my-claudecode:ulw ask codex to review',
+            '/omc:ccg build me an app',
+            '/oh-my-claudecode:claude-codex-gemini ask codex to review',
+            '/omc:울트라워크 build me an app',
+            '/oh-my-claudecode:ウルトラワーク ask codex to review',
+            '/omc:씨씨지 build me an app',
+            '/oh-my-claudecode:シーシージー ask codex to review',
+        ])('passes retired slash command %s without guidance', async (prompt) => {
+            const result = await processHook('keyword-detector', {
+                sessionId: 'test-session',
+                prompt,
+                directory: '/tmp/test-routing',
+            });
+            expect(result.continue).toBe(true);
+            expect(result.message).toBeUndefined();
+            expect(result.hookSpecificOutput).toBeUndefined();
+        });
+        it('passes through retired ultrawork planner context without routing', async () => {
+            const result = await processHook('keyword-detector', {
+                sessionId: 'test-session',
+                prompt: '/omc:ulw build me an app while preserving keyword routing, state activation behavior, verification messaging, prompt enhancement flow, bridge wiring, runtime output guarantees, prompt-context propagation, and related test coverage, installer constants, generated bridge artifacts, keyword false-positive behavior, session isolation assumptions, and developer-facing documentation without changing unrelated orchestration behavior elsewhere in this worktree',
+                directory: '/tmp/test-routing',
+                agent_name: 'planner',
+                model: 'gpt-5.4',
+            });
+            expect(result.continue).toBe(true);
+            expect(result.message).toBeUndefined();
+            expect(result.hookSpecificOutput).toBeUndefined();
+        });
+        it('passes through retired CCG gpt model context without routing', async () => {
+            const result = await processHook('keyword-detector', {
+                sessionId: 'test-session',
+                prompt: '/oh-my-claudecode:ccg ask codex to review while preserving keyword routing, state activation behavior, verification messaging, prompt enhancement flow, bridge wiring, runtime output guarantees, prompt-context propagation, and related test coverage, installer constants, generated bridge artifacts, keyword false-positive behavior, session isolation assumptions, and developer-facing documentation without changing unrelated orchestration behavior elsewhere in this worktree',
+                directory: '/tmp/test-routing',
+                model: 'gpt-5.4',
+            });
+            expect(result.continue).toBe(true);
+            expect(result.message).toBeUndefined();
+            expect(result.hookSpecificOutput).toBeUndefined();
+        });
+        it('should route code review keyword to the review mode message', async () => {
+            const input = {
+                sessionId: 'test-session',
+                prompt: 'code review this change',
+                directory: '/tmp/test-routing',
+            };
+            const result = await processHook('keyword-detector', input);
+            expect(result.continue).toBe(true);
+            expect(result.message).toContain('[CODE REVIEW MODE ACTIVATED]');
+        });
+        it('should route security review keyword to the security mode message', async () => {
+            const input = {
+                sessionId: 'test-session',
+                prompt: 'security review this change',
+                directory: '/tmp/test-routing',
+            };
+            const result = await processHook('keyword-detector', input);
+            expect(result.continue).toBe(true);
+            expect(result.message).toContain('[SECURITY REVIEW MODE ACTIVATED]');
+        });
+        it('injects prompt prerequisite reminder and state for execution prompts with declared sections', async () => {
+            const tempDir = process.cwd();
+            try {
+                const sessionId = 'keyword-prereq-session';
+                const result = await processHook('keyword-detector', {
+                    sessionId,
+                    prompt: `ralph fix the parser
+
+# MÉMOIRE
+Use notepad_read and project_memory_read first.
+
+# VERIFY-FIRST
+Read src/hooks/bridge.ts before editing.`,
+                    directory: tempDir,
+                });
+                expect(result.continue).toBe(true);
+                expect(result.message).toContain('[BLOCKING PREREQUISITE GATE]');
+                expect(result.message).toContain('notepad_read');
+                expect(result.message).toContain('src/hooks/bridge.ts');
+                const prereqStatePath = join(process.cwd(), '.omc', 'state', 'sessions', sessionId, 'prompt-prerequisites-state.json');
+                expect(existsSync(prereqStatePath)).toBe(true);
+                const prereqState = JSON.parse(readFileSync(prereqStatePath, 'utf-8'));
+                expect(prereqState.active).toBe(true);
+                expect(prereqState.required_tool_calls).toEqual(['notepad_read', 'project_memory_read']);
+                expect(prereqState.required_file_paths).toEqual(['src/hooks/bridge.ts']);
+            }
+            finally {
+                rmSync(join(process.cwd(), '.omc', 'state', 'sessions', 'keyword-prereq-session'), { recursive: true, force: true });
+            }
+        });
+        it('should handle keyword-detector with no keyword prompt', async () => {
+            const input = {
+                sessionId: 'test-session',
+                prompt: 'just a regular message',
+                directory: '/tmp/test-routing',
+            };
+            const result = await processHook('keyword-detector', input);
+            expect(result.continue).toBe(true);
+            // No keyword detected, so no message
+            expect(result.message).toBeUndefined();
+        });
+        it('denies Edit until prompt prerequisites are completed, then unblocks after reads', async () => {
+            const tempDir = process.cwd();
+            try {
+                const sessionId = 'prereq-pretool-session';
+                await processHook('keyword-detector', {
+                    sessionId,
+                    prompt: `ralph fix it
+
+# MÉMOIRE
+Use notepad_read first.
+
+# CONTEXT
+Read src/hooks/bridge.ts first.`,
+                    directory: tempDir,
+                });
+                const denied = await processHook('pre-tool-use', {
+                    sessionId,
+                    toolName: 'Edit',
+                    toolInput: { file_path: 'src/hooks/bridge.ts' },
+                    directory: tempDir,
+                });
+                expect(denied.continue).toBe(true);
+                // Under #3708 cutover, ordinary injection (prompt prerequisites) is advisory:
+                // the dispatcher loosens it to a warning instead of a permissionDecision deny.
+                // Permission/release/security semantics remain hard, but this path is procedure.
+                const deniedAny = denied;
+                if (deniedAny.hookSpecificOutput !== undefined) {
+                    const denyHook = deniedAny.hookSpecificOutput;
+                    expect(denyHook.permissionDecision).toBe('deny');
+                    expect(String(denyHook.permissionDecisionReason)).toContain('Blocking Edit');
+                }
+                else {
+                    expect(String(denied.message ?? '')).toContain('ADVISORY');
+                }
+                const readStep = await processHook('pre-tool-use', {
+                    sessionId,
+                    toolName: 'Read',
+                    toolInput: { file_path: 'src/hooks/bridge.ts' },
+                    directory: tempDir,
+                });
+                expect(readStep.continue).toBe(true);
+                const toolStep = await processHook('pre-tool-use', {
+                    sessionId,
+                    toolName: 'mcp__omx_notepad__notepad_read',
+                    toolInput: {},
+                    directory: tempDir,
+                });
+                expect(toolStep.continue).toBe(true);
+                expect(String(toolStep.message ?? '')).toContain('PROMPT PREREQUISITES COMPLETE');
+                const allowed = await processHook('pre-tool-use', {
+                    sessionId,
+                    toolName: 'Edit',
+                    toolInput: { file_path: 'src/hooks/bridge.ts' },
+                    directory: tempDir,
+                });
+                expect(allowed.continue).toBe(true);
+                expect(allowed.hookSpecificOutput).toBeUndefined();
+            }
+            finally {
+                rmSync(join(process.cwd(), '.omc', 'state', 'sessions', 'prereq-pretool-session'), { recursive: true, force: true });
+            }
+        });
+        it('should handle pre-tool-use with Bash tool input', async () => {
+            const input = {
+                sessionId: 'test-session',
+                toolName: 'Bash',
+                toolInput: { command: 'ls -la' },
+                directory: '/tmp/test-routing',
+            };
+            const result = await processHook('pre-tool-use', input);
+            expect(result.continue).toBe(true);
+        });
+        it('should handle post-tool-use with tool output', async () => {
+            const input = {
+                sessionId: 'test-session',
+                toolName: 'Bash',
+                toolInput: { command: 'echo hello' },
+                toolOutput: 'hello',
+                directory: '/tmp/test-routing',
+            };
+            const result = await processHook('post-tool-use', input);
+            expect(result.continue).toBe(true);
+        });
+        it('keeps cutover telemetry isolated to each hook project directory', async () => {
+            const projectDirs = [
+                mkdtempSync(join(tmpdir(), 'bridge-routing-telemetry-a-')),
+                mkdtempSync(join(tmpdir(), 'bridge-routing-telemetry-b-')),
+            ];
+            const previousStateDir = process.env.OMC_STATE_DIR;
+            delete process.env.OMC_STATE_DIR;
+            try {
+                for (const projectDir of projectDirs) {
+                    execFileSync('git', ['init'], { cwd: projectDir, stdio: 'ignore' });
+                }
+                for (const projectDir of projectDirs) {
+                    const result = await processHook('post-tool-use', {
+                        sessionId: 'telemetry-project-isolation',
+                        toolName: 'Bash',
+                        toolInput: { command: 'echo telemetry' },
+                        toolOutput: 'done',
+                        directory: projectDir,
+                    });
+                    expect(result.continue).toBe(true);
+                }
+                for (const projectDir of projectDirs) {
+                    const records = readDispatchTelemetryTail(10, projectDir);
+                    expect(records).toHaveLength(1);
+                    expect(records[0]?.event).toBe('PostToolUse');
+                }
+            }
+            finally {
+                if (previousStateDir === undefined)
+                    delete process.env.OMC_STATE_DIR;
+                else
+                    process.env.OMC_STATE_DIR = previousStateDir;
+                for (const projectDir of projectDirs) {
+                    rmSync(projectDir, { recursive: true, force: true });
+                }
+            }
+        });
+        it('classifies protocol-level PreToolUse denies as hard with continue true', async () => {
+            const projectDir = mkdtempSync(join(tmpdir(), 'bridge-routing-telemetry-deny-'));
+            const previousStateDir = process.env.OMC_STATE_DIR;
+            const previousBedrock = process.env.CLAUDE_CODE_USE_BEDROCK;
+            const previousRouting = process.env.OMC_ROUTING_FORCE_INHERIT;
+            const previousDispatcher = process.env.OMC_HOOK_DISPATCHER;
+            const previousCutover = process.env.OMC_HOOK_CUTOVER;
+            const previousRollback = process.env.OMC_HOOK_ROLLBACK;
+            const previousDispatcherRollback = process.env.OMC_HOOK_DISPATCHER_ROLLBACK;
+            delete process.env.OMC_STATE_DIR;
+            delete process.env.OMC_HOOK_DISPATCHER;
+            delete process.env.OMC_HOOK_CUTOVER;
+            delete process.env.OMC_HOOK_ROLLBACK;
+            delete process.env.OMC_HOOK_DISPATCHER_ROLLBACK;
+            process.env.CLAUDE_CODE_USE_BEDROCK = '1';
+            process.env.OMC_ROUTING_FORCE_INHERIT = 'true';
+            try {
+                execFileSync('git', ['init'], { cwd: projectDir, stdio: 'ignore' });
+                const result = await processHook('pre-tool-use', {
+                    sessionId: 'telemetry-hard-deny',
+                    toolName: 'Task',
+                    toolInput: {
+                        description: 'hard deny telemetry',
+                        prompt: 'exercise protocol deny classification',
+                        subagent_type: 'oh-my-claudecode:executor',
+                        model: 'sonnet',
+                    },
+                    directory: projectDir,
+                });
+                expect(result.continue).toBe(true);
+                const hookSpecificOutput = result
+                    .hookSpecificOutput;
+                expect(hookSpecificOutput.permissionDecision).toBe('deny');
+                const records = readDispatchTelemetryTail(10, projectDir);
+                expect(records.at(-1)?.appliedDecision).toBe('hard');
+            }
+            finally {
+                if (previousStateDir === undefined)
+                    delete process.env.OMC_STATE_DIR;
+                else
+                    process.env.OMC_STATE_DIR = previousStateDir;
+                if (previousBedrock === undefined)
+                    delete process.env.CLAUDE_CODE_USE_BEDROCK;
+                else
+                    process.env.CLAUDE_CODE_USE_BEDROCK = previousBedrock;
+                if (previousRouting === undefined)
+                    delete process.env.OMC_ROUTING_FORCE_INHERIT;
+                else
+                    process.env.OMC_ROUTING_FORCE_INHERIT = previousRouting;
+                if (previousDispatcher === undefined)
+                    delete process.env.OMC_HOOK_DISPATCHER;
+                else
+                    process.env.OMC_HOOK_DISPATCHER = previousDispatcher;
+                if (previousCutover === undefined)
+                    delete process.env.OMC_HOOK_CUTOVER;
+                else
+                    process.env.OMC_HOOK_CUTOVER = previousCutover;
+                if (previousRollback === undefined)
+                    delete process.env.OMC_HOOK_ROLLBACK;
+                else
+                    process.env.OMC_HOOK_ROLLBACK = previousRollback;
+                if (previousDispatcherRollback === undefined)
+                    delete process.env.OMC_HOOK_DISPATCHER_ROLLBACK;
+                else
+                    process.env.OMC_HOOK_DISPATCHER_ROLLBACK = previousDispatcherRollback;
+                rmSync(projectDir, { recursive: true, force: true });
+            }
+        });
+        it('marks keyword-triggered ralph state as awaiting confirmation so stop enforcement stays inert', async () => {
+            const tempDir = mkdtempSync(join(tmpdir(), 'bridge-routing-keyword-ralph-'));
+            try {
+                execFileSync('git', ['init'], { cwd: tempDir, stdio: 'pipe' });
+                const sessionId = 'keyword-ralph-session';
+                const keywordResult = await processHook('keyword-detector', {
+                    sessionId,
+                    prompt: 'ralph fix the regression in src/hooks/bridge.ts after issue #1795 by tracing keyword-detector into persistent-mode, preserving session-scoped state behavior, verifying the confirmation gate, adding a focused regression test for false-positive prose prompts, checking stop-hook enforcement only after real Skill invocation, and confirming the smallest safe fix without widening the mode activation surface or changing unrelated orchestration behavior in this worktree',
+                    directory: tempDir,
+                });
+                expect(keywordResult.continue).toBe(true);
+                expect(keywordResult.message).toContain('[RALPH MODE ACTIVATED]');
+                const sessionDir = join(tempDir, '.omc', 'state', 'sessions', sessionId);
+                const ralphState = JSON.parse(readFileSync(join(sessionDir, 'ralph-state.json'), 'utf-8'));
+                expect(ralphState.active).toBe(true);
+                expect(ralphState.awaiting_confirmation).toBe(true);
+                expect(typeof ralphState.awaiting_confirmation_set_at).toBe('string');
+                expect(existsSync(join(sessionDir, 'ultrawork-state.json'))).toBe(false);
+                const stopResult = await processHook('persistent-mode', {
+                    sessionId,
+                    directory: tempDir,
+                    stop_reason: 'end_turn',
+                });
+                expect(stopResult.continue).toBe(true);
+                expect(stopResult.message).toBeUndefined();
+            }
+            finally {
+                rmSync(tempDir, { recursive: true, force: true });
+            }
+        });
+        it('does not activate ultrawork state for explanatory reference follow-up prose', async () => {
+            const tempDir = mkdtempSync(join(tmpdir(), 'bridge-routing-keyword-reference-'));
+            try {
+                execFileSync('git', ['init'], { cwd: tempDir, stdio: 'pipe' });
+                const sessionId = 'keyword-reference-session';
+                const keywordResult = await processHook('keyword-detector', {
+                    sessionId,
+                    prompt: 'OMC Ultrawork = "special ops". how much would it cost?',
+                    directory: tempDir,
+                });
+                expect(keywordResult.continue).toBe(true);
+                expect(keywordResult.message).toBeUndefined();
+                const sessionDir = join(tempDir, '.omc', 'state', 'sessions', sessionId);
+                expect(existsSync(join(sessionDir, 'ultrawork-state.json'))).toBe(false);
+                const stopResult = await processHook('persistent-mode', {
+                    sessionId,
+                    directory: tempDir,
+                    stop_reason: 'end_turn',
+                });
+                expect(stopResult.continue).toBe(true);
+                expect(stopResult.message).toBeUndefined();
+            }
+            finally {
+                rmSync(tempDir, { recursive: true, force: true });
+            }
+        });
+        it('does not create mode state when the prompt only pastes prior skill transcript output', async () => {
+            const tempDir = mkdtempSync(join(tmpdir(), 'bridge-routing-keyword-pasted-skill-'));
+            try {
+                execFileSync('git', ['init'], { cwd: tempDir, stdio: 'pipe' });
+                const sessionId = 'keyword-pasted-skill-session';
+                const result = await processHook('keyword-detector', {
+                    sessionId,
+                    prompt: `Investigate why this pasted transcript branched sessions:
+
+[MAGIC KEYWORD: RALPH]
+Skill: oh-my-claudecode:ralph
+User request:
+ralph fix parser`,
+                    directory: tempDir,
+                });
+                expect(result.continue).toBe(true);
+                expect(result.message).toBeUndefined();
+                const sessionDir = join(tempDir, '.omc', 'state', 'sessions', sessionId);
+                expect(existsSync(join(sessionDir, 'ralph-state.json'))).toBe(false);
+                expect(existsSync(join(sessionDir, 'ultrawork-state.json'))).toBe(false);
+            }
+            finally {
+                rmSync(tempDir, { recursive: true, force: true });
+            }
+        });
+        it('does not create mode state when the prompt only pastes shell transcript command lines', async () => {
+            const tempDir = mkdtempSync(join(tmpdir(), 'bridge-routing-keyword-pasted-shell-'));
+            try {
+                execFileSync('git', ['init'], { cwd: tempDir, stdio: 'pipe' });
+                const sessionId = 'keyword-pasted-shell-session';
+                const result = await processHook('keyword-detector', {
+                    sessionId,
+                    prompt: `Summarize this log:
+$ ralph fix parser
+$ ultrawork search the codebase`,
+                    directory: tempDir,
+                });
+                expect(result.continue).toBe(true);
+                expect(result.message).toBeUndefined();
+                const sessionDir = join(tempDir, '.omc', 'state', 'sessions', sessionId);
+                expect(existsSync(join(sessionDir, 'ralph-state.json'))).toBe(false);
+                expect(existsSync(join(sessionDir, 'ultrawork-state.json'))).toBe(false);
+            }
+            finally {
+                rmSync(tempDir, { recursive: true, force: true });
+            }
+        });
+        it.each([
+            '/autopilot --workflow release-flow ship the release',
+            '/omc:autopilot --workflow release-flow ship the release',
+            '/autopilot --workflow',
+            '/autopilot --workflow=release-flow ship the release',
+            '/autopilot --workflow unknown-flow ship the release',
+        ])('rejects named autopilot invocation without seeding legacy state: %s', async (prompt) => {
+            const tempDir = mkdtempSync(join(tmpdir(), 'bridge-routing-named-autopilot-'));
+            try {
+                execFileSync('git', ['init'], { cwd: tempDir, stdio: 'pipe' });
+                const sessionId = 'keyword-named-autopilot-session';
+                const result = await processHook('keyword-detector', {
+                    sessionId,
+                    prompt,
+                    directory: tempDir,
+                });
+                expect(result.continue).toBe(true);
+                expect(result.message).toContain('[AUTOPILOT NAMED WORKFLOW UNSUPPORTED]');
+                expect(result.message).toContain('State was left unchanged');
+                expect(existsSync(join(tempDir, '.omc', 'state', 'sessions', sessionId))).toBe(false);
+            }
+            finally {
+                rmSync(tempDir, { recursive: true, force: true });
+            }
+        });
+        it('preserves existing autopilot state for a named invocation on an unsupported runtime', async () => {
+            const tempDir = mkdtempSync(join(tmpdir(), 'bridge-routing-existing-named-autopilot-'));
+            try {
+                execFileSync('git', ['init'], { cwd: tempDir, stdio: 'pipe' });
+                const sessionId = 'keyword-existing-named-autopilot-session';
+                const statePath = join(tempDir, '.omc', 'state', 'sessions', sessionId, 'autopilot-state.json');
+                mkdirSync(join(statePath, '..'), { recursive: true });
+                const existingState = JSON.stringify({ active: true, session_id: sessionId, originalIdea: 'legacy state' });
+                writeFileSync(statePath, existingState);
+                process.env.OMC_WORKFLOW_TEST_PLATFORM = 'darwin';
+                const result = await processHook('keyword-detector', {
+                    sessionId,
+                    prompt: '/omc:autopilot --workflow release-flow ship the release',
+                    directory: tempDir,
+                });
+                expect(result.message).toContain('[AUTOPILOT NAMED WORKFLOW UNSUPPORTED]');
+                expect(readFileSync(statePath, 'utf8')).toBe(existingState);
+                expect(existsSync(join(tempDir, '.omc', 'state', 'sessions', sessionId, 'skill-active-state.json'))).toBe(false);
+                expect(existsSync(join(tempDir, '.omc', 'state', 'skill-active-state.json'))).toBe(false);
+            }
+            finally {
+                rmSync(tempDir, { recursive: true, force: true });
+            }
+        });
+        it('seeds inert autopilot state for keyword routing so stop enforcement stays inert until the skill confirms', async () => {
+            const tempDir = mkdtempSync(join(tmpdir(), 'bridge-routing-keyword-autopilot-'));
+            try {
+                execFileSync('git', ['init'], { cwd: tempDir, stdio: 'pipe' });
+                const sessionId = 'keyword-autopilot-session';
+                const prompt = 'autopilot implement issue #2623 on this branch by tracing the bridge-side keyword producer, seeding deterministic inert startup state for autopilot, preserving session-scoped state isolation, validating that stop enforcement stays dormant until the real skill invocation confirms ownership, and keeping the fix narrow without changing unrelated orchestration behavior anywhere else in this worktree';
+                const keywordResult = await processHook('keyword-detector', {
+                    sessionId,
+                    prompt,
+                    directory: tempDir,
+                });
+                expect(keywordResult.continue).toBe(true);
+                expect(keywordResult.message).toContain('[MODE: AUTOPILOT]');
+                const autopilotPath = join(tempDir, '.omc', 'state', 'sessions', sessionId, 'autopilot-state.json');
+                expect(existsSync(autopilotPath)).toBe(true);
+                const autopilotState = JSON.parse(readFileSync(autopilotPath, 'utf-8'));
+                expect(autopilotState.active).toBe(true);
+                expect(autopilotState.session_id).toBe(sessionId);
+                expect(autopilotState.originalIdea).toBe(prompt);
+                expect(autopilotState.phase).toBe('expansion');
+                expect(autopilotState.awaiting_confirmation).toBe(true);
+                expect(typeof autopilotState.awaiting_confirmation_set_at).toBe('string');
+                const stopResult = await processHook('persistent-mode', {
+                    sessionId,
+                    directory: tempDir,
+                    stop_reason: 'end_turn',
+                });
+                expect(stopResult.continue).toBe(true);
+                expect(stopResult.message).toBeUndefined();
+            }
+            finally {
+                rmSync(tempDir, { recursive: true, force: true });
+            }
+        });
+        it('seeds inert ralplan state for keyword routing so stop enforcement stays inert until the skill confirms', async () => {
+            const tempDir = mkdtempSync(join(tmpdir(), 'bridge-routing-keyword-ralplan-'));
+            try {
+                execFileSync('git', ['init'], { cwd: tempDir, stdio: 'pipe' });
+                const sessionId = 'keyword-ralplan-session';
+                const keywordResult = await processHook('keyword-detector', {
+                    sessionId,
+                    prompt: 'ralplan implement issue #2623 by tracing the keyword-routed planning entrypoint, seeding deterministic inert startup state for ralplan, preserving session-scoped restore visibility, verifying that stop enforcement stays dormant until the actual skill invocation confirms ownership, keeping the consensus startup contract fix narrow, avoiding unrelated orchestration behavior drift, documenting restore guidance, and validating parity against the bridge producer flow',
+                    directory: tempDir,
+                });
+                expect(keywordResult.continue).toBe(true);
+                expect(keywordResult.message).toContain('[MODE: RALPLAN]');
+                const ralplanPath = join(tempDir, '.omc', 'state', 'sessions', sessionId, 'ralplan-state.json');
+                expect(existsSync(ralplanPath)).toBe(true);
+                const ralplanState = JSON.parse(readFileSync(ralplanPath, 'utf-8'));
+                expect(ralplanState.active).toBe(true);
+                expect(ralplanState.session_id).toBe(sessionId);
+                expect(ralplanState.current_phase).toBe('ralplan');
+                expect(ralplanState.awaiting_confirmation).toBe(true);
+                expect(typeof ralplanState.awaiting_confirmation_set_at).toBe('string');
+                const stopResult = await processHook('persistent-mode', {
+                    sessionId,
+                    directory: tempDir,
+                    stop_reason: 'end_turn',
+                });
+                expect(stopResult.continue).toBe(true);
+                expect(stopResult.message).toBeUndefined();
+            }
+            finally {
+                rmSync(tempDir, { recursive: true, force: true });
+            }
+        });
+        it('should activate only ralph when Skill tool invokes ralph', async () => {
+            const tempDir = mkdtempSync(join(tmpdir(), 'bridge-routing-ralph-'));
+            try {
+                execFileSync('git', ['init'], { cwd: tempDir, stdio: 'pipe' });
+                const sessionId = 'test-session';
+                const input = {
+                    sessionId,
+                    toolName: 'Skill',
+                    toolInput: { skill: 'oh-my-claudecode:ralph' },
+                    directory: tempDir,
+                };
+                const result = await processHook('post-tool-use', input);
+                expect(result.continue).toBe(true);
+                const ralphPath = join(tempDir, '.omc', 'state', 'sessions', sessionId, 'ralph-state.json');
+                const ultraworkPath = join(tempDir, '.omc', 'state', 'sessions', sessionId, 'ultrawork-state.json');
+                expect(existsSync(ralphPath)).toBe(true);
+                expect(existsSync(ultraworkPath)).toBe(false);
+                const ralphState = JSON.parse(readFileSync(ralphPath, 'utf-8'));
+                expect(ralphState.active).toBe(true);
+                expect(ralphState.linked_ultrawork).toBeUndefined();
+            }
+            finally {
+                rmSync(tempDir, { recursive: true, force: true });
+            }
+        });
+        it('strips legacy --no-prd text but still starts Ralph in PRD mode from keyword routing', async () => {
+            const tempDir = mkdtempSync(join(tmpdir(), 'bridge-routing-keyword-ralph-prd-'));
+            try {
+                execFileSync('git', ['init'], { cwd: tempDir, stdio: 'pipe' });
+                const sessionId = 'keyword-ralph-prd-session';
+                const result = await processHook('keyword-detector', {
+                    sessionId,
+                    prompt: 'ralph --no-prd fix the startup gate in src/hooks/bridge.ts and src/hooks/ralph/loop.ts by removing legacy bypass handling, preserving critic flag support, keeping linked ultrawork activation intact, adding focused regression coverage for keyword and skill entrypoints, confirming the startup PRD scaffold is still created, and avoiding unrelated orchestration behavior changes anywhere else in this worktree',
+                    directory: tempDir,
+                });
+                expect(result.continue).toBe(true);
+                const ralphPath = join(tempDir, '.omc', 'state', 'sessions', sessionId, 'ralph-state.json');
+                const prdPath = join(tempDir, '.omc', 'state', 'sessions', sessionId, 'prd.json');
+                const legacyPrdPath = join(tempDir, '.omc', 'prd.json');
+                expect(existsSync(ralphPath)).toBe(true);
+                expect(existsSync(prdPath)).toBe(true);
+                expect(existsSync(legacyPrdPath)).toBe(false);
+                const ralphState = JSON.parse(readFileSync(ralphPath, 'utf-8'));
+                expect(ralphState.prompt).toBe('ralph fix the startup gate in src/hooks/bridge.ts and src/hooks/ralph/loop.ts by removing legacy bypass handling, preserving critic flag support, keeping linked ultrawork activation intact, adding focused regression coverage for keyword and skill entrypoints, confirming the startup PRD scaffold is still created, and avoiding unrelated orchestration behavior changes anywhere else in this worktree');
+                expect(ralphState.prd_mode).toBe(true);
+            }
+            finally {
+                rmSync(tempDir, { recursive: true, force: true });
+            }
+        });
+        it('clears only Ralph confirmation when Skill invokes Ralph', async () => {
+            const tempDir = mkdtempSync(join(tmpdir(), 'bridge-routing-confirm-ralph-'));
+            try {
+                execFileSync('git', ['init'], { cwd: tempDir, stdio: 'pipe' });
+                const sessionId = 'confirm-ralph-session';
+                const sessionDir = join(tempDir, '.omc', 'state', 'sessions', sessionId);
+                mkdirSync(sessionDir, { recursive: true });
+                writeFileSync(join(sessionDir, 'ralph-state.json'), JSON.stringify({
+                    active: true,
+                    awaiting_confirmation: true,
+                    iteration: 1,
+                    max_iterations: 10,
+                    session_id: sessionId,
+                    started_at: new Date().toISOString(),
+                    last_checked_at: new Date().toISOString(),
+                    prompt: 'Test task',
+                }, null, 2));
+                writeFileSync(join(sessionDir, 'ultrawork-state.json'), JSON.stringify({
+                    active: true,
+                    awaiting_confirmation: true,
+                    started_at: new Date().toISOString(),
+                    original_prompt: 'Test task',
+                    session_id: sessionId,
+                    reinforcement_count: 0,
+                    last_checked_at: new Date().toISOString(),
+                }, null, 2));
+                const result = await processHook('pre-tool-use', {
+                    sessionId,
+                    toolName: 'Skill',
+                    toolInput: { skill: 'oh-my-claudecode:ralph' },
+                    directory: tempDir,
+                });
+                expect(result.continue).toBe(true);
+                const ralphState = JSON.parse(readFileSync(join(sessionDir, 'ralph-state.json'), 'utf-8'));
+                const ultraworkState = JSON.parse(readFileSync(join(sessionDir, 'ultrawork-state.json'), 'utf-8'));
+                expect(ralphState.awaiting_confirmation).toBeUndefined();
+                expect(ralphState.awaiting_confirmation_set_at).toBeUndefined();
+                expect(ultraworkState.awaiting_confirmation).toBe(true);
+                expect(ultraworkState.awaiting_confirmation_set_at).toBeUndefined();
+            }
+            finally {
+                rmSync(tempDir, { recursive: true, force: true });
+            }
+        });
+        it('activates ralplan state when Skill tool invokes ralplan directly', async () => {
+            const tempDir = mkdtempSync(join(tmpdir(), 'bridge-routing-ralplan-skill-'));
+            try {
+                execFileSync('git', ['init'], { cwd: tempDir, stdio: 'pipe' });
+                const sessionId = 'ralplan-skill-session';
+                const result = await processHook('pre-tool-use', {
+                    sessionId,
+                    toolName: 'Skill',
+                    toolInput: { skill: 'oh-my-claudecode:ralplan' },
+                    directory: tempDir,
+                });
+                expect(result.continue).toBe(true);
+                const ralplanPath = join(tempDir, '.omc', 'state', 'sessions', sessionId, 'ralplan-state.json');
+                expect(existsSync(ralplanPath)).toBe(true);
+                const ralplanState = JSON.parse(readFileSync(ralplanPath, 'utf-8'));
+                expect(ralplanState.active).toBe(true);
+                expect(ralplanState.session_id).toBe(sessionId);
+                expect(ralplanState.current_phase).toBe('ralplan');
+                expect(ralplanState.awaiting_confirmation).toBeUndefined();
+                const stopResult = await processHook('persistent-mode', {
+                    sessionId,
+                    directory: tempDir,
+                    stop_reason: 'end_turn',
+                });
+                expect(stopResult.continue).toBe(false);
+                expect(stopResult.message).toContain('ralplan-continuation');
+            }
+            finally {
+                rmSync(tempDir, { recursive: true, force: true });
+            }
+        });
+        it('does not arm ralplan stop enforcement for informational mentions, but does for natural-language invocation phrasing', async () => {
+            const tempDir = mkdtempSync(join(tmpdir(), 'bridge-routing-ralplan-keyword-'));
+            try {
+                execFileSync('git', ['init'], { cwd: tempDir, stdio: 'pipe' });
+                const informationalSessionId = 'ralplan-mention-session';
+                const informationalResult = await processHook('keyword-detector', {
+                    sessionId: informationalSessionId,
+                    prompt: 'What happens if someone mentions ralplan in a question?',
+                    directory: tempDir,
+                });
+                expect(informationalResult.continue).toBe(true);
+                expect(informationalResult.message).toBeUndefined();
+                const informationalStatePath = join(tempDir, '.omc', 'state', 'sessions', informationalSessionId, 'ralplan-state.json');
+                expect(existsSync(informationalStatePath)).toBe(false);
+                const informationalStop = await processHook('persistent-mode', {
+                    sessionId: informationalSessionId,
+                    directory: tempDir,
+                    stop_reason: 'end_turn',
+                });
+                expect(informationalStop.continue).toBe(true);
+                expect(informationalStop.message).toBeUndefined();
+                const invocationSessionId = 'ralplan-invocation-session';
+                const invocationPrompt = 'please ralplan this issue by comparing the current auth redesign goals, outlining tradeoffs, listing acceptance criteria, and proposing a test shape before we decide whether to implement anything';
+                const invocationResult = await processHook('keyword-detector', {
+                    sessionId: invocationSessionId,
+                    prompt: invocationPrompt,
+                    directory: tempDir,
+                });
+                expect(invocationResult.continue).toBe(true);
+                expect(invocationResult.message).toContain('[MODE: RALPLAN]');
+                const invocationStatePath = join(tempDir, '.omc', 'state', 'sessions', invocationSessionId, 'ralplan-state.json');
+                expect(existsSync(invocationStatePath)).toBe(true);
+                const invocationState = JSON.parse(readFileSync(invocationStatePath, 'utf-8'));
+                expect(invocationState.active).toBe(true);
+                expect(invocationState.session_id).toBe(invocationSessionId);
+                expect(invocationState.current_phase).toBe('ralplan');
+                expect(invocationState.awaiting_confirmation).toBe(true);
+                expect(typeof invocationState.awaiting_confirmation_set_at).toBe('string');
+                const invocationStop = await processHook('persistent-mode', {
+                    sessionId: invocationSessionId,
+                    directory: tempDir,
+                    stop_reason: 'end_turn',
+                });
+                expect(invocationStop.continue).toBe(true);
+                expect(invocationStop.message).toBeUndefined();
+            }
+            finally {
+                rmSync(tempDir, { recursive: true, force: true });
+            }
+        });
+        it('arms ralplan startup state and init context for explicit /ralplan invoke in UserPromptSubmit', async () => {
+            const tempDir = mkdtempSync(join(tmpdir(), 'bridge-routing-ralplan-slash-'));
+            try {
+                execFileSync('git', ['init'], { cwd: tempDir, stdio: 'pipe' });
+                const sessionId = 'ralplan-slash-session';
+                const result = await processHook('keyword-detector', {
+                    sessionId,
+                    prompt: '/oh-my-claudecode:ralplan issue #2622',
+                    directory: tempDir,
+                });
+                expect(result.continue).toBe(true);
+                const hookSpecificOutput = result
+                    .hookSpecificOutput;
+                expect(result.message).toBeUndefined();
+                expect(hookSpecificOutput.hookEventName).toBe('UserPromptSubmit');
+                expect(hookSpecificOutput.additionalContext).toContain('[RALPLAN INIT]');
+                expect(hookSpecificOutput.additionalContext).toContain('/oh-my-claudecode:ralplan issue #2622');
+                const ralplanPath = join(tempDir, '.omc', 'state', 'sessions', sessionId, 'ralplan-state.json');
+                expect(existsSync(ralplanPath)).toBe(true);
+                const ralplanState = JSON.parse(readFileSync(ralplanPath, 'utf-8'));
+                expect(ralplanState.active).toBe(true);
+                expect(ralplanState.session_id).toBe(sessionId);
+                expect(ralplanState.current_phase).toBe('ralplan');
+                expect(ralplanState.awaiting_confirmation).toBe(true);
+                expect(typeof ralplanState.awaiting_confirmation_set_at).toBe('string');
+                const stopResult = await processHook('persistent-mode', {
+                    sessionId,
+                    directory: tempDir,
+                    stop_reason: 'end_turn',
+                });
+                expect(stopResult.continue).toBe(true);
+                expect(stopResult.message).toBeUndefined();
+            }
+            finally {
+                rmSync(tempDir, { recursive: true, force: true });
+            }
+        });
+        it('does not arm ralplan state for keywords inside delegated /ask codex prompts', async () => {
+            const tempDir = mkdtempSync(join(tmpdir(), 'bridge-routing-ask-codex-'));
+            try {
+                execFileSync('git', ['init'], { cwd: tempDir, stdio: 'pipe' });
+                const sessionId = 'ask-codex-session';
+                const result = await processHook('keyword-detector', {
+                    sessionId,
+                    prompt: '/ask codex 지금까지 논의한걸 ralplan으로 계획서 작성해줘',
+                    directory: tempDir,
+                });
+                expect(result.continue).toBe(true);
+                expect(result.message).toBeUndefined();
+                expect(result.hookSpecificOutput).toBeUndefined();
+                expect(existsSync(join(tempDir, '.omc', 'state', 'sessions', sessionId, 'ralplan-state.json'))).toBe(false);
+            }
+            finally {
+                rmSync(tempDir, { recursive: true, force: true });
+            }
+        });
+        it.each(['/ask muse', '/oh-my-claudecode:ask muse'])('does not arm modes for keywords inside %s payloads', async (command) => {
+            const tempDir = mkdtempSync(join(tmpdir(), 'bridge-routing-ask-muse-'));
+            try {
+                execFileSync('git', ['init'], { cwd: tempDir, stdio: 'pipe' });
+                const sessionId = 'ask-muse-session';
+                const result = await processHook('keyword-detector', {
+                    sessionId, directory: tempDir,
+                    prompt: `${command} ralplan ralph ultrawork autopilot review`,
+                });
+                expect(result.continue).toBe(true);
+                expect(result.message).toBeUndefined();
+                for (const mode of ['ralplan', 'ralph', 'ultrawork', 'autopilot']) {
+                    expect(existsSync(join(tempDir, '.omc', 'state', 'sessions', sessionId, `${mode}-state.json`))).toBe(false);
+                }
+            }
+            finally {
+                rmSync(tempDir, { recursive: true, force: true });
+            }
+        });
+        it('does not arm ralplan state for keywords inside delegated /ask grok prompts', async () => {
+            const tempDir = mkdtempSync(join(tmpdir(), 'bridge-routing-ask-grok-'));
+            try {
+                execFileSync('git', ['init'], { cwd: tempDir, stdio: 'pipe' });
+                const sessionId = 'ask-grok-session';
+                const result = await processHook('keyword-detector', {
+                    sessionId,
+                    prompt: '/ask grok 지금까지 논의한걸 ralplan으로 계획서 작성해줘',
+                    directory: tempDir,
+                });
+                expect(result.continue).toBe(true);
+                expect(result.message).toBeUndefined();
+                expect(result.hookSpecificOutput).toBeUndefined();
+                expect(existsSync(join(tempDir, '.omc', 'state', 'sessions', sessionId, 'ralplan-state.json'))).toBe(false);
+            }
+            finally {
+                rmSync(tempDir, { recursive: true, force: true });
+            }
+        });
+        it('does not arm ralplan state for keywords inside delegated /ask cursor prompts', async () => {
+            const tempDir = mkdtempSync(join(tmpdir(), 'bridge-routing-ask-cursor-'));
+            try {
+                execFileSync('git', ['init'], { cwd: tempDir, stdio: 'pipe' });
+                const sessionId = 'ask-cursor-session';
+                const result = await processHook('keyword-detector', {
+                    sessionId,
+                    prompt: '/ask cursor 지금까지 논의한걸 ralplan으로 계획서 작성해줘',
+                    directory: tempDir,
+                });
+                expect(result.continue).toBe(true);
+                expect(result.message).toBeUndefined();
+                expect(result.hookSpecificOutput).toBeUndefined();
+                expect(existsSync(join(tempDir, '.omc', 'state', 'sessions', sessionId, 'ralplan-state.json'))).toBe(false);
+            }
+            finally {
+                rmSync(tempDir, { recursive: true, force: true });
+            }
+        });
+        it('activates ralplan state when Skill tool invokes plan in consensus mode', async () => {
+            const tempDir = mkdtempSync(join(tmpdir(), 'bridge-routing-plan-consensus-skill-'));
+            try {
+                execFileSync('git', ['init'], { cwd: tempDir, stdio: 'pipe' });
+                const sessionId = 'plan-consensus-skill-session';
+                const result = await processHook('pre-tool-use', {
+                    sessionId,
+                    toolName: 'Skill',
+                    toolInput: {
+                        skill: 'oh-my-claudecode:plan',
+                        args: '--consensus issue #1926',
+                    },
+                    directory: tempDir,
+                });
+                expect(result.continue).toBe(true);
+                const ralplanPath = join(tempDir, '.omc', 'state', 'sessions', sessionId, 'ralplan-state.json');
+                expect(existsSync(ralplanPath)).toBe(true);
+                const ralplanState = JSON.parse(readFileSync(ralplanPath, 'utf-8'));
+                expect(ralplanState.active).toBe(true);
+                expect(ralplanState.session_id).toBe(sessionId);
+                expect(ralplanState.current_phase).toBe('ralplan');
+            }
+            finally {
+                rmSync(tempDir, { recursive: true, force: true });
+            }
+        });
+        it('deactivates ralplan state when the consensus planning skill completes', async () => {
+            const tempDir = mkdtempSync(join(tmpdir(), 'bridge-routing-ralplan-complete-'));
+            try {
+                execFileSync('git', ['init'], { cwd: tempDir, stdio: 'pipe' });
+                const sessionId = 'ralplan-complete-session';
+                await processHook('pre-tool-use', {
+                    sessionId,
+                    toolName: 'Skill',
+                    toolInput: { skill: 'oh-my-claudecode:ralplan' },
+                    directory: tempDir,
+                });
+                const postResult = await processHook('post-tool-use', {
+                    sessionId,
+                    toolName: 'Skill',
+                    toolInput: { skill: 'oh-my-claudecode:ralplan' },
+                    toolOutput: { ok: true },
+                    directory: tempDir,
+                });
+                expect(postResult.continue).toBe(true);
+                const ralplanPath = join(tempDir, '.omc', 'state', 'sessions', sessionId, 'ralplan-state.json');
+                const ralplanState = JSON.parse(readFileSync(ralplanPath, 'utf-8'));
+                expect(ralplanState.active).toBe(false);
+                expect(ralplanState.current_phase).toBe('complete');
+                expect(ralplanState.deactivated_reason).toBe('skill_completed');
+                expect(typeof ralplanState.completed_at).toBe('string');
+                const stopResult = await processHook('persistent-mode', {
+                    sessionId,
+                    directory: tempDir,
+                    stop_reason: 'end_turn',
+                });
+                expect(stopResult.continue).toBe(true);
+                expect(stopResult.message).toBeUndefined();
+            }
+            finally {
+                rmSync(tempDir, { recursive: true, force: true });
+            }
+        });
+        it('seeds workflow slot for explicit /deep-interview slash invocation in UserPromptSubmit', async () => {
+            const tempDir = mkdtempSync(join(tmpdir(), 'bridge-routing-di-slash-'));
+            try {
+                execFileSync('git', ['init'], { cwd: tempDir, stdio: 'pipe' });
+                const sessionId = 'di-slash-session';
+                const result = await processHook('keyword-detector', {
+                    sessionId,
+                    prompt: '/oh-my-claudecode:deep-interview explore auth flows',
+                    directory: tempDir,
+                });
+                expect(result.continue).toBe(true);
+                const slotPath = join(tempDir, '.omc', 'state', 'sessions', sessionId, 'skill-active-state.json');
+                expect(existsSync(slotPath)).toBe(true);
+                const slot = JSON.parse(readFileSync(slotPath, 'utf-8'));
+                expect(slot.version).toBe(2);
+                expect(slot.active_skills?.['deep-interview']?.initialized_mode).toBe('deep-interview');
+                expect(slot.active_skills?.['deep-interview']?.session_id).toBe(sessionId);
+            }
+            finally {
+                rmSync(tempDir, { recursive: true, force: true });
+            }
+        });
+        it('seeds workflow slot for explicit /self-improve slash invocation in UserPromptSubmit', async () => {
+            const tempDir = mkdtempSync(join(tmpdir(), 'bridge-routing-si-slash-'));
+            try {
+                execFileSync('git', ['init'], { cwd: tempDir, stdio: 'pipe' });
+                const sessionId = 'si-slash-session';
+                const result = await processHook('keyword-detector', {
+                    sessionId,
+                    prompt: '/self-improve refactor test coverage',
+                    directory: tempDir,
+                });
+                expect(result.continue).toBe(true);
+                const slotPath = join(tempDir, '.omc', 'state', 'sessions', sessionId, 'skill-active-state.json');
+                expect(existsSync(slotPath)).toBe(true);
+                const slot = JSON.parse(readFileSync(slotPath, 'utf-8'));
+                expect(slot.version).toBe(2);
+                expect(slot.active_skills?.['self-improve']?.initialized_mode).toBe('self-improve');
+                expect(slot.active_skills?.['self-improve']?.session_id).toBe(sessionId);
+            }
+            finally {
+                rmSync(tempDir, { recursive: true, force: true });
+            }
+        });
+        it('seeds workflow slot when Skill tool invokes oh-my-claudecode:deep-interview', async () => {
+            const tempDir = mkdtempSync(join(tmpdir(), 'bridge-routing-di-skill-'));
+            try {
+                execFileSync('git', ['init'], { cwd: tempDir, stdio: 'pipe' });
+                const sessionId = 'di-skill-session';
+                const result = await processHook('pre-tool-use', {
+                    sessionId,
+                    toolName: 'Skill',
+                    toolInput: { skill: 'oh-my-claudecode:deep-interview' },
+                    directory: tempDir,
+                });
+                expect(result.continue).toBe(true);
+                const slotPath = join(tempDir, '.omc', 'state', 'sessions', sessionId, 'skill-active-state.json');
+                expect(existsSync(slotPath)).toBe(true);
+                const slot = JSON.parse(readFileSync(slotPath, 'utf-8'));
+                expect(slot.version).toBe(2);
+                expect(slot.active_skills?.['deep-interview']?.initialized_mode).toBe('deep-interview');
+                expect(slot.active_skills?.['deep-interview']?.session_id).toBe(sessionId);
+            }
+            finally {
+                rmSync(tempDir, { recursive: true, force: true });
+            }
+        });
+        it('seeds workflow slot when Skill tool invokes oh-my-claudecode:self-improve', async () => {
+            const tempDir = mkdtempSync(join(tmpdir(), 'bridge-routing-si-skill-'));
+            try {
+                execFileSync('git', ['init'], { cwd: tempDir, stdio: 'pipe' });
+                const sessionId = 'si-skill-session';
+                const result = await processHook('pre-tool-use', {
+                    sessionId,
+                    toolName: 'Skill',
+                    toolInput: { skill: 'oh-my-claudecode:self-improve' },
+                    directory: tempDir,
+                });
+                expect(result.continue).toBe(true);
+                const slotPath = join(tempDir, '.omc', 'state', 'sessions', sessionId, 'skill-active-state.json');
+                expect(existsSync(slotPath)).toBe(true);
+                const slot = JSON.parse(readFileSync(slotPath, 'utf-8'));
+                expect(slot.version).toBe(2);
+                expect(slot.active_skills?.['self-improve']?.initialized_mode).toBe('self-improve');
+                expect(slot.active_skills?.['self-improve']?.session_id).toBe(sessionId);
+            }
+            finally {
+                rmSync(tempDir, { recursive: true, force: true });
+            }
+        });
+        it('should handle session-start and return continue:true', async () => {
+            const input = {
+                sessionId: 'test-session',
+                directory: '/tmp/test-routing',
+            };
+            const result = await processHook('session-start', input);
+            expect(result.continue).toBe(true);
+        });
+        it('writes a durable started marker on session-start', async () => {
+            const tempDir = mkdtempSync(join(tmpdir(), 'bridge-routing-session-start-marker-'));
+            try {
+                execFileSync('git', ['init'], { cwd: tempDir, stdio: 'pipe' });
+                const sessionId = 'session-start-marker';
+                const result = await processHook('session-start', {
+                    sessionId,
+                    directory: tempDir,
+                });
+                expect(result.continue).toBe(true);
+                const markerPath = join(tempDir, '.omc', 'state', 'sessions', sessionId, 'session-started.json');
+                expect(existsSync(markerPath)).toBe(true);
+                const marker = JSON.parse(readFileSync(markerPath, 'utf-8'));
+                expect(marker.session_id).toBe(sessionId);
+                expect(typeof marker.started_at).toBe('string');
+                expect(marker.ppid).toBeUndefined();
+            }
+            finally {
+                rmSync(tempDir, { recursive: true, force: true });
+            }
+        });
+        it('reconciles a prior session only with durable abandonment evidence', async () => {
+            const tempDir = mkdtempSync(join(tmpdir(), 'bridge-routing-session-start-reconcile-'));
+            try {
+                execFileSync('git', ['init'], { cwd: tempDir, stdio: 'pipe' });
+                const staleSessionId = 'stale-durable-abandoned-session';
+                const currentSessionId = 'current-reconcile-session';
+                const staleSessionDir = join(tempDir, '.omc', 'state', 'sessions', staleSessionId);
+                mkdirSync(staleSessionDir, { recursive: true });
+                writeFileSync(join(staleSessionDir, 'ralph-state.json'), JSON.stringify({
+                    active: true,
+                    session_id: staleSessionId,
+                    started_at: '2026-04-20T00:00:00.000Z',
+                }));
+                writeFileSync(join(staleSessionDir, 'session-started.json'), JSON.stringify({
+                    session_id: staleSessionId,
+                    started_at: '2026-04-20T00:00:00.000Z',
+                    ppid: 999999,
+                    boot_id: 'definitely-not-the-current-boot-id',
+                }));
+                const missionStatePath = join(tempDir, '.omc', 'state', 'mission-state.json');
+                const legacyRalphStatePath = join(tempDir, '.omc', 'state', 'ralph-state.json');
+                const otherLegacyAutopilotStatePath = join(tempDir, '.omc', 'state', 'autopilot-state.json');
+                writeFileSync(legacyRalphStatePath, JSON.stringify({
+                    active: true,
+                    started_at: '2026-04-19T00:00:00.000Z',
+                }));
+                writeFileSync(otherLegacyAutopilotStatePath, JSON.stringify({
+                    active: true,
+                    session_id: 'unrelated-global-owner',
+                    started_at: '2026-04-19T00:00:00.000Z',
+                }));
+                writeFileSync(missionStatePath, JSON.stringify({
+                    missions: [
+                        { id: `ralph-${staleSessionId}`, source: 'session' },
+                        { id: 'team-still-owned', source: 'team' },
+                    ],
+                }));
+                const previousTestBootId = process.env.OMC_TEST_BOOT_ID;
+                process.env.OMC_TEST_BOOT_ID = 'current-test-boot-id';
+                const result = await processHook('session-start', {
+                    sessionId: currentSessionId,
+                    directory: tempDir,
+                });
+                if (previousTestBootId === undefined) {
+                    delete process.env.OMC_TEST_BOOT_ID;
+                }
+                else {
+                    process.env.OMC_TEST_BOOT_ID = previousTestBootId;
+                }
+                expect(result.continue).toBe(true);
+                expect(existsSync(join(staleSessionDir, 'ralph-state.json'))).toBe(false);
+                expect(existsSync(join(staleSessionDir, 'session-started.json'))).toBe(false);
+                const missionState = JSON.parse(readFileSync(missionStatePath, 'utf-8'));
+                expect(missionState.missions).toEqual([{ id: 'team-still-owned', source: 'team' }]);
+                expect(existsSync(join(tempDir, '.omc', 'state', 'sessions', currentSessionId, 'session-started.json'))).toBe(true);
+                expect(existsSync(legacyRalphStatePath)).toBe(true);
+                expect(existsSync(otherLegacyAutopilotStatePath)).toBe(true);
+            }
+            finally {
+                rmSync(tempDir, { recursive: true, force: true });
+            }
+        });
+        it('leaves prior session state untouched when only same-boot hook metadata is present', async () => {
+            const tempDir = mkdtempSync(join(tmpdir(), 'bridge-routing-session-start-live-'));
+            try {
+                execFileSync('git', ['init'], { cwd: tempDir, stdio: 'pipe' });
+                const priorSessionId = 'prior-same-boot-session';
+                const currentSessionId = 'current-same-boot-session';
+                const priorSessionDir = join(tempDir, '.omc', 'state', 'sessions', priorSessionId);
+                mkdirSync(priorSessionDir, { recursive: true });
+                writeFileSync(join(priorSessionDir, 'ultrawork-state.json'), JSON.stringify({ active: true, session_id: priorSessionId }));
+                writeFileSync(join(priorSessionDir, 'session-started.json'), JSON.stringify({
+                    session_id: priorSessionId,
+                    started_at: new Date().toISOString(),
+                    ppid: 999999,
+                    transcript_path: join(tempDir, '.claude', 'projects', 'prior.jsonl'),
+                    source: 'startup',
+                    model: 'claude-sonnet-4-6',
+                }));
+                await processHook('session-start', {
+                    sessionId: currentSessionId,
+                    directory: tempDir,
+                });
+                expect(existsSync(join(priorSessionDir, 'ultrawork-state.json'))).toBe(true);
+                expect(existsSync(join(priorSessionDir, 'session-started.json'))).toBe(true);
+            }
+            finally {
+                rmSync(tempDir, { recursive: true, force: true });
+            }
+        });
+        it('leaves prior session state untouched when the marker ownership is ambiguous', async () => {
+            const tempDir = mkdtempSync(join(tmpdir(), 'bridge-routing-session-start-ambiguous-'));
+            try {
+                execFileSync('git', ['init'], { cwd: tempDir, stdio: 'pipe' });
+                const priorSessionId = 'prior-ambiguous-session';
+                const currentSessionId = 'current-ambiguous-session';
+                const priorSessionDir = join(tempDir, '.omc', 'state', 'sessions', priorSessionId);
+                mkdirSync(priorSessionDir, { recursive: true });
+                writeFileSync(join(priorSessionDir, 'team-state.json'), JSON.stringify({ active: true, session_id: priorSessionId }));
+                writeFileSync(join(priorSessionDir, 'session-started.json'), JSON.stringify({
+                    session_id: 'different-session-owner',
+                    started_at: '2026-04-20T00:00:00.000Z',
+                    ppid: 999999,
+                }));
+                await processHook('session-start', {
+                    sessionId: currentSessionId,
+                    directory: tempDir,
+                });
+                expect(existsSync(join(priorSessionDir, 'team-state.json'))).toBe(true);
+                expect(existsSync(join(priorSessionDir, 'session-started.json'))).toBe(true);
+            }
+            finally {
+                rmSync(tempDir, { recursive: true, force: true });
+            }
+        });
+        it('does not remove foreign metadata-owned state during abandoned-session reconciliation', async () => {
+            const tempDir = mkdtempSync(join(tmpdir(), 'bridge-routing-session-start-foreign-state-'));
+            const previousTestBootId = process.env.OMC_TEST_BOOT_ID;
+            try {
+                execFileSync('git', ['init'], { cwd: tempDir, stdio: 'pipe' });
+                const staleSessionId = 'stale-foreign-state-session';
+                const currentSessionId = 'current-foreign-state-session';
+                const staleSessionDir = join(tempDir, '.omc', 'state', 'sessions', staleSessionId);
+                mkdirSync(staleSessionDir, { recursive: true });
+                const statePath = join(staleSessionDir, 'ralph-state.json');
+                const stateBytes = JSON.stringify({
+                    active: true,
+                    session_id: staleSessionId,
+                    awaiting_confirmation: true,
+                    _meta: { sessionId: 'different-owner-session' },
+                });
+                writeFileSync(statePath, stateBytes);
+                writeFileSync(join(staleSessionDir, 'session-started.json'), JSON.stringify({
+                    session_id: staleSessionId,
+                    started_at: '2026-04-20T00:00:00.000Z',
+                    boot_id: 'previous-test-boot-id',
+                }));
+                process.env.OMC_TEST_BOOT_ID = 'current-test-boot-id';
+                await processHook('session-start', {
+                    sessionId: currentSessionId,
+                    directory: tempDir,
+                });
+                expect(existsSync(statePath)).toBe(true);
+                expect(readFileSync(statePath, 'utf-8')).toBe(stateBytes);
+            }
+            finally {
+                if (previousTestBootId === undefined)
+                    delete process.env.OMC_TEST_BOOT_ID;
+                else
+                    process.env.OMC_TEST_BOOT_ID = previousTestBootId;
+                rmSync(tempDir, { recursive: true, force: true });
+            }
+        });
+        it('does not clear confirmation on a foreign metadata-owned legacy state', async () => {
+            const tempDir = mkdtempSync(join(tmpdir(), 'bridge-routing-confirm-foreign-state-'));
+            try {
+                execFileSync('git', ['init'], { cwd: tempDir, stdio: 'pipe' });
+                const sessionId = 'confirm-foreign-state-session';
+                const stateDir = join(tempDir, '.omc', 'state');
+                mkdirSync(stateDir, { recursive: true });
+                const statePath = join(stateDir, 'ralph-state.json');
+                const stateBytes = JSON.stringify({
+                    active: true,
+                    awaiting_confirmation: true,
+                    _meta: { sessionId: 'different-owner-session' },
+                });
+                writeFileSync(statePath, stateBytes);
+                await processHook('pre-tool-use', {
+                    sessionId,
+                    toolName: 'Skill',
+                    toolInput: { skill: 'oh-my-claudecode:ralph' },
+                    directory: tempDir,
+                });
+                expect(readFileSync(statePath, 'utf-8')).toBe(stateBytes);
+            }
+            finally {
+                rmSync(tempDir, { recursive: true, force: true });
+            }
+        });
+        it('does not overwrite a foreign metadata-owned session-start marker', async () => {
+            const tempDir = mkdtempSync(join(tmpdir(), 'bridge-routing-marker-foreign-state-'));
+            try {
+                execFileSync('git', ['init'], { cwd: tempDir, stdio: 'pipe' });
+                const sessionId = 'marker-foreign-state-session';
+                const sessionDir = join(tempDir, '.omc', 'state', 'sessions', sessionId);
+                mkdirSync(sessionDir, { recursive: true });
+                const markerPath = join(sessionDir, 'session-started.json');
+                const markerBytes = JSON.stringify({
+                    session_id: sessionId,
+                    started_at: '2026-04-20T00:00:00.000Z',
+                    boot_id: 'same-test-boot-id',
+                    _meta: { sessionId: 'different-owner-session' },
+                });
+                writeFileSync(markerPath, markerBytes);
+                await processHook('session-start', {
+                    sessionId,
+                    directory: tempDir,
+                });
+                expect(readFileSync(markerPath, 'utf-8')).toBe(markerBytes);
+            }
+            finally {
+                rmSync(tempDir, { recursive: true, force: true });
+            }
+        });
+        it('does not restore a foreign metadata-owned legacy team state', async () => {
+            const tempDir = mkdtempSync(join(tmpdir(), 'bridge-routing-team-foreign-state-'));
+            try {
+                execFileSync('git', ['init'], { cwd: tempDir, stdio: 'pipe' });
+                const stateDir = join(tempDir, '.omc', 'state');
+                mkdirSync(stateDir, { recursive: true });
+                writeFileSync(join(stateDir, 'team-state.json'), JSON.stringify({
+                    active: true,
+                    stage: 'team-exec',
+                    _meta: { sessionId: 'different-owner-session' },
+                }));
+                const result = await processHook('session-start', {
+                    sessionId: 'team-foreign-state-session',
+                    directory: tempDir,
+                });
+                expect(result.message ?? '').not.toContain('[TEAM MODE RESTORED]');
+            }
+            finally {
+                rmSync(tempDir, { recursive: true, force: true });
+            }
+        });
+        it('should restore canonical team context when coarse team-state drifts away', async () => {
+            const tempDir = process.cwd();
+            const sessionId = 'canonical-team-session';
+            const canonicalTeamDir = join(tempDir, '.omc', 'state', 'team', 'canonical-team');
+            try {
+                writeCanonicalTeamState(tempDir, sessionId, 'canonical-team', 'executing');
+                const result = await processHook('session-start', {
+                    sessionId,
+                    directory: tempDir,
+                });
+                expect(result.continue).toBe(true);
+                expect(result.message).toContain('[TEAM MODE RESTORED]');
+                expect(result.message).toContain('canonical-team');
+            }
+            finally {
+                rmSync(canonicalTeamDir, { recursive: true, force: true });
+            }
+        });
+        it('restores ralplan session context on session-start', async () => {
+            const tempDir = mkdtempSync(join(tmpdir(), 'bridge-routing-session-start-ralplan-'));
+            try {
+                execFileSync('git', ['init'], { cwd: tempDir, stdio: 'pipe' });
+                const sessionId = 'session-start-ralplan';
+                const sessionDir = join(tempDir, '.omc', 'state', 'sessions', sessionId);
+                mkdirSync(sessionDir, { recursive: true });
+                writeFileSync(join(sessionDir, 'ralplan-state.json'), JSON.stringify({
+                    active: true,
+                    session_id: sessionId,
+                    current_phase: 'ralplan',
+                    awaiting_confirmation: true,
+                    started_at: '2026-04-14T04:00:00.000Z',
+                }, null, 2));
+                const result = await processHook('session-start', {
+                    sessionId,
+                    directory: tempDir,
+                });
+                expect(result.continue).toBe(true);
+                expect(result.message).toContain('[RALPLAN MODE RESTORED]');
+                expect(result.message).toContain('Current phase: ralplan');
+                expect(result.message).toContain('Status: awaiting skill confirmation');
+            }
+            finally {
+                rmSync(tempDir, { recursive: true, force: true });
+            }
+        });
+        it('should handle stop-continuation and always return continue:true', async () => {
+            const input = {
+                sessionId: 'test-session',
+                directory: '/tmp/test-routing',
+            };
+            const result = await processHook('stop-continuation', input);
+            expect(result.continue).toBe(true);
+        });
+        it('should enforce team continuation for active non-terminal team state', async () => {
+            const tempDir = mkdtempSync(join(tmpdir(), 'bridge-routing-team-'));
+            const sessionId = 'team-stage-enforced';
+            try {
+                execFileSync('git', ['init'], { cwd: tempDir, stdio: 'pipe' });
+                const teamStateDir = join(tempDir, '.omc', 'state', 'sessions', sessionId);
+                mkdirSync(teamStateDir, { recursive: true });
+                writeFileSync(join(teamStateDir, 'team-state.json'), JSON.stringify({ active: true, stage: 'team-exec', session_id: sessionId }, null, 2));
+                const result = await processHook('persistent-mode', {
+                    sessionId,
+                    directory: tempDir,
+                    stop_reason: 'end_turn',
+                });
+                expect(result.continue).toBe(false);
+                // checkTeamPipeline() in persistent-mode now handles team enforcement
+                // instead of bridge.ts's own team enforcement
+                expect(result.message).toContain('team-pipeline-continuation');
+            }
+            finally {
+                rmSync(tempDir, { recursive: true, force: true });
+            }
+        });
+        it('should bypass team continuation for auth error stop reasons', async () => {
+            const tempDir = mkdtempSync(join(tmpdir(), 'bridge-routing-team-auth-'));
+            const sessionId = 'team-stage-auth-bypass';
+            try {
+                execFileSync('git', ['init'], { cwd: tempDir, stdio: 'pipe' });
+                const teamStateDir = join(tempDir, '.omc', 'state', 'sessions', sessionId);
+                mkdirSync(teamStateDir, { recursive: true });
+                writeFileSync(join(teamStateDir, 'team-state.json'), JSON.stringify({ active: true, stage: 'team-exec', session_id: sessionId }, null, 2));
+                const result = await processHook('persistent-mode', {
+                    sessionId,
+                    directory: tempDir,
+                    stop_reason: 'oauth_expired',
+                });
+                expect(result.continue).toBe(true);
+                expect(result.message).toMatch(/authentication/i);
+                expect(result.message).not.toContain('[TEAM MODE CONTINUATION]');
+            }
+            finally {
+                rmSync(tempDir, { recursive: true, force: true });
+            }
+        });
+        it('should not append legacy team continuation when ralplan already blocks stop', async () => {
+            const tempDir = mkdtempSync(join(tmpdir(), 'bridge-routing-ralplan-team-'));
+            const sessionId = 'ralplan-team-double-block';
+            try {
+                execFileSync('git', ['init'], { cwd: tempDir, stdio: 'pipe' });
+                const sessionStateDir = join(tempDir, '.omc', 'state', 'sessions', sessionId);
+                mkdirSync(sessionStateDir, { recursive: true });
+                writeFileSync(join(sessionStateDir, 'ralplan-state.json'), JSON.stringify({ active: true, session_id: sessionId, current_phase: 'ralplan' }, null, 2));
+                const globalStateDir = join(tempDir, '.omc', 'state');
+                mkdirSync(globalStateDir, { recursive: true });
+                writeFileSync(join(globalStateDir, 'team-state.json'), JSON.stringify({ active: true, stage: 'team-exec' }, null, 2));
+                const result = await processHook('persistent-mode', {
+                    sessionId,
+                    directory: tempDir,
+                    stop_reason: 'end_turn',
+                });
+                expect(result.continue).toBe(false);
+                expect(result.message).toContain('ralplan-continuation');
+                expect(result.message).not.toContain('team-stage-continuation');
+                expect(result.message).not.toContain('team-pipeline-continuation');
+            }
+            finally {
+                rmSync(tempDir, { recursive: true, force: true });
+            }
+        });
+    });
+    // --------------------------------------------------------------------------
+    // Invalid / unknown hook types
+    // --------------------------------------------------------------------------
+    describe('invalid hook types', () => {
+        it('should return continue:true for unknown hook type', async () => {
+            const input = {
+                sessionId: 'test-session',
+                prompt: 'test',
+                directory: '/tmp/test-routing',
+            };
+            // Cast to HookType to simulate an unknown type
+            const result = await processHook('nonexistent-hook', input);
+            expect(result).toEqual({ continue: true });
+        });
+        it('should return continue:true for empty string hook type', async () => {
+            const input = {
+                sessionId: 'test-session',
+                directory: '/tmp/test-routing',
+            };
+            const result = await processHook('', input);
+            expect(result).toEqual({ continue: true });
+        });
+    });
+    // --------------------------------------------------------------------------
+    // Input normalization (snake_case -> camelCase)
+    // --------------------------------------------------------------------------
+    describe('input normalization', () => {
+        it('should normalize snake_case tool_name to camelCase toolName', async () => {
+            // Send snake_case input (as Claude Code would)
+            const rawInput = {
+                session_id: 'test-session',
+                tool_name: 'Bash',
+                tool_input: { command: 'echo hi' },
+                cwd: '/tmp/test-routing',
+            };
+            const result = await processHook('pre-tool-use', rawInput);
+            // Should not crash - normalization handled the field mapping
+            expect(result).toBeDefined();
+            expect(typeof result.continue).toBe('boolean');
+        });
+        it('should normalize cwd to directory', async () => {
+            const rawInput = {
+                session_id: 'test-session',
+                cwd: '/tmp/test-routing',
+                prompt: 'hello',
+            };
+            const result = await processHook('keyword-detector', rawInput);
+            expect(result).toBeDefined();
+            expect(result.continue).toBe(true);
+        });
+        it('should normalize tool_response to toolOutput', async () => {
+            const rawInput = {
+                session_id: 'test-session',
+                tool_name: 'Read',
+                tool_input: { file_path: '/tmp/test.ts' },
+                tool_response: 'file contents here',
+                cwd: '/tmp/test-routing',
+            };
+            const result = await processHook('post-tool-use', rawInput);
+            expect(result).toBeDefined();
+            expect(typeof result.continue).toBe('boolean');
+        });
+        it('should handle already-camelCase input without breaking', async () => {
+            const input = {
+                sessionId: 'test-session',
+                toolName: 'Bash',
+                toolInput: { command: 'ls' },
+                directory: '/tmp/test-routing',
+            };
+            const result = await processHook('pre-tool-use', input);
+            expect(result).toBeDefined();
+            expect(typeof result.continue).toBe('boolean');
+        });
+        it('should handle empty/null input gracefully', async () => {
+            const result = await processHook('keyword-detector', {});
+            expect(result).toBeDefined();
+            expect(result.continue).toBe(true);
+        });
+        it('should handle null input without crashing', async () => {
+            const result = await processHook('keyword-detector', null);
+            expect(result).toBeDefined();
+            expect(result.continue).toBe(true);
+        });
+    });
+    // --------------------------------------------------------------------------
+    // OMC_SKIP_HOOKS environment variable
+    // --------------------------------------------------------------------------
+    describe('OMC_SKIP_HOOKS kill-switch', () => {
+        it('should skip a specific hook type when listed', async () => {
+            process.env.OMC_SKIP_HOOKS = 'keyword-detector';
+            const input = {
+                sessionId: 'test-session',
+                prompt: 'ralph this',
+                directory: '/tmp/test-routing',
+            };
+            const result = await processHook('keyword-detector', input);
+            // Should be skipped - no message, just continue
+            expect(result).toEqual({ continue: true });
+        });
+        it('should not skip hooks not in the list', async () => {
+            process.env.OMC_SKIP_HOOKS = 'keyword-detector';
+            const input = {
+                sessionId: 'test-session',
+                prompt: 'test',
+                directory: '/tmp/test-routing',
+            };
+            const result = await processHook('stop-continuation', input);
+            expect(result.continue).toBe(true);
+        });
+        it('should skip multiple comma-separated hooks', async () => {
+            process.env.OMC_SKIP_HOOKS = 'keyword-detector,pre-tool-use,post-tool-use';
+            const input = {
+                sessionId: 'test-session',
+                toolName: 'Bash',
+                toolInput: { command: 'ls' },
+                directory: '/tmp/test-routing',
+            };
+            const keywordResult = await processHook('keyword-detector', input);
+            const preToolResult = await processHook('pre-tool-use', input);
+            const postToolResult = await processHook('post-tool-use', input);
+            expect(keywordResult).toEqual({ continue: true });
+            expect(preToolResult).toEqual({ continue: true });
+            expect(postToolResult).toEqual({ continue: true });
+        });
+        it('should handle whitespace around hook names', async () => {
+            process.env.OMC_SKIP_HOOKS = ' keyword-detector , pre-tool-use ';
+            const input = {
+                sessionId: 'test-session',
+                prompt: 'ralph',
+                directory: '/tmp/test-routing',
+            };
+            const result = await processHook('keyword-detector', input);
+            expect(result).toEqual({ continue: true });
+        });
+        it('should process normally with empty OMC_SKIP_HOOKS', async () => {
+            process.env.OMC_SKIP_HOOKS = '';
+            const input = {
+                sessionId: 'test-session',
+                prompt: 'hello world',
+                directory: '/tmp/test-routing',
+            };
+            const result = await processHook('keyword-detector', input);
+            expect(result.continue).toBe(true);
+        });
+    });
+    // --------------------------------------------------------------------------
+    // DISABLE_OMC env kill-switch
+    // --------------------------------------------------------------------------
+    describe('DISABLE_OMC kill-switch', () => {
+        it('should return continue:true for all hooks when DISABLE_OMC=1', async () => {
+            process.env.DISABLE_OMC = '1';
+            const input = {
+                sessionId: 'test-session',
+                prompt: 'ralph this',
+                directory: '/tmp/test-routing',
+            };
+            const result = await processHook('keyword-detector', input);
+            expect(result).toEqual({ continue: true });
+        });
+        it('should return continue:true when DISABLE_OMC=true', async () => {
+            process.env.DISABLE_OMC = 'true';
+            const input = {
+                sessionId: 'test-session',
+                prompt: 'test',
+                directory: '/tmp/test-routing',
+            };
+            const result = await processHook('pre-tool-use', input);
+            expect(result).toEqual({ continue: true });
+        });
+        it('should process normally when DISABLE_OMC=false', async () => {
+            process.env.DISABLE_OMC = 'false';
+            const input = {
+                sessionId: 'test-session',
+                prompt: 'hello world',
+                directory: '/tmp/test-routing',
+            };
+            const result = await processHook('keyword-detector', input);
+            // Should process normally (not disabled)
+            expect(result.continue).toBe(true);
+        });
+        it('DISABLE_OMC takes precedence over OMC_SKIP_HOOKS', async () => {
+            process.env.DISABLE_OMC = '1';
+            process.env.OMC_SKIP_HOOKS = 'keyword-detector';
+            const input = {
+                sessionId: 'test-session',
+                prompt: 'ralph',
+                directory: '/tmp/test-routing',
+            };
+            const result = await processHook('keyword-detector', input);
+            expect(result).toEqual({ continue: true });
+        });
+    });
+    // --------------------------------------------------------------------------
+    // Error handling
+    // --------------------------------------------------------------------------
+    describe('error resilience', () => {
+        it('should catch errors and return continue:true', async () => {
+            // Suppress console.error for this test
+            const spy = vi.spyOn(console, 'error').mockImplementation(() => { });
+            // subagent-start requires specific fields - sending bad input may trigger error path
+            const input = {
+                sessionId: 'test-session',
+                directory: '/tmp/nonexistent-test-dir-12345',
+            };
+            const result = await processHook('autopilot', input);
+            // Should not crash, should return continue:true
+            expect(result.continue).toBe(true);
+            spy.mockRestore();
+        });
+    });
+    // --------------------------------------------------------------------------
+    // Regression: camelCase validation after normalization (PR #512 fix)
+    // --------------------------------------------------------------------------
+    describe('camelCase validation after normalization', () => {
+        const affectedHooks = [
+            'session-end',
+            'subagent-start',
+            'subagent-stop',
+            'pre-compact',
+            'setup-init',
+            'setup-maintenance',
+        ];
+        for (const hookType of affectedHooks) {
+            it(`"${hookType}" should pass validation with camelCase input (post-normalization)`, async () => {
+                // Suppress console.error from lazy-load failures in non-existent dirs
+                const spy = vi.spyOn(console, 'error').mockImplementation(() => { });
+                // camelCase input (as produced by normalizeHookInput)
+                const input = {
+                    sessionId: 'test-session-abc',
+                    directory: '/tmp/test-routing',
+                    toolName: 'Bash',
+                };
+                const result = await processHook(hookType, input);
+                // Should NOT silently fail validation — it should reach the handler
+                // (handler may still return continue:true due to missing state files, which is fine)
+                expect(result).toBeDefined();
+                expect(typeof result.continue).toBe('boolean');
+                // The key assertion: validation should NOT log a "missing keys" error
+                // for sessionId/directory since they are present in camelCase
+                const missingKeysLogs = spy.mock.calls.filter((args) => typeof args[0] === 'string' && args[0].includes('missing keys'));
+                expect(missingKeysLogs).toHaveLength(0);
+                spy.mockRestore();
+            });
+        }
+        it('"permission-request" should pass validation with camelCase input including toolName', async () => {
+            const spy = vi.spyOn(console, 'error').mockImplementation(() => { });
+            const input = {
+                sessionId: 'test-session-abc',
+                directory: '/tmp/test-routing',
+                toolName: 'Bash',
+            };
+            const result = await processHook('permission-request', input);
+            expect(result).toBeDefined();
+            expect(typeof result.continue).toBe('boolean');
+            const missingKeysLogs = spy.mock.calls.filter((args) => typeof args[0] === 'string' && args[0].includes('missing keys'));
+            expect(missingKeysLogs).toHaveLength(0);
+            spy.mockRestore();
+        });
+        it('should fail validation when required camelCase keys are missing', async () => {
+            const spy = vi.spyOn(console, 'error').mockImplementation(() => { });
+            // Missing sessionId and directory
+            const input = { prompt: 'hello' };
+            const result = await processHook('session-end', input);
+            expect(result).toEqual({ continue: true });
+            // Should have logged the missing keys
+            const missingKeysLogs = spy.mock.calls.filter((args) => typeof args[0] === 'string' && args[0].includes('missing keys'));
+            expect(missingKeysLogs.length).toBeGreaterThan(0);
+            spy.mockRestore();
+        });
+        it('snake_case input should be normalized and pass validation', async () => {
+            const spy = vi.spyOn(console, 'error').mockImplementation(() => { });
+            // Raw snake_case input as Claude Code would send
+            const rawInput = {
+                session_id: 'test-session-xyz',
+                cwd: '/tmp/test-routing',
+                tool_name: 'Read',
+            };
+            const result = await processHook('session-end', rawInput);
+            expect(result).toBeDefined();
+            expect(typeof result.continue).toBe('boolean');
+            // normalizeHookInput converts session_id→sessionId, cwd→directory
+            // so validation against camelCase keys should succeed
+            const missingKeysLogs = spy.mock.calls.filter((args) => typeof args[0] === 'string' && args[0].includes('missing keys'));
+            expect(missingKeysLogs).toHaveLength(0);
+            spy.mockRestore();
+        });
+    });
+    // --------------------------------------------------------------------------
+    // Regression: requiredKeysForHook helper
+    // --------------------------------------------------------------------------
+    describe('requiredKeysForHook', () => {
+        it('should return camelCase keys for session-end', () => {
+            expect(requiredKeysForHook('session-end')).toEqual(['sessionId', 'directory']);
+        });
+        it('should return camelCase keys for subagent-start', () => {
+            expect(requiredKeysForHook('subagent-start')).toEqual(['sessionId', 'directory']);
+        });
+        it('should return camelCase keys for subagent-stop', () => {
+            expect(requiredKeysForHook('subagent-stop')).toEqual(['sessionId', 'directory']);
+        });
+        it('should return camelCase keys for pre-compact', () => {
+            expect(requiredKeysForHook('pre-compact')).toEqual(['sessionId', 'directory']);
+        });
+        it('should return camelCase keys for setup-init', () => {
+            expect(requiredKeysForHook('setup-init')).toEqual(['sessionId', 'directory']);
+        });
+        it('should return camelCase keys for setup-maintenance', () => {
+            expect(requiredKeysForHook('setup-maintenance')).toEqual(['sessionId', 'directory']);
+        });
+        it('should return camelCase keys with toolName for permission-request', () => {
+            expect(requiredKeysForHook('permission-request')).toEqual(['sessionId', 'directory', 'toolName']);
+        });
+        it('should return empty array for unknown hook type', () => {
+            expect(requiredKeysForHook('unknown-hook')).toEqual([]);
+        });
+    });
+    // --------------------------------------------------------------------------
+    // Regression: autopilot session isolation (sessionId threading)
+    // --------------------------------------------------------------------------
+    describe('autopilot session threading', () => {
+        it('should pass sessionId to readAutopilotState for session isolation', async () => {
+            const spy = vi.spyOn(console, 'error').mockImplementation(() => { });
+            // With a sessionId, the autopilot handler should thread it to readAutopilotState
+            // Since no state file exists, it returns continue:true — but it should not crash
+            const input = {
+                sessionId: 'isolated-session-123',
+                directory: '/tmp/test-routing-autopilot',
+            };
+            const result = await processHook('autopilot', input);
+            expect(result.continue).toBe(true);
+            spy.mockRestore();
+        });
+        it('should handle autopilot without sessionId gracefully', async () => {
+            const spy = vi.spyOn(console, 'error').mockImplementation(() => { });
+            const input = {
+                directory: '/tmp/test-routing-autopilot',
+            };
+            const result = await processHook('autopilot', input);
+            expect(result.continue).toBe(true);
+            spy.mockRestore();
+        });
+        it('surfaces blocker details in autopilot hook output', async () => {
+            const testDir = process.cwd();
+            try {
+                const sessionId = 'autopilot-blockers-session';
+                const sessionDir = join(testDir, '.omc', 'state', 'sessions', sessionId);
+                const teamRoot = join(testDir, '.omc', 'state', 'team', 'bridge-autopilot-demo-team');
+                mkdirSync(sessionDir, { recursive: true });
+                mkdirSync(join(teamRoot, 'tasks'), { recursive: true });
+                writeFileSync(join(sessionDir, 'autopilot-state.json'), JSON.stringify({
+                    active: true,
+                    phase: 'planning',
+                    session_id: sessionId,
+                    originalIdea: 'demo task',
+                    expansion: { spec_path: null },
+                    planning: { plan_path: null },
+                }, null, 2));
+                writeFileSync(join(sessionDir, 'team-state.json'), JSON.stringify({
+                    active: true,
+                    session_id: sessionId,
+                    team_name: 'bridge-autopilot-demo-team',
+                    current_phase: 'team-exec',
+                }, null, 2));
+                writeCanonicalTeamState(testDir, sessionId, 'bridge-autopilot-demo-team', 'executing');
+                writeFileSync(join(teamRoot, 'tasks', '1.json'), JSON.stringify({
+                    id: '1',
+                    subject: 'Blocked task',
+                    description: 'Depends on missing task 13',
+                    status: 'pending',
+                    owner: 'worker-1',
+                    blocked_by: ['13'],
+                    depends_on: ['13'],
+                    created_at: new Date().toISOString(),
+                }, null, 2));
+                const result = await processHook('autopilot', {
+                    sessionId,
+                    directory: testDir,
+                });
+                expect(result.continue).toBe(true);
+                expect(result.message).toContain('[AUTOPILOT - Phase: PLANNING]');
+                expect(result.message).toContain('[bridge-autopilot-demo-team] task-1 depends on missing task ids [13]');
+            }
+            finally {
+                rmSync(join(testDir, '.omc', 'state', 'sessions', 'autopilot-blockers-session'), { recursive: true, force: true });
+                rmSync(join(testDir, '.omc', 'state', 'team', 'bridge-autopilot-demo-team'), { recursive: true, force: true });
+            }
+        });
+    });
+    // --------------------------------------------------------------------------
+    // Unknown hook types still return continue:true
+    // --------------------------------------------------------------------------
+    describe('unknown hook types (regression)', () => {
+        it('should return continue:true for completely unknown hook type', async () => {
+            const input = {
+                sessionId: 'test-session',
+                directory: '/tmp/test-routing',
+            };
+            const result = await processHook('totally-unknown-hook-xyz', input);
+            expect(result).toEqual({ continue: true });
+        });
+    });
+    // --------------------------------------------------------------------------
+    // Regression #858 — snake_case fields must reach handlers after normalization
+    //
+    // processHook() normalizes Claude Code's snake_case payload (session_id,
+    // cwd, tool_name, tool_input) to camelCase before routing.  The handlers
+    // for session-end, pre-compact, setup-init, setup-maintenance, and
+    // permission-request all expect the original snake_case field names, so
+    // processHook must de-normalize before calling them.
+    // --------------------------------------------------------------------------
+    describe('Regression #858 — snake_case fields reach handlers after normalization', () => {
+        it('permission-request: snake_case input auto-allows safe command (tool_name/tool_input reached handler)', async () => {
+            // "git status" is in SAFE_PATTERNS. If tool_name and tool_input are
+            // de-normalized correctly, the handler returns hookSpecificOutput with
+            // behavior:'allow'. Before the fix, tool_name was undefined so the
+            // handler returned { continue: true } with no hookSpecificOutput.
+            const rawInput = {
+                session_id: 'test-session-858',
+                cwd: '/tmp/test-routing',
+                tool_name: 'Bash',
+                tool_input: { command: 'git status' },
+                tool_use_id: 'tool-use-123',
+                transcript_path: '/tmp/transcript.jsonl',
+                permission_mode: 'default',
+                hook_event_name: 'PermissionRequest',
+            };
+            const result = await processHook('permission-request', rawInput);
+            expect(result.continue).toBe(true);
+            const out = result;
+            expect(out.hookSpecificOutput).toBeDefined();
+            const specific = out.hookSpecificOutput;
+            expect(specific.hookEventName).toBe('PermissionRequest');
+            const decision = specific.decision;
+            expect(decision.behavior).toBe('allow');
+        });
+        it('permission-request: camelCase input auto-allows repo-scoped inspection', async () => {
+            const tempDir = mkdtempSync(join(tmpdir(), 'bridge-858-permission-camel-'));
+            try {
+                mkdirSync(join(tempDir, 'src'), { recursive: true });
+                execFileSync('git', ['init'], { cwd: tempDir, stdio: 'pipe' });
+                writeFileSync(join(tempDir, 'src', 'safe.ts'), 'export const value = 1;\n');
+                const input = {
+                    sessionId: 'test-session-858',
+                    directory: tempDir,
+                    toolName: 'Bash',
+                    toolInput: { command: 'cat src/safe.ts' },
+                };
+                const result = await processHook('permission-request', input);
+                expect(result.continue).toBe(true);
+                const out = result;
+                expect(out.hookSpecificOutput).toBeDefined();
+                const specific = out.hookSpecificOutput;
+                expect(specific.hookEventName).toBe('PermissionRequest');
+                const decision = specific.decision;
+                expect(decision.behavior).toBe('allow');
+            }
+            finally {
+                rmSync(tempDir, { recursive: true, force: true });
+            }
+        });
+        it('setup-init: snake_case input reaches handler and returns additionalContext', async () => {
+            const tempDir = mkdtempSync(join(tmpdir(), 'bridge-858-setup-'));
+            try {
+                const rawInput = {
+                    session_id: 'test-session-858',
+                    cwd: tempDir,
+                    transcript_path: join(tempDir, 'transcript.jsonl'),
+                    permission_mode: 'default',
+                    hook_event_name: 'Setup',
+                };
+                const result = await processHook('setup-init', rawInput);
+                expect(result.continue).toBe(true);
+                const out = result;
+                expect(out.hookSpecificOutput).toBeDefined();
+                const specific = out.hookSpecificOutput;
+                expect(specific.hookEventName).toBe('Setup');
+                expect(typeof specific.additionalContext).toBe('string');
+            }
+            finally {
+                rmSync(tempDir, { recursive: true, force: true });
+            }
+        });
+        it('session-end: snake_case input reaches handler without crashing', async () => {
+            const tempDir = mkdtempSync(join(tmpdir(), 'bridge-858-session-end-'));
+            try {
+                const rawInput = {
+                    session_id: 'test-session-858',
+                    cwd: tempDir,
+                    transcript_path: join(tempDir, 'transcript.jsonl'),
+                    permission_mode: 'default',
+                    hook_event_name: 'SessionEnd',
+                    reason: 'other',
+                };
+                const result = await processHook('session-end', rawInput);
+                expect(result.continue).toBe(true);
+            }
+            finally {
+                rmSync(tempDir, { recursive: true, force: true });
+            }
+        });
+        it('pre-compact: snake_case input reaches handler and creates checkpoint directory', async () => {
+            const tempDir = mkdtempSync(join(tmpdir(), 'bridge-858-pre-compact-'));
+            try {
+                execFileSync('git', ['init'], { cwd: tempDir, stdio: 'pipe' });
+                const rawInput = {
+                    session_id: 'test-session-858',
+                    cwd: tempDir,
+                    transcript_path: join(tempDir, 'transcript.jsonl'),
+                    permission_mode: 'default',
+                    hook_event_name: 'PreCompact',
+                    trigger: 'manual',
+                };
+                const result = await processHook('pre-compact', rawInput);
+                expect(result.continue).toBe(true);
+                // If cwd reached the handler, it will have created the checkpoint dir
+                const checkpointDir = join(tempDir, '.omc', 'state', 'checkpoints');
+                expect(existsSync(checkpointDir)).toBe(true);
+            }
+            finally {
+                rmSync(tempDir, { recursive: true, force: true });
+            }
+        });
+        it('setup-maintenance: hook type routing overrides conflicting trigger input', async () => {
+            const tempDir = mkdtempSync(join(tmpdir(), 'bridge-858-setup-maint-'));
+            try {
+                const rawInput = {
+                    session_id: 'test-session-858',
+                    cwd: tempDir,
+                    transcript_path: join(tempDir, 'transcript.jsonl'),
+                    permission_mode: 'default',
+                    hook_event_name: 'Setup',
+                    trigger: 'init',
+                };
+                const result = await processHook('setup-maintenance', rawInput);
+                expect(result.continue).toBe(true);
+                const out = result;
+                const specific = out.hookSpecificOutput;
+                expect(specific.hookEventName).toBe('Setup');
+                const context = String(specific.additionalContext ?? '');
+                expect(context).toContain('OMC maintenance completed:');
+                expect(context).not.toContain('OMC initialized:');
+            }
+            finally {
+                rmSync(tempDir, { recursive: true, force: true });
+            }
+        });
+        it('subagent start/stop: normalized optional fields survive routing lifecycle', async () => {
+            const tempDir = mkdtempSync(join(tmpdir(), 'bridge-858-subagent-'));
+            const previousHome = process.env.HOME;
+            const previousUserProfile = process.env.USERPROFILE;
+            const previousStateDir = process.env.OMC_STATE_DIR;
+            process.env.HOME = tempDir;
+            process.env.USERPROFILE = tempDir;
+            delete process.env.OMC_STATE_DIR;
+            const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => { });
+            try {
+                const startInput = {
+                    session_id: 'test-session-858-subagent',
+                    cwd: tempDir,
+                    agent_id: 'agent-858',
+                    agent_type: 'executor',
+                    prompt: 'Investigate normalization edge regression in bridge routing',
+                    model: 'gpt-5.3-codex-spark',
+                };
+                const start = await processHook('subagent-start', startInput);
+                expect(start.continue).toBe(true);
+                const stopInput = {
+                    sessionId: 'test-session-858-subagent',
+                    directory: tempDir,
+                    agent_id: 'agent-858',
+                    agent_type: 'executor',
+                    output: 'routing complete with normalized fields',
+                    success: false,
+                };
+                const stop = await processHook('subagent-stop', stopInput);
+                expect(stop.continue).toBe(true);
+                flushPendingWrites();
+                const trackingPath = join(getOmcRoot(tempDir), 'state', 'sessions', 'test-session-858-subagent', 'subagent-tracking-state.json');
+                expect(existsSync(trackingPath)).toBe(true);
+                const tracking = JSON.parse(readFileSync(trackingPath, 'utf-8'));
+                const agent = tracking.agents.find((a) => a.agent_id === 'agent-858');
+                expect(agent).toBeDefined();
+                expect(agent?.task_description).toBe('Investigate normalization edge regression in bridge routing');
+                expect(agent?.model).toBe('gpt-5.3-codex-spark');
+                expect(agent?.status).toBe('failed');
+                expect(String(agent?.output_summary ?? '')).toContain('routing complete with normalized fields');
+                expect(tracking.total_failed).toBeGreaterThanOrEqual(1);
+                expect(tracking.total_completed).toBe(0);
+            }
+            finally {
+                flushPendingWrites();
+                errorSpy.mockRestore();
+                if (previousHome === undefined)
+                    delete process.env.HOME;
+                else
+                    process.env.HOME = previousHome;
+                if (previousUserProfile === undefined)
+                    delete process.env.USERPROFILE;
+                else
+                    process.env.USERPROFILE = previousUserProfile;
+                if (previousStateDir === undefined)
+                    delete process.env.OMC_STATE_DIR;
+                else
+                    process.env.OMC_STATE_DIR = previousStateDir;
+                rmSync(tempDir, { recursive: true, force: true });
+            }
+        });
+        it('permission-request: canonical hookEventName wins over conflicting raw hook_event_name', async () => {
+            const rawInput = {
+                session_id: 'test-session-858',
+                cwd: '/tmp/test-routing',
+                tool_name: 'Bash',
+                tool_input: { command: 'git status' },
+                hook_event_name: 'NotPermissionRequest',
+            };
+            const result = await processHook('permission-request', rawInput);
+            expect(result.continue).toBe(true);
+            const out = result;
+            const specific = out.hookSpecificOutput;
+            expect(specific.hookEventName).toBe('PermissionRequest');
+        });
+    });
+});
+//# sourceMappingURL=bridge-routing.test.js.map
