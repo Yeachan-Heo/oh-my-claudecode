@@ -9,7 +9,7 @@
 import { execFileSync } from 'node:child_process';
 import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, utimesSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { afterAll, describe, expect, it } from 'vitest';
 
@@ -189,6 +189,33 @@ describe('jev-compaction-state: SessionStart', () => {
     afterSessionStart({ session_id: sid, source: 'startup' }, {}, env);
     expect(readdirSync(spool)).toEqual([]);
     expect(existsSync(registryPath('stale', undefined, env))).toBe(false);
+  });
+});
+
+describe('jev-compaction-state: compaction.jsonl rotation', () => {
+  const ROTATED = /^compaction-\d{8}-\d{6}-\d+\.jsonl$/;
+  // Just above 1 MiB (OMC_JEV_LOG_MAX_MB=1).
+  const OLD_LOG = ('x'.repeat(99) + '\n').repeat(11_000);
+
+  it('renames a file above OMC_JEV_LOG_MAX_MB before the next append, like the other Jev logs', () => {
+    const { env, sid, log } = setup();
+    mkdirSync(dirname(log), { recursive: true });
+    writeFileSync(log, OLD_LOG);
+    afterSessionStart({ session_id: sid, source: 'compact' }, {}, { ...env, OMC_JEV_LOG_MAX_MB: '1' });
+    const rotated = readdirSync(dirname(log)).filter((name) => ROTATED.test(name));
+    expect(rotated).toHaveLength(1);
+    expect(readFileSync(join(dirname(log), rotated[0]), 'utf8')).toBe(OLD_LOG);
+    expect(logRows(log)).toEqual([expect.objectContaining({ event: 'module_missing', session_id: sid })]);
+  });
+
+  it('keeps appending to the same file without the variable', () => {
+    const { env, sid, log } = setup();
+    mkdirSync(dirname(log), { recursive: true });
+    writeFileSync(log, OLD_LOG);
+    afterSessionStart({ session_id: sid, source: 'compact' }, {}, env);
+    expect(readdirSync(dirname(log)).filter((name) => ROTATED.test(name))).toEqual([]);
+    expect(readFileSync(log, 'utf8').startsWith(OLD_LOG)).toBe(true);
+    expect(readFileSync(log, 'utf8').length).toBeGreaterThan(OLD_LOG.length);
   });
 });
 

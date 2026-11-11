@@ -60,6 +60,21 @@ export interface JevResponse {
 }
 
 /**
+ * Ids of the hook call behind one judgment, written to the Jev logs with
+ * OMC_JEV_LOG_CONTEXT=1 and never sent to Jev. agent_id and agent_type are
+ * set for a tool call made inside a subagent; request_id is new per request.
+ */
+export interface JevLogContext {
+  tool_use_id?: string;
+  session_id?: string;
+  cwd?: string;
+  agent_id?: string;
+  agent_type?: string;
+  prompt_id?: string;
+  request_id?: string;
+}
+
+/**
  * Why the resolver answered the way it did.
  * - shadow: twin decided; Jev's answer was recorded for comparison
  * - active: Jev's answer decided

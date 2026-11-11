@@ -17,6 +17,10 @@
  * name to its answer; multi-question points must read it by name, because the
  * API does not guarantee the order of the answers object.
  *
+ * With OMC_JEV_LOG_CONTEXT=1 the request may also carry `context`, the ids of
+ * the hook call (see jevLogContextOf). They go into the shadow-log line, the
+ * result echoes `request_id`, and none of them is ever sent to Jev.
+ *
  * mode mirrors the resolver's ResolveMode contract: off (config gates),
  * shadow (twin decides, comparison recorded), active (Jev decides), degraded
  * (a Jev call was attempted and failed - caller falls back to its twin),
@@ -36,7 +40,7 @@
  * deliberate mirrors; parity with the TS parse is locked by the test suite.
  */
 
-import { lstatSync, readFileSync, rmdirSync, unlinkSync } from "node:fs";
+import { existsSync, lstatSync, readFileSync, renameSync, rmdirSync, statSync, unlinkSync } from "node:fs";
 import { appendFile, mkdir } from "node:fs/promises";
 import { basename, dirname, join, resolve } from "node:path";
 import { tmpdir } from "node:os";
@@ -102,6 +106,40 @@ export function resolveExcerptChars(point, env = process.env) {
       ? POINT_DEFAULT_EXCERPT_CHARS[point]
       : positiveInt(env.OMC_JEV_EXCERPT_CHARS, DEFAULT_EXCERPT_CHARS))
   );
+}
+
+const BYTES_PER_MB = 1024 * 1024;
+const MAX_LOG_MB = Math.floor(Number.MAX_SAFE_INTEGER / BYTES_PER_MB);
+
+/**
+ * Size limit of one Jev log file in bytes: OMC_JEV_LOG_MAX_MB megabytes
+ * (MiB). 0 when the variable is unset or not a canonical positive integer,
+ * which turns rotation off. Mirror of logMaxBytes in config.ts.
+ */
+export function resolveJevLogMaxBytes(env = process.env) {
+  return positiveInt(env.OMC_JEV_LOG_MAX_MB, 0, MAX_LOG_MB) * BYTES_PER_MB;
+}
+
+/**
+ * Rotate one Jev log file before an append. A file larger than maxBytes is
+ * renamed to <name>-<YYYYMMDD-HHmmss>-<pid>.jsonl (UTC) in the same directory,
+ * so the append starts a new file. maxBytes 0 turns rotation off. An existing
+ * target is never overwritten, and a failed rename (another process rotated
+ * the file first, the file is locked) is ignored: rotation is best-effort and
+ * must never cost the line being appended. Rotated files are never deleted.
+ * Every writer of a Jev log file calls this right before appending.
+ * Mirror of rotateJevLog in src/hooks/jev/resolver.ts.
+ */
+export function rotateJevLog(path, maxBytes, now = new Date()) {
+  if (!(maxBytes > 0)) return;
+  try {
+    if (statSync(path).size <= maxBytes) return;
+    const stamp = now.toISOString().replace(/\.\d+Z$/, "").replace(/[-:]/g, "").replace("T", "-");
+    const target = path.replace(/\.jsonl$/, "") + "-" + stamp + "-" + process.pid + ".jsonl";
+    if (!existsSync(target)) renameSync(path, target);
+  } catch {
+    // Missing file or failed rename: nothing to rotate, the append goes on.
+  }
 }
 
 /**
@@ -273,6 +311,64 @@ export function validateJevResponse(body) {
   return body;
 }
 
+/**
+ * OMC_JEV_LOG_CONTEXT=1 (or `true`): Jev log lines carry the ids of the hook
+ * call, the hook scripts log resolver processes that died without a line, and
+ * `jev` and `confidence` in a line belong to the first question only.
+ */
+export function isJevLogContextEnabled(env = process.env) {
+  return ["1", "true"].includes(String(env.OMC_JEV_LOG_CONTEXT ?? "").trim().toLowerCase());
+}
+
+/**
+ * OMC_JEV_STATE_OMIT_IDS=1 (or `true`): the states sent to Jev leave out the
+ * ids that describe the session rather than the work: `session_id` in the
+ * loop-continuation state and `cwd` in the simplifier-trigger state. Mirror
+ * of isJevStateOmitIdsEnabled in src/hooks/jev/config.ts.
+ */
+export function isJevStateOmitIdsEnabled(env = process.env) {
+  return ["1", "true"].includes(String(env.OMC_JEV_STATE_OMIT_IDS ?? "").trim().toLowerCase());
+}
+
+/** Log field name -> the names a hook input may use for it (snake or camel case). */
+const LOG_CONTEXT_FIELDS = {
+  tool_use_id: ["tool_use_id", "toolUseId"],
+  session_id: ["session_id", "sessionId"],
+  cwd: ["cwd", "directory"],
+  agent_id: ["agent_id", "agentId"],
+  agent_type: ["agent_type", "agentType"],
+  prompt_id: ["prompt_id", "promptId"],
+  request_id: ["request_id"],
+};
+const LOG_CONTEXT_MAX_CHARS = 1000;
+
+/**
+ * The ids of one hook call for the Jev logs, taken from a hook input or from
+ * a request's `context`: tool_use_id, session_id, cwd, agent_id, agent_type
+ * (the last two only for a tool call made inside a subagent), prompt_id, and
+ * request_id (set by the hook script for each request). Only non-empty
+ * strings are kept, each cut to 1000 characters; anything else is left out.
+ * Mirror of jevLogContextOf in src/hooks/jev/resolver.ts.
+ */
+export function jevLogContextOf(source) {
+  const context = {};
+  if (!source || typeof source !== "object") return context;
+  for (const [field, names] of Object.entries(LOG_CONTEXT_FIELDS)) {
+    const value = names.map((name) => source[name]).find((candidate) => typeof candidate === "string" && candidate !== "");
+    if (value !== undefined) context[field] = value.slice(0, LOG_CONTEXT_MAX_CHARS);
+  }
+  return context;
+}
+
+/**
+ * The Jev log directory: OMC_JEV_LOG_DIR, else state/jev under the state
+ * root of the working directory. Hook scripts write their own lines next to
+ * the resolver's shadow.jsonl with it.
+ */
+export function resolveJevLogDir(env = process.env) {
+  return logDirFor(env);
+}
+
 async function logDirFor(env) {
   if (env.OMC_JEV_LOG_DIR) return env.OMC_JEV_LOG_DIR;
   const omcRoot = await resolveOmcStateRoot(process.cwd());
@@ -374,11 +470,14 @@ export function resolveRequestTimeoutMs(env = process.env, now = Date.now()) {
 
 /**
  * Mirror of the resolver's shadow-log entry (ShadowLogEntry): the jev-eval
- * tool compares lines regardless of which side wrote them.
+ * tool compares lines regardless of which side wrote them. maxBytes is the
+ * rotation limit (resolveJevLogMaxBytes, from this process's environment
+ * when not given); 0 appends as before.
  */
-async function writeShadowLog(entry, logDir) {
+async function writeShadowLog(entry, logDir, maxBytes = resolveJevLogMaxBytes()) {
   try {
     await mkdir(logDir, { recursive: true });
+    rotateJevLog(join(logDir, "shadow.jsonl"), maxBytes);
     await appendFile(
       join(logDir, "shadow.jsonl"),
       JSON.stringify(entry) + "\n",
@@ -404,6 +503,10 @@ export async function resolveRequest(
   if (mode === "off") {
     return { mode, answer: null, answers: null, confidence: undefined, durationMs: 0 };
   }
+  // OMC_JEV_LOG_CONTEXT: the call's ids for every line of this request, and
+  // the line's `jev` and confidence from the first question only (null when
+  // Jev did not answer it).
+  const logContext = isJevLogContextEnabled(env) ? jevLogContextOf(request.context) : undefined;
   // Only the state carries user text. Question definitions are static text
   // written by the hook scripts and go out whole: bounding them would cut the
   // model-routing effort instructions (295 characters) and the intent
@@ -423,6 +526,7 @@ export async function resolveRequest(
         {
           ts: new Date().toISOString(),
           point: request.point,
+          ...logContext,
           mode: skip.mode,
           state: bound.state,
           heuristic: comparableHeuristic(request.heuristic, request.questions),
@@ -432,11 +536,13 @@ export async function resolveRequest(
           durationMs,
         },
         await logDirFor(env),
+        resolveJevLogMaxBytes(env),
       );
       return {
         mode: skip.mode,
         answer: null,
         answers: null,
+        ...(logContext?.request_id ? { request_id: logContext.request_id } : {}),
         confidence: undefined,
         durationMs,
         ...(skip.breaker ? { breaker: skip.breaker } : {}),
@@ -454,6 +560,7 @@ export async function resolveRequest(
   });
   let jevAnswer = null;
   let jevAnswers = null;
+  let firstOnly = null;
   let confidence;
   let entryMode = mode;
   // What the breaker needs to classify a failure: the HTTP status and
@@ -498,6 +605,7 @@ export async function resolveRequest(
         : Object.values(body.answers)[0];
     jevAnswers = body.answers;
     confidence = jevAnswer.confidence;
+    if (firstQuestion !== undefined && Object.hasOwn(body.answers, firstQuestion)) firstOnly = body.answers[firstQuestion];
   } catch (error) {
     entryMode = "degraded";
     console.error(
@@ -521,21 +629,24 @@ export async function resolveRequest(
     {
       ts: new Date().toISOString(),
       point: request.point,
+      ...logContext,
       mode: entryMode,
       state: bound.state,
       heuristic: comparableHeuristic(request.heuristic, request.questions),
-      jev: entryMode === "degraded" ? null : jevAnswer,
+      jev: entryMode === "degraded" ? null : logContext ? firstOnly : jevAnswer,
       answers: entryMode === "degraded" ? null : jevAnswers,
-      confidence,
+      confidence: logContext ? firstOnly?.confidence : confidence,
       durationMs,
       ...(request.tool_use_id ? { tool_use_id: request.tool_use_id } : {}),
     },
     await logDirFor(env),
+    resolveJevLogMaxBytes(env),
   );
   return {
     mode: entryMode,
     answer: entryMode === "degraded" ? null : jevAnswer,
     answers: entryMode === "degraded" ? null : jevAnswers,
+    ...(logContext?.request_id ? { request_id: logContext.request_id } : {}),
     confidence,
     durationMs,
     ...(opened ? { breaker: opened } : {}),
