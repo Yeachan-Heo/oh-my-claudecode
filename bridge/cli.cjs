@@ -50306,6 +50306,7 @@ function parseJevConfig(env2 = process.env) {
   const masterOff = raw === "off";
   const points = /* @__PURE__ */ new Set();
   const activatedPoints = /* @__PURE__ */ new Set();
+  const offPoints = /* @__PURE__ */ new Set();
   let allPoints = false;
   let activateAll = false;
   if (raw && raw !== "off") {
@@ -50315,10 +50316,21 @@ function parseJevConfig(env2 = process.env) {
       const colon = token.lastIndexOf(":");
       const name = colon === -1 ? token : token.slice(0, colon);
       const isActive = colon !== -1 && token.slice(colon + 1) === "active";
+      const isOff = colon !== -1 && token.slice(colon + 1).trim().toLowerCase() === "off";
       if (name === "all") {
-        allPoints = true;
-        if (isActive) activateAll = true;
+        if (isOff) {
+          allPoints = false;
+          activateAll = false;
+        } else {
+          allPoints = true;
+          if (isActive) activateAll = true;
+        }
+      } else if (isOff) {
+        points.delete(name);
+        activatedPoints.delete(name);
+        offPoints.add(name);
       } else {
+        offPoints.delete(name);
         points.add(name);
         if (isActive) activatedPoints.add(name);
       }
@@ -50336,6 +50348,7 @@ function parseJevConfig(env2 = process.env) {
     points,
     allPoints,
     activatedPoints,
+    offPoints,
     activateAll,
     timeoutMs: positiveInt(env2.OMC_JEV_TIMEOUT_MS, DEFAULT_TIMEOUT_MS, MAX_TIMER_DELAY_MS),
     maxRequests: positiveInt(env2.OMC_JEV_MAX_REQUESTS, 0),
@@ -50353,6 +50366,7 @@ function isJevEnabled(config2) {
 }
 function pointState(point, config2, activated = ACTIVATED_POINTS) {
   if (!isJevEnabled(config2)) return "off";
+  if (config2.offPoints.has(point)) return "off";
   const namedOnly = NAMED_ONLY_POINTS.has(point);
   if ((namedOnly || !config2.allPoints) && !config2.points.has(point)) return "off";
   return activated.has(point) || !namedOnly && config2.activateAll || config2.activatedPoints.has(point) ? "active" : "shadow";

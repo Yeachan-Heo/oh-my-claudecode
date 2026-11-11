@@ -189,6 +189,27 @@ const SIMPLIFIER_TRIGGER_QUESTIONS = {
         },
     },
 };
+/**
+ * Point "compaction": Score per tool result at a conversation compaction - how
+ * much further work will still need it. Resolved by the Claude Code hooks
+ * module hooks/jev-compaction.mjs (a mod cannot import this file, so it keeps a
+ * copy of the question, locked by src/__tests__/jev-compaction-module.test.mjs),
+ * not through recordJudgment. Named-only (NAMED_ONLY_POINTS in config.ts):
+ * `all` never enables it.
+ */
+const COMPACTION_QUESTIONS = {
+    'result-need': {
+        type: 'score',
+        instructions: "How much will the tool result described under this question's name in state.results still be needed for further work on the user's task (state.task)? " +
+            'Judge whether further work will use it, not whether it was needed before.',
+        criteria: {
+            not_needed: 'Not needed: the work it served is finished, or the result is easy to reproduce (a file listing, repository status, a write confirmation, a result repeated later).',
+            probably_not_needed: 'Probably not needed: background from which further work needs at most a conclusion already written in the conversation.',
+            may_be_useful: 'May be useful: details that further work may come back to.',
+            needed: 'Needed: data that further work relies on and that is nowhere else in the conversation (file contents before an edit, numbers for later calculations, findings, an error to fix).',
+        },
+    },
+};
 /** Declare a judgment point. Declaration only - nothing here executes. */
 export function defineJudgmentPoint(definition) {
     return {
@@ -221,6 +242,7 @@ export const JUDGMENT_POINTS = {
         questions: SIMPLIFIER_TRIGGER_QUESTIONS,
         blocking: false,
     }),
+    compaction: defineJudgmentPoint({ name: 'compaction', questions: COMPACTION_QUESTIONS, blocking: true }),
 };
 /** Look up a declared judgment point. */
 export function getJudgmentPoint(name) {
