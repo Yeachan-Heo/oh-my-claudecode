@@ -2079,6 +2079,10 @@ async function main() {
       isStateForCurrentProject(autopilot.state, directory, autopilot.isGlobal)
     ) {
       clearLoadedStateFile(autopilot);
+      // Flush deferred Ralph rows on orphan-parent releases: when an autopilot state
+      // contains only the routing echo and is deleted, any deferred child Ralph release
+      // must be written before the orphan handler returns SAFE_CONTINUE.
+      writeChildRalphRelease();
       console.log(JSON.stringify({ continue: true, suppressOutput: true }));
       return;
     }

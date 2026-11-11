@@ -809,6 +809,73 @@ describe("jev advisory points: opt-in actions", () => {
       expect(read(ralphPath)).toMatchObject({ active: true });
       expect(read(autopilotPath)).toMatchObject({ active: true, reinforcement_count: 1 });
     }, 20000);
+
+    it("flushes deferred Ralph rows on orphan-parent releases", async () => {
+      const readAppliedRows = () => {
+        const logPath = join(cwd, "jev-logs", "applied.jsonl");
+        return (existsSync(logPath) ? readFileSync(logPath, "utf8").split("\n") : [])
+          .filter(Boolean)
+          .map((line) => JSON.parse(line) as { point: string; applied?: Record<string, unknown> })
+          .filter((row) => row.point === "loop-continuation");
+      };
+      const sessionId = "sess-release-orphan-parent";
+      // Create a Ralph state that will be released by Jev
+      const ralphPath = write(sessionId, "ralph-state.json", state("ralph", sessionId));
+      // Create an orphaned autopilot state with only the routing echo (will be deleted as orphan)
+      // The state must have a prompt that matches the routing echo pattern to be considered orphaned
+      const autopilotPath = write(
+        sessionId,
+        "autopilot-state.json",
+        state("autopilot", sessionId, {
+          phase: undefined,
+          current_phase: undefined,
+          prompt: "[MAGIC KEYWORDS DETECTED: AUTOPILOT]",
+        }),
+      );
+      noul.task_complete = 0.95;
+
+      const output = await stop(sessionId, { OMC_JEV_LOOP_RELEASE_ONLY: "1", OMC_JEV_APPLIED_LOG: "1" });
+      expect(output).toMatchObject({ continue: true, suppressOutput: true });
+      // Orphan autopilot should be deleted
+      expect(existsSync(autopilotPath)).toBe(false);
+      // Ralph should still exist and have been released
+      expect(read(ralphPath)).toMatchObject({ active: true, iteration: 2 });
+
+      // Verify the deferred Ralph release row was flushed before the orphan was deleted
+      const appliedRows = readAppliedRows();
+      expect(appliedRows.length).toBeGreaterThan(0);
+      expect(appliedRows[appliedRows.length - 1].applied).toMatchObject({
+        mode: "ralph",
+        block: { from: true, to: false },
+      });
+    }, 20000);
+
+    it("writes the applied-log row for a standalone Ralph at-limit release", async () => {
+      const readAppliedRows = () => {
+        const logPath = join(cwd, "jev-logs", "applied.jsonl");
+        return (existsSync(logPath) ? readFileSync(logPath, "utf8").split("\n") : [])
+          .filter(Boolean)
+          .map((line) => JSON.parse(line) as { point: string; applied?: Record<string, unknown> })
+          .filter((row) => row.point === "loop-continuation");
+      };
+      const sessionId = "sess-release-ralph-at-limit";
+      // Create a Ralph state at iteration === max_iterations (at-limit)
+      const path = write(sessionId, "ralph-state.json", state("ralph", sessionId, { iteration: 5, max_iterations: 5 }));
+      noul.task_complete = 0.95;
+
+      const output = await stop(sessionId, { OMC_JEV_LOOP_RELEASE_ONLY: "1", OMC_JEV_APPLIED_LOG: "1" });
+      expect(output).not.toHaveProperty("decision");
+      expect(output).toMatchObject({ continue: true, suppressOutput: true });
+      expect(String(output.systemMessage)).toContain("[JEV-COMPLETION]");
+
+      // Verify the applied-log row was written for the at-limit release
+      const appliedRows = readAppliedRows();
+      expect(appliedRows.length).toBeGreaterThan(0);
+      expect(appliedRows[appliedRows.length - 1].applied).toMatchObject({
+        mode: "ralph",
+        block: { from: true, to: false },
+      });
+    }, 20000);
   });
 
   describe("intent (OMC_JEV_INTENT_APPLY)", () => {
