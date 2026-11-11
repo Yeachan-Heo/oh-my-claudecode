@@ -16,6 +16,7 @@ import {
   paneHasActiveTask,
   captureOwnedTeamPane,
   type WorkerPaneOwnership,
+  providerForTeamTarget,
 } from './tmux-session.js';
 import {
   isValidTeamInstanceId,
@@ -45,7 +46,7 @@ export interface NudgeAuthority {
   /** Tmux server incarnation captured when the team was created. */
   tmuxServerIdentity?: TmuxServerIdentity;
   /** Provider inferred from the persisted target when omitted. */
-  provider?: 'tmux' | 'cmux';
+  provider?: 'tmux' | 'cmux' | 'herdr';
   /**
    * Return the exact provider ownership for one persisted worker pane.
    * Missing ownership is never replaced with ambient pane capture.
@@ -125,9 +126,9 @@ export class NudgeTracker {
     if (!authority || typeof authority !== 'object') return [];
     const sessionName = typeof authority.sessionName === 'string' ? authority.sessionName : '';
     const provider = authority.provider
-      ?? (sessionName.startsWith('cmux:') ? 'cmux' : 'tmux');
+      ?? providerForTeamTarget(sessionName);
     if (!Array.isArray(paneIds)
-      || (provider !== 'tmux' && provider !== 'cmux')
+      || (provider !== 'tmux' && provider !== 'cmux' && provider !== 'herdr')
       || sessionName.length === 0
       || !isValidTeamInstanceId(authority.instanceId)
       || sessionName.trim() !== sessionName
@@ -136,7 +137,7 @@ export class NudgeTracker {
       || typeof authority.executeNudge !== 'function'
       || (provider === 'tmux'
         && (!authority.tmuxServerIdentity || !isValidTmuxServerIdentity(authority.tmuxServerIdentity)))
-      || (provider === 'cmux' && authority.tmuxServerIdentity !== undefined)) {
+      || ((provider === 'cmux' || provider === 'herdr') && authority.tmuxServerIdentity !== undefined)) {
       return [];
     }
     const now = Date.now();
