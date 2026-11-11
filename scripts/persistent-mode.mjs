@@ -1850,6 +1850,10 @@ async function main() {
     const swarmMarker = existsSync(join(stateDir, "swarm-active.marker"));
     const swarmSummary = readJsonFile(join(stateDir, "swarm-summary.json"));
 
+    // OMC_JEV_APPLIED_LOG: the noul of a child Ralph that Jev released while its autopilot parent decides the Stop;
+    // its row is written only if the parent then releases the Stop too.
+    let childRalphRelease = null;
+
     // Priority 1: Ralph Loop (explicit persistence mode)
     // Skip if state is stale (older than 2 hours) - prevents blocking new sessions
     ralphPriority: if (
@@ -1952,6 +1956,7 @@ async function main() {
             // Ralph is a child workflow here, completed or cancelled; let the
             // active autopilot handler below decide Stop instead of releasing
             // the turn.
+            if (jevCompletion === "released") childRalphRelease = jevNoulOf(jevResult, "task_complete") ?? null;
             break ralphPriority;
           }
 
@@ -2008,6 +2013,7 @@ async function main() {
 
         // Completed or cancelled child Ralph: continue into the active
         // autopilot handler below.
+        if (jevCompletionAtExtend === "released") childRalphRelease = jevNoulOf(jevExtendResult, "task_complete") ?? null;
         break ralphPriority;
       }
     }
@@ -2196,6 +2202,9 @@ async function main() {
 
             const jevAutopilotCompletion = jevCompletionOutcome(jevAutopilotResult, autopilot.state, autopilot.path, !reinforcementLimitReached);
             if (jevAutopilotCompletion) {
+              if (jevAutopilotCompletion === "released" && childRalphRelease !== null) {
+                recordJevApplied("loop-continuation", { mode: "ralph", block: { from: true, to: false }, noul: childRalphRelease });
+              }
               console.log(JSON.stringify(jevCompletionStopOutput(jevAutopilotCompletion, "autopilot")));
               return;
             }
