@@ -646,6 +646,11 @@ describe('jev-compaction module: active compaction', () => {
     expect(JSON.stringify(run.calls.fetch.map((c) => c.body))).not.toMatch(/\.aws/);
     expect(run.records()[0].mentioned).toBe(1);
     expect(resultOf(run.out.messages, 't5')?.text).toBe(resultOf(messages, 't5').text);
+    // An omitted 5,000-character line lets the next line into the budget: the name on it still counts.
+    const after = conversation(20, { last: `${'w'.repeat(5000)} /home/u/.aws/credentials\nKeep notes-5.txt` });
+    const second = await compactOnce(after);
+    expect(JSON.stringify(second.calls.fetch.map((c) => c.body))).toContain('Keep notes-5.txt');
+    expect(second.records()[0].mentioned).toBe(1);
   });
 
   it('recognizes an MCP path given in parts (fields, nested objects, array segments, a key, three parts, a trailing line end) by joining the end of a .ssh, .aws or private-path part with every other string; beyond 2000 joins it fails closed', async () => {

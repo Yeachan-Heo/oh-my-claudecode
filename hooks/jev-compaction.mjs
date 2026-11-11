@@ -1089,24 +1089,27 @@ function userWords(m) {
 }
 
 // The task for the state: the /compact instructions first, then the last USER_MESSAGES user
-// messages, together USER_CHARS characters. The same words as written (`mention`, in lower case) are
-// only matched against the results the user names (markMentioned) and are never sent.
+// messages, together USER_CHARS characters. The part of each that is cleaned, as written (`mention`, in
+// lower case; an omitted line can let a later line into the budget), is only matched against the results
+// the user names (markMentioned) and is never sent.
 function userTask(messages, instructions, privatePaths = []) {
   let left = USER_CHARS;
-  const clean = (text) => maskSecrets(omitSecretLines(headPart(text, left + MASK_SLACK_CHARS), privatePaths));
+  const clean = (text) => maskSecrets(omitSecretLines(text, privatePaths));
   const mention = [];
-  const instr = instructions ? clip(clean(String(instructions)), left) : undefined;
+  const raw = instructions ? headPart(String(instructions), left + MASK_SLACK_CHARS) : '';
+  const instr = instructions ? clip(clean(raw), left) : undefined;
   if (instr) {
-    mention.push(String(instructions).slice(0, left));
+    mention.push(raw);
     left -= instr.length;
   }
   const picked = [];
   for (let i = messages.length - 1; i >= 0 && picked.length < USER_MESSAGES && left > 0; i--) {
     const words = userWords(messages[i]);
     if (!words) continue;
-    const text = clip(clean(words), left);
+    const part = headPart(words, left + MASK_SLACK_CHARS);
+    const text = clip(clean(part), left);
     picked.unshift(text);
-    mention.push(words.slice(0, left));
+    mention.push(part);
     left -= text.length;
   }
   return { task: picked, instructions: instr, mention: mention.join('\n').toLowerCase() };
@@ -1141,7 +1144,7 @@ function markMentioned(candidates, user) {
   for (const c of candidates) {
     if (c.secret || !c.textOnly) continue;
     for (const name of targetsOf(c.use.input)) {
-      if (mentions(text, name)) { c.score = Math.max(c.score, 1); c.asked = true; n++; break; }
+      if (text.includes(name) && mentions(text, name)) { c.score = Math.max(c.score, 1); c.asked = true; n++; break; }
     }
   }
   return n;
