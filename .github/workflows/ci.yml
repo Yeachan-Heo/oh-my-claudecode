@@ -60,8 +60,8 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
-      - name: Build TypeScript for runtime entrypoint tests
-        run: npx tsc
+      - name: Build TypeScript and bridge artifacts
+        run: npm run build
 
       - name: Run functional tests
         run: npm test -- --run
@@ -89,6 +89,9 @@ jobs:
 
       - name: Install dependencies
         run: npm ci
+
+      - name: Build TypeScript and bridge artifacts
+        run: npm run build
 
       # Scoped to the cross-platform path/encoding suites on a real Windows
       # runner. The ubuntu-only `test` job exercises POSIX separators, so
