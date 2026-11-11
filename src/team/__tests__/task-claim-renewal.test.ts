@@ -35,6 +35,20 @@ import type { TeamTask } from '../types.js';
 const teamName = 'claim-renewal-team';
 const timestamp = '2026-09-10T00:00:00.000Z';
 
+function restoreEnv(name: string, value: string | undefined): void {
+  if (value === undefined) {
+    delete process.env[name];
+  } else {
+    process.env[name] = value;
+  }
+}
+
+afterAll(() => {
+  restoreEnv('HOME', environmentIsolation.previous.home);
+  restoreEnv('USERPROFILE', environmentIsolation.previous.userProfile);
+  restoreEnv('OMC_STATE_DIR', environmentIsolation.previous.stateDir);
+});
+
 function teamRoot(cwd: string): string {
   return join(getOmcRoot(cwd), 'state', 'team', teamName);
 }
@@ -98,12 +112,6 @@ describe('teamRenewTaskClaim', () => {
 
   afterEach(async () => {
     await rm(cwd, { recursive: true, force: true });
-  });
-
-  afterAll(() => {
-    process.env.HOME = environmentIsolation.previous.home;
-    process.env.USERPROFILE = environmentIsolation.previous.userProfile;
-    process.env.OMC_STATE_DIR = environmentIsolation.previous.stateDir;
   });
 
   it('extends the lease of a live claim so a long task can still complete', async () => {
@@ -342,12 +350,6 @@ describe('renew-task-claim api dispatch', () => {
 
   afterEach(async () => {
     await rm(cwd, { recursive: true, force: true });
-  });
-
-  afterAll(() => {
-    process.env.HOME = environmentIsolation.previous.home;
-    process.env.USERPROFILE = environmentIsolation.previous.userProfile;
-    process.env.OMC_STATE_DIR = environmentIsolation.previous.stateDir;
   });
 
   it('rejects the public renew-task-claim dispatch when required fields are missing', async () => {
