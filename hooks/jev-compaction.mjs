@@ -40,6 +40,35 @@
  * until the context has grown by OWN_MIN_GAIN of the window from the lowest usage since it (from the
  * threshold at most).
  *
+ * OMC_JEV_COMPACT_FLEX=active (off with any other value) makes the target follow the growth since the
+ * previous compaction of the same loop in this process: the characters the compaction left (this
+ * module's, or the conversation the built-in summary returned) up to the characters now. The compaction
+ * frees that growth, never less than MIN_REDUCTION of the characters (the least a module compaction
+ * frees; less room fills again within a few turns) and never more than OMC_JEV_COMPACT_TARGET frees, so
+ * a conversation that grew little since its last compaction keeps more of it. The first compaction of a
+ * loop in a process, and one after the conversation shrank, keep OMC_JEV_COMPACT_TARGET. The record
+ * names the source of the target and the growth.
+ *
+ * OMC_JEV_COMPACT_AT_PERCENT=jev chooses the moment instead of a fixed percent. The module considers a
+ * request once the context is large enough for a compaction to the target to free OWN_MIN_GAIN of the
+ * window, and after a compaction once it grew by OWN_MIN_GAIN of the window from the lowest usage since
+ * it; the removable results must be worth that much too (with the target the compaction would aim at).
+ * It then asks the host to compact when a task of the list closed in the last MIN_TURNS_BETWEEN turns
+ * and was not counted before (a TaskUpdate to completed, or a TodoWrite or update_plan list with more
+ * done items than the list before it), else when Jev answers the moment question with at least
+ * MOMENT_YES. Jev is asked at most once per MIN_TURNS_BETWEEN turns, never after an interrupted, refused
+ * or failed turn, and one moment is decided at a time; a compaction of the main loop or a newer turn
+ * while Jev answers makes the answer stale. The transcript is read only when the tokens enter another
+ * step of OWN_MIN_GAIN of the window or MIN_TURNS_BETWEEN turns after the last read. Every request and
+ * every "not now" leaves an own_threshold record, and the compaction a request starts carries
+ * own_request. The moment question is a request of this point (the same admission and failure handling
+ * as a compaction's, within REQUEST_MS; under OMC_JEV_MAX_REQUESTS it is not asked once fewer than
+ * MAX_REQUESTS + 1 requests are left, so a compaction keeps its requests) and sends the user's words as
+ * a compaction does (below), the first MOMENT_HEAD_CHARS and last MOMENT_TAIL_CHARS characters of the
+ * answer that ended the turn, masked (left out when any call of the conversation touched a secret or
+ * private path), the done and total items of the newest task list, and the tokens and window; no tool
+ * result.
+ *
  * What goes to the endpoint: the /compact instructions and the last USER_MESSAGES user messages
  * (together USER_CHARS characters), and for each scored result its tool, its input (STATE_INPUT_CHARS)
  * and the result's first STATE_HEAD_CHARS and last STATE_TAIL_CHARS characters, all after secret
@@ -110,6 +139,18 @@ const USER_MESSAGES = 3;
 // state holds (USER_CHARS), so the default bounds nothing the limits above do not already bound.
 export const DEFAULT_EXCERPT_CHARS = 4000;
 const MIN_TURNS_BETWEEN = 5;
+// OMC_JEV_COMPACT_AT_PERCENT=jev: a yes needs at least this Noul probability. A compaction ahead of the
+// host's threshold costs the prompt cache, so it waits for a clear yes, above the 0.5 that reads as yes
+// elsewhere (NOUL_YES_THRESHOLD in src/hooks/jev/client.ts).
+const MOMENT_YES = 0.7;
+// Characters of the turn's answer the moment question sends.
+const MOMENT_HEAD_CHARS = 200;
+const MOMENT_TAIL_CHARS = 100;
+// A moment decision (Jev's answer, the compaction it asks for) that has not settled in this time no
+// longer holds the next one back.
+const MOMENT_STALE_MS = 5 * 60_000;
+// OMC_JEV_COMPACT_FLEX: loops whose growth start is kept (the main loop and the newest subagents).
+const AFTER_LOOPS_MAX = 64;
 const WINDOW_REFRESH_TURNS = 20;
 const CONFIG_TTL_MS = 30000;
 // A request batch counts when at least this share of its questions got a score; unanswered
@@ -164,6 +205,14 @@ export const QUESTION_CRITERIA = [
   'May be useful: details that further work may come back to.',
   'Needed: data that further work relies on and that is nowhere else in the conversation (file contents before an edit, numbers for later calculations, findings, an error to fix).',
 ];
+// Mirror of the `compaction-moment` Noul question in src/hooks/jev/points.ts (OMC_JEV_COMPACT_AT_PERCENT=jev).
+export const MOMENT_INSTRUCTIONS =
+  "Is the end of this turn a good moment to compact the agent's conversation? A good moment: work on the user's task (state.task) reached the end of a stage, and the answer that ended the turn (state.answer) closes a thread, reports a result or waits for the user's decision. " +
+  'A bad moment: the agent is in the middle of a thread and will soon come back to the details it just read or changed.';
+export const MOMENT_CRITERIA = {
+  true: 'Good moment: a stage of the work is closed; the details of the last steps will not be needed right away.',
+  false: 'Bad moment: work on the current thread goes on and will soon come back to fresh details.',
+};
 
 // Blocks the host or a hook adds to a user message; they stay in the conversation but are not the
 // user's words, so they are cut from the task sent to Jev.
@@ -292,6 +341,12 @@ function freshState() {
     sharedQueue: Promise.resolve(), compacting: 0, pausedUntil: 0, pauseReason: null, failedInRow: 0, noResponseAt: [], requests: 0,
     turnCount: 0, lastAttempt: -Infinity, hostCannot: false, compactWindow: undefined, windowTurn: -Infinity,
     cachedConfig: undefined, cachedAt: -Infinity, growthArmed: false, growthBase: undefined,
+    // OMC_JEV_COMPACT_FLEX: per loop ('' for the main loop), {chars, source} after its last compaction.
+    lastAfter: new Map(),
+    // OMC_JEV_COMPACT_AT_PERCENT=jev: main-loop compactions under way, the moment of the request in
+    // flight, the last read {turn, step}, the closing calls counted already, the done items of the newest
+    // list call per tool at the last read, the turn of the last question, the decision under way.
+    compactingMain: 0, ownRequested: undefined, momentRead: undefined, momentSeen: new Set(), listDone: new Map(), lastAsk: -Infinity, momentBusy: undefined,
   };
 }
 let session = freshState();
@@ -309,6 +364,7 @@ async function readConfig($) {
     OMC_JEV_EXCERPT_CHARS_COMPACTION: await $.env.get('OMC_JEV_EXCERPT_CHARS_COMPACTION'),
     OMC_JEV_COMPACT_AT_PERCENT: await $.env.get('OMC_JEV_COMPACT_AT_PERCENT'),
     OMC_JEV_COMPACT_TARGET: await $.env.get('OMC_JEV_COMPACT_TARGET'),
+    OMC_JEV_COMPACT_FLEX: await $.env.get('OMC_JEV_COMPACT_FLEX'),
     OMC_JEV_COMPACT_TOAST: await $.env.get('OMC_JEV_COMPACT_TOAST'),
     OMC_JEV_COMPACT_PRIVATE_PATHS: await $.env.get('OMC_JEV_COMPACT_PRIVATE_PATHS'),
     OMC_JEV_BREAKER: await $.env.get('OMC_JEV_BREAKER'),
@@ -364,7 +420,9 @@ async function readConfig($) {
     maxRequests: positiveInt(env.OMC_JEV_MAX_REQUESTS, 0),
     excerptChars: positiveInt(env.OMC_JEV_EXCERPT_CHARS_COMPACTION, DEFAULT_EXCERPT_CHARS),
     atPercent: fraction(env.OMC_JEV_COMPACT_AT_PERCENT, undefined, 1, 99),
+    atJev: String(env.OMC_JEV_COMPACT_AT_PERCENT ?? '').trim() === 'jev',
     target: fraction(env.OMC_JEV_COMPACT_TARGET, DEFAULT_TARGET, 0.1, 0.9),
+    flex: String(env.OMC_JEV_COMPACT_FLEX ?? '').trim() === 'active',
     toast: String(env.OMC_JEV_COMPACT_TOAST ?? '').trim() === '1',
     privatePaths,
   };
@@ -876,6 +934,27 @@ function findCandidates(messages, privatePaths) {
 
 const removableChars = (candidates) => candidates.reduce((s, c) => s + Math.max(0, c.fullCost - c.traceCost), 0);
 
+/**
+ * OMC_JEV_COMPACT_FLEX: the share of the `before` characters a compaction keeps, from the growth since the
+ * previous compaction of the loop (`prev`: {chars} it left, or {why} when that is unknown). The room it
+ * frees is that growth, at least MIN_REDUCTION of the characters and at most what the `rule` share frees.
+ * Returns {target, source: 'rule' | 'growth', why?, growth?, room?}; source 'rule' with why `large_growth`
+ * when the growth reaches what the rule frees.
+ */
+export function elasticTarget(before, rule, prev) {
+  if (!prev) return { target: rule, source: 'rule', why: 'first' };
+  if (!Number.isFinite(prev.chars)) return { target: rule, source: 'rule', why: prev.why ?? 'no_chars_after' };
+  const lo = MIN_REDUCTION * before;
+  const hi = (1 - rule) * before;
+  if (!(before > 0) || hi <= lo) return { target: rule, source: 'rule', why: 'rule_below_floor' };
+  const growth = before - prev.chars;
+  // Fewer characters than the compaction left (a rewind, another mod's change): the start says nothing.
+  if (growth < 0) return { target: rule, source: 'rule', why: 'shrank', growth };
+  if (growth >= hi) return { target: rule, source: 'rule', why: 'large_growth', growth, room: Math.round(hi) };
+  const room = Math.round(Math.max(growth, lo));
+  return { target: 1 - room / before, source: 'growth', growth, room };
+}
+
 // Rank and fill the budget: highest score first while the upgrade from a trace fits; a result that
 // does not fit whole and scores at least "may be useful" is cut to SHORT_CHARS when that fits; the rest
 // is traced. A result not asked about (secret path, no text, beyond the questions) is traced; a call
@@ -1236,6 +1315,18 @@ async function decide($, e, cfg, record, started) {
   const before = messages.reduce((s, m) => s + messageChars(m), 0);
   record.chars_before = before;
   if (messages.length <= KEEP_LAST + 1) return { fallback: 'too_few_messages' };
+  if (cfg.flex) {
+    // The rest of the decision allocates to the elastic target.
+    const prev = session.lastAfter.get(e.agentId ?? '');
+    const flex = elasticTarget(before, cfg.target, prev);
+    Object.assign(record, {
+      target: Math.round(flex.target * 1000) / 1000, rule_target: cfg.target, target_source: flex.source,
+      ...(flex.why ? { target_why: flex.why } : {}),
+      ...(Number.isFinite(prev?.chars) ? { growth_start_chars: prev.chars, growth_start_source: prev.source } : {}),
+      ...(flex.growth !== undefined ? { growth_chars: flex.growth, room_chars: flex.room } : {}),
+    });
+    cfg = { ...cfg, target: flex.target };
+  }
   // The rows of one API message are rebuilt together (groupsOf); only the last message of an open tool
   // loop keeps its handles, and then the API form has to hold every call of it: without it a call whose
   // result came back quickly starts a group of its own, and that message would be split.
@@ -1392,12 +1483,20 @@ async function compact($, e, next) {
   const started = Date.now();
   // Any compaction of the main loop that actually replaced the messages, this module's or the built-in
   // summary, arms the own threshold's growth gate again (ownThreshold). A skip leaves the context as it
-  // was, so the gate stays as it was too.
-  const armGrowthGate = (out) => {
-    if (e.agentId === undefined && !out?.skip) { session.growthArmed = true; session.growthBase = undefined; }
+  // was, so the gate stays as it was too. With OMC_JEV_COMPACT_FLEX the characters it left start the
+  // growth of the loop's next compaction.
+  const armGrowthGate = (out, source = 'summary') => {
+    if (e.agentId === undefined && !out?.skip) { session.growthArmed = true; session.growthBase = undefined; session.momentRead = undefined; }
+    if (cfg.flex && out && !out.skip) {
+      const key = e.agentId ?? '';
+      session.lastAfter.delete(key);
+      session.lastAfter.set(key, Array.isArray(out.messages) ? { chars: out.messages.reduce((s, m) => s + messageChars(m), 0), source } : { why: 'no_messages' });
+      if (session.lastAfter.size > AFTER_LOOPS_MAX) session.lastAfter.delete([...session.lastAfter.keys()].find((k) => k !== ''));
+    }
     return out;
   };
   session.compacting++;
+  if (e.agentId === undefined) session.compactingMain++;
   try {
     let sessionId;
     try { sessionId = await $.session.id(); } catch { sessionId = undefined; }
@@ -1407,6 +1506,9 @@ async function compact($, e, next) {
       chars_before: 0, target: cfg.target,
       ...(cfg.shared?.unavailable ? { shared_unavailable: true } : {}),
     };
+    // OMC_JEV_COMPACT_AT_PERCENT=jev: the compaction this module asked for ($.session.compact() runs it as
+    // `plugin`) names the moment that chose it.
+    if (e.agentId === undefined && e.trigger === 'plugin' && session.ownRequested) { record.own_request = session.ownRequested; session.ownRequested = undefined; }
     let decision;
     try {
       decision = await decide($, e, cfg, record, started);
@@ -1422,14 +1524,91 @@ async function compact($, e, next) {
     await writeRecord($, cfg, record);
     if (decision.fallback || cfg.mode !== 'active') return armGrowthGate(await next(e));
     if (cfg.toast) { try { $.ui.toast(`Jev compaction: ${decision.before} -> ${decision.after} chars`); } catch { /* optional */ } }
-    return armGrowthGate({ messages: decision.messages });
+    return armGrowthGate({ messages: decision.messages }, 'jev');
   } finally {
     session.compacting--;
+    if (e.agentId === undefined) session.compactingMain--;
   }
+}
+
+// OMC_JEV_COMPACT_AT_PERCENT=jev. Closing calls of the transcript, [{id, idx}] in order: a TaskUpdate to a
+// done status, or a task-list call (TASK_LIST) whose list holds more done items than the call of the same
+// tool before it. `listDone` holds the done items of the newest list call per tool at the last read, so a
+// list call whose predecessor a compaction removed is still compared with it. Returns the closings and
+// the done items of the newest list call per tool now.
+const DONE_STATUS = /^(?:completed|done)$/i;
+function doneItems(input) {
+  const list = Array.isArray(input?.todos) ? input.todos : Array.isArray(input?.items) ? input.items : undefined;
+  return list ? { done: list.filter((t) => t && DONE_STATUS.test(String(t.status ?? ''))).length, all: list.length } : undefined;
+}
+function closingCalls(messages, listDone) {
+  const doneBefore = new Map(listDone);
+  const closing = [];
+  messages.forEach((m, idx) => {
+    if (m.role !== 'assistant') return;
+    for (const u of m.toolUses || []) {
+      if (u.tool === 'TaskUpdate') { if (DONE_STATUS.test(String(u.input?.status ?? ''))) closing.push({ id: u.tool_use_id, idx }); continue; }
+      const n = TASK_LIST.test(u.tool || '') ? doneItems(u.input) : undefined;
+      if (!n) continue;
+      if (n.done > (doneBefore.get(u.tool) ?? 0)) closing.push({ id: u.tool_use_id, idx });
+      doneBefore.set(u.tool, n.done);
+    }
+  });
+  return { closing, listDone: doneBefore };
+}
+// The first row of the last `turns` turns: after the turns-th last message with the user's own words (a
+// notification or a teammate's message does not start a turn).
+function turnsStart(messages, turns) {
+  let seen = 0;
+  for (let i = messages.length - 1; i >= 0; i--) if (userWords(messages[i]) && ++seen === turns) return i + 1;
+  return 0;
+}
+
+const MOMENT_QUESTION = { type: 'noul', instructions: MOMENT_INSTRUCTIONS, criteria: MOMENT_CRITERIA };
+const MOMENT_HELD = { deadline: 'timeout', 'process-cap': 'cap', 'circuit-open': 'breaker_open', cap: 'rpm' };
+
+// Jev's answer to the moment question: {noul} or {reason}, with answer_skipped when the turn's answer was
+// left out. A request of this point like a compaction's: the same admission (OMC_JEV_MAX_REQUESTS, the
+// shared breaker and limit) and the same failure handling (the module's pause, the shared breaker), all
+// within REQUEST_MS. Under OMC_JEV_MAX_REQUESTS it leaves the requests of one whole compaction.
+async function askMoment($, cfg, messages, answer, tokens, window) {
+  if (cfg.maxRequests && cfg.maxRequests - session.requests <= MAX_REQUESTS) return { reason: 'cap' };
+  const deadline = Date.now() + REQUEST_MS;
+  const admission = await admitRequest($, cfg, deadline);
+  if (admission.skip) return { reason: MOMENT_HELD[admission.skip.mode] ?? 'held' };
+  let list;
+  for (const m of messages) {
+    if (m.role !== 'assistant') continue;
+    for (const u of m.toolUses || []) { const n = TASK_LIST.test(u.tool || '') ? doneItems(u.input) : undefined; if (n) list = n; }
+  }
+  // The answer may quote a file read in any earlier turn, so any call of the conversation on a secret or
+  // private path leaves it out.
+  const secret = messages.some((m) => m.role === 'assistant' && (m.toolUses || []).some((u) => touchesSecretPath(u.tool, u.input, cfg.privatePaths)));
+  const skipped = secret ? { answer_skipped: 'secret_path' } : {};
+  const state = boundExcerpts({
+    task: userTask(messages).task,
+    answer: secret ? '' : maskedHeadTail(typeof answer === 'string' ? answer : '', MOMENT_HEAD_CHARS, MOMENT_TAIL_CHARS),
+    context: { tokens, window },
+    ...(list ? { list } : {}),
+  }, cfg.excerptChars);
+  const timeoutMs = deadline - Date.now();
+  if (timeoutMs <= 0) { session.requests--; return { reason: 'timeout', ...skipped }; }
+  const r = await withDeadline($, askJev($, cfg, state, { moment: MOMENT_QUESTION }), timeoutMs);
+  const recording = recordSharedFailure($, cfg, { ...r, short: timeoutMs < 1000 });
+  if (Date.now() < deadline) await withDeadline($, recording, deadline - Date.now());
+  if (!r.value) {
+    const failure = classifyFailure(r);
+    noteFailures([failure], Date.now());
+    return { reason: failure.kind === 'timeout' ? 'timeout' : 'jev_error', ...skipped };
+  }
+  const raw = r.value.moment?.noul;
+  const noul = typeof raw === 'boolean' ? Number(raw) : typeof raw === 'number' && Number.isFinite(raw) ? raw : undefined;
+  return noul === undefined ? { reason: 'no_answer', ...skipped } : { noul, ...skipped };
 }
 
 async function ownThreshold($, e, next) {
   const result = await next(e);
+  let busy;
   try {
     if (e.agentId !== undefined || session.compacting > 0 || session.hostCannot) return result;
     session.turnCount++;
@@ -1439,7 +1618,7 @@ async function ownThreshold($, e, next) {
     // The base of the growth gate is the lowest usage since the compaction: the first reading may still
     // count the request from before it. It is read before the pause check, so a compaction that ran
     // while requests were paused still gets its base. The first reading never asks.
-    if (session.growthArmed && session.cachedConfig.mode === 'active' && session.cachedConfig.atPercent !== undefined) {
+    if (session.growthArmed && session.cachedConfig.mode === 'active' && (session.cachedConfig.atPercent !== undefined || session.cachedConfig.atJev)) {
       const reading = (await $.session.usage())?.context?.tokens;
       if (!Number.isFinite(reading) || reading <= 0) return result;
       const first = session.growthBase === undefined;
@@ -1447,7 +1626,16 @@ async function ownThreshold($, e, next) {
       if (first || session.turnCount - session.lastAttempt < MIN_TURNS_BETWEEN) return result;
     }
     const cfg = session.cachedConfig;
-    if (cfg.mode !== 'active' || cfg.atPercent === undefined || (await blockedReason($, cfg, Date.now()))) return result;
+    // With jev the shared state is read only once the cheap gates below pass.
+    if (cfg.mode !== 'active' || (cfg.atPercent === undefined && !cfg.atJev) || (!cfg.atJev && (await blockedReason($, cfg, Date.now())))) return result;
+    if (cfg.atJev) {
+      // An interrupted turn, a refusal or an API error never chooses the moment: the user is about to type.
+      if (e.isAborted || (e.reason !== undefined && e.reason !== 'answer')) return result;
+      // One moment decision at a time: a turn that ends while the previous one waits for Jev starts none.
+      if (session.momentBusy !== undefined && Date.now() - session.momentBusy < MOMENT_STALE_MS) return result;
+      busy = Date.now();
+      session.momentBusy = busy;
+    }
     const usage = await $.session.usage();
     const tokens = usage?.context?.tokens;
     if (!Number.isFinite(tokens) || tokens <= 0) return result;
@@ -1462,20 +1650,78 @@ async function ownThreshold($, e, next) {
       } catch { session.compactWindow = usage.context.window; }
     }
     const window = session.compactWindow;
-    if (!Number.isFinite(window) || window <= 0 || tokens * 100 < cfg.atPercent * window) return result;
+    // With jev the level is the context at which a compaction to OMC_JEV_COMPACT_TARGET could free
+    // OWN_MIN_GAIN of the window. It counts every token as the conversation's, so it is a lower bound: the
+    // removable results decide below. OMC_JEV_COMPACT_FLEX only raises the target, so it never lowers it.
+    const level = cfg.atJev ? Math.ceil((OWN_MIN_GAIN * window) / (1 - cfg.target)) : undefined;
+    if (!Number.isFinite(window) || window <= 0 || (cfg.atJev ? tokens < level : tokens * 100 < cfg.atPercent * window)) return result;
     // After a compaction the context has to grow by OWN_MIN_GAIN of the window first, counted from the
     // lowest usage since it and at most from the threshold: a compaction that ends above the threshold
     // would else be asked for again as soon as the turn gap allows (right away after /compact or the
-    // host's own compaction), and one that ends just below it after a few thousand tokens.
-    if (session.growthBase !== undefined && tokens - Math.min(session.growthBase, (cfg.atPercent * window) / 100) < OWN_MIN_GAIN * window) return result;
+    // host's own compaction), and one that ends just below it after a few thousand tokens. With jev there
+    // is no threshold to count from, so the growth counts from the lowest usage alone.
+    if (session.growthBase !== undefined && tokens - (cfg.atJev ? session.growthBase : Math.min(session.growthBase, (cfg.atPercent * window) / 100)) < OWN_MIN_GAIN * window) return result;
     session.growthArmed = false;
+    if (cfg.atJev) {
+      // The transcript only when the tokens entered another step of OWN_MIN_GAIN of the window, or
+      // MIN_TURNS_BETWEEN turns after the last read.
+      const step = Math.floor(tokens / (OWN_MIN_GAIN * window));
+      if (session.momentRead && session.momentRead.step === step && session.turnCount - session.momentRead.turn < MIN_TURNS_BETWEEN) return result;
+      if (await blockedReason($, cfg, Date.now())) return result;
+      session.momentRead = { turn: session.turnCount, step };
+    } else {
+      session.lastAttempt = session.turnCount;
+    }
     // The tokens include the fixed prefix (system prompt, tools, instructions): ask only when the
-    // removable tool results are worth it, so the threshold never forces the built-in summary.
-    session.lastAttempt = session.turnCount;
+    // removable tool results are worth it, so the threshold never forces the built-in summary. With jev
+    // the compaction frees them only down to the target it would aim at.
     const messages = await $.session.messages();
     const before = messages.reduce((s, m) => s + messageChars(m), 0);
+    let closed = false;
+    if (cfg.atJev) {
+      // A task closed in the last MIN_TURNS_BETWEEN turns and not counted at an earlier read chooses the
+      // moment; every closing is seen at this read, whatever the gates below decide.
+      const found = closingCalls(messages, session.listDone);
+      const recent = turnsStart(messages, MIN_TURNS_BETWEEN);
+      closed = found.closing.some((c) => c.idx >= recent && !session.momentSeen.has(c.id));
+      session.momentSeen = new Set(found.closing.map((c) => c.id));
+      session.listDone = found.listDone;
+    }
     const removable = removableChars(findCandidates(messages, cfg.privatePaths));
-    if (!before || removable / before < MIN_REDUCTION || removable / CHARS_PER_TOKEN < OWN_MIN_GAIN * window) return result;
+    let freed = removable;
+    if (cfg.atJev) freed = Math.min(removable, (1 - (cfg.flex ? elasticTarget(before, cfg.target, session.lastAfter.get('')).target : cfg.target)) * before);
+    if (!before || removable / before < MIN_REDUCTION || freed / CHARS_PER_TOKEN < OWN_MIN_GAIN * window) return result;
+    let sessionId;
+    const ownRecord = async (fields) => {
+      if (sessionId === undefined) { try { sessionId = (await $.session.id()) ?? null; } catch { sessionId = null; } }
+      await writeRecord($, cfg, { ts: isoNow(), point: POINT, event: 'own_threshold', session_id: sessionId, agent_id: null, ...fields });
+    };
+    let moment;
+    if (cfg.atJev) {
+      // A closed task chooses the moment at once; else Jev, at most once per MIN_TURNS_BETWEEN turns.
+      if (closed) moment = 'task';
+      else {
+        if (session.turnCount - session.lastAsk < MIN_TURNS_BETWEEN) return result;
+        session.lastAsk = session.turnCount;
+        const turn = session.turnCount;
+        const ask = await askMoment($, cfg, messages, e.answer, tokens, window);
+        const extra = { ...(ask.noul !== undefined ? { jev_noul: ask.noul } : {}), ...(ask.answer_skipped ? { answer_skipped: ask.answer_skipped } : {}) };
+        if (!(ask.noul >= MOMENT_YES)) {
+          await ownRecord({ result: 'not_now', reason: ask.reason ?? 'jev_no', ...extra, tokens, window, level });
+          return result;
+        }
+        // Jev's answer took time: a compaction of the main loop meanwhile (the host's, /compact) or a newer
+        // turn makes it stale, and the context is read anew.
+        const fresh = (await withDeadline($, Promise.resolve().then(() => $.session.usage()), HOST_MS)).value?.context?.tokens;
+        if (session.compactingMain > 0 || session.growthArmed || session.turnCount !== turn || !(fresh >= level)) {
+          await ownRecord({ result: 'not_now', reason: 'state_changed', ...extra, tokens: Number.isFinite(fresh) ? fresh : tokens, window, level });
+          return result;
+        }
+        moment = 'jev';
+      }
+      session.lastAttempt = session.turnCount;
+      session.ownRequested = moment;
+    }
     let reason;
     let detailText = '';
     try {
@@ -1486,15 +1732,18 @@ async function ownThreshold($, e, next) {
       reason = /headless|sdk|-p\b/i.test(detailText) ? 'host_cannot_compact' : /turn|in flight|running/i.test(detailText) ? 'host_turn_running' : 'host_error';
       if (reason === 'host_cannot_compact') session.hostCannot = true;
     }
+    session.ownRequested = undefined;
     if (reason) {
-      let sessionId;
-      try { sessionId = await $.session.id(); } catch { sessionId = undefined; }
-      await writeRecord($, cfg, {
-        ts: isoNow(), point: POINT, event: 'own_threshold', session_id: sessionId ?? null, agent_id: null, result: 'rejected',
-        reason, tokens, window, at_percent: cfg.atPercent, detail: clip(oneLine(maskSecrets(detailText)), 200),
+      await ownRecord({
+        result: 'rejected', reason, tokens, window, at_percent: cfg.atPercent, ...(cfg.atJev ? { moment, level } : {}),
+        detail: clip(oneLine(maskSecrets(detailText)), 200),
       });
+    } else if (cfg.atJev) {
+      await ownRecord({ result: 'requested', moment, tokens, window, level });
     }
-  } catch { /* the threshold never breaks a turn */ }
+  } catch { /* the threshold never breaks a turn */ } finally {
+    if (busy !== undefined && session.momentBusy === busy) session.momentBusy = undefined;
+  }
   return result;
 }
 

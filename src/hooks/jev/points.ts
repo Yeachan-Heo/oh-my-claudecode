@@ -212,11 +212,13 @@ const SIMPLIFIER_TRIGGER_QUESTIONS: JevQuestions = {
 
 /**
  * Point "compaction": Score per tool result at a conversation compaction - how
- * much further work will still need it. Resolved by the Claude Code hooks
- * module hooks/jev-compaction.mjs (a mod cannot import this file, so it keeps a
- * copy of the question, locked by src/__tests__/jev-compaction-module.test.mjs),
- * not through recordJudgment. Named-only (NAMED_ONLY_POINTS in config.ts):
- * `all` never enables it.
+ * much further work will still need it - and, with
+ * OMC_JEV_COMPACT_AT_PERCENT=jev, Noul on whether the end of this turn is a good
+ * moment to compact. Resolved by the Claude Code hooks module
+ * hooks/jev-compaction.mjs (a mod cannot import this file, so it keeps a copy of
+ * both questions, locked by src/__tests__/jev-compaction-module.test.mjs), not
+ * through recordJudgment. Named-only (NAMED_ONLY_POINTS in config.ts): `all`
+ * never enables it.
  */
 const COMPACTION_QUESTIONS: JevQuestions = {
   'result-need': {
@@ -229,6 +231,19 @@ const COMPACTION_QUESTIONS: JevQuestions = {
       probably_not_needed: 'Probably not needed: background from which further work needs at most a conclusion already written in the conversation.',
       may_be_useful: 'May be useful: details that further work may come back to.',
       needed: 'Needed: data that further work relies on and that is nowhere else in the conversation (file contents before an edit, numbers for later calculations, findings, an error to fix).',
+    },
+  },
+};
+
+const COMPACTION_MOMENT_QUESTIONS: JevQuestions = {
+  'compaction-moment': {
+    type: 'noul',
+    instructions:
+      "Is the end of this turn a good moment to compact the agent's conversation? A good moment: work on the user's task (state.task) reached the end of a stage, and the answer that ended the turn (state.answer) closes a thread, reports a result or waits for the user's decision. " +
+      'A bad moment: the agent is in the middle of a thread and will soon come back to the details it just read or changed.',
+    criteria: {
+      true: 'Good moment: a stage of the work is closed; the details of the last steps will not be needed right away.',
+      false: 'Bad moment: work on the current thread goes on and will soon come back to fresh details.',
     },
   },
 };
@@ -284,7 +299,7 @@ export const JUDGMENT_POINTS: Readonly<Record<JudgmentPointName, JudgmentPointDe
     questions: SIMPLIFIER_TRIGGER_QUESTIONS,
     blocking: false,
   }),
-  compaction: defineJudgmentPoint({ name: 'compaction', questions: COMPACTION_QUESTIONS, blocking: true }),
+  compaction: defineJudgmentPoint({ name: 'compaction', questions: [COMPACTION_QUESTIONS, COMPACTION_MOMENT_QUESTIONS], blocking: true }),
 };
 
 /** Look up a declared judgment point. */

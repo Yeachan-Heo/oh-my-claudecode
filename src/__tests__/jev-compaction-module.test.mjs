@@ -20,6 +20,7 @@ import { maskSecrets } from '../../scripts/lib/jev-mask.mjs';
 import { parseJevEnv, resolveExcerptChars, serializeQuestions } from '../../scripts/jev-resolve.mjs';
 import { boundExcerpts as tsBoundExcerpts, excerptCharsFor, parseJevConfig } from '../hooks/jev/config.ts';
 import { JUDGMENT_POINTS } from '../hooks/jev/points.ts';
+import * as jevCompaction from '../../hooks/jev-compaction.mjs';
 
 const root = join(fileURLToPath(import.meta.url), '..', '..', '..');
 const STATE = '/home/u/.omc/state/jev';
@@ -767,6 +768,422 @@ describe('jev-compaction module: own threshold (OMC_JEV_COMPACT_AT_PERCENT)', ()
       expect(fake.calls.compact).toBe(asks);
       expect(fake.records()[0]).toMatchObject({ event: 'own_threshold', result: 'rejected', reason });
     }
+  });
+});
+
+describe('jev-compaction module: elastic target (OMC_JEV_COMPACT_FLEX=active)', () => {
+  const flexEnv = { ...ACTIVE_ENV, OMC_JEV_COMPACT_FLEX: 'active' };
+
+  it('frees the growth since the previous compaction, at least MIN_REDUCTION and at most what OMC_JEV_COMPACT_TARGET frees', () => {
+    const { elasticTarget } = jevCompaction;
+    expect(elasticTarget(100000, 0.5, undefined)).toEqual({ target: 0.5, source: 'rule', why: 'first' });
+    expect(elasticTarget(100000, 0.5, { why: 'no_messages' })).toEqual({ target: 0.5, source: 'rule', why: 'no_messages' });
+    // Grew 10000 of 100000: the room is the floor, 30 % of the characters.
+    expect(elasticTarget(100000, 0.5, { chars: 90000 })).toEqual({ target: 0.7, source: 'growth', growth: 10000, room: 30000 });
+    // Grew 40000: that much room.
+    expect(elasticTarget(100000, 0.5, { chars: 60000 })).toEqual({ target: 0.6, source: 'growth', growth: 40000, room: 40000 });
+    // Grew 70000: never more room than the rule frees, and the record says the rule decided.
+    expect(elasticTarget(100000, 0.5, { chars: 30000 })).toEqual({ target: 0.5, source: 'rule', why: 'large_growth', growth: 70000, room: 50000 });
+    // Fewer characters than the compaction left: the start says nothing, the rule stands.
+    expect(elasticTarget(100000, 0.5, { chars: 120000 })).toEqual({ target: 0.5, source: 'rule', why: 'shrank', growth: -20000 });
+    // A rule that keeps more than 70 % leaves nothing to stretch.
+    expect(elasticTarget(100000, 0.8, { chars: 90000 })).toEqual({ target: 0.8, source: 'rule', why: 'rule_below_floor' });
+  });
+
+  it('a second compaction of the loop keeps more when the conversation grew little since the first; without the variable it keeps the rule', async () => {
+    const first = conversation(30, { chars: 3000 });
+    // About as many characters as the first compaction leaves, plus a little growth.
+    const second = conversation(20, { chars: 2800, maybe: [3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13] });
+    const run = async (env) => {
+      const handlers = load();
+      const one = await compactOnce(first, { handlers, env });
+      const two = await compactOnce(second, { handlers, env });
+      return { one: one.records()[0], two: two.records()[0] };
+    };
+    const flex = await run(flexEnv);
+    expect(flex.one).toMatchObject({ result: 'jev', target: 0.5, rule_target: 0.5, target_source: 'rule', target_why: 'first' });
+    const growth = flex.two.chars_before - flex.one.chars_after;
+    const room = Math.round(Math.max(growth, 0.3 * flex.two.chars_before));
+    expect(room).toBeLessThan(0.5 * flex.two.chars_before);
+    expect(flex.two).toMatchObject({
+      result: 'jev', rule_target: 0.5, target_source: 'growth', growth_start_chars: flex.one.chars_after, growth_start_source: 'jev',
+      growth_chars: growth, room_chars: room, target: Math.round((1 - room / flex.two.chars_before) * 1000) / 1000,
+    });
+    expect(flex.two).not.toHaveProperty('target_why');
+    expect(flex.two.chars_after).toBeLessThanOrEqual(flex.two.chars_before - room);
+    const rule = await run(ACTIVE_ENV);
+    expect(rule.two.target).toBe(0.5);
+    for (const field of ['rule_target', 'target_source', 'target_why', 'growth_start_chars', 'growth_start_source', 'growth_chars', 'room_chars']) expect(rule.two).not.toHaveProperty(field);
+    expect(rule.two.chars_after).toBeLessThanOrEqual(Math.floor(rule.two.chars_before * 0.5));
+    expect(flex.two.chars_after).toBeGreaterThan(rule.two.chars_after);
+    // The results the rule only cut to 300 characters stay whole.
+    expect(flex.two.kept_full).toBeGreaterThan(rule.two.kept_full);
+  });
+
+  it('the built-in summary starts the growth too; a subagent and the main loop count apart; a skip changes nothing; a result without messages is no start', async () => {
+    const handlers = load();
+    // A short conversation falls back: the summary's conversation (7 characters) starts the main loop's growth.
+    await compactOnce(conversation(2), { handlers, env: flexEnv });
+    // A subagent's first compaction keeps the rule, whatever the main loop did.
+    const sub = await compactOnce(conversation(30), { handlers, env: flexEnv }, { agentId: 'sub-1' });
+    expect(sub.records()[0]).toMatchObject({ agent_id: 'sub-1', target_source: 'rule', target_why: 'first' });
+    // Another mod vetoes a summary of the main loop: the start stays the summary's.
+    const fake = fakeDollar({ env: flexEnv });
+    const skip = { skip: 'vetoed by another mod' };
+    await handlers['session.compact'](fake.$, Object.freeze({ trigger: 'auto', messages: conversation(2) }), async () => skip);
+    const main = await compactOnce(conversation(30), { handlers, env: flexEnv });
+    expect(main.records()[0]).toMatchObject({ agent_id: null, target_source: 'rule', target_why: 'large_growth', growth_start_chars: 7, growth_start_source: 'summary', target: 0.5 });
+    // A compaction result without messages leaves the start unknown.
+    await handlers['session.compact'](fake.$, Object.freeze({ trigger: 'auto', messages: conversation(2) }), async () => ({}));
+    const after = await compactOnce(conversation(30), { handlers, env: flexEnv });
+    expect(after.records()[0]).toMatchObject({ target_source: 'rule', target_why: 'no_messages', target: 0.5 });
+    expect(after.records()[0]).not.toHaveProperty('growth_start_chars');
+  });
+
+  it('only the exact value `active` turns it on', async () => {
+    for (const value of ['on', '1', 'true', 'ACTIVE']) {
+      const handlers = load();
+      await compactOnce(conversation(30), { handlers, env: { ...ACTIVE_ENV, OMC_JEV_COMPACT_FLEX: value } });
+      const { records } = await compactOnce(conversation(30, { chars: 1500 }), { handlers, env: { ...ACTIVE_ENV, OMC_JEV_COMPACT_FLEX: value } });
+      expect(records()[0].target).toBe(0.5);
+      expect(records()[0]).not.toHaveProperty('target_source');
+    }
+  });
+});
+
+describe('jev-compaction module: moment chosen by Jev (OMC_JEV_COMPACT_AT_PERCENT=jev)', () => {
+  const env = { ...ACTIVE_ENV, OMC_JEV_COMPACT_AT_PERCENT: 'jev' };
+  const answer = 'Done. The token sk-ant-api03-abcdefghijklmnopqrstuvwxyz0123 is set. ' + 'z'.repeat(600) + ' FINAL-LINE';
+  const turn = (handlers, fake, e = {}) => handlers['turn.complete'](fake.$, { isAborted: false, reason: 'answer', answer, ...e }, async () => 'ok');
+  // Window 200000, OMC_JEV_COMPACT_TARGET 0.5: the level is 10 % of the window over half the context, 40000.
+  const usageAt = (get) => () => ({ context: { tokens: get(), window: 200000 } });
+  const momentRespond = (noul) => (body) => (body.questions.moment ? okResponse({ answers: { moment: { type: 'noul', noul, confidence: 0.9 } } }) : okResponse(scoreByMarker(body)));
+  const momentCalls = (calls) => calls.fetch.filter((c) => c.body.questions.moment);
+  const own = (fake) => fake.records().filter((r) => r.event === 'own_threshold');
+  const frozen = (rows) => rows.map((x, k) => Object.freeze({ ...x, handle: `h${k}` }));
+  const todo = (id, done, all = 3) => ({ tool_use_id: id, tool: 'TodoWrite', input: { todos: Array.from({ length: all }, (_, k) => ({ content: `item ${k}`, status: k < done ? 'completed' : 'pending' })) } });
+  /** Assistant `calls` and their results, then `later` more user turns of one question and one answer. */
+  function tail(calls, later = 0) {
+    const rows = [
+      { role: 'assistant', text: 'Updating the list.', toolUses: calls },
+      { role: 'user', text: '', toolUses: [], toolResults: calls.map((u) => ({ tool_use_id: u.tool_use_id, text: 'ok', isError: false })) },
+      { role: 'assistant', text: 'Done with that.', toolUses: [] },
+    ];
+    for (let k = 1; k <= later; k++) rows.push({ role: 'user', text: `Next question ${k}?`, toolUses: [] }, { role: 'assistant', text: `Answer ${k}.`, toolUses: [] });
+    return rows;
+  }
+  /** The usual conversation (40 results of 6000 characters) whose last turn, or a turn `later` turns back, holds `calls`. */
+  const withCalls = (calls, later = 0, base = conversation(40, { chars: 6000 })) => frozen([...base.slice(0, -1), ...tail(calls, later)]);
+  const withClosedTask = () => withCalls([todo('todo-1', 1, 2)]);
+
+  it('a task closed in this turn asks the host at once, without Jev; the record and the compaction name the moment', async () => {
+    let tokens = 30000;
+    const handlers = load();
+    const messages = withClosedTask();
+    const fake = fakeDollar({ env, messages, usage: usageAt(() => tokens) });
+    // The host runs the compaction it is asked for, as a plugin's.
+    fake.$.session.compact = async () => { fake.calls.compact++; return handlers['session.compact'](fake.$, Object.freeze({ trigger: 'plugin', messages }), summaryNext()); };
+    await turn(handlers, fake);
+    expect(fake.calls.messages).toBe(0);
+    expect(fake.calls.compact).toBe(0);
+    tokens = 130000;
+    await turn(handlers, fake);
+    expect(fake.calls.compact).toBe(1);
+    expect(momentCalls(fake.calls)).toHaveLength(0);
+    expect(own(fake)).toEqual([expect.objectContaining({ result: 'requested', moment: 'task', tokens: 130000, window: 200000, level: 40000, session_id: 'sess-1', agent_id: null })]);
+    expect(fake.records().find((r) => r.event === 'compact')).toMatchObject({ result: 'jev', own_request: 'task' });
+  });
+
+  it('closings: a TaskUpdate to completed, a list with more done items than the list before it; not another status, nor a list with as many done', async () => {
+    const cases = [
+      [[{ tool_use_id: 'u1', tool: 'TaskUpdate', input: { taskId: '1', status: 'completed' } }], 1],
+      [[{ tool_use_id: 'u1', tool: 'TaskUpdate', input: { taskId: '1', status: 'in_progress' } }], 0],
+      [[{ tool_use_id: 'p1', tool: 'mcp__desktop__update_plan', input: { items: [{ step: 'a', status: 'completed' }] } }], 1],
+      [[{ tool_use_id: 'p1', tool: 'update_plan', input: { advance: true } }], 0],
+      [[todo('w1', 0)], 0],
+    ];
+    for (const [calls, asks] of cases) {
+      const fake = fakeDollar({ env, messages: withCalls(calls), usage: usageAt(() => 130000), respond: momentRespond(0.1) });
+      await turn(load(), fake);
+      expect(fake.calls.compact, JSON.stringify(calls)).toBe(asks);
+      expect(momentCalls(fake.calls), JSON.stringify(calls)).toHaveLength(1 - asks);
+    }
+    // The list before stands in a turn outside the window: as many done items close nothing, one more closes a task.
+    for (const [done, asks] of [[2, 0], [3, 1]]) {
+      const fake = fakeDollar({ env, messages: frozen([...withCalls([todo('w1', 2)], 6), ...tail([todo('w2', done)])]), usage: usageAt(() => 130000), respond: momentRespond(0.1) });
+      await turn(load(), fake);
+      expect(fake.calls.compact, `${done} done`).toBe(asks);
+      expect(momentCalls(fake.calls), `${done} done`).toHaveLength(1 - asks);
+    }
+  });
+
+  it('a task closed 5 turns or more before this one is no moment; one closed in the last turns is', async () => {
+    for (const [later, asks] of [[5, 0], [2, 1]]) {
+      const fake = fakeDollar({ env, messages: withCalls([todo('w1', 1, 2)], later), usage: usageAt(() => 130000), respond: momentRespond(0.1) });
+      await turn(load(), fake);
+      expect(fake.calls.compact, `${later} turns later`).toBe(asks);
+      expect(momentCalls(fake.calls), `${later} turns later`).toHaveLength(1 - asks);
+    }
+  });
+
+  it('a closing counts once: one read while the removable results were small still sees it; a list kept alone by a compaction is compared with the list before it', async () => {
+    let current = withCalls([todo('w1', 1, 2)], 0, conversation(40, { chars: 5 }));
+    const handlers = load();
+    const fake = fakeDollar({ env, usage: usageAt(() => 130000), respond: momentRespond(0.1) });
+    fake.$.session.messages = async () => { fake.calls.messages++; return current; };
+    // The removable results are too small to ask: the closing is seen all the same.
+    await turn(handlers, fake);
+    expect(fake.calls.messages).toBe(1);
+    expect(fake.calls.compact).toBe(0);
+    // Five turns later, the same closing with large results: no task moment, Jev decides.
+    current = withCalls([todo('w1', 1, 2)], 0);
+    for (let k = 0; k < 5; k++) await turn(handlers, fake);
+    expect(fake.calls.compact).toBe(0);
+    expect(momentCalls(fake.calls)).toHaveLength(1);
+    // A compaction traced w1; w2 with as many done items is all that is left of the list: no closing.
+    current = withCalls([todo('w2', 1, 2)], 0);
+    for (let k = 0; k < 5; k++) await turn(handlers, fake);
+    expect(fake.calls.compact).toBe(0);
+    expect(momentCalls(fake.calls)).toHaveLength(2);
+    // w3 with one more done item is a closing.
+    current = withCalls([todo('w3', 2, 2)], 0);
+    for (let k = 0; k < 5; k++) await turn(handlers, fake);
+    expect(fake.calls.compact).toBe(1);
+    expect(own(fake).at(-1)).toMatchObject({ result: 'requested', moment: 'task' });
+  });
+
+  it('else asks Jev at most once per 5 turns; a no is logged, a yes of at least 0.7 asks the host', async () => {
+    let noul = 0.3;
+    const handlers = load();
+    const fake = fakeDollar({ env, messages: conversation(40, { chars: 6000 }), usage: usageAt(() => 130000), respond: (body) => momentRespond(noul)(body) });
+    for (let k = 0; k < 5; k++) await turn(handlers, fake);
+    expect(momentCalls(fake.calls)).toHaveLength(1);
+    expect(fake.calls.compact).toBe(0);
+    expect(own(fake)).toEqual([expect.objectContaining({ result: 'not_now', reason: 'jev_no', jev_noul: 0.3, level: 40000 })]);
+    noul = 0.69;
+    await turn(handlers, fake);
+    expect(momentCalls(fake.calls)).toHaveLength(2);
+    expect(fake.calls.compact).toBe(0);
+    noul = 0.9;
+    for (let k = 0; k < 5; k++) await turn(handlers, fake);
+    expect(momentCalls(fake.calls)).toHaveLength(3);
+    expect(fake.calls.compact).toBe(1);
+    expect(own(fake).at(-1)).toMatchObject({ result: 'requested', moment: 'jev', level: 40000 });
+  });
+
+  it('sends the user\'s words, 300 masked characters of the answer, the list counts and the context; never a tool result; the question is the registry\'s', async () => {
+    const messages = frozen([...withCalls([todo('w1', 0, 2)]), { role: 'user', text: 'And the totals?', toolUses: [] }, { role: 'assistant', text: 'Totals sent.', toolUses: [] }]);
+    const fake = fakeDollar({ env, messages, usage: usageAt(() => 130000), respond: momentRespond(0.2) });
+    await turn(load(), fake);
+    const [call] = momentCalls(fake.calls);
+    expect(call.body.model).toBe('jev-latest');
+    const { state, questions } = call.body;
+    expect(state.task).toEqual(['Task: review the notes and count the lines.', 'Good, now sum up the NEEDED results.', 'And the totals?']);
+    expect(state.answer.startsWith('Done. The token ')).toBe(true);
+    expect(state.answer.endsWith(' FINAL-LINE')).toBe(true);
+    expect(state.answer).toMatch(/\[\.\.\. \d+ chars omitted \.\.\.\]/);
+    expect(state.answer.replace(/\n\[\.\.\. \d+ chars omitted \.\.\.\]\n/, '')).toHaveLength(300);
+    expect(state.list).toEqual({ done: 0, all: 2 });
+    expect(state.context).toEqual({ tokens: 130000, window: 200000 });
+    expect(Object.keys(state).sort()).toEqual(['answer', 'context', 'list', 'task']);
+    expect(JSON.stringify(call.body)).not.toContain('sk-ant-api03-abcdefghijklmnopqrstuvwxyz0123');
+    expect(JSON.stringify(call.body)).not.toContain('RESULT-');
+    const [declared] = Object.values(JUDGMENT_POINTS.compaction.questions[1]);
+    expect(questions).toEqual({ moment: { type: 'noul', instructions: declared.instructions, criteria: declared.criteria } });
+  });
+
+  it('a call on a secret path anywhere in the conversation leaves the answer out; an answer that is no string is sent empty; no answer is "not now"', async () => {
+    const messages = conversation(40, { chars: 6000, tool: (i) => (i === 2 ? 'Read' : 'Bash'), input: (i) => (i === 2 ? { file_path: '/home/u/.ssh/id_ed25519' } : { command: `cat notes-${i}.txt` }) });
+    const secret = fakeDollar({ env, messages, usage: usageAt(() => 130000), respond: momentRespond(0.2) });
+    await turn(load(), secret);
+    expect(momentCalls(secret.calls)[0].body.state.answer).toBe('');
+    expect(own(secret)[0]).toMatchObject({ result: 'not_now', reason: 'jev_no', answer_skipped: 'secret_path' });
+    const empty = fakeDollar({ env, messages: conversation(40, { chars: 6000 }), usage: usageAt(() => 130000), respond: (body) => okResponse(body.questions.moment ? { answers: {} } : scoreByMarker(body)) });
+    await turn(load(), empty, { answer: undefined });
+    expect(momentCalls(empty.calls)[0].body.state.answer).toBe('');
+    expect(own(empty)[0]).toMatchObject({ result: 'not_now', reason: 'no_answer' });
+    expect(own(empty)[0]).not.toHaveProperty('answer_skipped');
+  });
+
+  it('an interrupted, refused or failed turn never chooses the moment; shadow mode leaves it off and a percent keeps the percent rules', async () => {
+    for (const e of [{ isAborted: true, reason: 'aborted' }, { reason: 'refusal' }, { reason: 'error' }]) {
+      const fake = fakeDollar({ env, messages: withClosedTask(), usage: usageAt(() => 130000) });
+      await turn(load(), fake, e);
+      expect(fake.calls.compact).toBe(0);
+      expect(fake.calls.messages).toBe(0);
+    }
+    const shadow = fakeDollar({ env: { ...env, OMC_JEV: 'compaction' }, messages: withClosedTask(), usage: usageAt(() => 130000) });
+    await turn(load(), shadow);
+    expect(shadow.calls.usage).toBe(0);
+    // 60 %: above 120000 the percent asks, on an aborted turn too, with no moment question and no record.
+    const percent = fakeDollar({ env: { ...env, OMC_JEV_COMPACT_AT_PERCENT: '60' }, messages: conversation(40, { chars: 6000 }), usage: usageAt(() => 130000), respond: momentRespond(0.1) });
+    await turn(load(), percent, { isAborted: true, reason: 'aborted' });
+    expect(percent.calls.compact).toBe(1);
+    expect(momentCalls(percent.calls)).toHaveLength(0);
+    expect(own(percent)).toEqual([]);
+  });
+
+  it('reads the transcript only when the tokens enter another step of 10 % of the window, or 5 turns after the last read', async () => {
+    let tokens = 130000;
+    const handlers = load();
+    const fake = fakeDollar({ env, messages: conversation(40, { chars: 6000 }), usage: usageAt(() => tokens), respond: momentRespond(0.1) });
+    for (let k = 0; k < 4; k++) await turn(handlers, fake);
+    expect(fake.calls.messages).toBe(1);
+    tokens = 141000;
+    await turn(handlers, fake);
+    expect(fake.calls.messages).toBe(2);
+    // A new step reads the transcript; Jev waits for its own 5-turn gap.
+    expect(momentCalls(fake.calls)).toHaveLength(1);
+    await turn(handlers, fake);
+    expect(fake.calls.messages).toBe(2);
+  });
+
+  it('reads the shared breaker only past the cheap gates: a stalled breaker file does not slow the turns below the level', async () => {
+    const fake = fakeDollar({ env: { ...env, OMC_JEV_BREAKER: '1' }, messages: conversation(40, { chars: 6000 }), usage: usageAt(() => 30000), stallBreakerRead: true });
+    const handlers = load();
+    const started = Date.now();
+    for (let k = 0; k < 3; k++) await turn(handlers, fake);
+    expect(Date.now() - started).toBeLessThan(1500);
+    expect(fake.calls.messages).toBe(0);
+  });
+
+  it('after a compaction waits for 10 % of the window of growth from the lowest usage since it, with no threshold to cap it', async () => {
+    let tokens = 100000;
+    const handlers = load();
+    const fake = fakeDollar({ env, messages: withClosedTask(), usage: usageAt(() => tokens) });
+    await handlers['session.compact'](fake.$, Object.freeze({ trigger: 'auto', messages: conversation(2) }), summaryNext());
+    await turn(handlers, fake);
+    tokens = 119000;
+    for (let k = 0; k < 6; k++) await turn(handlers, fake);
+    expect(fake.calls.compact).toBe(0);
+    tokens = 121000;
+    await turn(handlers, fake);
+    expect(fake.calls.compact).toBe(1);
+  });
+
+  it('a main-loop compaction or a context gone below the level while Jev answers turns the yes into "not now"; a subagent\'s compaction does not', async () => {
+    for (const change of ['compaction', 'tokens', 'subagent']) {
+      let tokens = 130000;
+      const handlers = load();
+      let fake;
+      const respond = async (body) => {
+        if (!body.questions.moment) return okResponse(scoreByMarker(body));
+        // While Jev answers, the host compacts on its own, the context shrinks below the level, or a subagent compacts.
+        if (change === 'compaction') await handlers['session.compact'](fake.$, Object.freeze({ trigger: 'auto', messages: conversation(2) }), summaryNext());
+        else if (change === 'subagent') await handlers['session.compact'](fake.$, Object.freeze({ trigger: 'auto', messages: conversation(2), agentId: 'sub-1' }), summaryNext());
+        else tokens = 30000;
+        return okResponse({ answers: { moment: { type: 'noul', noul: 0.95 } } });
+      };
+      fake = fakeDollar({ env, messages: conversation(40, { chars: 6000 }), usage: usageAt(() => tokens), respond });
+      await turn(handlers, fake);
+      if (change === 'subagent') {
+        expect(fake.calls.compact).toBe(1);
+        expect(own(fake)).toEqual([expect.objectContaining({ result: 'requested', moment: 'jev' })]);
+      } else {
+        expect(fake.calls.compact, change).toBe(0);
+        expect(own(fake), change).toEqual([expect.objectContaining({ result: 'not_now', reason: 'state_changed', jev_noul: 0.95, tokens })]);
+      }
+    }
+  });
+
+  it('one decision at a time: a turn that ends while Jev answers reads nothing and makes the answer stale; a decision older than 5 minutes holds nothing back', async () => {
+    let release;
+    const gate = new Promise((resolve) => { release = resolve; });
+    const handlers = load();
+    const respond = async (body) => {
+      if (!body.questions.moment) return okResponse(scoreByMarker(body));
+      await gate;
+      return okResponse({ answers: { moment: { type: 'noul', noul: 0.9 } } });
+    };
+    const fake = fakeDollar({ env, messages: conversation(40, { chars: 6000 }), usage: usageAt(() => 130000), respond });
+    const first = turn(handlers, fake);
+    for (let k = 0; k < 200 && momentCalls(fake.calls).length < 1; k++) await new Promise((resolve) => setTimeout(resolve, 5));
+    expect(momentCalls(fake.calls)).toHaveLength(1);
+    const reads = fake.calls.usage;
+    await turn(handlers, fake);
+    expect(fake.calls.usage).toBe(reads);
+    const realNow = Date.now;
+    Date.now = () => realNow() + 301_000;
+    try {
+      await turn(handlers, fake);
+    } finally {
+      Date.now = realNow;
+    }
+    expect(fake.calls.usage).toBeGreaterThan(reads);
+    release();
+    await first;
+    expect(fake.calls.compact).toBe(0);
+    expect(own(fake)).toEqual([expect.objectContaining({ result: 'not_now', reason: 'state_changed', jev_noul: 0.9 })]);
+  });
+
+  it('own_request goes only to the plugin compaction it asked for; a refusal by the host clears it', async () => {
+    const messages = withClosedTask();
+    // The host refuses: the record names the moment, and a later plugin compaction does not carry it.
+    let handlers = load();
+    let fake = fakeDollar({ env, messages, usage: usageAt(() => 130000), compactResult: new Error('cannot compact while a turn is running') });
+    await turn(handlers, fake);
+    expect(own(fake)).toEqual([expect.objectContaining({ result: 'rejected', reason: 'host_turn_running', moment: 'task', level: 40000 })]);
+    await handlers['session.compact'](fake.$, Object.freeze({ trigger: 'plugin', messages }), summaryNext());
+    expect(fake.records().find((r) => r.event === 'compact')).not.toHaveProperty('own_request');
+    // A compaction of another trigger (here a subagent's, then the user's /compact) while the request runs takes nothing.
+    handlers = load();
+    fake = fakeDollar({ env, messages, usage: usageAt(() => 130000) });
+    fake.$.session.compact = async () => {
+      fake.calls.compact++;
+      await handlers['session.compact'](fake.$, Object.freeze({ trigger: 'plugin', messages, agentId: 'sub-1' }), summaryNext());
+      return handlers['session.compact'](fake.$, Object.freeze({ trigger: 'manual', messages }), summaryNext());
+    };
+    await turn(handlers, fake);
+    const compacts = fake.records().filter((r) => r.event === 'compact');
+    expect(compacts).toHaveLength(2);
+    for (const r of compacts) expect(r).not.toHaveProperty('own_request');
+  });
+
+  it('under OMC_JEV_MAX_REQUESTS the question leaves the requests of one whole compaction', async () => {
+    const six = fakeDollar({ env: { ...env, OMC_JEV_MAX_REQUESTS: '6' }, messages: conversation(40, { chars: 6000 }), usage: usageAt(() => 130000), respond: momentRespond(0.1) });
+    await turn(load(), six);
+    expect(momentCalls(six.calls)).toHaveLength(0);
+    expect(own(six)).toEqual([expect.objectContaining({ result: 'not_now', reason: 'cap' })]);
+    const handlers = load();
+    const seven = fakeDollar({ env: { ...env, OMC_JEV_MAX_REQUESTS: '7' }, messages: conversation(40, { chars: 6000 }), usage: usageAt(() => 130000), respond: momentRespond(0.1) });
+    for (let k = 0; k < 6; k++) await turn(handlers, seven);
+    expect(momentCalls(seven.calls)).toHaveLength(1);
+    expect(own(seven).map((r) => r.reason)).toEqual(['jev_no', 'cap']);
+  });
+
+  it('a failed moment question is "not now" and pauses requests like a failed compaction request', async () => {
+    const handlers = load();
+    const fake = fakeDollar({ env, messages: conversation(40, { chars: 6000 }), usage: usageAt(() => 130000), respond: () => ({ ok: false, status: 503, headers: {}, text: '' }) });
+    await turn(handlers, fake);
+    expect(own(fake)).toEqual([expect.objectContaining({ result: 'not_now', reason: 'jev_error' })]);
+    const after = await compactOnce(conversation(30), { handlers });
+    expect(after.records()[0]).toMatchObject({ result: 'fallback', reason: 'paused' });
+    expect(after.calls.fetch).toHaveLength(0);
+  });
+
+  it('with OMC_JEV_COMPACT_FLEX the removable results must be worth 10 % of the window at the target the compaction would aim at', async () => {
+    // A summary that kept the whole conversation: no growth since, so the elastic target keeps 70 % and
+    // frees 30 % of about 242000 characters, under 20000 tokens; the rule's 50 % frees over 30000.
+    const messages = conversation(40, { chars: 6000 });
+    const run = async (flexValue) => {
+      let tokens = 100000;
+      const handlers = load();
+      const fake = fakeDollar({ env: { ...env, OMC_JEV_COMPACT_FLEX: flexValue }, messages, usage: usageAt(() => tokens), respond: momentRespond(0.1) });
+      await handlers['session.compact'](fake.$, Object.freeze({ trigger: 'auto', messages: conversation(2) }), async () => ({ messages }));
+      await turn(handlers, fake);
+      tokens = 130000;
+      await turn(handlers, fake);
+      return momentCalls(fake.calls).length;
+    };
+    expect(await run('off')).toBe(1);
+    expect(await run('active')).toBe(0);
+  });
+
+  it('the moment question is the registry\'s compaction-moment question', () => {
+    const question = JUDGMENT_POINTS.compaction.questions[1]['compaction-moment'];
+    expect(question.type).toBe('noul');
+    expect(jevCompaction.MOMENT_INSTRUCTIONS).toBe(question.instructions);
+    expect(jevCompaction.MOMENT_CRITERIA).toEqual(question.criteria);
   });
 });
 

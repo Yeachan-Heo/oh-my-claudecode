@@ -68,7 +68,8 @@ export const ACTIVATED_POINTS: ReadonlySet<string> = new Set<string>();
 /**
  * Points that `all` and `all:active` never enable: they send more than the
  * bounded excerpts of the other points (`compaction` sends tool results and
- * user messages from the conversation), so each needs its own entry in
+ * user messages from the conversation, and with OMC_JEV_COMPACT_AT_PERCENT=jev
+ * the start and end of the assistant's answer), so each needs its own entry in
  * OMC_JEV. Mirror of NAMED_ONLY_POINTS in scripts/jev-resolve.mjs.
  */
 export const NAMED_ONLY_POINTS: ReadonlySet<string> = new Set<string>(['compaction']);
@@ -169,8 +170,9 @@ export function parseJevConfig(env: NodeJS.ProcessEnv = process.env): JevConfig 
  * already bounds to 2000 characters, and a 200-character cut keeps only its
  * opening. Here the state carries the continuation message only.
  * compaction judges tool results by their start and end and the user's last
- * messages (hooks/jev-compaction.mjs bounds them itself, at most 4000
- * characters). task-size, skill-trigger and intent judge the user's prompt and
+ * messages, and with OMC_JEV_COMPACT_AT_PERCENT=jev the moment by 300
+ * characters of the assistant's answer (hooks/jev-compaction.mjs bounds them
+ * itself, at most 4000 characters). task-size, skill-trigger and intent judge the user's prompt and
  * learner-extraction the assistant message; a 200-character cut keeps only
  * the opening of either. learner-extraction uses the same 2000 characters as
  * loop-continuation. Mirror of POINT_DEFAULT_EXCERPT_CHARS in scripts/jev-resolve.mjs
