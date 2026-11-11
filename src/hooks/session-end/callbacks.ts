@@ -97,7 +97,7 @@ export function interpolatePath(pathTemplate: string, sessionId: string, idempot
   const time = now.toISOString().split('T')[1].split('.')[0].replace(/:/g, '-');
   const safeSessionId = sessionId.replace(/[/\\..]/g, '_');
   const safeIdempotencyKey = (idempotencyKey ?? '').replace(/[^A-Za-z0-9_-]/g, '_');
-  return normalize(pathTemplate.replace(/~/g, homedir()).replace(/\{session_id\}/g, safeSessionId).replace(/\{idempotency_key\}/g, safeIdempotencyKey).replace(/\{date\}/g, date).replace(/\{time\}/g, time));
+  return normalize(pathTemplate.replace(/^~(?=[\\/]|$)/, homedir()).replace(/\{session_id\}/g, safeSessionId).replace(/\{idempotency_key\}/g, safeIdempotencyKey).replace(/\{date\}/g, date).replace(/\{time\}/g, time));
 }
 
 
