@@ -1793,7 +1793,8 @@ async function decide($, e, cfg, record, started) {
   // loop keeps its handles, and then the API form has to hold every call of it: without it a call whose
   // result came back quickly starts a group of its own, and that message would be split.
   const asApi = e.agentId === undefined ? { as: 'api' } : { as: 'api', agentId: e.agentId };
-  let api = apiFormOf((await withDeadline($, Promise.resolve().then(() => $.session.messages(asApi)), HOST_MS)).value);
+  const apiRead = await withDeadline($, Promise.resolve().then(() => $.session.messages(asApi)), HOST_MS);
+  let api = apiFormOf(apiRead.value);
   const group = groupsOf(messages, api);
   const keepFrom = openLoopStart(messages, group);
   if (api && !keptCallsIn(messages, keepFrom, api)) api = undefined;
@@ -1803,7 +1804,9 @@ async function decide($, e, cfg, record, started) {
   // with the envelopes build adds. Their counts go into the record of every later outcome.
   const delivered = queuedOf(messages, api);
   Object.assign(record, { queued_user: delivered ? delivered.user : null, queued_other: delivered ? delivered.other : null });
-  if (!api && keepFrom < messages.length) return { fallback: 'no_api_form' };
+  // A read that timed out or failed leaves the delivered messages unknown, between turns too: a rebuilt
+  // row would drop one that only the API form holds (a host that answers another shape is a different case).
+  if (!api && (keepFrom < messages.length || !('value' in apiRead))) return { fallback: 'no_api_form' };
   const queued = delivered ? delivered.rows : new Map();
   for (const blocks of queued.values()) before += rawChars(blocks);
   record.chars_before = before;
@@ -1829,8 +1832,10 @@ async function decide($, e, cfg, record, started) {
     envelopes += c.text.length - (m.text || '').length - rawChars(c.own);
   }
   const removable = removableChars(candidates);
-  record.max_reduction = before ? Math.round((removable / before) * 1000) / 1000 : 0;
-  if (!before || removable / before < MIN_REDUCTION) return { fallback: 'too_few_results' };
+  // The envelopes build adds stay in every rebuilt row, so they come off what the results can give back.
+  const net = removable - envelopes;
+  record.max_reduction = before ? Math.round((net / before) * 1000) / 1000 : 0;
+  if (!before || net / before < MIN_REDUCTION) return { fallback: 'too_few_results' };
   const blocked = await blockedReason($, cfg, Date.now());
   if (blocked) {
     if (blocked === 'paused') Object.assign(record, { paused_until: new Date(session.pausedUntil).toISOString(), pause_reason: session.pauseReason });
@@ -2054,7 +2059,11 @@ async function ownThreshold($, e, next) {
     const messages = await $.session.messages();
     // Messages delivered during a tool turn are in the API form only; decide counts them, so the
     // preflight does too (else it could ask for a compaction that decide hands back to the summary).
-    const api = apiFormOf((await withDeadline($, Promise.resolve().then(() => $.session.messages({ as: 'api' })), HOST_MS)).value);
+    const apiRead = await withDeadline($, Promise.resolve().then(() => $.session.messages({ as: 'api' })), HOST_MS);
+    // A read that timed out or failed leaves the delivered text unknown: decide could hand a large one
+    // back to the summary, so the preflight does not ask.
+    if (!('value' in apiRead)) return result;
+    const api = apiFormOf(apiRead.value);
     const delivered = queuedOf(messages, api);
     let before = messages.reduce((s, m) => s + messageChars(m), 0);
     if (delivered) for (const blocks of delivered.rows.values()) before += rawChars(blocks);

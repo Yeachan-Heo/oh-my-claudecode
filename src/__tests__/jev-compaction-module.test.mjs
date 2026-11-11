@@ -941,7 +941,7 @@ describe('jev-compaction module: active compaction', () => {
 
   it('thirty thousand hidden deliveries at one result row are collected in linear time', async () => {
     const blocks = Array.from({ length: 30000 }, (_, k) => `The coordinator sent a message while you were working:\nnote ${k}`);
-    const messages = conversation(30, { chars: 80000 });
+    const messages = conversation(30, { chars: 200000 });
     const t0 = performance.now();
     const { records } = await compactWithApi(messages, apiOf(messages, { t10: blocks }));
     expect(performance.now() - t0).toBeLessThan(3000);
@@ -1183,6 +1183,28 @@ describe('jev-compaction module: active compaction', () => {
     // Only the kept blocks come back on top of the built list; the budget is used up to one result.
     expect(record.chars_after).toBeLessThanOrEqual(Math.floor(record.chars_before * 0.5));
     expect(record.chars_after).toBeGreaterThan(Math.floor(record.chars_before * 0.5) - 2500);
+  });
+
+  it('envelopes that outweigh every removable result fall back: the reduction gate counts the net', async () => {
+    const blocks = Array.from({ length: 1000 }, (_, k) => `The coordinator sent a message while you were working:\nn${k}`);
+    const messages = conversation(30, { chars: 2000, needed: [] });
+    const { out, calls, records } = await compactWithApi(messages, apiOf(messages, { t10: blocks }));
+    expect(records()[0]).toMatchObject({ result: 'fallback', reason: 'too_few_results', queued_other: 1000 });
+    expect(records()[0].max_reduction).toBeLessThan(0);
+    expect(calls.fetch).toHaveLength(0);
+    expect(out).toBe(SUMMARY);
+  });
+
+  it('an API form read that fails or times out leaves the deliveries unknown: between turns it falls back too', async () => {
+    const messages = conversation(30);
+    for (const read of [() => Promise.reject(new Error('refused')), () => new Promise(() => {})]) {
+      const fake = fakeDollar({ clockAfter: 20 });
+      fake.$.session.messages = async (opts) => (opts?.as === 'api' ? read() : messages);
+      const out = await load()['session.compact'](fake.$, Object.freeze({ trigger: 'auto', messages }), summaryNext());
+      expect(fake.records()[0]).toMatchObject({ result: 'fallback', reason: 'no_api_form', queued_user: null });
+      expect(fake.calls.fetch).toHaveLength(0);
+      expect(out).toBe(SUMMARY);
+    }
   });
 
   it('a legacy user block stops before a carried envelope after it, even when that envelope quotes the framing note', async () => {
@@ -1486,6 +1508,17 @@ describe('jev-compaction module: own threshold (OMC_JEV_COMPACT_AT_PERCENT)', ()
     fake = make(true);
     await turn(handlers, fake);
     expect(fake.calls.compact).toBe(0);
+  });
+
+  it('does not ask when the API form read fails or times out: the compaction read could then show a delivery that leaves too few results', async () => {
+    const messages = conversation(40, { chars: 4000 });
+    for (const read of [() => Promise.reject(new Error('refused')), () => new Promise(() => {})]) {
+      const handlers = load();
+      const fake = fakeDollar({ env, messages, usage: highUsage, clockAfter: 20 });
+      fake.$.session.messages = async (opts) => (opts?.as === 'api' ? read() : messages);
+      await turn(handlers, fake);
+      expect(fake.calls.compact).toBe(0);
+    }
   });
 
   it('after a compaction of the main loop waits until the context grew by 10 % of the window from the lowest usage since it, from the threshold at most', async () => {
@@ -2362,7 +2395,7 @@ describe('jev-compaction module: what the host sends after the compaction', () =
     const missing = (_opts, _messages, api) => api.map((a) => (a.role === 'assistant' ? { ...a, content: a.content.filter((b) => b.id !== 'ob') } : a));
     const partial = await compactHost([...opening, ...singles(20, 1), ...loop], { api: missing });
     expect(partial.records()[0]).toMatchObject({ result: 'fallback', reason: 'no_api_form' });
-    const sub = await compactHost([...opening, ...singles(20, 1), ...closing], { api: refused, event: { agentId: 'sub-1' } });
+    const sub = await compactHost([...opening, ...singles(20, 1), ...closing], { api: plain, event: { agentId: 'sub-1' } });
     expect(sub.records()[0]).toMatchObject({ result: 'jev', server_blocks: null, agent_id: 'sub-1' });
     expect(sub.asked).toEqual([{ as: 'api', agentId: 'sub-1' }]);
   });
