@@ -415,9 +415,11 @@ export async function resolveRequest(
   // Opt-in shared breaker and request limit: a held-back call is logged and
   // ends like a failed one (the caller uses its twin), without a fetch.
   const guard = await loadJevBreaker(env);
-  const admittedAt = Date.now();
+  let granted; // the minute's count when this request was admitted (limit only)
   if (guard) {
-    const { skip } = guard.breaker.admitRequest(guard.settings, request.point, admittedAt);
+    const admission = guard.breaker.admitRequest(guard.settings, request.point);
+    const { skip } = admission;
+    granted = admission.granted;
     if (skip) {
       const durationMs = Date.now() - startedAt;
       await writeShadowLog(
@@ -530,7 +532,7 @@ export async function resolveRequest(
       confidence,
       durationMs,
       // Under the shared breaker or limit a failed request says why it failed (and the minute's count against the limit).
-      ...(guard && failure ? guard.breaker.failureLogFields(guard.settings, failure, admittedAt) : {}),
+      ...(guard && failure ? guard.breaker.failureLogFields(guard.settings, failure, granted) : {}),
       ...(request.tool_use_id ? { tool_use_id: request.tool_use_id } : {}),
     },
     await logDirFor(env),

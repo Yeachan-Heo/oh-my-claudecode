@@ -349,33 +349,20 @@ export function classifyFailure(failure, now = Date.now()) {
 }
 
 /**
- * Requests the limit granted in the UTC minute of `now`, the count it enforces;
- * undefined without OMC_JEV_MAX_RPM. Fail-open like the rest of the limit.
- */
-export function rpmCount(settings, now = Date.now()) {
-  if (settings?.maxRpm === undefined) return undefined;
-  try {
-    return foldMinute(join(settings.dir, "rpm-" + minuteKey(now))).granted;
-  } catch {
-    return undefined;
-  }
-}
-
-/**
  * Extra shadow-log fields of a failed request (the failure as passed to
- * classifyFailure; `admittedAt` is the time the request was admitted):
+ * classifyFailure; `granted` is the count admitRequest returned for it):
  * - `error` {status, kind, retry_s?}: the HTTP status (null without a
  *   response) and the kind, the same name as the breaker reason ("http-<status>",
  *   "no-response"). `retry_s` is the pause the failure calls for, given only
  *   under OMC_JEV_BREAKER=1 and only for a failure that opens the breaker at
  *   once; a breaker that is already open for longer keeps its later end.
- * - under OMC_JEV_MAX_RPM, `rpm` {count, limit}: the requests this machine
- *   started in the UTC minute the failed one was admitted in (itself
- *   included) against the limit. Not a verdict on who caused a 429: it shows
- *   at what count 429s arrive.
+ * - under OMC_JEV_MAX_RPM, `rpm` {count, limit}: the requests this machine had
+ *   started in the UTC minute when the failed one was admitted (itself
+ *   included, later ones not) against the limit. Not a verdict on who caused
+ *   a 429: it shows at what count 429s arrive.
  * Empty for a failure that is neither an HTTP status nor a missing response.
  */
-export function failureLogFields(settings, failure, admittedAt = Date.now()) {
+export function failureLogFields(settings, failure, granted) {
   try {
     const status = Number.isInteger(failure?.status) ? failure.status : undefined;
     let error;
@@ -387,8 +374,8 @@ export function failureLogFields(settings, failure, admittedAt = Date.now()) {
     } else {
       return {};
     }
-    const count = rpmCount(settings, admittedAt);
-    return { error, ...(count !== undefined ? { rpm: { count, limit: settings.maxRpm } } : {}) };
+    const withCount = settings?.maxRpm !== undefined && Number.isInteger(granted);
+    return { error, ...(withCount ? { rpm: { count: granted, limit: settings.maxRpm } } : {}) };
   } catch {
     return {};
   }
@@ -500,7 +487,9 @@ export function reserveRequest(settings, point, now = Date.now()) {
  * Admission of one request, called right before the HTTP call: the open
  * breaker first, then the limit. Returns {skip} when the request must not go
  * out: {mode: "circuit-open", breaker} or {mode: "cap", priority, count,
- * threshold, limit}; {} otherwise.
+ * threshold, limit}; otherwise {} or, under a limit, {granted}: the requests
+ * granted in this UTC minute up to and including this one, for the log line
+ * of a failure (failureLogFields).
  */
 export function admitRequest(settings, point, now = Date.now()) {
   const open = readBreaker(settings, now);
@@ -509,7 +498,7 @@ export function admitRequest(settings, point, now = Date.now()) {
   if (!slot.ok) {
     return { skip: { mode: "cap", priority: slot.priority, count: slot.count, threshold: slot.threshold, limit: slot.limit } };
   }
-  return {};
+  return slot.count === undefined ? {} : { granted: slot.count };
 }
 
 /** Extra shadow-log fields of a request admitRequest held back. */

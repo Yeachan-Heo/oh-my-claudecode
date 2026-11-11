@@ -265,9 +265,11 @@ export async function resolveJudgment<T>(resolveJudgmentArgs: ResolveJudgmentArg
     return { answer: twinAnswer(), source: 'twin', mode: 'cap' };
   }
 
-  const admittedAt = Date.now();
+  let granted: number | undefined; // the minute's count when this call was admitted (limit only)
   if (shared) {
-    const { skip } = shared.breaker.admitRequest(shared.settings, args.point, admittedAt);
+    const admission = shared.breaker.admitRequest(shared.settings, args.point);
+    const { skip } = admission;
+    granted = admission.granted;
     if (skip) {
       const heuristic = twinAnswer();
       const loggableHeuristic = extractHeuristicForLogging(heuristic, args.questions, args.mapHeuristic, args.questionSet);
@@ -325,7 +327,7 @@ export async function resolveJudgment<T>(resolveJudgmentArgs: ResolveJudgmentArg
 
   // Under the shared breaker or limit a failed call logs why it failed.
   const failureFields = (failure: JevClientError | undefined) =>
-    shared && failure ? shared.breaker.failureLogFields(shared.settings, failure, admittedAt) : {};
+    shared && failure ? shared.breaker.failureLogFields(shared.settings, failure, granted) : {};
 
   // Non-blocking (detector-type) in shadow mode: return the twin now; log when Jev settles.
   if (mode === 'shadow' && args.blocking === false) {

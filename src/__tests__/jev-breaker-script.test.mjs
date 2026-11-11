@@ -30,7 +30,6 @@ import {
   reserveRequest,
   retryAfterFromBody,
   retryAfterSeconds,
-  rpmCount,
   thresholdFor,
 } from '../../scripts/lib/jev-breaker.mjs';
 import { resolveRequest, resolveRequestTimeoutMs } from '../../scripts/jev-resolve.mjs';
@@ -184,26 +183,27 @@ describe('jev-breaker library', () => {
     expect(failureLogFields(plain, { noResponse: true }, now)).toEqual({ error: { status: null, kind: 'no-response' } });
     expect(failureLogFields(plain, {}, now)).toEqual({});
     expect(failureLogFields(plain, undefined, now)).toEqual({});
-    expect(rpmCount(plain, now)).toBeUndefined();
+    expect(failureLogFields(plain, { status: 429 }, 3)).not.toHaveProperty('rpm'); // no limit: no count
 
+    // The count is the one admitRequest returned when the request was admitted, not the minute file as it is when the answer arrives.
     const limited = settingsFor(jevEnv({ OMC_JEV_MAX_RPM: '5' }));
-    expect(rpmCount(limited, now)).toBe(0);
-    reserveRequest(limited, 'model-routing', now);
-    reserveRequest(limited, 'model-routing', now);
-    expect(rpmCount(limited, now)).toBe(2);
-    expect(rpmCount(limited, now + 60_000)).toBe(0);
-    // The limit alone holds nothing back, so no block time is given; `now` is the minute of admission, not the clock of the call (2026-11-09 here).
-    expect(failureLogFields(limited, { status: 429 }, now)).toEqual({
+    expect(admitRequest(plain, 'model-routing', now)).toEqual({});
+    const first = admitRequest(limited, 'model-routing', now);
+    const second = admitRequest(limited, 'model-routing', now);
+    expect(first).toEqual({ granted: 1 });
+    expect(second).toEqual({ granted: 2 });
+    admitRequest(limited, 'model-routing', now); // admitted after the first one: its failure still logs 1
+    // The limit alone holds nothing back, so no block time is given.
+    expect(failureLogFields(limited, { status: 429 }, first.granted)).toEqual({
       error: { status: 429, kind: 'http-429' },
-      rpm: { count: 2, limit: 5 },
+      rpm: { count: 1, limit: 5 },
     });
     const both = settingsFor(jevEnv({ OMC_JEV_BREAKER: '1', OMC_JEV_MAX_RPM: '5' }));
-    expect(failureLogFields(both, { status: 429, retryAfter: '30' }, now)).toEqual({
+    expect(failureLogFields(both, { status: 429, retryAfter: '30' }, second.granted)).toEqual({
       error: { status: 429, kind: 'http-429', retry_s: 30 },
       rpm: { count: 2, limit: 5 },
     });
-    expect(failureLogFields(both, { status: 429 }, now + 60_000)).toMatchObject({ rpm: { count: 0, limit: 5 } });
-    expect(failureLogFields(both, { status: 429 }, Number.NaN)).toEqual({ error: { status: 429, kind: 'http-429', retry_s: 60 } }); // an unreadable count is left out, never thrown
+    expect(failureLogFields(both, { status: 429 }, undefined)).toEqual({ error: { status: 429, kind: 'http-429', retry_s: 60 } }); // admission gave no count (state unusable): left out
   });
 
   it('honors Retry-After in seconds or as an HTTP date, capped at 30 minutes', () => {
