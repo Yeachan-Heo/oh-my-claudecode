@@ -6,14 +6,14 @@
     "base": "05c800f40d1ad53b42a78609d2667ef4f726808b",
     "planningHead": "0a91273e61dbbd47eb0af4c02844409251e08398",
     "head": "c7d0ac87c553f88d898fb7dcbed142a3f1b25c14",
-    "sourceSha256": "360625531f6559930ba45532716be8129195b38837029b62eddc70e6640ffabd",
+    "sourceSha256": "fffdec097ad2b289b19bd35ec227e01d4c3eb8241e67d3c56aa794814ead009f",
     "generatedAt": null,
     "generator": "scripts/generate-inventory-graph.mjs"
   },
   "base": "05c800f40d1ad53b42a78609d2667ef4f726808b",
   "planningHead": "0a91273e61dbbd47eb0af4c02844409251e08398",
   "head": "c7d0ac87c553f88d898fb7dcbed142a3f1b25c14",
-  "sourceSha256": "360625531f6559930ba45532716be8129195b38837029b62eddc70e6640ffabd",
+  "sourceSha256": "fffdec097ad2b289b19bd35ec227e01d4c3eb8241e67d3c56aa794814ead009f",
   "counts": {
     "public": {
       "skills": 84,
@@ -23,13 +23,13 @@
       "total": 133
     },
     "internal": {
-      "hookFiles": 342,
+      "hookFiles": 343,
       "featureFiles": 95,
       "toolFiles": 65,
       "libFiles": 49,
       "templateHooks": 25,
-      "srcFiles": 1474,
-      "total": 1499
+      "srcFiles": 1475,
+      "total": 1500
     },
     "generated": {
       "distFiles": 5639,
@@ -41,7 +41,7 @@
     },
     "skills": 84,
     "commands": 21,
-    "hookFiles": 342,
+    "hookFiles": 343,
     "workflows": 8,
     "agentDefinitions": 18,
     "promptLikeFiles": 63
@@ -298,6 +298,7 @@
       "src/hooks/jev/points.ts",
       "src/hooks/jev/resolver.ts",
       "src/hooks/jev/types.ts",
+      "src/hooks/keyword-detector/__tests__/autopilot-command-parity.test.ts",
       "src/hooks/keyword-detector/__tests__/index.test.ts",
       "src/hooks/keyword-detector/__tests__/jev-shadow.test.ts",
       "src/hooks/keyword-detector/index.ts",
@@ -6740,6 +6741,7 @@
       "src/hooks/jev/points.ts",
       "src/hooks/jev/resolver.ts",
       "src/hooks/jev/types.ts",
+      "src/hooks/keyword-detector/__tests__/autopilot-command-parity.test.ts",
       "src/hooks/keyword-detector/__tests__/index.test.ts",
       "src/hooks/keyword-detector/__tests__/jev-shadow.test.ts",
       "src/hooks/keyword-detector/index.ts",
@@ -44294,6 +44296,11 @@
         "path": "src/hooks/jev/types.ts"
       },
       {
+        "id": "src/hooks/keyword-detector/__tests__/autopilot-command-parity.test.ts",
+        "kind": "hook",
+        "path": "src/hooks/keyword-detector/__tests__/autopilot-command-parity.test.ts"
+      },
+      {
         "id": "src/hooks/keyword-detector/__tests__/index.test.ts",
         "kind": "hook",
         "path": "src/hooks/keyword-detector/__tests__/index.test.ts"
@@ -71106,6 +71113,46 @@
         "kind": "type-imports"
       },
       {
+        "from": "src/hooks/keyword-detector/__tests__/autopilot-command-parity.test.ts",
+        "to": "external:node:child_process",
+        "kind": "imports"
+      },
+      {
+        "from": "src/hooks/keyword-detector/__tests__/autopilot-command-parity.test.ts",
+        "to": "external:node:fs",
+        "kind": "imports"
+      },
+      {
+        "from": "src/hooks/keyword-detector/__tests__/autopilot-command-parity.test.ts",
+        "to": "external:node:os",
+        "kind": "imports"
+      },
+      {
+        "from": "src/hooks/keyword-detector/__tests__/autopilot-command-parity.test.ts",
+        "to": "external:node:path",
+        "kind": "imports"
+      },
+      {
+        "from": "src/hooks/keyword-detector/__tests__/autopilot-command-parity.test.ts",
+        "to": "external:node:url",
+        "kind": "imports"
+      },
+      {
+        "from": "src/hooks/keyword-detector/__tests__/autopilot-command-parity.test.ts",
+        "to": "external:vitest",
+        "kind": "imports"
+      },
+      {
+        "from": "src/hooks/keyword-detector/__tests__/autopilot-command-parity.test.ts",
+        "to": "src/hooks/keyword-detector/index.ts",
+        "kind": "imports"
+      },
+      {
+        "from": "src/hooks/keyword-detector/__tests__/autopilot-command-parity.test.ts",
+        "to": "src/installer/index.ts",
+        "kind": "imports"
+      },
+      {
         "from": "src/hooks/keyword-detector/__tests__/index.test.ts",
         "to": "external:vitest",
         "kind": "imports"
@@ -94372,12 +94419,12 @@
       }
     ],
     "stats": {
-      "nodeCount": 8299,
-      "edgeCount": 9131,
-      "importEdgeCount": 7660,
+      "nodeCount": 8300,
+      "edgeCount": 9139,
+      "importEdgeCount": 7668,
       "registerEdgeCount": 105
     }
   },
-  "inventorySha256": "50bfd45f3d8edef9f44c61f332b2b85b6e4c644a54b7a9189af991ec28a7412d",
-  "manifestSha256": "f89aa7d5b88b4a1ac0d08b0c1dcaf2e19f6158988771d81e71fb2a48a4c86829"
+  "inventorySha256": "aad80b2660bad5afc74ca77b713b2de5f069654961623ee3f46a78b83ae65890",
+  "manifestSha256": "01fcddc3f389a3a24bb4c92bff77825257909d4f33d788d92c417f9ea22b1ee2"
 }
