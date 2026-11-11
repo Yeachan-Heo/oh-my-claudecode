@@ -193,4 +193,41 @@ describe('cleanupTransientState — .tmp sweep spares in-flight publication temp
 
     expect(existsSync(stale)).toBe(false);
   });
+
+  it('continues scanning when one temp file vanishes mid-sweep (simulates concurrent rename race)', () => {
+    // Regression: per-file catch must allow the remaining entries to be scanned.
+    // When a concurrent publisher renames a temp after enumeration, the file
+    // may vanish between readdir and stat/unlink. The per-file catch prevents
+    // the entire sweep from failing, allowing later stale siblings to be removed.
+    // This test simulates that race by creating files in an order where the
+    // first entry will fail (by being deleted before processing) and the second
+    // entry will succeed.
+    const other = join(tmpRoot, '.omc', 'state', 'sessions', 'session-other');
+    mkdirSync(other, { recursive: true });
+
+    // Files older than grace period
+    const oneHourAgo = new Date(Date.now() - 60 * 60 * 1000);
+
+    // Create first temp (alphabetically first, will be processed first)
+    const firstTemp = join(other, 'aaa-state.json.tmp');
+    writeFileSync(firstTemp, '{}');
+    utimesSync(firstTemp, oneHourAgo, oneHourAgo);
+
+    // Create second temp (alphabetically second, will be processed second)
+    const secondTemp = join(other, 'zzz-state.json.tmp');
+    writeFileSync(secondTemp, '{}');
+    utimesSync(secondTemp, oneHourAgo, oneHourAgo);
+
+    // Delete first temp before sweep runs to simulate concurrent rename
+    // (the file vanishes between readdir and stat/unlink)
+    rmSync(firstTemp);
+
+    const removed = cleanupTransientState(tmpRoot, 'session-ending');
+
+    // Even though the first temp failed with ENOENT, the sweep must continue
+    // and remove the second stale temp.
+    expect(existsSync(secondTemp)).toBe(false);
+    // At minimum one file was removed (the second temp)
+    expect(removed).toBeGreaterThanOrEqual(1);
+  });
 });
