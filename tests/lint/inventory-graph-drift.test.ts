@@ -395,4 +395,66 @@ describe('inventory-graph drift enforcement (#3702)', () => {
     expect(outsideWrite.status).not.toBe(0);
     expect(existsSync(outsideOut)).toBe(false);
   });
+
+  it('--write produces minimal baseline without volatile fields', { timeout: 30_000 }, () => {
+    const temp = join(REPO_ROOT, `.tmp-write-check-${process.pid}-${Math.random().toString(16).slice(2)}.json`);
+    const result = spawnSync('node', [GENERATOR, '--write', '--out', temp], {
+      cwd: REPO_ROOT,
+      encoding: 'utf8' as const,
+      maxBuffer: 20 * 1024 * 1024,
+    });
+    try {
+      expect(result.status, `write failed: ${result.stderr}`).toBe(0);
+      const written = JSON.parse(readFileSync(temp, 'utf8'));
+      // Committed baseline should be minimal
+      expect(written.schemaVersion).toBeDefined();
+      expect(written.repository).toBeDefined();
+      expect(written.provenance).toBeDefined();
+      // No volatile fields in committed baseline
+      expect(written.provenance.head).toBeUndefined();
+      expect(written.provenance.generatedAt).toBeUndefined();
+      expect(written.provenance.sourceSha256).toBeUndefined();
+      // No derived data fields
+      expect(written.graph).toBeUndefined();
+      expect(written.counts).toBeUndefined();
+      expect(written.inventorySha256).toBeUndefined();
+    } finally {
+      if (existsSync(temp)) unlinkSync(temp);
+    }
+  });
+
+  it('verify mode rejects legacy head-bearing baselines', { timeout: 30_000 }, () => {
+    const opts = { cwd: REPO_ROOT, encoding: 'utf8' as const, maxBuffer: 20 * 1024 * 1024 };
+    // Test rejection of legacy baseline with top-level head
+    const legacyTopHead = {
+      schemaVersion: 2,
+      repository: 'Yeachan-Heo/oh-my-claudecode',
+      provenance: { base: EXPECTED_BASE, planningHead: EXPECTED_PLANNING_HEAD, generator: 'scripts/generate-inventory-graph.mjs' },
+      head: '0'.repeat(40),
+    };
+    const tempTopHead = join(REPO_ROOT, `.tmp-legacy-top-${process.pid}-${Math.random().toString(16).slice(2)}.json`);
+    try {
+      writeFileSync(tempTopHead, JSON.stringify(legacyTopHead, null, 2));
+      const resultTopHead = spawnSync('node', [GENERATOR, '--verify', '--out', tempTopHead], opts);
+      expect(resultTopHead.status, `should reject legacy top-level head: ${resultTopHead.stdout}`).not.toBe(0);
+    } finally {
+      if (existsSync(tempTopHead)) unlinkSync(tempTopHead);
+    }
+    
+    // Test rejection of legacy baseline with provenance.head
+    const legacyProvHead = {
+      schemaVersion: 2,
+      repository: 'Yeachan-Heo/oh-my-claudecode',
+      provenance: { base: EXPECTED_BASE, planningHead: EXPECTED_PLANNING_HEAD, generator: 'scripts/generate-inventory-graph.mjs', head: '0'.repeat(40) },
+    };
+    const tempProvHead = join(REPO_ROOT, `.tmp-legacy-prov-${process.pid}-${Math.random().toString(16).slice(2)}.json`);
+    try {
+      writeFileSync(tempProvHead, JSON.stringify(legacyProvHead, null, 2));
+      const resultProvHead = spawnSync('node', [GENERATOR, '--verify', '--out', tempProvHead], opts);
+      expect(resultProvHead.status, `should reject provenance.head: ${resultProvHead.stdout}`).not.toBe(0);
+      expect(resultProvHead.stderr).toContain('old format');
+    } finally {
+      if (existsSync(tempProvHead)) unlinkSync(tempProvHead);
+    }
+  });
 });
