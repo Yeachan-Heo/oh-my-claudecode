@@ -539,7 +539,10 @@ function requestLogContext(point) {
 /**
  * Record that this hook acted on an active Jev answer: one line in
  * applied.jsonl next to shadow.jsonl, {ts, point, ...ids, applied}, where
- * `applied` says what the answer changed, typically as {from, to}. Call it
+ * `applied` says what the answer changed, typically as {from, to}. Advisory
+ * actions use {action: {from, to, noul}} for warning/reminder decisions and
+ * the active answer's probability. Routing fields and advisory metadata are
+ * accepted unchanged; this helper does not decide whether behavior changed. Call it
  * only when the answer really changed what the hook does. With
  * OMC_JEV_LOG_CONTEXT=1 the line carries the hook call's ids and the
  * request_id of this process's last request for the point, which is also in

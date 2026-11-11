@@ -8,7 +8,7 @@
  * .mjs so vitest picks it up without tsc typechecking the untyped scripts.
  */
 
-import { execFile } from 'node:child_process';
+import { spawn } from 'node:child_process';
 import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { createServer } from 'node:http';
 import { tmpdir } from 'node:os';
@@ -229,8 +229,9 @@ function baseEnv(home, overrides = {}) {
  * Run setJevHookContext(input) and one active-mode recordJevShadow call in a
  * child process, the way a hook script does. `resolverPreload` is a CommonJS
  * file the resolver child loads first (to make it exit or hang).
+ * `hookPreload` loads before the hook imports, to inject resolver spawn failures.
  */
-function runRecord({ cwd, env, input = HOOK_INPUT, resolverPreload }) {
+function runRecord({ cwd, env, input = HOOK_INPUT, resolverPreload, hookPreload }) {
   const script = `
     import { recordJevShadow, setJevHookContext } from ${JSON.stringify(JEV_SHADOW_URL)};
     await setJevHookContext(${JSON.stringify(input)});
@@ -239,9 +240,24 @@ function runRecord({ cwd, env, input = HOOK_INPUT, resolverPreload }) {
     console.log(JSON.stringify({ result: result ?? null }));
   `;
   return new Promise((resolve, reject) => {
-    execFile(NODE, ['--input-type=module', '-e', script], { cwd, env, encoding: 'utf8', timeout: 30_000 }, (error, stdout) => {
-      if (error) reject(error);
-      else resolve(JSON.parse(stdout.trim().split('\n').pop()).result);
+    const child = spawn(NODE, [...(hookPreload ? ['--require', hookPreload] : []), '--input-type=module', '-e', script], {
+      cwd, env, stdio: ['ignore', 'pipe', 'pipe'], timeout: 30_000,
+    });
+    let stdout = '';
+    let stderr = '';
+    child.stdout.setEncoding('utf8').on('data', (chunk) => { stdout += chunk; });
+    child.stderr.setEncoding('utf8').on('data', (chunk) => { stderr += chunk; });
+    child.once('error', reject);
+    child.once('close', (code, signal) => {
+      if (code !== 0) {
+        reject(new Error(`recordJevShadow child exited with ${signal ?? code}: ${stderr}`));
+        return;
+      }
+      try {
+        resolve(JSON.parse(stdout.trim().split('\n').pop()).result);
+      } catch (error) {
+        reject(error);
+      }
     });
   });
 }
@@ -290,15 +306,40 @@ describe('recordJevShadow with OMC_JEV_LOG_CONTEXT', () => {
     expect(Object.keys(line)).toEqual(DEV_LINE_KEYS);
   }, 60_000);
 
-  it('writes a degraded line when the resolver exits without a result', async () => {
+  it('writes a degraded line and cleans up its temp directory when the resolver cannot be spawned', async () => {
     const dir = freshDir();
-    const exit = preload('exit-3.cjs', 'process.exit(3);\n');
-    const result = await runRecord({ cwd: dir, resolverPreload: exit, env: baseEnv(dir, { OMC_JEV_ENDPOINT: 'http://127.0.0.1:1', OMC_JEV_LOG_DIR: join(dir, 'log'), OMC_JEV_LOG_CONTEXT: '1' }) });
+    const observedPath = join(dir, 'spawn-observed.json');
+    const failSpawn = preload('spawn-error.cjs', `
+      const cp = require('node:child_process');
+      const fs = require('node:fs');
+      const { dirname } = require('node:path');
+      const real = cp.spawnSync;
+      cp.spawnSync = function (file, args, options) {
+        if (Array.isArray(args) && args.some((arg) => String(arg).endsWith('jev-resolve.mjs'))) {
+          const requestFile = args[args.indexOf('--request-file') + 1];
+          const tempDir = dirname(requestFile);
+          fs.writeFileSync(${JSON.stringify(observedPath)}, JSON.stringify({
+            tempDir,
+            directoryExisted: fs.statSync(tempDir).isDirectory(),
+            request: JSON.parse(fs.readFileSync(requestFile, 'utf8')),
+          }));
+          return { error: Object.assign(new Error('spawn EACCES'), { code: 'EACCES' }), status: null, signal: null, stdout: '', stderr: '', pid: 0, output: null };
+        }
+        return real.apply(this, arguments);
+      };
+    `);
+    const result = await runRecord({ cwd: dir, hookPreload: failSpawn, env: baseEnv(dir, { OMC_JEV_ENDPOINT: 'http://127.0.0.1:1', OMC_JEV_LOG_DIR: join(dir, 'log'), OMC_JEV_LOG_CONTEXT: '1' }) });
     expect(result).toBeNull();
+    const observed = JSON.parse(readFileSync(observedPath, 'utf8'));
+    expect(observed.directoryExisted).toBe(true);
+    expect(observed.request).toMatchObject({ point: 'model-routing', state: { task: 'fix it' } });
+    expect(existsSync(observed.tempDir)).toBe(false);
+    expect(readdirSync(dir).filter((name) => name.startsWith('omc-jev-'))).toEqual([]);
     const lines = readLines(join(dir, 'log', 'shadow.jsonl'));
     expect(lines).toHaveLength(1);
-    expect(Object.keys(lines[0])).toEqual(['ts', 'point', 'tool_use_id', 'session_id', 'cwd', 'agent_id', 'agent_type', 'request_id', 'mode', 'reason', 'status', 'durationMs']);
-    expect(lines[0]).toMatchObject({ point: 'model-routing', session_id: 'session-1', request_id: expect.stringMatching(UUID), mode: 'degraded', reason: 'resolver-exit', status: 3 });
+    expect(Object.keys(lines[0])).toEqual(['ts', 'point', 'tool_use_id', 'session_id', 'cwd', 'agent_id', 'agent_type', 'request_id', 'mode', 'reason', 'durationMs']);
+    expect(lines[0]).toMatchObject({ point: 'model-routing', session_id: 'session-1', request_id: expect.stringMatching(UUID), mode: 'degraded', reason: 'resolver-spawn' });
+    expect(lines[0].request_id).toBe(observed.request.context.request_id);
   }, 60_000);
 
   it('rotates shadow.jsonl before its own line with OMC_JEV_LOG_MAX_MB', async () => {

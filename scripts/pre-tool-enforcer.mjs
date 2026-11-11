@@ -173,8 +173,15 @@ function readAgentDefinitionEffort(subagentType, onlyAgentsDir) {
  */
 function resolveBaselineEffort(callEffort, subagentType, directory) {
   if (typeof callEffort === 'string') return callEffort;
-  const agentDefEffort = readAgentDefinitionEffort(subagentType, directory);
+  const agentDefEffort = readAgentDefinitionEffort(subagentType);
   if (agentDefEffort) return agentDefEffort;
+  // Mirror readNativeAgentDefinitionModel: bare names also resolve project/user agents.
+  if (typeof subagentType === 'string' && /^[a-zA-Z0-9_-]+$/.test(subagentType)) {
+    for (const agentsDir of [join(directory || process.cwd(), '.claude', 'agents'), join(getClaudeConfigDir(), 'agents')]) {
+      const effort = readAgentDefinitionEffort(subagentType, agentsDir);
+      if (effort) return effort;
+    }
+  }
   const sessionEffort = process.env.CLAUDE_CODE_EFFORT_LEVEL;
   return sessionEffort || null;
 }
@@ -1083,7 +1090,7 @@ function recordModelRoutingShadow(toolName, toolInput, updatedToolInput, permiss
     // call without one), so it is applied to that value before the inherited ones are resolved:
     // an inherited effort stays as it is and a Jev change from it is recorded.
     const explicitEffort = typeof baseEffort === 'string' && isMaxEffortAlwaysEnabled() ? capEffort(baseEffort, maxEffort()) : baseEffort;
-    const baselineEffort = explicitEffort || resolveBaselineEffort(undefined, originalInput.subagent_type);
+    const baselineEffort = explicitEffort || resolveBaselineEffort(undefined, originalInput.subagent_type, directory);
     noteJevRouting({ model: baselineModel, effort: baselineEffort }, updatedToolInput, answers, originalInput.subagent_type);
   }
 
@@ -1180,7 +1187,15 @@ function generateSlopWarning(data, toolName) {
   if (isSlopWarningApplyEnabled()) {
     // Only an active answer decides; shadow, degraded and missing answers keep the heuristic.
     const noul = jevNoulOf(jevResult, 'slop_advisory');
-    if (noul !== undefined) warned = noul >= resolveSlopWarningThreshold();
+    if (noul !== undefined) {
+      const activeWarning = noul >= resolveSlopWarningThreshold();
+      if (activeWarning !== warned) {
+        recordJevApplied('slop-warning', {
+          action: { from: warned ? 'warn' : 'none', to: activeWarning ? 'warn' : 'none', noul },
+        });
+      }
+      warned = activeWarning;
+    }
   }
   if (!warned) return '';
 

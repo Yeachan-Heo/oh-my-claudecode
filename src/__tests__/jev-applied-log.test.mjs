@@ -381,6 +381,28 @@ describe('hook scripts with OMC_JEV_APPLIED_LOG=1', () => {
     expect(readLog(context, 'applied.jsonl')).toEqual([]);
   }, 60_000);
 
+  it.each(['project', 'user'])('model-routing: %s agent effort overrides the session effort in the applied baseline', async (scope) => {
+    const context = makeContext();
+    const agents = join(scope === 'project' ? context.cwd : context.home, '.claude', 'agents');
+    mkdirSync(agents, { recursive: true });
+    writeFileSync(join(agents, 'review-agent.md'), '---\nname: review-agent\nmodel: sonnet\neffort: high\n---\nReview the change.\n');
+    const env = { CLAUDE_CODE_EFFORT_LEVEL: 'low' };
+    const input = TASK_CALL(context.cwd, { subagent_type: 'review-agent' });
+
+    // Keeping the definition's high effort is not a low-to-high change from the session.
+    stubAnswers = { effort: { type: 'score', score: 2 } };
+    const same = await runHook(context, 'pre-tool-enforcer.mjs', input, 'model-routing', env);
+    expect(same.hookSpecificOutput.updatedInput).toMatchObject({ effort: 'high' });
+    expect(readLog(context, 'applied.jsonl')).toEqual([]);
+
+    stubAnswers = { effort: { type: 'score', score: 0 } };
+    const lower = await runHook(context, 'pre-tool-enforcer.mjs', input, 'model-routing', env);
+    expect(lower.hookSpecificOutput.updatedInput).toMatchObject({ effort: 'low' });
+    expect(readLog(context, 'applied.jsonl')).toEqual([
+      expect.objectContaining({ applied: { subagent_type: 'review-agent', effort: { from: 'high', to: 'low', score: 0 } } }),
+    ]);
+  }, 90_000);
+
   it('model-routing: a call pinned to a concrete model is compared with that model, not its tier', async () => {
     const SONNET_DEFAULT = 'us.anthropic.claude-sonnet-5-v1:0';
     const env = {
@@ -493,6 +515,107 @@ describe('hook scripts with OMC_JEV_APPLIED_LOG=1', () => {
       expect.objectContaining({ point: 'task-size', applied: { size: 'small', confidence: 0.95, suppressed: ['ralph'] } }),
     ]);
   }, 90_000);
+
+  describe('advisory actions', () => {
+    const workaround = 'Add a workaround if the normal architecture is hard.';
+    const benign = 'Write a unit test for the parser.';
+
+    it.each([
+      [workaround, 0.1, 'warn', 'none'],
+      [benign, 0.8, 'none', 'warn'],
+    ])('slop-warning records %s at probability %s', async (prompt, noul, from, to) => {
+      stubAnswers = { slop_advisory: { type: 'noul', noul } };
+      const context = makeContext();
+      const output = await runHook(context, 'pre-tool-enforcer.mjs', TASK_CALL(context.cwd, { prompt }), 'slop-warning', {
+        OMC_JEV_SLOP_WARNING_APPLY: '1',
+        OMC_JEV_SLOP_WARNING_THRESHOLD: '0.8',
+        OMC_JEV_LOG_CONTEXT: '1',
+      });
+      expect(JSON.stringify(output).includes('SLOP WARNING')).toBe(to === 'warn');
+      const [shadow] = readLog(context, 'shadow.jsonl');
+      expect(shadow.request_id).toMatch(UUID);
+      expect(readLog(context, 'applied.jsonl')).toEqual([
+        expect.objectContaining({
+          point: 'slop-warning',
+          session_id: 'session-1',
+          request_id: shadow.request_id,
+          applied: { action: { from, to, noul } },
+        }),
+      ]);
+    }, 60_000);
+
+    it.each([
+      ['unchanged', 0.8, {}, true],
+      ['apply disabled', 0.1, { OMC_JEV_SLOP_WARNING_APPLY: undefined }, true],
+      ['shadow', 0.1, { OMC_JEV: 'slop-warning' }, true],
+      ['log disabled', 0.1, { OMC_JEV_APPLIED_LOG: undefined }, false],
+      ['missing answer', undefined, {}, true],
+    ])('slop-warning writes no row when %s', async (_label, noul, overrides, warned) => {
+      stubAnswers = noul === undefined ? {} : { slop_advisory: { type: 'noul', noul } };
+      const context = makeContext();
+      const output = await runHook(context, 'pre-tool-enforcer.mjs', TASK_CALL(context.cwd, { prompt: workaround }), 'slop-warning', {
+        OMC_JEV_SLOP_WARNING_APPLY: '1',
+        OMC_JEV_SLOP_WARNING_THRESHOLD: '0.8',
+        ...overrides,
+      });
+      expect(JSON.stringify(output).includes('SLOP WARNING')).toBe(warned);
+      expect(readLog(context, 'applied.jsonl')).toEqual([]);
+    }, 60_000);
+
+    function simplifierContext() {
+      const context = makeContext();
+      const git = (...args) => execFileSync('git', ['-c', 'user.name=Test', '-c', 'user.email=test@example.com', ...args], {
+        cwd: context.cwd, stdio: 'pipe',
+      });
+      git('init', '-q');
+      writeFileSync(join(context.home, 'config.json'), JSON.stringify({ codeSimplifier: { enabled: true } }));
+      writeFileSync(join(context.cwd, 'app.ts'), 'export const a = 1;\n');
+      git('add', 'app.ts');
+      git('-c', 'core.hooksPath=/dev/null', 'commit', '--no-gpg-sign', '-q', '-m', 'init');
+      writeFileSync(join(context.cwd, 'app.ts'), 'export const a = 2;\n');
+      return context;
+    }
+
+    it('simplifier-trigger records the skipped reminder and its request id', async () => {
+      stubAnswers = { simplification_worthy: { type: 'noul', noul: 0.49 } };
+      const context = simplifierContext();
+      const output = await runHook(context, 'code-simplifier.mjs', { cwd: context.cwd, session_id: 'session-1' }, 'simplifier-trigger', {
+        OMC_HOME: context.home,
+        OMC_JEV_SIMPLIFIER_APPLY: '1',
+        OMC_JEV_LOG_CONTEXT: '1',
+      });
+      expect(output).toEqual({ continue: true });
+      expect(existsSync(join(context.cwd, '.omc', 'state', 'code-simplifier-triggered.marker'))).toBe(false);
+      const [shadow] = readLog(context, 'shadow.jsonl');
+      expect(shadow.request_id).toMatch(UUID);
+      expect(readLog(context, 'applied.jsonl')).toEqual([
+        expect.objectContaining({
+          point: 'simplifier-trigger',
+          session_id: 'session-1',
+          request_id: shadow.request_id,
+          applied: { action: { from: 'remind', to: 'skip', noul: 0.49 } },
+        }),
+      ]);
+    }, 60_000);
+
+    it.each([
+      ['threshold unchanged', 0.5, {}, false],
+      ['apply disabled', 0.1, { OMC_JEV_SIMPLIFIER_APPLY: undefined }, false],
+      ['shadow', 0.1, { OMC_JEV: 'simplifier-trigger' }, false],
+      ['log disabled', 0.1, { OMC_JEV_APPLIED_LOG: undefined }, true],
+      ['missing answer', undefined, {}, false],
+    ])('simplifier-trigger writes no row when %s', async (_label, noul, overrides, skipped) => {
+      stubAnswers = noul === undefined ? {} : { simplification_worthy: { type: 'noul', noul } };
+      const context = simplifierContext();
+      const output = await runHook(context, 'code-simplifier.mjs', { cwd: context.cwd, session_id: 'session-1' }, 'simplifier-trigger', {
+        OMC_HOME: context.home,
+        OMC_JEV_SIMPLIFIER_APPLY: '1',
+        ...overrides,
+      });
+      expect(output.continue).toBe(skipped);
+      expect(readLog(context, 'applied.jsonl')).toEqual([]);
+    }, 60_000);
+  });
 
   it('loop-continuation: the mode Jev\'s "task complete" ended', async () => {
     stubAnswers = { task_complete: { type: 'noul', noul: 0.9 } };

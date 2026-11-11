@@ -25,7 +25,7 @@ import { execFileSync } from 'child_process';
 import { readStdin } from './lib/stdin.mjs';
 import { resolveOmcStateRoot } from './lib/state-root.mjs';
 import { BOUNDED_GIT_TIMEOUT_MS } from './lib/bounded-git-timeout.mjs';
-import { jevNoulOf, jevStateIds, recordJevShadow, setJevHookContext } from './lib/jev-shadow.mjs';
+import { jevNoulOf, jevStateIds, recordJevApplied, recordJevShadow, setJevHookContext } from './lib/jev-shadow.mjs';
 
 const DEFAULT_EXTENSIONS = ['.ts', '.tsx', '.js', '.jsx', '.py', '.go', '.rs'];
 const DEFAULT_MAX_FILES = 10;
@@ -176,6 +176,9 @@ async function main() {
     if (isSimplifierApplyEnabled()) {
       const noul = jevNoulOf(jevResult, 'simplification_worthy');
       if (noul !== undefined && noul < SIMPLIFIER_SKIP_BELOW) {
+        recordJevApplied('simplifier-trigger', {
+          action: { from: 'remind', to: 'skip', noul },
+        });
         process.stdout.write(JSON.stringify({ continue: true }) + '\n');
         return;
       }
