@@ -269,7 +269,8 @@ function jevCompletionOutcome(result, state, statePath, heuristicShouldBlock) {
   if (!jevSaysTaskComplete(result)) return null;
   if (!isJevLoopReleaseOnly()) return completeModeFromJev(state, statePath);
   if (isStateUnchangedSinceJevRequest(state, statePath)) {
-    // OMC_JEV_APPLIED_LOG: Record only when Jev's "task complete" actually released a Stop the heuristic would have blocked.
+    // OMC_JEV_APPLIED_LOG: Record only when Jev's "task complete" actually released a Stop the heuristic would have blocked
+    // (a child Ralph under an active autopilot passes false: the autopilot handler decides that Stop).
     if (heuristicShouldBlock) {
       const modeName = /([^\\/]+)-state\.json$/.exec(statePath)?.[1] ?? null;
       recordJevApplied("loop-continuation", { mode: modeName, block: { from: true, to: false }, noul: jevNoulOf(result, "task_complete") });
@@ -1940,7 +1941,7 @@ async function main() {
           };
           const jevResult = recordLoopContinuationShadow(judgmentState, heuristic, data.permission_mode);
 
-          const jevCompletion = jevCompletionOutcome(jevResult, ralph.state, ralph.path, heuristic.shouldBlock);
+          const jevCompletion = jevCompletionOutcome(jevResult, ralph.state, ralph.path, heuristic.shouldBlock && !hasActiveAutopilotForSession);
 
           if (jevCompletion) {
             if (!hasActiveAutopilotForSession) {
@@ -1988,7 +1989,7 @@ async function main() {
           maxIterations: ralph.state.max_iterations,
         }, data.permission_mode);
         
-        const jevCompletionAtExtend = jevCompletionOutcome(jevExtendResult, ralph.state, ralph.path, true);
+        const jevCompletionAtExtend = jevCompletionOutcome(jevExtendResult, ralph.state, ralph.path, !hasActiveAutopilotForSession);
 
         if (!jevCompletionAtExtend) {
           console.log(

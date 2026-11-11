@@ -782,7 +782,7 @@ Without the variable, log lines, requests and resolver results are exactly as be
 | `skill-trigger` | Jev's choice changed the triggered keywords (a later `task-size` suppression has its own line) | `keywords: {from, to}`, `choice` |
 | `task-size` | Jev's `small` suppressed heavy modes (not when a size prefix won over another answer under `OMC_JEV_TASK_SIZE_PREFIX_WINS`) | `size`, `confidence`, `suppressed` (the keywords removed) |
 | `loop-continuation` | Jev's "task complete" ended the mode (another active mode can still block the stop) | `mode`, `completed: {from: false, to: true}` |
-| `loop-continuation` | with `OMC_JEV_LOOP_RELEASE_ONLY`, Jev's "task complete" released a Stop the heuristic would have blocked; the mode stays active | `mode`, `block: {from: true, to: false}`, `noul` |
+| `loop-continuation` | with `OMC_JEV_LOOP_RELEASE_ONLY`, Jev's "task complete" released a Stop the heuristic would have blocked; the mode stays active (no line at the autopilot reinforcement cap, where the fallback already releases, nor for a child Ralph whose parent autopilot decides the Stop) | `mode`, `block: {from: true, to: false}`, `noul` |
 | `learner-extraction` | with `OMC_JEV_LEARNER_HINT`, the hint was added to the Stop output (once per session) | `action: {from: "none", to: "hint", noul}` |
 | `slop-warning` | with `OMC_JEV_SLOP_WARNING_APPLY`, Jev's answer turned the warning on or off against the heuristic | `action: {from, to, noul}` (`warn` or `none`) |
 | `simplifier-trigger` | with `OMC_JEV_SIMPLIFIER_APPLY`, Jev's answer skipped the simplifier reminder | `action: {from: "remind", to: "skip", noul}` |
