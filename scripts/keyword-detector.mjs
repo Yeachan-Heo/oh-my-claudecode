@@ -2182,6 +2182,7 @@ async function main() {
     }
 
     // Resolve conflicts
+    let pendingSkillTriggerApplied;
     let resolved = resolveConflicts(uniqueMatches);
     if (NO_IMPLEMENT_PATTERN.test(cleanPrompt) && !/^\s*\//.test(prompt)) {
       resolved = resolved.filter((m) => !CODE_EDITING_SKILLS.has(m.name));
@@ -2212,7 +2213,8 @@ async function main() {
         }
         const keywordsAfter = resolved.map((match) => match.name);
         if (keywordsAfter.join(',') !== keywordsBefore.join(',')) {
-          recordJevApplied('skill-trigger', { keywords: { from: keywordsBefore, to: keywordsAfter }, choice: jevChoice });
+          // Staged: the follow-up routing below can end the hook without using the keywords.
+          pendingSkillTriggerApplied = { keywords: { from: keywordsBefore, to: keywordsAfter }, choice: jevChoice };
         }
       }
     }
@@ -2468,6 +2470,9 @@ async function main() {
         }
       }
     }
+
+    // The keywords reach the rest of the hook: now the skill-trigger application counts.
+    if (pendingSkillTriggerApplied) recordJevApplied('skill-trigger', pendingSkillTriggerApplied);
 
     // Nothing left to act on (no keywords, or all opted out) - pass through.
     // Keep this after approved follow-up handling so short post-ralplan
