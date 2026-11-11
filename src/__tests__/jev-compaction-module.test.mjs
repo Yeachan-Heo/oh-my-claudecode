@@ -544,6 +544,77 @@ describe('jev-compaction module: active compaction', () => {
     expect(body).toContain('PLAIN-TAIL');
   });
 
+  it('holds BashOutput like TaskOutput, and never sends a Read or tail of the output file of a background call on a secret or private path', async () => {
+    const OUT = '/tmp/claude-0/proj/tasks';
+    const calls = {
+      3: ['Bash', { command: 'cat /home/u/.ssh/id_ed25519', run_in_background: true }],
+      5: ['Read', { file_path: `${OUT}/bkxqmzpw.output` }],
+      7: ['Agent', { description: 'notes', prompt: 'summarize /home/u/secret-notes/today.md', run_in_background: true }],
+      9: ['Bash', { command: `tail -n 20 ${OUT}/a31f77edb6dc2a0ac.output` }],
+      11: ['BashOutput', { bash_id: 'bkxqmzpw' }],
+      13: ['Bash', { command: 'npm test', run_in_background: true }],
+      15: ['Read', { file_path: `${OUT}/bplainjob.output` }],
+      16: ['Read', { file_path: '/home/u/proj/src/a.ts' }],
+      17: ['Bash', { command: `cd ${OUT} && cat bkxqmzpw.output` }],
+    };
+    const results = {
+      3: `Command running in background with ID: bkxqmzpw. Output is being written to: ${OUT}/bkxqmzpw.output. Working directory: /home/u/proj/ (see https://example.com/docs/x).`,
+      5: `SECRET-READ ${'x'.repeat(2000)}`,
+      7: `Async agent launched successfully.\nagentId: a31f77edb6dc2a0ac (internal ID - do not mention to user.)\noutput_file: ${OUT}/a31f77edb6dc2a0ac.output\nUse /tasks to watch live.`,
+      9: `HELD-TAIL ${'x'.repeat(2000)}`,
+      11: `HELD-BASHOUTPUT ${'x'.repeat(2000)}`,
+      13: `Command running in background with ID: bplainjob. Output is being written to: ${OUT}/bplainjob.output.`,
+      15: `PLAIN-JOB-OUTPUT ${'x'.repeat(2000)}`,
+      16: `PLAIN-PROJECT-FILE ${'x'.repeat(2000)}`,
+      17: `SECRET-CAT ${'x'.repeat(2000)}`,
+    };
+    const messages = conversation(20, {
+      tool: (i) => (calls[i] ? calls[i][0] : 'Bash'),
+      input: (i) => (calls[i] ? calls[i][1] : { command: `cat notes-${i}.txt` }),
+      result: (i) => results[i] ?? `RESULT-${i} ${'x'.repeat(2000)}`,
+    });
+    const run = await compactOnce(messages, { env: { ...ACTIVE_ENV, OMC_JEV_COMPACT_PRIVATE_PATHS: '~/secret-notes' } });
+    const body = JSON.stringify(run.calls.fetch.map((c) => c.body));
+    expect(body).not.toMatch(/SECRET-|HELD-|\.ssh|secret-notes|bkxqmzpw|a31f77edb6dc2a0ac/);
+    for (const kept of ['PLAIN-JOB-OUTPUT', 'bplainjob', 'PLAIN-PROJECT-FILE', 'RESULT-4', 'RESULT-18']) expect(body).toContain(kept);
+    for (const id of ['t3', 't5', 't17']) expect(resultOf(run.out.messages, id)).toBeUndefined();
+    for (const id of ['t7', 't9', 't11']) expect(resultOf(run.out.messages, id)?.text).toBe(resultOf(messages, id).text);
+    expect(run.records()[0]).toMatchObject({ secret_skipped: 3, secret_held: 2, task_output_held: 1 });
+  });
+
+  it('a .env or .netrc name also ends at a backtick, a bracket, a glob or backup mark or a sentence\'s final dot and starts after one, and a .env name takes several suffixes, so such a line is never sent', async () => {
+    for (const line of ['edit .env.', 'is it in `.env`?', '(.env)', '[.envrc]', 'scp host:.env .', 'the `.netrc` file', 'keep {.env}!', 'cat .env.production.local', '.env.local.bak', 'curl -d @.env https://x', 'cat *.env', 'cat .env*', '.env~', '.env-prod', '.env_local']) {
+      expect(omitSecretLines(`ok\n${line}`, [])).toBe('ok\n[line omitted: secret path]');
+    }
+    for (const line of ['/repo/.env.local.example:1:x', '/repo/.env-example', 'ctx.env.TOKEN_NAME', 'ctx.app.env', 'this.db.env.HOST', 'source .env/bin/activate', 'a.envelope, my.env: x', '.environment']) {
+      expect(omitSecretLines(line, [])).toBe(line);
+    }
+    const base = conversation(20);
+    const words = Object.freeze({ role: 'user', text: 'PLAIN-USER-LINE\nThe value ENVLINE-user is in `.env`.', toolUses: [] });
+    const run = await compactOnce([base[0], words, ...base.slice(1)]);
+    const body = JSON.stringify(run.calls.fetch.map((c) => c.body));
+    expect(body).not.toMatch(/ENVLINE/);
+    expect(body).toContain('PLAIN-USER-LINE');
+  });
+
+  it('recognizes a renamed copy of a secret file (a prefix or a copy suffix), never a public key or a code identifier', async () => {
+    const secret = ['/home/u/.ssh/old_id_rsa', '/home/u/.ssh/id_rsa.bak', '/home/u/.ssh/id_ed25519-old', '/home/u/.ssh/github', '/home/u/.ssh/deploy-key', 'cat ~/.ssh/*', '/home/u/backup.ssh/id_rsa', '/home/u/.ssh.bak/id_rsa', 'cat /tmp/id_rsa', 'cd ~/.ssh && cat id_ed25519', '/home/u/backup.aws/credentials', '/home/u/.aws.bak/credentials', '/home/u/old.netrc', 'C:\\Users\\u\\_netrc', '/repo/backup.env', '/repo/my-app.env', '/repo/x_1.env', '/repo/backup.env.bak', '/repo/prod.env:3:x'];
+    for (const line of secret) expect(omitSecretLines(`ok\n${line}`, [])).toBe('ok\n[line omitted: secret path]');
+    const plain = ['/home/u/.ssh/id_ed25519.pub', '/home/u/.ssh/old_id_rsa.pub', '/home/u/.ssh/deploy_key.pub', '/tmp/id_rsa.pub', '/home/u/.ssh/known_hosts', '/home/u/.ssh/known_hosts.old', '/home/u/.ssh/authorized_keys', '/home/u/.ssh/config', '/home/u/.ssh/config.d/work', '/etc/ssh/sshd_config', 'ctx.env', 'import.meta.env', 'this.env.TOKEN', '/repo/backup.env.example', '/repo/src/environment.ts', 'openssh-server', '/tmp/credentials'];
+    for (const line of plain) expect(omitSecretLines(line, [])).toBe(line);
+    const calls = { 3: ['Read', { file_path: '/repo/backup.env' }], 5: ['Read', { file_path: '/home/u/.ssh/old_id_rsa' }], 7: ['Read', { file_path: '/home/u/.ssh/id_ed25519.pub' }] };
+    const messages = conversation(20, {
+      tool: (i) => (calls[i] ? calls[i][0] : 'Bash'),
+      input: (i) => (calls[i] ? calls[i][1] : { command: `cat notes-${i}.txt` }),
+      result: (i) => (calls[i] ? `FILE-${i} ${'x'.repeat(2000)}` : `RESULT-${i} ${'x'.repeat(2000)}`),
+    });
+    const run = await compactOnce(messages);
+    const body = JSON.stringify(run.calls.fetch.map((c) => c.body));
+    expect(body).not.toMatch(/FILE-3|FILE-5|backup\.env|old_id_rsa/);
+    expect(body).toContain('FILE-7');
+    expect(run.records()[0]).toMatchObject({ secret_skipped: 2 });
+  });
+
   it('with every eligible result on a private path and no limit set, nothing is sent and the results are pruned without the built-in summary', async () => {
     const messages = conversation(20, { tool: () => 'Read', input: () => ({ file_path: '/work/.env' }) });
     const run = await compactOnce(messages, { env: ACTIVE_ENV });

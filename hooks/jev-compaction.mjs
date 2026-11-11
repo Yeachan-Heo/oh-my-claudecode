@@ -46,8 +46,10 @@
  * masking, with every string bounded by OMC_JEV_EXCERPT_CHARS_COMPACTION (default
  * DEFAULT_EXCERPT_CHARS). Results of calls on secret paths (and on OMC_JEV_COMPACT_PRIVATE_PATHS)
  * and results without text are never sent; neither is the result of an agent, message or task call
- * whose prose names such a path (it is kept as if unanswered). A line naming such a path in a result,
- * an input, the user's words or the /compact instructions is sent as SECRET_LINE.
+ * whose prose names such a path (it is kept as if unanswered), nor what TaskOutput or BashOutput returns
+ * (the output of a call started in the background; it is kept the same way), nor a Read or `tail` of the
+ * output file of such a call on a secret or private path. A line naming such a path in a result, an
+ * input, the user's words or the /compact instructions is sent as SECRET_LINE.
  *
  * Shared breaker and request limit (OMC_JEV_BREAKER=1, OMC_JEV_MAX_RPM=<n>): the same files and rules as
  * the script side (scripts/lib/jev-breaker.mjs, see its header), under the same state directory and
@@ -180,10 +182,31 @@ const NOT_USER_PREFIXES = [
   '<side-sessions-event>', '<ci-monitor-event>', '<scheduled-task', '<cross-session-message', 'Another Claude session sent a message:',
 ];
 
-// Secret paths in the path and command fields of a call (a mention in a prompt or a result does not
-// count): SSH keys, git and gh credentials, Claude Code credentials, AWS credentials, .netrc, .env and
-// .envrc files (.env.example is not a secret).
-const SECRET_PATH = /[\\/]\.ssh[\\/]+(?:id_[a-z0-9_]+|[^\s"'\\/]*_key)\b|\.git-credentials\b|[\\/]\.config[\\/]+gh[\\/]+hosts\.ya?ml\b|\.credentials\.json\b|[\\/]\.aws[\\/]+credentials\b|(?:^|[\s"'\\/=])\.netrc\b|(?:^|[\s"'\\/=;|&<>])\.env(?!\.example)(?:rc|\.[a-z0-9_-]+)?(?=$|[\s"':,;|&)<>])/i;
+// Secret paths: SSH keys (every file in a .ssh directory but known_hosts*, authorized_keys*, config, config.d/,
+// environment, rc and *.pub, and an id_rsa, id_dsa, id_ecdsa or id_ed25519 key anywhere), git and gh credentials,
+// Claude Code credentials, AWS credentials, .netrc (_netrc on Windows), .env and .envrc files (not a .example
+// template), each also as a renamed copy (a prefix or a copy suffix: old_id_rsa, id_rsa.bak, backup.ssh/,
+// .ssh.bak/, old.netrc, backup.env, my-app.env, .env.production.local). A .netrc or .env name starts after a
+// separator, a quote, or a shell or prose delimiter, never inside a code identifier (`ctx.env`, `ctx.app.env`). A
+// .env name ends before such a delimiter, a glob or backup mark (* ~ #) or a dot that ends a sentence
+// (`/repo/.env:2:` of grep, "edit .env, then", "in `.env`."), not before a slash (a `.env/` directory). Every prefix
+// and suffix is bounded, so the check stays linear.
+const SECRET_START = String.raw`(?:^|[\s"'\x60\\/=;|&<>()[\]{},:@*])`;
+const SECRET_NAME = String.raw`[^\s"'\x60\\/=;|&<>()[\]{},:@*]`;
+const SECRET_FILE = String.raw`[^\s"'\x60\\/;|&<>()[\]{},:]`;
+const SECRET_ENV = String.raw`\.env(?:rc)?(?:[._-](?!example(?![a-z0-9]))[a-z0-9]+){0,4}(?=$|[\s"'\x60;|&<>()[\]{},:!?*~#]|\.(?![a-z0-9_-]))`;
+const SECRET_PATH = new RegExp([
+  String.raw`[\\/][^\s"'\\/]{0,80}\.ssh[^\s"'\\/]{0,80}[\\/]+(?!known_hosts|authorized_keys|(?:config|environment|rc)(?!${SECRET_FILE})|config\.d[\\/])(?!${SECRET_FILE}{0,255}\.pub(?!${SECRET_FILE}))${SECRET_FILE}+`,
+  `${SECRET_START}${SECRET_NAME}{0,80}id_(?:rsa|dsa|ecdsa|ed25519)(?![a-z])(?!${SECRET_NAME}{0,80}\\.pub(?!${SECRET_NAME}))`,
+  String.raw`\.git-credentials\b`,
+  String.raw`[\\/]\.config[\\/]+gh[\\/]+hosts\.ya?ml\b`,
+  String.raw`\.credentials\.json\b`,
+  String.raw`[\\/][^\s"'\\/]{0,80}\.aws[^\s"'\\/]{0,80}[\\/]+credentials\b`,
+  `${SECRET_START}${SECRET_NAME}{0,80}[._]netrc\\b`,
+  `${SECRET_START}${SECRET_ENV}`,
+  // a named env file (prod.env, backup.env, my-app.env, x_1.env); its prefix has no dot, so code such as ctx.app.env is not one
+  `${SECRET_START}[^\\s"'\\x60\\\\/=;|&<>()[\\]{},:@*.]{0,80}(?:prod|production|dev|development|staging|stage|test|local|secrets?|private|credentials?|app|docker|db|database|api|backup|bak|copy|old|orig|save|[-_0-9])${SECRET_ENV}`,
+].join('|'), 'i');
 // Fields that name a path or run a command, in any tool (built-in or MCP).
 const PATH_FIELDS = ['file_path', 'notebook_path', 'path', 'command'];
 const TOOL_PATH_FIELDS = { Glob: ['pattern'], Grep: ['glob'] };
@@ -195,6 +218,8 @@ const NAMED_FIELD_TOOLS = new Set(['Read', 'Write', 'Edit', 'MultiEdit', 'Notebo
 // not make the call a trace, since the result is the agent's own report, but the result is not sent either:
 // it is kept as if its request had been held back (UNANSWERED_SCORE), because the agent may have read the path.
 const PROSE_TOOLS = new Set(['Agent', 'Task', 'SendMessage', 'TaskCreate', 'TaskUpdate', 'TaskStop', 'TodoWrite', 'AskUserQuestion', 'ExitPlanMode', 'Skill']);
+// Tools that return the output of a call started in the background, by its id: their results are held.
+const OUTPUT_TOOLS = new Set(['TaskOutput', 'BashOutput']);
 const SECRET_WALK_MAX = 2000;
 // A line longer than MASK_SLACK_CHARS at the edge of a head or tail cut is read up to LINE_EDGE_CHARS further, so
 // a secret path later on that line still hides it.
@@ -788,6 +813,52 @@ function anySecretPath(input, privatePaths) {
   return walk(input, 0);
 }
 
+// The output files that calls started with run_in_background name in their results ("Output is being written to:
+// <file>", "output_file: <file>"), for calls on secret or private paths (`secret`) and for prose calls naming one
+// (`held`): a later Read, `tail` or `cat` of such a file reads that call's output. A file is a word of the first
+// OUTPUT_SCAN_CHARS of the result with at least two slashes (not a host hint such as `/tasks`, a directory or a
+// URL); it is kept whole and by its name (6 characters or more, for `cd <dir> && cat <name>` or `$D/<name>`), at most
+// OUTPUT_FILES_MAX of them, with runs of slashes joined and in lower case.
+const OUTPUT_SCAN_CHARS = 4096;
+const OUTPUT_FILES_MAX = 50;
+function backgroundOutputFiles(messages, privatePaths) {
+  const results = new Map();
+  for (const m of messages) if (m.role === 'user') for (const r of m.toolResults || []) results.set(r.tool_use_id, r.text || '');
+  const out = { secret: [], held: [] };
+  for (const m of messages) {
+    if (m.role !== 'assistant') continue;
+    for (const u of m.toolUses || []) {
+      if (u.input?.run_in_background !== true || !results.has(u.tool_use_id)) continue;
+      const list = touchesSecretPath(u.tool, u.input, privatePaths) ? out.secret : PROSE_TOOLS.has(u.tool) && anySecretPath(u.input, privatePaths) ? out.held : undefined;
+      if (!list) continue;
+      for (const w of results.get(u.tool_use_id).slice(0, OUTPUT_SCAN_CHARS).split(/[\s"'`|;&<>()[\]{},=]+/)) {
+        const file = w.replace(/[.:]+$/, '').replace(/[\\/]+/g, '/').toLowerCase();
+        if (file.includes('://') || file.endsWith('/') || (file.match(/\//g) || []).length < 2) continue;
+        const name = file.slice(file.lastIndexOf('/') + 1);
+        for (const f of name.length >= 6 ? [file, name] : [file]) if (list.length < OUTPUT_FILES_MAX && !list.includes(f)) list.push(f);
+      }
+    }
+  }
+  return out;
+}
+// Does a string of the input name one of the files as a whole name (not a part of a longer name or path)?
+const FILE_NAME_CHAR = /[a-z0-9_.-]/;
+function readsFile(input, files) {
+  if (!files.length) return false;
+  const names = (text) => files.some((f) => {
+    for (let i = text.indexOf(f); i >= 0; i = text.indexOf(f, i + 1)) {
+      const after = text[i + f.length];
+      if ((i === 0 || !FILE_NAME_CHAR.test(text[i - 1])) && (after === undefined || !(FILE_NAME_CHAR.test(after) || after === '/'))) return true;
+    }
+    return false;
+  });
+  let hit = false;
+  try {
+    JSON.stringify(input ?? {}, (_k, v) => { if (!hit && typeof v === 'string' && names(v.replace(/[\\/]+/g, '/').toLowerCase())) hit = true; return v; });
+  } catch { return true; }
+  return hit;
+}
+
 function touchesSecretPath(tool, input, privatePaths) {
   if (!input || typeof input !== 'object') return false;
   const values = [];
@@ -902,6 +973,7 @@ const TASK_LIST = /^TodoWrite$|(?:^|__)update_plan$/;
 // Candidates: tool results outside the first message and the last KEEP_LAST messages whose call is
 // in an earlier assistant message.
 function findCandidates(messages, privatePaths) {
+  const outputs = backgroundOutputFiles(messages, privatePaths);
   const uses = new Map();
   messages.forEach((m, i) => { if (m.role === 'assistant') for (const u of m.toolUses || []) uses.set(u.tool_use_id, { i, u }); });
   const tailStart = Math.max(1, messages.length - KEEP_LAST);
@@ -917,9 +989,9 @@ function findCandidates(messages, privatePaths) {
         summary: inputSummary(found.u.tool, found.u.input),
         inputChars: (found.u.tool || '').length + inputJson(found.u.input).length,
         resultChars: (r.text || '').length,
-        secret: touchesSecretPath(found.u.tool, found.u.input, privatePaths),
-        proseSecret: PROSE_TOOLS.has(found.u.tool) && anySecretPath(found.u.input, privatePaths),
-        taskOutput: found.u.tool === 'TaskOutput',
+        secret: touchesSecretPath(found.u.tool, found.u.input, privatePaths) || readsFile(found.u.input, outputs.secret),
+        proseSecret: (PROSE_TOOLS.has(found.u.tool) && anySecretPath(found.u.input, privatePaths)) || readsFile(found.u.input, outputs.held),
+        taskOutput: OUTPUT_TOOLS.has(found.u.tool),
         textOnly: textOnlyResult(r),
         score: 0, asked: false, answered: false,
       };
