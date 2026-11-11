@@ -15,17 +15,20 @@
  *
  * Repair: an assistant row that is NOT on the chain, whose `message.id` also belongs to a message on the chain and
  * whose join would repeat a `server_tool_use` id, gets a new `message.id` of the same byte length (the last 4 characters
- * become `Z` and three hex digits). The host then no longer joins it. Nothing else in the row changes.
+ * become `Z` and three hex digits). The host then no longer joins it. Nothing else in the row changes. The rows of one
+ * message between the same two compaction boundaries get the same new id, so they stay one message. Only rows that stand
+ * in the file before the first row of the chain are changed; such a row after it is reported (exit 2), and so is a chain
+ * that would still repeat a `server_tool_use` id without the changed rows.
  *
  * Usage: node scripts/jev-repair-transcript.mjs <transcript.jsonl>... [--write] [--json]
  *   default   check only: lists the rows that would change and writes nothing
  *   --write   write the repaired file. A copy of the original goes next to it first (<file>.pre-repair, then
  *             <file>.pre-repair.1 ... when one exists), and the new content replaces the file in one rename.
- *             Close the session that owns the transcript first: a row the app appends meanwhile makes the write stop.
+ *             Close the session that owns the transcript first: a change found just before the rename stops the write.
  *   --json    machine-readable report
  *
  * Pure Node, zero dependencies. Exit codes: 0 nothing to repair (or repaired with --write), 1 rows need repair (check
- * mode), 2 usage error, unreadable file or a row that cannot be repaired safely (nothing is written then).
+ * mode), 2 usage error, unreadable file, a write error or a row that cannot be repaired safely (nothing is written then).
  */
 
 import {
@@ -51,6 +54,14 @@ class RepairError extends Error {}
 
 const isObject = (value) => value !== null && typeof value === 'object' && !Array.isArray(value);
 const messageIdOf = (row) => (isObject(row.message) && typeof row.message.id === 'string' && row.message.id ? row.message.id : null);
+
+// Whether joining these rows into one message repeats a server_tool_use id.
+function repeatsServerId(rows) {
+  const ids = rows.flatMap((row) => (Array.isArray(row.object.message.content) ? row.object.message.content : []))
+    .filter((block) => isObject(block) && block.type === SERVER_BLOCK && typeof block.id === 'string')
+    .map((block) => block.id);
+  return ids.length !== new Set(ids).size;
+}
 
 // Rows of the transcript with their byte offsets. A line that is not a JSON object contributes nothing.
 function readRows(buffer) {
@@ -142,22 +153,29 @@ export function planRepair(buffer) {
   }
   const chainMessages = new Set();
   for (const row of chain) if (row.object.type === 'assistant' && messageIdOf(row.object)) chainMessages.add(messageIdOf(row.object));
+  // The copies come from earlier in the file: after a compaction the chain starts at its boundary row.
+  let chainStart = Infinity;
+  for (const row of chain) chainStart = Math.min(chainStart, row.offset);
+  const boundaries = rows.filter((row) => row.object.type === 'system' && row.object.subtype === 'compact_boundary').map((row) => row.offset);
+  const stretchOf = (row) => boundaries.filter((offset) => offset < row.offset).length;
 
   const fixes = [];
   const counter = { n: 0 };
   const affected = new Set();
   for (const messageId of chainMessages) {
     const group = rowsOfMessage.get(messageId);
-    const serverIds = group.flatMap((row) => (Array.isArray(row.object.message.content) ? row.object.message.content : []))
-      .filter((block) => isObject(block) && block.type === SERVER_BLOCK && typeof block.id === 'string')
-      .map((block) => block.id);
-    if (serverIds.length === new Set(serverIds).size) continue; // the join would not repeat a server_tool_use id
+    if (!repeatsServerId(group)) continue; // the join would not repeat a server_tool_use id
+    const newIds = new Map(); // one new id per stretch between boundaries: the rows of one message stay one message
     for (const row of group) {
       if (chain.has(row)) continue;
-      const newId = freshId(messageId, used, counter);
+      if (row.offset > chainStart) throw new RepairError(`line ${row.line}: a row of ${messageId} off the chain stands after the start of the chain, so it is not a copy from before a compaction; nothing was changed`);
+      const stretch = stretchOf(row);
+      if (!newIds.has(stretch)) newIds.set(stretch, freshId(messageId, used, counter));
+      const newId = newIds.get(stretch);
       fixes.push({ line: row.line, offset: row.offset, messageId, newId, uuid: row.object.uuid ?? null, fixed: rewriteRow(row, newId) });
       affected.add(messageId);
     }
+    if (repeatsServerId(group.filter((row) => chain.has(row)))) throw new RepairError(`${messageId} repeats a server_tool_use id on the chain itself, which changing rows off the chain does not repair; nothing was changed`);
   }
   fixes.sort((a, b) => a.line - b.line);
   return { rows: rows.length, chain: chain.size, messages: affected.size, fixes };
@@ -180,7 +198,8 @@ function freeBackupPath(path) {
 /**
  * Write `repaired` over `path`: a copy of `original` (the bytes that were repaired) next to it first, then a temporary file
  * in the same directory and one rename. The write stops, and the copy is removed again, when the file is no longer what
- * `original` holds. Returns the path of the copy.
+ * `original` holds just before the rename (a row appended after that check is lost, so the session has to be closed).
+ * Returns the path of the copy.
  */
 export function writeRepaired(path, original, repaired) {
   const mode = statSync(path).mode & 0o777;
@@ -188,8 +207,10 @@ export function writeRepaired(path, original, repaired) {
   writeFileSync(backup, original, { flag: 'wx', mode });
   const temp = `${path}.repair-${process.pid}.tmp`;
   let fd = null;
+  let created = false;
   try {
     fd = openSync(temp, 'wx', mode);
+    created = true;
     let written = 0;
     while (written < repaired.length) written += writeSync(fd, repaired, written, repaired.length - written);
     fsyncSync(fd);
@@ -199,10 +220,12 @@ export function writeRepaired(path, original, repaired) {
     renameSync(temp, path);
   } catch (error) {
     if (fd !== null) closeSync(fd);
-    try {
-      unlinkSync(temp);
-    } catch {
-      // no temporary file left
+    if (created) {
+      try {
+        unlinkSync(temp);
+      } catch {
+        // no temporary file left
+      }
     }
     try {
       unlinkSync(backup); // the copy belongs to this write only
@@ -275,18 +298,20 @@ export function main(argv) {
   let exit = 0;
   const reports = [];
   for (const path of paths) {
+    let report;
     try {
-      const report = repairTranscript(path, { write });
-      reports.push(report);
+      report = repairTranscript(path, { write });
       if (report.rowsToRepair && !report.written) exit = Math.max(exit, 1);
     } catch (error) {
-      if (!(error instanceof RepairError)) throw error;
-      reports.push({ path, error: error.message });
+      // A write error (EEXIST, EACCES, ENOSPC ...) is not a RepairError but ends this file the same way.
+      const detail = error instanceof RepairError ? error.message : `write failed: ${error?.code || error?.message || error}`;
+      report = { path, error: detail };
       exit = 2;
     }
+    reports.push(report);
+    if (!json) console.log(report.error ? `${report.path}: ERROR ${report.error}` : formatReport(report));
   }
   if (json) console.log(JSON.stringify(reports, null, 2));
-  else for (const report of reports) console.log(report.error ? `${report.path}: ERROR ${report.error}` : formatReport(report));
   return exit;
 }
 

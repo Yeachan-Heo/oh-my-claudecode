@@ -1,4 +1,4 @@
-/* global process, Buffer */
+/* global process, Buffer, console */
 /**
  * Tests for scripts/jev-repair-transcript.mjs (repair of transcripts that no longer resume after a Jev compaction).
  *
@@ -11,9 +11,9 @@ import { copyFileSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync,
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { afterAll, describe, expect, it } from 'vitest';
+import { afterAll, describe, expect, it, vi } from 'vitest';
 
-import { applyRepair, planRepair, repairTranscript, writeRepaired } from '../../scripts/jev-repair-transcript.mjs';
+import { applyRepair, main, planRepair, repairTranscript, writeRepaired } from '../../scripts/jev-repair-transcript.mjs';
 
 const root = join(fileURLToPath(import.meta.url), '..', '..', '..');
 const NODE = process.execPath;
@@ -71,7 +71,7 @@ function compactedTranscript() {
   const lines = [
     '{this line is not json',
     row('user', 1, null, userMessage('start')),
-    row('assistant', 2, 1, assistant(MA, block.thinking('zażółć gęślą jaźń'))),
+    row('assistant', 2, 1, assistant(MA, block.thinking('naïve café 日本語'))),
     row('assistant', 3, 2, assistant(MA, block.server('srvtoolu_01A'))),
     row('assistant', 4, 3, assistant(MA, block.result('srvtoolu_01A'))),
     row('assistant', 5, 4, assistant(MA, block.thinking('after the advice'))),
@@ -79,7 +79,7 @@ function compactedTranscript() {
     row('user', 7, 6, userMessage('tool result')),
     row('system', 8, null, null, { subtype: 'compact_boundary', logicalParentUuid: uuid(7) }),
     row('user', 9, 8, userMessage('[trace]')),
-    row('assistant', 10, 9, assistant(MA, block.thinking('zażółć gęślą jaźń'))),
+    row('assistant', 10, 9, assistant(MA, block.thinking('naïve café 日本語'))),
     row('assistant', 11, 10, assistant(MA, block.server('srvtoolu_01A'))),
     row('assistant', 12, 11, assistant(MA, block.result('srvtoolu_01A'))),
     row('assistant', 13, 12, assistant(MA, block.thinking('after the advice'))),
@@ -118,8 +118,15 @@ function manyOutsideRows(count, extraLines = []) {
   return `${lines.join('\n')}\n`;
 }
 
+// Rows of other messages that already use `count` of the suffixes freshId tries (Z001, Z002, ..., Zfff, Z000).
+function takenSuffixes(count) {
+  const lines = [];
+  for (let k = 1; k <= count; k += 1) lines.push(row('assistant', 1000 + k, 1, assistant(`${HEAD_A}Z${(k % SUFFIX_VALUES).toString(16).padStart(3, '0')}`, block.text('other message'))));
+  return lines;
+}
+
 describe('planRepair', () => {
-  it('finds the rows off the chain whose message the host would rejoin (Z33 case)', () => {
+  it('finds the rows off the chain whose message the host would rejoin', () => {
     const text = compactedTranscript();
     expect(hasRepeatedServerId(text)).toBe(true);
     const plan = planRepair(Buffer.from(text));
@@ -127,8 +134,9 @@ describe('planRepair', () => {
     expect(plan.chain).toBe(8);
     expect(plan.messages).toBe(1);
     expect(plan.fixes.map((fix) => fix.line)).toEqual([3, 4, 5, 6, 7]);
+    // One message before one boundary: one new id, so the five rows stay one message.
     const ids = plan.fixes.map((fix) => fix.newId);
-    expect(new Set(ids).size).toBe(5);
+    expect(new Set(ids).size).toBe(1);
     for (const fix of plan.fixes) {
       expect(fix.messageId).toBe(MA);
       expect(fix.newId).toHaveLength(MA.length);
@@ -202,11 +210,56 @@ describe('planRepair', () => {
     expect(plan.fixes[0].newId).toBe(`${HEAD_A}Z002`);
   });
 
-  it(`uses all ${SUFFIX_VALUES} suffixes of one message id and then stops`, () => {
-    const all = planRepair(Buffer.from(manyOutsideRows(SUFFIX_VALUES)));
-    expect(all.fixes).toHaveLength(SUFFIX_VALUES);
-    expect(new Set(all.fixes.map((fix) => fix.newId)).size).toBe(SUFFIX_VALUES);
-    expect(() => planRepair(Buffer.from(manyOutsideRows(SUFFIX_VALUES + 1)))).toThrow(/no free message id/);
+  it(`tries all ${SUFFIX_VALUES} suffixes of one message id and then stops`, () => {
+    const last = planRepair(Buffer.from(manyOutsideRows(1, takenSuffixes(SUFFIX_VALUES - 1))));
+    expect(last.fixes.map((fix) => fix.newId)).toEqual([`${HEAD_A}Z000`]);
+    expect(() => planRepair(Buffer.from(manyOutsideRows(1, takenSuffixes(SUFFIX_VALUES))))).toThrow(/no free message id/);
+  });
+
+  it('gives the rows of one message one new id per stretch between compaction boundaries', () => {
+    // MA before the first boundary (rows 2-4), its copies from the first compaction between the boundaries (rows 6-8),
+    // and the copies on the chain after the second boundary (rows 10-12).
+    const text = `${[
+      row('user', 1, null, userMessage('start')),
+      row('assistant', 2, 1, assistant(MA, block.thinking('t'))),
+      row('assistant', 3, 2, assistant(MA, block.server('srvtoolu_01A'))),
+      row('assistant', 4, 3, assistant(MA, block.text('advice used'))),
+      row('system', 5, null, null, { subtype: 'compact_boundary' }),
+      row('assistant', 6, 5, assistant(MA, block.thinking('t'))),
+      row('assistant', 7, 6, assistant(MA, block.server('srvtoolu_01A'))),
+      row('assistant', 8, 7, assistant(MA, block.text('advice used'))),
+      row('system', 9, null, null, { subtype: 'compact_boundary' }),
+      row('assistant', 10, 9, assistant(MA, block.thinking('t'))),
+      row('assistant', 11, 10, assistant(MA, block.server('srvtoolu_01A'))),
+      row('assistant', 12, 11, assistant(MA, block.text('advice used'))),
+      row('user', 13, 12, userMessage('leaf')),
+    ].join('\n')}\n`;
+    const plan = planRepair(Buffer.from(text));
+    expect(plan.fixes.map((fix) => fix.line)).toEqual([2, 3, 4, 6, 7, 8]);
+    const [first, second] = [plan.fixes.slice(0, 3), plan.fixes.slice(3)].map((part) => new Set(part.map((fix) => fix.newId)));
+    expect(first.size).toBe(1);
+    expect(second.size).toBe(1);
+    expect([...first][0]).not.toBe([...second][0]);
+    expect(hasRepeatedServerId(applyRepair(Buffer.from(text), plan.fixes).toString('utf8'))).toBe(false);
+  });
+
+  it('refuses a row of the message off the chain that stands after the start of the chain', () => {
+    // A sibling of row 11 behind the boundary shares MA with the chain, but it is not a copy from before it.
+    const lines = compactedTranscript().split('\n');
+    lines.splice(12, 0, row('assistant', 16, 11, assistant(MA, block.use('toolu_01B'))));
+    const text = lines.join('\n');
+    expect(() => planRepair(Buffer.from(text))).toThrow(/stands after the start of the chain/);
+  });
+
+  it('refuses a chain that repeats a server_tool_use id by itself, which no change off the chain repairs', () => {
+    const text = `${[
+      row('assistant', 2, null, assistant(MA, block.server('srvtoolu_01A'))),
+      row('user', 1, null, userMessage('start')),
+      row('assistant', 3, 1, assistant(MA, block.server('srvtoolu_01A'))),
+      row('assistant', 4, 3, assistant(MA, block.server('srvtoolu_01A'))),
+      row('user', 5, 4, userMessage('leaf')),
+    ].join('\n')}\n`;
+    expect(() => planRepair(Buffer.from(text))).toThrow(/repeats a server_tool_use id on the chain itself/);
   });
 
   it('refuses a row it cannot rewrite exactly (spaced JSON)', () => {
@@ -291,7 +344,7 @@ describe('command line', () => {
   });
 
   it('writes nothing when a row cannot be repaired (all suffixes taken)', () => {
-    const text = manyOutsideRows(SUFFIX_VALUES + 1);
+    const text = manyOutsideRows(1, takenSuffixes(SUFFIX_VALUES));
     const { dir, path } = writeTranscript(text);
     const result = run(path, '--write');
     expect(result.code).toBe(2);
@@ -309,6 +362,27 @@ describe('command line', () => {
     expect(reports[0].rowsToRepair).toBe(5);
     expect(reports[0].written).toBe(false);
     expect(reports[1].error).toMatch(/cannot read/);
+  });
+
+  it('a write error exits 2 with its report, after the report of a file already repaired, and leaves a temporary file it did not create', () => {
+    const good = writeTranscript(compactedTranscript());
+    const blocked = writeTranscript(compactedTranscript());
+    const stranger = `${blocked.path}.repair-${process.pid}.tmp`;
+    writeFileSync(stranger, 'not ours');
+    const lines = [];
+    const log = vi.spyOn(console, 'log').mockImplementation((text) => { lines.push(String(text)); });
+    let code;
+    try {
+      code = main([good.path, blocked.path, '--write']);
+    } finally {
+      log.mockRestore();
+    }
+    expect(code).toBe(2);
+    expect(lines[0]).toContain('written; copy of the original');
+    expect(lines[1]).toMatch(/ERROR write failed: EEXIST/);
+    expect(readFileSync(stranger, 'utf8')).toBe('not ours');
+    expect(readFileSync(blocked.path, 'utf8')).toBe(compactedTranscript());
+    expect(readdirSync(blocked.dir).sort()).toEqual(['transcript.jsonl', `transcript.jsonl.repair-${process.pid}.tmp`]);
   });
 
   it('exits 2 on a usage error', () => {
