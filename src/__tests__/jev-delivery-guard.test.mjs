@@ -10,7 +10,7 @@
 import { execFileSync, spawnSync } from 'node:child_process';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, utimesSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
@@ -164,7 +164,7 @@ describe('(b) changes after the session started', () => {
     expect(change.text).not.toContain('hooks/hooks.json');
     change.confirm();
     expect(promptCheck(session(), options())).toBeNull();
-    const stored = readFileSync(join(configDir, '.omc', 'jev-guard', 'sessions', 's1.json'), 'utf8');
+    const stored = readFileSync(join(configDir, '.omc', 'state', 'sessions', 's1', 'jev-guard-state.json'), 'utf8');
     expect(stored).not.toContain('secret');
     expect(stored).not.toContain('model-routing');
   });
@@ -186,7 +186,7 @@ describe('(b) changes after the session started', () => {
       expect(change.text).toContain('model-routing variables');
       change.confirm();
       expect(promptCheck(session(id), options())).toBeNull();
-      const stored = readFileSync(join(configDir, '.omc', 'jev-guard', 'sessions', `${id}.json`), 'utf8');
+      const stored = readFileSync(join(configDir, '.omc', 'state', 'sessions', id, 'jev-guard-state.json'), 'utf8');
       expect(stored).not.toContain('first');
       expect(stored).not.toContain('second');
     }
@@ -255,7 +255,7 @@ describe('(b) changes after the session started', () => {
 
 describe('the sweep of old session records', () => {
   const DAY = 24 * HOUR;
-  const recordPath = (id) => join(configDir, '.omc', 'jev-guard', 'sessions', `${id}.json`);
+  const recordPath = (id) => join(configDir, '.omc', 'state', 'sessions', id, 'jev-guard-state.json');
   beforeEach(() => writeHooks(60));
 
   it('removes a record nobody used for 14 days and keeps a live session\'s baseline, whatever its access time', () => {
@@ -264,7 +264,8 @@ describe('the sweep of old session records', () => {
     // the live session prompts every few days; the idle one never does
     for (const day of [5, 10]) expect(promptCheck(session('live'), options({ now: NOW + day * DAY }))).toBeNull();
     // the access time must not matter: set it to the far past, keep the modification time the prompt wrote
-    utimesSync(recordPath('live'), new Date(NOW - 60 * DAY), statSync(recordPath('live')).mtime);
+    const fileMtime = statSync(recordPath('live')).mtime;
+    utimesSync(recordPath('live'), new Date(NOW - 60 * DAY), fileMtime);
     const before = readFileSync(recordPath('live'), 'utf8');
     startSession(session('new'), options({ now: NOW + 20 * DAY }));
     expect(existsSync(recordPath('idle'))).toBe(false);
@@ -285,6 +286,65 @@ describe('the sweep of old session records', () => {
     startSession(session('live', 'compact'), options({ now: NOW + 18 * DAY }));
     expect(Math.abs(statSync(recordPath('live')).mtimeMs - (NOW + 18 * DAY))).toBeLessThan(2);
     expect(existsSync(recordPath('live'))).toBe(true);
+  });
+});
+
+describe('P2: Reset dedupe when configuration returns to baseline', () => {
+  const recordPath = (id) => join(configDir, '.omc', 'state', 'sessions', id, 'jev-guard-state.json');
+  beforeEach(() => writeHooks(60));
+
+  it('clears warnedHooks and warnedEnv when configuration returns to baseline (A→B→A→B)', () => {
+    // A: initial baseline
+    startSession(session(), options());
+    expect(promptCheck(session(), options())).toBeNull();
+    // B: change detected and confirmed
+    writeHooks(45); // different timeout
+    let change = promptCheck(session(), options());
+    expect(change.text).toContain('hooks/hooks.json');
+    change.confirm();
+    expect(promptCheck(session(), options())).toBeNull(); // no warning yet
+    // A: return to original
+    writeHooks(60);
+    let record = JSON.parse(readFileSync(recordPath('s1'), 'utf8'));
+    expect(record.warnedHooks).not.toBeNull(); // was set to the B hash
+    change = promptCheck(session(), options());
+    expect(change).toBeNull(); // return to baseline clears the warning
+    record = JSON.parse(readFileSync(recordPath('s1'), 'utf8'));
+    expect(record.warnedHooks).toBeNull(); // cleared by the reset
+    // B again: should warn again
+    writeHooks(45);
+    change = promptCheck(session(), options());
+    expect(change.text).toContain('hooks/hooks.json'); // not suppressed
+    change.confirm();
+    expect(promptCheck(session(), options())).toBeNull();
+  });
+});
+
+describe('P2: Hash a missing hooks manifest as a changed state', () => {
+  const recordPath = (id) => join(configDir, '.omc', 'state', 'sessions', id, 'jev-guard-state.json');
+
+  it('represents hooks.json absence as \'missing\' state, detectable as a change', () => {
+    writeHooks(60);
+    startSession(session(), options());
+    let record = JSON.parse(readFileSync(recordPath('s1'), 'utf8'));
+    const initialHash = record.hooks;
+    expect(typeof initialHash).toBe('string');
+    expect(initialHash).not.toBe('missing');
+    expect(initialHash.length).toBe(16); // sha256 digest, truncated to 16 hex chars
+    // delete hooks.json: absence is now hashable as 'missing'
+    rmSync(join(pluginRoot, 'hooks', 'hooks.json'));
+    let change = promptCheck(session(), options());
+    expect(change).not.toBeNull();
+    expect(change.text).toContain('hooks/hooks.json');
+    change.confirm();
+    record = JSON.parse(readFileSync(recordPath('s1'), 'utf8'));
+    expect(record.warnedHooks).toBe('missing');
+    // restoring hooks.json returns to baseline: no new warning
+    writeHooks(60);
+    expect(promptCheck(session(), options())).toBeNull();
+    record = JSON.parse(readFileSync(recordPath('s1'), 'utf8'));
+    // warnedHooks is cleared when we return to baseline
+    expect(record.warnedHooks).toBeNull();
   });
 });
 
@@ -496,7 +556,7 @@ describe('(c) the daily figures', () => {
   it('shows a bad result once per session at the next prompt', () => {
     writeHooks(60);
     const logDir = join(root, 'jev-log');
-    mkdirSync(join(configDir, '.omc', 'jev-guard'), { recursive: true });
+    mkdirSync(dirname(dailyStatePath(configDir, logDir, 'daily.json')), { recursive: true });
     writeFileSync(dailyStatePath(configDir, logDir, 'daily.json'), JSON.stringify({ lastStart: NOW })); // no new daily check now
     startSession(session(), options());
     startSession(session('other'), options());
@@ -515,7 +575,7 @@ describe('(c) the daily figures', () => {
   it('does not show a result older than two days', () => {
     writeHooks(60);
     const logDir = join(root, 'jev-log');
-    mkdirSync(join(configDir, '.omc', 'jev-guard'), { recursive: true });
+    mkdirSync(dirname(dailyStatePath(configDir, logDir, 'daily.json')), { recursive: true });
     writeFileSync(dailyStatePath(configDir, logDir, 'daily.json'), JSON.stringify({ lastStart: NOW }));
     startSession(session(), options());
     writeFileSync(dailyStatePath(configDir, logDir, 'delivery.json'), JSON.stringify({ ts: NOW - 49 * HOUR, windowHours: 24, decisions: 0, withAgent: 0, delivered: 0, deliveredPercent: null, interruptedAgentHooks: 5, interruptedOtherHooks: 0 }));
@@ -543,7 +603,7 @@ describe('(c) the daily figures', () => {
 });
 
 describe('regression coverage for the review findings', () => {
-  const guardState = () => join(configDir, '.omc', 'jev-guard');
+  const guardState = () => join(configDir, '.omc', 'jev-delivery');
   const badResult = (ts, interrupted) => ({ ts, windowHours: 24, decisions: 0, withAgent: 0, delivered: 0, deliveredPercent: null, interruptedAgentHooks: interrupted, interruptedOtherHooks: 0 });
 
   it('stays inactive for a plan-mode hook when OMC_JEV_PLAN_MODE turns routing off or to shadow', () => {
@@ -718,7 +778,7 @@ describe('the hook scripts', () => {
     mkdirSync(home, { recursive: true });
     execFileSync('git', ['init', '--quiet'], { cwd: project, stdio: 'ignore' });
     // keep the daily check out of these runs
-    mkdirSync(join(configDir, '.omc', 'jev-guard'), { recursive: true });
+    mkdirSync(dirname(dailyStatePath(configDir, join(root, 'jev-log'), 'daily.json')), { recursive: true });
     writeFileSync(dailyStatePath(configDir, join(root, 'jev-log'), 'daily.json'), JSON.stringify({ lastStart: Date.now() }));
   });
 
@@ -763,13 +823,13 @@ describe('the hook scripts', () => {
     writeSettings({ OMC_JEV: 'all:active' });
     const output = runHook(KEYWORD_DETECTOR, prompt(), env);
     expect(output.systemMessage).toBeUndefined();
-    expect(existsSync(join(configDir, '.omc', 'jev-guard', 'sessions'))).toBe(false);
+    expect(existsSync(join(configDir, '.omc', 'state', 'sessions'))).toBe(false);
   });
 
   it('session-start reports a short pre-tool-enforcer timeout and records the session', () => {
     const start = (extra) => runHook(SESSION_START, { hook_event_name: 'SessionStart', cwd: project, session_id: 'start-session', source: 'startup' }, extra);
     expect(start({ OMC_JEV_GUARD_MIN_TIMEOUT_S: '100000' }).systemMessage).toMatch(/Jev delivery guard: the PreToolUse timeout of pre-tool-enforcer/);
-    expect(existsSync(join(configDir, '.omc', 'jev-guard', 'sessions', 'start-session.json'))).toBe(true);
+    expect(existsSync(join(configDir, '.omc', 'state', 'sessions', 'start-session', 'jev-guard-state.json'))).toBe(true);
     expect(start({ OMC_JEV_GUARD_MIN_TIMEOUT_S: '1' }).systemMessage ?? '').not.toContain('Jev delivery guard');
     expect(start({ OMC_JEV_GUARD: '', OMC_JEV_GUARD_MIN_TIMEOUT_S: '100000' }).systemMessage ?? '').not.toContain('Jev delivery guard');
   });
