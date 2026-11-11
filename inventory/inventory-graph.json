@@ -5,15 +5,15 @@
   "provenance": {
     "base": "05c800f40d1ad53b42a78609d2667ef4f726808b",
     "planningHead": "0a91273e61dbbd47eb0af4c02844409251e08398",
-    "head": "ad402c37b684804f5cc9341870d08d352180592a",
-    "sourceSha256": "5fe7146e0b85fab6d43cbe71dfb45154a95fa69c9d7286886623e19de3afb456",
+    "head": "4401f7419b91285b4bcbbf096ce42e843460ef54",
+    "sourceSha256": "da88fa2fd423567402c4b0fc4c9629e803ef9f9b8e7d2951f678c41a890a0d81",
     "generatedAt": null,
     "generator": "scripts/generate-inventory-graph.mjs"
   },
   "base": "05c800f40d1ad53b42a78609d2667ef4f726808b",
   "planningHead": "0a91273e61dbbd47eb0af4c02844409251e08398",
-  "head": "ad402c37b684804f5cc9341870d08d352180592a",
-  "sourceSha256": "5fe7146e0b85fab6d43cbe71dfb45154a95fa69c9d7286886623e19de3afb456",
+  "head": "4401f7419b91285b4bcbbf096ce42e843460ef54",
+  "sourceSha256": "da88fa2fd423567402c4b0fc4c9629e803ef9f9b8e7d2951f678c41a890a0d81",
   "counts": {
     "public": {
       "skills": 84,
@@ -28,8 +28,8 @@
       "toolFiles": 65,
       "libFiles": 49,
       "templateHooks": 25,
-      "srcFiles": 1474,
-      "total": 1499
+      "srcFiles": 1476,
+      "total": 1501
     },
     "generated": {
       "distFiles": 5639,
@@ -40739,6 +40739,11 @@
         "path": "src/__tests__/agent-registry.test.ts"
       },
       {
+        "id": "src/__tests__/arguments-literal-substitution.test.ts",
+        "kind": "src",
+        "path": "src/__tests__/arguments-literal-substitution.test.ts"
+      },
+      {
         "id": "src/__tests__/artifact-descriptor-handoff.test.ts",
         "kind": "src",
         "path": "src/__tests__/artifact-descriptor-handoff.test.ts"
@@ -47104,6 +47109,11 @@
         "path": "src/team/__tests__/state-paths.test.ts"
       },
       {
+        "id": "src/team/__tests__/task-claim-renewal.test.ts",
+        "kind": "src",
+        "path": "src/team/__tests__/task-claim-renewal.test.ts"
+      },
+      {
         "id": "src/team/__tests__/task-recovery-checkpoint.test.ts",
         "kind": "src",
         "path": "src/team/__tests__/task-recovery-checkpoint.test.ts"
@@ -48312,6 +48322,11 @@
         "id": "tests/harbor-scenarios.test.ts",
         "kind": "other",
         "path": "tests/harbor-scenarios.test.ts"
+      },
+      {
+        "id": "tests/integration/atomic-write-retry.test.ts",
+        "kind": "other",
+        "path": "tests/integration/atomic-write-retry.test.ts"
       },
       {
         "id": "tests/integration/budget-guard.test.ts",
@@ -53318,6 +53333,36 @@
       {
         "from": "src/__tests__/agent-registry.test.ts",
         "to": "src/utils/frontmatter.ts",
+        "kind": "imports"
+      },
+      {
+        "from": "src/__tests__/arguments-literal-substitution.test.ts",
+        "to": "external:node:fs",
+        "kind": "imports"
+      },
+      {
+        "from": "src/__tests__/arguments-literal-substitution.test.ts",
+        "to": "external:node:os",
+        "kind": "imports"
+      },
+      {
+        "from": "src/__tests__/arguments-literal-substitution.test.ts",
+        "to": "external:node:path",
+        "kind": "imports"
+      },
+      {
+        "from": "src/__tests__/arguments-literal-substitution.test.ts",
+        "to": "external:vitest",
+        "kind": "imports"
+      },
+      {
+        "from": "src/__tests__/arguments-literal-substitution.test.ts",
+        "to": "src/commands/index.ts",
+        "kind": "imports"
+      },
+      {
+        "from": "src/__tests__/arguments-literal-substitution.test.ts",
+        "to": "src/hooks/auto-slash-command/executor.ts",
         "kind": "imports"
       },
       {
@@ -85596,6 +85641,56 @@
         "kind": "imports"
       },
       {
+        "from": "src/team/__tests__/task-claim-renewal.test.ts",
+        "to": "external:node:fs",
+        "kind": "imports"
+      },
+      {
+        "from": "src/team/__tests__/task-claim-renewal.test.ts",
+        "to": "external:node:fs/promises",
+        "kind": "imports"
+      },
+      {
+        "from": "src/team/__tests__/task-claim-renewal.test.ts",
+        "to": "external:node:os",
+        "kind": "imports"
+      },
+      {
+        "from": "src/team/__tests__/task-claim-renewal.test.ts",
+        "to": "external:node:path",
+        "kind": "imports"
+      },
+      {
+        "from": "src/team/__tests__/task-claim-renewal.test.ts",
+        "to": "external:vitest",
+        "kind": "imports"
+      },
+      {
+        "from": "src/team/__tests__/task-claim-renewal.test.ts",
+        "to": "src/lib/worktree-paths.ts",
+        "kind": "imports"
+      },
+      {
+        "from": "src/team/__tests__/task-claim-renewal.test.ts",
+        "to": "src/team/api-interop.ts",
+        "kind": "imports"
+      },
+      {
+        "from": "src/team/__tests__/task-claim-renewal.test.ts",
+        "to": "src/team/state/tasks.ts",
+        "kind": "imports"
+      },
+      {
+        "from": "src/team/__tests__/task-claim-renewal.test.ts",
+        "to": "src/team/team-ops.ts",
+        "kind": "imports"
+      },
+      {
+        "from": "src/team/__tests__/task-claim-renewal.test.ts",
+        "to": "src/team/types.ts",
+        "kind": "type-imports"
+      },
+      {
         "from": "src/team/__tests__/task-recovery-checkpoint.test.ts",
         "to": "external:node:fs",
         "kind": "imports"
@@ -92171,6 +92266,36 @@
         "kind": "imports"
       },
       {
+        "from": "tests/integration/atomic-write-retry.test.ts",
+        "to": "external:fs",
+        "kind": "imports"
+      },
+      {
+        "from": "tests/integration/atomic-write-retry.test.ts",
+        "to": "external:fs/promises",
+        "kind": "imports"
+      },
+      {
+        "from": "tests/integration/atomic-write-retry.test.ts",
+        "to": "external:os",
+        "kind": "imports"
+      },
+      {
+        "from": "tests/integration/atomic-write-retry.test.ts",
+        "to": "external:path",
+        "kind": "imports"
+      },
+      {
+        "from": "tests/integration/atomic-write-retry.test.ts",
+        "to": "external:vitest",
+        "kind": "imports"
+      },
+      {
+        "from": "tests/integration/atomic-write-retry.test.ts",
+        "to": "src/lib/atomic-write.ts",
+        "kind": "imports"
+      },
+      {
         "from": "tests/integration/budget-guard.test.ts",
         "to": "external:node:child_process",
         "kind": "imports"
@@ -94337,12 +94462,12 @@
       }
     ],
     "stats": {
-      "nodeCount": 8298,
-      "edgeCount": 9125,
-      "importEdgeCount": 7654,
+      "nodeCount": 8301,
+      "edgeCount": 9147,
+      "importEdgeCount": 7675,
       "registerEdgeCount": 105
     }
   },
-  "inventorySha256": "8052560f0b9c4008258c257af9bfec610abcba96f0b0c9abde8166a9cf56aba5",
-  "manifestSha256": "bc76b786bd6883c207f0035d94f2183806953a6bdf9235b635793bf7866b198a"
+  "inventorySha256": "17bd4843336901c6fa2b654bea306073342c2ae6603e9f6a5d1673f8688b7e7e",
+  "manifestSha256": "cdf8180979fc879514a8ee5ce2c9d5d9c28bf1f9eb2d158c6648bd88254cc427"
 }
