@@ -15,12 +15,15 @@
  * are existing repo code whose bugs must not be masked.
  */
 
+import { randomUUID } from 'node:crypto';
+import { existsSync, renameSync, statSync } from 'node:fs';
 import { appendFile, mkdir } from 'node:fs/promises';
 import { join } from 'node:path';
 import type * as JevBreaker from '../../../scripts/lib/jev-breaker.mjs';
 import { JevClientError, queryJev } from './client.js';
 import { ACTIVATED_POINTS, boundExcerpts, excerptCharsFor, parseJevConfig, pointState } from './config.js';
-import type { JevAnswer, JevQuestions, JevResponse, JevUsage, ResolveMode, ResolveResult } from './types.js';
+import type { JevConfig } from './config.js';
+import type { JevAnswer, JevLogContext, JevQuestions, JevResponse, JevUsage, ResolveMode, ResolveResult } from './types.js';
 
 const CIRCUIT_FAILURE_THRESHOLD = 3;
 
@@ -116,11 +119,16 @@ export interface ResolveJudgmentArgs<T> {
    * is fire-and-forget and the comparison is logged when it settles.
    */
   blocking?: boolean;
+  /**
+   * The hook input of the call being judged, or any object carrying its ids
+   * (see jevLogContextOf). Logged with OMC_JEV_LOG_CONTEXT=1, never sent.
+   */
+  logContext?: unknown;
   /** Test hook: injected transport. */
   fetchFn?: typeof fetch;
 }
 
-interface ShadowLogEntry {
+interface ShadowLogEntry extends JevLogContext {
   ts: string;
   point: string;
   /** cap / circuit-open: a call the opt-in shared request limit or breaker held back. */
@@ -168,11 +176,64 @@ function firstAnswer(response: JevResponse, questions: JevQuestions): JevAnswer 
   return Object.values(response.answers)[0] as JevAnswer;
 }
 
-/** Best-effort JSONL append under the shadow-log dir. Never throws. */
-async function writeShadowLog(entry: ShadowLogEntry, logDir: string): Promise<void> {
+/** Log field name -> the names a hook input may use for it (snake or camel case). */
+const LOG_CONTEXT_FIELDS: Readonly<Record<keyof JevLogContext, readonly string[]>> = {
+  tool_use_id: ['tool_use_id', 'toolUseId'],
+  session_id: ['session_id', 'sessionId'],
+  cwd: ['cwd', 'directory'],
+  agent_id: ['agent_id', 'agentId'],
+  agent_type: ['agent_type', 'agentType'],
+  prompt_id: ['prompt_id', 'promptId'],
+  request_id: ['request_id'],
+};
+const LOG_CONTEXT_MAX_CHARS = 1000;
+
+/**
+ * The ids of one hook call for the Jev logs: tool_use_id, session_id, cwd,
+ * agent_id, agent_type, prompt_id and request_id, read from a hook input
+ * (snake or camel case). Only non-empty strings are kept, each cut to 1000
+ * characters. Mirror of jevLogContextOf in scripts/jev-resolve.mjs.
+ */
+export function jevLogContextOf(source: unknown): JevLogContext {
+  const context: JevLogContext = {};
+  if (!source || typeof source !== 'object') return context;
+  const input = source as Record<string, unknown>;
+  for (const [field, names] of Object.entries(LOG_CONTEXT_FIELDS) as [keyof JevLogContext, readonly string[]][]) {
+    const value = names.map((name) => input[name]).find((candidate): candidate is string => typeof candidate === 'string' && candidate !== '');
+    if (value !== undefined) context[field] = value.slice(0, LOG_CONTEXT_MAX_CHARS);
+  }
+  return context;
+}
+
+/**
+ * Rotate one Jev log file before an append. A file larger than maxBytes is
+ * renamed to <name>-<YYYYMMDD-HHmmss>-<pid>.jsonl (UTC) in the same directory,
+ * so the append starts a new file. maxBytes 0 turns rotation off. An existing
+ * target is never overwritten, and a failed rename (another process rotated
+ * the file first, the file is locked) is ignored: rotation is best-effort and
+ * must never cost the line being appended. Rotated files are never deleted.
+ * Every writer of a Jev log file calls this right before appending.
+ * Mirror of rotateJevLog in scripts/jev-resolve.mjs.
+ */
+export function rotateJevLog(path: string, maxBytes: number, now: Date = new Date()): void {
+  if (!(maxBytes > 0)) return;
   try {
-    await mkdir(logDir, { recursive: true });
-    await appendFile(join(logDir, 'shadow.jsonl'), JSON.stringify(entry) + '\n', 'utf8');
+    if (statSync(path).size <= maxBytes) return;
+    const stamp = now.toISOString().replace(/\.\d+Z$/, '').replace(/[-:]/g, '').replace('T', '-');
+    const target = path.replace(/\.jsonl$/, '') + '-' + stamp + '-' + process.pid + '.jsonl';
+    if (!existsSync(target)) renameSync(path, target);
+  } catch {
+    // Missing file or failed rename: nothing to rotate, the append goes on.
+  }
+}
+
+/** Best-effort JSONL append under the shadow-log dir, rotated per OMC_JEV_LOG_MAX_MB. Never throws. */
+async function writeShadowLog(entry: ShadowLogEntry, config: Pick<JevConfig, 'logDir' | 'logMaxBytes'>): Promise<void> {
+  try {
+    await mkdir(config.logDir, { recursive: true });
+    const path = join(config.logDir, 'shadow.jsonl');
+    rotateJevLog(path, config.logMaxBytes);
+    await appendFile(path, JSON.stringify(entry) + '\n', 'utf8');
   } catch {
     // Best-effort logging: a logging failure must never affect the judgment.
   }
@@ -254,6 +315,8 @@ export async function resolveJudgment<T>(resolveJudgmentArgs: ResolveJudgmentArg
   // Only the state carries user text; question definitions are static (they must never embed user text) and go out whole.
   const boundedState = boundExcerpts(args.state, excerptCharsFor(args.point, config));
   const startedAt = Date.now();
+  // OMC_JEV_LOG_CONTEXT: the call's ids and one request_id for every line of this judgment.
+  const logFields = config.logContext ? { ...jevLogContextOf(args.logContext), request_id: randomUUID() } : undefined;
 
   // Opt-in breaker and request limit shared with every process of the machine.
   const shared = sharedBreakerWanted() ? await loadSharedBreaker(config.endpoint, config.apiKey) : undefined;
@@ -276,6 +339,7 @@ export async function resolveJudgment<T>(resolveJudgmentArgs: ResolveJudgmentArg
       const logEntry = {
         ts: new Date().toISOString(),
         point: args.point,
+        ...logFields,
         mode: skip.mode,
         state: boundedState,
         heuristic: loggableHeuristic,
@@ -286,9 +350,9 @@ export async function resolveJudgment<T>(resolveJudgmentArgs: ResolveJudgmentArg
       };
       // For nonblocking shadow calls, don't wait for the log write to complete.
       if (args.blocking === false) {
-        void writeShadowLog(logEntry, config.logDir);
+        void writeShadowLog(logEntry, config);
       } else {
-        await writeShadowLog(logEntry, config.logDir);
+        await writeShadowLog(logEntry, config);
       }
       return { answer: heuristic, source: 'twin', mode: skip.mode };
     }
@@ -336,10 +400,10 @@ export async function resolveJudgment<T>(resolveJudgmentArgs: ResolveJudgmentArg
     void attempt.then((outcome) => {
       if (outcome.ok) {
         recordSuccess(args.point);
-        void writeShadowLog(buildLogEntry(args.point, boundedState, startedAt, 'shadow', loggableHeuristic, outcome.response, args.questions), config.logDir);
+        void writeShadowLog(buildLogEntry(args.point, boundedState, startedAt, 'shadow', loggableHeuristic, outcome.response, args.questions, logFields), config);
       } else {
         recordFailure(args.point);
-        void writeShadowLog(buildLogEntry(args.point, boundedState, startedAt, 'degraded', loggableHeuristic, null, undefined, failureFields(outcome.failure)), config.logDir);
+        void writeShadowLog(buildLogEntry(args.point, boundedState, startedAt, 'degraded', loggableHeuristic, null, args.questions, logFields, failureFields(outcome.failure)), config);
       }
       // Belt-and-braces: a future throw in this callback must never become an
       // unhandled rejection that kills a one-shot hook process.
@@ -355,12 +419,12 @@ export async function resolveJudgment<T>(resolveJudgmentArgs: ResolveJudgmentArg
     const outcome = await attempt;
     if (!outcome.ok) {
       recordFailure(args.point);
-      await writeShadowLog(buildLogEntry(args.point, boundedState, startedAt, 'degraded', loggableHeuristic, null, undefined, failureFields(outcome.failure)), config.logDir);
+      await writeShadowLog(buildLogEntry(args.point, boundedState, startedAt, 'degraded', loggableHeuristic, null, args.questions, logFields, failureFields(outcome.failure)), config);
       return { answer: heuristic, source: 'twin', mode: 'degraded' };
     }
     recordSuccess(args.point);
     const jevAnswer = firstAnswer(outcome.response, args.questions);
-    await writeShadowLog(buildLogEntry(args.point, boundedState, startedAt, 'active', loggableHeuristic, outcome.response, args.questions), config.logDir);
+    await writeShadowLog(buildLogEntry(args.point, boundedState, startedAt, 'active', loggableHeuristic, outcome.response, args.questions, logFields), config);
     const answer = args.mapAnswer ? args.mapAnswer(jevAnswer) : (jevAnswer as unknown as T);
     return { answer, source: 'jev', mode: 'active' };
   }
@@ -371,7 +435,7 @@ export async function resolveJudgment<T>(resolveJudgmentArgs: ResolveJudgmentArg
     console.error('[jev] ' + args.point + ': degraded - ' + outcome.error);
     const heuristic = twinAnswer();
     const loggableHeuristic = extractHeuristicForLogging(heuristic, args.questions, args.mapHeuristic, args.questionSet);
-    await writeShadowLog(buildLogEntry(args.point, boundedState, startedAt, 'degraded', loggableHeuristic, null, undefined, failureFields(outcome.failure)), config.logDir);
+    await writeShadowLog(buildLogEntry(args.point, boundedState, startedAt, 'degraded', loggableHeuristic, null, args.questions, logFields, failureFields(outcome.failure)), config);
     return { answer: heuristic, source: 'twin', mode: 'degraded' };
   }
 
@@ -379,7 +443,7 @@ export async function resolveJudgment<T>(resolveJudgmentArgs: ResolveJudgmentArg
   const heuristic = twinAnswer();
   const loggableHeuristic = extractHeuristicForLogging(heuristic, args.questions, args.mapHeuristic, args.questionSet);
   const jevAnswer = firstAnswer(outcome.response, args.questions);
-  await writeShadowLog(buildLogEntry(args.point, boundedState, startedAt, mode === 'active' ? 'active' : 'shadow', loggableHeuristic, outcome.response, args.questions), config.logDir);
+  await writeShadowLog(buildLogEntry(args.point, boundedState, startedAt, mode === 'active' ? 'active' : 'shadow', loggableHeuristic, outcome.response, args.questions, logFields), config);
   if (mode === 'active') {
     const answer = args.mapAnswer ? args.mapAnswer(jevAnswer) : (jevAnswer as unknown as T);
     return { answer, source: 'jev', mode: 'active' };
@@ -396,13 +460,24 @@ function buildLogEntry(
   heuristic: unknown,
   response: JevResponse | null,
   questions?: JevQuestions,
+  logFields?: JevLogContext,
   extra: Pick<ShadowLogEntry, 'error' | 'rpm'> = {},
 ): ShadowLogEntry {
-  const jev = response ? firstAnswer(response, questions ?? {}) : null;
+  // With OMC_JEV_LOG_CONTEXT (logFields set) `jev` answers the first question
+  // only, null when Jev did not answer it; otherwise firstAnswer's fallback.
+  const firstQuestion = Object.keys(questions ?? {})[0];
+  const jev = !response
+    ? null
+    : !logFields
+      ? firstAnswer(response, questions ?? {})
+      : firstQuestion !== undefined && Object.hasOwn(response.answers, firstQuestion)
+        ? response.answers[firstQuestion]
+        : null;
   const safeUsage = sanitizeUsage(response?.usage);
   return {
     ts: new Date().toISOString(),
     point,
+    ...logFields,
     mode: entryMode,
     state: boundedState,
     heuristic,

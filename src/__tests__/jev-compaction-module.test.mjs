@@ -788,6 +788,17 @@ describe('jev-compaction module: shared breaker and request limit (OMC_JEV_BREAK
   const compactShared = (c, messages, options = {}, event = {}) => compactOnce(messages, { env: c.env, diskPrefix, ...options }, event);
   const openByScripts = (c, status, retryAfter) => recordFailure(c.settings, sharedClassifyFailure({ status, retryAfter }));
   const hang = () => new Promise(() => {});
+  // With a fake clock that shortens every timer of 5 s or more to 5 ms, the failure bookkeeping that
+  // runs after a request without a response outlives the compaction's own budget; it finishes on its
+  // own, so a test reads the breaker once it is there instead of at the moment the compaction returns.
+  async function openBreakerOf(c) {
+    for (let waited = 0; waited < 3000; waited += 20) {
+      const open = readBreaker(c.settings, Date.now());
+      if (open) return open;
+      await new Promise((resolve) => setTimeout(resolve, 20));
+    }
+    return readBreaker(c.settings, Date.now());
+  }
   // The limit counts UTC minutes: do not start a test that would cross a minute boundary.
   async function calmMinute() {
     const left = 60_000 - (Date.now() % 60_000);
@@ -996,9 +1007,9 @@ describe('jev-compaction module: shared breaker and request limit (OMC_JEV_BREAK
     expect(readBreaker(two.settings, Date.now())).toBeUndefined();
     const c = shared({ OMC_JEV_BREAKER: '1' });
     const before = Date.now();
-    const run = await compactShared(c, conversation(110, { chars: 600 }), { respond: hang, clockAfter: 5 });
+    const run = await compactShared(c, conversation(110, { chars: 600 }), { respond: hang, clockAfter: 5, fsDelayMs: 30 });
     expect(run.records()[0]).toMatchObject({ reason: 'timeout', requests: 3 });
-    const open = readBreaker(c.settings, Date.now());
+    const open = await openBreakerOf(c);
     expect(open).toMatchObject({ reason: 'no-response' });
     expect(open.until - before).toBeGreaterThan(58_000);
     expect(open.until - before).toBeLessThanOrEqual(61_000);
@@ -1009,8 +1020,8 @@ describe('jev-compaction module: shared breaker and request limit (OMC_JEV_BREAK
     recordFailure(c.settings, sharedClassifyFailure({ noResponse: true }));
     recordFailure(c.settings, sharedClassifyFailure({ noResponse: true }));
     expect(readBreaker(c.settings, Date.now())).toBeUndefined();
-    await compactShared(c, conversation(30), { respond: hang, clockAfter: 5 });
-    expect(readBreaker(c.settings, Date.now())).toMatchObject({ reason: 'no-response' });
+    await compactShared(c, conversation(30), { respond: hang, clockAfter: 5, fsDelayMs: 30 });
+    expect(await openBreakerOf(c)).toMatchObject({ reason: 'no-response' });
   });
 
   it('(c) OMC_JEV_MAX_RPM is one limit with the script side: compaction takes the slots the script side left, medium priority', async () => {
