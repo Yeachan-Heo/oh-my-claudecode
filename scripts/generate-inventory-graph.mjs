@@ -682,15 +682,30 @@ async function main() {
       process.exit(2);
     }
     
-    // Compare structural content (inventorySha256, counts, graph, public, internal, generated)
-    // by extracting the commit baseline from fresh
+    // Compare the complete minimal baseline (provenance anchors + schema)
+    // against the fresh generation to ensure on-disk baseline is valid
     const freshCommit = toCommitBaseline(fresh);
     
-    if (freshCommit.inventorySha256 !== onDisk.inventorySha256) {
-      console.error('[inventory-graph] drift detected: inventorySha256 mismatch');
-      console.error(`  fresh: ${freshCommit.inventorySha256}`);
-      console.error(`  on-disk: ${onDisk.inventorySha256}`);
-      console.error('  to refresh: node scripts/generate-inventory-graph.mjs --write');
+    // Check all required fields of the minimal baseline
+    if (onDisk.schemaVersion !== SCHEMA_VERSION) {
+      console.error(`[inventory-graph] schemaVersion mismatch: expected ${SCHEMA_VERSION}, got ${onDisk.schemaVersion}`);
+      process.exit(1);
+    }
+    if (onDisk.repository !== REPOSITORY) {
+      console.error(`[inventory-graph] repository mismatch: expected ${REPOSITORY}, got ${onDisk.repository}`);
+      process.exit(1);
+    }
+    if (!onDisk.provenance?.generator) {
+      console.error('[inventory-graph] provenance.generator is missing or invalid');
+      process.exit(1);
+    }
+    
+    // Compare the complete committed baseline structure
+    const freshJson = JSON.stringify(freshCommit);
+    const onDiskJson = JSON.stringify(onDisk);
+    if (freshJson !== onDiskJson) {
+      console.error('[inventory-graph] baseline structure mismatch');
+      console.error('[inventory-graph] to refresh: node scripts/generate-inventory-graph.mjs --write');
       process.exit(1);
     }
     

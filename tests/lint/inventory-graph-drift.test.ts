@@ -502,4 +502,31 @@ describe('inventory-graph drift enforcement (#3702)', () => {
       }
     }
   });
+
+  it('verify mode rejects malformed minimal baselines', { timeout: 120_000 }, () => {
+    const opts = { cwd: REPO_ROOT, encoding: 'utf8' as const, maxBuffer: 20 * 1024 * 1024 };
+    const valid = () => ({
+      schemaVersion: 2,
+      repository: 'Yeachan-Heo/oh-my-claudecode',
+      provenance: { base: EXPECTED_BASE, planningHead: EXPECTED_PLANNING_HEAD, generator: 'scripts/generate-inventory-graph.mjs' } as Record<string, unknown>,
+    });
+    const cases: Array<[string, Record<string, unknown>]> = [
+      ['missing schemaVersion', { repository: 'Yeachan-Heo/oh-my-claudecode', provenance: { base: EXPECTED_BASE, planningHead: EXPECTED_PLANNING_HEAD, generator: 'scripts/generate-inventory-graph.mjs' } }],
+      ['missing repository', { schemaVersion: 2, provenance: { base: EXPECTED_BASE, planningHead: EXPECTED_PLANNING_HEAD, generator: 'scripts/generate-inventory-graph.mjs' } }],
+      ['missing provenance.generator', { schemaVersion: 2, repository: 'Yeachan-Heo/oh-my-claudecode', provenance: { base: EXPECTED_BASE, planningHead: EXPECTED_PLANNING_HEAD } }],
+      ['wrong schemaVersion', { ...valid(), schemaVersion: 1 }],
+      ['wrong repository', { ...valid(), repository: 'other/repo' }],
+      ['wrong base', (() => { const m = valid(); m.provenance.base = '0'.repeat(40); return m; })()],
+    ];
+    for (const [label, baseline] of cases) {
+      const temp = join(REPO_ROOT, `.tmp-malformed-${process.pid}-${Math.random().toString(16).slice(2)}.json`);
+      try {
+        writeFileSync(temp, JSON.stringify(baseline, null, 2));
+        const result = spawnSync('node', [GENERATOR, '--verify', '--out', temp], opts);
+        expect(result.status, `should reject malformed baseline (${label}): stdout=${result.stdout}, stderr=${result.stderr}`).not.toBe(0);
+      } finally {
+        if (existsSync(temp)) unlinkSync(temp);
+      }
+    }
+  });
 });
