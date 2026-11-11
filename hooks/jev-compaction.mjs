@@ -49,7 +49,9 @@
  * whose prose names such a path (it is kept as if unanswered), nor what TaskOutput or BashOutput returns
  * (the output of a call started in the background; it is kept the same way), nor a Read or `tail` of the
  * output file of such a call on a secret or private path. A line naming such a path in a result, an
- * input, the user's words or the /compact instructions is sent as SECRET_LINE.
+ * input, the user's words or the /compact instructions is sent as SECRET_LINE (after its private key
+ * blocks are masked), and a line cut at a head or tail edge that does not end within LINE_EDGE_CHARS as
+ * LONG_LINE.
  *
  * Shared breaker and request limit (OMC_JEV_BREAKER=1, OMC_JEV_MAX_RPM=<n>): the same files and rules as
  * the script side (scripts/lib/jev-breaker.mjs, see its header), under the same state directory and
@@ -93,7 +95,7 @@
  * question are mirrors, and src/__tests__/jev-compaction-module.test.mjs locks their parity.
  */
 
-import { maskSecrets } from '../scripts/lib/jev-mask.mjs';
+import { maskPrivateKeys, maskSecrets } from '../scripts/lib/jev-mask.mjs';
 
 const POINT = 'compaction';
 // The last messages stay whole: the work in flight.
@@ -228,7 +230,8 @@ const NOT_USER_PREFIXES = [
 // environment, rc and *.pub, and an id_rsa, id_dsa, id_ecdsa or id_ed25519 key anywhere), git and gh credentials,
 // Claude Code credentials, AWS credentials, .netrc (_netrc on Windows), .env and .envrc files (not a .example
 // template), each also as a renamed copy (a prefix or a copy suffix: old_id_rsa, id_rsa.bak, backup.ssh/,
-// .ssh.bak/, old.netrc, backup.env, my-app.env, .env.production.local). A .netrc or .env name starts after a
+// .ssh.bak/, .ssh2/, .sshkeys/, old.netrc, backup.env, my-app.env, .env.production.local; a .ssh directory name goes
+// on only with a digit, a punctuation mark, a copy word or keys, so .sshuttle/ is not one). A .netrc or .env name starts after a
 // separator, a quote, or a shell or prose delimiter, never inside a code identifier (`ctx.env`, `ctx.app.env`). A
 // .env name ends before such a delimiter, a glob or backup mark (* ~ #) or a dot that ends a sentence
 // (`/repo/.env:2:` of grep, "edit .env, then", "in `.env`."), not before a slash (a `.env/` directory). Every prefix
@@ -238,7 +241,7 @@ const SECRET_NAME = String.raw`[^\s"'\x60\\/=;|&<>()[\]{},:@*]`;
 const SECRET_FILE = String.raw`[^\s"'\x60\\/;|&<>()[\]{},:]`;
 const SECRET_ENV = String.raw`\.env(?:rc)?(?:[._-](?!example(?![a-z0-9]))[a-z0-9]+){0,4}(?=$|[\s"'\x60;|&<>()[\]{},:!?*~#]|\.(?![a-z0-9_-]))`;
 const SECRET_PATH = new RegExp([
-  String.raw`[\\/][^\s"'\\/]{0,80}\.ssh[^\s"'\\/]{0,80}[\\/]+(?!known_hosts|authorized_keys|(?:config|environment|rc)(?!${SECRET_FILE})|config\.d[\\/])(?!${SECRET_FILE}{0,255}\.pub(?!${SECRET_FILE}))${SECRET_FILE}+`,
+  String.raw`[\\/][^\s"'\\/]{0,80}\.ssh(?:(?:[^a-z\s"'\\/]|bak|backup|old|orig|save|copy|prev|new|tmp|temp|keys?|archive)[^\s"'\\/]{0,80})?[\\/]+(?!known_hosts|authorized_keys|(?:config|environment|rc)(?!${SECRET_FILE})|config\.d[\\/])(?!${SECRET_FILE}{0,255}\.pub(?!${SECRET_FILE}))${SECRET_FILE}+`,
   `${SECRET_START}${SECRET_NAME}{0,80}id_(?:rsa|dsa|ecdsa|ed25519)(?![a-z])(?!${SECRET_NAME}{0,80}\\.pub(?!${SECRET_NAME}))`,
   String.raw`\.git-credentials\b`,
   String.raw`[\\/]\.config[\\/]+gh[\\/]+hosts\.ya?ml\b`,
@@ -269,6 +272,24 @@ const LINE_EDGE_CHARS = 4 * MASK_SLACK_CHARS;
 // What Jev gets instead of a line that names a secret or private path (the path and the rest of the line,
 // such as a grep hit, stay out).
 const SECRET_LINE = '[line omitted: secret path]';
+// What Jev gets instead of the part of a line cut at a head or tail edge that does not end within LINE_EDGE_CHARS:
+// the rest of that line is not read, so it may name a secret path (fail closed).
+const LONG_LINE = '[line omitted: too long to check]';
+// A tool may take a path in parts ({ directory, name }, { root, relative }, segments in an array, a directory as a key).
+// The last line of a string or key whose last two segments name .ssh, .aws or .config, or which ends with a private
+// path up to one of its slashes, is joined by a slash with the first line of every other string and key of the input.
+// A secret path the join makes spans that slash, so only JOIN_EDGE_CHARS (and the length of the longest private path)
+// on each side of it are read. A join that ends at a directory that still wants a child (`.config/gh`, a private path
+// cut at a slash) is joined again with every other string (`['/home/u', '.config', 'gh', 'hosts.yml']`, three parts, at
+// most JOIN_PARTS_MAX of them). A string whose start is a secret path under a root (`.config/gh/hosts.yml`) is joined
+// with every string that is a path (JOIN_ROOT: `{ root: '/home/u', relative: '.config/gh/hosts.yml' }`). The joins are
+// not narrowed by what the other strings look like: an option next to a .ssh directory (`encoding: 'utf-8'`) is joined too,
+// so such a call is held back even when its file is known_hosts (fail closed; one traced result costs less than a key sent).
+const JOIN_EDGE_CHARS = 300;
+const JOIN_PARTS_MAX = 3;
+const JOIN_DIR = /\.(?:ssh|aws)|(?:^|\/)\.config(?:\/|$)/i;
+const JOIN_ROOT = /[/~$%]|:$|^\.{0,2}$/;
+const JOIN_GH_DIR = /\.config\/gh\/?$/i;
 
 /** Mirror of parseJevEnv(POINT) in scripts/jev-resolve.mjs for a named-only point. */
 export function pointMode(raw, key) {
@@ -341,16 +362,26 @@ export function classifyFailure(result, now = Date.now()) {
 function maskedHeadTail(text, head, tail, privatePaths = []) {
   const clean = (part) => maskSecrets(omitSecretLines(part, privatePaths));
   if (text.length <= head + tail + 2 * MASK_SLACK_CHARS) return headTail(clean(text), head, tail);
-  // Each part is widened to whole lines (at most LINE_EDGE_CHARS more), so omitSecretLines sees the line its edge falls in.
-  let end = head + MASK_SLACK_CHARS;
-  const nl = text.indexOf('\n', end);
-  end = nl < 0 ? Math.min(text.length, end + LINE_EDGE_CHARS) : Math.min(nl, end + LINE_EDGE_CHARS);
-  let start = text.length - tail - MASK_SLACK_CHARS;
-  const pl = text.lastIndexOf('\n', start);
-  start = pl < 0 ? Math.max(0, start - LINE_EDGE_CHARS) : Math.max(pl + 1, start - LINE_EDGE_CHARS);
-  const first = clean(text.slice(0, end)).slice(0, head);
-  const last = clean(text.slice(start)).slice(-tail);
+  const first = clean(headPart(text, head + MASK_SLACK_CHARS)).slice(0, head);
+  const last = clean(tailPart(text, text.length - tail - MASK_SLACK_CHARS)).slice(-tail);
   return `${first}\n[... ${text.length - head - tail} chars omitted ...]\n${last}`;
+}
+// The text up to `end` and the text from `start`, each widened to the whole line its edge falls in (at most
+// LINE_EDGE_CHARS more), so omitSecretLines sees that line; a line that does not end within that becomes LONG_LINE.
+function headPart(text, end) {
+  if (end >= text.length) return text;
+  const nl = text.indexOf('\n', end);
+  if (nl >= 0 ? nl <= end + LINE_EDGE_CHARS : text.length <= end + LINE_EDGE_CHARS) return nl >= 0 ? text.slice(0, nl) : text;
+  return text.slice(0, text.lastIndexOf('\n', end - 1) + 1) + LONG_LINE;
+}
+function tailPart(text, start) {
+  if (start <= 0) return text;
+  const pl = text.lastIndexOf('\n', start);
+  if (pl + 1 >= start - LINE_EDGE_CHARS) return text.slice(pl + 1);
+  // The cut line may end with a private key header: its block is masked before the line is dropped.
+  const rest = maskPrivateKeys(text.slice(start - LINE_EDGE_CHARS));
+  const nl = rest.indexOf('\n');
+  return nl < 0 ? LONG_LINE : LONG_LINE + rest.slice(nl);
 }
 const oneLine = (text) => String(text ?? '').replace(/\s+/g, ' ').trim();
 const clip = (text, max) => (text.length > max ? text.slice(0, max) : text);
@@ -935,9 +966,10 @@ function namesSecretPath(value, privatePaths) {
   return privatePaths.some((p) => v.includes(p));
 }
 
-// The text with every line that names a secret or private path replaced by SECRET_LINE (exported for tests).
+// The text with every line that names a secret or private path replaced by SECRET_LINE (exported for tests). Private
+// key blocks are masked first: the header of a block may be on such a line, and without it the body is not recognized.
 export function omitSecretLines(text, privatePaths) {
-  const s = String(text ?? '');
+  const s = maskPrivateKeys(text);
   if (!namesSecretPath(s, privatePaths)) return s;
   return s.split('\n').map((line) => (namesSecretPath(line, privatePaths) ? SECRET_LINE : line)).join('\n');
 }
@@ -952,32 +984,78 @@ function sentInputJson(input, privatePaths) {
   try { return JSON.stringify(input ?? {}, (_k, v) => clean(v)) ?? ''; } catch { return ''; }
 }
 
-// Does any string or key of the input name a secret or private path? At most SECRET_WALK_MAX strings and keys,
-// depth 8; beyond that it counts as yes (fail closed).
+// Does any string or key of the input name a secret or private path, or a join of two or three of them (a path in
+// parts, see JOIN_DIR)? At most SECRET_WALK_MAX strings and keys and SECRET_WALK_MAX joins, depth 8; beyond that it
+// counts as yes (fail closed).
 function anySecretPath(input, privatePaths) {
   let seen = 0;
-  const walk = (v, depth) => {
-    if (depth > 8) return true;
-    if (typeof v === 'string') return ++seen > SECRET_WALK_MAX || namesSecretPath(v, privatePaths);
-    if (Array.isArray(v)) return v.some((x) => walk(x, depth + 1));
-    if (v && typeof v === 'object') return Object.entries(v).some(([k, x]) => ++seen > SECRET_WALK_MAX || namesSecretPath(k, privatePaths) || walk(x, depth + 1));
+  const parts = [];
+  const edge = JOIN_EDGE_CHARS + Math.max(0, ...privatePaths.map((p) => p.length));
+  // A key is a first part only (a directory as a key); as a second part a field name would make `.ssh/<field>`.
+  const named = (text, key) => {
+    if (namesSecretPath(text, privatePaths)) return true;
+    const t = text.trim();
+    const nl = t.indexOf('\n');
+    const first = key ? '' : (nl < 0 ? t : t.slice(0, nl)).trimEnd().replace(/[\\/]+/g, '/').slice(0, edge);
+    const last = t.slice(t.lastIndexOf('\n') + 1).trimStart().replace(/[\\/]+/g, '/').slice(-edge);
+    if (first || last) parts.push({ first, last });
     return false;
   };
-  return walk(input, 0);
+  const walk = (v, depth) => {
+    if (depth > 8) return true;
+    if (typeof v === 'string') return ++seen > SECRET_WALK_MAX || named(v, false);
+    if (Array.isArray(v)) return v.some((x) => walk(x, depth + 1));
+    if (v && typeof v === 'object') return Object.entries(v).some(([k, x]) => ++seen > SECRET_WALK_MAX || named(k, true) || walk(x, depth + 1));
+    return false;
+  };
+  if (walk(input, 0)) return true;
+  // A private path cut at one of its slashes: the end of a string that is its first part.
+  const prefixes = privatePaths.flatMap((p) => [...p.matchAll(/(?<=.)\//g)].map((m) => p.slice(0, m.index)));
+  const wantsChild = (end) => prefixes.length > 0 && prefixes.some((x) => end.toLowerCase().endsWith(x));
+  const endOf = (a) => (a.last.startsWith('/') ? a.last : `/${a.last}`).replace(/\/$/, '');
+  let joins = 0;
+  // `end` joined by a slash with the first line of every part not in `used`; a join that still wants a child (a private
+  // path cut at a slash, `.config/gh`) is joined again, up to JOIN_PARTS_MAX parts.
+  const joined = (end, used) => {
+    for (const [j, b] of parts.entries()) {
+      if (used.includes(j) || !b.first) continue;
+      if (++joins > SECRET_WALK_MAX) return true;
+      const path = `${end}/${b.first}`.replace(/\/{2,}/g, '/');
+      if (namesSecretPath(path, privatePaths)) return true;
+      const cut = path.replace(/\/$/, '');
+      if (used.length < JOIN_PARTS_MAX - 1 && (JOIN_GH_DIR.test(cut) || wantsChild(cut)) && joined(cut, [...used, j])) return true;
+    }
+    return false;
+  };
+  for (const [i, a] of parts.entries()) {
+    const end = endOf(a);
+    if ((JOIN_DIR.test(end.split('/').slice(-2).join('/')) || wantsChild(end)) && joined(end, [i])) return true;
+  }
+  // A part that is a secret path under a root (`.config/gh/hosts.yml`) is joined with every part that is a path.
+  const roots = parts.flatMap((a, i) => (JOIN_ROOT.test(a.last) ? [i] : []));
+  if (!roots.length) return false;
+  for (const [j, b] of parts.entries()) {
+    if (!b.first || !SECRET_PATH.test(`/${b.first}`)) continue;
+    for (const i of roots) {
+      if (i === j) continue;
+      if (++joins > SECRET_WALK_MAX) return true;
+      if (namesSecretPath(`${endOf(parts[i])}/${b.first}`, privatePaths)) return true;
+    }
+  }
+  return false;
 }
 
 // The output files that calls started with run_in_background name in their results ("Output is being written to:
 // <file>", "output_file: <file>"), for calls on secret or private paths (`secret`) and for prose calls naming one
 // (`held`): a later Read, `tail` or `cat` of such a file reads that call's output. A file is a word of the first
 // OUTPUT_SCAN_CHARS of the result with at least two slashes (not a host hint such as `/tasks`, a directory or a
-// URL); it is kept whole and by its name (6 characters or more, for `cd <dir> && cat <name>` or `$D/<name>`), at most
-// OUTPUT_FILES_MAX of them, with runs of slashes joined and in lower case.
+// URL); it is kept whole and by its name (6 characters or more, for `cd <dir> && cat <name>` or `$D/<name>`), every one
+// of them, with runs of slashes joined and in lower case.
 const OUTPUT_SCAN_CHARS = 4096;
-const OUTPUT_FILES_MAX = 50;
 function backgroundOutputFiles(messages, privatePaths) {
   const results = new Map();
   for (const m of messages) if (m.role === 'user') for (const r of m.toolResults || []) results.set(r.tool_use_id, r.text || '');
-  const out = { secret: [], held: [] };
+  const out = { secret: new Set(), held: new Set() };
   for (const m of messages) {
     if (m.role !== 'assistant') continue;
     for (const u of m.toolUses || []) {
@@ -988,23 +1066,48 @@ function backgroundOutputFiles(messages, privatePaths) {
         const file = w.replace(/[.:]+$/, '').replace(/[\\/]+/g, '/').toLowerCase();
         if (file.includes('://') || file.endsWith('/') || (file.match(/\//g) || []).length < 2) continue;
         const name = file.slice(file.lastIndexOf('/') + 1);
-        for (const f of name.length >= 6 ? [file, name] : [file]) if (list.length < OUTPUT_FILES_MAX && !list.includes(f)) list.push(f);
+        for (const f of name.length >= 6 ? [file, name] : [file]) list.add(f);
       }
     }
   }
-  return out;
+  return { secret: fileIndex(out.secret), held: fileIndex(out.held) };
 }
-// Does a string of the input name one of the files as a whole name (not a part of a longer name or path)?
+// Does a string of the input name one of the files as a whole name (not a part of a longer name or path)? The files
+// are kept by the run of name characters they end with; where such a file ends, that run is the whole run of name
+// characters of the input, so each string is read once however many files there are. A file that does not end with a
+// name character is searched for whole.
 const FILE_NAME_CHAR = /[a-z0-9_.-]/;
+function fileIndex(files) {
+  const byRun = new Map();
+  const other = [];
+  for (const f of files) {
+    let k = f.length;
+    while (k > 0 && FILE_NAME_CHAR.test(f[k - 1])) k--;
+    if (k === f.length) other.push(f);
+    else {
+      const run = f.slice(k);
+      if (byRun.has(run)) byRun.get(run).push(f);
+      else byRun.set(run, [f]);
+    }
+  }
+  return { byRun, other, size: files.size };
+}
 function readsFile(input, files) {
-  if (!files.length) return false;
-  const names = (text) => files.some((f) => {
-    for (let i = text.indexOf(f); i >= 0; i = text.indexOf(f, i + 1)) {
-      const after = text[i + f.length];
-      if ((i === 0 || !FILE_NAME_CHAR.test(text[i - 1])) && (after === undefined || !(FILE_NAME_CHAR.test(after) || after === '/'))) return true;
+  if (!files.size) return false;
+  const wholeAt = (text, f, i) => {
+    const after = text[i + f.length];
+    return (i === 0 || !FILE_NAME_CHAR.test(text[i - 1])) && (after === undefined || !(FILE_NAME_CHAR.test(after) || after === '/'));
+  };
+  const names = (text) => {
+    for (const f of files.other) for (let i = text.indexOf(f); i >= 0; i = text.indexOf(f, i + 1)) if (wholeAt(text, f, i)) return true;
+    let start = 0;
+    for (let p = 0; p <= text.length; p++) {
+      if (p < text.length && FILE_NAME_CHAR.test(text[p])) continue;
+      if (p > start && text[p] !== '/') for (const f of files.byRun.get(text.slice(start, p)) ?? []) if (p >= f.length && text.startsWith(f, p - f.length) && wholeAt(text, f, p - f.length)) return true;
+      start = p + 1;
     }
     return false;
-  });
+  };
   let hit = false;
   try {
     JSON.stringify(input ?? {}, (_k, v) => { if (!hit && typeof v === 'string' && names(v.replace(/[\\/]+/g, '/').toLowerCase())) hit = true; return v; });
@@ -1056,21 +1159,30 @@ function userWords(m) {
 }
 
 // The task for the state: the /compact instructions first, then the last USER_MESSAGES user
-// messages, together USER_CHARS characters.
+// messages, together USER_CHARS characters. The part of each that is cleaned, as written (`mention`, in
+// lower case; an omitted line can let a later line into the budget), is only matched against the results
+// the user names (markMentioned) and is never sent.
 function userTask(messages, instructions, privatePaths = []) {
   let left = USER_CHARS;
   const clean = (text) => maskSecrets(omitSecretLines(text, privatePaths));
-  const instr = instructions ? clip(clean(String(instructions).slice(0, left + MASK_SLACK_CHARS)), left) : undefined;
-  if (instr) left -= instr.length;
+  const mention = [];
+  const raw = instructions ? headPart(String(instructions), left + MASK_SLACK_CHARS) : '';
+  const instr = instructions ? clip(clean(raw), left) : undefined;
+  if (instr) {
+    mention.push(raw);
+    left -= instr.length;
+  }
   const picked = [];
   for (let i = messages.length - 1; i >= 0 && picked.length < USER_MESSAGES && left > 0; i--) {
     const words = userWords(messages[i]);
     if (!words) continue;
-    const text = clip(clean(words.slice(0, left + MASK_SLACK_CHARS)), left);
+    const part = headPart(words, left + MASK_SLACK_CHARS);
+    const text = clip(clean(part), left);
     picked.unshift(text);
+    mention.push(part);
     left -= text.length;
   }
-  return { task: picked, instructions: instr };
+  return { task: picked, instructions: instr, mention: mention.join('\n').toLowerCase() };
 }
 
 // Results the user names: a file (by its name) or a URL the call opened that one of the last user
@@ -1097,12 +1209,12 @@ function mentions(text, name) {
   return new RegExp(`(?:^|[\\s"'\`(<\\[/\\\\=:])${escapeRegExp(name)}(?=$|[\\s"'\`)>\\],.;:!?])`).test(text);
 }
 function markMentioned(candidates, user) {
-  const text = [user.instructions || '', ...user.task].join('\n').toLowerCase();
+  const text = user.mention;
   let n = 0;
   for (const c of candidates) {
     if (c.secret || !c.textOnly) continue;
     for (const name of targetsOf(c.use.input)) {
-      if (mentions(text, name)) { c.score = Math.max(c.score, 1); c.asked = true; n++; break; }
+      if (text.includes(name) && mentions(text, name)) { c.score = Math.max(c.score, 1); c.asked = true; n++; break; }
     }
   }
   return n;
