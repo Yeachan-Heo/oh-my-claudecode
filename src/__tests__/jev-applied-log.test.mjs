@@ -507,6 +507,24 @@ describe('hook scripts with OMC_JEV_APPLIED_LOG=1', () => {
     expect(line).toMatchObject({ point: 'skill-trigger', applied: { keywords: { from: ['ralph'], to: [] }, choice: 'none' } });
   }, 60_000);
 
+  it('skill-trigger: no line when the follow-up routing of a ralplan session ends the hook without the keywords', async () => {
+    stubAnswers = { 'skill-trigger': { type: 'choice', choice: 'none' } };
+    const input = (context) => ({ cwd: context.cwd, session_id: 'session-1', prompt: '/ralph' });
+    const withoutState = makeContext();
+    await runHook(withoutState, 'keyword-detector.mjs', input(withoutState), 'skill-trigger');
+    expect(readLog(withoutState, 'applied.jsonl')).toEqual([
+      expect.objectContaining({ point: 'skill-trigger', applied: { keywords: { from: ['ralph'], to: [] }, choice: 'none' } }),
+    ]);
+
+    const withState = makeContext();
+    mkdirSync(join(withState.cwd, '.git'), { recursive: true });
+    const stateDir = join(withState.cwd, '.omc', 'state', 'sessions', 'session-1');
+    mkdirSync(stateDir, { recursive: true });
+    writeFileSync(join(stateDir, 'ralplan-state.json'), JSON.stringify({ active: true, session_id: 'session-1', current_phase: 'planning' }));
+    await runHook(withState, 'keyword-detector.mjs', input(withState), 'skill-trigger');
+    expect(readLog(withState, 'applied.jsonl')).toEqual([]);
+  }, 90_000);
+
   it('task-size: the heavy modes a small answer suppressed', async () => {
     stubAnswers = { 'task-size': { type: 'choice', choice: 'small', confidence: 0.95 } };
     const context = makeContext();
