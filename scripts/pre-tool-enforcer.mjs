@@ -23,7 +23,7 @@ import { readStdin } from './lib/stdin.mjs';
 import { resolveConfiguredAgentModel } from './lib/agent-model-config.mjs';
 import { BOUNDED_GIT_TIMEOUT_MS } from './lib/bounded-git-timeout.mjs';
 import { isSkillVisibleToUser } from './lib/skill-entitlements.mjs';
-import { isJevShadowOptedIn, jevNoulOf, recordJevShadow } from './lib/jev-shadow.mjs';
+import { isJevShadowOptedIn, jevNoulOf, recordJevShadow, setJevHookContext, recordJevApplied } from './lib/jev-shadow.mjs';
 import { resolveExcerptChars } from './jev-resolve.mjs';
 
 // Inlined from src/config/models.ts — avoids a dist/ import so the hook works
@@ -982,11 +982,34 @@ function recordModelRoutingShadow(toolName, toolInput, updatedToolInput, permiss
     return updatedToolInput;
   };
   // The model and effort the call had before Jev and the marker touched it (for the log).
-  const baseModel = (updatedToolInput || toolInput).model;
-  const baseEffort = (updatedToolInput || toolInput).effort;
+  // baseModel is the actual baseline that should be compared against Jev's answer:
+  // - Explicit model from input, or
+  // - Inherited session model (if forceInherit), or
+  // - Agent definition model (if no explicit model)
+  let baseModel = (updatedToolInput || toolInput).model;
+  if (!baseModel) {
+    // No explicit model: determine the implicit baseline
+    if (isForceInheritEnabled()) {
+      // forceInherit: use session model as baseline
+      baseModel = process.env.CLAUDE_MODEL || process.env.ANTHROPIC_MODEL || null;
+    } else {
+      // Normal case: use agent definition model as baseline
+      baseModel = readAgentDefinitionModel(originalInput.subagent_type) || null;
+    }
+  }
+  // The baseline effort should be capped if OMC_JEV_MAX_EFFORT_ALWAYS is enabled
+  let baseEffort = (updatedToolInput || toolInput).effort;
   // Read lazily and once: the cap is only looked at when an effort is set, and a bad value is reported once.
   let maxEffortValue;
   const maxEffort = () => (maxEffortValue ??= resolveMaxEffort());
+  
+  // When OMC_JEV_MAX_EFFORT_ALWAYS is enabled, cap the baseline effort too
+  if (isMaxEffortAlwaysEnabled() && baseEffort && typeof baseEffort === 'string') {
+    const capped = capEffort(baseEffort, maxEffort());
+    if (capped !== baseEffort) {
+      baseEffort = capped;
+    }
+  }
 
   // In active mode, Jev's answers replace the model and effort in the call,
   // explicit values included. Answers are read by question name: the API
@@ -996,6 +1019,15 @@ function recordModelRoutingShadow(toolName, toolInput, updatedToolInput, permiss
   if (answers && typeof answers === 'object') {
     const tierChoice = answers['model-tier']?.choice;
     const jevChoice = typeof tierChoice === 'string' ? tierChoice.toLowerCase() : undefined;
+    const effortAnswer = answers.effort;
+    const effortScore = effortAnswer?.type === 'score' ? effortAnswer.score : undefined;
+    const currentEffort = (updatedToolInput || toolInput).effort;
+    
+    // Track if model or effort was actually changed by Jev (not just capped)
+    const modelChanged = jevChoice && (jevChoice !== baseModel);
+    let jevAppliedEffort;
+    let effortChangedByJev = false;
+    
     // With forceInherit a call without a model deliberately inherits the session model,
     // and a tier alias the provider cannot resolve is denied: set the alias on such a call
     // only when it resolves to a provider model.
@@ -1010,13 +1042,27 @@ function recordModelRoutingShadow(toolName, toolInput, updatedToolInput, permiss
 
     // Only a score answer inside the declared 0-4 range counts; anything else
     // is treated as a missing effort answer.
-    const effortAnswer = answers.effort;
-    const effortScore = effortAnswer?.type === 'score' ? effortAnswer.score : undefined;
-    const currentEffort = (updatedToolInput || toolInput).effort;
     if (typeof effortScore === 'number' && Number.isFinite(effortScore) && effortScore >= 0 && effortScore <= 4) {
-      ensureUpdated().effort = effortFromScore(effortScore, maxEffort());
+      jevAppliedEffort = effortFromScore(effortScore, maxEffort());
+      if (jevAppliedEffort !== baseEffort) {
+        ensureUpdated().effort = jevAppliedEffort;
+        effortChangedByJev = true;
+      }
     } else if (typeof currentEffort === 'string' && capEffort(currentEffort, maxEffort()) !== currentEffort) {
+      // This is a cap-only change, not applied by Jev
       ensureUpdated().effort = capEffort(currentEffort, maxEffort());
+    }
+    
+    // Record applied changes when Jev's answers cause a model or effort change
+    if (modelChanged || effortChangedByJev) {
+      const applied = { subagent_type: originalInput.subagent_type || null };
+      if (modelChanged) {
+        applied.model = { from: baseModel ?? null, to: jevChoice };
+      }
+      if (effortChangedByJev) {
+        applied.effort = { from: baseEffort ?? null, to: jevAppliedEffort, score: effortScore };
+      }
+      recordJevApplied('model-routing', applied);
     }
   }
 
@@ -2271,6 +2317,9 @@ async function main() {
     // Record Skill invocations to flow trace
     data = {};
     try { data = JSON.parse(input); } catch {}
+
+    // Initialize Jev hook context for applied.jsonl logging (OMC_JEV_APPLIED_LOG)
+    await setJevHookContext(data);
 
     // Opt-in shell checks (OMC_SHELL_CHECKS=1) for Bash and PowerShell commands. Fail-open: any error here
     // leaves the hook behaving as without the checks.
