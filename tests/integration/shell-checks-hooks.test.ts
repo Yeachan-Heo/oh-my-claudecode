@@ -251,74 +251,70 @@ describe('shell checks in the hooks', () => {
     }
   });
 
-  it('carries agent_id, agent_type and prompt_id into checks.jsonl and errors.jsonl when the hook input has them', () => {
-    const logDir = join(cwd, 'logs');
-    const extra = { OMC_SHELL_CHECKS: '1', OMC_SHELL_CHECKS_LOG_DIR: logDir };
-    const eof = "/usr/bin/bash: -c: line 60: unexpected EOF while looking for matching `''";
+  describe('agent and prompt ids in the log rows', () => {
     const ids = { agent_id: 'agent-abc123', agent_type: 'oh-my-claudecode:executor', prompt_id: 'prompt-xyz789' };
     const idKeys = Object.keys(ids);
-    const checksRow = (sid: string) => rows(join(logDir, 'checks.jsonl')).filter((row) => row.session_id === sid);
-    const errorsRow = (sid: string) => rows(join(logDir, 'errors.jsonl')).filter((row) => row.session_id === sid);
-    const failureInput = (sid: string, fields: Record<string, unknown>) => ({ hook_event_name: 'PostToolUseFailure', tool_name: 'Bash', tool_input: { command: 'ls' }, error: `Exit code 2\n${eof}`, tool_use_id: `toolu_${sid}`, cwd, session_id: sid, ...fields });
+    const eof = "/usr/bin/bash: -c: line 60: unexpected EOF while looking for matching `''";
+    let logDir: string;
+    let extra: Record<string, string>;
+    beforeEach(() => {
+      logDir = join(cwd, 'logs');
+      extra = { OMC_SHELL_CHECKS: '1', OMC_SHELL_CHECKS_LOG_DIR: logDir };
+    });
 
-    // snake_case names, in the pre-tool hook and both post-tool hooks
-    let sid = session();
-    expect(runHook('pre-tool-enforcer.mjs', { ...preInput('echo hi', 'Bash', sid), ...ids }, extra).code).toBe(0);
-    expect(checksRow(sid)).toHaveLength(1);
-    expect(checksRow(sid)[0]).toMatchObject(ids);
-    sid = session();
-    expect(runHook('post-tool-use-failure.mjs', failureInput(sid, ids), extra).code).toBe(0);
-    expect(errorsRow(sid)).toHaveLength(1);
-    expect(errorsRow(sid)[0]).toMatchObject(ids);
-    sid = session();
-    const verifierInput = { hook_event_name: 'PostToolUse', tool_name: 'Bash', tool_input: { command: 'ls' }, tool_response: { stdout: '', stderr: eof }, tool_use_id: `toolu_${sid}`, cwd, session_id: sid, ...ids };
-    expect(runHook('post-tool-verifier.mjs', verifierInput, extra).code).toBe(0);
-    expect(errorsRow(sid)).toHaveLength(1);
-    expect(errorsRow(sid)[0]).toMatchObject(ids);
-
-    // camelCase names give the same fields
-    sid = session();
-    const camel = { agentId: ids.agent_id, agentType: ids.agent_type, promptId: ids.prompt_id };
-    runHook('pre-tool-enforcer.mjs', { ...preInput('echo hi', 'Bash', sid), ...camel }, extra);
-    expect(checksRow(sid)[0]).toMatchObject(ids);
-    expect(checksRow(sid)[0]).not.toHaveProperty('agentId');
-    sid = session();
-    runHook('post-tool-use-failure.mjs', failureInput(sid, camel), extra);
-    expect(errorsRow(sid)[0]).toMatchObject(ids);
-
-    // without them the rows have none of the three fields
-    sid = session();
-    runHook('pre-tool-enforcer.mjs', preInput('echo hi', 'Bash', sid), extra);
-    runHook('post-tool-use-failure.mjs', failureInput(sid, {}), extra);
-    expect(checksRow(sid)).toHaveLength(1);
-    expect(errorsRow(sid)).toHaveLength(1);
-    for (const key of idKeys) {
-      expect(checksRow(sid)[0]).not.toHaveProperty(key);
-      expect(errorsRow(sid)[0]).not.toHaveProperty(key);
+    const checksRows = (sid: string) => rows(join(logDir, 'checks.jsonl')).filter((row) => row.session_id === sid);
+    const errorsRows = (sid: string) => rows(join(logDir, 'errors.jsonl')).filter((row) => row.session_id === sid);
+    const run = (script: string, input: unknown) => {
+      const result = runHook(script, input, extra);
+      expect(result.code, `${script}: ${result.stderr}`).toBe(0);
+      return result;
+    };
+    const pre = (sid: string, fields: Record<string, unknown>) => run('pre-tool-enforcer.mjs', { ...preInput('echo hi', 'Bash', sid), ...fields });
+    const failure = (sid: string, fields: Record<string, unknown>) =>
+      run('post-tool-use-failure.mjs', { hook_event_name: 'PostToolUseFailure', tool_name: 'Bash', tool_input: { command: 'ls' }, error: `Exit code 2\n${eof}`, tool_use_id: `toolu_${sid}`, cwd, session_id: sid, ...fields });
+    const verifier = (sid: string, fields: Record<string, unknown>) =>
+      run('post-tool-verifier.mjs', { hook_event_name: 'PostToolUse', tool_name: 'Bash', tool_input: { command: 'ls' }, tool_response: { stdout: '', stderr: eof }, tool_use_id: `toolu_${sid}`, cwd, session_id: sid, ...fields });
+    // one row of each log for the session, written by the three hooks in turn
+    function allRows(sid: string, fields: Record<string, unknown>) {
+      pre(sid, fields);
+      failure(sid, fields);
+      const sidV = session();
+      verifier(sidV, fields);
+      const checks = checksRows(sid);
+      const errors = errorsRows(sid);
+      const verified = errorsRows(sidV);
+      expect(checks).toHaveLength(1);
+      expect(errors).toHaveLength(1);
+      expect(verified).toHaveLength(1);
+      return [checks[0], errors[0], verified[0]];
     }
 
-    // non-string, empty and missing values are left out; a later name is used when the first is empty
-    sid = session();
-    const bad = { agent_id: 42, agent_type: '', prompt_id: { id: 'x' } };
-    runHook('pre-tool-enforcer.mjs', { ...preInput('echo hi', 'Bash', sid), ...bad }, extra);
-    runHook('post-tool-use-failure.mjs', failureInput(sid, bad), extra);
-    for (const key of idKeys) {
-      expect(checksRow(sid)[0]).not.toHaveProperty(key);
-      expect(errorsRow(sid)[0]).not.toHaveProperty(key);
-    }
-    sid = session();
-    runHook('pre-tool-enforcer.mjs', { ...preInput('echo hi', 'Bash', sid), agent_id: '', agentId: 'agent-camel' }, extra);
-    expect(checksRow(sid)[0].agent_id).toBe('agent-camel');
+    it('copies agent_id, agent_type and prompt_id from snake_case or camelCase input into checks.jsonl and errors.jsonl', () => {
+      for (const row of allRows(session(), ids)) expect(row).toMatchObject(ids);
+      const camel = { agentId: ids.agent_id, agentType: ids.agent_type, promptId: ids.prompt_id };
+      for (const row of allRows(session(), camel)) {
+        expect(row).toMatchObject(ids);
+        for (const name of Object.keys(camel)) expect(row).not.toHaveProperty(name);
+      }
+      // the second name is used when the first one is empty
+      expect(allRows(session(), { agent_id: '', agentId: 'agent-camel' }).map((row) => row.agent_id)).toEqual(['agent-camel', 'agent-camel', 'agent-camel']);
+    });
 
-    // long values are cut to 1000 characters
-    sid = session();
-    const long = { agent_id: 'a'.repeat(1500), agent_type: 't'.repeat(1500), prompt_id: 'p'.repeat(1500) };
-    runHook('pre-tool-enforcer.mjs', { ...preInput('echo hi', 'Bash', sid), ...long }, extra);
-    runHook('post-tool-use-failure.mjs', failureInput(sid, long), extra);
-    for (const row of [checksRow(sid)[0], errorsRow(sid)[0]]) {
-      expect(row.agent_id).toBe('a'.repeat(1000));
-      expect(row.agent_type).toBe('t'.repeat(1000));
-      expect(row.prompt_id).toBe('p'.repeat(1000));
-    }
+    it('leaves the three fields out when the hook input has none, or only empty and non-string values', () => {
+      for (const fields of [{}, { agent_id: 42, agent_type: '', prompt_id: { id: 'x' } }]) {
+        for (const row of allRows(session(), fields)) {
+          for (const key of idKeys) expect(row).not.toHaveProperty(key);
+        }
+      }
+    });
+
+    it('cuts long values to 1000 characters', () => {
+      const long = { agent_id: 'a'.repeat(1500), agent_type: 't'.repeat(1500), prompt_id: 'p'.repeat(1500) };
+      for (const row of allRows(session(), long)) {
+        expect(row.agent_id).toBe('a'.repeat(1000));
+        expect(row.agent_type).toBe('t'.repeat(1000));
+        expect(row.prompt_id).toBe('p'.repeat(1000));
+      }
+    });
   });
 });
