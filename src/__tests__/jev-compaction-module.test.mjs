@@ -518,6 +518,22 @@ describe('jev-compaction module: active compaction', () => {
     }
   });
 
+  it('two rows of one API message with the same text are matched in API order: a message after the second, kept row is left to the host', async () => {
+    const words = 'Message after the second notice.';
+    const notice = '[Request interrupted by user for tool use]';
+    const base = conversation(30);
+    const t10 = base.findIndex((m) => resultOf([m], 't10'));
+    const messages = [...base.slice(0, t10), Object.freeze({ ...base[t10], text: notice }), Object.freeze({ role: 'user', text: notice, toolUses: [], handle: 'hint' }), ...base.slice(t10 + 1)];
+    const api = apiOf(messages);
+    const k = api.findIndex((a) => a.role === 'user' && a.content.some((b) => b.tool_use_id === 't10'));
+    api[k] = { ...api[k], content: [...api[k].content, { type: 'text', text: framed(words) }] };
+    expect(api[k].content.map((b) => b.text ?? b.type)).toEqual(['tool_result', notice, notice, framed(words)]);
+    const { out, records } = await compactWithApi(messages, api);
+    expect(records()[0]).toMatchObject({ result: 'jev', queued_user: 1, queued_carried: 0 });
+    expect(out.messages).toContain(messages[t10 + 1]);
+    expect(count(out.messages, framed(words))).toBe(0);
+  });
+
   it('the same message delivered again after a row that already carries a copy is carried again, not hidden by the copy', async () => {
     const words = 'continue';
     const messages = conversation(30, { needed: [10] });

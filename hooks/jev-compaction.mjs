@@ -890,13 +890,14 @@ function userWords(m) {
 // message (the API form keeps the order of the rows it joins, so with parallel results in rows of
 // their own that is the result before it, and a row shown after the results, such as an
 // interruption notice, takes the blocks after its text). A block equal to a row's text is shown
-// already.
+// already; each row shows one block, matched in API order.
 function queuedOf(messages, api) {
   if (!api) return null;
   const rows = new Map();
   const counts = { user: 0, other: 0 };
   const rowOfResult = new Map();
   const rowsOfText = new Map();
+  const shown = new Set();
   messages.forEach((m, i) => {
     if (m.role !== 'user') return;
     if (m.text) rowsOfText.set(m.text, [...(rowsOfText.get(m.text) || []), i]);
@@ -919,9 +920,11 @@ function queuedOf(messages, api) {
       if (b?.type !== 'text') continue;
       // Shown already only by a row of this API message: a result row of it, or a later user row
       // right after them. The same text elsewhere (a block an earlier compaction carried, a repeated
-      // "continue") is another delivery.
-      const r = (rowsOfText.get(b.text) || []).find((k) => k >= first && messages.slice(row + 1, k + 1).every((x) => x.role === 'user'));
+      // "continue") is another delivery. Two rows with the same text are two blocks: the first row not
+      // matched yet shows this one.
+      const r = (rowsOfText.get(b.text) || []).find((k) => k >= first && !shown.has(k) && messages.slice(row + 1, k + 1).every((x) => x.role === 'user'));
       if (r !== undefined) {
+        shown.add(r);
         anchor = r;
         continue;
       }
