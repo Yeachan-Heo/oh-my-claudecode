@@ -15,6 +15,7 @@ import os from "os";
 import { contextCollector } from "../../../features/context-injector/collector.js";
 import { loadProjectMemory, saveProjectMemory } from "../storage.js";
 import { addCustomNote } from "../learner.js";
+import { withProjectMemoryLock } from "../storage.js";
 import { CACHE_EXPIRY_MS } from "../constants.js";
 import type { ProjectMemory } from "../types.js";
 
@@ -226,6 +227,74 @@ describe("Project Memory rescan concurrency", () => {
     const final = await loadProjectMemory(tempDir);
     expect(
       final?.userDirectives.some((directive) => directive.context === directiveText),
+    ).toBe(true);
+  });
+
+  it("rescan waits for a writer holding the lock when merge starts", async () => {
+    const noteContent = "note written while holding the lock during rescan";
+
+    await saveProjectMemory(
+      tempDir,
+      makeMemory(tempDir, { lastScanned: Date.now() - CACHE_EXPIRY_MS - 60_000 }),
+    );
+
+    const detectionEntered = new Promise<void>((resolve) => {
+      detectorGate.entered = resolve;
+    });
+    let releaseWriter: (() => void) | null = null;
+    const writerLocked = new Promise<void>((resolve) => {
+      releaseWriter = resolve;
+    });
+
+    detectorGate.detected = makeMemory(tempDir, {
+      build: {
+        buildCommand: "pnpm build:rescan-waits",
+        testCommand: "pnpm test:rescan-waits",
+        lintCommand: null,
+        devCommand: null,
+        scripts: { build: "rescan-waits" },
+      },
+    });
+
+    const rescan = rescanProjectEnvironment(tempDir);
+    await detectionEntered;
+
+    // Start a writer that will hold the lock across the detection finish.
+    // This reproduces the case where a locked writer is active when the rescan
+    // merge phase tries to acquire the lock.
+    const writerTask = withProjectMemoryLock(tempDir, async () => {
+      // Signal that we have entered the lock.
+      // At this point, the rescan is waiting for the lock.
+      const existing = await loadProjectMemory(tempDir);
+      await saveProjectMemory(tempDir, {
+        ...existing!,
+        customNotes: [...(existing?.customNotes ?? []), { id: "test", created: Date.now(), content: noteContent }],
+      });
+      // Hold the lock until told to release.
+      await writerLocked;
+    });
+
+    // Let both the writer and detector start.
+    await new Promise((r) => setTimeout(r, 50));
+
+    // Release detection so the rescan attempts to merge.
+    // The rescan will wait for the writer lock before merging.
+    detectorGate.release?.();
+    await new Promise((r) => setTimeout(r, 50));
+
+    // Release the writer lock.
+    releaseWriter?.();
+
+    // Both tasks should complete: writer finishes, rescan acquires lock and merges.
+    await writerTask;
+    await rescan;
+
+    const final = await loadProjectMemory(tempDir);
+    // The rescan really happened: detected schema was applied.
+    expect(final?.build.buildCommand).toBe("pnpm build:rescan-waits");
+    // The concurrent write inside the lock must survive the rescan merge.
+    expect(
+      final?.customNotes.some((note) => note.content === noteContent),
     ).toBe(true);
   });
 });
