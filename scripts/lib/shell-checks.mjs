@@ -983,10 +983,11 @@ export function appendShellLog(name, row, { env = process.env, logDir } = {}) {
   } catch { /* logging never breaks the hook */ }
 }
 
-// Identifiers that tie a row to a session and a tool call.
+// Identifiers that tie a row to a session, a tool call, a subagent (agent_id and agent_type are set only for a call made
+// inside one) and a prompt.
 function logContextOf(data) {
   const context = {};
-  for (const [key, names] of [['session_id', ['session_id', 'sessionId']], ['tool_use_id', ['tool_use_id', 'toolUseId']], ['cwd', ['cwd', 'directory']]]) {
+  for (const [key, names] of [['session_id', ['session_id', 'sessionId']], ['tool_use_id', ['tool_use_id', 'toolUseId']], ['cwd', ['cwd', 'directory']], ['agent_id', ['agent_id', 'agentId']], ['agent_type', ['agent_type', 'agentType']], ['prompt_id', ['prompt_id', 'promptId']]]) {
     const value = names.map((name) => data?.[name]).find((candidate) => typeof candidate === 'string' && candidate !== '');
     if (value !== undefined) context[key] = value.slice(0, 1000);
   }

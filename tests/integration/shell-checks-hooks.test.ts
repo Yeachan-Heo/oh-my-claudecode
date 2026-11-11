@@ -250,4 +250,75 @@ describe('shell checks in the hooks', () => {
       if (command.length >= 40) expect(JSON.stringify(logged[0])).not.toContain(command.slice(0, 40));
     }
   });
+
+  it('carries agent_id, agent_type and prompt_id into checks.jsonl and errors.jsonl when the hook input has them', () => {
+    const logDir = join(cwd, 'logs');
+    const extra = { OMC_SHELL_CHECKS: '1', OMC_SHELL_CHECKS_LOG_DIR: logDir };
+    const eof = "/usr/bin/bash: -c: line 60: unexpected EOF while looking for matching `''";
+    const ids = { agent_id: 'agent-abc123', agent_type: 'oh-my-claudecode:executor', prompt_id: 'prompt-xyz789' };
+    const idKeys = Object.keys(ids);
+    const checksRow = (sid: string) => rows(join(logDir, 'checks.jsonl')).filter((row) => row.session_id === sid);
+    const errorsRow = (sid: string) => rows(join(logDir, 'errors.jsonl')).filter((row) => row.session_id === sid);
+    const failureInput = (sid: string, fields: Record<string, unknown>) => ({ hook_event_name: 'PostToolUseFailure', tool_name: 'Bash', tool_input: { command: 'ls' }, error: `Exit code 2\n${eof}`, tool_use_id: `toolu_${sid}`, cwd, session_id: sid, ...fields });
+
+    // snake_case names, in the pre-tool hook and both post-tool hooks
+    let sid = session();
+    expect(runHook('pre-tool-enforcer.mjs', { ...preInput('echo hi', 'Bash', sid), ...ids }, extra).code).toBe(0);
+    expect(checksRow(sid)).toHaveLength(1);
+    expect(checksRow(sid)[0]).toMatchObject(ids);
+    sid = session();
+    expect(runHook('post-tool-use-failure.mjs', failureInput(sid, ids), extra).code).toBe(0);
+    expect(errorsRow(sid)).toHaveLength(1);
+    expect(errorsRow(sid)[0]).toMatchObject(ids);
+    sid = session();
+    const verifierInput = { hook_event_name: 'PostToolUse', tool_name: 'Bash', tool_input: { command: 'ls' }, tool_response: { stdout: '', stderr: eof }, tool_use_id: `toolu_${sid}`, cwd, session_id: sid, ...ids };
+    expect(runHook('post-tool-verifier.mjs', verifierInput, extra).code).toBe(0);
+    expect(errorsRow(sid)).toHaveLength(1);
+    expect(errorsRow(sid)[0]).toMatchObject(ids);
+
+    // camelCase names give the same fields
+    sid = session();
+    const camel = { agentId: ids.agent_id, agentType: ids.agent_type, promptId: ids.prompt_id };
+    runHook('pre-tool-enforcer.mjs', { ...preInput('echo hi', 'Bash', sid), ...camel }, extra);
+    expect(checksRow(sid)[0]).toMatchObject(ids);
+    expect(checksRow(sid)[0]).not.toHaveProperty('agentId');
+    sid = session();
+    runHook('post-tool-use-failure.mjs', failureInput(sid, camel), extra);
+    expect(errorsRow(sid)[0]).toMatchObject(ids);
+
+    // without them the rows have none of the three fields
+    sid = session();
+    runHook('pre-tool-enforcer.mjs', preInput('echo hi', 'Bash', sid), extra);
+    runHook('post-tool-use-failure.mjs', failureInput(sid, {}), extra);
+    expect(checksRow(sid)).toHaveLength(1);
+    expect(errorsRow(sid)).toHaveLength(1);
+    for (const key of idKeys) {
+      expect(checksRow(sid)[0]).not.toHaveProperty(key);
+      expect(errorsRow(sid)[0]).not.toHaveProperty(key);
+    }
+
+    // non-string, empty and missing values are left out; a later name is used when the first is empty
+    sid = session();
+    const bad = { agent_id: 42, agent_type: '', prompt_id: { id: 'x' } };
+    runHook('pre-tool-enforcer.mjs', { ...preInput('echo hi', 'Bash', sid), ...bad }, extra);
+    runHook('post-tool-use-failure.mjs', failureInput(sid, bad), extra);
+    for (const key of idKeys) {
+      expect(checksRow(sid)[0]).not.toHaveProperty(key);
+      expect(errorsRow(sid)[0]).not.toHaveProperty(key);
+    }
+    sid = session();
+    runHook('pre-tool-enforcer.mjs', { ...preInput('echo hi', 'Bash', sid), agent_id: '', agentId: 'agent-camel' }, extra);
+    expect(checksRow(sid)[0].agent_id).toBe('agent-camel');
+
+    // long values are cut to 1000 characters
+    sid = session();
+    const long = { agent_id: 'a'.repeat(1500), agent_type: 't'.repeat(1500), prompt_id: 'p'.repeat(1500) };
+    runHook('pre-tool-enforcer.mjs', { ...preInput('echo hi', 'Bash', sid), ...long }, extra);
+    runHook('post-tool-use-failure.mjs', failureInput(sid, long), extra);
+    for (const row of [checksRow(sid)[0], errorsRow(sid)[0]]) {
+      expect(row.agent_id).toBe('a'.repeat(1000));
+      expect(row.agent_type).toBe('t'.repeat(1000));
+      expect(row.prompt_id).toBe('p'.repeat(1000));
+    }
+  });
 });
