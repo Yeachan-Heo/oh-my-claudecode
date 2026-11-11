@@ -555,19 +555,24 @@ export function recordJevShadow({ point, state, questions, heuristic, permission
         // whole result (an unfinished response body keeps the process alive): that result counts, and the
         // hook adds no second row for the same request.
         const keptAlive = Boolean(breakerSettings?.breaker) && result.error?.code === "ETIMEDOUT";
+        let resolverWroteRow = false;
         if (result.stdout && (result.status === 0 || keptAlive)) {
           try {
             const parsed = JSON.parse(result.stdout);
             // This request opened the shared breaker.
             if (breakerSettings && parsed?.breaker) armOutageNotice(breakerSettings, parsed.breaker);
+            resolverWroteRow = Boolean(parsed?.reason); // Resolver row has a reason field.
             return parsed;
           } catch {
             // Parse error: fall back to heuristic (output cut by the kill: recorded below)
             if (!keptAlive) return undefined;
+            // If keptAlive and we have stdout (even if unparseable), assume resolver tried to write a row.
+            resolverWroteRow = true;
           }
         }
-        // Only log resolver exit for actual failures (non-zero status or error), not for successful completions.
-        if (breakerSettings?.breaker && result.status !== 0) recordResolverEnded(point, result, Date.now() - spawnedAt);
+        // Only log resolver exit for actual failures (non-zero status or error), not for successful completions
+        // and not when the resolver already wrote its own row.
+        if (breakerSettings?.breaker && result.status !== 0 && !resolverWroteRow) recordResolverEnded(point, result, Date.now() - spawnedAt);
       } finally {
         // Always clean up temp dir after active mode
         if (tempDir) {

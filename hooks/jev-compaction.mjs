@@ -426,14 +426,32 @@ const pause = ($, ms) => new Promise((resolve) => { try { $.clock.after(ms, () =
 async function readText($, path) {
   try { return await $.fs.read(path); } catch { return undefined; }
 }
+// Reads text distinguishing missing file from read error. Returns {missing: true}, {unreadable: true},
+// or {text: ...}. Unreadable errors are fail-open: don't overwrite shared state.
+async function readTextSafe($, path) {
+  try {
+    return { text: await $.fs.read(path) };
+  } catch (err) {
+    try {
+      const exists = await $.fs.exists(path);
+      if (!exists) return { missing: true };
+    } catch {
+      // Cannot check existence; assume unreadable.
+    }
+    return { unreadable: true };
+  }
+}
 
 // Adds one line to a file. $.fs cannot append, so the file is written whole and read back; a line
 // another process added between the read and the write is lost, and ours is written again when a
 // concurrent write took it away (at most APPEND_TRIES writes). Returns the text read last.
+// Before appending on retry, check if the line is already present (idempotent retry).
 async function appendLine($, path, line) {
   let text = '';
   for (let attempt = 0; attempt < APPEND_TRIES; attempt++) {
     const current = (await readText($, path)) ?? '';
+    // Idempotent: if the line is already present, don't write again.
+    if (current.split('\n').includes(line)) return current;
     await $.fs.write(path, `${current === '' || current.endsWith('\n') ? current : `${current}\n`}${line}\n`);
     text = (await readText($, path)) ?? '';
     if (text.split('\n').includes(line)) return text;
@@ -616,9 +634,13 @@ async function reserveRequest($, shared, now, deadline) {
   if (limit === undefined) return { ok: true };
   const threshold = mediumThreshold(limit);
   try {
-    const path = `${shared.dir}/rpm-${minuteKey(now)}`;
-    const before = foldMinute(await readText($, path));
     if (Date.now() >= deadline) return { expired: true };
+    const path = `${shared.dir}/rpm-${minuteKey(now)}`;
+    const readResult = await readTextSafe($, path);
+    if (Date.now() >= deadline) return { expired: true };
+    // Fail-open on unreadable: an error reading the RPM file is not grounds to block a request.
+    if (readResult.unreadable) return { ok: true };
+    const before = foldMinute(readResult.text ?? '');
     if (before.granted >= threshold) return { ok: false, count: before.granted, threshold, limit };
     const token = randomId();
     const { granted, ok } = foldMinute(await appendLine($, path, `${token} ${threshold}`), token);

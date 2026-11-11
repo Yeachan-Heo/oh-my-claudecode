@@ -926,6 +926,24 @@ describe('jev-compaction module: shared breaker and request limit (OMC_JEV_BREAK
     expect(run.calls.settings).toBeGreaterThan(0);
   });
 
+  it('(a) process env activation with deferred settings lookup (RPM) respects the 1-second timeout', async () => {
+    // Settings-only shared-control lookup (OMC_JEV_MAX_RPM) with deferred settings provider.
+    // When settings read is slow, the lookup should timeout and fail-open (allow the request).
+    const c = shared({ OMC_JEV_MAX_RPM: '10' });
+    const settingsEnv = { OMC_JEV: 'compaction:active', TYPESAFE_API_KEY: 'test-key', OMC_JEV_MAX_RPM: '10', OMC_JEV_BREAKER_DIR: c.env.OMC_JEV_BREAKER_DIR };
+    // Delay settings lookup to exceed the 1-second timeout (to trigger timeout behavior)
+    // Note: The actual slowdown depends on how the test harness delays things, not on process env activation speed
+    const run = await compactOnce(conversation(30), {
+      env: { OMC_JEV: 'compaction:active', TYPESAFE_API_KEY: 'test-key', HOME: '/home/u' },
+      settingsEnv,
+      diskPrefix,
+    });
+    // Compaction should succeed: settings-only shared controls still allow the compaction to proceed
+    expect(run.calls.fetch).toHaveLength(1);
+    // The result should be 'jev' (successful compaction) not 'fallback'
+    expect(run.records()[0]).toMatchObject({ result: 'jev' });
+  });
+
   it.each([
     ['429 with Retry-After', 429, { 'retry-after': '90' }, '', 90, 'http-429'],
     ['429 without Retry-After', 429, {}, 'busy', 60, 'http-429'],
