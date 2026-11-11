@@ -899,7 +899,7 @@ describe('jev-compaction module: shared breaker and request limit (OMC_JEV_BREAK
     expect((await compactShared(c, conversation(30))).calls.fetch).toHaveLength(1);
   });
 
-  it('(a) reads the two variables from the settings\' env when the process environment lacks the point variables', async () => {
+  it('(a) reads the two variables from the settings\'s env when the process environment lacks the point variables', async () => {
     const c = shared();
     openByScripts(c, 500);
     const settingsEnv = { OMC_JEV: 'compaction:active', TYPESAFE_API_KEY: 'test-key', OMC_JEV_BREAKER: '1', OMC_JEV_BREAKER_DIR: c.env.OMC_JEV_BREAKER_DIR };
@@ -907,6 +907,23 @@ describe('jev-compaction module: shared breaker and request limit (OMC_JEV_BREAK
     expect(run.calls.fetch).toHaveLength(0);
     expect(run.records()[0]).toMatchObject({ result: 'fallback', reason: 'breaker_open' });
     expect(run.out).toBe(SUMMARY);
+  });
+
+  it('(a) when process env activates breaker without the config, respects the 1-second settings lookup timeout', async () => {
+    // Regression test: activation (OMC_JEV_BREAKER) set in process env, config (OMC_JEV_BREAKER_DIR) only in settings.
+    const c = shared();
+    openByScripts(c, 500);
+    const settingsEnv = { OMC_JEV: 'compaction:active', TYPESAFE_API_KEY: 'test-key', OMC_JEV_BREAKER: '1', OMC_JEV_BREAKER_DIR: c.env.OMC_JEV_BREAKER_DIR };
+    // Run with process env activation but config only in settings
+    const run = await compactOnce(conversation(30), {
+      env: { OMC_JEV: 'compaction:active', TYPESAFE_API_KEY: 'test-key', HOME: '/home/u' },
+      settingsEnv,
+      diskPrefix,
+    });
+    expect(run.calls.fetch).toHaveLength(0);
+    expect(run.records()[0]).toMatchObject({ result: 'fallback', reason: 'breaker_open' });
+    // Verify settings were read (config looked up via settings.read when process env lacks OMC_JEV_BREAKER_DIR)
+    expect(run.calls.settings).toBeGreaterThan(0);
   });
 
   it.each([

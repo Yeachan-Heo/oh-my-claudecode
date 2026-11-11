@@ -678,8 +678,8 @@ async function blockedReason($, cfg, now) {
   if (cfg.maxRequests && session.requests >= cfg.maxRequests) return 'cap';
   // Bounded like admission: a stalled shared volume falls back to "not open" after SHARED_OP_MS.
   if (cfg.shared && (await sharedStep($, () => readSharedBreaker($, cfg.shared, now), undefined))) return 'breaker_open';
-  // The capacity peek is bounded the same way and fails open.
-  if (cfg.shared && !(await sharedStep($, () => rpmCapacityAvailable($, cfg.shared, 'compaction', now), true))) return 'rpm';
+  // The capacity peek is bounded the same way and fails open. Skip the peek when RPM is not enabled.
+  if (cfg.shared?.maxRpm && !(await sharedStep($, () => rpmCapacityAvailable($, cfg.shared, 'compaction', now), true))) return 'rpm';
   return undefined;
 }
 
