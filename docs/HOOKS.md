@@ -493,7 +493,7 @@ These keywords invoke a skill and create a state file.
 | `ralplan` | ralplan | Consensus-based iterative planning |
 | `deep interview`, `ouroboros` | deep-interview | Socratic deep interview |
 
-The Latin aliases `autopilot`, `auto-pilot`, `full auto` and `fullsend` start autopilot only as a command, like `ralph` and `ralplan`: the alias opens the prompt or a line, a command verb (`test`, `review`, `fix`, ...) or `:` plus a verb follows it, or a phrase such as `use`, `run`, `turn on`, `please` or `I want` stands before it. A bare mention (`the autopilot run failed`, `Docs: use autopilot ...`, `don't use autopilot`) does not start it.
+The Latin aliases `autopilot`, `auto-pilot`, `full auto` and `fullsend` start autopilot only as a command, like `ralph` and `ralplan`: the alias opens the prompt or a line, a command verb (`test`, `review`, `fix`, ...) or `:` plus a verb follows it, or a phrase such as `use`, `run`, `turn on` (also `turn autopilot on`), `please` or `I want` stands before it. For `full auto` and `fullsend` a command verb counts at the start of a line, and a colon plus verb counts anywhere (`Task: fullsend: fix the parser`). Negations that ask for the opposite (`do not stop using autopilot`, `without hesitation use autopilot`) do not cancel it. A bare mention (`the autopilot run failed`, `Docs: use autopilot ...`, `don't use autopilot`) does not start it.
 
 ### AI Slop Cleanup Keywords
 
