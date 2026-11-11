@@ -5,15 +5,15 @@
   "provenance": {
     "base": "05c800f40d1ad53b42a78609d2667ef4f726808b",
     "planningHead": "0a91273e61dbbd47eb0af4c02844409251e08398",
-    "head": "ad402c37b684804f5cc9341870d08d352180592a",
-    "sourceSha256": "70a958489092e017409cdabf9975008b0705ae47946e9adf211b049e49dd6786",
+    "head": "db1129afa6e14b3db1a196ffe6e312499e964997",
+    "sourceSha256": "a539a599a125f77619e31d1c382bd2575646ed02308f36b93c7d71ee28934e04",
     "generatedAt": null,
     "generator": "scripts/generate-inventory-graph.mjs"
   },
   "base": "05c800f40d1ad53b42a78609d2667ef4f726808b",
   "planningHead": "0a91273e61dbbd47eb0af4c02844409251e08398",
-  "head": "ad402c37b684804f5cc9341870d08d352180592a",
-  "sourceSha256": "70a958489092e017409cdabf9975008b0705ae47946e9adf211b049e49dd6786",
+  "head": "db1129afa6e14b3db1a196ffe6e312499e964997",
+  "sourceSha256": "a539a599a125f77619e31d1c382bd2575646ed02308f36b93c7d71ee28934e04",
   "counts": {
     "public": {
       "skills": 84,
@@ -48314,6 +48314,11 @@
         "path": "tests/harbor-scenarios.test.ts"
       },
       {
+        "id": "tests/integration/atomic-write-retry.test.ts",
+        "kind": "other",
+        "path": "tests/integration/atomic-write-retry.test.ts"
+      },
+      {
         "id": "tests/integration/budget-guard.test.ts",
         "kind": "other",
         "path": "tests/integration/budget-guard.test.ts"
@@ -92171,6 +92176,36 @@
         "kind": "imports"
       },
       {
+        "from": "tests/integration/atomic-write-retry.test.ts",
+        "to": "external:fs",
+        "kind": "imports"
+      },
+      {
+        "from": "tests/integration/atomic-write-retry.test.ts",
+        "to": "external:fs/promises",
+        "kind": "imports"
+      },
+      {
+        "from": "tests/integration/atomic-write-retry.test.ts",
+        "to": "external:os",
+        "kind": "imports"
+      },
+      {
+        "from": "tests/integration/atomic-write-retry.test.ts",
+        "to": "external:path",
+        "kind": "imports"
+      },
+      {
+        "from": "tests/integration/atomic-write-retry.test.ts",
+        "to": "external:vitest",
+        "kind": "imports"
+      },
+      {
+        "from": "tests/integration/atomic-write-retry.test.ts",
+        "to": "src/lib/atomic-write.ts",
+        "kind": "imports"
+      },
+      {
         "from": "tests/integration/budget-guard.test.ts",
         "to": "external:node:child_process",
         "kind": "imports"
@@ -94337,12 +94372,12 @@
       }
     ],
     "stats": {
-      "nodeCount": 8298,
-      "edgeCount": 9125,
-      "importEdgeCount": 7654,
+      "nodeCount": 8299,
+      "edgeCount": 9131,
+      "importEdgeCount": 7660,
       "registerEdgeCount": 105
     }
   },
-  "inventorySha256": "8052560f0b9c4008258c257af9bfec610abcba96f0b0c9abde8166a9cf56aba5",
-  "manifestSha256": "79f3c7640ece0d0455f25df787ffc38a1ab79ce8f3ae79ef91b93581f52f26b9"
+  "inventorySha256": "50bfd45f3d8edef9f44c61f332b2b85b6e4c644a54b7a9189af991ec28a7412d",
+  "manifestSha256": "f20fb5c1ff8770c331a86347fdafea9ec924c5652a233c4c3d2d1baa183139cf"
 }
