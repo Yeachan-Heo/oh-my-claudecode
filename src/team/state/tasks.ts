@@ -445,7 +445,6 @@ export async function renewTaskClaim(
         ...v.claim,
         leased_until: new Date(Date.now() + TASK_CLAIM_LEASE_MS).toISOString(),
       },
-      version: v.version + 1,
     };
     await deps.writeAtomic(deps.taskFilePath(deps.teamName, taskId, deps.cwd), JSON.stringify(updated, null, 2));
     return { ok: true as const, task: updated };

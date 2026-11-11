@@ -130,7 +130,7 @@ describe('teamRenewTaskClaim', () => {
     }
   });
 
-  it('bumps the task version and persists the new lease under the claim lock', async () => {
+  it('preserves the task version and persists the new lease under the claim lock', async () => {
     await writeTeamConfig(cwd);
     await writeTask(cwd, task('1', 'in_progress', {
       owner: 'worker-1',
@@ -140,9 +140,9 @@ describe('teamRenewTaskClaim', () => {
     const renewed = await teamRenewTaskClaim(teamName, 'task-1', 'token-1', 'worker-1', cwd);
     expect(renewed.ok).toBe(true);
     if (renewed.ok) {
-      expect(renewed.task.version).toBe(8);
+      expect(renewed.task.version).toBe(7);
       const onDisk = JSON.parse(await readFile(taskPath(cwd, '1'), 'utf8')) as TeamTask;
-      expect(onDisk.version).toBe(8);
+      expect(onDisk.version).toBe(7);
       expect(Date.parse((onDisk.claim as { leased_until: string }).leased_until))
         .toBeGreaterThan(Date.now() + 14 * 60_000);
     }
@@ -202,5 +202,31 @@ describe('teamRenewTaskClaim', () => {
     }));
     const result = await teamRenewTaskClaim(teamName, 'task-1', 'token-1', 'worker-1', cwd);
     expect(result).toEqual({ ok: false, error: 'already_terminal' });
+  });
+
+  it('preserves version-bound checkpoints across renewals', async () => {
+    // Regression test for the P1 issue: renewal must not invalidate version-bound recovery checkpoints.
+    // When a checkpoint is published at version V and renewal does not bump the version,
+    // the checkpoint remains valid for recovery if the worker crashes before publishing a new checkpoint.
+    await writeTeamConfig(cwd);
+    // Create a task in-progress with an initial version (simulating a claimed task)
+    await writeTask(cwd, task('1', 'in_progress', {
+      owner: 'worker-1',
+      version: 5,
+      claim: { owner: 'worker-1', token: 'token-1', leased_until: new Date(Date.now() + 60_000).toISOString() },
+    }));
+
+    // Renew the claim multiple times - version must stay the same
+    // This simulates the worker extending the lease for a long-running task
+    for (let i = 0; i < 3; i++) {
+      const renewed = await teamRenewTaskClaim(teamName, 'task-1', 'token-1', 'worker-1', cwd);
+      expect(renewed.ok).toBe(true);
+      if (renewed.ok) {
+        // Version must remain unchanged after renewal
+        expect(renewed.task.version).toBe(5);
+        const onDisk = JSON.parse(await readFile(taskPath(cwd, '1'), 'utf8')) as TeamTask;
+        expect(onDisk.version).toBe(5);
+      }
+    }
   });
 });
