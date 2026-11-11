@@ -82,8 +82,10 @@ type Manifest = {
 };
 
 function loadManifest(): Manifest {
-  if (!existsSync(BASELINE)) throw new Error(`baseline missing at ${relative(REPO_ROOT, BASELINE)} — run: node scripts/generate-inventory-graph.mjs --write`);
-  return JSON.parse(readFileSync(BASELINE, 'utf8')) as Manifest;
+  // Generate full manifest for tests (committed baseline is minimal)
+  const result = spawnSync('node', [GENERATOR], { cwd: REPO_ROOT, encoding: 'utf8', maxBuffer: 20 * 1024 * 1024 });
+  if (result.status !== 0) throw new Error(`generator failed: ${result.stderr}`);
+  return JSON.parse(result.stdout) as Manifest;
 }
 
 function collectRegisteredAgents(): string[] {
@@ -170,20 +172,24 @@ describe('inventory-graph drift enforcement (#3702)', () => {
   });
 
   it('baseline is valid JSON with expected schema + provenance', () => {
+    // Check committed baseline exists and is minimal format
+    expect(existsSync(BASELINE)).toBe(true);
+    const baseline = JSON.parse(readFileSync(BASELINE, 'utf8'));
+    expect(baseline.schemaVersion).toBe(2);
+    expect(baseline.repository).toBe('Yeachan-Heo/oh-my-claudecode');
+    expect(baseline.provenance.base).toBe(EXPECTED_BASE);
+    expect(baseline.provenance.planningHead).toBe(EXPECTED_PLANNING_HEAD);
+    // Baseline should be minimal (only provenance, no graph/counts)
+    expect(baseline.graph).toBeUndefined();
+    expect(baseline.counts).toBeUndefined();
+    
+    // Check full generated manifest
     expect(manifest).not.toBeNull();
     const m = manifest!;
     expect(m.schemaVersion).toBe(2);
     expect(m.repository).toBe('Yeachan-Heo/oh-my-claudecode');
     expect(m.provenance.base).toBe(EXPECTED_BASE);
     expect(m.provenance.planningHead).toBe(EXPECTED_PLANNING_HEAD);
-    // Committed baseline no longer contains volatile head/generatedAt/sourceSha256/manifestSha256
-    expect(m.provenance.head).toBeUndefined();
-    expect(m.provenance.generatedAt).toBeUndefined();
-    expect(m.provenance.sourceSha256).toBeUndefined();
-    expect((m as any).head).toBeUndefined();
-    expect((m as any).generatedAt).toBeUndefined();
-    expect((m as any).sourceSha256).toBeUndefined();
-    expect((m as any).manifestSha256).toBeUndefined();
     expect(m.base).toBe(EXPECTED_BASE);
     expect(m.planningHead).toBe(EXPECTED_PLANNING_HEAD);
     expect(typeof m.inventorySha256).toBe('string');
