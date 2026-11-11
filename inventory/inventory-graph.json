@@ -5,15 +5,15 @@
   "provenance": {
     "base": "05c800f40d1ad53b42a78609d2667ef4f726808b",
     "planningHead": "0a91273e61dbbd47eb0af4c02844409251e08398",
-    "head": "62876c15156db4fd7493aefcbcf3e2adb861b9e9",
-    "sourceSha256": "360625531f6559930ba45532716be8129195b38837029b62eddc70e6640ffabd",
+    "head": "c399566c85504c7d5701ec2c08bb2055a9572893",
+    "sourceSha256": "4cd3c910a9405cbc3bbccdbd461ae3a513fbffc2b3f0ee5b0477c80b10cad578",
     "generatedAt": null,
     "generator": "scripts/generate-inventory-graph.mjs"
   },
   "base": "05c800f40d1ad53b42a78609d2667ef4f726808b",
   "planningHead": "0a91273e61dbbd47eb0af4c02844409251e08398",
-  "head": "62876c15156db4fd7493aefcbcf3e2adb861b9e9",
-  "sourceSha256": "360625531f6559930ba45532716be8129195b38837029b62eddc70e6640ffabd",
+  "head": "c399566c85504c7d5701ec2c08bb2055a9572893",
+  "sourceSha256": "4cd3c910a9405cbc3bbccdbd461ae3a513fbffc2b3f0ee5b0477c80b10cad578",
   "counts": {
     "public": {
       "skills": 84,
@@ -28,8 +28,8 @@
       "toolFiles": 65,
       "libFiles": 49,
       "templateHooks": 25,
-      "srcFiles": 1474,
-      "total": 1499
+      "srcFiles": 1475,
+      "total": 1500
     },
     "generated": {
       "distFiles": 5639,
@@ -47104,6 +47104,11 @@
         "path": "src/team/__tests__/state-paths.test.ts"
       },
       {
+        "id": "src/team/__tests__/task-claim-renewal.test.ts",
+        "kind": "src",
+        "path": "src/team/__tests__/task-claim-renewal.test.ts"
+      },
+      {
         "id": "src/team/__tests__/task-recovery-checkpoint.test.ts",
         "kind": "src",
         "path": "src/team/__tests__/task-recovery-checkpoint.test.ts"
@@ -85601,6 +85606,56 @@
         "kind": "imports"
       },
       {
+        "from": "src/team/__tests__/task-claim-renewal.test.ts",
+        "to": "external:node:fs",
+        "kind": "imports"
+      },
+      {
+        "from": "src/team/__tests__/task-claim-renewal.test.ts",
+        "to": "external:node:fs/promises",
+        "kind": "imports"
+      },
+      {
+        "from": "src/team/__tests__/task-claim-renewal.test.ts",
+        "to": "external:node:os",
+        "kind": "imports"
+      },
+      {
+        "from": "src/team/__tests__/task-claim-renewal.test.ts",
+        "to": "external:node:path",
+        "kind": "imports"
+      },
+      {
+        "from": "src/team/__tests__/task-claim-renewal.test.ts",
+        "to": "external:vitest",
+        "kind": "imports"
+      },
+      {
+        "from": "src/team/__tests__/task-claim-renewal.test.ts",
+        "to": "src/lib/worktree-paths.ts",
+        "kind": "imports"
+      },
+      {
+        "from": "src/team/__tests__/task-claim-renewal.test.ts",
+        "to": "src/team/api-interop.ts",
+        "kind": "imports"
+      },
+      {
+        "from": "src/team/__tests__/task-claim-renewal.test.ts",
+        "to": "src/team/state/tasks.ts",
+        "kind": "imports"
+      },
+      {
+        "from": "src/team/__tests__/task-claim-renewal.test.ts",
+        "to": "src/team/team-ops.ts",
+        "kind": "imports"
+      },
+      {
+        "from": "src/team/__tests__/task-claim-renewal.test.ts",
+        "to": "src/team/types.ts",
+        "kind": "type-imports"
+      },
+      {
         "from": "src/team/__tests__/task-recovery-checkpoint.test.ts",
         "to": "external:node:fs",
         "kind": "imports"
@@ -94372,12 +94427,12 @@
       }
     ],
     "stats": {
-      "nodeCount": 8299,
-      "edgeCount": 9131,
-      "importEdgeCount": 7660,
+      "nodeCount": 8300,
+      "edgeCount": 9141,
+      "importEdgeCount": 7669,
       "registerEdgeCount": 105
     }
   },
-  "inventorySha256": "50bfd45f3d8edef9f44c61f332b2b85b6e4c644a54b7a9189af991ec28a7412d",
-  "manifestSha256": "bc98ca83ca7fefe0a34112ad6705c20534d750859a3a005cbe71c0b124f5e517"
+  "inventorySha256": "2dabacae90c6d83ef75bc66a7a2670641306f5e7f4aa096cd18e0c57689c9b77",
+  "manifestSha256": "8696ef08ab830fdbffb6df445e087fd0987e67e9954a44699f71036bc4c82d3d"
 }
