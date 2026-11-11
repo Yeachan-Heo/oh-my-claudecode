@@ -605,7 +605,7 @@ describe('regression coverage for the review findings', () => {
       'throws while spawning': () => { throw Object.assign(new Error('spawn EMFILE'), { code: 'EMFILE' }); },
       'reports an error event': () => {
         const handlers = {};
-        queueMicrotask(() => handlers.error?.(Object.assign(new Error('spawn EAGAIN'), { code: 'EAGAIN' })));
+        setTimeout(() => handlers.error?.(Object.assign(new Error('spawn EAGAIN'), { code: 'EAGAIN' })), 0);
         return { on: (name, fn) => { handlers[name] = fn; }, unref: () => {} };
       },
     };
