@@ -18,7 +18,7 @@ import { resolveOmcStateRoot } from './lib/state-root.mjs';
 import { readStdin } from './lib/stdin.mjs';
 import { resolveContextPercent } from './lib/context-usage.mjs';
 import { BOUNDED_GIT_TIMEOUT_MS } from './lib/bounded-git-timeout.mjs';
-import { recordJevApplied, recordJevShadow, setJevHookContext } from './lib/jev-shadow.mjs';
+import { recordJevApplied, recordJevShadow, setJevHookContext, setJevSessionId } from './lib/jev-shadow.mjs';
 import { initializeRalphStateForSkill } from './lib/ralph-startup.mjs';
 
 const SKIP_HOOKS = (process.env.OMC_SKIP_HOOKS || '').split(',').map(s => s.trim());
@@ -1192,6 +1192,7 @@ async function main() {
     const toolOutput = typeof rawResponse === 'string' ? rawResponse : JSON.stringify(rawResponse);
     const { clipped: clippedToolOutput, wasTruncated } = clipToolOutputForAnalysis(toolName, toolOutput);
     const sessionId = data.session_id || data.sessionId || 'unknown';
+    setJevSessionId(data.session_id || data.sessionId, data.agent_id || data.agentId);
     const directory = data.cwd || data.directory || process.cwd();
     const toolInput = data.tool_input || data.toolInput || {};
 
