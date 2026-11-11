@@ -1,0 +1,74 @@
+name: Regenerate Inventory on Dev Merge
+
+# This workflow regenerates inventory-graph.json after merges to dev branch.
+# This ensures the inventory baseline always reflects the current state of dev
+# and prevents merge conflicts in subsequent PRs (#5010).
+
+on:
+  push:
+    branches: [dev]
+    paths:
+      # Only run if source files changed (not if only inventory-graph.json changed)
+      - 'src/**'
+      - 'skills/**'
+      - 'commands/**'
+      - 'hooks/**'
+      - 'templates/**'
+      - '.github/workflows/**'
+      - 'scripts/generate-inventory-graph.mjs'
+      - '.gitattributes'
+
+permissions:
+  contents: write
+
+jobs:
+  regenerate-inventory:
+    name: Regenerate Inventory Graph
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: true
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Regenerate inventory
+        run: npm run generate:inventory
+
+      - name: Check if inventory changed
+        id: check-changes
+        run: |
+          if git diff --quiet inventory/inventory-graph.json; then
+            echo "changed=false" >> $GITHUB_OUTPUT
+            echo "✓ Inventory is current"
+          else
+            echo "changed=true" >> $GITHUB_OUTPUT
+            echo "✗ Inventory is out of date, regenerating..."
+            git diff --stat inventory/inventory-graph.json
+          fi
+
+      - name: Commit regenerated inventory
+        if: steps.check-changes.outputs.changed == 'true'
+        run: |
+          git config --global user.email "dev-automation@github.invalid"
+          git config --global user.name "Dev Automation"
+          git add inventory/inventory-graph.json
+          git commit -m "chore: regenerate inventory after merge"
+
+      - name: Push regenerated inventory
+        if: steps.check-changes.outputs.changed == 'true'
+        run: |
+          git push origin dev
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Verify inventory is valid
+        run: npm run generate:inventory:verify

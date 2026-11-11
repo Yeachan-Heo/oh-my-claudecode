@@ -28,3 +28,6 @@ dist/**/*.d.ts linguist-generated=true
 *.jpg binary
 *.gif binary
 *.ico binary
+
+# Inventory graph merge driver (#5010): regenerate on conflict instead of creating merge conflicts
+inventory/inventory-graph.json merge=inventorygraph
