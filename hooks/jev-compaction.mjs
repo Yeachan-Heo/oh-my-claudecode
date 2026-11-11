@@ -18,6 +18,15 @@
  * target budget (OMC_JEV_COMPACT_TARGET of the characters before). In shadow mode the decision is
  * computed and logged, and the built-in summary runs.
  *
+ * Assistant rows are rebuilt from their text, traces and kept calls (thinking and server blocks go, a
+ * row left empty is dropped), so the host writes them with a new message.id and `--resume` cannot
+ * join them with their rows from before the compaction. The rows of one API message become one
+ * message with its results right after it, so the host neither joins a row to an earlier message nor
+ * finds a call without its result. Between turns every assistant row is rebuilt; inside an open tool
+ * loop the rows of the last assistant message keep their handles, which needs the API form of the
+ * conversation ($.session.messages({ as: 'api' })) holding its calls, and no thinking row or server
+ * block among them; otherwise the built-in summary runs.
+ *
  * The built-in summary (next(e)) also runs when the conversation is too short or its tool results
  * are too small for the removal to matter, while requests are paused after an endpoint failure, when
  * OMC_JEV_MAX_REQUESTS is used up, while the shared breaker is open or the shared request limit is
@@ -27,7 +36,9 @@
  * once the context reaches that share of the compaction window: main loop only, at most once per
  * MIN_TURNS_BETWEEN turns, never during a compaction, never while requests are paused, and only when
  * the removable tool results are worth it (a request that would end in the built-in summary is not
- * made).
+ * made). After a compaction of the main loop (this module's or the built-in summary) it also waits
+ * until the context has grown by OWN_MIN_GAIN of the window from the lowest usage since it (from the
+ * threshold at most).
  *
  * What goes to the endpoint: the /compact instructions and the last USER_MESSAGES user messages
  * (together USER_CHARS characters), and for each scored result its tool, its input (STATE_INPUT_CHARS)
@@ -66,6 +77,9 @@ import { maskSecrets } from '../scripts/lib/jev-mask.mjs';
 const POINT = 'compaction';
 // The last messages stay whole: the work in flight.
 const KEEP_LAST = 6;
+// Cap on the host call for the API form of the conversation: a call that never settles must not hold
+// the compaction.
+const HOST_MS = 2000;
 // Up to BATCH * MAX_REQUESTS = 240 results are scored per compaction. A 40-question request took
 // 1.4-2.9 s against the production endpoint; the deadlines leave room for a slow answer and keep the
 // whole decision under TOTAL_MS, after which the built-in summary runs instead.
@@ -277,7 +291,7 @@ function freshState() {
   return {
     sharedQueue: Promise.resolve(), compacting: 0, pausedUntil: 0, pauseReason: null, failedInRow: 0, noResponseAt: [], requests: 0,
     turnCount: 0, lastAttempt: -Infinity, hostCannot: false, compactWindow: undefined, windowTurn: -Infinity,
-    cachedConfig: undefined, cachedAt: -Infinity,
+    cachedConfig: undefined, cachedAt: -Infinity, growthArmed: false, growthBase: undefined,
   };
 }
 let session = freshState();
@@ -807,7 +821,7 @@ function findCandidates(messages, privatePaths) {
       const found = uses.get(r.tool_use_id);
       if (!found || found.i >= i) continue;
       const c = {
-        id: r.tool_use_id, resIdx: i, use: found.u, res: r,
+        id: r.tool_use_id, resIdx: i, useIdx: found.i, use: found.u, res: r,
         summary: inputSummary(found.u.tool, found.u.input),
         inputChars: (found.u.tool || '').length + inputJson(found.u.input).length,
         resultChars: (r.text || '').length,
@@ -857,28 +871,185 @@ function allocate(candidates, before, target) {
   }
 }
 
+// Claude Code writes one transcript row per content block, so one API message is several assistant
+// rows sharing a message.id. On `--resume` the host joins the assistant rows of one message.id from
+// the whole transcript, rows from before the compact boundary included, and repeats every block of
+// them but tool_use (measured on Claude Code 2.1.321: a repeated server_tool_use fails the request
+// with API 400 "server_tool_use ids must be unique per assistant turn", and a call that became a trace
+// comes back without its result). Before a request it joins the rows of one message.id the same way
+// (also across result-only user rows: a streamed tool run puts a result between rows of one message)
+// and then needs every call's result in the next message. A row kept by its handle is written after
+// the boundary with its message.id, one built without a handle gets a new one. So the rows of one API
+// message are rebuilt together: one message with their text, traces and kept calls, the result rows
+// after it (groupsOf, build). Only the last message with calls keeps its rows' handles, when the
+// conversation ends inside its tool loop (the API wants that message to begin with its thinking,
+// which a built message cannot carry); between turns no assistant row keeps its handle
+// (openLoopStart).
+
+// Rows of one API message: consecutive assistant rows; an assistant row after result-only user rows
+// while a call of the group still has no result (a valid transcript starts a new message only once
+// every call has its result); and, with the API form, groups whose calls belong to one API message (a
+// call whose result came back quickly). A user row with text ends a group, as it ends the host's
+// joining. Returns the group of every row (-1 for user rows).
+function groupsOf(messages, api) {
+  const groupOf = new Array(messages.length).fill(-1);
+  const parent = [];
+  let cur = -1;
+  let prevAssistant = false;
+  let open = new Set();
+  messages.forEach((m, i) => {
+    if (m.role === 'assistant') {
+      if (cur < 0 || !(prevAssistant || open.size)) { cur = parent.length; parent.push(cur); open = new Set(); }
+      groupOf[i] = cur;
+      for (const u of m.toolUses || []) open.add(u.tool_use_id);
+      prevAssistant = true;
+      return;
+    }
+    prevAssistant = false;
+    const results = m.toolResults || [];
+    if (m.text || !results.length) { cur = -1; open = new Set(); return; }
+    for (const r of results) open.delete(r.tool_use_id);
+  });
+  const find = (g) => { while (parent[g] !== g) g = parent[g] = parent[parent[g]]; return g; };
+  if (Array.isArray(api)) {
+    const groupOfUse = new Map();
+    messages.forEach((m, i) => { if (m.role === 'assistant') for (const u of m.toolUses || []) if (!groupOfUse.has(u.tool_use_id)) groupOfUse.set(u.tool_use_id, groupOf[i]); });
+    for (const a of api) {
+      if (!a || a.role !== 'assistant' || !Array.isArray(a.content)) continue;
+      const gs = a.content.filter((b) => b && b.type === 'tool_use' && groupOfUse.has(b.id)).map((b) => find(groupOfUse.get(b.id)));
+      // Joined only across result-only user rows (a user row with text ends the host's joining too).
+      for (const g of gs.slice(1)) {
+        const [x, y] = [find(gs[0]), find(g)].sort((p, q) => p - q);
+        if (x !== y && sameRun(messages, groupOf, find, x, y)) parent[y] = x;
+      }
+    }
+  }
+  return messages.map((m, i) => (groupOf[i] < 0 ? -1 : find(groupOf[i])));
+}
+
+// Whether groups x < y stand in one stretch of the conversation with only assistant rows and
+// result-only user rows between them.
+function sameRun(messages, groupOf, find, x, y) {
+  const first = groupOf.findIndex((g) => g >= 0 && find(g) === x);
+  const last = groupOf.findIndex((g) => g >= 0 && find(g) === y);
+  for (let i = first + 1; i < last; i++) {
+    const m = messages[i];
+    if (m.role === 'user' && (m.text || !(m.toolResults || []).length)) return false;
+  }
+  return true;
+}
+
+// The first row that keeps its handle: the first row of the last assistant group when that group has
+// calls (the conversation ends inside that message's tool loop), else messages.length (between turns,
+// after a final answer without calls, every assistant row is rebuilt). User rows after that group do
+// not end the loop: a message typed during the tool turn (queued, written as a separate row) joins the
+// result message in the API, and the API still wants the last assistant message to begin with its
+// thinking.
+function openLoopStart(messages, group) {
+  for (let i = messages.length - 1; i >= 0; i--) {
+    if (messages[i].role !== 'assistant') continue;
+    const g = group[i];
+    return messages.some((x, k) => group[k] === g && (x.toolUses || []).length) ? group.indexOf(g) : messages.length;
+  }
+  return messages.length;
+}
+
+// The API form of the conversation, or undefined: a list whose every entry has `content` as an array
+// or a string, with at least one assistant message whose content is an array (a host that ignores
+// `as: 'api'` answers the plain messages, which have neither).
+function apiFormOf(value) {
+  if (!Array.isArray(value) || !value.length) return undefined;
+  if (!value.every((a) => a && (Array.isArray(a.content) || typeof a.content === 'string'))) return undefined;
+  return value.some((a) => a.role === 'assistant' && Array.isArray(a.content)) ? value : undefined;
+}
+
+// Whether every call of the rows that keep their handles (from keepFrom on) stands in the API form.
+function keptCallsIn(messages, keepFrom, api) {
+  const ids = new Set();
+  for (const a of api) if (a.role === 'assistant' && Array.isArray(a.content)) for (const b of a.content) if (b && b.type === 'tool_use') ids.add(b.id);
+  return messages.every((m, i) => i < keepFrom || m.role !== 'assistant' || (m.toolUses || []).every((u) => ids.has(u.tool_use_id)));
+}
+
+// A block the API runs itself: server_tool_use, mcp_tool_use and their results
+// (advisor_tool_result, web_search_tool_result, ...).
+const isServerBlock = (b) => Boolean(b) && typeof b.type === 'string' && b.type !== 'tool_use' && b.type !== 'tool_result' && /_tool_(?:use|result)$/.test(b.type);
+
+// Assistant API messages with a server block, and whether one stands among the rows that keep their
+// handles (from keepFrom on). An API message is placed by its first call's row, else by a text block
+// equal to the text of a row at or after the row of the API message before it (a cursor in order); one
+// placed nowhere takes the row of the next placed message and counts as kept when that row is at or
+// after keepFrom (or, with none following, when any row keeps its handle). Without the API form
+// nothing is counted (count null).
+function serverBlocks(messages, api, keepFrom) {
+  if (!api) return { count: null, inTail: false };
+  const rowOfUse = new Map();
+  messages.forEach((m, i) => { if (m.role === 'assistant') for (const u of m.toolUses || []) if (!rowOfUse.has(u.tool_use_id)) rowOfUse.set(u.tool_use_id, i); });
+  const placed = [];
+  let cursor = 0;
+  for (const a of api) {
+    if (!a || a.role !== 'assistant' || !Array.isArray(a.content)) continue;
+    let row;
+    for (const b of a.content) if (b && b.type === 'tool_use' && rowOfUse.has(b.id)) { row = rowOfUse.get(b.id); break; }
+    if (row === undefined) {
+      const texts = a.content.filter((b) => b && b.type === 'text' && typeof b.text === 'string' && b.text).map((b) => b.text);
+      for (let i = cursor; i < messages.length && texts.length; i++) if (messages[i].role === 'assistant' && texts.includes(messages[i].text)) { row = i; break; }
+    }
+    if (row !== undefined) cursor = Math.max(cursor, row);
+    placed.push({ row, server: a.content.some(isServerBlock) });
+  }
+  let next;
+  for (let k = placed.length - 1; k >= 0; k--) { if (placed[k].row === undefined) placed[k].row = next; else next = placed[k].row; }
+  let count = 0;
+  let inTail = false;
+  for (const p of placed) {
+    if (!p.server) continue;
+    count++;
+    if (p.row === undefined ? keepFrom < messages.length : p.row >= keepFrom) inTail = true;
+  }
+  return { count, inTail };
+}
+
 // A user message with tool results kept by its engine handle is written after the compact boundary
 // with its original parent, which points before the boundary, so `--resume` (and every `-p` turn)
 // rebuilt the conversation from before the compaction (measured on Claude Code 2.1.318). Such a
 // message is therefore rebuilt from its own text, unchanged for the model, whenever all its results
 // are text. A message with an image or another non-text result in the last KEEP_LAST messages keeps
-// its handle (counted in kept_handle) and has that limit.
-function build(messages, candidates, stats) {
+// its handle (counted in kept_handle) and has that limit. Every assistant row before `keepFrom` is
+// rebuilt (text, traces and kept calls; thinking and server blocks dropped, an empty row removed) into
+// the one message of its group (groupsOf), placed at the group's first row with content, so the result
+// rows that follow pair with it and the host gives it a new message.id; from keepFrom on
+// (openLoopStart) the rows keep their handles.
+function build(messages, candidates, keepFrom, group, stats) {
   const byId = new Map();
   for (const c of candidates) byId.set(c.id, c);
   const out = [];
   stats.rebuiltUnchanged = 0;
   stats.keptHandle = 0;
-  for (const m of messages) {
-    if (m.role === 'assistant' && (m.toolUses || []).some((u) => byId.get(u.tool_use_id)?.keep === 'trace')) {
+  stats.rebuiltAssistant = 0;
+  stats.droppedAssistant = 0;
+  stats.joinedRows = 0;
+  const merged = new Map();
+  for (const [i, m] of messages.entries()) {
+    if (m.role === 'assistant' && i < keepFrom) {
+      stats.rebuiltAssistant++;
       const traces = [];
       const kept = [];
-      for (const u of m.toolUses) {
+      for (const u of m.toolUses || []) {
         const c = byId.get(u.tool_use_id);
         if (c && c.keep === 'trace') traces.push(c.trace);
         else kept.push({ tool_use_id: u.tool_use_id, tool: u.tool, input: u.input });
       }
-      out.push({ role: 'assistant', text: [m.text || '', ...traces].filter(Boolean).join('\n'), toolUses: kept });
+      const text = [m.text || '', ...traces].filter(Boolean).join('\n');
+      if (!text && !kept.length) { stats.droppedAssistant++; continue; }
+      const at = merged.get(group[i]);
+      if (at !== undefined) {
+        const t = out[at];
+        out[at] = { role: 'assistant', text: [t.text, text].filter(Boolean).join('\n'), toolUses: [...t.toolUses, ...kept] };
+        stats.joinedRows++;
+        continue;
+      }
+      merged.set(group[i], out.length);
+      out.push({ role: 'assistant', text, toolUses: kept });
       continue;
     }
     if (m.role === 'user' && (m.toolResults || []).length) {
@@ -908,20 +1079,62 @@ function build(messages, candidates, stats) {
 function pairing(messages) {
   const open = new Set();
   const seen = new Set();
-  let orphanResults = 0;
+  const orphanResults = new Set();
   for (const m of messages) {
     for (const u of m.toolUses || []) { open.add(u.tool_use_id); seen.add(u.tool_use_id); }
     for (const r of m.toolResults || []) {
-      if (!seen.has(r.tool_use_id)) orphanResults++;
+      if (!seen.has(r.tool_use_id)) orphanResults.add(r.tool_use_id);
       open.delete(r.tool_use_id);
     }
   }
-  return { orphanResults, openCalls: open.size };
+  return { orphanResults, openCalls: open };
 }
+// Pairing as the host checks it before a request (measured on Claude Code 2.1.321). The host joins
+// consecutive user rows, and joins an assistant row to an earlier assistant message of the same
+// message.id while only result-only user rows stand between them; then every call of assistant
+// message k needs its result in message k + 1, else the host puts "[Tool result missing due to
+// internal error]" in its place and drops the real result. A row a hook built gets a new message.id,
+// so it joins nothing; the rows with the engine's handle since the last user row with text are taken
+// as one message, also across a built assistant row (the host keeps joining by message.id past it).
+// Returns the ids of calls without a result in the next message (`u:<id>`) and of results without a
+// call in the previous one (`r:<id>`).
+function adjacencyBreaks(messages) {
+  const msgs = [];
+  let run = -1;
+  for (const m of messages) {
+    if (m.role === 'assistant') {
+      const uses = (m.toolUses || []).map((u) => u.tool_use_id);
+      if (m.handle && run >= 0) { msgs[run].uses.push(...uses); continue; }
+      msgs.push({ role: 'assistant', uses });
+      if (m.handle) run = msgs.length - 1;
+      continue;
+    }
+    const results = (m.toolResults || []).map((r) => r.tool_use_id);
+    if (m.text || !results.length) run = -1;
+    const last = msgs[msgs.length - 1];
+    if (last && last.role === 'user') last.results.push(...results);
+    else msgs.push({ role: 'user', results });
+  }
+  const breaks = new Set();
+  const seen = new Set();
+  msgs.forEach((mm, k) => {
+    if (mm.role !== 'assistant') return;
+    const uses = mm.uses.filter((id) => !seen.has(id));
+    for (const id of uses) seen.add(id);
+    const next = msgs[k + 1];
+    if (!next) return;
+    const got = new Set(next.role === 'user' ? next.results : []);
+    for (const id of uses) if (!got.has(id)) breaks.add(`u:${id}`);
+    for (const id of got) if (!mm.uses.includes(id)) breaks.add(`r:${id}`);
+  });
+  return breaks;
+}
+const subset = (x, y) => [...x].every((id) => y.has(id));
+// Every break of the built list (by id) is already a break of the list the host handed over.
 export function pairingOk(original, built) {
   const a = pairing(original);
   const b = pairing(built);
-  return b.orphanResults <= a.orphanResults && b.openCalls <= a.openCalls;
+  return subset(b.orphanResults, a.orphanResults) && subset(b.openCalls, a.openCalls) && subset(adjacencyBreaks(built), adjacencyBreaks(original));
 }
 
 // Resolves {value}, {timeout: true} or {error}; never rejects. $.clock.after is a timer, not the
@@ -998,7 +1211,25 @@ async function decide($, e, cfg, record, started) {
   const before = messages.reduce((s, m) => s + messageChars(m), 0);
   record.chars_before = before;
   if (messages.length <= KEEP_LAST + 1) return { fallback: 'too_few_messages' };
-  const candidates = findCandidates(messages, cfg.privatePaths);
+  // The rows of one API message are rebuilt together (groupsOf); only the last message of an open tool
+  // loop keeps its handles, and then the API form has to hold every call of it: without it a call whose
+  // result came back quickly starts a group of its own, and that message would be split.
+  const asApi = e.agentId === undefined ? { as: 'api' } : { as: 'api', agentId: e.agentId };
+  let api = apiFormOf((await withDeadline($, Promise.resolve().then(() => $.session.messages(asApi)), HOST_MS)).value);
+  const group = groupsOf(messages, api);
+  const keepFrom = openLoopStart(messages, group);
+  if (api && !keptCallsIn(messages, keepFrom, api)) api = undefined;
+  record.kept_from = messages.length - keepFrom;
+  if (!api && keepFrom < messages.length) return { fallback: 'no_api_form' };
+  const server = serverBlocks(messages, api, keepFrom);
+  record.server_blocks = server.count;
+  if (server.inTail) return { fallback: 'server_block_in_tail' };
+  // A kept row with neither text nor calls is thinking (or a server block). On `--resume` the host joins
+  // it with its copy from before the boundary, so the last assistant message would carry its signed
+  // thinking block twice, which the extended thinking documentation says fails with 400.
+  if (messages.some((m, i) => i >= keepFrom && m.role === 'assistant' && m.handle && !m.text && !(m.toolUses || []).length)) return { fallback: 'thinking_in_tail' };
+  // Results of the calls that keep their handles stay whole (a built row may not stand among them).
+  const candidates = findCandidates(messages, cfg.privatePaths).filter((c) => c.useIdx < keepFrom);
   record.candidates = candidates.length;
   const removable = removableChars(candidates);
   record.max_reduction = before ? Math.round((removable / before) * 1000) / 1000 : 0;
@@ -1101,7 +1332,7 @@ async function decide($, e, cfg, record, started) {
   record.mentioned = markMentioned(candidates, user);
   allocate(candidates, before, cfg.target);
   const stats = {};
-  const built = build(messages, candidates, stats);
+  const built = build(messages, candidates, keepFrom, group, stats);
   if (!pairingOk(messages, built)) return { fallback: 'build_error' };
   const after = built.reduce((s, m) => s + messageChars(m), 0);
   const hist = [0, 0, 0, 0];
@@ -1115,6 +1346,9 @@ async function decide($, e, cfg, record, started) {
     traced: candidates.filter((c) => c.keep === 'trace').length,
     rebuilt_unchanged: stats.rebuiltUnchanged,
     kept_handle: stats.keptHandle,
+    rebuilt_assistant: stats.rebuiltAssistant,
+    dropped_assistant: stats.droppedAssistant,
+    joined_rows: stats.joinedRows,
     score_hist: hist,
     unanswered: asked.length - answered,
   });
@@ -1129,6 +1363,13 @@ async function compact($, e, next) {
   // the breaker is open the summary will run, so the host may compute it ahead.
   if (e.trigger === 'precompute') return cfg.mode === 'active' && !(await blockedReason($, cfg, Date.now())) ? { skip: 'jev-compaction replaces the summary' } : next(e);
   const started = Date.now();
+  // Any compaction of the main loop that actually replaced the messages, this module's or the built-in
+  // summary, arms the own threshold's growth gate again (ownThreshold). A skip leaves the context as it
+  // was, so the gate stays as it was too.
+  const armGrowthGate = (out) => {
+    if (e.agentId === undefined && !out?.skip) { session.growthArmed = true; session.growthBase = undefined; }
+    return out;
+  };
   session.compacting++;
   try {
     let sessionId;
@@ -1152,9 +1393,9 @@ async function compact($, e, next) {
     // Written before next(e): the classic SessionStart:compact hook can run while the built-in summary
     // is still being installed.
     await writeRecord($, cfg, record);
-    if (decision.fallback || cfg.mode !== 'active') return await next(e);
+    if (decision.fallback || cfg.mode !== 'active') return armGrowthGate(await next(e));
     if (cfg.toast) { try { $.ui.toast(`Jev compaction: ${decision.before} -> ${decision.after} chars`); } catch { /* optional */ } }
-    return { messages: decision.messages };
+    return armGrowthGate({ messages: decision.messages });
   } finally {
     session.compacting--;
   }
@@ -1165,8 +1406,19 @@ async function ownThreshold($, e, next) {
   try {
     if (e.agentId !== undefined || session.compacting > 0 || session.hostCannot) return result;
     session.turnCount++;
-    if (session.turnCount - session.lastAttempt < MIN_TURNS_BETWEEN) return result;
+    // While the growth gate is armed every turn reads the usage, not only every MIN_TURNS_BETWEEN turns.
+    if (!session.growthArmed && session.turnCount - session.lastAttempt < MIN_TURNS_BETWEEN) return result;
     if (!session.cachedConfig || Date.now() - session.cachedAt > CONFIG_TTL_MS) { session.cachedConfig = await readConfig($); session.cachedAt = Date.now(); }
+    // The base of the growth gate is the lowest usage since the compaction: the first reading may still
+    // count the request from before it. It is read before the pause check, so a compaction that ran
+    // while requests were paused still gets its base. The first reading never asks.
+    if (session.growthArmed && session.cachedConfig.mode === 'active' && session.cachedConfig.atPercent !== undefined) {
+      const reading = (await $.session.usage())?.context?.tokens;
+      if (!Number.isFinite(reading) || reading <= 0) return result;
+      const first = session.growthBase === undefined;
+      session.growthBase = first ? reading : Math.min(session.growthBase, reading);
+      if (first || session.turnCount - session.lastAttempt < MIN_TURNS_BETWEEN) return result;
+    }
     const cfg = session.cachedConfig;
     if (cfg.mode !== 'active' || cfg.atPercent === undefined || (await blockedReason($, cfg, Date.now()))) return result;
     const usage = await $.session.usage();
@@ -1184,6 +1436,12 @@ async function ownThreshold($, e, next) {
     }
     const window = session.compactWindow;
     if (!Number.isFinite(window) || window <= 0 || tokens * 100 < cfg.atPercent * window) return result;
+    // After a compaction the context has to grow by OWN_MIN_GAIN of the window first, counted from the
+    // lowest usage since it and at most from the threshold: a compaction that ends above the threshold
+    // would else be asked for again as soon as the turn gap allows (right away after /compact or the
+    // host's own compaction), and one that ends just below it after a few thousand tokens.
+    if (session.growthBase !== undefined && tokens - Math.min(session.growthBase, (cfg.atPercent * window) / 100) < OWN_MIN_GAIN * window) return result;
+    session.growthArmed = false;
     // The tokens include the fixed prefix (system prompt, tools, instructions): ask only when the
     // removable tool results are worth it, so the threshold never forces the built-in summary.
     session.lastAttempt = session.turnCount;

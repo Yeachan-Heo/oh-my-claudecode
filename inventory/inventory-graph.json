@@ -5,15 +5,15 @@
   "provenance": {
     "base": "05c800f40d1ad53b42a78609d2667ef4f726808b",
     "planningHead": "0a91273e61dbbd47eb0af4c02844409251e08398",
-    "head": "ef0c092f0a91b10083214177de564b8a9f96dc90",
-    "sourceSha256": "055b072fe00fbfc10564a199aae2586df6dbc8e14814983529997806fdee5ac3",
+    "head": "515fac705e2a75629d19a8641d3faadf6de17d39",
+    "sourceSha256": "04e637e9dcfeae931aff53632aed9911dd5bd939518f2bc207ebdc9bd09eea6c",
     "generatedAt": null,
     "generator": "scripts/generate-inventory-graph.mjs"
   },
   "base": "05c800f40d1ad53b42a78609d2667ef4f726808b",
   "planningHead": "0a91273e61dbbd47eb0af4c02844409251e08398",
-  "head": "ef0c092f0a91b10083214177de564b8a9f96dc90",
-  "sourceSha256": "055b072fe00fbfc10564a199aae2586df6dbc8e14814983529997806fdee5ac3",
+  "head": "515fac705e2a75629d19a8641d3faadf6de17d39",
+  "sourceSha256": "04e637e9dcfeae931aff53632aed9911dd5bd939518f2bc207ebdc9bd09eea6c",
   "counts": {
     "public": {
       "skills": 84,
@@ -23,13 +23,13 @@
       "total": 133
     },
     "internal": {
-      "hookFiles": 338,
+      "hookFiles": 336,
       "featureFiles": 95,
       "toolFiles": 65,
       "libFiles": 49,
       "templateHooks": 25,
-      "srcFiles": 1452,
-      "total": 1477
+      "srcFiles": 1448,
+      "total": 1473
     },
     "generated": {
       "distFiles": 5639,
@@ -41,7 +41,7 @@
     },
     "skills": 84,
     "commands": 21,
-    "hookFiles": 338,
+    "hookFiles": 336,
     "workflows": 8,
     "agentDefinitions": 18,
     "promptLikeFiles": 63
@@ -286,9 +286,7 @@
       "src/hooks/jev/__tests__/active-mode.test.ts",
       "src/hooks/jev/__tests__/client.test.ts",
       "src/hooks/jev/__tests__/points-wire-shape.test.ts",
-      "src/hooks/jev/__tests__/resolver-request-count.test.ts",
       "src/hooks/jev/__tests__/resolver.test.ts",
-      "src/hooks/jev/__tests__/shared-breaker.test.ts",
       "src/hooks/jev/client.ts",
       "src/hooks/jev/config.ts",
       "src/hooks/jev/index.ts",
@@ -891,8 +889,6 @@
       "scripts/lib/hud-cache-wrapper.sh",
       "scripts/lib/hud-wrapper-template.mjs",
       "scripts/lib/hud-wrapper-template.txt",
-      "scripts/lib/jev-breaker.d.mts",
-      "scripts/lib/jev-breaker.mjs",
       "scripts/lib/jev-compaction-state.mjs",
       "scripts/lib/jev-mask.mjs",
       "scripts/lib/jev-shadow.mjs",
@@ -6722,9 +6718,7 @@
       "src/hooks/jev/__tests__/active-mode.test.ts",
       "src/hooks/jev/__tests__/client.test.ts",
       "src/hooks/jev/__tests__/points-wire-shape.test.ts",
-      "src/hooks/jev/__tests__/resolver-request-count.test.ts",
       "src/hooks/jev/__tests__/resolver.test.ts",
-      "src/hooks/jev/__tests__/shared-breaker.test.ts",
       "src/hooks/jev/client.ts",
       "src/hooks/jev/config.ts",
       "src/hooks/jev/index.ts",
@@ -37454,16 +37448,6 @@
         "path": "scripts/lib/hud-wrapper-template.txt"
       },
       {
-        "id": "scripts/lib/jev-breaker.d.mts",
-        "kind": "script",
-        "path": "scripts/lib/jev-breaker.d.mts"
-      },
-      {
-        "id": "scripts/lib/jev-breaker.mjs",
-        "kind": "script",
-        "path": "scripts/lib/jev-breaker.mjs"
-      },
-      {
         "id": "scripts/lib/jev-compaction-state.mjs",
         "kind": "script",
         "path": "scripts/lib/jev-compaction-state.mjs"
@@ -41359,11 +41343,6 @@
         "path": "src/__tests__/issue-3867-legacy-l-update.test.ts"
       },
       {
-        "id": "src/__tests__/jev-breaker-script.test.mjs",
-        "kind": "src",
-        "path": "src/__tests__/jev-breaker-script.test.mjs"
-      },
-      {
         "id": "src/__tests__/jev-compaction-module.test.mjs",
         "kind": "src",
         "path": "src/__tests__/jev-compaction-module.test.mjs"
@@ -41397,11 +41376,6 @@
         "id": "src/__tests__/jev-shadow-noul.test.mjs",
         "kind": "src",
         "path": "src/__tests__/jev-shadow-noul.test.mjs"
-      },
-      {
-        "id": "src/__tests__/jev-shadow-spawn-mode.test.mjs",
-        "kind": "src",
-        "path": "src/__tests__/jev-shadow-spawn-mode.test.mjs"
       },
       {
         "id": "src/__tests__/job-state-db.test.ts",
@@ -44144,19 +44118,9 @@
         "path": "src/hooks/jev/__tests__/points-wire-shape.test.ts"
       },
       {
-        "id": "src/hooks/jev/__tests__/resolver-request-count.test.ts",
-        "kind": "hook",
-        "path": "src/hooks/jev/__tests__/resolver-request-count.test.ts"
-      },
-      {
         "id": "src/hooks/jev/__tests__/resolver.test.ts",
         "kind": "hook",
         "path": "src/hooks/jev/__tests__/resolver.test.ts"
-      },
-      {
-        "id": "src/hooks/jev/__tests__/shared-breaker.test.ts",
-        "kind": "hook",
-        "path": "src/hooks/jev/__tests__/shared-breaker.test.ts"
       },
       {
         "id": "src/hooks/jev/client.ts",
@@ -49602,11 +49566,6 @@
       },
       {
         "from": "scripts/jev-resolve.mjs",
-        "to": "scripts/lib/jev-breaker.mjs",
-        "kind": "imports"
-      },
-      {
-        "from": "scripts/jev-resolve.mjs",
         "to": "scripts/lib/state-root.mjs",
         "kind": "imports"
       },
@@ -49821,31 +49780,6 @@
         "kind": "imports"
       },
       {
-        "from": "scripts/lib/jev-breaker.mjs",
-        "to": "external:node:crypto",
-        "kind": "imports"
-      },
-      {
-        "from": "scripts/lib/jev-breaker.mjs",
-        "to": "external:node:fs",
-        "kind": "imports"
-      },
-      {
-        "from": "scripts/lib/jev-breaker.mjs",
-        "to": "external:node:os",
-        "kind": "imports"
-      },
-      {
-        "from": "scripts/lib/jev-breaker.mjs",
-        "to": "external:node:path",
-        "kind": "imports"
-      },
-      {
-        "from": "scripts/lib/jev-breaker.mjs",
-        "to": "scripts/lib/atomic-write.mjs",
-        "kind": "imports"
-      },
-      {
         "from": "scripts/lib/jev-compaction-state.mjs",
         "to": "external:node:fs",
         "kind": "imports"
@@ -49908,11 +49842,6 @@
       {
         "from": "scripts/lib/jev-shadow.mjs",
         "to": "scripts/jev-resolve.mjs",
-        "kind": "imports"
-      },
-      {
-        "from": "scripts/lib/jev-shadow.mjs",
-        "to": "scripts/lib/jev-breaker.mjs",
         "kind": "imports"
       },
       {
@@ -56021,68 +55950,8 @@
         "kind": "type-imports"
       },
       {
-        "from": "src/__tests__/jev-breaker-script.test.mjs",
-        "to": "external:node:child_process",
-        "kind": "imports"
-      },
-      {
-        "from": "src/__tests__/jev-breaker-script.test.mjs",
-        "to": "external:node:fs",
-        "kind": "imports"
-      },
-      {
-        "from": "src/__tests__/jev-breaker-script.test.mjs",
-        "to": "external:node:http",
-        "kind": "imports"
-      },
-      {
-        "from": "src/__tests__/jev-breaker-script.test.mjs",
-        "to": "external:node:os",
-        "kind": "imports"
-      },
-      {
-        "from": "src/__tests__/jev-breaker-script.test.mjs",
-        "to": "external:node:path",
-        "kind": "imports"
-      },
-      {
-        "from": "src/__tests__/jev-breaker-script.test.mjs",
-        "to": "external:node:url",
-        "kind": "imports"
-      },
-      {
-        "from": "src/__tests__/jev-breaker-script.test.mjs",
-        "to": "external:vitest",
-        "kind": "imports"
-      },
-      {
-        "from": "src/__tests__/jev-breaker-script.test.mjs",
-        "to": "scripts/jev-resolve.mjs",
-        "kind": "imports"
-      },
-      {
-        "from": "src/__tests__/jev-breaker-script.test.mjs",
-        "to": "scripts/lib/jev-breaker.mjs",
-        "kind": "imports"
-      },
-      {
-        "from": "src/__tests__/jev-breaker-script.test.mjs",
-        "to": "src/hooks/jev/points.ts",
-        "kind": "imports"
-      },
-      {
-        "from": "src/__tests__/jev-breaker-script.test.mjs",
-        "to": "src/hooks/jev/resolver.ts",
-        "kind": "imports"
-      },
-      {
         "from": "src/__tests__/jev-compaction-module.test.mjs",
         "to": "external:node:fs",
-        "kind": "imports"
-      },
-      {
-        "from": "src/__tests__/jev-compaction-module.test.mjs",
-        "to": "external:node:os",
         "kind": "imports"
       },
       {
@@ -56108,11 +55977,6 @@
       {
         "from": "src/__tests__/jev-compaction-module.test.mjs",
         "to": "scripts/jev-resolve.mjs",
-        "kind": "imports"
-      },
-      {
-        "from": "src/__tests__/jev-compaction-module.test.mjs",
-        "to": "scripts/lib/jev-breaker.mjs",
         "kind": "imports"
       },
       {
@@ -56313,21 +56177,6 @@
       {
         "from": "src/__tests__/jev-shadow-noul.test.mjs",
         "to": "scripts/lib/jev-shadow.mjs",
-        "kind": "imports"
-      },
-      {
-        "from": "src/__tests__/jev-shadow-spawn-mode.test.mjs",
-        "to": "external:node:path",
-        "kind": "imports"
-      },
-      {
-        "from": "src/__tests__/jev-shadow-spawn-mode.test.mjs",
-        "to": "external:node:url",
-        "kind": "imports"
-      },
-      {
-        "from": "src/__tests__/jev-shadow-spawn-mode.test.mjs",
-        "to": "external:vitest",
         "kind": "imports"
       },
       {
@@ -70086,41 +69935,6 @@
         "kind": "type-imports"
       },
       {
-        "from": "src/hooks/jev/__tests__/resolver-request-count.test.ts",
-        "to": "external:node:fs/promises",
-        "kind": "imports"
-      },
-      {
-        "from": "src/hooks/jev/__tests__/resolver-request-count.test.ts",
-        "to": "external:node:os",
-        "kind": "imports"
-      },
-      {
-        "from": "src/hooks/jev/__tests__/resolver-request-count.test.ts",
-        "to": "external:node:path",
-        "kind": "imports"
-      },
-      {
-        "from": "src/hooks/jev/__tests__/resolver-request-count.test.ts",
-        "to": "external:vitest",
-        "kind": "imports"
-      },
-      {
-        "from": "src/hooks/jev/__tests__/resolver-request-count.test.ts",
-        "to": "scripts/lib/jev-breaker.mjs",
-        "kind": "imports"
-      },
-      {
-        "from": "src/hooks/jev/__tests__/resolver-request-count.test.ts",
-        "to": "src/hooks/jev/resolver.ts",
-        "kind": "imports"
-      },
-      {
-        "from": "src/hooks/jev/__tests__/resolver-request-count.test.ts",
-        "to": "src/hooks/jev/types.ts",
-        "kind": "type-imports"
-      },
-      {
         "from": "src/hooks/jev/__tests__/resolver.test.ts",
         "to": "external:node:fs/promises",
         "kind": "imports"
@@ -70147,46 +69961,6 @@
       },
       {
         "from": "src/hooks/jev/__tests__/resolver.test.ts",
-        "to": "src/hooks/jev/types.ts",
-        "kind": "type-imports"
-      },
-      {
-        "from": "src/hooks/jev/__tests__/shared-breaker.test.ts",
-        "to": "external:node:fs",
-        "kind": "imports"
-      },
-      {
-        "from": "src/hooks/jev/__tests__/shared-breaker.test.ts",
-        "to": "external:node:fs/promises",
-        "kind": "imports"
-      },
-      {
-        "from": "src/hooks/jev/__tests__/shared-breaker.test.ts",
-        "to": "external:node:os",
-        "kind": "imports"
-      },
-      {
-        "from": "src/hooks/jev/__tests__/shared-breaker.test.ts",
-        "to": "external:node:path",
-        "kind": "imports"
-      },
-      {
-        "from": "src/hooks/jev/__tests__/shared-breaker.test.ts",
-        "to": "external:vitest",
-        "kind": "imports"
-      },
-      {
-        "from": "src/hooks/jev/__tests__/shared-breaker.test.ts",
-        "to": "src/hooks/jev/client.ts",
-        "kind": "imports"
-      },
-      {
-        "from": "src/hooks/jev/__tests__/shared-breaker.test.ts",
-        "to": "src/hooks/jev/resolver.ts",
-        "kind": "imports"
-      },
-      {
-        "from": "src/hooks/jev/__tests__/shared-breaker.test.ts",
         "to": "src/hooks/jev/types.ts",
         "kind": "type-imports"
       },
@@ -70254,16 +70028,6 @@
         "from": "src/hooks/jev/resolver.ts",
         "to": "external:node:path",
         "kind": "imports"
-      },
-      {
-        "from": "src/hooks/jev/resolver.ts",
-        "to": "scripts/lib/jev-breaker.mjs",
-        "kind": "imports"
-      },
-      {
-        "from": "src/hooks/jev/resolver.ts",
-        "to": "scripts/lib/jev-breaker.mjs",
-        "kind": "type-imports"
       },
       {
         "from": "src/hooks/jev/resolver.ts",
@@ -93067,12 +92831,12 @@
       }
     ],
     "stats": {
-      "nodeCount": 8266,
-      "edgeCount": 8905,
-      "importEdgeCount": 7449,
+      "nodeCount": 8260,
+      "edgeCount": 8865,
+      "importEdgeCount": 7412,
       "registerEdgeCount": 105
     }
   },
-  "inventorySha256": "193d59b6c1301bf993322f0cd7f3d0c13889845372e2fe1fe306ae1ef6668183",
-  "manifestSha256": "edf786db427c3bfdc0ba0b7ec58dec38850b2627fd9e6d749b9967a4cae9ab0a"
+  "inventorySha256": "a6bc1a36066b6e9d37b02f940c1f61d6c1422f17d89b04ceb1cb5d7073fc6166",
+  "manifestSha256": "d898096fc0f530822df97a7e6fb05f93a2a9d6e3e94df53bcb75580a1fd89fea"
 }
