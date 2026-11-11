@@ -1224,6 +1224,23 @@ describe('jev-compaction module: moment chosen by Jev (OMC_JEV_COMPACT_AT_PERCEN
     expect(own(fake).at(-1)).toMatchObject({ result: 'requested', moment: 'task' });
   });
 
+  it('a TaskUpdate closing seen at an earlier read never counts again, in a later turn without new words of the user', async () => {
+    const close = [{ tool_use_id: 'u1', tool: 'TaskUpdate', input: { taskId: '1', status: 'completed' } }];
+    let current = withCalls(close, 0, conversation(40, { chars: 5 }));
+    const handlers = load();
+    const fake = fakeDollar({ env, usage: usageAt(() => 130000), respond: momentRespond(0.1) });
+    fake.$.session.messages = async () => { fake.calls.messages++; return current; };
+    // Read while the removable results are too small: the closing is seen.
+    await turn(handlers, fake);
+    expect(fake.calls.messages).toBe(1);
+    expect(fake.calls.compact).toBe(0);
+    // The next turn (a notification, no words of the user) still has it after the user's last words.
+    current = withCalls(close, 0);
+    await turn(handlers, fake);
+    expect(fake.calls.compact).toBe(0);
+    expect(momentCalls(fake.calls)).toHaveLength(1);
+  });
+
   it('else asks Jev at most once per 5 turns; a no is logged, a yes of at least 0.7 asks the host', async () => {
     let noul = 0.3;
     const handlers = load();
