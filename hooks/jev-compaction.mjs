@@ -1365,10 +1365,11 @@ function keptCallsIn(messages, keepFrom, api) {
 }
 
 // Whether an assistant API message of the rows that keep their handles (from keepFrom on) carries a
-// redacted_thinking block. Those rows stand in the API form from the first message holding one of their
+// thinking or redacted_thinking block. Those rows stand in the API form from the first message holding one of their
 // calls, together with the assistant messages right before it (no user message between: one turn for
 // the API, e.g. after split message ids), to the end. No such rows: false; rows whose message the API
-// form does not show: true (the summary).
+// form does not show: true (the summary). For opaque output blocks (e.g. container_upload) that are
+// neither text, toolUses, toolResults, nor known serverBlocks, return false to avoid misclassifying them as thinking.
 export function tailRedacted(messages, api, keepFrom) {
   if (keepFrom >= messages.length) return false;
   const ids = new Set();
@@ -1377,7 +1378,7 @@ export function tailRedacted(messages, api, keepFrom) {
   let first = Array.isArray(api) ? api.findIndex(holds) : -1;
   if (first < 0) return true;
   while (first > 0 && api[first - 1] && api[first - 1].role === 'assistant') first--;
-  return api.slice(first).some((a) => a && a.role === 'assistant' && Array.isArray(a.content) && a.content.some((b) => b && b.type === 'redacted_thinking'));
+  return api.slice(first).some((a) => a && a.role === 'assistant' && Array.isArray(a.content) && a.content.some((b) => b && (b.type === 'thinking' || b.type === 'redacted_thinking')));
 }
 
 // A block the API runs itself: server_tool_use, mcp_tool_use and their results
