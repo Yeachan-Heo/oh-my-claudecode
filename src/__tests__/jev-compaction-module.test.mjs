@@ -14,7 +14,7 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { afterAll, describe, expect, it } from 'vitest';
 
-import { boundExcerpts, classifyFailure, DEFAULT_EXCERPT_CHARS, mediumThreshold, omitSecretLines, pairingOk, parseMaxRpm, pointMode, QUESTION_CRITERIA, QUESTION_INSTRUCTIONS, register, retryAfterFromBody, retryAfterMs, sharedFailureClass } from '../../hooks/jev-compaction.mjs';
+import { boundExcerpts, classifyFailure, DEFAULT_EXCERPT_CHARS, mediumThreshold, omitSecretLines, pairingOk, parseMaxRpm, pointMode, QUESTION_CRITERIA, QUESTION_INSTRUCTIONS, register, retryAfterFromBody, retryAfterMs, sharedFailureClass, tailRedacted } from '../../hooks/jev-compaction.mjs';
 import { breakerSettings, classifyFailure as sharedClassifyFailure, parseMaxRpm as sharedParseMaxRpm, readBreaker, recordFailure, reserveRequest, retryAfterFromBody as sharedRetryAfterFromBody, thresholdFor } from '../../scripts/lib/jev-breaker.mjs';
 import { maskSecrets } from '../../scripts/lib/jev-mask.mjs';
 import { parseJevEnv, resolveExcerptChars, serializeQuestions } from '../../scripts/jev-resolve.mjs';
@@ -1952,13 +1952,64 @@ describe('jev-compaction module: what the host sends after the compaction', () =
     expect(withoutApi.calls.fetch).toHaveLength(0);
   });
 
-  it('inside an open tool loop a thinking row or a server block among the kept rows runs the summary before any request', async () => {
-    const thinking = await compactHost([...opening, ...singles(20, 1), U('Now check one more.'), T('mo'), C('mo', 'oa'), needed('oa')]);
-    expect(thinking.records()[0]).toMatchObject({ result: 'fallback', reason: 'thinking_in_tail', kept_from: 3 });
-    expect(thinking.calls.fetch).toHaveLength(0);
+  it('inside an open tool loop thinking rows keep their handles: 0 placeholders in the request and on --resume, where the last message carries its thinking twice', async () => {
+    const shapes = {
+      // Two thinking rows, then parallel calls. Thinking, text, call. A result streamed in between. A
+      // built row of another message.id (a trace of an earlier compaction) right before the message.
+      parallel: [[T('mo'), T('mo'), C('mo', 'oa'), C('mo', 'ob'), needed('oa'), needed('ob')], 2],
+      thinkingTextCall: [[T('mo'), X('mo', 'Checking one more file.'), C('mo', 'oa'), needed('oa')], 1],
+      streamed: [[T('mo'), C('mo', 'oa'), needed('oa'), C('mo', 'ob'), needed('ob')], 1],
+      earlierTrace: [[X('mt', '[compacted] Read(a.txt)'), T('mo'), C('mo', 'oa'), needed('oa')], 1],
+    };
+    for (const [name, [shape, thinking]] of Object.entries(shapes)) {
+      const run = await compactHost([...opening, ...singles(20, 1), U('Now check one more.'), ...shape]);
+      expect([name, run.records()[0]]).toMatchObject([name, { result: 'jev', kept_from: shape.length, kept_thinking: thinking }]);
+      for (const m of run.messages.slice(-shape.length).filter((x) => x.role === 'assistant')) expect([name, run.out.messages.includes(m)]).toEqual([name, true]);
+      expect([name, run.request]).toEqual([name, clean]);
+      expect([name, run.resumed]).toEqual([name, noReplay]);
+      const last = hostRequest(run.written).filter((m) => m.role === 'assistant').pop();
+      expect([name, last.blocks[0].type]).toEqual([name, 'thinking']);
+      // --resume joins the rows of that message.id from before the boundary too.
+      const all = [...run.messages.map((m) => run.table.get(m.handle)), ...run.written];
+      const resumed = all.filter((r) => r.role === 'assistant' && r.id === last.id).flatMap((r) => r.blocks);
+      expect([name, resumed.filter((b) => b.type === 'thinking').length]).toEqual([name, 2 * thinking]);
+    }
+  });
+
+  it('inside an open tool loop redacted thinking in the kept message or a server block among the kept rows runs the summary before any request', async () => {
+    const loop = [...opening, ...singles(20, 1), U('Now check one more.'), T('mo'), C('mo', 'oa'), needed('oa')];
+    const redact = (a) => ({ ...a, content: a.content.map((b) => (b.type === 'thinking' ? { type: 'redacted_thinking', data: 'x'.repeat(200) } : b)) });
+    const redactWhere = (pick) => (_opts, _messages, api) => api.map((a, k) => (pick(a, k, api) ? redact(a) : a));
+    const lastAssistant = (_a, k, api) => k === api.map((x) => x.role).lastIndexOf('assistant');
+    const redacted = await compactHost(loop, { api: redactWhere(lastAssistant) });
+    expect(redacted.records()[0]).toMatchObject({ result: 'fallback', reason: 'thinking_in_tail', kept_from: 3, kept_thinking: 1 });
+    expect(redacted.calls.fetch).toHaveLength(0);
+    // Redacted thinking only in an earlier message (rebuilt without its thinking): the compaction stands.
+    const earlier = await compactHost(loop, { api: redactWhere((a) => a.role === 'assistant' && a.content.some((b) => b.type === 'tool_use' && b.id === 't3')) });
+    expect(earlier.records()[0]).toMatchObject({ result: 'jev', kept_from: 3, kept_thinking: 1 });
+    expect(earlier.request).toEqual(clean);
     const advice = await compactHost([...opening, ...singles(20, 1), U('Ask the advisor, then check.'), S('mo', 'srv1'), X('mo', 'The advisor agrees.'), C('mo', 'oa'), needed('oa')]);
     expect(advice.records()[0]).toMatchObject({ result: 'fallback', reason: 'server_block_in_tail', server_blocks: 1 });
     expect(advice.calls.fetch).toHaveLength(0);
+  });
+
+  it('tailRedacted looks at the API messages of the kept rows and the assistant messages right before them', () => {
+    const red = { type: 'redacted_thinking', data: 'x'.repeat(50) };
+    const thought = { type: 'thinking', thinking: 'm', signature: 's' };
+    const A = (...content) => ({ role: 'assistant', content });
+    const Res = (...ids) => ({ role: 'user', content: ids.map((id) => ({ type: 'tool_result', tool_use_id: id, content: 'r' })) });
+    const use = (id) => ({ type: 'tool_use', id, name: 'Bash', input: {} });
+    // Rows: the task, call a, its result, call b, its result; from row 3 on (call b) the rows keep their handles.
+    const rows = [{ role: 'user', text: 't', toolUses: [] }, { role: 'assistant', text: '', toolUses: [{ tool_use_id: 'a' }] }, { role: 'user', text: '', toolUses: [] }, { role: 'assistant', text: '', toolUses: [{ tool_use_id: 'b' }] }, { role: 'user', text: '', toolUses: [] }];
+    const shapes = [
+      ['a message of its own right before', [A(red), A(thought, use('b')), Res('b')], 3, true],
+      ['in the message with the call (no thinking-only row)', [A(red, use('b')), Res('b')], 3, true],
+      ['before a user message (the step before)', [A(red, use('a')), Res('a'), A(thought, use('b')), Res('b')], 3, false],
+      ['plain thinking', [A(thought), A(thought, use('b')), Res('b')], 3, false],
+      ['no kept rows', [A(red, use('a')), Res('a')], 5, false],
+      ['kept rows the API form does not show', [A(red, use('a')), Res('a')], 3, true],
+    ];
+    for (const [name, api, keepFrom, expected] of shapes) expect([name, tailRedacted(rows, api, keepFrom)]).toEqual([name, expected]);
   });
 
   it('takes the API form only in its shape and only when it holds every kept call', async () => {
