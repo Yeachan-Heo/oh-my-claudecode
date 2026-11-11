@@ -940,7 +940,7 @@ const AUTOPILOT_ALONE_ON_LINE = /^[ \t]*[.!]?[ \t]*(?:\r?\n|$)/;
 const AUTOPILOT_NEGATION_BEFORE = /(?<![\p{L}\d])(?:don['’]?t|do\s+not|never|not|without)\s+(?:(?!(?:so|but|and|then|instead|because|now|mind)(?![\p{L}]))[\p{L}'’]+\s+){0,2}$/iu;
 const AUTOPILOT_REFERENCE_LABEL_LINE = /^[ \t]*(?:docs?|documentation|summary|status|logs?|release\s+notes|changelog|readme|examples?|output|result|results|description|title|commit|trigger|triggers|keywords?)[ \t]*:/i;
 const AUTOPILOT_NOUN_USE_BEFORE = /(?<![\p{L}\d])(?:the|a|an|this|that|these|those|last|previous|our|my|its|your|their)\s+$/iu;
-const AUTOPILOT_COMMIT_LINE_BEFORE = /(?<![\p{L}\d])[0-9a-f]{7,40}\s+$/i;
+const AUTOPILOT_COMMIT_LINE_BEFORE = /(?<![\p{L}\d])[0-9a-f]{7,40}\s+$/iu;
 const AUTOPILOT_ASCII_FREE_SCRIPTS = /[\p{Script=Hangul}\p{Script=Hiragana}\p{Script=Katakana}\p{Script=Han}\p{Script=Thai}]/u;
 const AUTOPILOT_PHRASE_BEFORE = /(?<![\p{L}\d])(?:turn\s+on|switch\s+to|set|go(?:\s+with|\s+for)?|i\s+(?:want|need|would\s+like)(?:\s+to\s+use)?)\s+(?:the\s+|a\s+)?$/iu;
 const AUTOPILOT_VERB_DIRECTLY_BEFORE = /(?<![\p{L}\d])(?:use|run|start|enable|activate|invoke|trigger|launch|turn\s+on)\s+$/iu;
