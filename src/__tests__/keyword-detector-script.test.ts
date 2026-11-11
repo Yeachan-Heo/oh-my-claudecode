@@ -1630,6 +1630,7 @@ describe.each([
     'the autopilot plan looks wrong to me',
     'CI said autopilot build failed on step 2',
     'git log:\nabc1234 autopilot fix cap overflow',
+    'the autopilot status page is down',
   ])('does not activate autopilot from a mention: %j', (prompt) => {
     expect(autopilotActivated(prompt)).toBe(false);
   });
@@ -1663,6 +1664,14 @@ describe.each([
     '이거 autopilot 으로 해줘',
     'このバグをautopilotで直して',
     '请用autopilot修复这个bug',
+    // Activation phrases with an article, explicit colon with any verb, namespaced command on a later line.
+    'please use the autopilot to fix the parser',
+    'turn on the autopilot',
+    'go with the autopilot',
+    'Here is the task:\nautopilot: test the API',
+    'Here is the task:\nautopilot: deploy the app',
+    'Here is the spec: a todo CLI with tests.\n\n/oh-my-claudecode:autopilot',
+    'Here is the spec: a todo CLI with tests.\n\n/omc:autopilot add tests',
   ])('still activates autopilot for a command: %j', (prompt) => {
     expect(autopilotActivated(prompt)).toBe(true);
   });

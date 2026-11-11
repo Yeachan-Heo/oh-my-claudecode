@@ -933,7 +933,9 @@ function hasActionableRalphKeyword(text, pattern) {
 const AUTOPILOT_COMMAND_VERBS = 'fix|debug|investigate|resolve|handle|patch|address|implement|build|create|make|run|start|enable|activate|invoke|trigger|launch|plan|add|write|refactor|update|remove|migrate|finish|continue|do|go';
 const AUTOPILOT_NOT_A_COMMAND_AFTER = '(?!\\s+(?:\\d|failed|fails|was|were|is|are|has|had|step|phase|looks|takes|keeps|crashed|hangs|hung|errored|timed\\s+out|exit|status|log|ok|okay)(?![\\p{L}\\d]))';
 const AUTOPILOT_COMMAND_AFTER = new RegExp(`^[ \\t]+(?:${AUTOPILOT_COMMAND_VERBS})(?![\\p{L}\\d])${AUTOPILOT_NOT_A_COMMAND_AFTER}`, 'iu');
-const AUTOPILOT_COLON_COMMAND = new RegExp(`^[ \\t]*[:\\uFF1A][ \\t]*(?:${AUTOPILOT_COMMAND_VERBS})(?![\\p{L}\\d])${AUTOPILOT_NOT_A_COMMAND_AFTER}`, 'iu');
+// After an explicit colon any verb starts a command ("autopilot: test the API"); a status line
+// ("autopilot: waiting for a task", "autopilot: complete") has a gerund, a past tense or no object.
+const AUTOPILOT_COLON_COMMAND = new RegExp(`^[ \\t]*[:\\uFF1A][ \\t]*(?:(?:${AUTOPILOT_COMMAND_VERBS})(?![\\p{L}\\d])${AUTOPILOT_NOT_A_COMMAND_AFTER}|(?!\\p{L}*(?:ing|ed)(?![\\p{L}\\d]))\\p{L}{2,}(?![\\p{L}\\d])${AUTOPILOT_NOT_A_COMMAND_AFTER}[ \\t]+\\S)`, 'iu');
 const AUTOPILOT_ALONE_ON_LINE = /^[ \t]*[.!]?[ \t]*(?:\r?\n|$)/;
 const AUTOPILOT_NEGATION_BEFORE = /(?<![\p{L}\d])(?:don['’]?t|do\s+not|never|not|without)\s+(?:(?!(?:so|but|and|then|instead|because|now|mind)(?![\p{L}]))[\p{L}'’]+\s+){0,2}$/iu;
 const AUTOPILOT_REFERENCE_LABEL_LINE = /^[ \t]*(?:docs?|documentation|summary|status|logs?|release\s+notes|changelog|readme|examples?|output|result|results|description|title|commit|trigger|triggers|keywords?)[ \t]*:/i;
@@ -942,12 +944,13 @@ const AUTOPILOT_COMMIT_LINE_BEFORE = /(?<![\p{L}\d])[0-9a-f]{7,40}\s+$/i;
 const AUTOPILOT_ASCII_FREE_SCRIPTS = /[\p{Script=Hangul}\p{Script=Hiragana}\p{Script=Katakana}\p{Script=Han}\p{Script=Thai}]/u;
 const AUTOPILOT_PHRASE_BEFORE = /(?<![\p{L}\d])(?:turn\s+on|switch\s+to|set|go(?:\s+with|\s+for)?|i\s+(?:want|need|would\s+like)(?:\s+to\s+use)?)\s+(?:the\s+|a\s+)?$/iu;
 const AUTOPILOT_VERB_DIRECTLY_BEFORE = /(?<![\p{L}\d])(?:use|run|start|enable|activate|invoke|trigger|launch|turn\s+on)\s+$/iu;
+const AUTOPILOT_VERB_ARTICLE_BEFORE = /(?<![\p{L}\d])(?:use|run|start|enable|activate|invoke|trigger|launch)\s+(?:the|a)\s+$/iu;
 const AUTOPILOT_NAMESPACE_PREFIX = /^\s*\/?(?:oh-my-(?:claudecode|codex)|omc):\s*$/i;
 const AUTOPILOT_MAX_MATCHES = 1000;
 const AUTOPILOT_MAX_CANDIDATES = 20;
 
 function hasExplicitAutopilotInvocationContext(text, position, keywordLength, keywordText) {
-  if (hasDirectInvocationPrefix(text, position) || AUTOPILOT_NAMESPACE_PREFIX.test(text.slice(0, position))) return true;
+  if (hasDirectInvocationPrefix(text, position) || AUTOPILOT_NAMESPACE_PREFIX.test(text.slice(getLineBounds(text, position).start, position))) return true;
   const { start: lineStart, end: lineEnd } = getLineBounds(text, position);
   const headStart = Math.max(lineStart, position - 80);
   const tail = text.slice(headStart, position);
@@ -966,9 +969,9 @@ function hasExplicitAutopilotInvocationContext(text, position, keywordLength, ke
       || hasConversationalInvocationNearKeyword(text, position, keywordLength, keywordText);
   }
   if (AUTOPILOT_COLON_COMMAND.test(afterKeyword)) return true;
+  if (AUTOPILOT_PHRASE_BEFORE.test(tail) || AUTOPILOT_VERB_ARTICLE_BEFORE.test(tail)) return true;
   if (AUTOPILOT_NOUN_USE_BEFORE.test(tail) || AUTOPILOT_COMMIT_LINE_BEFORE.test(tail)) return false;
   if (AUTOPILOT_COMMAND_AFTER.test(afterKeyword)) return true;
-  if (AUTOPILOT_PHRASE_BEFORE.test(tail)) return true;
   if (hasConversationalInvocationNearKeyword(text, position, keywordLength, keywordText)) return true;
   return hasActivationIntentNearKeyword(text.slice(Math.max(lineStart, position - INFORMATIONAL_CONTEXT_WINDOW), Math.min(lineEnd, position + keywordLength + INFORMATIONAL_CONTEXT_WINDOW)), keywordText);
 }
