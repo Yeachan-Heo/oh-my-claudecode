@@ -5,15 +5,15 @@
   "provenance": {
     "base": "05c800f40d1ad53b42a78609d2667ef4f726808b",
     "planningHead": "0a91273e61dbbd47eb0af4c02844409251e08398",
-    "head": "8bafc3aaccf2ba262ac45262da19605dfe3452f6",
-    "sourceSha256": "b95b5abb10bb14e69528b54611c24a4e87c639008688c8ce151ad1c9fde8e4b6",
+    "head": "4c2dc8674919d5c2ca1e6578ec823d58da56a8f4",
+    "sourceSha256": "77188d9f6dc8aebd866f51bb9fec189a0715617cb66508b9c7b78ca237083106",
     "generatedAt": null,
     "generator": "scripts/generate-inventory-graph.mjs"
   },
   "base": "05c800f40d1ad53b42a78609d2667ef4f726808b",
   "planningHead": "0a91273e61dbbd47eb0af4c02844409251e08398",
-  "head": "8bafc3aaccf2ba262ac45262da19605dfe3452f6",
-  "sourceSha256": "b95b5abb10bb14e69528b54611c24a4e87c639008688c8ce151ad1c9fde8e4b6",
+  "head": "4c2dc8674919d5c2ca1e6578ec823d58da56a8f4",
+  "sourceSha256": "77188d9f6dc8aebd866f51bb9fec189a0715617cb66508b9c7b78ca237083106",
   "counts": {
     "public": {
       "skills": 84,
@@ -28,8 +28,8 @@
       "toolFiles": 65,
       "libFiles": 49,
       "templateHooks": 25,
-      "srcFiles": 1474,
-      "total": 1499
+      "srcFiles": 1475,
+      "total": 1500
     },
     "generated": {
       "distFiles": 5639,
@@ -41439,6 +41439,11 @@
         "path": "src/__tests__/jev-log-rotation.test.mjs"
       },
       {
+        "id": "src/__tests__/jev-mask.test.mjs",
+        "kind": "src",
+        "path": "src/__tests__/jev-mask.test.mjs"
+      },
+      {
         "id": "src/__tests__/jev-plugin-hook-wiring.test.mjs",
         "kind": "src",
         "path": "src/__tests__/jev-plugin-hook-wiring.test.mjs"
@@ -56678,6 +56683,16 @@
       {
         "from": "src/__tests__/jev-log-rotation.test.mjs",
         "to": "src/hooks/jev/config.ts",
+        "kind": "imports"
+      },
+      {
+        "from": "src/__tests__/jev-mask.test.mjs",
+        "to": "external:vitest",
+        "kind": "imports"
+      },
+      {
+        "from": "src/__tests__/jev-mask.test.mjs",
+        "to": "scripts/lib/jev-mask.mjs",
         "kind": "imports"
       },
       {
@@ -94337,12 +94352,12 @@
       }
     ],
     "stats": {
-      "nodeCount": 8298,
-      "edgeCount": 9125,
-      "importEdgeCount": 7654,
+      "nodeCount": 8299,
+      "edgeCount": 9127,
+      "importEdgeCount": 7656,
       "registerEdgeCount": 105
     }
   },
-  "inventorySha256": "8052560f0b9c4008258c257af9bfec610abcba96f0b0c9abde8166a9cf56aba5",
-  "manifestSha256": "d99189d57fbd2b3c23a2ef058db3a76835626ced6de0bade9b19963895afe29b"
+  "inventorySha256": "8eac9c1bfc19a64e40457476dbb4910cd43311a72919c8063724ed4f07430c7b",
+  "manifestSha256": "7b3cd2c43d2541b560838b1e71ba404820ba6ed041af92b41e439ef5d5e9b127"
 }
