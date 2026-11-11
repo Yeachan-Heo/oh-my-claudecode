@@ -413,7 +413,9 @@ function freshState() {
     // OMC_JEV_COMPACT_AT_PERCENT=jev: main-loop compactions under way, the moment of the request in
     // flight, the last read {turn, step}, the closing calls counted already, the done items of the newest
     // list call per tool at the last read, the turn of the last question, the decision under way.
-    compactingMain: 0, ownRequested: undefined, momentSeen: new Set(), listDone: new Map(), lastAsk: -Infinity, momentBusy: undefined, momentCapNoted: false,
+    // compactGen counts the main-loop compactions begun, so a decision can tell that one began or ended
+    // while it waited for the host or for Jev.
+    compactingMain: 0, compactGen: 0, ownRequested: undefined, momentSeen: new Set(), listDone: new Map(), lastAsk: -Infinity, momentBusy: undefined, momentCapNoted: false,
   };
 }
 let session = freshState();
@@ -1746,6 +1748,24 @@ async function decide($, e, cfg, record, started) {
 }
 
 async function compact($, e, next) {
+  // A compaction that replaces the messages of the main loop is counted before the first host call
+  // (the configuration read), so a moment decision under way sees it whatever it is waiting for.
+  const counted = e.trigger !== 'precompute';
+  if (counted) {
+    session.compacting++;
+    if (e.agentId === undefined) { session.compactingMain++; session.compactGen++; }
+  }
+  try {
+    return await compactCounted($, e, next);
+  } finally {
+    if (counted) {
+      session.compacting--;
+      if (e.agentId === undefined) session.compactingMain--;
+    }
+  }
+}
+
+async function compactCounted($, e, next) {
   let cfg;
   try { cfg = await readConfig($); } catch { return next(e); }
   if (cfg.mode === 'off') return next(e);
@@ -1767,45 +1787,38 @@ async function compact($, e, next) {
     }
     return out;
   };
-  session.compacting++;
-  if (e.agentId === undefined) session.compactingMain++;
+  let sessionId;
+  try { sessionId = await $.session.id(); } catch { sessionId = undefined; }
+  const record = {
+    ts: isoNow(), point: POINT, event: 'compact', session_id: sessionId ?? null, agent_id: e.agentId ?? null,
+    trigger: e.trigger, mode: cfg.mode, messages_before: Array.isArray(e.messages) ? e.messages.length : 0,
+    chars_before: 0, target: cfg.target,
+    ...(cfg.shared?.unavailable ? { shared_unavailable: true } : {}),
+  };
+  // OMC_JEV_COMPACT_AT_PERCENT=jev: the compaction this module asked for ($.session.compact() runs it as
+  // `plugin`) names the moment that chose it.
+  if (e.agentId === undefined && e.trigger === 'plugin' && session.ownRequested) { record.own_request = session.ownRequested; session.ownRequested = undefined; }
+  let decision;
   try {
-    let sessionId;
-    try { sessionId = await $.session.id(); } catch { sessionId = undefined; }
-    const record = {
-      ts: isoNow(), point: POINT, event: 'compact', session_id: sessionId ?? null, agent_id: e.agentId ?? null,
-      trigger: e.trigger, mode: cfg.mode, messages_before: Array.isArray(e.messages) ? e.messages.length : 0,
-      chars_before: 0, target: cfg.target,
-      ...(cfg.shared?.unavailable ? { shared_unavailable: true } : {}),
-    };
-    // OMC_JEV_COMPACT_AT_PERCENT=jev: the compaction this module asked for ($.session.compact() runs it as
-    // `plugin`) names the moment that chose it.
-    if (e.agentId === undefined && e.trigger === 'plugin' && session.ownRequested) { record.own_request = session.ownRequested; session.ownRequested = undefined; }
-    let decision;
-    try {
-      decision = await decide($, e, cfg, record, started);
-    } catch (error) {
-      decision = { fallback: 'exception' };
-      record.error = clip(oneLine(maskSecrets(String(error?.message ?? error))), 200);
-    }
-    record.duration_ms = Date.now() - started;
-    if (decision.fallback) Object.assign(record, { result: 'fallback', reason: decision.fallback });
-    else record.result = cfg.mode === 'active' ? 'jev' : 'shadow';
-    // Written before next(e): the classic SessionStart:compact hook can run while the built-in summary
-    // is still being installed.
-    await writeRecord($, cfg, record);
-    if (decision.fallback || cfg.mode !== 'active') return armGrowthGate(await next(e));
-    if (cfg.toast) { try { $.ui.toast(`Jev compaction: ${decision.before} -> ${decision.after} chars`); } catch { /* optional */ } }
-    return armGrowthGate({ messages: decision.messages }, 'jev');
-  } finally {
-    session.compacting--;
-    if (e.agentId === undefined) session.compactingMain--;
+    decision = await decide($, e, cfg, record, started);
+  } catch (error) {
+    decision = { fallback: 'exception' };
+    record.error = clip(oneLine(maskSecrets(String(error?.message ?? error))), 200);
   }
+  record.duration_ms = Date.now() - started;
+  if (decision.fallback) Object.assign(record, { result: 'fallback', reason: decision.fallback });
+  else record.result = cfg.mode === 'active' ? 'jev' : 'shadow';
+  // Written before next(e): the classic SessionStart:compact hook can run while the built-in summary
+  // is still being installed.
+  await writeRecord($, cfg, record);
+  if (decision.fallback || cfg.mode !== 'active') return armGrowthGate(await next(e));
+  if (cfg.toast) { try { $.ui.toast(`Jev compaction: ${decision.before} -> ${decision.after} chars`); } catch { /* optional */ } }
+  return armGrowthGate({ messages: decision.messages }, 'jev');
 }
 
 // OMC_JEV_COMPACT_AT_PERCENT=jev. Closing calls of the transcript, [{id, idx}] in order: a TaskUpdate to a
-// done status whose result is no error, or a task-list call (TASK_LIST) whose list holds more done items than the call of the same
-// tool before it. `listDone` holds the done items of the newest list call per tool at the last read, so a
+// done status whose result is no error, or a task-list call (TASK_LIST) whose result is no error and whose
+// list holds more done items than the call of the same tool before it. `listDone` holds the done items of the newest list call per tool at the last read, so a
 // list call whose predecessor a compaction removed is still compared with it. Returns the closings and
 // the done items of the newest list call per tool now.
 const DONE_STATUS = /^(?:completed|done)$/i;
@@ -1816,14 +1829,14 @@ function doneItems(input) {
 function closingCalls(messages, listDone) {
   const doneBefore = new Map(listDone);
   const closing = [];
-  // A TaskUpdate closes a task only when its own result came back without an error.
+  // A call closes a task only when its own result came back without an error.
   const succeeded = new Set();
   for (const m of messages) if (m.role === 'user') for (const r of m.toolResults || []) if (!r.isError) succeeded.add(r.tool_use_id);
   messages.forEach((m, idx) => {
     if (m.role !== 'assistant') return;
     for (const u of m.toolUses || []) {
       if (u.tool === 'TaskUpdate') { if (DONE_STATUS.test(String(u.input?.status ?? '')) && succeeded.has(u.tool_use_id)) closing.push({ id: u.tool_use_id, idx }); continue; }
-      const n = TASK_LIST.test(u.tool || '') ? doneItems(u.input) : undefined;
+      const n = TASK_LIST.test(u.tool || '') && succeeded.has(u.tool_use_id) ? doneItems(u.input) : undefined;
       if (!n) continue;
       if (n.done > (doneBefore.get(u.tool) ?? 0)) closing.push({ id: u.tool_use_id, idx });
       doneBefore.set(u.tool, n.done);
@@ -1881,10 +1894,16 @@ async function askMoment($, cfg, messages, answer, tokens, window, until) {
   if (!r.value) {
     const failure = classifyFailure(r);
     noteFailures([failure], Date.now());
+    // Like a failed scoring compaction, a failed question counts toward the module's breaker (not a
+    // timeout the budget cut short).
+    if (!(failure.kind === 'timeout' && timeoutMs < 1000)) session.failedInRow++;
     return { reason: failure.kind === 'timeout' ? 'timeout' : 'jev_error', ...skipped };
   }
-  const raw = r.value.moment?.noul;
-  const noul = typeof raw === 'boolean' ? Number(raw) : typeof raw === 'number' && Number.isFinite(raw) ? raw : undefined;
+  session.failedInRow = 0;
+  // The registry's contract: a noul answer of 0 to 1 (a boolean is 0 or 1); anything else is no answer.
+  const reply = r.value.moment;
+  const raw = reply?.type === 'noul' ? reply.noul : undefined;
+  const noul = typeof raw === 'boolean' ? Number(raw) : typeof raw === 'number' && Number.isFinite(raw) && raw >= 0 && raw <= 1 ? raw : undefined;
   return noul === undefined ? { reason: 'no_answer', ...skipped } : { noul, ...skipped };
 }
 
@@ -1893,10 +1912,16 @@ async function ownThreshold($, e, next) {
   const until = Date.now() + MOMENT_BUDGET_MS;
   let busy;
   try {
-    if (e.agentId !== undefined || session.compacting > 0 || session.hostCannot) return result;
+    if (e.agentId !== undefined || session.hostCannot) return result;
     session.turnCount++;
+    // A turn that ends during a compaction still counts, so a decision waiting from before is stale.
+    if (session.compacting > 0) return result;
     // The turn this decision belongs to: a turn that ends during a host read below moves the counter on.
     const turn = session.turnCount;
+    // The compactions of the main loop begun so far: one that begins or ends during the decision, at
+    // any await below, makes it stale (the growth flag alone is reset on the way).
+    const generation = session.compactGen;
+    const stale = () => session.compactingMain > 0 || session.compactGen !== generation || session.turnCount !== turn;
     // While the growth gate is armed every turn reads the usage, not only every MIN_TURNS_BETWEEN turns.
     if (!session.growthArmed && session.turnCount - session.lastAttempt < MIN_TURNS_BETWEEN) return result;
     if (!session.cachedConfig || Date.now() - session.cachedAt > CONFIG_TTL_MS) { session.cachedConfig = await readConfig($); session.cachedAt = Date.now(); }
@@ -1981,7 +2006,7 @@ async function ownThreshold($, e, next) {
       // The shared state only now, with a request or a question to make.
       if (await blockedReason($, cfg, Date.now())) return result;
       if (closed) {
-        if (session.turnCount !== turn) {
+        if (stale()) {
           await ownRecord({ result: 'not_now', reason: 'state_changed', tokens, window, level });
           return result;
         }
@@ -2001,7 +2026,7 @@ async function ownThreshold($, e, next) {
         // turn makes it stale, and the context is read anew.
         const left = until - Date.now();
         const fresh = left > 0 ? (await withDeadline($, Promise.resolve().then(() => $.session.usage()), Math.min(HOST_MS, left))).value?.context?.tokens : undefined;
-        if (Date.now() < until && (session.compactingMain > 0 || session.growthArmed || session.turnCount !== turn || !(fresh >= level))) {
+        if (Date.now() < until && (stale() || !(fresh >= level))) {
           await ownRecord({ result: 'not_now', reason: 'state_changed', ...extra, tokens: Number.isFinite(fresh) ? fresh : tokens, window, level });
           return result;
         }

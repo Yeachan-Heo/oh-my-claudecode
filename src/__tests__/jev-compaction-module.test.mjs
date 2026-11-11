@@ -1501,6 +1501,142 @@ describe('jev-compaction module: moment chosen by Jev (OMC_JEV_COMPACT_AT_PERCEN
     }
   });
 
+  it('a TodoWrite or update_plan whose result is an error closes nothing and moves no baseline', async () => {
+    const calls = [todo('w1', 1, 2), { tool_use_id: 'p1', tool: 'update_plan', input: { items: [{ step: 'a', status: 'completed' }] } }];
+    for (const call of calls) {
+      for (const [isError, asks] of [[true, 0], [false, 1]]) {
+        const base = withCalls([call]);
+        const messages = frozen(base.map((m) => (m.toolResults ? { ...m, toolResults: m.toolResults.map((r) => ({ ...r, isError })) } : m)));
+        const fake = fakeDollar({ env, messages, usage: usageAt(() => 130000), respond: momentRespond(0.1) });
+        await turn(load(), fake);
+        expect(fake.calls.compact, `${call.tool} isError ${isError}`).toBe(asks);
+        expect(momentCalls(fake.calls), `${call.tool} isError ${isError}`).toHaveLength(1 - asks);
+      }
+    }
+    // The failed list is no baseline: the next list with the same number of done items still closes a task.
+    const failed = withCalls([todo('w1', 2, 3)]).map((m) => (m.toolResults ? { ...m, toolResults: m.toolResults.map((r) => ({ ...r, isError: true })) } : m));
+    const fake = fakeDollar({ env, messages: frozen([...failed, ...tail([todo('w2', 2, 3)])]), usage: usageAt(() => 130000), respond: momentRespond(0.1) });
+    await turn(load(), fake);
+    expect(fake.calls.compact).toBe(1);
+  });
+
+  it('a main-loop compaction that ends while the transcript is read makes a closed task stale', async () => {
+    const handlers = load();
+    const messages = withClosedTask();
+    const fake = fakeDollar({ env, usage: usageAt(() => 130000), respond: momentRespond(0.1) });
+    fake.$.session.messages = async () => {
+      fake.calls.messages++;
+      await handlers['session.compact'](fake.$, Object.freeze({ trigger: 'manual', messages: conversation(2) }), summaryNext());
+      return messages;
+    };
+    await turn(handlers, fake);
+    expect(fake.calls.compact).toBe(0);
+    expect(own(fake)).toEqual([expect.objectContaining({ result: 'not_now', reason: 'state_changed' })]);
+  });
+
+  it('a turn that ends while a subagent compacts still counts, so the yes that was asked for before it is stale', async () => {
+    const handlers = load();
+    let fake;
+    let release;
+    let running;
+    const respond = async (body) => {
+      if (!body.questions.moment) return okResponse(scoreByMarker(body));
+      const gate = new Promise((resolve) => { release = resolve; });
+      let entered;
+      const inside = new Promise((resolve) => { entered = resolve; });
+      running = handlers['session.compact'](fake.$, Object.freeze({ trigger: 'auto', messages: conversation(2), agentId: 'sub-1' }), async () => { entered(); await gate; return SUMMARY; });
+      await inside;
+      // A newer turn of the main loop ends while the subagent compacts, and the answer comes after it.
+      await turn(handlers, fake);
+      return okResponse({ answers: { moment: { type: 'noul', noul: 0.95 } } });
+    };
+    fake = fakeDollar({ env, messages: conversation(40, { chars: 6000 }), usage: usageAt(() => 130000), respond });
+    await turn(handlers, fake);
+    release();
+    await running;
+    expect(fake.calls.compact).toBe(0);
+    expect(own(fake)).toEqual([expect.objectContaining({ result: 'not_now', reason: 'state_changed', jev_noul: 0.95 })]);
+  });
+
+  it('a main-loop compaction that ends during the first usage read still makes the yes stale, though the growth flag is reset on the way', async () => {
+    const handlers = load();
+    let fake;
+    let reads = 0;
+    const usage = async () => {
+      if (++reads === 1) await handlers['session.compact'](fake.$, Object.freeze({ trigger: 'manual', messages: conversation(2) }), summaryNext());
+      return { context: { tokens: 130000, window: 200000 } };
+    };
+    fake = fakeDollar({ env, messages: conversation(40, { chars: 6000 }), usage, respond: momentRespond(0.95) });
+    await turn(handlers, fake);
+    expect(momentCalls(fake.calls)).toHaveLength(1);
+    expect(fake.calls.compact).toBe(0);
+    expect(own(fake)).toEqual([expect.objectContaining({ result: 'not_now', reason: 'state_changed', jev_noul: 0.95 })]);
+  });
+
+  it('a main-loop compaction counts as begun before its configuration is read', async () => {
+    const handlers = load();
+    let fake;
+    let blockEnv = false;
+    let release;
+    let running;
+    const respond = async (body) => {
+      if (!body.questions.moment) return okResponse(scoreByMarker(body));
+      // The host starts a compaction whose configuration read does not return before Jev answers.
+      const gate = new Promise((resolve) => { release = resolve; });
+      blockEnv = gate;
+      running = handlers['session.compact'](fake.$, Object.freeze({ trigger: 'auto', messages: conversation(2) }), summaryNext());
+      return okResponse({ answers: { moment: { type: 'noul', noul: 0.95 } } });
+    };
+    fake = fakeDollar({ env, messages: conversation(40, { chars: 6000 }), usage: usageAt(() => 130000), respond });
+    const get = fake.$.env.get;
+    fake.$.env.get = async (name) => { if (blockEnv) await blockEnv; return get(name); };
+    await turn(handlers, fake);
+    release();
+    await running;
+    expect(fake.calls.compact).toBe(0);
+    expect(own(fake)).toEqual([expect.objectContaining({ result: 'not_now', reason: 'state_changed', jev_noul: 0.95 })]);
+  });
+
+  it('failed moment questions open the module breaker: an invalid answer or a 400/404 is a failure like a failed compaction request', async () => {
+    const failures = { 'no answers': () => okResponse({}), 400: () => ({ ok: false, status: 400, headers: {}, text: '' }), 404: () => ({ ok: false, status: 404, headers: {}, text: '' }) };
+    for (const [name, respond] of Object.entries(failures)) {
+      const handlers = load();
+      const fake = fakeDollar({ env, messages: conversation(40, { chars: 6000 }), usage: usageAt(() => 130000), respond });
+      for (let k = 0; k < 40; k++) await turn(handlers, fake);
+      // Asked every 5 turns until the third failure, then never.
+      expect(momentCalls(fake.calls), name).toHaveLength(3);
+      expect(own(fake).map((r) => r.reason), name).toEqual(['jev_error', 'jev_error', 'jev_error']);
+    }
+  });
+
+  it('an answer counts only as {type: noul} within 0 to 1; a success resets the failures in a row', async () => {
+    const answers = [
+      [{ type: 'noul', noul: 0.95 }, 'requested'],
+      [{ type: 'noul', noul: true }, 'requested'],
+      [{ type: 'score', noul: 0.95 }, 'no_answer'],
+      [{ noul: 0.95 }, 'no_answer'],
+      [{ type: 'noul', noul: 2 }, 'no_answer'],
+      [{ type: 'noul', noul: -0.5 }, 'no_answer'],
+      [{ type: 'noul', noul: '0.95' }, 'no_answer'],
+    ];
+    for (const [moment, outcome] of answers) {
+      const fake = fakeDollar({ env, messages: conversation(40, { chars: 6000 }), usage: usageAt(() => 130000), respond: (body) => (body.questions.moment ? okResponse({ answers: { moment } }) : okResponse(scoreByMarker(body))) });
+      await turn(load(), fake);
+      expect(fake.calls.compact, JSON.stringify(moment)).toBe(outcome === 'requested' ? 1 : 0);
+      expect(own(fake), JSON.stringify(moment)).toEqual([expect.objectContaining(outcome === 'requested' ? { result: 'requested', moment: 'jev' } : { result: 'not_now', reason: 'no_answer' })]);
+    }
+    // Two failures, an answer, two failures: the answer cleared the count, so the breaker stays shut.
+    let phase = 0;
+    const handlers = load();
+    const fake = fakeDollar({ env, messages: conversation(40, { chars: 6000 }), usage: usageAt(() => 130000), respond: (body) => {
+      if (!body.questions.moment) return okResponse(scoreByMarker(body));
+      phase++;
+      return phase === 3 ? okResponse({ answers: { moment: { type: 'noul', noul: 0.1 } } }) : { ok: false, status: 400, headers: {}, text: '' };
+    } });
+    for (let k = 0; k < 60; k++) await turn(handlers, fake);
+    expect(momentCalls(fake.calls)).toHaveLength(6);
+  });
+
   it('the decision stays within 8 s of the turn\'s end: the question gets only what is left, and past it nothing is requested', async () => {
     const realNow = Date.now;
     let skew = 0;
