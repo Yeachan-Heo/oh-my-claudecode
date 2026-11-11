@@ -635,6 +635,15 @@ describe('jev-compaction module: own threshold (OMC_JEV_COMPACT_AT_PERCENT)', ()
     expect(fake.calls.compact).toBe(1);
   });
 
+  it('a summary that another mod skips leaves the growth gate disarmed: the next turn asks at once', async () => {
+    const handlers = load();
+    const fake = fakeDollar({ env, messages: conversation(40, { chars: 4000 }), usage: highUsage });
+    const skip = { skip: 'vetoed by another mod' };
+    expect(await handlers['session.compact'](fake.$, Object.freeze({ trigger: 'auto', messages: conversation(2) }), async () => skip)).toBe(skip);
+    await turn(handlers, fake);
+    expect(fake.calls.compact).toBe(1);
+  });
+
   it('a compaction while requests are paused still gets its base: once the pause ends, 125000 asks after a summary that ended at 100000', async () => {
     const handlers = load();
     await compactOnce(conversation(30), { handlers, respond: () => ({ ok: false, status: 500, headers: {}, text: '' }) });
