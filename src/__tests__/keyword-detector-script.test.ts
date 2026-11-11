@@ -320,6 +320,34 @@ describe('keyword-detector.mjs mode-message dispatch', () => {
     }
   });
 
+  it.each([
+    'Fix the cron first.\nautopilot test the API',
+    'Fix the cron first.\nautopilot review the patch',
+    'Fix the cron first.\nautopilot: bring the db up',
+    'Fix the cron first.\nautopilot: ping the server',
+    'Fix the cron first.\nautopilot: seed the database',
+    'Please use the full auto on this task',
+    'Please use the fullsend on this task',
+  ])('activates autopilot for the command "%s" in both shipped hooks', (prompt) => {
+    for (const detectorPath of [SCRIPT_PATH, TEMPLATE_PATH]) {
+      const output = runKeywordDetector(prompt, process.cwd(), 'session-5007-positive', {}, detectorPath);
+      expect(output.hookSpecificOutput?.additionalContext ?? '').toContain('[MAGIC KEYWORD: AUTOPILOT]');
+    }
+  });
+
+  it.each([
+    'Fix the cron first.\nautopilot: waiting for a task',
+    'Fix the cron first.\nautopilot: complete',
+    'Fix the cron first.\nautopilot test suite is red',
+    'Fix the cron first.\nautopilot review is done',
+    'The full auto mode is neat',
+  ])('does not activate autopilot for the status or prose line "%s" in both shipped hooks', (prompt) => {
+    for (const detectorPath of [SCRIPT_PATH, TEMPLATE_PATH]) {
+      const output = runKeywordDetector(prompt, process.cwd(), 'session-5007-negative', {}, detectorPath);
+      expect(output.hookSpecificOutput?.additionalContext ?? '').not.toContain('[MAGIC KEYWORD: AUTOPILOT]');
+    }
+  });
+
   it('continues suppressing reference prose that mentions modes mid-sentence in both shipped hooks', () => {
     const prompt = 'The article compares ralph and autopilot workflows, and explains how they differ.';
 

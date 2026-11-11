@@ -1060,12 +1060,12 @@ function hasActionableRalphKeyword(text, pattern) {
 // phrases, only a verb or phrase directly before counts. Lines in Korean, Japanese, Chinese or
 // Thai keep the generic check, as before. At most AUTOPILOT_MAX_CANDIDATES commands are checked
 // with isInformationalKeywordContext, whose cost is linear in the text length.
-const AUTOPILOT_COMMAND_VERBS = 'fix|debug|investigate|resolve|handle|patch|address|implement|build|create|make|run|start|enable|activate|invoke|trigger|launch|plan|add|write|refactor|update|remove|migrate|finish|continue|do|go';
-const AUTOPILOT_NOT_A_COMMAND_AFTER = '(?!\\s+(?:\\d|failed|fails|was|were|is|are|has|had|step|phase|looks|takes|keeps|crashed|hangs|hung|errored|timed\\s+out|exit|status|log|ok|okay)(?![\\p{L}\\d]))';
+const AUTOPILOT_COMMAND_VERBS = 'fix|debug|investigate|resolve|handle|patch|address|implement|build|create|make|run|start|enable|activate|invoke|trigger|launch|plan|add|write|refactor|update|remove|migrate|finish|continue|do|go|test|review|check|verify|audit|analy[sz]e|inspect|deploy|install|configure|document|explain|find|search|generate|convert|ship|release|merge|prepare|design|draft|upgrade|rename|clean|optimi[sz]e|rewrite|summari[sz]e|compare';
+const AUTOPILOT_NOT_A_COMMAND_AFTER = '(?!\\s+(?:\\d|failed|fails|was|were|is|are|has|had|step|phase|looks|takes|keeps|crashed|hangs|hung|errored|timed\\s+out|exit|status|log|ok|okay|suite|mode|output|report|results?|summary)(?![\\p{L}\\d]))';
 const AUTOPILOT_COMMAND_AFTER = new RegExp(`^[ \\t]+(?:${AUTOPILOT_COMMAND_VERBS})(?![\\p{L}\\d])${AUTOPILOT_NOT_A_COMMAND_AFTER}`, 'iu');
 // After an explicit colon any verb starts a command ("autopilot: test the API"); a status line
 // ("autopilot: waiting for a task", "autopilot: complete") has a gerund, a past tense or no object.
-const AUTOPILOT_COLON_COMMAND = new RegExp(`^[ \\t]*[:\\uFF1A][ \\t]*(?:(?:${AUTOPILOT_COMMAND_VERBS})(?![\\p{L}\\d])${AUTOPILOT_NOT_A_COMMAND_AFTER}|(?!\\p{L}*(?:ing|ed)(?![\\p{L}\\d]))\\p{L}{2,}(?![\\p{L}\\d])${AUTOPILOT_NOT_A_COMMAND_AFTER}[ \\t]+\\S)`, 'iu');
+const AUTOPILOT_COLON_COMMAND = new RegExp(`^[ \\t]*[:\\uFF1A][ \\t]*(?:(?:${AUTOPILOT_COMMAND_VERBS})(?![\\p{L}\\d])${AUTOPILOT_NOT_A_COMMAND_AFTER}|(?!(?!(?:bring|ping|seed|feed|embed|proceed|succeed|speed|need|shred|string|swing|sing|ring|fling|sling|sting|wring|spring|cling)(?![\\p{L}\\d]))\\p{L}*(?:ing|ed)(?![\\p{L}\\d]))\\p{L}{2,}(?![\\p{L}\\d])${AUTOPILOT_NOT_A_COMMAND_AFTER}[ \\t]+\\S)`, 'iu');
 const AUTOPILOT_ALONE_ON_LINE = /^[ \t]*[.!]?[ \t]*(?:\r?\n|$)/;
 const AUTOPILOT_NEGATION_BEFORE = /(?<![\p{L}\d])(?:don['’]?t|do\s+not|never|not|without)\s+(?:(?!(?:so|but|and|then|instead|because|now|mind)(?![\p{L}]))[\p{L}'’]+\s+){0,2}$/iu;
 const AUTOPILOT_REFERENCE_LABEL_LINE = /^[ \t]*(?:docs?|documentation|summary|status|logs?|release\s+notes|changelog|readme|examples?|output|result|results|description|title|commit|trigger|triggers|keywords?)[ \t]*:/i;
@@ -1096,6 +1096,7 @@ function hasExplicitAutopilotInvocationContext(text, position, keywordLength, ke
     return (atLineStart && (AUTOPILOT_COLON_COMMAND.test(afterKeyword) || AUTOPILOT_COMMAND_AFTER.test(afterKeyword)))
       || AUTOPILOT_VERB_DIRECTLY_BEFORE.test(tail)
       || AUTOPILOT_PHRASE_BEFORE.test(tail)
+      || AUTOPILOT_VERB_ARTICLE_BEFORE.test(tail)
       || hasConversationalInvocationNearKeyword(text, position, keywordLength, keywordText);
   }
   if (AUTOPILOT_COLON_COMMAND.test(afterKeyword)) return true;
