@@ -415,7 +415,9 @@ function freshState() {
     // list call per tool at the last read, the turn of the last question, the decision under way.
     // compactGen counts the main-loop compactions begun, so a decision can tell that one began or ended
     // while it waited for the host or for Jev.
-    compactingMain: 0, compactGen: 0, ownRequested: undefined, momentSeen: new Set(), listDone: new Map(), lastAsk: -Infinity, momentBusy: undefined, momentCapNoted: false,
+    // missedTurns counts the turns that ended without the transcript being read (a decision busy, a compaction
+    // running), so a task they closed is still a moment at the next read.
+    compactingMain: 0, compactGen: 0, missedTurns: 0, ownRequested: undefined, momentSeen: new Set(), listDone: new Map(), lastAsk: -Infinity, momentBusy: undefined, momentCapNoted: false,
   };
 }
 let session = freshState();
@@ -1826,12 +1828,17 @@ function doneItems(input) {
   const list = Array.isArray(input?.todos) ? input.todos : Array.isArray(input?.items) ? input.items : undefined;
   return list ? { done: list.filter((t) => t && DONE_STATUS.test(String(t.status ?? ''))).length, all: list.length } : undefined;
 }
+// The ids of the calls whose own result came back without an error.
+function succeededCalls(messages) {
+  const succeeded = new Set();
+  for (const m of messages) if (m.role === 'user') for (const r of m.toolResults || []) if (!r.isError) succeeded.add(r.tool_use_id);
+  return succeeded;
+}
 function closingCalls(messages, listDone) {
   const doneBefore = new Map(listDone);
   const closing = [];
   // A call closes a task only when its own result came back without an error.
-  const succeeded = new Set();
-  for (const m of messages) if (m.role === 'user') for (const r of m.toolResults || []) if (!r.isError) succeeded.add(r.tool_use_id);
+  const succeeded = succeededCalls(messages);
   messages.forEach((m, idx) => {
     if (m.role !== 'assistant') return;
     for (const u of m.toolUses || []) {
@@ -1866,9 +1873,11 @@ async function askMoment($, cfg, messages, answer, tokens, window, until) {
   const admission = await admitRequest($, cfg, deadline);
   if (admission.skip) return { reason: MOMENT_HELD[admission.skip.mode] ?? 'held' };
   let list;
+  // The newest list a call changed: a failed call proposed a list that never took effect.
+  const succeeded = succeededCalls(messages);
   for (const m of messages) {
     if (m.role !== 'assistant') continue;
-    for (const u of m.toolUses || []) { const n = TASK_LIST.test(u.tool || '') ? doneItems(u.input) : undefined; if (n) list = n; }
+    for (const u of m.toolUses || []) { const n = TASK_LIST.test(u.tool || '') && succeeded.has(u.tool_use_id) ? doneItems(u.input) : undefined; if (n) list = n; }
   }
   // The answer may quote a file read in any earlier turn, by this loop or by a subagent or teammate a
   // prompt sent there, so a secret or private path in the answer, in the user's words, in any call of the
@@ -1915,7 +1924,7 @@ async function ownThreshold($, e, next) {
     if (e.agentId !== undefined || session.hostCannot) return result;
     session.turnCount++;
     // A turn that ends during a compaction still counts, so a decision waiting from before is stale.
-    if (session.compacting > 0) return result;
+    if (session.compacting > 0) { session.missedTurns++; return result; }
     // The turn this decision belongs to: a turn that ends during a host read below moves the counter on.
     const turn = session.turnCount;
     // The compactions of the main loop begun so far: one that begins or ends during the decision, at
@@ -1942,7 +1951,7 @@ async function ownThreshold($, e, next) {
       // An interrupted turn, a refusal or an API error never chooses the moment: the user is about to type.
       if (e.isAborted || (e.reason !== undefined && e.reason !== 'answer')) return result;
       // One moment decision at a time: a turn that ends while the previous one waits for Jev starts none.
-      if (session.momentBusy !== undefined && Date.now() - session.momentBusy < MOMENT_STALE_MS) return result;
+      if (session.momentBusy !== undefined && Date.now() - session.momentBusy < MOMENT_STALE_MS) { session.missedTurns++; return result; }
       busy = Date.now();
       session.momentBusy = busy;
     }
@@ -1971,11 +1980,14 @@ async function ownThreshold($, e, next) {
     // host's own compaction), and one that ends just below it after a few thousand tokens. With jev there
     // is no threshold to count from, so the growth counts from the lowest usage alone.
     if (session.growthBase !== undefined && tokens - (cfg.atJev ? session.growthBase : Math.min(session.growthBase, (cfg.atPercent * window) / 100)) < OWN_MIN_GAIN * window) return result;
+    // A compaction that ended since the turn began armed a gate of its own: it stays, and this turn waits.
+    if (session.compactGen !== generation) return result;
     session.growthArmed = false;
     if (!cfg.atJev) session.lastAttempt = session.turnCount;
     // The tokens include the fixed prefix (system prompt, tools, instructions): ask only when the
     // removable tool results are worth it, so the threshold never forces the built-in summary. With jev
     // the compaction frees them only down to the target it would aim at.
+    const missed = session.missedTurns;
     const messages = await $.session.messages();
     const before = messages.reduce((s, m) => s + messageChars(m), 0);
     let closed = false;
@@ -1984,7 +1996,8 @@ async function ownThreshold($, e, next) {
       // is seen at this read, whatever the gates below decide. Above the level the transcript is read at
       // every turn, so a closing is found in its own turn.
       const found = closingCalls(messages, session.listDone);
-      const recent = turnsStart(messages, 1);
+      const recent = turnsStart(messages, 1 + missed);
+      session.missedTurns -= missed;
       closed = found.closing.some((c) => c.idx >= recent && !session.momentSeen.has(c.id));
       session.momentSeen = new Set(found.closing.map((c) => c.id));
       session.listDone = found.listDone;

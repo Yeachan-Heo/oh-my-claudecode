@@ -1558,7 +1558,7 @@ describe('jev-compaction module: moment chosen by Jev (OMC_JEV_COMPACT_AT_PERCEN
     expect(own(fake)).toEqual([expect.objectContaining({ result: 'not_now', reason: 'state_changed', jev_noul: 0.95 })]);
   });
 
-  it('a main-loop compaction that ends during the first usage read still makes the yes stale, though the growth flag is reset on the way', async () => {
+  it('a main-loop compaction that ends during the first usage read keeps its growth gate: this turn asks nothing, and nor do the next ones without growth', async () => {
     const handlers = load();
     let fake;
     let reads = 0;
@@ -1567,10 +1567,69 @@ describe('jev-compaction module: moment chosen by Jev (OMC_JEV_COMPACT_AT_PERCEN
       return { context: { tokens: 130000, window: 200000 } };
     };
     fake = fakeDollar({ env, messages: conversation(40, { chars: 6000 }), usage, respond: momentRespond(0.95) });
-    await turn(handlers, fake);
-    expect(momentCalls(fake.calls)).toHaveLength(1);
+    for (let k = 0; k < 10; k++) await turn(handlers, fake);
+    expect(momentCalls(fake.calls)).toHaveLength(0);
     expect(fake.calls.compact).toBe(0);
-    expect(own(fake)).toEqual([expect.objectContaining({ result: 'not_now', reason: 'state_changed', jev_noul: 0.95 })]);
+  });
+
+  it('a task closed in a turn that ended while another decision was busy is still a moment at the next read', async () => {
+    let current = conversation(40, { chars: 6000 });
+    let release;
+    const gate = new Promise((resolve) => { release = resolve; });
+    const handlers = load();
+    const respond = async (body) => {
+      if (!body.questions.moment) return okResponse(scoreByMarker(body));
+      await gate;
+      return okResponse({ answers: { moment: { type: 'noul', noul: 0.95 } } });
+    };
+    const fake = fakeDollar({ env, usage: usageAt(() => 130000), respond });
+    fake.$.session.messages = async () => { fake.calls.messages++; return current; };
+    const first = turn(handlers, fake);
+    for (let k = 0; k < 2000 && momentCalls(fake.calls).length < 1; k++) await new Promise((resolve) => setTimeout(resolve, 5));
+    // A newer turn closes a task while the question is out; it is not read, as the first decision is busy.
+    current = withClosedTask();
+    await turn(handlers, fake);
+    release();
+    await first;
+    expect(fake.calls.compact).toBe(0);
+    // The next turn has new words of the user after the closing, yet the closing counts.
+    current = withCalls([todo('w1', 1, 2)], 1);
+    await turn(handlers, fake);
+    expect(fake.calls.compact).toBe(1);
+    expect(own(fake).at(-1)).toMatchObject({ result: 'requested', moment: 'task' });
+  });
+
+  it('a task closed in a turn that ended while a subagent compacted is still a moment at the next read', async () => {
+    const handlers = load();
+    let current = withClosedTask();
+    const fake = fakeDollar({ env, usage: usageAt(() => 130000), respond: momentRespond(0.1) });
+    fake.$.session.messages = async () => { fake.calls.messages++; return current; };
+    let release;
+    const gate = new Promise((resolve) => { release = resolve; });
+    let entered;
+    const inside = new Promise((resolve) => { entered = resolve; });
+    const running = handlers['session.compact'](fake.$, Object.freeze({ trigger: 'auto', messages: conversation(2), agentId: 'sub-1' }), async () => { entered(); await gate; return SUMMARY; });
+    await inside;
+    await turn(handlers, fake);
+    expect(fake.calls.messages).toBe(0);
+    release();
+    await running;
+    current = withCalls([todo('w1', 1, 2)], 1);
+    await turn(handlers, fake);
+    expect(fake.calls.compact).toBe(1);
+    expect(own(fake).at(-1)).toMatchObject({ result: 'requested', moment: 'task' });
+  });
+
+  it('the list sent with the question is the newest one a call changed, not one a failed call proposed', async () => {
+    const lists = [[todo('w1', 1, 3), todo('w2', 3, 3)]];
+    for (const [first, second] of lists) {
+      const base = withCalls([first], 1);
+      const failed = tail([second]).map((m) => (m.toolResults ? { ...m, toolResults: m.toolResults.map((r) => ({ ...r, isError: true })) } : m));
+      const fake = fakeDollar({ env, messages: frozen([...base, ...failed]), usage: usageAt(() => 130000), respond: momentRespond(0.1) });
+      await turn(load(), fake);
+      expect(momentCalls(fake.calls)).toHaveLength(1);
+      expect(momentCalls(fake.calls)[0].body.state.list).toEqual({ done: 1, all: 3 });
+    }
   });
 
   it('a main-loop compaction counts as begun before its configuration is read', async () => {
