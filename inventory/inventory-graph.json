@@ -5,15 +5,15 @@
   "provenance": {
     "base": "05c800f40d1ad53b42a78609d2667ef4f726808b",
     "planningHead": "0a91273e61dbbd47eb0af4c02844409251e08398",
-    "head": "680bd189d04fa4c3766f9a912b1ffacfbb200eb4",
-    "sourceSha256": "5e00e48506effed87266f6b8414f1d2093b4ea1c55acb443860802727f2dd00c",
+    "head": "0c4d045aae17707f748043522425ccc90fdf711b",
+    "sourceSha256": "9f64fba5b394f9483f534ff0565c33c085186034b94ebd71b3493f5fadf7cee3",
     "generatedAt": null,
     "generator": "scripts/generate-inventory-graph.mjs"
   },
   "base": "05c800f40d1ad53b42a78609d2667ef4f726808b",
   "planningHead": "0a91273e61dbbd47eb0af4c02844409251e08398",
-  "head": "680bd189d04fa4c3766f9a912b1ffacfbb200eb4",
-  "sourceSha256": "5e00e48506effed87266f6b8414f1d2093b4ea1c55acb443860802727f2dd00c",
+  "head": "0c4d045aae17707f748043522425ccc90fdf711b",
+  "sourceSha256": "9f64fba5b394f9483f534ff0565c33c085186034b94ebd71b3493f5fadf7cee3",
   "counts": {
     "public": {
       "skills": 84,
@@ -28,8 +28,8 @@
       "toolFiles": 65,
       "libFiles": 49,
       "templateHooks": 25,
-      "srcFiles": 1449,
-      "total": 1474
+      "srcFiles": 1451,
+      "total": 1476
     },
     "generated": {
       "distFiles": 5639,
@@ -872,6 +872,7 @@
       "scripts/graph-agent-demo.mjs",
       "scripts/inventory-issue-3698.mjs",
       "scripts/jev-eval.mjs",
+      "scripts/jev-repair-transcript.mjs",
       "scripts/jev-resolve.mjs",
       "scripts/keyword-detector.mjs",
       "scripts/lib/agent-model-config.mjs",
@@ -891,6 +892,7 @@
       "scripts/lib/hud-wrapper-template.mjs",
       "scripts/lib/hud-wrapper-template.txt",
       "scripts/lib/jev-compaction-state.mjs",
+      "scripts/lib/jev-delivery-guard.mjs",
       "scripts/lib/jev-mask.mjs",
       "scripts/lib/jev-shadow.mjs",
       "scripts/lib/model-routing-override-message.mjs",
@@ -36865,6 +36867,11 @@
         "path": "node:process"
       },
       {
+        "id": "external:node:readline",
+        "kind": "external",
+        "path": "node:readline"
+      },
+      {
         "id": "external:node:stream",
         "kind": "external",
         "path": "node:stream"
@@ -37360,6 +37367,11 @@
         "path": "scripts/jev-eval.mjs"
       },
       {
+        "id": "scripts/jev-repair-transcript.mjs",
+        "kind": "script",
+        "path": "scripts/jev-repair-transcript.mjs"
+      },
+      {
         "id": "scripts/jev-resolve.mjs",
         "kind": "script",
         "path": "scripts/jev-resolve.mjs"
@@ -37453,6 +37465,11 @@
         "id": "scripts/lib/jev-compaction-state.mjs",
         "kind": "script",
         "path": "scripts/lib/jev-compaction-state.mjs"
+      },
+      {
+        "id": "scripts/lib/jev-delivery-guard.mjs",
+        "kind": "script",
+        "path": "scripts/lib/jev-delivery-guard.mjs"
       },
       {
         "id": "scripts/lib/jev-mask.mjs",
@@ -41355,6 +41372,11 @@
         "path": "src/__tests__/jev-compaction-state.test.mjs"
       },
       {
+        "id": "src/__tests__/jev-delivery-guard.test.mjs",
+        "kind": "src",
+        "path": "src/__tests__/jev-delivery-guard.test.mjs"
+      },
+      {
         "id": "src/__tests__/jev-eval-script.test.mjs",
         "kind": "src",
         "path": "src/__tests__/jev-eval-script.test.mjs"
@@ -41368,6 +41390,11 @@
         "id": "src/__tests__/jev-plugin-hook-wiring.test.mjs",
         "kind": "src",
         "path": "src/__tests__/jev-plugin-hook-wiring.test.mjs"
+      },
+      {
+        "id": "src/__tests__/jev-repair-transcript-script.test.mjs",
+        "kind": "src",
+        "path": "src/__tests__/jev-repair-transcript-script.test.mjs"
       },
       {
         "id": "src/__tests__/jev-resolve-script.test.mjs",
@@ -48220,6 +48247,16 @@
         "path": "tests/integration/jev-advisory-points.test.ts"
       },
       {
+        "id": "tests/integration/jev-delivery-guard-handoff.test.ts",
+        "kind": "other",
+        "path": "tests/integration/jev-delivery-guard-handoff.test.ts"
+      },
+      {
+        "id": "tests/integration/jev-delivery-guard-per-logdir.test.ts",
+        "kind": "other",
+        "path": "tests/integration/jev-delivery-guard-per-logdir.test.ts"
+      },
+      {
         "id": "tests/integration/jev-max-effort-always.test.ts",
         "kind": "other",
         "path": "tests/integration/jev-max-effort-always.test.ts"
@@ -49547,6 +49584,16 @@
         "kind": "imports"
       },
       {
+        "from": "scripts/jev-repair-transcript.mjs",
+        "to": "external:node:fs",
+        "kind": "imports"
+      },
+      {
+        "from": "scripts/jev-repair-transcript.mjs",
+        "to": "external:node:url",
+        "kind": "imports"
+      },
+      {
         "from": "scripts/jev-resolve.mjs",
         "to": "external:node:fs",
         "kind": "imports"
@@ -49624,6 +49671,11 @@
       {
         "from": "scripts/keyword-detector.mjs",
         "to": "scripts/lib/config-dir.mjs",
+        "kind": "imports"
+      },
+      {
+        "from": "scripts/keyword-detector.mjs",
+        "to": "scripts/lib/jev-delivery-guard.mjs",
         "kind": "imports"
       },
       {
@@ -49819,6 +49871,56 @@
       {
         "from": "scripts/lib/jev-compaction-state.mjs",
         "to": "scripts/lib/jev-mask.mjs",
+        "kind": "imports"
+      },
+      {
+        "from": "scripts/lib/jev-delivery-guard.mjs",
+        "to": "external:node:child_process",
+        "kind": "imports"
+      },
+      {
+        "from": "scripts/lib/jev-delivery-guard.mjs",
+        "to": "external:node:crypto",
+        "kind": "imports"
+      },
+      {
+        "from": "scripts/lib/jev-delivery-guard.mjs",
+        "to": "external:node:fs",
+        "kind": "imports"
+      },
+      {
+        "from": "scripts/lib/jev-delivery-guard.mjs",
+        "to": "external:node:os",
+        "kind": "imports"
+      },
+      {
+        "from": "scripts/lib/jev-delivery-guard.mjs",
+        "to": "external:node:path",
+        "kind": "imports"
+      },
+      {
+        "from": "scripts/lib/jev-delivery-guard.mjs",
+        "to": "external:node:readline",
+        "kind": "imports"
+      },
+      {
+        "from": "scripts/lib/jev-delivery-guard.mjs",
+        "to": "external:node:url",
+        "kind": "imports"
+      },
+      {
+        "from": "scripts/lib/jev-delivery-guard.mjs",
+        "to": "scripts/jev-resolve.mjs",
+        "kind": "imports"
+      },
+      {
+        "from": "scripts/lib/jev-delivery-guard.mjs",
+        "to": "scripts/lib/config-dir.mjs",
+        "kind": "imports"
+      },
+      {
+        "from": "scripts/lib/jev-delivery-guard.mjs",
+        "to": "scripts/lib/state-root.mjs",
         "kind": "imports"
       },
       {
@@ -56042,6 +56144,41 @@
         "kind": "imports"
       },
       {
+        "from": "src/__tests__/jev-delivery-guard.test.mjs",
+        "to": "external:node:child_process",
+        "kind": "imports"
+      },
+      {
+        "from": "src/__tests__/jev-delivery-guard.test.mjs",
+        "to": "external:node:fs",
+        "kind": "imports"
+      },
+      {
+        "from": "src/__tests__/jev-delivery-guard.test.mjs",
+        "to": "external:node:os",
+        "kind": "imports"
+      },
+      {
+        "from": "src/__tests__/jev-delivery-guard.test.mjs",
+        "to": "external:node:path",
+        "kind": "imports"
+      },
+      {
+        "from": "src/__tests__/jev-delivery-guard.test.mjs",
+        "to": "external:node:url",
+        "kind": "imports"
+      },
+      {
+        "from": "src/__tests__/jev-delivery-guard.test.mjs",
+        "to": "external:vitest",
+        "kind": "imports"
+      },
+      {
+        "from": "src/__tests__/jev-delivery-guard.test.mjs",
+        "to": "scripts/lib/jev-delivery-guard.mjs",
+        "kind": "imports"
+      },
+      {
         "from": "src/__tests__/jev-eval-script.test.mjs",
         "to": "external:node:child_process",
         "kind": "imports"
@@ -56129,6 +56266,41 @@
       {
         "from": "src/__tests__/jev-plugin-hook-wiring.test.mjs",
         "to": "external:vitest",
+        "kind": "imports"
+      },
+      {
+        "from": "src/__tests__/jev-repair-transcript-script.test.mjs",
+        "to": "external:node:child_process",
+        "kind": "imports"
+      },
+      {
+        "from": "src/__tests__/jev-repair-transcript-script.test.mjs",
+        "to": "external:node:fs",
+        "kind": "imports"
+      },
+      {
+        "from": "src/__tests__/jev-repair-transcript-script.test.mjs",
+        "to": "external:node:os",
+        "kind": "imports"
+      },
+      {
+        "from": "src/__tests__/jev-repair-transcript-script.test.mjs",
+        "to": "external:node:path",
+        "kind": "imports"
+      },
+      {
+        "from": "src/__tests__/jev-repair-transcript-script.test.mjs",
+        "to": "external:node:url",
+        "kind": "imports"
+      },
+      {
+        "from": "src/__tests__/jev-repair-transcript-script.test.mjs",
+        "to": "external:vitest",
+        "kind": "imports"
+      },
+      {
+        "from": "src/__tests__/jev-repair-transcript-script.test.mjs",
+        "to": "scripts/jev-repair-transcript.mjs",
         "kind": "imports"
       },
       {
@@ -91437,6 +91609,76 @@
         "kind": "imports"
       },
       {
+        "from": "tests/integration/jev-delivery-guard-handoff.test.ts",
+        "to": "external:node:child_process",
+        "kind": "imports"
+      },
+      {
+        "from": "tests/integration/jev-delivery-guard-handoff.test.ts",
+        "to": "external:node:fs",
+        "kind": "imports"
+      },
+      {
+        "from": "tests/integration/jev-delivery-guard-handoff.test.ts",
+        "to": "external:node:http",
+        "kind": "imports"
+      },
+      {
+        "from": "tests/integration/jev-delivery-guard-handoff.test.ts",
+        "to": "external:node:http",
+        "kind": "type-imports"
+      },
+      {
+        "from": "tests/integration/jev-delivery-guard-handoff.test.ts",
+        "to": "external:node:os",
+        "kind": "imports"
+      },
+      {
+        "from": "tests/integration/jev-delivery-guard-handoff.test.ts",
+        "to": "external:node:path",
+        "kind": "imports"
+      },
+      {
+        "from": "tests/integration/jev-delivery-guard-handoff.test.ts",
+        "to": "external:node:url",
+        "kind": "imports"
+      },
+      {
+        "from": "tests/integration/jev-delivery-guard-handoff.test.ts",
+        "to": "external:vitest",
+        "kind": "imports"
+      },
+      {
+        "from": "tests/integration/jev-delivery-guard-per-logdir.test.ts",
+        "to": "external:node:crypto",
+        "kind": "imports"
+      },
+      {
+        "from": "tests/integration/jev-delivery-guard-per-logdir.test.ts",
+        "to": "external:node:fs",
+        "kind": "imports"
+      },
+      {
+        "from": "tests/integration/jev-delivery-guard-per-logdir.test.ts",
+        "to": "external:node:os",
+        "kind": "imports"
+      },
+      {
+        "from": "tests/integration/jev-delivery-guard-per-logdir.test.ts",
+        "to": "external:node:path",
+        "kind": "imports"
+      },
+      {
+        "from": "tests/integration/jev-delivery-guard-per-logdir.test.ts",
+        "to": "external:node:url",
+        "kind": "imports"
+      },
+      {
+        "from": "tests/integration/jev-delivery-guard-per-logdir.test.ts",
+        "to": "external:vitest",
+        "kind": "imports"
+      },
+      {
         "from": "tests/integration/jev-max-effort-always.test.ts",
         "to": "external:node:child_process",
         "kind": "imports"
@@ -92888,12 +93130,12 @@
       }
     ],
     "stats": {
-      "nodeCount": 8261,
-      "edgeCount": 8875,
-      "importEdgeCount": 7421,
+      "nodeCount": 8268,
+      "edgeCount": 8916,
+      "importEdgeCount": 7461,
       "registerEdgeCount": 105
     }
   },
-  "inventorySha256": "d78c2fafefc22d289d09f631740998ea6749e67c2d458662e9a1a9ca37c658bc",
-  "manifestSha256": "3c1e25776492478590b3a3ebe3454b280b9e6f455cfe254ea63a72a61d2814cf"
+  "inventorySha256": "762efd27033db680859e89e9f3d66ea4a6ecb4e61efbfeea5af9afc71c05cedb",
+  "manifestSha256": "ebdddeaf14d1a1d06b7934b7ac5122d8101f2cc23546a743a33364ca1b5e8b0e"
 }
