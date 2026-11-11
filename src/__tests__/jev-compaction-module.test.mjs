@@ -1335,6 +1335,24 @@ describe('jev-compaction module: shared breaker and request limit (OMC_JEV_BREAK
     expect(existsSync(`${c.settings.dir}/breaker.json`)).toBe(false);
   }, 20_000);
 
+  it('(a) a lock a script opener creates while the module\'s read of it is under way is judged by the clock after the read, and is not overwritten', async () => {
+    const c = shared({ OMC_JEV_BREAKER: '1' });
+    mkdirSync(c.settings.dir, { recursive: true });
+    const lock = `${c.settings.dir}/breaker.json.lock`;
+    // The host read of the lock takes 1.2 s; the script opener creates the lock 1.1 s into it, so the text read is 0.1 s old.
+    // Against the clock taken before the read it would look 1.1 s old (stale) and the module would write its token over it.
+    await compactShared(c, conversation(30), {
+      lockReadDelayMs: 1200,
+      respond: () => {
+        setTimeout(() => writeFileSync(lock, JSON.stringify({ token: 'script', ts: Date.now() })), 1100);
+        return { ok: false, status: 429, headers: {}, text: '' };
+      },
+    });
+    await new Promise((resolve) => setTimeout(resolve, 2500));
+    expect(JSON.parse(readFileSync(lock, 'utf8')).token).toBe('script');
+    expect(existsSync(`${c.settings.dir}/breaker.json`)).toBe(false);
+  }, 20_000);
+
   it('(b) three requests without a response within a minute open the shared breaker for a minute; two do not', async () => {
     const two = shared({ OMC_JEV_BREAKER: '1' });
     const twoRun = await compactShared(two, conversation(80, { chars: 600 }), { respond: hang, clockAfter: 5 });

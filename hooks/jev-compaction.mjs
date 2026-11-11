@@ -583,7 +583,7 @@ function breakerOf(state, now) {
 // module's token before its write and starts over), checks it again right before its write, and marks the lock released afterwards
 // (the next script opener removes the file). Free: missing, released, or older than LOCK_STALE_MS by its ts, else by its mtime (text not
 // written yet, unreadable or corrupt); no usable mtime: taken.
-async function lockFree($, path, now) {
+async function lockFree($, path) {
   let text;
   try { text = await $.fs.read(path); } catch (error) { if (await isMissing($, path, error)) return true; }
   let lock;
@@ -593,7 +593,8 @@ async function lockFree($, path, now) {
   if (at === undefined) {
     try { at = (await $.fs.stat(path)).mtimeMs; } catch (error) { return isMissing($, path, error); }
   }
-  return Number.isFinite(at) && Math.abs(now - at) > LOCK_STALE_MS;
+  // The clock is read after the host reads: a lock created while a slow read was under way is as young as it is, not ahead of an earlier sample.
+  return Number.isFinite(at) && Math.abs(Date.now() - at) > LOCK_STALE_MS;
 }
 async function holdsLock($, path, token) {
   try { return JSON.parse(await $.fs.read(path)).token === token; } catch { return false; }
@@ -614,7 +615,7 @@ async function takeLock($, path, deadline) {
     // waiting on its own token.
     if (wroteToken && (await holdsLock($, path, token))) return Date.now() < deadline ? token : expire();
     if (Date.now() >= deadline) return expire();
-    if (await lockFree($, path, Date.now())) {
+    if (await lockFree($, path)) {
       if (Date.now() >= deadline) return expire();
       let written = false;
       try {

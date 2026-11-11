@@ -516,6 +516,32 @@ describe('jev-breaker library', () => {
     expect(existsSync(join(settings.dir, 'breaker.json'))).toBe(false);
   }, 30_000);
 
+  it('puts a displaced newer lock back by a copy when the hard link fails for another reason than EEXIST: the only lock is not lost', async () => {
+    const settings = breakerSettings({ OMC_JEV_BREAKER: '1', OMC_JEV_BREAKER_DIR: join(caseDir, 'breaker') }, ENDPOINT, 'k');
+    mkdirSync(settings.dir, { recursive: true });
+    const lock = join(settings.dir, 'breaker.json.lock');
+    writeFileSync(lock, JSON.stringify({ token: 'dead', ts: Date.now() - 2000 }));
+    // As above, another opener takes the lock between the judgement and the move; and the file system has no hard links (EPERM).
+    const child = await openInChild('nolink', String((fs) => {
+      const rename = fs.renameSync;
+      let swapped = false;
+      fs.renameSync = function (from, to, ...rest) {
+        if (!swapped && String(from).endsWith('breaker.json.lock') && String(to).endsWith('.removed')) {
+          swapped = true;
+          fs.rmSync(from);
+          fs.writeFileSync(from, JSON.stringify({ token: 'other', ts: Date.now() }), { flag: 'wx' });
+        }
+        return rename.call(this, from, to, ...rest);
+      };
+      fs.linkSync = function () {
+        throw Object.assign(new Error('EPERM: operation not permitted'), { code: 'EPERM' });
+      };
+    }), 429, { TEST_DEADLINE_IN_MS: '500' });
+    expect(child.opened).toBeNull();
+    expect(JSON.parse(readFileSync(lock, 'utf8')).token).toBe('other');
+    expect(existsSync(join(settings.dir, 'breaker.json'))).toBe(false);
+  }, 30_000);
+
   it('does not create the lock once the hook deadline has passed: no lock left to hold the others back, nothing written', async () => {
     const settings = breakerSettings({ OMC_JEV_BREAKER: '1', OMC_JEV_BREAKER_DIR: join(caseDir, 'breaker') }, ENDPOINT, 'k');
     // The deadline of the hook (and its kill margin) is over before the opener starts: a free lock must not be created.

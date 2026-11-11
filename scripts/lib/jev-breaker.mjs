@@ -395,8 +395,17 @@ function removeLockIf(lockPath, tag, isSame) {
   if (!same) {
     try {
       linkSync(tomb, lockPath);
-    } catch {
-      // A newer lock took the place (EEXIST): the displaced holder finds a foreign token before it writes.
+    } catch (error) {
+      // EEXIST: a newer lock took the place; the displaced holder finds a foreign token before it writes.
+      // Any other error (no hard links on this file system, EPERM): the path may be empty, so the lock is put back by an
+      // exclusive copy, and the tombstone stays when that fails too (removeStaleTemp sweeps it) rather than losing the only lock.
+      if (error?.code !== "EEXIST") {
+        try {
+          writeFileSync(lockPath, readFileSync(tomb), { flag: "wx" });
+        } catch (copyError) {
+          if (copyError?.code !== "EEXIST") return "restored";
+        }
+      }
     }
   }
   try {
