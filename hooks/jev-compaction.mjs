@@ -190,7 +190,14 @@ const NOT_USER_PREFIXES = [
 // host frames an automatic continuation and a plugin's message sent as the user with QUEUED_PREFIX
 // too; the API form does not tell them apart, so they count as the user's.
 const QUEUED_PREFIX = 'The user sent a new message while you were working:\n';
-const QUEUED_AT = /(?:^|\n)\s*(?:<system-reminder[^>]*>\s*)?The user sent a new message while you were working:\n/; // QUEUED_PREFIX at the start of a line
+const QUEUED_AT = /(?:^|\n)\s*(?:<system-reminder[^>]*>\s*)?The user sent a new message while you were working:\n/g; // QUEUED_PREFIX at the start of a line
+// Closed envelopes of other senders: an agent's or another session's message, a teammate's, a task
+// notification, and a reminder whose first line is another sender's "... while you were working:".
+// A user header quoted inside one (an agent report quoting a transcript) is not the user's.
+const OTHER_SPANS = [
+  /<(agent-message|cross-session-message|teammate-message|task-notification)\b[^>]*>[\s\S]*?<\/\1>/g,
+  /<system-reminder( id="[^"]*")?>\s*(?!The user sent a new message while you were working:\n)[^\n]* while you were working:\n[\s\S]*?<\/system-reminder\1>/g,
+];
 const QUEUED_TAIL = '\n\nThis is how Claude Code surfaces messages';
 const DELIVERY_WRAP = /^\s*<system-reminder[^>]*>\s*/;
 const DELIVERY_OPENERS = ['Another Claude session sent a message', '<agent-message', '<cross-session-message', '<teammate-message', '[MESSAGE FROM NON-USER SOURCE'];
@@ -795,7 +802,11 @@ function isQueuedBlock(text) {
 // The user's words of every queued message block starting a line of a text.
 function queuedWords(text) {
   if (typeof text !== 'string') return [];
-  return text.split(QUEUED_AT).slice(1).map((part) => {
+  const spans = OTHER_SPANS.flatMap((re) => [...text.matchAll(re)].map((m) => [m.index, m.index + m[0].length]));
+  const headers = [...text.matchAll(QUEUED_AT)];
+  return headers.map((h, k) => {
+    if (spans.some(([from, to]) => h.index >= from && h.index < to)) return '';
+    const part = text.slice(h.index + h[0].length, k + 1 < headers.length ? headers[k + 1].index : text.length);
     const end = part.indexOf(QUEUED_TAIL);
     return (end >= 0 ? part.slice(0, end) : part.replace(/\s*<\/system-reminder[^>]*>[\s\S]*$/, '')).trim();
   }).filter(Boolean);
