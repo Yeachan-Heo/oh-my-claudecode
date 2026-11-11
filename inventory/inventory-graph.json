@@ -5,15 +5,15 @@
   "provenance": {
     "base": "05c800f40d1ad53b42a78609d2667ef4f726808b",
     "planningHead": "0a91273e61dbbd47eb0af4c02844409251e08398",
-    "head": "4d48a0e68114210526f4db9eaff01e5952b32022",
-    "sourceSha256": "b2eeb0b74961da9540a0b642ad6e2e289027b2bedb6735a80c68e2bda62ca168",
+    "head": "9e80e07d48b0445b35850e121596a6912d962989",
+    "sourceSha256": "13c12493447b580f00926c5d1d47fca8691035c0064b919dacc29bf15f0b00cd",
     "generatedAt": null,
     "generator": "scripts/generate-inventory-graph.mjs"
   },
   "base": "05c800f40d1ad53b42a78609d2667ef4f726808b",
   "planningHead": "0a91273e61dbbd47eb0af4c02844409251e08398",
-  "head": "4d48a0e68114210526f4db9eaff01e5952b32022",
-  "sourceSha256": "b2eeb0b74961da9540a0b642ad6e2e289027b2bedb6735a80c68e2bda62ca168",
+  "head": "9e80e07d48b0445b35850e121596a6912d962989",
+  "sourceSha256": "13c12493447b580f00926c5d1d47fca8691035c0064b919dacc29bf15f0b00cd",
   "counts": {
     "public": {
       "skills": 84,
@@ -897,8 +897,6 @@
       "scripts/lib/jev-compaction-state.mjs",
       "scripts/lib/jev-delivery-guard.mjs",
       "scripts/lib/jev-mask.mjs",
-      "scripts/lib/jev-shadow.mjs",
-      "scripts/lib/jev-shadow.mjs",
       "scripts/lib/jev-shadow.mjs",
       "scripts/lib/model-routing-override-message.mjs",
       "scripts/lib/pre-tool-enforcer-preflight.mjs",
@@ -93712,6 +93710,6 @@
       "registerEdgeCount": 105
     }
   },
-  "inventorySha256": "c14c4ef59c88995a6e956da3fe283064ce650a4cd9e8cb01858b4d57231c79e9",
-  "manifestSha256": "9f678ea7864a1f0958c6e71f882b02eb08685e860085683de0c779d6c71386fd"
+  "inventorySha256": "80e20802a5af28c76c9c7af5f459dbf580cfac0552eb579fd6f0d22593897913",
+  "manifestSha256": "aee3d8e92e5f15f370529c0e5c816387ce8616ceef284be7cbeb1726aa812eea"
 }
