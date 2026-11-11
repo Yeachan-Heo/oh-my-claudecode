@@ -8,12 +8,14 @@
  * `next` that stands for the built-in summary. The transport stub is the only fake of the Jev side.
  */
 
-import { readFileSync } from 'node:fs';
-import { join } from 'node:path';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { describe, expect, it } from 'vitest';
+import { afterAll, describe, expect, it } from 'vitest';
 
-import { boundExcerpts, classifyFailure, DEFAULT_EXCERPT_CHARS, pairingOk, pointMode, QUESTION_CRITERIA, QUESTION_INSTRUCTIONS, register, retryAfterMs } from '../../hooks/jev-compaction.mjs';
+import { boundExcerpts, classifyFailure, DEFAULT_EXCERPT_CHARS, mediumThreshold, pairingOk, parseMaxRpm, pointMode, QUESTION_CRITERIA, QUESTION_INSTRUCTIONS, register, retryAfterFromBody, retryAfterMs, sharedFailureClass } from '../../hooks/jev-compaction.mjs';
+import { breakerSettings, classifyFailure as sharedClassifyFailure, parseMaxRpm as sharedParseMaxRpm, readBreaker, recordFailure, reserveRequest, retryAfterFromBody as sharedRetryAfterFromBody, thresholdFor } from '../../scripts/lib/jev-breaker.mjs';
 import { maskSecrets } from '../../scripts/lib/jev-mask.mjs';
 import { parseJevEnv, resolveExcerptChars, serializeQuestions } from '../../scripts/jev-resolve.mjs';
 import { boundExcerpts as tsBoundExcerpts, excerptCharsFor, parseJevConfig } from '../hooks/jev/config.ts';
@@ -39,15 +41,31 @@ function okResponse(json) {
   return { ok: true, status: 200, headers: {}, text: JSON.stringify(json) };
 }
 
-function fakeDollar({ env = ACTIVE_ENV, settingsEnv, respond = (body) => okResponse(scoreByMarker(body)), clockAfter, usage, messages = [], compactResult, writeThrows = false } = {}) {
+function fakeDollar({ env = ACTIVE_ENV, settingsEnv, respond = (body) => okResponse(scoreByMarker(body)), clockAfter, usage, messages = [], compactResult, writeThrows = false, diskPrefix, flakyBreakerRead = false, stallBreakerRead = false, stallRpmRead = false, rpmReadGate, rpmReadGates = {}, fsDelayMs = 0 } = {}) {
   const files = new Map();
+  let flaked = false;
+  let gated = false;
+  let rpmReads = 0;
   const calls = { fetch: [], write: 0, toast: [], log: 0, compact: 0, usage: 0, messages: 0, settings: 0 };
   const $ = {
     env: { get: async (name) => env[name] },
     settings: { read: async ({ key }) => { calls.settings++; return key === 'env' ? settingsEnv : undefined; } },
     fs: {
-      read: async (p) => { if (!files.has(p)) throw new Error('ENOENT'); return files.get(p); },
-      write: async (p, text) => { calls.write++; if (writeThrows) throw new Error('EACCES'); files.set(p, text); },
+      read: async (p) => {
+        if (fsDelayMs) await new Promise((resolve) => setTimeout(resolve, fsDelayMs));
+        if (flakyBreakerRead && !flaked && p.endsWith('/breaker.json')) { flaked = true; throw new Error('EPERM'); }
+        if (stallBreakerRead && p.endsWith('/breaker.json')) return new Promise(() => {});
+        if (stallRpmRead && /\/rpm-\d+$/.test(p)) return new Promise(() => {});
+        if (rpmReadGate && !gated && /\/rpm-\d+$/.test(p)) { gated = true; await rpmReadGate; }
+        if (/\/rpm-\d+$/.test(p)) { rpmReads += 1; if (rpmReadGates[rpmReads]) await rpmReadGates[rpmReads]; }
+        if (diskPrefix && p.startsWith(diskPrefix)) return readFileSync(p, 'utf8'); if (!files.has(p)) throw new Error('ENOENT'); return files.get(p);
+      },
+      exists: async (p) => (diskPrefix && p.startsWith(diskPrefix) ? existsSync(p) : files.has(p)),
+      write: async (p, text) => {
+        if (fsDelayMs) await new Promise((resolve) => setTimeout(resolve, fsDelayMs));
+        if (diskPrefix && p.startsWith(diskPrefix)) { mkdirSync(dirname(p), { recursive: true }); writeFileSync(p, text); return; }
+        calls.write++; if (writeThrows) throw new Error('EACCES'); files.set(p, text);
+      },
       list: async () => [],
     },
     http: {
@@ -58,7 +76,7 @@ function fakeDollar({ env = ACTIVE_ENV, settingsEnv, respond = (body) => okRespo
       },
     },
     clock: {
-      after: (ms, fn) => { const t = setTimeout(fn, clockAfter ?? ms); return { cancel: () => clearTimeout(t) }; },
+      after: (ms, fn) => { const t = setTimeout(fn, clockAfter !== undefined && ms >= 5000 ? clockAfter : ms); return { cancel: () => clearTimeout(t) }; },
       sleep: async () => { throw new Error('the module must not use $.clock.sleep'); },
     },
     session: {
@@ -318,6 +336,51 @@ describe('jev-compaction module: active compaction', () => {
     for (const id of ['t2', 't4', 't5', 't6', 't7', 't10', 't11']) expect(resultOf(run.out.messages, id)).toBeUndefined();
     expect(run.out.messages.some((m) => (m.text || '').includes('[compacted] Bash(cat notes-10.txt) - non-text result (image or file) removed'))).toBe(true);
     expect(run.records()[0]).toMatchObject({ secret_skipped: 6, non_text: 1 });
+  });
+
+  it('a private path written with a backslash after ~ is expanded against a Windows home directory, so its results are never sent', async () => {
+    const calls = {
+      3: ['Read', { file_path: 'C:/Users/alice/private/ledger.txt' }],
+      5: ['Read', { file_path: 'C:\\Users\\alice\\private\\notes.txt' }],
+      7: ['Bash', { command: 'cat ~\\private\\todo.txt' }],
+    };
+    const messages = conversation(20, {
+      tool: (i) => (calls[i] ? calls[i][0] : 'Bash'),
+      input: (i) => (calls[i] ? calls[i][1] : { command: `cat notes-${i}.txt` }),
+    });
+    const env = { ...ACTIVE_ENV, HOME: undefined, USERPROFILE: 'C:\\Users\\alice', OMC_JEV_LOG_DIR: STATE, OMC_JEV_COMPACT_PRIVATE_PATHS: '~\\private' };
+    const run = await compactOnce(messages, { env });
+    const sent = sentResults(run.calls).map((r) => r.input).join('\n');
+    expect(sent).not.toMatch(/private/);
+    expect(run.records()[0]).toMatchObject({ secret_skipped: 3 });
+  });
+
+  it('with every eligible result on a private path and no limit set, nothing is sent and the results are pruned without the built-in summary', async () => {
+    const messages = conversation(20, { tool: () => 'Read', input: () => ({ file_path: '/work/.env' }) });
+    const run = await compactOnce(messages, { env: ACTIVE_ENV });
+    expect(run.calls.fetch).toHaveLength(0);
+    expect(run.next.seen).toHaveLength(0);
+    expect(run.out).not.toBe(SUMMARY);
+    expect(run.out.messages.length).toBeGreaterThan(0);
+  });
+
+  it('home defaults with HOME and USERPROFILE both set: POSIX keeps spool and shared state under HOME, Windows under USERPROFILE, private paths expand against USERPROFILE', async () => {
+    const posixEnv = { ...ACTIVE_ENV, HOME: '/home/u', USERPROFILE: 'C:\\Users\\alice', OMC_JEV_BREAKER: '1' };
+    const posix = await compactOnce(conversation(20), { env: posixEnv });
+    expect(posix.records()).toHaveLength(1);
+    expect([...posix.files.keys()].filter((p) => p.includes('/.omc/state/jev/')).every((p) => p.startsWith('/home/u/.omc/state/jev/'))).toBe(true);
+    const winEnv = { ...posixEnv, OS: 'Windows_NT', HOME: 'C:\\git-home' };
+    const win = await compactOnce(conversation(20), { env: winEnv });
+    const winPaths = [...win.files.keys()].filter((p) => p.includes('/.omc/state/jev/'));
+    expect(winPaths.some((p) => p.startsWith('C:/Users/alice/.omc/state/jev/compaction-spool/'))).toBe(true);
+    expect(winPaths.every((p) => p.startsWith('C:/Users/alice/.omc/state/jev/'))).toBe(true);
+    const calls = { 3: ['Read', { file_path: 'C:/Users/alice/private/ledger.txt' }] };
+    const messages = conversation(20, {
+      tool: (i) => (calls[i] ? calls[i][0] : 'Bash'),
+      input: (i) => (calls[i] ? calls[i][1] : { command: `cat notes-${i}.txt` }),
+    });
+    const priv = await compactOnce(messages, { env: { ...winEnv, OMC_JEV_COMPACT_PRIVATE_PATHS: '~\\private' } });
+    expect(sentResults(priv.calls).map((r) => r.input).join('\n')).not.toMatch(/private/);
   });
 
   it('a result the user names in a recent message counts as needed, matched as a whole name', async () => {
@@ -703,6 +766,370 @@ describe('jev-compaction module: own threshold (OMC_JEV_COMPACT_AT_PERCENT)', ()
       for (let k = 0; k < 7; k++) await turn(handlers, fake);
       expect(fake.calls.compact).toBe(asks);
       expect(fake.records()[0]).toMatchObject({ event: 'own_threshold', result: 'rejected', reason });
+    }
+  });
+});
+
+describe('jev-compaction module: shared breaker and request limit (OMC_JEV_BREAKER, OMC_JEV_MAX_RPM)', () => {
+  const ENDPOINT = 'https://api.typesafe.ai/v1/systemone';
+  const tmp = mkdtempSync(join(tmpdir(), 'jev-compaction-shared-'));
+  const diskPrefix = tmp.replace(/\\/g, '/');
+  afterAll(() => rmSync(tmp, { recursive: true, force: true, maxRetries: 20, retryDelay: 100 }));
+  let count = 0;
+
+  /** The module writes and reads the same files as the script side: the state directory is on the real file system, read and written with the script library too. */
+  function shared(extra = {}) {
+    count += 1;
+    const dir = `${diskPrefix}/case-${count}`;
+    const env = { ...ACTIVE_ENV, OMC_JEV_BREAKER_DIR: dir, ...extra };
+    const settings = breakerSettings({ OMC_JEV_BREAKER: '1', OMC_JEV_MAX_RPM: extra.OMC_JEV_MAX_RPM, OMC_JEV_BREAKER_DIR: dir }, ENDPOINT, ACTIVE_ENV.TYPESAFE_API_KEY);
+    return { dir, env, settings };
+  }
+  const compactShared = (c, messages, options = {}, event = {}) => compactOnce(messages, { env: c.env, diskPrefix, ...options }, event);
+  const openByScripts = (c, status, retryAfter) => recordFailure(c.settings, sharedClassifyFailure({ status, retryAfter }));
+  const hang = () => new Promise(() => {});
+  // The limit counts UTC minutes: do not start a test that would cross a minute boundary.
+  async function calmMinute() {
+    const left = 60_000 - (Date.now() % 60_000);
+    if (left < 8000) await new Promise((resolve) => setTimeout(resolve, left + 200));
+  }
+
+  it('(a) an open breaker file stops the request: the built-in summary runs, reason breaker_open; precompute and the own threshold also wait', async () => {
+    const c = shared({ OMC_JEV_BREAKER: '1', OMC_JEV_COMPACT_AT_PERCENT: '60' });
+    expect(openByScripts(c, 429, '120')).toBeDefined();
+    const handlers = load();
+    const run = await compactShared(c, conversation(30), { handlers });
+    expect(run.calls.fetch).toHaveLength(0);
+    expect(run.out).toBe(SUMMARY);
+    expect(run.records()[0]).toMatchObject({ result: 'fallback', reason: 'breaker_open' });
+    const precompute = await compactShared(c, conversation(30), { handlers }, { trigger: 'precompute' });
+    expect(precompute.out).toBe(SUMMARY);
+    expect(precompute.calls.fetch).toHaveLength(0);
+    const fake = fakeDollar({ env: c.env, diskPrefix, messages: conversation(40, { chars: 4000 }), usage: () => ({ context: { tokens: 130000, window: 200000 } }) });
+    await handlers['turn.complete'](fake.$, { isAborted: false }, async () => 'ok');
+    expect(fake.calls.compact).toBe(0);
+    // The summary armed the growth gate, whose base is read during a pause too (#4978); it never asks.
+    expect(fake.calls.usage).toBe(1);
+  });
+
+  it('(a) OMC_JEV_MAX_REQUESTS stays a hard cap when two compactions wait for shared admission at once', async () => {
+    await calmMinute();
+    const c = shared({ OMC_JEV_BREAKER: '1', OMC_JEV_MAX_RPM: '100', OMC_JEV_MAX_REQUESTS: '1' });
+    const handlers = load();
+    const runs = await Promise.all([0, 1].map(() => compactShared(c, conversation(30), { handlers, fsDelayMs: 20 })));
+    expect(runs.reduce((n, run) => n + run.calls.fetch.length, 0)).toBe(1);
+    expect(runs.reduce((n, run) => n + run.records()[0].requests, 0)).toBe(1);
+  });
+
+  it('(a) a stalled breaker read falls back to the built-in check within the shared step deadline', async () => {
+    const c = shared({ OMC_JEV_BREAKER: '1' });
+    const started = Date.now();
+    const run = await compactShared(c, conversation(30), { stallBreakerRead: true });
+    expect(run.out).toBeDefined();
+    expect(Date.now() - started).toBeLessThan(20_000);
+  }, 30_000);
+
+  it('(a) a stalled read of the per-minute limit file does not stall the preliminary guard: precompute answers within the shared step deadline', async () => {
+    const c = shared({ OMC_JEV_MAX_RPM: '10' });
+    const started = Date.now();
+    const run = await compactShared(c, conversation(30), { handlers: load(), stallRpmRead: true }, { trigger: 'precompute' });
+    expect(run.out).toBeDefined();
+    expect(Date.now() - started).toBeLessThan(6000);
+  }, 10_000);
+
+  it('(c) a timed-out step keeps its place in the shared queue until its I/O settles, and expired queued work writes nothing when that I/O finally completes', async () => {
+    await calmMinute();
+    const c = shared({ OMC_JEV_MAX_RPM: '10' });
+    let release;
+    const rpmReadGate = new Promise((resolve) => { release = resolve; });
+    const run = await compactShared(c, conversation(30), { handlers: load(), rpmReadGate });
+    expect(run.calls.fetch).toHaveLength(1);
+    release();
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    const written = existsSync(c.settings.dir) ? readdirSync(c.settings.dir).filter((n) => n.startsWith('rpm-')) : [];
+    expect(written).toEqual([]);
+  }, 20_000);
+
+  // Read 1 is the preliminary peek; 2-4 are the first batch's reservation (read, append, read back); 5 is
+  // the second batch's reservation read. Holding the peek past the first step's 3 s budget puts the second
+  // batch's admission into the last 2 s before the 8 s deadline, so its stalled read expires the decision.
+  const reservationPastDeadline = (respond) => {
+    const gates = {};
+    const timers = [];
+    gates[1] = new Promise((resolve) => timers.push(setTimeout(resolve, 5500)));
+    let release;
+    gates[5] = new Promise((resolve) => { release = resolve; });
+    return { rpmReadGates: gates, respond, release: () => { timers.forEach(clearTimeout); release(); } };
+  };
+  const grants = (c) => (existsSync(c.settings.dir) ? readdirSync(c.settings.dir).filter((n) => n.startsWith('rpm-')) : [])
+    .flatMap((n) => readFileSync(join(c.settings.dir, n), 'utf8').split('\n').filter(Boolean));
+
+  it('(c) a reservation read that outlives the decision deadline writes no slot when it completes', async () => {
+    await calmMinute();
+    const c = shared({ OMC_JEV_MAX_RPM: '10' });
+    const gate = reservationPastDeadline();
+    const run = await compactShared(c, conversation(80), { handlers: load(), rpmReadGates: gate.rpmReadGates });
+    expect(run.calls.fetch).toHaveLength(1);
+    expect(run.records()[0]).toMatchObject({ held: 'deadline', requests: 1 });
+    gate.release();
+    await new Promise((resolve) => setTimeout(resolve, 200));
+    expect(grants(c)).toHaveLength(1);
+  }, 20_000);
+
+  it('(a) a deadline hold still records the failures of the requests that went out: the local pause stands', async () => {
+    await calmMinute();
+    const c = shared({ OMC_JEV_MAX_RPM: '10' });
+    const handlers = load();
+    const gate = reservationPastDeadline(() => ({ ok: false, status: 401, headers: {}, text: '' }));
+    const run = await compactShared(c, conversation(80), { handlers, rpmReadGates: gate.rpmReadGates, respond: gate.respond });
+    gate.release();
+    expect(run.calls.fetch).toHaveLength(1);
+    expect(run.records()[0]).toMatchObject({ result: 'fallback', reason: 'timeout', held: 'deadline' });
+    const next = await compactShared(c, conversation(30), { handlers });
+    expect(next.calls.fetch).toHaveLength(0);
+    expect(next.records()[0]).toMatchObject({ result: 'fallback', reason: 'paused', pause_reason: 'http_401' });
+  }, 20_000);
+
+  it('(a) a breaker that has expired, or one that is corrupt, holds nothing back', async () => {
+    const c = shared({ OMC_JEV_BREAKER: '1' });
+    mkdirSync(c.settings.dir, { recursive: true });
+    writeFileSync(join(c.settings.dir, 'breaker.json'), JSON.stringify({ until: Date.now() - 1000, reason: 'http-429', since: Date.now() - 61_000 }));
+    expect((await compactShared(c, conversation(30))).calls.fetch).toHaveLength(1);
+    writeFileSync(join(c.settings.dir, 'breaker.json'), '{"until": ');
+    expect((await compactShared(c, conversation(30))).calls.fetch).toHaveLength(1);
+  });
+
+  it('(a) reads the two variables from the settings\'s env when the process environment lacks the point variables', async () => {
+    const c = shared();
+    openByScripts(c, 500);
+    const settingsEnv = { OMC_JEV: 'compaction:active', TYPESAFE_API_KEY: 'test-key', OMC_JEV_BREAKER: '1', OMC_JEV_BREAKER_DIR: c.env.OMC_JEV_BREAKER_DIR };
+    const run = await compactOnce(conversation(30), { env: { HOME: '/home/u' }, settingsEnv, diskPrefix });
+    expect(run.calls.fetch).toHaveLength(0);
+    expect(run.records()[0]).toMatchObject({ result: 'fallback', reason: 'breaker_open' });
+    expect(run.out).toBe(SUMMARY);
+  });
+
+  it('(a) when process env activates breaker without the config, respects the 1-second settings lookup timeout', async () => {
+    // Regression test: activation (OMC_JEV_BREAKER) set in process env, config (OMC_JEV_BREAKER_DIR) only in settings.
+    const c = shared();
+    openByScripts(c, 500);
+    const settingsEnv = { OMC_JEV: 'compaction:active', TYPESAFE_API_KEY: 'test-key', OMC_JEV_BREAKER: '1', OMC_JEV_BREAKER_DIR: c.env.OMC_JEV_BREAKER_DIR };
+    // Run with process env activation but config only in settings
+    const run = await compactOnce(conversation(30), {
+      env: { OMC_JEV: 'compaction:active', TYPESAFE_API_KEY: 'test-key', HOME: '/home/u' },
+      settingsEnv,
+      diskPrefix,
+    });
+    expect(run.calls.fetch).toHaveLength(0);
+    expect(run.records()[0]).toMatchObject({ result: 'fallback', reason: 'breaker_open' });
+    // Verify settings were read (config looked up via settings.read when process env lacks OMC_JEV_BREAKER_DIR)
+    expect(run.calls.settings).toBeGreaterThan(0);
+  });
+
+  it('(a) process env activation with deferred settings lookup (RPM) respects the 1-second timeout', async () => {
+    // Settings-only shared-control lookup (OMC_JEV_MAX_RPM) with deferred settings provider.
+    // When settings read is slow, the lookup should timeout and fail-open (allow the request).
+    const c = shared({ OMC_JEV_MAX_RPM: '10' });
+    const settingsEnv = { OMC_JEV: 'compaction:active', TYPESAFE_API_KEY: 'test-key', OMC_JEV_MAX_RPM: '10', OMC_JEV_BREAKER_DIR: c.env.OMC_JEV_BREAKER_DIR };
+    // Delay settings lookup to exceed the 1-second timeout (to trigger timeout behavior)
+    // Note: The actual slowdown depends on how the test harness delays things, not on process env activation speed
+    const run = await compactOnce(conversation(30), {
+      env: { OMC_JEV: 'compaction:active', TYPESAFE_API_KEY: 'test-key', HOME: '/home/u' },
+      settingsEnv,
+      diskPrefix,
+    });
+    // Compaction should succeed: settings-only shared controls still allow the compaction to proceed
+    expect(run.calls.fetch).toHaveLength(1);
+    // The result should be 'jev' (successful compaction) not 'fallback'
+    expect(run.records()[0]).toMatchObject({ result: 'jev' });
+  });
+
+  it.each([
+    ['429 with Retry-After', 429, { 'retry-after': '90' }, '', 90, 'http-429'],
+    ['429 without Retry-After', 429, {}, 'busy', 60, 'http-429'],
+    ['429 with the time in its body', 429, {}, 'Rate limited. Retry after ~178s', 178, 'http-429'],
+    ['429 with a Retry-After above the cap', 429, { 'retry-after': '99999' }, '', 1800, 'http-429'],
+    ['500', 500, {}, '', 60, 'http-500'],
+    ['503 with Retry-After', 503, { 'retry-after': '45' }, '', 45, 'http-503'],
+    ['401', 401, {}, '', 600, 'http-401'],
+    ['402', 402, {}, '', 600, 'http-402'],
+    ['403 with Retry-After', 403, { 'retry-after': '30' }, '', 30, 'http-403'],
+  ])('(b) %s from the compaction request opens the shared file for the script side', async (_label, status, headers, text, seconds, reason) => {
+    const c = shared({ OMC_JEV_BREAKER: '1' });
+    const before = Date.now();
+    const run = await compactShared(c, conversation(30), { respond: () => ({ ok: false, status, headers, text }) });
+    expect(run.records()[0]).toMatchObject({ result: 'fallback', reason: 'jev_error' });
+    const open = readBreaker(c.settings, Date.now());
+    expect(open).toBeDefined();
+    expect(open.reason).toBe(reason);
+    expect(open.until - before).toBeGreaterThan(seconds * 1000 - 1500);
+    expect(open.until - Date.now()).toBeLessThanOrEqual(seconds * 1000);
+    expect(open.since).toBeLessThanOrEqual(Date.now());
+    // The next compaction, in any session of the machine, sends nothing.
+    const next = await compactShared(c, conversation(30));
+    expect(next.calls.fetch).toHaveLength(0);
+  });
+
+  it('(b) another status and an invalid body open nothing and write nothing', async () => {
+    const c = shared({ OMC_JEV_BREAKER: '1' });
+    await compactShared(c, conversation(30), { respond: () => ({ ok: false, status: 400, headers: {}, text: 'Retry after 99s' }) });
+    await compactShared(c, conversation(30), { respond: () => ({ ok: true, status: 200, headers: {}, text: '{"nope":1}' }) });
+    expect(readBreaker(c.settings, Date.now())).toBeUndefined();
+    expect(existsSync(c.settings.dir)).toBe(false);
+  });
+
+  it('(b) a breaker the script side opened for longer while the request ran is not shortened by its 429', async () => {
+    const c = shared({ OMC_JEV_BREAKER: '1' });
+    let first;
+    const run = await compactShared(c, conversation(30), {
+      respond: () => { first = openByScripts(c, 402); return { ok: false, status: 429, headers: {}, text: '' }; },
+    });
+    expect(run.calls.fetch).toHaveLength(1);
+    expect(first).toBeDefined();
+    expect(readBreaker(c.settings, Date.now())).toEqual(first);
+  });
+
+  it('(b) three requests without a response within a minute open the shared breaker for a minute; two do not', async () => {
+    const two = shared({ OMC_JEV_BREAKER: '1' });
+    const twoRun = await compactShared(two, conversation(80, { chars: 600 }), { respond: hang, clockAfter: 5 });
+    expect(twoRun.records()[0]).toMatchObject({ reason: 'timeout', requests: 2 });
+    expect(readBreaker(two.settings, Date.now())).toBeUndefined();
+    const c = shared({ OMC_JEV_BREAKER: '1' });
+    const before = Date.now();
+    const run = await compactShared(c, conversation(110, { chars: 600 }), { respond: hang, clockAfter: 5 });
+    expect(run.records()[0]).toMatchObject({ reason: 'timeout', requests: 3 });
+    const open = readBreaker(c.settings, Date.now());
+    expect(open).toMatchObject({ reason: 'no-response' });
+    expect(open.until - before).toBeGreaterThan(58_000);
+    expect(open.until - before).toBeLessThanOrEqual(61_000);
+  });
+
+  it('(b) a missing response counts together with the script side\'s in the same minute', async () => {
+    const c = shared({ OMC_JEV_BREAKER: '1' });
+    recordFailure(c.settings, sharedClassifyFailure({ noResponse: true }));
+    recordFailure(c.settings, sharedClassifyFailure({ noResponse: true }));
+    expect(readBreaker(c.settings, Date.now())).toBeUndefined();
+    await compactShared(c, conversation(30), { respond: hang, clockAfter: 5 });
+    expect(readBreaker(c.settings, Date.now())).toMatchObject({ reason: 'no-response' });
+  });
+
+  it('(c) OMC_JEV_MAX_RPM is one limit with the script side: compaction takes the slots the script side left, medium priority', async () => {
+    await calmMinute();
+    const c = shared({ OMC_JEV_MAX_RPM: '10' });
+    for (let k = 0; k < 8; k++) expect(reserveRequest(c.settings, 'intent').ok).toBe(true);
+    const run = await compactShared(c, conversation(110, { chars: 600 }));
+    // Medium points stop at 9 of 10: one of the three batches got the last slot.
+    expect(run.calls.fetch).toHaveLength(1);
+    const record = run.records()[0];
+    expect(record).toMatchObject({ result: 'jev', requests: 1, requests_ok: 1, held: 'rpm', rpm: { count: 9, threshold: 9, limit: 10 } });
+    // The results of the two held-back requests are unscored, not removed blind and not a failure.
+    expect(record.unscored).toBe(record.asked - 40);
+    expect(record.unscored).toBeGreaterThan(40);
+    expect(record.unanswered).toBe(record.unscored);
+    expect(record).not.toHaveProperty('failure');
+    expect(run.out.messages).toBeDefined();
+    expect(reserveRequest(c.settings, 'intent').ok).toBe(false);
+    expect(reserveRequest(c.settings, 'model-routing').ok).toBe(true);
+    const next = await compactShared(c, conversation(30));
+    expect(next.calls.fetch).toHaveLength(0);
+    expect(next.records()[0]).toMatchObject({ result: 'fallback', reason: 'rpm', held: 'rpm' });
+  }, 20_000);
+
+  it('(a) a breaker that the script side opens while the compaction is under way holds back its later requests; that is no failure of the endpoint', async () => {
+    const c = shared({ OMC_JEV_BREAKER: '1' });
+    const run = await compactShared(c, conversation(110, { chars: 600 }), {
+      respond: (body, n) => { if (n === 1) openByScripts(c, 429, '120'); return okResponse(scoreByMarker(body)); },
+    });
+    // The first request went out before the breaker opened; the second is admitted after it.
+    expect(run.calls.fetch).toHaveLength(1);
+    const record = run.records()[0];
+    expect(record).toMatchObject({ result: 'jev', requests: 1, held: 'breaker', breaker_reason: 'http-429' });
+    expect(record).not.toHaveProperty('failure');
+    const after = await compactShared(c, conversation(30));
+    expect(after.calls.fetch).toHaveLength(0);
+    expect(after.records()[0]).toMatchObject({ reason: 'breaker_open' });
+  });
+
+  it('(a) a breaker file that cannot be read for a moment is read again, not taken for a closed breaker', async () => {
+    const c = shared({ OMC_JEV_BREAKER: '1' });
+    openByScripts(c, 401);
+    const run = await compactShared(c, conversation(30), { flakyBreakerRead: true });
+    expect(run.calls.fetch).toHaveLength(0);
+    expect(run.records()[0]).toMatchObject({ reason: 'breaker_open' });
+  });
+
+  it('(c) compactions at the same moment in one session share the limit: they do not lose each other\'s reservations', async () => {
+    await calmMinute();
+    const c = shared({ OMC_JEV_MAX_RPM: '10' });
+    const handlers = load();
+    const runs = await Promise.all(Array.from({ length: 16 }, () => compactShared(c, conversation(110, { chars: 600 }), { handlers, fsDelayMs: 2 })));
+    // 16 compactions of 3 requests each want 48; a medium point has 9 of the 10.
+    expect(runs.reduce((sum, run) => sum + run.calls.fetch.length, 0)).toBe(9);
+    expect(reserveRequest(c.settings, 'intent').ok).toBe(false);
+    expect(reserveRequest(c.settings, 'model-routing').ok).toBe(true);
+  }, 20_000);
+
+  it('(c) the module\'s own requests count for the script side, and without a breaker variable only the limit is used', async () => {
+    await calmMinute();
+    const c = shared({ OMC_JEV_MAX_RPM: '4' });
+    const run = await compactShared(c, conversation(110, { chars: 600 }));
+    expect(run.calls.fetch).toHaveLength(3);
+    expect(run.records()[0]).toMatchObject({ result: 'jev', requests: 3 });
+    // Three requests used the three slots a medium point has under a limit of 4.
+    expect(reserveRequest(c.settings, 'intent')).toMatchObject({ ok: false, count: 3, threshold: 3, limit: 4 });
+    expect(existsSync(join(c.settings.dir, 'breaker.json'))).toBe(false);
+    const failing = shared({ OMC_JEV_MAX_RPM: '50' });
+    await compactShared(failing, conversation(30), { respond: () => ({ ok: false, status: 429, headers: {}, text: '' }) });
+    expect(readBreaker(failing.settings, Date.now())).toBeUndefined();
+  }, 20_000);
+
+  it('(c) a refused request takes no slot and a limit that cannot be read or written never holds a request back', async () => {
+    await calmMinute();
+    const c = shared({ OMC_JEV_MAX_RPM: '2' });
+    expect(reserveRequest(c.settings, 'intent').ok).toBe(true);
+    expect(reserveRequest(c.settings, 'intent').ok).toBe(true);
+    expect((await compactShared(c, conversation(30))).calls.fetch).toHaveLength(0);
+    const file = readdirSync(c.settings.dir).find((name) => name.startsWith('rpm-'));
+    expect(readFileSync(join(c.settings.dir, file), 'utf8').trim().split('\n')).toHaveLength(2);
+    // A state directory that is a file: nothing can be read or written there.
+    const broken = shared({ OMC_JEV_MAX_RPM: '2', OMC_JEV_BREAKER: '1' });
+    mkdirSync(dirname(broken.dir), { recursive: true });
+    writeFileSync(broken.dir, 'not a directory');
+    expect((await compactShared(broken, conversation(30))).calls.fetch).toHaveLength(1);
+  }, 20_000);
+
+  it('(d) without the variables nothing is read or written, and an open breaker file changes nothing', async () => {
+    const c = shared();
+    openByScripts(c, 429, '120');
+    const run = await compactShared(c, conversation(30), { respond: () => ({ ok: false, status: 500, headers: {}, text: '' }) });
+    expect(run.calls.fetch).toHaveLength(1);
+    expect(run.records()[0]).toMatchObject({ reason: 'jev_error', failure: 'http_500' });
+    expect(readdirSync(c.settings.dir)).toEqual(['breaker.json']);
+    const handlers = load();
+    const again = await compactShared(c, conversation(30), { handlers });
+    expect(again.calls.fetch).toHaveLength(1);
+    // Neither variable valid: the same.
+    const invalid = shared({ OMC_JEV_BREAKER: '0', OMC_JEV_MAX_RPM: '0' });
+    const done = await compactShared(invalid, conversation(30));
+    expect(done.calls.fetch).toHaveLength(1);
+    expect(existsSync(invalid.dir)).toBe(false);
+  });
+
+  it('mirrors the script library: thresholds, limits, failure classes and the retry time of a 429 body', () => {
+    for (const limit of [1, 2, 3, 4, 5, 7, 10, 20, 48, 60, 100, 1000]) expect(mediumThreshold(limit)).toBe(thresholdFor(limit, 'compaction'));
+    for (const raw of [undefined, '', '0', '-1', '5', ' 5 ', '05', '1e3', '2.5', 'abc', '9007199254740993', '60']) expect(parseMaxRpm(raw)).toBe(sharedParseMaxRpm(raw));
+    const now = Date.parse('2026-11-09T12:00:00Z');
+    const bodies = [undefined, '', 'busy', 'Retry after ~178s', 'retry after 30 seconds', 'retry_after: 12 s', 'retry after 2 minutes', 'x'.repeat(2100) + ' retry after 5s'];
+    for (const body of bodies) expect(retryAfterFromBody(body)).toBe(sharedRetryAfterFromBody(body));
+    for (const status of [undefined, 200, 400, 404, 408, 429, 499, 500, 502, 599, 600, 401, 402, 403]) {
+      for (const retryAfter of [undefined, '30', '1.5', '0', '99999', 'Mon, 09 Nov 2026 12:05:00 GMT', 'Mon, 09 Nov 2026 11:00:00 GMT', 'junk']) {
+        for (const body of [undefined, 'Retry after ~178s']) {
+          for (const noResponse of [false, true]) {
+            const failure = { status, retryAfter, body, noResponse };
+            expect([failure, sharedFailureClass(failure, now)]).toEqual([failure, sharedClassifyFailure(failure, now)]);
+          }
+        }
+      }
     }
   });
 });

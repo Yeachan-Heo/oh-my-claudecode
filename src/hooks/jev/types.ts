@@ -66,8 +66,10 @@ export interface JevResponse {
  * - degraded: a shadow/active Jev call was attempted and failed (timeout,
  *   HTTP error, invalid response) — twin decided
  * - off: Jev disabled for this point (no key, master off, not in grayscale)
- * - cap: OMC_JEV_MAX_REQUESTS exhausted
- * - circuit-open: 3 consecutive failures opened this point's breaker
+ * - cap: OMC_JEV_MAX_REQUESTS exhausted, or the opt-in OMC_JEV_MAX_RPM limit
+ *   reached for this point's priority in the current minute
+ * - circuit-open: 3 consecutive failures opened this point's breaker, or the
+ *   opt-in breaker shared by every process (OMC_JEV_BREAKER=1) is open
  */
 export type ResolveMode = 'shadow' | 'active' | 'degraded' | 'off' | 'cap' | 'circuit-open';
 
