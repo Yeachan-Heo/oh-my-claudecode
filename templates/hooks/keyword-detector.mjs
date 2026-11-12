@@ -1012,6 +1012,9 @@ function hasExplicitAutopilotInvocationContext(text, position, keywordLength, ke
   const nestedQuestion = sentenceEnd !== null
     && ((sentenceEnd[0].length > 1 && !/^[ \t]*$/.test(afterEnd)) || /^[ \t]+\p{Ll}/u.test(afterEnd));
   if (sentenceEnd && sentenceEnd.index < lineEnd && sentenceEnd[0][0] === '?' && !nestedQuestion && !AUTOPILOT_REQUEST_START.test(clauseHead) && !AUTOPILOT_ACTIVATION_BEFORE.test(tail)) return false;
+  // Check for negation first, before the polite-request exemption:
+  // "Do not use autopilot (could you check the logs)" should not activate despite the polite request in parentheses.
+  if (AUTOPILOT_NEGATION_BEFORE.test(tail) || AUTOPILOT_NEGATION_BEFORE.test(tail.replace(AUTOPILOT_OPENING_DELIMITERS_AT_END, ''))) return false;
   // Check for a parenthesized question at the end of the sentence: "One question (should I use ...)"
   // But preserve polite requests inside parentheses: "Please proceed (could you use autopilot)"
   const sentenceText = text.slice(lineStart, lineEnd).replace(/\s+$/, '');
@@ -1027,7 +1030,6 @@ function hasExplicitAutopilotInvocationContext(text, position, keywordLength, ke
       }
     }
   }
-  if (AUTOPILOT_NEGATION_BEFORE.test(tail) || AUTOPILOT_NEGATION_BEFORE.test(tail.replace(AUTOPILOT_OPENING_DELIMITERS_AT_END, ''))) return false;
   if (AUTOPILOT_REFERENCE_LABEL_LINE.test(lineHead.replace(AUTOPILOT_MARKDOWN_MARKS, '').replace(AUTOPILOT_LIST_PREFIX, '').replace(/\s+$/, ''))) return false;
   if (AUTOPILOT_NON_ENGLISH_LINE.test(text.slice(lineStart, Math.min(lineEnd, lineStart + 400)))) return true;
   const isHardwareAlias = /^(?:full\s*auto|fullsend)$/i.test((keywordText || '').trim());

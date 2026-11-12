@@ -107,6 +107,7 @@ const COMMANDS = [
   'Could you, please, use autopilot to fix this?',
   'Please use my autopilot to fix this',
   'turn my autopilot on',
+  'Please proceed (could you use autopilot to fix this)',
   'Fix the cron first.\nautopilot re-run the tests',
   'Fix the cron first.\nautopilot double-check the result',
   'Fix the cron first.\nautopilot check status',
@@ -182,6 +183,8 @@ const NON_COMMANDS = [
   'Documentation:\nautopilot fix the parser',
   'One question (should I use autopilot for this)',
   'Should I use autopilot for this?',
+  'Please proceed (could you not use autopilot to fix this)',
+  'Do not use autopilot (could you check the logs)',
   'Docs:\n---\nautopilot fix parser',
   'autopilot: stuck during step 3',
   'autopilot: hung on step 3',
@@ -196,6 +199,8 @@ const NON_COMMANDS = [
   'Fix the cron first.\nautopilot: currently idle',
   'Fix the cron first.\nautopilot: ready for a task',
   'Fix the cron first.\nautopilot: no task assigned',
+  'Please proceed (could you not use autopilot to fix this)',
+  'Do not use autopilot (could you check the logs)',
 ];
 
 describe('autopilot command policy parity across the three detector copies', () => {
