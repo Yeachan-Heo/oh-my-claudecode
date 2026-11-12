@@ -1266,7 +1266,7 @@ explicitly enabled via the global OMC config file:
 
 Use these trigger phrases in natural language prompts to activate enhanced modes:
 
-The autopilot aliases (`autopilot`, `auto-pilot`, `full auto`, `fullsend`) start the mode only as a command (for example `autopilot test the API` or `use autopilot`); a bare mention such as `the autopilot run failed` does not.
+The autopilot aliases (`autopilot`, `auto-pilot`, `full auto`, `fullsend`) start the mode only as a command (for example `autopilot test the API` or `use autopilot`); a bare mention such as `the autopilot run failed` does not, and a question (`Did autopilot run the tests?`) never does. The command verb list is closed and a later-line `autopilot solve this issue` is not covered; the full grammar is in [HOOKS.md](HOOKS.md).
 
 | Keyword                                                                        | Effect                                                                                        |
 | ------------------------------------------------------------------------------ | --------------------------------------------------------------------------------------------- |
