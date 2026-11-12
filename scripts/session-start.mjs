@@ -1762,7 +1762,9 @@ ${summary}
     if (existsSync(notepadPath)) {
       try {
         const notepadContent = readFileSync(notepadPath, 'utf-8');
-        const priorityMatch = notepadContent.match(/## Priority Context\n([\s\S]*?)(?=## |$)/);
+        // The section ends at the next line that starts with `## `: `###`
+        // subheadings and `##` inside a line are part of the Priority Context.
+        const priorityMatch = notepadContent.match(/## Priority Context\n([\s\S]*?)(?=^## [^#]|(?![\s\S]))/m);
         if (priorityMatch && priorityMatch[1].trim()) {
           const priorityContext = priorityMatch[1].trim();
           // Only inject if there's actual content (not just the placeholder comment)
