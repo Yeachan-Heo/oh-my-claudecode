@@ -3,6 +3,9 @@
  * Authorization and Cookie headers, bearer tokens, password flags, common token prefixes,
  * `*KEY=`-style assignments and long mixed letter-digit strings.
  *
+ * Field names are matched by the name list in the `name: value` / `name=value` rule; the list is open: a name in
+ * another language is one more alternative there (hasło, klucz, sekret, passwort, kennwort and contraseña as examples).
+ *
  * Each rule reads the text once: where a match fails, the rule consumes the run, segment or gap it scanned, so the
  * next attempt does not read it again (src/__tests__/jev-mask.test.mjs times the shapes that once took seconds).
  * scripts/lib/shell-checks.mjs keeps a copy of these rules.
@@ -31,7 +34,7 @@ export function maskSecrets(text, { keepGitHashes = false } = {}) {
     .replace(/\beyJ(?:[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}|[A-Za-z0-9_-]*)/g, (m) => m.includes('.') ? 'eyJ***' : m)
     // A whole word containing a keyword: the lookahead finds the keyword once, then the word is read to its end.
     .replace(/(\b(?=[A-Za-z0-9_]*(?:KEY|TOKEN|SECRET|PASSWORD|PASSWD|PASS|PWD|CREDENTIALS?))[A-Za-z0-9_]+\b["'\]]*\s*[=:]\s*["']?)[^\s"'&;|)]+/gi, '$1***')
-    .replace(/((?:api[_-]?key|access[_-]?key|client[_-]?secret|private[_-]?key|password|passwd|token|secret)["']?\s*[:=]\s*["']?)[^\s"'&;|,}]+/gi, '$1***')
+    .replace(/((?:api[_-]?key|access[_-]?key|client[_-]?secret|private[_-]?key|password|passwd|token|secret|has[łl]o|klucz|sekret|passwort|kennwort|contrase[ñn]a)["']?\s*[:=]\s*["']?)[^\s"'&;|,}]+/gi, '$1***')
     .replace(/(^|[^A-Za-z0-9+_-])(?=[A-Za-z0-9+_-]*\d)(?=[A-Za-z0-9+_-]*[A-Za-z])([A-Za-z0-9+_-]{32,}={0,2})/g, (whole, before, token) =>
       keepGitHashes && /^(?:[0-9a-f]{40}|[0-9a-f]{64})$/.test(token) ? whole : before + '***');
 }

@@ -32,6 +32,8 @@ describe.each([
       'pass without =': (n) => repeat('pass', n),
       'pwd without =': (n) => repeat('pwd', n),
       'credentials without =': (n) => repeat('credentials', n),
+      'hasło without =': (n) => repeat('hasło', n),
+      'contraseña without =': (n) => repeat('contraseña', n),
     };
     for (const n of [100_000, 1_000_000]) {
       for (const [name, make] of Object.entries(shapes)) {
@@ -79,6 +81,23 @@ describe.each([
       ["cfg['client_secret'] = 'v1'", "cfg['client_secret'] = '***'"],
       ['KEY KEY: v', 'KEY KEY: ***'],
       ['name=value', 'name=value'],
+    ];
+    for (const [text, masked] of cases) expect({ text, masked: mask(text) }).toEqual({ text, masked });
+  });
+
+  it('masks the value after a field name in another language, and leaves prose with the same words', () => {
+    const cases = [
+      ['hasło: Zaq12wsx', 'hasło: ***'],
+      ['Hasło=Zaq12wsx', 'Hasło=***'],
+      ['HASŁO = "Zaq12wsx"', 'HASŁO = "***"'],
+      ['haslo: abc', 'haslo: ***'],
+      ['klucz: abc', 'klucz: ***'],
+      ['{"sekret": "abc"}', '{"sekret": "***"}'],
+      ['Passwort: abc', 'Passwort: ***'],
+      ['kennwort=abc', 'kennwort=***'],
+      ['contraseña: abc', 'contraseña: ***'],
+      ['hasło jest za krótkie', 'hasło jest za krótkie'],
+      ['klucz do pokoju', 'klucz do pokoju'],
     ];
     for (const [text, masked] of cases) expect({ text, masked: mask(text) }).toEqual({ text, masked });
   });
