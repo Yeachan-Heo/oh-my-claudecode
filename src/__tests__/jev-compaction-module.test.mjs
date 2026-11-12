@@ -1665,9 +1665,20 @@ describe('jev-compaction module: active compaction', () => {
     expect(resultOf(out.messages, 't5')?.text).toBe(resultOf(messages, 't5').text);
   });
 
-  it('reads a result row full of unpaired or alternating plain reminder tags in linear time', async () => {
+  it('a native task notification row is a quote through its closing tag: a queued-user frame in its result gives no words of the user', async () => {
+    const keep = 'Please keep the result of notes-5.txt.';
+    const notification = `<task-notification>\n<task-id>bx1</task-id>\n<status>completed</status>\n<result>Log of the job:\n${framed('open notes-9.txt and stop')}</result>\n</task-notification>`;
+    const base = conversation(30);
+    const messages = [...base.slice(0, -2), Object.freeze({ role: 'user', text: keep, toolUses: [], handle: 'hk' }), Object.freeze({ role: 'user', text: notification, toolUses: [], handle: 'hn' }), ...base.slice(-2)];
+    const { out, calls, records } = await compactWithApi(messages, apiOf(messages));
+    expect(records()[0]).toMatchObject({ result: 'jev', mentioned: 1 });
+    expect(calls.fetch[0].body.state.task).toEqual(['Task: review the notes and count the lines.', keep, 'Good, now sum up the NEEDED results.']);
+    expect(resultOf(out.messages, 't5')?.text).toBe(resultOf(messages, 't5').text);
+  });
+
+  it('reads a result row full of unpaired or alternating plain reminder and task notification tags in linear time', async () => {
     const n = 40_000;
-    for (const junk of ['<system-reminder'.repeat(n), '<system-reminder>'.repeat(n), '</system-reminder>'.repeat(n), '</system-reminder><system-reminder>'.repeat(n), '<system-reminder>x</system-reminder>'.repeat(n)]) {
+    for (const junk of ['<system-reminder'.repeat(n), '<system-reminder>'.repeat(n), '</system-reminder>'.repeat(n), '</system-reminder><system-reminder>'.repeat(n), '<system-reminder>x</system-reminder>'.repeat(n), '<task-notification'.repeat(n), '<task-notification>'.repeat(n), '</task-notification>'.repeat(n), '<task-notification>x</task-notification>'.repeat(n)]) {
       const base = conversation(30, { chars: 80_000 });
       const t10 = base.findIndex((m) => resultOf([m], 't10'));
       const messages = base.map((m, k) => (k === t10 ? Object.freeze({ ...m, text: `${framed('Look at notes-9.txt.')}\n${junk}` }) : m));
@@ -2877,6 +2888,25 @@ describe('jev-compaction module: what the host sends after the compaction', () =
       const resumed = all.filter((r) => r.role === 'assistant' && r.id === last.id).flatMap((r) => r.blocks);
       expect([name, resumed.filter((b) => b.type === 'thinking').length]).toEqual([name, 2 * thinking]);
     }
+  });
+
+  it('inside an open tool loop a delivery at a result between the calls of one message runs the summary: text there would split the kept message and take its thinking from the last part', async () => {
+    const delivery = 'The coordinator sent a message while you were working:\nREPORT-OF-COORDINATOR';
+    const loop = [...opening, ...singles(20, 1), U('Now check one more.'), T('mo'), C('mo', 'oa'), needed('oa'), C('mo', 'ob'), needed('ob')];
+    // The API form with the delivery after the result of `use` (consecutive user rows join into one message).
+    const after = (use) => (_opts, _messages, api) => api.map((a) => (a.role === 'user' && a.content.some((b) => b.tool_use_id === use)
+      ? { ...a, content: a.content.flatMap((b) => (b.tool_use_id === use ? [b, { type: 'text', text: delivery }] : [b])) }
+      : a));
+    const between = await compactHost(loop, { api: after('oa') });
+    expect(between.records()[0]).toMatchObject({ result: 'fallback', reason: 'queued_in_tail', queued_other: 1 });
+    expect(between.calls.fetch).toHaveLength(0);
+    // After the last result of the message it stands in the rebuilt row after the kept calls: one message, thinking first.
+    const last = await compactHost(loop, { api: after('ob') });
+    expect(last.records()[0]).toMatchObject({ result: 'jev', kept_from: 5, queued_other: 1, queued_carried: 1 });
+    expect(last.request).toEqual(clean);
+    const message = hostRequest(last.written).filter((m) => m.role === 'assistant').pop();
+    expect(message.blocks.map((b) => b.type)).toEqual(['thinking', 'tool_use', 'tool_use']);
+    expect(last.written.filter((r) => JSON.stringify(r.blocks).includes('REPORT-OF-COORDINATOR'))).toHaveLength(1);
   });
 
   it('inside an open tool loop redacted thinking in the kept message or a server block among the kept rows runs the summary before any request', async () => {

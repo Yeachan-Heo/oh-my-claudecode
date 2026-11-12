@@ -1259,36 +1259,45 @@ function blockWords(block) {
 }
 
 // The regions of a text that are quotes to the user's block around them: `opaque`, in text order and not
-// overlapping, holds every paired envelope and every paired plain <system-reminder> that holds no delivery (a
-// reminder that wraps one is read by its frame); `quotes` holds just those plain reminders, which can hold whole
-// envelopes (a delivery in one is part of the quote). A plain reminder ends at the first closing tag after its
-// opener; tags inside an envelope belong to it, and an opener without a closing tag is text. The tags are indexed
-// in one pass, so a text full of unpaired tags is read in linear time.
-const PLAIN_OPEN = /<system-reminder(?![^>]{0,200}\bid=)[^>]{0,200}>/g; // bounded: a text full of unclosed tags stays linear
-const PLAIN_CLOSE = '</system-reminder>';
+// overlapping, holds every paired envelope and the quotes below; `quotes` holds just those, which can hold whole
+// envelopes (a delivery in one is part of the quote). A quote is a paired plain <system-reminder> that holds no
+// delivery (a reminder that wraps one is read by its frame) and a paired <task-notification> (its result is
+// text of a task). One ends at the first closing tag after its opener; tags inside an envelope belong to it,
+// and an opener without a closing tag is text. The tags are indexed in one pass, so a text full of unpaired
+// tags is read in linear time.
+const QUOTE_TAGS = [
+  // Bounded openers: a text full of unclosed tags stays linear.
+  { open: /<system-reminder(?![^>]{0,200}\bid=)[^>]{0,200}>/g, close: '</system-reminder>', quote: (t) => !deliveryOf(t) },
+  { open: /<task-notification(?:\s[^>]{0,200})?>/g, close: '</task-notification>', quote: () => true },
+];
+const unionOf = (list) => {
+  const out = [];
+  for (const e of [...list].sort((x, y) => x.from - y.from)) {
+    const last = out[out.length - 1];
+    if (last && e.from < last.to) last.to = Math.max(last.to, e.to);
+    else out.push({ from: e.from, to: e.to });
+  }
+  return out;
+};
 function opaqueOf(text, envelopes = envelopesOf(text)) {
-  const quotes = [];
-  const closers = positionsOf(text, PLAIN_CLOSE);
-  if (closers.length) {
+  const found = [];
+  for (const tag of QUOTE_TAGS) {
+    const closers = positionsOf(text, tag.close);
+    if (!closers.length) continue;
     const inClose = insideOf(envelopes);
     const free = closers.filter((c) => !inClose(c));
     const inOpen = insideOf(envelopes);
     let end = 0;
-    for (const o of text.matchAll(PLAIN_OPEN)) {
+    for (const o of text.matchAll(tag.open)) {
       if (o.index < end || inOpen(o.index)) continue;
       const c = lowerBound(free, o.index + o[0].length);
       if (c >= free.length) break;
-      end = free[c] + PLAIN_CLOSE.length;
-      if (!deliveryOf(text.slice(o.index, end))) quotes.push({ from: o.index, to: end });
+      end = free[c] + tag.close.length;
+      if (tag.quote(text.slice(o.index, end))) found.push({ from: o.index, to: end });
     }
   }
-  const opaque = [];
-  for (const e of [...envelopes, ...quotes].sort((x, y) => x.from - y.from)) {
-    const last = opaque[opaque.length - 1];
-    if (last && e.from < last.to) last.to = Math.max(last.to, e.to);
-    else opaque.push({ from: e.from, to: e.to });
-  }
-  return { opaque, quotes };
+  const quotes = unionOf(found);
+  return { opaque: unionOf([...envelopes, ...quotes]), quotes };
 }
 
 // Whether a position lies inside one of the envelopes `spans` (in text order), after its opener; asked for in
@@ -1782,6 +1791,20 @@ function openLoopStart(messages, group) {
   return messages.length;
 }
 
+// Whether a delivery would be carried into a result row that stands between the kept rows of the last
+// message (the rows from keepFrom on, which keep their handles). Text in a user row ends the host's joining
+// of assistant rows (groupsOf), so the rows after it would become a message of their own, without the thinking
+// the API wants the last message to begin with. A delivery after the last kept row of the message is fine.
+function splitsTail(messages, queued, keepFrom, group) {
+  let lastKept = -1;
+  for (let j = messages.length - 1; j > keepFrom && lastKept < 0; j--) if (messages[j].role === 'assistant' && group[j] === group[keepFrom]) lastKept = j;
+  for (const [i, blocks] of queued) {
+    const m = messages[i];
+    if (blocks.length && i > keepFrom && i < lastKept && (m.toolResults || []).length && m.toolResults.every(textOnlyResult)) return true;
+  }
+  return false;
+}
+
 // The API form of the conversation, or undefined: a list whose every entry has `content` as an array
 // or a string, with at least one assistant message whose content is an array (a host that ignores
 // `as: 'api'` answers the plain messages, which have neither).
@@ -2124,6 +2147,9 @@ async function decide($, e, cfg, record, started) {
   const keptThinking = messages.filter((m, i) => i >= keepFrom && m.role === 'assistant' && m.handle && !m.text && !(m.toolUses || []).length).length;
   record.kept_thinking = keptThinking;
   if (tailRedacted(messages, api, keepFrom)) return { fallback: 'thinking_in_tail' };
+  // The host restores a delivery after a row that keeps its handle, but a result row that is rebuilt carries it as
+  // text, which would split the kept message: the summary runs instead.
+  if (splitsTail(messages, queued, keepFrom, group)) return { fallback: 'queued_in_tail' };
   // Results of the calls that keep their handles stay whole (a built row may not stand among them).
   const candidates = findCandidates(messages, cfg.privatePaths).filter((c) => c.useIdx < keepFrom);
   record.candidates = candidates.length;
