@@ -953,7 +953,8 @@ const AUTOPILOT_NEGATION_BEFORE = /(?<![\p{L}\d])(?:(?:don|doesn|didn|shouldn|co
 // Quotes, emphasis marks and brackets right before the alias do not change what a negation governs.
 const AUTOPILOT_OPENING_DELIMITERS_AT_END = /["'“”‘’`*_([{<]+$/;
 // A sentence that starts with a question or auxiliary word asks; "can/could/would/will you ..." is a request.
-const AUTOPILOT_QUESTION_START = /^[ \t]*(?:[-*+>#]+[ \t]+|\d+[.)][ \t]+|\[[ xX]\][ \t]+|["'“‘([*_`])*(?!(?:can|could|would|will)\s+you(?![\p{L}\d]))(?!do\s+not(?![\p{L}\d]))(?:did|does|do|is|are|was|were|has|have|had|can|could|should|would|will|may|might|must|shall|what|why|how|when|where|who|which)(?![\p{L}\d])/iu;
+// Imperative "do use" / "do check" is not a question.
+const AUTOPILOT_QUESTION_START = /^[ \t]*(?:[-*+>#]+[ \t]+|\d+[.)][ \t]+|\[[ xX]\][ \t]+|["''([*_`])*(?!(?:can|could|would|will)\s+you(?![\p{L}\d]))(?!do\s+not(?![\p{L}\d]))(?!do\s+(?:use|check|fix|test|run|try|build|create|make|implement|execute|invoke|trigger|launch|apply)\s)(?:did|does|do|is|are|was|were|has|have|had|can|could|should|would|will|may|might|must|shall|what|why|how|when|where|who|which)(?![\p{L}\d])/iu;
 // The polite request "can/could/would/will you ..." keeps its question mark without being a question.
 const AUTOPILOT_REQUEST_START = /^[ \t]*(?:[-*+>#]+[ \t]+|\d+[.)][ \t]+|\[[ xX]\][ \t]+|["'“‘([*_`])*(?:please[ ,]+)?(?:can|could|would|will)\s+you(?![\p{L}\d])/iu;
 const AUTOPILOT_SENTENCE_END = /(?<=\S)[.!?][)\]}"'*_\u201D\u2019]*(?=\s|$)/g;
@@ -1012,11 +1013,14 @@ function hasExplicitAutopilotInvocationContext(text, position, keywordLength, ke
     && ((sentenceEnd[0].length > 1 && !/^[ \t]*$/.test(afterEnd)) || /^[ \t]+\p{Ll}/u.test(afterEnd));
   if (sentenceEnd && sentenceEnd.index < lineEnd && sentenceEnd[0][0] === '?' && !nestedQuestion && !AUTOPILOT_REQUEST_START.test(clauseHead) && !AUTOPILOT_ACTIVATION_BEFORE.test(tail)) return false;
   // Check for a parenthesized question at the end of the sentence: "One question (should I use ...)"
+  // But preserve polite requests inside parentheses: "Please proceed (could you use autopilot)"
   const sentenceText = text.slice(lineStart, lineEnd).replace(/\s+$/, '');
   if (sentenceText.endsWith(')')) {
     const parenStart = sentenceText.lastIndexOf('(');
     if (parenStart >= 0) {
       const parenContent = sentenceText.slice(parenStart + 1, -1);
+      // Preserve polite-request exemptions: AUTOPILOT_REQUEST_START already exempts "can/could/would/will you"
+      if (AUTOPILOT_REQUEST_START.test('(' + parenContent)) return true; // Polite request activates
       // Check if the parenthesized content is a question (starts with a question word or contains ?)
       if (AUTOPILOT_QUESTION_START.test('(' + parenContent) || /\?/.test(parenContent)) {
         return false;

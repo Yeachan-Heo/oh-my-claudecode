@@ -1727,6 +1727,14 @@ describe.each([
     expect(autopilotActivated('Could you, please, use autopilot to fix this?')).toBe(true);
   });
 
+  it('activates autopilot for polite request with parenthesized imperative', () => {
+    expect(autopilotActivated('Please proceed (do use autopilot to fix the parser)')).toBe(true);
+  });
+
+  it('activates autopilot for polite request with parenthesized auxiliary', () => {
+    expect(autopilotActivated('Please proceed (could you use autopilot to fix this)')).toBe(true);
+  });
+
   it('arms no heavy mode from pasted text that mentions several of them', () => {
     const cwd = mkdtempSync(join(tmpdir(), 'keyword-detector-autopilot-others-'));
     try {
