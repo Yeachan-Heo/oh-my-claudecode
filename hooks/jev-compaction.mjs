@@ -207,7 +207,9 @@ const NOT_USER_PREFIXES = [
 // user's.
 const QUEUED_PREFIX = 'The user sent a new message while you were working:\n';
 const QUEUED_TAIL = '\n\nThis is how Claude Code surfaces messages'; // the fixed note after the user's words
-const QUEUED_FOOTER = `${QUEUED_TAIL} the user sends mid-turn`; // the start of the host's whole note, which a user rarely writes
+// The host's whole note (the same words in Claude Code 2.1.284 to 2.1.322). A user who quotes the note stops
+// somewhere in it, so only a verbatim copy of all of it reads like the host's.
+const QUEUED_FOOTER = `${QUEUED_TAIL} the user sends mid-turn \u2014 within the running turn, often alongside the next tool result, rather than as a separate conversation turn. Address the message above as you continue this turn.`;
 const DELIVERY_WRAP = /^(?:\s*<system-reminder[^>]*>)+\s*/; // a wrapper, also the envelope build writes around a wrapped block
 // The first line of another sender's frame: "<sender> sent a message (or a report) while you were
 // working:", and the bound conversation's "A message arrived ...", "Messages arrived ..." and
@@ -1289,11 +1291,11 @@ function frameLines(text) {
 // note, the last one before the first frame (a user's header or another sender's) after its first note
 // (a header the user quotes before the note stays in the block, and the user may write the note's words
 // too); -1 without a note. The first note is the host's whole footer outside the envelopes when the text has
-// one after `from` (`index`), so the note's opening words the user writes do not end the search early. A note
+// one after `from` (`index`), so the part of it the user quotes does not end the search early. A note
 // inside an envelope that holds a delivered message (`spans`, in text order) is that message's, not the user's, so a
 // block stops before a carried envelope that quotes the note. Each call reads only up to that frame and skips an
 // envelope in one step, so the blocks of a row stay linear. In a row rebuilt before blocks got envelopes, one user's
-// block that quotes the whole footer and then a header reads the same as two blocks in a row (the same bytes), so
+// block that quotes the footer word for word, all of it, and then a header has the same bytes as two blocks in a row, so
 // it is read as two; rows written now keep every block in an envelope of its own.
 function userBlockEnd(text, from, spans, index) {
   const inside = (i) => {

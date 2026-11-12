@@ -1573,6 +1573,16 @@ describe('jev-compaction module: active compaction', () => {
     expect(resultOf(out.messages, 't5')?.text).toBe(resultOf(messages, 't5').text);
   });
 
+  it('a user\'s block that quotes the host\'s note up to its opening words and then a header runs to the real footer: only a verbatim copy of the whole note ends a block', async () => {
+    const words = 'Check notes-9.txt first.\n\nThis is how Claude Code surfaces messages the user sends mid-turn\nThe user sent a new message while you were working:\nold one';
+    const base = conversation(30);
+    const messages = [...base.slice(0, -2), Object.freeze({ role: 'user', text: framed(words), toolUses: [], handle: 'hq' }), Object.freeze({ role: 'user', text: 'One more thing.', toolUses: [], handle: 'hm' }), ...base.slice(-2)];
+    const { out, calls, records } = await compactWithApi(messages, apiOf(messages));
+    expect(records()[0]).toMatchObject({ result: 'jev', mentioned: 1 });
+    expect(calls.fetch[0].body.state.task).toEqual([words, 'One more thing.', 'Good, now sum up the NEEDED results.']);
+    expect(resultOf(out.messages, 't9')?.text).toBe(resultOf(messages, 't9').text);
+  });
+
   it('reads a pasted transcript of thousands of user headers and paired report envelopes that quote the footer in linear time', async () => {
     const n = 8000;
     const junk = Array.from({ length: n }, (_, k) => `The user sent a new message while you were working:\nq${k}\n${hostEnvelope(`r${k}`, `The coordinator sent a message while you were working:\nreport ${k}\n\nThis is how Claude Code surfaces messages the user sends mid-turn`)}`).join('\n');
