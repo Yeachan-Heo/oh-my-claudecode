@@ -1301,7 +1301,9 @@ function opaqueOf(text, envelopes = envelopesOf(text)) {
   }
   if (native) {
     let tail = text.trimEnd();
-    for (let k = 0; k < PRELUDES_MAX; k++) {
+    // Only the closing tags of the reminders that open before the notification are peeled.
+    const wrappers = native[0].split('<system-reminder').length - 1;
+    for (let k = 0; k < wrappers; k++) {
       const at = tail.lastIndexOf('</system-reminder');
       const gt = at < 0 ? -1 : tail.indexOf('>', at);
       if (gt < 0 || tail.slice(gt + 1).trim()) break;
