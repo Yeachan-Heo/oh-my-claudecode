@@ -217,8 +217,8 @@ const NON_COMMANDS = [
   'One question (should I use autopilot for this)',
   // Smart quotes in dialogue should not activate
   '"Should I use autopilot to fix this" she asked; fix this later',
-  '"Should I use autopilot to fix this" she asked; fix this later',
-  "'Should I use autopilot to fix this' she asked; fix this later",
+  '“Should I use autopilot to fix this” she asked; fix this later',
+  '‘Should I use autopilot to fix this’ she asked; fix this later',
   // Regression: "do" + noun + "use autopilot" should be a question, not an imperative
   'Do test runs use autopilot',
   'Do build jobs use autopilot',
