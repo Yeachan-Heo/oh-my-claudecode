@@ -955,7 +955,7 @@ function hasExplicitAutopilotInvocationContext(
   const afterEnd = sentenceEnd === null ? '' : text.slice(sentenceEnd.index + sentenceEnd[0].length, lineEnd);
   const nestedQuestion = sentenceEnd !== null
     && ((sentenceEnd[0].length > 1 && !/^[ \t]*$/.test(afterEnd)) || /^[ \t]+\p{Ll}/u.test(afterEnd));
-  if (sentenceEnd && sentenceEnd.index < lineEnd && sentenceEnd[0][0] === '?' && !nestedQuestion && !AUTOPILOT_REQUEST_START.test(clauseHead)) return false;
+  if (sentenceEnd && sentenceEnd.index < lineEnd && sentenceEnd[0][0] === '?' && !nestedQuestion && !AUTOPILOT_REQUEST_START.test(clauseHead) && !AUTOPILOT_ACTIVATION_BEFORE.test(tail)) return false;
   // Check for a parenthesized question at the end of the sentence: "One question (should I use ...)"
   const sentenceText = text.slice(lineStart, lineEnd).replace(/\s+$/, '');
   if (sentenceText.endsWith(')')) {

@@ -1723,6 +1723,10 @@ describe.each([
     expect(autopilotActivated(`${logs}\nplease use autopilot to fix this`)).toBe(true);
   });
 
+  it('activates autopilot for polite request with comma-separated please', () => {
+    expect(autopilotActivated('Could you, please, use autopilot to fix this?')).toBe(true);
+  });
+
   it('arms no heavy mode from pasted text that mentions several of them', () => {
     const cwd = mkdtempSync(join(tmpdir(), 'keyword-detector-autopilot-others-'));
     try {
