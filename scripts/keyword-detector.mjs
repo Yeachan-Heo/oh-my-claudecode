@@ -1128,17 +1128,19 @@ function hasExplicitAutopilotInvocationContext(text, position, keywordLength, ke
   const lineHead = text.slice(lineStart, Math.min(position, lineStart + 80));
   // A question never starts the mode: it starts with a question word, or the sentence ends in "?".
   const sentenceHead = /(?:^|[.!?;]\s+)([^.!?;]*)$/.exec(text.slice(Math.max(lineStart, position - 200), position));
-  // The clause after a label ("Question: Must I use autopilot") is what gets classified.
-  const clauseHead = (sentenceHead ? sentenceHead[1] : tail).replace(/^.*:\s*/, '');
+  // The clause after a label or an introductory phrase ("Question: Must I ...", "Out of curiosity, should I ...") is what gets classified.
+  const clauseHead = (sentenceHead ? sentenceHead[1] : tail).replace(/^.*[,:\u2014\u2013]\s*/, '');
   if (AUTOPILOT_QUESTION_START.test(sentenceHead ? sentenceHead[1] : tail) || AUTOPILOT_QUESTION_START.test(clauseHead)) return false;
   AUTOPILOT_SENTENCE_END.lastIndex = position + keywordLength;
   const sentenceEnd = AUTOPILOT_SENTENCE_END.exec(text);
   // "?" inside a quotation or parenthesis that the sentence continues after ("... from "Ready?" to "Go.") is not terminal.
-  const nestedQuestion = sentenceEnd !== null && sentenceEnd[0].length > 1
-    && !/^[ \t]*$/.test(text.slice(sentenceEnd.index + sentenceEnd[0].length, lineEnd));
+  // A bare "?" followed by a lowercase word ("rename Ready? to Go.") is a literal, not the end of a question.
+  const afterEnd = sentenceEnd === null ? '' : text.slice(sentenceEnd.index + sentenceEnd[0].length, lineEnd);
+  const nestedQuestion = sentenceEnd !== null
+    && ((sentenceEnd[0].length > 1 && !/^[ \t]*$/.test(afterEnd)) || /^[ \t]+\p{Ll}/u.test(afterEnd));
   if (sentenceEnd && sentenceEnd.index < lineEnd && sentenceEnd[0][0] === '?' && !nestedQuestion && !AUTOPILOT_REQUEST_START.test(clauseHead)) return false;
   if (AUTOPILOT_NEGATION_BEFORE.test(tail) || AUTOPILOT_NEGATION_BEFORE.test(tail.replace(AUTOPILOT_OPENING_DELIMITERS_AT_END, ''))) return false;
-  if (AUTOPILOT_REFERENCE_LABEL_LINE.test(lineHead.replace(AUTOPILOT_MARKDOWN_MARKS, '').replace(AUTOPILOT_LIST_PREFIX, ''))) return false;
+  if (AUTOPILOT_REFERENCE_LABEL_LINE.test(lineHead.replace(AUTOPILOT_MARKDOWN_MARKS, '').replace(AUTOPILOT_LIST_PREFIX, '').replace(/\s+$/, ''))) return false;
   if (AUTOPILOT_NON_ENGLISH_LINE.test(text.slice(lineStart, Math.min(lineEnd, lineStart + 400)))) return true;
   const isHardwareAlias = /^(?:full\s*auto|fullsend)$/i.test((keywordText || '').trim());
   if (leadingPrefix) {
@@ -1192,7 +1194,7 @@ function hasActionableAutopilotKeyword(text, pattern) {
     }
     const afterAlias = searchText.slice(match.index + match[0].length, match.index + match[0].length + 60);
     const ownLine = /^[ \t]*$/.test(linePrefix)
-      && !AUTOPILOT_REFERENCE_HEADING.test(previousLine.replace(AUTOPILOT_MARKDOWN_MARKS, '').replace(AUTOPILOT_LIST_PREFIX, ''))
+      && !AUTOPILOT_REFERENCE_HEADING.test(previousLine.replace(AUTOPILOT_MARKDOWN_MARKS, '').replace(AUTOPILOT_LIST_PREFIX, '').replace(/\s+$/, ''))
       && (AUTOPILOT_COMMAND_AFTER.test(afterAlias) || AUTOPILOT_COLON_VERB.test(afterAlias));
     const from = ownLine ? lineStart : Math.max(0, match.index - AUTOPILOT_CONTEXT_WINDOW);
     const to = ownLine ? lineEnd : match.index + match[0].length + AUTOPILOT_CONTEXT_WINDOW;
