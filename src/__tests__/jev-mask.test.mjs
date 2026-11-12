@@ -171,6 +171,9 @@ describe.each([
       ['kennwort=abc', 'kennwort=***'],
       ['contraseña: abc', 'contraseña: ***'],
       ['Contrasena: abc', 'Contrasena: ***'],
+      [String.raw`{"hasło":"hunter2zz"}`, String.raw`{"hasło":"***"}`],
+      [String.raw`{"HASŁO":"hunter2zz"}`, String.raw`{"HASŁO":"***"}`],
+      [String.raw`{"contraseña":"hunter2zz"}`, String.raw`{"contraseña":"***"}`],
       ['hasło jest za krótkie', 'hasło jest za krótkie'],
       ['klucz do pokoju', 'klucz do pokoju'],
     ];
