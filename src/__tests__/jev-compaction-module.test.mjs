@@ -1744,6 +1744,9 @@ describe('jev-compaction module: active compaction', () => {
       [`${coordinator} mentions <task-notification> literal\n<system-reminder>\nOrdinary reminder: log </task-notification> end\n</system-reminder>\n${framed(keep)}\n${notification}`, [keep]],
       [`${notification}\n${framed(keep)}\n<system-reminder>\nquote ${notification}</system-reminder>`, [keep]],
     ];
+    // A notification opener in the middle of a line of a message of another sender (not a block of the host, which
+    // opens at the start of a line) is text: it does not pair with the closer of the notification after the user's frame.
+    sketches.push([`${coordinator} It quoted <task-notification> literal\n${framed(keep)}\n${notification}`, [keep]]);
     for (const [text, words] of sketches) {
       const rows = [...base.slice(0, -2), Object.freeze({ role: 'user', text, toolUses: [], handle: 'hr' }), ...base.slice(-2)];
       const { calls } = await compactWithApi(rows, apiOf(rows));

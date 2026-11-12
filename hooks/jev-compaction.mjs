@@ -1321,11 +1321,23 @@ function opaqueOf(text, envelopes = envelopesOf(text)) {
     // A notification tag that a plain reminder quotes is text in reading 1: it does not open a quote that ends at
     // a notification after the reminder (the tags of reading 2 and the block count are not changed by it).
     const inReminder = insideOf(unionOf(tag === QUOTE_TAGS[1] ? reminders : []));
+    // Whether a non-blank character precedes a position on its line; asked in increasing order, so it is linear.
+    let scanned = 0;
+    let dirty = false;
+    const midLine = (at) => {
+      const part = text.slice(scanned, at);
+      scanned = at;
+      const nl = part.lastIndexOf('\n');
+      dirty = nl < 0 ? dirty || /\S/.test(part) : /\S/.test(part.slice(nl + 1));
+      return dirty;
+    };
     // Reading 1: each opener to the first closing tag after it (a quote that holds a tag without its
-    // partner ends at its own closing tag).
+    // partner ends at its own closing tag). A notification opener in the middle of a line is text here: the host
+    // opens a notification at the start of a line, so such an opener is a mention in the words of someone else.
     let end = 0;
     for (const o of openers) {
-      if (o.index < end || inReminder(o.index)) continue;
+      const mid = tag === QUOTE_TAGS[1] && midLine(o.index);
+      if (o.index < end || mid || inReminder(o.index)) continue;
       const c = lowerBound(free, o.index + o[0].length);
       if (c >= free.length) break;
       end = free[c] + tag.close.length;
