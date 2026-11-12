@@ -9,17 +9,14 @@
  * scripts/jev-resolve.mjs and src/hooks/jev/config.ts).
  *
  * session.compact (auto, /compact, a plugin's request; main loop and subagents). The first message,
- * the last KEEP_LAST messages, every user message (also one typed during a tool turn, which only the
- * API form shows, like the messages of other sessions and the task notifications delivered then) and
- * every assistant text stay word for word. Other
+ * the last KEEP_LAST messages, every user message and every assistant text stay word for word. Other
  * tool results are kept whole, shortened to SHORT_CHARS characters, or removed together with their
  * call; a removed call stays as a one-line trace (tool, input up to TRACE_INPUT_CHARS, size of the
  * removed result), so the model knows what it already did. Jev scores how much each result will still
  * be needed (the `compaction` score question in src/hooks/jev/points.ts, BATCH results per request,
  * up to MAX_REQUESTS requests in parallel). Results are ranked by score and kept while they fit the
- * target budget (OMC_JEV_COMPACT_TARGET of the characters before, delivered messages that only the API
- * form shows included). In shadow mode the decision is computed and logged, and the built-in summary
- * runs.
+ * target budget (OMC_JEV_COMPACT_TARGET of the characters before). In shadow mode the decision is
+ * computed and logged, and the built-in summary runs.
  *
  * Assistant rows are rebuilt from their text, traces and kept calls (thinking and server blocks go, a
  * row left empty is dropped), so the host writes them with a new message.id and `--resume` cannot
@@ -194,40 +191,6 @@ const NOT_USER_PREFIXES = [
   'Base directory for this skill:', 'Caveat:', '[Request interrupted', 'This session is being continued from a previous conversation',
   '<side-sessions-event>', '<ci-monitor-event>', '<scheduled-task', '<cross-session-message', 'Another Claude session sent a message:',
 ];
-// Messages delivered while a tool turn runs. Claude Code keeps such a message as an attachment row
-// after the result row: `messages` does not show it (the host hands such rows back only with the
-// handle of the row before them), and the API form shows it as a text block of the user message with
-// the results, inside an optional <system-reminder ...> wrapper: "<who> sent a message while you were
-// working:" (the user: QUEUED_PREFIX, their words, then a fixed note, QUEUED_TAIL; another session or
-// agent; the coordinator; a plugin), a teammate's <teammate-message>, or a background task
-// notification. A result row rebuilt without its handle would lose it, so build carries every such
-// block word for word into the rebuilt row, each in its own envelope (envelope); only QUEUED_PREFIX
-// blocks count as the user's words. The host frames an automatic continuation and a plugin's message
-// sent as the user with QUEUED_PREFIX too; the API form does not tell them apart, so they count as the
-// user's.
-const QUEUED_PREFIX = 'The user sent a new message while you were working:\n';
-const QUEUED_TAIL = '\n\nThis is how Claude Code surfaces messages'; // the fixed note after the user's words
-// The host's whole note (the same words in Claude Code 2.1.284 to 2.1.322). A user who quotes the note stops
-// somewhere in it, so only a verbatim copy of all of it reads like the host's.
-const QUEUED_FOOTER = `${QUEUED_TAIL} the user sends mid-turn \u2014 within the running turn, often alongside the next tool result, rather than as a separate conversation turn. Address the message above as you continue this turn.`;
-const DELIVERY_WRAP = /^(?:\s*<system-reminder[^>]*>)+\s*/; // a wrapper, also the envelope build writes around a wrapped block
-// The first line of another sender's frame: "<sender> sent a message (or a report) while you were
-// working:", and the bound conversation's "A message arrived ...", "Messages arrived ..." and
-// "Activity ... in the bound conversation ..." frames. A line that only ends with "while you were
-// working:" is no frame.
-const OTHER_FRAME = /^(?:.+ sent an? (?:new )?(?:message|report)|(?:A message|Messages) arrived .+|Activity (?:was observed )?in the bound conversation) while you were working(?:,.*)?:$/;
-const DELIVERY_OPENERS = ['Another Claude session sent a message:', '<agent-message', '<cross-session-message', '<teammate-message', '<task-notification', '[MESSAGE FROM NON-USER SOURCE'];
-// An envelope in a row's text: the host's <system-reminder id="..."> and the one build writes around a
-// carried block, each closed only by the closing tag with its own id.
-const ENVELOPE_CLOSE = '</system-reminder id="';
-const ENVELOPE_OPEN = /<system-reminder id="(?=([^"\n]{1,64})">)/g; // every opener, also one inside another's id
-const ENVELOPE_ID = /([^"\n]{1,64})">/y; // the id and end of a closing tag, read where the tag starts
-// A task notification's marker opens the block (after its own wrapper and reminders), not a line deep in a quoted file.
-const DELIVERY_NOTES = ['[SYSTEM NOTIFICATION - NOT USER INPUT]', '<task-notification>'];
-// A complete reminder before a block's frame (the Claude desktop app writes "<system-reminder>...</system-reminder>
-// Another Claude session sent a message:"); at most PRELUDES_MAX of them are skipped.
-const DELIVERY_PRELUDE = /^\s*<system-reminder[^>]*>[\s\S]*?<\/system-reminder[^>]*>\s*/;
-const PRELUDES_MAX = 4;
 
 // Secret paths: SSH keys (every file in a .ssh directory but known_hosts*, authorized_keys*, config, config.d/,
 // environment, rc and *.pub, and an id_rsa, id_dsa, id_ecdsa or id_ed25519 key anywhere), git and gh credentials,
@@ -558,7 +521,7 @@ async function readText($, path) {
 async function readTextSafe($, path) {
   try {
     return { text: await $.fs.read(path) };
-  } catch {
+  } catch (err) {
     try {
       const exists = await $.fs.exists(path);
       if (!exists) return { missing: true };
@@ -1149,415 +1112,20 @@ function messageChars(m) {
   return n;
 }
 
-// The text from the point `starts` accepts: past the wrapper that opens it (also the envelope build
-// writes around a block) and past the complete reminders before it; undefined when none does.
-function bodyOf(text, starts) {
-  let t = text;
-  for (let k = 0; k <= PRELUDES_MAX; k++) {
-    const body = t.replace(DELIVERY_WRAP, '');
-    if (starts(body)) return body;
-    const prelude = DELIVERY_PRELUDE.exec(t);
-    if (!prelude) return undefined;
-    t = t.slice(prelude[0].length);
-  }
-  return undefined;
-}
-const startsFrame = (t) => t.startsWith(QUEUED_PREFIX) || OTHER_FRAME.test(t.split('\n', 1)[0]) || DELIVERY_OPENERS.some((p) => t.startsWith(p));
-const startsNote = (t) => DELIVERY_NOTES.some((k) => t.startsWith(k));
-
-// The frame a text opens with, after an optional <system-reminder ...> wrapper and complete reminders: 'user',
-// 'other' (another session, agent, coordinator, plugin, teammate) or undefined.
-function frameOf(text) {
-  const body = bodyOf(text, startsFrame);
-  if (body === undefined) return undefined;
-  return body.startsWith(QUEUED_PREFIX) ? 'user' : 'other';
-}
-
-// What a text block delivered with the results is: 'user', 'other' (another session, agent,
-// coordinator, plugin, teammate, task notification) or undefined (a reminder that may go).
-function deliveryOf(text) {
-  if (typeof text !== 'string') return undefined;
-  return frameOf(text) || (bodyOf(text, startsNote) !== undefined ? 'other' : undefined);
-}
-
-// A row's own text that opens with a delivered message: a frame, or a task notification's marker (after an
-// optional wrapper). A prompt that quotes the marker further on stays the user's.
-const opensDelivery = (text) => frameOf(text) || bodyOf(text, startsNote) !== undefined;
-
-// The envelopes of a text, in order: {from, to, text}. Read from the end, each closing tag with the
-// last opener of its id before it, so an envelope build appended (whose id nothing before it holds)
-// is found whole even when it quotes a closing tag that an opener without its closing tag earlier in
-// the text would take, and a quoted envelope inside one stays inside it. An unpaired tag is text.
-// The openers are indexed in one pass and each closing tag reads only its own id, so a text full of
-// unpaired tags (a truncated transcript pasted in) is read in linear time.
-function envelopesOf(text) {
-  const openers = new Map();
-  for (const o of text.matchAll(ENVELOPE_OPEN)) { const at = openers.get(o[1]); if (at) at.push(o.index); else openers.set(o[1], [o.index]); }
-  const found = [];
-  for (let end = text.length; end > 0;) {
-    const close = text.lastIndexOf(ENVELOPE_CLOSE, end - 1);
-    if (close < 0) break;
-    ENVELOPE_ID.lastIndex = close + ENVELOPE_CLOSE.length;
-    const id = ENVELOPE_ID.exec(text);
-    const to = ENVELOPE_ID.lastIndex;
-    const at = id && to <= end ? openers.get(id[1]) || [] : [];
-    // The last opener of this id before the closing tag (the openers stand in text order).
-    let lo = 0;
-    for (let hi = at.length; lo < hi;) { const mid = (lo + hi) >> 1; if (at[mid] < close) lo = mid + 1; else hi = mid; }
-    const open = lo > 0 ? at[lo - 1] : -1;
-    if (open >= 0) found.push({ from: open, to, text: text.slice(open, to) });
-    end = open >= 0 ? open : close;
-  }
-  return found.reverse();
-}
-
-const rawChars = (blocks) => blocks.reduce((n, t) => n + t.length, 0);
-
-// The delivered blocks of a row (queuedOf left out the ones a row shows), and the row's text with each
-// of them after it as one envelope, so that a later compaction reads it as one message whatever it
-// quotes and whatever follows it. A block that is one envelope already stays as it is; another gets the
-// lowest jev id that neither it nor the row's text so far holds (not the host's hex form, so the host
-// leaves the envelope as text). The ids are collected in one pass over each block and the text is
-// joined once, so many blocks stay linear. A copy an earlier compaction carried into the row's text
-// does not hide a new delivery of the same text.
-function carriedText(m, blocks = []) {
-  const parts = m.text ? [m.text] : [];
-  const taken = new Set();
-  const note = (text) => { for (const x of text.matchAll(/id="jev-(\d+)"/g)) taken.add(x[1]); };
-  note(m.text || '');
-  // A row with words of its own outside its envelopes gets even a host envelope in one of ours: after such
-  // text a jev envelope is what a later compaction reads as carried (userWords), a host one as a quote.
-  let mixed = false;
-  if (m.text && blocks.length) {
-    let at = 0;
-    const outside = [];
-    for (const e of envelopesOf(m.text)) { outside.push(m.text.slice(at, e.from)); at = e.to; }
-    outside.push(m.text.slice(at));
-    mixed = outside.join('').trim() !== '';
-  }
-  let k = 1;
-  for (const block of blocks) {
-    note(block);
-    const e = envelopesOf(block);
-    if (!mixed && e.length === 1 && e[0].from === 0 && e[0].to === block.length) { parts.push(block); continue; }
-    while (taken.has(String(k))) k++;
-    taken.add(String(k));
-    parts.push(`<system-reminder id="jev-${k}">\n${block}\n</system-reminder id="jev-${k}">`);
-  }
-  return { own: blocks, text: parts.join('\n') };
-}
-
-// The user's words in one delivered block: from the user's header to the last framing note of the
-// block (the user may write the note's words too); none for a block of another sender. Nothing inside
-// a block is read as a frame of its own, so a header another sender quotes is not the user's.
-function blockWords(block) {
-  if (frameOf(block) !== 'user') return [];
-  const body = bodyOf(block, startsFrame).slice(QUEUED_PREFIX.length);
-  const tail = body.lastIndexOf(QUEUED_TAIL);
-  const words = (tail < 0 ? body.replace(/(?:\s*<\/system-reminder[^>]*>)+\s*$/, '') : body.slice(0, tail)).trim();
-  return words ? [words] : [];
-}
-
-// The regions of a text that are quotes to the user's block around them: `opaque`, in text order and not
-// overlapping, holds every paired envelope and every paired plain <system-reminder> that holds no delivery (a
-// reminder that wraps one is read by its frame); `quotes` holds just those plain reminders, which can hold whole
-// envelopes (a delivery in one is part of the quote). A plain reminder ends at the first closing tag after its
-// opener; tags inside an envelope belong to it, and an opener without a closing tag is text. The tags are indexed
-// in one pass, so a text full of unpaired tags is read in linear time.
-const PLAIN_OPEN = /<system-reminder(?![^>]{0,200}\bid=)[^>]{0,200}>/g; // bounded: a text full of unclosed tags stays linear
-const PLAIN_CLOSE = '</system-reminder>';
-function opaqueOf(text, envelopes = envelopesOf(text)) {
-  const quotes = [];
-  const closers = positionsOf(text, PLAIN_CLOSE);
-  if (closers.length) {
-    const inClose = insideOf(envelopes);
-    const free = closers.filter((c) => !inClose(c));
-    const inOpen = insideOf(envelopes);
-    let end = 0;
-    for (const o of text.matchAll(PLAIN_OPEN)) {
-      if (o.index < end || inOpen(o.index)) continue;
-      const c = lowerBound(free, o.index + o[0].length);
-      if (c >= free.length) break;
-      end = free[c] + PLAIN_CLOSE.length;
-      if (!deliveryOf(text.slice(o.index, end))) quotes.push({ from: o.index, to: end });
-    }
-  }
-  const opaque = [];
-  for (const e of [...envelopes, ...quotes].sort((x, y) => x.from - y.from)) {
-    const last = opaque[opaque.length - 1];
-    if (last && e.from < last.to) last.to = Math.max(last.to, e.to);
-    else opaque.push({ from: e.from, to: e.to });
-  }
-  return { opaque, quotes };
-}
-
-// Whether a position lies inside one of the envelopes `spans` (in text order), after its opener; asked for in
-// increasing order.
-function insideOf(spans) {
-  let k = 0;
-  return (pos) => {
-    while (k < spans.length && spans[k].to <= pos) k++;
-    return k < spans.length && spans[k].from < pos;
-  };
-}
-
-// The first index of the sorted list `a` whose value is at least `x`.
-function lowerBound(a, x) {
-  let lo = 0;
-  for (let hi = a.length; lo < hi;) { const mid = (lo + hi) >> 1; if (a[mid] < x) lo = mid + 1; else hi = mid; }
-  return lo;
-}
-
-// What the user's blocks of a text read from, indexed once per text: the positions of the host's whole footer
-// outside every envelope that holds a delivered message (`spans`, in text order; a footer inside one is that
-// message's), and, once a block asks for it, the start of every line that opens a frame.
-function blockIndex(text, spans) {
-  const footers = [];
-  let k = 0;
-  for (const f of positionsOf(text, QUEUED_FOOTER)) {
-    while (k < spans.length && spans[k].to <= f) k++;
-    if (!(k < spans.length && spans[k].from <= f)) footers.push(f);
-  }
-  return { footers, frames: undefined };
-}
-function frameLines(text) {
-  const out = [];
-  for (let p = 0; p < text.length;) {
-    const nl = text.indexOf('\n', p);
-    if (frameOf(`${text.slice(p, nl < 0 ? text.length : nl)}\n`)) out.push(p);
-    p = nl < 0 ? text.length : nl + 1;
-  }
-  return out;
-}
-
-// The end of a user's block that opens at `from` in a row's text: the end of the line of its framing
-// note, the last one before the first frame (a user's header or another sender's) after its first note
-// (a header the user quotes before the note stays in the block, and the user may write the note's words
-// too); -1 without a note. The first note is the host's whole footer outside the envelopes when the text has
-// one after `from` (`index`), so the part of it the user quotes does not end the search early. A note
-// inside an envelope that holds a delivered message (`spans`, in text order) is that message's, not the user's, so a
-// block stops before a carried envelope that quotes the note. Each call reads only up to that frame and skips an
-// envelope in one step, so the blocks of a row stay linear. In a row rebuilt before blocks got envelopes, one user's
-// block that quotes the footer word for word, all of it, and then a header has the same bytes as two blocks in a row, so
-// it is read as two; rows written now keep every block in an envelope of its own.
-function userBlockEnd(text, from, spans, index) {
-  const inside = (i) => {
-    let lo = 0;
-    for (let hi = spans.length; lo < hi;) { const mid = (lo + hi) >> 1; if (spans[mid].from <= i) lo = mid + 1; else hi = mid; }
-    return lo > 0 && i < spans[lo - 1].to ? spans[lo - 1] : undefined;
-  };
-  const f = lowerBound(index.footers, from);
-  const first = f < index.footers.length ? index.footers[f] : text.indexOf(QUEUED_TAIL, from);
-  if (first < 0) return -1;
-  index.frames ??= frameLines(text);
-  const after = first + QUEUED_TAIL.length;
-  const header = text.indexOf(QUEUED_PREFIX, after);
-  const limit = Math.min(header < 0 ? text.length : header, index.frames[lowerBound(index.frames, after)] ?? text.length);
-  let t = text.lastIndexOf(QUEUED_TAIL, limit - QUEUED_TAIL.length);
-  for (let e; t >= from && (e = inside(t)); t = text.lastIndexOf(QUEUED_TAIL, e.from - 1));
-  if (t < from) return -1;
-  const nl = text.indexOf('\n', t + QUEUED_TAIL.length);
-  return nl < 0 ? text.length : Math.min(nl, limit);
-}
-
-// The positions of `s` in `text`, in order.
-function positionsOf(text, s) {
-  const out = [];
-  for (let i = text.indexOf(s); i >= 0; i = text.indexOf(s, i + s.length)) out.push(i);
-  return out;
-}
-
-// Text outside envelopes (a row rebuilt before carried blocks got envelopes) split at each line that
-// opens a frame: one piece {text, at} per delivered message. A user's block runs to its framing note
-// (userBlockEnd), so a frame line the user quotes before the note stays in it.
-function piecesOf(text) {
-  const pieces = [];
-  const spans = opaqueOf(text).opaque; // a footer or header inside an envelope or a plain reminder is a quote to the user's block around it
-  const index = blockIndex(text, spans);
-  const quoted = insideOf(spans);
-  const lastTail = text.lastIndexOf(QUEUED_TAIL);
-  let end = -1;
-  let at = 0;
-  for (const line of text.split('\n')) {
-    const frame = at >= end && !quoted(at) ? frameOf(`${line}\n`) : undefined;
-    if (!pieces.length || frame) {
-      pieces.push({ text: line, at });
-      end = frame === 'user' && at < lastTail ? userBlockEnd(text, at, spans, index) : -1;
-    } else pieces[pieces.length - 1].text += `\n${line}`;
-    at += line.length + 1;
-  }
-  return pieces;
-}
-
-// The envelopes of a row's text that hold a delivered message, except one inside a user's block before
-// its framing note: that one is a quote the user pasted and stays in their block.
-function deliveredOf(text) {
-  const envelopes = envelopesOf(text);
-  const { opaque, quotes } = opaqueOf(text, envelopes); // quotes to the user's block around them
-  const all = envelopes.filter((e) => deliveryOf(e.text));
-  const index = blockIndex(text, opaque);
-  const quoted = insideOf(opaque);
-  const inQuote = insideOf(quotes); // a delivery pasted into a plain reminder is part of that quote
-  const lastTail = text.lastIndexOf(QUEUED_TAIL);
-  const out = [];
-  let end = -1;
-  let k = 0;
-  for (let p = 0; p < text.length;) {
-    if (k < all.length && all[k].from <= p) {
-      if (all[k].from >= end && !inQuote(all[k].from)) { out.push(all[k]); p = Math.max(p, all[k].to); }
-      k++;
-      continue;
-    }
-    const nl = text.indexOf('\n', p);
-    const stop = Math.min(nl < 0 ? text.length : nl, k < all.length ? all[k].from : text.length);
-    if (p >= end && p < lastTail && !quoted(p) && frameOf(`${text.slice(p, stop)}\n`) === 'user') end = userBlockEnd(text, p, opaque, index);
-    p = stop === nl ? nl + 1 : stop;
-  }
-  return out;
-}
-
-// The user's own words in a message: none for host notices and summaries; host blocks inside a
-// message are cut out. A delivered message counts only as a whole block, by its opening frame (one
-// rule): each envelope of the text that holds a delivered message (the host's, or one a row rebuilt
-// by an earlier compaction carries; deliveredOf), and the text outside them, read by its pieces (piecesOf) when it
-// opens with a delivered message (opensDelivery) or the row holds results. A result row's own text
-// gives words only so. An envelope counts as carried only in such a row or in one whose text outside
-// the envelopes gives no words of the user (build carries blocks only into result rows); in a prompt
-// the user typed it is a quote they pasted.
+// The user's own words in a message: '' for tool results, host notices and summaries; host blocks
+// inside a message are cut out.
 function userWords(m) {
-  if (m.role !== 'user' || !m.text) return [];
-  const delivered = deliveredOf(m.text);
-  // The text outside the envelopes, as the parts between them, each with where it stands in the row.
-  const outside = [];
-  let at = 0;
-  for (const e of delivered) { outside.push({ from: at, text: m.text.slice(at, e.from) }); at = e.to; }
-  outside.push({ from: at, text: m.text.slice(at) });
-  const own = outside.map((o) => o.text).join('\n').trim();
-  if (opensDelivery(own) || (m.toolResults && m.toolResults.length)) {
-    // Every message in the order it stands in the row, a legacy one (outside the envelopes) and an enveloped one alike.
-    const found = delivered.map((e) => ({ at: e.from, words: blockWords(e.text) }));
-    for (const o of outside) for (const p of piecesOf(o.text)) found.push({ at: o.from + p.at, words: blockWords(p.text) });
-    return found.sort((x, y) => x.at - y.at).flatMap((f) => f.words);
-  }
-  const text = own.replace(HOST_BLOCK, '').trim();
-  const carried = delivered.flatMap((e) => blockWords(e.text));
-  if (!text || HOST_BLOCK_OPEN.test(text) || NOT_USER_PREFIXES.some((p) => text.startsWith(p))) return carried;
-  // A prompt the user typed: an envelope in it is a quote they pasted, so the whole prompt is theirs. Except
-  // the jev envelopes build appends at the end of a row it rebuilt from a result row (it has a toolResults list,
-  // whatever it holds; a result row keeps its own text before them): those stay messages of their senders.
-  let cut = m.text.length;
-  if (Array.isArray(m.toolResults)) for (let k = delivered.length - 1; k >= 0 && /^<system-reminder id="jev-\d+">/.test(delivered[k].text) && !m.text.slice(delivered[k].to, cut).trim(); k--) cut = delivered[k].from;
-  const typed = m.text.slice(0, cut).replace(HOST_BLOCK, '').trim();
-  return [...(typed ? [typed] : []), ...delivered.filter((e) => e.from >= cut).flatMap((e) => blockWords(e.text))];
-}
-
-// Messages delivered during a tool turn that the API form shows and `messages` does not (deliveryOf):
-// row -> its blocks, word for word, with the counts by kind; null without the API form (they cannot
-// be seen then). A block belongs to the row the host wrote the attachment after, whose handle brings
-// it back: the row of the result or of the shown text that stands last before the block in its API
-// message (the API form keeps the order of the rows it joins, so with parallel results in rows of
-// their own that is the result before it, and a row shown after the results, such as an
-// interruption notice, takes the blocks after its text). A block is shown already only by the row at
-// its position in the API form (matchShown).
-function queuedOf(messages, api) {
-  if (!api) return null;
-  const rows = new Map();
-  const counts = { user: 0, other: 0 };
-  const rowOfResult = new Map();
-  // The rows of one API message are a run of consecutive user rows (the host joins them): `runStart` is
-  // the first row of the run that holds a row, `runs` the first row of every run.
-  const runStart = [];
-  const runs = [];
-  messages.forEach((m, i) => {
-    if (m.role !== 'user') { runStart.push(-1); return; }
-    if (i > 0 && messages[i - 1].role === 'user') runStart.push(runStart[i - 1]);
-    else { runStart.push(i); runs.push(i); }
-    for (const r of m.toolResults || []) if (!rowOfResult.has(r.tool_use_id)) rowOfResult.set(r.tool_use_id, i);
-  });
-  // The first row at or after each index that the API form shows a block of (text or results), or an
-  // assistant row, which ends a user message; messages.length when none.
-  const nextAt = new Array(messages.length + 1).fill(messages.length);
-  for (let i = messages.length - 1; i >= 0; i--) {
-    const m = messages[i];
-    nextAt[i] = m.role !== 'user' || m.text || (m.toolResults || []).length ? i : nextAt[i + 1];
-  }
-  // For a text-only row: how many text-only rows with the same text follow it before the next row with
-  // results (the rows of one stretch of the API message, between two results).
-  const rowsAfter = new Array(messages.length).fill(0);
-  const seenRows = new Map();
-  for (let i = messages.length - 1; i >= 0; i--) {
-    const m = messages[i];
-    if (m.role !== 'user' || (m.toolResults || []).length) seenRows.clear();
-    else if (m.text) { rowsAfter[i] = seenRows.get(m.text) || 0; seenRows.set(m.text, rowsAfter[i] + 1); }
-  }
-  const shown = new Set();
-  // The API form joins the rows of one message in order, each row's results before its text. So a text
-  // block at row `at` (the row of the block before it; before the first one, the message starts at row
-  // `lead`) is shown by that row's own text not matched yet, or by the next row when that row has text
-  // and no results; otherwise no row shows it. The same text elsewhere (a block an earlier compaction
-  // carried, a repeated "continue") is another delivery, and two rows with the same text show two blocks.
-  // After a row (`at` set), a block that more blocks of its stretch repeat than text-only rows follow the next
-  // row is not shown by it: the last block with that text is (`later` counts the blocks after it), the earlier
-  // ones are deliveries of the row before, which stand before the shown one (a duplicate carried at worst, never
-  // one lost). Before the first block nothing owns a delivery, so the first block with that text is the row's.
-  const matchShown = (at, text, lead, later) => {
-    if (at !== undefined && !shown.has(at) && messages[at].text === text) return at;
-    const k = nextAt[at === undefined ? lead : at + 1];
-    const m = messages[k];
-    return m && m.role === 'user' && !(m.toolResults || []).length && m.text === text && (at === undefined || later <= rowsAfter[k]) ? k : undefined;
-  };
-  // A message without results is matched to the run of rows at its place in the order (when both lists
-  // hold the same number of them; a user message with a plain string counts, only the blocks of an array
-  // are read): a kept notice row can own a delivery after its result was traced.
-  const users = api.filter((a) => a.role === 'user');
-  let ordinal = -1;
-  for (const a of users) {
-    ordinal++;
-    if (!Array.isArray(a.content)) continue;
-    let row;
-    let results = false;
-    for (const b of a.content) {
-      if (b?.type !== 'tool_result') continue;
-      results = true;
-      if (rowOfResult.has(b.tool_use_id)) row = Math.max(row ?? 0, rowOfResult.get(b.tool_use_id));
-    }
-    const lead = row !== undefined ? runStart[row] : !results && runs.length === users.length ? runs[ordinal] : undefined;
-    if (lead === undefined) continue;
-    // For each text block, how many blocks with the same text follow it before the next result.
-    const later = new Array(a.content.length).fill(0);
-    const seen = new Map();
-    for (let p = a.content.length - 1; p >= 0; p--) {
-      const b = a.content[p];
-      if (b?.type === 'tool_result') seen.clear();
-      else if (b?.type === 'text' && typeof b.text === 'string') { later[p] = seen.get(b.text) || 0; seen.set(b.text, later[p] + 1); }
-    }
-    let anchor = row;
-    let at;
-    for (const [p, b] of a.content.entries()) {
-      if (b?.type === 'tool_result' && rowOfResult.has(b.tool_use_id)) at = anchor = rowOfResult.get(b.tool_use_id);
-      if (b?.type !== 'text') continue;
-      const r = matchShown(at, b.text, lead, later[p]);
-      if (r !== undefined) {
-        shown.add(r);
-        at = anchor = r;
-        continue;
-      }
-      const kind = deliveryOf(b.text);
-      if (!kind || anchor === undefined) continue;
-      if (!rows.has(anchor)) rows.set(anchor, []);
-      rows.get(anchor).push(b.text);
-      counts[kind]++;
-    }
-  }
-  return { rows, ...counts };
+  if (m.role !== 'user' || (m.toolResults && m.toolResults.length) || !m.text) return '';
+  const text = m.text.replace(HOST_BLOCK, '').trim();
+  if (!text || HOST_BLOCK_OPEN.test(text) || NOT_USER_PREFIXES.some((p) => text.startsWith(p))) return '';
+  return text;
 }
 
 // The task for the state: the /compact instructions first, then the last USER_MESSAGES user
-// messages, together USER_CHARS characters. A message the user typed during a tool turn (queuedOf)
-// counts as one, after its row; other delivered messages do not. The part of each that is cleaned, as written
-// (`mention`, in lower case; an omitted line can let a later line into the budget), is only matched against the
-// results the user names (markMentioned) and is never sent.
-function userTask(messages, instructions, queued = new Map(), privatePaths = []) {
+// messages, together USER_CHARS characters. The part of each that is cleaned, as written (`mention`, in
+// lower case; an omitted line can let a later line into the budget), is only matched against the results
+// the user names (markMentioned) and is never sent.
+function userTask(messages, instructions, privatePaths = []) {
   let left = USER_CHARS;
   const clean = (text) => maskSecrets(omitSecretLines(text, privatePaths));
   const mention = [];
@@ -1569,14 +1137,13 @@ function userTask(messages, instructions, queued = new Map(), privatePaths = [])
   }
   const picked = [];
   for (let i = messages.length - 1; i >= 0 && picked.length < USER_MESSAGES && left > 0; i--) {
-    const words = [...userWords(messages[i]), ...(queued.get(i) || []).flatMap(blockWords)];
-    for (let k = words.length - 1; k >= 0 && picked.length < USER_MESSAGES && left > 0; k--) {
-      const part = headPart(words[k], left + MASK_SLACK_CHARS);
-      const text = clip(clean(part), left);
-      picked.unshift(text);
-      mention.push(part);
-      left -= text.length;
-    }
+    const words = userWords(messages[i]);
+    if (!words) continue;
+    const part = headPart(words, left + MASK_SLACK_CHARS);
+    const text = clip(clean(part), left);
+    picked.unshift(text);
+    mention.push(part);
+    left -= text.length;
   }
   return { task: picked, instructions: instr, mention: mention.join('\n').toLowerCase() };
 }
@@ -1681,10 +1248,9 @@ const removableChars = (candidates) => candidates.reduce((s, c) => s + Math.max(
 // Rank and fill the budget: highest score first while the upgrade from a trace fits; a result that
 // does not fit whole and scores at least "may be useful" is cut to SHORT_CHARS when that fits; the rest
 // is traced. A result not asked about (secret path, no text, beyond the questions) is traced; a call
-// not longer than its trace and the task list stay whole. `added`: characters the built list adds
-// whatever is decided (the envelopes of carried messages).
-function allocate(candidates, before, target, added = 0) {
-  const fixed = before + added - candidates.reduce((s, c) => s + c.fullCost - c.traceCost, 0);
+// not longer than its trace and the task list stay whole.
+function allocate(candidates, before, target) {
+  const fixed = before - candidates.reduce((s, c) => s + c.fullCost - c.traceCost, 0);
   let avail = Math.floor(before * target) - fixed;
   const ranked = [...candidates].sort((a, b) => b.score - a.score || b.resIdx - a.resIdx);
   for (const c of ranked) {
@@ -1868,7 +1434,7 @@ function serverBlocks(messages, api, keepFrom) {
 // the one message of its group (groupsOf), placed at the group's first row with content, so the result
 // rows that follow pair with it and the host gives it a new message.id; from keepFrom on
 // (openLoopStart) the rows keep their handles.
-function build(messages, candidates, keepFrom, group, stats, queued = new Map()) {
+function build(messages, candidates, keepFrom, group, stats) {
   const byId = new Map();
   for (const c of candidates) byId.set(c.id, c);
   const out = [];
@@ -1877,8 +1443,6 @@ function build(messages, candidates, keepFrom, group, stats, queued = new Map())
   stats.rebuiltAssistant = 0;
   stats.droppedAssistant = 0;
   stats.joinedRows = 0;
-  stats.queuedCarried = 0;
-  stats.queuedKeptChars = 0;
   const merged = new Map();
   for (const [i, m] of messages.entries()) {
     if (m.role === 'assistant' && i < keepFrom) {
@@ -1905,12 +1469,7 @@ function build(messages, candidates, keepFrom, group, stats, queued = new Map())
     }
     if (m.role === 'user' && (m.toolResults || []).length) {
       const changed = m.toolResults.some((r) => byId.has(r.tool_use_id) && byId.get(r.tool_use_id).keep !== 'full');
-      if (!changed && !m.toolResults.every(textOnlyResult)) {
-        stats.keptHandle++;
-        stats.queuedKeptChars += rawChars(carriedText(m, queued.get(i)).own);
-        out.push(m);
-        continue;
-      }
+      if (!changed && !m.toolResults.every(textOnlyResult)) { stats.keptHandle++; out.push(m); continue; }
       const results = [];
       for (const r of m.toolResults) {
         const c = byId.get(r.tool_use_id);
@@ -1920,16 +1479,10 @@ function build(messages, candidates, keepFrom, group, stats, queued = new Map())
         else results.push({ tool_use_id: r.tool_use_id, text: '[non-text result (image or file) removed at compaction]', isError: Boolean(r.isError) });
       }
       if (!changed) stats.rebuiltUnchanged++;
-      // A message delivered after this row goes with the rebuilt row, in its own envelope (a row that
-      // keeps its handle brings it back itself).
-      const { own, text } = carriedText(m, queued.get(i));
-      stats.queuedCarried += own.length;
-      if (!results.length && !text) continue;
-      out.push({ role: 'user', text, toolUses: [], toolResults: results });
+      if (!results.length && !m.text) continue;
+      out.push({ role: 'user', text: m.text || '', toolUses: [], toolResults: results });
       continue;
     }
-    // A row kept as it is gets the messages delivered after it back from the host.
-    if (m.role === 'user') stats.queuedKeptChars += rawChars(carriedText(m, queued.get(i)).own);
     out.push(m);
   }
   return out;
@@ -2067,47 +1620,22 @@ function noteFailures(failures, now) {
   }
 }
 
-// The characters build adds in envelopes to the rows it rebuilds: a result row whose results are all text,
-// or one with a result that may change (a candidate); a row kept by its handle gets its blocks back as they were.
-function envelopeChars(messages, queued, candidates) {
-  const changing = new Set(candidates.map((c) => c.resIdx));
-  let envelopes = 0;
-  for (const [i, blocks] of queued) {
-    const m = messages[i];
-    if (!(m.toolResults || []).length || !(m.toolResults.every(textOnlyResult) || changing.has(i))) continue;
-    const c = carriedText(m, blocks);
-    envelopes += c.text.length - (m.text || '').length - rawChars(c.own);
-  }
-  return envelopes;
-}
-
 // Decides one compaction: {messages} to install or {fallback: reason}. Fills `record`; never calls next.
 async function decide($, e, cfg, record, started) {
   const messages = Array.isArray(e.messages) ? e.messages : [];
-  let before = messages.reduce((s, m) => s + messageChars(m), 0);
+  const before = messages.reduce((s, m) => s + messageChars(m), 0);
   record.chars_before = before;
   if (messages.length <= KEEP_LAST + 1) return { fallback: 'too_few_messages' };
   // The rows of one API message are rebuilt together (groupsOf); only the last message of an open tool
   // loop keeps its handles, and then the API form has to hold every call of it: without it a call whose
   // result came back quickly starts a group of its own, and that message would be split.
   const asApi = e.agentId === undefined ? { as: 'api' } : { as: 'api', agentId: e.agentId };
-  const apiRead = await withDeadline($, Promise.resolve().then(() => $.session.messages(asApi)), HOST_MS);
-  let api = apiFormOf(apiRead.value);
+  let api = apiFormOf((await withDeadline($, Promise.resolve().then(() => $.session.messages(asApi)), HOST_MS)).value);
   const group = groupsOf(messages, api);
   const keepFrom = openLoopStart(messages, group);
   if (api && !keptCallsIn(messages, keepFrom, api)) api = undefined;
   record.kept_from = messages.length - keepFrom;
-  // Delivered messages no row shows are part of the context too (build carries them, a kept row gets
-  // them back from the host), so they count in the characters before and in the budget as fixed text,
-  // with the envelopes build adds. Their counts go into the record of every later outcome.
-  const delivered = queuedOf(messages, api);
-  Object.assign(record, { queued_user: delivered ? delivered.user : null, queued_other: delivered ? delivered.other : null });
-  // A read that timed out or failed leaves the delivered messages unknown, between turns too: a rebuilt
-  // row would drop one that only the API form holds (a host that answers another shape is a different case).
-  if (!api && (keepFrom < messages.length || !('value' in apiRead))) return { fallback: 'no_api_form' };
-  const queued = delivered ? delivered.rows : new Map();
-  for (const blocks of queued.values()) before += rawChars(blocks);
-  record.chars_before = before;
+  if (!api && keepFrom < messages.length) return { fallback: 'no_api_form' };
   const server = serverBlocks(messages, api, keepFrom);
   record.server_blocks = server.count;
   if (server.inTail) return { fallback: 'server_block_in_tail' };
@@ -2127,12 +1655,9 @@ async function decide($, e, cfg, record, started) {
   // Results of the calls that keep their handles stay whole (a built row may not stand among them).
   const candidates = findCandidates(messages, cfg.privatePaths).filter((c) => c.useIdx < keepFrom);
   record.candidates = candidates.length;
-  const envelopes = envelopeChars(messages, queued, candidates);
   const removable = removableChars(candidates);
-  // The envelopes build adds stay in every rebuilt row, so they come off what the results can give back.
-  const net = removable - envelopes;
-  record.max_reduction = before ? Math.round((net / before) * 1000) / 1000 : 0;
-  if (!before || net / before < MIN_REDUCTION) return { fallback: 'too_few_results' };
+  record.max_reduction = before ? Math.round((removable / before) * 1000) / 1000 : 0;
+  if (!before || removable / before < MIN_REDUCTION) return { fallback: 'too_few_results' };
   const blocked = await blockedReason($, cfg, Date.now());
   if (blocked) {
     if (blocked === 'paused') Object.assign(record, { paused_until: new Date(session.pausedUntil).toISOString(), pause_reason: session.pauseReason });
@@ -2160,7 +1685,7 @@ async function decide($, e, cfg, record, started) {
   let asked = askable.slice(0, BATCH * Math.min(MAX_REQUESTS, left));
   record.asked = asked.length;
 
-  const user = userTask(messages, typeof e.instructions === 'string' && e.instructions.trim() ? e.instructions : undefined, queued, cfg.privatePaths);
+  const user = userTask(messages, typeof e.instructions === 'string' && e.instructions.trim() ? e.instructions : undefined, cfg.privatePaths);
   const deadline = started + TOTAL_MS;
   const runs = [];
   let held;
@@ -2237,11 +1762,11 @@ async function decide($, e, cfg, record, started) {
   if (held?.mode === 'deadline') return { fallback: 'timeout' };
 
   record.mentioned = markMentioned(candidates, user);
-  allocate(candidates, before, cfg.target, envelopes);
+  allocate(candidates, before, cfg.target);
   const stats = {};
-  const built = build(messages, candidates, keepFrom, group, stats, queued);
+  const built = build(messages, candidates, keepFrom, group, stats);
   if (!pairingOk(messages, built)) return { fallback: 'build_error' };
-  const after = built.reduce((s, m) => s + messageChars(m), stats.queuedKeptChars);
+  const after = built.reduce((s, m) => s + messageChars(m), 0);
   const hist = [0, 0, 0, 0];
   for (const c of asked) if (c.answered) hist[Math.min(3, Math.round(c.score * 3))]++;
   Object.assign(record, {
@@ -2256,7 +1781,6 @@ async function decide($, e, cfg, record, started) {
     rebuilt_assistant: stats.rebuiltAssistant,
     dropped_assistant: stats.droppedAssistant,
     joined_rows: stats.joinedRows,
-    queued_carried: stats.queuedCarried,
     score_hist: hist,
     unanswered: asked.length - answered,
   });
@@ -2354,26 +1878,9 @@ async function ownThreshold($, e, next) {
     // removable tool results are worth it, so the threshold never forces the built-in summary.
     session.lastAttempt = session.turnCount;
     const messages = await $.session.messages();
-    let before = messages.reduce((s, m) => s + messageChars(m), 0);
-    const candidates = findCandidates(messages, cfg.privatePaths);
-    let removable = removableChars(candidates);
-    const tooSmall = () => !before || removable / before < MIN_REDUCTION || removable / CHARS_PER_TOKEN < OWN_MIN_GAIN * window;
-    // The delivered messages can only make this worse (they add to `before`, their envelopes come off
-    // `removable`), so a transcript that fails here needs no API read, which may hold the turn for HOST_MS.
-    if (tooSmall()) return result;
-    // Messages delivered during a tool turn are in the API form only; decide counts them, so the
-    // preflight does too (else it could ask for a compaction that decide hands back to the summary).
-    const apiRead = await withDeadline($, Promise.resolve().then(() => $.session.messages({ as: 'api' })), HOST_MS);
-    // A read that timed out or failed leaves the delivered text unknown: decide could hand a large one
-    // back to the summary, so the preflight does not ask.
-    if (!('value' in apiRead)) return result;
-    const api = apiFormOf(apiRead.value);
-    const delivered = queuedOf(messages, api);
-    if (delivered) {
-      for (const blocks of delivered.rows.values()) before += rawChars(blocks);
-      removable -= envelopeChars(messages, delivered.rows, candidates);
-    }
-    if (tooSmall()) return result;
+    const before = messages.reduce((s, m) => s + messageChars(m), 0);
+    const removable = removableChars(findCandidates(messages, cfg.privatePaths));
+    if (!before || removable / before < MIN_REDUCTION || removable / CHARS_PER_TOKEN < OWN_MIN_GAIN * window) return result;
     let reason;
     let detailText = '';
     try {
