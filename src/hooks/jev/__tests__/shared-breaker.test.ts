@@ -7,7 +7,7 @@ import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { JevClientError, queryJev } from '../client.js';
 import { resetJevResolverState, resolveJudgment } from '../resolver.js';
 import type { JevQuestions } from '../types.js';
@@ -217,6 +217,24 @@ describe('resolveJudgment with the shared breaker', () => {
     expect(await judge(fetchFn)).toEqual({ answer: TWIN, source: 'twin', mode: 'cap' });
     expect(count()).toBe(1);
     expect(rows().pop()).toMatchObject({ mode: 'cap', reason: 'rpm', priority: 'high', rpm: { count: 1, threshold: 1, limit: 1 } });
+  });
+
+  it('retry_s of a failure with an HTTP-date Retry-After is the pause the breaker was told, not one read again later', async () => {
+    process.env.OMC_JEV_BREAKER = '1';
+    const start = Date.now();
+    const realNow = Date.now;
+    let ticks = 0;
+    // A clock that moves a second on every read: reading the date again at log time gives a shorter pause.
+    const now = vi.spyOn(Date, 'now').mockImplementation(() => start + 1000 * (ticks += 1));
+    try {
+      await judge(counting(() => failed(429, new Date(start + 600_000).toUTCString())).fetchFn);
+    } finally {
+      now.mockRestore();
+    }
+    expect(Date.now).toBe(realNow);
+    const state = JSON.parse(readFileSync(join(dir, 'breaker', readdirSync(join(dir, 'breaker'))[0], 'breaker.json'), 'utf8')) as { since: number; until: number };
+    const row = rows().pop() as { error: { retry_s: number } };
+    expect(row.error.retry_s).toBe((state.until - state.since) / 1000);
   });
 
   it('a failed call logs why it failed; under OMC_JEV_MAX_RPM also the minute count against the limit; without the variables nothing is added', async () => {

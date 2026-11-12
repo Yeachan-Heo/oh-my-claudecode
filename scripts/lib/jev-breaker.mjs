@@ -618,7 +618,9 @@ export function classifyFailure(failure, now = Date.now()) {
 
 /**
  * Extra shadow-log fields of a failed request (the failure as passed to
- * classifyFailure; `granted` is the count admitRequest returned for it):
+ * classifyFailure; `granted` is the count admitRequest returned for it;
+ * `classified` is the classifyFailure result the breaker was told, so `retry_s`
+ * is that very pause and not one read again at log time):
  * - `error` {status, kind, retry_s?}: the HTTP status (null without a
  *   response) and the kind, the same name as the breaker reason ("http-<status>",
  *   "no-response"). `retry_s` is the pause the failure calls for, given only
@@ -630,12 +632,12 @@ export function classifyFailure(failure, now = Date.now()) {
  *   a 429: it shows at what count 429s arrive.
  * Empty for a failure that is neither an HTTP status nor a missing response.
  */
-export function failureLogFields(settings, failure, granted) {
+export function failureLogFields(settings, failure, granted, classified) {
   try {
     const status = Number.isInteger(failure?.status) ? failure.status : undefined;
     let error;
     if (status !== undefined) {
-      const seconds = settings?.breaker ? classifyFailure(failure)?.seconds : undefined;
+      const seconds = settings?.breaker ? (classified ?? classifyFailure(failure))?.seconds : undefined;
       error = { status, kind: "http-" + status, ...(seconds !== undefined ? { retry_s: seconds } : {}) };
     } else if (failure?.noResponse) {
       error = { status: null, kind: "no-response" };

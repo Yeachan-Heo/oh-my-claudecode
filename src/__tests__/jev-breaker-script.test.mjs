@@ -206,6 +206,17 @@ describe('jev-breaker library', () => {
     expect(failureLogFields(both, { status: 429 }, undefined)).toEqual({ error: { status: 429, kind: 'http-429', retry_s: 60 } }); // admission gave no count (state unusable): left out
   });
 
+  it('logs the pause the breaker was told when given its classification, not one read again at log time', () => {
+    const classifiedAt = Date.parse('2026-11-09T12:00:00Z');
+    const failure = { status: 429, retryAfter: new Date(classifiedAt + 90_000).toUTCString() };
+    const classified = classifyFailure(failure, classifiedAt);
+    const plain = settingsFor(jevEnv({ OMC_JEV_BREAKER: '1' }));
+    expect(classified.seconds).toBe(90);
+    // Without it the date is read against the clock of the log call (here: long past the date, so the minimum).
+    expect(failureLogFields(plain, failure, undefined).error.retry_s).toBe(1);
+    expect(failureLogFields(plain, failure, undefined, classified).error.retry_s).toBe(90);
+  });
+
   it('honors Retry-After in seconds or as an HTTP date, capped at 30 minutes', () => {
     const now = Date.parse('2026-11-09T12:00:00Z');
     expect(classifyFailure({ status: 429, retryAfter: '178' }, now).seconds).toBe(178);

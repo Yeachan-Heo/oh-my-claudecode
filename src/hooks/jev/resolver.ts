@@ -378,20 +378,24 @@ export async function resolveJudgment<T>(resolveJudgmentArgs: ResolveJudgmentArg
           : {}),
       }) };
     } catch (error) {
+      // Classified once: the log reports the same pause the breaker was told (an HTTP-date Retry-After
+      // would give a shorter one if read again later).
+      const failureClass = shared && error instanceof JevClientError ? shared.breaker.classifyFailure(error) : undefined;
       if (shared && error instanceof JevClientError) {
-        shared.breaker.recordFailure(shared.settings, shared.breaker.classifyFailure(error));
+        shared.breaker.recordFailure(shared.settings, failureClass);
       }
       return {
         ok: false as const,
         error: error instanceof Error ? error.message : String(error),
         failure: error instanceof JevClientError ? error : undefined,
+        failureClass,
       };
     }
   })();
 
   // Under the shared breaker or limit a failed call logs why it failed.
-  const failureFields = (failure: JevClientError | undefined) =>
-    shared && failure ? shared.breaker.failureLogFields(shared.settings, failure, granted) : {};
+  const failureFields = (failure: JevClientError | undefined, failureClass: JevBreaker.FailureClass | undefined) =>
+    shared && failure ? shared.breaker.failureLogFields(shared.settings, failure, granted, failureClass) : {};
 
   // Non-blocking (detector-type) in shadow mode: return the twin now; log when Jev settles.
   if (mode === 'shadow' && args.blocking === false) {
@@ -403,7 +407,7 @@ export async function resolveJudgment<T>(resolveJudgmentArgs: ResolveJudgmentArg
         void writeShadowLog(buildLogEntry(args.point, boundedState, startedAt, 'shadow', loggableHeuristic, outcome.response, args.questions, logFields), config);
       } else {
         recordFailure(args.point);
-        void writeShadowLog(buildLogEntry(args.point, boundedState, startedAt, 'degraded', loggableHeuristic, null, args.questions, logFields, failureFields(outcome.failure)), config);
+        void writeShadowLog(buildLogEntry(args.point, boundedState, startedAt, 'degraded', loggableHeuristic, null, args.questions, logFields, failureFields(outcome.failure, outcome.failureClass)), config);
       }
       // Belt-and-braces: a future throw in this callback must never become an
       // unhandled rejection that kills a one-shot hook process.
@@ -419,7 +423,7 @@ export async function resolveJudgment<T>(resolveJudgmentArgs: ResolveJudgmentArg
     const outcome = await attempt;
     if (!outcome.ok) {
       recordFailure(args.point);
-      await writeShadowLog(buildLogEntry(args.point, boundedState, startedAt, 'degraded', loggableHeuristic, null, args.questions, logFields, failureFields(outcome.failure)), config);
+      await writeShadowLog(buildLogEntry(args.point, boundedState, startedAt, 'degraded', loggableHeuristic, null, args.questions, logFields, failureFields(outcome.failure, outcome.failureClass)), config);
       return { answer: heuristic, source: 'twin', mode: 'degraded' };
     }
     recordSuccess(args.point);
@@ -435,7 +439,7 @@ export async function resolveJudgment<T>(resolveJudgmentArgs: ResolveJudgmentArg
     console.error('[jev] ' + args.point + ': degraded - ' + outcome.error);
     const heuristic = twinAnswer();
     const loggableHeuristic = extractHeuristicForLogging(heuristic, args.questions, args.mapHeuristic, args.questionSet);
-    await writeShadowLog(buildLogEntry(args.point, boundedState, startedAt, 'degraded', loggableHeuristic, null, args.questions, logFields, failureFields(outcome.failure)), config);
+    await writeShadowLog(buildLogEntry(args.point, boundedState, startedAt, 'degraded', loggableHeuristic, null, args.questions, logFields, failureFields(outcome.failure, outcome.failureClass)), config);
     return { answer: heuristic, source: 'twin', mode: 'degraded' };
   }
 

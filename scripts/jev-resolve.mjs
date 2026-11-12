@@ -625,9 +625,8 @@ export async function resolveRequest(
   }
   const durationMs = Date.now() - startedAt;
   // Tell the breaker before the log write, so concurrent callers see it at once.
-  const opened = guard && failure
-    ? guard.breaker.recordFailure(guard.settings, guard.breaker.classifyFailure(failure))
-    : undefined;
+  const failureClass = guard && failure ? guard.breaker.classifyFailure(failure) : undefined;
+  const opened = guard && failure ? guard.breaker.recordFailure(guard.settings, failureClass) : undefined;
   await writeShadowLog(
     {
       ts: new Date().toISOString(),
@@ -641,7 +640,7 @@ export async function resolveRequest(
       confidence: logContext ? firstOnly?.confidence : confidence,
       durationMs,
       // Under the shared breaker or limit a failed request says why it failed (and the minute's count against the limit).
-      ...(guard && failure ? guard.breaker.failureLogFields(guard.settings, failure, granted) : {}),
+      ...(guard && failure ? guard.breaker.failureLogFields(guard.settings, failure, granted, failureClass) : {}),
       ...(request.tool_use_id ? { tool_use_id: request.tool_use_id } : {}),
     },
     await logDirFor(env),
