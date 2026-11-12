@@ -1001,8 +1001,8 @@ export function maskSecrets(text) {
   // The private key block, the pairs and the named values run first: a pair value holding a key block is masked as a block, and the
   // word rules do not break the opening of a value that the named rule reads whole.
   return maskNamedValues(String(text ?? '').replace(/(-{4,5} ?BEGIN +(?:[A-Z0-9]+(?: +|-))*PRIVATE KEY(?: BLOCK)? ?-{4,5})[\s\S]*?(-{4,5} ?END +(?:[A-Z0-9]+(?: +|-))*PRIVATE KEY(?: BLOCK)? ?-{4,5}|$)/g, '$1***'))
-    .replace(/((?:api[_-]?key|access[_-]?key|client[_-]?secret|private[_-]?key|password|passwd|token|secret|has(?:[łl]|\\+u014[12])o|klucz|sekret|passwort|kennwort|contrase(?:[ñn]|ñ|n\\+u0303|\\+u00d1|\\+u00f1)a)(?:\\*["'])?\s*[:=]\s*(?:\\*["'])?(?:(?:bearer|basic)[ \t]+)?)(?:[^\s"'&;|,}\\]|\\(?!["']))+/gi, '$1***')
     .replace(/(\/\/[^/\s:@]+:)[^/\s@]+@/g, '$1***@')
+    .replace(/((?:api[_-]?key|access[_-]?key|client[_-]?secret|private[_-]?key|password|passwd|token|secret|has(?:[łl]|\\+u014[12])o|klucz|sekret|passwort|kennwort|contrase(?:[ñn]|ñ|n\\+u0303|\\+u00d1|\\+u00f1)a)(?:\\*["'])?\s*[:=]\s*(?:\\*["'])?(?:(?:bearer|basic)[ \t]+)?)(?:[^\s"'&;|,}\\]|\\(?!["']))+/gi, '$1***')
     .replace(/((?:authorization|proxy-authorization)\s*:\s*(?:(?:bearer|basic|token)\s*)?)[^\s"']+/gi, '$1***')
     .replace(/((?:set-)?cookie\s*:\s*)[^\r\n"']+/gi, '$1***')
     .replace(/\b(bearer\s+)[A-Za-z0-9._~+/=-]{8,}/gi, '$1***')

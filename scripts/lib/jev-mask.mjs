@@ -16,8 +16,8 @@
 export function maskSecrets(text, { keepGitHashes = false } = {}) {
   // The structured rules run first, so that the word rules do not break the opening of a value that they read whole.
   return maskNamedValues(maskPrivateKeys(text))
-    .replace(/((?:api[_-]?key|access[_-]?key|client[_-]?secret|private[_-]?key|password|passwd|token|secret|has(?:[łl]|\\+u014[12])o|klucz|sekret|passwort|kennwort|contrase(?:[ñn]|ñ|n\\+u0303|\\+u00d1|\\+u00f1)a)(?:\\*["'])?\s*[:=]\s*(?:\\*["'])?(?:(?:bearer|basic)[ \t]+)?)(?:[^\s"'&;|,}\\]|\\(?!["']))+/gi, '$1***')
     .replace(/(\/\/[^/\s:@]+:)[^/\s@]+@/g, '$1***@')
+    .replace(/((?:api[_-]?key|access[_-]?key|client[_-]?secret|private[_-]?key|password|passwd|token|secret|has(?:[łl]|\\+u014[12])o|klucz|sekret|passwort|kennwort|contrase(?:[ñn]|ñ|n\\+u0303|\\+u00d1|\\+u00f1)a)(?:\\*["'])?\s*[:=]\s*(?:\\*["'])?(?:(?:bearer|basic)[ \t]+)?)(?:[^\s"'&;|,}\\]|\\(?!["']))+/gi, '$1***')
     .replace(/((?:authorization|proxy-authorization)\s*:\s*(?:(?:bearer|basic|token)\s*)?)[^\s"']+/gi, '$1***')
     .replace(/((?:set-)?cookie\s*:\s*)[^\r\n"']+/gi, '$1***')
     .replace(/\b(bearer\s+)[A-Za-z0-9._~+/=-]{8,}/gi, '$1***')
