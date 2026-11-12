@@ -134,6 +134,8 @@ const COMMANDS = [
   'Please proceed (do use autopilot to fix the parser)',
   // Polite request inside parens
   'Please proceed (could you use autopilot to fix this)',
+  // Status line with non-question parentheses (unit is not a question)
+  'autopilot run failed (unit) tests',
 ];
 
 const NON_COMMANDS = [
@@ -202,8 +204,8 @@ const NON_COMMANDS = [
   'Can autopilot fix this bug?',
   'Does autopilot fix the parser',
   `${'autopilot explain how it works?\n'.repeat(21)}`,
-  'Do not use autopilot \u2014 the r\u00e9sum\u00e9 forbids it',
-  'Never run autopilot for Ren\u00e9',
+  'Do not use autopilot — the résumé forbids it',
+  'Never run autopilot for René',
   'Yesterday autopilot test passed',
   'Fix the cron first.\nautopilot: currently idle',
   'Fix the cron first.\nautopilot: ready for a task',
@@ -213,6 +215,8 @@ const NON_COMMANDS = [
   'The autopilot run failed (could you check the logs)',
   // Parenthesized clause tests: keyword inside a true question
   'One question (should I use autopilot for this)',
+  // Smart quotes in dialogue should not activate
+  '"Should I use autopilot to fix this" she asked; fix this later',
 ];
 
 describe('autopilot command policy parity across the three detector copies', () => {
