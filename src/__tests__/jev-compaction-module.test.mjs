@@ -2491,6 +2491,21 @@ describe('jev-compaction module: pasted text (OMC_JEV_COMPACT_PASTES)', () => {
     expect(run.out.messages).toHaveLength(off.out.messages.length);
   });
 
+  it('works next to the result archive: both switches on, the archive holds the cut results, the pasted tag moves, the two directories stay apart', async () => {
+    const inner = `${filler('alpha', 1500)}${filler('omega', 1500)}`;
+    const report = tag(inner);
+    const messages = withPastes([`${OUTSIDE} ${report} Thanks, that is all.`]);
+    const pastesOnly = await compactPastes(messages);
+    const both = await compactPastes(messages, { env: { ...PASTES, OMC_JEV_COMPACT_ARCHIVE: 'active' } });
+    expect(both.written).toEqual(pastesOnly.written);
+    expect(both.record.pastes).toMatchObject({ moved: 1, installed: true });
+    expect(both.record.archive_written).toBeGreaterThan(0);
+    const archived = [...both.files.keys()].filter((path) => path.startsWith(`${STATE}/compaction-archive/`) && !path.endsWith('/.compaction'));
+    expect(archived).toHaveLength(both.record.archive_written);
+    expect(archived.some((path) => path.startsWith(`${STATE}/compaction-pastes/`))).toBe(false);
+    expect(userRow(both.out, OUTSIDE).text).toBe(userRow(pastesOnly.out, OUTSIDE).text);
+  });
+
   it.each([
     ['below the bar', 0.79],
     ['no', 0.1],
