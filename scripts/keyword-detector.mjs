@@ -1151,17 +1151,32 @@ function hasExplicitAutopilotInvocationContext(text, position, keywordLength, ke
   // This handles cases like "The autopilot run failed (could you check the logs)" which should not activate.
   if (/^[ \t]+(?:run|test|build|deploy|check)[ \t]+(?:failed|passed|succeeded|completed|crashed|errored|hung)(?![\p{L}\d])[ \t]*\(/iu.test(afterKeyword)) return false;
   // Check for a parenthesized question at the end of the sentence: "One question (should I use ...)"
-  // But preserve polite requests inside parentheses: "Please proceed (could you use autopilot)"
+  // But only reject if the keyword is INSIDE that parenthesized clause AND it's a true question.
+  // "autopilot fix the parser (why it fails)" activates because the keyword is outside the parens.
+  // "Please do the following (use autopilot to replace ? with ! in the template)" activates because
+  // the parenthesized clause is not a true question (? is an example character, not sentence-final).
   const sentenceText = text.slice(lineStart, lineEnd).replace(/\s+$/, '');
   if (sentenceText.endsWith(')')) {
     const parenStart = sentenceText.lastIndexOf('(');
     if (parenStart >= 0) {
       const parenContent = sentenceText.slice(parenStart + 1, -1);
-      // Preserve polite-request exemptions: AUTOPILOT_REQUEST_START already exempts "can/could/would/will you"
-      if (AUTOPILOT_REQUEST_START.test('(' + parenContent)) return true; // Polite request activates
-      // Check if the parenthesized content is a question (starts with a question word or contains ?)
-      if (AUTOPILOT_QUESTION_START.test('(' + parenContent) || /\?/.test(parenContent)) {
-        return false;
+      // Calculate if the keyword is inside the parenthesized clause.
+      // position is in the full text, lineStart is where the line begins.
+      // parenStart is the index within sentenceText (which starts at lineStart).
+      const keywordStartInSentence = position - lineStart;
+      const keywordEndInSentence = keywordStartInSentence + keywordLength;
+      const keywordInsideParens = keywordStartInSentence > parenStart && keywordEndInSentence < sentenceText.length - 1;
+      
+      if (keywordInsideParens) {
+        // Preserve polite-request exemptions: AUTOPILOT_REQUEST_START already exempts "can/could/would/will you"
+        if (AUTOPILOT_REQUEST_START.test('(' + parenContent)) return true; // Polite request activates
+        // A true question is one that ends with '?' immediately before ')' OR starts with question/auxiliary word.
+        // Note: AUTOPILOT_QUESTION_START already excludes "do use/check/fix..." which are imperatives.
+        const endsWithQuestion = /\?[ \t]*$/.test(parenContent);
+        const startsWithQuestion = AUTOPILOT_QUESTION_START.test('(' + parenContent);
+        if (endsWithQuestion || startsWithQuestion) {
+          return false; // Reject: keyword is in a true question
+        }
       }
     }
   }
