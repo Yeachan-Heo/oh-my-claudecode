@@ -1083,7 +1083,8 @@ const AUTOPILOT_NEGATION_BEFORE = /(?<![\p{L}\d])(?:(?:don|doesn|didn|shouldn|co
 // Quotes, emphasis marks and brackets right before the alias do not change what a negation governs.
 const AUTOPILOT_OPENING_DELIMITERS_AT_END = /["'“”‘’`*_([{<]+$/;
 // A sentence that starts with a question or auxiliary word asks; "can/could/would/will you ..." is a request.
-const AUTOPILOT_QUESTION_START = /^[ \t]*(?:[-*+>#]+[ \t]+|\d+[.)][ \t]+|\[[ xX]\][ \t]+|["'“‘([*_`])*(?!(?:can|could|would|will)\s+you(?![\p{L}\d]))(?!do\s+not(?![\p{L}\d]))(?:did|does|do|is|are|was|were|has|have|had|can|could|should|would|will|may|might|must|shall|what|why|how|when|where|who|which)(?![\p{L}\d])/iu;
+// Imperative "do use" / "do run" / "do start" (only activation verbs, not commands like test/fix) is not a question.
+const AUTOPILOT_QUESTION_START = /^[ \t]*(?:[-*+>#]+[ \t]+|\d+[.)][ \t]+|\[[ xX]\][ \t]+|["'“‘([*_`])*(?!(?:can|could|would|will)\s+you(?![\p{L}\d]))(?!do\s+not(?![\p{L}\d]))(?!do\s+(?:use|run|start|enable|activate|invoke|trigger|launch|engage|initiate|begin|kick\s+off|fire\s+up|spin\s+up|turn\s+on|switch\s+to|go(?:\s+with|\s+for)?|set)\s)(?:did|does|do|is|are|was|were|has|have|had|can|could|should|would|will|may|might|must|shall|what|why|how|when|where|who|which)(?![\p{L}\d])/iu;
 // The polite request "can/could/would/will you ..." keeps its question mark without being a question.
 const AUTOPILOT_REQUEST_START = /^[ \t]*(?:[-*+>#]+[ \t]+|\d+[.)][ \t]+|\[[ xX]\][ \t]+|["'“‘([*_`])*(?:please[ ,]+)?(?:can|could|would|will)\s+you(?![\p{L}\d])/iu;
 const AUTOPILOT_SENTENCE_END = /(?<=\S)[.!?][)\]}"'*_\u201D\u2019]*(?=\s|$)/g;
@@ -1101,14 +1102,16 @@ const AUTOPILOT_NON_ENGLISH_LINE = /[\p{Script=Hangul}\p{Script=Hiragana}\p{Scri
 // Imperative "use / start" in the common ASCII-only languages (Spanish, French, German, Italian, Portuguese).
 const AUTOPILOT_FOREIGN_VERB_BEFORE = /(?<![\p{L}\d])(?:usa|usar|utiliza|utilizar|activa|activar|ejecuta|ejecutar|inicia|iniciar|lanza|utilise|utiliser|active|lance|lancer|nutze|nutzen|benutze|verwende|starte|aktiviere|attiva|avvia|ative|inicie|execute)\s+(?:(?:el|la|le|il|der|die|das)\s+)?$/iu;
 // The activation phrase directly before the alias: an activation verb, or please / let's / I want, optionally
-// followed by a verb, then an optional the/a/my/our/your.
-const AUTOPILOT_ACTIVATION_BEFORE = /(?<![\p{L}\d])(?:(?:please|let['’]?s|i\s+(?:want|need|would\s+like)(?:\s+to)?)\s+(?:(?:use|run|start|enable|activate|invoke|trigger|launch|engage|initiate|begin|kick\s+off|fire\s+up|spin\s+up|turn\s+on|switch\s+to|go(?:\s+with|\s+for)?|set)\s+)?|(?:use|run|start|enable|activate|invoke|trigger|launch|engage|initiate|begin|kick\s+off|fire\s+up|spin\s+up|turn\s+on|switch\s+to|go(?:\s+with|\s+for)?|set)\s+)(?:(?:the|a|my|our|your)\s+)?$/iu;
+// followed by a verb, then an optional the/a/my/our/your. Allow commas after please ("please, use").
+const AUTOPILOT_ACTIVATION_BEFORE = /(?<![\p{L}\d])(?:(?:please|let['']?s|i\s+(?:want|need|would\s+like)(?:\s+to)?)[\s,]+(?:(?:use|run|start|enable|activate|invoke|trigger|launch|engage|initiate|begin|kick\s+off|fire\s+up|spin\s+up|turn\s+on|switch\s+to|go(?:\s+with|\s+for)?|set)\s+)?|(?:use|run|start|enable|activate|invoke|trigger|launch|engage|initiate|begin|kick\s+off|fire\s+up|spin\s+up|turn\s+on|switch\s+to|go(?:\s+with|\s+for)?|set)\s+)(?:(?:the|a|my|our|your)\s+)?$/iu;
 // "do not stop using autopilot" asks to keep it running, so the negation does not cancel it.
 const AUTOPILOT_KEEP_USING_BEFORE = /(?<![\p{L}\d])(?:don['’]?t|do\s+not|never)\s+(?:ever\s+)?(?:stop|quit)\s+using\s+$/iu;
 // The separable form "turn autopilot on" / "switch autopilot on": "turn" or "switch" before the alias and "on" right after it.
 const AUTOPILOT_TURN_BEFORE = /(?<![\p{L}\d])(?:turn|switch)\s+(?:the\s+|a\s+|my\s+|our\s+|your\s+)?$/iu;
 const AUTOPILOT_ON_AFTER = /^[ \t]+on(?![\p{L}\d])/iu;
 const AUTOPILOT_NAMESPACE_PREFIX = /^\s*\/?(?:oh-my-(?:claudecode|codex)|omc):\s*$/i;
+// Thematic break: a line with only dashes, underscores, or asterisks (with optional spaces).
+const AUTOPILOT_THEMATIC_BREAK = /^[ \t]*(?:(?:[-_*])[ \t]*){3,}$/;
 const AUTOPILOT_MAX_MATCHES = 1000;
 // The costly informational check sees this many characters on each side of a mention, so its cost does not grow
 // with the prompt length.
@@ -1138,9 +1141,46 @@ function hasExplicitAutopilotInvocationContext(text, position, keywordLength, ke
   const afterEnd = sentenceEnd === null ? '' : text.slice(sentenceEnd.index + sentenceEnd[0].length, lineEnd);
   const nestedQuestion = sentenceEnd !== null
     && ((sentenceEnd[0].length > 1 && !/^[ \t]*$/.test(afterEnd)) || /^[ \t]+\p{Ll}/u.test(afterEnd));
-  if (sentenceEnd && sentenceEnd.index < lineEnd && sentenceEnd[0][0] === '?' && !nestedQuestion && !AUTOPILOT_REQUEST_START.test(clauseHead)) return false;
+  if (sentenceEnd && sentenceEnd.index < lineEnd && sentenceEnd[0][0] === '?' && !nestedQuestion && !AUTOPILOT_REQUEST_START.test(clauseHead) && !AUTOPILOT_ACTIVATION_BEFORE.test(tail)) return false;
+  // Check for negation first, before the polite-request exemption:
+  // "Do not use autopilot (could you check the logs)" should not activate despite the polite request in parentheses.
   if (AUTOPILOT_NEGATION_BEFORE.test(tail) || AUTOPILOT_NEGATION_BEFORE.test(tail.replace(AUTOPILOT_OPENING_DELIMITERS_AT_END, ''))) return false;
+  // Check for reference labels before the polite-request exemption.
   if (AUTOPILOT_REFERENCE_LABEL_LINE.test(lineHead.replace(AUTOPILOT_MARKDOWN_MARKS, '').replace(AUTOPILOT_LIST_PREFIX, '').replace(/\s+$/, ''))) return false;
+  // Check for status verb + status result followed by parentheses containing reason/question keywords
+  // This handles cases like "The autopilot run failed (could you check the logs)" which should not activate.
+  // But allows "autopilot run failed (unit) tests" where (unit) is just a descriptor.
+  if (/^[ \t]+(?:run|test|build|deploy|check)[ \t]+(?:failed|passed|succeeded|completed|crashed|errored|hung)(?![\p{L}\d])[ \t]*\([^)]*(?:could|would|check|why|what|logs|error|reason|because)\s*\)/iu.test(afterKeyword)) return false;
+  // Check for a parenthesized question at the end of the sentence: "One question (should I use ...)"
+  // But only reject if the keyword is INSIDE that parenthesized clause AND it's a true question.
+  // "autopilot fix the parser (why it fails)" activates because the keyword is outside the parens.
+  // "Please do the following (use autopilot to replace ? with ! in the template)" activates because
+  // the parenthesized clause is not a true question (? is an example character, not sentence-final).
+  const sentenceText = text.slice(lineStart, lineEnd).replace(/\s+$/, '');
+  if (sentenceText.endsWith(')')) {
+    const parenStart = sentenceText.lastIndexOf('(');
+    if (parenStart >= 0) {
+      const parenContent = sentenceText.slice(parenStart + 1, -1);
+      // Calculate if the keyword is inside the parenthesized clause.
+      // position is in the full text, lineStart is where the line begins.
+      // parenStart is the index within sentenceText (which starts at lineStart).
+      const keywordStartInSentence = position - lineStart;
+      const keywordEndInSentence = keywordStartInSentence + keywordLength;
+      const keywordInsideParens = keywordStartInSentence > parenStart && keywordEndInSentence < sentenceText.length - 1;
+      
+      if (keywordInsideParens) {
+        // Preserve polite-request exemptions: AUTOPILOT_REQUEST_START already exempts "can/could/would/will you"
+        if (AUTOPILOT_REQUEST_START.test('(' + parenContent)) return true; // Polite request activates
+        // A true question is one that ends with '?' immediately before ')' OR starts with question/auxiliary word.
+        // Note: AUTOPILOT_QUESTION_START already excludes "do use/check/fix..." which are imperatives.
+        const endsWithQuestion = /\?[ \t]*$/.test(parenContent);
+        const startsWithQuestion = AUTOPILOT_QUESTION_START.test('(' + parenContent);
+        if (endsWithQuestion || startsWithQuestion) {
+          return false; // Reject: keyword is in a true question
+        }
+      }
+    }
+  }
   if (AUTOPILOT_NON_ENGLISH_LINE.test(text.slice(lineStart, Math.min(lineEnd, lineStart + 400)))) return true;
   const isHardwareAlias = /^(?:full\s*auto|fullsend)$/i.test((keywordText || '').trim());
   if (leadingPrefix) {
@@ -1187,7 +1227,7 @@ function hasActionableAutopilotKeyword(text, pattern) {
     // earlier line does not veto it; every other mention is judged on a bounded window around it.
     const { start: lineStart, end: lineEnd } = getLineBounds(searchText, match.index);
     let previousLine = '';
-    for (let end = lineStart - 1; end > 0 && !previousLine.trim();) {
+    for (let end = lineStart - 1; end > 0 && (!previousLine.trim() || AUTOPILOT_THEMATIC_BREAK.test(previousLine));) {
       const start = searchText.lastIndexOf('\n', end - 1) + 1;
       previousLine = searchText.slice(start, end);
       end = start - 1;

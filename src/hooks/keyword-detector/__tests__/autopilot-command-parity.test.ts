@@ -104,8 +104,10 @@ const COMMANDS = [
   'Intro\n/autopilot fix this?',
   'Can you use autopilot to fix this?',
   'Could you please use autopilot to fix the parser?',
+  'Could you, please, use autopilot to fix this?',
   'Please use my autopilot to fix this',
   'turn my autopilot on',
+  'Please proceed (could you use autopilot to fix this)',
   'Fix the cron first.\nautopilot re-run the tests',
   'Fix the cron first.\nautopilot double-check the result',
   'Fix the cron first.\nautopilot check status',
@@ -123,6 +125,17 @@ const COMMANDS = [
   'How do I use autopilot?\n/oh-my-claudecode:autopilot fix the bug',
   `${'How do I use autopilot?\n'.repeat(25)}/oh-my-claudecode:autopilot fix the bug`,
   `${'please autopilot? what is it?\n'.repeat(25)}Then do the work.\n$autopilot fix the bug`,
+  // Parenthesized clause tests: keyword outside parens
+  'autopilot fix the parser (why it fails)',
+  'Use autopilot to implement error handling (what to do on timeout)',
+  // Parenthesized clause tests: keyword inside but not a question
+  'Please do the following (use autopilot to replace ? with ! in the template)',
+  // Imperative do use inside parens
+  'Please proceed (do use autopilot to fix the parser)',
+  // Polite request inside parens
+  'Please proceed (could you use autopilot to fix this)',
+  // Status line with non-question parentheses (unit is not a question)
+  'autopilot run failed (unit) tests',
 ];
 
 const NON_COMMANDS = [
@@ -179,6 +192,11 @@ const NON_COMMANDS = [
   '**Must I use autopilot**',
   '- Must I use autopilot',
   'Documentation:\nautopilot fix the parser',
+  'One question (should I use autopilot for this)',
+  'Should I use autopilot for this?',
+  'Please proceed (could you not use autopilot to fix this)',
+  'Do not use autopilot (could you check the logs)',
+  'Docs:\n---\nautopilot fix parser',
   'autopilot: stuck during step 3',
   'autopilot: hung on step 3',
   'Camera specs:\nfull auto multi-shot mode',
@@ -186,12 +204,24 @@ const NON_COMMANDS = [
   'Can autopilot fix this bug?',
   'Does autopilot fix the parser',
   `${'autopilot explain how it works?\n'.repeat(21)}`,
-  'Do not use autopilot \u2014 the r\u00e9sum\u00e9 forbids it',
-  'Never run autopilot for Ren\u00e9',
+  'Do not use autopilot — the résumé forbids it',
+  'Never run autopilot for René',
   'Yesterday autopilot test passed',
   'Fix the cron first.\nautopilot: currently idle',
   'Fix the cron first.\nautopilot: ready for a task',
   'Fix the cron first.\nautopilot: no task assigned',
+  'Please proceed (could you not use autopilot to fix this)',
+  'Do not use autopilot (could you check the logs)',
+  'The autopilot run failed (could you check the logs)',
+  // Parenthesized clause tests: keyword inside a true question
+  'One question (should I use autopilot for this)',
+  // Smart quotes in dialogue should not activate
+  '"Should I use autopilot to fix this" she asked; fix this later',
+  '“Should I use autopilot to fix this” she asked; fix this later',
+  '‘Should I use autopilot to fix this’ she asked; fix this later',
+  // Regression: "do" + noun + "use autopilot" should be a question, not an imperative
+  'Do test runs use autopilot',
+  'Do build jobs use autopilot',
 ];
 
 describe('autopilot command policy parity across the three detector copies', () => {

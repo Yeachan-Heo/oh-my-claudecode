@@ -1714,13 +1714,34 @@ describe.each([
     'Here is the task:\nautopilot: deploy the app',
     'Here is the spec: a todo CLI with tests.\n\n/oh-my-claudecode:autopilot',
     'Here is the spec: a todo CLI with tests.\n\n/omc:autopilot add tests',
+    'Please proceed (could you use autopilot to fix this)',
   ])('still activates autopilot for a command: %j', (prompt) => {
     expect(autopilotActivated(prompt)).toBe(true);
+  });
+
+  it.each([
+    'Please proceed (could you not use autopilot to fix this)',
+    'Do not use autopilot (could you check the logs)',
+    'The autopilot run failed (could you check the logs)',
+  ])('does not activate autopilot when negation or status overrides polite request in parentheses: %j', (prompt) => {
+    expect(autopilotActivated(prompt)).toBe(false);
   });
 
   it('still activates autopilot for a command that follows many pasted mentions', () => {
     const logs = Array.from({ length: 60 }, (_, i) => `step ${i} autopilot ok`).join('\n');
     expect(autopilotActivated(`${logs}\nplease use autopilot to fix this`)).toBe(true);
+  });
+
+  it('activates autopilot for polite request with comma-separated please', () => {
+    expect(autopilotActivated('Could you, please, use autopilot to fix this?')).toBe(true);
+  });
+
+  it('activates autopilot for polite request with parenthesized imperative', () => {
+    expect(autopilotActivated('Please proceed (do use autopilot to fix the parser)')).toBe(true);
+  });
+
+  it('activates autopilot for polite request with parenthesized auxiliary', () => {
+    expect(autopilotActivated('Please proceed (could you use autopilot to fix this)')).toBe(true);
   });
 
   it('arms no heavy mode from pasted text that mentions several of them', () => {
