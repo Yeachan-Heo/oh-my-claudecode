@@ -87,6 +87,12 @@ const COMMANDS = [
   'Task: fullsend: fix the parser',
   'Task: full auto: fix the parser',
   'build me an app for tracking habits',
+  'engage autopilot for this task',
+  'switch autopilot on for this repo',
+  'Proszę użyj autopilot, aby naprawić testy',
+  'Por favor usa autopilot para arreglar las pruebas',
+  'How do I use autopilot?\n/oh-my-claudecode:autopilot fix the bug',
+  `${'How do I use autopilot?\n'.repeat(25)}/oh-my-claudecode:autopilot fix the bug`,
   `${'please autopilot? what is it?\n'.repeat(25)}Then do the work.\n$autopilot fix the bug`,
 ];
 
@@ -110,6 +116,13 @@ const NON_COMMANDS = [
   'abc1234 autopilot test the thing',
   'The article compares ralph and autopilot workflows, and explains how they differ.',
   'Docs say "use autopilot" as an example.',
+  'Do not use "autopilot" for this task',
+  'Never run **autopilot** on production',
+  'CI reports autopilot build succeeded',
+  'Yesterday autopilot test passed',
+  'Fix the cron first.\nautopilot: currently idle',
+  'Fix the cron first.\nautopilot: ready for a task',
+  'Fix the cron first.\nautopilot: no task assigned',
 ];
 
 describe('autopilot command policy parity across the three detector copies', () => {
@@ -124,4 +137,11 @@ describe('autopilot command policy parity across the three detector copies', () 
     expect(hookActivatesAutopilot(SCRIPT_PATH, prompt)).toBe(false);
     expect(hookActivatesAutopilot(TEMPLATE_PATH, prompt)).toBe(false);
   }, 60000);
+
+  it('reports the earliest match when a creation phrase and an alias are both commands', () => {
+    const prompt = 'build me an app, then use autopilot to finish it';
+    const match = detectKeywordsWithType(prompt).find((m) => m.type === 'autopilot');
+    expect(match?.position).toBe(0);
+    expect(match?.keyword.toLowerCase()).toBe('build me an app');
+  });
 });
