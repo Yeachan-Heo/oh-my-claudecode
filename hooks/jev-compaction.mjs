@@ -1291,8 +1291,15 @@ function opaqueOf(text, envelopes = envelopesOf(text)) {
     const openers = [...text.matchAll(tag.open)].filter((o) => !inOpen(o.index));
     // Tags pair by nesting (a quote can quote another), as a stack; deeper than QUOTE_DEPTH_MAX they are text.
     const stack = [];
+    let over = 0; // openers skipped below a full stack: their closers are text too and pop nothing
     for (let i = 0, j = 0; j < free.length;) {
-      if (i < openers.length && openers[i].index < free[j]) { if (stack.length < QUOTE_DEPTH_MAX) stack.push(openers[i].index); i++; continue; }
+      if (i < openers.length && openers[i].index < free[j]) {
+        if (stack.length < QUOTE_DEPTH_MAX) stack.push(openers[i].index);
+        else over++;
+        i++;
+        continue;
+      }
+      if (over > 0) { over--; j++; continue; }
       const from = stack.pop();
       const to = free[j++] + tag.close.length;
       if (from !== undefined && tag.quote(text.slice(from, to))) found.push({ from, to });
