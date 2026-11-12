@@ -50,10 +50,10 @@ export function maskPrivateKeys(text) {
 }
 
 // A quote delimiter at escaping depth 0 (a plain quote), 1 (inside a JSON string: `\"`), 2 (shell-escaped before it went into the
-// JSON string: `\\\"`) or 3 (7 backslashes): a maximal run of backslashes whose length is 2^depth - 1 plus a multiple of 2^(depth + 1),
+// JSON string: `\\\"`), 3 (7 backslashes) and so on up to 7 (255 backslashes): a maximal run of backslashes whose length is 2^depth - 1 plus a multiple of 2^(depth + 1),
 // then the quote. Runs of other lengths are escaped quotes inside the string (the raw text has an odd run before its quote), so the
 // string body is every character that does not start a delimiter, and a scan stops at the next delimiter, which keeps the rules linear.
-const QUOTE_DEPTHS = [0, 1, 2, 3].map((depth) => String.raw`(?<!\\)(?:\\{${2 << depth}})*\\{${(1 << depth) - 1}}"`);
+const QUOTE_DEPTHS = [0, 1, 2, 3, 4, 5, 6, 7].map((depth) => String.raw`(?<!\\)(?:\\{${2 << depth}})*\\{${(1 << depth) - 1}}"`);
 const stringBody = (delim) => String.raw`(?:(?!${delim})[^\n])`;
 
 // `name: value` and `name=value` for the names of the list (open: another language is one more alternative); a quoted value is read to its
@@ -74,12 +74,15 @@ const NAMED_VALUE = new RegExp(
 // length cap and no cutoff in the number of fields, and each character is read a constant number of times.
 const PAIR_FORMS = QUOTE_DEPTHS.map((d) =>
   new RegExp(String.raw`${d}(${stringBody(d)}*)${d}\s*:\s*(${d}${stringBody(d)}*(?:${d})?|[^,{}\[\]\s"\\]+)`, 'g'));
-const secretPairName = (name) => /key|token|secret|passw|pwd|credential|^securestring$/i.test(name);
+// JSON `\uXXXX` escapes of the name are read first (`DB_PASS\u0057ORD`), with any number of backslashes before the u.
+const secretPairName = (name) =>
+  /key|token|secret|pass|pwd|credential|^securestring$/i.test(name.replace(/\\+u([0-9a-f]{4})/gi, (_, hex) => String.fromCharCode(parseInt(hex, 16))));
 
 function maskNamedValues(text) {
   let out = text;
   if (!out.includes('"')) return out;
-  for (const field of PAIR_FORMS) {
+  for (const [depth, field] of PAIR_FORMS.entries()) {
+    if (depth && !out.includes('\\'.repeat((1 << depth) - 1) + '"')) continue;
     const cuts = [];
     let group = [];
     const flush = () => {
