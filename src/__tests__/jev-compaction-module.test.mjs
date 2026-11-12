@@ -1756,6 +1756,30 @@ describe('jev-compaction module: active compaction', () => {
     }
   });
 
+  it('pairs wrapper closers before peeling sibling reminders: a wrapper closer inside a sibling reminder is not mistaken for the actual wrapper closer', async () => {
+    const keep = 'Please keep the result of notes-5.txt.';
+    const base = conversation(30);
+    // Reproduces Codex P2 PRRT_kwDOQ2bIec62z4g3: native notification wrapped by a system-reminder,
+    // then a sibling reminder whose body contains a closing tag </system-reminder> that the lastIndexOf
+    // algorithm might mistakenly think is a wrapper closer. With proper nesting-based pairing,
+    // the wrapper closing tag is found correctly.
+    const wrappedNotification = `<system-reminder>
+[SYSTEM NOTIFICATION - NOT USER INPUT]
+<task-notification>
+<result>Output:
+${framed('keep this result')}
+</result>
+</task-notification>
+</system-reminder>
+<system-reminder>
+Sibling reminder content: note that this ends with </system-reminder>`;
+    const rows = [...base.slice(0, -2), Object.freeze({ role: 'user', text: keep, toolUses: [], handle: 'hk' }), Object.freeze({ role: 'user', text: wrappedNotification, toolUses: [], handle: 'hw' }), ...base.slice(-2)];
+    const { calls } = await compactWithApi(rows, apiOf(rows));
+    // The user's instruction must stay in the task state
+    const task = calls.fetch[0].body.state.task;
+    expect(task).toEqual(['Task: review the notes and count the lines.', keep, 'Good, now sum up the NEEDED results.']);
+  });
+
   it('reads a result row full of unpaired or alternating plain reminder and task notification tags in linear time', async () => {
     const n = 40_000;
     for (const junk of ['<system-reminder'.repeat(n), '<system-reminder>'.repeat(n), '</system-reminder>'.repeat(n), '</system-reminder><system-reminder>'.repeat(n), '<system-reminder>x</system-reminder>'.repeat(n), '<task-notification'.repeat(n), '<task-notification>'.repeat(n), '</task-notification>'.repeat(n), '<task-notification>x</task-notification>'.repeat(n), '<task-notification>'.repeat(n) + '</task-notification>'.repeat(n), '<system-reminder>'.repeat(n) + '</system-reminder>'.repeat(n)]) {
