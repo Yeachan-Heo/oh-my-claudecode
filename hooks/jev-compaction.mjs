@@ -1285,7 +1285,9 @@ const unionOf = (list) => {
 function opaqueOf(text, envelopes = envelopesOf(text)) {
   const found = [];
   // A row that is one native notification (it opens with the tag, maybe after its marker line or reminders around
-  // it, and ends with the closing tag) is one quote whatever its result holds, an unbalanced tag included.
+  // it, and ends with the closing tag) is one quote whatever its result holds, an unbalanced tag included; not
+  // when its tags make two blocks side by side (a legacy row can hold a message of the user between them).
+  let nativeQuote;
   const native = NATIVE_NOTIFICATION.exec(text);
   if (native) {
     let tail = text.trimEnd();
@@ -1295,7 +1297,7 @@ function opaqueOf(text, envelopes = envelopesOf(text)) {
       if (gt < 0 || tail.slice(gt + 1).trim()) break;
       tail = tail.slice(0, at).trimEnd();
     }
-    if (tail.endsWith(QUOTE_TAGS[1].close)) found.push({ from: native.index + native[0].length - native[1].length, to: tail.length });
+    if (tail.endsWith(QUOTE_TAGS[1].close)) nativeQuote = { from: native.index + native[0].length - native[1].length, to: tail.length };
   }
   for (const tag of QUOTE_TAGS) {
     const closers = positionsOf(text, tag.close);
@@ -1319,18 +1321,23 @@ function opaqueOf(text, envelopes = envelopesOf(text)) {
     // matching closing tag); an opener below a full stack is text, and so is its closing tag.
     const stack = [];
     let over = 0;
+    let depth = 0; // the true depth of the tags, and how many blocks of the first level they close
+    let blocks = 0;
     for (let i = 0, j = 0; j < free.length;) {
       if (i < openers.length && openers[i].index < free[j]) {
+        depth++;
         if (stack.length < QUOTE_DEPTH_MAX) stack.push(openers[i].index);
         else over++;
         i++;
         continue;
       }
+      if (depth > 0 && --depth === 0) blocks++;
       if (over > 0) { over--; j++; continue; }
       const from = stack.pop();
       const to = free[j++] + tag.close.length;
       if (from !== undefined) add(from, to);
     }
+    if (tag === QUOTE_TAGS[1] && nativeQuote && blocks < 2) found.push(nativeQuote);
   }
   const quotes = unionOf(found);
   return { opaque: unionOf([...envelopes, ...quotes]), quotes };
