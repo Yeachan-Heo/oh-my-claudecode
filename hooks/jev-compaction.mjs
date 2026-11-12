@@ -558,7 +558,7 @@ async function readText($, path) {
 async function readTextSafe($, path) {
   try {
     return { text: await $.fs.read(path) };
-  } catch (err) {
+  } catch {
     try {
       const exists = await $.fs.exists(path);
       if (!exists) return { missing: true };
@@ -1258,6 +1258,35 @@ function blockWords(block) {
   return words ? [words] : [];
 }
 
+// The regions of a text that are quotes to the user's block around them, in text order and not overlapping: every
+// paired envelope, and every paired plain <system-reminder> that holds no delivery (a reminder that wraps one is
+// read by its frame). A plain reminder ends at the first closing tag after its opener; openers without a closing
+// tag are text. The tags are indexed in one pass, so a text full of unpaired tags is read in linear time.
+const PLAIN_OPEN = /<system-reminder(?![^>]{0,200}\bid=)[^>]{0,200}>/g; // bounded: a text full of unclosed tags stays linear
+const PLAIN_CLOSE = '</system-reminder>';
+function opaqueOf(text, envelopes = envelopesOf(text)) {
+  const found = [...envelopes];
+  const closers = positionsOf(text, PLAIN_CLOSE);
+  if (closers.length) {
+    let end = 0;
+    for (const o of text.matchAll(PLAIN_OPEN)) {
+      if (o.index < end) continue;
+      const c = lowerBound(closers, o.index + o[0].length);
+      if (c >= closers.length) break;
+      end = closers[c] + PLAIN_CLOSE.length;
+      if (!deliveryOf(text.slice(o.index, end))) found.push({ from: o.index, to: end });
+    }
+  }
+  found.sort((a, b) => a.from - b.from);
+  const out = [];
+  for (const e of found) {
+    const last = out[out.length - 1];
+    if (last && e.from < last.to) last.to = Math.max(last.to, e.to);
+    else out.push({ from: e.from, to: e.to });
+  }
+  return out;
+}
+
 // Whether a position lies inside one of the envelopes `spans` (in text order), after its opener; asked for in
 // increasing order.
 function insideOf(spans) {
@@ -1339,7 +1368,7 @@ function positionsOf(text, s) {
 // (userBlockEnd), so a frame line the user quotes before the note stays in it.
 function piecesOf(text) {
   const pieces = [];
-  const spans = envelopesOf(text); // every envelope is opaque to the user's block around it: a footer or header in it is a quote
+  const spans = opaqueOf(text); // a footer or header inside an envelope or a plain reminder is a quote to the user's block around it
   const index = blockIndex(text, spans);
   const quoted = insideOf(spans);
   const lastTail = text.lastIndexOf(QUEUED_TAIL);
@@ -1359,10 +1388,11 @@ function piecesOf(text) {
 // The envelopes of a row's text that hold a delivered message, except one inside a user's block before
 // its framing note: that one is a quote the user pasted and stays in their block.
 function deliveredOf(text) {
-  const envelopes = envelopesOf(text); // every envelope is opaque to the user's block around it
+  const envelopes = envelopesOf(text);
+  const opaque = opaqueOf(text, envelopes); // quotes to the user's block around them
   const all = envelopes.filter((e) => deliveryOf(e.text));
-  const index = blockIndex(text, envelopes);
-  const quoted = insideOf(envelopes);
+  const index = blockIndex(text, opaque);
+  const quoted = insideOf(opaque);
   const lastTail = text.lastIndexOf(QUEUED_TAIL);
   const out = [];
   let end = -1;
@@ -1375,7 +1405,7 @@ function deliveredOf(text) {
     }
     const nl = text.indexOf('\n', p);
     const stop = Math.min(nl < 0 ? text.length : nl, k < all.length ? all[k].from : text.length);
-    if (p >= end && p < lastTail && !quoted(p) && frameOf(`${text.slice(p, stop)}\n`) === 'user') end = userBlockEnd(text, p, envelopes, index);
+    if (p >= end && p < lastTail && !quoted(p) && frameOf(`${text.slice(p, stop)}\n`) === 'user') end = userBlockEnd(text, p, opaque, index);
     p = stop === nl ? nl + 1 : stop;
   }
   return out;
