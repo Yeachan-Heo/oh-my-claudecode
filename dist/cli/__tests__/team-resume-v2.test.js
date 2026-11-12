@@ -5,14 +5,9 @@ import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { absPath, TeamPaths } from '../../team/state-paths.js';
 const ownership = vi.hoisted(() => ({ verify: vi.fn() }));
-const herdr = vi.hoisted(() => ({ workspaceExists: vi.fn() }));
 vi.mock('../../team/tmux-session.js', async (importOriginal) => {
     const actual = await importOriginal();
     return { ...actual, verifyTeamTargetOwnership: ownership.verify };
-});
-vi.mock('../../team/herdr-session.js', async (importOriginal) => {
-    const actual = await importOriginal();
-    return { ...actual, herdrWorkspaceExists: herdr.workspaceExists };
 });
 const { teamResumeByName } = await import('../team.js');
 const INSTANCE_ID = '11111111-2222-3333-4444-555555555555';
@@ -56,7 +51,6 @@ describe('omc team resume on a runtime v2 team', () => {
         savedFlag = process.env.OMC_RUNTIME_V2;
         delete process.env.OMC_RUNTIME_V2;
         ownership.verify.mockReset().mockResolvedValue({ kind: 'unavailable' });
-        herdr.workspaceExists.mockReset().mockResolvedValue('missing');
         cwd = mkdtempSync(join(tmpdir(), 'omc-team-resume-'));
         writeConfig(v2Config());
     });
@@ -104,46 +98,6 @@ describe('omc team resume on a runtime v2 team', () => {
         it('does not resume when the config has no tmux server identity', async () => {
             writeConfig(tmuxConfig({ tmux_server_identity: undefined }));
             expect(await teamResumeByName('demo', cwd)).toMatchObject({ resumed: false });
-        });
-    });
-    describe('herdr team', () => {
-        const HERDR_SESSION = 'herdr:workspace:abc123';
-        const herdrConfig = (overrides = {}) => v2Config({
-            tmux_session: HERDR_SESSION,
-            leader_pane_id: 'w1:p1',
-            workers: [{ name: 'worker-1', index: 1, role: 'executor', assigned_tasks: [], pane_id: 'w1:p2' }],
-            ...overrides,
-        });
-        beforeEach(() => {
-            herdr.workspaceExists.mockReset().mockResolvedValue('missing');
-        });
-        it('resumes when the Herdr workspace exists', async () => {
-            herdr.workspaceExists.mockResolvedValue('exists');
-            writeConfig(herdrConfig());
-            expect(await teamResumeByName('demo', cwd)).toMatchObject({
-                resumed: true,
-                sessionName: HERDR_SESSION,
-                leaderPaneId: 'w1:p1',
-                workerPaneIds: ['w1:p2'],
-            });
-        });
-        it('does not resume when the Herdr workspace is missing', async () => {
-            herdr.workspaceExists.mockResolvedValue('missing');
-            writeConfig(herdrConfig());
-            expect(await teamResumeByName('demo', cwd)).toMatchObject({ teamName: 'demo', resumed: false });
-        });
-        it('does not resume when the Herdr workspace query fails', async () => {
-            herdr.workspaceExists.mockRejectedValue(new Error('provider query failed'));
-            writeConfig(herdrConfig());
-            expect(await teamResumeByName('demo', cwd)).toMatchObject({ teamName: 'demo', resumed: false });
-        });
-        it('resumes with an external leader (no leader_pane_id check required)', async () => {
-            herdr.workspaceExists.mockResolvedValue('exists');
-            writeConfig(herdrConfig({ leader_pane_id: undefined }));
-            expect(await teamResumeByName('demo', cwd)).toMatchObject({
-                resumed: true,
-                sessionName: HERDR_SESSION,
-            });
         });
     });
     it('reports a missing team as not resumable', async () => {

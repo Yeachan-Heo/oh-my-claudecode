@@ -978,30 +978,6 @@ describe('team cli', () => {
         expect(saved.cleanedUpAt).toBeUndefined();
         expect(saved.cleanupBlockedReason).toBe('provider_cleanup_unverified:replacement');
     });
-    it('cleanupTeamJob accepts an untracked Herdr leader but not an empty tmux leader', async () => {
-        const { cleanupTeamJob } = await import('../team.js');
-        for (const [suffix, sessionName, shutdown] of [['herdr', 'herdr:w2', true], ['tmux', 'leader-session:0', false]]) {
-            mocks.shutdownTeamV2.mockClear();
-            const jobId = `omc-ldr${suffix}`;
-            const cwd = makeProject(`omc-team-cli-leader-${suffix}-`);
-            mkdirSync(join(cwd, '.omc', 'state', 'team', 'demo-team'), { recursive: true });
-            writeFileSync(join(jobsDir, `${jobId}.json`), JSON.stringify({
-                status: 'running',
-                startedAt: Date.now(),
-                teamName: 'demo-team',
-                cwd,
-                instanceId: INSTANCE_ID,
-            }));
-            writeFileSync(join(jobsDir, `${jobId}-panes.json`), JSON.stringify(paneArtifact(INSTANCE_ID, [], '', sessionName)));
-            const result = await cleanupTeamJob(jobId);
-            if (shutdown)
-                expect(mocks.shutdownTeamV2).toHaveBeenCalled();
-            else {
-                expect(result.message).toContain('cleanup_panes_evidence_corrupt');
-                expect(mocks.shutdownTeamV2).not.toHaveBeenCalled();
-            }
-        }
-    });
     it('cleanupTeamJob preserves state when pane evidence is missing or corrupt', async () => {
         const { cleanupTeamJob } = await import('../team.js');
         for (const [suffix, panes] of [['missing', undefined], ['corrupt', '{not-json']]) {

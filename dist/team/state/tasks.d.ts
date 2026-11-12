@@ -1,10 +1,8 @@
 import type { TeamTaskStatus } from '../contracts.js';
-import type { TeamTask, TeamTaskV2, TaskReadiness, ClaimTaskResult, TransitionTaskResult, ReleaseTaskClaimResult, RenewTaskClaimResult, TaskRecoveryAdoptionProof, TaskRecoveryAdoptionResult, TaskRecoveryCheckpoint, TaskRecoveryRequeueResult, TaskRecoveryRequeueSidecar } from '../types.js';
+import type { TeamTask, TeamTaskV2, TaskReadiness, ClaimTaskResult, TransitionTaskResult, ReleaseTaskClaimResult, TaskRecoveryAdoptionProof, TaskRecoveryAdoptionResult, TaskRecoveryCheckpoint, TaskRecoveryRequeueResult, TaskRecoveryRequeueSidecar } from '../types.js';
 interface TaskReadDeps {
     readTask: (teamName: string, taskId: string, cwd: string) => Promise<TeamTask | null>;
 }
-/** Lease window granted by claim, renewal, and recovery adoption. */
-export declare const TASK_CLAIM_LEASE_MS: number;
 export interface TaskDependencyFields {
     id?: unknown;
     depends_on?: unknown;
@@ -33,9 +31,6 @@ interface ClaimTaskDeps extends TaskReadDeps {
         workers: Array<{
             name: string;
         }>;
-        active_recovery?: {
-            worker_name: string;
-        };
     } | null>;
     withTaskClaimLock: <T>(teamName: string, taskId: string, cwd: string, fn: () => Promise<T>) => Promise<{
         ok: true;
@@ -68,15 +63,6 @@ export declare function transitionTaskStatus(taskId: string, from: TeamTaskStatu
 } | undefined, deps: TransitionDeps): Promise<TransitionTaskResult>;
 type ReleaseDeps = ClaimTaskDeps;
 export declare function releaseTaskClaim(taskId: string, claimToken: string, _workerName: string, deps: ReleaseDeps): Promise<ReleaseTaskClaimResult>;
-type RenewTaskClaimDeps = ClaimTaskDeps;
-/**
- * Extends the lease of a live claim so a worker on a long-running task can
- * still complete, release, or checkpoint it after the original 15-minute
- * window. Fencing is preserved: an expired lease is never renewed (dead-worker
- * recovery owns it), the claim token and owner must match, and a task with a
- * recovery reservation or adoption is never renewed.
- */
-export declare function renewTaskClaim(taskId: string, claimToken: string, workerName: string, deps: RenewTaskClaimDeps): Promise<RenewTaskClaimResult>;
 export declare function listTasks(teamName: string, cwd: string, deps: {
     teamDir: (teamName: string, cwd: string) => string;
     isTeamTask: (value: unknown) => value is TeamTask;

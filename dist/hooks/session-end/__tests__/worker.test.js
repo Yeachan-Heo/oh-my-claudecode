@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 const actions = vi.hoisted(() => ({
@@ -30,24 +30,7 @@ const actionRunner = vi.hoisted(() => ({
         return { code: 'completed', completed: true };
     }),
 }));
-const releaseFaults = vi.hoisted(() => ({ remaining: 0, stallMs: 0, calls: 0 }));
 vi.mock('../index.js', () => actions);
-vi.mock('../cleanup-manifest.js', async (importOriginal) => {
-    const actual = await importOriginal();
-    return {
-        ...actual,
-        releaseSessionEndJob: (...args) => {
-            releaseFaults.calls++;
-            if (releaseFaults.remaining > 0) {
-                releaseFaults.remaining--;
-                if (releaseFaults.stallMs)
-                    vi.setSystemTime(Date.now() + releaseFaults.stallMs);
-                return null;
-            }
-            return actual.releaseSessionEndJob(...args);
-        },
-    };
-});
 vi.mock('../../../platform/process-utils.js', () => processIdentity);
 vi.mock('../action-runner.js', () => actionRunner);
 // executeSpawnNext must never reach the real spawn in tests; the self-heal test
@@ -56,7 +39,7 @@ vi.mock('../spawn-next.js', async (importOriginal) => {
     const actual = await importOriginal();
     return { ...actual, executeSpawnNext: vi.fn(() => undefined) };
 });
-import { claimSessionEndAction, claimSessionEndJob, isManifestTerminal, sessionEndJobPath, sessionEndJobsDirectory, markSessionEndActionRunner, mutateSessionEndJob, releaseSessionEndJob, prepareCoreManifest, readSessionEndJob, sealCoreManifest, sealWikiManifest, takeSessionEndDiscoveryPage } from '../cleanup-manifest.js';
+import { claimSessionEndAction, claimSessionEndJob, isManifestTerminal, markSessionEndActionRunner, mutateSessionEndJob, releaseSessionEndJob, prepareCoreManifest, readSessionEndJob, sealCoreManifest, sealWikiManifest, takeSessionEndDiscoveryPage } from '../cleanup-manifest.js';
 import { processSessionEndWorker, reconcileSessionEndJobs, workerEnvironment } from '../worker.js';
 import { AFK_INCLUDE_USER_SETTINGS_ENV, executeSpawnNext } from '../spawn-next.js';
 const directories = [];
@@ -73,9 +56,6 @@ function project() {
 }
 afterEach(() => {
     vi.clearAllMocks();
-    releaseFaults.remaining = 0;
-    releaseFaults.stallMs = 0;
-    releaseFaults.calls = 0;
     processIdentity.getProcessStartIdentity.mockResolvedValue('test-process-start');
     for (const directory of directories.splice(0))
         rmSync(directory, { recursive: true, force: true });
@@ -116,95 +96,6 @@ describe('SessionEnd durable worker', () => {
         expect(actions.runSessionEndCallbacks).toHaveBeenCalledTimes(1);
         expect(actions.runSessionEndNotifications).toHaveBeenCalledTimes(1);
         expect(actions.runSessionEndOpenClaw).toHaveBeenCalledTimes(1);
-    });
-    it('releases its own job when the lease generation moved under it (#4844)', async () => {
-        const directory = project();
-        const sessionId = 'release-generation-drift';
-        expect(prepareCoreManifest(directory, sessionId, { initialTeamNames: [] })).not.toBeNull();
-        expect(sealCoreManifest(directory, sessionId)).not.toBeNull();
-        expect(sealWikiManifest(directory, sessionId)).not.toBeNull();
-        actionRunner.runSessionEndAction.mockImplementationOnce(async () => {
-            const job = readSessionEndJob(directory, sessionId);
-            mutateSessionEndJob(directory, sessionId, job.revision, (current) => { current.owner.leaseGeneration += 1; });
-            return { code: 'completed', completed: true };
-        });
-        await processSessionEndWorker({ directory, sessionId });
-        expect(readSessionEndJob(directory, sessionId)?.owner).toBeNull();
-    });
-    it('retries a release that fails once and leaves no exit trace (#4844)', async () => {
-        const directory = project();
-        const sessionId = 'release-transient-failure';
-        expect(prepareCoreManifest(directory, sessionId, { initialTeamNames: [] })).not.toBeNull();
-        expect(sealCoreManifest(directory, sessionId)).not.toBeNull();
-        expect(sealWikiManifest(directory, sessionId)).not.toBeNull();
-        actionRunner.runSessionEndAction.mockResolvedValueOnce({ code: 'runner-exit-1', completed: false });
-        releaseFaults.remaining = 1;
-        await processSessionEndWorker({ directory, sessionId });
-        expect(readSessionEndJob(directory, sessionId)?.owner).toBeNull();
-        expect(existsSync(join(sessionEndJobsDirectory(directory), 'worker-exits.jsonl'))).toBe(false);
-    });
-    it('records why a worker exits still owning its job (#4844)', async () => {
-        const directory = project();
-        const sessionId = 'release-exhausted';
-        expect(prepareCoreManifest(directory, sessionId, { initialTeamNames: [] })).not.toBeNull();
-        expect(sealCoreManifest(directory, sessionId)).not.toBeNull();
-        expect(sealWikiManifest(directory, sessionId)).not.toBeNull();
-        releaseFaults.remaining = Number.POSITIVE_INFINITY;
-        await processSessionEndWorker({ directory, sessionId });
-        const job = readSessionEndJob(directory, sessionId);
-        expect(job.owner).not.toBeNull();
-        const [line, ...rest] = readFileSync(join(sessionEndJobsDirectory(directory), 'worker-exits.jsonl'), 'utf8').trim().split('\n');
-        expect(rest).toEqual([]);
-        expect(JSON.parse(line)).toMatchObject({
-            sessionId,
-            pid: process.pid,
-            outcome: 'release-failed',
-            exitReason: 'actions-settled',
-            ownerNonce: job.owner.nonce,
-            leaseGeneration: job.owner.leaseGeneration,
-            revision: expect.any(Number),
-            phase: job.phase,
-        });
-    });
-    it('does not start a release retry that a full lock wait would push past the budget (#4844)', async () => {
-        const directory = project();
-        const sessionId = 'release-lock-stall';
-        expect(prepareCoreManifest(directory, sessionId, { initialTeamNames: [] })).not.toBeNull();
-        expect(sealCoreManifest(directory, sessionId)).not.toBeNull();
-        expect(sealWikiManifest(directory, sessionId)).not.toBeNull();
-        releaseFaults.remaining = Number.POSITIVE_INFINITY;
-        releaseFaults.stallMs = 4_800;
-        await processSessionEndWorker({ directory, sessionId });
-        expect(releaseFaults.calls).toBe(1);
-        expect(existsSync(join(sessionEndJobsDirectory(directory), 'worker-exits.jsonl'))).toBe(true);
-    });
-    it('records the exit when the manifest cannot be read back (#4844)', async () => {
-        const directory = project();
-        const sessionId = 'release-unreadable';
-        expect(prepareCoreManifest(directory, sessionId, { initialTeamNames: [] })).not.toBeNull();
-        expect(sealCoreManifest(directory, sessionId)).not.toBeNull();
-        expect(sealWikiManifest(directory, sessionId)).not.toBeNull();
-        actionRunner.runSessionEndAction.mockImplementationOnce(async () => {
-            writeFileSync(sessionEndJobPath(directory, sessionId), 'not json');
-            return { code: 'completed', completed: true };
-        });
-        await processSessionEndWorker({ directory, sessionId });
-        expect(JSON.parse(readFileSync(join(sessionEndJobsDirectory(directory), 'worker-exits.jsonl'), 'utf8'))).toMatchObject({ sessionId, outcome: 'release-failed' });
-    });
-    it('leaves no exit trace when another worker already took the job over (#4844)', async () => {
-        const directory = project();
-        const sessionId = 'release-after-reap';
-        expect(prepareCoreManifest(directory, sessionId, { initialTeamNames: [] })).not.toBeNull();
-        expect(sealCoreManifest(directory, sessionId)).not.toBeNull();
-        expect(sealWikiManifest(directory, sessionId)).not.toBeNull();
-        actionRunner.runSessionEndAction.mockImplementationOnce(async () => {
-            const job = readSessionEndJob(directory, sessionId);
-            mutateSessionEndJob(directory, sessionId, job.revision, (current) => { current.owner = { ...current.owner, nonce: 'other-worker' }; });
-            return { code: 'completed', completed: true };
-        });
-        await processSessionEndWorker({ directory, sessionId });
-        expect(readSessionEndJob(directory, sessionId)?.owner?.nonce).toBe('other-worker');
-        expect(existsSync(join(sessionEndJobsDirectory(directory), 'worker-exits.jsonl'))).toBe(false);
     });
     it('does not take ownership when a process identity cannot be established', async () => {
         const directory = project();

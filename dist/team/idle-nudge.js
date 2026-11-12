@@ -10,7 +10,7 @@
  *
  * @see https://github.com/anthropics/oh-my-claudecode/issues/1047
  */
-import { paneLooksReady, paneHasActiveTask, captureOwnedTeamPane, providerForTeamTarget, } from './tmux-session.js';
+import { paneLooksReady, paneHasActiveTask, captureOwnedTeamPane, } from './tmux-session.js';
 import { isValidTeamInstanceId, isValidTmuxServerIdentity, } from './types.js';
 export const DEFAULT_NUDGE_CONFIG = {
     delayMs: 30_000,
@@ -61,9 +61,9 @@ export class NudgeTracker {
             return [];
         const sessionName = typeof authority.sessionName === 'string' ? authority.sessionName : '';
         const provider = authority.provider
-            ?? providerForTeamTarget(sessionName);
+            ?? (sessionName.startsWith('cmux:') ? 'cmux' : 'tmux');
         if (!Array.isArray(paneIds)
-            || (provider !== 'tmux' && provider !== 'cmux' && provider !== 'herdr')
+            || (provider !== 'tmux' && provider !== 'cmux')
             || sessionName.length === 0
             || !isValidTeamInstanceId(authority.instanceId)
             || sessionName.trim() !== sessionName
@@ -72,7 +72,7 @@ export class NudgeTracker {
             || typeof authority.executeNudge !== 'function'
             || (provider === 'tmux'
                 && (!authority.tmuxServerIdentity || !isValidTmuxServerIdentity(authority.tmuxServerIdentity)))
-            || ((provider === 'cmux' || provider === 'herdr') && authority.tmuxServerIdentity !== undefined)) {
+            || (provider === 'cmux' && authority.tmuxServerIdentity !== undefined)) {
             return [];
         }
         const now = Date.now();

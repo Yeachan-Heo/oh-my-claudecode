@@ -347,23 +347,6 @@ describe('NudgeTracker', () => {
         expect(nudged).toEqual(['%2']);
         expect(vi.mocked(sendToWorker)).toHaveBeenCalledWith('cmux:workspace', '%2', DEFAULT_NUDGE_CONFIG.message);
     });
-    it('allows HERDR with instance identity but without a tmux identity', async () => {
-        mockCaptureOutput(IDLE_PANE_CONTENT);
-        const tracker = new NudgeTracker({ delayMs: 0 });
-        const authority = {
-            instanceId: TEST_AUTHORITY.instanceId,
-            sessionName: 'herdr-workspace',
-            provider: 'herdr',
-            getPaneOwnership: (paneId) => paneId === '%2'
-                ? { ...TEST_OWNERSHIP, provider: 'herdr', providerTarget: 'herdr-workspace', tmuxServerIdentity: undefined }
-                : undefined,
-            executeNudge: (paneId, message) => sendToWorker('herdr-workspace', paneId, message),
-        };
-        vi.advanceTimersByTime(6_000);
-        const nudged = await tracker.checkAndNudge(['%2'], '%1', authority);
-        expect(nudged).toEqual(['%2']);
-        expect(vi.mocked(sendToWorker)).toHaveBeenCalledWith('herdr-workspace', '%2', DEFAULT_NUDGE_CONFIG.message);
-    });
     it('handles multiple panes independently', async () => {
         const tracker = new NudgeTracker({ delayMs: 0, maxCount: 1 });
         // %2 is idle, %3 is active

@@ -1,7 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { formatSessionSummary, interpolatePath, triggerStopCallbacks } from '../callbacks.js';
-import { homedir } from 'os';
-import { join, normalize } from 'path';
 // Mock auto-update module
 vi.mock('../../../features/auto-update.js', () => ({
     getOMCConfig: vi.fn(() => ({
@@ -89,14 +87,6 @@ describe('interpolatePath', () => {
         const result = interpolatePath('~/logs/test.md', 'session-1');
         expect(result).not.toContain('~');
         expect(result).toContain('/logs/test.md');
-    });
-    it('leaves a ~ inside the path alone', () => {
-        expect(interpolatePath('C:\\PROGRA~1\\logs\\{session_id}.md', 's1')).toBe(normalize('C:\\PROGRA~1\\logs\\s1.md'));
-        expect(interpolatePath('/srv/backup~old/{session_id}.md', 's1')).toBe(normalize('/srv/backup~old/s1.md'));
-    });
-    it('expands a leading ~ before either separator', () => {
-        expect(interpolatePath('~/logs/a.md', 's1')).toBe(normalize(join(homedir(), 'logs/a.md')));
-        expect(interpolatePath('~\\logs\\a.md', 's1')).toBe(normalize(`${homedir()}\\logs\\a.md`));
     });
     it('replaces multiple placeholders', () => {
         const result = interpolatePath('/tmp/{date}/{session_id}.md', 'my-session');

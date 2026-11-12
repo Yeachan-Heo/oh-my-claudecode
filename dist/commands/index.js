@@ -103,7 +103,7 @@ export function expandCommand(name, args = '') {
         return null;
     }
     // Replace $ARGUMENTS placeholder with actual arguments
-    const prompt = command.template.replace(/\$ARGUMENTS/g, () => args);
+    const prompt = command.template.replace(/\$ARGUMENTS/g, args);
     return {
         name,
         prompt: prompt.trim(),

@@ -234,11 +234,7 @@ export function cleanupTransientState(directory, endingSessionId) {
             // Ignore cleanup errors
         }
     }
-    // Remove .tmp files in .omc/. Only files older than the in-flight grace
-    // window are deleted: atomic writers publish via write-then-rename within
-    // milliseconds, so a fresh temp may belong to a concurrent session that is
-    // mid-publication and unlinked temps break its rename.
-    const tmpFileGraceMs = 5 * 60 * 1000;
+    // Remove .tmp files in .omc/
     const removeTmpFiles = (dir) => {
         try {
             const entries = fs.readdirSync(dir, { withFileTypes: true });
@@ -248,22 +244,8 @@ export function cleanupTransientState(directory, endingSessionId) {
                     removeTmpFiles(fullPath);
                 }
                 else if (entry.name.endsWith('.tmp')) {
-                    try {
-                        const stats = fs.statSync(fullPath);
-                        if (stats.mtimeMs < Date.now() - tmpFileGraceMs) {
-                            // Re-stat immediately before unlink: another session may have
-                            // republished the same fixed-name temp between the first stat
-                            // and now, and unlinking it would break its rename.
-                            const latest = fs.statSync(fullPath);
-                            if (latest.mtimeMs < Date.now() - tmpFileGraceMs) {
-                                fs.unlinkSync(fullPath);
-                                filesRemoved++;
-                            }
-                        }
-                    }
-                    catch (_error) {
-                        // Temp vanished mid-sweep or is unreadable; skip it.
-                    }
+                    fs.unlinkSync(fullPath);
+                    filesRemoved++;
                 }
             }
         }

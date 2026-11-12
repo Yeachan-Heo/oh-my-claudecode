@@ -9,9 +9,9 @@
  * Modeled after oh-my-codex/src/team/team-ops.ts.
  */
 import type { TeamTaskStatus } from './contracts.js';
-import type { TeamTask, TeamTaskV2, TeamTaskClaim, TeamConfig, TeamManifestV2, WorkerInfo, WorkerStatus, WorkerHeartbeat, TeamEvent, TeamMailboxMessage, TeamMailbox, TaskApprovalRecord, ClaimTaskResult, TransitionTaskResult, ReleaseTaskClaimResult, RenewTaskClaimResult, TaskReadiness, TeamSummary, ShutdownAck, TeamMonitorSnapshotState, TaskRecoveryAdoptionProof, TaskRecoveryAdoptionResult, TaskRecoveryCheckpoint, TaskRecoveryRequeueResult, TaskRecoveryRequeueSidecar, TaskRecoveryCheckpointValidation, TeamTaskRecoveryReservation, RecoverDeadWorkerV2Error, RecoverDeadWorkerV2Result, RecoverDeadWorkerV2Warning } from './types.js';
+import type { TeamTask, TeamTaskV2, TeamTaskClaim, TeamConfig, TeamManifestV2, WorkerInfo, WorkerStatus, WorkerHeartbeat, TeamEvent, TeamMailboxMessage, TeamMailbox, TaskApprovalRecord, ClaimTaskResult, TransitionTaskResult, ReleaseTaskClaimResult, TaskReadiness, TeamSummary, ShutdownAck, TeamMonitorSnapshotState, TaskRecoveryAdoptionProof, TaskRecoveryAdoptionResult, TaskRecoveryCheckpoint, TaskRecoveryRequeueResult, TaskRecoveryRequeueSidecar, TaskRecoveryCheckpointValidation, TeamTaskRecoveryReservation, RecoverDeadWorkerV2Error, RecoverDeadWorkerV2Result, RecoverDeadWorkerV2Warning } from './types.js';
 import { type PublishTaskRecoveryCheckpointInput } from './task-recovery-checkpoint.js';
-export type { TeamConfig, WorkerInfo, WorkerHeartbeat, WorkerStatus, TeamTask, TeamTaskV2, TeamTaskClaim, TeamManifestV2, TeamEvent, TeamMailboxMessage, TeamMailbox, TaskApprovalRecord, ClaimTaskResult, TransitionTaskResult, ReleaseTaskClaimResult, RenewTaskClaimResult, TaskReadiness, TeamSummary, ShutdownAck, TeamMonitorSnapshotState, TaskRecoveryAdoptionProof, TaskRecoveryAdoptionResult, TaskRecoveryCheckpoint, TaskRecoveryRequeueResult, TaskRecoveryRequeueSidecar, TaskRecoveryCheckpointValidation, TeamTaskRecoveryReservation, RecoverDeadWorkerV2Error, RecoverDeadWorkerV2Result, RecoverDeadWorkerV2Warning, };
+export type { TeamConfig, WorkerInfo, WorkerHeartbeat, WorkerStatus, TeamTask, TeamTaskV2, TeamTaskClaim, TeamManifestV2, TeamEvent, TeamMailboxMessage, TeamMailbox, TaskApprovalRecord, ClaimTaskResult, TransitionTaskResult, ReleaseTaskClaimResult, TaskReadiness, TeamSummary, ShutdownAck, TeamMonitorSnapshotState, TaskRecoveryAdoptionProof, TaskRecoveryAdoptionResult, TaskRecoveryCheckpoint, TaskRecoveryRequeueResult, TaskRecoveryRequeueSidecar, TaskRecoveryCheckpointValidation, TeamTaskRecoveryReservation, RecoverDeadWorkerV2Error, RecoverDeadWorkerV2Result, RecoverDeadWorkerV2Warning, };
 export type { PublishTaskRecoveryCheckpointInput } from './task-recovery-checkpoint.js';
 /**
  * Result of an exact lookup in the canonical mailbox JSON file. This is a
@@ -77,7 +77,6 @@ export declare function teamTransitionTaskStatus(teamName: string, taskId: strin
     metadata?: Record<string, unknown>;
 }): Promise<TransitionTaskResult>;
 export declare function teamReleaseTaskClaim(teamName: string, taskId: string, claimToken: string, workerName: string, cwd: string): Promise<ReleaseTaskClaimResult>;
-export declare function teamRenewTaskClaim(teamName: string, taskId: string, claimToken: string, workerName: string, cwd: string): Promise<RenewTaskClaimResult>;
 export declare function teamPublishTaskRecoveryCheckpoint(input: PublishTaskRecoveryCheckpointInput, cwd: string): Promise<import("./task-recovery-checkpoint.js").PublishTaskRecoveryCheckpointResult>;
 export declare function teamRequeueRecoveredTask(teamName: string, cwd: string, input: {
     recoveryId: string;

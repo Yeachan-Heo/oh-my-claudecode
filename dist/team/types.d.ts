@@ -636,14 +636,6 @@ export type ReleaseTaskClaimResult = {
     ok: false;
     error: 'claim_conflict' | 'task_not_found' | 'already_terminal' | 'lease_expired';
 };
-/** Result of renewing a live task claim's lease */
-export type RenewTaskClaimResult = {
-    ok: true;
-    task: TeamTaskV2;
-} | {
-    ok: false;
-    error: 'claim_conflict' | 'task_not_found' | 'already_terminal' | 'invalid_transition' | 'lease_expired';
-};
 /** Team summary for monitoring */
 export interface TeamSummary {
     teamName: string;

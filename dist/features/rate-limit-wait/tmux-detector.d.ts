@@ -72,39 +72,6 @@ export declare function sendResumeSequence(paneId: string): boolean;
  */
 export declare function sendToPane(paneId: string, text: string, pressEnter?: boolean): boolean;
 /**
- * Whether the herdr panes should be scanned. Conservative gate: only when the
- * multiplexer setting elects herdr (env OMC_TEAM_MULTIPLEXER or
- * team.ops.multiplexer). Ambient scanning is not enabled for herdr because a
- * scan implies the headless Herdr server (spawned on demand); default tmux
- * behavior is unchanged.
- */
-export declare function isHerdrDetectorEnabled(env?: NodeJS.ProcessEnv): boolean;
-/**
- * Scan live herdr agent panes for blocked Claude Code sessions. Only panes
- * hosting a recognized agent are considered (the live-agent inventory is the
- * liveness proof; plain shell tabs are not agents). Returns [] when the
- * inventory cannot be read.
- */
-export declare function scanForBlockedHerdrPanes(lines?: number): Promise<BlockedPane[]>;
-/**
- * Revalidate persisted herdr pane candidates before sending resume keys.
- * Mirrors revalidateBlockedPanes: null means "inconclusive" (the inventory
- * could not be read — callers retain state and retry), otherwise only panes
- * whose live agent still shows a rate-limit screen with a live resume menu
- * are returned.
- */
-export declare function revalidateBlockedHerdrPanes(trackedPanes: BlockedPane[], lines?: number): Promise<BlockedPane[] | null>;
-/**
- * Send the resume confirmation to a herdr agent pane.
- *
- * tmux sends "1" + Enter to pick the first menu option. The herdr agent
- * surface types only semantic keys, so this confirms with Enter alone: the
- * live-menu revalidation above requires option 1 ("continue"/"wait") to be
- * the first resume option, and Claude's limit screen preselects it, making
- * Enter the equivalent of "1" + Enter.
- */
-export declare function sendHerdrResumeSequence(paneId: string): Promise<boolean>;
-/**
  * Get a summary of blocked panes for display
  */
 export declare function formatBlockedPanesSummary(blockedPanes: BlockedPane[]): string;

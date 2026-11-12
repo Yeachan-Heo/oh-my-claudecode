@@ -75,9 +75,8 @@ describe('run.cjs — graceful fallback for stale plugin paths', () => {
     it('keeps UserPromptSubmit manifest timeouts aligned for prompt hooks', () => {
         const hooksJson = JSON.parse(readFileSync(join(__dirname, '..', '..', 'hooks', 'hooks.json'), 'utf-8'));
         const promptHooks = hooksJson.hooks.UserPromptSubmit.flatMap((entry) => entry.hooks);
-        const hookText = (hook) => [hook.command, ...(hook.args ?? [])].join(' ');
-        const keywordDetector = promptHooks.find((hook) => hookText(hook).includes('keyword-detector.mjs'));
-        const skillInjector = promptHooks.find((hook) => hookText(hook).includes('skill-injector.mjs'));
+        const keywordDetector = promptHooks.find((hook) => hook.command.includes('keyword-detector.mjs'));
+        const skillInjector = promptHooks.find((hook) => hook.command.includes('skill-injector.mjs'));
         expect(keywordDetector?.timeout).toBe(30);
         expect(skillInjector?.timeout).toBe(30);
         const hooksDoc = readFileSync(join(__dirname, '..', '..', 'docs', 'HOOKS.md'), 'utf-8');

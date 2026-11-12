@@ -91,7 +91,6 @@ const TEAM_API_OPERATION_REQUIRED_FIELDS = {
     'claim-task': ['team_name', 'task_id', 'worker'],
     'transition-task-status': ['team_name', 'task_id', 'from', 'to', 'claim_token'],
     'release-task-claim': ['team_name', 'task_id', 'claim_token', 'worker'],
-    'renew-task-claim': ['team_name', 'task_id', 'claim_token', 'worker'],
     'read-config': ['team_name'],
     'read-manifest': ['team_name'],
     'read-worker-status': ['team_name', 'worker'],
@@ -129,7 +128,6 @@ const TEAM_API_OPERATION_OPTIONAL_FIELDS = {
 const TEAM_API_OPERATION_NOTES = {
     'update-task': 'Only non-lifecycle task metadata can be updated.',
     'release-task-claim': 'Use this only for rollback/requeue to pending (not for completion).',
-    'renew-task-claim': 'Extends a live claim\'s 15-minute lease for long-running tasks. Call it again well before the lease lapses; once the lease is expired the API returns lease_expired and only dead-worker recovery may reclaim the task.',
     'transition-task-status': 'Lifecycle flow is claim-safe and typically transitions in_progress -> completed|failed.',
     'recover-worker': 'v2 live-session recovery only: it proceeds only after confirmed worker death, refuses unknown liveness, and replays idempotently by request_id. A timeout may return before the durable result is final; use read-recovery-result to look it up. In-progress tasks require a checkpoint; idle dead workers recover without one.',
     'write-task-checkpoint': 'Authenticated worker checkpoint producer. The resume_payload must be JSON and no larger than 64 KiB; repeat the same sequence and payload to replay safely.',
