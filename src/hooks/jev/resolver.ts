@@ -145,7 +145,10 @@ interface ShadowLogEntry extends JevLogContext {
   until?: string;
   /** Held-back call under the request limit: the point's priority and the minute's count. */
   priority?: string;
-  rpm?: { count: number; threshold: number; limit: number };
+  /** Held-back call: the minute's count, the point's threshold and the limit. Failed call (degraded): the count and the limit. */
+  rpm?: { count: number; threshold?: number; limit: number };
+  /** Failed call under the shared breaker or limit: HTTP status (null without a response), kind (http-<status>, no-response) and the block time in seconds when the failure opens the breaker. */
+  error?: { status: number | null; kind: string; retry_s?: number };
   durationMs: number;
   /** Jev-reported token usage; absent on degraded lines. */
   usage?: JevUsage;
@@ -325,8 +328,11 @@ export async function resolveJudgment<T>(resolveJudgmentArgs: ResolveJudgmentArg
     return { answer: twinAnswer(), source: 'twin', mode: 'cap' };
   }
 
+  let granted: number | undefined; // the minute's count when this call was admitted (limit only)
   if (shared) {
-    const { skip } = shared.breaker.admitRequest(shared.settings, args.point);
+    const admission = shared.breaker.admitRequest(shared.settings, args.point);
+    const { skip } = admission;
+    granted = admission.granted;
     if (skip) {
       const heuristic = twinAnswer();
       const loggableHeuristic = extractHeuristicForLogging(heuristic, args.questions, args.mapHeuristic, args.questionSet);
@@ -372,12 +378,24 @@ export async function resolveJudgment<T>(resolveJudgmentArgs: ResolveJudgmentArg
           : {}),
       }) };
     } catch (error) {
+      // Classified once: the log reports the same pause the breaker was told (an HTTP-date Retry-After
+      // would give a shorter one if read again later).
+      const failureClass = shared && error instanceof JevClientError ? shared.breaker.classifyFailure(error) : undefined;
       if (shared && error instanceof JevClientError) {
-        shared.breaker.recordFailure(shared.settings, shared.breaker.classifyFailure(error));
+        shared.breaker.recordFailure(shared.settings, failureClass);
       }
-      return { ok: false as const, error: error instanceof Error ? error.message : String(error) };
+      return {
+        ok: false as const,
+        error: error instanceof Error ? error.message : String(error),
+        failure: error instanceof JevClientError ? error : undefined,
+        failureClass,
+      };
     }
   })();
+
+  // Under the shared breaker or limit a failed call logs why it failed.
+  const failureFields = (failure: JevClientError | undefined, failureClass: JevBreaker.FailureClass | undefined) =>
+    shared && failure ? shared.breaker.failureLogFields(shared.settings, failure, granted, failureClass) : {};
 
   // Non-blocking (detector-type) in shadow mode: return the twin now; log when Jev settles.
   if (mode === 'shadow' && args.blocking === false) {
@@ -389,7 +407,7 @@ export async function resolveJudgment<T>(resolveJudgmentArgs: ResolveJudgmentArg
         void writeShadowLog(buildLogEntry(args.point, boundedState, startedAt, 'shadow', loggableHeuristic, outcome.response, args.questions, logFields), config);
       } else {
         recordFailure(args.point);
-        void writeShadowLog(buildLogEntry(args.point, boundedState, startedAt, 'degraded', loggableHeuristic, null, args.questions, logFields), config);
+        void writeShadowLog(buildLogEntry(args.point, boundedState, startedAt, 'degraded', loggableHeuristic, null, args.questions, logFields, failureFields(outcome.failure, outcome.failureClass)), config);
       }
       // Belt-and-braces: a future throw in this callback must never become an
       // unhandled rejection that kills a one-shot hook process.
@@ -405,7 +423,7 @@ export async function resolveJudgment<T>(resolveJudgmentArgs: ResolveJudgmentArg
     const outcome = await attempt;
     if (!outcome.ok) {
       recordFailure(args.point);
-      await writeShadowLog(buildLogEntry(args.point, boundedState, startedAt, 'degraded', loggableHeuristic, null, args.questions, logFields), config);
+      await writeShadowLog(buildLogEntry(args.point, boundedState, startedAt, 'degraded', loggableHeuristic, null, args.questions, logFields, failureFields(outcome.failure, outcome.failureClass)), config);
       return { answer: heuristic, source: 'twin', mode: 'degraded' };
     }
     recordSuccess(args.point);
@@ -421,7 +439,7 @@ export async function resolveJudgment<T>(resolveJudgmentArgs: ResolveJudgmentArg
     console.error('[jev] ' + args.point + ': degraded - ' + outcome.error);
     const heuristic = twinAnswer();
     const loggableHeuristic = extractHeuristicForLogging(heuristic, args.questions, args.mapHeuristic, args.questionSet);
-    await writeShadowLog(buildLogEntry(args.point, boundedState, startedAt, 'degraded', loggableHeuristic, null, args.questions, logFields), config);
+    await writeShadowLog(buildLogEntry(args.point, boundedState, startedAt, 'degraded', loggableHeuristic, null, args.questions, logFields, failureFields(outcome.failure, outcome.failureClass)), config);
     return { answer: heuristic, source: 'twin', mode: 'degraded' };
   }
 
@@ -447,6 +465,7 @@ function buildLogEntry(
   response: JevResponse | null,
   questions?: JevQuestions,
   logFields?: JevLogContext,
+  extra: Pick<ShadowLogEntry, 'error' | 'rpm'> = {},
 ): ShadowLogEntry {
   // With OMC_JEV_LOG_CONTEXT (logFields set) `jev` answers the first question
   // only, null when Jev did not answer it; otherwise firstAnswer's fallback.
@@ -470,6 +489,7 @@ function buildLogEntry(
     answers: response ? response.answers : null,
     confidence: jev?.confidence,
     durationMs: Date.now() - startedAt,
+    ...extra,
     ...(safeUsage ? { usage: safeUsage } : {}),
   };
 }

@@ -617,6 +617,41 @@ export function classifyFailure(failure, now = Date.now()) {
 }
 
 /**
+ * Extra shadow-log fields of a failed request (the failure as passed to
+ * classifyFailure; `granted` is the count admitRequest returned for it;
+ * `classified` is the classifyFailure result the breaker was told, so `retry_s`
+ * is that very pause and not one read again at log time):
+ * - `error` {status, kind, retry_s?}: the HTTP status (null without a
+ *   response) and the kind, the same name as the breaker reason ("http-<status>",
+ *   "no-response"). `retry_s` is the pause the failure calls for, given only
+ *   under OMC_JEV_BREAKER=1 and only for a failure that opens the breaker at
+ *   once; a breaker that is already open for longer keeps its later end.
+ * - under OMC_JEV_MAX_RPM, `rpm` {count, limit}: the requests this machine had
+ *   started in the UTC minute when the failed one was admitted (itself
+ *   included, later ones not) against the limit. Not a verdict on who caused
+ *   a 429: it shows at what count 429s arrive.
+ * Empty for a failure that is neither an HTTP status nor a missing response.
+ */
+export function failureLogFields(settings, failure, granted, classified) {
+  try {
+    const status = Number.isInteger(failure?.status) ? failure.status : undefined;
+    let error;
+    if (status !== undefined) {
+      const seconds = settings?.breaker ? (classified ?? classifyFailure(failure))?.seconds : undefined;
+      error = { status, kind: "http-" + status, ...(seconds !== undefined ? { retry_s: seconds } : {}) };
+    } else if (failure?.noResponse) {
+      error = { status: null, kind: "no-response" };
+    } else {
+      return {};
+    }
+    const withCount = settings?.maxRpm !== undefined && Number.isInteger(granted);
+    return { error, ...(withCount ? { rpm: { count: granted, limit: settings.maxRpm } } : {}) };
+  } catch {
+    return {};
+  }
+}
+
+/**
  * Requests without a response within the window, this one included, and the
  * newest time recorded: {count, newest}. The window ends at the newest time,
  * not at this call's own clock: concurrent processes sample their clock before
@@ -722,7 +757,9 @@ export function reserveRequest(settings, point, now = Date.now()) {
  * Admission of one request, called right before the HTTP call: the open
  * breaker first, then the limit. Returns {skip} when the request must not go
  * out: {mode: "circuit-open", breaker} or {mode: "cap", priority, count,
- * threshold, limit}; {} otherwise.
+ * threshold, limit}; otherwise {} or, under a limit, {granted}: the requests
+ * granted in this UTC minute up to and including this one, for the log line
+ * of a failure (failureLogFields).
  */
 export function admitRequest(settings, point, now = Date.now()) {
   const open = readBreaker(settings, now);
@@ -731,7 +768,7 @@ export function admitRequest(settings, point, now = Date.now()) {
   if (!slot.ok) {
     return { skip: { mode: "cap", priority: slot.priority, count: slot.count, threshold: slot.threshold, limit: slot.limit } };
   }
-  return {};
+  return slot.count === undefined ? {} : { granted: slot.count };
 }
 
 /** Extra shadow-log fields of a request admitRequest held back. */
