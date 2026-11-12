@@ -893,8 +893,8 @@ const AUTOPILOT_NEGATION_BEFORE = /(?<![\p{L}\d])(?:(?:don|doesn|didn|shouldn|co
 // Quotes, emphasis marks and brackets right before the alias do not change what a negation governs.
 const AUTOPILOT_OPENING_DELIMITERS_AT_END = /["'“”‘’`*_([{<]+$/;
 // A sentence that starts with a question or auxiliary word asks; "can/could/would/will you ..." is a request.
-// Imperative "do use" / "do check" is not a question.
-const AUTOPILOT_QUESTION_START = /^[ \t]*(?:[-*+>#]+[ \t]+|\d+[.)][ \t]+|\[[ xX]\][ \t]+|["'“‘([*_`])*(?!(?:can|could|would|will)\s+you(?![\p{L}\d]))(?!do\s+not(?![\p{L}\d]))(?!do\s+(?:use|check|fix|test|run|try|build|create|make|implement|execute|invoke|trigger|launch|apply)\s)(?:did|does|do|is|are|was|were|has|have|had|can|could|should|would|will|may|might|must|shall|what|why|how|when|where|who|which)(?![\p{L}\d])/iu;
+// Imperative "do use" / "do run" / "do start" (only activation verbs, not commands like test/fix) is not a question.
+const AUTOPILOT_QUESTION_START = /^[ \t]*(?:[-*+>#]+[ \t]+|\d+[.)][ \t]+|\[[ xX]\][ \t]+|["'""''`([*_`])*(?!(?:can|could|would|will)\s+you(?![\p{L}\d]))(?!do\s+not(?![\p{L}\d]))(?!do\s+(?:use|run|start|enable|activate|invoke|trigger|launch|engage|initiate|begin|kick\s+off|fire\s+up|spin\s+up|turn\s+on|switch\s+to|go(?:\s+with|\s+for)?|set)\s)(?:did|does|do|is|are|was|were|has|have|had|can|could|should|would|will|may|might|must|shall|what|why|how|when|where|who|which)(?![\p{L}\d])/iu;
 // The polite request "can/could/would/will you ..." keeps its question mark without being a question.
 const AUTOPILOT_REQUEST_START = /^[ \t]*(?:[-*+>#]+[ \t]+|\d+[.)][ \t]+|\[[ xX]\][ \t]+|["'“‘([*_`])*(?:please[ ,]+)?(?:can|could|would|will)\s+you(?![\p{L}\d])/iu;
 const AUTOPILOT_SENTENCE_END = /(?<=\S)[.!?][)\]}"'*_\u201D\u2019]*(?=\s|$)/g;
@@ -987,7 +987,7 @@ function hasExplicitAutopilotInvocationContext(
         // Preserve polite-request exemptions: AUTOPILOT_REQUEST_START already exempts "can/could/would/will you"
         if (AUTOPILOT_REQUEST_START.test('(' + parenContent)) return true; // Polite request activates
         // A true question is one that ends with '?' immediately before ')' OR starts with question/auxiliary word.
-        // Note: AUTOPILOT_QUESTION_START already excludes "do use/check/fix..." which are imperatives.
+        // Note: AUTOPILOT_QUESTION_START already excludes "do use/run/start..." (activation verbs) which are imperatives.
         const endsWithQuestion = /\?[ \t]*$/.test(parenContent);
         const startsWithQuestion = AUTOPILOT_QUESTION_START.test('(' + parenContent);
         if (endsWithQuestion || startsWithQuestion) {
