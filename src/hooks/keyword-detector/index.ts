@@ -1003,10 +1003,10 @@ function findActionableAutopilotAliasMatch(
     // earlier line does not veto it; every other mention is judged on a bounded window around it.
     const { start: lineStart, end: lineEnd } = getLineBounds(text, match.index);
     let previousLine = '';
-    for (let before = lineStart; before > 0 && !previousLine.trim();) {
-      const bounds = getLineBounds(text, before - 1);
-      previousLine = text.slice(bounds.start, bounds.end);
-      before = bounds.start;
+    for (let end = lineStart - 1; end > 0 && !previousLine.trim();) {
+      const start = text.lastIndexOf('\n', end - 1) + 1;
+      previousLine = text.slice(start, end);
+      end = start - 1;
     }
     const afterAlias = text.slice(match.index + keyword.length, match.index + keyword.length + 60);
     const ownLine = /^[ \t]*$/.test(linePrefix)

@@ -92,6 +92,8 @@ const COMMANDS = [
   'Fix the cron first.\nautopilot review completed work',
   'Fix the cron first.\nautopilot! fix the parser',
   'Could you use autopilot to fix the parser please',
+  '\nautopilot fix this',
+  '\n\nautopilot fix this',
   '**Can you use autopilot to fix this?**',
   'Use autopilot to update the label from "Ready?" to "Go."',
   'What is autopilot?\nautopilot: build this',

@@ -1183,10 +1183,10 @@ function hasActionableAutopilotKeyword(text, pattern) {
     // earlier line does not veto it; every other mention is judged on a bounded window around it.
     const { start: lineStart, end: lineEnd } = getLineBounds(searchText, match.index);
     let previousLine = '';
-    for (let before = lineStart; before > 0 && !previousLine.trim();) {
-      const bounds = getLineBounds(searchText, before - 1);
-      previousLine = searchText.slice(bounds.start, bounds.end);
-      before = bounds.start;
+    for (let end = lineStart - 1; end > 0 && !previousLine.trim();) {
+      const start = searchText.lastIndexOf('\n', end - 1) + 1;
+      previousLine = searchText.slice(start, end);
+      end = start - 1;
     }
     const afterAlias = searchText.slice(match.index + match[0].length, match.index + match[0].length + 60);
     const ownLine = /^[ \t]*$/.test(linePrefix)
