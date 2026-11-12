@@ -33,6 +33,8 @@ describe.each([
       'pwd without =': (n) => repeat('pwd', n),
       'credentials without =': (n) => repeat('credentials', n),
       'hasło without =': (n) => repeat('hasło', n),
+      'hasło: and an opening quote': (n) => repeat('hasło:"', n),
+      'password= and an opening quote': (n) => repeat("password='", n),
       'contraseña without =': (n) => repeat('contraseña', n),
     };
     for (const n of [100_000, 1_000_000]) {
@@ -42,7 +44,9 @@ describe.each([
         let best = Infinity;
         for (let run = 0; run < 3 && best >= n / 1000; run++) {
           const t0 = performance.now();
-          expect(mask(text)).toBe(text);
+          const out = mask(text);
+          // The shapes with an opening quote are masked (their values are read); the others pass unchanged.
+          if (!/quote/.test(name)) expect(out).toBe(text);
           best = Math.min(best, performance.now() - t0);
         }
         expect(best, `${name}, ${n} characters: ${Math.round(best)} ms`).toBeLessThan(n / 1000);
@@ -96,6 +100,11 @@ describe.each([
       ['Passwort: abc', 'Passwort: ***'],
       ['kennwort=abc', 'kennwort=***'],
       ['contraseña: abc', 'contraseña: ***'],
+      ['Contrasena: abc', 'Contrasena: ***'],
+      ['hasło: "correct horse battery staple"', 'hasło: "***"'],
+      ["klucz = 'correct horse battery staple' x", "klucz = '***' x"],
+      ['{"password": "correct horse battery staple", "a": 1}', '{"password": "***", "a": 1}'],
+      ['hasło: "', 'hasło: "'],
       ['hasło jest za krótkie', 'hasło jest za krótkie'],
       ['klucz do pokoju', 'klucz do pokoju'],
     ];
