@@ -526,6 +526,110 @@ describe('triggerStopCallbacks', () => {
     await expect(triggerStopCallbacks(metrics, testInput)).resolves.not.toThrow();
   });
 
+  it('handles Slack API errors gracefully', async () => {
+    const mockFetch = vi.fn().mockResolvedValue({
+      ok: false,
+      status: 500,
+      text: () => Promise.resolve('Internal Server Error'),
+    });
+    vi.stubGlobal('fetch', mockFetch);
+
+    mockGetConfig.mockReturnValue({
+      silentAutoUpdate: false,
+      stopHookCallbacks: {
+        slack: {
+          enabled: true,
+          webhookUrl: 'https://hooks.slack.com/services/T000/B000/XXXX',
+        },
+      },
+    });
+
+    const metrics = createTestMetrics();
+    // Should not throw: errors are logged but not rethrown
+    await expect(triggerStopCallbacks(metrics, testInput)).resolves.not.toThrow();
+  });
+
+  it('handles Slack webhook URL validation failures', async () => {
+    const mockFetch = vi.fn();
+    vi.stubGlobal('fetch', mockFetch);
+
+    const invalidConfigs = [
+      { enabled: true, webhookUrl: 'http://hooks.slack.com/services/T000/B000/XXXX' }, // Non-HTTPS
+      { enabled: true, webhookUrl: 'https://example.slack.com/services/T000/B000/XXXX' }, // Invalid domain
+      { enabled: false, webhookUrl: 'https://hooks.slack.com/services/T000/B000/XXXX' }, // Disabled
+    ];
+
+    for (const slack of invalidConfigs) {
+      mockFetch.mockClear();
+      mockGetConfig.mockReturnValue({
+        silentAutoUpdate: false,
+        stopHookCallbacks: { slack },
+      });
+      await triggerStopCallbacks(createTestMetrics(), testInput);
+    }
+
+    expect(mockFetch).not.toHaveBeenCalled();
+  });
+
+  it('handles Slack network timeouts gracefully', async () => {
+    const mockFetch = vi.fn().mockImplementation(
+      () => new Promise((_, reject) => {
+        setTimeout(() => reject(new Error('Timeout')), 100);
+      })
+    );
+    vi.stubGlobal('fetch', mockFetch);
+
+    mockGetConfig.mockReturnValue({
+      silentAutoUpdate: false,
+      stopHookCallbacks: {
+        slack: {
+          enabled: true,
+          webhookUrl: 'https://hooks.slack.com/services/T000/B000/XXXX',
+        },
+      },
+    });
+
+    const metrics = createTestMetrics();
+    // Should complete within the 5s timeout without hanging
+    const startTime = Date.now();
+    await triggerStopCallbacks(metrics, testInput);
+    const elapsed = Date.now() - startTime;
+    // Should complete reasonably quickly (well under 30s)
+    expect(elapsed).toBeLessThan(30_000);
+  });
+
+  it('sends Slack notification and ensures delivery is terminal', async () => {
+    const mockFetch = vi.fn().mockResolvedValue({
+      ok: true,
+      text: () => Promise.resolve('ok'),
+    });
+    vi.stubGlobal('fetch', mockFetch);
+
+    mockGetConfig.mockReturnValue({
+      silentAutoUpdate: false,
+      stopHookCallbacks: {
+        slack: {
+          enabled: true,
+          webhookUrl: 'https://hooks.slack.com/services/T000/B000/XXXX',
+          tagList: ['<!here>'],
+        },
+      },
+    });
+
+    const metrics = createTestMetrics();
+    await triggerStopCallbacks(metrics, testInput);
+
+    // Verify fetch was called exactly once (terminal delivery, not retried)
+    expect(mockFetch).toHaveBeenCalledTimes(1);
+    expect(mockFetch).toHaveBeenCalledWith(
+      'https://hooks.slack.com/services/T000/B000/XXXX',
+      expect.objectContaining({
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+      })
+    );
+  });
+
   it('executes multiple callbacks in parallel', async () => {
     const mockFetch = vi.fn().mockResolvedValue({
       ok: true,
