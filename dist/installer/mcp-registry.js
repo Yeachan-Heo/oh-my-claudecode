@@ -305,7 +305,9 @@ function codexEntriesEqual(codexEntry, registryEntry, typeFieldPresent) {
     return isDeepStrictEqual(comparableCodexEntry, comparableRegistryEntry);
 }
 function normalizeCodexMcpType(type) {
-    return type === 'streamable-http' ? 'http' : type;
+    // Codex doesn't distinguish between specific HTTP-like types; it infers the
+    // transport method from 'url' vs 'command'. Map all HTTP variants to 'http'.
+    return (type === 'streamable-http' || type === 'sse') ? 'http' : type;
 }
 function inferCodexMcpTransportType(entry) {
     if (entry.command && !entry.url)
@@ -790,9 +792,9 @@ function renderCodexServerBlock(name, entry) {
     if (entry.url) {
         lines.push(`url = ${renderTomlString(entry.url)}`);
     }
-    if (entry.type) {
-        lines.push(`type = ${renderTomlString(entry.type)}`);
-    }
+    // Note: Codex does not recognize the 'type' key and warns about it (issue #4899),
+    // so we don't write it to the Codex TOML config. The type field is preserved
+    // in Claude's JSON config (.claude.json).
     if (entry.env && Object.keys(entry.env).length > 0) {
         lines.push(`env = ${renderTomlEnvTable(entry.env)}`);
     }

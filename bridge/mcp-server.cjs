@@ -18627,6 +18627,56 @@ function ensureDirSync(dir) {
     throw err;
   }
 }
+function shouldRetryRename(error2) {
+  if (process.platform !== "win32") {
+    return false;
+  }
+  const err = error2;
+  return err?.code === "EPERM" || err?.code === "EBUSY" || err?.code === "EACCES";
+}
+function renameSyncWithRetry(tempPath, filePath, renameImpl, maxAttempts = 10, delayMs = 3) {
+  let lastError = null;
+  for (let attempt = 0; attempt < maxAttempts; attempt++) {
+    try {
+      renameImpl(tempPath, filePath);
+      return;
+    } catch (error2) {
+      if (!shouldRetryRename(error2)) {
+        throw error2;
+      }
+      lastError = error2;
+      if (attempt < maxAttempts - 1) {
+        try {
+          Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, delayMs);
+        } catch {
+        }
+      }
+    }
+  }
+  if (lastError) {
+    throw lastError;
+  }
+}
+async function renameWithRetry(tempPath, filePath, maxAttempts = 10, delayMs = 3) {
+  let lastError = null;
+  for (let attempt = 0; attempt < maxAttempts; attempt++) {
+    try {
+      await fs2.rename(tempPath, filePath);
+      return;
+    } catch (error2) {
+      if (!shouldRetryRename(error2)) {
+        throw error2;
+      }
+      lastError = error2;
+      if (attempt < maxAttempts - 1) {
+        await new Promise((resolve17) => setTimeout(resolve17, delayMs));
+      }
+    }
+  }
+  if (lastError) {
+    throw lastError;
+  }
+}
 function writeAllSync(fd, content, label) {
   const bytes = Buffer.from(content, "utf-8");
   let offset = 0;
@@ -18775,7 +18825,7 @@ async function atomicWriteJson(filePath, data, hooks) {
       verifyPrivateTempFile(fd.fd, tempPath, "atomic JSON write");
       backupPath = preservePriorTarget(filePath);
       hooks?.beforeRename?.();
-      await fs2.rename(tempPath, filePath);
+      await renameWithRetry(tempPath, filePath);
       let publishedIdentity = null;
       try {
         verifyPublishedFile(fd.fd, filePath, "atomic JSON write");
@@ -18829,7 +18879,9 @@ function atomicWriteFileSync(filePath, content, hooks, operations) {
     verifyPrivateTempFile(fd, tempPath, "atomic write", operations);
     backupPath = preservePriorTarget(filePath, operations);
     hooks?.beforeRename?.();
-    (operations?.rename ?? fsSync.renameSync)(tempPath, filePath);
+    renameSyncWithRetry(tempPath, filePath, (src, dst) => {
+      (operations?.rename ?? fsSync.renameSync)(src, dst);
+    });
     let publishedIdentity = null;
     try {
       verifyPublishedFile(fd, filePath, "atomic write", operations);

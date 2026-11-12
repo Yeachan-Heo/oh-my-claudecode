@@ -1722,7 +1722,8 @@ describe.each([
   it.each([
     'Please proceed (could you not use autopilot to fix this)',
     'Do not use autopilot (could you check the logs)',
-  ])('does not activate autopilot when negation overrides polite request in parentheses: %j', (prompt) => {
+    'The autopilot run failed (could you check the logs)',
+  ])('does not activate autopilot when negation or status overrides polite request in parentheses: %j', (prompt) => {
     expect(autopilotActivated(prompt)).toBe(false);
   });
 

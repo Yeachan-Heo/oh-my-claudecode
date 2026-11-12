@@ -960,6 +960,11 @@ function hasExplicitAutopilotInvocationContext(
   // Check for negation first, before the polite-request exemption:
   // "Do not use autopilot (could you check the logs)" should not activate despite the polite request in parentheses.
   if (AUTOPILOT_NEGATION_BEFORE.test(tail) || AUTOPILOT_NEGATION_BEFORE.test(tail.replace(AUTOPILOT_OPENING_DELIMITERS_AT_END, ''))) return false;
+  // Check for reference labels before the polite-request exemption.
+  if (AUTOPILOT_REFERENCE_LABEL_LINE.test(lineHead.replace(AUTOPILOT_MARKDOWN_MARKS, '').replace(AUTOPILOT_LIST_PREFIX, '').replace(/\s+$/, ''))) return false;
+  // Check for status verb + status result followed by parentheses (e.g., "run failed (")
+  // This handles cases like "The autopilot run failed (could you check the logs)" which should not activate.
+  if (/^[ \t]+(?:run|test|build|deploy|check)[ \t]+(?:failed|passed|succeeded|completed|crashed|errored|hung)(?![\p{L}\d])[ \t]*\(/iu.test(afterKeyword)) return false;
   // Check for a parenthesized question at the end of the sentence: "One question (should I use ...)"
   // But preserve polite requests inside parentheses: "Please proceed (could you use autopilot)"
   const sentenceText = text.slice(lineStart, lineEnd).replace(/\s+$/, '');
@@ -975,7 +980,6 @@ function hasExplicitAutopilotInvocationContext(
       }
     }
   }
-  if (AUTOPILOT_REFERENCE_LABEL_LINE.test(lineHead.replace(AUTOPILOT_MARKDOWN_MARKS, '').replace(AUTOPILOT_LIST_PREFIX, '').replace(/\s+$/, ''))) return false;
   if (AUTOPILOT_NON_ENGLISH_LINE.test(text.slice(lineStart, Math.min(lineEnd, lineStart + 400)))) return true;
   const isHardwareAlias = /^(?:full\s*auto|fullsend)$/i.test((keywordText || '').trim());
   if (leadingPrefix) {

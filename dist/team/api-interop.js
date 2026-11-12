@@ -3,7 +3,7 @@ import { dirname, join, resolve as resolvePath } from 'node:path';
 import { getOmcRoot } from '../lib/worktree-paths.js';
 import { canonicalTeamCwd, canonicalTeamStatePath, canonicalTeamStateRoot, teamStateRoot, } from './state-paths.js';
 import { TEAM_NAME_SAFE_PATTERN, WORKER_NAME_SAFE_PATTERN, TASK_ID_SAFE_PATTERN, TEAM_TASK_STATUSES, TEAM_EVENT_TYPES, TEAM_TASK_APPROVAL_STATUSES, } from './contracts.js';
-import { teamSendMessage as sendDirectMessage, teamBroadcast as broadcastMessage, teamListMailbox as listMailboxMessages, teamMarkMessageDelivered as markMessageDelivered, teamMarkMessageNotified as markMessageNotified, teamCreateTask, teamReadTask, teamListTasks, teamUpdateTask, teamClaimTask, teamTransitionTaskStatus, teamReleaseTaskClaim, teamReadConfig, teamReadManifest, teamReadWorkerStatus, teamReadWorkerHeartbeat, teamUpdateWorkerHeartbeat, teamWriteWorkerInbox, teamWriteWorkerIdentity, teamAppendEvent, teamGetSummary, teamWriteShutdownRequest, teamReadShutdownAck, teamReadMonitorSnapshot, teamWriteMonitorSnapshot, teamReadTaskApproval, teamWriteTaskApproval, teamPublishTaskRecoveryCheckpoint, teamReadCanonicalMailboxMessageStrict, } from './team-ops.js';
+import { teamSendMessage as sendDirectMessage, teamBroadcast as broadcastMessage, teamListMailbox as listMailboxMessages, teamMarkMessageDelivered as markMessageDelivered, teamMarkMessageNotified as markMessageNotified, teamCreateTask, teamReadTask, teamListTasks, teamUpdateTask, teamClaimTask, teamTransitionTaskStatus, teamReleaseTaskClaim, teamRenewTaskClaim, teamReadConfig, teamReadManifest, teamReadWorkerStatus, teamReadWorkerHeartbeat, teamUpdateWorkerHeartbeat, teamWriteWorkerInbox, teamWriteWorkerIdentity, teamAppendEvent, teamGetSummary, teamWriteShutdownRequest, teamReadShutdownAck, teamReadMonitorSnapshot, teamWriteMonitorSnapshot, teamReadTaskApproval, teamWriteTaskApproval, teamPublishTaskRecoveryCheckpoint, teamReadCanonicalMailboxMessageStrict, } from './team-ops.js';
 import { queueBroadcastMailboxMessage, queueDirectMailboxMessage, runMailboxNotificationAttempt, } from './mcp-comm.js';
 import { verifyTeamTargetOwnership } from './tmux-session.js';
 import { readDispatchRequestStrict } from './dispatch-queue.js';
@@ -77,6 +77,7 @@ export const TEAM_API_OPERATIONS = [
     'claim-task',
     'transition-task-status',
     'release-task-claim',
+    'renew-task-claim',
     'read-config',
     'read-manifest',
     'read-worker-status',
@@ -895,6 +896,17 @@ export async function executeTeamApiOperation(operation, args, fallbackCwd) {
                     return { ok: false, operation, error: { code: 'invalid_input', message: 'team_name, task_id, claim_token, worker are required' } };
                 }
                 const result = await teamReleaseTaskClaim(teamName, taskId, claimToken, worker, cwd);
+                return { ok: true, operation, data: result };
+            }
+            case 'renew-task-claim': {
+                const teamName = String(args.team_name || '').trim();
+                const taskId = String(args.task_id || '').trim();
+                const claimToken = String(args.claim_token || '').trim();
+                const worker = String(args.worker || '').trim();
+                if (!teamName || !taskId || !claimToken || !worker) {
+                    return { ok: false, operation, error: { code: 'invalid_input', message: 'team_name, task_id, claim_token, worker are required' } };
+                }
+                const result = await teamRenewTaskClaim(teamName, taskId, claimToken, worker, cwd);
                 return { ok: true, operation, data: result };
             }
             case 'read-config': {

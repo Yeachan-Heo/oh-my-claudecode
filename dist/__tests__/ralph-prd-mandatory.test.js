@@ -1,5 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { existsSync, mkdirSync, rmSync, writeFileSync } from 'fs';
+import { execSync } from 'child_process';
 import { join } from 'path';
 import { tmpdir } from 'os';
 import { detectNoPrdFlag, stripNoPrdFlag, detectCriticModeFlag, stripCriticModeFlag, createRalphLoopHook, readRalphState, findPrdPath, getSessionPrdPath, initPrd, readPrd, writePrd, getStoryGoverningCriteriaRevision, } from '../hooks/ralph/index.js';
@@ -17,6 +18,8 @@ describe('Ralph PRD-Mandatory', () => {
         mkdirSync(testDir, { recursive: true });
         // Create .omc/state directory for ralph state files
         mkdirSync(join(testDir, '.omc', 'state'), { recursive: true });
+        // Initialize git repository so that getOmcRoot can properly resolve paths
+        execSync('git init', { cwd: testDir, stdio: 'pipe' });
     });
     afterEach(() => {
         if (existsSync(testDir)) {

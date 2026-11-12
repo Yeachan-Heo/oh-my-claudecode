@@ -201,6 +201,7 @@ const NON_COMMANDS = [
   'Fix the cron first.\nautopilot: no task assigned',
   'Please proceed (could you not use autopilot to fix this)',
   'Do not use autopilot (could you check the logs)',
+  'The autopilot run failed (could you check the logs)',
 ];
 
 describe('autopilot command policy parity across the three detector copies', () => {

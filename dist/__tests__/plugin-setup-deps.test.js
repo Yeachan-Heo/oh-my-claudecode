@@ -4,8 +4,7 @@ import { execFileSync } from 'node:child_process';
 import { tmpdir } from 'node:os';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
-// @ts-expect-error -- plain .mjs helper without type declarations
-import { normalizeHookCommand, UNIX_HOOK_PREFIX, WINDOWS_HOOK_PREFIX } from '../../scripts/lib/hook-command-normalizer.mjs';
+import { hookPrefixForPlatform, normalizeHookCommand, normalizeHooksDataForPlatform, UNIX_HOOK_PREFIX, windowsExecArgs } from '../../scripts/lib/hook-command-normalizer.mjs';
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 const PACKAGE_ROOT = join(__dirname, '..', '..');
@@ -135,13 +134,13 @@ describe('plugin-setup.mjs hook command portability', () => {
         ? readFileSync(PLUGIN_SETUP_PATH, 'utf-8')
         : '';
     const UNIX_PREFIX = UNIX_HOOK_PREFIX;
-    const WINDOWS_PREFIX = WINDOWS_HOOK_PREFIX;
     function patchCommand(cmd, prefix = UNIX_PREFIX) {
         return normalizeHookCommand(cmd, prefix);
     }
     it('selects direct node only on win32 and find-node bootstrap elsewhere', () => {
         expect(scriptContent).toContain("process.platform === 'win32'");
-        expect(scriptContent).toContain('hookPrefixForPlatform');
+        expect(scriptContent).toContain('direct node exec');
+        expect(scriptContent).toContain('find-node.sh run.cjs');
         expect(scriptContent).toContain('normalizeHooksDataForPlatform');
     });
     it('leaves the canonical sh+find-node+run.cjs command unchanged', () => {
@@ -169,40 +168,44 @@ describe('plugin-setup.mjs hook command portability', () => {
         expect(result).toBe(`${UNIX_PREFIX}"\${CLAUDE_PLUGIN_ROOT}"/scripts/keyword-detector.mjs`);
     });
     it('keeps generated SessionEnd hooks native-Windows safe without sh', () => {
-        const sessionEnd = 'node "${CLAUDE_PLUGIN_ROOT}"/scripts/run.cjs "${CLAUDE_PLUGIN_ROOT}"/scripts/session-end.mjs';
-        const wikiSessionEnd = 'node "${CLAUDE_PLUGIN_ROOT}"/scripts/run.cjs "${CLAUDE_PLUGIN_ROOT}"/scripts/wiki-session-end.mjs';
-        expect(patchCommand(sessionEnd, WINDOWS_PREFIX)).toBe(sessionEnd);
-        expect(patchCommand(wikiSessionEnd, WINDOWS_PREFIX)).toBe(wikiSessionEnd);
-        expect(sessionEnd).not.toContain('sh ');
-        expect(wikiSessionEnd).not.toContain('sh ');
+        const data = {
+            hooks: {
+                SessionEnd: [{ hooks: [
+                            { command: 'node "${CLAUDE_PLUGIN_ROOT}"/scripts/run.cjs "${CLAUDE_PLUGIN_ROOT}"/scripts/session-end.mjs' },
+                            { command: 'node "${CLAUDE_PLUGIN_ROOT}"/scripts/run.cjs "${CLAUDE_PLUGIN_ROOT}"/scripts/wiki-session-end.mjs' },
+                        ] }],
+            },
+        };
+        normalizeHooksDataForPlatform(data, 'win32');
+        const hooks = data.hooks.SessionEnd[0].hooks;
+        expect(hooks[0]).toMatchObject({ command: 'node', args: windowsExecArgs('session-end.mjs') });
+        expect(hooks[1]).toMatchObject({ command: 'node', args: windowsExecArgs('wiki-session-end.mjs') });
+        expect(JSON.stringify(hooks)).not.toContain('find-node.sh');
+        expect(JSON.stringify(hooks)).not.toMatch(/(?:^|\s)sh(?:\s|")/);
     });
-    it('normalizes every bundled sh/find-node hook command to direct node on Windows', () => {
+    it('normalizes every bundled hook to exec form on Windows', () => {
         const hooksJson = JSON.parse(readFileSync(join(PACKAGE_ROOT, 'hooks', 'hooks.json'), 'utf-8'));
-        const commands = Object.entries(hooksJson.hooks).flatMap(([event, groups]) => groups.flatMap(group => group.hooks
-            .map(hook => hook.command)
-            .filter((command) => typeof command === 'string')
-            .map(command => ({ event, command }))));
-        expect(commands.length).toBeGreaterThan(0);
-        for (const { event, command } of commands) {
-            const patched = patchCommand(command, WINDOWS_PREFIX);
-            expect(patched, event).toMatch(/^node "\$\{CLAUDE_PLUGIN_ROOT\}"\/scripts\/run\.cjs /);
-            expect(patched, event).not.toContain('find-node.sh');
-            expect(patched, event).not.toContain('/bin/sh');
-            expect(patched, event).not.toMatch(/^sh /);
+        normalizeHooksDataForPlatform(hooksJson, 'win32');
+        const hooks = Object.entries(hooksJson.hooks).flatMap(([event, groups]) => groups.flatMap(group => group.hooks.map(hook => ({ event, hook }))));
+        expect(hooks.length).toBeGreaterThan(0);
+        for (const { event, hook } of hooks) {
+            expect(hook.command, event).toBe('node');
+            expect(hook.args?.[0], event).toBe('${CLAUDE_PLUGIN_ROOT}/scripts/run.cjs');
+            expect(hook.args?.[1], event).toMatch(/^\$\{CLAUDE_PLUGIN_ROOT\}\/scripts\/.+\.mjs$/);
+            expect(JSON.stringify(hook), event).not.toContain('find-node.sh');
+            expect(JSON.stringify(hook), event).not.toContain('/bin/sh');
         }
     });
-    it('repairs every bundled direct-node hook command to find-node on Unix/macOS', () => {
+    it('repairs every bundled exec hook to find-node on Unix/macOS', () => {
         const hooksJson = JSON.parse(readFileSync(join(PACKAGE_ROOT, 'hooks', 'hooks.json'), 'utf-8'));
-        const commands = Object.entries(hooksJson.hooks).flatMap(([event, groups]) => groups.flatMap(group => group.hooks
-            .map(hook => hook.command)
-            .filter((command) => typeof command === 'string')
-            .map(command => ({ event, command }))));
-        expect(commands.length).toBeGreaterThan(0);
-        for (const { event, command } of commands) {
-            const patched = patchCommand(command, UNIX_PREFIX);
-            expect(patched, event).toMatch(/^sh "\$\{CLAUDE_PLUGIN_ROOT\}"\/scripts\/find-node\.sh "\$\{CLAUDE_PLUGIN_ROOT\}"\/scripts\/run\.cjs /);
-            expect(patched, event).toContain('"${CLAUDE_PLUGIN_ROOT}"/scripts/');
-            expect(patched, event).not.toContain('/bin/sh');
+        normalizeHooksDataForPlatform(hooksJson, 'linux');
+        const hooks = Object.entries(hooksJson.hooks).flatMap(([event, groups]) => groups.flatMap(group => group.hooks.map(hook => ({ event, hook }))));
+        expect(hooks.length).toBeGreaterThan(0);
+        for (const { event, hook } of hooks) {
+            expect(hook.command, event).toMatch(/^sh "\$\{CLAUDE_PLUGIN_ROOT\}"\/scripts\/find-node\.sh "\$\{CLAUDE_PLUGIN_ROOT\}"\/scripts\/run\.cjs /);
+            expect(hook.command, event).toContain('"${CLAUDE_PLUGIN_ROOT}"/scripts/');
+            expect(hook.command, event).not.toContain('/bin/sh');
+            expect(hook.args, event).toBeUndefined();
         }
     });
     it('does not rewrite the source hooks manifest when run from a repository checkout', () => {
@@ -229,9 +232,19 @@ describe('plugin-setup.mjs hook command portability', () => {
             rmSync(tempRoot, { recursive: true, force: true });
         }
     });
-    it('normalizes current sh find-node commands to node run.cjs on Windows', () => {
-        const current = 'sh "${CLAUDE_PLUGIN_ROOT}"/scripts/find-node.sh "${CLAUDE_PLUGIN_ROOT}"/scripts/run.cjs "${CLAUDE_PLUGIN_ROOT}"/scripts/session-end.mjs';
-        expect(patchCommand(current, WINDOWS_PREFIX)).toBe('node "${CLAUDE_PLUGIN_ROOT}"/scripts/run.cjs "${CLAUDE_PLUGIN_ROOT}"/scripts/session-end.mjs');
+    it('normalizes current sh find-node commands to exec form on Windows', () => {
+        const data = {
+            hooks: {
+                SessionEnd: [{ hooks: [{
+                                command: 'sh "${CLAUDE_PLUGIN_ROOT}"/scripts/find-node.sh "${CLAUDE_PLUGIN_ROOT}"/scripts/run.cjs "${CLAUDE_PLUGIN_ROOT}"/scripts/session-end.mjs',
+                            }] }],
+            },
+        };
+        expect(normalizeHooksDataForPlatform(data, 'win32')).toBe(true);
+        expect(data.hooks.SessionEnd[0].hooks[0]).toMatchObject({
+            command: 'node',
+            args: windowsExecArgs('session-end.mjs'),
+        });
     });
     it.runIf(process.platform !== 'win32')('executes a Unix hook command with minimal PATH by resolving Volta-managed node', () => {
         const tempRoot = mkdtempSync(join(tmpdir(), 'omc-min-path-hook-'));
@@ -342,11 +355,15 @@ describe('plugin-setup.mjs hook command portability', () => {
         }
     });
     it('keeps the Windows hook command direct-node and shell-wrapper free', () => {
-        const command = patchCommand(`${UNIX_PREFIX}"\${CLAUDE_PLUGIN_ROOT}"/scripts/session-end.mjs`, WINDOWS_PREFIX);
-        expect(command).toBe('node "${CLAUDE_PLUGIN_ROOT}"/scripts/run.cjs "${CLAUDE_PLUGIN_ROOT}"/scripts/session-end.mjs');
-        expect(command).not.toContain('find-node.sh');
-        expect(command).not.toMatch(/(?:^|\s)sh(?:\s|$)/);
-        expect(command).not.toContain('/bin/sh');
+        const data = {
+            hooks: { SessionEnd: [{ hooks: [{ command: `${UNIX_PREFIX}"\${CLAUDE_PLUGIN_ROOT}"/scripts/session-end.mjs` }] }] },
+        };
+        normalizeHooksDataForPlatform(data, 'win32');
+        const hook = data.hooks.SessionEnd[0].hooks[0];
+        expect(hook).toMatchObject({ command: 'node', args: windowsExecArgs('session-end.mjs') });
+        expect(JSON.stringify(hook)).not.toContain('find-node.sh');
+        expect(hook.command).not.toMatch(/(?:^|\s)sh(?:\s|$)/);
+        expect(JSON.stringify(hook)).not.toContain('/bin/sh');
     });
     // Regression coverage for #4042. The bare `$CLAUDE_PLUGIN_ROOT` form depends on
     // a POSIX shell expanding an environment variable. The Windows prefix runs
@@ -356,47 +373,64 @@ describe('plugin-setup.mjs hook command portability', () => {
     // identically, so braced is the only spelling that works on every platform.
     describe('braced ${CLAUDE_PLUGIN_ROOT} placeholder (#4042)', () => {
         const BARE_ROOT = /\$CLAUDE_PLUGIN_ROOT/;
-        function bundledCommands() {
+        function bundledHooks() {
             const hooksJson = JSON.parse(readFileSync(join(PACKAGE_ROOT, 'hooks', 'hooks.json'), 'utf-8'));
             return Object.entries(hooksJson.hooks).flatMap(([event, groups]) => groups.flatMap(group => group.hooks
-                .map(hook => hook.command)
-                .filter((command) => typeof command === 'string')
-                .map(command => ({ event, command }))));
+                .filter((hook) => typeof hook.command === 'string')
+                .map(hook => ({ event, command: hook.command, args: hook.args }))));
+        }
+        function invocationText(hook) {
+            return [hook.command, ...(hook.args ?? [])].join(' ');
         }
         it('ships no bare $CLAUDE_PLUGIN_ROOT in the bundled manifest', () => {
-            const commands = bundledCommands();
-            expect(commands.length).toBeGreaterThan(0);
-            for (const { event, command } of commands) {
-                expect(command, event).toContain('"${CLAUDE_PLUGIN_ROOT}"');
-                expect(command.replace(/\$\{CLAUDE_PLUGIN_ROOT\}/g, ''), event).not.toMatch(BARE_ROOT);
+            const hooks = bundledHooks();
+            expect(hooks.length).toBeGreaterThan(0);
+            for (const hook of hooks) {
+                const text = invocationText(hook);
+                expect(text, hook.event).toContain('${CLAUDE_PLUGIN_ROOT}');
+                expect(text.replace(/\$\{CLAUDE_PLUGIN_ROOT\}/g, ''), hook.event).not.toMatch(BARE_ROOT);
+                expect(hook.command, hook.event).toBe('node');
             }
         });
-        it('emits the braced form from both platform prefixes', () => {
-            for (const prefix of [UNIX_PREFIX, WINDOWS_PREFIX]) {
-                expect(prefix).toContain('"${CLAUDE_PLUGIN_ROOT}"');
-                expect(prefix.replace(/\$\{CLAUDE_PLUGIN_ROOT\}/g, '')).not.toMatch(BARE_ROOT);
+        it('emits the braced form from both platform outputs', () => {
+            const unix = hookPrefixForPlatform('linux');
+            const windows = windowsExecArgs('keyword-detector.mjs').join(' ');
+            for (const text of [unix, windows]) {
+                expect(text).toContain('${CLAUDE_PLUGIN_ROOT}');
+                expect(text.replace(/\$\{CLAUDE_PLUGIN_ROOT\}/g, '')).not.toMatch(BARE_ROOT);
             }
         });
         it('never normalizes a manifest command back to the bare form', () => {
             // The defect this guards: correcting hooks.json alone was undone because
             // plugin-setup.mjs re-normalized every command to the bare spelling.
-            for (const prefix of [UNIX_PREFIX, WINDOWS_PREFIX]) {
-                for (const { event, command } of bundledCommands()) {
-                    const patched = patchCommand(command, prefix);
-                    const label = `${event} / ${prefix}`;
-                    // Must still be recognised and rewritten to the platform prefix; a
-                    // normalizer that no longer matches the braced manifest would leave
-                    // the command untouched and silently drop the platform bootstrap.
-                    expect(patched, label).toContain(prefix);
-                    expect(patched.replace(/\$\{CLAUDE_PLUGIN_ROOT\}/g, ''), label).not.toMatch(BARE_ROOT);
+            const hooksJson = JSON.parse(readFileSync(join(PACKAGE_ROOT, 'hooks', 'hooks.json'), 'utf-8'));
+            for (const platform of ['win32', 'linux']) {
+                const copy = structuredClone(hooksJson);
+                normalizeHooksDataForPlatform(copy, platform);
+                for (const groups of Object.values(copy.hooks)) {
+                    for (const group of groups) {
+                        for (const hook of group.hooks) {
+                            const text = invocationText(hook);
+                            expect(text.replace(/\$\{CLAUDE_PLUGIN_ROOT\}/g, ''), platform).not.toMatch(BARE_ROOT);
+                        }
+                    }
                 }
             }
         });
         it('repairs a bare command and is idempotent on the result', () => {
-            const bare = 'node "$CLAUDE_PLUGIN_ROOT"/scripts/run.cjs "$CLAUDE_PLUGIN_ROOT"/scripts/session-start.mjs';
-            const once = patchCommand(bare, WINDOWS_PREFIX);
-            expect(once).toBe('node "${CLAUDE_PLUGIN_ROOT}"/scripts/run.cjs "${CLAUDE_PLUGIN_ROOT}"/scripts/session-start.mjs');
-            expect(patchCommand(once, WINDOWS_PREFIX)).toBe(once);
+            const data = {
+                hooks: {
+                    SessionStart: [{ hooks: [{
+                                    command: 'node "$CLAUDE_PLUGIN_ROOT"/scripts/run.cjs "$CLAUDE_PLUGIN_ROOT"/scripts/session-start.mjs',
+                                }] }],
+                },
+            };
+            expect(normalizeHooksDataForPlatform(data, 'win32')).toBe(true);
+            expect(data.hooks.SessionStart[0].hooks[0]).toMatchObject({
+                command: 'node',
+                args: windowsExecArgs('session-start.mjs'),
+            });
+            expect(normalizeHooksDataForPlatform(data, 'win32')).toBe(false);
         });
     });
 });
