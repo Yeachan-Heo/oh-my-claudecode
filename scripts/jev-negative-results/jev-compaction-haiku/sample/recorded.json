@@ -1,0 +1,87 @@
+{
+ "_note": "Synthetic. haiku: summary text per episode number. jev: recorded answer per episode number (choice + probabilities for the decision question, sprzeczne = answer to the contradiction question).",
+ "haiku": {
+  "1": "Task 1: package-1 had one failing test in packages/package-1/src/case.test.js; fixed in commit ab1c1de1f, 102 tests pass. A reviewer left 4 comments, none blocking; open item: a regression test for case 1.",
+  "2": "Task 2: package-2 had one failing test in packages/package-2/src/case.test.js; fixed in commit ab2c2de2f, 103 tests pass. A reviewer left 5 comments, none blocking; open item: a regression test for case 2.",
+  "3": "Task 3: package-3 had one failing test in packages/package-3/src/case.test.js; fixed in commit ab3c3de3f, 104 tests pass. A reviewer left 6 comments, none blocking; open item: a regression test for case 3.",
+  "4": "Task 4: package-4 had one failing test in packages/package-4/src/case.test.js; fixed in commit ab4c4de4f, 105 tests pass. A reviewer left 7 comments, none blocking; open item: a regression test for case 4.",
+  "5": "Task 5: package-5 had one failing test in packages/package-5/src/case.test.js; fixed in commit ab5c5de5f, 106 tests pass. A reviewer left 8 comments, none blocking; open item: a regression test for case 5.",
+  "6": "Task 6: package-6 had one failing test in packages/package-6/src/case.test.js; fixed in commit ab6c6de6f, 107 tests pass. A reviewer left 9 comments, none blocking; open item: a regression test for case 6.",
+  "7": "Task 7: package-7 had one failing test in packages/package-7/src/case.test.js; fixed in commit ab7c7de7f, 108 tests pass. A reviewer left 10 comments, none blocking; open item: a regression test for case 7. Coverage rose to 87.3 %.",
+  "8": "Task 8: package-8 had one failing test in packages/package-8/src/case.test.js; fixed in commit ab8c8de8f, 109 tests pass. A reviewer left 11 comments, none blocking; open item: a regression test for case 8."
+ },
+ "jev": {
+  "1": {
+   "choice": "streszczenie",
+   "probabilities": {
+    "streszczenie": 0.8,
+    "doslownie": 0.12,
+    "slad": 0.08
+   },
+   "sprzeczne": 0.1
+  },
+  "2": {
+   "choice": "streszczenie",
+   "probabilities": {
+    "streszczenie": 0.8,
+    "doslownie": 0.12,
+    "slad": 0.08
+   },
+   "sprzeczne": 0.1
+  },
+  "3": {
+   "choice": "doslownie",
+   "probabilities": {
+    "doslownie": 0.7,
+    "streszczenie": 0.25,
+    "slad": 0.05
+   },
+   "sprzeczne": 0.1
+  },
+  "4": {
+   "choice": "streszczenie",
+   "probabilities": {
+    "streszczenie": 0.8,
+    "doslownie": 0.12,
+    "slad": 0.08
+   },
+   "sprzeczne": 0.1
+  },
+  "5": {
+   "choice": "slad",
+   "probabilities": {
+    "slad": 0.6,
+    "streszczenie": 0.3,
+    "doslownie": 0.1
+   },
+   "sprzeczne": 0.1
+  },
+  "6": {
+   "choice": "streszczenie",
+   "probabilities": {
+    "streszczenie": 0.8,
+    "doslownie": 0.12,
+    "slad": 0.08
+   },
+   "sprzeczne": 0.1
+  },
+  "7": {
+   "choice": "streszczenie",
+   "probabilities": {
+    "streszczenie": 0.55,
+    "doslownie": 0.3,
+    "slad": 0.15
+   },
+   "sprzeczne": 0.6
+  },
+  "8": {
+   "choice": "streszczenie",
+   "probabilities": {
+    "streszczenie": 0.8,
+    "doslownie": 0.12,
+    "slad": 0.08
+   },
+   "sprzeczne": 0.1
+  }
+ }
+}

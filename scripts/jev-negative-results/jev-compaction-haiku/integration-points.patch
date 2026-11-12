@@ -1,0 +1,99 @@
+--- a/hooks/jev-compaction.ts
++++ b/hooks/jev-compaction.ts
+@@ -897,6 +897,7 @@
+     OMC_JEV_COMPACT_LONG_REPLIES: await $.env.get('OMC_JEV_COMPACT_LONG_REPLIES'),
+     OMC_JEV_COMPACT_AGENT_TRIM: await $.env.get('OMC_JEV_COMPACT_AGENT_TRIM'), // N28a
+     OMC_JEV_COMPACT_AGENT_MESSAGES: await $.env.get('OMC_JEV_COMPACT_AGENT_MESSAGES'), // 0f
++    OMC_JEV_COMPACT_HYBRID: await $.env.get('OMC_JEV_COMPACT_HYBRID'), // <jev-krok-b-env>
+     OMC_JEV_WINDOW_CHARS: await $.env.get('OMC_JEV_WINDOW_CHARS'), // T2: the window of Jev, the only limit of the input
+     OMC_JEV_COMPACT_BLOCK_QUESTIONS: await $.env.get('OMC_JEV_COMPACT_BLOCK_QUESTIONS'), // T2: full (default) | shared: the question about a block in full in each question, or its instruction once in the state
+     OMC_JEV_COMPACT_VERDICTS: await $.env.get('OMC_JEV_COMPACT_VERDICTS'), // T2: off = no verdict files, no background pass (default active, rec-D F7)
+@@ -943,6 +944,8 @@
+     longReplies: stageMode(env.OMC_JEV_COMPACT_LONG_REPLIES),
+     agentTrim: !['off', '0', 'false', 'no'].includes(String(env.OMC_JEV_COMPACT_AGENT_TRIM ?? '').trim().toLowerCase()), // N28a: on unless off|0|false|no
+     agentMessages: stageMode(env.OMC_JEV_COMPACT_AGENT_MESSAGES), // 0f
++    hybrid: ['active'].includes(String(env.OMC_JEV_COMPACT_HYBRID ?? '').trim()) ? 'active' : ['off', 'shadow'].includes(String(env.OMC_JEV_COMPACT_HYBRID).trim()) ? String(env.OMC_JEV_COMPACT_HYBRID).trim() : 'off', // <jev-krok-b-cfg>
++    hybridInvalid: ['', 'off', 'shadow', 'active'].includes(String(env.OMC_JEV_COMPACT_HYBRID ?? '').trim()) ? undefined : clip(oneLine(String(env.OMC_JEV_COMPACT_HYBRID)), 40), // <jev-krok-b-cfg>
+     windowChars: /^[1-9]\d{3,6}$/.test(String(env.OMC_JEV_WINDOW_CHARS ?? '').trim()) && Number(env.OMC_JEV_WINDOW_CHARS) >= 8000 ? Number(env.OMC_JEV_WINDOW_CHARS) : undefined, // T2
+     verdicts: String(env.OMC_JEV_COMPACT_VERDICTS ?? '').trim().toLowerCase() === 'off' ? 'off' : 'active', // T2
+     blockQuestions: String(env.OMC_JEV_COMPACT_BLOCK_QUESTIONS ?? '').trim().toLowerCase() === 'shared' ? 'shared' : 'full', // T2
+@@ -5493,7 +5496,8 @@
+ }
+ 
+ async function decide($, e, cfg, record, started) {
+-  const messages = Array.isArray(e.messages) ? e.messages : []
++  let messages = Array.isArray(e.messages) ? e.messages : [] // <jev-krok-b-let>
++  let krokBNaglowek // <jev-krok-b-let>
+   const messagesBeforeB = messages // the rows before step B rewrites the old segments: the tasks of the list are placed on these (the rows of the list calls are traces after the rewrite)
+   const before = messages.reduce((s, m) => s + messageChars(m), 0)
+   record.chars_before = before
+@@ -5600,6 +5604,39 @@
+     target = el.target
+   }
+   Object.assign(record, { tokens_before: tokensBefore, target_tokens: target })
++  // <jev-krok-b-wywolanie>
++  // Krok B (T6, B0): jedyny punkt wywołania w decide(). Czyta tylko werdykty i streszczenia z plików (S11, S3), niczego nie pyta Jeva w oknie hooka.
++  // Każda porażka zostawia ścieżkę A poniżej nietkniętą (rekord hybrid.fallback); krok B nie zwraca nic częściowego.
++  if (main && cfg.hybrid !== 'off') {
++    let hb
++    const tB0 = Date.now()
++    record.etapy_ms = { ...(record.etapy_ms ?? {}), przed_krok_b: tB0 - started }
++    const krokBCtx = { e, cfg, record, messages, apiList, group, keepFrom, form, win, tokensBefore, base, rate, rowSig, target, started, deadline: started + TOTAL_MS }
++    try {
++      hb = await krokB($, krokBCtx)
++      record.etapy_ms.krok_b_1 = Date.now() - tB0
++    } catch (error) {
++      hb = { fallback: 'wyjatek', error: clip(oneLine(String(error?.message ?? error)), 200) }
++    }
++    if (hb && hb.fallback !== 'nie_wdrozone') record.hybrid = { mode: cfg.hybrid, ...(cfg.hybridInvalid !== undefined ? { mode_invalid: cfg.hybridInvalid } : {}), ...(hb.record ?? {}), ...(hb.fallback ? { fallback: hb.fallback } : {}), ...(hb.error ? { error: hb.error } : {}) }
++    if (cfg.hybrid === 'active' && Array.isArray(hb?.messages) && Number.isFinite(hb.tokensAfter)) {
++      if (!pairingOk(messages, hb.messages)) record.hybrid = { ...record.hybrid, fallback: 'blad_budowy' }
++      else {
++        const chars = hb.messages.reduce((s, m) => s + messageChars(m), 0)
++        Object.assign(record, { tokens_after_pred: Math.max(0, Math.round(hb.tokensAfter)), messages_after: hb.messages.length, chars_after: chars, reduction: before ? Math.round((1 - chars / before) * 1000) / 1000 : 0 })
++        return { messages: hb.messages, tokensBefore, tokensAfter: Math.max(0, Math.round(hb.tokensAfter)), hist: [0, 0, 0, 0] }
++      }
++    }
++    if (cfg.hybrid === 'active' && hb && !hb.messages && hb.rewrite && Array.isArray(hb.rewrite.messages) && hb.rewrite.messages.length === messages.length) {
++      // Tryb rewrite (T6): stare odcinki zredukowane (wiersze usunięte są puste i mają trimDrop), reszta idzie dalej ścieżką A po werdyktach T1 i T2, kaskadzie i limicie.
++      const rw = hb.rewrite
++      messages = rw.messages
++      base -= rate * ((rw.removedChars ?? 0) - (rw.addedChars ?? 0)) + (rw.removedSig ?? 0)
++      krokBNaglowek = rw.header
++      record.hybrid = { ...record.hybrid, rewrite: { dropped: rw.dropped ? (rw.dropped.size ?? rw.dropped.length ?? 0) : 0, removed_chars: rw.removedChars ?? 0, added_chars: rw.addedChars ?? 0 } }
++    }
++  }
++  // </jev-krok-b-wywolanie>
+ 
+   // Items of the message that keeps its handles stay whole (a built row may not stand among them).
+   // T1: the short forms of the traces (n/ for the archive, the compact tool trace) are set before the candidates' traces are built.
+@@ -5943,6 +5980,7 @@
+   // N28a; rec-N28a LOW-3: a row another stage changed keeps that change, and its characters go back to the prediction.
+   if (trim && trim.rows.size) moved = moved.map((m, i) => { if (!trim.rows.has(i)) return m; if (m === messages[i]) return trim.rows.get(i); if (!from0f.has(i)) plan.pred += rate * trim.saved.get(i); return m })
+   const built = build(moved, candidates, keepFrom, group, stats, form.queued, drop, dropKinds)
++  if (krokBNaglowek) built.unshift(krokBNaglowek) // <jev-krok-b-naglowek>
+   // T1: the header of the traces opens the result (its older copies are dropped by build); the files of the compaction go to the index.
+   if (cfg.mode === 'active' && cfg.logDir && record.session_id) built.unshift({ role: 'user', text: headerOf(cfg.logDir, record.session_id), toolUses: [], toolResults: [] }) // H4 of the review: the short forms are in every result, so the header is too
+   if (!pairingOk(messages, built)) return { fallback: 'blad_budowy' }
+@@ -6321,6 +6359,7 @@
+   // T2 (rec-D F1): Jev is asked about everything without a verdict before the request goes; never throws, stops new requests at `until`.
+   if (!prepared) { // the moment of Jev prepares in `backlogGate` before the request; here only the way back (the numeric threshold)
+     await fillBeforeCompaction($, cfg, await sessionOf(), undefined, until)
++    try { await krokBPrepareForCompaction($, cfg, await sessionOf(), until) } catch { /* krok B nigdy nie psuje prośby o kompakcję */ } // <jev-krok-b-przygotowanie>
+   }
+   let route = 'session'
+   if (!sessionCompactOff) {
+@@ -6481,6 +6520,7 @@
+ // The numeric own threshold (OMC_JEV_COMPACT_AT_PERCENT=<percent>): kept as the way back until the moment of Jev is accepted live (plan point 3 of E3).
+ async function ownThreshold($, e, next) {
+   const result = await next(e)
++  krokBTurnComplete($, e) // <jev-krok-b-tura>
+   void backgroundVerdicts($, e) // T2 (J4): the verdicts of what has lived a turn, in the background (S5: no deadline of the turn); never throws
+   const until = Date.now() + MOMENT_BUDGET_MS
+   try {
+@@ -6553,4 +6593,5 @@
+   on('session.compact', compact)
+   on('turn.step', firstRequest)
+   on('turn.complete', ownThreshold)
++  krokBRegister(on) // <jev-krok-b-rejestracja>
+ }
