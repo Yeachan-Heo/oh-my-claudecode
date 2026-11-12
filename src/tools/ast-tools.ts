@@ -565,9 +565,11 @@ IMPORTANT: dryRun=true (default) only previews changes. Set dryRun=false to appl
             try {
               // One pass with a function replacer: captured code is inserted
               // as written ($&, $' and the like), is not scanned again, and
-              // $A does not replace the start of $AB.
+              // $A does not replace the start of $AB. A capture of the pattern
+              // is inserted wherever the replacement names it, also next to
+              // another one ($$$THEN$$$ELSE).
               finalReplacement = replacement.replace(
-                /(?<![\w$])\$\$\$([A-Z_][A-Z0-9_]*)(?![\w$])|\$\$?([A-Z_][A-Z0-9_]*)/g,
+                /\$\$\$([A-Z_][A-Z0-9_]*)|\$\$?([A-Z_][A-Z0-9_]*)/g,
                 (metaVar: string, multiName: string | undefined, singleName: string) => {
                   if (multiName !== undefined && multiCaptureNames.has(multiName)) {
                     // getMatch() returns null for a $$$ capture: insert the

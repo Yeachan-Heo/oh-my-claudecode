@@ -111,6 +111,16 @@ describe('ast-tools', () => {
       expect(content).toBe('let price$$$USD = 1\n');
     });
 
+    it('inserts $$$ captures that the replacement writes next to each other', async () => {
+      const { content } = await replaceInFile(
+        'if (ok) { a(); } else { b(); }\n',
+        'if ($COND) { $$$THEN } else { $$$ELSE }',
+        '{ $$$THEN$$$ELSE }',
+      );
+
+      expect(content).toBe('{ a();b(); }\n');
+    });
+
     it('shows the substituted code in a dry run without writing', async () => {
       const source = 'console.log("a", b);\n';
       const { text, content } = await replaceInFile(source, 'console.log($$$ARGS)', 'logger.info($$$ARGS)', true);
