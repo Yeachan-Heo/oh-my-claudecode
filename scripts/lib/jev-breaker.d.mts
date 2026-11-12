@@ -41,6 +41,15 @@ export function classifyFailure(
   failure: { status?: number; retryAfter?: string | null; body?: string; noResponse?: boolean } | undefined,
   now?: number,
 ): FailureClass | undefined;
+export function failureLogFields(
+  settings: BreakerSettings | undefined,
+  failure: { status?: number; retryAfter?: string | null; body?: string; noResponse?: boolean } | undefined,
+  granted?: number,
+  classified?: FailureClass,
+): {
+  error?: { status: number | null; kind: string; retry_s?: number };
+  rpm?: { count: number; limit: number };
+};
 export function recordFailure(settings: BreakerSettings | undefined, failure: FailureClass | undefined, now?: number): OpenBreaker | undefined;
 export function minuteKey(now?: number): string;
 export function reserveRequest(
@@ -48,7 +57,7 @@ export function reserveRequest(
   point: string,
   now?: number,
 ): { ok: boolean; priority?: string; count?: number; threshold?: number; limit?: number };
-export function admitRequest(settings: BreakerSettings | undefined, point: string, now?: number): { skip?: AdmissionSkip };
+export function admitRequest(settings: BreakerSettings | undefined, point: string, now?: number): { skip?: AdmissionSkip; granted?: number };
 export function skipLogFields(skip: AdmissionSkip): {
   reason: string;
   until?: string;
