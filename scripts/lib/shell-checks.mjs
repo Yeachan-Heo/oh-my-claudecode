@@ -998,8 +998,10 @@ function logContextOf(data) {
 // The rules of scripts/lib/jev-mask.mjs (copied, so that this module stays self-contained), in time linear in the text
 // length; the comments there say why the mysql, JWT and KEY= rules have their shape.
 export function maskSecrets(text) {
-  // The private key block and the pairs run first: a pair value holding a key block is masked as a block.
+  // The private key block, the pairs and the named values run first: a pair value holding a key block is masked as a block, and the
+  // word rules do not break the opening of a value that the named rule reads whole.
   return maskNamedValues(String(text ?? '').replace(/(-{4,5} ?BEGIN (?:[A-Z0-9]+[ -])*PRIVATE KEY(?: BLOCK)? ?-{4,5})[\s\S]*?(-{4,5} ?END (?:[A-Z0-9]+[ -])*PRIVATE KEY(?: BLOCK)? ?-{4,5}|$)/g, '$1***'))
+    .replace(/((?:api[_-]?key|access[_-]?key|client[_-]?secret|private[_-]?key|password|passwd|token|secret|has(?:[łl]|\\+u014[12])o|klucz|sekret|passwort|kennwort|contrase(?:[ñn]|\\+u00d1|\\+u00f1)a)(?:\\*["'])?\s*[:=]\s*(?:\\*["'])?)(?:[^\s"'&;|,}\\]|\\(?!["']))+/gi, '$1***')
     .replace(/(\/\/[^/\s:@]+:)[^/\s@]+@/g, '$1***@')
     .replace(/((?:authorization|proxy-authorization)\s*:\s*(?:(?:bearer|basic|token)\s*)?)[^\s"']+/gi, '$1***')
     .replace(/((?:set-)?cookie\s*:\s*)[^\r\n"']+/gi, '$1***')
@@ -1014,7 +1016,6 @@ export function maskSecrets(text) {
     .replace(/\bAKIA[0-9A-Z]{16}\b/g, 'AKIA***')
     .replace(/\beyJ(?:[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}|[A-Za-z0-9_-]*)/g, (m) => m.includes('.') ? 'eyJ***' : m)
     .replace(/(\b(?=[A-Za-z0-9_]*(?:KEY|TOKEN|SECRET|PASSWORD|PASSWD|PASS|PWD|CREDENTIALS?))[A-Za-z0-9_]+\b["'\]]*\s*[=:]\s*["']?)[^\s"'&;|)]+/gi, '$1***')
-    .replace(/((?:api[_-]?key|access[_-]?key|client[_-]?secret|private[_-]?key|password|passwd|token|secret|has(?:[łl]|\\+u014[12])o|klucz|sekret|passwort|kennwort|contrase(?:[ñn]|\\+u00d1|\\+u00f1)a)(?:\\*["'])?\s*[:=]\s*(?:\\*["'])?)(?:[^\s"'&;|,}\\]|\\(?!["']))+/gi, '$1***')
     .replace(/(?<![A-Za-z0-9+_-])(?=[A-Za-z0-9+_-]*\d)(?=[A-Za-z0-9+_-]*[A-Za-z])[A-Za-z0-9+_-]{32,}={0,2}/g, '***');
 }
 
@@ -1036,7 +1037,7 @@ const AFTER_CLOSE = String.raw`(?=[\s,}\])&;|"'\\]|$)`;
 // The text is read at each quote depth, so the same pair inside a JSON string (as a tool input is sent) is found too. There is no
 // length cap and no cutoff in the number of fields, and each character is read a constant number of times.
 const PAIR_FORMS = QUOTE_DEPTHS.map((d) =>
-  new RegExp(String.raw`${d}(${stringBody(d)}*)${d}\s*:\s*(${d}${stringBody(d)}*${d}${AFTER_CLOSE}|${d}[^\n]*?(?=\s*,\s*${d}${stringBody(d)}*${d}\s*:|[}\]]|$)|[^,{}\[\]\s"\\]+)`, 'g'));
+  new RegExp(String.raw`${d}(${stringBody(d)}*)${d}\s*:\s*(${d}${stringBody(d)}*${d}${AFTER_CLOSE}|${d}[^\n]*?(?=,\s*${d}${stringBody(d)}*${d}\s*:|[}\]]|$)|[^,{}\[\]\s"\\]+)`, 'g'));
 // JSON `\uXXXX` escapes of the name are read first (`DB_PASS\u0057ORD`), with any number of backslashes before the u.
 const secretPairName = (name) =>
   /key|token|secret|pass|pwd|credential|^securestring$/i.test(name.replace(/(?<!\\)\\+u([0-9a-f]{4})/gi, (_, hex) => String.fromCharCode(parseInt(hex, 16))));

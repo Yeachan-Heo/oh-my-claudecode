@@ -42,6 +42,7 @@ describe.each([
       'escaped backslashes and quotes': (n) => repeat('\\\\"', n),
       'shell-escaped pair fields, masked': (n) => repeat(String.raw`\\\"Name\\\":\\\"A_KEY\\\",\\\"Value\\\":\\\"x\\\",`, n),
       'pair names with backslash runs': (n) => '{"Name":"' + '\\'.repeat(n) + 'x","Value":"y"}',
+      'pair values with whitespace tails, masked': (n) => '{"Name":"DB_PASSWORD","Value":"' + ' '.repeat(n),
       'pair names alone': (n) => repeat('"name":"a",', n),
       'a pair value with an opening quote': (n) => repeat('"Name":"A_TOKEN","Value":"', n),
       '4 hyphens and BEGIN words': (n) => repeat('---- BEGIN SSH2 ENCRYPTED ', n),
@@ -180,5 +181,9 @@ describe.each([
       ['klucz do pokoju', 'klucz do pokoju'],
     ];
     for (const [text, masked] of cases) expect({ text, masked: mask(text) }).toEqual({ text, masked });
+    // A name that the word rules also know (PASS in passwort), in the serialized form: nothing of the value is left.
+    for (const text of ['Passwort="hunter2zz"', String.raw`Passwort=\"hunter2zz\"`]) {
+      expect({ text, left: mask(text).includes('hunter2zz') }).toEqual({ text, left: false });
+    }
   });
 });
