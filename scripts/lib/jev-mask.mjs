@@ -14,7 +14,7 @@
  * file too, and a hooks module may import only plain files of its plugin.
  */
 export function maskSecrets(text, { keepGitHashes = false } = {}) {
-  return maskPrivateKeys(text)
+  return maskNamedValues(maskPrivateKeys(text))
     .replace(/(\/\/[^/\s:@]+:)[^/\s@]+@/g, '$1***@')
     .replace(/((?:authorization|proxy-authorization)\s*:\s*(?:(?:bearer|basic|token)\s*)?)[^\s"']+/gi, '$1***')
     .replace(/((?:set-)?cookie\s*:\s*)[^\r\n"']+/gi, '$1***')
@@ -47,4 +47,23 @@ export function maskSecrets(text, { keepGitHashes = false } = {}) {
  */
 export function maskPrivateKeys(text) {
   return String(text ?? '').replace(/(-{4,5} ?BEGIN (?:[A-Z0-9]+[ -])*PRIVATE KEY(?: BLOCK)? ?-{4,5})[\s\S]*?(-{4,5} ?END (?:[A-Z0-9]+[ -])*PRIVATE KEY(?: BLOCK)? ?-{4,5}|$)/g, '$1***$2');
+}
+
+// A name/value pair in JSON text, `{"Name":"DB_PASSWORD","Value":"hunter2zz"}` or the AWS SSM form with `"Type":"SecureString"`:
+// the value is masked when the name holds a secret word. At most 6 simple fields lie between the two, forward the nearest value,
+// backward the farthest name; every part has a length cap, so a failed match costs a bounded read and the rule stays linear.
+const PAIR_NAME = String.raw`"([A-Za-z_]{0,40}(?:name|key|type))"(\s*:\s*)"([^"\\\n]{0,200})"`;
+const PAIR_VALUE = String.raw`"([A-Za-z_]{0,40}(?:value|val))"(\s*:\s*)("(?:[^"\\\n]|\\.){0,4000}"|[^,}\]\s]{1,200})`;
+const PAIR_GAP = String.raw`((?:\s*,\s*"[^"\\\n]{0,40}"\s*:\s*(?:"[^"\\\n]{0,200}"|[^,{}\[\]\s"]{1,40})){0,6}?\s*,\s*)`;
+const PAIR_FORWARD = new RegExp(PAIR_NAME + PAIR_GAP + PAIR_VALUE, 'gi');
+const PAIR_BACKWARD = new RegExp(PAIR_VALUE + PAIR_GAP.replace('{0,6}?', '{0,6}') + PAIR_NAME, 'gi');
+const secretPairName = (name) => /key|token|secret|passw|pwd|credential|^securestring$/i.test(name);
+const secretPairGap = (gap) => [...gap.matchAll(new RegExp(PAIR_NAME, 'gi'))].some((m) => secretPairName(m[3]));
+
+function maskNamedValues(text) {
+  return text
+    .replace(PAIR_FORWARD, (all, nk, s1, nv, gap, vk, s2, vv) =>
+      (secretPairName(nv) || secretPairGap(gap)) && vv !== '"***"' ? `"${nk}"${s1}"${nv}"${gap}"${vk}"${s2}"***"` : all)
+    .replace(PAIR_BACKWARD, (all, vk, s1, vv, gap, nk, s2, nv) =>
+      (secretPairName(nv) || secretPairGap(gap)) && vv !== '"***"' ? `"${vk}"${s1}"***"${gap}"${nk}"${s2}"${nv}"` : all);
 }

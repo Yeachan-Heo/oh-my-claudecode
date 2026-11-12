@@ -36,6 +36,10 @@ describe.each([
       'hasło: and an opening quote': (n) => repeat('hasło:"', n),
       'password= and an opening quote': (n) => repeat("password='", n),
       'an unterminated double quote and many names': (n) => 'hasło: "' + repeat("password: 'x ", n),
+      'pair names without a value': (n) => repeat('{"Name":"DB_PASSWORD","a":"b","c":1,', n),
+      'pair values without a name': (n) => repeat('"Value":"x","a":"b","c":1,', n),
+      'pair names alone': (n) => repeat('"name":"a",', n),
+      'a pair value with an opening quote': (n) => repeat('"Name":"A_TOKEN","Value":"', n),
       '4 hyphens and BEGIN words': (n) => repeat('---- BEGIN SSH2 ENCRYPTED ', n),
       'BEGIN PRIVATE without KEY': (n) => repeat('-----BEGIN A1 B2 PRIVATE ', n),
       'escaped opening quotes': (n) => repeat('hasło: \\"', n),
@@ -113,6 +117,20 @@ describe.each([
     for (const text of ['-----BEGIN PUBLIC KEY-----\nabc\n-----END PUBLIC KEY-----', '-----BEGIN CERTIFICATE-----\nabc', '---- BEGIN SSH2 PUBLIC KEY ----\nabc']) {
       expect(mask(text)).toBe(text);
     }
+  });
+
+  it('masks the value of a name/value pair whose name is a secret, and leaves other pairs', () => {
+    const cases = [
+      ['{"Name":"DB_PASSWORD","Value":"hunter2zz"}', '{"Name":"DB_PASSWORD","Value":"***"}'],
+      ['{"Name":"/prod/db","Type":"SecureString","Value":"s3cr3tVal"}', '{"Name":"/prod/db","Type":"SecureString","Value":"***"}'],
+      ['{"Value":"s3cr3tVal","Name":"api_key"}', '{"Value":"***","Name":"api_key"}'],
+      ['{"Value": "two words", "Type": "SecureString", "Name": "/p"}', '{"Value": "***", "Type": "SecureString", "Name": "/p"}'],
+      ['[{"Name":"A_TOKEN","Value":"t0k3n"},{"Name":"REGION","Value":"eu-west-1"}]', '[{"Name":"A_TOKEN","Value":"***"},{"Name":"REGION","Value":"eu-west-1"}]'],
+      ['{"Name":"A_TOKEN","Value":"***"}', '{"Name":"A_TOKEN","Value":"***"}'],
+      ['{"Name":"/prod/db","Type":"String","Value":"plain"}', '{"Name":"/prod/db","Type":"String","Value":"plain"}'],
+      ['{"Name":"REGION","Value":"eu-west-1"}', '{"Name":"REGION","Value":"eu-west-1"}'],
+    ];
+    for (const [text, masked] of cases) expect({ text, masked: mask(text) }).toEqual({ text, masked });
   });
 
   it('masks the value after a field name in another language, and leaves prose with the same words', () => {

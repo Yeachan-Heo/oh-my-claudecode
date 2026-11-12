@@ -998,7 +998,7 @@ function logContextOf(data) {
 // The rules of scripts/lib/jev-mask.mjs (copied, so that this module stays self-contained), in time linear in the text
 // length; the comments there say why the mysql, JWT and KEY= rules have their shape.
 export function maskSecrets(text) {
-  return String(text ?? '')
+  return maskNamedValues(String(text ?? ''))
     .replace(/(-{4,5} ?BEGIN (?:[A-Z0-9]+[ -])*PRIVATE KEY(?: BLOCK)? ?-{4,5})[\s\S]*?(-{4,5} ?END (?:[A-Z0-9]+[ -])*PRIVATE KEY(?: BLOCK)? ?-{4,5}|$)/g, '$1***')
     .replace(/(\/\/[^/\s:@]+:)[^/\s@]+@/g, '$1***@')
     .replace(/((?:authorization|proxy-authorization)\s*:\s*(?:(?:bearer|basic|token)\s*)?)[^\s"']+/gi, '$1***')
@@ -1016,6 +1016,25 @@ export function maskSecrets(text) {
     .replace(/(\b(?=[A-Za-z0-9_]*(?:KEY|TOKEN|SECRET|PASSWORD|PASSWD|PASS|PWD|CREDENTIALS?))[A-Za-z0-9_]+\b["'\]]*\s*[=:]\s*["']?)[^\s"'&;|)]+/gi, '$1***')
     .replace(/((?:api[_-]?key|access[_-]?key|client[_-]?secret|private[_-]?key|password|passwd|token|secret|has[łl]o|klucz|sekret|passwort|kennwort|contrase[ñn]a)(?:\\?["'])?\s*[:=]\s*(?:\\?["'])?)(?:(?<=\\")(?:[^\\\n]|\\(?!"))*(?=\\")|(?<=")(?:[^"\\\n]|\\.)*(?=")|(?<=')(?:[^'\\\n]|\\.|'')*(?=')|[^\s"'&;|,}]+)/gi, '$1***')
     .replace(/(?<![A-Za-z0-9+_-])(?=[A-Za-z0-9+_-]*\d)(?=[A-Za-z0-9+_-]*[A-Za-z])[A-Za-z0-9+_-]{32,}={0,2}/g, '***');
+}
+
+// A name/value pair in JSON text, `{"Name":"DB_PASSWORD","Value":"hunter2zz"}` or the AWS SSM form with `"Type":"SecureString"`:
+// the value is masked when the name holds a secret word. At most 6 simple fields lie between the two, forward the nearest value,
+// backward the farthest name; every part has a length cap, so a failed match costs a bounded read and the rule stays linear.
+const PAIR_NAME = String.raw`"([A-Za-z_]{0,40}(?:name|key|type))"(\s*:\s*)"([^"\\\n]{0,200})"`;
+const PAIR_VALUE = String.raw`"([A-Za-z_]{0,40}(?:value|val))"(\s*:\s*)("(?:[^"\\\n]|\\.){0,4000}"|[^,}\]\s]{1,200})`;
+const PAIR_GAP = String.raw`((?:\s*,\s*"[^"\\\n]{0,40}"\s*:\s*(?:"[^"\\\n]{0,200}"|[^,{}\[\]\s"]{1,40})){0,6}?\s*,\s*)`;
+const PAIR_FORWARD = new RegExp(PAIR_NAME + PAIR_GAP + PAIR_VALUE, 'gi');
+const PAIR_BACKWARD = new RegExp(PAIR_VALUE + PAIR_GAP.replace('{0,6}?', '{0,6}') + PAIR_NAME, 'gi');
+const secretPairName = (name) => /key|token|secret|passw|pwd|credential|^securestring$/i.test(name);
+const secretPairGap = (gap) => [...gap.matchAll(new RegExp(PAIR_NAME, 'gi'))].some((m) => secretPairName(m[3]));
+
+function maskNamedValues(text) {
+  return text
+    .replace(PAIR_FORWARD, (all, nk, s1, nv, gap, vk, s2, vv) =>
+      (secretPairName(nv) || secretPairGap(gap)) && vv !== '"***"' ? `"${nk}"${s1}"${nv}"${gap}"${vk}"${s2}"***"` : all)
+    .replace(PAIR_BACKWARD, (all, vk, s1, vv, gap, nk, s2, nv) =>
+      (secretPairName(nv) || secretPairGap(gap)) && vv !== '"***"' ? `"${vk}"${s1}"***"${gap}"${nk}"${s2}"${nv}"` : all);
 }
 
 const excerptForLog = (text) => maskSecrets(text).slice(0, EXCERPT_CHARS);
