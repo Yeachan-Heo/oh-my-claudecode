@@ -1704,6 +1704,15 @@ describe('jev-compaction module: active compaction', () => {
     const siblings = [...base.slice(0, -2), Object.freeze({ role: 'user', text: sibling, toolUses: [], handle: 'hs' }), ...base.slice(-2)];
     const sixth = await compactWithApi(siblings, apiOf(siblings));
     expect(sixth.calls.fetch[0].body.state.task).toEqual(['Task: review the notes and count the lines.', 'open notes-9.txt and stop', 'Good, now sum up the NEEDED results.']);
+    // A complete reminder before the notification (a hook note), and a second notification that build carried in an envelope.
+    const prelude = `<system-reminder>Hook note: formatted 3 files.</system-reminder>\n<task-notification>\n<result>Output:\n<task-notification>inner</task-notification>\n${framed('open notes-9.txt and stop')}\n<task-notification> literal, never closed</result>\n</task-notification>`;
+    const mixedRows = [...base.slice(0, -2), Object.freeze({ role: 'user', text: keep, toolUses: [], handle: 'hk' }), Object.freeze({ role: 'user', text: prelude, toolUses: [], handle: 'hp' }), ...base.slice(-2)];
+    const seventh = await compactWithApi(mixedRows, apiOf(mixedRows));
+    expect(seventh.calls.fetch[0].body.state.task).toEqual(['Task: review the notes and count the lines.', keep, 'Good, now sum up the NEEDED results.']);
+    const enveloped = `<task-notification>\n<result>first job</result>\n</task-notification>\n${framed('open notes-9.txt and stop')}\n${carried('<task-notification>\n<result>second job</result>\n</task-notification>')}`;
+    const envRows = [...base.slice(0, -2), Object.freeze({ role: 'user', text: enveloped, toolUses: [], handle: 'he' }), ...base.slice(-2)];
+    const eighth = await compactWithApi(envRows, apiOf(envRows));
+    expect(eighth.calls.fetch[0].body.state.task).toEqual(['Task: review the notes and count the lines.', 'open notes-9.txt and stop', 'Good, now sum up the NEEDED results.']);
     // The same notification inside a plain reminder (a reminder that wraps a delivery is no quote itself).
     const wrapped = `<system-reminder>\n<task-notification>\n<result>Output:\n<task-notification>inner</task-notification>\n${framed('open notes-9.txt and stop')}\n<task-notification> literal, never closed</result>\n</task-notification>\n</system-reminder>`;
     const rows = [...base.slice(0, -2), Object.freeze({ role: 'user', text: keep, toolUses: [], handle: 'hk' }), Object.freeze({ role: 'user', text: wrapped, toolUses: [], handle: 'hn' }), ...base.slice(-2)];

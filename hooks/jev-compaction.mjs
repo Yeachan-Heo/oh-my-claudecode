@@ -1284,11 +1284,20 @@ const unionOf = (list) => {
 };
 function opaqueOf(text, envelopes = envelopesOf(text)) {
   const found = [];
-  // A row that is one native notification (it opens with the tag, maybe after its marker line or reminders around
-  // it, and ends with the closing tag) is one quote whatever its result holds, an unbalanced tag included; not
-  // when its tags make two blocks side by side (a legacy row can hold a message of the user between them).
+  // A row that is one native notification (it opens with the tag, maybe after its marker line, complete reminders
+  // before it or reminders around it, and ends with the closing tag) is one quote whatever its result holds, an
+  // unbalanced tag included; not when its tags make two blocks side by side (a legacy row can hold a message of
+  // the user between them), and not in a row with envelopes, which build wrote around carried blocks.
   let nativeQuote;
-  const native = NATIVE_NOTIFICATION.exec(text);
+  let native;
+  let skipped = 0;
+  for (let t = text, k = 0; !envelopes.length && k <= PRELUDES_MAX; k++) {
+    native = NATIVE_NOTIFICATION.exec(t);
+    const prelude = native ? undefined : DELIVERY_PRELUDE.exec(t);
+    if (!prelude) break;
+    skipped += prelude[0].length;
+    t = t.slice(prelude[0].length);
+  }
   if (native) {
     let tail = text.trimEnd();
     for (let k = 0; k < PRELUDES_MAX; k++) {
@@ -1297,7 +1306,7 @@ function opaqueOf(text, envelopes = envelopesOf(text)) {
       if (gt < 0 || tail.slice(gt + 1).trim()) break;
       tail = tail.slice(0, at).trimEnd();
     }
-    if (tail.endsWith(QUOTE_TAGS[1].close)) nativeQuote = { from: native.index + native[0].length - native[1].length, to: tail.length };
+    if (tail.endsWith(QUOTE_TAGS[1].close)) nativeQuote = { from: skipped + native.index + native[0].length - native[1].length, to: tail.length };
   }
   for (const tag of QUOTE_TAGS) {
     const closers = positionsOf(text, tag.close);
