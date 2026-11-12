@@ -2,7 +2,7 @@
  * Stop Hook Callbacks
  *
  * Provides configurable callback handlers for session end events.
- * Supports file logging, Telegram, and Discord notifications.
+ * Supports file logging, Telegram, Discord, and Slack notifications.
  */
 
 import { writeFileSync, mkdirSync } from 'fs';
@@ -14,6 +14,7 @@ import {
   type StopCallbackFileConfig,
   type StopCallbackTelegramConfig,
   type StopCallbackDiscordConfig,
+  type StopCallbackSlackConfig,
 } from '../../features/auto-update.js';
 
 /**
@@ -42,7 +43,7 @@ export function formatSessionSummary(metrics: SessionMetrics, format: 'markdown'
 }
 
 export interface TriggerStopCallbacksOptions {
-  skipPlatforms?: Array<'file' | 'telegram' | 'discord'>;
+  skipPlatforms?: Array<'file' | 'telegram' | 'discord' | 'slack'>;
   /** Stable manifest action key for retries of a local callback write. */
   idempotencyKey?: string;
 }
@@ -84,6 +85,11 @@ function normalizeDiscordTagList(tagList?: string[]): string[] {
 
 function normalizeTelegramTagList(tagList?: string[]): string[] {
   return (tagList ?? []).map((tag) => tag.trim()).filter(Boolean).map((tag) => tag.startsWith('@') ? tag : `@${tag}`);
+}
+
+/** Slack tags use Slack's mention syntax (`<!here>`, `<@MEMBER_ID>`, `<!subteam^GROUP_ID>`) and are sent as given. */
+function normalizeSlackTagList(tagList?: string[]): string[] {
+  return (tagList ?? []).map((tag) => tag.trim()).filter(Boolean);
 }
 
 function prefixMessageWithTags(message: string, tags: string[]): string {
@@ -132,6 +138,15 @@ async function sendDiscord(config: StopCallbackDiscordConfig, message: string, s
   if (!response.ok) throw new Error(`Discord webhook error: ${response.status}`);
 }
 
+/** See sendTelegram: failed Slack delivery is terminal to avoid duplicate remote side effects. */
+async function sendSlack(config: StopCallbackSlackConfig, message: string, signal: AbortSignal): Promise<void> {
+  if (!config.webhookUrl) return;
+  const url = new URL(config.webhookUrl);
+  if (url.protocol !== 'https:' || !(url.hostname === 'hooks.slack.com' || url.hostname.endsWith('.hooks.slack.com'))) return;
+  const response = await fetch(config.webhookUrl, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ text: message }), signal });
+  if (!response.ok) throw new Error(`Slack webhook error: ${response.status}`);
+}
+
 
 async function runLegacyCallbacks(metrics: SessionMetrics, options: TriggerStopCallbacksOptions, signal: AbortSignal): Promise<void> {
   const callbacks = getOMCConfig().stopHookCallbacks;
@@ -142,6 +157,7 @@ async function runLegacyCallbacks(metrics: SessionMetrics, options: TriggerStopC
   if (!skipPlatforms.has('file') && callbacks.file?.enabled && callbacks.file.path) work.push(writeToFile(callbacks.file, formatSessionSummary(metrics, callbacks.file.format || 'markdown'), metrics.session_id, idempotencyKey));
   if (!skipPlatforms.has('telegram') && callbacks.telegram?.enabled) work.push(sendTelegram(callbacks.telegram, prefixMessageWithTags(formatSessionSummary(metrics), normalizeTelegramTagList(callbacks.telegram.tagList)), signal, idempotencyKey));
   if (!skipPlatforms.has('discord') && callbacks.discord?.enabled) work.push(sendDiscord(callbacks.discord, prefixMessageWithTags(formatSessionSummary(metrics), normalizeDiscordTagList(callbacks.discord.tagList)), signal, idempotencyKey));
+  if (!skipPlatforms.has('slack') && callbacks.slack?.enabled) work.push(sendSlack(callbacks.slack, prefixMessageWithTags(formatSessionSummary(metrics), normalizeSlackTagList(callbacks.slack.tagList)), signal));
   await Promise.all(work);
 }
 
@@ -162,8 +178,8 @@ export async function triggerStopCallbacks(
   }
 }
 
-function stringList(value: unknown): Array<'file' | 'telegram' | 'discord'> {
-  return Array.isArray(value) ? value.filter((item): item is 'file' | 'telegram' | 'discord' => item === 'file' || item === 'telegram' || item === 'discord') : [];
+function stringList(value: unknown): Array<'file' | 'telegram' | 'discord' | 'slack'> {
+  return Array.isArray(value) ? value.filter((item): item is 'file' | 'telegram' | 'discord' | 'slack' => item === 'file' || item === 'telegram' || item === 'discord' || item === 'slack') : [];
 }
 
 async function runWithinDeadline<T>(deadlineAt: number, run: (signal: AbortSignal) => Promise<T>): Promise<T | undefined> {
