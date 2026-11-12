@@ -14,10 +14,12 @@
  * file too, and a hooks module may import only plain files of its plugin.
  */
 export function maskSecrets(text, { keepGitHashes = false } = {}) {
-  // The structured rules run first, so that the word rules do not break the opening of a value that they read whole.
+  // The private key blocks and the pairs run first (a pair value holding a key block is masked as a block). The named values come
+  // last and only add masking: every rule before them sees the text as it was, so the first word of a value (`secret='Cookie: ...'`,
+  // `hasło: DB_PASSWORD=...`) is still the marker of the rule that needs it. The word rule opens on a serialized quote (`\"`), takes the
+  // scheme of `token: Bearer ...` along, and a first word that is itself an assignment (`secret: "x-api-key: ..."`) with its value.
   return maskNamedValues(maskPrivateKeys(text))
     .replace(/(\/\/[^/\s:@]+:)[^/\s@]+@/g, '$1***@')
-    .replace(/((?:api[_-]?key|access[_-]?key|client[_-]?secret|private[_-]?key|password|passwd|token|secret|has(?:[łl]|\\+u014[12])o|klucz|sekret|passwort|kennwort|contrase(?:[ñn]|ñ|n\\+u0303|\\+u00d1|\\+u00f1)a)(?:\\*["'])?\s*[:=]\s*(?:\\*["'])?(?:(?:bearer|basic)[ \t]+)?)(?:[^\s"'&;|,}\\]|\\(?!["']))+/gi, '$1***')
     .replace(/((?:authorization|proxy-authorization)\s*:\s*(?:(?:bearer|basic|token)\s*)?)[^\s"']+/gi, '$1***')
     .replace(/((?:set-)?cookie\s*:\s*)[^\r\n"']+/gi, '$1***')
     .replace(/\b(bearer\s+)[A-Za-z0-9._~+/=-]{8,}/gi, '$1***')
@@ -35,9 +37,10 @@ export function maskSecrets(text, { keepGitHashes = false } = {}) {
     // A JWT, or else the rest of the run kept unchanged; the run class has no dot, so a match with a dot is the JWT.
     .replace(/\beyJ(?:[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}|[A-Za-z0-9_-]*)/g, (m) => m.includes('.') ? 'eyJ***' : m)
     // A whole word containing a keyword: the lookahead finds the keyword once, then the word is read to its end.
-    .replace(/(\b(?=[A-Za-z0-9_]*(?:KEY|TOKEN|SECRET|PASSWORD|PASSWD|PASS|PWD|CREDENTIALS?))[A-Za-z0-9_]+\b["'\]]*\s*[=:]\s*["']?)[^\s"'&;|)]+/gi, '$1***')
+    .replace(/(\b(?=[A-Za-z0-9_]*(?:KEY|TOKEN|SECRET|PASSWORD|PASSWD|PASS|PWD|CREDENTIALS?))[A-Za-z0-9_]+\b["'\]]*\s*[=:]\s*(?:\\*["'])?)(?:(bearer|basic)[ \t]+)?[^\s"'&;|)]+(?:(?:(?<=[:=])|[ \t]+[:=])[ \t]*(?:\\*["'])?[^\s"'&;|)]+)?/gi, (whole, head, scheme) => head + (scheme ? '*** ***' : '***'))
     .replace(/(^|[^A-Za-z0-9+_-])(?=[A-Za-z0-9+_-]*\d)(?=[A-Za-z0-9+_-]*[A-Za-z])([A-Za-z0-9+_-]{32,}={0,2})/g, (whole, before, token) =>
-      keepGitHashes && /^(?:[0-9a-f]{40}|[0-9a-f]{64})$/.test(token) ? whole : before + '***');
+      keepGitHashes && /^(?:[0-9a-f]{40}|[0-9a-f]{64})$/.test(token) ? whole : before + '***')
+    .replace(NAMED_VALUE, '$1***');
 }
 
 /**
@@ -47,8 +50,17 @@ export function maskSecrets(text, { keepGitHashes = false } = {}) {
  * changes nothing: the first step of maskSecrets, also for a caller that drops lines before masking.
  */
 export function maskPrivateKeys(text) {
-  return String(text ?? '').replace(/(-{4,5} ?BEGIN +(?:[A-Z0-9]+(?: +|-))*PRIVATE KEY(?: BLOCK)? ?-{4,5})[\s\S]*?(-{4,5} ?END +(?:[A-Z0-9]+(?: +|-))*PRIVATE KEY(?: BLOCK)? ?-{4,5}|$)/g, '$1***$2');
+  return String(text ?? '').replace(/(-{4,5} ?BEGIN +(?:[A-Z0-9]+(?: +|-))*[A-Z0-9]*PRIVATE KEY(?: BLOCK)? ?-{4,5})[\s\S]*?(-{4,5} ?END +(?:[A-Z0-9]+(?: +|-))*[A-Z0-9]*PRIVATE KEY(?: BLOCK)? ?-{4,5}|$)/g, '$1***$2');
 }
+
+// Whitespace between the parts of a field (the name, its separator, the value): a space or a line break, also as JSON writes it into
+// a string (`\n`, `\t`, `\r`, `\f` or `\uXXXX` of a whitespace character), with any number of backslashes (the run doubles each time the
+// text goes through a string).
+const WS = String.raw`(?:\s|\\+(?:[ntrf]|u(?:000[9a-dA-D]|0020|00[aA]0|1680|200[0-9aA]|202[89fF]|205[fF]|3000|[fF][eE][fF][fF])))`;
+
+// The `name: value` / `name=value` rule, the last one of the chain: it masks the first word of a value, so every other rule runs
+// before it, and it adds the names of other languages and whitespace written as JSON writes it into a string.
+const NAMED_VALUE = new RegExp(String.raw`((?:api[_-]?key|access[_-]?key|client[_-]?secret|private[_-]?key|password|passwd|token|secret|has(?:[łl]|\\+u014[12])o|klucz|sekret|passwort|kennwort|contrase(?:[ñn]|ñ|n\\+u0303|\\+u00d1|\\+u00f1)a)(?:\\*["'])?${WS}*[:=]${WS}*(?:\\*["'])?(?:(?:bearer|basic)[ \t]+)?)(?:[^\s"'&;|,}\\]|\\(?!["']))+`, 'gi');
 
 // A quote delimiter at escaping depth 0 (a plain quote), 1 (inside a JSON string: `\"`), 2 (shell-escaped before it went into the
 // JSON string: `\\\"`), 3 (7 backslashes) and so on up to 8 (255 backslashes): a maximal run of backslashes whose length is 2^depth - 1 plus a multiple of 2^(depth + 1),
@@ -67,14 +79,12 @@ const AFTER_CLOSE = String.raw`(?=[\s,}\])&;|"'\\]|$)`;
 // a value, and a value goes with the names of its own prefix (`oldName` and `oldValue`), or else with the names without a prefix.
 // The text is read at each quote depth, so the same pair inside a JSON string (as a tool input is sent) is found too. There is no
 // length cap and no cutoff in the number of fields, and each character is read a constant number of times.
-// Whitespace between the parts of a pair: also as JSON writes it into a string (`\\n`, `\\t`, `\\r`, any number of backslashes).
-const WS = String.raw`(?:\s|\\+[ntr])`;
 const PAIR_SEPARATOR = new RegExp(String.raw`^${WS}*,${WS}*$`);
 const PAIR_FORMS = QUOTE_DEPTHS.map((d) =>
   new RegExp(String.raw`${d}(${stringBody(d)}*)${d}${WS}*:${WS}*(${d}${stringBody(d)}*${d}${AFTER_CLOSE}|${d}[^\n]*?(?=,${WS}*${d}${stringBody(d)}*${d}${WS}*:|[}\]]|\n|$)|[^,{}\[\]\s"\\]+)`, 'g'));
 // JSON `\uXXXX` escapes of the name are read first (`DB_PASS\u0057ORD`), with any number of backslashes before the u.
 const decodeUnicode = (text) => text.replace(/(?<!\\)\\+u([0-9a-f]{4})/gi, (_, hex) => String.fromCharCode(parseInt(hex, 16)));
-const secretPairName = (name) => /key|token|secret|pass|pwd|credential|^securestring$/i.test(decodeUnicode(name));
+const secretPairName = (name) => /key|token|secret|pass|pwd|credential|has[łl]o|klucz|sekret|kennwort|contrase(?:ñ|n\u0303?)a|^securestring$/i.test(decodeUnicode(name));
 
 // The text of a quoted value without its quotes and without the backslashes of an escaped closing quote.
 function unquoted(value, quote) {

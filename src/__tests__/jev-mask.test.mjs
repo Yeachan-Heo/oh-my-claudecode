@@ -12,6 +12,33 @@ import { maskSecrets as shellChecksMaskSecrets } from '../../scripts/lib/shell-c
 
 const repeat = (unit, n) => unit.repeat(Math.ceil(n / unit.length)).slice(0, n);
 
+// Secret-bearing constructs that a rule reads by their first word (a marker), and ways to wrap them as the value of a named field.
+const CONTEXTS = [
+  'Cookie: session=hunter2zz',
+  'Set-Cookie: sid=hunter2zz; Path=/',
+  'Authorization: Basic aHVudGVyMnp6',
+  'Authorization: Bearer aHVudGVyMnp6',
+  'Proxy-Authorization: Basic aHVudGVyMnp6',
+  'bearer aHVudGVyMnp6',
+  'mysql -phunter2zz db',
+  'mariadb -u root -phunter2zz',
+  'sshpass -p hunter2zz ssh host',
+  'curl -u alice:hunter2zz x',
+  'x-api-key: hunter2zz',
+  'DB_PASSWORD: hunter2zz',
+  'API_KEY=hunter2zz',
+];
+const WRAPPERS = [
+  (v) => `secret='${v}'`,
+  (v) => `password="${v}"`,
+  (v) => `token: '${v}'`,
+  (v) => `{"secret": "${v}"}`,
+  (v) => `hasło='${v}'`,
+  (v) => `sekret: "${v}"`,
+  (v) => String.raw`secret=\"${v}\"`,
+  (v) => JSON.stringify({ command: `export secret='${v}'` }),
+];
+
 describe.each([
   ['jev-mask.mjs', maskSecrets],
   ['shell-checks.mjs', shellChecksMaskSecrets],
@@ -51,6 +78,21 @@ describe.each([
       '4 hyphens and BEGIN words': (n) => repeat('---- BEGIN SSH2 ENCRYPTED ', n),
       'BEGIN PRIVATE without KEY': (n) => repeat('-----BEGIN A1 B2 PRIVATE ', n),
       'contraseña without =': (n) => repeat('contraseña', n),
+      'password and serialized newlines without a separator': (n) => 'password' + String.raw`\n`.repeat(n / 2),
+      'password and serialized vertical tabs without a separator': (n) => 'password' + String.raw`\u000b`.repeat(n / 6),
+      'password: and serialized newlines, masked': (n) => 'password:' + String.raw`\n`.repeat(n / 2),
+      'password: a: and spaces, masked': (n) => 'password: a:' + ' '.repeat(n),
+      'password: a and spaces before an equals sign, masked': (n) => 'password: a' + ' '.repeat(n) + '= x',
+      'hasło and a backslash run': (n) => 'hasło' + '\\'.repeat(n),
+      'hasło and serialized tabs and backslashes': (n) => 'hasło' + repeat(String.raw`\\\t\\\\`, n),
+      'hasło and serialized newlines before a colon, masked': (n) => 'hasło' + String.raw`\n`.repeat(n / 2) + ':',
+      'hasło= and a run of escaped quotes, masked': (n) => 'hasło=' + String.raw`\"`.repeat(n / 2),
+      'serialized newlines between names and separators, masked': (n) => repeat(String.raw`password\n\n:\n\n"x"\n`, n),
+      'label words and spaces, masked': (n) => repeat('password: a: ', n),
+      'pair names and serialized vertical tabs': (n) => '"a"' + String.raw`\u000b`.repeat(n / 6),
+      'pair names and serialized form feeds, masked': (n) => '{"Name":"DB_PASSWORD"' + String.raw`\f`.repeat(n / 2) + ',"Value":"x"}',
+      'BEGIN and one long word': (n) => '-----BEGIN ' + 'A'.repeat(n),
+      'BEGIN with long words glued to PRIVATE': (n) => repeat('-----BEGIN AAAAAAAAAAAAAAAAPRIVATE ', n),
     };
     for (const n of [100_000, 1_000_000]) {
       for (const [name, make] of Object.entries(shapes)) {
@@ -110,6 +152,7 @@ describe.each([
       ['-----BEGIN PRIVATE KEY-----', '-----END PRIVATE KEY-----'],
       ['-----BEGIN RSA  PRIVATE KEY-----', '-----END RSA  PRIVATE KEY-----'],
       ['-----BEGIN OPENSSH PRIVATE KEY-----', '-----END OPENSSH PRIVATE KEY-----'],
+      ['-----BEGIN RSAPRIVATE KEY-----', '-----END RSAPRIVATE KEY-----'],
       ['-----BEGIN PGP PRIVATE KEY BLOCK-----\n', '=abCD\n-----END PGP PRIVATE KEY BLOCK-----'],
       ['---- BEGIN SSH2 ENCRYPTED PRIVATE KEY ----\nProc-Type: 4,ENCRYPTED', '---- END SSH2 ENCRYPTED PRIVATE KEY ----'],
     ];
@@ -122,6 +165,11 @@ describe.each([
     }
     const pair = '{"Name":"DB_KEY","Value":"-----BEGIN PRIVATE KEY-----\n' + body + '\n-----END PRIVATE KEY-----"}';
     expect(mask(pair).includes('bGluZTEy')).toBe(false);
+    // A body that no other rule masks (short, one word), and a type word glued to PRIVATE, as the rule before it also read.
+    for (const type of ['', 'RSA ', 'RSA', 'OPENSSH ']) {
+      const text = `-----BEGIN ${type}PRIVATE KEY-----\nhunter2zz\n-----END ${type}PRIVATE KEY-----`;
+      expect({ text, left: mask(text).includes('hunter2zz') }).toEqual({ text, left: false });
+    }
     for (const text of ['-----BEGIN PUBLIC KEY-----\nabc\n-----END PUBLIC KEY-----', '-----BEGIN CERTIFICATE-----\nabc', '---- BEGIN SSH2 PUBLIC KEY ----\nabc']) {
       expect(mask(text)).toBe(text);
     }
@@ -174,6 +222,13 @@ describe.each([
       ['{"Value":"secretactual","Type":"SecureString","Name":"/p"},{"Value":"public","Name":"REGION"}', '{"Value":"***","Type":"SecureString","Name":"/p"},{"Value":"public","Name":"REGION"}'],
       ['{"Name":"/prod/db","Type":"String","Value":"plain"}', '{"Name":"/prod/db","Type":"String","Value":"plain"}'],
       ['{"Name":"REGION","Value":"eu-west-1"}', '{"Name":"REGION","Value":"eu-west-1"}'],
+      ['{"Name":"hasło","Value":"hunter2zz"}', '{"Name":"hasło","Value":"***"}'],
+      ['{"Name":"has\\u0142o","Value":"hunter2zz"}', '{"Name":"has\\u0142o","Value":"***"}'],
+      ['{"Name":"KLUCZ_API","Value":"hunter2zz"}', '{"Name":"KLUCZ_API","Value":"***"}'],
+      ['{"Name":"contraseña","Value":"hunter2zz"}', '{"Name":"contraseña","Value":"***"}'],
+      ['{"Name":"contrasen\\u0303a","Value":"hunter2zz"}', '{"Name":"contrasen\\u0303a","Value":"***"}'],
+      ['{"Value":"hunter2zz","Name":"sekret"}', '{"Value":"***","Name":"sekret"}'],
+      [String.raw`{\"Name\":\"kennwort\",\"Value\":\"hunter2zz\"}`, String.raw`{\"Name\":\"kennwort\",\"Value\":\"***\"}`],
     ];
     for (const [text, masked] of cases) expect({ text, masked: mask(text) }).toEqual({ text, masked });
     // The same pair with the delimiters escaped at higher depths (JSON string, shell-escaped, and so on up to 255 backslashes).
@@ -217,5 +272,108 @@ describe.each([
     for (const text of ['Passwort="hunter2zz"', String.raw`Passwort=\"hunter2zz\"`]) {
       expect({ text, left: mask(text).includes('hunter2zz') }).toEqual({ text, left: false });
     }
+  });
+
+  it('masks a field name followed by whitespace as JSON writes it into a string (pretty-printed input as sentInputJson sends it)', () => {
+    const cases = [
+      [String.raw`{\n  "hasło"\n  :\n  "hunter2zz"\n}`, String.raw`{\n  "hasło"\n  :\n  "***"\n}`],
+      [String.raw`{"hasło":\n"hunter2zz"}`, String.raw`{"hasło":\n"***"}`],
+      [String.raw`{\n  \"hasło\"\n  :\n  \"hunter2zz\"\n}`, String.raw`{\n  \"hasło\"\n  :\n  \"***\"\n}`],
+      [String.raw`{\n\t"hasło"\t:\r\n\t"hunter2zz"\r\n}`, String.raw`{\n\t"hasło"\t:\r\n\t"***"\r\n}`],
+      [String.raw`{\n  "password"\n  :\n  "hunter2zz"\n}`, String.raw`{\n  "password"\n  :\n  "***"\n}`],
+      [String.raw`{\n  "contraseña"\n  :\n  "hunter2zz"\n}`, String.raw`{\n  "contraseña"\n  :\n  "***"\n}`],
+      [String.raw`{\n  "has\u0142o"\n  :\n  "hunter2zz"\n}`, String.raw`{\n  "has\u0142o"\n  :\n  "***"\n}`],
+      [String.raw`hasło\n=\nhunter2zz`, String.raw`hasło\n=\n***`],
+      [String.raw`{"hasło"\f:\u000b"hunter2zz"}`, String.raw`{"hasło"\f:\u000b"***"}`],
+      // Whitespace that a JSON writer with ASCII output escapes as \uXXXX, in either case of the hex digits.
+      [String.raw`{"password"\u00a0:\u00A0"hunter2zz"}`, String.raw`{"password"\u00a0:\u00A0"***"}`],
+      [String.raw`{"hasło"\u3000:\u2028"hunter2zz"}`, String.raw`{"hasło"\u3000:\u2028"***"}`],
+      [String.raw`{"hasło"\u0009:\u000a"hunter2zz"}`, String.raw`{"hasło"\u0009:\u000a"***"}`],
+      [String.raw`{"hasło"\u0020:\u202f"hunter2zz"}`, String.raw`{"hasło"\u0020:\u202f"***"}`],
+      [String.raw`{"hasło"\ufeff:\u205F"hunter2zz"}`, String.raw`{"hasło"\ufeff:\u205F"***"}`],
+    ];
+    for (const [text, masked] of cases) expect({ text, masked: mask(text) }).toEqual({ text, masked });
+    // The same pretty-printed object serialized once, twice and three times (a string inside a string inside a string): the value is gone.
+    for (const name of ['hasło', 'password', 'contraseña']) {
+      let sent = `{\n  "${name}"\n  :\n  "hunter2zz"\n}`;
+      for (let level = 1; level <= 3; level++) {
+        sent = JSON.stringify(sent).slice(1, -1);
+        expect({ name, level, left: mask(sent).includes('hunter2zz') }).toEqual({ name, level, left: false });
+      }
+    }
+    // The text itself, written the way the compaction hook sends a tool input: JSON.stringify of a call that holds pretty-printed JSON.
+    for (const name of ['hasło', 'password', 'sekret', 'Passwort', 'contraseña', 'client_secret']) {
+      const pretty = `{\n  "${name}"\n  :\n  "hunter2zz"\n}`;
+      for (const input of [{ command: `curl -d '${pretty}' x` }, { content: pretty }, { command: JSON.stringify({ body: pretty }) }]) {
+        const sent = JSON.stringify(input);
+        expect({ name, sent, left: mask(sent).includes('hunter2zz') }).toEqual({ name, sent, left: false });
+      }
+    }
+  });
+
+  it('masks what a contextual rule masks also when the first word of a named value is its marker', () => {
+    // The named-value rule must not hide the marker (Cookie:, Authorization: Basic, mysql -p, sshpass -p) from the rule that needs it.
+    expect(mask("secret='Cookie: session=hunter2zz'")).toBe("secret='***'");
+    expect(mask("secret='Authorization: Basic aHVudGVyMnp6'")).toBe("secret='*** ***'");
+    expect(mask("password='mysql -phunter2zz'")).toBe("password='*** -p***'");
+    expect(mask("token='sshpass -p hunter2zz'")).toBe("token='*** -p ***'");
+    const leaks = [];
+    for (const context of CONTEXTS) {
+      for (const wrap of WRAPPERS) {
+        const text = wrap(context);
+        const out = mask(text);
+        if (/hunter2zz|aHVudGVyMnp6/.test(out)) leaks.push({ text, out });
+      }
+    }
+    expect(leaks).toEqual([]);
+  });
+
+  it('masks an assignment that is the first word of the value of a named field, as it is masked on its own', () => {
+    const texts = [
+      // A file written by a tool: the parent key has a secret name, the child key is the secret.
+      JSON.stringify({ file_path: 'values.yaml', content: "secret:\n  password: 'hunter2zz'\n" }),
+      JSON.stringify({ content: "token:\n  api_key: 'hunter2zz'\n" }),
+      JSON.stringify({ content: "client_secret:\n  DB_PASSWORD: 'hunter2zz'\n" }),
+      JSON.stringify({ content: 'secret:\n  API_KEY = hunter2zz\n' }),
+      JSON.stringify({ content: "hasło:\n  password: 'hunter2zz'" }),
+      JSON.stringify({ command: "echo 'hasło: DB_PASSWORD = hunter2zz'" }),
+      JSON.stringify({ content: '{\n  "token"\n  :\n  "DB_PASSWORD = hunter2zz"\n}' }),
+      JSON.stringify({ content: '{"password": "API_KEY = hunter2zz"}' }),
+      String.raw`{\"password\": \"API_KEY = hunter2zz\"}`,
+      // The same as raw text.
+      "Nowe hasło:\nDB_PASSWORD='hunter2zz'",
+      'hasło: PASSWORD = hunter2zz',
+      'hasło=API_KEY=x,hunter2zz',
+      'sekret: "x-api-key: \'hunter2zz\'"',
+      'Contraseña:\npassword="hunter2zz"',
+      'Kennwort:\nDB_PASSWORD="hunter2zz"',
+      'Klucz:\n"api_token": "hunter2zz"',
+      String.raw`password=\"password: hunter2zz\"`,
+      String.raw`secret=\"api_key:'hunter2zz'\"`,
+      String.raw`token=\"password = hunter2zz,x\"`,
+    ];
+    const leaks = texts.filter((text) => mask(text).includes('hunter2zz'));
+    expect(leaks).toEqual([]);
+  });
+});
+
+describe('the two copies of maskSecrets', () => {
+  it('give the same result on text that holds no private key block, no hf_, npm_ or sk_live_ token and no long hex string', () => {
+    const names = ['password', 'secret', 'token', 'api_key', 'hasło', 'klucz', 'Passwort', 'contraseña'];
+    const serializations = [(t) => t, (t) => JSON.stringify(t).slice(1, -1), (t) => JSON.stringify({ command: t })];
+    const differences = [];
+    for (const context of CONTEXTS) {
+      for (const wrap of WRAPPERS) {
+        for (const serialize of serializations) {
+          const text = serialize(wrap(context));
+          if (shellChecksMaskSecrets(text) !== maskSecrets(text)) differences.push(text);
+        }
+      }
+      for (const name of names) {
+        const text = JSON.stringify({ content: `{\n  "${name}"\n  :\n  "${context}"\n}` });
+        if (shellChecksMaskSecrets(text) !== maskSecrets(text)) differences.push(text);
+      }
+    }
+    expect(differences).toEqual([]);
   });
 });
