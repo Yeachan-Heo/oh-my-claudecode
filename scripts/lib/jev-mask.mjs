@@ -40,9 +40,11 @@ export function maskSecrets(text, { keepGitHashes = false } = {}) {
 }
 
 /**
- * Private key blocks only (to their END line or the end of the text), keeping both header lines so a second pass
+ * Private key blocks only: a PEM, PGP (`PRIVATE KEY BLOCK`) or SSH2 (`---- BEGIN SSH2 ENCRYPTED PRIVATE KEY ----`) one, with
+ * 4 or 5 hyphens, the type being words of letters and digits (a run of them stops at a double hyphen, so the rule stays linear),
+ * to their END line or the end of the text, keeping both header lines so a second pass
  * changes nothing: the first step of maskSecrets, also for a caller that drops lines before masking.
  */
 export function maskPrivateKeys(text) {
-  return String(text ?? '').replace(/(-----BEGIN [A-Z ]*PRIVATE KEY-----)[\s\S]*?(-----END [A-Z ]*PRIVATE KEY-----|$)/g, '$1***$2');
+  return String(text ?? '').replace(/(-{4,5} ?BEGIN (?:[A-Z0-9]+[ -])*PRIVATE KEY(?: BLOCK)? ?-{4,5})[\s\S]*?(-{4,5} ?END (?:[A-Z0-9]+[ -])*PRIVATE KEY(?: BLOCK)? ?-{4,5}|$)/g, '$1***$2');
 }

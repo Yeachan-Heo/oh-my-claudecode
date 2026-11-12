@@ -36,6 +36,8 @@ describe.each([
       'hasło: and an opening quote': (n) => repeat('hasło:"', n),
       'password= and an opening quote': (n) => repeat("password='", n),
       'an unterminated double quote and many names': (n) => 'hasło: "' + repeat("password: 'x ", n),
+      '4 hyphens and BEGIN words': (n) => repeat('---- BEGIN SSH2 ENCRYPTED ', n),
+      'BEGIN PRIVATE without KEY': (n) => repeat('-----BEGIN A1 B2 PRIVATE ', n),
       'escaped opening quotes': (n) => repeat('hasło: \\"', n),
       'doubled apostrophes in a quote': (n) => "password: '" + repeat("''", n),
       'an unterminated double quote and a long line': (n) => 'hasło: "' + 'a '.repeat(n / 2),
@@ -91,6 +93,26 @@ describe.each([
       ['name=value', 'name=value'],
     ];
     for (const [text, masked] of cases) expect({ text, masked: mask(text) }).toEqual({ text, masked });
+  });
+
+  it('masks PEM, PGP and SSH2 private key blocks, with 4 or 5 hyphens, and leaves other BEGIN lines', () => {
+    const body = 'bGluZTEyMzQ1Njc4OTBhYmNkZWZnaGlqa2xtbm9w\nbGluZTEyMzQ1Njc4OTBhYmNkZWZnaGlqa2xtbm9w';
+    const keys = [
+      ['-----BEGIN PRIVATE KEY-----', '-----END PRIVATE KEY-----'],
+      ['-----BEGIN OPENSSH PRIVATE KEY-----', '-----END OPENSSH PRIVATE KEY-----'],
+      ['-----BEGIN PGP PRIVATE KEY BLOCK-----\n', '=abCD\n-----END PGP PRIVATE KEY BLOCK-----'],
+      ['---- BEGIN SSH2 ENCRYPTED PRIVATE KEY ----\nProc-Type: 4,ENCRYPTED', '---- END SSH2 ENCRYPTED PRIVATE KEY ----'],
+    ];
+    for (const [begin, end] of keys) {
+      for (const text of [`before\n${begin}\n${body}\n${end}\nafter`, `before\n${begin}\n${body}`]) {
+        const out = mask(text);
+        expect({ text, out: out.includes('bGluZTEy') }).toEqual({ text, out: false });
+        expect(out.startsWith('before\n' + begin.split('\n')[0])).toBe(true);
+      }
+    }
+    for (const text of ['-----BEGIN PUBLIC KEY-----\nabc\n-----END PUBLIC KEY-----', '-----BEGIN CERTIFICATE-----\nabc', '---- BEGIN SSH2 PUBLIC KEY ----\nabc']) {
+      expect(mask(text)).toBe(text);
+    }
   });
 
   it('masks the value after a field name in another language, and leaves prose with the same words', () => {

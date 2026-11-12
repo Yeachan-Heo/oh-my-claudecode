@@ -999,7 +999,7 @@ function logContextOf(data) {
 // length; the comments there say why the mysql, JWT and KEY= rules have their shape.
 export function maskSecrets(text) {
   return String(text ?? '')
-    .replace(/(-----BEGIN [A-Z ]*PRIVATE KEY-----)[\s\S]*?(-----END [A-Z ]*PRIVATE KEY-----|$)/g, '$1***')
+    .replace(/(-{4,5} ?BEGIN (?:[A-Z0-9]+[ -])*PRIVATE KEY(?: BLOCK)? ?-{4,5})[\s\S]*?(-{4,5} ?END (?:[A-Z0-9]+[ -])*PRIVATE KEY(?: BLOCK)? ?-{4,5}|$)/g, '$1***')
     .replace(/(\/\/[^/\s:@]+:)[^/\s@]+@/g, '$1***@')
     .replace(/((?:authorization|proxy-authorization)\s*:\s*(?:(?:bearer|basic|token)\s*)?)[^\s"']+/gi, '$1***')
     .replace(/((?:set-)?cookie\s*:\s*)[^\r\n"']+/gi, '$1***')
