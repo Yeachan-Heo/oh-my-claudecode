@@ -1133,11 +1133,12 @@ Note:
       json: options.json,
     });
     if (!result.success) {
-      // teleportCommand prints the error only in text mode.
+      // teleportCommand prints the error only in text mode. Set the exit code
+      // instead of exiting, so that a long error reaches a pipe in full.
       if (options.json) {
         console.log(JSON.stringify({ success: false, error: result.error }));
       }
-      process.exit(1);
+      process.exitCode = 1;
     }
   });
 

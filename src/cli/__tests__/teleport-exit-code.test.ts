@@ -1,8 +1,10 @@
 import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 // teleportCommand returns { success: false, error } when it fails and prints the
-// error only in text mode. `omc teleport <ref>` then exits 1, and with --json it
-// prints the error on stdout, like `teleport remove`.
+// error only in text mode. `omc teleport <ref>` then sets exit code 1, and with
+// --json it prints the error on stdout, like `teleport remove`. It sets
+// process.exitCode instead of calling process.exit(), so a long error is written
+// in full when stdout is a pipe.
 const mocks = vi.hoisted(() => ({
   teleportCommand: vi.fn(),
 }));
@@ -27,6 +29,7 @@ describe('omc teleport <ref> exit code', () => {
 
   beforeEach(() => {
     mocks.teleportCommand.mockReset();
+    process.exitCode = undefined;
     exitSpy = vi.spyOn(process, 'exit').mockImplementation((() => {}) as () => never);
     logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
   });
@@ -34,6 +37,7 @@ describe('omc teleport <ref> exit code', () => {
   afterEach(() => {
     exitSpy.mockRestore();
     logSpy.mockRestore();
+    process.exitCode = undefined;
   });
 
   afterAll(() => {
@@ -50,7 +54,8 @@ describe('omc teleport <ref> exit code', () => {
     expect(mocks.teleportCommand).toHaveBeenCalledWith('my-feature', expect.objectContaining({ json: true }));
     expect(logSpy).toHaveBeenCalledTimes(1);
     expect(JSON.parse(String(logSpy.mock.calls[0][0]))).toEqual({ success: false, error });
-    expect(exitSpy).toHaveBeenCalledWith(1);
+    expect(process.exitCode).toBe(1);
+    expect(exitSpy).not.toHaveBeenCalled();
   });
 
   it('exits 1 without writing to stdout when teleport fails in text mode', async () => {
@@ -59,7 +64,8 @@ describe('omc teleport <ref> exit code', () => {
     await parse(['teleport', 'my-feature']);
 
     expect(logSpy).not.toHaveBeenCalled();
-    expect(exitSpy).toHaveBeenCalledWith(1);
+    expect(process.exitCode).toBe(1);
+    expect(exitSpy).not.toHaveBeenCalled();
   });
 
   it('keeps exit 0 when teleport succeeds', async () => {
@@ -68,6 +74,7 @@ describe('omc teleport <ref> exit code', () => {
     await parse(['teleport', 'my-feature', '--json']);
 
     expect(logSpy).not.toHaveBeenCalled();
+    expect(process.exitCode).toBeUndefined();
     expect(exitSpy).not.toHaveBeenCalled();
   });
 });
