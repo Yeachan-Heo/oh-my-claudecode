@@ -92,6 +92,7 @@ const POINT_DEFAULT_EXCERPT_CHARS = {
   "learner-extraction": 2000,
   "loop-continuation": 2000,
   compaction: 4000,
+  panel: 4000, // script-channel only, not mirrored in config.ts (experimental panel)
 };
 
 /**
@@ -182,7 +183,8 @@ export function serializeQuestions(questions) {
  * bounded excerpts of the other points, so each needs its own opt-in. Mirror
  * of NAMED_ONLY_POINTS in src/hooks/jev/config.ts.
  */
-export const NAMED_ONLY_POINTS = new Set(["compaction"]);
+// `panel` (experimental, see docs/jev/negative-results/jev-panel.md) is script-channel only: src/hooks/jev/config.ts and its compiled copies do not list it.
+export const NAMED_ONLY_POINTS = new Set(["compaction", "panel"]);
 
 /**
  * Mirror of parseJevConfig + pointState in src/hooks/jev/config.ts. Returns

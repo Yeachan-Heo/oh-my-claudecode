@@ -1,0 +1,40 @@
+{
+  "_comment": "Hook entries of the experimental Jev panel, in the format of hooks/hooks.json (event -> list of { matcher, hooks }). Not merged into hooks/hooks.json on purpose: merge them by hand into a local copy to try the panel on a live session. Without the point `panel` in OMC_JEV every entry exits at once.",
+  "hooks": {
+    "PostToolUse": [
+      {
+        "matcher": "mcp__plugin_oh-my-claudecode_t__lista_zadan|mcp__t__lista_zadan|TaskCreate|TaskUpdate|TodoWrite|mcp__ccd_turn__update_plan|mcp__ccd_turn__wrap_up",
+        "hooks": [{ "type": "command", "command": "node", "timeout": 3, "args": ["${CLAUDE_PLUGIN_ROOT}/scripts/run.cjs", "${CLAUDE_PLUGIN_ROOT}/scripts/jev-lista-stan.mjs"] }]
+      }
+    ],
+    "SubagentStart": [
+      {
+        "matcher": "*",
+        "hooks": [{ "type": "command", "command": "node", "timeout": 3, "args": ["${CLAUDE_PLUGIN_ROOT}/scripts/run.cjs", "${CLAUDE_PLUGIN_ROOT}/scripts/jev-lista-start.mjs"] }]
+      }
+    ],
+    "PostToolBatch": [
+      {
+        "hooks": [{ "type": "command", "command": "node", "timeout": 8, "args": ["${CLAUDE_PLUGIN_ROOT}/scripts/jev-lista-paczka.mjs"] }]
+      }
+    ],
+    "PostToolUseFailure": [
+      {
+        "matcher": "*",
+        "hooks": [{ "type": "command", "command": "node", "timeout": 8, "args": ["${CLAUDE_PLUGIN_ROOT}/scripts/run.cjs", "${CLAUDE_PLUGIN_ROOT}/scripts/jev-panel-blad.mjs"] }]
+      }
+    ],
+    "Stop": [
+      {
+        "matcher": "*",
+        "hooks": [{ "type": "command", "command": "node", "timeout": 8, "args": ["${CLAUDE_PLUGIN_ROOT}/scripts/jev-panel-koniec.mjs"] }]
+      }
+    ],
+    "SubagentStop": [
+      {
+        "matcher": "*",
+        "hooks": [{ "type": "command", "command": "node", "timeout": 8, "args": ["${CLAUDE_PLUGIN_ROOT}/scripts/jev-panel-koniec-agenta.mjs"] }]
+      }
+    ]
+  }
+}
