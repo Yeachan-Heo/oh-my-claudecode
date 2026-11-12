@@ -40,6 +40,9 @@ describe.each([
       'pair values without a name': (n) => repeat('"Value":"x","a":"b","c":1,', n),
       'pair values with long strings': (n) => repeat('"Value":"' + 'a'.repeat(300) + '","x":"', n),
       'pair names with long strings': (n) => repeat('"Name":"' + 'a'.repeat(300) + '","x":"' + 'b'.repeat(300) + '",', n),
+      'pair fields in one object, masked': (n) => '{' + repeat('"Name":"A_TOKEN","aValue":"x",', n),
+      'pair keys and escaped backslashes': (n) => repeat('"k":"\\\\', n),
+      'escaped backslashes and quotes': (n) => repeat('\\\\"', n),
       'pair names alone': (n) => repeat('"name":"a",', n),
       'a pair value with an opening quote': (n) => repeat('"Name":"A_TOKEN","Value":"', n),
       '4 hyphens and BEGIN words': (n) => repeat('---- BEGIN SSH2 ENCRYPTED ', n),
@@ -57,8 +60,8 @@ describe.each([
         for (let run = 0; run < 3 && best >= n / 1000; run++) {
           const t0 = performance.now();
           const out = mask(text);
-          // The shapes with an opening quote are masked (their values are read); the others pass unchanged.
-          if (!/quote/.test(name)) expect(out).toBe(text);
+          // The shapes named quote or masked are masked (their values are read); the others pass unchanged.
+          if (!/quote|masked/.test(name)) expect(out).toBe(text);
           best = Math.min(best, performance.now() - t0);
         }
         expect(best, `${name}, ${n} characters: ${Math.round(best)} ms`).toBeLessThan(n / 1000);
@@ -129,6 +132,13 @@ describe.each([
       ['{"Value": "two words", "Type": "SecureString", "Name": "/p"}', '{"Value": "***", "Type": "SecureString", "Name": "/p"}'],
       ['[{"Name":"A_TOKEN","Value":"t0k3n"},{"Name":"REGION","Value":"eu-west-1"}]', '[{"Name":"A_TOKEN","Value":"***"},{"Name":"REGION","Value":"eu-west-1"}]'],
       ['{"Name":"A_TOKEN","Value":"***"}', '{"Name":"A_TOKEN","Value":"***"}'],
+      ['{"oldName":"REGION","newName":"DB_PASSWORD","oldValue":"public","newValue":"secretactual"}', '{"oldName":"REGION","newName":"DB_PASSWORD","oldValue":"public","newValue":"***"}'],
+      ['{"oldValue":"public","newValue":"secretactual","oldName":"REGION","newName":"DB_PASSWORD"}', '{"oldValue":"public","newValue":"***","oldName":"REGION","newName":"DB_PASSWORD"}'],
+      ['{"Name":"DB_PASSWORD","a":1,"b":2,"c":3,"d":4,"e":5,"f":6,"g":7,"h":8,"Value":"hunter2zz"}', '{"Name":"DB_PASSWORD","a":1,"b":2,"c":3,"d":4,"e":5,"f":6,"g":7,"h":8,"Value":"***"}'],
+      ['{"Value":"hunter2zz","a":1,"b":2,"c":3,"d":4,"e":5,"f":6,"g":7,"h":8,"Name":"DB_PASSWORD"}', '{"Value":"***","a":1,"b":2,"c":3,"d":4,"e":5,"f":6,"g":7,"h":8,"Name":"DB_PASSWORD"}'],
+      ['{"Name":"A_TOKEN","Meta":{"k":"v"},"Value":"hunter2zz"}', '{"Name":"A_TOKEN","Meta":{"k":"v"},"Value":"hunter2zz"}'],
+      ['{"command":"aws ssm put-parameter --cli-input-json \'{\\"Name\\":\\"DB_PASSWORD\\",\\"Value\\":\\"hunter2zz\\"}\'"}', '{"command":"aws ssm put-parameter --cli-input-json \'{\\"Name\\":\\"DB_PASSWORD\\",\\"Value\\":\\"***\\"}\'"}'],
+      ['{\\"Name\\":\\"/prod/db\\",\\"Type\\":\\"SecureString\\",\\"Value\\":\\"a b\\\\\\"c\\"}', '{\\"Name\\":\\"/prod/db\\",\\"Type\\":\\"SecureString\\",\\"Value\\":\\"***\\"}'],
       ['{"Name":"DB_PASSWORD","Value":"' + 'A'.repeat(4001) + '"}', '{"Name":"DB_PASSWORD","Value":"***"}'],
       ['{"Name":"DB_PASSWORD","Value":"' + 'A'.repeat(4001), '{"Name":"DB_PASSWORD","Value":"***"'],
       ['{"Name":"' + 'x'.repeat(300) + '_PASSWORD","Value":"hunter2zz"}', '{"Name":"' + 'x'.repeat(300) + '_PASSWORD","Value":"***"}'],
@@ -159,6 +169,9 @@ describe.each([
       ["klucz = 'correct horse battery staple' x", "klucz = '***' x"],
       ['{"password": "correct horse battery staple", "a": 1}', '{"password": "***", "a": 1}'],
       ['hasło: "', 'hasło: "'],
+      ['hasło: "correct horse battery staple', 'hasło: "***'],
+      ["klucz: 'correct horse battery staple", "klucz: '***"],
+      ['{"command":"x hasło: \\"correct horse battery staple', '{"command":"x hasło: \\"***'],
       ['{"command":"x hasło: \\"correct horse battery staple\\" y"}', '{"command":"x hasło: \\"***\\" y"}'],
       ['{"command":"hasło=\\"abc def\\""}', '{"command":"hasło=\\"***\\""}'],
       ['hasło: \\"abc\\\\\\"def ghi\\" y', 'hasło: \\"***\\" y'],

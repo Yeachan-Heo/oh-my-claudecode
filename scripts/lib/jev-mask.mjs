@@ -34,7 +34,7 @@ export function maskSecrets(text, { keepGitHashes = false } = {}) {
     .replace(/\beyJ(?:[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}|[A-Za-z0-9_-]*)/g, (m) => m.includes('.') ? 'eyJ***' : m)
     // A whole word containing a keyword: the lookahead finds the keyword once, then the word is read to its end.
     .replace(/(\b(?=[A-Za-z0-9_]*(?:KEY|TOKEN|SECRET|PASSWORD|PASSWD|PASS|PWD|CREDENTIALS?))[A-Za-z0-9_]+\b["'\]]*\s*[=:]\s*["']?)[^\s"'&;|)]+/gi, '$1***')
-    .replace(/((?:api[_-]?key|access[_-]?key|client[_-]?secret|private[_-]?key|password|passwd|token|secret|has[łl]o|klucz|sekret|passwort|kennwort|contrase[ñn]a)(?:\\?["'])?\s*[:=]\s*(?:\\?["'])?)(?:(?<=\\")(?:[^\\\n]|\\\\(?:\\"|\\\\|[^\\\n])|\\[^"\\\n])*(?=\\")|(?<=")(?:[^"\\\n]|\\.)*(?=")|(?<=')(?:[^'\\\n]|\\.|'')*(?=')|[^\s"'&;|,}]+)/gi, '$1***')
+    .replace(/((?:api[_-]?key|access[_-]?key|client[_-]?secret|private[_-]?key|password|passwd|token|secret|has[łl]o|klucz|sekret|passwort|kennwort|contrase[ñn]a)(?:\\?["'])?\s*[:=]\s*(?:\\?["'])?)(?:(?<=\\")(?:[^\\\n]|\\\\(?:\\"|\\\\|[^\\\n])|\\[^"\\\n])*(?=\\")|(?<=")(?:[^"\\\n]|\\.)*(?=")|(?<=')(?:[^'\\\n]|\\.|'')*(?=')|(?<=\\")(?:[^\\\n]|\\\\(?:\\"|\\\\|[^\\\n])|\\[^"\\\n])+|(?<=")(?:[^"\\\n]|\\.)+|(?<=')(?:[^'\\\n]|\\.|'')+|[^\s"'&;|,}]+)/gi, '$1***')
     .replace(/(^|[^A-Za-z0-9+_-])(?=[A-Za-z0-9+_-]*\d)(?=[A-Za-z0-9+_-]*[A-Za-z])([A-Za-z0-9+_-]{32,}={0,2})/g, (whole, before, token) =>
       keepGitHashes && /^(?:[0-9a-f]{40}|[0-9a-f]{64})$/.test(token) ? whole : before + '***');
 }
@@ -49,23 +49,63 @@ export function maskPrivateKeys(text) {
   return String(text ?? '').replace(/(-{4,5} ?BEGIN (?:[A-Z0-9]+[ -])*PRIVATE KEY(?: BLOCK)? ?-{4,5})[\s\S]*?(-{4,5} ?END (?:[A-Z0-9]+[ -])*PRIVATE KEY(?: BLOCK)? ?-{4,5}|$)/g, '$1***$2');
 }
 
-// A name/value pair in JSON text, `{"Name":"DB_PASSWORD","Value":"hunter2zz"}` or the AWS SSM form with `"Type":"SecureString"`:
-// the value is masked when the name holds a secret word. At most 6 simple fields lie between the two, none of them a value field
-// (so each value pairs with the nearest name, and a pair never spans another value); forward the nearest value, backward the
-// farthest name. Strings are read to their closing quote with no length cap (an unterminated value to the end of the line), and a
-// failed match reads at most the 6 fields after its start, so the rule stays linear.
-const PAIR_NAME = String.raw`"([A-Za-z_]*(?:name|key|type))"(\s*:\s*)"((?:[^"\\\n]|\\.)*)"`;
-const PAIR_VALUE = String.raw`"([A-Za-z_]*(?:value|val))"(\s*:\s*)("(?:[^"\\\n]|\\.)*"?|[^,}\]\s]+)`;
-const PAIR_GAP = String.raw`((?:\s*,\s*(?!"[A-Za-z_]*(?:value|val)")"(?:[^"\\\n]|\\.)*"\s*:\s*(?:"(?:[^"\\\n]|\\.)*"|[^,{}\[\]\s"]+)){0,6}?\s*,\s*)`;
-const PAIR_FORWARD = new RegExp(PAIR_NAME + PAIR_GAP + PAIR_VALUE, 'gi');
-const PAIR_BACKWARD = new RegExp(PAIR_VALUE + PAIR_GAP.replace('{0,6}?', '{0,6}') + PAIR_NAME, 'gi');
+// Name/value pairs in JSON text, `{"Name":"DB_PASSWORD","Value":"hunter2zz"}` or the AWS SSM form with `"Type":"SecureString"`:
+// the value is masked when the name holds a secret word. The scalar fields of one flat object (consecutive `"key": scalar` fields,
+// separated by commas only) are read once, in order; a key ending in `name`, `key` or `type` is a name, one ending in `value` or `val`
+// a value, and a value goes with the names of its own prefix (`oldName` and `oldValue`), or else with the names without a prefix.
+// Both the plain text and the same text inside a JSON string (`\"Name\":\"...\"`, as a tool input is sent) are read. There is no
+// length cap and no cutoff in the number of fields, and each character is read a constant number of times (a string does not start
+// after a backslash: inside a JSON string every `\"`, or every `\\"`, would otherwise start a scan to the end of the line).
+const PAIR_FORMS = [
+  { quote: '"', field: new RegExp(String.raw`(?<!\\)"((?:[^"\\\n]|\\.)*)"\s*:\s*("(?:[^"\\\n]|\\.)*"?|[^,{}\[\]\s"\\]+)`, 'g') },
+  { quote: '\\"', field: new RegExp(String.raw`(?<!\\)\\"((?:[^\\\n]|\\\\(?:\\"|\\\\|[^\\\n])|\\[^"\\\n])*)\\"\s*:\s*(\\"(?:[^\\\n]|\\\\(?:\\"|\\\\|[^\\\n])|\\[^"\\\n])*(?:\\")?|[^,{}\[\]\s"\\]+)`, 'g') },
+];
 const secretPairName = (name) => /key|token|secret|passw|pwd|credential|^securestring$/i.test(name);
-const secretPairGap = (gap) => [...gap.matchAll(new RegExp(PAIR_NAME, 'gi'))].some((m) => secretPairName(m[3]));
 
 function maskNamedValues(text) {
-  return text
-    .replace(PAIR_FORWARD, (all, nk, s1, nv, gap, vk, s2, vv) =>
-      (secretPairName(nv) || secretPairGap(gap)) && vv !== '"***"' ? `"${nk}"${s1}"${nv}"${gap}"${vk}"${s2}"***"` : all)
-    .replace(PAIR_BACKWARD, (all, vk, s1, vv, gap, nk, s2, nv) =>
-      (secretPairName(nv) || secretPairGap(gap)) && vv !== '"***"' ? `"${vk}"${s1}"***"${gap}"${nk}"${s2}"${nv}"` : all);
+  let out = text;
+  for (const { quote, field } of PAIR_FORMS) {
+    if (!out.includes(quote)) continue;
+    const cuts = [];
+    let group = [];
+    const flush = () => {
+      const names = new Set();
+      const secret = new Set();
+      for (const f of group) {
+        const m = /^([A-Za-z_]*)(?:name|key|type)$/i.exec(f.key);
+        if (!m || !f.value.startsWith(quote)) continue;
+        const prefix = m[1].toLowerCase();
+        names.add(prefix);
+        if (secretPairName(f.value.slice(quote.length, f.value.endsWith(quote) && f.value.length >= 2 * quote.length ? -quote.length : undefined))) secret.add(prefix);
+      }
+      if (secret.size) {
+        for (const f of group) {
+          const m = /^([A-Za-z_]*)(?:value|val)$/i.exec(f.key);
+          if (!m || f.value === quote + '***' + quote) continue;
+          const prefix = m[1].toLowerCase();
+          if (secret.has(prefix) || (!names.has(prefix) && secret.has(''))) cuts.push(f);
+        }
+      }
+      group = [];
+    };
+    field.lastIndex = 0;
+    let end = 0;
+    let m;
+    while ((m = field.exec(out))) {
+      if (group.length && !/^\s*,\s*$/.test(out.slice(end, m.index))) flush();
+      end = m.index + m[0].length;
+      group.push({ key: m[1], value: m[2], start: end - m[2].length, end });
+    }
+    flush();
+    if (cuts.length) {
+      let masked = '';
+      let at = 0;
+      for (const f of cuts) {
+        masked += out.slice(at, f.start) + quote + '***' + quote;
+        at = f.end;
+      }
+      out = masked + out.slice(at);
+    }
+  }
+  return out;
 }
