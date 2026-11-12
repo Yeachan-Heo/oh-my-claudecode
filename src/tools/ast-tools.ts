@@ -518,6 +518,11 @@ IMPORTANT: dryRun=true (default) only previews changes. Set dryRun=false to appl
         };
       }
       const lang = toLangEnum(sg, language);
+      // getMultipleMatches() also returns no nodes for a name that the pattern
+      // does not capture with $$$; such a $$$NAME keeps the getMatch() lookup.
+      const multiCaptureNames = new Set(
+        Array.from(pattern.matchAll(/\$\$\$([A-Z_][A-Z0-9_]*)/g), (m) => m[1]),
+      );
 
       const changes: {
         file: string;
@@ -551,30 +556,28 @@ IMPORTANT: dryRun=true (default) only previews changes. Set dryRun=false to appl
 
             // Build replacement by substituting meta-variables
             let finalReplacement = replacement;
-
-            // Get all captured meta-variables
-            // ast-grep captures are accessed via match.getMatch() or by variable name
-            // For simplicity, we'll use a basic approach here
             const matchedText = match.text();
 
-            // Try to get named captures
             try {
-              // Replace meta-variables in the replacement string
-              const metaVars =
-                replacement.match(/\$\$?\$?[A-Z_][A-Z0-9_]*/g) || [];
-              for (const metaVar of metaVars) {
-                const varName = metaVar.replace(/^\$+/, "");
-                const captured = match.getMatch(varName);
-                if (captured) {
-                  // Escape $ in captured text to prevent JS replacement patterns
-                  // ($&, $', $`, $$) from being interpreted by replaceAll
-                  const safeText = captured.text().replace(/\$/g, "$$$$");
-                  finalReplacement = finalReplacement.replaceAll(
-                    metaVar,
-                    safeText,
-                  );
-                }
-              }
+              // One pass with a function replacer: captured code is inserted
+              // as written ($&, $' and the like), is not scanned again, and
+              // $A does not replace the start of $AB.
+              finalReplacement = replacement.replace(
+                /\$\$\$([A-Z_][A-Z0-9_]*)|\$\$?([A-Z_][A-Z0-9_]*)/g,
+                (metaVar: string, multiName: string | undefined, singleName: string) => {
+                  if (multiName !== undefined && multiCaptureNames.has(multiName)) {
+                    // getMatch() returns null for a $$$ capture: insert the
+                    // source from its first node to its last, or nothing.
+                    const nodes = match.getMultipleMatches(multiName);
+                    if (nodes.length === 0) return "";
+                    return content.slice(
+                      nodes[0].range().start.index,
+                      nodes[nodes.length - 1].range().end.index,
+                    );
+                  }
+                  return match.getMatch(multiName ?? singleName)?.text() ?? metaVar;
+                },
+              );
             } catch {
               // If meta-variable extraction fails, use pattern as-is
             }
