@@ -92,6 +92,12 @@ describe.each([
       'pair names and serialized vertical tabs': (n) => '"a"' + String.raw`\u000b`.repeat(n / 6),
       'pair names and serialized form feeds, masked': (n) => '{"Name":"DB_PASSWORD"' + String.raw`\f`.repeat(n / 2) + ',"Value":"x"}',
       'BEGIN and one long word': (n) => '-----BEGIN ' + 'A'.repeat(n),
+      'a key of escapes without a separator': (n) => repeat(String.raw`a`, n),
+      'words with an escape and no separator': (n) => repeat(String.raw`pass `, n),
+      'escaped keys, separators and values, masked': (n) => repeat(String.raw`password:x `, n),
+      'a long word and then an escape': (n) => 'a'.repeat(n) + String.raw`a`,
+      'a word and then a backslash run': (n) => 'abc' + '\\'.repeat(n) + 'x',
+      'whitespace escapes between letters': (n) => repeat(String.raw`p `, n),
       'BEGIN with long words glued to PRIVATE': (n) => repeat('-----BEGIN AAAAAAAAAAAAAAAAPRIVATE ', n),
     };
     for (const n of [100_000, 1_000_000]) {
@@ -222,6 +228,12 @@ describe.each([
       ['{"Value":"secretactual","Type":"SecureString","Name":"/p"},{"Value":"public","Name":"REGION"}', '{"Value":"***","Type":"SecureString","Name":"/p"},{"Value":"public","Name":"REGION"}'],
       ['{"Name":"/prod/db","Type":"String","Value":"plain"}', '{"Name":"/prod/db","Type":"String","Value":"plain"}'],
       ['{"Name":"REGION","Value":"eu-west-1"}', '{"Name":"REGION","Value":"eu-west-1"}'],
+      ['{"Name":"DB_PASSWORD","Value":123456}', '{"Name":"DB_PASSWORD","Value":***}'],
+      ['{"Value":123456,"Name":"DB_PASSWORD"}', '{"Value":***,"Name":"DB_PASSWORD"}'],
+      ['{"Name":"DB_PASSWORD","Value":true,"x":1}', '{"Name":"DB_PASSWORD","Value":***,"x":1}'],
+      [String.raw`{\"Name\":\"DB_PASSWORD\",\"Value\":123456}`, String.raw`{\"Name\":\"DB_PASSWORD\",\"Value\":***}`],
+      [String.raw`{\"Value\":123456,\"Name\":\"DB_PASSWORD\"}`, String.raw`{\"Value\":***,\"Name\":\"DB_PASSWORD\"}`],
+      ['{"Name":"REGION","Value":123456}', '{"Name":"REGION","Value":123456}'],
       ['{"Name":"hasło","Value":"hunter2zz"}', '{"Name":"hasło","Value":"***"}'],
       ['{"Name":"has\\u0142o","Value":"hunter2zz"}', '{"Name":"has\\u0142o","Value":"***"}'],
       ['{"Name":"KLUCZ_API","Value":"hunter2zz"}', '{"Name":"KLUCZ_API","Value":"***"}'],
@@ -236,6 +248,9 @@ describe.each([
       const q = '\\'.repeat(2 ** depth - 1) + '"';
       const pair = (value) => `{${q}Name${q}:${q}DB_PASSWORD${q},${q}Value${q}:${q}${value}${q}}`;
       expect({ depth, out: mask(pair('hunter2zz')) }).toEqual({ depth, out: pair('***') });
+      // The value is a number: no quotes around it, so no quotes are put back.
+      const bare = (value) => `{${q}Name${q}:${q}DB_PASSWORD${q},${q}Value${q}:${value}}`;
+      expect({ depth, out: mask(bare('123456')) }).toEqual({ depth, out: bare('***') });
     }
   });
 
@@ -271,6 +286,31 @@ describe.each([
     // A name that the word rules also know (PASS in passwort), in the serialized form: nothing of the value is left.
     for (const text of ['Passwort="hunter2zz"', String.raw`Passwort=\"hunter2zz\"`]) {
       expect({ text, left: mask(text).includes('hunter2zz') }).toEqual({ text, left: false });
+    }
+  });
+
+  it('masks the value of a field whose key has JSON escapes in any of its letters, and leaves other keys', () => {
+    const cases = [
+      ['{"h\\u0061s\\u0142o":"hunter2zz"}', '{"h\\u0061s\\u0142o":"***"}'],
+      ['{"p\\u0061ssword":"hunter2zz"}', '{"p\\u0061ssword":"***"}'],
+      ['{"\\u0063lient_s\\u0065cret": "hunter2zz"}', '{"\\u0063lient_s\\u0065cret": "***"}'],
+      ['{"DB_P\\u0041SSWORD":"hunter2zz"}', '{"DB_P\\u0041SSWORD":"***"}'],
+      ['{"c\\u006fntrase\\u00f1a":"hunter2zz"}', '{"c\\u006fntrase\\u00f1a":"***"}'],
+      ['{"k\\u006cucz":"hunter2zz"}', '{"k\\u006cucz":"***"}'],
+      ['p\\u0061ssword=hunter2zz', 'p\\u0061ssword=***'],
+      [String.raw`{\"h\\u0061s\\u0142o\":\"hunter2zz\"}`, String.raw`{\"h\\u0061s\\u0142o\":\"***\"}`],
+      [String.raw`{\n  "hasło"\n  :\n  "hunter2zz"\n}`, String.raw`{\n  "hasło"\n  :\n  "***"\n}`],
+      ['{"n\\u0061me":"value"}', '{"n\\u0061me":"value"}'],
+      ['{"\\u0061":"value"}', '{"\\u0061":"value"}'],
+    ];
+    for (const [text, masked] of cases) expect({ text, masked: mask(text) }).toEqual({ text, masked });
+    // As the compaction hook sends it: a string, and a string inside a string.
+    for (const raw of ['{"h\\u0061s\\u0142o":"hunter2zz"}', '{"p\\u0061ssword":\n"hunter2zz"}']) {
+      let sent = raw;
+      for (let level = 1; level <= 3; level++) {
+        sent = JSON.stringify(sent).slice(1, -1);
+        expect({ raw, level, left: mask(sent).includes('hunter2zz') }).toEqual({ raw, level, left: false });
+      }
     }
   });
 

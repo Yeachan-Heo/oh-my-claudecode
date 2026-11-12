@@ -40,7 +40,8 @@ export function maskSecrets(text, { keepGitHashes = false } = {}) {
     .replace(/(\b(?=[A-Za-z0-9_]*(?:KEY|TOKEN|SECRET|PASSWORD|PASSWD|PASS|PWD|CREDENTIALS?))[A-Za-z0-9_]+\b["'\]]*\s*[=:]\s*(?:\\*["'])?)(?:(bearer|basic)[ \t]+)?[^\s"'&;|)]+(?:(?:(?<=[:=])|[ \t]+[:=])[ \t]*(?:\\*["'])?[^\s"'&;|)]+)?/gi, (whole, head, scheme) => head + (scheme ? '*** ***' : '***'))
     .replace(/(^|[^A-Za-z0-9+_-])(?=[A-Za-z0-9+_-]*\d)(?=[A-Za-z0-9+_-]*[A-Za-z])([A-Za-z0-9+_-]{32,}={0,2})/g, (whole, before, token) =>
       keepGitHashes && /^(?:[0-9a-f]{40}|[0-9a-f]{64})$/.test(token) ? whole : before + '***')
-    .replace(NAMED_VALUE, '$1***');
+    .replace(NAMED_VALUE, '$1***')
+    .replace(ESCAPED_KEY, (whole, key, separator) => secretPairName(key) ? key + separator + '***' : whole);
 }
 
 /**
@@ -61,6 +62,12 @@ const WS = String.raw`(?:\s|\\+(?:[ntrf]|u(?:000[9a-dA-D]|0020|00[aA]0|1680|200[
 // The `name: value` / `name=value` rule, the last one of the chain: it masks the first word of a value, so every other rule runs
 // before it, and it adds the names of other languages and whitespace written as JSON writes it into a string.
 const NAMED_VALUE = new RegExp(String.raw`((?:api[_-]?key|access[_-]?key|client[_-]?secret|private[_-]?key|password|passwd|token|secret|has(?:[łl]|\\+u014[12])o|klucz|sekret|passwort|kennwort|contrase(?:[ñn]|ñ|n\\+u0303|\\+u00d1|\\+u00f1)a)(?:\\*["'])?${WS}*[:=]${WS}*(?:\\*["'])?(?:(?:bearer|basic)[ \t]+)?)(?:[^\s"'&;|,}\\]|\\(?!["']))+`, 'gi');
+
+// A field key that holds JSON `\uXXXX` escapes in any of its letters (`h\u0061s\u0142o`, `p\u0061ssword`), which the name list above does not
+// read: the key is decoded and classified as the key of a pair is, and the value is masked when it names a secret. The key is a run of
+// word characters and escapes (not of whitespace, which stays the separator), read from its start only, so each character is read once.
+const KEY_ESCAPE = String.raw`\\+u(?!(?:000[9a-dA-D]|0020|00[aA]0|1680|200[0-9aA]|202[89fF]|205[fF]|3000|[fF][eE][fF][fF]))[0-9a-fA-F]{4}`;
+const ESCAPED_KEY = new RegExp(String.raw`(?<![\w\\-])((?=(?:[\w-]|${KEY_ESCAPE})*${KEY_ESCAPE})(?:[\w-]|${KEY_ESCAPE})+)((?:\\*["'])?${WS}*[:=]${WS}*(?:\\*["'])?)(?:[^\s"'&;|,}\\]|\\(?!["']))+`, 'g');
 
 // A quote delimiter at escaping depth 0 (a plain quote), 1 (inside a JSON string: `\"`), 2 (shell-escaped before it went into the
 // JSON string: `\\\"`), 3 (7 backslashes) and so on up to 8 (255 backslashes): a maximal run of backslashes whose length is 2^depth - 1 plus a multiple of 2^(depth + 1),
