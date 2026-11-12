@@ -32,6 +32,27 @@
  * OMC_JEV_MAX_REQUESTS is used up, while the shared breaker is open or the shared request limit is
  * used up, and when Jev fails, answers too little or does not answer in time.
  *
+ * Superseded calls and finished tasks (OMC_JEV_COMPACT_TASKS=off|shadow|active, off when unset; with
+ * `off` nothing of this runs and the result and the record are as without it). Two kinds of tool
+ * results are removable without asking Jev. Superseded: a Read of a file followed by a Read of the same
+ * lines (the same PDF pages) or by a Write of the whole file, and a read-only command (git status, ls,
+ * cat, grep, sed -n ...), a Grep or a Glob repeated with the same input; the newer result has to be
+ * there and at least as long as the older one, and an error supersedes an error only. In the main loop
+ * (for PowerShell in a subagent too) not across a change of directory, and in the main loop Grep and
+ * Glob only with an absolute path. Finished tasks: with TodoWrite, TaskCreate and TaskUpdate (their
+ * schema is known; `update_plan` is not read), the calls made while one task was the only one in
+ * progress go once the agent marks it completed, but only what the same call gives again (a Read, a
+ * Grep, a Glob, a command that only reads) and writes: an answer of the user, an agent's report, a
+ * page, a plan and any MCP result stay for Jev's score. Kept as well: the last CLOSE_GUARD of them
+ * before the message that closed the task, a file or command a later call outside the completed
+ * tasks touches (by the name of the file, absolute or not), and the calls of the last messages. A
+ * superseded call becomes a trace that says so only while its newer call stays whole (else it is
+ * ranked like without this step), and only when that trace is shorter than the call. A result of a
+ * file or URL the user names stays out of both kinds. A trace takes no part of the budget, so the
+ * results ranked next can stay whole. `shadow` only counts them in the record (the tasks_* fields);
+ * `active` also makes them traces and leaves them out of the questions to Jev. An error in this step
+ * is recorded (tasks_error) and the compaction goes on as with `off`.
+ *
  * turn.complete. With OMC_JEV_COMPACT_AT_PERCENT (off when unset) the module asks the host to compact
  * once the context reaches that share of the compaction window: main loop only, at most once per
  * MIN_TURNS_BETWEEN turns, never during a compaction, never while requests are paused, and only when
@@ -104,6 +125,7 @@ const OWN_MIN_GAIN = 0.1;
 const CHARS_PER_TOKEN = 4;
 const SHORT_CHARS = 300;
 const TRACE_INPUT_CHARS = 200;
+const TRACE_PREFIX = '[compacted]';
 const STATE_INPUT_CHARS = 300;
 const STATE_HEAD_CHARS = 1000;
 const STATE_TAIL_CHARS = 500;
@@ -400,6 +422,7 @@ async function readConfig($) {
     OMC_JEV_COMPACT_TARGET: await $.env.get('OMC_JEV_COMPACT_TARGET'),
     OMC_JEV_COMPACT_TOAST: await $.env.get('OMC_JEV_COMPACT_TOAST'),
     OMC_JEV_COMPACT_PRIVATE_PATHS: await $.env.get('OMC_JEV_COMPACT_PRIVATE_PATHS'),
+    OMC_JEV_COMPACT_TASKS: await $.env.get('OMC_JEV_COMPACT_TASKS'),
     OMC_JEV_BREAKER: await $.env.get('OMC_JEV_BREAKER'),
     OMC_JEV_MAX_RPM: await $.env.get('OMC_JEV_MAX_RPM'),
     OMC_JEV_BREAKER_DIR: await $.env.get('OMC_JEV_BREAKER_DIR'),
@@ -445,6 +468,7 @@ async function readConfig($) {
     // Runs of slashes and backslashes as one slash, as in namesSecretPath.
     .map((p) => p.replace(/[\\/]+/g, '/').replace(/\/$/, '').toLowerCase());
   const endpoint = env.OMC_JEV_ENDPOINT || DEFAULT_ENDPOINT;
+  const tasksMode = String(env.OMC_JEV_COMPACT_TASKS ?? '').trim().toLowerCase();
   return {
     mode,
     key: env.TYPESAFE_API_KEY,
@@ -457,6 +481,7 @@ async function readConfig($) {
     target: fraction(env.OMC_JEV_COMPACT_TARGET, DEFAULT_TARGET, 0.1, 0.9),
     toast: String(env.OMC_JEV_COMPACT_TOAST ?? '').trim() === '1',
     privatePaths,
+    tasks: tasksMode === 'shadow' || tasksMode === 'active' ? tasksMode : 'off',
   };
 }
 
@@ -1184,8 +1209,9 @@ function markMentioned(candidates, user) {
 }
 
 function traceLine(c) {
+  if (c.supersededBy) return supersededLine(c, c.supersededBy);
   const what = !c.textOnly ? 'non-text result (image or file) removed' : `${c.res.isError ? 'error' : 'result'} of ${c.resultChars} chars removed`;
-  return `[compacted] ${c.use.tool}(${clip(c.summary, TRACE_INPUT_CHARS)}) - ${what}`;
+  return `${TRACE_PREFIX} ${c.use.tool}(${clip(c.summary, TRACE_INPUT_CHARS)}) - ${what}`;
 }
 
 function shortText(c) {
@@ -1247,8 +1273,9 @@ const removableChars = (candidates) => candidates.reduce((s, c) => s + Math.max(
 
 // Rank and fill the budget: highest score first while the upgrade from a trace fits; a result that
 // does not fit whole and scores at least "may be useful" is cut to SHORT_CHARS when that fits; the rest
-// is traced. A result not asked about (secret path, no text, beyond the questions) is traced; a call
-// not longer than its trace and the task list stay whole.
+// is traced. A result not asked about (secret path, no text, beyond the questions) is traced, and so is
+// one marked by tasksPlan (superseded or of a finished task); a call not longer than its trace and the
+// task list stay whole.
 function allocate(candidates, before, target) {
   const fixed = before - candidates.reduce((s, c) => s + c.fullCost - c.traceCost, 0);
   let avail = Math.floor(before * target) - fixed;
@@ -1258,7 +1285,7 @@ function allocate(candidates, before, target) {
     const upShort = c.shortCost - c.traceCost;
     if (c.secret || !c.textOnly) c.keep = 'trace';
     else if (upFull <= 0 || c.task) c.keep = 'full';
-    else if (!c.asked) c.keep = 'trace';
+    else if (c.supersededBy || c.closedTask || !c.asked) c.keep = 'trace';
     else if (upFull <= avail) { c.keep = 'full'; avail -= upFull; }
     else if (c.score >= 0.5 && c.shortCost < c.fullCost && upShort <= avail) { c.keep = 'short'; avail -= Math.max(0, upShort); }
     else c.keep = 'trace';
@@ -1620,6 +1647,401 @@ function noteFailures(failures, now) {
   }
 }
 
+// --- superseded calls and calls of finished tasks (OMC_JEV_COMPACT_TASKS, see the header) --------------------------------------------
+// The module cannot import another file of the plugin per hook module, so the rules live here. They work on call records
+// {id, tool, input, text, hasResult, isError, textOnly, order, main, message}: one per tool_use of the conversation, in order.
+
+const READ_DEFAULT_LIMIT = 2000; // lines the Read tool returns without `limit` (its description)
+const CLOSE_GUARD = 8;
+const STATUSES = new Set(['pending', 'in_progress', 'completed']);
+const CONTENT_MAX = 500;
+const TASK_ID = /^[A-Za-z0-9_-]{1,40}$/;
+const SHELLS = new Set(['Bash', 'PowerShell']);
+const SEARCHES = new Set(['Grep', 'Glob']);
+const CD_WORD = /(?:^|[\s;&|(`{"'])(?:cd|chdir|pushd|popd|sl|set-location|push-location|pop-location|source|eval|\.)(?=$|[\s;&|)`}"'])/i;
+const CD_TOOLS = new Set(['EnterWorktree', 'ExitWorktree', 'mcp__ccd_directory__change_directory']);
+// The host's reply to a repeated Read: it points to the older result, so it cannot stand for it.
+const UNCHANGED_READ = /^\s*File unchanged since last read/i;
+
+const isForced = (c) => c.secret || !c.textOnly;
+const retrace = (c) => { c.trace = traceLine(c); c.traceCost = c.trace.length + 1; };
+
+// Do the calls name a Windows path (X:\ or \\server)? Only then a Git Bash path (/d/x) is a drive path and names differ in case at most.
+const WIN_PATH = /(?:^|[\s"'=(])(?:[A-Za-z]:[\\/]|\\\\[^\s\\])/;
+
+// An absolute path as a comparison key: one kind of slash, no doubled, trailing, "." or ".." segment. With `win`: a Git Bash path (/d/x)
+// as its drive path, and a drive path (D:\...) or a UNC path in lower case (Windows names ignore case). Not absolute: null (the
+// directory would decide).
+function pathKey(p, win) {
+  if (typeof p !== 'string') return null;
+  let t = p.trim();
+  if (!t) return null;
+  if (win) {
+    const gitBash = /^\/([A-Za-z])(?=\/|$)/.exec(t);
+    if (gitBash) t = `${gitBash[1]}:/${t.slice(2).replace(/^\/+/, '')}`;
+  }
+  const drive = /^[A-Za-z]:[\\/]/.test(t);
+  if (!drive && !/^[\\/]/.test(t)) return null;
+  t = t.replace(/\\/g, '/');
+  const unc = win && t.startsWith('//');
+  const head = drive ? t.slice(0, 2) : '';
+  const parts = [];
+  for (const seg of t.slice(head.length).split('/')) {
+    if (seg === '..') parts.pop();
+    else if (seg !== '' && seg !== '.') parts.push(seg);
+  }
+  const key = `${head}${unc ? '/' : ''}/${parts.join('/')}`;
+  return win && (drive || unc) ? key.toLowerCase() : key;
+}
+
+function canonical(v) {
+  if (Array.isArray(v)) return `[${v.map(canonical).join(',')}]`;
+  if (v && typeof v === 'object') return `{${Object.keys(v).sort().map((k) => `${JSON.stringify(k)}:${canonical(v[k])}`).join(',')}}`;
+  return JSON.stringify(v === undefined ? null : v);
+}
+
+const intOf = (v, min) => {
+  const n = typeof v === 'string' && /^\d+$/.test(v.trim()) ? Number(v) : v;
+  return Number.isInteger(n) && n >= min ? n : null;
+};
+const pagesOf = (input) => (input.pages === undefined || input.pages === null ? '' : String(input.pages).replace(/\s+/g, ''));
+
+// Lines a Read covers: from max(1, offset), `limit` lines (READ_DEFAULT_LIMIT without; with allow_large and no limit up to the end).
+function readRange(input) {
+  const start = Math.max(1, intOf(input.offset, 0) || 1);
+  const limit = intOf(input.limit, 0);
+  if (limit) return [start, start + limit - 1];
+  return [start, input.allow_large === true ? Infinity : start + READ_DEFAULT_LIMIT - 1];
+}
+
+function changesDirectory(c) {
+  if (CD_TOOLS.has(c.tool)) return true;
+  return SHELLS.has(c.tool) && typeof c.input.command === 'string' && CD_WORD.test(c.input.command);
+}
+
+// A command supersedes and is superseded only when it reads: every part of it (split at unquoted | ; & and line breaks, leading
+// VAR=value dropped) starts with a reading verb and carries no writing flag; no output redirection but to &N, /dev/null, $null or nul;
+// no command or process substitution; in PowerShell no parenthesis or script block outside quotes. Anything else (a commit, an append, a
+// generator, an install, a script, curl) keeps every run.
+const READ_VERBS = /^(?:git(?:\s+(?:-C\s+\S+|-c\s+\S+|--no-pager))*\s+(?:status|diff|log|show|blame|ls-files|ls-tree|rev-parse|grep|describe|shortlog)|ls|dir|cat|head|tail|wc|sha256sum|sha1sum|md5sum|cksum|grep|egrep|fgrep|rg|find|stat|file|du|df|pwd|which|type|realpath|readlink|basename|dirname|diff|cmp|comm|jq|echo|printf|true|test|cd|pushd|popd|node\s+--check|ruff\s+check|get-content|gc|get-childitem|gci|get-item|gi|get-itemproperty|get-filehash|test-path|resolve-path|select-string|sls|measure-object|select-object|sort-object|get-location|gl|set-location|sl|push-location|pop-location|format-table|ft|format-list|fl|out-string|out-null|write-output|write-host)(?=$|\s)/i;
+const WRITE_FLAGS = /(?:^|\s)(?:--output|--pre|--fix|--fix-only|--add-noqa|-delete|-exec|-execdir|-ok|-okdir|-fprint0?|-fprintf|-fls)(?=$|[\s=])/i;
+const OPEN_IN_PAGER = /(?:^|\s)(?:-O|--open-files-in-pager)/; // git grep -O<command> runs a command on the matching files
+const SED_PRINT = /^sed\s+-n\s+(['"]?)[\d,$;p\s]+\1(?:\s+[^-\s]\S*)*$/; // sed -n with line numbers and p only (no -i, no w)
+function readOnlyCommand(command, powershell) {
+  if (typeof command !== 'string' || !command.trim()) return false;
+  const parts = [];
+  let cur = '';
+  let quote = '';
+  for (let i = 0; i < command.length; i++) {
+    const ch = command[i];
+    if (quote) {
+      if (ch === quote) quote = '';
+      else if (quote === '"' && (ch === '`' || (ch === '$' && command[i + 1] === '('))) return false;
+      else if (quote === '"' && ch === '\\') { cur += ch + (command[i + 1] ?? ''); i++; continue; }
+      cur += ch;
+      continue;
+    }
+    if (ch === '"' || ch === "'") { quote = ch; cur += ch; continue; }
+    if (ch === '\\') { cur += ch + (command[i + 1] ?? ''); i++; continue; }
+    if (ch === '`' || (ch === '$' && command[i + 1] === '(') || ((ch === '<' || ch === '>') && command[i + 1] === '(')) return false;
+    if (powershell && (ch === '(' || ch === '{')) return false;
+    if (ch === '>') {
+      const m = /^>>?\s*(?:&\d|(?:\/dev\/null|\$null|nul)(?=$|[\s;&|)]))/i.exec(command.slice(i));
+      if (!m) return false;
+      i += m[0].length - 1;
+      continue;
+    }
+    if (ch === '|' || ch === ';' || ch === '&' || ch === '\n' || ch === '\r') { parts.push(cur); cur = ''; continue; }
+    cur += ch;
+  }
+  if (quote) return false;
+  parts.push(cur);
+  return parts.map((s) => s.trim().replace(/^(?:[A-Za-z_][A-Za-z0-9_]*=\S*\s+)+/, '')).filter(Boolean).every((s) => (/^sed\s/i.test(s) ? SED_PRINT.test(s) : READ_VERBS.test(s) && !WRITE_FLAGS.test(s) && !OPEN_IN_PAGER.test(s)));
+}
+
+// Can the Read `newer` stand for the Read `old` of the same file (later, same lines, same pages, a result at least as long)?
+function readSame(old, newer) {
+  if (!newer.hasResult || newer.isError || !newer.textOnly || !newer.text || UNCHANGED_READ.test(newer.text)) return false;
+  if (pagesOf(old.input) !== pagesOf(newer.input)) return false;
+  const [a0, a1] = readRange(old.input);
+  const [b0, b1] = readRange(newer.input);
+  return a0 === b0 && a1 === b1 && newer.text.length >= (old.text || '').length;
+}
+
+const writeWhole = (w) => w.hasResult && !w.isError && typeof w.input.content === 'string';
+
+// Map<tool_use_id of the superseded call, tool_use_id of the newer call>. newerKept(id): whether that call stays in the compaction
+// at all; a call that goes anyway (a non-text result, a secret path) stands for nothing. The newest calls decide first, so a newer
+// call that is itself superseded never stands for another one.
+function supersededCalls(list, newerKept, win) {
+  const cdBefore = new Array(list.length + 1).fill(0); // cdBefore[k]: directory changes among list[0..k-1]
+  list.forEach((c, i) => { cdBefore[i + 1] = cdBefore[i] + (changesDirectory(c) ? 1 : 0); });
+  const groups = new Map();
+  const add = (key, i) => { if (!groups.has(key)) groups.set(key, []); groups.get(key).push(i); };
+  list.forEach((c, i) => {
+    if (!c.id) return;
+    if (c.tool === 'Read' || c.tool === 'Write') { const k = pathKey(c.input.file_path, win); if (k) add(`file:${k}`, i); }
+    else if (SHELLS.has(c.tool)) { if (typeof c.input.command === 'string' && c.input.run_in_background !== true && readOnlyCommand(c.input.command, c.tool === 'PowerShell')) add(`${c.tool}:${c.input.command}`, i); }
+    else if (SEARCHES.has(c.tool)) add(`${c.tool}:${canonical(c.input)}`, i);
+  });
+  const by = new Map();
+  for (const members of groups.values()) {
+    for (let x = members.length - 2; x >= 0; x--) {
+      const i = members[x];
+      const old = list[i];
+      if (old.tool === 'Write') continue;
+      for (let y = members.length - 1; y > x; y--) {
+        const j = members[y];
+        const newer = list[j];
+        if (by.has(newer.id) || newer.order <= old.order || !newerKept(newer.id)) continue;
+        let ok;
+        if (old.tool === 'Read') ok = newer.tool === 'Read' ? readSame(old, newer) : writeWhole(newer);
+        else {
+          // a newer error (a call a hook denied) never stands for an older result; a newer result that is empty or shorter than the older
+          // one (a command that changed what it reads, as `git diff` after a commit) stands for nothing
+          ok = newer.hasResult && newer.textOnly && !!newer.text && newer.text.length >= (old.text || '').length && (!newer.isError || old.isError);
+          const sameDirectory = cdBefore[j] === cdBefore[i];
+          // Bash keeps its directory between calls in the main loop only, PowerShell everywhere (its tool description); a Grep or Glob
+          // without an absolute path searches the directory of the call
+          if (ok && SEARCHES.has(old.tool)) {
+            const absolute = pathKey(old.input.path, win) !== null;
+            ok = old.main || newer.main ? absolute && sameDirectory : absolute || sameDirectory;
+          } else if (ok && (old.main || newer.main || old.tool === 'PowerShell')) ok = sameDirectory;
+        }
+        if (ok) { by.set(old.id, newer.id); break; }
+      }
+    }
+  }
+  return by;
+}
+
+// --- the task list, as the tools keep it ---
+
+const arrayOf = (value) => {
+  if (Array.isArray(value)) return value;
+  if (typeof value === 'string' && value.trim().startsWith('[')) {
+    try { const parsed = JSON.parse(value); return Array.isArray(parsed) ? parsed : null; } catch { return null; }
+  }
+  return null;
+};
+
+function itemOf(raw) {
+  if (!raw || typeof raw !== 'object') return null;
+  const content = clip(String(raw.content ?? raw.subject ?? '').trim(), CONTENT_MAX);
+  return content ? { content, status: STATUSES.has(raw.status) ? raw.status : 'pending' } : null;
+}
+
+// The tools that carry the task list are the ones with a known schema: TodoWrite (the whole list each call) and TaskCreate and TaskUpdate.
+// A plan tool (`update_plan`) is not read: its schema is not verified, so its calls stay as they are (TASK_LIST keeps them whole).
+const isListTool = (tool) => TASK_LIST.test(tool) || TASK_STEP.test(tool);
+
+// The list after one list call -> [{ content, status, id? }] (id only for TaskCreate tasks), or null when the call changes nothing (an
+// error, no result, a malformed input).
+function listStep(items, c) {
+  if (c.isError || !c.hasResult) return null;
+  if (c.tool === 'TodoWrite') {
+    const todos = arrayOf(c.input.todos);
+    return todos ? todos.map(itemOf).filter(Boolean) : null;
+  }
+  if (c.tool === 'TaskCreate') {
+    const id = /Task #([A-Za-z0-9_-]{1,40}) created/.exec(c.text || '')?.[1];
+    const item = itemOf({ content: c.input.subject, status: 'pending' });
+    if (!id || !TASK_ID.test(id) || !item) return null;
+    return [...items.filter((x) => x.id !== id), { id, ...item }];
+  }
+  if (c.tool === 'TaskUpdate') {
+    const id = c.input.taskId === undefined ? '' : String(c.input.taskId);
+    const at = items.findIndex((x) => x.id === id);
+    if (at < 0) return null;
+    const list = items.map((x) => ({ ...x }));
+    if (c.input.status === 'deleted') return list.filter((_, i) => i !== at);
+    if (STATUSES.has(c.input.status)) list[at].status = c.input.status;
+    if (typeof c.input.subject === 'string' && c.input.subject.trim()) list[at].content = clip(c.input.subject.trim(), CONTENT_MAX);
+    return list;
+  }
+  return null;
+}
+
+// A task's identity across list calls: the Task* id, else the content (the k-th item with one content gets #k).
+function keysOf(items) {
+  const seen = new Map();
+  return items.map((x) => {
+    if (x.id !== undefined) return `t:${x.id}`;
+    const n = (seen.get(x.content) || 0) + 1;
+    seen.set(x.content, n);
+    return n === 1 ? `c:${x.content}` : `c:${x.content}#${n}`;
+  });
+}
+
+// Absolute paths in a command, quoted or as a whole word (D:\x, D:/x, /d/x, /home/u/x, \\server\share), and the words that end in an
+// extension (src/a.ts, a.ts); /dev and /proc are no files of a task.
+const CMD_PATH = /"((?:[A-Za-z]:)?[\\/][^"\n]*)"|'((?:[A-Za-z]:)?[\\/][^'\n]*)'|(?<![^\s=(<>|;&,])((?:[A-Za-z]:)?[\\/][^\s"'`|;&<>()]*)/g;
+const CMD_FILE = /(?<![^\s"'`|;&<>()])[^\s"'`|;&<>()]+\.[A-Za-z0-9]{1,6}\b/g;
+const NOT_A_FILE = /^\/(?:dev|proc)(?:\/|$)/;
+
+// What a call touches: the names of the files of its path fields and of its command, as written (absolute or relative, in any case:
+// the directory a relative path starts from is not known, so the name has to do), and a shell command as a whole.
+function taskTargetsOf(c) {
+  const out = [];
+  const add = (path) => {
+    const name = String(path).replace(/[\\/]+$/, '').split(/[\\/]/).pop().toLowerCase();
+    if (name && name !== '.' && name !== '..') out.push(`file:${name}`);
+  };
+  for (const f of ['file_path', 'notebook_path', 'path']) if (typeof c.input[f] === 'string') add(c.input[f]);
+  if (SHELLS.has(c.tool) && typeof c.input.command === 'string') {
+    out.push(`cmd:${c.tool}:${c.input.command}`);
+    for (const m of c.input.command.matchAll(CMD_PATH)) { const path = m[1] ?? m[2] ?? m[3]; if (path && !NOT_A_FILE.test(path)) add(path); }
+    for (const m of c.input.command.matchAll(CMD_FILE)) add(m[0]);
+  }
+  return out;
+}
+
+// The calls of every task and which of them go once the task is completed. A group of calls of one API message belongs to the task in
+// progress after its last list call (or the one in progress now when it has none); with none or several in progress, to no task.
+// -> { closed, abandoned, collapse, guarded, touched, tail }: counts of completed tasks and of tasks left in progress when a later one
+// began, and sets of tool_use_id: collapse (go), guarded (the CLOSE_GUARD calls before the closing message), touched (a file or command a
+// later call outside the completed tasks touches, a task not completed or none), tail (from `keepFrom` on).
+function assignTasks(list, keepFrom) {
+  const tasks = new Map();
+  let items = [];
+  let keys = [];
+  for (let s = 0; s < list.length;) {
+    let e = s;
+    while (e + 1 < list.length && list[e + 1].message === list[s].message) e++;
+    const group = list.slice(s, e + 1);
+    for (const c of group) {
+      const next = listStep(items, c);
+      if (!next) continue;
+      const nextKeys = keysOf(next);
+      next.forEach((x, i) => {
+        if (!tasks.has(nextKeys[i])) tasks.set(nextKeys[i], { status: null, closedAt: null, startedAt: null, calls: [] });
+        const t = tasks.get(nextKeys[i]);
+        const was = t.status;
+        t.status = x.status;
+        if (x.status !== 'completed') t.closedAt = null;
+        else if (was !== 'completed') t.closedAt = group[0].order;
+        if (x.status === 'in_progress' && was !== 'in_progress') t.startedAt = c.order;
+      });
+      items = next;
+      keys = nextKeys;
+    }
+    const open = keys.filter((_, i) => items[i].status === 'in_progress');
+    if (open.length === 1) for (const c of group) if (!isListTool(c.tool)) tasks.get(open[0]).calls.push(c);
+    s = e + 1;
+  }
+  const isClosed = (t) => t.status === 'completed' && t.closedAt !== null;
+  const ofClosed = new Set();
+  for (const t of tasks.values()) if (isClosed(t)) for (const c of t.calls) ofClosed.add(c.id);
+  const touch = new Map(); // target -> the latest order of a call that is not of a completed task
+  for (const c of list) if (!ofClosed.has(c.id)) for (const k of taskTargetsOf(c)) if (!(touch.get(k) >= c.order)) touch.set(k, c.order);
+  const out = { closed: 0, abandoned: 0, collapse: new Set(), guarded: new Set(), touched: new Set(), tail: new Set() };
+  const latestStart = Math.max(-Infinity, ...[...tasks.values()].map((t) => (t.startedAt === null ? -Infinity : t.startedAt)));
+  for (const t of tasks.values()) {
+    if (t.status === 'in_progress' && t.startedAt !== null && t.startedAt < latestStart) out.abandoned++;
+    if (!isClosed(t)) continue;
+    out.closed++;
+    const before = t.calls.filter((c) => c.order < t.closedAt);
+    const guard = new Set(before.slice(-CLOSE_GUARD).map((c) => c.id));
+    for (const c of before) {
+      if (c.order >= keepFrom) out.tail.add(c.id);
+      else if (guard.has(c.id)) out.guarded.add(c.id);
+      else if (taskTargetsOf(c).some((k) => touch.get(k) > c.order)) out.touched.add(c.id);
+      else out.collapse.add(c.id);
+    }
+  }
+  return out;
+}
+
+// The trace of a superseded call. No step number: steps renumber after a compaction.
+function supersededLine(c, byTool) {
+  const i = c.use.input && typeof c.use.input === 'object' ? c.use.input : {};
+  let range = '';
+  if (c.use.tool === 'Read' && (i.offset !== undefined || i.limit !== undefined || i.pages !== undefined)) {
+    const [r0, r1] = readRange(i);
+    range = i.pages !== undefined ? ` pages ${pagesOf(i)}` : r1 === Infinity ? ` from line ${r0}` : ` lines ${r0}-${r1}`;
+  }
+  const by = byTool === 'Write' ? 'a write of the whole file' : c.use.tool === 'Read' ? 'the same read' : 'the same command';
+  return `${TRACE_PREFIX} ${c.use.tool}(${clip(c.summary, TRACE_INPUT_CHARS)}${range}) - ${c.res.isError ? 'error' : 'result'} of ${c.resultChars} chars superseded by a later call (${by})`;
+}
+
+// What the collapse of a completed task may drop: the results the same call gives again (a file, a search, a command that only reads) and
+// the writes (their content is on disk). An answer of the user, an agent's report, a page, a plan and any MCP result are left to Jev.
+const REPRODUCIBLE = new Set(['Read', 'Grep', 'Glob', 'Write', 'Edit', 'MultiEdit', 'NotebookEdit']);
+const reproducible = (c) => REPRODUCIBLE.has(c.tool) || (SHELLS.has(c.tool) && typeof c.input.command === 'string' && readOnlyCommand(c.input.command, c.tool === 'PowerShell'));
+
+// The decisions of this step, from the calls of every row (the last messages and the open loop too: directory changes and later
+// touches count) but about the candidates only, so a call of the last messages or of the open loop is never superseded or collapsed.
+// Left out: a forced item, a trace not shorter than the item, a result of a file or URL the user names, and a call that goes with a
+// task that is not reproducible. A call that goes with a task cannot stand for an older one. Everything is counted for the record; only
+// `active` marks the candidates (supersededBy and newer, closedTask).
+function tasksPlan(messages, group, keepFrom, main, candidates, active, user) {
+  const results = new Map();
+  for (const m of messages) for (const r of m.toolResults || []) if (!results.has(r.tool_use_id)) results.set(r.tool_use_id, r);
+  const calls = [];
+  const seen = new Set();
+  messages.forEach((m, i) => {
+    if (m.role !== 'assistant') return;
+    for (const u of m.toolUses || []) {
+      if (seen.has(u.tool_use_id)) continue;
+      seen.add(u.tool_use_id);
+      const r = results.get(u.tool_use_id);
+      calls.push({
+        id: u.tool_use_id, tool: u.tool || '', input: u.input && typeof u.input === 'object' ? u.input : {},
+        text: r ? r.text || '' : undefined, hasResult: r !== undefined, isError: Boolean(r?.isError), textOnly: r ? textOnlyResult(r) : true,
+        order: calls.length + 1, main, message: group[i], row: i,
+      });
+    }
+  });
+  const tail = calls.find((c) => c.row >= Math.min(messages.length - KEEP_LAST, keepFrom));
+  const byId = new Map(candidates.map((c) => [c.id, c]));
+  const callOf = new Map(calls.map((c) => [c.id, c]));
+  const win = calls.some((c) => ['file_path', 'notebook_path', 'path', 'command'].some((f) => typeof c.input[f] === 'string' && WIN_PATH.test(c.input[f])));
+  const tasks = assignTasks(calls, tail ? tail.order : calls.length + 1);
+  const userText = [user.instructions || '', ...user.task].join('\n').toLowerCase();
+  const named = (c) => [...targetsOf(c.use.input)].some((name) => mentions(userText, name));
+  let mentioned = 0;
+  const closing = new Set();
+  for (const id of tasks.collapse) {
+    const c = byId.get(id);
+    if (!c || isForced(c) || c.fullCost <= c.traceCost || !reproducible(callOf.get(id))) continue;
+    if (named(c)) { mentioned++; continue; }
+    closing.add(c);
+  }
+  const sup = supersededCalls(calls, (id) => !(byId.has(id) && (isForced(byId.get(id)) || closing.has(byId.get(id)))), win);
+  const superseded = [];
+  for (const [oldId, newId] of sup) {
+    const c = byId.get(oldId);
+    if (!c || isForced(c)) continue;
+    if (named(c)) { mentioned++; continue; }
+    if (c.inputChars + c.resultChars <= supersededLine(c, callOf.get(newId).tool).length) continue;
+    superseded.push([c, callOf.get(newId).tool, byId.get(newId)]);
+  }
+  const supersededSet = new Set(superseded.map(([c]) => c));
+  const closed = [...closing].filter((c) => !supersededSet.has(c));
+  const counts = {
+    tasks_calls: calls.length,
+    tasks_superseded_calls: sup.size,
+    tasks_superseded: superseded.length,
+    tasks_superseded_chars: superseded.reduce((s, [c]) => s + c.resultChars, 0),
+    tasks_superseded_by_write: superseded.filter(([, tool]) => tool === 'Write').length,
+    tasks_closed: tasks.closed,
+    tasks_collapse: tasks.collapse.size,
+    tasks_collapsed: closed.length,
+    tasks_collapsed_chars: closed.reduce((s, c) => s + c.resultChars, 0),
+    tasks_guarded: tasks.guarded.size,
+    tasks_touched: tasks.touched.size,
+    tasks_tail: tasks.tail.size,
+    tasks_abandoned: tasks.abandoned,
+    tasks_mentioned: mentioned,
+    tasks_not_asked: superseded.length + closed.length, // the questions to Jev that `active` saves
+  };
+  if (active) {
+    for (const [c, tool, newer] of superseded) { c.supersededBy = tool; c.newer = newer; retrace(c); }
+    for (const c of closed) c.closedTask = true;
+  }
+  return counts;
+}
+
 // Decides one compaction: {messages} to install or {fallback: reason}. Fills `record`; never calls next.
 async function decide($, e, cfg, record, started) {
   const messages = Array.isArray(e.messages) ? e.messages : [];
@@ -1667,8 +2089,20 @@ async function decide($, e, cfg, record, started) {
     return { fallback: blocked };
   }
 
-  // Newest results first; only text results of calls outside secret paths are asked about.
-  const askable = [...candidates].sort((a, b) => b.resIdx - a.resIdx).filter((c) => !c.secret && !c.proseSecret && !c.taskOutput && c.textOnly);
+  const user = userTask(messages, typeof e.instructions === 'string' && e.instructions.trim() ? e.instructions : undefined, cfg.privatePaths);
+  if (cfg.tasks !== 'off') {
+    record.tasks_mode = cfg.tasks;
+    try {
+      Object.assign(record, tasksPlan(messages, group, keepFrom, e.agentId === undefined, candidates, cfg.tasks === 'active', user));
+    } catch (error) {
+      // As with `off`: whatever was marked before the exception is undone.
+      record.tasks_error = clip(oneLine(maskSecrets(String(error?.message ?? error))), 200);
+      for (const c of candidates) if (c.supersededBy || c.closedTask) { c.supersededBy = c.newer = c.closedTask = undefined; retrace(c); }
+    }
+  }
+
+  // Newest results first; only text results of calls outside secret paths are asked about (not those `active` already traces).
+  const askable = [...candidates].sort((a, b) => b.resIdx - a.resIdx).filter((c) => !c.secret && !c.proseSecret && !c.taskOutput && c.textOnly && !c.supersededBy && !c.closedTask);
   record.secret_skipped = candidates.filter((c) => c.secret).length;
   // A prose call that names a secret path: its result is never sent; it stays as if its request were held back.
   record.secret_held = 0;
@@ -1685,7 +2119,6 @@ async function decide($, e, cfg, record, started) {
   let asked = askable.slice(0, BATCH * Math.min(MAX_REQUESTS, left));
   record.asked = asked.length;
 
-  const user = userTask(messages, typeof e.instructions === 'string' && e.instructions.trim() ? e.instructions : undefined, cfg.privatePaths);
   const deadline = started + TOTAL_MS;
   const runs = [];
   let held;
@@ -1763,6 +2196,20 @@ async function decide($, e, cfg, record, started) {
 
   record.mentioned = markMentioned(candidates, user);
   allocate(candidates, before, cfg.target);
+  // A superseded call stands for its newer call only while that call stays whole; else it is ranked and cut as without this step, with
+  // the score of the newer call (the same command or file), and the budget is shared out again. Marks only go, so this ends.
+  for (;;) {
+    const stale = candidates.filter((c) => c.supersededBy && c.newer && c.newer.keep !== 'full');
+    if (!stale.length) break;
+    for (const c of stale) { c.asked = c.newer.asked; c.score = c.newer.score; c.supersededBy = c.newer = undefined; retrace(c); }
+    allocate(candidates, before, cfg.target);
+  }
+  if (cfg.tasks === 'active' && record.tasks_error === undefined) {
+    Object.assign(record, {
+      tasks_superseded_applied: candidates.filter((c) => c.supersededBy && c.keep !== 'full').length,
+      tasks_collapsed_applied: candidates.filter((c) => c.closedTask && c.keep !== 'full').length,
+    });
+  }
   const stats = {};
   const built = build(messages, candidates, keepFrom, group, stats);
   if (!pairingOk(messages, built)) return { fallback: 'build_error' };

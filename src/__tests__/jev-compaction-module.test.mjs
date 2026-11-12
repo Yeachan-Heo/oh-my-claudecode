@@ -2032,3 +2032,365 @@ describe('jev-compaction module: what the host sends after the compaction', () =
     expect(sub.asked).toEqual([{ as: 'api', agentId: 'sub-1' }]);
   });
 });
+
+describe('jev-compaction module: superseded calls and finished tasks (OMC_JEV_COMPACT_TASKS)', () => {
+  // The budget is wide, and the results Jev scores NEEDED rank first, so what leaves the conversation is what this step removes.
+  const ENV = { ...ACTIVE_ENV, OMC_JEV_COMPACT_TARGET: '0.9' };
+  const WIDE = 'x'.repeat(2000);
+  const step = (tool, input, result = `NEEDED ${input.file_path ?? input.command ?? input.pattern} ${WIDE}`, isError = false) => ({ tool, input, result, isError });
+  const read = (path, extra = {}, result) => step('Read', { file_path: path, ...extra }, result);
+  const write = (path) => step('Write', { file_path: path, content: WIDE }, 'NEEDED File created successfully');
+  const bash = (command, result, isError) => step('Bash', { command }, result, isError);
+  // Its result is far over the budget left, so it is traced however this step decides.
+  const bulk = step('Bash', { command: 'make all' }, `BULK ${'z'.repeat(150000)}`);
+  // The last two calls are among the last KEEP_LAST messages: never candidates.
+  const tail = [read('/p/tail-1.ts'), read('/p/tail-2.ts')];
+  const todos = (...states) => step('TodoWrite', { todos: states.map((status, k) => ({ content: `Task ${'AB'[k]}`, status, activeForm: `Doing ${'AB'[k]}` })) }, 'Todos have been modified successfully');
+  const state = (r, id) => {
+    const x = resultOf(r.out.messages, id);
+    return x === undefined ? 'trace' : x.text.includes('[result shortened') ? 'short' : 'full';
+  };
+
+  /** Steps t1, t2, ... as call/result pairs between the first message and the closing request. */
+  function trail(steps, last = 'Now sum up the results.') {
+    const m = [{ role: 'user', text: 'Task: review the project.', toolUses: [] }];
+    steps.forEach((s, k) => {
+      const id = `t${k + 1}`;
+      m.push({ role: 'assistant', text: `Step ${k + 1}.`, toolUses: [{ tool_use_id: id, tool: s.tool, input: s.input }] });
+      m.push({ role: 'user', text: '', toolUses: [], toolResults: [{ tool_use_id: id, text: s.result, isError: s.isError }] });
+    });
+    m.push({ role: 'user', text: last, toolUses: [] }, { role: 'assistant', text: 'Summary: done.', toolUses: [] });
+    return m.map((x, k) => Object.freeze({ ...x, handle: `h${k}` }));
+  }
+  const run = (messages, mode, event, options = {}) => compactOnce(messages, { env: mode === undefined ? ENV : { ...ENV, OMC_JEV_COMPACT_TASKS: mode }, ...options }, event);
+  const rec = (r) => r.records()[0];
+  const gone = (r, ...ids) => ids.every((id) => resultOf(r.out.messages, id) === undefined);
+  const kept = (r, ...ids) => ids.every((id) => resultOf(r.out.messages, id) !== undefined);
+  const said = (r) => r.out.messages.filter((m) => m.role === 'assistant').map((m) => m.text).join('\n');
+  const strip = (r) => { const rest = { ...rec(r) }; for (const k of ['ts', 'duration_ms', 'jev_ms']) delete rest[k]; return rest; };
+  const tasksFields = (r) => Object.keys(rec(r)).filter((k) => k.startsWith('tasks_'));
+  const paired = (r, messages) => {
+    const ids = (key, id) => new Set(r.out.messages.flatMap((m) => (m[key] || []).map((x) => x[id])));
+    return pairingOk(messages, r.out.messages) && [...ids('toolUses', 'tool_use_id')].every((id) => ids('toolResults', 'tool_use_id').has(id)) && ids('toolUses', 'tool_use_id').size === ids('toolResults', 'tool_use_id').size;
+  };
+
+  it('off: without the variable, with off and with a value it does not know the result and the record are as without this step', async () => {
+    const messages = trail([bulk, read('/p/a.ts'), write('/p/a.ts'), bash('git status'), bash('git status'), ...tail]);
+    const base = await run(messages);
+    expect(rec(base)).toMatchObject({ result: 'jev' });
+    expect(tasksFields(base)).toEqual([]);
+    expect(kept(base, 't2', 't4', 't5')).toBe(true);
+    for (const mode of ['off', 'bogus', '', ' ']) {
+      const other = await run(messages, mode);
+      expect([mode, other.out]).toEqual([mode, base.out]);
+      expect([mode, strip(other)]).toEqual([mode, strip(base)]);
+    }
+  });
+
+  it('shadow: the result is the one of off, the record only counts what active would do', async () => {
+    const messages = trail([bulk, read('/p/a.ts'), write('/p/a.ts'), bash('git status'), bash('git status'), ...tail]);
+    const off = await run(messages, 'off');
+    const shadow = await run(messages, 'shadow');
+    expect(shadow.out).toEqual(off.out);
+    expect(shadow.calls.fetch).toHaveLength(off.calls.fetch.length);
+    expect(rec(shadow)).toMatchObject({ tasks_mode: 'shadow', tasks_calls: 7, tasks_superseded_calls: 2, tasks_superseded: 2, tasks_superseded_by_write: 1, tasks_superseded_chars: resultOf(messages, 't2').text.length + resultOf(messages, 't4').text.length, tasks_not_asked: 2 });
+    expect(tasksFields(shadow)).not.toContain('tasks_superseded_applied');
+    expect(strip(shadow)).toEqual({ ...strip(off), ...Object.fromEntries(Object.entries(rec(shadow)).filter(([k]) => k.startsWith('tasks_'))) });
+    // The names of the fields belong to the record only with the variable set.
+    expect(tasksFields(off)).toEqual([]);
+  });
+
+  it('active: a Read of a file, then a Write of the whole file, and a repeated command become traces that say so; the newer calls stay', async () => {
+    const messages = trail([bulk, read('/p/a.ts'), write('/p/a.ts'), bash('git status'), bash('git status'), ...tail]);
+    const off = await run(messages, 'off');
+    const r = await run(messages, 'active');
+    expect(rec(r)).toMatchObject({ result: 'jev', tasks_mode: 'active', tasks_superseded: 2, tasks_superseded_applied: 2, tasks_not_asked: 2 });
+    expect(gone(r, 't2', 't4')).toBe(true);
+    expect(kept(r, 't3', 't5')).toBe(true);
+    expect(said(r)).toContain(`[compacted] Read(/p/a.ts) - result of ${resultOf(messages, 't2').text.length} chars superseded by a later call (a write of the whole file)`);
+    expect(said(r)).toContain(`[compacted] Bash(git status) - result of ${resultOf(messages, 't4').text.length} chars superseded by a later call (the same command)`);
+    expect(paired(r, messages)).toBe(true);
+    expect((await run(messages, ' ACTIVE ')).out).toEqual(r.out);
+    // Jev is not asked about them.
+    expect(sentResults(off.calls).filter((x) => x.tool === 'Read' || x.input.includes('git status'))).toHaveLength(3);
+    expect(sentResults(r.calls).filter((x) => x.tool === 'Read' || x.input.includes('git status'))).toHaveLength(1);
+    // Everything else is as with off.
+    expect(chars(r.out.messages)).toBeLessThan(chars(off.out.messages));
+    expect(kept(off, 't2', 't4')).toBe(true);
+  });
+
+  it('the rules: the same lines of a Read, an error only by an error, a command only when it reads, no change of directory in between', async () => {
+    const pad = `NEEDED ${'y'.repeat(43)}`;
+    const steps = [
+      bulk,
+      read('/p/r.ts', { offset: 1, limit: 50 }), read('/p/r.ts', { offset: 1, limit: 100 }), // t2, t3: other lines
+      read('/p/s.ts', { offset: 5, limit: 20 }), read('/p/s.ts', { offset: 5, limit: 20 }), // t4, t5: the same lines
+      read('/p/d.pdf', { pages: '1-3' }), read('/p/d.pdf', { pages: '4-5' }), // t6, t7: other pages
+      read('/p/u.ts'), read('/p/u.ts', {}, 'File unchanged since last read'), // t8, t9: the host's reply points back
+      bash('git status'), bash('git status'), // t10, t11
+      bash('git commit -am wip'), bash('git commit -am wip'), // t12, t13: writes
+      bash('ls /p'), bash('ls /p', undefined, true), // t14, t15: a newer error
+      bash('cat /p/missing', undefined, true), bash('cat /p/missing', undefined, true), // t16, t17: errors both
+      bash('git log -1', pad), bash('git log -1', pad), // t18, t19: too short for a longer trace
+      ...tail,
+    ];
+    const messages = trail(steps);
+    const r = await run(messages, 'active');
+    expect(gone(r, 't4', 't10', 't16')).toBe(true);
+    expect(kept(r, 't2', 't3', 't5', 't6', 't7', 't8', 't9', 't11', 't12', 't13', 't14', 't15', 't17', 't18', 't19')).toBe(true);
+    expect(rec(r)).toMatchObject({ tasks_superseded_calls: 4, tasks_superseded: 3, tasks_superseded_applied: 3 });
+    expect(said(r)).toContain('[compacted] Read(/p/s.ts lines 5-24) - result of');
+    expect(said(r)).toContain('[compacted] Bash(cat /p/missing) - error of');
+    expect(paired(r, messages)).toBe(true);
+  });
+
+  it('in the main loop a change of directory between two commands, and a Grep or Glob without an absolute path, keep both; a subagent keeps no directory', async () => {
+    const messages = trail([
+      bulk,
+      bash('git log -1'), bash('cd /p && ls'), bash('git log -1'), // t2, t3, t4
+      step('Grep', { pattern: 'foo', path: '/p/src' }), step('Grep', { pattern: 'foo', path: '/p/src' }), // t5, t6
+      step('Grep', { pattern: 'bar' }), step('Grep', { pattern: 'bar' }), // t7, t8
+      ...tail,
+    ]);
+    const main = await run(messages, 'active');
+    expect(gone(main, 't5')).toBe(true);
+    expect(kept(main, 't2', 't3', 't4', 't6', 't7', 't8')).toBe(true);
+    const sub = await run(messages, 'active', { agentId: 'sub-1' });
+    expect(gone(sub, 't2', 't5', 't7')).toBe(true);
+    expect(kept(sub, 't3', 't4', 't6', 't8')).toBe(true);
+    expect(paired(sub, messages)).toBe(true);
+  });
+
+  it('the last messages and the open tool loop stay as they are', async () => {
+    const tailOnly = trail([bulk, read('/p/o.ts'), write('/p/o.ts')]);
+    const inTail = await run(tailOnly, 'active');
+    expect(kept(inTail, 't2', 't3')).toBe(true);
+    expect(rec(inTail)).toMatchObject({ tasks_superseded_calls: 1, tasks_superseded: 0 });
+    // The last message holds two calls whose results came back; the loop is open and keeps its rows.
+    const before = trail([bulk, read('/p/o.ts'), bash('echo one'), bash('echo two')]).slice(0, -2);
+    const loop = [
+      { role: 'assistant', text: 'Checking.', toolUses: [{ tool_use_id: 'o1', tool: 'Read', input: { file_path: '/p/o.ts' } }, { tool_use_id: 'o2', tool: 'Write', input: { file_path: '/p/o.ts', content: WIDE } }], handle: 'ha' },
+      { role: 'user', text: '', toolUses: [], toolResults: [{ tool_use_id: 'o1', text: `NEEDED /p/o.ts ${WIDE}`, isError: false }, { tool_use_id: 'o2', text: 'NEEDED File created successfully', isError: false }], handle: 'hb' },
+    ];
+    const messages = [...before, ...loop];
+    const api = messages.map((m) => ({ role: m.role, content: [...(m.text ? [{ type: 'text', text: m.text }] : []), ...(m.toolUses || []).map((u) => ({ type: 'tool_use', id: u.tool_use_id, name: u.tool, input: u.input })), ...(m.toolResults || []).map((x) => ({ type: 'tool_result', tool_use_id: x.tool_use_id, content: x.text }))] }));
+    const open = await run(messages, 'active', undefined, { messages: api });
+    expect(rec(open)).toMatchObject({ result: 'jev', kept_from: 2, tasks_superseded_calls: 2, tasks_superseded: 1 });
+    // The Read before the loop is superseded by the Write in it; the Read in the loop is not touched.
+    expect(gone(open, 't2')).toBe(true);
+    expect(kept(open, 'o1', 'o2')).toBe(true);
+    expect(open.out.messages).toContain(loop[0]);
+  });
+
+  it('a trace that is not shorter than the call is not made; a result of a file the user names stays', async () => {
+    const pad = `NEEDED ${'y'.repeat(43)}`;
+    const small = trail([bulk, bash('git status', pad), bash('git status', pad), ...tail]);
+    const r = await run(small, 'active');
+    expect(rec(r)).toMatchObject({ tasks_superseded_calls: 1, tasks_superseded: 0 });
+    expect(kept(r, 't2', 't3')).toBe(true);
+    const named = trail([bulk, read('/p/config.json'), write('/p/config.json'), ...tail], 'Now compare /p/config.json with the rest.');
+    const n = await run(named, 'active');
+    expect(rec(n)).toMatchObject({ tasks_superseded_calls: 1, tasks_superseded: 0, tasks_mentioned: 1 });
+    expect(kept(n, 't2', 't3')).toBe(true);
+    const unnamed = await run(trail([bulk, read('/p/config.json'), write('/p/config.json'), ...tail]), 'active');
+    expect(gone(unnamed, 't2')).toBe(true);
+  });
+
+  it('a superseded call whose newer call does not stay whole is decided as without this step', async () => {
+    const huge = read('/p/big.ts', {}, `NEEDED ${'y'.repeat(40000)}`);
+    const unfit = step('Write', { file_path: '/p/k.ts', content: 'w'.repeat(30000) }, 'File created successfully');
+    const messages = trail([huge, read('/p/k.ts'), unfit, ...tail]);
+    const off = await run(messages, 'off');
+    const r = await run(messages, 'active');
+    expect(['t1', 't2', 't3'].map((id) => state(r, id))).toEqual(['t1', 't2', 't3'].map((id) => state(off, id)));
+    expect(state(r, 't3')).toBe('trace');
+    expect(rec(r)).toMatchObject({ tasks_superseded: 1, tasks_superseded_applied: 0 });
+    expect(said(r)).not.toContain('superseded');
+    expect(paired(r, messages)).toBe(true);
+    // The same when the older call is kept whole and the newer one is cut: the model keeps one of them, not neither.
+    for (const target of ['0.1', '0.2', '0.3']) {
+      const budget = trail([step('Bash', { command: 'make' }, `MAYBE ${'z'.repeat(60000)}`), bash('git status', `NEEDED ${'s'.repeat(3000)}`), bash('git status', `NEEDED ${'s'.repeat(40000)}`), ...tail]);
+      const env = { ...ACTIVE_ENV, OMC_JEV_COMPACT_TARGET: target };
+      const a = await compactOnce(budget, { env: { ...env, OMC_JEV_COMPACT_TASKS: 'active' } });
+      const o = await compactOnce(budget, { env });
+      expect([target, state(a, 't2'), state(a, 't3')]).toEqual([target, state(o, 't2'), state(o, 't3')]);
+      expect([target, state(a, 't2'), state(a, 't3')]).not.toEqual([target, 'trace', 'trace']);
+    }
+  });
+
+  const work = (n, name) => Array.from({ length: n }, (_, k) => read(`/p/${name}${k + 1}.ts`));
+  const lists = {
+    TodoWrite: [[todos('in_progress', 'pending')], [todos('completed', 'in_progress')]],
+    'TaskCreate and TaskUpdate': [
+      [step('TaskCreate', { subject: 'Task A' }, 'Task #1 created successfully: Task A'), step('TaskCreate', { subject: 'Task B' }, 'Task #2 created successfully: Task B'), step('TaskUpdate', { taskId: '1', status: 'in_progress' }, 'Updated task #1 status')],
+      [step('TaskUpdate', { taskId: '1', status: 'completed' }, 'Updated task #1 status')],
+    ],
+  };
+
+  it.each(Object.entries(lists))('a task completed in %s: its calls go, except the last 8 before the closing message', async (_name, [open, close]) => {
+    const messages = trail([bulk, ...open, ...work(12, 'g'), ...close, ...tail]);
+    const first = 2 + open.length; // t<first> is the first call of the task
+    const ids = (from, n) => Array.from({ length: n }, (_, k) => `t${from + k}`);
+    const off = await run(messages, 'off');
+    expect(kept(off, ...ids(first, 12))).toBe(true);
+    const shadow = await run(messages, 'shadow');
+    expect(shadow.out).toEqual(off.out);
+    expect(rec(shadow)).toMatchObject({ tasks_closed: 1, tasks_collapse: 4, tasks_collapsed: 4, tasks_guarded: 8, tasks_touched: 0, tasks_superseded: 0 });
+    const r = await run(messages, 'active');
+    expect(gone(r, ...ids(first, 4))).toBe(true);
+    expect(kept(r, ...ids(first + 4, 8))).toBe(true);
+    expect(kept(r, ...ids(2, open.length), ...close.map((_, k) => `t${first + 12 + k}`))).toBe(true); // the task list stays
+    expect(rec(r)).toMatchObject({ tasks_collapsed_applied: 4, tasks_not_asked: 4 });
+    expect(said(r)).toContain('[compacted] Read(/p/g1.ts) - result of');
+    expect(paired(r, messages)).toBe(true);
+  });
+
+  it('a task reopened or deleted after it was completed or begun is not finished', async () => {
+    const reopened = trail([bulk, todos('in_progress', 'pending'), ...work(12, 'w'), todos('completed', 'pending'), todos('in_progress', 'pending'), ...tail]);
+    expect(rec(await run(reopened, 'active'))).toMatchObject({ tasks_closed: 0, tasks_collapsed: 0 });
+    const created = [step('TaskCreate', { subject: 'Task A' }, 'Task #1 created successfully: Task A'), step('TaskUpdate', { taskId: '1', status: 'in_progress' }, 'Updated task #1 status')];
+    const deleted = trail([bulk, ...created, ...work(12, 'd'), step('TaskUpdate', { taskId: '1', status: 'deleted' }, 'Updated task #1 status'), ...tail]);
+    expect(rec(await run(deleted, 'active'))).toMatchObject({ tasks_closed: 0, tasks_collapsed: 0 });
+    // A plan tool is not read: its calls stay and nothing is attributed to a task by it.
+    const plan = step('mcp__ccd_turn__update_plan', { items: [{ content: 'Task A', status: 'in_progress' }] }, 'ok');
+    const unread = trail([bulk, plan, ...work(12, 'u'), step('mcp__ccd_turn__update_plan', { done: [1] }, 'ok'), ...tail]);
+    const u = await run(unread, 'active');
+    expect(rec(u)).toMatchObject({ tasks_closed: 0, tasks_collapsed: 0 });
+    expect(kept(u, 't2', 't15')).toBe(true);
+  });
+
+  it('a file a task not completed touches later stays, whatever the earlier task did with it', async () => {
+    const edit = step('Edit', { file_path: '/p/shared.ts', old_string: 'a', new_string: 'b' }, 'The file has been updated');
+    const messages = trail([bulk, todos('in_progress', 'pending'), read('/p/shared.ts'), ...work(11, 'i'), todos('completed', 'in_progress'), edit, ...tail]);
+    const r = await run(messages, 'active');
+    expect(rec(r)).toMatchObject({ tasks_closed: 1, tasks_touched: 1, tasks_collapsed: 3, tasks_guarded: 8 });
+    expect(gone(r, 't4', 't5', 't6')).toBe(true);
+    expect(kept(r, 't3', 't7')).toBe(true);
+  });
+
+  it('an exception in this step leaves the result of off and is recorded', async () => {
+    const messages = trail([bulk, read('/p/a.ts'), write('/p/a.ts'), step('Grep', { pattern: 'x', path: '/p', head_limit: 10n }), ...tail]);
+    const off = await run(messages, 'off');
+    const r = await run(messages, 'active');
+    expect(r.out).toEqual(off.out);
+    expect(rec(r)).toMatchObject({ result: 'jev', tasks_mode: 'active', tasks_error: expect.stringContaining('BigInt') });
+    expect(tasksFields(r).sort()).toEqual(['tasks_error', 'tasks_mode']);
+    expect(kept(r, 't2')).toBe(true);
+  });
+
+  it('a completed task drops what its call gives again and what is on disk; an answer, a report, a page, a plan and MCP results stay', async () => {
+    const own = (tool, input) => step(tool, input, `NEEDED ${tool} result ${WIDE}`);
+    const steps = [
+      bulk, todos('in_progress', 'pending'),
+      own('AskUserQuestion', { questions: [{ question: 'Which DB?' }] }), own('Agent', { description: 'research', prompt: 'find the API' }), // t3, t4
+      own('WebFetch', { url: 'https://example.com/spec', prompt: 'p' }), own('ExitPlanMode', { plan: 'the plan' }), // t5, t6
+      own('mcp__x__lookup', { q: 'a' }), own('WebSearch', { query: 'q' }), bash('npm test'), // t7, t8, t9
+      bash('git log -1'), step('Grep', { pattern: 'foo', path: '/p' }), step('Edit', { file_path: '/p/e.ts', old_string: 'a', new_string: 'b' }), // t10, t11, t12
+      ...work(8, 'g'), // t13..t20: the last 8 before the closing message
+      todos('completed', 'in_progress'), ...tail,
+    ];
+    const messages = trail(steps);
+    const r = await run(messages, 'active');
+    expect(rec(r)).toMatchObject({ tasks_closed: 1, tasks_collapse: 10, tasks_collapsed: 3, tasks_guarded: 8 });
+    expect(gone(r, 't10', 't11', 't12')).toBe(true);
+    expect(kept(r, 't3', 't4', 't5', 't6', 't7', 't8', 't9', 't13')).toBe(true);
+    expect(paired(r, messages)).toBe(true);
+  });
+
+  it('a call that goes with a completed task does not stand for an older one', async () => {
+    const messages = trail([bulk, read('/p/k.ts'), todos('in_progress', 'pending'), read('/p/k.ts'), ...work(11, 'w'), todos('completed', 'in_progress'), ...tail]);
+    const r = await run(messages, 'active');
+    expect(rec(r)).toMatchObject({ tasks_closed: 1, tasks_collapsed: 4, tasks_superseded: 0 });
+    expect(kept(r, 't2')).toBe(true);
+    expect(gone(r, 't4')).toBe(true);
+  });
+
+  it('a newer result that is empty or shorter than the older one supersedes nothing, in a command, Grep, Glob and PowerShell alike', async () => {
+    const wide = `NEEDED ${WIDE}`;
+    const short = `NEEDED ${'y'.repeat(500)}`;
+    const ps = (command, result) => step('PowerShell', { command }, result);
+    const grep = (result) => step('Grep', { pattern: 'foo', path: '/p/src' }, result);
+    const glob = (result) => step('Glob', { pattern: '**/*.ts', path: '/p' }, result);
+    const messages = trail([
+      bulk,
+      bash('git diff', wide), bash('git commit -am x', 'NEEDED [main 1234] x'), bash('git diff', ''), // t2, t3, t4: a diff after a commit
+      bash('ls /p/a', wide), bash('ls /p/a', short), // t5, t6
+      grep(wide), grep(short), glob(wide), glob(''), ps('Get-Content /p/a.txt', wide), ps('Get-Content /p/a.txt', short), // t7..t12
+      bash('ls /p/b', short), bash('ls /p/b', wide), // t13, t14: a longer one does
+      ...tail,
+    ]);
+    const r = await run(messages, 'active');
+    expect(kept(r, 't2', 't3', 't4', 't5', 't6', 't7', 't8', 't9', 't10', 't11', 't12', 't14')).toBe(true);
+    expect(gone(r, 't13')).toBe(true);
+    expect(rec(r)).toMatchObject({ tasks_superseded_calls: 1, tasks_superseded: 1 });
+  });
+
+  it('a later call outside the completed tasks protects its files, whether or not a task is in progress, and by name when the path is relative', async () => {
+    const edit = (path) => step('Edit', { file_path: path, old_string: 'a', new_string: 'b' }, 'NEEDED ok');
+    // After the task, work on the same files outside any task.
+    const outside = trail([bulk, todos('in_progress'), ...work(12, 'x'), todos('completed'), edit('/p/x1.ts'), ...work(2, 'y'), ...tail]);
+    const a = await run(outside, 'active');
+    expect(rec(a)).toMatchObject({ tasks_touched: 1, tasks_collapsed: 3 });
+    expect(kept(a, 't3')).toBe(true);
+    expect(gone(a, 't4', 't5', 't6')).toBe(true);
+    // Every task completed at once, the work goes on.
+    const all = trail([bulk, todos('in_progress', 'pending'), ...work(12, 'q'), todos('completed', 'completed'), read('/p/q1.ts', { offset: 1, limit: 10 }), edit('/p/q2.ts'), ...tail]);
+    const b = await run(all, 'active');
+    expect(rec(b)).toMatchObject({ tasks_touched: 2, tasks_collapsed: 2 });
+    expect(kept(b, 't3', 't4')).toBe(true);
+    // A relative path in a command is the name of a file; `..` is no name.
+    const relative = trail([bulk, todos('in_progress'), ...work(12, 'r'), todos('completed'), bash('sed -n 1,80p src/r1.ts'), bash('cat ../lib/r2.ts'), edit('r3.ts'), ...tail]);
+    const c = await run(relative, 'active');
+    expect(rec(c)).toMatchObject({ tasks_touched: 3, tasks_collapsed: 1 });
+    expect(kept(c, 't3', 't4', 't5')).toBe(true);
+    expect(gone(c, 't6')).toBe(true);
+  });
+
+  it('only a command that reads supersedes: a PowerShell block, --fix-only, --add-noqa, tree -o and git grep -O keep every run', async () => {
+    const same = (tool, command) => [step(tool, { command }), step(tool, { command })];
+    const writes = [['PowerShell', 'Get-Item (Remove-Item /p/x)'], ['PowerShell', 'Get-ChildItem | ForEach-Object { Remove-Item $_ }'], ['Bash', 'ruff check --fix-only src'], ['Bash', 'ruff check --add-noqa src'],
+      ['Bash', 'tree -o /p/out.txt'], ['Bash', 'git grep -Ovim foo'], ['Bash', 'git -c core.fsmonitor="touch /p/z" status'], ['Bash', 'echo hi >| /p/x'], ['Bash', "eval 'rm -rf /p/x'"]];
+    const reads = [['Bash', 'ls -la /p'], ['Bash', 'rg -o foo src'], ['Bash', 'git grep -n foo'], ['PowerShell', 'Get-Content /p/a.txt | Select-Object -First 5']];
+    const messages = trail([bulk, ...[...writes, ...reads].flatMap(([tool, command]) => same(tool, command)), ...tail]);
+    const r = await run(messages, 'active');
+    const ids = (from, n) => Array.from({ length: n }, (_, k) => `t${from + 2 * k}`); // the older call of each pair
+    expect(kept(r, ...ids(2, writes.length), ...ids(3, writes.length))).toBe(true);
+    expect(gone(r, ...ids(2 + 2 * writes.length, reads.length))).toBe(true);
+    expect(rec(r)).toMatchObject({ tasks_superseded: reads.length });
+  });
+
+  it('a change of directory hidden in eval, quotes, source or a dot keeps both runs; in a subagent a Grep without a path is held to it too', async () => {
+    const between = ['eval "cd /other"', 'source env.sh', '. ./env.sh', "bash -c 'cd /other'"];
+    const messages = trail([bulk, ...between.flatMap((cd, k) => [bash(`git log -${k + 1}`), bash(cd), bash(`git log -${k + 1}`)]), ...tail]);
+    const main = await run(messages, 'active');
+    expect(rec(main)).toMatchObject({ tasks_superseded_calls: 0 });
+    const grep = () => step('Grep', { pattern: 'foo' });
+    const sub = trail([bulk, grep(), step('EnterWorktree', { name: 'w' }, 'NEEDED switched'), grep(), step('Grep', { pattern: 'bar' }), step('Glob', { pattern: '*.ts' }), step('Grep', { pattern: 'bar' }), ...tail]);
+    const s = await run(sub, 'active', { agentId: 'sub-1' });
+    expect(kept(s, 't2', 't3', 't4')).toBe(true);
+    expect(gone(s, 't5')).toBe(true);
+    expect(rec(s)).toMatchObject({ tasks_superseded_calls: 1 });
+  });
+
+  it('paths differ in case on Linux; with a Windows path in the conversation a Git Bash path is its drive path and case is ignored', async () => {
+    const same = (a, b) => [read(a, {}, `NEEDED ${WIDE}`), read(b, {}, `NEEDED ${WIDE}`)];
+    const linux = trail([bulk, ...same('/a/x.ts', '/A/x.ts'), ...same('/d/p/a.ts', '/d/p/./sub/../a.ts'), ...tail]);
+    const l = await run(linux, 'active');
+    expect(gone(l, 't4')).toBe(true); // the same file, whatever the dots
+    expect(kept(l, 't2', 't3')).toBe(true);
+    const windows = trail([bulk, ...same('/a/x.ts', '/A/x.ts'), ...same('/d/p/a.ts', 'D:\\p\\a.ts'), read('D:\\q\\b.ts'), ...tail]);
+    const w = await run(windows, 'active');
+    expect(gone(w, 't2', 't4')).toBe(true);
+  });
+
+  it('the trace names the lines of a Read, also from a line on; PowerShell, Glob and a Read with allow_large supersede like the rest', async () => {
+    const ps = step('PowerShell', { command: 'Get-Content /p/a.txt' });
+    const messages = trail([bulk, read('/p/big.ts', { offset: 100, allow_large: true }), read('/p/big.ts', { offset: 100, allow_large: true }), ps, ps,
+      step('Glob', { pattern: '**/*.ts', path: '/p' }), step('Glob', { pattern: '**/*.ts', path: '/p' }), ...tail]);
+    const r = await run(messages, 'active');
+    expect(gone(r, 't2', 't4', 't6')).toBe(true);
+    expect(kept(r, 't3', 't5', 't7')).toBe(true);
+    expect(said(r)).toContain('[compacted] Read(/p/big.ts from line 100) - result of');
+    expect(paired(r, messages)).toBe(true);
+  });
+});
