@@ -1085,10 +1085,11 @@ const AUTOPILOT_OPENING_DELIMITERS_AT_END = /["'“”‘’`*_([{<]+$/;
 // A sentence that starts with a question or auxiliary word asks; "can/could/would/will you ..." is a request.
 const AUTOPILOT_QUESTION_START = /^[ \t]*(?:[-*+>#]+[ \t]+|["'“‘([*_`])*(?!(?:can|could|would|will)\s+you(?![\p{L}\d]))(?!do\s+not(?![\p{L}\d]))(?:did|does|do|is|are|was|were|has|have|had|can|could|should|would|will|may|might|must|shall|what|why|how|when|where|who|which)(?![\p{L}\d])/iu;
 // The polite request "can/could/would/will you ..." keeps its question mark without being a question.
-const AUTOPILOT_REQUEST_START = /^[ \t]*(?:please[ ,]+)?(?:can|could|would|will)\s+you(?![\p{L}\d])/iu;
+const AUTOPILOT_REQUEST_START = /^[ \t]*(?:[-*+>#]+[ \t]+|["'“‘([*_`])*(?:please[ ,]+)?(?:can|could|would|will)\s+you(?![\p{L}\d])/iu;
 const AUTOPILOT_SENTENCE_END = /[.!?][)\]}"'*_\u201D\u2019]*(?=\s|$)/g;
 // Markdown emphasis and heading marks around a label ("**Docs:**") do not hide it.
 const AUTOPILOT_MARKDOWN_MARKS = /[*_`#>]+/g;
+const AUTOPILOT_LIST_PREFIX = /^[\s\-+]*(?:\d+[.)]\s+)?/;
 const AUTOPILOT_REFERENCE_LABEL_LINE = /^[ \t]*(?:docs?|documentation|summary|status|logs?|release\s+notes|changelog|readme|examples?|output|result|results|description|title|commit|trigger|triggers|keywords?)[ \t]*:/i;
 const AUTOPILOT_NOUN_USE_BEFORE = /(?<![\p{L}\d])(?:the|a|an|this|that|these|those|last|previous|our|my|its|your|their)\s+$/iu;
 const AUTOPILOT_COMMIT_LINE_BEFORE = /(?<![\p{L}\d])[0-9a-f]{7,40}\s+$/iu;
@@ -1125,15 +1126,17 @@ function hasExplicitAutopilotInvocationContext(text, position, keywordLength, ke
   const lineHead = text.slice(lineStart, Math.min(position, lineStart + 80));
   // A question never starts the mode: it starts with a question word, or the sentence ends in "?".
   const sentenceHead = /(?:^|[.!?;]\s+)([^.!?;]*)$/.exec(text.slice(Math.max(lineStart, position - 200), position));
-  if (AUTOPILOT_QUESTION_START.test(sentenceHead ? sentenceHead[1] : tail)) return false;
+  // The clause after a label ("Question: Must I use autopilot") is what gets classified.
+  const clauseHead = (sentenceHead ? sentenceHead[1] : tail).replace(/^.*:\s*/, '');
+  if (AUTOPILOT_QUESTION_START.test(sentenceHead ? sentenceHead[1] : tail) || AUTOPILOT_QUESTION_START.test(clauseHead)) return false;
   AUTOPILOT_SENTENCE_END.lastIndex = position + keywordLength;
   const sentenceEnd = AUTOPILOT_SENTENCE_END.exec(text);
   // "?" inside a quotation or parenthesis that the sentence continues after ("... from "Ready?" to "Go.") is not terminal.
   const nestedQuestion = sentenceEnd !== null && sentenceEnd[0].length > 1
     && !/^[ \t]*$/.test(text.slice(sentenceEnd.index + sentenceEnd[0].length, lineEnd));
-  if (sentenceEnd && sentenceEnd.index < lineEnd && sentenceEnd[0][0] === '?' && !nestedQuestion && !AUTOPILOT_REQUEST_START.test(sentenceHead ? sentenceHead[1] : tail)) return false;
+  if (sentenceEnd && sentenceEnd.index < lineEnd && sentenceEnd[0][0] === '?' && !nestedQuestion && !AUTOPILOT_REQUEST_START.test(clauseHead)) return false;
   if (AUTOPILOT_NEGATION_BEFORE.test(tail) || AUTOPILOT_NEGATION_BEFORE.test(tail.replace(AUTOPILOT_OPENING_DELIMITERS_AT_END, ''))) return false;
-  if (AUTOPILOT_REFERENCE_LABEL_LINE.test(lineHead.replace(AUTOPILOT_MARKDOWN_MARKS, ''))) return false;
+  if (AUTOPILOT_REFERENCE_LABEL_LINE.test(lineHead.replace(AUTOPILOT_MARKDOWN_MARKS, '').replace(AUTOPILOT_LIST_PREFIX, ''))) return false;
   if (AUTOPILOT_NON_ENGLISH_LINE.test(text.slice(lineStart, Math.min(lineEnd, lineStart + 400)))) return true;
   const isHardwareAlias = /^(?:full\s*auto|fullsend)$/i.test((keywordText || '').trim());
   if (leadingPrefix) {
@@ -1187,7 +1190,7 @@ function hasActionableAutopilotKeyword(text, pattern) {
     }
     const afterAlias = searchText.slice(match.index + match[0].length, match.index + match[0].length + 60);
     const ownLine = /^[ \t]*$/.test(linePrefix)
-      && !AUTOPILOT_REFERENCE_LABEL_LINE.test(previousLine.replace(AUTOPILOT_MARKDOWN_MARKS, ''))
+      && !AUTOPILOT_REFERENCE_LABEL_LINE.test(previousLine.replace(AUTOPILOT_MARKDOWN_MARKS, '').replace(AUTOPILOT_LIST_PREFIX, ''))
       && (AUTOPILOT_COMMAND_AFTER.test(afterAlias) || AUTOPILOT_COLON_VERB.test(afterAlias));
     const from = ownLine ? lineStart : Math.max(0, match.index - AUTOPILOT_CONTEXT_WINDOW);
     const to = ownLine ? lineEnd : match.index + match[0].length + AUTOPILOT_CONTEXT_WINDOW;
