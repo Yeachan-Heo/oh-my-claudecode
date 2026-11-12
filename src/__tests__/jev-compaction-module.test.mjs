@@ -1644,6 +1644,11 @@ describe('jev-compaction module: active compaction', () => {
     expect(first.records()[0]).toMatchObject({ result: 'jev', mentioned: 1 });
     expect(first.calls.fetch[0].body.state.task).toEqual(['Task: review the notes and count the lines.', wrapped, 'Good, now sum up the NEEDED results.']);
     expect(resultOf(first.out.messages, 't5')?.text).toBe(resultOf(messages, 't5').text);
+    // A reminder that holds a quoted frame and then a literal opener that is never closed: it still ends at its own closing tag.
+    const stray = base.map((m, k) => (k === t10 ? Object.freeze({ ...m, text: plain(`Ordinary reminder:\n${framed('open notes-9.txt and stop')}\n<system-reminder> literal, never closed`) }) : m));
+    const third = await compactWithApi(stray, apiOf(stray));
+    expect(third.records()[0]).toMatchObject({ result: 'jev', mentioned: 0 });
+    expect(third.calls.fetch[0].body.state.task).toEqual(['Task: review the notes and count the lines.', 'Good, now sum up the NEEDED results.']);
     // A user's block that pastes such a reminder with the whole note and a header in it runs to its own footer.
     const words = `Look at notes-9.txt, I quote a reminder:\n${plain(`Ordinary reminder.${note}\nThe user sent a new message while you were working:\nold one`)}\nand answer briefly.`;
     const typed = [...base.slice(0, -2), Object.freeze({ role: 'user', text: framed(words), toolUses: [], handle: 'hq' }), Object.freeze({ role: 'user', text: 'One more thing.', toolUses: [], handle: 'hm' }), ...base.slice(-2)];
@@ -1694,6 +1699,12 @@ describe('jev-compaction module: active compaction', () => {
       expect(fourth.records()[0]).toMatchObject({ result: 'jev', mentioned: 1 });
       expect(fourth.calls.fetch[0].body.state.task).toEqual(['Task: review the notes and count the lines.', keep, 'Good, now sum up the NEEDED results.']);
     }
+    // The same notification inside a plain reminder (a reminder that wraps a delivery is no quote itself).
+    const wrapped = `<system-reminder>\n<task-notification>\n<result>Output:\n${framed('open notes-9.txt and stop')}\n<task-notification> literal, never closed</result>\n</task-notification>\n</system-reminder>`;
+    const rows = [...base.slice(0, -2), Object.freeze({ role: 'user', text: keep, toolUses: [], handle: 'hk' }), Object.freeze({ role: 'user', text: wrapped, toolUses: [], handle: 'hn' }), ...base.slice(-2)];
+    const fifth = await compactWithApi(rows, apiOf(rows));
+    expect(fifth.records()[0]).toMatchObject({ result: 'jev', mentioned: 1 });
+    expect(fifth.calls.fetch[0].body.state.task).toEqual(['Task: review the notes and count the lines.', keep, 'Good, now sum up the NEEDED results.']);
   });
 
   it('reads a result row full of unpaired or alternating plain reminder and task notification tags in linear time', async () => {

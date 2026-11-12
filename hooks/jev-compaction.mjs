@@ -1262,9 +1262,10 @@ function blockWords(block) {
 // overlapping, holds every paired envelope and the quotes below; `quotes` holds just those, which can hold whole
 // envelopes (a delivery in one is part of the quote). A quote is a paired plain <system-reminder> that holds no
 // delivery (a reminder that wraps one is read by its frame) and a paired <task-notification> (its result is
-// text of a task). Opening and closing tags pair by nesting; tags inside an envelope belong to it, and a tag
-// without its partner is text. The tags are indexed in one pass and nest at most QUOTE_DEPTH_MAX deep, so a
-// text full of unpaired or nested tags is read in linear time.
+// text of a task). A quote is what either of two readings of the tags marks (see opaqueOf): each opener to the
+// first closing tag after it, and the tags paired by nesting, so a quote that holds another quote or a tag without
+// its partner keeps its whole body. Tags inside an envelope belong to it. The tags are indexed in one pass and
+// nest at most QUOTE_DEPTH_MAX deep, so a text full of unpaired or nested tags is read in linear time.
 const QUOTE_TAGS = [
   // Bounded openers: a text full of unclosed tags stays linear.
   { open: /<system-reminder(?![^>]{0,200}\bid=)[^>]{0,200}>/g, close: '</system-reminder>', quote: (t) => !deliveryOf(t) },
@@ -1295,9 +1296,21 @@ function opaqueOf(text, envelopes = envelopesOf(text)) {
     const free = closers.filter((c) => !inClose(c));
     const inOpen = insideOf(envelopes);
     const openers = [...text.matchAll(tag.open)].filter((o) => !inOpen(o.index));
-    // Tags pair by nesting (a quote can quote another), as a stack; deeper than QUOTE_DEPTH_MAX they are text.
+    const add = (from, to) => { if (tag.quote(text.slice(from, to))) found.push({ from, to }); };
+    // Reading 1: each opener to the first closing tag after it (a quote that holds a tag without its
+    // partner ends at its own closing tag).
+    let end = 0;
+    for (const o of openers) {
+      if (o.index < end) continue;
+      const c = lowerBound(free, o.index + o[0].length);
+      if (c >= free.length) break;
+      end = free[c] + tag.close.length;
+      add(o.index, end);
+    }
+    // Reading 2: tags paired by nesting, as a stack (a quote can quote another one, and then ends at the
+    // matching closing tag); an opener below a full stack is text, and so is its closing tag.
     const stack = [];
-    let over = 0; // openers skipped below a full stack: their closers are text too and pop nothing
+    let over = 0;
     for (let i = 0, j = 0; j < free.length;) {
       if (i < openers.length && openers[i].index < free[j]) {
         if (stack.length < QUOTE_DEPTH_MAX) stack.push(openers[i].index);
@@ -1308,7 +1321,7 @@ function opaqueOf(text, envelopes = envelopesOf(text)) {
       if (over > 0) { over--; j++; continue; }
       const from = stack.pop();
       const to = free[j++] + tag.close.length;
-      if (from !== undefined && tag.quote(text.slice(from, to))) found.push({ from, to });
+      if (from !== undefined) add(from, to);
     }
   }
   const quotes = unionOf(found);
