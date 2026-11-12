@@ -100,6 +100,17 @@ describe('ast-tools', () => {
       expect(content).toBe('logger.info($$$OTHER, $B);\n');
     });
 
+    it('keeps a $$$ that is part of a longer identifier as written', async () => {
+      // price$$$USD is a plain identifier: a meta-variable is a whole node.
+      const { content } = await replaceInFile(
+        'const price$$$USD = 1\n',
+        'const price$$$USD = $VALUE',
+        'let price$$$USD = $VALUE',
+      );
+
+      expect(content).toBe('let price$$$USD = 1\n');
+    });
+
     it('shows the substituted code in a dry run without writing', async () => {
       const source = 'console.log("a", b);\n';
       const { text, content } = await replaceInFile(source, 'console.log($$$ARGS)', 'logger.info($$$ARGS)', true);

@@ -520,8 +520,12 @@ IMPORTANT: dryRun=true (default) only previews changes. Set dryRun=false to appl
       const lang = toLangEnum(sg, language);
       // getMultipleMatches() also returns no nodes for a name that the pattern
       // does not capture with $$$; such a $$$NAME keeps the getMatch() lookup.
+      // A meta-variable is a whole node, so the $$$USD in price$$$USD is not one.
       const multiCaptureNames = new Set(
-        Array.from(pattern.matchAll(/\$\$\$([A-Z_][A-Z0-9_]*)/g), (m) => m[1]),
+        Array.from(
+          pattern.matchAll(/(?<![\w$])\$\$\$([A-Z_][A-Z0-9_]*)(?![\w$])/g),
+          (m) => m[1],
+        ),
       );
 
       const changes: {
@@ -563,7 +567,7 @@ IMPORTANT: dryRun=true (default) only previews changes. Set dryRun=false to appl
               // as written ($&, $' and the like), is not scanned again, and
               // $A does not replace the start of $AB.
               finalReplacement = replacement.replace(
-                /\$\$\$([A-Z_][A-Z0-9_]*)|\$\$?([A-Z_][A-Z0-9_]*)/g,
+                /(?<![\w$])\$\$\$([A-Z_][A-Z0-9_]*)(?![\w$])|\$\$?([A-Z_][A-Z0-9_]*)/g,
                 (metaVar: string, multiName: string | undefined, singleName: string) => {
                   if (multiName !== undefined && multiCaptureNames.has(multiName)) {
                     // getMatch() returns null for a $$$ capture: insert the
