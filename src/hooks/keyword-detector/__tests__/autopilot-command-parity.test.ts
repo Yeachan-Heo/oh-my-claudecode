@@ -125,6 +125,15 @@ const COMMANDS = [
   'How do I use autopilot?\n/oh-my-claudecode:autopilot fix the bug',
   `${'How do I use autopilot?\n'.repeat(25)}/oh-my-claudecode:autopilot fix the bug`,
   `${'please autopilot? what is it?\n'.repeat(25)}Then do the work.\n$autopilot fix the bug`,
+  // Parenthesized clause tests: keyword outside parens
+  'autopilot fix the parser (why it fails)',
+  'Use autopilot to implement error handling (what to do on timeout)',
+  // Parenthesized clause tests: keyword inside but not a question
+  'Please do the following (use autopilot to replace ? with ! in the template)',
+  // Imperative do use inside parens
+  'Please proceed (do use autopilot to fix the parser)',
+  // Polite request inside parens
+  'Please proceed (could you use autopilot to fix this)',
 ];
 
 const NON_COMMANDS = [
@@ -202,6 +211,8 @@ const NON_COMMANDS = [
   'Please proceed (could you not use autopilot to fix this)',
   'Do not use autopilot (could you check the logs)',
   'The autopilot run failed (could you check the logs)',
+  // Parenthesized clause tests: keyword inside a true question
+  'One question (should I use autopilot for this)',
 ];
 
 describe('autopilot command policy parity across the three detector copies', () => {
