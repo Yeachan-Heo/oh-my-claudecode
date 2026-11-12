@@ -1061,7 +1061,7 @@ function hasActionableRalphKeyword(text, pattern) {
 // Thai keep the generic check, as before. At most AUTOPILOT_MAX_CANDIDATES commands are checked
 // with isInformationalKeywordContext, whose cost is linear in the text length.
 const AUTOPILOT_COMMAND_VERBS = 'fix|debug|investigate|resolve|handle|patch|address|implement|build|create|make|run|start|enable|activate|invoke|trigger|launch|plan|add|write|refactor|update|remove|migrate|finish|continue|do|go|test|review|check|verify|audit|analy[sz]e|inspect|deploy|install|configure|document|explain|find|search|generate|convert|ship|release|merge|prepare|design|draft|upgrade|rename|clean|optimi[sz]e|rewrite|summari[sz]e|compare';
-const AUTOPILOT_STATUS_CONTINUATION = '\\s+(?:failed|fails|was|were|is|are|has|had|looks|takes|keeps|crashed|hangs|hung|errored|timed\\s+out|ok|okay|done|green|succeeded|succeeds|passed|passes|completed|completes|finished|finishes|works|worked)(?![\\p{L}\\d])|\\s+(?:step|phase|exit|status|log|suite|mode|output|report|results?|summary)\\s+(?:\\d+|is|are|was|were|has|had|failed|fails|passed|passes|succeeded|looks|takes|keeps|crashed|errored|ok|okay|red|green)(?![\\p{L}\\d])';
+const AUTOPILOT_STATUS_CONTINUATION = '\\s+(?:fails|was|were|is|are|has|had|looks|takes|keeps|hangs|hung|timed\\s+out|succeeds|passes|completes|finishes|works)(?![\\p{L}\\d])|\\s+(?:failed|crashed|errored|ok|okay|done|green|succeeded|passed|completed|finished|worked)(?![\\p{L}\\d])(?=[ \\t]*(?:[.,;:!?)]|\\r?\\n|$)|[ \\t]+(?:on|at|in|with|after|during|for|because|again|twice|and|but|so|before|when|while|since|until|due|once|yesterday|today|overnight|too|earlier|already)(?![\\p{L}\\d]))|\\s+(?:step|phase|exit|status|log|suite|mode|output|report|results?|summary)\\s+(?:\\d+|is|are|was|were|has|had|failed|fails|passed|passes|succeeded|looks|takes|keeps|crashed|errored|ok|okay|red|green)(?![\\p{L}\\d])';
 const AUTOPILOT_NOT_A_COMMAND_AFTER = `(?!${AUTOPILOT_STATUS_CONTINUATION})`;
 // Words that never open a command: articles, pronouns, auxiliaries, prepositions, conjunctions, adverbs and status words.
 const AUTOPILOT_NON_COMMAND_WORDS = 'a|an|the|this|that|these|those|my|our|your|his|her|its|their|i|we|you|he|she|it|they|me|us|them|is|are|was|were|be|been|am|has|have|had|do|does|did|will|would|can|could|should|may|might|must|shall|not|no|nor|and|or|but|so|if|then|than|as|at|in|on|of|to|for|from|with|by|about|into|onto|over|under|after|before|during|until|while|when|where|which|who|whom|what|why|how|also|just|only|still|already|always|never|now|currently|ready|idle|off|none|nothing|active|inactive|enabled|disabled|available|unavailable|busy|pending|offline|online|yes|here|there|too|very|really|actually|maybe|perhaps|however|hung|hangs|ran|went|got|took|broke|broken|froze|frozen|stuck|became|seems|seemed|remains|lost|left|hit|began|saw|said|gave|found|kept|knew|thought|told|wrote|made|built|sent|spent|stood|held|fell|drew|drove|chose|came|won|threw|grew|met|paid|rose|sold|taught|understood|wore|sat|slept|spoke|swept|sank';
@@ -1070,8 +1070,8 @@ const AUTOPILOT_NON_COMMAND_WORDS = 'a|an|the|this|that|these|those|my|our|your|
 const AUTOPILOT_COMMAND_START = `(?:(?:${AUTOPILOT_COMMAND_VERBS})(?![\\p{L}\\d])${AUTOPILOT_NOT_A_COMMAND_AFTER}|(?!(?:${AUTOPILOT_NON_COMMAND_WORDS})(?![\\p{L}\\d]))(?!\\p{L}*[a-hj-rt-tv-z]s(?![\\p{L}\\d]))(?!(?!(?:bring|ping|seed|feed|embed|proceed|succeed|speed|need|shred|string|swing|sing|ring|fling|sling|sting|wring|spring|cling)(?![\\p{L}\\d]))\\p{L}*(?:ing|ed)(?![\\p{L}\\d]))\\p{L}{2,}(?![\\p{L}\\d])${AUTOPILOT_NOT_A_COMMAND_AFTER}[ \\t]+\\S)`;
 // A plain alias that opens the prompt counts as a command unless it reads as a status line:
 // a command verb followed by a result ("autopilot run failed"), or a colon plus a status word or gerund.
-const AUTOPILOT_LEADING_STATUS = new RegExp(`^(?:[ \\t]*[:\\uFF1A][ \\t]*(?:(?:${AUTOPILOT_NON_COMMAND_WORDS})|(?!(?:bring|ping|seed|feed|embed|proceed|succeed|speed|need|shred|string|swing|sing|ring|fling|sling|sting|wring|spring|cling)(?![\\p{L}\\d]))\\p{L}*(?:ing|ed))(?![\\p{L}\\d])|[ \\t]+(?:${AUTOPILOT_COMMAND_VERBS})(?![\\p{L}\\d])${AUTOPILOT_STATUS_CONTINUATION})`, 'iu');
-const AUTOPILOT_COMMAND_SEPARATOR = '(?:[ \\t]*[,;\\u2014\\u2013][ \\t]*|[ \\t]+-[ \\t]+|[ \\t]+)';
+const AUTOPILOT_LEADING_STATUS = new RegExp(`^(?:[ \\t]*[:\\uFF1A][ \\t]*(?:(?:${AUTOPILOT_NON_COMMAND_WORDS})|(?!(?:bring|ping|seed|feed|embed|proceed|succeed|speed|need|shred|string|swing|sing|ring|fling|sling|sting|wring|spring|cling)(?![\\p{L}\\d]))\\p{L}*(?:ing|ed))(?![\\p{L}\\d])|[ \\t]+(?:${AUTOPILOT_COMMAND_VERBS})(?![\\p{L}\\d])(?:${AUTOPILOT_STATUS_CONTINUATION}))`, 'iu');
+const AUTOPILOT_COMMAND_SEPARATOR = '(?:[ \\t]*[,;!\\u2014\\u2013][ \\t]*|[ \\t]+-[ \\t]+|[ \\t]+)';
 const AUTOPILOT_COMMAND_AFTER = new RegExp(`^${AUTOPILOT_COMMAND_SEPARATOR}${AUTOPILOT_COMMAND_START}`, 'iu');
 // full auto and fullsend are ordinary hardware phrases: only the closed verb list counts after them.
 const AUTOPILOT_COMMAND_AFTER_VERB = new RegExp(`^${AUTOPILOT_COMMAND_SEPARATOR}(?:${AUTOPILOT_COMMAND_VERBS})(?![\\p{L}\\d])${AUTOPILOT_NOT_A_COMMAND_AFTER}`, 'iu');
@@ -1079,9 +1079,11 @@ const AUTOPILOT_COMMAND_AFTER_VERB = new RegExp(`^${AUTOPILOT_COMMAND_SEPARATOR}
 // ("autopilot: waiting for a task", "autopilot: complete") has a gerund, a past tense or no object.
 const AUTOPILOT_COLON_COMMAND = new RegExp(`^[ \\t]*[:\\uFF1A][ \\t]*${AUTOPILOT_COMMAND_START}`, 'iu');
 const AUTOPILOT_ALONE_ON_LINE = /^[ \t]*[.!]?[ \t]*(?:\r?\n|$)/;
-const AUTOPILOT_NEGATION_BEFORE = /(?<![\p{L}\d])(?:don['’]?t|do\s+not|never|not|without)\s+(?!(?:just|only|simply|merely|also|solely|stop|quit|forget|fail|hesitat\w*|delay\w*|wait\w*|paus\w*|ask\w*)(?![\p{L}\d]))(?:(?!(?:so|but|and|then|instead|because|now|mind)(?![\p{L}]))[\p{L}'’]+\s+){0,4}$/iu;
+const AUTOPILOT_NEGATION_BEFORE = /(?<![\p{L}\d])(?:(?:don|doesn|didn|shouldn|couldn|wouldn|can|won|mustn|isn|aren|shan|needn)['’]?t|cannot|do\s+not|never|not|without)\s+(?!(?:just|only|simply|merely|also|solely|stop|quit|forget|fail|hesitat\w*|delay\w*|wait\w*|paus\w*|ask\w*)(?![\p{L}\d]))(?:(?!(?:so|but|and|then|instead|because|now|mind)(?![\p{L}]))[\p{L}'’]+\s+){0,4}$/iu;
 // Quotes, emphasis marks and brackets right before the alias do not change what a negation governs.
 const AUTOPILOT_OPENING_DELIMITERS_AT_END = /["'\u201C\u201D\u2018\u2019`*_([{<]+$/;
+// "Do you use autopilot?", "Should we use autopilot?" ask about use; "can you use autopilot ..." is a request.
+const AUTOPILOT_USE_QUESTION_BEFORE = /(?<![\p{L}\d])(?:(?:do|does|did)\s+(?:you|we|they|i)|(?:can|could|should|shall|may|might|must)\s+(?:i|we|they))\s+(?:(?:ever|also|really|actually|usually|normally|even|still)\s+)?(?:(?:want|need|have|plan|like)\s+to\s+)?(?:(?:use|run|start|enable|activate|invoke|trigger|launch|engage|initiate|begin)\s+(?:the\s+|a\s+)?)?$/iu;
 const AUTOPILOT_REFERENCE_LABEL_LINE = /^[ \t]*(?:docs?|documentation|summary|status|logs?|release\s+notes|changelog|readme|examples?|output|result|results|description|title|commit|trigger|triggers|keywords?)[ \t]*:/i;
 const AUTOPILOT_NOUN_USE_BEFORE = /(?<![\p{L}\d])(?:the|a|an|this|that|these|those|last|previous|our|my|its|your|their)\s+$/iu;
 const AUTOPILOT_COMMIT_LINE_BEFORE = /(?<![\p{L}\d])[0-9a-f]{7,40}\s+$/iu;
@@ -1116,13 +1118,14 @@ function hasExplicitAutopilotInvocationContext(text, position, keywordLength, ke
   const lineHead = text.slice(lineStart, Math.min(position, lineStart + 80));
   if (AUTOPILOT_NEGATION_BEFORE.test(tail) || AUTOPILOT_NEGATION_BEFORE.test(tail.replace(AUTOPILOT_OPENING_DELIMITERS_AT_END, ''))) return false;
   if (AUTOPILOT_REFERENCE_LABEL_LINE.test(lineHead)) return false;
+  if (AUTOPILOT_USE_QUESTION_BEFORE.test(tail)) return false;
   if (AUTOPILOT_NON_ENGLISH_LINE.test(text.slice(lineStart, Math.min(lineEnd, lineStart + 400)))) return true;
   const isHardwareAlias = /^(?:full\s*auto|fullsend)$/i.test((keywordText || '').trim());
   if (leadingPrefix) {
     // A plain alias that opens the prompt counts unless it reads as a status line ("autopilot run failed").
     if (isHardwareAlias) {
       return AUTOPILOT_ALONE_ON_LINE.test(afterKeyword)
-        || AUTOPILOT_COLON_COMMAND.test(afterKeyword)
+        || AUTOPILOT_COLON_VERB.test(afterKeyword)
         || AUTOPILOT_COMMAND_AFTER_VERB.test(afterKeyword)
         || /^[ \t]+(?:this|these|that|it|my|our|everything)(?![\p{L}\d])/iu.test(afterKeyword);
     }
@@ -1133,7 +1136,7 @@ function hasExplicitAutopilotInvocationContext(text, position, keywordLength, ke
   const atLineStart = /^[ \t]*(?:[$/!][ \t]*)?$/.test(lineHead);
   if (atLineStart && (/[$/!]/.test(lineHead) || AUTOPILOT_ALONE_ON_LINE.test(afterKeyword))) return true;
   if (isHardwareAlias) {
-    return (atLineStart && (AUTOPILOT_COLON_COMMAND.test(afterKeyword) || AUTOPILOT_COMMAND_AFTER_VERB.test(afterKeyword)))
+    return (atLineStart && AUTOPILOT_COMMAND_AFTER_VERB.test(afterKeyword))
       || AUTOPILOT_COLON_VERB.test(afterKeyword)
       || AUTOPILOT_VERB_DIRECTLY_BEFORE.test(tail)
       || AUTOPILOT_PHRASE_BEFORE.test(tail)
