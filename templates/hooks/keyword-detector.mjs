@@ -954,7 +954,7 @@ const AUTOPILOT_NEGATION_BEFORE = /(?<![\p{L}\d])(?:(?:don|doesn|didn|shouldn|co
 const AUTOPILOT_OPENING_DELIMITERS_AT_END = /["'“”‘’`*_([{<]+$/;
 // A sentence that starts with a question or auxiliary word asks; "can/could/would/will you ..." is a request.
 // Imperative "do use" / "do check" is not a question.
-const AUTOPILOT_QUESTION_START = /^[ \t]*(?:[-*+>#]+[ \t]+|\d+[.)][ \t]+|\[[ xX]\][ \t]+|["'"'([*_`])*(?!(?:can|could|would|will)\s+you(?![\p{L}\d]))(?!do\s+not(?![\p{L}\d]))(?!do\s+(?:use|check|fix|test|run|try|build|create|make|implement|execute|invoke|trigger|launch|apply)\s)(?:did|does|do|is|are|was|were|has|have|had|can|could|should|would|will|may|might|must|shall|what|why|how|when|where|who|which)(?![\p{L}\d])/iu;
+const AUTOPILOT_QUESTION_START = /^[ \t]*(?:[-*+>#]+[ \t]+|\d+[.)][ \t]+|\[[ xX]\][ \t]+|["'“‘([*_`])*(?!(?:can|could|would|will)\s+you(?![\p{L}\d]))(?!do\s+not(?![\p{L}\d]))(?!do\s+(?:use|check|fix|test|run|try|build|create|make|implement|execute|invoke|trigger|launch|apply)\s)(?:did|does|do|is|are|was|were|has|have|had|can|could|should|would|will|may|might|must|shall|what|why|how|when|where|who|which)(?![\p{L}\d])/iu;
 // The polite request "can/could/would/will you ..." keeps its question mark without being a question.
 const AUTOPILOT_REQUEST_START = /^[ \t]*(?:[-*+>#]+[ \t]+|\d+[.)][ \t]+|\[[ xX]\][ \t]+|["'“‘([*_`])*(?:please[ ,]+)?(?:can|could|would|will)\s+you(?![\p{L}\d])/iu;
 const AUTOPILOT_SENTENCE_END = /(?<=\S)[.!?][)\]}"'*_\u201D\u2019]*(?=\s|$)/g;
