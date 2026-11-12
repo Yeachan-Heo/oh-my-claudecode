@@ -220,9 +220,12 @@ const DELIVERY_OPENERS = ['Another Claude session sent a message:', '<agent-mess
 const ENVELOPE_CLOSE = '</system-reminder id="';
 const ENVELOPE_OPEN = /<system-reminder id="(?=([^"\n]{1,64})">)/g; // every opener, also one inside another's id
 const ENVELOPE_ID = /([^"\n]{1,64})">/y; // the id and end of a closing tag, read where the tag starts
-// A task notification's marker stands at its start (after its own reminders), not deep in a quoted file.
+// A task notification's marker opens the block (after its own wrapper and reminders), not a line deep in a quoted file.
 const DELIVERY_NOTES = ['[SYSTEM NOTIFICATION - NOT USER INPUT]', '<task-notification>'];
-const DELIVERY_NOTE_CHARS = 300;
+// A complete reminder before a block's frame (the Claude desktop app writes "<system-reminder>...</system-reminder>
+// Another Claude session sent a message:"); at most PRELUDES_MAX of them are skipped.
+const DELIVERY_PRELUDE = /^\s*<system-reminder[^>]*>[\s\S]*?<\/system-reminder[^>]*>\s*/;
+const PRELUDES_MAX = 4;
 
 // Secret paths: SSH keys (every file in a .ssh directory but known_hosts*, authorized_keys*, config, config.d/,
 // environment, rc and *.pub, and an id_rsa, id_dsa, id_ecdsa or id_ed25519 key anywhere), git and gh credentials,
@@ -1144,24 +1147,40 @@ function messageChars(m) {
   return n;
 }
 
-// The frame a text opens with, after an optional <system-reminder ...> wrapper: 'user', 'other'
-// (another session, agent, coordinator, plugin, teammate) or undefined.
+// The text from the point `starts` accepts: past the wrapper that opens it (also the envelope build
+// writes around a block) and past the complete reminders before it; undefined when none does.
+function bodyOf(text, starts) {
+  let t = text;
+  for (let k = 0; k <= PRELUDES_MAX; k++) {
+    const body = t.replace(DELIVERY_WRAP, '');
+    if (starts(body)) return body;
+    const prelude = DELIVERY_PRELUDE.exec(t);
+    if (!prelude) return undefined;
+    t = t.slice(prelude[0].length);
+  }
+  return undefined;
+}
+const startsFrame = (t) => t.startsWith(QUEUED_PREFIX) || OTHER_FRAME.test(t.split('\n', 1)[0]) || DELIVERY_OPENERS.some((p) => t.startsWith(p));
+const startsNote = (t) => DELIVERY_NOTES.some((k) => t.startsWith(k));
+
+// The frame a text opens with, after an optional <system-reminder ...> wrapper and complete reminders: 'user',
+// 'other' (another session, agent, coordinator, plugin, teammate) or undefined.
 function frameOf(text) {
-  const t = text.replace(DELIVERY_WRAP, '');
-  if (t.startsWith(QUEUED_PREFIX)) return 'user';
-  return OTHER_FRAME.test(t.split('\n', 1)[0]) || DELIVERY_OPENERS.some((p) => t.startsWith(p)) ? 'other' : undefined;
+  const body = bodyOf(text, startsFrame);
+  if (body === undefined) return undefined;
+  return body.startsWith(QUEUED_PREFIX) ? 'user' : 'other';
 }
 
 // What a text block delivered with the results is: 'user', 'other' (another session, agent,
 // coordinator, plugin, teammate, task notification) or undefined (a reminder that may go).
 function deliveryOf(text) {
   if (typeof text !== 'string') return undefined;
-  return frameOf(text) || (DELIVERY_NOTES.some((k) => { const at = text.indexOf(k); return at >= 0 && at < DELIVERY_NOTE_CHARS; }) ? 'other' : undefined);
+  return frameOf(text) || (bodyOf(text, startsNote) !== undefined ? 'other' : undefined);
 }
 
-// A row's own text that opens with a delivered message: a frame, or a task notification's marker at its
-// start (after an optional wrapper). A prompt that quotes the marker further on stays the user's.
-const opensDelivery = (text) => frameOf(text) || DELIVERY_NOTES.some((k) => text.replace(DELIVERY_WRAP, '').startsWith(k));
+// A row's own text that opens with a delivered message: a frame, or a task notification's marker (after an
+// optional wrapper). A prompt that quotes the marker further on stays the user's.
+const opensDelivery = (text) => frameOf(text) || bodyOf(text, startsNote) !== undefined;
 
 // The envelopes of a text, in order: {from, to, text}. Read from the end, each closing tag with the
 // last opener of its id before it, so an envelope build appended (whose id nothing before it holds)
@@ -1204,11 +1223,21 @@ function carriedText(m, blocks = []) {
   const taken = new Set();
   const note = (text) => { for (const x of text.matchAll(/id="jev-(\d+)"/g)) taken.add(x[1]); };
   note(m.text || '');
+  // A row with words of its own outside its envelopes gets even a host envelope in one of ours: after such
+  // text a jev envelope is what a later compaction reads as carried (userWords), a host one as a quote.
+  let mixed = false;
+  if (m.text && blocks.length) {
+    let at = 0;
+    const outside = [];
+    for (const e of envelopesOf(m.text)) { outside.push(m.text.slice(at, e.from)); at = e.to; }
+    outside.push(m.text.slice(at));
+    mixed = outside.join('').trim() !== '';
+  }
   let k = 1;
   for (const block of blocks) {
     note(block);
     const e = envelopesOf(block);
-    if (e.length === 1 && e[0].from === 0 && e[0].to === block.length) { parts.push(block); continue; }
+    if (!mixed && e.length === 1 && e[0].from === 0 && e[0].to === block.length) { parts.push(block); continue; }
     while (taken.has(String(k))) k++;
     taken.add(String(k));
     parts.push(`<system-reminder id="jev-${k}">\n${block}\n</system-reminder id="jev-${k}">`);
@@ -1221,37 +1250,64 @@ function carriedText(m, blocks = []) {
 // a block is read as a frame of its own, so a header another sender quotes is not the user's.
 function blockWords(block) {
   if (frameOf(block) !== 'user') return [];
-  const body = block.replace(DELIVERY_WRAP, '').slice(QUEUED_PREFIX.length);
+  const body = bodyOf(block, startsFrame).slice(QUEUED_PREFIX.length);
   const tail = body.lastIndexOf(QUEUED_TAIL);
   const words = (tail < 0 ? body.replace(/(?:\s*<\/system-reminder[^>]*>)+\s*$/, '') : body.slice(0, tail)).trim();
   return words ? [words] : [];
 }
 
+// The first index of the sorted list `a` whose value is at least `x`.
+function lowerBound(a, x) {
+  let lo = 0;
+  for (let hi = a.length; lo < hi;) { const mid = (lo + hi) >> 1; if (a[mid] < x) lo = mid + 1; else hi = mid; }
+  return lo;
+}
+
+// What the user's blocks of a text read from, indexed once per text: the positions of the host's whole footer
+// outside every envelope that holds a delivered message (`spans`, in text order; a footer inside one is that
+// message's), and, once a block asks for it, the start of every line that opens a frame.
+function blockIndex(text, spans) {
+  const footers = [];
+  let k = 0;
+  for (const f of positionsOf(text, QUEUED_FOOTER)) {
+    while (k < spans.length && spans[k].to <= f) k++;
+    if (!(k < spans.length && spans[k].from <= f)) footers.push(f);
+  }
+  return { footers, frames: undefined };
+}
+function frameLines(text) {
+  const out = [];
+  for (let p = 0; p < text.length;) {
+    const nl = text.indexOf('\n', p);
+    if (frameOf(`${text.slice(p, nl < 0 ? text.length : nl)}\n`)) out.push(p);
+    p = nl < 0 ? text.length : nl + 1;
+  }
+  return out;
+}
+
 // The end of a user's block that opens at `from` in a row's text: the end of the line of its framing
-// note, the last one before the first user's header after its first note (a header the user quotes
-// before the note stays in the block, and the user may write the note's words too); -1 without a
-// note. The first note is the host's whole footer when the text has one after `from` (`footers`, its
-// positions in order), so the note's opening words the user writes do not end the search early. A note inside an envelope that holds a delivered message (`spans`, in text order) is that
-// message's, not the user's, so a block stops before a carried envelope that quotes the note. Each call
-// reads only up to that header and skips an envelope in one step, so the blocks of a row stay linear.
-function userBlockEnd(text, from, spans = [], footers = []) {
+// note, the last one before the first frame (a user's header or another sender's) after its first note
+// (a header the user quotes before the note stays in the block, and the user may write the note's words
+// too); -1 without a note. The first note is the host's whole footer outside the envelopes when the text has
+// one after `from` (`index`), so the note's opening words the user writes do not end the search early. A note
+// inside an envelope that holds a delivered message (`spans`, in text order) is that message's, not the user's, so a
+// block stops before a carried envelope that quotes the note. Each call reads only up to that frame and skips an
+// envelope in one step, so the blocks of a row stay linear. In a row rebuilt before blocks got envelopes, one user's
+// block that quotes the whole footer and then a header reads the same as two blocks in a row (the same bytes), so
+// it is read as two; rows written now keep every block in an envelope of its own.
+function userBlockEnd(text, from, spans, index) {
   const inside = (i) => {
     let lo = 0;
     for (let hi = spans.length; lo < hi;) { const mid = (lo + hi) >> 1; if (spans[mid].from <= i) lo = mid + 1; else hi = mid; }
     return lo > 0 && i < spans[lo - 1].to ? spans[lo - 1] : undefined;
   };
-  // The first footer after `from` outside every envelope (one in an envelope is that message's).
-  const footerFrom = (i) => {
-    let f = 0;
-    for (let hi = footers.length; f < hi;) { const mid = (f + hi) >> 1; if (footers[mid] < i) f = mid + 1; else hi = mid; }
-    return f;
-  };
-  let f = footerFrom(from);
-  for (let e; f < footers.length && (e = inside(footers[f])); f = footerFrom(e.to));
-  const first = f < footers.length ? footers[f] : text.indexOf(QUEUED_TAIL, from);
+  const f = lowerBound(index.footers, from);
+  const first = f < index.footers.length ? index.footers[f] : text.indexOf(QUEUED_TAIL, from);
   if (first < 0) return -1;
-  const next = text.indexOf(QUEUED_PREFIX, first + QUEUED_TAIL.length);
-  const limit = next < 0 ? text.length : next;
+  index.frames ??= frameLines(text);
+  const after = first + QUEUED_TAIL.length;
+  const header = text.indexOf(QUEUED_PREFIX, after);
+  const limit = Math.min(header < 0 ? text.length : header, index.frames[lowerBound(index.frames, after)] ?? text.length);
   let t = text.lastIndexOf(QUEUED_TAIL, limit - QUEUED_TAIL.length);
   for (let e; t >= from && (e = inside(t)); t = text.lastIndexOf(QUEUED_TAIL, e.from - 1));
   if (t < from) return -1;
@@ -1267,21 +1323,21 @@ function positionsOf(text, s) {
 }
 
 // Text outside envelopes (a row rebuilt before carried blocks got envelopes) split at each line that
-// opens a frame: one piece per delivered message. A user's block runs to its framing note
+// opens a frame: one piece {text, at} per delivered message. A user's block runs to its framing note
 // (userBlockEnd), so a frame line the user quotes before the note stays in it.
 function piecesOf(text) {
   const pieces = [];
-  const footers = positionsOf(text, QUEUED_FOOTER);
   const spans = envelopesOf(text).filter((e) => deliveryOf(e.text)); // envelopes the user pasted
+  const index = blockIndex(text, spans);
   const lastTail = text.lastIndexOf(QUEUED_TAIL);
   let end = -1;
   let at = 0;
   for (const line of text.split('\n')) {
     const frame = at >= end ? frameOf(`${line}\n`) : undefined;
     if (!pieces.length || frame) {
-      pieces.push(line);
-      end = frame === 'user' && at < lastTail ? userBlockEnd(text, at, spans, footers) : -1;
-    } else pieces[pieces.length - 1] += `\n${line}`;
+      pieces.push({ text: line, at });
+      end = frame === 'user' && at < lastTail ? userBlockEnd(text, at, spans, index) : -1;
+    } else pieces[pieces.length - 1].text += `\n${line}`;
     at += line.length + 1;
   }
   return pieces;
@@ -1291,7 +1347,7 @@ function piecesOf(text) {
 // its framing note: that one is a quote the user pasted and stays in their block.
 function deliveredOf(text) {
   const all = envelopesOf(text).filter((e) => deliveryOf(e.text));
-  const footers = positionsOf(text, QUEUED_FOOTER);
+  const index = blockIndex(text, all);
   const lastTail = text.lastIndexOf(QUEUED_TAIL);
   const out = [];
   let end = -1;
@@ -1304,7 +1360,7 @@ function deliveredOf(text) {
     }
     const nl = text.indexOf('\n', p);
     const stop = Math.min(nl < 0 ? text.length : nl, k < all.length ? all[k].from : text.length);
-    if (p >= end && p < lastTail && frameOf(`${text.slice(p, stop)}\n`) === 'user') end = userBlockEnd(text, p, all, footers);
+    if (p >= end && p < lastTail && frameOf(`${text.slice(p, stop)}\n`) === 'user') end = userBlockEnd(text, p, all, index);
     p = stop === nl ? nl + 1 : stop;
   }
   return out;
@@ -1321,20 +1377,26 @@ function deliveredOf(text) {
 function userWords(m) {
   if (m.role !== 'user' || !m.text) return [];
   const delivered = deliveredOf(m.text);
+  // The text outside the envelopes, as the parts between them, each with where it stands in the row.
   const outside = [];
   let at = 0;
-  for (const e of delivered) { outside.push(m.text.slice(at, e.from)); at = e.to; }
-  outside.push(m.text.slice(at));
-  const own = outside.join('\n').trim();
-  const carried = delivered.flatMap((e) => blockWords(e.text));
-  if (opensDelivery(own) || (m.toolResults && m.toolResults.length)) return [...piecesOf(own).flatMap(blockWords), ...carried];
+  for (const e of delivered) { outside.push({ from: at, text: m.text.slice(at, e.from) }); at = e.to; }
+  outside.push({ from: at, text: m.text.slice(at) });
+  const own = outside.map((o) => o.text).join('\n').trim();
+  if (opensDelivery(own) || (m.toolResults && m.toolResults.length)) {
+    // Every message in the order it stands in the row, a legacy one (outside the envelopes) and an enveloped one alike.
+    const found = delivered.map((e) => ({ at: e.from, words: blockWords(e.text) }));
+    for (const o of outside) for (const p of piecesOf(o.text)) found.push({ at: o.from + p.at, words: blockWords(p.text) });
+    return found.sort((x, y) => x.at - y.at).flatMap((f) => f.words);
+  }
   const text = own.replace(HOST_BLOCK, '').trim();
+  const carried = delivered.flatMap((e) => blockWords(e.text));
   if (!text || HOST_BLOCK_OPEN.test(text) || NOT_USER_PREFIXES.some((p) => text.startsWith(p))) return carried;
-  // A prompt the user typed: an envelope in it is a quote they pasted, so the whole prompt is theirs,
-  // except the jev envelopes build appends at the end of a row it rebuilt (a result row whose results
-  // all became traces keeps its own text before them): those stay messages of their senders.
+  // A prompt the user typed: an envelope in it is a quote they pasted, so the whole prompt is theirs. Except
+  // the jev envelopes build appends at the end of a row it rebuilt from a result row (it has a toolResults list,
+  // whatever it holds; a result row keeps its own text before them): those stay messages of their senders.
   let cut = m.text.length;
-  for (let k = delivered.length - 1; k >= 0 && /^<system-reminder id="jev-\d+">/.test(delivered[k].text) && !m.text.slice(delivered[k].to, cut).trim(); k--) cut = delivered[k].from;
+  if (Array.isArray(m.toolResults)) for (let k = delivered.length - 1; k >= 0 && /^<system-reminder id="jev-\d+">/.test(delivered[k].text) && !m.text.slice(delivered[k].to, cut).trim(); k--) cut = delivered[k].from;
   const typed = m.text.slice(0, cut).replace(HOST_BLOCK, '').trim();
   return [...(typed ? [typed] : []), ...delivered.filter((e) => e.from >= cut).flatMap((e) => blockWords(e.text))];
 }
@@ -1352,8 +1414,14 @@ function queuedOf(messages, api) {
   const rows = new Map();
   const counts = { user: 0, other: 0 };
   const rowOfResult = new Map();
+  // The rows of one API message are a run of consecutive user rows (the host joins them): `runStart` is
+  // the first row of the run that holds a row, `runs` the first row of every run.
+  const runStart = [];
+  const runs = [];
   messages.forEach((m, i) => {
-    if (m.role !== 'user') return;
+    if (m.role !== 'user') { runStart.push(-1); return; }
+    if (i > 0 && messages[i - 1].role === 'user') runStart.push(runStart[i - 1]);
+    else { runStart.push(i); runs.push(i); }
     for (const r of m.toolResults || []) if (!rowOfResult.has(r.tool_use_id)) rowOfResult.set(r.tool_use_id, i);
   });
   // The first row at or after each index that the API form shows a block of (text or results), or an
@@ -1363,36 +1431,66 @@ function queuedOf(messages, api) {
     const m = messages[i];
     nextAt[i] = m.role !== 'user' || m.text || (m.toolResults || []).length ? i : nextAt[i + 1];
   }
+  // For a text-only row: how many text-only rows with the same text follow it before the next row with
+  // results (the rows of one stretch of the API message, between two results).
+  const rowsAfter = new Array(messages.length).fill(0);
+  const seenRows = new Map();
+  for (let i = messages.length - 1; i >= 0; i--) {
+    const m = messages[i];
+    if (m.role !== 'user' || (m.toolResults || []).length) seenRows.clear();
+    else if (m.text) { rowsAfter[i] = seenRows.get(m.text) || 0; seenRows.set(m.text, rowsAfter[i] + 1); }
+  }
   const shown = new Set();
   // The API form joins the rows of one message in order, each row's results before its text. So a text
-  // block at row `at` (the row of the block before it) is shown by that row's own text not matched
-  // yet, or by the next row when that row has text and no results; otherwise no row shows it. The
-  // same text elsewhere (a block an earlier compaction carried, a repeated "continue") is another
-  // delivery, and two rows with the same text show two blocks.
-  const matchShown = (at, text) => {
-    if (!shown.has(at) && messages[at].text === text) return at;
-    const k = nextAt[at + 1];
+  // block at row `at` (the row of the block before it; before the first one, the message starts at row
+  // `lead`) is shown by that row's own text not matched yet, or by the next row when that row has text
+  // and no results; otherwise no row shows it. The same text elsewhere (a block an earlier compaction
+  // carried, a repeated "continue") is another delivery, and two rows with the same text show two blocks.
+  // A block that more blocks of its stretch repeat than text-only rows follow the row is not shown by it:
+  // the last block with that text is (`later` counts the blocks after it), the earlier ones are deliveries
+  // that stand before the row (a duplicate carried at worst, never one lost).
+  const matchShown = (at, text, lead, later) => {
+    if (at !== undefined && !shown.has(at) && messages[at].text === text) return at;
+    const k = nextAt[at === undefined ? lead : at + 1];
     const m = messages[k];
-    return m && m.role === 'user' && !(m.toolResults || []).length && m.text === text ? k : undefined;
+    return m && m.role === 'user' && !(m.toolResults || []).length && m.text === text && later <= rowsAfter[k] ? k : undefined;
   };
-  for (const a of api) {
-    if (a.role !== 'user' || !Array.isArray(a.content)) continue;
+  // A message without results is matched to the run of rows at its place in the order (when both lists
+  // hold the same number of them): a kept notice row can own a delivery after its result was traced.
+  const users = api.filter((a) => a.role === 'user' && Array.isArray(a.content));
+  let ordinal = -1;
+  for (const a of users) {
+    ordinal++;
     let row;
-    for (const b of a.content) if (b?.type === 'tool_result' && rowOfResult.has(b.tool_use_id)) row = Math.max(row ?? 0, rowOfResult.get(b.tool_use_id));
-    if (row === undefined) continue;
+    let results = false;
+    for (const b of a.content) {
+      if (b?.type !== 'tool_result') continue;
+      results = true;
+      if (rowOfResult.has(b.tool_use_id)) row = Math.max(row ?? 0, rowOfResult.get(b.tool_use_id));
+    }
+    const lead = row !== undefined ? runStart[row] : !results && runs.length === users.length ? runs[ordinal] : undefined;
+    if (lead === undefined) continue;
+    // For each text block, how many blocks with the same text follow it before the next result.
+    const later = new Array(a.content.length).fill(0);
+    const seen = new Map();
+    for (let p = a.content.length - 1; p >= 0; p--) {
+      const b = a.content[p];
+      if (b?.type === 'tool_result') seen.clear();
+      else if (b?.type === 'text' && typeof b.text === 'string') { later[p] = seen.get(b.text) || 0; seen.set(b.text, later[p] + 1); }
+    }
     let anchor = row;
     let at;
-    for (const b of a.content) {
+    for (const [p, b] of a.content.entries()) {
       if (b?.type === 'tool_result' && rowOfResult.has(b.tool_use_id)) at = anchor = rowOfResult.get(b.tool_use_id);
       if (b?.type !== 'text') continue;
-      const r = at === undefined ? undefined : matchShown(at, b.text);
+      const r = matchShown(at, b.text, lead, later[p]);
       if (r !== undefined) {
         shown.add(r);
         at = anchor = r;
         continue;
       }
       const kind = deliveryOf(b.text);
-      if (!kind) continue;
+      if (!kind || anchor === undefined) continue;
       if (!rows.has(anchor)) rows.set(anchor, []);
       rows.get(anchor).push(b.text);
       counts[kind]++;
@@ -2203,6 +2301,13 @@ async function ownThreshold($, e, next) {
     // removable tool results are worth it, so the threshold never forces the built-in summary.
     session.lastAttempt = session.turnCount;
     const messages = await $.session.messages();
+    let before = messages.reduce((s, m) => s + messageChars(m), 0);
+    const candidates = findCandidates(messages, cfg.privatePaths);
+    let removable = removableChars(candidates);
+    const tooSmall = () => !before || removable / before < MIN_REDUCTION || removable / CHARS_PER_TOKEN < OWN_MIN_GAIN * window;
+    // The delivered messages can only make this worse (they add to `before`, their envelopes come off
+    // `removable`), so a transcript that fails here needs no API read, which may hold the turn for HOST_MS.
+    if (tooSmall()) return result;
     // Messages delivered during a tool turn are in the API form only; decide counts them, so the
     // preflight does too (else it could ask for a compaction that decide hands back to the summary).
     const apiRead = await withDeadline($, Promise.resolve().then(() => $.session.messages({ as: 'api' })), HOST_MS);
@@ -2211,11 +2316,11 @@ async function ownThreshold($, e, next) {
     if (!('value' in apiRead)) return result;
     const api = apiFormOf(apiRead.value);
     const delivered = queuedOf(messages, api);
-    let before = messages.reduce((s, m) => s + messageChars(m), 0);
-    if (delivered) for (const blocks of delivered.rows.values()) before += rawChars(blocks);
-    const candidates = findCandidates(messages, cfg.privatePaths);
-    const removable = removableChars(candidates) - (delivered ? envelopeChars(messages, delivered.rows, candidates) : 0);
-    if (!before || removable / before < MIN_REDUCTION || removable / CHARS_PER_TOKEN < OWN_MIN_GAIN * window) return result;
+    if (delivered) {
+      for (const blocks of delivered.rows.values()) before += rawChars(blocks);
+      removable -= envelopeChars(messages, delivered.rows, candidates);
+    }
+    if (tooSmall()) return result;
     let reason;
     let detailText = '';
     try {

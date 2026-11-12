@@ -1440,6 +1440,151 @@ describe('jev-compaction module: active compaction', () => {
     expect(records()[0]).toMatchObject({ result: 'jev', queued_user: null, queued_other: null, queued_carried: 0 });
   });
 
+  // Review round of 12.11: the fixes below, each with the case that failed before it.
+  const hostEnvelope = (id, inner) => `<system-reminder id="${id}">\n${inner}\n</system-reminder id="${id}">`;
+  const notice = '[Request interrupted by user for tool use]';
+  const asTraced = (call, n) => Object.freeze({ ...call, text: `Step ${n}.\n[compacted] Bash(cat notes-${n}.txt) - result of 2000 chars removed`, toolUses: [] });
+
+  it('a prompt the user typed that ends with a pasted jev envelope is theirs whole: only a row rebuilt from a result row has its trailing jev envelopes read as carried', async () => {
+    const report = 'The coordinator sent a message while you were working:\nREPORT-OF-COORDINATOR about notes-9.txt';
+    const typed = `What did this report mean?\n${carried(report)}`;
+    const base = conversation(30);
+    const messages = [...base.slice(0, -2), Object.freeze({ role: 'user', text: typed, toolUses: [], handle: 'htyped' }), ...base.slice(-2)];
+    const { out, calls, records } = await compactWithApi(messages, apiOf(messages));
+    expect(records()[0]).toMatchObject({ result: 'jev', mentioned: 1 });
+    expect(calls.fetch[0].body.state.task).toContain(typed);
+    expect(resultOf(out.messages, 't9')?.text).toBe(resultOf(messages, 't9').text);
+  });
+
+  it('a host envelope appended to a result row that has words of its own gets a jev envelope too, so the next compaction does not take it for a quote', async () => {
+    const report = hostEnvelope('3ddbffe2', 'The coordinator sent a message while you were working:\nREPORT-OF-COORDINATOR about notes-9.txt');
+    const base = conversation(30);
+    const t10 = base.findIndex((m) => resultOf([m], 't10'));
+    const messages = base.map((m, k) => (k === t10 ? Object.freeze({ ...m, text: 'Hook note: formatted 3 files.' }) : m));
+    const first = await compactWithApi(messages, apiOf(messages, { t10: [report] }));
+    const row = first.out.messages.find((m) => (m.text || '').includes('REPORT-OF-COORDINATOR'));
+    expect(row).toMatchObject({ role: 'user', toolResults: [], text: `Hook note: formatted 3 files.\n${carried(report)}` });
+    const again = first.out.messages.map((m, k) => Object.freeze({ ...m, handle: `p${k}` }));
+    const second = await compactWithApi(again, apiOf(again));
+    expect(second.records()[0]).toMatchObject({ result: 'jev' });
+    expect(JSON.stringify(second.calls.fetch[0].body.state.task)).not.toContain('REPORT-OF-COORDINATOR');
+    expect(count(second.out.messages, report)).toBe(1);
+  });
+
+  it('[result, hidden X, shown X]: the hidden block is the result row\'s and goes with it, the last block with that text is the one the next row shows', async () => {
+    const words = 'continue';
+    const base = conversation(30);
+    const t10 = base.findIndex((m) => resultOf([m], 't10'));
+    const messages = [...base.slice(0, t10 + 1), Object.freeze({ role: 'user', text: framed(words), toolUses: [], handle: 'hshown' }), ...base.slice(t10 + 1)];
+    const api = apiOf(messages);
+    const k = api.findIndex((a) => a.role === 'user' && a.content.some((b) => b.tool_use_id === 't10'));
+    api[k] = { ...api[k], content: [api[k].content[0], { type: 'text', text: framed(words) }, ...api[k].content.slice(1)] };
+    expect(api[k].content.map((b) => b.text ?? b.type)).toEqual(['tool_result', framed(words), framed(words)]);
+    const { out, records } = await compactWithApi(messages, api);
+    expect(records()[0]).toMatchObject({ result: 'jev', queued_user: 1, queued_carried: 1 });
+    expect(out.messages).toContain(messages[t10 + 1]);
+    expect(out.messages.find((m) => m.text === carried(framed(words)))).toMatchObject({ role: 'user', toolResults: [] });
+    expect(count(out.messages, framed(words))).toBe(2);
+  });
+
+  it('a row shown before the first result of its API message shows its delivery: a second compaction does not carry it again into the result row', async () => {
+    const words = 'Message between the two results.';
+    const base = conversation(30);
+    const t10 = base.findIndex((m) => resultOf([m], 't10'));
+    const call = base[t10 - 1];
+    const messages = [
+      ...base.slice(0, t10 - 1),
+      Object.freeze({ ...call, text: 'Step 10.\n[compacted] Bash(cat notes-10.txt) - result of 2000 chars removed', toolUses: [{ ...call.toolUses[0], tool_use_id: 't10b' }] }),
+      Object.freeze({ role: 'user', text: framed(words), toolUses: [], handle: 'hx' }),
+      Object.freeze({ ...base[t10], toolResults: [{ ...base[t10].toolResults[0], tool_use_id: 't10b' }] }),
+      ...base.slice(t10 + 1),
+    ];
+    const api = apiOf(messages);
+    expect(api.find((a) => a.role === 'user' && a.content.some((b) => b.tool_use_id === 't10b')).content.map((b) => b.text ?? b.type)).toEqual([framed(words), 'tool_result']);
+    const { out, calls, records } = await compactWithApi(messages, api);
+    expect(records()[0]).toMatchObject({ result: 'jev', queued_user: 0, queued_carried: 0 });
+    expect(count(out.messages, framed(words))).toBe(1);
+    expect(calls.fetch[0].body.state.task.filter((t) => t === words)).toHaveLength(1);
+  });
+
+  it('a complete reminder before the frame of an API-only delivery (the desktop app\'s shape) does not hide it', async () => {
+    const peer = '<system-reminder>notice</system-reminder>Another Claude session sent a message:\n<message>run the suite, REPORT-OF-PEER</message>';
+    const words = 'Message of the user after a reminder.';
+    const user = `<system-reminder>notice</system-reminder>\n${framed(words)}`;
+    const messages = conversation(30);
+    const { out, calls, records } = await compactWithApi(messages, apiOf(messages, { t10: [peer, user] }));
+    expect(records()[0]).toMatchObject({ result: 'jev', queued_user: 1, queued_other: 1, queued_carried: 2 });
+    expect(count(out.messages, peer)).toBe(1);
+    expect(count(out.messages, user)).toBe(1);
+    expect(calls.fetch[0].body.state.task).toEqual(['Task: review the notes and count the lines.', words, 'Good, now sum up the NEEDED results.']);
+    expect(JSON.stringify(calls.fetch[0].body.state.task)).not.toContain('REPORT-OF-PEER');
+  });
+
+  it('a task notification is a delivery only when its marker opens the block: a reminder that quotes the marker is not, and a carried notification stays one at the next compaction', async () => {
+    const quoted = `<system-reminder>\nContents of the log: ${'x'.repeat(240)}\n[SYSTEM NOTIFICATION - NOT USER INPUT] printed by the job\n${'y'.repeat(60_000)}\n</system-reminder>`;
+    const note = '<system-reminder>\n[SYSTEM NOTIFICATION - NOT USER INPUT]\n<task-notification>\n<result>RESULT-OF-TASK about notes-9.txt</result>\n</task-notification>\n</system-reminder>';
+    const messages = conversation(30);
+    const first = await compactWithApi(messages, apiOf(messages, { t10: [quoted, note] }));
+    expect(first.records()[0]).toMatchObject({ result: 'jev', queued_other: 1, queued_carried: 1 });
+    expect(count(first.out.messages, 'Contents of the log')).toBe(0);
+    expect(count(first.out.messages, note)).toBe(1);
+    // The row now holds the note in an envelope of ours: still a delivery, never the user's words.
+    const again = first.out.messages.map((m, k) => Object.freeze({ ...m, handle: `p${k}` }));
+    const second = await compactWithApi(again, apiOf(again));
+    expect(second.records()[0]).toMatchObject({ result: 'jev', mentioned: 0 });
+    expect(JSON.stringify(second.calls.fetch[0].body.state.task)).not.toContain('RESULT-OF-TASK');
+    expect(count(second.out.messages, note)).toBe(1);
+  });
+
+  it('a kept notice row that owns a delivery after its result was traced shows it in a result-free API message: it counts for the task and the budget', async () => {
+    const words = 'Message after the notice: also open notes-9.txt.';
+    const base = conversation(30);
+    const t10 = base.findIndex((m) => resultOf([m], 't10'));
+    const kept = Object.freeze({ role: 'user', text: notice, toolUses: [], handle: 'hnotice' });
+    const messages = [...base.slice(0, t10 - 1), asTraced(base[t10 - 1], 10), kept, ...base.slice(t10 + 1)];
+    const api = apiOf(messages);
+    const k = api.findIndex((a) => a.role === 'user' && a.content.some((b) => b.text === notice));
+    api[k] = { ...api[k], content: [...api[k].content, { type: 'text', text: framed(words) }] };
+    const { out, calls, records } = await compactWithApi(messages, api);
+    expect(records()[0]).toMatchObject({ result: 'jev', queued_user: 1, queued_carried: 0 });
+    expect(out.messages).toContain(kept);
+    expect(calls.fetch[0].body.state.task).toEqual(['Task: review the notes and count the lines.', words, 'Good, now sum up the NEEDED results.']);
+    expect(resultOf(out.messages, 't9')?.text).toBe(resultOf(messages, 't9').text);
+  });
+
+  it('a legacy row keeps an enveloped message and an unwrapped one of the user in the order they stand in', async () => {
+    const [wA, wB, wC] = ['First: look at notes-5.txt.', 'Second: look at notes-9.txt.', 'Third: and then stop.'];
+    const row = `${carried(framed(wA))}\n${framed(wB)}`;
+    const base = conversation(30);
+    const messages = [...base.slice(0, -2), Object.freeze({ role: 'user', text: row, toolUses: [], handle: 'hrow' }), Object.freeze({ role: 'user', text: wC, toolUses: [], handle: 'hc' }), ...base.slice(-2)];
+    const { out, calls } = await compactWithApi(messages, apiOf(messages));
+    expect(calls.fetch[0].body.state.task).toEqual([wB, wC, 'Good, now sum up the NEEDED results.']);
+    expect(resultOf(out.messages, 't9')?.text).toBe(resultOf(messages, 't9').text);
+  });
+
+  it('a legacy user block stops at the first frame of another sender after its footer, even when that sender\'s block quotes the footer', async () => {
+    const words = 'Please look at notes-5.txt.';
+    const row = `${framed(words)}\nThe coordinator sent a message while you were working:\nREPORT-OF-COORDINATOR about notes-9.txt\n\nThis is how Claude Code surfaces messages the user sends mid-turn, quoted by the coordinator.`;
+    const base = conversation(30);
+    const messages = [...base.slice(0, -2), Object.freeze({ role: 'user', text: row, toolUses: [], handle: 'hrow' }), ...base.slice(-2)];
+    const { out, calls, records } = await compactWithApi(messages, apiOf(messages));
+    expect(calls.fetch[0].body.state.task).toEqual(['Task: review the notes and count the lines.', words, 'Good, now sum up the NEEDED results.']);
+    expect(records()[0]).toMatchObject({ result: 'jev', mentioned: 1 });
+    expect(resultOf(out.messages, 't5')?.text).toBe(resultOf(messages, 't5').text);
+  });
+
+  it('reads a pasted transcript of thousands of user headers and paired report envelopes that quote the footer in linear time', async () => {
+    const n = 8000;
+    const junk = Array.from({ length: n }, (_, k) => `The user sent a new message while you were working:\nq${k}\n${hostEnvelope(`r${k}`, `The coordinator sent a message while you were working:\nreport ${k}\n\nThis is how Claude Code surfaces messages the user sends mid-turn`)}`).join('\n');
+    const base = conversation(30, { chars: 80_000 });
+    const messages = [...base.slice(0, -2), Object.freeze({ role: 'user', text: junk, toolUses: [], handle: 'hpasted' }), ...base.slice(-2)];
+    const t0 = performance.now();
+    const { calls, records } = await compactWithApi(messages, apiOf(messages));
+    expect(performance.now() - t0).toBeLessThan(2000);
+    expect(records()[0]).toMatchObject({ result: 'jev' });
+    expect(calls.fetch[0].body.state.task).toEqual([`q${n - 2}`, `q${n - 1}`, 'Good, now sum up the NEEDED results.']);
+  });
+
   it('keeps the task list whole: every TaskCreate/TaskUpdate and the newest TodoWrite with every later call of that tool', async () => {
     const input = (i) => (i === 3 || i === 12 ? { todos: [{ content: `todo ${i}`, status: 'pending' }] } : i === 7 ? { subject: 'task seven' } : { command: `cat notes-${i}.txt` });
     const tool = (i) => (i === 3 || i === 12 ? 'TodoWrite' : i === 7 ? 'TaskCreate' : 'Bash');
@@ -1706,6 +1851,21 @@ describe('jev-compaction module: own threshold (OMC_JEV_COMPACT_AT_PERCENT)', ()
     handlers = load();
     fake = make(true);
     await turn(handlers, fake);
+    expect(fake.calls.compact).toBe(0);
+  });
+
+  it('does not read the API form when the plain transcript cannot be worth a compaction: a read that never settles does not hold the turn', async () => {
+    const messages = conversation(40, { chars: 50 });
+    const handlers = load();
+    const fake = fakeDollar({ env, messages, usage: highUsage });
+    let apiReads = 0;
+    fake.$.session.messages = async (opts) => {
+      if (opts?.as !== 'api') return messages;
+      apiReads++;
+      return new Promise(() => {});
+    };
+    await turn(handlers, fake);
+    expect(apiReads).toBe(0);
     expect(fake.calls.compact).toBe(0);
   });
 
