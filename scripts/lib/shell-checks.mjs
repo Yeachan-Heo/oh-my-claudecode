@@ -1027,7 +1027,7 @@ const QUOTE_DEPTHS = [0, 1, 2, 3, 4, 5, 6, 7, 8].map((depth) => String.raw`(?<!\
 const stringBody = (delim) => String.raw`(?:(?!${delim})[^\n])`;
 
 // `name: value` and `name=value` for the names of the list (open: another language is one more alternative); a quoted value is read to its
-// closing quote, one with no closing quote (or opened by a run of backslashes of no known depth) to the end of the line.
+// closing quote, one with no closing quote (or opened by a run of backslashes of no known depth, or closed wrongly) to the end of the line.
 // A double-quoted value also reads a PowerShell backtick-escaped quote and a doubled quote as content (at every depth); an apostrophe closes a
 // single-quoted value when the run of backslashes before it is a multiple of 4 (a JSON string doubles every backslash, so `\'` of the
 // raw text arrives as `\\'`), and a doubled apostrophe is content.
@@ -1035,12 +1035,16 @@ const psBody = (delim) => String.raw`(?:\x60${delim}|${delim}${delim}|(?!${delim
 const APOSTROPHE = String.raw`(?<!\\)(?:\\{4})*'`;
 // The shell form that closes and reopens the quotes around an apostrophe ('\'') is content too.
 const APOSTROPHE_BODY = String.raw`(?:'\\{1,2}''|''|(?!${APOSTROPHE})[^\n])`;
+// A closing quote counts only when a terminator follows it (a space, a comma, a bracket, a separator, another quote or the end); if
+// another character follows, the close was misread (an escape form the rules do not know), and the value is masked to the end of the
+// line instead. Over-masking on a misread close is the price of never leaving the rest of a value behind.
+const AFTER_CLOSE = String.raw`(?=[\s,}\])&;|"'\\]|$)`;
 const NAMED_VALUE = new RegExp(
   String.raw`((?:api[_-]?key|access[_-]?key|client[_-]?secret|private[_-]?key|password|passwd|token|secret|has(?:[łl]|\\+u014[12])o|klucz|sekret|passwort|kennwort|contrase(?:[ñn]|\\+u00d1|\\+u00f1)a)(?:\\*["'])?\s*[:=]\s*(?:\$?\\*["'])?)(?:`
-    + QUOTE_DEPTHS.map((d) => String.raw`(?<=${d})${psBody(d)}*(?=${d})`).join('|')
-    + String.raw`|(?<=${APOSTROPHE})${APOSTROPHE_BODY}*(?=${APOSTROPHE})|`
-    + QUOTE_DEPTHS.map((d) => String.raw`(?<=${d})${psBody(d)}+`).join('|')
-    + String.raw`|(?<=${APOSTROPHE})${APOSTROPHE_BODY}+|(?<=\\["'])[^\n]+|[^\s"'&;|,}]+)`,
+    + QUOTE_DEPTHS.map((d) => String.raw`(?<=${d})${psBody(d)}*(?=${d}${AFTER_CLOSE})`).join('|')
+    + String.raw`|(?<=${APOSTROPHE})${APOSTROPHE_BODY}*(?=${APOSTROPHE}${AFTER_CLOSE})|`
+    + QUOTE_DEPTHS.map((d) => String.raw`(?<=${d})[^\n]+`).join('|')
+    + String.raw`|(?<=${APOSTROPHE})[^\n]+|(?<=\\["'])[^\n]+|[^\s"'&;|,}]+)`,
   'gi');
 
 // Name/value pairs in JSON text, `{"Name":"DB_PASSWORD","Value":"hunter2zz"}` or the AWS SSM form with `"Type":"SecureString"`:
