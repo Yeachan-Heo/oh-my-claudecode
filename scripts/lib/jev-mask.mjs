@@ -34,7 +34,7 @@ export function maskSecrets(text, { keepGitHashes = false } = {}) {
     .replace(/\beyJ(?:[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}|[A-Za-z0-9_-]*)/g, (m) => m.includes('.') ? 'eyJ***' : m)
     // A whole word containing a keyword: the lookahead finds the keyword once, then the word is read to its end.
     .replace(/(\b(?=[A-Za-z0-9_]*(?:KEY|TOKEN|SECRET|PASSWORD|PASSWD|PASS|PWD|CREDENTIALS?))[A-Za-z0-9_]+\b["'\]]*\s*[=:]\s*["']?)[^\s"'&;|)]+/gi, '$1***')
-    .replace(/((?:api[_-]?key|access[_-]?key|client[_-]?secret|private[_-]?key|password|passwd|token|secret|has[łl]o|klucz|sekret|passwort|kennwort|contrase[ñn]a)(?:\\?["'])?\s*[:=]\s*(?:\\?["'])?)(?:(?<=\\")(?:[^\\\n]|\\\\(?:\\"|\\\\|[^\\\n])|\\[^"\\\n])*(?=\\")|(?<=")(?:[^"\\\n]|\\.)*(?=")|(?<=')(?:[^'\\\n]|\\.|'')*(?=')|(?<=\\")(?:[^\\\n]|\\\\(?:\\"|\\\\|[^\\\n])|\\[^"\\\n])+|(?<=")(?:[^"\\\n]|\\.)+|(?<=')(?:[^'\\\n]|\\.|'')+|[^\s"'&;|,}]+)/gi, '$1***')
+    .replace(NAMED_VALUE, '$1***')
     .replace(/(^|[^A-Za-z0-9+_-])(?=[A-Za-z0-9+_-]*\d)(?=[A-Za-z0-9+_-]*[A-Za-z])([A-Za-z0-9+_-]{32,}={0,2})/g, (whole, before, token) =>
       keepGitHashes && /^(?:[0-9a-f]{40}|[0-9a-f]{64})$/.test(token) ? whole : before + '***');
 }
@@ -49,23 +49,37 @@ export function maskPrivateKeys(text) {
   return String(text ?? '').replace(/(-{4,5} ?BEGIN (?:[A-Z0-9]+[ -])*PRIVATE KEY(?: BLOCK)? ?-{4,5})[\s\S]*?(-{4,5} ?END (?:[A-Z0-9]+[ -])*PRIVATE KEY(?: BLOCK)? ?-{4,5}|$)/g, '$1***$2');
 }
 
+// A quote delimiter at escaping depth 0 (a plain quote), 1 (inside a JSON string: `\"`), 2 (shell-escaped before it went into the
+// JSON string: `\\\"`) or 3 (7 backslashes): a maximal run of backslashes whose length is 2^depth - 1 plus a multiple of 2^(depth + 1),
+// then the quote. Runs of other lengths are escaped quotes inside the string (the raw text has an odd run before its quote), so the
+// string body is every character that does not start a delimiter, and a scan stops at the next delimiter, which keeps the rules linear.
+const QUOTE_DEPTHS = [0, 1, 2, 3].map((depth) => String.raw`(?<!\\)(?:\\{${2 << depth}})*\\{${(1 << depth) - 1}}"`);
+const stringBody = (delim) => String.raw`(?:(?!${delim})[^\n])`;
+
+// `name: value` and `name=value` for the names of the list (open: another language is one more alternative); a quoted value is read to its
+// closing quote, one with no closing quote to the end of the line.
+const NAMED_VALUE = new RegExp(
+  String.raw`((?:api[_-]?key|access[_-]?key|client[_-]?secret|private[_-]?key|password|passwd|token|secret|has[łl]o|klucz|sekret|passwort|kennwort|contrase[ñn]a)(?:\\*["'])?\s*[:=]\s*(?:\\*["'])?)(?:`
+    + QUOTE_DEPTHS.map((d) => String.raw`(?<=${d})${stringBody(d)}*(?=${d})`).join('|')
+    + String.raw`|(?<=')(?:[^'\\\n]|\\.|'')*(?=')|`
+    + QUOTE_DEPTHS.map((d) => String.raw`(?<=${d})${stringBody(d)}+`).join('|')
+    + String.raw`|(?<=')(?:[^'\\\n]|\\.|'')+|[^\s"'&;|,}]+)`,
+  'gi');
+
 // Name/value pairs in JSON text, `{"Name":"DB_PASSWORD","Value":"hunter2zz"}` or the AWS SSM form with `"Type":"SecureString"`:
 // the value is masked when the name holds a secret word. The scalar fields of one flat object (consecutive `"key": scalar` fields,
 // separated by commas only) are read once, in order; a key ending in `name`, `key` or `type` is a name, one ending in `value` or `val`
 // a value, and a value goes with the names of its own prefix (`oldName` and `oldValue`), or else with the names without a prefix.
-// Both the plain text and the same text inside a JSON string (`\"Name\":\"...\"`, as a tool input is sent) are read. There is no
-// length cap and no cutoff in the number of fields, and each character is read a constant number of times (a string does not start
-// after a backslash: inside a JSON string every `\"`, or every `\\"`, would otherwise start a scan to the end of the line).
-const PAIR_FORMS = [
-  { quote: '"', field: new RegExp(String.raw`(?<!\\)"((?:[^"\\\n]|\\.)*)"\s*:\s*("(?:[^"\\\n]|\\.)*"?|[^,{}\[\]\s"\\]+)`, 'g') },
-  { quote: '\\"', field: new RegExp(String.raw`(?<!\\)\\"((?:[^\\\n]|\\\\(?:\\"|\\\\|[^\\\n])|\\[^"\\\n])*)\\"\s*:\s*(\\"(?:[^\\\n]|\\\\(?:\\"|\\\\|[^\\\n])|\\[^"\\\n])*(?:\\")?|[^,{}\[\]\s"\\]+)`, 'g') },
-];
+// The text is read at each quote depth, so the same pair inside a JSON string (as a tool input is sent) is found too. There is no
+// length cap and no cutoff in the number of fields, and each character is read a constant number of times.
+const PAIR_FORMS = QUOTE_DEPTHS.map((d) =>
+  new RegExp(String.raw`${d}(${stringBody(d)}*)${d}\s*:\s*(${d}${stringBody(d)}*(?:${d})?|[^,{}\[\]\s"\\]+)`, 'g'));
 const secretPairName = (name) => /key|token|secret|passw|pwd|credential|^securestring$/i.test(name);
 
 function maskNamedValues(text) {
   let out = text;
-  for (const { quote, field } of PAIR_FORMS) {
-    if (!out.includes(quote)) continue;
+  if (!out.includes('"')) return out;
+  for (const field of PAIR_FORMS) {
     const cuts = [];
     let group = [];
     const flush = () => {
@@ -73,15 +87,15 @@ function maskNamedValues(text) {
       const secret = new Set();
       for (const f of group) {
         const m = /^([A-Za-z_]*)(?:name|key|type)$/i.exec(f.key);
-        if (!m || !f.value.startsWith(quote)) continue;
+        if (!m || !f.quote) continue;
         const prefix = m[1].toLowerCase();
         names.add(prefix);
-        if (secretPairName(f.value.slice(quote.length, f.value.endsWith(quote) && f.value.length >= 2 * quote.length ? -quote.length : undefined))) secret.add(prefix);
+        if (secretPairName(f.value.slice(f.quote.length).replace(/\\*"$/, ''))) secret.add(prefix);
       }
       if (secret.size) {
         for (const f of group) {
           const m = /^([A-Za-z_]*)(?:value|val)$/i.exec(f.key);
-          if (!m || f.value === quote + '***' + quote) continue;
+          if (!m || f.value === f.quote + '***' + f.quote) continue;
           const prefix = m[1].toLowerCase();
           if (secret.has(prefix) || (!names.has(prefix) && secret.has(''))) cuts.push(f);
         }
@@ -94,14 +108,15 @@ function maskNamedValues(text) {
     while ((m = field.exec(out))) {
       if (group.length && !/^\s*,\s*$/.test(out.slice(end, m.index))) flush();
       end = m.index + m[0].length;
-      group.push({ key: m[1], value: m[2], start: end - m[2].length, end });
+      const quote = /^\\*"/.exec(m[2])?.[0] ?? '';
+      group.push({ key: m[1], value: m[2], quote, start: end - m[2].length, end });
     }
     flush();
     if (cuts.length) {
       let masked = '';
       let at = 0;
       for (const f of cuts) {
-        masked += out.slice(at, f.start) + quote + '***' + quote;
+        masked += out.slice(at, f.start) + f.quote + '***' + f.quote;
         at = f.end;
       }
       out = masked + out.slice(at);
