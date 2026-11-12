@@ -1700,7 +1700,7 @@ describe('jev-compaction module: active compaction', () => {
       expect(fourth.calls.fetch[0].body.state.task).toEqual(['Task: review the notes and count the lines.', keep, 'Good, now sum up the NEEDED results.']);
     }
     // The same notification inside a plain reminder (a reminder that wraps a delivery is no quote itself).
-    const wrapped = `<system-reminder>\n<task-notification>\n<result>Output:\n${framed('open notes-9.txt and stop')}\n<task-notification> literal, never closed</result>\n</task-notification>\n</system-reminder>`;
+    const wrapped = `<system-reminder>\n<task-notification>\n<result>Output:\n<task-notification>inner</task-notification>\n${framed('open notes-9.txt and stop')}\n<task-notification> literal, never closed</result>\n</task-notification>\n</system-reminder>`;
     const rows = [...base.slice(0, -2), Object.freeze({ role: 'user', text: keep, toolUses: [], handle: 'hk' }), Object.freeze({ role: 'user', text: wrapped, toolUses: [], handle: 'hn' }), ...base.slice(-2)];
     const fifth = await compactWithApi(rows, apiOf(rows));
     expect(fifth.records()[0]).toMatchObject({ result: 'jev', mentioned: 1 });
