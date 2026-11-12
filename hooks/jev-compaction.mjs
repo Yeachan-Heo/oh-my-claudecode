@@ -1302,11 +1302,29 @@ function opaqueOf(text, envelopes = envelopesOf(text)) {
   if (native) {
     let tail = text.trimEnd();
     // Only the closing tags of the reminders that open before the notification are peeled.
+    // Pair wrapper closers by nesting, not by lastIndexOf which could find a sibling reminder's closer.
     const wrappers = native[0].split('<system-reminder').length - 1;
     for (let k = 0; k < wrappers; k++) {
-      const at = tail.lastIndexOf('</system-reminder');
+      // Find the wrapper's closer: a </system-reminder> whose nesting level matches (depth = k from the end).
+      // Count depth from the end: +1 for each closing tag, -1 for each opening tag (going backward).
+      let depth = 0;
+      let at = -1;
+      for (let i = tail.length - 1; i >= 0; i--) {
+        if (i + '</system-reminder>'.length <= tail.length && tail.slice(i, i + '</system-reminder>'.length) === '</system-reminder>') {
+          if (depth === 0) {
+            at = i; // Found the closer at the expected nesting level
+            break;
+          }
+          depth++; // Going backward, each closing tag increases depth
+          i -= 17; // Skip past the closing tag length
+        } else if (i + '<system-reminder'.length <= tail.length && tail.slice(i, i + '<system-reminder'.length) === '<system-reminder') {
+          depth--; // Going backward, each opening tag decreases depth
+          i -= 16; // Skip past the opening tag length
+        }
+      }
+      if (at < 0) break; // No more closers found
       const gt = at < 0 ? -1 : tail.indexOf('>', at);
-      if (gt < 0 || tail.slice(gt + 1).trim()) break;
+      if (gt < 0 || tail.slice(gt + 1).trim()) break; // Stop if no closing > or content after it
       tail = tail.slice(0, at).trimEnd();
     }
     if (tail.endsWith(QUOTE_TAGS[1].close)) nativeQuote = { from: skipped + native.index + native[0].length - native[1].length, to: tail.length };
