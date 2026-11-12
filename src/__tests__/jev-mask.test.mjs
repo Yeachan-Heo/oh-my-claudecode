@@ -48,6 +48,8 @@ describe.each([
       'deep escaped quotes, masked': (n) => repeat('hasło: ' + '\\'.repeat(15) + '"x ', n),
       'backticks and doubled quotes in a quote': (n) => 'hasło: "' + repeat('`"\'\'""', n),
       'backslashes and apostrophes in a quote': (n) => "klucz: '" + repeat("\\\\'", n),
+      'shell apostrophe segments in a quote': (n) => "klucz: 'a" + repeat("'\\\\''", n),
+      'very deep escaped quotes, masked': (n) => repeat('hasło: ' + '\\'.repeat(600) + '"x ', n),
       'pair names alone': (n) => repeat('"name":"a",', n),
       'a pair value with an opening quote': (n) => repeat('"Name":"A_TOKEN","Value":"', n),
       '4 hyphens and BEGIN words': (n) => repeat('---- BEGIN SSH2 ENCRYPTED ', n),
@@ -124,6 +126,8 @@ describe.each([
         expect(out.startsWith('before\n' + begin.split('\n')[0])).toBe(true);
       }
     }
+    const pair = '{"Name":"DB_KEY","Value":"-----BEGIN PRIVATE KEY-----\n' + body + '\n-----END PRIVATE KEY-----"}';
+    expect(mask(pair).includes('bGluZTEy')).toBe(false);
     for (const text of ['-----BEGIN PUBLIC KEY-----\nabc\n-----END PUBLIC KEY-----', '-----BEGIN CERTIFICATE-----\nabc', '---- BEGIN SSH2 PUBLIC KEY ----\nabc']) {
       expect(mask(text)).toBe(text);
     }
@@ -203,6 +207,10 @@ describe.each([
       [String.raw`{"contraseña":"a b"}`, String.raw`{"contraseña":"***"}`],
       ["sekret=$'hunter2 b' x", "sekret=$'***' x"],
       ['sekret=$"hunter2 b" x', 'sekret=$"***" x'],
+      ["klucz='correct horse'\\''s battery staple' y", "klucz='***' y"],
+      ["klucz='correct horse'\\\\''s battery staple' y", "klucz='***' y"],
+      ['hasło: ' + '\\'.repeat(255) + '"correct horse battery staple' + '\\'.repeat(255) + '" y', 'hasło: ' + '\\'.repeat(255) + '"***' + '\\'.repeat(255) + '" y'],
+      ['hasło: ' + '\\'.repeat(511) + '"correct horse battery staple' + '\\'.repeat(511) + '" y', 'hasło: ' + '\\'.repeat(511) + '"***'],
       ["hasło: 'correct horse''s battery staple' x", "hasło: '***' x"],
       ["klucz = 'it''s ''quoted'' here'", "klucz = '***'"],
       ["klucz: ''", "klucz: '***'"],
@@ -213,5 +221,9 @@ describe.each([
       ['klucz do pokoju', 'klucz do pokoju'],
     ];
     for (const [text, masked] of cases) expect({ text, masked: mask(text) }).toEqual({ text, masked });
+    // A name that the word rule also knows (PASS in passwort): the structured rule runs first, nothing of the value is left.
+    for (const text of ['Passwort="correct horse battery staple" y', String.raw`Passwort=\"correct horse battery staple\" y`]) {
+      expect({ text, left: mask(text).includes('horse') }).toEqual({ text, left: false });
+    }
   });
 });
