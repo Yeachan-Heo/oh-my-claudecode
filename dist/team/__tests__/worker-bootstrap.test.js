@@ -327,6 +327,25 @@ describe('worker-bootstrap', () => {
             expect(overlay).toContain('missing_delegation_compliance_evidence');
             expect(overlay).not.toContain('Read your task file at');
         });
+        it('tells long-running workers how to renew the claim before the 15-minute lease lapses', () => {
+            const overlay = generateWorkerOverlay(baseParams);
+            expect(overlay).toContain('team api renew-task-claim --input');
+            expect(overlay).toContain('claim_token');
+            expect(overlay).toContain('renew its claim before the 15-minute lease lapses');
+        });
+        it('instructs workers to renew claims after 10 minutes for long-running tasks', () => {
+            // Regression test: worker-facing renewal instruction must include both timing guidance
+            // (10 minutes to trigger renewal) and lease boundary (15-minute window).
+            // Formatting or removal would otherwise pass tests while breaking long-running workers.
+            const overlay = generateWorkerOverlay(baseParams);
+            expect(overlay).toContain('more than 10 minutes');
+            expect(overlay).toContain('team api renew-task-claim --input');
+            // Verify command structure with required fields
+            expect(overlay).toContain('\\"team_name\\"');
+            expect(overlay).toContain('\\"task_id\\"');
+            expect(overlay).toContain('\\"claim_token\\"');
+            expect(overlay).toContain('\\"worker\\"');
+        });
         it('renders required task versions in ordinary and adopted checkpoint commands', () => {
             expect(generateWorkerOverlay(baseParams)).toContain('\\"task_version\\":<current_task_version>');
             const recovery = renderRecoveryContinuationInstruction({ teamName: 'test-team', workerName: 'worker-1',

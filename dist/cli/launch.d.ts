@@ -120,11 +120,24 @@ export declare function isPrintMode(args: string[]): boolean;
  */
 export declare function hasMadmaxFlag(args: string[]): boolean;
 /**
+ * Sanitize a tmux session name into a Herdr workspace label. Herdr labels are
+ * free-form, but the launch label reuses the tmux session identity
+ * (buildTmuxSessionName) so the same project maps to a recognizable name in
+ * either multiplexer. Characters outside the conservative label alphabet are
+ * collapsed to dashes.
+ */
+export declare function sanitizeHerdrWorkspaceLabel(sessionName: string): string;
+/**
  * runClaude: Launch Claude CLI (blocks until exit)
  * Handles 3 scenarios:
  * 1. inside-tmux: Launch claude in current pane
  * 2. outside-tmux: Create new tmux session with claude
  * 3. direct: tmux not available, run claude directly
+ *
+ * When the team multiplexer setting resolves to 'herdr', Claude instead runs
+ * as a tab in a Herdr workspace (runClaudeInHerdrWorkspace) and both tmux
+ * paths are bypassed; a Herdr failure falls back to the default flow below so
+ * an outage never prevents Claude from starting.
  *
  * When --print/-p is present, always runs direct to preserve stdout piping.
  *
@@ -132,9 +145,11 @@ export declare function hasMadmaxFlag(args: string[]): boolean;
  * installed we exit with a brew install hint rather than silently launching
  * direct. Inside an existing tmux session the current pane is reused. If
  * tmux is installed but new-session/attach-session fails, we surface the
- * error instead of silently demoting to direct mode.
+ * error instead of silently demoting to direct mode. A successful herdr
+ * launch also satisfies this requirement (the Herdr server, not this
+ * process, owns the Claude pane).
  */
-export declare function runClaude(cwd: string, args: string[], sessionId: string): void;
+export declare function runClaude(cwd: string, args: string[], sessionId: string): Promise<void>;
 /**
  * Env vars that must be forwarded into tmux sessions.
  * tmux new-session inherits the *server's* environment, not the calling

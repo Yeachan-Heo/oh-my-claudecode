@@ -1,9 +1,10 @@
-import type { MailboxNotificationTarget, MailboxTargetOwnership } from './mailbox-notification-guard.js';
-import type { CliAgentType } from './model-contract.js';
-import { type TeamInstanceId, type TmuxServerIdentity } from './types.js';
-import { type ProcessIdentityObservation } from './team-owner-epoch.js';
-import { type WorkerLaunchAttempt, type WorkerLaunchContext } from './worker-launch-ack.js';
-export type TmuxServerIdentityObservation = 'matching' | 'dead' | 'unknown';
+import { type HerdrExecOptions } from "./herdr-session.js";
+import type { MailboxNotificationTarget, MailboxTargetOwnership } from "./mailbox-notification-guard.js";
+import type { CliAgentType } from "./model-contract.js";
+import { type TeamInstanceId, type TmuxServerIdentity } from "./types.js";
+import { type ProcessIdentityObservation } from "./team-owner-epoch.js";
+import { type WorkerLaunchAttempt, type WorkerLaunchContext } from "./worker-launch-ack.js";
+export type TmuxServerIdentityObservation = "matching" | "dead" | "unknown";
 export interface TmuxServerIdentityDependencies {
     tmuxQuery?: (args: string[], options?: {
         timeout?: number;
@@ -13,7 +14,7 @@ export interface TmuxServerIdentityDependencies {
         stderr: string;
     }>;
     processIdentity?: (pid: number) => string | null;
-    processObservation?: (record: Pick<TmuxServerIdentity, 'server_pid' | 'process_started_at'>) => ProcessIdentityObservation;
+    processObservation?: (record: Pick<TmuxServerIdentity, "server_pid" | "process_started_at">) => ProcessIdentityObservation;
 }
 /** Build the initial empty-server keepalive command queue. */
 export declare function buildDetachedTmuxServerKeepaliveArgs(socketPath: string): string[];
@@ -87,7 +88,7 @@ export declare function tmuxServerGuardConditionPosix(nodePath: string, runtimeP
  * @internal Exported for testing only.
  */
 export declare function tmuxServerGuardConditionPowerShell(nodePath: string, runtimePath: string, encodedIdentity: string): string;
-export type TeamMultiplexerContext = 'tmux' | 'cmux' | 'none';
+export type TeamMultiplexerContext = "tmux" | "cmux" | "none";
 export declare function detectTeamMultiplexerContext(env?: NodeJS.ProcessEnv): TeamMultiplexerContext;
 /**
  * True when running on Windows under MSYS2/Git Bash.
@@ -103,6 +104,23 @@ export declare function applyMainVerticalLayout(teamTarget: string, options?: {
  * tmux ids (`%N`) and herdr ids (`w<id>:p<id>`, e.g. `w2FQ:p16`) never do.
  */
 export declare function isCmuxSurfaceTarget(value: string | undefined): value is string;
+export type TeamPaneProvider = "tmux" | "cmux" | "herdr";
+/**
+ * Resolve the configured team multiplexer backend: explicit argument wins
+ * (callers that already loaded plugin config), then OMC_TEAM_MULTIPLEXER,
+ * then team.ops.multiplexer from the plugin config, then tmux.
+ */
+export declare function resolveTeamMultiplexer(explicit?: "tmux" | "herdr", env?: NodeJS.ProcessEnv): "tmux" | "herdr";
+/** Herdr pane ids look like `wN:pM` (workspace-qualified, never `%N`). */
+export declare function isHerdrPaneId(value: string | undefined): boolean;
+/** Herdr team sessions are persisted as `herdr:<workspace_id>`. */
+export declare function isHerdrSessionTarget(value: string | undefined | null): boolean;
+/**
+ * Provider for a persisted team target. The session marker is authoritative;
+ * the pane-id grammar disambiguates when only a pane is known. Herdr panes
+ * must never fall through to the cmux branch (opaque non-`%` ids).
+ */
+export declare function providerForTeamTarget(sessionName: string | undefined | null, paneId?: string | null): TeamPaneProvider;
 export declare const TMUX_MAILBOX_PANE_ID: RegExp;
 export declare const TMUX_MAILBOX_TARGET: RegExp;
 type MailboxOwnershipCommand = (args: string[]) => Promise<{
@@ -112,6 +130,8 @@ type MailboxOwnershipCommand = (args: string[]) => Promise<{
 export interface MailboxTargetOwnershipDependencies {
     tmuxExec: MailboxOwnershipCommand;
     cmuxExec: MailboxOwnershipCommand;
+    /** Injectable Herdr exec (execFile shape) for the Herdr ownership proof. */
+    herdrExec?: HerdrExecOptions["execFn"];
     serverIdentityDependencies?: TmuxServerIdentityDependencies;
 }
 /**
@@ -121,17 +141,17 @@ export interface MailboxTargetOwnershipDependencies {
  */
 export declare function verifyTeamTargetOwnership(target: MailboxNotificationTarget, dependencies?: MailboxTargetOwnershipDependencies): Promise<MailboxTargetOwnership>;
 export type DirectMailboxEffectResult = {
-    kind: 'not_attempted';
+    kind: "not_attempted";
     reason: string;
 } | {
-    kind: 'confirmed';
-    transport: 'tmux_send_keys';
-    reason: 'worker_pane_notified' | 'leader_pane_notified';
+    kind: "confirmed";
+    transport: "tmux_send_keys";
+    reason: "worker_pane_notified" | "leader_pane_notified";
 } | {
-    kind: 'attempted_unconfirmed';
-    transport: 'tmux_send_keys';
-    reason: 'notification_delivery_uncertain';
-    cause: 'returned_false' | 'threw';
+    kind: "attempted_unconfirmed";
+    transport: "tmux_send_keys";
+    reason: "notification_delivery_uncertain";
+    cause: "returned_false" | "threw";
 };
 export interface DirectMailboxEffectDependencies {
     sendWorker: typeof sendToWorker;
@@ -143,7 +163,7 @@ export interface DirectMailboxEffectDependencies {
  * called, a false result or exception is conservatively treated as uncertain.
  */
 export declare function invokeDirectMailboxEffect(target: MailboxNotificationTarget, message: string, dependencies?: DirectMailboxEffectDependencies): Promise<DirectMailboxEffectResult>;
-export type TeamSessionMode = 'split-pane' | 'dedicated-window' | 'detached-session';
+export type TeamSessionMode = "split-pane" | "dedicated-window" | "detached-session";
 export interface TeamSession {
     sessionName: string;
     leaderPaneId: string;
@@ -153,7 +173,7 @@ export interface TeamSession {
     tmuxServerIdentity?: TmuxServerIdentity;
 }
 export interface TeamSessionCreationEvidence {
-    provider: 'tmux' | 'cmux';
+    provider: "tmux" | "cmux";
     operation: string;
     rawOutput: string;
     stderr: string;
@@ -172,11 +192,13 @@ export interface TeamSessionCreationEvidence {
 export declare class TeamSessionCreationError extends Error {
     readonly partialSession: TeamSession;
     readonly creationEvidence?: TeamSessionCreationEvidence;
-    cleanupStatus: 'verified' | 'unknown';
+    cleanupStatus: "verified" | "unknown";
     constructor(message: string, partialSession: TeamSession, creationEvidence?: TeamSessionCreationEvidence);
 }
 export interface CreateTeamSessionOptions {
     newWindow?: boolean;
+    /** Team multiplexer backend; defaults to config/env resolution inside. */
+    multiplexer?: "tmux" | "herdr";
 }
 export interface WorkerPaneConfig {
     teamName: string;
@@ -273,9 +295,9 @@ export declare function listActiveSessions(teamName: string): string[];
  */
 export interface WorkerPaneSplitEvidence {
     commandSucceeded: boolean;
-    provider: 'tmux' | 'cmux';
+    provider: TeamPaneProvider;
     splitTarget: string;
-    direction: 'right' | 'down';
+    direction: "right" | "down";
     rawOutput: string;
     stderr: string;
     paneId: string | null;
@@ -283,13 +305,13 @@ export interface WorkerPaneSplitEvidence {
     tmuxServerIdentity?: TmuxServerIdentity;
 }
 export interface WorkerPaneOwnership {
-    provider: WorkerPaneSplitEvidence['provider'];
+    provider: WorkerPaneSplitEvidence["provider"];
     providerTarget: string;
     paneId: string;
     splitTarget: string;
     leaderPaneId: string;
     reservedPaneIds: readonly string[];
-    source: 'split' | 'adopted';
+    source: "split" | "adopted";
     /** Required for tmux ownership; absent for CMUX surfaces. */
     tmuxServerIdentity?: TmuxServerIdentity;
 }
@@ -298,7 +320,7 @@ export type WorkerPaneOwnershipResult = {
     ownership: WorkerPaneOwnership;
 } | {
     ok: false;
-    reason: 'split_failed' | 'pane_id_missing' | 'pane_id_malformed' | 'leader_alias' | 'split_target_alias' | 'reserved_worker_alias' | 'pane_foreign' | 'pane_membership_unavailable' | 'tmux_server_identity_missing' | 'tmux_server_identity_mismatch' | 'tmux_server_identity_unknown';
+    reason: "split_failed" | "pane_id_missing" | "pane_id_malformed" | "leader_alias" | "split_target_alias" | "reserved_worker_alias" | "pane_foreign" | "pane_membership_unavailable" | "tmux_server_identity_missing" | "tmux_server_identity_mismatch" | "tmux_server_identity_unknown";
 };
 export interface StartupPaneContext {
     ownership: WorkerPaneOwnership;
@@ -313,7 +335,7 @@ export declare function proveWorkerPaneOwnership(evidence: WorkerPaneSplitEviden
     tmuxServerIdentity?: TmuxServerIdentity;
 }): WorkerPaneOwnershipResult;
 export declare function adoptWorkerPaneOwnership(input: {
-    provider: WorkerPaneSplitEvidence['provider'];
+    provider: WorkerPaneSplitEvidence["provider"];
     providerTarget: string;
     paneId: string;
     leaderPaneId: string;
@@ -323,7 +345,7 @@ export declare function adoptWorkerPaneOwnership(input: {
     serverIdentityDependencies?: TmuxServerIdentityDependencies;
 }): Promise<WorkerPaneOwnershipResult>;
 export declare function workerPaneBelongsToProviderTarget(input: {
-    provider: WorkerPaneSplitEvidence['provider'];
+    provider: WorkerPaneSplitEvidence["provider"];
     providerTarget: string;
     paneId: string;
     tmuxServerIdentity?: TmuxServerIdentity;
@@ -331,15 +353,15 @@ export declare function workerPaneBelongsToProviderTarget(input: {
 }, dependencies?: MailboxTargetOwnershipDependencies): Promise<boolean>;
 /** Owned variant of pane membership; tmux queries never reconnect by name. */
 export declare function workerPaneBelongsToOwnedProviderTarget(input: {
-    provider: WorkerPaneSplitEvidence['provider'];
+    provider: WorkerPaneSplitEvidence["provider"];
     providerTarget: string;
     paneId: string;
     tmuxServerIdentity?: TmuxServerIdentity;
     dependencies?: MailboxTargetOwnershipDependencies;
     serverIdentityDependencies?: TmuxServerIdentityDependencies;
 }): Promise<boolean>;
-export declare function splitTeamWorkerPaneWithEvidence(splitTarget: string, direction: 'right' | 'down', cwd: string, provider?: WorkerPaneSplitEvidence['provider'], tmuxServerIdentity?: TmuxServerIdentity, serverIdentityDependencies?: TmuxServerIdentityDependencies): Promise<WorkerPaneSplitEvidence>;
-export declare function splitTeamWorkerPane(splitTarget: string, direction: 'right' | 'down', cwd: string): Promise<string | null>;
+export declare function splitTeamWorkerPaneWithEvidence(splitTarget: string, direction: "right" | "down", cwd: string, provider?: WorkerPaneSplitEvidence["provider"], tmuxServerIdentity?: TmuxServerIdentity, serverIdentityDependencies?: TmuxServerIdentityDependencies, herdrWorkspaceId?: string): Promise<WorkerPaneSplitEvidence>;
+export declare function splitTeamWorkerPane(splitTarget: string, direction: "right" | "down", cwd: string): Promise<string | null>;
 /**
  * Darwin strict identity comes only from the contained-fs native addon (no
  * sysctl/ps fallback), so a missing addon is the common cause of an unavailable
@@ -375,7 +397,7 @@ export declare function killOwnedWorkerPane(ownership: WorkerPaneOwnership): Pro
 /**
  * @internal Exported for testing only.
  */
-export type PaneTrustPromptKind = 'directory' | 'claude_directory' | 'codex_directory' | 'codex_hooks' | 'cursor_workspace_trust';
+export type PaneTrustPromptKind = "directory" | "claude_directory" | "codex_directory" | "codex_hooks" | "cursor_workspace_trust";
 /**
  * @internal Exported for testing only.
  */
@@ -391,18 +413,22 @@ export interface WaitForPaneReadyOptions {
     tmuxServerIdentity?: TmuxServerIdentity;
 }
 export declare function waitForPaneReady(paneId: string, opts?: WaitForPaneReadyOptions): Promise<boolean>;
+/**
+ * @internal Exported for testing only.
+ */
+export declare function paneCopyModeObservation(paneId: string, tmuxServerIdentity?: TmuxServerIdentity): Promise<boolean | null>;
 export type StartupPaneReadyResult = {
     ok: true;
 } | {
     ok: false;
-    reason: 'attempt_inactive' | 'ownership_mismatch' | 'copy_mode' | 'copy_mode_unknown' | 'capture_failed' | 'selector_unsupported' | 'selector_persistent' | 'cursor_workspace_untrusted' | 'codex_workspace_untrusted' | 'pane_busy' | 'readiness_timeout';
+    reason: "attempt_inactive" | "ownership_mismatch" | "copy_mode" | "copy_mode_unknown" | "capture_failed" | "selector_unsupported" | "selector_persistent" | "cursor_workspace_untrusted" | "codex_workspace_untrusted" | "pane_busy" | "readiness_timeout";
 };
 export declare function waitForStartupPaneReady(context: StartupPaneContext, opts?: WaitForPaneReadyOptions): Promise<StartupPaneReadyResult>;
 export declare function deliverStartupInbox(context: StartupPaneContext, message: string, options?: {
     attemptAlreadyFenced?: boolean;
 }): Promise<{
     ok: true;
-    kind: 'attempted_unconfirmed';
+    kind: "attempted_unconfirmed";
 } | {
     ok: false;
     reason: string;
@@ -416,14 +442,14 @@ export declare function deliverStartupInbox(context: StartupPaneContext, message
  * - `unavailable` — the pane cannot be re-submitted into (inactive attempt,
  *   copy mode, capture failure, selector, or the trigger text is gone).
  */
-export type StartupInboxResubmitOutcome = 'resubmitted' | 'pane_busy' | 'unavailable';
+export type StartupInboxResubmitOutcome = "resubmitted" | "pane_busy" | "unavailable";
 /**
  * Read-only observation of the pane after the startup trigger was delivered.
  * `busy` is the only state that can extend the evidence wait; all other
  * outcomes fail closed to the normal final recheck. This probe intentionally
  * never inspects or mutates the input buffer, so it cannot resubmit Enter.
  */
-export type StartupPaneActivity = 'busy' | 'idle' | 'dead' | 'unknown';
+export type StartupPaneActivity = "busy" | "idle" | "dead" | "unknown";
 export declare function probeStartupPaneActivity(context: StartupPaneContext, options?: {
     attemptAlreadyFenced?: boolean;
 }): Promise<StartupPaneActivity>;
@@ -456,7 +482,7 @@ export declare function injectToLeaderPane(sessionName: string, leaderPaneId: st
  * Check if a worker pane is still alive.
  * Uses pane ID for stable targeting (not pane index).
  */
-export type WorkerPaneLiveness = 'alive' | 'dead' | 'unknown';
+export type WorkerPaneLiveness = "alive" | "dead" | "unknown";
 export declare function getWorkerLiveness(paneId: string): Promise<WorkerPaneLiveness>;
 /**
  * Liveness bound to the original tmux server. A positively dead original
@@ -474,13 +500,13 @@ export declare function isWorkerAlive(paneId: string): Promise<boolean>;
 export declare function normalizeDetachedSessionTarget(sessionName: string): string | null;
 export declare function resolveSplitPaneWorkerPaneIds(_sessionName: string, recordedPaneIds?: string[], leaderPaneId?: string): Promise<string[]>;
 export type TeamSessionTargetPresence = {
-    kind: 'owned';
+    kind: "owned";
 } | {
-    kind: 'absent';
+    kind: "absent";
 } | {
-    kind: 'present_unowned';
+    kind: "present_unowned";
 } | {
-    kind: 'unknown';
+    kind: "unknown";
 };
 /**
  * Observe whether the recorded team session/window still belongs to this
@@ -489,7 +515,7 @@ export type TeamSessionTargetPresence = {
  */
 export declare function observeTeamSessionTargetPresence(args: {
     sessionName: string;
-    sessionMode: Exclude<TeamSessionMode, 'split-pane'>;
+    sessionMode: Exclude<TeamSessionMode, "split-pane">;
     leaderPaneId: string;
     tmuxServerIdentity?: TmuxServerIdentity;
 }): Promise<TeamSessionTargetPresence>;

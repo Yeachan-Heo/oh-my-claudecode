@@ -13,7 +13,7 @@
  * HTTP calls.
  */
 import { getAllKeywords, } from './index.js';
-import { recordJudgment } from '../jev/index.js';
+import { noulAnswerIsYes, recordJudgment } from '../jev/index.js';
 /**
  * Point "skill-trigger" (ticket 04): the keyword list decides in shadow/off
  * mode; Jev's Choice over the triggerable skills/modes is recorded per
@@ -54,8 +54,8 @@ export function recordIntentShadow(prompt, fetchFn) {
         twin: () => INTENT_SLASH_PATTERN.test(prompt),
         mapHeuristic: (result, questionSet) => result,
         mapAnswer: (answer) => {
-            // Jev Noul answer has { type: 'noul', noul: boolean | undefined }
-            return answer.noul === true;
+            // Jev Noul answer: noul is the probability of "yes" (0-1)
+            return noulAnswerIsYes(answer);
         },
         fetchFn,
     });

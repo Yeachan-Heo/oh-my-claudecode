@@ -11,7 +11,7 @@
  */
 export { dispatchNotifications, sendDiscord, sendDiscordBot, sendTelegram, sendSlack, sendSlackBot, sendWebhook, } from "./dispatcher.js";
 export { formatNotification, formatSessionStart, formatSessionStop, formatSessionEnd, formatSessionIdle, formatAskUserQuestion, formatAgentCall, parseTmuxTail, } from "./formatter.js";
-export { getCurrentTmuxSession, getCurrentTmuxPaneId, getTeamTmuxSessions, formatTmuxInfo, } from "./tmux.js";
+export { getCurrentTmuxSession, getCurrentTmuxPaneId, getCurrentHerdrPaneId, getTeamTmuxSessions, getTeamHerdrWorkspaces, formatTmuxInfo, } from "./tmux.js";
 export { getNotificationConfig, isEventEnabled, getEnabledPlatforms, getVerbosity, getTmuxTailLines, isEventAllowedByVerbosity, shouldIncludeTmuxTail, } from "./config.js";
 export { getHookConfig, resolveEventTemplate, resetHookConfigCache, mergeHookConfigIntoNotificationConfig, } from "./hook-config.js";
 export { interpolateTemplate, getDefaultTemplate, validateTemplate, computeTemplateVariables, } from "./template-engine.js";
@@ -92,19 +92,34 @@ export async function notify(event, data) {
             payload.tmuxPaneId &&
             (event === "session-idle" || event === "session-end" || event === "session-stop")) {
             try {
-                const { capturePaneContent } = await import("../features/rate-limit-wait/tmux-detector.js");
-                const { getNewPaneTail } = await import("../features/rate-limit-wait/pane-fresh-capture.js");
+                const { isHerdrPaneId } = await import("../team/tmux-session.js");
                 const tailLines = getTmuxTailLines(config);
-                const rawTail = payload.projectPath
-                    ? getNewPaneTail(payload.tmuxPaneId, join(getOmcRoot(payload.projectPath), "state"), tailLines)
-                    : capturePaneContent(payload.tmuxPaneId, tailLines);
+                let rawTail;
+                if (isHerdrPaneId(payload.tmuxPaneId)) {
+                    // Route Herdr pane capture through the Herdr backend
+                    const { captureHerdrWorkerPane } = await import("../team/herdr-session.js");
+                    try {
+                        rawTail = await captureHerdrWorkerPane(payload.tmuxPaneId, tailLines);
+                    }
+                    catch {
+                        // Herdr capture failed; continue without tail
+                    }
+                }
+                else {
+                    // tmux pane capture
+                    const { capturePaneContent } = await import("../features/rate-limit-wait/tmux-detector.js");
+                    const { getNewPaneTail } = await import("../features/rate-limit-wait/pane-fresh-capture.js");
+                    rawTail = payload.projectPath
+                        ? getNewPaneTail(payload.tmuxPaneId, join(getOmcRoot(payload.projectPath), "state"), tailLines)
+                        : capturePaneContent(payload.tmuxPaneId, tailLines);
+                }
                 if (rawTail) {
                     payload.tmuxTail = rawTail;
                     payload.maxTailLines = tailLines;
                 }
             }
             catch {
-                // Non-blocking: tmux capture is best-effort
+                // Non-blocking: pane capture is best-effort
             }
         }
         // Format the message (default for all platforms)

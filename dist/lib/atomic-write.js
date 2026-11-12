@@ -28,6 +28,65 @@ export function ensureDirSync(dir) {
         throw err;
     }
 }
+/** Check if an error code should trigger a rename retry on Windows. */
+function shouldRetryRename(error) {
+    if (process.platform !== "win32") {
+        return false;
+    }
+    const err = error;
+    return err?.code === "EPERM" || err?.code === "EBUSY" || err?.code === "EACCES";
+}
+/** Retry a synchronous rename operation on Windows with bounded backoff. */
+function renameSyncWithRetry(tempPath, filePath, renameImpl, maxAttempts = 10, delayMs = 3) {
+    let lastError = null;
+    for (let attempt = 0; attempt < maxAttempts; attempt++) {
+        try {
+            renameImpl(tempPath, filePath);
+            return;
+        }
+        catch (error) {
+            if (!shouldRetryRename(error)) {
+                throw error;
+            }
+            lastError = error;
+            if (attempt < maxAttempts - 1) {
+                // Use Atomics.wait for synchronous sleep on Windows
+                try {
+                    Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, delayMs);
+                }
+                catch {
+                    // Atomics.wait may fail in some contexts; ignore and retry immediately
+                }
+            }
+        }
+    }
+    if (lastError) {
+        throw lastError;
+    }
+}
+/** Retry an asynchronous rename operation on Windows with bounded backoff. */
+async function renameWithRetry(tempPath, filePath, maxAttempts = 10, delayMs = 3) {
+    let lastError = null;
+    for (let attempt = 0; attempt < maxAttempts; attempt++) {
+        try {
+            await fs.rename(tempPath, filePath);
+            return;
+        }
+        catch (error) {
+            if (!shouldRetryRename(error)) {
+                throw error;
+            }
+            lastError = error;
+            if (attempt < maxAttempts - 1) {
+                // Use setTimeout for async sleep
+                await new Promise((resolve) => setTimeout(resolve, delayMs));
+            }
+        }
+    }
+    if (lastError) {
+        throw lastError;
+    }
+}
 function writeAllSync(fd, content, label) {
     const bytes = Buffer.from(content, "utf-8");
     let offset = 0;
@@ -232,7 +291,7 @@ export async function atomicWriteJson(filePath, data, hooks) {
             hooks?.beforeRename?.();
             // Keep the opened descriptor live through rename so publication can be
             // checked against the inode that was actually written.
-            await fs.rename(tempPath, filePath);
+            await renameWithRetry(tempPath, filePath);
             let publishedIdentity = null;
             try {
                 verifyPublishedFile(fd.fd, filePath, "atomic JSON write");
@@ -325,7 +384,9 @@ export function atomicWriteFileSync(filePath, content, hooks, operations) {
         hooks?.beforeRename?.();
         // Keep the opened descriptor live through rename so publication can be
         // checked against the inode that was actually written.
-        (operations?.rename ?? fsSync.renameSync)(tempPath, filePath);
+        renameSyncWithRetry(tempPath, filePath, (src, dst) => {
+            (operations?.rename ?? fsSync.renameSync)(src, dst);
+        });
         let publishedIdentity = null;
         try {
             verifyPublishedFile(fd, filePath, "atomic write", operations);
@@ -456,7 +517,7 @@ export function atomicWriteBatchSync(writes, hooks) {
             }
             write.backupPath = preservePriorTarget(write.path);
             hooks?.beforeRename?.();
-            fsSync.renameSync(write.tempPath, write.path);
+            renameSyncWithRetry(write.tempPath, write.path, fsSync.renameSync);
             let publishedIdentity = null;
             try {
                 verifyPublishedFile(write.fd, write.path, "atomic batch write");

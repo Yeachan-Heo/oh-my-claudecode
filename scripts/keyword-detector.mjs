@@ -1101,14 +1101,16 @@ const AUTOPILOT_NON_ENGLISH_LINE = /[\p{Script=Hangul}\p{Script=Hiragana}\p{Scri
 // Imperative "use / start" in the common ASCII-only languages (Spanish, French, German, Italian, Portuguese).
 const AUTOPILOT_FOREIGN_VERB_BEFORE = /(?<![\p{L}\d])(?:usa|usar|utiliza|utilizar|activa|activar|ejecuta|ejecutar|inicia|iniciar|lanza|utilise|utiliser|active|lance|lancer|nutze|nutzen|benutze|verwende|starte|aktiviere|attiva|avvia|ative|inicie|execute)\s+(?:(?:el|la|le|il|der|die|das)\s+)?$/iu;
 // The activation phrase directly before the alias: an activation verb, or please / let's / I want, optionally
-// followed by a verb, then an optional the/a/my/our/your.
-const AUTOPILOT_ACTIVATION_BEFORE = /(?<![\p{L}\d])(?:(?:please|let['’]?s|i\s+(?:want|need|would\s+like)(?:\s+to)?)\s+(?:(?:use|run|start|enable|activate|invoke|trigger|launch|engage|initiate|begin|kick\s+off|fire\s+up|spin\s+up|turn\s+on|switch\s+to|go(?:\s+with|\s+for)?|set)\s+)?|(?:use|run|start|enable|activate|invoke|trigger|launch|engage|initiate|begin|kick\s+off|fire\s+up|spin\s+up|turn\s+on|switch\s+to|go(?:\s+with|\s+for)?|set)\s+)(?:(?:the|a|my|our|your)\s+)?$/iu;
+// followed by a verb, then an optional the/a/my/our/your. Allow commas after please ("please, use").
+const AUTOPILOT_ACTIVATION_BEFORE = /(?<![\p{L}\d])(?:(?:please|let['']?s|i\s+(?:want|need|would\s+like)(?:\s+to)?)[\s,]+(?:(?:use|run|start|enable|activate|invoke|trigger|launch|engage|initiate|begin|kick\s+off|fire\s+up|spin\s+up|turn\s+on|switch\s+to|go(?:\s+with|\s+for)?|set)\s+)?|(?:use|run|start|enable|activate|invoke|trigger|launch|engage|initiate|begin|kick\s+off|fire\s+up|spin\s+up|turn\s+on|switch\s+to|go(?:\s+with|\s+for)?|set)\s+)(?:(?:the|a|my|our|your)\s+)?$/iu;
 // "do not stop using autopilot" asks to keep it running, so the negation does not cancel it.
 const AUTOPILOT_KEEP_USING_BEFORE = /(?<![\p{L}\d])(?:don['’]?t|do\s+not|never)\s+(?:ever\s+)?(?:stop|quit)\s+using\s+$/iu;
 // The separable form "turn autopilot on" / "switch autopilot on": "turn" or "switch" before the alias and "on" right after it.
 const AUTOPILOT_TURN_BEFORE = /(?<![\p{L}\d])(?:turn|switch)\s+(?:the\s+|a\s+|my\s+|our\s+|your\s+)?$/iu;
 const AUTOPILOT_ON_AFTER = /^[ \t]+on(?![\p{L}\d])/iu;
 const AUTOPILOT_NAMESPACE_PREFIX = /^\s*\/?(?:oh-my-(?:claudecode|codex)|omc):\s*$/i;
+// Thematic break: a line with only dashes, underscores, or asterisks (with optional spaces).
+const AUTOPILOT_THEMATIC_BREAK = /^[ \t]*(?:(?:[-_*])[ \t]*){3,}$/;
 const AUTOPILOT_MAX_MATCHES = 1000;
 // The costly informational check sees this many characters on each side of a mention, so its cost does not grow
 // with the prompt length.
@@ -1139,6 +1141,18 @@ function hasExplicitAutopilotInvocationContext(text, position, keywordLength, ke
   const nestedQuestion = sentenceEnd !== null
     && ((sentenceEnd[0].length > 1 && !/^[ \t]*$/.test(afterEnd)) || /^[ \t]+\p{Ll}/u.test(afterEnd));
   if (sentenceEnd && sentenceEnd.index < lineEnd && sentenceEnd[0][0] === '?' && !nestedQuestion && !AUTOPILOT_REQUEST_START.test(clauseHead)) return false;
+  // Check for a parenthesized question at the end of the sentence: "One question (should I use ...)"
+  const sentenceText = text.slice(lineStart, lineEnd).replace(/\s+$/, '');
+  if (sentenceText.endsWith(')')) {
+    const parenStart = sentenceText.lastIndexOf('(');
+    if (parenStart >= 0) {
+      const parenContent = sentenceText.slice(parenStart + 1, -1);
+      // Check if the parenthesized content is a question (starts with a question word or contains ?)
+      if (AUTOPILOT_QUESTION_START.test('(' + parenContent) || /\?/.test(parenContent)) {
+        return false;
+      }
+    }
+  }
   if (AUTOPILOT_NEGATION_BEFORE.test(tail) || AUTOPILOT_NEGATION_BEFORE.test(tail.replace(AUTOPILOT_OPENING_DELIMITERS_AT_END, ''))) return false;
   if (AUTOPILOT_REFERENCE_LABEL_LINE.test(lineHead.replace(AUTOPILOT_MARKDOWN_MARKS, '').replace(AUTOPILOT_LIST_PREFIX, '').replace(/\s+$/, ''))) return false;
   if (AUTOPILOT_NON_ENGLISH_LINE.test(text.slice(lineStart, Math.min(lineEnd, lineStart + 400)))) return true;
@@ -1187,7 +1201,7 @@ function hasActionableAutopilotKeyword(text, pattern) {
     // earlier line does not veto it; every other mention is judged on a bounded window around it.
     const { start: lineStart, end: lineEnd } = getLineBounds(searchText, match.index);
     let previousLine = '';
-    for (let end = lineStart - 1; end > 0 && !previousLine.trim();) {
+    for (let end = lineStart - 1; end > 0 && (!previousLine.trim() || AUTOPILOT_THEMATIC_BREAK.test(previousLine));) {
       const start = searchText.lastIndexOf('\n', end - 1) + 1;
       previousLine = searchText.slice(start, end);
       end = start - 1;

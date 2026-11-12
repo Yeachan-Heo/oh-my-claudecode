@@ -32,7 +32,7 @@ import { NudgeTracker } from '../team/idle-nudge.js';
 import { convergeJobWithResultArtifact, isValidOmcTeamJob, isValidTeamPaneArtifact, isJobTerminal, readMatchingTerminalArtifact, resultArtifactIdentityError, } from './team-job-convergence.js';
 import { isProcessAlive } from '../platform/index.js';
 import { isValidTeamInstanceId, isValidTmuxServerIdentity } from '../team/types.js';
-import { sendToWorker } from '../team/tmux-session.js';
+import { providerForTeamTarget, sendToWorker } from '../team/tmux-session.js';
 import { readTeamConfig } from '../team/monitor.js';
 import { assertTeamInstanceUnderLock, createTeamInstanceBinding, withTeamInstanceLifecycleLock, } from '../team/team-instance.js';
 import { canonicalTeamCwd } from '../team/state-paths.js';
@@ -279,7 +279,7 @@ async function resolveNudgeAuthorityUnderLock(jobId, expected, panes) {
     if (typeof config.tmux_session !== 'string' || config.tmux_session.trim() !== config.tmux_session
         || config.tmux_session.length === 0)
         return null;
-    const provider = config.tmux_session.startsWith('cmux:') ? 'cmux' : 'tmux';
+    const provider = providerForTeamTarget(config.tmux_session);
     let tmuxServerIdentity;
     if (provider === 'tmux') {
         if (!isValidTmuxServerIdentity(config.tmux_server_identity))
