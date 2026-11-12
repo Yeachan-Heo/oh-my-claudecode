@@ -47,7 +47,7 @@ export function maskSecrets(text, { keepGitHashes = false } = {}) {
  * changes nothing: the first step of maskSecrets, also for a caller that drops lines before masking.
  */
 export function maskPrivateKeys(text) {
-  return String(text ?? '').replace(/(-{4,5} ?BEGIN (?:[A-Z0-9]+[ -])*PRIVATE KEY(?: BLOCK)? ?-{4,5})[\s\S]*?(-{4,5} ?END (?:[A-Z0-9]+[ -])*PRIVATE KEY(?: BLOCK)? ?-{4,5}|$)/g, '$1***$2');
+  return String(text ?? '').replace(/(-{4,5} ?BEGIN +(?:[A-Z0-9]+(?: +|-))*PRIVATE KEY(?: BLOCK)? ?-{4,5})[\s\S]*?(-{4,5} ?END +(?:[A-Z0-9]+(?: +|-))*PRIVATE KEY(?: BLOCK)? ?-{4,5}|$)/g, '$1***$2');
 }
 
 // A quote delimiter at escaping depth 0 (a plain quote), 1 (inside a JSON string: `\"`), 2 (shell-escaped before it went into the
@@ -73,8 +73,8 @@ const PAIR_SEPARATOR = new RegExp(String.raw`^${WS}*,${WS}*$`);
 const PAIR_FORMS = QUOTE_DEPTHS.map((d) =>
   new RegExp(String.raw`${d}(${stringBody(d)}*)${d}${WS}*:${WS}*(${d}${stringBody(d)}*${d}${AFTER_CLOSE}|${d}[^\n]*?(?=,${WS}*${d}${stringBody(d)}*${d}${WS}*:|[}\]]|\n|$)|[^,{}\[\]\s"\\]+)`, 'g'));
 // JSON `\uXXXX` escapes of the name are read first (`DB_PASS\u0057ORD`), with any number of backslashes before the u.
-const secretPairName = (name) =>
-  /key|token|secret|pass|pwd|credential|^securestring$/i.test(name.replace(/(?<!\\)\\+u([0-9a-f]{4})/gi, (_, hex) => String.fromCharCode(parseInt(hex, 16))));
+const decodeUnicode = (text) => text.replace(/(?<!\\)\\+u([0-9a-f]{4})/gi, (_, hex) => String.fromCharCode(parseInt(hex, 16)));
+const secretPairName = (name) => /key|token|secret|pass|pwd|credential|^securestring$/i.test(decodeUnicode(name));
 
 // The text of a quoted value without its quotes and without the backslashes of an escaped closing quote.
 function unquoted(value, quote) {
@@ -97,7 +97,7 @@ function maskNamedValues(text) {
       const names = new Set();
       const secret = new Set();
       for (const f of group) {
-        const m = /^([A-Za-z_]*)(?:name|key|type)$/i.exec(f.key);
+        const m = /^([\w.-]*)(?:name|key|type)$/i.exec(decodeUnicode(f.key));
         if (!m || !f.quote) continue;
         const prefix = m[1].toLowerCase();
         names.add(prefix);
@@ -105,7 +105,7 @@ function maskNamedValues(text) {
       }
       if (secret.size) {
         for (const f of group) {
-          const m = /^([A-Za-z_]*)(?:value|val)$/i.exec(f.key);
+          const m = /^([\w.-]*)(?:value|val)$/i.exec(decodeUnicode(f.key));
           if (!m || f.value === f.quote + '***' + f.quote) continue;
           const prefix = m[1].toLowerCase();
           if (secret.has(prefix) || (!names.has(prefix) && secret.has(''))) cuts.push(f);

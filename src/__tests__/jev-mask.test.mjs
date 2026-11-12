@@ -44,6 +44,8 @@ describe.each([
       'pair names with backslash runs': (n) => '{"Name":"' + '\\'.repeat(n) + 'x","Value":"y"}',
       'pair values with whitespace tails, masked': (n) => '{"Name":"DB_PASSWORD","Value":"' + ' '.repeat(n),
       'premature closing quotes before a newline': (n) => repeat('"k":"abc', n) + '\nz',
+      'BEGIN with only spaces': (n) => '-----BEGIN' + ' '.repeat(n),
+      'BEGIN words with repeated spaces': (n) => repeat('-----BEGIN  A1   B2  ', n),
       'pair names alone': (n) => repeat('"name":"a",', n),
       'a pair value with an opening quote': (n) => repeat('"Name":"A_TOKEN","Value":"', n),
       '4 hyphens and BEGIN words': (n) => repeat('---- BEGIN SSH2 ENCRYPTED ', n),
@@ -106,6 +108,7 @@ describe.each([
     const body = 'bGluZTEyMzQ1Njc4OTBhYmNkZWZnaGlqa2xtbm9w\nbGluZTEyMzQ1Njc4OTBhYmNkZWZnaGlqa2xtbm9w';
     const keys = [
       ['-----BEGIN PRIVATE KEY-----', '-----END PRIVATE KEY-----'],
+      ['-----BEGIN RSA  PRIVATE KEY-----', '-----END RSA  PRIVATE KEY-----'],
       ['-----BEGIN OPENSSH PRIVATE KEY-----', '-----END OPENSSH PRIVATE KEY-----'],
       ['-----BEGIN PGP PRIVATE KEY BLOCK-----\n', '=abCD\n-----END PGP PRIVATE KEY BLOCK-----'],
       ['---- BEGIN SSH2 ENCRYPTED PRIVATE KEY ----\nProc-Type: 4,ENCRYPTED', '---- END SSH2 ENCRYPTED PRIVATE KEY ----'],
@@ -132,6 +135,12 @@ describe.each([
       ['{"Value": "two words", "Type": "SecureString", "Name": "/p"}', '{"Value": "***", "Type": "SecureString", "Name": "/p"}'],
       ['[{"Name":"A_TOKEN","Value":"t0k3n"},{"Name":"REGION","Value":"eu-west-1"}]', '[{"Name":"A_TOKEN","Value":"***"},{"Name":"REGION","Value":"eu-west-1"}]'],
       ['{"Name":"A_TOKEN","Value":"***"}', '{"Name":"A_TOKEN","Value":"***"}'],
+      ['{"N\\u0061me":"DB_PASSWORD","Value":"hunter2zz"}', '{"N\\u0061me":"DB_PASSWORD","Value":"***"}'],
+      ['{"Name":"DB_PASSWORD","V\\u0061lue":"hunter2zz"}', '{"Name":"DB_PASSWORD","V\\u0061lue":"***"}'],
+      [String.raw`{\"N\\u0061me\":\"DB_PASSWORD\",\"Value\":\"hunter2zz\"}`, String.raw`{\"N\\u0061me\":\"DB_PASSWORD\",\"Value\":\"***\"}`],
+      ['{"parameter-name":"DB_PASSWORD","parameter-value":"hunter2zz"}', '{"parameter-name":"DB_PASSWORD","parameter-value":"***"}'],
+      [String.raw`{\"parameter-name\":\"DB_PASSWORD\",\"parameter-value\":\"hunter2zz\"}`, String.raw`{\"parameter-name\":\"DB_PASSWORD\",\"parameter-value\":\"***\"}`],
+      ['{"a.name":"DB_PASSWORD","a.value":"hunter2zz","b.value":"public"}', '{"a.name":"DB_PASSWORD","a.value":"***","b.value":"public"}'],
       [String.raw`{\"Name\":\"DB_PASSWORD\",\n  \"Value\": \"hunter2zz\"\n}`, String.raw`{\"Name\":\"DB_PASSWORD\",\n  \"Value\": \"***\"\n}`],
       [String.raw`{"Name"\n:\n"DB_PASSWORD",\r\n"Value"\t:\t"hunter2zz"}`, String.raw`{"Name"\n:\n"DB_PASSWORD",\r\n"Value"\t:\t"***"}`],
       ['{"k":"abc"z\n"Name":"DB_PASSWORD","Value":"x"}', '{"k":"abc"z\n"Name":"DB_PASSWORD","Value":"***"}'],
@@ -163,6 +172,12 @@ describe.each([
       ['{"Name":"REGION","Value":"eu-west-1"}', '{"Name":"REGION","Value":"eu-west-1"}'],
     ];
     for (const [text, masked] of cases) expect({ text, masked: mask(text) }).toEqual({ text, masked });
+    // The same pair with the delimiters escaped at higher depths (JSON string, shell-escaped, and so on up to 255 backslashes).
+    for (const depth of [1, 2, 3, 4, 5, 8]) {
+      const q = '\\'.repeat(2 ** depth - 1) + '"';
+      const pair = (value) => `{${q}Name${q}:${q}DB_PASSWORD${q},${q}Value${q}:${q}${value}${q}}`;
+      expect({ depth, out: mask(pair('hunter2zz')) }).toEqual({ depth, out: pair('***') });
+    }
   });
 
   it('masks the value after a field name in another language, and leaves prose with the same words', () => {

@@ -1000,7 +1000,7 @@ function logContextOf(data) {
 export function maskSecrets(text) {
   // The private key block, the pairs and the named values run first: a pair value holding a key block is masked as a block, and the
   // word rules do not break the opening of a value that the named rule reads whole.
-  return maskNamedValues(String(text ?? '').replace(/(-{4,5} ?BEGIN (?:[A-Z0-9]+[ -])*PRIVATE KEY(?: BLOCK)? ?-{4,5})[\s\S]*?(-{4,5} ?END (?:[A-Z0-9]+[ -])*PRIVATE KEY(?: BLOCK)? ?-{4,5}|$)/g, '$1***'))
+  return maskNamedValues(String(text ?? '').replace(/(-{4,5} ?BEGIN +(?:[A-Z0-9]+(?: +|-))*PRIVATE KEY(?: BLOCK)? ?-{4,5})[\s\S]*?(-{4,5} ?END +(?:[A-Z0-9]+(?: +|-))*PRIVATE KEY(?: BLOCK)? ?-{4,5}|$)/g, '$1***'))
     .replace(/((?:api[_-]?key|access[_-]?key|client[_-]?secret|private[_-]?key|password|passwd|token|secret|has(?:[łl]|\\+u014[12])o|klucz|sekret|passwort|kennwort|contrase(?:[ñn]|\\+u00d1|\\+u00f1)a)(?:\\*["'])?\s*[:=]\s*(?:\\*["'])?)(?:[^\s"'&;|,}\\]|\\(?!["']))+/gi, '$1***')
     .replace(/(\/\/[^/\s:@]+:)[^/\s@]+@/g, '$1***@')
     .replace(/((?:authorization|proxy-authorization)\s*:\s*(?:(?:bearer|basic|token)\s*)?)[^\s"']+/gi, '$1***')
@@ -1042,8 +1042,8 @@ const PAIR_SEPARATOR = new RegExp(String.raw`^${WS}*,${WS}*$`);
 const PAIR_FORMS = QUOTE_DEPTHS.map((d) =>
   new RegExp(String.raw`${d}(${stringBody(d)}*)${d}${WS}*:${WS}*(${d}${stringBody(d)}*${d}${AFTER_CLOSE}|${d}[^\n]*?(?=,${WS}*${d}${stringBody(d)}*${d}${WS}*:|[}\]]|\n|$)|[^,{}\[\]\s"\\]+)`, 'g'));
 // JSON `\uXXXX` escapes of the name are read first (`DB_PASS\u0057ORD`), with any number of backslashes before the u.
-const secretPairName = (name) =>
-  /key|token|secret|pass|pwd|credential|^securestring$/i.test(name.replace(/(?<!\\)\\+u([0-9a-f]{4})/gi, (_, hex) => String.fromCharCode(parseInt(hex, 16))));
+const decodeUnicode = (text) => text.replace(/(?<!\\)\\+u([0-9a-f]{4})/gi, (_, hex) => String.fromCharCode(parseInt(hex, 16)));
+const secretPairName = (name) => /key|token|secret|pass|pwd|credential|^securestring$/i.test(decodeUnicode(name));
 
 // The text of a quoted value without its quotes and without the backslashes of an escaped closing quote.
 function unquoted(value, quote) {
@@ -1066,7 +1066,7 @@ function maskNamedValues(text) {
       const names = new Set();
       const secret = new Set();
       for (const f of group) {
-        const m = /^([A-Za-z_]*)(?:name|key|type)$/i.exec(f.key);
+        const m = /^([\w.-]*)(?:name|key|type)$/i.exec(decodeUnicode(f.key));
         if (!m || !f.quote) continue;
         const prefix = m[1].toLowerCase();
         names.add(prefix);
@@ -1074,7 +1074,7 @@ function maskNamedValues(text) {
       }
       if (secret.size) {
         for (const f of group) {
-          const m = /^([A-Za-z_]*)(?:value|val)$/i.exec(f.key);
+          const m = /^([\w.-]*)(?:value|val)$/i.exec(decodeUnicode(f.key));
           if (!m || f.value === f.quote + '***' + f.quote) continue;
           const prefix = m[1].toLowerCase();
           if (secret.has(prefix) || (!names.has(prefix) && secret.has(''))) cuts.push(f);
