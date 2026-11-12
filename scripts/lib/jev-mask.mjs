@@ -58,12 +58,18 @@ const stringBody = (delim) => String.raw`(?:(?!${delim})[^\n])`;
 
 // `name: value` and `name=value` for the names of the list (open: another language is one more alternative); a quoted value is read to its
 // closing quote, one with no closing quote to the end of the line.
+// A plain double-quoted value also reads a PowerShell backtick escape, a doubled quote ("") as content; an apostrophe closes a
+// single-quoted value when the run of backslashes before it is a multiple of 4 (a JSON string doubles every backslash, so `\'` of the
+// raw text arrives as `\\'`), and a doubled apostrophe is content.
+const PLAIN_BODY = String.raw`(?:\x60[^\n]|""|(?!${QUOTE_DEPTHS[0]})[^\n])`;
+const APOSTROPHE = String.raw`(?<!\\)(?:\\{4})*'`;
+const APOSTROPHE_BODY = String.raw`(?:''|(?!${APOSTROPHE})[^\n])`;
 const NAMED_VALUE = new RegExp(
   String.raw`((?:api[_-]?key|access[_-]?key|client[_-]?secret|private[_-]?key|password|passwd|token|secret|has[łl]o|klucz|sekret|passwort|kennwort|contrase[ñn]a)(?:\\*["'])?\s*[:=]\s*(?:\\*["'])?)(?:`
-    + QUOTE_DEPTHS.map((d) => String.raw`(?<=${d})${stringBody(d)}*(?=${d})`).join('|')
-    + String.raw`|(?<=')(?:[^'\\\n]|\\.|'')*(?=')|`
-    + QUOTE_DEPTHS.map((d) => String.raw`(?<=${d})${stringBody(d)}+`).join('|')
-    + String.raw`|(?<=')(?:[^'\\\n]|\\.|'')+|[^\s"'&;|,}]+)`,
+    + QUOTE_DEPTHS.map((d, i) => String.raw`(?<=${d})${i ? stringBody(d) : PLAIN_BODY}*(?=${d})`).join('|')
+    + String.raw`|(?<=${APOSTROPHE})${APOSTROPHE_BODY}*(?=${APOSTROPHE})|`
+    + QUOTE_DEPTHS.map((d, i) => String.raw`(?<=${d})${i ? stringBody(d) : PLAIN_BODY}+`).join('|')
+    + String.raw`|(?<=${APOSTROPHE})${APOSTROPHE_BODY}+|[^\s"'&;|,}]+)`,
   'gi');
 
 // Name/value pairs in JSON text, `{"Name":"DB_PASSWORD","Value":"hunter2zz"}` or the AWS SSM form with `"Type":"SecureString"`:
