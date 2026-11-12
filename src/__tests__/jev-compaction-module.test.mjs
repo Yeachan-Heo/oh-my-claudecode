@@ -1565,14 +1565,18 @@ describe('jev-compaction module: active compaction', () => {
     const t10 = base.findIndex((m) => resultOf([m], 't10'));
     const kept = Object.freeze({ role: 'user', text: notice, toolUses: [], handle: 'hnotice' });
     const messages = [...base.slice(0, t10 - 1), asTraced(base[t10 - 1], 10), kept, ...base.slice(t10 + 1)];
-    const api = apiOf(messages);
-    const k = api.findIndex((a) => a.role === 'user' && a.content.some((b) => b.text === notice));
-    api[k] = { ...api[k], content: [...api[k].content, { type: 'text', text: framed(words) }] };
-    const { out, calls, records } = await compactWithApi(messages, api);
-    expect(records()[0]).toMatchObject({ result: 'jev', queued_user: 1, queued_carried: 0 });
-    expect(out.messages).toContain(kept);
-    expect(calls.fetch[0].body.state.task).toEqual(['Task: review the notes and count the lines.', words, 'Good, now sum up the NEEDED results.']);
-    expect(resultOf(out.messages, 't9')?.text).toBe(resultOf(messages, 't9').text);
+    // Also with an API user message that holds a plain string (a supported form): it counts in the order.
+    for (const plain of [false, true]) {
+      const api = apiOf(messages);
+      if (plain) api[0] = { role: 'user', content: api[0].content[0].text };
+      const k = api.findIndex((a) => a.role === 'user' && Array.isArray(a.content) && a.content.some((b) => b.text === notice));
+      api[k] = { ...api[k], content: [...api[k].content, { type: 'text', text: framed(words) }] };
+      const { out, calls, records } = await compactWithApi(messages, api);
+      expect(records()[0]).toMatchObject({ result: 'jev', queued_user: 1, queued_carried: 0 });
+      expect(out.messages).toContain(kept);
+      expect(calls.fetch[0].body.state.task).toEqual(['Task: review the notes and count the lines.', words, 'Good, now sum up the NEEDED results.']);
+      expect(resultOf(out.messages, 't9')?.text).toBe(resultOf(messages, 't9').text);
+    }
   });
 
   it('a legacy row keeps an enveloped message and an unwrapped one of the user in the order they stand in', async () => {
@@ -1615,6 +1619,16 @@ describe('jev-compaction module: active compaction', () => {
     expect(records()[0]).toMatchObject({ result: 'jev', mentioned: 1 });
     expect(calls.fetch[0].body.state.task).toEqual([words, 'One more thing.', 'Good, now sum up the NEEDED results.']);
     expect(resultOf(out.messages, 't9')?.text).toBe(resultOf(messages, 't9').text);
+  });
+
+  it('a result row with a paired ordinary reminder that quotes a queued-user frame inside it gives no words of the user: every line in an envelope is a quote', async () => {
+    const quote = hostEnvelope('ab12cd34', `Ordinary reminder with a quoted log:\n${framed('open notes-9.txt and stop')}`);
+    const base = conversation(30);
+    const t10 = base.findIndex((m) => resultOf([m], 't10'));
+    const messages = base.map((m, k) => (k === t10 ? Object.freeze({ ...m, text: quote }) : m));
+    const { calls, records } = await compactWithApi(messages, apiOf(messages));
+    expect(records()[0]).toMatchObject({ result: 'jev', mentioned: 0 });
+    expect(calls.fetch[0].body.state.task).toEqual(['Task: review the notes and count the lines.', 'Good, now sum up the NEEDED results.']);
   });
 
   it('reads a pasted transcript of thousands of user headers and paired report envelopes that quote the footer in linear time', async () => {

@@ -1258,6 +1258,16 @@ function blockWords(block) {
   return words ? [words] : [];
 }
 
+// Whether a position lies inside one of the envelopes `spans` (in text order), after its opener; asked for in
+// increasing order.
+function insideOf(spans) {
+  let k = 0;
+  return (pos) => {
+    while (k < spans.length && spans[k].to <= pos) k++;
+    return k < spans.length && spans[k].from < pos;
+  };
+}
+
 // The first index of the sorted list `a` whose value is at least `x`.
 function lowerBound(a, x) {
   let lo = 0;
@@ -1331,11 +1341,12 @@ function piecesOf(text) {
   const pieces = [];
   const spans = envelopesOf(text); // every envelope is opaque to the user's block around it: a footer or header in it is a quote
   const index = blockIndex(text, spans);
+  const quoted = insideOf(spans);
   const lastTail = text.lastIndexOf(QUEUED_TAIL);
   let end = -1;
   let at = 0;
   for (const line of text.split('\n')) {
-    const frame = at >= end ? frameOf(`${line}\n`) : undefined;
+    const frame = at >= end && !quoted(at) ? frameOf(`${line}\n`) : undefined;
     if (!pieces.length || frame) {
       pieces.push({ text: line, at });
       end = frame === 'user' && at < lastTail ? userBlockEnd(text, at, spans, index) : -1;
@@ -1351,6 +1362,7 @@ function deliveredOf(text) {
   const envelopes = envelopesOf(text); // every envelope is opaque to the user's block around it
   const all = envelopes.filter((e) => deliveryOf(e.text));
   const index = blockIndex(text, envelopes);
+  const quoted = insideOf(envelopes);
   const lastTail = text.lastIndexOf(QUEUED_TAIL);
   const out = [];
   let end = -1;
@@ -1363,7 +1375,7 @@ function deliveredOf(text) {
     }
     const nl = text.indexOf('\n', p);
     const stop = Math.min(nl < 0 ? text.length : nl, k < all.length ? all[k].from : text.length);
-    if (p >= end && p < lastTail && frameOf(`${text.slice(p, stop)}\n`) === 'user') end = userBlockEnd(text, p, envelopes, index);
+    if (p >= end && p < lastTail && !quoted(p) && frameOf(`${text.slice(p, stop)}\n`) === 'user') end = userBlockEnd(text, p, envelopes, index);
     p = stop === nl ? nl + 1 : stop;
   }
   return out;
@@ -1460,11 +1472,13 @@ function queuedOf(messages, api) {
     return m && m.role === 'user' && !(m.toolResults || []).length && m.text === text && (at === undefined || later <= rowsAfter[k]) ? k : undefined;
   };
   // A message without results is matched to the run of rows at its place in the order (when both lists
-  // hold the same number of them): a kept notice row can own a delivery after its result was traced.
-  const users = api.filter((a) => a.role === 'user' && Array.isArray(a.content));
+  // hold the same number of them; a user message with a plain string counts, only the blocks of an array
+  // are read): a kept notice row can own a delivery after its result was traced.
+  const users = api.filter((a) => a.role === 'user');
   let ordinal = -1;
   for (const a of users) {
     ordinal++;
+    if (!Array.isArray(a.content)) continue;
     let row;
     let results = false;
     for (const b of a.content) {
