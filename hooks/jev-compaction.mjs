@@ -1258,33 +1258,37 @@ function blockWords(block) {
   return words ? [words] : [];
 }
 
-// The regions of a text that are quotes to the user's block around them, in text order and not overlapping: every
-// paired envelope, and every paired plain <system-reminder> that holds no delivery (a reminder that wraps one is
-// read by its frame). A plain reminder ends at the first closing tag after its opener; openers without a closing
-// tag are text. The tags are indexed in one pass, so a text full of unpaired tags is read in linear time.
+// The regions of a text that are quotes to the user's block around them: `opaque`, in text order and not
+// overlapping, holds every paired envelope and every paired plain <system-reminder> that holds no delivery (a
+// reminder that wraps one is read by its frame); `quotes` holds just those plain reminders, which can hold whole
+// envelopes (a delivery in one is part of the quote). A plain reminder ends at the first closing tag after its
+// opener; tags inside an envelope belong to it, and an opener without a closing tag is text. The tags are indexed
+// in one pass, so a text full of unpaired tags is read in linear time.
 const PLAIN_OPEN = /<system-reminder(?![^>]{0,200}\bid=)[^>]{0,200}>/g; // bounded: a text full of unclosed tags stays linear
 const PLAIN_CLOSE = '</system-reminder>';
 function opaqueOf(text, envelopes = envelopesOf(text)) {
-  const found = [...envelopes];
+  const quotes = [];
   const closers = positionsOf(text, PLAIN_CLOSE);
   if (closers.length) {
+    const inClose = insideOf(envelopes);
+    const free = closers.filter((c) => !inClose(c));
+    const inOpen = insideOf(envelopes);
     let end = 0;
     for (const o of text.matchAll(PLAIN_OPEN)) {
-      if (o.index < end) continue;
-      const c = lowerBound(closers, o.index + o[0].length);
-      if (c >= closers.length) break;
-      end = closers[c] + PLAIN_CLOSE.length;
-      if (!deliveryOf(text.slice(o.index, end))) found.push({ from: o.index, to: end });
+      if (o.index < end || inOpen(o.index)) continue;
+      const c = lowerBound(free, o.index + o[0].length);
+      if (c >= free.length) break;
+      end = free[c] + PLAIN_CLOSE.length;
+      if (!deliveryOf(text.slice(o.index, end))) quotes.push({ from: o.index, to: end });
     }
   }
-  found.sort((a, b) => a.from - b.from);
-  const out = [];
-  for (const e of found) {
-    const last = out[out.length - 1];
+  const opaque = [];
+  for (const e of [...envelopes, ...quotes].sort((x, y) => x.from - y.from)) {
+    const last = opaque[opaque.length - 1];
     if (last && e.from < last.to) last.to = Math.max(last.to, e.to);
-    else out.push({ from: e.from, to: e.to });
+    else opaque.push({ from: e.from, to: e.to });
   }
-  return out;
+  return { opaque, quotes };
 }
 
 // Whether a position lies inside one of the envelopes `spans` (in text order), after its opener; asked for in
@@ -1368,7 +1372,7 @@ function positionsOf(text, s) {
 // (userBlockEnd), so a frame line the user quotes before the note stays in it.
 function piecesOf(text) {
   const pieces = [];
-  const spans = opaqueOf(text); // a footer or header inside an envelope or a plain reminder is a quote to the user's block around it
+  const spans = opaqueOf(text).opaque; // a footer or header inside an envelope or a plain reminder is a quote to the user's block around it
   const index = blockIndex(text, spans);
   const quoted = insideOf(spans);
   const lastTail = text.lastIndexOf(QUEUED_TAIL);
@@ -1389,17 +1393,18 @@ function piecesOf(text) {
 // its framing note: that one is a quote the user pasted and stays in their block.
 function deliveredOf(text) {
   const envelopes = envelopesOf(text);
-  const opaque = opaqueOf(text, envelopes); // quotes to the user's block around them
+  const { opaque, quotes } = opaqueOf(text, envelopes); // quotes to the user's block around them
   const all = envelopes.filter((e) => deliveryOf(e.text));
   const index = blockIndex(text, opaque);
   const quoted = insideOf(opaque);
+  const inQuote = insideOf(quotes); // a delivery pasted into a plain reminder is part of that quote
   const lastTail = text.lastIndexOf(QUEUED_TAIL);
   const out = [];
   let end = -1;
   let k = 0;
   for (let p = 0; p < text.length;) {
     if (k < all.length && all[k].from <= p) {
-      if (all[k].from >= end) { out.push(all[k]); p = Math.max(p, all[k].to); }
+      if (all[k].from >= end && !inQuote(all[k].from)) { out.push(all[k]); p = Math.max(p, all[k].to); }
       k++;
       continue;
     }
