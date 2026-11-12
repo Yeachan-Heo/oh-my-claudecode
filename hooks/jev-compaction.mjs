@@ -1448,14 +1448,15 @@ function queuedOf(messages, api) {
   // `lead`) is shown by that row's own text not matched yet, or by the next row when that row has text
   // and no results; otherwise no row shows it. The same text elsewhere (a block an earlier compaction
   // carried, a repeated "continue") is another delivery, and two rows with the same text show two blocks.
-  // A block that more blocks of its stretch repeat than text-only rows follow the row is not shown by it:
-  // the last block with that text is (`later` counts the blocks after it), the earlier ones are deliveries
-  // that stand before the row (a duplicate carried at worst, never one lost).
+  // After a row (`at` set), a block that more blocks of its stretch repeat than text-only rows follow the next
+  // row is not shown by it: the last block with that text is (`later` counts the blocks after it), the earlier
+  // ones are deliveries of the row before, which stand before the shown one (a duplicate carried at worst, never
+  // one lost). Before the first block nothing owns a delivery, so the first block with that text is the row's.
   const matchShown = (at, text, lead, later) => {
     if (at !== undefined && !shown.has(at) && messages[at].text === text) return at;
     const k = nextAt[at === undefined ? lead : at + 1];
     const m = messages[k];
-    return m && m.role === 'user' && !(m.toolResults || []).length && m.text === text && later <= rowsAfter[k] ? k : undefined;
+    return m && m.role === 'user' && !(m.toolResults || []).length && m.text === text && (at === undefined || later <= rowsAfter[k]) ? k : undefined;
   };
   // A message without results is matched to the run of rows at its place in the order (when both lists
   // hold the same number of them): a kept notice row can own a delivery after its result was traced.

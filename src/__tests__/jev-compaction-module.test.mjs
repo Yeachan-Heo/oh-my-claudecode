@@ -1507,6 +1507,29 @@ describe('jev-compaction module: active compaction', () => {
     expect(calls.fetch[0].body.state.task.filter((t) => t === words)).toHaveLength(1);
   });
 
+  it('[shown X, hidden X, result]: before the first block nothing else owns a delivery, so the row shows the first X and keeps the second', async () => {
+    const words = 'continue';
+    const base = conversation(30);
+    const t10 = base.findIndex((m) => resultOf([m], 't10'));
+    const call = base[t10 - 1];
+    const shownRow = Object.freeze({ role: 'user', text: framed(words), toolUses: [], handle: 'hx' });
+    const messages = [
+      ...base.slice(0, t10 - 1),
+      Object.freeze({ ...call, text: 'Step 10.\n[compacted] Bash(cat notes-10.txt) - result of 2000 chars removed', toolUses: [{ ...call.toolUses[0], tool_use_id: 't10b' }] }),
+      shownRow,
+      Object.freeze({ ...base[t10], toolResults: [{ ...base[t10].toolResults[0], tool_use_id: 't10b' }] }),
+      ...base.slice(t10 + 1),
+    ];
+    const api = apiOf(messages);
+    const k = api.findIndex((a) => a.role === 'user' && a.content.some((b) => b.tool_use_id === 't10b'));
+    api[k] = { ...api[k], content: [api[k].content[0], { type: 'text', text: framed(words) }, ...api[k].content.slice(1)] };
+    expect(api[k].content.map((b) => b.text ?? b.type)).toEqual([framed(words), framed(words), 'tool_result']);
+    const { out, records } = await compactWithApi(messages, api);
+    expect(records()[0]).toMatchObject({ result: 'jev', queued_user: 1, queued_carried: 0 });
+    expect(out.messages).toContain(shownRow);
+    expect(count(out.messages, framed(words))).toBe(1);
+  });
+
   it('a complete reminder before the frame of an API-only delivery (the desktop app\'s shape) does not hide it', async () => {
     const peer = '<system-reminder>notice</system-reminder>Another Claude session sent a message:\n<message>run the suite, REPORT-OF-PEER</message>';
     const words = 'Message of the user after a reminder.';
