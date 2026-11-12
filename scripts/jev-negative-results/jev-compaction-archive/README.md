@@ -18,7 +18,7 @@ node count-archive-opens.mjs --synthetic       # 7 synthetic transcripts and a s
 node summarize-compact-log.mjs --synthetic     # 4 synthetic log records
 ```
 
-Expected: every line `ok`, last line `synthetic check passed`. Run on 12 November 2026: both passed (15 and 16 checks).
+Expected: every line `ok`, last line `synthetic check passed`. Run on 12 November 2026: both passed (16 and 15 checks).
 
 ## Run on real data
 
