@@ -35,6 +35,8 @@ describe.each([
       'hasło without =': (n) => repeat('hasło', n),
       'hasło: and an opening quote': (n) => repeat('hasło:"', n),
       'password= and an opening quote': (n) => repeat("password='", n),
+      'an unterminated double quote and many names': (n) => 'hasło: "' + repeat("password: 'x ", n),
+      'an unterminated double quote and a long line': (n) => 'hasło: "' + 'a '.repeat(n / 2),
       'contraseña without =': (n) => repeat('contraseña', n),
     };
     for (const n of [100_000, 1_000_000]) {
@@ -105,6 +107,7 @@ describe.each([
       ["klucz = 'correct horse battery staple' x", "klucz = '***' x"],
       ['{"password": "correct horse battery staple", "a": 1}', '{"password": "***", "a": 1}'],
       ['hasło: "', 'hasło: "'],
+      ['hasło: "' + 'word '.repeat(60) + '" x', 'hasło: "***" x'],
       ['hasło: "abc\\"def ghi" x', 'hasło: "***" x'],
       ["klucz: 'abc\\'def ghi' x", "klucz: '***' x"],
       ['hasło jest za krótkie', 'hasło jest za krótkie'],
