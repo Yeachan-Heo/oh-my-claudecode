@@ -1126,12 +1126,19 @@ Note:
       return;
     }
 
-    await teleportCommand(ref, {
+    const result = await teleportCommand(ref, {
       worktree: true, // Always create worktree
       worktreePath: options.path,
       base: options.base,
       json: options.json,
     });
+    if (!result.success) {
+      // teleportCommand prints the error only in text mode.
+      if (options.json) {
+        console.log(JSON.stringify({ success: false, error: result.error }));
+      }
+      process.exit(1);
+    }
   });
 
 teleportCmd
