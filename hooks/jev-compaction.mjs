@@ -1266,6 +1266,7 @@ function blockWords(block) {
 // first closing tag after it, and the tags paired by nesting, so a quote that holds another quote or a tag without
 // its partner keeps its whole body. Tags inside an envelope belong to it. The tags are indexed in one pass and
 // nest at most QUOTE_DEPTH_MAX deep, so a text full of unpaired or nested tags is read in linear time.
+// The reminder tag comes first: a notification opener inside a reminder that is a quote by nesting is text in reading 1.
 const QUOTE_TAGS = [
   // Bounded openers: a text full of unclosed tags stays linear.
   { open: /<system-reminder(?![^>]{0,200}\bid=)[^>]{0,200}>/g, close: '</system-reminder>', quote: (t) => !deliveryOf(t) },
@@ -1308,6 +1309,7 @@ function opaqueOf(text, envelopes = envelopesOf(text)) {
     }
     if (tail.endsWith(QUOTE_TAGS[1].close)) nativeQuote = { from: skipped + native.index + native[0].length - native[1].length, to: tail.length };
   }
+  const reminders = []; // the plain reminders that are quotes by nesting (the first tag's reading 2)
   for (const tag of QUOTE_TAGS) {
     const closers = positionsOf(text, tag.close);
     if (!closers.length) continue;
@@ -1315,12 +1317,15 @@ function opaqueOf(text, envelopes = envelopesOf(text)) {
     const free = closers.filter((c) => !inClose(c));
     const inOpen = insideOf(envelopes);
     const openers = [...text.matchAll(tag.open)].filter((o) => !inOpen(o.index));
-    const add = (from, to) => { if (tag.quote(text.slice(from, to))) found.push({ from, to }); };
+    const add = (from, to) => { if (!tag.quote(text.slice(from, to))) return false; found.push({ from, to }); return true; };
+    // A notification tag that a plain reminder quotes is text in reading 1: it does not open a quote that ends at
+    // a notification after the reminder (the tags of reading 2 and the block count are not changed by it).
+    const inReminder = insideOf(unionOf(tag === QUOTE_TAGS[1] ? reminders : []));
     // Reading 1: each opener to the first closing tag after it (a quote that holds a tag without its
     // partner ends at its own closing tag).
     let end = 0;
     for (const o of openers) {
-      if (o.index < end) continue;
+      if (o.index < end || inReminder(o.index)) continue;
       const c = lowerBound(free, o.index + o[0].length);
       if (c >= free.length) break;
       end = free[c] + tag.close.length;
@@ -1344,7 +1349,7 @@ function opaqueOf(text, envelopes = envelopesOf(text)) {
       if (over > 0) { over--; j++; continue; }
       const from = stack.pop();
       const to = free[j++] + tag.close.length;
-      if (from !== undefined) add(from, to);
+      if (from !== undefined && add(from, to) && tag === QUOTE_TAGS[0]) reminders.push({ from, to });
     }
     if (tag === QUOTE_TAGS[1] && nativeQuote && blocks < 2) found.push(nativeQuote);
   }

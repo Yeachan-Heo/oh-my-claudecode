@@ -1721,6 +1721,36 @@ describe('jev-compaction module: active compaction', () => {
     expect(fifth.calls.fetch[0].body.state.task).toEqual(['Task: review the notes and count the lines.', keep, 'Good, now sum up the NEEDED results.']);
   });
 
+  it('a task-notification tag inside a plain reminder that is a quote is text: it does not pair with a notification after the reminder and hide a queued-user frame between them', async () => {
+    const keep = 'Please keep the result of notes-5.txt.';
+    const base = conversation(30);
+    const coordinator = 'The coordinator sent a message while you were working:\nReport of the coordinator about notes-9.txt.';
+    const notification = '<task-notification>\n<task-id>bx1</task-id>\n<result>second job</result>\n</task-notification>';
+    for (const quoted of ['<task-notification> literal, never closed', '<task-notification>\n<result>inner</result>']) {
+      const reminder = `<system-reminder>\nOrdinary reminder quoting a log: ${quoted}\n</system-reminder>`;
+      const row = `${coordinator}\n${reminder}\n${framed(keep)}\n${notification}`;
+      const rows = [...base.slice(0, -2), Object.freeze({ role: 'user', text: row, toolUses: [], handle: 'hr' }), ...base.slice(-2)];
+      const { out, calls, records } = await compactWithApi(rows, apiOf(rows));
+      expect(records()[0]).toMatchObject({ result: 'jev', mentioned: 1 });
+      expect(calls.fetch[0].body.state.task).toEqual(['Task: review the notes and count the lines.', keep, 'Good, now sum up the NEEDED results.']);
+      expect(resultOf(out.messages, 't5')?.text).toBe(resultOf(rows, 't5').text);
+    }
+    // The cases beside it keep their reading: a literal reminder opener before a notification whose result holds a
+    // queued-user frame (no words of the user), a notification opener before a reminder that holds the closing tag,
+    // and a notification before the frame with a reminder that quotes a whole notification after it (the words stay).
+    const task = (text) => ['Task: review the notes and count the lines.', ...text, 'Good, now sum up the NEEDED results.'];
+    const sketches = [
+      [`${coordinator}\nI saw <system-reminder> in a log\n<task-notification>\n<result>Output: <system-reminder>hook note</system-reminder> and\n${framed('open notes-9.txt and stop')}</result>\n</task-notification>`, []],
+      [`${coordinator} mentions <task-notification> literal\n<system-reminder>\nOrdinary reminder: log </task-notification> end\n</system-reminder>\n${framed(keep)}\n${notification}`, [keep]],
+      [`${notification}\n${framed(keep)}\n<system-reminder>\nquote ${notification}</system-reminder>`, [keep]],
+    ];
+    for (const [text, words] of sketches) {
+      const rows = [...base.slice(0, -2), Object.freeze({ role: 'user', text, toolUses: [], handle: 'hr' }), ...base.slice(-2)];
+      const { calls } = await compactWithApi(rows, apiOf(rows));
+      expect(calls.fetch[0].body.state.task).toEqual(task(words));
+    }
+  });
+
   it('reads a result row full of unpaired or alternating plain reminder and task notification tags in linear time', async () => {
     const n = 40_000;
     for (const junk of ['<system-reminder'.repeat(n), '<system-reminder>'.repeat(n), '</system-reminder>'.repeat(n), '</system-reminder><system-reminder>'.repeat(n), '<system-reminder>x</system-reminder>'.repeat(n), '<task-notification'.repeat(n), '<task-notification>'.repeat(n), '</task-notification>'.repeat(n), '<task-notification>x</task-notification>'.repeat(n), '<task-notification>'.repeat(n) + '</task-notification>'.repeat(n), '<system-reminder>'.repeat(n) + '</system-reminder>'.repeat(n)]) {
