@@ -1036,8 +1036,8 @@ waitCmd
   .command('status')
   .description('Show detailed rate limit and daemon status')
   .option('--json', 'Output as JSON')
-  .action(async (options) => {
-    await waitStatusCommand(options);
+  .action(async (_options, command) => {
+    await waitStatusCommand({ json: command.optsWithGlobals().json });
   });
 
 waitCmd
@@ -1069,9 +1069,9 @@ waitCmd
   .description('Scan for blocked Claude Code sessions in tmux')
   .option('--json', 'Output as JSON')
   .option('-l, --lines <number>', 'Number of pane lines to analyze', integerOption(1), 15)
-  .action(async (options) => {
+  .action(async (options, command) => {
     await waitDetectCommand({
-      json: options.json,
+      json: command.optsWithGlobals().json,
       lines: options.lines,
     });
   });
@@ -1138,8 +1138,8 @@ teleportCmd
   .command('list')
   .description('List existing worktrees in ~/Workspace/omc-worktrees/')
   .option('--json', 'Output as JSON')
-  .action(async (options) => {
-    await teleportListCommand(options);
+  .action(async (_options, command) => {
+    await teleportListCommand({ json: command.optsWithGlobals().json });
   });
 
 teleportCmd
@@ -1148,8 +1148,8 @@ teleportCmd
   .description('Remove a worktree')
   .option('-f, --force', 'Force removal even with uncommitted changes')
   .option('--json', 'Output as JSON')
-  .action(async (path: string, options) => {
-    const exitCode = await teleportRemoveCommand(path, options);
+  .action(async (path: string, options, command) => {
+    const exitCode = await teleportRemoveCommand(path, { ...options, json: command.optsWithGlobals().json });
     if (exitCode !== 0) process.exit(exitCode);
   });
 
@@ -1315,9 +1315,9 @@ Examples:
   $ omc doctor conflicts                        Check for configuration issues
   $ omc doctor conflicts --json                 Output results as JSON
   $ omc doctor conflicts --plugin-dir /tmp/foo  Check against a specific plugin dir`)
-  .action(async (options) => {
+  .action(async (options, command) => {
     applyPluginDirOption(options.pluginDir);
-    const exitCode = await doctorConflictsCommand(options);
+    const exitCode = await doctorConflictsCommand({ ...options, json: command.optsWithGlobals().json });
     process.exit(exitCode);
   });
 
