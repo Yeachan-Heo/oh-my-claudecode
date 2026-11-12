@@ -1036,8 +1036,11 @@ const AFTER_CLOSE = String.raw`(?=[\s,}\])&;|"'\\]|$)`;
 // a value, and a value goes with the names of its own prefix (`oldName` and `oldValue`), or else with the names without a prefix.
 // The text is read at each quote depth, so the same pair inside a JSON string (as a tool input is sent) is found too. There is no
 // length cap and no cutoff in the number of fields, and each character is read a constant number of times.
+// Whitespace between the parts of a pair: also as JSON writes it into a string (`\\n`, `\\t`, `\\r`, any number of backslashes).
+const WS = String.raw`(?:\s|\\+[ntr])`;
+const PAIR_SEPARATOR = new RegExp(String.raw`^${WS}*,${WS}*$`);
 const PAIR_FORMS = QUOTE_DEPTHS.map((d) =>
-  new RegExp(String.raw`${d}(${stringBody(d)}*)${d}\s*:\s*(${d}${stringBody(d)}*${d}${AFTER_CLOSE}|${d}[^\n]*?(?=,\s*${d}${stringBody(d)}*${d}\s*:|[}\]]|$)|[^,{}\[\]\s"\\]+)`, 'g'));
+  new RegExp(String.raw`${d}(${stringBody(d)}*)${d}${WS}*:${WS}*(${d}${stringBody(d)}*${d}${AFTER_CLOSE}|${d}[^\n]*?(?=,${WS}*${d}${stringBody(d)}*${d}${WS}*:|[}\]]|\n|$)|[^,{}\[\]\s"\\]+)`, 'g'));
 // JSON `\uXXXX` escapes of the name are read first (`DB_PASS\u0057ORD`), with any number of backslashes before the u.
 const secretPairName = (name) =>
   /key|token|secret|pass|pwd|credential|^securestring$/i.test(name.replace(/(?<!\\)\\+u([0-9a-f]{4})/gi, (_, hex) => String.fromCharCode(parseInt(hex, 16))));
@@ -1083,7 +1086,7 @@ function maskNamedValues(text) {
     let end = 0;
     let m;
     while ((m = field.exec(out))) {
-      if (group.length && !/^\s*,\s*$/.test(out.slice(end, m.index))) flush();
+      if (group.length && !PAIR_SEPARATOR.test(out.slice(end, m.index))) flush();
       end = m.index + m[0].length;
       const quote = /^\\*"/.exec(m[2])?.[0] ?? '';
       group.push({ key: m[1], value: m[2], quote, start: end - m[2].length, end });
