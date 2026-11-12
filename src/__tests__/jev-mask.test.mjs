@@ -105,6 +105,8 @@ describe.each([
       ["klucz = 'correct horse battery staple' x", "klucz = '***' x"],
       ['{"password": "correct horse battery staple", "a": 1}', '{"password": "***", "a": 1}'],
       ['hasło: "', 'hasło: "'],
+      ['hasło: "abc\\"def ghi" x', 'hasło: "***" x'],
+      ["klucz: 'abc\\'def ghi' x", "klucz: '***' x"],
       ['hasło jest za krótkie', 'hasło jest za krótkie'],
       ['klucz do pokoju', 'klucz do pokoju'],
     ];
