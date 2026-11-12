@@ -493,6 +493,8 @@ These keywords invoke a skill and create a state file.
 | `ralplan` | ralplan | Consensus-based iterative planning |
 | `deep interview`, `ouroboros` | deep-interview | Socratic deep interview |
 
+The Latin aliases `autopilot`, `auto-pilot`, `full auto` and `fullsend` start autopilot only as a command, like `ralph` and `ralplan`: the alias opens the prompt or a line, a command verb (`test`, `review`, `fix`, ...) or `:` plus a verb follows it, or a phrase such as `use`, `run`, `turn on` (also `turn autopilot on`), `please` or `I want` stands before it. For `full auto` and `fullsend` a command verb counts at the start of a line, and a colon plus verb counts anywhere (`Task: fullsend: fix the parser`). Negations that ask for the opposite (`do not stop using autopilot`, `without hesitation use autopilot`) do not cancel it. A bare mention (`the autopilot run failed`, `Docs: use autopilot ...`, `don't use autopilot`, `autopilot: currently idle`) does not start it, and a negation still applies when the alias is quoted (`do not use "autopilot"`). A namespaced slash command (`/oh-my-claudecode:autopilot ...`) always starts it. A line with any non-ASCII letter (Polish, Russian, Arabic, Korean, ...) is not judged by the English command grammar and keeps the generic check; the common ASCII-only imperatives (`usa`, `utilise`, `nutze`, ...) count as activation phrases. When a creation phrase (`build me an app`) and an alias both match, the earlier match is reported.
+
 ### AI Slop Cleanup Keywords
 
 Supports two pattern types:
