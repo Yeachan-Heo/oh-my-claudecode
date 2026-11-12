@@ -953,10 +953,10 @@ const AUTOPILOT_NEGATION_BEFORE = /(?<![\p{L}\d])(?:(?:don|doesn|didn|shouldn|co
 // Quotes, emphasis marks and brackets right before the alias do not change what a negation governs.
 const AUTOPILOT_OPENING_DELIMITERS_AT_END = /["'“”‘’`*_([{<]+$/;
 // A sentence that starts with a question or auxiliary word asks; "can/could/would/will you ..." is a request.
-const AUTOPILOT_QUESTION_START = /^[ \t]*["'“‘([]*(?!(?:can|could|would|will)\s+you(?![\p{L}\d]))(?!do\s+not(?![\p{L}\d]))(?:did|does|do|is|are|was|were|has|have|had|can|could|should|would|will|may|might|shall|what|why|how|when|where|who|which)(?![\p{L}\d])/iu;
+const AUTOPILOT_QUESTION_START = /^[ \t]*["'“‘([]*(?!(?:can|could|would|will)\s+you(?![\p{L}\d]))(?!do\s+not(?![\p{L}\d]))(?:did|does|do|is|are|was|were|has|have|had|can|could|should|would|will|may|might|must|shall|what|why|how|when|where|who|which)(?![\p{L}\d])/iu;
 // The polite request "can/could/would/will you ..." keeps its question mark without being a question.
 const AUTOPILOT_REQUEST_START = /^[ \t]*(?:please[ ,]+)?(?:can|could|would|will)\s+you(?![\p{L}\d])/iu;
-const AUTOPILOT_SENTENCE_END = /[.!?](?=\s|$)/g;
+const AUTOPILOT_SENTENCE_END = /[.!?][)\]}"'*_\u201D\u2019]*(?=\s|$)/g;
 const AUTOPILOT_REFERENCE_LABEL_LINE = /^[ \t]*(?:docs?|documentation|summary|status|logs?|release\s+notes|changelog|readme|examples?|output|result|results|description|title|commit|trigger|triggers|keywords?)[ \t]*:/i;
 const AUTOPILOT_NOUN_USE_BEFORE = /(?<![\p{L}\d])(?:the|a|an|this|that|these|those|last|previous|our|my|its|your|their)\s+$/iu;
 const AUTOPILOT_COMMIT_LINE_BEFORE = /(?<![\p{L}\d])[0-9a-f]{7,40}\s+$/iu;
@@ -985,6 +985,8 @@ function hasExplicitAutopilotInvocationContext(text, position, keywordLength, ke
   const leadingPrefix = hasDirectInvocationPrefix(text, position);
   if (leadingPrefix && /[$/!:]/.test(text.slice(0, position))) return true;
   const { start: lineStart, end: lineEnd } = getLineBounds(text, position);
+  // $, ! and slash directly before the alias on its line is explicit invocation syntax, also on a later line.
+  if (/^[ \t]*[$/!]$/.test(text.slice(lineStart, position))) return true;
   const headStart = Math.max(lineStart, position - 80);
   const tail = text.slice(headStart, position);
   const afterKeyword = text.slice(position + keywordLength, position + keywordLength + 60);
@@ -994,7 +996,7 @@ function hasExplicitAutopilotInvocationContext(text, position, keywordLength, ke
   if (AUTOPILOT_QUESTION_START.test(sentenceHead ? sentenceHead[1] : tail)) return false;
   AUTOPILOT_SENTENCE_END.lastIndex = position + keywordLength;
   const sentenceEnd = AUTOPILOT_SENTENCE_END.exec(text);
-  if (sentenceEnd && sentenceEnd.index < lineEnd && sentenceEnd[0] === '?' && !AUTOPILOT_REQUEST_START.test(sentenceHead ? sentenceHead[1] : tail)) return false;
+  if (sentenceEnd && sentenceEnd.index < lineEnd && sentenceEnd[0][0] === '?' && !AUTOPILOT_REQUEST_START.test(sentenceHead ? sentenceHead[1] : tail)) return false;
   if (AUTOPILOT_NEGATION_BEFORE.test(tail) || AUTOPILOT_NEGATION_BEFORE.test(tail.replace(AUTOPILOT_OPENING_DELIMITERS_AT_END, ''))) return false;
   if (AUTOPILOT_REFERENCE_LABEL_LINE.test(lineHead)) return false;
   if (AUTOPILOT_NON_ENGLISH_LINE.test(text.slice(lineStart, Math.min(lineEnd, lineStart + 400)))) return true;
