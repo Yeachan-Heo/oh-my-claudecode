@@ -1,0 +1,13 @@
+log rows in range: 671 (unreadable lines: 0)
+intent rows by mode: {"active":576,"shadow":12,"degraded":3}
+intent active rows: 576 (85.8 % of all rows), answered with a number: 576
+empty sanitized prompt among answered: 256 (44.4 %)
+resolver time logged, ms: n=576 sum=919.7 s median=1596 p95=2314 max=2391
+prompts with an intent row and a prompt_id: 576; resolver time summed over skill-trigger, intent and task-size per prompt, ms: median=1645 p95=3211 max=4260, over 8000 (the run.cjs cap of keyword-detector.mjs): 0
+noul bands: {"below 0.2":472,"0.2 to 0.5":85,"0.5 and above":19}
+answer can change the hook output: without OMC_JEV_INTENT_APPLY 0 of 576; with it 19 of 576 (3.3 %), of which 17 where /intent was not already typed
+peak intent requests in one UTC minute: 3
+labels joined: 59, labelled yes in total: 2
+  noul >= 0.5: 19 flagged and labelled, 2 yes, 17 no
+  noul >= 0.7: 12 flagged and labelled, 1 yes, 11 no
+  noul >= 0.8: 8 flagged and labelled, 1 yes, 7 no
