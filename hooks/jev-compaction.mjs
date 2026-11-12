@@ -1271,6 +1271,7 @@ const QUOTE_TAGS = [
   { open: /<task-notification(?:\s[^>]{0,200})?>/g, close: '</task-notification>', quote: () => true },
 ];
 const QUOTE_DEPTH_MAX = 8;
+const NATIVE_NOTIFICATION = /^\s*(?:\[SYSTEM NOTIFICATION - NOT USER INPUT\]\s*)?(<task-notification(?:\s[^>]{0,200})?>)/;
 const unionOf = (list) => {
   const out = [];
   for (const e of [...list].sort((x, y) => x.from - y.from)) {
@@ -1282,6 +1283,11 @@ const unionOf = (list) => {
 };
 function opaqueOf(text, envelopes = envelopesOf(text)) {
   const found = [];
+  // A row that is one native notification (it opens with the tag, maybe after its marker line, and ends with the
+  // closing tag) is one quote whatever its result holds, an unbalanced tag included.
+  const native = NATIVE_NOTIFICATION.exec(text);
+  const tail = text.trimEnd();
+  if (native && tail.endsWith(QUOTE_TAGS[1].close)) found.push({ from: native.index + native[0].length - native[1].length, to: tail.length });
   for (const tag of QUOTE_TAGS) {
     const closers = positionsOf(text, tag.close);
     if (!closers.length) continue;

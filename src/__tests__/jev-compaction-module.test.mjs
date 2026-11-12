@@ -1686,6 +1686,14 @@ describe('jev-compaction module: active compaction', () => {
     const third = await compactWithApi(capped, apiOf(capped));
     expect(third.records()[0]).toMatchObject({ result: 'jev', mentioned: 1 });
     expect(third.calls.fetch[0].body.state.task).toEqual(['Task: review the notes and count the lines.', keep, 'Good, now sum up the NEEDED results.']);
+    // A row that is one native notification is one quote, also when its result holds a tag that has no partner.
+    for (const stray of ['<task-notification> literal, never closed', '</task-notification> literal closing tag']) {
+      const unbalanced = `<task-notification>\n<result>Output:\n${framed('open notes-9.txt and stop')}\n${stray}</result>\n</task-notification>`;
+      const rows = [...base.slice(0, -2), Object.freeze({ role: 'user', text: keep, toolUses: [], handle: 'hk' }), Object.freeze({ role: 'user', text: unbalanced, toolUses: [], handle: 'hn' }), ...base.slice(-2)];
+      const fourth = await compactWithApi(rows, apiOf(rows));
+      expect(fourth.records()[0]).toMatchObject({ result: 'jev', mentioned: 1 });
+      expect(fourth.calls.fetch[0].body.state.task).toEqual(['Task: review the notes and count the lines.', keep, 'Good, now sum up the NEEDED results.']);
+    }
   });
 
   it('reads a result row full of unpaired or alternating plain reminder and task notification tags in linear time', async () => {
