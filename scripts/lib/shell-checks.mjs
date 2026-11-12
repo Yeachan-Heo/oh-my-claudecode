@@ -1043,8 +1043,10 @@ const NAMED_VALUE = new RegExp(
   String.raw`((?:api[_-]?key|access[_-]?key|client[_-]?secret|private[_-]?key|password|passwd|token|secret|has(?:[łl]|\\+u014[12])o|klucz|sekret|passwort|kennwort|contrase(?:[ñn]|\\+u00d1|\\+u00f1)a)(?:\\*["'])?\s*[:=]\s*(?:\$?\\*["'])?)(?:`
     + QUOTE_DEPTHS.map((d) => String.raw`(?<=${d})${psBody(d)}*(?=${d}${AFTER_CLOSE})`).join('|')
     + String.raw`|(?<=${APOSTROPHE})${APOSTROPHE_BODY}*(?=${APOSTROPHE}${AFTER_CLOSE})|`
+    + QUOTE_DEPTHS.map((d) => String.raw`(?<=${d})(?:(?!${d})[\s\S])*(?=${d}${AFTER_CLOSE})`).join('|')
+    + String.raw`|(?<=${APOSTROPHE})(?:(?!${APOSTROPHE})[\s\S])*(?=${APOSTROPHE}${AFTER_CLOSE})|`
     + QUOTE_DEPTHS.map((d) => String.raw`(?<=${d})[^\n]+`).join('|')
-    + String.raw`|(?<=${APOSTROPHE})[^\n]+|(?<=\\["'])[^\n]+|(?:\\+[^\n]|[^\s"'&;|,}\\])+)`,
+    + String.raw`|(?<=${APOSTROPHE})[^\n]+|(?<=\\["'])[^\n]+|(?:\\+[^\n]|[^\s"'&;|,}\\]|'[^'\n]*'|"(?:[^"\\\n]|\\.)*")+)`,
   'gi');
 
 // Name/value pairs in JSON text, `{"Name":"DB_PASSWORD","Value":"hunter2zz"}` or the AWS SSM form with `"Type":"SecureString"`:
@@ -1054,7 +1056,7 @@ const NAMED_VALUE = new RegExp(
 // The text is read at each quote depth, so the same pair inside a JSON string (as a tool input is sent) is found too. There is no
 // length cap and no cutoff in the number of fields, and each character is read a constant number of times.
 const PAIR_FORMS = QUOTE_DEPTHS.map((d) =>
-  new RegExp(String.raw`${d}(${stringBody(d)}*)${d}\s*:\s*(${d}${stringBody(d)}*${d}${AFTER_CLOSE}|${d}[^\n]*|[^,{}\[\]\s"\\]+)`, 'g'));
+  new RegExp(String.raw`${d}(${stringBody(d)}*)${d}\s*:\s*(${d}${stringBody(d)}*${d}${AFTER_CLOSE}|${d}[^\n]*?(?=\s*,\s*${d}${stringBody(d)}*${d}\s*:|[}\]]|$)|[^,{}\[\]\s"\\]+)`, 'g'));
 // JSON `\uXXXX` escapes of the name are read first (`DB_PASS\u0057ORD`), with any number of backslashes before the u.
 const secretPairName = (name) =>
   /key|token|secret|pass|pwd|credential|^securestring$/i.test(name.replace(/\\+u([0-9a-f]{4})/gi, (_, hex) => String.fromCharCode(parseInt(hex, 16))));
