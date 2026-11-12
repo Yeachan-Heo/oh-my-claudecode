@@ -1,0 +1,195 @@
+diff --git a/scripts/jev-panel.mjs b/scripts/jev-panel.mjs
+
+--- a/scripts/jev-panel.mjs
++++ b/scripts/jev-panel.mjs
+@@ -342,10 +342,10 @@ async function runPanelV2(P, data, env, { event, key, main, tools }) {
+     // K3 (plan 1, zasada nr 1): the reserve of the question `notka` when it was sent and Jev did not answer it
+     const rules = [];
+     if (!pick && pokaz !== 'zadna' && mode === 'active' && offered.includes('notka') && p.notka === null && P.noteRule(sig)) { pick = 'notka'; kto = 'k3'; rules.push('notka'); }
+-    const facts = { stale: sent.sygnaly?.wywolan_bez_zmiany_listy ?? 0, noNote: !note };
++    const facts = { stale: sent.sygnaly?.wywolan_bez_zmiany_listy ?? 0, noNote: !note, delegate };
+     const uwaga = pick && pick === pokaz && typeof pokazAnswer?.text === 'string' ? P.cleanText(pokazAnswer.text).replace(/\s+/g, ' ').trim() : '';
+     const hintText = pick ? (uwaga || P.panelHintV2(pick, main, task, facts)) : '';
+-    const hint = reminderText ? '' : hintText; // one voice per batch: the reminder of the list first
++    const hint = reminderText && (pick === 'zrobione' || pick === 'notka') ? '' : hintText; // one voice about the list: the reminder first; a hint of another topic (slop, utknal...) goes with it
+     let saved = null;
+     const moved = P.markMoves(textTo, mark);
+     if (hint || moved) {
+@@ -359,6 +359,16 @@ async function runPanelV2(P, data, env, { event, key, main, tools }) {
+       if (written) leased = false;
+     }
+     const delivered = Boolean(hint) && saved !== false;
++    // the former point slop-warning: Jev's answer of the question `slop` is recorded under that point with the source (comparable with the rows of the
++    // time when pre-tool-enforcer asked about every call); the warning itself goes the way of every hint (the choice `pokaz`), after the calls were made
++    if (mode === 'active' && yesActive.includes('slop')) {
++      const shown = delivered && pick === 'slop';
++      shadowLib.recordJevApplied(asking.last, 'slop-warning', {
++        zrodlo: 'zapytanie-po-paczce', question: 'slop_advisory', kto, noul: p.slop, tool: journal.map((e) => e.narzedzie).find((n) => /^(?:Write|Edit|NotebookEdit|Bash|PowerShell)$/.test(n)) ?? journal.at(-1)?.narzedzie ?? null,
++        narzedzia: journal.map((e) => e.narzedzie), tool_use_ids: (Array.isArray(data.tool_calls) ? data.tool_calls : []).map((c) => c?.tool_use_id).filter(Boolean),
++        pokaz: pokaz ?? null, pokazano: shown, ...(shown ? {} : { powod_niepokazania: pokaz === 'zadna' ? 'zadna' : pick && pick !== 'slop' ? `wybrano-${pick}` : reminderText ? 'przypomnienie-listy' : 'brak-wyboru' }), warning: { from: null, to: shown },
++      });
++    }
+     const empty = ['polecenia', 'lista', 'zadanie_w_toku', 'notka', 'ostatnie_wywolania', 'tekst_agenta', 'tekst_poprzedni'].filter((field) => {
+       const value = built.state[field];
+       return value === null || value === undefined || (Array.isArray(value) && !value.length);
+@@ -377,9 +387,10 @@ async function runPanelV2(P, data, env, { event, key, main, tools }) {
+       ...(saved === false ? { zapis_podanych: false } : {}), limit_ms: await effectiveLimit(timeout), limit_zadany_ms: Number(timeout), ms, ...(asking.parts > 1 ? { zapytan: asking.parts } : {}), ms_wejscie: msInput, ms_hook: hookMs(),
+     }, env);
+     if (!delivered) return reminderText;
++    const withReminder = (text) => (reminderText ? `${reminderText}\n${text}` : text);
+     // review L10: a hint of a rule alone (no query) gets its applied.jsonl row too
+     shadowLib.recordJevApplied(asking.last, P.PANEL_POINT, { powod: reason, podpowiedzi: [pick], p, ...(rules.length ? { reguly: rules } : {}) });
+-    return `Panel Jeva: ${hint}`;
++    return withReminder(`Panel Jeva: ${hint}`);
+   } finally {
+     if (leased) P.updatePanelState(data.session_id, key, (st) => P.releaseErrorQuery(st), env);
+   }
+diff --git a/scripts/lib/jev-panel-wejscie.mjs b/scripts/lib/jev-panel-wejscie.mjs
+
+--- a/scripts/lib/jev-panel-wejscie.mjs
++++ b/scripts/lib/jev-panel-wejscie.mjs
+@@ -15,7 +15,7 @@ import { basename, dirname } from 'node:path';
+ import { atomicWriteFileSync } from './atomic-write.mjs';
+ import { maskSecrets } from './jev-shell.mjs';
+ import { SECRET_PATH, SECRET_PEM, cleanSecretText, maskSecretProse, secretJson, secretPathIn } from './jev-sekrety.mjs';
+-import { MAIN, agentKey, inProgress, listPath, readList, withFileLock } from './jev-lista.mjs';
++import { MAIN, agentKey, inProgress, listPath, readList, skipped, withFileLock } from './jev-lista.mjs';
+ import { readOwnerTask, subagentTranscriptPath } from './jev-task.mjs';
+ 
+ export const PANEL_POINT = 'panel';
+@@ -454,9 +454,26 @@ export function questionModes(env = process.env, v2 = false) {
+     else if (alias && wanted === 'active') warnings.push(`stara nazwa "${parts[0]}" (teraz ${name}): tryb active tylko pod nową nazwą`); // review L7
+     else modes[name] = wanted;
+   }
++  if (v2 && env.OMC_JEV_SLOP_PRETOOL === 'on') modes.slop = 'off'; // the old query of pre-tool-enforcer is back: the panel does not ask the same question again
+   return { modes, set: raw !== '', warnings };
+ }
+ 
++// Does the panel ask the question `slop` (the former point slop-warning) for this hook environment? The same conditions as runPanel and the hook of the
++// batch have, so pre-tool-enforcer is silent only when the panel will really ask: version 2, the point named and not off, the hooks not skipped, the question
++// `slop` active, the breaker closed. The caller has checked jevModeFor('panel') === 'active' (it lives in jev-shadow.mjs).
++export async function panelAsksSlop(env = process.env) {
++  if (!panelV2(env) || !env.TYPESAFE_API_KEY) return false;
++  const named = String(env.OMC_JEV ?? '');
++  if (!/(?:^|,)\s*panel\s*(?::[^,]*)?(?:,|$)/.test(named) || /(?:^|,)\s*panel\s*:\s*off\s*(?:,|$)/i.test(named)) return false;
++  if (skipped('jev-panel', env) || skipped('post-tool-batch', env)) return false;
++  if (questionModes(env, true).modes.slop !== 'active') return false;
++  try {
++    const limit = await import('./jev-limit.mjs');
++    if (limit.readBreaker(env) ?? limit.readBreaker(env, Date.now(), PANEL_POINT)) return false;
++  } catch { /* no breaker file: closed */ }
++  return true;
++}
++
+ // Each hint is a sentence that stands alone, without the question it answers (review M5).
+ export function panelHint(name, main) {
+   switch (name) {
+@@ -508,7 +525,7 @@ export function panelVersionWarning(env = process.env) {
+   const value = String(env.OMC_JEV_PANEL_WERSJA ?? '').trim();
+   return value && value !== '1' && value !== '2' ? `OMC_JEV_PANEL_WERSJA: nieznana wartość "${value.slice(0, 40)}", działa wersja 1` : null;
+ }
+-export const PANEL_QUESTION_NAMES_V2 = ['deleguj', 'poboczne', 'zrodlo', 'utknal', 'zrobione', 'notka'];
++export const PANEL_QUESTION_NAMES_V2 = ['deleguj', 'poboczne', 'zrodlo', 'utknal', 'zrobione', 'notka', 'slop'];
+ // Plan v2, 6.10 F7: every question is active when the variable is missing or misspelt; shadow and off are set by the owner alone with
+ // OMC_JEV_PANEL_PYTANIA.
+ const V2_ALIAS = { pytanie: 'zrodlo', 'osobna-sesja': 'poboczne' };
+@@ -613,6 +630,10 @@ export function panelQuestionsV2(sig) { // eslint-disable-line no-unused-vars
+     utknal: UTKNAL,
+     zrobione: Q('Czy zadanie z pola zadanie_w_toku albo inne niezakończone zadanie z pola lista jest już wykonane według ostatnich wyników (ostatnie_wywolania, tekst_agenta, tekst_poprzedni), a na liście nie jest oznaczone jako zakończone? Gdy nie ma listy ani niezakończonych zadań, odpowiedz nie. Pomaga sygnaly.wywolan_bez_zmiany_listy.',
+       'Zadanie jest już wykonane, a na liście nie jest zakończone', 'Praca nad zadaniami trwa, zadania są już oznaczone albo nie ma listy'),
++    // the former point slop-warning (pre-tool-enforcer asked Jev about every tool call in a query of its own): since 11.11 the same question is asked
++    // here, once per query after a batch, about all the calls of the journal; the answer is logged as slop-warning in applied.jsonl (zrodlo: zapytanie-po-paczce)
++    slop: Q('Czy któreś z ostatnich wywołań (ostatnie_wywolania: polecenie, treść zapisywanego albo edytowanego pliku, wiadomość) zawiera język obejścia (fallback, workaround, doraźna warstwa zgodności, shim, łatka pod jedno środowisko), który zasługuje na ostrzeżenie dla agenta? Odpowiedz nie, gdy to dokumentacja, instrukcja, tekst o samym ostrzeżeniu albo zwykły opis techniczny bez obejścia.',
++      'Wywołanie zawiera język obejścia wart ostrzeżenia poza dokumentacją i tekstem o samym ostrzeżeniu', 'Brak języka obejścia wartego ostrzeżenia'),
+     notka: Q('Czy lista zadań agenta jest nieaktualna? Tak, gdy zadanie w toku (zadanie_w_toku) albo jego notka (notka) nie opisują już tego, co agent robi w ostatnich krokach (ostatnie_wywolania, tekst_agenta), albo praca nad zadaniem jest faktycznie skończona, a zadanie nadal stoi w toku, albo agent pracuje nad zadaniem bez notki. Sygnały wywolan_bez_zmiany_listy i ta_sama_lista_zapytan pokazują tylko, jak dawno lista się nie zmieniała: sama długa cisza listy nie oznacza, że jest nieaktualna, jeśli praca nadal toczy się w opisanym zadaniu. Gdy agent nie ma zadania w toku, odpowiedz nie.',
+       'Lista albo notka jest nieaktualna', 'Lista i notka opisują to, co agent teraz robi, albo nie ma zadania w toku'),
+   };
+@@ -627,6 +648,7 @@ const HINT_GIST = {
+   utknal: 'nie powtarzać nieudanej czynności i zmienić podejście',
+   zrobione: 'zakończyć zadanie na liście albo dopisać, czego brakuje',
+   notka: 'zaktualizować listę: dopisać albo poprawić notkę zadania w toku',
++  slop: 'nie dokładać doraźnych warstw zgodności ani łatek pod jedno środowisko bez uzasadnienia, a założenia środowiskowe zapisać w raporcie',
+ };
+ // The question that lets Jev choose among the hints (one hint per batch, and none when the history of the task says it was given in vain);
+ // `names` are the questions asked in this query with the mode active. Static text.
+@@ -670,6 +692,7 @@ export function panelHintV2(name, main, task = '', facts = {}) {
+       ? 'Zapisujesz wartość albo decyzję, której nie ma w poleceniach ani w odczytanych wynikach. Sprawdź ją w źródle jednym poleceniem (plik, dziennik, pomiar); jeśli to Twój wybór, napisz to wprost obok tej wartości.'
+       : 'Zapisujesz wartość albo decyzję, której nie ma w zleceniu ani w odczytanych wynikach. Sprawdź ją w źródle jednym poleceniem; jeśli to Twój wybór, oznacz ją w raporcie jako własne założenie.';
+     case 'utknal': return 'Ta sama czynność nie udała się co najmniej dwa razy. Nie powtarzaj jej: przeczytaj treść błędu i zmień podejście (inne narzędzie, inna ścieżka, mniejszy krok), a blokadę hooka albo uprawnień zapisz w raporcie i idź dalej.';
++    case 'slop': return `Ostrzeżenie: w ostatnich wywołaniach jest język obejścia (fallback, workaround). Nie dokładaj doraźnych warstw zgodności, shimów ani łatek pod jedno środowisko bez wyraźnego uzasadnienia; ${facts.delegate === false ? '' : 'przy kwestii architektury zleć projekt architektowi, a '}założenia środowiskowe zapisz w raporcie.`;
+     case 'zrobione':
+     case 'notka':
+       if (name === 'notka' && facts.noNote) return `Zadanie w toku${named} nie ma notki. Dopisz jedno zdanie: co robisz i po co.`;
+diff --git a/scripts/pre-tool-enforcer.mjs b/scripts/pre-tool-enforcer.mjs
+
+--- a/scripts/pre-tool-enforcer.mjs
++++ b/scripts/pre-tool-enforcer.mjs
+@@ -677,6 +677,17 @@ function effortFromScore(score, maxEffort) {
+   return capEffort(EFFORT_LEVELS[index], maxEffort);
+ }
+ 
++// omc-lokalne T4: the question slop_advisory was asked here in a query of its own for
++// EVERY tool call (16 154 of 19 518 queries to Jev on 11.11); the panel (jev-panel.mjs) asks it now once per query after a batch of tools about all the calls
++// of the batch, and Jev chooses in `pokaz` whether the warning is shown. So by default this hook asks nothing of its own (neither a query of its own nor the
++// question inside the tool gate query), and when the panel is active it warns nothing either (the warning comes after the calls were made, not before).
++// Without the panel the hook keeps its old rule (the code heuristic). OMC_JEV_SLOP_PRETOOL=on brings back the old query for every call (a way back, and the
++// tests of the points that use this query as their probe).
++const slopOwnQuery = () => process.env.OMC_JEV_SLOP_PRETOOL === 'on'; // omc-lokalne T4
++async function slopViaPanel(data) { // omc-lokalne T4: true only when the panel will really ask (panelAsksSlop: the same conditions as the hook of the batch)
++  if (slopOwnQuery() || String(process.env.OMC_JEV_PANEL_WERSJA ?? '').trim() !== '2' || !process.env.TYPESAFE_API_KEY || jevModeFor('panel', process.env, data?.permission_mode) !== 'active') return false; // omc-lokalne T4
++  try { return await (await import('./lib/jev-panel-wejscie.mjs')).panelAsksSlop(process.env); } catch { return false; } // omc-lokalne T4
++} // omc-lokalne T4
+ function recordSlopWarningShadow(toolName, toolInput, warned, permissionMode) {
+   return recordJevShadow({ // omc-lokalne P4: the result goes back to generateSlopWarning
+     point: 'slop-warning',
+@@ -974,7 +985,8 @@ function recordModelRoutingShadow(toolName, toolInput, updatedToolInput, permiss
+   return updatedToolInput;
+ }
+ 
+-function generateSlopWarning(data, toolName, gateSlop = null) { // omc-lokalne P14: gateSlop = the slop answer that the tool gate query already carried
++async function generateSlopWarning(data, toolName, gateSlop = null) { // omc-lokalne P14: gateSlop = the slop answer that the tool gate query already carried
++  if (await slopViaPanel(data)) return ''; // omc-lokalne T4: the panel asks and Jev decides, after the batch
+   const toolInput = data.toolInput || data.tool_input || {};
+   const promptLikeFields = {
+     prompt: data.prompt,
+@@ -986,7 +998,7 @@ function generateSlopWarning(data, toolName, gateSlop = null) { // omc-lokalne P
+     .concat(collectStringValues(promptLikeFields))
+     .join('\n');
+   let warned = shouldWarnForSlopFallbackLanguage(data, toolName, inspectedText); // omc-lokalne P4: let
+-  const jevResult = gateSlop ? gateSlop.result : recordSlopWarningShadow(toolName, data.toolInput || data.tool_input || {}, warned, data.permission_mode); // omc-lokalne P4/P14: no second query when the gate asked
++  const jevResult = gateSlop ? gateSlop.result : slopOwnQuery() ? recordSlopWarningShadow(toolName, data.toolInput || data.tool_input || {}, warned, data.permission_mode) : null; // omc-lokalne P4/P14/T4: no second query when the gate asked; a query of its own only with OMC_JEV_SLOP_PRETOOL=on
+   const slopNoul = gateSlop ? gateSlop.noul : jevNoulOf(jevResult, 'slop_advisory'); // omc-lokalne P4/P14: an active answer decides (noul >= SLOP_WARNING_NOUL_THRESHOLD warns)
+   if (slopNoul !== undefined) { // omc-lokalne P4
+     const jevWarns = slopNoul >= SLOP_WARNING_NOUL_THRESHOLD; // omc-lokalne P4
+@@ -994,11 +1006,12 @@ function generateSlopWarning(data, toolName, gateSlop = null) { // omc-lokalne P
+     warned = jevWarns; // omc-lokalne P4
+   } // omc-lokalne P4
+   if (!warned) return '';
++  if (slopNoul === undefined) recordJevApplied(null, 'slop-warning', { tool: toolName, zrodlo: 'heurystyka-kodu', warning: { from: true, to: true } }); // omc-lokalne T4: no answer of Jev behind this warning (no panel, no query): the log says so
+ 
+   return '[SLOP WARNING] Detected fallback/workaround language in this tool input. ' +
+     'Do not make potential slop: avoid ad-hoc fallback layers, workaround shims, or environment-specific patches unless explicitly justified. ' +
+     'For architecture concerns, consult the architect for a concrete design first. ' +
+-    'If this seems environment-specific, ask the user to confirm constraints before proceeding.';
++    'If this seems environment-specific, record the environment assumption in the report and go on.'; // omc-lokalne T4:
+ }
+ 
+ function combineHookMessages(...messages) {
+@@ -2226,7 +2239,7 @@ async function main() {
+     if (process.env.OMC_JEV) { // omc-lokalne P14: tool gate (point tool-gate); imported only when OMC_JEV is set, fail-open
+       try { // omc-lokalne P14
+         const gate = await import('./lib/jev-gate.mjs'); // omc-lokalne P14
+-        const gateResult = gate.runGate(data, { stateDir, elapsedMs: Math.round(process.uptime() * 1000), slop: { questions: SLOP_WARNING_QUESTIONS, mode: jevModeFor('slop-warning', process.env, data.permission_mode) } }); // omc-lokalne P14: fixed rules first, then one query; elapsedMs: the query gets what is left of the hook limit
++        const gateResult = gate.runGate(data, { stateDir, elapsedMs: Math.round(process.uptime() * 1000), slop: slopOwnQuery() ? { questions: SLOP_WARNING_QUESTIONS, mode: jevModeFor('slop-warning', process.env, data.permission_mode) } : null }); // omc-lokalne P14/T4: the gate query carries the slop question only with OMC_JEV_SLOP_PRETOOL=on: fixed rules first, then one query; elapsedMs: the query gets what is left of the hook limit
+         if (gateResult.handled && gateResult.enforced) { // omc-lokalne P14: a denial ends the hook (never ask: it blocks even under bypassPermissions)
+           emitPreToolUseOutput(gate.gateHookOutput(gateResult), data); // omc-lokalne P14
+           return; // omc-lokalne P14
+@@ -2511,7 +2524,7 @@ async function main() {
+       }
+     }
+ 
+-    const slopWarning = generateSlopWarning(data, toolName, gateSlop); // omc-lokalne P14
++    const slopWarning = await generateSlopWarning(data, toolName, gateSlop); // omc-lokalne P14/T4
+     let message;
+     if (BUILT_IN_TASK_LIST_TOOL_NAMES.has(toolName)) {
+       emitPreToolUseOutput({ continue: true, suppressOutput: true }, data);
