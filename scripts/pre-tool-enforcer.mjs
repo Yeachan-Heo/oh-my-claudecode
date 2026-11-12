@@ -2459,6 +2459,20 @@ async function main() {
       } catch { /* fail-open */ }
     }
 
+    // Experimental tool gate (negative result, see docs/jev/negative-results/jev-tool-gate.md). Runs only when
+    // OMC_JEV names `tool-gate` (`all` never enables it). Fail-open: any error leaves the hook as without the gate.
+    const gateEntries = String(process.env.OMC_JEV || '').split(',').map((t) => t.trim()).filter((t) => t === 'tool-gate' || t.startsWith('tool-gate:'));
+    if (gateEntries.length && !/^tool-gate:\s*off$/i.test(gateEntries[gateEntries.length - 1])) { // the last entry wins; `tool-gate:off` never loads the module
+      try {
+        const gate = await import('./lib/jev-tool-gate.mjs');
+        const gateResult = gate.runGate(data, { stateDir });
+        if (gateResult.enforced) {
+          emitPreToolUseOutput(gate.gateHookOutput(gateResult), data);
+          return;
+        }
+      } catch { /* fail-open */ }
+    }
+
     recordToolInvocation(data, directory);
 
     // Activate skill state when Skill tool is invoked (issue #1033)
