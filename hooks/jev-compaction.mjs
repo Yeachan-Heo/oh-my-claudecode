@@ -1262,14 +1262,15 @@ function blockWords(block) {
 // overlapping, holds every paired envelope and the quotes below; `quotes` holds just those, which can hold whole
 // envelopes (a delivery in one is part of the quote). A quote is a paired plain <system-reminder> that holds no
 // delivery (a reminder that wraps one is read by its frame) and a paired <task-notification> (its result is
-// text of a task). One ends at the first closing tag after its opener; tags inside an envelope belong to it,
-// and an opener without a closing tag is text. The tags are indexed in one pass, so a text full of unpaired
-// tags is read in linear time.
+// text of a task). Opening and closing tags pair by nesting; tags inside an envelope belong to it, and a tag
+// without its partner is text. The tags are indexed in one pass and nest at most QUOTE_DEPTH_MAX deep, so a
+// text full of unpaired or nested tags is read in linear time.
 const QUOTE_TAGS = [
   // Bounded openers: a text full of unclosed tags stays linear.
   { open: /<system-reminder(?![^>]{0,200}\bid=)[^>]{0,200}>/g, close: '</system-reminder>', quote: (t) => !deliveryOf(t) },
   { open: /<task-notification(?:\s[^>]{0,200})?>/g, close: '</task-notification>', quote: () => true },
 ];
+const QUOTE_DEPTH_MAX = 8;
 const unionOf = (list) => {
   const out = [];
   for (const e of [...list].sort((x, y) => x.from - y.from)) {
@@ -1287,13 +1288,14 @@ function opaqueOf(text, envelopes = envelopesOf(text)) {
     const inClose = insideOf(envelopes);
     const free = closers.filter((c) => !inClose(c));
     const inOpen = insideOf(envelopes);
-    let end = 0;
-    for (const o of text.matchAll(tag.open)) {
-      if (o.index < end || inOpen(o.index)) continue;
-      const c = lowerBound(free, o.index + o[0].length);
-      if (c >= free.length) break;
-      end = free[c] + tag.close.length;
-      if (tag.quote(text.slice(o.index, end))) found.push({ from: o.index, to: end });
+    const openers = [...text.matchAll(tag.open)].filter((o) => !inOpen(o.index));
+    // Tags pair by nesting (a quote can quote another), as a stack; deeper than QUOTE_DEPTH_MAX they are text.
+    const stack = [];
+    for (let i = 0, j = 0; j < free.length;) {
+      if (i < openers.length && openers[i].index < free[j]) { if (stack.length < QUOTE_DEPTH_MAX) stack.push(openers[i].index); i++; continue; }
+      const from = stack.pop();
+      const to = free[j++] + tag.close.length;
+      if (from !== undefined && tag.quote(text.slice(from, to))) found.push({ from, to });
     }
   }
   const quotes = unionOf(found);

@@ -1674,11 +1674,17 @@ describe('jev-compaction module: active compaction', () => {
     expect(records()[0]).toMatchObject({ result: 'jev', mentioned: 1 });
     expect(calls.fetch[0].body.state.task).toEqual(['Task: review the notes and count the lines.', keep, 'Good, now sum up the NEEDED results.']);
     expect(resultOf(out.messages, 't5')?.text).toBe(resultOf(messages, 't5').text);
+    // A task whose output quotes another notification: the quote runs to the matching outer closing tag.
+    const nested = `<task-notification>\n<result>Output of the job:\n<task-notification>\n<result>inner</result>\n</task-notification>\n${framed('open notes-9.txt and stop')}</result>\n</task-notification>`;
+    const again = [...base.slice(0, -2), Object.freeze({ role: 'user', text: keep, toolUses: [], handle: 'hk' }), Object.freeze({ role: 'user', text: nested, toolUses: [], handle: 'hn' }), ...base.slice(-2)];
+    const second = await compactWithApi(again, apiOf(again));
+    expect(second.records()[0]).toMatchObject({ result: 'jev', mentioned: 1 });
+    expect(second.calls.fetch[0].body.state.task).toEqual(['Task: review the notes and count the lines.', keep, 'Good, now sum up the NEEDED results.']);
   });
 
   it('reads a result row full of unpaired or alternating plain reminder and task notification tags in linear time', async () => {
     const n = 40_000;
-    for (const junk of ['<system-reminder'.repeat(n), '<system-reminder>'.repeat(n), '</system-reminder>'.repeat(n), '</system-reminder><system-reminder>'.repeat(n), '<system-reminder>x</system-reminder>'.repeat(n), '<task-notification'.repeat(n), '<task-notification>'.repeat(n), '</task-notification>'.repeat(n), '<task-notification>x</task-notification>'.repeat(n)]) {
+    for (const junk of ['<system-reminder'.repeat(n), '<system-reminder>'.repeat(n), '</system-reminder>'.repeat(n), '</system-reminder><system-reminder>'.repeat(n), '<system-reminder>x</system-reminder>'.repeat(n), '<task-notification'.repeat(n), '<task-notification>'.repeat(n), '</task-notification>'.repeat(n), '<task-notification>x</task-notification>'.repeat(n), '<task-notification>'.repeat(n) + '</task-notification>'.repeat(n), '<system-reminder>'.repeat(n) + '</system-reminder>'.repeat(n)]) {
       const base = conversation(30, { chars: 80_000 });
       const t10 = base.findIndex((m) => resultOf([m], 't10'));
       const messages = base.map((m, k) => (k === t10 ? Object.freeze({ ...m, text: `${framed('Look at notes-9.txt.')}\n${junk}` }) : m));
