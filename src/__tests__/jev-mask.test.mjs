@@ -92,12 +92,12 @@ describe.each([
       'pair names and serialized vertical tabs': (n) => '"a"' + String.raw`\u000b`.repeat(n / 6),
       'pair names and serialized form feeds, masked': (n) => '{"Name":"DB_PASSWORD"' + String.raw`\f`.repeat(n / 2) + ',"Value":"x"}',
       'BEGIN and one long word': (n) => '-----BEGIN ' + 'A'.repeat(n),
-      'a key of escapes without a separator': (n) => repeat(String.raw`a`, n),
-      'words with an escape and no separator': (n) => repeat(String.raw`pass `, n),
-      'escaped keys, separators and values, masked': (n) => repeat(String.raw`password:x `, n),
-      'a long word and then an escape': (n) => 'a'.repeat(n) + String.raw`a`,
+      'a key of escapes without a separator': (n) => repeat(String.raw`\u0061`, n),
+      'words with an escape and no separator': (n) => repeat(String.raw`p\u0061ss `, n),
+      'escaped keys, separators and values, masked': (n) => repeat(String.raw`p\u0061ssword:x `, n),
+      'a long word and then an escape': (n) => 'a'.repeat(n) + String.raw`\u0061`,
       'a word and then a backslash run': (n) => 'abc' + '\\'.repeat(n) + 'x',
-      'whitespace escapes between letters': (n) => repeat(String.raw`p `, n),
+      'whitespace escapes between letters': (n) => repeat(String.raw`p\u0020`, n),
       'BEGIN with long words glued to PRIVATE': (n) => repeat('-----BEGIN AAAAAAAAAAAAAAAAPRIVATE ', n),
     };
     for (const n of [100_000, 1_000_000]) {
@@ -299,7 +299,7 @@ describe.each([
       ['{"k\\u006cucz":"hunter2zz"}', '{"k\\u006cucz":"***"}'],
       ['p\\u0061ssword=hunter2zz', 'p\\u0061ssword=***'],
       [String.raw`{\"h\\u0061s\\u0142o\":\"hunter2zz\"}`, String.raw`{\"h\\u0061s\\u0142o\":\"***\"}`],
-      [String.raw`{\n  "hasło"\n  :\n  "hunter2zz"\n}`, String.raw`{\n  "hasło"\n  :\n  "***"\n}`],
+      [String.raw`{\n  "h\u0061s\u0142o"\n  :\n  "hunter2zz"\n}`, String.raw`{\n  "h\u0061s\u0142o"\n  :\n  "***"\n}`],
       ['{"n\\u0061me":"value"}', '{"n\\u0061me":"value"}'],
       ['{"\\u0061":"value"}', '{"\\u0061":"value"}'],
     ];
