@@ -7,17 +7,13 @@
  * Ported from oh-my-opencode's keyword-detector hook.
  */
 import { classifyTaskSize, isHeavyMode, } from '../task-size-detector/index.js';
-// The Latin aliases need a command (see findActionableAutopilotAliasMatch); the
-// creation phrases and the Korean and Japanese aliases keep the generic check.
-const AUTOPILOT_ALIAS_PATTERN = /\b(autopilot|auto[\s-]?pilot|fullsend|full\s+auto)\b/i;
-const AUTOPILOT_OTHER_PATTERN = /\b(?:build|create|make)\s+me\s+(?:an?\s+)?(?:app|feature|project|tool|plugin|website|api|server|cli|script|system|service|dashboard|bot|extension)\b|\bi\s+want\s+an?\s+(?:app|feature|project|tool|plugin|website|api|server|cli|script|system|service|dashboard|bot|extension)\b|(오토파일럿)|(オートパイロット)/i;
 /**
  * Keyword patterns for each mode
  */
 const KEYWORD_PATTERNS = {
     cancel: /\b(cancelomc|stopomc)\b/i,
     ralph: /\b(ralph)\b(?!-)|(랄프)(?!로렌)|(ラルフ)(?!・?ローレン)/i,
-    autopilot: new RegExp(`${AUTOPILOT_ALIAS_PATTERN.source}|${AUTOPILOT_OTHER_PATTERN.source}`, 'i'),
+    autopilot: /\b(autopilot|auto[\s-]?pilot|fullsend|full\s+auto)\b|\b(?:build|create|make)\s+me\s+(?:an?\s+)?(?:app|feature|project|tool|plugin|website|api|server|cli|script|system|service|dashboard|bot|extension)\b|\bi\s+want\s+an?\s+(?:app|feature|project|tool|plugin|website|api|server|cli|script|system|service|dashboard|bot|extension)\b|(오토파일럿)|(オートパイロット)/i,
     // Team keyword detection disabled — team mode is now explicit-only via /team skill.
     // This prevents infinite spawning when Claude workers receive prompts containing "team".
     team: /(?!x)x/, // never-match placeholder (type system requires the key)
@@ -674,205 +670,6 @@ function findActionableKeywordMatch(text, pattern) {
     }
     return null;
 }
-// The Latin autopilot aliases (autopilot, auto pilot, auto-pilot, full auto, fullsend) start the mode only as an
-// explicit command, like ralph and ralplan. Without this, a foreign sentence pasted into a prompt
-// ("Add tests (autopilot at cap; ...)") armed the mode, because the generic hasActionableKeyword treats every
-// mention outside quotes and help questions as a command. The grammar is deliberately small. A sentence is a
-// command when all of these hold:
-//  1. It is not a question: it does not end in "?" and does not start with a question or auxiliary word
-//     (did, does, is, can, what, how, ...), except the request "can/could/would/will you ...".
-//  2. It is not negated (don't, can't, never, without, ...) and not a reference label line ("Docs: ...").
-//  3. The alias is the first word of the command, followed by a command verb from a closed list (also re-run,
-//     double-check), by ":" plus such a verb, or by nothing; at the very start of the prompt any continuation that is
-//     not a status line counts. Or an activation phrase stands directly before it: use, run, start, ...
-//     (also after please, let's, I want) with an optional the/a/my/our/your, or turn/switch autopilot on.
-// "full auto" and "fullsend" are ordinary hardware phrases: only an activation phrase, a line-leading command verb
-// or ":" plus a verb count. A line with a non-ASCII letter is not English and keeps the generic check.
-//  4. Anything else that passes rules 1 and 2 and is not a status line keeps the generic activation-verb check (an
-//     activation verb elsewhere in the clause: "Run in autopilot mode", "fix issue with autopilot in parser module").
-// Phrasings beyond this grammar (an open verb list, other languages) are out of scope.
-const AUTOPILOT_COMMAND_VERBS = 'fix|debug|investigate|resolve|handle|patch|address|implement|build|create|make|run|start|enable|activate|invoke|trigger|launch|plan|add|write|refactor|update|remove|migrate|finish|continue|do|go|test|review|check|verify|audit|analy[sz]e|inspect|deploy|install|configure|document|explain|find|search|generate|convert|ship|release|merge|prepare|design|draft|upgrade|rename|clean|optimi[sz]e|rewrite|summari[sz]e|compare|bring|ping|seed';
-const AUTOPILOT_HYPHENATED_VERB = '(?:re-(?:run|test|check|build|deploy|install|implement|review|verify|try|apply|start|launch|write|format|generate|create)|double-check|cross-check|un-install)';
-const AUTOPILOT_COMMAND_WORD = `(?:(?:${AUTOPILOT_COMMAND_VERBS})|${AUTOPILOT_HYPHENATED_VERB})`;
-const AUTOPILOT_STATUS_CONTINUATION = '\\s+(?:fails|was|were|is|are|has|had|looks|takes|keeps|hangs|hung|timed\\s+out|succeeds|passes|completes|finishes|works)(?![\\p{L}\\d])|\\s+(?:failed|crashed|errored|ok|okay|done|green|succeeded|passed|completed|finished|worked)(?![\\p{L}\\d])(?=[ \\t]*(?:[.,;:!?)]|\\r?\\n|$)|[ \\t]+(?:on|at|in|with|after|during|for|because|again|twice|and|but|so|before|when|while|since|until|due|once|yesterday|today|overnight|too|earlier|already)(?![\\p{L}\\d]))|\\s+(?:step|phase|exit|status|log|suite|mode|output|report|results?|summary)\\s+(?:\\d+|is|are|was|were|has|had|failed|fails|passed|passes|succeeded|looks|takes|keeps|crashed|errored|ok|okay|red|green)(?![\\p{L}\\d])';
-const AUTOPILOT_NOT_A_COMMAND_AFTER = `(?!${AUTOPILOT_STATUS_CONTINUATION})`;
-// Words that open a status line after a colon, not a command: articles, pronouns, auxiliaries, prepositions,
-// conjunctions, adverbs and status words.
-const AUTOPILOT_NON_COMMAND_WORDS = 'a|an|the|this|that|these|those|my|our|your|his|her|its|their|i|we|you|he|she|it|they|me|us|them|is|are|was|were|be|been|am|has|have|had|do|does|did|will|would|can|could|should|may|might|must|shall|not|no|nor|and|or|but|so|if|then|than|as|at|in|on|of|to|for|from|with|by|about|into|onto|over|under|after|before|during|until|while|when|where|which|who|whom|what|why|how|also|just|only|still|already|always|never|now|currently|ready|idle|off|none|nothing|active|inactive|enabled|disabled|available|unavailable|busy|pending|offline|online|yes|here|there|too|very|really|actually|maybe|perhaps|however|hung|hangs|stuck|ran|went|got|took|broke|broken|froze|frozen|became|seems|seemed|remains|lost|left|hit|began|saw|said|gave|found|kept|knew|thought|told|wrote|made|built|sent|spent|stood|held|fell|drew|drove|chose|came|won|threw|grew|met|paid|rose|sold|taught|understood|wore|sat|slept|spoke|swept|sank';
-// A plain alias that opens the prompt counts as a command unless it reads as a status line:
-// a command verb followed by a result ("autopilot run failed"), or a colon plus a status word or gerund.
-const AUTOPILOT_LEADING_STATUS = new RegExp(`^(?:[ \\t]*[:\\uFF1A][ \\t]*(?:(?:${AUTOPILOT_NON_COMMAND_WORDS})|(?!(?:bring|ping|seed|feed|embed|proceed|succeed|speed|need|shred|string|swing|sing|ring|fling|sling|sting|wring|spring|cling)(?![\\p{L}\\d]))\\p{L}*(?:ing|ed))(?![\\p{L}\\d])|[ \\t]+(?:${AUTOPILOT_COMMAND_VERBS})(?![\\p{L}\\d])(?:${AUTOPILOT_STATUS_CONTINUATION}))`, 'iu');
-const AUTOPILOT_COMMAND_AFTER = new RegExp(`^(?:[ \\t]*[,;!\\u2014\\u2013][ \\t]*|[ \\t]+-[ \\t]+|[ \\t]+)${AUTOPILOT_COMMAND_WORD}(?![\\p{L}\\d])${AUTOPILOT_NOT_A_COMMAND_AFTER}`, 'iu');
-const AUTOPILOT_COLON_VERB = new RegExp(`^[ \\t]*[:\\uFF1A][ \\t]*${AUTOPILOT_COMMAND_WORD}(?![\\p{L}\\d])${AUTOPILOT_NOT_A_COMMAND_AFTER}`, 'iu');
-const AUTOPILOT_ALONE_ON_LINE = /^[ \t]*[.!]?[ \t]*(?:\r?\n|$)/;
-const AUTOPILOT_NEGATION_BEFORE = /(?<![\p{L}\d])(?:(?:don|doesn|didn|shouldn|couldn|wouldn|can|won|mustn|isn|aren|shan|needn)['’]?t|cannot|do\s+not|never|not|without)\s+(?!(?:just|only|simply|merely|also|solely|stop|quit|forget|fail|hesitat\w*|delay\w*|wait\w*|paus\w*|ask\w*)(?![\p{L}\d]))(?:(?!(?:so|but|and|then|instead|because|now|mind)(?![\p{L}]))[\p{L}'’]+\s+){0,4}$/iu;
-// Quotes, emphasis marks and brackets right before the alias do not change what a negation governs.
-const AUTOPILOT_OPENING_DELIMITERS_AT_END = /["'“”‘’`*_([{<]+$/;
-// A sentence that starts with a question or auxiliary word asks; "can/could/would/will you ..." is a request.
-const AUTOPILOT_QUESTION_START = /^[ \t]*(?:[-*+>#]+[ \t]+|\d+[.)][ \t]+|\[[ xX]\][ \t]+|["'“‘([*_`])*(?!(?:can|could|would|will)\s+you(?![\p{L}\d]))(?!do\s+not(?![\p{L}\d]))(?:did|does|do|is|are|was|were|has|have|had|can|could|should|would|will|may|might|must|shall|what|why|how|when|where|who|which)(?![\p{L}\d])/iu;
-// The polite request "can/could/would/will you ..." keeps its question mark without being a question.
-const AUTOPILOT_REQUEST_START = /^[ \t]*(?:[-*+>#]+[ \t]+|\d+[.)][ \t]+|\[[ xX]\][ \t]+|["'“‘([*_`])*(?:please[ ,]+)?(?:can|could|would|will)\s+you(?![\p{L}\d])/iu;
-const AUTOPILOT_SENTENCE_END = /(?<=\S)[.!?][)\]}"'*_\u201D\u2019]*(?=\s|$)/g;
-// Markdown emphasis and heading marks around a label ("**Docs:**") do not hide it.
-const AUTOPILOT_MARKDOWN_MARKS = /[*_`#>]+/g;
-const AUTOPILOT_LIST_PREFIX = /^[\s\-+]*(?:\d+[.)]\s+)?/;
-const AUTOPILOT_REFERENCE_LABEL_LINE = /^[ \t]*(?:docs?|documentation|summary|status|logs?|release\s+notes|changelog|readme|examples?|output|result|results|description|title|commit|trigger|triggers|keywords?)[ \t]*:/i;
-// A heading line that is only the label ("## Documentation") also marks what follows as reference text.
-const AUTOPILOT_REFERENCE_HEADING = /^[ \t]*(?:docs?|documentation|summary|status|logs?|release\s+notes|changelog|readme|examples?|output|result|results|description|title|commit|trigger|triggers|keywords?)[ \t]*:?[ \t]*$/i;
-const AUTOPILOT_NOUN_USE_BEFORE = /(?<![\p{L}\d])(?:the|a|an|this|that|these|those|last|previous|our|my|its|your|their)\s+$/iu;
-const AUTOPILOT_COMMIT_LINE_BEFORE = /(?<![\p{L}\d])[0-9a-f]{7,40}\s+$/iu;
-// A line with any non-ASCII letter (Hangul, kana, Han, Thai, Cyrillic, Arabic, Polish diacritics, ...) is not
-// English prose, so the English command grammar cannot judge it and the generic check applies.
-const AUTOPILOT_NON_ENGLISH_LINE = /[\p{Script=Hangul}\p{Script=Hiragana}\p{Script=Katakana}\p{Script=Han}\p{Script=Thai}]|(?![A-Za-z])\p{L}/u;
-// Imperative "use / start" in the common ASCII-only languages (Spanish, French, German, Italian, Portuguese).
-const AUTOPILOT_FOREIGN_VERB_BEFORE = /(?<![\p{L}\d])(?:usa|usar|utiliza|utilizar|activa|activar|ejecuta|ejecutar|inicia|iniciar|lanza|utilise|utiliser|active|lance|lancer|nutze|nutzen|benutze|verwende|starte|aktiviere|attiva|avvia|ative|inicie|execute)\s+(?:(?:el|la|le|il|der|die|das)\s+)?$/iu;
-// The activation phrase directly before the alias: an activation verb, or please / let's / I want, optionally
-// followed by a verb, then an optional the/a/my/our/your. Allow commas after please ("please, use").
-const AUTOPILOT_ACTIVATION_BEFORE = /(?<![\p{L}\d])(?:(?:please|let['']?s|i\s+(?:want|need|would\s+like)(?:\s+to)?)[\s,]+(?:(?:use|run|start|enable|activate|invoke|trigger|launch|engage|initiate|begin|kick\s+off|fire\s+up|spin\s+up|turn\s+on|switch\s+to|go(?:\s+with|\s+for)?|set)\s+)?|(?:use|run|start|enable|activate|invoke|trigger|launch|engage|initiate|begin|kick\s+off|fire\s+up|spin\s+up|turn\s+on|switch\s+to|go(?:\s+with|\s+for)?|set)\s+)(?:(?:the|a|my|our|your)\s+)?$/iu;
-// "do not stop using autopilot" asks to keep it running, so the negation does not cancel it.
-const AUTOPILOT_KEEP_USING_BEFORE = /(?<![\p{L}\d])(?:don['’]?t|do\s+not|never)\s+(?:ever\s+)?(?:stop|quit)\s+using\s+$/iu;
-// The separable form "turn autopilot on" / "switch autopilot on": "turn" or "switch" before the alias and "on" right after it.
-const AUTOPILOT_TURN_BEFORE = /(?<![\p{L}\d])(?:turn|switch)\s+(?:the\s+|a\s+|my\s+|our\s+|your\s+)?$/iu;
-const AUTOPILOT_ON_AFTER = /^[ \t]+on(?![\p{L}\d])/iu;
-const AUTOPILOT_NAMESPACE_PREFIX = /^\s*\/?(?:oh-my-(?:claudecode|codex)|omc):\s*$/i;
-// Thematic break: a line with only dashes, underscores, or asterisks (with optional spaces).
-const AUTOPILOT_THEMATIC_BREAK = /^[ \t]*(?:(?:[-_*])[ \t]*){3,}$/;
-const AUTOPILOT_MAX_MATCHES = 1000;
-// The costly informational check sees this many characters on each side of a mention, so its cost does not grow
-// with the prompt length.
-const AUTOPILOT_CONTEXT_WINDOW = 2000;
-function hasExplicitAutopilotInvocationContext(text, position, keywordLength, keywordText) {
-    if (AUTOPILOT_NAMESPACE_PREFIX.test(text.slice(getLineBounds(text, position).start, position)))
-        return true;
-    // $, !, / and force: are explicit invocation syntax.
-    const leadingPrefix = hasDirectInvocationPrefix(text, position);
-    if (leadingPrefix && /[$/!:]/.test(text.slice(0, position)))
-        return true;
-    const { start: lineStart, end: lineEnd } = getLineBounds(text, position);
-    // $, ! and slash directly before the alias on its line is explicit invocation syntax, also on a later line.
-    if (/^[ \t]*[$/!]$/.test(text.slice(lineStart, position)))
-        return true;
-    const headStart = Math.max(lineStart, position - 80);
-    const tail = text.slice(headStart, position);
-    const afterKeyword = text.slice(position + keywordLength, position + keywordLength + 60);
-    const lineHead = text.slice(lineStart, Math.min(position, lineStart + 80));
-    // A question never starts the mode: it starts with a question word, or the sentence ends in "?".
-    const sentenceHead = /(?:^|[.!?;]\s+)([^.!?;]*)$/.exec(text.slice(Math.max(lineStart, position - 200), position));
-    // The clause after a label or an introductory phrase ("Question: Must I ...", "Out of curiosity, should I ...") is what gets classified.
-    const clauseHead = (sentenceHead ? sentenceHead[1] : tail).replace(/^.*[,:\u2014\u2013]\s*/, '');
-    if (AUTOPILOT_QUESTION_START.test(sentenceHead ? sentenceHead[1] : tail) || AUTOPILOT_QUESTION_START.test(clauseHead))
-        return false;
-    AUTOPILOT_SENTENCE_END.lastIndex = position + keywordLength;
-    const sentenceEnd = AUTOPILOT_SENTENCE_END.exec(text);
-    // "?" inside a quotation or parenthesis that the sentence continues after ("... from "Ready?" to "Go.") is not terminal.
-    // A bare "?" followed by a lowercase word ("rename Ready? to Go.") is a literal, not the end of a question.
-    const afterEnd = sentenceEnd === null ? '' : text.slice(sentenceEnd.index + sentenceEnd[0].length, lineEnd);
-    const nestedQuestion = sentenceEnd !== null
-        && ((sentenceEnd[0].length > 1 && !/^[ \t]*$/.test(afterEnd)) || /^[ \t]+\p{Ll}/u.test(afterEnd));
-    if (sentenceEnd && sentenceEnd.index < lineEnd && sentenceEnd[0][0] === '?' && !nestedQuestion && !AUTOPILOT_REQUEST_START.test(clauseHead))
-        return false;
-    // Check for a parenthesized question at the end of the sentence: "One question (should I use ...)"
-    const sentenceText = text.slice(lineStart, lineEnd).replace(/\s+$/, '');
-    if (sentenceText.endsWith(')')) {
-        const parenStart = sentenceText.lastIndexOf('(');
-        if (parenStart >= 0) {
-            const parenContent = sentenceText.slice(parenStart + 1, -1);
-            // Check if the parenthesized content is a question (starts with a question word or contains ?)
-            if (AUTOPILOT_QUESTION_START.test('(' + parenContent) || /\?/.test(parenContent)) {
-                return false;
-            }
-        }
-    }
-    if (AUTOPILOT_NEGATION_BEFORE.test(tail) || AUTOPILOT_NEGATION_BEFORE.test(tail.replace(AUTOPILOT_OPENING_DELIMITERS_AT_END, '')))
-        return false;
-    if (AUTOPILOT_REFERENCE_LABEL_LINE.test(lineHead.replace(AUTOPILOT_MARKDOWN_MARKS, '').replace(AUTOPILOT_LIST_PREFIX, '').replace(/\s+$/, '')))
-        return false;
-    if (AUTOPILOT_NON_ENGLISH_LINE.test(text.slice(lineStart, Math.min(lineEnd, lineStart + 400))))
-        return true;
-    const isHardwareAlias = /^(?:full\s*auto|fullsend)$/i.test((keywordText || '').trim());
-    if (leadingPrefix) {
-        // A plain alias that opens the prompt counts unless it reads as a status line ("autopilot run failed").
-        if (isHardwareAlias) {
-            return AUTOPILOT_ALONE_ON_LINE.test(afterKeyword)
-                || AUTOPILOT_COLON_VERB.test(afterKeyword)
-                || AUTOPILOT_COMMAND_AFTER.test(afterKeyword)
-                || /^[ \t]+(?:this|these|that|it|my|our|everything)(?![\p{L}\d])/iu.test(afterKeyword);
-        }
-        return !AUTOPILOT_LEADING_STATUS.test(afterKeyword);
-    }
-    if (AUTOPILOT_TURN_BEFORE.test(tail) && AUTOPILOT_ON_AFTER.test(afterKeyword))
-        return true;
-    if (AUTOPILOT_KEEP_USING_BEFORE.test(tail))
-        return true;
-    const atLineStart = /^[ \t]*(?:[$/!][ \t]*)?$/.test(lineHead);
-    if (atLineStart && (/[$/!]/.test(lineHead) || AUTOPILOT_ALONE_ON_LINE.test(afterKeyword)))
-        return true;
-    if (AUTOPILOT_ACTIVATION_BEFORE.test(tail) || AUTOPILOT_FOREIGN_VERB_BEFORE.test(tail))
-        return true;
-    if (AUTOPILOT_COLON_VERB.test(afterKeyword))
-        return true;
-    if (isHardwareAlias) {
-        return (atLineStart && AUTOPILOT_COMMAND_AFTER.test(afterKeyword))
-            || hasConversationalInvocationNearKeyword(text, position, keywordLength, keywordText);
-    }
-    if (AUTOPILOT_NOUN_USE_BEFORE.test(tail) || AUTOPILOT_COMMIT_LINE_BEFORE.test(tail) || AUTOPILOT_LEADING_STATUS.test(afterKeyword))
-        return false;
-    if (AUTOPILOT_COMMAND_AFTER.test(afterKeyword))
-        return true;
-    if (hasConversationalInvocationNearKeyword(text, position, keywordLength, keywordText))
-        return true;
-    return hasActivationIntentNearKeyword(text.slice(Math.max(lineStart, position - INFORMATIONAL_CONTEXT_WINDOW), Math.min(lineEnd, position + keywordLength + INFORMATIONAL_CONTEXT_WINDOW)), keywordText);
-}
-function findActionableAutopilotAliasMatch(text, pattern) {
-    const flags = pattern.flags.includes('g') ? pattern.flags : `${pattern.flags}g`;
-    const globalPattern = new RegExp(pattern.source, flags);
-    let scanned = 0;
-    for (const match of text.matchAll(globalPattern)) {
-        if (match.index === undefined)
-            continue;
-        if (++scanned > AUTOPILOT_MAX_MATCHES)
-            break;
-        const keyword = match[0];
-        if (!hasExplicitAutopilotInvocationContext(text, match.index, keyword.length, keyword))
-            continue;
-        // A namespaced or $ / ! / slash-prefixed command is unambiguous, whatever surrounds it.
-        const linePrefix = text.slice(getLineBounds(text, match.index).start, match.index);
-        if (AUTOPILOT_NAMESPACE_PREFIX.test(linePrefix) || /^[ \t]*[$/!]$/.test(linePrefix)) {
-            return { keyword, position: match.index };
-        }
-        // A command that opens its line with a command verb is judged on its own line, so a help question on an
-        // earlier line does not veto it; every other mention is judged on a bounded window around it.
-        const { start: lineStart, end: lineEnd } = getLineBounds(text, match.index);
-        let previousLine = '';
-        for (let end = lineStart - 1; end > 0 && (!previousLine.trim() || AUTOPILOT_THEMATIC_BREAK.test(previousLine));) {
-            const start = text.lastIndexOf('\n', end - 1) + 1;
-            previousLine = text.slice(start, end);
-            end = start - 1;
-        }
-        const afterAlias = text.slice(match.index + keyword.length, match.index + keyword.length + 60);
-        const ownLine = /^[ \t]*$/.test(linePrefix)
-            && !AUTOPILOT_REFERENCE_HEADING.test(previousLine.replace(AUTOPILOT_MARKDOWN_MARKS, '').replace(AUTOPILOT_LIST_PREFIX, '').replace(/\s+$/, ''))
-            && (AUTOPILOT_COMMAND_AFTER.test(afterAlias) || AUTOPILOT_COLON_VERB.test(afterAlias));
-        const from = ownLine ? lineStart : Math.max(0, match.index - AUTOPILOT_CONTEXT_WINDOW);
-        const to = ownLine ? lineEnd : match.index + keyword.length + AUTOPILOT_CONTEXT_WINDOW;
-        if (isInformationalKeywordContext(text.slice(from, to), match.index - from, keyword.length, keyword))
-            continue;
-        return { keyword, position: match.index };
-    }
-    return null;
-}
-function findActionableAutopilotMatch(text) {
-    // Only the Latin aliases need a command; the creation phrases and the
-    // Korean and Japanese aliases keep the generic check.
-    // When both classes match, the earlier (then longer) match wins, as in the combined pattern.
-    const alias = findActionableAutopilotAliasMatch(text, AUTOPILOT_ALIAS_PATTERN);
-    const other = findActionableKeywordMatch(text, AUTOPILOT_OTHER_PATTERN);
-    if (!alias || !other)
-        return alias ?? other;
-    if (other.position !== alias.position)
-        return other.position < alias.position ? other : alias;
-    return other.keyword.length > alias.keyword.length ? other : alias;
-}
 function findActionableRalplanMatch(text, pattern) {
     const flags = pattern.flags.includes('g') ? pattern.flags : `${pattern.flags}g`;
     const globalPattern = new RegExp(pattern.source, flags);
@@ -948,9 +745,7 @@ export function detectKeywordsWithType(text, _agentName) {
         }
         const match = type === 'ralplan'
             ? findActionableRalplanMatch(cleanedText, pattern)
-            : type === 'autopilot'
-                ? findActionableAutopilotMatch(cleanedText)
-                : findActionableKeywordMatch(cleanedText, pattern);
+            : findActionableKeywordMatch(cleanedText, pattern);
         if (match) {
             detected.push({
                 ...match,

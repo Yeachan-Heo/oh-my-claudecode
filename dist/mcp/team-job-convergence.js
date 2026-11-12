@@ -195,10 +195,7 @@ export function isValidTeamPaneArtifact(value, instanceId) {
         || !record.paneIds.every((paneId) => typeof paneId === 'string' && paneId.trim().length > 0)
         || new Set(record.paneIds).size !== record.paneIds.length
         || typeof record.leaderPaneId !== 'string'
-        // A Herdr leader started outside a Herdr pane is untracked (''); every
-        // other provider must name its leader pane.
-        || (record.leaderPaneId.trim().length === 0
-            && !(record.leaderPaneId === '' && typeof record.sessionName === 'string' && record.sessionName.startsWith('herdr:')))
+        || record.leaderPaneId.trim().length === 0
         || (record.sessionName !== undefined && (typeof record.sessionName !== 'string' || record.sessionName.trim().length === 0))
         || (record.ownsWindow !== undefined && typeof record.ownsWindow !== 'boolean')
         || !Array.isArray(record.workers))

@@ -2,9 +2,7 @@
  * Judgment resolver - the single seam every judgment point consults.
  *
  * Dispatches a named judgment across the off | shadow | active tri-state:
- * - off / cap / circuit-open: twin decides, no fetch, no log (the opt-in
- *   shared breaker and request limit of OMC_JEV_BREAKER / OMC_JEV_MAX_RPM
- *   also return circuit-open / cap, and log the held-back call)
+ * - off / cap / circuit-open: twin decides, no fetch, no log
  * - shadow: twin decides; the Jev call is made (waited on unless
  *   blocking:false) and the comparison logged
  * - active: Jev answer decides; the twin result is preserved in the log
@@ -14,7 +12,7 @@
  * Jev path - only twin() (and mapAnswer()) errors propagate, because twins
  * are existing repo code whose bugs must not be masked.
  */
-import type { JevAnswer, JevLogContext, JevQuestions, ResolveResult } from './types.js';
+import type { JevAnswer, JevQuestions, ResolveResult } from './types.js';
 /** Reset in-process resolver state (request cap, circuit breaker, warnings). Test hook. */
 export declare function resetJevResolverState(): void;
 export interface ResolveJudgmentArgs<T> {
@@ -55,32 +53,9 @@ export interface ResolveJudgmentArgs<T> {
      * is fire-and-forget and the comparison is logged when it settles.
      */
     blocking?: boolean;
-    /**
-     * The hook input of the call being judged, or any object carrying its ids
-     * (see jevLogContextOf). Logged with OMC_JEV_LOG_CONTEXT=1, never sent.
-     */
-    logContext?: unknown;
     /** Test hook: injected transport. */
     fetchFn?: typeof fetch;
 }
-/**
- * The ids of one hook call for the Jev logs: tool_use_id, session_id, cwd,
- * agent_id, agent_type, prompt_id and request_id, read from a hook input
- * (snake or camel case). Only non-empty strings are kept, each cut to 1000
- * characters. Mirror of jevLogContextOf in scripts/jev-resolve.mjs.
- */
-export declare function jevLogContextOf(source: unknown): JevLogContext;
-/**
- * Rotate one Jev log file before an append. A file larger than maxBytes is
- * renamed to <name>-<YYYYMMDD-HHmmss>-<pid>.jsonl (UTC) in the same directory,
- * so the append starts a new file. maxBytes 0 turns rotation off. An existing
- * target is never overwritten, and a failed rename (another process rotated
- * the file first, the file is locked) is ignored: rotation is best-effort and
- * must never cost the line being appended. Rotated files are never deleted.
- * Every writer of a Jev log file calls this right before appending.
- * Mirror of rotateJevLog in scripts/jev-resolve.mjs.
- */
-export declare function rotateJevLog(path: string, maxBytes: number, now?: Date): void;
 /** Extract the loggable heuristic value, applying mapHeuristic if provided. */
 /**
  * A logged heuristic is comparable with the logged Jev answer only when it is

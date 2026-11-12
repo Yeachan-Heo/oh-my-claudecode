@@ -34,7 +34,7 @@ vi.mock('../tmux-utils.js', async (importOriginal) => {
         tmuxExec: vi.fn(),
     };
 });
-import { isSensitiveTmuxEnvironmentVariable, runClaude, launchCommand, extractNotifyFlag, extractOpenClawFlag, extractTelegramFlag, extractDiscordFlag, extractSlackFlag, extractWebhookFlag, normalizeClaudeLaunchArgs, isPrintMode, prepareOmcLaunchConfigDir, buildEnvExportPrefix, buildSensitiveEnvFilePrefix, buildTmuxClaudeCommand, hasMadmaxFlag, TMUX_ENV_FORWARD } from '../launch.js';
+import { runClaude, launchCommand, extractNotifyFlag, extractOpenClawFlag, extractTelegramFlag, extractDiscordFlag, extractSlackFlag, extractWebhookFlag, normalizeClaudeLaunchArgs, isPrintMode, prepareOmcLaunchConfigDir, buildEnvExportPrefix, buildSensitiveEnvFilePrefix, buildTmuxClaudeCommand, hasMadmaxFlag, TMUX_ENV_FORWARD } from '../launch.js';
 import { resolveLaunchPolicy, buildTmuxShellCommand, buildTmuxShellCommandWithEnv, isNativeWindowsShell, wrapWithLoginShell, quoteShellArg, isTmuxAvailable, tmuxExec, } from '../tmux-utils.js';
 function mockValidTmuxPane() {
     vi.mocked(tmuxExec).mockImplementation((args) => {
@@ -120,9 +120,6 @@ describe('normalizeClaudeLaunchArgs', () => {
 describe('runClaude — exit code propagation', () => {
     let processExitSpy;
     let stderrSpy;
-    beforeEach(() => {
-        process.env.OMC_TEAM_MULTIPLEXER = 'tmux';
-    });
     beforeEach(() => {
         vi.resetAllMocks();
         processExitSpy = vi.spyOn(process, 'exit').mockImplementation(() => undefined);
@@ -300,15 +297,6 @@ describe('runClaude — exit code propagation', () => {
         it('forwards effective provider credentials without putting the value on a command line', () => {
             const savedApiKey = process.env.ANTHROPIC_API_KEY;
             const secret = "key with spaces; it's still one value";
-            // Clear other credential-shaped variables from the host shell so the
-            // env.sh body anchor below is deterministic on dev machines.
-            const savedSensitive = {};
-            for (const key of Object.keys(process.env)) {
-                if (key !== 'ANTHROPIC_API_KEY' && isSensitiveTmuxEnvironmentVariable(key)) {
-                    savedSensitive[key] = process.env[key];
-                    delete process.env[key];
-                }
-            }
             process.env.ANTHROPIC_API_KEY = secret;
             try {
                 runClaude('/tmp', [], 'sid');
@@ -332,12 +320,6 @@ describe('runClaude — exit code propagation', () => {
                 rmSync(dirname(envFile), { recursive: true, force: true });
             }
             finally {
-                for (const [key, value] of Object.entries(savedSensitive)) {
-                    if (value === undefined)
-                        delete process.env[key];
-                    else
-                        process.env[key] = value;
-                }
                 if (savedApiKey === undefined)
                     delete process.env.ANTHROPIC_API_KEY;
                 else
@@ -2256,14 +2238,14 @@ describe('runClaude outside-tmux — env forwarding', () => {
                 process.env.ANTHROPIC_API_KEY = savedApiKey;
         }
     });
-    it('rejects newline values before composing a native psmux command', async () => {
+    it('rejects newline values before composing a native psmux command', () => {
         const originalPlatform = process.platform;
         const savedApiKey = process.env.ANTHROPIC_API_KEY;
         Object.defineProperty(process, 'platform', { value: 'win32', configurable: true });
         process.env.ANTHROPIC_API_KEY = 'line\nbreak';
         vi.mocked(isNativeWindowsShell).mockReturnValue(true);
         try {
-            await expect(runClaude('/tmp', [], 'sid')).rejects.toThrow('Native Windows tmux command values cannot contain NUL, CR, or LF characters');
+            expect(() => runClaude('/tmp', [], 'sid')).toThrow('Native Windows tmux command values cannot contain NUL, CR, or LF characters');
         }
         finally {
             Object.defineProperty(process, 'platform', { value: originalPlatform, configurable: true });

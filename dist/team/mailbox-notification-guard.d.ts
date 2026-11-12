@@ -1,6 +1,6 @@
-import { type StrictDispatchReadResult, type TeamDispatchRequest } from "./dispatch-queue.js";
-import { type StrictCanonicalMailboxMessageReadResult } from "./team-ops.js";
-import { type TeamConfig, type TeamMailboxMessage, type TmuxServerIdentity } from "./types.js";
+import { type StrictDispatchReadResult, type TeamDispatchRequest } from './dispatch-queue.js';
+import { type StrictCanonicalMailboxMessageReadResult } from './team-ops.js';
+import { type TeamConfig, type TeamMailboxMessage, type TmuxServerIdentity } from './types.js';
 export interface MailboxNotificationGuardInput {
     teamName: string;
     recipient: string;
@@ -8,39 +8,34 @@ export interface MailboxNotificationGuardInput {
     messageId: string;
     triggerMessage: string;
 }
-export type MailboxNotificationProvider = "tmux" | "cmux" | "herdr";
+export type MailboxNotificationProvider = 'tmux' | 'cmux';
 export interface MailboxNotificationTarget {
     provider: MailboxNotificationProvider;
     providerTarget: string;
     recipient: string;
-    recipientRole: "leader" | "worker";
+    recipientRole: 'leader' | 'worker';
     paneId: string;
     workerIndex?: number;
     /** Present only for tmux targets and copied from the persisted config binding. */
     tmuxServerIdentity?: TmuxServerIdentity;
 }
 export type MailboxTargetOwnership = {
-    kind: "owned";
-    provider: "tmux";
+    kind: 'owned';
+    provider: 'tmux';
     providerTarget: string;
     paneId: string;
     tmuxServerIdentity: TmuxServerIdentity;
 } | {
-    kind: "owned";
-    provider: "cmux";
+    kind: 'owned';
+    provider: 'cmux';
     providerTarget: string;
     paneId: string;
 } | {
-    kind: "owned";
-    provider: "herdr";
-    providerTarget: string;
-    paneId: string;
+    kind: 'unavailable';
 } | {
-    kind: "unavailable";
+    kind: 'foreign';
 } | {
-    kind: "foreign";
-} | {
-    kind: "provider_mismatch";
+    kind: 'provider_mismatch';
 };
 /** Fields that must remain identical between the guard's pre-effect re-reads. */
 export interface MailboxNotificationSecurityTuple {
@@ -51,20 +46,20 @@ export interface MailboxNotificationSecurityTuple {
     configTmuxServerPid?: number;
     configTmuxServerProcessStartedAt?: string;
     recipient: string;
-    recipientRole: "leader" | "worker";
+    recipientRole: 'leader' | 'worker';
     canonicalPaneId: string;
     canonicalWorkerIndex?: number;
     requestId: string;
-    requestKind: "mailbox";
+    requestKind: 'mailbox';
     requestTeamName: string;
     requestRecipient: string;
     requestMessageId: string;
     requestTriggerMessage: string;
     requestPaneId?: string;
     requestWorkerIndex?: number;
-    requestTransportPreference: TeamDispatchRequest["transport_preference"];
+    requestTransportPreference: TeamDispatchRequest['transport_preference'];
     requestFallbackAllowed: boolean;
-    requestStatus: "pending";
+    requestStatus: 'pending';
     mailboxOwner: string;
     mailboxMessageId: string;
     mailboxRecipient: string;
@@ -72,15 +67,15 @@ export interface MailboxNotificationSecurityTuple {
     providerTarget: string;
     providerPaneId: string;
 }
-export type MailboxNotificationGuardReason = "mailbox_team_unavailable" | "mailbox_team_identity_mismatch" | "mailbox_request_missing" | "mailbox_dispatch_store_invalid" | "mailbox_request_ambiguous" | "mailbox_request_not_pending" | "mailbox_request_identity_mismatch" | "mailbox_target_missing" | "mailbox_target_metadata_mismatch" | "leader_pane_missing_deferred" | "mailbox_store_invalid" | "mailbox_message_missing" | "mailbox_message_ambiguous" | "mailbox_recipient_mismatch" | "mailbox_replay_suppressed" | "mailbox_provider_mismatch" | "mailbox_membership_unresolvable" | "mailbox_target_foreign";
+export type MailboxNotificationGuardReason = 'mailbox_team_unavailable' | 'mailbox_team_identity_mismatch' | 'mailbox_request_missing' | 'mailbox_dispatch_store_invalid' | 'mailbox_request_ambiguous' | 'mailbox_request_not_pending' | 'mailbox_request_identity_mismatch' | 'mailbox_target_missing' | 'mailbox_target_metadata_mismatch' | 'leader_pane_missing_deferred' | 'mailbox_store_invalid' | 'mailbox_message_missing' | 'mailbox_message_ambiguous' | 'mailbox_recipient_mismatch' | 'mailbox_replay_suppressed' | 'mailbox_provider_mismatch' | 'mailbox_membership_unresolvable' | 'mailbox_target_foreign';
 export type MailboxNotificationGuardResult = {
-    kind: "allow";
+    kind: 'allow';
     target: MailboxNotificationTarget;
     request: TeamDispatchRequest;
     message: TeamMailboxMessage;
     securityTuple: MailboxNotificationSecurityTuple;
 } | {
-    kind: "suppress";
+    kind: 'suppress';
     reason: MailboxNotificationGuardReason;
     safePendingRequest?: TeamDispatchRequest;
     target?: MailboxNotificationTarget;

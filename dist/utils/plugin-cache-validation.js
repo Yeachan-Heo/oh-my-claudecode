@@ -216,35 +216,26 @@ function hasUsableOmcHookTargets(path, staleVersionIdentity) {
             for (const hook of group.hooks) {
                 if (!isRecord(hook))
                     return false;
-                const references = [];
-                if (typeof hook.command === 'string')
-                    references.push(hook.command);
-                if (Array.isArray(hook.args)) {
-                    for (const arg of hook.args) {
-                        if (typeof arg === 'string')
-                            references.push(arg);
+                if (typeof hook.command !== 'string')
+                    continue;
+                for (const match of hook.command.matchAll(/\$(?:\{CLAUDE_PLUGIN_ROOT\}|CLAUDE_PLUGIN_ROOT)["']?([\\/][^"'`\s]+)/g)) {
+                    const reference = match[1];
+                    if (!reference)
+                        return false;
+                    const pathParts = reference.split(/[\\/]+/).filter(Boolean);
+                    if (pathParts.includes('..'))
+                        return false;
+                    const targetPath = join(path, ...pathParts);
+                    try {
+                        const targetStats = statSync(targetPath);
+                        if (!targetStats.isFile() ||
+                            targetStats.size <= 0 ||
+                            pathTraversesFileSystemIdentity(targetPath, staleVersionIdentity)) {
+                            return false;
+                        }
                     }
-                }
-                for (const referenceText of references) {
-                    for (const match of referenceText.matchAll(/\$(?:\{CLAUDE_PLUGIN_ROOT\}|CLAUDE_PLUGIN_ROOT)["']?([\\/][^"'`\s]+)/g)) {
-                        const reference = match[1];
-                        if (!reference)
-                            return false;
-                        const pathParts = reference.split(/[\\/]+/).filter(Boolean);
-                        if (pathParts.includes('..'))
-                            return false;
-                        const targetPath = join(path, ...pathParts);
-                        try {
-                            const targetStats = statSync(targetPath);
-                            if (!targetStats.isFile() ||
-                                targetStats.size <= 0 ||
-                                pathTraversesFileSystemIdentity(targetPath, staleVersionIdentity)) {
-                                return false;
-                            }
-                        }
-                        catch {
-                            return false;
-                        }
+                    catch {
+                        return false;
                     }
                 }
             }

@@ -11,7 +11,7 @@
  * (hooks/jev/points.ts); this module keeps the call-specific state shape.
  */
 import { detectExtractableMoment } from './detector.js';
-import { noulAnswerIsYes, recordJudgment } from '../jev/index.js';
+import { recordJudgment } from '../jev/index.js';
 /**
  * Record the shadow comparison for one assistant message and return the
  * detection (twin in shadow/off mode, Jev-mapped in active mode). With no
@@ -29,9 +29,9 @@ export function recordLearnerExtractionShadow(assistantMessage, userMessage, fet
         twin: () => detectExtractableMoment(assistantMessage, userMessage),
         mapHeuristic: (result, questionSet) => result.detected,
         mapAnswer: (answer) => {
-            // Jev Noul answer: noul is the probability of "yes" (0-1)
+            // Jev Noul answer has { type: 'noul', noul: boolean | undefined }
             return {
-                detected: noulAnswerIsYes(answer),
+                detected: answer.noul === true,
                 confidence: (answer.confidence ?? 0.5) * 100, // Scale to 0-100
                 patternType: 'technique',
                 suggestedTriggers: [],

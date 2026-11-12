@@ -202,7 +202,7 @@ export function findCommand(commandName) {
  * Resolve $ARGUMENTS placeholder in command content
  */
 function resolveArguments(content, args) {
-    return content.replace(/\$ARGUMENTS/g, () => args || '(no arguments provided)');
+    return content.replace(/\$ARGUMENTS/g, args || '(no arguments provided)');
 }
 function validateLiveDataArguments(args) {
     for (const char of args) {

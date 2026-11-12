@@ -5,8 +5,6 @@ import { TASK_ID_SAFE_PATTERN } from '../contracts.js';
 import { createSwallowedErrorLogger } from '../../lib/swallowed-error.js';
 const logEventAppendFailure = createSwallowedErrorLogger('team.state.tasks transitionTaskStatus appendTeamEvent failed');
 const logCompletionMarkerFailure = createSwallowedErrorLogger('team.state.tasks transitionTaskStatus completion marker failed');
-/** Lease window granted by claim, renewal, and recovery adoption. */
-export const TASK_CLAIM_LEASE_MS = 15 * 60 * 1000;
 /**
  * `depends_on` is the canonical dependency field, while `blocked_by` is kept
  * for compatibility with older task producers. Once both fields are present
@@ -147,14 +145,10 @@ export async function claimTask(taskId, workerName, expectedVersion, deps) {
             ...v,
             status: 'in_progress',
             owner: workerName,
-            // An ordinary claim supersedes historical recovery-adoption metadata:
-            // the new lease is a plain claim, not a recovery adoption, so stale
-            // adoption records must not govern it (e.g. renewal after reclaim).
-            recovery_adoption: undefined,
             claim: {
                 owner: workerName,
                 token: claimToken,
-                leased_until: new Date(Date.now() + TASK_CLAIM_LEASE_MS).toISOString(),
+                leased_until: new Date(Date.now() + 15 * 60 * 1000).toISOString(),
                 ...(deps.launchAttemptId ? { launch_attempt_id: deps.launchAttemptId } : {}),
             },
             version: v.version + 1,
@@ -291,54 +285,6 @@ export async function releaseTaskClaim(taskId, claimToken, _workerName, deps) {
             owner: undefined,
             claim: undefined,
             version: v.version + 1,
-        };
-        await deps.writeAtomic(deps.taskFilePath(deps.teamName, taskId, deps.cwd), JSON.stringify(updated, null, 2));
-        return { ok: true, task: updated };
-    });
-    if (!lock.ok)
-        return { ok: false, error: 'claim_conflict' };
-    return lock.value;
-}
-/**
- * Extends the lease of a live claim so a worker on a long-running task can
- * still complete, release, or checkpoint it after the original 15-minute
- * window. Fencing is preserved: an expired lease is never renewed (dead-worker
- * recovery owns it), the claim token and owner must match, and a task with a
- * recovery reservation or adoption is never renewed.
- */
-export async function renewTaskClaim(taskId, claimToken, workerName, deps) {
-    const lock = await deps.withTaskClaimLock(deps.teamName, taskId, deps.cwd, async () => {
-        const current = await deps.readTask(deps.teamName, taskId, deps.cwd);
-        if (!current)
-            return { ok: false, error: 'task_not_found' };
-        // Dead-worker recovery commits active_recovery before it reserves the task, so a
-        // delayed renewal from the old attempt must not move the lease the saga will requeue.
-        // Read under the claim lock: the reservation write needs the same lock, so a renewal
-        // either finishes before recovery touches the task or sees the marker.
-        const teamConfig = await deps.readTeamConfig(deps.teamName, deps.cwd);
-        if (teamConfig?.active_recovery?.worker_name === workerName) {
-            return { ok: false, error: 'claim_conflict' };
-        }
-        const v = deps.normalizeTask(current);
-        if (v.status === 'completed' || v.status === 'failed')
-            return { ok: false, error: 'already_terminal' };
-        if (v.status !== 'in_progress')
-            return { ok: false, error: 'invalid_transition' };
-        if (v.recovery_reservation)
-            return { ok: false, error: 'claim_conflict' };
-        if (v.recovery_adoption)
-            return { ok: false, error: 'claim_conflict' };
-        if (!v.owner || !hasValidLease(v.claim) || v.claim.owner !== v.owner || v.claim.owner !== workerName || v.claim.token !== claimToken) {
-            return { ok: false, error: 'claim_conflict' };
-        }
-        if (Date.parse(v.claim.leased_until) <= Date.now())
-            return { ok: false, error: 'lease_expired' };
-        const updated = {
-            ...v,
-            claim: {
-                ...v.claim,
-                leased_until: new Date(Date.now() + TASK_CLAIM_LEASE_MS).toISOString(),
-            },
         };
         await deps.writeAtomic(deps.taskFilePath(deps.teamName, taskId, deps.cwd), JSON.stringify(updated, null, 2));
         return { ok: true, task: updated };
@@ -546,7 +492,7 @@ export async function adoptRecoveryReservations(taskIds, workerName, proof, deps
             const updated = { ...task, status: 'in_progress', owner: workerName, claim: {
                     owner: workerName,
                     token: claimToken,
-                    leased_until: new Date(Date.now() + TASK_CLAIM_LEASE_MS).toISOString(),
+                    leased_until: new Date(Date.now() + 15 * 60 * 1000).toISOString(),
                     ...(deps.launchAttemptId ? { launch_attempt_id: deps.launchAttemptId } : {}),
                 }, version: task.version + 1, recovery_reservation: undefined, recovery_adoption: { recovery_id: reservation.recovery_id, request_id: reservation.request_id, continuation_sequence: reservation.continuation_sequence, checkpoint_path: reservation.checkpoint_path, checkpoint_hash: reservation.checkpoint_hash, replacement_worker: workerName, replacement_generation: reservation.replacement_generation, adopted_at: adoptedAt } };
             await deps.writeAtomic(deps.taskFilePath(deps.teamName, taskId, deps.cwd), JSON.stringify(updated, null, 2));

@@ -20,29 +20,14 @@ const HARD_RISK_ENTRYPOINTS = new Map([
     ['permission-handler.mjs', 'security-boundary'],
 ]);
 const ENTRYPOINT_RE = /scripts\/([A-Za-z0-9._-]+\.mjs)((?:"|\s)[^"]*)?$/;
-const EXEC_SCRIPT_RE = /^[A-Za-z0-9._-]+\.mjs$/;
-/**
- * Parse an installed hook into entrypoint basename + trailing args.
- * Accepts the exec form (`command: node` plus `args`) and the older shell
- * string, so a cache that has not been rewritten still registers.
- */
-export function parseEntrypointCommand(command, args) {
-    if (command === 'node' && args && args.length >= 2) {
-        const runner = args[0].replace(/\\/g, '/');
-        const script = args[1].replace(/\\/g, '/').split('/').pop() ?? '';
-        if (runner.endsWith('/scripts/run.cjs') && EXEC_SCRIPT_RE.test(script) && script !== 'run.cjs') {
-            return {
-                entrypoint: script,
-                args: args.slice(2).map((item) => item.trim()).filter((item) => item.length > 0),
-            };
-        }
-    }
+/** Parse an installed command into entrypoint basename + trailing args. */
+export function parseEntrypointCommand(command) {
     const m = ENTRYPOINT_RE.exec(command);
     if (!m)
         return null;
     const tail = (m[2] ?? '').trim();
-    const trailing = tail.length > 0 ? tail.split(/\s+/) : [];
-    return { entrypoint: m[1], args: trailing };
+    const args = tail.length > 0 ? tail.split(/\s+/) : [];
+    return { entrypoint: m[1], args };
 }
 /** Derive risk class by convention: only security/destructive hooks are hard-risk. */
 function riskClassForEntrypoint(entrypoint) {
@@ -63,7 +48,7 @@ export function buildHookRegistry(hooksJson) {
             continue;
         for (const group of groups) {
             group.hooks.forEach((hook, order) => {
-                const parsed = parseEntrypointCommand(hook.command, hook.args);
+                const parsed = parseEntrypointCommand(hook.command);
                 if (!parsed)
                     return;
                 const riskClass = riskClassForEntrypoint(parsed.entrypoint);
@@ -101,7 +86,7 @@ export function validateRegistryAgainstHooksJson(hooksJson) {
         }
         for (const group of groups) {
             for (const hook of group.hooks) {
-                const parsed = parseEntrypointCommand(hook.command, hook.args);
+                const parsed = parseEntrypointCommand(hook.command);
                 if (!parsed) {
                     issues.push({
                         code: 'unparseable-command',

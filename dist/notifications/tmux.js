@@ -4,39 +4,11 @@
  * Detects the current tmux session name for inclusion in notification payloads.
  */
 import { tmuxShell } from "../cli/tmux-utils.js";
-import { isHerdrPaneId } from "../team/tmux-session.js";
-import { herdrWorkspaceIdFromPaneId, listHerdrTeams, } from "../team/herdr-session.js";
-/**
- * The Herdr pane hosting this process, when OMC itself runs inside Herdr.
- * The HERDR_PANE_ID grammar (wN:pM) is validated before any use; an absent
- * or malformed value leaves the default tmux detection untouched.
- */
-export function getCurrentHerdrPaneId(env = process.env) {
-    const paneId = env.HERDR_PANE_ID?.trim();
-    return paneId && isHerdrPaneId(paneId) ? paneId : null;
-}
-/** Herdr team-session marker (herdr:<workspace_id>) for the current pane. */
-function herdrSessionMarker(paneId) {
-    try {
-        return `herdr:${herdrWorkspaceIdFromPaneId(paneId)}`;
-    }
-    catch {
-        return null;
-    }
-}
 /**
  * Get the current tmux session name.
  * Returns null if not running inside tmux.
- *
- * Inside a Herdr pane the team-session marker (herdr:<workspace_id>) is
- * returned instead, so payloads and registries use the same marker grammar
- * the team layer persists.
  */
 export function getCurrentTmuxSession() {
-    const herdrPane = getCurrentHerdrPaneId();
-    if (herdrPane) {
-        return herdrSessionMarker(herdrPane);
-    }
     // Check if we're inside a tmux session
     if (!process.env.TMUX) {
         return null;
@@ -90,15 +62,10 @@ export function getTeamTmuxSessions(teamName) {
     }
 }
 /**
- * Format multiplexer session info for human-readable display.
- * Returns null when not inside tmux or Herdr.
+ * Format tmux session info for human-readable display.
+ * Returns null if not in tmux.
  */
 export function formatTmuxInfo() {
-    const herdrPane = getCurrentHerdrPaneId();
-    if (herdrPane) {
-        const marker = herdrSessionMarker(herdrPane);
-        return marker ? `herdr: ${marker.slice("herdr:".length)}` : null;
-    }
     const session = getCurrentTmuxSession();
     if (!session)
         return null;
@@ -111,11 +78,6 @@ export function formatTmuxInfo() {
  * Tries $TMUX_PANE env var first, falls back to tmux display-message.
  */
 export function getCurrentTmuxPaneId() {
-    // A Herdr pane context wins: the pane id routes notifications and replies
-    // to the Herdr agent surface instead of tmux send-keys.
-    const herdrPane = getCurrentHerdrPaneId();
-    if (herdrPane)
-        return herdrPane;
     if (!process.env.TMUX)
         return null;
     // Prefer $TMUX_PANE (set by tmux automatically)
@@ -132,23 +94,6 @@ export function getCurrentTmuxPaneId() {
     }
     catch {
         return null;
-    }
-}
-/**
- * List Herdr team workspaces for a given team (omc-team-<name> labels).
- * Async because the Herdr CLI answers JSON envelopes; returns [] on any
- * failure, mirroring the tmux variant's tolerance.
- */
-export async function getTeamHerdrWorkspaces(teamName) {
-    const sanitized = teamName.replace(/[^a-zA-Z0-9-]/g, "");
-    if (!sanitized)
-        return [];
-    try {
-        const teams = await listHerdrTeams();
-        return teams.filter((team) => team.teamName === sanitized);
-    }
-    catch {
-        return [];
     }
 }
 //# sourceMappingURL=tmux.js.map

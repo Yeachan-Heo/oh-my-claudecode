@@ -28,7 +28,7 @@ export interface NudgeAuthority {
     /** Tmux server incarnation captured when the team was created. */
     tmuxServerIdentity?: TmuxServerIdentity;
     /** Provider inferred from the persisted target when omitted. */
-    provider?: 'tmux' | 'cmux' | 'herdr';
+    provider?: 'tmux' | 'cmux';
     /**
      * Return the exact provider ownership for one persisted worker pane.
      * Missing ownership is never replaced with ambient pane capture.
