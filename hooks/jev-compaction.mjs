@@ -1329,7 +1329,7 @@ function positionsOf(text, s) {
 // (userBlockEnd), so a frame line the user quotes before the note stays in it.
 function piecesOf(text) {
   const pieces = [];
-  const spans = envelopesOf(text).filter((e) => deliveryOf(e.text)); // envelopes the user pasted
+  const spans = envelopesOf(text); // every envelope is opaque to the user's block around it: a footer or header in it is a quote
   const index = blockIndex(text, spans);
   const lastTail = text.lastIndexOf(QUEUED_TAIL);
   let end = -1;
@@ -1348,8 +1348,9 @@ function piecesOf(text) {
 // The envelopes of a row's text that hold a delivered message, except one inside a user's block before
 // its framing note: that one is a quote the user pasted and stays in their block.
 function deliveredOf(text) {
-  const all = envelopesOf(text).filter((e) => deliveryOf(e.text));
-  const index = blockIndex(text, all);
+  const envelopes = envelopesOf(text); // every envelope is opaque to the user's block around it
+  const all = envelopes.filter((e) => deliveryOf(e.text));
+  const index = blockIndex(text, envelopes);
   const lastTail = text.lastIndexOf(QUEUED_TAIL);
   const out = [];
   let end = -1;
@@ -1362,7 +1363,7 @@ function deliveredOf(text) {
     }
     const nl = text.indexOf('\n', p);
     const stop = Math.min(nl < 0 ? text.length : nl, k < all.length ? all[k].from : text.length);
-    if (p >= end && p < lastTail && frameOf(`${text.slice(p, stop)}\n`) === 'user') end = userBlockEnd(text, p, all, index);
+    if (p >= end && p < lastTail && frameOf(`${text.slice(p, stop)}\n`) === 'user') end = userBlockEnd(text, p, envelopes, index);
     p = stop === nl ? nl + 1 : stop;
   }
   return out;
