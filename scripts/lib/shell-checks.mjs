@@ -1019,11 +1019,13 @@ export function maskSecrets(text) {
 }
 
 // A name/value pair in JSON text, `{"Name":"DB_PASSWORD","Value":"hunter2zz"}` or the AWS SSM form with `"Type":"SecureString"`:
-// the value is masked when the name holds a secret word. At most 6 simple fields lie between the two, forward the nearest value,
-// backward the farthest name; every part has a length cap, so a failed match costs a bounded read and the rule stays linear.
-const PAIR_NAME = String.raw`"([A-Za-z_]{0,40}(?:name|key|type))"(\s*:\s*)"([^"\\\n]{0,200})"`;
-const PAIR_VALUE = String.raw`"([A-Za-z_]{0,40}(?:value|val))"(\s*:\s*)("(?:[^"\\\n]|\\.){0,4000}"|[^,}\]\s]{1,200})`;
-const PAIR_GAP = String.raw`((?:\s*,\s*"[^"\\\n]{0,40}"\s*:\s*(?:"[^"\\\n]{0,200}"|[^,{}\[\]\s"]{1,40})){0,6}?\s*,\s*)`;
+// the value is masked when the name holds a secret word. At most 6 simple fields lie between the two, none of them a value field
+// (so each value pairs with the nearest name, and a pair never spans another value); forward the nearest value, backward the
+// farthest name. Strings are read to their closing quote with no length cap (an unterminated value to the end of the line), and a
+// failed match reads at most the 6 fields after its start, so the rule stays linear.
+const PAIR_NAME = String.raw`"([A-Za-z_]*(?:name|key|type))"(\s*:\s*)"((?:[^"\\\n]|\\.)*)"`;
+const PAIR_VALUE = String.raw`"([A-Za-z_]*(?:value|val))"(\s*:\s*)("(?:[^"\\\n]|\\.)*"?|[^,}\]\s]+)`;
+const PAIR_GAP = String.raw`((?:\s*,\s*(?!"[A-Za-z_]*(?:value|val)")"(?:[^"\\\n]|\\.)*"\s*:\s*(?:"(?:[^"\\\n]|\\.)*"|[^,{}\[\]\s"]+)){0,6}?\s*,\s*)`;
 const PAIR_FORWARD = new RegExp(PAIR_NAME + PAIR_GAP + PAIR_VALUE, 'gi');
 const PAIR_BACKWARD = new RegExp(PAIR_VALUE + PAIR_GAP.replace('{0,6}?', '{0,6}') + PAIR_NAME, 'gi');
 const secretPairName = (name) => /key|token|secret|passw|pwd|credential|^securestring$/i.test(name);
