@@ -1,0 +1,67 @@
+[
+ {
+  "ts": "2026-11-11T21:16:00.916Z",
+  "state": "a",
+  "wording": "question before history field",
+  "probabilities": {
+   "zadne": 0.4,
+   "zaloz_liste": 0.55,
+   "wpisz_krok": 0.02,
+   "lista_nieaktualna": 0.01,
+   "notka": 0.02
+  },
+  "choice": "zaloz_liste"
+ },
+ {
+  "ts": "2026-11-11T21:16:06.434Z",
+  "state": "a",
+  "wording": "history, first wording",
+  "probabilities": {
+   "zadne": 0.43,
+   "zaloz_liste": 0.47,
+   "wpisz_krok": 0.05,
+   "lista_nieaktualna": 0.03,
+   "notka": 0.02
+  },
+  "choice": "zaloz_liste"
+ },
+ {
+  "ts": "2026-11-11T21:24:26.177Z",
+  "state": "a",
+  "wording": "history, final wording (QUESTION_WITH_HISTORY)",
+  "probabilities": {
+   "zadne": 0.49,
+   "zaloz_liste": 0.29,
+   "wpisz_krok": 0.1,
+   "lista_nieaktualna": 0.08,
+   "notka": 0.04
+  },
+  "choice": "zadne"
+ },
+ {
+  "ts": "2026-11-11T21:16:07.080Z",
+  "state": "b",
+  "wording": "question before history field",
+  "probabilities": {
+   "zadne": 0.19,
+   "zaloz_liste": 0,
+   "wpisz_krok": 0.16,
+   "lista_nieaktualna": 0.6,
+   "notka": 0.05
+  },
+  "choice": "lista_nieaktualna"
+ },
+ {
+  "ts": "2026-11-11T21:16:07.677Z",
+  "state": "b",
+  "wording": "history, first wording",
+  "probabilities": {
+   "zadne": 0.17,
+   "zaloz_liste": 0,
+   "wpisz_krok": 0.14,
+   "lista_nieaktualna": 0.66,
+   "notka": 0.03
+  },
+  "choice": "lista_nieaktualna"
+ }
+]

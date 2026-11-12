@@ -1,0 +1,261 @@
+{
+ "session_id": "synthetic-session",
+ "batches": [
+  {
+   "ts": "2026-01-01T10:00:00.000Z",
+   "agent": "sub-1",
+   "agent_type": "executor",
+   "calls": [
+    {
+     "tool_name": "Bash"
+    },
+    {
+     "tool_name": "Bash"
+    },
+    {
+     "tool_name": "Bash"
+    },
+    {
+     "tool_name": "Read"
+    },
+    {
+     "tool_name": "Read"
+    },
+    {
+     "tool_name": "Read"
+    }
+   ]
+  },
+  {
+   "ts": "2026-01-01T10:00:05.000Z",
+   "agent": "main",
+   "calls": [
+    {
+     "tool_name": "TaskCreate",
+     "tool_input": {
+      "subject": "step one"
+     },
+     "tool_response": "Task #1 created"
+    },
+    {
+     "tool_name": "TaskCreate",
+     "tool_input": {
+      "subject": "step two"
+     },
+     "tool_response": "Task #2 created"
+    }
+   ]
+  },
+  {
+   "ts": "2026-01-01T10:00:08.000Z",
+   "agent": "main",
+   "calls": [
+    {
+     "tool_name": "TaskUpdate",
+     "tool_input": {
+      "taskId": "1",
+      "status": "in_progress"
+     }
+    }
+   ]
+  },
+  {
+   "ts": "2026-01-01T10:00:30.000Z",
+   "agent": "sub-1",
+   "agent_type": "executor",
+   "calls": [
+    {
+     "tool_name": "Bash"
+    },
+    {
+     "tool_name": "Bash"
+    },
+    {
+     "tool_name": "Bash"
+    },
+    {
+     "tool_name": "Read"
+    },
+    {
+     "tool_name": "Read"
+    },
+    {
+     "tool_name": "Read"
+    }
+   ]
+  },
+  {
+   "ts": "2026-01-01T10:00:40.000Z",
+   "agent": "main",
+   "calls": [
+    {
+     "tool_name": "Bash"
+    },
+    {
+     "tool_name": "Read"
+    }
+   ]
+  },
+  {
+   "ts": "2026-01-01T10:01:00.000Z",
+   "agent": "sub-1",
+   "agent_type": "executor",
+   "calls": [
+    {
+     "tool_name": "Bash"
+    },
+    {
+     "tool_name": "Bash"
+    },
+    {
+     "tool_name": "Bash"
+    },
+    {
+     "tool_name": "Read"
+    },
+    {
+     "tool_name": "Read"
+    },
+    {
+     "tool_name": "Read"
+    }
+   ]
+  },
+  {
+   "ts": "2026-01-01T10:01:10.000Z",
+   "agent": "main",
+   "calls": [
+    {
+     "tool_name": "Bash"
+    },
+    {
+     "tool_name": "Read"
+    }
+   ]
+  },
+  {
+   "ts": "2026-01-01T10:01:30.000Z",
+   "agent": "sub-1",
+   "agent_type": "executor",
+   "calls": [
+    {
+     "tool_name": "Bash"
+    },
+    {
+     "tool_name": "Bash"
+    },
+    {
+     "tool_name": "Bash"
+    },
+    {
+     "tool_name": "Read"
+    },
+    {
+     "tool_name": "Read"
+    },
+    {
+     "tool_name": "Read"
+    }
+   ]
+  },
+  {
+   "ts": "2026-01-01T10:01:40.000Z",
+   "agent": "main",
+   "calls": [
+    {
+     "tool_name": "Bash"
+    },
+    {
+     "tool_name": "Read"
+    }
+   ]
+  },
+  {
+   "ts": "2026-01-01T10:01:55.000Z",
+   "agent": "main",
+   "calls": [
+    {
+     "tool_name": "Bash"
+    },
+    {
+     "tool_name": "Read"
+    }
+   ]
+  },
+  {
+   "ts": "2026-01-01T10:02:00.000Z",
+   "agent": "sub-1",
+   "agent_type": "executor",
+   "calls": [
+    {
+     "tool_name": "Bash"
+    },
+    {
+     "tool_name": "Bash"
+    },
+    {
+     "tool_name": "Bash"
+    },
+    {
+     "tool_name": "Read"
+    },
+    {
+     "tool_name": "Read"
+    },
+    {
+     "tool_name": "Read"
+    }
+   ]
+  },
+  {
+   "ts": "2026-01-01T10:02:02.000Z",
+   "agent": "main",
+   "calls": [
+    {
+     "tool_name": "TaskUpdate",
+     "tool_input": {
+      "taskId": "1",
+      "status": "completed"
+     }
+    }
+   ]
+  },
+  {
+   "ts": "2026-01-01T10:02:10.000Z",
+   "agent": "main",
+   "calls": [
+    {
+     "tool_name": "Bash"
+    },
+    {
+     "tool_name": "Read"
+    }
+   ]
+  },
+  {
+   "ts": "2026-01-01T10:02:30.000Z",
+   "agent": "sub-1",
+   "agent_type": "executor",
+   "calls": [
+    {
+     "tool_name": "Bash"
+    },
+    {
+     "tool_name": "Bash"
+    },
+    {
+     "tool_name": "Bash"
+    },
+    {
+     "tool_name": "Read"
+    },
+    {
+     "tool_name": "Read"
+    },
+    {
+     "tool_name": "Read"
+    }
+   ]
+  }
+ ]
+}

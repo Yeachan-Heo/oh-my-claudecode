@@ -1,0 +1,16 @@
+{
+ "scenarios": [
+  {
+   "name": "a-subagent-third-reminder",
+   "agent": "sub-1",
+   "query_at": "2026-01-01T10:02:30.000Z",
+   "note": "subagent without a list, two reminders already sent and ignored, asked again at the 6th batch"
+  },
+  {
+   "name": "b-main-after-list-call",
+   "agent": "main",
+   "query_at": "2026-01-01T10:02:11.000Z",
+   "note": "main thread, list changed 9 s ago, a reminder 'lista_nieaktualna' was sent 15 s ago and followed by a list call"
+  }
+ ]
+}

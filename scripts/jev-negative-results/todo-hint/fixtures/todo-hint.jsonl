@@ -1,0 +1,3 @@
+{"ts": "2026-01-01T10:00:30.000Z", "etap": "przypomnienie", "tryb": "active", "session_id": "synthetic-session", "agent": "sub-1", "agent_type": "executor", "rodzaj": "zaloz_liste", "nr_tury": 12, "kto": "jev", "uwaga": null}
+{"ts": "2026-01-01T10:01:30.000Z", "etap": "przypomnienie", "tryb": "active", "session_id": "synthetic-session", "agent": "sub-1", "agent_type": "executor", "rodzaj": "zaloz_liste", "nr_tury": 24, "kto": "jev", "uwaga": null}
+{"ts": "2026-01-01T10:01:56.000Z", "etap": "przypomnienie", "tryb": "active", "session_id": "synthetic-session", "agent": "main", "agent_type": null, "rodzaj": "lista_nieaktualna", "nr_tury": 10, "kto": "jev", "uwaga": null}
