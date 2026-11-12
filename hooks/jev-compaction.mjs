@@ -1364,6 +1364,27 @@ function keptCallsIn(messages, keepFrom, api) {
   return messages.every((m, i) => i < keepFrom || m.role !== 'assistant' || (m.toolUses || []).every((u) => ids.has(u.tool_use_id)));
 }
 
+// Blocks a kept assistant message may carry and still keep its handle: text, client calls and signed
+// thinking. Anything else (redacted_thinking, or an opaque output block such as container_upload that
+// serverBlocks() does not classify) runs the summary.
+const KEEPABLE_TAIL_BLOCKS = new Set(['text', 'tool_use', 'thinking']);
+
+// Whether an assistant API message of the rows that keep their handles (from keepFrom on) carries a
+// block outside KEEPABLE_TAIL_BLOCKS. Those rows stand in the API form from the first message holding one of their
+// calls, together with the assistant messages right before it (no user message between: one turn for
+// the API, e.g. after split message ids), to the end. No such rows: false; rows whose message the API
+// form does not show: true (the summary).
+export function tailRedacted(messages, api, keepFrom) {
+  if (keepFrom >= messages.length) return false;
+  const ids = new Set();
+  for (let i = keepFrom; i < messages.length; i++) for (const u of messages[i].toolUses || []) ids.add(u.tool_use_id);
+  const holds = (a) => a && a.role === 'assistant' && Array.isArray(a.content) && a.content.some((b) => b && b.type === 'tool_use' && ids.has(b.id));
+  let first = Array.isArray(api) ? api.findIndex(holds) : -1;
+  if (first < 0) return true;
+  while (first > 0 && api[first - 1] && api[first - 1].role === 'assistant') first--;
+  return api.slice(first).some((a) => a && a.role === 'assistant' && Array.isArray(a.content) && a.content.some((b) => !b || !KEEPABLE_TAIL_BLOCKS.has(b.type)));
+}
+
 // A block the API runs itself: server_tool_use, mcp_tool_use and their results
 // (advisor_tool_result, web_search_tool_result, ...).
 const isServerBlock = (b) => Boolean(b) && typeof b.type === 'string' && b.type !== 'tool_use' && b.type !== 'tool_result' && /_tool_(?:use|result)$/.test(b.type);
@@ -1618,10 +1639,19 @@ async function decide($, e, cfg, record, started) {
   const server = serverBlocks(messages, api, keepFrom);
   record.server_blocks = server.count;
   if (server.inTail) return { fallback: 'server_block_in_tail' };
-  // A kept row with neither text nor calls is thinking (or a server block). On `--resume` the host joins
-  // it with its copy from before the boundary, so the last assistant message would carry its signed
-  // thinking block twice, which the extended thinking documentation says fails with 400.
-  if (messages.some((m, i) => i >= keepFrom && m.role === 'assistant' && m.handle && !m.text && !(m.toolUses || []).length)) return { fallback: 'thinking_in_tail' };
+  // A kept row with neither text nor calls is thinking (server blocks are caught above); such rows keep
+  // their handles like the other rows of the open loop. On `--resume` the host may join them with their
+  // copies from before the boundary, so the last assistant message carries each signed thinking block
+  // twice. The API takes that (measured on Claude Code 2.1.322, Opus 5.5: a resumed request whose last
+  // assistant message held 6 thinking blocks, each signature two or three times, before its tool results
+  // and the host's "Continue from where you left off." was answered without an error). Redacted thinking
+  // was never tested, so a redacted_thinking block in an API message of those rows still runs the
+  // summary, also without a thinking-only row (the block may share a row with text or a call). Should a
+  // resumed request fail with 400 after a record with kept_thinking > 0, returning the summary whenever
+  // keptThinking > 0 restores the earlier rule.
+  const keptThinking = messages.filter((m, i) => i >= keepFrom && m.role === 'assistant' && m.handle && !m.text && !(m.toolUses || []).length).length;
+  record.kept_thinking = keptThinking;
+  if (tailRedacted(messages, api, keepFrom)) return { fallback: 'thinking_in_tail' };
   // Results of the calls that keep their handles stay whole (a built row may not stand among them).
   const candidates = findCandidates(messages, cfg.privatePaths).filter((c) => c.useIdx < keepFrom);
   record.candidates = candidates.length;
