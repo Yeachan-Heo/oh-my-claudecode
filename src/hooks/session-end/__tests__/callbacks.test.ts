@@ -383,6 +383,86 @@ describe('triggerStopCallbacks', () => {
     expect(mockFetch).not.toHaveBeenCalled();
   });
 
+  it('sends Slack notification when enabled', async () => {
+    const mockFetch = vi.fn().mockResolvedValue({
+      ok: true,
+      text: () => Promise.resolve('ok'),
+    });
+    vi.stubGlobal('fetch', mockFetch);
+
+    mockGetConfig.mockReturnValue({
+      silentAutoUpdate: false,
+      stopHookCallbacks: {
+        slack: {
+          enabled: true,
+          webhookUrl: 'https://hooks.slack.com/services/T000/B000/XXXX',
+        },
+      },
+    });
+
+    const metrics = createTestMetrics();
+    await triggerStopCallbacks(metrics, testInput);
+
+    expect(mockFetch).toHaveBeenCalledWith(
+      'https://hooks.slack.com/services/T000/B000/XXXX',
+      expect.objectContaining({
+        method: 'POST',
+        body: expect.stringContaining('test-session-123'),
+      })
+    );
+    const request = mockFetch.mock.calls[0]?.[1] as { body: string };
+    const payload = JSON.parse(request.body) as { text: string };
+    expect(payload.text.startsWith('# Session Ended')).toBe(true);
+  });
+
+  it('prefixes Slack messages with tags from tagList', async () => {
+    const mockFetch = vi.fn().mockResolvedValue({
+      ok: true,
+      text: () => Promise.resolve('ok'),
+    });
+    vi.stubGlobal('fetch', mockFetch);
+
+    mockGetConfig.mockReturnValue({
+      silentAutoUpdate: false,
+      stopHookCallbacks: {
+        slack: {
+          enabled: true,
+          webhookUrl: 'https://hooks.slack.com/services/T000/B000/XXXX',
+          tagList: ['<!here>', ' <@U1234567890> ', '  ', ''],
+        },
+      },
+    });
+
+    const metrics = createTestMetrics();
+    await triggerStopCallbacks(metrics, testInput);
+
+    expect(mockFetch).toHaveBeenCalledTimes(1);
+    const request = mockFetch.mock.calls[0]?.[1] as { body: string };
+    const payload = JSON.parse(request.body) as { text: string };
+    expect(payload.text.startsWith('<!here> <@U1234567890>\n# Session Ended')).toBe(true);
+  });
+
+  it('skips Slack when disabled, without a webhook URL, or with a URL that is not a Slack webhook', async () => {
+    const mockFetch = vi.fn();
+    vi.stubGlobal('fetch', mockFetch);
+
+    const configs = [
+      { enabled: false, webhookUrl: 'https://hooks.slack.com/services/T000/B000/XXXX' },
+      { enabled: true },
+      { enabled: true, webhookUrl: 'http://hooks.slack.com/services/T000/B000/XXXX' },
+      { enabled: true, webhookUrl: 'https://example.com/services/T000/B000/XXXX' },
+    ];
+    for (const slack of configs) {
+      mockGetConfig.mockReturnValue({
+        silentAutoUpdate: false,
+        stopHookCallbacks: { slack },
+      });
+      await triggerStopCallbacks(createTestMetrics(), testInput);
+    }
+
+    expect(mockFetch).not.toHaveBeenCalled();
+  });
+
   it('handles file write errors gracefully', async () => {
     mockMkdirSync.mockImplementation(() => {
       throw new Error('Permission denied');
