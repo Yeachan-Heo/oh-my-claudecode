@@ -166,9 +166,6 @@ export const TeamPaths = {
     `.omc/state/team/${teamName}/dispatch/requests.lock`,
   dispatchLegacyLockDir: (teamName: string) =>
     `.omc/state/team/${teamName}/dispatch/.lock`,
-  /** @deprecated Use `dispatchLegacyLockDir` instead. Kept for public API compatibility. */
-  dispatchLockDir: (teamName: string) =>
-    `.omc/state/team/${teamName}/dispatch/.lock`,
   mailboxNotificationLock: (teamName: string, requestId: string) =>
     `.omc/state/team/${teamName}/dispatch/.mailbox-notification-${createHash('sha256').update(requestId).digest('hex')}.lock`,
 
