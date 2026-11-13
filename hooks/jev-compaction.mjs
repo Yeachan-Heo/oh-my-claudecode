@@ -2295,7 +2295,8 @@ async function measureAfter($, usage) {
 async function* firstRequest($, e, next) {
   const result = yield* next(e);
   try {
-    if (e.agentId === undefined && session.pendingAfter) await measureAfter($, result?.usage);
+    // Bounded: a session id or a write that never settles must not hold the model request (the pending entry is already taken).
+    if (e.agentId === undefined && session.pendingAfter) await withDeadline($, measureAfter($, result?.usage), HOST_MS);
   } catch { /* the measurement never breaks a request */ }
   return result;
 }
@@ -2539,15 +2540,14 @@ async function compact($, e, next) {
   const started = Date.now();
   // Any compaction of the main loop that actually replaced the messages, this module's or the built-in
   // summary, arms the own threshold's growth gate again (ownThreshold). A skip leaves the context as it
-  // was, so the gate stays as it was too.
+  // was, so the gate stays as it was too. The same holds for the measurement still waiting for the request after an earlier compaction
+  // of this module: it ends only when the messages were really replaced.
   const armGrowthGate = (out) => {
-    if (e.agentId === undefined && !out?.skip) { session.growthArmed = true; session.growthBase = undefined; }
+    if (e.agentId === undefined && !out?.skip) { session.growthArmed = true; session.growthBase = undefined; session.pendingAfter = undefined; }
     return out;
   };
   session.compacting++;
   try {
-    // A newer compaction of the main loop replaces the one still waiting for its measurement.
-    if (e.agentId === undefined) session.pendingAfter = undefined;
     let sessionId;
     try { sessionId = await $.session.id(); } catch { sessionId = undefined; }
     const record = {
@@ -2571,8 +2571,10 @@ async function compact($, e, next) {
     await writeRecord($, cfg, record);
     if (decision.fallback || cfg.mode !== 'active') return armGrowthGate(await next(e));
     if (cfg.toast) { try { $.ui.toast(`Jev compaction: ${decision.before} -> ${decision.after} chars`); } catch { /* optional */ } }
+    const installed = armGrowthGate({ messages: decision.messages });
+    // The measurement of this compaction replaces any still waiting for an earlier one (armGrowthGate cleared it).
     if (e.agentId === undefined) session.pendingAfter = { cfg, ts: record.ts, sessionId: record.session_id, charsAfter: decision.after };
-    return armGrowthGate({ messages: decision.messages });
+    return installed;
   } finally {
     session.compacting--;
   }

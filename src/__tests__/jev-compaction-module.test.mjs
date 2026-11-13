@@ -3375,6 +3375,36 @@ describe('jev-compaction module: refused batches, unrated results, well-formed b
       expect(afterRecords(second)).toHaveLength(1);
     });
 
+    it('a session id or a write that never settles does not hold the model request', async () => {
+      const never = () => new Promise(() => {});
+      for (const patch of [{ session: (r) => ({ ...r.$.session, id: never }) }, { fs: (r) => ({ ...r.$.fs, write: never }) }]) {
+        const run = await compactOnce(conversation(30));
+        const stalled = { ...run.$, ...Object.fromEntries(Object.entries(patch).map(([k, f]) => [k, f(run)])) };
+        const t0 = Date.now();
+        await step(run.handlers, stalled, usage);
+        expect(Date.now() - t0).toBeLessThan(4000);
+        expect(afterRecords(run)).toHaveLength(0);
+      }
+    });
+
+    it('a compaction that replaced nothing (the summary was vetoed) leaves the wait for the earlier measurement; one that replaced the messages ends it', async () => {
+      const handlers = load();
+      const first = await compactOnce(conversation(30), { handlers });
+      const firstTs = first.records()[0].ts;
+      // The second compaction falls back to the summary, which another mod vetoes: nothing was replaced.
+      const vetoed = fakeDollar({ respond: refuse(500) });
+      const out = await handlers['session.compact'](vetoed.$, Object.freeze({ trigger: 'auto', messages: conversation(30) }), async () => ({ skip: 'another mod' }));
+      expect(out).toEqual({ skip: 'another mod' });
+      await step(handlers, first.$, usage);
+      expect(afterRecords(first)).toHaveLength(1);
+      expect(afterRecords(first)[0].compact_ts).toBe(firstTs);
+      // A summary that really replaced the messages ends the wait.
+      const again = await compactOnce(conversation(30), { handlers });
+      await compactOnce(conversation(30), { handlers, respond: refuse(500) });
+      await step(handlers, again.$, usage);
+      expect(afterRecords(again)).toHaveLength(0);
+    });
+
     it('a failing write never breaks the request: its result is returned', async () => {
       const run = await compactOnce(conversation(30));
       const broken = { ...run.$, fs: { ...run.$.fs, write: async () => { throw new Error('EACCES'); } } };
