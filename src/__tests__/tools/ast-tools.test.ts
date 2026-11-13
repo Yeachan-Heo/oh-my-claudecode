@@ -129,41 +129,6 @@ describe('ast-tools', () => {
       expect(text).toContain('+ logger.info("a", b)');
       expect(content).toBe(source);
     });
-
-    describe('a match inside another match', () => {
-      it('replaces only the outer of two matches that start at the same place', async () => {
-        // a + b + c is (a + b) + c: both binary expressions start at a.
-        const { content } = await replaceInFile('const s = a + b + c;\n', '$X + $Y', 'add($X, $Y)');
-
-        expect(content).toBe('const s = add(a + b, c);\n');
-      });
-
-      it('replaces only the outer call when a matching call is its argument', async () => {
-        const { content } = await replaceInFile('foo(foo(1));\n', 'foo($A)', 'barbaz($A)');
-
-        expect(content).toBe('barbaz(foo(1));\n');
-      });
-
-      it('still replaces separate and adjacent matches on one line', async () => {
-        const separate = await replaceInFile('foo(1); foo(2);\n', 'foo($A)', 'barbaz($A)');
-        // The first statement ends where the second one starts.
-        const adjacent = await replaceInFile('foo(1);foo(2);\n', 'foo($A);', 'bar($A);');
-
-        expect(separate.content).toBe('barbaz(1); barbaz(2);\n');
-        expect(adjacent.content).toBe('bar(1);bar(2);\n');
-      });
-
-      it('counts and shows only the replaced matches in a dry run', async () => {
-        const source = 'foo(foo(1)); foo(2);\n';
-        const { text, content } = await replaceInFile(source, 'foo($A)', 'barbaz($A)', true);
-
-        expect(text).toContain('Found 2 replacement(s) in 1 file(s)');
-        expect(text).toContain('- foo(foo(1))\n  + barbaz(foo(1))');
-        expect(text).toContain('- foo(2)\n  + barbaz(2)');
-        expect(text).not.toContain('barbaz(1)');
-        expect(content).toBe(source);
-      });
-    });
   });
 
   describe('$ replacement pattern escaping', () => {

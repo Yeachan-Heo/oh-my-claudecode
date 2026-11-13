@@ -597,23 +597,11 @@ IMPORTANT: dryRun=true (default) only previews changes. Set dryRun=false to appl
             });
           }
 
-          // findAll() also returns the matches inside a match (foo(1) in
-          // foo(foo(1))), and their edits would change code that the outer
-          // edit replaces. Keep the outer one, as ast-grep's rewrite does: an
-          // edit that starts inside a kept edit is dropped. findAll() lists an
-          // outer match first and the sort is stable, so in a + b + c the
-          // outer sum is kept although a + b starts at the same place.
-          edits.sort((a, b) => a.start - b.start);
-          let keptEnd = 0;
-          const keptEdits = edits.filter((edit) => {
-            if (edit.start < keptEnd) return false;
-            keptEnd = edit.end;
-            return true;
-          });
+          // Sort edits in reverse order to apply from end to start
+          edits.sort((a, b) => b.start - a.start);
 
-          // Apply the kept edits from end to start
           let newContent = content;
-          for (const edit of keptEdits.reverse()) {
+          for (const edit of edits) {
             const before = newContent.slice(edit.start, edit.end);
             newContent =
               newContent.slice(0, edit.start) +

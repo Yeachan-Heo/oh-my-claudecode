@@ -45,7 +45,7 @@ interface SessionOwnedTeamCleanupResult {
   failed: Array<{ teamName: string; error: string }>;
 }
 
-type LegacyStopCallbackPlatform = 'file' | 'telegram' | 'discord' | 'slack';
+type LegacyStopCallbackPlatform = 'file' | 'telegram' | 'discord';
 const SESSION_STARTED_MARKER_FILE = 'session-started.json';
 
 const DEFAULT_SESSION_END_CLEANUP_BUDGET_MS = 2_000;
@@ -115,10 +115,6 @@ function getLegacyPlatformsCoveredByNotifications(
 
   if (enabledPlatforms.includes('discord')) {
     overlappingPlatforms.push('discord');
-  }
-
-  if (enabledPlatforms.includes('slack')) {
-    overlappingPlatforms.push('slack');
   }
 
   return overlappingPlatforms;

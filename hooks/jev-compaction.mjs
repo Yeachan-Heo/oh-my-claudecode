@@ -1259,134 +1259,36 @@ function blockWords(block) {
 }
 
 // The regions of a text that are quotes to the user's block around them: `opaque`, in text order and not
-// overlapping, holds every paired envelope and the quotes below; `quotes` holds just those, which can hold whole
-// envelopes (a delivery in one is part of the quote). A quote is a paired plain <system-reminder> that holds no
-// delivery (a reminder that wraps one is read by its frame) and a paired <task-notification> (its result is
-// text of a task). A quote is what either of two readings of the tags marks (see opaqueOf): each opener to the
-// first closing tag after it, and the tags paired by nesting, so a quote that holds another quote or a tag without
-// its partner keeps its whole body. Tags inside an envelope belong to it. The tags are indexed in one pass and
-// nest at most QUOTE_DEPTH_MAX deep, so a text full of unpaired or nested tags is read in linear time.
-// The reminder tag comes first: a notification opener inside a reminder that is a quote by nesting is text in reading 1.
-const QUOTE_TAGS = [
-  // Bounded openers: a text full of unclosed tags stays linear.
-  { open: /<system-reminder(?![^>]{0,200}\bid=)[^>]{0,200}>/g, close: '</system-reminder>', quote: (t) => !deliveryOf(t) },
-  { open: /<task-notification(?:\s[^>]{0,200})?>/g, close: '</task-notification>', quote: () => true },
-];
-const QUOTE_DEPTH_MAX = 8;
-const NATIVE_NOTIFICATION = /^\s*(?:<system-reminder[^>]{0,200}>\s*){0,4}(?:\[SYSTEM NOTIFICATION - NOT USER INPUT\]\s*)?(<task-notification(?:\s[^>]{0,200})?>)/;
-const unionOf = (list) => {
-  const out = [];
-  for (const e of [...list].sort((x, y) => x.from - y.from)) {
-    const last = out[out.length - 1];
-    if (last && e.from < last.to) last.to = Math.max(last.to, e.to);
-    else out.push({ from: e.from, to: e.to });
-  }
-  return out;
-};
+// overlapping, holds every paired envelope and every paired plain <system-reminder> that holds no delivery (a
+// reminder that wraps one is read by its frame); `quotes` holds just those plain reminders, which can hold whole
+// envelopes (a delivery in one is part of the quote). A plain reminder ends at the first closing tag after its
+// opener; tags inside an envelope belong to it, and an opener without a closing tag is text. The tags are indexed
+// in one pass, so a text full of unpaired tags is read in linear time.
+const PLAIN_OPEN = /<system-reminder(?![^>]{0,200}\bid=)[^>]{0,200}>/g; // bounded: a text full of unclosed tags stays linear
+const PLAIN_CLOSE = '</system-reminder>';
 function opaqueOf(text, envelopes = envelopesOf(text)) {
-  const found = [];
-  // A row that is one native notification (it opens with the tag, maybe after its marker line, complete reminders
-  // before it or reminders around it, and ends with the closing tag) is one quote whatever its result holds, an
-  // unbalanced tag included; not when its tags make two blocks side by side (a legacy row can hold a message of
-  // the user between them), and not in a row with envelopes, which build wrote around carried blocks.
-  let nativeQuote;
-  let native;
-  let skipped = 0;
-  for (let t = text, k = 0; !envelopes.length && k <= PRELUDES_MAX; k++) {
-    native = NATIVE_NOTIFICATION.exec(t);
-    const prelude = native ? undefined : DELIVERY_PRELUDE.exec(t);
-    if (!prelude) break;
-    skipped += prelude[0].length;
-    t = t.slice(prelude[0].length);
-  }
-  if (native) {
-    let tail = text.trimEnd();
-    // Only the closing tags of the reminders that open before the notification are peeled.
-    // Pair wrapper closers by nesting, not by lastIndexOf which could find a sibling reminder's closer.
-    const wrappers = native[0].split('<system-reminder').length - 1;
-    for (let k = 0; k < wrappers; k++) {
-      // Find the wrapper's closer: a </system-reminder> whose nesting level matches (depth = k from the end).
-      // Count depth from the end: +1 for each closing tag, -1 for each opening tag (going backward).
-      let depth = 0;
-      let at = -1;
-      for (let i = tail.length - 1; i >= 0; i--) {
-        if (i + '</system-reminder>'.length <= tail.length && tail.slice(i, i + '</system-reminder>'.length) === '</system-reminder>') {
-          if (depth === 0) {
-            at = i; // Found the closer at the expected nesting level
-            break;
-          }
-          depth++; // Going backward, each closing tag increases depth
-          i -= 17; // Skip past the closing tag length
-        } else if (i + '<system-reminder'.length <= tail.length && tail.slice(i, i + '<system-reminder'.length) === '<system-reminder') {
-          depth--; // Going backward, each opening tag decreases depth
-          i -= 16; // Skip past the opening tag length
-        }
-      }
-      if (at < 0) break; // No more closers found
-      const gt = at < 0 ? -1 : tail.indexOf('>', at);
-      if (gt < 0 || tail.slice(gt + 1).trim()) break; // Stop if no closing > or content after it
-      tail = tail.slice(0, at).trimEnd();
-    }
-    if (tail.endsWith(QUOTE_TAGS[1].close)) nativeQuote = { from: skipped + native.index + native[0].length - native[1].length, to: tail.length };
-  }
-  const reminders = []; // the plain reminders that are quotes by nesting (the first tag's reading 2)
-  for (const tag of QUOTE_TAGS) {
-    const closers = positionsOf(text, tag.close);
-    if (!closers.length) continue;
+  const quotes = [];
+  const closers = positionsOf(text, PLAIN_CLOSE);
+  if (closers.length) {
     const inClose = insideOf(envelopes);
     const free = closers.filter((c) => !inClose(c));
     const inOpen = insideOf(envelopes);
-    const openers = [...text.matchAll(tag.open)].filter((o) => !inOpen(o.index));
-    const add = (from, to) => { if (!tag.quote(text.slice(from, to))) return false; found.push({ from, to }); return true; };
-    // A notification tag that a plain reminder quotes is text in reading 1: it does not open a quote that ends at
-    // a notification after the reminder (the tags of reading 2 and the block count are not changed by it).
-    const inReminder = insideOf(unionOf(tag === QUOTE_TAGS[1] ? reminders : []));
-    // Whether a non-blank character precedes a position on its line; asked in increasing order, so it is linear.
-    let scanned = 0;
-    let dirty = false;
-    const midLine = (at) => {
-      const part = text.slice(scanned, at);
-      scanned = at;
-      const nl = part.lastIndexOf('\n');
-      dirty = nl < 0 ? dirty || /\S/.test(part) : /\S/.test(part.slice(nl + 1));
-      return dirty;
-    };
-    // Reading 1: each opener to the first closing tag after it (a quote that holds a tag without its
-    // partner ends at its own closing tag). A notification opener in the middle of a line is text here: the host
-    // opens a notification at the start of a line, so such an opener is a mention in the words of someone else.
     let end = 0;
-    for (const o of openers) {
-      const mid = tag === QUOTE_TAGS[1] && midLine(o.index);
-      if (o.index < end || mid || inReminder(o.index)) continue;
+    for (const o of text.matchAll(PLAIN_OPEN)) {
+      if (o.index < end || inOpen(o.index)) continue;
       const c = lowerBound(free, o.index + o[0].length);
       if (c >= free.length) break;
-      end = free[c] + tag.close.length;
-      add(o.index, end);
+      end = free[c] + PLAIN_CLOSE.length;
+      if (!deliveryOf(text.slice(o.index, end))) quotes.push({ from: o.index, to: end });
     }
-    // Reading 2: tags paired by nesting, as a stack (a quote can quote another one, and then ends at the
-    // matching closing tag); an opener below a full stack is text, and so is its closing tag.
-    const stack = [];
-    let over = 0;
-    let depth = 0; // the true depth of the tags, and how many blocks of the first level they close
-    let blocks = 0;
-    for (let i = 0, j = 0; j < free.length;) {
-      if (i < openers.length && openers[i].index < free[j]) {
-        depth++;
-        if (stack.length < QUOTE_DEPTH_MAX) stack.push(openers[i].index);
-        else over++;
-        i++;
-        continue;
-      }
-      if (depth > 0 && --depth === 0) blocks++;
-      if (over > 0) { over--; j++; continue; }
-      const from = stack.pop();
-      const to = free[j++] + tag.close.length;
-      if (from !== undefined && add(from, to) && tag === QUOTE_TAGS[0]) reminders.push({ from, to });
-    }
-    if (tag === QUOTE_TAGS[1] && nativeQuote && blocks < 2) found.push(nativeQuote);
   }
-  const quotes = unionOf(found);
-  return { opaque: unionOf([...envelopes, ...quotes]), quotes };
+  const opaque = [];
+  for (const e of [...envelopes, ...quotes].sort((x, y) => x.from - y.from)) {
+    const last = opaque[opaque.length - 1];
+    if (last && e.from < last.to) last.to = Math.max(last.to, e.to);
+    else opaque.push({ from: e.from, to: e.to });
+  }
+  return { opaque, quotes };
 }
 
 // Whether a position lies inside one of the envelopes `spans` (in text order), after its opener; asked for in
@@ -1880,20 +1782,6 @@ function openLoopStart(messages, group) {
   return messages.length;
 }
 
-// Whether a delivery would be carried into a result row that stands between the kept rows of the last
-// message (the rows from keepFrom on, which keep their handles). Text in a user row ends the host's joining
-// of assistant rows (groupsOf), so the rows after it would become a message of their own, without the thinking
-// the API wants the last message to begin with. A delivery after the last kept row of the message is fine.
-function splitsTail(messages, queued, keepFrom, group) {
-  let lastKept = -1;
-  for (let j = messages.length - 1; j > keepFrom && lastKept < 0; j--) if (messages[j].role === 'assistant' && group[j] === group[keepFrom]) lastKept = j;
-  for (const [i, blocks] of queued) {
-    const m = messages[i];
-    if (blocks.length && i > keepFrom && i < lastKept && (m.toolResults || []).length && m.toolResults.every(textOnlyResult)) return true;
-  }
-  return false;
-}
-
 // The API form of the conversation, or undefined: a list whose every entry has `content` as an array
 // or a string, with at least one assistant message whose content is an array (a host that ignores
 // `as: 'api'` answers the plain messages, which have neither).
@@ -2236,9 +2124,6 @@ async function decide($, e, cfg, record, started) {
   const keptThinking = messages.filter((m, i) => i >= keepFrom && m.role === 'assistant' && m.handle && !m.text && !(m.toolUses || []).length).length;
   record.kept_thinking = keptThinking;
   if (tailRedacted(messages, api, keepFrom)) return { fallback: 'thinking_in_tail' };
-  // The host restores a delivery after a row that keeps its handle, but a result row that is rebuilt carries it as
-  // text, which would split the kept message: the summary runs instead.
-  if (splitsTail(messages, queued, keepFrom, group)) return { fallback: 'queued_in_tail' };
   // Results of the calls that keep their handles stay whole (a built row may not stand among them).
   const candidates = findCandidates(messages, cfg.privatePaths).filter((c) => c.useIdx < keepFrom);
   record.candidates = candidates.length;
