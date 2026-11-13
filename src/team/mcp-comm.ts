@@ -6,8 +6,7 @@
  * current strict durable state before any pane effect.
  */
 
-import { realpathSync } from 'node:fs';
-import { basename, dirname, join } from 'node:path';
+
 
 import {
   enqueueDispatchRequest,
@@ -40,6 +39,12 @@ import {
 import { absPath, TeamPaths } from './state-paths.js';
 import { withProcessIdentityFileLock } from './process-identity-lock.js';
 import { createSwallowedErrorLogger } from '../lib/swallowed-error.js';
+import {
+  notifyExceptionReason,
+  enqueueFailedOutcome,
+  isExactText,
+  canonicalNotificationLockIdentity,
+} from './mcp-dispatch-helpers.js';
 
 // ── Types ──────────────────────────────────────────────────────────────────
 
@@ -150,32 +155,7 @@ function fallbackTransportForPreference(
   return 'hook';
 }
 
-function notifyExceptionReason(error: unknown): string {
-  const message = error instanceof Error ? error.message : String(error);
-  return `notify_exception:${message}`;
-}
 
-/** Reported, not thrown: callers enqueue after persisting a message or starting a worker, and a throw would hide that fact. */
-function enqueueFailedOutcome(error: unknown): DispatchOutcome {
-  const message = error instanceof Error ? error.message : String(error);
-  return { ok: false, transport: 'none', reason: `dispatch_enqueue_failed:${message}` };
-}
-
-function isExactText(value: unknown): value is string {
-  return typeof value === 'string' && value.length > 0 && value === value.trim();
-}
-
-function canonicalNotificationLockIdentity(lockPath: string): string {
-  try {
-    return realpathSync(lockPath);
-  } catch {
-    try {
-      return join(realpathSync(dirname(lockPath)), basename(lockPath));
-    } catch {
-      return lockPath;
-    }
-  }
-}
 
 function managedOutcome(
   ok: boolean,
