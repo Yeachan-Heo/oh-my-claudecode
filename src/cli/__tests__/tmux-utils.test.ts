@@ -648,6 +648,7 @@ describe('createHudWatchPane login shell wrapping', () => {
 
 describe('HUD pane tmux server targeting', () => {
   it('creates HUD panes against the current tmux server', () => {
+    Object.defineProperty(process, 'platform', { value: 'linux', configurable: true });
     vi.stubEnv('TMUX', '/tmp/tmux-100/default,123,0');
     mockedExecFileSync.mockReturnValue('%12\n' as any);
 
@@ -659,6 +660,7 @@ describe('HUD pane tmux server targeting', () => {
   });
 
   it('lists HUD panes against the current tmux server', () => {
+    Object.defineProperty(process, 'platform', { value: 'linux', configurable: true });
     vi.stubEnv('TMUX', '/tmp/tmux-100/default,123,0');
     mockedExecFileSync.mockReturnValue('%2\tnode\tnode /tmp/omc.js hud --watch\n' as any);
 
@@ -670,6 +672,7 @@ describe('HUD pane tmux server targeting', () => {
   });
 
   it('kills HUD panes against the current tmux server', () => {
+    Object.defineProperty(process, 'platform', { value: 'linux', configurable: true });
     vi.stubEnv('TMUX', '/tmp/tmux-100/default,123,0');
     mockedExecFileSync.mockReturnValue('' as any);
 
