@@ -42,10 +42,11 @@ function okResponse(json) {
   return { ok: true, status: 200, headers: {}, text: JSON.stringify(json) };
 }
 
-function fakeDollar({ env = ACTIVE_ENV, settingsEnv, respond = (body) => okResponse(scoreByMarker(body)), clockAfter, usage, messages = [], compactResult, writeThrows = false, diskPrefix, flakyBreakerRead = false, stallBreakerRead = false, stallRpmRead = false, rpmReadGate, rpmReadGates = {}, fsDelayMs = 0, brokenBreakerRead = false, breakerWriteDelayMs = 0, lockReadDelayMs = 0, lockWriteThrows = false, sessionId = 'sess-1', stallModuleRead = false } = {}) {
+function fakeDollar({ env = ACTIVE_ENV, settingsEnv, respond = (body) => okResponse(scoreByMarker(body)), clockAfter, usage, messages = [], compactResult, writeThrows = false, diskPrefix, flakyBreakerRead = false, stallBreakerRead = false, stallRpmRead = false, rpmReadGate, rpmReadGates = {}, fsDelayMs = 0, brokenBreakerRead = false, breakerWriteDelayMs = 0, lockReadDelayMs = 0, lockWriteThrows = false, lockSteal = false, sessionId = 'sess-1', stallModuleRead = false } = {}) {
   const files = new Map();
   const mtimes = new Map();
   let flaked = false;
+  let lockFailures = 0;
   let gated = false;
   let rpmReads = 0;
   const calls = { fetch: [], write: 0, toast: [], log: 0, compact: 0, usage: 0, messages: 0, settings: 0 };
@@ -72,7 +73,9 @@ function fakeDollar({ env = ACTIVE_ENV, settingsEnv, respond = (body) => okRespo
         return { kind: 'file', size: files.get(p).length, mtimeMs: mtimes.get(p), isLink: false };
       },
       write: async (p, text) => {
-        if (lockWriteThrows && p.endsWith('/breaker.json.lock')) throw Object.assign(new Error('EBUSY'), { code: 'EBUSY' });
+        if (lockWriteThrows && p.endsWith('/breaker.json.lock') && (lockWriteThrows === true || lockFailures++ < lockWriteThrows)) throw Object.assign(new Error('EBUSY'), { code: 'EBUSY' });
+        // Another process takes the lock the moment the module has written its token.
+        if (lockSteal && p.endsWith('/breaker.json.lock') && diskPrefix && p.startsWith(diskPrefix)) { mkdirSync(dirname(p), { recursive: true }); writeFileSync(p, JSON.stringify({ token: 'other', ts: Date.now() })); return; }
         if (fsDelayMs) await new Promise((resolve) => setTimeout(resolve, fsDelayMs));
         if (breakerWriteDelayMs && p.endsWith('/breaker.json')) await new Promise((resolve) => setTimeout(resolve, breakerWriteDelayMs));
         if (diskPrefix && p.startsWith(diskPrefix)) { mkdirSync(dirname(p), { recursive: true }); writeFileSync(p, text); return; }
@@ -2553,6 +2556,19 @@ describe('jev-compaction module: shared breaker and request limit (OMC_JEV_BREAK
     }
   });
 
+  it('a lock another process keeps taking ends the wait with a lock-timeout trace, also after refused writes, and the breaker is not written', async () => {
+    const tooMany = () => ({ ok: false, status: 429, headers: {}, text: '' });
+    for (const refused of [0, 2]) {
+      const c = shared({ OMC_JEV_BREAKER: '1' });
+      mkdirSync(c.settings.dir, { recursive: true });
+      const run = await compactShared(c, conversation(30), { lockSteal: true, lockWriteThrows: refused, respond: tooMany });
+      // Refused writes before a written one do not turn the later timeout into a refusal.
+      expect(run.records()[0]).toMatchObject({ reason: 'jev_error', breaker_issue: { kind: 'lock-timeout' } });
+      expect(run.records()[0].breaker_issue).not.toHaveProperty('code');
+      expect(readBreaker(c.settings, Date.now())).toBeUndefined();
+    }
+  }, 20_000);
+
   it('a corrupt breaker file, which is replaced, does not hide a later lock the module cannot write', async () => {
     const tooMany = () => ({ ok: false, status: 429, headers: {}, text: '' });
     const c = shared({ OMC_JEV_BREAKER: '1' });
@@ -2607,7 +2623,8 @@ describe('jev-compaction module: shared breaker and request limit (OMC_JEV_BREAK
     const c = shared({ OMC_JEV_BREAKER: '1' });
     mkdirSync(c.settings.dir, { recursive: true });
     // The first read of the (absent) lock returns after the 1.5 s wait is over and reports the path free.
-    await compactShared(c, conversation(30), { lockReadDelayMs: 1800, respond: () => ({ ok: false, status: 429, headers: {}, text: '' }) });
+    const run = await compactShared(c, conversation(30), { lockReadDelayMs: 1800, respond: () => ({ ok: false, status: 429, headers: {}, text: '' }) });
+    expect(run.records()[0].breaker_issue).toEqual({ kind: 'lock-timeout' });
     await new Promise((resolve) => setTimeout(resolve, 2500));
     expect(existsSync(`${c.settings.dir}/breaker.json.lock`)).toBe(false);
     expect(existsSync(`${c.settings.dir}/breaker.json`)).toBe(false);
@@ -3291,6 +3308,36 @@ describe('jev-compaction module: refused batches, unrated results, well-formed b
     expect(Date.now() - t1).toBeLessThan(1500);
   });
 
+  it('an answer that lacks some of the asked results leaves them unrated: they may be kept short, the rated-0 ones are traces', async () => {
+    const answers = (body) => Object.fromEntries(Object.keys(body.questions).filter((q, k) => k % 2 === 0).map((q) => [q, { type: 'score', score: 0, confidence: 0.9 }]));
+    const run = await compactOnce(conversation(30, { chars: 600 }), { env: { ...ACTIVE_ENV, OMC_JEV_COMPACT_TARGET: '0.2' }, respond: (body) => okResponse({ answers: answers(body) }) });
+    expect(run.records()[0]).toMatchObject({ result: 'jev', asked: 28, answered: 14, unanswered: 14, kept_short: 1 });
+    const shortened = (id) => /\[result shortened/.test(resultOf(run.out.messages, id)?.text ?? '');
+    // Results are asked newest first (t28 is r1): the even-numbered questions r1, r3, ... got a rating of 0, r2, r4, ... got none.
+    expect(shortened('t27')).toBe(true);
+    for (let k = 0; k < 28; k += 2) expect(shortened(`t${28 - k}`)).toBe(false);
+  });
+
+  it('a session id that cannot be read: the hold is kept for the unknown session, not for a known one', async () => {
+    const handlers = load();
+    const unknown = (fake) => ({ ...fake.$, session: { ...fake.$.session, id: async () => { throw new Error('no id'); } } });
+    const first = fakeDollar({ respond: refuse(400) });
+    await handlers['session.compact'](unknown(first), Object.freeze({ trigger: 'auto', messages: conversation(30) }), summaryNext());
+    expect(first.records()[0]).toMatchObject({ batch_refused: true, session_id: null });
+    const second = fakeDollar();
+    await handlers['session.compact'](unknown(second), Object.freeze({ trigger: 'auto', messages: conversation(30) }), summaryNext());
+    expect(second.calls.fetch).toHaveLength(0);
+    expect(second.records()[0]).toMatchObject({ reason: 'batch_refused' });
+    const known = await compactOnce(conversation(30), { handlers });
+    expect(known.calls.fetch).toHaveLength(1);
+  });
+
+  it('a host that rejects the turn.step registration still gets the other two handlers', () => {
+    const seen = [];
+    register((event) => { if (event === 'turn.step') throw new Error('unknown event'); seen.push(event); });
+    expect(seen).toEqual(['session.compact', 'turn.complete']);
+  });
+
   it('every record names the module (module_rev): the sha256 of its file, else of CLAUDE_PLUGIN_ROOT/hooks/jev-compaction.mjs, else null', async () => {
     const own = readFileSync(join(root, 'hooks', 'jev-compaction.mjs'));
     const digest = createHash('sha256').update(own).digest('hex');
@@ -3302,6 +3349,10 @@ describe('jev-compaction module: refused batches, unrated results, well-formed b
     fake.files.set('/plugin/hooks/jev-compaction.mjs', 'module text');
     await load()['session.compact'](fake.$, Object.freeze({ trigger: 'auto', messages: conversation(30) }), summaryNext());
     expect(fake.records()[0].module_rev).toBe(createHash('sha256').update('module text').digest('hex'));
+    const windows = fakeDollar({ env: { ...ACTIVE_ENV, CLAUDE_PLUGIN_ROOT: 'C:\\plugin\\' } });
+    windows.files.set('C:/plugin/hooks/jev-compaction.mjs', 'windows module text');
+    await load()['session.compact'](windows.$, Object.freeze({ trigger: 'auto', messages: conversation(30) }), summaryNext());
+    expect(windows.records()[0].module_rev).toBe(createHash('sha256').update('windows module text').digest('hex'));
   });
 
   describe('turn.step: the record after a compaction', () => {
@@ -3401,6 +3452,36 @@ describe('jev-compaction module: refused batches, unrated results, well-formed b
       // A summary that really replaced the messages ends the wait.
       const again = await compactOnce(conversation(30), { handlers });
       await compactOnce(conversation(30), { handlers, respond: refuse(500) });
+      await step(handlers, again.$, usage);
+      expect(afterRecords(again)).toHaveLength(0);
+    });
+
+    it('only a known and equal session id measures: unknown at the compaction, unknown at the request, or another session at the request, drops the record', async () => {
+      const unknownAtCompaction = await compactOnce(conversation(30), { handlers: load(), sessionId: null });
+      expect(unknownAtCompaction.records()[0]).toMatchObject({ result: 'jev', session_id: null });
+      await step(unknownAtCompaction.handlers, unknownAtCompaction.$, usage);
+      expect(afterRecords(unknownAtCompaction)).toHaveLength(0);
+      for (const id of [async () => { throw new Error('no id'); }, async () => 'sess-other', async () => undefined]) {
+        const run = await compactOnce(conversation(30));
+        await step(run.handlers, { ...run.$, session: { ...run.$.session, id } }, usage);
+        expect(afterRecords(run)).toHaveLength(0);
+        // The entry is gone: the same session's next request does not measure either.
+        await step(run.handlers, run.$, usage);
+        expect(afterRecords(run)).toHaveLength(0);
+      }
+    });
+
+    it('a built-in summary that ran with an unreadable configuration ends the wait, one that was only precomputed does not', async () => {
+      const handlers = load();
+      const first = await compactOnce(conversation(30), { handlers });
+      const broken = fakeDollar();
+      broken.$.env.get = async () => { throw new Error('env unreadable'); };
+      const pre = await handlers['session.compact'](broken.$, Object.freeze({ trigger: 'precompute', messages: conversation(30) }), summaryNext());
+      expect(pre).toBe(SUMMARY);
+      await step(handlers, first.$, usage);
+      expect(afterRecords(first)).toHaveLength(1);
+      const again = await compactOnce(conversation(30), { handlers });
+      await handlers['session.compact'](broken.$, Object.freeze({ trigger: 'auto', messages: conversation(30) }), summaryNext());
       await step(handlers, again.$, usage);
       expect(afterRecords(again)).toHaveLength(0);
     });

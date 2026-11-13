@@ -2282,8 +2282,11 @@ async function measureAfter($, usage) {
   const real = parts.reduce((sum, n) => sum + (typeof n === 'number' && Number.isFinite(n) && n > 0 ? n : 0), 0);
   if (real <= 0) return;
   session.pendingAfter = undefined;
-  // A conversation swapped in the same process (not re-registered) is not the one that was compacted.
-  if (p.sessionId) { let now; try { now = await $.session.id(); } catch { now = undefined; } if (now !== undefined && now !== p.sessionId) return; }
+  // A conversation swapped in the same process (not re-registered) is not the one that was compacted: the id must be known now and equal to
+  // the one the compaction was armed with (installed only with a known id), else the measurement is dropped.
+  let now;
+  try { now = await $.session.id(); } catch { now = undefined; }
+  if (typeof now !== 'string' || now !== p.sessionId) return;
   await writeRecord($, p.cfg, {
     ts: isoNow(), point: POINT, event: 'after', session_id: p.sessionId, agent_id: null, compact_ts: p.ts,
     chars_after: p.charsAfter, tokens_after_real: real, measured: 'first_request',
@@ -2573,7 +2576,7 @@ async function compact($, e, next) {
     if (cfg.toast) { try { $.ui.toast(`Jev compaction: ${decision.before} -> ${decision.after} chars`); } catch { /* optional */ } }
     const installed = armGrowthGate({ messages: decision.messages });
     // The measurement of this compaction replaces any still waiting for an earlier one (armGrowthGate cleared it).
-    if (e.agentId === undefined) session.pendingAfter = { cfg, ts: record.ts, sessionId: record.session_id, charsAfter: decision.after };
+    if (e.agentId === undefined && record.session_id) session.pendingAfter = { cfg, ts: record.ts, sessionId: record.session_id, charsAfter: decision.after };
     return installed;
   } finally {
     session.compacting--;
