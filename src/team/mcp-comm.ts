@@ -155,7 +155,7 @@ function notifyExceptionReason(error: unknown): string {
   return `notify_exception:${message}`;
 }
 
-/** Reported instead of thrown: callers have already persisted the message, so a retried send would duplicate it. */
+/** Reported, not thrown: callers enqueue after persisting a message or starting a worker, and a throw would hide that fact. */
 function enqueueFailedOutcome(error: unknown): DispatchOutcome {
   const message = error instanceof Error ? error.message : String(error);
   return { ok: false, transport: 'none', reason: `dispatch_enqueue_failed:${message}` };
@@ -477,20 +477,25 @@ export interface QueueInboxParams {
 }
 
 export async function queueInboxInstruction(params: QueueInboxParams): Promise<DispatchOutcome> {
-  const queued = await enqueueDispatchRequest(
-    params.teamName,
-    {
-      kind: 'inbox',
-      to_worker: params.workerName,
-      worker_index: params.workerIndex,
-      pane_id: params.paneId,
-      trigger_message: params.triggerMessage,
-      transport_preference: params.transportPreference,
-      fallback_allowed: params.fallbackAllowed,
-      inbox_correlation_key: params.inboxCorrelationKey,
-    },
-    params.cwd,
-  );
+  let queued: { request: TeamDispatchRequest; deduped: boolean };
+  try {
+    queued = await enqueueDispatchRequest(
+      params.teamName,
+      {
+        kind: 'inbox',
+        to_worker: params.workerName,
+        worker_index: params.workerIndex,
+        pane_id: params.paneId,
+        trigger_message: params.triggerMessage,
+        transport_preference: params.transportPreference,
+        fallback_allowed: params.fallbackAllowed,
+        inbox_correlation_key: params.inboxCorrelationKey,
+      },
+      params.cwd,
+    );
+  } catch (error) {
+    return enqueueFailedOutcome(error);
+  }
 
   if (queued.deduped) {
     return {
