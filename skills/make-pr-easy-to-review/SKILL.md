@@ -62,14 +62,22 @@ rewriting, verify the worktree is clean and pin both the identity and OID the re
 git status --porcelain | grep -q . && { echo "Worktree not clean" >&2; exit 1; }
 
 # Parse the PR number and repository from the argument or current branch
-PR_ARG="${1:?PR number or OWNER/REPO#N required}"
+PR_ARG="${1:?PR number, OWNER/REPO#N, or PR URL required}"
 if [[ "${PR_ARG}" =~ ^([^#]+)#([0-9]+)$ ]]; then
   TARGET_REPO="${BASH_REMATCH[1]}"
   N="${BASH_REMATCH[2]}"
-else
-  N="${PR_ARG}"
-  # Resolve the target repository from the current checkout or use gh's default
+elif [[ "${PR_ARG}" =~ ([0-9]+)/?$ ]]; then
+  # A URL or bare number: the trailing number is the PR id. The snapshot
+  # refs below are named with N, so it must be a plain integer before use.
+  N="${BASH_REMATCH[1]}"
   TARGET_REPO=$(gh repo view --json nameWithOwner --jq '.nameWithOwner' 2>/dev/null) || TARGET_REPO=""
+else
+  echo "cannot derive a PR number from ${PR_ARG}" >&2
+  exit 1
+fi
+if ! [[ "${N}" =~ ^[0-9]+$ ]]; then
+  echo "cannot derive a numeric PR number from ${PR_ARG}" >&2
+  exit 1
 fi
 
 # Fetch from PR's actual repository (for cross-repo PRs) using -R to keep repo context
@@ -81,8 +89,15 @@ HEAD_OID=$(gh pr view "${N}" ${TARGET_REPO:+-R "${TARGET_REPO}"} --json headRefO
 # Resolve the head repository's URL honoring the checkout's configured git
 # transport (gh config git_protocol), preferring a remote that already
 # matches the head repository — a hard-coded HTTPS URL bypasses SSH-authened
-# checkouts and fails to push private heads.
-HEAD_REPO_URL=$(git remote -v | awk -v r="${HEAD_REPO}" '$2 ~ r && $3 == "(fetch)" {print $2; exit}')
+# checkouts and fails to push private heads. The match is on the normalized
+# owner/repo tail, exact — an unanchored substring would send the force-push
+# to a mirror like acme/app-mirror.git when the head repo is acme/app.
+HEAD_REPO_URL=$(git remote -v | awk -v r="${HEAD_REPO}" '$3 == "(fetch)" {
+  url = $2
+  sub(/^(\w+:\/\/)?[^\/@]+[:\/]/, "", url)
+  sub(/\.git$/, "", url)
+  if (url == r) { print $2; exit }
+}')
 if [ -z "${HEAD_REPO_URL}" ]; then
   GITHUB_HOST="${GITHUB_SERVER_URL#https://}"
   GITHUB_HOST="${GITHUB_HOST#http://}"
@@ -94,7 +109,10 @@ if [ -z "${HEAD_REPO_URL}" ]; then
   fi
 fi
 
-git fetch origin "${BASE_BRANCH}"
+# Fetch the base by full refspec: a short ${BASE_BRANCH} would resolve a
+# same-named tag over the branch, and the next head fetch replaces
+# FETCH_HEAD, leaving no fresh base for the merge-base and patch checks.
+git fetch origin "refs/heads/${BASE_BRANCH}:refs/remotes/origin/${BASE_BRANCH}"
 git fetch "${HEAD_REPO_URL}" "refs/heads/${HEAD_REF}:pr-head-${N}"
 
 MERGE_BASE=$(git merge-base "refs/remotes/origin/${BASE_BRANCH}" "pr-head-${N}")
