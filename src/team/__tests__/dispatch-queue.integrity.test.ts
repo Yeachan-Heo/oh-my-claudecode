@@ -157,6 +157,41 @@ describe('dispatch queue store integrity', () => {
       expect(rows[0]).toEqual(futureRow);
       expect(rows[1]).toMatchObject({ request_id: 'request-1', status: 'notified' });
     });
+
+    it('enqueue preserves non-object rows verbatim (null, number, array)', async () => {
+      await writeFile(storePath, JSON.stringify([null, 42, [1, 2, 3], pending()]), 'utf8');
+      const originalBytes = await readFile(storePath, 'utf8');
+
+      const { request } = await enqueueDispatchRequest(teamName, {
+        kind: 'nudge', to_worker: 'worker-1', trigger_message: 'New work.',
+      }, cwd);
+
+      const rows = await storedRows();
+      // Non-object rows must be preserved verbatim
+      expect(rows[0]).toBeNull();
+      expect(rows[1]).toBe(42);
+      expect(rows[2]).toEqual([1, 2, 3]);
+      // Original object request is preserved and new request is appended
+      expect(rows[3].request_id).toBe('request-1');
+      expect(rows[4].request_id).toBe(request.request_id);
+    });
+
+    it('transition preserves non-object rows verbatim (null, number, array)', async () => {
+      await writeFile(storePath, JSON.stringify([null, 42, [1, 2, 3], pending()]), 'utf8');
+      const originalBytes = await readFile(storePath, 'utf8');
+
+      await expect(transitionDispatchRequest(teamName, 'request-1', 'pending', 'notified', {}, cwd))
+        .resolves.toMatchObject({ request_id: 'request-1', status: 'notified' });
+
+      const rows = await storedRows();
+      // Non-object rows must be preserved verbatim at same positions
+      expect(rows[0]).toBeNull();
+      expect(rows[1]).toBe(42);
+      expect(rows[2]).toEqual([1, 2, 3]);
+      // The request should have been transitioned
+      expect(rows[3].request_id).toBe('request-1');
+      expect(rows[3].status).toBe('notified');
+    });
   });
 
   describe('lock', () => {
