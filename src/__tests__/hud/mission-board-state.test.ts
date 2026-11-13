@@ -37,6 +37,37 @@ afterEach(() => {
 });
 
 describe('mission board state tracking', () => {
+  it('keeps team timeline events around a torn events.jsonl line', () => {
+    const cwd = makeTempDir();
+    const teamRoot = join(cwd, '.omc', 'state', 'team', 'torn');
+    mkdirSync(teamRoot, { recursive: true });
+    writeFileSync(join(teamRoot, 'config.json'), JSON.stringify({
+      name: 'torn',
+      task: 'Survive torn event log',
+      created_at: '2026-03-09T06:55:00.000Z',
+      worker_count: 1,
+      workers: [{ name: 'worker-1', role: 'executor', assigned_tasks: [] }],
+    }));
+    writeFileSync(join(teamRoot, 'events.jsonl'), [
+      JSON.stringify({ event_id: 'e1', type: 'task_completed', worker: 'worker-1', task_id: '1', created_at: '2026-03-09T07:03:00.000Z' }),
+      '{"event_id":"torn","type":"task_fai',
+      JSON.stringify({ event_id: 'e2', type: 'team_leader_nudge', worker: 'worker-1', reason: 'continue working', created_at: '2026-03-09T07:04:00.000Z' }),
+      '{"event_id":"partial"',
+    ].join('\n'));
+
+    const state = refreshMissionBoardState(cwd, {
+      enabled: true,
+      maxMissions: 5,
+      maxAgentsPerMission: 5,
+      maxTimelineEvents: 10,
+      persistCompletedForMinutes: 30,
+    }, 'torn-session');
+
+    const teamMission = state.missions.find((mission) => mission.source === 'team');
+    const eventIds = teamMission?.timeline.map((entry) => entry.id).filter((id) => id.startsWith('event:'));
+    expect(eventIds).toEqual(['event:e1', 'event:e2']);
+  });
+
   it('records session-scoped agent starts and completions', () => {
     const cwd = makeTempDir();
 
