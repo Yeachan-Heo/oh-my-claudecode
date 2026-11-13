@@ -31,7 +31,7 @@ describe('validateTmux', () => {
     mockedExecSync.mockReturnValue(Buffer.from('tmux 3.4'));
 
     expect(() => validateTmux(false)).not.toThrow();
-    expect(mockedExecSync).toHaveBeenCalledWith('tmux -V', expect.objectContaining({
+    expect(mockedExecSync).toHaveBeenCalledWith('tmux -u -V', expect.objectContaining({
       encoding: 'utf-8',
       timeout: 5000,
       stdio: 'pipe',
