@@ -3290,6 +3290,31 @@ describe('jev-compaction module: refused batches, unrated results, well-formed b
     expect(seen).toEqual(['session.compact', 'turn.complete']);
   });
 
+  it('without String.prototype.toWellFormed the regular expression gives the same result as the native method', () => {
+    const samples = [
+      'x\ud83dy', '\ude00z', 'ok \ud83d\ude00', '\ud83d', '\ude00', '\ud83d\ud83d\ude00', '\ude00\ude00', '\ud83d\ude00\ud83d', 'a\ud83d\ude00b\ude00c\ud83dd', '',
+      'plain text', `${'z'.repeat(2000)}\ud83d`,
+    ];
+    const value = { a: samples, nested: { k: samples[0] }, 'key\ud83d': samples[1], n: 1, none: null };
+    // The expectation comes from the native method itself, computed here and not by the module.
+    const native = JSON.stringify(value, (_key, v) => (typeof v === 'string' ? v.toWellFormed() : v));
+    expect(wellFormedBody(value)).toBe(native);
+    const descriptor = Object.getOwnPropertyDescriptor(String.prototype, 'toWellFormed');
+    expect(typeof descriptor.value).toBe('function');
+    let fallback;
+    try {
+      delete String.prototype.toWellFormed;
+      expect(typeof String.prototype.toWellFormed).toBe('undefined');
+      fallback = wellFormedBody(value);
+    } finally {
+      Object.defineProperty(String.prototype, 'toWellFormed', descriptor);
+    }
+    expect(typeof String.prototype.toWellFormed).toBe('function');
+    expect(fallback).toBe(native);
+    // Keys are not touched; every string value of the body is well-formed.
+    for (const v of Object.values(JSON.parse(fallback).a)) expect(v.isWellFormed()).toBe(true);
+  });
+
   it('every record names the module (module_rev): the sha256 of its file, else of CLAUDE_PLUGIN_ROOT/hooks/jev-compaction.mjs, else null', async () => {
     const own = readFileSync(join(root, 'hooks', 'jev-compaction.mjs'));
     const digest = createHash('sha256').update(own).digest('hex');
