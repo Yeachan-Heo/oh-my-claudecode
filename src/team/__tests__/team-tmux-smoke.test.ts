@@ -268,6 +268,7 @@ describe.skipIf(!SMOKE_ENABLED)('team tmux smoke: fake claude worker lifecycle',
       workerCount: 1,
       agentTypes: ['claude'],
       tasks: [{ subject: 'Smoke task', description: 'Claim this task, complete it, then wait for shutdown.' }],
+      pluginConfig: {},
       cwd,
     });
     const serverIdentity = runtime.config.tmux_server_identity;
