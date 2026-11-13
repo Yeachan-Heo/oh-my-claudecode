@@ -5,19 +5,20 @@
  * process-identity file lock that is reclaimed only from a dead holder.
  *
  * State file: .omc/state/team/{name}/dispatch/requests.json
- * Lock path:  .omc/state/team/{name}/dispatch/requests.lock
+ * Lock paths: .omc/state/team/{name}/dispatch/requests.lock, then dispatch/.lock/
  *
  * Mirrors OMX src/team/state/dispatch.ts behavior exactly.
  */
 
 import { randomUUID } from 'crypto';
 import { existsSync } from 'fs';
-import { readFile } from 'fs/promises';
-import { dirname } from 'path';
+import { mkdir, readFile, rm, stat, writeFile } from 'fs/promises';
+import { dirname, join } from 'path';
 import { TeamPaths, absPath } from './state-paths.js';
 import { atomicWriteJson, ensureDirWithMode } from './fs-utils.js';
 import { WORKER_NAME_SAFE_PATTERN } from './contracts.js';
 import { withProcessIdentityFileLock } from './process-identity-lock.js';
+import { currentProcessStartIdentity, isProcessIdentityDead, type OwnerEpochRecord } from './team-owner-epoch.js';
 
 // ── Types ──────────────────────────────────────────────────────────────────
 
@@ -109,6 +110,9 @@ const OMC_DISPATCH_LOCK_TIMEOUT_ENV = 'OMC_TEAM_DISPATCH_LOCK_TIMEOUT_MS';
 const DEFAULT_DISPATCH_LOCK_TIMEOUT_MS = 15_000;
 const MIN_DISPATCH_LOCK_TIMEOUT_MS = 1_000;
 const MAX_DISPATCH_LOCK_TIMEOUT_MS = 120_000;
+const LEGACY_LOCK_STALE_MS = 5 * 60 * 1000;
+const LEGACY_LOCK_INITIAL_POLL_MS = 25;
+const LEGACY_LOCK_MAX_POLL_MS = 500;
 
 // ── Validation ─────────────────────────────────────────────────────────────
 
@@ -162,16 +166,75 @@ async function withDispatchLock<T>(teamName: string, cwd: string, fn: () => Prom
   if (!existsSync(root)) throw new Error(`Team ${teamName} not found`);
 
   const timeoutMs = resolveDispatchLockTimeoutMs(process.env);
+  const deadline = Date.now() + timeoutMs;
+  const timedOut = () => new Error(
+    `Timed out acquiring dispatch lock for ${teamName} after ${timeoutMs}ms. ` +
+    `Set ${OMC_DISPATCH_LOCK_TIMEOUT_ENV} to increase (current: ${timeoutMs}ms, max: ${MAX_DISPATCH_LOCK_TIMEOUT_MS}ms).`,
+  );
   try {
-    return await withProcessIdentityFileLock(absPath(cwd, TeamPaths.dispatchLock(teamName)), fn, timeoutMs);
+    return await withProcessIdentityFileLock(
+      absPath(cwd, TeamPaths.dispatchLock(teamName)),
+      () => withLegacyDispatchLockDir(absPath(cwd, TeamPaths.dispatchLegacyLockDir(teamName)), deadline, timedOut, fn),
+      timeoutMs,
+    );
   } catch (error) {
-    if (error instanceof Error && error.message === 'process_identity_lock_timeout') {
-      throw new Error(
-        `Timed out acquiring dispatch lock for ${teamName} after ${timeoutMs}ms. ` +
-        `Set ${OMC_DISPATCH_LOCK_TIMEOUT_ENV} to increase (current: ${timeoutMs}ms, max: ${MAX_DISPATCH_LOCK_TIMEOUT_MS}ms).`,
-      );
-    }
+    if (error instanceof Error && error.message === 'process_identity_lock_timeout') throw timedOut();
     throw error;
+  }
+}
+
+async function isLegacyDispatchLockReclaimable(lockDir: string): Promise<boolean> {
+  try {
+    const owner = JSON.parse(await readFile(join(lockDir, 'owner'), 'utf8')) as Pick<OwnerEpochRecord, 'pid' | 'process_started_at'>;
+    if (isProcessIdentityDead(owner)) return true;
+  } catch {
+    // Older versions write a non-JSON token; only age can retire their directory.
+  }
+  try {
+    return Date.now() - (await stat(lockDir)).mtimeMs > LEGACY_LOCK_STALE_MS;
+  } catch {
+    return false;
+  }
+}
+
+// Migration shim: OMC versions without requests.lock still serialize on this mkdir lock; delete once none can be running.
+async function withLegacyDispatchLockDir<T>(
+  lockDir: string,
+  deadline: number,
+  timedOut: () => Error,
+  fn: () => Promise<T>,
+): Promise<T> {
+  const ownerPath = join(lockDir, 'owner');
+  const owner = JSON.stringify({ pid: process.pid, process_started_at: currentProcessStartIdentity(), nonce: randomUUID() });
+  let pollMs = LEGACY_LOCK_INITIAL_POLL_MS;
+  while (true) {
+    try {
+      await mkdir(lockDir);
+      break;
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error;
+    }
+    if (await isLegacyDispatchLockReclaimable(lockDir)) {
+      await rm(lockDir, { recursive: true, force: true });
+      continue;
+    }
+    if (Date.now() >= deadline) throw timedOut();
+    await new Promise((resolve) => setTimeout(resolve, pollMs));
+    pollMs = Math.min(pollMs * 2, LEGACY_LOCK_MAX_POLL_MS);
+  }
+
+  try {
+    await writeFile(ownerPath, owner, 'utf8');
+  } catch (error) {
+    await rm(lockDir, { recursive: true, force: true });
+    throw error;
+  }
+  try {
+    return await fn();
+  } finally {
+    if (await readFile(ownerPath, 'utf8').catch(() => null) === owner) {
+      await rm(lockDir, { recursive: true, force: true });
+    }
   }
 }
 

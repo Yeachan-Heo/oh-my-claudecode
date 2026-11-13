@@ -164,6 +164,8 @@ export const TeamPaths = {
   // Not `.lock`: that name holds pre-identity-lock mkdir directories, which the file lock cannot read or reclaim.
   dispatchLock: (teamName: string) =>
     `.omc/state/team/${teamName}/dispatch/requests.lock`,
+  dispatchLegacyLockDir: (teamName: string) =>
+    `.omc/state/team/${teamName}/dispatch/.lock`,
   mailboxNotificationLock: (teamName: string, requestId: string) =>
     `.omc/state/team/${teamName}/dispatch/.mailbox-notification-${createHash('sha256').update(requestId).digest('hex')}.lock`,
 

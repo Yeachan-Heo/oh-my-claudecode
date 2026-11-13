@@ -182,27 +182,58 @@ describe('dispatch queue store integrity', () => {
       expect((await storedRows()).map((row) => row.trigger_message)).toEqual(['seed', 'holder', 'contender']);
     });
 
-    it('reclaims a lock whose holder process is dead', async () => {
+    it('reclaims both locks a dead writer of this version left behind', async () => {
       const lockPath = join(dispatchDir, 'requests.lock');
+      const legacyLockDir = join(dispatchDir, '.lock');
+      const deadHolder = { pid: 2_147_483_647, process_started_at: deadProcessStart, nonce: 'dead-holder' };
       await writeFile(lockPath, JSON.stringify({
-        schema_version: 1, pid: 2_147_483_647, process_started_at: deadProcessStart,
-        nonce: 'dead-holder', created_at: new Date().toISOString(),
+        schema_version: 1, ...deadHolder, created_at: new Date().toISOString(),
       }), 'utf8');
+      await mkdir(legacyLockDir);
+      await writeFile(join(legacyLockDir, 'owner'), JSON.stringify(deadHolder), 'utf8');
 
       await enqueueDispatchRequest(teamName, { kind: 'nudge', to_worker: 'worker-1', trigger_message: 'after crash' }, cwd);
 
       expect((await storedRows()).map((row) => row.trigger_message)).toEqual(['after crash']);
       expect(existsSync(lockPath)).toBe(false);
+      expect(existsSync(legacyLockDir)).toBe(false);
     });
 
-    it('is not blocked by a leftover directory lock from an older version', async () => {
+    it('waits for a directory lock held by an older version instead of losing its update', async () => {
+      process.env.OMC_TEAM_DISPATCH_LOCK_TIMEOUT_MS = '10000';
+      await enqueueDispatchRequest(teamName, { kind: 'nudge', to_worker: 'worker-1', trigger_message: 'seed' }, cwd);
       const legacyLockDir = join(dispatchDir, '.lock');
       await mkdir(legacyLockDir);
       await writeFile(join(legacyLockDir, 'owner'), '12345.1.abc', 'utf8');
+      const oldWriterSnapshot = await storedRows();
+
+      let newWriterSettled = false;
+      const newWriter = enqueueDispatchRequest(teamName, { kind: 'nudge', to_worker: 'worker-1', trigger_message: 'new writer' }, cwd)
+        .finally(() => { newWriterSettled = true; });
+      await new Promise((resolve) => setTimeout(resolve, 300));
+      const settledWhileOldWriterHeld = newWriterSettled;
+      await writeFile(storePath, JSON.stringify([
+        ...oldWriterSnapshot,
+        pending({ request_id: 'old-writer', trigger_message: 'old writer' }),
+      ]), 'utf8');
+      await rm(legacyLockDir, { recursive: true, force: true });
+      await newWriter;
+
+      expect((await storedRows()).map((row) => row.trigger_message)).toEqual(['seed', 'old writer', 'new writer']);
+      expect(settledWhileOldWriterHeld).toBe(false);
+    });
+
+    it('reclaims a directory lock an older version abandoned past its stale window', async () => {
+      const legacyLockDir = join(dispatchDir, '.lock');
+      await mkdir(legacyLockDir);
+      await writeFile(join(legacyLockDir, 'owner'), '12345.1.abc', 'utf8');
+      const sixMinutesAgo = new Date(Date.now() - 6 * 60 * 1000);
+      await utimes(legacyLockDir, sixMinutesAgo, sixMinutesAgo);
 
       await enqueueDispatchRequest(teamName, { kind: 'nudge', to_worker: 'worker-1', trigger_message: 'after upgrade' }, cwd);
 
       expect((await storedRows()).map((row) => row.trigger_message)).toEqual(['after upgrade']);
+      expect(existsSync(legacyLockDir)).toBe(false);
     });
   });
 });
