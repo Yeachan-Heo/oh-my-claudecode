@@ -15,9 +15,11 @@
  */
 export function maskSecrets(text, { keepGitHashes = false } = {}) {
   // The private key blocks and the pairs run first (a pair value holding a key block is masked as a block). The named values come
-  // last and only add masking: every rule before them sees the text as it was, so the first word of a value (`secret='Cookie: ...'`,
-  // `hasło: DB_PASSWORD=...`) is still the marker of the rule that needs it. The word rule opens on a serialized quote (`\"`), takes the
-  // scheme of `token: Bearer ...` along, and a first word that is itself an assignment (`secret: "x-api-key: ..."`) with its value.
+  // after the contextual rules and only add masking: every rule before them sees the text as it was, so the first word of a value
+  // (`secret='Cookie: ...'`, `hasło: DB_PASSWORD=...`) is still the marker of the rule that needs it. The word rule opens on a serialized
+  // quote (`\"`), takes the scheme of `token: Bearer ...` along, and a first word that is itself a field key (`secret: "x-api-key: ..."`,
+  // `hasło: "p\u0061ssword": "..."`) with its value. The long mixed letter-digit string is the last rule, so a key that is such a string
+  // is still read by the rules that find the field.
   return maskNamedValues(maskPrivateKeys(text))
     .replace(/(\/\/[^/\s:@]+:)[^/\s@]+@/g, '$1***@')
     .replace(/((?:authorization|proxy-authorization)\s*:\s*(?:(?:bearer|basic|token)\s*)?)[^\s"']+/gi, '$1***')
@@ -37,11 +39,13 @@ export function maskSecrets(text, { keepGitHashes = false } = {}) {
     // A JWT, or else the rest of the run kept unchanged; the run class has no dot, so a match with a dot is the JWT.
     .replace(/\beyJ(?:[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}|[A-Za-z0-9_-]*)/g, (m) => m.includes('.') ? 'eyJ***' : m)
     // A whole word containing a keyword: the lookahead finds the keyword once, then the word is read to its end.
-    .replace(/(\b(?=[A-Za-z0-9_]*(?:KEY|TOKEN|SECRET|PASSWORD|PASSWD|PASS|PWD|CREDENTIALS?))[A-Za-z0-9_]+\b["'\]]*\s*[=:]\s*(?:\\*["'])?)(?:(bearer|basic)[ \t]+)?[^\s"'&;|)]+(?:(?:(?<=[:=])|[ \t]+[:=])[ \t]*(?:\\*["'])?[^\s"'&;|)]+)?/gi, (whole, head, scheme) => head + (scheme ? '*** ***' : '***'))
-    .replace(/(^|[^A-Za-z0-9+_-])(?=[A-Za-z0-9+_-]*\d)(?=[A-Za-z0-9+_-]*[A-Za-z])([A-Za-z0-9+_-]{32,}={0,2})/g, (whole, before, token) =>
-      keepGitHashes && /^(?:[0-9a-f]{40}|[0-9a-f]{64})$/.test(token) ? whole : before + '***')
+    .replace(/(\b(?=[A-Za-z0-9_]*(?:KEY|TOKEN|SECRET|PASSWORD|PASSWD|PASS|PWD|CREDENTIALS?))[A-Za-z0-9_]+\b["'\]]*\s*[=:]\s*(?:\\*["'])?)(?:(bearer|basic)[ \t]+)?[^\s"'&;|)]+(?:(?:(?<=[:=])|[ \t]+[:=])[ \t]*(?:\\*["'])?(?![^\s"'&;|)]*(?:KEY|TOKEN|SECRET|PASSWORD|PASSWD|PASS|PWD|CREDENTIALS?|has[łl]o|klucz|sekret|passwort|kennwort|contrase[ñn]a|\\+u[0-9a-fA-F]{4})[^\s"'&;|)]*(?:[:=]\\*(?![^\s"'&;|)])|(?:\\*["']|\s)+[:=]))[^\s"'&;|)]+)?/gi, (whole, head, scheme) => head + (scheme ? '*** ***' : '***'))
     .replace(NAMED_VALUE, '$1***')
-    .replace(ESCAPED_KEY, (whole, key, separator) => secretPairName(key) ? key + separator + '***' : whole);
+    .replace(ESCAPED_KEY, (whole, key, separator) => secretPairName(key) ? key + separator + '***' : whole)
+    // The long mixed letter-digit strings come after the field-name rules: a key such as `service_01234567890123456789_klucz` is a long
+    // string itself, and the rules above must read it (to find the field and mask its value) before this one masks it.
+    .replace(/(^|[^A-Za-z0-9+_-])(?=[A-Za-z0-9+_-]*\d)(?=[A-Za-z0-9+_-]*[A-Za-z])([A-Za-z0-9+_-]{32,}={0,2})/g, (whole, before, token) =>
+      keepGitHashes && /^(?:[0-9a-f]{40}|[0-9a-f]{64})$/.test(token) ? whole : before + '***');
 }
 
 /**
@@ -61,13 +65,19 @@ const WS = String.raw`(?:\s|\\+(?:[ntrf]|u(?:000[9a-dA-D]|0020|00[aA]0|1680|200[
 
 // The `name: value` / `name=value` rule, the last one of the chain: it masks the first word of a value, so every other rule runs
 // before it, and it adds the names of other languages and whitespace written as JSON writes it into a string.
-const NAMED_VALUE = new RegExp(String.raw`((?:api[_-]?key|access[_-]?key|client[_-]?secret|private[_-]?key|password|passwd|token|secret|has(?:[łl]|\\+u014[12])o|klucz|sekret|passwort|kennwort|contrase(?:[ñn]|ñ|n\\+u0303|\\+u00d1|\\+u00f1)a)(?:\\*["'])?${WS}*[:=]${WS}*(?:\\*["'])?(?:(?:bearer|basic)[ \t]+)?)(?:[^\s"'&;|,}\\]|\\(?!["']))+`, 'gi');
+// A value is read to the first whitespace, quote or separator. When that first word is itself a field key (`"password": "x"` inside the
+// value of `hasło:`, or `x-api-key: x`), the word after its separator is the secret and is masked too, as the `KEY=` rule does, unless
+// that word is a key of its own (it ends in a separator or has one after it), which is left to the rule that reads it.
+const VALUE = String.raw`(?:[^\s"'&;|,}\\]|\\(?!["']))+`;
+const NEXT_FIELD = String.raw`(?:(?:\\*["'])?${WS}*[:=]|(?<=[^=][:=]))${WS}*(?:\\*["'])?(?!(?=(?<word>${VALUE}))\k<word>(?:(?<=[:=])|(?:\\*["']|${WS})*[:=]))${VALUE}`;
+const NAMED_VALUE = new RegExp(String.raw`((?:api[_-]?key|access[_-]?key|client[_-]?secret|private[_-]?key|password|passwd|token|secret|has(?:[łl]|\\+u014[12])o|klucz|sekret|passwort|kennwort|contrase(?:[ñn]|ñ|n\\+u0303|\\+u00d1|\\+u00f1)a)(?:\\*["'])?${WS}*[:=]${WS}*(?:\\*["'])?(?:(?:bearer|basic)[ \t]+)?)${VALUE}(?:${NEXT_FIELD})?`, 'gi');
 
 // A field key that holds JSON `\uXXXX` escapes in any of its letters (`h\u0061s\u0142o`, `p\u0061ssword`), which the name list above does not
 // read: the key is decoded and classified as the key of a pair is, and the value is masked when it names a secret. The key is a run of
 // word characters and escapes (not of whitespace, which stays the separator), read from its start only, so each character is read once.
 const KEY_ESCAPE = String.raw`\\+u(?!(?:000[9a-dA-D]|0020|00[aA]0|1680|200[0-9aA]|202[89fF]|205[fF]|3000|[fF][eE][fF][fF]))[0-9a-fA-F]{4}`;
-const ESCAPED_KEY = new RegExp(String.raw`(?<![\w\\-])((?=(?:[\w-]|${KEY_ESCAPE})*${KEY_ESCAPE})(?:[\w-]|${KEY_ESCAPE})+)((?:\\*["'])?${WS}*[:=]${WS}*(?:\\*["'])?)(?:[^\s"'&;|,}\\]|\\(?!["']))+`, 'g');
+const KEY_CHAR = String.raw`[^\s\x00-\x2c\x2e\x2f\x3a-\x40\x5b-\x5e\x60\x7b-\x7f]`;
+const ESCAPED_KEY = new RegExp(String.raw`(?<!${KEY_CHAR}|\\)((?=(?:${KEY_CHAR}|${KEY_ESCAPE})*${KEY_ESCAPE})(?:${KEY_CHAR}|${KEY_ESCAPE})+)((?:\\*["'])?${WS}*[:=]${WS}*(?:\\*["'])?)${VALUE}`, 'g');
 
 // A quote delimiter at escaping depth 0 (a plain quote), 1 (inside a JSON string: `\"`), 2 (shell-escaped before it went into the
 // JSON string: `\\\"`), 3 (7 backslashes) and so on up to 8 (255 backslashes): a maximal run of backslashes whose length is 2^depth - 1 plus a multiple of 2^(depth + 1),
@@ -86,9 +96,14 @@ const AFTER_CLOSE = String.raw`(?=[\s,}\])&;|"'\\]|$)`;
 // a value, and a value goes with the names of its own prefix (`oldName` and `oldValue`), or else with the names without a prefix.
 // The text is read at each quote depth, so the same pair inside a JSON string (as a tool input is sent) is found too. There is no
 // length cap and no cutoff in the number of fields, and each character is read a constant number of times.
+// A prefix of a pair-field key (`old` in `oldName`, `paramètre-` in `paramètre-name`): word characters, hyphens, dots and non-ASCII characters
+// that are not whitespace, so a key in another language pairs as an English one does.
+const PAIR_PREFIX = String.raw`[^\s\x00-\x2c\x2f\x3a-\x40\x5b-\x5e\x60\x7b-\x7f]*`;
+const PAIR_NAME_FIELD = new RegExp(String.raw`^(${PAIR_PREFIX})(?:name|key|type)$`, 'i');
+const PAIR_VALUE_FIELD = new RegExp(String.raw`^(${PAIR_PREFIX})(?:value|val)$`, 'i');
 const PAIR_SEPARATOR = new RegExp(String.raw`^${WS}*,${WS}*$`);
 const PAIR_FORMS = QUOTE_DEPTHS.map((d) =>
-  new RegExp(String.raw`${d}(${stringBody(d)}*)${d}${WS}*:${WS}*(${d}${stringBody(d)}*${d}${AFTER_CLOSE}|${d}[^\n]*?(?=,${WS}*${d}${stringBody(d)}*${d}${WS}*:|[}\]]|\n|$)|[^,{}\[\]\s"\\]+)`, 'g'));
+  new RegExp(String.raw`${d}(${stringBody(d)}*)${d}${WS}*:${WS}*(${d}${stringBody(d)}*${d}${AFTER_CLOSE}|${d}[^\n]*?(?=,${WS}*${d}${stringBody(d)}*${d}${WS}*:|[}\]](?:(?<=["'][}\]])|(?=${WS}*(?:[,{}\[\]]|$)))|\n|$)|[^,{}\[\]\s"\\]+)`, 'g'));
 // JSON `\uXXXX` escapes of the name are read first (`DB_PASS\u0057ORD`), with any number of backslashes before the u.
 const decodeUnicode = (text) => text.replace(/(?<!\\)\\+u([0-9a-f]{4})/gi, (_, hex) => String.fromCharCode(parseInt(hex, 16)));
 const secretPairName = (name) => /key|token|secret|pass|pwd|credential|has[łl]o|klucz|sekret|kennwort|contrase(?:ñ|n\u0303?)a|^securestring$/i.test(decodeUnicode(name));
@@ -114,7 +129,7 @@ function maskNamedValues(text) {
       const names = new Set();
       const secret = new Set();
       for (const f of group) {
-        const m = /^([\w.-]*)(?:name|key|type)$/i.exec(decodeUnicode(f.key));
+        const m = PAIR_NAME_FIELD.exec(decodeUnicode(f.key));
         if (!m || !f.quote) continue;
         const prefix = m[1].toLowerCase();
         names.add(prefix);
@@ -122,7 +137,7 @@ function maskNamedValues(text) {
       }
       if (secret.size) {
         for (const f of group) {
-          const m = /^([\w.-]*)(?:value|val)$/i.exec(decodeUnicode(f.key));
+          const m = PAIR_VALUE_FIELD.exec(decodeUnicode(f.key));
           if (!m || f.value === f.quote + '***' + f.quote) continue;
           const prefix = m[1].toLowerCase();
           if (secret.has(prefix) || (!names.has(prefix) && secret.has(''))) cuts.push(f);

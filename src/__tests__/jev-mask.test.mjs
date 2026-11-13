@@ -99,6 +99,21 @@ describe.each([
       'a word and then a backslash run': (n) => 'abc' + '\\'.repeat(n) + 'x',
       'whitespace escapes between letters': (n) => repeat(String.raw`p\u0020`, n),
       'BEGIN with long words glued to PRIVATE': (n) => repeat('-----BEGIN AAAAAAAAAAAAAAAAPRIVATE ', n),
+      'non-ASCII letters without a separator': (n) => repeat('ł', n),
+      'non-ASCII letters and escapes without a separator': (n) => repeat('ł\\u0061', n),
+      'a long non-ASCII word and then an escape': (n) => 'ł'.repeat(n) + String.raw`\u0061`,
+      'non-ASCII escaped keys, separators and values, masked': (n) => repeat(String.raw`hasł\u006f:x `, n),
+      'non-ASCII pair prefixes, masked': (n) => '{' + repeat('"paramètre-name":"A_TOKEN","paramètre-value":"x",', n),
+      'non-ASCII pair names alone': (n) => repeat('"paramètre-name":"a",', n),
+      'a word ending in padding and assignments, masked': (n) => repeat("API_KEY=YWJjZA== DB_PASSWORD='x' ", n),
+      'words ending in one equals sign and labels, masked': (n) => repeat('KEY=a= b: ', n),
+      'labels and quoted assignments, masked': (n) => repeat("secret: a: b='", n),
+      'escaped keys under a localized parent, masked': (n) => repeat('hasło:\n  "p\\u0061ssword": "x"\n', n),
+      'unterminated pair values with brackets, masked': (n) => '{"Name":"DB_PASSWORD","Value":"' + repeat('a}b]', n),
+      'long keys before a localized word, masked': (n) => repeat('service_01234567890123456789_klucz:x ', n),
+      'a label and one long word, masked': (n) => 'KEY=: ' + 'x'.repeat(n),
+      'labels and words that hold a keyword, masked': (n) => repeat('KEY=: xxxxxxxxxxKEYxxxxxxxxx ', n),
+      'a label and a long word that holds a keyword and a quote, masked': (n) => 'KEY=: ' + 'x'.repeat(n) + 'KEY"',
     };
     for (const n of [100_000, 1_000_000]) {
       for (const [name, make] of Object.entries(shapes)) {
@@ -394,6 +409,130 @@ describe.each([
     ];
     const leaks = texts.filter((text) => mask(text).includes('hunter2zz'));
     expect(leaks).toEqual([]);
+  });
+
+  it('masks the next assignment after a value that ends in Base64 padding, and what follows a label', () => {
+    // The nested-label arm leaves a following key (a word with a secret name and a separator at its end) to the rule that reads it.
+    expect(mask("API_KEY=YWJjZA== DB_PASSWORD='hunter2zz' ./app")).toBe("API_KEY=*** DB_PASSWORD='***' ./app");
+    expect(mask("API_KEY=YWJjZA= DB_PASSWORD='hunter2zz' ./app")).toBe("API_KEY=*** DB_PASSWORD='***' ./app");
+    expect(mask('API_KEY=YWJjZA== hasło=\'hunter2zz\' ./app')).toBe("API_KEY=*** hasło='***' ./app");
+    expect(mask('API_KEY=YWJjZA== hasło="hunter2zz" ./app')).toBe('API_KEY=*** hasło="***" ./app');
+    expect(mask('PASS== pass= hunter2zz')).toBe('PASS=*** pass= ***');
+    expect(mask('KEY=: KEY: hunter2zz')).toBe('KEY=*** KEY: ***');
+    expect(mask('PASS== pass =hunter2zz')).toBe('PASS=*** pass =***');
+    expect(mask('API_KEY=YWJjZA== h\\u0061s\\u0142o="hunter2zz" ./app')).toBe('API_KEY=*** h\\u0061s\\u0142o="***" ./app');
+    expect(mask('PASS:= KEY":hunter2zz')).toBe('PASS:*** KEY":***');
+    for (const text of [
+      String.raw`API_KEY=YWJjZA== DB_PASSWORD=\"hunter2zz\" ./app`,
+      'API_KEY=YWJjZA== hasło=abc}hunter2zz z ./app',
+      'API_KEY=YWJjZA== hasło=abc,hunter2zz z ./app',
+      "secret: x-api-key: DB_PASSWORD='hunter2zz'",
+      "hasło: x-api-key: DB_PASSWORD='hunter2zz'",
+    ]) expect({ text, left: mask(text).includes('hunter2zz') }).toEqual({ text, left: false });
+    // A value that follows a label and ends in an equals sign (padding) is still the value: it is masked, also before a closing quote.
+    for (const text of ['secret: x-api-key: hunter2zz=', 'secret: x-api-key: YWJjZA=', '{"command":"secret: x-api-key: hunter2zz="}', 'hasło: x-api-key: hunter2zz=']) {
+      expect({ text, left: /hunter2zz|YWJjZA/.test(mask(text)) }).toEqual({ text, left: false });
+    }
+    for (const raw of ["API_KEY=YWJjZA== DB_PASSWORD='hunter2zz' ./app", 'API_KEY=YWJjZA== hasło="hunter2zz" ./app']) {
+      let sent = raw;
+      for (let level = 1; level <= 3; level++) {
+        sent = JSON.stringify(sent).slice(1, -1);
+        expect({ raw, level, left: mask(sent).includes('hunter2zz') }).toEqual({ raw, level, left: false });
+      }
+    }
+  });
+
+  it('masks the value of a field key with non-ASCII letters, also when it holds JSON escapes, and of a pair whose prefix has them', () => {
+    const cases = [
+      ['{"hasł\\u006f":"hunter2zz"}', '{"hasł\\u006f":"***"}'],
+      ['{"contrase\\u00f1\\u0061":"hunter2zz"}', '{"contrase\\u00f1\\u0061":"***"}'],
+      ['{"contrasen\u0303\\u0061":"hunter2zz"}', '{"contrasen\u0303\\u0061":"***"}'],
+      ['{"parame\u0300tre-p\\u0061ss":"hunter2zz"}', '{"parame\u0300tre-p\\u0061ss":"***"}'],
+      [String.raw`{\"hasł\\u006f\":\"hunter2zz\"}`, String.raw`{\"hasł\\u006f\":\"***\"}`],
+      ['hasł\\u006f: hunter2zz', 'hasł\\u006f: ***'],
+      ['{"zażółć\\u0061":"value"}', '{"zażółć\\u0061":"value"}'],
+      ['{"ł\\u0061":"value"}', '{"ł\\u0061":"value"}'],
+      ['{"paramètre-name":"DB_PASSWORD","paramètre-value":"hunter2zz"}', '{"paramètre-name":"DB_PASSWORD","paramètre-value":"***"}'],
+      ['{"paramètre-value":"hunter2zz","paramètre-name":"DB_PASSWORD"}', '{"paramètre-value":"***","paramètre-name":"DB_PASSWORD"}'],
+      ['{"parame\u0300tre-name":"DB_PASSWORD","parame\u0300tre-value":"hunter2zz"}', '{"parame\u0300tre-name":"DB_PASSWORD","parame\u0300tre-value":"***"}'],
+      [String.raw`{\"paramètre-name\":\"DB_PASSWORD\",\"paramètre-value\":\"hunter2zz\"}`, String.raw`{\"paramètre-name\":\"DB_PASSWORD\",\"paramètre-value\":\"***\"}`],
+      ['{"nazwa.parametrów-name":"A_TOKEN","nazwa.parametrów-value":"hunter2zz"}', '{"nazwa.parametrów-name":"A_TOKEN","nazwa.parametrów-value":"***"}'],
+      ['{"paramètre-name":"REGION","paramètre-value":"eu-west-1"}', '{"paramètre-name":"REGION","paramètre-value":"eu-west-1"}'],
+    ];
+    for (const [text, masked] of cases) expect({ text, masked: mask(text) }).toEqual({ text, masked });
+    for (const raw of ['{"hasł\\u006f":"hunter2zz"}', '{"paramètre-name":"DB_PASSWORD","paramètre-value":"hunter2zz"}']) {
+      let sent = raw;
+      for (let level = 1; level <= 3; level++) {
+        sent = JSON.stringify(sent).slice(1, -1);
+        expect({ raw, level, left: mask(sent).includes('hunter2zz') }).toEqual({ raw, level, left: false });
+      }
+    }
+  });
+
+  it('classifies a field key before a long string erases it', () => {
+    const cases = [
+      ['{"service_01234567890123456789_klucz":"hunter2zz"}', '{"***":"***"}'],
+      ['{"service_01234567890123456789_hasło":"hunter2zz"}', '{"***ło":"***"}'],
+      ['{"service_01234567890123456789_p\\u0061ssword":"hunter2zz"}', '{"service_01234567890123456789_p\\u0061ssword":"***"}'],
+      ['{"service_01234567890123456789_h\\u0061s\\u0142o":"hunter2zz"}', '{"service_01234567890123456789_h\\u0061s\\u0142o":"***"}'],
+      ['service_01234567890123456789_sekret: hunter2zz', '***: ***'],
+      ['{"service_01234567890123456789_name":"public"}', '{"***":"public"}'],
+    ];
+    for (const [text, masked] of cases) expect({ text, masked: mask(text) }).toEqual({ text, masked });
+    for (const raw of ['{"service_01234567890123456789_klucz":"hunter2zz"}', '{"service_01234567890123456789_p\\u0061ssword":"hunter2zz"}']) {
+      let sent = raw;
+      for (let level = 1; level <= 3; level++) {
+        sent = JSON.stringify(sent).slice(1, -1);
+        expect({ raw, level, left: mask(sent).includes('hunter2zz') }).toEqual({ raw, level, left: false });
+      }
+    }
+  });
+
+  it('masks a field whose key has JSON escapes under a localized field, and a field that names a secret inside the value of one', () => {
+    const texts = [
+      'hasło:\n  "p\\u0061ssword": "hunter2zz"',
+      JSON.stringify({ content: 'hasło:\n  "p\\u0061ssword": "hunter2zz"' }),
+      JSON.stringify({ command: "printf 'klucz:\\n  \"p\\u0061ssword\": \"hunter2zz\"\\n'" }),
+      'Passwort: {"p\\u0061ssword":"hunter2zz"}',
+      '{"p\\u0061ssword":"hasło: hunter2zz"}',
+      String.raw`{\"p\\u0061ssword\":\"hasło: hunter2zz\"}`,
+      'hasło: x-api-key: hunter2zz',
+      "hasło: DB_PASSWORD: 'hunter2zz'",
+      // A word after a label that is a key of its own is left to the rule that reads it, so its value is masked too.
+      'hasło: abc: klucz: hunter2zz',
+      'sekret: foo: Passwort: hunter2zz',
+      '{"hasło":"abc: klucz: hunter2zz"}',
+      'hasło= abc= sekret=hunter2zz',
+    ];
+    const leaks = texts.filter((text) => mask(text).includes('hunter2zz'));
+    expect(leaks).toEqual([]);
+    expect(mask('hasło:\n  "p\\u0061ssword": "hunter2zz"')).toBe('hasło:\n  "***"');
+    // A key without a secret name under a localized field stays readable on the other side of the value.
+    expect(mask('{"hasło":"hunter2zz","region":"eu-west-1"}')).toBe('{"hasło":"***","region":"eu-west-1"}');
+  });
+
+  it('masks the rest of a pair value cut off inside its quotes, also past a bracket in the value', () => {
+    const cases = [
+      ['{"Name":"DB_PASSWORD","Value":"abc}hunter2zz xxx', '{"Name":"DB_PASSWORD","Value":"***"'],
+      ['{"Name":"DB_PASSWORD","Value":"abc]hunter2zz xxx', '{"Name":"DB_PASSWORD","Value":"***"'],
+      ['{"Name":"DB_PASSWORD","Value":"abc}def]hunter2zz', '{"Name":"DB_PASSWORD","Value":"***"'],
+      [String.raw`{\"Name\":\"DB_PASSWORD\",\"Value\":\"abc}hunter2zz xxx`, String.raw`{\"Name\":\"DB_PASSWORD\",\"Value\":\"***\"`],
+      ['{"Name":"DB_PASSWORD","Value":"abc}hunter2zz xxx","Other":"x"}', '{"Name":"DB_PASSWORD","Value":"***","Other":"x"}'],
+      ['{"Value":"abc}hunter2zz ","Name":"DB_PASSWORD"}', '{"Value":"***","Name":"DB_PASSWORD"}'],
+      // A premature quote still ends the scan at the bracket that follows the closing quote.
+      ['{"Name":"DB_PASSWORD","Value":"abc"def ghi"}', '{"Name":"DB_PASSWORD","Value":"***"}'],
+      ['{"Name":"DB_PASSWORD","Value":"abc"def ghi"],"Other":"x"', '{"Name":"DB_PASSWORD","Value":"***"],"Other":"x"'],
+      // A bracket that closes an object ends the scan, so the next object of an array is its own group (a premature quote in the first).
+      ['[{"Name":"REGION","Value":"abc"def},{"Name":"DB_PASSWORD","Value":"hunter2zz"}]', '[{"Name":"REGION","Value":"abc"def},{"Name":"DB_PASSWORD","Value":"***"}]'],
+      [String.raw`[{\"Name\":\"REGION\",\"Value\":\"abc\"def},{\"Name\":\"DB_PASSWORD\",\"Value\":\"hunter2zz\"}]`, String.raw`[{\"Name\":\"REGION\",\"Value\":\"abc\"def},{\"Name\":\"DB_PASSWORD\",\"Value\":\"***\"}]`],
+    ];
+    for (const [text, masked] of cases) expect({ text, masked: mask(text) }).toEqual({ text, masked });
+    // The same text cut at every length inside the value, as the compaction hook cuts a long input: nothing of the value is left.
+    const whole = '{"Name":"DB_PASSWORD","Value":"abc}hunter2zz and more text after the bracket"}';
+    for (let end = whole.indexOf('hunter2zz'); end <= whole.length; end++) {
+      const cut = whole.slice(0, end + 'hunter2zz'.length > whole.length ? whole.length : end + 'hunter2zz'.length);
+      expect({ cut, left: mask(cut).includes('hunter2zz') }).toEqual({ cut, left: false });
+    }
   });
 });
 
