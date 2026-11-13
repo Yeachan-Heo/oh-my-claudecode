@@ -33,6 +33,7 @@ vi.mock('fs/promises', async (importOriginal) => {
 });
 
 import {
+  DispatchLockTimeoutError,
   enqueueDispatchRequest,
   transitionDispatchRequest,
   type TeamDispatchRequest,
@@ -288,6 +289,47 @@ describe('dispatch queue store integrity', () => {
 
       expect(result.deduped).toBe(false);
       expect((await storedRows()).map((row) => row.trigger_message)).toEqual(['committed']);
+    });
+
+    it('times out on requests.lock held by a live writer and leaves the holder and the store alone', async () => {
+      await enqueueDispatchRequest(teamName, { kind: 'nudge', to_worker: 'worker-1', trigger_message: 'seed' }, cwd);
+      let releaseHolder!: () => void;
+      const holderInside = new Promise<void>((entered) => {
+        readHold.current = {
+          path: storePath,
+          entered,
+          release: new Promise<void>((resolve) => { releaseHolder = resolve; }),
+        };
+      });
+      const holder = enqueueDispatchRequest(teamName, { kind: 'nudge', to_worker: 'worker-1', trigger_message: 'holder' }, cwd);
+      await holderInside;
+      const holderLock = await readFile(join(dispatchDir, 'requests.lock'), 'utf8');
+
+      const contender = enqueueDispatchRequest(teamName, { kind: 'nudge', to_worker: 'worker-1', trigger_message: 'contender' }, cwd);
+      await expect(contender).rejects.toBeInstanceOf(DispatchLockTimeoutError);
+      await expect(contender).rejects.toThrow(/Timed out acquiring dispatch lock for integrity-team after 1000ms/);
+
+      await expect(readFile(join(dispatchDir, 'requests.lock'), 'utf8')).resolves.toBe(holderLock);
+      expect(existsSync(join(dispatchDir, '.lock'))).toBe(true);
+      releaseHolder();
+      await holder;
+      expect((await storedRows()).map((row) => row.trigger_message)).toEqual(['seed', 'holder']);
+    });
+
+    it('times out on a directory lock an older version holds and releases requests.lock it acquired', async () => {
+      await enqueueDispatchRequest(teamName, { kind: 'nudge', to_worker: 'worker-1', trigger_message: 'seed' }, cwd);
+      const seeded = await readFile(storePath, 'utf8');
+      const legacyLockDir = join(dispatchDir, '.lock');
+      await mkdir(legacyLockDir);
+      await writeFile(join(legacyLockDir, 'owner'), '12345.1.abc', 'utf8');
+
+      const contender = enqueueDispatchRequest(teamName, { kind: 'nudge', to_worker: 'worker-1', trigger_message: 'contender' }, cwd);
+      await expect(contender).rejects.toBeInstanceOf(DispatchLockTimeoutError);
+      await expect(contender).rejects.toThrow(/Timed out acquiring dispatch lock for integrity-team after 1000ms/);
+
+      await expect(readFile(storePath, 'utf8')).resolves.toBe(seeded);
+      await expect(readFile(join(legacyLockDir, 'owner'), 'utf8')).resolves.toBe('12345.1.abc');
+      expect(existsSync(join(dispatchDir, 'requests.lock'))).toBe(false);
     });
   });
 });

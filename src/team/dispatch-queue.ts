@@ -95,6 +95,22 @@ export class DispatchStoreInvalidError extends Error {
   }
 }
 
+/** Thrown when the team's dispatch lock stays held past the acquisition deadline. */
+export class DispatchLockTimeoutError extends Error {
+  constructor(teamName: string, timeoutMs: number) {
+    super(
+      `Timed out acquiring dispatch lock for ${teamName} after ${timeoutMs}ms. ` +
+      `Set ${OMC_DISPATCH_LOCK_TIMEOUT_ENV} to increase (current: ${timeoutMs}ms, max: ${MAX_DISPATCH_LOCK_TIMEOUT_MS}ms).`,
+    );
+    this.name = 'DispatchLockTimeoutError';
+  }
+}
+
+/** Failures of the team's shared lock or store, which every other enqueue for the team would hit as well. */
+export function isTeamWideDispatchFailure(error: unknown): boolean {
+  return error instanceof DispatchLockTimeoutError || error instanceof DispatchStoreInvalidError;
+}
+
 /** Rows this version cannot normalize are carried verbatim so a rewrite never drops them. */
 type DispatchStoreEntry =
   | { kind: 'request'; request: TeamDispatchRequest }
@@ -167,10 +183,7 @@ async function withDispatchLock<T>(teamName: string, cwd: string, fn: () => Prom
 
   const timeoutMs = resolveDispatchLockTimeoutMs(process.env);
   const deadline = Date.now() + timeoutMs;
-  const timedOut = () => new Error(
-    `Timed out acquiring dispatch lock for ${teamName} after ${timeoutMs}ms. ` +
-    `Set ${OMC_DISPATCH_LOCK_TIMEOUT_ENV} to increase (current: ${timeoutMs}ms, max: ${MAX_DISPATCH_LOCK_TIMEOUT_MS}ms).`,
-  );
+  const timedOut = () => new DispatchLockTimeoutError(teamName, timeoutMs);
   try {
     return await withProcessIdentityFileLock(
       absPath(cwd, TeamPaths.dispatchLock(teamName)),
