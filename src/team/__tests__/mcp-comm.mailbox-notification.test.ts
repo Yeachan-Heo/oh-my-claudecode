@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { mkdir, mkdtemp, rm, symlink } from 'node:fs/promises';
+import { mkdir, mkdtemp, rm, symlink, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 
@@ -582,5 +582,47 @@ describe.sequential('direct mailbox notification orchestration', () => {
     })).rejects.toThrow('persist recipient 2 failed');
 
     expect(notify).not.toHaveBeenCalled();
+  });
+
+  it('fails the remaining broadcast recipients after one team-wide lock timeout instead of waiting again for each', async () => {
+    const previousTimeout = process.env.OMC_TEAM_DISPATCH_LOCK_TIMEOUT_MS;
+    process.env.OMC_TEAM_DISPATCH_LOCK_TIMEOUT_MS = '1000';
+    const cwd = suiteHome;
+    const legacyLockDir = join(suiteHome, '.omc', 'state', 'team', 'dispatch-team', 'dispatch', '.lock');
+    await mkdir(legacyLockDir, { recursive: true });
+    await writeFile(join(legacyLockDir, 'owner'), '12345.1.abc', 'utf8');
+    const notify = vi.fn(async () => ({ ok: true, transport: 'hook' as const, reason: 'queued_for_hook_dispatch' }));
+    let nextMessage = 0;
+
+    try {
+      const startedAt = Date.now();
+      const outcomes = await queueBroadcastMailboxMessage({
+        teamName: 'dispatch-team',
+        fromWorker: 'leader-fixed',
+        recipients: ['worker-1', 'worker-2', 'worker-3'].map((workerName, index) => ({ workerName, workerIndex: index + 1, paneId: `%${index + 9}` })),
+        body: 'broadcast body',
+        cwd,
+        triggerFor: (workerName) => `Read mailbox for ${workerName}.`,
+        notify,
+        deps: {
+          sendDirectMessage: vi.fn(async (_teamName, _fromWorker, toWorker) => ({ message_id: `broadcast-${++nextMessage}`, to_worker: toWorker })),
+          broadcastMessage: vi.fn(async () => []),
+          markMessageNotified: vi.fn(async () => true),
+        },
+      });
+      const elapsedMs = Date.now() - startedAt;
+
+      expect(outcomes.map((outcome) => [outcome.to_worker, outcome.message_id, outcome.ok])).toEqual([
+        ['worker-1', 'broadcast-1', false],
+        ['worker-2', 'broadcast-2', false],
+        ['worker-3', 'broadcast-3', false],
+      ]);
+      for (const outcome of outcomes) expect(outcome.reason).toMatch(/^dispatch_enqueue_failed:Timed out acquiring dispatch lock/);
+      expect(elapsedMs).toBeLessThan(2_000);
+      expect(notify).not.toHaveBeenCalled();
+    } finally {
+      if (previousTimeout === undefined) delete process.env.OMC_TEAM_DISPATCH_LOCK_TIMEOUT_MS;
+      else process.env.OMC_TEAM_DISPATCH_LOCK_TIMEOUT_MS = previousTimeout;
+    }
   });
 });

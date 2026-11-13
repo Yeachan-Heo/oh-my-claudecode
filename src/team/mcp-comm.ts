@@ -8,6 +8,7 @@
 
 import {
   enqueueDispatchRequest,
+  isTeamWideDispatchFailure,
   readDispatchRequest,
   readDispatchRequestStrict,
   transitionDispatchRequest,
@@ -664,9 +665,11 @@ export async function queueBroadcastMailboxMessage(params: QueueBroadcastParams)
     persistedRecipients.push({ ...recipient, triggerMessage, message });
   }
 
+  let teamWideFailure: unknown;
   for (const recipient of persistedRecipients) {
     let queued: { request: TeamDispatchRequest; deduped: boolean };
     try {
+      if (teamWideFailure !== undefined) throw teamWideFailure;
       queued = await enqueueDispatchRequest(
         params.teamName,
         {
@@ -682,6 +685,7 @@ export async function queueBroadcastMailboxMessage(params: QueueBroadcastParams)
         params.cwd,
       );
     } catch (error) {
+      if (isTeamWideDispatchFailure(error)) teamWideFailure = error;
       outcomes[recipient.index] = {
         ...enqueueFailedOutcome(error),
         message_id: recipient.message.message_id,
