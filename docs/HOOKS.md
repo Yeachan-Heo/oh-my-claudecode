@@ -806,7 +806,18 @@ With the compaction point enabled, Jev's compaction module (if installed in the 
 
 #### States without session ids
 
-Two states sent to Jev carry an id of the session rather than of the work: the `loop-continuation` state has `session_id`, and the `simplifier-trigger` state has `cwd`, the project path. Neither helps the judgment, and both leave the machine with the request. With `OMC_JEV_STATE_OMIT_IDS=1` the hook scripts and the TypeScript points leave them out of the state. They are then also missing from the state recorded in `shadow.jsonl`; set `OMC_JEV_LOG_CONTEXT=1` as well to keep them in the log line, as the top-level `session_id` and `cwd` fields, without sending them. Without the variable the states are unchanged.
+Two states sent to Jev carry an id of the session rather than of the work: the `loop-continuation` state has `session_id`, and the `simplifier-trigger` state has `cwd`, the project path. Neither helps the judgment, and both leave the machine with the request. With `OMC_JEV_STATE_OMIT_IDS=1` the hook scripts and the TypeScript points leave them out of the state. They are then also missing from the state recorded in `shadow.jsonl`; set `OMC_JEV_LOG_CONTEXT=1` as well to keep them in the log line, as the top-level `session_id` and `cwd` fields, without sending them. Without the variable the ids stay in the state (a UUID under `session_id` and the value of `cwd` are not masked, see [Masking of the state](#masking-of-the-state)).
+
+#### Masking of the state
+
+Every point's state is masked before it is sent to Jev and before it is written to `shadow.jsonl` (both the hook scripts and the TypeScript points; the compaction point has its own mask). A string is first cut to the characters that are sent plus 512 (`OMC_JEV_EXCERPT_CHARS` and its per-point variables bound the work of the mask: a larger limit means more work), then:
+
+- a line that names a secret path (an SSH key, `.env`, `.netrc`, cloud and Git credentials, a `secrets/` directory, a file named `credentials` or `passwords*`) becomes `[line omitted: secret path]`;
+- tokens, passwords, keys and similar values in the text become `***` (`ghp_***`, `password=***`);
+- the value under a key that names a secret (`password`, `token`, `api_key`, `authorization`, `cookie`, ...) becomes `***`; a number under such a key that counts something (`total_tokens`, `token_count`) stays;
+- a key that names a secret path becomes `[key omitted: path]`.
+
+A state is not sent when it cannot be masked (a cycle, more than 64 levels or 50 000 nodes, a missing mask module) or when a non-empty string of it is a secret path whole. The call then ends like a failed one: the heuristic twin answers, and `shadow.jsonl` gets one `degraded` line whose `state` is `[state not sent: mask failed]` or `[state not sent: secret path]`. Such a call counts for neither `OMC_JEV_MAX_REQUESTS`, the shared breaker nor the circuit of the point. The TypeScript points print one stderr line per process for it (not with `OMC_JEV_QUIET=1`). The request file that a hook script writes for a detached resolver is not masked; the resolver reads it, deletes it and masks the state.
 
 ### Heuristic Fallback on Failure
 

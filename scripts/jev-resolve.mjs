@@ -468,6 +468,11 @@ export function resolveRequestTimeoutMs(env = process.env, now = Date.now()) {
   return Math.max(200, Math.min(timeoutMs, deadline - now));
 }
 
+/** The logged state of a request whose state could not be masked. */
+const STATE_NOT_SENT = "[state not sent: mask failed]";
+/** The logged state of a request with a string that is a secret path whole. */
+const STATE_NOT_SENT_PATH = "[state not sent: secret path]";
+
 /**
  * Mirror of the resolver's shadow-log entry (ShadowLogEntry): the jev-eval
  * tool compares lines regardless of which side wrote them. maxBytes is the
@@ -507,12 +512,51 @@ export async function resolveRequest(
   // the line's `jev` and confidence from the first question only (null when
   // Jev did not answer it).
   const logContext = isJevLogContextEnabled(env) ? jevLogContextOf(request.context) : undefined;
+  // Secrets are masked before the state is bounded, so before it is sent or logged; a string is cut to the
+  // window that is sent (plus a margin) first, so the cost of the mask does not grow with the prompt. A state
+  // that cannot be masked, a string that is a secret path whole, or a missing mask module sends nothing: fail
+  // closed, the caller uses its twin.
+  let maskedState;
+  try {
+    const { maskJevState } = await import("./lib/jev-state-mask.mjs");
+    maskedState = maskJevState(request.state, { maxChars: resolveExcerptChars(request.point, env) });
+  } catch (error) {
+    const omitted = error?.name === "JevStateFieldOmittedError";
+    if (String(env.OMC_JEV_QUIET ?? "").trim() !== "1") {
+      console.error("[jev] " + request.point + ": degraded - state not sent: " + (omitted ? "secret path" : "mask failed") + " (" + (error?.name ?? "Error") + ")");
+    }
+    const durationMs = Date.now() - startedAt;
+    await writeShadowLog(
+      {
+        ts: new Date().toISOString(),
+        point: request.point,
+        ...logContext,
+        mode: "degraded",
+        state: omitted ? STATE_NOT_SENT_PATH : STATE_NOT_SENT,
+        heuristic: comparableHeuristic(request.heuristic, request.questions),
+        jev: null,
+        answers: null,
+        durationMs,
+        ...(request.tool_use_id ? { tool_use_id: request.tool_use_id } : {}),
+      },
+      await logDirFor(env),
+      resolveJevLogMaxBytes(env),
+    );
+    return {
+      mode: "degraded",
+      answer: null,
+      answers: null,
+      ...(logContext?.request_id ? { request_id: logContext.request_id } : {}),
+      confidence: undefined,
+      durationMs,
+    };
+  }
   // Only the state carries user text. Question definitions are static text
   // written by the hook scripts and go out whole: bounding them would cut the
   // model-routing effort instructions (295 characters) and the intent
   // criterion (209). A question must never embed user text.
   const bound = {
-    state: boundExcerpts(request.state, resolveExcerptChars(request.point, env)),
+    state: boundExcerpts(maskedState, resolveExcerptChars(request.point, env)),
     questions: request.questions,
   };
   // Opt-in shared breaker and request limit: a held-back call is logged and
