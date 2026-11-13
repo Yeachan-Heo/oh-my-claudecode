@@ -296,7 +296,7 @@ export interface OmcSession {
  * }
  * ```
  */
-export function createOmcSession(options?: OmcOptions): OmcSession {
+export async function createOmcSession(options?: OmcOptions): Promise<OmcSession> {
   // Load configuration
   const loadedConfig = options?.skipConfigLoad ? {} : loadConfig();
   const config: PluginConfig = {
@@ -384,6 +384,10 @@ export function createOmcSession(options?: OmcOptions): OmcSession {
   // Create background task manager
   const backgroundTaskManager = createBackgroundTaskManager(state, config);
 
+  // Ensure OMC tools server is initialized before assembling session
+  const { getOmcToolsServer } = await import('./mcp/omc-tools-server.js');
+  const toolsServer = await getOmcToolsServer();
+
   return {
     queryOptions: {
       options: {
@@ -391,7 +395,7 @@ export function createOmcSession(options?: OmcOptions): OmcSession {
         agents,
         mcpServers: {
           ...toSdkMcpFormat(externalMcpServers),
-          't': omcToolsServer as any
+          't': toolsServer as any
         },
         allowedTools,
         permissionMode: 'acceptEdits'
