@@ -42,7 +42,7 @@ function okResponse(json) {
   return { ok: true, status: 200, headers: {}, text: JSON.stringify(json) };
 }
 
-function fakeDollar({ env = ACTIVE_ENV, settingsEnv, respond = (body) => okResponse(scoreByMarker(body)), clockAfter, usage, messages = [], compactResult, writeThrows = false, diskPrefix, flakyBreakerRead = false, stallBreakerRead = false, stallRpmRead = false, rpmReadGate, rpmReadGates = {}, fsDelayMs = 0, brokenBreakerRead = false, breakerWriteDelayMs = 0, lockReadDelayMs = 0, lockWriteThrows = false } = {}) {
+function fakeDollar({ env = ACTIVE_ENV, settingsEnv, respond = (body) => okResponse(scoreByMarker(body)), clockAfter, usage, messages = [], compactResult, writeThrows = false, diskPrefix, flakyBreakerRead = false, stallBreakerRead = false, stallRpmRead = false, rpmReadGate, rpmReadGates = {}, fsDelayMs = 0, brokenBreakerRead = false, breakerWriteDelayMs = 0, lockReadDelayMs = 0, lockWriteThrows = false, sessionId = 'sess-1', stallModuleRead = false } = {}) {
   const files = new Map();
   const mtimes = new Map();
   let flaked = false;
@@ -55,6 +55,7 @@ function fakeDollar({ env = ACTIVE_ENV, settingsEnv, respond = (body) => okRespo
     fs: {
       read: async (p) => {
         if (fsDelayMs) await new Promise((resolve) => setTimeout(resolve, fsDelayMs));
+        if (stallModuleRead && p.endsWith('/hooks/jev-compaction.mjs')) return new Promise(() => {});
         if (lockReadDelayMs && p.endsWith('/breaker.json.lock')) await new Promise((resolve) => setTimeout(resolve, lockReadDelayMs));
         if (flakyBreakerRead && !flaked && p.endsWith('/breaker.json')) { flaked = true; throw new Error('EPERM'); }
         if (brokenBreakerRead && p.endsWith('/breaker.json')) throw Object.assign(new Error('EPERM'), { code: 'EPERM' });
@@ -91,7 +92,7 @@ function fakeDollar({ env = ACTIVE_ENV, settingsEnv, respond = (body) => okRespo
       sleep: async () => { throw new Error('the module must not use $.clock.sleep'); },
     },
     session: {
-      id: async () => 'sess-1',
+      id: async () => sessionId,
       usage: async (opts) => { calls.usage++; return usage ? usage(opts) : { context: { tokens: 1000, window: 200000 } }; },
       messages: async () => { calls.messages++; return messages; },
       compact: async () => { calls.compact++; if (compactResult instanceof Error) throw compactResult; return compactResult ?? {}; },
@@ -3203,6 +3204,20 @@ describe('jev-compaction module: refused batches, unrated results, well-formed b
     expect(await run(400)).toBe(0);
   });
 
+  it('the refusal is held for the conversation that got it: another session in the same process asks again', async () => {
+    const handlers = load();
+    await compactOnce(conversation(30), { handlers, respond: refuse(400), sessionId: 'sess-A' });
+    const same = await compactOnce(conversation(30), { handlers, sessionId: 'sess-A' });
+    expect(same.calls.fetch).toHaveLength(0);
+    expect(same.records()[0]).toMatchObject({ reason: 'batch_refused' });
+    const other = await compactOnce(conversation(30), { handlers, sessionId: 'sess-B' });
+    expect(other.calls.fetch).toHaveLength(1);
+    expect(other.records()[0]).toMatchObject({ result: 'jev', session_id: 'sess-B' });
+    // precompute: the held session lets the host compute the summary ahead, the other one does not.
+    expect((await compactOnce(conversation(30), { handlers, sessionId: 'sess-A' }, { trigger: 'precompute' })).out).toBe(SUMMARY);
+    expect((await compactOnce(conversation(30), { handlers, sessionId: 'sess-B' }, { trigger: 'precompute' })).out).toEqual({ skip: 'jev-compaction replaces the summary' });
+  });
+
   it('refusals more than ten minutes apart still stop the requests after three in a row (circuit_open)', async () => {
     const handlers = load();
     const real = Date.now();
@@ -3261,6 +3276,19 @@ describe('jev-compaction module: refused batches, unrated results, well-formed b
     const { calls } = await compactOnce(messages, {});
     expect(calls.fetch.length).toBeGreaterThan(0);
     for (const c of calls.fetch) expect(c.init.body).not.toMatch(/\\ud[89a-f][0-9a-f]{2}/i);
+  });
+
+  it('a read of the module file that never settles does not hold the record: module_rev is null for the rest of the process', async () => {
+    const handlers = load();
+    const disk = join(root, 'hooks').replace(/\\/g, '/');
+    const t0 = Date.now();
+    const first = await compactOnce(conversation(30), { handlers, diskPrefix: disk, stallModuleRead: true });
+    expect(first.records()[0]).toMatchObject({ result: 'jev', module_rev: null });
+    expect(Date.now() - t0).toBeLessThan(4000);
+    const t1 = Date.now();
+    const second = await compactOnce(conversation(30), { handlers, diskPrefix: disk });
+    expect(second.records()[0].module_rev).toBeNull();
+    expect(Date.now() - t1).toBeLessThan(1500);
   });
 
   it('every record names the module (module_rev): the sha256 of its file, else of CLAUDE_PLUGIN_ROOT/hooks/jev-compaction.mjs, else null', async () => {
@@ -3329,6 +3357,22 @@ describe('jev-compaction module: refused batches, unrated results, well-formed b
       const sub = await compactOnce(conversation(30), {}, { agentId: 'sub-1' });
       await step(sub.handlers, sub.$, usage);
       expect(afterRecords(sub)).toHaveLength(0);
+    });
+
+    it('a compaction that ran with the point off ends the wait: the next request is not measured against the earlier one', async () => {
+      const handlers = load();
+      const first = await compactOnce(conversation(30), { handlers });
+      expect(first.records()[0].result).toBe('jev');
+      const off = await compactOnce(conversation(30), { handlers, env: { TYPESAFE_API_KEY: 'k', HOME: '/home/u' } });
+      expect(off.out).toBe(SUMMARY);
+      await step(handlers, first.$, usage);
+      expect(afterRecords(first)).toHaveLength(0);
+      // A veto of the summary (skip) leaves the context as it was: the wait stays.
+      const second = await compactOnce(conversation(30), { handlers });
+      const vetoed = fakeDollar({ env: { TYPESAFE_API_KEY: 'k', HOME: '/home/u' } });
+      await handlers['session.compact'](vetoed.$, Object.freeze({ trigger: 'auto', messages: conversation(30) }), async () => ({ skip: 'another mod' }));
+      await step(handlers, second.$, usage);
+      expect(afterRecords(second)).toHaveLength(1);
     });
 
     it('a failing write never breaks the request: its result is returned', async () => {

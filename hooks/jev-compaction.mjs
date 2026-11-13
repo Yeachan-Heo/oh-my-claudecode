@@ -148,8 +148,9 @@ const UNANSWERED_SCORE = 0.4;
 // (a result rated "may be useful" is 2/3).
 const UNRATED_SCORE = SHORT_COPY_MIN_SCORE;
 // A batch the API refuses (HTTP 400, 413, 422) is about that conversation, not about the endpoint being down, so it opens no breaker.
-// When the compaction ends in the built-in summary because of it, the process remembers the refusal per agent (the main loop is 'main')
-// for BATCH_REFUSED_MS and the compactions in between run the summary (blockedReason).
+// When the compaction ends in the built-in summary because of it, the process remembers the refusal for BATCH_REFUSED_MS, per session id
+// and agent (the main loop is 'main'), and the compactions in between run the summary (blockedReason). It is about one conversation, so
+// another session in the same process (a resume or a swap) is not held back by it.
 const BATCH_REFUSED_MS = 10 * 60 * 1000;
 const BATCH_REFUSED_STATUSES = [400, 413, 422];
 const PROBE_MAX_CHARS = 5_000_000;
@@ -983,13 +984,21 @@ async function rpmCapacityAvailable($, shared, point, now) {
   }
 }
 
+// The key of a refused-batch hold: session id and agent ('main' for the main loop).
+const refusedKey = (sessionId, agentId) => `${sessionId ?? ''}|${agentId ?? 'main'}`;
+// The session id, read within HOST_MS; undefined when it cannot be read.
+async function sessionIdOf($) {
+  const read = await withDeadline($, Promise.resolve().then(() => $.session.id()), HOST_MS);
+  return typeof read.value === 'string' ? read.value : undefined;
+}
+
 // No request goes out: paused after a failure, breaker open, OMC_JEV_MAX_REQUESTS used up, the
 // shared breaker open, or RPM capacity exhausted.
 async function blockedReason($, cfg, now, agentId) {
   if (session.failedInRow >= FAILURES_TO_OPEN) return 'circuit_open';
   if (now < session.pausedUntil) return 'paused';
   if (cfg.maxRequests && session.requests >= cfg.maxRequests) return 'cap';
-  if (now < (session.batchRefusedUntil.get(agentId ?? 'main') ?? 0)) return 'batch_refused';
+  if (session.batchRefusedUntil.size && now < (session.batchRefusedUntil.get(refusedKey(await sessionIdOf($), agentId)) ?? 0)) return 'batch_refused';
   // Bounded like admission: a stalled shared volume falls back to "not open" after SHARED_OP_MS.
   if (cfg.shared && (await sharedStep($, () => readSharedBreaker($, cfg.shared, now), undefined))) return 'breaker_open';
   // The capacity peek is bounded the same way and fails open. Skip the peek when RPM is not enabled.
@@ -2229,7 +2238,9 @@ function scoreOf(answer) {
 const MODULE_URL = (() => { try { return import.meta.url; } catch { return undefined; } })();
 function moduleRevOf($) {
   if (!session.moduleRev) {
-    session.moduleRev = (async () => {
+    // Read once, within HOST_MS: a read that never settles (a stalled plugin file system) must not hold every later record, and with it
+    // the compaction and the model request, so on a timeout the revision is null for the rest of the process.
+    session.moduleRev = withDeadline($, (async () => {
       const paths = [];
       try {
         const u = new URL(MODULE_URL);
@@ -2246,7 +2257,7 @@ function moduleRevOf($) {
         } catch { /* the next path */ }
       }
       return null;
-    })();
+    })(), HOST_MS).then((r) => (typeof r.value === 'string' ? r.value : null));
   }
   return session.moduleRev;
 }
@@ -2472,7 +2483,7 @@ async function decide($, e, cfg, record, started) {
     if (!asked.length || answered / asked.length < PARTIAL_OK) {
       // Only a compaction that ends in the summary because of a refused batch is remembered; one that went on with the other batches is not.
       if (results.some((r) => !r.value && BATCH_REFUSED_STATUSES.includes(r.error?.status))) {
-        session.batchRefusedUntil.set(e.agentId ?? 'main', Date.now() + BATCH_REFUSED_MS);
+        session.batchRefusedUntil.set(refusedKey(record.session_id, e.agentId), Date.now() + BATCH_REFUSED_MS);
         record.batch_refused = true;
       }
       session.failedInRow++;
@@ -2512,9 +2523,16 @@ async function decide($, e, cfg, record, started) {
 }
 
 async function compact($, e, next) {
+  // The point is off or its configuration unreadable: the built-in summary runs. One that replaces the messages of the main loop also ends the
+  // wait for the measurement of an earlier compaction of this module, or the next request would be measured against that one.
+  const passThrough = async () => {
+    const out = await next(e);
+    if (e.agentId === undefined && e.trigger !== 'precompute' && !out?.skip) session.pendingAfter = undefined;
+    return out;
+  };
   let cfg;
-  try { cfg = await readConfig($); } catch { return next(e); }
-  if (cfg.mode === 'off') return next(e);
+  try { cfg = await readConfig($); } catch { return passThrough(); }
+  if (cfg.mode === 'off') return passThrough();
   // An active point replaces the summary, so a summary computed ahead of time would be wasted; while
   // the breaker is open the summary will run, so the host may compute it ahead.
   if (e.trigger === 'precompute') return cfg.mode === 'active' && !(await blockedReason($, cfg, Date.now(), e.agentId)) ? { skip: 'jev-compaction replaces the summary' } : next(e);
