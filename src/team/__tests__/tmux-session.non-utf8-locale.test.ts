@@ -40,7 +40,7 @@ describe.skipIf(process.platform === 'win32' || !hasTmux())(
       socketPath = join(directory, 's');
       execFileSync(
         'tmux',
-        ['-S', socketPath, 'new-session', '-d', '-s', 'locale', 'sleep 300'],
+        ['-f', '/dev/null', '-S', socketPath, 'new-session', '-d', '-s', 'locale', 'sleep 300'],
         { env: tmuxTestEnv(), stdio: 'ignore' },
       );
     });
