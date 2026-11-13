@@ -998,6 +998,8 @@ async function blockedReason($, cfg, now, agentId) {
   if (session.failedInRow >= FAILURES_TO_OPEN) return 'circuit_open';
   if (now < session.pausedUntil) return 'paused';
   if (cfg.maxRequests && session.requests >= cfg.maxRequests) return 'cap';
+  // Expired holds go first, so the map does not grow with every refused conversation and an expired hold costs no session id read.
+  for (const [key, until] of session.batchRefusedUntil) if (until <= now) session.batchRefusedUntil.delete(key);
   if (session.batchRefusedUntil.size && now < (session.batchRefusedUntil.get(refusedKey(await sessionIdOf($), agentId)) ?? 0)) return 'batch_refused';
   // Bounded like admission: a stalled shared volume falls back to "not open" after SHARED_OP_MS.
   if (cfg.shared && (await sharedStep($, () => readSharedBreaker($, cfg.shared, now), undefined))) return 'breaker_open';

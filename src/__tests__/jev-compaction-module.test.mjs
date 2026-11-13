@@ -3318,6 +3318,35 @@ describe('jev-compaction module: refused batches, unrated results, well-formed b
     for (let k = 0; k < 28; k += 2) expect(shortened(`t${28 - k}`)).toBe(false);
   });
 
+  it('an expired hold is dropped before the session is looked up: no session id read, and the map does not keep it', async () => {
+    const handlers = load();
+    await compactOnce(conversation(30), { handlers, respond: refuse(400) });
+    await compactOnce(conversation(30), { handlers, respond: refuse(400), sessionId: 'sess-2' });
+    const lookups = () => {
+      let n = 0;
+      const fake = fakeDollar();
+      const id = fake.$.session.id;
+      fake.$.session.id = async () => { n++; return id(); };
+      return { fake, count: () => n };
+    };
+    const held = lookups();
+    expect(await handlers['session.compact'](held.fake.$, Object.freeze({ trigger: 'precompute', messages: conversation(30) }), summaryNext())).toBe(SUMMARY);
+    expect(held.count()).toBe(1);
+    const real = Date.now();
+    const spy = vi.spyOn(Date, 'now').mockImplementation(() => real + 11 * 60_000);
+    try {
+      const expired = lookups();
+      expect(await handlers['session.compact'](expired.fake.$, Object.freeze({ trigger: 'precompute', messages: conversation(30) }), summaryNext())).toEqual({ skip: 'jev-compaction replaces the summary' });
+      expect(expired.count()).toBe(0);
+      // The own threshold and the compaction itself take the same path: only the compaction's own id read for its record remains.
+      const compacted = lookups();
+      await handlers['session.compact'](compacted.fake.$, Object.freeze({ trigger: 'auto', messages: conversation(30) }), summaryNext());
+      expect(compacted.count()).toBe(1);
+    } finally {
+      spy.mockRestore();
+    }
+  });
+
   it('a session id that cannot be read: the hold is kept for the unknown session, not for a known one', async () => {
     const handlers = load();
     const unknown = (fake) => ({ ...fake.$, session: { ...fake.$.session, id: async () => { throw new Error('no id'); } } });
