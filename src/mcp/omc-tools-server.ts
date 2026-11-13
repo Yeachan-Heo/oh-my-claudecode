@@ -4,9 +4,10 @@
  * Exposes 18 custom tools (12 LSP, 2 AST, 1 python_repl, 3 skills) via the Claude Agent SDK's
  * createSdkMcpServer helper for local Node.js Agent SDK integrations. This is not a VS Code
  * extension host or CI runner by itself.
+ *
+ * NOTE: Agent SDK imports are deferred to dynamic import() to preserve ESM loading in CJS bundles.
+ * This avoids ERR_REQUIRE_ESM on Node <20.19 and <22.12 where require(esm) is not supported.
  */
-
-import { createSdkMcpServer, tool } from "@anthropic-ai/claude-agent-sdk";
 import { lspTools } from "../tools/lsp-tools.js";
 import { astTools } from "../tools/ast-tools.js";
 import { pythonReplTool } from "../tools/python-repl/index.js";
@@ -57,27 +58,74 @@ const allTools: ToolDef[] = [
 // Read OMC_DISABLE_TOOLS once at startup and filter tools accordingly
 const enabledTools: ToolDef[] = filterDisabledTools(allTools);
 
-// Convert to SDK tool format
-// The SDK's tool() expects a ZodRawShape directly (not wrapped in z.object())
-const sdkTools = enabledTools.map(t =>
-  tool(
-    t.name,
-    t.description,
-    t.schema as Parameters<typeof tool>[2],
-    async (args: unknown) => await t.handler(args)
-  )
-);
+// Lazy-initialized server to defer SDK imports until first use (avoids require(esm) errors)
+let _omcToolsServerCache: any = null;
 
 /**
- * In-process MCP server exposing all OMC custom tools
+ * Initialize the OMC tools server by dynamically importing the Agent SDK.
+ * This is deferred from module load time to preserve ESM loading in CJS bundles.
+ */
+async function initializeOmcToolsServer() {
+  if (_omcToolsServerCache !== null) {
+    return _omcToolsServerCache;
+  }
+
+  // Dynamic import to preserve ESM loading for the external Agent SDK
+  const { createSdkMcpServer, tool } = await import(
+    "@anthropic-ai/claude-agent-sdk"
+  );
+
+  // Convert to SDK tool format
+  // The SDK's tool() expects a ZodRawShape directly (not wrapped in z.object())
+  const sdkTools = enabledTools.map((t) =>
+    tool(
+      t.name,
+      t.description,
+      t.schema as Parameters<typeof tool>[2],
+      async (args: unknown) => await t.handler(args)
+    )
+  );
+
+  // Create and cache the server
+  _omcToolsServerCache = createSdkMcpServer({
+    name: "t",
+    version: "1.0.0",
+    tools: sdkTools,
+  });
+
+  return _omcToolsServerCache;
+}
+
+/**
+ * Get the OMC tools server, initializing it if needed.
+ * This function must be awaited to ensure the Agent SDK is properly loaded.
+ */
+export async function getOmcToolsServer() {
+  return initializeOmcToolsServer();
+}
+
+/**
+ * In-process MCP server exposing all OMC custom tools.
+ *
+ * NOTE: This is initialized lazily on first access. Code using this must be aware that
+ * in new runtime contexts (like when imported by the CLI), the server may not be immediately
+ * available and should use getOmcToolsServer() async variant instead, or wait for initialization.
  *
  * Tools will be available as mcp__t__<tool_name>.
  * Tools in disabled groups (via OMC_DISABLE_TOOLS) are excluded at startup.
  */
-export const omcToolsServer = createSdkMcpServer({
-  name: "t",
-  version: "1.0.0",
-  tools: sdkTools
+export let omcToolsServer: any = null;
+
+// Initialize on first import for backward compatibility with existing code
+// This runs asynchronously and doesn't block module load
+initializeOmcToolsServer().then((server) => {
+  omcToolsServer = server;
+}).catch((err) => {
+  // If initialization fails, log it but don't crash module load
+  // The error will be caught when someone tries to actually use the server
+  if (process.env.DEBUG) {
+    console.error("Failed to initialize OMC tools server:", err);
+  }
 });
 
 /**
@@ -167,4 +215,12 @@ export function getOmcToolNames(options?: ToolNameFilterOptions): string[] {
 export function _getAllToolNamesForTests(options?: ToolNameFilterOptions): string[] {
   const allToolNames = allTools.map(t => `mcp__t__${t.name}`);
   return filterToolNames(allToolNames, toolCategoryMap, options);
+}
+
+/**
+ * Ensure the OMC tools server is initialized before use.
+ * This is a synchronous check for tests and other code that needs to know if the server is ready.
+ */
+export function isOmcToolsServerReady(): boolean {
+  return _omcToolsServerCache !== null && omcToolsServer !== null;
 }
