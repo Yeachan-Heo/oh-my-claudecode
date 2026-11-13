@@ -2,7 +2,7 @@ import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
-import { readTeamEvents } from '../events.js';
+import { readTeamEvents, readTeamEventsByType } from '../events.js';
 import { TeamPaths, absPath } from '../state-paths.js';
 
 const tempDirs: string[] = [];
@@ -34,5 +34,13 @@ describe('readTeamEvents with a damaged log', () => {
     const events = await readTeamEvents('t', cwd);
 
     expect(events.map((e) => e.event_id)).toEqual(['e1', 'e2']);
+  });
+
+  it('skips lines that parse to a non-object so typed readers do not crash', async () => {
+    const event = { event_id: 'e1', team: 't', created_at: '2026-01-01T00:00:00.000Z', type: 'team_leader_nudge', worker: 'leader-fixed', reason: 'nudge' };
+    const cwd = writeEventsLog('t', ['null', '42', '"text"', '[1]', JSON.stringify(event), '{"torn'].join('\n'));
+
+    expect((await readTeamEvents('t', cwd)).map((e) => e.event_id)).toEqual(['e1']);
+    expect((await readTeamEventsByType('t', 'team_leader_nudge', cwd)).map((e) => e.event_id)).toEqual(['e1']);
   });
 });
