@@ -7,6 +7,7 @@ import { tmpdir } from 'node:os';
 const readHold = vi.hoisted(() => ({
   current: null as null | { path: string; entered: () => void; release: Promise<void> },
 }));
+const rmFailure = vi.hoisted(() => ({ path: null as string | null }));
 
 vi.mock('fs/promises', async (importOriginal) => {
   const actual = await importOriginal<typeof import('fs/promises')>();
@@ -20,7 +21,15 @@ vi.mock('fs/promises', async (importOriginal) => {
     }
     return result;
   }) as typeof actual.readFile;
-  return { ...actual, default: { ...actual, readFile: readFileGated }, readFile: readFileGated };
+  const rmFailing = (async (...args: Parameters<typeof actual.rm>) => {
+    if (rmFailure.path && String(args[0]) === rmFailure.path) {
+      rmFailure.path = null;
+      throw Object.assign(new Error('EBUSY: resource busy'), { code: 'EBUSY' });
+    }
+    return actual.rm(...args);
+  }) as typeof actual.rm;
+  const overrides = { readFile: readFileGated, rm: rmFailing };
+  return { ...actual, default: { ...actual, ...overrides }, ...overrides };
 });
 
 import {
@@ -81,6 +90,7 @@ describe('dispatch queue store integrity', () => {
 
   afterEach(async () => {
     readHold.current = null;
+    rmFailure.path = null;
     for (const [key, value] of Object.entries(savedEnv)) {
       if (value === undefined) delete process.env[key];
       else process.env[key] = value;
@@ -234,6 +244,15 @@ describe('dispatch queue store integrity', () => {
 
       expect((await storedRows()).map((row) => row.trigger_message)).toEqual(['after upgrade']);
       expect(existsSync(legacyLockDir)).toBe(false);
+    });
+
+    it('reports a committed enqueue as committed when releasing the directory lock fails', async () => {
+      rmFailure.path = join(dispatchDir, '.lock');
+
+      const result = await enqueueDispatchRequest(teamName, { kind: 'nudge', to_worker: 'worker-1', trigger_message: 'committed' }, cwd);
+
+      expect(result.deduped).toBe(false);
+      expect((await storedRows()).map((row) => row.trigger_message)).toEqual(['committed']);
     });
   });
 });

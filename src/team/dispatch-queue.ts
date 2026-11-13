@@ -232,8 +232,9 @@ async function withLegacyDispatchLockDir<T>(
   try {
     return await fn();
   } finally {
+    // Release is best effort: fn() may already have committed, and a failed rm must not report it as failed.
     if (await readFile(ownerPath, 'utf8').catch(() => null) === owner) {
-      await rm(lockDir, { recursive: true, force: true });
+      await rm(lockDir, { recursive: true, force: true }).catch(() => undefined);
     }
   }
 }
