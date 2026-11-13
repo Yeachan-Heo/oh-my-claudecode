@@ -6,8 +6,6 @@
  * current strict durable state before any pane effect.
  */
 
-
-
 import {
   enqueueDispatchRequest,
   readDispatchRequest,
@@ -39,12 +37,7 @@ import {
 import { absPath, TeamPaths } from './state-paths.js';
 import { withProcessIdentityFileLock } from './process-identity-lock.js';
 import { createSwallowedErrorLogger } from '../lib/swallowed-error.js';
-import {
-  notifyExceptionReason,
-  enqueueFailedOutcome,
-  isExactText,
-  canonicalNotificationLockIdentity,
-} from './mcp-dispatch-helpers.js';
+import { canonicalNotificationLockIdentity, enqueueFailedOutcome, isExactText, notifyExceptionReason } from './mcp-dispatch-helpers.js';
 
 // ── Types ──────────────────────────────────────────────────────────────────
 
@@ -154,8 +147,6 @@ function fallbackTransportForPreference(
   if (preference === 'transport_direct') return 'tmux_send_keys';
   return 'hook';
 }
-
-
 
 function managedOutcome(
   ok: boolean,
