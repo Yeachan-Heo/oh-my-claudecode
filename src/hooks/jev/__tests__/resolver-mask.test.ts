@@ -142,4 +142,29 @@ describe('resolveJudgment state mask', () => {
     for (const sent of [bodies[0], readFileSync(join(dir, 'log', 'shadow.jsonl'), 'utf8')]) expect(sent).not.toContain('MIIEvQIBADANBgkqhkiG9w0BAQEFAASCBKcwggSj');
     delete process.env.OMC_JEV_EXCERPT_CHARS_MODEL_ROUTING;
   });
+
+  it('masks URL credentials whose "@" is beyond the margin, in the body and in the log', async () => {
+    process.env.OMC_JEV_EXCERPT_CHARS_MODEL_ROUTING = '100';
+    const task = 'deploy to https://user:' + 'abcdefghij'.repeat(30) + 'z'.repeat(400) + '@host/x';
+    const bodies: string[] = [];
+    await resolveJudgment({ point: 'model-routing', state: { task }, questions: QUESTIONS, twin: () => 'sonnet', fetchFn: recordingFetch(bodies) });
+    expect(bodies).toHaveLength(1);
+    for (const text of [bodies[0], readFileSync(join(dir, 'log', 'shadow.jsonl'), 'utf8')]) {
+      expect(text).not.toContain('abcdefghij');
+      expect(text).toContain('https://user:***');
+    }
+    delete process.env.OMC_JEV_EXCERPT_CHARS_MODEL_ROUTING;
+  });
+
+  it('sends nothing when the sent part of a string is a secret path whole and plain text follows in the margin', async () => {
+    process.env.OMC_JEV_EXCERPT_CHARS_MODEL_ROUTING = '100';
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    const task = '/home/u/.ssh/id_ed25519\n' + ' \n'.repeat(100) + 'plain text that nobody sends';
+    const bodies: string[] = [];
+    const result = await resolveJudgment({ point: 'model-routing', state: { task }, questions: QUESTIONS, twin: () => 'sonnet', fetchFn: recordingFetch(bodies) });
+    expect(result).toEqual({ answer: 'sonnet', source: 'twin', mode: 'degraded' });
+    expect(bodies).toHaveLength(0);
+    expect(lastLogLine()).toMatchObject({ mode: 'degraded', state: '[state not sent: secret path]' });
+    delete process.env.OMC_JEV_EXCERPT_CHARS_MODEL_ROUTING;
+  });
 });

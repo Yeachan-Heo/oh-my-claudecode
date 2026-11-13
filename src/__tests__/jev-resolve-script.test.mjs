@@ -516,6 +516,36 @@ describe('state mask', () => {
   });
 });
 
+describe('state mask: what the cut removes', () => {
+  const okFetch = (bodies) => async (_url, init) => {
+    bodies.push(String(init.body));
+    return { ok: true, status: 200, json: async () => ({ answers: { route: { type: 'choice', choice: 'opus' } } }) };
+  };
+  const lastLine = () => readFileSync(join(tmp, 'shadow.jsonl'), 'utf8').trim().split('\n').pop();
+
+  it('masks URL credentials whose "@" is beyond the margin, in the body and in the log', async () => {
+    const task = 'deploy to https://user:' + 'abcdefghij'.repeat(30) + 'z'.repeat(400) + '@host/x';
+    const bodies = [];
+    const env = baseEnv({ OMC_JEV: 'model-routing:active', OMC_JEV_EXCERPT_CHARS_MODEL_ROUTING: '100' });
+    await resolveRequest({ point: 'model-routing', state: { task }, questions: QUESTIONS }, env, okFetch(bodies));
+    expect(bodies).toHaveLength(1);
+    for (const text of [bodies[0], lastLine()]) {
+      expect(text).not.toContain('abcdefghij');
+      expect(text).toContain('https://user:***');
+    }
+  });
+
+  it('sends nothing when the sent part of a string is a secret path whole and plain text follows in the margin', async () => {
+    const task = '/home/u/.ssh/id_ed25519\n' + ' \n'.repeat(100) + 'plain text that nobody sends';
+    const bodies = [];
+    const env = baseEnv({ OMC_JEV: 'model-routing:active', OMC_JEV_EXCERPT_CHARS_MODEL_ROUTING: '100' });
+    const result = await resolveRequest({ point: 'model-routing', state: { task }, questions: QUESTIONS, heuristic: 'sonnet' }, env, okFetch(bodies));
+    expect(result).toMatchObject({ mode: 'degraded', answer: null });
+    expect(bodies).toHaveLength(0);
+    expect(JSON.parse(lastLine())).toMatchObject({ mode: 'degraded', state: '[state not sent: secret path]' });
+  });
+});
+
 describe('end-to-end child process', () => {
   it('a plain-Node caller feeds stdin JSON to the child and reads the result from stdout', async () => {
     const server = createServer((req, res) => {

@@ -291,6 +291,69 @@ describe('maskJevState: the window', () => {
   });
 });
 
+describe('maskJevState: what the cut removes', () => {
+  const MAX = 200;
+  const sentOf = (value, key = 't') => maskJevState({ [key]: value }, { maxChars: MAX })[key].slice(0, MAX);
+
+  it('masks URL credentials whose "@" is beyond the margin', () => {
+    const text = 'x '.repeat(10) + 'https://user:' + 'A'.repeat(300) + 'z'.repeat(400) + '@host/path';
+    expect(sentOf(text)).toBe('x '.repeat(10) + 'https://user:***');
+    expect(sentOf(text)).not.toContain('AAAA');
+  });
+
+  it('masks an unterminated URL userinfo that starts at the edge of the window', () => {
+    const text = 'a'.repeat(MAX - 20) + 'ftp://bob:' + 'p'.repeat(2000) + '@host';
+    expect(sentOf(text)).not.toMatch(/p{3}/);
+  });
+
+  it('masks the unterminated userinfo in a key that was cut', () => {
+    const key = '//user:' + 'q'.repeat(900);
+    const [name] = Object.keys(maskJevState({ [key]: 1 }, { maxChars: MAX }));
+    expect(name).toBe('//user:***');
+  });
+
+  it('masks the unterminated first parts of a JWT whose last part is beyond the margin', () => {
+    const jwt = 'eyJhbGciOiJIUzI1NiJ9.' + 'B'.repeat(900) + '.sig12345678';
+    expect(sentOf('a ' + jwt)).toBe('a eyJ***');
+  });
+
+  it('leaves a string that was not cut and a cut text without an unterminated URL alone', () => {
+    expect(maskJevState({ t: 'see https://host:8080/x and //a:b/c' }, { maxChars: MAX }).t).toBe('see https://host:8080/x and //a:b/c');
+    expect(maskJevState({ t: 'see https://host:8080/x' }, { maxChars: MAX }).t).toBe('see https://host:8080/x');
+    const long = 'see https://host:8080/x ' + 'w '.repeat(500);
+    expect(maskJevState({ t: long }, { maxChars: MAX }).t).toBe(long.slice(0, MAX + WINDOW_MARGIN));
+    // without maxChars nothing is cut, so a URL without "@" is no credentials, as in compaction
+    expect(maskJevState({ t: 'https://user:abc' }).t).toBe('https://user:abc');
+  });
+});
+
+describe('maskJevState: a string whose sent part is a secret path whole', () => {
+  const MAX = 200;
+  const SEC = '/home/u/.ssh/id_ed25519';
+
+  it('throws when the first maxChars characters are the marker and blank lines and the text is in the margin', () => {
+    const text = SEC + '\n' + ' \n'.repeat(150) + 'plain text that nobody sends';
+    expect(() => maskJevState({ t: text }, { maxChars: MAX })).toThrow(JevStateFieldOmittedError);
+  });
+
+  it('counts a marker that the edge of the window cut short', () => {
+    const text = 'x'.repeat(MAX - 10) + '\n' + SEC + '\n' + 'plain text';
+    // the first maxChars of the masked text are a line of x and part of the marker: sent, not omitted
+    expect(() => maskJevState({ t: text }, { maxChars: MAX })).not.toThrow();
+    const only = ' '.repeat(MAX - 10) + '\n' + SEC + '\n' + 'plain text in the margin '.repeat(5);
+    expect(() => maskJevState({ t: only }, { maxChars: MAX })).toThrow(JevStateFieldOmittedError);
+  });
+
+  it('sends a string with plain text in the first maxChars characters', () => {
+    const text = 'plain text\n' + SEC + '\n' + ' \n'.repeat(300);
+    expect(maskJevState({ t: text }, { maxChars: MAX }).t.startsWith('plain text\n[line omitted: secret path]')).toBe(true);
+  });
+
+  it('judges the whole text without maxChars, as before', () => {
+    expect(maskJevState({ t: SEC + '\n' + ' \n'.repeat(150) + 'plain text' }).t).toContain('plain text');
+  });
+});
+
 describe('SECRET_PATH', () => {
   // Everything the compaction expression catches is caught here too (this one adds patterns).
   function compactionPath() {

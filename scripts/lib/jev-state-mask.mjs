@@ -101,17 +101,32 @@ function omitSecretLines(text) {
  * The text with secret-path lines omitted and secrets masked. Cut to maxChars + WINDOW_MARGIN first when
  * maxChars is given: the caller sends only the first maxChars characters, and a secret that starts before that
  * point is masked whole inside the margin (a private key block without its end is masked to the end of the text).
+ * A rule of maskSecrets that needs a closing part of the secret (the "@" after URL credentials, the last part of
+ * a JWT) cannot see it when the cut removed it, so for a cut text the unterminated start of such a secret that
+ * runs to the end of the text is masked too. The other rules take the value up to the next delimiter or to the
+ * end of the text and need no closing part.
  */
 function maskString(text, maxChars, plain) {
-  const cut = maxChars !== undefined && text.length > maxChars + WINDOW_MARGIN ? text.slice(0, maxChars + WINDOW_MARGIN) : text;
+  const cutText = maxChars !== undefined && text.length > maxChars + WINDOW_MARGIN;
+  const cut = cutText ? text.slice(0, maxChars + WINDOW_MARGIN) : text;
   if (plain === 'cwd') return omitSecretLines(cut);
   const omitted = omitSecretLines(maskPrivateKeys(cut));
-  return maskSecrets(omitted, { keepGitHashes: true });
+  const masked = maskSecrets(omitted, { keepGitHashes: true });
+  if (!cutText) return masked;
+  return masked
+    .replace(/(\/\/[^/\s:@]+:)[^/\s@]+$/, '$1***')
+    .replace(/\beyJ[A-Za-z0-9_-]{8,}(?:\.[A-Za-z0-9_-]*){0,2}$/, 'eyJ***');
 }
 
-function fieldOmitted(masked) {
-  const lines = masked.split('\n').map((line) => line.trim()).filter(Boolean);
-  return lines.length > 0 && lines.every((line) => line === SECRET_LINE);
+/**
+ * Whether what is sent of a masked string says nothing: every non-empty line of its first maxChars characters
+ * (all of it without maxChars) is SECRET_LINE. A marker that the edge of the window cut short counts as one.
+ */
+function fieldOmitted(masked, maxChars) {
+  const windowCut = maxChars !== undefined && masked.length > maxChars;
+  const lines = (windowCut ? masked.slice(0, maxChars) : masked).split('\n').map((line) => line.trim()).filter(Boolean);
+  if (lines.length === 0) return false;
+  return lines.every((line, i) => line === SECRET_LINE || (windowCut && i === lines.length - 1 && SECRET_LINE.startsWith(line)));
 }
 
 /**
@@ -145,7 +160,7 @@ export function maskJevState(state, { maxChars } = {}) {
       // A session id is no secret and a UUID looks like one to maskSecrets.
       if (plain === 'uuid' && UUID.test(value)) return value;
       const masked = maskString(value, maxChars, plain);
-      if (fieldOmitted(masked)) throw new JevStateFieldOmittedError('a string of the state is a secret path');
+      if (fieldOmitted(masked, maxChars)) throw new JevStateFieldOmittedError('a string of the state is a secret path');
       return masked;
     }
     if (ancestors.has(value)) throw new JevStateMaskError('state has a cycle');
@@ -162,7 +177,7 @@ export function maskJevState(state, { maxChars } = {}) {
         const masked = walk(value[k], k, depth + 1, secret, kind);
         if (masked === undefined) continue;
         const cut = keyCut(k);
-        const base = SECRET_PATH.test(cut) ? KEY_OMITTED : maskString(cut, undefined, false);
+        const base = SECRET_PATH.test(cut) ? KEY_OMITTED : maskString(k, maxChars, false);
         let name = base;
         for (let n = 2; Object.hasOwn(out, name); n++) name = `${base} #${n}`;
         Object.defineProperty(out, name, { value: masked, enumerable: true, writable: true, configurable: true });
