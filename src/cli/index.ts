@@ -695,7 +695,7 @@ Examples:
   $ omc info                     Show agents, features, and MCP servers`)
   .action(async () => {
     const { createOmcSession } = await import('../index.js');
-    const session = await createOmcSession();
+    const session = createOmcSession();
 
     console.log(chalk.blue.bold('\nOh-My-ClaudeCode System Information\n'));
     console.log(chalk.gray('━'.repeat(50)));
@@ -743,7 +743,7 @@ Examples:
   $ omc test-prompt "analyze this code"     Test prompt enhancement`)
   .action(async (prompt: string) => {
     const { createOmcSession } = await import('../index.js');
-    const session = await createOmcSession();
+    const session = createOmcSession();
 
     console.log(chalk.blue('Original prompt:'));
     console.log(chalk.gray(prompt));
