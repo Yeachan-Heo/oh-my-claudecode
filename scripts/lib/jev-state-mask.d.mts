@@ -9,6 +9,8 @@ export const MAX_STATE_DEPTH: number;
 export const MAX_STATE_NODES: number;
 /** A string longer than maxChars plus this is cut before it is masked. */
 export const WINDOW_MARGIN: number;
+/** How far past the cut a run of token characters is followed to its end. */
+export const RUN_EXTENSION: number;
 
 export class JevStateMaskError extends Error {
   constructor(message?: string, options?: ErrorOptions);

@@ -80,16 +80,24 @@ export class JevStateFieldOmittedError extends JevStateMaskError {
   }
 }
 
-// A key names a secret when one of these words stands between separators or camelCase humps (accessToken,
-// api_key, Client-Secret, AWS_SECRET_ACCESS_KEY, passwords); "tokens" and "passenger" are not these words.
-const SECRET_KEY = /(?:^|[^a-z0-9])(?:passwords?|passwd|pwds?|pass|passphrases?|secrets?|token|bearer|api[_ -]?keys?|apikeys?|access[_ -]?keys?|private[_ -]?keys?|client[_ -]?secrets?|authorization|cookies?|credentials?)(?:[^a-z0-9]|$)/;
+// A key names a secret when it has one of the strong words (password, passwd, passphrase, secret, token,
+// credential, apikey), alone or glued to a prefix (dbpassword, apitoken, clientsecret, mypassphrase), or one of
+// the weak words (pass, pwd, cookie, bearer, api key, access key, private key, authorization) between separators,
+// camelCase humps or acronym ends (accessToken, DBPassword, api_key, Client-Secret, AWS_SECRET_ACCESS_KEY,
+// password2): a digit run may follow. Not "tokens", "tokenizer", "secretary", "passwordless", "bypass",
+// "compass" or "passenger". "secretsManager" and "cookieJar" are secret keys on purpose: what they hold is secrets.
+const SECRET_KEY = new RegExp(
+  '(?:(?:passwords?|passwd|passphrases?|secrets?|token|credentials?|apikeys?)' +
+  '|(?:^|[^a-z0-9])(?:pass|pwds?|cookies?|bearer|api[_ -]?keys?|access[_ -]?keys?|private[_ -]?keys?|client[_ -]?secrets?|authorization))' +
+  '\\d*(?:[^a-z0-9]|$)',
+);
 // A number under such a key that counts or measures something (token_count, password_length, tokenBudget) stays.
 const COUNTER_KEY = /(?:tokens|(?:^|[^a-z0-9])(?:count|length|len|budget|usage|size))$/;
 const MARKER = /\[(?:key|line) omitted: [^\]]*\]/g;
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 function normalizeKey(key) {
-  return key.replace(MARKER, '').replace(/([a-z0-9])([A-Z])/g, '$1_$2').toLowerCase();
+  return key.replace(MARKER, '').replace(/([A-Z]+)([A-Z][a-z])/g, '$1_$2').replace(/([a-z0-9])([A-Z])/g, '$1_$2').toLowerCase();
 }
 
 function omitSecretLines(text) {
@@ -97,25 +105,59 @@ function omitSecretLines(text) {
   return text.split('\n').map((line) => (SECRET_PATH.test(line) ? SECRET_LINE : line)).join('\n');
 }
 
+// The characters of a token as the rules of maskSecrets see it: the class of its tokens, API keys, JWTs, base64.
+const TOKEN_CHAR = /[A-Za-z0-9+/=_.-]/;
+/** How far past the cut a run of token characters is followed to its end; a longer run is replaced by *** instead. */
+export const RUN_EXTENSION = 4096;
+
+/**
+ * The text cut to the part that can reach the first maxChars after masking (maxChars + WINDOW_MARGIN: the
+ * mask shortens the text, so more than maxChars of the original can end up in what is sent), with its tail made
+ * safe. The rule the mask keeps: every character that is sent was judged by every rule with the whole context
+ * that the rule needs. The context of a rule is the rest of the same string without white space (a URL with
+ * its "@", a JWT, a long token with the letter and the digit that may come later, "AKIA..." with its end), the
+ * same line (a secret path), the text up to a closing mark (a private key block, masked to the end of the text),
+ * or what stands before the value (KEY=, authorization:, --password, -u, mysql -p, cookie), which a cut value
+ * does not take away. The cut removes context only at its tail, so only the tail has to be made safe:
+ * - the last line, when it is cut: the secret path is looked for in the whole original line, and a hit omits it;
+ * - otherwise the last run of token characters, when the cut is inside one (the next character is one too):
+ *   the cut moves to the end of the run, so that every rule sees the whole token (its end, a digit beyond the
+ *   old cut); a run longer than RUN_EXTENSION past the cut becomes "***" (fail closed);
+ * - maskString then masks a "//user:value" that runs to the end of a cut text (the URL rule needs the "@",
+ *   and its value class covers more than token characters, such as ! and #).
+ * The tail is looked at on the original text, not after the key block rule has joined lines.
+ */
+function cutAndCloseTail(text, end) {
+  const cut = text.slice(0, end);
+  if (text[end] !== '\n') {
+    const lineStart = cut.lastIndexOf('\n') + 1;
+    const next = text.indexOf('\n', end);
+    const line = text.slice(lineStart, next === -1 ? text.length : next);
+    if (SECRET_PATH.test(line)) return cut.slice(0, lineStart) + SECRET_LINE;
+  }
+  if (TOKEN_CHAR.test(cut[end - 1]) && TOKEN_CHAR.test(text[end])) {
+    // the cut is inside a run of token characters: let every rule see the whole run when it is short enough
+    let stop = end;
+    while (stop < text.length && stop - end < RUN_EXTENSION && TOKEN_CHAR.test(text[stop])) stop++;
+    if (stop === text.length || !TOKEN_CHAR.test(text[stop])) return text.slice(0, stop);
+    let start = end;
+    while (start > 0 && TOKEN_CHAR.test(cut[start - 1])) start--;
+    return cut.slice(0, start) + '***';
+  }
+  return cut;
+}
+
 /**
  * The text with secret-path lines omitted and secrets masked. Cut to maxChars + WINDOW_MARGIN first when
- * maxChars is given: the caller sends only the first maxChars characters, and a secret that starts before that
- * point is masked whole inside the margin (a private key block without its end is masked to the end of the text).
- * A rule of maskSecrets that needs a closing part of the secret (the "@" after URL credentials, the last part of
- * a JWT) cannot see it when the cut removed it, so for a cut text the unterminated start of such a secret that
- * runs to the end of the text is masked too. The other rules take the value up to the next delimiter or to the
- * end of the text and need no closing part.
+ * maxChars is given: the caller sends only the first maxChars characters (see cutAndCloseTail).
  */
 function maskString(text, maxChars, plain) {
   const cutText = maxChars !== undefined && text.length > maxChars + WINDOW_MARGIN;
-  const cut = cutText ? text.slice(0, maxChars + WINDOW_MARGIN) : text;
+  const cut = cutText ? cutAndCloseTail(text, maxChars + WINDOW_MARGIN) : text;
   if (plain === 'cwd') return omitSecretLines(cut);
   const omitted = omitSecretLines(maskPrivateKeys(cut));
   const masked = maskSecrets(omitted, { keepGitHashes: true });
-  if (!cutText) return masked;
-  return masked
-    .replace(/(\/\/[^/\s:@]+:)[^/\s@]+$/, '$1***')
-    .replace(/\beyJ[A-Za-z0-9_-]{8,}(?:\.[A-Za-z0-9_-]*){0,2}$/, 'eyJ***');
+  return cutText ? masked.replace(/(\/\/[^/\s:@]+:)[^/\s@]+$/, '$1***') : masked;
 }
 
 /**
@@ -139,7 +181,6 @@ function fieldOmitted(masked, maxChars) {
 export function maskJevState(state, { maxChars } = {}) {
   let nodes = 0;
   const ancestors = new Set();
-  const keyCut = (k) => (maxChars !== undefined && k.length > maxChars + WINDOW_MARGIN ? k.slice(0, maxChars + WINDOW_MARGIN) : k);
 
   // secretKey: false, 'secret' or 'counter'; plain: 'uuid' (a session id key) or 'cwd'
   const walk = (input, key, depth, secretKey, plain) => {
@@ -176,8 +217,7 @@ export function maskJevState(state, { maxChars } = {}) {
         const kind = normalized === 'session_id' ? 'uuid' : normalized === 'cwd' ? 'cwd' : false;
         const masked = walk(value[k], k, depth + 1, secret, kind);
         if (masked === undefined) continue;
-        const cut = keyCut(k);
-        const base = SECRET_PATH.test(cut) ? KEY_OMITTED : maskString(k, maxChars, false);
+        const base = SECRET_PATH.test(k) ? KEY_OMITTED : maskString(k, maxChars, false);
         let name = base;
         for (let n = 2; Object.hasOwn(out, name); n++) name = `${base} #${n}`;
         Object.defineProperty(out, name, { value: masked, enumerable: true, writable: true, configurable: true });

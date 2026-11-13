@@ -167,4 +167,40 @@ describe('resolveJudgment state mask', () => {
     expect(lastLogLine()).toMatchObject({ mode: 'degraded', state: '[state not sent: secret path]' });
     delete process.env.OMC_JEV_EXCERPT_CHARS_MODEL_ROUTING;
   });
+
+  describe('the tail of the cut and the keys', () => {
+    const logText = () => readFileSync(join(dir, 'log', 'shadow.jsonl'), 'utf8');
+    beforeEach(() => {
+      process.env.OMC_JEV_EXCERPT_CHARS_MODEL_ROUTING = '200';
+    });
+    afterEach(() => {
+      delete process.env.OMC_JEV_EXCERPT_CHARS_MODEL_ROUTING;
+    });
+
+    it('masks a token that the cut crosses whose digit comes after the cut, in the body and in the log', async () => {
+      const task = ' '.repeat(190) + 'A'.repeat(600) + '1' + 'B'.repeat(100) + ' end';
+      const bodies: string[] = [];
+      await resolveJudgment({ point: 'model-routing', state: { task }, questions: QUESTIONS, twin: () => 'sonnet', fetchFn: recordingFetch(bodies) });
+      expect(bodies).toHaveLength(1);
+      for (const text of [bodies[0], logText()]) expect(text).not.toMatch(/AAA/);
+    });
+
+    it('omits the last line when its secret path is beyond the cut, also after a shortened token', async () => {
+      const task = 'Q9'.repeat(300) + '\necho hunter2 > ' + 'x '.repeat(400) + '~/.ssh/id_ed25519';
+      const bodies: string[] = [];
+      await resolveJudgment({ point: 'model-routing', state: { task }, questions: QUESTIONS, twin: () => 'sonnet', fetchFn: recordingFetch(bodies) });
+      expect(bodies).toHaveLength(1);
+      for (const text of [bodies[0], logText()]) expect(text).not.toContain('hunter2');
+    });
+
+    it('masks the value under a key with an acronym or a glued prefix', async () => {
+      const bodies: string[] = [];
+      const state = { DBPassword: 'hunter2zzQ', APIToken: 'plain-token-value', userpassword: 'second-secret', ok: 'fine' };
+      await resolveJudgment({ point: 'model-routing', state, questions: QUESTIONS, twin: () => 'sonnet', fetchFn: recordingFetch(bodies) });
+      for (const text of [bodies[0], logText()]) {
+        for (const secret of ['hunter2zzQ', 'plain-token-value', 'second-secret']) expect(text).not.toContain(secret);
+        expect(text).toContain('fine');
+      }
+    });
+  });
 });

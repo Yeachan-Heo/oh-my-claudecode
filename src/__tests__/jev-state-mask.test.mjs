@@ -6,7 +6,7 @@ import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 
-import { JevStateFieldOmittedError, JevStateMaskError, MAX_STATE_DEPTH, MAX_STATE_NODES, SECRET_PATH, WINDOW_MARGIN, maskJevState } from '../../scripts/lib/jev-state-mask.mjs';
+import { JevStateFieldOmittedError, JevStateMaskError, MAX_STATE_DEPTH, MAX_STATE_NODES, RUN_EXTENSION, SECRET_PATH, WINDOW_MARGIN, maskJevState } from '../../scripts/lib/jev-state-mask.mjs';
 
 const root = join(fileURLToPath(import.meta.url), '..', '..', '..');
 const GHP = 'ghp_' + 'A'.repeat(36);
@@ -251,17 +251,18 @@ describe('maskJevState: second pass changes nothing', () => {
 describe('maskJevState: the window', () => {
   const MAX = 200;
   it('cuts a string longer than maxChars plus the margin before it is masked, and only then', () => {
-    const long = 'a'.repeat(MAX + WINDOW_MARGIN + 100);
+    const long = 'a '.repeat((MAX + WINDOW_MARGIN + 100) / 2);
     expect(maskJevState({ t: long }, { maxChars: MAX }).t).toHaveLength(MAX + WINDOW_MARGIN);
     expect(maskJevState({ t: long }).t).toHaveLength(long.length);
-    const edge = 'a'.repeat(MAX + WINDOW_MARGIN);
+    const edge = 'a '.repeat((MAX + WINDOW_MARGIN) / 2);
     expect(maskJevState({ t: edge }, { maxChars: MAX }).t).toBe(edge);
   });
 
   it('hands maskSecrets at most maxChars plus the margin characters of a string (a structure check, no clock)', () => {
     const long = ('password ' + 'x'.repeat(30)).repeat(20_000);
     const out = maskJevState({ t: long }, { maxChars: MAX }).t;
-    expect(out.length).toBeLessThanOrEqual(MAX + WINDOW_MARGIN);
+    // the cut moves to the end of a run of token characters, at most RUN_EXTENSION further
+    expect(out.length).toBeLessThanOrEqual(MAX + WINDOW_MARGIN + RUN_EXTENSION);
   });
 
   it('masks a secret that starts just before the edge of the window whole, not in part', () => {
@@ -286,7 +287,7 @@ describe('maskJevState: the window', () => {
   });
 
   it('cuts a long key too', () => {
-    const out = maskJevState({ ['k'.repeat(5000)]: 1 }, { maxChars: MAX });
+    const out = maskJevState({ ['k '.repeat(2500)]: 1 }, { maxChars: MAX });
     expect(Object.keys(out)[0]).toHaveLength(MAX + WINDOW_MARGIN);
   });
 });
@@ -312,7 +313,7 @@ describe('maskJevState: what the cut removes', () => {
     expect(name).toBe('//user:***');
   });
 
-  it('masks the unterminated first parts of a JWT whose last part is beyond the margin', () => {
+  it('masks a JWT whose last part is beyond the margin', () => {
     const jwt = 'eyJhbGciOiJIUzI1NiJ9.' + 'B'.repeat(900) + '.sig12345678';
     expect(sentOf('a ' + jwt)).toBe('a eyJ***');
   });
@@ -351,6 +352,169 @@ describe('maskJevState: a string whose sent part is a secret path whole', () => 
 
   it('judges the whole text without maxChars, as before', () => {
     expect(maskJevState({ t: SEC + '\n' + ' \n'.repeat(150) + 'plain text' }).t).toContain('plain text');
+  });
+});
+
+// The class of the findings on the window cut: what a string without the window hides, a string with it must hide
+// in the part that is sent, wherever the cut falls (the secret starts before, at or after the edge of the
+// window, with and without a text before it that the mask shortens).
+describe('maskJevState: a window never shows what the whole string hides', () => {
+  const MAX = 700;
+  // a small deterministic generator, so a failure names the same input every time
+  const seeded = (seed) => () => { seed = (seed * 1664525 + 1013904223) >>> 0; return seed / 2 ** 32; };
+  const rnd = (alphabet, n, next) => Array.from({ length: n }, () => alphabet[Math.floor(next() * alphabet.length)]).join('');
+  const LOWER = 'abcdefghijklmnopqrstuvwxyz';
+  const UPPER = LOWER.toUpperCase();
+  const ALNUM = LOWER + UPPER + '0123456789';
+  const B64URL = ALNUM + '-_';
+  const PUNCT = LOWER + '!#$%^&()-_+~';
+  // a string that is a secret path whole is not sent at all: that hides it too
+  const maskedText = (value, opts) => { try { return maskJevState({ t: value }, opts).t; } catch (error) { if (error instanceof JevStateFieldOmittedError) return ''; throw error; } };
+  const maskedKey = (value, opts) => Object.keys(maskJevState({ [value]: 1 }, opts))[0];
+  const grams = (secret) => { const out = new Set(); for (let i = 0; i + 6 <= secret.length; i++) out.add(secret.slice(i, i + 6)); return out; };
+
+  // [rule, builder: (next) => { text, secret }]
+  const cases = [
+    ['URL with punctuation and an "@" far away', (n) => { const secret = rnd(PUNCT, 600, n); return { text: `https://user:${secret}@host/x`, secret }; }],
+    ['JWT', (n) => { const secret = rnd(B64URL, 600, n); return { text: `eyJ${rnd(B64URL, 20, n)}.${secret}.${rnd(B64URL, 43, n)}`, secret }; }],
+    ['long token with the digit far away', (n) => { const secret = rnd(LOWER + UPPER, 700, n) + '7' + rnd(LOWER, 30, n); return { text: secret, secret }; }],
+    ['AKIA', (n) => { const secret = rnd(UPPER, 16, n); return { text: `id AKIA${secret} end`, secret }; }],
+    ['sk-', (n) => { const secret = rnd(B64URL, 60, n); return { text: 'sk-ant-' + secret, secret }; }],
+    ['ghp_', (n) => { const secret = rnd(ALNUM, 40, n); return { text: 'ghp_' + secret, secret }; }],
+    ['KEY=', (n) => { const secret = rnd(ALNUM, 40, n); return { text: `export API_KEY=${secret}`, secret }; }],
+    ['authorization:', (n) => { const secret = rnd(ALNUM, 60, n); return { text: `Authorization: Bearer ${secret}`, secret }; }],
+    ['cookie', (n) => { const secret = rnd(ALNUM, 60, n); return { text: `Cookie: sid=${secret}`, secret }; }],
+    ['--password', (n) => { const secret = rnd(ALNUM, 30, n); return { text: `run --password ${secret} now`, secret }; }],
+    ['mysql -p', (n) => { const secret = rnd(ALNUM, 30, n); return { text: `mysql -u root -p${secret}`, secret }; }],
+    ['private key block', (n) => { const secret = Array.from({ length: 28 }, () => rnd(B64URL, 64, n)).join('\n'); return { text: `-----BEGIN RSA PRIVATE KEY-----\n${secret}\n-----END RSA PRIVATE KEY-----`, secret }; }],
+    ['a value before a secret path in the same line', () => ({ text: `echo hunter2 > ${'x '.repeat(350)}/home/u/.ssh/id_ed25519`, secret: 'hunter2' })],
+  ];
+  const offsets = [];
+  for (let o = MAX - 40; o <= MAX + 560; o += 40) offsets.push(o);
+  const shrink = 'Q9'.repeat(300); // a 600-character token that the mask turns into ***
+
+  const build = (text, offset, shrinks) => {
+    const head = shrinks ? shrink + ' ' : '';
+    const fill = 'w '.repeat(Math.ceil((offset - head.length) / 2)).slice(0, offset - head.length);
+    return head + fill + text + ' tail ' + 'w '.repeat(900);
+  };
+
+  it('hides every secret of the grid in the sent part of a string and of a key', () => {
+    let secrets = 0;
+    let assertions = 0;
+    for (const [rule, make] of cases) {
+      for (const shrinks of [false, true]) {
+        for (const offset of offsets) {
+          const { text, secret } = make(seeded(offset * 7 + (shrinks ? 1 : 0)));
+          const input = build(text, offset, shrinks);
+          const whole = maskedText(input);
+          const wholeKey = maskedKey(input);
+          const gs = [...grams(secret)];
+          // the reference hides it (the case is a real secret of its rule)
+          expect(gs.filter((g) => whole.includes(g)), `${rule} reference string, offset ${offset}`).toEqual([]);
+          expect(gs.filter((g) => wholeKey.includes(g)), `${rule} reference key, offset ${offset}`).toEqual([]);
+          const sent = maskedText(input, { maxChars: MAX }).slice(0, MAX);
+          const key = maskedKey(input, { maxChars: MAX });
+          expect(gs.filter((g) => sent.includes(g)), `${rule} string, offset ${offset}, shrink ${shrinks}`).toEqual([]);
+          expect(gs.filter((g) => key.includes(g)), `${rule} key, offset ${offset}, shrink ${shrinks}`).toEqual([]);
+          secrets++;
+          assertions += 4;
+        }
+      }
+    }
+    // 13 rules x 2 (shortened or not) x 16 offsets, each as a string and as a key
+    expect(secrets).toBe(13 * 2 * 16);
+    expect(assertions).toBe(secrets * 4);
+  });
+});
+
+describe('maskJevState: the tail of a cut text', () => {
+  const MAX = 200;
+  const sentOf = (value) => maskJevState({ t: value }, { maxChars: MAX }).t.slice(0, MAX);
+
+  it('masks a token that the cut crosses, whose digit comes after the cut', () => {
+    const text = ' '.repeat(190) + 'A'.repeat(600) + '1' + 'B'.repeat(100) + ' end';
+    expect(sentOf(text)).not.toMatch(/A{3}/);
+    expect(maskJevState({ ['k '.repeat(10) + 'A'.repeat(700) + '1' + 'B'.repeat(10)]: 1 }, { maxChars: MAX })).toBeDefined();
+  });
+
+  it('keeps a text before such a token when the mask has shortened an earlier token', () => {
+    const text = 'Q9'.repeat(300) + ' ' + ' '.repeat(60) + 'A'.repeat(600) + '1' + 'B'.repeat(100);
+    expect(sentOf(text)).not.toMatch(/A{3}/);
+  });
+
+  it('does not take the window away from text without spaces or from a long paragraph', () => {
+    // Chinese text without spaces (written with escapes)
+    const cjk = '\u8fd9\u662f\u4e00\u4e2a\u6ca1\u6709\u7a7a\u683c\u7684\u5f88\u957f\u7684\u4e2d\u6587\u6bb5\u843d\uff0c'.repeat(200);
+    expect(sentOf(cjk)).toBe(cjk.slice(0, MAX));
+    const english = 'The quick brown fox jumps over the lazy dog. '.repeat(60);
+    expect(sentOf(english)).toBe(english.slice(0, MAX));
+  });
+
+  it('masks URL credentials with punctuation whose "@" is beyond the margin', () => {
+    const text = 'x '.repeat(20) + 'https://user:pa!ss#' + 'w'.repeat(30) + '$%^&' + 'z'.repeat(800) + '@host/x';
+    expect(sentOf(text)).toBe('x '.repeat(20) + 'https://user:***');
+  });
+
+  it('omits the last line of a cut text when its secret path is beyond the cut', () => {
+    const text = 'first line\necho hunter2 > ' + 'x '.repeat(400) + '~/.ssh/id_ed25519\nlast';
+    expect(sentOf(text)).toBe('first line\n[line omitted: secret path]');
+    expect(sentOf(text)).not.toContain('hunter2');
+  });
+
+  it('leaves the last line alone when it names no secret path, and a complete line at the cut', () => {
+    const text = 'first line\necho hello ' + 'x '.repeat(400) + 'end\nlast';
+    expect(sentOf(text).startsWith('first line\necho hello x x')).toBe(true);
+    const exact = 'a '.repeat((MAX + WINDOW_MARGIN) / 2 - 1) + '\n/home/u/.ssh/id_rsa';
+    expect(maskJevState({ t: exact }, { maxChars: MAX }).t.startsWith('a a a')).toBe(true);
+  });
+
+  it('judges the last line on the original text when the line before it is part of a private key block', () => {
+    const block = '-----BEGIN RSA PRIVATE KEY-----\n' + 'MIIEvQIBADANBgkqhkiG9w0BAQEFAASCBKcwggSjAgEAAoIBAQC\n'.repeat(5) + '-----END RSA PRIVATE KEY-----\n';
+    const text = block + 'echo hunter2 > ' + 'x '.repeat(400) + '~/.ssh/id_ed25519';
+    expect(sentOf(text)).not.toContain('hunter2');
+  });
+});
+
+describe('maskJevState: a run of token characters that the cut crosses', () => {
+  const MAX = 200;
+  const sentOf = (value) => maskJevState({ t: value }, { maxChars: MAX }).t.slice(0, MAX);
+
+  it('follows a run to its end, so that a plain long run is sent as it is', () => {
+    const run = 'a'.repeat(MAX + WINDOW_MARGIN + 100);
+    expect(maskJevState({ t: run }, { maxChars: MAX }).t).toBe(run);
+  });
+
+  it('replaces a run that is longer than RUN_EXTENSION past the cut by ***', () => {
+    const text = ' '.repeat(190) + 'A'.repeat(MAX + WINDOW_MARGIN + RUN_EXTENSION + 10) + '1';
+    expect(sentOf(text)).toBe(' '.repeat(190) + '***');
+  });
+
+  it('does not take the window of a long text with no white space and a token character at the cut', () => {
+    const text = 'x'.repeat(MAX + WINDOW_MARGIN + 3000);
+    expect(sentOf(text)).toBe('x'.repeat(MAX));
+  });
+});
+
+describe('maskJevState: key names with acronyms and glued prefixes', () => {
+  it.each(['DBPassword', 'APIToken', 'APIKey', 'dbpassword', 'userpassword', 'apitoken', 'accesstoken', 'authtoken', 'clientsecret', 'mypassphrase', 'usercredentials', 'password2', 'token1', 'secret_v2', 'Pass2', 'PRIVATEKEY', 'secretsManager', 'cookieJar'])(
+    'replaces the value under %s',
+    (key) => {
+      expect(maskJevState({ [key]: 'hunter2zzQ' })).toEqual({ [key]: '***' });
+    },
+  );
+
+  it.each(['tokenizer', 'max_tokens', 'totalTokens', 'secretary', 'passwordless', 'tokens_used', 'bypass', 'compass', 'passenger', 'XMLHttpRequest', 'userId', 'HTMLParser', 'keyboard'])(
+    'leaves the value under %s',
+    (key) => {
+      expect(maskJevState({ [key]: 'plain value' })).toEqual({ [key]: 'plain value' });
+    },
+  );
+
+  it('keeps the counters and the markers out of the key check', () => {
+    expect(maskJevState({ DBPasswordLength: 12, APITokenCount: 3, input_tokens: 5 })).toEqual({ DBPasswordLength: 12, APITokenCount: 3, input_tokens: 5 });
+    const once = maskJevState({ '/home/u/.ssh/id_rsa': 'x', '/x/.env': 'y' });
+    expect(maskJevState(once)).toEqual(once);
   });
 });
 
