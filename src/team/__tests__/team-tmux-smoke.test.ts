@@ -2,7 +2,8 @@ import { afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { execFile, execFileSync } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import { existsSync } from 'node:fs';
-import { chmod, mkdir, mkdtemp, readdir, readFile, rm, symlink, writeFile } from 'node:fs/promises';
+import { chmod, link, mkdir, mkdtemp, readdir, readFile, rm, symlink, writeFile } from 'node:fs/promises';
+import { createConnection } from 'node:net';
 import { tmpdir } from 'node:os';
 import { delimiter, dirname, join, resolve } from 'node:path';
 import { promisify } from 'node:util';
@@ -11,6 +12,8 @@ import { shutdownTeamV2, startTeamV2 } from '../runtime-v2.js';
 import { executeTeamApiOperation } from '../api-interop.js';
 import { readTeamConfig } from '../monitor.js';
 import { createTeamInstanceBinding } from '../team-instance.js';
+import { observeProcessIdentity } from '../team-owner-epoch.js';
+import type { TeamEvent } from '../types.js';
 import { observeTmuxServerIdentity, paneHasActiveTask, paneLooksReady } from '../tmux-session.js';
 import { absPath, TeamPaths } from '../state-paths.js';
 import { isTmuxAvailable, tmuxCmdAsync } from '../../cli/tmux-utils.js';
@@ -31,7 +34,13 @@ const RUNTIME_CLI_PATH = join(SMOKE_CACHE, 'bridge', 'runtime-cli.cjs');
 const SHUTDOWN_ACK_TIMEOUT_MS = 30_000;
 const execFileAsync = promisify(execFile);
 
-type TraceEntry = { step: string; pid: number; failed_step?: string; message?: string };
+type TraceEntry = {
+  step: string;
+  pid: number;
+  process_started_at: string | null;
+  failed_step?: string;
+  message?: string;
+};
 
 function sleep(ms: number): Promise<void> {
   return new Promise(resolveSleep => setTimeout(resolveSleep, ms));
@@ -93,6 +102,19 @@ async function processesMentioning(markers: string[]): Promise<string[]> {
     .map(line => line.trim());
 }
 
+function socketRefusesConnections(socketPath: string): Promise<boolean> {
+  return new Promise(resolveProbe => {
+    const socket = createConnection(socketPath);
+    socket.once('connect', () => {
+      socket.destroy();
+      resolveProbe(false);
+    });
+    socket.once('error', (error: NodeJS.ErrnoException) => {
+      resolveProbe(error.code === 'ECONNREFUSED' || error.code === 'ENOENT');
+    });
+  });
+}
+
 // createTeamSession starts its detached server on /tmp/o-<leader pid>-*.sock.
 // Cleanup kills only sockets that appeared during the test, because an older
 // socket under a reused pid can belong to someone's live team.
@@ -122,6 +144,7 @@ describe.skipIf(!SMOKE_ENABLED)('team tmux smoke: fake claude worker lifecycle',
 
   let fixtureRoot = '';
   let runRoot = '';
+  let runtimeCliPath = '';
   let cwd = '';
   let tracePath = '';
   let socketsBefore = new Set<string>();
@@ -141,19 +164,24 @@ describe.skipIf(!SMOKE_ENABLED)('team tmux smoke: fake claude worker lifecycle',
     fixtureRoot = await mkdtemp(join(tmpdir(), 'omc-smoke-'));
     runRoot = await mkdtemp(join(SMOKE_CACHE, 'run-'));
     const binDir = join(runRoot, 'bin');
+    // Every runtime-cli process names its entry in argv. A per-run link gives
+    // the leftover scan a marker that concurrent runs in this checkout lack;
+    // node resolves the link, so the bundle still loads from its real home.
+    runtimeCliPath = join(runRoot, 'bridge', 'runtime-cli.cjs');
     const home = join(fixtureRoot, 'home');
     const privateTmp = join(fixtureRoot, 'tmp');
     cwd = join(fixtureRoot, 'workdir');
     tracePath = join(fixtureRoot, 'fake-provider.trace.jsonl');
-    for (const dir of [binDir, home, privateTmp, cwd, join(fixtureRoot, 'state'), join(fixtureRoot, 'tmux')]) {
+    for (const dir of [binDir, dirname(runtimeCliPath), home, privateTmp, cwd, join(fixtureRoot, 'state'), join(fixtureRoot, 'tmux')]) {
       await mkdir(dir, { recursive: true });
     }
 
+    await symlink(RUNTIME_CLI_PATH, runtimeCliPath);
     await writeExecutable(join(binDir, 'claude'), [
       '#!/bin/sh',
       // Login shells may reorder PATH (macOS path_helper); pin the omc shim.
       `export PATH=${shellQuote(binDir)}:"$PATH"`,
-      `exec ${shellQuote(process.execPath)} ${shellQuote(FAKE_PROVIDER)} --trace ${shellQuote(tracePath)} "$@"`,
+      `exec ${shellQuote(process.execPath)} --import ${shellQuote(TSX_LOADER_URL)} ${shellQuote(FAKE_PROVIDER)} --trace ${shellQuote(tracePath)} "$@"`,
     ]);
     await writeExecutable(join(binDir, 'omc'), [
       '#!/bin/sh',
@@ -168,7 +196,7 @@ describe.skipIf(!SMOKE_ENABLED)('team tmux smoke: fake claude worker lifecycle',
       XDG_DATA_HOME: join(home, '.local', 'share'),
       CLAUDE_CONFIG_DIR: join(home, '.claude'),
       OMC_STATE_DIR: join(fixtureRoot, 'state'),
-      OMC_RUNTIME_CLI_PATH: RUNTIME_CLI_PATH,
+      OMC_RUNTIME_CLI_PATH: runtimeCliPath,
       TMUX_TMPDIR: join(fixtureRoot, 'tmux'),
       TMPDIR: privateTmp,
       TEMP: privateTmp,
@@ -200,14 +228,28 @@ describe.skipIf(!SMOKE_ENABLED)('team tmux smoke: fake claude worker lifecycle',
   });
 
   afterEach(async () => {
-    for (const entry of await readTrace()) {
-      if (isProcessAlive(entry.pid)) {
-        try { process.kill(entry.pid, 'SIGKILL'); } catch { /* exited concurrently */ }
+    const leftovers: string[] = [];
+    const providers = new Map((await readTrace()).map(entry => [entry.pid, entry.process_started_at]));
+    for (const [pid, processStartedAt] of providers) {
+      const state = processStartedAt
+        ? observeProcessIdentity({ pid, process_started_at: processStartedAt })
+        : isProcessAlive(pid) ? 'unknown' : 'dead';
+      if (state === 'matching') {
+        try { process.kill(pid, 'SIGKILL'); } catch { /* exited concurrently */ }
+      } else if (state === 'unknown') {
+        leftovers.push(`provider pid ${pid}: identity unverifiable, not signalled`);
       }
     }
     for (const socketPath of (await privateSockets()).filter(path => !socketsBefore.has(path))) {
       await tmuxCmdAsync(['-S', socketPath, 'kill-server'], { timeout: 2_000, stripTmux: true }).catch(() => undefined);
-      await rm(socketPath, { force: true });
+      const serverGone = await waitFor(
+        `tmux server on ${socketPath} to exit`,
+        () => socketRefusesConnections(socketPath),
+        refused => refused,
+        5_000,
+      ).catch(() => false);
+      if (serverGone) await rm(socketPath, { force: true });
+      else leftovers.push(`tmux server still accepts connections on ${socketPath}; socket kept`);
     }
     for (const [key, value] of savedEnv) {
       if (value === undefined) delete process.env[key];
@@ -216,6 +258,7 @@ describe.skipIf(!SMOKE_ENABLED)('team tmux smoke: fake claude worker lifecycle',
     savedEnv.clear();
     await rm(fixtureRoot, { recursive: true, force: true });
     await rm(runRoot, { recursive: true, force: true });
+    if (leftovers.length > 0) throw new Error(`smoke cleanup left live resources:\n${leftovers.join('\n')}`);
   });
 
   it('launches a worker that claims and completes its task, then acks shutdown and leaves nothing behind', async () => {
@@ -258,14 +301,18 @@ describe.skipIf(!SMOKE_ENABLED)('team tmux smoke: fake claude worker lifecycle',
       traceDiagnostics,
     );
 
-    const shutdownStartedAt = Date.now();
+    // Cleanup deletes events.jsonl; a hard link keeps the leader's appends readable.
+    const eventsWitness = join(fixtureRoot, 'events.witness.jsonl');
+    await link(absPath(leaderCwd, TeamPaths.events(runtime.teamName)), eventsWitness);
     const shutdown = await shutdownTeamV2(runtime.teamName, leaderCwd, {
       instanceId: runtime.instanceId,
       timeoutMs: SHUTDOWN_ACK_TIMEOUT_MS,
     });
-    const shutdownMs = Date.now() - shutdownStartedAt;
     expect(shutdown).toEqual({ outcome: 'cleaned' });
-    expect(shutdownMs, 'shutdown waited out the ack timeout, so the worker ack was never consumed').toBeLessThan(SHUTDOWN_ACK_TIMEOUT_MS);
+    const leaderEvents = (await readFile(eventsWitness, 'utf8'))
+      .split('\n').filter(Boolean).map(line => JSON.parse(line) as TeamEvent);
+    expect(leaderEvents.filter(event => event.type === 'shutdown_ack'), 'leader never consumed the worker shutdown ack')
+      .toEqual([expect.objectContaining({ worker: 'worker-1', reason: 'accept' })]);
 
     const providerSteps = (await readTrace()).map(entry => entry.step);
     expect(providerSteps.slice(-2), await traceDiagnostics()).toEqual(['write-shutdown-ack', 'exit']);
@@ -288,7 +335,7 @@ describe.skipIf(!SMOKE_ENABLED)('team tmux smoke: fake claude worker lifecycle',
     expect(isProcessAlive(providerPids[0]!)).toBe(false);
     await waitFor(
       'no worker, bootstrap, or provider process from this run',
-      () => processesMentioning([fixtureRoot, RUNTIME_CLI_PATH]),
+      () => processesMentioning([fixtureRoot, runRoot, runtime.teamName]),
       leftovers => leftovers.length === 0,
       10_000,
     );

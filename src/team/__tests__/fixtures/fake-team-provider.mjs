@@ -6,16 +6,20 @@ import { execFileSync } from 'node:child_process';
 import process from 'node:process';
 import { createInterface } from 'node:readline';
 import { setTimeout as sleep } from 'node:timers/promises';
+import { currentStrictProcessStartIdentity } from '../../team-owner-epoch.ts';
 
 const IDLE_PROMPT = '❯ ';
 const SHUTDOWN_POLL_MS = 100;
 
 const traceIndex = process.argv.indexOf('--trace');
 const tracePath = traceIndex >= 0 ? process.argv[traceIndex + 1] : undefined;
+// Lets test cleanup signal this process only while its PID still names it.
+const processStartedAt = currentStrictProcessStartIdentity();
 
 function trace(step, detail = {}) {
   if (!tracePath) return;
-  appendFileSync(tracePath, `${JSON.stringify({ step, pid: process.pid, at: new Date().toISOString(), ...detail })}\n`);
+  const entry = { step, pid: process.pid, process_started_at: processStartedAt, at: new Date().toISOString(), ...detail };
+  appendFileSync(tracePath, `${JSON.stringify(entry)}\n`);
 }
 
 function expandStateRoot(path) {
