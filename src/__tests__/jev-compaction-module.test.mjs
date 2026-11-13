@@ -42,11 +42,10 @@ function okResponse(json) {
   return { ok: true, status: 200, headers: {}, text: JSON.stringify(json) };
 }
 
-function fakeDollar({ env = ACTIVE_ENV, settingsEnv, respond = (body) => okResponse(scoreByMarker(body)), clockAfter, usage, messages = [], compactResult, writeThrows = false, diskPrefix, flakyBreakerRead = false, stallBreakerRead = false, stallRpmRead = false, rpmReadGate, rpmReadGates = {}, fsDelayMs = 0, brokenBreakerRead = false, breakerWriteDelayMs = 0, lockReadDelayMs = 0, lockWriteThrows = false, lockSteal = false, sessionId = 'sess-1', stallModuleRead = false } = {}) {
+function fakeDollar({ env = ACTIVE_ENV, settingsEnv, respond = (body) => okResponse(scoreByMarker(body)), clockAfter, usage, messages = [], compactResult, writeThrows = false, diskPrefix, flakyBreakerRead = false, stallBreakerRead = false, stallRpmRead = false, rpmReadGate, rpmReadGates = {}, fsDelayMs = 0, brokenBreakerRead = false, breakerWriteDelayMs = 0, lockReadDelayMs = 0, sessionId = 'sess-1', stallModuleRead = false } = {}) {
   const files = new Map();
   const mtimes = new Map();
   let flaked = false;
-  let lockFailures = 0;
   let gated = false;
   let rpmReads = 0;
   const calls = { fetch: [], write: 0, toast: [], log: 0, compact: 0, usage: 0, messages: 0, settings: 0 };
@@ -73,9 +72,6 @@ function fakeDollar({ env = ACTIVE_ENV, settingsEnv, respond = (body) => okRespo
         return { kind: 'file', size: files.get(p).length, mtimeMs: mtimes.get(p), isLink: false };
       },
       write: async (p, text) => {
-        if (lockWriteThrows && p.endsWith('/breaker.json.lock') && (lockWriteThrows === true || lockFailures++ < lockWriteThrows)) throw Object.assign(new Error('EBUSY'), { code: 'EBUSY' });
-        // Another process takes the lock the moment the module has written its token.
-        if (lockSteal && p.endsWith('/breaker.json.lock') && diskPrefix && p.startsWith(diskPrefix)) { mkdirSync(dirname(p), { recursive: true }); writeFileSync(p, JSON.stringify({ token: 'other', ts: Date.now() })); return; }
         if (fsDelayMs) await new Promise((resolve) => setTimeout(resolve, fsDelayMs));
         if (breakerWriteDelayMs && p.endsWith('/breaker.json')) await new Promise((resolve) => setTimeout(resolve, breakerWriteDelayMs));
         if (diskPrefix && p.startsWith(diskPrefix)) { mkdirSync(dirname(p), { recursive: true }); writeFileSync(p, text); return; }
@@ -2518,78 +2514,6 @@ describe('jev-compaction module: shared breaker and request limit (OMC_JEV_BREAK
     expect(readBreaker(c.settings, Date.now())).toMatchObject({ reason: 'http-429' });
   });
 
-  it('a breaker file that cannot be read, or is corrupt, is named in the record of the compaction whose failure was recorded', async () => {
-    const tooMany = () => ({ ok: false, status: 429, headers: {}, text: '' });
-    const c = shared({ OMC_JEV_BREAKER: '1' });
-    openByScripts(c, 402);
-    const unreadable = await compactShared(c, conversation(30), { brokenBreakerRead: true, respond: tooMany });
-    expect(unreadable.records()[0]).toMatchObject({ reason: 'jev_error', breaker_issue: { kind: 'unreadable' } });
-    const d = shared({ OMC_JEV_BREAKER: '1' });
-    mkdirSync(d.settings.dir, { recursive: true });
-    const file = `${d.settings.dir}/breaker.json`;
-    writeFileSync(file, '{');
-    const old = new Date(Date.now() - 60_000);
-    utimesSync(file, old, old);
-    const corrupt = await compactShared(d, conversation(30), { respond: tooMany });
-    expect(corrupt.records()[0].breaker_issue).toEqual({ kind: 'corrupt' });
-    expect(readBreaker(d.settings, Date.now())).toMatchObject({ reason: 'http-429' });
-    const clean = shared({ OMC_JEV_BREAKER: '1' });
-    expect((await compactShared(clean, conversation(30), { respond: tooMany })).records()[0]).not.toHaveProperty('breaker_issue');
-  });
-
-  it('a lock the module cannot write gives up with a trace in the record, once per kind and process, and the breaker is not written', async () => {
-    const tooMany = () => ({ ok: false, status: 429, headers: {}, text: '' });
-    const c = shared({ OMC_JEV_BREAKER: '1' });
-    const handlers = load();
-    const first = await compactShared(c, conversation(30), { handlers, lockWriteThrows: true, respond: tooMany });
-    expect(first.records()[0]).toMatchObject({ reason: 'jev_error', breaker_issue: { kind: 'lock-unwritable', code: 'EBUSY' } });
-    expect(readBreaker(c.settings, Date.now())).toBeUndefined();
-    // The pause after the 429 is over (the clock is ten minutes on): the same trouble is not named again.
-    const real = Date.now();
-    const spy = vi.spyOn(Date, 'now').mockImplementation(() => real + 10 * 60_000);
-    try {
-      const second = await compactShared(c, conversation(30), { handlers, lockWriteThrows: true, respond: tooMany });
-      expect(second.calls.fetch).toHaveLength(1);
-      expect(second.records()[0]).not.toHaveProperty('breaker_issue');
-    } finally {
-      spy.mockRestore();
-    }
-  });
-
-  it('a lock another process keeps taking ends the wait with a lock-timeout trace, also after refused writes, and the breaker is not written', async () => {
-    const tooMany = () => ({ ok: false, status: 429, headers: {}, text: '' });
-    for (const refused of [0, 2]) {
-      const c = shared({ OMC_JEV_BREAKER: '1' });
-      mkdirSync(c.settings.dir, { recursive: true });
-      const run = await compactShared(c, conversation(30), { lockSteal: true, lockWriteThrows: refused, respond: tooMany });
-      // Refused writes before a written one do not turn the later timeout into a refusal.
-      expect(run.records()[0]).toMatchObject({ reason: 'jev_error', breaker_issue: { kind: 'lock-timeout' } });
-      expect(run.records()[0].breaker_issue).not.toHaveProperty('code');
-      expect(readBreaker(c.settings, Date.now())).toBeUndefined();
-    }
-  }, 20_000);
-
-  it('a corrupt breaker file, which is replaced, does not hide a later lock the module cannot write', async () => {
-    const tooMany = () => ({ ok: false, status: 429, headers: {}, text: '' });
-    const c = shared({ OMC_JEV_BREAKER: '1' });
-    mkdirSync(c.settings.dir, { recursive: true });
-    const file = `${c.settings.dir}/breaker.json`;
-    writeFileSync(file, '{');
-    const old = new Date(Date.now() - 60_000);
-    utimesSync(file, old, old);
-    const handlers = load();
-    const first = await compactShared(c, conversation(30), { handlers, respond: tooMany });
-    expect(first.records()[0].breaker_issue).toEqual({ kind: 'corrupt' });
-    const real = Date.now();
-    const spy = vi.spyOn(Date, 'now').mockImplementation(() => real + 10 * 60_000);
-    try {
-      const second = await compactShared(c, conversation(30), { handlers, respond: tooMany, lockWriteThrows: true });
-      expect(second.records()[0].breaker_issue).toMatchObject({ kind: 'lock-unwritable', code: 'EBUSY' });
-    } finally {
-      spy.mockRestore();
-    }
-  });
-
   it('(a) the module waits for the lock of a script opener and keeps the longer end that opener writes', async () => {
     const c = shared({ OMC_JEV_BREAKER: '1' });
     mkdirSync(c.settings.dir, { recursive: true });
@@ -2623,8 +2547,7 @@ describe('jev-compaction module: shared breaker and request limit (OMC_JEV_BREAK
     const c = shared({ OMC_JEV_BREAKER: '1' });
     mkdirSync(c.settings.dir, { recursive: true });
     // The first read of the (absent) lock returns after the 1.5 s wait is over and reports the path free.
-    const run = await compactShared(c, conversation(30), { lockReadDelayMs: 1800, respond: () => ({ ok: false, status: 429, headers: {}, text: '' }) });
-    expect(run.records()[0].breaker_issue).toEqual({ kind: 'lock-timeout' });
+    await compactShared(c, conversation(30), { lockReadDelayMs: 1800, respond: () => ({ ok: false, status: 429, headers: {}, text: '' }) });
     await new Promise((resolve) => setTimeout(resolve, 2500));
     expect(existsSync(`${c.settings.dir}/breaker.json.lock`)).toBe(false);
     expect(existsSync(`${c.settings.dir}/breaker.json`)).toBe(false);

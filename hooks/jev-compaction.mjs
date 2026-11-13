@@ -80,11 +80,6 @@
  * when it writes a new minute). Without these two variables nothing of this is read or written. The
  * module's own pause, its three-failures stop and OMC_JEV_MAX_REQUESTS stay as they were.
  *
- * A shared breaker that did not open cleanly is not silent: the first trouble with breaker.json or its
- * lock (lock-timeout, lock-unwritable, unreadable, corrupt) is put once per process into the record of
- * the compaction whose failure was being recorded (breaker_issue); one that ends after that record is
- * written shows in the next record with a failure.
- *
  * Quiet: no $.ui.log; a toast only with OMC_JEV_COMPACT_TOAST=1. One JSON file per event goes to the
  * spool directory (<state dir>/compaction-spool, $.fs cannot append); the classic SessionStart hook
  * (scripts/lib/jev-compaction-state.mjs) moves those records to compaction.jsonl next to shadow.jsonl.
@@ -446,7 +441,7 @@ function freshState() {
     sharedQueue: Promise.resolve(), compacting: 0, pausedUntil: 0, pauseReason: null, failedInRow: 0, noResponseAt: [], requests: 0,
     turnCount: 0, lastAttempt: -Infinity, hostCannot: false, compactWindow: undefined, windowTurn: -Infinity,
     cachedConfig: undefined, cachedAt: -Infinity, growthArmed: false, growthBase: undefined,
-    batchRefusedUntil: new Map(), pendingAfter: undefined, breakerIssue: undefined, breakerIssuesShown: new Set(), moduleRev: undefined,
+    batchRefusedUntil: new Map(), pendingAfter: undefined, moduleRev: undefined,
   };
 }
 let session = freshState();
@@ -621,23 +616,6 @@ const isMissing = async ($, path, error) => {
   try { return !(await $.fs.exists(path)); } catch { return false; }
 };
 
-// What went wrong with the shared breaker file or its lock, so that a breaker that did not open is not silent: the first trouble (kind
-// lock-timeout or lock-unwritable, unreadable, corrupt; code is the error code of a refused write) is kept in process memory and goes, once
-// per kind and process, into the record of the compaction whose failure was being recorded (breaker_issue). A corrupt file is replaced and
-// the breaker opens, so it only waits behind a trouble that kept the breaker from opening. It is a trace only: no decision depends on it.
-const noteBreakerIssue = (kind, code) => {
-  const pending = session.breakerIssue;
-  if (session.breakerIssuesShown.has(kind) || (pending && !(pending.kind === 'corrupt' && kind !== 'corrupt'))) return;
-  session.breakerIssue = { kind, ...(code ? { code: String(code) } : {}) };
-};
-const takeBreakerIssue = () => {
-  const issue = session.breakerIssue;
-  if (!issue || session.breakerIssuesShown.has(issue.kind)) return undefined;
-  session.breakerIssuesShown.add(issue.kind);
-  session.breakerIssue = undefined;
-  return issue;
-};
-
 // breaker.json as read, in up to 4 attempts 3 ms apart (mirror of readBreakerState in jev-breaker.mjs): {state} (the file as written,
 // whatever its times; undefined when missing or not an object); {unreadable: true} when a read failed in any attempt, or the text does
 // not parse in a file written less than LOCK_STALE_MS ago (a write in progress; no usable mtime counts as fresh): readers treat it as
@@ -719,11 +697,9 @@ async function holdsLock($, path, token) {
 async function takeLock($, path, deadline) {
   const token = `compaction-${randomId()}`;
   let refusals = 0;
-  let refusal;
   let wroteToken = false;
   const expire = async () => {
     if (wroteToken) await releaseLock($, path, token);
-    noteBreakerIssue(refusal ? 'lock-unwritable' : 'lock-timeout', refusal);
     return undefined;
   };
   for (;;) {
@@ -738,15 +714,10 @@ async function takeLock($, path, deadline) {
         await $.fs.write(path, JSON.stringify({ token, ts: Date.now() }));
         written = true;
         refusals = 0;
-        refusal = undefined;
-      } catch (error) {
+      } catch {
         // EBUSY or EPERM while a script process removes the lock: keep polling, as the script side does.
-        refusal = error?.code ?? 'write';
         refusals += 1;
-        if (refusals >= LOCK_REFUSALS_TO_GIVE_UP) {
-          noteBreakerIssue('lock-unwritable', refusal);
-          return undefined;
-        }
+        if (refusals >= LOCK_REFUSALS_TO_GIVE_UP) return undefined;
       }
       if (written) {
         wroteToken = true;
@@ -787,11 +758,7 @@ async function openSharedBreaker($, shared, seconds, reason, now) {
       if (!token) break;
       try {
         const onDisk = await readBreakerState($, shared);
-        if (onDisk.unreadable) {
-          noteBreakerIssue('unreadable');
-          break;
-        }
-        if (onDisk.corrupt) noteBreakerIssue('corrupt');
+        if (onDisk.unreadable) break;
         if (!read) {
           read = true;
           const previous = onDisk.state;
@@ -2482,10 +2449,6 @@ async function decide($, e, cfg, record, started) {
   if (failures.length) {
     record.failure = failures.map((f) => f.kind).join(',');
     noteFailures(failures, Date.now());
-    // The first trouble with the shared breaker file or its lock (see noteBreakerIssue). The failure that opens the breaker is
-    // recorded while the answers are awaited, so it is normally here; one that ends later is in the next record.
-    const issue = takeBreakerIssue();
-    if (issue) record.breaker_issue = issue;
     if (!asked.length || answered / asked.length < PARTIAL_OK) {
       // Only a compaction that ends in the summary because of a refused batch is remembered; one that went on with the other batches is not.
       if (results.some((r) => !r.value && BATCH_REFUSED_STATUSES.includes(r.error?.status))) {
