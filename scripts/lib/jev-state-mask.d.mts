@@ -11,6 +11,8 @@ export const MAX_STATE_NODES: number;
 export const WINDOW_MARGIN: number;
 /** How far past the cut a run of token characters is followed to its end. */
 export const RUN_EXTENSION: number;
+/** The characters that a run of token characters is made of (see the comment in the module). */
+export const TOKEN_CHAR: RegExp;
 
 export class JevStateMaskError extends Error {
   constructor(message?: string, options?: ErrorOptions);

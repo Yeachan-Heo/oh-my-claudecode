@@ -203,4 +203,34 @@ describe('resolveJudgment state mask', () => {
       }
     });
   });
+
+  describe('plural keys, bearer with ~, arguments and pairs', () => {
+    const logText = () => readFileSync(join(dir, 'log', 'shadow.jsonl'), 'utf8');
+    beforeEach(() => {
+      process.env.OMC_JEV_EXCERPT_CHARS_MODEL_ROUTING = '200';
+    });
+    afterEach(() => {
+      delete process.env.OMC_JEV_EXCERPT_CHARS_MODEL_ROUTING;
+    });
+    const send = async (state: unknown): Promise<string[]> => {
+      const bodies: string[] = [];
+      await resolveJudgment({ point: 'model-routing', state, questions: QUESTIONS, twin: () => 'sonnet', fetchFn: recordingFetch(bodies) });
+      expect(bodies).toHaveLength(1);
+      return [bodies[0], logText()];
+    };
+
+    it('masks a bearer value with ~ that the cut crosses, after a shortened token', async () => {
+      // the value starts 7 characters before the cut, and a bearer value needs 8: the rule can only see it if the run goes on past the ~
+    const task = 'Q9'.repeat(300) + ' ' + ' '.repeat(97) + 'Bearer ' + 'abcdef~' + 'ghijk'.repeat(60);
+      for (const text of await send({ task })) expect(text).not.toContain('abcdef~');
+    });
+
+    it('masks the value under accessTokens and the arguments after a secret flag, and the value of a pair', async () => {
+      const state = { accessTokens: ['tok_hunter2zz', 'tok-one-zzQ'], refreshTokens: 'hunter2zz', argv: ['run', '--password', 'arg-secret-zzQ'], env: [{ name: 'DB_PASSWORD', value: 'pair-secret-zzQ' }], ok: 'fine' };
+      for (const text of await send(state)) {
+        for (const secret of ['tok_hunter2zz', 'hunter2zz', 'tok-one-zzQ', 'arg-secret-zzQ', 'pair-secret-zzQ']) expect(text).not.toContain(secret);
+        expect(text).toContain('fine');
+      }
+    });
+  });
 });

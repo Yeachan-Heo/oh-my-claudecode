@@ -84,12 +84,15 @@ export class JevStateFieldOmittedError extends JevStateMaskError {
 // credential, apikey), alone or glued to a prefix (dbpassword, apitoken, clientsecret, mypassphrase), or one of
 // the weak words (pass, pwd, cookie, bearer, api key, access key, private key, authorization) between separators,
 // camelCase humps or acronym ends (accessToken, DBPassword, api_key, Client-Secret, AWS_SECRET_ACCESS_KEY,
-// password2): a digit run may follow. Not "tokens", "tokenizer", "secretary", "passwordless", "bypass",
-// "compass" or "passenger". "secretsManager" and "cookieJar" are secret keys on purpose: what they hold is secrets.
+// password2): a digit run may follow. The plural counts for the strong words and for "tokens" as the last word
+// (accessTokens, refresh_tokens), not for pass and pwd. Not "tokenizer", "secretary", "passwordless", "bypass",
+// "compass", "passenger", "passes" or "tokens_used". "secretsManager" and "cookieJar" are secret keys on purpose:
+// what they hold is secrets. A key that ends with "tokens" is also a counter (COUNTER_KEY): a number under it stays,
+// a string, array or object under it is masked.
 const SECRET_KEY = new RegExp(
-  '(?:(?:passwords?|passwd|passphrases?|secrets?|token|credentials?|apikeys?)' +
-  '|(?:^|[^a-z0-9])(?:pass|pwds?|cookies?|bearer|api[_ -]?keys?|access[_ -]?keys?|private[_ -]?keys?|client[_ -]?secrets?|authorization))' +
-  '\\d*(?:[^a-z0-9]|$)',
+  '(?:(?:passwords?|passwd|passphrases?|secrets?|token|credentials?|apikeys?)\\d*(?:[^a-z0-9]|$)' +
+  '|(?:^|[^a-z0-9])(?:pass|pwds?|cookies?|bearer|api[_ -]?keys?|access[_ -]?keys?|private[_ -]?keys?|client[_ -]?secrets?|authorization)\\d*(?:[^a-z0-9]|$)' +
+  '|tokens\\d*$)',
 );
 // A number under such a key that counts or measures something (token_count, password_length, tokenBudget) stays.
 const COUNTER_KEY = /(?:tokens|(?:^|[^a-z0-9])(?:count|length|len|budget|usage|size))$/;
@@ -100,13 +103,69 @@ function normalizeKey(key) {
   return key.replace(MARKER, '').replace(/([A-Z]+)([A-Z][a-z])/g, '$1_$2').replace(/([a-z0-9])([A-Z])/g, '$1_$2').toLowerCase();
 }
 
+// 'secret' (the value is masked, a number too), 'counter' (a number stays) or false, for the name of a key or of a pair.
+function secretKind(name) {
+  const normalized = normalizeKey(name);
+  if (!SECRET_KEY.test(normalized)) return false;
+  return COUNTER_KEY.test(normalized) ? 'counter' : 'secret';
+}
+
+// Pairs: the value of { name: 'DB_PASSWORD', value: x }, { key: 'apiToken', value: x }, { Name, Value },
+// { ParameterKey, ParameterValue } and the second element of a ['Authorization', 'Basic abc'] pair is masked when the
+// name is a secret name. The bare name "pass" is not one here (['pass', 'fail'] is a list of results).
+const PAIR_NAME = new Set(['name', 'key', 'parameter_key']);
+const PAIR_VALUE = new Set(['value', 'parameter_value']);
+function pairNameKind(name) {
+  return typeof name === 'string' && name.length <= 200 && normalizeKey(name) !== 'pass' ? secretKind(name) : false;
+}
+// Arguments of a command written as an array: what maskSecrets masks in the same command line as a string, which its
+// rules cannot see when each element is masked alone. The element after a secret flag is a value; after -u or --user
+// the part of "user:password" after the colon; for a command of the mysql family or sshpass, the element after -p and
+// the password stuck to -p (-phunter2). -p takes a password only for these commands (docker login -p is left alone,
+// as it is in a string).
+const SECRET_FLAG = /^--(?:password|passwd|pass|token|secret|api-key|apikey|access-token|auth-token|client-secret)$/i;
+const USER_FLAG = /^(?:-u|--user)$/;
+const USER_PASSWORD = /^([^\s:"']+:)[^\s"']+/;
+const GLUED_P = /^(-p)[^\s"']/;
+const P_COMMANDS = new Set(['mysql', 'mariadb', 'mysqldump', 'mysqladmin', 'sshpass']);
+// Map: index of an element -> 'value' (all of it), 'user' (after the colon) or 'glued' (after -p)
+function secretArguments(array) {
+  const modes = new Map();
+  let command = -1;
+  for (let i = 0; i < array.length; i++) {
+    const element = array[i];
+    if (typeof element !== 'string') continue;
+    if (command < 0 && P_COMMANDS.has(element.split(/[\\/]/).pop().toLowerCase())) command = i;
+    if (SECRET_FLAG.test(element)) {
+      if (i + 1 < array.length) modes.set(i + 1, 'value');
+    } else if (USER_FLAG.test(element)) {
+      if (typeof array[i + 1] === 'string' && USER_PASSWORD.test(array[i + 1])) modes.set(i + 1, 'user');
+    } else if (command >= 0 && i > command) {
+      if (element === '-p') {
+        if (i + 1 < array.length) modes.set(i + 1, 'value');
+      } else if (GLUED_P.test(element)) {
+        modes.set(i, 'glued');
+      }
+    }
+  }
+  if (array.length === 2 && pairNameKind(array[0])) modes.set(1, 'value');
+  return modes;
+}
+function maskArgument(item, mode) {
+  if (mode === 'user') return item.replace(USER_PASSWORD, '$1***');
+  if (mode === 'glued') return item.replace(/^(-p)[^\s"']+/, '$1***');
+  return item;
+}
+
 function omitSecretLines(text) {
   if (!SECRET_PATH.test(text)) return text;
   return text.split('\n').map((line) => (SECRET_PATH.test(line) ? SECRET_LINE : line)).join('\n');
 }
 
-// The characters of a token as the rules of maskSecrets see it: the class of its tokens, API keys, JWTs, base64.
-const TOKEN_CHAR = /[A-Za-z0-9+/=_.-]/;
+// The characters of a token as the rules of maskSecrets see it: the union of what their token classes take inside a
+// secret (a test checks it by the behavior of maskSecrets for every printable ASCII character): tokens, API keys,
+// JWTs, base64, bearer values (which also take ~). Not the class of the URL rule, which takes much more.
+export const TOKEN_CHAR = /[A-Za-z0-9+/=_.~-]/;
 /** How far past the cut a run of token characters is followed to its end; a longer run is replaced by *** instead. */
 export const RUN_EXTENSION = 4096;
 
@@ -208,18 +267,34 @@ export function maskJevState(state, { maxChars } = {}) {
     ancestors.add(value);
     try {
       if (Array.isArray(value)) {
-        return value.map((item, i) => walk(item, String(i), depth + 1, false, false) ?? null);
+        const modes = secretArguments(value);
+        return value.map((item, i) => {
+          const mode = modes.get(i);
+          return walk(mode && mode !== 'value' ? maskArgument(item, mode) : item, String(i), depth + 1, mode === 'value' ? 'secret' : false, false) ?? null;
+        });
       }
       const out = {};
-      for (const k of Object.keys(value)) {
+      const keys = Object.keys(value);
+      let pairKind = false;
+      for (const k of keys) {
+        if (PAIR_NAME.has(normalizeKey(k))) pairKind = pairNameKind(value[k]) || pairKind;
+      }
+      // names that collide after masking get the next free " #n" of their base, kept in one place so many collisions stay linear
+      const nextSuffix = new Map();
+      for (const k of keys) {
         const normalized = normalizeKey(k);
-        const secret = SECRET_KEY.test(normalized) ? (COUNTER_KEY.test(normalized) ? 'counter' : 'secret') : false;
+        const secret = secretKind(k) || (PAIR_VALUE.has(normalized) ? pairKind : false);
         const kind = normalized === 'session_id' ? 'uuid' : normalized === 'cwd' ? 'cwd' : false;
         const masked = walk(value[k], k, depth + 1, secret, kind);
         if (masked === undefined) continue;
         const base = SECRET_PATH.test(k) ? KEY_OMITTED : maskString(k, maxChars, false);
         let name = base;
-        for (let n = 2; Object.hasOwn(out, name); n++) name = `${base} #${n}`;
+        if (Object.hasOwn(out, name)) {
+          let n = nextSuffix.get(base) ?? 2;
+          while (Object.hasOwn(out, `${base} #${n}`)) n++;
+          name = `${base} #${n}`;
+          nextSuffix.set(base, n + 1);
+        }
         Object.defineProperty(out, name, { value: masked, enumerable: true, writable: true, configurable: true });
       }
       return out;

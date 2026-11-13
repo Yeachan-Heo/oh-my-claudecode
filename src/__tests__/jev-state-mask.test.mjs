@@ -6,7 +6,9 @@ import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 
-import { JevStateFieldOmittedError, JevStateMaskError, MAX_STATE_DEPTH, MAX_STATE_NODES, RUN_EXTENSION, SECRET_PATH, WINDOW_MARGIN, maskJevState } from '../../scripts/lib/jev-state-mask.mjs';
+import { makeCase, checkCase, seededRandom } from './jev-state-mask-cases.mjs';
+import { maskSecrets } from '../../scripts/lib/jev-mask.mjs';
+import { JevStateFieldOmittedError, JevStateMaskError, MAX_STATE_DEPTH, MAX_STATE_NODES, RUN_EXTENSION, SECRET_PATH, TOKEN_CHAR, WINDOW_MARGIN, maskJevState } from '../../scripts/lib/jev-state-mask.mjs';
 
 const root = join(fileURLToPath(import.meta.url), '..', '..', '..');
 const GHP = 'ghp_' + 'A'.repeat(36);
@@ -58,6 +60,11 @@ describe('maskJevState: keys that name a secret', () => {
   it('keeps token counters and unrelated keys', () => {
     const state = { totalTokens: 1234, input_tokens: 5, 'output-tokens': 6, passenger: 'x', keyboard: 'y', tokenizer: 'z' };
     expect(maskJevState(state)).toEqual(state);
+  });
+
+  it('masks the values that the maintainer used on #5064', () => {
+    expect(maskJevState({ accessTokens: ['tok_hunter2zz'], refreshTokens: 'hunter2zz' })).toEqual({ accessTokens: '***', refreshTokens: '***' });
+    expect(maskJevState({ refreshTokens: ['hunter2zz'], accessTokens: 'tok_hunter2zz' })).toEqual({ refreshTokens: '***', accessTokens: '***' });
   });
 
   it('keeps a number under a key that ends with tokens even when it names a secret word', () => {
@@ -504,7 +511,7 @@ describe('maskJevState: key names with acronyms and glued prefixes', () => {
     },
   );
 
-  it.each(['tokenizer', 'max_tokens', 'totalTokens', 'secretary', 'passwordless', 'tokens_used', 'bypass', 'compass', 'passenger', 'XMLHttpRequest', 'userId', 'HTMLParser', 'keyboard'])(
+  it.each(['tokenizer', 'secretary', 'passwordless', 'tokens_used', 'bypass', 'compass', 'passenger', 'passes', 'passed', 'XMLHttpRequest', 'userId', 'HTMLParser', 'keyboard'])(
     'leaves the value under %s',
     (key) => {
       expect(maskJevState({ [key]: 'plain value' })).toEqual({ [key]: 'plain value' });
@@ -515,6 +522,178 @@ describe('maskJevState: key names with acronyms and glued prefixes', () => {
     expect(maskJevState({ DBPasswordLength: 12, APITokenCount: 3, input_tokens: 5 })).toEqual({ DBPasswordLength: 12, APITokenCount: 3, input_tokens: 5 });
     const once = maskJevState({ '/home/u/.ssh/id_rsa': 'x', '/x/.env': 'y' });
     expect(maskJevState(once)).toEqual(once);
+  });
+});
+
+describe('maskJevState: plural token keys', () => {
+  it.each(['accessTokens', 'refreshTokens', 'idTokens', 'apiTokens', 'authTokens', 'refresh_tokens', 'tokens'])('replaces a string or an array under %s', (key) => {
+    expect(maskJevState({ [key]: 'hunter2zzQ' })).toEqual({ [key]: '***' });
+    expect(maskJevState({ [key]: ['a1b2c3', 'd4e5f6'] })).toEqual({ [key]: '***' });
+  });
+
+  it('keeps a number under a key that ends with tokens, and leaves passes, passed and passes: 3 alone', () => {
+    expect(maskJevState({ max_tokens: 4096, totalTokens: 7, input_tokens: 5, accessTokens: 3, tokens: 12 })).toEqual({ max_tokens: 4096, totalTokens: 7, input_tokens: 5, accessTokens: 3, tokens: 12 });
+    expect(maskJevState({ passes: 3, passed: 'yes', passes_total: 2 })).toEqual({ passes: 3, passed: 'yes', passes_total: 2 });
+  });
+
+  it('masks a string under a key that ends with tokens (a counter key holds a number)', () => {
+    expect(maskJevState({ max_tokens: 'inherit' })).toEqual({ max_tokens: '***' });
+  });
+});
+
+describe('maskJevState: names that collide after masking', () => {
+  it('numbers the keys that become the same marker, and never overwrites a key that has the numbered name', () => {
+    const state = { '/a/.ssh/id_rsa': 1, '/b/.ssh/id_rsa': 2, '[key omitted: path] #2': 'literal', '/c/.ssh/id_rsa': 3 };
+    const out = maskJevState(state);
+    expect(Object.keys(out)).toEqual(['[key omitted: path]', '[key omitted: path] #2', '[key omitted: path] #2 #2', '[key omitted: path] #3']);
+    expect(Object.values(out)).toEqual([1, 2, 'literal', 3]);
+  });
+
+  it('numbers many colliding keys in order (the next number is kept per name)', () => {
+    const state = {};
+    for (let i = 0; i < 300; i++) state[`/h${i}/.ssh/id_rsa`] = i;
+    const keys = Object.keys(maskJevState(state));
+    expect(keys).toHaveLength(300);
+    expect(keys[0]).toBe('[key omitted: path]');
+    expect(keys[299]).toBe('[key omitted: path] #300');
+    expect(new Set(keys).size).toBe(300);
+  });
+});
+
+describe('maskJevState: values that stand beside their names', () => {
+  it.each([
+    [{ name: 'DB_PASSWORD', value: 'hunter2zzQ' }, { name: 'DB_PASSWORD', value: '***' }],
+    [{ key: 'apiToken', value: 'hunter2zzQ' }, { key: 'apiToken', value: '***' }],
+    [{ Name: 'accessTokens', Value: 'hunter2zzQ' }, { Name: 'accessTokens', Value: '***' }],
+    [{ ParameterKey: 'dbPassword', ParameterValue: 'hunter2zzQ' }, { ParameterKey: 'dbPassword', ParameterValue: '***' }],
+    [{ name: 'LOG_LEVEL', value: 'debug' }, { name: 'LOG_LEVEL', value: 'debug' }],
+    [{ name: 'token_count', value: 5 }, { name: 'token_count', value: 5 }],
+  ])('pair %j', (input, expected) => {
+    expect(maskJevState(input)).toEqual(expected);
+  });
+
+  it.each([
+    [['Authorization', 'Basic abc123'], ['Authorization', '***']],
+    [['X-Api-Key', 'hunter2zzQ'], ['X-Api-Key', '***']],
+    [['Cookie', 'a=b'], ['Cookie', '***']],
+    [['pass', 'fail'], ['pass', 'fail']],
+    [['name', 'value'], ['name', 'value']],
+  ])('tuple %j', (input, expected) => {
+    expect(maskJevState({ headers: [input] }).headers[0]).toEqual(expected);
+  });
+
+  it('masks a header under a key that is no secret name', () => {
+    expect(maskJevState({ headers: { Authorization: 'Basic abc123', Accept: 'text/html' } })).toEqual({ headers: { Authorization: '***', Accept: 'text/html' } });
+  });
+
+  it.each([
+    [['--password', 'hunter2zzQ'], ['--password', '***']],
+    [['run', '--token', 'hunter2zzQ', 'x'], ['run', '--token', '***', 'x']],
+    [['--api-key', 'hunter2zzQ'], ['--api-key', '***']],
+    [['mysql', '-u', 'root', '-p', 'hunter2zzQ'], ['mysql', '-u', 'root', '-p', '***']],
+    [['sshpass', '-p', 'hunter2zzQ', 'ssh', 'host'], ['sshpass', '-p', '***', 'ssh', 'host']],
+    [['curl', '-u', 'user:hunter2zzQ'], ['curl', '-u', 'user:***']],
+    [['curl', '--user', 'u:hunter2zzQ'], ['curl', '--user', 'u:***']],
+    [['-u', 'user:hunter2zzQ'], ['-u', 'user:***']],
+    [['mysql', '-u', 'root', '-phunter2zzQ', 'db'], ['mysql', '-u', 'root', '-p***', 'db']],
+    [['sudo', 'mysqldump', '-phunter2zzQ'], ['sudo', 'mysqldump', '-p***']],
+    [['sshpass', '-phunter2zzQ', 'ssh', 'host'], ['sshpass', '-p***', 'ssh', 'host']],
+    [['curl', '-u', 'useronly'], ['curl', '-u', 'useronly']],
+    [['docker', 'login', '-p', 'hunter2zzQ'], ['docker', 'login', '-p', 'hunter2zzQ']],
+    [['docker', 'run', '-p', '8080:80'], ['docker', 'run', '-p', '8080:80']],
+    [['ssh', '-p', '2222', 'host'], ['ssh', '-p', '2222', 'host']],
+  ])('arguments %j', (input, expected) => {
+    expect(maskJevState({ argv: input }).argv).toEqual(expected);
+  });
+});
+
+describe('maskJevState: an array of arguments hides what the same command line hides as a string', () => {
+  const SECRET = 'hunter2zzQ';
+  const lines = [
+    ['curl', '-u', `user:${SECRET}`, 'http://h'],
+    ['curl', '--user', `u:${SECRET}`],
+    ['-u', `user:${SECRET}`],
+    ['run', '--password', SECRET, 'x'],
+    ['run', '--passwd', SECRET],
+    ['run', '--pass', SECRET],
+    ['run', '--token', SECRET],
+    ['run', '--secret', SECRET],
+    ['run', '--api-key', SECRET],
+    ['run', '--apikey', SECRET],
+    ['run', '--access-token', SECRET],
+    ['run', '--auth-token', SECRET],
+    ['run', '--client-secret', SECRET],
+    ['mysql', '-u', 'root', `-p${SECRET}`, 'db'],
+    ['mariadb', `-p${SECRET}`],
+    ['mysqldump', `-p${SECRET}`, 'db'],
+    ['mysqladmin', '-u', 'root', `-p${SECRET}`, 'status'],
+    ['sshpass', '-p', SECRET, 'ssh', 'host'],
+    ['sshpass', `-p${SECRET}`, 'ssh', 'host'],
+  ];
+  it.each(lines.map((argv) => [argv.join(' '), argv]))('%s', (_line, argv) => {
+    const asString = maskJevState({ t: argv.join(' ') }).t;
+    const asArray = JSON.stringify(maskJevState({ argv }).argv);
+    // what the string does not let out, the array does not let out either
+    expect(asString).not.toContain(SECRET);
+    expect(asArray).not.toContain(SECRET);
+  });
+
+  it('leaves alone what the string leaves alone', () => {
+    for (const argv of [['docker', 'login', '-p', SECRET], ['curl', '-u', 'useronly'], ['ssh', '-p', '2222', 'host']]) {
+      expect(maskJevState({ t: argv.join(' ') }).t).toBe(argv.join(' '));
+      expect(maskJevState({ argv }).argv).toEqual(argv);
+    }
+  });
+});
+
+describe('maskJevState: the tail class holds what the rules take', () => {
+  // Every printable ASCII character that a rule of maskSecrets takes inside a secret that has a minimum length or a
+  // context further along the same string must be a token character, so that the cut can be moved to the end of the run.
+  const T = 'ZQZQZQZQ';
+  const A = (n) => 'A'.repeat(n);
+  const rules = {
+    bearer: (c) => `bearer ${A(8)}${c}${T}`,
+    sk: (c) => `sk-ant-${A(16)}${c}${T}`,
+    ghp: (c) => `ghp_${A(12)}${c}${T}`,
+    github_pat: (c) => `github_pat_${A(12)}${c}${T}`,
+    glpat: (c) => `glpat-${A(12)}${c}${T}`,
+    xox: (c) => `xoxb-${A(12)}${c}${T}`,
+    sk_live: (c) => `sk_live_${A(20)}${c}${T}`,
+    hf: (c) => `hf_${A(20)}${c}${T}`,
+    npm: (c) => `npm_${A(20)}${c}${T}`,
+    akia: (c) => `AKIA${A(8)}${c}ZQZQZQZ`,
+    jwt1: (c) => `eyJ${A(8)}${c}${T}.${A(10)}.${A(10)}`,
+    jwt2: (c) => `eyJ${A(10)}.${A(8)}${c}${T}.${A(10)}`,
+    jwt3: (c) => `eyJ${A(10)}.${A(10)}.${A(8)}${c}${T}`,
+    long: (c) => `A1${A(20)}${c}${T}${T}`,
+  };
+  it('has every character that a rule takes (the URL rule takes more and has its own tail rule)', () => {
+    const missing = [];
+    for (const [name, build] of Object.entries(rules)) {
+      for (let code = 0x21; code <= 0x7e; code++) {
+        const c = String.fromCharCode(code);
+        if (!maskSecrets(build(c)).includes('ZQZQ') && !TOKEN_CHAR.test(c)) missing.push(`${name}: ${c}`);
+      }
+    }
+    expect(missing).toEqual([]);
+    expect(TOKEN_CHAR.test('~')).toBe(true);
+    expect(TOKEN_CHAR.test('\u4e2d')).toBe(false);
+  });
+});
+
+describe('maskJevState: random cases against the mask without a window', () => {
+  it('hides in the sent part what the mask without a window hides, for 400 cases of a fixed seed', () => {
+    const next = seededRandom(20261113);
+    const counts = { ok: 0, gap: 0, error: 0 };
+    for (let i = 0; i < 400; i++) {
+      const c = makeCase(next);
+      const r = checkCase(maskJevState, c);
+      if (r.ok) counts.ok++;
+      else if (r.gap) counts.gap++;
+      else counts.error++;
+      expect(r.error, `case ${i}: ${c.kind}, maxChars ${c.maxChars}, shows ${r.shown}`).toBeUndefined();
+    }
+    expect(counts.ok).toBeGreaterThan(380);
   });
 });
 

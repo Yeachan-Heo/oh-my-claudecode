@@ -580,6 +580,35 @@ describe('state mask: the tail of the cut and the keys', () => {
   });
 });
 
+describe('state mask: plural keys, bearer with ~, arguments and pairs', () => {
+  const okFetch = (bodies) => async (_url, init) => {
+    bodies.push(String(init.body));
+    return { ok: true, status: 200, json: async () => ({ answers: { route: { type: 'choice', choice: 'opus' } } }) };
+  };
+  const lastLine = () => readFileSync(join(tmp, 'shadow.jsonl'), 'utf8').trim().split('\n').pop();
+  const env = () => baseEnv({ OMC_JEV: 'model-routing:active', OMC_JEV_EXCERPT_CHARS_MODEL_ROUTING: '200' });
+  const send = async (state) => {
+    const bodies = [];
+    await resolveRequest({ point: 'model-routing', state, questions: QUESTIONS }, env(), okFetch(bodies));
+    expect(bodies).toHaveLength(1);
+    return [bodies[0], lastLine()];
+  };
+
+  it('masks a bearer value with ~ that the cut crosses, after a shortened token', async () => {
+    // the value starts 7 characters before the cut, and a bearer value needs 8: the rule can only see it if the run goes on past the ~
+    const task = 'Q9'.repeat(300) + ' ' + ' '.repeat(97) + 'Bearer ' + 'abcdef~' + 'ghijk'.repeat(60);
+    for (const text of await send({ task })) expect(text).not.toContain('abcdef~');
+  });
+
+  it('masks the value under accessTokens and the arguments after a secret flag, and the value of a pair', async () => {
+    const state = { accessTokens: ['tok_hunter2zz', 'tok-one-zzQ'], refreshTokens: 'hunter2zz', argv: ['run', '--password', 'arg-secret-zzQ'], env: [{ name: 'DB_PASSWORD', value: 'pair-secret-zzQ' }], ok: 'fine' };
+    for (const text of await send(state)) {
+      for (const secret of ['tok_hunter2zz', 'hunter2zz', 'tok-one-zzQ', 'arg-secret-zzQ', 'pair-secret-zzQ']) expect(text).not.toContain(secret);
+      expect(text).toContain('fine');
+    }
+  });
+});
+
 describe('end-to-end child process', () => {
   it('a plain-Node caller feeds stdin JSON to the child and reads the result from stdout', async () => {
     const server = createServer((req, res) => {

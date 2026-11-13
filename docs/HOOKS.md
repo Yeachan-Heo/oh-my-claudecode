@@ -810,12 +810,15 @@ Two states sent to Jev carry an id of the session rather than of the work: the `
 
 #### Masking of the state
 
-Every point's state is masked before it is sent to Jev and before it is written to `shadow.jsonl` (both the hook scripts and the TypeScript points; the compaction point has its own mask). A string is first cut to the characters that are sent plus 512 (`OMC_JEV_EXCERPT_CHARS` and its per-point variables bound the work of the mask: a larger limit means more work), then:
+The mask removes the known shapes of secrets listed below from every point's state before it is sent to Jev and before it is written to `shadow.jsonl` (both the hook scripts and the TypeScript points; the compaction point has its own mask). A string is first cut to the characters that are sent plus 512 (`OMC_JEV_EXCERPT_CHARS` and its per-point variables bound the work of the mask: a larger limit means more work), then:
 
 - a line that names a secret path (an SSH key, `.env`, `.netrc`, cloud and Git credentials, a `secrets/` directory, a file named `credentials` or `passwords*`) becomes `[line omitted: secret path]`;
 - tokens, passwords, keys and similar values in the text become `***` (`ghp_***`, `password=***`);
 - the value under a key that names a secret (`password`, `token`, `api_key`, `authorization`, `cookie`, ...) becomes `***`; a number under such a key that counts something (`total_tokens`, `token_count`) stays;
+- the value of a pair `{ name: 'DB_PASSWORD', value: ... }` (also `key`, `Name`/`Value`, `ParameterKey`/`ParameterValue`) and the second element of a `['Authorization', ...]` pair is masked when the name is a secret name, and so is the element after `--password`, `--token`, `--api-key` and similar flags in an array of arguments (and after `-p` in an array that starts with `mysql`, `mariadb`, `mysqldump`, `mysqladmin` or `sshpass`);
 - a key that names a secret path becomes `[key omitted: path]`.
+
+The mask removes these shapes and does not guarantee that a state holds no secret. A secret that is none of these shapes is not removed, and neither is one under a key with an encoded or non-English name or in a name and value pair that uses such names; the general text patterns are those of `scripts/lib/jev-mask.mjs`, shared with the compaction point, and widening them is separate work.
 
 A state is not sent when it cannot be masked (a cycle, more than 64 levels or 50 000 nodes, a missing mask module) or when a non-empty string of it is a secret path whole. The call then ends like a failed one: the heuristic twin answers, and `shadow.jsonl` gets one `degraded` line whose `state` is `[state not sent: mask failed]` or `[state not sent: secret path]`. Such a call counts for neither `OMC_JEV_MAX_REQUESTS`, the shared breaker nor the circuit of the point. The TypeScript points print one stderr line per process for it (not with `OMC_JEV_QUIET=1`). The request file that a hook script writes for a detached resolver is not masked; the resolver reads it, deletes it and masks the state.
 
