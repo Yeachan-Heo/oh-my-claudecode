@@ -155,6 +155,12 @@ function notifyExceptionReason(error: unknown): string {
   return `notify_exception:${message}`;
 }
 
+/** Reported instead of thrown: callers have already persisted the message, so a retried send would duplicate it. */
+function enqueueFailedOutcome(error: unknown): DispatchOutcome {
+  const message = error instanceof Error ? error.message : String(error);
+  return { ok: false, transport: 'none', reason: `dispatch_enqueue_failed:${message}` };
+}
+
 function isExactText(value: unknown): value is string {
   return typeof value === 'string' && value.length > 0 && value === value.trim();
 }
@@ -554,20 +560,25 @@ export interface QueueDirectMessageParams {
 
 export async function queueDirectMailboxMessage(params: QueueDirectMessageParams): Promise<DispatchOutcome> {
   const message = await params.deps.sendDirectMessage(params.teamName, params.fromWorker, params.toWorker, params.body, params.cwd);
-  const queued = await enqueueDispatchRequest(
-    params.teamName,
-    {
-      kind: 'mailbox',
-      to_worker: params.toWorker,
-      worker_index: params.toWorkerIndex,
-      pane_id: params.toPaneId,
-      trigger_message: params.triggerMessage,
-      message_id: message.message_id,
-      transport_preference: params.transportPreference,
-      fallback_allowed: params.fallbackAllowed,
-    },
-    params.cwd,
-  );
+  let queued: { request: TeamDispatchRequest; deduped: boolean };
+  try {
+    queued = await enqueueDispatchRequest(
+      params.teamName,
+      {
+        kind: 'mailbox',
+        to_worker: params.toWorker,
+        worker_index: params.toWorkerIndex,
+        pane_id: params.toPaneId,
+        trigger_message: params.triggerMessage,
+        message_id: message.message_id,
+        transport_preference: params.transportPreference,
+        fallback_allowed: params.fallbackAllowed,
+      },
+      params.cwd,
+    );
+  } catch (error) {
+    return { ...enqueueFailedOutcome(error), message_id: message.message_id, to_worker: params.toWorker };
+  }
 
   if (queued.deduped) {
     return {
@@ -678,20 +689,30 @@ export async function queueBroadcastMailboxMessage(params: QueueBroadcastParams)
   }
 
   for (const recipient of persistedRecipients) {
-    const queued = await enqueueDispatchRequest(
-      params.teamName,
-      {
-        kind: 'mailbox',
-        to_worker: recipient.workerName,
-        worker_index: recipient.workerIndex,
-        pane_id: recipient.paneId,
-        trigger_message: recipient.triggerMessage,
+    let queued: { request: TeamDispatchRequest; deduped: boolean };
+    try {
+      queued = await enqueueDispatchRequest(
+        params.teamName,
+        {
+          kind: 'mailbox',
+          to_worker: recipient.workerName,
+          worker_index: recipient.workerIndex,
+          pane_id: recipient.paneId,
+          trigger_message: recipient.triggerMessage,
+          message_id: recipient.message.message_id,
+          transport_preference: params.transportPreference,
+          fallback_allowed: params.fallbackAllowed,
+        },
+        params.cwd,
+      );
+    } catch (error) {
+      outcomes[recipient.index] = {
+        ...enqueueFailedOutcome(error),
         message_id: recipient.message.message_id,
-        transport_preference: params.transportPreference,
-        fallback_allowed: params.fallbackAllowed,
-      },
-      params.cwd,
-    );
+        to_worker: recipient.workerName,
+      };
+      continue;
+    }
 
     if (queued.deduped) {
       outcomes[recipient.index] = {

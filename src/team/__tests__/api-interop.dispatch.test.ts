@@ -374,4 +374,83 @@ describe('team api dispatch-aware messaging', () => {
     }
     expect(tmuxUtilsMocks.tmuxExecAsync.mock.calls.some(([args]) => args.includes('send-keys'))).toBe(false);
   });
+
+  describe('when the dispatch store refuses writes', () => {
+    const corruptStore = '[{"request_id":"half-written",';
+
+    async function corruptDispatchStore(): Promise<string> {
+      const storePath = teamStatePath(cwd, teamName, 'dispatch', 'requests.json');
+      await mkdir(join(storePath, '..'), { recursive: true });
+      await writeFile(storePath, corruptStore, 'utf8');
+      return storePath;
+    }
+
+    async function mailboxMessageIds(worker: string): Promise<string[]> {
+      const mailbox = JSON.parse(await readFile(teamStatePath(cwd, teamName, 'mailbox', `${worker}.json`), 'utf8')) as {
+        messages: Array<{ message_id: string }>;
+      };
+      return mailbox.messages.map((message) => message.message_id);
+    }
+
+    it('reports the persisted direct message with a failed notification', async () => {
+      const storePath = await corruptDispatchStore();
+
+      const result = await executeTeamApiOperation('send-message', {
+        team_name: teamName,
+        from_worker: 'leader-fixed',
+        to_worker: 'worker-1',
+        body: 'Persist me once',
+      }, cwd);
+
+      expect(result).toMatchObject({ ok: true, operation: 'send-message' });
+      if (!result.ok) return;
+      const data = result.data as { message: { message_id: string }; notification_outcome: Record<string, unknown> };
+      expect(data.notification_outcome).toMatchObject({
+        ok: false,
+        reason: expect.stringMatching(/^dispatch_enqueue_failed:/),
+        message_id: data.message.message_id,
+        to_worker: 'worker-1',
+      });
+      expect(await mailboxMessageIds('worker-1')).toEqual([data.message.message_id]);
+      await expect(readFile(storePath, 'utf8')).resolves.toBe(corruptStore);
+    });
+
+    it('reports every persisted broadcast message with a failed notification', async () => {
+      const configPath = teamStatePath(cwd, teamName, 'config.json');
+      const config = JSON.parse(await readFile(configPath, 'utf8')) as Record<string, unknown>;
+      await writeFile(configPath, JSON.stringify({
+        ...config,
+        worker_count: 2,
+        workers: [
+          { name: 'worker-1', index: 1, role: 'executor', assigned_tasks: [] },
+          { name: 'worker-2', index: 2, role: 'executor', assigned_tasks: [] },
+        ],
+      }, null, 2));
+      const storePath = await corruptDispatchStore();
+
+      const result = await executeTeamApiOperation('broadcast', {
+        team_name: teamName,
+        from_worker: 'leader-fixed',
+        body: 'Persist me once per worker',
+      }, cwd);
+
+      expect(result).toMatchObject({ ok: true, operation: 'broadcast' });
+      if (!result.ok) return;
+      const data = result.data as {
+        messages: Array<{ message_id: string; to_worker: string }>;
+        notification_outcomes: Array<Record<string, unknown>>;
+      };
+      expect(data.messages.map((message) => message.to_worker)).toEqual(['worker-1', 'worker-2']);
+      expect(data.notification_outcomes).toEqual(data.messages.map((message) => expect.objectContaining({
+        ok: false,
+        reason: expect.stringMatching(/^dispatch_enqueue_failed:/),
+        message_id: message.message_id,
+        to_worker: message.to_worker,
+      })));
+      for (const message of data.messages) {
+        expect(await mailboxMessageIds(message.to_worker)).toEqual([message.message_id]);
+      }
+      await expect(readFile(storePath, 'utf8')).resolves.toBe(corruptStore);
+    });
+  });
 });
