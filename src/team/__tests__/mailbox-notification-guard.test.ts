@@ -863,6 +863,54 @@ describe("mailbox notification guard", () => {
     expect(verifyProviderOwnership).toHaveBeenCalledOnce();
   });
 
+  it.each([
+    ["dead", { kind: "suppress", reason: "mailbox_provider_exited" }],
+    ["unknown", { kind: "allow", target: { paneId: "w2:p5" } }],
+  ] as const)(
+    "gates the notification on recipient provider liveness %s",
+    async (liveness, expected) => {
+      const readWorkerProviderLiveness = vi.fn(async () => liveness);
+      const result = await readCurrentMailboxNotificationGuard(input, "/unused", {
+        readConfig: vi.fn(async () =>
+          config({
+            tmux_session: "herdr:w2",
+            workers: [
+              {
+                name: "worker-1",
+                index: 1,
+                role: "executor",
+                assigned_tasks: [],
+                pane_id: "w2:p5",
+                worker_cli: "claude",
+                launch_attempt_id: "attempt-1",
+              },
+            ],
+          }),
+        ),
+        readStrictDispatchRequest: vi.fn(async () =>
+          strictDispatch(request({ pane_id: "w2:p5" })),
+        ),
+        readStrictMailboxMessage: vi.fn(async () => strictMailbox()),
+        verifyProviderOwnership: vi.fn(async () => ({
+          kind: "owned",
+          provider: "herdr",
+          providerTarget: "herdr:w2",
+          paneId: "w2:p5",
+        }) satisfies MailboxTargetOwnership),
+        readWorkerProviderLiveness,
+      });
+
+      expect(result).toMatchObject(expected);
+      if (result.kind === "suppress") expect(result.safePendingRequest).toBeDefined();
+      expect(readWorkerProviderLiveness).toHaveBeenCalledWith(
+        teamName,
+        "/unused",
+        instanceId,
+        expect.objectContaining({ name: "worker-1", launch_attempt_id: "attempt-1" }),
+      );
+    },
+  );
+
   it.skipIf(!supportsStrictTmuxFixture)(
     "compares named security fields while ignoring diagnostic-only dispatch changes",
     () => {

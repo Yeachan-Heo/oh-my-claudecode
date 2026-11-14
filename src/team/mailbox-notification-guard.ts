@@ -17,6 +17,7 @@ import {
 } from "./types.js";
 import { isValidStrictProcessStartIdentity } from "./team-owner-epoch.js";
 import { canonicalizeWorkers } from "./worker-canonicalization.js";
+import { getWorkerProviderLiveness } from "./worker-provider-liveness.js";
 
 export interface MailboxNotificationGuardInput {
   teamName: string;
@@ -112,7 +113,8 @@ export type MailboxNotificationGuardReason =
   | "mailbox_replay_suppressed"
   | "mailbox_provider_mismatch"
   | "mailbox_membership_unresolvable"
-  | "mailbox_target_foreign";
+  | "mailbox_target_foreign"
+  | "mailbox_provider_exited";
 
 export type MailboxNotificationGuardResult =
   | {
@@ -152,6 +154,7 @@ export interface MailboxNotificationGuardDependencies {
   verifyProviderOwnership: (
     target: MailboxNotificationTarget,
   ) => Promise<MailboxTargetOwnership>;
+  readWorkerProviderLiveness: typeof getWorkerProviderLiveness;
 }
 
 function hasExactText(value: unknown): value is string {
@@ -584,6 +587,41 @@ export function mailboxNotificationSecurityTupleEquals(
 }
 
 /**
+ * An exited provider leaves the user's shell in the pane, and a notification
+ * would be typed into it. Only proven death refuses; unknown keeps delivery.
+ */
+async function refuseExitedRecipient(
+  result: MailboxNotificationGuardResult,
+  config: TeamConfig | null,
+  cwd: string,
+  readLiveness: typeof getWorkerProviderLiveness,
+): Promise<MailboxNotificationGuardResult> {
+  if (
+    result.kind !== "allow" ||
+    result.target.recipientRole !== "worker" ||
+    !config
+  )
+    return result;
+  const worker = canonicalizeWorkers(config.workers).workers.find(
+    (candidate) => candidate.name === result.target.recipient,
+  );
+  if (!worker) return result;
+  const liveness = await readLiveness(
+    config.name,
+    cwd,
+    config.instance_id,
+    worker,
+  );
+  if (liveness !== "dead") return result;
+  return {
+    kind: "suppress",
+    reason: "mailbox_provider_exited",
+    safePendingRequest: result.request,
+    target: result.target,
+  };
+}
+
+/**
  * Reads current evidence through strict readers, then runs the pure evaluator.
  * The injected provider verifier must be read-only; this module has no way to
  * invoke a pane transport or write durable delivery markers.
@@ -612,6 +650,8 @@ export async function readCurrentMailboxNotificationGuard(
       cwd,
     ).catch(() => ({ kind: "malformed_store", cause: "json" }) as const),
   ]);
+  const readLiveness =
+    dependencies.readWorkerProviderLiveness ?? getWorkerProviderLiveness;
   const state: MailboxNotificationGuardState = { config, dispatch, mailbox };
   const initial = evaluateMailboxNotificationGuard(input, state);
   if (
@@ -619,7 +659,7 @@ export async function readCurrentMailboxNotificationGuard(
     initial.reason !== "mailbox_membership_unresolvable" ||
     !initial.target
   ) {
-    return initial;
+    return refuseExitedRecipient(initial, config, cwd, readLiveness);
   }
   if (!config || !targetHasPersistedAuthority(config, initial.target))
     return initial;
@@ -634,5 +674,10 @@ export async function readCurrentMailboxNotificationGuard(
         })
         .catch(() => ({ kind: "unavailable" }) as const)
     : ({ kind: "unavailable" } as const);
-  return evaluateMailboxNotificationGuard(input, { ...state, ownership });
+  return refuseExitedRecipient(
+    evaluateMailboxNotificationGuard(input, { ...state, ownership }),
+    config,
+    cwd,
+    readLiveness,
+  );
 }
