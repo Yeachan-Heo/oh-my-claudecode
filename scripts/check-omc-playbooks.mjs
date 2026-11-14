@@ -84,15 +84,24 @@ function resolveSkillBodyPath(skillsRoot, base) {
 }
 
 function parseFrontmatter(source) {
-  const match = source.match(/^---\r?\n([\s\S]*?)\r?\n---(?:\r?\n|$)/);
+  // YAML allows trailing blanks on a delimiter and a closing one at the end
+  // of the file.
+  const match = source.match(/^---[ \t]*\r?\n([\s\S]*?)\r?\n---[ \t]*(?:\r?\n|$)/);
   if (!match) return {};
   const fields = {};
   for (const line of match[1].split(/\r?\n/)) {
     const kv = line.match(/^([A-Za-z][\w-]*):\s*(.*)$/);
-    if (kv) fields[kv[1]] = kv[2].trim();
+    if (kv) fields[kv[1]] = kv[2];
   }
   return fields;
 }
+
+// A frontmatter value as YAML reads a one-line scalar: trimmed, one pair of
+// matching quotes removed.
+const yamlScalar = (value) =>
+  typeof value === "string"
+    ? value.trim().replace(/^(["'])(.*)\1$/, "$2").trim()
+    : value;
 
 function buildSkillIndex(skillsRoot) {
   const index = new Map();
@@ -221,11 +230,14 @@ async function main() {
 
   for (const source of sources) {
     for (const file of source.files) {
-      // Project playbooks can carry a UTF-8 BOM just like bundled skills;
-      // strip it before parsing or the frontmatter block is invisible.
+      // Project playbooks can carry a UTF-8 BOM and CRLF line endings just
+      // like bundled skills; normalize both before parsing or the
+      // frontmatter delimiters are invisible.
       const fileLabel = `${source.label}${file}`;
-      const playbookSource = readFileSync(join(source.dir, file), "utf8");
-      const fields = parseFrontmatter(stripLeadingUtf8Bom(playbookSource));
+      const playbookSource = readFileSync(join(source.dir, file), "utf8")
+        .replace(/^\uFEFF/, "")
+        .replaceAll("\r\n", "\n");
+      const fields = parseFrontmatter(playbookSource);
       const extendsValue = fields.extends;
       // One error per problem: record both missing required fields before
       // deciding whether anchor validation can run at all.
@@ -235,29 +247,18 @@ async function main() {
           `${fileLabel}: frontmatter is missing an "extends:" field`,
         );
       }
-      // A YAML placeholder such as when: "" parses to the quote characters;
-      // decode and trim so a semantically empty trigger sentence counts as
-      // missing.
-      const whenValue =
-        typeof fields.when === "string"
-          ? fields.when.replace(/^['"]+|['"]+$/g, "").trim()
-          : fields.when;
+      const whenValue = yamlScalar(fields.when);
       if (!whenValue) {
         problems.push(`${fileLabel}: frontmatter is missing a "when:" field`);
       }
       if (missingExtends) continue;
-      // Decode a quoted extends scalar the way the runtime frontmatter parser
-      // does, or `extends: "tdd"` splits to `"tdd"` and fails the name regex.
-      const extendsDecoded =
-        typeof extendsValue === "string" &&
-        extendsValue.length > 1 &&
-        ((extendsValue.startsWith('"') && extendsValue.endsWith('"')) ||
-          (extendsValue.startsWith("'") && extendsValue.endsWith("'")))
-          ? extendsValue.slice(1, -1)
-          : extendsValue;
-      const baseNames = extendsDecoded
+      if (missingExtends) continue;
+      // A YAML one-line flow list `extends: [tdd, verify]` reads as one
+      // scalar: strip the brackets before splitting, then read each item as
+      // a scalar — a quoted flow list stays one stem, as YAML reads it.
+      const baseNames = yamlScalar(extendsValue.replace(/^\[(.*)\]$/, "$1"))
         .split(",")
-        .map((s) => s.trim())
+        .map(yamlScalar)
         .filter(Boolean);
       if (baseNames.length === 0) {
         problems.push(
@@ -303,11 +304,11 @@ async function main() {
       }
       if (allBasesFound) {
         ANCHOR_RE.lastIndex = 0;
-        // The BOM is stripped before the frontmatter fence is removed, or a
-        // BOM-prefixed `---` leaves the frontmatter inside the anchor-scanned
-        // body.
-        const body = stripLeadingUtf8Bom(playbookSource).replace(
-          /^---\r?\n[\s\S]*?\r?\n---(?:\r?\n|$)/,
+        // The source is already BOM-stripped and CRLF-normalized; remove the
+        // frontmatter fence (with the delimiter-blank tolerance from #455)
+        // before scanning the anchors.
+        const body = playbookSource.replace(
+          /^---[ \t]*\n([\s\S]*?)\n---[ \t]*(?:\n|$)/,
           "",
         );
         let anchor;
