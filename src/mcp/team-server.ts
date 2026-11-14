@@ -425,6 +425,8 @@ async function executeLockedNudge(
         if (!current || !sameNudgeAuthority(current, authority)) return false;
         const ownership = current.getPaneOwnership(paneId);
         if (!ownership) return false;
+        // The provider can exit while this nudge waits for the lock, leaving a shell prompt in the pane.
+        if ((await current.getProviderLiveness(paneId)) === 'dead') return false;
         // Config, reservation, and pane evidence above all cross async
         // boundaries. Re-read the original durable job synchronously under its
         // own lock immediately before input so terminalization, removal, or a

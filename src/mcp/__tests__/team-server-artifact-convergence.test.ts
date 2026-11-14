@@ -44,6 +44,7 @@ const runtimeMocks = vi.hoisted(() => ({
 }));
 const livenessMocks = vi.hoisted(() => ({
   override: undefined as undefined | 'alive' | 'dead' | 'unknown',
+  sequence: [] as Array<'alive' | 'dead' | 'unknown'>,
   calls: [] as Array<{ teamName: string; worker: { name: string; launch_attempt_id?: string } }>,
 }));
 const monitorMocks = vi.hoisted(() => ({
@@ -115,7 +116,7 @@ vi.mock('../../team/worker-provider-liveness.js', async (importOriginal) => {
     ...actual,
     getWorkerProviderLiveness: async (...args: Parameters<typeof actual.getWorkerProviderLiveness>) => {
       livenessMocks.calls.push({ teamName: args[0], worker: args[3] });
-      return livenessMocks.override ?? actual.getWorkerProviderLiveness(...args);
+      return livenessMocks.sequence.shift() ?? livenessMocks.override ?? actual.getWorkerProviderLiveness(...args);
     },
   };
 });
@@ -938,6 +939,40 @@ describe('team-server artifact convergence + scoped cleanup', () => {
         worker: expect.objectContaining({ name: 'worker-1', launch_attempt_id: 'attempt-1' }),
       });
     } finally {
+      livenessMocks.override = undefined;
+    }
+  });
+
+  it('handleWait does not nudge when the provider exits between the idle check and the locked send', async () => {
+    const { handleWait } = await importTeamServerWithJobsDir(jobsDir);
+    const teamName = 'nudge-provider-exits-late-team';
+    const cwd = join(testRoot, 'workspace-nudge-provider-exits-late');
+    const fixture = await createActiveNudgeTeam(teamName, cwd, INSTANCE_ID, 'cmux');
+    const jobId = 'omc-nudgelate';
+    writeFileSync(join(jobsDir, `${jobId}.json`), JSON.stringify(jobRecord(teamName, cwd, INSTANCE_ID)), 'utf-8');
+    writeFileSync(
+      join(jobsDir, `${jobId}-panes.json`),
+      JSON.stringify(paneArtifact(INSTANCE_ID, [fixture.paneId], fixture.leaderPaneId, fixture.sessionName)),
+      'utf-8',
+    );
+    tmuxMocks.captureOwnedTeamPane.mockResolvedValue(['$ claude', 'bye', '❯ '].join('\n'));
+    tmuxMocks.sendToWorker.mockResolvedValue(true);
+    livenessMocks.sequence = ['alive'];
+    livenessMocks.override = 'dead';
+
+    try {
+      const response = await handleWait({
+        job_id: jobId,
+        timeout_ms: 700,
+        nudge_delay_ms: 0,
+        nudge_max_count: 1,
+      });
+      const payload = parseResponseText(response.content[0].text);
+
+      expect(payload.nudges).toBeUndefined();
+      expect(tmuxMocks.sendToWorker).not.toHaveBeenCalled();
+    } finally {
+      livenessMocks.sequence = [];
       livenessMocks.override = undefined;
     }
   });
