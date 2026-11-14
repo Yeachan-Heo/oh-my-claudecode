@@ -402,6 +402,7 @@ describe('monitorTeamV2 pane-based stall inference', () => {
       providerLiveness: 'dead',
     });
     expect(snapshot?.deadWorkers).toContain('worker-1');
+    expect(snapshot?.nonReportingWorkers).not.toContain('worker-1');
   });
 
   it('aborts a stale expected-instance cycle before mutating the replacement', async () => {

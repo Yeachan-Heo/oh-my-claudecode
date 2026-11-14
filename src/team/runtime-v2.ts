@@ -8323,8 +8323,12 @@ export async function monitorTeamV2(
       }
     }
 
+    // A dead provider leaves its shell prompt behind; that is not an idle worker.
     const paneSuggestsIdle =
-      alive && paneLooksReady(paneCapture) && !paneHasActiveTask(paneCapture);
+      alive &&
+      providerLiveness !== "dead" &&
+      paneLooksReady(paneCapture) &&
+      !paneHasActiveTask(paneCapture);
     const statusFresh = isFreshTimestamp(status.updated_at);
     const heartbeatFresh = isFreshTimestamp(heartbeat?.last_turn_at);
     const hasWorkStartEvidence =
