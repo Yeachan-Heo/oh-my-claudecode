@@ -1669,8 +1669,8 @@ export async function waitForStartupEvidenceBudget(
   const deadline = Date.now() + Math.max(0, budgetMs);
   for (;;) {
     if (await hasEvidence()) return true;
-    // An exited provider can write no further evidence; checked after the read so evidence written before the exit still counts.
-    if (providerExited && (await providerExited())) return false;
+    // An exited provider can write no further evidence. Evidence is read again after the exit is confirmed, since the provider may have written it while that check ran.
+    if (providerExited && (await providerExited())) return hasEvidence();
     const remainingMs = deadline - Date.now();
     if (remainingMs <= 0) return false;
     await new Promise((resolve) =>

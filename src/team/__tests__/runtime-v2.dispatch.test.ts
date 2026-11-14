@@ -3238,6 +3238,12 @@ describe('runtime v2 startup inbox dispatch', () => {
     await expect(waitForStartupEvidenceBudget(async () => true, 30_000, 250, async () => true)).resolves.toBe(true);
   });
 
+  it('counts startup evidence the provider wrote while its exit was being confirmed', async () => {
+    let hasEvidence = false;
+    const providerExited = async () => { hasEvidence = true; return true; };
+    await expect(waitForStartupEvidenceBudget(async () => hasEvidence, 30_000, 250, providerExited)).resolves.toBe(true);
+  });
+
   it('times out Codex evidence at exactly 31s after one read-only recheck window', async () => {
     vi.useFakeTimers();
     const policy = getWorkerStartupEvidencePolicy('codex');
