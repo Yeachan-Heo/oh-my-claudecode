@@ -1,0 +1,40 @@
+ 
+  >_ OpenAI Codex (v0.167.0)
+     /private/tmp/r1-codex-cwd-URme
+ 
+ 
+› Reply with exactly the word OK and nothing else.
+ 
+ 
+• OK
+ 
+  Worked for 3s • 12:36                                                                                                 
+                                                             
+                                                                      
+                                                                        
+                                                                         
+                                                                          
+                                                                          
+                                                                           
+                                                                            
+                                                                            
+                                                                             
+                                                                            
+                                                                            
+                                                                           
+                                                                         
+                                                                      
+                                                                     
+                                                                   
+ 
+ 
+ 
+ 
+ 
+• Reconnecting to server… (4s)   
+ 
+ 
+› Ask Codex to do anything                        
+ 
+  GPT-6-Astra medium · /private/tmp/r1-codex-cwd-URme · Reply with OK
+  ⌃c quit                       

@@ -1,0 +1,4 @@
+Read .omc/state/team/example/workers/worker-1/inbox.md, execute now, report concrete progress.
+─────────────────────────────────────────────
+[OMC] Starting...
+⏵⏵ bypass permissions on (shift+tab to cycle)

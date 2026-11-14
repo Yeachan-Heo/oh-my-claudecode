@@ -1,0 +1,2 @@
+→ Read inbox.md
+ctrl+c to stop

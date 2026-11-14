@@ -1,0 +1,4 @@
+Trust this folder?
+› 1. Trust and continue
+  2. Quit
+› ready

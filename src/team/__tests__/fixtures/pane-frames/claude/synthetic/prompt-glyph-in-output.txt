@@ -1,0 +1,7 @@
+ ▐▛███▛█   Claude Code v2.1.325
+▝▜██████▀  Haiku 5.5 · Claude Xxx
+ ▝▝   ▝▝   /private/tmp/omc-synthetic/work
+
+⏺ The inbox says:
+  > Claim this task, complete it, then wait for shutdown.
+  > Then write the shutdown ack.
