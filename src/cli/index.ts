@@ -22,7 +22,9 @@ import {
   loadConfig,
   getConfigPaths,
 } from '../config/loader.js';
-import { createOmcSession } from '../index.js';
+// Lazy-import createOmcSession to avoid bundling the SDK in cli.cjs
+// The SDK is only loaded if someone runs the info or test-prompt commands
+// import { createOmcSession } from '../index.js';
 import {
   checkForUpdates,
   performUpdate,
@@ -692,7 +694,8 @@ program
 Examples:
   $ omc info                     Show agents, features, and MCP servers`)
   .action(async () => {
-    const session = createOmcSession();
+    const { createOmcSessionAsync } = await import('../index.js');
+    const session = await createOmcSessionAsync();
 
     console.log(chalk.blue.bold('\nOh-My-ClaudeCode System Information\n'));
     console.log(chalk.gray('━'.repeat(50)));
@@ -739,7 +742,8 @@ Examples:
   $ omc test-prompt "analyze this code"     See how magic keywords are detected
   $ omc test-prompt "analyze this code"     Test prompt enhancement`)
   .action(async (prompt: string) => {
-    const session = createOmcSession();
+    const { createOmcSessionAsync } = await import('../index.js');
+    const session = await createOmcSessionAsync();
 
     console.log(chalk.blue('Original prompt:'));
     console.log(chalk.gray(prompt));

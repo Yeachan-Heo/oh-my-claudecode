@@ -391,7 +391,132 @@ export function createOmcSession(options?: OmcOptions): OmcSession {
         agents,
         mcpServers: {
           ...toSdkMcpFormat(externalMcpServers),
-          't': omcToolsServer as any
+          // Conditionally include OMC tools server (may be null if async init not complete)
+          ...(omcToolsServer ? { 't': omcToolsServer as any } : {})
+        },
+        allowedTools,
+        permissionMode: 'acceptEdits'
+      }
+    },
+    state,
+    config,
+    processPrompt,
+    detectKeywords: (prompt: string) => detectMagicKeywords(prompt, config.magicKeywords),
+    backgroundTasks: backgroundTaskManager,
+    shouldRunInBackground: (command: string) => shouldRunInBackgroundFn(
+      command,
+      backgroundTaskManager.getRunningCount(),
+      backgroundTaskManager.getMaxTasks()
+    )
+  };
+}
+
+/**
+ * Create an OMC session with guaranteed tool server initialization.
+ * Use this async version when you need custom MCP tool availability (e.g., in CLI commands).
+ *
+ * For existing synchronous consumers, use the synchronous createOmcSession() instead.
+ */
+export async function createOmcSessionAsync(options?: OmcOptions): Promise<OmcSession> {
+  // Load configuration
+  const loadedConfig = options?.skipConfigLoad ? {} : loadConfig();
+  const config: PluginConfig = {
+    ...loadedConfig,
+    ...options?.config
+  };
+
+  // Find and load context files
+  let contextAddition = '';
+  if (!options?.skipContextInjection && config.features?.autoContextInjection !== false) {
+    const contextFiles = findContextFiles(options?.workingDirectory);
+    if (contextFiles.length > 0) {
+      contextAddition = `\n\n## Project Context\n\n${loadContextFromFiles(contextFiles)}`;
+    }
+  }
+
+  // Build system prompt
+  let systemPrompt = appendSkininthegamebrosGuidance(omcSystemPrompt, 'system');
+
+  // Add continuation enforcement
+  if (config.features?.continuationEnforcement !== false) {
+    systemPrompt += continuationSystemPromptAddition;
+  }
+
+  // Add custom system prompt
+  if (options?.customSystemPrompt) {
+    systemPrompt += `\n\n## Custom Instructions\n\n${options.customSystemPrompt}`;
+  }
+
+  // Add context from files
+  if (contextAddition) {
+    systemPrompt += contextAddition;
+  }
+
+  // Get agent definitions
+  const agents = getAgentDefinitions({ config });
+
+  // Build MCP servers configuration
+  const externalMcpServers = getDefaultMcpServers({
+    exaApiKey: config.mcpServers?.exa?.apiKey,
+    enableExa: config.mcpServers?.exa?.enabled,
+    enableContext7: config.mcpServers?.context7?.enabled
+  });
+
+  // Build allowed tools list
+  const allowedTools: string[] = [
+    'Read', 'Glob', 'Grep', 'WebSearch', 'WebFetch', 'Task', 'TodoWrite'
+  ];
+
+  if (config.permissions?.allowBash !== false) {
+    allowedTools.push('Bash');
+  }
+
+  if (config.permissions?.allowEdit !== false) {
+    allowedTools.push('Edit');
+  }
+
+  if (config.permissions?.allowWrite !== false) {
+    allowedTools.push('Write');
+  }
+
+  // Add MCP tool names
+  for (const serverName of Object.keys(externalMcpServers)) {
+    allowedTools.push(`mcp__${serverName}__*`);
+  }
+
+  // Add OMC custom tools in MCP format (LSP, AST, python_repl)
+  const omcTools = getOmcToolNames({
+    includeLsp: config.features?.lspTools !== false,
+    includeAst: config.features?.astTools !== false,
+    includePython: true
+  });
+  allowedTools.push(...omcTools);
+
+  // Create magic keyword processor
+  const processPrompt = createMagicKeywordProcessor(config.magicKeywords);
+
+  // Initialize session state
+  const state: SessionState = {
+    activeAgents: new Map(),
+    backgroundTasks: [],
+    contextFiles: findContextFiles(options?.workingDirectory)
+  };
+
+  // Create background task manager
+  const backgroundTaskManager = createBackgroundTaskManager(state, config);
+
+  // Ensure OMC tools server is initialized before assembling session
+  const { getOmcToolsServer } = await import('./mcp/omc-tools-server.js');
+  const toolsServer = await getOmcToolsServer();
+
+  return {
+    queryOptions: {
+      options: {
+        systemPrompt,
+        agents,
+        mcpServers: {
+          ...toSdkMcpFormat(externalMcpServers),
+          't': toolsServer as any
         },
         allowedTools,
         permissionMode: 'acceptEdits'
