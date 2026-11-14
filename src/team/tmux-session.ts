@@ -4802,7 +4802,7 @@ async function startupContextIsActive(
 // The pane outlives its provider: after an exit it shows the user's shell,
 // whose prompt can read as the provider's idle prompt. Only `dead` refuses
 // input; `unknown` (cmux, missing receipts) keeps the pane-text path.
-async function startupProviderExited(
+export async function startupProviderExited(
   context: StartupPaneContext,
 ): Promise<boolean> {
   return (await observeWorkerLaunchProvider(context.attempt)) === "dead";

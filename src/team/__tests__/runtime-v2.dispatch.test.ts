@@ -143,6 +143,7 @@ const mocks = vi.hoisted(() => {
     spawnOwnedWorkerInPane: vi.fn(),
     deliverStartupInbox: vi.fn(),
     probeStartupPaneActivity: vi.fn(),
+    startupProviderExited: vi.fn(),
     retryStartupInboxSubmit: vi.fn(),
     sendToWorker: vi.fn(),
     waitForPaneReady: vi.fn(),
@@ -344,6 +345,7 @@ vi.mock('../tmux-session.js', async (importOriginal) => {
     spawnOwnedWorkerInPane: mocks.spawnOwnedWorkerInPane,
     deliverStartupInbox: mocks.deliverStartupInbox,
     probeStartupPaneActivity: mocks.probeStartupPaneActivity,
+    startupProviderExited: mocks.startupProviderExited,
     retryStartupInboxSubmit: mocks.retryStartupInboxSubmit,
     sendToWorker: mocks.sendToWorker,
     waitForPaneReady: mocks.waitForPaneReady,
@@ -954,6 +956,7 @@ describe('runtime v2 startup inbox dispatch', () => {
     mocks.spawnOwnedWorkerInPane.mockReset();
     mocks.deliverStartupInbox.mockReset();
     mocks.probeStartupPaneActivity.mockReset();
+    mocks.startupProviderExited.mockReset();
     mocks.retryStartupInboxSubmit.mockReset();
     mocks.sendToWorker.mockReset();
     mocks.waitForPaneReady.mockReset();
@@ -1202,6 +1205,7 @@ describe('runtime v2 startup inbox dispatch', () => {
       return { ok: true, kind: 'attempted_unconfirmed' };
     });
     mocks.probeStartupPaneActivity.mockResolvedValue('unknown');
+    mocks.startupProviderExited.mockResolvedValue(false);
     mocks.retryStartupInboxSubmit.mockResolvedValue('unavailable');
     mocks.waitForPaneReady.mockResolvedValue(true);
     mocks.sendToWorker.mockResolvedValue(true);
@@ -2977,6 +2981,29 @@ describe('runtime v2 startup inbox dispatch', () => {
     expect(mocks.sendToWorker).not.toHaveBeenCalled();
   });
 
+  it('reports provider_exited without waiting out the evidence budget when the provider exits after the trigger', async () => {
+    cwd = await mkdtempFixture('omc-runtime-v2-provider-exited-after-trigger-');
+    mocks.autoStartupEvidence = false;
+    mocks.startupProviderExited.mockResolvedValue(true);
+    const { startTeamV2 } = await import('../runtime-v2.js');
+    const startedAt = Date.now();
+
+    const runtime = await startTeamV2({
+      teamName: 'dispatch-team',
+      workerCount: 1,
+      agentTypes: ['claude'],
+      tasks: [{ subject: 'Dispatch test', description: 'Provider exits after the trigger' }],
+      cwd,
+    });
+
+    expect(runtime.startupFailures).toEqual([
+      { worker: 'worker-1', reason: 'provider_exited' },
+    ]);
+    expect(Date.now() - startedAt).toBeLessThan(10_000);
+    const requests = await listDispatchRequests('dispatch-team', cwd, { kind: 'inbox' });
+    expect(requests[0]).toMatchObject({ status: 'failed', last_reason: 'provider_exited' });
+  });
+
   it('fails closed when exact provider process cleanup cannot be verified', async () => {
     cwd = await mkdtempFixture('omc-runtime-v2-provider-cleanup-unverified-');
     mocks.sendToWorker.mockResolvedValue(false);
@@ -3184,6 +3211,31 @@ describe('runtime v2 startup inbox dispatch', () => {
     await expect(evidencePromise).resolves.toBe(true);
     expect(Date.now() - startedAt).toBe(18_000);
     expect(policy.resubmitAttempts).toBe(0);
+  });
+
+  it('stops waiting for Claude startup evidence once the provider has exited', async () => {
+    vi.useFakeTimers();
+    const policy = getWorkerStartupEvidencePolicy('claude');
+    const startedAt = Date.now();
+    let providerExited = false;
+    setTimeout(() => { providerExited = true; }, 1_000);
+    const settlement = settleStartupEvidence(
+      policy,
+      budgetMs => waitForStartupEvidenceBudget(async () => false, budgetMs, 250, async () => providerExited),
+      async () => (providerExited ? 'unavailable' : 'resubmitted'),
+    );
+    let settled = false;
+    void settlement.finally(() => { settled = true; });
+
+    await vi.advanceTimersByTimeAsync(1_500);
+
+    expect(settled).toBe(true);
+    await expect(settlement).resolves.toEqual({ settled: false, paneBusy: false });
+    expect(Date.now() - startedAt).toBeLessThan(2_000);
+  });
+
+  it('still accepts evidence the provider wrote before it exited', async () => {
+    await expect(waitForStartupEvidenceBudget(async () => true, 30_000, 250, async () => true)).resolves.toBe(true);
   });
 
   it('times out Codex evidence at exactly 31s after one read-only recheck window', async () => {

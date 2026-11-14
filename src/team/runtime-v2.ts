@@ -107,6 +107,7 @@ import {
   spawnOwnedWorkerInPane,
   deliverStartupInbox,
   probeStartupPaneActivity,
+  startupProviderExited,
   retryStartupInboxSubmit,
   proveWorkerPaneOwnership,
   adoptWorkerPaneOwnership,
@@ -1663,10 +1664,13 @@ export async function waitForStartupEvidenceBudget(
   hasEvidence: () => Promise<boolean>,
   budgetMs: number,
   delayMs = WORKER_STARTUP_EVIDENCE_POLL_INTERVAL_MS,
+  providerExited?: () => Promise<boolean>,
 ): Promise<boolean> {
   const deadline = Date.now() + Math.max(0, budgetMs);
   for (;;) {
     if (await hasEvidence()) return true;
+    // An exited provider can write no further evidence; checked after the read so evidence written before the exit still counts.
+    if (providerExited && (await providerExited())) return false;
     const remainingMs = deadline - Date.now();
     if (remainingMs <= 0) return false;
     await new Promise((resolve) =>
@@ -1683,7 +1687,7 @@ async function waitForWorkerStartupEvidence(
   baseline: WorkerStartupBaseline,
   launchAttemptId: string,
   budgetMs: number,
-  delayMs = WORKER_STARTUP_EVIDENCE_POLL_INTERVAL_MS,
+  providerExited?: () => Promise<boolean>,
 ): Promise<boolean> {
   return waitForStartupEvidenceBudget(
     () =>
@@ -1696,7 +1700,8 @@ async function waitForWorkerStartupEvidence(
         launchAttemptId,
       ),
     budgetMs,
-    delayMs,
+    WORKER_STARTUP_EVIDENCE_POLL_INTERVAL_MS,
+    providerExited,
   );
 }
 
@@ -1707,7 +1712,7 @@ async function waitForWorkerStatusTransition(
   baselineFingerprint: string,
   launchAttemptId: string,
   budgetMs: number,
-  delayMs = 250,
+  providerExited?: () => Promise<boolean>,
 ): Promise<boolean> {
   return waitForStartupEvidenceBudget(
     async () => {
@@ -1719,7 +1724,8 @@ async function waitForWorkerStatusTransition(
       );
     },
     budgetMs,
-    delayMs,
+    250,
+    providerExited,
   );
 }
 /**
@@ -1782,6 +1788,16 @@ function startupEvidenceMissingReason(
     ? `${agentType}_startup_evidence_missing`
     : "worker_startup_evidence_missing";
   return paneBusy ? `${base}_pane_busy` : base;
+}
+
+async function startupEvidenceFailureReason(
+  context: StartupPaneContext,
+  paneBusy: boolean,
+  agentType?: CliAgentType,
+): Promise<string> {
+  return (await startupProviderExited(context))
+    ? "provider_exited"
+    : startupEvidenceMissingReason(paneBusy, agentType);
 }
 
 const CLAIM_ERROR_CAPTURE_MAX = 16_384;
@@ -2232,6 +2248,7 @@ async function spawnV2Worker(
       startupBaseline,
       startupContext.attempt.attempt_id,
       budgetMs,
+      () => startupProviderExited(startupContext),
     );
   const probeActivity =
     opts.agentType === "cursor" || opts.agentType === "codex"
@@ -2302,7 +2319,8 @@ async function spawnV2Worker(
                   : {
                       ok: false,
                       transport: "prompt_stdin" as const,
-                      reason: startupEvidenceMissingReason(
+                      reason: await startupEvidenceFailureReason(
+                        startupContext,
                         settlement.paneBusy,
                         opts.agentType,
                       ),
@@ -2339,7 +2357,10 @@ async function spawnV2Worker(
                 : {
                     ok: false,
                     transport: "tmux_send_keys" as const,
-                    reason: startupEvidenceMissingReason(settlement.paneBusy),
+                    reason: await startupEvidenceFailureReason(
+                      startupContext,
+                      settlement.paneBusy,
+                    ),
                   };
             },
             deps: { writeWorkerInbox },
@@ -5269,6 +5290,7 @@ export async function executeRecoverDeadWorkerV2Owner(
                 startupBaseline,
                 startupAttemptId,
                 budgetMs,
+                () => startupProviderExited(startupContext),
               )
             : waitForWorkerStatusTransition(
                 input.teamName,
@@ -5277,6 +5299,7 @@ export async function executeRecoverDeadWorkerV2Owner(
                 statusBaseline,
                 startupAttemptId,
                 budgetMs,
+                () => startupProviderExited(startupContext),
               );
         const probeActivity =
           pending.agentType === "cursor" || pending.agentType === "codex"
@@ -5434,7 +5457,8 @@ export async function executeRecoverDeadWorkerV2Owner(
               if (!settlement.settled)
                 return {
                   ok: false as const,
-                  error: startupEvidenceMissingReason(
+                  error: await startupEvidenceFailureReason(
+                    startupContext,
                     settlement.paneBusy,
                     pending.agentType,
                   ),
@@ -5498,7 +5522,8 @@ export async function executeRecoverDeadWorkerV2Owner(
                     : {
                         ok: false,
                         transport: "tmux_send_keys" as const,
-                        reason: startupEvidenceMissingReason(
+                        reason: await startupEvidenceFailureReason(
+                          startupContext,
                           settlement.paneBusy,
                         ),
                       };
