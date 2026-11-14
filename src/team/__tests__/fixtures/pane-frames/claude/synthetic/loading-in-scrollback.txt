@@ -1,0 +1,11 @@
+ ▐▛███▛█   Claude Code v2.1.325
+▝▜██████▀  Haiku 5.5 · Claude Xxx
+ ▝▝   ▝▝   /private/tmp/omc-synthetic/work
+
+⏺ Fixed the lazy loading regression in src/app.ts and reran the tests.
+
+✻ Brewed for 9s · done
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+❯ 
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+  ⏵⏵ bypass permissions on (shift+tab to cycle)

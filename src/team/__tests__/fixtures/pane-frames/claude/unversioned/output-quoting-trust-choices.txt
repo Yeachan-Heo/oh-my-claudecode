@@ -1,0 +1,3 @@
+⏺ Quick safety check: the startup loop answers the trust dialog.
+  It moves from "No, exit" to "Yes, I trust this folder" with Down.
+❯ 

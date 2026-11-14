@@ -1,0 +1,8 @@
+Folder access
+/repo
+Trust this folder? Codex can read, edit, and
+run files here, subject to your permission
+settings.
+› 1. Trust and continue
+  2. Quit
+enter continue · esc quit

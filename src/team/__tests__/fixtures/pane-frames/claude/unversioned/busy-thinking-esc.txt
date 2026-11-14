@@ -1,0 +1,4 @@
+❯ Run the migration
+·  Thinking…
+   esc to interrupt
+  ⏵⏵ bypass permissions on (shift+tab to cycle)
