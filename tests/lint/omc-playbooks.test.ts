@@ -537,3 +537,38 @@ describe('check-omc-playbooks', () => {
     rmSync(root, { recursive: true, force: true });
   });
 });
+
+describe("check-omc-playbooks YAML frontmatter robustness (upstream #455)", () => {
+  const cases: [string, string][] = [
+    ["a quoted extends and when", '---\nextends: "tdd"\nwhen: \'Run the red-green cycle.\'\n---\n'],
+    ["an extends flow list", "---\nextends: [tdd]\nwhen: Run the red-green cycle.\n---\n"],
+    ["blanks after a delimiter", "--- \nextends: tdd\nwhen: Run the red-green cycle.\n---\t\n"],
+    ["a closing delimiter at the end of the file", "---\nextends: tdd\nwhen: Run the red-green cycle.\n---"],
+  ];
+  for (const [name, front] of cases) {
+    it(`frontmatter written as valid YAML passes: ${name}`, () => {
+      const { root, skillsRoot } = buildProject();
+      // Match upstream's fixture: when the frontmatter ends at the closing
+      // delimiter, the file is frontmatter-only (no anchor body appended).
+      const body = front.endsWith("---")
+        ? ""
+        : "- **In** \"Write the failing test first.\" keep the output artifact path.\n";
+      writeFileSync(join(root, ".omc", "playbooks", "yaml-form.md"), `${front}\n${body}`);
+      const r = runChecker(root, skillsRoot);
+      expect(r.status).toBe(0);
+      rmSync(root, { recursive: true, force: true });
+    });
+  }
+
+  it("a quoted flow list stays one stem, as YAML reads it", () => {
+    const { root, skillsRoot } = buildProject();
+    writeFileSync(
+      join(root, ".omc", "playbooks", "quoted-list.md"),
+      '---\nextends: "[tdd]" \nwhen: Run the cycle.\n---\n',
+    );
+    const r = runChecker(root, skillsRoot);
+    expect(r.status).toBe(1);
+    expect(r.stderr).toContain('invalid extended skill name "[tdd]"');
+    rmSync(root, { recursive: true, force: true });
+  });
+});
