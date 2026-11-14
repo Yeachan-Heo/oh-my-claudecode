@@ -297,10 +297,10 @@ import {
   isWorkerLaunchAttemptAccepted,
   loadCurrentWorkerLaunchAttempt,
   loadWorkerLaunchAttempt,
-  observeWorkerLaunchProvider,
   retireAndCleanupCurrentWorkerLaunchAttempt,
   withWorkerLaunchAttemptFence,
 } from "./worker-launch-ack.js";
+import { getWorkerProviderLiveness } from "./worker-provider-liveness.js";
 import { isProcessIdentityLive } from "../platform/process-utils.js";
 import {
   activateTeamInstanceUnderLock,
@@ -1173,40 +1173,6 @@ function configuredPaneOwnership(
     source: "adopted",
     ...(identity ? { tmuxServerIdentity: identity } : {}),
   };
-}
-
-/**
- * Read provider execution health from the exact launch receipt.  A missing or
- * malformed attempt is deliberately unknown; pane liveness is not a provider
- * termination proof.
- */
-async function getWorkerProviderLiveness(
-  teamName: string,
-  cwd: string,
-  instanceId: TeamInstanceId | undefined,
-  worker: Pick<
-    WorkerInfo,
-    "name" | "pane_id" | "worker_cli" | "launch_attempt_id"
-  > & {
-    launch_descriptor?: WorkerLaunchDescriptor;
-  },
-): Promise<"alive" | "dead" | "unknown"> {
-  if (!instanceId || !worker.pane_id || !worker.launch_attempt_id)
-    return "unknown";
-  const provider = worker.launch_descriptor?.provider ?? worker.worker_cli;
-  if (!provider) return "unknown";
-  const attempt = await loadWorkerLaunchAttempt({
-    cwd,
-    teamName,
-    instanceId,
-    workerName: worker.name,
-    paneId: worker.pane_id,
-    provider,
-    attemptId: worker.launch_attempt_id,
-    runtimeCliPath: resolveRuntimeCliPath(),
-  }).catch(() => null);
-  if (!attempt) return "unknown";
-  return observeWorkerLaunchProvider(attempt);
 }
 
 /**
