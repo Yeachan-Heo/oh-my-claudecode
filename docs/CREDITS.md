@@ -52,6 +52,7 @@ are summarized once per upstream source here rather than file-by-file.
 | `fix-ci` skill | idea | pstack fix-ci | real/flaky/environmental CI failure classification |
 | `fix-merge-conflicts` skill | idea | pstack fix-merge-conflicts | both-intent-preserving non-interactive resolution |
 | `get-pr-comments` skill | idea | pstack get-pr-comments | review-thread dedupe and fix/dismiss/ask triage |
+| `make-pr-easy-to-review` skill | idea | pstack make-pr-easy-to-review | reviewability prep: history regroup on explicit agreement with tree-identity proof, description-to-diff honesty |
 | `ai-slop-cleaner` branch-delta focus | idea | pstack deslop | cleanup surface defaults to the slop the branch itself introduced |
 | `src/features/watch-pr/policy.ts` | mechanism | pstack watch-pr | gate ordering, mergeability-unknown wait, no-checks confirmation window; pure reimplementation |
 | `src/features/verification-ledger/ledger.ts` | mechanism | pstack orch ledger | verdict vocabulary, append-only TSV shape, formula-cell guard |
