@@ -393,6 +393,30 @@ async function acceptedContext(provider: StartupPaneContext['provider']): Promis
   return { ownership: ownership(), attempt, provider };
 }
 
+async function markProviderExited(attempt: WorkerLaunchAttempt): Promise<void> {
+  const expected = JSON.parse(await readFile(attempt.expectedPath, 'utf8')) as Record<string, unknown>;
+  const processIdentity = {
+    pid: 999_999,
+    process_start_identity: process.platform === 'darwin' ? 'darwin:1:0' : `${process.platform}:1`,
+    process_group_id: 999_999,
+  };
+  await writeFile(attempt.startedPath, JSON.stringify({
+    ...expected,
+    kind: 'worker_launch_provider_started',
+    ...processIdentity,
+    written_at: new Date().toISOString(),
+  }));
+  await writeFile(`${attempt.startedPath}.terminal`, JSON.stringify({
+    ...expected,
+    kind: 'worker_launch_provider_terminal',
+    outcome: 'exit',
+    cleanup_verified: true,
+    child_reaped: true,
+    ...processIdentity,
+    written_at: new Date().toISOString(),
+  }));
+}
+
 describe('worker pane startup safety', () => {
   it.each([
     ['legacy Codex prompt', undefined, '› ', true],
@@ -1162,4 +1186,50 @@ describe('worker pane startup safety', () => {
     expect(tmuxState.args).toHaveLength(0);
   });
 
+});
+
+describe('startup input after the provider exits to a shell prompt', () => {
+  const message = 'Read inbox.md, execute now.';
+  const sendKeys = () => tmuxState.args.filter(args => args[0] === 'send-keys');
+
+  strictTmuxIt.each(['❯ ', '$ '])('fails fast with provider_exited at a %j shell prompt without typing', async prompt => {
+    const context = await acceptedContext('claude');
+    await markProviderExited(context.attempt);
+    tmuxState.captures = [prompt];
+
+    const startedAt = Date.now();
+    await expect(waitForStartupPaneReady(context, { timeoutMs: 3_000, pollIntervalMs: 1 }))
+      .resolves.toEqual({ ok: false, reason: 'provider_exited' });
+    expect(Date.now() - startedAt).toBeLessThan(1_000);
+    await expect(deliverStartupInbox(context, message))
+      .resolves.toEqual({ ok: false, reason: 'provider_exited' });
+    expect(sendKeys()).toEqual([]);
+  });
+
+  strictTmuxIt('delivers at the same prompt when provider liveness is unknown', async () => {
+    const context = await acceptedContext('claude');
+    tmuxState.captures = ['❯ '];
+
+    await expect(deliverStartupInbox(context, message))
+      .resolves.toEqual({ ok: true, kind: 'attempted_unconfirmed' });
+    expect(sendKeys().some(args => args.at(-1) === message)).toBe(true);
+  });
+
+  strictTmuxIt('does not resubmit Enter into the shell once the provider has exited', async () => {
+    const context = await acceptedContext('claude');
+    await markProviderExited(context.attempt);
+    tmuxState.captures = [`❯ ${message}\n❯ `];
+
+    await expect(retryStartupInboxSubmit(context, message)).resolves.toBe('unavailable');
+    expect(sendKeys()).toEqual([]);
+  });
+
+  strictTmuxIt('reports a provider-exited pane as dead even when stale busy text remains', async () => {
+    const context = await acceptedContext('codex');
+    await markProviderExited(context.attempt);
+    tmuxState.captures = ['› Read inbox.md\nesc to interrupt\n'];
+
+    await expect(probeStartupPaneActivity(context)).resolves.toBe('dead');
+    expect(sendKeys()).toEqual([]);
+  });
 });
