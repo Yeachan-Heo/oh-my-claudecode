@@ -27,7 +27,7 @@ const HOOK_EVENTS = ['SessionStart', 'UserPromptSubmit', 'Stop'];
 const USAGE = `Usage:
   node scripts/record-pane-frames.mjs record --provider <claude|codex|cursor|gemini|grok|antigravity>
       [--args '<json array>'] [--model <id>] [--bin <path>] [--cwd <dir>] [--out <dir>]
-      [--cols 120] [--rows 40] [--interval-ms 50] [--timeout 120] [--settle 3]
+      [--cols 120] [--rows 40] [--history 0] [--interval-ms 50] [--timeout 120] [--settle 3]
       [--hooks] [--step wait:<regex> | keys:<tmux keys> | text:<literal> | sleep:<seconds>]...
   node scripts/record-pane-frames.mjs extract --from <frames.txt|plain.txt> --state <label>
       [--frame <index|last>] [--provider <p>] [--version <v>] [--cols <n>] [--rows <n>]
@@ -36,7 +36,8 @@ const USAGE = `Usage:
 record defaults its launch args to model-contract.ts buildLaunchArgs(), so the
 frames match a real worker. Those args include each provider's approval bypass
 flag; pass --args to launch without it. A wait:<regex> step is tested against
-the frame with every whitespace run collapsed to one space.`;
+the frame with every whitespace run collapsed to one space. --history 80 adds
+the scrollback lines the team runtime's own capture (-S -80) includes.`;
 
 function fail(message) {
   process.stderr.write(`record-pane-frames: ${message}\n\n${USAGE}\n`);
@@ -102,6 +103,7 @@ async function record(values) {
   const provider = values.provider ?? fail('--provider is required');
   const cols = Number(values.cols ?? 120);
   const rows = Number(values.rows ?? 40);
+  const history = Number(values.history ?? 0);
   const intervalMs = Number(values['interval-ms'] ?? 50);
   const deadline = Date.now() + Number(values.timeout ?? 120) * 1000;
   const settleMs = Number(values.settle ?? 3) * 1000;
@@ -130,6 +132,7 @@ async function record(values) {
     hooks: Boolean(values.hooks),
     cols,
     rows,
+    history,
     cwd,
     steps: values.step ?? [],
     started_at: new Date().toISOString(),
@@ -153,7 +156,7 @@ async function record(values) {
   let stopReason = 'error';
   let last = null;
   const capture = () => {
-    const frame = tmux('capture-pane', '-p', '-J', '-t', 'rec:0.0');
+    const frame = tmux('capture-pane', '-p', '-J', '-t', 'rec:0.0', ...(history > 0 ? ['-S', `-${history}`] : []));
     if (frame !== last) {
       appendFileSync(framesPath, `=== ${(Date.now() / 1000).toFixed(3)}\n${frame}`);
       last = frame;
@@ -269,6 +272,7 @@ const { values } = parseArgs({
     out: { type: 'string' },
     cols: { type: 'string' },
     rows: { type: 'string' },
+    history: { type: 'string' },
     'interval-ms': { type: 'string' },
     timeout: { type: 'string' },
     settle: { type: 'string' },
