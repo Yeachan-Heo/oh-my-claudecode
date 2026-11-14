@@ -156,7 +156,8 @@ afterEach(async () => {
   await rm(root, { recursive: true, force: true });
 });
 
-describe('fake team provider scenarios', () => {
+// The fake provider is POSIX-only: it matches the inbox by a forward-slash path and runs the team API through /bin/sh.
+describe.skipIf(process.platform === 'win32')('fake team provider scenarios', () => {
   it('default: keeps the banner, the claim lifecycle and the trace step order', async () => {
     const run = startFake(undefined);
     await run.waitForOutput('fake-claude for omc team tmux smoke\n\n❯ ');
