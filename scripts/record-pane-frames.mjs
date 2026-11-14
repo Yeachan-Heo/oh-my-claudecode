@@ -11,7 +11,7 @@
 import { execFileSync, spawnSync } from 'node:child_process';
 import { randomBytes } from 'node:crypto';
 import { appendFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { constants as osConstants, tmpdir } from 'node:os';
 import { dirname, join, relative, resolve } from 'node:path';
 import process from 'node:process';
 import { fileURLToPath, pathToFileURL } from 'node:url';
@@ -149,8 +149,9 @@ async function record(values) {
     spawnSync('tmux', ['-L', socket, 'kill-server'], { stdio: 'ignore' });
     if (socketPath) rmSync(socketPath, { force: true });
   };
-  const onSignal = () => { killServer(); process.exit(130); };
-  for (const signal of ['SIGINT', 'SIGTERM', 'SIGHUP']) process.on(signal, onSignal);
+  const onSignal = (signal) => { killServer(); process.exit(128 + osConstants.signals[signal]); };
+  const cleanupSignals = ['SIGINT', 'SIGTERM', 'SIGHUP'];
+  for (const signal of cleanupSignals) process.on(signal, onSignal);
 
   let frameCount = 0;
   let stopReason = 'error';
@@ -204,8 +205,7 @@ async function record(values) {
     if (stepIndex < steps.length) process.stderr.write(`record-pane-frames: stopped before step ${values.step[stepIndex]}\n`);
   } finally {
     killServer();
-    process.off('SIGINT', onSignal);
-    process.off('SIGTERM', onSignal);
+    for (const signal of cleanupSignals) process.off(signal, onSignal);
   }
 
   process.stdout.write(`${JSON.stringify({ out, frames: frameCount, stop: stopReason, provider, version, launch_args: launchArgs, cwd })}\n`);
