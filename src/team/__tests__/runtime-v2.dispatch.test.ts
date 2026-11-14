@@ -2956,6 +2956,27 @@ describe('runtime v2 startup inbox dispatch', () => {
     expect(mocks.sendToWorker).toHaveBeenCalledTimes(1);
   });
 
+  it('reports provider_exited as the startup failure when the provider left a shell prompt', async () => {
+    cwd = await mkdtempFixture('omc-runtime-v2-provider-exited-');
+    mocks.deliverStartupInbox.mockResolvedValueOnce({ ok: false, reason: 'provider_exited' });
+    const { startTeamV2 } = await import('../runtime-v2.js');
+
+    const runtime = await startTeamV2({
+      teamName: 'dispatch-team',
+      workerCount: 1,
+      agentTypes: ['claude'],
+      tasks: [{ subject: 'Dispatch test', description: 'Provider exits before the trigger' }],
+      cwd,
+    });
+
+    expect(runtime.startupFailures).toEqual([
+      expect.objectContaining({ worker: 'worker-1', reason: 'worker_notify_failed:provider_exited' }),
+    ]);
+    const requests = await listDispatchRequests('dispatch-team', cwd, { kind: 'inbox' });
+    expect(requests[0]?.last_reason).toBe('worker_notify_failed:provider_exited');
+    expect(mocks.sendToWorker).not.toHaveBeenCalled();
+  });
+
   it('fails closed when exact provider process cleanup cannot be verified', async () => {
     cwd = await mkdtempFixture('omc-runtime-v2-provider-cleanup-unverified-');
     mocks.sendToWorker.mockResolvedValue(false);
