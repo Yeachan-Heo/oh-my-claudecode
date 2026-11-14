@@ -438,6 +438,177 @@ describe('resolveRequest', () => {
   });
 });
 
+describe('state mask', () => {
+  const okFetch = (bodies) => async (_url, init) => {
+    bodies.push(String(init.body));
+    return { ok: true, status: 200, json: async () => ({ answers: { route: { type: 'choice', choice: 'opus' } } }) };
+  };
+
+  it('sends and logs a state without secrets', async () => {
+    const ghp = 'ghp_' + 'A'.repeat(36);
+    const state = { prompt: `use ${ghp}\ncat /home/u/.ssh/id_ed25519`, config: { password: 'hunter2zzQ', totalTokens: 1234 } };
+    const bodies = [];
+    const result = await resolveRequest({ point: 'model-routing', state, questions: QUESTIONS }, baseEnv({ OMC_JEV: 'model-routing:active' }), okFetch(bodies));
+    expect(result.mode).toBe('active');
+    expect(bodies).toHaveLength(1);
+    const line = readFileSync(join(tmp, 'shadow.jsonl'), 'utf8').trim().split('\n').pop();
+    for (const text of [bodies[0], line]) {
+      expect(text).not.toContain(ghp);
+      expect(text).not.toContain('hunter2zzQ');
+      expect(text).not.toContain('id_ed25519');
+      expect(text).toContain('1234');
+    }
+  });
+
+  // The state of a request is JSON (stdin or the request file), so a cycle cannot reach the script: depth can.
+  const nested = (levels) => JSON.parse('{"a":'.repeat(levels) + '"leaf"' + '}'.repeat(levels));
+  const lastLine = () => JSON.parse(readFileSync(join(tmp, 'shadow.jsonl'), 'utf8').trim().split('\n').pop());
+
+  it('sends nothing and degrades when the state cannot be masked, logging a marker instead of the state', async () => {
+    const state = nested(65);
+    const bodies = [];
+    const result = await resolveRequest({ point: 'model-routing', state, questions: QUESTIONS, heuristic: 'sonnet', tool_use_id: 'toolu_1' }, baseEnv({ OMC_JEV: 'model-routing:active' }), okFetch(bodies));
+    expect(result).toMatchObject({ mode: 'degraded', answer: null, answers: null });
+    expect(bodies).toHaveLength(0);
+    expect(lastLine()).toMatchObject({ mode: 'degraded', state: '[state not sent: mask failed]', jev: null, heuristic: 'sonnet', tool_use_id: 'toolu_1' });
+  });
+
+  it('sends a state of 64 levels', async () => {
+    const bodies = [];
+    const result = await resolveRequest({ point: 'model-routing', state: nested(63), questions: QUESTIONS }, baseEnv({ OMC_JEV: 'model-routing:active' }), okFetch(bodies));
+    expect(result.mode).toBe('active');
+    expect(bodies).toHaveLength(1);
+  });
+
+  it('sends nothing when a string of the state is a secret path whole, and logs its own marker', async () => {
+    const bodies = [];
+    const result = await resolveRequest({ point: 'model-routing', state: { task: 'Do not touch the .env handling.' }, questions: QUESTIONS, heuristic: 'sonnet' }, baseEnv({ OMC_JEV: 'model-routing:active' }), okFetch(bodies));
+    expect(result).toMatchObject({ mode: 'degraded', answer: null });
+    expect(bodies).toHaveLength(0);
+    expect(lastLine()).toMatchObject({ mode: 'degraded', state: '[state not sent: secret path]', jev: null });
+  });
+
+  it('sends a string that is only partly omitted', async () => {
+    const bodies = [];
+    await resolveRequest({ point: 'model-routing', state: { task: 'fix the build\ncat /srv/app/.env' }, questions: QUESTIONS }, baseEnv({ OMC_JEV: 'model-routing:active' }), okFetch(bodies));
+    expect(JSON.parse(bodies[0]).state.task).toBe('fix the build\n[line omitted: secret path]');
+  });
+
+  it('masks a secret that starts just before the edge of the window whole, in the body and in the log', async () => {
+    const ghp = 'ghp_' + 'A'.repeat(36);
+    const bodies = [];
+    const env = baseEnv({ OMC_JEV: 'model-routing:active', OMC_JEV_EXCERPT_CHARS_MODEL_ROUTING: '100' });
+    await resolveRequest({ point: 'model-routing', state: { task: ' '.repeat(95) + ghp + ' tail' }, questions: QUESTIONS }, env, okFetch(bodies));
+    for (const text of [bodies[0], readFileSync(join(tmp, 'shadow.jsonl'), 'utf8').trim().split('\n').pop()]) {
+      expect(text).not.toMatch(/ghp_[A-Za-z0-9]/);
+    }
+  });
+
+  it('masks a private key block of RSA 4096 size that starts 100 characters before the edge of the window', async () => {
+    const body = ('MIIEvQIBADANBgkqhkiG9w0BAQEFAASCBKcwggSjAgEAAoIBAQC' + 'x'.repeat(14)).repeat(40);
+    const text = 'a'.repeat(100) + '\n-----BEGIN RSA PRIVATE KEY-----\n' + body + '\n-----END RSA PRIVATE KEY-----\nafter';
+    const bodies = [];
+    const env = baseEnv({ OMC_JEV: 'model-routing:active', OMC_JEV_EXCERPT_CHARS_MODEL_ROUTING: '200' });
+    await resolveRequest({ point: 'model-routing', state: { task: text }, questions: QUESTIONS }, env, okFetch(bodies));
+    for (const sent of [bodies[0], readFileSync(join(tmp, 'shadow.jsonl'), 'utf8').trim().split('\n').pop()]) {
+      expect(sent).not.toContain('MIIEvQIBADANBgkqhkiG9w0BAQEFAASCBKcwggSj');
+    }
+  });
+});
+
+describe('state mask: what the cut removes', () => {
+  const okFetch = (bodies) => async (_url, init) => {
+    bodies.push(String(init.body));
+    return { ok: true, status: 200, json: async () => ({ answers: { route: { type: 'choice', choice: 'opus' } } }) };
+  };
+  const lastLine = () => readFileSync(join(tmp, 'shadow.jsonl'), 'utf8').trim().split('\n').pop();
+
+  it('masks URL credentials whose "@" is beyond the margin, in the body and in the log', async () => {
+    const task = 'deploy to https://user:' + 'abcdefghij'.repeat(30) + 'z'.repeat(400) + '@host/x';
+    const bodies = [];
+    const env = baseEnv({ OMC_JEV: 'model-routing:active', OMC_JEV_EXCERPT_CHARS_MODEL_ROUTING: '100' });
+    await resolveRequest({ point: 'model-routing', state: { task }, questions: QUESTIONS }, env, okFetch(bodies));
+    expect(bodies).toHaveLength(1);
+    for (const text of [bodies[0], lastLine()]) {
+      expect(text).not.toContain('abcdefghij');
+      expect(text).toContain('https://user:***');
+    }
+  });
+
+  it('sends nothing when the sent part of a string is a secret path whole and plain text follows in the margin', async () => {
+    const task = '/home/u/.ssh/id_ed25519\n' + ' \n'.repeat(100) + 'plain text that nobody sends';
+    const bodies = [];
+    const env = baseEnv({ OMC_JEV: 'model-routing:active', OMC_JEV_EXCERPT_CHARS_MODEL_ROUTING: '100' });
+    const result = await resolveRequest({ point: 'model-routing', state: { task }, questions: QUESTIONS, heuristic: 'sonnet' }, env, okFetch(bodies));
+    expect(result).toMatchObject({ mode: 'degraded', answer: null });
+    expect(bodies).toHaveLength(0);
+    expect(JSON.parse(lastLine())).toMatchObject({ mode: 'degraded', state: '[state not sent: secret path]' });
+  });
+});
+
+describe('state mask: the tail of the cut and the keys', () => {
+  const okFetch = (bodies) => async (_url, init) => {
+    bodies.push(String(init.body));
+    return { ok: true, status: 200, json: async () => ({ answers: { route: { type: 'choice', choice: 'opus' } } }) };
+  };
+  const lastLine = () => readFileSync(join(tmp, 'shadow.jsonl'), 'utf8').trim().split('\n').pop();
+  const env = () => baseEnv({ OMC_JEV: 'model-routing:active', OMC_JEV_EXCERPT_CHARS_MODEL_ROUTING: '200' });
+
+  it('masks a token that the cut crosses whose digit comes after the cut, in the body and in the log', async () => {
+    const task = ' '.repeat(190) + 'A'.repeat(600) + '1' + 'B'.repeat(100) + ' end';
+    const bodies = [];
+    await resolveRequest({ point: 'model-routing', state: { task }, questions: QUESTIONS }, env(), okFetch(bodies));
+    expect(bodies).toHaveLength(1);
+    for (const text of [bodies[0], lastLine()]) expect(text).not.toMatch(/AAA/);
+  });
+
+  it('omits the last line when its secret path is beyond the cut, also after a shortened token', async () => {
+    const task = 'Q9'.repeat(300) + '\necho hunter2 > ' + 'x '.repeat(400) + '~/.ssh/id_ed25519';
+    const bodies = [];
+    await resolveRequest({ point: 'model-routing', state: { task }, questions: QUESTIONS }, env(), okFetch(bodies));
+    expect(bodies).toHaveLength(1);
+    for (const text of [bodies[0], lastLine()]) expect(text).not.toContain('hunter2');
+  });
+
+  it('masks the value under a key with an acronym or a glued prefix', async () => {
+    const bodies = [];
+    await resolveRequest({ point: 'model-routing', state: { DBPassword: 'hunter2zzQ', APIToken: 'plain-token-value', userpassword: 'second-secret', ok: 'fine' }, questions: QUESTIONS }, env(), okFetch(bodies));
+    for (const text of [bodies[0], lastLine()]) {
+      for (const secret of ['hunter2zzQ', 'plain-token-value', 'second-secret']) expect(text).not.toContain(secret);
+      expect(text).toContain('fine');
+    }
+  });
+});
+
+describe('state mask: plural keys, bearer with ~, arguments and pairs', () => {
+  const okFetch = (bodies) => async (_url, init) => {
+    bodies.push(String(init.body));
+    return { ok: true, status: 200, json: async () => ({ answers: { route: { type: 'choice', choice: 'opus' } } }) };
+  };
+  const lastLine = () => readFileSync(join(tmp, 'shadow.jsonl'), 'utf8').trim().split('\n').pop();
+  const env = () => baseEnv({ OMC_JEV: 'model-routing:active', OMC_JEV_EXCERPT_CHARS_MODEL_ROUTING: '200' });
+  const send = async (state) => {
+    const bodies = [];
+    await resolveRequest({ point: 'model-routing', state, questions: QUESTIONS }, env(), okFetch(bodies));
+    expect(bodies).toHaveLength(1);
+    return [bodies[0], lastLine()];
+  };
+
+  it('masks a bearer value with ~ that the cut crosses, after a shortened token', async () => {
+    // the value starts 7 characters before the cut, and a bearer value needs 8: the rule can only see it if the run goes on past the ~
+    const task = 'Q9'.repeat(300) + ' ' + ' '.repeat(97) + 'Bearer ' + 'abcdef~' + 'ghijk'.repeat(60);
+    for (const text of await send({ task })) expect(text).not.toContain('abcdef~');
+  });
+
+  it('masks the value under accessTokens and the arguments after a secret flag, and the value of a pair', async () => {
+    const state = { accessTokens: ['tok_hunter2zz', 'tok-one-zzQ'], refreshTokens: 'hunter2zz', argv: ['run', '--password', 'arg-secret-zzQ'], env: [{ name: 'DB_PASSWORD', value: 'pair-secret-zzQ' }], ok: 'fine' };
+    for (const text of await send(state)) {
+      for (const secret of ['tok_hunter2zz', 'hunter2zz', 'tok-one-zzQ', 'arg-secret-zzQ', 'pair-secret-zzQ']) expect(text).not.toContain(secret);
+      expect(text).toContain('fine');
+    }
+  });
+});
+
 describe('end-to-end child process', () => {
   it('a plain-Node caller feeds stdin JSON to the child and reads the result from stdout', async () => {
     const server = createServer((req, res) => {
