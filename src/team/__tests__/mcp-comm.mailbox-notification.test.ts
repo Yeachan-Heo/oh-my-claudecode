@@ -584,6 +584,46 @@ describe.sequential('direct mailbox notification orchestration', () => {
     expect(notify).not.toHaveBeenCalled();
   });
 
+  it('reports a recipient-specific enqueue failure and still dispatches to the later recipients', async () => {
+    const cwd = suiteHome;
+    await mkdir(join(suiteHome, '.omc', 'state', 'team', 'dispatch-team'), { recursive: true });
+    const notify = vi.fn(async () => ({ ok: true, transport: 'hook' as const, reason: 'queued_for_hook_dispatch' }));
+    let nextMessage = 0;
+
+    const outcomes = await queueBroadcastMailboxMessage({
+      teamName: 'dispatch-team',
+      fromWorker: 'leader-fixed',
+      recipients: [
+        { workerName: 'worker-1', workerIndex: 1, paneId: '%9' },
+        { workerName: 'worker-2', workerIndex: 2, paneId: '%10' },
+      ],
+      body: 'broadcast body',
+      cwd,
+      triggerFor: (workerName) => (workerName === 'worker-1' ? '' : `Read mailbox for ${workerName}.`),
+      notify,
+      deps: {
+        sendDirectMessage: vi.fn(async (_teamName, _fromWorker, toWorker) => ({ message_id: `broadcast-${++nextMessage}`, to_worker: toWorker })),
+        broadcastMessage: vi.fn(async () => []),
+        markMessageNotified: vi.fn(async () => true),
+      },
+    });
+
+    expect(outcomes[0]).toMatchObject({
+      ok: false,
+      transport: 'none',
+      reason: 'dispatch_enqueue_failed:failed_to_normalize_dispatch_request',
+      message_id: 'broadcast-1',
+      to_worker: 'worker-1',
+    });
+    expect(outcomes[1]).toMatchObject({ ok: true, message_id: 'broadcast-2', to_worker: 'worker-2' });
+    expect(notify).toHaveBeenCalledTimes(1);
+    expect(notify).toHaveBeenCalledWith(
+      expect.objectContaining({ workerName: 'worker-2' }),
+      'Read mailbox for worker-2.',
+      expect.objectContaining({ message_id: 'broadcast-2' }),
+    );
+  });
+
   it('fails the remaining broadcast recipients after one team-wide lock timeout instead of waiting again for each', async () => {
     const previousTimeout = process.env.OMC_TEAM_DISPATCH_LOCK_TIMEOUT_MS;
     process.env.OMC_TEAM_DISPATCH_LOCK_TIMEOUT_MS = '1000';
