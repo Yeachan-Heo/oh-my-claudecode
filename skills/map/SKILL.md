@@ -31,6 +31,7 @@ You know something needs doing; you do not know which skill owns it. Find the jo
 | Something claims to be done | `verify` |
 | Work is landing as a PR | `pr` |
 | An open PR needs driving to merge-ready | `babysit` |
+| A UI needs property-based hardening | `ui-property-testing` |
 | The run taught the environment something | `refit` |
 
 ## On-ramps (off the main loop)

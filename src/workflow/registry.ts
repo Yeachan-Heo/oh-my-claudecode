@@ -135,7 +135,7 @@ function entry(e: WorkflowEntry): WorkflowEntry {
 const ALIAS_MILESTONE = REMOVAL_MILESTONE;
 
 // ---------------------------------------------------------------------------
-// Skills — all 81 installed surfaces + defined Tier-0 targets + legacy alias
+// Skills — all 85 installed surfaces + defined Tier-0 targets + legacy alias
 // names. Classification per plan §4.2 with the owner's authoritative Tier-0
 // decision (plan/execute/review/verify; specialists remain internal).
 // ---------------------------------------------------------------------------
@@ -189,6 +189,7 @@ const SKILL_ENTRIES: readonly WorkflowEntry[] = [
   entry({ name: 'pr', kind: 'skill', decision: 'keep', riskClass: 'advisory', owner: REGISTRY_OWNER, notes: 'Advisory PR-body assembly from existing verify evidence; never recollects evidence or gates delivery.' }),
   entry({ name: 'refit', kind: 'skill', decision: 'keep', riskClass: 'advisory', owner: REGISTRY_OWNER, notes: 'User-invoked retrospective; only lands findings approved by the user.' }),
   entry({ name: 'session-flow', kind: 'skill', decision: 'keep', riskClass: 'advisory', owner: REGISTRY_OWNER, notes: 'User-invoked session reorientation; updates only its own session-flow Tasks.' }),
+  entry({ name: 'ui-property-testing', kind: 'skill', decision: 'keep', riskClass: 'advisory', owner: REGISTRY_OWNER, notes: 'Opt-in property-based UI testing: temporal properties, state extractors, and action generators explored autonomously to break invariants (idea credit: antithesishq/bombadil); reports, never fixes.' }),
   entry({ name: 'map', kind: 'skill', decision: 'keep', riskClass: 'advisory', owner: REGISTRY_OWNER, notes: 'Router over shipped skills; routes and never executes.' }),
   entry({ name: 'tdd', kind: 'skill', decision: 'keep', riskClass: 'advisory', owner: REGISTRY_OWNER, notes: 'Test-first discipline at pre-agreed seams; opt-in, never a default gate.' }),
   entry({ name: 'ai-slop-cleaner', kind: 'skill', decision: 'keep', riskClass: 'advisory', owner: REGISTRY_OWNER, notes: 'Opt-in review tool; never a default gate.' }),
