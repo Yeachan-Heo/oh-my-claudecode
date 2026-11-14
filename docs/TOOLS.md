@@ -633,6 +633,10 @@ Returns session IDs, timestamps, source paths, and matching excerpts as structur
 
 Use `omc session friction report --since 24h` for a local-only context-bloat and operator-friction report. The report summarizes metadata from local transcript/session/replay artifacts with counts, sizes, timestamps, and signal codes, and avoids raw prompt/session content by default. Use `--json` for local dashboards or audit scripts.
 
+### Cross-Harness Session Recall (Optional)
+
+While `session_search` covers Claude Code and OMC transcripts, teams running OMC alongside Codex CLI, Cursor, Gemini CLI, OpenCode, or Claw Code can pair it with [`deja-vu`](https://github.com/vshulcz/deja-vu) (`deja install claude`), which indexes local transcripts across 47 coding agents into `~/.cache/deja/index.db` with secret scrubbing.
+
 ---
 
 ## Trace
