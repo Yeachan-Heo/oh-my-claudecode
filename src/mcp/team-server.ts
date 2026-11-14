@@ -47,6 +47,7 @@ import type { OmcTeamJob, TeamPaneArtifact } from './team-job-convergence.js';
 import { isValidTeamInstanceId, isValidTmuxServerIdentity, type TeamConfig } from '../team/types.js';
 import { providerForTeamTarget, sendToWorker, type WorkerPaneOwnership } from '../team/tmux-session.js';
 import { readTeamConfig } from '../team/monitor.js';
+import { getWorkerProviderLiveness } from '../team/worker-provider-liveness.js';
 import {
   assertTeamInstanceUnderLock,
   createTeamInstanceBinding,
@@ -338,12 +339,14 @@ async function resolveNudgeAuthorityUnderLock(
   }
 
   const ownershipByPane = new Map<string, WorkerPaneOwnership>();
+  const workerByPane = new Map<string, TeamConfig['workers'][number]>();
   const artifactWorkerNames = new Set<string>();
   for (const pane of panes.workers) {
     const worker = config.workers.find(candidate => candidate.name === pane.workerName);
     if (!worker || worker.pane_id !== pane.paneId || worker.launch_attempt_id !== pane.launchAttemptId) return null;
     if (artifactWorkerNames.has(pane.workerName)) return null;
     artifactWorkerNames.add(pane.workerName);
+    workerByPane.set(pane.paneId, worker);
     ownershipByPane.set(pane.paneId, {
       provider,
       providerTarget: config.tmux_session,
@@ -367,6 +370,12 @@ async function resolveNudgeAuthorityUnderLock(
     provider,
     ...(tmuxServerIdentity ? { tmuxServerIdentity } : {}),
     getPaneOwnership: (paneId: string) => ownershipByPane.get(paneId),
+    getProviderLiveness: async (paneId: string) => {
+      const worker = workerByPane.get(paneId);
+      return worker
+        ? getWorkerProviderLiveness(config.name, expected.cwd, config.instance_id, worker)
+        : 'unknown';
+    },
     // The live caller replaces this placeholder with the lifecycle-locked
     // final validation + transport operation.
     executeNudge: async () => false,

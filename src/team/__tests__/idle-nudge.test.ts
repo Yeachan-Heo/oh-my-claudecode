@@ -96,6 +96,7 @@ const TEST_AUTHORITY: NudgeAuthority = {
   getPaneOwnership: (paneId: string) => ['%2', '%3'].includes(paneId)
     ? { ...TEST_OWNERSHIP, paneId }
     : undefined,
+  getProviderLiveness: async () => 'unknown',
   executeNudge: (paneId: string, message: string) =>
     sendToWorker(TEST_AUTHORITY.sessionName, paneId, message, TEST_TMUX_IDENTITY),
 };
@@ -257,6 +258,23 @@ describe('NudgeTracker', () => {
       TEST_TMUX_IDENTITY,
     );
     expect(tracker.totalNudges).toBe(1);
+  });
+
+  it('does not nudge a shell prompt left behind by an exited provider', async () => {
+    mockCaptureOutput(['$ claude', 'bye', '❯ '].join('\n'));
+    const tracker = new NudgeTracker({ delayMs: 10_000 });
+    const authority: NudgeAuthority = {
+      ...TEST_AUTHORITY,
+      getProviderLiveness: async paneId => (paneId === '%2' ? 'dead' : 'unknown'),
+    };
+
+    await tracker.checkAndNudge(['%2', '%3'], '%1', authority);
+    vi.advanceTimersByTime(15_000);
+    const nudged = await tracker.checkAndNudge(['%2', '%3'], '%1', authority);
+
+    expect(nudged).toEqual(['%3']);
+    expect(vi.mocked(sendToWorker)).toHaveBeenCalledTimes(1);
+    expect(vi.mocked(sendToWorker)).toHaveBeenCalledWith('test-session', '%3', DEFAULT_NUDGE_CONFIG.message, TEST_TMUX_IDENTITY);
   });
 
   it('uses custom nudge message', async () => {
@@ -436,6 +454,7 @@ describe('NudgeTracker', () => {
       getPaneOwnership: (paneId: string) => paneId === '%2'
         ? { ...TEST_OWNERSHIP, provider: 'cmux', providerTarget: 'cmux:workspace', tmuxServerIdentity: undefined }
         : undefined,
+      getProviderLiveness: TEST_AUTHORITY.getProviderLiveness,
       executeNudge: (paneId: string, message: string) =>
         sendToWorker('cmux:workspace', paneId, message),
     };
@@ -461,6 +480,7 @@ describe('NudgeTracker', () => {
       getPaneOwnership: (paneId: string) => paneId === '%2'
         ? { ...TEST_OWNERSHIP, provider: 'herdr', providerTarget: 'herdr-workspace', tmuxServerIdentity: undefined }
         : undefined,
+      getProviderLiveness: TEST_AUTHORITY.getProviderLiveness,
       executeNudge: (paneId: string, message: string) =>
         sendToWorker('herdr-workspace', paneId, message),
     };
