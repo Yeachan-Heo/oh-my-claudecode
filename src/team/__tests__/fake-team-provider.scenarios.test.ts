@@ -259,6 +259,14 @@ describe('fake team provider scenarios', () => {
     expect(await apiCalls()).toEqual([]);
   });
 
+  it('provider-exit-before-prompt: exits at once, leaving only a shell prompt', async () => {
+    const run = startFake('provider-exit-before-prompt');
+    expect(await run.exitCode).toBe(0);
+    expect(run.output().endsWith(frame('claude/synthetic/shell-prompt-after-exit-heavy-angle.txt'))).toBe(true);
+    expect(run.output()).not.toContain(frame('claude/2.1.325/idle.txt'));
+    expect(await apiCalls()).toEqual([]);
+  });
+
   it('recovery-continuation: checkpoints and completes the adopted task without claiming it', async () => {
     vi.stubEnv('CLAUDE_PLUGIN_ROOT', '');
     const instruction = renderRecoveryContinuationInstruction({

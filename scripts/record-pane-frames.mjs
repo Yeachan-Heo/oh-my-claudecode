@@ -120,6 +120,7 @@ async function record(values) {
   const argv = [...launchArgs];
   if (values.hooks) {
     if (provider !== 'claude') fail('--hooks is only supported for claude');
+    if (argv.includes('--bare')) fail('--hooks cannot record under --bare: Claude skips hooks in bare mode (unset ANTHROPIC_API_KEY or pass --args)');
     argv.push('--settings', writeHookSettings(out, eventsLog));
   }
 
@@ -149,8 +150,7 @@ async function record(values) {
     if (socketPath) rmSync(socketPath, { force: true });
   };
   const onSignal = () => { killServer(); process.exit(130); };
-  process.on('SIGINT', onSignal);
-  process.on('SIGTERM', onSignal);
+  for (const signal of ['SIGINT', 'SIGTERM', 'SIGHUP']) process.on(signal, onSignal);
 
   let frameCount = 0;
   let stopReason = 'error';

@@ -222,6 +222,9 @@ const SCENARIOS = {
     pause('provider-running', PROVIDER_EXIT_MS),
     showFrame('shell-prompt', 'claude/synthetic/shell-prompt-after-exit-heavy-angle.txt'),
   ],
+  'provider-exit-before-prompt': [
+    showFrame('shell-prompt', 'claude/synthetic/shell-prompt-after-exit-heavy-angle.txt'),
+  ],
   'recovery-continuation': [
     banner,
     idlePrompt,

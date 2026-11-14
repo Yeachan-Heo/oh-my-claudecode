@@ -1,5 +1,5 @@
 import { readdirSync, readFileSync } from 'node:fs';
-import { dirname, join, relative } from 'node:path';
+import { dirname, join, relative, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 import type { CliAgentType } from '../model-contract.js';
@@ -115,7 +115,7 @@ function fixtureFiles(dir: string): string[] {
   return readdirSync(dir, { withFileTypes: true }).flatMap(entry => {
     const path = join(dir, entry.name);
     if (entry.isDirectory()) return fixtureFiles(path);
-    return entry.name.endsWith('.txt') ? [relative(CORPUS_ROOT, path)] : [];
+    return entry.name.endsWith('.txt') ? [relative(CORPUS_ROOT, path).split(sep).join('/')] : [];
   });
 }
 
