@@ -193,3 +193,135 @@ Top level: `tasks`, `summary_by_provider`, `coverage` (`with_transcript`, `total
   thresholds are named constants at the top of the script and can be changed in the code.
 - The tool does not know which transcript belongs to which task of a larger run; it measures the files given.
 - Test-run detection is by command name only; use `--test-pattern` for other runners.
+
+# Decision-outcome join
+
+`decision_outcome_join.py` joins the Jev model and effort decisions with what the subagent did afterwards: the model and
+effort Jev chose, the model and effort Claude Code actually started (`meta.json`), the transcript (models, tokens, cache,
+reasoning, turns, tool calls, end status), the cost in USD and the gross saving under a price table given by the caller.
+It prints numbers only. It is a standalone diagnostic run by hand. It does not change OMC behaviour and is not shipped in
+the npm package.
+
+## Requirements and usage
+
+- `python3` (standard library only). Run it in isolated mode with `python3 -I`.
+- The journals and transcripts are only read. The only files written are the `--tsv` and `--json` outputs, if given.
+
+```
+python3 -I tools/diagnostics/decision_outcome_join.py --journal <jev dir> --transcripts <transcript dir> --prices prices.json
+python3 -I tools/diagnostics/decision_outcome_join.py --journal J --transcripts T --from 2026-11-01 --to 2026-11-30 --json out.json
+```
+
+| Option | Meaning |
+|---|---|
+| `--journal <dir>` | directory with `applied.jsonl` and `shadow.jsonl` and their rotated files |
+| `--transcripts <dir>` | directory with the Claude Code transcripts and `agent-*.meta.json` files |
+| `--from`, `--to` | keep rows whose `ts` is in the range (ISO 8601, both ends inclusive) |
+| `--prices <file>` | JSON price table `{"family": [input, cache write 5 min, cache write 1 h, cache read, output]}` in USD per 1 million tokens. Without it every cost is unavailable (null), never zero |
+| `--source-map SUBSTRING=LABEL` | label the task source when the subagent type contains `SUBSTRING` (repeatable, first match wins). Without a match the source is `undetermined` |
+| `--tsv <file>` | one row per agent task |
+| `--json <file>` | the whole result as JSON |
+| `--wilson-vectors` | print the Wilson test vectors (shared with `wilson_threshold.mjs`) and exit |
+
+Exit codes: `0` valid run (also with no data), `2` argument or input error.
+
+## Input format
+
+- `applied.jsonl` rows with `point` `model-routing` and a `tool_use_id` are joined to `agent-*.meta.json` by `toolUseId`.
+  The transcript is the `agent-*.jsonl` next to the meta file.
+- `shadow.jsonl` rows with the same `tool_use_id` give the Jev answers (probabilities and confidence of `model-tier` and `effort`).
+- Rotated files are read as `<name>-YYYYMMDD-HHMMSS.jsonl` or `<name>-YYYYMMDD-HHMMSS-<pid>.jsonl`.
+- These field names come from the Jev journal and the Claude Code transcript format; a change in those formats changes the results.
+
+## Rules used for the counts
+
+- Zero is not a measurement: a model family that is not in the price table has a null cost. An agent with 0 turns has
+  `cost_status` `unavailable`.
+- `cost_status`: `reported` (all turns priced), `partial` (cost of the priced turns only, the count in `turns_unpriced`),
+  `unavailable` (no turns, or none priced).
+- `model_match`: `match`, `mismatch` (the dominant transcript model is not the model Jev chose), `undetermined` (no transcript
+  or no `message.model`), `no model decision` (Jev chose no model).
+- A duplicate `tool_use_id` is counted once in the result and once under `distribution.duplicates`.
+- Every ratio in the report shows the denominator and a two-sided 95 % Wilson interval (z = 1.96) and a one-sided lower bound (z = 1.645).
+- The price-consistency check compares two cost functions on single-model agents. It guards only against regressions: both use the same price table.
+
+# Wilson threshold
+
+`wilson_threshold.mjs` applies a threshold rule to a TSV of outcome labels (the output of `jev_outcome_labels.mjs`, or any file
+with the same columns): a Wilson lower bound against a target, a minimum support, and a `no threshold` result that is valid, not an error.
+It is a standalone diagnostic run by hand. It does not change OMC behaviour and is not shipped in the npm package.
+
+## Requirements and usage
+
+- Node 20 or later, built-in modules only.
+
+```
+node tools/diagnostics/wilson_threshold.mjs --input labels.tsv --target 0.95 [--min-support 30] [--kind selective|per-query]
+node tools/diagnostics/wilson_threshold.mjs --input labels.tsv --target 0.10 --direction upper --json
+```
+
+| Option | Meaning |
+|---|---|
+| `--input <file>` | TSV with a header; `-` reads stdin |
+| `--target <0-1>` | the target hit rate (or the error bound with `--direction upper`) |
+| `--min-support <n>` | the minimum number of rows for a threshold (default 30) |
+| `--kind selective\|per-query` | the error kind: among accepted rows, or over all inputs (coverage times selective error) |
+| `--direction lower\|upper` | `lower`: the lower bound must reach the target; `upper`: the upper bound must stay below it (ratio mode only) |
+| `--group-by <fields>` | `point,spec_version,jev_model` by default; allowed `point`, `spec_version`, `jev_model`, `mode`, `session` |
+| `--holdout <0-0.5>` | fit/holdout split of the sessions (needs a `session` column) |
+| `--json` | JSON output instead of the text report |
+
+Exit codes: `0` valid run (also `no threshold`), `2` argument or input error.
+
+## Input format
+
+- Columns: `result` (required: `1` or `executed` = hit, `0` or `ignored` = miss, empty or `undetermined` = outside the denominator),
+  and the optional `confidence` (0-1), `mode`, `point`, `spec_version`, `jev_model`, `session`, `ts`.
+- Rows with `mode` `breaker`, `limit` or `degraded` are not a verdict: they are excluded from the denominator and counted per mode.
+- A row with an empty `confidence` (in a file that has the column) forms a `no confidence` subgroup, measured as a single ratio.
+
+## Output rules
+
+- Every row falls into exactly one category: the denominator, an excluded mode, `undetermined`, `invalid`, `invalid_confidence`
+  or `bad_format`. The report shows the counts per group and in total, so the closing equation can be checked.
+- With a `confidence` column the sweep runs over the distinct confidence values; the chosen threshold is the lowest one with
+  at least `min_support` rows and a hit-rate lower bound at least the target.
+- Without it the ratio is judged directly. `too little data` means fewer rows than `min_support`.
+- A warning `small sample` is printed when `n < 100`; the status does not change.
+
+# Jev outcome labels
+
+`jev_outcome_labels.mjs` labels the outcome of each learner hint (`learner-extraction` in `applied.jsonl`) and each denial of an
+agent type (`deny` in `agent-type.jsonl`) by joining the journal row with the session transcript: `executed`, `ignored` or
+`undetermined`. The label measures behaviour (the agent called the `remember` skill, or the owner typed `/remember`); it is not a verdict on whether the hint was right.
+It is a standalone diagnostic run by hand. It does not change OMC behaviour and is not shipped in the npm package.
+
+## Requirements and usage
+
+- Node 20 or later, built-in modules only.
+
+```
+node tools/diagnostics/jev_outcome_labels.mjs --journal <journal dir> --transcripts <transcript dir> [--from <ISO>] [--to <ISO>] [--session <id>] [--tsv <file>] [--json]
+```
+
+| Option | Meaning |
+|---|---|
+| `--journal <dir>` | directory with `applied.jsonl` (required) and `agent-type.jsonl` (optional), plus rotated files |
+| `--transcripts <dir>` | Claude Code transcript directory (required) |
+| `--from`, `--to` | period filter on `ts` |
+| `--session <id>` | the decision timeline of one session instead of the summary |
+| `--tsv <file>` | the labelled rows as TSV, the input of `wilson_threshold.mjs` (columns `result`, `confidence`, `mode`, `point`, `spec_version`, `jev_model`, `session`, `ts`) |
+| `--json` | JSON output |
+
+Exit codes: `0` valid run, `2` argument or input error.
+
+## Label rules
+
+- `executed`: in the window (the rest of the turn of the row, plus the next 3 turns) the agent called the `Skill` tool with a skill
+  name containing `remember`, or the user sent `/remember` at the start of a message or inside `<command-name>`.
+- `ignored`: the transcript has entries after the row and the window has no such call. A transcript that ends before the third
+  turn counts as `window_incomplete`.
+- `undetermined`: no transcript, no entries after the row, no `session_id`, or an unreadable `ts`. Outside the denominator of the executed share.
+- Agent-type denials take the label from the next `agent-type` row of the same session: `allow` = executed, `deny` or `would-deny` = ignored, otherwise undetermined.
+- Rows with `mode` `breaker`, `limit` or `degraded` get no label and are counted separately. `would-deny` rows stay out of the TSV.
+- Sample-size markers: 20 labels (`DEEP`) and 30 labels (`min_support`); below 30 the executed share is reported as `too little data`.
