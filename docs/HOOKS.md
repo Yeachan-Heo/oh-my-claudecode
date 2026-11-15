@@ -227,6 +227,14 @@ Fires when a session ends.
 
 Saves agent activity, token usage, and other session data to `.omc/sessions/`. If configured, sends completion notifications via Discord, Telegram, or Slack.
 
+#### Key-shape redaction (`src/notifications/redact.ts`)
+
+Opt-in masking for the strings that `redactTokens` produces (notification and reply-listener log lines). Set `OMC_REDACT_KEY_SHAPES=1` to enable it. Without it `redactTokens` returns exactly what the regex rules return. With it the function also masks, in one linear pass: keys with the prefixes `sk-` (8 or more following characters), `sk_live_`, `sk_test_`, `rk_` (16), `AIza`, `gsk_`, `xai-`, `hf_` (20), JWTs (shown as `eyJ***`), and `NAME=value` or `NAME: value` assignments whose name contains `KEY`, `TOKEN`, `SECRET`, `PASSWORD`, `PASSWD`, `PASS`, `PWD` or `CREDENTIALS`. The name match is a plain substring match, so `COMPASS=` and `PASSED=` values are masked too. With the switch on, an assignment is also masked when its value was already masked by the regex rules, so the visible prefix is lost: `token=xoxa-****` becomes `token=****`.
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `OMC_REDACT_KEY_SHAPES` | (unset) | `1` enables the key-shape masking above. Any other value leaves it off. |
+
 ---
 
 ## Core Hooks
