@@ -278,14 +278,13 @@ describe('denial counter: switch on in the hook', () => {
     expect(journal(logDir).some((row) => row.action === 'escalation-1' && row.key === hash)).toBe(true);
   });
 
-  it('adds the three common sentences only with OMC_JEV_DENIAL_TEXTS=1', () => {
-    const plain = runPoolSequence({ OMC_JEV_DENIAL_COUNTER: '1' }, 'hook-texts-off', 3).reasons[2];
-    expect(plain).not.toContain('Action NOT performed');
-    expect(plain).not.toContain('Do not repeat the same call: do independent work or change the plan.');
-    const texts = runPoolSequence({ OMC_JEV_DENIAL_COUNTER: '1', OMC_JEV_DENIAL_TEXTS: '1' }, 'hook-texts-on', 1).reasons[0];
-    expect(texts).toContain('Action NOT performed: do not write that it succeeded.');
-    expect(texts).toContain('Do not repeat the same call: do independent work or change the plan.');
-    expect(texts).toContain('Use the existing result and change the plan.');
+  it('adds the three common sentences with the counter switch alone; OMC_JEV_DENIAL_TEXTS=1 alone adds nothing', () => {
+    const counted = runPoolSequence({ OMC_JEV_DENIAL_COUNTER: '1' }, 'hook-sentences-counter', 1).reasons[0];
+    expect(counted).toContain('Action NOT performed: do not write that it succeeded.');
+    expect(counted).toContain('Do not repeat the same call: do independent work or change the plan.');
+    expect(counted).toContain('Use the existing result and change the plan.');
+    const textsOnly = runPoolSequence({ OMC_JEV_DENIAL_TEXTS: '1' }, 'hook-sentences-texts-only', 1).reasons[0];
+    expect(textsOnly).toBe(`[AGENT POOL] ${refusalText(1, 1)}`);
   });
 });
 
@@ -322,11 +321,12 @@ describe('denial counter: /goal guard in the hook', () => {
     expect(run.reason).toBe(`${GOAL_DENIAL} Activate /goal with the ultragoal objective, or set ALLOW_ULTRAGOAL_WITHOUT_GOAL=1 to bypass this guard intentionally. Expected objective: ${GOAL}`);
   });
 
-  it('counter on, texts off: the marker and the common sentences stay off; the /goal text keeps the activate sentence', () => {
+  it('counter on, texts off: the marker and the common sentences appear; the /goal text keeps the activate sentence', () => {
     const run = runGoalDeny({ OMC_JEV_DENIAL_COUNTER: '1' }, 'goal-counter', 1);
     expect(run.reason).toContain('Activate /goal with the ultragoal objective');
     expect(run.reason).toMatch(/\[denial [0-9a-f]{16} #1\]/);
-    expect(run.reason).not.toContain('Action NOT performed');
+    expect(run.reason).toContain('Action NOT performed: do not write that it succeeded.');
+    expect(run.reason).toContain('Use the existing result and change the plan.');
     expect(run.reason).not.toContain('End this step');
   });
 

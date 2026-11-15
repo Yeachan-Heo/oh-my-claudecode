@@ -2402,9 +2402,10 @@ function evaluateAgentPool(toolName, data, stateDir) {
 }
 
 // Opt-in denial counter (OMC_JEV_DENIAL_COUNTER=1): every guard denial of this hook passes through here. Returns the
-// reason with the counter marker and the escalation text appended, or null when the counter releases the guard (only
-// the /goal guard, see lib/jev-denial-counter.mjs). With the switch off it returns the reason unchanged. OMC_JEV_DENIAL_TEXTS=1
-// adds the three common sentences (not done, do not repeat, the executable way out for the guards that have one).
+// reason with the counter marker, the three common sentences (not done, do not repeat, the executable way out for the
+// guards that have one) and the escalation text appended, or null when the counter releases the guard (only the /goal
+// guard, see lib/jev-denial-counter.mjs). With the switch off it returns the reason unchanged. OMC_JEV_DENIAL_TEXTS=1
+// only selects the /goal refusal text variant (see the ultragoal guard).
 const DENIAL_POLL_TOOLS = new Set(['BashOutput', 'TaskOutput']);
 const DENIAL_TEXT_NOT_DONE = 'Action NOT performed: do not write that it succeeded.';
 const DENIAL_TEXT_NO_REPEAT = 'Do not repeat the same call: do independent work or change the plan.';
@@ -2430,9 +2431,7 @@ function denialReasonWithCounter(guard, reason, data, stateDir) {
       },
     });
     if (result.release) return null;
-    const texts = isDenialSwitchOn('OMC_JEV_DENIAL_TEXTS')
-      ? [DENIAL_TEXT_NOT_DONE, DENIAL_TEXT_NO_REPEAT, ...(DENIAL_WAY_OUT_GUARDS.has(guard) ? [denialWayOut(data?.tool_name ?? data?.toolName)] : [])]
-      : [];
+    const texts = [DENIAL_TEXT_NOT_DONE, DENIAL_TEXT_NO_REPEAT, ...(DENIAL_WAY_OUT_GUARDS.has(guard) ? [denialWayOut(data?.tool_name ?? data?.toolName)] : [])];
     const appended = [denialMarker(result.key, result.n), ...texts, result.text].filter(Boolean).join('\n\n');
     return appended ? `${reason}\n\n${appended}` : reason;
   } catch {
