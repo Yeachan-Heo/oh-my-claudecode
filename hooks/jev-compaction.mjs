@@ -94,8 +94,13 @@
  *
  * Token cascade (OMC_JEV_COMPACT_TARGET_PERCENT, two digits from 20 to 80; unset: off). The cut then follows tokens: the target is that
  * share of the tokens before, and cascade (pass forced, pass A, pass B) steps the results down from the least needed, predicting the tokens
- * after each step, until the prediction reaches the target. The compaction record gains cut, cascade_pass, cascade_target_tokens,
- * cascade_predicted_tokens and cascade_tokens_source. Removing a call with its result is not part of it. Question naming
+ * after each step, until the prediction reaches the target; the last pass (D) removes a result with its call. A compaction at or below the usual
+ * target is manual: only the scores decide (manualPlan), and the cascade runs only when that still leaves the prediction above the target. In
+ * any other case, before Jev is asked, the floor (every removable result gone) is predicted: above the threshold less FLOOR_MARGIN of the window
+ * the host's summary runs (floor_above_threshold; no_window when the window is unknown). The compaction record gains cut, cascade_pass,
+ * cascade_target_tokens, cascade_predicted_tokens, cascade_tokens_source, cascade_dropped, floor_pred and tokens_after_pred. Host handoff
+ * (OMC_JEV_COMPACT_HOST_HANDOFF=1, opt-in with caution: the host's contract is not documented in this repository): the result also carries
+ * tokensBefore and tokensAfter, and a manual or automatic cut under HOST_MIN_CUT goes to the host's summary (cut_below_host_min). Question naming
  * (OMC_JEV_COMPACT_QUESTION_NAME=1; unset: off): the score question names its result's key in state.results in its text.
  *
  * Quiet: no $.ui.log; a toast only with OMC_JEV_COMPACT_TOAST=1. One JSON file per event goes to the
@@ -136,6 +141,17 @@ const CHARS_PER_TOKEN = 4;
 // Token accounting (OMC_JEV_COMPACT_TOKEN_ACCOUNTING=1). The host compacts HOST_BUFFER tokens below its window (window minus
 // the 20 000 output reserve and the 13 000 autocompact buffer, the /context panel's 33k); used only when the host gives no threshold.
 const HOST_BUFFER = 33000;
+// The floor rule of the token cascade: the predicted floor must stay under the threshold less this share of the window; a compaction
+// that cannot get below it would fire again within a few turns.
+const FLOOR_MARGIN = 0.2;
+// Host handoff (OMC_JEV_COMPACT_HOST_HANDOFF=1): a manual or automatic compaction that would remove less than this share of the tokens
+// goes to the host's own summary, so the module does not ask Jev for a cut the host would not have needed.
+const HOST_MIN_CUT = 0.3;
+// The usual target of the token cascade's rule: the share of the window (OMC_JEV_COMPACT_TARGET_PERCENT), capped at 75 % of the threshold, then
+// 85 % of that. A compaction at or below it is manual: only the scores decide (manualPlan), and the floor is not checked.
+const TARGET_OF_THRESHOLD = 0.75;
+const TARGET_UNCALIBRATED = 0.85;
+const usualTarget = (win, targetPercent) => Math.min(Math.floor((win.window * targetPercent) / 100), Math.floor(TARGET_OF_THRESHOLD * win.threshold));
 // The prediction after a compaction falls short of the window the host measures by this share (measured on one set of compaction states, 1.2 %
 // after the rates below; an estimate, to be measured again for other hosts). The window ceiling divides by 1 + this share.
 const PREDICTION_SHORTFALL = 0.012;
@@ -517,6 +533,7 @@ async function readConfig($) {
     OMC_JEV_COMPACT_MAX_WINDOW_TOKENS: await $.env.get('OMC_JEV_COMPACT_MAX_WINDOW_TOKENS'),
     OMC_JEV_COMPACT_TARGET_PERCENT: await $.env.get('OMC_JEV_COMPACT_TARGET_PERCENT'),
     OMC_JEV_COMPACT_QUESTION_NAME: await $.env.get('OMC_JEV_COMPACT_QUESTION_NAME'),
+    OMC_JEV_COMPACT_HOST_HANDOFF: await $.env.get('OMC_JEV_COMPACT_HOST_HANDOFF'),
     CLAUDE_CODE_AUTO_COMPACT_WINDOW: await $.env.get('CLAUDE_CODE_AUTO_COMPACT_WINDOW'),
     CLAUDE_CONFIG_DIR: await $.env.get('CLAUDE_CONFIG_DIR'),
     OMC_JEV_COMPACT_PRIVATE_PATHS: await $.env.get('OMC_JEV_COMPACT_PRIVATE_PATHS'),
@@ -579,7 +596,11 @@ async function readConfig($) {
     maxWindowTokens: windowInt(env.OMC_JEV_COMPACT_MAX_WINDOW_TOKENS),
     // Token cascade (off unless set to a two-digit share from 20 to 80).
     targetPercent: /^\d{2}$/.test(String(env.OMC_JEV_COMPACT_TARGET_PERCENT ?? '').trim()) ? fraction(env.OMC_JEV_COMPACT_TARGET_PERCENT, undefined, 20, 80) : undefined,
-    questionNamed: String(env.OMC_JEV_COMPACT_QUESTION_NAME ?? '').trim() === '1',
+    // Switches: 1 and active turn them on; 0, off, any other value and unset leave them off.
+    questionNamed: ['1', 'active'].includes(String(env.OMC_JEV_COMPACT_QUESTION_NAME ?? '').trim()),
+    // Host handoff (off unless 1 or active): the return of the tokens before and after to the host, and a manual or automatic cut below HOST_MIN_CUT
+    // goes to the host's summary.
+    handoff: ['1', 'active'].includes(String(env.OMC_JEV_COMPACT_HOST_HANDOFF ?? '').trim()),
     autoCompactWindow: env.CLAUDE_CODE_AUTO_COMPACT_WINDOW,
     configDir: env.CLAUDE_CONFIG_DIR ? slash(env.CLAUDE_CONFIG_DIR) : undefined,
     home: homeForState ? slash(homeForState) : undefined,
@@ -1879,25 +1900,27 @@ function findCandidates(messages, privatePaths) {
 // Token cascade (OMC_JEV_COMPACT_TARGET_PERCENT, 20-80: the share of the tokens before the compaction the kept text may take). Every result
 // starts whole, then the least needed steps down, with a prediction after each step, and it stops at the target: pass forced (a secret or a
 // non-text result to a trace), pass A (a result Jev scored under SHORT_COPY_MIN_SCORE to a trace, the others to a short copy when that saves tokens),
-// pass B (every remaining result to a trace). A pinned result (a task-list call, or a trace that saves no tokens) stays whole. The last pass
-// of the full cascade (removing a call with its result) and the floor are not here: the build does not render a removed call. The keep
-// decisions go to `keep` as allocate sets them. Returns the pass reached, the target and the predicted tokens after.
-export function cascade(candidates, tokensBefore, targetPercent) {
-  const target = Math.floor((targetPercent / 100) * tokensBefore);
+// pass B (every remaining result to a trace), pass D (every result still at a trace, least needed first, removed with its call). A pinned
+// result (a task-list call, or a trace that saves no tokens) stays whole. The keep decisions go to `keep` as allocate sets them. Returns the
+// pass reached, the target and the predicted tokens after.
+// A forced result (a secret, or a non-text result) goes to a trace first, whatever its score; a pinned one is never cut by the cascade and is
+// not counted in the floor.
+const isForced = (c) => c.secret || !c.textOnly;
+const isPinned = (c) => !isForced(c) && (c.task || itemTokens(c).full - itemTokens(c).trace <= 0);
+export function cascade(candidates, tokensBefore, targetPercent, targetTokens) {
+  const target = targetTokens ?? Math.floor((targetPercent / 100) * tokensBefore);
   const costs = new Map(candidates.map((c) => [c, itemTokens(c)]));
   const saved = (c, keep) => {
     const t = costs.get(c);
-    return keep === 'short' ? t.full - t.short : keep === 'trace' ? t.full - t.trace : 0;
+    return keep === 'short' ? t.full - t.short : keep === 'trace' ? t.full - t.trace : keep === 'drop' ? t.full : 0;
   };
   let removed = 0;
   const setKeep = (c, keep) => { removed += saved(c, keep) - saved(c, c.keep ?? 'full'); c.keep = keep; };
   const reached = () => tokensBefore - removed <= target;
-  const forced = (c) => c.secret || !c.textOnly;
-  const pinned = (c) => !forced(c) && (c.task || costs.get(c).full - costs.get(c).trace <= 0);
   for (const c of candidates) c.keep = 'full';
   let pass = 'forced';
-  for (const c of candidates) if (forced(c)) setKeep(c, 'trace');
-  const free = candidates.filter((c) => !forced(c) && !pinned(c)).sort((a, b) => a.score - b.score || a.resIdx - b.resIdx);
+  for (const c of candidates) if (isForced(c)) setKeep(c, 'trace');
+  const free = candidates.filter((c) => !isForced(c) && !isPinned(c)).sort((a, b) => a.score - b.score || a.resIdx - b.resIdx);
   if (!reached()) {
     pass = 'A';
     for (const c of free) {
@@ -1913,7 +1936,34 @@ export function cascade(candidates, tokensBefore, targetPercent) {
       if (c.keep !== 'trace') setKeep(c, 'trace');
     }
   }
+  if (!reached()) {
+    pass = 'D';
+    for (const c of candidates.filter((x) => x.keep === 'trace').sort((a, b) => a.score - b.score || a.resIdx - b.resIdx)) {
+      if (reached()) break;
+      setKeep(c, 'drop');
+    }
+  }
   return { pass, target, predicted: Math.round(tokensBefore - removed) };
+}
+
+// The floor of the cascade: the predicted tokens when every removable result (every candidate but the pinned ones) is gone with its call.
+export function floorPrediction(candidates, tokensBefore) {
+  return tokensBefore - candidates.reduce((s, c) => s + (isPinned(c) ? 0 : itemTokens(c).full), 0);
+}
+
+// A manual compaction at or below the usual target: only the scores decide. Every forced result goes to a trace, and so does every free result
+// Jev scored under SHORT_COPY_MIN_SCORE; the rest stays whole. Returns the prediction after the removal (no pass beyond it).
+export function manualPlan(candidates, tokensBefore) {
+  let removed = 0;
+  for (const c of candidates) {
+    c.keep = 'full';
+    if (isForced(c) || (!isPinned(c) && c.score < SHORT_COPY_MIN_SCORE)) {
+      c.keep = 'trace';
+      const t = itemTokens(c);
+      removed += t.full - t.trace;
+    }
+  }
+  return { pass: 'manual', predicted: Math.round(tokensBefore - removed) };
 }
 
 const removableChars = (candidates) => candidates.reduce((s, c) => s + Math.max(0, c.fullCost - c.traceCost), 0);
@@ -2298,7 +2348,7 @@ function build(messages, candidates, keepFrom, group, stats, queued = new Map())
       for (const u of m.toolUses || []) {
         const c = byId.get(u.tool_use_id);
         if (c && c.keep === 'trace') traces.push(c.trace);
-        else kept.push({ tool_use_id: u.tool_use_id, tool: u.tool, input: u.input });
+        else if (!(c && c.keep === 'drop')) kept.push({ tool_use_id: u.tool_use_id, tool: u.tool, input: u.input });
       }
       const text = [m.text || '', ...traces].filter(Boolean).join('\n');
       if (!text && !kept.length) { stats.droppedAssistant++; continue; }
@@ -2324,7 +2374,7 @@ function build(messages, candidates, keepFrom, group, stats, queued = new Map())
       const results = [];
       for (const r of m.toolResults) {
         const c = byId.get(r.tool_use_id);
-        if (c && c.keep === 'trace') continue;
+        if (c && (c.keep === 'trace' || c.keep === 'drop')) continue;
         if (c && c.keep === 'short') results.push({ tool_use_id: r.tool_use_id, text: shortText(c), isError: Boolean(r.isError) });
         else if (textOnlyResult(r)) results.push({ tool_use_id: r.tool_use_id, text: r.text || '', isError: Boolean(r.isError) });
         else results.push({ tool_use_id: r.tool_use_id, text: '[non-text result (image or file) removed at compaction]', isError: Boolean(r.isError) });
@@ -2522,6 +2572,8 @@ async function measureAfter($, usage) {
   await writeRecord($, p.cfg, {
     ts: isoNow(), point: POINT, event: 'after', session_id: p.sessionId, agent_id: null, compact_ts: p.ts,
     chars_after: p.charsAfter, tokens_after_real: real, measured: 'first_request',
+    // Only with the token cascade: the prediction of the tokens after, and how far it fell from the first real request (error_pct > 0: predicted higher).
+    ...(p.predicted !== undefined ? { tokens_after_pred: p.predicted, error_pct: Math.round(((p.predicted - real) / real) * 1000) / 10 } : {}),
   });
 }
 
@@ -2618,6 +2670,37 @@ async function decide($, e, cfg, record, started) {
   const net = removable - envelopes;
   record.max_reduction = before ? Math.round((net / before) * 1000) / 1000 : 0;
   if (!before || net / before < MIN_REDUCTION) return { fallback: 'too_few_results' };
+  // Token cascade. The window first (none: the summary runs). The tokens before of an automatic compaction are raised to the threshold, as the
+  // host fires there (a subagent's window follows its estimate). A compaction at or below the usual target is manual: only the scores decide
+  // and the floor is not checked. Otherwise the floor (every removable result gone) is predicted before Jev is asked, since the scores do not
+  // change it: above the threshold less FLOOR_MARGIN of the window the summary runs at once.
+  let tokens;
+  let manual = false;
+  let ruleTarget;
+  if (cfg.targetPercent !== undefined) {
+    const detail = await hostValue($, () => $.session.usage({ breakdown: 'summary' }));
+    let win = await resolveWindow($, cfg, detail, await hostValue($, () => $.session.usage()));
+    if (!win) return { fallback: 'no_window' };
+    tokens = await tokensBeforeOf($, e, messages, api);
+    if (e.trigger === 'auto') {
+      if (e.agentId === undefined) tokens.tokens = Math.max(tokens.tokens, win.threshold);
+      else if (tokens.tokens < win.threshold) {
+        win = { window: Math.min(win.window, Math.round(tokens.tokens) + HOST_BUFFER), threshold: Math.max(1, Math.round(tokens.tokens)), source: `${win.source}+agent` };
+      }
+    }
+    tokens.tokens = Math.round(tokens.tokens);
+    Object.assign(record, { window: win.window, threshold: win.threshold, window_source: win.source });
+    // The rule's target: the usual target before the owner's limit (`raw`), then the limit from the configured window ceiling (absent by default).
+    const raw = Math.floor(TARGET_UNCALIBRATED * usualTarget(win, cfg.targetPercent));
+    const ceiling = tokenCeiling(cfg.maxWindowTokens);
+    ruleTarget = ceiling === undefined ? raw : Math.min(raw, ceiling);
+    manual = tokens.tokens <= raw;
+    if (!manual) {
+      const floor = floorPrediction(candidates, tokens.tokens);
+      record.floor_pred = Math.round(floor);
+      if (floor > win.threshold - FLOOR_MARGIN * win.window) return { fallback: 'floor_above_threshold' };
+    }
+  }
   const blocked = await blockedReason($, cfg, Date.now(), e.agentId);
   if (blocked) {
     if (blocked === 'paused') Object.assign(record, { paused_until: new Date(session.pausedUntil).toISOString(), pause_reason: session.pauseReason });
@@ -2732,9 +2815,20 @@ async function decide($, e, cfg, record, started) {
   else {
     // Token cascade (OMC_JEV_COMPACT_TARGET_PERCENT): the target and the prediction are in tokens; the envelopes and delivered text that build
     // adds are not part of the prediction.
-    const tokens = await tokensBeforeOf($, e, messages, api);
-    const plan = cascade(candidates, tokens.tokens, cfg.targetPercent);
-    Object.assign(record, { cut: 'cascade', cascade_pass: plan.pass, cascade_target_tokens: plan.target, cascade_predicted_tokens: plan.predicted, cascade_tokens_source: tokens.source });
+    // A manual compaction: the scores decide; a prediction still above the target (the cascade's own target) goes on to the cascade, as the rule does.
+    let target = Math.floor((cfg.targetPercent / 100) * tokens.tokens);
+    let plan;
+    if (manual) {
+      // Migrated rule: a manual compaction is decided by the scores against the rule's target; a prediction still above it goes on to the cascade,
+      // which then stops at that target.
+      plan = manualPlan(candidates, tokens.tokens);
+      target = ruleTarget;
+      if (plan.predicted > target) plan = cascade(candidates, tokens.tokens, cfg.targetPercent, target);
+    } else plan = cascade(candidates, tokens.tokens, cfg.targetPercent);
+    Object.assign(record, { cut: plan.pass === 'manual' ? 'manual_scores' : 'cascade', cascade_pass: plan.pass, cascade_target_tokens: target, cascade_predicted_tokens: plan.predicted, tokens_after_pred: plan.predicted, cascade_tokens_source: tokens.source, cascade_dropped: candidates.filter((c) => c.keep === 'drop').length });
+    // Host handoff: a manual or automatic compaction that removes less than HOST_MIN_CUT of the tokens is left to the host's summary (the record
+    // keeps the numbers). The module's own requests and other mods' plugin compactions are not handled here.
+    if (cfg.handoff && plan.predicted > (1 - HOST_MIN_CUT) * tokens.tokens && (e.trigger === 'manual' || e.trigger === 'auto')) return { fallback: 'cut_below_host_min' };
   }
   const stats = {};
   const built = build(messages, candidates, keepFrom, group, stats, queued);
@@ -2759,7 +2853,7 @@ async function decide($, e, cfg, record, started) {
     unanswered: asked.length - answered,
   });
   if (cfg.tokenAccounting) Object.assign(record, await tokenAccounting($, e, cfg, messages, api, candidates));
-  return { messages: built, before, after };
+  return { messages: built, before, after, predicted: record.tokens_after_pred, tokensBefore: tokens?.tokens, tokensAfter: record.tokens_after_pred };
 }
 
 async function compact($, e, next) {
@@ -2810,9 +2904,11 @@ async function compact($, e, next) {
     await writeRecord($, cfg, record);
     if (decision.fallback || cfg.mode !== 'active') return armGrowthGate(await next(e));
     if (cfg.toast) { try { $.ui.toast(`Jev compaction: ${decision.before} -> ${decision.after} chars`); } catch { /* optional */ } }
-    const installed = armGrowthGate({ messages: decision.messages });
+    // Host handoff (OMC_JEV_COMPACT_HOST_HANDOFF=1, opt-in with caution): the host also gets the tokens before and after this compaction. The
+    // host's contract for these keys is not documented in this repository, so the switch is off by default. Off, it gets the messages only.
+    const installed = armGrowthGate(cfg.handoff && decision.tokensAfter !== undefined ? { messages: decision.messages, tokensBefore: decision.tokensBefore, tokensAfter: decision.tokensAfter } : { messages: decision.messages });
     // The measurement of this compaction replaces any still waiting for an earlier one (armGrowthGate cleared it).
-    if (e.agentId === undefined && record.session_id) session.pendingAfter = { cfg, ts: record.ts, sessionId: record.session_id, charsAfter: decision.after };
+    if (e.agentId === undefined && record.session_id) session.pendingAfter = { cfg, ts: record.ts, sessionId: record.session_id, charsAfter: decision.after, predicted: decision.predicted };
     return installed;
   } finally {
     session.compacting--;
