@@ -22,12 +22,20 @@
  *    REGISTRY_CHARS characters); after a Jev compaction the messages stayed verbatim, so it is left
  *    out. MISSING_TO_NOTIFY `module_missing` within a day give one systemMessage.
  *
+ * 4. Pasted-text retention. With OMC_JEV_COMPACT_PASTES the module writes the pasted text it moves out of the conversation to
+ *    <state dir>/compaction-pastes/<session>/<hash>.txt (see its header). SessionStart (any source but `compact`) first touches
+ *    `.compaction` in the current session's directory, if there is one, then removes the other session directories whose newest
+ *    file is older than OMC_JEV_PASTES_DAYS days (default 14; a whole number from 1 to 99999; `0` or any other value keeps
+ *    everything). A link and anything outside that directory stay, and without a session id nothing is touched or removed. It
+ *    runs only while the compaction point is enabled, and a session idle for longer than the days can find that a trace names a
+ *    file that is gone.
+ *
  * <state dir> is OMC_JEV_LOG_DIR when set, else ~/.omc/state/jev: the module knows only the home
  * directory, not the project's state root. Registry text is masked with scripts/lib/jev-mask.mjs, the
  * masking the module uses for what it sends.
  */
 
-import { appendFileSync, closeSync, existsSync, mkdirSync, openSync, readdirSync, readFileSync, readSync, rmSync, statSync } from 'node:fs';
+import { appendFileSync, closeSync, existsSync, lstatSync, mkdirSync, openSync, readdirSync, readFileSync, readSync, rmSync, statSync, utimesSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -47,6 +55,7 @@ const RECORD_MATCH_MS = 15 * 60_000;
 const MISSING_WINDOW_MS = 24 * 3600_000;
 const MISSING_TO_NOTIFY = 3;
 const MAX_AGE_MS = 7 * 24 * 3600_000;
+const PASTES_DAYS_DEFAULT = 14;
 const FILE_TOOLS = new Set(['Write', 'Edit', 'MultiEdit', 'NotebookEdit']);
 const SHELL_TOOLS = new Set(['Bash', 'PowerShell']);
 // git subcommands that change the repository or its remote (status, log and diff are not worth a line).
@@ -246,6 +255,56 @@ function sweep(dir, now) {
   } catch { /* no directory */ }
 }
 
+/** OMC_JEV_PASTES_DAYS: days a session directory of compaction-pastes is kept, a whole number from 1 to 99999 (unset or empty: the default); 0 or any other value: no removal. */
+export function pastesDays(env = process.env) {
+  const raw = String(env.OMC_JEV_PASTES_DAYS ?? '').trim();
+  if (!raw) return PASTES_DAYS_DEFAULT;
+  return /^[1-9]\d{0,4}$/.test(raw) ? Number(raw) : 0;
+}
+
+// Does the directory hold no file (nor itself) changed since `cutoff`? A directory that cannot be read counts as new.
+function pastesDirIsOld(dir, cutoff) {
+  try {
+    if (statSync(dir).mtimeMs >= cutoff) return false;
+    for (const name of readdirSync(dir)) if (lstatSync(join(dir, name)).mtimeMs >= cutoff) return false;
+    return true;
+  } catch { return false; }
+}
+
+/**
+ * Marks the current session's directory of compaction-pastes as live (touches `.compaction` when the directory exists), then removes
+ * the other session directories whose newest file is older than OMC_JEV_PASTES_DAYS days. Returns the number removed. A link stays;
+ * without a session id nothing is touched or removed.
+ */
+export function sweepPastes(sessionId, now = Date.now(), env = process.env) {
+  const days = pastesDays(env);
+  if (!days || !sessionId) return 0;
+  const root = join(stateDirOf(env), 'compaction-pastes');
+  const current = safeName(sessionId);
+  const cutoff = now - days * 24 * 3600_000;
+  let removed = 0;
+  try {
+    // A session resumed after the days must not lose its files to the next start of another session.
+    try {
+      const marker = join(root, current, '.compaction');
+      if (lstatSync(join(root, current)).isDirectory()) {
+        writeFileSync(marker, `${new Date(now).toISOString()}\n`);
+        utimesSync(marker, new Date(now), new Date(now));
+      }
+    } catch { /* no directory of this session */ }
+    for (const name of readdirSync(root)) {
+      if (name === current) continue;
+      const dir = join(root, name);
+      try {
+        if (!lstatSync(dir).isDirectory() || !pastesDirIsOld(dir, cutoff)) continue;
+        rmSync(dir, { recursive: true, force: true });
+        removed++;
+      } catch { /* in use or gone: the next start tries again */ }
+    }
+  } catch { /* no directory */ }
+  return removed;
+}
+
 // The session's spool files: [{name, record}], record undefined for an unreadable file.
 function readSpool(spoolDir, sessionId) {
   let names = [];
@@ -315,6 +374,7 @@ export function afterSessionStart(data, { logDir } = {}, env = process.env) {
       sweep(spoolDir, now);
       sweep(join(stateDir, 'compaction-registry'), now);
     }
+    if (data.source !== 'compact') sweepPastes(sessionId, now, env);
     return out;
   } catch { return {}; }
 }
