@@ -623,7 +623,7 @@ export OMC_JEV_ENDPOINT="https://jev-proxy.example.com/v1/systemone"
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `TYPESAFE_API_KEY` | (absent) | API key for the Jev API at `OMC_JEV_ENDPOINT` (TypeSafe System One by default). Required to enable Jev; the key alone does not enable any points. |
-| `OMC_JEV` | (absent) | Per-point opt-in: `point`, `point:active`, `all` (every point, shadow), `all:active` (every point, active), or `point:off` (that point off, also under `all` and `all:active`). Comma-separated; unknown point names are ignored. |
+| `OMC_JEV` | (absent) | Per-point opt-in: `point`, `point:active`, `all` (every point, shadow), `all:active` (every point, active), `point:shadow` (that point in shadow, also under `all:active`, when it is the last entry naming the point), or `point:off` (that point off, also under `all` and `all:active`). Comma-separated; unknown point names are ignored. |
 | `OMC_JEV_TIMEOUT_MS` | `2000` | Per-call timeout in milliseconds (single round-trip measured at 465–605 ms; default allows margin). In active mode the requests of one hook process add up: each waits up to this value plus the resolver buffer (500 ms; 3500 ms for `model-routing`), and the resolver process needs time to start (0.5-1.2 s on a busy Windows laptop). The timeouts in `hooks/hooks.json` of the hooks that wait for Jev (`pre-tool-enforcer`, `post-tool-verifier`, `persistent-mode`, `code-simplifier`) are sized for the default. If you raise this value, check that the sum over the requests of one hook (`persistent-mode` also waits up to 6 s for the bridge) still fits the hook timeout minus the `run.cjs` cushion (0.5 s POSIX, 1.5 s Windows); otherwise `run.cjs` stops the hook and drops its whole output. `keyword-detector.mjs` is capped at 8 s by `run.cjs` whatever its manifest timeout says, so with three active points (`skill-trigger`, `intent`, `task-size`) at the defaults it can still be stopped. |
 | `OMC_JEV_MAX_REQUESTS` | `0` (unlimited) | Maximum Jev requests per process. When reached, heuristic twins run for remaining calls. |
 | `OMC_JEV_BREAKER` | (unset) | Set to `1` to share one circuit breaker between every process of the machine, hook scripts included: after HTTP 429, 401, 402, 403, any 5xx, or three requests without a response within a minute, no request is sent until it closes. The `compaction` point honors it too (through its hooks module). See [Shared breaker and request limit](#shared-breaker-and-request-limit). |
@@ -679,6 +679,10 @@ export OMC_JEV="all:active"
 # Turn one point off while the rest stay on (a later non-off entry for the same point turns it back on;
 # the suffix is case-insensitive; `all:off` withdraws the wildcard)
 export OMC_JEV="all:active,intent:off"
+
+# Keep one point in shadow while the rest are active (`point:shadow` wins over `all:active` when it is the
+# last entry naming the point; a later `point:active` or plain `point` entry takes the point back)
+export OMC_JEV="all:active,task-size:shadow"
 
 # Master disable
 export OMC_JEV="off"

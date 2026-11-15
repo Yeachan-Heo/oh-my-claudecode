@@ -205,6 +205,7 @@ export function parseJevEnv(point, env = process.env, permissionMode) {
   let active = false;
   let listed = false;
   let off = false;
+  let explicitShadow = false; // the last entry naming this point is `point:shadow`
   for (const entry of raw.split(",")) {
     const token = entry.trim();
     if (!token) continue;
@@ -222,6 +223,7 @@ export function parseJevEnv(point, env = process.env, permissionMode) {
         if (isActive) activateAll = true;
       }
     } else if (name === point) {
+      explicitShadow = colon !== -1 && token.slice(colon + 1) === "shadow"; // `point:shadow` wins over `all:active` and over an earlier `point:active` (last entry of the name wins)
       // `point:off` turns the point off even under `all`; a later non-off entry for the point turns it back on.
       if (isOff) {
         off = true;
@@ -237,6 +239,10 @@ export function parseJevEnv(point, env = process.env, permissionMode) {
   if (NAMED_ONLY_POINTS.has(point)) {
     sawAll = false;
     activateAll = false;
+  }
+  if (explicitShadow) {
+    activateAll = false;
+    active = false;
   }
   if (!sawAll && !listed) return "off";
   if (permissionMode === "plan") {
