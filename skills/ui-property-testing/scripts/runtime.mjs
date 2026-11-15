@@ -17,6 +17,12 @@ globalThis.__uiPropertyRuntime = installed;
 
 export const runtime = installed;
 
+// Windows executable-search hardening: this file is a skills/scripts/*.mjs
+// entry in the repo-wide entry-point scan, so it carries the same hardening
+// the other entry points have.
+import { hardenWindowsExeSearch } from "../../../scripts/lib/windows-search.mjs";
+hardenWindowsExeSearch();
+
 // Runs on every captured state; returns JSON-serializable data. The cell is
 // stateful — `.current` reads the latest value.
 export function extract(fn) {

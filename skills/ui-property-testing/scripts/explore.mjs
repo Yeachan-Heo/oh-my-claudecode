@@ -13,6 +13,7 @@
 // as JSON); exit 2 = usage/driver errors (stderr).
 
 import { join, resolve } from "node:path";
+import { hardenWindowsExeSearch } from "../../../scripts/lib/windows-search.mjs";
 import { pathToFileURL } from "node:url";
 
 const args = process.argv.slice(2);
@@ -28,6 +29,7 @@ const url = flag("url");
 const seed = Number(flag("seed", "1234"));
 const maxSteps = Number(flag("max-steps", "60"));
 const jsonOut = has("json") || !has("human");
+hardenWindowsExeSearch();
 
 if (!driverPath || !specPath) {
   console.error("usage: explore.mjs --driver <path> --spec <path> [--url <url>] [--seed n] [--max-steps n]");
