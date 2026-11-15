@@ -96,3 +96,100 @@ fields. Kinds: `compaction`, `tool_call` (`tool`, `id`), `result` (`id`, `status
 `turn_end`, `turn_end_api_error`, `turn_interrupted`, and `tool_call_no_result` (`tool`, `id`,
 `before_compaction`). Events are sorted by time; events without a timestamp come first, and
 `tool_call_no_result` events come last. The timeline does not contain message or result text.
+
+# Executor outcome metrics
+
+`executor_outcome_metrics.py` measures the transcript of one executor (worker) session: failed tool
+calls, loops (retry, parameter drift, oscillation), API exhaustion, assistant steps, thinking and
+output-token counts, the flags of the final answer, and test runs without an advisor consultation.
+It prints numbers only and never issues a verdict. It is a standalone diagnostic run by hand. It does
+not change OMC behaviour and is not shipped in the npm package.
+
+## Requirements and usage
+
+- `python3` (standard library only). Run it in isolated mode with `python3 -I`.
+- The transcripts are only read. Nothing is written; the output goes to stdout.
+
+```
+python3 -I tools/diagnostics/executor_outcome_metrics.py --transcript <session.jsonl>
+python3 -I tools/diagnostics/executor_outcome_metrics.py --transcript A.jsonl --transcript A/subagents/agent-x.jsonl --json
+python3 -I tools/diagnostics/executor_outcome_metrics.py --transcript A.jsonl --provider-map glm-=zai --from 2026-11-01
+```
+
+| Option | Meaning |
+|---|---|
+| `--transcript <file>` | transcript of one session (repeatable). A file named `<session>/subagents/agent-<id>.jsonl` is a separate task with the session as `parent` |
+| `--from YYYY-MM-DD`, `--to YYYY-MM-DD` | keep tasks whose first timestamp (UTC) is in the range; tasks without a timestamp are counted as `no_date` |
+| `--provider-map PREFIX=NAME` | map a model name prefix to a provider name (repeatable, first match wins). Without a mapping the provider is `unmapped`; a task without any model name has `unknown` |
+| `--test-pattern <regex>` | regular expression matched (`re.match`) to a Bash command segment after removing prefixes; replaces the built-in list of test runners |
+| `--advisor-pattern <regex>` | regular expression for a Bash command segment that is an advisor consultation. The advisor tool block (`server_tool_use` named `advisor`) is always recognised |
+| `--json` | JSON output instead of text |
+
+Exit codes: `0` success (whatever the numbers), `2` usage error (missing file, bad date, bad
+`--provider-map` entry, bad regular expression).
+
+## Input format
+
+Only lines with `type` `assistant` or `user` are read. Other types, including `api-request-blob`, are
+skipped. A line that is not a JSON object is counted in `bad_lines`. Fields used: `message.content`
+blocks (`text`, `thinking`, `tool_use`, `tool_result` with `is_error`, `server_tool_use`), `message.id`,
+`message.model`, `message.usage.output_tokens`, `requestId`, `timestamp`, `sessionId`, `isSidechain`,
+`isApiErrorMessage`, `error`, `thinkingDurationMs`. Rows with model `<synthetic>` are skipped for steps,
+calls, tokens and final text, except that an API error row is still read as an API error. These names come
+from the Claude Code transcript format, which can change between host versions.
+
+## Metrics (per task)
+
+Every metric is a number, or the string `unmeasured` with the reason in the task's `reasons` object.
+A missing value is never reported as zero.
+
+| Metric | Meaning |
+|---|---|
+| `tool_failures` | calls whose result has `is_error` true. An empty result is not a failure |
+| `failure_runs`, `longest_failure_run` | runs of two or more failed results in a row, and the longest such run |
+| `retry_patterns` | runs of at least 3 consecutive calls with an identical signature (tool name and arguments; key order does not matter). `loop_patterns.retry` lists `[first, last]` call indexes |
+| `parameter_drift_patterns` | runs of at least 3 consecutive calls to one tool with at least 2 distinct signatures. A run that overlaps a retry run is suppressed. `loop_patterns.parameter_drift` lists `[first, last]` |
+| `oscillation_patterns` | cycles of 2 to 5 tool names, with at least 2 distinct names, repeated at least 3 full times back to back. Overlaps are removed (sort by start, longer first). `loop_patterns.oscillation` lists `first`, `last`, `cycle`, `cycle_count` |
+| `exhaustion_api`, `exhaustion_api_by_status` | API error rows that count as exhaustion, and the key of each (the status, or `phrase` when only the text matched) |
+| `api_errors_other`, `api_errors_by_error_field` | the other API error rows, and the count of each `error` field value |
+| `exhaustion_tool_results` | failed tool results that count as exhaustion |
+| `assistant_steps` | distinct `message.id` of non-synthetic assistant rows |
+| `thinking_blocks`, `thinking_chars`, `thinking_duration_ms` | thinking blocks, their text length, and the sum of `thinkingDurationMs` |
+| `output_tokens` | sum of `usage.output_tokens` over `(message.id, requestId)`, taking the maximum per key |
+| `test_episodes_without_advisor` | episodes of two or more failed test runs in a row, ended by a passed run, an advisor consultation, or the end of the transcript |
+| `test_runs_failed`, `test_runs_passed`, `test_runs_no_result` | test runs by result. A run without a result is counted separately and neither breaks nor extends a series |
+| `advisor_consultations` | advisor tool blocks plus Bash segments matching `--advisor-pattern` |
+
+Exhaustion rule: an item counts when its HTTP status is one of 408, 413, 429, 503, 504, 529, or its
+lowercased text contains one of these phrases: `context length`, `context window`, `token limit`,
+`rate limit`, `too many requests`, `timeout`. The status is read from the text first (a 3-digit number
+in parentheses, else a 3-digit number after a colon), then from the mapping of the `error` field
+(`rate_limit` 429, `overloaded` and `overloaded_error` 529, `request_too_large` 413). Anything else is
+`other`. A failed tool result is checked the same way; a result without `is_error` is never exhaustion.
+
+## Final answer flags
+
+The last main-thread assistant text is checked. Without such text the answer is `unmeasured`.
+
+| Flag | Meaning |
+|---|---|
+| `empty` | blank after trimming |
+| `cut_off` | the trimmed text ends with a comma, `&&`, `||`, `=>`, an arithmetic or assignment operator, an opening bracket, a colon, or a trailing `const`, `let`, `var`, `function` or `return` |
+| `odd_fences` | an odd number of triple-backtick markers |
+| `repeated_line` | one trimmed line longer than 8 characters occurs 5 or more times in a row (blank lines ignored) |
+| `ended_with_api_error` | the last main-thread assistant row is an API error |
+
+## Output
+
+Top level: `tasks`, `summary_by_provider`, `coverage` (`with_transcript`, `total`, `percent`, `no_date`),
+`skipped` (duplicate files). Each task: `session_id`, `provider`, `model`, `parent`, `file`, `transcript`
+(`present`, `empty` or `unreadable`), `bad_lines`, `period` (`first`, `last` dates), `metrics`,
+`final_result` (`status`, `flags`), `loop_patterns`, `reasons`. Per provider: `n`, `with_transcript`,
+`metrics` (`sum`, `median`, `unmeasured` for each numeric metric), `final_result` (flag counts).
+
+## Limits
+
+- The loop, exhaustion, failure and final-answer rules follow a written behaviour specification. The
+  thresholds are named constants at the top of the script and can be changed in the code.
+- The tool does not know which transcript belongs to which task of a larger run; it measures the files given.
+- Test-run detection is by command name only; use `--test-pattern` for other runners.
