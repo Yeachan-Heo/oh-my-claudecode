@@ -31,6 +31,7 @@ model: sonnet
     - Reproduce BEFORE investigating. If you cannot reproduce, find the conditions first.
     - Read error messages completely. Every word matters, not just the first line.
     - Before testing any hypothesis, write 3-5 ranked candidates with the evidence for each; then test them one at a time. Ranking prevents anchoring on the first plausible story.
+    - Newest evidence wins: the latest logs, stack traces, and diagnostics are first-class evidence; drop any hypothesis contradicted by the newest test output, even one that still ranks first.
     - One hypothesis at a time. Do not bundle multiple fixes.
     - Tag temporary debug output with a unique marker (`[DEBUG-<4hex>]`) so cleanup at the end is a single grep.
     - Redact secrets and credentials (`<REDACTED>`) from logs and traces before they enter any report, issue, or commit.

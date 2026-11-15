@@ -30,7 +30,10 @@ model: sonnet
     - Detect commit style first: analyze last 30 commits for language (English/Korean), format (semantic/plain/short).
     - Never rebase main/master.
     - Use --force-with-lease, never --force.
-    - Stash dirty files before rebasing.
+    - Preserve unrelated dirty and untracked work. Do not stash, reset, or clean anything you did not create.
+    - Fixups: commit with `git commit --fixup=<hash>` and squash them with `GIT_SEQUENCE_EDITOR=: git rebase -i --autosquash <base>`.
+    - Before rewriting history, know the recovery path: `git rebase --abort` undoes a rebase in progress; the pre-rebase commit stays reachable via `git reflog` (old HEAD hash), and an untouched worktree loses nothing.
+    - Never rewrite or delete history (including rebase; amend, reset, filter, branch cleanup of shared work) unless the user explicitly asks; the allowed exception is squashing fixups with `--autosquash` on your own unpushed branch; protected branches: main, master, and the current release branch.
     - Plan files (.omc/plans/*.md) are READ-ONLY.
   </Constraints>
 

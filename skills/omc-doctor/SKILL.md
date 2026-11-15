@@ -237,15 +237,17 @@ The settings scan alone does not establish that no references remain; the active
 After handling every relevant user/project settings file, re-check `${CLAUDE_CONFIG_DIR:-~/.claude}/settings.json`, the primary working directory's `.claude/settings.json`, every applicable project-local `.claude/settings.local.json` path resolved above (main-checkout, Windows side-by-side, and legacy starting-directory paths where applicable), for references to each legacy script, including references in composite or ambiguous commands. Also inspect managed hook sources read-only: `/etc/claude-code/managed-settings.json` on Linux/WSL, `/Library/Application Support/ClaudeCode/managed-settings.json` on macOS, `C:\Program Files\ClaudeCode\managed-settings.json` on Windows, and any applicable MDM, server-managed, or command-line `--settings` sources (see [Claude Code managed-settings locations](https://code.claude.com/docs/en/managed-settings#deploy-a-managed-settings-file)). Never edit those sources. Remove a script only when no configured hook references remain in any source, the active plugin provides the same event, and its content matches the shipped OMC payload already verified in Step 2. If any applicable project-local path, main checkout root, managed source, or command-line source cannot be resolved or inspected, if any source references the script, the user declined the relevant settings change, a file could not be updated, no shipped payload exists, or verification is inconclusive, leave the corresponding script in place. Never run an unconditional `rm -f` based on basename.
 
 ### Fix: Outdated Plugin
+**Cache guard**: Diagnostics do not authorize removal or setup changes. Do not prune cache versions by age, lexical/version order, or presence of a newer version. A cache version is protected and must never be moved aside when it is the version pinned in `${CLAUDE_CONFIG_DIR:-~/.claude}/plugins/installed_plugins.json`; if every cached version is protected, move nothing and report the protection instead of running the command below.
 ```bash
-# Clear plugin cache (cross-platform)
-node -e "const p=require('path'),f=require('fs'),d=process.env.CLAUDE_CONFIG_DIR||p.join(require('os').homedir(),'.claude'),b=p.join(d,'plugins','cache','omc','oh-my-claudecode');try{f.rmSync(b,{recursive:true,force:true});console.log('Plugin cache cleared. Restart Claude Code to fetch latest version.')}catch{console.log('No plugin cache found')}"
+# Move unprotected cache versions aside (cross-platform); keep versions pinned in installed_plugins.json; never delete
+node -e "const p=require('path'),f=require('fs'),d=process.env.CLAUDE_CONFIG_DIR||p.join(require('os').homedir(),'.claude'),b=p.join(d,'plugins','cache','omc','oh-my-claudecode'),r=p.join(d,'plugins','installed_plugins.json');try{const v=f.readdirSync(b).filter(x=>/^\d/.test(x));let pinned=[];try{pinned=(JSON.parse(f.readFileSync(r,'utf8')).plugins['oh-my-claudecode@omc']||[]).map(w=>w.version)}catch{};const prot=v.filter(x=>pinned.includes(x));const free=v.filter(x=>!prot.includes(x));if(prot.length){console.log('Kept protected cache versions (pinned in installed_plugins.json):',prot.join(', '))}if(prot.length&&free.length){free.forEach(x=>{if(x){f.renameSync(p.join(b,x),p.join(b,'.bak-'+x+'-'+Date.now()))}});console.log('Moved',free.length,'unprotected version(s) to .bak. Restart Claude Code to fetch latest version.')}else{console.log(prot.length?'Nothing to move: every cached version is pinned in installed_plugins.json':'Nothing moved: no pinned cache version found, so nothing is moved')}}catch{console.log('No plugin cache found')}"
 ```
 
 ### Fix: Stale Cache (multiple versions)
+**Stale cache guard**: Do not prune cache versions by age, lexical/version order, or presence of a newer version. A cache version is protected when it is the version pinned in `${CLAUDE_CONFIG_DIR:-~/.claude}/plugins/installed_plugins.json`; move aside (to a `.bak` copy) only unprotected versions, and report the protected versions kept.
 ```bash
-# Keep only latest version (cross-platform)
-node -e "const p=require('path'),f=require('fs'),h=require('os').homedir(),d=process.env.CLAUDE_CONFIG_DIR||p.join(h,'.claude'),b=p.join(d,'plugins','cache','omc','oh-my-claudecode');try{const v=f.readdirSync(b).filter(x=>/^\d/.test(x)).sort((a,c)=>a.localeCompare(c,void 0,{numeric:true}));v.slice(0,-1).forEach(x=>f.rmSync(p.join(b,x),{recursive:true,force:true}));console.log('Removed',v.length-1,'old version(s)')}catch(e){console.log('No cache to clean')}"
+# Keep protected versions; never prune by age, lexical/version order, or presence of a newer version; move only unprotected versions aside
+node -e "const p=require('path'),f=require('fs'),h=require('os').homedir(),d=process.env.CLAUDE_CONFIG_DIR||p.join(h,'.claude'),b=p.join(d,'plugins','cache','omc','oh-my-claudecode'),r=p.join(d,'plugins','installed_plugins.json');try{const v=f.readdirSync(b).filter(x=>/^\d/.test(x));let pinned=[];try{pinned=(JSON.parse(f.readFileSync(r,'utf8')).plugins['oh-my-claudecode@omc']||[]).map(w=>w.version)}catch{};const prot=v.filter(x=>pinned.includes(x));const free=v.filter(x=>!prot.includes(x));if(prot.length){console.log('Kept protected cache versions (pinned in installed_plugins.json):',prot.join(', '))}if(prot.length&&free.length){free.forEach(x=>{if(x){f.renameSync(p.join(b,x),p.join(b,'.bak-'+x+'-'+Date.now()))}});console.log('Moved',free.length,'unprotected version(s) to .bak')}else{console.log(prot.length?'Nothing to move: keep every pinned version; do not prune cache versions by age, lexical/version order, or presence of a newer version':'Nothing moved: no pinned version found; manual review instead of pruning')}}catch(e){console.log('No cache to clean')}"
 ```
 
 ### Fix: Missing/Outdated CLAUDE.md
@@ -258,21 +260,19 @@ WebFetch(url: "https://raw.githubusercontent.com/Yeachan-Heo/oh-my-claudecode/ma
 
 ### Fix: Legacy Curl-Installed Content
 
-Remove legacy agents, commands, and skills directories (now provided by plugin):
+**Legacy content guard**: Diagnostics do not authorize deletion or setup changes. Before moving anything, record the exact target, its ownership evidence, and its contents (a file list of what is being moved and why).
+Do not move entire `agents/`, `commands/`, or `skills/` roots to resolve a mixed installation. Never touch `agents/` or `skills/` roots containing any file that is not a verified OMC payload (those roots hold user custom agents and skills); with any such file present, report the mixed installation instead of fixing it.
+The only allowed cleanup is a reversible move to a sibling `.bak` copy (`mv`); deletion (`rm -rf`, `rm`) is never allowed. Move a whole root with `mv` only when every file inside matches a known plugin-provided OMC name; with any custom (non-OMC) file present, move only individually verified OMC-owned files, one by one, into the matching `.bak` directory and leave every other file in place.
 
 ```bash
 # Backup first (optional - ask user)
 # mv "${CLAUDE_CONFIG_DIR:-$HOME/.claude}"/agents "${CLAUDE_CONFIG_DIR:-$HOME/.claude}"/agents.bak
 # mv "${CLAUDE_CONFIG_DIR:-$HOME/.claude}"/commands "${CLAUDE_CONFIG_DIR:-$HOME/.claude}"/commands.bak
 # mv "${CLAUDE_CONFIG_DIR:-$HOME/.claude}"/skills "${CLAUDE_CONFIG_DIR:-$HOME/.claude}"/skills.bak
-
-# Or remove directly
-rm -rf "${CLAUDE_CONFIG_DIR:-$HOME/.claude}"/agents
-rm -rf "${CLAUDE_CONFIG_DIR:-$HOME/.claude}"/commands
-rm -rf "${CLAUDE_CONFIG_DIR:-$HOME/.claude}"/skills
+# Never rm -rf here: the only allowed form is the reversible mv above, after the guards above
 ```
 
-**Note**: Only remove if these contain oh-my-claudecode-related files. If user has custom agents/commands/skills, warn them and ask before removing.
+**Note**: Only move (never delete) if these contain oh-my-claudecode-related files. If user has custom agents/commands/skills, warn them and ask before moving.
 
 ---
 
