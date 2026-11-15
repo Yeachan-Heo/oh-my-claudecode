@@ -325,3 +325,93 @@ Exit codes: `0` valid run, `2` argument or input error.
 - Agent-type denials take the label from the next `agent-type` row of the same session: `allow` = executed, `deny` or `would-deny` = ignored, otherwise undetermined.
 - Rows with `mode` `breaker`, `limit` or `degraded` get no label and are counted separately. `would-deny` rows stay out of the TSV.
 - Sample-size markers: 20 labels (`DEEP`) and 30 labels (`min_support`); below 30 the executed share is reported as `too little data`.
+
+# Tool call repeats
+
+`tool_call_repeats.py` measures repeated tool calls on Claude Code transcripts: repeated successful
+calls, duplicate Agent/Task calls, near-identical series and cycles. It reports numbers only (no
+input, prompt or result content) and never issues a verdict. It is a standalone offline diagnostic
+run by hand: it does not change OMC behaviour, has no switch, and is not shipped in the npm package.
+
+## Requirements and usage
+
+- `python3` (standard library only). Run it in isolated mode with `python3 -I`.
+- The transcripts are only read. The only files written are the `--tsv` and `--json` files, if given.
+
+```
+python3 -I tools/diagnostics/tool_call_repeats.py --transcripts <dir> [--from <ISO>] [--to <ISO>]
+python3 -I tools/diagnostics/tool_call_repeats.py --transcripts <dir> --poll-prefix ls --poll-tool MyStateTool --tsv out.tsv --json out.json
+```
+
+| Option | Meaning |
+|---|---|
+| `--transcripts <dir>` | required: transcripts laid out `<dir>/<project>/<session>.jsonl` and `<dir>/<project>/<session>/subagents/agent-<id>.jsonl` |
+| `--from`, `--to` | ISO range on the call timestamp, both ends inclusive |
+| `--min-identical N` | (a) minimum run of identical calls with an identical result (default 3) |
+| `--dice X` | (c) Dice threshold on character bigrams of the input JSON (default 0.85) |
+| `--min-similar N` | (c) minimum series length (default 5) |
+| `--periods a-b` | (d) cycle periods (default 2-6) |
+| `--min-cycle-repeats N` | (d) minimum repetitions of the pattern (default 3) |
+| `--window N` | (d) number of last call signatures scanned per context (default 64) |
+| `--min-support N` | below this denominator a rate has no threshold (default 30) |
+| `--poll-prefix <prefix>` | extra Bash command prefix treated as polling (repeatable) |
+| `--poll-tool <name or suffix>` | extra tool treated as polling, matched as a full name or a suffix (repeatable; empty by default) |
+| `--tsv <file>`, `--json <file>` | optional outputs (one TSV row per finding; the full JSON result) |
+
+Exit codes: `0` normal run (also with no data), `2` argument or input error, including a failed write.
+
+## What is counted
+
+- (a) repeated success: a run of consecutive calls with the same call signature and the same successful result signature.
+- (b) duplicate task: Agent/Task calls in one context with the same `subagent_type` and the same prompt; the second call
+  lands before the first result (result not received), or after it (reported separately).
+- (c) near-identical series: consecutive calls of one tool whose input JSON is similar (Dice) but not identical.
+- (d) cycles: a pattern of period p repeated in the last calls of a context (for example A,B,A,B,A,B).
+- Polling (sleep, `gh run watch`, `tail -f`, `git status`, state tools, MCP tools ending with a state suffix) is counted
+  separately and stays out of (a) and out of the repeat-work sums.
+
+Every variant is reported twice: `subsequence` (calls of one tool, other tools in between do not break a run) and `strict`
+(the full call stream of the context). Every rate gives k/n, a two-sided 95 % Wilson interval and a one-sided 95 % lower
+bound; with n below `--min-support` the status is "no threshold (too little data)". The default thresholds are starting
+values to tune on data.
+
+# Empty results
+
+`empty_results.py` counts how many finished agent tasks returned no result at all, on Claude Code transcripts
+and on `omc team` task files. It blocks nothing and reports numbers only (no prompt, result or subject content).
+It is a standalone offline diagnostic run by hand: it does not change OMC behaviour and has no switch.
+
+## Requirements and usage
+
+- `python3` (standard library only). Run it in isolated mode with `python3 -I`.
+- The inputs are only read. The only files written are the `--tsv` and `--json` files, if given.
+
+```
+python3 -I tools/diagnostics/empty_results.py --transcripts <dir> [--teams <dir>] [--from <ISO>] [--to <ISO>]
+python3 -I tools/diagnostics/empty_results.py --transcripts <dir> --intent intent.tsv --tsv out.tsv --json out.json
+```
+
+| Option | Meaning |
+|---|---|
+| `--transcripts <dir>` | transcripts laid out as for the repeats tool (main sessions and subagents) |
+| `--teams <dir>` | team state directory with `<team>/tasks/task-<n>.json` (or `<n>.json`) files |
+| `--from`, `--to` | ISO range: the call timestamp (transcripts) or `completed_at` / `created_at` (team tasks) |
+| `--min-support N` | below this denominator a rate has no threshold (default 30) |
+| `--intent <TSV>` | optional hand-filled file with the columns `id` and `intent` (`intentional` or `other`) for stopped calls |
+| `--tsv <file>`, `--json <file>` | optional outputs (one TSV row per empty or stopped call or task; the full JSON result) |
+| `--wilson-vectors` | print the Wilson test vectors as JSON and exit |
+
+At least one of `--transcripts` and `--teams` is required. Exit codes: `0` normal run (also with no data), `2` argument or input error.
+
+## What is counted
+
+- Transcripts: an Agent/Task call is empty when its subagent transcript has no assistant text, or its `tool_result` is empty.
+  Subtotals: `prompt_only`, `empty_tool_result`, `tool_use_only`; a call with neither a transcript nor a result is
+  `missing_transcript` and stays outside the denominator.
+- Stop measure: a call with missing answer text that was stopped from outside (parent `TaskStop`, a `killed` task
+  notification, or an interrupted subagent transcript) is not an empty result; it enters `stopped_without_report`.
+  The source precedence is `parent_taskstop`, then `interrupt`, then `killed_other`.
+- Team: a task is empty when its status is `completed` and `result` is missing or blank. The denominator is all finished
+  tasks (`completed` and `failed`) in the range.
+- A part without its input is reported as unmeasured, never as 0; n = 0 gives no rate value. Every rate gives k/n, a
+  two-sided 95 % Wilson interval and a one-sided 95 % lower bound.
