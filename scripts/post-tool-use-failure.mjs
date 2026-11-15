@@ -9,6 +9,9 @@ import { join, sep, resolve } from 'path';
 import { readStdin } from './lib/stdin.mjs';
 import { atomicWriteFileSync, withStateFileLockAtPathSync } from './lib/atomic-write.mjs';
 import { resolveOmcStateRoot } from './lib/state-root.mjs';
+// Opt-in repeated-failure series helpers (OMC_JEV_FAILURE_SERIES=1): the series key, the nudge
+// and final thresholds. Unused while the switch is off.
+import { errorSeriesKey, finalThreshold, nudgeThreshold } from './lib/jev-failure-signature.mjs';
 
 // ============================================================================
 // Session ID resolution (mirrors src/lib/session-id.ts — inlined for .mjs)
@@ -110,6 +113,11 @@ function resolveErrorStatePaths(omcRoot, sessionId) {
 
 // Constants
 const RETRY_WINDOW_MS = 60000; // 60 seconds
+// Package gap of the one-attempt-per-model-response rule: two failures of one series within this
+// window count as a single attempt when no stronger package key is available.
+const PACKAGE_GAP_MS = 2000;
+// Byte limit of the series state file (progressive string-field cuts keep the file under it).
+const STATE_LIMIT_BYTES = 4096;
 // Do not persist tool input or raw errors: either can contain credentials.
 const GENERIC_ERROR_CLASS = 'Tool execution failed (details omitted for privacy).';
 const OPTIONAL_STARTUP_READ_TOOL_NAMES = new Set([
@@ -239,6 +247,67 @@ function calculateRetryCount(existingState, toolName, currentTime) {
   return (existingState.retry_count || 1) + 1;
 }
 
+// Repeated-failure series, keyed by (tool, error signature) instead of the bare tool name. A
+// mutating command with a recognized target path keys the series by the path instead, so one file
+// ground in a circle by different methods is one series. The window and the package rule (one
+// attempt per model response) follow the retry window above.
+function countFailureSeries(existingState, toolName, seriesKey, currentTime, packageKey) {
+  const sameSeries = existingState
+    && existingState.version === 2 // an old (pre-series) or broken state starts a fresh series
+    && existingState.tool_name === toolName
+    && existingState.error_key === seriesKey
+    && Number.isFinite(new Date(existingState.timestamp).getTime());
+  if (!sameSeries || currentTime - new Date(existingState.timestamp).getTime() > RETRY_WINDOW_MS) {
+    return { n: 1, newAttempt: true, newSeries: true };
+  }
+  const samePackage = packageKey
+    ? (existingState.package_key === packageKey)
+    : (currentTime - (existingState.package_ts || 0) < PACKAGE_GAP_MS);
+  if (samePackage) return { n: existingState.retry_count || 1, newAttempt: false }; // one attempt per response: no counting
+  return { n: (existingState.retry_count || 1) + 1, newAttempt: true };
+}
+
+// Steering texts of a series. The nudge fires once per series at the nudge threshold; at the
+// final threshold the final state fires once per series.
+function seriesNudgeText(toolName, n) {
+  return `[OMC FAILURE SERIES] Tool "${toolName}" returned the same error signature ${n} times in this series. Do not repeat the same action: inspect the latest failure, name the cause, pick a materially different approach (a different tool or different input) and run the narrowest verifying step; if the same error returns after two failed methods, end the turn with a line \`BLOCKED: <reason, at least 20 characters>\`. Do not write a report about this notice: at most one short sentence and resume the task.`;
+}
+
+function seriesEndStateText(toolName, n) {
+  return `[OMC FAILURE SERIES: FINAL] Tool "${toolName}" has failed ${n} times with the same signature: two different methods failed. Stop retrying the same approach: try a different command or check dependencies; if the remaining work cannot be performed, end the turn with a line \`BLOCKED: <reason, at least 20 characters>\`; further repeats of the same action change nothing.`;
+}
+
+// Write the failure-series state (version 2) under a hard byte limit: when the JSON exceeds it,
+// string fields are progressively cut until it fits. Fail-open like the base write.
+function writeFailureSeriesState(stateDir, toolName, retryCount, statePath, additional = {}) {
+  const resolvedPath = statePath || join(stateDir, 'last-tool-error.json');
+
+  let errorState = {
+    version: 2,
+    tool_name: toolName,
+    error: GENERIC_ERROR_CLASS,
+    timestamp: new Date().toISOString(),
+    retry_count: retryCount,
+    ...additional,
+  };
+
+  try {
+    let text = JSON.stringify(errorState, null, 2);
+    if (Buffer.byteLength(text) > STATE_LIMIT_BYTES) {
+      let trimmed = { ...errorState };
+      for (const limit of [1200, 800, 400, 200, 100, 50, 20, 8]) {
+        for (const k of Object.keys(trimmed)) {
+          if (typeof trimmed[k] === 'string' && trimmed[k].length > limit) trimmed[k] = trimmed[k].slice(0, limit);
+        }
+        text = JSON.stringify(trimmed, null, 2);
+        if (Buffer.byteLength(text) <= STATE_LIMIT_BYTES) break;
+      }
+      errorState = trimmed;
+    }
+    atomicWriteFileSync(resolvedPath, text);
+  } catch {}
+}
+
 // Write error state to a pre-resolved statePath (session-scoped or legacy)
 function writeErrorState(stateDir, toolName, retryCount, statePath) {
   const resolvedPath = statePath || join(stateDir, 'last-tool-error.json');
@@ -344,18 +413,69 @@ async function main() {
       try { mkdirSync(stateDir, { recursive: true }); } catch {}
     }
 
+    // Opt-in repeated-failure series (OMC_JEV_FAILURE_SERIES=1, default off): failures of the
+    // same tool call signature are counted per session; at the nudge threshold the hook adds a
+    // nudge to the guidance, at the final threshold it escalates once per series. Without the
+    // variable the hook behaves exactly as before.
+    const failureSeriesEnabled = String(process.env.OMC_JEV_FAILURE_SERIES ?? '').trim() === '1';
+
     // Hoist retryCount so it is accessible for guidance generation after the lock
     let retryCount = 1;
+    let steeringText = null; // series steering text of this call (nudge or final state); null = base text
+    let seriesFlags = { nudge: false, end: false };
+
+    // Series key (tool, signature hash), or (tool, path hash) for a mutating command with a
+    // recognized target path; computed only when the series is enabled.
+    let signatureHash = '';
+    let seriesKey = '';
+    let pathHash = '';
+    if (failureSeriesEnabled) {
+      ({ hash: signatureHash, key: seriesKey, pathHash } = errorSeriesKey(toolName, toolInput, error));
+    }
+    // No transcript-based package key in this hook; the time-gap fallback of countFailureSeries
+    // (PACKAGE_GAP_MS) applies.
+    const packageKey = null;
 
     // Read-compute-write under lock to prevent concurrent retryCount corruption
     const stateWriteCompleted = withFileLockSync(statePath, () => {
-      // Read existing state and calculate retry count
+      // Read existing state and calculate the retry count (or the series number when enabled)
       const existingState = readErrorState(statePath);
       const currentTime = Date.now();
-      retryCount = calculateRetryCount(existingState, toolName, currentTime);
+      if (!failureSeriesEnabled) {
+        retryCount = calculateRetryCount(existingState, toolName, currentTime);
+        writeErrorState(stateDir, toolName, retryCount, statePath);
+        return;
+      }
+      const series = countFailureSeries(existingState, toolName, seriesKey, currentTime, packageKey);
+      retryCount = series.n;
+      // A fresh series starts with fresh flags; flags are latched per series (each fires once).
+      const previous = (series.newSeries || !existingState)
+        ? { nudge: false, end: false }
+        : { nudge: existingState.nudge_sent === 1, end: existingState.end_sent === 1 };
+      if (series.newAttempt) { // a package member fires nothing (one attempt per model response)
+        if (series.n >= finalThreshold() && !previous.end) { // final state fires once per series
+          steeringText = seriesEndStateText(toolName, series.n);
+          seriesFlags = { nudge: true, end: true };
+        } else if (series.n >= nudgeThreshold() && !previous.nudge && !previous.end) { // nudge fires once per series
+          steeringText = seriesNudgeText(toolName, series.n);
+          seriesFlags = { nudge: true, end: false };
+        } else {
+          seriesFlags = previous;
+        }
+      } else {
+        seriesFlags = previous;
+      }
 
-      // Write error state
-      writeErrorState(stateDir, toolName, retryCount, statePath);
+      // Write the failure-series state (version 2)
+      writeFailureSeriesState(stateDir, toolName, retryCount, statePath, {
+        signature_hash: signatureHash,
+        path_hash: pathHash,
+        error_key: seriesKey,
+        package_key: packageKey || null,
+        package_ts: currentTime,
+        nudge_sent: seriesFlags.nudge ? 1 : 0,
+        end_sent: seriesFlags.end ? 1 : 0,
+      });
     });
     if (!stateWriteCompleted) {
       console.error('[omc-tool-failure] state write skipped because the exclusive lock was unavailable');
@@ -367,7 +487,10 @@ async function main() {
     // successful Bash calls with error patterns, but PostToolUseFailure is a separate
     // event that needs its own guidance injection.
     let guidance;
-    if (retryCount >= 5) {
+    if (steeringText) {
+      // A fired nudge or final state replaces the base text (each fires once per series).
+      guidance = steeringText;
+    } else if (!failureSeriesEnabled && retryCount >= 5) {
       guidance = `Tool "${toolName}" has failed ${retryCount} times. Stop retrying the same approach — try a different command, check dependencies, or ask the user for guidance.`;
     } else {
       guidance = `Tool "${toolName}" failed. Analyze the error, fix the issue, and continue working.`;

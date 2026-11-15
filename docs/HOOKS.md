@@ -443,6 +443,23 @@ A denial is a PreToolUse `permissionDecision: "deny"` whose reason starts with `
 | `OMC_SHELL_SYNTAX_TIMEOUT_MS` | `1000` | Time limit of the `bash -n` check in milliseconds (100-3000, so that a hung `bash` cannot use up the hook timeout; other values use the default). |
 | `OMC_SHELL_CHECKS_LOG_DIR` | `<state root>/state/shell-checks` | Log directory override. |
 
+#### Repeated Failure Series (`scripts/lib/jev-failure-signature.mjs`)
+
+Opt-in steering for repeated tool failures in `post-tool-use-failure.mjs`. Set `OMC_JEV_FAILURE_SERIES=1` to enable. Without the variable the hook keeps its bare tool-name retry counter, its texts and its state format unchanged.
+
+With the series enabled, each failure is keyed by `(tool, error signature)`. The signature is the first non-empty line of the error with volatile details masked (temp paths, UUIDs, datetimes, times of day, epoch milliseconds, long hex, remaining numbers), so line numbers and timestamps do not split one retry loop into many series. A mutating shell command (`rm`, `mv`, `sed -i`, `tee`, `git apply`) with a recognized target path keys the series by `(tool, path hash)` instead, so the same file caught in a circle by different commands is one series. Only hashes reach the state file, never error text or paths.
+
+- **Nudge**: at the nudge repetition of a series the hook replaces its guidance once with a `[OMC FAILURE SERIES]` notice: inspect the failure, name the cause, change approach, and end the turn with a `BLOCKED: <reason, at least 20 characters>` line if two methods failed.
+- **Final state**: at the final repetition the hook escalates once per series with a `[OMC FAILURE SERIES: FINAL]` notice; later repeats of the same series get the base text.
+- **One attempt per model response**: failures of one series arriving within the package gap (2 s) count as a single attempt.
+- **State**: the session state file gains `version: 2` plus `signature_hash`, `path_hash`, `error_key`, `package_key`, `package_ts`, `nudge_sent`, `end_sent`, and stays under a 4 KiB limit through progressive cuts of its string fields.
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `OMC_JEV_FAILURE_SERIES` | (unset) | `1` enables the series detector, the nudge and the final state. Any other value leaves the hook unchanged. |
+| `OMC_JEV_FAILURE_SERIES_NUDGE` | `3` | Series repetition that fires the nudge (positive integer; other values use the default). |
+| `OMC_JEV_FAILURE_SERIES_FINAL` | `4` | Series repetition that fires the final state (positive integer; other values use the default). |
+
 #### Stale Run Reporter (`stale-run-reporter.mjs`)
 
 A SessionStart hook: the unattended-run **watchdog**. It scans the resolved `.omc` state root for persistent unattended-mode state files — ralph, autopilot, team, ultragoal — left `active: true` with a stale mtime and surfaces them as advisory context, split into two categories.
