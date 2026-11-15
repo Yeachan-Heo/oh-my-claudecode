@@ -24,6 +24,7 @@ import { resolveConfiguredAgentModel } from './lib/agent-model-config.mjs';
 import { BOUNDED_GIT_TIMEOUT_MS } from './lib/bounded-git-timeout.mjs';
 import { isSkillVisibleToUser } from './lib/skill-entitlements.mjs';
 import { isJevAppliedLogEnabled, isJevShadowOptedIn, jevNoulOf, recordJevApplied, recordJevShadow, setJevHookContext, setJevSessionId } from './lib/jev-shadow.mjs';
+import { agentLimit, poolDir, poolEnabled, readPoolState, refusalText, reserveAgent, writePoolRow } from './lib/jev-pool.mjs';
 import { resolveExcerptChars, resolveJevLogMaxBytes, rotateJevLog } from './jev-resolve.mjs';
 
 // Inlined from src/config/models.ts — avoids a dist/ import so the hook works
@@ -2360,6 +2361,42 @@ ${hookOutput.additionalContext}`
   return merged;
 }
 
+// Opt-in agent pool (OMC_JEV_POOL=1, scripts/lib/jev-pool.mjs): a machine-wide ceiling on Agent/Task
+// calls (OMC_JEV_POOL_MAX_AGENTS, 0 = no limit), checked before any Jev query. An allowed call takes a
+// pending reservation, which the SubagentStart, SubagentStop and PostToolUseFailure hooks commit or
+// release. A read error of the pool state never refuses (fail-open).
+function evaluateAgentPool(toolName, data, stateDir) {
+  if (!poolEnabled()) return null;
+  const dir = poolDir(process.env, stateDir);
+  const limit = agentLimit();
+  const toolInput = data && typeof data === 'object' ? (data.tool_input ?? data.toolInput) : undefined;
+  const sessionId = typeof data?.session_id === 'string' ? data.session_id : '';
+  const toolUseId = typeof data?.tool_use_id === 'string' ? data.tool_use_id : '';
+  const subagentType = toolInput && typeof toolInput === 'object' && typeof toolInput.subagent_type === 'string' ? toolInput.subagent_type.slice(0, 200) : null;
+  let alive;
+  let pending = 0;
+  let readOk = true;
+  try {
+    const state = readPoolState(dir);
+    alive = state.alive.length;
+    pending = state.pending.length;
+  } catch {
+    readOk = false;
+  }
+  const occupied = readOk ? alive + pending : null; // pending and alive together: a reservation takes its slot
+  const decision = !readOk ? 'unreadable' : limit > 0 && occupied >= limit ? 'deny' : 'allow';
+  writePoolRow(dir, { tool_name: toolName, session_id: sessionId || null, tool_use_id: toolUseId || null, subagent_type: subagentType, alive: readOk ? alive : null, pending, occupied, limit, decision });
+  if (decision === 'deny') {
+    return { continue: true, hookSpecificOutput: { hookEventName: 'PreToolUse', permissionDecision: 'deny', permissionDecisionReason: `[AGENT POOL] ${refusalText(occupied, limit)}` } };
+  }
+  if (decision === 'allow') {
+    try {
+      reserveAgent({ dir, sessionId, toolUseId, subagentType }); // a failing reservation keeps the call allowed
+    } catch { /* allow without a reservation */ }
+  }
+  return null;
+}
+
 function emitPreToolUseOutput(output, input, space = 0) {
   output = withShellCheckContext(output);
   flushJevRouting(output);
@@ -2437,6 +2474,15 @@ async function main() {
     data = {};
     try { data = JSON.parse(input); } catch {}
     await setJevHookContext(data);
+
+    // Opt-in agent pool (OMC_JEV_POOL=1): refuses Agent/Task calls over the ceiling before any Jev query.
+    if (toolName === 'Task' || toolName === 'Agent') {
+      const poolDeny = evaluateAgentPool(toolName, data, stateDir);
+      if (poolDeny) {
+        emitPreToolUseOutput(poolDeny, data);
+        return;
+      }
+    }
 
     // Opt-in shell checks (OMC_SHELL_CHECKS=1) for Bash and PowerShell commands. Fail-open: any error here
     // leaves the hook behaving as without the checks.
