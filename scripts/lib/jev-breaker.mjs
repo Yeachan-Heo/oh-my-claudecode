@@ -10,11 +10,24 @@
  * another endpoint or a new key starts with a closed breaker; the key itself
  * is never written.
  *
- *   breaker.json            {until, reason, since} in epoch ms: the open breaker
+ *   breaker.json            {until, reason, since} in epoch ms: the open breaker;
+ *                           with OMC_JEV_BREAKER_TIMEOUT_LOW=1 a breaker opened
+ *                           only by no-response failures carries
+ *                           {scope: "low", since_all}: scope "low" holds back
+ *                           only low-priority points, and since_all is the start
+ *                           of the stretch in which every point waited
  *   rpm-<YYYYMMDDHHmm>      one line "<token> <threshold>" per reservation in
  *                           that UTC minute (see foldMinute)
  *   noresp-<YYYYMMDDHHmm>   one line (epoch ms) per request that got no HTTP
  *                           response in that UTC minute
+ *   noresp-imp-<YYYYMMDDHHmm>  with OMC_JEV_BREAKER_TIMEOUT_LOW=1, the same for
+ *                           requests of points of medium or high priority only
+ *                           (see recordFailure)
+ *   openings/<id>.json      with OMC_JEV_BREAKER_TIMEOUT_LOW=1, one file per
+ *                           opening of the breaker {ts, reason, scope, seconds,
+ *                           until, since}, in the parent of the per-scope
+ *                           directories (the daily guard counts the openings
+ *                           caused by no-response failures)
  *   notices/<id>-<n>        claim files: one outage notice per session and outage
  *   breaker.json.lock       {token, ts}: held while breaker.json is read, compared
  *                           and replaced (see takeLock)
@@ -166,8 +179,14 @@ export function breakerSettings(env, endpoint, apiKey) {
   }
   const scope = createHash("sha256").update(String(endpoint ?? "") + "\n" + String(apiKey ?? "")).digest("hex").slice(0, 16);
   const hookDeadline = Number(env?.OMC_JEV_HOOK_DEADLINE);
-  return { breaker, maxRpm, dir: join(base, scope), ...(Number.isFinite(hookDeadline) && hookDeadline > 0 ? { hookDeadline } : {}) };
+  // The low scope for no-response failures is its own opt-in: off, a no-response
+  // failure counts for one breaker of every point, exactly as before.
+  const timeoutLow = String(env?.OMC_JEV_BREAKER_TIMEOUT_LOW ?? "").trim() === "1";
+  return { breaker, maxRpm, base, dir: join(base, scope), timeoutLow, ...(Number.isFinite(hookDeadline) && hookDeadline > 0 ? { hookDeadline } : {}) };
 }
+
+/** Directory of the openings log, shared by every endpoint and key of this installation. */
+export const openingsDirOf = (settings) => join(settings.base, "openings");
 
 function sleepSync(ms) {
   try {
@@ -311,7 +330,17 @@ function breakerOf(state, now) {
   if (state.until > now + BREAKER_MAX_SECONDS * 1000 + CLOCK_SLACK_MS) return undefined;
   const since = Number.isFinite(state.since) ? state.since : now;
   if (since < 0 || since > now + CLOCK_SLACK_MS) return undefined;
-  return { until: state.until, reason: String(state.reason ?? ""), since: Math.min(since, now) };
+  const sinceAll = Number.isFinite(state.since_all) && state.since_all >= 0 && state.since_all <= now + CLOCK_SLACK_MS ? Math.min(state.since_all, now) : undefined;
+  return { until: state.until, reason: String(state.reason ?? ""), since: Math.min(since, now), ...(state.scope === "low" ? { scope: state.scope } : {}), ...(sinceAll !== undefined ? { since_all: sinceAll } : {}) };
+}
+
+/**
+ * Does the open breaker hold back a request of this point? A breaker of scope
+ * "low" (opened by no-response failures of low-priority points only) holds back
+ * the low-priority points only; every other breaker holds back every point.
+ */
+export function breakerCovers(breaker, point) {
+  return Boolean(breaker) && (breaker.scope !== "low" || pointPriority(point) === "low");
 }
 
 /**
@@ -504,7 +533,7 @@ function releaseLock(lockPath, token) {
  * extended or opens again within 15 minutes of expiring. Returns the state in the file afterwards (so
  * concurrent openers agree on `since`), or undefined when it cannot be written.
  */
-function openBreaker(settings, seconds, reason, now) {
+function openBreaker(settings, seconds, reason, now, scope) {
   try {
     ensureDir(settings.dir);
     const until = now + Math.max(1, Math.min(seconds, BREAKER_MAX_SECONDS)) * 1000;
@@ -515,7 +544,15 @@ function openBreaker(settings, seconds, reason, now) {
     const settleMs = settings.settleMs ?? SETTLE_MS;
     let since = now;
     let read = false;
+    let previous; // the file at the first read under the lock
     let written;
+    let recorded = false; // one openings-log row per call that wrote the file, however many rewrites the settle loop made
+    const record = () => {
+      if (settings.timeoutLow && written && !recorded) {
+        recorded = true;
+        recordOpening(settings, now, written, seconds);
+      }
+    };
     for (let attempt = 0; attempt < 3; attempt += 1) {
       if (written) {
         // No pause and second round when the process is about to be killed (not when only the wait for the lock ran long).
@@ -530,7 +567,7 @@ function openBreaker(settings, seconds, reason, now) {
         if (onDisk.unreadable) break;
         if (!read) {
           read = true;
-          const previous = onDisk.state;
+          previous = onDisk.state;
           if (
             previous &&
             Number.isFinite(previous.until) &&
@@ -543,8 +580,36 @@ function openBreaker(settings, seconds, reason, now) {
           }
         }
         const current = breakerOf(onDisk.state, now);
-        if (current && current.until >= until - EXTEND_MIN_MS) return current;
-        const state = { until, reason, since: current ? Math.min(current.since, since) : since };
+        let state;
+        if (!settings.timeoutLow) {
+          if (current && current.until >= until - EXTEND_MIN_MS) return current;
+          state = { until, reason, since: current ? Math.min(current.since, since) : since };
+        } else {
+          // A breaker of scope "low" that must now hold back every point is rewritten even when it ends later; a "low"
+          // opening never narrows an open breaker of all points.
+          const widens = Boolean(current) && current.scope === "low" && scope !== "low";
+          if (current && scope === "low" && current.scope !== "low") {
+            record();
+            return current;
+          }
+          if (current && !widens && current.until >= until - EXTEND_MIN_MS) {
+            record();
+            return current;
+          }
+          const kept = scope === "low" && (!current || current.scope === "low") ? "low" : undefined;
+          // since_all is the start of the stretch (openings less than 15 minutes apart) in which EVERY point waited; a stretch of scope "low" does not count.
+          const chain = current && current.scope !== "low" ? current : previous && previous.scope !== "low" && Number.isFinite(previous.until) && now - previous.until < SAME_OUTAGE_GAP_MS ? previous : undefined;
+          const chainStart = chain ? chain.since_all ?? chain.since : undefined;
+          const sinceAll = Number.isFinite(chainStart) && chainStart >= 0 && chainStart <= now ? chainStart : now;
+          // A no-response breaker that only extends an open breaker of another reason leaves its reason, so its notice is not silenced.
+          const writtenReason = reason === "no-response" && current && current.reason !== "no-response" ? current.reason : reason;
+          state = {
+            until: widens ? Math.max(current.until, until) : until,
+            reason: writtenReason,
+            since: current ? Math.min(current.since, since) : since,
+            ...(kept ? { scope: kept } : { since_all: sinceAll }),
+          };
+        }
         const replaced = replaceFileIf(settings.dir, "breaker.json", JSON.stringify(state), () => holdsLock(lockPath, token));
         // The lock was taken over meanwhile (stale, or a compaction module's token): read again.
         if (replaced === "lost") continue;
@@ -555,9 +620,38 @@ function openBreaker(settings, seconds, reason, now) {
         releaseLock(lockPath, token);
       }
     }
+    record();
     return readBreaker(settings, now) ?? written;
   } catch {
     return undefined;
+  }
+}
+
+// --- openings log (OMC_JEV_BREAKER_TIMEOUT_LOW) ----------------------------
+// openings/<epoch ms>-<random>.json: one small file per opening of the breaker,
+// {ts, reason, scope, seconds, until, since}. A file per opening because the compaction
+// module cannot append and several processes write at once. The daily guard counts the
+// openings caused by no-response failures; the files are the only place where openings
+// (not skipped requests) can be counted. Files older than 7 days are removed on the way.
+
+const OPENINGS_KEEP_MS = 7 * 24 * 3_600_000;
+
+/**
+ * Write the openings-log row of one call that wrote the breaker file, and sweep
+ * rows older than a week. Advisory: never throws.
+ */
+function recordOpening(settings, now, state, seconds) {
+  try {
+    const dir = openingsDirOf(settings);
+    mkdirSync(dir, { recursive: true });
+    const name = now + "-" + Math.random().toString(36).slice(2, 10) + ".json";
+    writeFileSync(join(dir, name), JSON.stringify({ ts: now, reason: state.reason, scope: state.scope === "low" ? state.scope : "all", seconds: Math.round(Math.min(seconds, BREAKER_MAX_SECONDS)), until: state.until, since: state.since }), "utf8");
+    for (const old of readdirSync(dir)) {
+      const at = Number(String(old).split("-")[0]);
+      if (Number.isFinite(at) && now - at > OPENINGS_KEEP_MS) rmSync(join(dir, old), { force: true });
+    }
+  } catch {
+    // the log is advisory
   }
 }
 
@@ -653,34 +747,48 @@ export function failureLogFields(settings, failure, granted, classified) {
 
 /**
  * Requests without a response within the window, this one included, and the
- * newest time recorded: {count, newest}. The window ends at the newest time,
- * not at this call's own clock: concurrent processes sample their clock before
- * they append, so a process may append a time that is older than lines already
- * in the file (or in the next minute's file). Counting back from the newest
- * time gives every process the same count once all lines are written, whatever
- * the order of the appends. A time more than NO_RESPONSE_SKEW_MS ahead of this
- * clock is a corrupt line or a clock set back and is ignored.
+ * newest time recorded: {count, importantCount, newest}. With
+ * OMC_JEV_BREAKER_TIMEOUT_LOW a request of a medium- or high-priority point is
+ * also appended to noresp-imp-<minute>, and importantCount counts those; the
+ * window ends at the newest time, not at this call's own clock: concurrent
+ * processes sample their clock before they append, so a process may append a
+ * time that is older than lines already in the file (or in the next minute's
+ * file). Counting back from the newest time gives every process the same count
+ * once all lines are written, whatever the order of the appends. A time more
+ * than NO_RESPONSE_SKEW_MS ahead of this clock is a corrupt line or a clock set
+ * back and is ignored.
  */
-function noteNoResponse(settings, now) {
+function noteNoResponse(settings, now, important) {
   try {
     appendToMinute(settings, "noresp", String(now), now);
-    const times = [];
-    for (const key of [minuteKey(now - 60_000), minuteKey(now), minuteKey(now + 60_000)]) {
-      let text = "";
-      try {
-        text = readFileSync(join(settings.dir, "noresp-" + key), "utf8");
-      } catch {
-        continue;
+    const importantAppended = Boolean(settings.timeoutLow) && important === true;
+    if (importantAppended) appendToMinute(settings, "noresp-imp", String(now), now);
+    const readMinuteTimes = (prefix) => {
+      const times = [];
+      for (const key of [minuteKey(now - 60_000), minuteKey(now), minuteKey(now + 60_000)]) {
+        let text = "";
+        try {
+          text = readFileSync(join(settings.dir, prefix + "-" + key), "utf8");
+        } catch {
+          continue;
+        }
+        for (const line of text.split("\n")) {
+          const time = Number(line);
+          if (line && Number.isFinite(time) && time <= now + NO_RESPONSE_SKEW_MS) times.push(time);
+        }
       }
-      for (const line of text.split("\n")) {
-        const time = Number(line);
-        if (line && Number.isFinite(time) && time <= now + NO_RESPONSE_SKEW_MS) times.push(time);
-      }
-    }
+      return times;
+    };
+    const times = readMinuteTimes("noresp");
     const newest = times.reduce((latest, time) => Math.max(latest, time), now);
-    return { count: times.filter((time) => time > newest - NO_RESPONSE_WINDOW_MS).length, newest };
+    const importantTimes = importantAppended ? readMinuteTimes("noresp-imp") : [];
+    return {
+      count: times.filter((time) => time > newest - NO_RESPONSE_WINDOW_MS).length,
+      importantCount: importantTimes.filter((time) => time > newest - NO_RESPONSE_WINDOW_MS).length,
+      newest,
+    };
   } catch {
-    return { count: 0, newest: now };
+    return { count: 0, importantCount: 0, newest: now };
   }
 }
 
@@ -688,14 +796,24 @@ function noteNoResponse(settings, now) {
  * Record a failed request (a classifyFailure result). Returns the breaker as
  * it is after this failure when it is open (opened or extended now, or open
  * already), else undefined. Does nothing without OMC_JEV_BREAKER=1.
+ *
+ * With OMC_JEV_BREAKER_TIMEOUT_LOW=1 a request without a response is counted
+ * apart by its point's priority (medium or high is important; `point` absent
+ * counts as important): three within a minute of important points hold back
+ * every point, three within a minute of any point hold back the low-priority
+ * points only (scope "low"). Without the switch every missing response counts
+ * for one breaker of every point, as before.
  */
-export function recordFailure(settings, failure, now = Date.now()) {
+export function recordFailure(settings, failure, now = Date.now(), point) {
   if (!settings?.breaker || !failure) return undefined;
   if (failure.opens) return openBreaker(settings, failure.seconds, failure.reason, now);
   if (failure.reason === "no-response") {
+    const important = pointPriority(point) !== "low";
+    const { count, importantCount, newest } = noteNoResponse(settings, now, important);
     // The breaker closes a minute after the newest of the failures, not of this process's own clock.
-    const { count, newest } = noteNoResponse(settings, now);
-    if (count >= NO_RESPONSE_TO_OPEN) return openBreaker(settings, BREAKER_SECONDS.noResponse, "no-response", newest);
+    if (settings.timeoutLow && importantCount >= NO_RESPONSE_TO_OPEN) return openBreaker(settings, BREAKER_SECONDS.noResponse, "no-response", newest);
+    if (settings.timeoutLow && count >= NO_RESPONSE_TO_OPEN) return openBreaker(settings, BREAKER_SECONDS.noResponse, "no-response", newest, "low");
+    if (!settings.timeoutLow && count >= NO_RESPONSE_TO_OPEN) return openBreaker(settings, BREAKER_SECONDS.noResponse, "no-response", newest);
   }
   return undefined;
 }
@@ -763,7 +881,7 @@ export function reserveRequest(settings, point, now = Date.now()) {
  */
 export function admitRequest(settings, point, now = Date.now()) {
   const open = readBreaker(settings, now);
-  if (open) return { skip: { mode: "circuit-open", breaker: open } };
+  if (open && breakerCovers(open, point)) return { skip: { mode: "circuit-open", breaker: open } };
   const slot = reserveRequest(settings, point, now);
   if (!slot.ok) {
     return { skip: { mode: "cap", priority: slot.priority, count: slot.count, threshold: slot.threshold, limit: slot.limit } };
@@ -774,7 +892,7 @@ export function admitRequest(settings, point, now = Date.now()) {
 /** Extra shadow-log fields of a request admitRequest held back. */
 export function skipLogFields(skip) {
   if (skip.mode === "circuit-open") {
-    return { reason: skip.breaker.reason, until: new Date(skip.breaker.until).toISOString() };
+    return { reason: skip.breaker.reason, until: new Date(skip.breaker.until).toISOString(), ...(skip.breaker.scope === "low" ? { scope: skip.breaker.scope } : {}) };
   }
   return { reason: "rpm", priority: skip.priority, rpm: { count: skip.count, threshold: skip.threshold, limit: skip.limit } };
 }
@@ -799,14 +917,36 @@ export function outageMessage(breaker) {
     "); hooks decide without Jev until then.";
 }
 
+// A breaker opened only by requests without a response is the endpoint being
+// slow for a while: the hooks fall back to their heuristics by themselves and
+// come back by themselves, the user can do nothing about it, so no session gets
+// a message about it. Two cases only (both behind OMC_JEV_BREAKER_TIMEOUT_LOW=1,
+// without it every open breaker keeps its notice as before): a breaker of scope
+// "low" never (the important points keep asking, a "paused" message would be
+// untrue), and one for every point only when every point has been waiting for
+// more than QUIET_NO_RESPONSE_MAX_MS (since_all: openings less than 15 minutes
+// apart are one stretch; the span from `since` is not used, it includes the gaps
+// and the time of scope "low").
+export const QUIET_NO_RESPONSE_REASON = "no-response";
+export const QUIET_NO_RESPONSE_MAX_MS = 10 * 60_000;
+export function noticeWanted(breaker) {
+  if (!breaker) return false;
+  if (breaker.reason !== QUIET_NO_RESPONSE_REASON) return true;
+  if (breaker.scope === "low") return false;
+  return breaker.until - (breaker.since_all ?? breaker.since) > QUIET_NO_RESPONSE_MAX_MS;
+}
+
 /**
  * Claim the notice for this session and outage: the first process to create
  * the claim file wins. Without a session id the claim is per outage for the
  * whole machine. Returns the notice text, or undefined when another process
- * already showed it or the claim cannot be made.
+ * already showed it, the claim cannot be made, or (behind
+ * OMC_JEV_BREAKER_TIMEOUT_LOW=1) noticeWanted rejects a short outage of
+ * no-response failures.
  */
 export function claimOutageNotice(settings, sessionId, breaker, now = Date.now()) {
   if (!settings?.breaker || !breaker) return undefined;
+  if (settings.timeoutLow && !noticeWanted(breaker)) return undefined;
   try {
     const dir = join(settings.dir, "notices");
     ensureDir(dir);

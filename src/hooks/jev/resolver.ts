@@ -382,7 +382,7 @@ export async function resolveJudgment<T>(resolveJudgmentArgs: ResolveJudgmentArg
       // would give a shorter one if read again later).
       const failureClass = shared && error instanceof JevClientError ? shared.breaker.classifyFailure(error) : undefined;
       if (shared && error instanceof JevClientError) {
-        shared.breaker.recordFailure(shared.settings, failureClass);
+        shared.breaker.recordFailure(shared.settings, failureClass, Date.now(), args.point);
       }
       return {
         ok: false as const,

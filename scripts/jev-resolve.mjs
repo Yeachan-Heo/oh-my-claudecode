@@ -628,7 +628,7 @@ export async function resolveRequest(
   const durationMs = Date.now() - startedAt;
   // Tell the breaker before the log write, so concurrent callers see it at once.
   const failureClass = guard && failure ? guard.breaker.classifyFailure(failure) : undefined;
-  const opened = guard && failure ? guard.breaker.recordFailure(guard.settings, failureClass) : undefined;
+  const opened = guard && failure ? guard.breaker.recordFailure(guard.settings, failureClass, Date.now(), request.point) : undefined;
   await writeShadowLog(
     {
       ts: new Date().toISOString(),

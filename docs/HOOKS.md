@@ -1137,6 +1137,29 @@ State is kept under `<Claude config dir>/.omc/jev-guard/`: a record per session 
 
 Without the variable no file is read or written and the hooks behave exactly as before.
 
+### Tool-loop warning, StopFailure record, breaker low scope, delivery guard checks, account probe
+
+Five opt-in additions around the Jev hooks; each is off unless its variable is set, and each leaves the existing behavior unchanged while off.
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `OMC_JEV_LOOP_WARNING` | (unset) | Set to `1` to turn on the `tool-loop-warning.mjs` PostToolUse hook (`hooks/hooks.json`, timeout 3 s). It adds a warning to the context (never blocks) when the same tool call with the same result repeats in a row (every 3rd time by default), or when a cycle of 2 to 6 different calls repeats 3 times. The Agent and Task tools, polling (`sleep`, `gh run watch`, `tail -f`, `git status`) and status tools are not counted. It keeps only digests and tool names, never call or result content. |
+| `OMC_JEV_LOOP_WARNING_THRESHOLD` | `3` | Repeat threshold; zero or negative turns the repeat warning off. |
+| `OMC_JEV_LOOP_WARNING_WINDOW` | `64` | Number of recent call signatures kept per context for cycle detection. |
+| `OMC_JEV_LOOP_WARNING_CYCLE_REPEATS` | `3` | Full repeats of a pattern that make a cycle; zero or negative turns cycle detection off. |
+| `OMC_JEV_LOOP_WARNING_STATE_DAYS` | `2` | Age in days after which a context's state file is swept (every 100th call). |
+| `OMC_JEV_LOOP_WARNING_MCP_SUFFIXES` | `__state_list_active,__state_get_status,__state_read` | Comma-separated name suffixes of MCP tools treated as status polling. |
+| `OMC_JEV_LOOP_WARNING_STATE_DIR` | `~/.omc/state/tool-loop` | State directory; the warnings journal `tool-loop-warnings.jsonl` sits in its parent. |
+| `OMC_JEV_STOP_FAILURE` | (unset) | Set to `1` to make `scripts/stop-failure-record.mjs` record the error code and class of a session's last API failure (a `<session>.error.json` and a line in `errors.jsonl`). The script is **not registered** in `hooks/hooks.json`: this repository does not document a `StopFailure` hook event, so register the script yourself under that event if your Claude Code version sends it. |
+| `OMC_JEV_STOP_FAILURE_DIR` | the Jev log directory | Where the records are written. |
+| `OMC_JEV_STOP_FAILURE_MAX_B` | `1048576` | Size at which `errors.jsonl` is rotated to `errors.jsonl.1`. |
+| `OMC_JEV_BREAKER_TIMEOUT_LOW` | (unset) | Set to `1` (with `OMC_JEV_BREAKER=1`) to count requests without a response by the priority of their point: three within a minute of medium- or high-priority points hold back every point as before, three within a minute of any points hold back only the low-priority points (the breaker file then carries `scope: "low"`), every opening of the breaker is logged as a file in `<breaker dir>/openings/`, and the one-time outage notice is not shown for a short no-response outage (one for every point is shown only after more than 10 minutes). |
+| `OMC_JEV_GUARD_EFFORT` | (unset) | With `OMC_JEV_GUARD=1`: the daily delivery check compares the effort as well as the model; calls of a named agent (a team member) are counted apart because the effort may not reach them. |
+| `OMC_JEV_GUARD_USE_MARKER` | (unset) | With `OMC_JEV_GUARD=1`: the daily delivery check leaves out the decisions of calls with a `use` marker (rows of `applied.jsonl` whose applied model or effort has source `marker`; it takes effect once the applied log records that field). |
+| `OMC_JEV_GUARD_TIMEOUTS_ALARM` | (unset) | With `OMC_JEV_GUARD=1`: the daily check counts the breaker openings caused by missing responses over the last 24 hours (`<breaker dir>/openings/`, written with `OMC_JEV_BREAKER_TIMEOUT_LOW=1`) and the minutes they held requests back, and the next prompt shows an alarm above 20 openings or above 60 minutes. |
+
+`scripts/jev-account-probe.mjs` is a command-line probe, not a hook: it reads the breaker files and the Jev logs and exits 3 when the account has a payment error (HTTP 402) with no successful answer after it, 0 when it has none, and 2 on a read error. It writes an alarm file that other tooling can read (`--alarm-file`, default `<breaker dir>/account-alarm.txt`), with `--state-dir`, `--log-dir`, `--json` and `--now` options. It never uses the network.
+
 ### Request Budget and Latency
 
 Set limits to control cost and latency:
