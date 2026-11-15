@@ -26,7 +26,7 @@ import { isSkillVisibleToUser } from './lib/skill-entitlements.mjs';
 import { isJevAppliedLogEnabled, isJevShadowOptedIn, jevNoulOf, recordJevApplied, recordJevShadow, setJevHookContext, setJevSessionId } from './lib/jev-shadow.mjs';
 import { agentLimit, poolDir, poolEnabled, readPoolState, refusalText, reserveAgent, writePoolRow } from './lib/jev-pool.mjs';
 import { resolveExcerptChars, resolveJevLogMaxBytes, rotateJevLog } from './jev-resolve.mjs';
-import { isDenialSwitchOn, registerDenial, denialMarker } from './lib/jev-denial-counter.mjs';
+import { denialK, denialKey, denialLogDir, denialMarker, denialSessionMax, isDenialSwitchOn, keyHash, registerDenial, writeDenialRow } from './lib/jev-denial-counter.mjs';
 
 // Inlined from src/config/models.ts — avoids a dist/ import so the hook works
 // before a build and stays consistent with the TypeScript source.
@@ -2546,6 +2546,47 @@ async function main() {
         }
         if (verdict?.context) shellCheckContext = verdict.context;
       } catch { /* fail-open */ }
+    }
+
+    // Opt-in kill guard (OMC_JEV_KILL_GUARD=1): refuses Bash commands that signal protected processes or stop protected
+    // services and containers (lib/jev-kill-guard.mjs). Nothing is imported or judged while it is off. Fail-open: a judge
+    // error is logged as one state row of the denial journal and the command goes on.
+    if (toolName === 'Bash' && isDenialSwitchOn('OMC_JEV_KILL_GUARD')) {
+      try {
+        const { judgeKill } = await import('./lib/jev-kill-guard.mjs');
+        const verdict = judgeKill(data?.toolInput?.command ?? data?.tool_input?.command ?? '', process.env, data?.cwd || directory);
+        if (verdict?.refuse) {
+          emitPreToolUseOutput({
+            continue: true,
+            hookSpecificOutput: {
+              hookEventName: 'PreToolUse',
+              permissionDecision: 'deny',
+              permissionDecisionReason: denialReasonWithCounter('kill-guard', verdict.reason, data, stateDir) ?? verdict.reason,
+            },
+          }, data);
+          return;
+        }
+      } catch {
+        writeDenialRow({
+          kind: 'state',
+          session_id: typeof data?.session_id === 'string' ? data.session_id : null,
+          agent_id: typeof data?.agent_id === 'string' ? data.agent_id : null,
+          guard: 'kill-guard',
+          key: keyHash(denialKey('kill-guard', 'judge-error')),
+          n: null,
+          sessionCount: null,
+          k: denialK(process.env),
+          maxSession: denialSessionMax(process.env),
+          degree: 0,
+          result: 'passed',
+          action: 'kill-guard-error',
+          reason_code: 'judge_error',
+          effectiveness: null,
+          state: 'judge-error',
+          tool_name: 'Bash',
+          tool_use_id: typeof data?.tool_use_id === 'string' ? data.tool_use_id : null,
+        }, denialLogDir(stateDir, process.env));
+      }
     }
 
     recordToolInvocation(data, directory);

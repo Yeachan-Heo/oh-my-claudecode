@@ -155,6 +155,17 @@ Opt-in with `OMC_JEV_DENIAL_COUNTER=1`. Every refusal of `pre-tool-enforcer.mjs`
 - **Journal.** `denials.jsonl` in `OMC_JEV_LOG_DIR`, or `<state root>/state/jev` when that is unset. Rows carry `ts`, `ts_ms`, `point: "denial"`, `id`, `kind` (`denial`, `release`, `state`, `outcome`), `session_id`, `agent_id`, `guard`, `key`, `n`, `sessionCount`, `k`, `maxSession`, `degree` (0, 1, 2), `result` (`denied`, `passed`), `action` (`escalation-1`, `escalation-2`, `deny-storm`, `release`, `state-broken`, `state-nan`, `state-lock-unavailable`), `reason_code` (`guard_denial`), `effectiveness` (`null`, reserved for later outcome rows), `state` (`ok`, `broken`, `nan`, `lock-unavailable`), `tool_name` and `tool_use_id`. A row fires once per action. Every decision row is followed by an `outcome` row whose `ref` is the decision `id`. A row is at most 2000 characters (longer string fields are cut and the row gets `truncated: true`), and the file rotates at 1.5 MB.
 - **Lock.** `OMC_JEV_DENIAL_LOCK_MS` (default 1800) and `OMC_JEV_DENIAL_LOCK_ATTEMPTS` (default 50). When the lock is unavailable the refusal stays unchanged, the increment is not counted, and a `state-lock-unavailable` row is written.
 
+### Kill guard
+
+Opt-in with `OMC_JEV_KILL_GUARD=1` (off by default; without it nothing is imported or judged). `pre-tool-enforcer.mjs` judges each Bash command with `scripts/lib/jev-kill-guard.mjs`, after the shell checks, and refuses commands that signal protected processes or stop protected services and containers:
+
+- signals to pid 1, to the ancestors of the agent shell and to their process groups;
+- `pkill` and `killall` patterns that match a protected name, a generic process name, or the command line or name of an ancestor;
+- `systemctl`, `service` and `/etc/init.d/` stop-like actions on protected units, and actions that stop the whole system;
+- `docker` and `docker compose` stop-like actions on protected containers and projects, and commands whose targets cannot be read (globs, unknown substitutions, `xargs` input).
+
+Protected names are configured, not built in (see the variables below). A refusal goes through the [denial counter](#denial-counter), so the common sentences and the escalation apply when `OMC_JEV_DENIAL_COUNTER=1`. A judge error lets the command pass and writes one `state` row with action `kill-guard-error` to `denials.jsonl`.
+
 ### PermissionRequest
 
 Fires when a permission request arises during Bash tool execution.
@@ -653,6 +664,11 @@ export OMC_JEV_ENDPOINT="https://jev-proxy.example.com/v1/systemone"
 | `OMC_JEV_DENIAL_COUNTER` | (unset) | Set to `1` to enable the denial counter for the refusals of `pre-tool-enforcer.mjs` (see [Denial counter](#denial-counter)). Any other value, or unset: the refusal texts stay as they are and no counter file is written. |
 | `OMC_JEV_DENIAL_TEXTS` | (unset) | Set to `1` to give the `/goal` refusal the `BLOCKED:` ending instead of the activate-`/goal` sentence (works without the counter). The three common sentences of counted refusals are added by `OMC_JEV_DENIAL_COUNTER=1` alone. |
 | `OMC_JEV_DENIAL_RELEASE` | (unset) | Set to `1` to let the `/goal` refusal pass after the session ceiling, in a main Claude session. Off by default. |
+| `OMC_JEV_KILL_GUARD` | (unset) | Set to `1` to enable the kill guard. Any other value leaves it off. |
+| `OMC_JEV_KILL_GUARD_SERVICES` | (empty) | Comma separated service and unit names to protect, by base name (without `.service` or `.timer`). Merged with the container list into one list. |
+| `OMC_JEV_KILL_GUARD_CONTAINERS` | (empty) | Comma separated container names to protect. Merged with the service list. |
+| `OMC_JEV_KILL_GUARD_ALLOW` | (empty) | Comma separated names removed from the name-based rules (protected names and generic process names). It never lifts the pid, ancestor, system unit or whole-system rules. |
+| `OMC_JEV_KILL_GUARD_TEST_DIRS` | (empty) | Comma separated path prefixes, for example `/tmp`. A `docker compose` project under one of them, or a project named `test-*`, may be stopped. |
 | `OMC_JEV_DENIAL_K` | `3` | Repeats in the window at which the reminder starts (the block starts at `k + 2`). A value that is not a positive integer keeps the default. |
 | `OMC_JEV_DENIAL_WINDOW_S` | `120` | Window of the repeat count, in seconds. |
 | `OMC_JEV_DENIAL_SESSION_MAX` | `20` | Ceiling of refusals of one guard in a session, never reset within the session. |
