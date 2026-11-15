@@ -158,9 +158,25 @@ Fires after a tool use completes.
 | `project-memory-posttool.mjs` | Updates project memory | 3s |
 | `post-tool-rules-injector.mjs` | Injects matching project rules | 3s |
 | `post-tool-directory-context-injector.mjs` | Injects the README.md and AGENTS.md files from the file's directory up to the working directory, for Read, Write, Edit, and MultiEdit | 3s |
+| `jev-task-list-state.mjs` | Saves the task list of the calling agent; opt-in with `OMC_TASK_LIST=1` (see [Task List](#task-list-scriptslibjev-task-listmjs)) | 3s |
 
 Injects additional guidance based on Read, Write, Edit, and Bash results. For example, after reading a file it may hint "consider using parallel reads."
 These exact canonical shipped scripts use the trusted Worker path without changing their manifest timeout budgets. The verifier retains statistics for the current session and the 99 most recently updated historical sessions so per-tool writes stay bounded. With `OMC_SHELL_CHECKS=1`, `post-tool-verifier.mjs` also records known shell error classes of Bash and PowerShell results (see [Shell Checks](#shell-checks-scriptslibshell-checksmjs)). Disable all four with `DISABLE_OMC=1` (or `DISABLE_OMC=true`) or `OMC_SKIP_HOOKS=post-tool-use`; `project-memory-posttool` also accepts its script-specific token.
+
+#### Task List (`scripts/lib/jev-task-list.mjs`)
+
+Opt-in storage of the task list each agent keeps with the task-list tool (`task_list`, served by the standalone MCP server) and with the built-in task tools (`TaskCreate`, `TaskUpdate`, `TodoWrite`, `update_plan`, `wrap_up`). Set `OMC_TASK_LIST=1` to enable it. Without it the tool is not registered, and `jev-task-list-state.mjs` writes nothing. The list of an agent is what the agent itself sent to these tools; nothing judges the work. The main thread keeps `main.json`, a subagent keeps `<agent_id>.json`, both under `<log dir>/lists/<session_id>/`.
+
+Every call is first written as one event file, then folded into the list under a lock. A lock that is not taken within 1.5 s leaves the event for the next fold and writes a row with `event: "lock_timeout"` to `<log dir>/task-list.jsonl`. The hook fails open: a failure changes nothing and the hook prints the quiet output.
+
+`scripts/jev-task-list-batch.mjs` writes one row per batch of tool calls to `<log dir>/batches.jsonl`. It is not registered in `hooks/hooks.json`, because the `PostToolBatch` event is not used by any hook in this repository and its support by the host is unverified. Register it only after checking that the host sends that event.
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `OMC_TASK_LIST` | (unset) | `1` enables the task-list tool and the state hook. Any other value leaves both off. |
+| `OMC_TASK_LIST_LOG_DIR` | `<home>/.omc/state/task-list` | Log directory override for the lists and the two log files. |
+
+Setting `OMC_SKIP_HOOKS=task-list` (or `DISABLE_OMC=1`) turns the state hook off. The tool can be hidden with `OMC_DISABLE_TOOLS=task-list`.
 
 ### PostToolUseFailure
 
