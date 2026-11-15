@@ -80,6 +80,18 @@
  * when it writes a new minute). Without these two variables nothing of this is read or written. The
  * module's own pause, its three-failures stop and OMC_JEV_MAX_REQUESTS stay as they were.
  *
+ * Token accounting (OMC_JEV_COMPACT_TOKEN_ACCOUNTING=1, off by default; without it nothing below runs and
+ * no record gains a field). The compaction window and threshold come from one resolver (resolveWindow): the
+ * host's breakdown first (rawMaxTokens, autoCompactThreshold), else CLAUDE_CODE_AUTO_COMPACT_WINDOW, the
+ * autoCompactWindow of settings.json under CLAUDE_CONFIG_DIR (or ~/.claude), capped at the model's window,
+ * else the model's window; the threshold is that window less HOST_BUFFER. With the switch on, the own
+ * threshold reads the same window. The tokens before are the host's usage in the main loop, else an
+ * estimate of the API form by class (listTokens, RATE_* constants); the tokens after are predicted from the
+ * removed text by the same rates. OMC_JEV_COMPACT_MAX_WINDOW_TOKENS (positive integer, unset: no cap) caps the
+ * kept target at that window divided by 1 + PREDICTION_SHORTFALL (tokenCeiling). These figures go to the
+ * compaction record only (target_tokens, target_tokens_capped, tokens_before, tokens_after, window, threshold,
+ * window_source, tokens_source); the cut itself still follows the character budget of allocate.
+ *
  * Quiet: no $.ui.log; a toast only with OMC_JEV_COMPACT_TOAST=1. One JSON file per event goes to the
  * spool directory (<state dir>/compaction-spool, $.fs cannot append); the classic SessionStart hook
  * (scripts/lib/jev-compaction-state.mjs) moves those records to compaction.jsonl next to shadow.jsonl.
@@ -115,6 +127,26 @@ const MIN_REDUCTION = 0.3;
 // of the compaction window (about four characters per token).
 const OWN_MIN_GAIN = 0.1;
 const CHARS_PER_TOKEN = 4;
+// Token accounting (OMC_JEV_COMPACT_TOKEN_ACCOUNTING=1). The host compacts HOST_BUFFER tokens below its window (window minus
+// the 20 000 output reserve and the 13 000 autocompact buffer, the /context panel's 33k); used only when the host gives no threshold.
+const HOST_BUFFER = 33000;
+// The prediction after a compaction falls short of the window the host measures by this share (measured on one set of compaction states, 1.2 %
+// after the rates below; an estimate, to be measured again for other hosts). The window ceiling divides by 1 + this share.
+const PREDICTION_SHORTFALL = 0.012;
+// Cost of a class of text in API tokens, from a regression on 374 usage increments of one model (Opus 5.5, Claude Code 2.1.322). Only
+// the costs the module uses are listed; the rates are configuration of the measured host and need measuring again for another one.
+const RATE_IN = 0.5513; // a character of a tool call's name and input
+const RATE_OUT = 0.4502; // a character of a tool result
+const RATE_NOTE = 0.363; // a character of a reminder, notification or delivered message (user text beside a result)
+const RATE_OWN = 0.287; // a character of the user's own words
+const RATE_ATXT = 0.315; // a character of the assistant's text
+const RATE_TRACE = 0.58; // a character of a one-line trace
+const RATE_NON_ASCII = 3.72; // one more token per non-ASCII character
+const RATE_BLOCK = 45.4; // per content block
+const RATE_MESSAGE = -40.5; // per message, spread over its blocks
+const RATE_IMAGE = 2348; // per image (flat; the size from the file header is not read)
+// Non-ASCII characters (by code point) of a text: each costs RATE_NON_ASCII tokens more than an ASCII one.
+const nonAscii = (s) => { let n = 0; for (const ch of String(s ?? '')) if (ch.codePointAt(0) > 127) n++; return n; };
 const SHORT_CHARS = 300;
 const TRACE_INPUT_CHARS = 200;
 const STATE_INPUT_CHARS = 300;
@@ -460,6 +492,10 @@ async function readConfig($) {
     OMC_JEV_COMPACT_AT_PERCENT: await $.env.get('OMC_JEV_COMPACT_AT_PERCENT'),
     OMC_JEV_COMPACT_TARGET: await $.env.get('OMC_JEV_COMPACT_TARGET'),
     OMC_JEV_COMPACT_TOAST: await $.env.get('OMC_JEV_COMPACT_TOAST'),
+    OMC_JEV_COMPACT_TOKEN_ACCOUNTING: await $.env.get('OMC_JEV_COMPACT_TOKEN_ACCOUNTING'),
+    OMC_JEV_COMPACT_MAX_WINDOW_TOKENS: await $.env.get('OMC_JEV_COMPACT_MAX_WINDOW_TOKENS'),
+    CLAUDE_CODE_AUTO_COMPACT_WINDOW: await $.env.get('CLAUDE_CODE_AUTO_COMPACT_WINDOW'),
+    CLAUDE_CONFIG_DIR: await $.env.get('CLAUDE_CONFIG_DIR'),
     OMC_JEV_COMPACT_PRIVATE_PATHS: await $.env.get('OMC_JEV_COMPACT_PRIVATE_PATHS'),
     OMC_JEV_BREAKER: await $.env.get('OMC_JEV_BREAKER'),
     OMC_JEV_MAX_RPM: await $.env.get('OMC_JEV_MAX_RPM'),
@@ -516,6 +552,11 @@ async function readConfig($) {
     excerptChars: positiveInt(env.OMC_JEV_EXCERPT_CHARS_COMPACTION, DEFAULT_EXCERPT_CHARS),
     atPercent: fraction(env.OMC_JEV_COMPACT_AT_PERCENT, undefined, 1, 99),
     target: fraction(env.OMC_JEV_COMPACT_TARGET, DEFAULT_TARGET, 0.1, 0.9),
+    tokenAccounting: String(env.OMC_JEV_COMPACT_TOKEN_ACCOUNTING ?? '').trim() === '1',
+    maxWindowTokens: windowInt(env.OMC_JEV_COMPACT_MAX_WINDOW_TOKENS),
+    autoCompactWindow: env.CLAUDE_CODE_AUTO_COMPACT_WINDOW,
+    configDir: env.CLAUDE_CONFIG_DIR ? slash(env.CLAUDE_CONFIG_DIR) : undefined,
+    home: homeForState ? slash(homeForState) : undefined,
     toast: String(env.OMC_JEV_COMPACT_TOAST ?? '').trim() === '1',
     privatePaths,
   };
@@ -1832,6 +1873,153 @@ function allocate(candidates, before, target, added = 0) {
   }
 }
 
+// --- token accounting (OMC_JEV_COMPACT_TOKEN_ACCOUNTING=1; record fields only, the cut follows allocate) -------------------
+
+const finitePositive = (n) => (typeof n === 'number' && Number.isFinite(n) && n > 0 ? n : undefined);
+const windowInt = (raw) => (/^[1-9]\d{0,8}$/.test(String(raw ?? '').trim()) ? Number(String(raw).trim()) : undefined);
+const strOf = (v) => (typeof v === 'string' ? v : '');
+// One host call capped at HOST_MS: its value, or undefined on a timeout, an error or a missing value.
+async function hostValue($, call) {
+  const settled = await withDeadline($, Promise.resolve().then(() => call()), HOST_MS);
+  return 'value' in settled ? settled.value : undefined;
+}
+
+// The window from settings.json under CLAUDE_CONFIG_DIR (or the home's .claude); a missing or unreadable file gives none.
+async function settingsWindow($, cfg) {
+  const dir = cfg.configDir || (cfg.home ? `${cfg.home}/.claude` : undefined);
+  if (!dir) return undefined;
+  try {
+    const settings = JSON.parse(await $.fs.read(`${dir}/settings.json`));
+    return windowInt(settings?.autoCompactWindow);
+  } catch { return undefined; }
+}
+
+// The compaction window and threshold, one resolver for the compaction and the own threshold. The host's breakdown first: rawMaxTokens is the
+// compaction window (also after /autocompact), autoCompactThreshold the count at which it compacts. Else CLAUDE_CODE_AUTO_COMPACT_WINDOW or the
+// autoCompactWindow of settings.json (both capped at the model's window), else the model's window; the threshold is the window less HOST_BUFFER.
+// `detail` is the result of $.session.usage({ breakdown: 'summary' }), `usage` the one without breakdown; either may be missing.
+export async function resolveWindow($, cfg, detail, usage) {
+  const b = detail?.context?.breakdown;
+  const raw = finitePositive(b?.rawMaxTokens);
+  if (raw) {
+    const threshold = finitePositive(b.autoCompactThreshold) ?? raw - HOST_BUFFER;
+    return { window: raw, threshold: Math.max(1, threshold), source: `host:${typeof b.autocompactSource === 'string' ? b.autocompactSource : 'unknown'}` };
+  }
+  const model = finitePositive(usage?.context?.window) ?? finitePositive(detail?.context?.window);
+  let window = windowInt(cfg.autoCompactWindow);
+  let source = window ? 'env' : undefined;
+  if (!window) { window = await settingsWindow($, cfg); if (window) source = 'settings'; }
+  if (window && model) window = Math.min(window, model);
+  if (!window && model) { window = model; source = 'model'; }
+  if (!window) return undefined;
+  return { window, threshold: Math.max(1, window - HOST_BUFFER), source };
+}
+
+// The prefix in tokens (system prompt, tools, memory files and the like): the breakdown's `used` rows but the messages row, which only its name
+// tells apart; without a messages row no prefix (it would count the messages twice).
+export function prefixTokens(detail) {
+  const rows = detail?.context?.breakdown?.categories;
+  if (!Array.isArray(rows) || !rows.some((c) => c && /^messages$/i.test(String(c.name || '').trim()))) return 0;
+  return rows.reduce((s, c) => s + (c && c.kind === 'used' && !/^messages$/i.test(String(c.name || '').trim()) ? finitePositive(c.tokens) || 0 : 0), 0);
+}
+
+// The kept target after a compaction is at most the window limit divided by 1 + PREDICTION_SHORTFALL; no limit (unset variable) means no ceiling.
+export function tokenCeiling(maxWindowTokens) {
+  return maxWindowTokens ? Math.floor(maxWindowTokens / (1 + PREDICTION_SHORTFALL)) : undefined;
+}
+
+// A one-line trace of a removed item (traceLine), wherever it stands in an assistant text: at its start or after a line break.
+const TRACE_LINE = /(?:^|\n)\[compacted\] [^\n]*/g;
+// The user's own words: a user text that is not a delivery of another source, a task notification or a host block.
+const isUserText = (t) => {
+  const body = t.trimStart();
+  return !HOST_BLOCK_OPEN.test(body) && !DELIVERY_OPENERS.some((p) => body.startsWith(p)) && !DELIVERY_NOTES.some((n) => t.includes(n)) && frameOf(t) !== 'other';
+};
+
+// The API list in tokens by class: a call costs RATE_IN a character of its name and input, a result RATE_OUT, a reminder or a text beside a result
+// RATE_NOTE, the user's words RATE_OWN, the assistant's text RATE_ATXT, a trace RATE_TRACE, each non-ASCII character RATE_NON_ASCII more, RATE_BLOCK a
+// block and RATE_MESSAGE a message spread over its blocks, an image RATE_IMAGE. Thinking, signatures and server blocks are not counted here.
+export function listTokens(api) {
+  let tok = 0;
+  for (const a of api) {
+    if (!a || typeof a !== 'object') continue;
+    const blocks = typeof a.content === 'string' ? [{ type: 'text', text: a.content }] : Array.isArray(a.content) ? a.content.filter((b) => b && typeof b === 'object') : [];
+    const hasResult = blocks.some((b) => b.type === 'tool_result');
+    for (const b of blocks) {
+      const over = RATE_BLOCK + RATE_MESSAGE / blocks.length;
+      if (b.type === 'text') {
+        const t = strOf(b.text);
+        let inTraces = 0;
+        const rest = t.replace(TRACE_LINE, (x) => { inTraces += x.length; return ''; });
+        const rate = a.role === 'assistant' ? RATE_ATXT : hasResult || !isUserText(t) ? RATE_NOTE : RATE_OWN;
+        tok += RATE_TRACE * inTraces + rate * rest.length + RATE_NON_ASCII * nonAscii(rest) + over;
+      } else if (b.type === 'tool_use') {
+        const json = inputJson(b.input);
+        tok += RATE_IN * (strOf(b.name).length + json.length) + RATE_NON_ASCII * nonAscii(json) + over;
+      } else if (b.type === 'tool_result') {
+        const parts = typeof b.content === 'string' ? [{ type: 'text', text: b.content }] : Array.isArray(b.content) ? b.content : [];
+        let text = '';
+        let images = 0;
+        for (const x of parts) { if (x?.type === 'text') text += strOf(x.text); else if (x?.type === 'image') images += RATE_IMAGE; }
+        tok += RATE_OUT * text.length + RATE_NON_ASCII * nonAscii(text) + images + over;
+      } else if (b.type === 'image') tok += RATE_IMAGE;
+      else tok += over;
+    }
+  }
+  return tok;
+}
+
+// The messages as API blocks (a text, a call with its name and input, a result with its text): the estimate's input when the API form is missing.
+function rowsAsApi(messages) {
+  return messages.map((m) => ({
+    role: m.role,
+    content: [
+      ...(m.text ? [{ type: 'text', text: m.text }] : []),
+      ...(m.toolUses || []).map((u) => ({ type: 'tool_use', name: u.tool, input: u.input })),
+      ...(m.toolResults || []).map((r) => ({ type: 'tool_result', tool_use_id: r.tool_use_id, content: r.text || '' })),
+    ],
+  }));
+}
+
+// The cost in tokens of one candidate as it stands (full), with its result shortened (short) and as its trace (trace).
+function itemTokens(c) {
+  const json = inputJson(c.use.input);
+  const call = RATE_IN * ((c.use.tool || '').length + json.length) + RATE_NON_ASCII * nonAscii(json);
+  const cost = (text) => RATE_OUT * text.length + RATE_NON_ASCII * nonAscii(text);
+  const full = call + cost(c.res.text || '');
+  const short = c.resultChars > SHORT_CHARS ? call + cost(shortText(c)) : full;
+  return { full, short, trace: RATE_TRACE * (c.trace.length + 1) };
+}
+
+// The record fields of one compaction with token accounting: the window and threshold, the tokens before (the host's usage in the main loop, else
+// the prefix plus the estimate of the API form) and after (the tokens before less what the keep decisions of allocate remove), the target and its
+// ceiling. Read-only: the cut itself stays with allocate.
+async function tokenAccounting($, e, cfg, messages, api, candidates) {
+  const detail = await hostValue($, () => $.session.usage({ breakdown: 'summary' }));
+  const usage = await hostValue($, () => $.session.usage());
+  const win = await resolveWindow($, cfg, detail, usage);
+  const real = usage?.context?.tokens;
+  const main = e.agentId === undefined && finitePositive(real) !== undefined;
+  const tokensBefore = Math.round(main ? real : prefixTokens(detail) + listTokens(api ?? rowsAsApi(messages)));
+  let removed = 0;
+  for (const c of candidates) {
+    const t = itemTokens(c);
+    removed += t.full - (c.keep === 'short' ? t.short : c.keep === 'trace' ? t.trace : t.full);
+  }
+  const target = Math.floor(cfg.target * tokensBefore);
+  const ceiling = tokenCeiling(cfg.maxWindowTokens);
+  return {
+    tokens_source: main ? 'usage' : 'estimate',
+    tokens_before: tokensBefore,
+    tokens_after: Math.round(tokensBefore - removed),
+    target_tokens: target,
+    target_tokens_capped: ceiling === undefined ? target : Math.min(target, ceiling),
+    window: win?.window ?? null,
+    threshold: win?.threshold ?? null,
+    window_source: win?.source ?? null,
+  };
+}
+
 // Claude Code writes one transcript row per content block, so one API message is several assistant
 // rows sharing a message.id. On `--resume` the host joins the assistant rows of one message.id from
 // the whole transcript, rows from before the compact boundary included, and repeats every block of
@@ -2488,6 +2676,7 @@ async function decide($, e, cfg, record, started) {
     score_hist: hist,
     unanswered: asked.length - answered,
   });
+  if (cfg.tokenAccounting) Object.assign(record, await tokenAccounting($, e, cfg, messages, api, candidates));
   return { messages: built, before, after };
 }
 
@@ -2577,8 +2766,12 @@ async function ownThreshold($, e, next) {
       session.windowTurn = session.turnCount;
       try {
         const detail = await $.session.usage({ breakdown: 'summary' });
-        const raw = detail?.context?.breakdown?.rawMaxTokens;
-        session.compactWindow = Number.isFinite(raw) && raw > 0 ? raw : usage.context.window;
+        if (cfg.tokenAccounting) {
+          session.compactWindow = (await resolveWindow($, cfg, detail, usage))?.window ?? usage.context.window;
+        } else {
+          const raw = detail?.context?.breakdown?.rawMaxTokens;
+          session.compactWindow = Number.isFinite(raw) && raw > 0 ? raw : usage.context.window;
+        }
       } catch { session.compactWindow = usage.context.window; }
     }
     const window = session.compactWindow;
