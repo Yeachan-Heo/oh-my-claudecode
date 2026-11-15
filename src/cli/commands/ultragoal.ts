@@ -63,6 +63,10 @@ Claude /goal integration:
   Final completion is mandatory-gated: run ai-slop-cleaner, rerun verification,
   run $code-review, and pass --quality-gate-json with APPROVE + CLEAR evidence.
   Non-clean final review must use record-review-blockers before clearing the /goal.
+
+Environment:
+  OMC_ULTRAGOAL_MAX_CANDIDATES=<n>  create-goals without --goal refuses a brief whose loose
+    list yields more than <n> goals (unset or 0: no limit). Explicit --goal values are not limited.
 `;
 
 function hasFlag(args: readonly string[], flag: string): boolean {
