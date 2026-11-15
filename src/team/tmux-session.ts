@@ -4353,6 +4353,108 @@ export async function killTeamPane(paneId: string): Promise<void> {
   throw new Error("tmux_server_identity_required");
 }
 
+/**
+ * Opt-in (`OMC_TEAM_KILL_PANE_TREE=1`): before a tmux pane is killed, terminate
+ * every descendant process of the pane's root process, found by parent PID
+ * regardless of session or process group. Descendants get SIGTERM, deepest
+ * first; survivors after 2 seconds get SIGKILL. The pane's root process and
+ * this process are never signalled. Errors are swallowed so that the pane kill
+ * still runs.
+ */
+export async function killWorkerPaneProcessTree(
+  identity: TmuxServerIdentity,
+  paneId: string,
+): Promise<void> {
+  if (process.env.OMC_TEAM_KILL_PANE_TREE !== "1") return;
+  try {
+    const readResult = await runGuardedNativeTmuxCommand(
+      identity,
+      tmuxCommandString(
+        ["display-message", "-p", "-t", paneId, "#{pane_pid}"],
+        ["#{pane_pid}"],
+      ),
+    );
+    if (readResult.outcome !== "executed") return;
+    let panePid = 0;
+    for (const line of readResult.stdout.split(/\r?\n/)) {
+      const value = line.trim();
+      if (/^[1-9]\d*$/.test(value) && panePid === 0) {
+        panePid = Number(value);
+      }
+    }
+    if (panePid <= 1 || panePid === process.pid) return;
+    const records = await readProcessRecords();
+    const byParent = new Map<number, number[]>();
+    for (const [pid, record] of records) {
+      const children = byParent.get(record.ppid) ?? [];
+      children.push(pid);
+      byParent.set(record.ppid, children);
+    }
+    const tree: number[] = [];
+    const seen = new Set<number>([panePid]);
+    const queue = [...(byParent.get(panePid) ?? [])];
+    for (const pid of queue) seen.add(pid);
+    while (queue.length > 0) {
+      const pid = queue.shift()!;
+      tree.push(pid);
+      for (const child of byParent.get(pid) ?? []) {
+        if (!seen.has(child)) {
+          seen.add(child);
+          queue.push(child);
+        }
+      }
+    }
+    if (tree.length === 0) return;
+    const ownPid = process.pid;
+    for (const pid of [...tree].reverse()) {
+      if (pid > 1 && pid !== ownPid && pid !== panePid) {
+        try {
+          process.kill(pid, "SIGTERM");
+        } catch {
+          /* already exited */
+        }
+      }
+    }
+    await new Promise((resolve) => setTimeout(resolve, 2000));
+    const isAlive = (pid: number): boolean => {
+      try {
+        process.kill(pid, 0);
+        return true;
+      } catch (error) {
+        return (error as NodeJS.ErrnoException)?.code === "EPERM";
+      }
+    };
+    for (const pid of [...tree].reverse()) {
+      if (pid > 1 && pid !== ownPid && pid !== panePid && isAlive(pid)) {
+        try {
+          process.kill(pid, "SIGKILL");
+        } catch {
+          /* already exited */
+        }
+      }
+    }
+  } catch {
+    /* reading the tree must not block the pane kill */
+  }
+}
+
+function readProcessRecords(): Promise<Map<number, { ppid: number }>> {
+  return execFileAsync("ps", ["-eo", "pid=,ppid="], { timeout: 2e3 }).then(
+    (result) => {
+      const records = new Map<number, { ppid: number }>();
+      for (const line of result.stdout.split(/\r?\n/)) {
+        const match = line.trim().match(/^(\d+)\s+(\d+)\s*$/);
+        if (!match) continue;
+        const pid = Number(match[1]);
+        const ppid = Number(match[2]);
+        if (pid > 0) records.set(pid, { ppid });
+      }
+      return records;
+    },
+    () => new Map<number, { ppid: number }>(),
+  );
+}
+
 export async function killOwnedWorkerPane(
   ownership: WorkerPaneOwnership,
 ): Promise<void> {
@@ -4400,6 +4502,10 @@ export async function killOwnedWorkerPane(
     await cmuxCloseSurface(ownership.paneId);
     return;
   }
+  await killWorkerPaneProcessTree(
+    ownership.tmuxServerIdentity!,
+    ownership.paneId,
+  );
   const result = await runGuardedNativeTmuxCommand(
     ownership.tmuxServerIdentity!,
     tmuxCommandString(["kill-pane", "-t", ownership.paneId]),

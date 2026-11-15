@@ -116,6 +116,7 @@ import {
   workerPaneBelongsToOwnedProviderTarget,
   observeTmuxServerIdentity,
   killOwnedWorkerPane,
+  killWorkerPaneProcessTree,
   verifyTeamTargetOwnership,
   observeTeamSessionTargetPresence,
   redactBoundedDiagnostic,
@@ -9261,6 +9262,12 @@ export async function shutdownTeamV2(
         continue;
       }
       paneOwnership = ownership.ownership;
+    }
+    if (paneOwnership && worker.pane_id.startsWith("%")) {
+      await killWorkerPaneProcessTree(
+        paneOwnership.tmuxServerIdentity!,
+        paneOwnership.paneId,
+      );
     }
     const attempt = await loadWorkerLaunchAttempt({
       cwd,

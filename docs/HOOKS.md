@@ -382,6 +382,14 @@ A denial is a PreToolUse `permissionDecision: "deny"` whose reason starts with `
 | `OMC_SHELL_SYNTAX_TIMEOUT_MS` | `1000` | Time limit of the `bash -n` check in milliseconds (100-3000, so that a hung `bash` cannot use up the hook timeout; other values use the default). |
 | `OMC_SHELL_CHECKS_LOG_DIR` | `<state root>/state/shell-checks` | Log directory override. |
 
+#### Team Runtime Variables
+
+One opt-in variable of the team runtime (`src/team/`). It leaves behavior unchanged when unset.
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `OMC_TEAM_KILL_PANE_TREE` | (unset) | Set to `1` to terminate all descendant processes of a worker's tmux pane before the pane is killed (SIGTERM, then SIGKILL after 2 seconds for survivors). The pane's root process is not signalled. Only tmux panes are affected. |
+
 #### Stale Run Reporter (`stale-run-reporter.mjs`)
 
 A SessionStart hook: the unattended-run **watchdog**. It scans the resolved `.omc` state root for persistent unattended-mode state files — ralph, autopilot, team, ultragoal — left `active: true` with a stale mtime and surfaces them as advisory context, split into two categories.
