@@ -26,6 +26,7 @@ import { isSkillVisibleToUser } from './lib/skill-entitlements.mjs';
 import { isJevAppliedLogEnabled, isJevShadowOptedIn, jevNoulOf, recordJevApplied, recordJevShadow, setJevHookContext, setJevSessionId } from './lib/jev-shadow.mjs';
 import { agentLimit, poolDir, poolEnabled, readPoolState, refusalText, reserveAgent, writePoolRow } from './lib/jev-pool.mjs';
 import { resolveExcerptChars, resolveJevLogMaxBytes, rotateJevLog } from './jev-resolve.mjs';
+import { isDenialSwitchOn, registerDenial, denialMarker } from './lib/jev-denial-counter.mjs';
 
 // Inlined from src/config/models.ts — avoids a dist/ import so the hook works
 // before a build and stays consistent with the TypeScript source.
@@ -1928,7 +1929,10 @@ function evaluateUltragoalPreToolEnforcement(stateDir, directory, sessionId, dat
   const mismatch = actualObjective
     ? `current Claude /goal appears unrelated: "${actual.objective}".`
     : 'no active Claude /goal snapshot was visible to the hook.';
-  return `[ULTRAGOAL /GOAL REQUIRED] Active ultragoal state requires the matching Claude /goal before tools run; ${mismatch} Activate /goal with the ultragoal objective, or set ALLOW_ULTRAGOAL_WITHOUT_GOAL=1 to bypass this guard intentionally. Expected objective: ${expected || '<record one in ultragoal-state.json or .omc/ultragoal/goals.json>'}`;
+  if (!isDenialSwitchOn('OMC_JEV_DENIAL_TEXTS')) {
+    return `[ULTRAGOAL /GOAL REQUIRED] Active ultragoal state requires the matching Claude /goal before tools run; ${mismatch} Activate /goal with the ultragoal objective, or set ALLOW_ULTRAGOAL_WITHOUT_GOAL=1 to bypass this guard intentionally. Expected objective: ${expected || '<record one in ultragoal-state.json or .omc/ultragoal/goals.json>'}`;
+  }
+  return `[ULTRAGOAL /GOAL REQUIRED] Active ultragoal state requires the matching Claude /goal before tools run; ${mismatch} Expected objective: ${expected || '<record one in ultragoal-state.json or .omc/ultragoal/goals.json>'}. End this step without the call: end your turn with a line \`BLOCKED: <reason, at least 20 characters>\`.`;
 }
 
 function hasActiveJsonMode(stateDir, { allowSessionTagged = false } = {}) {
@@ -2397,6 +2401,45 @@ function evaluateAgentPool(toolName, data, stateDir) {
   return null;
 }
 
+// Opt-in denial counter (OMC_JEV_DENIAL_COUNTER=1): every guard denial of this hook passes through here. Returns the
+// reason with the counter marker and the escalation text appended, or null when the counter releases the guard (only
+// the /goal guard, see lib/jev-denial-counter.mjs). With the switch off it returns the reason unchanged. OMC_JEV_DENIAL_TEXTS=1
+// adds the three common sentences (not done, do not repeat, the executable way out for the guards that have one).
+const DENIAL_POLL_TOOLS = new Set(['BashOutput', 'TaskOutput']);
+const DENIAL_TEXT_NOT_DONE = 'Action NOT performed: do not write that it succeeded.';
+const DENIAL_TEXT_NO_REPEAT = 'Do not repeat the same call: do independent work or change the plan.';
+const DENIAL_WAY_OUT_GUARDS = new Set(['agent-pool', 'ultragoal-goal', 'ultragoal-goal-missing']);
+function denialWayOut(toolName) {
+  return DENIAL_POLL_TOOLS.has(String(toolName || '').trim())
+    ? 'Arm a monitor or wait for the notification.'
+    : 'Use the existing result and change the plan.';
+}
+function denialReasonWithCounter(guard, reason, data, stateDir) {
+  if (!isDenialSwitchOn('OMC_JEV_DENIAL_COUNTER')) return reason;
+  try {
+    const result = registerDenial({
+      stateDir,
+      sessionId: typeof data?.session_id === 'string' ? data.session_id : typeof data?.sessionId === 'string' ? data.sessionId : '',
+      agentId: typeof data?.agent_id === 'string' ? data.agent_id : typeof data?.agentId === 'string' ? data.agentId : '',
+      guard,
+      reason,
+      call: {
+        transcriptPath: data?.transcript_path || data?.transcriptPath || '',
+        toolUseId: data?.tool_use_id || data?.toolUseId || '',
+        toolName: data?.tool_name || data?.toolName || '',
+      },
+    });
+    if (result.release) return null;
+    const texts = isDenialSwitchOn('OMC_JEV_DENIAL_TEXTS')
+      ? [DENIAL_TEXT_NOT_DONE, DENIAL_TEXT_NO_REPEAT, ...(DENIAL_WAY_OUT_GUARDS.has(guard) ? [denialWayOut(data?.tool_name ?? data?.toolName)] : [])]
+      : [];
+    const appended = [denialMarker(result.key, result.n), ...texts, result.text].filter(Boolean).join('\n\n');
+    return appended ? `${reason}\n\n${appended}` : reason;
+  } catch {
+    return reason; // the counter never changes a denial
+  }
+}
+
 function emitPreToolUseOutput(output, input, space = 0) {
   output = withShellCheckContext(output);
   flushJevRouting(output);
@@ -2479,6 +2522,7 @@ async function main() {
     if (toolName === 'Task' || toolName === 'Agent') {
       const poolDeny = evaluateAgentPool(toolName, data, stateDir);
       if (poolDeny) {
+        poolDeny.hookSpecificOutput.permissionDecisionReason = denialReasonWithCounter('agent-pool', poolDeny.hookSpecificOutput.permissionDecisionReason, data, stateDir);
         emitPreToolUseOutput(poolDeny, data);
         return;
       }
@@ -2496,7 +2540,7 @@ async function main() {
             hookSpecificOutput: {
               hookEventName: 'PreToolUse',
               permissionDecision: 'deny',
-              permissionDecisionReason: verdict.reason,
+              permissionDecisionReason: denialReasonWithCounter('shell-checks', verdict.reason, data, stateDir),
             },
           }, data);
           return;
@@ -2534,15 +2578,20 @@ async function main() {
 
     const ultragoalDenyReason = evaluateUltragoalPreToolEnforcement(stateDir, directory, sessionId, data);
     if (ultragoalDenyReason) {
-      emitPreToolUseOutput({
-        continue: true,
-        hookSpecificOutput: {
-          hookEventName: 'PreToolUse',
-          permissionDecision: 'deny',
-          permissionDecisionReason: ultragoalDenyReason
-        }
-      }, data);
-      return;
+      const ultragoalGuard = ultragoalDenyReason.includes('no active Claude /goal snapshot was visible') ? 'ultragoal-goal-missing' : 'ultragoal-goal';
+      const ultragoalReason = denialReasonWithCounter(ultragoalGuard, ultragoalDenyReason, data, stateDir);
+      // A null reason is a release by the denial counter: the call passes and the rest of the hook runs.
+      if (ultragoalReason !== null) {
+        emitPreToolUseOutput({
+          continue: true,
+          hookSpecificOutput: {
+            hookEventName: 'PreToolUse',
+            permissionDecision: 'deny',
+            permissionDecisionReason: ultragoalReason
+          }
+        }, data);
+        return;
+      }
     }
 
     const modeActive = hasActiveMode(stateDir, sessionId);
@@ -2565,6 +2614,7 @@ async function main() {
       // error that names the Skill tool and the correct identifier.
       const skillAgentDeny = evaluateSkillAsAgentCall(toolName, toolInput, directory);
       if (skillAgentDeny) {
+        skillAgentDeny.hookSpecificOutput.permissionDecisionReason = denialReasonWithCounter('skill-vs-agent', skillAgentDeny.hookSpecificOutput.permissionDecisionReason, data, stateDir);
         emitPreToolUseOutput(skillAgentDeny, data);
         return;
       }
@@ -2601,7 +2651,7 @@ async function main() {
               hookSpecificOutput: {
                 hookEventName: 'PreToolUse',
                 permissionDecision: 'deny',
-                permissionDecisionReason: `[MODEL ROUTING] This environment uses a non-standard provider (Bedrock/Vertex/proxy). ${guidance} The model "${toolModel}" is not valid for this provider.`
+                permissionDecisionReason: denialReasonWithCounter('model-routing', `[MODEL ROUTING] This environment uses a non-standard provider (Bedrock/Vertex/proxy). ${guidance} The model "${toolModel}" is not valid for this provider.`, data, stateDir)
               }
             }, data);
             return;
@@ -2623,7 +2673,7 @@ async function main() {
             hookSpecificOutput: {
               hookEventName: 'PreToolUse',
               permissionDecision: 'deny',
-              permissionDecisionReason: `[MODEL ROUTING] Your session model "${sessionModel}" has a context-window suffix ([1m]) that sub-agents cannot inherit — the runtime strips it to a bare Anthropic model ID which is invalid on Bedrock. ${suggestion}`
+              permissionDecisionReason: denialReasonWithCounter('model-routing', `[MODEL ROUTING] Your session model "${sessionModel}" has a context-window suffix ([1m]) that sub-agents cannot inherit — the runtime strips it to a bare Anthropic model ID which is invalid on Bedrock. ${suggestion}`, data, stateDir)
             }
           }, data);
           return;
@@ -2650,7 +2700,7 @@ async function main() {
               hookSpecificOutput: {
                 hookEventName: 'PreToolUse',
                 permissionDecision: 'deny',
-                permissionDecisionReason: `[MODEL ROUTING] Agent type "${agentType}" has model "${agentDefModel}" in its definition, which is not valid for this Bedrock/Vertex/proxy environment. ${guidance}`
+                permissionDecisionReason: denialReasonWithCounter('model-routing', `[MODEL ROUTING] Agent type "${agentType}" has model "${agentDefModel}" in its definition, which is not valid for this Bedrock/Vertex/proxy environment. ${guidance}`, data, stateDir)
               }
             }, data);
             return;
@@ -2742,7 +2792,7 @@ async function main() {
         hookSpecificOutput: {
           hookEventName: 'PreToolUse',
           permissionDecision: 'deny',
-          permissionDecisionReason: delegationBlock.reason,
+          permissionDecisionReason: denialReasonWithCounter('force-delegation', delegationBlock.reason, data, stateDir),
         },
       }, data);
       return;
@@ -2765,7 +2815,7 @@ async function main() {
         hookSpecificOutput: {
           hookEventName: 'PreToolUse',
           permissionDecision: 'deny',
-          permissionDecisionReason: readBudget.reason,
+          permissionDecisionReason: denialReasonWithCounter('read-budget', readBudget.reason, data, stateDir),
         },
       }, data);
       return;
@@ -2789,6 +2839,7 @@ async function main() {
         transcriptPath,
       });
       if (preflightBlock) {
+        preflightBlock.reason = denialReasonWithCounter('agent-heavy-preflight', preflightBlock.reason, data, stateDir);
         emitPreToolUseOutput(preflightBlock, data);
         return;
       }

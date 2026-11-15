@@ -138,6 +138,22 @@ Denies Task/Agent calls whose `subagent_type` names a bundled skill (issue #3667
 The exact canonical shipped script runs in the trusted Worker path; untrusted paths, event mismatches, and extra arguments retain the isolated child-process fallback.
 With `OMC_SHELL_CHECKS=1` it also checks Bash and PowerShell commands before they run (see [Shell Checks](#shell-checks-scriptslibshell-checksmjs)).
 
+### Denial counter
+
+Opt-in with `OMC_JEV_DENIAL_COUNTER=1`. Every refusal of `pre-tool-enforcer.mjs` (agent pool, shell checks, `/goal` guard, skill-vs-agent, model routing, force delegation, read budget, agent-heavy preflight) passes through one counter. A model that repeats the same refused call gets an escalation instead of a bare refusal. The module is `scripts/lib/jev-denial-counter.mjs`. With the switch unset the refusal text is unchanged and no counter file is written.
+
+- **Key.** The guard name and the normalized reason. UUIDs, timestamps, times of day, epoch milliseconds, temp paths and long hex values are replaced by placeholders, so one loop shares one key.
+- **Window.** `OMC_JEV_DENIAL_WINDOW_S` seconds (default 120). The windowed count of a key resets only after the window.
+- **Degrees.** At `OMC_JEV_DENIAL_K` repeats (default 3) the refusal gets a reminder to change approach. At `k + 2` (default 5) it gets a block: change the plan of action, or end the turn with a line `BLOCKED: <reason, at least 20 characters>`.
+- **One attempt per model response.** Calls of one response count once. The package key is the id of the last assistant message of the transcript. Without a transcript id, same-key denials less than 2 s apart count once.
+- **Session ceiling.** `OMC_JEV_DENIAL_SESSION_MAX` (default 20) counts the denials of one guard in a session. It never resets within the session, and at the ceiling the text says so.
+- **Marker.** Every counted refusal ends with `[denial <hash> #<n>]`, where `<hash>` is the 16-hex SHA-256 prefix of the normalized key, the same value as the `key` field of the journal. `#0` means the number is unknown.
+- **Texts.** `OMC_JEV_DENIAL_TEXTS=1` adds three sentences to every counted refusal (needs `OMC_JEV_DENIAL_COUNTER=1`): the action was not performed, do not repeat the same call, and the way out (for agent-pool and `/goal` refusals; for polling tools, arm a monitor or wait). It also gives the `/goal` refusal the `BLOCKED:` ending instead of the activate-`/goal` sentence, with or without the counter.
+- **Release.** `OMC_JEV_DENIAL_RELEASE=1` lets the `/goal` refusal (`ultragoal-goal`) pass after the session ceiling, in a main Claude session only. The missing-goal variant (`ultragoal-goal-missing`), subagents and every other guard are never released.
+- **State.** `<state root>/state/sessions/<session>/denials-<agent_id or main>.json`, written atomically under a lock. It holds hashes, never the denial text, and at most 64 entries per map. An unreadable state (truncated JSON or wrong shape) counts as a crossed threshold for that one call; the state then restarts at one denial.
+- **Journal.** `denials.jsonl` in `OMC_JEV_LOG_DIR`, or `<state root>/state/jev` when that is unset. Rows carry `ts`, `ts_ms`, `point: "denial"`, `id`, `kind` (`denial`, `release`, `state`, `outcome`), `session_id`, `agent_id`, `guard`, `key`, `n`, `sessionCount`, `k`, `maxSession`, `degree` (0, 1, 2), `result` (`denied`, `passed`), `action` (`escalation-1`, `escalation-2`, `deny-storm`, `release`, `state-broken`, `state-nan`, `state-lock-unavailable`), `reason_code` (`guard_denial`), `effectiveness` (`null`, reserved for later outcome rows), `state` (`ok`, `broken`, `nan`, `lock-unavailable`), `tool_name` and `tool_use_id`. A row fires once per action. Every decision row is followed by an `outcome` row whose `ref` is the decision `id`. A row is at most 2000 characters (longer string fields are cut and the row gets `truncated: true`), and the file rotates at 1.5 MB.
+- **Lock.** `OMC_JEV_DENIAL_LOCK_MS` (default 1800) and `OMC_JEV_DENIAL_LOCK_ATTEMPTS` (default 50). When the lock is unavailable the refusal stays unchanged, the increment is not counted, and a `state-lock-unavailable` row is written.
+
 ### PermissionRequest
 
 Fires when a permission request arises during Bash tool execution.
@@ -633,6 +649,14 @@ export OMC_JEV_ENDPOINT="https://jev-proxy.example.com/v1/systemone"
 | `OMC_JEV_POOL_MAX_AGENTS` | `0` (no limit) | Ceiling on the agents of the pool (pending and alive reservations together). A positive integer; `0` or a value that is not an integer means no limit. |
 | `OMC_JEV_POOL_MAX_SESSIONS` | `0` (no limit) | Ceiling on the main sessions counted by `OMC_JEV_POOL_SESSION_COUNTER`; `0` or a value that is not an integer means no limit. |
 | `OMC_JEV_POOL_SESSION_COUNTER` | `claude agents --json` | Command whose output lists the main sessions (an array, or an object with an `agents` or `sessions` array). Processes started with `-p` or `--print` are not counted. A failing command is a read error, not a refusal. |
+| `OMC_JEV_DENIAL_COUNTER` | (unset) | Set to `1` to enable the denial counter for the refusals of `pre-tool-enforcer.mjs` (see [Denial counter](#denial-counter)). Any other value, or unset: the refusal texts stay as they are and no counter file is written. |
+| `OMC_JEV_DENIAL_TEXTS` | (unset) | Set to `1` to add the three common sentences to counted refusals (needs `OMC_JEV_DENIAL_COUNTER=1`) and to give the `/goal` refusal the `BLOCKED:` ending instead of the activate-`/goal` sentence (this part works without the counter). |
+| `OMC_JEV_DENIAL_RELEASE` | (unset) | Set to `1` to let the `/goal` refusal pass after the session ceiling, in a main Claude session. Off by default. |
+| `OMC_JEV_DENIAL_K` | `3` | Repeats in the window at which the reminder starts (the block starts at `k + 2`). A value that is not a positive integer keeps the default. |
+| `OMC_JEV_DENIAL_WINDOW_S` | `120` | Window of the repeat count, in seconds. |
+| `OMC_JEV_DENIAL_SESSION_MAX` | `20` | Ceiling of refusals of one guard in a session, never reset within the session. |
+| `OMC_JEV_DENIAL_LOCK_MS` | `1800` | Total budget of the state lock, in milliseconds. |
+| `OMC_JEV_DENIAL_LOCK_ATTEMPTS` | `50` | Lock attempts before the increment is skipped (fail-open). |
 | `OMC_JEV_BREAKER` | (unset) | Set to `1` to share one circuit breaker between every process of the machine, hook scripts included: after HTTP 429, 401, 402, 403, any 5xx, or three requests without a response within a minute, no request is sent until it closes. The `compaction` point honors it too (through its hooks module). See [Shared breaker and request limit](#shared-breaker-and-request-limit). |
 | `OMC_JEV_MAX_RPM` | (unset, no limit) | Maximum Jev requests per UTC minute for the machine and endpoint/key, a positive integer (`0` or any other value means no limit). Low-priority points stop at 60 % of it and medium ones at 85 %. The `compaction` point counts against it too, as a medium point. See [Shared breaker and request limit](#shared-breaker-and-request-limit). |
 | `OMC_JEV_BREAKER_DIR` | `~/.omc/state/jev/breaker` | State directory of the shared breaker and request limit (test only). |
