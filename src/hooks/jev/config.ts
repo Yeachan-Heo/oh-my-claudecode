@@ -68,10 +68,12 @@ export const ACTIVATED_POINTS: ReadonlySet<string> = new Set<string>();
 /**
  * Points that `all` and `all:active` never enable: they send more than the
  * bounded excerpts of the other points (`compaction` sends tool results and
- * user messages from the conversation), so each needs its own entry in
- * OMC_JEV. Mirror of NAMED_ONLY_POINTS in scripts/jev-resolve.mjs.
+ * user messages from the conversation), or are asked outside the hooks' own
+ * judgment path (`delegation` of a coordinator session, `session-routing` of
+ * scripts/jev-session.mjs), so each needs its own entry in OMC_JEV. Mirror of
+ * NAMED_ONLY_POINTS in scripts/jev-resolve.mjs.
  */
-export const NAMED_ONLY_POINTS: ReadonlySet<string> = new Set<string>(['compaction']);
+export const NAMED_ONLY_POINTS: ReadonlySet<string> = new Set<string>(['compaction', 'delegation', 'session-routing']);
 
 export interface JevConfig {
   apiKey: string | null;

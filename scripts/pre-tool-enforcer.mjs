@@ -6,7 +6,7 @@
  * Cross-platform: Windows, macOS, Linux
  */
 
-import { appendFileSync, closeSync, existsSync, fstatSync, lstatSync, mkdirSync, openSync, readFileSync, readSync, readdirSync, renameSync, writeFileSync } from 'fs';
+import { appendFileSync, closeSync, existsSync, fstatSync, lstatSync, mkdirSync, openSync, readFileSync, readSync, readdirSync, renameSync, statSync, writeFileSync } from 'fs';
 import { createHash } from 'crypto';
 import { dirname, join, resolve, basename } from 'path';
 import { homedir } from 'os';
@@ -23,7 +23,7 @@ import { readStdin } from './lib/stdin.mjs';
 import { resolveConfiguredAgentModel } from './lib/agent-model-config.mjs';
 import { BOUNDED_GIT_TIMEOUT_MS } from './lib/bounded-git-timeout.mjs';
 import { isSkillVisibleToUser } from './lib/skill-entitlements.mjs';
-import { isJevAppliedLogEnabled, isJevShadowOptedIn, jevNoulOf, recordJevApplied, recordJevShadow, setJevHookContext, setJevSessionId } from './lib/jev-shadow.mjs';
+import { isJevAppliedLogEnabled, isJevShadowOptedIn, jevModeFor, jevNoulOf, recordJevApplied, recordJevShadow, setJevHookContext, setJevSessionId } from './lib/jev-shadow.mjs';
 import { agentLimit, poolDir, poolEnabled, readPoolState, refusalText, reserveAgent, writePoolRow } from './lib/jev-pool.mjs';
 import { resolveExcerptChars, resolveJevLogMaxBytes, rotateJevLog } from './jev-resolve.mjs';
 import { denialK, denialKey, denialLogDir, denialMarker, denialSessionMax, isDenialSwitchOn, keyHash, registerDenial, writeDenialRow } from './lib/jev-denial-counter.mjs';
@@ -1718,6 +1718,9 @@ function getExpectedUltragoalObjective(state, directory) {
 
 // Upper bound on the transcript we are willing to read on every tool call.
 const MAX_TRANSCRIPT_BYTES = 25 * 1024 * 1024;
+// Set by readBoundedTranscript when a transcript is over the bound (only with OMC_JEV_HANDOFF=1), so that a size overflow
+// can be told apart from a missing or empty file (both return null).
+let transcriptOverLimit = false;
 // The authoritative `/goal` signal is the slash-command *invocation* record, not the
 // `<local-command-stdout>` display echo (which Claude Code also emits for ordinary
 // user-typed/pasted prompts, so display text is spoofable). A real record looks like
@@ -1748,7 +1751,11 @@ function readBoundedTranscript(path) {
   }
   try {
     const stat = fstatSync(fd);
-    if (!stat.isFile() || stat.size === 0 || stat.size > MAX_TRANSCRIPT_BYTES) return null;
+    if (!stat.isFile() || stat.size === 0) return null;
+    if (stat.size > MAX_TRANSCRIPT_BYTES) {
+      if (isDenialSwitchOn('OMC_JEV_HANDOFF')) transcriptOverLimit = true;
+      return null;
+    }
     const buffer = Buffer.allocUnsafe(stat.size);
     let read = 0;
     while (read < stat.size) {
@@ -1762,6 +1769,18 @@ function readBoundedTranscript(path) {
   } finally {
     try { closeSync(fd); } catch { /* ignore */ }
   }
+}
+
+// Transcript size by statSync only, no reading; only the session's own transcript (`<sessionId>.jsonl`) of a main
+// session (no agent_id), the same binding as in extractGoalFromTranscript.
+function handoffTranscriptSize(data, directory, sessionId) {
+  try {
+    if (data.agent_id || data.agentId || !sessionId) return null;
+    const path = resolveTranscriptPath(data.transcript_path ?? data.transcriptPath, directory);
+    if (!path || typeof path !== 'string') return null;
+    if (basename(path).replace(/\.jsonl$/i, '') !== sessionId) return null;
+    return statSync(path).size;
+  } catch { return null; }
 }
 
 // Recover the active Claude `/goal` from the session transcript.
@@ -1896,6 +1915,7 @@ function isUltragoalBootstrapTool(toolName, toolInput) {
 }
 
 function evaluateUltragoalPreToolEnforcement(stateDir, directory, sessionId, data) {
+  transcriptOverLimit = false; // set again by readBoundedTranscript when the transcript is over the bound
   if (process.env.ALLOW_ULTRAGOAL_WITHOUT_GOAL === '1') return null;
   const toolName = data.tool_name || data.toolName || '';
   const toolInput = data.toolInput || data.tool_input || {};
@@ -2365,6 +2385,19 @@ ${hookOutput.additionalContext}`
   return merged;
 }
 
+// The handoff warning (OMC_JEV_HANDOFF=1) rides on whatever output the hook emits, unless it denies.
+let handoffContext = '';
+function withHandoffContext(output) {
+  if (!handoffContext || !output || typeof output !== 'object') return output;
+  const hookOutput = output.hookSpecificOutput && typeof output.hookSpecificOutput === 'object' ? output.hookSpecificOutput : {};
+  if (hookOutput.permissionDecision === 'deny') return output;
+  const context = typeof hookOutput.additionalContext === 'string' && hookOutput.additionalContext ? `${handoffContext}\n\n${hookOutput.additionalContext}` : handoffContext;
+  const merged = { ...output, hookSpecificOutput: { ...hookOutput, hookEventName: 'PreToolUse', additionalContext: context } };
+  delete merged.suppressOutput;
+  handoffContext = '';
+  return merged;
+}
+
 // Opt-in agent pool (OMC_JEV_POOL=1, scripts/lib/jev-pool.mjs): a machine-wide ceiling on Agent/Task
 // calls (OMC_JEV_POOL_MAX_AGENTS, 0 = no limit), checked before any Jev query. An allowed call takes a
 // pending reservation, which the SubagentStart, SubagentStop and PostToolUseFailure hooks commit or
@@ -2399,6 +2432,31 @@ function evaluateAgentPool(toolName, data, stateDir) {
     } catch { /* allow without a reservation */ }
   }
   return null;
+}
+
+// The named-only Jev point `delegation` (OMC_JEV=delegation, delegation:shadow or delegation:active; `all` never enables it,
+// lib/jev-delegation.mjs). Only the session's own Agent/Task call (no agent_id) in a session whose role is coordinator
+// (OMC_SESSION_ROLE, set by scripts/jev-session.mjs): `delegation` and `delegation:shadow` ask Jev and log the answer in
+// shadow.jsonl, `delegation:active` also gives the hint when Jev says "session". Context only: this never denies and never
+// changes the call; a failure of any kind returns no hint. One applied.jsonl row per decision (with OMC_JEV_APPLIED_LOG).
+async function delegationHintFor(toolName, toolInput, data, stateDir, sessionId) {
+  try {
+    if (data.agent_id || data.agentId) return ''; // a subagent's own call is never a coordinator's choice
+    const mode = jevModeFor('delegation', process.env, data.permission_mode);
+    if (mode === 'off') return '';
+    const { DELEGATION_QUESTIONS, decideDelegation, delegationHintText, delegationState, readRunningAgents, sessionRoleFacts } = await import('./lib/jev-delegation.mjs');
+    const facts = sessionRoleFacts();
+    if (!facts || facts.role !== 'coordinator') return '';
+    const running = readRunningAgents(stateDir, sessionId);
+    const marker = parseModelRoutingMarker(toolInput.prompt);
+    const markerApplies = Boolean(marker && (marker.model || marker.effort)); // a refused word alone leaves the prompt as it was
+    const result = recordJevShadow({ point: 'delegation', state: delegationState({ toolName, toolInput: markerApplies ? { ...toolInput, prompt: marker.prompt } : toolInput, facts, running }), questions: DELEGATION_QUESTIONS, heuristic: null, permissionMode: data.permission_mode });
+    if (mode !== 'active' || !result || result.mode !== 'active') return ''; // shadow logs inside the resolver and returns nothing
+    const decision = decideDelegation(result.answers);
+    if (!decision.choice) return '';
+    recordJevApplied('delegation', { subagent_type: toolInput.subagent_type || null, role: facts.role, choice: decision.choice, confidence: decision.confidence, ...(running !== undefined ? { running } : {}) });
+    return decision.choice === 'session' ? delegationHintText({ running, sessionId }) : '';
+  } catch { return ''; }
 }
 
 // Opt-in denial counter (OMC_JEV_DENIAL_COUNTER=1): every guard denial of this hook passes through here. Returns the
@@ -2440,6 +2498,7 @@ function denialReasonWithCounter(guard, reason, data, stateDir) {
 }
 
 function emitPreToolUseOutput(output, input, space = 0) {
+  output = withHandoffContext(output);
   output = withShellCheckContext(output);
   flushJevRouting(output);
   if (!isCodexPreToolUse(input)) {
@@ -2616,21 +2675,55 @@ async function main() {
           : '';
     setJevSessionId(sessionId, data.agent_id || data.agentId);
 
+    // Opt-in session handoff at a large transcript (OMC_JEV_HANDOFF=1, lib/jev-handoff.mjs). A main session: after the takeover
+    // line in the handoff file every tool is refused (through the denial counter under the guard name `handoff`); from the
+    // warning threshold the warning with the handoff steps is attached to the calls that pass (its frequency is kept in the
+    // handoff state); the path of an allowed write of the handoff file goes to the state. Nothing is imported or read while off.
+    const handoffOn = isDenialSwitchOn('OMC_JEV_HANDOFF');
+    const handoff = handoffOn ? await import('./lib/jev-handoff.mjs') : null;
+    const handoffSize = handoffOn ? handoffTranscriptSize(data, directory, sessionId) : null; // statSync, no reading of the file
+    const handoffBefore = handoffOn ? handoff.handoffBeforeGuard({ stateDir, sessionId, data, sizeBytes: handoffSize }) : { output: null, context: '' };
+    if (handoffBefore.output) {
+      const handedOverReason = handoffBefore.output?.hookSpecificOutput?.permissionDecision === 'deny'
+        ? denialReasonWithCounter('handoff', handoffBefore.output.hookSpecificOutput.permissionDecisionReason, data, stateDir)
+        : '';
+      if (handedOverReason !== null && handedOverReason !== '') handoffBefore.output.hookSpecificOutput.permissionDecisionReason = handedOverReason; // the guard `handoff` is never released: the denial stays
+      emitPreToolUseOutput(handoffBefore.output, data);
+      return;
+    }
+    if (handoffBefore.context) handoffContext = handoffBefore.context;
+
     const ultragoalDenyReason = evaluateUltragoalPreToolEnforcement(stateDir, directory, sessionId, data);
     if (ultragoalDenyReason) {
-      const ultragoalGuard = ultragoalDenyReason.includes('no active Claude /goal snapshot was visible') ? 'ultragoal-goal-missing' : 'ultragoal-goal';
-      const ultragoalReason = denialReasonWithCounter(ultragoalGuard, ultragoalDenyReason, data, stateDir);
-      // A null reason is a release by the denial counter: the call passes and the rest of the hook runs.
-      if (ultragoalReason !== null) {
-        emitPreToolUseOutput({
-          continue: true,
-          hookSpecificOutput: {
-            hookEventName: 'PreToolUse',
-            permissionDecision: 'deny',
-            permissionDecisionReason: ultragoalReason
-          }
-        }, data);
-        return;
+      // Handoff mode replaces the denial when readBoundedTranscript recognised the size overflow: a subagent passes with a
+      // journal row, a main session gets the handoff tools or the "hand the session over" denial (through the denial counter
+      // under the guard name `handoff`, which is never released).
+      const handoffOverride = handoffOn ? handoff.overrideUltragoalDenial({ stateDir, sessionId, data, sizeBytes: handoffSize, overLimit: transcriptOverLimit }) : null;
+      if (handoffOverride) {
+        handoffContext = ''; // in handoff mode a warning would only grow the transcript
+        if (handoffOverride.hookSpecificOutput?.permissionDecision === 'deny') {
+          const handoffReason = denialReasonWithCounter('handoff', handoffOverride.hookSpecificOutput.permissionDecisionReason, data, stateDir);
+          if (handoffReason !== null) handoffOverride.hookSpecificOutput.permissionDecisionReason = handoffReason;
+          emitPreToolUseOutput(handoffOverride, data);
+          return;
+        }
+        // A passed call does not return early and skips the denial below: the rest of the hook keeps running (skill-vs-agent,
+        // model routing, force delegation, read budget, the effort cap and the "Spawning agent" context).
+      } else {
+        const ultragoalGuard = ultragoalDenyReason.includes('no active Claude /goal snapshot was visible') ? 'ultragoal-goal-missing' : 'ultragoal-goal';
+        const ultragoalReason = denialReasonWithCounter(ultragoalGuard, ultragoalDenyReason, data, stateDir);
+        // A null reason is a release by the denial counter: the call passes and the rest of the hook runs.
+        if (ultragoalReason !== null) {
+          emitPreToolUseOutput({
+            continue: true,
+            hookSpecificOutput: {
+              hookEventName: 'PreToolUse',
+              permissionDecision: 'deny',
+              permissionDecisionReason: ultragoalReason
+            }
+          }, data);
+          return;
+        }
       }
     }
 
@@ -2889,6 +2982,7 @@ async function main() {
     // A suppressed warning is applied as soon as it is decided; an added one only once it reaches the output.
     if (appliedAction && appliedAction.action.to === 'none') recordJevApplied('slop-warning', appliedAction);
     let message;
+    let delegationHint = '';
     if (BUILT_IN_TASK_LIST_TOOL_NAMES.has(toolName)) {
       emitPreToolUseOutput({ continue: true, suppressOutput: true }, data);
       return;
@@ -2898,10 +2992,11 @@ async function main() {
       const toolInput = data.toolInput || data.tool_input || null;
       // Reflect any injected per-agent model (issue #3242) in the advisory label.
       message = await generateAgentSpawnMessage(updatedToolInput || toolInput, stateDir, directory, todoStatus, sessionId);
+      delegationHint = toolInput && typeof toolInput === 'object' ? await delegationHintFor(toolName, toolInput, data, stateDir, sessionId) : ''; // coordinator hint (point delegation), context only
     } else {
       message = generateMessage(toolName, todoStatus, modeActive);
     }
-    message = combineHookMessages(slopWarning, message);
+    message = combineHookMessages(delegationHint, slopWarning, message);
 
     // Carry any per-agent model injection (issue #3242) even when the advisory
     // message is empty or throttled, so the configured model is always applied.
@@ -2919,7 +3014,7 @@ async function main() {
       return;
     }
 
-    if (!shouldEmitAdvisoryMessage(stateDir, sessionId, message)) {
+    if (!delegationHint && !shouldEmitAdvisoryMessage(stateDir, sessionId, message)) { // the hint is a decision of this call, never throttled
       emitPreToolUseOutput(
         modelInjection
           ? { continue: true, suppressOutput: true, ...modelInjection }

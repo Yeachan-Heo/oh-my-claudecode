@@ -179,10 +179,12 @@ export function serializeQuestions(questions) {
 
 /**
  * Points that `all` and `all:active` never enable: they send more than the
- * bounded excerpts of the other points, so each needs its own opt-in. Mirror
- * of NAMED_ONLY_POINTS in src/hooks/jev/config.ts.
+ * bounded excerpts of the other points (`compaction`), or are asked outside the
+ * hooks' own judgment path (`delegation` of a coordinator session,
+ * `session-routing` of scripts/jev-session.mjs), so each needs its own opt-in.
+ * Mirror of NAMED_ONLY_POINTS in src/hooks/jev/config.ts.
  */
-export const NAMED_ONLY_POINTS = new Set(["compaction"]);
+export const NAMED_ONLY_POINTS = new Set(["compaction", "delegation", "session-routing"]);
 
 /**
  * Mirror of parseJevConfig + pointState in src/hooks/jev/config.ts. Returns
