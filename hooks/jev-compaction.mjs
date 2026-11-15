@@ -92,6 +92,12 @@
  * compaction record only (target_tokens, target_tokens_capped, tokens_before, tokens_after, window, threshold,
  * window_source, tokens_source); the cut itself still follows the character budget of allocate.
  *
+ * Token cascade (OMC_JEV_COMPACT_TARGET_PERCENT, two digits from 20 to 80; unset: off). The cut then follows tokens: the target is that
+ * share of the tokens before, and cascade (pass forced, pass A, pass B) steps the results down from the least needed, predicting the tokens
+ * after each step, until the prediction reaches the target. The compaction record gains cut, cascade_pass, cascade_target_tokens,
+ * cascade_predicted_tokens and cascade_tokens_source. Removing a call with its result is not part of it. Question naming
+ * (OMC_JEV_COMPACT_QUESTION_NAME=1; unset: off): the score question names its result's key in state.results in its text.
+ *
  * Quiet: no $.ui.log; a toast only with OMC_JEV_COMPACT_TOAST=1. One JSON file per event goes to the
  * spool directory (<state dir>/compaction-spool, $.fs cannot append); the classic SessionStart hook
  * (scripts/lib/jev-compaction-state.mjs) moves those records to compaction.jsonl next to shadow.jsonl.
@@ -236,6 +242,21 @@ export const QUESTION_CRITERIA = [
   'May be useful: details that further work may come back to.',
   'Needed: data that further work relies on and that is nowhere else in the conversation (file contents before an edit, numbers for later calculations, findings, an error to fix).',
 ];
+// The score question of one result. With OMC_JEV_COMPACT_QUESTION_NAME=1 the question text names the result's key in state.results (the keys
+// are not sent to the model otherwise), in the shape of the Typesafe documentation: instructions as {question, compare, focus}, criteria as
+// {what}. Off by default: the plain question above.
+export function scoreQuestion(name, named) {
+  if (!named) return { type: 'score', instructions: QUESTION_INSTRUCTIONS, criteria: QUESTION_CRITERIA };
+  return {
+    type: 'score',
+    instructions: {
+      question: `How much will the tool result \`results.${name}\` still be needed for further work on the user's task (\`task\`)?`,
+      compare: [`\`results.${name}\``, '`task`'],
+      focus: 'Judge whether further work will use it, not whether it was needed before.',
+    },
+    criteria: QUESTION_CRITERIA.map((what) => ({ what })),
+  };
+}
 
 // Blocks the host or a hook adds to a user message; they stay in the conversation but are not the
 // user's words, so they are cut from the task sent to Jev.
@@ -494,6 +515,8 @@ async function readConfig($) {
     OMC_JEV_COMPACT_TOAST: await $.env.get('OMC_JEV_COMPACT_TOAST'),
     OMC_JEV_COMPACT_TOKEN_ACCOUNTING: await $.env.get('OMC_JEV_COMPACT_TOKEN_ACCOUNTING'),
     OMC_JEV_COMPACT_MAX_WINDOW_TOKENS: await $.env.get('OMC_JEV_COMPACT_MAX_WINDOW_TOKENS'),
+    OMC_JEV_COMPACT_TARGET_PERCENT: await $.env.get('OMC_JEV_COMPACT_TARGET_PERCENT'),
+    OMC_JEV_COMPACT_QUESTION_NAME: await $.env.get('OMC_JEV_COMPACT_QUESTION_NAME'),
     CLAUDE_CODE_AUTO_COMPACT_WINDOW: await $.env.get('CLAUDE_CODE_AUTO_COMPACT_WINDOW'),
     CLAUDE_CONFIG_DIR: await $.env.get('CLAUDE_CONFIG_DIR'),
     OMC_JEV_COMPACT_PRIVATE_PATHS: await $.env.get('OMC_JEV_COMPACT_PRIVATE_PATHS'),
@@ -554,6 +577,9 @@ async function readConfig($) {
     target: fraction(env.OMC_JEV_COMPACT_TARGET, DEFAULT_TARGET, 0.1, 0.9),
     tokenAccounting: String(env.OMC_JEV_COMPACT_TOKEN_ACCOUNTING ?? '').trim() === '1',
     maxWindowTokens: windowInt(env.OMC_JEV_COMPACT_MAX_WINDOW_TOKENS),
+    // Token cascade (off unless set to a two-digit share from 20 to 80).
+    targetPercent: /^\d{2}$/.test(String(env.OMC_JEV_COMPACT_TARGET_PERCENT ?? '').trim()) ? fraction(env.OMC_JEV_COMPACT_TARGET_PERCENT, undefined, 20, 80) : undefined,
+    questionNamed: String(env.OMC_JEV_COMPACT_QUESTION_NAME ?? '').trim() === '1',
     autoCompactWindow: env.CLAUDE_CODE_AUTO_COMPACT_WINDOW,
     configDir: env.CLAUDE_CONFIG_DIR ? slash(env.CLAUDE_CONFIG_DIR) : undefined,
     home: homeForState ? slash(homeForState) : undefined,
@@ -1850,6 +1876,46 @@ function findCandidates(messages, privatePaths) {
   return out;
 }
 
+// Token cascade (OMC_JEV_COMPACT_TARGET_PERCENT, 20-80: the share of the tokens before the compaction the kept text may take). Every result
+// starts whole, then the least needed steps down, with a prediction after each step, and it stops at the target: pass forced (a secret or a
+// non-text result to a trace), pass A (a result Jev scored under SHORT_COPY_MIN_SCORE to a trace, the others to a short copy when that saves tokens),
+// pass B (every remaining result to a trace). A pinned result (a task-list call, or a trace that saves no tokens) stays whole. The last pass
+// of the full cascade (removing a call with its result) and the floor are not here: the build does not render a removed call. The keep
+// decisions go to `keep` as allocate sets them. Returns the pass reached, the target and the predicted tokens after.
+export function cascade(candidates, tokensBefore, targetPercent) {
+  const target = Math.floor((targetPercent / 100) * tokensBefore);
+  const costs = new Map(candidates.map((c) => [c, itemTokens(c)]));
+  const saved = (c, keep) => {
+    const t = costs.get(c);
+    return keep === 'short' ? t.full - t.short : keep === 'trace' ? t.full - t.trace : 0;
+  };
+  let removed = 0;
+  const setKeep = (c, keep) => { removed += saved(c, keep) - saved(c, c.keep ?? 'full'); c.keep = keep; };
+  const reached = () => tokensBefore - removed <= target;
+  const forced = (c) => c.secret || !c.textOnly;
+  const pinned = (c) => !forced(c) && (c.task || costs.get(c).full - costs.get(c).trace <= 0);
+  for (const c of candidates) c.keep = 'full';
+  let pass = 'forced';
+  for (const c of candidates) if (forced(c)) setKeep(c, 'trace');
+  const free = candidates.filter((c) => !forced(c) && !pinned(c)).sort((a, b) => a.score - b.score || a.resIdx - b.resIdx);
+  if (!reached()) {
+    pass = 'A';
+    for (const c of free) {
+      if (reached()) break;
+      if (c.score < SHORT_COPY_MIN_SCORE) setKeep(c, 'trace');
+      else if (costs.get(c).short < costs.get(c).full) setKeep(c, 'short');
+    }
+  }
+  if (!reached()) {
+    pass = 'B';
+    for (const c of free) {
+      if (reached()) break;
+      if (c.keep !== 'trace') setKeep(c, 'trace');
+    }
+  }
+  return { pass, target, predicted: Math.round(tokensBefore - removed) };
+}
+
 const removableChars = (candidates) => candidates.reduce((s, c) => s + Math.max(0, c.fullCost - c.traceCost), 0);
 
 // Rank and fill the budget: highest score first while the upgrade from a trace fits; a result that
@@ -1989,6 +2055,15 @@ function itemTokens(c) {
   const full = call + cost(c.res.text || '');
   const short = c.resultChars > SHORT_CHARS ? call + cost(shortText(c)) : full;
   return { full, short, trace: RATE_TRACE * (c.trace.length + 1) };
+}
+
+// The tokens before the compaction, the token cascade's basis: the host's usage in the main loop, else the prefix plus the estimate of the API form.
+async function tokensBeforeOf($, e, messages, api) {
+  const detail = await hostValue($, () => $.session.usage({ breakdown: 'summary' }));
+  const usage = await hostValue($, () => $.session.usage());
+  const real = usage?.context?.tokens;
+  const main = e.agentId === undefined && finitePositive(real) !== undefined;
+  return { tokens: Math.round(main ? real : prefixTokens(detail) + listTokens(api ?? rowsAsApi(messages))), source: main ? 'usage' : 'estimate' };
 }
 
 // The record fields of one compaction with token accounting: the window and threshold, the tokens before (the host's usage in the main loop, else
@@ -2590,7 +2665,7 @@ async function decide($, e, cfg, record, started) {
         chars: c.resultChars,
         ...(c.res.isError ? { error: true } : {}),
       };
-      questions[c.question] = { type: 'score', instructions: QUESTION_INSTRUCTIONS, criteria: QUESTION_CRITERIA };
+      questions[c.question] = scoreQuestion(c.question, cfg.questionNamed);
     });
     const state = boundExcerpts({ task: user.task, ...(user.instructions ? { compact_instructions: user.instructions } : {}), results }, cfg.excerptChars);
     const t0 = Date.now();
@@ -2653,7 +2728,14 @@ async function decide($, e, cfg, record, started) {
   if (held?.mode === 'deadline') return { fallback: 'timeout' };
 
   record.mentioned = markMentioned(candidates, user);
-  allocate(candidates, before, cfg.target, envelopes);
+  if (cfg.targetPercent === undefined) allocate(candidates, before, cfg.target, envelopes);
+  else {
+    // Token cascade (OMC_JEV_COMPACT_TARGET_PERCENT): the target and the prediction are in tokens; the envelopes and delivered text that build
+    // adds are not part of the prediction.
+    const tokens = await tokensBeforeOf($, e, messages, api);
+    const plan = cascade(candidates, tokens.tokens, cfg.targetPercent);
+    Object.assign(record, { cut: 'cascade', cascade_pass: plan.pass, cascade_target_tokens: plan.target, cascade_predicted_tokens: plan.predicted, cascade_tokens_source: tokens.source });
+  }
   const stats = {};
   const built = build(messages, candidates, keepFrom, group, stats, queued);
   if (!pairingOk(messages, built)) return { fallback: 'build_error' };
