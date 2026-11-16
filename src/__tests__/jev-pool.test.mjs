@@ -88,7 +88,7 @@ describe('reservation, commit and release (reserveSubagentSpawn pattern)', () =>
     const dir = makeDir();
     expect(countAlive(dir)).toBe(0);
     expect(countOccupied(dir)).toBe(0);
-    const r = reserveAgent({ dir, sessionId: 's1', toolUseId: 't1', subagentType: 'mechanik', now: 1_000_000, env: {} });
+    const r = reserveAgent({ dir, sessionId: 's1', toolUseId: 't1', subagentType: 'helper', now: 1_000_000, env: {} });
     expect(r.ok).toBe(true);
     expect(countOccupied(dir, 1_000_001)).toBe(1);
     expect(countAlive(dir, 1_000_001)).toBe(0);
@@ -229,7 +229,7 @@ function projectDir() {
   return dir;
 }
 
-function preToolUse(cwd, logDir, extraEnv, toolName = 'Agent', toolInput = { subagent_type: 'mechanik', prompt: 'Check the risks.' }) {
+function preToolUse(cwd, logDir, extraEnv, toolName = 'Agent', toolInput = { subagent_type: 'helper', prompt: 'Check the risks.' }) {
   return runHook('pre-tool-enforcer.mjs', { hook_event_name: 'PreToolUse', tool_name: toolName, tool_input: toolInput, session_id: 'session-pool', tool_use_id: 'tool-1', cwd }, { OMC_JEV_LOG_DIR: logDir, ...extraEnv }, cwd);
 }
 

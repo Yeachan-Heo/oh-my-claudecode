@@ -105,7 +105,7 @@ describe('stop-failure-record hook', () => {
     const details = 'D'.repeat(500) + 'END-DETAILS';
     const message = 'A'.repeat(400) + 'TAIL-MARKER-SFR';
     const r = run({
-      session_id: 's-kontrakt',
+      session_id: 's-contract',
       error: 'billing_error',
       error_details: details,
       last_assistant_message: message,
@@ -116,12 +116,12 @@ describe('stop-failure-record hook', () => {
     expect(existsSync(state)).toBe(true);
     const dirMode = lstatSync(state).mode & 0o777;
     expect(dirMode).toBe(0o700);
-    const filePath = join(state, 's-kontrakt.error.json');
+    const filePath = join(state, 's-contract.error.json');
     const fileMode = lstatSync(filePath).mode & 0o777;
     expect(fileMode).toBe(0o600);
     const record = JSON.parse(readFileSync(filePath, 'utf8'));
     expect(record.ts).toMatch(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d+)?(Z|[+-]\d{2}:\d{2})$/);
-    expect(record.session_id).toBe('s-kontrakt');
+    expect(record.session_id).toBe('s-contract');
     expect(record.error).toBe('billing_error');
     expect(record.errorClass).toBe('config');
     expect(record.details).toHaveLength(300);
@@ -129,7 +129,7 @@ describe('stop-failure-record hook', () => {
     expect(record.tail).toBe(message.slice(-300));
     expect(record.tail).toHaveLength(300);
     expect(readdirSync(state).some((n) => n.endsWith('.tmp'))).toBe(false);
-    const r2 = run({ session_id: 's-kontrakt', error: 'rate_limit' }, state);
+    const r2 = run({ session_id: 's-contract', error: 'rate_limit' }, state);
     expect(r2.status).toBe(0);
     expect(JSON.parse(readFileSync(filePath, 'utf8')).errorClass).toBe('transient');
   });

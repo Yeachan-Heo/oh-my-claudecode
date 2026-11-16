@@ -102,7 +102,7 @@ describe('tool-loop warning hook', () => {
     const laneDir = laneOf('different-results');
     const state = join(laneDir, 'state');
     for (let i = 1; i <= 3; i += 1) {
-      const r = run({ session_id: 's-rozne', tool_response: `version-${i}` }, state);
+      const r = run({ session_id: 's-varied', tool_response: `version-${i}` }, state);
       expect(r.status).toBe(0);
       expect(r.stdout.trim()).toBe('');
     }
@@ -134,7 +134,7 @@ describe('tool-loop warning hook', () => {
     const B = { tool_name: 'Grep', tool_input: { pattern: 'cycle-p', path: '/tmp/c' }, tool_response: 'cycle-b' };
     const C = { tool_name: 'Glob', tool_input: { pattern: 'break-*' }, tool_response: 'empty' };
     const step = (n, extra, expectWarn) => {
-      const r = run({ session_id: 's-cykl', ...extra }, state);
+      const r = run({ session_id: 's-cycle', ...extra }, state);
       expect(r.status).toBe(0);
       const text = context(r);
       if (expectWarn) {
@@ -170,7 +170,7 @@ describe('tool-loop warning hook', () => {
       { tool_name: 'Bash', tool_input: { command: 'ls /tmp/m' } },
     ];
     for (let i = 0; i < 9; i += 1) {
-      const r = run({ session_id: 's-cykl3', ...tools[i % 3] }, state);
+      const r = run({ session_id: 's-cycle3', ...tools[i % 3] }, state);
       expect(r.status).toBe(0);
       if (i === 8) expect(context(r)).toMatch(/in a 3-step cycle \(Read, Grep, Bash\) 3 times\./);
       else expect(context(r)).toBeNull();
@@ -196,7 +196,7 @@ describe('tool-loop warning hook', () => {
 
     for (let i = 0; i < cases.length; i += 1) {
       for (let k = 0; k < 3; k += 1) {
-        const r = run({ session_id: 's-wyj', tool_use_id: `w${i}-${k}`, ...cases[i] }, state);
+        const r = run({ session_id: 's-exempt', tool_use_id: `w${i}-${k}`, ...cases[i] }, state);
         expect(r.status).toBe(0);
         expect(r.stdout.trim()).toBe('');
       }
@@ -250,7 +250,7 @@ describe('tool-loop warning hook', () => {
   it('main session and subagent (agent_id) count apart, separate state files', () => {
     const laneDir = laneOf('contexts');
     const state = join(laneDir, 'state');
-    const d = { session_id: 's-ktx', tool_use_id: 'k' };
+    const d = { session_id: 's-ctx', tool_use_id: 'k' };
     expect(context(run(d, state))).toBeNull();
     expect(context(run(d, state))).toBeNull();
     const dAgent = { ...d, agent_id: 'a1', agent_type: 'executor' };
@@ -302,7 +302,7 @@ describe('tool-loop warning hook', () => {
     let last;
     for (let k = 1; k <= 3; k += 1) {
       last = run({
-        session_id: 's-tresc',
+        session_id: 's-content',
         tool_input: { file_path: `/tmp/${MARKER_INPUT}/file.md` },
         tool_response: `result ${MARKER_RESULT}`,
       }, state);
@@ -311,7 +311,7 @@ describe('tool-loop warning hook', () => {
     expect(context(last)).toBeTruthy();
     const whole = last.stdout
       + readFileSync(join(laneDir, 'tool-loop-warnings.jsonl'), 'utf8')
-      + readFileSync(stateFileOf(laneDir, 's-tresc'), 'utf8');
+      + readFileSync(stateFileOf(laneDir, 's-content'), 'utf8');
     expect(whole.includes(MARKER_INPUT)).toBe(false);
     expect(whole.includes(MARKER_RESULT)).toBe(false);
     expect(whole).toMatch(/"tool":"Read"/);
@@ -321,14 +321,14 @@ describe('tool-loop warning hook', () => {
     const laneDir = laneOf('sweep');
     const state = join(laneDir, 'state');
     mkdirSync(state, { recursive: true });
-    const own = stateFileOf(laneDir, 's-sprzat', '');
+    const own = stateFileOf(laneDir, 's-cleanup', '');
     writeFileSync(own, JSON.stringify({ calls: 99 }));
     const now = Date.now() / 1000;
     utimesSync(own, now - 5, now - 5);
     const foreign = join(state, 'stale-inactive.json');
     writeFileSync(foreign, JSON.stringify({}));
     utimesSync(foreign, now - 5, now - 5);
-    const r = run({ session_id: 's-sprzat', tool_use_id: 'z' }, state, { OMC_JEV_LOOP_WARNING_STATE_DAYS: '0' });
+    const r = run({ session_id: 's-cleanup', tool_use_id: 'z' }, state, { OMC_JEV_LOOP_WARNING_STATE_DAYS: '0' });
     expect(r.status).toBe(0);
     expect(r.stdout.trim()).toBe('');
     expect(existsSync(foreign)).toBe(false);

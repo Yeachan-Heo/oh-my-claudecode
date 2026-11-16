@@ -125,7 +125,7 @@ test('table p2: kill targets, pkill patterns, compose, heredoc', () => {
     T("pkill -f '\\.mjs'", 'pass'),
     T('pkill -f "port=8123"', 'pass'), T('pkill -f "--port 8123"', 'pass'), T('pkill -f "--port=8123"', 'pass'),
     T('pkill -f "x.py"', 'pass'),
-    T('killall node', 'refuse'), T('killall sleep', 'pass'), T('killall -9 mojproces', 'pass'),
+    T('killall node', 'refuse'), T('killall sleep', 'pass'), T('killall -9 myprocess', 'pass'),
     T('docker compose down', 'refuse'), T('docker compose -f docker-compose.test.yml down', 'refuse'),
     T('docker compose up -d', 'pass'), T('docker compose ps', 'pass'), T('docker compose logs', 'pass'),
     T('docker logs example-db-prod', 'pass'), T('docker ps', 'pass'),
@@ -155,7 +155,7 @@ test('table p3: quoting, comments, substitutions, systemctl gaps, uncertain dock
   const T = (n, o) => ({ n, o });
   const table = [
     T('echo "it\'s"; kill 1', 'refuse'), T("cat <<EOF2\nit's\nEOF2\nkill 1", 'refuse'), T("cat <<'EOF2'\ndon't\nEOF2\nsystemctl stop caddy", 'refuse'),
-    T('echo a#b; kill 1', 'refuse'), T("echo '#'; kill 1", 'refuse'), T('kill 1 # komentarz', 'refuse'),
+    T('echo a#b; kill 1', 'refuse'), T("echo '#'; kill 1", 'refuse'), T('kill 1 # comment', 'refuse'),
     T('kill\t1', 'refuse'), T('kill 1&', 'refuse'), T(';kill 1', 'refuse'),
     T('x=$(kill 1)', 'refuse'), T('echo "$(kill 1)"', 'refuse'), T('echo `kill 1`', 'refuse'),
     T('sudo -u root kill 1', 'refuse'), T('env -i kill 1', 'refuse'), T('env FOO=1 kill 1', 'refuse'), T('sudo env kill 1', 'refuse'),
@@ -208,7 +208,7 @@ test('table p4-p7: per-wrapper flags, nesting depth, broadcast, stop-everything 
     T('xargs -a f kill', 'refuse'), T('xargs -0 kill', 'refuse'), T('xargs --no-run-if-empty kill', 'refuse'),
     T("bash -ec 'kill 1'", 'refuse'), T("bash -xc 'kill 1'", 'refuse'), T('sh -lc "systemctl stop caddy"', 'refuse'),
     T("zsh -c 'kill 1'", 'refuse'), T("dash -c 'kill 1'", 'refuse'), T("bash -c 'kill 1'", 'refuse'), T('bash -c "kill 1"', 'refuse'), T("/bin/bash -c 'kill 1'", 'refuse'),
-    T("sudo -u flota bash -lc 'docker stop example-db-prod'", 'refuse'),
+    T("sudo -u fleet bash -lc 'docker stop example-db-prod'", 'refuse'),
     T('echo $(echo $(echo $(echo $(echo $(echo $(echo $(echo $(echo $(echo $(kill 1))))))))))', 'refuse'),
     T('echo $(echo $(echo $(kill 1)))', 'refuse'),
     T('kill -- -1', 'refuse'), T('kill -9 -1', 'refuse'), T('kill -TERM -1', 'refuse'), T('kill -s KILL -1', 'refuse'), T('kill -9 -- -1', 'refuse'),
