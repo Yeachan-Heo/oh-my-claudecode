@@ -1,0 +1,20 @@
+// Type declarations for vocab.cjs (editor support only; scripts/ is not compiled by tsc).
+export declare const STATUSES: Readonly<Record<string, string>>;
+export declare const CAUSES: Readonly<Record<string, string>>;
+export declare const FAILURE_CLASSES: Readonly<Record<string, string>>;
+export declare const DONE_CLAIM_KEYS: Readonly<Record<string, string>>;
+export declare const GATE_REASONS: Readonly<Record<string, string>>;
+export declare const QUOTA_LEVELS: Readonly<Record<'PAUSE' | 'STOP' | 'WORK', string>>;
+export declare const EXIT: Readonly<Record<string, number>>;
+export declare function signalExitCode(signalNumber: number): number;
+export declare const WORKER_EVENT_RESULTS: Readonly<Record<string, string>>;
+export declare const ADVISOR_STATUSES: Readonly<Record<string, string>>;
+export declare const ADVISOR_EVENTS: Readonly<Record<string, string>>;
+export declare const ADVISOR_VERDICTS: Readonly<Record<'plan' | 'rescue' | 'final', readonly string[]>>;
+export declare const ADVISOR_TOKENS: Readonly<Record<string, string>>;
+export declare const TASK_WARNINGS: Readonly<Record<string, string>>;
+export declare const RESCUE_EVENTS: Readonly<Record<string, string>>;
+export declare const RESCUE_COUNTER_FIELDS: readonly string[];
+export declare const CALL_COUNTER_FILE: string;
+export declare const TASK_TEAM_RE: RegExp;
+export declare function taskSubject(id: string): string;

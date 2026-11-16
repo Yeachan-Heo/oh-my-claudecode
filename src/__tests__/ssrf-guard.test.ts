@@ -1,4 +1,4 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import { validateUrlForSSRF, validateAnthropicBaseUrl } from '../utils/ssrf-guard.js';
 
 describe('SSRF Guard', () => {
@@ -125,6 +125,66 @@ describe('SSRF Guard', () => {
 
     it('allows valid external URLs', () => {
       expect(validateAnthropicBaseUrl('https://api.anthropic.com').allowed).toBe(true);
+    });
+
+    describe('allowLoopbackPort option', () => {
+      const PORT = 33177;
+      const loopback = `http://127.0.0.1:${PORT}`;
+
+      it('allows http://127.0.0.1:<port> for exactly that port, without a warning', () => {
+        const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+        try {
+          expect(validateAnthropicBaseUrl(loopback, { allowLoopbackPort: PORT })).toEqual({ allowed: true });
+          expect(validateAnthropicBaseUrl(`http://localhost:${PORT}`, { allowLoopbackPort: PORT })).toEqual({ allowed: true });
+          expect(warn).not.toHaveBeenCalled();
+        } finally {
+          warn.mockRestore();
+        }
+      });
+
+      it('still blocks loopback without the option', () => {
+        expect(validateAnthropicBaseUrl(loopback).allowed).toBe(false);
+        expect(validateAnthropicBaseUrl(loopback, {}).allowed).toBe(false);
+      });
+
+      it('denies any other port', () => {
+        expect(validateAnthropicBaseUrl(`http://127.0.0.1:${PORT + 1}`, { allowLoopbackPort: PORT }).allowed).toBe(false);
+        expect(validateAnthropicBaseUrl('http://127.0.0.1', { allowLoopbackPort: PORT }).allowed).toBe(false);
+      });
+
+      it('denies https on the loopback address', () => {
+        expect(validateAnthropicBaseUrl(`https://127.0.0.1:${PORT}`, { allowLoopbackPort: PORT }).allowed).toBe(false);
+      });
+
+      it('denies private and metadata addresses even on the allowed port', () => {
+        expect(validateAnthropicBaseUrl(`http://10.0.0.1:${PORT}`, { allowLoopbackPort: PORT }).allowed).toBe(false);
+        expect(validateAnthropicBaseUrl(`http://169.254.169.254:${PORT}`, { allowLoopbackPort: PORT }).allowed).toBe(false);
+        expect(validateAnthropicBaseUrl(`http://[::1]:${PORT}`, { allowLoopbackPort: PORT }).allowed).toBe(false);
+      });
+
+      it('denies credentials in the URL and cloud metadata paths', () => {
+        expect(validateAnthropicBaseUrl(`http://user:pw@127.0.0.1:${PORT}`, { allowLoopbackPort: PORT }).allowed).toBe(false);
+        expect(validateAnthropicBaseUrl(`${loopback}/latest/meta-data`, { allowLoopbackPort: PORT }).allowed).toBe(false);
+      });
+
+      it('gives a lookalike host the same result with and without the option', () => {
+        const lookalike = `http://127.0.0.1.evil.example:${PORT}`;
+        const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+        try {
+          expect(validateAnthropicBaseUrl(lookalike, { allowLoopbackPort: PORT }))
+            .toEqual(validateAnthropicBaseUrl(lookalike));
+        } finally {
+          warn.mockRestore();
+        }
+      });
+
+      it.each([0, 65536, 1.5, Number.NaN, -1])('ignores an invalid port value: %s', (invalid) => {
+        expect(validateAnthropicBaseUrl(loopback, { allowLoopbackPort: invalid }).allowed).toBe(false);
+      });
+
+      it('leaves validateUrlForSSRF unchanged for loopback', () => {
+        expect(validateUrlForSSRF(loopback).allowed).toBe(false);
+      });
     });
   });
 });

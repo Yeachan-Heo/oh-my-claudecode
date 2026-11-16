@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   isBedrock,
   isVertexAI,
@@ -8,6 +8,7 @@ import {
   CLAUDE_FAMILY_DEFAULTS,
   hasExtendedContextSuffix,
   isSubagentSafeModelId,
+  isAltProviderModelId,
   resolveInheritedModelFromEnv,
   shouldAutoForceInherit,
 } from '../models.js';
@@ -446,5 +447,115 @@ describe('isSubagentSafeModelId()', () => {
 
   it('rejects tier alias "haiku"', () => {
     expect(isSubagentSafeModelId('haiku')).toBe(false);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// isAltProviderModelId()
+// ---------------------------------------------------------------------------
+describe('isAltProviderModelId()', () => {
+  const KEYS = [...ALL_KEYS, 'OMC_PROVIDER_MODEL_PREFIXES'] as const;
+  let saved: Record<string, string | undefined>;
+
+  beforeEach(() => {
+    saved = saveAndClear(KEYS);
+    process.env.ANTHROPIC_BASE_URL = 'https://llm.acme.example/anthropic';
+    process.env.ANTHROPIC_MODEL = 'acme-large[1m]';
+  });
+  afterEach(() => { restore(saved); });
+
+  it('returns false without OMC_PROVIDER_MODEL_PREFIXES (behaviour unchanged)', () => {
+    expect(isAltProviderModelId('acme-large[1m]')).toBe(false);
+    expect(isAltProviderModelId('acme-large')).toBe(false);
+  });
+
+  it('accepts a listed prefix with and without a context suffix for a non-Claude provider', () => {
+    process.env.OMC_PROVIDER_MODEL_PREFIXES = 'acme-';
+    expect(isAltProviderModelId('acme-large[1m]')).toBe(true);
+    expect(isAltProviderModelId('acme-small')).toBe(true);
+    expect(isAltProviderModelId('ACME-Small[200k]')).toBe(true);
+  });
+
+  it('accepts any prefix of a comma-separated list and ignores blank entries', () => {
+    process.env.OMC_PROVIDER_MODEL_PREFIXES = ' , other- ,acme-';
+    expect(isAltProviderModelId('other-x1[1m]')).toBe(true);
+    expect(isAltProviderModelId('acme-large[1m]')).toBe(true);
+  });
+
+  it('rejects ids that do not start with a listed prefix or do not match the id shape', () => {
+    process.env.OMC_PROVIDER_MODEL_PREFIXES = 'acme-';
+    expect(isAltProviderModelId('gpt-5')).toBe(false);
+    expect(isAltProviderModelId('claude-sonnet-5[1m]')).toBe(false);
+    expect(isAltProviderModelId('acme-')).toBe(false);
+    expect(isAltProviderModelId('acme-large[1m] extra')).toBe(false);
+  });
+
+  it('treats the prefix literally, not as a pattern', () => {
+    process.env.OMC_PROVIDER_MODEL_PREFIXES = 'a.me-';
+    expect(isAltProviderModelId('a.me-large')).toBe(true);
+    expect(isAltProviderModelId('acme-large')).toBe(false);
+  });
+
+  it('rejects when the process does not talk to a non-Claude provider', () => {
+    process.env.OMC_PROVIDER_MODEL_PREFIXES = 'acme-';
+    process.env.ANTHROPIC_BASE_URL = 'https://api.anthropic.com';
+    process.env.ANTHROPIC_MODEL = 'claude-sonnet-5';
+    expect(isAltProviderModelId('acme-large[1m]')).toBe(false);
+  });
+
+  it('rejects on Bedrock and on Vertex AI', () => {
+    process.env.OMC_PROVIDER_MODEL_PREFIXES = 'acme-';
+    process.env.CLAUDE_CODE_USE_BEDROCK = '1';
+    expect(isAltProviderModelId('acme-large[1m]')).toBe(false);
+    delete process.env.CLAUDE_CODE_USE_BEDROCK;
+    process.env.CLAUDE_CODE_USE_VERTEX = '1';
+    expect(isAltProviderModelId('acme-large[1m]')).toBe(false);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// OMC_ALLOW_LOOPBACK_PROXY_PORT
+// ---------------------------------------------------------------------------
+describe('OMC_ALLOW_LOOPBACK_PROXY_PORT', () => {
+  const KEYS = [...ALL_KEYS, 'OMC_ALLOW_LOOPBACK_PROXY_PORT'] as const;
+  const PORT = '33177';
+  let saved: Record<string, string | undefined>;
+  let errors: ReturnType<typeof vi.spyOn>;
+
+  beforeEach(() => {
+    saved = saveAndClear(KEYS);
+    process.env.ANTHROPIC_BASE_URL = `http://127.0.0.1:${PORT}`;
+    errors = vi.spyOn(console, 'error').mockImplementation(() => {});
+  });
+  afterEach(() => {
+    errors.mockRestore();
+    restore(saved);
+  });
+
+  const guardLines = () => errors.mock.calls.filter((call: unknown[]) => String(call[0]).includes('[SSRF Guard]'));
+
+  it('is a non-Claude provider without a stderr line when the variable names the proxy port', () => {
+    process.env.OMC_ALLOW_LOOPBACK_PROXY_PORT = PORT;
+    expect(isNonClaudeProvider()).toBe(true);
+    expect(shouldAutoForceInherit()).toBe(true);
+    expect(guardLines()).toHaveLength(0);
+  });
+
+  it('keeps the stderr line without the variable', () => {
+    expect(isNonClaudeProvider()).toBe(true);
+    expect(guardLines()).toHaveLength(1);
+  });
+
+  it('keeps the stderr line when the variable names another port', () => {
+    process.env.OMC_ALLOW_LOOPBACK_PROXY_PORT = '33178';
+    expect(isNonClaudeProvider()).toBe(true);
+    expect(guardLines()).toHaveLength(1);
+  });
+
+  it.each(['0', 'abc', '99999', '', '1e3', '-5'])('keeps the stderr line for the invalid value %j', (value) => {
+    process.env.OMC_ALLOW_LOOPBACK_PROXY_PORT = value;
+    expect(isNonClaudeProvider()).toBe(true);
+    expect(shouldAutoForceInherit()).toBe(true);
+    expect(guardLines()).toHaveLength(2);
   });
 });
