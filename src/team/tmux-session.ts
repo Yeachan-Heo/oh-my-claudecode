@@ -4353,17 +4353,31 @@ export async function killTeamPane(paneId: string): Promise<void> {
   throw new Error("tmux_server_identity_required");
 }
 
+/** Test seams for `killWorkerPaneProcessTree`; production callers pass none. */
+export interface PaneProcessTreeDependencies {
+  readProcessRecords?: () => Promise<Map<number, { ppid: number }>>;
+  processIdentity?: (pid: number) => string | null;
+  killProcess?: (pid: number, signal: NodeJS.Signals | 0) => void;
+  sleep?: (ms: number) => Promise<void>;
+}
+
 /**
  * Opt-in (`OMC_TEAM_KILL_PANE_TREE=1`): before a tmux pane is killed, terminate
  * every descendant process of the pane's root process, found by parent PID
  * regardless of session or process group. Descendants get SIGTERM, deepest
  * first; survivors after 2 seconds get SIGKILL. The pane's root process and
- * this process are never signalled. Errors are swallowed so that the pane kill
- * still runs.
+ * this process are never signalled. Each descendant's process start identity
+ * is recorded with the snapshot, and a survivor only gets SIGKILL when the PID
+ * is alive and its identity is unchanged, so a PID reused during the wait is
+ * never hit; an unreadable identity skips that PID. A PID reused in the
+ * remaining windows is still possible: the identity is read after the process
+ * table, SIGTERM goes to a bare PID, and the identity check and the SIGKILL are
+ * not atomic (no pidfd). Errors are swallowed so that the pane kill still runs.
  */
 export async function killWorkerPaneProcessTree(
   identity: TmuxServerIdentity,
   paneId: string,
+  dependencies: PaneProcessTreeDependencies = {},
 ): Promise<void> {
   if (process.env.OMC_TEAM_KILL_PANE_TREE !== "1") return;
   try {
@@ -4383,7 +4397,15 @@ export async function killWorkerPaneProcessTree(
       }
     }
     if (panePid <= 1 || panePid === process.pid) return;
-    const records = await readProcessRecords();
+    const readRecords = dependencies.readProcessRecords ?? readProcessRecords;
+    const readIdentity =
+      dependencies.processIdentity ?? currentStrictProcessStartIdentity;
+    const killProcess =
+      dependencies.killProcess ?? ((pid, signal) => process.kill(pid, signal));
+    const sleep =
+      dependencies.sleep ??
+      ((ms) => new Promise<void>((resolve) => setTimeout(resolve, ms)));
+    const records = await readRecords();
     const byParent = new Map<number, number[]>();
     for (const [pid, record] of records) {
       const children = byParent.get(record.ppid) ?? [];
@@ -4406,28 +4428,51 @@ export async function killWorkerPaneProcessTree(
     }
     if (tree.length === 0) return;
     const ownPid = process.pid;
+    const startIdentities = new Map<number, string | null>();
+    for (const pid of tree) {
+      try {
+        startIdentities.set(pid, readIdentity(pid));
+      } catch {
+        startIdentities.set(pid, null);
+      }
+    }
     for (const pid of [...tree].reverse()) {
       if (pid > 1 && pid !== ownPid && pid !== panePid) {
         try {
-          process.kill(pid, "SIGTERM");
+          killProcess(pid, "SIGTERM");
         } catch {
           /* already exited */
         }
       }
     }
-    await new Promise((resolve) => setTimeout(resolve, 2000));
+    await sleep(2000);
     const isAlive = (pid: number): boolean => {
       try {
-        process.kill(pid, 0);
+        killProcess(pid, 0);
         return true;
       } catch (error) {
         return (error as NodeJS.ErrnoException)?.code === "EPERM";
       }
     };
+    const sameIncarnation = (pid: number): boolean => {
+      const recorded = startIdentities.get(pid);
+      if (!recorded) return false;
+      try {
+        return readIdentity(pid) === recorded;
+      } catch {
+        return false;
+      }
+    };
     for (const pid of [...tree].reverse()) {
-      if (pid > 1 && pid !== ownPid && pid !== panePid && isAlive(pid)) {
+      if (
+        pid > 1 &&
+        pid !== ownPid &&
+        pid !== panePid &&
+        isAlive(pid) &&
+        sameIncarnation(pid)
+      ) {
         try {
-          process.kill(pid, "SIGKILL");
+          killProcess(pid, "SIGKILL");
         } catch {
           /* already exited */
         }

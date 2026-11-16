@@ -159,6 +159,24 @@ describe("killWorkerPaneProcessTree (opt-in OMC_TEAM_KILL_PANE_TREE=1)", () => {
     expect(isAlive(pane.pid!)).toBe(true);
   });
 
+  it.skipIf(currentStrictProcessStartIdentity(process.pid) === null)(
+    "with the variable set: SIGKILLs a descendant that ignores SIGTERM, using the default identity reader",
+    async () => {
+      process.env.OMC_TEAM_KILL_PANE_TREE = "1";
+      // The child shell ignores SIGTERM and `exec` keeps that disposition, so the sleep survives SIGTERM.
+      // The root execs a longer sleep so it outlives its child, which is killed during the test.
+      const pane = startPane(`sh -c 'trap "" TERM; exec sleep 240.${TAG}' & exec sleep 243.${TAG}`);
+      await waitForTaggedSleeps("240", 1);
+      mockPanePid(pane.pid!);
+
+      await killWorkerPaneProcessTree(IDENTITY, "%7");
+
+      expect((await taggedSleeps("240")).length).toBe(0);
+      expect(isAlive(pane.pid!)).toBe(true);
+    },
+    30_000,
+  );
+
   it("never signals its own process when the reported pane PID is this process", async () => {
     process.env.OMC_TEAM_KILL_PANE_TREE = "1";
     const killSpy = vi.spyOn(process, "kill");
@@ -179,6 +197,134 @@ describe("killWorkerPaneProcessTree (opt-in OMC_TEAM_KILL_PANE_TREE=1)", () => {
 
     expect((await taggedSleeps("240")).length).toBe(1);
     expect(isAlive(pane.pid!)).toBe(true);
+  });
+});
+
+describe("killWorkerPaneProcessTree SIGKILL identity check (injected dependencies, no real signals)", () => {
+  const FAKE_PANE_PID = 4_000_000;
+  const CHILD = 4_000_001;
+  const GRANDCHILD = 4_000_002;
+  const sleepArgs: number[] = [];
+
+  /** Runs the tree kill against a fake process table; every signal goes to the recorder. */
+  async function run(options: {
+    identityAfterTerm: (pid: number) => string | null;
+    aliveAfterTerm?: (pid: number) => boolean;
+  }): Promise<Array<[number, NodeJS.Signals | 0]>> {
+    process.env.OMC_TEAM_KILL_PANE_TREE = "1";
+    mockPanePid(FAKE_PANE_PID);
+    const calls: Array<[number, NodeJS.Signals | 0]> = [];
+    sleepArgs.length = 0;
+    let waited = false;
+    await killWorkerPaneProcessTree(IDENTITY, "%7", {
+      readProcessRecords: async () =>
+        new Map([
+          [CHILD, { ppid: FAKE_PANE_PID }],
+          [GRANDCHILD, { ppid: CHILD }],
+        ]),
+      processIdentity: (pid) => (waited ? options.identityAfterTerm(pid) : `start-${pid}`),
+      killProcess: (pid, signal) => {
+        calls.push([pid, signal]);
+        if (signal === 0 && !(options.aliveAfterTerm?.(pid) ?? true)) {
+          throw Object.assign(new Error("no such process"), { code: "ESRCH" });
+        }
+      },
+      sleep: async (ms) => {
+        sleepArgs.push(ms);
+        waited = true;
+      },
+    });
+    return calls;
+  }
+
+  const sigkills = (calls: Array<[number, NodeJS.Signals | 0]>): number[] =>
+    calls.filter(([, signal]) => signal === "SIGKILL").map(([pid]) => pid);
+
+  it("sends SIGKILL to a survivor whose start identity is unchanged", async () => {
+    const calls = await run({ identityAfterTerm: (pid) => `start-${pid}` });
+
+    expect(calls.filter(([, signal]) => signal === "SIGTERM").map(([pid]) => pid)).toEqual([GRANDCHILD, CHILD]);
+    expect(sigkills(calls)).toEqual([GRANDCHILD, CHILD]);
+    expect(calls.some(([pid]) => pid === FAKE_PANE_PID)).toBe(false);
+  });
+
+  it("waits 2000 ms between SIGTERM and SIGKILL when the pane root has descendants", async () => {
+    await run({ identityAfterTerm: (pid) => `start-${pid}` });
+
+    expect(sleepArgs).toEqual([2000]);
+  });
+
+  it("does not wait when the pane root has no descendants", async () => {
+    process.env.OMC_TEAM_KILL_PANE_TREE = "1";
+    mockPanePid(FAKE_PANE_PID);
+    const calls: Array<[number, NodeJS.Signals | 0]> = [];
+    const waits: number[] = [];
+
+    await killWorkerPaneProcessTree(IDENTITY, "%7", {
+      readProcessRecords: async () => new Map(),
+      processIdentity: () => null,
+      killProcess: (pid, signal) => {
+        calls.push([pid, signal]);
+      },
+      sleep: async (ms) => {
+        waits.push(ms);
+      },
+    });
+
+    expect(calls).toEqual([]);
+    expect(waits).toEqual([]);
+  });
+
+  it("sends no SIGKILL when the start identity throws after the wait", async () => {
+    const calls = await run({
+      identityAfterTerm: () => {
+        throw new Error("identity unreadable");
+      },
+    });
+
+    expect(calls.filter(([, signal]) => signal === "SIGTERM").map(([pid]) => pid)).toEqual([GRANDCHILD, CHILD]);
+    expect(sigkills(calls)).toEqual([]);
+  });
+
+  it("does not send SIGKILL to a PID that was reused by a different process", async () => {
+    const calls = await run({
+      identityAfterTerm: (pid) => (pid === CHILD ? "start-of-an-unrelated-process" : `start-${pid}`),
+    });
+
+    expect(sigkills(calls)).toEqual([GRANDCHILD]);
+  });
+
+  it("does not send SIGKILL to a PID that is no longer alive", async () => {
+    const calls = await run({
+      identityAfterTerm: (pid) => `start-${pid}`,
+      aliveAfterTerm: (pid) => pid !== GRANDCHILD,
+    });
+
+    expect(sigkills(calls)).toEqual([CHILD]);
+  });
+
+  it("skips a PID whose start identity cannot be read after the wait", async () => {
+    const calls = await run({ identityAfterTerm: () => null });
+
+    expect(sigkills(calls)).toEqual([]);
+  });
+
+  it("skips a PID whose start identity could not be read when the tree was read", async () => {
+    process.env.OMC_TEAM_KILL_PANE_TREE = "1";
+    mockPanePid(FAKE_PANE_PID);
+    const calls: Array<[number, NodeJS.Signals | 0]> = [];
+
+    await killWorkerPaneProcessTree(IDENTITY, "%7", {
+      readProcessRecords: async () => new Map([[CHILD, { ppid: FAKE_PANE_PID }]]),
+      processIdentity: () => null,
+      killProcess: (pid, signal) => {
+        calls.push([pid, signal]);
+      },
+      sleep: async () => undefined,
+    });
+
+    expect(calls.filter(([, signal]) => signal === "SIGTERM")).toEqual([[CHILD, "SIGTERM"]]);
+    expect(calls.some(([, signal]) => signal === "SIGKILL")).toBe(false);
   });
 });
 

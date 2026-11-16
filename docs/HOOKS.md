@@ -426,7 +426,7 @@ One opt-in variable of the team runtime (`src/team/`). It leaves behavior unchan
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `OMC_TEAM_KILL_PANE_TREE` | (unset) | Set to `1` to terminate all descendant processes of a worker's tmux pane before the pane is killed (SIGTERM, then SIGKILL after 2 seconds for survivors). The pane's root process is not signalled. Only tmux panes are affected, and only when the team records a tmux server identity; without one the switch does nothing. |
+| `OMC_TEAM_KILL_PANE_TREE` | (unset) | Set to `1` to terminate all descendant processes of a worker's tmux pane before the pane is killed (SIGTERM, then SIGKILL after 2 seconds for survivors whose process start identity is unchanged since the process list was read; a PID that was reused or whose identity cannot be read is skipped). The pane's root process is not signalled. Only tmux panes are affected, and only when the team records a tmux server identity; without one the switch does nothing. |
 
 #### Stale Run Reporter (`stale-run-reporter.mjs`)
 
