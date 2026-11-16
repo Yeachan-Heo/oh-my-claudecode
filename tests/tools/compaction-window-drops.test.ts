@@ -6,7 +6,7 @@ import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
-const SCRIPT = join(HERE, '..', '..', 'scripts', 'diagnostics', 'compaction-window-drops.py');
+const SCRIPT = join(HERE, '..', '..', 'tools', 'diagnostics', 'compaction-window-drops.py');
 
 const TO = '2026-11-14T12:00:00Z';
 
@@ -372,7 +372,7 @@ describe('compaction-window-drops.py', () => {
     }
   });
 
-  it('T9a: the same pair in copies counted once, drops_duplicated_from_copies = 1', () => {
+  it('T9-a: the same pair in copies counted once, drops_duplicated_from_copies = 1', () => {
     const dir = makeDir();
     try {
       const fileA = save(dir, 'fileA.jsonl', [
@@ -395,7 +395,7 @@ describe('compaction-window-drops.py', () => {
     }
   });
 
-  it('T9b: continuous prefix with a shapeHash change: no_cut_shape_change', () => {
+  it('T9-b: continuous prefix with a shapeHash change: no_cut_shape_change', () => {
     const dir = makeDir();
     try {
       const file = save(dir, 'S9b-shape.jsonl', [
@@ -415,7 +415,7 @@ describe('compaction-window-drops.py', () => {
     }
   });
 
-  it('T9c: missing base in both requests gives broken; T9c-b request without keep gives no_cause', () => {
+  it('T9-c: missing base in both requests gives broken; T9-c-b request without keep gives no_cause', () => {
     const dir = makeDir();
     try {
       const fileA = save(dir, 'fileA9c.jsonl', [
@@ -435,7 +435,7 @@ describe('compaction-window-drops.py', () => {
     }
   });
 
-  it('T9c-b: request without keep: prefix unavailable, cause no_cause', () => {
+  it('T9-c-b: request without keep: prefix unavailable, cause no_cause', () => {
     const dir = makeDir();
     try {
       const file = save(dir, 'S9c2.jsonl', [
@@ -455,7 +455,7 @@ describe('compaction-window-drops.py', () => {
     }
   });
 
-  it('T9d: reverse check and compact_without_drop', () => {
+  it('T9-d: reverse check and compact_without_drop', () => {
     const dir = makeDir();
     try {
       const file = save(dir, 'S9d.jsonl', [

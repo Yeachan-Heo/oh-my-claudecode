@@ -8,7 +8,7 @@ import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
-const SCRIPT = join(HERE, '..', '..', 'scripts', 'diagnostics', 'compaction-ask-probe.py');
+const SCRIPT = join(HERE, '..', '..', 'tools', 'diagnostics', 'compaction-ask-probe.py');
 const Z = 1.959963984540054;
 
 function wilsonUpper(k, n) {

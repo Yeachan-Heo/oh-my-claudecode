@@ -415,3 +415,103 @@ At least one of `--transcripts` and `--teams` is required. Exit codes: `0` norma
   tasks (`completed` and `failed`) in the range.
 - A part without its input is reported as unmeasured, never as 0; n = 0 gives no rate value. Every rate gives k/n, a
   two-sided 95 % Wilson interval and a one-sided 95 % lower bound.
+
+# Compaction window drops
+
+`compaction-window-drops.py` classifies the drops of the context window between consecutive model calls
+by cause (for example module compaction, host compaction, a new process, a side task, a change of shape
+without a cut). It reads Claude Code session transcripts and the compaction journal (`compaction.jsonl`)
+and reports numbers only. It is a standalone offline diagnostic run by hand: it does not change OMC
+behaviour, has no switch, is not run by any hook, and is not shipped in the npm package.
+
+## Requirements and usage
+
+- `python3` (standard library only). Run it in isolated mode with `python3 -I`.
+- The transcripts and the journal are only read. The only file written is the `--out` file, if given
+  (a new file with mode `0600`; an existing file is an error).
+- The journal is read from `OMC_JEV_LOG_DIR` or `~/.omc/state/jev` unless `--compact` is given. The
+  projects directory defaults to `$CLAUDE_CONFIG_DIR/projects` or `~/.claude/projects`.
+
+```
+python3 -I tools/diagnostics/compaction-window-drops.py [--projects <dir>] [--days 7] [--json]
+python3 -I tools/diagnostics/compaction-window-drops.py --transcript session.jsonl --compact compaction.jsonl --out report.json
+```
+
+| Option | Meaning |
+|---|---|
+| `--projects <dir>` | the projects directory with transcripts (main sessions and subagents) |
+| `--transcript <file>` | one transcript file (repeatable; used instead of scanning the projects directory) |
+| `--compact <file>` | the compaction journal |
+| `--to <ISO>`, `--days N` | the period end (default: now, UTC) and its length in days (default 7) |
+| `--min-drop-tokens N`, `--min-drop-percent N` | drop thresholds (defaults 10000 tokens and 10 % of the previous window) |
+| `--tolerance-s S` | tolerance in seconds when matching a drop to a journal row (default 5) |
+| `--json`, `--out <file>` | JSON output (template `compaction-report/1`) and the file to write it to |
+
+The rule (window definition, drop definition and the order of the cause classes) is in the script
+docstring and in the `RULE` constant; both are fixed before a measurement.
+
+# Compaction ask probe
+
+`compaction-ask-probe.py` measures whether the first and the last human ask of a session survive a
+compaction. It counts the loss rates of both asks (`head_lost`, `ask_lost`) with the survival level of
+each ask (`full`, `trace`, `paraphrased` or `lost`), empty calls after a compaction and natural canaries.
+With n of at least 30, the verdict compares the upper 95 % Wilson bound of a loss rate with
+`--ask-loss-threshold`. It prints no ask or state content: only numbers, levels and identifiers. It needs
+a `compact_boundary` row in the transcript. It is a standalone offline diagnostic run by hand: it does not
+change OMC behaviour, has no switch, and is not shipped in the npm package.
+
+## Requirements and usage
+
+- `python3` (standard library only). Run it in isolated mode with `python3 -I`.
+- The inputs are only read. The only file written is the `--out` file, if given (a new file with mode `0600`).
+
+```
+python3 -I tools/diagnostics/compaction-ask-probe.py [--projects <dir>] [--days 7] [--ask-loss-threshold 0.05] [--json]
+```
+
+| Option | Meaning |
+|---|---|
+| `--projects <dir>`, `--transcript <file>`, `--compact <file>` | inputs, as for the window drops tool |
+| `--to <ISO>`, `--days N` | the period end (default: now, UTC) and its length in days (default 7) |
+| `--ask-loss-threshold X` | the threshold the upper Wilson bound is compared with (default 0.05) |
+| `--details` | add the list of units (without ask contents) |
+| `--json`, `--out <file>` | the result as one JSON object, and the file to write it to |
+
+# Compaction cache cost
+
+`compaction-cache-cost.py` measures how compactions affect the prompt cache: prefix rewrite breaks by
+class, the rewrite cost, the recovery in the first turn after a compaction, the turns to breakeven,
+Cache Savings, and cache losses before and from a deployment date. It counts only usage fields and
+timestamps. It is a standalone offline diagnostic run by hand: it does not change OMC behaviour, has
+no switch, and is not shipped in the npm package.
+
+## Requirements and usage
+
+- `python3` (standard library only). Run it in isolated mode with `python3 -I`.
+- The inputs are only read. The only file written is the `--out` file, if given.
+- Prices come only from the file given with `--prices`; without it every USD figure is reported as
+  unavailable and the cache measurements still run. The file is JSON, with prices in USD per million
+  tokens:
+
+```
+{"models": {"<model id or id prefix>": {"input_per_mtok": 3.0, "output_per_mtok": 15.0}},
+ "subscription_prefixes": ["<model id prefix>"]}
+```
+
+A model is matched by exact id, otherwise by the longest listed prefix. Models whose id starts with a
+subscription prefix are left out of the USD sums. The cache write costs 1.25 x the input price for a
+5-minute write and 2.0 x for a 1-hour write, and the cache read costs 0.10 x the input price; these
+multipliers are constants of the script.
+
+```
+python3 -I tools/diagnostics/compaction-cache-cost.py --deployed-at 2026-01-01T00:00:00Z [--prices prices.json] [--json]
+```
+
+| Option | Meaning |
+|---|---|
+| `--deployed-at <ISO>` | required: the time the compaction module was deployed; cache loss sessions are split by the time of their first call |
+| `--prices <file>` | the explicit price table described above |
+| `--projects <dir>`, `--transcript <file>`, `--compact <file>` | inputs, as for the window drops tool |
+| `--to <ISO>`, `--days N` | the period end (default: now, UTC) and its length in days (default 7) |
+| `--details` | add the segment hit rates and the units to the report |
+| `--json`, `--out <file>` | the result as JSON, and the file to write it to |

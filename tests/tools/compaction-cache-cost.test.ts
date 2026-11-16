@@ -8,7 +8,7 @@ import { join, dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
-const SCRIPT = resolve(HERE, '..', '..', 'scripts', 'diagnostics', 'compaction-cache-cost.py');
+const SCRIPT = resolve(HERE, '..', '..', 'tools', 'diagnostics', 'compaction-cache-cost.py');
 const TO = '2026-11-15T00:00:00Z';
 const DEPLOYED_AT = '2026-11-13T00:00:00Z';
 
