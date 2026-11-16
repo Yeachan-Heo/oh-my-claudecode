@@ -3,14 +3,16 @@
  * scripts/post-tool-use-failure.mjs: the unchanged default behavior (state v1, old text at the
  * 5th failure), the per-signature series with one nudge at the third failure and one final state
  * at the fourth, separate series for different errors of one tool, the path-keyed series for
- * mutating commands, the package-gap rule (one attempt per model response) via its time-gap
- * fallback, the 4 KiB state limit, and the threshold overrides.
+ * mutating commands, the package rule (one attempt per model response) by the transcript message
+ * id and via its time-gap fallback, the 4 KiB state limit, and the threshold overrides.
  */
 
 import { execFileSync } from 'node:child_process';
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import process from 'node:process';
+import { setTimeout } from 'node:timers';
 import { afterEach, describe, expect, it } from 'vitest';
 
 import { errorSeriesKey, failureSignature, hashSignature } from '../../scripts/lib/jev-failure-signature.mjs';
@@ -65,6 +67,14 @@ function failingInput(cwd, sessionId, overrides = {}) {
     session_id: sessionId,
     ...overrides,
   };
+}
+
+// A transcript whose last assistant message id is unique per file name and message count, so a
+// new count means a new model response.
+function writeTranscript(dir, name, messageCount) {
+  const path = join(dir, name);
+  writeFileSync(path, Array.from({ length: messageCount }, (_, j) => JSON.stringify({ type: 'assistant', message: { id: `msg_${name}-${j}` } })).join('\n') + '\n');
+  return path;
 }
 
 function sessionStatePath(cwd, sessionId) {
@@ -126,6 +136,52 @@ describe('post-tool-use-failure.mjs failure series (opt-in)', () => {
     expect(state.error_key).toBe(expectedKey.key);
     expect(state.tool_name).toBe('Bash');
   }, 45000);
+
+  it('counts one model response as one attempt by the transcript message id (package key)', () => {
+    const cwd = makeTempDir();
+    const sid = 'package-key';
+    const transcript = writeTranscript(cwd, 'package.jsonl', 1); // same transcript = same model response
+    const run = () => runHook(failingInput(cwd, sid, { transcript_path: transcript }), { OMC_JEV_FAILURE_SERIES: '1' });
+    run();
+    run();
+    const third = run();
+    expect(String(third.hookSpecificOutput?.additionalContext ?? '')).not.toContain('OMC FAILURE SERIES');
+    const state = readState(cwd, sid);
+    expect(state.retry_count).toBe(1); // three calls of one response are one attempt
+    expect(state.package_key).toBe('msg_package.jsonl-0'); // the key comes from the transcript
+  });
+
+  it('fires the nudge and the final state when every failure has its own message id (no time gap needed)', () => {
+    const cwd = makeTempDir();
+    const sid = 'package-key-series';
+    const outputs = [];
+    for (let i = 1; i <= 5; i++) {
+      const transcript = writeTranscript(cwd, 'series.jsonl', i); // a new assistant message per run = a new attempt
+      outputs.push(runHook(failingInput(cwd, sid, { transcript_path: transcript }), { OMC_JEV_FAILURE_SERIES: '1' }));
+    }
+    const texts = outputs.map((o) => String(o.hookSpecificOutput?.additionalContext ?? ''));
+    expect(texts[0]).not.toContain('OMC FAILURE SERIES');
+    expect(texts[1]).not.toContain('OMC FAILURE SERIES');
+    expect(texts[2]).toContain('[OMC FAILURE SERIES]');
+    expect(texts[2]).not.toContain('FINAL');
+    expect(texts[3]).toContain('[OMC FAILURE SERIES: FINAL]');
+    expect(texts[4]).not.toContain('OMC FAILURE SERIES');
+    const state = readState(cwd, sid);
+    expect(state.retry_count).toBe(5);
+    expect(state.package_key).toBe('msg_series.jsonl-4');
+    expect(state.nudge_sent).toBe(1);
+    expect(state.end_sent).toBe(1);
+  });
+
+  it('does not read the transcript while the switch is off (package key stays absent)', () => {
+    const cwd = makeTempDir();
+    const sid = 'package-key-off';
+    const transcript = writeTranscript(cwd, 'off.jsonl', 2);
+    runHook(failingInput(cwd, sid, { transcript_path: transcript }));
+    const state = readState(cwd, sid);
+    expect('package_key' in state).toBe(false);
+    expect(state.retry_count).toBe(1);
+  });
 
   it('does not add up two different errors of the same tool (separate series)', async () => {
     const cwd = makeTempDir();

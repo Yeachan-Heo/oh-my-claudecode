@@ -129,15 +129,15 @@ test('table p2: kill targets, pkill patterns, compose, heredoc', () => {
     T('docker compose down', 'refuse'), T('docker compose -f docker-compose.test.yml down', 'refuse'),
     T('docker compose up -d', 'pass'), T('docker compose ps', 'pass'), T('docker compose logs', 'pass'),
     T('docker logs example-db-prod', 'pass'), T('docker ps', 'pass'),
-    T('docker stop mojtest', 'pass'), T('docker rm mojtest', 'pass'), T('docker rm -f mojtest', 'pass'),
-    T('docker run --rm x', 'pass'), T('docker stop mojtest-1', 'pass'), T('docker kill testowy', 'pass'),
-    T('systemctl status caddy', 'pass'), T('systemctl is-active caddy', 'pass'), T('systemctl restart mojtest', 'pass'),
-    T('systemctl --user restart mojtest', 'pass'), T('systemctl stop cron-test', 'pass'), T('systemctl stop docker-test', 'pass'),
+    T('docker stop mytest', 'pass'), T('docker rm mytest', 'pass'), T('docker rm -f mytest', 'pass'),
+    T('docker run --rm x', 'pass'), T('docker stop mytest-1', 'pass'), T('docker kill sample-test', 'pass'),
+    T('systemctl status caddy', 'pass'), T('systemctl is-active caddy', 'pass'), T('systemctl restart mytest', 'pass'),
+    T('systemctl --user restart mytest', 'pass'), T('systemctl stop cron-test', 'pass'), T('systemctl stop docker-test', 'pass'),
     T('systemctl list-units', 'pass'), T('journalctl -u caddy', 'pass'),
     T('cat > x.sh <<\'EOF2\'\nkill $PID\nEOF2', 'pass'), T('cat > x.sh <<\'EOF2\'\ndocker compose down\nEOF2', 'pass'),
     T("cat <<EOF2\nit's\nEOF2\nkill 1", 'refuse'),
     T('git commit -m "fix: kill 1 pid guard"', 'pass'),
-    T('git commit -m "$(cat <<\'EOF2\'\nfix\n\nkill 1 przez docker compose down\ndocker stop example-db-prod\nEOF2\n)"', 'pass'),
+    T('git commit -m "$(cat <<\'EOF2\'\nfix\n\nkill 1 via docker compose down\ndocker stop example-db-prod\nEOF2\n)"', 'pass'),
     T('echo "kill 1"', 'pass'), T('echo kill 1', 'pass'),
     T('grep -rn "pkill" .', 'pass'), T('grep -n "systemctl stop caddy" file', 'pass'),
     T("echo 'docker stop example-db-prod' > x.sh", 'pass'), T("printf 'kill 1\n' > x.sh", 'pass'),
@@ -178,7 +178,7 @@ test('table p3: quoting, comments, substitutions, systemctl gaps, uncertain dock
     T('systemctl stop systemd-logind.service', 'refuse'), T('systemctl stop networking.service', 'refuse'), T('systemctl stop systemd-networkd.service', 'refuse'), T('systemctl stop systemd-journald', 'pass'),
     T('loginctl terminate-session 1', 'refuse'), T('loginctl kill-user root', 'refuse'), T('machinectl poweroff x', 'refuse'),
     T('docker container stop example-db-prod', 'refuse'), T('docker container rm -f example-db-prod', 'refuse'),
-    T('docker stop -t 0 example-db-prod', 'refuse'), T('docker stop --time 5 example-db-prod', 'refuse'), T('docker stop mojtest example-db-prod', 'refuse'),
+    T('docker stop -t 0 example-db-prod', 'refuse'), T('docker stop --time 5 example-db-prod', 'refuse'), T('docker stop mytest example-db-prod', 'refuse'),
     T('docker rm -f $(docker ps -aq)', 'refuse'), T('docker ps -q | xargs docker stop', 'refuse'), T('docker ps -q | xargs -r docker kill', 'refuse'),
     T('docker stop $(docker ps -q --filter name=pp)', 'refuse'),
     T('docker compose stop', 'refuse'), T('docker compose stop web', 'refuse'), T('docker compose restart', 'refuse'), T('docker compose kill', 'refuse'),
@@ -218,7 +218,7 @@ test('table p4-p7: per-wrapper flags, nesting depth, broadcast, stop-everything 
     T('pkill -f uvicorn', 'pass'), T('pkill -f gunicorn', 'pass'),
     T('command systemctl restart caddy', 'refuse'), T('time docker stop example-db-prod', 'refuse'), T('exec systemctl stop caddy', 'refuse'),
     T('if systemctl is-active caddy; then systemctl restart caddy; fi', 'refuse'), T('for c in a; do docker stop example-db-prod; done', 'refuse'), T('while true; do docker restart example-cache; done', 'refuse'),
-    T("cat <<EOF2\nit's\nEOF2\nsystemctl restart caddy", 'refuse'), T('cat <<EOF2\nnormalny tekst\nEOF2\nsystemctl restart caddy', 'refuse'),
+    T("cat <<EOF2\nit's\nEOF2\nsystemctl restart caddy", 'refuse'), T('cat <<EOF2\nnormal text\nEOF2\nsystemctl restart caddy', 'refuse'),
     T('pkill -P 1', 'refuse'), T('pkill -F /run/x.pid', 'pass'),
     T('docker compose -f x.yml stop', 'refuse'), T('docker compose rm -sf', 'refuse'), T('docker compose -f x.yml rm -sf', 'refuse'),
     T('OMC_JEV_KILL_GUARD=0 kill 1', 'refuse'), T('DISABLE_OMC=1 kill 1', 'refuse'), T('export OMC_JEV_KILL_GUARD=0; kill 1', 'refuse'),
@@ -413,13 +413,16 @@ describe('hook wiring', () => {
     assert.equal(journal(root).filter((row) => row.guard === 'kill-guard').length, 0);
   });
 
-  it('switch off: kill 1 passes, nothing is judged, no kill-guard row', () => {
+  it('switch off: kill 1 and systemctl stop caddy pass, nothing is judged, no kill-guard row', () => {
     for (const value of [undefined, '0']) {
       const root = tempDir();
       const env = value === undefined ? { OMC_JEV_DENIAL_COUNTER: '1' } : { OMC_JEV_KILL_GUARD: value, OMC_JEV_DENIAL_COUNTER: '1' };
-      const run = runHook(root, env, `kg-hook-off-${value ?? 'unset'}`, 0);
-      assert.equal(run.status, 0, run.stderr.slice(0, 300));
-      assert.notEqual(run.output.hookSpecificOutput?.permissionDecision, 'deny', `kill 1 refused with the switch ${value ?? 'unset'}: ${run.reason.slice(0, 300)}`);
+      for (const [i, command] of ['kill 1', 'systemctl stop caddy'].entries()) {
+        const run = runHook(root, env, `kg-hook-off-${value ?? 'unset'}`, i, command);
+        assert.equal(run.status, 0, run.stderr.slice(0, 300));
+        assert.notEqual(run.output.hookSpecificOutput?.permissionDecision, 'deny', `${command} refused with the switch ${value ?? 'unset'}: ${run.reason.slice(0, 300)}`);
+        assert.ok(!run.reason.includes('[KILL-GUARD]'), `${command} with the switch ${value ?? 'unset'}: ${run.reason.slice(0, 300)}`);
+      }
       assert.equal(journal(root).filter((row) => row.guard === 'kill-guard').length, 0);
     }
   });

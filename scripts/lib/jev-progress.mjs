@@ -242,8 +242,10 @@ export class ProgressState {
 export function classifyTranscript(text, progress, fromTsMs = 0) {
   // Classify a JSONL transcript: assistant tool-use blocks and user
   // tool-result blocks paired by id, durations taken from the row
-  // timestamps; a truncated last line is skipped and rows without usable
-  // timestamps stay outside the classified window.
+  // timestamps (a duration stays unknown when either row has none); a
+  // truncated last line is skipped. Rows without a usable timestamp are
+  // classified like any other, unless a window start (fromTsMs > 0) is given:
+  // such a row cannot be placed in the window and stays outside it.
   const result = { calls: 0, progress: false };
   if (typeof text !== "string" || !text.trim()) return result;
   const pending = new Map();
@@ -258,7 +260,7 @@ export function classifyTranscript(text, progress, fromTsMs = 0) {
     for (const part of parts) {
       if (row.type === "assistant" && part?.type === "tool_use") {
         pending.set(part.id, { tool: part.name, input: part.input, ts: tsMs, ok: null, result: null, durationMs: null });
-        if (SAVING_TOOLS.has(part.name) && tsMs >= fromTsMs && tsMs > 0) {
+        if (SAVING_TOOLS.has(part.name) && tsMs >= fromTsMs) {
           const r = progress.add({ tool: part.name, input: part.input, result: null, durationMs: null, ok: null });
           if (r.progress) result.progress = true;
           result.calls += 1;
@@ -267,8 +269,8 @@ export function classifyTranscript(text, progress, fromTsMs = 0) {
       }
       if (row.type === "user" && part?.type === "tool_result") {
         const call = pending.get(part.tool_use_id);
-        if (call && tsMs > call.ts) call.durationMs = tsMs - call.ts;
-        if (call && tsMs >= fromTsMs && tsMs > 0) {
+        if (call && call.ts > 0 && tsMs > call.ts) call.durationMs = tsMs - call.ts;
+        if (call && tsMs >= fromTsMs) {
           call.ok = part.is_error !== true;
           call.result = flattenResult(part.content);
           call.durationMs = (call.durationMs === null) ? null : call.durationMs;

@@ -4,9 +4,12 @@
  * scripts/lib/jev-delivery-guard.mjs). Without them the daily result is unchanged.
  */
 
-import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { execFileSync } from 'node:child_process';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { fileURLToPath } from 'node:url';
+import process from 'node:process';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import {
@@ -19,6 +22,7 @@ import {
   timeoutsMessage,
 } from '../../scripts/lib/jev-delivery-guard.mjs';
 
+const REPO_ROOT = join(fileURLToPath(import.meta.url), '..', '..', '..');
 const NOW = Date.now();
 const HOUR = 3600 * 1000;
 const MIN = 60_000;
@@ -126,6 +130,56 @@ describe('OMC_JEV_GUARD_USE_MARKER', () => {
     expect('namedAgents' in result).toBe(false);
     const message = deliveryMessage({ ...result, interruptedAgentHooks: 1 });
     expect(message).toContain('such as forceInherit,');
+  });
+
+  it('the enforcer records a marker row for a `use` marker call only with the switch, and the guard reads it', async () => {
+    const run = (extraEnv) => {
+      const dir = mkdtempSync(join(root, 'hook-'));
+      const log = join(dir, 'log');
+      const home = join(dir, 'home');
+      mkdirSync(home, { recursive: true });
+      const env = { ...process.env };
+      for (const key of Object.keys(env)) if (/^(TYPESAFE_|OMC_JEV)/.test(key)) delete env[key];
+      // The point is named so that the hook records the ids of the call (the marker settles model and effort: no query is sent).
+      Object.assign(env, {
+        HOME: home,
+        USERPROFILE: home,
+        CLAUDE_PLUGIN_ROOT: '',
+        DISABLE_OMC: '',
+        OMC_SKIP_HOOKS: '',
+        OMC_STATE_DIR: '',
+        TYPESAFE_API_KEY: 'test-key',
+        OMC_JEV: 'model-routing',
+        OMC_JEV_ENDPOINT: 'http://127.0.0.1:9/v1/systemone',
+        OMC_JEV_MODEL_ROUTING_MARKER: '1',
+        OMC_JEV_APPLIED_LOG: '1',
+        OMC_JEV_LOG_CONTEXT: '1',
+        OMC_JEV_LOG_DIR: log,
+        NODE_ENV: 'test',
+        ...extraEnv,
+      });
+      const input = {
+        cwd: dir,
+        session_id: 'session-1',
+        tool_use_id: 'toolu_marker',
+        tool_name: 'Task',
+        tool_input: { subagent_type: 'oh-my-claudecode:executor', description: 'Fix', prompt: 'use sonnet low\n\nFix the regression.' },
+      };
+      execFileSync(process.execPath, [join(REPO_ROOT, 'scripts', 'pre-tool-enforcer.mjs')], { cwd: dir, env, input: JSON.stringify(input), encoding: 'utf8', timeout: 30_000 });
+      return log;
+    };
+    const appliedRows = (log) => (existsSync(join(log, 'applied.jsonl')) ? readFileSync(join(log, 'applied.jsonl'), 'utf8').trim().split('\n').map((line) => JSON.parse(line)) : []);
+    expect(appliedRows(run({}))).toEqual([]); // without the switch the applied log has no marker row
+    const log = run({ OMC_JEV_GUARD_USE_MARKER: '1' });
+    const rows = appliedRows(log);
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({ point: 'model-routing', tool_use_id: 'toolu_marker', applied: { subagent_type: 'oh-my-claudecode:executor', model: { to: 'sonnet', source: 'marker' }, effort: { to: 'low', source: 'marker' } } });
+    // The guard finds the call through that row.
+    writeFileSync(join(logDir, 'shadow.jsonl'), decision('toolu_marker', 'opus', 2) + '\n');
+    writeFileSync(join(logDir, 'applied.jsonl'), readFileSync(join(log, 'applied.jsonl'), 'utf8').replace(/"ts":"[^"]*"/, `"ts":"${iso(NOW - 3 * HOUR)}"`));
+    meta('toolu_marker', { model: 'sonnet' });
+    const result = await computeDelivery({ logDir, configDir, now: NOW, env: { OMC_JEV_GUARD_USE_MARKER: '1' } });
+    expect(result.markerDecisions).toBe(1);
   });
 
   it('is fail-open when applied.jsonl is absent or has no marker rows', async () => {

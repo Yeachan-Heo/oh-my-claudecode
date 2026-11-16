@@ -12,6 +12,8 @@ import process from 'node:process';
 import { spawn, spawnSync } from 'node:child_process';
 import { fileURLToPath, URL } from 'node:url';
 import assert from 'node:assert/strict';
+import { clearTimeout, setTimeout } from 'node:timers';
+import { Buffer } from 'node:buffer';
 import { afterAll, beforeAll, describe, it } from 'vitest';
 import { DELEGATION_QUESTIONS, SESSION_ROLES, decideDelegation, delegationHintText, delegationState, readRunningAgents, sessionRoleFacts } from '../../scripts/lib/jev-delegation.mjs';
 import { NAMED_ONLY_POINTS, parseJevEnv } from '../../scripts/jev-resolve.mjs';
@@ -144,7 +146,8 @@ describe('delegation point: Agent hook', { timeout: 180_000 }, () => {
 
   function hookEnv({ logs, omcJev, role, extra = {} }) {
     const env = Object.fromEntries(Object.entries(process.env).filter(([key]) => !/^(OMC_|TYPESAFE_|CLAUDE|ANTHROPIC_|PLUGIN_ROOT$|CODEX|DISABLE_OMC)/i.test(key)));
-    Object.assign(env, { HOME: world.home, USERPROFILE: world.home, CLAUDE_CONFIG_DIR: join(world.home, '.claude'), CLAUDE_PLUGIN_ROOT: ROOT, OMC_JEV: omcJev, TYPESAFE_API_KEY: 'test', OMC_JEV_ENDPOINT: `http://127.0.0.1:${port}/v1/systemone`, OMC_JEV_LOG_DIR: logs, OMC_JEV_QUIET: '1', OMC_JEV_APPLIED_LOG: '1', OMC_JEV_TIMEOUT_MS: '8000' });
+    Object.assign(env, { HOME: world.home, USERPROFILE: world.home, CLAUDE_CONFIG_DIR: join(world.home, '.claude'), CLAUDE_PLUGIN_ROOT: ROOT, TYPESAFE_API_KEY: 'test', OMC_JEV_ENDPOINT: `http://127.0.0.1:${port}/v1/systemone`, OMC_JEV_LOG_DIR: logs, OMC_JEV_QUIET: '1', OMC_JEV_APPLIED_LOG: '1', OMC_JEV_TIMEOUT_MS: '8000' });
+    if (omcJev !== null) env.OMC_JEV = omcJev; // null = the variable stays unset
     if (role !== undefined) env.OMC_SESSION_ROLE = role;
     return Object.assign(env, extra);
   }
@@ -320,7 +323,9 @@ describe('delegation point: Agent hook', { timeout: 180_000 }, () => {
     assert.equal(delegationQueries(run).length, 0);
     assert.equal(run.context.includes('delegation'), false);
     assert.equal(run.applied.some((entry) => entry.point === 'delegation'), false);
-    const plain = await call({ role: 'coordinator', omcJev: undefined, answer: { choice: 'session' } });
+    const plain = await call({ role: 'coordinator', omcJev: null, answer: { choice: 'session' } }); // OMC_JEV not set at all
     assert.equal(delegationQueries(plain).length, 0);
+    assert.equal(plain.context.includes('delegation'), false);
+    assert.equal(plain.applied.some((entry) => entry.point === 'delegation'), false);
   });
 });

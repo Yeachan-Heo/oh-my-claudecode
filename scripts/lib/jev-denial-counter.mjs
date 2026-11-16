@@ -12,7 +12,8 @@
  * ceiling, and only with OMC_JEV_DENIAL_RELEASE=1. Every other denial is only counted and escalated.
  *
  * State: <stateDir>/sessions/<session>/denials-<agent_id or main>.json, written atomically under a lock.
- * The state holds 16-hex hashes of the keys, never the denial text.
+ * The counts of the state are keyed by 16-hex hashes of the keys; the once-per-key action markers carry the
+ * normalized key itself (so after the first escalation the file holds up to 2000 characters of denial text).
  * Log: denials.jsonl in OMC_JEV_LOG_DIR, or <stateDir>/jev when that is unset. One decision row per fired
  * action (escalation, release, ceiling, unreadable state) and one outcome row that references it. Rows are at
  * most 2000 characters; the file rotates at 1.5 MB.
@@ -160,9 +161,9 @@ export function writeDenialRow(row, logDir) {
 
 function statePath(stateDir, sessionId, agentId) {
   const file = agentId ? `denials-${String(agentId).replace(/[^A-Za-z0-9._-]/g, '_').slice(0, 120)}.json` : 'denials-main.json';
-  const session = typeof sessionId === 'string' && sessionId.trim()
-    ? sessionId.trim().replace(/[^A-Za-z0-9._-]/g, '_').slice(0, 120)
-    : 'no-session';
+  const cleaned = typeof sessionId === 'string' ? sessionId.trim().replace(/[^A-Za-z0-9._-]/g, '_').slice(0, 120) : '';
+  // An id made only of dots ("." or "..") would climb out of the sessions directory.
+  const session = cleaned && !/^\.+$/.test(cleaned) ? cleaned : 'no-session';
   return join(stateDir, 'sessions', session, file);
 }
 
@@ -312,7 +313,7 @@ export function registerDenial({ stateDir, sessionId, agentId, guard, reason, ca
 
     if (!state.actions || typeof state.actions !== 'object' || Array.isArray(state.actions)) state.actions = {};
     const fire = (id) => {
-      const actionKey = `${hash}|${id}`;
+      const actionKey = `${key}|${id}`; // the action marker carries the normalized key, not its hash
       if (state.actions[actionKey]) return; // each action fires once per key
       state.actions[actionKey] = ts;
       result.action = id;

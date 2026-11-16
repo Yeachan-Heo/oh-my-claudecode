@@ -1127,6 +1127,15 @@ function recordModelRoutingShadow(toolName, toolInput, updatedToolInput, permiss
         row.effort = { from: baseEffort ?? null, to, ...(to !== marker.effort ? { capped: true, requested: marker.effort } : {}) };
       }
       target.prompt = marker.prompt;
+      // OMC_JEV_GUARD_USE_MARKER=1: the delivery guard leaves out the calls a `use` marker decided
+      // and finds them in applied.jsonl by a model or effort entry with the source "marker".
+      if (String(process.env.OMC_JEV_GUARD_USE_MARKER ?? '').trim() === '1') {
+        recordJevApplied('model-routing', {
+          subagent_type: row.subagent_type,
+          ...(row.model ? { model: { ...row.model, source: 'marker' } } : {}),
+          ...(row.effort ? { effort: { ...row.effort, source: 'marker' } } : {}),
+        });
+      }
     }
     recordModelRoutingOverride(stateDir, row);
   }

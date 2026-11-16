@@ -29,12 +29,18 @@
  *   <state dir>/errors.jsonl          one line per failure: ts, session_id,
  *                                     error, errorClass and prompt_id when
  *                                     the payload carries it, appended as one
- *                                     write with O_APPEND (atomic per line on
- *                                     local file systems; a lost append costs
- *                                     nothing, the .error.json exists anyway).
- *                                     When the file passes the rotation
- *                                     threshold it is moved to errors.jsonl.1
- *                                     (one copy) before the append.
+ *                                     write on a descriptor opened with
+ *                                     O_APPEND and O_NOFOLLOW (a symlink in
+ *                                     place of the file is refused), under an
+ *                                     exclusive lock (errors.jsonl.lock) that
+ *                                     is retried for up to 1 s; without the
+ *                                     lock in that time the append is skipped
+ *                                     (a lost append costs nothing, the
+ *                                     .error.json exists anyway). When the
+ *                                     file passes the rotation threshold
+ *                                     (checked under the lock) it is moved to
+ *                                     errors.jsonl.1 (one copy) before the
+ *                                     append.
  *
  * The state directory is created with mode 0700 and checked (lstat): it must
  * be a directory (not a symlink) owned by the current user; wider modes are
@@ -50,13 +56,15 @@
  *                                  (default 1048576).
  *
  * Fail-open: every error (bad JSON, missing fields, a write error, the time
- * limit) ends the hook with code 0 and at most one stderr line; the session
- * flows on.
+ * limit of 4 s) ends the hook with code 0 and at most one stderr line; the
+ * session flows on.
  */
 
-import { appendFileSync, chmodSync, mkdirSync, lstatSync, readFileSync, renameSync, rmSync, statSync, unlinkSync, writeFileSync, openSync, closeSync } from 'node:fs';
+import { chmodSync, closeSync, constants, lstatSync, mkdirSync, openSync, renameSync, rmSync, statSync, writeFileSync, writeSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
+import { withStateFileLockAtPathSync } from './lib/atomic-write.mjs';
+import { readStdin } from './lib/stdin.mjs';
 import { resolveOmcStateRoot } from './lib/state-root.mjs';
 
 /** Error codes per class: transient, configuration, task-content. Anything else is unknown. */
@@ -67,6 +75,13 @@ export const ERROR_CLASSES = {
 };
 export const UNKNOWN_CLASS = 'unknown';
 export const RECORD_LIMIT_CHARS = 300;
+/** Longest wait for the errors.jsonl lock; after it the append is skipped. */
+export const APPEND_LOCK_MAX_MS = 1000;
+/** Time limit of the whole hook; after it the hook passes through with code 0. */
+export const TIME_LIMIT_MS = 4000;
+const APPEND_LOCK_ATTEMPTS = 100; // retries of 10 ms inside the lock helper; the deadline above ends them first
+const APPEND_LOCK_SQLITE_TIMEOUT_MS = 500;
+const APPEND_LOCK_PROBE_TIMEOUT_MS = 500;
 
 export const stopFailureEnabled = (env = process.env) => String(env.OMC_JEV_STOP_FAILURE ?? '').trim() === '1';
 
@@ -171,29 +186,47 @@ export function jsonlRowOf(record) {
   return row;
 }
 
+/** errors.jsonl: O_WRONLY|O_APPEND|O_CREAT|O_NOFOLLOW (the last where the platform has it), mode 0600. */
+function openErrorsLog(path) {
+  const { O_WRONLY, O_APPEND, O_CREAT, O_NOFOLLOW = 0 } = constants;
+  return openSync(path, O_WRONLY | O_APPEND | O_CREAT | O_NOFOLLOW, 0o600);
+}
+
 /**
- * Append one line to errors.jsonl and rotate it first when the file passed
- * the threshold: the file is moved to errors.jsonl.1 (one copy) and a fresh
- * file carries only the new line.
+ * Append one line to errors.jsonl under an exclusive lock (errors.jsonl.lock,
+ * retried for up to APPEND_LOCK_MAX_MS) and rotate it first when the file
+ * passed the threshold: checked under the lock, the file is moved to
+ * errors.jsonl.1 (one copy) and reopened, so the fresh file carries only the
+ * new line. Returns true when the line was appended and false when the lock
+ * was not obtained in time (the line is then skipped). A symlink in place of
+ * the file is refused (O_NOFOLLOW) and throws.
  */
 export function appendErrorsJsonl(dir, record, threshold) {
   const path = join(dir, 'errors.jsonl');
-  const row = jsonlRowOf(record);
-  const line = JSON.stringify(row) + '\n';
-  let size = 0;
+  const line = JSON.stringify(jsonlRowOf(record)) + '\n';
+  let fd = openErrorsLog(path);
   try {
-    size = statSync(path).size;
-  } catch {
-    // no file yet
+    const result = withStateFileLockAtPathSync(
+      `${path}.lock`,
+      () => {
+        if (statSync(path).size > threshold) {
+          renameSync(path, path + '.1');
+          closeSync(fd);
+          fd = -1;
+          fd = openErrorsLog(path);
+        }
+        writeSync(fd, line);
+      },
+      true,
+      APPEND_LOCK_ATTEMPTS,
+      APPEND_LOCK_SQLITE_TIMEOUT_MS,
+      APPEND_LOCK_PROBE_TIMEOUT_MS,
+      APPEND_LOCK_MAX_MS,
+    );
+    return result.acquired || Boolean(result.callbackRan);
+  } finally {
+    if (fd >= 0) closeSync(fd);
   }
-  if (size > threshold) {
-    try {
-      renameSync(path, path + '.1');
-    } catch {
-      // another process rotated it meanwhile; the append follows anyway
-    }
-  }
-  appendFileSync(path, line, { encoding: 'utf8', mode: 0o600 });
 }
 
 // --- main ---------------------------------------------------------------------
@@ -227,14 +260,21 @@ export async function main(argv, stdin, env = process.env, cwd = process.cwd()) 
 
 /* istanbul ignore next */
 if (process.argv[1] && /stop-failure-record\.mjs$/.test(process.argv[1])) {
-  let stdin = '';
-  try {
-    stdin = readFileSync(0, 'utf8');
-  } catch {
-    // closed stdin: an empty input, the JSON error path
-  }
-  main(process.argv.slice(2), stdin).then(
-    () => process.exit(0),
-    () => process.exit(0),
-  );
+  // The hook's own time limit, armed before stdin is read (an input that never closes ends here too):
+  // the hook ends with code 0 and one stderr line.
+  setTimeout(() => {
+    try {
+      console.error('[stop-failure-record] passing through after an error: TimeLimit');
+    } catch {
+      // stderr itself failed
+    }
+    process.exit(0);
+  }, TIME_LIMIT_MS).unref();
+  readStdin(TIME_LIMIT_MS)
+    .catch(() => '') // closed stdin: an empty input, the JSON error path
+    .then((stdin) => main(process.argv.slice(2), stdin))
+    .then(
+      () => process.exit(0),
+      () => process.exit(0),
+    );
 }

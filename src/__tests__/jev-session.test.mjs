@@ -14,6 +14,8 @@ import process from 'node:process';
 import { spawn, spawnSync } from 'node:child_process';
 import { fileURLToPath, URL } from 'node:url';
 import assert from 'node:assert/strict';
+import { clearTimeout, setTimeout } from 'node:timers';
+import { Buffer } from 'node:buffer';
 import { afterAll, beforeAll, describe, it } from 'vitest';
 import { successorUseLine } from '../../scripts/lib/jev-handoff.mjs';
 
@@ -339,6 +341,13 @@ console.log(JSON.stringify(Array.from({ length: n }, () => ({ pid: null }))));
   it('(F6) the row of sessions.jsonl never holds the text of the brief or a key (only the brief path)', async () => {
     const r = await start({ brief: 'SECRET-BRIEF-TEXT to check' });
     assert.ok(!js(r.row).includes('SECRET-BRIEF-TEXT'), js(r.row));
+  }, SLOW);
+  it('(F6b) a key in the start of the brief is masked in the query to Jev', async () => {
+    const r = await start({ brief: 'Check the deploy with the key sk-ant-abcdef1234567890ABCD and report.\nAPI_KEY=hunter2hunter2 stays out.' });
+    assert.ok(r.queries.length >= 1, js(r.queries));
+    const sent = js(r.queries.map((entry) => entry.body));
+    assert.ok(!sent.includes('abcdef1234567890ABCD') && !sent.includes('hunter2hunter2'), sent.slice(0, 400));
+    assert.ok(sent.includes('sk-ant-***'), sent.slice(0, 400));
   }, SLOW);
   it('(F7) a run through a symbolic link (a wrapper on PATH) works like a direct one; importing the module does not run the launcher', async () => {
     const link = join(tmp, 'jev-session');

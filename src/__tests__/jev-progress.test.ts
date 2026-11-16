@@ -94,9 +94,30 @@ describe("jev-progress module", () => {
     expect(r1).toEqual({ calls: 2, progress: true });
     const undated = JSON.stringify({ type: "assistant", message: { content: [{ type: "tool_use", id: "tu2", name: "Write", input: { file_path: "/x/b.md" } }] } }) + "\n";
     const r2 = classifyTranscript(undated, new ProgressState());
-    expect(r2).toEqual({ calls: 0, progress: false });
+    expect(r2).toEqual({ calls: 1, progress: true });
     const r3 = classifyTranscript(use(new Date(1000).toISOString(), "tu3") + "\n" + "{\"type\":\"assist", new ProgressState());
     expect(r3).toEqual({ calls: 1, progress: true });
+  });
+
+  it("classifies a transcript without timestamps: the other rules work and the duration stays unknown", () => {
+    const useBash = (id: string, ts?: string) => JSON.stringify({ type: "assistant", ...(ts ? { timestamp: ts } : {}), message: { content: [{ type: "tool_use", id, name: "Bash", input: { command: "make " + id } }] } });
+    const resBash = (id: string, content: string, ts?: string) => JSON.stringify({ type: "user", ...(ts ? { timestamp: ts } : {}), message: { content: [{ type: "tool_result", tool_use_id: id, is_error: true, content }] } });
+    // no timestamps: a new error signature is progress, the same error again is not
+    const first = classifyTranscript(useBash("a1") + "\n" + resBash("a1", "Error: missing module xyz") + "\n", new ProgressState());
+    expect(first).toEqual({ calls: 1, progress: true });
+    const repeat = new ProgressState();
+    const both = classifyTranscript([useBash("b1"), resBash("b1", "Error: missing module xyz"), useBash("b2"), resBash("b2", "Error: missing module xyz")].join("\n") + "\n", repeat);
+    expect(both).toEqual({ calls: 2, progress: true });
+    expect(repeat.add({ tool: "Bash", input: { command: "make b3" }, result: "Error: missing module xyz", ok: false })).toEqual({ progress: false, reason: "error-repeat" });
+    // an undated call with a dated result has no duration: no bogus "long call"
+    const undatedCall = classifyTranscript(useBash("c1") + "\n" + resBash("c1", "", new Date(5_000_000).toISOString()) + "\n", new ProgressState());
+    expect(undatedCall).toEqual({ calls: 1, progress: false });
+    // a dated call with an undated result: duration unknown as well
+    const undatedResult = classifyTranscript(useBash("d1", new Date(1000).toISOString()) + "\n" + resBash("d1", "") + "\n", new ProgressState());
+    expect(undatedResult).toEqual({ calls: 1, progress: false });
+    // a window start places only dated rows: an undated row stays outside it
+    const undatedWrite = JSON.stringify({ type: "assistant", message: { content: [{ type: "tool_use", id: "w1", name: "Write", input: { file_path: "/x/w.md" } }] } }) + "\n";
+    expect(classifyTranscript(undatedWrite, new ProgressState(), 1000)).toEqual({ calls: 0, progress: false });
   });
 
   it("does not count guard denials in a transcript as progress", () => {

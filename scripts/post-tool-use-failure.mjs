@@ -429,12 +429,17 @@ async function main() {
     let signatureHash = '';
     let seriesKey = '';
     let pathHash = '';
+    // The package key (one attempt per model response) is read from the transcript before the
+    // state lock; it stays null while the series is off (the transcript is then not read), and
+    // the time-gap fallback of countFailureSeries (PACKAGE_GAP_MS) applies when it is null.
+    let packageKey = null;
     if (failureSeriesEnabled) {
       ({ hash: signatureHash, key: seriesKey, pathHash } = errorSeriesKey(toolName, toolInput, error));
+      const { lastAssistantMessageId } = await import('./lib/jev-denial-counter.mjs');
+      packageKey = lastAssistantMessageId(
+        typeof data.transcript_path === 'string' && data.transcript_path ? data.transcript_path : undefined,
+      );
     }
-    // No transcript-based package key in this hook; the time-gap fallback of countFailureSeries
-    // (PACKAGE_GAP_MS) applies.
-    const packageKey = null;
 
     // Read-compute-write under lock to prevent concurrent retryCount corruption
     const stateWriteCompleted = withFileLockSync(statePath, () => {

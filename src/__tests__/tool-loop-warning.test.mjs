@@ -16,6 +16,7 @@ import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, 
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import process from 'node:process';
 import { afterEach, describe, expect, it } from 'vitest';
 
 const ROOT = join(fileURLToPath(import.meta.url), '..', '..', '..');
@@ -62,12 +63,12 @@ const journal = (laneDir) => {
 };
 
 const stateFileOf = (laneDir, session, agent = '') =>
-  join(laneDir, 'stan', `${createHash('sha256').update(`${session}\u0000${agent}`).digest('hex')}.json`);
+  join(laneDir, 'state', `${createHash('sha256').update(`${session}\u0000${agent}`).digest('hex')}.json`);
 
 describe('tool-loop warning hook', () => {
   it('warns at the 3rd and 6th identical call, journal rows, output structure', () => {
     const laneDir = laneOf('repeat');
-    const state = join(laneDir, 'stan');
+    const state = join(laneDir, 'state');
     const call = (n) => run({ session_id: 's-pow', tool_use_id: `t${n}` }, state);
     for (const n of [1, 2]) {
       const r = call(n);
@@ -83,7 +84,7 @@ describe('tool-loop warning hook', () => {
 
   it('journal has one repeat row per warning (at 3 and 6), fields without content', () => {
     const laneDir = laneOf('repeat-journal');
-    const state = join(laneDir, 'stan');
+    const state = join(laneDir, 'state');
     const call = (n) => run({ session_id: 's-pow', tool_use_id: `t${n}` }, state);
     for (let n = 1; n <= 6; n += 1) call(n);
     const rows = journal(laneDir);
@@ -99,7 +100,7 @@ describe('tool-loop warning hook', () => {
 
   it('3 Reads with different results: no warning', () => {
     const laneDir = laneOf('different-results');
-    const state = join(laneDir, 'stan');
+    const state = join(laneDir, 'state');
     for (let i = 1; i <= 3; i += 1) {
       const r = run({ session_id: 's-rozne', tool_response: `version-${i}` }, state);
       expect(r.status).toBe(0);
@@ -110,7 +111,7 @@ describe('tool-loop warning hook', () => {
 
   it('Read,Edit,Read,Edit,Read: no repeat and no cycle (period 2 needs 6 calls)', () => {
     const laneDir = laneOf('alternating');
-    const state = join(laneDir, 'stan');
+    const state = join(laneDir, 'state');
     const seq = [
       { tool_name: 'Read', tool_input: { file_path: '/tmp/r.md' } },
       { tool_name: 'Edit', tool_input: { file_path: '/tmp/r.md', old_string: 'a', new_string: 'b' } },
@@ -118,8 +119,8 @@ describe('tool-loop warning hook', () => {
       { tool_name: 'Edit', tool_input: { file_path: '/tmp/r.md', old_string: 'a', new_string: 'b' } },
       { tool_name: 'Read', tool_input: { file_path: '/tmp/r.md' } },
     ];
-    seq.forEach((extra, i) => {
-      const r = run({ session_id: 's-rzad', ...extra }, state);
+    seq.forEach((extra) => {
+      const r = run({ session_id: 's-sequence', ...extra }, state);
       expect(r.status).toBe(0);
       expect(r.stdout.trim()).toBe('');
     });
@@ -128,7 +129,7 @@ describe('tool-loop warning hook', () => {
 
   it('cycle A,B,A,B,A,B: shortest period, again only after the cycle breaks', () => {
     const laneDir = laneOf('cycle');
-    const state = join(laneDir, 'stan');
+    const state = join(laneDir, 'state');
     const A = { tool_name: 'Read', tool_input: { file_path: '/tmp/c.md' }, tool_response: 'cycle-a' };
     const B = { tool_name: 'Grep', tool_input: { pattern: 'cycle-p', path: '/tmp/c' }, tool_response: 'cycle-b' };
     const C = { tool_name: 'Glob', tool_input: { pattern: 'break-*' }, tool_response: 'empty' };
@@ -162,7 +163,7 @@ describe('tool-loop warning hook', () => {
 
   it('mixed cycle A,B,C x3: period 3 warning at the 9th call', () => {
     const laneDir = laneOf('cycle-3');
-    const state = join(laneDir, 'stan');
+    const state = join(laneDir, 'state');
     const tools = [
       { tool_name: 'Read', tool_input: { file_path: '/tmp/m.md' } },
       { tool_name: 'Grep', tool_input: { pattern: 'm-pattern' } },
@@ -179,7 +180,7 @@ describe('tool-loop warning hook', () => {
 
   it('polling and status exemptions never warn', () => {
     const laneDir = laneOf('exemptions');
-    const state = join(laneDir, 'stan');
+    const state = join(laneDir, 'state');
     const cases = [
       { tool_name: 'Bash', tool_input: { command: 'sleep 30' } },
       { tool_name: 'Bash', tool_input: { command: 'gh run watch 42' } },
@@ -205,7 +206,7 @@ describe('tool-loop warning hook', () => {
 
   it('sleep as a whole word only: sleepy is not polling and warns at the 3rd call', () => {
     const laneDir = laneOf('sleep-word');
-    const state = join(laneDir, 'stan');
+    const state = join(laneDir, 'state');
     for (let k = 1; k <= 3; k += 1) {
       const r = run({ session_id: 's-sleepy', tool_name: 'Bash', tool_input: { command: 'sleepy 5' } }, state);
       expect(r.status).toBe(0);
@@ -216,7 +217,7 @@ describe('tool-loop warning hook', () => {
 
   it('MCP suffixes: the default list exempts the state tools; a custom list exempts more', () => {
     const laneDir = laneOf('mcp-suffixes');
-    const state = join(laneDir, 'stan');
+    const state = join(laneDir, 'state');
     const taskListTool = 'mcp__other__task_list';
     // default list: the task-list suffix is not exempt, so 3 identical calls warn
     for (let k = 1; k <= 3; k += 1) {
@@ -233,7 +234,7 @@ describe('tool-loop warning hook', () => {
 
   it('Agent resets the repeat counter (the warning moves after the exemption)', () => {
     const laneDir = laneOf('agent-resets');
-    const state = join(laneDir, 'stan');
+    const state = join(laneDir, 'state');
     const d = { session_id: 's-agent', tool_use_id: 'a' };
     expect(context(run(d, state))).toBeNull();
     expect(context(run(d, state))).toBeNull();
@@ -248,7 +249,7 @@ describe('tool-loop warning hook', () => {
 
   it('main session and subagent (agent_id) count apart, separate state files', () => {
     const laneDir = laneOf('contexts');
-    const state = join(laneDir, 'stan');
+    const state = join(laneDir, 'state');
     const d = { session_id: 's-ktx', tool_use_id: 'k' };
     expect(context(run(d, state))).toBeNull();
     expect(context(run(d, state))).toBeNull();
@@ -266,7 +267,7 @@ describe('tool-loop warning hook', () => {
 
   it('bad JSON and missing fields: exit 0, no output, error rows in the journal', () => {
     const laneDir = laneOf('bad-json');
-    const state = join(laneDir, 'stan');
+    const state = join(laneDir, 'state');
     const rBad = run('{bad-json-loop', state);
     expect(rBad.status).toBe(0);
     expect(rBad.stdout).toBe('');
@@ -287,7 +288,7 @@ describe('tool-loop warning hook', () => {
     const laneDir = laneOf('state-error');
     const fileAsDir = join(laneDir, 'file-as-state');
     writeFileSync(fileAsDir, 'x');
-    const r = run({ session_id: 's-blad', tool_use_id: 'x' }, fileAsDir);
+    const r = run({ session_id: 's-error', tool_use_id: 'x' }, fileAsDir);
     expect(r.status).toBe(0);
     expect(r.stdout).toBe('');
     expect(r.stderr).toBe('');
@@ -297,7 +298,7 @@ describe('tool-loop warning hook', () => {
 
   it('output, journal and state never carry tool_input or tool_response content', () => {
     const laneDir = laneOf('no-content');
-    const state = join(laneDir, 'stan');
+    const state = join(laneDir, 'state');
     let last;
     for (let k = 1; k <= 3; k += 1) {
       last = run({
@@ -318,7 +319,7 @@ describe('tool-loop warning hook', () => {
 
   it('sweep at the 100th call: an old foreign file is removed, the own state file stays', () => {
     const laneDir = laneOf('sweep');
-    const state = join(laneDir, 'stan');
+    const state = join(laneDir, 'state');
     mkdirSync(state, { recursive: true });
     const own = stateFileOf(laneDir, 's-sprzat', '');
     writeFileSync(own, JSON.stringify({ calls: 99 }));
@@ -337,7 +338,7 @@ describe('tool-loop warning hook', () => {
 
   it('with the switch off the behavior is unchanged: no output, no state, no journal', () => {
     const laneDir = laneOf('default-off');
-    const state = join(laneDir, 'stan');
+    const state = join(laneDir, 'state');
     for (let k = 1; k <= 3; k += 1) {
       const r = run({ session_id: 's-off', tool_use_id: `o${k}` }, state, { OMC_JEV_LOOP_WARNING: '' });
       expect(r.status).toBe(0);
@@ -350,7 +351,7 @@ describe('tool-loop warning hook', () => {
 
   it('threshold from the environment: OMC_JEV_LOOP_WARNING_THRESHOLD=2 warns at the 2nd call', () => {
     const laneDir = laneOf('threshold-env');
-    const state = join(laneDir, 'stan');
+    const state = join(laneDir, 'state');
     const env = { OMC_JEV_LOOP_WARNING_THRESHOLD: '2' };
     expect(context(run({ session_id: 's-th', tool_use_id: 'x1' }, state, env))).toBeNull();
     expect(context(run({ session_id: 's-th', tool_use_id: 'x2' }, state, env))).toMatch(/repeated 2 times in a row/);
@@ -370,9 +371,11 @@ describe('tool-loop warning hook', () => {
     expect(typeof entries[0].timeout).toBe('number');
   });
 
-  it('speed: the median of 20 runs stays below 300 ms', () => {
+  // The bound is generous on purpose: the run time is dominated by the node process start, which
+  // varies a lot on a loaded machine; the hook has a 3 s limit in hooks.json.
+  it('speed: the median of 20 runs stays below 1000 ms', () => {
     const laneDir = laneOf('speed');
-    const state = join(laneDir, 'stan');
+    const state = join(laneDir, 'state');
     const times = [];
     for (let i = 0; i < 20; i += 1) {
       const start = process.hrtime.bigint();
@@ -383,7 +386,7 @@ describe('tool-loop warning hook', () => {
     }
     times.sort((a, b) => a - b);
     const median = (times[9] + times[10]) / 2;
-    expect(median).toBeLessThan(300);
+    expect(median).toBeLessThan(1000);
   });
 });
 

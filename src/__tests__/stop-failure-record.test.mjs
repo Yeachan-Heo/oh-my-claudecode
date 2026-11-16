@@ -8,16 +8,20 @@
  * trims, an ISO ts and the file modes; prompt_id is recorded only when the
  * payload carries it; errors.jsonl lines keep the JSONL fields, parallel
  * calls append cleanly; session ids are sanitized and never escape the state
- * dir; rotation moves the log to errors.jsonl.1; a symlinked state dir and
- * every input error pass through with code 0; with the switch off nothing is
- * written.
+ * dir; rotation moves the log to errors.jsonl.1; a symlinked log or state dir
+ * and a held lock never block the hook, and every input error passes through
+ * with code 0; with the switch off nothing is written.
  */
 import { spawn, spawnSync } from 'node:child_process';
 import { existsSync, lstatSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import process from 'node:process';
+import { clearTimeout, setTimeout } from 'node:timers';
 import { afterEach, describe, expect, it } from 'vitest';
+
+import { acquireStateFileLockAtPathSync, releaseStateFileLockSync } from '../../scripts/lib/atomic-write.mjs';
 
 const ROOT = join(fileURLToPath(import.meta.url), '..', '..', '..');
 const HOOK = join(ROOT, 'scripts', 'stop-failure-record.mjs');
@@ -75,7 +79,7 @@ const jsonlRows = (state) => {
 
 describe('stop-failure-record hook', () => {
   it('classifies every known code into its class; unknown, missing and non-string fall back to unknown', () => {
-    const state = join(laneOf('classification'), 'stan');
+    const state = join(laneOf('classification'), 'state');
     const check = (error, expectedClass, id) => {
       const r = run({ session_id: id, error }, state);
       expect(r.status).toBe(0);
@@ -97,7 +101,7 @@ describe('stop-failure-record hook', () => {
   });
 
   it('.error.json: contract fields, 300-char trims, ISO ts, file modes, atomic replace', () => {
-    const state = join(laneOf('contract'), 'stan');
+    const state = join(laneOf('contract'), 'state');
     const details = 'D'.repeat(500) + 'END-DETAILS';
     const message = 'A'.repeat(400) + 'TAIL-MARKER-SFR';
     const r = run({
@@ -131,7 +135,7 @@ describe('stop-failure-record hook', () => {
   });
 
   it('prompt_id: recorded when the payload carries it, key absent when it does not', () => {
-    const state = join(laneOf('prompt-id'), 'stan');
+    const state = join(laneOf('prompt-id'), 'state');
     const r = run({ session_id: 's-pid', error: 'rate_limit', prompt_id: 'prompt-sfr-1' }, state);
     expect(r.status).toBe(0);
     expect(readError(state, 's-pid').prompt_id).toBe('prompt-sfr-1');
@@ -145,7 +149,7 @@ describe('stop-failure-record hook', () => {
   });
 
   it('errors.jsonl: contract fields; five parallel calls append clean lines', async () => {
-    const state = join(laneOf('jsonl'), 'stan');
+    const state = join(laneOf('jsonl'), 'state');
     const r = run({ session_id: 's-jsonl', error: 'overloaded' }, state);
     expect(r.status).toBe(0);
     const rows = jsonlRows(state);
@@ -180,7 +184,7 @@ describe('stop-failure-record hook', () => {
 
   it('session id sanitization: 9 vectors, the file never escapes the state dir', () => {
     const laneDir = laneOf('sanitization');
-    const state = join(laneDir, 'stan');
+    const state = join(laneDir, 'state');
     const cases = [
       ['3f2a9c1e-0b7d-4e5a-9c1f-2b3c4d5e6f70', '3f2a9c1e-0b7d-4e5a-9c1f-2b3c4d5e6f70'],
       ['a/b..c', 'a_b__c'],
@@ -200,11 +204,11 @@ describe('stop-failure-record hook', () => {
       expect(existsSync(join(state, expected + '.error.json')), 'file for ' + JSON.stringify(input)).toBe(true);
       expect(JSON.parse(readFileSync(join(state, expected + '.error.json'), 'utf8')).session_id).toBe(expected);
     }
-    expect(readdirSync(laneDir).sort()).toEqual(['stan']);
+    expect(readdirSync(laneDir).sort()).toEqual(['state']);
   });
 
   it('lone surrogate in error_details: both records written and readable', () => {
-    const state = join(laneOf('surrogate'), 'stan');
+    const state = join(laneOf('surrogate'), 'state');
     const r = run({ session_id: 's-surrogate', error: 'billing_error', error_details: '\ud800' }, state);
     expect(r.status).toBe(0);
     expect(r.stdout).toBe('');
@@ -213,14 +217,14 @@ describe('stop-failure-record hook', () => {
   });
 
   it('session id of 300 chars: file named 200 x + .error.json', () => {
-    const state = join(laneOf('long-id'), 'stan');
+    const state = join(laneOf('long-id'), 'state');
     const r = run({ session_id: 'x'.repeat(300), error: 'rate_limit' }, state);
     expect(r.status).toBe(0);
     expect(existsSync(join(state, 'x'.repeat(200) + '.error.json'))).toBe(true);
   });
 
   it('rotation: errors.jsonl above OMC_JEV_STOP_FAILURE_MAX_B moves to errors.jsonl.1 before the append', () => {
-    const state = join(laneOf('rotation'), 'stan');
+    const state = join(laneOf('rotation'), 'state');
     mkdirSync(state, { recursive: true });
     const rows = [];
     for (let i = 0; i < 20; i += 1) {
@@ -236,11 +240,71 @@ describe('stop-failure-record hook', () => {
     expect(JSON.parse(old[0]).session_id).toBe('s-r0');
   });
 
+  it('a symlinked errors.jsonl is refused (O_NOFOLLOW): the target stays untouched, .error.json is written, code 0', () => {
+    const laneDir = laneOf('symlink-log');
+    const state = join(laneDir, 'state');
+    mkdirSync(state, { recursive: true });
+    const target = join(laneDir, 'target.jsonl');
+    writeFileSync(target, 'untouched\n');
+    symlinkSync(target, join(state, 'errors.jsonl'));
+    const r = run({ session_id: 's-sym-log', error: 'rate_limit' }, state);
+    expect(r.status).toBe(0);
+    expect(r.stdout).toBe('');
+    expect(r.stderr.split('\n').filter((l) => l.trim()).length).toBeLessThanOrEqual(1);
+    expect(readFileSync(target, 'utf8')).toBe('untouched\n');
+    expect(readError(state, 's-sym-log')?.error).toBe('rate_limit');
+  });
+
+  it('a held errors.jsonl lock: the append is skipped after about a second, .error.json is written, code 0; a free lock appends', () => {
+    const state = join(laneOf('lock-held'), 'state');
+    mkdirSync(state, { recursive: true });
+    const held = acquireStateFileLockAtPathSync(join(state, 'errors.jsonl.lock'), 50, true);
+    expect(held).toBeTruthy();
+    const started = Date.now();
+    let r;
+    try {
+      r = run({ session_id: 's-lock', error: 'rate_limit' }, state);
+    } finally {
+      releaseStateFileLockSync(held);
+    }
+    const elapsed = Date.now() - started;
+    expect(r.status).toBe(0);
+    expect(r.stdout).toBe('');
+    expect(elapsed).toBeLessThan(4000);
+    expect(readError(state, 's-lock')?.error).toBe('rate_limit');
+    expect(jsonlRows(state)).toHaveLength(0);
+    const after = run({ session_id: 's-lock-free', error: 'rate_limit' }, state);
+    expect(after.status).toBe(0);
+    expect(jsonlRows(state).map((row) => row.session_id)).toEqual(['s-lock-free']);
+  });
+
+  it('the time limit: a stdin that never closes ends the hook with code 0 after about 4 s, quiet', async () => {
+    const state = join(laneOf('time-limit'), 'state');
+    const started = Date.now();
+    const result = await new Promise((resolve, reject) => {
+      const child = spawn(process.execPath, [HOOK], { env: { ...process.env, OMC_JEV_STOP_FAILURE: '1', OMC_JEV_STOP_FAILURE_DIR: state } });
+      let stdout = '';
+      let stderr = '';
+      const guard = setTimeout(() => { child.kill(); reject(new Error('the hook did not end by itself')); }, 15_000);
+      child.stdout.on('data', (chunk) => { stdout += chunk; });
+      child.stderr.on('data', (chunk) => { stderr += chunk; });
+      child.on('close', (code) => { clearTimeout(guard); resolve({ code, stdout, stderr }); });
+      child.stdin.write('{"session_id":"s-open"'); // an unfinished object; the pipe stays open
+    });
+    const elapsed = Date.now() - started;
+    expect(result.code).toBe(0);
+    expect(result.stdout).toBe('');
+    expect(result.stderr.split('\n').filter((l) => l.trim()).length).toBeLessThanOrEqual(1);
+    expect(elapsed).toBeGreaterThanOrEqual(3500);
+    expect(elapsed).toBeLessThan(10_000);
+    expect(existsSync(state)).toBe(false);
+  }, 30_000);
+
   it('a symlinked state dir: nothing written, code 0', () => {
     const laneDir = laneOf('symlink-dir');
     const target = join(laneDir, 'target');
     mkdirSync(target, { recursive: true });
-    const state = join(laneDir, 'stan');
+    const state = join(laneDir, 'state');
     symlinkSync(target, state);
     const r = run({ session_id: 's-sym', error: 'rate_limit' }, state);
     expect(r.status).toBe(0);
@@ -251,12 +315,12 @@ describe('stop-failure-record hook', () => {
 
   it('fail-open: bad JSON, another event, a file as state dir: code 0, quiet', () => {
     const laneDir = laneOf('fail-open');
-    const stateBad = join(laneDir, 'stan-bad');
+    const stateBad = join(laneDir, 'state-bad');
     const rBad = run({}, stateBad, {}, '{bad-json-sfr');
     expect(rBad.status).toBe(0);
     expect(rBad.stdout).toBe('');
     expect(rBad.stderr.split('\n').filter((l) => l.trim()).length).toBeLessThanOrEqual(1);
-    const stateOther = join(laneDir, 'stan-other');
+    const stateOther = join(laneDir, 'state-other');
     const rOther = run({ hook_event_name: 'Stop' }, stateOther);
     expect(rOther.status).toBe(0);
     expect(rOther.stdout).toBe('');
@@ -270,7 +334,7 @@ describe('stop-failure-record hook', () => {
   });
 
   it('with the switch off nothing is written', () => {
-    const state = join(laneOf('default-off'), 'stan');
+    const state = join(laneOf('default-off'), 'state');
     const r = run({ session_id: 's-off', error: 'rate_limit' }, state, { OMC_JEV_STOP_FAILURE: '' });
     expect(r.status).toBe(0);
     expect(r.stdout).toBe('');
@@ -278,7 +342,7 @@ describe('stop-failure-record hook', () => {
   });
 
   it('closed stdin: code 0, quiet', () => {
-    const state = join(laneOf('closed-stdin'), 'stan');
+    const state = join(laneOf('closed-stdin'), 'state');
     const closed = spawnSync('/bin/sh', ['-c', 'exec ' + JSON.stringify(process.execPath) + ' ' + JSON.stringify(HOOK) + ' <&-'], {
       encoding: 'utf8',
       env: { ...process.env, OMC_JEV_STOP_FAILURE: '1', OMC_JEV_STOP_FAILURE_DIR: state },
@@ -302,7 +366,7 @@ describe('stop-failure-record random contract', () => {
       };
     };
     const laneDir = laneOf('random-contract');
-    const state = join(laneDir, 'stan');
+    const state = join(laneDir, 'state');
     const randomText = (length, rnd) => {
       const alphabet = 'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789 _"\'`$();&\\/*{}\n';
       let result = '';

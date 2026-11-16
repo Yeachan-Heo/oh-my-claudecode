@@ -473,6 +473,29 @@ describe('handoff hook (OMC_JEV_HANDOFF=1)', () => {
     assert.equal(handoffRows(world).filter((row) => row.action === 'handoff-refused').length, 8);
   });
 
+  it('21 handoff-mode denials 2.2 s apart (no message ids: the time-gap package rule): a degree text from the 3rd, past 20 still a denial, one escalation row, 21 refusal rows', { timeout: 300_000 }, () => {
+    const world = newWorld();
+    sparseTranscript(world.transcript, 25 * MIB + 1);
+    activeUltragoal(world);
+    sessionsLog(world, { session_id: SID, started_with: { model: 'opus', effort: 'high' } });
+    const env = { OMC_JEV_DENIAL_COUNTER: '1' };
+    // A synchronous gap above 2 s: without a package key, denials closer than 2 s count as one attempt.
+    const pause = (ms) => Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
+    let third = '';
+    for (let i = 1; i <= 21; i++) {
+      if (i > 1) pause(2200);
+      const run = runHook(world, 'Write', { file_path: join(world.logs, 'other.md'), content: 'x' }, { env });
+      assert.equal(denied(run.output, 'hand the session over'), true, `denial ${i} must stay a denial: ${JSON.stringify(run.output)}`);
+      if (i < 3) assert.doesNotMatch(reasonOf(run.output), /DENIAL COUNTER/, `denial ${i} must have no degree text`);
+      if (i === 3) third = reasonOf(run.output);
+    }
+    assert.match(third, /DENIAL COUNTER/);
+    assert.match(third, /guard handoff/);
+    const rows = readFileSync(join(world.logs, 'denials.jsonl'), 'utf8').trim().split('\n').map((line) => JSON.parse(line));
+    assert.equal(rows.filter((row) => row.kind === 'denial' && row.guard === 'handoff' && row.action === 'escalation-1').length, 1);
+    assert.equal(handoffRows(world).filter((row) => row.action === 'handoff-refused').length, 21);
+  });
+
   it('a successor appends the takeover line through an allowed Edit and keeps working; a plain session editing an old handoff file with that line gets no denials', () => {
     const world = newWorld();
     sparseTranscript(world.transcript, 1); // a small transcript: a session without handoff mode (how a successor works)

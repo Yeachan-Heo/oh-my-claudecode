@@ -450,7 +450,7 @@ export function jevNoulOf(result, questionName) {
  * Fire-and-record one script-side judgment.
  * - Shadow mode: fire-and-forget, returns undefined immediately
  * - Active mode: waits (sync) for Jev answer, returns { mode, answer, answers, ... }
- *   (not while the opt-in shared breaker is open: then as in shadow mode)
+ *   (not while the opt-in shared breaker is open and covers the point: then as in shadow mode)
  *   (`answers` maps every question name to its answer; read multi-question
  *   points by name, never by position)
  * - Off mode: returns undefined
@@ -465,9 +465,12 @@ export function recordJevShadow({ point, state, questions, heuristic, permission
   // it. While the breaker is open an active hook does not wait for that: the
   // resolver runs in the background as in shadow mode and the twin decides.
   const breakerSettings = hookBreakerSettings();
+  // A breaker of scope "low" (opt-in, OMC_JEV_BREAKER_TIMEOUT_LOW=1) holds back only
+  // low-priority points: for any other point the hook keeps its mode.
   const openBreaker = breakerSettings && jevBreaker.readBreaker(breakerSettings);
-  if (openBreaker) armOutageNotice(breakerSettings, openBreaker);
-  const spawnMode = openBreaker ? "shadow" : mode;
+  const heldBack = Boolean(openBreaker) && jevBreaker.breakerCovers(openBreaker, point);
+  if (heldBack) armOutageNotice(breakerSettings, openBreaker);
+  const spawnMode = heldBack ? "shadow" : mode;
 
   // Throttled best-effort sweep of stale temp directories (once per hour)
   // This cleans up leftovers from killed resolvers that couldn't clean themselves

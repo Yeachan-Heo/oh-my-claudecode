@@ -27,6 +27,7 @@ import { fileURLToPath } from 'node:url';
 import { spawnSync } from 'node:child_process';
 import { homedir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
+import { maskSecrets } from './lib/jev-mask.mjs';
 import { capEffort, decideRoutingFromAnswers, getModelRoutingQuestions, parseUseMarker, resolveMaxEffort, ROUTING_TIERS } from './lib/jev-routing.mjs';
 import { recordJevShadow, setJevHookContext } from './lib/jev-shadow.mjs';
 import { resolveJevLogDir, resolveJevLogMaxBytes, rotateJevLog } from './jev-resolve.mjs';
@@ -37,9 +38,9 @@ const ROLES = ['coordinator', 'worker'];
 const BRIEF_MAX_BYTES = 400_000;
 const MODES = ['shadow', 'active', 'off'];
 
-// The state-masking helper of the Jev log is not available in this tree: the paths of the log row are kept as given
-// (the state sent to Jev is masked by the resolver). A fallback that returns the state unchanged.
-const maskJevState = (state) => state;
+// The text sent to Jev (the start of the brief, the name) and the paths of the log row pass through the secret mask of
+// the Jev log (lib/jev-mask.mjs): every string field of the object is masked, other values stay as they are.
+const maskJevState = (state) => Object.fromEntries(Object.entries(state).map(([key, value]) => [key, typeof value === 'string' ? maskSecrets(value) : value]));
 
 function parseArgs(argv) {
   const out = { dryRun: false };
@@ -159,7 +160,7 @@ export function decideSession({ brief, name, role, ask = recordJevShadow, env = 
   result.asked = true;
   let answered;
   try {
-    answered = ask({ point: POINT, state: { tool_name: 'SessionLauncher', subagent_type: `session-${role}`, task: marker.active ? marker.prompt : brief, description: name }, questions, heuristic: null, permissionMode: undefined });
+    answered = ask({ point: POINT, state: maskJevState({ tool_name: 'SessionLauncher', subagent_type: `session-${role}`, task: marker.active ? marker.prompt : brief, description: name }), questions, heuristic: null, permissionMode: undefined });
   } catch (error) {
     result.degraded = true; result.reason = `query-error: ${String(error?.message || error).slice(0, 120)}`; return result;
   }

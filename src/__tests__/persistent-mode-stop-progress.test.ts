@@ -9,19 +9,19 @@ import { resolveOmcStateRoot } from "../../scripts/lib/state-root.mjs";
 const WORKTREE = process.cwd();
 
 let TMP = "";
-let DOM = "";
+let HOME_DIR = "";
 let PROJECT = "";
-let STAN = "";
+let STATE_DIR = "";
 let TRANSCRIPTS = "";
 
 beforeAll(() => {
   TMP = fs.mkdtempSync(path.join(os.tmpdir(), "omc-stop-progress-"));
-  DOM = path.join(TMP, "home");
+  HOME_DIR = path.join(TMP, "home");
   PROJECT = path.join(TMP, "project");
-  STAN = path.join(TMP, "state");
+  STATE_DIR = path.join(TMP, "state");
   TRANSCRIPTS = path.join(TMP, "transcripts");
-  for (const dir of [DOM, path.join(DOM, ".claude"), PROJECT, STAN, TRANSCRIPTS]) fs.mkdirSync(dir, { recursive: true });
-  fs.writeFileSync(path.join(DOM, ".claude", ".claude.json"), JSON.stringify({ projects: {} }));
+  for (const dir of [HOME_DIR, path.join(HOME_DIR, ".claude"), PROJECT, STATE_DIR, TRANSCRIPTS]) fs.mkdirSync(dir, { recursive: true });
+  fs.writeFileSync(path.join(HOME_DIR, ".claude", ".claude.json"), JSON.stringify({ projects: {} }));
 });
 
 afterAll(() => {
@@ -31,13 +31,13 @@ afterAll(() => {
 function hookEnv(scenario: Record<string, string> = {}): NodeJS.ProcessEnv {
   return {
     PATH: process.env.PATH ?? "",
-    HOME: DOM,
-    USERPROFILE: DOM,
-    CLAUDE_CONFIG_DIR: path.join(DOM, ".claude"),
+    HOME: HOME_DIR,
+    USERPROFILE: HOME_DIR,
+    CLAUDE_CONFIG_DIR: path.join(HOME_DIR, ".claude"),
     TMPDIR: TMP,
     TEMP: TMP,
     TMP: TMP,
-    OMC_STATE_DIR: STAN,
+    OMC_STATE_DIR: STATE_DIR,
     OMC_JEV_LOG_DIR: path.join(TMP, "logs"),
     OMC_JEV_QUIET: "1",
     ...scenario,
@@ -54,7 +54,7 @@ function runHook(scenario: Record<string, string>, sessionId: string, extraInput
 }
 
 async function stateRoot(): Promise<string> {
-  process.env.OMC_STATE_DIR = STAN;
+  process.env.OMC_STATE_DIR = STATE_DIR;
   try { return await resolveOmcStateRoot(PROJECT); } finally { delete process.env.OMC_STATE_DIR; }
 }
 
@@ -181,8 +181,8 @@ describe("persistent-mode Stop progress release", () => {
     for (const scenario of [{}, { OMC_JEV_STOP_PROGRESS: "0" }] as Record<string, string>[]) {
       const sid = "off-series-" + (scenario.OMC_JEV_STOP_PROGRESS ?? "missing");
       await writeState(sid);
-      const powod = "BLOCKED: no access to the private package registry of the company";
-      const r = runHook(scenario, sid, { transcript_path: writeTranscript(sid), last_assistant_message: powod });
+      const reason = "BLOCKED: no access to the private package registry of the company";
+      const r = runHook(scenario, sid, { transcript_path: writeTranscript(sid), last_assistant_message: reason });
       expect(r.status).toBe(0);
       const o = json(r);
       expect(o.decision).toBe("block");

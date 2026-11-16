@@ -2,12 +2,13 @@
  * Opt-in denial counter (OMC_JEV_DENIAL_COUNTER=1): the library scripts/lib/jev-denial-counter.mjs and
  * its wiring into the PreToolUse refusals of scripts/pre-tool-enforcer.mjs (agent pool deny as the source).
  */
-import { spawnSync } from 'node:child_process';
-import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, truncateSync, writeFileSync } from 'node:fs';
+import { spawn, spawnSync } from 'node:child_process';
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import process from 'node:process';
-import { fileURLToPath, URL } from 'node:url';
+import { fileURLToPath, pathToFileURL, URL } from 'node:url';
+import { setTimeout } from 'node:timers';
 import { afterAll, describe, expect, it } from 'vitest';
 import {
   denialK,
@@ -19,6 +20,7 @@ import {
   registerDenial,
   writeDenialRow,
 } from '../../scripts/lib/jev-denial-counter.mjs';
+import { ProgressState, classifyTranscript } from '../../scripts/lib/jev-progress.mjs';
 import { refusalText, reserveAgent } from '../../scripts/lib/jev-pool.mjs';
 
 const ROOT = fileURLToPath(new URL('../..', import.meta.url));
@@ -167,6 +169,109 @@ describe('denial counter: broken state', () => {
   });
 });
 
+describe('denial counter: the marker and the progress classifier', () => {
+  const marker = denialMarker(denialKey('agent-pool', 'pool is full'), 3);
+
+  it('a real denial marker in a call result overrides a new saved path (guard-denial, no progress)', () => {
+    const progress = new ProgressState();
+    const result = progress.add({ tool: 'Write', input: { file_path: '/p/new.md' }, result: `Agent pool is full. ${marker}`, ok: true });
+    expect(result).toEqual({ progress: false, reason: 'guard-denial' });
+  });
+
+  it('real denial markers in a transcript are classified as guard denials, never as progress', () => {
+    const rows = [];
+    for (let i = 1; i <= 3; i++) {
+      const id = `tu-${i}`;
+      rows.push(JSON.stringify({ type: 'assistant', timestamp: new Date(i * 31_000).toISOString(), message: { content: [{ type: 'tool_use', id, name: 'Bash', input: { command: 'date' } }] } }));
+      rows.push(JSON.stringify({ type: 'user', timestamp: new Date(i * 31_000 + 100).toISOString(), message: { content: [{ type: 'tool_result', tool_use_id: id, is_error: true, content: `Guard stopped the call. ${denialMarker(denialKey('agent-pool', 'pool is full'), i)}` }] } }));
+    }
+    expect(classifyTranscript(`${rows.join('\n')}\n`, new ProgressState())).toEqual({ calls: 3, progress: false });
+  });
+});
+
+describe('denial counter: parallel processes and an unavailable lock', () => {
+  const MODULE_URL = pathToFileURL(join(ROOT, 'scripts', 'lib', 'jev-denial-counter.mjs')).href;
+
+  // One worker process: registers one denial of key i in round r on the shared state directory.
+  function worker(round, i, ctx) {
+    const code = `
+import { registerDenial } from ${JSON.stringify(MODULE_URL)};
+registerDenial({
+  stateDir: ${JSON.stringify(ctx.stateDir)},
+  sessionId: 'stress',
+  guard: 'agent-pool',
+  reason: 'reason-' + ${i},
+  call: { packageKey: 'p-${round}-${i}', toolUseId: 'tu-${round}-${i}', toolName: 'Bash' },
+  env: process.env,
+  now: ${round} * 60000 + ${i},
+});
+`;
+    return new Promise((resolve, reject) => {
+      const child = spawn(process.execPath, ['--input-type=module', '-e', code], {
+        env: { ...process.env, OMC_JEV_LOG_DIR: ctx.logDir, OMC_JEV_DENIAL_SESSION_MAX: '200', OMC_JEV_DENIAL_LOCK_MS: '90000', OMC_JEV_DENIAL_LOCK_ATTEMPTS: '600' },
+        stdio: ['ignore', 'ignore', 'pipe'],
+      });
+      let stderr = '';
+      child.stderr.on('data', (chunk) => { stderr += chunk; });
+      child.on('close', (status) => (status === 0 ? resolve() : reject(new Error(`process ${i} round ${round} exit ${status}: ${stderr.slice(0, 400)}`))));
+    });
+  }
+
+  it('64 parallel hook processes in 3 rounds lose no increment and write exactly one escalation row per key', async () => {
+    const ctx = setup();
+    const ROUNDS = 3;
+    const PROCESSES = 64;
+    for (let round = 0; round < ROUNDS; round++) {
+      await Promise.all(Array.from({ length: PROCESSES }, (_, i) => worker(round, i, ctx)));
+    }
+    const state = JSON.parse(readFileSync(stateFile(ctx.stateDir, 'stress'), 'utf8'));
+    const total = Object.values(state.sessionCounts).reduce((a, b) => a + b, 0);
+    expect(total).toBe(ROUNDS * PROCESSES); // the exact number of attempts, no lost increment
+    const keys = Object.keys(state.keys);
+    expect(keys).toHaveLength(PROCESSES); // one entry per distinct denial key
+    for (const key of keys) expect(state.keys[key].n).toBe(ROUNDS); // every key counted exactly 3 times
+    const rows = journal(ctx.logDir);
+    expect(rows.filter((row) => row.action === 'escalation-1')).toHaveLength(PROCESSES); // one per key, at the third attempt
+    expect(rows).toHaveLength(PROCESSES * 2); // a decision row and an outcome row per fired action
+  }, 60_000);
+
+  it('a lock held by another process: the state is lock-unavailable, the denial stays a denial, one state row records the lost increment', async () => {
+    const ctx = setup();
+    const lockPath = `${stateFile(ctx.stateDir, 'lk')}.lock`;
+    const code = `
+import { acquireStateFileLockAtPathSync } from ${JSON.stringify(pathToFileURL(join(ROOT, 'scripts', 'lib', 'state-lock.mjs')).href)};
+const lock = acquireStateFileLockAtPathSync(${JSON.stringify(lockPath)}, 1, true, false, 1000, 1000, Infinity);
+console.log(JSON.stringify({ holds: !!lock }));
+if (lock) {
+  setInterval(() => {}, 1000);
+  process.on('SIGTERM', () => process.exit(0));
+  setTimeout(() => process.exit(0), 60000).unref();
+}
+`;
+    const holder = spawn(process.execPath, ['--input-type=module', '-e', code], { env: { ...process.env }, stdio: ['ignore', 'pipe', 'ignore'] });
+    try {
+      const first = await new Promise((resolve) => {
+        let out = '';
+        holder.stdout.on('data', (chunk) => { out += chunk; if (out.includes('holds')) resolve(out); });
+        holder.on('close', () => resolve(out));
+        setTimeout(() => resolve(out), 5000);
+      });
+      expect(JSON.parse(first.trim().split('\n').pop() || '{}').holds).toBe(true);
+      const result = registerDenial({ stateDir: ctx.stateDir, sessionId: 'lk', guard: 'agent-pool', reason: 'guard reason', call: { toolName: 'Bash', toolUseId: 'tu-lock' }, env: ctx.env, now: 0 });
+      expect(result.state).toBe('lock-unavailable');
+      expect(result.degree).toBe(0);
+      expect(result.release).toBe(false);
+      expect(result.text).toBe('');
+      const rows = journal(ctx.logDir).filter((row) => row.kind === 'state' && row.action === 'state-lock-unavailable');
+      expect(rows).toHaveLength(1);
+      expect(rows[0]).toMatchObject({ n: null, sessionCount: null, result: 'denied', state: 'lock-unavailable' });
+      expect(existsSync(stateFile(ctx.stateDir, 'lk'))).toBe(false); // nothing was counted
+    } finally {
+      holder.kill('SIGTERM');
+    }
+  }, 30_000);
+});
+
 describe('denial counter: session ceiling and release', () => {
   it('never resets the per-guard session count and hardens the text at the ceiling', () => {
     const ctx = setup({ OMC_JEV_DENIAL_SESSION_MAX: '3' });
@@ -206,12 +311,30 @@ describe('denial counter: session ceiling and release', () => {
 });
 
 describe('denial counter: state and journal', () => {
-  it('keeps hashes in the state file, never the denial text', () => {
+  it('keys the counts by hashes: a first denial leaves no denial text in the state file', () => {
     const ctx = setup();
     deny(ctx, T0, { reason: 'secret-token-abc123 in the command text' });
     const raw = readFileSync(stateFile(ctx.stateDir), 'utf8');
     expect(raw).not.toContain('secret-token');
     expect(raw).toContain(keyHash(denialKey('agent-pool', 'secret-token-abc123 in the command text')));
+  });
+
+  it('keys the once-per-key action markers by the normalized key and the action id', () => {
+    const ctx = setup();
+    const key = denialKey('agent-pool', 'pool is full');
+    for (let i = 0; i < 3; i++) deny(ctx, T0 + i * 3_000);
+    const state = JSON.parse(readFileSync(stateFile(ctx.stateDir), 'utf8'));
+    expect(Object.keys(state.actions)).toEqual([`${key}|escalation-1`]);
+    expect(Object.keys(state.keys)).toEqual([keyHash(key)]);
+  });
+
+  it('keeps an id made only of dots inside the sessions directory', () => {
+    const ctx = setup();
+    deny(ctx, T0, { sessionId: '..' });
+    deny(ctx, T0 + 3_000, { sessionId: '.' });
+    expect(existsSync(join(ctx.stateDir, 'sessions', 'no-session', 'denials-main.json'))).toBe(true);
+    expect(existsSync(join(ctx.stateDir, 'denials-main.json'))).toBe(false);
+    expect(readdirSync(join(ctx.stateDir, 'sessions'))).toEqual(['no-session']);
   });
 
   it('keeps at most 64 entries per state map', () => {
@@ -289,25 +412,33 @@ describe('denial counter: switch on in the hook', () => {
 });
 
 describe('denial counter: /goal guard in the hook', () => {
-  const GOAL = 'cel testowy pozycji T2.2 hook';
+  const GOAL = 'test objective for the hook';
   const GOAL_DENIAL = `[ULTRAGOAL /GOAL REQUIRED] Active ultragoal state requires the matching Claude /goal before tools run; no active Claude /goal snapshot was visible to the hook.`;
 
-  /** One Read call under an active ultragoal state with no visible /goal: the missing-goal denial. */
-  function runGoalDeny(extraEnv, sid, i) {
-    const root = tempDir();
+  /**
+   * One call under an active ultragoal state, by default a Read with no visible /goal (the missing-goal denial).
+   * options.root reuses one directory tree across calls (shared state); options.goal puts a /goal command with that
+   * objective into the transcript (a visible /goal); options.toolName and options.toolInput change the call.
+   */
+  function runGoalDeny(extraEnv, sid, i, options = {}) {
+    const root = options.root ?? tempDir();
     const home = join(root, 'home');
     const cwd = join(root, 'proj');
     mkdirSync(cwd, { recursive: true });
     const sessions = join(home, '.omc', 'state', 'sessions', sid);
     mkdirSync(sessions, { recursive: true });
     const now = new Date().toISOString();
-    writeFileSync(join(sessions, 'ultragoal-state.json'), JSON.stringify({ wersja: 1, active: true, session_id: sid, project_path: cwd, claude_goal_objective: GOAL, started_at: now, updated_at: now }));
-    const transcript = join(root, `transcript-${i}.jsonl`);
-    writeFileSync(transcript, `{"type":"assistant","message":{"id":"goal-msg-${i}","content":[]}}\n`);
+    writeFileSync(join(sessions, 'ultragoal-state.json'), JSON.stringify({ active: true, session_id: sid, project_path: cwd, claude_goal_objective: GOAL, started_at: now, updated_at: now }));
+    // A visible /goal is read only from the session's own transcript, which Claude Code names <session id>.jsonl.
+    const transcript = join(root, options.goal === undefined ? `transcript-${i}.jsonl` : `${sid}.jsonl`);
+    const goalRow = options.goal === undefined
+      ? ''
+      : `${JSON.stringify({ type: 'user', message: { role: 'user', content: `<command-name>/goal</command-name>\n<command-args>${options.goal}</command-args>` } })}\n`;
+    writeFileSync(transcript, `${goalRow}{"type":"assistant","message":{"id":"goal-msg-${i}","content":[]}}\n`);
     return runHook(home, cwd, { ...extraEnv, OMC_JEV_LOG_DIR: join(root, 'jev') }, {
       hook_event_name: 'PreToolUse',
-      tool_name: 'Read',
-      tool_input: { file_path: join(cwd, 'a.txt') },
+      tool_name: options.toolName ?? 'Read',
+      tool_input: options.toolInput ?? { file_path: join(cwd, 'a.txt') },
       session_id: sid,
       tool_use_id: `goal-tool-${i}`,
       transcript_path: transcript,
@@ -328,6 +459,33 @@ describe('denial counter: /goal guard in the hook', () => {
     expect(run.reason).toContain('Action NOT performed: do not write that it succeeded.');
     expect(run.reason).toContain('Use the existing result and change the plan.');
     expect(run.reason).not.toContain('End this step');
+  });
+
+  it('polling tools BashOutput and TaskOutput get their own way out; other tools keep the existing-result sentence', () => {
+    for (const [toolName, toolInput] of [['BashOutput', { bash_id: 'bash-1' }], ['TaskOutput', { task_id: 'task-1' }]]) {
+      const run = runGoalDeny({ OMC_JEV_DENIAL_COUNTER: '1' }, `goal-poll-${toolName}`, 1, { toolName, toolInput });
+      expect(run.permissionDecision, `${toolName}: ${run.reason.slice(0, 200)}`).toBe('deny');
+      expect(run.reason).toContain('Arm a monitor or wait for the notification.');
+      expect(run.reason).not.toContain('Use the existing result and change the plan.');
+    }
+  });
+
+  it('release at the ceiling, with a visible /goal that does not match: the fourth call passes, a release row is written, the missing-goal guard never releases', () => {
+    const root = tempDir();
+    const env = { OMC_JEV_DENIAL_COUNTER: '1', OMC_JEV_DENIAL_RELEASE: '1', OMC_JEV_DENIAL_SESSION_MAX: '4' };
+    const runs = [0, 1, 2, 3].map((i) => runGoalDeny(env, 'goal-release', i, { root, goal: 'a goal quite different from the expected one' }));
+    for (const run of runs.slice(0, 3)) expect(run.permissionDecision, run.reason.slice(0, 200)).toBe('deny');
+    expect(runs[0].reason).toContain('current Claude /goal appears unrelated');
+    expect(runs[3].permissionDecision, runs[3].reason.slice(0, 200)).not.toBe('deny');
+    expect(journal(join(root, 'jev')).some((row) => row.kind === 'release' && row.guard === 'ultragoal-goal')).toBe(true);
+    // No visible /goal: the missing-goal guard stays a denial past the ceiling and writes no release row.
+    const rootMissing = tempDir();
+    const missing = [0, 1, 2, 3, 4, 5].map((i) => runGoalDeny(env, 'goal-missing', i, { root: rootMissing }));
+    for (const [i, run] of missing.entries()) {
+      expect(run.permissionDecision, `call ${i + 1}: ${run.reason.slice(0, 200)}`).toBe('deny');
+      expect(run.reason).toContain('no active Claude /goal snapshot was visible');
+    }
+    expect(journal(join(rootMissing, 'jev')).some((row) => row.kind === 'release')).toBe(false);
   });
 
   it('texts on: the /goal refusal ends with the BLOCKED line and the three common sentences', () => {
