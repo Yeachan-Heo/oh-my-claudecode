@@ -418,7 +418,7 @@ At least one of `--transcripts` and `--teams` is required. Exit codes: `0` norma
 
 # Compaction window drops
 
-`compaction-window-drops.py` classifies the drops of the context window between consecutive model calls
+`compaction_window_drops.py` classifies the drops of the context window between consecutive model calls
 by cause (for example module compaction, host compaction, a new process, a side task, a change of shape
 without a cut). It reads Claude Code session transcripts and the compaction journal (`compaction.jsonl`)
 and reports numbers only. It is a standalone offline diagnostic run by hand: it does not change OMC
@@ -433,8 +433,8 @@ behaviour, has no switch, is not run by any hook, and is not shipped in the npm 
   projects directory defaults to `$CLAUDE_CONFIG_DIR/projects` or `~/.claude/projects`.
 
 ```
-python3 -I tools/diagnostics/compaction-window-drops.py [--projects <dir>] [--days 7] [--json]
-python3 -I tools/diagnostics/compaction-window-drops.py --transcript session.jsonl --compact compaction.jsonl --out report.json
+python3 -I tools/diagnostics/compaction_window_drops.py [--projects <dir>] [--days 7] [--json]
+python3 -I tools/diagnostics/compaction_window_drops.py --transcript session.jsonl --compact compaction.jsonl --out report.json
 ```
 
 | Option | Meaning |
@@ -452,7 +452,7 @@ docstring and in the `RULE` constant; both are fixed before a measurement.
 
 # Compaction ask probe
 
-`compaction-ask-probe.py` measures whether the first and the last human ask of a session survive a
+`compaction_ask_probe.py` measures whether the first and the last human ask of a session survive a
 compaction. It counts the loss rates of both asks (`head_lost`, `ask_lost`) with the survival level of
 each ask (`full`, `trace`, `paraphrased` or `lost`), empty calls after a compaction and natural canaries.
 With n of at least 30, the verdict compares the upper 95 % Wilson bound of a loss rate with
@@ -466,7 +466,7 @@ change OMC behaviour, has no switch, and is not shipped in the npm package.
 - The inputs are only read. The only file written is the `--out` file, if given (a new file with mode `0600`).
 
 ```
-python3 -I tools/diagnostics/compaction-ask-probe.py [--projects <dir>] [--days 7] [--ask-loss-threshold 0.05] [--json]
+python3 -I tools/diagnostics/compaction_ask_probe.py [--projects <dir>] [--days 7] [--ask-loss-threshold 0.05] [--json]
 ```
 
 | Option | Meaning |
@@ -479,7 +479,7 @@ python3 -I tools/diagnostics/compaction-ask-probe.py [--projects <dir>] [--days 
 
 # Compaction cache cost
 
-`compaction-cache-cost.py` measures how compactions affect the prompt cache: prefix rewrite breaks by
+`compaction_cache_cost.py` measures how compactions affect the prompt cache: prefix rewrite breaks by
 class, the rewrite cost, the recovery in the first turn after a compaction, the turns to breakeven,
 Cache Savings, and cache losses before and from a deployment date. It counts only usage fields and
 timestamps. It is a standalone offline diagnostic run by hand: it does not change OMC behaviour, has
@@ -504,7 +504,7 @@ subscription prefix are left out of the USD sums. The cache write costs 1.25 x t
 multipliers are constants of the script.
 
 ```
-python3 -I tools/diagnostics/compaction-cache-cost.py --deployed-at 2026-01-01T00:00:00Z [--prices prices.json] [--json]
+python3 -I tools/diagnostics/compaction_cache_cost.py --deployed-at 2026-01-01T00:00:00Z [--prices prices.json] [--json]
 ```
 
 | Option | Meaning |

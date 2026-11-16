@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 r"""Compaction cost and cache behaviour from Claude Code transcripts: an offline diagnostic script.
 
-Usage: python3 -I compaction-cache-cost.py --deployed-at <ISO-8601> [--compact <compaction.jsonl>]
+Usage: python3 -I compaction_cache_cost.py --deployed-at <ISO-8601> [--compact <compaction.jsonl>]
 [--projects <dir>] [--transcript FILE ...] [--to <ISO-8601>] [--days 7] [--prices <prices.json>]
 [--out <file.json>] [--json] [--details]. Offline, standard library only. Reads the session transcripts of
 Claude Code (JSONL) and the compaction journal of the Jev compaction module (compaction.jsonl) and computes:
@@ -1189,7 +1189,7 @@ def main(argv):
     report = {
         "template": "compaction-report/1",
         "metric": "cache-cost",
-        "script": "compaction-cache-cost.py",
+        "script": "compaction_cache_cost.py",
         "generated_at": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
         "rule": RULE + " " + rule_values,
         "period": {

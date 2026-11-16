@@ -4,7 +4,7 @@ r"""Probe of the first and last human ask after a compaction.
 Offline script: reads Claude Code session transcripts and the compaction journal, and counts the loss
 rates of the first and last human ask (head_lost, ask_lost), empty calls after a compaction and natural
 canaries. It never prints ask or state contents, only numbers, levels and identifiers.
-Usage: python3 -I compaction-ask-probe.py [--projects <dir>] [--transcript <file>]...
+Usage: python3 -I compaction_ask_probe.py [--projects <dir>] [--transcript <file>]...
     [--compact <file>] [--to <ISO-8601-UTC>] [--days <N>] [--details] [--json] [--out <file>]
 
 RULE (written before the measurement; do not change after seeing the results):
@@ -79,7 +79,7 @@ from datetime import datetime, timedelta, timezone
 
 TEMPLATE = "compaction-report/1"
 METRIC = "ask-probe"
-SCRIPT_NAME = "compaction-ask-probe.py"
+SCRIPT_NAME = "compaction_ask_probe.py"
 MIN_SUPPORT = 30
 Z_95 = 1.959963984540054
 MATCH_WINDOW_S = 600.0
@@ -741,7 +741,7 @@ def unit_details(units):
 
 def text_report(report, verdicts):
     lines = [
-        "compaction-ask-probe: metric " + METRIC + ", period " + report["period"].get("from") + " to " + report["period"].get("to"),
+        "compaction_ask_probe: metric " + METRIC + ", period " + report["period"].get("from") + " to " + report["period"].get("to"),
         "units n = " + str(report["n"]["value"]),
     ]
     for w in report["results"]:

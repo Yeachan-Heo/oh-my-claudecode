@@ -2,7 +2,7 @@
 """Causes of context-window drops in Claude Code transcripts: an offline diagnostic script.
 
 Usage:
-  python3 -I compaction-window-drops.py [--projects <projects dir>] [--transcript FILE ...]
+  python3 -I compaction_window_drops.py [--projects <projects dir>] [--transcript FILE ...]
       [--compact <compaction.jsonl>] [--to ISO] [--days N] [--min-drop-tokens N] [--min-drop-percent N]
       [--tolerance-s S] [--json] [--out FILE]
 Standard library only; isolated mode (-I); input is read-only.
@@ -785,7 +785,7 @@ def build_report(context, clean, dups, file_stats, journal_data, args, period):
     return {
         "template": "compaction-report/1",
         "metric": "window-drops",
-        "script": "compaction-window-drops.py",
+        "script": "compaction_window_drops.py",
         "generated_at": epoch_to_iso(datetime.now(timezone.utc).timestamp()),
         "rule": args.get("run_rule", RULE),
         "period": period,
@@ -822,7 +822,7 @@ def text_summary(report):
     """A short text summary without --json."""
     n = report["n"]["value"]
     lines = [
-        "window drops causes (compaction-window-drops.py)",
+        "window drops causes (compaction_window_drops.py)",
         "period: " + report["period"]["from"] + " to " + report["period"]["to"],
         "n (drops): " + str(n),
     ]

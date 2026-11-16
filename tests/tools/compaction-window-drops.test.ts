@@ -6,7 +6,7 @@ import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
-const SCRIPT = join(HERE, '..', '..', 'tools', 'diagnostics', 'compaction-window-drops.py');
+const SCRIPT = join(HERE, '..', '..', 'tools', 'diagnostics', 'compaction_window_drops.py');
 
 const TO = '2026-11-14T12:00:00Z';
 
@@ -98,7 +98,7 @@ function assertNoNull(value, path = '') {
     for (const [k, v] of Object.entries(value)) assertNoNull(v, path + '.' + k);
   }
 }
-describe('compaction-window-drops.py', () => {
+describe('compaction_window_drops.py', () => {
   it('T1: module compaction confirmed by two readings, plugin trigger', () => {
     const dir = makeDir();
     try {

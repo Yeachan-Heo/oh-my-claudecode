@@ -8,7 +8,7 @@ import { join, dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
-const SCRIPT = resolve(HERE, '..', '..', 'tools', 'diagnostics', 'compaction-cache-cost.py');
+const SCRIPT = resolve(HERE, '..', '..', 'tools', 'diagnostics', 'compaction_cache_cost.py');
 const TO = '2026-11-15T00:00:00Z';
 const DEPLOYED_AT = '2026-11-13T00:00:00Z';
 
@@ -120,7 +120,7 @@ function sameTime(path, iso) {
   utimesSync(path, new Date(iso), new Date(iso));
 }
 
-describe('compaction-cache-cost', () => {
+describe('compaction_cache_cost', () => {
   it('1: a series without breaks; Cache Savings match the reference value', () => {
     const c = newCase();
     try {
