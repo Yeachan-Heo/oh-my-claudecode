@@ -392,7 +392,7 @@ function buildCanonicalSkillRegistry() {
   return registry;
 }
 
-// Agent types the owner refuses: OMC_AGENT_TYPE_DENY is a comma-separated list, empty by default.
+// Agent types the hook refuses: OMC_AGENT_TYPE_DENY is a comma-separated list, empty by default.
 // An entry matches a type without regard to letter case; an entry that starts with `=` matches
 // exactly, so a list can refuse `explore` while a differently cased user agent `Explore` passes.
 // OMC_AGENT_TYPE_DENY_MODE: off (default), shadow (log only), deny (refuse the call). Shadow and
@@ -1025,7 +1025,8 @@ function recordModelRoutingOverride(stateDir, row) {
 
 // A `fork` call runs on the parent conversation model and ignores the effort parameter (the host
 // docs document effort only for non-fork subagents), so asking Jev about it is a query with no
-// effect. With the model-routing point active, such a call gets one skipped row and no question.
+// effect. While the model-routing point is on (shadow or active), such a call gets one skipped row
+// and no question, and a `use` marker on it is not applied.
 function recordJevForkSkipRow(data, toolInput, stateDir) {
   try {
     const dir = process.env.OMC_JEV_LOG_DIR || join(stateDir, 'jev');
@@ -1045,12 +1046,15 @@ function recordJevForkSkipRow(data, toolInput, stateDir) {
   }
 }
 
-// Pointer expansion (OMC_JEV_POINTER_EXPAND=1): a short Agent/Task prompt (under 600 characters)
-// that is only an absolute path to a .md file is replaced, in the Jev state, by the head of that
-// file. Only files under the directories listed in OMC_JEV_POINTER_EXPAND_DIRS (separated by the
-// platform path delimiter, empty by default, so nothing is read) are expanded. The excerpt is sent UNMASKED to the configured
-// Jev endpoint: state masking is a separate change, so the content leaves the machine as is.
-// Any failure leaves the prompt unchanged and records the reason.
+// Pointer expansion (OMC_JEV_POINTER_EXPAND=1): for a short Agent/Task prompt (under 600 characters)
+// that contains an absolute path to a .md file, the head (up to 8000 characters) of the file named
+// by the first such path is appended to the prompt in the Jev state; the prompt itself and the call
+// are not changed. Only files
+// under the directories listed in OMC_JEV_POINTER_EXPAND_DIRS (separated by the platform path
+// delimiter, empty by default, so nothing is read) are expanded. The excerpt is sent UNMASKED to the
+// configured Jev endpoint: state masking is a separate change, so the content leaves the machine as is.
+// Any failure leaves the prompt unchanged and sets the reason in the pointer telemetry (written to
+// the shadow line with OMC_JEV_ROW_TELEMETRY).
 const POINTER_MAX_PROMPT_CHARS = 600;
 const POINTER_MAX_EXCERPT_CHARS = 8000;
 const POINTER_MAX_FILE_BYTES = 1024 * 1024;

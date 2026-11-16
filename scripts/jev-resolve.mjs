@@ -340,8 +340,10 @@ export function isJevStateOmitIdsEnabled(env = process.env) {
  * OMC_JEV_ROW_TELEMETRY=1 (or `true`): the shadow-log lines carry the
  * telemetry of the classifier input and answer (the state length before and
  * after the cut, pointer fields, the questions version, the answer's model,
- * usage, usage status and cost fields). Rows without an answer carry those
- * fields empty (null, never zero). Off by default: the rows keep their shape.
+ * usage, usage status and cost fields). Rows without an answer carry the
+ * fields of JEV_ROW_NO_ANSWER empty (null, never zero); a degraded row of the
+ * resolver also has `usage` and `model` as null. Off by default: the rows keep
+ * their shape.
  */
 export function isJevRowTelemetryEnabled(env = process.env) {
   return ["1", "true"].includes(String(env.OMC_JEV_ROW_TELEMETRY ?? "").trim().toLowerCase());
