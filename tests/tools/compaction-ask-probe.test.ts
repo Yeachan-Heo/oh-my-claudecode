@@ -361,7 +361,7 @@ describe('compaction_ask_probe', () => {
   const VERDICT_OK = 'meets the ask-loss threshold';
   const VERDICT_NOT_OK = 'does not meet the ask-loss threshold';
 
-  it('11a: 80 units without a loss: the verdict meets the threshold, upper bound for 0/80', () => {
+  it('80 units without a loss: the verdict meets the threshold, upper bound for 0/80', () => {
     const env = scenarioVerdicts('b', 80, 0);
     try {
       const r = resultJson(env);
@@ -380,7 +380,7 @@ describe('compaction_ask_probe', () => {
     }
   });
 
-  it('11a2: 30 units without a loss: the upper bound for 0/30 (11.35 %) does not meet the threshold', () => {
+  it('30 units without a loss: the upper bound for 0/30 (11.35 %) does not meet the threshold', () => {
     const env = scenarioVerdicts('b30', 30, 0);
     try {
       const r = resultJson(env);
@@ -396,7 +396,7 @@ describe('compaction_ask_probe', () => {
     }
   });
 
-  it('11b: 30 units with 3 lost asks: does not meet the threshold; Wilson matches the formula', () => {
+  it('30 units with 3 lost asks: does not meet the threshold; Wilson matches the formula', () => {
     const env = scenarioVerdicts('c', 30, 3);
     try {
       const r = resultJson(env);
@@ -415,7 +415,7 @@ describe('compaction_ask_probe', () => {
     }
   });
 
-  it('11c: 10 units: insufficient data', () => {
+  it('10 units: insufficient data', () => {
     const env = scenarioVerdicts('d', 10, 0);
     try {
       const r = resultJson(env);
@@ -441,7 +441,7 @@ describe('compaction_ask_probe', () => {
     }
   }
 
-  it('12: the template fields are complete and without null', () => {
+  it('the template fields are complete and without null', () => {
     const env = scenarioVerdicts('e', 30, 0);
     try {
       const r = resultJson(env);
@@ -477,7 +477,7 @@ describe('compaction_ask_probe', () => {
     return { event: 'compact', ts, session_id: 'S', agent_id: null, trigger: 'manual', result: 'jev' };
   }
 
-  it('R-A2: a copy sorting first does not take the jev group (the pair rule with consumption)', () => {
+  it('a copy sorting first does not take the jev group (the pair rule with consumption)', () => {
     const env = makeEnv();
     try {
       const dirA = join(env.projects, '-aaa-copy');
@@ -515,7 +515,7 @@ describe('compaction_ask_probe', () => {
     }
   });
 
-  it('R-B: two boundaries at one fallback row: only the closer one gets the group', () => {
+  it('two boundaries at one fallback row: only the closer one gets the group', () => {
     const env = makeEnv();
     try {
       const dir = join(env.projects, '-test');
@@ -542,7 +542,7 @@ describe('compaction_ask_probe', () => {
     }
   });
 
-  it('R-E: a skipped row does not displace the closer jev row', () => {
+  it('a skipped row does not displace the closer jev row', () => {
     const env = makeEnv();
     try {
       const dir = join(env.projects, '-test');
@@ -566,7 +566,7 @@ describe('compaction_ask_probe', () => {
     }
   });
 
-  it('R-D: boundaries without a uuid have the fallback key file:timestamp', () => {
+  it('boundaries without a uuid have the fallback key file:timestamp', () => {
     const env = makeEnv();
     try {
       const dir = join(env.projects, '-test');
@@ -592,7 +592,7 @@ describe('compaction_ask_probe', () => {
     }
   });
 
-  it('R-empty-period: n=0 has the requested window as the period and one results row', () => {
+  it('n=0 has the requested window as the period and one results row', () => {
     const env = makeEnv();
     try {
       const dir = join(env.projects, '-test');
@@ -622,7 +622,7 @@ describe('compaction_ask_probe', () => {
     }
   });
 
-  it('R-gap: a state ending at the next boundary goes to a separate gap', () => {
+  it('a state ending at the next boundary goes to a separate gap', () => {
     const env = makeEnv();
     try {
       const dir = join(env.projects, '-test');
@@ -653,7 +653,7 @@ describe('compaction_ask_probe', () => {
     }
   });
 
-  it('R-out: --out always writes JSON, also without --json', () => {
+  it('--out always writes JSON, also without --json', () => {
     const env = scenarioA();
     try {
       const file = join(env.dir, 'result-w.json');

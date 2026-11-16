@@ -99,7 +99,7 @@ function assertNoNull(value, path = '') {
   }
 }
 describe('compaction_window_drops.py', () => {
-  it('T1: module compaction confirmed by two readings, plugin trigger', () => {
+  it('module compaction confirmed by two readings, plugin trigger', () => {
     const dir = makeDir();
     try {
       const lines = [
@@ -140,7 +140,7 @@ describe('compaction_window_drops.py', () => {
     }
   });
 
-  it('T2: host fallback without after and without a marker, one reading, compact_without_after gap', () => {
+  it('host fallback without after and without a marker, one reading, compact_without_after gap', () => {
     const dir = makeDir();
     try {
       const lines = [
@@ -165,7 +165,7 @@ describe('compaction_window_drops.py', () => {
     }
   });
 
-  it('T3: host boundary only, preTokens matching the window (+/-10%)', () => {
+  it('host boundary only, preTokens matching the window (+/-10%)', () => {
     const dir = makeDir();
     try {
       const lines = [
@@ -194,7 +194,7 @@ describe('compaction_window_drops.py', () => {
     }
   });
 
-  it('T4: advisor trap: zero drops from iterations, 1 drop from main fields', () => {
+  it('advisor trap: zero drops from iterations, 1 drop from main fields', () => {
     const dir = makeDir();
     try {
       const advisorUsage = {
@@ -230,7 +230,7 @@ describe('compaction_window_drops.py', () => {
     }
   });
 
-  it('T5: continuous prefix without a marker: no_cut_prefix', () => {
+  it('continuous prefix without a marker: no_cut_prefix', () => {
     const dir = makeDir();
     try {
       const lines = [
@@ -254,7 +254,7 @@ describe('compaction_window_drops.py', () => {
     }
   });
 
-  it('T6: broken prefix, 3700 s gap: cut_without_marker, after_60min_gap', () => {
+  it('broken prefix, 3700 s gap: cut_without_marker, after_60min_gap', () => {
     const dir = makeDir();
     try {
       const lines = [
@@ -277,7 +277,7 @@ describe('compaction_window_drops.py', () => {
     }
   });
 
-  it('T7: no api-request rows: no_cause, prefix unavailable, gap counter', () => {
+  it('no api-request rows: no_cause, prefix unavailable, gap counter', () => {
     const dir = makeDir();
     try {
       const lines = [
@@ -298,7 +298,7 @@ describe('compaction_window_drops.py', () => {
     }
   });
 
-  it('T8: querySource change: side_task', () => {
+  it('side task: querySource change', () => {
     const dir = makeDir();
     try {
       const lines = [
@@ -320,7 +320,7 @@ describe('compaction_window_drops.py', () => {
     }
   });
 
-  it('T9 w1: copied history and a from-scratch request: new_process confirmed', () => {
+  it('copied history and a from-scratch request: new_process confirmed', () => {
     const dir = makeDir();
     try {
       const fileA = save(dir, 'fileA.jsonl', [
@@ -351,7 +351,7 @@ describe('compaction_window_drops.py', () => {
     }
   });
 
-  it('T9 w2: sessionId change within a file and a keep-0 request: new_process confirmed', () => {
+  it('sessionId change within a file and a keep-0 request: new_process confirmed', () => {
     const dir = makeDir();
     try {
       const file = save(dir, 'S9b.jsonl', [
@@ -372,7 +372,7 @@ describe('compaction_window_drops.py', () => {
     }
   });
 
-  it('T9-a: the same pair in copies counted once, drops_duplicated_from_copies = 1', () => {
+  it('the same pair in copies counted once, drops_duplicated_from_copies = 1', () => {
     const dir = makeDir();
     try {
       const fileA = save(dir, 'fileA.jsonl', [
@@ -395,7 +395,7 @@ describe('compaction_window_drops.py', () => {
     }
   });
 
-  it('T9-b: continuous prefix with a shapeHash change: no_cut_shape_change', () => {
+  it('continuous prefix with a shapeHash change: no_cut_shape_change', () => {
     const dir = makeDir();
     try {
       const file = save(dir, 'S9b-shape.jsonl', [
@@ -415,7 +415,7 @@ describe('compaction_window_drops.py', () => {
     }
   });
 
-  it('T9-c: missing base in both requests gives broken; T9-c-b request without keep gives no_cause', () => {
+  it('missing base in both requests gives broken; a request without keep gives no_cause', () => {
     const dir = makeDir();
     try {
       const fileA = save(dir, 'fileA9c.jsonl', [
@@ -435,7 +435,7 @@ describe('compaction_window_drops.py', () => {
     }
   });
 
-  it('T9-c-b: request without keep: prefix unavailable, cause no_cause', () => {
+  it('request without keep: prefix unavailable, cause no_cause', () => {
     const dir = makeDir();
     try {
       const file = save(dir, 'S9c2.jsonl', [
@@ -455,7 +455,7 @@ describe('compaction_window_drops.py', () => {
     }
   });
 
-  it('T9-d: reverse check and compact_without_drop', () => {
+  it('reverse check and compact_without_drop', () => {
     const dir = makeDir();
     try {
       const file = save(dir, 'S9d.jsonl', [
@@ -484,7 +484,7 @@ describe('compaction_window_drops.py', () => {
     }
   });
 
-  it('T10: a 15000-token drop at 7.5% does not pass the percent threshold (AND of thresholds)', () => {
+  it('a 15000-token drop at 7.5% does not pass the percent threshold (AND of thresholds)', () => {
     const dir = makeDir();
     try {
       const file = save(dir, 'S10.jsonl', [
@@ -503,7 +503,7 @@ describe('compaction_window_drops.py', () => {
     }
   });
 
-  it('T11: duplicate message.id counted once, synthetic and zero window skipped', () => {
+  it('duplicate message.id counted once, synthetic and zero window skipped', () => {
     const dir = makeDir();
     try {
       const synthetic = JSON.stringify({
@@ -532,7 +532,7 @@ describe('compaction_window_drops.py', () => {
     }
   });
 
-  it('T12: a drop outside the period is not counted', () => {
+  it('a drop outside the period is not counted', () => {
     const dir = makeDir();
     try {
       const file = save(dir, 'S12.jsonl', [
@@ -549,7 +549,7 @@ describe('compaction_window_drops.py', () => {
     }
   });
 
-  it('T13: subagent matched by agent_id; null does not match a subagent (T13b)', () => {
+  it('subagent matched by agent_id; null does not match a subagent', () => {
     const dir = makeDir();
     try {
       const fileA = save(dir, join('S13', 'subagents', 'agent-aX1.jsonl'), [
@@ -574,7 +574,7 @@ describe('compaction_window_drops.py', () => {
     }
   });
 
-  it('T13b: the same compact row with agent_id null does not match a subagent', () => {
+  it('the same compact row with agent_id null does not match a subagent', () => {
     const dir = makeDir();
     try {
       const file = save(dir, join('S13b', 'subagents', 'agent-aX1.jsonl'), [
@@ -601,7 +601,7 @@ describe('compaction_window_drops.py', () => {
     }
   });
 
-  it('T14: bad lines in the transcript and in compaction.jsonl counted in data quality', () => {
+  it('bad lines in the transcript and in compaction.jsonl counted in data quality', () => {
     const dir = makeDir();
     try {
       const file = save(dir, 'S14.jsonl', [
@@ -622,7 +622,7 @@ describe('compaction_window_drops.py', () => {
     }
   });
 
-  it('T15: 30 cut_without_marker drops, share and Wilson against the reference value', () => {
+  it('30 cut_without_marker drops, share and Wilson against the reference value', () => {
     const dir = makeDir();
     try {
       const lines = [];
@@ -652,7 +652,7 @@ describe('compaction_window_drops.py', () => {
     }
   });
 
-  it('T16: --out to an existing file exit 1; to a new file 0600; missing --compact exit 2', () => {
+  it('--out to an existing file exit 1; to a new file 0600; missing --compact exit 2', () => {
     const dir = makeDir();
     try {
       const file = save(dir, 'S16.jsonl', [
@@ -677,7 +677,7 @@ describe('compaction_window_drops.py', () => {
     }
   });
 
-  it('T17: base different from id with matching keep: prefix broken, cause cut_without_marker', () => {
+  it('base different from id with matching keep: prefix broken, cause cut_without_marker', () => {
     const dir = makeDir();
     try {
       const file = save(dir, 'S17.jsonl', [
@@ -697,7 +697,7 @@ describe('compaction_window_drops.py', () => {
     }
   });
 
-  it('T18: a copy sorted before the original keeps the journal cause', () => {
+  it('a copy sorted before the original keeps the journal cause', () => {
     const dir = makeDir();
     try {
       const copy = save(dir, 'aaa-copy.jsonl', [
@@ -731,7 +731,7 @@ describe('compaction_window_drops.py', () => {
     }
   });
 
-  it('T19: a skipped row closer than jev does not displace jev', () => {
+  it('a skipped row closer than jev does not displace jev', () => {
     const dir = makeDir();
     try {
       const file = save(dir, 'S19.jsonl', [
@@ -756,7 +756,7 @@ describe('compaction_window_drops.py', () => {
     }
   });
 
-  it('T20: one jev row with two adjacent drops goes only to the closer one', () => {
+  it('one jev row with two adjacent drops goes only to the closer one', () => {
     const dir = makeDir();
     try {
       const file = save(dir, 'S20.jsonl', [
@@ -787,7 +787,7 @@ describe('compaction_window_drops.py', () => {
     }
   });
 
-  it('T21: drops_from_main_fields per pair without copy duplicates', () => {
+  it('drops_from_main_fields per pair without copy duplicates', () => {
     const dir = makeDir();
     try {
       const advisorUsage = {
@@ -825,7 +825,7 @@ describe('compaction_window_drops.py', () => {
     }
   });
 
-  it('T22: --out without --json saves JSON, not text', () => {
+  it('--out without --json saves JSON, not text', () => {
     const dir = makeDir();
     try {
       const file = save(dir, 'S22.jsonl', [
@@ -843,7 +843,7 @@ describe('compaction_window_drops.py', () => {
     }
   });
 
-  it('T23: after row without tokens_after_real: gap 0, after reading yes, tokens unavailable', () => {
+  it('after row without tokens_after_real: gap 0, after reading yes, tokens unavailable', () => {
     const dir = makeDir();
     try {
       const file = save(dir, 'S23.jsonl', [
@@ -871,7 +871,7 @@ describe('compaction_window_drops.py', () => {
     }
   });
 
-  it('T24: period is the requested window, data_range is the min and max drop ts', () => {
+  it('period is the requested window, data_range is the min and max drop ts', () => {
     const dir = makeDir();
     try {
       const file = save(dir, 'S24.jsonl', [
@@ -893,7 +893,7 @@ describe('compaction_window_drops.py', () => {
     }
   });
 
-  it('T25: control arm n is the number of drops in a file without a compact row', () => {
+  it('control arm n is the number of drops in a file without a compact row', () => {
     const dir = makeDir();
     try {
       const file = save(dir, 'S25.jsonl', [
@@ -916,7 +916,7 @@ describe('compaction_window_drops.py', () => {
     }
   });
 
-  it('T26: drop times literal from the row, with second fractions', () => {
+  it('drop times literal from the row, with second fractions', () => {
     const dir = makeDir();
     try {
       const file = save(dir, 'S26.jsonl', [

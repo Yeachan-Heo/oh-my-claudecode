@@ -4,7 +4,7 @@
 // no worktree removal, no prune, no branch deletion, no file removal. Only read commands of git are run.
 //
 //   node tools/maintenance/worktree_report.mjs [--repo <path>]... [--repos-file <file>] [--main-branch <name>]
-//        [--min-age-days <n>] [--exclude <prefix>]... [--json]
+//        [--min-age-days <n>] [--exclude <prefix>]... [--git-timeout <seconds>] [--json]
 //
 // --repo            repository to report on (repeatable); with no --repo and no --repos-file the repository of the
 //                   current directory is used
@@ -13,6 +13,8 @@
 // --main-branch     main branch of the repositories (default main); "merged" means contained in this branch
 // --min-age-days    a worktree directory not modified for more than this many days counts as old (default 0 = off)
 // --exclude         path prefix that marks worktrees as external (repeatable; "~" is the home directory)
+// --git-timeout     time limit of every git call in seconds (default 30); a call that runs out of time skips the
+//                   worktree (reason git_timeout, kept) or, for a repository-level call, the whole repository
 // --json            JSON output instead of a text table
 // Exit code: 0 report printed (also when some repositories were skipped), 2 usage error (unknown option, missing
 // value, missing repository list file). Node 20+, built-in modules only; needs git.
@@ -26,6 +28,7 @@
 //   keep   unmerged          neither merged into the main branch nor old
 //   sweep  merged            not protected, and merged into the main branch
 //   sweep  old_unmerged      not protected, not merged, but older than --min-age-days
+// A worktree whose git call timed out is reported as keep with the reason git_timeout and "skipped": "git_timeout".
 // A locked, current or external worktree is never reported as prune or sweep (these protections win over cleanup, also
 // for a missing directory). The dirty and unmerged rules apply only to worktrees that exist on disk.
 
@@ -35,10 +38,12 @@ import { resolve, sep } from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { pathToFileURL } from 'node:url';
 
-const USAGE = 'usage: node worktree_report.mjs [--repo <path>]... [--repos-file <file>] [--main-branch <name>] [--min-age-days <n>] [--exclude <prefix>]... [--json]';
+const USAGE = 'usage: node worktree_report.mjs [--repo <path>]... [--repos-file <file>] [--main-branch <name>] [--min-age-days <n>] [--exclude <prefix>]... [--git-timeout <seconds>] [--json]';
 const DAY_MS = 86400000;
+const DEFAULT_GIT_TIMEOUT_SECONDS = 30;
 
 class UsageError extends Error {}
+class GitTimeout extends Error {}
 
 /** Parse the output of `git worktree list --porcelain` into worktree records. The first one is the main worktree. */
 export function parseWorktreeList(text) {
@@ -93,16 +98,18 @@ export function parseRepoList(text) {
   return String(text).split('\n').map((l) => l.trim()).filter((l) => l.startsWith('/'));
 }
 
-function git(cwd, args) {
-  const r = spawnSync('git', ['--no-optional-locks', ...args], { cwd, encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 });
+// Runs one read-only git command; throws GitTimeout when it runs longer than timeoutMs.
+function git(cwd, args, timeoutMs) {
+  const r = spawnSync('git', ['--no-optional-locks', ...args], { cwd, encoding: 'utf8', maxBuffer: 64 * 1024 * 1024, timeout: timeoutMs });
+  if (r.error && r.error.code === 'ETIMEDOUT') throw new GitTimeout(`git ${args[0]} timed out`);
   return { status: r.error ? -1 : r.status, stdout: r.stdout || '' };
 }
 
 const realOrResolved = (p) => { try { return realpathSync(p); } catch { return resolve(p); } };
 
 // Exit 0: ancestor (equality included); exit 1: not an ancestor; anything else: unknown.
-function isAncestor(repo, ancestor, descendant) {
-  const r = git(repo, ['merge-base', '--is-ancestor', ancestor, descendant]);
+function isAncestor(repo, ancestor, descendant, timeoutMs) {
+  const r = git(repo, ['merge-base', '--is-ancestor', ancestor, descendant], timeoutMs);
   if (r.status === 0) return true;
   if (r.status === 1) return false;
   return null;
@@ -114,40 +121,36 @@ function isOld(path, minAgeDays, now) {
 }
 
 /** Report on one repository. Returns { repo, skipped?, hint?, mainBranch, worktrees }. */
-export function reportRepo(repo, { mainBranch = 'main', minAgeDays = 0, exclude = [], cwd = process.cwd(), now = Date.now() } = {}) {
+export function reportRepo(repo, { mainBranch = 'main', minAgeDays = 0, exclude = [], cwd = process.cwd(), now = Date.now(), gitTimeoutSeconds = DEFAULT_GIT_TIMEOUT_SECONDS } = {}) {
   const base = { repo, mainBranch };
-  if (!existsSync(repo) || git(repo, ['rev-parse', '--git-dir']).status !== 0) {
-    return { ...base, skipped: 'not_a_repository', hint: 'the path is not a git repository', worktrees: [] };
+  const timeoutMs = gitTimeoutSeconds * 1000;
+  const skippedRepo = (skipped, hint) => ({ ...base, skipped, hint, worktrees: [] });
+  let listed;
+  let startedFrom = null;
+  try {
+    if (!existsSync(repo) || git(repo, ['rev-parse', '--git-dir'], timeoutMs).status !== 0) {
+      return skippedRepo('not_a_repository', 'the path is not a git repository');
+    }
+    if (git(repo, ['show-ref', '--verify', '--quiet', `refs/heads/${mainBranch}`], timeoutMs).status !== 0) {
+      return skippedRepo('no_main_branch', `branch "${mainBranch}" not found; use --main-branch <name>`);
+    }
+    listed = git(repo, ['worktree', 'list', '--porcelain'], timeoutMs);
+    if (listed.status !== 0) return skippedRepo('worktree_list_failed', 'git worktree list failed');
+  } catch (e) {
+    if (!(e instanceof GitTimeout)) throw e;
+    return skippedRepo('git_timeout', `a git call took longer than ${gitTimeoutSeconds} seconds`);
   }
   const mainRef = `refs/heads/${mainBranch}`;
-  if (git(repo, ['show-ref', '--verify', '--quiet', mainRef]).status !== 0) {
-    return { ...base, skipped: 'no_main_branch', hint: `branch "${mainBranch}" not found; use --main-branch <name>`, worktrees: [] };
+  try {
+    const top = git(cwd, ['rev-parse', '--show-toplevel'], timeoutMs);
+    startedFrom = top.status === 0 ? realOrResolved(top.stdout.trim()) : null;
+  } catch (e) {
+    if (!(e instanceof GitTimeout)) throw e;
   }
-  const listed = git(repo, ['worktree', 'list', '--porcelain']);
-  if (listed.status !== 0) {
-    return { ...base, skipped: 'worktree_list_failed', hint: 'git worktree list failed', worktrees: [] };
-  }
-  const top = git(cwd, ['rev-parse', '--show-toplevel']);
-  const startedFrom = top.status === 0 ? realOrResolved(top.stdout.trim()) : null;
   const prefixes = exclude.map(expandPrefix);
   const records = parseWorktreeList(listed.stdout);
   const worktrees = records.map((rec, index) => {
     const exists = existsSync(rec.path);
-    const known = rec.head && !/^0+$/.test(rec.head);
-    const merged = known ? isAncestor(repo, rec.head, mainRef) : null;
-    let cls = '';
-    if (merged === true) cls = 'merged';
-    else if (merged === false) {
-      const back = isAncestor(repo, mainRef, rec.head);
-      cls = back === true ? 'ahead' : (back === false ? 'diverged' : '');
-    }
-    let dirty = false;
-    let dirtyReason = null;
-    if (exists && !rec.bare) {
-      const status = git(rec.path, ['status', '--porcelain']);
-      if (status.status !== 0) { dirty = true; dirtyReason = 'status_failed'; }
-      else if (status.stdout.trim() !== '') { dirty = true; dirtyReason = 'changes'; }
-    }
     const w = {
       path: rec.path,
       branch: rec.branch,
@@ -159,14 +162,32 @@ export function reportRepo(repo, { mainBranch = 'main', minAgeDays = 0, exclude 
       prunable: rec.prunable,
       prune_reason: rec.pruneReason,
       exists,
-      dirty,
-      dirty_reason: dirtyReason,
-      merged,
-      class: cls,
-      old: exists ? isOld(rec.path, minAgeDays, now) : false,
+      dirty: false,
+      dirty_reason: null,
+      merged: null,
+      class: '',
+      old: false,
       current: index === 0 || (startedFrom !== null && realOrResolved(rec.path) === startedFrom),
       external: isExternal(rec.path, prefixes),
     };
+    try {
+      const known = rec.head && !/^0+$/.test(rec.head);
+      w.merged = known ? isAncestor(repo, rec.head, mainRef, timeoutMs) : null;
+      if (w.merged === true) w.class = 'merged';
+      else if (w.merged === false) {
+        const back = isAncestor(repo, mainRef, rec.head, timeoutMs);
+        w.class = back === true ? 'ahead' : (back === false ? 'diverged' : '');
+      }
+      if (exists && !rec.bare) {
+        const status = git(rec.path, ['status', '--porcelain'], timeoutMs);
+        if (status.status !== 0) { w.dirty = true; w.dirty_reason = 'status_failed'; }
+        else if (status.stdout.trim() !== '') { w.dirty = true; w.dirty_reason = 'changes'; }
+      }
+    } catch (e) {
+      if (!(e instanceof GitTimeout)) throw e;
+      return { ...w, decision: 'keep', reason: 'git_timeout', skipped: 'git_timeout' };
+    }
+    w.old = exists ? isOld(rec.path, minAgeDays, now) : false;
     return { ...w, ...decide(w) };
   });
   return { ...base, worktrees };
@@ -174,10 +195,13 @@ export function reportRepo(repo, { mainBranch = 'main', minAgeDays = 0, exclude 
 
 /** Counts of decisions over a list of repository reports. */
 export function summarizeReports(reports) {
-  const summary = { keep: 0, prune: 0, sweep: 0, repositories: reports.length, skipped: 0 };
+  const summary = { keep: 0, prune: 0, sweep: 0, repositories: reports.length, skipped: 0, skipped_worktrees: 0 };
   for (const r of reports) {
     if (r.skipped) summary.skipped += 1;
-    for (const w of r.worktrees) summary[w.decision] += 1;
+    for (const w of r.worktrees) {
+      summary[w.decision] += 1;
+      if (w.skipped) summary.skipped_worktrees += 1;
+    }
   }
   return summary;
 }
@@ -191,6 +215,7 @@ function flagsOf(w) {
   if (w.old) flags.push('old');
   if (!w.exists) flags.push('missing');
   if (w.prunable) flags.push('prunable');
+  if (w.skipped) flags.push(`skipped(${w.skipped})`);
   return flags.join(',') || '-';
 }
 
@@ -207,12 +232,13 @@ export function textReport(reports, summary) {
       lines.push([w.decision, w.reason, w.branch || (w.detached ? '(detached)' : '-'), w.class || '-', flagsOf(w), w.path].join(' | '));
     }
   }
-  lines.push(`summary: keep=${summary.keep} prune=${summary.prune} sweep=${summary.sweep}, repositories=${summary.repositories}, skipped=${summary.skipped}`);
+  const skippedWorktrees = summary.skipped_worktrees > 0 ? `, skipped_worktrees=${summary.skipped_worktrees}` : '';
+  lines.push(`summary: keep=${summary.keep} prune=${summary.prune} sweep=${summary.sweep}, repositories=${summary.repositories}, skipped=${summary.skipped}${skippedWorktrees}`);
   return lines.join('\n');
 }
 
 export function parseArgs(argv) {
-  const opts = { repos: [], reposFile: null, mainBranch: 'main', minAgeDays: 0, exclude: [], json: false, help: false };
+  const opts = { repos: [], reposFile: null, mainBranch: 'main', minAgeDays: 0, exclude: [], gitTimeoutSeconds: DEFAULT_GIT_TIMEOUT_SECONDS, json: false, help: false };
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
     const value = () => {
@@ -228,6 +254,11 @@ export function parseArgs(argv) {
       const n = Number(v);
       if (v.trim() === '' || !Number.isFinite(n) || n < 0) throw new UsageError(`invalid value for --min-age-days: ${v}`);
       opts.minAgeDays = n;
+    } else if (a === '--git-timeout') {
+      const v = value();
+      const n = Number(v);
+      if (v.trim() === '' || !Number.isFinite(n) || n <= 0) throw new UsageError(`invalid value for --git-timeout: ${v}`);
+      opts.gitTimeoutSeconds = n;
     } else if (a === '--exclude') opts.exclude.push(value());
     else if (a === '--json') opts.json = true;
     else if (a === '-h' || a === '--help') opts.help = true;
@@ -254,7 +285,7 @@ function main() {
     process.exit(2);
   }
   const unique = [...new Set(repos)];
-  const reports = unique.map((repo) => reportRepo(repo, { mainBranch: opts.mainBranch, minAgeDays: opts.minAgeDays, exclude: opts.exclude }));
+  const reports = unique.map((repo) => reportRepo(repo, { mainBranch: opts.mainBranch, minAgeDays: opts.minAgeDays, exclude: opts.exclude, gitTimeoutSeconds: opts.gitTimeoutSeconds }));
   const summary = summarizeReports(reports);
   if (opts.json) console.log(JSON.stringify({ repositories: reports, summary }, null, 2));
   else console.log(textReport(reports, summary));

@@ -11,8 +11,10 @@
 //
 // Without file arguments it reads <OMC_JEV_LOG_DIR, else ~/.omc/state/jev>/denials.jsonl and its rotated parts
 // (denials-YYYYMMDD-HHMMSS.jsonl or denials-YYYYMMDD-HHMMSS-<pid>.jsonl).
+// A file given on the command line that does not exist is reported with a warning on stderr; the summary and the exit
+// code are not changed by it.
 // Exit code: 0 summary printed, 2 no journal file found.
-import { readdirSync, readFileSync } from 'node:fs';
+import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 
@@ -208,7 +210,10 @@ const main = () => {
   const files = [...opts.files];
   let dir = opts.dir;
   if (!files.length && !dir) dir = process.env.OMC_JEV_LOG_DIR || join(homedir(), '.omc', 'state', 'jev');
-  files.push(...opts.positional); // positional paths come after the default directory decision, as in the original
+  files.push(...opts.positional); // positional paths come after the default directory decision
+  for (const file of files) {
+    if (!existsSync(file)) console.error(`denial_log_summary: warning: file not found: ${file}`);
+  }
   if (dir) {
     let names = [];
     try { names = readdirSync(dir).filter((n) => n === 'denials.jsonl' || /^denials-\d{8}-\d{6}(-\d+)?\.jsonl$/.test(n)).sort(); } catch { /* no directory */ }

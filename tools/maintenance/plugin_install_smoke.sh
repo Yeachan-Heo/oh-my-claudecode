@@ -3,8 +3,9 @@
 # Smoke test of an install, revert and re-install flow on a THROWAWAY configuration directory.
 #
 # Copies a plugin directory into <config>/plugins/cache/<marketplace>/<name>/<version>, writes a one-entry installed_plugins.json
-# and a fake settings.json (values outside OMC_*, CLAUDE_CODE_* and ENABLE_TOOL_SEARCH replaced by FAKE; no hooks, plugin
-# configurations, status line or extra marketplaces), then runs four phases with CLAUDE_CONFIG_DIR pointing at the throwaway directory:
+# and a fake settings.json (values outside OMC_*, CLAUDE_CODE_* and ENABLE_TOOL_SEARCH replaced by FAKE, and so are the values
+# of keys whose name contains TOKEN, KEY, SECRET or PASSWORD in any case; no hooks, plugin configurations, status line or
+# extra marketplaces), then runs four phases with CLAUDE_CONFIG_DIR pointing at the throwaway directory:
 #   1. dry run   (--dry-run-cmd)
 #   2. apply     (--apply-cmd)
 #   3. revert    (--revert-cmd), timed
@@ -29,7 +30,8 @@
 #   --keep                     keep <config>/plugins/cache after the run (logs are always kept)
 #   -h, --help                 show this help
 # The script refuses (exit 2) to run when the target configuration directory is, contains or lies inside the real one
-# (${CLAUDE_CONFIG_DIR:-$HOME/.claude} or $HOME/.claude). Needs bash, python3, sha256sum, find, xargs and GNU date.
+# (${CLAUDE_CONFIG_DIR:-$HOME/.claude} or $HOME/.claude). Without --config-dir the same check is made for the default work
+# directory (a directory under ${TMPDIR:-/tmp}). Needs bash, python3, sha256sum, find, xargs and GNU date.
 set -uo pipefail
 
 usage() { sed -n '2,/^set -uo/p' "$0" | sed '$d' | sed 's/^# \{0,1\}//'; }
@@ -69,13 +71,19 @@ python3 -I -c "import sys; sys.exit(0 if float(sys.argv[1]) > 0 else 1)" "$LIMIT
 
 # Refuse the real configuration directory (resolved, so symbolic links are caught too).
 REAL_CANDIDATES=("$(realpath -m "${CLAUDE_CONFIG_DIR:-$HOME/.claude}")" "$(realpath -m "$HOME/.claude")")
-if [ -n "$CONFIG_DIR" ]; then
-  TARGET=$(realpath -m "$CONFIG_DIR")
-  for REAL in "${REAL_CANDIDATES[@]}"; do
-    case "$TARGET/" in "$REAL"/*) die "refusing to use the real configuration directory (or a path inside it): $CONFIG_DIR";; esac
-    case "$REAL/" in "$TARGET"/*) die "refusing to use a directory that contains the real configuration directory: $CONFIG_DIR";; esac
+refuse_real() {
+  local target real
+  target=$(realpath -m "$1")
+  for real in "${REAL_CANDIDATES[@]}"; do
+    case "$target/" in "$real"/*) die "refusing to use the real configuration directory (or a path inside it): $2";; esac
+    case "$real/" in "$target"/*) die "refusing to use a directory that contains the real configuration directory: $2";; esac
   done
+}
+if [ -n "$CONFIG_DIR" ]; then
+  refuse_real "$CONFIG_DIR" "$CONFIG_DIR"
   if [ -e "$CONFIG_DIR" ] && { [ ! -d "$CONFIG_DIR" ] || [ -n "$(ls -A "$CONFIG_DIR")" ]; }; then die "configuration directory must not exist or be empty: $CONFIG_DIR"; fi
+else
+  refuse_real "${TMPDIR:-/tmp}/plugin-smoke.XXXXXX/config" "${TMPDIR:-/tmp}"
 fi
 
 NAME=$(python3 -I -c "import json,sys; print(json.load(open(sys.argv[1]))['name'])" "$PLUGIN_DIR/.claude-plugin/plugin.json" 2>/dev/null) || die "plugin.json has no readable name"
@@ -93,7 +101,12 @@ shutil.copytree(src, dst, symlinks=True)
 entry = {'scope': 'user', 'installPath': dst, 'version': version}
 json.dump({'version': 2, 'plugins': {name + '@' + marketplace: [entry]}}, open(c + '/plugins/installed_plugins.json', 'w'), indent=2)
 s = json.load(open(settings_from)) if settings_from else {}
-s['env'] = {k: (v if (k.startswith('OMC_') or k.startswith('CLAUDE_CODE_') or k == 'ENABLE_TOOL_SEARCH') else 'FAKE') for k, v in s.get('env', {}).items()}
+secret_words = ('TOKEN', 'KEY', 'SECRET', 'PASSWORD')
+def keep_value(k):
+    if any(w in k.upper() for w in secret_words):
+        return False
+    return k.startswith('OMC_') or k.startswith('CLAUDE_CODE_') or k == 'ENABLE_TOOL_SEARCH'
+s['env'] = {k: (v if keep_value(k) else 'FAKE') for k, v in s.get('env', {}).items()}
 for k in ('pluginConfigs', 'hooks', 'statusLine', 'extraKnownMarketplaces'): s[k] = {}
 open(c + '/settings.json', 'w').write(json.dumps(s, indent=2, ensure_ascii=False) + '\n'); os.chmod(c + '/settings.json', 0o600)
 PY

@@ -41,7 +41,7 @@ function parseArgs(argv) {
 
 function load(file, label) {
   if (!existsSync(file)) { console.error(`missing file (${label}): ${file}`); process.exit(2); }
-  try { return JSON.parse(readFileSync(file, 'utf8').replace(/^﻿/, '')); } catch (e) { console.error(`bad JSON (${label}): ${file}: ${e.message}`); process.exit(2); }
+  try { return JSON.parse(readFileSync(file, 'utf8').replace(/^\uFEFF/, '')); } catch (e) { console.error(`bad JSON (${label}): ${file}: ${e.message}`); process.exit(2); }
 }
 
 const secret = (name) => /key|token|secret|passw/i.test(name);

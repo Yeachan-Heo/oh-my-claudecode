@@ -115,7 +115,7 @@ not change OMC behaviour and is not shipped in the npm package.
 ```
 python3 -I tools/diagnostics/executor_outcome_metrics.py --transcript <session.jsonl>
 python3 -I tools/diagnostics/executor_outcome_metrics.py --transcript A.jsonl --transcript A/subagents/agent-x.jsonl --json
-python3 -I tools/diagnostics/executor_outcome_metrics.py --transcript A.jsonl --provider-map glm-=zai --from 2026-11-01
+python3 -I tools/diagnostics/executor_outcome_metrics.py --transcript A.jsonl --provider-map model-x=provider-x --from 2026-11-01
 ```
 
 | Option | Meaning |
@@ -125,10 +125,18 @@ python3 -I tools/diagnostics/executor_outcome_metrics.py --transcript A.jsonl --
 | `--provider-map PREFIX=NAME` | map a model name prefix to a provider name (repeatable, first match wins). Without a mapping the provider is `unmapped`; a task without any model name has `unknown` |
 | `--test-pattern <regex>` | regular expression matched (`re.match`) to a Bash command segment after removing prefixes; replaces the built-in list of test runners |
 | `--advisor-pattern <regex>` | regular expression for a Bash command segment that is an advisor consultation. The advisor tool block (`server_tool_use` named `advisor`) is always recognised |
+| `--retry-threshold N` | consecutive identical calls that form a retry pattern (default 3) |
+| `--drift-threshold N` | consecutive calls to one tool that form a parameter-drift pattern (default 3) |
+| `--drift-min-signatures N` | distinct signatures a drift run needs (default 2) |
+| `--oscillation-min-repeats N` | full back-to-back repeats of a cycle that form an oscillation (default 3) |
+| `--max-cycle-length N` | longest cycle of tool names checked for oscillation (default 5, at least 2) |
+| `--exhaustion-status CODE` | extra HTTP status that counts as exhaustion, added to the built-in set (repeatable) |
+| `--exhaustion-phrase TEXT` | extra phrase that counts as exhaustion when it is found in the lowercased text, added to the built-in list (repeatable) |
+| `--error-field-status NAME=CODE` | HTTP status for an `error` field value, used when the error text has no status (repeatable; there is no built-in mapping) |
 | `--json` | JSON output instead of text |
 
 Exit codes: `0` success (whatever the numbers), `2` usage error (missing file, bad date, bad
-`--provider-map` entry, bad regular expression).
+`--provider-map` entry, bad regular expression, a threshold below its minimum, a bad `--error-field-status` entry).
 
 ## Input format
 
@@ -165,9 +173,8 @@ A missing value is never reported as zero.
 Exhaustion rule: an item counts when its HTTP status is one of 408, 413, 429, 503, 504, 529, or its
 lowercased text contains one of these phrases: `context length`, `context window`, `token limit`,
 `rate limit`, `too many requests`, `timeout`. The status is read from the text first (a 3-digit number
-in parentheses, else a 3-digit number after a colon), then from the mapping of the `error` field
-(`rate_limit` 429, `overloaded` and `overloaded_error` 529, `request_too_large` 413). Anything else is
-`other`. A failed tool result is checked the same way; a result without `is_error` is never exhaustion.
+in parentheses, else a 3-digit number after a colon), then from the mapping of the `error` field given
+with `--error-field-status` (empty by default). Anything else is `other`. A failed tool result is checked the same way; a result without `is_error` is never exhaustion.
 
 ## Final answer flags
 
@@ -192,7 +199,8 @@ Top level: `tasks`, `summary_by_provider`, `coverage` (`with_transcript`, `total
 ## Limits
 
 - The loop, exhaustion, failure and final-answer rules follow a written behaviour specification. The
-  thresholds are named constants at the top of the script and can be changed in the code.
+  thresholds, the exhaustion statuses and phrases and the error-field mapping have the defaults named above and
+  can be changed with the options; the same values are parameters of the functions in the script.
 - The tool does not know which transcript belongs to which task of a larger run; it measures the files given.
 - Test-run detection is by command name only; use `--test-pattern` for other runners.
 
@@ -525,7 +533,8 @@ python3 -I tools/diagnostics/compaction_cache_cost.py --deployed-at 2026-01-01T0
 
 # Denial log summary
 
-`denial_log_summary.mjs` summarizes the denial counter journal `denials.jsonl`: counts per event kind and per subject (a
+`denial_log_summary.mjs` summarizes the journal `denials.jsonl` written by the denial counter, which another change
+delivers (this change contains no writer of that journal, so the tool has nothing to read until the counter is in use): counts per event kind and per subject (a
 session, with the agent id when a subagent wrote the row), degrees, results, the p50 and p95 of the time from a decision to its
 outcome, and the number of unique keys. It is a standalone diagnostic run by hand. It does not change OMC behaviour and is not
 shipped in the npm package.
@@ -540,7 +549,7 @@ node tools/diagnostics/denial_log_summary.mjs [--file <path>]... [--dir <dir>] [
 
 | Option | Meaning |
 |---|---|
-| `--file <path>` | a journal file; repeatable. Plain arguments are taken as files too, and (unlike `--file`) do not turn off the default directory |
+| `--file <path>` | a journal file; repeatable. Plain arguments are taken as files too, and (unlike `--file`) do not turn off the default directory. A file given on the command line that does not exist is reported with a warning on stderr; the summary and the exit code do not change |
 | `--dir <dir>` | a directory: reads `denials.jsonl` and its rotated parts (`denials-YYYYMMDD-HHMMSS.jsonl`, `denials-YYYYMMDD-HHMMSS-<pid>.jsonl`) |
 | `--json` | JSON output |
 

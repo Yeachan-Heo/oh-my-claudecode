@@ -9,8 +9,15 @@ const REPO = join(fileURLToPath(import.meta.url), '..', '..', '..');
 const SCRIPT = join(REPO, 'tools', 'maintenance', 'plugin_install_smoke.sh');
 
 const have = (cmd: string[]): boolean => spawnSync(cmd[0], cmd.slice(1), { stdio: 'ignore' }).status === 0;
-const toolsOk =
-  have(['bash', '-c', 'true']) && have(['python3', '-c', 'pass']) && have(['sha256sum', '--version']) && have(['bash', '-c', 'date +%s.%N | grep -q "\\."']);
+const requiredTools: Array<[string, string[]]> = [
+  ['bash', ['bash', '-c', 'true']],
+  ['python3', ['python3', '-c', 'pass']],
+  ['sha256sum', ['sha256sum', '--version']],
+  ['GNU date', ['bash', '-c', 'date +%s.%N | grep -q "\\."']],
+];
+const missingTools = requiredTools.filter(([, cmd]) => !have(cmd)).map(([name]) => name);
+const toolsOk = missingTools.length === 0;
+if (!toolsOk) console.warn(`plugin-install-smoke tests skipped: missing tool(s): ${missingTools.join(', ')}`);
 
 const root = mkdtempSync(join(tmpdir(), 'plugin-smoke-test-'));
 const home = join(root, 'home');
@@ -125,6 +132,44 @@ describe.skipIf(!toolsOk)('plugin_install_smoke.sh', () => {
       expect(r.out).toContain('refusing');
     }
     expect(readdirSync(real)).toEqual(['sentinel.txt']);
+  });
+
+  it('refuses a default work directory under the real configuration directory, without writing', () => {
+    const real = join(home, '.claude');
+    mkdirSync(join(real, 'tmp'), { recursive: true });
+    for (const tmp of [real, join(real, 'tmp')]) {
+      const r = run(base(), { TMPDIR: tmp });
+      expect(r.status, `${tmp}: ${r.out}`).toBe(2);
+      expect(r.out).toContain('refusing');
+      expect(readdirSync(tmp).filter((n) => n.startsWith('plugin-smoke.'))).toEqual([]);
+    }
+  });
+
+  it('refuses a default work directory under the directory named by CLAUDE_CONFIG_DIR', () => {
+    const other = join(root, 'named-config');
+    mkdirSync(other);
+    const r = run(base(), { CLAUDE_CONFIG_DIR: other, TMPDIR: other });
+    expect(r.status, r.out).toBe(2);
+    expect(r.out).toContain('refusing');
+    expect(readdirSync(other)).toEqual([]);
+  });
+
+  it('replaces the values of keys that look like secrets, also under the kept prefixes', () => {
+    const src = join(root, 'secret-settings.json');
+    writeFileSync(src, JSON.stringify({
+      env: {
+        OMC_MODE: 'on', CLAUDE_CODE_FLAG: '1', OMC_API_TOKEN: 'tok-1', CLAUDE_CODE_OAUTH_TOKEN: 'tok-2',
+        OMC_SERVICE_KEY: 'key-1', CLAUDE_CODE_SECRET_VALUE: 'sec-1', OMC_PASSWORD: 'pw-1', CLAUDE_CODE_Api_Key: 'key-2',
+      },
+    }));
+    const r = run(base(['--keep', '--settings-from', src]));
+    expect(r.status, r.out).toBe(0);
+    const settings = JSON.parse(readFileSync(join(logDir(r.out), 'config', 'settings.json'), 'utf8'));
+    expect(settings.env).toEqual({
+      OMC_MODE: 'on', CLAUDE_CODE_FLAG: '1', OMC_API_TOKEN: 'FAKE', CLAUDE_CODE_OAUTH_TOKEN: 'FAKE',
+      OMC_SERVICE_KEY: 'FAKE', CLAUDE_CODE_SECRET_VALUE: 'FAKE', OMC_PASSWORD: 'FAKE', CLAUDE_CODE_Api_Key: 'FAKE',
+    });
+    expect(readFileSync(join(logDir(r.out), 'config', 'settings.json'), 'utf8')).not.toMatch(/tok-|key-|sec-|pw-/);
   });
 
   it('refuses the directory named by CLAUDE_CONFIG_DIR', () => {

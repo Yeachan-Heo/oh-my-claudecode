@@ -17,6 +17,7 @@ const SCRIPT = path.resolve(
   'executor_outcome_metrics.py',
 );
 const hasPython3 = spawnSync('python3', ['--version'], { encoding: 'utf8' }).status === 0;
+if (!hasPython3) console.warn('executor-outcome-metrics tests skipped: python3 is not installed');
 
 const MODEL = 'claude-test-model';
 const at = (second: number) => new Date(Date.UTC(2026, 10, 14, 10, 0, second)).toISOString();
@@ -62,13 +63,44 @@ function write(lines: string[], name = `transcript-${++counter}.jsonl`): string 
 function run(args: string[]) {
   return spawnSync('python3', ['-I', SCRIPT, ...args], { encoding: 'utf8' });
 }
+interface OscillationPattern {
+  first: number;
+  last: number;
+  cycle: string[];
+  cycle_count: number;
+}
+interface Task {
+  session_id: string;
+  provider: string;
+  model: string | null;
+  parent: string | null;
+  transcript: string;
+  bad_lines: number;
+  metrics: Record<string, unknown>;
+  reasons: Record<string, string>;
+  final_result: { status: string; flags: string[]; reason?: string };
+  loop_patterns: { retry: number[][]; parameter_drift: number[][]; oscillation: OscillationPattern[] };
+}
+interface Output {
+  tasks: Task[];
+  coverage: Record<string, unknown>;
+  skipped: Array<{ kind: string }>;
+}
 // one transcript, JSON output, exactly one task
-function taskOf(lines: string[], extra: string[] = []): any {
+function taskOf(lines: string[], extra: string[] = []): Task {
   const p = run(['--transcript', write(lines), '--json', ...extra]);
   assert.equal(p.status, 0, `exit ${p.status}: ${p.stderr}`);
-  const out = JSON.parse(p.stdout);
+  const out = JSON.parse(p.stdout) as Output;
   assert.equal(out.tasks.length, 1);
   return out.tasks[0];
+}
+// calls the python module functions directly (isolated mode, the module directory is put on the path)
+function pyEval(expression: string): unknown {
+  const code = `import json, sys; sys.path.insert(0, ${JSON.stringify(path.dirname(SCRIPT))}); sys.dont_write_bytecode = True; `
+    + `import executor_outcome_metrics as m; print(json.dumps(${expression}))`;
+  const p = spawnSync('python3', ['-I', '-c', code], { encoding: 'utf8' });
+  assert.equal(p.status, 0, p.stderr);
+  return JSON.parse(p.stdout);
 }
 // calls with distinct inputs (no retry, no drift): read-only file reads
 function readCalls(count: number): string[] {
@@ -146,6 +178,17 @@ describe.skipIf(!hasPython3)('executor_outcome_metrics.py', () => {
       assert.equal(task.metrics.retry_patterns, 0);
     });
 
+    it('parameter drift: four calls to one tool with two signatures are still one pattern', () => {
+      const task = taskOf([
+        call(1, 'a', 'Write', { file_path: 'x', content: '1' }),
+        call(2, 'b', 'Write', { file_path: 'x', content: '2' }),
+        call(3, 'c', 'Write', { file_path: 'x', content: '3' }),
+        call(4, 'd', 'Write', { file_path: 'x', content: '4' }),
+      ]);
+      assert.equal(task.metrics.parameter_drift_patterns, 1);
+      assert.deepEqual(task.loop_patterns.parameter_drift, [[0, 3]]);
+    });
+
     it('parameter drift: a drift run that overlaps a retry run is suppressed', () => {
       const task = taskOf([
         call(1, 'a', 'Bash', { command: 'make' }),
@@ -175,6 +218,31 @@ describe.skipIf(!hasPython3)('executor_outcome_metrics.py', () => {
       assert.deepEqual(task.loop_patterns.oscillation, [{ first: 0, last: 5, cycle: ['Read', 'Grep'], cycle_count: 3 }]);
     });
 
+    it('oscillation: four full repeats of a two-name cycle are one pattern with the cycle count 4', () => {
+      const calls = Array.from({ length: 8 }, (_, i) =>
+        i % 2 === 0 ? call(i + 1, `c${i}`, 'Read', { file_path: String(i) }) : call(i + 1, `c${i}`, 'Grep', { pattern: String(i) }));
+      const task = taskOf(calls);
+      assert.equal(task.metrics.oscillation_patterns, 1);
+      assert.deepEqual(task.loop_patterns.oscillation, [{ first: 0, last: 7, cycle: ['Read', 'Grep'], cycle_count: 4 }]);
+    });
+
+    it('oscillation: a cycle of five names repeated three times is found, a cycle of six names is not', () => {
+      const names = ['Read', 'Grep', 'Bash', 'Edit', 'Write', 'Glob'];
+      const build = (length: number) =>
+        Array.from({ length: length * 3 }, (_, i) => call(i + 1, `c${i}`, names[i % length], { n: i }));
+      const five = taskOf(build(5));
+      assert.equal(five.metrics.oscillation_patterns, 1);
+      assert.equal(five.loop_patterns.oscillation[0].cycle.length, 5);
+      assert.equal(taskOf(build(6)).metrics.oscillation_patterns, 0);
+    });
+
+    it('overlap removal: the longest pattern from an equal start is kept and a nested pattern is dropped', () => {
+      const kept = pyEval(
+        'm.remove_overlaps([{"first": 0, "last": 3}, {"first": 0, "last": 7}, {"first": 2, "last": 5}, {"first": 8, "last": 9}])',
+      );
+      assert.deepEqual(kept, [{ first: 0, last: 7 }, { first: 8, last: 9 }]);
+    });
+
     it('oscillation: a three-name cycle repeated three times is one pattern', () => {
       const task = taskOf([
         call(1, 'a', 'Read', { file_path: '1' }), call(2, 'b', 'Grep', { pattern: '1' }), call(3, 'c', 'Bash', { command: '1' }),
@@ -195,6 +263,54 @@ describe.skipIf(!hasPython3)('executor_outcome_metrics.py', () => {
       assert.equal(task.metrics.retry_patterns, 0);
       assert.equal(task.metrics.parameter_drift_patterns, 0);
       assert.equal(task.metrics.oscillation_patterns, 0);
+    });
+  });
+
+  describe('threshold options', () => {
+    const twoSame = [call(1, 'a', 'Grep', { pattern: 'x' }), call(2, 'b', 'Grep', { pattern: 'x' })];
+    const twoDrift = [call(1, 'a', 'Write', { content: '1' }), call(2, 'b', 'Write', { content: '2' })];
+    const twoRepeats = [
+      call(1, 'a', 'Read', { n: 1 }), call(2, 'b', 'Grep', { n: 1 }),
+      call(3, 'c', 'Read', { n: 2 }), call(4, 'd', 'Grep', { n: 2 }),
+    ];
+
+    it('without the options the defaults apply and two-call patterns are not reported', () => {
+      assert.equal(taskOf(twoSame).metrics.retry_patterns, 0);
+      assert.equal(taskOf(twoDrift).metrics.parameter_drift_patterns, 0);
+      assert.equal(taskOf(twoRepeats).metrics.oscillation_patterns, 0);
+    });
+
+    it('--retry-threshold lowers the retry threshold', () => {
+      assert.deepEqual(taskOf(twoSame, ['--retry-threshold', '2']).loop_patterns.retry, [[0, 1]]);
+    });
+
+    it('--drift-threshold lowers the drift threshold', () => {
+      assert.deepEqual(taskOf(twoDrift, ['--drift-threshold', '2']).loop_patterns.parameter_drift, [[0, 1]]);
+    });
+
+    it('--drift-min-signatures raises the number of distinct signatures a drift run needs', () => {
+      const three = [
+        call(1, 'a', 'Write', { content: '1' }), call(2, 'b', 'Write', { content: '1' }), call(3, 'c', 'Write', { content: '2' }),
+      ];
+      assert.equal(taskOf(three).metrics.parameter_drift_patterns, 1);
+      assert.equal(taskOf(three, ['--drift-min-signatures', '3']).metrics.parameter_drift_patterns, 0);
+    });
+
+    it('--oscillation-min-repeats lowers the repeat threshold', () => {
+      assert.equal(taskOf(twoRepeats, ['--oscillation-min-repeats', '2']).metrics.oscillation_patterns, 1);
+    });
+
+    it('--max-cycle-length raises the longest cycle that is checked', () => {
+      const names = ['Read', 'Grep', 'Bash', 'Edit', 'Write', 'Glob'];
+      const calls = Array.from({ length: 18 }, (_, i) => call(i + 1, `c${i}`, names[i % 6], { n: i }));
+      assert.equal(taskOf(calls).metrics.oscillation_patterns, 0);
+      assert.equal(taskOf(calls, ['--max-cycle-length', '6']).metrics.oscillation_patterns, 1);
+    });
+
+    it('loop_patterns takes its thresholds as parameters', () => {
+      const calls = '[{"name": "A", "signature": "A(1)"}, {"name": "A", "signature": "A(1)"}]';
+      assert.deepEqual(pyEval(`m.loop_patterns(${calls})["retry"]`), []);
+      assert.deepEqual(pyEval(`m.loop_patterns(${calls}, retry_threshold=2)["retry"]`), [[0, 1]]);
     });
   });
 
@@ -238,17 +354,45 @@ describe.skipIf(!hasPython3)('executor_outcome_metrics.py', () => {
   });
 
   describe('detector 5: resource exhaustion', () => {
-    it('API errors: status from the text, status from the error field, and an other error', () => {
-      const task = taskOf([
-        text(0, 'Working.'),
-        apiError(1, 'API Error: Request rejected (429) · limit', 'rate_limit'),
-        apiError(2, 'Upstream failure', 'overloaded'),
-        apiError(3, 'Invalid request', 'invalid_request'),
-      ]);
+    const apiLines = [
+      text(0, 'Working.'),
+      apiError(1, 'API Error: Request rejected (429) · limit', 'rate_limit'),
+      apiError(2, 'Upstream failure', 'overloaded'),
+      apiError(3, 'Invalid request', 'invalid_request'),
+    ];
+
+    it('API errors: status from the text, status from the configured error field mapping, and an other error', () => {
+      const task = taskOf(apiLines, ['--error-field-status', 'overloaded=529']);
       assert.equal(task.metrics.exhaustion_api, 2);
       assert.deepEqual(task.metrics.exhaustion_api_by_status, { '429': 1, '529': 1 });
       assert.equal(task.metrics.api_errors_other, 1);
       assert.deepEqual(task.metrics.api_errors_by_error_field, { rate_limit: 1, overloaded: 1, invalid_request: 1 });
+    });
+
+    it('API errors: without an error field mapping only the status in the text counts', () => {
+      const task = taskOf(apiLines);
+      assert.equal(task.metrics.exhaustion_api, 1);
+      assert.deepEqual(task.metrics.exhaustion_api_by_status, { '429': 1 });
+      assert.equal(task.metrics.api_errors_other, 2);
+    });
+
+    it('--exhaustion-status and --exhaustion-phrase extend the built-in sets', () => {
+      const lines = [
+        text(0, 'Working.'),
+        apiError(1, 'Server error (500)'),
+        apiError(2, 'Quota depleted for this key'),
+      ];
+      assert.equal(taskOf(lines).metrics.exhaustion_api, 0);
+      const task = taskOf(lines, ['--exhaustion-status', '500', '--exhaustion-phrase', 'Quota Depleted']);
+      assert.equal(task.metrics.exhaustion_api, 2);
+      assert.deepEqual(task.metrics.exhaustion_api_by_status, { '500': 1, phrase: 1 });
+    });
+
+    it('the exhaustion functions take the status and phrase sets as parameters', () => {
+      assert.equal(pyEval('m.exhaustion_key("boom", 418, statuses=(418,))'), '418');
+      assert.equal(pyEval('m.exhaustion_key("boom", 418)'), null);
+      assert.equal(pyEval('m.exhaustion_key("disk full", None, phrases=("disk full",))'), 'phrase');
+      assert.equal(pyEval('m.exhaustion_key("disk full", None)'), null);
     });
 
     it('API error with a phrase and no status counts under the phrase key', () => {
@@ -380,10 +524,10 @@ describe.skipIf(!hasPython3)('executor_outcome_metrics.py', () => {
 
   describe('input handling and options', () => {
     it('provider comes from the model prefix through --provider-map; the context suffix is removed', () => {
-      const lines = [text(1, 'Done.')].map((l) => l.replace(MODEL, 'glm-5.3-flash[1m]'));
-      const mapped = taskOf(lines, ['--provider-map', 'glm-=zai']);
-      assert.equal(mapped.provider, 'zai');
-      assert.equal(mapped.model, 'glm-5.3-flash');
+      const lines = [text(1, 'Done.')].map((l) => l.replace(MODEL, 'model-x-1[1m]'));
+      const mapped = taskOf(lines, ['--provider-map', 'model-x=provider-x']);
+      assert.equal(mapped.provider, 'provider-x');
+      assert.equal(mapped.model, 'model-x-1');
       assert.equal(taskOf(lines).provider, 'unmapped');
     });
 
@@ -447,7 +591,11 @@ describe.skipIf(!hasPython3)('executor_outcome_metrics.py', () => {
       assert.equal(run(['--transcript', path.join(dir, 'missing.jsonl')]).status, 2);
       assert.equal(run(['--transcript', file, '--from', '14-11-2026']).status, 2);
       assert.equal(run(['--transcript', file, '--from', '2026-11-15', '--to', '2026-11-14']).status, 2);
-      assert.equal(run(['--transcript', file, '--provider-map', 'glm-']).status, 2);
+      assert.equal(run(['--transcript', file, '--provider-map', 'model-x-']).status, 2);
+      assert.equal(run(['--transcript', file, '--retry-threshold', '0']).status, 2);
+      assert.equal(run(['--transcript', file, '--max-cycle-length', '1']).status, 2);
+      assert.equal(run(['--transcript', file, '--error-field-status', 'overloaded']).status, 2);
+      assert.equal(run(['--transcript', file, '--error-field-status', 'overloaded=abc']).status, 2);
       assert.equal(run(['--transcript', file, '--test-pattern', '(bad']).status, 2);
     });
   });

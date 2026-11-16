@@ -121,7 +121,7 @@ function sameTime(path, iso) {
 }
 
 describe('compaction_cache_cost', () => {
-  it('1: a series without breaks; Cache Savings match the reference value', () => {
+  it('a series without breaks; Cache Savings match the reference value', () => {
     const c = newCase();
     try {
       const file = join(c.dir, 'proj', 's1.jsonl');
@@ -156,7 +156,7 @@ describe('compaction_cache_cost', () => {
     }
   });
 
-  it('2: a boundary, a call with cc 50000 and cr 2000: an after_compaction break, reference cost and recovery', () => {
+  it('a boundary, a call with cc 50000 and cr 2000: an after_compaction break, reference cost and recovery', () => {
     const c = newCase();
     try {
       const file = join(c.dir, 'proj', 's2.jsonl');
@@ -179,7 +179,7 @@ describe('compaction_cache_cost', () => {
     }
   });
 
-  it('3: TTL break classes: after_ttl_gap (3600 and 300), other, ttl_unknown', () => {
+  it('TTL break classes: after_ttl_gap (3600 and 300), other, ttl_unknown', () => {
     const c = newCase();
     try {
       const a = join(c.dir, 'proj', 'sa.jsonl');
@@ -214,7 +214,7 @@ describe('compaction_cache_cost', () => {
     }
   });
 
-  it('4: a call with an advisor: cost = thread model + advisor; no false break', () => {
+  it('a call with an advisor: cost = thread model + advisor; no false break', () => {
     const c = newCase();
     try {
       const file = join(c.dir, 'proj', 's4.jsonl');
@@ -245,7 +245,7 @@ describe('compaction_cache_cost', () => {
     }
   });
 
-  it('5: several rows of one call are counted once', () => {
+  it('several rows of one call are counted once', () => {
     const c = newCase();
     try {
       const file = join(c.dir, 'proj', 's5.jsonl');
@@ -265,7 +265,7 @@ describe('compaction_cache_cost', () => {
     }
   });
 
-  it('6: two boundaries: turns_to_next, the median of turns, breakeven_turns, paid_back', () => {
+  it('two boundaries: turns_to_next, the median of turns, breakeven_turns, paid_back', () => {
     const c = newCase();
     try {
       const file = join(c.dir, 'proj', 's6.jsonl');
@@ -307,7 +307,7 @@ describe('compaction_cache_cost', () => {
     }
   });
 
-  it('7: cache loss: single, persistent, reset after a boundary, sides before/from the deployment', () => {
+  it('cache loss: single, persistent, reset after a boundary, sides before/from the deployment', () => {
     const c = newCase();
     try {
       const dir = join(c.dir, 'proj');
@@ -349,7 +349,7 @@ describe('compaction_cache_cost', () => {
     }
   });
 
-  it('8: matching jev, fallback, host and a subagent by agent_id', () => {
+  it('matching jev, fallback, host and a subagent by agent_id', () => {
     const c = newCase();
     try {
       const dir = join(c.dir, 'proj');
@@ -384,7 +384,7 @@ describe('compaction_cache_cost', () => {
     }
   });
 
-  it('9: a model without a price and a subscription model are in the gaps and outside USD', () => {
+  it('a model without a price and a subscription model are in the gaps and outside USD', () => {
     const c = newCase();
     try {
       const file = join(c.dir, 'proj', 's9.jsonl');
@@ -406,7 +406,7 @@ describe('compaction_cache_cost', () => {
     }
   });
 
-  it('10: complete fields, no null; insufficient data; Wilson with a denominator >= 30', () => {
+  it('complete fields, no null; insufficient data; Wilson with a denominator >= 30', () => {
     const c = newCase();
     try {
       const dir = join(c.dir, 'proj');
@@ -437,7 +437,7 @@ describe('compaction_cache_cost', () => {
     }
   });
 
-  it('11: a missing --prices file: exit 2; --out to an existing file: exit 1', () => {
+  it('a missing --prices file: exit 2; --out to an existing file: exit 1', () => {
     const c = newCase();
     try {
       const dir = join(c.dir, 'proj');
@@ -462,7 +462,7 @@ describe('compaction_cache_cost', () => {
     }
   });
 
-  it('14: a boundary in the original and in a copy; the copy older by modification time; the jev-main unit from the original', () => {
+  it('a boundary in the original and in a copy; the copy older by modification time; the jev-main unit from the original', () => {
     const c = newCase();
     try {
       const dir = join(c.dir, 'proj');
@@ -493,7 +493,7 @@ describe('compaction_cache_cost', () => {
     }
   });
 
-  it('15: reversed modification times: the unit result is identical', () => {
+  it('reversed modification times: the unit result is identical', () => {
     const c = newCase();
     try {
       const dir = join(c.dir, 'proj');
@@ -521,7 +521,7 @@ describe('compaction_cache_cost', () => {
     }
   });
 
-  it('16: two files with the same uuid and no compact row: host, the file first by path', () => {
+  it('two files with the same uuid and no compact row: host, the file first by path', () => {
     const c = newCase();
     try {
       const dir = join(c.dir, 'proj');
@@ -543,7 +543,7 @@ describe('compaction_cache_cost', () => {
     }
   });
 
-  it('17: the calls of the boundary file are copies from an earlier file; the unit counts its own file', () => {
+  it('the calls of the boundary file are copies from an earlier file; the unit counts its own file', () => {
     const c = newCase();
     try {
       const dir = join(c.dir, 'proj');
@@ -574,7 +574,7 @@ describe('compaction_cache_cost', () => {
     }
   });
 
-  it('18: a boundary without a call after it in the file', () => {
+  it('a boundary without a call after it in the file', () => {
     const c = newCase();
     try {
       const dir = join(c.dir, 'proj');
@@ -600,7 +600,7 @@ describe('compaction_cache_cost', () => {
     }
   });
 
-  it('19: one fallback compact row, two boundaries 80 s before and 30 s after; the order in the file does not matter', () => {
+  it('one fallback compact row, two boundaries 80 s before and 30 s after; the order in the file does not matter', () => {
     const c = newCase();
     try {
       const file = join(c.dir, 'proj', 's19.jsonl');
@@ -634,7 +634,7 @@ describe('compaction_cache_cost', () => {
     }
   });
 
-  it('15b: scanning with --projects (sorted by mtime) gives the same unit result and cost sum', () => {
+  it('scanning with --projects (sorted by mtime) gives the same unit result and cost sum', () => {
     const c = newCase();
     try {
       const projects = join(c.dir, 'my-projects');
@@ -666,7 +666,7 @@ describe('compaction_cache_cost', () => {
     }
   });
 
-  it('20: a boundary before a boundary without calls: no double cost, zero in the turns between', () => {
+  it('a boundary before a boundary without calls: no double cost, zero in the turns between', () => {
     const c = newCase();
     try {
       const dir = join(c.dir, 'proj');
@@ -704,7 +704,7 @@ describe('compaction_cache_cost', () => {
     }
   });
 
-  it('21: the next boundary after the end of the period: paid_back unavailable, outside the median of turns', () => {
+  it('the next boundary after the end of the period: paid_back unavailable, outside the median of turns', () => {
     const c = newCase();
     try {
       const dir = join(c.dir, 'proj');
@@ -737,7 +737,7 @@ describe('compaction_cache_cost', () => {
     }
   });
 
-  it('22: file_end: paid_back decided, outside the median of turns', () => {
+  it('file_end: paid_back decided, outside the median of turns', () => {
     const c = newCase();
     try {
       const dir = join(c.dir, 'proj');
@@ -764,7 +764,7 @@ describe('compaction_cache_cost', () => {
     }
   });
 
-  it('23: exit codes: no --compact and no --transcript file exit 2, a bad --out exit 1, no stack trace', () => {
+  it('exit codes: no --compact and no --transcript file exit 2, a bad --out exit 1, no stack trace', () => {
     const c = newCase();
     try {
       const dir = join(c.dir, 'proj');
@@ -789,7 +789,7 @@ describe('compaction_cache_cost', () => {
     }
   });
 
-  it('24: bad transcript lines are counted in the transcripts entry', () => {
+  it('bad transcript lines are counted in the transcripts entry', () => {
     const c = newCase();
     try {
       const dir = join(c.dir, 'proj');
@@ -811,7 +811,7 @@ describe('compaction_cache_cost', () => {
     }
   });
 
-  it('25: the cache loss denominator holds only sessions with a call in the period', () => {
+  it('the cache loss denominator holds only sessions with a call in the period', () => {
     const c = newCase();
     try {
       const dir = join(c.dir, 'proj');
@@ -845,7 +845,7 @@ describe('compaction_cache_cost', () => {
     }
   });
 
-  it('26: the price table: an invalid --prices file and a missing --deployed-at exit 2; without --prices USD figures are unavailable', () => {
+  it('the price table: an invalid --prices file and a missing --deployed-at exit 2; without --prices USD figures are unavailable', () => {
     const c = newCase();
     try {
       const dir = join(c.dir, 'proj');
@@ -881,7 +881,7 @@ describe('compaction_cache_cost', () => {
     }
   });
 
-  it('27: the 5-minute write is priced at 1.25 x input, a write without a TTL breakdown at the 1-hour price, reads at 0.10 x input', () => {
+  it('the 5-minute write is priced at 1.25 x input, a write without a TTL breakdown at the 1-hour price, reads at 0.10 x input', () => {
     const c = newCase();
     try {
       const dir = join(c.dir, 'proj');

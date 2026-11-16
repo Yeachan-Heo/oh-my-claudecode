@@ -80,7 +80,8 @@ What it does:
 
 1. Copies the plugin directory to `<config>/plugins/cache/<marketplace>/<name>/<version>`, writes a one-entry
    `installed_plugins.json` and a fake `settings.json` (mode 0600). In the fake settings the values of `env` keys other than
-   `OMC_*`, `CLAUDE_CODE_*` and `ENABLE_TOOL_SEARCH` are replaced by `FAKE`; `pluginConfigs`, `hooks`, `statusLine` and
+   `OMC_*`, `CLAUDE_CODE_*` and `ENABLE_TOOL_SEARCH` are replaced by `FAKE`, and so are the values of keys whose name contains
+   `TOKEN`, `KEY`, `SECRET` or `PASSWORD` (in any case), also under those prefixes; `pluginConfigs`, `hooks`, `statusLine` and
    `extraKnownMarketplaces` are empty.
 2. Takes the tree sum S0 (sorted sha256 of all files under `<config>/plugins`) and runs the phases: dry run, apply (tree sum S1),
    revert (timed; tree sum S2), apply again (tree sum S3).
@@ -93,7 +94,7 @@ Result: exit `0` and `SMOKE RESULT: OK` only when all four phases exit 0, the re
 S3 = S1. Exit `1` otherwise, exit `2` on a usage error.
 
 Safety: the script refuses (exit 2) to run when the target configuration directory is the real one, lies inside it or
-contains it. The real directories are `${CLAUDE_CONFIG_DIR:-$HOME/.claude}` and `$HOME/.claude`; paths are resolved first, so a symbolic link to
+contains it. Without `--config-dir` the same check is made for the default work directory under `$TMPDIR` or `/tmp`. The real directories are `${CLAUDE_CONFIG_DIR:-$HOME/.claude}` and `$HOME/.claude`; paths are resolved first, so a symbolic link to
 them is caught too. The commands you supply are your own code: they run with your user rights, so keep them pointed at
 `$CLAUDE_CONFIG_DIR`.
 
@@ -137,7 +138,7 @@ clean up. It is read-only and never deletes anything: no `git worktree remove`, 
 deletion, no file removal. It runs only read commands of git (the status check uses `--no-optional-locks`).
 
 ```
-node tools/maintenance/worktree_report.mjs [--repo <path>]... [--repos-file <file>] [--main-branch <name>] [--min-age-days <n>] [--exclude <prefix>]... [--json]
+node tools/maintenance/worktree_report.mjs [--repo <path>]... [--repos-file <file>] [--main-branch <name>] [--min-age-days <n>] [--exclude <prefix>]... [--git-timeout <seconds>] [--json]
 ```
 
 | Option | Meaning |
@@ -147,6 +148,7 @@ node tools/maintenance/worktree_report.mjs [--repo <path>]... [--repos-file <fil
 | `--main-branch <name>` | main branch of the repositories (default `main`); "merged" means contained in this branch |
 | `--min-age-days <n>` | a worktree directory not modified for more than `n` days counts as old (default `0`, which turns the age check off) |
 | `--exclude <prefix>` | path prefix that marks worktrees as external; repeatable; a leading `~` is the home directory |
+| `--git-timeout <seconds>` | time limit of every git call (default `30`, must be above 0). A worktree whose call runs out of time is reported as `keep` with the reason `git_timeout` and a `skipped` field (counted in `skipped_worktrees` of the summary); a timeout of a repository-level call skips the whole repository with `skipped: git_timeout` |
 | `--json` | JSON output instead of a text table |
 
 Exit codes: `0` report printed (also when some repositories were skipped), `2` usage error (unknown option, missing value,
@@ -178,6 +180,9 @@ Decision per worktree, the first matching rule wins (this order is fixed, so the
 | keep | `unmerged` | neither merged nor old |
 | sweep | `merged` | not protected and merged |
 | sweep | `old_unmerged` | not protected, not merged, but old |
+
+A worktree whose git call timed out (see `--git-timeout`) is not decided by these rules: it is `keep` with the reason
+`git_timeout`.
 
 A locked, current or external worktree is never reported as `prune` or `sweep`: those three protections win over cleanup, even for a
 worktree whose directory is missing. The `dirty` and `unmerged` rules apply only to worktrees that exist on disk, so a missing

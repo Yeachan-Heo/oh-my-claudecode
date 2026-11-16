@@ -432,11 +432,11 @@ def walk_file_safe(path):
     try:
         return walk_file(path)
     except OSError as e:
-        return None, "read error: " + str(e)
+        return None, f"read error: {e}"
 def read_journal(path, from_e, to_e):
     """The compaction journal: (data, error message). Gaps per the docstring rule."""
     if not os.path.isfile(path):
-        return None, "missing file " + path
+        return None, f"missing file {path}"
     compacts = []
     afters = []
     rows = 0
@@ -463,7 +463,7 @@ def read_journal(path, from_e, to_e):
                 elif ev == "after":
                     afters.append(row)
     except OSError as e:
-        return None, "read error " + path + ": " + str(e)
+        return None, f"read error {path}: {e}"
     all_ts = {c.get("ts") for c in compacts}
     after_without_compact = sum(1 for a in afters if a.get("compact_ts") not in all_ts)
     compact_without_after = sum(
@@ -558,7 +558,7 @@ def main_analysis(files, journal_data, from_e, to_e):
     for path, role, agent_id in files:
         state, message = walk_file_safe(path)
         if message is not None:
-            print("warning: skipping file " + path + ": " + message, file=sys.stderr)
+            print(f"warning: skipping file {path}: {message}", file=sys.stderr)
             continue
         total_rows += state["rows"]
         total_bad += state["bad_lines"]
@@ -570,7 +570,7 @@ def main_analysis(files, journal_data, from_e, to_e):
             bnd["role"] = role
             bnd["agent_id"] = agent_id
             bnd["session"] = sessionId
-            bnd["key"] = bnd["uuid"] if bnd["uuid"] else str(path) + ":" + str(bnd["ts_text"])
+            bnd["key"] = bnd["uuid"] if bnd["uuid"] else f"{path}:{bnd['ts_text']}"
             if bnd["ts"] is None:
                 no_ts_gap += 1
                 continue
@@ -580,7 +580,7 @@ def main_analysis(files, journal_data, from_e, to_e):
     units, dup_gap, used = assign_units(occurrences, journal_data["compacts_all"])
     for bnd in units:
         thread = "subagent" if bnd["role"] == "subagent" else "main"
-        bnd["group"] = bnd["result"] + "/" + thread
+        bnd["group"] = f"{bnd['result']}/{thread}"
         bnd["head_level"] = ask_level(bnd["head300"], bnd["state_text"]) if (bnd["has_state"] and bnd["head300"]) else (None if not bnd["has_state"] else "no ask")
         bnd["ask_level"] = ask_level(bnd["ask300"], bnd["state_text"]) if (bnd["has_state"] and bnd["ask300"]) else (None if not bnd["has_state"] else "no ask")
     return {
@@ -649,13 +649,13 @@ def build_report(units, quality, generated_at, from_dt, to_dt, threshold):
                 lower = round(low, 4)
             results.append({"name": label, "numerator": count, "denominator": total, "share": share, "wilson_lower_95": lower})
 
-        add_row(name + ": head_lost", head_lost, len(head_n))
-        add_row(name + ": ask_lost", ask_lost, len(ask_n))
-        add_row(name + ": first ask lost or trace only", head_trace, len(head_n))
-        add_row(name + ": last ask lost or trace only", ask_trace, len(ask_n))
-        add_row(name + ": empty calls in the 5 after compaction", empty, len(calls))
-        add_row(name + ": compactions with an empty call", with_empty, len(with_calls))
-        add_row(name + ": canaries lost", canary_lost, canary_n)
+        add_row(f"{name}: head_lost", head_lost, len(head_n))
+        add_row(f"{name}: ask_lost", ask_lost, len(ask_n))
+        add_row(f"{name}: first ask lost or trace only", head_trace, len(head_n))
+        add_row(f"{name}: last ask lost or trace only", ask_trace, len(ask_n))
+        add_row(f"{name}: empty calls in the 5 after compaction", empty, len(calls))
+        add_row(f"{name}: compactions with an empty call", with_empty, len(with_calls))
+        add_row(f"{name}: canaries lost", canary_lost, canary_n)
 
         def verdict(total_n, count_k):
             if total_n < MIN_SUPPORT:
@@ -741,14 +741,14 @@ def unit_details(units):
 
 def text_report(report, verdicts):
     lines = [
-        "compaction_ask_probe: metric " + METRIC + ", period " + report["period"].get("from") + " to " + report["period"].get("to"),
-        "units n = " + str(report["n"]["value"]),
+        f"compaction_ask_probe: metric {METRIC}, period {report['period'].get('from')} to {report['period'].get('to')}",
+        f"units n = {report['n']['value']}",
     ]
     for w in report["results"]:
-        lines.append("  " + w["name"] + ": " + str(w["numerator"]) + "/" + str(w["denominator"]) + ", share " + str(w["share"]) + ", wilson_lower " + str(w["wilson_lower_95"]))
+        lines.append(f"  {w['name']}: {w['numerator']}/{w['denominator']}, share {w['share']}, wilson_lower {w['wilson_lower_95']}")
     for g in sorted(verdicts):
         v = verdicts[g]
-        lines.append("  verdict " + g + ": head_lost " + v["head_lost"] + ", ask_lost " + v["ask_lost"] + ", upper bounds " + str(v["head_upper_bound"]) + " / " + str(v["ask_upper_bound"]))
+        lines.append(f"  verdict {g}: head_lost {v['head_lost']}, ask_lost {v['ask_lost']}, upper bounds {v['head_upper_bound']} / {v['ask_upper_bound']}")
     return "\n".join(lines)
 def find_transcripts(projects):
     """Transcripts: main <projects>/<dir>/<id>.jsonl and subagent <projects>/<dir>/<id>/subagents/agent-*.jsonl."""
@@ -802,7 +802,7 @@ def main(argv=None):
     to_e = to_dt.timestamp()
     journal_data, message = read_journal(args.compact, from_e, to_e)
     if message is not None:
-        print("error: " + message, file=sys.stderr)
+        print(f"error: {message}", file=sys.stderr)
         return 2
     if args.transcript:
         files = []
@@ -843,7 +843,7 @@ def main(argv=None):
             },
         },
         {
-            "source": "files from the --transcript option" if args.transcript else str(args.projects) + "/*/<id>.jsonl and <id>/subagents/agent-*.jsonl",
+            "source": "files from the --transcript option" if args.transcript else f"{args.projects}/*/<id>.jsonl and <id>/subagents/agent-*.jsonl",
             "rows": analysis["total_rows"],
             "bad_lines": analysis["total_bad"],
             "gaps": {
@@ -868,13 +868,13 @@ def main(argv=None):
             with os.fdopen(fd, "w", encoding="utf-8") as out_file:
                 out_file.write(json_text + "\n")
         except FileExistsError:
-            print("error: --out: the file " + args.out + " exists, write refused", file=sys.stderr)
+            print(f"error: --out: the file {args.out} exists, write refused", file=sys.stderr)
             return 1
         except OSError as e:
-            print("error: --out: " + str(e), file=sys.stderr)
+            print(f"error: --out: {e}", file=sys.stderr)
             return 1
         else:
-            print("result saved: " + args.out, file=sys.stderr)
+            print(f"result saved: {args.out}", file=sys.stderr)
             return 0
     print(json_text if args.json else plain_text)
     return 0

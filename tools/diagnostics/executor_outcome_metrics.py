@@ -15,6 +15,9 @@ Usage:
   python3 -I executor_outcome_metrics.py --transcript <file.jsonl> [--transcript <file.jsonl> ...]
       [--from YYYY-MM-DD] [--to YYYY-MM-DD] [--provider-map PREFIX=NAME ...]
       [--test-pattern REGEX] [--advisor-pattern REGEX] [--json]
+      [--retry-threshold N] [--drift-threshold N] [--drift-min-signatures N]
+      [--oscillation-min-repeats N] [--max-cycle-length N]
+      [--exhaustion-status CODE ...] [--exhaustion-phrase TEXT ...] [--error-field-status NAME=CODE ...]
 
 """
 
@@ -48,10 +51,10 @@ EXHAUSTION_PHRASES = (
 )
 PARENTHESIZED_STATUS = re.compile(r"\((\d{3})\)")
 COLON_STATUS = re.compile(r":\s*(\d{3})\b")
-ERROR_FIELD_STATUS = {"rate_limit": 429, "overloaded": 529, "overloaded_error": 529, "request_too_large": 413}
+ERROR_FIELD_STATUS = {}  # error field value -> HTTP status; empty by default, extended with --error-field-status
 MODEL_SUFFIX = re.compile(r"\[[^\]]*\]$")  # context-window suffix such as "[1m]"
-# final answer ends with an operator or opener, or with a declaration or return keyword
-TRUNCATION_TAIL = re.compile(r"(?:,|&&|\|\||=>|[+\-*/%=]|[(\[{]|:|\b(?:const|let|var|function|return))$")
+# a final answer whose trimmed end is a dangling operator or opener, or a declaration or return keyword
+DANGLING_END = re.compile(r"(?:,|&&|\|\||=>|[+\-*/%=]|[(\[{]|:|\b(?:const|let|var|function|return))$")
 ENV_ASSIGNMENT = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*=")
 SECONDS_ARG = re.compile(r"^\d+(?:\.\d+)?[a-zA-Z]?$")
 NICE_ARG = re.compile(r"^-?\d+$")
@@ -154,12 +157,12 @@ def status_from_text(text):
     return int(match.group(1)) if match else None
 
 
-def exhaustion_key(text, status):
+def exhaustion_key(text, status, statuses=EXHAUSTION_STATUSES, phrases=EXHAUSTION_PHRASES):
     """Key of an exhaustion item ("429", "phrase", ...), or None when it is not exhaustion."""
-    if status in EXHAUSTION_STATUSES:
+    if status in statuses:
         return str(status)
     lowered = text.lower()
-    if any(phrase in lowered for phrase in EXHAUSTION_PHRASES):
+    if any(phrase in lowered for phrase in phrases):
         return "phrase"
     return None
 
@@ -354,11 +357,14 @@ def find_oscillations(calls, min_repeats=OSCILLATION_MIN_REPEATS,
     return remove_overlaps(found)
 
 
-def loop_patterns(calls):
+def loop_patterns(calls, retry_threshold=RETRY_THRESHOLD, drift_threshold=DRIFT_THRESHOLD,
+                  drift_min_signatures=DRIFT_MIN_SIGNATURES, oscillation_min_repeats=OSCILLATION_MIN_REPEATS,
+                  max_cycle_length=MAX_CYCLE_LENGTH):
     """Retry, parameter drift (not overlapping a retry run) and oscillation patterns of the call list."""
-    retry = find_retry_runs(calls)
-    drift = [run for run in find_drift_runs(calls) if not any(overlaps(run, other) for other in retry)]
-    oscillation = find_oscillations(calls)
+    retry = find_retry_runs(calls, retry_threshold)
+    drift = [run for run in find_drift_runs(calls, drift_threshold, drift_min_signatures)
+             if not any(overlaps(run, other) for other in retry)]
+    oscillation = find_oscillations(calls, oscillation_min_repeats, MIN_CYCLE_LENGTH, max_cycle_length)
     return {
         "retry": [[run["first"], run["last"]] for run in retry],
         "parameter_drift": [[run["first"], run["last"]] for run in drift],
@@ -366,7 +372,7 @@ def loop_patterns(calls):
     }
 
 
-def exhaustion_metrics(tr):
+def exhaustion_metrics(tr, statuses=EXHAUSTION_STATUSES, phrases=EXHAUSTION_PHRASES, error_statuses=ERROR_FIELD_STATUS):
     """Exhaustion of API errors and failed tool results (status or phrase), with the rest of the API errors."""
     api_exhaustion = 0
     by_status = {}
@@ -377,8 +383,8 @@ def exhaustion_metrics(tr):
             by_error_field[error] = by_error_field.get(error, 0) + 1
         status = status_from_text(text)
         if status is None and error:
-            status = ERROR_FIELD_STATUS.get(error)
-        key = exhaustion_key(text, status)
+            status = error_statuses.get(error)
+        key = exhaustion_key(text, status, statuses, phrases)
         if key is None:
             api_other += 1
         else:
@@ -386,7 +392,8 @@ def exhaustion_metrics(tr):
             by_status[key] = by_status.get(key, 0) + 1
     tool_exhaustion = 0
     for result in tr["results"].values():
-        if result["is_error"] and exhaustion_key(result["text"], status_from_text(result["text"])) is not None:
+        if result["is_error"] and exhaustion_key(result["text"], status_from_text(result["text"]),
+                                                  statuses, phrases) is not None:
             tool_exhaustion += 1
     return {
         "exhaustion_api": api_exhaustion,
@@ -423,7 +430,7 @@ def final_result(tr):
     flags = []
     if not stripped:
         flags.append("empty")
-    if TRUNCATION_TAIL.search(stripped):
+    if DANGLING_END.search(stripped):
         flags.append("cut_off")
     if stripped.count("```") % 2 == 1:
         flags.append("odd_fences")
@@ -685,15 +692,32 @@ def thinking_metrics(tr):
     return metrics, reasons
 
 
-def task_metrics(tr, test_pattern, advisor_pattern):
+def default_options():
+    """Detector options: exhaustion statuses, phrases and error-field mapping, and the loop thresholds."""
+    return {
+        "statuses": EXHAUSTION_STATUSES,
+        "phrases": EXHAUSTION_PHRASES,
+        "error_statuses": ERROR_FIELD_STATUS,
+        "retry_threshold": RETRY_THRESHOLD,
+        "drift_threshold": DRIFT_THRESHOLD,
+        "drift_min_signatures": DRIFT_MIN_SIGNATURES,
+        "oscillation_min_repeats": OSCILLATION_MIN_REPEATS,
+        "max_cycle_length": MAX_CYCLE_LENGTH,
+    }
+
+
+def task_metrics(tr, test_pattern, advisor_pattern, options=None):
     """All metrics of a parsed transcript, its loop patterns and the reasons of unmeasured values."""
+    options = options or default_options()
     metrics = {}
     metrics.update(failure_metrics(tr["calls"], tr["results"]))
-    patterns = loop_patterns(tr["calls"])
+    patterns = loop_patterns(tr["calls"], options["retry_threshold"], options["drift_threshold"],
+                             options["drift_min_signatures"], options["oscillation_min_repeats"],
+                             options["max_cycle_length"])
     metrics["retry_patterns"] = len(patterns["retry"])
     metrics["parameter_drift_patterns"] = len(patterns["parameter_drift"])
     metrics["oscillation_patterns"] = len(patterns["oscillation"])
-    metrics.update(exhaustion_metrics(tr))
+    metrics.update(exhaustion_metrics(tr, options["statuses"], options["phrases"], options["error_statuses"]))
     metrics["assistant_steps"] = len(tr["steps"])
     thinking, reasons = thinking_metrics(tr)
     metrics.update(thinking)
@@ -741,7 +765,7 @@ def first_session_id(rows):
     return None
 
 
-def analyse_transcript(path, mapping, test_pattern, advisor_pattern):
+def analyse_transcript(path, mapping, test_pattern, advisor_pattern, options=None):
     """One task (transcript or subagent file) with its status, metrics, flags and reasons."""
     try:
         rows, bad = read_jsonl(path)
@@ -766,7 +790,7 @@ def analyse_transcript(path, mapping, test_pattern, advisor_pattern):
         final = {"status": UNMEASURED, "flags": [], "reason": reason}
         first = last = None
     else:
-        metrics, patterns, reasons = task_metrics(parsed, test_pattern, advisor_pattern)
+        metrics, patterns, reasons = task_metrics(parsed, test_pattern, advisor_pattern, options)
         final = final_result(parsed)
         first, last = parsed["first"], parsed["last"]
     return {
@@ -785,7 +809,7 @@ def analyse_transcript(path, mapping, test_pattern, advisor_pattern):
     }
 
 
-def collect_tasks(args, mapping, test_pattern, advisor_pattern):
+def collect_tasks(args, mapping, test_pattern, advisor_pattern, options=None):
     """(tasks, skipped, no_date): transcripts in the order given, duplicates skipped, date filter applied."""
     tasks = []
     skipped = []
@@ -797,7 +821,7 @@ def collect_tasks(args, mapping, test_pattern, advisor_pattern):
             skipped.append({"kind": "duplicate-file", "file": path, "reason": "same file given more than once"})
             continue
         seen.add(real)
-        task = analyse_transcript(path, mapping, test_pattern, advisor_pattern)
+        task = analyse_transcript(path, mapping, test_pattern, advisor_pattern, options)
         day = task["period"]["first"]
         if args.date_from or args.date_to:
             if day is None:
@@ -900,6 +924,22 @@ def build_parser():
                         help="regular expression for a test run command segment (replaces the built-in list)")
     parser.add_argument("--advisor-pattern", metavar="REGEX",
                         help="regular expression for a Bash command segment that is an advisor consultation")
+    parser.add_argument("--retry-threshold", type=int, default=RETRY_THRESHOLD, metavar="N",
+                        help=f"consecutive identical calls that form a retry pattern (default {RETRY_THRESHOLD})")
+    parser.add_argument("--drift-threshold", type=int, default=DRIFT_THRESHOLD, metavar="N",
+                        help=f"consecutive calls to one tool that form a drift pattern (default {DRIFT_THRESHOLD})")
+    parser.add_argument("--drift-min-signatures", type=int, default=DRIFT_MIN_SIGNATURES, metavar="N",
+                        help=f"distinct signatures a drift run needs (default {DRIFT_MIN_SIGNATURES})")
+    parser.add_argument("--oscillation-min-repeats", type=int, default=OSCILLATION_MIN_REPEATS, metavar="N",
+                        help=f"full back-to-back repeats of a cycle that form an oscillation (default {OSCILLATION_MIN_REPEATS})")
+    parser.add_argument("--max-cycle-length", type=int, default=MAX_CYCLE_LENGTH, metavar="N",
+                        help=f"longest cycle of tool names checked for oscillation (default {MAX_CYCLE_LENGTH})")
+    parser.add_argument("--exhaustion-status", action="append", default=[], type=int, metavar="CODE",
+                        help="extra HTTP status that counts as exhaustion (repeatable)")
+    parser.add_argument("--exhaustion-phrase", action="append", default=[], metavar="TEXT",
+                        help="extra lowercase phrase that counts as exhaustion when found in the error text (repeatable)")
+    parser.add_argument("--error-field-status", action="append", default=[], metavar="NAME=CODE",
+                        help="HTTP status for an error field value, used when the text has none (repeatable)")
     parser.add_argument("--json", action="store_true", help="JSON output instead of text")
     return parser
 
@@ -924,7 +964,31 @@ def main(argv):
         advisor_pattern = re.compile(args.advisor_pattern) if args.advisor_pattern else None
     except re.error as error:
         return fail(f"bad regular expression: {error}")
-    tasks, skipped, no_date = collect_tasks(args, mapping, test_pattern, advisor_pattern)
+    for label, value in (("--retry-threshold", args.retry_threshold), ("--drift-threshold", args.drift_threshold),
+                         ("--drift-min-signatures", args.drift_min_signatures),
+                         ("--oscillation-min-repeats", args.oscillation_min_repeats)):
+        if value < 1:
+            return fail(f"{label} expects a positive integer, got: {value}")
+    if args.max_cycle_length < MIN_CYCLE_LENGTH:
+        return fail(f"--max-cycle-length expects at least {MIN_CYCLE_LENGTH}, got: {args.max_cycle_length}")
+    error_statuses = dict(ERROR_FIELD_STATUS)
+    for entry in args.error_field_status:
+        name, separator, code = entry.partition("=")
+        if not separator or not name or not code.isdigit():
+            return fail("--error-field-status expects NAME=CODE with a numeric code")
+        error_statuses[name] = int(code)
+    options = default_options()
+    options.update({
+        "statuses": EXHAUSTION_STATUSES + tuple(args.exhaustion_status),
+        "phrases": EXHAUSTION_PHRASES + tuple(phrase.lower() for phrase in args.exhaustion_phrase),
+        "error_statuses": error_statuses,
+        "retry_threshold": args.retry_threshold,
+        "drift_threshold": args.drift_threshold,
+        "drift_min_signatures": args.drift_min_signatures,
+        "oscillation_min_repeats": args.oscillation_min_repeats,
+        "max_cycle_length": args.max_cycle_length,
+    })
+    tasks, skipped, no_date = collect_tasks(args, mapping, test_pattern, advisor_pattern, options)
     summary = summarise(tasks)
     cover = coverage(tasks, no_date)
     if args.json:

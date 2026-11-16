@@ -1,6 +1,6 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { spawnSync } from 'node:child_process';
-import { mkdirSync, mkdtempSync, realpathSync, rmSync, utimesSync, writeFileSync } from 'node:fs';
+import { chmodSync, mkdirSync, mkdtempSync, realpathSync, rmSync, utimesSync, writeFileSync } from 'node:fs';
 import { homedir, tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -327,6 +327,60 @@ describe('reportRepo on fixture repositories', () => {
       expect(run(['--repo']).status).toBe(2);
       expect(run(['--repo', repo, '--min-age-days', 'abc']).status).toBe(2);
       expect(run(['--repo', repo, '--min-age-days', '-1']).status).toBe(2);
+      expect(run(['--repo', repo, '--git-timeout', '0']).status).toBe(2);
+      expect(run(['--repo', repo, '--git-timeout', 'abc']).status).toBe(2);
+    });
+
+    describe('git time limit', () => {
+      // a fake git first on PATH: it sleeps for the named subcommand and runs the real git for everything else
+      function fakeGitBin(slowSubcommand: string): string {
+        const bin = join(dir, `fake-git-${slowSubcommand}`);
+        mkdirSync(bin, { recursive: true });
+        const realGit = spawnSync('sh', ['-c', 'command -v git'], { encoding: 'utf8' }).stdout.trim();
+        writeFileSync(
+          join(bin, 'git'),
+          `#!/bin/sh\nfor arg in "$@"; do\n  if [ "$arg" = "${slowSubcommand}" ]; then exec sleep 30; fi\ndone\nexec "${realGit}" "$@"\n`,
+        );
+        chmodSync(join(bin, 'git'), 0o755);
+        return bin;
+      }
+      const withPath = (bin: string) => ({ env: { PATH: `${bin}:${process.env.PATH}` } });
+
+      it('skips a worktree whose status call times out and keeps the others', () => {
+        const slowRepo = makeRepo('slow-status');
+        const slowWorktree = addWorktree(slowRepo, 'slow');
+        const r = run(['--repo', slowRepo, '--git-timeout', '1', '--json'], withPath(fakeGitBin('status')));
+        expect(r.status).toBe(0);
+        const parsed = JSON.parse(r.stdout);
+        const entry = parsed.repositories[0].worktrees.find((w: Entry) => w.path === slowWorktree);
+        expect(entry).toMatchObject({ decision: 'keep', reason: 'git_timeout', skipped: 'git_timeout' });
+        expect(parsed.summary).toMatchObject({ skipped_worktrees: 2, sweep: 0, prune: 0 });
+      });
+
+      it('shows a timed out worktree in the text report', () => {
+        const slowRepo = makeRepo('slow-text');
+        addWorktree(slowRepo, 'slow');
+        const r = run(['--repo', slowRepo, '--git-timeout', '1'], withPath(fakeGitBin('status')));
+        expect(r.status).toBe(0);
+        expect(r.stdout).toContain('keep | git_timeout |');
+        expect(r.stdout).toContain('skipped(git_timeout)');
+        expect(r.stdout).toMatch(/skipped_worktrees=2/);
+      });
+
+      it('skips the repository when a repository-level call times out', () => {
+        const slowRepo = makeRepo('slow-list');
+        const r = run(['--repo', slowRepo, '--git-timeout', '1', '--json'], withPath(fakeGitBin('worktree')));
+        expect(r.status).toBe(0);
+        const parsed = JSON.parse(r.stdout);
+        expect(parsed.repositories[0]).toMatchObject({ skipped: 'git_timeout', worktrees: [] });
+        expect(parsed.summary).toMatchObject({ skipped: 1 });
+      });
+
+      it('does not mark anything skipped when git answers in time', () => {
+        const fastRepo = makeRepo('fast');
+        const r = run(['--repo', fastRepo, '--json']);
+        expect(JSON.parse(r.stdout).summary.skipped_worktrees).toBe(0);
+      });
     });
 
     it('prints usage for --help', () => {

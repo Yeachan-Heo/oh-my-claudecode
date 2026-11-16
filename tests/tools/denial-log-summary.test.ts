@@ -4,7 +4,17 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { readJournal, summarize, validateRow } from '../../tools/diagnostics/denial_log_summary.mjs';
+import {
+  EFFECTIVENESS,
+  END_TYPES,
+  HANDOFF_EVENTS,
+  KINDS,
+  REASON_CODES,
+  RESULTS,
+  readJournal,
+  summarize,
+  validateRow,
+} from '../../tools/diagnostics/denial_log_summary.mjs';
 
 // Tests for tools/diagnostics/denial_log_summary.mjs on synthetic journals (temp directory only, no network).
 const SCRIPT = join(fileURLToPath(new URL('.', import.meta.url)), '..', '..', 'tools', 'diagnostics', 'denial_log_summary.mjs');
@@ -61,18 +71,22 @@ function run(args: string[], env: Record<string, string> = {}) {
 
 describe('denial_log_summary.mjs summary', () => {
   it('counts unique keys, flags one key with different facts and counts a duplicate from two journals once', () => {
-    const d1 = decision({ session_id: 'sA', guard: 'g1', key: 'aaaaaaaaaaaaaaaa', n: 3, result: 'denied' });
-    const o1 = outcome(d1.id as string, { ts_ms: 1731600000250 });
-    const d2 = decision({ session_id: 'sA', guard: 'g1', key: 'aaaaaaaaaaaaaaaa', n: 4, degree: 2, result: 'passed', kind: 'release', action: 'release' });
-    const d3 = decision({ session_id: 'sB', guard: 'g1', key: 'bbbbbbbbbbbbbbbb', n: 1, degree: 0, action: 'deny-storm' });
-    const file = writeJournal('dup/denials.jsonl', [d1, o1, d2, d3]);
+    const d1 = decision({ session_id: 'sA', guard: 'g1', key: 'aaaaaaaaaaaaaaaa', n: 3, sessionCount: 3, k: 3, maxSession: 20, degree: 1, result: 'denied', action: 'escalation-1' });
+    const o1 = outcome(d1.id as string, { session_id: 'sA', result: 'denied' });
+    const d2 = decision({ session_id: 'sA', guard: 'g1', key: 'aaaaaaaaaaaaaaaa', n: 4, sessionCount: 4, k: 3, maxSession: 20, degree: 1, result: 'blocked', action: 'blocked' });
+    const d3 = decision({ session_id: 'sB', guard: 'g1', key: 'bbbbbbbbbbbbbbbb', n: 1, sessionCount: 1, k: 3, maxSession: 4, degree: 0, result: 'denied', action: 'deny-storm' });
+    const end = { ts: new Date(1731600000000).toISOString(), ts_ms: 1731600000000, point: 'denial', id: nextId(), kind: 'end', session_id: 'sB', agent_id: null, type: 'awaiting-human' };
+    const written = [d1, o1, d2, d3, end];
+    expect(written).toHaveLength(5);
+    expect(written.every((row) => validateRow(row).ok)).toBe(true);
+    const file = writeJournal('dup/denials.jsonl', written);
     const result = summarize([file, file]);
-    expect(result.rows).toBe(4);
-    expect(result.duplicates).toBe(4);
+    expect(result.rows).toBe(5);
+    expect(result.duplicates).toBe(5);
     expect(result.unparseable).toBe(0);
     expect(result.outOfSchema).toBe(0);
     const denial = result.kinds.find((g: { group: string }) => g.group === 'denial');
-    expect(denial.count).toBe(2);
+    expect(denial.count).toBe(3);
     expect(denial.keys).toBe(2);
     expect(result.differentFacts).toEqual(['aaaaaaaaaaaaaaaa']);
     const subjectA = result.subjects.find((p: { group: string }) => p.group === 'session sA');
@@ -214,6 +228,39 @@ describe('denial_log_summary.mjs schema validator', () => {
   });
 });
 
+describe('denial_log_summary.mjs validator sets', () => {
+  // The validator keeps its own copy of the closed vocabularies of the journal rows on purpose (the tool runs from a
+  // plain checkout and does not import the hook library). The counter that writes the journal is not part of this
+  // change, so the sets are pinned here; they are meant to mirror the counter of the session guards change, and a
+  // vocabulary change there has to update the validator and this list together. The handoff event names are the
+  // validator's own: they have not been compared with the names the other change writes.
+  const sorted = (values: readonly string[]) => [...values].sort();
+
+  it('pins the row kinds, results, end types, handoff events, reason codes and effectiveness values', () => {
+    expect(sorted(KINDS)).toEqual(sorted(['denial', 'release', 'state', 'end', 'outcome', 'handoff', 'nudge']));
+    expect(sorted(RESULTS)).toEqual(sorted(['denied', 'passed', 'blocked']));
+    expect(sorted(END_TYPES)).toEqual(sorted(['awaiting-human', 'stopped-with-reason', 'no-input', 'step-budget']));
+    expect(sorted(HANDOFF_EVENTS)).toEqual(sorted(['warning-20mib', 'handoff-passed', 'handoff-denied', 'handoff-subagent', 'handed-off-denied']));
+    expect(sorted(REASON_CODES)).toEqual(sorted([
+      'missing_fact', 'fact_not_accepted', 'contradictory_declaration', 'consultation',
+      'blocked_after_consultation', 'timeout', 'guard_denial', 'error_loop',
+    ]));
+    expect(sorted(EFFECTIVENESS)).toEqual(sorted(['returned', 'not-returned']));
+  });
+
+  it('accepts every pinned value and rejects a value outside the set', () => {
+    for (const kind of ['end', 'outcome', 'handoff']) expect(KINDS).toContain(kind);
+    for (const code of ['guard_denial', 'error_loop']) {
+      expect(validateRow(decision({ reason_code: code })).ok).toBe(true);
+    }
+    for (const result of ['denied', 'passed', 'blocked']) {
+      expect(validateRow(decision({ result })).ok).toBe(true);
+    }
+    expect(validateRow(decision({ reason_code: 'not-in-the-set' })).ok).toBe(false);
+    expect(validateRow(decision({ result: 'not-in-the-set' })).ok).toBe(false);
+  });
+});
+
 describe('denial_log_summary.mjs command line', () => {
   it('prints a text summary for a file argument and exits 0', () => {
     const d = decision({ key: '2222222222222222' });
@@ -271,6 +318,21 @@ describe('denial_log_summary.mjs command line', () => {
     const r = run([], { OMC_JEV_LOG_DIR: join(dir, 'cli/env') });
     expect(r.status).toBe(0);
     expect(r.stdout).toContain('files: 1, rows: 1');
+  });
+
+  it('warns on stderr for a file given with --file that does not exist, without changing the summary or the exit code', () => {
+    const existing = writeJournal('cli/warn/denials.jsonl', [decision({ key: 'abababababababab' })]);
+    const missing = join(dir, 'cli/warn/typo.jsonl');
+    const r = run(['--file', missing, '--file', existing]);
+    expect(r.status).toBe(0);
+    expect(r.stderr).toContain(`warning: file not found: ${missing}`);
+    expect(r.stdout).toContain('files: 2, rows: 1');
+    const quiet = run(['--file', existing]);
+    expect(quiet.stderr).toBe('');
+    const onlyMissing = run(['--file', missing]);
+    expect(onlyMissing.status).toBe(0);
+    expect(onlyMissing.stdout).toContain('files: 1, rows: 0');
+    expect(onlyMissing.stderr).toContain('file not found');
   });
 
   it('exits 2 when no journal file is found', () => {

@@ -68,7 +68,7 @@ RULE = (
 )
 Z_WILSON = 1.959963984540054
 MIN_SUPPORT = 30
-KLASY = [
+CAUSE_CLASSES = [
     "module_compaction",
     "host_after_fallback",
     "host",
@@ -388,7 +388,7 @@ def evaluate_pair(prev, call, boundaries, agent_id, context):
         "session_id": call["session"],
         "agent_id": agent_id,
         "ts_prev": str(prev["ts_text"]) if prev["ts_text"] is not None else epoch_to_iso(prev["ts_f"]),
-        "ts": str(call["ts_text"] if call["ts_text"] is not None else epoch_to_iso(call["ts_f"])),
+        "ts": str(call["ts_text"]) if call["ts_text"] is not None else epoch_to_iso(call["ts_f"]),
         "ts_prev_f": prev["ts_f"],
         "ts_f": call["ts_f"],
         "line": call["line"],
@@ -638,14 +638,13 @@ def build_report(context, clean, dups, file_stats, journal_data, args, period):
         o = s["readings"]
         if s["cause"] in ("module_compaction", "host_after_fallback"):
             tr = o.get("compact_trigger")
-            key = str(tr) if tr is not None else "unavailable"
+            triggers[str(tr) if tr is not None else "unavailable"] = triggers.get(str(tr) if tr is not None else "unavailable", 0) + 1
         elif s["cause"] == "host":
             tr = o.get("boundary_trigger")
-            key = str(tr) if tr is not None else "unavailable"
+            triggers[str(tr) if tr is not None else "unavailable"] = triggers.get(str(tr) if tr is not None else "unavailable", 0) + 1
         else:
-            key = "none"
-        triggers[key] = triggers.get(key, 0) + 1
-    class_counts = {k: 0 for k in KLASY}
+            triggers["none"] = triggers.get("none", 0) + 1
+    class_counts = {k: 0 for k in CAUSE_CLASSES}
     for s in clean:
         class_counts[s["cause"]] += 1
     confirmed = {k: 0 for k in ("module_compaction", "host_after_fallback", "new_process")}
@@ -710,13 +709,13 @@ def build_report(context, clean, dups, file_stats, journal_data, args, period):
             "result": row.get("result"),
             "trigger": row.get("trigger"),
         })
-    assigned_1_7 = sum(class_counts[k] for k in KLASY[:7])
-    assigned_1_8 = sum(class_counts[k] for k in KLASY[:8])
+    assigned_1_7 = sum(class_counts[k] for k in CAUSE_CLASSES[:7])
+    assigned_1_8 = sum(class_counts[k] for k in CAUSE_CLASSES[:8])
     results = [
         result_row("drops with assigned cause (classes 1-7)", assigned_1_7, n),
         result_row("drops with assigned cause including exclusion (classes 1-8)", assigned_1_8, n),
     ]
-    for k in KLASY:
+    for k in CAUSE_CLASSES:
         results.append(result_row("cause " + k, class_counts[k], n))
     results.append(result_row("module_compaction confirmed by two readings", confirmed["module_compaction"], class_counts["module_compaction"]))
     results.append(result_row("host_after_fallback confirmed by two readings", confirmed["host_after_fallback"], class_counts["host_after_fallback"]))
