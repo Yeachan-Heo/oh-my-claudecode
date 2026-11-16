@@ -134,8 +134,8 @@
  * compaction record only (target_tokens, target_tokens_capped, tokens_before, tokens_after, window, threshold,
  * window_source, tokens_source); the cut itself still follows the character budget of allocate.
  *
- * Token cascade (OMC_JEV_COMPACT_TARGET_PERCENT, two digits from 20 to 80 enable it; unset: off. The name stays as it is although the value is a share of the tokens, not a switch). The cut then follows tokens: the target is that
- * share of the tokens before, and cascade (passes forced, short_or_trace, trace_all) steps the results down from the least needed, predicting the tokens
+ * Token cascade (OMC_JEV_COMPACT_TARGET_PERCENT, two digits from 20 to 80 enable it; unset: off. The name stays as it is although the value is a share of the window, not a switch). The cut then follows tokens: the target is that
+ * share of the window, at most TARGET_OF_THRESHOLD of the threshold, times TARGET_UNCALIBRATED (the rule's target), and cascade (passes forced, short_or_trace, trace_all) steps the results down from the least needed, predicting the tokens
  * after each step, until the prediction reaches the target; the last pass (drop) removes a result with its call. A compaction at or below the usual
  * target is manual: only the scores decide (manualPlan), and the cascade runs only when that still leaves the prediction above the target. In
  * any other case, before Jev is asked, the floor (every removable result gone) is predicted: above the threshold less FLOOR_MARGIN of the window
@@ -2123,7 +2123,7 @@ function findCandidates(messages, privatePaths, notifications = false) {
   return out;
 }
 
-// Token cascade (OMC_JEV_COMPACT_TARGET_PERCENT, 20-80: the share of the tokens before the compaction the kept text may take). Every result
+// Token cascade (OMC_JEV_COMPACT_TARGET_PERCENT, 20-80: the share of the window the kept text may take, see the rule's target in decide). Every result
 // starts whole, then the least needed steps down, with a prediction after each step, and it stops at the target: pass `forced` (a secret or a
 // non-text result to a trace), pass `short_or_trace` (a result Jev scored under SHORT_COPY_MIN_SCORE to a trace, the others to a short copy when that
 // saves tokens), pass `trace_all` (every remaining result to a trace), pass `drop` (every result still at a trace, least needed first, removed with its call). A pinned
@@ -3703,13 +3703,12 @@ async function decide($, e, cfg, record, started) {
     // Token cascade (OMC_JEV_COMPACT_TARGET_PERCENT): the target and the prediction are in tokens; the envelopes and delivered text that build
     // adds are not part of the prediction.
     // A manual compaction: the scores decide; a prediction still above the target (the cascade's own target) goes on to the cascade, as the rule does.
-    let target = Math.floor((cfg.targetPercent / 100) * tokens.tokens);
+    // The target is the rule's target for every trigger. A manual compaction is decided by the scores against it; a prediction still above it goes on
+    // to the cascade, which then stops at the same target.
+    const target = ruleTarget;
     let plan;
     if (manual) {
-      // Migrated rule: a manual compaction is decided by the scores against the rule's target; a prediction still above it goes on to the cascade,
-      // which then stops at that target.
       plan = manualPlan(candidates, tokens.tokens - trimTokens - agentTokens, cfg.rates);
-      target = ruleTarget;
       if (plan.predicted > target) plan = cascade(candidates, tokens.tokens - trimTokens - agentTokens, cfg.targetPercent, target, cfg.rates);
     } else plan = cascade(candidates, tokens.tokens - trimTokens - agentTokens, cfg.targetPercent, target, cfg.rates);
     Object.assign(record, { cut: plan.pass === 'manual' ? 'manual_scores' : 'cascade', cascade_pass: plan.pass, cascade_target_tokens: target, cascade_predicted_tokens: plan.predicted, tokens_after_pred: plan.predicted, cascade_tokens_source: tokens.source, cascade_dropped: candidates.filter((c) => c.keep === 'drop').length });

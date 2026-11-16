@@ -155,8 +155,8 @@ describe('token cascade (OMC_JEV_COMPACT_TARGET_PERCENT)', () => {
 
   it('with a valid share writes the cascade record: target in tokens from the host usage, and the pass reached', async () => {
     const { record } = await compactRun({ ...ACTIVE_ENV, OMC_JEV_COMPACT_TARGET_PERCENT: '20' });
-    // The automatic compaction raises the tokens to the threshold (200 000 window less 33 000 = 167 000), so 20 % of them is 33 400.
-    expect(record).toMatchObject({ cut: 'cascade', cascade_tokens_source: 'usage', cascade_target_tokens: 33400 });
+    // The target is 85 % of 20 % of the 200 000 window (at most 75 % of the 167 000 threshold, which is the larger here), so 34 000.
+    expect(record).toMatchObject({ cut: 'cascade', cascade_tokens_source: 'usage', cascade_target_tokens: 34000 });
     expect(['forced', 'short_or_trace', 'trace_all', 'drop']).toContain(record.cascade_pass);
     expect(record.cascade_predicted_tokens).toBeLessThan(130000);
   });
@@ -247,9 +247,9 @@ describe('drop pass, the floor, host handoff and the after record (token cascade
   });
 
   it('a cut under HOST_MIN_CUT of the tokens goes to the host summary only with the handoff switch', async () => {
-    // An automatic compaction starts at the threshold (167 000 tokens). About 20 traced results reach the 80 % target, leaving about 132 000
-    // tokens: a cut of about 21 %, under HOST_MIN_CUT. The floor (every result gone) stays under 127 000.
-    const messages = conversation(30, 4000);
+    // An automatic compaction starts at the threshold (167 000 tokens). The target (106 462) is out of reach: the 25 results give back about 44 000
+    // tokens when every one is gone, a cut of about 26 %, under HOST_MIN_CUT. The floor stays under 127 000 (167 000 less 33 400).
+    const messages = conversation(25, 4000);
     const off = await compactRun({ ...ACTIVE_ENV, OMC_JEV_COMPACT_TARGET_PERCENT: '80' }, { messages });
     expect(off.record.result).toBe('jev');
     const on = await compactRun({ ...ACTIVE_ENV, OMC_JEV_COMPACT_TARGET_PERCENT: '80', OMC_JEV_COMPACT_HOST_HANDOFF: '1' }, { messages });
