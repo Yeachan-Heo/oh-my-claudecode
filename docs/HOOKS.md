@@ -592,6 +592,30 @@ stopomc
 
 ---
 
+## Provider Worker-Panel Quota Wait
+
+The rate-limit-wait daemon can wait out a provider quota error shown on an `omc team` worker pane instead of leaving the task stopped. It is opt-in: with `OMC_PANEL_QUOTA_WAIT` unset or not `1`, the daemon reads nothing, sends no keys and writes no state.
+
+Once per daemon poll, a team pane (its session name starts with `OMC_PANEL_SESSION_PREFIX`) whose last 15 lines show an API error line with a code from `OMC_PANEL_QUOTA_WAIT_CODES` waits until the reset of the 5 h window plus `OMC_PANEL_QUOTA_WAIT_MARGIN_S` seconds. Then a fresh capture must still show the error, and the pane gets one `continue` keystroke. A code from `OMC_PANEL_QUOTA_END_CODES`, a reset beyond the window, an exhausted weekly limit, or more than `OMC_PANEL_QUOTA_WAIT_MAX` waits ends the task with class `quota`. The reset date goes to the daemon log and to `OMC_PANEL_QUOTA_JOURNAL` when that is set.
+
+| Variable | Default | Meaning |
+|----------|---------|---------|
+| `OMC_PANEL_QUOTA_WAIT` | (unset) | `1` switches the panel quota wait on. Any other value leaves it off. |
+| `OMC_PANEL_QUOTA_WAIT_CODES` | (unset) | Comma-separated error codes that wait for the reset. Unset: no code is detected. |
+| `OMC_PANEL_QUOTA_END_CODES` | (unset) | Comma-separated error codes that never resume the pane. |
+| `OMC_PANEL_QUOTA_READ_URL` | (unset) | Endpoint of the provider reading. `https`, or `http` on a loopback host. Unset: no reading, so no wait. |
+| `OMC_PANEL_QUOTA_KEY_FILE` | (unset) | File holding the API key for the reading. The key is never read from the environment and never logged. |
+| `OMC_PANEL_QUOTA_WAIT_MAX` | `3` | Waits per pane before the task ends. |
+| `OMC_PANEL_QUOTA_WAIT_MARGIN_S` | `120` | Seconds after the reset before the continue keystroke. |
+| `OMC_PANEL_QUOTA_PASS_LIMIT_S` | `30` | Time limit of one pass, in seconds. Zero, negative and non-numeric values fall back to `30`. |
+| `OMC_PANEL_QUOTA_WEEK_UNIT` | `6` | Unit code of the weekly limit in the provider reading. An exhausted limit with this unit never waits: the task ends with class `quota`. Negative, fractional and non-numeric values fall back to `6`. |
+| `OMC_PANEL_SESSION_PREFIX` | `omc-` | Only sessions with this prefix are inspected. |
+| `OMC_PANEL_WRAPPER_OWNS_RE` | (unset) | Panes whose last lines match this pattern are left alone, for a wrapper that runs its own wait. |
+| `OMC_PANEL_QUOTA_STATE` | `provider-quota-panels.json` in the daemon state directory | State file of the panels. |
+| `OMC_PANEL_QUOTA_JOURNAL` | (unset) | Optional JSON Lines journal of the decisions. |
+
+Example preset for Z.ai: `OMC_PANEL_QUOTA_WAIT_CODES=1308`, `OMC_PANEL_QUOTA_END_CODES=1310`, `OMC_PANEL_QUOTA_READ_URL=https://api.z.ai/api/monitor/usage/quota/limit`, with the key in the file named by `OMC_PANEL_QUOTA_KEY_FILE`.
+
 ## Jev Judgment Points
 
 **Jev** is a System One API (TypeSafe) that provides calibrated decision-making for OMC's orchestration points. It replaces keyword lists and heuristics for critical decisions like skill triggering, model-tier routing, loop continuation, and context pruning.
@@ -1132,3 +1156,19 @@ node scripts/jev-repair-transcript.mjs ~/.claude/projects/<project>/<session>.js
 - **Degradation Contract**: [ADR 03665](https://github.com/Yeachan-Heo/oh-my-claudecode/blob/dev/docs/adr/03665-jev-degradation-contract.md) — how Jev fails gracefully
 - **Env Activation**: [ADR 03672](https://github.com/Yeachan-Heo/oh-my-claudecode/blob/dev/docs/adr/03672-env-activated-active-mode.md) — `:active` syntax and union semantics
 - **Script-Side Points**: [ADR 03671](https://github.com/Yeachan-Heo/oh-my-claudecode/blob/dev/docs/adr/03671-script-side-judgment-channel.md) — hook-script integration points
+
+## Graph Run Switches
+
+The graph runtime (`omc graph`) reads these variables. None of them changes behavior unless it is set. `omc graph status <run_id>` prints the derived state of one run as JSON and changes nothing.
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `OMC_GRAPH_SIGNAL_CLEANUP` | (unset) | `1` makes `omc graph run` handle SIGINT and SIGTERM: active command nodes get SIGTERM (SIGKILL after 5 s), the run stops, and the process exits 130 (SIGINT) or 143 (SIGTERM). Any other value keeps the default behavior. |
+| `OMC_GRAPH_GC` | (unset) | `1` lets `omc graph gc` delete expired final runs and repair torn journals. Without it the command only reports what it would do. |
+| `OMC_GRAPH_RETENTION_DAYS` | `7` | Days a final run is kept by `omc graph gc` (positive integer; `--retention-days` overrides it). |
+| `OMC_GRAPH_REPAIR_TORN_WAL` | (unset) | `1` makes `omc graph gc` repair a torn last journal line, as `--repair-torn-wal` does. Writing the repair still needs `OMC_GRAPH_GC=1`. |
+| `OMC_GRAPH_RUNS_ROOT` | `.omc/graph-runs` | Runs root of `omc graph gc` when `--runs-root` is not given. The directory must be named `.omc/graph-runs`. |
+
+**Interrupted runs.** A run stopped by a signal (with `OMC_GRAPH_SIGNAL_CLEANUP=1`) leaves its `owner.lock` behind, with the process id of the stopped run. The signal path exits without releasing the lock. A dead owner's lock is taken over only once it is 30 s old (the stale grace period of the single-writer fence), so a rerun with the same run id is refused with exit 19 ("another writer owns this run") until then. Wait 30 s before rerunning the same run id.
+
+**Signals without the switch.** With `OMC_GRAPH_SIGNAL_CLEANUP` unset, the graph code installs no SIGINT or SIGTERM handler, and a running step is not stopped. The CLI still does not exit on SIGTERM: the LSP client manager (`src/tools/lsp/client.ts`) registers SIGTERM, SIGINT and SIGHUP listeners at startup that stop the language servers and do not exit, so SIGTERM ends neither the run nor its step. The SIGTERM behavior is covered by a test (`command-signal-process.test.ts`, switch off).
