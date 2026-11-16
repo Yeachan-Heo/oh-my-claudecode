@@ -100,6 +100,9 @@ async function importHudPackage(hudPackage) {
 }
 
 async function main() {
+  // Only this wrapper may set the signal; an inherited value would hide a real update.
+  delete process.env.OMC_HUD_UNBUILT_VERSION;
+
   let pluginCacheVersion = null;
   let pluginCacheDir = null;
   let lastHudLoadError = null;
@@ -179,6 +182,11 @@ async function main() {
         });
 
         if (builtVersions.length > 0) {
+          // The older HUD loaded below would advertise the skipped version as an
+          // update that the update command cannot deliver. Tell it what happened.
+          if (builtVersions[0] !== latestInstalledVersion) {
+            process.env.OMC_HUD_UNBUILT_VERSION = latestInstalledVersion;
+          }
           const attemptedTargets = new Set();
           for (const version of builtVersions) {
             pluginCacheVersion = version;

@@ -569,6 +569,8 @@ export async function render(
       omcUpdateAvailable: context.updateAvailable,
       omcUpdateSource: context.omcUpdateSource ?? null,
       claudeCodeUpdateAvailable: context.claudeCodeUpdateAvailable ?? null,
+      omcUnbuiltVersion: context.omcUnbuiltVersion ?? null,
+      omcVersion: context.omcVersion ?? null,
     });
     if (updateHints.length > 0) renderedDetail.set("updateHint", updateHints);
   }
