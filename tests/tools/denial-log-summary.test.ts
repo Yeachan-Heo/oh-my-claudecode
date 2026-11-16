@@ -5,12 +5,11 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
-  EFFECTIVENESS,
-  END_TYPES,
   HANDOFF_EVENTS,
   KINDS,
   REASON_CODES,
   RESULTS,
+  STATES,
   readJournal,
   summarize,
   validateRow,
@@ -52,7 +51,7 @@ function handoff(over: Row = {}): Row {
   const ts_ms = (over.ts_ms as number | undefined) ?? 1731600000000;
   return {
     ts: new Date(ts_ms).toISOString(), ts_ms, point: 'denial', id: nextId(), kind: 'handoff',
-    session_id: 'sA', agent_id: null, event: 'warning-20mib', result: 'passed', tool_name: 'Bash', tool_use_id: null, bytes: null,
+    session_id: 'sA', agent_id: null, guard: 'handoff', action: 'warning', result: 'passed', tool_name: 'Bash', tool_use_id: null, bytes: null,
     ...over,
   };
 }
@@ -73,10 +72,11 @@ describe('denial_log_summary.mjs summary', () => {
   it('counts unique keys, flags one key with different facts and counts a duplicate from two journals once', () => {
     const d1 = decision({ session_id: 'sA', guard: 'g1', key: 'aaaaaaaaaaaaaaaa', n: 3, sessionCount: 3, k: 3, maxSession: 20, degree: 1, result: 'denied', action: 'escalation-1' });
     const o1 = outcome(d1.id as string, { session_id: 'sA', result: 'denied' });
-    const d2 = decision({ session_id: 'sA', guard: 'g1', key: 'aaaaaaaaaaaaaaaa', n: 4, sessionCount: 4, k: 3, maxSession: 20, degree: 1, result: 'blocked', action: 'blocked' });
+    const d2 = decision({ session_id: 'sA', guard: 'g1', key: 'aaaaaaaaaaaaaaaa', n: 5, sessionCount: 5, k: 3, maxSession: 20, degree: 2, result: 'denied', action: 'escalation-2' });
     const d3 = decision({ session_id: 'sB', guard: 'g1', key: 'bbbbbbbbbbbbbbbb', n: 1, sessionCount: 1, k: 3, maxSession: 4, degree: 0, result: 'denied', action: 'deny-storm' });
-    const end = { ts: new Date(1731600000000).toISOString(), ts_ms: 1731600000000, point: 'denial', id: nextId(), kind: 'end', session_id: 'sB', agent_id: null, type: 'awaiting-human' };
-    const written = [d1, o1, d2, d3, end];
+    // the same key released: one key with two different facts (denied, passed)
+    const release = decision({ kind: 'release', session_id: 'sB', guard: 'g1', key: 'aaaaaaaaaaaaaaaa', n: null, sessionCount: 3, degree: 0, result: 'passed', action: 'release' });
+    const written = [d1, o1, d2, d3, release];
     expect(written).toHaveLength(5);
     expect(written.every((row) => validateRow(row).ok)).toBe(true);
     const file = writeJournal('dup/denials.jsonl', written);
@@ -139,31 +139,31 @@ describe('denial_log_summary.mjs summary', () => {
     expect(result.rows).toBe(0);
   });
 
-  it('separates a subagent from its session and names a task subject', () => {
-    const rows = [decision({ session_id: 'sC', agent_id: 'ag1', key: 'ffffffffffffffff' }), decision({ session_id: 'sC', agent_id: null, key: 'ffffffffffffffff' }), decision({ session_id: null, key: '1111111111111111' }), decision({ session_id: null, task: 'job-7', key: '1111111111111111' })];
+  it('separates a subagent from its session and names a row without a session', () => {
+    const rows = [decision({ session_id: 'sC', agent_id: 'ag1', key: 'ffffffffffffffff' }), decision({ session_id: 'sC', agent_id: null, key: 'ffffffffffffffff' }), decision({ session_id: null, key: '1111111111111111' })];
     const result = summarize([writeJournal('agent/denials.jsonl', rows)]);
     const names = result.subjects.map((s: { group: string }) => s.group).sort();
-    expect(names).toEqual(['no-subject', 'session sC', 'session sC/ag1', 'task job-7']);
+    expect(names).toEqual(['no-subject', 'session sC', 'session sC/ag1']);
   });
 
   it('counts two subagents of one session in the same millisecond as separate handoff events', () => {
     const rows = [
-      handoff({ agent_id: 'agent-A', event: 'handoff-subagent', tool_use_id: null, ts_ms: 1731600000000 }),
-      handoff({ agent_id: 'agent-B', event: 'handoff-subagent', tool_use_id: null, ts_ms: 1731600000000 }),
+      handoff({ agent_id: 'agent-A', action: 'handoff-subagent', tool_use_id: null, ts_ms: 1731600000000 }),
+      handoff({ agent_id: 'agent-B', action: 'handoff-subagent', tool_use_id: null, ts_ms: 1731600000000 }),
     ];
     const result = summarize([writeJournal('handoff/denials.jsonl', rows)]);
     expect(result.kinds.find((g: { group: string }) => g.group === 'handoff').count).toBe(2);
     expect(result.outOfSchema).toBe(0);
   });
 
-  it('summarizes nudge and end rows by kind', () => {
+  it('summarizes release and state rows by kind', () => {
     const rows = [
-      decision({ kind: 'nudge', guard: 'error-loop', key: '7777777777777777', result: 'passed', reason_code: 'error_loop', action: 'nudge' }),
-      { ts: new Date(1731600000000).toISOString(), ts_ms: 1731600000000, point: 'denial', id: nextId(), kind: 'end', session_id: 'sA', agent_id: null, type: 'awaiting-human' },
+      decision({ kind: 'release', key: '7777777777777777', result: 'passed', degree: 0, action: 'release' }),
+      decision({ kind: 'state', key: '7777777777777777', n: null, sessionCount: null, degree: 0, action: 'state-lock-unavailable', state: 'lock-unavailable' }),
     ];
-    const result = summarize([writeJournal('nudge/denials.jsonl', rows)]);
+    const result = summarize([writeJournal('release/denials.jsonl', rows)]);
     const kinds = result.kinds.map((g: { group: string }) => g.group).sort();
-    expect(kinds).toEqual(['end', 'nudge']);
+    expect(kinds).toEqual(['release', 'state']);
     expect(result.outOfSchema).toBe(0);
   });
 });
@@ -175,7 +175,7 @@ describe('denial_log_summary.mjs schema validator', () => {
     expect(validateRow(decision({ kind: 'state', n: null, sessionCount: null, degree: 0, action: 'state-lock-unavailable', state: 'lock-unavailable' })).ok).toBe(true);
     expect(validateRow(decision({ kind: 'release', result: 'passed', action: 'release' })).ok).toBe(true);
     expect(validateRow(outcome(d.id as string)).ok).toBe(true);
-    expect(validateRow(outcome(d.id as string, { effectiveness: 'returned' })).ok).toBe(true);
+    expect(validateRow(outcome(d.id as string, { effectiveness: null })).ok).toBe(true);
     expect(validateRow({ ...d, truncated: true }).ok).toBe(true);
   });
 
@@ -193,7 +193,8 @@ describe('denial_log_summary.mjs schema validator', () => {
     expect(validateRow({ ...d, degree: 3 }).errors).toContain('degree');
     expect(validateRow({ ...d, action: '' }).errors).toContain('action');
     expect(validateRow({ ...d, reason_code: 'unknown' }).errors).toContain('reason_code');
-    expect(validateRow({ ...d, effectiveness: 'maybe' }).errors).toContain('effectiveness');
+    expect(validateRow({ ...d, effectiveness: 'returned' }).errors).toContain('effectiveness');
+    expect(validateRow({ ...d, state: 'unknown-state' }).errors).toContain('state');
     expect(validateRow({ ...d, k: 0 }).errors).toContain('k');
     expect(validateRow({ ...d, maxSession: 0 }).errors).toContain('maxSession');
     expect(validateRow({ ...d, tool_name: 5 }).errors).toContain('tool_name');
@@ -203,61 +204,70 @@ describe('denial_log_summary.mjs schema validator', () => {
     const o = outcome(d.id as string);
     expect(validateRow({ ...o, ref: undefined }).errors).toContain('ref');
     expect(validateRow({ ...o, result: 'bad' }).errors).toContain('result');
-    expect(validateRow({ ...o, effectiveness: 'maybe' }).errors).toContain('effectiveness-outcome');
+    expect(validateRow({ ...o, effectiveness: 'returned' }).errors).toContain('effectiveness-outcome');
   });
 
-  it('checks the end and handoff rows and the task field', () => {
-    const end = { ts: new Date().toISOString(), ts_ms: 2, point: 'denial', id: hex(70001), kind: 'end', session_id: 's', agent_id: null };
-    expect(validateRow(end).errors).toContain('type');
-    expect(validateRow({ ...end, type: 'step-budget' }).ok).toBe(true);
-    expect(validateRow({ ...end, type: 'other' }).errors).toContain('type');
+  it('accepts the rows exactly as the denial counter and the handoff writer emit them', () => {
+    const ts = '2026-11-14T10:00:00.000Z';
+    const common = { ts, ts_ms: Date.parse(ts), point: 'denial' };
+    const denial = { ...common, id: 'a1b2c3d4e5f60718', kind: 'denial', session_id: 's1', agent_id: null, guard: 'ultragoal-goal', key: '0123456789abcdef', n: 3, sessionCount: 3, k: 3, maxSession: 20, degree: 1, result: 'denied', action: 'escalation-1', reason_code: 'guard_denial', effectiveness: null, state: 'ok', tool_name: 'Bash', tool_use_id: 'toolu_1' };
+    const brokenState = { ...denial, id: 'a1b2c3d4e5f60719', kind: 'state', n: null, sessionCount: null, degree: 2, action: 'state-broken', state: 'broken', tool_name: null, tool_use_id: null };
+    const release = { ...denial, id: 'a1b2c3d4e5f6071a', kind: 'release', degree: 0, result: 'passed', action: 'release' };
+    const outcomeRow = { ...common, id: 'a1b2c3d4e5f6071b', kind: 'outcome', ref: denial.id, session_id: 's1', agent_id: null, guard: 'ultragoal-goal', key: denial.key, result: 'denied', effectiveness: null };
+    const handoffRow = { ...common, id: 'a1b2c3d4e5f6071c', kind: 'handoff', guard: 'handoff', action: 'warning', result: 'passed', session_id: 's1', agent_id: null, tool_name: 'Read', tool_use_id: null, bytes: 20971521 };
+    for (const row of [denial, brokenState, release, outcomeRow, handoffRow, { ...denial, truncated: true }]) {
+      expect(validateRow(row), JSON.stringify(row)).toEqual({ ok: true, errors: [] });
+    }
+  });
+
+  it('checks the handoff rows: the event is carried by the action field', () => {
     const h = handoff();
     expect(validateRow(h)).toEqual({ ok: true, errors: [] });
-    expect(validateRow({ ...h, event: 'unknown-event' }).errors).toContain('event');
+    for (const event of HANDOFF_EVENTS) {
+      expect(validateRow(handoff({ action: event })).ok, event).toBe(true);
+    }
+    expect(validateRow({ ...h, action: 'unknown-event' }).errors).toContain('action');
+    expect(validateRow({ ...h, guard: 'other' }).errors).toContain('guard');
     expect(validateRow({ ...h, result: 'bad-result' }).errors).toContain('result');
     expect(validateRow({ ...h, bytes: undefined }).errors).toContain('bytes');
     expect(validateRow({ ...h, bytes: -1 }).errors).toContain('bytes');
     expect(validateRow({ ...h, bytes: 1048576 }).ok).toBe(true);
     expect(validateRow({ ...h, agent_id: undefined }).errors).toContain('agent_id');
     expect(validateRow({ ...h, tool_name: 5 }).errors).toContain('tool_name');
-    expect(validateRow({ ...h, result: 'blocked' }).ok).toBe(true);
-    expect(validateRow({ ...decision(), task: 'job-1' }).ok).toBe(true);
-    expect(validateRow({ ...decision(), task: 5 }).errors).toContain('task');
-    expect(validateRow(decision({ kind: 'nudge', result: 'blocked', reason_code: 'error_loop' })).ok).toBe(true);
-    expect(validateRow(decision({ reason_code: 'missing_fact' })).ok).toBe(true);
+    expect(validateRow({ ...h, result: 'denied', action: 'handoff-refused' }).ok).toBe(true);
+  });
+
+  it('rejects the kinds and values that the writer does not emit', () => {
+    expect(validateRow(decision({ kind: 'end' })).errors).toContain('kind');
+    expect(validateRow(decision({ kind: 'nudge' })).errors).toContain('kind');
+    expect(validateRow(decision({ result: 'blocked' })).errors).toContain('result');
+    expect(validateRow(decision({ reason_code: 'missing_fact' })).errors).toContain('reason_code');
   });
 });
 
 describe('denial_log_summary.mjs validator sets', () => {
   // The validator keeps its own copy of the closed vocabularies of the journal rows on purpose (the tool runs from a
-  // plain checkout and does not import the hook library). The counter that writes the journal is not part of this
-  // change, so the sets are pinned here; they are meant to mirror the counter of the session guards change, and a
-  // vocabulary change there has to update the validator and this list together. The handoff event names are the
-  // validator's own: they have not been compared with the names the other change writes.
+  // plain checkout and does not import the hook library). The denial counter that writes the journal is not part of
+  // this change, so the sets are pinned here: they mirror the denial counter of the session guards change
+  // (scripts/lib/jev-denial-counter.mjs and the handoff rows of scripts/lib/jev-handoff.mjs). A vocabulary change there
+  // has to update the validator and this list together.
   const sorted = (values: readonly string[]) => [...values].sort();
 
-  it('pins the row kinds, results, end types, handoff events, reason codes and effectiveness values', () => {
-    expect(sorted(KINDS)).toEqual(sorted(['denial', 'release', 'state', 'end', 'outcome', 'handoff', 'nudge']));
-    expect(sorted(RESULTS)).toEqual(sorted(['denied', 'passed', 'blocked']));
-    expect(sorted(END_TYPES)).toEqual(sorted(['awaiting-human', 'stopped-with-reason', 'no-input', 'step-budget']));
-    expect(sorted(HANDOFF_EVENTS)).toEqual(sorted(['warning-20mib', 'handoff-passed', 'handoff-denied', 'handoff-subagent', 'handed-off-denied']));
-    expect(sorted(REASON_CODES)).toEqual(sorted([
-      'missing_fact', 'fact_not_accepted', 'contradictory_declaration', 'consultation',
-      'blocked_after_consultation', 'timeout', 'guard_denial', 'error_loop',
-    ]));
-    expect(sorted(EFFECTIVENESS)).toEqual(sorted(['returned', 'not-returned']));
+  it('pins the row kinds, results, handoff events, reason codes and states', () => {
+    expect(sorted(KINDS)).toEqual(sorted(['denial', 'release', 'state', 'outcome', 'handoff']));
+    expect(sorted(RESULTS)).toEqual(sorted(['denied', 'passed']));
+    expect(sorted(HANDOFF_EVENTS)).toEqual(sorted(['warning', 'handoff-allowed', 'handoff-subagent', 'handoff-refused', 'handed-over-refused']));
+    expect(sorted(REASON_CODES)).toEqual(['guard_denial']);
+    expect(sorted(STATES)).toEqual(sorted(['ok', 'broken', 'nan', 'lock-unavailable']));
   });
 
   it('accepts every pinned value and rejects a value outside the set', () => {
-    for (const kind of ['end', 'outcome', 'handoff']) expect(KINDS).toContain(kind);
-    for (const code of ['guard_denial', 'error_loop']) {
-      expect(validateRow(decision({ reason_code: code })).ok).toBe(true);
-    }
-    for (const result of ['denied', 'passed', 'blocked']) {
-      expect(validateRow(decision({ result })).ok).toBe(true);
-    }
+    for (const result of RESULTS) expect(validateRow(decision({ result })).ok).toBe(true);
+    for (const state of STATES) expect(validateRow(decision({ state })).ok).toBe(true);
+    for (const code of REASON_CODES) expect(validateRow(decision({ reason_code: code })).ok).toBe(true);
     expect(validateRow(decision({ reason_code: 'not-in-the-set' })).ok).toBe(false);
     expect(validateRow(decision({ result: 'not-in-the-set' })).ok).toBe(false);
+    expect(validateRow(decision({ state: 'not-in-the-set' })).ok).toBe(false);
   });
 });
 

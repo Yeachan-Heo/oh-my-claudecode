@@ -567,20 +567,21 @@ With no `--file` and no `--dir` it also reads the directory `$OMC_JEV_LOG_DIR`, 
 
 ## Journal fields
 
-The tool reads the rows as the denial counter writes them:
+The tool reads the rows as the denial counter writes them (the counter and its handoff rows come from the session guards
+change, not from this one). A row that does not match this layout is still summarized and is counted as `outside schema`.
 
 | Field | Meaning |
 |---|---|
-| `kind` | `denial`, `release`, `state`, `nudge` (decision rows), `end`, `handoff` or `outcome` |
+| `ts`, `ts_ms`, `point` | the time of the row (ISO text and milliseconds) and the constant `denial` |
+| `kind` | `denial`, `release`, `state` (decision rows), `outcome` or `handoff` |
 | `id`, `ref` | 16-hex event id; `ref` of an `outcome` row is the id of its decision |
 | `session_id`, `agent_id` | the subject; `agent_id` is `null` for the main session |
-| `guard`, `key` | the guard and the 16-hex hash of the normalized denial key |
-| `n`, `sessionCount`, `k`, `maxSession` | windowed count, per-guard session count, threshold, session ceiling |
+| `guard`, `key` | the guard and the 16-hex hash of the normalized denial key (a `handoff` row has the guard `handoff` and no key) |
+| `n`, `sessionCount`, `k`, `maxSession` | windowed count, per-guard session count, threshold, session ceiling (`n` and `sessionCount` are `null` for a row written without a readable state) |
 | `degree` | `0` none, `1` reminder, `2` block |
-| `result` | `denied`, `passed` or `blocked` |
-| `action`, `reason_code`, `state` | the fired action, the reason code (`missing_fact`, `fact_not_accepted`, `contradictory_declaration`, `consultation`, `blocked_after_consultation`, `timeout`, `guard_denial`, `error_loop`) and the state of the counter |
-| `type` | of an `end` row: `awaiting-human`, `stopped-with-reason`, `no-input` or `step-budget` |
-| `event`, `bytes` | of a `handoff` row: `warning-20mib`, `handoff-passed`, `handoff-denied`, `handoff-subagent` or `handed-off-denied`; the size in bytes, or `null` when unknown |
-| `task` | optional subject for rows of a background task; checked only when present |
-| `effectiveness` | `null`, or `returned` / `not-returned` |
+| `result` | `denied` or `passed` |
+| `action` | of a decision row, the fired action (`escalation-1`, `escalation-2`, `deny-storm`, `release`, `state-broken`, `state-nan`, `state-lock-unavailable`); of a `handoff` row, the event: `warning`, `handoff-allowed`, `handoff-subagent`, `handoff-refused` or `handed-over-refused` |
+| `reason_code`, `state` | `guard_denial`, and the state of the counter: `ok`, `broken`, `nan` or `lock-unavailable` |
+| `bytes` | of a `handoff` row: the size in bytes, or `null` when unknown |
+| `effectiveness` | always `null` |
 | `tool_name`, `tool_use_id`, `truncated` | the call, and a marker for a row that was shortened to fit 2000 characters |

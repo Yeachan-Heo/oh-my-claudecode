@@ -18,16 +18,15 @@ import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 
-// The closed vocabularies of the journal rows. They are a copy of the sets of the denial counter on purpose: the tool
-// runs from a plain repository checkout and must not import the hook library, so it also works on a machine that has
-// only the journal.
-export const KINDS = ['denial', 'release', 'state', 'end', 'outcome', 'handoff', 'nudge']; // "nudge" is the repeated-error steering row
-export const RESULTS = ['denied', 'passed', 'blocked'];
-export const END_TYPES = ['awaiting-human', 'stopped-with-reason', 'no-input', 'step-budget'];
-export const HANDOFF_EVENTS = ['warning-20mib', 'handoff-passed', 'handoff-denied', 'handoff-subagent', 'handed-off-denied']; // the closed handoff events
-export const REASON_CODES = ['missing_fact', 'fact_not_accepted', 'contradictory_declaration', 'consultation', 'blocked_after_consultation', 'timeout', 'guard_denial', 'error_loop']; // "error_loop" is the repeated-tool-error row
-export const EFFECTIVENESS = ['returned', 'not-returned'];
-const DECISION_KINDS = ['denial', 'release', 'state', 'nudge']; // the decision rows; nudge rows carry the same decision fields
+// The closed vocabularies of the journal rows, as the denial counter writes them (scripts/lib/jev-denial-counter.mjs and the
+// handoff rows of scripts/lib/jev-handoff.mjs in the session guards change). They are a copy on purpose: the tool runs from a
+// plain repository checkout and must not import the hook library, so it also works on a machine that has only the journal.
+export const KINDS = ['denial', 'release', 'state', 'outcome', 'handoff'];
+export const RESULTS = ['denied', 'passed'];
+export const HANDOFF_EVENTS = ['warning', 'handoff-allowed', 'handoff-subagent', 'handoff-refused', 'handed-over-refused']; // the "action" of a handoff row
+export const REASON_CODES = ['guard_denial'];
+export const STATES = ['ok', 'broken', 'nan', 'lock-unavailable'];
+const DECISION_KINDS = ['denial', 'release', 'state']; // the decision rows; one outcome row references each of them
 
 /** The schema validator of one journal row: returns { ok, errors: [...] }. Unknown extra fields are allowed;
  * required fields are checked per kind. */
@@ -41,8 +40,6 @@ export function validateRow(w) {
   if (!KINDS.includes(w.kind)) errors.push('kind');
   if (w.session_id !== null && typeof w.session_id !== 'string') errors.push('session_id');
   if (w.agent_id !== null && typeof w.agent_id !== 'string') errors.push('agent_id');
-  // The task field (a background task instead of a session) is checked only when present: the denial counter writes session rows.
-  if (w.task !== undefined && w.task !== null && typeof w.task !== 'string') errors.push('task');
   if (w.truncated !== undefined && w.truncated !== true) errors.push('truncated');
   if (DECISION_KINDS.includes(w.kind)) {
     if (typeof w.guard !== 'string' || !w.guard) errors.push('guard');
@@ -55,16 +52,14 @@ export function validateRow(w) {
     if (!RESULTS.includes(w.result)) errors.push('result');
     if (typeof w.action !== 'string' || !w.action) errors.push('action');
     if (w.reason_code !== undefined && !REASON_CODES.includes(w.reason_code)) errors.push('reason_code');
-    if (w.effectiveness !== undefined && w.effectiveness !== null && !EFFECTIVENESS.includes(w.effectiveness)) errors.push('effectiveness');
-    if (w.state !== undefined && (typeof w.state !== 'string' || !w.state)) errors.push('state');
+    if (w.effectiveness !== undefined && w.effectiveness !== null) errors.push('effectiveness');
+    if (w.state !== undefined && !STATES.includes(w.state)) errors.push('state');
     if (w.tool_name !== undefined && w.tool_name !== null && typeof w.tool_name !== 'string') errors.push('tool_name');
     if (w.tool_use_id !== undefined && w.tool_use_id !== null && typeof w.tool_use_id !== 'string') errors.push('tool_use_id');
   }
-  if (w.kind === 'end') {
-    if (!END_TYPES.includes(w.type)) errors.push('type');
-  }
   if (w.kind === 'handoff') {
-    if (!HANDOFF_EVENTS.includes(w.event)) errors.push('event');
+    if (w.guard !== 'handoff') errors.push('guard');
+    if (!HANDOFF_EVENTS.includes(w.action)) errors.push('action');
     if (!RESULTS.includes(w.result)) errors.push('result');
     if (w.tool_name !== null && typeof w.tool_name !== 'string') errors.push('tool_name');
     if (w.tool_use_id !== null && typeof w.tool_use_id !== 'string') errors.push('tool_use_id');
@@ -73,7 +68,7 @@ export function validateRow(w) {
   if (w.kind === 'outcome') {
     if (typeof w.ref !== 'string' || !/^[0-9a-f]{16}$/.test(w.ref)) errors.push('ref');
     if (w.result !== undefined && !RESULTS.includes(w.result)) errors.push('result');
-    if (w.effectiveness !== undefined && w.effectiveness !== null && !EFFECTIVENESS.includes(w.effectiveness)) errors.push('effectiveness-outcome');
+    if (w.effectiveness !== undefined && w.effectiveness !== null) errors.push('effectiveness-outcome');
   }
   return { ok: errors.length === 0, errors };
 }
@@ -106,7 +101,7 @@ const percentile = (data, p) => {
   return s[Math.min(s.length, Math.max(1, Math.ceil((p / 100) * s.length))) - 1];
 };
 
-const subjectOf = (w) => (w.task ? `task ${w.task}` : w.session_id ? `session ${w.session_id}${w.agent_id ? `/${w.agent_id}` : ''}` : 'no-subject');
+const subjectOf = (w) => (w.session_id ? `session ${w.session_id}${w.agent_id ? `/${w.agent_id}` : ''}` : 'no-subject');
 
 /** Aggregation of one group of rows (a kind group or a subject group). */
 export function summarizeRows(rows) {
