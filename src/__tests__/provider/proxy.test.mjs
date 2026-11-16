@@ -11,7 +11,7 @@ import net from 'node:net';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import zlib from 'node:zlib';
-import { makeTmp, fakeKeyFile, writeProfile, PLACEHOLDER_KEY } from './_helpers.mjs';
+import { makeTmp, fakeKeyFile, processAlive, writeProfile, PLACEHOLDER_KEY } from './_helpers.mjs';
 import { backoffDelayMs } from '../../../scripts/provider/provider-proxy.mjs';
 
 const SCRIPT = fileURLToPath(new URL('../../../scripts/provider/provider-proxy.mjs', import.meta.url));
@@ -37,20 +37,6 @@ function freePort() {
       server.close(() => done(port));
     });
   });
-}
-
-function processAlive(pid) {
-  try {
-    process.kill(pid, 0);
-  } catch {
-    return false;
-  }
-  try {
-    const stat = readFileSync(`/proc/${pid}/stat`, 'utf8');
-    return stat[stat.lastIndexOf(')') + 2] !== 'Z';
-  } catch {
-    return false;
-  }
 }
 
 // Server processes (command line carries `_serve`) whose command line mentions the directory.

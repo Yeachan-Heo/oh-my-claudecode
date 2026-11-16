@@ -6,7 +6,7 @@ import { chmodSync, existsSync, mkdirSync, readFileSync, readdirSync, statSync, 
 import { createServer } from 'node:http';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { makeTmp, writeProfile, stubProxyProcess, PLACEHOLDER_KEY } from './_helpers.mjs';
+import { makeTmp, writeProfile, stubProxyProcess, waitProcessGone, PLACEHOLDER_KEY } from './_helpers.mjs';
 
 const LAUNCH = fileURLToPath(new URL('../../../scripts/provider/provider-launch.cjs', import.meta.url));
 const QUOTA_URL = 'https://quota.acme.example/api/monitor/usage/quota/limit';
@@ -400,9 +400,7 @@ describe.skipIf(process.platform === 'win32')('provider session launcher', () =>
         process.kill(child.pid, signal);
         expect(await closed).toBe(code);
         const starterPid = Number(readFileSync(join(f.env.HOME, 'signal.pid'), 'utf8'));
-        let alive = true;
-        try { process.kill(starterPid, 0); } catch { alive = false; }
-        expect(alive).toBe(false);
+        expect(await waitProcessGone(starterPid), 'the starter is still alive').toBe(true);
         expect(slotFiles().length).toBe(0);
       } finally {
         try { child.kill('SIGKILL'); } catch { /* gone */ }

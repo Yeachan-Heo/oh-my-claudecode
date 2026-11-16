@@ -9,7 +9,7 @@ import { createRequire } from 'node:module';
 import { chmodSync, cpSync, existsSync, mkdirSync, readFileSync, realpathSync, statSync, symlinkSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { ADVISOR, ROLE_TEMPLATE, fakeAdvisorClaude, readRows, runAdvisor } from './_advisor-helpers.mjs';
-import { makeTmp, writeProfile } from './_helpers.mjs';
+import { makeTmp, waitProcessGone, writeProfile } from './_helpers.mjs';
 
 // Each case starts several node processes; on a loaded machine that takes longer than the default limit.
 vi.setConfig({ testTimeout: 180000 });
@@ -142,16 +142,17 @@ describe.skipIf(process.platform === 'win32')('provider advisor', () => {
     const r = advisor({ OMC_PROVIDER_ADVISOR_CLAUDE_BIN: join(TMP, 'does-not-exist') });
     check(r.status === 127 && !r.called && lastRow().status === 'no-binary', js({ s: r.status, w: lastRow() }));
   });
-  it('(9) the time limit: exit 124, the claude process killed, a timeout row (the limit from OMC_PROVIDER_ADVISOR_TIMEOUT_MS only in a test); the test waits for the .pid file before reading it', () => {
+  it('(9) the time limit: exit 124, the claude process killed, a timeout row (the limit from OMC_PROVIDER_ADVISOR_TIMEOUT_MS only in a test); the test waits for the .pid file before reading it and for the process to be gone', async () => {
     const t0 = Date.now();
     const r = advisor({ FAKE_SLEEP: '1', OMC_PROVIDER_ADVISOR_TIMEOUT_MS: '3000' });
+    const elapsed = Date.now() - t0; // the advisor run only; the waits below are not part of the budget
     let pid = null;
     for (let k = 0; k < 100; k++) { // wait for the .pid to appear (up to 5 s), not a read right away
       try { pid = Number(readFileSync(`${r.out}.pid`, 'utf8')); break; } catch { spawnSync('sleep', ['0.05']); }
     }
     check(pid !== null, 'the fake did not write .pid (a start over 5 s: finished = timeout instead of enforcement)');
-    let alive = true; try { process.kill(pid, 0); } catch { alive = false; }
-    check(r.status === 124 && !alive && Date.now() - t0 < 15_000 && lastRow().status === 'timeout' && /time limit/.test(r.stderr), js({ s: r.status, alive, w: lastRow() }));
+    const alive = !(await waitProcessGone(pid)); // a killed process can stay a zombie for a moment on a host with a slow reaper
+    check(r.status === 124 && !alive && elapsed < 15_000 && lastRow().status === 'timeout' && /time limit/.test(r.stderr), js({ s: r.status, alive, w: lastRow() }));
   });
   it('(10) the script does not reach for a provider key or address (no key helper, readKey, apiKey, baseUrl or URL in the code)', () => {
     const code = readFileSync(ADVISOR, 'utf8').split('\n').filter((l) => !l.startsWith('//')).join('\n');
@@ -169,7 +170,7 @@ describe.skipIf(process.platform === 'win32')('provider advisor', () => {
     const t = advisor({ FAKE_SLEEP: '1', OMC_PROVIDER_ADVISOR_TIMEOUT_MS: '500' });
     check(t.status === 124 && t.cwd && !existsSync(t.cwd), `after the time limit the directory ${t.cwd} stayed`);
   });
-  it('(12) no detached: claude in the process group of the advisor; SIGTERM to the group of the worker kills the advisor and claude (no orphan)', () => {
+  it('(12) no detached: claude in the process group of the advisor; SIGTERM to the group of the worker kills the advisor and claude (no orphan)', async () => {
     const out = join(TMP, 'group');
     const script = `const { spawn } = require('node:child_process'); const fs = require('node:fs');
 const e = ${js({ ...base(), FAKE_OUT: out, FAKE_SLEEP: '1', OMC_PROVIDER_ADVISOR_TIMEOUT_MS: '120000' })};
@@ -179,7 +180,7 @@ d.on('exit', (code) => { console.log(JSON.stringify({ advisorPgid: d.pid, code }
     const g = spawnSync(process.execPath, ['-e', script], { encoding: 'utf8' });
     const result = JSON.parse(g.stdout.trim().split('\n').at(-1));
     const pgid = Number(readFileSync(`${out}.pgid`, 'utf8')); const pid = Number(readFileSync(`${out}.pid`, 'utf8'));
-    let alive = true; for (let k = 0; k < 40 && alive; k++) { try { process.kill(pid, 0); spawnSync('sleep', ['0.05']); } catch { alive = false; } }
+    const alive = !(await waitProcessGone(pid));
     check(pgid === result.advisorPgid && !alive, js({ pgid, advisorPgid: result.advisorPgid, alive, g: g.stderr }));
   });
 

@@ -175,6 +175,32 @@ export function stubProxyProcess(dir) {
   };
 }
 
+// True while the process exists and is not a zombie. A killed process whose parent is gone stays a
+// zombie until the host's reaper collects it, and signal 0 still succeeds for it, so the state in
+// /proc/<pid>/stat (when /proc exists) is read as well. EPERM from signal 0 means the process exists
+// but belongs to another user, so it counts as alive. Without /proc the zombie state cannot be read,
+// so a process that signal 0 reaches also counts as alive, the same as with EPERM.
+export function processAlive(pid) {
+  try {
+    process.kill(pid, 0);
+  } catch (e) {
+    return Boolean(e && e.code === 'EPERM');
+  }
+  try {
+    const stat = readFileSync(`/proc/${pid}/stat`, 'utf8');
+    return stat[stat.lastIndexOf(')') + 2] !== 'Z';
+  } catch {
+    return true;
+  }
+}
+
+// Polls until the process is gone (or a zombie); resolves false when it is still alive after timeoutMs.
+export async function waitProcessGone(pid, timeoutMs = 5000) {
+  const end = Date.now() + timeoutMs;
+  while (processAlive(pid) && Date.now() < end) await new Promise((done) => setTimeout(done, 50));
+  return !processAlive(pid);
+}
+
 // Reads a JSON or text file written by a fixture; returns null when it is missing.
 export function readFixture(file) {
   try {

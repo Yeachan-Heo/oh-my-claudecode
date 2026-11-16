@@ -8,7 +8,7 @@ import { createServer } from 'node:http';
 import { createRequire } from 'node:module';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { makeTmp, writeProfile, PLACEHOLDER_KEY } from './_helpers.mjs';
+import { makeTmp, writeProfile, waitProcessGone, PLACEHOLDER_KEY } from './_helpers.mjs';
 
 const WORKER_SCRIPT = fileURLToPath(new URL('../../../scripts/provider/provider-worker.cjs', import.meta.url));
 const PROVIDER_DIR = fileURLToPath(new URL('../../../scripts/provider/', import.meta.url));
@@ -1166,7 +1166,6 @@ describe.skipIf(process.platform === 'win32')('provider worker wrapper', () => {
     chmodSync(fake, 0o755);
     const slots = join(f.state, 'slots');
     const slotCount = () => (existsSync(slots) ? readdirSync(slots).filter((n) => /^slot-/.test(n)).length : 0);
-    const alive = (pid) => { try { process.kill(pid, 0); return true; } catch { return false; } };
     const child = spawn(process.execPath, [WORKER_SCRIPT, ...args], { env: { ...f.env, OMC_PROVIDER_CLAUDE_BIN: fake, ...env(f) } });
     try {
       const started = Date.now();
@@ -1177,7 +1176,7 @@ describe.skipIf(process.platform === 'win32')('provider worker wrapper', () => {
       const status = await new Promise((done) => child.on('close', done));
       expect(status, `wrapper exit code after ${signal}`).toBe(code);
       const pid = Number(readFileSync(pidFile, 'utf8'));
-      expect(alive(pid), `the child claude is alive after ${signal} to the wrapper (pid ${pid})`).toBe(false);
+      expect(await waitProcessGone(pid), `the child claude is alive after ${signal} to the wrapper (pid ${pid})`).toBe(true);
       expect(slotCount(), 'slots after the end').toBe(0);
       if (endRow) expect(f.rows().at(-1)).toMatchObject({ result: 'end', class: 'other' });
     } finally {
