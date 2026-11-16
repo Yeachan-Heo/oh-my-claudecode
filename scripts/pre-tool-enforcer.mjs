@@ -6,9 +6,9 @@
  * Cross-platform: Windows, macOS, Linux
  */
 
-import { appendFileSync, closeSync, existsSync, fstatSync, lstatSync, mkdirSync, openSync, readFileSync, readSync, readdirSync, renameSync, writeFileSync } from 'fs';
+import { appendFileSync, closeSync, existsSync, fstatSync, lstatSync, mkdirSync, openSync, readFileSync, readSync, readdirSync, realpathSync, renameSync, writeFileSync } from 'fs';
 import { createHash } from 'crypto';
-import { dirname, join, resolve, basename } from 'path';
+import { dirname, join, resolve, basename, relative, isAbsolute, sep } from 'path';
 import { homedir } from 'os';
 import { execFileSync } from 'child_process';
 import { fileURLToPath, pathToFileURL } from 'url';
@@ -24,7 +24,7 @@ import { resolveConfiguredAgentModel } from './lib/agent-model-config.mjs';
 import { BOUNDED_GIT_TIMEOUT_MS } from './lib/bounded-git-timeout.mjs';
 import { isSkillVisibleToUser } from './lib/skill-entitlements.mjs';
 import { isJevAppliedLogEnabled, isJevShadowOptedIn, jevNoulOf, recordJevApplied, recordJevShadow, setJevHookContext, setJevSessionId } from './lib/jev-shadow.mjs';
-import { resolveExcerptChars, resolveJevLogMaxBytes, rotateJevLog } from './jev-resolve.mjs';
+import { jevLogContextOf, resolveExcerptChars, resolveJevLogMaxBytes, rotateJevLog } from './jev-resolve.mjs';
 import { loadContextText } from './lib/context-text-loader.mjs';
 
 // Inlined from src/config/models.ts — avoids a dist/ import so the hook works
@@ -2415,6 +2415,114 @@ function emitPreToolUseOutput(output, input, space = 0) {
 // Opt-in text cleaning (OMC_CONTEXT_TEXT_SANITIZE=1 or true): the /goal objective and the expected objective are cleaned in the
 // deny reason only when the switch is on. main() loads the module; with the switch off nothing is imported.
 let contextText = null;
+// Plan write guard (opt-in, OMC_PLANNER_WRITE_GUARD=1): a Write, Edit, MultiEdit or NotebookEdit call made inside a
+// subagent whose agent_type is in the guarded list is denied unless the target is a Markdown file under <cwd>/.omc/plans/.
+// The list comes from OMC_PLANNER_WRITE_GUARD_TYPES (comma separated, exact match after trimming; default:
+// oh-my-claudecode:planner). Calls without agent_type and calls of other agent types pass. The path is normalized
+// lexically first. Then the real path (symbolic links resolved) of the nearest existing directory above the target, and
+// of the target when it exists, must stay inside the real plans directory; a link that cannot be resolved is denied. Anything else unreadable passes (fail-open). With the guard on, each call of a guarded tool adds one row to
+// plan-write-guard.jsonl in OMC_JEV_LOG_DIR or <state dir>/jev, with decision allow or deny; a call without agent_type or
+// with another agent_type adds one row with decision allow and a reason.
+const PLAN_WRITE_TOOLS = new Set(['Write', 'Edit', 'MultiEdit', 'NotebookEdit']);
+const PLAN_WRITE_DIR = join('.omc', 'plans');
+const PLAN_WRITE_EXT = '.md';
+const PLAN_WRITE_DEFAULT_TYPES = ['oh-my-claudecode:planner'];
+
+function planWriteGuardTypes(env = process.env) {
+  const list = String(env.OMC_PLANNER_WRITE_GUARD_TYPES ?? '').split(',').map((name) => name.trim()).filter(Boolean);
+  return list.length > 0 ? list : PLAN_WRITE_DEFAULT_TYPES;
+}
+
+function pathExists(path) {
+  try {
+    lstatSync(path);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+// True when the real path of an existing entry is `base` or inside it. A link that cannot be resolved is not inside.
+function realPathInside(path, base) {
+  try {
+    const rel = relative(base, realpathSync(path));
+    return rel === '' || (rel.split(sep)[0] !== '..' && !isAbsolute(rel));
+  } catch {
+    return false;
+  }
+}
+
+function planWritePathAllowed(filePath, cwd) {
+  const plansDir = resolve(cwd, PLAN_WRITE_DIR);
+  const target = resolve(cwd, filePath);
+  const rel = relative(plansDir, target);
+  if (rel === '' || rel.split(sep)[0] === '..' || isAbsolute(rel) || !rel.endsWith(PLAN_WRITE_EXT)) return false;
+  if (!pathExists(plansDir)) return true;
+  let realPlansDir;
+  try {
+    realPlansDir = realpathSync(plansDir);
+  } catch {
+    return false;
+  }
+  // The nearest existing directory above the target must resolve inside the real plans directory, so a missing directory
+  // under a link cannot be created outside it. The target itself, when it exists, must too.
+  let ancestor = dirname(target);
+  while (!pathExists(ancestor)) ancestor = dirname(ancestor);
+  return realPathInside(ancestor, realPlansDir) && (!pathExists(target) || realPathInside(target, realPlansDir));
+}
+
+function appendPlanWriteGuardRow(data, toolName, stateDir, row) {
+  try {
+    const logDir = process.env.OMC_JEV_LOG_DIR || join(stateDir, 'jev');
+    mkdirSync(logDir, { recursive: true });
+    const logPath = join(logDir, 'plan-write-guard.jsonl');
+    rotateJevLog(logPath, resolveJevLogMaxBytes(process.env));
+    appendFileSync(logPath, JSON.stringify({
+      ts: new Date().toISOString(),
+      point: 'plan-write-guard',
+      ...jevLogContextOf(data),
+      tool_name: toolName,
+      ...row,
+    }) + '\n', 'utf8');
+  } catch { /* logging never breaks the hook */ }
+}
+
+function evaluatePlanWriteGuard(toolName, data, directory, stateDir) {
+  if (process.env.OMC_PLANNER_WRITE_GUARD !== '1' || !PLAN_WRITE_TOOLS.has(toolName)) return null;
+  try {
+    const rawType = data?.agent_type ?? data?.agentType;
+    const agentType = typeof rawType === 'string' ? rawType.trim() : '';
+    if (!agentType || !planWriteGuardTypes().includes(agentType)) {
+      appendPlanWriteGuardRow(data, toolName, stateDir, {
+        agent_type: agentType ? agentType.slice(0, 200) : null,
+        decision: 'allow',
+        reason: agentType ? 'agent_type not guarded' : 'no agent_type',
+      });
+      return null;
+    }
+    const toolInput = data.tool_input ?? data.toolInput;
+    if (toolInput === null || typeof toolInput !== 'object' || Array.isArray(toolInput)) return null;
+    const filePath = toolInput.file_path ?? toolInput.notebook_path ?? toolInput.path;
+    if (typeof filePath !== 'string' || filePath.trim() === '') return null;
+    const cwd = typeof data.cwd === 'string' && data.cwd !== '' ? data.cwd : directory;
+    const allowed = planWritePathAllowed(filePath, cwd);
+    appendPlanWriteGuardRow(data, toolName, stateDir, {
+      agent_type: agentType.slice(0, 200),
+      path: filePath.slice(0, 300),
+      decision: allowed ? 'allow' : 'deny',
+    });
+    if (allowed) return null;
+    return {
+      continue: true,
+      hookSpecificOutput: {
+        hookEventName: 'PreToolUse',
+        permissionDecision: 'deny',
+        permissionDecisionReason: `[PLAN WRITE GUARD] The planner may write only Markdown files under ${PLAN_WRITE_DIR}/ (denied: "${filePath.slice(0, 200)}"). Write the plan to ${PLAN_WRITE_DIR}/<name>${PLAN_WRITE_EXT} instead.`,
+      },
+    };
+  } catch { return null; }
+}
+
 async function main() {
   // Skip guard: check OMC_SKIP_HOOKS env var (see issue #838)
   const _skipHooks = (process.env.OMC_SKIP_HOOKS || '').split(',').map(s => s.trim());
@@ -2442,6 +2550,15 @@ async function main() {
     data = {};
     try { data = JSON.parse(input); } catch {}
     await setJevHookContext(data);
+
+    // Opt-in plan write guard (OMC_PLANNER_WRITE_GUARD=1): the planner may write only plan files.
+    if (PLAN_WRITE_TOOLS.has(toolName)) {
+      const planWriteDeny = evaluatePlanWriteGuard(toolName, data, directory, stateDir);
+      if (planWriteDeny) {
+        emitPreToolUseOutput(planWriteDeny, data);
+        return;
+      }
+    }
 
     // Opt-in shell checks (OMC_SHELL_CHECKS=1) for Bash and PowerShell commands. Fail-open: any error here
     // leaves the hook behaving as without the checks.

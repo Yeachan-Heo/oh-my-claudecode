@@ -382,6 +382,20 @@ A denial is a PreToolUse `permissionDecision: "deny"` whose reason starts with `
 | `OMC_SHELL_SYNTAX_TIMEOUT_MS` | `1000` | Time limit of the `bash -n` check in milliseconds (100-3000, so that a hung `bash` cannot use up the hook timeout; other values use the default). |
 | `OMC_SHELL_CHECKS_LOG_DIR` | `<state root>/state/shell-checks` | Log directory override. |
 
+#### Plan Write Guard (`pre-tool-enforcer.mjs`)
+
+Opt-in guard for the planner agent. With `OMC_PLANNER_WRITE_GUARD=1`, a `Write`, `Edit`, `MultiEdit` or `NotebookEdit` call made inside a subagent whose `agent_type` is in the guarded list is denied unless the target is a Markdown file under `<cwd>/.omc/plans/`. Calls without `agent_type` and calls whose `agent_type` is not in the list pass. The host also reports `agent_type` for some calls of the main session (value `claude`, without `agent_id`), so the main session is guarded only when its value is in the list. The path is normalized lexically first: a `..` that leaves the plans directory is denied. Then, when the plans directory exists, the real path of the nearest existing directory above the target, and of the target when it exists, must stay inside the real plans directory, so a symbolic link that leads outside is denied, and a path that cannot be resolved is denied too (fail-closed). When the plans directory does not exist, only the lexical check applies. Tool input the hook cannot read passes (fail-open), but a failure to resolve a real path while the plans directory exists is a denial. A call of a guarded tool with readable `tool_input` and a text `file_path` adds one row (`decision`: `allow` or `deny`) to `plan-write-guard.jsonl`; a call without `agent_type` or with another `agent_type` adds one row with `decision` `allow` and a `reason` (`no agent_type` or `agent_type not guarded`). A call with unreadable input or a `file_path` that is not text passes without a row. Without the variable, or with any value other than `1`, the hook behaves as before and writes no row.
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `OMC_PLANNER_WRITE_GUARD` | (unset) | Only `1` enables the guard. Any other value leaves it off. |
+| `OMC_PLANNER_WRITE_GUARD_TYPES` | `oh-my-claudecode:planner` | Comma-separated `agent_type` values that are guarded (exact match after trimming). An empty list falls back to the default. |
+| `OMC_JEV_LOG_DIR` | `<state root>/state/jev` | Log directory of `plan-write-guard.jsonl`. |
+
+The denial text names the plans directory and asks for a Markdown file there. The guard does not depend on the other pre-tool switches.
+
+Limits, all by design. The plans directory is always `<cwd>/.omc/plans/`. The planner agent definition asks for drafts under `.omc/drafts/`, and a plan under a centralized state directory (`OMC_STATE_DIR`) is also written elsewhere; both are denied while the guard is on. When the working directory is a subdirectory of the project, a plan written to the project root's `.omc/plans/` is denied. The guard covers only the four write tools: the planner can still write any file through a `Bash` command, and `agents/planner.md` does not disallow `Bash`. `agent_type` must match the list exactly; a user-defined agent has no `oh-my-claudecode:` prefix, so it is guarded only when its exact name is in `OMC_PLANNER_WRITE_GUARD_TYPES`.
+
 #### Stale Run Reporter (`stale-run-reporter.mjs`)
 
 A SessionStart hook: the unattended-run **watchdog**. It scans the resolved `.omc` state root for persistent unattended-mode state files — ralph, autopilot, team, ultragoal — left `active: true` with a stale mtime and surfaces them as advisory context, split into two categories.
