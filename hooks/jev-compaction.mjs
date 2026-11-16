@@ -3266,7 +3266,7 @@ async function moveReplies($, cfg, record, messages, api, keepFrom, deadline) {
 // they are.
 const TRIM_HEAD = 'Another Claude session sent a message:';
 const TRIM_PRE = /Another Claude session sent a message:\n?(?=\s*<teammate-message\b)/g; // only before a <teammate-message
-const TRIM_OGON = /(<\/(?:teammate-message|agent-message|cross-session-message)>)\n*This came from another Claude session[^\n]*?permission laundering\./g; // after any of the three
+const TRIM_TAIL = /(<\/(?:teammate-message|agent-message|cross-session-message)>)\n*This came from another Claude session[^\n]*?permission laundering\./g; // after any of the three
 const TRIM_TM = /(<teammate-message\b[^>]*>)\n?([\s\S]*?)\n?(<\/teammate-message>)/g;
 const TRIM_STATE_MAX = 200; // a longer result is a state only when the agent's earlier message carries its summary
 const TRIM_DUP_MIN = 40; // a shorter result is never a duplicate by its text
@@ -3321,7 +3321,7 @@ export function trimAgentRows(messages, opts = {}) {
     stats.rows++;
     let removed = 0;
     // The frame first, while every block still anchors it; then the idle notifications.
-    const framed = row.replace(TRIM_OGON, '$1').replace(TRIM_PRE, '');
+    const framed = row.replace(TRIM_TAIL, '$1').replace(TRIM_PRE, '');
     let text = framed.replace(TRIM_TM, (all, open, body) => {
       const d = trimIdle(body);
       if (!d) return all;
@@ -3340,7 +3340,7 @@ export function trimAgentRows(messages, opts = {}) {
     text = text.replace(/(<\/(?:teammate-message|agent-message|cross-session-message)>)\s*\n\s*(?=<(?:teammate-message|agent-message|cross-session-message)\b)/g, '$1\n\n').replace(/^\s+|\s+$/g, '');
     // A row that would open with <agent-message> or <cross-session-message> keeps the host's header, which tells it from the owner's words.
     if (lead.startsWith(TRIM_HEAD) && !text.startsWith('<teammate-message') && !text.startsWith(TRIM_HEAD)) text = `${TRIM_HEAD}\n${text}`;
-    if (row.match(TRIM_OGON)) stats.note++;
+    if (row.match(TRIM_TAIL)) stats.note++;
     if (row.match(TRIM_PRE) && !text.startsWith(TRIM_HEAD)) stats.pre++;
     if (text !== row) { stats.chars += row.length - text.length; saved.set(i, row.length - text.length); rows.set(i, trimRow(m, text)); }
     learn(m);
