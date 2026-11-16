@@ -9,6 +9,7 @@ import { fileURLToPath } from 'node:url';
 // The script needs python3; the suite is skipped when python3 is not installed.
 const SCRIPT = join(dirname(fileURLToPath(import.meta.url)), '..', '..', 'tools', 'diagnostics', 'empty_results.py');
 const hasPython3 = spawnSync('python3', ['--version'], { encoding: 'utf8' }).status === 0;
+if (!hasPython3) console.warn('empty_results.py tests are skipped: python3 is not available');
 
 // Content markers of the fixture: the script must print none of them (no prompt, result or subject content).
 const MARKER_PROMPT = 'MARKER-prompt';
@@ -311,13 +312,13 @@ describe.skipIf(!hasPython3)('empty_results.py', () => {
     // Mini fixture: a session with the fallback ts field and a session with a bad timestamp.
     const dir = join(base, 'ts');
     write(join(dir, 'proj', 'ses-L.jsonl'),
-      assistant('2026-11-14T12:00:00.000Z', 'm-l1', [agentBlock('tu-l1')], 'ts')
-      + user('2026-11-14T12:00:30.000Z', [resultBlock('tu-l1', 'non-empty fallback result')], 'ts'));
-    write(join(dir, 'proj', 'ses-L', 'subagents', 'agent-al.meta.json'), meta('tu-l1', 'al'));
+      assistant('2026-11-14T12:00:00.000Z', 'm-fallback-1', [agentBlock('tu-fallback-1')], 'ts')
+      + user('2026-11-14T12:00:30.000Z', [resultBlock('tu-fallback-1', 'non-empty fallback result')], 'ts'));
+    write(join(dir, 'proj', 'ses-L', 'subagents', 'agent-al.meta.json'), meta('tu-fallback-1', 'al'));
     write(join(dir, 'proj', 'ses-L', 'subagents', 'agent-al.jsonl'),
       assistant('2026-11-14T12:00:20.000Z', 'sal-1', [textBlock('Legacy report.')], 'ts'));
     // bad timestamp: skipped with the bad_ts counter
-    write(join(dir, 'proj', 'ses-B.jsonl'), assistant('no-timestamp-here', 'm-l2', [agentBlock('tu-l2')]));
+    write(join(dir, 'proj', 'ses-B.jsonl'), assistant('no-timestamp-here', 'm-fallback-2', [agentBlock('tu-fallback-2')]));
     const r = run(['--transcripts', dir, '--json', join(dir, 'result.json')]);
     expect(r.status, r.stderr).toBe(0);
     const out = readJson(join(dir, 'result.json'));

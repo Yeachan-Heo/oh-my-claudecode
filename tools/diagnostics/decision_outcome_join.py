@@ -19,11 +19,12 @@ Inputs (arguments only; there are no default paths):
   --transcripts directory with Claude Code transcripts: <project>/<session>/subagents/agent-*.meta.json and the
                  agent-*.jsonl next to them (also <project>/<session>/subagents/<child>/agent-*.jsonl)
   --from/--to    time filter on ts (ISO 8601, both ends inclusive); without them the whole file
-  --prices       required; JSON file with the price table: {"family": [input, cache write 5 min, cache write 1 h,
+  --prices       optional; JSON file with the price table: {"family": [input, cache write 5 min, cache write 1 h,
                  cache read, output], ...} in USD per 1 million tokens. Families are haiku, sonnet, opus,
                  fable-5-1 and fable-5-2; "haiku>100k" applies to Haiku requests above 100k tokens of input.
-                 An empty table ({}) makes every cost unavailable (null), never zero. No price table is built in
-  --pointer-verbs WORD  extra verb (repeatable) that marks a pointer prompt, besides read, execute and brief
+                 Without the option (or with an empty table, {}) the price table is empty: every cost is
+                 unavailable (null), never zero, and one note is printed on stderr. No price table is built in
+  --pointer-verbs WORD  extra verb (repeatable) that marks a pointer prompt, besides read and brief
   --source-map   SUBSTRING=LABEL (repeatable, first match wins): the task source label when the subagent
                  type contains SUBSTRING; without a match the source is "undetermined"
   --tsv          TSV file: one row per agent task
@@ -65,7 +66,7 @@ over single-model agents must differ by less than 0.005 USD; the report gives bo
 against a regression (both functions use the same price table), it is not an independent check of the prices.
 
 Exit codes: 0 valid run (also when there is no data); 2 argument or input error (missing --journal or --transcripts,
-missing directory or file, bad period, bad price table, bad --source-map entry).
+missing directory or file, bad period, bad price table, bad --source-map entry). A missing --prices is not an error.
 """
 import argparse
 import glob
@@ -89,7 +90,7 @@ SOURCE_UNDETERMINED = 'undetermined'
 
 USAGE = (
     'usage: decision_outcome_join.py --journal <Jev journal dir> --transcripts <transcript dir>\n'
-    '          --prices <json file> [--from <ISO>] [--to <ISO>] [--source-map SUBSTRING=LABEL]\n'
+    '          [--prices <json file>] [--from <ISO>] [--to <ISO>] [--source-map SUBSTRING=LABEL]\n'
     '          [--pointer-verbs WORD] [--tsv <file>] [--json <file>]'
 )
 
@@ -193,11 +194,11 @@ def margin(d):
     return p[0] - p[1] if len(p) >= 2 else None
 
 
-POINTER_VERBS = ('read', 'execute', 'brief')
+POINTER_VERBS = ('read', 'brief')
 
 
 def is_pointer_task(text, extra_verbs=()):
-    """Classifies a pointer prompt (a short prompt that names a file and a verb such as read or execute); the text itself is never printed."""
+    """Classifies a pointer prompt (a short prompt that names a file and a verb such as read or brief); the text itself is never printed."""
     pattern = re.compile(r'(/[\w.\-/]+\.(md|txt|json|toml))')
     if not isinstance(text, str):
         return False
@@ -615,8 +616,6 @@ def main():
 
     if not a.journal or not a.transcripts:
         usage_error('missing --journal or --transcripts')
-    if not a.prices:
-        usage_error('missing --prices (a price table is required; use {} for no prices)')
     if not os.path.isdir(a.journal):
         usage_error(f'--journal is not a directory: {a.journal}')
     if not os.path.isdir(a.transcripts):
@@ -628,7 +627,11 @@ def main():
     if a.date_to and d is None:
         usage_error(f'--to is not an ISO date: {a.date_to}')
     period = (o, d)
-    prices = load_prices(a.prices)
+    if a.prices:
+        prices = load_prices(a.prices)
+    else:
+        prices = {}
+        print('note: no --prices given: the price table is empty, every cost and saving is unavailable (null)', file=sys.stderr)
     source_map = parse_source_map(a.source_map)
 
     applied, applied_bad_ts = read_journal(a.journal, 'applied', period)

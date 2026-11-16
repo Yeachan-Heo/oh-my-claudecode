@@ -9,6 +9,7 @@ import { fileURLToPath } from 'node:url';
 // The script needs python3; the suite is skipped when python3 is not installed.
 const SCRIPT = join(dirname(fileURLToPath(import.meta.url)), '..', '..', 'tools', 'diagnostics', 'tool_call_repeats.py');
 const hasPython3 = spawnSync('python3', ['--version'], { encoding: 'utf8' }).status === 0;
+if (!hasPython3) console.warn('tool_call_repeats.py tests are skipped: python3 is not available');
 
 const D = '2026-11-14';
 const MARKER_PROMPT = 'DUPLICATE-PROMPT-MARKER';
@@ -277,6 +278,7 @@ describe.skipIf(!hasPython3)('tool_call_repeats.py', () => {
     expect(r.stdout).toMatch(/with \(b\) after result = 4\+8\+1\+1 = 14/);
     expect(r.stdout).toMatch(/repeat-work sum, Variant strict: strict:.*= 3\+7\+1\+1 = 12 \(strict sum\)/);
     expect(r.stdout).toMatch(/ReadNotifications/);
+    expect(r.stdout).toMatch(/threshold defaults are starting values to tune with data/);
 
     // TSV: header with the variant; 22 rows: 4 a subsequence + 3 a strict + 2 polling subsequence
     // + 2 polling strict + 8 b + 1 c subsequence + 1 c strict + 1 d
@@ -296,6 +298,8 @@ describe.skipIf(!hasPython3)('tool_call_repeats.py', () => {
     expect(by('c', 'strict').length).toBe(1);
     expect(by('d').length).toBe(1);
     expect(by('d', '').length).toBe(1);
+    expect(rows.filter((x) => x.kind === 'a' || x.kind === 'c' || x.kind === 'polling')
+      .every((x) => x.variant === 'strict' || x.variant === 'subsequence'), 'variant strict or subsequence for a, c, polling').toBe(true);
     const cycleRow = by('d')[0];
     expect(cycleRow.period).toBe('2');
     expect(cycleRow.calls).toBe('6');
@@ -316,7 +320,7 @@ describe.skipIf(!hasPython3)('tool_call_repeats.py', () => {
   });
 
   it('Agent without a prompt stays out of (b), sleep is a whole word, --poll-tool and an MCP suffix work', () => {
-    const dir = join(base, 'l1');
+    const dir = join(base, 'poll-extension');
     mkdirSync(join(dir, 'tr', 'proj'), { recursive: true });
     const t = builder(180);
     const rows: string[] = [];
@@ -332,12 +336,12 @@ describe.skipIf(!hasPython3)('tool_call_repeats.py', () => {
     for (let i = 0; i < 2; i += 1) w('mcp__service__state_read', { key: 'x' }, 'value');
     w('Agent', { subagent_type: 'executor' });
     w('Agent', { subagent_type: 'executor' });
-    writeFileSync(join(dir, 'tr', 'proj', 'ses-l1.jsonl'), rows.join(''));
+    writeFileSync(join(dir, 'tr', 'proj', 'ses-poll.jsonl'), rows.join(''));
     const tr = join(dir, 'tr');
 
     // without the option: sleep (3 calls, 2 different signatures) matched, 0 runs;
     // sleeper-x is not polling (whole word), MyState is not matched, the __state_read suffix is
-    const first = runJson([], 'l1-a.json', tr);
+    const first = runJson([], 'poll-a.json', tr);
     expect(first.r.status, first.r.stderr).toBe(0);
     const w1 = first.out;
     expect(w1.polling.matched_calls.Bash, 'sleep and sleep 5 matched, sleeper-x not').toBe(3);
@@ -352,7 +356,7 @@ describe.skipIf(!hasPython3)('tool_call_repeats.py', () => {
     expect(w1.repeat_work_sum.subsequence).toEqual({ strict_sum: 2, with_b_after_result: 2 });
 
     // with --poll-tool MyState: MyState moves from (a) to polling
-    const second = runJson(['--poll-tool', 'MyState'], 'l1-b.json', tr);
+    const second = runJson(['--poll-tool', 'MyState'], 'poll-b.json', tr);
     expect(second.r.status, second.r.stderr).toBe(0);
     const w2 = second.out;
     expect(w2.a.subsequence.sequences, 'only sleeper-x').toBe(1);

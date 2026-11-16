@@ -462,9 +462,8 @@ def duplicate_pairs(stream):
         groups.setdefault(key, []).append(position)
     pairs = []
     for positions in groups.values():
-        n_positions = len(positions)
-        for a_idx in range(n_positions):
-            for b_idx in range(a_idx + 1, n_positions):
+        for a_idx in range(len(positions)):
+            for b_idx in range(a_idx + 1, len(positions)):
                 i = positions[a_idx]
                 j = positions[b_idx]
                 result_pos = stream[i]['result_pos']
@@ -729,7 +728,7 @@ def collect(calls_by_context, options):
               'pairs': pairs_no_result + pairs_after_result,
               'duplicate_calls': len(duplicate_calls),
               'pairs_by_tool': dict(pairs_by_tool),
-              'duplicates_by_tool': dict(Counter(narz for _, _, _, narz in duplicate_calls)),
+              'duplicates_by_tool': dict(Counter(tool_name for _, _, _, tool_name in duplicate_calls)),
               'denominator': dict(b_denominator),
               'agent_without_prompt': agent_without_prompt},
         'c': {'subsequence': {'series': c_total['subsequence'][0], 'calls': c_total['subsequence'][1],

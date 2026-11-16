@@ -31,6 +31,8 @@ python3 -I tools/diagnostics/compare_sessions.py --timeline <session.jsonl>
 Exit codes: `0` success (whatever the differences), `1` usage or read error (missing file, file without
 any valid line, existing `--output` file).
 
+The tool has no cost option: it reports counts, tool times and evidence gaps only, never a price or a cost.
+
 ## Input format
 
 A session consists of:
@@ -217,13 +219,16 @@ python3 -I tools/diagnostics/decision_outcome_join.py --journal J --transcripts 
 | `--journal <dir>` | directory with `applied.jsonl` and `shadow.jsonl` and their rotated files |
 | `--transcripts <dir>` | directory with the Claude Code transcripts and `agent-*.meta.json` files |
 | `--from`, `--to` | keep rows whose `ts` is in the range (ISO 8601, both ends inclusive) |
-| `--prices <file>` | JSON price table `{"family": [input, cache write 5 min, cache write 1 h, cache read, output]}` in USD per 1 million tokens. Without it every cost is unavailable (null), never zero |
+| `--prices <file>` | optional JSON price table `{"family": [input, cache write 5 min, cache write 1 h, cache read, output]}` in USD per 1 million tokens. Without it the price table is empty: every cost and saving is unavailable (null), never zero, and one note is printed on stderr (the exit code stays `0`) |
+| `--pointer-verbs WORD` | extra verb (repeatable) that marks a pointer prompt (a short prompt that names a file), besides the built-in `read` and `brief`. Words in other languages go here |
 | `--source-map SUBSTRING=LABEL` | label the task source when the subagent type contains `SUBSTRING` (repeatable, first match wins). Without a match the source is `undetermined` |
 | `--tsv <file>` | one row per agent task |
-| `--json <file>` | the whole result as JSON |
+| `--json <file>` | the whole result as JSON (see the note on output files below) |
 | `--wilson-vectors` | print the Wilson test vectors (shared with `wilson_threshold.mjs`) and exit |
 
 Exit codes: `0` valid run (also with no data), `2` argument or input error.
+
+Output files: `--tsv` and `--json` open the given path for writing, so an existing file is overwritten and a symbolic link is followed. Point them at a new path.
 
 ## Input format
 
@@ -336,7 +341,8 @@ run by hand: it does not change OMC behaviour, has no switch, and is not shipped
 ## Requirements and usage
 
 - `python3` (standard library only). Run it in isolated mode with `python3 -I`.
-- The transcripts are only read. The only files written are the `--tsv` and `--json` files, if given.
+- The transcripts are only read. The only files written are the `--tsv` and `--json` files, if given. They are opened for
+  writing as given, so an existing file is overwritten and a symbolic link is followed: point them at a new path.
 
 ```
 python3 -I tools/diagnostics/tool_call_repeats.py --transcripts <dir> [--from <ISO>] [--to <ISO>]
@@ -384,7 +390,8 @@ It is a standalone offline diagnostic run by hand: it does not change OMC behavi
 ## Requirements and usage
 
 - `python3` (standard library only). Run it in isolated mode with `python3 -I`.
-- The inputs are only read. The only files written are the `--tsv` and `--json` files, if given.
+- The inputs are only read. The only files written are the `--tsv` and `--json` files, if given. They are opened for
+  writing as given, so an existing file is overwritten and a symbolic link is followed: point them at a new path.
 
 ```
 python3 -I tools/diagnostics/empty_results.py --transcripts <dir> [--teams <dir>] [--from <ISO>] [--to <ISO>]

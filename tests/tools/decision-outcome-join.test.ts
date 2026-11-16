@@ -9,6 +9,7 @@ import { fileURLToPath } from 'node:url';
 // The script needs python3; the suite is skipped when python3 is not installed.
 const SCRIPT = join(dirname(fileURLToPath(import.meta.url)), '..', '..', 'tools', 'diagnostics', 'decision_outcome_join.py');
 const hasPython3 = spawnSync('python3', ['--version'], { encoding: 'utf8' }).status === 0;
+if (!hasPython3) console.warn('decision_outcome_join.py tests are skipped: python3 is not available');
 
 const MARKER = 'UNIQUE-MARKER-TASK-TEXT';
 
@@ -129,7 +130,7 @@ beforeAll(() => {
   write(join(journal, 'shadow-20261114-080000.jsonl'),
     JSON.stringify({
       ts: '2026-11-14T08:05:00.000Z', point: 'model-routing', mode: 'active', tool_use_id: 'tid-4',
-      state: { task: 'Execute /tmp/task.md' },
+      state: { task: 'Read /tmp/task.md' },
       answers: {
         'model-tier': { choice: 'haiku', probabilities: { haiku: 0.8, sonnet: 0.2 }, confidence: 0.6 },
         effort: { choice: 'xhigh', probabilities: { xhigh: 0.6, low: 0.4 }, confidence: 0.55 },
@@ -216,6 +217,7 @@ describe.skipIf(!hasPython3)('decision_outcome_join', () => {
     expect(out.join.distribution.zero_turns).toBe(1);
     expect(out.join.distribution.bad_ts).toBe(1);
     expect(out.join.distribution.joined).toBe(5);
+    expect(out.join.wilson_1_96[0] > 0 && out.join.wilson_1_96[0] <= out.join.k / out.join.n).toBe(true);
     expect(out.join.wilson_lower_1_645).toBeLessThanOrEqual(out.join.share);
 
     expect(out.join.model_match).toEqual({ 'no model decision': 1, mismatch: 1, undetermined: 1, match: 3 });
@@ -344,15 +346,28 @@ describe.skipIf(!hasPython3)('decision_outcome_join', () => {
     expect(out.agents.length).toBe(0);
   });
 
-  it('without --prices the run is a usage error; an empty table makes every cost unavailable (null), never zero', () => {
-    const missing = spawnSync('python3', ['-I', SCRIPT, '--journal', journal, '--transcripts', transcripts], { encoding: 'utf8' });
-    expect(missing.status).toBe(2);
-    expect(missing.stderr).toMatch(/--prices/);
+  it('without --prices the price table is empty: one note on stderr, exit 0, every cost unavailable (null), never zero', () => {
+    const noPrices = join(base, 'result-no-prices-option.json');
+    const missing = spawnSync('python3', ['-I', SCRIPT, '--journal', journal, '--transcripts', transcripts, '--json', noPrices], { encoding: 'utf8' });
+    expect(missing.status, missing.stderr).toBe(0);
+    expect(missing.stderr.trim().split('\n').length).toBe(1);
+    expect(missing.stderr).toMatch(/no --prices given/);
+    const outMissing = JSON.parse(readFileSync(noPrices, 'utf8'));
+    expect(outMissing.agents.length).toBe(6);
+    for (const a of outMissing.agents) {
+      expect(a.cost_usd).toBeNull();
+      expect(a.gross_saving).toBeNull();
+      expect(a.cost_status).toBe('unavailable');
+    }
+    expect(outMissing.prices).toEqual({});
+    expect(missing.stdout).toMatch(/empty table: every cost is unavailable/);
+    // an explicit empty table gives the same result without the note
     const emptyTable = join(base, 'empty-prices.json');
     writeFileSync(emptyTable, '{}');
     const planPath = join(base, 'result-noprices.json');
     const result = spawnSync('python3', ['-I', SCRIPT, '--journal', journal, '--transcripts', transcripts, '--prices', emptyTable, '--json', planPath], { encoding: 'utf8' });
     expect(result.status, result.stderr).toBe(0);
+    expect(result.stderr).toBe('');
     const out = JSON.parse(readFileSync(planPath, 'utf8'));
     expect(out.agents.length).toBe(6);
     for (const a of out.agents) {
@@ -385,6 +400,35 @@ describe.skipIf(!hasPython3)('decision_outcome_join', () => {
       const outVerb = JSON.parse(readFileSync(join(verbBase, 'b.json'), 'utf8'));
       expect(outVerb.margins['model-tier'].pointer.decisions).toBe(1);
       expect(outVerb.margins['model-tier'].full.decisions).toBe(0);
+    } finally {
+      rmSync(verbBase, { recursive: true, force: true });
+    }
+  });
+
+  it('the default pointer verbs are read and brief; execute and other words come through --pointer-verbs', () => {
+    const verbBase = mkdtempSync(join(tmpdir(), 'decision-outcome-join-default-verbs-'));
+    try {
+      const verbJournal = join(verbBase, 'journal');
+      const shadowRow = (toolUseId: string, task: string) => JSON.stringify({
+        ts: '2026-11-14T09:01:00.000Z', point: 'model-routing', mode: 'active', tool_use_id: toolUseId,
+        state: { task },
+        answers: { 'model-tier': { choice: 'haiku', probabilities: { haiku: 0.9, sonnet: 0.1 }, confidence: 0.9 } },
+      }) + '\n';
+      write(join(verbJournal, 'shadow.jsonl'),
+        shadowRow('tid-read', 'Read /tmp/notes.md')
+        + shadowRow('tid-brief', 'Follow the brief in /tmp/notes.md')
+        + shadowRow('tid-execute', 'Execute /tmp/notes.md'));
+      const run3 = (extra: string[], name: string) => {
+        const result = spawnSync('python3', ['-I', SCRIPT, '--journal', verbJournal, '--transcripts', verbBase, '--prices', prices, ...extra, '--json', join(verbBase, name)], { encoding: 'utf8' });
+        expect(result.status, result.stderr).toBe(0);
+        return JSON.parse(readFileSync(join(verbBase, name), 'utf8')).margins['model-tier'];
+      };
+      const plain = run3([], 'a.json');
+      expect(plain.pointer.decisions).toBe(2);
+      expect(plain.full.decisions).toBe(1);
+      const withExecute = run3(['--pointer-verbs', 'execute'], 'b.json');
+      expect(withExecute.pointer.decisions).toBe(3);
+      expect(withExecute.full.decisions).toBe(0);
     } finally {
       rmSync(verbBase, { recursive: true, force: true });
     }

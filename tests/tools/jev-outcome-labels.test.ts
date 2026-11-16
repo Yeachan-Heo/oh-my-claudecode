@@ -40,12 +40,12 @@ afterEach(() => {
 
 /** Builds the fixture: sessions with learner hints (executed by the Skill tool, executed by the /remember command, ignored with a full window, ignored with an incomplete window, undetermined without a transcript, ignored with remember in the fourth turn), a row only in a rotated file, agent-type denials, groups by spec_version and "no field", a timeline. */
 function build(): void {
-  // W1 sesA: executed by the Skill tool remember in the rest of the current turn
-  // W2 sesB: executed by the /remember command in turn 1
-  // W3 sesC: ignored, 3 full turns without effect (spec_version abc123 group)
-  // W4 sesD: ignored, incomplete window (spec_version abc123 group)
-  // W5 sesE: undetermined, no session transcript
-  // W6 sesF: ignored, remember in turn 4 (outside the window)
+  // sesA: executed by the Skill tool remember in the rest of the current turn
+  // sesB: executed by the /remember command in turn 1
+  // sesC: ignored, 3 full turns without effect (spec_version abc123 group)
+  // sesD: ignored, incomplete window (spec_version abc123 group)
+  // sesE: undetermined, no session transcript
+  // sesF: ignored, remember in turn 4 (outside the window)
   const applied = [
     learner('10:00', 'sesA', {}, { systemMessage: 'UNIQUE-HINT-TEXT-MARKER', noul: 0.92 }),
     learner('10:00', 'sesB', {}, { noul: 0.5 }),
@@ -55,7 +55,7 @@ function build(): void {
     learner('10:00', 'sesF', {}, { noul: 0.1 }),
   ];
   writeFileSync(join(journal, 'applied.jsonl'), applied.join('\n') + '\n');
-  // W7: a row only in a rotated file, session sesC, ts 09:00 (4 turns seen after ts, full window)
+  // a row only in a rotated file, session sesC, ts 09:00 (4 turns seen after ts, full window)
   writeFileSync(join(journal, 'applied-20261114-093000.jsonl'), learner('09:00', 'sesC', {}, { noul: 0.8 }) + '\n');
   const agentRows = [
     agentType('12:00', 'deny'), agentType('12:01', 'allow'),
@@ -211,23 +211,23 @@ describe('jev_outcome_labels', () => {
     expect(j.points.find((p: { point: string }) => p.point === 'learner-extraction').total.n).toBe(7);
   });
 
-  it('/remember only at the start of the text or inside <command-name> (M1); a deny without session_id is undetermined (L2)', () => {
+  it('/remember only at the start of the text or inside <command-name>; a deny without session_id is undetermined', () => {
     mkdirSync(join(transcripts, 'proj'), { recursive: true });
     const learnerRow = (ts: string, session: string) => JSON.stringify({ ts: `${D}T${ts}:00.000Z`, point: 'learner-extraction', session_id: session, applied: { noul: 0.9 } });
-    writeFileSync(join(journal, 'applied.jsonl'), [learnerRow('10:00', 'sesM1'), learnerRow('10:00', 'sesM2'), learnerRow('10:00', 'sesM3')].join('\n') + '\n');
-    // L2: a deny without session_id, followed by an allow without session_id: without the rule the deny would get executed from a missing session
+    writeFileSync(join(journal, 'applied.jsonl'), [learnerRow('10:00', 'sesQuote'), learnerRow('10:00', 'sesSlash'), learnerRow('10:00', 'sesTag')].join('\n') + '\n');
+    // a deny without session_id, followed by an allow without session_id: without the rule the deny would get executed from a missing session
     writeFileSync(join(journal, 'agent-type.jsonl'), [agentType('12:00', 'deny', null as unknown as string), agentType('12:01', 'allow', null as unknown as string)].join('\n') + '\n');
-    writeFileSync(join(transcripts, 'proj', 'sesM1.jsonl'), [entry('09:59', 'user', 'start'), entry('10:05', 'user', 'see skills/remember/SKILL.md after it'), entry('10:10', 'user', 'x'), entry('10:15', 'user', 'y')].join('\n') + '\n');
-    writeFileSync(join(transcripts, 'proj', 'sesM2.jsonl'), [entry('09:59', 'user', 'start'), entry('10:05', 'user', '/remember save a note')].join('\n') + '\n');
-    writeFileSync(join(transcripts, 'proj', 'sesM3.jsonl'), [entry('09:59', 'user', 'start'), entry('10:05', 'user', 'something first'), entry('10:10', 'user', 'before <command-name>/oh-my-claudecode:remember</command-name> after')].join('\n') + '\n');
+    writeFileSync(join(transcripts, 'proj', 'sesQuote.jsonl'), [entry('09:59', 'user', 'start'), entry('10:05', 'user', 'see skills/remember/SKILL.md after it'), entry('10:10', 'user', 'x'), entry('10:15', 'user', 'y')].join('\n') + '\n');
+    writeFileSync(join(transcripts, 'proj', 'sesSlash.jsonl'), [entry('09:59', 'user', 'start'), entry('10:05', 'user', '/remember save a note')].join('\n') + '\n');
+    writeFileSync(join(transcripts, 'proj', 'sesTag.jsonl'), [entry('09:59', 'user', 'start'), entry('10:05', 'user', 'something first'), entry('10:10', 'user', 'before <command-name>/oh-my-claudecode:remember</command-name> after')].join('\n') + '\n');
     const tsvPath = join(base, 'remember.tsv');
     const w = run(['--json', '--tsv', tsvPath]);
     expect(w.code, `exit 0, stderr: ${w.stderr}`).toBe(0);
     const rows = tsvRows(readFileSync(tsvPath, 'utf8'));
     const resultBySession = Object.fromEntries(rows.filter((x) => x.point === 'learner-extraction').map((x) => [x.session, x.result]));
-    expect(resultBySession.sesM1).toBe('ignored');
-    expect(resultBySession.sesM2).toBe('executed');
-    expect(resultBySession.sesM3).toBe('executed');
+    expect(resultBySession.sesQuote).toBe('ignored');
+    expect(resultBySession.sesSlash).toBe('executed');
+    expect(resultBySession.sesTag).toBe('executed');
     const denials = rows.filter((x) => x.point === 'agent-type');
     expect(denials.length).toBe(1);
     expect(denials[0].result).toBe('undetermined');
@@ -257,7 +257,7 @@ describe('jev_outcome_labels', () => {
     expect(denialPoint.total.undetermined).toBe(1);
   });
 
-  it('chain with wilson_threshold (M2): the TSV of the labels tool is the input of the threshold tool', () => {
+  it('chain with wilson_threshold: the TSV of the labels tool is the input of the threshold tool', () => {
     build();
     const tsvPath = join(base, 'chain.tsv');
     const first = run(['--tsv', tsvPath]);

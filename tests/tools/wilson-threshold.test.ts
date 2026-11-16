@@ -7,13 +7,11 @@ import { fileURLToPath } from 'node:url';
 import {
   analyze,
   certifiedFloor,
-  parseArgs,
   parseTsv,
   selectThreshold,
   splitFitHoldout,
   sweep,
   textReport,
-  validateArgs,
   wilsonInterval,
   wilsonLower,
   wilsonUpper,
@@ -422,7 +420,7 @@ describe('wilson_threshold', () => {
     expect(reportText).toMatch(/no confidence: n 3/);
   });
 
-  it('upper bound (direction upper): status and vectors; CLI rejects direction upper with a confidence column', () => {
+  it('wilsonUpper vectors and the ratio-mode statuses with direction upper', () => {
     const vectors = [
       [0, 30, 0.0827],
       [0, 100, 0.0263],
@@ -444,7 +442,9 @@ describe('wilson_threshold', () => {
     expect(near(r6.groups[0].upper as number, 0.1118)).toBe(true);
     // Default direction lower: the same data does not meet the 0.10 target from below (lower bound about 0.0223).
     expect(run(five, { target: 0.1 }).groups[0].status).toBe('threshold not met');
-    // CLI: direction upper needs the ratio mode
+  });
+
+  it('CLI --direction upper requires the ratio mode (exit 2 with a confidence column); value validation', () => {
     const withConfidence = cli(['--input', '-', '--target', '0.1', '--direction', 'upper'], 'result\tconfidence\n1\t0.9\n');
     expect(withConfidence.status).toBe(2);
     expect(withConfidence.stderr).toMatch(/direction upper/);
@@ -480,16 +480,5 @@ describe('wilson_threshold', () => {
     expect(textReport(report)).toMatch(/error selective: 0.2500/);
     const perQuery = run(text, { target: 0.9, minSupport: 1, kind: 'per-query' });
     expect(textReport(perQuery)).toMatch(/error per-query: 0.2500/);
-  });
-
-  it('argument parsing and validation', () => {
-    expect(parseArgs(['--nope'])).toBeNull();
-    expect(validateArgs(null)).toBe('unknown argument');
-    expect(validateArgs(parseArgs(['--target', '0.9']))).toBe('missing --input');
-    const ok = parseArgs(['--input', 'x.tsv', '--target', '0,95', '--group-by', 'point,mode']);
-    expect(ok).not.toBeNull();
-    expect(validateArgs(ok)).toBeNull();
-    expect(ok!.target).toBe(0.95);
-    expect(validateArgs(parseArgs(['--input', 'x.tsv', '--target', '0.5', '--group-by', 'tryb']))).toMatch(/--group-by/);
   });
 });

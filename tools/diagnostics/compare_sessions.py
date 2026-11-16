@@ -69,7 +69,7 @@ def content_blocks(line):
     return []
 
 
-def is_interrupt(blocks):
+def is_interrupt(row, blocks):
     """User line with an interrupt marker: a text block starting with the interrupt prefix."""
     for b in blocks:
         if b.get("type") == "text" and str(b.get("text", "")).startswith(INTERRUPT_PREFIX):
@@ -270,29 +270,28 @@ def analyze(main_file, no_subagents, with_timeline=False):
                             continue  # duplicate result (resumed copies) is skipped
                         seen_results.add(identifier)
                         failed = block.get("is_error") is True  # explicit flag only; the word "error" in content is not a failure
-                        status = "failure" if failed else "ok"
                         call = calls.get(identifier)
                         if call is None or call["result"] is not None:
                             orphan_results += 1  # result without a call in the transcript
-                            events.append((ts, ts_text, file_index, "result", {"id": identifier, "status": status, "duration_ms": None, "no_call": True}))
+                            events.append((ts, ts_text, file_index, "result", {"id": identifier, "status": "failure" if failed else "ok", "duration_ms": None, "no_call": True}))
                             continue
                         duration_ms = None
                         if ts is not None and call["ts"] is not None:
                             diff = int(round((ts - call["ts"]) * 1000))
                             if diff >= 0:
                                 duration_ms = diff
-                        call["result"] = {"status": status, "duration_ms": duration_ms, "ts": ts}
+                        call["result"] = {"status": "failure" if failed else "ok", "duration_ms": duration_ms, "ts": ts}
                         record = tools[call["tool"]]
                         if failed:
                             record.failures += 1
                         if duration_ms is not None:
                             record.measured += 1
                             record.total_ms += duration_ms
-                        events.append((ts, ts_text, file_index, "result", {"id": identifier, "status": status, "duration_ms": duration_ms}))
+                        events.append((ts, ts_text, file_index, "result", {"id": identifier, "status": "failure" if failed else "ok", "duration_ms": duration_ms}))
                 # turns: state kept per file
                 if o.get("isCompactSummary") is True or o.get("isVisibleInTranscriptOnly") is True:
                     pass  # skipped for turns (compaction summary, transcript-only notes)
-                elif is_interrupt(blocks):
+                elif is_interrupt(o, blocks):
                     # an interrupt closes the open turn whether or not this line also has a tool_result;
                     # the tool_result of this line is still counted above
                     if turn_open:

@@ -398,7 +398,7 @@ function main() {
         executed_share: { k: executed, n: labelled, share: labelled > 0 ? round4(executed / labelled) : null, assessment: labelled >= MIN_SUPPORT ? percentText(executed, labelled) : 'too little data' },
         thresholds: {
           deep20: labelled >= DEEP_THRESHOLD ? 'sufficient' : 'too little data',
-          r7_min_support: labelled >= MIN_SUPPORT ? 'sufficient' : 'too little data',
+          min_support: labelled >= MIN_SUPPORT ? 'sufficient' : 'too little data',
           last10: { ignored: lastIgnored, labelled: lastLabelled, of_last: last.length, c_percent: C_THRESHOLD_PERCENT, note: 'threshold (c) 70 %: unapproved proposal, a number only' },
         },
       };
@@ -487,7 +487,7 @@ function summaryText(w) {
     lines.push(`  executed share on the point: ${p.total.assessment} (k=${p.total.executed_share.k}, n=${p.total.executed_share.n}; threshold ${p.total.assessment === 'too little data' ? '30 labels (min_support)' : ''})`);
     for (const g of p.groups) {
       lines.push(`  group spec_version=${g.spec_version} jev_model=${g.jev_model}: n=${g.n}, labelled ${g.labelled}/${g.n}, undetermined ${g.undetermined}, executed ${g.executed}, ignored ${g.ignored}, window incomplete ${g.window_incomplete}, would-deny ${g.would_deny}, outside verdict ${g.outside_verdict}, period ${g.period.from ?? '?'} to ${g.period.to ?? '?'}`);
-      lines.push(`  label thresholds: DEEP 20: ${g.thresholds.deep20}, min_support R7 30: ${g.thresholds.r7_min_support}`);
+      lines.push(`  label thresholds: DEEP 20: ${g.thresholds.deep20}, min_support 30: ${g.thresholds.min_support}`);
       lines.push(`  last 10: no effect (ignored) ${g.thresholds.last10.ignored} of ${g.thresholds.last10.labelled} labelled (of the last ${g.thresholds.last10.of_last}); threshold (c) 70 %: unapproved proposal, a number only`);
     }
   }

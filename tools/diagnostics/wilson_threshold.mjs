@@ -86,7 +86,6 @@ export const SLACK_HOLDOUT = 0.02;
 export const SMALL_SAMPLE = 100;
 export const GROUP_FIELDS = ['point', 'spec_version', 'jev_model', 'mode', 'session'];
 const EXCLUDED_MODES = ['breaker', 'limit', 'degraded'];
-const DEFAULT_GROUP_FIELDS = ['point', 'spec_version', 'jev_model'];
 
 /** One-sided lower Wilson bound (z = 1.645); n = 0 or bad data gives null. */
 export function wilsonLower(k, n, z = Z_LOWER) {
@@ -215,10 +214,6 @@ function parseResult(raw) {
   return null;
 }
 
-function emptyGroup() {
-  return { list: [], noConfidenceList: [], modes: {}, undetermined: 0, invalid: 0, invalidConfidence: 0, badFormat: 0, total: 0 };
-}
-
 /**
  * Main analysis of the parsed rows (output of parseTsv). Each row falls into exactly one category: the denominator
  * (with a numeric confidence: sweep; with an empty confidence: the "no confidence" subgroup as a ratio) or excluded
@@ -230,9 +225,12 @@ export function analyze({ columns, rows }, options = {}) {
   const hasConfidence = columns.includes('confidence');
   const hasTs = columns.includes('ts');
 
-  const groupFields = groupBy !== null ? groupBy : DEFAULT_GROUP_FIELDS.some((p) => columns.includes(p)) ? DEFAULT_GROUP_FIELDS : [];
+  const DEFAULT_GROUP_FIELDS = ['point', 'spec_version', 'jev_model'];
+  const hasDefaults = DEFAULT_GROUP_FIELDS.some((p) => columns.includes(p));
+  const groupFields = groupBy !== null ? groupBy : hasDefaults ? DEFAULT_GROUP_FIELDS : [];
   const groupKey = (row) => groupFields.map((p) => {
-    const value = String(row[p] ?? '').trim();
+    const raw = p === 'mode' ? row.mode : p === 'session' ? row.session : row[p];
+    const value = String(raw ?? '').trim();
     return value === '' ? 'no field' : value;
   });
 
@@ -251,7 +249,7 @@ export function analyze({ columns, rows }, options = {}) {
     const key = JSON.stringify(groupKey(row));
     let group = groups.get(key);
     if (!group) {
-      group = emptyGroup();
+      group = { list: [], noConfidenceList: [], modes: {}, undetermined: 0, invalid: 0, invalidConfidence: 0, badFormat: 0, total: 0 };
       groups.set(key, group);
     }
     group.total += 1;
@@ -288,7 +286,7 @@ export function analyze({ columns, rows }, options = {}) {
     }
     group.list.push(working);
   }
-  if (groups.size === 0) groups.set(JSON.stringify([]), emptyGroup());
+  if (groups.size === 0) groups.set(JSON.stringify([]), { list: [], noConfidenceList: [], modes: {}, undetermined: 0, invalid: 0, invalidConfidence: 0, badFormat: 0, total: 0 });
 
   const statusForRatio = (n, k) => {
     if (n < minSupport) return 'too little data';
@@ -325,7 +323,8 @@ export function analyze({ columns, rows }, options = {}) {
       const selectiveError = threshold.n === 0 ? null : 1 - threshold.k / threshold.n;
       error = kind === 'per-query' ? threshold.coverage * selectiveError : selectiveError;
     } else {
-      error = n === 0 ? null : 1 - k / n;
+      const selectiveError = n === 0 ? null : 1 - k / n;
+      error = selectiveError;
     }
     // "No confidence" subgroup: rows with an empty confidence, measured as a ratio next to the sweep.
     let noConfidence = null;
