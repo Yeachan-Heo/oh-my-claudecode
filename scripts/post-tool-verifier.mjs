@@ -1037,7 +1037,7 @@ function getAgentCompletionSummary(directory, quietLevel = QUIET_LEVEL, sessionI
 
       const parts = [];
       if (quietLevel < 2 && running.length > 0) {
-        parts.push(`Running: ${running.length} [${running.map(a => a.agent_type.replace('oh-my-claudecode:', '')).join(', ')}]`);
+        parts.push(`Running: ${running.length} [${running.map(a => String(a.agent_type ?? '').replace('oh-my-claudecode:', '') || 'unknown').join(', ')}]`);
       }
       if (quietLevel < 2 && completed > 0) parts.push(`Completed: ${completed}`);
       if (failed > 0) parts.push(`Failed: ${failed}`);
