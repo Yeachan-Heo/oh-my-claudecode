@@ -17,7 +17,8 @@ vi.mock("../../cli/tmux-utils.js", async (importOriginal) => ({
   tmuxCmdAsync: tmuxUtilsMocks.tmuxCmdAsync,
 }));
 
-import { killWorkerPaneProcessTree } from "../tmux-session.js";
+import { killOwnedWorkerPane, killWorkerPaneProcessTree, type WorkerPaneOwnership } from "../tmux-session.js";
+import { currentStrictProcessStartIdentity } from "../team-owner-epoch.js";
 
 const execFileAsync = promisify(execFile);
 
@@ -93,6 +94,7 @@ function isAlive(pid: number): boolean {
 
 beforeEach(() => {
   tmuxUtilsMocks.tmuxCmdAsync.mockReset();
+  tmuxUtilsMocks.tmuxExecAsync.mockReset();
   delete process.env.OMC_TEAM_KILL_PANE_TREE;
 });
 
@@ -177,5 +179,80 @@ describe("killWorkerPaneProcessTree (opt-in OMC_TEAM_KILL_PANE_TREE=1)", () => {
 
     expect((await taggedSleeps("240")).length).toBe(1);
     expect(isAlive(pane.pid!)).toBe(true);
+  });
+});
+
+describe.skipIf(currentStrictProcessStartIdentity(process.pid) === null)("killOwnedWorkerPane (tmux) and the pane process tree", () => {
+  const PANE_ID = "%7";
+  // The identity of this very process, so that the real server identity and ownership checks pass against the mocked tmux.
+  const OWN_IDENTITY = {
+    socket_path: "/tmp/omc-kill-pane-tree-test.sock",
+    server_pid: process.pid,
+    process_started_at: currentStrictProcessStartIdentity(process.pid) ?? "unavailable",
+  };
+  const ownership: WorkerPaneOwnership = {
+    provider: "tmux",
+    providerTarget: "leader-session:0",
+    paneId: PANE_ID,
+    splitTarget: "",
+    leaderPaneId: "%1",
+    reservedPaneIds: [],
+    source: "adopted",
+    tmuxServerIdentity: OWN_IDENTITY,
+  };
+
+  /** Answers the identity probe, the membership list and the two guarded commands; records their order. */
+  function mockTmuxServer(panePid: number): { events: string[]; sleepsAtKillPane: number[] } {
+    const events: string[] = [];
+    const sleepsAtKillPane: number[] = [];
+    tmuxUtilsMocks.tmuxExecAsync.mockImplementation(async (args: string[]) => ({
+      stdout: args.includes("list-panes") ? `${PANE_ID}\n%1\n` : "",
+      stderr: "",
+    }));
+    tmuxUtilsMocks.tmuxCmdAsync.mockImplementation(async (args: string[]) => {
+      if (args[2] === "display-message") return { stdout: `${process.pid}\n`, stderr: "" };
+      const joined = args.join(" ");
+      const marker = joined.match(/OMC_TMUX_GUARD_OK_[A-Za-z0-9_]+/)?.[0];
+      if (args[2] !== "if-shell" || !marker) return { stdout: "", stderr: "" };
+      if (joined.includes("#{pane_pid}")) {
+        events.push("pane-pid-query");
+        return { stdout: `${panePid}\n${marker}\n`, stderr: "" };
+      }
+      if (joined.includes("kill-pane")) {
+        events.push("kill-pane");
+        sleepsAtKillPane.push((await taggedSleeps("240")).length, (await taggedSleeps("241")).length);
+        return { stdout: `${marker}\n`, stderr: "" };
+      }
+      return { stdout: "", stderr: "" };
+    });
+    return { events, sleepsAtKillPane };
+  }
+
+  it("with the variable set: the descendants are gone before kill-pane is issued", async () => {
+    process.env.OMC_TEAM_KILL_PANE_TREE = "1";
+    const pane = startPane(`sh -c 'sleep 240.${TAG}' & sleep 241.${TAG} & wait`);
+    await waitForTaggedSleeps("240", 1);
+    await waitForTaggedSleeps("241", 1);
+    const { events, sleepsAtKillPane } = mockTmuxServer(pane.pid!);
+    const killSpy = vi.spyOn(process, "kill");
+
+    await killOwnedWorkerPane(ownership);
+
+    expect(events).toEqual(["pane-pid-query", "kill-pane"]);
+    expect(sleepsAtKillPane).toEqual([0, 0]);
+    // The pane root is left to the pane kill: it is never signalled by the tree kill.
+    expect(killSpy.mock.calls.some(([pid]) => pid === pane.pid)).toBe(false);
+  }, 30_000);
+
+  it("without the variable: the pane is killed with no tree query and the descendants are left alone", async () => {
+    const pane = startPane(`sh -c 'sleep 240.${TAG}' & sleep 241.${TAG} & wait`);
+    await waitForTaggedSleeps("240", 1);
+    await waitForTaggedSleeps("241", 1);
+    const { events, sleepsAtKillPane } = mockTmuxServer(pane.pid!);
+
+    await killOwnedWorkerPane(ownership);
+
+    expect(events).toEqual(["kill-pane"]);
+    expect(sleepsAtKillPane).toEqual([1, 1]);
   });
 });

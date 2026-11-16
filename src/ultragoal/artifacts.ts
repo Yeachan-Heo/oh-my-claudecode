@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { existsSync } from 'node:fs';
-import { appendFile, mkdir, readdir, readFile, rename, rm, writeFile } from 'node:fs/promises';
+import { appendFile, chmod, mkdir, readdir, readFile, rename, rm, stat, writeFile } from 'node:fs/promises';
 import { join, relative } from 'node:path';
 import {
   formatClaudeGoalReconciliation,
@@ -451,11 +451,14 @@ export async function readUltragoalPlan(cwd: string, planId?: string): Promise<U
 async function writePlan(cwd: string, plan: UltragoalPlan): Promise<void> {
   // The plan is written to a unique temporary file in the same directory and renamed into place,
   // so an interrupted write never leaves a truncated goals.json; a failed write removes its temporary file.
+  // The permissions of an existing goals.json carry over to the new file; without one the default mode applies.
   const goalsPath = ultragoalGoalsPath(cwd, plan.planId);
   const tmpPath = `${goalsPath}.tmp.${process.pid}.${randomUUID()}`;
   await mkdir(ultragoalDir(cwd, plan.planId), { recursive: true });
+  const existing = await stat(goalsPath).catch(() => null);
   try {
     await writeFile(tmpPath, `${JSON.stringify(plan, null, 2)}\n`, { flag: 'wx' });
+    if (existing) await chmod(tmpPath, existing.mode & 0o777);
     await rename(tmpPath, goalsPath);
   } catch (error) {
     await rm(tmpPath, { force: true });

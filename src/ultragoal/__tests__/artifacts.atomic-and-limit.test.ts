@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, mkdirSync, readFileSync, readdirSync, statSync, writeFileSync } from 'node:fs';
 import { mkdtemp, readFile, rm } from 'node:fs/promises';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
@@ -8,6 +8,8 @@ import { clearWorktreeCache } from '../../lib/worktree-paths.js';
 import {
   addUltragoalGoal,
   createUltragoalPlan,
+  deriveGoalCandidates,
+  UltragoalError,
   ultragoalDir,
   ultragoalGoalsPath,
 } from '../artifacts.js';
@@ -77,6 +79,11 @@ async function readPlan(cwd: string): Promise<{ version: number; goals: Array<{ 
 
 function bulletBrief(count: number): string {
   return Array.from({ length: count }, (_, index) => `- Goal number ${index + 1}`).join('\n');
+}
+
+// A loose list without bullets: paragraphs separated by a blank line (the second way goals are derived).
+function paragraphBrief(count: number): string {
+  return Array.from({ length: count }, (_, index) => `Paragraph ${index + 1} of the brief: something to do.`).join('\n\n');
 }
 
 describe('ultragoal goals.json atomic write', () => {
@@ -193,6 +200,38 @@ describe('ultragoal goals.json atomic write', () => {
   });
 });
 
+describe.skipIf(process.platform === 'win32')('ultragoal goals.json permissions', () => {
+  beforeEach(() => {
+    control.failRenameNext = false;
+    control.fixedUuid = undefined;
+  });
+
+  it('keeps the permissions of an existing goals.json across the atomic write', async () => {
+    await withTempRepo(async (cwd) => {
+      await createUltragoalPlan(cwd, { planId: PLAN_ID, brief: BRIEF });
+      const goalsPath = ultragoalGoalsPath(cwd, PLAN_ID);
+
+      // 0o600 is narrower and 0o664 wider than the 0o644 a default umask gives a new file.
+      for (const mode of [0o600, 0o664]) {
+        chmodSync(goalsPath, mode);
+        await addUltragoalGoal(cwd, { planId: PLAN_ID, title: `goal for mode ${mode.toString(8)}`, objective: 'Mode test goal.' });
+        expect(statSync(goalsPath).mode & 0o777).toBe(mode);
+      }
+      expect(temporaryFiles(cwd)).toEqual([]);
+    });
+  });
+
+  it('gives a new goals.json the default mode of a newly created file', async () => {
+    await withTempRepo(async (cwd) => {
+      await createUltragoalPlan(cwd, { planId: PLAN_ID, brief: BRIEF });
+      const reference = join(ultragoalDir(cwd, PLAN_ID), 'default-mode-reference');
+      writeFileSync(reference, 'reference');
+
+      expect(statSync(ultragoalGoalsPath(cwd, PLAN_ID)).mode & 0o777).toBe(statSync(reference).mode & 0o777);
+    });
+  });
+});
+
 describe('ultragoal implicit candidate limit', () => {
   let originalLimit: string | undefined;
 
@@ -234,7 +273,7 @@ describe('ultragoal implicit candidate limit', () => {
     await withTempRepo(async (cwd) => {
       const error = await createUltragoalPlan(cwd, { brief: bulletBrief(21) }).catch((caught: unknown) => caught);
 
-      expect(error).toBeInstanceOf(Error);
+      expect(error).toBeInstanceOf(UltragoalError);
       expect((error as Error).message).toContain('21 goal candidates');
       expect((error as Error).message).toContain('20');
       expect((error as Error).message).toContain('--goal');
@@ -250,5 +289,56 @@ describe('ultragoal implicit candidate limit', () => {
       const plan = await createUltragoalPlan(cwd, { brief: bulletBrief(21), goals });
       expect(plan.goals).toHaveLength(21);
     });
+  });
+
+  it('never limits a larger set of explicit goals', async () => {
+    process.env[MAX_CANDIDATES_ENV] = '20';
+    await withTempRepo(async (cwd) => {
+      const goals = Array.from({ length: 25 }, (_, index) => ({ objective: `Explicit goal ${index + 1}` }));
+      const plan = await createUltragoalPlan(cwd, { brief: bulletBrief(21), goals });
+      expect(plan.goals).toHaveLength(25);
+      expect(plan.goals[0]?.objective).toBe('Explicit goal 1');
+    });
+  });
+
+  it('accepts exactly 20 and refuses 21 candidates derived from a loose bullet list', () => {
+    process.env[MAX_CANDIDATES_ENV] = '20';
+    const candidates = deriveGoalCandidates(bulletBrief(20));
+    expect(candidates).toHaveLength(20);
+    expect(candidates[0]?.objective).toBe('Goal number 1');
+    expect(() => deriveGoalCandidates(bulletBrief(21))).toThrow(UltragoalError);
+    expect(() => deriveGoalCandidates(bulletBrief(21))).toThrow(/21 goal candidates/);
+  });
+
+  it('accepts exactly 20 and refuses 21 candidates derived from paragraphs', () => {
+    process.env[MAX_CANDIDATES_ENV] = '20';
+    expect(deriveGoalCandidates(paragraphBrief(20))).toHaveLength(20);
+    let failure: unknown = null;
+    try {
+      deriveGoalCandidates(paragraphBrief(21));
+    } catch (error) {
+      failure = error;
+    }
+    expect(failure).toBeInstanceOf(UltragoalError);
+    expect((failure as Error).message).toContain('21 goal candidates');
+    expect((failure as Error).message).toContain('20');
+  });
+
+  it('does not count headings or non-goal lines against the limit', () => {
+    process.env[MAX_CANDIDATES_ENV] = '20';
+    const headings = '# Plan\n\n## Background\n\n';
+    expect(deriveGoalCandidates(`${headings}${paragraphBrief(20)}`)).toHaveLength(20);
+    // With a bullet list present only the bullets are goals; the prose around them is not counted.
+    expect(deriveGoalCandidates(`Intro line.\n\n${bulletBrief(20)}\n\nClosing remark.`)).toHaveLength(20);
+  });
+
+  it('leaves an empty brief to the existing empty-list path', () => {
+    process.env[MAX_CANDIDATES_ENV] = '20';
+    expect(deriveGoalCandidates('')).toHaveLength(1);
+  });
+
+  it.each(['abc', '-3', ''])('does not limit candidates when the variable is %j', (value) => {
+    process.env[MAX_CANDIDATES_ENV] = value;
+    expect(deriveGoalCandidates(bulletBrief(25))).toHaveLength(25);
   });
 });

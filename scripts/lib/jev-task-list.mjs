@@ -1,3 +1,4 @@
+/* global process, console */
 // Task lists of agents: storage, update semantics and the PostToolUse entry point.
 // Opt-in: the state hooks do nothing unless OMC_TASK_LIST=1 (see scripts/jev-task-list-state.mjs).
 // The list of every agent is what the agent itself sent to a list tool (source of truth: the tool_input of a call that ran, as the
@@ -12,6 +13,7 @@ import { homedir } from 'node:os';
 import { appendFileSync, closeSync, existsSync, linkSync, lstatSync, mkdirSync, openSync, readFileSync, readdirSync, renameSync, rmSync, statSync, unlinkSync, writeSync } from 'node:fs';
 import { basename, join } from 'node:path';
 import { atomicWriteFileSync } from './atomic-write.mjs';
+import { rotateJevLog } from '../jev-resolve.mjs';
 
 export const LIST_TOOL_RE = /^mcp__(?:plugin_oh-my-claudecode_)?t__task_list$/; // also the bare server name without the plugin prefix
 export const MAIN = 'main';
@@ -20,6 +22,7 @@ export const ITEMS_MAX = 50;
 export const CONTENT_MAX = 500;
 export const NOTE_MAX = 600;
 export const LISTS_MAX_AGE_MS = 7 * 24 * 3600 * 1000;
+export const LOG_MAX_BYTES = 50 * 1024 * 1024; // size at which task-list.jsonl and batches.jsonl are rotated
 const SWEEP_EVERY_MS = 3600 * 1000;
 const STATUSES = new Set(['pending', 'in_progress', 'completed']);
 const SESSION_ID = /^(?!\.)[A-Za-z0-9._-]{1,200}$/; // a safe session id, never "." or ".." or a name starting with a dot
@@ -34,7 +37,7 @@ const LOCK_STALE_MS = 3000;
 const SYNC_STALE_MS = 60_000;
 const LOCK_STEP_MS = 20;
 
-// Tools whose call changes the list of the calling agent (the PostToolUse matcher in hooks/hooks.json names exactly these).
+// Tools whose call changes the list of the calling agent (the PostToolUse matcher shown in docs/HOOKS.md names exactly these).
 // update_plan and wrap_up count only in the main thread: the host rejects them in subagents before they run.
 export const LIST_TOOL_NAMES = ['mcp__plugin_oh-my-claudecode_t__task_list', 'mcp__t__task_list', 'TaskCreate', 'TaskUpdate', 'TodoWrite', 'mcp__ccd_turn__update_plan', 'mcp__ccd_turn__wrap_up'];
 export function isListTool(name, key = MAIN) {
@@ -73,12 +76,14 @@ function readRecord(path) {
   }
 }
 
-// Appends one JSON row to a file of the log directory. Never throws.
+// Appends one JSON row to a file of the log directory; a file above LOG_MAX_BYTES is rotated first. Never throws.
 function appendLog(name, row, env = process.env) {
   try {
     const dir = taskListLogDir(env);
     mkdirSync(dir, { recursive: true });
-    appendFileSync(join(dir, name), JSON.stringify(row) + '\n', 'utf8');
+    const path = join(dir, name);
+    rotateJevLog(path, LOG_MAX_BYTES);
+    appendFileSync(path, JSON.stringify(row) + '\n', 'utf8');
   } catch { /* logging never breaks the hook */ }
 }
 

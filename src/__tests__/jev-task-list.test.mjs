@@ -5,7 +5,7 @@
  * the registry opt-in are covered in task-list-tool.test.ts.
  */
 import { spawn } from 'node:child_process';
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, utimesSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, truncateSync, utimesSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath, pathToFileURL, URL } from 'node:url';
@@ -186,7 +186,7 @@ describe('task list: state hook (PostToolUse)', () => {
     expect(listOf(sid, 'main').items.every((x) => x.status === 'completed')).toBe(true);
   });
 
-  it('TaskCreate with text and object results; TaskUpdate of another agent\'s task moves nothing; a reused number belongs to the later creator', async () => {
+  it('TaskCreate with text and object results; TaskUpdate of another agent\'s task moves nothing; a reused number stays with the first creator', async () => {
     const sid = session();
     await stan(sid, 'TaskCreate', { subject: 'TEST task list 7', description: 'description 7' }, { agent_id: 'ag4', tool_response: 'Task #7 created successfully: TEST task list 7' });
     await stan(sid, 'TaskCreate', { subject: 'Task 8' }, { agent_id: 'ag4', tool_response: { task: { id: '8', subject: 'Task 8' } } });
@@ -294,10 +294,15 @@ describe('task list: batch hook (not registered)', () => {
 });
 
 describe('task list: storage library', () => {
-  it('the matcher of the state hook in hooks/hooks.json names exactly the list tools', () => {
-    const entry = HOOKS.hooks.PostToolUse.find((g) => g.hooks.some((h) => h.args.some((a) => a.endsWith('/jev-task-list-state.mjs'))));
-    expect(entry).toBeDefined();
+  it('the state hook is not registered in hooks/hooks.json; the matcher shown in docs/HOOKS.md names exactly the list tools', () => {
+    expect(JSON.stringify(HOOKS)).not.toContain('jev-task-list-state');
+    const doc = readFileSync(join(ROOT, 'docs', 'HOOKS.md'), 'utf8');
+    const section = doc.slice(doc.indexOf('#### Task List'));
+    const snippet = JSON.parse(section.match(/```json\n([\s\S]*?)\n```/)[1]);
+    const entry = snippet.hooks.PostToolUse[0];
     expect([...entry.matcher.split('|')].sort()).toEqual([...L.LIST_TOOL_NAMES].sort());
+    expect(entry.hooks[0].timeout).toBe(3);
+    expect(entry.hooks[0].command).toBe('node "<plugin-root>/scripts/run.cjs" "<plugin-root>/scripts/jev-task-list-state.mjs"');
     expect(L.LIST_TOOL_NAMES.every((name) => L.isListTool(name))).toBe(true);
   });
 
@@ -305,6 +310,32 @@ describe('task list: storage library', () => {
     const text = JSON.stringify(HOOKS);
     expect(text).not.toContain('jev-task-list-batch');
     expect(text).not.toContain('PostToolBatch');
+  });
+
+  it('task-list.jsonl and batches.jsonl are rotated above 50 MB before the next row is appended', () => {
+    const dir = mkdtempSync(join(TMP, 'rotate-'));
+    const env = { OMC_TASK_LIST_LOG_DIR: dir };
+    const rowsOf = (name) => readFileSync(join(dir, name), 'utf8').trim().split('\n').map((line) => JSON.parse(line));
+    for (const name of ['task-list.jsonl', 'batches.jsonl']) {
+      const stem = name.replace(/\.jsonl$/, '');
+      const rotatedOf = () => readdirSync(dir).filter((file) => new RegExp(`^${stem}-\\d{8}-\\d{6}-\\d+\\.jsonl$`).test(file));
+      // A sparse file at exactly the limit is kept: only a larger file is rotated.
+      writeFileSync(join(dir, name), '{"old":1}\n');
+      truncateSync(join(dir, name), L.LOG_MAX_BYTES);
+      L.logRow(name, { event: 'at-limit' }, env);
+      expect(rotatedOf()).toEqual([]);
+      expect(statSync(join(dir, name)).size).toBeGreaterThan(L.LOG_MAX_BYTES);
+      // The file now exceeds the limit: it moves aside whole and the next row starts a new file.
+      L.logRow(name, { event: 'rotated' }, env);
+      const rotated = rotatedOf();
+      expect(rotated).toHaveLength(1);
+      expect(statSync(join(dir, rotated[0])).size).toBeGreaterThan(L.LOG_MAX_BYTES);
+      expect(rowsOf(name).map((row) => row.event)).toEqual(['rotated']);
+      // The new file is small again: no further rotation.
+      L.logRow(name, { event: 'after' }, env);
+      expect(rotatedOf()).toEqual(rotated);
+      expect(rowsOf(name).map((row) => row.event)).toEqual(['rotated', 'after']);
+    }
   });
 
   it('isListTool: update_plan and wrap_up count only in the main thread', () => {

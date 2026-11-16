@@ -158,18 +158,40 @@ Fires after a tool use completes.
 | `project-memory-posttool.mjs` | Updates project memory | 3s |
 | `post-tool-rules-injector.mjs` | Injects matching project rules | 3s |
 | `post-tool-directory-context-injector.mjs` | Injects the README.md and AGENTS.md files from the file's directory up to the working directory, for Read, Write, Edit, and MultiEdit | 3s |
-| `jev-task-list-state.mjs` | Saves the task list of the calling agent; opt-in with `OMC_TASK_LIST=1` (see [Task List](#task-list-scriptslibjev-task-listmjs)) | 3s |
 
 Injects additional guidance based on Read, Write, Edit, and Bash results. For example, after reading a file it may hint "consider using parallel reads."
 These exact canonical shipped scripts use the trusted Worker path without changing their manifest timeout budgets. The verifier retains statistics for the current session and the 99 most recently updated historical sessions so per-tool writes stay bounded. With `OMC_SHELL_CHECKS=1`, `post-tool-verifier.mjs` also records known shell error classes of Bash and PowerShell results (see [Shell Checks](#shell-checks-scriptslibshell-checksmjs)). Disable all four with `DISABLE_OMC=1` (or `DISABLE_OMC=true`) or `OMC_SKIP_HOOKS=post-tool-use`; `project-memory-posttool` also accepts its script-specific token.
 
 #### Task List (`scripts/lib/jev-task-list.mjs`)
 
-Opt-in storage of the task list each agent keeps with the task-list tool (`task_list`, served by the standalone MCP server) and with the built-in task tools (`TaskCreate`, `TaskUpdate`, `TodoWrite`, `update_plan`, `wrap_up`). Set `OMC_TASK_LIST=1` to enable it. Without it the tool is not registered, and `jev-task-list-state.mjs` writes nothing. The list of an agent is what the agent itself sent to these tools; nothing judges the work. The main thread keeps `main.json`, a subagent keeps `<agent_id>.json`, both under `<log dir>/lists/<session_id>/`.
+Opt-in storage of the task list each agent keeps with the task-list tool (`task_list`, served by the standalone MCP server) and with the built-in task tools (`TaskCreate`, `TaskUpdate`, `TodoWrite`, `update_plan`, `wrap_up`). Set `OMC_TASK_LIST=1` to enable it. Without it the tool is not registered, and `jev-task-list-state.mjs` (registered by the user, see below) writes nothing. The list of an agent is what the agent itself sent to these tools; nothing judges the work. The main thread keeps `main.json`, a subagent keeps `<agent_id>.json`, both under `<log dir>/lists/<session_id>/`.
 
-Every call is first written as one event file, then folded into the list under a lock. A lock that is not taken within 1.5 s leaves the event for the next fold and writes a row with `event: "lock_timeout"` to `<log dir>/task-list.jsonl`. The hook fails open: a failure changes nothing and the hook prints the quiet output.
+Every call is first written as one event file, then folded into the list under a lock. A lock that is not taken within 1.5 s leaves the event for the next fold and writes a row with `event: "lock_timeout"` to `<log dir>/task-list.jsonl`. The hook fails open: a failure changes nothing and the hook prints the quiet output. `task-list.jsonl` and `batches.jsonl` are rotated at 50 MB: a larger file is renamed to `<name>-<YYYYMMDD-HHmmss>-<pid>.jsonl` (UTC) in the same directory before the next row is appended, and rotated files are never deleted.
 
-`scripts/jev-task-list-batch.mjs` writes one row per batch of tool calls to `<log dir>/batches.jsonl`. It is not registered in `hooks/hooks.json`, because the `PostToolBatch` event is not used by any hook in this repository and its support by the host is unverified. Register it only after checking that the host sends that event.
+`jev-task-list-state.mjs` is not registered in `hooks/hooks.json`: a registration would start one node process for every `TaskCreate`, `TaskUpdate`, `TodoWrite`, `update_plan` and `wrap_up` call of every user, also while `OMC_TASK_LIST` is unset. To use it with `OMC_TASK_LIST=1`, register it yourself, for example in the `hooks` section of the user-level `settings.json` (shell-string form, as the settings installer writes its hooks). Replace `<plugin-root>` with the absolute path of the installed plugin:
+
+```json
+{
+  "hooks": {
+    "PostToolUse": [
+      {
+        "matcher": "mcp__plugin_oh-my-claudecode_t__task_list|mcp__t__task_list|TaskCreate|TaskUpdate|TodoWrite|mcp__ccd_turn__update_plan|mcp__ccd_turn__wrap_up",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"<plugin-root>/scripts/run.cjs\" \"<plugin-root>/scripts/jev-task-list-state.mjs\"",
+            "timeout": 3
+          }
+        ]
+      }
+    ]
+  }
+}
+```
+
+Keep `run.cjs` and the 3 s timeout: the 1.5 s lock wait is sized for the runner's budget of a 3 s hook.
+
+`scripts/jev-task-list-batch.mjs` writes one row per batch of tool calls to `<log dir>/batches.jsonl`. It is not registered either, because the `PostToolBatch` event is not used by any hook in this repository and its support by the host is unverified. Register it only after checking that the host sends that event.
 
 | Variable | Default | Description |
 |----------|---------|-------------|
@@ -404,7 +426,7 @@ One opt-in variable of the team runtime (`src/team/`). It leaves behavior unchan
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `OMC_TEAM_KILL_PANE_TREE` | (unset) | Set to `1` to terminate all descendant processes of a worker's tmux pane before the pane is killed (SIGTERM, then SIGKILL after 2 seconds for survivors). The pane's root process is not signalled. Only tmux panes are affected. |
+| `OMC_TEAM_KILL_PANE_TREE` | (unset) | Set to `1` to terminate all descendant processes of a worker's tmux pane before the pane is killed (SIGTERM, then SIGKILL after 2 seconds for survivors). The pane's root process is not signalled. Only tmux panes are affected, and only when the team records a tmux server identity; without one the switch does nothing. |
 
 #### Stale Run Reporter (`stale-run-reporter.mjs`)
 

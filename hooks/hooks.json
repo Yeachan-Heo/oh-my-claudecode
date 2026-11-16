@@ -200,20 +200,6 @@
             ]
           }
         ]
-      },
-      {
-        "matcher": "mcp__plugin_oh-my-claudecode_t__task_list|mcp__t__task_list|TaskCreate|TaskUpdate|TodoWrite|mcp__ccd_turn__update_plan|mcp__ccd_turn__wrap_up",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "node",
-            "timeout": 3,
-            "args": [
-              "${CLAUDE_PLUGIN_ROOT}/scripts/run.cjs",
-              "${CLAUDE_PLUGIN_ROOT}/scripts/jev-task-list-state.mjs"
-            ]
-          }
-        ]
       }
     ],
     "PostToolUseFailure": [

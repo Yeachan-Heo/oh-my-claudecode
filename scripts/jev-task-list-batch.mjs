@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+/* global process, console */
 // Optional PostToolBatch hook for the task-list tools. NOT registered in hooks/hooks.json: the PostToolBatch event is not used by any
 // hook in this repository, so its support by the host is unverified. Register it only after checking that the host sends it.
 // Opt-in: does nothing unless OMC_TASK_LIST=1.
