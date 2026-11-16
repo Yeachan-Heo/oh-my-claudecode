@@ -184,6 +184,8 @@ const FLOOR_MARGIN = 0.2;
 // Host handoff (OMC_JEV_COMPACT_HOST_HANDOFF=1): a manual or automatic compaction that would remove less than this share of the tokens
 // goes to the host's own summary, so the module does not ask Jev for a cut the host would not have needed.
 const HOST_MIN_CUT = 0.3;
+// The text of the skip the module answers its own request with (ownThreshold tells it from another mod's skip).
+const OWN_SKIP_PREFIX = 'jev-compaction:';
 // The usual target of the token cascade's rule: the share of the window (OMC_JEV_COMPACT_TARGET_PERCENT), capped at 75 % of the threshold, then
 // 85 % of that. A compaction at or below it is manual: only the scores decide (manualPlan), and the floor is not checked.
 const TARGET_OF_THRESHOLD = 0.75;
@@ -582,7 +584,7 @@ function freshState() {
   return {
     sharedQueue: Promise.resolve(), compacting: 0, pausedUntil: 0, pauseReason: null, failedInRow: 0, noResponseAt: [], requests: 0,
     turnCount: 0, lastAttempt: -Infinity, hostCannot: false, compactWindow: undefined, windowTurn: -Infinity,
-    cachedConfig: undefined, cachedAt: -Infinity, growthArmed: false, growthBase: undefined,
+    cachedConfig: undefined, cachedAt: -Infinity, growthArmed: false, growthBase: undefined, skipBase: undefined, ownCompactInFlight: false,
     batchRefusedUntil: new Map(), pendingAfter: undefined, moduleRev: undefined,
   };
 }
@@ -607,6 +609,9 @@ async function readConfig($) {
     OMC_JEV_COMPACT_TARGET_PERCENT: await $.env.get('OMC_JEV_COMPACT_TARGET_PERCENT'),
     OMC_JEV_COMPACT_QUESTION_NAME: await $.env.get('OMC_JEV_COMPACT_QUESTION_NAME'),
     OMC_JEV_COMPACT_HOST_HANDOFF: await $.env.get('OMC_JEV_COMPACT_HOST_HANDOFF'),
+    OMC_JEV_COMPACT_OWN_THRESHOLD: await $.env.get('OMC_JEV_COMPACT_OWN_THRESHOLD'),
+    OMC_JEV_COMPACT_AGENT_TRIM: await $.env.get('OMC_JEV_COMPACT_AGENT_TRIM'),
+    OMC_JEV_COMPACT_AGENT_STATES: await $.env.get('OMC_JEV_COMPACT_AGENT_STATES'),
     CLAUDE_CODE_AUTO_COMPACT_WINDOW: await $.env.get('CLAUDE_CODE_AUTO_COMPACT_WINDOW'),
     CLAUDE_CONFIG_DIR: await $.env.get('CLAUDE_CONFIG_DIR'),
     OMC_JEV_COMPACT_PRIVATE_PATHS: await $.env.get('OMC_JEV_COMPACT_PRIVATE_PATHS'),
@@ -680,6 +685,13 @@ async function readConfig($) {
     // Host handoff (off unless 1 or active): the return of the tokens before and after to the host, and a manual or automatic cut below HOST_MIN_CUT
     // goes to the host's summary.
     handoff: ['1', 'active'].includes(String(env.OMC_JEV_COMPACT_HOST_HANDOFF ?? '').trim()),
+    // Own threshold skip (off unless 1 or active): the module's own request (the compaction ownThreshold asks the host for) that would remove less than
+    // HOST_MIN_CUT of the tokens is answered with a skip, and the own threshold waits for growth before asking again.
+    ownSkip: ['1', 'active'].includes(String(env.OMC_JEV_COMPACT_OWN_THRESHOLD ?? '').trim()),
+    // Agent trim (off unless 1 or active): the host's frame and the idle notifications that carry only a state are cut out of the rows of agents' messages
+    // before the tail. OMC_JEV_COMPACT_AGENT_STATES lists, comma separated, the phrases an agent's idle result may open or end with to be a state.
+    agentTrim: ['1', 'active'].includes(String(env.OMC_JEV_COMPACT_AGENT_TRIM ?? '').trim()),
+    agentStates: agentStatePattern(env.OMC_JEV_COMPACT_AGENT_STATES),
     autoCompactWindow: env.CLAUDE_CODE_AUTO_COMPACT_WINDOW,
     configDir: env.CLAUDE_CONFIG_DIR ? slash(env.CLAUDE_CONFIG_DIR) : undefined,
     home: homeForState ? slash(homeForState) : undefined,
@@ -2427,6 +2439,7 @@ function build(messages, candidates, keepFrom, group, stats, queued = new Map())
   stats.queuedKeptChars = 0;
   const merged = new Map();
   for (const [i, m] of messages.entries()) {
+    if (m.trimDrop === true) continue; // agent trim: a row left without a block
     if (m.role === 'assistant' && i < keepFrom) {
       stats.rebuiltAssistant++;
       const traces = [];
@@ -2804,7 +2817,7 @@ function planPastes(messages, api, keepFrom, cfg, sessionId, stats) {
   const images = nonTextUserRows(messages, api);
   if (images.unmatched) { stats.reason = 'image_unmatched'; return []; }
   const users = [];
-  messages.forEach((m, i) => { if (userWords(m)) users.push(i); });
+  messages.forEach((m, i) => { if (userWords(m).length) users.push(i); });
   const before = Math.min(keepFrom, Math.max(1, messages.length - KEEP_LAST));
   const limit = cfg.pasteMaxChars;
   const found = [];
@@ -3013,7 +3026,7 @@ async function planReplies(cfg, messages, api, keepFrom, sessionId, stats) {
   if (!sessionId) { stats.reason = 'no_session'; return []; }
   if (!api) { stats.reason = 'no_api_form'; return []; }
   const users = [];
-  messages.forEach((m, i) => { if (userWords(m)) users.push(i); });
+  messages.forEach((m, i) => { if (userWords(m).length) users.push(i); });
   const turns = [];
   messages.forEach((m, i) => { if (m.role === 'user' && !(m.toolResults || []).length && typeof m.text === 'string' && m.text.trim()) turns.push(i); });
   const limit = Math.min(
@@ -3079,6 +3092,100 @@ async function moveReplies($, cfg, record, messages, api, keepFrom, deadline) {
 }
 
 // Decides one compaction: {messages} to install or {fallback: reason}. Fills `record`; never calls next.
+// --- agent trim (OMC_JEV_COMPACT_AGENT_TRIM) ---------------------------------------------------------------------------------------------
+// In a coordinator's session the reports of team agents arrive as whole user rows: "Another Claude session sent a message:", one or more closed
+// <teammate-message>, <agent-message> or <cross-session-message> blocks, and the host's fixed note after them. Before the tail the trim cuts out the host's
+// frame (the opening line before a <teammate-message and the note after any of the three blocks) and every idle_notification block that only carries a state
+// or duplicates a report: an empty result; a result of at most TRIM_STATE_MAX characters opening or ending with a configured state phrase; such a result of
+// any length when the agent's earlier message in this conversation has the notification's summary; a result of at least TRIM_DUP_MIN characters found whole
+// in the agent's earlier messages. A row left with nothing but blank space is removed whole (build skips it: trimDrop), except the row right before the
+// tail, which keeps its notification without the frame (an assistant row with a handle may follow it). An idle notification that is the only carrier of a
+// report stays as the agent's message. Rows with the owner's words, a delivered block anchored to them or a block the host cannot rebuild from text stay as
+// they are.
+const TRIM_HEAD = 'Another Claude session sent a message:';
+const TRIM_PRE = /Another Claude session sent a message:\n?(?=\s*<teammate-message\b)/g; // only before a <teammate-message
+const TRIM_OGON = /(<\/(?:teammate-message|agent-message|cross-session-message)>)\n*This came from another Claude session[^\n]*?permission laundering\./g; // after any of the three
+const TRIM_TM = /(<teammate-message\b[^>]*>)\n?([\s\S]*?)\n?(<\/teammate-message>)/g;
+const TRIM_STATE_MAX = 200; // a longer result is a state only when the agent's earlier message carries its summary
+const TRIM_DUP_MIN = 40; // a shorter result is never a duplicate by its text
+const trimNorm = (t) => String(t ?? '').replace(/\s+/g, ' ').trim();
+// The pattern of a state result: a configured phrase at the start or at the end (a phrase may be followed by `: ...` at the end). No phrases, no state
+// (only an empty result and a repeated report are removed then).
+export function agentStatePattern(raw) {
+  const phrases = String(raw ?? '').split(',').map((x) => x.trim()).filter(Boolean).map(escapeRegExp);
+  if (!phrases.length) return /(?!)/u;
+  const any = phrases.join('|');
+  return new RegExp(`^(?:${any})(?![\\p{L}\\p{N}_])|(?:^|\\s)(?:${any})(?::[^\\n]*)?\\.?\\s*$`, 'iu');
+}
+function trimIdle(body) {
+  const t = body.trim();
+  if (!t.startsWith('{') || !t.slice(0, 200).includes('"idle_notification"')) return undefined;
+  try { const d = JSON.parse(t); return d && d.type === 'idle_notification' ? d : undefined; } catch { return undefined; }
+}
+const trimRow = (m, text) => ({ role: m.role, text, toolUses: m.toolUses || [], ...(m.toolResults ? { toolResults: m.toolResults } : {}) });
+// opts: keepFrom (the first row of the tail), skipRows (a Set of rows the host cannot rebuild from text), queuedRows (a Map of rows with delivered blocks
+// anchored to them), statePattern. Returns {rows: Map row -> rebuilt row, saved: Map row -> characters, stats}.
+export function trimAgentRows(messages, opts = {}) {
+  const tail = Number.isInteger(opts.keepFrom) ? opts.keepFrom : Math.max(1, messages.length - KEEP_LAST);
+  const skip = opts.skipRows instanceof Set ? opts.skipRows : new Set();
+  const queued = opts.queuedRows instanceof Map ? opts.queuedRows : new Map();
+  const state = opts.statePattern instanceof RegExp ? opts.statePattern : agentStatePattern('');
+  const stats = { rows: 0, pre: 0, note: 0, idle_removed: 0, idle_kept: 0, rows_dropped: 0, chars: 0, anchored: 0 };
+  const rows = new Map();
+  const saved = new Map();
+  const said = new Map(); // what every agent said outside idle notifications in the rows before the current one: summaries and bodies
+  const learn = (m) => {
+    if (m.role !== 'user' || (m.toolResults || []).length || typeof m.text !== 'string' || !m.text.includes('<teammate-message')) return;
+    for (const b of m.text.matchAll(TRIM_TM)) {
+      if (trimIdle(b[2])) continue;
+      const who = (/teammate_id="([^"]*)"/.exec(b[1]) || [])[1] || '';
+      const sum = (/summary="([^"]*)"/.exec(b[1]) || [])[1] || '';
+      const e = said.get(who) || { sums: new Set(), body: '' };
+      if (sum) e.sums.add(trimNorm(sum));
+      e.body += ` ${trimNorm(b[2])}`;
+      said.set(who, e);
+    }
+  };
+  for (let i = 1; i < tail; i++) {
+    const m = messages[i];
+    const row = m.role === 'user' && !(m.toolResults || []).length && typeof m.text === 'string' ? m.text : undefined;
+    const lead = row === undefined ? '' : row.trimStart();
+    const agent = (lead.startsWith(TRIM_HEAD) || lead.startsWith('<teammate-message')) && /<\/(?:teammate-message|agent-message|cross-session-message)>/.test(row);
+    if (!agent || skip.has(i) || queued.has(i) || userWords(m).length || row.includes(QUEUED_PREFIX)) {
+      if (agent && (skip.has(i) || queued.has(i))) stats.anchored++; // anchored: kept with its frame
+      learn(m);
+      continue;
+    }
+    stats.rows++;
+    let removed = 0;
+    // The frame first, while every block still anchors it; then the idle notifications.
+    const framed = row.replace(TRIM_OGON, '$1').replace(TRIM_PRE, '');
+    let text = framed.replace(TRIM_TM, (all, open, body) => {
+      const d = trimIdle(body);
+      if (!d) return all;
+      const who = typeof d.from === 'string' ? d.from : (/teammate_id="([^"]*)"/.exec(open) || [])[1] || '';
+      const r = trimNorm(d.result);
+      const e = said.get(who);
+      const isState = state.test(r);
+      const dup = !r || (isState && r.length <= TRIM_STATE_MAX) || (isState && d.summary && e && e.sums.has(trimNorm(d.summary))) || (r.length >= TRIM_DUP_MIN && e && e.body.includes(r));
+      if (!dup) { stats.idle_kept++; return all; }
+      removed++;
+      return '';
+    });
+    if (!text.trim() && i !== tail - 1) { stats.idle_removed += removed; stats.rows_dropped++; stats.chars += row.length; saved.set(i, row.length); rows.set(i, { ...trimRow(m, ''), trimDrop: true }); learn(m); continue; }
+    if (!text.trim()) text = framed; // the row right before the tail: its notification stays, without the frame
+    else stats.idle_removed += removed;
+    text = text.replace(/(<\/(?:teammate-message|agent-message|cross-session-message)>)\s*\n\s*(?=<(?:teammate-message|agent-message|cross-session-message)\b)/g, '$1\n\n').replace(/^\s+|\s+$/g, '');
+    // A row that would open with <agent-message> or <cross-session-message> keeps the host's header, which tells it from the owner's words.
+    if (lead.startsWith(TRIM_HEAD) && !text.startsWith('<teammate-message') && !text.startsWith(TRIM_HEAD)) text = `${TRIM_HEAD}\n${text}`;
+    if (row.match(TRIM_OGON)) stats.note++;
+    if (row.match(TRIM_PRE) && !text.startsWith(TRIM_HEAD)) stats.pre++;
+    if (text !== row) { stats.chars += row.length - text.length; saved.set(i, row.length - text.length); rows.set(i, trimRow(m, text)); }
+    learn(m);
+  }
+  return { rows, saved, stats };
+}
+
 async function decide($, e, cfg, record, started) {
   const messages = Array.isArray(e.messages) ? e.messages : [];
   let before = messages.reduce((s, m) => s + messageChars(m), 0);
@@ -3131,6 +3238,20 @@ async function decide($, e, cfg, record, started) {
   const removable = removableChars(candidates);
   // The envelopes build adds stay in every rebuilt row, so they come off what the results can give back.
   const net = removable - envelopes;
+  // Agent trim: the host's frame of agents' messages and idle notifications out of the rows before the tail; lossless for the work, so before the floor and
+  // the cascade, and its tokens come off the prediction (the cascade's target stays the share of the tokens before the trim).
+  let trim;
+  if (cfg.agentTrim && e.agentId === undefined && api) {
+    const skip = nonTextUserRows(messages, api);
+    if (!skip.unmatched) {
+      try {
+        trim = trimAgentRows(messages, { keepFrom: Math.min(keepFrom, Math.max(1, messages.length - KEEP_LAST)), skipRows: skip.rows, queuedRows: queued, statePattern: cfg.agentStates });
+        record.agent_trim = trim.stats;
+      } catch (error) { trim = undefined; record.agent_trim = { error: clip(oneLine(String(error?.message ?? error)), 200) }; }
+    }
+  }
+  const trimmed = trim && trim.rows.size ? messages.map((m, i) => trim.rows.get(i) ?? m) : messages;
+  const trimTokens = trim ? RATE_NOTE * trim.stats.chars : 0;
   record.max_reduction = before ? Math.round((net / before) * 1000) / 1000 : 0;
   if (!before || net / before < MIN_REDUCTION) return { fallback: 'too_few_results' };
   // Token cascade. The window first (none: the summary runs). The tokens before of an automatic compaction are raised to the threshold, as the
@@ -3159,7 +3280,7 @@ async function decide($, e, cfg, record, started) {
     ruleTarget = ceiling === undefined ? raw : Math.min(raw, ceiling);
     manual = tokens.tokens <= raw;
     if (!manual) {
-      const floor = floorPrediction(candidates, tokens.tokens);
+      const floor = floorPrediction(candidates, tokens.tokens - trimTokens);
       record.floor_pred = Math.round(floor);
       if (floor > win.threshold - FLOOR_MARGIN * win.window) return { fallback: 'floor_above_threshold' };
     }
@@ -3286,22 +3407,26 @@ async function decide($, e, cfg, record, started) {
     if (manual) {
       // Migrated rule: a manual compaction is decided by the scores against the rule's target; a prediction still above it goes on to the cascade,
       // which then stops at that target.
-      plan = manualPlan(candidates, tokens.tokens);
+      plan = manualPlan(candidates, tokens.tokens - trimTokens);
       target = ruleTarget;
-      if (plan.predicted > target) plan = cascade(candidates, tokens.tokens, cfg.targetPercent, target);
-    } else plan = cascade(candidates, tokens.tokens, cfg.targetPercent);
+      if (plan.predicted > target) plan = cascade(candidates, tokens.tokens - trimTokens, cfg.targetPercent, target);
+    } else plan = cascade(candidates, tokens.tokens - trimTokens, cfg.targetPercent, target);
     Object.assign(record, { cut: plan.pass === 'manual' ? 'manual_scores' : 'cascade', cascade_pass: plan.pass, cascade_target_tokens: target, cascade_predicted_tokens: plan.predicted, tokens_after_pred: plan.predicted, cascade_tokens_source: tokens.source, cascade_dropped: candidates.filter((c) => c.keep === 'drop').length });
     // Host handoff: a manual or automatic compaction that removes less than HOST_MIN_CUT of the tokens is left to the host's summary (the record
     // keeps the numbers). The module's own requests and other mods' plugin compactions are not handled here.
     if (cfg.handoff && plan.predicted > (1 - HOST_MIN_CUT) * tokens.tokens && (e.trigger === 'manual' || e.trigger === 'auto')) return { fallback: 'cut_below_host_min' };
+    // The module's own request (`$.session.compact()` of ownThreshold, trigger `plugin`) that would stay under HOST_MIN_CUT is rejected, not handed over:
+    // the host's summary is what it replaces, and nothing forces a compaction yet. compact() answers it with a skip. A `plugin` compaction asked by
+    // another mod is not ours to veto.
+    if (cfg.ownSkip && plan.predicted > (1 - HOST_MIN_CUT) * tokens.tokens && e.trigger === 'plugin' && session.ownCompactInFlight) return { fallback: 'cut_below_host_min_skipped', skip: true, tokensBefore: tokens.tokens };
   }
   const stats = {};
-  let built = build(messages, candidates, keepFrom, group, stats, queued);
+  let built = build(trimmed, candidates, keepFrom, group, stats, queued);
   if (!pairingOk(messages, built)) return { fallback: 'build_error' };
   if (cfg.replies !== 'off' && e.agentId === undefined) {
     const edited = await moveReplies($, cfg, record, messages, api, keepFrom, deadline);
     if (edited.size) {
-      built = build(messages.map((m, i) => (edited.has(i) ? { ...m, text: edited.get(i) } : m)), candidates, keepFrom, group, stats, queued);
+      built = build(trimmed.map((m, i) => (edited.has(i) ? { ...m, text: edited.get(i) } : m)), candidates, keepFrom, group, stats, queued);
       record.replies.installed = true;
     }
   }
@@ -3352,7 +3477,7 @@ async function compact($, e, next) {
   // was, so the gate stays as it was too. The same holds for the measurement still waiting for the request after an earlier compaction
   // of this module: it ends only when the messages were really replaced.
   const armGrowthGate = (out) => {
-    if (e.agentId === undefined && !out?.skip) { session.growthArmed = true; session.growthBase = undefined; session.pendingAfter = undefined; }
+    if (e.agentId === undefined && !out?.skip) { session.growthArmed = true; session.growthBase = undefined; session.skipBase = undefined; session.pendingAfter = undefined; }
     return out;
   };
   session.compacting++;
@@ -3378,6 +3503,13 @@ async function compact($, e, next) {
     // Written before next(e): the classic SessionStart:compact hook can run while the built-in summary
     // is still being installed.
     await writeRecord($, cfg, record);
+    if (decision.skip && cfg.mode === 'active') {
+      // The cut of the module's own request would stay under HOST_MIN_CUT: nothing is replaced and the host's summary does not run. The growth gate is
+      // armed here on purpose and skipBase records the tokens of this request, so the next one waits for OWN_MIN_GAIN of the window of growth from them
+      // instead of paying for Jev's scores again after MIN_TURNS_BETWEEN turns.
+      if (e.agentId === undefined) { session.growthArmed = true; session.growthBase = undefined; session.skipBase = decision.tokensBefore; }
+      return { skip: `${OWN_SKIP_PREFIX} cut under ${Math.round(HOST_MIN_CUT * 100)} % of the tokens, nothing replaced` };
+    }
     if (decision.fallback || cfg.mode !== 'active') return armGrowthGate(await next(e));
     if (cfg.toast) { try { $.ui.toast(`Jev compaction: ${decision.before} -> ${decision.after} chars`); } catch { /* optional */ } }
     // Host handoff (OMC_JEV_COMPACT_HOST_HANDOFF=1, opt-in with caution): the host also gets the tokens before and after this compaction. The
@@ -3435,6 +3567,8 @@ async function ownThreshold($, e, next) {
     // would else be asked for again as soon as the turn gap allows (right away after /compact or the
     // host's own compaction), and one that ends just below it after a few thousand tokens.
     if (session.growthBase !== undefined && tokens - Math.min(session.growthBase, (cfg.atPercent * window) / 100) < OWN_MIN_GAIN * window) return result;
+    // After a skipped request (cut under HOST_MIN_CUT) the next one waits for OWN_MIN_GAIN of the window of growth from the tokens of that request.
+    if (cfg.ownSkip && session.skipBase !== undefined && tokens - session.skipBase < OWN_MIN_GAIN * window) return result;
     session.growthArmed = false;
     // The tokens include the fixed prefix (system prompt, tools, instructions): ask only when the
     // removable tool results are worth it, so the threshold never forces the built-in summary.
@@ -3442,6 +3576,8 @@ async function ownThreshold($, e, next) {
     const messages = await $.session.messages();
     let before = messages.reduce((s, m) => s + messageChars(m), 0);
     const candidates = findCandidates(messages, cfg.privatePaths);
+    // Not even the floor (every removable result gone) cuts HOST_MIN_CUT of the tokens: the request would only end in a skip after Jev's scores.
+    if (cfg.ownSkip && tokens - floorPrediction(candidates, tokens) < Math.max(OWN_MIN_GAIN * window, HOST_MIN_CUT * tokens)) return result;
     let removable = removableChars(candidates);
     const tooSmall = () => !before || removable / before < MIN_REDUCTION || removable / CHARS_PER_TOKEN < OWN_MIN_GAIN * window;
     // The delivered messages can only make this worse (they add to `before`, their envelopes come off
@@ -3463,12 +3599,15 @@ async function ownThreshold($, e, next) {
     let reason;
     let detailText = '';
     try {
+      session.ownCompactInFlight = true;
       const done = await $.session.compact();
-      if (done && typeof done.skip === 'string') { reason = 'host_skipped'; detailText = done.skip; }
+      if (done && typeof done.skip === 'string') { reason = cfg.ownSkip && done.skip.startsWith(OWN_SKIP_PREFIX) ? 'cut_below_host_min' : 'host_skipped'; detailText = done.skip; }
     } catch (error) {
       detailText = String(error?.message ?? error);
       reason = /headless|sdk|-p\b/i.test(detailText) ? 'host_cannot_compact' : /turn|in flight|running/i.test(detailText) ? 'host_turn_running' : 'host_error';
       if (reason === 'host_cannot_compact') session.hostCannot = true;
+    } finally {
+      session.ownCompactInFlight = false;
     }
     if (reason) {
       let sessionId;

@@ -316,3 +316,81 @@ describe('manual compaction against the rule target (migrated rule: scores first
     expect(record).toMatchObject({ cut: 'cascade', cascade_target_tokens: Math.floor(20000 / 1.012) });
   });
 });
+
+describe('own threshold skip (OMC_JEV_COMPACT_OWN_THRESHOLD)', () => {
+  const OWN = { ...ACTIVE_ENV, OMC_JEV_COMPACT_AT_PERCENT: '60', OMC_JEV_COMPACT_TARGET_PERCENT: '80' };
+  const turn = (handlers, fake) => handlers['turn.complete'](fake.$, { isAborted: false }, async () => 'ok');
+
+  // The own threshold asks the host to compact; the fake host runs the module's compaction with the trigger `plugin`, as the host does.
+  async function ownRun(env, { messages = conversation(30, 4000), repeat = 1, usage } = {}) {
+    const fake = fakeDollar({ env, usage });
+    fake.$.session.messages = async () => messages;
+    const handlers = {};
+    register((event, hook) => { handlers[event] = hook; });
+    const answers = [];
+    fake.$.session.compact = async () => {
+      const out = await handlers['session.compact'](fake.$, Object.freeze({ trigger: 'plugin', messages }), async () => ({ messages: [{ role: 'user', text: 'SUMMARY', toolUses: [] }] }));
+      answers.push(out);
+      return out;
+    };
+    for (let k = 0; k < repeat; k++) await turn(handlers, fake);
+    return { answers, records: fake.records(), fake };
+  }
+
+  it('without the variable the own request is compacted as before', async () => {
+    const { answers, records } = await ownRun(OWN);
+    expect(answers).toHaveLength(1);
+    expect(answers[0]).toHaveProperty('messages');
+    expect(answers[0]).not.toHaveProperty('skip');
+    expect(records.find((r) => r.event === 'compact')).toMatchObject({ trigger: 'plugin', result: 'jev' });
+  });
+
+  it('a cut of the own request under HOST_MIN_CUT is answered with a skip and recorded as rejected', async () => {
+    const { answers, records } = await ownRun({ ...OWN, OMC_JEV_COMPACT_OWN_THRESHOLD: '1' });
+    expect(answers).toHaveLength(1);
+    expect(typeof answers[0].skip).toBe('string');
+    expect(answers[0].skip.startsWith('jev-compaction:')).toBe(true);
+    expect(answers[0]).not.toHaveProperty('messages');
+    expect(records.find((r) => r.event === 'compact')).toMatchObject({ result: 'fallback', reason: 'cut_below_host_min_skipped' });
+    expect(records.find((r) => r.event === 'own_threshold')).toMatchObject({ result: 'rejected', reason: 'cut_below_host_min' });
+  });
+
+  it('after a skip the own threshold waits for OWN_MIN_GAIN of the window of growth from the skipped request, not only from the threshold', async () => {
+    // The skipped request read 130 000 tokens of a 200 000 window. At 145 000 the growth from the threshold (120 000) is 25 000, enough for the
+    // growth gate, but the growth from the skipped request is 15 000, under 10 % of the window; at 155 000 it is 25 000.
+    let tokens = 130000;
+    const usage = () => ({ context: { tokens, window: 200000 } });
+    const env = { ...OWN, OMC_JEV_COMPACT_OWN_THRESHOLD: 'active' };
+    const fake = fakeDollar({ env, usage });
+    const messages = conversation(30, 4000);
+    fake.$.session.messages = async () => messages;
+    const handlers = {};
+    register((event, hook) => { handlers[event] = hook; });
+    let asks = 0;
+    fake.$.session.compact = async () => {
+      asks++;
+      return handlers['session.compact'](fake.$, Object.freeze({ trigger: 'plugin', messages }), async () => ({ messages: [] }));
+    };
+    await turn(handlers, fake);
+    expect(asks).toBe(1);
+    for (let k = 0; k < 7; k++) await turn(handlers, fake);
+    tokens = 145000;
+    for (let k = 0; k < 7; k++) await turn(handlers, fake);
+    expect(asks).toBe(1);
+    tokens = 155000;
+    await turn(handlers, fake);
+    expect(asks).toBe(2);
+  });
+
+  it('a compaction of another trigger is not skipped by the switch', async () => {
+    const env = { ...OWN, OMC_JEV_COMPACT_OWN_THRESHOLD: '1' };
+    const fake = fakeDollar({ env });
+    const messages = conversation(30, 4000);
+    fake.$.session.messages = async () => messages;
+    const handlers = {};
+    register((event, hook) => { handlers[event] = hook; });
+    const out = await handlers['session.compact'](fake.$, Object.freeze({ trigger: 'plugin', messages }), async () => ({ messages: [] }));
+    expect(out).toHaveProperty('messages');
+    expect(out).not.toHaveProperty('skip');
+  });
+});
