@@ -202,6 +202,7 @@ const RATE_NOTE = 0.363; // a character of a reminder, notification or delivered
 const RATE_OWN = 0.287; // a character of the user's own words
 const RATE_ATXT = 0.315; // a character of the assistant's text
 const RATE_TRACE = 0.58; // a character of a one-line trace
+const RATE_MOVED = 0.455; // a character of text moved to a file (assistant text 0.315 plus the non-ASCII share of long messages); a slight overstatement of what leaves
 const RATE_NON_ASCII = 3.72; // one more token per non-ASCII character
 const RATE_BLOCK = 45.4; // per content block
 const RATE_MESSAGE = -40.5; // per message, spread over its blocks
@@ -360,6 +361,7 @@ const HOST_BLOCK_OPEN = /^<(?:system-reminder|task-notification|teammate-message
 const NOT_USER_PREFIXES = [
   'Base directory for this skill:', 'Caveat:', '[Request interrupted', 'This session is being continued from a previous conversation',
   '<side-sessions-event>', '<ci-monitor-event>', '<scheduled-task', '<cross-session-message', 'Another Claude session sent a message:',
+  '[agent message moved at compaction', '[compacted] ',
 ];
 // Messages delivered while a tool turn runs. Claude Code keeps such a message as an attachment row
 // after the result row: `messages` does not show it (the host hands such rows back only with the
@@ -612,6 +614,7 @@ async function readConfig($) {
     OMC_JEV_COMPACT_OWN_THRESHOLD: await $.env.get('OMC_JEV_COMPACT_OWN_THRESHOLD'),
     OMC_JEV_COMPACT_AGENT_TRIM: await $.env.get('OMC_JEV_COMPACT_AGENT_TRIM'),
     OMC_JEV_COMPACT_AGENT_STATES: await $.env.get('OMC_JEV_COMPACT_AGENT_STATES'),
+    OMC_JEV_COMPACT_NOTIFICATIONS: await $.env.get('OMC_JEV_COMPACT_NOTIFICATIONS'),
     CLAUDE_CODE_AUTO_COMPACT_WINDOW: await $.env.get('CLAUDE_CODE_AUTO_COMPACT_WINDOW'),
     CLAUDE_CONFIG_DIR: await $.env.get('CLAUDE_CONFIG_DIR'),
     OMC_JEV_COMPACT_PRIVATE_PATHS: await $.env.get('OMC_JEV_COMPACT_PRIVATE_PATHS'),
@@ -692,6 +695,9 @@ async function readConfig($) {
     // before the tail. OMC_JEV_COMPACT_AGENT_STATES lists, comma separated, the phrases an agent's idle result may open or end with to be a state.
     agentTrim: ['1', 'active'].includes(String(env.OMC_JEV_COMPACT_AGENT_TRIM ?? '').trim()),
     agentStates: agentStatePattern(env.OMC_JEV_COMPACT_AGENT_STATES),
+    // OMC_JEV_COMPACT_NOTIFICATIONS=1: a background task notification row before the tail is a candidate of the compaction (scored by Jev, kept, cut or
+    // removed with a trace) instead of staying word for word.
+    notifications: ['1', 'active'].includes(String(env.OMC_JEV_COMPACT_NOTIFICATIONS ?? '').trim()),
     autoCompactWindow: env.CLAUDE_CODE_AUTO_COMPACT_WINDOW,
     configDir: env.CLAUDE_CONFIG_DIR ? slash(env.CLAUDE_CONFIG_DIR) : undefined,
     home: homeForState ? slash(homeForState) : undefined,
@@ -1936,11 +1942,19 @@ function markMentioned(candidates, user) {
 }
 
 function traceLine(c) {
+  if (c.note) return `[compacted] ${NOTE_LABEL} (${clip(c.summary, TRACE_INPUT_CHARS)}) - ${c.resultChars} chars removed`;
   const what = !c.textOnly ? 'non-text result (image or file) removed' : `${c.res.isError ? 'error' : 'result'} of ${c.resultChars} chars removed`;
   return `[compacted] ${c.use.tool}(${clip(c.summary, TRACE_INPUT_CHARS)}) - ${what}`;
 }
 
+// A notification's cut keeps its summary and the first SHORT_CHARS of its <result> body (the part before it is the same fixed text in every
+// notification); without a <result>, the first SHORT_CHARS of the text.
 function shortText(c) {
+  if (c.note) {
+    const body = /<result>([\s\S]*?)(?:<\/result>|$)/.exec(c.res.text);
+    const kept = body ? `${c.summary}\n${body[1].slice(0, SHORT_CHARS)}` : c.res.text.slice(0, SHORT_CHARS);
+    return `${kept}\n[notification shortened at compaction: kept ${SHORT_CHARS} of ${c.resultChars} chars]`;
+  }
   return `${c.res.text.slice(0, SHORT_CHARS)}\n[result shortened at compaction: kept ${SHORT_CHARS} of ${c.resultChars} chars]`;
 }
 
@@ -1950,9 +1964,72 @@ function shortText(c) {
 const TASK_STEP = /^(?:TaskCreate|TaskUpdate)$/;
 const TASK_LIST = /^TodoWrite$|(?:^|__)update_plan$/;
 
+// --- background task notifications as candidates (OMC_JEV_COMPACT_NOTIFICATIONS) ---------------------------------------------------------------
+// A notification row is a user row without results that carries a notification marker and either opens with it or is made only of <system-reminder> and
+// <task-notification> blocks (a row that mixes them with other text is left alone, so no word of the user is ever removed), none of them a message of
+// another sender or the user (frameOf). A row of envelopes (carriedText, the host's) is a notification when each envelope's body is one.
+const NOTE_TOOL = 'notification';
+const NOTE_LABEL = 'background task notification';
+// The text without its closed <system-reminder> and <task-notification> blocks (`rest`) and the <system-reminder> blocks cut out (`plain`). Linear: an
+// opener without a closer ends the search for its kind (no later opener has a closer either).
+function withoutReminderBlocks(text) {
+  const kinds = [{ open: '<system-reminder>', close: '</system-reminder>', next: -2, plain: true }, { open: '<task-notification>', close: '</task-notification>', next: -2, plain: false }];
+  const plain = [];
+  let rest = '';
+  let at = 0;
+  for (;;) {
+    let kind;
+    for (const x of kinds) {
+      if (x.next === -1) continue;
+      if (x.next < at) x.next = text.indexOf(x.open, at);
+      if (x.next >= 0 && (!kind || x.next < kind.next)) kind = x;
+    }
+    if (!kind) break;
+    const end = text.indexOf(kind.close, kind.next + kind.open.length);
+    if (end < 0) { kind.next = -1; continue; }
+    rest += text.slice(at, kind.next);
+    if (kind.plain) plain.push(text.slice(kind.next, end + kind.close.length));
+    at = end + kind.close.length;
+  }
+  return { rest: rest + text.slice(at), plain };
+}
+// A <system-reminder> block that holds a message of another sender or the user: its frame (frameOf also takes a block opening with the notification's own
+// <task-notification> for a frame of another kind, which a notification is not).
+const foreignBlock = (block) => frameOf(block) !== undefined && !DELIVERY_NOTES.some((k) => block.replace(DELIVERY_WRAP, '').startsWith(k));
+function isNoteBody(t) {
+  const { rest, plain } = withoutReminderBlocks(t);
+  return (t.startsWith(DELIVERY_NOTES[0]) || rest.trim() === '') && !plain.some(foreignBlock);
+}
+// A row of envelopes and nothing else, each holding a notification: a delivery of another kind (the coordinator, another session, a plugin), also inside a
+// <system-reminder> in the envelope, leaves the row alone.
+function onlyNoteEnvelopes(t, envelopes) {
+  let at = 0;
+  for (const e of envelopes) {
+    if (t.slice(at, e.from).trim() || !isNoteBody(e.text.slice(e.text.indexOf('">') + 2, e.text.lastIndexOf(ENVELOPE_CLOSE)).trim())) return false;
+    at = e.to;
+  }
+  return !t.slice(at).trim();
+}
+export function isNotification(m) {
+  if (m.role !== 'user' || (m.toolResults && m.toolResults.length) || typeof m.text !== 'string' || !m.text) return false;
+  if (userWords(m).length || !DELIVERY_NOTES.some((k) => m.text.includes(k))) return false;
+  const t = m.text.trim();
+  const envelopes = envelopesOf(t);
+  return envelopes.length ? onlyNoteEnvelopes(t, envelopes) : isNoteBody(t);
+}
+// What the notification says in a line: its <summary>, else the first line of its body after the marker.
+function noteSummary(text) {
+  const tag = /<summary>([\s\S]*?)<\/summary>/.exec(text);
+  if (tag && oneLine(tag[1])) return clip(oneLine(tag[1]), TRACE_INPUT_CHARS);
+  let at = -1;
+  for (const k of DELIVERY_NOTES) { const i = text.indexOf(k); if (i >= 0 && (at < 0 || i + k.length < at)) at = i + k.length; }
+  const line = (at >= 0 ? text.slice(at) : text).split('\n').map((l) => oneLine(l.replace(/<[^>]*>/g, ' '))).find(Boolean) || '';
+  return clip(line, TRACE_INPUT_CHARS);
+}
+
 // Candidates: tool results outside the first message and the last KEEP_LAST messages whose call is
 // in an earlier assistant message.
-function findCandidates(messages, privatePaths) {
+function findCandidates(messages, privatePaths, notifications = false) {
   const outputs = backgroundOutputFiles(messages, privatePaths);
   const uses = new Map();
   messages.forEach((m, i) => { if (m.role === 'assistant') for (const u of m.toolUses || []) uses.set(u.tool_use_id, { i, u }); });
@@ -1960,6 +2037,22 @@ function findCandidates(messages, privatePaths) {
   const out = [];
   for (let i = 1; i < tailStart; i++) {
     const m = messages[i];
+    if (notifications && isNotification(m)) {
+      // A notification that names the output file of a call on a secret path takes on the secrecy of that call (a trace, never sent to Jev).
+      const c = {
+        id: `${NOTE_TOOL}-${i}`, note: true, resIdx: i, useIdx: -1, use: { tool: NOTE_TOOL, input: {} }, res: { text: m.text, isError: false },
+        summary: noteSummary(m.text), inputChars: 0, resultChars: m.text.length,
+        secret: readsFile(m.text, outputs.secret), proseSecret: readsFile(m.text, outputs.held), taskOutput: false, textOnly: true,
+        score: 0, asked: false, answered: false,
+      };
+      c.trace = traceLine(c);
+      c.fullCost = c.resultChars;
+      c.traceCost = c.trace.length; // a row of its own: no newline joins it to an assistant text
+      c.shortCost = c.resultChars > SHORT_CHARS ? shortText(c).length : c.fullCost;
+      c.task = false;
+      out.push(c);
+      continue;
+    }
     if (m.role !== 'user' || !m.toolResults || !m.toolResults.length) continue;
     for (const r of m.toolResults) {
       const found = uses.get(r.tool_use_id);
@@ -1986,11 +2079,11 @@ function findCandidates(messages, privatePaths) {
   const carriesList = (c) => Array.isArray(c.use.input?.todos) || Array.isArray(c.use.input?.items);
   const newestList = new Map();
   for (const c of out) {
-    if (TASK_LIST.test(c.use.tool || '') && carriesList(c) && (!newestList.has(c.use.tool) || newestList.get(c.use.tool).resIdx < c.resIdx)) newestList.set(c.use.tool, c);
+    if (!c.note && TASK_LIST.test(c.use.tool || '') && carriesList(c) && (!newestList.has(c.use.tool) || newestList.get(c.use.tool).resIdx < c.resIdx)) newestList.set(c.use.tool, c);
   }
   for (const c of out) {
     const list = newestList.get(c.use.tool);
-    if (list && c.resIdx >= list.resIdx && TASK_LIST.test(c.use.tool || '')) c.task = true;
+    if (!c.note && list && c.resIdx >= list.resIdx && TASK_LIST.test(c.use.tool || '')) c.task = true;
   }
   return out;
 }
@@ -2197,6 +2290,12 @@ function rowsAsApi(messages) {
 
 // The cost in tokens of one candidate as it stands (full), with its result shortened (short) and as its trace (trace).
 function itemTokens(c) {
+  if (c.note) {
+    // A notification row has no call and its text is of the reminder class; its trace is a row of its own.
+    const cost = (text) => RATE_NOTE * text.length + RATE_NON_ASCII * nonAscii(text);
+    const full = cost(c.res.text || '');
+    return { full, short: c.resultChars > SHORT_CHARS ? cost(shortText(c)) : full, trace: RATE_TRACE * c.trace.length };
+  }
   const json = inputJson(c.use.input);
   const call = RATE_IN * ((c.use.tool || '').length + json.length) + RATE_NON_ASCII * nonAscii(json);
   const cost = (text) => RATE_OUT * text.length + RATE_NON_ASCII * nonAscii(text);
@@ -2428,7 +2527,8 @@ function serverBlocks(messages, api, keepFrom) {
 // (openLoopStart) the rows keep their handles.
 function build(messages, candidates, keepFrom, group, stats, queued = new Map()) {
   const byId = new Map();
-  for (const c of candidates) byId.set(c.id, c);
+  const notes = new Map();
+  for (const c of candidates) { if (c.note) notes.set(c.resIdx, c); else byId.set(c.id, c); }
   const out = [];
   stats.rebuiltUnchanged = 0;
   stats.keptHandle = 0;
@@ -2440,6 +2540,15 @@ function build(messages, candidates, keepFrom, group, stats, queued = new Map())
   const merged = new Map();
   for (const [i, m] of messages.entries()) {
     if (m.trimDrop === true) continue; // agent trim: a row left without a block
+    // A notification row traced, cut or removed is rebuilt from its replacement text with the blocks delivered after it (a row that stays gets them back
+    // from the host and falls through to the end).
+    const note = notes.get(i);
+    if (note && ['trace', 'short', 'drop'].includes(note.keep)) {
+      const { own, text } = carriedText({ text: note.keep === 'trace' ? note.trace : note.keep === 'short' ? shortText(note) : '' }, queued.get(i));
+      stats.queuedCarried += own.length;
+      if (text) out.push({ role: 'user', text, toolUses: [], toolResults: [] });
+      continue;
+    }
     if (m.role === 'assistant' && i < keepFrom) {
       stats.rebuiltAssistant++;
       const traces = [];
@@ -2704,10 +2813,11 @@ function noteFailures(failures, now) {
 // or one with a result that may change (a candidate); a row kept by its handle gets its blocks back as they were.
 function envelopeChars(messages, queued, candidates) {
   const changing = new Set(candidates.map((c) => c.resIdx));
+  const noteRows = new Set(candidates.filter((c) => c.note).map((c) => c.resIdx));
   let envelopes = 0;
   for (const [i, blocks] of queued) {
     const m = messages[i];
-    if (!(m.toolResults || []).length || !(m.toolResults.every(textOnlyResult) || changing.has(i))) continue;
+    if (!((m.toolResults || []).length || noteRows.has(i)) || !(m.toolResults.every(textOnlyResult) || changing.has(i))) continue;
     const c = carriedText(m, blocks);
     envelopes += c.text.length - (m.text || '').length - rawChars(c.own);
   }
@@ -3186,6 +3296,138 @@ export function trimAgentRows(messages, opts = {}) {
   return { rows, saved, stats };
 }
 
+// --- agent messages to files (OMC_JEV_COMPACT_AGENT_TRIM, with the trim above) --------------------------------------------------------------
+// In a coordinator's session the reports of team agents are whole user rows. Besides the frame the trim cuts, an older row of this kind moves whole to a file
+// and a one-line trace takes its place: the sender, the time when the message carries one (an idle notification's timestamp), a summary (the `summary`
+// attribute, else an idle notification's result, an agent's state with its summary, the last message it sent, else the start of the body) and, once, the path
+// and the size. The trace says the message is not the user's, so the module's own readings never take it for the user's words. Lossless, without a request
+// to Jev, main loop only. Whole stay: the first row, the tail, the last AGENT_KEEP_LAST rows of this kind (a row of state-only idle notifications takes no
+// place among them: the trim removes it), a row of the session's lead (AGENT_LEAD, and every sender of the first row when another session started this
+// one with it), a row with the user's words (a delivered block, QUEUED_PREFIX anywhere in it, or a row opening with a block without the host's header) or
+// that a delivered block is anchored to, a row with a JSON body other than an idle notification (a request waiting for an answer), a row the host cannot
+// rebuild from text (an unmatched API message with a non-text block stops the stage), a row shorter than AGENT_MIN_CHARS or than its trace, and a row with
+// a secret (a secret path, or anything maskSecrets would change; also in its trace). The stage runs on the rows as the trim leaves them.
+const AGENT_MIN_CHARS = 800;
+const AGENT_KEEP_LAST = 6;
+const AGENT_SUMMARY_CHARS = 150;
+const AGENT_SENT_CHARS = 60;
+const AGENT_SENDERS_MAX = 4;
+const AGENT_OPENERS = ['Another Claude session sent a message', '<teammate-message', '<agent-message', '<cross-session-message'];
+const AGENT_BLOCK = /<(teammate-message|agent-message|cross-session-message)\b((?:[^>"]|"[^"]*")*)>([\s\S]*?)<\/\1>/g; // a quoted value may hold '>'
+const AGENT_TRACE_PREFIX = '[agent message moved at compaction, not from the user: ';
+const AGENT_LEAD = 'team-lead'; // the teammate_id of a team's lead in its members' sessions
+const utf8Bytes = (text) => new TextEncoder().encode(text).length;
+const isAgentRow = (m) => m.role === 'user' && !(m.toolResults || []).length && typeof m.text === 'string' && AGENT_OPENERS.some((p) => m.text.trimStart().startsWith(p)) && new RegExp(AGENT_BLOCK.source).test(m.text);
+const agentWord = (v, max) => Array.from(oneLine(typeof v === 'string' ? v : '').replace(/[<>[\]"]/g, '')).slice(0, max).join(''); // by code point: never half a surrogate pair
+// Who, when and what of each block, in order.
+export function agentSenders(text, statePattern = agentStatePattern('')) {
+  const out = [];
+  for (const b of text.matchAll(AGENT_BLOCK)) {
+    const at = {};
+    for (const a of b[2].matchAll(/([\w-]+)="([^"]*)"/g)) at[a[1]] = a[2];
+    let who = at.teammate_id || at['from-name'] || at.from || at.name || '';
+    let when = at.timestamp || '';
+    let what = at.summary || '';
+    let idle = false;
+    let state = false;
+    let sent = '';
+    let json = '';
+    const body = b[3].trim();
+    if (body.startsWith('{')) {
+      try {
+        const j = JSON.parse(body);
+        if (j && typeof j === 'object' && !Array.isArray(j)) {
+          json = typeof j.type === 'string' ? j.type : '?';
+          idle = j.type === 'idle_notification';
+          who ||= typeof j.from === 'string' ? j.from : '';
+          when ||= typeof j.timestamp === 'string' ? j.timestamp : '';
+          // An idle notification: its result is the agent's state, its summary the last message it sent.
+          const result = typeof j.result === 'string' ? j.result : '';
+          const summary = typeof j.summary === 'string' ? j.summary : '';
+          const r = trimNorm(result);
+          state = idle && (!r || (statePattern.test(r) && r.length <= TRIM_STATE_MAX)); // what the trim removes before the tail
+          if (!what) { what = result || summary || (typeof j.type === 'string' ? j.type : ''); if (result && summary) sent = summary; }
+        }
+      } catch { /* not JSON: the body is the message */ }
+    }
+    out.push({ who, when, idle, state, sent, json, what: what || body });
+  }
+  return out;
+}
+// The trace is a function of the path and the row's text only, so its length is known before the write.
+export function agentTrace(path, text, statePattern) {
+  const all = agentSenders(text, statePattern);
+  const when = (w) => (/^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d(?:\.\d+)?Z$/.test(w) ? `, ${w.slice(0, 10)} ${w.slice(11, 19)} UTC` : w ? `, ${agentWord(w, 40)}` : '');
+  const parts = all.slice(0, AGENT_SENDERS_MAX).map((s) => `from ${agentWord(s.who, 64) || 'an unknown sender'}${s.idle ? ` (idle${s.sent ? `, last: "${agentWord(s.sent, AGENT_SENT_CHARS)}"` : ''})` : ''}${when(s.when)}: "${agentWord(s.what, AGENT_SUMMARY_CHARS)}"`);
+  if (all.length > AGENT_SENDERS_MAX) parts.push(`and ${all.length - AGENT_SENDERS_MAX} more`);
+  return `${AGENT_TRACE_PREFIX}${path} (${text.length} chars, ${utf8Bytes(text)} bytes); ${parts.join('; ')}]`;
+}
+const agentSecret = (text, privatePaths) => namesSecretPath(text, privatePaths) || maskSecrets(text) !== text;
+
+// Plans the rows that move and, with opts.write, writes their files. opts: sessionId, skipRows (a Set of rows the host cannot rebuild from text, with
+// `unmatched`), keepFrom, queuedRows, statePattern, write (default true), deadline. Returns {rows: Map row -> rebuilt row, stats}; the tokens it saves
+// are RATE_MOVED * moved_chars - RATE_TRACE * trace_chars of the stats. Never rejects.
+export async function moveAgentMessages($, cfg, messages, opts = {}) {
+  const write = opts.write !== false;
+  const stats = { mode: write ? 'active' : 'plan', agent_rows: 0, limit_row: 0, kept_last: 0, considered: 0, skipped_blocks: 0, owner_words: 0, lead: 0, queued_anchor: 0, pending_json: 0, secret: 0, too_short: 0, too_short_chars: 0, written: 0, reused: 0, write_failed: 0, timed_out: 0, moved: 0, moved_chars: 0, trace_chars: 0 };
+  const rows = new Map();
+  try {
+    if (!cfg.pasteDir) { stats.reason = 'no_state_dir'; return { rows, stats }; }
+    if (!opts.sessionId) { stats.reason = 'no_session'; return { rows, stats }; }
+    const skip = opts.skipRows instanceof Set ? opts.skipRows : undefined;
+    if (!skip) { stats.reason = 'no_api_form'; return { rows, stats }; }
+    if (skip.unmatched) { stats.reason = 'image_unmatched'; return { rows, stats }; }
+    const state = opts.statePattern instanceof RegExp ? opts.statePattern : agentStatePattern('');
+    const agentRows = [];
+    messages.forEach((m, i) => { if (isAgentRow(m)) agentRows.push(i); });
+    stats.agent_rows = agentRows.length;
+    const senders = new Map(agentRows.map((i) => [i, agentSenders(messages[i].text, state)]));
+    const tail = Number.isInteger(opts.keepFrom) ? opts.keepFrom : Math.max(1, messages.length - KEEP_LAST);
+    // A row of state-only idle notifications (the trim removes it before the tail) takes no place among the last AGENT_KEEP_LAST.
+    const counted = agentRows.filter((i) => !senders.get(i).every((x) => x.state));
+    const limit = Math.min(tail, counted.length > AGENT_KEEP_LAST ? counted[counted.length - AGENT_KEEP_LAST] : 0);
+    stats.limit_row = limit;
+    stats.kept_last = counted.filter((i) => i >= limit && i < tail).length;
+    const queued = opts.queuedRows instanceof Map ? opts.queuedRows : new Map();
+    // The messages of whoever leads this session are its task, as the user's are: those of a team's lead and of every sender of the first row when
+    // another session started this one with it.
+    const leads = new Set([AGENT_LEAD, ...(agentRows[0] === 0 ? senders.get(0).map((x) => x.who).filter(Boolean) : [])]);
+    const jobs = [];
+    for (const i of agentRows) {
+      if (i === 0 || i >= tail) continue;
+      const m = messages[i];
+      if (skip.has(i)) { stats.skipped_blocks++; continue; }
+      if (userWords(m).length || m.text.includes(QUEUED_PREFIX)) { stats.owner_words++; continue; }
+      if (queued.has(i)) { stats.queued_anchor++; continue; }
+      if (senders.get(i).some((x) => x.json && !x.idle)) { stats.pending_json++; continue; }
+      if (i >= limit) continue;
+      if (senders.get(i).some((x) => leads.has(x.who))) { stats.lead++; continue; }
+      stats.considered++;
+      const text = m.text;
+      if (text.length < AGENT_MIN_CHARS) { stats.too_short++; stats.too_short_chars += text.length; continue; }
+      if (agentSecret(text, cfg.privatePaths)) { stats.secret++; continue; }
+      const path = `${cfg.pasteDir}/${safeName(opts.sessionId)}/${(await sha256Hex(text)).slice(0, 32)}.txt`;
+      const trace = agentTrace(path, text, state);
+      if (trace.length >= text.length) { stats.too_short++; stats.too_short_chars += text.length; continue; }
+      if (agentSecret(trace.replace(path, ''), cfg.privatePaths)) { stats.secret++; continue; } // the path is ours
+      jobs.push({ i, text, path, trace });
+    }
+    const gate = { deadline: opts.deadline ?? Date.now() + TOTAL_MS, stalled: false };
+    for (const job of jobs) {
+      if (write) {
+        const saved = await savePaste($, gate, job.path, job.text);
+        if (saved === 'written' || saved === 'reused') stats[saved]++;
+        else { stats[saved === 'timeout' ? 'timed_out' : 'write_failed']++; continue; }
+      }
+      stats.moved++;
+      stats.moved_chars += job.text.length;
+      stats.trace_chars += job.trace.length;
+      if (write) rows.set(job.i, trimRow(messages[job.i], job.trace));
+    }
+  } catch { stats.error = 1; }
+  return { rows, stats };
+}
+
 async function decide($, e, cfg, record, started) {
   const messages = Array.isArray(e.messages) ? e.messages : [];
   let before = messages.reduce((s, m) => s + messageChars(m), 0);
@@ -3232,8 +3474,9 @@ async function decide($, e, cfg, record, started) {
   // text, which would split the kept message: the summary runs instead.
   if (splitsTail(messages, queued, keepFrom, group)) return { fallback: 'queued_in_tail' };
   // Results of the calls that keep their handles stay whole (a built row may not stand among them).
-  const candidates = findCandidates(messages, cfg.privatePaths).filter((c) => c.useIdx < keepFrom);
+  const candidates = findCandidates(messages, cfg.privatePaths, cfg.notifications).filter((c) => (c.note ? c.resIdx : c.useIdx) < keepFrom);
   record.candidates = candidates.length;
+  if (cfg.notifications) record.notifications = candidates.filter((c) => c.note).length;
   const envelopes = envelopeChars(messages, queued, candidates);
   const removable = removableChars(candidates);
   // The envelopes build adds stay in every rebuilt row, so they come off what the results can give back.
@@ -3241,17 +3484,20 @@ async function decide($, e, cfg, record, started) {
   // Agent trim: the host's frame of agents' messages and idle notifications out of the rows before the tail; lossless for the work, so before the floor and
   // the cascade, and its tokens come off the prediction (the cascade's target stays the share of the tokens before the trim).
   let trim;
-  if (cfg.agentTrim && e.agentId === undefined && api) {
-    const skip = nonTextUserRows(messages, api);
-    if (!skip.unmatched) {
+  const agentSkip = cfg.agentTrim && e.agentId === undefined && api ? nonTextUserRows(messages, api) : undefined;
+  if (agentSkip) {
+    if (!agentSkip.unmatched) {
       try {
-        trim = trimAgentRows(messages, { keepFrom: Math.min(keepFrom, Math.max(1, messages.length - KEEP_LAST)), skipRows: skip.rows, queuedRows: queued, statePattern: cfg.agentStates });
+        trim = trimAgentRows(messages, { keepFrom: Math.min(keepFrom, Math.max(1, messages.length - KEEP_LAST)), skipRows: agentSkip.rows, queuedRows: queued, statePattern: cfg.agentStates });
         record.agent_trim = trim.stats;
       } catch (error) { trim = undefined; record.agent_trim = { error: clip(oneLine(String(error?.message ?? error)), 200) }; }
     }
   }
   const trimmed = trim && trim.rows.size ? messages.map((m, i) => trim.rows.get(i) ?? m) : messages;
   const trimTokens = trim ? RATE_NOTE * trim.stats.chars : 0;
+  // Agent messages to files: the rows as the trim leaves them; the window of rows and the files are the same in the plan and in the run.
+  const agentOpts = agentSkip ? { sessionId: record.session_id, skipRows: Object.assign(new Set(agentSkip.rows), { unmatched: agentSkip.unmatched }), keepFrom: Math.min(keepFrom, Math.max(1, messages.length - KEEP_LAST)), queuedRows: queued, statePattern: cfg.agentStates } : undefined;
+  const movedTokens = (st) => RATE_MOVED * st.moved_chars - RATE_TRACE * st.trace_chars;
   record.max_reduction = before ? Math.round((net / before) * 1000) / 1000 : 0;
   if (!before || net / before < MIN_REDUCTION) return { fallback: 'too_few_results' };
   // Token cascade. The window first (none: the summary runs). The tokens before of an automatic compaction are raised to the threshold, as the
@@ -3261,6 +3507,7 @@ async function decide($, e, cfg, record, started) {
   let tokens;
   let manual = false;
   let ruleTarget;
+  let agentsFloor = 0;
   if (cfg.targetPercent !== undefined) {
     const detail = await hostValue($, () => $.session.usage({ breakdown: 'summary' }));
     let win = await resolveWindow($, cfg, detail, await hostValue($, () => $.session.usage()));
@@ -3280,7 +3527,14 @@ async function decide($, e, cfg, record, started) {
     ruleTarget = ceiling === undefined ? raw : Math.min(raw, ceiling);
     manual = tokens.tokens <= raw;
     if (!manual) {
-      const floor = floorPrediction(candidates, tokens.tokens - trimTokens);
+      // With the stage active the floor counts what it plans to save (a plan, no write), so a session full of agents' reports is not handed to the
+      // host's summary that the stage would spare it; if the writes then fall short, the plan is held to the same bound after the cascade.
+      if (agentOpts && cfg.mode === 'active') {
+        const planned = await moveAgentMessages($, cfg, trimmed, { ...agentOpts, write: false });
+        agentsFloor = Math.max(0, movedTokens(planned.stats));
+        record.floor_agents_tokens = Math.round(agentsFloor);
+      }
+      const floor = floorPrediction(candidates, tokens.tokens - trimTokens - agentsFloor);
       record.floor_pred = Math.round(floor);
       if (floor > win.threshold - FLOOR_MARGIN * win.window) return { fallback: 'floor_above_threshold' };
     }
@@ -3315,6 +3569,8 @@ async function decide($, e, cfg, record, started) {
 
   const user = userTask(messages, typeof e.instructions === 'string' && e.instructions.trim() ? e.instructions : undefined, queued, cfg.privatePaths);
   const deadline = started + TOTAL_MS;
+  // Agent messages to files run next to the scoring requests (no request of their own); their result comes before the plan.
+  const agentsRun = agentOpts ? moveAgentMessages($, cfg, trimmed, { ...agentOpts, write: cfg.mode === 'active', deadline }) : undefined;
   const runs = [];
   let held;
   for (let b = 0; b * BATCH < asked.length; b++) {
@@ -3326,8 +3582,8 @@ async function decide($, e, cfg, record, started) {
     batch.forEach((c, k) => {
       c.question = `r${k + 1}`;
       results[c.question] = {
-        tool: c.use.tool,
-        input: clip(oneLine(maskSecrets(sentInputJson(c.use.input, cfg.privatePaths).slice(0, STATE_INPUT_CHARS * 4 + MASK_SLACK_CHARS))), STATE_INPUT_CHARS),
+        tool: c.note ? NOTE_LABEL : c.use.tool,
+        input: c.note ? '' : clip(oneLine(maskSecrets(sentInputJson(c.use.input, cfg.privatePaths).slice(0, STATE_INPUT_CHARS * 4 + MASK_SLACK_CHARS))), STATE_INPUT_CHARS),
         result: maskedHeadTail(c.res.text || '', STATE_HEAD_CHARS, STATE_TAIL_CHARS, cfg.privatePaths),
         chars: c.resultChars,
         ...(c.res.isError ? { error: true } : {}),
@@ -3396,6 +3652,14 @@ async function decide($, e, cfg, record, started) {
   session.failedInRow = 0;
   if (held?.mode === 'deadline') return { fallback: 'timeout' };
 
+  // The agent messages that moved (active, files written and read back): their rows and their tokens come off the prediction.
+  let agentMoved = new Map();
+  let agentTokens = 0;
+  if (agentsRun) {
+    const run = await agentsRun;
+    record.agent_messages = run.stats;
+    if (cfg.mode === 'active' && run.rows.size) { agentMoved = run.rows; agentTokens = movedTokens(run.stats); run.stats.installed = true; }
+  }
   record.mentioned = markMentioned(candidates, user);
   if (cfg.targetPercent === undefined) allocate(candidates, before, cfg.target, envelopes);
   else {
@@ -3407,13 +3671,16 @@ async function decide($, e, cfg, record, started) {
     if (manual) {
       // Migrated rule: a manual compaction is decided by the scores against the rule's target; a prediction still above it goes on to the cascade,
       // which then stops at that target.
-      plan = manualPlan(candidates, tokens.tokens - trimTokens);
+      plan = manualPlan(candidates, tokens.tokens - trimTokens - agentTokens);
       target = ruleTarget;
-      if (plan.predicted > target) plan = cascade(candidates, tokens.tokens - trimTokens, cfg.targetPercent, target);
-    } else plan = cascade(candidates, tokens.tokens - trimTokens, cfg.targetPercent, target);
+      if (plan.predicted > target) plan = cascade(candidates, tokens.tokens - trimTokens - agentTokens, cfg.targetPercent, target);
+    } else plan = cascade(candidates, tokens.tokens - trimTokens - agentTokens, cfg.targetPercent, target);
     Object.assign(record, { cut: plan.pass === 'manual' ? 'manual_scores' : 'cascade', cascade_pass: plan.pass, cascade_target_tokens: target, cascade_predicted_tokens: plan.predicted, tokens_after_pred: plan.predicted, cascade_tokens_source: tokens.source, cascade_dropped: candidates.filter((c) => c.keep === 'drop').length });
     // Host handoff: a manual or automatic compaction that removes less than HOST_MIN_CUT of the tokens is left to the host's summary (the record
     // keeps the numbers). The module's own requests and other mods' plugin compactions are not handled here.
+    // The files were planned to spare the host's summary (the floor counted them): when the writes fell short and the plan still ends above the bound the
+    // floor is held to, the summary runs.
+    if (agentsFloor > 0 && plan.predicted > record.threshold - FLOOR_MARGIN * record.window) { record.floor_after_agents = plan.predicted; return { fallback: 'text_above_threshold' }; }
     if (cfg.handoff && plan.predicted > (1 - HOST_MIN_CUT) * tokens.tokens && (e.trigger === 'manual' || e.trigger === 'auto')) return { fallback: 'cut_below_host_min' };
     // The module's own request (`$.session.compact()` of ownThreshold, trigger `plugin`) that would stay under HOST_MIN_CUT is rejected, not handed over:
     // the host's summary is what it replaces, and nothing forces a compaction yet. compact() answers it with a skip. A `plugin` compaction asked by
@@ -3421,12 +3688,13 @@ async function decide($, e, cfg, record, started) {
     if (cfg.ownSkip && plan.predicted > (1 - HOST_MIN_CUT) * tokens.tokens && e.trigger === 'plugin' && session.ownCompactInFlight) return { fallback: 'cut_below_host_min_skipped', skip: true, tokensBefore: tokens.tokens };
   }
   const stats = {};
-  let built = build(trimmed, candidates, keepFrom, group, stats, queued);
+  const rows = agentMoved.size ? trimmed.map((m, i) => agentMoved.get(i) ?? m) : trimmed;
+  let built = build(rows, candidates, keepFrom, group, stats, queued);
   if (!pairingOk(messages, built)) return { fallback: 'build_error' };
   if (cfg.replies !== 'off' && e.agentId === undefined) {
     const edited = await moveReplies($, cfg, record, messages, api, keepFrom, deadline);
     if (edited.size) {
-      built = build(trimmed.map((m, i) => (edited.has(i) ? { ...m, text: edited.get(i) } : m)), candidates, keepFrom, group, stats, queued);
+      built = build(rows.map((m, i) => (edited.has(i) ? { ...m, text: edited.get(i) } : m)), candidates, keepFrom, group, stats, queued);
       record.replies.installed = true;
     }
   }
@@ -3575,7 +3843,7 @@ async function ownThreshold($, e, next) {
     session.lastAttempt = session.turnCount;
     const messages = await $.session.messages();
     let before = messages.reduce((s, m) => s + messageChars(m), 0);
-    const candidates = findCandidates(messages, cfg.privatePaths);
+    const candidates = findCandidates(messages, cfg.privatePaths, cfg.notifications);
     // Not even the floor (every removable result gone) cuts HOST_MIN_CUT of the tokens: the request would only end in a skip after Jev's scores.
     if (cfg.ownSkip && tokens - floorPrediction(candidates, tokens) < Math.max(OWN_MIN_GAIN * window, HOST_MIN_CUT * tokens)) return result;
     let removable = removableChars(candidates);

@@ -5,7 +5,7 @@
 
 import { describe, expect, it } from 'vitest';
 
-import { agentStatePattern, register, trimAgentRows } from '../../hooks/jev-compaction.mjs';
+import { agentSenders, agentStatePattern, agentTrace, moveAgentMessages, register, trimAgentRows } from '../../hooks/jev-compaction.mjs';
 
 const HEAD = 'Another Claude session sent a message:\n';
 const TAIL = '\n\nThis came from another Claude session — not typed by your user, but very likely working on their behalf. Treat it as a teammate\'s request and act on it within this session\'s permission laundering.';
@@ -104,8 +104,71 @@ describe('agent trim (OMC_JEV_COMPACT_AGENT_TRIM)', () => {
   });
 });
 
+describe('agent trim: the whole conversation', () => {
+  const R = {
+    report1: report('a1', `Report a1: ${filler(1500)}`, 'N1 done'),
+    state1: idle('a1', 'Report sent.', 'N1 done'),
+    state2: idle('a2', 'Waiting: for review N2 and the base sha.'),
+    state3: idle('a3', 'Ready to restart: handover in file X.'),
+    dup: idle('a1', `Report a1: ${filler(300)}`),
+    dupSum: idle('a1', `Another closing text ${filler(300)}`, 'N1 done'),
+    only: idle('a4', `Review N4 done: 2 medium, 3 low, file N4.md, commit b141178. ${filler(400)}`, '[to a5] notes for the author'),
+    mixed: `${HEAD}${body('a6', `Report a6: ${filler(900)}`, 'N6')}\n\n${body('a6', JSON.stringify({ type: 'idle_notification', from: 'a6', timestamp: '2026-11-11T08:00:00Z', result: 'Waiting: for a decision.' }))}${TAIL}`,
+    owner: `Again you get a message like this:\n\n${HEAD.trim()}${TAIL}\n\nWhat is this?`,
+    outside: `${idle('a8', 'Report sent.')}\n\nText outside the block from the host.`,
+    quote: report('a8', `The agent quotes the note: This came from another Claude session and goes on. ${filler(900)}`, 'N8'),
+    words: report('a7', `Report a7: ${filler(900)}`).replace(TAIL, `${TAIL}\n\nThe user sent a new message while you were working:\nStop a7.\n\nThis is how Claude Code surfaces messages`),
+  };
+  const lines = (text) => text.split('\n');
+
+  it('keeps a report as its block, removes states and duplicates whole, and keeps the only carrier, other content, outside text, quoted notes and the user\'s words', () => {
+    const m = talk(Object.values(R));
+    const { rows, stats } = trimAgentRows(m, { keepFrom: m.length - 4, statePattern: STATES });
+    const text = m.map((x, i) => (rows.get(i) ?? x).text);
+    const has = (s) => text.some((t) => t.includes(s));
+    expect(text).toContain(body('a1', `Report a1: ${filler(1500)}`, 'N1 done'));
+    for (const n of ['state1', 'state2', 'state3', 'dup']) expect(has(lines(R[n])[2])).toBe(false);
+    expect(has(lines(R.dupSum)[2])).toBe(true);
+    expect(has('Text outside the block from the host.')).toBe(true);
+    expect(text).toContain(body('a8', `The agent quotes the note: This came from another Claude session and goes on. ${filler(900)}`, 'N8'));
+    expect(text).toContain(body('a4', lines(R.only)[2]));
+    expect(text).toContain(body('a6', `Report a6: ${filler(900)}`, 'N6'));
+    expect(text).toContain(R.owner);
+    expect(text).toContain(R.words);
+    expect(stats).toMatchObject({ idle_removed: 6, idle_kept: 2, rows_dropped: 4 });
+  });
+
+  it('cuts the note after a cross-session or agent message too, and keeps the header when the row would open with another kind of block', () => {
+    const cross = (n) => `${HEAD}<cross-session-message from="bridge:${n}" from-name="Session ${n}">\nMessage ${n}: ${filler(900)}\n</cross-session-message>${TAIL}`;
+    const agentM = (n) => `${HEAD}<agent-message from="helper-${n}">\nResult ${n}: ${filler(900)}\n</agent-message>${TAIL}`;
+    const mixed = `${HEAD}${body('s1', JSON.stringify({ type: 'idle_notification', from: 's1', timestamp: '2026-11-11T07:00:00Z', idleReason: 'available', result: 'Waiting.' }))}\n\n<agent-message from="helper-m">\nResult mixed: ${filler(900)}\n</agent-message>${TAIL}`;
+    const rowsIn = [];
+    for (let n = 1; n <= 6; n++) rowsIn.push(cross(n), agentM(n));
+    rowsIn.push(mixed, report('a7', `Report 7: ${filler(900)}`));
+    const m = talk(rowsIn);
+    const { rows, stats } = trimAgentRows(m, { keepFrom: m.length - 4, statePattern: STATES });
+    expect(stats.note).toBeGreaterThanOrEqual(13);
+    const rebuilt = [...rows.values()];
+    expect(rebuilt.every((x) => !x.text.includes('This came from'))).toBe(true);
+    const mix = rebuilt.find((x) => x.text.includes('Result mixed'));
+    expect(mix.text.startsWith(`${HEAD}<agent-message`)).toBe(true);
+    expect(mix.text).not.toContain('idle_notification');
+    expect(rebuilt.filter((x) => x.text.startsWith(HEAD)).every((x) => !/^Another Claude session sent a message:\s*<teammate-message/.test(x.text))).toBe(true);
+  });
+
+  it('a subagent compaction (agentId) is unchanged: no trim stats, the frame stays', async () => {
+    const m = [...talk([stateOnly, report('a1', `Report a1: ${filler(600)}`, 'N1 done')])];
+    m.splice(1, 0, { role: 'assistant', text: 'Read.', toolUses: [{ tool_use_id: 't1', tool: 'Bash', input: { command: 'cat a.txt' } }] }, { role: 'user', text: '', toolUses: [], toolResults: [{ tool_use_id: 't1', text: `RESULT ${'x'.repeat(30000)}`, isError: false }] });
+    const frozen = m.map((x, k) => Object.freeze({ ...x, handle: `h${k}` }));
+    const { out, record } = await compactRun({ OMC_JEV_COMPACT_AGENT_TRIM: '1' }, frozen, { agentId: 'sub-1' });
+    expect(record).not.toHaveProperty('agent_trim');
+    expect(record).not.toHaveProperty('agent_messages');
+    expect(JSON.stringify(out.messages ?? [])).not.toContain('moved at compaction, not from the user');
+  });
+});
+
 // The compaction through register(on): the active mode with a conversation of agent rows; the record says whether the trim ran.
-async function compactRun(env, messages) {
+async function compactRun(env, messages, event = {}) {
   const store = new Map();
   const e = { OMC_JEV: 'compaction:active', TYPESAFE_API_KEY: 'test-key', HOME: '/home/u', ...env };
   const api = [];
@@ -126,9 +189,9 @@ async function compactRun(env, messages) {
   };
   const handlers = {};
   register((event, hook) => { handlers[event] = hook; });
-  const out = await handlers['session.compact']($, Object.freeze({ trigger: 'manual', messages }), async () => ({ messages: [] }));
+  const out = await handlers['session.compact']($, Object.freeze({ trigger: 'manual', messages, ...event }), async () => ({ messages: [] }));
   const record = [...store.entries()].filter(([p]) => p.includes('compaction-spool')).map(([, t]) => JSON.parse(t)).find((r) => r.event === 'compact');
-  return { out, record };
+  return { out, record, store };
 }
 
 describe('agent trim in the compaction', () => {
@@ -152,5 +215,155 @@ describe('agent trim in the compaction', () => {
     expect(record.agent_trim).toMatchObject({ rows: 3, rows_dropped: 2 });
     expect(JSON.stringify(out.messages)).not.toContain('permission laundering');
     expect(JSON.stringify(out.messages)).toContain('Report a1:');
+  });
+});
+
+// Agent messages to files (the same variable): an older agent row moves whole to a file and a one-line trace takes its place.
+const PEM = '-----BEGIN RSA PRIVATE KEY-----\nKEYBODY-1\n-----END RSA PRIVATE KEY-----';
+const CFG = { pasteDir: '/state/compaction-pastes', privatePaths: [] };
+const KEEP = new Set();
+function fakeHost(failWrite = false) {
+  const files = new Map();
+  const $ = {
+    clock: { after: (ms, fn) => { const t = setTimeout(fn, ms); return { cancel: () => clearTimeout(t) }; }, sleep: async () => {} },
+    fs: {
+      read: async (p) => { if (!files.has(p)) throw Object.assign(new Error('ENOENT'), { code: 'ENOENT' }); return files.get(p); },
+      write: async (p, t) => { if (failWrite) throw new Error('EIO'); files.set(p, t); },
+    },
+  };
+  return { files, $ };
+}
+const rowsOf = (n, make) => Array.from({ length: n }, (_, k) => make(k));
+const longReport = (k, who = 'a1') => report(who, `Report ${k}: ${filler(1200)}`, `N${k} done`);
+const run = (host, messages, extra = {}) => moveAgentMessages(host.$, CFG, messages, { sessionId: 'sess-1', skipRows: KEEP, keepFrom: messages.length - 12, ...extra });
+
+describe('agent messages to files', () => {
+  it('moves the older agent rows whole to a file, keeps the last six, and leaves a trace that says the row is not the user\'s', async () => {
+    const host = fakeHost();
+    const m = talk(rowsOf(8, (k) => longReport(k)));
+    const { rows, stats } = await run(host, m);
+    expect([...rows.keys()]).toEqual([1, 3]);
+    expect(stats).toMatchObject({ mode: 'active', agent_rows: 8, limit_row: 5, kept_last: 6, moved: 2, written: 2, moved_chars: m[1].text.length + m[3].text.length });
+    const row = rows.get(1);
+    expect(row).toMatchObject({ role: 'user', toolUses: [] });
+    expect(row.handle).toBeUndefined();
+    expect(row.text.startsWith('[agent message moved at compaction, not from the user: /state/compaction-pastes/sess-1/')).toBe(true);
+    expect(row.text).toContain(`(${m[1].text.length} chars, `);
+    expect(row.text).toContain('from a1');
+    expect(row.text).toContain('"N0 done"');
+    const path = /: (\/state\/[^ ]+) \(/.exec(row.text)[1];
+    expect(host.files.get(path)).toBe(m[1].text);
+    expect(stats.trace_chars).toBe(row.text.length + rows.get(3).text.length);
+  });
+
+  it('plans without writing when write is false', async () => {
+    const host = fakeHost();
+    const { rows, stats } = await run(host, talk(rowsOf(8, (k) => longReport(k))), { write: false });
+    expect(rows.size).toBe(0);
+    expect(host.files.size).toBe(0);
+    expect(stats).toMatchObject({ mode: 'plan', moved: 2, written: 0 });
+  });
+
+  it('keeps the first row, the lead\'s rows, rows with the user\'s words, pending requests, short rows and rows with a secret', async () => {
+    const host = fakeHost();
+    const pending = report('a3', JSON.stringify({ type: 'permission_request', request_id: 'r1', note: filler(900) }));
+    const rowsIn = [
+      longReport(1, 'team-lead'), `${longReport(2)}\n\nThe user sent a new message while you were working:\nplease also check N9`, pending, report('a4', 'short'),
+      report('a5', `Report with a key ${PEM} ${filler(900)}`), longReport(6), ...rowsOf(6, (k) => longReport(10 + k)),
+    ];
+    const { rows, stats } = await run(host, talk(rowsIn));
+    expect(stats).toMatchObject({ lead: 1, owner_words: 1, pending_json: 1, too_short: 1, secret: 1, moved: 1 });
+    expect([...rows.keys()]).toEqual([11]);
+  });
+
+  it('keeps a row whose trace would carry a secret', async () => {
+    const host = fakeHost();
+    const withKey = report('a1', filler(1200), PEM);
+    const { rows, stats } = await run(host, talk([withKey, ...rowsOf(6, (k) => longReport(k))]));
+    expect(rows.size).toBe(0);
+    expect(stats.secret).toBe(1);
+  });
+
+  it('a row of state-only idle notifications takes no place among the last six', async () => {
+    const host = fakeHost();
+    const states = rowsOf(3, () => idle('a2', 'Waiting: for the review.'));
+    const m = talk([longReport(1), longReport(2), ...rowsOf(6, (k) => longReport(10 + k)), ...states]);
+    const { stats } = await run(host, m, { statePattern: STATES });
+    expect(stats).toMatchObject({ agent_rows: 11, limit_row: 5, moved: 2 });
+  });
+
+  it('keeps every row when a row of the API form cannot be rebuilt from text, and when there is no API form', async () => {
+    const host = fakeHost();
+    const m = talk(rowsOf(8, (k) => longReport(k)));
+    expect((await run(host, m, { skipRows: Object.assign(new Set(), { unmatched: 1 }) })).stats).toMatchObject({ reason: 'image_unmatched', moved: 0 });
+    expect((await run(host, m, { skipRows: undefined })).stats).toMatchObject({ reason: 'no_api_form', moved: 0 });
+    expect((await run(host, m, { skipRows: new Set([1]) })).stats).toMatchObject({ skipped_blocks: 1, moved: 1 });
+    expect(host.files.size).toBe(1);
+  });
+
+  it('a row stays when its file cannot be written, and an identical file counts as reused', async () => {
+    const m = talk(rowsOf(8, (k) => longReport(k)));
+    const bad = await run(fakeHost(true), m);
+    expect(bad.rows.size).toBe(0);
+    expect(bad.stats).toMatchObject({ write_failed: 2, moved: 0 });
+    const host = fakeHost();
+    await run(host, m);
+    const again = await run(host, m);
+    expect(again.stats).toMatchObject({ reused: 2, written: 0, moved: 2 });
+  });
+
+  it('reads senders, time and summary of each block', () => {
+    const text = `${HEAD}${body('a1', 'Done.', 'first')}\n\n${body('a2', JSON.stringify({ type: 'idle_notification', from: 'a2', timestamp: '2026-11-11T07:34:03.398Z', summary: 'sent N5', result: 'Waiting: for N6.' }))}`;
+    const senders = agentSenders(text, STATES);
+    expect(senders.map((x) => x.who)).toEqual(['a1', 'a2']);
+    expect(senders[1]).toMatchObject({ idle: true, state: true, sent: 'sent N5', when: '2026-11-11T07:34:03.398Z' });
+    const trace = agentTrace('/p/f.txt', text, STATES);
+    expect(trace).toContain('from a2 (idle, last: "sent N5"), 2026-11-11 07:34:03 UTC: "Waiting: for N6."');
+    expect(trace.endsWith(']')).toBe(true);
+  });
+});
+
+describe('agent messages to files in the compaction', () => {
+  const agentRows = rowsOf(8, (k) => longReport(k));
+  const messages = () => {
+    const m = talk(agentRows);
+    m.splice(1, 0, { role: 'assistant', text: 'Read.', toolUses: [{ tool_use_id: 't1', tool: 'Bash', input: { command: 'cat a.txt' } }] }, { role: 'user', text: '', toolUses: [], toolResults: [{ tool_use_id: 't1', text: `RESULT ${'x'.repeat(30000)}`, isError: false }] });
+    return m.map((x, k) => Object.freeze({ ...x, handle: `h${k}` }));
+  };
+  const spilled = (store) => [...store.keys()].filter((p) => p.includes('/compaction-pastes/'));
+
+  it('without the variable no row moves and the record has no stats', async () => {
+    const { out, record, store } = await compactRun({}, messages());
+    expect(record).not.toHaveProperty('agent_messages');
+    expect(spilled(store)).toHaveLength(0);
+    expect(JSON.stringify(out.messages)).toContain('Report 0:');
+  });
+
+  it('with the variable the older reports go to files and the rows carry traces', async () => {
+    const { out, record, store } = await compactRun({ OMC_JEV_COMPACT_AGENT_TRIM: '1' }, messages());
+    expect(record.result).toBe('jev');
+    expect(record.agent_messages).toMatchObject({ mode: 'active', moved: 2, written: 2, installed: true });
+    expect(spilled(store)).toHaveLength(2);
+    const text = JSON.stringify(out.messages);
+    expect(text).not.toContain('Report 0:');
+    expect(text).toContain('[agent message moved at compaction, not from the user: ');
+    expect(text).toContain('Report 7:');
+  });
+
+  it('through the token cascade the floor counts the files and their saving comes off the prediction', async () => {
+    const env = { OMC_JEV_COMPACT_TARGET_PERCENT: '20' };
+    const off = await compactRun(env, messages());
+    const on = await compactRun({ ...env, OMC_JEV_COMPACT_AGENT_TRIM: '1' }, messages());
+    expect(on.record).toMatchObject({ result: 'jev', agent_messages: { moved: 2, installed: true } });
+    expect(on.record.floor_agents_tokens).toBeGreaterThan(0);
+    const st = on.record.agent_messages;
+    const saved = 0.363 * on.record.agent_trim.chars + 0.455 * st.moved_chars - 0.58 * st.trace_chars;
+    expect(Math.abs(off.record.tokens_after_pred - on.record.tokens_after_pred - saved)).toBeLessThanOrEqual(1);
+  });
+
+  it('with the point in shadow mode the stage only plans: no file, no change', async () => {
+    const { record, store } = await compactRun({ OMC_JEV: 'compaction:shadow', OMC_JEV_COMPACT_AGENT_TRIM: '1' }, messages());
+    expect(record.agent_messages).toMatchObject({ mode: 'plan', moved: 2, written: 0 });
+    expect(spilled(store)).toHaveLength(0);
   });
 });
