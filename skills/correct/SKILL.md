@@ -33,7 +33,7 @@ agent mistake into an enforcement the mistake cannot survive.
    `<state-root>/notepads/*/problems.md`, the verification ledger at
    `<state-root>/state/verification-ledger.tsv`, review comments, recent
    fix commits, and the user's feedback notes in the memory directory
-   (`~/.claude/projects/<project>/memory/`, notes with `type: feedback`):
+   (`${CLAUDE_CONFIG_DIR:-$HOME/.claude}/projects/<project>/memory/`, notes with `type: feedback`):
    a note's `count` field, when present, counts how many times in total the user
    stated that correction, the first time included.
    Group by root cause, not by symptom.

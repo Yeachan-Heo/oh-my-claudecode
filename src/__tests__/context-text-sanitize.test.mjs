@@ -11,6 +11,7 @@ import { appendFileSync, mkdirSync, mkdtempSync, rmSync, utimesSync, writeFileSy
 import { tmpdir } from 'os';
 import { dirname, join } from 'path';
 import { fileURLToPath } from 'url';
+import process from 'node:process';
 import { cleanHostText, cleanTextBlock, untrustedEnvelope } from '../../scripts/lib/context-text-sanitize.mjs';
 
 const REPO_ROOT = join(dirname(fileURLToPath(import.meta.url)), '..', '..');

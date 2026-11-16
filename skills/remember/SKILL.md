@@ -38,7 +38,7 @@ Promote durable, reusable knowledge into the right memory surface instead of lea
 - Keep entries concise and actionable.
 - If something is uncertain, mark it as uncertain rather than storing it as fact.
 - When the destination is a user memory note (a file under
-  `~/.claude/projects/<project>/memory/`), set `metadata.source` (`user` only
+  `${CLAUDE_CONFIG_DIR:-$HOME/.claude}/projects/<project>/memory/`), set `metadata.source` (`user` only
   with a quote of the user's words, otherwise `agent` or `inferred`), set
   `metadata.expires` for dated state, and set `metadata.lastVerified` when
   you checked the note against the repository or system. For a repeated
