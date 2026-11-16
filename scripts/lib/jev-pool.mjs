@@ -2,7 +2,8 @@
 // agents, enforced with hard refusals of Agent/Task calls in PreToolUse, with a reservation per
 // allowed call (the reserveSubagentSpawn pattern). A ceiling on the number of main sessions is
 // read here too (sessionLimit, countSessions) but is enforced only by the session launcher
-// (scripts/jev-session.mjs), not by the Agent/Task refusal. Enabled only with OMC_JEV_POOL=1; with the variable unset nothing here runs.
+// (scripts/jev-session.mjs), not by the Agent/Task refusal. Enabled only with OMC_JEV_POOL=1; with the variable unset nothing here runs
+// (the SubagentStart, SubagentStop and PostToolUseFailure hooks do not even import this module).
 //
 // The state lives in the Jev log directory (OMC_JEV_LOG_DIR, else state/jev under the state root;
 // set OMC_JEV_LOG_DIR to share one pool between projects):
@@ -266,10 +267,9 @@ export function countSessions({ env = process.env, readCmdline = readFileSync } 
 }
 
 /**
- * The shared handler of the event hooks (scripts/jev-pool-start.mjs, jev-pool-stop.mjs,
- * jev-pool-failure.mjs): the SubagentStart commit, the SubagentStop release of the session and the
- * PostToolUseFailure release by tool_use_id. Disabled pool and every error are a no-op (fail-open).
- * Returns true when the state changed.
+ * The handler of the pool events: the SubagentStart commit, the SubagentStop release of the
+ * session and the PostToolUseFailure release by tool_use_id. Disabled pool and every error are a
+ * no-op (fail-open). Returns true when the state changed.
  */
 export async function handlePoolEvent({ event, sessionId, toolUseId, cwd, env = process.env, now = Date.now() }) {
   if (!poolEnabled(env)) return false;
@@ -281,4 +281,22 @@ export async function handlePoolEvent({ event, sessionId, toolUseId, cwd, env = 
     if (event === 'PostToolUseFailure') return releaseAgentByToolUseId(dir, toolUseId, now);
   } catch { return false; }
   return false;
+}
+
+/**
+ * Runs the pool handler for a parsed hook event object, as read once by the hook that calls this
+ * (scripts/subagent-tracker.mjs and scripts/post-tool-use-failure.mjs, which import this module
+ * only when OMC_JEV_POOL=1). A value that is not an object is a no-op. Returns true when the
+ * state changed.
+ */
+export async function handlePoolHookEvent(data, options = {}) {
+  if (!data || typeof data !== 'object') return false;
+  const text = (value) => (typeof value === 'string' ? value : '');
+  return handlePoolEvent({
+    event: text(data.hook_event_name),
+    sessionId: text(data.session_id),
+    cwd: text(data.cwd),
+    toolUseId: text(data.tool_use_id),
+    ...options,
+  });
 }

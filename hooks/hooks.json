@@ -214,15 +214,6 @@
               "${CLAUDE_PLUGIN_ROOT}/scripts/run.cjs",
               "${CLAUDE_PLUGIN_ROOT}/scripts/post-tool-use-failure.mjs"
             ]
-          },
-          {
-            "type": "command",
-            "command": "node",
-            "timeout": 3,
-            "args": [
-              "${CLAUDE_PLUGIN_ROOT}/scripts/run.cjs",
-              "${CLAUDE_PLUGIN_ROOT}/scripts/jev-pool-failure.mjs"
-            ]
           }
         ]
       }
@@ -240,15 +231,6 @@
               "${CLAUDE_PLUGIN_ROOT}/scripts/subagent-tracker.mjs",
               "start"
             ]
-          },
-          {
-            "type": "command",
-            "command": "node",
-            "timeout": 3,
-            "args": [
-              "${CLAUDE_PLUGIN_ROOT}/scripts/run.cjs",
-              "${CLAUDE_PLUGIN_ROOT}/scripts/jev-pool-start.mjs"
-            ]
           }
         ]
       }
@@ -265,15 +247,6 @@
               "${CLAUDE_PLUGIN_ROOT}/scripts/run.cjs",
               "${CLAUDE_PLUGIN_ROOT}/scripts/subagent-tracker.mjs",
               "stop"
-            ]
-          },
-          {
-            "type": "command",
-            "command": "node",
-            "timeout": 3,
-            "args": [
-              "${CLAUDE_PLUGIN_ROOT}/scripts/run.cjs",
-              "${CLAUDE_PLUGIN_ROOT}/scripts/jev-pool-stop.mjs"
             ]
           },
           {

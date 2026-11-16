@@ -1,7 +1,8 @@
 /**
  * Opt-in agent pool (OMC_JEV_POOL=1): the library scripts/lib/jev-pool.mjs, the PreToolUse refusal
  * of Agent and Task calls in scripts/pre-tool-enforcer.mjs, and the SubagentStart, SubagentStop and
- * PostToolUseFailure hook scripts that commit or release the reservations.
+ * PostToolUseFailure handling in scripts/subagent-tracker.mjs and scripts/post-tool-use-failure.mjs
+ * that commits or releases the reservations.
  */
 import { spawnSync } from 'node:child_process';
 import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
@@ -215,11 +216,11 @@ describe('session counter', () => {
 });
 
 /** Runs one of the hook scripts with the given stdin and environment; the cwd is a temp project. */
-function runHook(script, input, extraEnv, cwd) {
+function runHook(script, input, extraEnv, cwd, args = [], nodeArgs = [], timeoutMs = 60_000) {
   const home = makeDir('jev-pool-home-');
   const env = Object.fromEntries(Object.entries(process.env).filter(([key]) => !/^(OMC_|TYPESAFE_|CLAUDE|ANTHROPIC_|DISABLE_OMC|CODEX)/i.test(key)));
   Object.assign(env, { HOME: home, USERPROFILE: home, CLAUDE_CONFIG_DIR: join(home, '.claude'), OMC_JEV_QUIET: '1' }, extraEnv);
-  return spawnSync(process.execPath, [join(ROOT, 'scripts', script)], { cwd, input: JSON.stringify(input), env, encoding: 'utf8', timeout: 60_000 });
+  return spawnSync(process.execPath, [...nodeArgs, join(ROOT, 'scripts', script), ...args], { cwd, input: JSON.stringify(input), env, encoding: 'utf8', timeout: timeoutMs });
 }
 
 function projectDir() {
@@ -294,46 +295,196 @@ describe('PreToolUse refusal with OMC_JEV_POOL=1', () => {
   });
 });
 
-describe('event hooks with OMC_JEV_POOL=1', () => {
+const start = (cwd, sessionId = 'session-a') => ({ hook_event_name: 'SubagentStart', session_id: sessionId, cwd });
+const stop = (cwd, sessionId = 'session-a') => ({ hook_event_name: 'SubagentStop', session_id: sessionId, cwd });
+const failure = (cwd, sessionId, toolUseId) => ({ hook_event_name: 'PostToolUseFailure', session_id: sessionId, tool_use_id: toolUseId, cwd });
+
+describe('event handling with OMC_JEV_POOL=1', () => {
   it('SubagentStart commits the pending reservation and SubagentStop releases the alive one', () => {
     const cwd = projectDir();
     const logDir = makeDir();
     reserveAgent({ dir: logDir, sessionId: 'session-a', now: Date.now(), env: {} });
-    const start = runHook('jev-pool-start.mjs', { hook_event_name: 'SubagentStart', session_id: 'session-a', cwd }, { OMC_JEV_POOL: '1', OMC_JEV_LOG_DIR: logDir }, cwd);
-    expect(start.status).toBe(0);
-    expect(JSON.parse(start.stdout)).toEqual({ continue: true, suppressOutput: true });
+    const env = { OMC_JEV_POOL: '1', OMC_JEV_LOG_DIR: logDir };
+    const started = runHook('subagent-tracker.mjs', start(cwd), env, cwd, ['start']);
+    expect(started.status).toBe(0);
     expect(countAlive(logDir)).toBe(1);
-    const stop = runHook('jev-pool-stop.mjs', { hook_event_name: 'SubagentStop', session_id: 'session-a', cwd }, { OMC_JEV_POOL: '1', OMC_JEV_LOG_DIR: logDir }, cwd);
-    expect(stop.status).toBe(0);
+    const stopped = runHook('subagent-tracker.mjs', stop(cwd), env, cwd, ['stop']);
+    expect(stopped.status).toBe(0);
     expect(countAlive(logDir)).toBe(0);
+    expect(countOccupied(logDir)).toBe(0);
+  });
+
+  it('the pool does not change what the tracker prints', () => {
+    const logDir = makeDir();
+    for (const action of ['start', 'stop']) {
+      const cwdOff = projectDir();
+      const cwdOn = projectDir();
+      const input = (cwd) => (action === 'start' ? start(cwd) : stop(cwd));
+      const off = runHook('subagent-tracker.mjs', input(cwdOff), { OMC_JEV_LOG_DIR: logDir }, cwdOff, [action]);
+      const on = runHook('subagent-tracker.mjs', input(cwdOn), { OMC_JEV_POOL: '1', OMC_JEV_LOG_DIR: logDir }, cwdOn, [action]);
+      expect(on.status).toBe(off.status);
+      expect(on.stdout).toBe(off.stdout);
+    }
+  });
+
+  it('a pool step that never ends does not stop a hook: each exits 0 with the output it prints without the pool', () => {
+    // A resolve hook replaces the pool module with a handler that never settles and keeps a timer open.
+    const tools = makeDir('jev-pool-hang-');
+    writeFileSync(join(tools, 'hang-pool.mjs'), [
+      'export function handlePoolHookEvent() {',
+      '  return new Promise(() => setInterval(() => {}, 1000));',
+      '}',
+      '',
+    ].join('\n'));
+    writeFileSync(join(tools, 'hang-hooks.mjs'), [
+      "const stub = new URL('./hang-pool.mjs', import.meta.url).href;",
+      'export async function resolve(specifier, context, nextResolve) {',
+      "  if (specifier.endsWith('lib/jev-pool.mjs')) return { url: stub, format: 'module', shortCircuit: true };",
+      '  return nextResolve(specifier, context);',
+      '}',
+      '',
+    ].join('\n'));
+    writeFileSync(join(tools, 'register.mjs'), "import { register } from 'node:module';\nregister('./hang-hooks.mjs', import.meta.url);\n");
+    const nodeArgs = ['--import', join(tools, 'register.mjs')];
+    const runs = [
+      ['subagent-tracker.mjs', (cwd) => start(cwd), ['start']],
+      ['subagent-tracker.mjs', (cwd) => stop(cwd), ['stop']],
+      ['post-tool-use-failure.mjs', (cwd) => failure(cwd, 'session-hang', 'tool-hang'), []],
+    ];
+    for (const [script, makeInput, args] of runs) {
+      const cwdOff = projectDir();
+      const off = runHook(script, makeInput(cwdOff), { OMC_JEV_LOG_DIR: makeDir() }, cwdOff, args);
+      const cwdOn = projectDir();
+      const on = runHook(script, makeInput(cwdOn), { OMC_JEV_POOL: '1', OMC_JEV_LOG_DIR: makeDir() }, cwdOn, args, nodeArgs, 20_000);
+      expect(on.signal, script).toBeNull();
+      expect(on.status, script).toBe(0);
+      expect(on.stdout, script).toBe(off.stdout);
+    }
   });
 
   it('PostToolUseFailure releases the reservation of the failed call by tool_use_id, pending or alive', () => {
     const cwd = projectDir();
     const logDir = makeDir();
+    const env = { OMC_JEV_POOL: '1', OMC_JEV_LOG_DIR: logDir };
     reserveAgent({ dir: logDir, sessionId: 'session-f', toolUseId: 'tool-f1', now: Date.now(), env: {} });
     expect(countOccupied(logDir)).toBe(1);
-    const failure = runHook('jev-pool-failure.mjs', { hook_event_name: 'PostToolUseFailure', session_id: 'session-f', tool_use_id: 'tool-f1', cwd }, { OMC_JEV_POOL: '1', OMC_JEV_LOG_DIR: logDir }, cwd);
-    expect(failure.status).toBe(0);
+    // An event without tool_name and error still releases: the pool runs before the early returns.
+    const first = runHook('post-tool-use-failure.mjs', failure(cwd, 'session-f', 'tool-f1'), env, cwd);
+    expect(first.status).toBe(0);
     expect(countOccupied(logDir)).toBe(0);
     reserveAgent({ dir: logDir, sessionId: 'session-f2', toolUseId: 'tool-f2', now: Date.now(), env: {} });
     commitAgent(logDir, 'session-f2');
-    const failure2 = runHook('jev-pool-failure.mjs', { hook_event_name: 'PostToolUseFailure', session_id: 'session-f2', tool_use_id: 'tool-f2', cwd }, { OMC_JEV_POOL: '1', OMC_JEV_LOG_DIR: logDir }, cwd);
-    expect(failure2.status).toBe(0);
+    const second = runHook('post-tool-use-failure.mjs', { ...failure(cwd, 'session-f2', 'tool-f2'), tool_name: 'Agent', error: 'spawn failed' }, env, cwd);
+    expect(second.status).toBe(0);
     expect(countOccupied(logDir)).toBe(0);
     expect(releaseAgentByToolUseId(logDir, 'no-such-tool')).toBe(false);
   });
 
-  it('the event hooks change nothing without OMC_JEV_POOL', () => {
+  it('an interrupted failure still releases the reservation', () => {
+    const cwd = projectDir();
+    const logDir = makeDir();
+    reserveAgent({ dir: logDir, sessionId: 'session-i', toolUseId: 'tool-i', now: Date.now(), env: {} });
+    runHook('post-tool-use-failure.mjs', { ...failure(cwd, 'session-i', 'tool-i'), tool_name: 'Agent', error: 'x', is_interrupt: true }, { OMC_JEV_POOL: '1', OMC_JEV_LOG_DIR: logDir }, cwd);
+    expect(countOccupied(logDir)).toBe(0);
+  });
+
+  it('the pool step also runs when the tracker or the failure hook is skipped', () => {
+    const cwd = projectDir();
+    const logDir = makeDir();
+    const env = { OMC_JEV_POOL: '1', OMC_JEV_LOG_DIR: logDir };
+    reserveAgent({ dir: logDir, sessionId: 'session-a', toolUseId: 'tool-s', now: Date.now(), env: {} });
+    runHook('subagent-tracker.mjs', start(cwd), { ...env, OMC_SKIP_HOOKS: 'subagent-tracker' }, cwd, ['start']);
+    expect(countAlive(logDir)).toBe(1);
+    runHook('subagent-tracker.mjs', stop(cwd), { ...env, DISABLE_OMC: '1' }, cwd, ['stop']);
+    expect(countOccupied(logDir)).toBe(0);
+    reserveAgent({ dir: logDir, sessionId: 'session-a', toolUseId: 'tool-s2', now: Date.now(), env: {} });
+    runHook('post-tool-use-failure.mjs', failure(cwd, 'session-a', 'tool-s2'), { ...env, OMC_SKIP_HOOKS: 'post-tool-use-failure' }, cwd);
+    expect(countOccupied(logDir)).toBe(0);
+  });
+
+  it('a value of OMC_JEV_POOL with spaces around 1 enables the pool, any other value does not', () => {
+    const cwd = projectDir();
+    const logDir = makeDir();
+    reserveAgent({ dir: logDir, sessionId: 'session-a', now: Date.now(), env: {} });
+    runHook('subagent-tracker.mjs', start(cwd), { OMC_JEV_POOL: 'off', OMC_JEV_LOG_DIR: logDir }, cwd, ['start']);
+    expect(countAlive(logDir)).toBe(0);
+    runHook('subagent-tracker.mjs', start(cwd), { OMC_JEV_POOL: ' 1 ', OMC_JEV_LOG_DIR: logDir }, cwd, ['start']);
+    expect(countAlive(logDir)).toBe(1);
+  });
+
+  it('a malformed event leaves the pool untouched and the exit code 0', () => {
+    const cwd = projectDir();
+    const logDir = makeDir();
+    reserveAgent({ dir: logDir, sessionId: 'session-a', toolUseId: 'tool-m', now: Date.now(), env: {} });
+    const env = { OMC_JEV_POOL: '1', OMC_JEV_LOG_DIR: logDir };
+    for (const input of [{ hook_event_name: 'Unknown', session_id: 'session-a', tool_use_id: 'tool-m', cwd }, 'not an object']) {
+      expect(runHook('subagent-tracker.mjs', input, env, cwd, ['start']).status).toBe(0);
+      expect(runHook('post-tool-use-failure.mjs', input, env, cwd).status).toBe(0);
+    }
+    expect(countOccupied(logDir)).toBe(1);
+  });
+});
+
+describe('event handling without OMC_JEV_POOL', () => {
+  it('changes nothing in the pool', () => {
     const cwd = projectDir();
     const logDir = makeDir();
     reserveAgent({ dir: logDir, sessionId: 'session-off', toolUseId: 'tool-off', now: Date.now(), env: {} });
-    const start = runHook('jev-pool-start.mjs', { hook_event_name: 'SubagentStart', session_id: 'session-off', cwd }, { OMC_JEV_LOG_DIR: logDir }, cwd);
-    expect(start.status).toBe(0);
+    const started = runHook('subagent-tracker.mjs', start(cwd, 'session-off'), { OMC_JEV_LOG_DIR: logDir }, cwd, ['start']);
+    expect(started.status).toBe(0);
     expect(countAlive(logDir)).toBe(0);
     expect(countOccupied(logDir)).toBe(1);
-    const failure = runHook('jev-pool-failure.mjs', { hook_event_name: 'PostToolUseFailure', session_id: 'session-off', tool_use_id: 'tool-off', cwd }, { OMC_JEV_LOG_DIR: logDir }, cwd);
-    expect(failure.status).toBe(0);
+    const stopped = runHook('subagent-tracker.mjs', stop(cwd, 'session-off'), { OMC_JEV_LOG_DIR: logDir }, cwd, ['stop']);
+    expect(stopped.status).toBe(0);
     expect(countOccupied(logDir)).toBe(1);
+    const failed = runHook('post-tool-use-failure.mjs', failure(cwd, 'session-off', 'tool-off'), { OMC_JEV_LOG_DIR: logDir }, cwd);
+    expect(failed.status).toBe(0);
+    expect(countOccupied(logDir)).toBe(1);
+  });
+
+  it('does not load the pool module, while the same run with OMC_JEV_POOL=1 does', () => {
+    // A resolve hook, registered with --import, appends a line to the marker file for every
+    // module URL that ends in lib/jev-pool.mjs.
+    const tools = makeDir('jev-pool-loader-');
+    const marker = join(tools, 'loaded.txt');
+    writeFileSync(join(tools, 'hooks.mjs'), [
+      "import { appendFileSync } from 'node:fs';",
+      'export async function resolve(specifier, context, nextResolve) {',
+      '  const result = await nextResolve(specifier, context);',
+      "  if (result.url.endsWith('/lib/jev-pool.mjs')) appendFileSync(process.env.POOL_LOAD_MARKER, `${result.url}\\n`);",
+      '  return result;',
+      '}',
+      '',
+    ].join('\n'));
+    writeFileSync(join(tools, 'register.mjs'), "import { register } from 'node:module';\nregister('./hooks.mjs', import.meta.url);\n");
+    const nodeArgs = ['--import', join(tools, 'register.mjs')];
+    const cwd = projectDir();
+    const logDir = makeDir();
+    const base = { OMC_JEV_LOG_DIR: logDir, POOL_LOAD_MARKER: marker };
+    const runs = [
+      ['subagent-tracker.mjs', start(cwd), ['start']],
+      ['subagent-tracker.mjs', stop(cwd), ['stop']],
+      ['post-tool-use-failure.mjs', failure(cwd, 'session-a', 'tool-1'), []],
+      ['subagent-tracker.mjs', start(cwd), ['start'], { OMC_SKIP_HOOKS: 'subagent-tracker' }],
+      ['post-tool-use-failure.mjs', failure(cwd, 'session-a', 'tool-1'), [], { DISABLE_OMC: '1' }],
+    ];
+    for (const [script, input, args, extra = {}] of runs) {
+      for (const value of [undefined, 'off', '0', '']) {
+        const env = { ...base, ...extra, ...(value === undefined ? {} : { OMC_JEV_POOL: value }) };
+        expect(runHook(script, input, env, cwd, args, nodeArgs).status).toBe(0);
+        expect(existsSync(marker)).toBe(false);
+      }
+      expect(runHook(script, input, { ...base, ...extra, OMC_JEV_POOL: '1' }, cwd, args, nodeArgs).status).toBe(0);
+      expect(existsSync(marker)).toBe(true);
+      rmSync(marker, { force: true });
+    }
+  });
+
+  it('hooks.json registers no separate agent pool hook', () => {
+    const manifest = readFileSync(join(ROOT, 'hooks', 'hooks.json'), 'utf8');
+    expect(manifest).not.toMatch(/jev-pool/);
+    expect(existsSync(join(ROOT, 'scripts', 'jev-pool-start.mjs'))).toBe(false);
+    expect(existsSync(join(ROOT, 'scripts', 'jev-pool-stop.mjs'))).toBe(false);
+    expect(existsSync(join(ROOT, 'scripts', 'jev-pool-failure.mjs'))).toBe(false);
   });
 });

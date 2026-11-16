@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+/* global process, setTimeout, clearTimeout */
 // OMC Post-Tool-Use-Failure Hook (Node.js)
 // Tracks tool failures for retry guidance in Stop hook
 // Writes last-tool-error-state.json (session-scoped) or last-tool-error.json (legacy)
@@ -332,6 +333,42 @@ function shouldSuppressOptionalStartupMethodNotFound(toolName, error) {
   return /\bmethod not found\b/i.test(String(error || ''));
 }
 
+// Opt-in agent pool (OMC_JEV_POOL=1): releases the reservation of a failed Agent/Task call. The
+// pool module is imported only when the variable is set, so with it unset this hook does no extra
+// work. The pool is independent of the skip switches and of the early returns below, and fails open.
+const agentPoolEnabled = () => String(process.env.OMC_JEV_POOL ?? '').trim() === '1';
+
+// Time cap of the agent pool step (ms). SubagentStart and PostToolUseFailure have the shortest
+// manifest timeout of the hooks that run this step, 3 s. run.cjs stops a hook 1.5 s before its
+// manifest timeout on Windows, and the rest of the hook runs after this step, so 1 s leaves about
+// 0.5 s for it there.
+const AGENT_POOL_STEP_LIMIT_MS = 1000;
+let agentPoolStepTimedOut = false;
+
+async function runAgentPool(data) {
+  if (!agentPoolEnabled()) return;
+  let timer;
+  try {
+    const step = import('./lib/jev-pool.mjs').then(({ handlePoolHookEvent }) => handlePoolHookEvent(data));
+    const limit = new Promise((resolve) => {
+      timer = setTimeout(() => {
+        agentPoolStepTimedOut = true;
+        resolve();
+      }, AGENT_POOL_STEP_LIMIT_MS);
+    });
+    await Promise.race([step, limit]);
+  } catch { /* fail-open */ } finally {
+    clearTimeout(timer);
+  }
+}
+
+// A step past its cap can leave its handler holding timers or sockets, which would keep the process
+// alive until run.cjs kills it and drops its output. Once stdout is flushed, exit with the exit code.
+function exitAfterAgentPoolTimeout() {
+  if (!agentPoolStepTimedOut) return;
+  process.stdout.write('', () => process.exit(process.exitCode ?? 0));
+}
+
 async function main() {
   // Skip guard: honor DISABLE_OMC and OMC_SKIP_HOOKS (see issues #838, #3253).
   // Token `post-tool-use-failure` is preferred; `post-tool-use` is accepted for
@@ -343,6 +380,9 @@ async function main() {
     _skipHooks.includes('post-tool-use-failure') ||
     _skipHooks.includes('post-tool-use')
   ) {
+    if (agentPoolEnabled()) {
+      try { await runAgentPool(JSON.parse(await readStdin())); } catch { /* fail-open */ }
+    }
     console.log(JSON.stringify({ continue: true }));
     return;
   }
@@ -350,6 +390,8 @@ async function main() {
   try {
     const input = await readStdin();
     const data = JSON.parse(input);
+
+    await runAgentPool(data);
 
     // Opt-in shell checks (OMC_SHELL_CHECKS=1): record known Bash/PowerShell error classes. Never affects the hook.
     if (process.env.OMC_SHELL_CHECKS === '1' && (data?.tool_name === 'Bash' || data?.tool_name === 'PowerShell')) {
@@ -514,4 +556,4 @@ async function main() {
   }
 }
 
-main();
+main().then(exitAfterAgentPoolTimeout);

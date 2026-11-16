@@ -207,9 +207,10 @@ Fires when a tool use fails.
 | Script | Role | Timeout |
 |--------|------|---------|
 | `post-tool-use-failure.mjs` | Provides recovery guidance for failed tool use | 3s |
-| `jev-pool-failure.mjs` | Releases the agent-pool reservation of a failed Agent/Task call (opt-in, `OMC_JEV_POOL=1`) | 3s |
 
 With `OMC_SHELL_CHECKS=1`, the script also records known shell error classes of failed Bash and PowerShell calls (see [Shell Checks](#shell-checks-scriptslibshell-checksmjs)).
+
+With `OMC_JEV_POOL=1`, the script also releases the agent-pool reservation of a failed Agent/Task call by its `tool_use_id`. It runs before the early returns of the script and also when the script is skipped; with the variable unset the pool module is not loaded.
 
 Disable via `DISABLE_OMC=1` (or `DISABLE_OMC=true`) or `OMC_SKIP_HOOKS=post-tool-use-failure` (the `post-tool-use` token also skips it, alongside `post-tool-verifier.mjs`).
 
@@ -220,9 +221,8 @@ Fires when a subagent is spawned.
 | Script | Role | Timeout |
 |--------|------|---------|
 | `subagent-tracker.mjs start` | Tracks subagent start, injects prompts | 3s |
-| `jev-pool-start.mjs` | Commits the agent-pool reservation to alive (opt-in, `OMC_JEV_POOL=1`) | 3s |
 
-Records the subagent name, start time, and session information.
+Records the subagent name, start time, and session information. With `OMC_JEV_POOL=1`, it also commits the agent-pool reservation of the session to alive (also when the tracker is skipped); with the variable unset the pool module is not loaded.
 
 ### SubagentStop
 
@@ -231,8 +231,9 @@ Fires when a subagent completes.
 | Script | Role | Timeout |
 |--------|------|---------|
 | `subagent-tracker.mjs stop` | Tracks subagent completion | 5s |
-| `jev-pool-stop.mjs` | Releases the agent-pool reservation of the subagent (opt-in, `OMC_JEV_POOL=1`) | 3s |
 | `verify-deliverables.mjs` | Verifies subagent deliverables | 5s |
+
+With `OMC_JEV_POOL=1`, `subagent-tracker.mjs stop` also releases the oldest alive agent-pool reservation of the session (the oldest pending one when there is no alive one), also when the tracker is skipped.
 
 ### PreCompact
 
@@ -704,7 +705,7 @@ export OMC_JEV_ENDPOINT="https://jev-proxy.example.com/v1/systemone"
 | `OMC_JEV` | (absent) | Per-point opt-in: `point`, `point:active`, `all` (every point, shadow), `all:active` (every point, active), or `point:off` (that point off, also under `all` and `all:active`). Comma-separated; unknown point names are ignored. |
 | `OMC_JEV_TIMEOUT_MS` | `2000` | Per-call timeout in milliseconds (single round-trip measured at 465–605 ms; default allows margin). In active mode the requests of one hook process add up: each waits up to this value plus the resolver buffer (500 ms; 3500 ms for `model-routing`), and the resolver process needs time to start (0.5-1.2 s on a busy Windows laptop). The timeouts in `hooks/hooks.json` of the hooks that wait for Jev (`pre-tool-enforcer`, `post-tool-verifier`, `persistent-mode`, `code-simplifier`) are sized for the default. If you raise this value, check that the sum over the requests of one hook (`persistent-mode` also waits up to 6 s for the bridge) still fits the hook timeout minus the `run.cjs` cushion (0.5 s POSIX, 1.5 s Windows); otherwise `run.cjs` stops the hook and drops its whole output. `keyword-detector.mjs` is capped at 8 s by `run.cjs` whatever its manifest timeout says, so with three active points (`skill-trigger`, `intent`, `task-size`) at the defaults it can still be stopped. |
 | `OMC_JEV_MAX_REQUESTS` | `0` (unlimited) | Maximum Jev requests per process. When reached, heuristic twins run for remaining calls. |
-| `OMC_JEV_POOL` | (unset) | Set to `1` to enable the agent pool: `pre-tool-enforcer.mjs` refuses `Agent` and `Task` calls while the pool is full (see `OMC_JEV_POOL_MAX_AGENTS`), with a message that tells the caller to do the work itself. Each allowed call takes a reservation that `jev-pool-start.mjs`, `jev-pool-stop.mjs` and `jev-pool-failure.mjs` commit or release. Reservations and `pool.jsonl` live in the Jev log directory. Any other value, or unset: no check, no reservation, no line. |
+| `OMC_JEV_POOL` | (unset) | Set to `1` to enable the agent pool: `pre-tool-enforcer.mjs` refuses `Agent` and `Task` calls while the pool is full (see `OMC_JEV_POOL_MAX_AGENTS`), with a message that tells the caller to do the work itself. Each allowed call takes a reservation that the `SubagentStart` and `SubagentStop` handling in `subagent-tracker.mjs` and the `PostToolUseFailure` handling in `post-tool-use-failure.mjs` commit or release; those scripts import the pool module only when the variable is `1`, and run that step even when the tracker or the failure hook is skipped with `DISABLE_OMC` or `OMC_SKIP_HOOKS`. Reservations and `pool.jsonl` live in the Jev log directory. Any other value, or unset: no check, no reservation, no line. `subagent-tracker.mjs` and `post-tool-use-failure.mjs` cap the pool step at 1 s; past the cap the hook goes on without waiting for the step, so the step's effect on the reservations is not guaranteed for that event. |
 | `OMC_JEV_POOL_MAX_AGENTS` | `0` (no limit) | Ceiling on the agents of the pool (pending and alive reservations together). A positive integer; `0` or a value that is not an integer means no limit. |
 | `OMC_JEV_POOL_MAX_SESSIONS` | `0` (no limit) | Ceiling on the main sessions counted by `OMC_JEV_POOL_SESSION_COUNTER`; `0` or a value that is not an integer means no limit. It is checked only when `scripts/jev-session.mjs` starts a session (the start is refused at the ceiling); `Agent` and `Task` calls are not refused because of it. |
 | `OMC_JEV_POOL_SESSION_COUNTER` | `claude agents --json` | Command whose output lists the main sessions (an array, or an object with an `agents` or `sessions` array). Processes started with `-p` or `--print` are not counted. A failing command is a read error, not a refusal. |

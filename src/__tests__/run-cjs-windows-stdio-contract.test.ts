@@ -184,9 +184,6 @@ describe('run.cjs Windows/protocol stdio contract (#3920)', () => {
       .filter((name): name is string => Boolean(name))
       .sort();
     expect(commands).toEqual([
-      'jev-pool-failure.mjs',
-      'jev-pool-start.mjs',
-      'jev-pool-stop.mjs',
       'post-tool-directory-context-injector.mjs',
       'post-tool-rules-injector.mjs',
       'post-tool-use-failure.mjs',
