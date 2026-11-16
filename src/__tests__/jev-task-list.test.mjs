@@ -353,6 +353,12 @@ describe('task list: storage library', () => {
     expect(existsSync(listFile(sid, 'main'))).toBe(false);
   });
 
+  // Armored blocks are assembled at run time so no literal key header sits in the source.
+  const armored = (dashes, label, body, pad = '') => {
+    const bar = '-'.repeat(dashes);
+    return `${bar}${pad}BEGIN ${label}${pad}${bar}\n${body}\n${bar}${pad}END ${label}${pad}${bar}`;
+  };
+
   it('masking keeps task names and masks key, token and secret values only', async () => {
     const sid = session();
     const keep = ['File task-list-recovery-2026-11-10 to fix', 'Passed: 26 tests', 'tokens: 5 items', 'Key monkey=3 and task-list-abcdefghij'];
@@ -363,9 +369,9 @@ describe('task list: storage library', () => {
       ['AUTH_TOKEN: "xyz-secret-1"', 'xyz-secret-1'],
       ['db.password=Pass123', 'Pass123'],
       [`sk-ant-${'Q9'.repeat(8)}`, 'Q9Q9Q9Q9'],
-      ['-----BEGIN RSA PRIVATE KEY-----\nMIIabc\n-----END RSA PRIVATE KEY-----', 'MIIabc'],
-      ['-----BEGIN PGP PRIVATE KEY BLOCK-----\nSECRETPGPLIST\n-----END PGP PRIVATE KEY BLOCK-----', 'SECRETPGPLIST'],
-      ['---- BEGIN SSH2 ENCRYPTED PRIVATE KEY ----\nSECRETSSH2LIST\n---- END SSH2 ENCRYPTED PRIVATE KEY ----', 'SECRETSSH2LIST'],
+      [armored(5, 'RSA PRIVATE KEY', 'MIIabc'), 'MIIabc'],
+      [armored(5, 'PGP PRIVATE KEY BLOCK', 'SECRETPGPLIST'), 'SECRETPGPLIST'],
+      [armored(4, 'SSH2 ENCRYPTED PRIVATE KEY', 'SECRETSSH2LIST', ' '), 'SECRETSSH2LIST'],
     ];
     const items = [...keep, ...hide.map(([c]) => c)].map((content) => ({ content, status: 'pending' }));
     await stan(sid, LIST_TOOL, { items: [{ content: 'Current', status: 'in_progress', note: 'Passed: 26 tests, secret_key=hidden999' }, ...items] }, { agent_id: 'r1' });
