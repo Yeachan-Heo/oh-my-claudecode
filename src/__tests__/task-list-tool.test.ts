@@ -86,7 +86,7 @@ describe('task_list replies', () => {
       { items: [{ content: 'A', status: 'done' }] },
       { items: [{ content: ' ', status: 'pending' }] },
       { done: [0] },
-      { advance: 'tak' },
+      { advance: 'yes' },
       { advance: false },
     ];
     for (const args of bad) {

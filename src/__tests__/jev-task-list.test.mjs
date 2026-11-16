@@ -21,7 +21,7 @@ const TOTAL_MS = 120_000;
 
 let TMP;
 let DOM;
-let LOGI;
+let LOGS;
 let L;
 let counter = 0;
 const TRANSCRIPT = () => join(TMP, 'transcript.jsonl');
@@ -29,7 +29,7 @@ const TRANSCRIPT = () => join(TMP, 'transcript.jsonl');
 beforeAll(async () => {
   TMP = mkdtempSync(join(tmpdir(), 'omc-task-list-'));
   DOM = join(TMP, 'home');
-  LOGI = join(TMP, 'logs');
+  LOGS = join(TMP, 'logs');
   mkdirSync(DOM, { recursive: true });
   L = await import(pathToFileURL(join(SCRIPTS, 'lib', 'jev-task-list.mjs')).href);
 });
@@ -41,7 +41,7 @@ afterAll(() => {
 /** Environment of a hook process: opt-in on, log directory in the temporary directory. */
 function envFor(extra = {}) {
   const env = Object.fromEntries(Object.entries(process.env).filter(([k]) => !/^(OMC_|DISABLE_OMC|TYPESAFE_|ANTHROPIC_|CLAUDE)/i.test(k)));
-  Object.assign(env, { HOME: DOM, USERPROFILE: DOM, OMC_TASK_LIST: '1', OMC_TASK_LIST_LOG_DIR: LOGI });
+  Object.assign(env, { HOME: DOM, USERPROFILE: DOM, OMC_TASK_LIST: '1', OMC_TASK_LIST_LOG_DIR: LOGS });
   for (const [k, v] of Object.entries(extra)) {
     if (v === undefined) delete env[k];
     else env[k] = v;
@@ -73,15 +73,15 @@ const hookViaRunner = (script, input, env) => run([join(SCRIPTS, 'run.cjs'), joi
 const stan = (sid, tool, input, extra = {}) => hook('jev-task-list-state.mjs', postToolUse(sid, tool, input, extra));
 
 const session = () => `test-task-list-${process.pid}-${++counter}`;
-const listFile = (sid, key) => join(LOGI, 'lists', sid, `${key}.json`);
+const listFile = (sid, key) => join(LOGS, 'lists', sid, `${key}.json`);
 const readListFile = (sid, key) => (existsSync(listFile(sid, key)) ? JSON.parse(readFileSync(listFile(sid, key), 'utf8')) : null);
 const listOf = (sid, key) => readListFile(sid, key);
 const logRows = (name) => {
-  const p = join(LOGI, name);
+  const p = join(LOGS, name);
   return existsSync(p) ? readFileSync(p, 'utf8').trim().split('\n').filter(Boolean).map((line) => JSON.parse(line)) : [];
 };
 const eventFiles = (sid, key) => {
-  const d = join(LOGI, 'lists', sid, `${key}.events`);
+  const d = join(LOGS, 'lists', sid, `${key}.events`);
   return existsSync(d) ? readdirSync(d) : [];
 };
 const shape = (items) => items?.map(({ id, content, status, note }) => ({
@@ -227,10 +227,10 @@ describe('task list: state hook (PostToolUse)', () => {
     expect(text).toContain('***');
     await stan('../escape', LIST_TOOL, { items: [{ content: 'A', status: 'pending' }] }, { agent_id: 'ag8' });
     await stan(sid, LIST_TOOL, { items: [{ content: 'A', status: 'pending' }] }, { agent_id: '../ag9' });
-    expect(existsSync(join(LOGI, 'escape'))).toBe(false);
-    expect(existsSync(join(LOGI, 'lists', 'escape'))).toBe(false);
+    expect(existsSync(join(LOGS, 'escape'))).toBe(false);
+    expect(existsSync(join(LOGS, 'lists', 'escape'))).toBe(false);
     expect(existsSync(listFile(sid, 'main'))).toBe(false);
-    expect(readdirSync(join(LOGI, 'lists', sid)).some((f) => /^___ag9-[0-9a-f]{10}\.json$/.test(f))).toBe(true);
+    expect(readdirSync(join(LOGS, 'lists', sid)).some((f) => /^___ag9-[0-9a-f]{10}\.json$/.test(f))).toBe(true);
   });
 
   it('OMC_SKIP_HOOKS=task-list and DISABLE_OMC=1 switch the write off', async () => {
@@ -387,7 +387,7 @@ describe('task list: storage library', () => {
     await stan(sid, LIST_TOOL, { items: [{ content: 'A', status: 'pending' }] }, { agent_id: '../ag9' });
     await stan(sid, LIST_TOOL, { items: [{ content: 'B', status: 'pending' }] }, { agent_id: 'main' });
     expect(existsSync(listFile(sid, 'main'))).toBe(false);
-    const files = readdirSync(join(LOGI, 'lists', sid)).filter((f) => f.endsWith('.json'));
+    const files = readdirSync(join(LOGS, 'lists', sid)).filter((f) => f.endsWith('.json'));
     expect(files).toHaveLength(2);
     expect(files.some((f) => /^___ag9-[0-9a-f]{10}\.json$/.test(f))).toBe(true);
     expect(files.some((f) => /^main-[0-9a-f]{10}\.json$/.test(f))).toBe(true);
@@ -399,8 +399,8 @@ describe('task list: storage library', () => {
 
   it('dot session ids are refused', async () => {
     for (const sid of ['.', '..', '.hidden']) await stan(sid, LIST_TOOL, { items: [{ content: 'A', status: 'pending' }] });
-    expect(existsSync(join(LOGI, 'lists', 'main.json'))).toBe(false);
-    expect(existsSync(join(LOGI, 'lists', '.hidden'))).toBe(false);
+    expect(existsSync(join(LOGS, 'lists', 'main.json'))).toBe(false);
+    expect(existsSync(join(LOGS, 'lists', '.hidden'))).toBe(false);
   });
 
   it('a stale lock (over 60 s) is taken over only for the fold; a fresh foreign lock makes the event wait and logs lock_timeout', async () => {
@@ -500,7 +500,7 @@ describe('task list: storage library', () => {
 
   it('the batch row carries the time of the whole hook process', async () => {
     const sid = session();
-    const ag = { agent_id: 'r14', agent_type: 'mechanik' };
+    const ag = { agent_id: 'r14', agent_type: 'helper' };
     for (let i = 0; i < 4; i += 1) await hook('jev-task-list-batch.mjs', batch(sid, ['Read', 'Read', 'Read'], ag));
     const rows = logRows('batches.jsonl').filter((x) => x.session_id === sid);
     expect(rows).toHaveLength(4);
@@ -519,11 +519,11 @@ describe('task list: storage library', () => {
   it('the event file keeps masked text, also for items sent as JSON text', async () => {
     const sid = session();
     const lock = `${listFile(sid, 'o5')}.lock`;
-    mkdirSync(join(LOGI, 'lists', sid), { recursive: true });
+    mkdirSync(join(LOGS, 'lists', sid), { recursive: true });
     writeFileSync(lock, 'foreign');
     await stan(sid, LIST_TOOL, { items: JSON.stringify([{ content: 'Key api_key=SECRET123 in the file', status: 'pending' }]) }, { agent_id: 'o5' });
     const files = eventFiles(sid, 'o5');
-    const text = files.map((f) => readFileSync(join(LOGI, 'lists', sid, 'o5.events', f), 'utf8')).join('');
+    const text = files.map((f) => readFileSync(join(LOGS, 'lists', sid, 'o5.events', f), 'utf8')).join('');
     rmSync(lock, { force: true });
     expect(files).toHaveLength(1);
     expect(text).not.toContain('SECRET123');
@@ -560,7 +560,7 @@ describe('task list: storage library', () => {
 
   it('retention: 600 events are folded by one locked write that keeps all 600 names; the next fold trims them to 500', async () => {
     const sid = session();
-    const dir = join(LOGI, 'lists', sid, 'o3.events');
+    const dir = join(LOGS, 'lists', sid, 'o3.events');
     mkdirSync(dir, { recursive: true });
     const t = Date.now();
     for (let i = 0; i < 600; i += 1) {
