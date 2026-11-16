@@ -1,7 +1,8 @@
 // Shared agent pool for the Jev hooks (opt-in): a machine-wide ceiling on the number of
-// agents, and optionally on the number of main sessions, enforced with hard refusals of
-// Agent/Task calls in PreToolUse, with a reservation per allowed call (the reserveSubagentSpawn
-// pattern). Enabled only with OMC_JEV_POOL=1; with the variable unset nothing here runs.
+// agents, enforced with hard refusals of Agent/Task calls in PreToolUse, with a reservation per
+// allowed call (the reserveSubagentSpawn pattern). A ceiling on the number of main sessions is
+// read here too (sessionLimit, countSessions) but is enforced only by the session launcher
+// (scripts/jev-session.mjs), not by the Agent/Task refusal. Enabled only with OMC_JEV_POOL=1; with the variable unset nothing here runs.
 //
 // The state lives in the Jev log directory (OMC_JEV_LOG_DIR, else state/jev under the state root;
 // set OMC_JEV_LOG_DIR to share one pool between projects):

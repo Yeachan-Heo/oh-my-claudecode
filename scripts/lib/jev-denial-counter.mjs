@@ -66,7 +66,7 @@ export function denialLogDir(stateDir, env = process.env) {
 
 const isFiniteNumber = (x) => typeof x === 'number' && Number.isFinite(x);
 
-/** The 16-hex hash of a normalized key; the journal and the state carry this, never the key text. */
+/** The 16-hex hash of a normalized key; the journal and the counts of the state carry this instead of the key text (the once-per-key action markers of the state carry the normalized key itself). */
 export function keyHash(key) {
   return createHash('sha256').update(String(key ?? '')).digest('hex').slice(0, 16);
 }

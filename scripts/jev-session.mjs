@@ -17,7 +17,7 @@
 // whatever --mode says. When claude refuses the flags of a start, the start is repeated once without them (row: fallback true). Source of the mode: --mode,
 // OMC_JEV_SESSION_MODE, the entry `session-routing[:shadow|:active|:off]` of OMC_JEV (the point is named-only: `all` never enables it);
 // `off` starts without any query. Jev failing (no key, error, timeout, no usable answer) never stops the start: the session starts with the default
-// model and the log row says `degraded`. The Jev state is masked and bounded by the resolver, not here again.
+// model and the log row says `degraded`. The text sent to Jev and the paths of the log row are masked here, by maskJevState below (the resolver does not mask them).
 // The log: <Jev log directory>/sessions.jsonl, one row per start (the directory of the other Jev logs: OMC_JEV_LOG_DIR, else state/jev under the state
 // root of the working directory); the query itself is in shadow.jsonl (point session-routing).
 // The session pool (OMC_JEV_POOL=1, OMC_JEV_POOL_MAX_SESSIONS, scripts/lib/jev-pool.mjs): at the ceiling the start is refused; off by default.
