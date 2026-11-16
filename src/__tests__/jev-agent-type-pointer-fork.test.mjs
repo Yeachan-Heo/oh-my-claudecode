@@ -1,7 +1,7 @@
 /**
  * Three opt-in behaviours of the PreToolUse hook for Agent/Task calls:
  * OMC_AGENT_TYPE_DENY with OMC_AGENT_TYPE_DENY_MODE (deny list), OMC_JEV_POINTER_EXPAND
- * with OMC_JEV_POINTER_EXPAND_DIRS (pointer expansion), and the fork skip row of the
+ * with OMC_JEV_POINTER_EXPAND_DIRS and OMC_JEV_POINTER_EXPAND_SECRET_DIRS (pointer expansion), and the fork skip row of the
  * model-routing point. Each is also checked to leave the hook unchanged when unset.
  */
 import { execFile } from 'node:child_process';
@@ -76,6 +76,7 @@ function hookEnv(context, overrides = {}) {
     OMC_AGENT_TYPE_DENY_MODE: '',
     OMC_JEV_POINTER_EXPAND: '',
     OMC_JEV_POINTER_EXPAND_DIRS: '',
+    OMC_JEV_POINTER_EXPAND_SECRET_DIRS: '',
     OMC_JEV_ROW_TELEMETRY: '',
     OMC_JEV_LOG_CONTEXT: '',
     TYPESAFE_API_KEY: 'test-key',
@@ -183,7 +184,7 @@ const REFUSED = [
   ['OH-MY-CLAUDECODE:WRITER (letter case)', 'OH-MY-CLAUDECODE:WRITER'],
 ];
 // Types the list does not name, plus Explore and EXPLORE, which the exact entry =explore does not match.
-const ALLOWED = ['fork', 'mechanik', 'Explore', 'EXPLORE', 'Writer', 'docs', 'oh-my-claudecode:executor', 'oh-my-claudecode:verifier', 'Plan'];
+const ALLOWED = ['fork', 'example-agent', 'Explore', 'EXPLORE', 'Writer', 'docs', 'oh-my-claudecode:executor', 'oh-my-claudecode:verifier', 'Plan'];
 
 describe('agent-type deny list (OMC_AGENT_TYPE_DENY, OMC_AGENT_TYPE_DENY_MODE)', () => {
   it('without the list and the mode: no refusal and no agent-type row', async () => {
@@ -259,7 +260,7 @@ describe('agent-type deny list (OMC_AGENT_TYPE_DENY, OMC_AGENT_TYPE_DENY_MODE)',
     const context = makeContext();
     const refused = await runHook(context, { ...AGENT_CALL('general-purpose'), ...ids }, { ...DENY, ...LOG_IDS });
     expect(denied(refused)).toBe(true);
-    const passed = await runHook(context, { ...AGENT_CALL('mechanik'), ...ids }, { ...DENY, ...LOG_IDS });
+    const passed = await runHook(context, { ...AGENT_CALL('example-agent'), ...ids }, { ...DENY, ...LOG_IDS });
     expect(denied(passed)).toBe(false);
     expect(readLog(context, 'agent-type.jsonl').map((row) => [row.decision, row.agent_id])).toEqual([['deny', 'a-1'], ['allow', 'a-1']]);
     const taskContext = makeContext();
@@ -292,12 +293,12 @@ describe('agent-type deny list (OMC_AGENT_TYPE_DENY, OMC_AGENT_TYPE_DENY_MODE)',
       expect(readLog(context, 'agent-type.jsonl').map((row) => [row.decision, row.mode]), label).toEqual([['would-deny', 'shadow']]);
     }
     const context = makeContext();
-    await runHook(context, AGENT_CALL('mechanik'), { OMC_AGENT_TYPE_DENY: DENY_LIST, OMC_AGENT_TYPE_DENY_MODE: 'shadow' });
+    await runHook(context, AGENT_CALL('example-agent'), { OMC_AGENT_TYPE_DENY: DENY_LIST, OMC_AGENT_TYPE_DENY_MODE: 'shadow' });
     expect(readLog(context, 'agent-type.jsonl').map((row) => row.decision)).toEqual(['allow']);
   });
 
   it('off: no refusal and no row, and the hook output is the same as in shadow mode, for refused and allowed types', async () => {
-    for (const type of ['general-purpose', 'General-Purpose', undefined, 'mechanik', 'fork']) {
+    for (const type of ['general-purpose', 'General-Purpose', undefined, 'example-agent', 'fork']) {
       const off = await runHookFull(makeContext(), AGENT_CALL(type), { OMC_AGENT_TYPE_DENY: DENY_LIST, OMC_AGENT_TYPE_DENY_MODE: 'off' });
       const shadow = await runHookFull(makeContext(), AGENT_CALL(type), { OMC_AGENT_TYPE_DENY: DENY_LIST, OMC_AGENT_TYPE_DENY_MODE: 'shadow' });
       expect(denied(off.output), String(type)).toBe(false);
@@ -385,7 +386,7 @@ describe('pointer expansion (OMC_JEV_POINTER_EXPAND, OMC_JEV_POINTER_EXPAND_DIRS
     const output = await runHook(context, AGENT_CALL('executor', { prompt, model: 'sonnet' }), overrides);
     const requests = routingRequests(before);
     expect(requests).toHaveLength(1);
-    return { task: requests[0].state.task, output, row: readLog(context, 'shadow.jsonl').find((x) => x.point === 'model-routing') };
+    return { task: requests[0].state.task, output, row: readLog(context, 'shadow.jsonl').findLast((x) => x.point === 'model-routing') };
   }
 
   it('switch on, file under an allowed dir: the task is the prompt plus the head of the file, and the call itself is not changed', async () => {
@@ -452,6 +453,47 @@ describe('pointer expansion (OMC_JEV_POINTER_EXPAND, OMC_JEV_POINTER_EXPAND_DIRS
     const { task, row } = await taskSentFor(context, prompt);
     expect(task).toBe(prompt);
     expect(row?.pointer_unexpanded).toBe('secret-path');
+  });
+
+  it('a symlink to a key store or a file under a GnuPG directory is excluded, a harmless neighbour is expanded', async () => {
+    const context = makeContext();
+    const dir = briefsDir(context);
+    writeFileSync(join(dir, 'server.pem'), 'PEM-MARKER', 'utf8');
+    symlinkSync(join(dir, 'server.pem'), join(dir, 'to-key.md'));
+    mkdirSync(join(dir, '.gnupg'));
+    writeFileSync(join(dir, '.gnupg', 'brief.md'), 'GNUPG-MARKER', 'utf8');
+    mkdirSync(join(dir, '.sshuttle'));
+    const ordinary = join(dir, '.sshuttle', 'brief.md');
+    writeFileSync(ordinary, 'ORDINARY-MARKER', 'utf8');
+    for (const path of [join(dir, 'to-key.md'), join(dir, '.gnupg', 'brief.md')]) {
+      const { task, row } = await taskSentFor(context, TASK + ' Details in ' + path);
+      expect(task, path).toBe(TASK + ' Details in ' + path);
+      expect(row?.pointer_unexpanded, path).toBe('secret-path');
+    }
+    const prompt = TASK + ' Details in ' + ordinary;
+    const { task, row } = await taskSentFor(context, prompt);
+    expect(task).toBe(prompt + label(realpathSync(ordinary)) + 'ORDINARY-MARKER');
+    expect(row?.pointer_expanded).toBe(true);
+  });
+
+  it('a directory in OMC_JEV_POINTER_EXPAND_SECRET_DIRS is never read; without the variable the same file is expanded', async () => {
+    const context = makeContext();
+    const dir = briefsDir(context);
+    mkdirSync(join(dir, 'vault'));
+    mkdirSync(join(dir, 'vault-notes'));
+    const inside = join(dir, 'vault', 'brief.md');
+    const sibling = join(dir, 'vault-notes', 'brief.md');
+    writeFileSync(inside, 'VAULT-MARKER', 'utf8');
+    writeFileSync(sibling, 'SIBLING-MARKER', 'utf8');
+    const secretDirs = ON(context, { OMC_JEV_POINTER_EXPAND_SECRET_DIRS: join(dir, 'vault') });
+    const refused = await taskSentFor(context, TASK + ' Details in ' + inside, secretDirs);
+    expect(refused.task).toBe(TASK + ' Details in ' + inside);
+    expect(refused.row?.pointer_unexpanded).toBe('secret-path');
+    const siblingPrompt = TASK + ' Details in ' + sibling;
+    const kept = await taskSentFor(context, siblingPrompt, secretDirs);
+    expect(kept.task).toBe(siblingPrompt + label(realpathSync(sibling)) + 'SIBLING-MARKER');
+    const unset = await taskSentFor(context, TASK + ' Details in ' + inside);
+    expect(unset.task).toBe(TASK + ' Details in ' + inside + label(realpathSync(inside)) + 'VAULT-MARKER');
   });
 
   it('a path with .. segments: one that reaches a secret path is excluded; one that reaches an ordinary file is expanded', async () => {

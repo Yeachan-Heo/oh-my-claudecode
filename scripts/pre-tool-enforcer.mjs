@@ -24,6 +24,7 @@ import { resolveConfiguredAgentModel } from './lib/agent-model-config.mjs';
 import { BOUNDED_GIT_TIMEOUT_MS } from './lib/bounded-git-timeout.mjs';
 import { isSkillVisibleToUser } from './lib/skill-entitlements.mjs';
 import { isJevAppliedLogEnabled, isJevShadowOptedIn, jevNoulOf, recordJevApplied, recordJevShadow, setJevHookContext, setJevSessionId } from './lib/jev-shadow.mjs';
+import { pointerSecretPath } from './lib/jev-pointer-secret-path.mjs';
 import { isJevLogContextEnabled, isJevRowTelemetryEnabled, JEV_ROW_NO_ANSWER, jevLogContextOf, resolveExcerptChars, resolveJevLogMaxBytes, rotateJevLog } from './jev-resolve.mjs';
 
 // Inlined from src/config/models.ts — avoids a dist/ import so the hook works
@@ -1023,10 +1024,8 @@ function recordModelRoutingOverride(stateDir, row) {
   }
 }
 
-// A `fork` call runs on the parent conversation model and ignores the effort parameter (the host
-// docs document effort only for non-fork subagents), so asking Jev about it is a query with no
-// effect. While the model-routing point is on (shadow or active), such a call gets one skipped row
-// and no question, and a `use` marker on it is not applied.
+// A `fork` call is not asked about. While the model-routing point is on (shadow or active), such a
+// call gets one skipped row and no question, and a `use` marker on it is not applied.
 function recordJevForkSkipRow(data, toolInput, stateDir) {
   try {
     const dir = process.env.OMC_JEV_LOG_DIR || join(stateDir, 'jev');
@@ -1051,8 +1050,11 @@ function recordJevForkSkipRow(data, toolInput, stateDir) {
 // by the first such path is appended to the prompt in the Jev state; the prompt itself and the call
 // are not changed. Only files
 // under the directories listed in OMC_JEV_POINTER_EXPAND_DIRS (separated by the platform path
-// delimiter, empty by default, so nothing is read) are expanded. The excerpt is sent UNMASKED to the
-// configured Jev endpoint: state masking is a separate change, so the content leaves the machine as is.
+// delimiter, empty by default, so nothing is read) are expanded. A file whose canonical path looks secret
+// (scripts/lib/jev-pointer-secret-path.mjs: SSH keys, env files, credential and token files, key stores), a
+// settings*.json file, and any file under a directory listed in OMC_JEV_POINTER_EXPAND_SECRET_DIRS is never
+// read. The excerpt is sent UNMASKED to the configured Jev endpoint: state masking is a separate change, so
+// the content leaves the machine as is.
 // Any failure leaves the prompt unchanged and sets the reason in the pointer telemetry (written to
 // the shadow line with OMC_JEV_ROW_TELEMETRY).
 const POINTER_MAX_PROMPT_CHARS = 600;
@@ -1060,12 +1062,11 @@ const POINTER_MAX_EXCERPT_CHARS = 8000;
 const POINTER_MAX_FILE_BYTES = 1024 * 1024;
 const POINTER_BINARY_SCAN_BYTES = 8192;
 const POINTER_PATH_RE = /(?<![\w.\-/:~])\/[\w.\-/\p{L}]+\.md(?![\w])/u;
-const POINTER_SECRET_PATH_RE = /(?:^|[\\/])\.ssh[\\/]|(?:^|[\\/])\.env(?:\.[^\\/]*)?$|(?:^|[\\/])\.git-credentials$|(?:^|[\\/])\.aws[\\/]credentials$|(?:^|[\\/])\.config[\\/]gh[\\/]hosts\.ya?ml$|(?:^|[\\/])\.credentials\.json$|(?:^|[\\/])id_(?:rsa|dsa|ecdsa|ed25519)(?!\.pub$)/i;
 function isPointerExpandEnabled(env = process.env) {
   return String(env.OMC_JEV_POINTER_EXPAND ?? '').trim() === '1';
 }
-function pointerExpandRoots(env = process.env) {
-  return String(env.OMC_JEV_POINTER_EXPAND_DIRS ?? '').split(delimiter).map((dir) => dir.trim()).filter(Boolean)
+function pointerDirList(value) {
+  return String(value ?? '').split(delimiter).map((dir) => dir.trim()).filter(Boolean)
     .flatMap((dir) => {
       try {
         return [realpathSync(dir)];
@@ -1073,6 +1074,14 @@ function pointerExpandRoots(env = process.env) {
         return [];
       }
     });
+}
+function pointerExpandRoots(env = process.env) {
+  return pointerDirList(env.OMC_JEV_POINTER_EXPAND_DIRS);
+}
+// Directories whose files are never expanded, in addition to the built-in secret path patterns
+// (OMC_JEV_POINTER_EXPAND_SECRET_DIRS, same format as OMC_JEV_POINTER_EXPAND_DIRS, empty by default).
+function pointerSecretDirs(env = process.env) {
+  return pointerDirList(env.OMC_JEV_POINTER_EXPAND_SECRET_DIRS);
 }
 // `pointer` is the telemetry object of the row ({ expanded, unexpanded }); undefined when the
 // switch is off, in which case the prompt passes through untouched.
@@ -1092,7 +1101,7 @@ function expandTaskPointer(prompt, pointer) {
     }
     // Canonicalize before the exclusions, so a symlink or a ".." segment cannot dodge them.
     const real = realpathSync(named);
-    if (POINTER_SECRET_PATH_RE.test(real) || /^settings.*\.json$/i.test(basename(real))) {
+    if (pointerSecretPath(real) || /^settings.*\.json$/i.test(basename(real)) || pointerSecretDirs().some((dir) => real === dir || real.startsWith(dir + sep))) {
       pointer.unexpanded = 'secret-path';
       return prompt;
     }
