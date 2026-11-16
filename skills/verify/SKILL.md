@@ -28,6 +28,17 @@ Turn vague “it should work” claims into concrete evidence.
 - If a check fails, include the failure clearly.
 - If no realistic verification path exists, say that explicitly instead of bluffing.
 - Prefer concise evidence summaries over noisy logs.
+- Treat uncertainty as not verified. Passing tests, a green status, or a complete-looking manifest count only when they cover every stated requirement.
+- A result without an artifact is INCONCLUSIVE, not PASS. An artifact is a file, or command output together with its exit code, that a reader can open; a claim in prose is not one. INCONCLUSIVE does not count as verified.
+- Check both directions: nothing owed by the task is missing, and nothing beyond its scope was done.
+
+## Evidence matrix
+Record one row per scenario:
+
+| Scenario | Exact command | Expected | Observed | Verdict | Artifact |
+|----------|---------------|----------|----------|---------|----------|
+
+A row without an artifact path is not PASS. Use PASS, FAIL, or INCONCLUSIVE as the verdict.
 
 ## Output
 - What was verified
