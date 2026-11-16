@@ -16,7 +16,7 @@ import { spawn, spawnSync } from 'node:child_process';
 import { existsSync, lstatSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import process from 'node:process';
 import { clearTimeout, setTimeout } from 'node:timers';
 import { afterEach, describe, expect, it } from 'vitest';
@@ -419,4 +419,21 @@ afterEach(() => {
     }
   }
   lane = null;
+});
+
+describe('default state directory', () => {
+  it('falls back to the home directory when the state root cannot be resolved', () => {
+    const home = laneOf('home');
+    const pluginRoot = laneOf('plugin');
+    mkdirSync(join(pluginRoot, 'dist', 'lib'), { recursive: true });
+    writeFileSync(join(pluginRoot, 'dist', 'lib', 'worktree-paths.js'), "export function getOmcRoot() { throw new Error('unresolvable'); }\n");
+    const source = `import { resolveStateDir } from ${JSON.stringify(pathToFileURL(HOOK).href)};`
+      + ' process.stdout.write(await resolveStateDir({}, process.cwd()));';
+    const result = spawnSync(process.execPath, ['--input-type=module', '-e', source], {
+      encoding: 'utf8',
+      env: { ...process.env, HOME: home, USERPROFILE: home, CLAUDE_PLUGIN_ROOT: pluginRoot },
+    });
+    expect(result.status).toBe(0);
+    expect(result.stdout).toBe(join(home, '.omc', 'state', 'jev'));
+  });
 });

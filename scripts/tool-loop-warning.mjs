@@ -115,11 +115,10 @@ function intFromEnv(value, fallback) {
 export const loopWarningEnabled = (env = process.env) => flag(env.OMC_JEV_LOOP_WARNING);
 
 export function loopWarningConfig(env = process.env) {
-  const home = (() => {
-    try { return homedir(); } catch { return '.'; }
-  })();
   const stateDir = String(env.OMC_JEV_LOOP_WARNING_STATE_DIR ?? '').trim()
-    || join(home, '.omc', 'state', 'tool-loop');
+    || (() => {
+      try { return join(homedir(), '.omc', 'state', 'tool-loop'); } catch { return '.omc/state/tool-loop'; }
+    })();
   return {
     enabled: flag(env.OMC_JEV_LOOP_WARNING),
     stateDir,

@@ -126,7 +126,7 @@ export async function resolveStateDir(env = process.env, cwd = process.cwd()) {
     const root = await resolveOmcStateRoot(cwd);
     return join(root, 'state', 'jev');
   } catch {
-    return join((() => { try { return homedir(); } catch { return '.'; } })(), '.omc', 'state', 'jev');
+    try { return join(homedir(), '.omc', 'state', 'jev'); } catch { return '.omc/state/jev'; }
   }
 }
 

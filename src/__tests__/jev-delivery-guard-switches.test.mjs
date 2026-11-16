@@ -8,7 +8,7 @@ import { execFileSync } from 'node:child_process';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import process from 'node:process';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
@@ -227,5 +227,22 @@ describe('OMC_JEV_GUARD_TIMEOUTS_ALARM', () => {
     expect(existsSync(join(dir, `${NOW - 8 * 24 * HOUR}-x.json`))).toBe(true);
     countOpenings(dir, NOW - 24 * HOUR, NOW, { prune: true, wall: NOW });
     expect(existsSync(join(dir, `${NOW - 8 * 24 * HOUR}-x.json`))).toBe(false);
+  });
+});
+
+describe('default breaker directory', () => {
+  it('reads the openings under the home directory when OMC_JEV_BREAKER_DIR is unset', () => {
+    const home = join(root, 'home');
+    const dir = join(home, '.omc', 'state', 'jev', 'breaker', 'openings');
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(join(dir, `${NOW - HOUR}-x.json`), JSON.stringify({ ts: NOW - HOUR, reason: 'no-response', scope: 'all', seconds: 60, until: NOW - HOUR + 60_000, since: NOW - HOUR }));
+    const source = `import { computeDelivery } from ${JSON.stringify(pathToFileURL(join(REPO_ROOT, 'scripts', 'lib', 'jev-delivery-guard.mjs')).href)};`
+      + ` const r = await computeDelivery({ logDir: ${JSON.stringify(logDir)}, configDir: ${JSON.stringify(configDir)}, now: ${NOW}, env: { OMC_JEV_GUARD_TIMEOUTS_ALARM: '1' } });`
+      + ' process.stdout.write(JSON.stringify({ openings: r.breakerOpenings, all: r.breakerOpeningsAll }));';
+    const out = execFileSync(process.execPath, ['--input-type=module', '-e', source], {
+      encoding: 'utf8',
+      env: { ...process.env, HOME: home, USERPROFILE: home },
+    });
+    expect(JSON.parse(out)).toEqual({ openings: 1, all: 1 });
   });
 });

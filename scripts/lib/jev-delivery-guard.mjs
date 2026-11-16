@@ -572,9 +572,7 @@ async function countInterruptions(projectsDir, since, until) {
 const openingsDir = (env = process.env) => {
   let base = env.OMC_JEV_BREAKER_DIR;
   if (!base) {
-    let home;
-    try { home = homedir(); } catch { home = '.'; }
-    base = join(home, '.omc', 'state', 'jev', 'breaker');
+    try { base = join(homedir(), '.omc', 'state', 'jev', 'breaker'); } catch { base = '.omc/state/jev/breaker'; }
   }
   return join(base, 'openings');
 };
