@@ -32,6 +32,58 @@ const STREAM_TAIL_CHARS = 2000;
 /** Grace period after the first kill before escalating to a hard kill. */
 const KILL_ESCALATION_MS = 5000;
 
+// Graph run signal cleanup. Active only when OMC_GRAPH_SIGNAL_CLEANUP is exactly "1";
+// any other value keeps the upstream behavior (no handlers, no AbortSignal, no child tracking).
+const graphSignalState = { interrupted: false };
+const graphActiveChildren = new Set<ChildProcess>();
+
+function graphSignalCleanupEnabled(): boolean {
+  return process.env.OMC_GRAPH_SIGNAL_CLEANUP === "1";
+}
+
+/**
+ * Installs SIGINT and SIGTERM handlers for one graph run. Returns the
+ * AbortSignal the runner observes, or undefined while the switch is off.
+ * On the first signal the active command children get SIGTERM, then SIGKILL
+ * after KILL_ESCALATION_MS, and the process exits once they have closed
+ * (130 for SIGINT, 143 for SIGTERM).
+ */
+export function installGraphSignalCleanup(): AbortSignal | undefined {
+  if (!graphSignalCleanupEnabled()) {
+    return undefined;
+  }
+  const controller = new AbortController();
+  const interrupt = (signalName: NodeJS.Signals): void => {
+    if (graphSignalState.interrupted) {
+      return;
+    }
+    graphSignalState.interrupted = true;
+    const exitCode = signalName === "SIGINT" ? 130 : 143;
+    controller.abort(new Error(`graph run interrupted by ${signalName}`));
+    const children = [...graphActiveChildren];
+    if (children.length === 0) {
+      process.exit(exitCode);
+    }
+    let open = children.length;
+    const hardDeadline = setTimeout(() => process.exit(exitCode), KILL_ESCALATION_MS * 2);
+    for (const child of children) {
+      terminateProcessTree(child, "SIGTERM");
+      const escalation = setTimeout(() => terminateProcessTree(child, "SIGKILL"), KILL_ESCALATION_MS);
+      child.once("close", () => {
+        clearTimeout(escalation);
+        open -= 1;
+        if (open === 0) {
+          clearTimeout(hardDeadline);
+          process.exit(exitCode);
+        }
+      });
+    }
+  };
+  process.once("SIGINT", () => interrupt("SIGINT"));
+  process.once("SIGTERM", () => interrupt("SIGTERM"));
+  return controller.signal;
+}
+
 /**
  * Output shape for command attempts. Extends the frozen
  * NodeExecutionOutput with the idempotency key computed for idempotent
@@ -138,6 +190,10 @@ function runShellCommand(
       return;
     }
 
+    // Tracked for the signal cleanup; a no-op while OMC_GRAPH_SIGNAL_CLEANUP is off.
+    if (graphSignalCleanupEnabled()) {
+      graphActiveChildren.add(child);
+    }
     let settled = false;
     let timedOut = false;
     let exitCode: number | null = null;
@@ -149,6 +205,7 @@ function runShellCommand(
         return;
       }
       settled = true;
+      graphActiveChildren.delete(child);
       if (timeoutTimer !== undefined) clearTimeout(timeoutTimer);
       if (escalationTimer !== undefined) clearTimeout(escalationTimer);
       resolve({ timed_out: timedOut, exit_code: exitCode, infra_error: infraError });
@@ -202,6 +259,11 @@ export class CommandNodeExecutor implements NodeExecutor {
       );
     }
     const node: GraphCommandNode = dispatched;
+    // After an interrupt no node starts and no result is committed: the promise never settles,
+    // so the journal keeps the last committed transition.
+    if (graphSignalState.interrupted) {
+      return new Promise(() => {});
+    }
 
     const startedAtMs = Date.now();
     const stdoutTail = new StreamTail();
@@ -221,6 +283,11 @@ export class CommandNodeExecutor implements NodeExecutor {
       stderrTail,
       externalIdempotencyKey,
     );
+    // A node whose child was stopped by the interrupt must not commit its result (that would
+    // journal "failed exit=143" for an interrupted node). Its promise never settles.
+    if (graphSignalState.interrupted) {
+      return new Promise(() => {});
+    }
     const durationMs = Date.now() - startedAtMs;
 
     const succeeded =
