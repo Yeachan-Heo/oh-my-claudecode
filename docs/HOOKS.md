@@ -196,7 +196,6 @@ Fires after a tool use completes.
 | `project-memory-posttool.mjs` | Updates project memory | 3s |
 | `post-tool-rules-injector.mjs` | Injects matching project rules | 3s |
 | `post-tool-directory-context-injector.mjs` | Injects the README.md and AGENTS.md files from the file's directory up to the working directory, for Read, Write, Edit, and MultiEdit | 3s |
-| `tool-loop-warning.mjs` | Warns when the same tool call or a short cycle of calls repeats (opt-in, `OMC_JEV_LOOP_WARNING=1`) | 3s |
 
 Injects additional guidance based on Read, Write, Edit, and Bash results. For example, after reading a file it may hint "consider using parallel reads."
 These exact canonical shipped scripts use the trusted Worker path without changing their manifest timeout budgets. The verifier retains statistics for the current session and the 99 most recently updated historical sessions so per-tool writes stay bounded. With `OMC_SHELL_CHECKS=1`, `post-tool-verifier.mjs` also records known shell error classes of Bash and PowerShell results (see [Shell Checks](#shell-checks-scriptslibshell-checksmjs)). Disable all four with `DISABLE_OMC=1` (or `DISABLE_OMC=true`) or `OMC_SKIP_HOOKS=post-tool-use`; `project-memory-posttool` also accepts its script-specific token.
@@ -1140,11 +1139,11 @@ Without the variable no file is read or written and the hooks behave exactly as 
 
 ### Tool-loop warning, StopFailure record, breaker low scope, delivery guard checks, account probe
 
-Five opt-in additions around the Jev hooks; each is off unless its variable is set, and each leaves the existing behavior unchanged while off. The hooks registered in `hooks/hooks.json` for the opt-in features (`tool-loop-warning.mjs` and the three agent-pool hooks) are registered unconditionally: with their variable unset each still starts one node process for every matching event and exits at once without output or files. The cost while the switches are off is that process start; the behavior does not change.
+Five opt-in additions around the Jev hooks; each is off unless its variable is set, and each leaves the existing behavior unchanged while off. The three agent-pool hooks registered in `hooks/hooks.json` (`SubagentStart`, `SubagentStop`, `PostToolUseFailure`) are registered unconditionally: with their variable unset each still starts one node process for every matching event and exits at once without output or files. These events are rare, so the cost while the switches are off is that process start; the behavior does not change. `tool-loop-warning.mjs` is not registered by default (see below).
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `OMC_JEV_LOOP_WARNING` | (unset) | Set to `1` to turn on the `tool-loop-warning.mjs` PostToolUse hook (`hooks/hooks.json`, timeout 3 s). It adds a warning to the context (never blocks) when the same tool call with the same result repeats in a row (every 3rd time by default), or when a cycle of 2 to 6 different calls repeats 3 times. The Agent and Task tools, polling (`sleep`, `gh run watch`, `tail -f`, `git status`) and status tools are not counted. It keeps only digests and tool names, never call or result content. |
+| `OMC_JEV_LOOP_WARNING` | (unset) | Set to `1` to turn on the `tool-loop-warning.mjs` PostToolUse hook; it has an effect only once the script is registered (see [Registering the tool-loop warning](#registering-the-tool-loop-warning)). It adds a warning to the context (never blocks) when the same tool call with the same result repeats in a row (every 3rd time by default), or when a cycle of 2 to 6 different calls repeats 3 times. The Agent and Task tools, polling (`sleep`, `gh run watch`, `tail -f`, `git status`) and status tools are not counted. It keeps only digests and tool names, never call or result content. |
 | `OMC_JEV_LOOP_WARNING_THRESHOLD` | `3` | Repeat threshold; zero or negative turns the repeat warning off. |
 | `OMC_JEV_LOOP_WARNING_WINDOW` | `64` | Number of recent call signatures kept per context for cycle detection. |
 | `OMC_JEV_LOOP_WARNING_CYCLE_REPEATS` | `3` | Full repeats of a pattern that make a cycle; zero or negative turns cycle detection off. |
@@ -1160,6 +1159,31 @@ Five opt-in additions around the Jev hooks; each is off unless its variable is s
 | `OMC_JEV_GUARD_TIMEOUTS_ALARM` | (unset) | With `OMC_JEV_GUARD=1`: the daily check counts the breaker openings caused by missing responses over the last 24 hours (`<breaker dir>/openings/`, written with `OMC_JEV_BREAKER_TIMEOUT_LOW=1`) and the minutes they held requests back, and the next prompt shows an alarm above 20 openings or above 60 minutes. |
 
 `scripts/jev-account-probe.mjs` is a command-line probe, not a hook: it reads the breaker files and the Jev logs and exits 3 when the account has a payment error (HTTP 402) with no successful answer after it, 0 when it has none, and 2 on a read error. It writes an alarm file that other tooling can read (`--alarm-file`, default `<breaker dir>/account-alarm.txt`), with `--state-dir`, `--log-dir`, `--json` and `--now` options. It never uses the network.
+
+#### Registering the tool-loop warning
+
+`tool-loop-warning.mjs` is not registered in `hooks/hooks.json`: a registration would start one node process after every tool call of every user, also while `OMC_JEV_LOOP_WARNING` is unset. `OMC_JEV_LOOP_WARNING=1` has an effect only once the script is registered. To use it, register it yourself, for example in the `hooks` section of the user-level `settings.json` (shell-string form, as the settings installer writes its hooks). Replace `<plugin-root>` with the absolute path of the installed plugin:
+
+```json
+{
+  "hooks": {
+    "PostToolUse": [
+      {
+        "matcher": "*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"<plugin-root>/scripts/run.cjs\" \"<plugin-root>/scripts/tool-loop-warning.mjs\"",
+            "timeout": 3
+          }
+        ]
+      }
+    ]
+  }
+}
+```
+
+Keep `run.cjs` and the 3 s timeout.
 
 ### Request Budget and Latency
 

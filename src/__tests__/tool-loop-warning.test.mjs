@@ -357,22 +357,21 @@ describe('tool-loop warning hook', () => {
     expect(context(run({ session_id: 's-th', tool_use_id: 'x2' }, state, env))).toMatch(/repeated 2 times in a row/);
   });
 
-  it('hooks.json registers the hook for PostToolUse with a timeout', () => {
-    const groups = MANIFEST.hooks.PostToolUse;
+  it('hooks.json does not register the hook for any event', () => {
     const entries = [];
-    for (const group of groups) {
-      for (const hook of group.hooks ?? []) {
-        const invocation = [hook.command, ...(hook.args ?? [])].join(' ');
-        if (invocation.includes('tool-loop-warning.mjs')) entries.push(hook);
+    for (const groups of Object.values(MANIFEST.hooks)) {
+      for (const group of groups) {
+        for (const hook of group.hooks ?? []) {
+          const invocation = [hook.command, ...(hook.args ?? [])].join(' ');
+          if (invocation.includes('tool-loop-warning.mjs')) entries.push(hook);
+        }
       }
     }
-    expect(entries).toHaveLength(1);
-    expect(entries[0].type).toBe('command');
-    expect(typeof entries[0].timeout).toBe('number');
+    expect(entries).toHaveLength(0);
   });
 
   // The bound is generous on purpose: the run time is dominated by the node process start, which
-  // varies a lot on a loaded machine; the hook has a 3 s limit in hooks.json.
+  // varies a lot on a loaded machine; the hook is documented with a 3 s limit.
   it('speed: the median of 20 runs stays below 1000 ms', () => {
     const laneDir = laneOf('speed');
     const state = join(laneDir, 'state');

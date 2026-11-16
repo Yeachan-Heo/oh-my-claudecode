@@ -170,15 +170,6 @@
             "type": "command",
             "command": "node",
             "timeout": 3,
-            "args": [
-              "${CLAUDE_PLUGIN_ROOT}/scripts/run.cjs",
-              "${CLAUDE_PLUGIN_ROOT}/scripts/tool-loop-warning.mjs"
-            ]
-          },
-          {
-            "type": "command",
-            "command": "node",
-            "timeout": 3,
             "async": true,
             "args": [
               "${CLAUDE_PLUGIN_ROOT}/scripts/run.cjs",
