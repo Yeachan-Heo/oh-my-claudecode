@@ -6,6 +6,7 @@ in the npm package (`tools/` is not in the `files` list of `package.json`). Ever
 - [Settings drift check](#settings-drift-check) (`settings_drift.mjs`)
 - [Plugin install smoke test](#plugin-install-smoke-test) (`plugin_install_smoke.sh`)
 - [Compaction review](#compaction-review) (`compaction_review.mjs`)
+- [Worktree report](#worktree-report) (`worktree_report.mjs`)
 
 ## Settings drift check
 
@@ -128,3 +129,61 @@ session, and for comparison the rows before the boundary:
 Rows of type `api-request-blob`, `attachment` and `queue-operation` are skipped because they quote text; placeholder results in
 request blobs are counted separately, over the whole file, as information. Rows without a timestamp are not counted. The tool prints only
 counts, 8-character ids and file names. The transcript layout comes from the host and can change between host versions.
+
+## Worktree report
+
+`worktree_report.mjs` lists the git worktrees of one or more repositories and says, for each one, whether it is safe to
+clean up. It is read-only and never deletes anything: no `git worktree remove`, no `git worktree prune`, no branch
+deletion, no file removal. It runs only read commands of git (the status check uses `--no-optional-locks`).
+
+```
+node tools/maintenance/worktree_report.mjs [--repo <path>]... [--repos-file <file>] [--main-branch <name>] [--min-age-days <n>] [--exclude <prefix>]... [--json]
+```
+
+| Option | Meaning |
+|---|---|
+| `--repo <path>` | repository to report on; repeatable. With no `--repo` and no `--repos-file`, the repository of the current directory is used |
+| `--repos-file <file>` | text file with one repository path per line; only lines starting with `/` are paths, comments and blank lines are ignored |
+| `--main-branch <name>` | main branch of the repositories (default `main`); "merged" means contained in this branch |
+| `--min-age-days <n>` | a worktree directory not modified for more than `n` days counts as old (default `0`, which turns the age check off) |
+| `--exclude <prefix>` | path prefix that marks worktrees as external; repeatable; a leading `~` is the home directory |
+| `--json` | JSON output instead of a text table |
+
+Exit codes: `0` report printed (also when some repositories were skipped), `2` usage error (unknown option, missing value,
+missing repository list file).
+
+Facts per worktree:
+
+- `exists`: the path exists on disk. `locked` and `prunable` come from `git worktree list --porcelain` (with the reason, when
+  git gives one). The first worktree listed is the main worktree.
+- `merged`: the head revision is an ancestor of `refs/heads/<main branch>` (equality included). The ref is fully qualified, so a tag
+  with the same name as the branch cannot confuse the check. When git cannot tell (a bare worktree, an unreadable revision) the
+  value is `null`. `class` is a display-only label: `merged`, `ahead` (the main branch is an ancestor of the head but not the
+  reverse), `diverged`, or empty when unknown.
+- `dirty`: the porcelain status is not empty. A failing status command counts as dirty with `dirty_reason` `status_failed`
+  (otherwise `changes`).
+- `old`: only with `--min-age-days` above 0 and a directory modification time older than that many days; a stat error means not old.
+- `current`: the worktree is the one the tool was started from, or the main worktree.
+- `external`: the path equals, or lies under, an `--exclude` prefix (whole path segments).
+
+Decision per worktree, the first matching rule wins (this order is fixed, so the output is stable):
+
+| Decision | Reason | When |
+|---|---|---|
+| keep | `locked` | the worktree is locked |
+| keep | `current` | started from it, or the main worktree |
+| keep | `external` | under an excluded prefix |
+| prune | `missing` | the path no longer exists (a stale registration) |
+| keep | `dirty` | uncommitted changes, or the status command failed |
+| keep | `unmerged` | neither merged nor old |
+| sweep | `merged` | not protected and merged |
+| sweep | `old_unmerged` | not protected, not merged, but old |
+
+A locked, current or external worktree is never reported as `prune` or `sweep`: those three protections win over cleanup, even for a
+worktree whose directory is missing. The `dirty` and `unmerged` rules apply only to worktrees that exist on disk, so a missing
+worktree that is not locked, current or external is `prune` whatever its branch state. `prune` and `sweep` mean "eligible for
+cleanup"; the tool does not perform it.
+
+A repository without the named main branch, or a path that is not a repository, is reported as skipped with a hint
+(`--main-branch <name>`), and the run still exits `0`. The text output ends with a summary line of the decision counts; the JSON
+output has the same counts under `summary`.

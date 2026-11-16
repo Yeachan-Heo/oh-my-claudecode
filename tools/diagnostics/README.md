@@ -515,3 +515,56 @@ python3 -I tools/diagnostics/compaction_cache_cost.py --deployed-at 2026-01-01T0
 | `--to <ISO>`, `--days N` | the period end (default: now, UTC) and its length in days (default 7) |
 | `--details` | add the segment hit rates and the units to the report |
 | `--json`, `--out <file>` | the result as JSON, and the file to write it to |
+
+# Denial log summary
+
+`denial_log_summary.mjs` summarizes the denial counter journal `denials.jsonl`: counts per event kind and per subject (a
+session, with the agent id when a subagent wrote the row), degrees, results, the p50 and p95 of the time from a decision to its
+outcome, and the number of unique keys. It is a standalone diagnostic run by hand. It does not change OMC behaviour and is not
+shipped in the npm package.
+
+## Requirements and usage
+
+- Node 20 or later, built-in modules only. It reads files only.
+
+```
+node tools/diagnostics/denial_log_summary.mjs [--file <path>]... [--dir <dir>] [--json] [<path>...]
+```
+
+| Option | Meaning |
+|---|---|
+| `--file <path>` | a journal file; repeatable. Plain arguments are taken as files too, and (unlike `--file`) do not turn off the default directory |
+| `--dir <dir>` | a directory: reads `denials.jsonl` and its rotated parts (`denials-YYYYMMDD-HHMMSS.jsonl`, `denials-YYYYMMDD-HHMMSS-<pid>.jsonl`) |
+| `--json` | JSON output |
+
+With no `--file` and no `--dir` it also reads the directory `$OMC_JEV_LOG_DIR`, else `~/.omc/state/jev`. Exit codes: `0` summary printed, `2` no journal file found.
+
+## What is counted
+
+- Rows are read from all files and deduplicated by the stable event id: the same event in two journals counts once (`duplicates`).
+  A row that is not valid JSON, for example the truncated tail of a rotated part, is skipped and counted (`unparseable`).
+- `outside schema` counts the rows that fail the field check below. They are still summarized.
+- Per group (a kind, or a subject): `rows`, `degrees` (`d0`, `d1`, `d2`), `results`, the number of distinct `key` values, and the p50 and p95 of
+  the milliseconds between a decision row and the `outcome` row that references it by `ref`. Only a decision seen earlier in the files and an
+  outcome that is not older than it are joined.
+- `DIFFERENT-FACTS`: the same `key` appears in decision rows with different guard or result values.
+
+## Journal fields
+
+The tool reads the rows as the denial counter writes them:
+
+| Field | Meaning |
+|---|---|
+| `kind` | `denial`, `release`, `state`, `nudge` (decision rows), `end`, `handoff` or `outcome` |
+| `id`, `ref` | 16-hex event id; `ref` of an `outcome` row is the id of its decision |
+| `session_id`, `agent_id` | the subject; `agent_id` is `null` for the main session |
+| `guard`, `key` | the guard and the 16-hex hash of the normalized denial key |
+| `n`, `sessionCount`, `k`, `maxSession` | windowed count, per-guard session count, threshold, session ceiling |
+| `degree` | `0` none, `1` reminder, `2` block |
+| `result` | `denied`, `passed` or `blocked` |
+| `action`, `reason_code`, `state` | the fired action, the reason code (`missing_fact`, `fact_not_accepted`, `contradictory_declaration`, `consultation`, `blocked_after_consultation`, `timeout`, `guard_denial`, `error_loop`) and the state of the counter |
+| `type` | of an `end` row: `awaiting-human`, `stopped-with-reason`, `no-input` or `step-budget` |
+| `event`, `bytes` | of a `handoff` row: `warning-20mib`, `handoff-passed`, `handoff-denied`, `handoff-subagent` or `handed-off-denied`; the size in bytes, or `null` when unknown |
+| `task` | optional subject for rows of a background task; checked only when present |
+| `effectiveness` | `null`, or `returned` / `not-returned` |
+| `tool_name`, `tool_use_id`, `truncated` | the call, and a marker for a row that was shortened to fit 2000 characters |
