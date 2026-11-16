@@ -6,7 +6,7 @@
  * Cross-platform: Windows, macOS, Linux
  */
 
-import { appendFileSync, closeSync, existsSync, fstatSync, lstatSync, mkdirSync, openSync, readFileSync, readSync, readdirSync, renameSync, writeFileSync } from 'fs';
+import { appendFileSync, closeSync, existsSync, fstatSync, lstatSync, mkdirSync, openSync, readFileSync, readSync, readdirSync, realpathSync, renameSync, statSync, writeFileSync } from 'fs';
 import { createHash } from 'crypto';
 import { dirname, join, resolve, basename } from 'path';
 import { homedir } from 'os';
@@ -24,7 +24,7 @@ import { resolveConfiguredAgentModel } from './lib/agent-model-config.mjs';
 import { BOUNDED_GIT_TIMEOUT_MS } from './lib/bounded-git-timeout.mjs';
 import { isSkillVisibleToUser } from './lib/skill-entitlements.mjs';
 import { isJevAppliedLogEnabled, isJevShadowOptedIn, jevNoulOf, recordJevApplied, recordJevShadow, setJevHookContext, setJevSessionId } from './lib/jev-shadow.mjs';
-import { isJevRowTelemetryEnabled, resolveExcerptChars, resolveJevLogMaxBytes, rotateJevLog } from './jev-resolve.mjs';
+import { isJevLogContextEnabled, isJevRowTelemetryEnabled, JEV_ROW_NO_ANSWER, jevLogContextOf, resolveExcerptChars, resolveJevLogMaxBytes, rotateJevLog } from './jev-resolve.mjs';
 
 // Inlined from src/config/models.ts — avoids a dist/ import so the hook works
 // before a build and stays consistent with the TypeScript source.
@@ -390,6 +390,61 @@ function buildCanonicalSkillRegistry() {
   }
   cachedCanonicalSkillRegistry = registry;
   return registry;
+}
+
+// Agent types the owner refuses: OMC_AGENT_TYPE_DENY is a comma-separated list, empty by default.
+// OMC_AGENT_TYPE_DENY_MODE: off (default), shadow (log only), deny (refuse the call). Shadow and
+// deny log one row per Agent/Task call in agent-type.jsonl, so the allowed calls are counted too.
+// A call without subagent_type runs as general-purpose, so it is judged as general-purpose.
+const AGENT_TYPE_DENY_MODES = ['off', 'shadow', 'deny'];
+function agentTypeDenyList(env = process.env) {
+  return String(env.OMC_AGENT_TYPE_DENY ?? '').split(',').map((type) => type.trim()).filter(Boolean);
+}
+function agentTypeDenyMode(env = process.env) {
+  const raw = String(env.OMC_AGENT_TYPE_DENY_MODE ?? '').trim();
+  const mode = raw.toLowerCase();
+  if (AGENT_TYPE_DENY_MODES.includes(mode)) return { mode };
+  if (!raw) return { mode: 'off' };
+  if (env.OMC_JEV_QUIET !== '1') console.error('[omc] agent-type: OMC_AGENT_TYPE_DENY_MODE=' + raw.slice(0, 40) + ' is not one of ' + AGENT_TYPE_DENY_MODES.join(', ') + '; using shadow');
+  return { mode: 'shadow', raw: raw.slice(0, 40) };
+}
+function evaluateForbiddenAgentType(toolName, data, stateDir) {
+  const { mode, raw: modeRaw } = agentTypeDenyMode();
+  if (mode === 'off') return null;
+  const toolInput = data && typeof data === 'object' ? (data.tool_input ?? data.toolInput) : undefined;
+  const inputOk = toolInput !== null && typeof toolInput === 'object' && !Array.isArray(toolInput);
+  const typeValue = inputOk ? toolInput.subagent_type : undefined;
+  const parsed = inputOk && (typeValue === undefined || typeof typeValue === 'string');
+  const rawType = typeof typeValue === 'string' ? typeValue.trim() : '';
+  const forbidden = agentTypeDenyList().includes(rawType || 'general-purpose');
+  const decision = !parsed ? 'unparsed' : !forbidden ? 'allow' : mode === 'deny' ? 'deny' : 'would-deny';
+  try {
+    const dir = process.env.OMC_JEV_LOG_DIR || join(stateDir, 'jev');
+    mkdirSync(dir, { recursive: true });
+    const path = join(dir, 'agent-type.jsonl');
+    rotateJevLog(path, resolveJevLogMaxBytes(process.env));
+    appendFileSync(path, JSON.stringify({
+      ts: new Date().toISOString(),
+      point: 'agent-type',
+      ...(isJevLogContextEnabled(process.env) ? jevLogContextOf(data && typeof data === 'object' ? data : {}) : {}),
+      tool_name: toolName,
+      subagent_type: rawType ? rawType.slice(0, 200) : null,
+      mode,
+      ...(modeRaw ? { mode_raw: modeRaw } : {}),
+      decision,
+    }) + '\n', 'utf8');
+  } catch {
+    // Best-effort logging: a logging failure never affects the call.
+  }
+  if (decision !== 'deny') return null;
+  return {
+    continue: true,
+    hookSpecificOutput: {
+      hookEventName: 'PreToolUse',
+      permissionDecision: 'deny',
+      permissionDecisionReason: `[AGENT TYPE] "${rawType || '(no subagent_type)'}" is not allowed by OMC_AGENT_TYPE_DENY; choose another agent type.`,
+    },
+  };
 }
 
 /**
@@ -962,6 +1017,93 @@ function recordModelRoutingOverride(stateDir, row) {
   }
 }
 
+// A `fork` call runs on the parent conversation model and ignores the effort parameter (the host
+// docs document effort only for non-fork subagents), so asking Jev about it is a query with no
+// effect. With the model-routing point active, such a call gets one skipped row and no question.
+function recordJevForkSkipRow(data, toolInput, stateDir) {
+  try {
+    const dir = process.env.OMC_JEV_LOG_DIR || join(stateDir, 'jev');
+    mkdirSync(dir, { recursive: true });
+    rotateJevLog(join(dir, 'shadow.jsonl'), resolveJevLogMaxBytes(process.env));
+    appendFileSync(join(dir, 'shadow.jsonl'), JSON.stringify({
+      ts: new Date().toISOString(),
+      point: 'model-routing',
+      ...(isJevLogContextEnabled(process.env) ? jevLogContextOf(data) : {}),
+      subagent_type: typeof toolInput.subagent_type === 'string' ? toolInput.subagent_type.slice(0, 200) : null,
+      skipped: 'fork',
+      ...(isJevRowTelemetryEnabled(process.env) ? JEV_ROW_NO_ANSWER : {}),
+      durationMs: 0,
+    }) + '\n', 'utf8');
+  } catch {
+    // Best-effort logging: a logging failure never affects the call.
+  }
+}
+
+// Pointer expansion (OMC_JEV_POINTER_EXPAND=1): a short Agent/Task prompt (under 600 characters)
+// that is only an absolute path to a .md file is replaced, in the Jev state, by the head of that
+// file. Only files under the directories listed in OMC_JEV_POINTER_EXPAND_DIRS (colon-separated,
+// empty by default, so nothing is read) are expanded. The excerpt is sent UNMASKED to the configured
+// Jev endpoint: state masking is a separate change, so the content leaves the machine as is.
+// Any failure leaves the prompt unchanged and records the reason.
+const POINTER_MAX_PROMPT_CHARS = 600;
+const POINTER_MAX_EXCERPT_CHARS = 8000;
+const POINTER_MAX_FILE_BYTES = 1024 * 1024;
+const POINTER_BINARY_SCAN_BYTES = 8192;
+const POINTER_PATH_RE = /(?<![\w.\-/:~])\/[\w.\-/\p{L}]+\.md(?![\w])/u;
+const POINTER_SECRET_PATH_RE = /(?:^|[\\/])\.ssh[\\/]|(?:^|[\\/])\.env(?:\.[^\\/]*)?$|(?:^|[\\/])\.git-credentials$|(?:^|[\\/])\.aws[\\/]credentials$|(?:^|[\\/])\.config[\\/]gh[\\/]hosts\.ya?ml$|(?:^|[\\/])\.credentials\.json$|(?:^|[\\/])id_(?:rsa|dsa|ecdsa|ed25519)(?!\.pub$)/i;
+function isPointerExpandEnabled(env = process.env) {
+  return String(env.OMC_JEV_POINTER_EXPAND ?? '').trim() === '1';
+}
+function pointerExpandRoots(env = process.env) {
+  return String(env.OMC_JEV_POINTER_EXPAND_DIRS ?? '').split(':').map((dir) => dir.trim()).filter(Boolean)
+    .flatMap((dir) => {
+      try {
+        return [realpathSync(dir)];
+      } catch {
+        return [];
+      }
+    });
+}
+// `pointer` is the telemetry object of the row ({ expanded, unexpanded }); undefined when the
+// switch is off, in which case the prompt passes through untouched.
+function expandTaskPointer(prompt, pointer) {
+  if (!pointer || typeof prompt !== 'string' || prompt.length === 0 || prompt.length >= POINTER_MAX_PROMPT_CHARS) return prompt;
+  const named = prompt.match(POINTER_PATH_RE)?.[0];
+  if (!named) return prompt;
+  try {
+    const stat = statSync(named);
+    if (!stat.isFile()) {
+      pointer.unexpanded = 'directory';
+      return prompt;
+    }
+    if (stat.size > POINTER_MAX_FILE_BYTES) {
+      pointer.unexpanded = 'too-large';
+      return prompt;
+    }
+    // Canonicalize before the exclusions, so a symlink or a ".." segment cannot dodge them.
+    const real = realpathSync(named);
+    if (POINTER_SECRET_PATH_RE.test(real) || /^settings.*\.json$/i.test(basename(real))) {
+      pointer.unexpanded = 'secret-path';
+      return prompt;
+    }
+    const roots = pointerExpandRoots();
+    if (!roots.some((root) => real === root || real.startsWith(root + '/'))) {
+      pointer.unexpanded = 'outside-allowed-dirs';
+      return prompt;
+    }
+    const content = readFileSync(real);
+    if (content.subarray(0, POINTER_BINARY_SCAN_BYTES).includes(0)) {
+      pointer.unexpanded = 'binary';
+      return prompt;
+    }
+    pointer.expanded = true;
+    return prompt + '\n\n[source file: ' + real + ', head of file]\n' + content.toString('utf8').slice(0, POINTER_MAX_EXCERPT_CHARS);
+  } catch (error) {
+    pointer.unexpanded = error?.code === 'ENOENT' ? 'missing' : 'read-error';
+    return prompt;
+  }
+}
+
 function boundModelRoutingInput(toolInput) {
   const bounded = {};
   for (const key of ['description', 'prompt', 'subagent_type', 'model', 'effort', 'resume']) {
@@ -976,7 +1118,11 @@ function boundModelRoutingInput(toolInput) {
   return bounded;
 }
 
-function recordModelRoutingShadow(toolName, toolInput, updatedToolInput, permissionMode, transcriptPath, directory, sessionId, stateDir, toolUseId, inheritedModel = null) {
+function recordModelRoutingShadow(toolName, toolInput, updatedToolInput, permissionMode, transcriptPath, directory, sessionId, stateDir, toolUseId, inheritedModel = null, data = undefined) {
+  if (toolInput.subagent_type === 'fork' && isJevShadowOptedIn('model-routing', process.env, permissionMode)) {
+    recordJevForkSkipRow(data, toolInput, stateDir);
+    return;
+  }
   const incomingUpdated = updatedToolInput;
   // OMC_JEV_MODEL_ROUTING_MARKER: a `use` line in the prompt pins the model and/or the effort.
   // The marker is the caller's own instruction, so it works whether or not the point is on;
@@ -1028,18 +1174,20 @@ function recordModelRoutingShadow(toolName, toolInput, updatedToolInput, permiss
     };
   }
 
+  const pointer = isPointerExpandEnabled() ? { expanded: false, unexpanded: null } : undefined;
   const jevResult = !askJev ? undefined : recordJevShadow({
     point: 'model-routing',
     state: {
       tool_name: toolName,
       subagent_type: originalInput.subagent_type || '',
-      task: originalInput.prompt || '',
+      task: expandTaskPointer(originalInput.prompt || '', pointer),
       ...context,
     },
     questions,
     heuristic,
     permissionMode,
     toolUseId,
+    pointer,
   });
 
   const ensureUpdated = () => {
@@ -2541,6 +2689,12 @@ async function main() {
     //   DENY  no-model calls when the session model itself has [1m] — guide to OMC_SUBAGENT_MODEL
     if (toolName === 'Task' || toolName === 'Agent') {
       const toolInput = data.toolInput || data.tool_input || {};
+      // Agent-type deny list (OMC_AGENT_TYPE_DENY): before any Jev query and before model routing.
+      const agentTypeDeny = evaluateForbiddenAgentType(toolName, data, stateDir);
+      if (agentTypeDeny) {
+        emitPreToolUseOutput(agentTypeDeny, data);
+        return;
+      }
       // Skill vs agent namespace guard (issue #3667): deny BEFORE the native
       // boundary when a bundled skill name is passed as subagent_type, with an
       // error that names the Skill tool and the correct identifier.
@@ -2665,7 +2819,7 @@ async function main() {
         const anthropicModel = process.env.ANTHROPIC_MODEL || '';
         inheritedModel = claudeModel || anthropicModel || null;
       }
-      const jevUpdated = recordModelRoutingShadow(toolName, toolInput, updatedToolInput, data.permission_mode, data.transcript_path || data.transcriptPath || '', directory, data.session_id || data.sessionId || '', stateDir, data.tool_use_id || data.toolUseID, inheritedModel);
+      const jevUpdated = recordModelRoutingShadow(toolName, toolInput, updatedToolInput, data.permission_mode, data.transcript_path || data.transcriptPath || '', directory, data.session_id || data.sessionId || '', stateDir, data.tool_use_id || data.toolUseID, inheritedModel, data);
       // In active mode, Jev may override the model choice
       if (jevUpdated) updatedToolInput = jevUpdated;
       // Test-only: force exception after Jev routing is staged to verify catch path
