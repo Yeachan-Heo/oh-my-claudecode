@@ -13,6 +13,8 @@ import { absPath, TeamPaths } from './state-paths.js';
 import { atomicWriteJson } from '../lib/atomic-write.js';
 import { lockPathFor, withFileLock } from '../lib/file-lock.js';
 import { checkHostLoadGate } from '../lib/host-load-gate.js';
+import { isHerdrPaneId } from './tmux-session.js';
+
 import { gzipSync } from 'node:zlib';
 
 const WORKER_LAUNCH_SCHEMA_VERSION = 1 as const;
@@ -2333,7 +2335,7 @@ export async function runWorkerLaunchBootstrap(value: unknown): Promise<WorkerLa
           : invocation.providerGateFd === undefined
             ? 'inherit'
             : ['inherit', 'inherit', 'inherit', 'pipe'],
-        detached: process.platform !== 'win32',
+        detached: process.platform !== 'win32' && !isHerdrPaneId(spec.pane_id),
       });
       let settled = false;
       let providerPid: number | null = null;
