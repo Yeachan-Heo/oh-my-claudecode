@@ -832,3 +832,13 @@ export function formatBlockedPanesSummary(blockedPanes: BlockedPane[]): string {
 
   return lines.join('\n');
 }
+
+/**
+ * tmux adapter for the opt-in worker panel quota wait (OMC_PANEL_QUOTA_WAIT=1).
+ * Strict capture: a pane that cannot be read is skipped, not treated as an empty screen.
+ */
+export const panelQuotaTmux = {
+  listPanes: (): TmuxPane[] => listTmuxPanes(),
+  capture: (pane: TmuxPane, lines: number): string | null => capturePaneContentStrict(pane.id, lines),
+  sendContinue: (pane: TmuxPane): boolean => sendToPane(pane.id, 'continue', true),
+};
