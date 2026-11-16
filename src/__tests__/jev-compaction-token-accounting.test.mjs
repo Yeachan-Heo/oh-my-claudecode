@@ -8,7 +8,7 @@
 
 import { describe, expect, it } from 'vitest';
 
-import { listTokens, prefixTokens, register, resolveWindow, tokenCeiling } from '../../hooks/jev-compaction.mjs';
+import { listTokens, prefixTokens, ratesFrom, register, resolveWindow, tokenCeiling } from '../../hooks/jev-compaction.mjs';
 
 const ACTIVE_ENV = { OMC_JEV: 'compaction:active', TYPESAFE_API_KEY: 'test-key', HOME: '/home/u' };
 const SPOOL = '/home/u/.omc/state/jev/compaction-spool/';
@@ -227,5 +227,54 @@ describe('token accounting: own threshold window', () => {
     // 130 000 tokens against 80 % of 100 000 asks the host to compact; against 80 % of the model's 200 000 it does not.
     expect(await turnRecords({ ...ACTIVE_ENV, OMC_JEV_COMPACT_TOKEN_ACCOUNTING: '1' })).toBe(1);
     expect(await turnRecords(ACTIVE_ENV)).toBe(0);
+  });
+});
+
+describe('token accounting: rates as configuration (OMC_JEV_COMPACT_RATES)', () => {
+  const DEFAULTS = {
+    PREDICTION_SHORTFALL: 0.012, RATE_IN: 0.5513, RATE_OUT: 0.4502, RATE_NOTE: 0.363, RATE_OWN: 0.287, RATE_ATXT: 0.315, RATE_ATT: 0.43,
+    RATE_TRACE: 0.58, RATE_MOVED: 0.455, RATE_NON_ASCII: 3.72, RATE_BLOCK: 45.4, RATE_IMAGE: 2348,
+  };
+
+  it('keeps the measured values when the variable is unset, empty or not a JSON object', () => {
+    for (const raw of [undefined, '', '   ', 'not json', '[1,2]', '42', 'null', '"RATE_OUT"']) expect(ratesFrom(raw)).toEqual(DEFAULTS);
+  });
+
+  it('overrides the named rates one by one and keeps the others', () => {
+    expect(ratesFrom('{"RATE_OUT":0.5,"RATE_ATT":0.2}')).toEqual({ ...DEFAULTS, RATE_OUT: 0.5, RATE_ATT: 0.2 });
+    expect(ratesFrom('{"PREDICTION_SHORTFALL":0}').PREDICTION_SHORTFALL).toBe(0);
+  });
+
+  it('ignores unknown names, non-finite, non-positive and non-number values, and a negative shortfall', () => {
+    const bad = '{"RATE_UNKNOWN":3,"RATE_OUT":0,"RATE_IN":-1,"RATE_NOTE":"0.5","RATE_OWN":null,"RATE_ATXT":true,"RATE_TRACE":1e999,"RATE_MOVED":[1],"PREDICTION_SHORTFALL":-0.1}';
+    expect(ratesFrom(bad)).toEqual(DEFAULTS);
+    expect(ratesFrom('{"RATE_OUT":0.5,"RATE_IN":-1}')).toEqual({ ...DEFAULTS, RATE_OUT: 0.5 });
+  });
+
+  it('prices the API list and the window ceiling with the given rates, and with the defaults when none are given', () => {
+    const block = 45.4 - 40.5;
+    expect(listTokens([{ role: 'user', content: 'hello' }], ratesFrom('{"RATE_OWN":1}'))).toBeCloseTo(5 + block, 6);
+    expect(listTokens([{ role: 'user', content: 'hello' }], ratesFrom(undefined))).toBe(listTokens([{ role: 'user', content: 'hello' }]));
+    expect(tokenCeiling(120000, ratesFrom('{"PREDICTION_SHORTFALL":0}'))).toBe(120000);
+    expect(tokenCeiling(120000, ratesFrom('{"PREDICTION_SHORTFALL":0.1}'))).toBe(109090);
+  });
+
+  it('gives the same record without the variable as with a variable that holds nothing usable', async () => {
+    const env = { ...ACTIVE_ENV, OMC_JEV_COMPACT_TOKEN_ACCOUNTING: '1', OMC_JEV_COMPACT_MAX_WINDOW_TOKENS: '50000' };
+    const plain = await compactRecord(env);
+    for (const raw of ['{}', 'oops', '{"RATE_OUT":-3,"NOPE":1}']) {
+      const same = await compactRecord({ ...env, OMC_JEV_COMPACT_RATES: raw });
+      for (const key of ['tokens_before', 'tokens_after', 'target_tokens', 'target_tokens_capped']) expect(same.record[key]).toBe(plain.record[key]);
+    }
+  });
+
+  it('changes the prediction and the ceiling in the record when the variable names rates', async () => {
+    const env = { ...ACTIVE_ENV, OMC_JEV_COMPACT_TOKEN_ACCOUNTING: '1', OMC_JEV_COMPACT_MAX_WINDOW_TOKENS: '50000' };
+    const plain = await compactRecord(env);
+    const heavy = await compactRecord({ ...env, OMC_JEV_COMPACT_RATES: '{"RATE_OUT":0.9004,"PREDICTION_SHORTFALL":0}' });
+    expect(heavy.record.tokens_before).toBe(plain.record.tokens_before);
+    expect(heavy.record.tokens_after).toBeLessThan(plain.record.tokens_after);
+    expect(plain.record.target_tokens_capped).toBe(49407);
+    expect(heavy.record.target_tokens_capped).toBe(50000);
   });
 });

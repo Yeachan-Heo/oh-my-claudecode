@@ -91,6 +91,8 @@ async function compactThenRequest(env) {
   const handlers = {};
   register((event, hook) => { handlers[event] = hook; });
   await handlers['session.compact'](fake.$, Object.freeze({ trigger: 'auto', messages }), async () => ({ messages: [] }));
+  // The host's request stream is a generator; this one ends at once with the usage as its return value.
+  // eslint-disable-next-line require-yield
   const step = handlers['turn.step'](fake.$, Object.freeze({}), async function* request() {
     return { usage: { input_tokens: 100000, cache_read_input_tokens: 0, cache_creation_input_tokens: 0 } };
   });
@@ -155,7 +157,7 @@ describe('token cascade (OMC_JEV_COMPACT_TARGET_PERCENT)', () => {
     const { record } = await compactRun({ ...ACTIVE_ENV, OMC_JEV_COMPACT_TARGET_PERCENT: '20' });
     // The automatic compaction raises the tokens to the threshold (200 000 window less 33 000 = 167 000), so 20 % of them is 33 400.
     expect(record).toMatchObject({ cut: 'cascade', cascade_tokens_source: 'usage', cascade_target_tokens: 33400 });
-    expect(['forced', 'A', 'B', 'D']).toContain(record.cascade_pass);
+    expect(['forced', 'short_or_trace', 'trace_all', 'drop']).toContain(record.cascade_pass);
     expect(record.cascade_predicted_tokens).toBeLessThan(130000);
   });
 
@@ -167,11 +169,11 @@ describe('token cascade (OMC_JEV_COMPACT_TARGET_PERCENT)', () => {
     expect(cands.map((c) => c.keep)).toEqual(['trace', 'trace', 'full']);
   });
 
-  it('pass A traces the results scored under 0.5 first, then shortens the rest, and stops at the target', () => {
+  it('the short_or_trace pass traces the results scored under 0.5 first, then shortens the rest, and stops at the target', () => {
     // Two results scored 0 and one scored 2/3: the target is one result's worth below the three whole.
     const cands = [item('low1', { score: 0, resIdx: 1 }), item('low2', { score: 0, resIdx: 3 }), item('mid', { score: 2 / 3, resIdx: 5 })];
     const plan = cascade(cands, 3 * 1900, 66);
-    expect(plan.pass).toBe('A');
+    expect(plan.pass).toBe('short_or_trace');
     expect(cands[0].keep).toBe('trace');
     expect(plan.predicted).toBeLessThanOrEqual(plan.target);
   });
@@ -179,27 +181,27 @@ describe('token cascade (OMC_JEV_COMPACT_TARGET_PERCENT)', () => {
   it('stops as soon as the prediction reaches the target: the rest stays whole', () => {
     const cands = [item('a', { score: 0, resIdx: 1 }), item('b', { score: 0, resIdx: 2 }), item('c', { score: 0, resIdx: 3 })];
     const plan = cascade(cands, 3 * 1900, 70);
-    expect(plan.pass).toBe('A');
+    expect(plan.pass).toBe('short_or_trace');
     expect(cands.map((c) => c.keep)).toEqual(['trace', 'full', 'full']);
   });
 
-  it('pass B traces every remaining result, pass D removes the traced ones with their calls when the target is still out of reach; a pinned task call stays whole', () => {
-    // The pinned call (4 000 characters, about 1 800 tokens) is never cut, so the target is out of reach after pass A and the cascade
-    // goes on to pass B, which traces the one free result; the prediction stays above the target, so pass D removes that trace with its call.
+  it('the trace_all pass traces every remaining result, the drop pass removes the traced ones with their calls when the target is still out of reach; a pinned task call stays whole', () => {
+    // The pinned call (4 000 characters, about 1 800 tokens) is never cut, so the target is out of reach after the short_or_trace pass and the cascade
+    // goes on to the trace_all pass, which traces the one free result; the prediction stays above the target, so the drop pass removes that trace with its call.
     const cands = [item('plan', { task: true, resIdx: 1 }), item('a', { score: 3, resIdx: 2 })];
     const plan = cascade(cands, 3700, 20);
-    expect(plan.pass).toBe('D');
+    expect(plan.pass).toBe('drop');
     expect(cands.map((c) => c.keep)).toEqual(['full', 'drop']);
     expect(plan.predicted).toBeGreaterThan(plan.target);
   });
 
-  it('pass D removes a traced result with its call only once the passes before did not reach the target, least needed first', () => {
-    // Two free results of 3 000 characters (about 1 370 tokens whole each). With 3 360 tokens before and a 20 % target (672 tokens), pass B
-    // traces both and predicts about 690 tokens, just above the target; pass D then drops the lower score (y) with its trace, which
+  it('the drop pass removes a traced result with its call only once the passes before did not reach the target, least needed first', () => {
+    // Two free results of 3 000 characters (about 1 370 tokens whole each). With 3 360 tokens before and a 20 % target (672 tokens), the trace_all pass
+    // traces both and predicts about 690 tokens, just above the target; the drop pass then drops the lower score (y) with its trace, which
     // reaches the target (about 652), so x stays a trace. The window holds for 3 340 to 3 380 tokens.
     const cands = [item('x', { score: 2, resIdx: 1, chars: 3000 }), item('y', { score: 1, resIdx: 2, chars: 3000 })];
     const plan = cascade(cands, 3360, 20);
-    expect(plan.pass).toBe('D');
+    expect(plan.pass).toBe('drop');
     expect(plan.predicted).toBeLessThanOrEqual(plan.target);
     expect(cands.map((c) => [c.id, c.keep])).toEqual([['x', 'trace'], ['y', 'drop']]);
   });
@@ -216,13 +218,13 @@ describe('token cascade (OMC_JEV_COMPACT_TARGET_PERCENT)', () => {
   });
 });
 
-describe('pass D, the floor, host handoff and the after record (token cascade)', () => {
+describe('drop pass, the floor, host handoff and the after record (token cascade)', () => {
   const TARGET_20 = { ...ACTIVE_ENV, OMC_JEV_COMPACT_TARGET_PERCENT: '20' };
   const HANDOFF_20 = { ...TARGET_20, OMC_JEV_COMPACT_HOST_HANDOFF: '1' };
 
-  it('pass D removes results with their calls, and the rebuilt list keeps every call paired with its result', async () => {
+  it('the drop pass removes results with their calls, and the rebuilt list keeps every call paired with its result', async () => {
     const { record, out } = await compactRun({ ...ACTIVE_ENV, OMC_JEV_COMPACT_TARGET_PERCENT: '20' });
-    expect(record).toMatchObject({ cut: 'cascade', cascade_pass: 'D', result: 'jev' });
+    expect(record).toMatchObject({ cut: 'cascade', cascade_pass: 'drop', result: 'jev' });
     expect(record.cascade_dropped).toBeGreaterThan(0);
     const calls = out.messages.flatMap((m) => (m.toolUses || []).map((u) => u.tool_use_id)).sort();
     const results = out.messages.flatMap((m) => (m.toolResults || []).map((r) => r.tool_use_id)).sort();

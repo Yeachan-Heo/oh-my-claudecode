@@ -3486,7 +3486,8 @@ describe('jev-compaction module: pasted text (OMC_JEV_COMPACT_PASTES)', () => {
   // A <pasted_content> tag says that the user pasted the text, not who wrote it. The rule under test: no sentence of the user leaves the
   // conversation, so a tag moves to a file only when Jev, who read all of it, says that none of it is the user's own writing; text outside
   // tags never moves; tags never join; the default is off.
-  const PASTES = { ...ACTIVE_ENV, OMC_JEV_COMPACT_PASTES: 'active' };
+  // The tests below tune the stage to short tags and a lower bar (the example values of docs/HOOKS.md); the defaults (2000 characters, 0.8) are tested apart.
+  const PASTES = { ...ACTIVE_ENV, OMC_JEV_COMPACT_PASTES: 'active', OMC_JEV_COMPACT_PASTE_MIN_CHARS: '400', OMC_JEV_COMPACT_PASTE_YES: '0.7' };
   const DIR = `${STATE}/compaction-pastes/sess-1`;
   const tag = (inner, id = 1) => `<pasted_content id="${id}">${inner}</pasted_content>`;
   const filler = (word, n) => `${word} `.repeat(Math.ceil(n / (word.length + 1))).slice(0, n);
@@ -3620,7 +3621,7 @@ describe('jev-compaction module: pasted text (OMC_JEV_COMPACT_PASTES)', () => {
     const strict = await compactPastes(withPastes([text]), { env: { ...PASTES, OMC_JEV_COMPACT_PASTE_YES: '0.9' }, jev: jevSays(0.8) });
     expect(userRow(strict.out, OUTSIDE).text).toBe(text);
     expect(userRow((await compactPastes(withPastes([text]), { env: { ...PASTES, OMC_JEV_COMPACT_PASTE_YES: '0.9' }, jev: jevSays(0.95) })).out, OUTSIDE).text).not.toBe(text);
-    expect(userRow((await compactPastes(withPastes([text]), { env: { ...PASTES, OMC_JEV_COMPACT_PASTE_YES: 'high' }, jev: jevSays(0.7) })).out, OUTSIDE).text).not.toBe(text);
+    expect(userRow((await compactPastes(withPastes([text]), { env: { ...PASTES, OMC_JEV_COMPACT_PASTE_YES: 'high' }, jev: jevSays(0.8) })).out, OUTSIDE).text).not.toBe(text);
     const failing = (body) => (body.questions.pasted ? { ok: false, status: 500, headers: {}, text: '' } : okResponse(scoreByMarker(body)));
     const run = await compactPastes(withPastes([text]), { jev: failing });
     expect(userRow(run.out, OUTSIDE).text).toBe(text);
@@ -3752,6 +3753,17 @@ describe('jev-compaction module: pasted text (OMC_JEV_COMPACT_PASTES)', () => {
     const raised = await compactPastes(messages, { env: { ...PASTES, OMC_JEV_COMPACT_PASTE_MAX_CHARS: '100000' } });
     expect(raised.requests.map((c) => c.body.state.fragment.text.length).sort((a, b) => b - a)).toEqual([30001, 4001]);
     for (const c of [...byDefault.requests, ...raised.requests]) expect(c.body.state.fragment.chars).toBe(c.body.state.fragment.text.length);
+  });
+
+  it('without the size and probability variables a tag moves from 2000 characters and at 0.8', async () => {
+    const defaults = { ...ACTIVE_ENV, OMC_JEV_COMPACT_PASTES: 'active' };
+    const messages = withPastes([`${OUTSIDE} ${sized(1999)}`, `${OUTSIDE} ${sized(2001, 2)}`]);
+    const asked = await compactPastes(messages, { env: defaults, jev: jevSays(0.8) });
+    expect(asked.requests.map((c) => c.body.state.fragment.text.length)).toEqual([2001]);
+    expect(asked.record.pastes).toMatchObject({ small: 1, asked: 1, yes: 1, moved: 1 });
+    const below = await compactPastes(messages, { env: defaults, jev: jevSays(0.79) });
+    expect(below.record.pastes).toMatchObject({ asked: 1, yes: 0, no: 1, moved: 0 });
+    expect(below.written).toHaveLength(0);
   });
 
   it('a tag that carries the style named in OMC_JEV_COMPACT_OWNER_MARKERS stays without a question; with no patterns nothing is held back', async () => {
@@ -3894,10 +3906,9 @@ describe('jev-compaction module: pasted text (OMC_JEV_COMPACT_PASTES)', () => {
     const tags = pasteTags(text);
     expect(tags.map((t) => text.slice(t.start, t.end))).toEqual(['<pasted_content>one</pasted_content>', '<pasted_content id="2">two <pasted_content>x</pasted_content>']);
     expect(tags.map((t) => text.slice(t.from, t.to))).toEqual(['one', 'two <pasted_content>x']);
-    const started = performance.now();
+    // Hostile repeats: a quadratic scan would not return within the test's own timeout, so the results are asserted without a clock.
     expect(pasteTags('<pasted_content'.repeat(30000))).toEqual([]);
     expect(pasteTags('<pasted_content>'.repeat(30000))).toEqual([]);
-    expect(performance.now() - started).toBeLessThan(5000);
   });
 
   describe('long replies (OMC_JEV_COMPACT_LONG_REPLIES)', () => {

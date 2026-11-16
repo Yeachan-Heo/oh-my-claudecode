@@ -1,3 +1,4 @@
+/* global setTimeout, clearTimeout */
 /**
  * Tests for hooks/jev-compaction.mjs background task notifications as candidates (OMC_JEV_COMPACT_NOTIFICATIONS): a notification row before the tail
  * is scored by Jev and kept, cut or removed with a trace. Without the variable the compaction is unchanged.
@@ -136,4 +137,38 @@ describe('isNotification', () => {
     isNotification(row(`[SYSTEM NOTIFICATION - NOT USER INPUT]\n${'<system-reminder>'.repeat(40000)}`));
     expect(Date.now() - t0).toBeLessThan(1000);
   });
+});
+
+describe('rows that open like a trace of the module (the stages\' trace prefixes)', () => {
+  // A user row that opens with the text of a trace is the user's words while none of the four stages is on (as without the module's stages),
+  // and not the user's words once one of them is on. The words reach Jev in the task of the scoring request only as the user's words.
+  const MARK = 'PLAN-MARKER-7781';
+  const withRow = (opening) => {
+    const w = talk(30);
+    const result = [
+      { role: 'assistant', text: 'Read.', toolUses: [{ tool_use_id: 't1', tool: 'Bash', input: { command: 'cat a.txt' } }] },
+      { role: 'user', text: '', toolUses: [], toolResults: [{ tool_use_id: 't1', text: `RESULT ${'x'.repeat(30000)}`, isError: false }] },
+    ];
+    const typed = row(`${opening} ${MARK} what I think about the plan.`);
+    return [w[0], ...result, ...w.slice(1), typed, assistant('Noted.')].map((m, k) => Object.freeze({ ...m, handle: `h${k}` }));
+  };
+  const sent = async (env, opening) => (await compactRun(env, withRow(opening))).bodies.join('');
+
+  for (const opening of ['[compacted] ', '[agent message moved at compaction, not from the user: ']) {
+    it(`a user row opening with "${opening.trim()}" counts as the user's words with every stage off`, async () => {
+      expect(await sent({}, opening)).toContain(MARK);
+    });
+
+    it.each([
+      ['OMC_JEV_COMPACT_AGENT_TRIM', '1'],
+      ['OMC_JEV_COMPACT_NOTIFICATIONS', '1'],
+      ['OMC_JEV_COMPACT_LONG_REPLIES', 'shadow'],
+      ['OMC_JEV_COMPACT_PASTES', 'shadow'],
+    ])(`a user row opening with "${opening.trim()}" is not the user's words with %s=%s`, async (name, value) => {
+      const body = await sent({ [name]: value }, opening);
+      // A scoring request went out (its task is there), and the row's words are not in it.
+      expect(body).toContain('"task":["Question 24.","Question 26.","Question 28."]');
+      expect(body).not.toContain(MARK);
+    });
+  }
 });

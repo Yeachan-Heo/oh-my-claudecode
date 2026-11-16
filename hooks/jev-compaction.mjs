@@ -103,6 +103,10 @@
  * and read back like those of the pastes (same directory, same retention), after the module's own result is certain; `shadow` counts
  * only; the record gets `replies`.
  *
+ * Secrets in the paste, reply and agent stages: a tag, run or agent message that names a secret or private path, or that masking changes, stays
+ * in the conversation unmoved, and no file is written for it. This is deliberate: a copy with the secrets masked is not archived in its place, so
+ * a session with secrets in such text keeps that text whole in the conversation until masked archiving is added.
+ *
  * Shared breaker and request limit (OMC_JEV_BREAKER=1, OMC_JEV_MAX_RPM=<n>): the same files and rules as
  * the script side (scripts/lib/jev-breaker.mjs, see its header), under the same state directory and
  * scope. A hooks module cannot import Node, so the file work goes through $.fs; the rules are mirrors.
@@ -125,13 +129,14 @@
  * threshold reads the same window. The tokens before are the host's usage in the main loop, else an
  * estimate of the API form by class (listTokens, RATE_* constants); the tokens after are predicted from the
  * removed text by the same rates. OMC_JEV_COMPACT_MAX_WINDOW_TOKENS (positive integer, unset: no cap) caps the
- * kept target at that window divided by 1 + PREDICTION_SHORTFALL (tokenCeiling). These figures go to the
+ * kept target at that window divided by 1 + PREDICTION_SHORTFALL (tokenCeiling). The rates and PREDICTION_SHORTFALL come from one measurement of
+ * one model on one host; OMC_JEV_COMPACT_RATES (a JSON object of rate name to number) overrides them one by one (ratesFrom). These figures go to the
  * compaction record only (target_tokens, target_tokens_capped, tokens_before, tokens_after, window, threshold,
  * window_source, tokens_source); the cut itself still follows the character budget of allocate.
  *
- * Token cascade (OMC_JEV_COMPACT_TARGET_PERCENT, two digits from 20 to 80; unset: off). The cut then follows tokens: the target is that
- * share of the tokens before, and cascade (pass forced, pass A, pass B) steps the results down from the least needed, predicting the tokens
- * after each step, until the prediction reaches the target; the last pass (D) removes a result with its call. A compaction at or below the usual
+ * Token cascade (OMC_JEV_COMPACT_TARGET_PERCENT, two digits from 20 to 80 enable it; unset: off. The name stays as it is although the value is a share of the tokens, not a switch). The cut then follows tokens: the target is that
+ * share of the tokens before, and cascade (passes forced, short_or_trace, trace_all) steps the results down from the least needed, predicting the tokens
+ * after each step, until the prediction reaches the target; the last pass (drop) removes a result with its call. A compaction at or below the usual
  * target is manual: only the scores decide (manualPlan), and the cascade runs only when that still leaves the prediction above the target. In
  * any other case, before Jev is asked, the floor (every removable result gone) is predicted: above the threshold less FLOOR_MARGIN of the window
  * the host's summary runs (floor_above_threshold; no_window when the window is unknown). The compaction record gains cut, cascade_pass,
@@ -191,22 +196,39 @@ const OWN_SKIP_PREFIX = 'jev-compaction:';
 const TARGET_OF_THRESHOLD = 0.75;
 const TARGET_UNCALIBRATED = 0.85;
 const usualTarget = (win, targetPercent) => Math.min(Math.floor((win.window * targetPercent) / 100), Math.floor(TARGET_OF_THRESHOLD * win.threshold));
-// The prediction after a compaction falls short of the window the host measures by this share (measured on one set of compaction states, 1.2 %
-// after the rates below; an estimate, to be measured again for other hosts). The window ceiling divides by 1 + this share.
-const PREDICTION_SHORTFALL = 0.012;
-// Cost of a class of text in API tokens, from a regression on 374 usage increments of one model (Opus 5.5, Claude Code 2.1.322). Only
-// the costs the module uses are listed; the rates are configuration of the measured host and need measuring again for another one.
-const RATE_IN = 0.5513; // a character of a tool call's name and input
-const RATE_OUT = 0.4502; // a character of a tool result
-const RATE_NOTE = 0.363; // a character of a reminder, notification or delivered message (user text beside a result)
-const RATE_OWN = 0.287; // a character of the user's own words
-const RATE_ATXT = 0.315; // a character of the assistant's text
-const RATE_TRACE = 0.58; // a character of a one-line trace
-const RATE_MOVED = 0.455; // a character of text moved to a file (assistant text 0.315 plus the non-ASCII share of long messages); a slight overstatement of what leaves
-const RATE_NON_ASCII = 3.72; // one more token per non-ASCII character
-const RATE_BLOCK = 45.4; // per content block
+// The rates below and the shortfall come from one measurement of one model on one host (Opus 5.5, Claude Code 2.1.322): the defaults are an
+// estimate to be measured again for another model or host, and OMC_JEV_COMPACT_RATES overrides them (a JSON object of name to number).
+// The prediction after a compaction falls short of the window the host measures by PREDICTION_SHORTFALL (1.2 % after the rates; a share, 0 or
+// more); the window ceiling divides by 1 + this share. The rest is the cost of a class of text in API tokens, from a regression on 374 usage
+// increments. Only the costs the module uses are listed.
+const DEFAULT_RATES = Object.freeze({
+  PREDICTION_SHORTFALL: 0.012,
+  RATE_IN: 0.5513, // a character of a tool call's name and input
+  RATE_OUT: 0.4502, // a character of a tool result
+  RATE_NOTE: 0.363, // a character of a reminder, notification or delivered message (user text beside a result)
+  RATE_OWN: 0.287, // a character of the user's own words
+  RATE_ATXT: 0.315, // a character of the assistant's text
+  RATE_ATT: 0.43, // a character of the frame cut from an agent's message (reminder-class text of tags, no measurement of its own: an upper bound)
+  RATE_TRACE: 0.58, // a character of a one-line trace
+  RATE_MOVED: 0.455, // a character of text moved to a file (assistant text 0.315 plus the non-ASCII share of long messages); a slight overstatement of what leaves
+  RATE_NON_ASCII: 3.72, // one more token per non-ASCII character
+  RATE_BLOCK: 45.4, // per content block
+  RATE_IMAGE: 2348, // per image (flat; the size from the file header is not read)
+});
+// OMC_JEV_COMPACT_RATES: a JSON object of rate name to number laid over the defaults. A name that is not listed, a value that is not a finite
+// number above 0 (PREDICTION_SHORTFALL: 0 or above) and a text that is not a JSON object leave the default in place.
+export function ratesFrom(raw) {
+  const rates = { ...DEFAULT_RATES };
+  let given;
+  try { given = JSON.parse(String(raw ?? '')); } catch { return rates; }
+  if (!given || typeof given !== 'object' || Array.isArray(given)) return rates;
+  for (const name of Object.keys(DEFAULT_RATES)) {
+    const v = given[name];
+    if (typeof v === 'number' && Number.isFinite(v) && (name === 'PREDICTION_SHORTFALL' ? v >= 0 : v > 0)) rates[name] = v;
+  }
+  return rates;
+}
 const RATE_MESSAGE = -40.5; // per message, spread over its blocks
-const RATE_IMAGE = 2348; // per image (flat; the size from the file header is not read)
 // Non-ASCII characters (by code point) of a text: each costs RATE_NON_ASCII tokens more than an ASCII one.
 const nonAscii = (s) => { let n = 0; for (const ch of String(s ?? '')) if (ch.codePointAt(0) > 127) n++; return n; };
 const SHORT_CHARS = 300;
@@ -246,16 +268,16 @@ const PROBE_MAX_CHARS = 5_000_000;
 // A file or URL named in the last user messages counts as needed when its name has at least this
 // many characters (shorter names match too much text).
 const MENTION_MIN = 5;
-// Pasted text (OMC_JEV_COMPACT_PASTES, see the header). A tag shorter than the minimum would save little of its trace (default 400,
+// Pasted text (OMC_JEV_COMPACT_PASTES, see the header). A tag shorter than the minimum would save little of its trace (default 2000,
 // OMC_JEV_COMPACT_PASTE_MIN_CHARS); the cap keeps masking (quadratic patterns) and the request bounded (default 30000,
 // OMC_JEV_COMPACT_PASTE_MAX_CHARS; 30000 is about half of a scoring request). A message with fewer than PASTE_OWN_MIN_CHARS
 // characters of other words is the paste itself. Jev's "no part is the user's own" must reach the probability in
-// OMC_JEV_COMPACT_PASTE_YES (default 0.7). A trace keeps the first and last characters word for word (what comes at the end of a
+// OMC_JEV_COMPACT_PASTE_YES (default 0.8). A trace keeps the first and last characters word for word (what comes at the end of a
 // paste is often what the user typed last).
-const PASTE_MIN_CHARS = 400;
+const PASTE_MIN_CHARS = 2000;
 const PASTE_MAX_CHARS = 30000;
 const PASTE_OWN_MIN_CHARS = 20;
-const PASTE_YES = 0.7;
+const PASTE_YES = 0.8;
 const PASTE_MAX_ASKS = 4;
 const PASTE_TRACE_HEAD = 200;
 const PASTE_TRACE_TAIL = 300;
@@ -361,8 +383,12 @@ const HOST_BLOCK_OPEN = /^<(?:system-reminder|task-notification|teammate-message
 const NOT_USER_PREFIXES = [
   'Base directory for this skill:', 'Caveat:', '[Request interrupted', 'This session is being continued from a previous conversation',
   '<side-sessions-event>', '<ci-monitor-event>', '<scheduled-task', '<cross-session-message', 'Another Claude session sent a message:',
-  '[agent message moved at compaction', '[compacted] ',
 ];
+// The traces the module's own stages leave in a user row (an agent's message moved to a file, a removed item) are not the user's words either, but
+// only while one of those stages is on (OMC_JEV_COMPACT_AGENT_TRIM, _NOTIFICATIONS, _LONG_REPLIES, _PASTES): without them a row that opens with
+// one of these is the user's text, as before. The stages themselves always count them; readConfig adds them to the list userTask reads.
+const STAGE_NOT_USER_PREFIXES = ['[agent message moved at compaction', '[compacted] '];
+const STAGE_NOT_USER = [...NOT_USER_PREFIXES, ...STAGE_NOT_USER_PREFIXES];
 // Messages delivered while a tool turn runs. Claude Code keeps such a message as an attachment row
 // after the result row: `messages` does not show it (the host hands such rows back only with the
 // handle of the row before them), and the API form shows it as a text block of the user message with
@@ -609,6 +635,7 @@ async function readConfig($) {
     OMC_JEV_COMPACT_TOKEN_ACCOUNTING: await $.env.get('OMC_JEV_COMPACT_TOKEN_ACCOUNTING'),
     OMC_JEV_COMPACT_MAX_WINDOW_TOKENS: await $.env.get('OMC_JEV_COMPACT_MAX_WINDOW_TOKENS'),
     OMC_JEV_COMPACT_TARGET_PERCENT: await $.env.get('OMC_JEV_COMPACT_TARGET_PERCENT'),
+    OMC_JEV_COMPACT_RATES: await $.env.get('OMC_JEV_COMPACT_RATES'),
     OMC_JEV_COMPACT_QUESTION_NAME: await $.env.get('OMC_JEV_COMPACT_QUESTION_NAME'),
     OMC_JEV_COMPACT_HOST_HANDOFF: await $.env.get('OMC_JEV_COMPACT_HOST_HANDOFF'),
     OMC_JEV_COMPACT_OWN_THRESHOLD: await $.env.get('OMC_JEV_COMPACT_OWN_THRESHOLD'),
@@ -669,6 +696,10 @@ async function readConfig($) {
     // Runs of slashes and backslashes as one slash, as in namesSecretPath.
     .map((p) => p.replace(/[\\/]+/g, '/').replace(/\/$/, '').toLowerCase());
   const endpoint = env.OMC_JEV_ENDPOINT || DEFAULT_ENDPOINT;
+  const agentTrim = ['1', 'active'].includes(String(env.OMC_JEV_COMPACT_AGENT_TRIM ?? '').trim());
+  const notifications = ['1', 'active'].includes(String(env.OMC_JEV_COMPACT_NOTIFICATIONS ?? '').trim());
+  const pastes = pasteMode(env.OMC_JEV_COMPACT_PASTES);
+  const replies = pasteMode(env.OMC_JEV_COMPACT_LONG_REPLIES);
   return {
     mode,
     key: env.TYPESAFE_API_KEY,
@@ -681,6 +712,8 @@ async function readConfig($) {
     target: fraction(env.OMC_JEV_COMPACT_TARGET, DEFAULT_TARGET, 0.1, 0.9),
     tokenAccounting: String(env.OMC_JEV_COMPACT_TOKEN_ACCOUNTING ?? '').trim() === '1',
     maxWindowTokens: windowInt(env.OMC_JEV_COMPACT_MAX_WINDOW_TOKENS),
+    // Token rates and the prediction shortfall (the defaults of DEFAULT_RATES unless OMC_JEV_COMPACT_RATES overrides some).
+    rates: ratesFrom(env.OMC_JEV_COMPACT_RATES),
     // Token cascade (off unless set to a two-digit share from 20 to 80).
     targetPercent: /^\d{2}$/.test(String(env.OMC_JEV_COMPACT_TARGET_PERCENT ?? '').trim()) ? fraction(env.OMC_JEV_COMPACT_TARGET_PERCENT, undefined, 20, 80) : undefined,
     // Switches: 1 and active turn them on; 0, off, any other value and unset leave them off.
@@ -693,23 +726,25 @@ async function readConfig($) {
     ownSkip: ['1', 'active'].includes(String(env.OMC_JEV_COMPACT_OWN_THRESHOLD ?? '').trim()),
     // Agent trim (off unless 1 or active): the host's frame and the idle notifications that carry only a state are cut out of the rows of agents' messages
     // before the tail. OMC_JEV_COMPACT_AGENT_STATES lists, comma separated, the phrases an agent's idle result may open or end with to be a state.
-    agentTrim: ['1', 'active'].includes(String(env.OMC_JEV_COMPACT_AGENT_TRIM ?? '').trim()),
+    agentTrim,
     agentStates: agentStatePattern(env.OMC_JEV_COMPACT_AGENT_STATES),
     // OMC_JEV_COMPACT_NOTIFICATIONS=1: a background task notification row before the tail is a candidate of the compaction (scored by Jev, kept, cut or
     // removed with a trace) instead of staying word for word.
-    notifications: ['1', 'active'].includes(String(env.OMC_JEV_COMPACT_NOTIFICATIONS ?? '').trim()),
+    notifications,
+    // The user's-words check reads the stages' trace prefixes only while one of the four stages is on (STAGE_NOT_USER_PREFIXES).
+    notUserPrefixes: agentTrim || notifications || pastes !== 'off' || replies !== 'off' ? STAGE_NOT_USER : NOT_USER_PREFIXES,
     autoCompactWindow: env.CLAUDE_CODE_AUTO_COMPACT_WINDOW,
     configDir: env.CLAUDE_CONFIG_DIR ? slash(env.CLAUDE_CONFIG_DIR) : undefined,
     home: homeForState ? slash(homeForState) : undefined,
     toast: String(env.OMC_JEV_COMPACT_TOAST ?? '').trim() === '1',
     privatePaths,
-    pastes: pasteMode(env.OMC_JEV_COMPACT_PASTES),
+    pastes,
     pasteDir: stateDir ? `${stateDir}/compaction-pastes` : undefined,
     pasteMinChars: positiveInt(env.OMC_JEV_COMPACT_PASTE_MIN_CHARS, PASTE_MIN_CHARS),
     pasteMaxChars: positiveInt(env.OMC_JEV_COMPACT_PASTE_MAX_CHARS, PASTE_MAX_CHARS),
     pasteYes: fraction(env.OMC_JEV_COMPACT_PASTE_YES, PASTE_YES, 0.01, 1),
     ownerMarkers: ownerMarkerPatterns(env.OMC_JEV_COMPACT_OWNER_MARKERS),
-    replies: pasteMode(env.OMC_JEV_COMPACT_LONG_REPLIES),
+    replies,
   };
 }
 
@@ -1749,7 +1784,7 @@ function deliveredOf(text) {
 // gives words only so. An envelope counts as carried only in such a row or in one whose text outside
 // the envelopes gives no words of the user (build carries blocks only into result rows); in a prompt
 // the user typed it is a quote they pasted.
-function userWords(m) {
+function userWords(m, prefixes = NOT_USER_PREFIXES) {
   if (m.role !== 'user' || !m.text) return [];
   const delivered = deliveredOf(m.text);
   // The text outside the envelopes, as the parts between them, each with where it stands in the row.
@@ -1766,7 +1801,7 @@ function userWords(m) {
   }
   const text = own.replace(HOST_BLOCK, '').trim();
   const carried = delivered.flatMap((e) => blockWords(e.text));
-  if (!text || HOST_BLOCK_OPEN.test(text) || NOT_USER_PREFIXES.some((p) => text.startsWith(p))) return carried;
+  if (!text || HOST_BLOCK_OPEN.test(text) || prefixes.some((p) => text.startsWith(p))) return carried;
   // A prompt the user typed: an envelope in it is a quote they pasted, so the whole prompt is theirs. Except
   // the jev envelopes build appends at the end of a row it rebuilt from a result row (it has a toolResults list,
   // whatever it holds; a result row keeps its own text before them): those stay messages of their senders.
@@ -1882,7 +1917,7 @@ function queuedOf(messages, api) {
 // counts as one, after its row; other delivered messages do not. The part of each that is cleaned, as written
 // (`mention`, in lower case; an omitted line can let a later line into the budget), is only matched against the
 // results the user names (markMentioned) and is never sent.
-function userTask(messages, instructions, queued = new Map(), privatePaths = []) {
+function userTask(messages, instructions, queued = new Map(), privatePaths = [], notUserPrefixes = NOT_USER_PREFIXES) {
   let left = USER_CHARS;
   const clean = (text) => maskSecrets(omitSecretLines(text, privatePaths));
   const mention = [];
@@ -1894,7 +1929,7 @@ function userTask(messages, instructions, queued = new Map(), privatePaths = [])
   }
   const picked = [];
   for (let i = messages.length - 1; i >= 0 && picked.length < USER_MESSAGES && left > 0; i--) {
-    const words = [...userWords(messages[i]), ...(queued.get(i) || []).flatMap(blockWords)];
+    const words = [...userWords(messages[i], notUserPrefixes), ...(queued.get(i) || []).flatMap(blockWords)];
     for (let k = words.length - 1; k >= 0 && picked.length < USER_MESSAGES && left > 0; k--) {
       const part = headPart(words[k], left + MASK_SLACK_CHARS);
       const text = clip(clean(part), left);
@@ -2012,7 +2047,7 @@ function onlyNoteEnvelopes(t, envelopes) {
 }
 export function isNotification(m) {
   if (m.role !== 'user' || (m.toolResults && m.toolResults.length) || typeof m.text !== 'string' || !m.text) return false;
-  if (userWords(m).length || !DELIVERY_NOTES.some((k) => m.text.includes(k))) return false;
+  if (userWords(m, STAGE_NOT_USER).length || !DELIVERY_NOTES.some((k) => m.text.includes(k))) return false;
   const t = m.text.trim();
   const envelopes = envelopesOf(t);
   return envelopes.length ? onlyNoteEnvelopes(t, envelopes) : isNoteBody(t);
@@ -2089,18 +2124,18 @@ function findCandidates(messages, privatePaths, notifications = false) {
 }
 
 // Token cascade (OMC_JEV_COMPACT_TARGET_PERCENT, 20-80: the share of the tokens before the compaction the kept text may take). Every result
-// starts whole, then the least needed steps down, with a prediction after each step, and it stops at the target: pass forced (a secret or a
-// non-text result to a trace), pass A (a result Jev scored under SHORT_COPY_MIN_SCORE to a trace, the others to a short copy when that saves tokens),
-// pass B (every remaining result to a trace), pass D (every result still at a trace, least needed first, removed with its call). A pinned
+// starts whole, then the least needed steps down, with a prediction after each step, and it stops at the target: pass `forced` (a secret or a
+// non-text result to a trace), pass `short_or_trace` (a result Jev scored under SHORT_COPY_MIN_SCORE to a trace, the others to a short copy when that
+// saves tokens), pass `trace_all` (every remaining result to a trace), pass `drop` (every result still at a trace, least needed first, removed with its call). A pinned
 // result (a task-list call, or a trace that saves no tokens) stays whole. The keep decisions go to `keep` as allocate sets them. Returns the
 // pass reached, the target and the predicted tokens after.
 // A forced result (a secret, or a non-text result) goes to a trace first, whatever its score; a pinned one is never cut by the cascade and is
 // not counted in the floor.
 const isForced = (c) => c.secret || !c.textOnly;
-const isPinned = (c) => !isForced(c) && (c.task || itemTokens(c).full - itemTokens(c).trace <= 0);
-export function cascade(candidates, tokensBefore, targetPercent, targetTokens) {
+const isPinned = (c, rates = DEFAULT_RATES) => !isForced(c) && (c.task || itemTokens(c, rates).full - itemTokens(c, rates).trace <= 0);
+export function cascade(candidates, tokensBefore, targetPercent, targetTokens, rates = DEFAULT_RATES) {
   const target = targetTokens ?? Math.floor((targetPercent / 100) * tokensBefore);
-  const costs = new Map(candidates.map((c) => [c, itemTokens(c)]));
+  const costs = new Map(candidates.map((c) => [c, itemTokens(c, rates)]));
   const saved = (c, keep) => {
     const t = costs.get(c);
     return keep === 'short' ? t.full - t.short : keep === 'trace' ? t.full - t.trace : keep === 'drop' ? t.full : 0;
@@ -2111,9 +2146,9 @@ export function cascade(candidates, tokensBefore, targetPercent, targetTokens) {
   for (const c of candidates) c.keep = 'full';
   let pass = 'forced';
   for (const c of candidates) if (isForced(c)) setKeep(c, 'trace');
-  const free = candidates.filter((c) => !isForced(c) && !isPinned(c)).sort((a, b) => a.score - b.score || a.resIdx - b.resIdx);
+  const free = candidates.filter((c) => !isForced(c) && !isPinned(c, rates)).sort((a, b) => a.score - b.score || a.resIdx - b.resIdx);
   if (!reached()) {
-    pass = 'A';
+    pass = 'short_or_trace';
     for (const c of free) {
       if (reached()) break;
       if (c.score < SHORT_COPY_MIN_SCORE) setKeep(c, 'trace');
@@ -2121,14 +2156,14 @@ export function cascade(candidates, tokensBefore, targetPercent, targetTokens) {
     }
   }
   if (!reached()) {
-    pass = 'B';
+    pass = 'trace_all';
     for (const c of free) {
       if (reached()) break;
       if (c.keep !== 'trace') setKeep(c, 'trace');
     }
   }
   if (!reached()) {
-    pass = 'D';
+    pass = 'drop';
     for (const c of candidates.filter((x) => x.keep === 'trace').sort((a, b) => a.score - b.score || a.resIdx - b.resIdx)) {
       if (reached()) break;
       setKeep(c, 'drop');
@@ -2138,19 +2173,19 @@ export function cascade(candidates, tokensBefore, targetPercent, targetTokens) {
 }
 
 // The floor of the cascade: the predicted tokens when every removable result (every candidate but the pinned ones) is gone with its call.
-export function floorPrediction(candidates, tokensBefore) {
-  return tokensBefore - candidates.reduce((s, c) => s + (isPinned(c) ? 0 : itemTokens(c).full), 0);
+export function floorPrediction(candidates, tokensBefore, rates = DEFAULT_RATES) {
+  return tokensBefore - candidates.reduce((s, c) => s + (isPinned(c, rates) ? 0 : itemTokens(c, rates).full), 0);
 }
 
 // A manual compaction at or below the usual target: only the scores decide. Every forced result goes to a trace, and so does every free result
 // Jev scored under SHORT_COPY_MIN_SCORE; the rest stays whole. Returns the prediction after the removal (no pass beyond it).
-export function manualPlan(candidates, tokensBefore) {
+export function manualPlan(candidates, tokensBefore, rates = DEFAULT_RATES) {
   let removed = 0;
   for (const c of candidates) {
     c.keep = 'full';
-    if (isForced(c) || (!isPinned(c) && c.score < SHORT_COPY_MIN_SCORE)) {
+    if (isForced(c) || (!isPinned(c, rates) && c.score < SHORT_COPY_MIN_SCORE)) {
       c.keep = 'trace';
-      const t = itemTokens(c);
+      const t = itemTokens(c, rates);
       removed += t.full - t.trace;
     }
   }
@@ -2230,9 +2265,9 @@ export function prefixTokens(detail) {
   return rows.reduce((s, c) => s + (c && c.kind === 'used' && !/^messages$/i.test(String(c.name || '').trim()) ? finitePositive(c.tokens) || 0 : 0), 0);
 }
 
-// The kept target after a compaction is at most the window limit divided by 1 + PREDICTION_SHORTFALL; no limit (unset variable) means no ceiling.
-export function tokenCeiling(maxWindowTokens) {
-  return maxWindowTokens ? Math.floor(maxWindowTokens / (1 + PREDICTION_SHORTFALL)) : undefined;
+// The kept target after a compaction is at most the window limit divided by 1 + PREDICTION_SHORTFALL (its default, or OMC_JEV_COMPACT_RATES); no limit (unset variable) means no ceiling.
+export function tokenCeiling(maxWindowTokens, rates = DEFAULT_RATES) {
+  return maxWindowTokens ? Math.floor(maxWindowTokens / (1 + rates.PREDICTION_SHORTFALL)) : undefined;
 }
 
 // A one-line trace of a removed item (traceLine), wherever it stands in an assistant text: at its start or after a line break.
@@ -2246,7 +2281,8 @@ const isUserText = (t) => {
 // The API list in tokens by class: a call costs RATE_IN a character of its name and input, a result RATE_OUT, a reminder or a text beside a result
 // RATE_NOTE, the user's words RATE_OWN, the assistant's text RATE_ATXT, a trace RATE_TRACE, each non-ASCII character RATE_NON_ASCII more, RATE_BLOCK a
 // block and RATE_MESSAGE a message spread over its blocks, an image RATE_IMAGE. Thinking, signatures and server blocks are not counted here.
-export function listTokens(api) {
+export function listTokens(api, rates = DEFAULT_RATES) {
+  const { RATE_IN, RATE_OUT, RATE_NOTE, RATE_OWN, RATE_ATXT, RATE_TRACE, RATE_NON_ASCII, RATE_BLOCK, RATE_IMAGE } = rates;
   let tok = 0;
   for (const a of api) {
     if (!a || typeof a !== 'object') continue;
@@ -2289,7 +2325,8 @@ function rowsAsApi(messages) {
 }
 
 // The cost in tokens of one candidate as it stands (full), with its result shortened (short) and as its trace (trace).
-function itemTokens(c) {
+function itemTokens(c, rates = DEFAULT_RATES) {
+  const { RATE_IN, RATE_OUT, RATE_NOTE, RATE_TRACE, RATE_NON_ASCII } = rates;
   if (c.note) {
     // A notification row has no call and its text is of the reminder class; its trace is a row of its own.
     const cost = (text) => RATE_NOTE * text.length + RATE_NON_ASCII * nonAscii(text);
@@ -2305,12 +2342,12 @@ function itemTokens(c) {
 }
 
 // The tokens before the compaction, the token cascade's basis: the host's usage in the main loop, else the prefix plus the estimate of the API form.
-async function tokensBeforeOf($, e, messages, api) {
+async function tokensBeforeOf($, e, cfg, messages, api) {
   const detail = await hostValue($, () => $.session.usage({ breakdown: 'summary' }));
   const usage = await hostValue($, () => $.session.usage());
   const real = usage?.context?.tokens;
   const main = e.agentId === undefined && finitePositive(real) !== undefined;
-  return { tokens: Math.round(main ? real : prefixTokens(detail) + listTokens(api ?? rowsAsApi(messages))), source: main ? 'usage' : 'estimate' };
+  return { tokens: Math.round(main ? real : prefixTokens(detail) + listTokens(api ?? rowsAsApi(messages), cfg.rates)), source: main ? 'usage' : 'estimate' };
 }
 
 // The record fields of one compaction with token accounting: the window and threshold, the tokens before (the host's usage in the main loop, else
@@ -2322,14 +2359,14 @@ async function tokenAccounting($, e, cfg, messages, api, candidates) {
   const win = await resolveWindow($, cfg, detail, usage);
   const real = usage?.context?.tokens;
   const main = e.agentId === undefined && finitePositive(real) !== undefined;
-  const tokensBefore = Math.round(main ? real : prefixTokens(detail) + listTokens(api ?? rowsAsApi(messages)));
+  const tokensBefore = Math.round(main ? real : prefixTokens(detail) + listTokens(api ?? rowsAsApi(messages), cfg.rates));
   let removed = 0;
   for (const c of candidates) {
-    const t = itemTokens(c);
+    const t = itemTokens(c, cfg.rates);
     removed += t.full - (c.keep === 'short' ? t.short : c.keep === 'trace' ? t.trace : t.full);
   }
   const target = Math.floor(cfg.target * tokensBefore);
-  const ceiling = tokenCeiling(cfg.maxWindowTokens);
+  const ceiling = tokenCeiling(cfg.maxWindowTokens, cfg.rates);
   return {
     tokens_source: main ? 'usage' : 'estimate',
     tokens_before: tokensBefore,
@@ -2927,7 +2964,7 @@ function planPastes(messages, api, keepFrom, cfg, sessionId, stats) {
   const images = nonTextUserRows(messages, api);
   if (images.unmatched) { stats.reason = 'image_unmatched'; return []; }
   const users = [];
-  messages.forEach((m, i) => { if (userWords(m).length) users.push(i); });
+  messages.forEach((m, i) => { if (userWords(m, STAGE_NOT_USER).length) users.push(i); });
   const before = Math.min(keepFrom, Math.max(1, messages.length - KEEP_LAST));
   const limit = cfg.pasteMaxChars;
   const found = [];
@@ -3136,7 +3173,7 @@ async function planReplies(cfg, messages, api, keepFrom, sessionId, stats) {
   if (!sessionId) { stats.reason = 'no_session'; return []; }
   if (!api) { stats.reason = 'no_api_form'; return []; }
   const users = [];
-  messages.forEach((m, i) => { if (userWords(m).length) users.push(i); });
+  messages.forEach((m, i) => { if (userWords(m, STAGE_NOT_USER).length) users.push(i); });
   const turns = [];
   messages.forEach((m, i) => { if (m.role === 'user' && !(m.toolResults || []).length && typeof m.text === 'string' && m.text.trim()) turns.push(i); });
   const limit = Math.min(
@@ -3261,7 +3298,7 @@ export function trimAgentRows(messages, opts = {}) {
     const row = m.role === 'user' && !(m.toolResults || []).length && typeof m.text === 'string' ? m.text : undefined;
     const lead = row === undefined ? '' : row.trimStart();
     const agent = (lead.startsWith(TRIM_HEAD) || lead.startsWith('<teammate-message')) && /<\/(?:teammate-message|agent-message|cross-session-message)>/.test(row);
-    if (!agent || skip.has(i) || queued.has(i) || userWords(m).length || row.includes(QUEUED_PREFIX)) {
+    if (!agent || skip.has(i) || queued.has(i) || userWords(m, STAGE_NOT_USER).length || row.includes(QUEUED_PREFIX)) {
       if (agent && (skip.has(i) || queued.has(i))) stats.anchored++; // anchored: kept with its frame
       learn(m);
       continue;
@@ -3397,7 +3434,7 @@ export async function moveAgentMessages($, cfg, messages, opts = {}) {
       if (i === 0 || i >= tail) continue;
       const m = messages[i];
       if (skip.has(i)) { stats.skipped_blocks++; continue; }
-      if (userWords(m).length || m.text.includes(QUEUED_PREFIX)) { stats.owner_words++; continue; }
+      if (userWords(m, STAGE_NOT_USER).length || m.text.includes(QUEUED_PREFIX)) { stats.owner_words++; continue; }
       if (queued.has(i)) { stats.queued_anchor++; continue; }
       if (senders.get(i).some((x) => x.json && !x.idle)) { stats.pending_json++; continue; }
       if (i >= limit) continue;
@@ -3494,10 +3531,10 @@ async function decide($, e, cfg, record, started) {
     }
   }
   const trimmed = trim && trim.rows.size ? messages.map((m, i) => trim.rows.get(i) ?? m) : messages;
-  const trimTokens = trim ? RATE_NOTE * trim.stats.chars : 0;
+  const trimTokens = trim ? cfg.rates.RATE_ATT * trim.stats.chars : 0;
   // Agent messages to files: the rows as the trim leaves them; the window of rows and the files are the same in the plan and in the run.
   const agentOpts = agentSkip ? { sessionId: record.session_id, skipRows: Object.assign(new Set(agentSkip.rows), { unmatched: agentSkip.unmatched }), keepFrom: Math.min(keepFrom, Math.max(1, messages.length - KEEP_LAST)), queuedRows: queued, statePattern: cfg.agentStates } : undefined;
-  const movedTokens = (st) => RATE_MOVED * st.moved_chars - RATE_TRACE * st.trace_chars;
+  const movedTokens = (st) => cfg.rates.RATE_MOVED * st.moved_chars - cfg.rates.RATE_TRACE * st.trace_chars;
   record.max_reduction = before ? Math.round((net / before) * 1000) / 1000 : 0;
   if (!before || net / before < MIN_REDUCTION) return { fallback: 'too_few_results' };
   // Token cascade. The window first (none: the summary runs). The tokens before of an automatic compaction are raised to the threshold, as the
@@ -3512,7 +3549,7 @@ async function decide($, e, cfg, record, started) {
     const detail = await hostValue($, () => $.session.usage({ breakdown: 'summary' }));
     let win = await resolveWindow($, cfg, detail, await hostValue($, () => $.session.usage()));
     if (!win) return { fallback: 'no_window' };
-    tokens = await tokensBeforeOf($, e, messages, api);
+    tokens = await tokensBeforeOf($, e, cfg, messages, api);
     if (e.trigger === 'auto') {
       if (e.agentId === undefined) tokens.tokens = Math.max(tokens.tokens, win.threshold);
       else if (tokens.tokens < win.threshold) {
@@ -3523,7 +3560,7 @@ async function decide($, e, cfg, record, started) {
     Object.assign(record, { window: win.window, threshold: win.threshold, window_source: win.source });
     // The rule's target: the usual target before the owner's limit (`raw`), then the limit from the configured window ceiling (absent by default).
     const raw = Math.floor(TARGET_UNCALIBRATED * usualTarget(win, cfg.targetPercent));
-    const ceiling = tokenCeiling(cfg.maxWindowTokens);
+    const ceiling = tokenCeiling(cfg.maxWindowTokens, cfg.rates);
     ruleTarget = ceiling === undefined ? raw : Math.min(raw, ceiling);
     manual = tokens.tokens <= raw;
     if (!manual) {
@@ -3534,7 +3571,7 @@ async function decide($, e, cfg, record, started) {
         agentsFloor = Math.max(0, movedTokens(planned.stats));
         record.floor_agents_tokens = Math.round(agentsFloor);
       }
-      const floor = floorPrediction(candidates, tokens.tokens - trimTokens - agentsFloor);
+      const floor = floorPrediction(candidates, tokens.tokens - trimTokens - agentsFloor, cfg.rates);
       record.floor_pred = Math.round(floor);
       if (floor > win.threshold - FLOOR_MARGIN * win.window) return { fallback: 'floor_above_threshold' };
     }
@@ -3567,7 +3604,7 @@ async function decide($, e, cfg, record, started) {
   let asked = askable.slice(0, BATCH * Math.min(MAX_REQUESTS, left));
   record.asked = asked.length;
 
-  const user = userTask(messages, typeof e.instructions === 'string' && e.instructions.trim() ? e.instructions : undefined, queued, cfg.privatePaths);
+  const user = userTask(messages, typeof e.instructions === 'string' && e.instructions.trim() ? e.instructions : undefined, queued, cfg.privatePaths, cfg.notUserPrefixes);
   const deadline = started + TOTAL_MS;
   // Agent messages to files run next to the scoring requests (no request of their own); their result comes before the plan.
   const agentsRun = agentOpts ? moveAgentMessages($, cfg, trimmed, { ...agentOpts, write: cfg.mode === 'active', deadline }) : undefined;
@@ -3671,10 +3708,10 @@ async function decide($, e, cfg, record, started) {
     if (manual) {
       // Migrated rule: a manual compaction is decided by the scores against the rule's target; a prediction still above it goes on to the cascade,
       // which then stops at that target.
-      plan = manualPlan(candidates, tokens.tokens - trimTokens - agentTokens);
+      plan = manualPlan(candidates, tokens.tokens - trimTokens - agentTokens, cfg.rates);
       target = ruleTarget;
-      if (plan.predicted > target) plan = cascade(candidates, tokens.tokens - trimTokens - agentTokens, cfg.targetPercent, target);
-    } else plan = cascade(candidates, tokens.tokens - trimTokens - agentTokens, cfg.targetPercent, target);
+      if (plan.predicted > target) plan = cascade(candidates, tokens.tokens - trimTokens - agentTokens, cfg.targetPercent, target, cfg.rates);
+    } else plan = cascade(candidates, tokens.tokens - trimTokens - agentTokens, cfg.targetPercent, target, cfg.rates);
     Object.assign(record, { cut: plan.pass === 'manual' ? 'manual_scores' : 'cascade', cascade_pass: plan.pass, cascade_target_tokens: target, cascade_predicted_tokens: plan.predicted, tokens_after_pred: plan.predicted, cascade_tokens_source: tokens.source, cascade_dropped: candidates.filter((c) => c.keep === 'drop').length });
     // Host handoff: a manual or automatic compaction that removes less than HOST_MIN_CUT of the tokens is left to the host's summary (the record
     // keeps the numbers). The module's own requests and other mods' plugin compactions are not handled here.

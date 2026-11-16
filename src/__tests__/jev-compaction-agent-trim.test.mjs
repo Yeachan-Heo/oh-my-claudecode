@@ -1,3 +1,4 @@
+/* global setTimeout, clearTimeout */
 /**
  * Tests for hooks/jev-compaction.mjs agent trim (OMC_JEV_COMPACT_AGENT_TRIM): the host's frame around the messages of team agents and the idle
  * notifications that carry only a state leave the rows before the tail. Without the variable the compaction is unchanged.
@@ -357,8 +358,19 @@ describe('agent messages to files in the compaction', () => {
     expect(on.record).toMatchObject({ result: 'jev', agent_messages: { moved: 2, installed: true } });
     expect(on.record.floor_agents_tokens).toBeGreaterThan(0);
     const st = on.record.agent_messages;
-    const saved = 0.363 * on.record.agent_trim.chars + 0.455 * st.moved_chars - 0.58 * st.trace_chars;
+    const saved = 0.43 * on.record.agent_trim.chars + 0.455 * st.moved_chars - 0.58 * st.trace_chars;
     expect(Math.abs(off.record.tokens_after_pred - on.record.tokens_after_pred - saved)).toBeLessThanOrEqual(1);
+  });
+
+  it('predicts the trimmed frame at RATE_ATT, which OMC_JEV_COMPACT_RATES sets', async () => {
+    const env = { OMC_JEV_COMPACT_TARGET_PERCENT: '20', OMC_JEV_COMPACT_AGENT_TRIM: '1' };
+    const byDefault = await compactRun(env, messages());
+    const doubled = await compactRun({ ...env, OMC_JEV_COMPACT_RATES: '{"RATE_ATT":0.86}' }, messages());
+    const chars = byDefault.record.agent_trim.chars;
+    expect(chars).toBeGreaterThan(0);
+    expect(doubled.record.agent_trim.chars).toBe(chars);
+    // Only the trim's rate changed: the prediction falls by the extra 0.43 tokens per character of the frame (rounded once at the end).
+    expect(Math.abs(byDefault.record.tokens_after_pred - doubled.record.tokens_after_pred - 0.43 * chars)).toBeLessThanOrEqual(1);
   });
 
   it('with the point in shadow mode the stage only plans: no file, no change', async () => {

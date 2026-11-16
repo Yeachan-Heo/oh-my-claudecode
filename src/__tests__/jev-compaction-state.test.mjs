@@ -250,6 +250,22 @@ describe('jev-compaction-state: pasted text kept for the traces of the module (O
     expect(sweepPastes('x', Date.now(), { OMC_JEV_LOG_DIR: join(tmp, 'no-such-state-dir') })).toBe(0);
   });
 
+  it('without a compaction-pastes directory nothing is created and nothing else is removed, with and without OMC_JEV_COMPACT_PASTES', () => {
+    const { env, sid } = setup();
+    const state = env.OMC_JEV_LOG_DIR;
+    mkdirSync(join(state, 'compaction-registry'), { recursive: true });
+    writeFileSync(join(state, 'other.txt'), 'kept');
+    const before = readdirSync(state).sort();
+    for (const extra of [{}, { OMC_JEV_COMPACT_PASTES: 'active' }, { OMC_JEV_COMPACT_PASTES: 'off' }]) {
+      expect(sweepPastes('my-session', Date.now() + 90 * DAY, { ...env, ...extra })).toBe(0);
+      afterSessionStart({ session_id: sid, source: 'startup' }, {}, { ...env, ...extra });
+      expect(existsSync(join(state, 'compaction-pastes'))).toBe(false);
+      expect(existsSync(join(state, 'other.txt'))).toBe(true);
+      expect(existsSync(join(state, 'compaction-registry'))).toBe(true);
+    }
+    expect(readdirSync(state).filter((name) => before.includes(name)).sort()).toEqual(before);
+  });
+
   it('SessionStart sweeps at startup, on resume and on clear, but not after a compaction and not when the point is not named', () => {
     const { env, sid } = setup();
     const old = pastes(env, 'old-session', 20);
