@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest';
-import { mkdtempSync, readFileSync, readdirSync, rmSync, mkdirSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, readdirSync, rmSync, mkdirSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { getAgentDefinitions } from '../agents/definitions.js';
@@ -10,8 +10,10 @@ import {
   applyExtraDisallowedToolsToMarkdown,
   extractDisallowedTools,
   getExtraDisallowedTools,
+  isPlainYamlToken,
   mergeDisallowedTools,
 } from '../agents/utils.js';
+import { parseFrontmatter } from '../utils/frontmatter.js';
 
 const AGENTS_DIR = join(process.cwd(), 'agents');
 
@@ -33,6 +35,22 @@ const DESKTOP_PATTERNS = [
 afterEach(() => {
   vi.unstubAllEnvs();
 });
+
+function frontmatterLines(content: string): string[] {
+  const match = content.match(/^\uFEFF?---\r?\n([\s\S]*?)\r?\n---/);
+  return match ? match[1].split(/\r?\n/) : [];
+}
+
+/** Metadata of the output must equal the original's, except for the disallowedTools value. */
+function expectFrontmatterIntact(original: string, out: string): void {
+  const before = parseFrontmatter(original).metadata;
+  const after = parseFrontmatter(out).metadata;
+  expect(Object.keys(after).sort()).toEqual([...new Set([...Object.keys(before), 'disallowedTools'])].sort());
+  for (const key of Object.keys(before)) {
+    if (key !== 'disallowedTools') expect(after[key]).toBe(before[key]);
+  }
+  expect(parseFrontmatter(out).body).toBe(parseFrontmatter(original).body);
+}
 
 describe('getExtraDisallowedTools', () => {
   test('unset variable gives no extra tools', () => {
@@ -153,6 +171,169 @@ describe('applyExtraDisallowedToolsToMarkdown', () => {
       expect(extractDisallowedTools(out)).toEqual([...own, ...DESKTOP_PATTERNS]);
       expect(out.slice(out.indexOf('\n---', 4))).toBe(content.slice(content.indexOf('\n---', 4)));
     }
+  });
+});
+
+describe('isPlainYamlToken', () => {
+  test.each([
+    ...DESKTOP_PATTERNS,
+    'mcp__server__*',
+    'mcp__*__x*',
+    'Bash(git push:*)',
+    'Foo$&bar',
+    'Foo$`bar',
+    "Foo$'bar",
+    'Foo$$bar',
+    'Foo$1bar',
+    'a"b',
+    "a'b",
+    'a\\b',
+    'a\tb',
+    'T'.repeat(10000),
+  ])('accepts %s', (token) => {
+    expect(isPlainYamlToken(token)).toBe(true);
+  });
+
+  test.each([
+    ['a line feed', 'a\nmodel: opus'],
+    ['a carriage return', 'a\r\nmodel: opus'],
+    ['U+0085', 'a\u0085model: opus'],
+    ['U+2028', 'a\u2028model: opus'],
+    ['U+2029', 'a\u2029model: opus'],
+    ['a colon followed by a space', 'a: b'],
+    ['a colon followed by a tab', 'a:\tb'],
+    ['a trailing colon', 'a:'],
+    ['a hash preceded by a space', 'x #y'],
+    ['a leading hash', '#comment'],
+    ['a leading dash', '-x'],
+    ['a leading dash and space', '- x'],
+    ['a document separator', '---'],
+    ['a leading question mark', '? x'],
+    ['a leading brace', '{x}'],
+    ['a leading bracket', '[a]'],
+    ['a leading ampersand', '&anchor'],
+    ['a leading star', '*alias'],
+    ['a lone star', '*'],
+    ['a leading exclamation mark', '!tag'],
+    ['a leading pipe', '|'],
+    ['a leading greater-than sign', '>'],
+    ['a leading percent sign', '%x'],
+    ['a leading at sign', '@x'],
+    ['a leading backtick', '`x'],
+    ['a leading double quote', '"quoted"'],
+    ['a leading single quote', "'single'"],
+    ['the word null', 'null'],
+    ['a tilde', '~'],
+    ['the word true', 'true'],
+    ['an integer', '123'],
+    ['a float', '1.5e3'],
+  ])('rejects a token with %s', (_name, token) => {
+    expect(isPlainYamlToken(token)).toBe(false);
+  });
+});
+
+describe('applyExtraDisallowedToolsToMarkdown with unusual token values', () => {
+  const WITH_LIST = '---\nname: x\ndescription: Test\ndisallowedTools: Write, Edit\nmodel: haiku\n---\nBody\n';
+  const WITHOUT_LIST = '---\nname: x\ndescription: Test\nmodel: sonnet\n---\nBody\n';
+
+  const REPLACEMENT_PATTERNS = ['Foo$&bar', 'Foo$`bar', "Foo$'bar", 'Foo$$bar', 'Foo$1bar', '$&', '$`', '$$'];
+
+  test.each(REPLACEMENT_PATTERNS)('keeps the replacement pattern %s literal on an agent with its own list', (token) => {
+    const out = applyExtraDisallowedToolsToMarkdown(WITH_LIST, [token]);
+    expect(out).toBe(`---\nname: x\ndescription: Test\ndisallowedTools: Write, Edit, ${token}\nmodel: haiku\n---\nBody\n`);
+    expect(extractDisallowedTools(out)).toEqual(['Write', 'Edit', token]);
+    expect(frontmatterLines(out)).toHaveLength(frontmatterLines(WITH_LIST).length);
+    expectFrontmatterIntact(WITH_LIST, out);
+  });
+
+  test.each(REPLACEMENT_PATTERNS)('keeps the replacement pattern %s literal on an agent without a list', (token) => {
+    const out = applyExtraDisallowedToolsToMarkdown(WITHOUT_LIST, [token]);
+    expect(out).toBe(`---\nname: x\ndescription: Test\nmodel: sonnet\ndisallowedTools: ${token}\n---\nBody\n`);
+    expectFrontmatterIntact(WITHOUT_LIST, out);
+  });
+
+  test('a value that tries to add a model line through a replacement pattern changes nothing', () => {
+    const extra = getExtraDisallowedTools({ [EXTRA_DISALLOWED_TOOLS_ENV]: 'Foo$`model: opus' });
+    expect(applyExtraDisallowedToolsToMarkdown(WITH_LIST, extra)).toBe(WITH_LIST);
+    const ampersand = getExtraDisallowedTools({ [EXTRA_DISALLOWED_TOOLS_ENV]: 'Foo$&\nmodel: opus' });
+    expect(applyExtraDisallowedToolsToMarkdown(WITH_LIST, ampersand)).toBe(WITH_LIST);
+  });
+
+  test.each([
+    ['a line feed', 'x\nmodel: opus'],
+    ['a carriage return and line feed', 'x\r\nmodel: opus'],
+    ['U+0085', 'x\u0085model: opus'],
+    ['U+2028', 'x\u2028model: opus'],
+    ['U+2029', 'x\u2029model: opus'],
+    ['a colon and a space', 'a: b'],
+    ['a hash after a space', 'x #y'],
+    ['quotes around the token', '"quoted"'],
+    ['a document separator', '---'],
+    ['a document separator in a model line', 'x\n---\nmodel: opus'],
+  ])('skips a token with %s and keeps the agent file unchanged', (_name, token) => {
+    expect(applyExtraDisallowedToolsToMarkdown(WITH_LIST, [token])).toBe(WITH_LIST);
+    expect(applyExtraDisallowedToolsToMarkdown(WITHOUT_LIST, [token])).toBe(WITHOUT_LIST);
+  });
+
+  test('skips the unusable tokens and still applies the usable ones', () => {
+    const out = applyExtraDisallowedToolsToMarkdown(WITH_LIST, ['a: b', 'Good', '#c', 'mcp__x__*']);
+    expect(extractDisallowedTools(out)).toEqual(['Write', 'Edit', 'Good', 'mcp__x__*']);
+    expectFrontmatterIntact(WITH_LIST, out);
+  });
+
+  test('handles a 10 000 character token', () => {
+    const token = 'T'.repeat(10000);
+    const out = applyExtraDisallowedToolsToMarkdown(WITH_LIST, [token]);
+    expect(extractDisallowedTools(out)).toEqual(['Write', 'Edit', token]);
+    expectFrontmatterIntact(WITH_LIST, out);
+  });
+
+  test('every desktop preset token and a custom pattern keep the frontmatter valid for every bundled agent', () => {
+    const tokens = [...DESKTOP_PATTERNS, 'mcp__custom__*', 'Bash(git push:*)'];
+    for (const token of tokens) expect(isPlainYamlToken(token)).toBe(true);
+    for (const agent of AGENTS) {
+      const original = readFileSync(join(AGENTS_DIR, `${agent}.md`), 'utf-8');
+      const out = applyExtraDisallowedToolsToMarkdown(original, tokens);
+      expect(extractDisallowedTools(out)).toEqual([...(extractDisallowedTools(original) ?? []), ...tokens]);
+      expectFrontmatterIntact(original, out);
+    }
+  });
+
+  test('every skipped token leaves every bundled agent file unchanged', () => {
+    const skipped = ['a: b', 'x #y', '*alias', '*', '!tag', '@x', '%x', '`x', '- x', '? x', '{x}', '[a]', '|', '>', '&a', 'null', '123', 'a\u2028b'];
+    for (const token of skipped) expect(isPlainYamlToken(token)).toBe(false);
+    for (const agent of AGENTS) {
+      const original = readFileSync(join(AGENTS_DIR, `${agent}.md`), 'utf-8');
+      expect(applyExtraDisallowedToolsToMarkdown(original, skipped)).toBe(original);
+    }
+  });
+
+  test('a hostile token never changes the other frontmatter keys of any bundled agent', () => {
+    const hostile = [...REPLACEMENT_PATTERNS, 'T'.repeat(10000), 'a"b', "a'b", 'mcp__*__x*', 'a\tb'];
+    for (const agent of AGENTS) {
+      const original = readFileSync(join(AGENTS_DIR, `${agent}.md`), 'utf-8');
+      for (const token of hostile) {
+        const out = applyExtraDisallowedToolsToMarkdown(original, [token]);
+        expect(extractDisallowedTools(out)).toEqual([...(extractDisallowedTools(original) ?? []), token]);
+        expect(frontmatterLines(out)).toHaveLength(frontmatterLines(original).length + (extractDisallowedTools(original) ? 0 : 1));
+        expectFrontmatterIntact(original, out);
+      }
+    }
+  });
+
+  test.each([
+    ['an empty key', '---\nname: x\ndisallowedTools:\n---\nBody\n'],
+    ['a block list', '---\nname: x\ndisallowedTools:\n  - Write\n  - Edit\n---\nBody\n'],
+    ['a flow list', '---\nname: x\ndisallowedTools: [Write, Edit]\n---\nBody\n'],
+    ['a trailing comment', '---\nname: x\ndisallowedTools: Write, Edit # read-only\n---\nBody\n'],
+    ['CRLF with a flow list', '---\r\nname: x\r\ndisallowedTools: [Write]\r\n---\r\nBody\r\n'],
+  ])('returns the content unchanged when the existing entry is %s', (_name, content) => {
+    expect(applyExtraDisallowedToolsToMarkdown(content, ['Foo', 'mcp__x__*'])).toBe(content);
+  });
+
+  test('still rewrites a quoted existing list as plain text', () => {
+    const out = applyExtraDisallowedToolsToMarkdown('---\nname: x\ndisallowedTools: "Write, Edit"\n---\nBody\n', ['Foo']);
+    expect(out).toBe('---\nname: x\ndisallowedTools: Write, Edit, Foo\n---\nBody\n');
   });
 });
 
@@ -278,5 +459,100 @@ describe('legacy agent install with OMC_AGENT_EXTRA_DISALLOWED_TOOLS', () => {
       expect(copy).toBe(applyExtraDisallowedToolsToMarkdown(original, DESKTOP_PATTERNS));
       expect(extractDisallowedTools(copy)).toEqual([...(extractDisallowedTools(original) ?? []), ...DESKTOP_PATTERNS]);
     }
+  });
+
+  test('a token that is not a plain YAML value is skipped with one log line naming it, the rest is applied', async () => {
+    const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+    try {
+      const claudeConfigDir = join(tempRoot, 'home', '.claude');
+      process.env.CLAUDE_CONFIG_DIR = claudeConfigDir;
+      process.env.HOME = join(tempRoot, 'home');
+      vi.stubEnv(EXTRA_DISALLOWED_TOOLS_ENV, 'Good, a: b, mcp__server__*, Foo$`model: opus, x #y');
+      vi.resetModules();
+      const installer = await import('../installer/index.js');
+      const result = installer.install({ skipClaudeCheck: true, skipHud: true, force: true, verbose: true });
+      expect(result.success, `${result.message}\n${result.errors.join('\n')}`).toBe(true);
+
+      const warnings = logSpy.mock.calls
+        .map((call) => String(call[0]))
+        .filter((line) => line.includes('Skipping extra disallowed tool'));
+      expect(warnings).toHaveLength(3);
+      expect(warnings.some((line) => line.includes('"a: b"'))).toBe(true);
+      expect(warnings.some((line) => line.includes('"Foo$`model: opus"'))).toBe(true);
+      expect(warnings.some((line) => line.includes('"x #y"'))).toBe(true);
+
+      const installed = join(claudeConfigDir, 'agents');
+      for (const file of readdirSync(AGENTS_DIR).filter((f) => f.endsWith('.md'))) {
+        const original = readFileSync(join(AGENTS_DIR, file), 'utf-8');
+        const copy = readFileSync(join(installed, file), 'utf-8');
+        expect(extractDisallowedTools(copy)).toEqual([...(extractDisallowedTools(original) ?? []), 'Good', 'mcp__server__*']);
+        expectFrontmatterIntact(original, copy);
+      }
+    } finally {
+      logSpy.mockRestore();
+    }
+  });
+
+  test('a value that tries to inject a model line leaves every installed agent file as the bundled one', async () => {
+    const installed = await installAgents('Foo$`model: opus');
+    for (const file of readdirSync(AGENTS_DIR).filter((f) => f.endsWith('.md'))) {
+      expect(readFileSync(join(installed, file), 'utf-8')).toBe(readFileSync(join(AGENTS_DIR, file), 'utf-8'));
+    }
+  });
+});
+
+describe('agent cleanup with a copy that has the extra tools', () => {
+  let tempDir: string;
+  let originalConfigDir: string | undefined;
+  const log = vi.fn();
+  const extra = [...DESKTOP_PATTERNS];
+
+  function historical(fixturePath: string): string {
+    return readFileSync(
+      join(process.cwd(), 'src', 'installer', '__tests__', 'fixtures', 'historical-agents', fixturePath),
+      'utf-8',
+    );
+  }
+
+  beforeEach(() => {
+    tempDir = mkdtempSync(join(tmpdir(), 'omc-agent-extra-cleanup-'));
+    originalConfigDir = process.env.CLAUDE_CONFIG_DIR;
+    process.env.CLAUDE_CONFIG_DIR = tempDir;
+    log.mockClear();
+  });
+
+  afterEach(() => {
+    if (originalConfigDir === undefined) delete process.env.CLAUDE_CONFIG_DIR;
+    else process.env.CLAUDE_CONFIG_DIR = originalConfigDir;
+    rmSync(tempDir, { recursive: true, force: true });
+    vi.resetModules();
+  });
+
+  test('prunePluginDuplicateAgents removes an unchanged copy and keeps the copy with the extra tools', async () => {
+    vi.resetModules();
+    const { prunePluginDuplicateAgents, AGENTS_DIR: agentsDir } = await import('../installer/index.js');
+    mkdirSync(agentsDir, { recursive: true });
+    writeFileSync(join(agentsDir, 'architect.md'), historical('v4.5.0/architect.md'));
+    const analyst = applyExtraDisallowedToolsToMarkdown(historical('v4.4.0/analyst.md'), extra);
+    expect(analyst).not.toBe(historical('v4.4.0/analyst.md'));
+    writeFileSync(join(agentsDir, 'analyst.md'), analyst);
+
+    expect(prunePluginDuplicateAgents(log)).toEqual(['architect.md']);
+    expect(existsSync(join(agentsDir, 'architect.md'))).toBe(false);
+    expect(readFileSync(join(agentsDir, 'analyst.md'), 'utf-8')).toBe(analyst);
+  });
+
+  test('cleanupStaleAgents removes an unchanged stale agent and keeps the copy with the extra tools', async () => {
+    vi.resetModules();
+    const { cleanupStaleAgents, AGENTS_DIR: agentsDir } = await import('../installer/index.js');
+    mkdirSync(agentsDir, { recursive: true });
+    writeFileSync(join(agentsDir, 'build-fixer.md'), historical('build-fixer.md'));
+    const deepExecutor = applyExtraDisallowedToolsToMarkdown(historical('deep-executor.md'), extra);
+    expect(deepExecutor).not.toBe(historical('deep-executor.md'));
+    writeFileSync(join(agentsDir, 'deep-executor.md'), deepExecutor);
+
+    expect(cleanupStaleAgents(log)).toEqual(['build-fixer.md']);
+    expect(existsSync(join(agentsDir, 'build-fixer.md'))).toBe(false);
+    expect(readFileSync(join(agentsDir, 'deep-executor.md'), 'utf-8')).toBe(deepExecutor);
   });
 });
