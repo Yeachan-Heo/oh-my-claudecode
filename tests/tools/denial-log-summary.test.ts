@@ -1,6 +1,6 @@
 import { afterAll, describe, expect, it } from 'vitest';
 import { spawnSync } from 'node:child_process';
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -18,7 +18,7 @@ import {
 // Tests for tools/diagnostics/denial_log_summary.mjs on synthetic journals (temp directory only, no network).
 const SCRIPT = join(fileURLToPath(new URL('.', import.meta.url)), '..', '..', 'tools', 'diagnostics', 'denial_log_summary.mjs');
 
-const dir = mkdtempSync(join(tmpdir(), 'denial-log-summary-'));
+const dir = realpathSync(mkdtempSync(join(tmpdir(), 'denial-log-summary-')));
 afterAll(() => rmSync(dir, { recursive: true, force: true }));
 
 let counter = 0;
@@ -63,8 +63,8 @@ function writeJournal(name: string, rows: Array<Row | string>): string {
   return file;
 }
 
-function run(args: string[], env: Record<string, string> = {}) {
-  const r = spawnSync(process.execPath, [SCRIPT, ...args], { encoding: 'utf8', env: { ...process.env, HOME: dir, OMC_JEV_LOG_DIR: '', ...env } });
+function run(args: string[], env: Record<string, string> = {}, cwd: string = dir) {
+  const r = spawnSync(process.execPath, [SCRIPT, ...args], { encoding: 'utf8', cwd, env: { ...process.env, HOME: dir, OMC_JEV_LOG_DIR: '', ...env } });
   return { status: r.status, stdout: r.stdout, stderr: r.stderr };
 }
 
@@ -330,6 +330,28 @@ describe('denial_log_summary.mjs command line', () => {
     expect(r.stdout).toContain('files: 1, rows: 1');
   });
 
+  it('without OMC_JEV_LOG_DIR defaults to .omc/state/jev under the current directory', () => {
+    writeJournal('cli/cwd/proj/.omc/state/jev/denials.jsonl', [decision({ key: 'c1c1c1c1c1c1c1c1' })]);
+    const r = run([], {}, join(dir, 'cli/cwd/proj'));
+    expect(r.status).toBe(0);
+    expect(r.stdout).toContain('files: 1, rows: 1');
+  });
+
+  it('OMC_JEV_LOG_DIR wins over .omc/state/jev under the current directory', () => {
+    writeJournal('cli/cwdwin/proj/.omc/state/jev/denials.jsonl', [decision({ key: 'd1d1d1d1d1d1d1d1' })]);
+    writeJournal('cli/cwdwin/env/denials.jsonl', [decision({ key: 'd2d2d2d2d2d2d2d2' }), decision({ key: 'd3d3d3d3d3d3d3d3' })]);
+    const r = run([], { OMC_JEV_LOG_DIR: join(dir, 'cli/cwdwin/env') }, join(dir, 'cli/cwdwin/proj'));
+    expect(r.status).toBe(0);
+    expect(r.stdout).toContain('files: 1, rows: 2');
+  });
+
+  it('does not read ~/.omc/state/jev any more', () => {
+    writeJournal('.omc/state/jev/denials.jsonl', [decision({ key: 'e1e1e1e1e1e1e1e1' })]);
+    mkdirSync(join(dir, 'cli/nohome'), { recursive: true });
+    const r = run([], {}, join(dir, 'cli/nohome'));
+    expect(r.status).toBe(2);
+  });
+
   it('warns on stderr for a file given with --file that does not exist, without changing the summary or the exit code', () => {
     const existing = writeJournal('cli/warn/denials.jsonl', [decision({ key: 'abababababababab' })]);
     const missing = join(dir, 'cli/warn/typo.jsonl');
@@ -356,5 +378,6 @@ describe('denial_log_summary.mjs command line', () => {
     const r = run(['--help']);
     expect(r.status).toBe(0);
     expect(r.stdout).toContain('usage: node denial_log_summary.mjs');
+    expect(r.stdout).toContain('OMC_STATE_DIR');
   });
 });

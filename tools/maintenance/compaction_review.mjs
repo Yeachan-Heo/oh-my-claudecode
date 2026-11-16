@@ -5,7 +5,8 @@
 //   node compaction_review.mjs --from <time> [--log <compaction.jsonl>] [--projects <dir>] [--json] [--full]
 //
 // --from      start of the record window (required; local time, for example 2026-01-01T10:00:00, or ISO with Z)
-// --log       compaction journal (default $OMC_JEV_LOG_DIR/compaction.jsonl or ~/.omc/state/jev/compaction.jsonl)
+// --log       compaction journal (default $OMC_JEV_LOG_DIR/compaction.jsonl, else .omc/state/jev/compaction.jsonl under the
+//             current directory; with OMC_STATE_DIR set, pass --log or set OMC_JEV_LOG_DIR)
 // --projects  transcripts directory (default $CLAUDE_CONFIG_DIR/projects or ~/.claude/projects)
 // --json      also print the result as one JSON line
 // --full      print every file (by default only files with a record or with an error after the boundary; the rest is in the sums)
@@ -26,7 +27,9 @@ import { existsSync, readFileSync, readdirSync, statSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 
-const USAGE = 'usage: node compaction_review.mjs --from <time> [--log <compaction.jsonl>] [--projects <dir>] [--json] [--full]';
+const USAGE = 'usage: node compaction_review.mjs --from <time> [--log <compaction.jsonl>] [--projects <dir>] [--json] [--full]\n'
+  + 'default journal: $OMC_JEV_LOG_DIR/compaction.jsonl, else .omc/state/jev/compaction.jsonl under the current directory;\n'
+  + 'with OMC_STATE_DIR set, pass --log or set OMC_JEV_LOG_DIR';
 
 function parseArgs(argv) {
   const opts = { from: null, log: null, projects: null, json: false, full: false };
@@ -48,7 +51,7 @@ const opts = parseArgs(process.argv.slice(2));
 if (opts.from === null) { console.error(`--from is required\n${USAGE}`); process.exit(2); }
 const from = Date.parse(opts.from);
 if (!Number.isFinite(from)) { console.error(`bad time for --from: ${opts.from}`); process.exit(2); }
-const logFile = opts.log || join(process.env.OMC_JEV_LOG_DIR || join(homedir(), '.omc', 'state', 'jev'), 'compaction.jsonl');
+const logFile = opts.log || join(process.env.OMC_JEV_LOG_DIR || join(process.cwd(), '.omc', 'state', 'jev'), 'compaction.jsonl');
 const projects = opts.projects || join(process.env.CLAUDE_CONFIG_DIR || join(homedir(), '.claude'), 'projects');
 if (!existsSync(logFile)) { console.error(`missing journal: ${logFile}`); process.exit(2); }
 if (!existsSync(projects)) { console.error(`missing transcripts directory: ${projects}`); process.exit(2); }

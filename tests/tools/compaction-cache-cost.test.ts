@@ -2,7 +2,7 @@
 // The script runs with python3 -I through spawnSync; prices come from a --prices file written by the test.
 import { describe, expect, it } from 'vitest';
 import { spawnSync } from 'node:child_process';
-import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync, statSync, utimesSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, realpathSync, rmSync, statSync, utimesSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -900,5 +900,72 @@ describe('compaction_cache_cost', () => {
     } finally {
       rmSync(c.dir, { recursive: true, force: true });
     }
+  });
+});
+
+describe('default journal path', () => {
+  const journalRow = JSON.stringify({ ts: '2026-11-14T09:05:00Z', event: 'compact', session_id: 'S', agent_id: null, trigger: 'plugin', result: 'jev' });
+
+  function runDefault(cwd, extraEnv) {
+    const env = { ...process.env, ...extraEnv };
+    if (!extraEnv.OMC_JEV_LOG_DIR) delete env.OMC_JEV_LOG_DIR;
+    const transcript = join(cwd, 'transcript.jsonl');
+    writeFileSync(transcript, '');
+    return spawnSync('python3', ['-I', SCRIPT, '--transcript', transcript, '--deployed-at', DEPLOYED_AT, '--to', TO, '--json'], { encoding: 'utf8', cwd, env });
+  }
+
+  function projectWithJournal(root, name) {
+    const cwd = join(root, name);
+    const logDir = join(cwd, '.omc', 'state', 'jev');
+    mkdirSync(logDir, { recursive: true });
+    writeFileSync(join(logDir, 'compaction.jsonl'), journalRow + '\n');
+    return { cwd, journal: join(logDir, 'compaction.jsonl') };
+  }
+
+  it('without OMC_JEV_LOG_DIR reads .omc/state/jev/compaction.jsonl under the current directory', () => {
+    const root = realpathSync(mkdtempSync(join(tmpdir(), 'test-default-journal-')));
+    try {
+      const { cwd, journal } = projectWithJournal(root, 'proj');
+      const proc = runDefault(cwd, {});
+      expect(proc.status, proc.stderr).toBe(0);
+      expect(JSON.stringify(JSON.parse(proc.stdout))).toContain(JSON.stringify(journal).slice(1, -1));
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it('OMC_JEV_LOG_DIR wins over .omc/state/jev under the current directory', () => {
+    const root = realpathSync(mkdtempSync(join(tmpdir(), 'test-default-journal-')));
+    try {
+      const { cwd, journal } = projectWithJournal(root, 'proj');
+      const envDir = join(root, 'env-dir');
+      mkdirSync(envDir);
+      const envJournal = join(envDir, 'compaction.jsonl');
+      writeFileSync(envJournal, journalRow + '\n');
+      const proc = runDefault(cwd, { OMC_JEV_LOG_DIR: envDir });
+      expect(proc.status, proc.stderr).toBe(0);
+      const text = JSON.stringify(JSON.parse(proc.stdout));
+      expect(text).toContain(JSON.stringify(envJournal).slice(1, -1));
+      expect(text).not.toContain(JSON.stringify(journal).slice(1, -1));
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it('without OMC_JEV_LOG_DIR and without a journal under the current directory exits 2', () => {
+    const root = realpathSync(mkdtempSync(join(tmpdir(), 'test-default-journal-')));
+    try {
+      const proc = runDefault(root, {});
+      expect(proc.status).toBe(2);
+      expect(proc.stderr).toContain(join(root, '.omc', 'state', 'jev', 'compaction.jsonl'));
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it('--help names the default journal and the OMC_STATE_DIR case', () => {
+    const proc = spawnSync('python3', ['-I', SCRIPT, '--help'], { encoding: 'utf8' });
+    expect(proc.status).toBe(0);
+    expect(proc.stdout.replace(/\s+/g, ' ')).toContain('OMC_STATE_DIR');
   });
 });

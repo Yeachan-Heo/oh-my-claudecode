@@ -444,8 +444,10 @@ behaviour, has no switch, is not run by any hook, and is not shipped in the npm 
 - `python3` (standard library only). Run it in isolated mode with `python3 -I`.
 - The transcripts and the journal are only read. The only file written is the `--out` file, if given
   (a new file with mode `0600`; an existing file is an error).
-- The journal is read from `OMC_JEV_LOG_DIR` or `~/.omc/state/jev` unless `--compact` is given. The
-  projects directory defaults to `$CLAUDE_CONFIG_DIR/projects` or `~/.claude/projects`.
+- The journal is read from `OMC_JEV_LOG_DIR`, else from `.omc/state/jev` under the current directory (run the tool from
+  the project root), unless `--compact` is given. With `OMC_STATE_DIR` set, the Jev log directory has a project identifier
+  in its path, so pass the journal with `--compact` (or set `OMC_JEV_LOG_DIR`). The projects directory defaults to
+  `$CLAUDE_CONFIG_DIR/projects` or `~/.claude/projects`.
 
 ```
 python3 -I tools/diagnostics/compaction_window_drops.py [--projects <dir>] [--days 7] [--json]
@@ -486,7 +488,7 @@ python3 -I tools/diagnostics/compaction_ask_probe.py [--projects <dir>] [--days 
 
 | Option | Meaning |
 |---|---|
-| `--projects <dir>`, `--transcript <file>`, `--compact <file>` | inputs, as for the window drops tool |
+| `--projects <dir>`, `--transcript <file>`, `--compact <file>` | inputs, as for the window drops tool (including the default journal: `OMC_JEV_LOG_DIR`, else `.omc/state/jev` under the current directory; with `OMC_STATE_DIR` set, pass `--compact` or set `OMC_JEV_LOG_DIR`) |
 | `--to <ISO>`, `--days N` | the period end (default: now, UTC) and its length in days (default 7) |
 | `--ask-loss-threshold X` | the threshold the upper Wilson bound is compared with (default 0.05) |
 | `--details` | add the list of units (without ask contents) |
@@ -526,7 +528,7 @@ python3 -I tools/diagnostics/compaction_cache_cost.py --deployed-at 2026-01-01T0
 |---|---|
 | `--deployed-at <ISO>` | required: the time the compaction module was deployed; cache loss sessions are split by the time of their first call |
 | `--prices <file>` | the explicit price table described above |
-| `--projects <dir>`, `--transcript <file>`, `--compact <file>` | inputs, as for the window drops tool |
+| `--projects <dir>`, `--transcript <file>`, `--compact <file>` | inputs, as for the window drops tool (including the default journal: `OMC_JEV_LOG_DIR`, else `.omc/state/jev` under the current directory; with `OMC_STATE_DIR` set, pass `--compact` or set `OMC_JEV_LOG_DIR`) |
 | `--to <ISO>`, `--days N` | the period end (default: now, UTC) and its length in days (default 7) |
 | `--details` | add the segment hit rates and the units to the report |
 | `--json`, `--out <file>` | the result as JSON, and the file to write it to |
@@ -553,7 +555,7 @@ node tools/diagnostics/denial_log_summary.mjs [--file <path>]... [--dir <dir>] [
 | `--dir <dir>` | a directory: reads `denials.jsonl` and its rotated parts (`denials-YYYYMMDD-HHMMSS.jsonl`, `denials-YYYYMMDD-HHMMSS-<pid>.jsonl`) |
 | `--json` | JSON output |
 
-With no `--file` and no `--dir` it also reads the directory `$OMC_JEV_LOG_DIR`, else `~/.omc/state/jev`. Exit codes: `0` summary printed, `2` no journal file found.
+With no `--file` and no `--dir` it also reads the directory `$OMC_JEV_LOG_DIR`, else `.omc/state/jev` under the current directory (run the tool from the project root). With `OMC_STATE_DIR` set, the Jev log directory has a project identifier in its path, so pass the directory with `--dir` (or set `OMC_JEV_LOG_DIR`). Exit codes: `0` summary printed, `2` no journal file found.
 
 ## What is counted
 

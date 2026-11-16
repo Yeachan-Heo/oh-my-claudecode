@@ -6,6 +6,9 @@ rates of the first and last human ask (head_lost, ask_lost), empty calls after a
 canaries. It never prints ask or state contents, only numbers, levels and identifiers.
 Usage: python3 -I compaction_ask_probe.py [--projects <dir>] [--transcript <file>]...
     [--compact <file>] [--to <ISO-8601-UTC>] [--days <N>] [--details] [--json] [--out <file>]
+Without --compact the journal is compaction.jsonl in $OMC_JEV_LOG_DIR, else in .omc/state/jev under the
+current directory (run the tool from the project root). With OMC_STATE_DIR set, the Jev log directory has a
+project identifier in its path: pass the file with --compact or set OMC_JEV_LOG_DIR.
 
 RULE (written before the measurement; do not change after seeing the results):
 - A unit = a compaction boundary (a system/compact_boundary row with a timestamp in the period
@@ -481,10 +484,10 @@ def read_journal(path, from_e, to_e):
 
 
 def default_compact_path():
-    """Default journal path: OMC_JEV_LOG_DIR or ~/.omc/state/jev, file compaction.jsonl."""
+    """Default journal path: OMC_JEV_LOG_DIR, else .omc/state/jev under the current directory, file compaction.jsonl."""
     base = os.environ.get("OMC_JEV_LOG_DIR")
     if not base:
-        base = os.path.join(os.path.expanduser("~"), ".omc", "state", "jev")
+        base = os.path.join(os.getcwd(), ".omc", "state", "jev")
     return os.path.join(base, "compaction.jsonl")
 
 
@@ -779,7 +782,7 @@ def main(argv=None):
     parser = argparse.ArgumentParser(description="ask-probe: the first and last human ask after a compaction.", allow_abbrev=False)
     parser.add_argument("--projects", default=default_projects_dir(), help="the projects directory with transcripts")
     parser.add_argument("--transcript", action="append", default=None, help="a transcript file (repeatable; instead of scanning)")
-    parser.add_argument("--compact", default=default_compact_path(), help="the compaction journal (compaction.jsonl)")
+    parser.add_argument("--compact", default=default_compact_path(), help="the compaction journal (default: compaction.jsonl in $OMC_JEV_LOG_DIR, else in .omc/state/jev under the current directory; with OMC_STATE_DIR set, pass the file or set OMC_JEV_LOG_DIR)")
     parser.add_argument("--to", default=None, help="period end, ISO 8601 UTC (defaults to now)")
     parser.add_argument("--days", type=int, default=7, help="period length in days (default 7)")
     parser.add_argument("--ask-loss-threshold", type=float, default=0.05, help="the ask-loss Wilson bound threshold (default 0.05)")

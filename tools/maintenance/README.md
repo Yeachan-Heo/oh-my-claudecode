@@ -111,7 +111,7 @@ node tools/maintenance/compaction_review.mjs --from <time> [--log <compaction.js
 | Option | Meaning |
 |---|---|
 | `--from <time>` | start of the record window (required): local time such as `2026-01-01T10:00:00`, or ISO with `Z` |
-| `--log <file>` | compaction journal (default `$OMC_JEV_LOG_DIR/compaction.jsonl`, else `~/.omc/state/jev/compaction.jsonl`) |
+| `--log <file>` | compaction journal (default `$OMC_JEV_LOG_DIR/compaction.jsonl`, else `.omc/state/jev/compaction.jsonl` under the current directory, so run the tool from the project root; with `OMC_STATE_DIR` set, the Jev log directory has a project identifier in its path, so pass `--log` explicitly or set `OMC_JEV_LOG_DIR`) |
 | `--projects <dir>` | transcripts directory (default `$CLAUDE_CONFIG_DIR/projects`, else `~/.claude/projects`) |
 | `--json` | also print the result as one JSON line |
 | `--full` | print every file; by default only files with a record or with an error after the boundary (the rest is in the sums) |

@@ -6,6 +6,9 @@ Usage:
       [--compact <compaction.jsonl>] [--to ISO] [--days N] [--min-drop-tokens N] [--min-drop-percent N]
       [--tolerance-s S] [--json] [--out FILE]
 Standard library only; isolated mode (-I); input is read-only.
+Without --compact the journal is compaction.jsonl in $OMC_JEV_LOG_DIR, else in .omc/state/jev under the
+current directory (run the tool from the project root). With OMC_STATE_DIR set, the Jev log directory has a
+project identifier in its path: pass the file with --compact or set OMC_JEV_LOG_DIR.
 
 Input: session transcript JSONL files (main files `<projects>/<dir>/<id>.jsonl` and subagents
 `<projects>/<dir>/<id>/subagents/agent-*.jsonl`; `agent-*.meta.json` files are skipped) plus the
@@ -250,10 +253,10 @@ def load_journal(path):
             result["after_without_compact"] += 1
     return result
 def default_compact_path():
-    """Default journal path: OMC_JEV_LOG_DIR or ~/.omc/state/jev, file compaction.jsonl."""
+    """Default journal path: OMC_JEV_LOG_DIR, else .omc/state/jev under the current directory, file compaction.jsonl."""
     base = os.environ.get("OMC_JEV_LOG_DIR")
     if not base:
-        base = os.path.join(os.path.expanduser("~"), ".omc", "state", "jev")
+        base = os.path.join(os.getcwd(), ".omc", "state", "jev")
     return os.path.join(base, "compaction.jsonl")
 
 
@@ -842,7 +845,7 @@ def parse_args(argv):
     )
     parser.add_argument("--projects", default=default_projects_dir(), help="the projects directory with transcripts")
     parser.add_argument("--transcript", action="append", default=None, help="a transcript file (repeatable; instead of scanning)")
-    parser.add_argument("--compact", default=default_compact_path(), help="the compaction journal (compaction.jsonl)")
+    parser.add_argument("--compact", default=default_compact_path(), help="the compaction journal (default: compaction.jsonl in $OMC_JEV_LOG_DIR, else in .omc/state/jev under the current directory; with OMC_STATE_DIR set, pass the file or set OMC_JEV_LOG_DIR)")
     parser.add_argument("--to", default=None, help="period end (ISO 8601; defaults to now UTC)")
     parser.add_argument("--days", type=int, default=7, help="period length in days (default 7)")
     parser.add_argument("--min-drop-tokens", type=int, default=10000, help="drop threshold in tokens (default 10000)")

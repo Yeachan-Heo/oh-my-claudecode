@@ -1,6 +1,6 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { spawnSync } from 'node:child_process';
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { copyFileSync, mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -8,7 +8,7 @@ import { fileURLToPath } from 'node:url';
 const REPO = join(fileURLToPath(import.meta.url), '..', '..', '..');
 const SCRIPT = join(REPO, 'tools', 'maintenance', 'compaction_review.mjs');
 
-const root = mkdtempSync(join(tmpdir(), 'compaction-review-test-'));
+const root = realpathSync(mkdtempSync(join(tmpdir(), 'compaction-review-test-')));
 const logDir = join(root, 'jev');
 const projects = join(root, 'projects');
 afterAll(() => rmSync(root, { recursive: true, force: true }));
@@ -52,8 +52,8 @@ beforeAll(() => {
   ]));
 });
 
-function run(args: string[], env: Record<string, string> = {}) {
-  const r = spawnSync(process.execPath, [SCRIPT, ...args], { encoding: 'utf8', env: { ...process.env, HOME: root, OMC_JEV_LOG_DIR: '', CLAUDE_CONFIG_DIR: '', ...env } });
+function run(args: string[], env: Record<string, string> = {}, cwd: string = root) {
+  const r = spawnSync(process.execPath, [SCRIPT, ...args], { encoding: 'utf8', cwd, env: { ...process.env, HOME: root, OMC_JEV_LOG_DIR: '', CLAUDE_CONFIG_DIR: '', ...env } });
   return { status: r.status, out: r.stdout + r.stderr, stdout: r.stdout };
 }
 const base = ['--from', '2026-01-01T00:00:00Z', '--log', join(logDir, 'compaction.jsonl'), '--projects', projects];
@@ -123,11 +123,36 @@ describe('compaction_review.mjs', () => {
     expect(r.stdout).toContain('transcript files: 0');
   });
 
+  it('without OMC_JEV_LOG_DIR defaults the journal to .omc/state/jev/compaction.jsonl under the current directory', () => {
+    const cwd = join(root, 'cwd-default');
+    const emptyProjects = join(root, 'cwd-default-projects');
+    mkdirSync(emptyProjects);
+    const projectLogDir = join(cwd, '.omc', 'state', 'jev');
+    mkdirSync(projectLogDir, { recursive: true });
+    copyFileSync(join(logDir, 'compaction.jsonl'), join(projectLogDir, 'compaction.jsonl'));
+    const r = run(['--from', '2026-01-01T00:00:00Z', '--projects', emptyProjects], {}, cwd);
+    expect(r.status, r.out).toBe(0);
+    expect(r.stdout).toContain(`journal: ${join(projectLogDir, 'compaction.jsonl')}`);
+    expect(r.stdout).toContain('records: 2');
+  });
+
+  it('OMC_JEV_LOG_DIR wins over .omc/state/jev under the current directory', () => {
+    const cwd = join(root, 'cwd-env-wins');
+    const emptyProjects = join(root, 'cwd-env-wins-projects');
+    mkdirSync(emptyProjects);
+    mkdirSync(join(cwd, '.omc', 'state', 'jev'), { recursive: true });
+    const r = run(['--from', '2026-01-01T00:00:00Z', '--projects', emptyProjects], { OMC_JEV_LOG_DIR: logDir }, cwd);
+    expect(r.status, r.out).toBe(0);
+    expect(r.stdout).toContain(`journal: ${join(logDir, 'compaction.jsonl')}`);
+  });
+
   it('input errors exit 2: missing journal, missing transcripts directory, unknown option, missing value', () => {
     expect(run(['--from', '2026-01-01', '--log', join(root, 'none.jsonl'), '--projects', projects]).status).toBe(2);
     expect(run(['--from', '2026-01-01', '--log', join(logDir, 'compaction.jsonl'), '--projects', join(root, 'none')]).status).toBe(2);
     expect(run([...base, '--bogus']).status).toBe(2);
     expect(run([...base, '--log']).status).toBe(2);
-    expect(run(['--help']).status).toBe(0);
+    const help = run(['--help']);
+    expect(help.status).toBe(0);
+    expect(help.stdout).toContain('OMC_STATE_DIR');
   });
 });
