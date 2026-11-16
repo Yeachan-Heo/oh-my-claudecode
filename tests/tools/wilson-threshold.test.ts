@@ -276,7 +276,7 @@ describe('wilson_threshold', () => {
       ['1', '2026-11-01T10:00:00Z'],
       ['0', '2026-11-03T10:00:00Z'],
       ['1', ''],
-      ['zla', '2026-11-05T10:00:00Z'],
+      ['bad', '2026-11-05T10:00:00Z'],
     ]);
     const report = run(text, { target: 0.9 });
     const g = report.groups[0];

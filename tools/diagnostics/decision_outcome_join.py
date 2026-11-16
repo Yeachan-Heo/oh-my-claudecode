@@ -694,8 +694,8 @@ def main():
         else:
             distribution['zero_turns'] += 1
         if tr['requests'] and len(set(tr['families'])) == 1:
-            _st, kwot, _pom = cost_status(tr, prices)
-            single_p1 += kwot
+            _st, amount, _unpriced = cost_status(tr, prices)
+            single_p1 += amount
             single_p2 += cost_as(tr['requests'], tr['families'][0], prices)
             single_n += 1
     distribution['bad_ts'] += applied_bad_ts
