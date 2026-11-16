@@ -333,6 +333,99 @@ export function extractDisallowedTools(content: string): string[] | undefined {
 }
 
 /**
+ * Environment variable that adds tools to every agent's disallowedTools list.
+ * Comma-separated tool names or patterns; unset or empty changes nothing.
+ */
+export const EXTRA_DISALLOWED_TOOLS_ENV = 'OMC_AGENT_EXTRA_DISALLOWED_TOOLS';
+
+/**
+ * Tool names and patterns the `desktop` preset expands to: the desktop app's
+ * artifact tools and its turn, session, visualize and browser tool families.
+ */
+export const DESKTOP_APP_DISALLOWED_TOOLS: readonly string[] = [
+  'Artifact',
+  'ArtifactComments',
+  'ArtifactData',
+  'ArtifactCheck',
+  'mcp__ccd_turn__*',
+  'mcp__ccd_session__*',
+  'mcp__visualize__*',
+  'mcp__Claude_Browser__*',
+];
+
+/**
+ * Read the extra disallowed tools from OMC_AGENT_EXTRA_DISALLOWED_TOOLS.
+ * Tokens are trimmed, empty tokens and tokens containing a line break are
+ * ignored, `desktop` (any case) expands to DESKTOP_APP_DISALLOWED_TOOLS, and
+ * duplicates are removed keeping the first occurrence.
+ */
+export function getExtraDisallowedTools(env: NodeJS.ProcessEnv = process.env): string[] {
+  const raw = env[EXTRA_DISALLOWED_TOOLS_ENV];
+  if (!raw) return [];
+
+  const tokens: string[] = [];
+  for (const part of raw.split(',')) {
+    const token = part.trim();
+    if (!token || /[\r\n]/.test(token)) continue;
+    if (token.toLowerCase() === 'desktop') {
+      tokens.push(...DESKTOP_APP_DISALLOWED_TOOLS);
+    } else {
+      tokens.push(token);
+    }
+  }
+  return [...new Set(tokens)];
+}
+
+/**
+ * Append extra tools to an agent's own disallowedTools list. Entries of the
+ * agent's list are never removed or reordered. With no extra tools the
+ * original value is returned unchanged (including `undefined`).
+ */
+export function mergeDisallowedTools(
+  base: string[] | undefined,
+  extra: readonly string[],
+): string[] | undefined {
+  if (extra.length === 0) return base;
+  const merged = [...(base ?? [])];
+  for (const tool of extra) {
+    if (!merged.includes(tool)) merged.push(tool);
+  }
+  return merged;
+}
+
+/**
+ * Apply extra disallowed tools to agent markdown: append them to the
+ * `disallowedTools:` frontmatter line, or add that line when the agent has
+ * none. Returns the content unchanged when there are no extra tools, no
+ * frontmatter, or the existing list is written in a form this does not rewrite.
+ */
+export function applyExtraDisallowedToolsToMarkdown(
+  content: string,
+  extra: readonly string[],
+): string {
+  if (extra.length === 0) return content;
+
+  const match = content.match(/^(\uFEFF?---)(\r?\n)([\s\S]*?)(\r?\n---)(?=\r?\n|$)/);
+  if (!match) return content;
+
+  const [head, open, newline, yaml, close] = match;
+  const base = extractDisallowedTools(content);
+  const merged = mergeDisallowedTools(base, extra) ?? [];
+  const line = `disallowedTools: ${merged.join(', ')}`;
+
+  let nextYaml: string;
+  if (base === undefined) {
+    nextYaml = `${yaml}${newline}${line}`;
+  } else {
+    const existing = /^disallowedTools:.*$/m;
+    if (!existing.test(yaml)) return content;
+    nextYaml = yaml.replace(existing, line);
+  }
+
+  return `${open}${newline}${nextYaml}${close}${content.slice(head.length)}`;
+}
+
+/**
  * Standard path for open questions file
  */
 export const OPEN_QUESTIONS_PATH = '.omc/plans/open-questions.md';

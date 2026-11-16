@@ -150,6 +150,7 @@ For configurable skill reviews in deep-interview, ralplan, and omc-review, see [
 | `OMC_FREE_MEMORY_THRESHOLD` | `256` | Free memory threshold in MB. Gate blocks operations when free memory falls below this. Zero is valid; empty, malformed, negative, fractional, or unsafe integer values use the default. |
 | `OMC_MAX_SIBLING_SESSIONS` | `8` | Maximum concurrent OMC sessions before gating expensive operations. Zero is valid; empty, malformed, negative, fractional, or unsafe integer values use the default. |
 | `OMC_HOST_LOAD_GATE_DISABLED` | _(unset)_ | Set to any value to disable the host load gate entirely. |
+| `OMC_AGENT_EXTRA_DISALLOWED_TOOLS` | _(unset)_ | Comma-separated tool names or patterns appended to every agent's `disallowedTools` list, for example `mcp__server__*`; the value `desktop` expands to the eight desktop-app patterns. Unset or empty changes nothing. Reaches the SDK agent definitions and the legacy `~/.claude/agents/` copy, not agent files that Claude Code reads from the plugin. See [Extra disallowed tools](#extra-disallowed-tools-omc_agent_extra_disallowed_tools). |
 
 #### Headless factory and AFK settings
 
@@ -418,6 +419,18 @@ Your custom system prompt here...
 ```
 
 Bundled OMC agent prompts currently do **not** ship an `effort:` frontmatter field. Any effort language inside `agents/*.md` is behavioral guidance for the prompt body, while runtime effort inherits from the parent Claude Code session unless the agent markdown explicitly declares an override.
+
+#### Extra disallowed tools (`OMC_AGENT_EXTRA_DISALLOWED_TOOLS`)
+
+Set `OMC_AGENT_EXTRA_DISALLOWED_TOOLS` to a comma-separated list of tool names or patterns to add them to the `disallowedTools` list of every agent. Tokens are trimmed, empty tokens and tokens with a line break are ignored, and duplicates are removed. The extra tokens are appended after the agent's own entries (read-only agents keep `Write, Edit`); the option never removes an entry. The value `desktop` expands to `Artifact`, `ArtifactComments`, `ArtifactData`, `ArtifactCheck`, `mcp__ccd_turn__*`, `mcp__ccd_session__*`, `mcp__visualize__*` and `mcp__Claude_Browser__*`, and can be combined with other tokens, for example `desktop,mcp__server__*`. With the variable unset or empty, no agent definition changes. The agent files in `agents/` are not edited. OMC passes each entry through unchanged; how Claude Code matches a name or a `*` pattern is up to Claude Code.
+
+| Path of an agent definition | Reached |
+| --- | --- |
+| Agent definitions from `getAgentDefinitions` (SDK use, `omc capabilities`, which shows the effective list) | Yes, read on every call |
+| `omc install` or `omc setup` without the plugin, which copy `agents/*.md` to `~/.claude/agents/` | Yes, when the files are written: run it with the variable set and `--force`, because existing files are skipped without `--force`. A copy that differs from the bundled file is treated like any file you edited, so OMC's cleanup of stale and plugin-duplicate agent files, which compares exact bytes, leaves it in place |
+| Plugin install, where Claude Code reads `agents/*.md` from the plugin directory itself | No: no OMC code runs on this path, so the variable has no effect there |
+
+For the plugin path, the effect has to come from the file Claude Code reads. A copy of the agent file in `~/.claude/agents/` with the extra entries on its `disallowedTools:` line (see Agent Customization above) is the way this page documents; which of two agent files with the same name Claude Code uses, and its permission rules, are described in the Claude Code documentation, not here.
 
 ### Project-Level Config
 
