@@ -448,6 +448,7 @@ behaviour, has no switch, is not run by any hook, and is not shipped in the npm 
   the project root), unless `--compact` is given. With `OMC_STATE_DIR` set, the Jev log directory has a project identifier
   in its path, so pass the journal with `--compact` (or set `OMC_JEV_LOG_DIR`). The projects directory defaults to
   `$CLAUDE_CONFIG_DIR/projects` or `~/.claude/projects`.
+  This tool does not resolve the state root (it uses `.omc/state/jev` under the current directory); `denial_log_summary.mjs` and `compaction_review.mjs` do.
 
 ```
 python3 -I tools/diagnostics/compaction_window_drops.py [--projects <dir>] [--days 7] [--json]
@@ -481,6 +482,7 @@ change OMC behaviour, has no switch, and is not shipped in the npm package.
 
 - `python3` (standard library only). Run it in isolated mode with `python3 -I`.
 - The inputs are only read. The only file written is the `--out` file, if given (a new file with mode `0600`).
+- This tool does not resolve the state root (it uses `.omc/state/jev` under the current directory); `denial_log_summary.mjs` and `compaction_review.mjs` do.
 
 ```
 python3 -I tools/diagnostics/compaction_ask_probe.py [--projects <dir>] [--days 7] [--ask-loss-threshold 0.05] [--json]
@@ -506,6 +508,7 @@ no switch, and is not shipped in the npm package.
 
 - `python3` (standard library only). Run it in isolated mode with `python3 -I`.
 - The inputs are only read. The only file written is the `--out` file, if given.
+- This tool does not resolve the state root (it uses `.omc/state/jev` under the current directory); `denial_log_summary.mjs` and `compaction_review.mjs` do.
 - Prices come only from the file given with `--prices`; without it every USD figure is reported as
   unavailable and the cache measurements still run. The file is JSON, with prices in USD per million
   tokens:
@@ -543,7 +546,7 @@ shipped in the npm package.
 
 ## Requirements and usage
 
-- Node 20 or later, built-in modules only. It reads files only.
+- Node 20 or later, built-in modules only. It reads files only. Run it from a repository checkout: the default directory is resolved through `scripts/lib/state-root.mjs`, which is loaded only when no `--file` or `--dir` is given.
 
 ```
 node tools/diagnostics/denial_log_summary.mjs [--file <path>]... [--dir <dir>] [--json] [<path>...]
@@ -555,7 +558,7 @@ node tools/diagnostics/denial_log_summary.mjs [--file <path>]... [--dir <dir>] [
 | `--dir <dir>` | a directory: reads `denials.jsonl` and its rotated parts (`denials-YYYYMMDD-HHMMSS.jsonl`, `denials-YYYYMMDD-HHMMSS-<pid>.jsonl`) |
 | `--json` | JSON output |
 
-With no `--file` and no `--dir` it also reads the directory `$OMC_JEV_LOG_DIR`, else `.omc/state/jev` under the current directory (run the tool from the project root). With `OMC_STATE_DIR` set, the Jev log directory has a project identifier in its path, so pass the directory with `--dir` (or set `OMC_JEV_LOG_DIR`). Exit codes: `0` summary printed, `2` no journal file found.
+With no `--file` and no `--dir` it also reads the directory `$OMC_JEV_LOG_DIR`, else `state/jev` under the state root of the current directory (run the tool from the project root). The state root is resolved with `scripts/lib/state-root.mjs`, the resolver the hooks use, so it follows `OMC_STATE_DIR`; if it cannot be resolved the tool exits with `2` and asks for `--dir` (or `OMC_JEV_LOG_DIR`). This tool and `compaction_review.mjs` resolve the state root; the `compaction_*.py` tools do not. Exit codes: `0` summary printed, `2` no journal file found.
 
 ## What is counted
 

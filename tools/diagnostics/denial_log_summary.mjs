@@ -9,10 +9,10 @@
 //
 //   node tools/diagnostics/denial_log_summary.mjs [--file <path>]... [--dir <dir>] [--json] [<path>...]
 //
-// Without file arguments it reads <OMC_JEV_LOG_DIR, else .omc/state/jev under the current directory>/denials.jsonl and its
-// rotated parts (denials-YYYYMMDD-HHMMSS.jsonl or denials-YYYYMMDD-HHMMSS-<pid>.jsonl); run it from the project root. With
-// OMC_STATE_DIR set, the Jev log directory has a project identifier in its path: pass the directory with --dir or set
-// OMC_JEV_LOG_DIR.
+// Without file arguments it reads <OMC_JEV_LOG_DIR, else state/jev under the state root of the current directory>/denials.jsonl
+// and its rotated parts (denials-YYYYMMDD-HHMMSS.jsonl or denials-YYYYMMDD-HHMMSS-<pid>.jsonl); run it from the project root.
+// The state root comes from scripts/lib/state-root.mjs, so it follows OMC_STATE_DIR like the hooks do; when it cannot be
+// resolved the tool asks for --dir or OMC_JEV_LOG_DIR.
 // A file given on the command line that does not exist is reported with a warning on stderr; the summary and the exit
 // code are not changed by it.
 // Exit code: 0 summary printed, 2 no journal file found.
@@ -186,8 +186,20 @@ const printTable = (title, rows) => {
 };
 
 const USAGE = 'usage: node denial_log_summary.mjs [--file <path>]... [--dir <dir>] [--json] [<path>...]\n'
-  + 'default directory: $OMC_JEV_LOG_DIR, else .omc/state/jev under the current directory;\n'
-  + 'with OMC_STATE_DIR set, pass --dir or set OMC_JEV_LOG_DIR';
+  + 'default directory: $OMC_JEV_LOG_DIR, else state/jev under the state root of the current directory\n'
+  + '(the state root follows OMC_STATE_DIR); pass --dir or set OMC_JEV_LOG_DIR when it cannot be resolved';
+
+// The default Jev log directory: the same state root the hooks use (it follows OMC_STATE_DIR). The module is imported
+// on demand so that reading explicit files or a given directory works without it.
+async function defaultLogDir() {
+  try {
+    const { resolveOmcStateRoot } = await import('../../scripts/lib/state-root.mjs');
+    return join(await resolveOmcStateRoot(process.cwd()), 'state', 'jev');
+  } catch (e) {
+    console.error(`denial_log_summary: cannot resolve the state root (${e && e.message ? e.message : e}); pass the journal directory with --dir or set OMC_JEV_LOG_DIR`);
+    process.exit(2);
+  }
+}
 
 export function parseArgs(argv) {
   const opts = { files: [], positional: [], dir: null, json: false, help: false };
@@ -202,12 +214,12 @@ export function parseArgs(argv) {
   return opts;
 }
 
-const main = () => {
+const main = async () => {
   const opts = parseArgs(process.argv.slice(2));
   if (opts.help) { console.log(USAGE); return; }
   const files = [...opts.files];
   let dir = opts.dir;
-  if (!files.length && !dir) dir = process.env.OMC_JEV_LOG_DIR || join(process.cwd(), '.omc', 'state', 'jev');
+  if (!files.length && !dir) dir = process.env.OMC_JEV_LOG_DIR || await defaultLogDir();
   files.push(...opts.positional); // positional paths come after the default directory decision
   for (const file of files) {
     if (!existsSync(file)) console.error(`denial_log_summary: warning: file not found: ${file}`);
@@ -233,4 +245,4 @@ const main = () => {
 };
 
 const isMain = process.argv[1] && import.meta.url === new URL(`file://${process.argv[1]}`).href;
-if (isMain) main();
+if (isMain) await main();

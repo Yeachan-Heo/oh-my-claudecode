@@ -111,12 +111,14 @@ node tools/maintenance/compaction_review.mjs --from <time> [--log <compaction.js
 | Option | Meaning |
 |---|---|
 | `--from <time>` | start of the record window (required): local time such as `2026-01-01T10:00:00`, or ISO with `Z` |
-| `--log <file>` | compaction journal (default `$OMC_JEV_LOG_DIR/compaction.jsonl`, else `.omc/state/jev/compaction.jsonl` under the current directory, so run the tool from the project root; with `OMC_STATE_DIR` set, the Jev log directory has a project identifier in its path, so pass `--log` explicitly or set `OMC_JEV_LOG_DIR`) |
+| `--log <file>` | compaction journal (default `$OMC_JEV_LOG_DIR/compaction.jsonl`, else `state/jev/compaction.jsonl` under the state root of the current directory, so run the tool from the project root; the state root is resolved with `scripts/lib/state-root.mjs`, the resolver the hooks use, so it follows `OMC_STATE_DIR`, and if it cannot be resolved the tool exits with `2` and asks for `--log` or `OMC_JEV_LOG_DIR`) |
 | `--projects <dir>` | transcripts directory (default `$CLAUDE_CONFIG_DIR/projects`, else `~/.claude/projects`) |
 | `--json` | also print the result as one JSON line |
 | `--full` | print every file; by default only files with a record or with an error after the boundary (the rest is in the sums) |
 
 Exit codes: `0` no 400 errors and no placeholder results after the boundaries, `1` at least one, `2` input error.
+
+This tool and `denial_log_summary.mjs` resolve the state root for the default journal directory; the `compaction_*.py` diagnostics do not (they use `.omc/state/jev` under the current directory).
 
 What it counts. From the journal it takes the `event: compact` records with `kept_thinking > 0` from `--from` on. For every
 transcript file (main session `<project>/<session>.jsonl`, agents `<project>/<session>/subagents/agent-<agent>.jsonl`) it counts

@@ -5,8 +5,9 @@
 //   node compaction_review.mjs --from <time> [--log <compaction.jsonl>] [--projects <dir>] [--json] [--full]
 //
 // --from      start of the record window (required; local time, for example 2026-01-01T10:00:00, or ISO with Z)
-// --log       compaction journal (default $OMC_JEV_LOG_DIR/compaction.jsonl, else .omc/state/jev/compaction.jsonl under the
-//             current directory; with OMC_STATE_DIR set, pass --log or set OMC_JEV_LOG_DIR)
+// --log       compaction journal (default $OMC_JEV_LOG_DIR/compaction.jsonl, else state/jev/compaction.jsonl under the state
+//             root of the current directory, which follows OMC_STATE_DIR like the hooks; pass --log or set OMC_JEV_LOG_DIR
+//             when the state root cannot be resolved)
 // --projects  transcripts directory (default $CLAUDE_CONFIG_DIR/projects or ~/.claude/projects)
 // --json      also print the result as one JSON line
 // --full      print every file (by default only files with a record or with an error after the boundary; the rest is in the sums)
@@ -28,8 +29,8 @@ import { homedir } from 'node:os';
 import { join } from 'node:path';
 
 const USAGE = 'usage: node compaction_review.mjs --from <time> [--log <compaction.jsonl>] [--projects <dir>] [--json] [--full]\n'
-  + 'default journal: $OMC_JEV_LOG_DIR/compaction.jsonl, else .omc/state/jev/compaction.jsonl under the current directory;\n'
-  + 'with OMC_STATE_DIR set, pass --log or set OMC_JEV_LOG_DIR';
+  + 'default journal: $OMC_JEV_LOG_DIR/compaction.jsonl, else state/jev/compaction.jsonl under the state root of the current\n'
+  + 'directory (the state root follows OMC_STATE_DIR); pass --log or set OMC_JEV_LOG_DIR when it cannot be resolved';
 
 function parseArgs(argv) {
   const opts = { from: null, log: null, projects: null, json: false, full: false };
@@ -51,7 +52,17 @@ const opts = parseArgs(process.argv.slice(2));
 if (opts.from === null) { console.error(`--from is required\n${USAGE}`); process.exit(2); }
 const from = Date.parse(opts.from);
 if (!Number.isFinite(from)) { console.error(`bad time for --from: ${opts.from}`); process.exit(2); }
-const logFile = opts.log || join(process.env.OMC_JEV_LOG_DIR || join(process.cwd(), '.omc', 'state', 'jev'), 'compaction.jsonl');
+// The default Jev log directory: the same state root the hooks use (it follows OMC_STATE_DIR).
+async function defaultLogDir() {
+  try {
+    const { resolveOmcStateRoot } = await import('../../scripts/lib/state-root.mjs');
+    return join(await resolveOmcStateRoot(process.cwd()), 'state', 'jev');
+  } catch (e) {
+    console.error(`cannot resolve the state root (${e && e.message ? e.message : e}); pass the journal with --log or set OMC_JEV_LOG_DIR`);
+    process.exit(2);
+  }
+}
+const logFile = opts.log || join(process.env.OMC_JEV_LOG_DIR || await defaultLogDir(), 'compaction.jsonl');
 const projects = opts.projects || join(process.env.CLAUDE_CONFIG_DIR || join(homedir(), '.claude'), 'projects');
 if (!existsSync(logFile)) { console.error(`missing journal: ${logFile}`); process.exit(2); }
 if (!existsSync(projects)) { console.error(`missing transcripts directory: ${projects}`); process.exit(2); }

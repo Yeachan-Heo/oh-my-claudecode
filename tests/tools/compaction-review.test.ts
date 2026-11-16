@@ -52,9 +52,17 @@ beforeAll(() => {
   ]));
 });
 
+// The state root the resolver returns for a working directory, asked in a child process (the tool is not involved).
+function stateRootFor(cwd: string, env: Record<string, string> = {}): string {
+  const stateRootModule = join(REPO, 'scripts', 'lib', 'state-root.mjs');
+  const code = `import(${JSON.stringify(stateRootModule)}).then(async (m) => console.log(await m.resolveOmcStateRoot(process.cwd())))`;
+  const r = spawnSync(process.execPath, ['-e', code], { encoding: 'utf8', cwd, env: { ...process.env, HOME: root, OMC_STATE_DIR: '', CLAUDE_PLUGIN_ROOT: '', ...env } });
+  return r.stdout.trim();
+}
+
 function run(args: string[], env: Record<string, string> = {}, cwd: string = root) {
-  const r = spawnSync(process.execPath, [SCRIPT, ...args], { encoding: 'utf8', cwd, env: { ...process.env, HOME: root, OMC_JEV_LOG_DIR: '', CLAUDE_CONFIG_DIR: '', ...env } });
-  return { status: r.status, out: r.stdout + r.stderr, stdout: r.stdout };
+  const r = spawnSync(process.execPath, [SCRIPT, ...args], { encoding: 'utf8', cwd, env: { ...process.env, HOME: root, OMC_JEV_LOG_DIR: '', OMC_STATE_DIR: '', CLAUDE_PLUGIN_ROOT: '', CLAUDE_CONFIG_DIR: '', ...env } });
+  return { status: r.status, out: r.stdout + r.stderr, stdout: r.stdout, stderr: r.stderr };
 }
 const base = ['--from', '2026-01-01T00:00:00Z', '--log', join(logDir, 'compaction.jsonl'), '--projects', projects];
 
@@ -123,10 +131,11 @@ describe('compaction_review.mjs', () => {
     expect(r.stdout).toContain('transcript files: 0');
   });
 
-  it('without OMC_JEV_LOG_DIR defaults the journal to .omc/state/jev/compaction.jsonl under the current directory', () => {
+  it('without OMC_JEV_LOG_DIR defaults the journal to state/jev/compaction.jsonl under the state root of the current directory', () => {
     const cwd = join(root, 'cwd-default');
     const emptyProjects = join(root, 'cwd-default-projects');
     mkdirSync(emptyProjects);
+    mkdirSync(join(cwd, '.git'), { recursive: true }); // marks the project root for the state root resolver
     const projectLogDir = join(cwd, '.omc', 'state', 'jev');
     mkdirSync(projectLogDir, { recursive: true });
     copyFileSync(join(logDir, 'compaction.jsonl'), join(projectLogDir, 'compaction.jsonl'));
@@ -134,6 +143,38 @@ describe('compaction_review.mjs', () => {
     expect(r.status, r.out).toBe(0);
     expect(r.stdout).toContain(`journal: ${join(projectLogDir, 'compaction.jsonl')}`);
     expect(r.stdout).toContain('records: 2');
+  });
+
+  it('with OMC_STATE_DIR set, defaults the journal to the state/jev directory the state root resolver returns', () => {
+    const cwd = join(root, 'cwd-state-dir');
+    const emptyProjects = join(root, 'cwd-state-dir-projects');
+    mkdirSync(emptyProjects);
+    mkdirSync(join(cwd, '.git'), { recursive: true });
+    mkdirSync(join(cwd, '.omc', 'state', 'jev'), { recursive: true });
+    const env = { OMC_STATE_DIR: join(root, 'custom-state') };
+    const stateRoot = stateRootFor(cwd, env);
+    expect(stateRoot.startsWith(env.OMC_STATE_DIR)).toBe(true);
+    const customLogDir = join(stateRoot, 'state', 'jev');
+    mkdirSync(customLogDir, { recursive: true });
+    copyFileSync(join(logDir, 'compaction.jsonl'), join(customLogDir, 'compaction.jsonl'));
+    const r = run(['--from', '2026-01-01T00:00:00Z', '--projects', emptyProjects], env, cwd);
+    expect(r.status, r.out).toBe(0);
+    expect(r.stdout).toContain(`journal: ${join(customLogDir, 'compaction.jsonl')}`);
+  });
+
+  it('exits 2 and asks for --log or OMC_JEV_LOG_DIR when the state root cannot be resolved', () => {
+    const pluginRoot = join(root, 'bad-plugin');
+    mkdirSync(join(pluginRoot, 'dist', 'lib'), { recursive: true });
+    writeFileSync(join(pluginRoot, 'dist', 'lib', 'worktree-paths.js'), "throw new Error('boom');\n");
+    const cwd = join(root, 'cwd-bad-plugin');
+    mkdirSync(join(cwd, '.omc', 'state', 'jev'), { recursive: true });
+    copyFileSync(join(logDir, 'compaction.jsonl'), join(cwd, '.omc', 'state', 'jev', 'compaction.jsonl'));
+    const r = run(['--from', '2026-01-01T00:00:00Z', '--projects', projects], { CLAUDE_PLUGIN_ROOT: pluginRoot }, cwd);
+    expect(r.status, r.out).toBe(2);
+    expect(r.stderr).toContain('cannot resolve the state root');
+    expect(r.stderr).toContain('--log');
+    expect(r.stderr).toContain('OMC_JEV_LOG_DIR');
+    expect(r.stdout).not.toContain('journal:');
   });
 
   it('OMC_JEV_LOG_DIR wins over .omc/state/jev under the current directory', () => {

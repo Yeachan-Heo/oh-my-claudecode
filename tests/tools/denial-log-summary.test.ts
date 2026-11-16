@@ -2,7 +2,7 @@ import { afterAll, describe, expect, it } from 'vitest';
 import { spawnSync } from 'node:child_process';
 import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { join, relative } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
   HANDOFF_EVENTS,
@@ -63,8 +63,16 @@ function writeJournal(name: string, rows: Array<Row | string>): string {
   return file;
 }
 
+// The state root the resolver returns for a working directory, asked in a child process (the tool is not involved).
+function stateRootFor(cwd: string, env: Record<string, string> = {}): string {
+  const stateRootModule = join(fileURLToPath(new URL('.', import.meta.url)), '..', '..', 'scripts', 'lib', 'state-root.mjs');
+  const code = `import(${JSON.stringify(stateRootModule)}).then(async (m) => console.log(await m.resolveOmcStateRoot(process.cwd())))`;
+  const r = spawnSync(process.execPath, ['-e', code], { encoding: 'utf8', cwd, env: { ...process.env, HOME: dir, OMC_STATE_DIR: '', CLAUDE_PLUGIN_ROOT: '', ...env } });
+  return r.stdout.trim();
+}
+
 function run(args: string[], env: Record<string, string> = {}, cwd: string = dir) {
-  const r = spawnSync(process.execPath, [SCRIPT, ...args], { encoding: 'utf8', cwd, env: { ...process.env, HOME: dir, OMC_JEV_LOG_DIR: '', ...env } });
+  const r = spawnSync(process.execPath, [SCRIPT, ...args], { encoding: 'utf8', cwd, env: { ...process.env, HOME: dir, OMC_JEV_LOG_DIR: '', OMC_STATE_DIR: '', CLAUDE_PLUGIN_ROOT: '', ...env } });
   return { status: r.status, stdout: r.stdout, stderr: r.stderr };
 }
 
@@ -330,11 +338,40 @@ describe('denial_log_summary.mjs command line', () => {
     expect(r.stdout).toContain('files: 1, rows: 1');
   });
 
-  it('without OMC_JEV_LOG_DIR defaults to .omc/state/jev under the current directory', () => {
+  it('without OMC_JEV_LOG_DIR defaults to state/jev under the state root of the current directory', () => {
+    mkdirSync(join(dir, 'cli/cwd/proj/.git'), { recursive: true }); // marks the project root for the state root resolver
     writeJournal('cli/cwd/proj/.omc/state/jev/denials.jsonl', [decision({ key: 'c1c1c1c1c1c1c1c1' })]);
     const r = run([], {}, join(dir, 'cli/cwd/proj'));
     expect(r.status).toBe(0);
     expect(r.stdout).toContain('files: 1, rows: 1');
+  });
+
+  it('with OMC_STATE_DIR set, defaults to the state/jev directory the state root resolver returns', () => {
+    const cwd = join(dir, 'cli/statedir/proj');
+    mkdirSync(join(cwd, '.git'), { recursive: true });
+    writeJournal('cli/statedir/proj/.omc/state/jev/denials.jsonl', [decision({ key: 'f1f1f1f1f1f1f1f1' }), decision({ key: 'f2f2f2f2f2f2f2f2' })]);
+    const env = { OMC_STATE_DIR: join(dir, 'cli/statedir/custom') };
+    const root = stateRootFor(cwd, env);
+    expect(root.startsWith(env.OMC_STATE_DIR)).toBe(true);
+    writeJournal(relative(dir, join(root, 'state', 'jev', 'denials.jsonl')), [decision({ key: 'f3f3f3f3f3f3f3f3' })]);
+    const r = run([], env, cwd);
+    expect(r.status).toBe(0);
+    expect(r.stdout).toContain('files: 1, rows: 1');
+  });
+
+  it('exits 2 and asks for --dir or OMC_JEV_LOG_DIR when the state root cannot be resolved', () => {
+    const pluginRoot = join(dir, 'cli/badplugin');
+    mkdirSync(join(pluginRoot, 'dist', 'lib'), { recursive: true });
+    writeFileSync(join(pluginRoot, 'dist', 'lib', 'worktree-paths.js'), "throw new Error('boom');\n");
+    const cwd = join(dir, 'cli/badplugin/proj');
+    mkdirSync(join(cwd, '.omc/state/jev'), { recursive: true });
+    writeJournal('cli/badplugin/proj/.omc/state/jev/denials.jsonl', [decision({ key: '9a9a9a9a9a9a9a9a' })]);
+    const r = run([], { CLAUDE_PLUGIN_ROOT: pluginRoot }, cwd);
+    expect(r.status).toBe(2);
+    expect(r.stderr).toContain('cannot resolve the state root');
+    expect(r.stderr).toContain('--dir');
+    expect(r.stderr).toContain('OMC_JEV_LOG_DIR');
+    expect(r.stdout).not.toContain('files:');
   });
 
   it('OMC_JEV_LOG_DIR wins over .omc/state/jev under the current directory', () => {
@@ -345,11 +382,19 @@ describe('denial_log_summary.mjs command line', () => {
     expect(r.stdout).toContain('files: 1, rows: 2');
   });
 
-  it('does not read ~/.omc/state/jev any more', () => {
+  it('does not read ~/.omc/state/jev from inside a project that has no journal', () => {
     writeJournal('.omc/state/jev/denials.jsonl', [decision({ key: 'e1e1e1e1e1e1e1e1' })]);
-    mkdirSync(join(dir, 'cli/nohome'), { recursive: true });
+    mkdirSync(join(dir, 'cli/nohome/.git'), { recursive: true });
     const r = run([], {}, join(dir, 'cli/nohome'));
     expect(r.status).toBe(2);
+  });
+
+  it('outside a repository the default is the state root fallback of the resolver (~/.omc)', () => {
+    writeJournal('.omc/state/jev/denials.jsonl', [decision({ key: 'e2e2e2e2e2e2e2e2' })]);
+    mkdirSync(join(dir, 'cli/nogit'), { recursive: true });
+    const r = run([], {}, join(dir, 'cli/nogit'));
+    expect(r.status).toBe(0);
+    expect(r.stdout).toContain('files: 1, rows: 1');
   });
 
   it('warns on stderr for a file given with --file that does not exist, without changing the summary or the exit code', () => {
