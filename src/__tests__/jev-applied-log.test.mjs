@@ -12,6 +12,7 @@ import process from 'node:process';
 import { fileURLToPath, pathToFileURL, URL } from 'node:url';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
+import { JEV_ROW_NO_ANSWER } from '../../scripts/jev-resolve.mjs';
 import { isJevAppliedLogEnabled } from '../../scripts/lib/jev-shadow.mjs';
 
 const ROOT = fileURLToPath(new URL('../..', import.meta.url));
@@ -936,6 +937,24 @@ describe('model-routing applied line with OMC_JEV_ROW_TELEMETRY=1', () => {
     expect(row).not.toHaveProperty('cause');
   }, 60_000);
 
+  it('a resolver that exits before writing leaves the degraded line the hook writes, with the telemetry fields null and no applied line', async () => {
+    const context = makeContext();
+    // Preloaded into every node process of the hook; it stops only the resolver, which the hook runs as jev-resolve.mjs.
+    const preload = join(context.root, 'exit-resolver.cjs');
+    writeFileSync(preload, "if (String(process.argv[1]).endsWith('jev-resolve.mjs')) process.exit(1);\n", 'utf8');
+    stubAnswers = { 'model-tier': { type: 'choice', choice: 'opus' } };
+    const output = await runHook(context, 'pre-tool-enforcer.mjs', TASK_CALL(context.cwd), 'model-routing', {
+      OMC_JEV_ROW_TELEMETRY: '1',
+      OMC_JEV_LOG_CONTEXT: '1',
+      NODE_OPTIONS: '--require ' + preload,
+    });
+    expect(output?.hookSpecificOutput?.updatedInput).toBeUndefined();
+    const degraded = readLog(context, 'shadow.jsonl').find((row) => row.point === 'model-routing' && row.mode === 'degraded');
+    expect(degraded).toMatchObject({ reason: 'resolver-exit' });
+    for (const field of Object.keys(JEV_ROW_NO_ANSWER)) expect(degraded[field], field).toBeNull();
+    expect(readLog(context, 'applied.jsonl')).toEqual([]);
+  }, 60_000);
+
   it('the same marker without the variable writes no cause and no applied line', async () => {
     const context = makeContext();
     const call = TASK_CALL(context.cwd, { prompt: 'use sonnet low\n\nFix the regression.', model: 'haiku' });
@@ -954,10 +973,80 @@ describe('model-routing applied line with OMC_JEV_ROW_TELEMETRY=1', () => {
       OMC_JEV_ROW_TELEMETRY: '1',
     });
     const [line] = readLog(context, 'applied.jsonl');
-    expect(line).toMatchObject({ point: 'model-routing', applied: { subagent_type: 'oh-my-claudecode:executor', cause: 'marker', override_rejected: ['max'], marker: 'use max' } });
+    expect(line).toMatchObject({ point: 'model-routing', applied: { subagent_type: 'oh-my-claudecode:executor', cause: 'marker', override_rejected: 'max', marker: 'use max' } });
     const [row] = readLog(context, 'overrides.jsonl');
     expect(row).toMatchObject({ rejected: ['max'] });
     expect(row).not.toHaveProperty('cause');
+  }, 60_000);
+
+  it('a marker line lists the whole decision: override, marker, and each value with its source', async () => {
+    const context = makeContext();
+    const call = TASK_CALL(context.cwd, { prompt: 'use opus max\n\nFix the regression.', model: 'haiku', effort: 'medium' });
+    const output = await runHook(context, 'pre-tool-enforcer.mjs', call, 'model-routing', {
+      OMC_JEV: '',
+      OMC_JEV_MODEL_ROUTING_MARKER: '1',
+      OMC_JEV_ROW_TELEMETRY: '1',
+    });
+    expect(output.hookSpecificOutput.updatedInput).toMatchObject({ model: 'opus', prompt: 'Fix the regression.' });
+    const [line] = readLog(context, 'applied.jsonl');
+    expect(line.applied).toEqual({
+      subagent_type: 'oh-my-claudecode:executor',
+      cause: 'marker',
+      override: 'model',
+      marker: 'use opus max',
+      override_rejected: 'max',
+      model: { from: 'haiku', to: 'opus', source: 'marker' },
+      effort: { from: 'medium', to: 'medium', source: 'explicit' },
+    });
+  }, 60_000);
+
+  it('without a Jev log directory the marker lines go to the jev directory of the state directory', async () => {
+    for (const prompt of ['use sonnet low\n\nFix the regression.', 'use max\n\nFix the regression.']) {
+      const context = makeContext();
+      const stateDir = join(context.root, 'state');
+      const call = TASK_CALL(context.cwd, { prompt, model: 'haiku' });
+      await runHook(context, 'pre-tool-enforcer.mjs', call, 'model-routing', {
+        OMC_JEV: '',
+        OMC_JEV_LOG_DIR: undefined,
+        OMC_STATE_DIR: stateDir,
+        OMC_JEV_MODEL_ROUTING_MARKER: '1',
+        OMC_JEV_ROW_TELEMETRY: '1',
+      });
+      const files = readdirSync(stateDir, { recursive: true }).map(String).filter((file) => file.endsWith('applied.jsonl'));
+      expect(files, prompt).toHaveLength(1);
+      const [line] = readFileSync(join(stateDir, files[0]), 'utf8').trim().split('\n').map((row) => JSON.parse(row));
+      expect(line.applied, prompt).toMatchObject({ cause: 'marker', marker: prompt.split('\n')[0] });
+    }
+  }, 60_000);
+
+  it('a refused marker still leaves its line when Jev answered but changed nothing, or gave no usable answer', async () => {
+    stubAnswers = {};
+    for (const omcJev of ['model-routing:active', 'model-routing:shadow']) {
+      const context = makeContext();
+      const call = TASK_CALL(context.cwd, { prompt: 'use max\n\nFix the regression.', model: 'haiku' });
+      const output = await runHook(context, 'pre-tool-enforcer.mjs', call, 'model-routing', {
+        OMC_JEV: omcJev,
+        OMC_JEV_MODEL_ROUTING_MARKER: '1',
+        OMC_JEV_ROW_TELEMETRY: '1',
+      });
+      expect(output?.hookSpecificOutput?.updatedInput).toBeUndefined();
+      const lines = readLog(context, 'applied.jsonl');
+      expect(lines, omcJev).toHaveLength(1);
+      expect(lines[0].applied, omcJev).toEqual({ subagent_type: 'oh-my-claudecode:executor', cause: 'marker', marker: 'use max', override_rejected: 'max' });
+    }
+  }, 60_000);
+
+  it('a refused marker joins the Jev line when Jev changed the call', async () => {
+    stubAnswers = { 'model-tier': { type: 'choice', choice: 'opus' }, effort: { type: 'score', score: 3 } };
+    const context = makeContext();
+    const call = TASK_CALL(context.cwd, { prompt: 'use max\n\nFix the regression.', model: 'haiku' });
+    await runHook(context, 'pre-tool-enforcer.mjs', call, 'model-routing', {
+      OMC_JEV_MODEL_ROUTING_MARKER: '1',
+      OMC_JEV_ROW_TELEMETRY: '1',
+    });
+    const lines = readLog(context, 'applied.jsonl');
+    expect(lines).toHaveLength(1);
+    expect(lines[0].applied).toMatchObject({ cause: 'jev', marker: 'use max', override_rejected: 'max', model: { from: 'haiku', to: 'opus' } });
   }, 60_000);
 
   it('the same refused marker without the variable writes no applied line; overrides.jsonl keeps the rejection', async () => {

@@ -173,6 +173,20 @@ describe('resolveRequest shadow line', () => {
     expect(absent.row.cost_basis).toBe('unknown');
   });
 
+  it('the questions version differs between points and is the hash of the questions of that point', async () => {
+    const other = { q: { type: 'choice', instructions: 'i', criteria: { a: 'a' } } };
+    const { row: first } = await judge({ env: TELEMETRY_ENV });
+    const dir = freshDir();
+    await resolveRequest(
+      { point: 'task-size', state: { task: 'short task' }, questions: other, heuristic: 'sonnet' },
+      { OMC_JEV: 'all:active', TYPESAFE_API_KEY: 'test-key', OMC_JEV_LOG_DIR: dir, ...TELEMETRY_ENV },
+      ok(ANSWER_BODY),
+    );
+    const second = readLines(dir).pop();
+    expect(first.questions_version).not.toBe(second.questions_version);
+    expect(second.questions_version).toBe(questionsVersion(other));
+  });
+
   it('a degraded line (HTTP 500) carries the telemetry fields empty, never zero', async () => {
     const { row } = await judge({
       env: TELEMETRY_ENV,

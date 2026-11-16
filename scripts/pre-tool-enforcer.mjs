@@ -8,7 +8,7 @@
 
 import { appendFileSync, closeSync, existsSync, fstatSync, lstatSync, mkdirSync, openSync, readFileSync, readSync, readdirSync, realpathSync, renameSync, statSync, writeFileSync } from 'fs';
 import { createHash } from 'crypto';
-import { dirname, join, resolve, basename } from 'path';
+import { delimiter, dirname, join, resolve, basename, sep } from 'path';
 import { homedir } from 'os';
 import { execFileSync } from 'child_process';
 import { fileURLToPath, pathToFileURL } from 'url';
@@ -393,12 +393,18 @@ function buildCanonicalSkillRegistry() {
 }
 
 // Agent types the owner refuses: OMC_AGENT_TYPE_DENY is a comma-separated list, empty by default.
+// An entry matches a type without regard to letter case; an entry that starts with `=` matches
+// exactly, so a list can refuse `explore` while a differently cased user agent `Explore` passes.
 // OMC_AGENT_TYPE_DENY_MODE: off (default), shadow (log only), deny (refuse the call). Shadow and
 // deny log one row per Agent/Task call in agent-type.jsonl, so the allowed calls are counted too.
 // A call without subagent_type runs as general-purpose, so it is judged as general-purpose.
 const AGENT_TYPE_DENY_MODES = ['off', 'shadow', 'deny'];
 function agentTypeDenyList(env = process.env) {
   return String(env.OMC_AGENT_TYPE_DENY ?? '').split(',').map((type) => type.trim()).filter(Boolean);
+}
+function isAgentTypeDenied(type, list) {
+  const lower = type.toLowerCase();
+  return list.some((entry) => (entry.startsWith('=') ? entry.slice(1).trim() === type : entry.toLowerCase() === lower));
 }
 function agentTypeDenyMode(env = process.env) {
   const raw = String(env.OMC_AGENT_TYPE_DENY_MODE ?? '').trim();
@@ -416,7 +422,7 @@ function evaluateForbiddenAgentType(toolName, data, stateDir) {
   const typeValue = inputOk ? toolInput.subagent_type : undefined;
   const parsed = inputOk && (typeValue === undefined || typeof typeValue === 'string');
   const rawType = typeof typeValue === 'string' ? typeValue.trim() : '';
-  const forbidden = agentTypeDenyList().includes(rawType || 'general-purpose');
+  const forbidden = isAgentTypeDenied(rawType || 'general-purpose', agentTypeDenyList());
   const decision = !parsed ? 'unparsed' : !forbidden ? 'allow' : mode === 'deny' ? 'deny' : 'would-deny';
   try {
     const dir = process.env.OMC_JEV_LOG_DIR || join(stateDir, 'jev');
@@ -1041,8 +1047,8 @@ function recordJevForkSkipRow(data, toolInput, stateDir) {
 
 // Pointer expansion (OMC_JEV_POINTER_EXPAND=1): a short Agent/Task prompt (under 600 characters)
 // that is only an absolute path to a .md file is replaced, in the Jev state, by the head of that
-// file. Only files under the directories listed in OMC_JEV_POINTER_EXPAND_DIRS (colon-separated,
-// empty by default, so nothing is read) are expanded. The excerpt is sent UNMASKED to the configured
+// file. Only files under the directories listed in OMC_JEV_POINTER_EXPAND_DIRS (separated by the
+// platform path delimiter, empty by default, so nothing is read) are expanded. The excerpt is sent UNMASKED to the configured
 // Jev endpoint: state masking is a separate change, so the content leaves the machine as is.
 // Any failure leaves the prompt unchanged and records the reason.
 const POINTER_MAX_PROMPT_CHARS = 600;
@@ -1055,7 +1061,7 @@ function isPointerExpandEnabled(env = process.env) {
   return String(env.OMC_JEV_POINTER_EXPAND ?? '').trim() === '1';
 }
 function pointerExpandRoots(env = process.env) {
-  return String(env.OMC_JEV_POINTER_EXPAND_DIRS ?? '').split(':').map((dir) => dir.trim()).filter(Boolean)
+  return String(env.OMC_JEV_POINTER_EXPAND_DIRS ?? '').split(delimiter).map((dir) => dir.trim()).filter(Boolean)
     .flatMap((dir) => {
       try {
         return [realpathSync(dir)];
@@ -1087,7 +1093,7 @@ function expandTaskPointer(prompt, pointer) {
       return prompt;
     }
     const roots = pointerExpandRoots();
-    if (!roots.some((root) => real === root || real.startsWith(root + '/'))) {
+    if (!roots.some((root) => real === root || real.startsWith(root + sep))) {
       pointer.unexpanded = 'outside-allowed-dirs';
       return prompt;
     }
@@ -1275,23 +1281,56 @@ function recordModelRoutingShadow(toolName, toolInput, updatedToolInput, permiss
       target.prompt = marker.prompt;
     }
     recordModelRoutingOverride(stateDir, row);
-    // OMC_JEV_ROW_TELEMETRY: a marker that changed the call is the cause of its applied line (the marker decided, not Jev).
-    // Like a Jev answer, the line is written by flushJevRouting once the output carries the values; it replaces any pending Jev line.
-    // A refused marker (`use max`) that sets nothing: with no Jev request it is the whole line; with one, it
-    // travels on the Jev line when Jev's answer changed the call.
-    const refusedLine = { marker: marker.line, override_rejected: marker.rejected };
-    if (markerApplies && isJevRowTelemetryEnabled() && isJevAppliedLogEnabled()) {
-      pendingJevRouting = {
-        subagent_type: originalInput.subagent_type || null,
-        cause: JEV_APPLIED_CAUSES.marker,
-        ...(marker.model ? { model: { from: baseModel ?? null, to: marker.model } } : {}),
-        ...(marker.effort ? { effort: { to: capEffort(marker.effort, maxEffort()) } } : {}),
-      };
-    } else if (!markerApplies && marker.rejected.length > 0 && isJevRowTelemetryEnabled() && isJevAppliedLogEnabled()) {
-      if (!jevOptedIn) {
-        recordJevApplied('model-routing', { subagent_type: originalInput.subagent_type || null, cause: JEV_APPLIED_CAUSES.marker, ...refusedLine });
-      } else if (pendingJevRouting) {
-        pendingJevRouting.refusedLine = refusedLine;
+    // OMC_JEV_ROW_TELEMETRY: the applied line of a marker. A marker that changed the call is the cause of one
+    // line for the whole decision, each value with its source (marker, jev, explicit, heuristic); like a Jev
+    // answer it is written by flushJevRouting once the output carries the decided values, and it replaces any
+    // pending Jev line. A refused marker (`use max`, or a model force-inherit refuses) that sets nothing leaves
+    // its own line, unless Jev's answer changed the call: then the marker fields join the Jev line.
+    if (isJevRowTelemetryEnabled() && isJevAppliedLogEnabled()) {
+      const refusedText = marker.rejected.join(',');
+      const jevApplied = pendingJevRouting ?? {};
+      if (markerApplies) {
+        const cap = maxEffort();
+        const teamMember = typeof toolInput.name === 'string' && toolInput.name.trim() !== '';
+        const line = {
+          override: row.override,
+          marker: marker.line,
+          ...(refusedText ? { override_rejected: refusedText } : {}),
+        };
+        let appliedModel;
+        let appliedEffort;
+        if (marker.model) appliedModel = { from: baseModel ?? null, to: marker.model, source: 'marker' };
+        else if (jevApplied.model) appliedModel = { ...jevApplied.model, source: 'jev' };
+        else if (baseModel) appliedModel = { from: baseModel, to: baseModel, source: 'explicit' };
+        else if (knownTier) appliedModel = { from: null, to: model, source: 'heuristic' };
+        if (marker.effort) {
+          const to = capEffort(marker.effort, cap);
+          appliedEffort = { from: baseEffort ?? null, to, source: 'marker', ...(to !== marker.effort ? { capped: true, requested: marker.effort } : {}) };
+        } else if (jevApplied.effort) appliedEffort = { ...jevApplied.effort, source: 'jev' };
+        else if (typeof baseEffort === 'string') appliedEffort = { from: baseEffort, to: capEffort(baseEffort, cap), source: 'explicit' };
+        if (appliedEffort && teamMember) appliedEffort.delivered = 'unknown-team-member';
+        pendingJevRouting = {
+          subagent_type: originalInput.subagent_type || null,
+          cause: JEV_APPLIED_CAUSES.marker,
+          markerLine: line,
+          ...(appliedModel ? { model: appliedModel } : {}),
+          ...(appliedEffort ? { effort: appliedEffort } : {}),
+          ...(jevResult?.jevModel ? { jevModel: jevResult.jevModel } : {}),
+          fallbackLogDir: join(stateDir, 'jev'),
+        };
+      } else if (refusedText) {
+        const refusedLine = { marker: marker.line, override_rejected: refusedText };
+        if (pendingJevRouting) {
+          pendingJevRouting.refusedLine = refusedLine;
+        } else {
+          recordJevApplied(
+            'model-routing',
+            { subagent_type: originalInput.subagent_type || null, cause: JEV_APPLIED_CAUSES.marker, ...refusedLine },
+            undefined,
+            jevResult?.jevModel ? { jev_model: jevResult.jevModel } : {},
+            join(stateDir, 'jev'),
+          );
+        }
       }
     }
   }
@@ -1364,12 +1403,20 @@ function flushJevRouting(output) {
   try {
     const sent = output?.hookSpecificOutput?.updatedInput;
     if (!sent || typeof sent !== 'object') return;
-    const { subagent_type, model, effort, jevModel, cause, refusedLine } = pending;
+    const { subagent_type, model, effort, jevModel, cause, refusedLine, markerLine, fallbackLogDir } = pending;
+    const telemetry = isJevRowTelemetryEnabled();
+    if (markerLine) {
+      // A marker line is written whole, but only when every value the marker or Jev decided is in the
+      // output; values the call already had (explicit) or the agent definition gives (heuristic) are listed, not required.
+      const decided = (entry) => entry && entry.source !== 'explicit' && entry.source !== 'heuristic';
+      if ((decided(model) && sent.model !== model.to) || (decided(effort) && sent.effort !== effort.to)) return;
+      recordJevApplied('model-routing', { subagent_type, cause, ...markerLine, ...(model ? { model } : {}), ...(effort ? { effort } : {}) }, undefined, jevModel ? { jev_model: jevModel } : {}, fallbackLogDir);
+      return;
+    }
     const carried = {
       ...(model && sent.model === model.to ? { model } : {}),
       ...(effort && sent.effort === effort.to ? { effort } : {}),
     };
-    const telemetry = isJevRowTelemetryEnabled();
     if (carried.model || carried.effort) {
       recordJevApplied('model-routing', { subagent_type, ...carried, ...(telemetry ? { cause: cause ?? JEV_APPLIED_CAUSES.jev, ...(refusedLine ?? {}) } : {}) }, undefined, telemetry && jevModel ? { jev_model: jevModel } : {});
     }

@@ -726,9 +726,11 @@ export function jevLastRequestId(point) {
  * for the same point passes the earlier request's id (jevLastRequestId) as
  * `requestId`. Only with OMC_JEV_APPLIED_LOG=1; never throws.
  * `extra` holds top-level fields of the line (such as jev_model, given only
- * with OMC_JEV_ROW_TELEMETRY=1 by the caller).
+ * with OMC_JEV_ROW_TELEMETRY=1 by the caller). `fallbackLogDir` is the
+ * directory used when the hook has no Jev log directory (a line written
+ * without a Jev request, such as a `use` marker's).
  */
-export function recordJevApplied(point, applied, requestId = lastRequestIds.get(point), extra = {}) {
+export function recordJevApplied(point, applied, requestId = lastRequestIds.get(point), extra = {}, fallbackLogDir = undefined) {
   if (!isJevAppliedLogEnabled(process.env)) return;
   appendJevLogLine("applied.jsonl", {
     ts: new Date().toISOString(),
@@ -736,17 +738,18 @@ export function recordJevApplied(point, applied, requestId = lastRequestIds.get(
     ...(isJevLogContextEnabled(process.env) ? { ...hookLogContext, ...(requestId ? { request_id: requestId } : {}) } : {}),
     ...extra,
     applied,
-  });
+  }, fallbackLogDir);
 }
 
 /**
  * Append one line to a Jev log file in the hook's log directory
- * (OMC_JEV_LOG_DIR when setJevHookContext did not resolve one), rotated like
+ * (OMC_JEV_LOG_DIR when setJevHookContext did not resolve one, else the
+ * optional fallback directory), rotated like
  * the resolver's lines (OMC_JEV_LOG_MAX_MB). Every file a hook script writes
  * next to shadow.jsonl goes through this. Never throws.
  */
-export function appendJevLogLine(fileName, entry) {
-  const logDir = hookLogDir || process.env.OMC_JEV_LOG_DIR;
+export function appendJevLogLine(fileName, entry, fallbackLogDir = undefined) {
+  const logDir = hookLogDir || process.env.OMC_JEV_LOG_DIR || fallbackLogDir;
   if (!logDir) return;
   try {
     mkdirSync(logDir, { recursive: true });

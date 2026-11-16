@@ -140,7 +140,7 @@ describe('point:shadow: a named shadow entry wins over all:active; the last entr
 
   it.each([
     ['all:active,task-size:shadow', { 'task-size': 'shadow', intent: 'active', 'model-routing': 'active', compaction: 'off' }],
-    ['all:active,compaction:active,tool-gate:off,intent:off,panel:off,slop-warning:off,task-size:shadow', { 'task-size': 'shadow', intent: 'off', 'slop-warning': 'off', 'tool-gate': 'off', 'model-routing': 'active', 'skill-trigger': 'active', compaction: 'active' }],
+    ['all:active,compaction:active,context-pruning:off,intent:off,ralph-verdict:off,slop-warning:off,task-size:shadow', { 'task-size': 'shadow', intent: 'off', 'slop-warning': 'off', 'context-pruning': 'off', 'model-routing': 'active', 'skill-trigger': 'active', compaction: 'active' }],
     ['all:active,intent:off', { intent: 'off', 'task-size': 'active', compaction: 'off' }],
     ['all:active', { intent: 'active', 'task-size': 'active', compaction: 'off' }],
     ['all:active,compaction:shadow', { compaction: 'shadow', intent: 'active' }],
@@ -177,8 +177,8 @@ describe('point:shadow: a named shadow entry wins over all:active; the last entr
     const state = (omcJev, point) => pointState(point, parseJevConfig(env(omcJev)));
     expect(state('all:active,task-size:shadow', 'task-size')).toBe('shadow');
     expect(state('all:active,task-size:shadow', 'intent')).toBe('active');
-    expect(state('all:active,compaction:active,tool-gate:off,intent:off,panel:off,slop-warning:off,task-size:shadow', 'task-size')).toBe('shadow');
-    expect(state('all:active,compaction:active,tool-gate:off,intent:off,panel:off,slop-warning:off,task-size:shadow', 'intent')).toBe('off');
+    expect(state('all:active,compaction:active,context-pruning:off,intent:off,ralph-verdict:off,slop-warning:off,task-size:shadow', 'task-size')).toBe('shadow');
+    expect(state('all:active,compaction:active,context-pruning:off,intent:off,ralph-verdict:off,slop-warning:off,task-size:shadow', 'intent')).toBe('off');
     expect(state('all:active,intent:off', 'intent')).toBe('off');
     expect(state('all:active', 'intent')).toBe('active');
     expect(state('all:active,intent:shadow,intent:active', 'intent')).toBe('active');
