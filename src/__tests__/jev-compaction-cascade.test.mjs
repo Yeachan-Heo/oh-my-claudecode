@@ -164,7 +164,7 @@ describe('token cascade (OMC_JEV_COMPACT_TARGET_PERCENT)', () => {
   it('forced results (a secret path or a non-text result) go to the trace first, before any score is used', () => {
     // Target 80 % of 6 000 tokens = 4 800; the two forced results trace (about 3 500 tokens removed) and that reaches it.
     const cands = [item('a', { secret: true, score: 3 }), item('b', { textOnly: false, score: 3 }), item('c', { score: 3 })];
-    const plan = cascade(cands, 6000, 80);
+    const plan = cascade(cands, 6000, 4800);
     expect(plan.pass).toBe('forced');
     expect(cands.map((c) => c.keep)).toEqual(['trace', 'trace', 'full']);
   });
@@ -172,7 +172,7 @@ describe('token cascade (OMC_JEV_COMPACT_TARGET_PERCENT)', () => {
   it('the short_or_trace pass traces the results scored under 0.5 first, then shortens the rest, and stops at the target', () => {
     // Two results scored 0 and one scored 2/3: the target is one result's worth below the three whole.
     const cands = [item('low1', { score: 0, resIdx: 1 }), item('low2', { score: 0, resIdx: 3 }), item('mid', { score: 2 / 3, resIdx: 5 })];
-    const plan = cascade(cands, 3 * 1900, 66);
+    const plan = cascade(cands, 3 * 1900, 3762);
     expect(plan.pass).toBe('short_or_trace');
     expect(cands[0].keep).toBe('trace');
     expect(plan.predicted).toBeLessThanOrEqual(plan.target);
@@ -180,7 +180,7 @@ describe('token cascade (OMC_JEV_COMPACT_TARGET_PERCENT)', () => {
 
   it('stops as soon as the prediction reaches the target: the rest stays whole', () => {
     const cands = [item('a', { score: 0, resIdx: 1 }), item('b', { score: 0, resIdx: 2 }), item('c', { score: 0, resIdx: 3 })];
-    const plan = cascade(cands, 3 * 1900, 70);
+    const plan = cascade(cands, 3 * 1900, 3989);
     expect(plan.pass).toBe('short_or_trace');
     expect(cands.map((c) => c.keep)).toEqual(['trace', 'full', 'full']);
   });
@@ -189,7 +189,7 @@ describe('token cascade (OMC_JEV_COMPACT_TARGET_PERCENT)', () => {
     // The pinned call (4 000 characters, about 1 800 tokens) is never cut, so the target is out of reach after the short_or_trace pass and the cascade
     // goes on to the trace_all pass, which traces the one free result; the prediction stays above the target, so the drop pass removes that trace with its call.
     const cands = [item('plan', { task: true, resIdx: 1 }), item('a', { score: 3, resIdx: 2 })];
-    const plan = cascade(cands, 3700, 20);
+    const plan = cascade(cands, 3700, 740);
     expect(plan.pass).toBe('drop');
     expect(cands.map((c) => c.keep)).toEqual(['full', 'drop']);
     expect(plan.predicted).toBeGreaterThan(plan.target);
@@ -200,10 +200,18 @@ describe('token cascade (OMC_JEV_COMPACT_TARGET_PERCENT)', () => {
     // traces both and predicts about 690 tokens, just above the target; the drop pass then drops the lower score (y) with its trace, which
     // reaches the target (about 652), so x stays a trace. The window holds for 3 340 to 3 380 tokens.
     const cands = [item('x', { score: 2, resIdx: 1, chars: 3000 }), item('y', { score: 1, resIdx: 2, chars: 3000 })];
-    const plan = cascade(cands, 3360, 20);
+    const plan = cascade(cands, 3360, 672);
     expect(plan.pass).toBe('drop');
     expect(plan.predicted).toBeLessThanOrEqual(plan.target);
     expect(cands.map((c) => [c.id, c.keep])).toEqual([['x', 'trace'], ['y', 'drop']]);
+  });
+
+  it('prices a result turned into a trace at the trace rate of the trace alone, with no newline added to its length', () => {
+    // Ten results scored 0, no target to reach: the manual plan traces them all, so the prediction is the tokens before less ten times (whole minus trace).
+    const cands = Array.from({ length: 10 }, (_, k) => item(`r${k}`, { score: 0, resIdx: k + 1 }));
+    const whole = 0.5513 * ('Bash'.length + JSON.stringify(cands[0].use.input).length) + 0.4502 * cands[0].res.text.length;
+    const trace = 0.58 * cands[0].trace.length;
+    expect(manualPlan(cands, 20000).predicted).toBe(Math.round(20000 - 10 * (whole - trace)));
   });
 
   it('floorPrediction counts the removable results and leaves the pinned ones in the floor', () => {

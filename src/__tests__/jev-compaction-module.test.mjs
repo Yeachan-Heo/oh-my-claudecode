@@ -3911,6 +3911,118 @@ describe('jev-compaction module: pasted text (OMC_JEV_COMPACT_PASTES)', () => {
     expect(pasteTags('<pasted_content>'.repeat(30000))).toEqual([]);
   });
 
+  describe('rows that a hook or the host puts in as a user message (the paste stage)', () => {
+    // A hook or host row is no message of the user: it neither becomes the newest message of the user (which stays whole) nor shifts that role off the
+    // paste's own row. The paste row stands last among the user's messages here, followed only by the row under test.
+    const rowOf = (text, extra = {}) => Object.freeze({ role: 'user', text, toolUses: [], ...extra });
+    function pasteThenRow(row) {
+      const base = conversation(30);
+      const paste = rowOf(`${OUTSIDE} ${sized(3000)}`, { handle: 'px' });
+      // 26 call/result pairs, the paste row, the row under test, four more pairs and a closing answer: the paste row lies before the last six messages.
+      return [base[0], ...base.slice(1, 53), paste, row, ...base.slice(53, 61), base[62]];
+    }
+    const moved = async (row, env = PASTES) => (await compactPastes(pasteThenRow(row), { env })).record.pastes.moved;
+
+    it('moves the tag when a message of the user follows it, so the setup is a case the stage acts on', async () => {
+      expect(await moved(rowOf('Next, please carry on with part five of the plan.'))).toBe(1);
+    });
+
+    it('does not count a row the host flags isMeta, or one that opens with the prefix of a hook or host row, as a message of the user', async () => {
+      for (const row of [
+        rowOf('Keep going with the plan, said the hook.', { isMeta: true }),
+        rowOf('Stop hook feedback: do not stop yet, the tests are red.'),
+        rowOf('\n  Stop hook feedback: leading space and a line break are ignored.'),
+        rowOf('<ci-monitor-event>the build finished</ci-monitor-event>'),
+        rowOf('<cross-session-message from="peer">hello</cross-session-message>'),
+      ]) {
+        const run = await compactPastes(pasteThenRow(row), { env: PASTES });
+        expect(run.record.pastes, row.text).toMatchObject({ moved: 0, tags: 0 });
+        expect(run.written, row.text).toHaveLength(0);
+      }
+    });
+
+    it('does not count a row that opens with any of the built-in host and hook row prefixes as a message of the user', async () => {
+      for (const text of [
+        'Stop hook feedback: do not stop yet.', 'Goal check-in: the goal still holds.', 'A session-scoped Stop hook is now active with a condition.',
+        '<ci-monitor-event>the build finished</ci-monitor-event>',
+        '<cross-session-message from="peer">hello</cross-session-message>', '[Image: source: /tmp/shot.png]', '[Image: original 2000x1500, displayed at 1568x1176.]',
+        '(Re-invocation of the skill, same arguments)', '[Usage limit reached, resets at noon]',
+      ]) {
+        const run = await compactPastes(pasteThenRow(rowOf(text)), { env: PASTES });
+        expect(run.record.pastes, text).toMatchObject({ moved: 0, tags: 0 });
+      }
+    });
+
+    it('takes more prefixes from OMC_JEV_COMPACT_HOOK_ROW_PREFIXES, comma separated and trimmed, and counts the row as a message of the user without it', async () => {
+      const row = rowOf('Custom hook note: the check passed.');
+      expect(await moved(row)).toBe(1);
+      expect(await moved(row, { ...PASTES, OMC_JEV_COMPACT_HOOK_ROW_PREFIXES: 'Custom hook note:' })).toBe(0);
+      expect(await moved(row, { ...PASTES, OMC_JEV_COMPACT_HOOK_ROW_PREFIXES: ' Build bot says ,, Custom hook note: ,' })).toBe(0);
+      expect(await moved(row, { ...PASTES, OMC_JEV_COMPACT_HOOK_ROW_PREFIXES: 'Build bot says' })).toBe(1);
+      expect(await moved(row, { ...PASTES, OMC_JEV_COMPACT_HOOK_ROW_PREFIXES: '' })).toBe(1);
+    });
+
+    it('counts rows that no host or built-in prefix covers as messages of the user until the variable lists their prefix', async () => {
+      for (const text of ['Quoted from GitHub: a comment on the pull request.', 'Background (from the session that started this one): notes.']) {
+        const row = rowOf(text);
+        expect(await moved(row), text).toBe(1);
+        expect(await moved(row, { ...PASTES, OMC_JEV_COMPACT_HOOK_ROW_PREFIXES: 'Quoted from GitHub, Background (from the session that started this one)' }), text).toBe(0);
+      }
+    });
+
+    it('reads the prefixes from the settings env too', async () => {
+      const run = await compactPastes(pasteThenRow(rowOf('Custom hook note: the check passed.')), { env: PASTES, settingsEnv: { OMC_JEV_COMPACT_HOOK_ROW_PREFIXES: 'Custom hook note:' } });
+      expect(run.record.pastes.moved).toBe(0);
+    });
+  });
+
+  describe('the prediction with a token target and pasted text (OMC_JEV_COMPACT_TARGET_PERCENT)', () => {
+    // The text a tag moves to a file comes off the predicted tokens before the plan: 0.455 per moved character less 0.58 per character of the trace.
+    const TARGET = { OMC_JEV_COMPACT_TARGET_PERCENT: '50' };
+    // A manual compaction takes the host's tokens as they are (an automatic one is raised to the threshold).
+    const MANUAL = { trigger: 'manual' };
+    const atTokens = (tokens) => () => ({ context: { tokens, window: 200000 } });
+    const messages = withPastes([`${OUTSIDE} ${sized(20000)}`]);
+    const off = { ...ACTIVE_ENV, ...TARGET };
+    const on = { ...PASTES, ...TARGET };
+
+    it('below the rule\'s target the scores decide, so the prediction is lower by the moved text and nothing else', async () => {
+      const without = await compactPastes(messages, { env: off, event: MANUAL, usage: atTokens(60000) });
+      const withPaste = await compactPastes(messages, { env: on, event: MANUAL, usage: atTokens(60000) });
+      expect(without.record).toMatchObject({ result: 'jev', cascade_pass: 'manual' });
+      expect(withPaste.record).toMatchObject({ result: 'jev', cascade_pass: 'manual' });
+      expect(withPaste.record.pastes).toMatchObject({ moved: 1, installed: true });
+      const expected = 0.455 * withPaste.record.pastes.moved_chars - 0.58 * withPaste.record.pastes.trace_chars;
+      expect(expected).toBeGreaterThan(8000);
+      expect(Math.abs(without.record.tokens_after_pred - withPaste.record.tokens_after_pred - expected)).toBeLessThanOrEqual(1);
+    });
+
+    it('above the target the cascade stops earlier: fewer results become traces and the prediction still reaches the target', async () => {
+      const without = await compactPastes(messages, { env: off, event: MANUAL, usage: atTokens(105000) });
+      const withPaste = await compactPastes(messages, { env: on, event: MANUAL, usage: atTokens(105000) });
+      expect(without.record).toMatchObject({ result: 'jev', cut: 'cascade' });
+      expect(withPaste.record).toMatchObject({ result: 'jev', cut: 'cascade' });
+      expect(withPaste.record.pastes.moved).toBe(1);
+      expect(withPaste.record.traced).toBeLessThan(without.record.traced);
+      expect(withPaste.record.tokens_after_pred).toBe(withPaste.record.cascade_predicted_tokens);
+      expect(withPaste.record.cascade_predicted_tokens).toBeLessThanOrEqual(withPaste.record.cascade_target_tokens);
+      expect(without.record.cascade_predicted_tokens).toBeLessThanOrEqual(without.record.cascade_target_tokens);
+    });
+
+    it('takes nothing off in shadow mode, with the switch off or unset, or when the tag stays: the same prediction as without the stage', async () => {
+      const base = await compactPastes(messages, { env: off, event: MANUAL, usage: atTokens(105000) });
+      for (const OMC_JEV_COMPACT_PASTES of ['shadow', 'off', '', 'yes']) {
+        const run = await compactPastes(messages, { env: { ...PASTES, ...TARGET, OMC_JEV_COMPACT_PASTES }, event: MANUAL, usage: atTokens(105000) });
+        expect(run.record.tokens_after_pred, OMC_JEV_COMPACT_PASTES).toBe(base.record.tokens_after_pred);
+        expect(run.record.traced, OMC_JEV_COMPACT_PASTES).toBe(base.record.traced);
+        expect(run.written, OMC_JEV_COMPACT_PASTES).toHaveLength(0);
+      }
+      const refused = await compactPastes(messages, { env: on, event: MANUAL, usage: atTokens(105000), jev: jevSays(0.1) });
+      expect(refused.record.pastes).toMatchObject({ yes: 0, moved: 0 });
+      expect(refused.record.tokens_after_pred).toBe(base.record.tokens_after_pred);
+    });
+  });
+
   describe('long replies (OMC_JEV_COMPACT_LONG_REPLIES)', () => {
     // Long runs of assistant text well before the newest user messages move to a file without a question to Jev; the replies that answer
     // a user message directly, the newest turns and rows the host could not rebuild from text stay; the default is off.
@@ -4031,6 +4143,111 @@ describe('jev-compaction module: pasted text (OMC_JEV_COMPACT_PASTES)', () => {
       expect(sub.record).not.toHaveProperty('replies');
       const few = await compactPastes(replyConversation(2), { env: REPLIES });
       expect(few.record.replies).toMatchObject({ limit_row: 0, moved: 0 });
+    });
+
+    describe('rows that a hook or the host puts in as a user message (the reply stage)', () => {
+      // Question A is answered by an opening reply, a long middle reply and a closing reply, with the row under test between the middle and the closing
+      // reply. A hook or host row does not end the span of replies to the question, so the closing reply is the last one and the middle reply moves; a
+      // message of the user there does end it, and the middle reply is the last reply to the question and stays.
+      const rowOf = (text, extra = {}) => ({ role: 'user', text, toolUses: [], ...extra });
+      function between(row) {
+        const rows = conversation(30).slice(0, -2).map((m) => ({ ...m }));
+        rows.push(U('Question A: what about part A?'), A('Looking at part A.', 'a0'), Rr('a0'), A(long('middle'), 'b0'), Rr('b0'), row, A('Part A is done.'));
+        for (let k = 1; k <= 8; k++) rows.push(U(`Question ${k}: and part ${k}?`), A(`Looking at part ${k}.`, `c${k}`), Rr(`c${k}`), A(`Part ${k} is done.`));
+        return rows.map((m, k) => Object.freeze({ ...m, handle: `h${k}` }));
+      }
+      const movedMiddle = async (row, env = REPLIES) => {
+        const run = await compactPastes(between(row), { env });
+        return { moved: run.record.replies.moved, whole: Boolean(replyOf(run.out, long('middle'))) };
+      };
+
+      it('keeps the middle reply when a message of the user stands between it and the closing reply', async () => {
+        expect(await movedMiddle(rowOf('Part A looks fine, carry on with part B.'))).toEqual({ moved: 0, whole: true });
+      });
+
+      it('moves the middle reply when the row between is a hook or host row, that is isMeta or opens with a hook prefix', async () => {
+        for (const row of [
+          rowOf('Please continue.', { isMeta: true }),
+          rowOf('Stop hook feedback: do not stop yet.'),
+          rowOf('<ci-monitor-event>the build finished</ci-monitor-event>'),
+          rowOf('<cross-session-message from="peer">hello</cross-session-message>'),
+        ]) {
+          expect(await movedMiddle(row), row.text).toEqual({ moved: 1, whole: false });
+        }
+      });
+
+      it('moves the middle reply for every built-in host and hook row prefix', async () => {
+        for (const text of [
+          'Goal check-in: the goal still holds.', 'A session-scoped Stop hook is now active with a condition.',
+          '[Image: source: /tmp/shot.png]', '[Image: original 2000x1500, displayed at 1568x1176.]',
+          '(Re-invocation of the skill, same arguments)', '[Usage limit reached, resets at noon]',
+        ]) {
+          expect(await movedMiddle(rowOf(text)), text).toEqual({ moved: 1, whole: false });
+        }
+      });
+
+      it('takes more prefixes from OMC_JEV_COMPACT_HOOK_ROW_PREFIXES, and without it the row counts as a message of the user', async () => {
+        const row = rowOf('Custom hook note: the check passed.');
+        expect(await movedMiddle(row)).toEqual({ moved: 0, whole: true });
+        expect(await movedMiddle(row, { ...REPLIES, OMC_JEV_COMPACT_HOOK_ROW_PREFIXES: 'Build bot says, Custom hook note:' })).toEqual({ moved: 1, whole: false });
+      });
+    });
+
+    describe('the prediction with a token target (OMC_JEV_COMPACT_TARGET_PERCENT)', () => {
+      // The text a long reply moves to a file comes off the predicted tokens before the plan: 0.455 per moved character less 0.58 per character of the trace.
+      const TARGET = { OMC_JEV_COMPACT_TARGET_PERCENT: '50' };
+      // A manual compaction takes the host's tokens as they are (an automatic one is raised to the threshold).
+      const MANUAL = { trigger: 'manual' };
+      const atTokens = (tokens) => () => ({ context: { tokens, window: 200000 } });
+      const messages = replyConversation(8, { middle: (k) => long(`reply${k}`, 6000) });
+      const off = { ...ACTIVE_ENV, ...TARGET };
+      const on = { ...REPLIES, ...TARGET };
+
+      it('below the rule\'s target the scores decide, so the prediction is lower by the moved text and nothing else', async () => {
+        const without = await compactPastes(messages, { env: off, event: MANUAL, usage: atTokens(60000) });
+        const withReplies = await compactPastes(messages, { env: on, event: MANUAL, usage: atTokens(60000) });
+        expect(without.record).toMatchObject({ result: 'jev', cascade_pass: 'manual' });
+        expect(withReplies.record).toMatchObject({ result: 'jev', cascade_pass: 'manual' });
+        expect(withReplies.record.replies).toMatchObject({ moved: 2, installed: true });
+        const expected = 0.455 * withReplies.record.replies.moved_chars - 0.58 * withReplies.record.replies.trace_chars;
+        expect(expected).toBeGreaterThan(4000);
+        expect(Math.abs(without.record.tokens_after_pred - withReplies.record.tokens_after_pred - expected)).toBeLessThanOrEqual(1);
+      });
+
+      it('above the target the cascade stops earlier: fewer results become traces and the prediction still reaches the target', async () => {
+        const without = await compactPastes(messages, { env: off, event: MANUAL, usage: atTokens(110000) });
+        const withReplies = await compactPastes(messages, { env: on, event: MANUAL, usage: atTokens(110000) });
+        expect(without.record).toMatchObject({ result: 'jev', cut: 'cascade' });
+        expect(withReplies.record).toMatchObject({ result: 'jev', cut: 'cascade' });
+        expect(withReplies.record.replies.moved).toBe(2);
+        expect(withReplies.record.traced).toBeLessThan(without.record.traced);
+        expect(withReplies.record.tokens_after_pred).toBe(withReplies.record.cascade_predicted_tokens);
+        expect(withReplies.record.cascade_predicted_tokens).toBeLessThanOrEqual(withReplies.record.cascade_target_tokens);
+        expect(without.record.cascade_predicted_tokens).toBeLessThanOrEqual(without.record.cascade_target_tokens);
+      });
+
+      it('the host handoff sees the cut the stage makes: with no results traced the prediction stays at the tokens before and goes to the host\'s summary, with the replies moved the cut is above 30 % and Jev finishes', async () => {
+        const wholeEach = (body) => okResponse({ answers: Object.fromEntries(Object.keys(body.questions).map((q) => [q, { type: 'score', score: 3, confidence: 0.9 }])) });
+        const talk = replyConversation(20, { middle: (k) => long(`reply${k}`, 6000) });
+        const handoff = { ...ACTIVE_ENV, ...TARGET, OMC_JEV_COMPACT_HOST_HANDOFF: '1' };
+        // 84 000 tokens are below the rule's target of 85 000, so the scores alone decide, and every result is scored whole.
+        const without = await compactPastes(talk, { env: handoff, event: MANUAL, usage: atTokens(84000), jev: wholeEach });
+        const withReplies = await compactPastes(talk, { env: { ...handoff, OMC_JEV_COMPACT_LONG_REPLIES: 'active' }, event: MANUAL, usage: atTokens(84000), jev: wholeEach });
+        expect(without.record).toMatchObject({ result: 'fallback', reason: 'cut_below_host_min', cascade_pass: 'manual', tokens_after_pred: 84000 });
+        expect(withReplies.record.replies.moved).toBeGreaterThan(10);
+        expect(withReplies.record).toMatchObject({ result: 'jev', cascade_pass: 'manual' });
+        expect(withReplies.record.tokens_after_pred).toBeLessThan(0.7 * 84000);
+      });
+
+      it('takes nothing off in shadow mode, with the switch off or unset: the same prediction as without the stage', async () => {
+        const base = await compactPastes(messages, { env: off, event: MANUAL, usage: atTokens(110000) });
+        for (const OMC_JEV_COMPACT_LONG_REPLIES of ['shadow', 'off', '', 'yes']) {
+          const run = await compactPastes(messages, { env: { ...ACTIVE_ENV, ...TARGET, OMC_JEV_COMPACT_LONG_REPLIES }, event: MANUAL, usage: atTokens(110000) });
+          expect(run.record.tokens_after_pred, OMC_JEV_COMPACT_LONG_REPLIES).toBe(base.record.tokens_after_pred);
+          expect(run.record.traced, OMC_JEV_COMPACT_LONG_REPLIES).toBe(base.record.traced);
+          expect(run.written, OMC_JEV_COMPACT_LONG_REPLIES).toHaveLength(0);
+        }
+      });
     });
   });
 });

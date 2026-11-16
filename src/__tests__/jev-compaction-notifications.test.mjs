@@ -4,7 +4,7 @@
  * is scored by Jev and kept, cut or removed with a trace. Without the variable the compaction is unchanged.
  */
 
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 
 import { isNotification, register } from '../../hooks/jev-compaction.mjs';
 
@@ -132,10 +132,20 @@ describe('isNotification', () => {
     expect(isNotification(row(`${bare('x')}\n${foreign}`))).toBe(false);
   });
 
-  it('reads a row of 40 000 unclosed reminder tags in linear time', () => {
-    const t0 = Date.now();
-    isNotification(row(`[SYSTEM NOTIFICATION - NOT USER INPUT]\n${'<system-reminder>'.repeat(40000)}`));
-    expect(Date.now() - t0).toBeLessThan(1000);
+  it('reads a row of 40 000 unclosed reminder tags with a bounded number of searches for the closing tag', () => {
+    // The searches are counted, not timed: a search for the closing tag from every opener would make 40 000 of them (and a quadratic read).
+    const search = vi.spyOn(String.prototype, 'indexOf');
+    let result;
+    let closers;
+    try {
+      result = isNotification(row(`[SYSTEM NOTIFICATION - NOT USER INPUT]\n${'<system-reminder>'.repeat(40000)}`));
+      closers = search.mock.calls.filter(([what]) => what === '</system-reminder>').length;
+    } finally {
+      search.mockRestore();
+    }
+    expect(result).toBe(true);
+    expect(closers).toBeGreaterThan(0);
+    expect(closers).toBeLessThan(10);
   });
 });
 

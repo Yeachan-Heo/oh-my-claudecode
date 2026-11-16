@@ -841,6 +841,32 @@ describe('own request: a cut under 30 % is answered with a skip', () => {
     expect(e.state.compact === 1 && e.state.answers[0]?.messages?.length > 0 && e.state.hostSummary === 0).toBe(true);
   });
 
+  it('the own request at 120 500 tokens: the cascade ends at 84 922 tokens, a cut of 29.5 %, so the request is skipped', async () => {
+    // The cascade stops at the first step that reaches the 85 000 target, and one step is the saving of one result, so the wording of the trace decides where it
+    // lands: a longer trace wording gives a different figure (a trace line 19 characters longer, a shortened-result note 2 characters longer and result markers
+    // 2 and 3 characters longer give 83 471 tokens, a cut of 30.7 %, and no skip). A difference of wording, not of logic.
+    const e = await ownEnv(OWN_ON, 120_500, markedSteps(40));
+    await e.turn(); await e.turn();
+    const rec = e.records().filter((r) => r.event === 'compact');
+    expect(e.state.compact).toBe(1);
+    expect(e.state.hostSummary).toBe(0);
+    expect(typeof e.state.answers[0].skip).toBe('string');
+    expect(rec).toHaveLength(1);
+    expect(rec[0]).toMatchObject({ reason: 'cut_below_host_min_skipped', cascade_target_tokens: 85000, cascade_pass: 'short_or_trace', tokens_after_pred: 84922 });
+  });
+
+  it('the own request above the tokens where the target of 85 000 is a cut of 30 % (121 429 and more) is finished by Jev without a skip, a cut just above 30 %', async () => {
+    const e = await ownEnv(OWN_ON, 122_000, markedSteps(40));
+    await e.turn(); await e.turn();
+    const rec = e.records().filter((r) => r.event === 'compact');
+    expect(e.state.compact).toBe(1);
+    expect(e.state.hostSummary).toBe(0);
+    expect(e.state.answers[0].skip).toBeUndefined();
+    expect(rec).toHaveLength(1);
+    expect(rec[0]).toMatchObject({ result: 'jev', cascade_target_tokens: 85000 });
+    expect(1 - rec[0].tokens_after_pred / rec[0].tokens_before).toBeGreaterThanOrEqual(0.3);
+  });
+
   it('a request whose floor does not give 30 % either (little to remove in a large context) is not made: no request, no question to Jev', async () => {
     const e = await ownEnv(OWN_ON, 150_000, markedSteps(12, 400));
     for (let i = 0; i < 8; i++) await e.turn();
@@ -952,6 +978,30 @@ describe('the prediction of the stages that move text', () => {
     const st = on.record.agent_messages;
     const expected = 0.43 * frame + (st && !st.error && st.mode === 'active' ? 0.455 * st.moved_chars - 0.58 * st.trace_chars : 0);
     expect(frame).toBeGreaterThan(0);
+    expect(Math.abs(off.record.tokens_after_pred - on.record.tokens_after_pred - expected), `off ${off.record.tokens_after_pred}, on ${on.record.tokens_after_pred}, expected ${expected}`).toBeLessThanOrEqual(1);
+  });
+
+  it('the long replies: the prediction is lower by 0.455 per moved character less 0.58 per character of the traces, within one token', async () => {
+    // A discussion in which the long middle replies of the older turns move to files (the first and the last reply of each turn stay); one result of 30 000
+    // characters gives the compaction something to cut, and it is cut the same way with the stage on and off.
+    const w = [{ role: 'user', text: 'Task: discuss the subject.', toolUses: [] }, ...bashPair(0, 30000)];
+    for (let k = 1; k <= 20; k++) {
+      w.push({ role: 'assistant', text: `Took point ${k}.`, toolUses: [] });
+      w.push({ role: 'assistant', text: `Answer ${k}: ${fill(3000)}`, toolUses: [] });
+      w.push({ role: 'assistant', text: `Done ${k}.`, toolUses: [] });
+      w.push({ role: 'user', text: `Next ${k}, please give the next point.`, toolUses: [] });
+    }
+    w.push({ role: 'assistant', text: 'The end.', toolUses: [] });
+    const msgs = w.map((m, i) => Object.freeze({ ...m, handle: `h${i}` }));
+    const off = await compactRun({ ...TARGET, OMC_JEV_COMPACT_AGENT_TRIM: 'off' }, msgs);
+    const on = await compactRun({ ...TARGET, OMC_JEV_COMPACT_AGENT_TRIM: 'off', OMC_JEV_COMPACT_LONG_REPLIES: 'active' }, msgs);
+    expect(off.record.result).toBe('jev');
+    expect(on.record.result).toBe('jev');
+    const st = on.record.replies;
+    expect(st).toMatchObject({ mode: 'active', installed: true });
+    expect(st.moved).toBeGreaterThan(5);
+    expect(st.moved_chars).toBeGreaterThan(10000);
+    const expected = 0.455 * st.moved_chars - 0.58 * st.trace_chars;
     expect(Math.abs(off.record.tokens_after_pred - on.record.tokens_after_pred - expected), `off ${off.record.tokens_after_pred}, on ${on.record.tokens_after_pred}, expected ${expected}`).toBeLessThanOrEqual(1);
   });
 
