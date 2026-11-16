@@ -13,6 +13,7 @@ import { readFileSync } from 'fs';
 import { join } from 'path';
 import { readStdin } from './lib/stdin.mjs';
 import { resolveOmcStateRoot } from './lib/state-root.mjs';
+import { loadContextText } from './lib/context-text-loader.mjs';
 
 const LOOKBACK_MS = 7 * 24 * 3600_000;
 
@@ -57,6 +58,8 @@ function reconcile(entries) {
   return findings;
 }
 
+// Opt-in text cleaning (OMC_CONTEXT_TEXT_SANITIZE=1 or true): the ledger fields are cleaned before they are injected.
+// The module is loaded only when the switch is on; with the switch off the fields are injected unchanged.
 async function main() {
   const raw = await readStdin(3000);
   let payload = null;
@@ -85,9 +88,12 @@ async function main() {
     return;
   }
 
+  // Ledger fields are data: with the switch on each field is cleaned to one line and cut to 200 characters.
+  const sanitize = await loadContextText();
+  const field = (value) => (sanitize ? sanitize.cleanHostText(value, 200) : value);
   const lines = [
     `[RUN RECONCILIATION] ${findings.length} unattended run(s) ended without a notepad closeout — the run's friction was not captured:`,
-    ...findings.map((entry) => `- ${entry.run}${entry.sessionId ? ` (session ${entry.sessionId})` : ''}: ended ${entry.ts} without a notepad closeout`),
+    ...findings.map((entry) => `- ${field(entry.run)}${entry.sessionId ? ` (session ${field(entry.sessionId)})` : ''}: ended ${field(entry.ts)} without a notepad closeout`),
     'Nothing was changed automatically. If a lesson was learned in those runs, record it now (the notepad is the refit surface); otherwise acknowledge and move on.',
   ];
 

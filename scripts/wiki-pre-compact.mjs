@@ -1,6 +1,9 @@
 #!/usr/bin/env node
 import { readStdin } from './lib/stdin.mjs';
+import { loadContextText } from './lib/context-text-loader.mjs';
 
+// Opt-in text cleaning (OMC_CONTEXT_TEXT_SANITIZE=1 or true): the wiki page metadata is cleaned before it is written.
+// The module is loaded only when the switch is on; with the switch off the text is written unchanged.
 async function main() {
   const input = await readStdin(1000);
   try {
@@ -8,9 +11,10 @@ async function main() {
     const { onPreCompact } = await import('../dist/hooks/wiki/session-hooks.js');
     const result = onPreCompact(data);
     if (result.additionalContext) {
+      const sanitize = await loadContextText();
       console.log(JSON.stringify({
         continue: true,
-        systemMessage: result.additionalContext,
+        systemMessage: sanitize ? sanitize.cleanTextBlock(result.additionalContext) : result.additionalContext,
       }));
     } else {
       console.log(JSON.stringify({ continue: true, suppressOutput: true }));

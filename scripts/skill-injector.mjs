@@ -18,6 +18,7 @@ import { readStdin } from './lib/stdin.mjs';
 import { createRequire } from 'module';
 import { atomicWriteFileSync, ensureDirSync } from './lib/atomic-write.mjs';
 import { stripLeadingUtf8Bom } from './lib/utf8-bom.mjs';
+import { loadContextText } from './lib/context-text-loader.mjs';
 
 const skipHooks = (process.env.OMC_SKIP_HOOKS || '').split(',').map(token => token.trim());
 const isDisabled = process.env.DISABLE_OMC === '1' ||
@@ -565,6 +566,8 @@ function formatSkillsMessage(skills) {
   return `${header}${descriptors.join('')}${footer}`;
 }
 
+// Opt-in text cleaning (OMC_CONTEXT_TEXT_SANITIZE=1 or true): the skill descriptors read from skill files are cleaned
+// before they are injected. The module is loaded only when the switch is on; with the switch off the text is unchanged.
 // Main
 async function main() {
   try {
@@ -606,11 +609,13 @@ async function main() {
     }
 
     if (matchingSkills.length > 0) {
+      const message = formatSkillsMessage(matchingSkills);
+      const sanitize = await loadContextText();
       console.log(JSON.stringify({
         continue: true,
         hookSpecificOutput: {
           hookEventName: 'UserPromptSubmit',
-          additionalContext: formatSkillsMessage(matchingSkills)
+          additionalContext: sanitize ? sanitize.cleanTextBlock(message) : message
         }
       }));
     } else {

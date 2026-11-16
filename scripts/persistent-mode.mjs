@@ -27,6 +27,7 @@ import { join, dirname, resolve, normalize, sep } from "path";
 import { homedir } from "os";
 import { fileURLToPath, pathToFileURL } from "url";
 import { isJevShadowOptedIn, jevLastRequestId, jevNoulOf, jevStateIds, recordJevApplied, recordJevShadow, setJevHookContext, setJevSessionId } from "./lib/jev-shadow.mjs";
+import { loadContextText } from './lib/context-text-loader.mjs';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -1667,8 +1668,12 @@ function delegateToBridge(input) {
   return null;
 }
 
+// Opt-in text cleaning (OMC_CONTEXT_TEXT_SANITIZE=1 or true): the Ralph task line and the /goal objective in Stop blocks are
+// cleaned only when the switch is on. main() loads the module; with the switch off nothing is imported.
+let contextText = null;
 async function main() {
   try {
+    contextText = await loadContextText();
     if (shouldSkipPersistentModeHook()) {
       writeSafeContinue();
       return;
@@ -1933,7 +1938,7 @@ async function main() {
           }
           writeJsonFile(ralph.path, ralph.state);
 
-          let reason = `[RALPH LOOP - ITERATION ${iteration + 1}/${maxIter}] Work is NOT done. Continue working.\nWhen FULLY complete (after Architect verification), run /oh-my-claudecode:cancel to cleanly exit ralph mode and clean up all state files. If cancel fails, retry with /oh-my-claudecode:cancel --force.\n${ralph.state.prompt ? `Task: ${ralph.state.prompt}` : ""}`;
+          let reason = `[RALPH LOOP - ITERATION ${iteration + 1}/${maxIter}] Work is NOT done. Continue working.\nWhen FULLY complete (after Architect verification), run /oh-my-claudecode:cancel to cleanly exit ralph mode and clean up all state files. If cancel fails, retry with /oh-my-claudecode:cancel --force.\n${ralph.state.prompt ? `Task: ${contextText ? contextText.cleanHostText(ralph.state.prompt, 500) : ralph.state.prompt}` : ""}`;
           if (errorGuidance) {
             reason = errorGuidance + reason;
           }
@@ -2059,7 +2064,7 @@ async function main() {
 
         let reason = `[ULTRAGOAL #${newCount}/${maxReinforcements}] Ultragoal mode is active. Continue the durable goal workflow, keep the matching Claude /goal active, and checkpoint .omc/ultragoal/ledger.jsonl before stopping. When all ultragoal stories are complete and the final quality gate passes, run /oh-my-claudecode:cancel to cleanly exit.`;
         const objective = getUltragoalObjective(ultragoal.state, omcRoot);
-        if (objective) reason += `\nClaude /goal objective: ${objective}`;
+        if (objective) reason += `\nClaude /goal objective: ${contextText ? contextText.cleanHostText(objective) : objective}`;
         if (errorGuidance) {
           reason = errorGuidance + reason;
         }

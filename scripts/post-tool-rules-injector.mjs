@@ -18,6 +18,7 @@
 import { isAbsolute, join, dirname } from 'path';
 import { fileURLToPath, pathToFileURL } from 'url';
 import { readStdin } from './lib/stdin.mjs';
+import { loadContextText } from './lib/context-text-loader.mjs';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -48,6 +49,8 @@ function extractFilePath(toolInput) {
   return toolInput.file_path || toolInput.path || null;
 }
 
+// Opt-in text cleaning (OMC_CONTEXT_TEXT_SANITIZE=1 or true): the rules file text read from disk is cleaned before it is
+// injected. The module is loaded only when the switch is on; with the switch off the text is injected unchanged.
 async function main() {
   // Skip guard: honor the documented kill switches (see issues #838, #3253).
   // This hook injects context on PostToolUse alongside post-tool-verifier.mjs, so it
@@ -101,11 +104,12 @@ async function main() {
     const rulesText = hook.processToolExecution(toolName, filePath, sessionId);
 
     if (rulesText) {
+      const sanitize = await loadContextText();
       console.log(JSON.stringify({
         continue: true,
         hookSpecificOutput: {
           hookEventName: 'PostToolUse',
-          additionalContext: rulesText,
+          additionalContext: sanitize ? sanitize.cleanTextBlock(rulesText) : rulesText,
         },
       }));
     } else {

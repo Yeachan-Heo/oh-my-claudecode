@@ -26,7 +26,10 @@ import { readStdin } from './lib/stdin.mjs';
 import { resolveOmcStateRoot } from './lib/state-root.mjs';
 import { BOUNDED_GIT_TIMEOUT_MS } from './lib/bounded-git-timeout.mjs';
 import { jevNoulOf, jevStateIds, recordJevApplied, recordJevShadow, setJevHookContext, setJevSessionId } from './lib/jev-shadow.mjs';
+import { loadContextText } from './lib/context-text-loader.mjs';
 
+// Opt-in text cleaning (OMC_CONTEXT_TEXT_SANITIZE=1 or true): file names from git are cleaned only when the switch is on.
+let contextText = null;
 const DEFAULT_EXTENSIONS = ['.ts', '.tsx', '.js', '.jsx', '.py', '.go', '.rs'];
 const DEFAULT_MAX_FILES = 10;
 const MARKER_FILENAME = 'code-simplifier-triggered.marker';
@@ -108,8 +111,9 @@ function getModifiedFiles(cwd, extensions, maxFiles) {
 }
 
 function buildMessage(files) {
-  const fileList = files.map((f) => `  - ${f}`).join('\n');
-  const fileArgs = files.join('\\n');
+  const shown = contextText ? files.map((f) => contextText.cleanHostText(f, 300)) : files;
+  const fileList = shown.map((f) => `  - ${f}`).join('\n');
+  const fileArgs = shown.join('\\n');
   return (
     `[CODE SIMPLIFIER] Recently modified files detected. Delegate to the ` +
     `code-simplifier agent to simplify the following files for clarity, ` +
@@ -131,6 +135,7 @@ async function main() {
       return;
     }
     setJevSessionId(data.session_id || data.sessionId, data.agent_id || data.agentId);
+    contextText = await loadContextText();
 
     const cwd = data.cwd || data.directory || process.cwd();
     await setJevHookContext(data);

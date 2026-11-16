@@ -462,6 +462,30 @@ Session Start
 
 ---
 
+### Opt-in text cleaning (`scripts/lib/context-text-sanitize.mjs`)
+
+Set `OMC_CONTEXT_TEXT_SANITIZE` to `1` or `true` to clean the text that hooks copy into their messages from files, transcripts, state files and process output. Without the variable the hooks write the same text as before and do not load the module.
+
+- Control, format and bidi characters and the other invisible characters of the set (see `scripts/lib/context-text-sanitize.mjs`) become spaces; in multi-line blocks line feed and tab are kept. The closing markers of the envelopes (`</notepad-context>`, `</session-restore>`, `</project-memory-context>`) and both `<system-reminder>` tags have their `<` replaced by `<\`, so cleaned text cannot close an envelope early. This goes beyond removing invisible characters.
+- `post-tool-verifier.mjs`: the TaskOutput summary is wrapped in an untrusted-output envelope (a closing marker inside the output is escaped). Running agent names are cleaned and cut to 80 characters, at most 10 are listed, the rest as `+N more`; the counts are cleaned too. A running agent entry without `agent_type` is listed as `unknown` with or without the switch; before, it dropped the whole summary.
+- `code-simplifier.mjs`: modified file names are cleaned and cut to 300 characters.
+- `session-start.mjs`: the compaction registry (both paths), the checkpoint restore, the project memory summary and the notepad context are cleaned; the restored Ralph prompt is cleaned and cut to 500 characters.
+- `pre-tool-enforcer.mjs`: the /goal objective and the expected objective in the ultragoal deny reason are cleaned and cut to 500 characters.
+- `persistent-mode.mjs`: the Ralph task line is cleaned and cut to 500 characters; the /goal objective in the Stop block is cleaned.
+- `post-tool-directory-context-injector.mjs`: the README text read from disk is cleaned before it is injected.
+- `post-tool-rules-injector.mjs`: the text of the rules files read from disk is cleaned before it is injected.
+- `skill-injector.mjs`: the learned skill descriptors read from skill files are cleaned before they are injected.
+- `wiki-session-start.mjs`: the wiki index text is cleaned before it is injected.
+- `wiki-pre-compact.mjs`: the wiki page metadata in the system message is cleaned.
+- `runs-reconciler.mjs`: each run ledger field is cleaned to one line and cut to 200 characters.
+- `stale-run-reporter.mjs`: the state-file fields are cleaned and cut to 200 characters; the state file path is cut to 500 characters.
+
+The hook scripts share one loader, `scripts/lib/context-text-loader.mjs`, which imports the module only when the switch is on and returns `null` on a failed import (the text is then written unchanged).
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `OMC_CONTEXT_TEXT_SANITIZE` | (unset) | `1` or `true` enables the cleaning in the hooks listed above. Any other value leaves the messages unchanged. |
+
 ## Magic Keywords
 
 Magic keywords automatically activate OMC skills or execution modes when specific words or patterns are detected in the user's natural language prompt. No slash command is needed — include a keyword in your prompt and the feature activates automatically.

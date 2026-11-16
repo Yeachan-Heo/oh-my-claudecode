@@ -14,6 +14,7 @@ import { fileURLToPath, pathToFileURL } from 'url';
 import { getClaudeConfigDir, getUpdateCheckCachePath } from './lib/config-dir.mjs';
 import { resolveOmcStateRoot } from './lib/state-root.mjs';
 import { pathIdentity, publishCacheOccupancy, readOccupiedPluginRoots } from './lib/cache-occupancy.mjs';
+import { loadContextText } from './lib/context-text-loader.mjs';
 
 // Detached update-cache refresh: argv flag and the child's overall deadline.
 const REFRESH_UPDATE_CACHE_FLAG = '--refresh-update-cache';
@@ -1518,9 +1519,16 @@ async function jevDeliveryGuardAtSessionStart(data) {
 }
 
 // Main
+// Opt-in text cleaning (OMC_CONTEXT_TEXT_SANITIZE=1 or true): the context read from state files, notepad and project memory is
+// cleaned only when the switch is on. main() loads the module; with the switch off the text passes unchanged.
+let contextText = null;
+const cleanBlock = (text) => (contextText ? contextText.cleanTextBlock(text) : text);
+const cleanHost = (text, max) => (contextText ? contextText.cleanHostText(text, max) : text);
+
 async function main() {
   const sessionStartDeadline = Date.now() + SESSION_START_HOOK_TIMEOUT_MS;
   try {
+    contextText = await loadContextText();
     const input = await readStdin();
     let data = {};
     try { data = JSON.parse(input); } catch {}
@@ -1556,7 +1564,7 @@ async function main() {
         console.log(JSON.stringify({
           continue: true,
           ...(noWorkspaceMessage ? { systemMessage: noWorkspaceMessage } : {}),
-          ...(compaction.context ? { hookSpecificOutput: { hookEventName: 'SessionStart', additionalContext: compaction.context } } : {}),
+          ...(compaction.context ? { hookSpecificOutput: { hookEventName: 'SessionStart', additionalContext: cleanBlock(compaction.context) } } : {}),
         }));
         return;
       }
@@ -1583,7 +1591,7 @@ async function main() {
         const prepared = preparePreCompactCheckpointRestore(omcRoot, sessionId);
         if (prepared) {
           pendingRestore = { ...prepared, preparePreCompactCheckpointRestore, claimPreCompactCheckpointRestore };
-          pendingRestoreMessage = `<session-restore>\n\n${prepared.text}\n\n</session-restore>\n\n---\n`;
+          pendingRestoreMessage = `<session-restore>\n\n${cleanBlock(prepared.text)}\n\n</session-restore>\n\n---\n`;
           messages.push(pendingRestoreMessage);
         }
       } catch {
@@ -1594,7 +1602,7 @@ async function main() {
     // Jev compaction (opt-in point `compaction`): move the hooks module's records to
     // compaction.jsonl; after a compaction that used the built-in summary, add the work-state registry.
     const compaction = await jevCompactionAfterSessionStart(data, () => join(omcRoot, 'state', 'jev'));
-    if (compaction.context) messages.push(`<session-restore>\n\n${compaction.context}\n\n</session-restore>\n\n---\n`);
+    if (compaction.context) messages.push(`<session-restore>\n\n${cleanBlock(compaction.context)}\n\n</session-restore>\n\n---\n`);
     if (compaction.systemMessage) userMessages.push(compaction.systemMessage);
     const guardMessage = await jevDeliveryGuardAtSessionStart(data);
     if (guardMessage) userMessages.push(guardMessage);
@@ -1691,7 +1699,7 @@ async function main() {
 [RALPH LOOP RESTORED]
 
 You have an active ralph-loop session.
-Original task: ${ralphState.prompt || 'Task in progress'}
+Original task: ${cleanHost(ralphState.prompt || 'Task in progress', 500)}
 Iteration: ${ralphState.iteration || 1}/${ralphState.max_iterations || 10}
 
 Treat this as prior-session context only. Prioritize the user's newest request, and resume the ralph loop only if the user explicitly asks to continue it.
@@ -1745,7 +1753,7 @@ Treat this as prior-session context only. Prioritize the user's newest request, 
 
 [PROJECT MEMORY]
 
-${summary}
+${cleanBlock(summary)}
 
 </project-memory-context>
 
@@ -1772,7 +1780,7 @@ ${summary}
           if (cleanContent) {
             messages.push(`<notepad-context>
 [NOTEPAD - Priority Context]
-${cleanContent}
+${cleanBlock(cleanContent)}
 </notepad-context>`);
           }
         }
@@ -1961,7 +1969,7 @@ ${cleanContent}
           Atomics.wait(waitCell, 0, 0, 10);
           const refreshed = pendingRestore.preparePreCompactCheckpointRestore(omcRoot, sessionId);
           if (!refreshed) break;
-          const refreshedMessage = `<session-restore>\n\n${refreshed.text}\n\n</session-restore>\n\n---\n`;
+          const refreshedMessage = `<session-restore>\n\n${cleanBlock(refreshed.text)}\n\n</session-restore>\n\n---\n`;
           const refreshedMessages = messages.map((message) => (
             message === pendingRestoreMessage ? refreshedMessage : message
           ));
