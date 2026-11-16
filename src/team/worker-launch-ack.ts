@@ -13,7 +13,7 @@ import { absPath, TeamPaths } from './state-paths.js';
 import { atomicWriteJson } from '../lib/atomic-write.js';
 import { lockPathFor, withFileLock } from '../lib/file-lock.js';
 import { checkHostLoadGate } from '../lib/host-load-gate.js';
-import { isHerdrPaneId } from './tmux-session.js';
+import { isHerdrPaneId } from './pane-id.js';
 
 import { gzipSync } from 'node:zlib';
 
@@ -2563,14 +2563,45 @@ export async function runWorkerLaunchBootstrap(value: unknown): Promise<WorkerLa
           // the child exit has been observed, only the reap callback may
           // settle completion.
           if (process.platform !== 'win32' && !childExitObserved
-            && child.exitCode === null && child.signalCode === null && launchGroup !== null) {
-            const retryResult = await terminateOwnedProcessGroup({
-              pid: launchGroup.pid, expectedStartIdentity: launchGroup.processStartIdentity,
-              processGroupId: launchGroup.processGroupId,
-              deadlineAt: new Date(Date.now() + 2_000).toISOString(), force: true,
-            });
-            if (retryResult !== 'terminated' && retryResult !== 'already-dead') return false;
-            return await waitForProcessGroupAbsence(launchGroup.processGroupId, Date.now() + 2_000);
+            && child.exitCode === null && child.signalCode === null) {
+            if (launchGroup !== null) {
+              // Process-group termination for tmux/cmux panes (detached:true)
+              const retryResult = await terminateOwnedProcessGroup({
+                pid: launchGroup.pid, expectedStartIdentity: launchGroup.processStartIdentity,
+                processGroupId: launchGroup.processGroupId,
+                deadlineAt: new Date(Date.now() + 2_000).toISOString(), force: true,
+              });
+              if (retryResult !== 'terminated' && retryResult !== 'already-dead') return false;
+              return await waitForProcessGroupAbsence(launchGroup.processGroupId, Date.now() + 2_000);
+            } else if (providerPid && providerStartIdentity) {
+              // PID-only termination for herdr panes (detached:false)
+              try {
+                const liveness = await isProcessIdentityLive(providerPid, providerStartIdentity);
+                if (liveness === 'dead') return true;
+                if (liveness === 'live') {
+                  try {
+                    process.kill(providerPid, 'SIGTERM');
+                  } catch {
+                    // Process may have already exited
+                  }
+                  // Wait for PID absence
+                  const deadline = Date.now() + 2_000;
+                  while (Date.now() < deadline && isProcessAlive(providerPid)) {
+                    await new Promise(resolve => setTimeout(resolve, 50));
+                  }
+                  if (!isProcessAlive(providerPid)) return true;
+                  // Force kill if still alive
+                  try {
+                    process.kill(providerPid, 'SIGKILL');
+                  } catch {
+                    // Process may have already exited
+                  }
+                  return !isProcessAlive(providerPid);
+                }
+              } catch {
+                // Fall through
+              }
+            }
           }
           return process.platform !== 'win32'
             && launchGroup !== null
@@ -2604,6 +2635,40 @@ export async function runWorkerLaunchBootstrap(value: unknown): Promise<WorkerLa
             });
           });
           return completed;
+        } else if (child.pid && providerStartIdentity && !launchGroup) {
+          // Herdr pane case (detached:false): terminate by specific PID only
+          try {
+            const pid = child.pid; // Capture for closure
+            terminationResult ??= (async () => {
+              const liveness = await isProcessIdentityLive(pid, providerStartIdentity);
+              if (liveness === 'dead') return 'already-dead';
+              if (liveness === 'live') {
+                try {
+                  process.kill(pid, 'SIGTERM');
+                } catch {
+                  // Process may have already exited
+                }
+                // Wait for PID absence
+                const deadline = Date.now() + 2_000;
+                while (Date.now() < deadline && isProcessAlive(pid)) {
+                  await new Promise(resolve => setTimeout(resolve, 50));
+                }
+                if (!isProcessAlive(pid)) return 'terminated';
+                // Force kill if still alive
+                try {
+                  process.kill(pid, 'SIGKILL');
+                } catch {
+                  // Process may have already exited
+                }
+                return isProcessAlive(pid) ? 'unknown' : 'terminated';
+              }
+              return 'unknown';
+            })();
+            const result = await terminationResult;
+            return result === 'terminated' || result === 'already-dead';
+          } catch {
+            return false;
+          }
         }
         return false;
       };
@@ -2739,13 +2804,18 @@ export async function runWorkerLaunchBootstrap(value: unknown): Promise<WorkerLa
         if (!child.pid || !providerStartIdentity || settled || !isProcessAlive(child.pid)) {
           return cleanupProvider('provider_spawn_failed');
         }
-        try {
-          launchGroup = captureOwnedProcessGroup(child.pid);
-        } catch {
-          launchGroup = null;
-        }
-        if (!launchGroup || launchGroup.processStartIdentity !== providerStartIdentity) {
-          return cleanupProvider('provider_spawn_failed');
+        // For herdr panes with detached:false, do NOT capture process group;
+        // the provider shares the wrapper's process group. Instead, track by pid+start identity
+        // and terminate the specific pid directly on cleanup.
+        if (!isHerdrPaneId(spec.pane_id)) {
+          try {
+            launchGroup = captureOwnedProcessGroup(child.pid);
+          } catch {
+            launchGroup = null;
+          }
+          if (!launchGroup || launchGroup.processStartIdentity !== providerStartIdentity) {
+            return cleanupProvider('provider_spawn_failed');
+          }
         }
         let reboundIdentity: string | null = null;
         try {
