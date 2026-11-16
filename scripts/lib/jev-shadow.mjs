@@ -23,7 +23,9 @@ import { basename, dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
   isJevLogContextEnabled,
+  isJevRowTelemetryEnabled,
   isJevStateOmitIdsEnabled,
+  JEV_ROW_NO_ANSWER,
   jevLogContextOf,
   parseJevEnv,
   resolveJevEndpoint,
@@ -151,6 +153,7 @@ function recordResolverEnded(point, result, durationMs) {
         point,
         mode: "degraded",
         reason: code === "ETIMEDOUT" ? "resolver-timeout" : "resolver-exit",
+        ...(isJevRowTelemetryEnabled(process.env) ? JEV_ROW_NO_ANSWER : {}),
         ...how,
         durationMs,
       }) + "\n",
@@ -457,8 +460,10 @@ export function jevNoulOf(result, questionName) {
  * Falls back to undefined (caller uses heuristic) on timeout/error/parse-failure.
  * permissionMode is the hook input's permission_mode; it travels in the
  * request so the resolver logs the same mode the caller acted on.
+ * pointer ({expanded, unexpanded}) is the pointer telemetry of the
+ * request; it travels in the request file only when given.
  */
-export function recordJevShadow({ point, state, questions, heuristic, permissionMode, toolUseId }) {
+export function recordJevShadow({ point, state, questions, heuristic, permissionMode, toolUseId, pointer }) {
   const mode = jevModeFor(point, process.env, permissionMode);
   if (mode === "off") return undefined;
   // Opt-in shared breaker: the resolver holds the call back itself and logs
@@ -502,7 +507,24 @@ export function recordJevShadow({ point, state, questions, heuristic, permission
 
     writeFileSync(
       requestFile,
-      JSON.stringify({ point, state, questions, heuristic, permissionMode, spawnMode, ...(toolUseId ? { tool_use_id: toolUseId } : {}), ...(logContext ? { context: logContext } : {}) }),
+      JSON.stringify({
+        point,
+        state,
+        questions,
+        heuristic,
+        permissionMode,
+        spawnMode,
+        ...(toolUseId ? { tool_use_id: toolUseId } : {}),
+        ...(logContext ? { context: logContext } : {}),
+        ...(pointer
+          ? {
+              pointer: {
+                expanded: pointer.expanded === true,
+                unexpanded: typeof pointer.unexpanded === "string" && pointer.unexpanded !== "" ? pointer.unexpanded : null,
+              },
+            }
+          : {}),
+      }),
       {
         encoding: "utf8",
         mode: 0o600,
@@ -703,13 +725,16 @@ export function jevLastRequestId(point) {
  * that request's shadow.jsonl line; a caller that records after a later request
  * for the same point passes the earlier request's id (jevLastRequestId) as
  * `requestId`. Only with OMC_JEV_APPLIED_LOG=1; never throws.
+ * `extra` holds top-level fields of the line (such as jev_model, given only
+ * with OMC_JEV_ROW_TELEMETRY=1 by the caller).
  */
-export function recordJevApplied(point, applied, requestId = lastRequestIds.get(point)) {
+export function recordJevApplied(point, applied, requestId = lastRequestIds.get(point), extra = {}) {
   if (!isJevAppliedLogEnabled(process.env)) return;
   appendJevLogLine("applied.jsonl", {
     ts: new Date().toISOString(),
     point,
     ...(isJevLogContextEnabled(process.env) ? { ...hookLogContext, ...(requestId ? { request_id: requestId } : {}) } : {}),
+    ...extra,
     applied,
   });
 }
@@ -750,6 +775,7 @@ function recordResolverFailure(point, result, durationMs, logContext) {
     ...logContext,
     mode: "degraded",
     reason: code === "ETIMEDOUT" ? "resolver-timeout" : result?.error ? "resolver-spawn" : "resolver-exit",
+    ...(isJevRowTelemetryEnabled(process.env) ? JEV_ROW_NO_ANSWER : {}),
     ...(typeof result?.status === "number" ? { status: result.status } : {}),
     ...(result?.signal ? { signal: result.signal } : {}),
     durationMs,

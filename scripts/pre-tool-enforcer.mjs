@@ -24,7 +24,7 @@ import { resolveConfiguredAgentModel } from './lib/agent-model-config.mjs';
 import { BOUNDED_GIT_TIMEOUT_MS } from './lib/bounded-git-timeout.mjs';
 import { isSkillVisibleToUser } from './lib/skill-entitlements.mjs';
 import { isJevAppliedLogEnabled, isJevShadowOptedIn, jevNoulOf, recordJevApplied, recordJevShadow, setJevHookContext, setJevSessionId } from './lib/jev-shadow.mjs';
-import { resolveExcerptChars, resolveJevLogMaxBytes, rotateJevLog } from './jev-resolve.mjs';
+import { isJevRowTelemetryEnabled, resolveExcerptChars, resolveJevLogMaxBytes, rotateJevLog } from './jev-resolve.mjs';
 
 // Inlined from src/config/models.ts — avoids a dist/ import so the hook works
 // before a build and stays consistent with the TypeScript source.
@@ -1100,7 +1100,7 @@ function recordModelRoutingShadow(toolName, toolInput, updatedToolInput, permiss
     // an inherited effort stays as it is and a Jev change from it is recorded.
     const explicitEffort = typeof baseEffort === 'string' && isMaxEffortAlwaysEnabled() ? capEffort(baseEffort, maxEffort()) : baseEffort;
     const baselineEffort = explicitEffort || resolveBaselineEffort(undefined, originalInput.subagent_type, directory);
-    noteJevRouting({ model: baselineModel, effort: baselineEffort }, updatedToolInput, answers, originalInput.subagent_type, typeof toolInput.name === 'string' && toolInput.name.trim() !== '');
+    noteJevRouting({ model: baselineModel, effort: baselineEffort }, updatedToolInput, answers, originalInput.subagent_type, typeof toolInput.name === 'string' && toolInput.name.trim() !== '', jevResult?.jevModel);
   }
 
   // The marker wins over the call's own values and over Jev's answers. The effort is still
@@ -1127,6 +1127,25 @@ function recordModelRoutingShadow(toolName, toolInput, updatedToolInput, permiss
       target.prompt = marker.prompt;
     }
     recordModelRoutingOverride(stateDir, row);
+    // OMC_JEV_ROW_TELEMETRY: a marker that changed the call is the cause of its applied line (the marker decided, not Jev).
+    // Like a Jev answer, the line is written by flushJevRouting once the output carries the values; it replaces any pending Jev line.
+    // A refused marker (`use max`) that sets nothing: with no Jev request it is the whole line; with one, it
+    // travels on the Jev line when Jev's answer changed the call.
+    const refusedLine = { marker: marker.line, override_rejected: marker.rejected };
+    if (markerApplies && isJevRowTelemetryEnabled() && isJevAppliedLogEnabled()) {
+      pendingJevRouting = {
+        subagent_type: originalInput.subagent_type || null,
+        cause: JEV_APPLIED_CAUSES.marker,
+        ...(marker.model ? { model: { from: baseModel ?? null, to: marker.model } } : {}),
+        ...(marker.effort ? { effort: { to: capEffort(marker.effort, maxEffort()) } } : {}),
+      };
+    } else if (!markerApplies && marker.rejected.length > 0 && isJevRowTelemetryEnabled() && isJevAppliedLogEnabled()) {
+      if (!jevOptedIn) {
+        recordJevApplied('model-routing', { subagent_type: originalInput.subagent_type || null, cause: JEV_APPLIED_CAUSES.marker, ...refusedLine });
+      } else if (pendingJevRouting) {
+        pendingJevRouting.refusedLine = refusedLine;
+      }
+    }
   }
 
   // A copy of the call's input that no answer and no marker changed is not sent back: an
@@ -1148,7 +1167,12 @@ function recordModelRoutingShadow(toolName, toolInput, updatedToolInput, permiss
 // alone is the cap's doing, not Jev's, and is not recorded.
 let pendingJevRouting;
 
-function noteJevRouting(before, updated, answers, subagentType, teamMember = false) {
+// OMC_JEV_ROW_TELEMETRY: the closed list of values of the `cause` field of a model-routing applied.jsonl line.
+// Today the hook writes `jev` (the answer decided) and `marker` (the `use` marker decided); `breaker` and
+// `no-answer` are reserved for later rows.
+const JEV_APPLIED_CAUSES = { jev: 'jev', marker: 'marker', breaker: 'breaker', noAnswer: 'no-answer' };
+
+function noteJevRouting(before, updated, answers, subagentType, teamMember = false, jevModel) {
   pendingJevRouting = undefined;
   if (!updated || !isJevAppliedLogEnabled()) return;
   const applied = {};
@@ -1182,7 +1206,7 @@ function noteJevRouting(before, updated, answers, subagentType, teamMember = fal
       ...(teamMember ? { delivered: 'unknown-team-member' } : {}),
     };
   }
-  if (applied.model || applied.effort) pendingJevRouting = { subagent_type: subagentType || null, ...applied };
+  if (applied.model || applied.effort) pendingJevRouting = { subagent_type: subagentType || null, ...applied, ...(jevModel ? { jevModel } : {}) };
 }
 
 function flushJevRouting(output) {
@@ -1192,12 +1216,15 @@ function flushJevRouting(output) {
   try {
     const sent = output?.hookSpecificOutput?.updatedInput;
     if (!sent || typeof sent !== 'object') return;
-    const { subagent_type, model, effort } = pending;
+    const { subagent_type, model, effort, jevModel, cause, refusedLine } = pending;
     const carried = {
       ...(model && sent.model === model.to ? { model } : {}),
       ...(effort && sent.effort === effort.to ? { effort } : {}),
     };
-    if (carried.model || carried.effort) recordJevApplied('model-routing', { subagent_type, ...carried });
+    const telemetry = isJevRowTelemetryEnabled();
+    if (carried.model || carried.effort) {
+      recordJevApplied('model-routing', { subagent_type, ...carried, ...(telemetry ? { cause: cause ?? JEV_APPLIED_CAUSES.jev, ...(refusedLine ?? {}) } : {}) }, undefined, telemetry && jevModel ? { jev_model: jevModel } : {});
+    }
   } catch {
     // The applied log is advisory: it must never cost the hook its output.
   }

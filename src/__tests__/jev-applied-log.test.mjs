@@ -902,3 +902,70 @@ describe('hook scripts with OMC_JEV_APPLIED_LOG=1', () => {
     expect(JSON.parse(readFileSync(join(stateDir, 'ralph-state.json'), 'utf8')).active).toBe(false);
   }, 60_000);
 });
+
+describe('model-routing applied line with OMC_JEV_ROW_TELEMETRY=1', () => {
+  it('a Jev answer that changed the call carries cause jev', async () => {
+    stubAnswers = { 'model-tier': { type: 'choice', choice: 'opus' }, effort: { type: 'score', score: 3 } };
+    const context = makeContext();
+    await runHook(context, 'pre-tool-enforcer.mjs', TASK_CALL(context.cwd), 'model-routing', { OMC_JEV_ROW_TELEMETRY: '1' });
+    const [line] = readLog(context, 'applied.jsonl');
+    expect(line.applied).toMatchObject({ subagent_type: 'oh-my-claudecode:executor', cause: 'jev' });
+    expect(line).not.toHaveProperty('jev_model');
+  }, 60_000);
+
+  it('without the variable the applied line has no cause', async () => {
+    stubAnswers = { 'model-tier': { type: 'choice', choice: 'opus' }, effort: { type: 'score', score: 3 } };
+    const context = makeContext();
+    await runHook(context, 'pre-tool-enforcer.mjs', TASK_CALL(context.cwd), 'model-routing');
+    const [line] = readLog(context, 'applied.jsonl');
+    expect(line.applied).not.toHaveProperty('cause');
+  }, 60_000);
+
+  it('a use marker that changes the call writes cause marker to applied.jsonl; overrides.jsonl keeps its shape', async () => {
+    const context = makeContext();
+    const call = TASK_CALL(context.cwd, { prompt: 'use sonnet low\n\nFix the regression.', model: 'haiku' });
+    await runHook(context, 'pre-tool-enforcer.mjs', call, 'model-routing', {
+      OMC_JEV: '',
+      OMC_JEV_MODEL_ROUTING_MARKER: '1',
+      OMC_JEV_ROW_TELEMETRY: '1',
+    });
+    const [line] = readLog(context, 'applied.jsonl');
+    expect(line).toMatchObject({ point: 'model-routing', applied: { subagent_type: 'oh-my-claudecode:executor', cause: 'marker', model: { from: 'haiku', to: 'sonnet' } } });
+    const [row] = readLog(context, 'overrides.jsonl');
+    expect(row).toMatchObject({ point: 'model-routing', subagent_type: 'oh-my-claudecode:executor', override: 'both' });
+    expect(row).not.toHaveProperty('cause');
+  }, 60_000);
+
+  it('the same marker without the variable writes no cause and no applied line', async () => {
+    const context = makeContext();
+    const call = TASK_CALL(context.cwd, { prompt: 'use sonnet low\n\nFix the regression.', model: 'haiku' });
+    await runHook(context, 'pre-tool-enforcer.mjs', call, 'model-routing', { OMC_JEV: '', OMC_JEV_MODEL_ROUTING_MARKER: '1' });
+    expect(readLog(context, 'applied.jsonl')).toHaveLength(0);
+    const [row] = readLog(context, 'overrides.jsonl');
+    expect(row).not.toHaveProperty('cause');
+  }, 60_000);
+
+  it('a refused use marker (use max, sets nothing) writes cause marker and override_rejected to applied.jsonl', async () => {
+    const context = makeContext();
+    const call = TASK_CALL(context.cwd, { prompt: 'use max\n\nFix the regression.', model: 'haiku' });
+    await runHook(context, 'pre-tool-enforcer.mjs', call, 'model-routing', {
+      OMC_JEV: '',
+      OMC_JEV_MODEL_ROUTING_MARKER: '1',
+      OMC_JEV_ROW_TELEMETRY: '1',
+    });
+    const [line] = readLog(context, 'applied.jsonl');
+    expect(line).toMatchObject({ point: 'model-routing', applied: { subagent_type: 'oh-my-claudecode:executor', cause: 'marker', override_rejected: ['max'], marker: 'use max' } });
+    const [row] = readLog(context, 'overrides.jsonl');
+    expect(row).toMatchObject({ rejected: ['max'] });
+    expect(row).not.toHaveProperty('cause');
+  }, 60_000);
+
+  it('the same refused marker without the variable writes no applied line; overrides.jsonl keeps the rejection', async () => {
+    const context = makeContext();
+    const call = TASK_CALL(context.cwd, { prompt: 'use max\n\nFix the regression.', model: 'haiku' });
+    await runHook(context, 'pre-tool-enforcer.mjs', call, 'model-routing', { OMC_JEV: '', OMC_JEV_MODEL_ROUTING_MARKER: '1' });
+    expect(readLog(context, 'applied.jsonl')).toHaveLength(0);
+    const [row] = readLog(context, 'overrides.jsonl');
+    expect(row).toMatchObject({ rejected: ['max'] });
+  }, 60_000);
+});
