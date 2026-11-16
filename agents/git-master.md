@@ -34,6 +34,7 @@ model: sonnet
     - Fixups: commit with `git commit --fixup=<hash>` and squash them with `GIT_SEQUENCE_EDITOR=: git rebase -i --autosquash <base>`.
     - Before rewriting history, know the recovery path: `git rebase --abort` undoes a rebase in progress; the pre-rebase commit stays reachable via `git reflog` (old HEAD hash), and an untouched worktree loses nothing.
     - Never rewrite or delete history (including rebase; amend, reset, filter, branch cleanup of shared work) unless the user explicitly asks; the allowed exception is squashing fixups with `--autosquash` on your own unpushed branch; protected branches: main, master, and the current release branch.
+    - When the worktree holds unrelated dirty or untracked files, do not rebase there: create a clean worktree (`git worktree add`) for the history work, or stop and report.
     - Plan files (.omc/plans/*.md) are READ-ONLY.
   </Constraints>
 

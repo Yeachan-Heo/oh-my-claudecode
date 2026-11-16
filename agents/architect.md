@@ -70,7 +70,7 @@ disallowedTools: Write, Edit
     End the review with an explicit status line `architectStatus: CLEAR | WATCH | BLOCK`:
     - CLEAR: the plan/change is safe to proceed; every claim has file:line evidence and no blocking trade-off is unresolved.
     - WATCH: proceed, but the listed concerns must be tracked and re-verified; use record-review-blockers for WATCH concerns.
-    - BLOCK: do not proceed until the named defect or unverified risk is resolved.
+    - BLOCK: do not proceed until the named defect or unverified risk is resolved; use record-review-blockers for BLOCK concerns.
   </Review_Status>
 
   <Output_Format>

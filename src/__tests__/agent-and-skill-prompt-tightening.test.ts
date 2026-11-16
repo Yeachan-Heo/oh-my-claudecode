@@ -1,6 +1,6 @@
 import { describe, test, expect } from 'vitest';
 import { spawnSync } from 'node:child_process';
-import { mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -56,6 +56,12 @@ describe('git-master agent prompt', () => {
     expect(text).toContain('git reflog');
   });
 
+  test('gives an executable path when the worktree holds unrelated dirty files: clean worktree or stop and report', () => {
+    expect(text).toContain('do not rebase there');
+    expect(text).toContain('git worktree add');
+    expect(text).toContain('stop and report');
+  });
+
   test('counts rebase as history rewriting, with the autosquash exception on unpushed branches', () => {
     expect(text).toContain('including rebase');
     expect(/exception[^.]*--autosquash[^.]*unpushed/.test(text)).toBe(true);
@@ -67,6 +73,15 @@ describe('reviewer and architect agent prompts', () => {
     const text = read('agents/architect.md');
     for (const word of ['CLEAR', 'WATCH', 'BLOCK', 'record-review-blockers']) {
       expect(text).toContain(word);
+    }
+  });
+
+  test('architect points WATCH and BLOCK concerns to record-review-blockers, like the final quality gate', () => {
+    const lines = read('agents/architect.md').split('\n');
+    for (const status of ['WATCH', 'BLOCK']) {
+      const line = lines.find((l) => l.trim().startsWith(`- ${status}:`));
+      expect(line).toBeDefined();
+      expect(line).toContain('record-review-blockers');
     }
   });
 
@@ -115,7 +130,7 @@ describe('ai-slop-cleaner skill', () => {
 
 describe('omc-doctor skill', () => {
   const text = read('skills/omc-doctor/SKILL.md');
-  const REGLA = 'Do not prune cache versions by age, lexical/version order, or presence of a newer version';
+  const NO_PRUNE_RULE = 'Do not prune cache versions by age, lexical/version order, or presence of a newer version';
 
   test('no unconditional rmSync; every renameSync call sits behind an if', () => {
     const lines = text.split('\n');
@@ -128,10 +143,19 @@ describe('omc-doctor skill', () => {
   test('cache fix sections state the no-prune rule and keep pinned versions', () => {
     const outdated = section(text, 'Fix: Outdated Plugin');
     const stale = section(text, 'Fix: Stale Cache');
-    expect(outdated).toContain(REGLA);
-    expect(stale).toContain(REGLA);
+    expect(outdated).toContain(NO_PRUNE_RULE);
+    expect(stale).toContain(NO_PRUNE_RULE);
     expect(outdated).toContain('installed_plugins.json');
     expect(stale).toContain('installed_plugins.json');
+  });
+
+  test('cache fix sections put backups outside plugins/cache and explain why', () => {
+    for (const heading of ['Fix: Outdated Plugin', 'Fix: Stale Cache']) {
+      const fix = section(text, heading);
+      expect(fix).toContain('plugins/backups/oh-my-claudecode/');
+      expect(fix).toContain('outside `plugins/cache/`');
+      expect(fix).not.toContain('.bak-');
+    }
   });
 
   test('legacy section has no executable rm -rf and keeps the commented mv .bak variants', () => {
@@ -148,6 +172,7 @@ describe('omc-doctor skill', () => {
     expect(legacy).toContain('Diagnostics do not authorize deletion or setup changes');
     expect(legacy).toContain('Do not move entire `agents/`, `commands/`, or `skills/` roots');
     expect(legacy).toMatch(/record the exact target, its ownership evidence, and its contents/);
+    expect(legacy).toContain("a name shipped in the active plugin's own");
   });
 });
 
@@ -182,7 +207,8 @@ describe('omc-doctor cache commands on a synthetic config directory', () => {
   }
 
   const digitVersions = (cache: string) => readdirSync(cache).filter((n) => /^\d/.test(n)).sort().join(',');
-  const movedAside = (cache: string) => readdirSync(cache).filter((n) => n.startsWith('.bak-')).length;
+  const backupDir = (dir: string) => path.join(dir, 'plugins', 'backups', 'oh-my-claudecode');
+  const movedAside = (dir: string) => (existsSync(backupDir(dir)) ? readdirSync(backupDir(dir)).length : 0);
 
   test('both cache commands are present', () => {
     expect(commands).toHaveLength(2);
@@ -196,8 +222,71 @@ describe('omc-doctor cache commands on a synthetic config directory', () => {
         const result = runCommand(command, dir);
         expect(result.status).toBe(0);
         expect(digitVersions(cache)).toBe('5.8.1');
-        expect(movedAside(cache)).toBe(2);
+        expect(movedAside(dir)).toBe(2);
+        expect(readdirSync(cache).filter((n) => n.startsWith('.bak-'))).toEqual([]);
+        expect(readdirSync(backupDir(dir)).some((n) => n.startsWith('5.8.0-'))).toBe(true);
+        expect(existsSync(path.join(backupDir(dir), readdirSync(backupDir(dir)).find((n) => n.startsWith('5.9.0-'))!, 'package.json'))).toBe(true);
         expect(result.stdout).toMatch(/Moved 2 unprotected version/);
+      } finally {
+        rmSync(dir, { recursive: true, force: true });
+      }
+    }
+  });
+
+  test('pin on the newest version (typical install): only older versions are moved aside', () => {
+    for (const command of commands) {
+      const { dir, cache } = makeConfigDir(['5.8.0', '5.9.0'], '5.9.0');
+      try {
+        const result = runCommand(command, dir);
+        expect(result.status).toBe(0);
+        expect(digitVersions(cache)).toBe('5.9.0');
+        expect(movedAside(dir)).toBe(1);
+        expect(result.stdout).toMatch(/Moved 1 unprotected version/);
+      } finally {
+        rmSync(dir, { recursive: true, force: true });
+      }
+    }
+  });
+
+  test('every cached version pinned: nothing is moved and the protection is reported', () => {
+    for (const command of commands) {
+      const { dir, cache } = makeConfigDir(['5.9.0'], '5.9.0');
+      try {
+        const result = runCommand(command, dir);
+        expect(result.status).toBe(0);
+        expect(digitVersions(cache)).toBe('5.9.0');
+        expect(movedAside(dir)).toBe(0);
+        expect(result.stdout).toMatch(/Nothing to move/);
+      } finally {
+        rmSync(dir, { recursive: true, force: true });
+      }
+    }
+  });
+
+  test('a failed move reports the failure instead of claiming there is no cache', () => {
+    for (const command of commands) {
+      const { dir, cache } = makeConfigDir(['5.8.0', '5.9.0'], '5.9.0');
+      try {
+        // A file where the backup directory should go makes the move fail.
+        writeFileSync(path.join(dir, 'plugins', 'backups'), 'not a directory');
+        const result = runCommand(command, dir);
+        expect(result.status).toBe(0);
+        expect(result.stdout).toMatch(/Cache move failed \(0 moved before the error\)/);
+        expect(result.stdout).not.toMatch(/No plugin cache found|No cache to clean/);
+        expect(digitVersions(cache)).toBe('5.8.0,5.9.0');
+      } finally {
+        rmSync(dir, { recursive: true, force: true });
+      }
+    }
+  });
+
+  test('without a cache directory the commands report that no cache was found', () => {
+    for (const command of commands) {
+      const dir = mkdtempSync(path.join(tmpdir(), 'omc-doctor-skill-'));
+      try {
+        const result = runCommand(command, dir);
+        expect(result.status).toBe(0);
+        expect(result.stdout).toMatch(/No plugin cache found|No cache to clean/);
       } finally {
         rmSync(dir, { recursive: true, force: true });
       }
@@ -211,7 +300,7 @@ describe('omc-doctor cache commands on a synthetic config directory', () => {
         const result = runCommand(command, dir);
         expect(result.status).toBe(0);
         expect(digitVersions(cache)).toBe('5.8.0,5.8.1');
-        expect(movedAside(cache)).toBe(0);
+        expect(movedAside(dir)).toBe(0);
         expect(result.stdout).toMatch(/Nothing moved/);
       } finally {
         rmSync(dir, { recursive: true, force: true });
@@ -226,7 +315,7 @@ describe('omc-doctor cache commands on a synthetic config directory', () => {
         const result = runCommand(command, dir);
         expect(result.status).toBe(0);
         expect(digitVersions(cache)).toBe('5.8.1');
-        expect(movedAside(cache)).toBe(1);
+        expect(movedAside(dir)).toBe(1);
         expect(result.stdout).toMatch(/Moved 1 unprotected version/);
       } finally {
         rmSync(dir, { recursive: true, force: true });
