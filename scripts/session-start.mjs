@@ -713,7 +713,11 @@ async function loadProjectMemoryModules() {
     return {
       loadProjectMemory: projectMemoryStorage.loadProjectMemory,
       detectProjectEnvironment: projectMemoryDetector.detectProjectEnvironment,
-      formatContextSummary: projectMemoryFormatter.formatContextSummary,
+      // Opt-in (OMC_PROJECT_MEMORY_FRAME=1 or true): framed summary. Falls back to the bare summary when the
+      // built formatter does not export the framed variant (dist is rebuilt by release, not by feature commits).
+      formatContextSummary: (['1', 'true'].includes(String(process.env.OMC_PROJECT_MEMORY_FRAME ?? '').trim().toLowerCase())
+        ? projectMemoryFormatter.formatContextSummaryWithFrame
+        : undefined) ?? projectMemoryFormatter.formatContextSummary,
       findProjectRoot: rulesFinder.findProjectRoot,
     };
   } catch {
@@ -810,7 +814,7 @@ async function resolveProjectMemorySummary(directory, projectMemoryModules) {
     return '';
   }
 
-  return formatContextSummary(memory)?.trim() || '';
+  return (await formatContextSummary(memory))?.trim() || '';
 }
 
 // Semantic version comparison (for cache cleanup sorting and update checks)

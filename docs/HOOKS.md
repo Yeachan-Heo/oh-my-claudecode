@@ -428,7 +428,12 @@ Manages permanent project-level memory.
   - `project-memory-session.mjs` (SessionStart): Loads project memory when session starts
   - `project-memory-posttool.mjs` (PostToolUse): Updates memory after tool use
   - `project-memory-precompact.mjs` (PreCompact): Preserves memory before compaction
+- **Reference frame (opt-in)**: With `OMC_PROJECT_MEMORY_FRAME=1` or `true`, the memory summary injected at SessionStart and PreCompact starts with a `[REFERENCE ONLY]` paragraph: the summary is heuristic and not current truth, and the current task and the user's latest instruction take precedence. The summary text is cleaned before the frame is added. The PreCompact message then says the recorded directives are reference material instead of "must be followed". This weakens the duty to keep user directives after compaction, which is why it is a separate switch and off by default. Without the variable both messages are unchanged. SessionStart and PreCompact run the built `dist` files. With a build that predates this change, both keep the bare summary and the old PreCompact wording even with the variable on. A release build contains both paths.
 - **Multi-session contract**: Both writers acquire `withProjectMemoryLock` (see `src/lib/file-lock.ts`) before reading or rewriting `project-memory.json`. Concurrent sessions in the same workspace serialize through this lock, so lost-update races between parallel Claude sessions are impossible. See `tests/integration/concurrent-project-memory.test.ts` for the regression guard.
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `OMC_PROJECT_MEMORY_FRAME` | (unset) | `1` or `true` adds the `[REFERENCE ONLY]` frame to the memory summary and switches the PreCompact wording. Any other value leaves both unchanged. |
 
 Two types of data are stored in project-memory:
 
@@ -464,7 +469,9 @@ Session Start
 
 ### Opt-in text cleaning (`scripts/lib/context-text-sanitize.mjs`)
 
-Set `OMC_CONTEXT_TEXT_SANITIZE` to `1` or `true` to clean the text that hooks copy into their messages from files, transcripts, state files and process output. Without the variable the hooks write the same text as before and do not load the module.
+Set `OMC_CONTEXT_TEXT_SANITIZE` to `1` or `true` to clean the text that hooks copy into their messages from files, transcripts, state files and process output. Without the variable the hooks write the same text as before. Each hook listed below loads the module only when the variable is on. The project memory formatter loads the module only in the framed path, and the default summary does not depend on it (see `OMC_PROJECT_MEMORY_FRAME` above).
+
+The cleaning is fail-open: if `scripts/lib/context-text-sanitize.mjs` cannot be loaded while the variable is on, each hook writes its text uncleaned, as it did before the switch existed. No hook stops, skips the message or changes its other output because of a failed load.
 
 - Control, format and bidi characters and the other invisible characters of the set (see `scripts/lib/context-text-sanitize.mjs`) become spaces; in multi-line blocks line feed and tab are kept. The closing markers of the envelopes (`</notepad-context>`, `</session-restore>`, `</project-memory-context>`) and both `<system-reminder>` tags have their `<` replaced by `<\`, so cleaned text cannot close an envelope early. This goes beyond removing invisible characters.
 - `post-tool-verifier.mjs`: the TaskOutput summary is wrapped in an untrusted-output envelope (a closing marker inside the output is escaped). Running agent names are cleaned and cut to 80 characters, at most 10 are listed, the rest as `+N more`; the counts are cleaned too. A running agent entry without `agent_type` is listed as `unknown` with or without the switch; before, it dropped the whole summary.
@@ -484,7 +491,7 @@ The hook scripts share one loader, `scripts/lib/context-text-loader.mjs`, which 
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `OMC_CONTEXT_TEXT_SANITIZE` | (unset) | `1` or `true` enables the cleaning in the hooks listed above. Any other value leaves the messages unchanged. |
+| `OMC_CONTEXT_TEXT_SANITIZE` | (unset) | `1` or `true` enables the cleaning in the hooks listed above. Any other value leaves the messages unchanged. If the module cannot be loaded, the text is written uncleaned (fail-open). |
 
 ## Magic Keywords
 
