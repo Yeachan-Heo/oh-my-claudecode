@@ -3350,6 +3350,7 @@ const AGENT_SUMMARY_CHARS = 150;
 const AGENT_SENT_CHARS = 60;
 const AGENT_SENDERS_MAX = 4;
 const AGENT_OPENERS = ['Another Claude session sent a message', '<teammate-message', '<agent-message', '<cross-session-message'];
+const AGENT_BARE = /^\s*<(?:agent-message|cross-session-message)\b/; // a row that opens with one of these blocks has no header of the host: it is read as the user's words
 const AGENT_BLOCK = /<(teammate-message|agent-message|cross-session-message)\b((?:[^>"]|"[^"]*")*)>([\s\S]*?)<\/\1>/g; // a quoted value may hold '>'
 const AGENT_TRACE_PREFIX = '[agent message moved at compaction, not from the user: ';
 const AGENT_LEAD = 'team-lead'; // the teammate_id of a team's lead in its members' sessions
@@ -3434,7 +3435,7 @@ export async function moveAgentMessages($, cfg, messages, opts = {}) {
       if (i === 0 || i >= tail) continue;
       const m = messages[i];
       if (skip.has(i)) { stats.skipped_blocks++; continue; }
-      if (userWords(m, STAGE_NOT_USER).length || m.text.includes(QUEUED_PREFIX)) { stats.owner_words++; continue; }
+      if (userWords(m, STAGE_NOT_USER).length || m.text.includes(QUEUED_PREFIX) || AGENT_BARE.test(m.text)) { stats.owner_words++; continue; }
       if (queued.has(i)) { stats.queued_anchor++; continue; }
       if (senders.get(i).some((x) => x.json && !x.idle)) { stats.pending_json++; continue; }
       if (i >= limit) continue;
