@@ -262,7 +262,7 @@ WebFetch(url: "https://raw.githubusercontent.com/Yeachan-Heo/oh-my-claudecode/ma
 
 **Legacy content guard**: Diagnostics do not authorize deletion or setup changes. Before moving anything, record the exact target, its ownership evidence, and its contents (a file list of what is being moved and why).
 Do not move entire `agents/`, `commands/`, or `skills/` roots to resolve a mixed installation. Never touch `agents/` or `skills/` roots containing any file that is not a verified OMC payload (those roots hold user custom agents and skills); with any such file present, report the mixed installation instead of fixing it.
-The only allowed cleanup is a reversible move to a sibling `.bak` copy (`mv`); deletion (`rm -rf`, `rm`) is never allowed. Move a whole root with `mv` only when every file inside matches a name shipped in the active plugin's own `agents/`, `commands/`, or `skills/` directory; with any custom (non-OMC) file present, move only individually verified OMC-owned files, one by one, into the matching `.bak` directory and leave every other file in place.
+The only allowed cleanup is a reversible move to a sibling `.bak` copy (`mv`); deletion (`rm -rf`, `rm`) is never allowed. Move a whole root with `mv` only when every file inside matches a name shipped in the active plugin's own `agents/`, `commands/`, or `skills/` directory. A `commands/` root that also holds a custom (non-OMC) file is not moved as a whole: move only individually verified OMC-owned files, one by one, into `commands.bak/` and leave every other file in place. An `agents/` or `skills/` root that holds a custom file is only reported, as stated above: nothing in it is moved.
 
 ```bash
 # Backup first (optional - ask user)

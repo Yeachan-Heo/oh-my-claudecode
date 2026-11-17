@@ -201,6 +201,16 @@ describe('omc-doctor skill', () => {
     expect(legacy).toMatch(/record the exact target, its ownership evidence, and its contents/);
     expect(legacy).toContain("a name shipped in the active plugin's own");
   });
+
+  test('legacy section does not contradict itself: custom files in agents/ or skills/ are reported, commands/ is moved file by file', () => {
+    const legacy = section(text, 'Fix: Legacy Curl-Installed Content');
+    expect(legacy).toContain('with any such file present, report the mixed installation instead of fixing it');
+    expect(legacy).toContain('A `commands/` root that also holds a custom (non-OMC) file is not moved as a whole');
+    expect(legacy).toContain('into `commands.bak/`');
+    expect(legacy).toContain('An `agents/` or `skills/` root that holds a custom file is only reported, as stated above: nothing in it is moved.');
+    // The per-file move is no longer stated for every root.
+    expect(legacy).not.toMatch(/with any custom \(non-OMC\) file present, move only/);
+  });
 });
 
 describe('omc-doctor cache commands on a synthetic config directory', () => {
