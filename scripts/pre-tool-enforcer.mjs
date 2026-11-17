@@ -2452,6 +2452,54 @@ function realPathInside(path, base) {
   }
 }
 
+// Validate that a path with symlink components cannot escape `base` via directory traversal.
+// Prevents attacks like 'link/../victim' where 'link' -> '/tmp/out', allowing the filesystem
+// to resolve 'link/..' to '/tmp/out/..' = '/tmp/out' (outside), bypassing the guard.
+function pathWithSymlinksStaysInside(filePath, base) {
+  try {
+    // Convert to absolute path for consistent comparison
+    const target = resolve(base, filePath);
+    // Find the nearest existing directory and check if the unresolved path stays inside
+    let ancestor = dirname(target);
+    while (!pathExists(ancestor)) ancestor = dirname(ancestor);
+    // The ancestor must be inside the bounds
+    if (!realPathInside(ancestor, base)) return false;
+    // Now check for symlink-based escapes in the path components.
+    // Walk the input path and follow symlinks to verify no component
+    // escapes the bounds. This catches cases where following symlinks and then '..' escape.
+    const components = filePath.split(sep).filter(c => c && c !== '.');
+    let current = base;
+    for (const comp of components) {
+      if (comp === '..') {
+        // Check if going up stays inside
+        const parent = dirname(current);
+        if (!realPathInside(parent, base)) return false;
+        current = parent;
+      } else if (comp) {
+        const next = resolve(current, comp);
+        // If the component exists and is a symlink, verify its target stays inside
+        if (pathExists(next)) {
+          try {
+            const realNext = realpathSync(next);
+            // Following this symlink must not escape
+            if (!realPathInside(realNext, base)) return false;
+            current = realNext;
+          } catch {
+            // Treat resolution errors as rejections
+            return false;
+          }
+        } else {
+          // Component doesn't exist; continue with lexical path
+          current = next;
+        }
+      }
+    }
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 function planWritePathAllowed(filePath, cwd) {
   const plansDir = resolve(cwd, PLAN_WRITE_DIR);
   const target = resolve(cwd, filePath);
@@ -2464,6 +2512,10 @@ function planWritePathAllowed(filePath, cwd) {
   } catch {
     return false;
   }
+  // SECURITY: Validate that symlink-based traversals (e.g. 'link/../victim.md') cannot escape the guard.
+  // Check the input path with symlinks resolved to prevent attacks where the symlink target contains '..',
+  // allowing escape when the filesystem kernel processes symlinks before '..' (issue #5085).
+  if (!pathWithSymlinksStaysInside(filePath, realPlansDir)) return false;
   // The nearest existing directory above the target must resolve inside the real plans directory, so a missing directory
   // under a link cannot be created outside it. The target itself, when it exists, must too.
   let ancestor = dirname(target);
