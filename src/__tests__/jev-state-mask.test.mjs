@@ -582,6 +582,16 @@ describe('maskJevState: values that stand beside their names', () => {
     expect(maskJevState({ headers: [input] }).headers[0]).toEqual(expected);
   });
 
+  it('preserves counter numbers in two-element tuples', () => {
+    expect(maskJevState({ usage: [['input_tokens', 1234]] })).toEqual({ usage: [['input_tokens', 1234]] });
+    expect(maskJevState({ data: [['token_count', 5], ['token_budget', 100]] })).toEqual({ data: [['token_count', 5], ['token_budget', 100]] });
+  });
+
+  it('still masks secret strings under secret keys in two-element tuples', () => {
+    expect(maskJevState({ creds: [['password', 'hunter2zzQ']] })).toEqual({ creds: [['password', '***']] });
+    expect(maskJevState({ data: [['api_key', 'secret123']] })).toEqual({ data: [['api_key', '***']] });
+  });
+
   it('masks a header under a key that is no secret name', () => {
     expect(maskJevState({ headers: { Authorization: 'Basic abc123', Accept: 'text/html' } })).toEqual({ headers: { Authorization: '***', Accept: 'text/html' } });
   });

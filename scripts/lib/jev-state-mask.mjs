@@ -148,7 +148,10 @@ function secretArguments(array) {
       }
     }
   }
-  if (array.length === 2 && pairNameKind(array[0])) modes.set(1, 'value');
+  if (array.length === 2 && pairNameKind(array[0])) {
+    const kind = pairNameKind(array[0]);
+    modes.set(1, kind);
+  }
   return modes;
 }
 function maskArgument(item, mode) {
@@ -270,7 +273,7 @@ export function maskJevState(state, { maxChars } = {}) {
         const modes = secretArguments(value);
         return value.map((item, i) => {
           const mode = modes.get(i);
-          return walk(mode && mode !== 'value' ? maskArgument(item, mode) : item, String(i), depth + 1, mode === 'value' ? 'secret' : false, false) ?? null;
+          return walk(mode && mode !== 'value' && mode !== 'secret' && mode !== 'counter' ? maskArgument(item, mode) : item, String(i), depth + 1, mode === 'value' || mode === 'secret' ? 'secret' : (mode === 'counter' ? 'counter' : false), false) ?? null;
         });
       }
       const out = {};
