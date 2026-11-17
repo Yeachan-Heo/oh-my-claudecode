@@ -16,16 +16,18 @@ const assistant = (text) => ({ role: 'assistant', text, toolUses: [] });
 const talk = (n) => Array.from({ length: n }, (_, k) => (k % 2 ? assistant(`Answer ${k}.`) : user(`Question ${k}.`)));
 
 // One compaction through register(on) in the active mode; Jev scores every result 0; the bodies of its requests are kept.
-async function compactRun(env, messages, { tokens = 30000 } = {}) {
+async function compactRun(env, messages, { tokens = 30000, deliver = {} } = {}) {
   const store = new Map();
   const bodies = [];
   const e = { OMC_JEV: 'compaction:active', TYPESAFE_API_KEY: 'test-key', HOME: '/home/u', ...env };
   const api = [];
-  for (const m of messages) {
+  for (const [i, m] of messages.entries()) {
     const content = m.role === 'assistant'
       ? [{ type: 'text', text: m.text }, ...m.toolUses.map((u) => ({ type: 'tool_use', id: u.tool_use_id, name: u.tool, input: u.input }))]
       : [...(m.toolResults || []).map((r) => ({ type: 'tool_result', tool_use_id: r.tool_use_id, content: r.text })), ...(m.text ? [{ type: 'text', text: m.text }] : [])];
     if (m.role === 'user' && api[api.length - 1]?.role === 'user') api[api.length - 1].content.push(...content); else api.push({ role: m.role, content });
+    // A message delivered during a tool turn is a block of the API form only, after the blocks of the row it is anchored to.
+    if (deliver[i]) api[api.length - 1].content.push(...deliver[i].map((text) => ({ type: 'text', text })));
   }
   const $ = {
     env: { get: async (n) => e[n] },
@@ -112,6 +114,26 @@ describe('background task notifications as candidates (OMC_JEV_COMPACT_NOTIFICAT
     expect(record.notifications).toBe(1);
     expect(bodies.join('')).not.toContain('SECRETBODY');
     expect(JSON.stringify(out.messages)).not.toContain('SECRETBODY');
+  });
+});
+
+describe('a notification row that anchors a message delivered during a tool turn', () => {
+  const framed = (words) => `The user sent a new message while you were working:\n${words}\n\nThis is how Claude Code surfaces messages the user sends mid-turn \u2014 within the running turn, often alongside the next tool result, rather than as a separate conversation turn. Address the message above as you continue this turn.`;
+
+  it('has no toolResults property and still compacts: the notification becomes a trace and the delivered message is carried word for word into its row', async () => {
+    const w = talk(30);
+    const p1 = Object.freeze(row(note('Status: registry', `Report ${'r'.repeat(8000)}`), { handle: 'n1' }));
+    expect(p1).not.toHaveProperty('toolResults');
+    const messages = [...w.slice(0, 3), p1, ...w.slice(3)];
+    const words = 'DELIVERED-WORDS: also check the registry.';
+    const { out, record } = await compactRun(NOTE_ENV, messages, { deliver: { 3: [framed(words)] } });
+    // Before the fix the row's missing list threw and the compaction ended in the built-in summary with reason exception.
+    expect(record).toMatchObject({ result: 'jev', notifications: 1, queued_user: 1, queued_carried: 1 });
+    const carried = out.messages.find((m) => (m.text || '').includes(words));
+    expect(carried).toBeTruthy();
+    expect(carried.text).toContain('[compacted] background task notification');
+    expect(carried.handle).toBeUndefined();
+    expect(JSON.stringify(out.messages)).not.toContain('Report rrrr');
   });
 });
 

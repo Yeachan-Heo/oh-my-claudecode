@@ -107,7 +107,9 @@
  *
  * Secrets in the paste, reply and agent stages: a tag, run or agent message that names a secret or private path, or that masking changes, stays
  * in the conversation unmoved, and no file is written for it. This is deliberate: a copy with the secrets masked is not archived in its place, so
- * a session with secrets in such text keeps that text whole in the conversation until masked archiving is added.
+ * a session with secrets in such text keeps that text whole in the conversation until masked archiving is added. The check is bounded (maskSecrets
+ * is quadratic on one long word): a text beyond SCAN_MAX_CHARS, or beyond the SCAN_BUDGET_CHARS one stage checks in one compaction, counts as unchecked
+ * and stays whole the same way. A row that holds tool results or a delivered message's anchor is never rebuilt by the paste stage.
  *
  * Shared breaker and request limit (OMC_JEV_BREAKER=1, OMC_JEV_MAX_RPM=<n>): the same files and rules as
  * the script side (scripts/lib/jev-breaker.mjs, see its header), under the same state directory and
@@ -2234,9 +2236,12 @@ function allocate(candidates, before, target, added = 0) {
 const finitePositive = (n) => (typeof n === 'number' && Number.isFinite(n) && n > 0 ? n : undefined);
 const windowInt = (raw) => (/^[1-9]\d{0,8}$/.test(String(raw ?? '').trim()) ? Number(String(raw).trim()) : undefined);
 const strOf = (v) => (typeof v === 'string' ? v : '');
-// One host call capped at HOST_MS: its value, or undefined on a timeout, an error or a missing value.
-async function hostValue($, call) {
-  const settled = await withDeadline($, Promise.resolve().then(() => call()), HOST_MS);
+// One host call capped at HOST_MS, and at the time left before `deadline` when one is given (none left: no call is made): its value, or undefined on a
+// timeout, an error or a missing value.
+async function hostValue($, call, deadline) {
+  const ms = deadline === undefined ? HOST_MS : Math.min(HOST_MS, deadline - Date.now());
+  if (ms <= 0) return undefined;
+  const settled = await withDeadline($, Promise.resolve().then(() => call()), ms);
   return 'value' in settled ? settled.value : undefined;
 }
 
@@ -2253,8 +2258,9 @@ async function settingsWindow($, cfg) {
 // The compaction window and threshold, one resolver for the compaction and the own threshold. The host's breakdown first: rawMaxTokens is the
 // compaction window (also after /autocompact), autoCompactThreshold the count at which it compacts. Else CLAUDE_CODE_AUTO_COMPACT_WINDOW or the
 // autoCompactWindow of settings.json (both capped at the model's window), else the model's window; the threshold is the window less HOST_BUFFER.
-// `detail` is the result of $.session.usage({ breakdown: 'summary' }), `usage` the one without breakdown; either may be missing.
-export async function resolveWindow($, cfg, detail, usage) {
+// `detail` is the result of $.session.usage({ breakdown: 'summary' }), `usage` the one without breakdown; either may be missing. `deadline` (a time in ms) caps the
+// read of settings.json at the time left.
+export async function resolveWindow($, cfg, detail, usage, deadline) {
   const b = detail?.context?.breakdown;
   const raw = finitePositive(b?.rawMaxTokens);
   if (raw) {
@@ -2264,7 +2270,7 @@ export async function resolveWindow($, cfg, detail, usage) {
   const model = finitePositive(usage?.context?.window) ?? finitePositive(detail?.context?.window);
   let window = windowInt(cfg.autoCompactWindow);
   let source = window ? 'env' : undefined;
-  if (!window) { window = await hostValue($, () => settingsWindow($, cfg)); if (window) source = 'settings'; }
+  if (!window) { window = await hostValue($, () => settingsWindow($, cfg), deadline); if (window) source = 'settings'; }
   if (window && model) window = Math.min(window, model);
   if (!window && model) { window = model; source = 'model'; }
   if (!window) return undefined;
@@ -2333,9 +2339,16 @@ function rowsAsApi(messages) {
   }));
 }
 
-// The cost in tokens of one candidate as it stands (full), with its result shortened (short) and as its trace (trace).
+// The image blocks of a result as the host holds it (a list of blocks, or an object with a `content` list): each costs RATE_IMAGE, as in listTokens.
+function imagesOf(r) {
+  const blocks = Array.isArray(r?.result) ? r.result : Array.isArray(r?.result?.content) ? r.result.content : [];
+  return blocks.filter((b) => b && b.type === 'image').length;
+}
+
+// The cost in tokens of one candidate as it stands (full), with its result shortened (short) and as its trace (trace). The images of a result are part
+// of its full cost; a short copy is text only (a result with an image is never cut to a short copy: it goes to a trace first).
 function itemTokens(c, rates = DEFAULT_RATES) {
-  const { RATE_IN, RATE_OUT, RATE_NOTE, RATE_TRACE, RATE_NON_ASCII } = rates;
+  const { RATE_IN, RATE_OUT, RATE_NOTE, RATE_TRACE, RATE_NON_ASCII, RATE_IMAGE } = rates;
   if (c.note) {
     // A notification row has no call and its text is of the reminder class; its trace is a row of its own.
     const cost = (text) => RATE_NOTE * text.length + RATE_NON_ASCII * nonAscii(text);
@@ -2345,15 +2358,14 @@ function itemTokens(c, rates = DEFAULT_RATES) {
   const json = inputJson(c.use.input);
   const call = RATE_IN * ((c.use.tool || '').length + json.length) + RATE_NON_ASCII * nonAscii(json);
   const cost = (text) => RATE_OUT * text.length + RATE_NON_ASCII * nonAscii(text);
-  const full = call + cost(c.res.text || '');
+  const full = call + cost(c.res.text || '') + RATE_IMAGE * imagesOf(c.res);
   const short = c.resultChars > SHORT_CHARS ? call + cost(shortText(c)) : full;
   return { full, short, trace: RATE_TRACE * c.trace.length };
 }
 
-// The tokens before the compaction, the token cascade's basis: the host's usage in the main loop, else the prefix plus the estimate of the API form.
-async function tokensBeforeOf($, e, cfg, messages, api) {
-  const detail = await hostValue($, () => $.session.usage({ breakdown: 'summary' }));
-  const usage = await hostValue($, () => $.session.usage());
+// The tokens before the compaction, the token cascade's basis: the host's usage in the main loop, else the prefix plus the estimate of the API form. `detail`
+// and `usage` are the reads the caller made (either may be missing).
+function tokensBeforeOf(e, cfg, messages, api, detail, usage) {
   const real = usage?.context?.tokens;
   const main = e.agentId === undefined && finitePositive(real) !== undefined;
   return { tokens: Math.round(main ? real : prefixTokens(detail) + listTokens(api ?? rowsAsApi(messages), cfg.rates)), source: main ? 'usage' : 'estimate' };
@@ -2362,10 +2374,12 @@ async function tokensBeforeOf($, e, cfg, messages, api) {
 // The record fields of one compaction with token accounting: the window and threshold, the tokens before (the host's usage in the main loop, else
 // the prefix plus the estimate of the API form) and after (the tokens before less what the keep decisions of allocate remove), the target and its
 // ceiling. Read-only: the cut itself stays with allocate.
-async function tokenAccounting($, e, cfg, messages, api, candidates, installedStageTokens = 0) {
-  const detail = await hostValue($, () => $.session.usage({ breakdown: 'summary' }));
-  const usage = await hostValue($, () => $.session.usage());
-  const win = await resolveWindow($, cfg, detail, usage);
+// The host reads (`known` when the caller made them already) and the settings read stay within `deadline`, the compaction's own: once it has passed the
+// estimate of the API form and no window stand in the record. `installedStageTokens`: what the text stages that installed took off.
+async function tokenAccounting($, e, cfg, messages, api, candidates, installedStageTokens, deadline, known = {}) {
+  const detail = 'detail' in known ? known.detail : await hostValue($, () => $.session.usage({ breakdown: 'summary' }), deadline);
+  const usage = 'usage' in known ? known.usage : await hostValue($, () => $.session.usage(), deadline);
+  const win = await resolveWindow($, cfg, detail, usage, deadline);
   const real = usage?.context?.tokens;
   const main = e.agentId === undefined && finitePositive(real) !== undefined;
   const tokensBefore = Math.round(main ? real : prefixTokens(detail) + listTokens(api ?? rowsAsApi(messages), cfg.rates));
@@ -2941,6 +2955,20 @@ export function pasteTrace(chars, inner, path) {
 const sha256Hex = async (text) =>
   Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(text))), (byte) => byte.toString(16).padStart(2, '0')).join('');
 
+// maskSecrets has patterns that are quadratic in the length of one long run of word characters that holds many KEY or TOKEN (30 000 characters of it take
+// about 0.6 s, 90 000 about 6 s), and a synchronous scan cannot be stopped by the compaction's deadline. The stages that move a text whole never cut it before
+// the check, so they check at most SCAN_MAX_CHARS of one text (`max`; a pasted tag: its own limit, which the owner may raise) and SCAN_BUDGET_CHARS of all the
+// text one stage checks in one compaction (`budget`: {left}). A text beyond either is `unchecked` and stays word for word, as one that holds a secret
+// ('secret') does; '' means clear.
+const SCAN_MAX_CHARS = 30000;
+const SCAN_BUDGET_CHARS = 4 * SCAN_MAX_CHARS;
+function secretCheck(text, privatePaths, budget, max = SCAN_MAX_CHARS) {
+  if (namesSecretPath(text, privatePaths)) return 'secret';
+  if (text.length > max || text.length > budget.left) return 'unchecked';
+  budget.left -= text.length;
+  return maskSecrets(text) !== text ? 'secret' : '';
+}
+
 // Rows of user messages that the host would rebuild without their image or file: an API user message holding a block besides text
 // and tool results is matched to its row by text (as much of it as is text, without [Image #N] and carriage returns). `unmatched`:
 // such a message with text that matches no row, so nothing can be told about any row.
@@ -2976,8 +3004,9 @@ function ownerRows(messages, prefixes) {
 }
 
 // The tags to ask about, the largest PASTE_MAX_ASKS that pass every check: [{row, tag, text, inner}]. What stays, and why, is counted in
-// `stats`; a reason says that nothing can move.
-function planPastes(messages, api, keepFrom, cfg, sessionId, stats) {
+// `stats`; a reason says that nothing can move. A row that holds tool results or that a delivered block is anchored to is never rebuilt here: the
+// replacement is a plain user row, so it would lose the results, or the delivery that only the row's handle brings back.
+function planPastes(messages, api, keepFrom, cfg, sessionId, stats, queued = new Map()) {
   if (!cfg.pasteDir) { stats.reason = 'no_state_dir'; return []; }
   if (!sessionId) { stats.reason = 'no_session'; return []; }
   if (!api) { stats.reason = 'no_api_form'; return []; }
@@ -2994,6 +3023,8 @@ function planPastes(messages, api, keepFrom, cfg, sessionId, stats) {
     const tags = pasteTags(text);
     stats.tags += tags.length;
     if (!tags.length) continue;
+    if ((messages[row].toolResults || []).length) { stats.result_rows += tags.length; continue; }
+    if (queued.has(row)) { stats.queued_anchor += tags.length; continue; }
     let rest = '';
     let at = 0;
     for (const t of tags) { rest += text.slice(at, t.start); at = t.end; }
@@ -3008,11 +3039,13 @@ function planPastes(messages, api, keepFrom, cfg, sessionId, stats) {
       found.push({ row, tag, text: whole, inner: text.slice(tag.from, tag.to) });
     }
   }
-  // Masking has quadratic patterns, so it runs on the largest tags only, until there are enough.
+  // Masking has quadratic patterns, so it runs on the largest tags only, until there are enough, and within the budget of the check.
   const jobs = [];
+  const budget = { left: Math.max(SCAN_BUDGET_CHARS, PASTE_MAX_ASKS * limit) };
   for (const job of found.sort((a, b) => b.text.length - a.text.length)) {
-    if (jobs.length >= PASTE_MAX_ASKS) stats.unasked++;
-    else if (maskSecrets(job.text) !== job.text) stats.secret++;
+    if (jobs.length >= PASTE_MAX_ASKS) { stats.unasked++; continue; }
+    const held = secretCheck(job.text, cfg.privatePaths, budget, limit);
+    if (held) stats[held]++;
     else jobs.push(job);
   }
   return jobs;
@@ -3055,12 +3088,12 @@ async function askPastes($, cfg, jobs, sessionId, stats, deadline) {
 }
 
 // Plans the tags and starts the requests about them; `record.pastes` holds the counts from here on. `active` needs the point itself active.
-function startPastes($, cfg, record, messages, api, keepFrom, deadline) {
+function startPastes($, cfg, record, messages, api, keepFrom, deadline, queued) {
   const mode = cfg.pastes === 'active' && cfg.mode === 'active' ? 'active' : 'shadow';
-  const stats = { mode, tags: 0, small: 0, kept_whole: 0, too_long: 0, secret: 0, owner_marked: 0, too_short: 0, unasked: 0, asked: 0, held: 0, yes: 0, no: 0, unanswered: 0, written: 0, reused: 0, write_failed: 0, timed_out: 0, moved: 0, moved_chars: 0, trace_chars: 0, answers: [], ...(mode === 'active' ? { installed: false } : {}) };
+  const stats = { mode, tags: 0, small: 0, kept_whole: 0, too_long: 0, secret: 0, owner_marked: 0, result_rows: 0, queued_anchor: 0, unchecked: 0, too_short: 0, unasked: 0, asked: 0, held: 0, yes: 0, no: 0, unanswered: 0, written: 0, reused: 0, write_failed: 0, timed_out: 0, moved: 0, moved_chars: 0, trace_chars: 0, answers: [], ...(mode === 'active' ? { installed: false } : {}) };
   record.pastes = stats;
   let jobs = [];
-  try { jobs = planPastes(messages, api, keepFrom, cfg, record.session_id, stats); } catch { stats.error = 1; }
+  try { jobs = planPastes(messages, api, keepFrom, cfg, record.session_id, stats, queued); } catch { stats.error = 1; }
   return { stats, jobs, asks: askPastes($, cfg, jobs, record.session_id, stats, deadline) };
 }
 
@@ -3146,14 +3179,18 @@ export function replyRuns(text, minChars = REPLY_MIN_CHARS) {
 /**
  * The assistant replies that answer a user message directly, which the stage never takes text from: after each user message that still
  * holds words of its own (not only the traces of pasted text), the first row with text and the last one before the next user message.
+ * `delivered`: rows that a message the user typed during a tool turn is anchored to (it stands after the row, in the API form only); each
+ * is a user message of its own that holds words by definition, so the replies after it are direct replies too.
  * The interval runs to the next user message, so a notification in the middle does not end it. Over-protection costs tokens, never text.
  * Only the structure decides; whether the reply confirms or corrects what the user said is not for the code to read.
  */
-export function directReplyRows(messages, users) {
+export function directReplyRows(messages, users, delivered = []) {
   const rows = new Set();
-  users.forEach((row, n) => {
-    if (!String(messages[row].text ?? '').replace(/\[pasted text moved at compaction: [^\n]*\]/g, '').trim()) return;
-    const stop = n + 1 < users.length ? users[n + 1] : messages.length;
+  const sent = new Set(delivered);
+  const bounds = [...new Set([...users, ...sent])].sort((a, b) => a - b);
+  bounds.forEach((row, n) => {
+    if (!sent.has(row) && !String(messages[row].text ?? '').replace(/\[pasted text moved at compaction: [^\n]*\]/g, '').trim()) return;
+    const stop = n + 1 < bounds.length ? bounds[n + 1] : messages.length;
     let first = -1;
     let last = -1;
     for (let j = row + 1; j < stop; j++) {
@@ -3187,22 +3224,26 @@ function nonTextAssistantRows(messages, api) {
 }
 
 // Plans the runs that may move: [{row, start, end, text, path, trace}]. What stays, and why, is counted in `stats`; a reason says that nothing can move.
-async function planReplies(cfg, messages, api, keepFrom, sessionId, stats) {
+async function planReplies(cfg, messages, api, keepFrom, sessionId, stats, queued = new Map()) {
   if (!cfg.pasteDir) { stats.reason = 'no_state_dir'; return []; }
   if (!sessionId) { stats.reason = 'no_session'; return []; }
   if (!api) { stats.reason = 'no_api_form'; return []; }
   const users = ownerRows(messages, cfg.hookRowPrefixes);
+  // A message the user typed during a tool turn is a user message too, though no row shows it: it stands after the row it is anchored to (queuedOf).
+  const delivered = [...queued].filter(([, blocks]) => blocks.some((b) => deliveryOf(b) === 'user')).map(([row]) => row);
+  const owners = [...new Set([...users, ...delivered])].sort((a, b) => a - b);
   const turns = [];
   messages.forEach((m, i) => { if (m.role === 'user' && !(m.toolResults || []).length && typeof m.text === 'string' && m.text.trim()) turns.push(i); });
   const limit = Math.min(
     Math.min(keepFrom, Math.max(1, messages.length - KEEP_LAST)),
-    users.length >= REPLY_KEEP_OWNERS ? users[users.length - REPLY_KEEP_OWNERS] : 0,
+    owners.length >= REPLY_KEEP_OWNERS ? owners[owners.length - REPLY_KEEP_OWNERS] : 0,
     turns.length >= REPLY_KEEP_TURNS ? turns[turns.length - REPLY_KEEP_TURNS] : 0,
   );
   stats.limit_row = limit;
   const skip = nonTextAssistantRows(messages, api);
-  const direct = directReplyRows(messages, users);
+  const direct = directReplyRows(messages, users, delivered);
   const jobs = [];
+  const budget = { left: SCAN_BUDGET_CHARS };
   for (let row = 0; row < limit; row++) {
     const m = messages[row];
     if (m.role !== 'assistant' || !m.text) continue;
@@ -3213,7 +3254,8 @@ async function planReplies(cfg, messages, api, keepFrom, sessionId, stats) {
     for (const run of replyRuns(m.text)) {
       stats.runs++;
       const text = m.text.slice(run.start, run.end);
-      if (namesSecretPath(text, cfg.privatePaths) || maskSecrets(text) !== text) { stats.secret++; continue; }
+      const held = secretCheck(text, cfg.privatePaths, budget);
+      if (held) { stats[held]++; continue; }
       const path = `${cfg.pasteDir}/${safeName(sessionId)}/${(await sha256Hex(text)).slice(0, 32)}.txt`;
       const trace = replyTrace(text.length, text, path);
       if (trace.length > text.length - REPLY_MIN_SAVING) { stats.too_short++; continue; }
@@ -3225,15 +3267,15 @@ async function planReplies(cfg, messages, api, keepFrom, sessionId, stats) {
 
 // Once the module's own result is certain (with a token target: before the plan, which takes the moved text off the prediction): plans the runs,
 // writes their files (active) and returns the new text of each changed row by its row index. A run stays when its file could not be written and read back whole in time. Never rejects.
-async function moveReplies($, cfg, record, messages, api, keepFrom, deadline) {
+async function moveReplies($, cfg, record, messages, api, keepFrom, deadline, queued) {
   const mode = cfg.replies === 'active' && cfg.mode === 'active' ? 'active' : 'shadow';
-  const stats = { mode, assistant_rows: 0, considered: 0, skipped_blocks: 0, direct_replies: 0, limit_row: 0, runs: 0, secret: 0, too_short: 0, written: 0, reused: 0, write_failed: 0, timed_out: 0, moved: 0, moved_chars: 0, trace_chars: 0, ...(mode === 'active' ? { installed: false } : {}) };
+  const stats = { mode, assistant_rows: 0, considered: 0, skipped_blocks: 0, direct_replies: 0, limit_row: 0, runs: 0, secret: 0, unchecked: 0, too_short: 0, written: 0, reused: 0, write_failed: 0, timed_out: 0, moved: 0, moved_chars: 0, trace_chars: 0, ...(mode === 'active' ? { installed: false } : {}) };
   record.replies = stats;
   const edited = new Map();
   try {
     const gate = { deadline, stalled: false };
     const byRow = new Map();
-    for (const job of await planReplies(cfg, messages, api, keepFrom, record.session_id, stats)) {
+    for (const job of await planReplies(cfg, messages, api, keepFrom, record.session_id, stats, queued)) {
       if (mode === 'active') {
         const saved = await savePaste($, gate, job.path, job.text);
         if (saved === 'written' || saved === 'reused') stats[saved]++;
@@ -3300,7 +3342,7 @@ export function trimAgentRows(messages, opts = {}) {
   const saved = new Map();
   const said = new Map(); // what every agent said outside idle notifications in the rows before the current one: summaries and bodies
   const learn = (m) => {
-    if (m.role !== 'user' || (m.toolResults || []).length || typeof m.text !== 'string' || !m.text.includes('<teammate-message')) return;
+    if (m.role !== 'user' || (m.toolResults || []).length || typeof m.text !== 'string' || m.text.length > AGENT_ROW_MAX_CHARS || !m.text.includes('<teammate-message')) return;
     for (const b of m.text.matchAll(TRIM_TM)) {
       if (trimIdle(b[2])) continue;
       const who = (/teammate_id="([^"]*)"/.exec(b[1]) || [])[1] || '';
@@ -3313,7 +3355,7 @@ export function trimAgentRows(messages, opts = {}) {
   };
   for (let i = 1; i < tail; i++) {
     const m = messages[i];
-    const row = m.role === 'user' && !(m.toolResults || []).length && typeof m.text === 'string' ? m.text : undefined;
+    const row = m.role === 'user' && !(m.toolResults || []).length && typeof m.text === 'string' && m.text.length <= AGENT_ROW_MAX_CHARS ? m.text : undefined;
     const lead = row === undefined ? '' : row.trimStart();
     const agent = (lead.startsWith(TRIM_HEAD) || lead.startsWith('<teammate-message')) && /<\/(?:teammate-message|agent-message|cross-session-message)>/.test(row);
     if (!agent || skip.has(i) || queued.has(i) || userWords(m, STAGE_NOT_USER).length || row.includes(QUEUED_PREFIX)) {
@@ -3363,6 +3405,9 @@ export function trimAgentRows(messages, opts = {}) {
 // rebuild from text (an unmatched API message with a non-text block stops the stage), a row shorter than AGENT_MIN_CHARS or than its trace, and a row with
 // a secret (a secret path, or anything maskSecrets would change; also in its trace). The stage runs on the rows as the trim leaves them.
 const AGENT_MIN_CHARS = 800;
+// The block patterns below (AGENT_BLOCK, TRIM_TM) are quadratic on a row of many openers without a closer (100 000 characters take about 0.7 s, 400 000 about
+// 12 s), so a longer row is no agent row for the trim and the move: it stays as it is.
+const AGENT_ROW_MAX_CHARS = 60000;
 const AGENT_KEEP_LAST = 6;
 const AGENT_SUMMARY_CHARS = 150;
 const AGENT_SENT_CHARS = 60;
@@ -3373,7 +3418,7 @@ const AGENT_BLOCK = /<(teammate-message|agent-message|cross-session-message)\b((
 const AGENT_TRACE_PREFIX = '[agent message moved at compaction, not from the user: ';
 const AGENT_LEAD = 'team-lead'; // the teammate_id of a team's lead in its members' sessions
 const utf8Bytes = (text) => new TextEncoder().encode(text).length;
-const isAgentRow = (m) => m.role === 'user' && !(m.toolResults || []).length && typeof m.text === 'string' && AGENT_OPENERS.some((p) => m.text.trimStart().startsWith(p)) && new RegExp(AGENT_BLOCK.source).test(m.text);
+const isAgentRow = (m) => m.role === 'user' && !(m.toolResults || []).length && typeof m.text === 'string' && m.text.length <= AGENT_ROW_MAX_CHARS && AGENT_OPENERS.some((p) => m.text.trimStart().startsWith(p)) && new RegExp(AGENT_BLOCK.source).test(m.text);
 const agentWord = (v, max) => Array.from(oneLine(typeof v === 'string' ? v : '').replace(/[<>[\]"]/g, '')).slice(0, max).join(''); // by code point: never half a surrogate pair
 // Who, when and what of each block, in order.
 export function agentSenders(text, statePattern = agentStatePattern('')) {
@@ -3425,7 +3470,7 @@ const agentSecret = (text, privatePaths) => namesSecretPath(text, privatePaths) 
 // are RATE_MOVED * moved_chars - RATE_TRACE * trace_chars of the stats. Never rejects.
 export async function moveAgentMessages($, cfg, messages, opts = {}) {
   const write = opts.write !== false;
-  const stats = { mode: write ? 'active' : 'plan', agent_rows: 0, limit_row: 0, kept_last: 0, considered: 0, skipped_blocks: 0, owner_words: 0, lead: 0, queued_anchor: 0, pending_json: 0, secret: 0, too_short: 0, too_short_chars: 0, written: 0, reused: 0, write_failed: 0, timed_out: 0, moved: 0, moved_chars: 0, trace_chars: 0 };
+  const stats = { mode: write ? 'active' : 'plan', agent_rows: 0, limit_row: 0, kept_last: 0, considered: 0, skipped_blocks: 0, owner_words: 0, lead: 0, queued_anchor: 0, pending_json: 0, secret: 0, unchecked: 0, too_short: 0, too_short_chars: 0, written: 0, reused: 0, write_failed: 0, timed_out: 0, moved: 0, moved_chars: 0, trace_chars: 0 };
   const rows = new Map();
   try {
     if (!cfg.pasteDir) { stats.reason = 'no_state_dir'; return { rows, stats }; }
@@ -3449,6 +3494,7 @@ export async function moveAgentMessages($, cfg, messages, opts = {}) {
     // another session started this one with it.
     const leads = new Set([AGENT_LEAD, ...(agentRows[0] === 0 ? senders.get(0).map((x) => x.who).filter(Boolean) : [])]);
     const jobs = [];
+    const budget = { left: SCAN_BUDGET_CHARS };
     for (const i of agentRows) {
       if (i === 0 || i >= tail) continue;
       const m = messages[i];
@@ -3461,11 +3507,12 @@ export async function moveAgentMessages($, cfg, messages, opts = {}) {
       stats.considered++;
       const text = m.text;
       if (text.length < AGENT_MIN_CHARS) { stats.too_short++; stats.too_short_chars += text.length; continue; }
-      if (agentSecret(text, cfg.privatePaths)) { stats.secret++; continue; }
+      const held = secretCheck(text, cfg.privatePaths, budget);
+      if (held) { stats[held]++; continue; }
       const path = `${cfg.pasteDir}/${safeName(opts.sessionId)}/${(await sha256Hex(text)).slice(0, 32)}.txt`;
       const trace = agentTrace(path, text, state);
       if (trace.length >= text.length) { stats.too_short++; stats.too_short_chars += text.length; continue; }
-      if (agentSecret(trace.replace(path, ''), cfg.privatePaths)) { stats.secret++; continue; } // the path is ours
+      if (agentSecret(trace.replace(path, ''), cfg.privatePaths)) { stats.secret++; continue; } // the path is ours; the trace is short, so no budget
       jobs.push({ i, text, path, trace });
     }
     const gate = { deadline: opts.deadline ?? Date.now() + TOTAL_MS, stalled: false };
@@ -3488,6 +3535,7 @@ async function decide($, e, cfg, record, started) {
   const messages = Array.isArray(e.messages) ? e.messages : [];
   let before = messages.reduce((s, m) => s + messageChars(m), 0);
   record.chars_before = before;
+  const deadline = started + TOTAL_MS;
   if (messages.length <= KEEP_LAST + 1) return { fallback: 'too_few_messages' };
   // The rows of one API message are rebuilt together (groupsOf); only the last message of an open tool
   // loop keeps its handles, and then the API form has to hold every call of it: without it a call whose
@@ -3564,11 +3612,15 @@ async function decide($, e, cfg, record, started) {
   let manual = false;
   let ruleTarget;
   let agentsFloor = 0;
+  let known;
   if (cfg.targetPercent !== undefined) {
-    const detail = await hostValue($, () => $.session.usage({ breakdown: 'summary' }));
-    let win = await resolveWindow($, cfg, detail, await hostValue($, () => $.session.usage()));
+    // The host reads are made once, within the compaction's deadline, and the token accounting below uses them again.
+    const detail = await hostValue($, () => $.session.usage({ breakdown: 'summary' }), deadline);
+    const usage = await hostValue($, () => $.session.usage(), deadline);
+    known = { detail, usage };
+    let win = await resolveWindow($, cfg, detail, usage, deadline);
     if (!win) return { fallback: 'no_window' };
-    tokens = await tokensBeforeOf($, e, cfg, messages, api);
+    tokens = tokensBeforeOf(e, cfg, messages, api, detail, usage);
     if (e.trigger === 'auto') {
       if (e.agentId === undefined) tokens.tokens = Math.max(tokens.tokens, win.threshold);
       else if (tokens.tokens < win.threshold) {
@@ -3584,7 +3636,10 @@ async function decide($, e, cfg, record, started) {
     manual = tokens.tokens <= raw;
     if (!manual) {
       // With the stage active the floor counts what it plans to save (a plan, no write), so a session full of agents' reports is not handed to the
-      // host's summary that the stage would spare it; if the writes then fall short, the plan is held to the same bound after the cascade.
+      // host's summary that the stage would spare it; if the writes then fall short, the plan is held to the same bound after the cascade. The floor
+      // leaves out the text of the reply stage and of the paste stage: what the paste stage moves depends on Jev's answers, which come after the floor, and
+      // the reply stage is left out with it so that both are counted once, in the plan. A session that only those two stages would spare goes to the
+      // host's summary here, which is the safe side.
       if (agentOpts && cfg.mode === 'active') {
         const planned = await moveAgentMessages($, cfg, trimmed, { ...agentOpts, write: false });
         agentsFloor = Math.max(0, movedTokens(planned.stats));
@@ -3624,7 +3679,6 @@ async function decide($, e, cfg, record, started) {
   record.asked = asked.length;
 
   const user = userTask(messages, typeof e.instructions === 'string' && e.instructions.trim() ? e.instructions : undefined, queued, cfg.privatePaths, cfg.notUserPrefixes);
-  const deadline = started + TOTAL_MS;
   // Agent messages to files run next to the scoring requests (no request of their own); their result comes before the plan.
   const agentsRun = agentOpts ? moveAgentMessages($, cfg, trimmed, { ...agentOpts, write: cfg.mode === 'active', deadline }) : undefined;
   const runs = [];
@@ -3674,7 +3728,7 @@ async function decide($, e, cfg, record, started) {
   }
   record.requests = runs.length;
   // Pasted text: the requests go out next to the scoring ones; the files wait for the result (below), or for the plan with a token target.
-  const pasted = cfg.pastes === 'off' || e.agentId !== undefined ? undefined : startPastes($, cfg, record, messages, api, keepFrom, deadline);
+  const pasted = cfg.pastes === 'off' || e.agentId !== undefined ? undefined : startPastes($, cfg, record, messages, api, keepFrom, deadline, queued);
   const [results] = await Promise.all([Promise.all(runs), pasted?.asks]);
   record.jev_ms = results.map((r) => r.ms);
   let answered = 0;
@@ -3732,7 +3786,7 @@ async function decide($, e, cfg, record, started) {
     // then stops earlier and the host handoff below sees the cut they make. Only a stage that moved text (active, files written) counts. A fallback after
     // this point leaves the files, which hold the text word for word.
     if (cfg.replies !== 'off' && e.agentId === undefined) {
-      replyEdits = await moveReplies($, cfg, record, messages, api, keepFrom, deadline);
+      replyEdits = await moveReplies($, cfg, record, messages, api, keepFrom, deadline, queued);
       if (replyEdits.size) stageTokens += movedTokens(record.replies);
     }
     if (pasted) {
@@ -3766,7 +3820,7 @@ async function decide($, e, cfg, record, started) {
   let built = build(rows, candidates, keepFrom, group, stats, queued);
   if (!pairingOk(messages, built)) return { fallback: 'build_error' };
   if (cfg.replies !== 'off' && e.agentId === undefined) {
-    const edited = replyEdits ?? (await moveReplies($, cfg, record, messages, api, keepFrom, deadline));
+    const edited = replyEdits ?? (await moveReplies($, cfg, record, messages, api, keepFrom, deadline, queued));
     if (edited.size) {
       built = build(rows.map((m, i) => (edited.has(i) ? { ...m, text: edited.get(i) } : m)), candidates, keepFrom, group, stats, queued);
       record.replies.installed = true;
@@ -3791,7 +3845,9 @@ async function decide($, e, cfg, record, started) {
     score_hist: hist,
     unanswered: asked.length - answered,
   });
-  if (cfg.tokenAccounting) Object.assign(record, await tokenAccounting($, e, cfg, messages, api, candidates, trimTokens + agentTokens + (cfg.targetPercent !== undefined ? stageTokens : 0)));
+  // What the installed text stages took off, with or without the cascade: a stage that moved nothing (shadow, writes that failed, or a fallback) counts for nothing.
+  const installedTokens = trimTokens + agentTokens + (record.replies?.installed ? movedTokens(record.replies) : 0) + (pasted?.stats.installed ? movedTokens(pasted.stats) : 0);
+  if (cfg.tokenAccounting) Object.assign(record, await tokenAccounting($, e, cfg, messages, api, candidates, installedTokens, deadline, known));
   return { messages: built, before, after, predicted: record.tokens_after_pred, tokensBefore: tokens?.tokens, tokensAfter: record.tokens_after_pred };
 }
 
@@ -3914,17 +3970,11 @@ async function ownThreshold($, e, next) {
     const messages = await $.session.messages();
     let before = messages.reduce((s, m) => s + messageChars(m), 0);
     const candidates = findCandidates(messages, cfg.privatePaths, cfg.notifications);
-    // Not even the floor (every removable result gone) cuts HOST_MIN_CUT of the tokens: the request would only end in a skip after Jev's scores.
-    // With active text stages (agent trim), include conservative savings to avoid suppressing useful early compactions.
-    let floor = floorPrediction(candidates, tokens, cfg.rates);
-    if (cfg.targetPercent !== undefined && cfg.agentTrim) {
-      // Conservative estimate: agent trim might save up to 5% of non-candidate text. This is a floor estimate, not actual savings.
-      const candidateTokens = candidates.reduce((s, c) => s + itemTokens(c, cfg.rates).full, 0);
-      const conservativeAgentSavings = Math.round((tokens - candidateTokens) * 0.05);
-      // Don't let the adjusted floor go below the window; actual savings in decide() might be less.
-      floor = Math.max(window, floor - conservativeAgentSavings);
-    }
-    if (cfg.ownSkip && tokens - floor < Math.max(OWN_MIN_GAIN * window, HOST_MIN_CUT * tokens)) return result;
+    // Not even the floor (every removable result gone) cuts HOST_MIN_CUT of the tokens: the request would only end in a skip after Jev's scores. The floor counts
+    // results only, so with a stage on that takes text off as well (agent trim, long replies, pasted text) it is no proof: decide holds the request to the same
+    // bound with the text of those stages in its plan, and answers it with a skip.
+    const textStages = cfg.agentTrim || cfg.replies === 'active' || cfg.pastes === 'active';
+    if (cfg.ownSkip && !textStages && tokens - floorPrediction(candidates, tokens, cfg.rates) < Math.max(OWN_MIN_GAIN * window, HOST_MIN_CUT * tokens)) return result;
     let removable = removableChars(candidates);
     const tooSmall = () => !before || removable / before < MIN_REDUCTION || removable / CHARS_PER_TOKEN < OWN_MIN_GAIN * window;
     // The delivered messages can only make this worse (they add to `before`, their envelopes come off

@@ -8,7 +8,7 @@
 
 import { describe, expect, it } from 'vitest';
 
-import { QUESTION_CRITERIA, QUESTION_INSTRUCTIONS, cascade, floorPrediction, manualPlan, register, scoreQuestion } from '../../hooks/jev-compaction.mjs';
+import { QUESTION_CRITERIA, QUESTION_INSTRUCTIONS, cascade, floorPrediction, manualPlan, ratesFrom, register, scoreQuestion } from '../../hooks/jev-compaction.mjs';
 
 const ACTIVE_ENV = { OMC_JEV: 'compaction:active', TYPESAFE_API_KEY: 'test-key', HOME: '/home/u' };
 const SPOOL = '/home/u/.omc/state/jev/compaction-spool/';
@@ -219,6 +219,20 @@ describe('token cascade (OMC_JEV_COMPACT_TARGET_PERCENT)', () => {
     expect(floorPrediction([item('a', { score: 3, resIdx: 2 })], 3700)).toBeLessThan(3700);
   });
 
+  it('the full cost of a result counts its image blocks at RATE_IMAGE (also a configured one): the floor and every cascade step take them off, a short copy is text only', () => {
+    const base = item('img', { textOnly: false, chars: 0 });
+    const none = { ...base, res: { text: '', isError: false } };
+    const two = { ...base, res: { text: '', isError: false, result: [{ type: 'image' }, { type: 'image' }] } };
+    const nested = { ...base, res: { text: '', isError: false, result: { content: [{ type: 'image' }, { type: 'text', text: 'x' }, { type: 'image' }] } } };
+    expect(floorPrediction([none], 10000) - floorPrediction([two], 10000)).toBeCloseTo(2 * 2348, 6);
+    expect(floorPrediction([none], 10000) - floorPrediction([nested], 10000)).toBeCloseTo(2 * 2348, 6);
+    const rates = ratesFrom('{"RATE_IMAGE":100}');
+    expect(floorPrediction([none], 10000, rates) - floorPrediction([two], 10000, rates)).toBeCloseTo(200, 6);
+    // The forced pass (a result that cannot be sent goes to its trace) and the drop pass count them too.
+    expect(cascade([none], 10000, 1).predicted - cascade([two], 10000, 1).predicted).toBe(2 * 2348);
+    expect(manualPlan([none], 10000).predicted - manualPlan([two], 10000).predicted).toBe(2 * 2348);
+  });
+
   it('the cascade is not run without the variable: allocate keeps its own keep decisions', async () => {
     const { record } = await compactRun({ ...ACTIVE_ENV, OMC_JEV_COMPACT_TOKEN_ACCOUNTING: '1' });
     expect(record).not.toHaveProperty('cut');
@@ -229,6 +243,31 @@ describe('token cascade (OMC_JEV_COMPACT_TARGET_PERCENT)', () => {
 describe('drop pass, the floor, host handoff and the after record (token cascade)', () => {
   const TARGET_20 = { ...ACTIVE_ENV, OMC_JEV_COMPACT_TARGET_PERCENT: '20' };
   const HANDOFF_20 = { ...TARGET_20, OMC_JEV_COMPACT_HOST_HANDOFF: '1' };
+
+  it('the token accounting and the plan agree for every keep decision, a dropped result (call and result gone) included', async () => {
+    const { record } = await compactRun({ ...TARGET_20, OMC_JEV_COMPACT_TOKEN_ACCOUNTING: '1' }, { trigger: 'manual' });
+    expect(record).toMatchObject({ cut: 'cascade', cascade_pass: 'drop', result: 'jev', tokens_source: 'usage' });
+    expect(record.cascade_dropped).toBeGreaterThan(0);
+    // The record says no more tokens are left than the plan predicts, and no fewer: a dropped result counts as zero retained tokens.
+    expect(Math.abs(record.tokens_after - record.tokens_after_pred)).toBeLessThanOrEqual(1);
+  });
+
+  it('screenshots count: a session of 60 image results and 20 text results at 190 000 tokens has a floor lower by the image tokens and does not go to the host summary', async () => {
+    const m = [{ role: 'user', text: 'Task: look at the screens and the notes.', toolUses: [] }];
+    for (let i = 1; i <= 80; i++) {
+      const image = i % 8 !== 0 && i % 8 !== 4;
+      m.push({ role: 'assistant', text: `Step ${i}.`, toolUses: [{ tool_use_id: `t${i}`, tool: image ? 'Screenshot' : 'Bash', input: image ? { screen: i } : { command: `cat notes-${i}.txt` } }] });
+      m.push({ role: 'user', text: '', toolUses: [], toolResults: [{ tool_use_id: `t${i}`, text: image ? '' : `RESULT-${i} ${'x'.repeat(4000)}`, ...(image ? { result: [{ type: 'image', source: { type: 'base64', data: 'AAAA' } }] } : {}), isError: false }] });
+    }
+    m.push({ role: 'user', text: 'Good, now sum up the results.', toolUses: [] }, { role: 'assistant', text: 'Summary: done.', toolUses: [] });
+    const messages = m.map((x, k) => Object.freeze({ ...x, handle: `h${k}` }));
+    const usage = async (o) => ({ context: { tokens: 190000, window: 200000, ...(o?.breakdown ? { breakdown: { rawMaxTokens: 200000, autoCompactThreshold: 167000 } } : {}) } });
+    const { record } = await compactRun(TARGET_20, { messages, usage });
+    // The threshold less 20 % of the window is 127 000: the text results alone leave the floor above it, the images take it far below.
+    expect(record.non_text).toBeGreaterThan(50);
+    expect(record.result).toBe('jev');
+    expect(record.floor_pred).toBeLessThanOrEqual(190000 - record.non_text * 2348);
+  });
 
   it('the drop pass removes results with their calls, and the rebuilt list keeps every call paired with its result', async () => {
     const { record, out } = await compactRun({ ...ACTIVE_ENV, OMC_JEV_COMPACT_TARGET_PERCENT: '20' });

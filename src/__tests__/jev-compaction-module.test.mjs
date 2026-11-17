@@ -3911,6 +3911,73 @@ describe('jev-compaction module: pasted text (OMC_JEV_COMPACT_PASTES)', () => {
     expect(pasteTags('<pasted_content>'.repeat(30000))).toEqual([]);
   });
 
+  // The API form of a conversation as the host holds it: consecutive user rows are one message (a row with results shows them, then its text), and
+  // `extra` (row index to texts) adds delivered blocks after that row's blocks, as the host does for a message the user typed during a tool turn.
+  const apiJoined = (messages, extra = {}) => {
+    const api = [];
+    messages.forEach((m, i) => {
+      const content = m.role === 'assistant'
+        ? [...(m.text ? [{ type: 'text', text: m.text }] : []), ...(m.toolUses || []).map((u) => ({ type: 'tool_use', id: u.tool_use_id, name: u.tool, input: u.input }))]
+        : [...(m.toolResults || []).map((r) => ({ type: 'tool_result', tool_use_id: r.tool_use_id, content: r.text })), ...(m.text ? [{ type: 'text', text: m.text }] : [])];
+      const last = api[api.length - 1];
+      if (m.role === 'user' && last?.role === 'user') last.content.push(...content); else api.push({ role: m.role, content });
+      if (extra[i]) api[api.length - 1].content.push(...extra[i].map((text) => ({ type: 'text', text })));
+    });
+    return api;
+  };
+  const delivered = (words) => `The user sent a new message while you were working:\n${words}\n\nThis is how Claude Code surfaces messages the user sends mid-turn — within the running turn, often alongside the next tool result, rather than as a separate conversation turn. Address the message above as you continue this turn.`;
+
+  describe('rows that are not rebuilt by the paste stage: tool results and delivered messages (the replacement is a plain user row)', () => {
+    it('keeps a tag in a row that a message delivered during a tool turn is anchored to: the row stays with its handle, nothing is asked, written or counted as moved', async () => {
+      const messages = withPastes([`${OUTSIDE} ${sized(3000)}`]);
+      const words = 'DELIVERED-WORDS: stop after this step.';
+      const run = await compactPastes(messages, { api: apiJoined(messages, { 1: [delivered(words)] }) });
+      expect(run.record).toMatchObject({ result: 'jev', queued_user: 1, pastes: { tags: 1, queued_anchor: 1, result_rows: 0, moved: 0, asked: 0, installed: false } });
+      expect(run.requests).toHaveLength(0);
+      expect(run.written).toHaveLength(0);
+      // The row stands as the host gave it, with its handle, so the host brings the delivered message back after it.
+      expect(run.out.messages).toContain(messages[1]);
+      expect(pairingOk(messages, run.out.messages)).toBe(true);
+      // The same row without the delivered message does move, so the anchor is what holds it.
+      const free = await compactPastes(messages);
+      expect(free.record.pastes).toMatchObject({ queued_anchor: 0, moved: 1, installed: true });
+    });
+
+    it('keeps a tag in a mid-turn message that a tool result row carries: the results stay, the build holds, nothing is counted as moved', async () => {
+      const base = conversation(30);
+      const mid = delivered(`${OUTSIDE} ${sized(3000)}`);
+      const messages = base.map((m) => (resultOf([m], 't10') ? Object.freeze({ ...m, text: mid }) : m));
+      const run = await compactPastes(messages, { api: apiJoined(messages) });
+      expect(run.record).toMatchObject({ result: 'jev', pastes: { tags: 1, result_rows: 1, queued_anchor: 0, moved: 0, asked: 0, installed: false } });
+      expect(run.requests).toHaveLength(0);
+      expect(run.written).toHaveLength(0);
+      expect(JSON.stringify(run.out.messages)).toContain('<pasted_content');
+      expect(pairingOk(messages, run.out.messages)).toBe(true);
+      expect(run.out.messages.some((m) => (m.text || '').includes(OUTSIDE))).toBe(true);
+    });
+  });
+
+  describe('the check for a secret in the stages that move text whole is bounded (maskSecrets is quadratic on one long word)', () => {
+    // 'KEY' repeated is one word with thousands of KEY inside: 90 000 characters of it take seconds in maskSecrets and nothing in a bounded check. The
+    // tests assert on the counters of the stages, never on the time.
+    const withSecret = (n) => `${filler('alpha', n)} password=hunter22`;
+
+    it('a tag is checked up to the budget of one compaction (four times the default limit): the rest stays, counted as unchecked, and a tag with a secret is counted as secret', async () => {
+      // The results are large, so the results are what the compaction cuts and the stage still runs.
+      const messages = withPastes(Array.from({ length: 8 }, (_, k) => `${OUTSIDE} ${tag(withSecret(29000), k + 1)}`), { chars: 20000 });
+      const run = await compactPastes(messages, { env: { ...PASTES, OMC_JEV_COMPACT_PASTE_MIN_CHARS: '2000' } });
+      expect(run.record.pastes).toMatchObject({ tags: 8, secret: 4, unchecked: 4, moved: 0, asked: 0 });
+      expect(run.requests).toHaveLength(0);
+      expect(run.written).toHaveLength(0);
+    });
+
+    it('a tag within the budget and without a secret is still asked about and moved', async () => {
+      const messages = withPastes([`${OUTSIDE} ${sized(29000)}`]);
+      const run = await compactPastes(messages, { env: { ...PASTES, OMC_JEV_COMPACT_PASTE_MIN_CHARS: '2000' } });
+      expect(run.record.pastes).toMatchObject({ tags: 1, unchecked: 0, asked: 1, moved: 1 });
+    });
+  });
+
   describe('rows that a hook or the host puts in as a user message (the paste stage)', () => {
     // A hook or host row is no message of the user: it neither becomes the newest message of the user (which stays whole) nor shifts that role off the
     // paste's own row. The paste row stands last among the user's messages here, followed only by the row under test.
@@ -4033,8 +4100,8 @@ describe('jev-compaction module: pasted text (OMC_JEV_COMPACT_PASTES)', () => {
     const Rr = (id) => ({ role: 'user', text: '', toolUses: [], toolResults: [{ tool_use_id: id, text: `RESULT-${id} ${'x'.repeat(2000)}`, isError: false }] });
 
     /** `turns` user questions; in each the assistant opens, works with a long middle reply, and closes. */
-    function replyConversation(turns, { middle = (k) => long(`reply${k}`) } = {}) {
-      const rows = conversation(30).slice(0, -2).map((m) => ({ ...m }));
+    function replyConversation(turns, { middle = (k) => long(`reply${k}`), chars } = {}) {
+      const rows = conversation(30, chars ? { chars } : {}).slice(0, -2).map((m) => ({ ...m }));
       for (let k = 1; k <= turns; k++) rows.push(U(`Question ${k}: what about part ${k}?`), A(`Looking at part ${k}.`, `a${k}`), Rr(`a${k}`), A(middle(k), `b${k}`), Rr(`b${k}`), A(`Part ${k} is done.`));
       return rows.map((m, k) => Object.freeze({ ...m, handle: `h${k}` }));
     }
@@ -4143,6 +4210,51 @@ describe('jev-compaction module: pasted text (OMC_JEV_COMPACT_PASTES)', () => {
       expect(sub.record).not.toHaveProperty('replies');
       const few = await compactPastes(replyConversation(2), { env: REPLIES });
       expect(few.record.replies).toMatchObject({ limit_row: 0, moved: 0 });
+    });
+
+    it('checks a long run for a secret only up to a limit: a reply of 90 000 characters of one word stays and is counted as unchecked, one of 25 000 characters moves', async () => {
+      const messages = replyConversation(8, { chars: 20000, middle: (k) => (k === 1 ? 'KEY'.repeat(30000) : k === 2 ? long('reply2', 25000) : long(`reply${k}`)) });
+      const run = await compactPastes(messages, { env: REPLIES });
+      expect(run.record.replies).toMatchObject({ moved: 1, unchecked: 1, secret: 0, written: 1, installed: true });
+      expect(run.written).toHaveLength(1);
+      expect(replyOf(run.out, 'KEY'.repeat(30000))).toBeDefined();
+      expect(replyOf(run.out, long('reply2', 25000))).toBeUndefined();
+    });
+
+    it('the runs of one compaction share a budget of 120 000 characters: the first four of 29 000 characters are checked and move, the rest stay unchecked', async () => {
+      // Turns 7 to 12 are the newest six, so turns 1 to 6 are eligible.
+      const many = await compactPastes(replyConversation(12, { chars: 20000, middle: (k) => long(`reply${k}`, 29000) }), { env: REPLIES });
+      expect(many.record.replies).toMatchObject({ moved: 4, unchecked: 2, written: 4 });
+    });
+
+    it('a message the user typed during a tool turn (in the API form only) is a user message too: the reply that opens after it is a direct reply and stays', async () => {
+      const rowOf = (text, extra = {}) => ({ role: 'user', text, toolUses: [], ...extra });
+      const rows = conversation(30).slice(0, -2).map((m) => ({ ...m }));
+      rows.push(U('Question A: what about part A?'), A('Looking at part A.', 'a0'), Rr('a0'), A(long('middle'), 'b0'), Rr('b0'), rowOf('Please continue.', { isMeta: true }), A('Part A is done.'));
+      for (let k = 1; k <= 8; k++) rows.push(U(`Question ${k}: and part ${k}?`), A(`Looking at part ${k}.`, `c${k}`), Rr(`c${k}`), A(`Part ${k} is done.`));
+      const messages = rows.map((m, k) => Object.freeze({ ...m, handle: `h${k}` }));
+      const at = messages.findIndex((m) => resultOf([m], 'a0'));
+      const plain = await compactPastes(messages, { env: REPLIES, api: apiJoined(messages) });
+      expect(plain.record.replies).toMatchObject({ moved: 1 });
+      expect(replyOf(plain.out, long('middle'))).toBeUndefined();
+      const run = await compactPastes(messages, { env: REPLIES, api: apiJoined(messages, { [at]: [delivered('DELIVERED: look at part A again.')] }) });
+      expect(run.record).toMatchObject({ result: 'jev', queued_user: 1 });
+      expect(run.record.replies).toMatchObject({ moved: 0 });
+      expect(replyOf(run.out, long('middle'))).toBeDefined();
+    });
+
+    it('directReplyRows takes the replies after a delivered user message, whose row holds no words of its own', () => {
+      const m = [
+        { role: 'user', text: 'Question.', toolUses: [] },
+        { role: 'assistant', text: 'Reply one.', toolUses: [] },
+        { role: 'user', text: '', toolUses: [], toolResults: [{ tool_use_id: 'x', text: 'result' }] },
+        { role: 'assistant', text: 'Reply two.', toolUses: [] },
+        { role: 'assistant', text: 'Reply three.', toolUses: [] },
+        { role: 'assistant', text: 'Reply four.', toolUses: [] },
+      ];
+      expect([...directReplyRows(m, [0])].sort()).toEqual([1, 5]);
+      expect([...directReplyRows(m, [0], [2])].sort()).toEqual([1, 3, 5]);
+      expect([...directReplyRows(m, [], [2])].sort()).toEqual([3, 5]);
     });
 
     describe('rows that a hook or the host puts in as a user message (the reply stage)', () => {
