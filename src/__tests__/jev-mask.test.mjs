@@ -155,11 +155,24 @@ describe.each([
       'a localized label, a word and a word of repeated PASS, masked': (n) => 'klucz: a: ' + repeat('PASS', n),
       'a localized label and a run of backslashes, masked': (n) => 'sekret=: ' + '\\'.repeat(n),
       'a serialized localized label and a word of repeated keywords, masked': (n) => String.raw`hasło=\"a: ` + repeat('klucz', n),
-      // The forms of a name: each is read once.
+      // The class of the closing characters inside quotes and of the forms of a name: each is read once.
+      'a name and a run of backslashes': (n) => 'X_KEY' + '\\'.repeat(n),
+      'a name and serialized quotes, masked': (n) => 'X_KEY' + String.raw`\"`.repeat(n / 2) + ':x',
+      'a quoted value with separators, masked': (n) => "KEY='" + repeat('a;b|c)', n),
+      'a quoted value of a localized name with commas and braces, masked': (n) => 'hasło="' + repeat('a,b}c', n),
+      'quoted values with brackets and commas, masked': (n) => repeat('hasło="a},b" klucz=\'a;b\' ', n),
+      'an open pair value with brackets and commas, masked': (n) => '{"Name":"DB_PASSWORD","Value":"' + repeat('},', n),
+      'an open pair value with quotes, brackets and commas, masked': (n) => '{"Name":"DB_PASSWORD","Value":"' + repeat('"x},', n),
+      'an open serialized pair value with brackets and commas, masked': (n) => String.raw`{\"Name\":\"DB_PASSWORD\",\"Value\":\"` + repeat('},', n),
+      'pair values opened and cut by brackets, masked': (n) => repeat('{"Name":"DB_PASSWORD","Value":"a}', n),
       'a decomposed name and combining marks': (n) => 'contrasen' + '\u0303'.repeat(n),
       'decomposed names without a separator': (n) => repeat('contrasen\u0303a', n),
       'a label and a word of repeated decomposed names, masked': (n) => 'KEY=: ' + repeat('contrasen\u0303a', n),
       'a padded assignment and words of decomposed names, masked': (n) => repeat('API_KEY=YWJjZA== contrasen\u0303a=x ', n),
+      'a quote and spaces, masked': (n) => 'password="' + ' '.repeat(n),
+      'misread closes before brackets, masked': (n) => '{"Name":"DB_PASSWORD","Value":"abc"' + repeat('x\\"},', n),
+      'misread closes before brackets after backslash runs, masked': (n) => '{"Name":"DB_PASSWORD","Value":"abc"d' + repeat('\\\\\\\\"},', n),
+      'serialized misread closes before brackets, masked': (n) => String.raw`{\"Name\":\"DB_PASSWORD\",\"Value\":\"abc\"` + repeat('x\\\\\\"},', n),
     };
     for (const n of [100_000, 1_000_000]) {
       for (const [name, make] of Object.entries(shapes)) {
@@ -638,17 +651,99 @@ describe.each([
       // A premature quote still ends the scan at the bracket that follows the closing quote.
       ['{"Name":"DB_PASSWORD","Value":"abc"def ghi"}', '{"Name":"DB_PASSWORD","Value":"***"}'],
       ['{"Name":"DB_PASSWORD","Value":"abc"def ghi"],"Other":"x"', '{"Name":"DB_PASSWORD","Value":"***"],"Other":"x"'],
+      // After a quote that was misread as the close, a bracket ends the scan only when the end, another bracket or the next member follows it.
+      ['{"Name":"DB_PASSWORD","Value":"abc"def},hunter2zz and more', '{"Name":"DB_PASSWORD","Value":"***"'],
+      ['{"Name":"DB_PASSWORD","Value":"abc"def}],hunter2zz and more', '{"Name":"DB_PASSWORD","Value":"***"'],
+      ['{"Name":"DB_PASSWORD","Value":"abc"def],hunter2zz and more', '{"Name":"DB_PASSWORD","Value":"***"'],
+      [String.raw`{\"Name\":\"DB_PASSWORD\",\"Value\":\"abc\"def},hunter2zz and more`, String.raw`{\"Name\":\"DB_PASSWORD\",\"Value\":\"***\"`],
+      // That bracket must follow a real delimiter or such a follower: an escaped quote or an apostrophe before it is content.
+      ['{"Name":"DB_PASSWORD","Value":"abc"def\\"},hunter2zz and more', '{"Name":"DB_PASSWORD","Value":"***"'],
+      ['{"Name":"DB_PASSWORD","Value":"abc"def\'},hunter2zz and more', '{"Name":"DB_PASSWORD","Value":"***"'],
+      [String.raw`{\"Name\":\"DB_PASSWORD\",\"Value\":\"abc\"def\\\"},hunter2zz and more`, String.raw`{\"Name\":\"DB_PASSWORD\",\"Value\":\"***\"`],
+      [String.raw`{\"Name\":\"DB_PASSWORD\",\"Value\":\"abc\"def'},hunter2zz and more`, String.raw`{\"Name\":\"DB_PASSWORD\",\"Value\":\"***\"`],
+      // A quote that a bracket follows is a close: what comes after the bracket is outside the value (the same as for a value without a misread quote).
+      ['{"Name":"DB_PASSWORD","Value":"abc"def"},hunter2zz and more', '{"Name":"DB_PASSWORD","Value":"***"},hunter2zz and more'],
+      [String.raw`{\"Name\":\"DB_PASSWORD\",\"Value\":\"abc\"def\"},hunter2zz and more`, String.raw`{\"Name\":\"DB_PASSWORD\",\"Value\":\"***\"},hunter2zz and more`],
+      [JSON.stringify({ command: '{"Name":"DB_PASSWORD","Value":"abc"def ghi"}' }), JSON.stringify({ command: '{"Name":"DB_PASSWORD","Value":"***"}' })],
+      ['{"Name":"DB_PASSWORD","Value":"abc"def}', '{"Name":"DB_PASSWORD","Value":"***"}'],
+      ['{"Name":"DB_PASSWORD","Value":"abc"def}]', '{"Name":"DB_PASSWORD","Value":"***"}]'],
+      ['[{"Name":"REGION","Value":"abc"def}, {"Name":"DB_PASSWORD","Value":"hunter2zz"}]', '[{"Name":"REGION","Value":"abc"def}, {"Name":"DB_PASSWORD","Value":"***"}]'],
       // A bracket that closes an object ends the scan, so the next object of an array is its own group (a premature quote in the first).
       ['[{"Name":"REGION","Value":"abc"def},{"Name":"DB_PASSWORD","Value":"hunter2zz"}]', '[{"Name":"REGION","Value":"abc"def},{"Name":"DB_PASSWORD","Value":"***"}]'],
       [String.raw`[{\"Name\":\"REGION\",\"Value\":\"abc\"def},{\"Name\":\"DB_PASSWORD\",\"Value\":\"hunter2zz\"}]`, String.raw`[{\"Name\":\"REGION\",\"Value\":\"abc\"def},{\"Name\":\"DB_PASSWORD\",\"Value\":\"***\"}]`],
     ];
     for (const [text, masked] of cases) expect({ text, masked: mask(text) }).toEqual({ text, masked });
-    // The same text cut at every length inside the value, as the compaction hook cuts a long input: nothing of the value is left.
-    const whole = '{"Name":"DB_PASSWORD","Value":"abc}hunter2zz and more text after the bracket"}';
-    for (let end = whole.indexOf('hunter2zz'); end <= whole.length; end++) {
-      const cut = whole.slice(0, end + 'hunter2zz'.length > whole.length ? whole.length : end + 'hunter2zz'.length);
-      expect({ cut, left: mask(cut).includes('hunter2zz') }).toEqual({ cut, left: false });
+  });
+
+  it('masks a pair value cut at any length, whatever closes inside it, raw and serialized once and twice, with exact results', () => {
+    // The class behind the findings on one closing character: while the quote of a value is open, a bracket, a comma or a parenthesis is
+    // content, so a value that the text cuts short is masked to its end, and a value that is complete is masked up to its closing quote.
+    const tail = 'hunter2zz and more text';
+    const wrong = [];
+    let cuts = 0;
+    // `"` is a quote inside the value that nothing escapes (a close that was misread); `\"` is one that the value escapes.
+    for (const closer of ['}', '}]', '},', '],', ')', '"', String.raw`\"`]) {
+      const pairs = [
+        `{"Name":"DB_PASSWORD","Value":"abc${closer}${tail}"}`,
+        `{"Value":"abc${closer}${tail}","Name":"DB_PASSWORD"}`,
+      ];
+      for (const [order, pair] of pairs.entries()) {
+        let text = pair;
+        for (let depth = 0; depth <= 2; depth++) {
+          if (depth) text = JSON.stringify({ command: text });
+          const q = '\\'.repeat(2 ** depth - 1) + '"';
+          const valueAt = text.indexOf(`${q}Value${q}:`) + `${q}Value${q}:`.length;
+          const closeAt = text.indexOf(tail) + tail.length;
+          expect({ depth, closer, closes: text.startsWith(q, closeAt) }).toEqual({ depth, closer, closes: true });
+          // The text cut at every length (as the compaction hook cuts a long input), and uncut. Before the value opens nothing is masked;
+          // inside it the value is masked to the cut; after its closing quote, up to that quote. A name that comes after its value is
+          // read only when the text is not cut before it.
+          const lengths = order ? [text.length] : Array.from({ length: text.length + 1 }, (_, end) => end);
+          for (const end of lengths) {
+            const cut = text.slice(0, end);
+            const expected = end < valueAt + q.length ? cut : text.slice(0, valueAt) + q + '***' + q + text.slice(closeAt + q.length, Math.max(end, closeAt + q.length));
+            cuts++;
+            if (mask(cut) !== expected) wrong.push({ depth, closer, cut, expected, out: mask(cut) });
+          }
+        }
+      }
     }
+    expect(cuts).toBeGreaterThan(1500);
+    expect(wrong.slice(0, 3)).toEqual([]);
+  });
+
+  it('masks a quoted value whole under any name when a separator, bracket, comma or parenthesis is inside the quotes, also when the quote is never closed', () => {
+    // The same class as a pair value cut short: while the quote of a value is open, what would end an unquoted word is content.
+    const names = ['password', 'DB_PASSWORD', 'X_KEY', 'api_key', 'hasło', 'klucz', 'sekret', 'Passwort', 'contraseña', 'contrasen\u0303a', String.raw`hasło`, String.raw`password`];
+    const closers = [',', '}', '},', ']', '],', ')', ';', '&', '|', ')}', ',}'];
+    const wrong = [];
+    let checked = 0;
+    for (const name of names) {
+      for (const separator of ['=', ': ', ' = ']) {
+        for (const quote of ["'", '"']) {
+          for (const closer of closers) {
+            const open = `${name}${separator}${quote}`;
+            for (const [text, masked] of [
+              [`${open}abc${closer}hunter2zz${quote}`, `${open}***${quote}`],
+              [`${open}abc${closer}hunter2zz`, `${open}***`],
+              [`${open}abc${closer}hunter2zz${quote} next`, `${open}***${quote} next`],
+            ]) {
+              checked++;
+              if (mask(text) !== masked) wrong.push({ text, masked, out: mask(text) });
+            }
+            // As a tool input is sent (the quotes escaped by the JSON string) and as a JSON key: nothing of the value is left.
+            // (A name that only the `KEY=` rule reads is not read when JSON has escaped the quotes around it, as on dev: `X_KEY` stays out of that shape.)
+            const escapedKey = name === 'X_KEY' ? [] : [String.raw`{\"${name}\":\"abc${closer}hunter2zz\"}`];
+            for (const text of [JSON.stringify({ command: `${open}abc${closer}hunter2zz${quote}` }), `{"${name}":"abc${closer}hunter2zz"}`, ...escapedKey]) {
+              checked++;
+              if (mask(text).includes('hunter2zz')) wrong.push({ text, out: mask(text) });
+            }
+          }
+        }
+      }
+    }
+    expect(checked).toBeGreaterThan(4000);
+    expect(wrong.slice(0, 5)).toEqual([]);
   });
 
   it('leaves nothing of a secret-bearing value under any field name, separator, key and value quoting and serialization', () => {

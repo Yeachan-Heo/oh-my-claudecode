@@ -40,7 +40,7 @@ export function maskSecrets(text, { keepGitHashes = false } = {}) {
     // A JWT, or else the rest of the run kept unchanged; the run class has no dot, so a match with a dot is the JWT.
     .replace(/\beyJ(?:[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}|[A-Za-z0-9_-]*)/g, (m) => m.includes('.') ? 'eyJ***' : m)
     // A whole word containing a keyword: the lookahead finds the keyword once, then the word is read to its end.
-    .replace(KEYWORD_ASSIGNMENT, (whole, head, scheme) => head + (scheme ? '*** ***' : '***'))
+    .replace(KEYWORD_ASSIGNMENT, (whole, head, quotedScheme, scheme) => head + (quotedScheme || scheme ? '*** ***' : '***'))
     .replace(NAMED_VALUE, '$1***')
     .replace(ESCAPED_KEY, (whole, key, separator) => secretPairName(key) ? key + separator + '***' : whole)
     // The long mixed letter-digit strings come after the field-name rules: a key such as `service_01234567890123456789_klucz` is a long
@@ -86,9 +86,15 @@ const localNames = (escapes) => {
 // is not rescanned from each of its characters), then the word is read to its end once, and that end is tested. The test does not
 // depend on where the keyword is, so a word that holds many keywords is not read again from each of them.
 const WORD = String.raw`[^\s"'&;|)]`;
+// After an opening quote the word is read to the closing quote or a space: a separator, a parenthesis, a comma or a brace inside the
+// quotes is content, so a value that holds them is masked whole, also where the text ends before the quote. The lookbehind reads only
+// the quote (never a run of spaces before the position), which keeps the rules linear.
+const AFTER_QUOTE = String.raw`(?<=["'])`;
+const QUOTED_WORD = String.raw`[^\s"']+`;
+const VALUE_WORD = String.raw`(?:${AFTER_QUOTE}${QUOTED_WORD}|${WORD}+)`;
 const KEYWORD = String.raw`${ENGLISH_KEYWORDS}|${localNames(false)}|\\u[0-9a-fA-F]{4}`;
 const NEXT_KEY = String.raw`(?:(?!${KEYWORD})${WORD})*(?:${KEYWORD})${WORD}*(?!${WORD})(?:(?<=[:=]\\*)|(?:\\*["']|\s)+[:=])`;
-const KEYWORD_ASSIGNMENT = new RegExp(String.raw`(\b(?=[A-Za-z0-9_]*(?:${ENGLISH_KEYWORDS}))[A-Za-z0-9_]+\b["'\]]*\s*[=:]\s*(?:\\*["'])?)(?:(bearer|basic)[ \t]+)?${WORD}+(?:(?:(?<=[:=])|[ \t]+[:=])[ \t]*(?:\\*["'])?(?!${NEXT_KEY})${WORD}+)?`, 'gi');
+const KEYWORD_ASSIGNMENT = new RegExp(String.raw`(\b(?=[A-Za-z0-9_]*(?:${ENGLISH_KEYWORDS}))[A-Za-z0-9_]+\b["'\]]*\s*[=:]\s*(?:\\*["'])?)(?:${AFTER_QUOTE}(?:(bearer|basic)[ \t]+)?${QUOTED_WORD}|(?:(bearer|basic)[ \t]+)?${WORD}+)(?:(?:(?<=[:=])|[ \t]+[:=])[ \t]*(?:\\*["'])?(?!${NEXT_KEY})${VALUE_WORD})?`, 'gi');
 
 // Whitespace between the parts of a field (the name, its separator, the value): a space or a line break, also as JSON writes it into
 // a string (`\n`, `\t`, `\r`, `\f` or `\uXXXX` of a whitespace character), with any number of backslashes (the run doubles each time the
@@ -101,15 +107,19 @@ const WS = String.raw`(?:\s|\\+(?:[ntrf]|u(?:000[9a-dA-D]|0020|00[aA]0|1680|200[
 // value of `hasło:`, or `x-api-key: x`), the word after its separator is the secret and is masked too, as the `KEY=` rule does, unless
 // that word is a key of its own (it ends in a separator or has one after it), which is left to the rule that reads it.
 const VALUE = String.raw`(?:[^\s"'&;|,}\\]|\\(?!["']))+`;
+// After an opening quote the word is read as in the `KEY=` rule: the closing quote or a space ends it, and a comma, a closing brace or a
+// shell separator inside the quotes is content.
+const QUOTED_VALUE = String.raw`(?:[^\s"'\\]|\\(?!["']))+`;
+const FIELD_VALUE = String.raw`(?:${AFTER_QUOTE}${QUOTED_VALUE}|${VALUE})`;
 const NEXT_FIELD = String.raw`(?:(?:\\*["'])?${WS}*[:=]|(?<=[^=][:=]))${WS}*(?:\\*["'])?(?!(?=(?<word>${VALUE}))\k<word>(?:(?<=[:=])|(?:\\*["']|${WS})*[:=]))${VALUE}`;
-const NAMED_VALUE = new RegExp(String.raw`((?:api[_-]?key|access[_-]?key|client[_-]?secret|private[_-]?key|password|passwd|token|secret|${localNames(true)})(?:\\*["'])?${WS}*[:=]${WS}*(?:\\*["'])?(?:(?:bearer|basic)[ \t]+)?)${VALUE}(?:${NEXT_FIELD})?`, 'gi');
+const NAMED_VALUE = new RegExp(String.raw`((?:api[_-]?key|access[_-]?key|client[_-]?secret|private[_-]?key|password|passwd|token|secret|${localNames(true)})(?:\\*["'])?${WS}*[:=]${WS}*(?:\\*["'])?(?:(?:bearer|basic)[ \t]+)?)${FIELD_VALUE}(?:${NEXT_FIELD})?`, 'gi');
 
 // A field key that holds JSON `\uXXXX` escapes in any of its letters (`h\u0061s\u0142o`, `p\u0061ssword`), which the name list above does not
 // read: the key is decoded and classified as the key of a pair is, and the value is masked when it names a secret. The key is a run of
 // word characters and escapes (not of whitespace, which stays the separator), read from its start only, so each character is read once.
 const KEY_ESCAPE = String.raw`\\+u(?!(?:000[9a-dA-D]|0020|00[aA]0|1680|200[0-9aA]|202[89fF]|205[fF]|3000|[fF][eE][fF][fF]))[0-9a-fA-F]{4}`;
 const KEY_CHAR = String.raw`[^\s\x00-\x2c\x2e\x2f\x3a-\x40\x5b-\x5e\x60\x7b-\x7f]`;
-const ESCAPED_KEY = new RegExp(String.raw`(?<!${KEY_CHAR}|\\)((?=(?:${KEY_CHAR}|${KEY_ESCAPE})*${KEY_ESCAPE})(?:${KEY_CHAR}|${KEY_ESCAPE})+)((?:\\*["'])?${WS}*[:=]${WS}*(?:\\*["'])?)${VALUE}`, 'g');
+const ESCAPED_KEY = new RegExp(String.raw`(?<!${KEY_CHAR}|\\)((?=(?:${KEY_CHAR}|${KEY_ESCAPE})*${KEY_ESCAPE})(?:${KEY_CHAR}|${KEY_ESCAPE})+)((?:\\*["'])?${WS}*[:=]${WS}*(?:\\*["'])?)${FIELD_VALUE}`, 'g');
 
 // A quote delimiter at escaping depth 0 (a plain quote), 1 (inside a JSON string: `\"`), 2 (shell-escaped before it went into the
 // JSON string: `\\\"`), 3 (7 backslashes) and so on up to 8 (255 backslashes): a maximal run of backslashes whose length is 2^depth - 1 plus a multiple of 2^(depth + 1),
@@ -134,8 +144,20 @@ const PAIR_PREFIX = String.raw`[^\s\x00-\x2c\x2f\x3a-\x40\x5b-\x5e\x60\x7b-\x7f]
 const PAIR_NAME_FIELD = new RegExp(String.raw`^(${PAIR_PREFIX})(?:name|key|type)$`, 'i');
 const PAIR_VALUE_FIELD = new RegExp(String.raw`^(${PAIR_PREFIX})(?:value|val)$`, 'i');
 const PAIR_SEPARATOR = new RegExp(String.raw`^${WS}*,${WS}*$`);
+// The value of a pair field at quote depth d: a complete quoted string, or else a value whose quote is open or was misread.
+// The text sent to a model is often clipped, so a value can end where the text does, and what closes a value (a bracket, a comma, a
+// parenthesis) is content for as long as its quote is open: with no delimiter in the value, nothing ends it before the end of the line
+// (or the next field), however many brackets and commas it holds. Only after a delimiter that no terminator followed (the close was
+// misread) does a bracket that ends an object end the scan, so the next object of an array is its own group; such a bracket comes right
+// after a delimiter (an escaped quote or an apostrophe is none), or is followed by the end, or by one more bracket at most and then the
+// end or a comma and the start of the next member (a quote, a brace, a bracket): `abc"def},hunter2zz` is a value that goes on.
+const pairValue = (d) => {
+  const nextField = String.raw`,${WS}*${d}${stringBody(d)}*${d}${WS}*:`;
+  const objectEnd = String.raw`[}\]](?:(?<=${d}[}\]])|(?=(?:${WS}*[}\]])?${WS}*(?:,${WS}*(?:["{\[\\]|$)|$)))`;
+  return String.raw`${d}${stringBody(d)}*${d}${AFTER_CLOSE}|${d}(?:${stringBody(d)}*?(?=${nextField}|\n|$)|${stringBody(d)}*${d}[^\n]*?(?=${nextField}|${objectEnd}|\n|$))|[^,{}\[\]\s"\\]+`;
+};
 const PAIR_FORMS = QUOTE_DEPTHS.map((d) =>
-  new RegExp(String.raw`${d}(${stringBody(d)}*)${d}${WS}*:${WS}*(${d}${stringBody(d)}*${d}${AFTER_CLOSE}|${d}[^\n]*?(?=,${WS}*${d}${stringBody(d)}*${d}${WS}*:|[}\]](?:(?<=["'][}\]])|(?=${WS}*(?:[,{}\[\]]|$)))|\n|$)|[^,{}\[\]\s"\\]+)`, 'g'));
+  new RegExp(String.raw`${d}(${stringBody(d)}*)${d}${WS}*:${WS}*(${pairValue(d)})`, 'g'));
 // JSON `\uXXXX` escapes of the name are read first (`DB_PASS\u0057ORD`), with any number of backslashes before the u.
 const decodeUnicode = (text) => text.replace(/(?<!\\)\\+u([0-9a-f]{4})/gi, (_, hex) => String.fromCharCode(parseInt(hex, 16)));
 const SECRET_PAIR_NAME = new RegExp(String.raw`${ENGLISH_KEYWORDS}|${localNames(false)}|^securestring$`, 'i');
