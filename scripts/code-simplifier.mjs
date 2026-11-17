@@ -28,7 +28,7 @@ import { BOUNDED_GIT_TIMEOUT_MS } from './lib/bounded-git-timeout.mjs';
 import { jevNoulOf, jevStateIds, recordJevApplied, recordJevShadow, setJevHookContext, setJevSessionId } from './lib/jev-shadow.mjs';
 import { loadContextText } from './lib/context-text-loader.mjs';
 
-// Opt-in text cleaning (OMC_CONTEXT_TEXT_SANITIZE=1 or true): file names from git are cleaned only when the switch is on.
+// Opt-in text cleaning (OMC_CONTEXT_TEXT_SANITIZE=1 or true): file names from git are escaped, not cleaned, only when the switch is on.
 let contextText = null;
 const DEFAULT_EXTENSIONS = ['.ts', '.tsx', '.js', '.jsx', '.py', '.go', '.rs'];
 const DEFAULT_MAX_FILES = 10;
@@ -111,7 +111,13 @@ function getModifiedFiles(cwd, extensions, maxFiles) {
 }
 
 function buildMessage(files) {
-  const shown = contextText ? files.map((f) => contextText.cleanHostText(f, 300)) : files;
+  // With the text cleaning switch on, a name that contains a character the cleaning removes is written as a double-quoted
+  // JSON string with \uXXXX escapes; every other name stays exactly as git printed it. A cleaned name would point the
+  // simplifier at a file that does not exist.
+  const shown = contextText ? files.map((f) => contextText.escapeIdentifier(f)) : files;
+  const escapedNote = shown.some((f, index) => f !== files[index])
+    ? `A name in double quotes is a JSON string: its \\uXXXX escapes stand for characters that are not shown. Decode them to get the exact name.\n\n`
+    : '';
   const fileList = shown.map((f) => `  - ${f}`).join('\n');
   const fileArgs = shown.join('\\n');
   return (
@@ -119,6 +125,7 @@ function buildMessage(files) {
     `code-simplifier agent to simplify the following files for clarity, ` +
     `consistency, and maintainability (without changing behavior):\n\n` +
     `${fileList}\n\n` +
+    escapedNote +
     `Use: Task(subagent_type="oh-my-claudecode:code-simplifier", ` +
     `prompt="Simplify the recently modified files:\\n${fileArgs}")`
   );

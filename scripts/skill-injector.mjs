@@ -517,7 +517,10 @@ function summarizeSkillContent(content) {
   return compactText(firstUsefulLine || content.replace(/\s+/g, ' ').trim(), 240);
 }
 
-function formatSkillDescriptor(skill) {
+// `sanitize` is the text cleaning module when OMC_CONTEXT_TEXT_SANITIZE is on, otherwise null. The names and the summary are
+// cleaned. The path is not: cleaning would turn it into a path that does not exist, so it is written exactly, with each
+// character that cleaning removes as a \uXXXX escape (see escapeIdentifier). The same holds for every field of the metadata.
+function formatSkillDescriptor(skill, sanitize = null) {
   const metadata = {
     path: skill.path,
     triggers: skill.triggers,
@@ -525,16 +528,18 @@ function formatSkillDescriptor(skill) {
     scope: skill.scope
   };
   const summary = skill.description || skill.summary || summarizeSkillContent(skill.content);
+  const metadataJson = JSON.stringify(metadata);
+  const path = sanitize ? sanitize.escapeIdentifier(skill.path) : skill.path;
   return compactText([
-    `### ${skill.name} (${skill.scope})`,
-    `<skill-metadata>${JSON.stringify(metadata)}</skill-metadata>`,
-    summary ? `Summary: ${summary}` : '',
-    `Load instructions: if this skill is needed, read ${skill.path} and follow the full instructions there.`,
+    `### ${sanitize ? sanitize.cleanHostText(skill.name, 200) : skill.name} (${sanitize ? sanitize.cleanHostText(skill.scope, 50) : skill.scope})`,
+    `<skill-metadata>${sanitize ? sanitize.escapeRemovedCharacters(metadataJson) : metadataJson}</skill-metadata>`,
+    summary ? `Summary: ${sanitize ? sanitize.cleanTextBlock(summary) : summary}` : '',
+    `Load instructions: if this skill is needed, read ${path}${path === skill.path ? '' : ' (a JSON string: decode its escapes to get the exact path)'} and follow the full instructions there.`,
   ].filter(Boolean).join('\n'), MAX_LEARNED_SKILL_DESCRIPTOR_CHARS);
 }
 
 // Format skills for injection
-function formatSkillsMessage(skills) {
+function formatSkillsMessage(skills, sanitize = null) {
   const header = [
     '<mnemosyne>',
     '',
@@ -549,7 +554,7 @@ function formatSkillsMessage(skills) {
   let used = 0;
 
   for (const skill of skills) {
-    const descriptor = formatSkillDescriptor(skill);
+    const descriptor = formatSkillDescriptor(skill, sanitize);
     const separator = descriptors.length > 0 ? '\n\n---\n\n' : '';
     if (used + separator.length + descriptor.length > budget) {
       const omission = `${separator}[Additional learned skills omitted due to ${MAX_LEARNED_SKILLS_CONTEXT_CHARS}-character context budget; use skill metadata paths if needed.]`;
@@ -609,13 +614,12 @@ async function main() {
     }
 
     if (matchingSkills.length > 0) {
-      const message = formatSkillsMessage(matchingSkills);
       const sanitize = await loadContextText();
       console.log(JSON.stringify({
         continue: true,
         hookSpecificOutput: {
           hookEventName: 'UserPromptSubmit',
-          additionalContext: sanitize ? sanitize.cleanTextBlock(message) : message
+          additionalContext: formatSkillsMessage(matchingSkills, sanitize)
         }
       }));
     } else {

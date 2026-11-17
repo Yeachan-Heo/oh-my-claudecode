@@ -489,13 +489,13 @@ The cleaning is fail-open: if `scripts/lib/context-text-sanitize.mjs` cannot be 
 
 - Control, format and bidi characters and the other invisible characters of the set (see `scripts/lib/context-text-sanitize.mjs`) become spaces; in multi-line blocks line feed and tab are kept. The closing markers of the envelopes (`</notepad-context>`, `</session-restore>`, `</project-memory-context>`) and both `<system-reminder>` tags have their `<` replaced by `<\`, so cleaned text cannot close an envelope early. This goes beyond removing invisible characters.
 - `post-tool-verifier.mjs`: the TaskOutput summary is wrapped in an untrusted-output envelope (a closing marker inside the output is escaped). Running agent names are cleaned and cut to 80 characters, at most 10 are listed, the rest as `+N more`; the counts are cleaned too. A running agent entry without `agent_type` is listed as `unknown` with or without the switch; before, it dropped the whole summary.
-- `code-simplifier.mjs`: modified file names are cleaned and cut to 300 characters.
+- `code-simplifier.mjs`: the simplifier is told to open each modified file, so a name is never cleaned or cut. A name that contains a character the cleaning removes (or the start of a marker above) is written as a double-quoted JSON string with `\uXXXX` escapes, which decodes to the exact name, and the message says so; every other name is written exactly as git prints it.
 - `session-start.mjs`: the compaction registry (both paths), the checkpoint restore, the project memory summary and the notepad context are cleaned; the restored Ralph prompt is cleaned and cut to 500 characters.
-- `pre-tool-enforcer.mjs`: the /goal objective and the expected objective in the ultragoal deny reason are cleaned and cut to 500 characters.
-- `persistent-mode.mjs`: the Ralph task line is cleaned and cut to 500 characters; the /goal objective in the Stop block is cleaned.
+- `pre-tool-enforcer.mjs`: the objective of the current /goal in the ultragoal deny reason is cleaned and cut to 500 characters. The expected objective is cleaned and not cut, because the model has to type it as a goal, and the guard compares the two objectives in their cleaned form, so a goal typed from the deny text matches an expected objective that contains a removed character.
+- `persistent-mode.mjs`: the Ralph task line is cleaned and cut to 500 characters; the /goal objective in the Stop block is cleaned and not cut.
 - `post-tool-directory-context-injector.mjs`: the README text read from disk is cleaned before it is injected.
 - `post-tool-rules-injector.mjs`: the text of the rules files read from disk is cleaned before it is injected.
-- `skill-injector.mjs`: the learned skill descriptors read from skill files are cleaned before they are injected.
+- `skill-injector.mjs`: the name and the summary of each learned skill descriptor are cleaned before they are injected. The path is not cleaned, because the model is told to read it: every character the cleaning removes is written as a `\uXXXX` escape in the metadata JSON, and the load line then shows the path as a JSON string and says so.
 - `wiki-session-start.mjs`: the wiki index text is cleaned before it is injected.
 - `wiki-pre-compact.mjs`: the wiki page metadata in the system message is cleaned.
 - `runs-reconciler.mjs`: each run ledger field is cleaned to one line and cut to 200 characters.

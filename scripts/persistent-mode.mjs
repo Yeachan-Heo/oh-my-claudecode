@@ -2064,7 +2064,7 @@ async function main() {
 
         let reason = `[ULTRAGOAL #${newCount}/${maxReinforcements}] Ultragoal mode is active. Continue the durable goal workflow, keep the matching Claude /goal active, and checkpoint .omc/ultragoal/ledger.jsonl before stopping. When all ultragoal stories are complete and the final quality gate passes, run /oh-my-claudecode:cancel to cleanly exit.`;
         const objective = getUltragoalObjective(ultragoal.state, omcRoot);
-        if (objective) reason += `\nClaude /goal objective: ${contextText ? contextText.cleanHostText(objective) : objective}`;
+        if (objective) reason += `\nClaude /goal objective: ${contextText ? contextText.cleanHostText(objective, Infinity) : objective}`;
         if (errorGuidance) {
           reason = errorGuidance + reason;
         }

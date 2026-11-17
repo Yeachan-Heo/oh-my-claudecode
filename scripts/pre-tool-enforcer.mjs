@@ -2153,8 +2153,11 @@ function evaluateUltragoalPreToolEnforcement(stateDir, directory, sessionId, dat
 
   const expected = getExpectedUltragoalObjective(state, directory);
   const actual = extractClaudeGoalSnapshot(data, sessionId, directory);
-  const actualObjective = normalizeText(actual?.objective);
-  const expectedObjective = normalizeText(expected);
+  // With the text cleaning switch on the deny reason shows the expected objective cleaned and not cut, so the objectives are
+  // compared in their cleaned form: a goal typed from that text matches an expected objective that contains a removed character.
+  const comparable = (value) => normalizeText(contextText && typeof value === 'string' ? contextText.cleanHostText(value, Infinity) : value);
+  const actualObjective = comparable(actual?.objective);
+  const expectedObjective = comparable(expected);
   const status = normalizePhase(actual?.status);
   const objectiveMatches = Boolean(actualObjective && expectedObjective && actualObjective === expectedObjective);
   const activeStatus = status === '' || status === 'active' || status === 'in_progress' || status === 'running';
@@ -2171,7 +2174,7 @@ function evaluateUltragoalPreToolEnforcement(stateDir, directory, sessionId, dat
   const mismatch = actualObjective
     ? `current Claude /goal appears unrelated: "${contextText ? contextText.cleanHostText(actual.objective) : actual.objective}".`
     : 'no active Claude /goal snapshot was visible to the hook.';
-  return `[ULTRAGOAL /GOAL REQUIRED] Active ultragoal state requires the matching Claude /goal before tools run; ${mismatch} Activate /goal with the ultragoal objective, or set ALLOW_ULTRAGOAL_WITHOUT_GOAL=1 to bypass this guard intentionally. Expected objective: ${(contextText ? contextText.cleanHostText(expected) : expected) || '<record one in ultragoal-state.json or .omc/ultragoal/goals.json>'}`;
+  return `[ULTRAGOAL /GOAL REQUIRED] Active ultragoal state requires the matching Claude /goal before tools run; ${mismatch} Activate /goal with the ultragoal objective, or set ALLOW_ULTRAGOAL_WITHOUT_GOAL=1 to bypass this guard intentionally. Expected objective: ${(contextText ? contextText.cleanHostText(expected, Infinity) : expected) || '<record one in ultragoal-state.json or .omc/ultragoal/goals.json>'}`;
 }
 
 function hasActiveJsonMode(stateDir, { allowSessionTagged = false } = {}) {

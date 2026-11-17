@@ -56,11 +56,11 @@ function isHighSurrogate(code) {
 }
 
 // Single-line host text: control and bidi characters become spaces, structure markers are neutralized, runs of whitespace
-// collapse, the result is bounded to `max` UTF-16 code units (default 500). The cut never splits a surrogate pair and never
-// leaves a trailing space.
+// collapse, the result is bounded to `max` UTF-16 code units (default 500; Infinity means no bound, for a text that the model
+// has to reproduce exactly). The cut never splits a surrogate pair and never leaves a trailing space.
 export function cleanHostText(value, max = 500) {
   try {
-    const limit = typeof max === 'number' && Number.isFinite(max) && max > 0 ? Math.floor(max) : 500;
+    const limit = max === Infinity ? Infinity : typeof max === 'number' && Number.isFinite(max) && max > 0 ? Math.floor(max) : 500;
     let text = neutralizeStructureMarkers(toText(value).replace(REMOVED_CHARACTERS, ' '));
     text = text.replace(/\s+/g, ' ').trim();
     if (text.length <= limit) return text;
@@ -79,6 +79,41 @@ export function cleanTextBlock(value) {
     return neutralizeStructureMarkers(
       toText(value).replace(REMOVED_CHARACTERS, (ch) => (ch === '\t' || ch === '\n' ? ch : ' ')),
     );
+  } catch {
+    return '';
+  }
+}
+
+// Identifiers (file names, paths) that a message tells the model to use are never cleaned: cleaning would turn a name with
+// a removed character, a run of spaces or a long name into a different name that does not exist. They are escaped instead,
+// and the escape is reversible. Each character that cleaning removes, and each "<" that starts a structure marker, becomes
+// \uXXXX (one escape per UTF-16 unit, so an astral character gives two); cleanTextBlock does not change the result.
+const ESCAPED_CHARACTERS = new RegExp(`${REMOVED_CHARACTERS.source}|${STRUCTURE_MARKER.source}`, 'giu');
+
+function unicodeEscape(text) {
+  let escaped = '';
+  for (let index = 0; index < text.length; index += 1) {
+    escaped += `\\u${text.charCodeAt(index).toString(16).padStart(4, '0')}`;
+  }
+  return escaped;
+}
+
+// For text that is already JSON, such as JSON.stringify output: escapes the characters above inside it. The result is
+// still valid JSON and parses to the same value.
+export function escapeRemovedCharacters(json) {
+  try {
+    return toText(json).replace(ESCAPED_CHARACTERS, unicodeEscape);
+  } catch {
+    return '';
+  }
+}
+
+// A name that contains none of those characters is returned as it is. Any other name is returned as a double-quoted JSON
+// string with the characters escaped, so JSON.parse of the result gives the exact name.
+export function escapeIdentifier(value) {
+  try {
+    const text = toText(value);
+    return text.search(ESCAPED_CHARACTERS) === -1 ? text : escapeRemovedCharacters(JSON.stringify(text));
   } catch {
     return '';
   }
