@@ -240,6 +240,51 @@ describe('stop-failure-record hook', () => {
     expect(JSON.parse(old[0]).session_id).toBe('s-r0');
   });
 
+  it('a writer that waits for the lock appends to the journal as it is after the rotation, never through a descriptor opened before it', async () => {
+    const state = join(laneOf('rotation-race'), 'state');
+    mkdirSync(state, { recursive: true });
+    const rows = [];
+    for (let i = 0; i < 20; i += 1) {
+      rows.push(JSON.stringify({ ts: new Date().toISOString(), session_id: 's-old' + i, error: 'rate_limit', errorClass: 'transient' }));
+    }
+    writeFileSync(join(state, 'errors.jsonl'), rows.join('\n') + '\n');
+    const markers = { held: join(state, 'a-holds-the-lock'), waiting: join(state, 'b-is-waiting') };
+    const module = pathToFileURL(join(ROOT, 'scripts', 'stop-failure-record.mjs')).href;
+    const lockModule = pathToFileURL(join(ROOT, 'scripts', 'lib', 'atomic-write.mjs')).href;
+    const record = (id) => `{ ts: new Date().toISOString(), session_id: ${JSON.stringify(id)}, error: 'rate_limit', errorClass: 'transient' }`;
+    const pause = (ms) => `Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ${ms});`;
+    const until = (path) => `for (let i = 0; i < 500 && !existsSync(${JSON.stringify(path)}); i++) { ${pause(20)} }`;
+    // A holds the lock, lets B start, and appends with the rotation (the journal is over the threshold) while B waits for the lock.
+    const holder = `
+      import { existsSync, writeFileSync } from 'node:fs';
+      import { withStateFileLockAtPathSync } from ${JSON.stringify(lockModule)};
+      import { appendErrorsJsonl } from ${JSON.stringify(module)};
+      withStateFileLockAtPathSync(${JSON.stringify(join(state, 'errors.jsonl.lock'))}, () => {
+        writeFileSync(${JSON.stringify(markers.held)}, '1');
+        ${until(markers.waiting)}
+        ${pause(500)} // B has had time to open the journal, if it opens it before the lock
+        appendErrorsJsonl(${JSON.stringify(state)}, ${record('s-a')}, 1000);
+      }, true);
+    `;
+    const waiter = `
+      import { existsSync, writeFileSync } from 'node:fs';
+      import { appendErrorsJsonl } from ${JSON.stringify(module)};
+      ${until(markers.held)}
+      writeFileSync(${JSON.stringify(markers.waiting)}, '1');
+      appendErrorsJsonl(${JSON.stringify(state)}, ${record('s-b')}, 1000);
+    `;
+    const exits = [holder, waiter].map((code) => new Promise((resolve) => {
+      const child = spawn(process.execPath, ['--input-type=module', '-e', code], { stdio: 'ignore' });
+      child.on('exit', resolve);
+    }));
+    expect(await Promise.all(exits)).toEqual([0, 0]);
+    // A rotated the old journal and appended its row to the new file; B's row follows it in the new file and is not in the archive
+    expect(jsonlRows(state).map((row) => row.session_id)).toEqual(['s-a', 's-b']);
+    const archive = readFileSync(join(state, 'errors.jsonl.1'), 'utf8').trimEnd().split('\n').map((row) => JSON.parse(row).session_id);
+    expect(archive).toHaveLength(20);
+    expect(archive.every((id) => id.startsWith('s-old'))).toBe(true);
+  }, 30_000);
+
   it('a symlinked errors.jsonl is refused (O_NOFOLLOW): the target stays untouched, .error.json is written, code 0', () => {
     const laneDir = laneOf('symlink-log');
     const state = join(laneDir, 'state');
