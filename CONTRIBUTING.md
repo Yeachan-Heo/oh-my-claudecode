@@ -294,6 +294,8 @@ npm run test:run
 npm run test:coverage
 ```
 
+Tests run with `HOME` pointed at a temporary `omc-vitest-home-*` folder inside your home directory, so fixture state goes there and not into your real `~/.omc` or `~/.claude`. `CLAUDE_CONFIG_DIR`, `OMC_STATE_DIR`, `OMC_HOME`, `CODEX_HOME` and the `XDG_*_HOME` variables are unset for the run. The folder is removed when the run ends; if a run is killed, the next run removes the leftover. On Windows, `APPDATA` and `LOCALAPPDATA` are not redirected.
+
 ### Run linter
 
 ```bash
