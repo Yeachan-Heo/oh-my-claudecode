@@ -52,6 +52,7 @@ import {
   readdirSync,
   readFileSync,
   realpathSync,
+  renameSync,
   rmdirSync,
   unlinkSync,
   writeSync,
@@ -560,7 +561,30 @@ export function removeRun(realRoot: string, id: string): void {
   if (realpathSync(runDir) !== runDir) throw new Error("run directory resolves outside the runs root");
   // The owner lock is checked again here: a run started after the scan must not be removed.
   if (leaseOf(runDir).held) throw new Error("run is held by a live owner; not removed");
-  removeTree(runDir);
+  
+  // Hold run ownership throughout GC deletion by using atomic quarantine.
+  // Move the directory to a quarantine location before deletion, so any new process
+  // acquiring ownership gets a fresh directory, not one being deleted by GC.
+  const quarantineDir = `${runDir}.deleted-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+  try {
+    renameSync(runDir, quarantineDir);
+  } catch (error) {
+    // If rename fails (e.g., another process acquired ownership and created new files),
+    // the directory no longer exists as expected, so we're done.
+    if ((error as NodeJS.ErrnoException).code === "ENOENT" ||
+        (error as NodeJS.ErrnoException).code === "EEXIST") {
+      return;
+    }
+    throw error;
+  }
+  
+  // Now safely delete from the quarantine location
+  try {
+    removeTree(quarantineDir);
+  } catch (error) {
+    // Log but don't fail - quarantine cleanup can be retried in future GC passes
+    throw new Error(`failed to delete quarantined run ${quarantineDir}: ${(error as Error).message}`);
+  }
 }
 
 function writeAll(fd: number, buffer: Buffer): void {

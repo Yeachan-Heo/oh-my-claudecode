@@ -2,6 +2,7 @@ import { copyFileSync, existsSync, mkdirSync, readFileSync, readdirSync, renameS
 import { join } from 'node:path';
 import { atomicWriteJsonSync } from '../lib/atomic-write.js';
 import { withFileLockSync } from '../lib/file-lock.js';
+import { parseJsonLines } from '../lib/jsonl.js';
 import { getOmcRoot, getProcessSessionId, isLegacyStateMigrationEnabled, resolveSessionStatePaths, validateSessionId, } from '../lib/worktree-paths.js';
 import { truncateToWidth } from '../utils/string-width.js';
 import { canonicalizeWorkers } from '../team/worker-canonicalization.js';
@@ -40,11 +41,7 @@ function readJsonLinesSafe(path) {
     if (!existsSync(path))
         return [];
     try {
-        return readFileSync(path, 'utf-8')
-            .split('\n')
-            .map((line) => line.trim())
-            .filter(Boolean)
-            .map((line) => JSON.parse(line));
+        return parseJsonLines(readFileSync(path, 'utf-8'));
     }
     catch {
         return [];

@@ -307,11 +307,17 @@ export async function runPanelQuotaPass(
   const settleMs = marginMs(env);
   const weekUnit = weekLimitUnit(env);
   const prefix = sessionPrefix(env);
-  const panes = (deps.listPanes() || []).filter((pane) => String(pane.session).startsWith(prefix));
-  const live = new Set(panes.map(paneKey));
-  for (const key of Object.keys(state.panes)) {
-    if (!live.has(key)) delete state.panes[key];
+  const listedPanes = deps.listPanes(); // null if enumeration failed, [] if no panes
+  // Preserve quota waits when pane enumeration fails.
+  // Only delete entries if we have a successful enumeration.
+  if (listedPanes !== null) {
+    const panes = listedPanes.filter((pane) => String(pane.session).startsWith(prefix));
+    const live = new Set(panes.map(paneKey));
+    for (const key of Object.keys(state.panes)) {
+      if (!live.has(key)) delete state.panes[key];
+    }
   }
+  const panes = (listedPanes || []).filter((pane) => String(pane.session).startsWith(prefix));
 
   for (const pane of panes) {
     if (timeLeft() <= 0) { stopForTimeLimit(); break; }
@@ -329,11 +335,24 @@ export async function runPanelQuotaPass(
       if (entry.untilMs !== undefined && now < entry.untilMs) continue;
       // Strict capture right before the keys: the quota error must still be on screen for this pane identity.
       const fresh = deps.capture(pane, TAIL_LINES);
-      if (fresh === null || fresh === undefined || !detectQuotaError(fresh, codes)) {
+      // Keep quota waits retryable when the fresh capture fails.
+      // If capture times out or returns null, retry on the next pass rather than marking as resumed.
+      if (fresh === null || fresh === undefined) {
+        deps.log(`pane ${key}: fresh capture failed at reset time; retry on next pass`);
+        continue;
+      }
+      const freshErr = detectQuotaError(fresh, codes);
+      if (!freshErr) {
         entry.state = 'resumed';
-        entry.sig = fresh === null || fresh === undefined ? null : screenSignature(fresh);
+        entry.sig = screenSignature(fresh);
         entry.resumedAt = now;
         deps.log(`pane ${key}: no quota error on screen at reset time; no keys sent`);
+        continue;
+      }
+      // Reclassify terminal quota errors before sending a resume.
+      // The error code may have changed from resumable to non-resumable due to a user retry.
+      if (codes.end.includes(freshErr.code)) {
+        endQuota(entry, deps, now, `quota error ${freshErr.code} is non-resumable: no resume`, entry.resetMs ?? null);
         continue;
       }
       if (timeLeft() <= 0) { stopForTimeLimit(); break; }

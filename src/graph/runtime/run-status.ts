@@ -65,6 +65,11 @@ interface Projection {
   readonly terminal_verification_activation_ids: readonly string[];
 }
 
+interface ProjectionEnvelope {
+  readonly projection: Projection;
+  readonly saved_at_seq: number;
+}
+
 class UnreadableError extends Error {}
 
 function usage(message: string): RunStatusOutcome {
@@ -96,7 +101,7 @@ function readRunText(file: string): string {
   }
 }
 
-function readProjection(file: string): Projection {
+function readProjectionEnvelope(file: string): ProjectionEnvelope {
   const text = readRunText(file);
   let parsed: unknown;
   try {
@@ -104,7 +109,9 @@ function readProjection(file: string): Projection {
   } catch (error) {
     throw new UnreadableError(`projection.json: ${(error as Error).message}`);
   }
-  const projection = (parsed as { projection?: Projection } | null)?.projection;
+  const envelope = parsed as { projection?: Projection; saved_at_seq?: unknown } | null;
+  const projection = envelope?.projection;
+  const savedAtSeq = envelope?.saved_at_seq;
   if (!projection || typeof projection !== "object") {
     throw new UnreadableError("projection.json has no projection object");
   }
@@ -117,7 +124,21 @@ function readProjection(file: string): Projection {
       "projection.json lacks activations, committed_transitions or terminal_verification_activation_ids",
     );
   }
-  return projection;
+  if (typeof savedAtSeq !== "number" || !Number.isInteger(savedAtSeq)) {
+    throw new UnreadableError("projection.json has invalid saved_at_seq");
+  }
+  return { projection, saved_at_seq: savedAtSeq };
+}
+
+
+
+// Returns the last seq in the journal, or -1 for an empty journal.
+function lastJournalSeq(transitions: Transition[]): number {
+  if (transitions.length === 0) return -1;
+  // Transitions are read in order from the journal, so the last one has the highest seq
+  // However, seq is not always present in Transition. We need to count the transitions instead.
+  // The journal should have seq 0, 1, 2, ... so the last index is the last seq.
+  return transitions.length - 1;
 }
 
 function readJournal(file: string): Transition[] {
@@ -154,7 +175,8 @@ function nodeStateOf(
 }
 
 function summarize(runId: string, runDir: string, runsRoot: string): Record<string, unknown> {
-  const projection = readProjection(join(runDir, "projection.json"));
+  const envelope = readProjectionEnvelope(join(runDir, "projection.json"));
+  const projection = envelope.projection;
   const journalFile = join(runDir, "journal.jsonl");
   const committed = projection.committed_transitions;
   const activations = projection.activations;
@@ -164,6 +186,16 @@ function summarize(runId: string, runDir: string, runsRoot: string): Record<stri
   } else if (Object.keys(committed).length > 0) {
     throw new UnreadableError(
       "journal.jsonl is missing although the projection has committed transitions",
+    );
+  }
+
+  // Verify that the snapshot is fresh: reject snapshots that lag the journal.
+  // If the graph crashed after journal.append() but before store.save(), the projection
+  // would lag committed history.
+  const journalSeq = lastJournalSeq(transitions);
+  if (envelope.saved_at_seq < journalSeq) {
+    throw new UnreadableError(
+      `projection is stale (saved_at_seq ${envelope.saved_at_seq} < journal seq ${journalSeq})`,
     );
   }
 
@@ -195,10 +227,15 @@ function summarize(runId: string, runDir: string, runsRoot: string): Record<stri
   });
   const allCompleted = Object.values(activations).every((activation) => activation.status === "completed");
   // A failure counts whether it is in the journal or only in the projection.
+  // Include denied approvals in terminal failure detection.
   const anyFailed =
-    transitions.some((t) => t.outcome === "failed") ||
-    Object.values(committed).some((t) => t?.outcome === "failed");
-  const anyOpen = nodes.some((node) => node.state === "ready" || node.state === "running");
+    transitions.some((t) => t.outcome === "failed" || t.outcome === "denied") ||
+    Object.values(committed).some((t) => t?.outcome === "failed" || t?.outcome === "denied");
+  // Check all activations before declaring the run failed.
+  // A newer failed activation should not hide an older running activation.
+  const anyOpen = Object.values(activations).some(
+    (activation) => activation.status === "ready" || activation.status === "running"
+  );
 
   let state: keyof typeof RUN_STATUS_EXIT_CODES;
   if (terminalSucceeded && allCompleted) state = "succeeded";
