@@ -533,13 +533,19 @@ async function startInternal(id) {
   // section): a task that was killed, or already has a verdict (a `kill`, the time limit of `wait`, a start_failed of the queue ceiling), while
   // this launcher waited for the start lock must not start a team. `kill` and the limit shut down a team that does not exist yet (omc answers
   // "No team state found"), so nothing else would stop it; `wait` and `kill` write killed or the verdict before they shut down.
+  const isCancelled = (d) => Boolean(d && (d.killed || d.verdict));
   let cancelled = false;
   try {
     completeTask(id, env, (d) => {
-      if (d.killed || d.verdict) { cancelled = true; return { ...d, start_error: 'cancelled before the team was started' }; }
+      if (isCancelled(d)) { cancelled = true; return { ...d, start_error: 'cancelled before the team was started' }; }
       return { ...d, omc_started_at: new Date().toISOString() };
     });
-  } catch (e3) { console.error(`_start: writing omc_started_at failed (${e3.message}); the grace period is evaluated from start_pid`); }
+  } catch (e3) {
+    console.error(`_start: writing omc_started_at failed (${e3.message}); the grace period is evaluated from start_pid`);
+    // The task file lock stayed busy, so the check above did not run: read the file without the lock rather than start a team for a task that may be
+    // cancelled (writes are a temp file and a rename, so a lock-free read never sees half a file). Unreadable: the start goes on.
+    try { cancelled = isCancelled(JSON.parse(readFileSync(taskPath(id), 'utf8'))); } catch { /* unreadable: not treated as cancelled */ }
+  }
   if (cancelled) { releaseStartLock(); process.exit(0); }
   // Resolved before the spawn: an `error` event of the child (e.g. ENOENT) must not fire while no listener is registered yet.
   const teamDir = await teamStateDir(cwd);

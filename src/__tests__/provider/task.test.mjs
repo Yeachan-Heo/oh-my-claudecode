@@ -10,7 +10,7 @@ import { createRequire } from 'node:module';
 import { chmodSync, existsSync, mkdirSync, readdirSync, readFileSync, realpathSync, statSync, unlinkSync, utimesSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { PLACEHOLDER_KEY, fakeQuotaServer, makeTmp, writeProfile } from './_helpers.mjs';
+import { PLACEHOLDER_KEY, fakeQuotaServer, makeTmp, waitProcessGone, writeProfile } from './_helpers.mjs';
 
 const require = createRequire(import.meta.url);
 const SCRIPTS = fileURLToPath(new URL('../../../scripts/provider/', import.meta.url));
@@ -1071,7 +1071,7 @@ setTimeout(()=>process.exit(0), 3200);`], { stdio: 'ignore' });
 
   // A launcher queued on the start lock has no team yet, so `kill` and the time limit of `wait` shut down nothing; after they record killed or the verdict,
   // the launcher must not start the team when it takes the lock (quota and the worktree would be used by a task already reported as ended).
-  const queuedLauncher = async (f, text) => {
+  const queuedLauncher = async (f, text, extraEnv = {}) => {
     const lockDir = join(f.state, 'locks');
     mkdirSync(lockDir, { recursive: true });
     const lock = join(lockDir, `start-${createHash('sha1').update(realpathSync(f.cwd)).digest('hex')}.lock`);
@@ -1083,7 +1083,7 @@ process.exit(0);
 `, { mode: 0o755 });
     const peer = livePeer();
     writeFileSync(lock, js({ pid: peer.pid, ts: Date.now() }));
-    const r = await f.start([text], undefined, { OMC_PROVIDER_TASK_TEAM_BIN: fakeMarker, MARKER_FILE: marker });
+    const r = await f.start([text], undefined, { OMC_PROVIDER_TASK_TEAM_BIN: fakeMarker, MARKER_FILE: marker, ...extraEnv });
     check(r.status === 0 && /^[0-9a-f]{8}$/.test(r.id), `start: ${js(r.stdout.slice(0, 200))}, err ${r.stderr.slice(0, 200)}`);
     check(await waitFor(() => (f.task(r.id) || {}).queue_ts, 15000), `the launcher did not queue: ${js(f.task(r.id))}`);
     const release = () => { try { peer.kill('SIGKILL'); } catch { /* already dead */ } try { unlinkSync(lock); } catch { /* none */ } };
@@ -1122,6 +1122,28 @@ process.exit(0);
       check(!existsSync(q.marker) && !existsSync(q.lock), `marker ${existsSync(q.marker)}, lock ${existsSync(q.lock)}`);
       check(JSON.parse(f.run(['status', q.id], f.scenario({})).stdout).status === 'killed', 'status killed');
     } finally { q.release(); }
+  }, 120000);
+  it('(T12) the cancellation check of a queued launcher does not fail open: with the task file lock busy past the lock limit the check cannot run under the lock, and the launcher still sees killed in the file (read without the lock), cancels, releases the start lock and starts no team', async () => {
+    const f = fixture();
+    const q = await queuedLauncher(f, 'Test a queued launcher with a busy task file lock', { OMC_PROVIDER_TASK_LOCK_LIMIT_MS: '1000' });
+    const holder = livePeer();
+    const taskLock = join(f.tasks, `${q.id}.json.lock`);
+    try {
+      const k = f.run(['kill', q.id], f.scenario({}));
+      check(k.status === 0 && f.task(q.id).killed, js({ s: k.status, z: f.task(q.id) }));
+      writeFileSync(taskLock, js({ pid: holder.pid, ts: Date.now() })); // a live owner of the task file lock, fresh for the whole test
+      const launcher = f.task(q.id).start_pid;
+      check(Number.isInteger(launcher), js(f.task(q.id)));
+      q.release();
+      check(await waitProcessGone(launcher, 30000), 'the launcher did not end (it neither cancelled nor finished)');
+      check(!existsSync(q.marker), 'the team was started although the task was killed');
+      check(!existsSync(q.lock), 'the start lock of the cancelled launcher was not released');
+      check((f.task(q.id).omc_started_at ?? null) === null, js(f.task(q.id)));
+    } finally {
+      try { holder.kill('SIGKILL'); } catch { /* already dead */ }
+      try { unlinkSync(taskLock); } catch { /* none */ }
+      q.release();
+    }
   }, 120000);
   it('(T9) start_error null on start_exit_code 0 with a non-empty stderr of provider-team (the stderr stays in <id>.err.log); on a non-zero code the last stderr line as before (L6)', async () => {
     const f = fixture();
