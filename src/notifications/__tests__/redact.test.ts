@@ -332,7 +332,7 @@ describe('redactTokens key-shape masking (OMC_REDACT_KEY_SHAPES=1)', () => {
     // P2: Bound the optional-index scan to avoid quadratic retries
     it('handles degenerate bracket patterns efficiently', () => {
       // This would cause quadratic behavior if not bounded: 'KEY' repeated with brackets
-      const degenerate = `'KEY' + '[KEY]'.repeat(20000)`;
+      const degenerate = 'KEY' + '[KEY]'.repeat(20000);
       const start = performance.now();
       const result = redactTokens(degenerate);
       const elapsed = performance.now() - start;
