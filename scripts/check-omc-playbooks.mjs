@@ -248,7 +248,6 @@ async function main() {
         problems.push(`${fileLabel}: frontmatter is missing a "when:" field`);
       }
       if (missingExtends) continue;
-      if (missingExtends) continue;
       // A YAML one-line flow list `extends: [tdd, verify]` reads as one
       // scalar: strip the brackets before splitting, then read each item as
       // a scalar. A quoted value like `extends: "tdd, verify"` must be
