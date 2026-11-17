@@ -59,7 +59,7 @@ import { writeApprovalDecision } from "../graph/runtime/remote-approval.js";
 
 import type { ReplyConfig } from "./types.js";
 import { parseMentionAllowedMentions } from "./config.js";
-import { redactTokens } from "./redact.js";
+import { redactedPreview, redactTokens } from "./redact.js";
 import {
   getProcessStartIdentity,
   isProcessAlive,
@@ -527,6 +527,32 @@ export type ReplyInjectionStep =
   | { kind: "literal"; value: string }
   | { kind: "key"; value: string };
 
+function sanitizeReplyText(
+  text: string,
+  platform: string,
+  config: Pick<ReplyListenerDaemonConfig, "includePrefix">,
+): string {
+  const prefix = config.includePrefix ? `[reply:${platform}] ` : "";
+  return sanitizeReplyInput(prefix + text);
+}
+
+/**
+ * The first 50 characters of the injected reply for the daemon log. The whole reply is redacted before it is
+ * cut (see redactedPreview), not after: a key that starts shortly before the cut would otherwise be logged
+ * as a fragment that is too short to be recognized.
+ */
+export function replyLogPreview(
+  text: string,
+  platform: string,
+  config: Pick<ReplyListenerDaemonConfig, "includePrefix" | "maxMessageLength">,
+): string {
+  return redactedPreview(
+    sanitizeReplyText(text, platform, config),
+    50,
+    config.maxMessageLength,
+  );
+}
+
 export function buildReplyInjectionSteps(
   text: string,
   platform: string,
@@ -536,9 +562,10 @@ export function buildReplyInjectionSteps(
     "event" | "askUserQuestionOptionCount" | "askUserQuestionAllowOther"
   >,
 ): ReplyInjectionStep[] {
-  const prefix = config.includePrefix ? `[reply:${platform}] ` : "";
-  const sanitized = sanitizeReplyInput(prefix + text);
-  const truncated = sanitized.slice(0, config.maxMessageLength);
+  const truncated = sanitizeReplyText(text, platform, config).slice(
+    0,
+    config.maxMessageLength,
+  );
 
   if (
     mapping?.event === "ask-user-question" &&
@@ -642,7 +669,7 @@ export async function injectReplyIntoHerdrPane(
   try {
     await herdrSendPrompt(paneId, preview);
     log(
-      `Injected reply from ${platform} into herdr pane ${paneId}: "${preview.slice(0, 50)}${preview.length > 50 ? "..." : ""}"`,
+      `Injected reply from ${platform} into herdr pane ${paneId}: "${replyLogPreview(text, platform, config)}"`,
     );
     return true;
   } catch (error) {
@@ -687,7 +714,7 @@ async function injectReply(
 
   if (success) {
     log(
-      `Injected reply from ${platform} into pane ${paneId}: "${preview.slice(0, 50)}${preview.length > 50 ? "..." : ""}"`,
+      `Injected reply from ${platform} into pane ${paneId}: "${replyLogPreview(text, platform, config)}"`,
     );
   } else {
     log(`ERROR: Failed to inject reply into pane ${paneId}`);

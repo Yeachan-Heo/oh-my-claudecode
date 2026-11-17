@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { redactTokens } from '../redact.js';
+import { redactedPreview, redactTokens } from '../redact.js';
 
 describe('redactTokens', () => {
   const SWITCH = 'OMC_REDACT_KEY_SHAPES';
@@ -386,15 +386,29 @@ describe('redactTokens key-shape masking (OMC_REDACT_KEY_SHAPES=1)', () => {
         expect(redactTokens('PASSWORD[=hunter2')).toBe('PASSWORD[=****');
       });
 
-      it('accepts an index of 64 characters and not one of 65 (documented limit); later assignments are masked', () => {
+      it('skips an index of any length', () => {
         const index = (length: number) => '"' + 'a'.repeat(length - 2) + '"';
-        expect(redactTokens(`CREDENTIALS[${index(64)}]=secret`)).toBe(`CREDENTIALS[${index(64)}]=****`);
-        expect(redactTokens(`CREDENTIALS[${index(65)}]=secret TOKEN=canary`)).toBe(`CREDENTIALS[${index(65)}]=secret TOKEN=****`);
+        for (const length of [64, 65, 300]) {
+          expect(redactTokens(`CREDENTIALS[${index(length)}]=secret TOKEN=canary`)).toBe(`CREDENTIALS[${index(length)}]=**** TOKEN=****`);
+        }
       });
 
-      it('looks ahead at most 256 characters for the separator (documented limit)', () => {
+      it('has no limit on how far the separator is from the name', () => {
         expect(redactTokens('KEY' + '[a]'.repeat(80) + '=secret')).toBe('KEY' + '[a]'.repeat(80) + '=****');
-        expect(redactTokens('KEY' + '[a]'.repeat(100) + '=secret TOKEN=canary')).toBe('KEY' + '[a]'.repeat(100) + '=secret TOKEN=****');
+        expect(redactTokens('KEY' + '[a]'.repeat(100) + '=secret TOKEN=canary')).toBe('KEY' + '[a]'.repeat(100) + '=**** TOKEN=****');
+      });
+
+      it('skips stray closing brackets and quotes, and spaces and tabs around the separator', () => {
+        expect(redactTokens('KEY]=x')).toBe('KEY]=****');
+        expect(redactTokens('KEY["a"]]"=x')).toBe('KEY["a"]]"=****');
+        expect(redactTokens('KEY\t=x')).toBe('KEY\t=****');
+        expect(redactTokens('KEY \t: \tx')).toBe('KEY \t: \t****');
+      });
+
+      it('reads a [ both ways: an index that swallows the separator cannot hide the value', () => {
+        expect(redactTokens('PASSWORD[=hunter2 ]')).toBe('PASSWORD[=**** ]');
+        expect(redactTokens('PASSWORD["=hunter2"]')).toBe('PASSWORD["=****"]');
+        expect(redactTokens('KEY[=a][=b]')).toBe('KEY[=****');
       });
 
       it('an index can contain = or : and the names of other assignments, which are masked on their own', () => {
@@ -404,6 +418,64 @@ describe('redactTokens key-shape masking (OMC_REDACT_KEY_SHAPES=1)', () => {
         expect(redactTokens('KEY[ TOKEN: canary ]=x')).toBe('KEY[ TOKEN: **** ]=****');
         expect(redactTokens('CREDENTIALS["registry:5000"]=secret')).toBe('CREDENTIALS["registry:5000"]=****');
       });
+    });
+
+    // No fixed length may leave a secret visible. The name, the index and the distance between the name and the
+    // separator are each tried just below, at, just above and far above 64, 64 and 256 characters, with each
+    // kind of secret, and must give the same result.
+    describe('lengths around 64 and 256 characters leave nothing visible (grid)', () => {
+      const exact = (actual: string, expected: string, label: string) => expect(actual === expected, label).toBe(true);
+      const identifier = (length: number) => 'A'.repeat(length - '_PASSWORD'.length) + '_PASSWORD';
+      const keyName = (length: number) => 'hf_' + 'a'.repeat(length - '_PASSWORD'.length - 3) + '_PASSWORD';
+
+      it.each([63, 64, 65, 66, 128, 100000])('identifier of %i characters: bare value, quoted value, colon, key shape', (length) => {
+        const plain = identifier(length);
+        expect(plain.length).toBe(length);
+        exact(redactTokens(`${plain}=canary`), `${plain}=****`, 'bare');
+        exact(redactTokens(`${plain}="two words"`), `${plain}="****"`, 'quoted');
+        exact(redactTokens(`${plain}: canary`), `${plain}: ****`, 'colon');
+        exact(redactTokens(`${keyName(length)}=canary`), 'hf_****=****', 'a name that is a key shape');
+        exact(redactTokens(`${'a'.repeat(length - 3)}KEY a`), `${'a'.repeat(length - 3)}KEY a`, 'no separator');
+      });
+
+      it.each([0, 1, 63, 64, 65, 66, 128, 100000])('index of %i characters between the name and the separator', (length) => {
+        const index = `[${'a'.repeat(length)}]`;
+        exact(redactTokens(`KEY${index}=canary`), `KEY${index}=****`, 'bare');
+        exact(redactTokens(`KEY${index}="two words"`), `KEY${index}="****"`, 'quoted');
+        exact(redactTokens(`hf_${'a'.repeat(20)}_KEY${index}=canary`), `hf_****${index}=****`, 'a name that is a key shape');
+        exact(redactTokens(`KEY[${'a'.repeat(length)} TOKEN=canary`), `KEY[${'a'.repeat(length)} TOKEN=****`, 'never closed');
+      });
+
+      it.each([255, 256, 257, 512, 100000])('%i characters between the name and the separator', (length) => {
+        for (const [label, filler] of [['quotes', '"'.repeat(length)], ['indexes', '[a]'.repeat(Math.ceil(length / 3))]]) {
+          exact(redactTokens(`KEY${filler}=canary`), `KEY${filler}=****`, `${label}, bare`);
+          exact(redactTokens(`KEY${filler}="two words"`), `KEY${filler}="****"`, `${label}, quoted`);
+          exact(redactTokens(`hf_${'a'.repeat(20)}_KEY${filler}=canary`), `hf_****${filler}=****`, `${label}, key shape`);
+        }
+      });
+    });
+
+    // The minimum lengths are thresholds that say what a key is, not limits on how far a scan goes: a run that is
+    // shorter is not a key. They apply to text that has not been cut (see redactedPreview).
+    describe('minimum lengths of key shapes: one below, at and one above', () => {
+      const thresholds: Array<[prefix: string, min: number]> = [
+        ['sk-', 8], ['sk_live_', 16], ['sk_test_', 16], ['rk_', 16], ['AIza', 20], ['gsk_', 20], ['xai-', 20], ['hf_', 20],
+      ];
+      it.each(thresholds)('%s needs %i characters after it', (prefix, min) => {
+        const text = (length: number) => `tok ${prefix}${'a'.repeat(length)} end`;
+        expect(redactTokens(text(min - 1))).toBe(text(min - 1));
+        expect(redactTokens(text(min))).toBe(`tok ${prefix}**** end`);
+        expect(redactTokens(text(min + 1))).toBe(`tok ${prefix}**** end`);
+        expect(redactTokens(text(100000))).toBe(`tok ${prefix}**** end`);
+      });
+
+      it.each([[10, 8, 8, false], [11, 8, 8, true], [12, 8, 8, true], [20, 7, 8, false], [20, 8, 8, true], [20, 9, 8, true], [20, 8, 7, false], [20, 8, 9, true]])(
+        'a JWT with segments of %i, %i and %i characters (the first one counts eyJ): masked %s',
+        (first, second, third, masked) => {
+          const jwt = `eyJ${'a'.repeat(first - 3)}.${'b'.repeat(second)}.${'c'.repeat(third)}`;
+          expect(redactTokens(`tok ${jwt} end`)).toBe(masked ? 'tok eyJ*** end' : `tok ${jwt} end`);
+        },
+      );
     });
 
     describe('JWT rejection', () => {
@@ -425,7 +497,8 @@ describe('redactTokens key-shape masking (OMC_REDACT_KEY_SHAPES=1)', () => {
     // Property check with a seeded generator. Every fragment that carries a canary must lose it, whatever the
     // fragments before and after it look like (quotes, backslashes, line breaks, Bearer/Bot words, nested names).
     describe('no canary survives (generated inputs)', () => {
-      const names = ['TOKEN', 'PASSWORD', 'api_key', 'hf_token_long_name', 'CREDENTIALS["k"]', 'CREDENTIALS["registry:5000"]', "KEY['a=b']", 'MY_SECRET', 'pwd', 'KEY'];
+      const names = ['TOKEN', 'PASSWORD', 'api_key', 'hf_token_long_name', 'CREDENTIALS["k"]', 'CREDENTIALS["registry:5000"]', "KEY['a=b']", 'MY_SECRET', 'pwd', 'KEY',
+        `${'A'.repeat(70)}_TOKEN`, `KEY["${'k'.repeat(70)}"]`, `KEY[${'x'.repeat(300)}]`, `KEY${'"'.repeat(300)}`];
       // a name nested in a value must not contain a quote character itself
       const nestedNames = names.map((name) => name.replace(/["']/g, ''));
       const separators = ['=', ':', ' = ', ': '];
@@ -503,6 +576,12 @@ describe('redactTokens key-shape masking (OMC_REDACT_KEY_SHAPES=1)', () => {
       ['index openers', 'KEY['.repeat(30000)],
       ['indexes of one character', 'KEY' + '[KEY]'.repeat(24000)],
       ['256 index openers per name', ('KEY' + '['.repeat(256)).repeat(460)],
+      ['index openers that share one closing bracket', 'KEY['.repeat(30000) + ']'],
+      ['a name followed by 100 000 quotes', 'KEY' + '"'.repeat(120000) + '=x'],
+      ['openers, one closing bracket, spaces', 'KEY' + '['.repeat(60000) + ']' + ' '.repeat(60000) + '=x'],
+      ['names whose index holds a separator', 'KEY[=a]'.repeat(18000)],
+      ['one identifier of 120 000 characters', 'A'.repeat(120000) + '_KEY=x'],
+      ['names after long runs of spaces', ('KEY' + ' '.repeat(1000)).repeat(120)],
       ['names that are values of names', 'a_KEY='.repeat(20000)],
       ['unterminated quotes', 'KEY="'.repeat(24000)],
       ['bare values that contain names', 'KEY=a:'.repeat(20000) + '"'],
@@ -546,6 +625,106 @@ describe('redactTokens key-shape masking (OMC_REDACT_KEY_SHAPES=1)', () => {
       const tSmall = median(() => redactTokens(small));
       const tLarge = median(() => redactTokens(large));
       expect(tLarge).toBeLessThanOrEqual(tSmall * 2.5 + 5);
+    });
+  });
+});
+
+// A log preview is the start of a longer text. The text must be redacted before it is cut: a key that starts
+// shortly before the cut would otherwise be logged as a fragment shorter than the minimum length of its shape.
+describe('redactedPreview', () => {
+  const SWITCH = 'OMC_REDACT_KEY_SHAPES';
+  let saved: string | undefined;
+
+  beforeEach(() => {
+    saved = process.env[SWITCH];
+    delete process.env[SWITCH];
+  });
+
+  afterEach(() => {
+    if (saved === undefined) delete process.env[SWITCH];
+    else process.env[SWITCH] = saved;
+  });
+
+  // What the callers did before: cut first, redact later (redactTokens on the log line).
+  const cutFirst = (text: string, max: number, cut = text.length): string => {
+    const shown = text.slice(0, cut);
+    return `${shown.slice(0, max)}${shown.length > max ? '...' : ''}`;
+  };
+
+  const thresholds: Array<[prefix: string, min: number]> = [
+    ['sk-', 8], ['sk_live_', 16], ['sk_test_', 16], ['rk_', 16], ['AIza', 20], ['gsk_', 20], ['xai-', 20], ['hf_', 20],
+  ];
+
+  describe('switch on', () => {
+    beforeEach(() => {
+      process.env[SWITCH] = '1';
+    });
+
+    // The key starts so that exactly one character less than its minimum length lies inside the first 50 characters.
+    it.each(thresholds)('%s key that starts just before the cut: masked, not logged as a fragment', (prefix, min) => {
+      const filler = 'x'.repeat(50 - prefix.length - (min - 1) - 1) + ' ';
+      const text = `${filler}${prefix}${'a'.repeat(min + 25)}`;
+      expect(text.slice(0, 50)).toBe(`${filler}${prefix}${'a'.repeat(min - 1)}`);
+      expect(redactedPreview(text, 50)).toBe(`${filler}${prefix}****`);
+    });
+
+    it('a JWT whose signature is cut to 7 characters: masked', () => {
+      const filler = 'x'.repeat(21) + ' ';
+      const text = `${filler}eyJ${'a'.repeat(8)}.${'b'.repeat(8)}.${'c'.repeat(30)}`;
+      expect(text.slice(0, 50).endsWith('.ccccccc')).toBe(true);
+      expect(redactedPreview(text, 50)).toBe(`${filler}eyJ***`);
+    });
+
+    it('a quoted value whose closing quote is cut off: masked', () => {
+      const text = `${'x'.repeat(19)} PASSWORD="${'v'.repeat(60)}`;
+      expect(redactedPreview(text, 50)).toBe(`${'x'.repeat(19)} PASSWORD="****`);
+    });
+
+    it('a Telegram token and an AWS key that the regex rules need in full', () => {
+      const telegram = `${'x'.repeat(30)} 123456789:${'A'.repeat(40)}`;
+      expect(redactedPreview(telegram, 50)).toBe(`${'x'.repeat(30)} 123456789:****`);
+      const aws = `${'x'.repeat(30)} AKIA${'B'.repeat(16)} tail`;
+      expect(redactedPreview(aws, 50)).toBe(`${'x'.repeat(30)} AKIA**** tail`);
+    });
+
+    it('cuts the masked text, so the preview can show more of the text than the unmasked cut would', () => {
+      const text = `${'x'.repeat(10)} hf_${'a'.repeat(100)} and then more text`;
+      expect(redactedPreview(text, 50)).toBe(`${'x'.repeat(10)} hf_**** and then more text`);
+      expect(redactedPreview('y'.repeat(80), 50)).toBe(`${'y'.repeat(50)}...`);
+    });
+
+    it('types only `cut` characters: a longer text is cut after redaction at that length too', () => {
+      const text = `${'x'.repeat(24)} hf_${'a'.repeat(40)}`;
+      expect(redactedPreview(text, 50, 40)).toBe(`${'x'.repeat(24)} hf_****`);
+      expect(redactedPreview(`${'z '.repeat(60)}`, 50, 30)).toBe('z '.repeat(15));
+      expect(redactedPreview('z'.repeat(60), 50, 55)).toBe(`${'z'.repeat(50)}...`);
+    });
+  });
+
+  describe.each([undefined, '', '0', 'true'])('switch off (%s): the text is cut as before', (value) => {
+    beforeEach(() => {
+      if (value === undefined) delete process.env[SWITCH];
+      else process.env[SWITCH] = value;
+    });
+
+    it('returns exactly what cutting first returns, including the fragment of a key at the cut', () => {
+      const texts = [
+        `${'x'.repeat(28)} hf_${'a'.repeat(40)}`,
+        `${'x'.repeat(30)} xoxb-${'1'.repeat(40)} tail`,
+        `${'x'.repeat(30)} 123456789:${'A'.repeat(40)}`,
+        `${'x'.repeat(19)} PASSWORD="${'v'.repeat(60)}`,
+        `${'x'.repeat(21)} eyJ${'a'.repeat(8)}.${'b'.repeat(8)}.${'c'.repeat(30)}`,
+        'short text',
+        'y'.repeat(50),
+        'y'.repeat(51),
+        '',
+      ];
+      for (const text of texts) {
+        for (const cut of [undefined, 0, 10, 40, 50, 51, 500]) {
+          expect(redactedPreview(text, 50, cut)).toBe(cutFirst(text, 50, cut));
+        }
+      }
+      expect(redactedPreview(texts[0], 50)).toBe(`${'x'.repeat(28)} hf_${'a'.repeat(18)}...`);
     });
   });
 });
