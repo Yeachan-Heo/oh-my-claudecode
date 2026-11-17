@@ -15,6 +15,14 @@
  * no wrapper may own the wait, the code must not have turned non-resumable, and the provider must still run
  * in the pane (a pane whose provider exited shows the user's shell, and the key would be typed into it).
  *
+ * The key cannot be taken back, so the intent to send it is recorded first: the pane goes to state "resuming"
+ * and the state is saved (deps.persist) before the key is sent. A daemon that stops after that point finds the
+ * "resuming" entry on its next pass and does not send a second key: it marks the pane "resumed" and says in
+ * the log and the journal that the delivery is unconfirmed. If the intent cannot be saved, no key is sent. A key
+ * that tmux refused puts the pane back to "waiting_quota" and saves that. A code that ends a pane (a configured
+ * end code, a wait limit, a weekly limit) needs no key and is decided on the screen first: it is not held back by
+ * a slow reading, which only supplies the reset date for the log.
+ *
  * Tmux, the clock and the provider reading are injected, so the decision logic runs in tests without
  * tmux or a live account. The API key is read from the file named by OMC_PANEL_QUOTA_KEY_FILE and is never
  * written to the state file, the journal or the log.
@@ -71,7 +79,8 @@ export interface PanelEntry {
   windowIndex: number;
   paneIndex: number;
   waits: number;
-  state?: 'waiting_quota' | 'resumed' | 'quota-ended';
+  /** "resuming": the continue key is about to be sent, or was sent without the pass finishing; it is never sent again. */
+  state?: 'waiting_quota' | 'resuming' | 'resumed' | 'quota-ended';
   sig?: string | null;
   updatedAt?: number;
   resumedAt?: number;
@@ -106,6 +115,8 @@ export interface PanelQuotaDeps {
   readQuota(): Promise<QuotaReading | null>;
   log(text: string): void;
   journal(row: Journal): void;
+  /** Saves the state durably. Called before an effect that cannot be undone; a throw stops that effect. */
+  persist?(state: PanelState): void;
 }
 
 interface QuotaLimit {
@@ -307,7 +318,8 @@ function withTimeLimit<T>(promise: Promise<T>, ms: number): Promise<T | typeof T
 }
 
 /**
- * One pass over the team panes. Mutates and returns `state`; the caller saves it.
+ * One pass over the team panes. Mutates and returns `state`; the caller saves it at the end of the pass, and
+ * `deps.persist` saves it before a continue key is sent (see the header).
  * With the switch off, returns `state` untouched and calls no dependency.
  */
 export async function runPanelQuotaPass(
@@ -330,6 +342,14 @@ export async function runPanelQuotaPass(
   const settleMs = marginMs(env);
   const weekUnit = weekLimitUnit(env);
   const prefix = sessionPrefix(env);
+  // A resume that an earlier pass recorded before its key, and did not finish, is not repeated.
+  for (const [key, entry] of Object.entries(state.panes)) {
+    if (entry.state !== 'resuming') continue;
+    entry.state = 'resumed';
+    entry.resumedAt = entry.resumedAt ?? now;
+    deps.log(`pane ${key}: a resume was recorded before the daemon stopped; no second key is sent, and whether the first one arrived is unknown`);
+    deps.journal({ ts: new Date(now).toISOString(), point: 'team-panel', pane: key, result: 'resume-unconfirmed', state: 'resumed', attempt: entry.waits });
+  }
   const listedPanes = deps.listPanes();
   if (listedPanes === null) {
     // An inventory that cannot be read is not an empty one: the saved waits stay and nothing is scanned or sent.
@@ -414,14 +434,32 @@ export async function runPanelQuotaPass(
         continue;
       }
       if (timeLeft() <= 0) { stopForTimeLimit(); limitedAt = { index, attempted: true }; break; }
+      // The intent goes to disk before the key goes to the pane. A key that cannot be taken back must not depend on
+      // a save that comes after it.
+      const before = { state: entry.state, sig: entry.sig, resumedAt: entry.resumedAt };
+      entry.state = 'resuming';
+      entry.sig = screenSignature(fresh);
+      entry.resumedAt = now;
+      try {
+        deps.persist?.(state);
+      } catch (error) {
+        Object.assign(entry, before);
+        deps.log(`pane ${key}: the resume could not be recorded (${error instanceof Error ? error.message : String(error)}); no key is sent; retry on the next pass`);
+        continue;
+      }
       if (deps.sendContinue(pane)) {
         entry.state = 'resumed';
-        entry.sig = screenSignature(fresh);
-        entry.resumedAt = now;
         deps.log(`pane ${key}: resumed after the quota reset (wait ${entry.waits} of ${max})`);
         deps.journal({ ts: new Date(now).toISOString(), point: 'team-panel', pane: key, result: 'resume', state: 'resumed', attempt: entry.waits });
       } else {
+        // No key was sent: the pane waits again, and that is recorded, so that a restart retries it.
+        Object.assign(entry, before);
         deps.log(`pane ${key}: resume keys not sent; retry on the next pass`);
+        try {
+          deps.persist?.(state);
+        } catch (error) {
+          deps.log(`pane ${key}: the wait could not be saved again (${error instanceof Error ? error.message : String(error)}); a restart will not repeat the resume`);
+        }
       }
       continue;
     }
@@ -432,17 +470,41 @@ export async function runPanelQuotaPass(
     }
 
     const err = detectQuotaError(content, codes);
-    if (!err) continue;
+    if (!err) {
+      // A settled pane that shows no quota error ends the last event: the next error, even one that renders the
+      // same tail, is a new event and must not be taken for the old one.
+      if (entry && (entry.state === 'resumed' || entry.state === 'quota-ended')) entry.sig = null;
+      continue;
+    }
     if (entry && entry.state === 'quota-ended' && sig === entry.sig) continue;
 
     if (!entry) {
       entry = { key, pane: pane.id, session: pane.session, windowIndex: pane.windowIndex, paneIndex: pane.paneIndex, waits: 0 };
       state.panes[key] = entry;
     }
-    entry.sig = sig;
-    entry.updatedAt = now;
+    // The screen is recorded as the last event only once the event is acted on: a pass that runs out of time on it
+    // leaves the pane to be looked at again, and does not make the next pass take the event for an old one.
+    const target = entry;
+    const seen = (): void => { target.sig = sig; target.updatedAt = now; };
 
+    if (codes.end.includes(err.code)) {
+      // A non-resumable code is never resumed, whatever the reading says, so the pane is decided here and the wait
+      // ends in this pass. The reading only supplies the reset date for the coordinator: a reading that does not
+      // come back within the pass leaves the date unknown, and the pass stops after this pane.
+      let resetMs: number | null = null;
+      let outOfTime = timeLeft() <= 0;
+      if (!outOfTime) {
+        const reading = await withTimeLimit(deps.readQuota(), timeLeft());
+        if (reading === TIME_LIMIT) outOfTime = true;
+        else resetMs = planForReading(reading, now, settleMs, weekUnit).reset ?? null;
+      }
+      seen();
+      endQuota(entry, deps, now, `quota error ${err.code} is non-resumable: no resume`, resetMs);
+      if (outOfTime) { stopForTimeLimit(); limitedAt = { index, attempted: true }; break; }
+      continue;
+    }
     if (entry.waits >= max) {
+      seen();
       endQuota(entry, deps, now, `wait limit reached (${max})`, entry.resetMs ?? null);
       continue;
     }
@@ -450,11 +512,7 @@ export async function runPanelQuotaPass(
     const reading = await withTimeLimit(deps.readQuota(), timeLeft());
     if (reading === TIME_LIMIT) { stopForTimeLimit(); limitedAt = { index, attempted: true }; break; }
     const plan = planForReading(reading, now, settleMs, weekUnit);
-    if (codes.end.includes(err.code)) {
-      // A non-resumable code is never resumed, whatever the reading says; the reset date goes to the coordinator.
-      endQuota(entry, deps, now, `quota error ${err.code} is non-resumable: no resume`, plan.reset ?? null);
-      continue;
-    }
+    seen();
     if (plan.wait) {
       entry.waits += 1;
       entry.state = 'waiting_quota';
@@ -582,6 +640,7 @@ export async function runDaemonPanelQuotaPass({
     readQuota: readQuota ?? (() => readProviderQuota(env)),
     log,
     journal: (row) => appendJournal(env, row),
+    persist: (saved) => saveState(file, saved),
   };
   await runPanelQuotaPass(state, deps, env);
   saveState(file, state);
