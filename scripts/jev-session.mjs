@@ -21,6 +21,8 @@
 // The log: <Jev log directory>/sessions.jsonl, one row per start (the directory of the other Jev logs: OMC_JEV_LOG_DIR, else state/jev under the state
 // root of the working directory); the query itself is in shadow.jsonl (point session-routing).
 // The session pool (OMC_JEV_POOL=1, OMC_JEV_POOL_MAX_SESSIONS, scripts/lib/jev-pool.mjs): at the ceiling the start is refused; off by default.
+// The ceiling covers the launches in flight: a launch takes a reservation under the pool lock before the Jev query and gives it back when it is
+// over, so two launchers that counted the sessions at the same time do not both start.
 import { appendFileSync, existsSync, lstatSync, mkdirSync, readFileSync, readlinkSync, realpathSync, statSync, writeFileSync } from 'node:fs';
 import { randomUUID } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
@@ -31,7 +33,7 @@ import { maskSecrets } from './lib/jev-mask.mjs';
 import { capEffort, decideRoutingFromAnswers, getModelRoutingQuestions, parseUseMarker, resolveMaxEffort, ROUTING_TIERS } from './lib/jev-routing.mjs';
 import { recordJevShadow, setJevHookContext } from './lib/jev-shadow.mjs';
 import { resolveJevLogDir, resolveJevLogMaxBytes, rotateJevLog } from './jev-resolve.mjs';
-import { countSessions, poolEnabled, sessionLimit } from './lib/jev-pool.mjs';
+import { countSessions, poolEnabled, releaseSession, reserveSession, sessionLimit } from './lib/jev-pool.mjs';
 
 const POINT = 'session-routing';
 const ROLES = ['coordinator', 'worker'];
@@ -190,17 +192,33 @@ function writeSettings(path, { name, role, coordinator }) {
 const quote = (a) => (/[\s"]/.test(a) ? JSON.stringify(a) : a);
 const describe = (decision) => (decision.degraded ? `degraded (${decision.reason})` : `model ${decision.model ?? '-'}, effort ${decision.effort ?? '-'}`);
 
-// The session pool gate: off unless OMC_JEV_POOL=1; at a ceiling above 0 (OMC_JEV_POOL_MAX_SESSIONS) the start is refused. A counter read error
-// never refuses and shows in the row as pool {sessions: null, error}.
-function poolGate(env) {
+// The session pool gate: off unless OMC_JEV_POOL=1; at a ceiling above 0 (OMC_JEV_POOL_MAX_SESSIONS) the start is refused. A counter
+// read error never refuses and shows in the row as pool {sessions: null, error}. The count is the running sessions of the counter command
+// plus the launches in flight (reservations of other launchers, see reserveSession); an admitted launch holds a reservation of its own,
+// which `held` collects and main gives back when the launch is over. A reservation that cannot be taken in time (the pool lock) admits the
+// launch, as a counter read error does.
+function poolGate(env, logDir, held) {
   if (!poolEnabled(env)) return { refuse: false };
   const limit = sessionLimit(env);
   const counted = countSessions({ env });
-  const pool = counted.error ? { sessions: null, error: counted.error } : { sessions: counted.sessions, limit };
-  return { refuse: !counted.error && limit > 0 && counted.sessions >= limit, pool, sessions: counted.sessions, limit };
+  if (counted.error) return { refuse: false, pool: { sessions: null, error: counted.error }, sessions: null, limit };
+  let reservation = { ok: true, file: null, inFlight: 0 };
+  try { reservation = reserveSession({ dir: logDir, counted: counted.sessions, limit }); } catch { /* the reservation is advisory: a file error admits the launch */ }
+  if (reservation.ok && reservation.file) held.push(() => releaseSession(logDir, reservation.file));
+  const sessions = counted.sessions + reservation.inFlight;
+  return { refuse: !reservation.ok, pool: { sessions: counted.sessions, ...(reservation.inFlight ? { starting: reservation.inFlight } : {}), limit }, sessions, limit };
 }
 
 export async function main(argv = process.argv.slice(2), env = process.env) {
+  const held = []; // the reservations of this launch (the session pool), given back whatever way the launch ends
+  try {
+    return await launch(argv, env, held);
+  } finally {
+    for (const release of held) release();
+  }
+}
+
+async function launch(argv, env, held) {
   const args = parseArgs(argv);
   const usage = 'Usage: jev-session --role coordinator|worker --brief <file> --name "<name>" [--coordinator <id>] [--cwd <dir>] [--mode shadow|active|off] [--starter <command>] [--prompt <text>] [--dry-run] | resume: jev-session --resume <sessionId> --prompt "<text>" --cwd <dir> [--name "<name>"] [--starter <command>] [--dry-run]';
   if (args.error) { console.error(`jev-session: ${args.error}\n${usage}`); return 2; }
@@ -225,7 +243,7 @@ export async function main(argv = process.argv.slice(2), env = process.env) {
     if (trust.verdict === 'untrusted') { console.error(`jev-session: directory ${cwd} (source: ${cwdSource}) is not trusted by Claude Code (no trust in ${trust.configFile} for it, its parent directories or its repository); a background session would not start. Pass --cwd <a trusted project directory> or run \`claude\` once in this directory and accept the trust. Nothing was started.`); return 2; }
 
     // The pool gate, the same as at a regular start.
-    const gate = poolGate(env);
+    const gate = poolGate(env, logDir, held);
     if (gate.refuse) {
       const maskedRefusal = maskJevState({ cwd });
       writeRow(logDir, { mode: 'resume', resume: args.resume, name, ...(maskedRefusal.cwd ? { cwd: maskedRefusal.cwd } : {}), cwd_source: cwdSource, result: 'pool-refused', pool: gate.pool }, env);
@@ -272,7 +290,7 @@ export async function main(argv = process.argv.slice(2), env = process.env) {
 
   // The session pool gate before any Jev query: at the ceiling the start is refused with the count in the message and in the log row; a counter
   // read error never refuses and shows in the final row as pool {sessions: null, error}.
-  const gate = poolGate(env);
+  const gate = poolGate(env, logDir, held);
   if (gate.refuse) {
     const maskedRefusal = maskJevState({ brief: briefPath, cwd }); // the same mask as the regular row
     writeRow(logDir, { role: args.role, name: args.name, ...(args.coordinator ? { coordinator: args.coordinator } : {}), brief: maskedRefusal.brief, cwd: maskedRefusal.cwd, cwd_source: cwdSource, result: 'pool-refused', pool: gate.pool }, env);

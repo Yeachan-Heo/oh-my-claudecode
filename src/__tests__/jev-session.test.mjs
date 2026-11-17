@@ -66,6 +66,7 @@ const argv = process.argv.slice(2);
 writeFileSync(process.env.FAKE_ARGV, JSON.stringify(argv));
 writeFileSync(process.env.FAKE_ARGV + '.cwd', process.cwd());
 if (process.env.FAKE_START === 'flags' && argv.includes('--model')) { console.error('error: unknown model combination'); process.exit(1); }
+if (process.env.FAKE_START === 'slow') Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 2500);
 if (process.env.FAKE_START === 'trust') { console.error('Workspace not trusted. Run \`claude\` in ' + process.cwd() + ' once and accept the trust prompt, then retry.'); process.exit(1); }
 const name = argv[argv.indexOf('--name') + 1] ?? '';
 console.log('backgrounded · ab12cd34 · ' + name);
@@ -553,6 +554,39 @@ console.log(JSON.stringify(Array.from({ length: n }, () => ({ pid: null }))));
     assert.ok(zero.result.code === 0 && zero.row.pool.sessions === 25, `a ceiling of 0 means no limit: ${js(zero.row)}`);
     const broken = await start({ env: poolEnv({ OMC_JEV_POOL_SESSION_COUNTER: join(tmp, 'no-such-counter') }) });
     assert.ok(broken.result.code === 0 && broken.row.pool.sessions === null && broken.row.pool.error, `a counter read error never refuses: ${js(broken.row)}`);
+  }, SLOW);
+
+  it('(pool) a launch in flight holds a slot of its own: a launcher that counted the same sessions is refused, and the slot is given back when the launch ends, fails or is a dry run', async () => {
+    const logs = join(logsRoot, `s${++counter}`);
+    mkdirSync(logs, { recursive: true });
+    writeFileSync(briefFile, 'Review the payment module and list the risks.');
+    const sessionsFile = join(tmp, 'sessions-none');
+    writeFileSync(sessionsFile, '0\n');
+    const env = (extra = {}) => launcherEnv({ jev: false, logs, extra: poolEnv({ OMC_JEV_POOL_MAX_SESSIONS: '1', FAKE_SESSIONS_FILE: sessionsFile, ...extra }) });
+    const argv = ['--role', 'worker', '--brief', briefFile, '--name', 'Flight', '--mode', 'off'];
+    const reservations = () => (existsSync(join(logs, 'pool-sessions')) ? readdirSync(join(logs, 'pool-sessions')) : []);
+    resetStarter();
+    const first = run(argv, env({ FAKE_START: 'slow' }));
+    for (let waited = 0; !existsSync(argvFile) && waited < 20_000; waited += 50) await new Promise((resolve) => setTimeout(resolve, 50)); // the starter of the first launch is running
+    assert.ok(existsSync(argvFile), 'the first starter did not run');
+    assert.equal(reservations().length, 1, 'the launch in flight holds no reservation');
+    const second = await run(argv, env());
+    assert.ok(second.code === 2 && /the session pool is full \(1\/1\)/.test(second.stderr), `exit ${second.code}: ${second.stderr.slice(0, 300)}`);
+    const refused = rowsOf(logs, 'sessions.jsonl').find((row) => row.result === 'pool-refused');
+    assert.ok(refused && refused.pool.sessions === 0 && refused.pool.starting === 1 && refused.pool.limit === 1, js(refused));
+    assert.equal((await first).code, 0);
+    assert.deepEqual(reservations(), [], 'the reservation of a finished launch stays');
+    assert.equal((await run(argv, env())).code, 0, 'a start after the first one ended is refused');
+    // a failed start gives its slot back, and so does a dry run
+    resetStarter();
+    assert.equal((await run(argv, env({ FAKE_START: 'trust' }))).code, 1);
+    assert.deepEqual(reservations(), []);
+    assert.equal((await run([...argv, '--dry-run'], env())).code, 0);
+    assert.deepEqual(reservations(), []);
+    assert.equal((await run(argv, env())).code, 0);
+    // a counter read error admits the launch and takes no reservation
+    assert.equal((await run(argv, env({ OMC_JEV_POOL_SESSION_COUNTER: join(tmp, 'no-such-counter') }))).code, 0);
+    assert.deepEqual(reservations(), []);
   }, SLOW);
 
   // --- J: --resume ---

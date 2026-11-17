@@ -8,19 +8,29 @@
 // The state lives in the Jev log directory (OMC_JEV_LOG_DIR, else state/jev under the state root;
 // set OMC_JEV_LOG_DIR to share one pool between projects):
 //   pool-agents/<epoch ms>-<random>.json  one reservation per allowed Agent/Task call:
-//                                         {ts, state, session_id, tool_use_id, subagent_type}.
+//                                         {ts, state, session_id, tool_use_id, subagent_type[, agent_id]}.
 //                                         "pending" is the reservation before the start; the
-//                                         SubagentStart hook commits it to "alive", the
-//                                         SubagentStop hook releases it, and the
-//                                         PostToolUseFailure hook releases it by tool_use_id
-//                                         (a start that failed after the allow). A pending
-//                                         reservation expires after 2 minutes (a start that never
-//                                         happened), an alive one after 24 hours (a lost
-//                                         SubagentStop). Expired and corrupt files are swept on
-//                                         every read. The ceiling counts pending and alive
-//                                         together, so a reservation takes its slot from the
-//                                         moment of the allow and N parallel calls at the limit
-//                                         do not all pass.
+//                                         SubagentStart hook commits it to "alive" (it takes the pending
+//                                         reservation of the session whose subagent_type is the type
+//                                         that started, else the oldest one, and records the agent_id),
+//                                         the SubagentStop hook releases it (by agent_id, else the oldest
+//                                         alive one of the session), and the PostToolUseFailure hook
+//                                         releases it by tool_use_id (a start that failed after the
+//                                         allow). A pending reservation expires after 2 minutes (a start
+//                                         that never happened), an alive one after 24 hours (a lost
+//                                         SubagentStop). Expired and corrupt files are swept on every
+//                                         read. The ceiling counts pending and alive together, so a
+//                                         reservation takes its slot from the moment of the allow and N
+//                                         parallel calls at the limit do not all pass.
+//   pool-sessions/<epoch ms>-<random>.json one reservation per session launch in flight (see
+//                                         reserveSession): the launcher takes it before the Jev query
+//                                         and the start and removes it when it is done.
+//   .pool.lock                            every read-modify-write of the reservations (reserve, commit,
+//                                         release, the session reservation) runs under this one lock,
+//                                         with a wait budget under a second: the hooks that release
+//                                         have a 3 s manifest timeout, and a lock wait blocks their
+//                                         event loop, so a wait that does not end in time fails open
+//                                         (below), never a long stall.
 //   pool.jsonl                            one row per Agent/Task call: {ts, point: "pool-agents",
 //                                         alive, pending, occupied, limit, decision:
 //                                         allow|deny|unreadable}, rotated like shadow.jsonl.
@@ -29,8 +39,10 @@
 // 0 (the default) means no limit, so enabling the pool alone changes no refusal. A value that
 // is not an integer keeps the default.
 //
-// Fail-open: a read or write error never refuses a call and never breaks a hook. The decision
-// is then `unreadable`, the call goes through without a reservation, and the row is logged.
+// Fail-open: a read or write error never refuses a call and never breaks a hook, and neither does a
+// lock that is not obtained in time: the call goes through without a reservation (an untracked call),
+// the decision is `unreadable` when the state could not be read, and the row is logged. A capacity
+// refusal is only ever a count over the limit that was read under the lock.
 import { appendFileSync, closeSync, mkdirSync, openSync, readFileSync, readdirSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { spawnSync } from 'node:child_process';
 import { join } from 'node:path';
@@ -42,8 +54,27 @@ export const DEFAULT_SESSION_LIMIT = 0;
 export const DEFAULT_AGENT_LIMIT = 0;
 
 const RESERVATION_DIR = 'pool-agents';
+const SESSION_RESERVATION_DIR = 'pool-sessions';
 export const PENDING_TTL_MS = 2 * 60_000;
 export const ALIVE_TTL_MS = 24 * 3_600_000;
+// A session launch lasts up to the two start attempts of the launcher (120 s each) plus the Jev query; a reservation of a launcher that died expires after this.
+export const SESSION_PENDING_TTL_MS = 5 * 60_000;
+// Wait budget of the pool lock (ms). The lock wait is synchronous: it must end well inside the 1 s cap of the hook step and the 3 s hook timeout.
+// A caller can pass a longer budget (options.lockBudgetMs) where no hook timeout applies, as the tests of many concurrent callers do.
+const LOCK_BUSY_MS = 300;
+const LOCK_PROBE_MS = 300;
+const LOCK_BUDGET_MS = 700;
+
+/**
+ * Runs fn under the pool lock. Returns true when fn ran (also when only the release of the lock failed afterwards: the
+ * results fn left in its closure are valid), false when the lock was not obtained in the budget (fn did not run).
+ * An error thrown by fn propagates after the lock is released.
+ */
+function underPoolLock(dir, fn, budgetMs = LOCK_BUDGET_MS) {
+  const budget = Number.isFinite(budgetMs) && budgetMs > 0 ? budgetMs : LOCK_BUDGET_MS;
+  const lock = withStateFileLockAtPathSync(join(dir, '.pool.lock'), fn, true, Math.ceil(budget / 8), LOCK_BUSY_MS, LOCK_PROBE_MS, budget);
+  return lock.acquired === true || lock.callbackRan === true;
+}
 
 const readLimit = (env, name, fallback) => {
   const raw = String(env?.[name] ?? '').trim();
@@ -61,7 +92,7 @@ export function poolDir(env, stateDir) {
   return env?.OMC_JEV_LOG_DIR || join(stateDir, 'jev');
 }
 
-/** The pool as read from pool-agents/: {pending: [...], alive: [...]} of {name, path, ts, state, sessionId, toolUseId}. Sweeps expired and corrupt files on the way. */
+/** The pool as read from pool-agents/: {pending: [...], alive: [...]} of {name, path, ts, state, sessionId, toolUseId, agentId, subagentType}. Sweeps expired and corrupt files on the way. */
 function readPool(dir, now) {
   const folder = join(dir, RESERVATION_DIR);
   let names;
@@ -94,6 +125,8 @@ function readPool(dir, now) {
       state: record.state,
       sessionId: typeof record.session_id === 'string' ? record.session_id : null,
       toolUseId: typeof record.tool_use_id === 'string' ? record.tool_use_id : null,
+      agentId: typeof record.agent_id === 'string' ? record.agent_id : null,
+      subagentType: typeof record.subagent_type === 'string' ? record.subagent_type : null,
     };
     const expired = record.state === 'pending' ? record.ts < now - PENDING_TTL_MS : record.ts < now - ALIVE_TTL_MS;
     if (expired) {
@@ -123,146 +156,166 @@ export function readPoolState(dir, now = Date.now()) {
 
 /**
  * Reserve an agent slot before the start. Counts pending and alive together; at the limit it
- * refuses without writing a file, otherwise it creates the pending reservation (O_EXCL). The caller
- * has already passed the pool check; this is the second, race-tolerant look. Returns
- * {ok: false, alive, occupied, limit} on a refusal and {ok: true, file, alive, occupied, limit}
- * on a reservation. Throws on a file error (the caller fails open).
- * The check and reservation are atomic under a shared lock to prevent overallocation.
+ * refuses without writing a file, otherwise it creates the pending reservation (O_EXCL). The check
+ * and the creation run under the pool lock, so parallel callers at the last free slot get one
+ * reservation. Returns {ok: false, alive, occupied, limit} on a refusal (a count over the limit read
+ * under the lock), {ok: true, file, alive, occupied, limit} on a reservation, and
+ * {ok: true, file: null, untracked: true, ...} when the lock was not obtained in time (fail-open:
+ * not a refusal). Throws on a file error (the caller fails open).
  */
-export function reserveAgent({ dir, sessionId, toolUseId, subagentType, now = Date.now(), env = process.env }) {
+export function reserveAgent({ dir, sessionId, toolUseId, subagentType, now = Date.now(), env = process.env, lockBudgetMs }) {
   const limit = agentLimit(env);
-  let result = { ok: false, alive: 0, occupied: 0, limit };
-
-  // Hold a shared lock across the check and reservation to prevent race conditions
-  const lockResult = withStateFileLockAtPathSync(
-    join(dir, '.pool.lock'),
-    () => {
-      const alive = countAlive(dir, now);
-      const occupied = alive + readPool(dir, now).pending.length;
-      if (limit > 0 && occupied >= limit) {
-        result = { ok: false, alive, occupied, limit };
-        return;
-      }
-      mkdirSync(join(dir, RESERVATION_DIR), { recursive: true });
-      const file = `${now}-${Math.random().toString(36).slice(2, 10)}.json`;
-      const fd = openSync(join(dir, RESERVATION_DIR, file), 'wx'); // never overwrites a reservation of another call
-      try {
-        writeFileSync(fd, JSON.stringify({ ts: now, state: 'pending', session_id: sessionId || null, tool_use_id: toolUseId || null, subagent_type: subagentType || null }) + '\n', 'utf8');
-      } finally {
-        closeSync(fd);
-      }
-      result = { ok: true, file, alive, occupied, limit };
-    },
-    true, // requireExclusive
-    50, // attempts
-    2000, // busyTimeoutMs
-    3000, // processProbeTimeoutMs
-    5000, // overallTimeoutMs - 5 seconds should be plenty for a quick check+write
-  );
-  
-  // If lock acquisition failed, fail open by allowing the call with no reservation (Codex P2 finding).
-  // This prevents treating lock failures as pool-full refusals, which would cause spurious denials.
-  if (lockResult && !lockResult.acquired) {
-    return { ok: true, file: null, alive: 0, occupied: 0, limit, untracked: true };
-  }
-  
+  let result = null;
+  const ran = underPoolLock(dir, () => {
+    const pool = readPool(dir, now);
+    const alive = pool.alive.length;
+    const occupied = alive + pool.pending.length;
+    if (limit > 0 && occupied >= limit) {
+      result = { ok: false, alive, occupied, limit };
+      return;
+    }
+    mkdirSync(join(dir, RESERVATION_DIR), { recursive: true });
+    const file = `${now}-${Math.random().toString(36).slice(2, 10)}.json`;
+    const fd = openSync(join(dir, RESERVATION_DIR, file), 'wx'); // never overwrites a reservation of another call
+    try {
+      writeFileSync(fd, JSON.stringify({ ts: now, state: 'pending', session_id: sessionId || null, tool_use_id: toolUseId || null, subagent_type: subagentType || null }) + '\n', 'utf8');
+    } finally {
+      closeSync(fd);
+    }
+    result = { ok: true, file, alive, occupied, limit };
+  }, lockBudgetMs);
+  if (!ran || !result) return { ok: true, file: null, alive: 0, occupied: 0, limit, untracked: true };
   return result;
 }
 
-/** Commit the newest pending reservation of the session (SubagentStart): the agent started. False when there is none. */
-export function commitAgent(dir, sessionId, now = Date.now()) {
+const baseType = (type) => String(type ?? '').trim().toLowerCase().replace(/^[^:]+:/, '');
+
+/**
+ * Commit a pending reservation of the session (SubagentStart): the agent started. The reservation is the oldest pending
+ * one of the session whose subagent_type is the type that started (the namespace before ":" and the letter case do not
+ * count), else the oldest pending one of the session; the agent_id of the start is recorded on it, so that the
+ * SubagentStop of this agent releases exactly this reservation. The selection and the rewrite run under the pool lock,
+ * so concurrent starts of one session commit distinct reservations. False when there is none or the lock was not obtained.
+ */
+export function commitAgent(dir, sessionId, now = Date.now(), start = {}) {
   if (!sessionId) return false;
   try {
-    const pool = readPool(dir, now);
-    const pendingOfSession = pool.pending.filter((entry) => entry.sessionId === sessionId).sort((a, b) => b.ts - a.ts); // the newest pending one
-    for (const entry of pendingOfSession) {
-      const aliveName = entry.path.replace(/\.json$/, '.alive.json');
+    let committed = false;
+    underPoolLock(dir, () => {
+      const pending = readPool(dir, now).pending.filter((entry) => entry.sessionId === sessionId).sort((a, b) => a.ts - b.ts); // the oldest first
+      const type = baseType(start.agentType);
+      const entry = (type && pending.find((candidate) => baseType(candidate.subagentType) === type)) || pending[0];
+      if (!entry) return;
       const record = JSON.parse(readFileSync(entry.path, 'utf8')); // reread, keep the unknown fields
-      try {
-        renameSync(entry.path, aliveName); // the atomic rename is the claim: a concurrent twin gets ENOENT and takes the next pending one
-      } catch {
-        continue; // another process claimed this one in the meantime
-      }
       record.ts = now; // the alive TTL counts from the start
       record.state = 'alive';
-      const tmp = `${aliveName}.${process.pid}.${Math.random().toString(36).slice(2, 8)}.tmp`;
+      if (typeof start.agentId === 'string' && start.agentId) record.agent_id = start.agentId.slice(0, 200);
+      const tmp = `${entry.path}.${process.pid}.${Math.random().toString(36).slice(2, 8)}.tmp`;
       writeFileSync(tmp, JSON.stringify(record) + '\n', 'utf8');
-      renameSync(tmp, aliveName); // only the claimant gets here
-      return true;
-    }
-    return false;
+      renameSync(tmp, entry.path); // one atomic replace: a reader that does not take the lock sees pending or alive, both count
+      committed = true;
+    }, start.lockBudgetMs);
+    return committed;
   } catch {
     return false; // a commit that fails is never an error of the caller
   }
 }
 
-/** Release the oldest alive reservation of the session (SubagentStop); without one, the oldest pending one. False when there is none. */
-export function releaseAgent(dir, sessionId, now = Date.now()) {
+/**
+ * Release the reservation of a stopped agent (SubagentStop): the alive one that carries its agent_id; without one, the
+ * oldest alive reservation of the session that carries no agent_id (a start that was not recorded with its id), then the
+ * oldest alive one of the session, then the oldest pending one. The selection and the removal run under the pool lock, so
+ * concurrent stops release distinct reservations. False when there is none or the lock was not obtained.
+ */
+export function releaseAgent(dir, sessionId, now = Date.now(), stop = {}) {
   if (!sessionId) return false;
   try {
-    // Serialize the read + delete under a lock to prevent concurrent SubagentStop hooks from selecting and deleting the same reservation.
-    // Without this, multiple callers can all report success even when only one file is actually deleted (Codex P1 finding).
-    let result = false;
-    const lockResult = withStateFileLockAtPathSync(
-      join(dir, '.pool.lock'),
-      () => {
-        const pool = readPool(dir, now);
-        const alive = pool.alive.filter((entry) => entry.sessionId === sessionId).sort((a, b) => a.ts - b.ts); // FIFO, the usual order of the stops
-        if (alive.length) {
-          rmSync(alive[0].path, { force: true });
-          result = true;
-          return;
-        }
-        const pending = pool.pending.filter((entry) => entry.sessionId === sessionId).sort((a, b) => a.ts - b.ts); // a stop without a registered start
-        if (pending.length) {
-          rmSync(pending[0].path, { force: true });
-          result = true;
-          return;
-        }
-      },
-      true, // requireExclusive: serialize all operations
-      100, // attempts: more attempts for cleanup operations
-      2000, // busyTimeoutMs
-      3000, // processProbeTimeoutMs
-      15000, // overallTimeoutMs: cleanup can take longer with high concurrency
-    );
-    // If lock acquisition failed, fail open by returning false (not untracked like reserveAgent, since this is cleanup)
-    if (lockResult && !lockResult.acquired) {
-      return false;
-    }
-    return result;
+    let released = false;
+    underPoolLock(dir, () => {
+      const pool = readPool(dir, now);
+      const aliveOfSession = pool.alive.filter((entry) => entry.sessionId === sessionId).sort((a, b) => a.ts - b.ts); // FIFO, the usual order of the stops
+      const agentId = typeof stop.agentId === 'string' ? stop.agentId : '';
+      const pending = pool.pending.filter((entry) => entry.sessionId === sessionId).sort((a, b) => a.ts - b.ts); // a stop without a registered start
+      const entry = (agentId && aliveOfSession.find((candidate) => candidate.agentId === agentId))
+        || aliveOfSession.find((candidate) => !candidate.agentId)
+        || aliveOfSession[0]
+        || pending[0];
+      if (!entry) return;
+      rmSync(entry.path, { force: true });
+      released = true;
+    }, stop.lockBudgetMs);
+    return released;
   } catch {
     return false;
   }
 }
 
 /** Release the reservation of one exact call (PostToolUseFailure, by the tool_use_id of the failed Agent/Task call): pending or alive. False when there is none. */
-export function releaseAgentByToolUseId(dir, toolUseId, now = Date.now()) {
+export function releaseAgentByToolUseId(dir, toolUseId, now = Date.now(), options = {}) {
   if (!toolUseId) return false;
   try {
-    // Serialize the read + delete under a lock to prevent concurrent releases from both succeeding when only one file exists.
-    // This ensures the pool capacity is correctly tracked (Codex P1 finding).
     let released = false;
-    const lockResult = withStateFileLockAtPathSync(
-      join(dir, '.pool.lock'),
-      () => {
-        const pool = readPool(dir, now);
-        const hits = [...pool.alive, ...pool.pending].filter((entry) => entry.toolUseId === toolUseId);
-        for (const entry of hits) {
-          try { rmSync(entry.path, { force: true }); released = true; } catch { /* best effort */ }
-        }
-      },
-      true, // requireExclusive: serialize all operations
-      100, // attempts: more attempts for cleanup operations
-      2000, // busyTimeoutMs
-      3000, // processProbeTimeoutMs
-      15000, // overallTimeoutMs: cleanup can take longer with high concurrency
-    );
-    // If lock acquisition failed, fail open by returning false (not untracked, since this is cleanup)
-    if (lockResult && !lockResult.acquired) {
-      return false;
-    }
+    underPoolLock(dir, () => {
+      const pool = readPool(dir, now);
+      for (const entry of [...pool.alive, ...pool.pending].filter((candidate) => candidate.toolUseId === toolUseId)) {
+        try { rmSync(entry.path, { force: true }); released = true; } catch { /* best effort */ }
+      }
+    }, options.lockBudgetMs);
     return released;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * The session launcher's reservation (scripts/jev-session.mjs): a launch in flight takes a slot of its own, so that two
+ * launchers that both counted the sessions before either has started do not both pass the ceiling. Under the pool
+ * lock it counts the launches in flight (reservations younger than SESSION_PENDING_TTL_MS) and refuses at
+ * `counted + inFlight >= limit`; otherwise it creates the reservation. `counted` is the number of running sessions the
+ * caller read from the session counter (before the lock, the counter command is slow). A limit of 0 reserves
+ * nothing. Returns {ok: false, inFlight} on a refusal and {ok: true, file, inFlight} on a reservation (file is null with
+ * no limit, and with the lock not obtained in time: fail-open). Throws on a file error (the caller fails open).
+ */
+export function reserveSession({ dir, counted, limit, sessionId, now = Date.now(), lockBudgetMs }) {
+  if (!(limit > 0)) return { ok: true, file: null, inFlight: 0 };
+  let result = null;
+  const ran = underPoolLock(dir, () => {
+    const folder = join(dir, SESSION_RESERVATION_DIR);
+    let names = [];
+    try { names = readdirSync(folder); } catch (error) { if (error?.code !== 'ENOENT') throw error; }
+    let inFlight = 0;
+    for (const name of names) {
+      if (!name.endsWith('.json')) continue;
+      const path = join(folder, name);
+      let ts = 0;
+      try { ts = JSON.parse(readFileSync(path, 'utf8'))?.ts; } catch { try { ts = statSync(path).mtimeMs; } catch { continue; } }
+      if (!Number.isFinite(ts) || ts < now - SESSION_PENDING_TTL_MS) { try { rmSync(path, { force: true }); } catch { /* swept later */ } continue; }
+      inFlight += 1;
+    }
+    if (counted + inFlight >= limit) {
+      result = { ok: false, inFlight };
+      return;
+    }
+    mkdirSync(folder, { recursive: true });
+    const file = `${now}-${Math.random().toString(36).slice(2, 10)}.json`;
+    const fd = openSync(join(folder, file), 'wx');
+    try {
+      writeFileSync(fd, JSON.stringify({ ts: now, session_id: sessionId || null, pid: process.pid }) + '\n', 'utf8');
+    } finally {
+      closeSync(fd);
+    }
+    result = { ok: true, file, inFlight };
+  }, lockBudgetMs);
+  if (!ran || !result) return { ok: true, file: null, inFlight: 0 };
+  return result;
+}
+
+/** Removes the reservation of a launch that is over (started or failed). Never throws. */
+export function releaseSession(dir, file) {
+  if (!file || !/^[0-9]+-[a-z0-9]+\.json$/.test(file)) return false;
+  try {
+    rmSync(join(dir, SESSION_RESERVATION_DIR, file), { force: true });
+    return true;
   } catch {
     return false;
   }
@@ -332,13 +385,13 @@ export function countSessions({ env = process.env, readCmdline = readFileSync } 
  * session and the PostToolUseFailure release by tool_use_id. Disabled pool and every error are a
  * no-op (fail-open). Returns true when the state changed.
  */
-export async function handlePoolEvent({ event, sessionId, toolUseId, cwd, env = process.env, now = Date.now() }) {
+export async function handlePoolEvent({ event, sessionId, toolUseId, agentId, agentType, cwd, env = process.env, now = Date.now() }) {
   if (!poolEnabled(env)) return false;
   try {
     const omcRoot = await resolveOmcStateRoot(cwd || process.cwd());
     const dir = poolDir(env, join(omcRoot, 'state'));
-    if (event === 'SubagentStart') return commitAgent(dir, sessionId, now);
-    if (event === 'SubagentStop') return releaseAgent(dir, sessionId, now);
+    if (event === 'SubagentStart') return commitAgent(dir, sessionId, now, { agentId, agentType });
+    if (event === 'SubagentStop') return releaseAgent(dir, sessionId, now, { agentId });
     if (event === 'PostToolUseFailure') return releaseAgentByToolUseId(dir, toolUseId, now);
   } catch { return false; }
   return false;
@@ -358,6 +411,8 @@ export async function handlePoolHookEvent(data, options = {}) {
     sessionId: text(data.session_id),
     cwd: text(data.cwd),
     toolUseId: text(data.tool_use_id),
+    agentId: text(data.agent_id),
+    agentType: text(data.agent_type),
     ...options,
   });
 }

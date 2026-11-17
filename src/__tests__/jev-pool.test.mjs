@@ -229,8 +229,8 @@ function projectDir() {
   return dir;
 }
 
-function preToolUse(cwd, logDir, extraEnv, toolName = 'Agent', toolInput = { subagent_type: 'helper', prompt: 'Check the risks.' }) {
-  return runHook('pre-tool-enforcer.mjs', { hook_event_name: 'PreToolUse', tool_name: toolName, tool_input: toolInput, session_id: 'session-pool', tool_use_id: 'tool-1', cwd }, { OMC_JEV_LOG_DIR: logDir, ...extraEnv }, cwd);
+function preToolUse(cwd, logDir, extraEnv, toolName = 'Agent', toolInput = { subagent_type: 'helper', prompt: 'Check the risks.' }, nodeArgs = []) {
+  return runHook('pre-tool-enforcer.mjs', { hook_event_name: 'PreToolUse', tool_name: toolName, tool_input: toolInput, session_id: 'session-pool', tool_use_id: 'tool-1', cwd }, { OMC_JEV_LOG_DIR: logDir, ...extraEnv }, cwd, [], nodeArgs);
 }
 
 describe('PreToolUse refusal with OMC_JEV_POOL=1', () => {
@@ -252,6 +252,55 @@ describe('PreToolUse refusal with OMC_JEV_POOL=1', () => {
 
     const task = preToolUse(cwd, logDir, { OMC_JEV_POOL: '1', OMC_JEV_POOL_MAX_AGENTS: '40' }, 'Task');
     expect(JSON.parse(task.stdout)?.hookSpecificOutput?.permissionDecision).toBe('deny');
+  });
+
+  it('a call that a later guard denies takes no slot: at a ceiling of 1 the corrected call is allowed', () => {
+    const cwd = projectDir();
+    const logDir = makeDir();
+    const env = { OMC_JEV_POOL: '1', OMC_JEV_POOL_MAX_AGENTS: '1' };
+    const skill = preToolUse(cwd, logDir, env, 'Agent', { subagent_type: 'oh-my-claudecode:ralph', prompt: 'Run it.' });
+    expect(skill.status).toBe(0);
+    expect(JSON.parse(skill.stdout)?.hookSpecificOutput?.permissionDecision).toBe('deny');
+    expect(skill.stdout).toContain('[SKILL vs AGENT]');
+    expect(poolFiles(logDir)).toHaveLength(0);
+    const corrected = preToolUse(cwd, logDir, env);
+    expect(corrected.stdout).not.toContain('[AGENT POOL]');
+    expect(poolFiles(logDir)).toHaveLength(1);
+    // the pool is full now: the next call is refused by the check and still reserves nothing more
+    expect(JSON.parse(preToolUse(cwd, logDir, env).stdout)?.hookSpecificOutput?.permissionDecisionReason).toContain('[AGENT POOL]');
+    expect(poolFiles(logDir)).toHaveLength(1);
+  });
+
+  it('a slot taken between the check and the reservation is a refusal of this call, logged as a deny row', () => {
+    const cwd = projectDir();
+    const logDir = makeDir();
+    mkdirSync(join(logDir, 'pool-agents'), { recursive: true });
+    // A preload that lets a parallel call take the last slot right after the occupancy check has listed the pool.
+    const preload = join(makeDir('jev-pool-preload-'), 'preload.mjs');
+    writeFileSync(preload, `
+      import fs from 'node:fs';
+      import { syncBuiltinESMExports } from 'node:module';
+      import { join } from 'node:path';
+      const list = fs.readdirSync;
+      let taken = false;
+      fs.readdirSync = (path, ...rest) => {
+        const names = list(path, ...rest);
+        if (!taken && String(path).endsWith('pool-agents')) {
+          taken = true;
+          fs.writeFileSync(join(String(path), 'parallel.json'), JSON.stringify({ ts: Date.now(), state: 'pending', session_id: 'parallel', tool_use_id: 'parallel-call', subagent_type: null }));
+        }
+        return names;
+      };
+      syncBuiltinESMExports();
+    `);
+    const run = preToolUse(cwd, logDir, { OMC_JEV_POOL: '1', OMC_JEV_POOL_MAX_AGENTS: '1' }, 'Agent', { subagent_type: 'helper', prompt: 'Check the risks.' }, ['--import', preload]);
+    expect(run.status).toBe(0);
+    const output = JSON.parse(run.stdout);
+    expect(output?.hookSpecificOutput?.permissionDecision).toBe('deny');
+    expect(output?.hookSpecificOutput?.permissionDecisionReason).toContain('[AGENT POOL]');
+    expect(rows(logDir).map((row) => row.decision)).toEqual(['allow', 'deny']);
+    expect(rows(logDir).at(-1)).toMatchObject({ occupied: 1, limit: 1 });
+    expect(poolFiles(logDir)).toEqual(['parallel.json']);
   });
 
   it('allows the call on an empty pool, logs an allow row and creates one pending reservation', () => {
@@ -312,6 +361,23 @@ describe('event handling with OMC_JEV_POOL=1', () => {
     expect(stopped.status).toBe(0);
     expect(countAlive(logDir)).toBe(0);
     expect(countOccupied(logDir)).toBe(0);
+  });
+
+  it('the hooks pass the agent type and the agent id: the start commits the reservation of its type and the stop releases that agent', () => {
+    const cwd = projectDir();
+    const logDir = makeDir();
+    const now = Date.now();
+    reserveAgent({ dir: logDir, sessionId: 'session-a', toolUseId: 'call-a', subagentType: 'oh-my-claudecode:executor', now, env: {} });
+    reserveAgent({ dir: logDir, sessionId: 'session-a', toolUseId: 'call-b', subagentType: 'oh-my-claudecode:planner', now: now + 1, env: {} });
+    const env = { OMC_JEV_POOL: '1', OMC_JEV_LOG_DIR: logDir };
+    const byCall = () => Object.fromEntries(poolFiles(logDir).map((name) => JSON.parse(readFileSync(join(logDir, 'pool-agents', name), 'utf8'))).map((record) => [record.tool_use_id, record]));
+    expect(runHook('subagent-tracker.mjs', { ...start(cwd), agent_id: 'agent-b', agent_type: 'oh-my-claudecode:planner' }, env, cwd, ['start']).status).toBe(0);
+    expect(byCall()['call-b']).toMatchObject({ state: 'alive', agent_id: 'agent-b' });
+    expect(byCall()['call-a']).toMatchObject({ state: 'pending' });
+    expect(runHook('subagent-tracker.mjs', { ...start(cwd), agent_id: 'agent-a', agent_type: 'oh-my-claudecode:executor' }, env, cwd, ['start']).status).toBe(0);
+    expect(runHook('subagent-tracker.mjs', { ...stop(cwd), agent_id: 'agent-b', agent_type: 'oh-my-claudecode:planner' }, env, cwd, ['stop']).status).toBe(0);
+    expect(Object.keys(byCall())).toEqual(['call-a']);
+    expect(byCall()['call-a']).toMatchObject({ state: 'alive', agent_id: 'agent-a' });
   });
 
   it('the pool does not change what the tracker prints', () => {

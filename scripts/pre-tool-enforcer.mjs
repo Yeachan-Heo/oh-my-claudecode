@@ -2651,10 +2651,14 @@ function withHandoffContext(output) {
 }
 
 // Opt-in agent pool (OMC_JEV_POOL=1, scripts/lib/jev-pool.mjs): a machine-wide ceiling on Agent/Task
-// calls (OMC_JEV_POOL_MAX_AGENTS, 0 = no limit), checked before any Jev query. An allowed call takes a
-// pending reservation, which the SubagentStart, SubagentStop and PostToolUseFailure hooks commit or
-// release. A read error of the pool state never refuses (fail-open).
+// calls (OMC_JEV_POOL_MAX_AGENTS, 0 = no limit), checked before any Jev query. The check only reads the pool. The
+// reservation of an allowed call is taken when the hook emits its allow (settlePoolReservation, called by
+// emitPreToolUseOutput, the one exit of this hook): a call that any later guard denies never holds a slot, and
+// no denial path needs to give one back. The SubagentStart, SubagentStop and PostToolUseFailure hooks commit or
+// release the reservation. A read error of the pool state never refuses (fail-open).
+let poolPending = null; // set by evaluateAgentPool when the occupancy check passed: what settlePoolReservation reserves
 function evaluateAgentPool(toolName, data, stateDir) {
+  poolPending = null;
   if (!poolEnabled()) return null;
   const dir = poolDir(process.env, stateDir);
   const limit = agentLimit();
@@ -2678,16 +2682,31 @@ function evaluateAgentPool(toolName, data, stateDir) {
   if (decision === 'deny') {
     return { continue: true, hookSpecificOutput: { hookEventName: 'PreToolUse', permissionDecision: 'deny', permissionDecisionReason: `[AGENT POOL] ${refusalText(occupied, limit)}` } };
   }
-  if (decision === 'allow') {
-    try {
-      const result = reserveAgent({ dir, sessionId, toolUseId, subagentType });
-      if (!result.ok) {
-        // Pool filled between check and reservation: deny this call
-        return { continue: true, hookSpecificOutput: { hookEventName: 'PreToolUse', permissionDecision: 'deny', permissionDecisionReason: `[AGENT POOL] ${refusalText(result.occupied, result.limit)}` } };
-      }
-    } catch { /* allow without a reservation: I/O failure, fail-open */ }
-  }
+  if (decision === 'allow') poolPending = { dir, sessionId, toolUseId, subagentType, toolName, stateDir };
   return null;
+}
+
+// True when the hook output refuses the call: a deny decision, or the shapes that end in one (continue false, a block decision).
+function outputDeniesCall(output) {
+  return output?.hookSpecificOutput?.permissionDecision === 'deny' || output?.continue === false || output?.decision === 'block';
+}
+
+// The reservation of an Agent/Task call that passed the pool check, taken once the hook allows the call. At the limit
+// by now (a parallel call took the last slot) the allow becomes the pool refusal; an I/O error allows the call without a
+// reservation. A denied call reserves nothing.
+function settlePoolReservation(output, input) {
+  const pending = poolPending;
+  poolPending = null;
+  if (!pending || outputDeniesCall(output)) return output;
+  try {
+    const result = reserveAgent({ dir: pending.dir, sessionId: pending.sessionId, toolUseId: pending.toolUseId, subagentType: pending.subagentType });
+    if (result.ok === false) {
+      writePoolRow(pending.dir, { tool_name: pending.toolName, session_id: pending.sessionId || null, tool_use_id: pending.toolUseId || null, subagent_type: pending.subagentType, alive: result.alive, pending: result.occupied - result.alive, occupied: result.occupied, limit: result.limit, decision: 'deny' });
+      const reason = denialReasonWithCounter('agent-pool', `[AGENT POOL] ${refusalText(result.occupied, result.limit)}`, input, pending.stateDir);
+      return { continue: true, hookSpecificOutput: { hookEventName: 'PreToolUse', permissionDecision: 'deny', permissionDecisionReason: reason } };
+    }
+  } catch { /* an I/O failure: allow without a reservation (fail-open) */ }
+  return output;
 }
 
 // The named-only Jev point `delegation` (OMC_JEV=delegation, delegation:shadow or delegation:active; `all` never enables it,
@@ -2754,6 +2773,7 @@ function denialReasonWithCounter(guard, reason, data, stateDir) {
 }
 
 function emitPreToolUseOutput(output, input, space = 0) {
+  output = settlePoolReservation(output, input);
   output = withHandoffContext(output);
   output = withShellCheckContext(output);
   flushJevRouting(output);
