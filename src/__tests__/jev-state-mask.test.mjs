@@ -899,13 +899,13 @@ describe('maskJevState: an argument is one value, white space and quotes include
       for (const credential of credentials) {
         for (const tail of [[], ['db']]) {
           const argv = [...command.split(' '), ...credential, ...tail];
-          if (maskJevState({ t: argv.join(' ') }).t.includes(SECRET)) continue;
+          expect(maskJevState({ t: argv.join(' ') }).t, `text: ${argv.join(' ')}`).not.toContain(SECRET);
           expect(JSON.stringify(maskJevState({ argv }).argv), argv.join(' ')).not.toContain(SECRET);
           checked++;
         }
       }
     }
-    expect(checked).toBeGreaterThan(100);
+    expect(checked).toBe(commands.length * credentials.length * 2);
   });
 });
 
@@ -1027,12 +1027,24 @@ describe('maskJevState: the program of a command is read from the end of its arg
   });
 
   it('pays for the end of the arguments it reads: the budget counts it, so many long arguments are refused, fast', () => {
-    // each argument is read twice (its window and its mask) and its end once more: 4808 + 4808 + 4096 characters
-    const argv = (n) => ({ argv: Array.from({ length: n }, () => 'z'.repeat(5000) + '/d') });
+    // each argument is read twice (its window and its mask) and its end once more: 4808 + 4808 + 4096 characters. A -p asks which
+    // program there is, and with none in the array every end is read
+    const argv = (n) => ({ argv: ['-p', ...Array.from({ length: n - 1 }, () => 'z'.repeat(5000) + '/d')] });
     expect(maskJevState(argv(250), { maxChars: MAX }).argv).toHaveLength(250);
     const start = performance.now();
     expect(() => maskJevState(argv(350), { maxChars: MAX })).toThrow(new RegExp(`more than ${MAX_STATE_CHARS} characters`));
     expect(performance.now() - start).toBeLessThan(2000);
+  });
+
+  it('reads the ends of the arguments only until the program that an option needs is found, and not at all when no option needs one', () => {
+    const long = (n) => Array.from({ length: n }, () => 'z'.repeat(5000) + '/d');
+    // a program at the start ends the reading: this many long arguments after it are within the budget, as they were when -p was the only option
+    expect(maskJevState({ argv: ['mysql', '-p', 'x', ...long(380)] }, { maxChars: MAX }).argv).toHaveLength(383);
+    expect(maskJevState({ argv: ['curl', '-U', 'u:x', ...long(380)] }, { maxChars: MAX }).argv).toHaveLength(383);
+    // no option that needs a program: no end is read, so no program is looked for and nothing is paid for it
+    expect(maskJevState({ argv: ['x', '-u', 'root', '--password', 'y', ...long(380)] }, { maxChars: MAX }).argv).toHaveLength(385);
+    // an option that needs a program, none in the array: every end is read
+    expect(() => maskJevState({ argv: ['x', '-p', 'y', ...long(380)] }, { maxChars: MAX })).toThrow(new RegExp(`more than ${MAX_STATE_CHARS} characters`));
   });
 });
 

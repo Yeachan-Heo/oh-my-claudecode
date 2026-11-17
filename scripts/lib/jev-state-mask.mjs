@@ -438,11 +438,21 @@ function secretArguments(array, programsAt) {
   const replace = (i, text) => {
     if (text !== (partial.get(i) ?? array[i])) partial.set(i, text);
   };
+  // The kinds of program that an option of the array needs. Only an element that can be such an option asks which program there is, and
+  // the ends of the elements are read (and paid for, see maskJevState) only until each of these kinds is found: an array with no such
+  // option reads none, and the first program of the one kind it needs ends the reading, as it did when -p was the only one.
+  const needed = new Set();
+  for (const element of array) {
+    if (typeof element !== 'string') continue;
+    for (const rule of OPTION_RULES) {
+      if (rule.program !== undefined && !needed.has(rule.program) && (rule.alone.test(element) || rule.joined.test(element))) needed.add(rule.program);
+    }
+  }
   for (let i = 0; i < array.length; i++) {
     const element = array[i];
     if (typeof element !== 'string') continue;
-    if (first.size < PROGRAM_KINDS.length) {
-      for (const kind of programsAt(i)) if (!first.has(kind)) first.set(kind, i);
+    if (first.size < needed.size) {
+      for (const kind of programsAt(i)) if (needed.has(kind) && !first.has(kind)) first.set(kind, i);
     }
     for (const rule of OPTION_RULES) {
       if (rule.program !== undefined && !(first.get(rule.program) < i)) continue;
