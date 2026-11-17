@@ -2437,8 +2437,12 @@ function evaluateAgentPool(toolName, data, stateDir) {
   }
   if (decision === 'allow') {
     try {
-      reserveAgent({ dir, sessionId, toolUseId, subagentType }); // a failing reservation keeps the call allowed
-    } catch { /* allow without a reservation */ }
+      const result = reserveAgent({ dir, sessionId, toolUseId, subagentType });
+      if (!result.ok) {
+        // Pool filled between check and reservation: deny this call
+        return { continue: true, hookSpecificOutput: { hookEventName: 'PreToolUse', permissionDecision: 'deny', permissionDecisionReason: `[AGENT POOL] ${refusalText(result.occupied, result.limit)}` } };
+      }
+    } catch { /* allow without a reservation: I/O failure, fail-open */ }
   }
   return null;
 }
