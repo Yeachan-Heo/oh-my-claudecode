@@ -491,6 +491,20 @@ describe('omc-doctor cache commands on a synthetic config directory', () => {
     }
   });
 
+  test('a version written with surrounding spaces still protects the version it names', () => {
+    for (const command of commands) {
+      const { dir, cache } = makeCache(['5.8.0', '5.9.0']);
+      try {
+        writeRegistry(dir, { [PLUGIN_ID]: [{ scope: 'user', version: ' 5.9.0 ' }] });
+        const result = runCommand(command, dir);
+        expect({ status: result.status, versions: digitVersions(cache), moved: movedAside(dir) }).toEqual({ status: 0, versions: '5.9.0', moved: 1 });
+        expect(result.stdout).toMatch(/Moved 1 unprotected version/);
+      } finally {
+        rmSync(dir, { recursive: true, force: true });
+      }
+    }
+  });
+
   test('the same ID spelled two ways keeps the versions pinned under both spellings', () => {
     for (const command of commands) {
       const { dir, cache } = makeCache(['5.8.0', '5.8.1', '5.9.0']);
@@ -628,6 +642,18 @@ describe('omc-doctor cache commands on a synthetic config directory', () => {
       'a record has no plugin root': (dir: string) => {
         mkdirSync(path.join(dir, '.omc', 'cache-occupancy'), { recursive: true });
         writeFileSync(path.join(dir, '.omc', 'cache-occupancy', `${'b'.repeat(64)}.json`), JSON.stringify({ version: 1, pid: process.pid }));
+      },
+      'a record has an empty plugin root': (dir: string) => {
+        mkdirSync(path.join(dir, '.omc', 'cache-occupancy'), { recursive: true });
+        writeFileSync(path.join(dir, '.omc', 'cache-occupancy', `${'c'.repeat(64)}.json`), JSON.stringify({ version: 1, pid: process.pid, pluginRoot: '' }));
+      },
+      'a record has a blank plugin root': (dir: string) => {
+        mkdirSync(path.join(dir, '.omc', 'cache-occupancy'), { recursive: true });
+        writeFileSync(path.join(dir, '.omc', 'cache-occupancy', `${'d'.repeat(64)}.json`), JSON.stringify({ version: 1, pid: process.pid, pluginRoot: '  ' }));
+      },
+      'a record has a plugin root that is not a string': (dir: string) => {
+        mkdirSync(path.join(dir, '.omc', 'cache-occupancy'), { recursive: true });
+        writeFileSync(path.join(dir, '.omc', 'cache-occupancy', `${'e'.repeat(64)}.json`), JSON.stringify({ version: 1, pid: process.pid, pluginRoot: 42 }));
       },
     };
     for (const command of commands) {
