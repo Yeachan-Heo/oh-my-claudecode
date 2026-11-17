@@ -190,7 +190,8 @@ async function record(values) {
     let settleUntil = steps.length === 0 ? Date.now() + settleMs : Infinity;
     stopReason = 'timeout';
     while (Date.now() < deadline) {
-      if (Date.now() >= settleUntil) { stopReason = 'settled'; break; }
+      // The interval can outlast the settle time, so the last step's screen is captured here.
+      if (Date.now() >= settleUntil) { capture(); stopReason = 'settled'; break; }
       const frame = capture();
       if (paneDead()) { capture(); stopReason = 'pane_dead'; break; }
       const step = steps[stepIndex];

@@ -234,6 +234,14 @@ describe.skipIf(!HAS_TMUX)('record-pane-frames record', () => {
     expect(processIsAlive(await providerPid())).toBe(false);
   });
 
+  it('saves the screen its last step produced even when the settle time is shorter than the interval', async () => {
+    const run = await record(['wait:READY>', 'text:hello', 'keys:Enter'], ['--interval-ms', '500', '--settle', '0.05']);
+
+    expect(run.code).toBe(0);
+    expect((JSON.parse(run.stdout) as { stop: string }).stop).toBe('settled');
+    expect(extractLast().frame).toContain('got:hello');
+  });
+
   it('stops with pane_dead when the provider exits and names the step it never reached', async () => {
     const run = await record(['wait:READY>', 'text:quit', 'keys:Enter', 'wait:never-shown']);
 
