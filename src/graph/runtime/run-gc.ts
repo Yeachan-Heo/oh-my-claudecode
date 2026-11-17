@@ -135,6 +135,8 @@ export interface ScannedRun {
   /** Test-only interlocks: once the lock is held, and once the directory is open, each before the run is decided again. */
   readonly afterOwnership?: () => void;
   readonly afterHandle?: () => void;
+  /** Test-only interlock: the decision reads under the lock are done; the name is not checked yet. */
+  readonly afterReads?: () => void;
   /** Test-only interlock: after the name was checked for the last time, right before the directory is moved. */
   readonly beforeMove?: () => void;
 }
@@ -522,12 +524,15 @@ export function scanRuns({
       run.reason = lease.reason;
       continue;
     }
-    const verdict = judgeRun(runDir, id, measured.newestMs, cutoffMs);
+    // The fence gives the epoch above the highest it has seen, so a resume would refuse a record above this one: the
+    // scan applies the same bound as the replay under ownership, and the two verdicts cannot differ for the same files.
+    const epochFloor = epochFloorOf(runDir);
+    const verdict = judgeRun(runDir, id, measured.newestMs, cutoffMs, epochFloor + 1);
     run.decision = verdict.decision;
     run.reason = verdict.reason;
     run.state = verdict.state;
     run.torn = verdict.torn;
-    if (verdict.decision === "delete") run.epochFloor = epochFloorOf(runDir);
+    if (verdict.decision === "delete") run.epochFloor = epochFloor;
   }
   return scan;
 }
@@ -789,7 +794,9 @@ export function quarantineRun(
       // directory at the moment of the move.
       const verdict = withRunDirectory(runDir, scanned.identity, (run) => {
         scanned.afterHandle?.();
-        return judgeRun(run.path, id, measureRun(run.path, true, run.anchored).newestMs, scanned.cutoffMs, epoch);
+        const judged = judgeRun(run.path, id, measureRun(run.path, true, run.anchored).newestMs, scanned.cutoffMs, epoch);
+        scanned.afterReads?.();
+        return judged;
       });
       if (verdict.decision !== "delete") throw new Error(`run changed after the scan (${verdict.reason}); not removed`);
       assertIdentity(lstatSync(runDir), scanned.identity, "the run directory");

@@ -20,7 +20,9 @@
  * The snapshot never decides a verdict. It is read only for a descriptor with an empty journal, where the replay has
  * nothing to fold: the initial snapshot (`saved_at_seq` -1, bound to the descriptor, run and revision) is the evidence
  * that the run was initialized and has not committed a record yet. A lost, restored or corrupt snapshot beside a
- * journal that replays does not change the verdict.
+ * journal that replays does not change the verdict. One exception comes before the replay, from the readers of the
+ * files: a projection.json that is a link, a FIFO or another file that is not a regular file is refused when the files
+ * are read (status: unreadable, gc: unknown), because nothing is read through it.
  */
 
 import { parseSealedGraphDescriptor } from "../descriptor.js";

@@ -959,18 +959,75 @@ describe("omc graph gc", () => {
     });
   }
 
-  it("a journal whose epoch is above the epoch the lock gives is not removed: a resume would refuse it too", () => {
+  it("a journal whose epoch is above the epoch the lock gives is kept in the scan already: a resume would refuse it too", () => {
     withBase((base) => {
       const root = makeRoot(base);
       // No owner.epoch and no lock: the fence hands out epoch 1, and the records say 3.
       const dir = makeRealRun(root, "run-ahead", "succeeded", 3);
       ageTree(dir, OLD);
-      // The scan has no ceiling, so it proposes the removal; the replay under ownership, which has one, refuses it.
       const result = gc(root);
       const run = decisionOf(result, "run-ahead");
-      expect(run.action).toBe("failed");
-      expect(run.error).toMatch(/run changed after the scan \(unknown:replay-rejected\); not removed/);
+      // The scan applies the bound the lock would give, so the verdict is the same before and under the lock: kept, not
+      // proposed on every pass and refused on every pass (which would end every pass with exit code 1).
+      expect(run.action).toBe("keep");
+      expect(run.reason).toBe("unknown:replay-rejected");
+      expect(result.summary.failed).toBe(0);
       expect(existsSync(dir)).toBe(true);
+    });
+  });
+
+  it("the replay under ownership is bounded by the epoch the lock gives: records above it, written after the scan, refuse the removal", () => {
+    withBase((base) => {
+      const root = makeRoot(base);
+      const dir = makeRealRun(root, "run-ahead-late", "succeeded");
+      ageTree(dir, OLD);
+      const scanned = scannedFirst(root);
+      // After the scan the files are replaced by a run whose records carry epoch 3; the fence still hands out epoch 1.
+      makeRealRun(root, "run-ahead-late", "succeeded", 3);
+      ageTree(dir, OLD);
+      expect(() => removeRun(realpathSync(root), "run-ahead-late", scanned)).toThrow(/changed after the scan \(unknown:replay-rejected\)/);
+      expect(existsSync(join(dir, "journal.jsonl"))).toBe(true);
+    });
+  });
+
+  // ABA: the reads under the lock must come from the directory that was opened. The name is swapped to a finished copy
+  // while they run and swapped back before the check of the name, so only reads through the open directory still see
+  // the run that is resumable.
+  it.runIf(process.platform === "linux")("the decision reads follow the open directory, not the name: a swap and a swap back during them cannot show a finished run", () => {
+    withBase((base) => {
+      const root = makeRoot(base);
+      const realRoot = realpathSync(root);
+      const dir = makeFinishedRun(root, "run-aba");
+      ageTree(dir, OLD);
+      const finishedCopy = join(base, "finished-copy");
+      const parked = join(base, "parked");
+      const scanned: ScannedRun = {
+        ...scannedFirst(root),
+        afterOwnership: () => {
+          // Under the lock the run turns out to be resumable: a stopped run with the second step ready.
+          makeRealRun(root, "run-aba", "ready");
+          ageTree(dir, OLD);
+        },
+        afterHandle: () => {
+          // A finished, expired copy takes the name while the reads run.
+          renameSync(dir, parked);
+          const copy = makeRealRun(root, "run-aba", "succeeded");
+          ageTree(copy, OLD);
+          renameSync(copy, finishedCopy);
+          renameSync(parked, dir);
+          renameSync(dir, parked);
+          renameSync(finishedCopy, dir);
+        },
+        afterReads: () => {
+          // And the opened directory gets its name back before the name is checked.
+          renameSync(dir, finishedCopy);
+          renameSync(parked, dir);
+        },
+      };
+
+      expect(() => removeRun(realRoot, "run-aba", scanned)).toThrow(/changed after the scan \(resumable-ready\)/);
+      expect(existsSync(join(dir, "journal.jsonl")), "the resumable run was removed on what a swapped name showed").toBe(true);
+      expect(readdirSync(root).filter((name) => name.startsWith(".deleted-"))).toEqual([]);
     });
   });
 

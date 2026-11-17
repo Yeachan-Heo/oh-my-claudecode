@@ -272,6 +272,34 @@ describe.runIf(process.platform !== "win32")("omc graph status", () => {
     }
   });
 
+  // Thread shape: a snapshot that is valid and at the right seq, but whose body was restored to another state.
+  it("a snapshot restored to another state at the right seq does not change the report: a ready run stays in_progress, a failed run stays failed", async () => {
+    const runs = makeRunsRoot();
+    writeRealRun(runs, "st-ready-restored", "ready");
+    editProjection(runs, "st-ready-restored", (body) => {
+      for (const activation of Object.values(body.activations) as Record<string, any>[]) activation.status = "failed";
+    });
+    const ready = await statusCli(["st-ready-restored", "--runs-root", runs]);
+    expect(ready.code, JSON.stringify(ready.json)).toBe(3);
+    expect(ready.json?.state).toBe("in_progress");
+    expect(nodeOf(ready.json as Record<string, any>, "step-2").state).toBe("ready");
+
+    writeRealRun(runs, "st-failed-lost", "failed");
+    rmSync(join(runs, "st-failed-lost", "projection.json"));
+    const failed = await statusCli(["st-failed-lost", "--runs-root", runs]);
+    expect(failed.code, JSON.stringify(failed.json)).toBe(1);
+    expect(failed.json?.state).toBe("failed");
+    expect(nodeOf(failed.json as Record<string, any>, "step-1").state).toBe("failed");
+
+    writeRealRun(runs, "st-done-restored", "succeeded");
+    editProjection(runs, "st-done-restored", (body) => {
+      for (const activation of Object.values(body.activations) as Record<string, any>[]) activation.status = "ready";
+    });
+    const done = await statusCli(["st-done-restored", "--runs-root", runs]);
+    expect(done.code, JSON.stringify(done.json)).toBe(0);
+    expect(done.json?.state).toBe("succeeded");
+  });
+
   it("an emptied journal is unreadable, as the runtime refuses it: the snapshot does not stand in for the history", async () => {
     const runs = makeRunsRoot();
     await runChain(runs, "st-empty", NODE_FAIL);
