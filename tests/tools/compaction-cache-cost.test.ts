@@ -349,6 +349,38 @@ describe('compaction_cache_cost', () => {
     }
   });
 
+  it('cache loss: a call below the minimum breaks the series of consecutive calls, the token sum still counts it', () => {
+    const c = newCase();
+    try {
+      const dir = join(c.dir, 'proj');
+      mkdirSync(dir, { recursive: true });
+      idCounter = 0;
+      const lossWith = (name, sizes) => {
+        const file = join(dir, `${name}.jsonl`);
+        writeLines(file, [
+          assistant('2026-11-12T10:00:00Z', 'test-model', usageOf(100, 0, 10000, 10)),
+          ...sizes.map((size, i) => assistant(`2026-11-12T10:0${i + 1}:00Z`, 'test-model', usageOf(size, 0, 0, 10))),
+        ]);
+        return file;
+      };
+      // 3000, 1000, 3000, 1000, 3000: three qualifying calls, never three in a row, far below 100000 tokens
+      const separated = lossWith('separated', [3000, 1000, 3000, 1000, 3000]);
+      // three qualifying calls in a row are a persistent loss
+      const consecutive = lossWith('consecutive', [3000, 3000, 3000]);
+      // 50000 + 1000 + 49500: no series, the sum of all uncached input since the event reaches 100000
+      const heavy = lossWith('heavy', [50000, 1000, 49500]);
+      const persistent = (file) => {
+        const w = resultJson(run(c, [file], ['--json']));
+        return [w.cache_loss.before_deployment.losses, w.cache_loss.before_deployment.persistent_losses];
+      };
+      expect(persistent(separated)).toEqual([1, 0]);
+      expect(persistent(consecutive)).toEqual([1, 1]);
+      expect(persistent(heavy)).toEqual([1, 1]);
+    } finally {
+      rmSync(c.dir, { recursive: true, force: true });
+    }
+  });
+
   it('matching jev, fallback, host and a subagent by agent_id', () => {
     const c = newCase();
     try {

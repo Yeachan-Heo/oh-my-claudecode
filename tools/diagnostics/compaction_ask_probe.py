@@ -329,6 +329,10 @@ def walk_file(path):
                     session_id = row["sessionId"]
                 if row_type == "system" and row.get("subtype") == "compact_boundary":
                     close_current(via_next=True)
+                    # The calls of the window that just closed (and of its state phase) are prior calls now:
+                    # take their ids before window_new is replaced with the new boundary's empty dictionary.
+                    seen_before.update(seen_in_state)
+                    seen_before.update(window_new.keys())
                     meta = row.get("compactMetadata")
                     ts = ts_epoch(row.get("timestamp"))
                     current = {
@@ -348,8 +352,6 @@ def walk_file(path):
                     }
                     window_new = current["window_new"]
                     window_matches = current["window_matches"]
-                    seen_before.update(seen_in_state)
-                    seen_before.update(window_new.keys())
                     seen_in_state = set()
                     seen = set()
                     for lst in canary_deque:

@@ -622,6 +622,37 @@ describe('compaction_ask_probe', () => {
     }
   });
 
+  it('a call first seen in the window of one boundary and replayed after the next boundary is not a new call', () => {
+    const env = makeEnv();
+    try {
+      const dir = join(env.projects, '-test');
+      const ts = (s) => `2026-11-14T12:00:${String(s).padStart(2, '0')}Z`;
+      writeJsonl(join(dir, 'sR.jsonl'), [
+        ask('SR', ts(0), 'First request R for a report'),
+        ask('SR', ts(1), 'Last request R for a summing'),
+        boundary('UR1', ts(2)),
+        stateRow('SR', ts(3), 'State R1: First request R for a report and Last request R for a summing'),
+        apiRequest('SR', ts(4)),
+        assistant('SR', ts(5), 'm-old', 'test-model-b', [{ type: 'text', text: 'worked' }]),
+        boundary('UR2', ts(10)),
+        stateRow('SR', ts(11), 'State R2: First request R for a report and Last request R for a summing'),
+        apiRequest('SR', ts(12)),
+        assistant('SR', ts(13), 'm-old', 'test-model-b', [{ type: 'text', text: 'worked' }]),
+        assistant('SR', ts(14), 'm-new', 'test-model-b', [{ type: 'thinking', thinking: 'x' }]),
+      ]);
+      writeCompact(env.compactFile, [compactAt(ts(2)), compactAt(ts(10))]);
+      const r = resultJson(env, ['--details']);
+      const j = Object.fromEntries(r.units.map((x) => [x.uuid, x]));
+      expect(j.UR1.calls_count).toBe(1);
+      expect(j.UR1.empty_calls).toBe(0);
+      // the replayed m-old is a prior call; only m-new belongs to the second window, and it is empty
+      expect(j.UR2.calls_count).toBe(1);
+      expect(j.UR2.empty_calls).toBe(1);
+    } finally {
+      rmSync(env.dir, { recursive: true, force: true });
+    }
+  });
+
   it('a state ending at the next boundary goes to a separate gap', () => {
     const env = makeEnv();
     try {

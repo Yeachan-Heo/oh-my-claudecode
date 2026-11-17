@@ -74,9 +74,10 @@ RULE = """- Period: calls and compaction boundaries with a `timestamp` in [to - 
 - Cache Savings = the cost without cache (all cache_read and cache_creation at the input price) minus the actual
   cost, in USD, in total and per thread group (main, subagent).
 - Cache loss: in a file, after an earlier call with cr > 0, the first call with cr = 0 and (in + cc) >= 2048 is a
-  "cache loss" event; a series of 3 consecutive such calls or a sum of 100 000 uncached tokens since the event is a
-  "persistent loss". After a compaction boundary the detector resets: the call right after a boundary is not a loss
-  (it is the rewrite after a compaction). The number of losses per session (a session = the file's session id, with
+  "cache loss" event; a series of 3 consecutive such calls (a call below 2048 breaks the series) or a sum of 100 000
+  uncached tokens since the event (all uncached input of the calls since then) is a "persistent loss". After a
+  compaction boundary the detector resets: the call right after a boundary is not a loss (it is the rewrite after
+  a compaction). The number of losses per session (a session = the file's session id, with
   its subagents) separately for sessions with at least one call in the period; classified before/from the deployment
   by the first call of the session (--deployed-at); two periods are not a control arm, there is no causal
   conclusion.
@@ -788,19 +789,18 @@ def file_cache_losses(calls: list, file_boundaries: list, start, end) -> list:
             series = 0
             total = 0
             continue
-        if uncached >= LOSS_MIN_INPUT:
-            if had_cache and not in_event:
-                in_event = True
-                series = 1
-                total = uncached
-                losses.append({"session": c.session, "persistent": False})
-                if series >= LOSS_SERIES or total >= LOSS_TOKEN_SUM:
-                    losses[-1]["persistent"] = total >= LOSS_TOKEN_SUM
-            elif in_event:
-                series += 1
-                total += uncached
-                if series >= LOSS_SERIES or total >= LOSS_TOKEN_SUM:
-                    losses[-1]["persistent"] = True
+        if in_event:
+            # A series is consecutive calls that each meet the minimum; a smaller call breaks it. The token sum
+            # runs over all uncached input since the event, whatever the size of each call.
+            series = series + 1 if uncached >= LOSS_MIN_INPUT else 0
+            total += uncached
+            if series >= LOSS_SERIES or total >= LOSS_TOKEN_SUM:
+                losses[-1]["persistent"] = True
+        elif had_cache and uncached >= LOSS_MIN_INPUT:
+            in_event = True
+            series = 1
+            total = uncached
+            losses.append({"session": c.session, "persistent": total >= LOSS_TOKEN_SUM})
     return losses
 
 
