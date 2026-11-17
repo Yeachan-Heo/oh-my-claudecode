@@ -3,7 +3,7 @@
  * tmux is replaced by the mocked tmux-utils wrappers; no tmux server is started.
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { panelQuotaTmux } from '../../features/rate-limit-wait/tmux-detector.js';
+import { panelQuotaTmux, sendToPane, sendToPaneOutcome } from '../../features/rate-limit-wait/tmux-detector.js';
 import type { TmuxPane } from '../../features/rate-limit-wait/types.js';
 
 vi.mock('../../cli/tmux-utils.js', async (importOriginal) => {
@@ -89,9 +89,82 @@ describe('panelQuotaTmux adapter', () => {
 
   it('sendContinue sends the text and then Enter to the same pane', () => {
     vi.mocked(tmuxExec).mockReturnValue('');
-    expect(panelQuotaTmux.sendContinue(PANE)).toBe(true);
+    expect(panelQuotaTmux.sendContinue(PANE)).toBe('delivered');
     const calls = vi.mocked(tmuxExec).mock.calls.map((call) => call[0]);
     expect(calls).toContainEqual(['send-keys', '-t', '%7', '-l', 'continue']);
     expect(calls).toContainEqual(['send-keys', '-t', '%7', 'Enter']);
+  });
+
+  describe('the three outcomes of typing text into a pane', () => {
+    const exited = (status: number): Error => Object.assign(new Error(`Command failed: tmux (status ${status})`), { status, signal: null });
+    const timedOut = (): Error => Object.assign(new Error('spawnSync tmux ETIMEDOUT'), { code: 'ETIMEDOUT', signal: 'SIGTERM', status: null });
+    const sendKeysCalls = (): string[][] => vi.mocked(tmuxExec).mock.calls.map((call) => call[0]).filter((args) => args[0] === 'send-keys');
+
+    beforeEach(() => {
+      vi.spyOn(console, 'error').mockImplementation(() => {});
+    });
+
+    it('the text went in and the Enter failed: unconfirmed, because the text sits in the pane', () => {
+      vi.mocked(tmuxExec).mockReturnValueOnce('').mockImplementationOnce(() => { throw exited(1); });
+      expect(panelQuotaTmux.sendContinue(PANE)).toBe('unconfirmed');
+      expect(sendKeysCalls()).toEqual([['send-keys', '-t', '%7', '-l', 'continue'], ['send-keys', '-t', '%7', 'Enter']]);
+    });
+
+    it('the text went in and the Enter timed out: unconfirmed', () => {
+      vi.mocked(tmuxExec).mockReturnValueOnce('').mockImplementationOnce(() => { throw timedOut(); });
+      expect(panelQuotaTmux.sendContinue(PANE)).toBe('unconfirmed');
+    });
+
+    it('the text call timed out: unconfirmed, and no Enter follows', () => {
+      vi.mocked(tmuxExec).mockImplementationOnce(() => { throw timedOut(); });
+      expect(panelQuotaTmux.sendContinue(PANE)).toBe('unconfirmed');
+      expect(sendKeysCalls()).toHaveLength(1);
+    });
+
+    it('the text call died of a signal or failed in a way tmux does not report: unconfirmed', () => {
+      vi.mocked(tmuxExec).mockImplementationOnce(() => { throw Object.assign(new Error('killed'), { status: null, signal: 'SIGKILL' }); });
+      expect(panelQuotaTmux.sendContinue(PANE)).toBe('unconfirmed');
+      vi.mocked(tmuxExec).mockReset();
+      vi.mocked(tmuxExec).mockImplementationOnce(() => { throw new Error('unexpected'); });
+      expect(panelQuotaTmux.sendContinue(PANE)).toBe('unconfirmed');
+    });
+
+    it('tmux refuses the text (exit status 1) or does not start: not attempted, and no Enter follows', () => {
+      vi.mocked(tmuxExec).mockImplementationOnce(() => { throw exited(1); });
+      expect(panelQuotaTmux.sendContinue(PANE)).toBe('not_attempted');
+      expect(sendKeysCalls()).toHaveLength(1);
+      vi.mocked(tmuxExec).mockReset();
+      vi.mocked(tmuxExec).mockImplementationOnce(() => { throw Object.assign(new Error('spawn tmux ENOENT'), { code: 'ENOENT' }); });
+      expect(panelQuotaTmux.sendContinue(PANE)).toBe('not_attempted');
+    });
+
+    it('a failure before any key (tmux missing, herdr pane, malformed pane id): not attempted, nothing is sent', () => {
+      vi.mocked(tmuxSpawn).mockReturnValue({ status: 1 } as never);
+      expect(sendToPaneOutcome('%7', 'continue')).toBe('not_attempted');
+      vi.mocked(tmuxSpawn).mockReturnValue({ status: 0 } as never);
+      expect(sendToPaneOutcome('w1:p2', 'continue')).toBe('not_attempted');
+      expect(sendToPaneOutcome('%7; rm -rf /', 'continue')).toBe('not_attempted');
+      expect(sendKeysCalls()).toHaveLength(0);
+    });
+
+    it('the text without Enter is delivered when the text call succeeds', () => {
+      vi.mocked(tmuxExec).mockReturnValue('');
+      expect(sendToPaneOutcome('%7', 'continue', false)).toBe('delivered');
+      expect(sendKeysCalls()).toEqual([['send-keys', '-t', '%7', '-l', 'continue']]);
+    });
+
+    it('sendToPane keeps its boolean: true only when the text and the Enter both went in', () => {
+      vi.mocked(tmuxExec).mockReturnValue('');
+      expect(sendToPane('%7', 'continue')).toBe(true);
+      vi.mocked(tmuxExec).mockReset();
+      vi.mocked(tmuxExec).mockReturnValueOnce('').mockImplementationOnce(() => { throw exited(1); });
+      expect(sendToPane('%7', 'continue')).toBe(false);
+      vi.mocked(tmuxExec).mockReset();
+      vi.mocked(tmuxExec).mockImplementationOnce(() => { throw exited(1); });
+      expect(sendToPane('%7', 'continue')).toBe(false);
+      vi.mocked(tmuxExec).mockReset();
+      vi.mocked(tmuxExec).mockImplementationOnce(() => { throw timedOut(); });
+      expect(sendToPane('%7', 'continue')).toBe(false);
+    });
   });
 });

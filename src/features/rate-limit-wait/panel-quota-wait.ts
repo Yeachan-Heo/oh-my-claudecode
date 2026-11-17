@@ -18,8 +18,13 @@
  * The key cannot be taken back, so the intent to send it is recorded first: the pane goes to state "resuming"
  * and the state is saved (deps.persist) before the key is sent. A daemon that stops after that point finds the
  * "resuming" entry on its next pass and does not send a second key: it marks the pane "resumed" and says in
- * the log and the journal that the delivery is unconfirmed. If the intent cannot be saved, no key is sent. A key
- * that tmux refused puts the pane back to "waiting_quota" and saves that. A code that ends a pane (a configured
+ * the log and the journal that the delivery is unconfirmed. If the intent cannot be saved, no key is sent.
+ * The key has three outcomes. Delivered: the pane is "resumed". Not attempted (tmux refused it, or did not start):
+ * the pane goes back to "waiting_quota" and that is saved, so the key may be sent again. Unconfirmed (the text was
+ * typed and its Enter failed, or a call timed out): the key may sit in the pane's input, so it is never sent again.
+ * The pane is "resumed" with the flag `unconfirmed`, the log and the journal (result "resume-unconfirmed") say that
+ * the pane needs a look, and no key goes to it while the quota error is still on its screen, whatever the tail looks
+ * like. A restart that finds the saved intent ends in the same state. A code that ends a pane (a configured
  * end code, a wait limit, a weekly limit) needs no key and is decided on the screen first: it is not held back by
  * a slow reading, which only supplies the reset date for the log.
  *
@@ -63,11 +68,18 @@ export interface QuotaReading {
   body: unknown;
 }
 
+/**
+ * Outcome of the continue key, the one effect of a pass that cannot be taken back: `delivered` (text and Enter went
+ * in), `not_attempted` (nothing was sent, so the key may be sent again), `unconfirmed` (the text may be typed in
+ * the pane without its Enter, or a call timed out: it is never sent again).
+ */
+export type ResumeDelivery = 'delivered' | 'not_attempted' | 'unconfirmed';
+
 export interface PanelTmux {
   /** The panes of the tmux server, or null when the inventory cannot be read (tmux missing, server unreachable, timeout). */
   listPanes(): PanePoint[] | null;
   capture(pane: PanePoint, lines: number): string | null;
-  sendContinue(pane: PanePoint): boolean;
+  sendContinue(pane: PanePoint): ResumeDelivery;
   /** Whether the provider still runs in the pane: false for a dead pane or a shell in the foreground, null when it cannot be told. */
   providerRunning(pane: PanePoint): boolean | null;
 }
@@ -81,6 +93,12 @@ export interface PanelEntry {
   waits: number;
   /** "resuming": the continue key is about to be sent, or was sent without the pass finishing; it is never sent again. */
   state?: 'waiting_quota' | 'resuming' | 'resumed' | 'quota-ended';
+  /**
+   * Set on a "resumed" pane whose continue key may have been typed without being submitted (a partial send, a timeout,
+   * or a daemon that stopped between the intent and the result). No key is sent to the pane while the quota error is
+   * still on its screen: a second key would be typed after the first. Cleared when the error is gone.
+   */
+  unconfirmed?: boolean;
   sig?: string | null;
   updatedAt?: number;
   resumedAt?: number;
@@ -110,7 +128,7 @@ export interface PanelQuotaDeps {
   monotonic?(): number;
   listPanes(): PanePoint[] | null;
   capture(pane: PanePoint, lines: number): string | null | undefined;
-  sendContinue(pane: PanePoint): boolean;
+  sendContinue(pane: PanePoint): ResumeDelivery;
   providerRunning(pane: PanePoint): boolean | null;
   readQuota(): Promise<QuotaReading | null>;
   log(text: string): void;
@@ -345,10 +363,8 @@ export async function runPanelQuotaPass(
   // A resume that an earlier pass recorded before its key, and did not finish, is not repeated.
   for (const [key, entry] of Object.entries(state.panes)) {
     if (entry.state !== 'resuming') continue;
-    entry.state = 'resumed';
     entry.resumedAt = entry.resumedAt ?? now;
-    deps.log(`pane ${key}: a resume was recorded before the daemon stopped; no second key is sent, and whether the first one arrived is unknown`);
-    deps.journal({ ts: new Date(now).toISOString(), point: 'team-panel', pane: key, result: 'resume-unconfirmed', state: 'resumed', attempt: entry.waits });
+    markResumeUnconfirmed(entry, key, deps, now, 'a resume was recorded before the daemon stopped; no second key is sent, and whether the first one arrived is unknown');
   }
   const listedPanes = deps.listPanes();
   if (listedPanes === null) {
@@ -392,6 +408,15 @@ export async function runPanelQuotaPass(
       continue;
     }
     const sig = screenSignature(content);
+
+    if (entry?.unconfirmed) {
+      // The key may sit typed in the pane's input: nothing is sent while the error shows, however the tail changed.
+      if (detectQuotaError(content, codes)) continue;
+      delete entry.unconfirmed;
+      entry.sig = null;
+      deps.log(`pane ${key}: the quota error is gone from the screen; the unconfirmed resume is closed`);
+      continue;
+    }
 
     if (entry && entry.state === 'waiting_quota') {
       if (entry.untilMs !== undefined && now < entry.untilMs) continue;
@@ -447,12 +472,17 @@ export async function runPanelQuotaPass(
         deps.log(`pane ${key}: the resume could not be recorded (${error instanceof Error ? error.message : String(error)}); no key is sent; retry on the next pass`);
         continue;
       }
-      if (deps.sendContinue(pane)) {
+      const delivery = deps.sendContinue(pane);
+      if (delivery === 'delivered') {
         entry.state = 'resumed';
         deps.log(`pane ${key}: resumed after the quota reset (wait ${entry.waits} of ${max})`);
         deps.journal({ ts: new Date(now).toISOString(), point: 'team-panel', pane: key, result: 'resume', state: 'resumed', attempt: entry.waits });
+      } else if (delivery === 'unconfirmed') {
+        // Part of the key may be in the pane (the text without its Enter) or the call did not answer: it is never sent
+        // again. The intent saved above stays as the record of the attempt, and the pane is held for a manual look.
+        markResumeUnconfirmed(entry, key, deps, now, 'the continue key may have reached the pane only in part; no second key is sent');
       } else {
-        // No key was sent: the pane waits again, and that is recorded, so that a restart retries it.
+        // Nothing was sent: the pane waits again, and that is recorded, so that a restart retries it.
         Object.assign(entry, before);
         deps.log(`pane ${key}: resume keys not sent; retry on the next pass`);
         try {
@@ -535,6 +565,15 @@ export async function runPanelQuotaPass(
     }
   }
   return state;
+}
+
+// A resume whose delivery is not known: the pane is settled as "resumed", held against any further key (see
+// PanelEntry.unconfirmed), and the log and the journal say that someone must look at the pane.
+function markResumeUnconfirmed(entry: PanelEntry, key: string, deps: PanelQuotaDeps, now: number, why: string): void {
+  entry.state = 'resumed';
+  entry.unconfirmed = true;
+  deps.log(`pane ${key}: ${why}`);
+  deps.journal({ ts: new Date(now).toISOString(), point: 'team-panel', pane: key, result: 'resume-unconfirmed', state: 'resumed', attempt: entry.waits });
 }
 
 // The wait of this pane ends with class quota and the pane is left alone: the reset date goes to the journal and

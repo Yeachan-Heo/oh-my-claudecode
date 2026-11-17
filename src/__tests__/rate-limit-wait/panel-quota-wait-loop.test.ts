@@ -33,7 +33,7 @@ vi.mock('../../features/rate-limit-wait/tmux-detector.js', async (importOriginal
     capture: () => fake.screen,
     sendContinue: (pane: { id: string }) => {
       fake.sent.push(pane.id);
-      return true;
+      return 'delivered' as const;
     },
   },
 }));

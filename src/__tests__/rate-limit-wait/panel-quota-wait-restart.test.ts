@@ -43,6 +43,7 @@ describe('panel quota wait: a restart never sends the continue key twice', () =>
   let sent: string[];
   let afterKey: () => void;
   let tmux: PanelTmux;
+  let delivery: 'delivered' | 'unconfirmed';
 
   const pass = (nowMs: number) =>
     runDaemonPanelQuotaPass({ stateDir: join(dir, 'daemon'), env, tmux, readQuota: async () => READING, now: () => nowMs });
@@ -55,6 +56,7 @@ describe('panel quota wait: a restart never sends the continue key twice', () =>
     disk.failWrites = false;
     sent = [];
     afterKey = () => {};
+    delivery = 'delivered';
     env = {
       OMC_PANEL_QUOTA_WAIT: '1',
       OMC_PANEL_QUOTA_WAIT_MARGIN_S: '0',
@@ -67,7 +69,7 @@ describe('panel quota wait: a restart never sends the continue key twice', () =>
       sendContinue: (pane) => {
         sent.push(pane.id);
         afterKey();
-        return true;
+        return delivery;
       },
       providerRunning: () => true,
     };
@@ -110,6 +112,23 @@ describe('panel quota wait: a restart never sends the continue key twice', () =>
     await pass(BASE_MS + 2 * H + 60_000);
     expect(sent).toEqual(['%7']);
     expect(stateOnDisk().panes['%7'].state).toBe('resumed');
+  });
+
+  it('a key that may have been typed without its Enter is held on disk: a restart with a changed tail sends nothing', async () => {
+    delivery = 'unconfirmed';
+    const first = await pass(BASE_MS + 2 * H);
+    expect(sent).toEqual(['%7']);
+    expect(first?.panes['%7'].state).toBe('resumed');
+    expect(stateOnDisk().panes['%7']).toMatchObject({ state: 'resumed', unconfirmed: true });
+    expect(journal().filter((row) => row.result === 'resume-unconfirmed')).toHaveLength(1);
+    expect(journal().filter((row) => row.result === 'resume')).toHaveLength(0);
+
+    // A restart: the typed text changed the tail, and the settle time and the next reset have both passed.
+    delivery = 'delivered';
+    tmux.capture = () => `${ERR_1308}\n> continue`;
+    for (let hours = 3; hours <= 9; hours += 2) await pass(BASE_MS + hours * H);
+    expect(sent, 'a second continue was typed after the unconfirmed one').toEqual(['%7']);
+    expect(stateOnDisk().panes['%7']).toMatchObject({ state: 'resumed', unconfirmed: true });
   });
 
   it('the intent cannot be written: no key is sent, the file still says waiting, and the next pass resumes once', async () => {

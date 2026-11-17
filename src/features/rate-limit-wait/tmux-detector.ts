@@ -616,43 +616,78 @@ export function sendResumeSequence(paneId: string): boolean {
 }
 
 /**
- * Send custom text to a tmux pane
+ * What happened to text typed into a pane: it went in with its Enter (`delivered`), nothing was sent and the same
+ * call can safely be repeated (`not_attempted`), or part of it may have gone in or the outcome is not known
+ * (`unconfirmed`: the text was typed and the Enter failed, or a call timed out or died).
  */
-export function sendToPane(paneId: string, text: string, pressEnter = true): boolean {
+export type PaneSendOutcome = 'delivered' | 'not_attempted' | 'unconfirmed';
+
+// A tmux call that ran and exited non-zero, or that never started, sent nothing. A timeout, a signal or an error of
+// unknown shape can have come after the key was typed.
+function tmuxCallSentNothing(error: unknown): boolean {
+  const failure = error as { status?: unknown; signal?: unknown; code?: unknown } | null;
+  if (typeof failure?.status === 'number' && failure.status !== 0 && !failure.signal) return true;
+  return failure?.code === 'ENOENT' || failure?.code === 'EACCES';
+}
+
+/**
+ * Send custom text to a tmux pane and report all three outcomes (see PaneSendOutcome). The text and the Enter
+ * are two tmux calls, so a failure of the second leaves the text typed in the pane: that is `unconfirmed`, never
+ * `not_attempted`.
+ */
+export function sendToPaneOutcome(paneId: string, text: string, pressEnter = true): PaneSendOutcome {
   if (!isTmuxAvailable()) {
-    return false;
+    return 'not_attempted';
   }
 
   // Herdr panes (wN:pM) are addressed through the herdr agent surface.
   if (isHerdrPaneId(paneId)) {
-    return false;
+    return 'not_attempted';
   }
 
   // Validate pane ID to prevent command injection
   if (!isValidPaneId(paneId)) {
     console.error(`[TmuxDetector] Invalid pane ID format: ${paneId}`);
-    return false;
+    return 'not_attempted';
   }
 
+  let sanitizedText: string;
   try {
-    const sanitizedText = sanitizeForTmux(text);
+    sanitizedText = sanitizeForTmux(text);
+  } catch (error) {
+    console.error(`[TmuxDetector] Error sending to pane ${paneId}:`, error);
+    return 'not_attempted';
+  }
+  try {
     // Send text with -l flag (literal) to avoid key interpretation issues in TUI apps
     tmuxExec(['send-keys', '-t', paneId, '-l', sanitizedText], {
       stripTmux: true,
       timeout: 2000,
     });
-    // Send Enter as a separate command so it is interpreted as a key press
-    if (pressEnter) {
+  } catch (error) {
+    console.error(`[TmuxDetector] Error sending to pane ${paneId}:`, error);
+    return tmuxCallSentNothing(error) ? 'not_attempted' : 'unconfirmed';
+  }
+  // Send Enter as a separate command so it is interpreted as a key press
+  if (pressEnter) {
+    try {
       tmuxExec(['send-keys', '-t', paneId, 'Enter'], {
         stripTmux: true,
         timeout: 2000,
       });
+    } catch (error) {
+      console.error(`[TmuxDetector] Error sending to pane ${paneId}:`, error);
+      return 'unconfirmed';
     }
-    return true;
-  } catch (error) {
-    console.error(`[TmuxDetector] Error sending to pane ${paneId}:`, error);
-    return false;
   }
+  return 'delivered';
+}
+
+/**
+ * Send custom text to a tmux pane
+ */
+export function sendToPane(paneId: string, text: string, pressEnter = true): boolean {
+  return sendToPaneOutcome(paneId, text, pressEnter) === 'delivered';
 }
 
 // ---------------------------------------------------------------------------
@@ -842,7 +877,7 @@ export const panelQuotaTmux = {
   // null when the inventory cannot be read (tmux missing, server unreachable, timeout): the pass keeps its saved waits.
   listPanes: (): TmuxPane[] | null => listTmuxPanesStrict(),
   capture: (pane: TmuxPane, lines: number): string | null => capturePaneContentStrict(pane.id, lines),
-  sendContinue: (pane: TmuxPane): boolean => sendToPane(pane.id, 'continue', true),
+  sendContinue: (pane: TmuxPane): PaneSendOutcome => sendToPaneOutcome(pane.id, 'continue', true),
   providerRunning: (pane: TmuxPane): boolean | null => paneProviderRunning(pane.id),
 };
 

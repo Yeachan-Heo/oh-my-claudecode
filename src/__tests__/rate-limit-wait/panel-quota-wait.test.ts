@@ -83,7 +83,7 @@ function world(init: { panes: PanePoint[]; screens: Record<string, string>; read
     now: () => w.clock.now,
     listPanes: () => w.panes,
     capture: (pane) => (Object.prototype.hasOwnProperty.call(w.screens, pane.id) ? w.screens[pane.id] : null),
-    sendContinue: (pane) => { w.sent.push(pane.id); return true; },
+    sendContinue: (pane) => { w.sent.push(pane.id); return 'delivered'; },
     providerRunning: (pane) => (Object.prototype.hasOwnProperty.call(w.running, pane.id) ? w.running[pane.id] : true),
     readQuota: async () => w.reading.value,
     log: (t) => { w.log.push(t); },
@@ -577,14 +577,14 @@ describe('panel quota wait: state transitions and their effects', () => {
   // Row: waiting x tmux refuses the key -> waiting again, and that is saved
   it('a key that tmux refuses puts the pane back to waiting, on disk as well', async () => {
     const { w, state, disk } = await waitingAtResetWithDisk();
-    w.deps.sendContinue = (pane) => { disk.events.push('send'); w.sent.push(pane.id); return false; };
+    w.deps.sendContinue = (pane) => { disk.events.push('send'); w.sent.push(pane.id); return 'not_attempted'; };
     await runPanelQuotaPass(state, w.deps, ON);
     expect(state.panes[KEY_A].state).toBe('waiting_quota');
     expect(disk.events).toEqual(['persist:resuming', 'send', 'persist:waiting_quota']);
     expect((JSON.parse(disk.saved as string) as PanelState).panes[KEY_A].state, 'a restart would not retry the resume').toBe('waiting_quota');
     expect(w.journal.some((r) => r.result === 'resume')).toBe(false);
 
-    w.deps.sendContinue = (pane) => { w.sent.push(pane.id); return true; };
+    w.deps.sendContinue = (pane) => { w.sent.push(pane.id); return 'delivered'; };
     await runPanelQuotaPass(state, w.deps, ON);
     expect(state.panes[KEY_A].state).toBe('resumed');
   });
@@ -622,6 +622,78 @@ describe('panel quota wait: state transitions and their effects', () => {
     await runPanelQuotaPass(onDisk, w.deps, ON);
     expect(onDisk.panes[KEY_A].state).toBe('resumed');
     expect(w.sent).toHaveLength(0);
+  });
+
+  // Row: waiting x the key may have been typed without its Enter -> held, never sent again, on disk as well
+  it('a key whose delivery is unconfirmed is never sent again, even when the screen changes and the settle time passes', async () => {
+    const { w, state, disk } = await waitingAtResetWithDisk();
+    w.deps.sendContinue = (pane) => { disk.events.push('send'); w.sent.push(pane.id); return 'unconfirmed'; };
+    await runPanelQuotaPass(state, w.deps, ON);
+    expect(disk.events, 'the intent is saved before the key and nothing puts the pane back to waiting').toEqual(['persist:resuming', 'send']);
+    expect(state.panes[KEY_A].state).toBe('resumed');
+    expect(state.panes[KEY_A].unconfirmed).toBe(true);
+    expect(w.journal.filter((r) => r.result === 'resume-unconfirmed')).toHaveLength(1);
+    expect(w.journal.some((r) => r.result === 'resume')).toBe(false);
+    expect(w.log.some((t) => /may have reached the pane only in part/.test(t))).toBe(true);
+
+    // The typed text changes the tail; hours pass; the error is still above it. No pass sends a key.
+    w.deps.sendContinue = (pane) => { w.sent.push(pane.id); return 'delivered'; };
+    w.screens['%7'] = screen(`${ERR_1308}\n> continue`);
+    for (let pass = 0; pass < 6; pass++) {
+      w.clock.now += 40 * 60_000;
+      await runPanelQuotaPass(state, w.deps, ON);
+    }
+    expect(w.sent, 'a second continue was typed after the unconfirmed one').toEqual(['%7']);
+    expect(state.panes[KEY_A].state).toBe('resumed');
+    expect(w.journal.filter((r) => r.result === 'resume-unconfirmed')).toHaveLength(1);
+    expect(w.journal.some((r) => r.result === 'quota-wait' && r.attempt === 2)).toBe(false);
+  });
+
+  it('the hold of an unconfirmed key ends when the quota error is gone from the screen; a later error waits and resumes again', async () => {
+    const { w, state } = await waitingAtResetWithDisk();
+    w.deps.sendContinue = (pane) => { w.sent.push(pane.id); return 'unconfirmed'; };
+    await runPanelQuotaPass(state, w.deps, ON);
+    expect(state.panes[KEY_A].unconfirmed).toBe(true);
+    w.deps.sendContinue = (pane) => { w.sent.push(pane.id); return 'delivered'; };
+
+    w.clock.now += 10 * 60_000;
+    w.screens['%7'] = screen('the worker is busy again');
+    await runPanelQuotaPass(state, w.deps, ON);
+    expect(state.panes[KEY_A].unconfirmed, 'the hold stays after the error is gone').toBeUndefined();
+    expect(w.sent).toEqual(['%7']);
+
+    w.clock.now += 10 * 60_000;
+    w.screens['%7'] = screen(ERR_1308);
+    w.reading.value = exhausted5h(w.clock.now + H);
+    await runPanelQuotaPass(state, w.deps, ON);
+    expect(state.panes[KEY_A].state).toBe('waiting_quota');
+    w.clock.now += H + 60_000;
+    await runPanelQuotaPass(state, w.deps, ON);
+    expect(w.sent).toEqual(['%7', '%7']);
+    expect(state.panes[KEY_A].state).toBe('resumed');
+  });
+
+  it('a restart that finds a recorded resume holds the pane too: a changed tail and many passes send nothing', async () => {
+    const onDisk: PanelState = { panes: { [KEY_A]: { key: KEY_A, pane: '%7', session: 'omc-team-a', windowIndex: 0, paneIndex: 1, waits: 1, state: 'resuming', sig: 'abc', resumedAt: BASE_MS } } };
+    const w = world({ panes: [PANE_A], screens: { '%7': screen(`${ERR_1308}\n> continue`) }, readingValue: exhausted5h(BASE_MS + H) });
+    w.clock.now = BASE_MS + 2 * H;
+    for (let pass = 0; pass < 5; pass++) {
+      await runPanelQuotaPass(onDisk, w.deps, ON);
+      w.clock.now += 30 * 60_000;
+    }
+    expect(w.sent).toHaveLength(0);
+    expect(onDisk.panes[KEY_A].unconfirmed).toBe(true);
+    expect(w.journal.filter((r) => r.result === 'resume-unconfirmed')).toHaveLength(1);
+  });
+
+  it('a pane that disappears while it is held loses its entry, and the hold with it', async () => {
+    const { w, state } = await waitingAtResetWithDisk();
+    w.deps.sendContinue = () => 'unconfirmed';
+    await runPanelQuotaPass(state, w.deps, ON);
+    expect(state.panes[KEY_A].unconfirmed).toBe(true);
+    w.panes = [];
+    await runPanelQuotaPass(state, w.deps, ON);
+    expect(state.panes[KEY_A]).toBeUndefined();
   });
 
   // Row: resumed or quota-ended x a settled screen without a quota error -> the baseline is cleared
@@ -799,7 +871,7 @@ describe('panel quota wait: daemon entry point and real reading', () => {
     const tmux: PanelTmux = {
       listPanes: () => [PANE_A],
       capture: () => screen(ERR_1308),
-      sendContinue: (pane) => { sent.push(pane.id); return true; },
+      sendContinue: (pane) => { sent.push(pane.id); return 'delivered'; },
       providerRunning: () => true,
     };
     const stateDir = join(dir, 'daemon');
@@ -820,7 +892,7 @@ describe('panel quota wait: daemon entry point and real reading', () => {
     const tmux: PanelTmux = {
       listPanes: () => [PANE_A],
       capture: () => screen(ERR_1308),
-      sendContinue: () => true,
+      sendContinue: () => 'delivered',
       providerRunning: () => true,
     };
     const offDir = join(dir, 'off');
@@ -834,7 +906,7 @@ describe('panel quota wait: daemon entry point and real reading', () => {
     const tmux: PanelTmux = {
       listPanes: () => [PANE_A],
       capture: () => screen(ERR_1308),
-      sendContinue: (pane) => { sent.push(pane.id); return true; },
+      sendContinue: (pane) => { sent.push(pane.id); return 'delivered'; },
       providerRunning: () => true,
     };
     const env: PanelEnv = {
