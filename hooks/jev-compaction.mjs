@@ -2957,7 +2957,7 @@ const sha256Hex = async (text) =>
 
 // maskSecrets has patterns that are quadratic in the length of one long run of word characters that holds many KEY or TOKEN (30 000 characters of it take
 // about 0.6 s, 90 000 about 6 s), and a synchronous scan cannot be stopped by the compaction's deadline. The stages that move a text whole never cut it before
-// the check, so they check at most SCAN_MAX_CHARS of one text (`max`; a pasted tag: its own limit, which the owner may raise) and SCAN_BUDGET_CHARS of all the
+// the check, so they check at most SCAN_MAX_CHARS of one text (`max`; a pasted tag: its own limit, which a user may raise) and SCAN_BUDGET_CHARS of all the
 // text one stage checks in one compaction (`budget`: {left}). A text beyond either is `unchecked` and stays word for word, as one that holds a secret
 // ('secret') does; '' means clear.
 const SCAN_MAX_CHARS = 30000;
@@ -3231,12 +3231,12 @@ async function planReplies(cfg, messages, api, keepFrom, sessionId, stats, queue
   const users = ownerRows(messages, cfg.hookRowPrefixes);
   // A message the user typed during a tool turn is a user message too, though no row shows it: it stands after the row it is anchored to (queuedOf).
   const delivered = [...queued].filter(([, blocks]) => blocks.some((b) => deliveryOf(b) === 'user')).map(([row]) => row);
-  const owners = [...new Set([...users, ...delivered])].sort((a, b) => a - b);
+  const userRows = [...new Set([...users, ...delivered])].sort((a, b) => a - b);
   const turns = [];
   messages.forEach((m, i) => { if (m.role === 'user' && !(m.toolResults || []).length && typeof m.text === 'string' && m.text.trim()) turns.push(i); });
   const limit = Math.min(
     Math.min(keepFrom, Math.max(1, messages.length - KEEP_LAST)),
-    owners.length >= REPLY_KEEP_OWNERS ? owners[owners.length - REPLY_KEEP_OWNERS] : 0,
+    userRows.length >= REPLY_KEEP_OWNERS ? userRows[userRows.length - REPLY_KEEP_OWNERS] : 0,
     turns.length >= REPLY_KEEP_TURNS ? turns[turns.length - REPLY_KEEP_TURNS] : 0,
   );
   stats.limit_row = limit;

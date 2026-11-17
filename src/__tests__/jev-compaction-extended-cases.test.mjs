@@ -1073,7 +1073,7 @@ describe('the token accounting counts the text the stages moved, with or without
 describe('a shortened notification is still a notification at the next compaction', () => {
   const env = { OMC_JEV_COMPACT_NOTIFICATIONS: '1', OMC_JEV_COMPACT_TARGET_PERCENT: '20' };
 
-  it('it keeps the marker of the host, so it is no word of the owner and a candidate again, and the owner\'s task stays in the task sent to Jev', async () => {
+  it('it keeps the marker of the host, so it is no word of the user and a candidate again, and the first task of the user stays in the task sent to Jev', async () => {
     const important = steps(30, { important: Array.from({ length: 30 }, (_, i) => i + 1) });
     const p = Object.freeze({ role: 'user', text: noteOf('Important', `REPORT-TEXT IMPORTANT ${'w'.repeat(9000)}`), toolUses: [], handle: 'n5' });
     const w = [...important.slice(0, 3), p, ...important.slice(3)];
