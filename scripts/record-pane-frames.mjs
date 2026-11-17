@@ -20,7 +20,6 @@ import { setTimeout as sleep } from 'node:timers/promises';
 
 const REPO_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const CORPUS_ROOT = join(REPO_ROOT, 'src', 'team', '__tests__', 'fixtures', 'pane-frames');
-const MANIFEST_PATH = join(CORPUS_ROOT, 'manifest.json');
 const SOURCES = ['recorded', 'migrated', 'synthetic'];
 const HOOK_EVENTS = ['SessionStart', 'UserPromptSubmit', 'Stop'];
 
@@ -32,12 +31,14 @@ const USAGE = `Usage:
   node scripts/record-pane-frames.mjs extract --from <frames.txt|plain.txt> --state <label>
       [--frame <index|last>] [--provider <p>] [--version <v>] [--cols <n>] [--rows <n>]
       [--args '<json array>'] [--source recorded|migrated|synthetic] [--origin <text>] [--note <text>]
+      [--corpus <dir>]
 
 record defaults its launch args to model-contract.ts buildLaunchArgs(), so the
 frames match a real worker. Those args include each provider's approval bypass
 flag; pass --args to launch without it. A wait:<regex> step is tested against
 the frame with every whitespace run collapsed to one space. --history 80 adds
-the scrollback lines the team runtime's own capture (-S -80) includes.`;
+the scrollback lines the team runtime's own capture (-S -80) includes.
+--corpus files the frame under another directory than the checked-in corpus.`;
 
 function fail(message) {
   process.stderr.write(`record-pane-frames: ${message}\n\n${USAGE}\n`);
@@ -211,15 +212,16 @@ async function record(values) {
   process.stdout.write(`${JSON.stringify({ out, frames: frameCount, stop: stopReason, provider, version, launch_args: launchArgs, cwd })}\n`);
 }
 
+// Only the header capture() writes counts, so a pane line such as
+// "=== test results ===" stays inside its frame.
+const FRAME_HEADER = /^=== \d+\.\d{3}\n/m;
+
 function readFrames(path) {
   const raw = readFileSync(path, 'utf8');
-  if (!raw.startsWith('=== ')) return [raw];
-  return raw.split(/^=== [^\n]*\n/m).slice(1);
+  if (raw.search(FRAME_HEADER) !== 0) return [raw];
+  return raw.split(FRAME_HEADER).slice(1);
 }
 
-function readManifest() {
-  return existsSync(MANIFEST_PATH) ? JSON.parse(readFileSync(MANIFEST_PATH, 'utf8')) : [];
-}
 
 function extract(values) {
   const from = resolve(values.from ?? fail('--from is required'));
@@ -237,7 +239,9 @@ function extract(values) {
   const provider = values.provider ?? meta.provider ?? fail('--provider is required without meta.json');
   const version = values.version ?? meta.version ?? fail('--version is required without meta.json');
   const file = `${provider}/${version}/${state}.txt`;
-  const target = join(CORPUS_ROOT, file);
+  const corpusRoot = values.corpus === undefined ? CORPUS_ROOT : resolve(values.corpus);
+  const manifestPath = join(corpusRoot, 'manifest.json');
+  const target = join(corpusRoot, file);
   mkdirSync(dirname(target), { recursive: true });
   writeFileSync(target, frame);
 
@@ -253,10 +257,11 @@ function extract(values) {
     origin: values.origin ?? `${relative(REPO_ROOT, from)}#${index}`,
     ...(values.note ? { note: values.note } : {}),
   };
-  const manifest = readManifest().filter(existing => existing.file !== file);
+  const manifest = (existsSync(manifestPath) ? JSON.parse(readFileSync(manifestPath, 'utf8')) : [])
+    .filter(existing => existing.file !== file);
   manifest.push(entry);
   manifest.sort((a, b) => a.file.localeCompare(b.file));
-  writeFileSync(MANIFEST_PATH, `${JSON.stringify(manifest, null, 2)}\n`);
+  writeFileSync(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`);
   process.stdout.write(`${file}\n`);
 }
 
@@ -285,6 +290,7 @@ const { values } = parseArgs({
     source: { type: 'string' },
     origin: { type: 'string' },
     note: { type: 'string' },
+    corpus: { type: 'string' },
   },
 });
 
