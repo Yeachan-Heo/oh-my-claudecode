@@ -679,7 +679,8 @@ export async function setJevHookContext(data) {
   hookLogDir = undefined;
   lastRequestIds.clear();
   const logContext = isJevLogContextEnabled(process.env);
-  if ((!logContext && !isJevAppliedLogEnabled(process.env)) || !mayRequestJev(process.env)) return;
+  const appliedLog = isJevAppliedLogEnabled(process.env);
+  // Capture context if log context is needed, regardless of whether Jev can be requested
   if (logContext) {
     const context = jevLogContextOf(data);
     delete context.request_id;
@@ -692,10 +693,13 @@ export async function setJevHookContext(data) {
     }
     hookLogContext = context;
   }
-  try {
-    hookLogDir = await resolveJevLogDir(process.env);
-  } catch {
-    // Without a log directory the hook writes no lines itself.
+  // Resolve log directory if log context or applied logging is needed
+  if (logContext || appliedLog) {
+    try {
+      hookLogDir = await resolveJevLogDir(process.env);
+    } catch {
+      // Without a log directory the hook writes no lines itself.
+    }
   }
 }
 

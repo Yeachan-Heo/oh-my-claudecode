@@ -1061,7 +1061,7 @@ const POINTER_MAX_PROMPT_CHARS = 600;
 const POINTER_MAX_EXCERPT_CHARS = 8000;
 const POINTER_MAX_FILE_BYTES = 1024 * 1024;
 const POINTER_BINARY_SCAN_BYTES = 8192;
-const POINTER_PATH_RE = /(?<![\w.\-/:~])\/[\w.\-/\p{L}]+\.md(?![\w])/u;
+const POINTER_PATH_RE = /(?<![\w.\-/:~])\/[\w.\-/\p{L}]+\.md(?![.\w])/u;
 function isPointerExpandEnabled(env = process.env) {
   return String(env.OMC_JEV_POINTER_EXPAND ?? '').trim() === '1';
 }
@@ -1083,6 +1083,14 @@ function pointerExpandRoots(env = process.env) {
 function pointerSecretDirs(env = process.env) {
   return pointerDirList(env.OMC_JEV_POINTER_EXPAND_SECRET_DIRS);
 }
+// Check if a canonical path is contained within a directory (handles filesystem roots safely).
+function isPathInDirectory(canonicalPath, directory) {
+  if (canonicalPath === directory) return true;
+  // Handle root directory case: '/' + '/' = '//', but '/etc/passwd' starts with '/', not '//'
+  if (directory === sep) return canonicalPath.startsWith(sep);
+  return canonicalPath.startsWith(directory + sep);
+}
+
 // `pointer` is the telemetry object of the row ({ expanded, unexpanded }); undefined when the
 // switch is off, in which case the prompt passes through untouched.
 function expandTaskPointer(prompt, pointer) {
@@ -1101,12 +1109,12 @@ function expandTaskPointer(prompt, pointer) {
     }
     // Canonicalize before the exclusions, so a symlink or a ".." segment cannot dodge them.
     const real = realpathSync(named);
-    if (pointerSecretPath(real) || /^settings.*\.json$/i.test(basename(real)) || pointerSecretDirs().some((dir) => real === dir || real.startsWith(dir + sep))) {
+    if (pointerSecretPath(real) || /^settings.*\.json$/i.test(basename(real)) || pointerSecretDirs().some((dir) => isPathInDirectory(real, dir))) {
       pointer.unexpanded = 'secret-path';
       return prompt;
     }
     const roots = pointerExpandRoots();
-    if (!roots.some((root) => real === root || real.startsWith(root + sep))) {
+    if (!roots.some((root) => isPathInDirectory(real, root))) {
       pointer.unexpanded = 'outside-allowed-dirs';
       return prompt;
     }
@@ -1320,7 +1328,7 @@ function recordModelRoutingShadow(toolName, toolInput, updatedToolInput, permiss
           const to = capEffort(marker.effort, cap);
           appliedEffort = { from: baseEffort ?? null, to, source: 'marker', ...(to !== marker.effort ? { capped: true, requested: marker.effort } : {}) };
         } else if (jevApplied.effort) appliedEffort = { ...jevApplied.effort, source: 'jev' };
-        else if (typeof baseEffort === 'string') appliedEffort = { from: baseEffort, to: capEffort(baseEffort, cap), source: 'explicit' };
+        else if (typeof baseEffort === 'string') appliedEffort = { from: baseEffort, to: baseEffort, source: 'explicit' };
         if (appliedEffort && teamMember) appliedEffort.delivered = 'unknown-team-member';
         pendingJevRouting = {
           subagent_type: originalInput.subagent_type || null,
