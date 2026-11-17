@@ -11,7 +11,7 @@
  * For checkout .omc/ isolation, see setupFiles which runs per-test-file.
  */
 
-import { mkdtempSync, rmSync } from 'fs';
+import { mkdtempSync, rmSync, realpathSync } from 'fs';
 import { tmpdir } from 'os';
 import { join } from 'path';
 
@@ -25,7 +25,7 @@ const tempDirs: string[] = [];
 export async function setup() {
   // Create temp HOME directory to prevent pollution of ~/.omc
   // (getOmcRoot() falls back to homedir()/.omc when in a non-git directory)
-  const tempHome = mkdtempSync(join(tmpdir(), 'vitest-home-'));
+  const tempHome = realpathSync.native(mkdtempSync(join(tmpdir(), 'vitest-home-')));
   tempDirs.push(tempHome);
   process.env.HOME = tempHome;
   process.env.USERPROFILE = tempHome;
