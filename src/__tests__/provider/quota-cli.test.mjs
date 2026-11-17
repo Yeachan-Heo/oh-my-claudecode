@@ -3,7 +3,7 @@
 // and the gate on HTTP 200 with success false. Loopback servers run in this process; the CLI runs as a child.
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { spawn } from 'node:child_process';
-import { existsSync, mkdirSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { createServer } from 'node:http';
 import { createRequire } from 'node:module';
 import { join } from 'node:path';
@@ -107,6 +107,34 @@ describe.skipIf(process.platform === 'win32')('provider quota reads', () => {
     }
   }, 60_000);
 
+  it('(16d) quota.cacheSeconds of the selected profile is the lifetime of the response cache: 60 (default) serves the second read from the cache, 0 reads the endpoint every time, a larger value keeps a response that the default would have dropped', async () => {
+    const srv = await serve((req, res) => answer(res, 200, { success: true, data: { level: 'lite', limits: [limit5h(12), limitWeek(12)] } }));
+    try {
+      for (const [name, seconds, secondFromCache] of [['q16d-default', undefined, true], ['q16d-zero', 0, false]]) {
+        const p = profileIn(name, seconds === undefined ? {} : { quota: { adapter: 'monitor-limits', url: QUOTA_URL, cacheSeconds: seconds } });
+        const env = { ...p.env, OMC_PROVIDER_QUOTA_URL: srv.origin };
+        const profile = loadProfile(env).profile;
+        const before = srv.hits.length;
+        expect((await readQuota(profile, env, PLACEHOLDER_KEY)).fromCache).toBeFalsy();
+        expect(Boolean((await readQuota(profile, env, PLACEHOLDER_KEY)).fromCache), name).toBe(secondFromCache);
+        expect(srv.hits.length - before, name).toBe(secondFromCache ? 1 : 2);
+      }
+      // a cache entry older than the default lifetime stays valid under a longer one and is dropped under the default
+      const p = profileIn('q16d-long', { quota: { adapter: 'monitor-limits', url: QUOTA_URL, cacheSeconds: 3600 } });
+      const env = { ...p.env, OMC_PROVIDER_QUOTA_URL: srv.origin };
+      const long = loadProfile(env).profile;
+      expect((await readQuota(long, env, PLACEHOLDER_KEY)).fromCache).toBeFalsy();
+      const cacheFile = join(p.dir, 'state', 'quota-cache.json');
+      const cache = JSON.parse(readFileSync(cacheFile, 'utf8'));
+      writeFileSync(cacheFile, JSON.stringify({ ...cache, ts: Date.now() - 600_000 }));
+      expect((await readQuota(long, env, PLACEHOLDER_KEY)).fromCache, 'a 10 minute old entry under cacheSeconds 3600').toBe(true);
+      const short = loadProfile({ ...env, OMC_PROVIDER_PROFILE: 'acme' }).profile;
+      short.quota.cacheSeconds = 60;
+      expect(Boolean((await readQuota(short, env, PLACEHOLDER_KEY)).fromCache), 'the same entry under cacheSeconds 60').toBe(false);
+    } finally {
+      await srv.close();
+    }
+  }, 60_000);
   it('(16c) HTTP 200 with success false is a read error: fail-open start allowed, no authentication refusal, no breaker written', async () => {
     const srv = await serve((req, res) => answer(res, 200, { success: false, msg: '404 NOT_FOUND' }));
     try {

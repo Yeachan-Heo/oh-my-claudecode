@@ -136,6 +136,19 @@ describe.skipIf(process.platform === 'win32')('provider team wrapper', () => {
     expect(names.filter((n) => n === 'OMC_PROVIDER_PROFILE').length).toBe(1);
   });
 
+  it('an env key source (apiKey.env) is forwarded to the worker panes by name, so the provider role can read the key; a file key source adds no name', () => {
+    const f = fixture({ apiKey: { env: 'ACME_API_KEY' } });
+    const r = f.run({ ACME_API_KEY: 'not-printed-key-0123456789', OMC_TEAM_WORKER_ENV_PASSTHROUGH: 'OMC_OTHER' });
+    expect(r.status, r.stderr).toBe(0);
+    const names = variable(r, 'OMC_TEAM_WORKER_ENV_PASSTHROUGH').split('=')[1].split(',');
+    expect(names).toContain('ACME_API_KEY');
+    expect(names).toContain('OMC_OTHER');
+    expect(r.stdout + r.stderr).not.toContain('not-printed-key-0123456789');
+    const file = fixture();
+    const g = file.run({ ACME_API_KEY: 'unrelated' });
+    expect(variable(g, 'OMC_TEAM_WORKER_ENV_PASSTHROUGH').split('=')[1].split(',')).not.toContain('ACME_API_KEY');
+  });
+
   it('OMC_TEAM_TASK_LEASE_MS is not set by the wrapper', () => {
     expect(variable(fixture().run(), 'OMC_TEAM_TASK_LEASE_MS')).toBeUndefined();
   });

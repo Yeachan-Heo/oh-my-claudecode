@@ -110,9 +110,10 @@ if (!direct && !env.OMC_TEAM_WORKER) {
     try { loadedProfile = loadProfile(env); break; } catch (e) {
       if (!(e instanceof ProfileError)) throw e;
       if (e.code === 'missing_profile') {
-        // Reject invalid profile selections: if OMC_PROVIDER_PROFILE is set but the profile is not found,
-        // fail with a configuration error instead of launching as Claude (which would bypass provider credential/quota checks).
-        if (env.OMC_PROVIDER_PROFILE) fail(2, `provider profile selection error: ${e.message}`);
+        // Plain Claude only for an installation that is not configured at all: no profiles file and no profile named in OMC_PROVIDER_PROFILE.
+        // Every other missing_profile is a selection error (a profile named by OMC_PROVIDER_PROFILE or defaultProfile that is not defined, or
+        // several profiles and no choice): launching Claude would bypass the credential, quota and session checks of the provider that was chosen.
+        if (!e.unconfigured || String(env.OMC_PROVIDER_PROFILE || '').trim()) fail(e.exit, e.message);
         loadedProfile = null;
         break;
       }
@@ -243,7 +244,16 @@ if (!direct && !env.OMC_TEAM_WORKER) {
     strip(finalArgs, '--model'); finalArgs.push('--model', profile.worker.model);
     strip(finalArgs, '--effort'); finalArgs.push('--effort', profile.worker.effort);
   }
-  const childEnv = onProvider ? executorEnv(env, { explicit: { ANTHROPIC_AUTH_TOKEN: token }, profile }) : (isForeignProvider(env) ? stripProviderEnv(env) : env);
+  // The variable of an `env` key source (apiKey.env) reaches every pane, because provider-team forwards it so that a provider role can read the key; the
+  // roles that stay on Claude must not keep it (the key stays away from them). A provider role gets the key only as ANTHROPIC_AUTH_TOKEN, from the allow-list env.
+  const keyVariable = profile.apiKey && profile.apiKey.env;
+  const withoutKeyVariable = (e) => {
+    if (!keyVariable || !(keyVariable in e)) return e;
+    const copy = { ...e };
+    delete copy[keyVariable];
+    return copy;
+  };
+  const childEnv = onProvider ? executorEnv(env, { explicit: { ANTHROPIC_AUTH_TOKEN: token }, profile }) : withoutKeyVariable(isForeignProvider(env) ? stripProviderEnv(env) : env);
   const baseRow = { role: `worker-${role}`, name: env.OMC_TEAM_WORKER, team, provider, session_id: sessionId, role_source: roleSource };
   record({ ...baseRow, started_with: { model: onProvider ? profile.worker.model : null, effort: onProvider ? profile.worker.effort : null }, ...(!onProvider && childEnv !== env ? { provider_env_stripped: true } : {}) });
   // Working directory of the worker: OMC_TEAM_WORKER_CWD (set for teams with a worktree), otherwise the process cwd (a team without worktrees).

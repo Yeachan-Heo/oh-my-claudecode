@@ -12,6 +12,15 @@ import { makeTmp, writeProfile } from './_helpers.mjs';
 const require = createRequire(import.meta.url);
 const profile = require('../../../scripts/provider/lib/profile.cjs');
 
+function errorOf(fn) {
+  try {
+    fn();
+    return null;
+  } catch (error) {
+    return error;
+  }
+}
+
 function codeOf(fn) {
   try {
     fn();
@@ -49,9 +58,12 @@ describe.skipIf(process.platform === 'win32')('provider profile', () => {
     doc.profiles.other = { ...doc.profiles.acme, baseUrl: 'https://other.acme.example/anthropic' };
     doc.defaultProfile = undefined;
     writeFileSync(file, JSON.stringify(doc));
+    // with a profiles file the errors are selection errors, not an unconfigured installation
     expect(codeOf(() => profile.loadProfile(env))).toMatchObject({ code: 'missing_profile', exit: 2 });
+    expect(errorOf(() => profile.loadProfile(env)).unconfigured).toBeUndefined();
     expect(profile.loadProfile({ ...env, OMC_PROVIDER_PROFILE: 'other' }).name).toBe('other');
     expect(codeOf(() => profile.loadProfile({ ...env, OMC_PROVIDER_PROFILE: 'nope' }))).toMatchObject({ code: 'missing_profile', exit: 2 });
+    expect(errorOf(() => profile.loadProfile({ ...env, OMC_PROVIDER_PROFILE: 'nope' })).unconfigured).toBeUndefined();
     doc.defaultProfile = 'acme';
     writeFileSync(file, JSON.stringify(doc));
     expect(profile.loadProfile(env).name).toBe('acme');
@@ -233,6 +245,7 @@ describe.skipIf(process.platform === 'win32')('provider profile', () => {
     mkdirSync(home, { recursive: true });
     const env = { PATH: process.env.PATH, HOME: home };
     expect(codeOf(() => profile.loadProfile(env))).toMatchObject({ code: 'missing_profile', exit: 2 });
+    expect(errorOf(() => profile.loadProfile(env)).unconfigured).toBe(true);
     expect(existsSync(join(home, '.config'))).toBe(false);
     expect(existsSync(join(home, '.omc'))).toBe(false);
   });

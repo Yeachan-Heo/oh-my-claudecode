@@ -244,6 +244,35 @@ describe.skipIf(process.platform === 'win32')('provider worker wrapper', () => {
     expect(f.rows().at(-1).provider).toBe('claude');
   });
 
+  it('(9c) profile selection of a worker: passthrough to plain Claude only when nothing is configured (no profiles file, no OMC_PROVIDER_PROFILE); a profile named by OMC_PROVIDER_PROFILE or defaultProfile that is not defined, several profiles and no choice, or a named profile without a file: exit 2, claude not started, no key read', () => {
+    const f = fixture();
+    const missingFile = join(f.dir, 'no-such-providers.jsonc');
+    // genuinely unconfigured: plain Claude, arguments unchanged
+    const plain = f.run({ ...TEAM, OMC_PROVIDER_PROFILES_FILE: missingFile }, ['--version']);
+    expect(plain.status, plain.stderr).toBe(0);
+    expect(plain.argv).toEqual(['--version']);
+    const refused = (r, pattern) => {
+      expect(r.status, `${r.stderr}`).toBe(2);
+      expect(r.called, 'claude must not start').toBe(false);
+      expect(r.stderr).toMatch(pattern);
+    };
+    // OMC_PROVIDER_PROFILE misspelled, with a valid profiles file
+    refused(f.run({ ...TEAM, OMC_PROVIDER_PROFILE: 'typo' }), /provider profile "typo" is not defined/);
+    // OMC_PROVIDER_PROFILE names a profile but there is no profiles file
+    refused(f.run({ ...TEAM, OMC_PROVIDER_PROFILES_FILE: missingFile, OMC_PROVIDER_PROFILE: 'acme' }), /no provider profiles file/);
+    // defaultProfile renamed or removed
+    const doc = JSON.parse(readFileSync(f.file, 'utf8'));
+    writeFileSync(f.file, json({ ...doc, defaultProfile: 'gone' }));
+    refused(f.run({ ...TEAM }), /provider profile "gone" is not defined/);
+    // several profiles and no choice at all
+    writeFileSync(f.file, json({ profiles: { ...doc.profiles, second: doc.profiles.acme } }));
+    refused(f.run({ ...TEAM }), /no provider profile selected/);
+    // control: the same file with a choice starts the provider worker
+    const chosen = f.run({ ...TEAM, OMC_PROVIDER_PROFILE: 'second' });
+    expect(chosen.status, chosen.stderr).toBe(0);
+    expect(chosen.argv).toContain('--settings');
+  });
+
   it('(9f-model) a provider role always gets the fixed model and effort of the profile; the environment overrides them; a value that is not allowed gives exit 2 with an aborted row and no start', () => {
     const f = fixture();
     const arg = (r, flag) => r.argv[r.argv.indexOf(flag) + 1];
@@ -294,6 +323,24 @@ describe.skipIf(process.platform === 'win32')('provider worker wrapper', () => {
     expect(Object.keys(bad).filter((name) => r.env.includes(name))).toEqual([]);
     expect(Object.keys(terminal).every((name) => r.env.includes(name))).toBe(true);
     expect(r.env).toEqual(['ANTHROPIC_AUTH_TOKEN', 'COLORTERM', 'HOME', 'LOGNAME', 'OMC_TEAM_NAME', 'OMC_TEAM_ROLE', 'OMC_TEAM_WORKER', 'PATH', 'SHELL', 'TERM', 'TMUX', 'TMUX_PANE']);
+  });
+
+  it('(23c) an env key source (apiKey.env): a provider role reads the key from the variable and passes it only as ANTHROPIC_AUTH_TOKEN (the variable itself is not in its child env); a Claude role does not keep the variable either; without that profile field a Claude role keeps its environment as before', () => {
+    const KEY = 'ENV-SOURCE-KEY-0123456789';
+    const f = fixture({ apiKey: { env: 'ACME_API_KEY' } });
+    const provider = f.run({ ...TEAM, ACME_API_KEY: KEY });
+    expect(provider.status, provider.stderr).toBe(0);
+    expect(provider.auth).toBe(KEY);
+    expect(provider.env).not.toContain('ACME_API_KEY');
+    const reviewer = f.run({ ...TEAM, OMC_TEAM_ROLE: 'code-reviewer', ACME_API_KEY: KEY, ACME_OTHER: 'kept' });
+    expect(reviewer.status, reviewer.stderr).toBe(0);
+    expect(reviewer.env).not.toContain('ACME_API_KEY');
+    expect(reviewer.env).toContain('ACME_OTHER');
+    expect(f.rows().at(-1)).toMatchObject({ provider: 'claude', provider_env_stripped: true });
+    const other = fixture();
+    const plain = other.run({ ...TEAM, OMC_TEAM_ROLE: 'code-reviewer', ACME_API_KEY: 'unrelated' });
+    expect(plain.env).toContain('ACME_API_KEY');
+    expect(other.rows().at(-1).provider_env_stripped).toBeUndefined();
   });
 
   it('(23b) the quiet variables DISABLE_AUTOUPDATER and DISABLE_ERROR_REPORTING of the parent reach the child env of a provider role and are in the --settings file', () => {

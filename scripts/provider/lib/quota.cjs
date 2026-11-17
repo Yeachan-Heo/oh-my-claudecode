@@ -3,12 +3,10 @@
 // Every function takes a profile returned by loadProfile (defaults already applied).
 const { existsSync, mkdirSync, readFileSync, renameSync, unlinkSync, writeFileSync } = require('node:fs');
 const { join } = require('node:path');
-const { LOOPBACK_HOSTS, PROFILE_DEFAULTS, stateDirOf, statePath } = require('./profile.cjs');
+const { LOOPBACK_HOSTS, stateDirOf, statePath } = require('./profile.cjs');
 const { mask } = require('./redact.cjs');
 const { EXIT, GATE_REASONS, QUOTA_LEVELS } = require('./vocab.cjs');
 
-// Default cache lifetime of a successful quota response (profile quota.cacheSeconds).
-const QUOTA_CACHE_MS = PROFILE_DEFAULTS.quota.cacheSeconds * 1000;
 const REQUEST_TIMEOUT_MS = 10_000;
 
 const readJson = (path) => {
@@ -78,9 +76,8 @@ async function readQuota(profile, env = process.env, key, { fresh = false } = {}
   const cachePath = statePath(profile, env, 'quota-cache.json');
   if (!fresh) {
     const cache = readJson(cachePath);
-    // Use profile's quota cache lifetime instead of the constant default
-    const cacheLifetimeMs = (profile.quota?.cacheSeconds ?? PROFILE_DEFAULTS.quota.cacheSeconds) * 1000;
-    if (cache && typeof cache.ts === 'number' && Date.now() - cache.ts < cacheLifetimeMs && cache.response) {
+    // Cache lifetime of a successful response: quota.cacheSeconds of the selected profile (0 turns the cache off).
+    if (cache && typeof cache.ts === 'number' && Date.now() - cache.ts < profile.quota.cacheSeconds * 1000 && cache.response) {
       return { data: cache.response, fromCache: true };
     }
   }
@@ -211,7 +208,6 @@ async function gate(profile, env = process.env, key) {
 }
 
 module.exports = {
-  QUOTA_CACHE_MS,
   thresholds,
   levelOf,
   quotaLevel,

@@ -80,6 +80,44 @@ describe.skipIf(process.platform === 'win32')('provider hook need', () => {
     expect(denial(hookNeed(sessionInput, { OMC_PROVIDER_MAX_TOOL_CALLS: '1', OMC_PROVIDER_STATE_DIR: stateDirect })).permissionDecisionReason.includes('Summarize'), 'the second direct denial has no request for a summary').toBe(true);
   });
 
+  it('(need-5) lifecycle commands pass after the tool budget is exhausted and are not counted: a single `omc team api <operation>` command (also the plugin bridge form, with any characters inside the quoted JSON input); text that merely occurs in a longer command line, other operations, shell control operators, redirection and command substitution outside the command are denied like any call', () => {
+    const state = join(tmp.dir, 'state-lifecycle');
+    const session = '01890c5a-6c81-7d20-8000-000000000005';
+    const bash = (command) => ({ tool_name: 'Bash', tool_input: { command }, session_id: session });
+    const env = { OMC_PROVIDER_MAX_TOOL_CALLS: '1', OMC_PROVIDER_STATE_DIR: state };
+    expect(hookNeed(bash('ls'), env).stdout).toBe('');
+    expect(denial(hookNeed(bash('ls'), env)), 'the budget is exhausted').not.toBeNull();
+    const counter = () => JSON.parse(readFileSync(join(state, 'tasks', `session-${session}`, 'calls.json'), 'utf8')).n;
+    const before = counter();
+    const input = '--input "{\\"team_name\\":\\"t\\",\\"result\\":\\"Summary: a; b && c | d > e\\"}" --json';
+    const allowed = [
+      `omc team api transition-task-status ${input}`,
+      `  omc team api claim-task ${input}`,
+      `./bin/omc team api read-task ${input}`,
+      `node "$CLAUDE_PLUGIN_ROOT"/bridge/cli.cjs team api send-message ${input}`,
+      "omc team api release-task-claim --input '{\"a\":\"x;y\"}' --json",
+      'omc team api renew-task-claim',
+    ];
+    for (const command of allowed) expect(hookNeed(bash(command), env).stdout, command).toBe('');
+    expect(counter(), 'lifecycle commands are not counted').toBe(before);
+    const denied = [
+      'echo team api read-task',
+      'ls; omc team api claim-task --input x',
+      'omc team api claim-task --input x && cat /etc/hosts',
+      'omc team api claim-task --input x | tee out',
+      'omc team api claim-task --input x > out',
+      'omc team api claim-task --input x\nls',
+      'omc team api claim-task --input "$(cat secret)"',
+      'omc team api claim-task --input `cat secret`',
+      'omc team api mailbox-list --input x --json',
+      'omc team api claim-taskx',
+      'xomc team api claim-task',
+      'git log --grep "omc team api read-task"',
+    ];
+    for (const command of denied) expect(denial(hookNeed(bash(command), env)), command).not.toBeNull();
+    expect(denial(hookNeed({ tool_name: 'Read', tool_input: { command: 'omc team api read-task' }, session_id: session }, env)), 'only Bash calls are lifecycle commands').not.toBeNull();
+  });
+
   it('addNeed appends the AskUserQuestion hook always and the counter hook only when asked, keeping existing PreToolUse entries; a damaged input is denied fail-closed', () => {
     const settings = { hooks: { PreToolUse: [{ matcher: 'Bash', hooks: [] }] } };
     need.addNeed(settings, { script: HOOK, counter: false });

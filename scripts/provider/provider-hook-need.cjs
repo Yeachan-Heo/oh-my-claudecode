@@ -65,13 +65,21 @@ function count(key) {
   }
 }
 
-// Lifecycle commands that must work even when the tool budget is exhausted: team api operations for task reporting and status transitions.
+// Lifecycle commands that must work even when the tool budget is exhausted: the `team api` operations that report and hand back a task. Only a
+// single simple command counts (`omc team api <operation> ...`, or the plugin bridge form `node "$CLAUDE_PLUGIN_ROOT"/bridge/cli.cjs team api
+// <operation> ...`, as the worker bootstrap prints them): the operation must be the command itself, not text that merely occurs in a longer command line,
+// so the budget cannot be bypassed by adding such text. Quoted text (the JSON input) may hold any character; outside quotes no shell control operator,
+// redirection, command substitution or newline is allowed.
+const LIFECYCLE_OPERATIONS = 'claim-task|transition-task-status|release-task-claim|renew-task-claim|send-message|read-task';
+const LIFECYCLE_COMMAND = new RegExp(`^\\s*(?:(?:[\\w.~/-]*/)?omc|node\\s+(?:"[^"]*"|[^\\s"]*)/bridge/cli\\.cjs)\\s+team\\s+api\\s+(?:${LIFECYCLE_OPERATIONS})(?=\\s|$)`);
 function isLifecycleCommand(input) {
   if (!input || typeof input !== 'object') return false;
   if (input.tool_name !== 'Bash') return false;
   const cmd = String(input.tool_input?.command ?? '');
-  // Allow team api commands: claim-task, transition-task-status, release-task-claim, renew-task-claim, send-message, read-task
-  return /\bteam\s+api\s+(claim-task|transition-task-status|release-task-claim|renew-task-claim|send-message|read-task)\b/.test(cmd);
+  if (!LIFECYCLE_COMMAND.test(cmd)) return false;
+  if (/`|\$\(/.test(cmd)) return false; // command substitution runs inside double quotes too
+  const outsideQuotes = cmd.replace(/"(?:[^"\\]|\\.)*"|'[^']*'/g, '""');
+  return !/[;&|<>\n]/.test(outsideQuotes);
 }
 
 // Handles the hook input (text from stdin or a parsed object in tests); null = let the call through (no response).

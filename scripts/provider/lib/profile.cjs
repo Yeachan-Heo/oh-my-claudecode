@@ -409,7 +409,9 @@ function loadProfile(env = process.env, { name, file, onWarning } = {}) {
   const path = file ?? profilesFilePath(env);
   const doc = readDocument(path);
   if (!doc) {
-    throw new ProfileError('missing_profile', 'no provider profiles file; create providers.jsonc or set OMC_PROVIDER_PROFILES_FILE');
+    // `unconfigured`: nothing is set up at all (the one case where a caller may fall back to plain Claude). The two errors below mean that a
+    // profiles file exists and no usable profile was selected.
+    throw Object.assign(new ProfileError('missing_profile', 'no provider profiles file; create providers.jsonc or set OMC_PROVIDER_PROFILES_FILE'), { unconfigured: true });
   }
   const names = Object.keys(doc.profiles);
   const chosen = nonEmpty(name) ?? nonEmpty(env.OMC_PROVIDER_PROFILE) ?? nonEmpty(doc.defaultProfile) ?? (names.length === 1 ? names[0] : null);
