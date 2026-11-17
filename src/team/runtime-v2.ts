@@ -116,7 +116,8 @@ import {
   workerPaneBelongsToOwnedProviderTarget,
   observeTmuxServerIdentity,
   killOwnedWorkerPane,
-  killWorkerPaneProcessTree,
+  capturePaneProcessTree,
+  terminatePaneProcessTree,
   verifyTeamTargetOwnership,
   observeTeamSessionTargetPresence,
   redactBoundedDiagnostic,
@@ -9263,6 +9264,16 @@ export async function shutdownTeamV2(
       }
       paneOwnership = ownership.ownership;
     }
+    // Opt-in tree kill (OMC_TEAM_KILL_PANE_TREE): the pane's process tree is only read here, before the launch fence is taken.
+    // Terminating the provider inside the fence can leave a descendant that left its process group outside the pane's tree, so the
+    // read comes first; nothing is signalled before the fence below is held (see the cleanup callback).
+    const paneTree =
+      paneOwnership?.tmuxServerIdentity && worker.pane_id.startsWith("%")
+        ? await capturePaneProcessTree(
+            paneOwnership.tmuxServerIdentity,
+            paneOwnership.paneId,
+          )
+        : null;
     const attempt = await loadWorkerLaunchAttempt({
       cwd,
       teamName: sanitized,
@@ -9280,12 +9291,7 @@ export async function shutdownTeamV2(
         "team_shutdown",
         async () => {
           try {
-            if (paneOwnership && worker.pane_id && worker.pane_id.startsWith("%")) {
-              await killWorkerPaneProcessTree(
-                paneOwnership.tmuxServerIdentity!,
-                paneOwnership.paneId,
-              );
-            }
+            await terminatePaneProcessTree(paneTree);
             let lastLiveness: WorkerPaneLiveness = paneOwnership
               ? await getOwnedWorkerLiveness(paneOwnership)
               : initialPaneLiveness;

@@ -17,7 +17,13 @@ vi.mock("../../cli/tmux-utils.js", async (importOriginal) => ({
   tmuxCmdAsync: tmuxUtilsMocks.tmuxCmdAsync,
 }));
 
-import { killOwnedWorkerPane, killWorkerPaneProcessTree, type WorkerPaneOwnership } from "../tmux-session.js";
+import {
+  capturePaneProcessTree,
+  killOwnedWorkerPane,
+  killWorkerPaneProcessTree,
+  terminatePaneProcessTree,
+  type WorkerPaneOwnership,
+} from "../tmux-session.js";
 import { currentStrictProcessStartIdentity } from "../team-owner-epoch.js";
 
 const execFileAsync = promisify(execFile);
@@ -309,10 +315,11 @@ describe("killWorkerPaneProcessTree SIGKILL identity check (injected dependencie
     expect(sigkills(calls)).toEqual([]);
   });
 
-  it("skips a PID whose start identity could not be read when the tree was read", async () => {
+  it("signals nothing for a PID whose start identity could not be read when the tree was read", async () => {
     process.env.OMC_TEAM_KILL_PANE_TREE = "1";
     mockPanePid(FAKE_PANE_PID);
     const calls: Array<[number, NodeJS.Signals | 0]> = [];
+    const waits: number[] = [];
 
     await killWorkerPaneProcessTree(IDENTITY, "%7", {
       readProcessRecords: async () => new Map([[CHILD, { ppid: FAKE_PANE_PID }]]),
@@ -320,12 +327,138 @@ describe("killWorkerPaneProcessTree SIGKILL identity check (injected dependencie
       killProcess: (pid, signal) => {
         calls.push([pid, signal]);
       },
-      sleep: async () => undefined,
+      sleep: async (ms) => {
+        waits.push(ms);
+      },
     });
 
-    expect(calls.filter(([, signal]) => signal === "SIGTERM")).toEqual([[CHILD, "SIGTERM"]]);
-    expect(calls.some(([, signal]) => signal === "SIGKILL")).toBe(false);
+    expect(calls).toEqual([]);
+    expect(waits).toEqual([]);
   });
+});
+
+describe("pane process tree captured first and terminated later (injected dependencies, no real signals)", () => {
+  const FAKE_PANE_PID = 4_000_000;
+  const CHILD = 4_000_001;
+  const GRANDCHILD = 4_000_002;
+  const records = async () =>
+    new Map([
+      [CHILD, { ppid: FAKE_PANE_PID }],
+      [GRANDCHILD, { ppid: CHILD }],
+    ]);
+
+  it("without the variable the capture is null and reads neither tmux nor the process table", async () => {
+    const readProcessRecords = vi.fn(records);
+    mockPanePid(FAKE_PANE_PID);
+
+    await expect(capturePaneProcessTree(IDENTITY, "%7", { readProcessRecords })).resolves.toBeNull();
+
+    expect(tmuxUtilsMocks.tmuxCmdAsync).not.toHaveBeenCalled();
+    expect(readProcessRecords).not.toHaveBeenCalled();
+  });
+
+  it("the capture records the descendants breadth first with their start identities and signals nothing", async () => {
+    process.env.OMC_TEAM_KILL_PANE_TREE = "1";
+    mockPanePid(FAKE_PANE_PID);
+    const killProcess = vi.fn();
+
+    const tree = await capturePaneProcessTree(IDENTITY, "%7", {
+      readProcessRecords: records,
+      processIdentity: (pid) => `start-${pid}`,
+      killProcess,
+    });
+
+    expect(tree).toEqual({
+      panePid: FAKE_PANE_PID,
+      pids: [CHILD, GRANDCHILD],
+      startIdentities: new Map([
+        [CHILD, `start-${CHILD}`],
+        [GRANDCHILD, `start-${GRANDCHILD}`],
+      ]),
+    });
+    expect(killProcess).not.toHaveBeenCalled();
+  });
+
+  it("terminating a null capture does nothing", async () => {
+    const killProcess = vi.fn();
+    const sleep = vi.fn(async () => undefined);
+
+    await terminatePaneProcessTree(null, { killProcess, sleep });
+
+    expect(killProcess).not.toHaveBeenCalled();
+    expect(sleep).not.toHaveBeenCalled();
+  });
+
+  /** Captures with every identity readable, then terminates with `identityNow` as the identity reader. */
+  async function captureThenTerminate(identityNow: (pid: number, waited: boolean) => string | null) {
+    process.env.OMC_TEAM_KILL_PANE_TREE = "1";
+    mockPanePid(FAKE_PANE_PID);
+    const tree = await capturePaneProcessTree(IDENTITY, "%7", {
+      readProcessRecords: records,
+      processIdentity: (pid) => `start-${pid}`,
+    });
+    const calls: Array<[number, NodeJS.Signals | 0]> = [];
+    const waits: number[] = [];
+    let waited = false;
+    await terminatePaneProcessTree(tree, {
+      processIdentity: (pid) => identityNow(pid, waited),
+      killProcess: (pid, signal) => {
+        calls.push([pid, signal]);
+      },
+      sleep: async (ms) => {
+        waits.push(ms);
+        waited = true;
+      },
+    });
+    return { calls, waits };
+  }
+  const withSignal = (calls: Array<[number, NodeJS.Signals | 0]>, signal: NodeJS.Signals): number[] =>
+    calls.filter(([, s]) => s === signal).map(([pid]) => pid);
+
+  it("signals the descendants deepest first when their identities are unchanged", async () => {
+    const { calls, waits } = await captureThenTerminate((pid) => `start-${pid}`);
+
+    expect(withSignal(calls, "SIGTERM")).toEqual([GRANDCHILD, CHILD]);
+    expect(withSignal(calls, "SIGKILL")).toEqual([GRANDCHILD, CHILD]);
+    expect(waits).toEqual([2000]);
+  });
+
+  it("sends no SIGTERM, and later no SIGKILL, to a PID that was reused after the capture", async () => {
+    const { calls } = await captureThenTerminate((pid) => (pid === CHILD ? "start-of-an-unrelated-process" : `start-${pid}`));
+
+    expect(withSignal(calls, "SIGTERM")).toEqual([GRANDCHILD]);
+    expect(withSignal(calls, "SIGKILL")).toEqual([GRANDCHILD]);
+    expect(calls.some(([pid]) => pid === CHILD)).toBe(false);
+  });
+
+  it("sends nothing and does not wait when no identity can be read at termination time", async () => {
+    const { calls, waits } = await captureThenTerminate(() => null);
+
+    expect(calls).toEqual([]);
+    expect(waits).toEqual([]);
+  });
+
+  it("a descendant that left the pane tree after the capture is still terminated, and a fresh read no longer finds it", async () => {
+    process.env.OMC_TEAM_KILL_PANE_TREE = "1";
+    const pane = startPane(`sh -c 'sleep 240.${TAG}' & sleep 241.${TAG} & wait`);
+    await waitForTaggedSleeps("240", 1);
+    await waitForTaggedSleeps("241", 1);
+    mockPanePid(pane.pid!);
+
+    const tree = await capturePaneProcessTree(IDENTITY, "%7");
+    expect(tree?.pids.length).toBeGreaterThanOrEqual(2);
+
+    // The pane's root goes away first, as the provider does in the shutdown loop: its children are reparented.
+    pane.kill("SIGKILL");
+    await new Promise<void>((resolve) => pane.once("exit", () => resolve()));
+    await killWorkerPaneProcessTree(IDENTITY, "%7");
+    expect((await taggedSleeps("240")).length).toBe(1);
+    expect((await taggedSleeps("241")).length).toBe(1);
+
+    await terminatePaneProcessTree(tree);
+    expect((await taggedSleeps("240")).length).toBe(0);
+    expect((await taggedSleeps("241")).length).toBe(0);
+  }, 30_000);
 });
 
 describe.skipIf(currentStrictProcessStartIdentity(process.pid) === null)("killOwnedWorkerPane (tmux) and the pane process tree", () => {
