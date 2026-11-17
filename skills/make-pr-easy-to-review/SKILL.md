@@ -93,16 +93,18 @@ HEAD_OID=$(gh pr view "${N}" ${TARGET_REPO:+-R "${TARGET_REPO}"} --json headRefO
 # checkouts and fails to push private heads. The match is on the normalized
 # owner/repo tail, exact — an unanchored substring would send the force-push
 # to a mirror like acme/app-mirror.git when the head repo is acme/app.
+# Initialize API hostname for later use; prefer GITHUB_SERVER_URL else default to github.com
+GITHUB_HOST="${GITHUB_SERVER_URL#https://}"
+GITHUB_HOST="${GITHUB_HOST#http://}"
+GITHUB_HOST="${GITHUB_HOST:-github.com}"  # default to github.com if unset
+
 HEAD_REPO_URL=$(git remote -v | awk -v r="${HEAD_REPO}" '$3 == "(fetch)" {
   url = $2
-  sub(/^((https?:\/\/|git@|[a-z]+@)?[\w.-]+[:\/])/, "", url)
+  sub(/^((https?:\/\/|git@|[a-z]+@)?[[:alnum:]._-]+[:\/])/, "", url)
   sub(/\.git$/, "", url)
   if (url == r) { print $2; exit }
 }')
 if [ -z "${HEAD_REPO_URL}" ]; then
-  GITHUB_HOST="${GITHUB_SERVER_URL#https://}"
-  GITHUB_HOST="${GITHUB_HOST#http://}"
-  GITHUB_HOST="${GITHUB_HOST:-github.com}"  # default to github.com if unset
   if [ "$(gh config get git_protocol 2>/dev/null)" = "ssh" ]; then
     HEAD_REPO_URL="git@${GITHUB_HOST}:${HEAD_REPO}.git"
   else
