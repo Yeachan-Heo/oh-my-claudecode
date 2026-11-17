@@ -221,6 +221,19 @@ describe.skipIf(!HAS_TMUX)('record-pane-frames record', () => {
     expect(frame).toContain('got:hello');
   });
 
+  it('without steps, records until the settle time passes and leaves no tmux server', async () => {
+    const run = await record([], ['--settle', '2', '--timeout', '10']);
+
+    expect(run.code).toBe(0);
+    const summary = JSON.parse(run.stdout) as { stop: string; frames: number };
+    expect(summary.stop).toBe('settled');
+    expect(summary.frames).toBeGreaterThanOrEqual(1);
+    expect(actions()).toEqual(['launch']);
+    expect(extractLast().frame).toContain('READY>');
+    expect(leftoverSockets()).toEqual([]);
+    expect(processIsAlive(await providerPid())).toBe(false);
+  });
+
   it('stops with pane_dead when the provider exits and names the step it never reached', async () => {
     const run = await record(['wait:READY>', 'text:quit', 'keys:Enter', 'wait:never-shown']);
 
