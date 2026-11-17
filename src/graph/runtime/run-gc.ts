@@ -49,6 +49,11 @@
  *     `.deleted-<run id>-<time>-<random>` under the runs root (an atomic rename, so no process can resume the run
  *     from then on) and deletes the moved directory. A directory left behind by an interrupted removal is finished by
  *     the next pass, unless the lock inside it still names a live process.
+ *   - Under ownership every file of the run is reached through the open run directory, whose identity is the scanned
+ *     one (withRunDirectory): the decision reads, the journal and torn copy of a repair, and the directory sync. The
+ *     name of the run is checked again before the copy, before the truncation and after the decision reads; a name
+ *     that was swapped refuses the step. A directory can only be renamed by name, so the name is checked right before
+ *     the move and the moved directory right after it, and a directory that is not the scanned one is put back.
  *   - Removal never follows a symbolic link: a link is unlinked, its target is left alone. On Linux every directory
  *     is opened without following links and its entries are removed relative to that open directory, so a
  *     directory swapped for a link while the tree is walked cannot redirect the removal. macOS (with the native
@@ -76,6 +81,7 @@ import {
 } from "node:fs";
 import { randomBytes } from "node:crypto";
 import { basename, dirname, join, resolve } from "node:path";
+import { directoryOperations, type DirectoryOperations } from "./contained-fd.js";
 import { FileOwnershipFence } from "./fence.js";
 import { RUN_ID_PATTERN } from "./run-dir.js";
 import { classifyRunFiles } from "./run-state.js";
@@ -129,6 +135,8 @@ export interface ScannedRun {
   /** Test-only interlocks: once the lock is held, and once the directory is open, each before the run is decided again. */
   readonly afterOwnership?: () => void;
   readonly afterHandle?: () => void;
+  /** Test-only interlock: after the name was checked for the last time, right before the directory is moved. */
+  readonly beforeMove?: () => void;
 }
 
 interface RunEntry {
@@ -678,13 +686,28 @@ function takeOwnership(
   return { fence, epoch: acquired.epoch };
 }
 
-// Calls `read` with a path for reading the run directory through an open handle on it, after checking that the handle
-// is the expected directory. On Linux the path is /proc/self/fd/<fd>, which names the opened directory itself, so a
-// swap of the directory's name cannot redirect the reads; elsewhere it is the path of the directory.
-function withDirectoryHandle<T>(
+// What a step that works on a run directory under ownership gets: the open directory and a way to check its name.
+interface AnchoredRun {
+  /** A path that names the open directory itself on Linux (/proc/self/fd/<fd>); the path of the directory elsewhere. */
+  readonly path: string;
+  readonly anchored: boolean;
+  /** Operations relative to the open directory (every open adds O_NOFOLLOW); throws where the platform has none. */
+  readonly operations: DirectoryOperations;
+  /** Throws unless the name of the run still is the directory that is open (device and inode). */
+  assertNamed(): void;
+}
+
+// The one way gc and repair touch the files of a run after the scan or under ownership. The directory is opened
+// without following a link and must be `expected` (device and inode), so a name that was swapped refuses the step
+// before anything is read or written; `action` reads and writes through the open directory (`operations`, or `path`
+// for the readers that take a path); and with `checkAfter` the name must still be the same directory when the step
+// is over, or the result is refused. A step that has changed something on disk checks the name (`assertNamed`)
+// before each change instead, and takes `checkAfter` false, because a refusal then could not undo the change.
+function withRunDirectory<T>(
   runDir: string,
   expected: FileIdentity,
-  read: (path: string, anchored: boolean) => T,
+  action: (run: AnchoredRun) => T,
+  checkAfter = true,
 ): T {
   let fd: number;
   try {
@@ -696,10 +719,47 @@ function withDirectoryHandle<T>(
   }
   try {
     assertIdentity(fstatSync(fd), expected, "the run directory");
-    return process.platform === "linux" ? read(`/proc/self/fd/${fd}`, true) : read(runDir, false);
+    const linux = process.platform === "linux";
+    const assertNamed = (): void => {
+      const named = lstatSync(runDir);
+      if (named.dev !== expected.dev || named.ino !== expected.ino) {
+        throw new Error("the run directory was replaced while it was in use; left unchanged");
+      }
+    };
+    const run: AnchoredRun = {
+      path: linux ? `/proc/self/fd/${fd}` : runDir,
+      anchored: linux,
+      get operations() {
+        return directoryOperations(fd);
+      },
+      assertNamed,
+    };
+    const result = action(run);
+    if (checkAfter) assertNamed();
+    return result;
   } finally {
     closeSync(fd);
   }
+}
+
+// A directory cannot be renamed through its open descriptor, so the move is by name: the name is checked right before
+// it, and the moved directory is checked right after. When the name was swapped in between, the directory that was
+// moved is not the scanned one: it is put back, and nothing is deleted.
+function putBackUnlessScanned(runDir: string, moved: string, scanned: FileIdentity): void {
+  let identity: FileIdentity | null = null;
+  try {
+    const stat = lstatSync(moved);
+    identity = { dev: stat.dev, ino: stat.ino };
+  } catch {
+    // Nothing is at the new name; the check below refuses.
+  }
+  if (identity !== null && identity.dev === scanned.dev && identity.ino === scanned.ino) return;
+  try {
+    renameSync(moved, runDir);
+  } catch {
+    // The name is taken again; the moved directory stays under its quarantine name for the operator.
+  }
+  throw new Error("the run directory was replaced while it was moved; the moved directory was put back");
 }
 
 // Moves one run out of the runs namespace while this process owns it, and returns the new path. After the rename
@@ -727,14 +787,16 @@ export function quarantineRun(
       // again, now that no other process can change it. The files are read through the open directory, so the name
       // cannot be swapped under the reads (Linux; elsewhere by path), and the name must still be the scanned
       // directory at the moment of the move.
-      const verdict = withDirectoryHandle(runDir, scanned.identity, (path, anchored) => {
+      const verdict = withRunDirectory(runDir, scanned.identity, (run) => {
         scanned.afterHandle?.();
-        return judgeRun(path, id, measureRun(path, true, anchored).newestMs, scanned.cutoffMs, epoch);
+        return judgeRun(run.path, id, measureRun(run.path, true, run.anchored).newestMs, scanned.cutoffMs, epoch);
       });
       if (verdict.decision !== "delete") throw new Error(`run changed after the scan (${verdict.reason}); not removed`);
       assertIdentity(lstatSync(runDir), scanned.identity, "the run directory");
+      scanned.beforeMove?.();
     }
     renameSync(runDir, quarantine);
+    if (scanned !== undefined) putBackUnlessScanned(runDir, quarantine, scanned.identity);
   } catch (error) {
     // The run stays where it was, so the lock this process took must not stay with it.
     try {
@@ -775,10 +837,11 @@ function stampFor(nowMs: number): string {
   return new Date(nowMs).toISOString().replace(/[:.]/g, "-");
 }
 
-// Opens the journal without following a link. It must be a regular file with no other name: a hard link shares its
-// inode with another name, possibly outside the runs root, and truncating it would change that file too.
-function openJournal(runDir: string, flags: number): number {
-  const fd = openSync(join(runDir, JOURNAL_FILE_NAME), flags | NOFOLLOW);
+// Opens the journal through the open run directory, without following a link. It must be a regular file with no other
+// name: a hard link shares its inode with another name, possibly outside the runs root, and truncating it would
+// change that file too.
+function openJournal(operations: DirectoryOperations, flags: number): number {
+  const fd = operations.open(JOURNAL_FILE_NAME, flags);
   try {
     const stat = fstatSync(fd);
     if (!stat.isFile()) throw new Error("journal is not a regular file");
@@ -790,55 +853,112 @@ function openJournal(runDir: string, flags: number): number {
   }
 }
 
+// Test-only interlocks of repairTornTail, each at a point where the name of the run could be swapped.
+export interface RepairInterlock {
+  /** The lock is held and no file has been opened yet. */
+  readonly afterOwnership?: () => void;
+  /** The run directory is open and its identity is checked; the journal is not opened yet. */
+  readonly afterHandle?: () => void;
+  /** The name was checked for the last time before the torn copy is created. */
+  readonly beforeCopy?: () => void;
+  /** The torn copy is written and synced; the journal is not truncated yet. */
+  readonly afterCopy?: () => void;
+  /** The name was checked for the last time before the journal is truncated. */
+  readonly beforeTruncate?: () => void;
+  /** The repair is done; the lock is not released yet. */
+  readonly beforeRelease?: () => void;
+}
+
 // Moves the torn last line of one journal to a copy beside it. Complete lines are not touched.
 // The copy is written and synced before the journal is truncated, so the tail is never lost.
 // The journal is changed only while this process owns the run (the same fence as the removal), so a writer cannot
-// append between the last look and the truncation. Returns { repaired, copy }. Throws when the run is owned by
-// another process, or the journal is not a private regular file.
+// append between the last look and the truncation. Every file is opened relative to the open run directory, whose
+// identity is the scanned one, so a name that was swapped for a link or for another directory can neither be read nor
+// written; the name is checked again before the copy and before the truncation. Returns { repaired, copy }. Throws when
+// the run is owned by another process, or the journal is not a private regular file.
 export function repairTornTail(
   runDir: string,
   nowMs: number,
   expected?: FileIdentity,
+  interlock: RepairInterlock = {},
 ): { repaired: boolean; copy: string | null } {
+  let identity = expected;
+  if (identity === undefined) {
+    const stat = lstatSync(runDir);
+    if (!stat.isDirectory()) throw new Error("run is no longer a plain directory");
+    identity = { dev: stat.dev, ino: stat.ino };
+  }
   // Looked at before the lock is taken, so a run with nothing to repair, or with a journal that must not be
   // touched, is left exactly as it was.
-  const probe = openJournal(runDir, fsConstants.O_RDONLY | NONBLOCK);
-  let torn: boolean;
-  try {
-    torn = splitTornTail(readFileSync(probe)).tail.length > 0;
-  } finally {
-    closeSync(probe);
-  }
+  const torn = withRunDirectory(runDir, identity, ({ operations }) => {
+    const probe = openJournal(operations, fsConstants.O_RDONLY | NONBLOCK);
+    try {
+      return splitTornTail(readFileSync(probe)).tail.length > 0;
+    } finally {
+      closeSync(probe);
+    }
+  });
   if (!torn) return { repaired: false, copy: null };
-  const owned = takeOwnership(runDir, "run is held by a live owner; journal left unchanged", expected);
+  const owned = takeOwnership(runDir, "run is held by a live owner; journal left unchanged", identity);
+  let outcome: { repaired: boolean; copy: string | null };
   try {
-    return repairOwnedJournal(runDir, nowMs);
-  } finally {
-    owned.fence.releaseSync(owned.epoch);
+    interlock.afterOwnership?.();
+    const ownedIdentity = identity;
+    outcome = withRunDirectory(
+      runDir,
+      ownedIdentity,
+      (run) => {
+        interlock.afterHandle?.();
+        return repairOwnedJournal(run, nowMs, interlock);
+      },
+      false,
+    );
+  } catch (error) {
+    try {
+      owned.fence.releaseSync(owned.epoch);
+    } catch {
+      // The error below is the one to report; a name that was swapped no longer leads to the lock.
+    }
+    throw error;
   }
+  interlock.beforeRelease?.();
+  try {
+    owned.fence.releaseSync(owned.epoch);
+  } catch (error) {
+    throw new Error(`journal repaired${outcome.copy === null ? "" : ` (copy ${outcome.copy})`}; the lock could not be released: ${(error as Error).message}`);
+  }
+  return outcome;
 }
 
-function repairOwnedJournal(runDir: string, nowMs: number): { repaired: boolean; copy: string | null } {
-  const fd = openJournal(runDir, fsConstants.O_RDWR);
+function repairOwnedJournal(
+  run: AnchoredRun,
+  nowMs: number,
+  interlock: RepairInterlock,
+): { repaired: boolean; copy: string | null } {
+  const { operations } = run;
+  const fd = openJournal(operations, fsConstants.O_RDWR);
   try {
     const before = fstatSync(fd);
     const { complete, tail } = splitTornTail(readFileSync(fd));
     if (tail.length === 0) return { repaired: false, copy: null };
     const copyName = `${TORN_COPY_PREFIX}${stampFor(nowMs)}`;
-    const copyFd = openSync(
-      join(runDir, copyName),
-      fsConstants.O_WRONLY | fsConstants.O_CREAT | fsConstants.O_EXCL | NOFOLLOW,
-      0o600,
-    );
+    run.assertNamed();
+    interlock.beforeCopy?.();
+    const copyFd = operations.open(copyName, fsConstants.O_WRONLY | fsConstants.O_CREAT | fsConstants.O_EXCL, 0o600);
     try {
       writeAll(copyFd, tail);
       fsyncSync(copyFd);
     } finally {
       closeSync(copyFd);
     }
+    // The entry of the copy is durable before the journal is shortened.
+    operations.sync();
+    interlock.afterCopy?.();
     if (fstatSync(fd).size !== before.size) {
       throw new Error("journal changed during repair; left unchanged, torn copy kept");
     }
+    run.assertNamed();
+    interlock.beforeTruncate?.();
     ftruncateSync(fd, complete.length);
     fsyncSync(fd);
     return { repaired: true, copy: copyName };

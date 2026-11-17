@@ -51,6 +51,7 @@ import {
   removeRun,
   removeTree,
   repairTornTail,
+  type RepairInterlock,
   runGc,
   runGraphGc,
   scanRuns,
@@ -1543,15 +1544,15 @@ describe("omc graph gc", () => {
         ...scannedFirst(root),
         afterHandle: () => {
           // The directory is open and was checked. The name now leads to an interrupted run; reads by path would see
-          // that run and keep it. The reads of the open directory still see the finished one, and the name is
-          // refused at the moment of the move.
+          // that run and keep it. The reads of the open directory still see the finished one, and the result is
+          // refused because the name no longer is the directory that was read.
           renameSync(dir, join(base, "moved-away"));
           makeScenarioRun(root, "run-swapped-reading", SCENARIOS.running);
           ageTree(dir, OLD);
         },
       };
 
-      expect(() => removeRun(realRoot, "run-swapped-reading", swapped)).toThrow(/not the directory that was scanned/);
+      expect(() => removeRun(realRoot, "run-swapped-reading", swapped)).toThrow(/replaced while it was in use/);
       expect(readFileSync(join(dir, "journal.jsonl"), "utf8"), "the run that took the name was changed").toBe(journalText(1));
       expect(readdirSync(root).filter((name) => name.startsWith(".deleted-"))).toEqual([]);
     });
@@ -1581,9 +1582,125 @@ describe("omc graph gc", () => {
       const replacement = makeTornRun(root, "run-torn-replaced");
       const before = readFileSync(join(replacement, "journal.jsonl"), "utf8");
 
-      expect(() => repairTornTail(replacement, NOW, identity)).toThrow(/replaced after the scan/);
+      expect(() => repairTornTail(replacement, NOW, identity)).toThrow(/not the directory that was scanned/);
       expect(readFileSync(join(replacement, "journal.jsonl"), "utf8")).toBe(before);
       expect(readdirSync(replacement).sort()).toEqual(["descriptor.json", "journal.jsonl", "projection.json"]);
+    });
+  });
+
+  // Class: after ownership is taken, every file of the run is reached through the open, identity-checked directory, never
+  // by the name. The name is swapped at each step of the repair; what took the name (a link to a directory outside the
+  // runs root, or another real run directory) must never be read, copied or truncated.
+  describe.runIf(process.platform === "linux")("a torn journal repair when the name of the run is swapped under it", () => {
+    const TORN = '{"seq":1,"epoch":1,"descr';
+    type Point = keyof RepairInterlock;
+    type Swap = "link to an outside directory" | "another real run directory";
+
+    function swapIn(base: string, root: string, id: string, dir: string, kind: Swap): { target: string } {
+      renameSync(dir, join(base, "moved-away"));
+      if (kind === "another real run directory") {
+        const other = makeTornRun(root, id);
+        return { target: other };
+      }
+      const outside = join(base, "outside");
+      mkdirSync(outside, { recursive: true });
+      writeFileSync(join(outside, "journal.jsonl"), `${journalText(1)}${TORN}`);
+      symlinkSync(outside, dir);
+      return { target: outside };
+    }
+
+    // For each point: what the original directory (moved away, still open to the repair) looks like afterwards.
+    const POINTS: { point: Point; message: RegExp; copy: boolean; truncated: boolean }[] = [
+      { point: "afterOwnership", message: /no longer a plain directory|not the directory that was scanned/, copy: false, truncated: false },
+      { point: "afterHandle", message: /replaced while it was in use/, copy: false, truncated: false },
+      // Swapped after the last check of the name: the copy goes into the directory the repair owns, never into the new one,
+      // and the check before the truncation refuses the rest.
+      { point: "beforeCopy", message: /replaced while it was in use/, copy: true, truncated: false },
+      { point: "afterCopy", message: /replaced while it was in use/, copy: true, truncated: false },
+      // Swapped after the check before the truncation: the truncation is on the descriptor of the owned journal, so it
+      // completes there; the lock cannot be released through the swapped name, and that is reported.
+      { point: "beforeTruncate", message: /journal repaired.*lock could not be released/, copy: true, truncated: true },
+      { point: "beforeRelease", message: /journal repaired.*lock could not be released/, copy: true, truncated: true },
+    ];
+    const KINDS: Swap[] = ["link to an outside directory", "another real run directory"];
+
+    for (const { point, message, copy, truncated } of POINTS) {
+      for (const kind of KINDS) {
+        it(`${point}: the name is swapped for a ${kind}; the repair changes nothing that took the name`, () => {
+          withBase((base) => {
+            const root = makeRoot(base);
+            const dir = makeTornRun(root, "run-torn-swap");
+            const identity = scanRuns({ runsRoot: root, retentionDays: 7, nowMs: NOW }).runs[0].identity as { dev: number; ino: number };
+            let target = "";
+            let targetBefore = "";
+            const interlock: RepairInterlock = {
+              [point]: () => {
+                target = swapIn(base, root, "run-torn-swap", dir, kind).target;
+                targetBefore = snapshot(target);
+              },
+            };
+
+            expect(() => repairTornTail(dir, NOW, identity, interlock)).toThrow(message);
+            expect(snapshot(target), "what took the name was changed").toBe(targetBefore);
+            expect(readdirSync(target).filter((name) => name.startsWith("journal.jsonl.torn-")), "a copy appeared where the name leads").toEqual([]);
+
+            const moved = join(base, "moved-away");
+            const copies = readdirSync(moved).filter((name) => name.startsWith("journal.jsonl.torn-"));
+            expect(copies.length > 0, `copy in the original directory (${copies.join(",")})`).toBe(copy);
+            const journal = readFileSync(join(moved, "journal.jsonl"), "utf8");
+            expect(journal === journalText(1), "the journal of the original directory was truncated").toBe(truncated);
+            if (!truncated) expect(journal).toBe(`${journalText(1)}${TORN}`);
+          });
+        });
+      }
+    }
+
+    it("without a swap the same repair copies the tail, truncates the journal and releases the lock", () => {
+      withBase((base) => {
+        const root = makeRoot(base);
+        const dir = makeTornRun(root, "run-torn-plain");
+        const identity = scanRuns({ runsRoot: root, retentionDays: 7, nowMs: NOW }).runs[0].identity as { dev: number; ino: number };
+        const points: string[] = [];
+        const outcome = repairTornTail(dir, NOW, identity, {
+          afterOwnership: () => points.push("owned"),
+          afterHandle: () => points.push("open"),
+          beforeCopy: () => points.push("checked"),
+          afterCopy: () => points.push("copied"),
+          beforeTruncate: () => points.push("checked"),
+          beforeRelease: () => points.push("done"),
+        });
+        expect(points).toEqual(["owned", "open", "checked", "copied", "checked", "done"]);
+        expect(outcome.repaired).toBe(true);
+        expect(readFileSync(join(dir, outcome.copy as string), "utf8")).toBe(TORN);
+        expect(readFileSync(join(dir, "journal.jsonl"), "utf8")).toBe(journalText(1));
+        expect(existsSync(join(dir, "owner.lock"))).toBe(false);
+      });
+    });
+  });
+
+  // The move of the run out of the runs namespace is a rename by name. The name is checked right before it and the moved
+  // directory right after it, so a swap in between puts the wrong directory back instead of deleting it.
+  it.runIf(process.platform === "linux")("a name swapped between the last check and the move: what was moved is put back, and nothing is deleted", () => {
+    withBase((base) => {
+      const root = makeRoot(base);
+      const realRoot = realpathSync(root);
+      const dir = makeFinishedRun(root, "run-swapped-move");
+      ageTree(dir, OLD);
+      let replacementJournal = "";
+      const swapped: ScannedRun = {
+        ...scannedFirst(root),
+        beforeMove: () => {
+          renameSync(dir, join(base, "moved-away"));
+          makeFinishedRun(root, "run-swapped-move");
+          ageTree(dir, OLD);
+          replacementJournal = readFileSync(join(dir, "journal.jsonl"), "utf8");
+        },
+      };
+
+      expect(() => removeRun(realRoot, "run-swapped-move", swapped)).toThrow(/replaced while it was moved; the moved directory was put back/);
+      expect(readFileSync(join(dir, "journal.jsonl"), "utf8"), "the run that took the name was changed").toBe(replacementJournal);
+      expect(readdirSync(root).filter((name) => name.startsWith(".deleted-")), "a run was left in quarantine").toEqual([]);
+      expect(existsSync(join(base, "moved-away", "journal.jsonl")), "the scanned directory was changed").toBe(true);
     });
   });
 
