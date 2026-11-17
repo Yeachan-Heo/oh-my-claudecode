@@ -610,15 +610,17 @@ describe("check-omc-playbooks YAML frontmatter robustness (upstream #455)", () =
 
   it("CRLF-encoded playbooks with anchors pass after normalization", () => {
     const { root, skillsRoot } = buildProject();
-    // Write a CRLF-encoded playbook with anchor text that could be confused with
-    // YAML delimiters (e.g., '---' in the anchor). The normalization ensures
-    // the frontmatter is correctly identified and removed before anchor validation.
+    // Write a CRLF-encoded playbook with anchor text that includes '---' (which
+    // could confuse an LF-only fence regex). The CRLF normalization ensures the
+    // frontmatter is correctly identified and removed before anchor validation.
+    // If normalization were skipped, the LF-only body-fence regex would fail to
+    // match the CRLF-delimited frontmatter and leak it into anchor scanning.
     const crlfContent = [
       '---\r',
       'extends: tdd\r',
-      'when: Verify the red-green cycle.\r',
+      'when: When the body starts with anchor-like text.\r',
       '---\r',
-      '- In **In** "Write the failing test first." keep the output artifact path.\r',
+      '- In **Before** "---" (a fence-like anchor) write the failing test.\r',
       '',
     ].join('\n');
     writeFileSync(

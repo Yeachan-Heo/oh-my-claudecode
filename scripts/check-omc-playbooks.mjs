@@ -260,7 +260,8 @@ async function main() {
       // not leaving tdd" and "verify by incorrectly unquoting the bracket-stripped
       // list as a whole.
       // Check for explicitly quoted values: if quoted, unquote and split by comma
-      // only (do not reinterpret brackets within the quoted content).
+      // only (do not reinterpret brackets within the quoted content, and do not
+      // apply yamlScalar again since the value is already decoded).
       const trimmedValue = extendsValue.trim();
       let baseNames = [];
       const isQuoted =
@@ -268,11 +269,12 @@ async function main() {
         ((trimmedValue.startsWith('"') && trimmedValue.endsWith('"')) ||
           (trimmedValue.startsWith("'") && trimmedValue.endsWith("'")));
       if (isQuoted) {
-        // Explicitly quoted value: unquote and split by comma only
+        // Explicitly quoted value: unquote, split by comma, and trim each item
+        // (do not apply yamlScalar again, since it would double-unquote)
         const unquoted = trimmedValue.slice(1, -1);
         baseNames = unquoted
           .split(",")
-          .map(yamlScalar)
+          .map((s) => s.trim())
           .filter(Boolean);
       } else if (trimmedValue.startsWith("[") && trimmedValue.endsWith("]")) {
         // Bracket-enclosed list (not quoted): strip brackets, split by comma, then unquote each
