@@ -287,4 +287,63 @@ describe('plan write guard (pre-tool-enforcer.mjs)', () => {
     expect(verdictOf(callTool('Write', '.omc/plans/inner-link/plan.md'))).toBe('allow');
     expect(verdictOf(callTool('Write', '.omc/plans/new-sub/plan.md')), 'missing directory inside the plans directory').toBe('allow');
   });
+
+  // The guard walks the raw path the way the kernel does: from the working directory, a link is followed where it stands and
+  // ".." then goes to the parent of the link target, not to the parent of the link.
+  describe('links combined with ..', () => {
+    const plans = () => join(projectDir, '.omc', 'plans');
+    const outside = () => join(tmp, 'walk-outside');
+
+    beforeAll(() => {
+      mkdirSync(join(outside(), 'nested'), { recursive: true });
+      mkdirSync(join(outside(), '.omc', 'plans'), { recursive: true });
+      mkdirSync(join(plans(), 'walk-sub'), { recursive: true });
+      mkdirSync(join(plans(), 'walk-real'), { recursive: true });
+      symlinkSync(join(outside(), 'nested'), join(plans(), 'walk-link'), 'dir');
+      symlinkSync(join(plans(), 'walk-real'), join(plans(), 'walk-inner'), 'dir');
+      symlinkSync(join(outside(), 'nested'), join(projectDir, 'walk-jump'), 'dir');
+      symlinkSync(join(plans(), 'walk-link'), join(plans(), 'walk-chain'), 'dir');
+    });
+
+    it('denies a link followed by .. that leads out of the plans directory', () => {
+      const cases: Array<[string, string]> = [
+        ['Edit', '.omc/plans/walk-link/../victim.md'],
+        ['Write', '.omc/plans/walk-chain/../victim.md'],
+        ['Write', '.omc/plans/../plans/walk-link/../victim.md'],
+        ['Write', './.omc/plans/./walk-link/./../victim.md'],
+        ['Write', '.omc/plans/walk-link/../../plans/victim.md'],
+        ['MultiEdit', `${projectDir}/.omc/plans/walk-link/../victim.md`],
+        ['NotebookEdit', '.omc/plans/walk-link/../victim.md'],
+      ];
+      for (const [tool, path] of cases) {
+        expect(verdictOf(callTool(tool, path)), `${tool} ${path}`).toBe('deny');
+      }
+    });
+
+    it('denies a link before the plans directory that is followed by ..', () => {
+      for (const path of [
+        'walk-jump/../.omc/plans/victim.md',
+        './walk-jump/../.omc/plans/victim.md',
+        `${projectDir}/walk-jump/../.omc/plans/victim.md`,
+      ]) {
+        expect(verdictOf(callTool('Write', path)), path).toBe('deny');
+      }
+      rmSync(join(outside(), '.omc'), { recursive: true, force: true });
+      expect(verdictOf(callTool('Write', 'walk-jump/../.omc/plans/victim.md')), 'the outside target does not exist').toBe('deny');
+    });
+
+    it('allows .. after a real directory or after a link that stays inside the plans directory', () => {
+      const cases: Array<[string, string]> = [
+        ['Write', '.omc/plans/walk-sub/../x.md'],
+        ['Write', './.omc/plans/../plans/z.md'],
+        ['Edit', '.omc/plans/walk-inner/../x.md'],
+        ['Write', '.omc/plans/walk-inner/sub/../y.md'],
+        ['Write', '.omc/plans/walk-missing/../x.md'],
+        ['Write', `${projectDir}/.omc/plans/walk-sub/../x.md`],
+      ];
+      for (const [tool, path] of cases) {
+        expect(verdictOf(callTool(tool, path)), `${tool} ${path}`).toBe('allow');
+      }
+    });
+  });
 });

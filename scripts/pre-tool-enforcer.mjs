@@ -8,7 +8,7 @@
 
 import { appendFileSync, closeSync, existsSync, fstatSync, lstatSync, mkdirSync, openSync, readFileSync, readSync, readdirSync, realpathSync, renameSync, statSync, writeFileSync } from 'fs';
 import { createHash } from 'crypto';
-import { delimiter, dirname, join, resolve, basename, relative, isAbsolute, sep } from 'path';
+import { delimiter, dirname, join, resolve, basename, relative, isAbsolute, parse, sep } from 'path';
 import { homedir } from 'os';
 import { execFileSync } from 'child_process';
 import { fileURLToPath, pathToFileURL } from 'url';
@@ -2662,8 +2662,10 @@ let contextText = null;
 // subagent whose agent_type is in the guarded list is denied unless the target is a Markdown file under <cwd>/.omc/plans/.
 // The list comes from OMC_PLANNER_WRITE_GUARD_TYPES (comma separated, exact match after trimming; default:
 // oh-my-claudecode:planner). Calls without agent_type and calls of other agent types pass. The path is normalized
-// lexically first. Then the real path (symbolic links resolved) of the nearest existing directory above the target, and
-// of the target when it exists, must stay inside the real plans directory; a link that cannot be resolved is denied. Anything else unreadable passes (fail-open). With the guard on, each call of a guarded tool adds one row to
+// lexically first. When the plans directory exists, the raw path is then walked from the working directory the way the
+// kernel resolves it (see walkKernelPath) and must end inside the real plans directory, and the real path of the nearest
+// existing directory above the normalized target, and of the target when it exists, must stay inside it too; a link that
+// cannot be resolved is denied. Anything else unreadable passes (fail-open). With the guard on, each call of a guarded tool adds one row to
 // plan-write-guard.jsonl in OMC_JEV_LOG_DIR or <state dir>/jev, with decision allow or deny; a call without agent_type or
 // with another agent_type adds one row with decision allow and a reason.
 const PLAN_WRITE_TOOLS = new Set(['Write', 'Edit', 'MultiEdit', 'NotebookEdit']);
@@ -2695,51 +2697,41 @@ function realPathInside(path, base) {
   }
 }
 
-// Validate that a path with symlink components cannot escape `base` via directory traversal.
-// Prevents attacks like 'link/../victim' where 'link' -> '/tmp/out', allowing the filesystem
-// to resolve 'link/..' to '/tmp/out/..' = '/tmp/out' (outside), bypassing the guard.
-function pathWithSymlinksStaysInside(filePath, base) {
+// The path the kernel reaches for `filePath`, walked from `cwd` one component at a time on the raw text: a link is followed
+// where it stands, so ".." after a link goes to the parent of the link target, not to the parent of the link. A component that
+// does not exist has no link below it; the rest is walked as text and a ".." after it only removes it again. Returns null
+// when a component cannot be resolved (a link that dangles or loops, a file used as a directory).
+function walkKernelPath(filePath, cwd) {
   try {
-    // Convert to absolute path for consistent comparison
-    const target = resolve(base, filePath);
-    // Find the nearest existing directory and check if the unresolved path stays inside
-    let ancestor = dirname(target);
-    while (!pathExists(ancestor)) ancestor = dirname(ancestor);
-    // The ancestor must be inside the bounds
-    if (!realPathInside(ancestor, base)) return false;
-    // Now check for symlink-based escapes in the path components.
-    // Walk the input path and follow symlinks to verify no component
-    // escapes the bounds. This catches cases where following symlinks and then '..' escape.
-    const components = filePath.split(sep).filter(c => c && c !== '.');
-    let current = base;
-    for (const comp of components) {
-      if (comp === '..') {
-        // Check if going up stays inside
-        const parent = dirname(current);
-        if (!realPathInside(parent, base)) return false;
-        current = parent;
-      } else if (comp) {
-        const next = resolve(current, comp);
-        // If the component exists and is a symlink, verify its target stays inside
-        if (pathExists(next)) {
-          try {
-            const realNext = realpathSync(next);
-            // Following this symlink must not escape
-            if (!realPathInside(realNext, base)) return false;
-            current = realNext;
-          } catch {
-            // Treat resolution errors as rejections
-            return false;
-          }
-        } else {
-          // Component doesn't exist; continue with lexical path
+    const root = isAbsolute(filePath) ? parse(filePath).root : '';
+    let current = realpathSync.native(root || cwd);
+    let missing = 0;
+    for (const part of filePath.slice(root.length).split(process.platform === 'win32' ? /[\\/]+/ : /\/+/)) {
+      if (part === '' || part === '.') continue;
+      if (part === '..') {
+        current = dirname(current);
+        if (missing > 0) missing -= 1;
+        continue;
+      }
+      const next = join(current, part);
+      if (missing === 0) {
+        try {
+          lstatSync(next);
+        } catch (error) {
+          if (error?.code !== 'ENOENT') return null;
+          missing = 1;
           current = next;
+          continue;
         }
+        current = realpathSync.native(next);
+      } else {
+        missing += 1;
+        current = next;
       }
     }
-    return true;
+    return current;
   } catch {
-    return false;
+    return null;
   }
 }
 
@@ -2750,31 +2742,22 @@ function planWritePathAllowed(filePath, cwd) {
   if (rel === '' || rel.split(sep)[0] === '..' || isAbsolute(rel) || !rel.endsWith(PLAN_WRITE_EXT)) return false;
   if (!pathExists(plansDir)) return true;
   let realPlansDir;
+  let nativePlansDir;
   try {
     realPlansDir = realpathSync(plansDir);
+    nativePlansDir = realpathSync.native(plansDir);
   } catch {
     return false;
   }
-  // SECURITY: Validate that symlink-based traversals (e.g. 'link/../victim.md') cannot escape the guard.
-  // Check the input path with symlinks resolved to prevent attacks where the symlink target contains '..',
-  // allowing escape when the filesystem kernel processes symlinks before '..' (issue #5085).
-  // Extract the relative part within the plans directory, preserving '..' for symlink validation.
-  let relPathInPlans = filePath;
-  const planDirPrefix = join('.omc', 'plans') + sep;
-  if (filePath.includes(planDirPrefix)) {
-    const idx = filePath.indexOf(planDirPrefix);
-    relPathInPlans = filePath.substring(idx + planDirPrefix.length);
-  }
-  // SECURITY: Validate the original traversal (relPathInPlans) before checking if it escapes.
-  // A leading '..' like '.omc/plans/../plans/link/../victim.md' must be rejected even though
-  // it normalized to something inside. The normalized path check alone allows symlink escapes.
-  if (relPathInPlans && relPathInPlans.split(sep)[0] === '..') {
-    // Leading '..' always escapes; never fall back to normalized path
-    return false;
-  }
-  if (!pathWithSymlinksStaysInside(relPathInPlans, realPlansDir)) return false;
-  // The nearest existing directory above the target must resolve inside the real plans directory, so a missing directory
-  // under a link cannot be created outside it. The target itself, when it exists, must too.
+  // The raw path as the kernel resolves it must end inside the real plans directory: a link followed by ".." in the input
+  // must not lead out of it, whether the link comes before or after the plans directory in the path.
+  const reached = walkKernelPath(filePath, cwd);
+  if (reached === null) return false;
+  const reachedRel = relative(nativePlansDir, reached);
+  if (reachedRel === '' || reachedRel.split(sep)[0] === '..' || isAbsolute(reachedRel)) return false;
+  // The normalized target is checked too, for a caller that normalizes the path before it opens it: the nearest existing
+  // directory above it must resolve inside the real plans directory, so a missing directory under a link cannot be created
+  // outside it. The target itself, when it exists, must too.
   let ancestor = dirname(target);
   while (!pathExists(ancestor)) ancestor = dirname(ancestor);
   return realPathInside(ancestor, realPlansDir) && (!pathExists(target) || realPathInside(target, realPlansDir));
