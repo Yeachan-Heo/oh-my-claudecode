@@ -181,12 +181,14 @@ async function main() {
           return existsSync(pluginPath);
         });
 
+        // Whichever older HUD loads next (an older cached build, the marketplace
+        // clone or an npm install) would advertise the skipped version as an
+        // update that the update command cannot deliver. Tell it what happened.
+        if (builtVersions[0] !== latestInstalledVersion) {
+          process.env.OMC_HUD_UNBUILT_VERSION = latestInstalledVersion;
+        }
+
         if (builtVersions.length > 0) {
-          // The older HUD loaded below would advertise the skipped version as an
-          // update that the update command cannot deliver. Tell it what happened.
-          if (builtVersions[0] !== latestInstalledVersion) {
-            process.env.OMC_HUD_UNBUILT_VERSION = latestInstalledVersion;
-          }
           const attemptedTargets = new Set();
           for (const version of builtVersions) {
             pluginCacheVersion = version;

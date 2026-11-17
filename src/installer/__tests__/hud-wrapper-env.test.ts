@@ -509,6 +509,27 @@ describe('HUD wrapper — OMC_PLUGIN_ROOT resolution', () => {
     expect(result.stdout).toBe('UNBUILT=unset\n');
   });
 
+  it('case 12: tells a fallback HUD which installed version it replaced when no cached version is built', () => {
+    const s = staged!;
+    const configDir = join(s.dir, 'isolated-config-unbuilt-only');
+    const reportUnbuilt = `process.stdout.write("UNBUILT=" + (process.env.${OMC_HUD_UNBUILT_VERSION_ENV} ?? "unset") + "\\n");\n`;
+
+    // The cache holds only an unbuilt 4.11.3; the marketplace clone has a built HUD.
+    mkdirSync(join(configDir, 'plugins', 'cache', 'omc', 'oh-my-claudecode', '4.11.3', 'bridge'), { recursive: true });
+    const marketplaceHudDir = join(configDir, 'plugins', 'marketplaces', 'omc', 'dist', 'hud');
+    mkdirSync(marketplaceHudDir, { recursive: true });
+    writeFileSync(join(marketplaceHudDir, 'index.js'), reportUnbuilt, 'utf8');
+
+    const result = runWrapper(s.wrapperPath, scrubbedEnv({
+      CLAUDE_CONFIG_DIR: configDir,
+      OMC_HUD_DISABLE_NPM_FALLBACK: '1',
+    }));
+
+    expect(result.status).toBe(0);
+    expect(result.stdout).toBe('UNBUILT=4.11.3\n');
+    expect(result.stderr ?? '').toBe('');
+  });
+
   it('case 5: symmetry — installer source and plugin-setup.mjs both produce identical wrapper text', async () => {
     // Both consumers must read the same byte-for-byte template body.
     const txt = readFileSync(TEMPLATE_TXT, 'utf8');
