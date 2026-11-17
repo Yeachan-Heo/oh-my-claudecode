@@ -355,4 +355,146 @@ describe('plan write guard (pre-tool-enforcer.mjs)', () => {
       }
     });
   });
+
+  // The tool follows a link in the last component too, so the entry it opens can be another file than the one the text names.
+  // The guard follows the last component one link at a time, and every entry of the chain must be a Markdown path inside the
+  // real plans directory; the entry that ends the chain must be a regular file, or must not exist when no link is on the way.
+  describe('a final component that is a link', () => {
+    const plans = () => join(projectDir, '.omc', 'plans');
+    const outside = () => join(tmp, 'entry-outside');
+    const stateFile = () => join(plans(), 'state.json');
+
+    beforeAll(() => {
+      mkdirSync(outside(), { recursive: true });
+      mkdirSync(join(plans(), 'entry-real-dir', 'deep'), { recursive: true });
+      mkdirSync(join(plans(), 'entry-dir.md'), { recursive: true });
+      writeFileSync(stateFile(), '{}\n');
+      writeFileSync(join(plans(), 'entry-real.md'), 'plan\n');
+      writeFileSync(join(plans(), 'entry-upper.MD'), 'plan\n');
+      writeFileSync(join(outside(), 'entry-out.md'), 'plan\n');
+      symlinkSync(stateFile(), join(plans(), 'alias-abs.md'));
+      symlinkSync('state.json', join(plans(), 'alias-rel.md'));
+      symlinkSync('state.json', join(plans(), 'chain-b.md'));
+      symlinkSync('chain-b.md', join(plans(), 'chain-a.md'));
+      symlinkSync('entry-real.md', join(plans(), 'chain-ok-b.md'));
+      symlinkSync('chain-ok-b.md', join(plans(), 'chain-ok-a.md'));
+      symlinkSync(join(plans(), 'entry-real.md'), join(outside(), 'hop.md'));
+      symlinkSync(join(outside(), 'hop.md'), join(plans(), 'chain-out.md'));
+      symlinkSync(plans(), join(plans(), 'to-plans.md'), 'dir');
+      symlinkSync(join(plans(), 'entry-real-dir'), join(plans(), 'to-dir.md'), 'dir');
+      symlinkSync(join(plans(), 'entry-dir.md'), join(plans(), 'to-md-dir.md'), 'dir');
+      symlinkSync(join(plans(), 'entry-missing.md'), join(plans(), 'dangling-in.md'));
+      symlinkSync(join(outside(), 'entry-missing.md'), join(plans(), 'dangling-out.md'));
+      symlinkSync('entry-real.md', join(plans(), 'to-real.md'));
+      symlinkSync(join(plans(), 'entry-real.md'), join(plans(), 'to-real-abs.md'));
+      symlinkSync(join(outside(), 'entry-out.md'), join(plans(), 'to-out.md'));
+      symlinkSync('entry-upper.MD', join(plans(), 'to-upper.md'));
+      symlinkSync('entry-loop.md', join(plans(), 'entry-loop.md'));
+      symlinkSync('entry-loop-b.md', join(plans(), 'entry-loop-a.md'));
+      symlinkSync('entry-loop-a.md', join(plans(), 'entry-loop-b.md'));
+      symlinkSync(join(plans(), 'entry-real-dir', 'deep'), join(plans(), 'entry-inner'), 'dir');
+      symlinkSync(stateFile(), join(plans(), 'entry-real-dir', 'trap.md'));
+      writeFileSync(join(plans(), 'entry-real-dir', 'good.md'), 'plan\n');
+      symlinkSync('state.json', join(plans(), 'good.md'));
+      symlinkSync(outside(), join(plans(), 'entry-out-dir'), 'dir');
+      symlinkSync('entry-out-dir/../victim.md', join(plans(), 'via-link.md'));
+      symlinkSync('entry-real-dir/../entry-real.md', join(plans(), 'via-dir.md'));
+    });
+
+    it('denies a link to a file that is not Markdown, whatever the tool and the way the link is written', () => {
+      const cases: Array<[string, string]> = [
+        ['Write', '.omc/plans/alias-abs.md'],
+        ['Edit', '.omc/plans/alias-abs.md'],
+        ['MultiEdit', '.omc/plans/alias-rel.md'],
+        ['NotebookEdit', '.omc/plans/alias-rel.md'],
+        ['Write', `${projectDir}/.omc/plans/alias-rel.md`],
+        ['Write', './.omc/plans/../plans/alias-rel.md'],
+        ['Write', '.omc/plans/entry-real-dir/../alias-rel.md'],
+      ];
+      for (const [tool, path] of cases) {
+        expect(verdictOf(callTool(tool, path)), `${tool} ${path}`).toBe('deny');
+      }
+    });
+
+    it('denies a chain of links that ends in a file that is not Markdown, and one that leaves the plans directory on the way', () => {
+      for (const path of ['.omc/plans/chain-a.md', '.omc/plans/chain-b.md', '.omc/plans/chain-out.md']) {
+        expect(verdictOf(callTool('Write', path)), path).toBe('deny');
+      }
+    });
+
+    it('allows a link, and a chain of links, that ends in a Markdown file inside the plans directory', () => {
+      for (const path of [
+        '.omc/plans/to-real.md',
+        '.omc/plans/to-real-abs.md',
+        '.omc/plans/chain-ok-a.md',
+        '.omc/plans/chain-ok-b.md',
+        '.omc/plans/via-dir.md',
+        `${projectDir}/.omc/plans/to-real.md`,
+      ]) {
+        expect(verdictOf(callTool('Edit', path)), path).toBe('allow');
+      }
+    });
+
+    it('denies a link that leads to the plans directory, to another directory, or to a directory named like a Markdown file', () => {
+      for (const path of ['.omc/plans/to-plans.md', '.omc/plans/to-dir.md', '.omc/plans/to-md-dir.md']) {
+        expect(verdictOf(callTool('Write', path)), path).toBe('deny');
+      }
+    });
+
+    it('denies a directory named like a Markdown file', () => {
+      expect(verdictOf(callTool('Write', '.omc/plans/entry-dir.md'))).toBe('deny');
+    });
+
+    it('denies a link that cannot be resolved, inside the plans directory or outside it, and links that loop', () => {
+      for (const path of [
+        '.omc/plans/dangling-in.md',
+        '.omc/plans/dangling-out.md',
+        '.omc/plans/entry-loop.md',
+        '.omc/plans/entry-loop-a.md',
+      ]) {
+        expect(verdictOf(callTool('Write', path)), path).toBe('deny');
+      }
+    });
+
+    it('denies a link to a Markdown file outside the plans directory, also when the link text goes through a directory link', () => {
+      for (const path of ['.omc/plans/to-out.md', '.omc/plans/via-link.md']) {
+        expect(verdictOf(callTool('Write', path)), path).toBe('deny');
+      }
+    });
+
+    it('denies a file that is not Markdown written directly, and an extension of another case, also through a link', () => {
+      for (const path of ['.omc/plans/state.json', '.omc/plans/x.MD', '.omc/plans/entry-upper.MD', '.omc/plans/to-upper.md']) {
+        expect(verdictOf(callTool('Write', path)), path).toBe('deny');
+      }
+    });
+
+    it('denies a path whose text names one entry and whose route through a directory link ends on a link to a file that is not Markdown', () => {
+      // .omc/plans/entry-inner is a link to .omc/plans/entry-real-dir/deep, so entry-inner/../trap.md is
+      // .omc/plans/entry-real-dir/trap.md, a link to state.json, while the normalized text names .omc/plans/trap.md.
+      expect(verdictOf(callTool('Write', '.omc/plans/entry-inner/../trap.md'))).toBe('deny');
+      writeFileSync(join(plans(), 'trap.md'), 'plan\n');
+      expect(verdictOf(callTool('Write', '.omc/plans/entry-inner/../trap.md')), 'a plain file of that name exists').toBe('deny');
+      expect(verdictOf(callTool('Write', '.omc/plans/trap.md')), 'the plain file itself').toBe('allow');
+    });
+
+    it('denies a path whose route through a directory link ends on a plain file when its normalized text ends on a link to a file that is not Markdown', () => {
+      // .omc/plans/entry-inner/../good.md is the plain file .omc/plans/entry-real-dir/good.md, while the normalized text
+      // names .omc/plans/good.md, a link to state.json: a caller that normalizes the path before it opens it writes state.json.
+      expect(verdictOf(callTool('Write', '.omc/plans/entry-inner/../good.md'))).toBe('deny');
+      expect(verdictOf(callTool('Write', '.omc/plans/entry-real-dir/good.md')), 'the plain file itself').toBe('allow');
+    });
+
+    it('still allows a Markdown file that does not exist yet and a plain Markdown file', () => {
+      for (const path of ['.omc/plans/entry-new.md', '.omc/plans/entry-real.md', '.omc/plans/entry-real-dir/new.md']) {
+        expect(verdictOf(callTool('Write', path)), path).toBe('allow');
+      }
+    });
+
+    it('logs the denial of a link to a file that is not Markdown', () => {
+      const before = logRows().length;
+      callTool('Write', '.omc/plans/alias-abs.md');
+      const added = logRows().slice(before);
+      expect(added.map((row) => [row.decision, row.path])).toEqual([['deny', '.omc/plans/alias-abs.md']]);
+    });
+  });
 });

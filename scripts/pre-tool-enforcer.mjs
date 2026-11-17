@@ -6,7 +6,7 @@
  * Cross-platform: Windows, macOS, Linux
  */
 
-import { appendFileSync, closeSync, existsSync, fstatSync, lstatSync, mkdirSync, openSync, readFileSync, readSync, readdirSync, realpathSync, renameSync, statSync, writeFileSync } from 'fs';
+import { appendFileSync, closeSync, existsSync, fstatSync, lstatSync, mkdirSync, openSync, readFileSync, readSync, readdirSync, readlinkSync, realpathSync, renameSync, statSync, writeFileSync } from 'fs';
 import { createHash } from 'crypto';
 import { delimiter, dirname, join, resolve, basename, relative, isAbsolute, parse, sep } from 'path';
 import { homedir } from 'os';
@@ -2670,15 +2670,17 @@ let contextText = null;
 // subagent whose agent_type is in the guarded list is denied unless the target is a Markdown file under <cwd>/.omc/plans/.
 // The list comes from OMC_PLANNER_WRITE_GUARD_TYPES (comma separated, exact match after trimming; default:
 // oh-my-claudecode:planner). Calls without agent_type and calls of other agent types pass. The path is normalized
-// lexically first. When the plans directory exists, the raw path is then walked from the working directory the way the
-// kernel resolves it (see walkKernelPath) and must end inside the real plans directory, and the real path of the nearest
-// existing directory above the normalized target, and of the target when it exists, must stay inside it too; a link that
-// cannot be resolved is denied. Anything else unreadable passes (fail-open). With the guard on, each call of a guarded tool adds one row to
+// lexically first. When the plans directory exists, the raw path and the normalized path are then walked from the working
+// directory the way the kernel resolves them (see walkKernelPath), and the last component is followed one link at a time
+// (see planEntryAllowed): every entry on the way must be a path that ends in .md inside the real plans directory, and the
+// entry that ends the chain must be a regular file or must not exist yet. A link that cannot be resolved, a link that loops
+// and a directory are denied. Anything else unreadable passes (fail-open). With the guard on, each call of a guarded tool adds one row to
 // plan-write-guard.jsonl in OMC_JEV_LOG_DIR or <state dir>/jev, with decision allow or deny; a call without agent_type or
 // with another agent_type adds one row with decision allow and a reason.
 const PLAN_WRITE_TOOLS = new Set(['Write', 'Edit', 'MultiEdit', 'NotebookEdit']);
 const PLAN_WRITE_DIR = join('.omc', 'plans');
 const PLAN_WRITE_EXT = '.md';
+const PLAN_WRITE_MAX_LINKS = 40;
 const PLAN_WRITE_DEFAULT_TYPES = ['oh-my-claudecode:planner'];
 
 function planWriteGuardTypes(env = process.env) {
@@ -2695,27 +2697,18 @@ function pathExists(path) {
   }
 }
 
-// True when the real path of an existing entry is `base` or inside it. A link that cannot be resolved is not inside.
-function realPathInside(path, base) {
-  try {
-    const rel = relative(base, realpathSync(path));
-    return rel === '' || (rel.split(sep)[0] !== '..' && !isAbsolute(rel));
-  } catch {
-    return false;
-  }
-}
-
 // The path the kernel reaches for `filePath`, walked from `cwd` one component at a time on the raw text: a link is followed
 // where it stands, so ".." after a link goes to the parent of the link target, not to the parent of the link. A component that
-// does not exist has no link below it; the rest is walked as text and a ".." after it only removes it again. Returns null
-// when a component cannot be resolved (a link that dangles or loops, a file used as a directory).
-function walkKernelPath(filePath, cwd) {
+// does not exist has no link below it; the rest is walked as text and a ".." after it only removes it again. With `followLast`
+// false the last component is not followed: the result is the real path of its directory joined with its name, which may be a
+// link. Returns null when a component cannot be resolved (a link that dangles or loops, a file used as a directory).
+function walkKernelPath(filePath, cwd, followLast = true) {
   try {
     const root = isAbsolute(filePath) ? parse(filePath).root : '';
     let current = realpathSync.native(root || cwd);
     let missing = 0;
-    for (const part of filePath.slice(root.length).split(process.platform === 'win32' ? /[\\/]+/ : /\/+/)) {
-      if (part === '' || part === '.') continue;
+    const parts = filePath.slice(root.length).split(process.platform === 'win32' ? /[\\/]+/ : /\/+/).filter((part) => part !== '' && part !== '.');
+    for (const [index, part] of parts.entries()) {
       if (part === '..') {
         current = dirname(current);
         if (missing > 0) missing -= 1;
@@ -2731,7 +2724,7 @@ function walkKernelPath(filePath, cwd) {
           current = next;
           continue;
         }
-        current = realpathSync.native(next);
+        current = followLast || index < parts.length - 1 ? realpathSync.native(next) : next;
       } else {
         missing += 1;
         current = next;
@@ -2743,32 +2736,50 @@ function walkKernelPath(filePath, cwd) {
   }
 }
 
+// A real directory and a name: the entry the tool opens is that name, followed through every link the way the kernel does,
+// one link at a time (the Linux limit is 40). Every entry on the way must be inside the real plans directory and end in
+// .md, so a link to a file of another extension, a link that leaves the plans directory and comes back, and a link to the
+// plans directory are denied, as are a link that dangles or loops. The entry that ends the chain must be a regular file; it
+// may be missing only when no link was followed, the way a new plan file is.
+function planEntryAllowed(entry, nativePlansDir) {
+  let current = entry;
+  for (let hop = 0; hop <= PLAN_WRITE_MAX_LINKS; hop += 1) {
+    if (current === null) return false;
+    const rel = relative(nativePlansDir, current);
+    if (rel === '' || rel.split(sep)[0] === '..' || isAbsolute(rel) || !current.endsWith(PLAN_WRITE_EXT)) return false;
+    let stat;
+    try {
+      stat = lstatSync(current);
+    } catch (error) {
+      return hop === 0 && error?.code === 'ENOENT';
+    }
+    if (!stat.isSymbolicLink()) return stat.isFile();
+    try {
+      current = walkKernelPath(readlinkSync(current), dirname(current), false);
+    } catch {
+      return false;
+    }
+  }
+  return false;
+}
+
 function planWritePathAllowed(filePath, cwd) {
   const plansDir = resolve(cwd, PLAN_WRITE_DIR);
   const target = resolve(cwd, filePath);
   const rel = relative(plansDir, target);
   if (rel === '' || rel.split(sep)[0] === '..' || isAbsolute(rel) || !rel.endsWith(PLAN_WRITE_EXT)) return false;
   if (!pathExists(plansDir)) return true;
-  let realPlansDir;
   let nativePlansDir;
   try {
-    realPlansDir = realpathSync(plansDir);
     nativePlansDir = realpathSync.native(plansDir);
   } catch {
     return false;
   }
   // The raw path as the kernel resolves it must end inside the real plans directory: a link followed by ".." in the input
-  // must not lead out of it, whether the link comes before or after the plans directory in the path.
-  const reached = walkKernelPath(filePath, cwd);
-  if (reached === null) return false;
-  const reachedRel = relative(nativePlansDir, reached);
-  if (reachedRel === '' || reachedRel.split(sep)[0] === '..' || isAbsolute(reachedRel)) return false;
-  // The normalized target is checked too, for a caller that normalizes the path before it opens it: the nearest existing
-  // directory above it must resolve inside the real plans directory, so a missing directory under a link cannot be created
-  // outside it. The target itself, when it exists, must too.
-  let ancestor = dirname(target);
-  while (!pathExists(ancestor)) ancestor = dirname(ancestor);
-  return realPathInside(ancestor, realPlansDir) && (!pathExists(target) || realPathInside(target, realPlansDir));
+  // must not lead out of it, whether the link comes before or after the plans directory in the path. The normalized target is
+  // checked the same way, for a caller that normalizes the path before it opens it.
+  return planEntryAllowed(walkKernelPath(filePath, cwd, false), nativePlansDir)
+    && planEntryAllowed(walkKernelPath(target, cwd, false), nativePlansDir);
 }
 
 function appendPlanWriteGuardRow(data, toolName, stateDir, row) {
