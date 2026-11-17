@@ -68,7 +68,60 @@ function isTokenChar(code: number): boolean {
 }
 
 /**
- * Key shapes that the regex rules above do not cover, found by one linear scan
+ * Where the value of a `NAME=value` or `NAME: value` assignment that starts at word boundary `i` begins:
+ * the index of its first character (after the opening quote, if any) and that quote (`''` for a bare value).
+ * Returns null when no assignment starts at `i`. NAME is 3 to 64 letters, digits or underscores and contains
+ * one of the phrases. Quotes and `[index]` parts (at most 64 characters up to the closing bracket) may stand
+ * between NAME and the separator, within 256 characters of the name; spaces and tabs may stand around it.
+ */
+function matchAssignment(input: string, i: number): { valueStart: number; quote: string } | null {
+  const n = input.length;
+  let j = i;
+  while (j < n && j - i < 64 && isWordChar(input.charCodeAt(j))) j++;
+  if (j - i < 3) return null;
+  const name = input.slice(i, j).toUpperCase();
+  if (!REDACT_KEY_SHAPES_PHRASES.some((phrase) => name.includes(phrase))) return null;
+  let k = j;
+  const scanEnd = Math.min(n, k + 256); // bounded lookahead: no quadratic retries on inputs like 'KEY' + '[KEY]'.repeat(10000)
+  while (k < scanEnd && (input[k] === '"' || input[k] === "'" || input[k] === '[' || input[k] === ']')) {
+    if (input[k] === '[') {
+      let z = k + 1;
+      while (z < n && z - k <= 64 && input[z] !== ']') z++;
+      k = input[z] === ']' ? z + 1 : k + 1; // an unclosed or overlong index is skipped one character at a time
+    } else {
+      k++;
+    }
+  }
+  while (k < n && (input[k] === ' ' || input[k] === '\t')) k++;
+  if (input[k] !== '=' && input[k] !== ':') return null;
+  k++;
+  while (k < n && (input[k] === ' ' || input[k] === '\t')) k++;
+  const quote = input[k] === '"' || input[k] === "'" ? input[k] : '';
+  return { valueStart: quote ? k + 1 : k, quote };
+}
+
+/**
+ * For every position p of `input`, the end of a value that is scanned from p (`ends[p]`), so that the end of
+ * any value is found in constant time and values that contain other values never make the scan quadratic.
+ * A quoted value ends at the next matching quote or line break; in double quotes a backslash escapes the
+ * next character, but never a line break; in single quotes it is literal. A bare value ends at a space, tab,
+ * line break, quote, `&`, `;`, `|`, `,`, `)` or `}`.
+ */
+function valueEnds(input: string, quote: string): Int32Array {
+  const n = input.length;
+  const ends = new Int32Array(n + 1);
+  ends[n] = n;
+  for (let p = n - 1; p >= 0; p--) {
+    const c = input[p];
+    if (quote ? c === quote || c === '\n' : ' \t\r\n"\'&;|,)}'.includes(c)) ends[p] = p;
+    else if (quote === '"' && c === '\\' && p + 1 < n && input[p + 1] !== '\n') ends[p] = ends[p + 2];
+    else ends[p] = ends[p + 1];
+  }
+  return ends;
+}
+
+/**
+ * Key shapes that the regex rules above do not cover, found in linear time
  * (no regular expressions, so no backtracking). Applied after those rules.
  *
  * - Prefixed keys: the prefix stays visible and the rest is replaced by `****`
@@ -76,109 +129,68 @@ function isTokenChar(code: number): boolean {
  * - JWTs: three base64url segments, the first starting with `eyJ`; masked as `eyJ***`.
  * - NAME=value and NAME: value, where NAME contains KEY, TOKEN, SECRET, PASSWORD,
  *   PASSWD, PASS, PWD or CREDENTIALS (matched case-insensitively, anywhere in the name).
- *   Quoted values are masked up to the matching quote on the same line.
+ *   A quoted value runs to the matching quote on the same line, or to the end of the line when the quote is
+ *   missing (a truncated preview); see valueEnds for escapes and for where a bare value ends.
+ *
+ * Every word boundary is examined on its own, by all three rules, so that nothing a rule has already matched
+ * can hide a later one: a value can contain the name of another assignment (a quote that opens the next value
+ * was taken as the closing quote, `abc:TOKEN="x"`), and a key can be followed by one (`sk-...-PASSWORD=x`).
+ * Masks that overlap are merged into one. The only starts that are skipped are those that provably end where
+ * the start before them ended (inside the run of characters of a key or of a JWT's first segment), so their
+ * masks lie inside masks that were already made.
  */
 function redactKeyShapes(input: string): string {
   if (typeof input !== 'string' || input.length === 0) return input;
   const n = input.length;
   const ranges: Array<[start: number, end: number, mask: string]> = [];
-  let i = 0;
-  // After a failed JWT check the token run [i, j) has no dot after its first segment, so every "eyJ"
-  // starting inside it fails the same way; skip them to keep the scan linear.
-  let jwtSkipUntil = -1;
-  while (i < n) {
-    if (i > 0 && isWordChar(input.charCodeAt(i - 1))) { i++; continue; } // not a word boundary (\b)
-    let hit: [number, number, string] | null = null;
-    // Check for NAME=value or NAME: value assignments FIRST (takes precedence over prefixes)
-    // with an optional ["index"] or quotes after the name
-    let j = i;
-    while (j < n && j - i < 64 && isWordChar(input.charCodeAt(j))) j++;
-    const name = input.slice(i, j).toUpperCase();
-    if (j - i >= 3 && REDACT_KEY_SHAPES_PHRASES.some((phrase) => name.includes(phrase))) {
-      let k = j;
-      // Scan through optional quotes and brackets (e.g. NAME["index"] or NAME['key'])
-      // to find the assignment separator. Bound the total scan to avoid quadratic retries
-      // on inputs like 'KEY' + '[KEY]'.repeat(10000).
-      const maxBracketScan = Math.min(256, n - k); // limit lookahead to 256 chars from name end
-      const scanEnd = k + maxBracketScan;
-      while (k < scanEnd && (input[k] === '"' || input[k] === "'" || input[k] === '[' || input[k] === ']')) {
-        if (input[k] === '[') {
-          let z = k + 1;
-          while (z < n && z - k <= 64 && input[z] !== ']') z++;
-          k = input[z] === ']' ? z + 1 : k + 1;
-        } else {
-          k++;
-        }
-      }
-      while (k < n && (input[k] === ' ' || input[k] === '\t')) k++;
-      if (input[k] === '=' || input[k] === ':') {
-        k++;
-        while (k < n && (input[k] === ' ' || input[k] === '\t')) k++;
-        const quote = input[k] === '"' || input[k] === "'" ? input[k] : '';
-        if (quote) k++;
-        const valueStart = k;
-        let valueEnd = valueStart;
-        if (quote) {
-          // quoted value: up to the matching closing quote (not escaped) on the same line, or to line/input end
-          while (valueEnd < n && input[valueEnd] !== '\n') {
-            if (quote === '"' && input[valueEnd] === '\\' && valueEnd + 1 < n) {
-              // Skip escaped character (including escaped quotes) - only in double quotes
-              // In single quotes, backslashes are literal
-              valueEnd += 2;
-            } else if (input[valueEnd] === quote) {
-              // Found closing quote
-              break;
-            } else {
-              valueEnd++;
-            }
-          }
-          // Mask if we found content, even if the closing quote is missing (truncated input)
-          if (valueEnd > valueStart) hit = [valueStart, valueEnd, '****'];
-        } else {
-          // bare value: up to a separator, like [^\s"'&;|),}]+
-          while (valueEnd < n && !' \t\r\n"\'&;|,)}'.includes(input[valueEnd])) valueEnd++;
-          if (valueEnd > valueStart) hit = [valueStart, valueEnd, '****'];
-        }
-      }
+  const ends = new Map<string, Int32Array>();
+  let keySkipUntil = 0;
+  let jwtSkipUntil = 0;
+  for (let i = 0; i < n; i++) {
+    if (i > 0 && isWordChar(input.charCodeAt(i - 1))) continue; // not a word boundary (\b)
+    const assignment = matchAssignment(input, i);
+    if (assignment) {
+      const { valueStart, quote } = assignment;
+      let table = ends.get(quote);
+      if (!table) ends.set(quote, (table = valueEnds(input, quote)));
+      if (table[valueStart] > valueStart) ranges.push([valueStart, table[valueStart], '****']);
     }
-    // If no assignment match, check for prefixes
-    if (!hit) {
+    if (i >= keySkipUntil) {
       for (const [prefix, minLength] of REDACT_KEY_SHAPES_PREFIXES) {
         if (!input.startsWith(prefix, i)) continue;
-        let j2 = i + prefix.length;
-        while (j2 < n && isTokenChar(input.charCodeAt(j2))) j2++;
-        if (j2 - (i + prefix.length) >= minLength) hit = [i + prefix.length, j2, '****'];
+        let j = i + prefix.length;
+        while (j < n && isTokenChar(input.charCodeAt(j))) j++;
+        if (j - (i + prefix.length) >= minLength) {
+          ranges.push([i + prefix.length, j, '****']);
+          keySkipUntil = j;
+        }
         break; // at most one prefix can match at a position
       }
     }
-    // If no prefix match, check for JWT patterns
-    if (!hit && i >= jwtSkipUntil && input.startsWith('eyJ', i)) {
-      let j2 = i + 3;
-      while (j2 < n && isTokenChar(input.charCodeAt(j2))) j2++;
-      if (j2 - i >= 11 && input[j2] === '.') {
-        let k = j2 + 1;
+    if (i >= jwtSkipUntil && input.startsWith('eyJ', i)) {
+      let j = i + 3;
+      while (j < n && isTokenChar(input.charCodeAt(j))) j++;
+      jwtSkipUntil = j; // an "eyJ" inside this run ends its first segment at j as well and meets the same later segments
+      if (j - i >= 11 && input[j] === '.') {
+        let k = j + 1;
         while (k < n && isTokenChar(input.charCodeAt(k))) k++;
-        if (k - (j2 + 1) >= 8 && input[k] === '.') {
+        if (k - (j + 1) >= 8 && input[k] === '.') {
           let m = k + 1;
           while (m < n && isTokenChar(input.charCodeAt(m))) m++;
-          if (m - (k + 1) >= 8) hit = [i + 3, m, '***'];
+          if (m - (k + 1) >= 8) ranges.push([i + 3, m, '***']);
         }
       }
-      if (!hit) jwtSkipUntil = j2;
     }
-    if (hit) {
-      ranges.push(hit);
-      i = hit[1];
-      continue;
-    }
-    i++;
   }
   if (ranges.length === 0) return input;
   ranges.sort((a, b) => a[0] - b[0]);
   let out = '';
   let pos = 0;
   for (const [start, end, mask] of ranges) {
-    if (start < pos) continue; // overlap: the earlier mask wins
+    if (start < pos) { // overlap: merge into the earlier mask
+      if (end > pos) pos = end;
+      continue;
+    }
     out += input.slice(pos, start) + mask;
     pos = end;
   }

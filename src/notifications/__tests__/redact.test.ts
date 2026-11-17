@@ -309,102 +309,218 @@ describe('redactTokens key-shape masking (OMC_REDACT_KEY_SHAPES=1)', () => {
       expect(redactTokens('PASSWORD reset completed')).toBe('PASSWORD reset completed');
     });
 
-    // P1: Mask unterminated quoted values in truncated log previews
-    it('masks unterminated quoted values (closing quote cut off)', () => {
-      // Simulates a password truncated at 50 chars before the closing quote
-      const truncatedPassword = `PASSWORD='verylongpasswordthatgetstruncatedbeforeclosingquote`;
-      const result = redactTokens(truncatedPassword);
-      // Should mask the value even though the closing quote is missing
-      expect(result).toContain('PASSWORD=\'****');
-      expect(result).not.toContain('verylongpasswordthatgetstruncatedbeforeclosingquote');
+    describe('quoted values', () => {
+      it('masks an unterminated quoted value up to the end of the line (closing quote cut off)', () => {
+        expect(redactTokens("PASSWORD='verylongpasswordthatgetstruncated")).toBe("PASSWORD='****");
+        expect(redactTokens('PASSWORD="abc\nTOKEN=x')).toBe('PASSWORD="****\nTOKEN=****');
+      });
+
+      it('skips an escaped quote in double quotes', () => {
+        const input = `CONFIG='{"PASSWORD": "start\\"sensitive-suffix"}'`;
+        expect(redactTokens(input)).toBe(`CONFIG='{"PASSWORD": "****"}'`);
+      });
+
+      it('treats a backslash in single quotes as a literal character', () => {
+        expect(redactTokens("PASSWORD='abc\\' TOKEN='secret'")).toBe("PASSWORD='****' TOKEN='****'");
+      });
+
+      it('does not let a backslash escape a line break', () => {
+        expect(redactTokens(['PASSWORD="abc\\', 'TOKEN="canary"'].join('\n'))).toBe('PASSWORD="****\nTOKEN="****"');
+      });
     });
 
-    // P1: Skip escaped quotes when locating a secret's closing quote
-    it('skips escaped quotes when finding the closing quote', () => {
-      // JSON.stringify result with escaped quote in the password
-      const jsonWithEscapedQuote = `CONFIG='{"PASSWORD": "start\\"sensitive-suffix"}'`;
-      const result = redactTokens(jsonWithEscapedQuote);
-      // Should mask the entire value, not stop at the escaped quote
-      expect(result).toContain('****');
-      expect(result).not.toContain('sensitive-suffix');
+    // A value can end at a quote that really opens the next value, so that the next assignment's name is
+    // inside the first value. The value after that name must be masked anyway.
+    describe('an assignment name inside the previous value', () => {
+      it('quote taken as closing: escaped quote in a double-quoted value', () => {
+        expect(redactTokens('PASSWORD="abc\\" TOKEN="canary"')).toBe('PASSWORD="****"****"');
+      });
+
+      it('quote eaten by the Bearer rule', () => {
+        expect(redactTokens('TOKEN="Bearer abc" PASSWORD="canary"')).toBe('TOKEN="****"****"');
+      });
+
+      it('quote eaten by the Bot rule, which has no word boundary (robot)', () => {
+        expect(redactTokens('TOKEN="robot abc" PASSWORD="canary"')).toBe('TOKEN="****"****"');
+      });
+
+      it('bare value that ends at the quote opening the next value', () => {
+        expect(redactTokens('KEY=abc:TOKEN="canary"')).toBe('KEY=****"****"');
+        expect(redactTokens("KEY=a:PASSWORD='canary'")).toBe("KEY=****'****'");
+      });
+
+      it('merges overlapping masks: the second value ends after the first', () => {
+        expect(redactTokens(`TOKEN="x PASSWORD='canary" more'`)).toBe(`TOKEN="****'`);
+      });
+
+      it('two names nested in one value: the value of the first one runs past the end of the outer value', () => {
+        expect(redactTokens(`KEY="TOKEN='aa PWD=b" cc'`)).toBe(`KEY="****'`);
+      });
+
+      it('a name after a key is examined too (sk-...-PASSWORD=secret)', () => {
+        expect(redactTokens('sk-abcdefghijkl-PASSWORD=secretvalue')).toBe('sk-****=****');
+      });
+
+      it('a JWT that starts inside a key is masked up to its own end', () => {
+        expect(redactTokens('sk-abcdefghijkl-eyJabcdefghij.abcdefgh.abcdefgh')).toBe('sk-****');
+      });
     });
 
-    // P2: Bound the optional-index scan to avoid quadratic retries
-    it('handles degenerate bracket patterns efficiently', () => {
-      // This would cause quadratic behavior if not bounded: 'KEY' repeated with brackets
-      const degenerate = 'KEY' + '[KEY]'.repeat(20000);
-      const start = performance.now();
-      const result = redactTokens(degenerate);
-      const elapsed = performance.now() - start;
-      // Should complete in reasonable time (< 500ms even on slower machines)
-      expect(elapsed).toBeLessThan(500);
-      expect(result).toBeTruthy(); // Basic sanity check
+    describe('prefix shapes and assignments are independent rules', () => {
+      it('masks the value of an assignment whose name has a key prefix shape (and the name, which is a key shape)', () => {
+        expect(redactTokens('hf_token_long_variable_name=canary')).toBe('hf_****=****');
+      });
+
+      it('masks a key that contains a name phrase and is followed by a colon', () => {
+        expect(redactTokens('gsk_abcKEYdefghijklmnopqrstuvwxyz: ok')).toBe('gsk_****: ****');
+      });
     });
 
-    it('long degenerate inputs without hits come back unchanged', () => {
-      expect(redactTokens('eyJ-'.repeat(25000))).toBe('eyJ-'.repeat(25000));
-      expect(redactTokens('a-'.repeat(50000))).toBe('a-'.repeat(50000));
+    describe('index between the name and the separator', () => {
+      it('skips closed indexes', () => {
+        expect(redactTokens("CONFIG_PASSWORD['key1']['key2']=secret")).toBe("CONFIG_PASSWORD['key1']['key2']=****");
+      });
+
+      it('recovers from an index that is never closed: the separator after it and the next assignment are still found', () => {
+        expect(redactTokens('CREDENTIALS["abc TOKEN=canary')).toBe('CREDENTIALS["abc TOKEN=****');
+        expect(redactTokens('PASSWORD[=hunter2')).toBe('PASSWORD[=****');
+      });
+
+      it('accepts an index of 64 characters and not one of 65 (documented limit); later assignments are masked', () => {
+        const index = (length: number) => '"' + 'a'.repeat(length - 2) + '"';
+        expect(redactTokens(`CREDENTIALS[${index(64)}]=secret`)).toBe(`CREDENTIALS[${index(64)}]=****`);
+        expect(redactTokens(`CREDENTIALS[${index(65)}]=secret TOKEN=canary`)).toBe(`CREDENTIALS[${index(65)}]=secret TOKEN=****`);
+      });
+
+      it('looks ahead at most 256 characters for the separator (documented limit)', () => {
+        expect(redactTokens('KEY' + '[a]'.repeat(80) + '=secret')).toBe('KEY' + '[a]'.repeat(80) + '=****');
+        expect(redactTokens('KEY' + '[a]'.repeat(100) + '=secret TOKEN=canary')).toBe('KEY' + '[a]'.repeat(100) + '=secret TOKEN=****');
+      });
+
+      it('an index can contain = or : and the names of other assignments, which are masked on their own', () => {
+        expect(redactTokens('KEY[a=b]=secret')).toBe('KEY[a=b]=****');
+        expect(redactTokens('KEY[x:y]: secret')).toBe('KEY[x:y]: ****');
+        expect(redactTokens('KEY[ TOKEN=canary ]=x')).toBe('KEY[ TOKEN=**** ]=****');
+        expect(redactTokens('KEY[ TOKEN: canary ]=x')).toBe('KEY[ TOKEN: **** ]=****');
+        expect(redactTokens('CREDENTIALS["registry:5000"]=secret')).toBe('CREDENTIALS["registry:5000"]=****');
+      });
     });
 
-    // P1: Preserve literal backslashes in single-quoted assignments
-    it('handles literal backslashes in single-quoted values', () => {
-      // In shell, backslashes inside single quotes are literal (not escape characters)
-      // A sequence like PASSWORD='abc\' TOKEN='secret' should not skip the closing quote
-      const shellReply = "PASSWORD='abc\\' TOKEN='secret'";
-      const result = redactTokens(shellReply);
-      // Should mask both PASSWORD and TOKEN values, not expose the token name or its value
-      expect(result).toContain("PASSWORD='****'");
-      expect(result).toContain("TOKEN='****'");
-      expect(result).not.toContain('abc\\');
-      expect(result).not.toContain('secret');
-    });
-
-    // P2: Give assignment matching precedence over prefix-shaped names
-    it('masks assignment values, not prefix-matched identifiers with TOKEN', () => {
-      // hf_ is a prefix in REDACT_KEY_SHAPES_PREFIXES (Hugging Face token prefix)
-      // But if the full identifier is part of a NAME=value assignment, the value should be masked
-      const hfToken = 'hf_token_long_variable_name=canary';
-      const result = redactTokens(hfToken);
-      // Should mask the value 'canary', not the identifier prefix
-      expect(result).toContain('****');
-      expect(result).not.toContain('canary');
-      // The hf_ prefix should stay visible
-      expect(result).toContain('hf_');
-    });
-
-    // P1: Cover malformed-index recovery with regression tests
-    it('handles unterminated brackets via bounded fallback without crashing', () => {
-      // When an index is opened but not closed within 64 chars, the bounded scan triggers fallback (k = k + 1)
-      // This tests that the fallback code path executes without errors
-      const malformedIndex = `CREDENTIALS['a_very_long_string_that_exceeds_64_chars_and_has_no_closing_bracket_so_we_just_move_on_inside'=secret`;
-      const result = redactTokens(malformedIndex);
-      // Verify the function completes without crashing; malformed bracket is an edge case
-      expect(result).toBeTruthy();
-      expect(typeof result).toBe('string');
-    });
-
-    it('handles multiple properly-closed brackets before assignment', () => {
-      // Multiple brackets encountered before the assignment separator
-      // The bracket scan loop should handle them and continue until the separator is found
-      // This exercises the bracket scan loop iteration path
-      const withPhrase = `CONFIG_PASSWORD['key1']['key2']=secret`;
-      const result = redactTokens(withPhrase);
-      expect(result).toContain('****');
-      expect(result).not.toContain('secret');
-    });
-
-    it('stays near-linear on large inputs: 100 000 characters within a loose 1000 ms budget', () => {
-      const base = 'Report of the stage: the module was reviewed, tests passed, result saved in the work directory. ';
-      const inputs = [
-        base.repeat(Math.ceil(100000 / base.length)).slice(0, 100000),
-        'eyJ-'.repeat(25000),
-        'a-'.repeat(50000),
+    describe('JWT rejection', () => {
+      const validJwt = 'eyJ' + 'A'.repeat(20) + '.' + 'B'.repeat(20) + '.' + 'C'.repeat(20);
+      const rejected = [
+        ['second segment too short', 'eyJabcdefghij.abc.defghijkl'],
+        ['third segment too short', 'eyJabcdefghij.abcdefgh.xyz'],
+        ['no third segment', 'eyJabcdefghij.abcdefghijk'],
+        ['first segment too short', 'eyJabc.abcdefgh.abcdefgh'],
       ];
-      for (const input of inputs) {
-        redactTokens(input); // warm-up
-        const start = performance.now();
-        redactTokens(input);
-        expect(performance.now() - start).toBeLessThan(1000);
+
+      it.each(rejected)('%s: stays unchanged, a later JWT and a later assignment are still masked', (_name, text) => {
+        expect(redactTokens(text)).toBe(text);
+        expect(redactTokens(`${text} ${validJwt}`)).toBe(`${text} eyJ***`);
+        expect(redactTokens(`${text} TOKEN=canary`)).toBe(`${text} TOKEN=****`);
+      });
+    });
+
+    // Property check with a seeded generator. Every fragment that carries a canary must lose it, whatever the
+    // fragments before and after it look like (quotes, backslashes, line breaks, Bearer/Bot words, nested names).
+    describe('no canary survives (generated inputs)', () => {
+      const names = ['TOKEN', 'PASSWORD', 'api_key', 'hf_token_long_name', 'CREDENTIALS["k"]', 'CREDENTIALS["registry:5000"]', "KEY['a=b']", 'MY_SECRET', 'pwd', 'KEY'];
+      // a name nested in a value must not contain a quote character itself
+      const nestedNames = names.map((name) => name.replace(/["']/g, ''));
+      const separators = ['=', ':', ' = ', ': '];
+      const bareLeads = ['', 'Bearer ', 'Bot ', 'robot ', 'abc\\', 'abc:', 'ab\\\\', 'x:TOKEN=', "a:PASSWORD='"];
+      const quotedLeads = [...bareLeads, 'a b '];
+      const joiners = [' ', '\n', '\r\n', '; ', ', '];
+      // fragments without a canary that leave an odd quote, backslash or Bearer/Bot word behind
+      const junk = ['PASSWORD="abc\\"', "PASSWORD='abc\\'", 'PASSWORD="abc\\', 'KEY="abc', "KEY='abc", 'robot "', 'Bearer abc"',
+        'x "', "x '", 'TOKEN=a:', 'KEY[', 'KEY["abc', '"', "'", '\\', '[', ']', 'sk-abcdefghijkl'];
+
+      it('masks every canary in 2000 generated inputs', () => {
+        let seed = 20261117;
+        const rand = (): number => {
+          seed = (seed * 1664525 + 1013904223) >>> 0;
+          return seed / 4294967296;
+        };
+        const pick = <T,>(items: T[]): T => items[Math.floor(rand() * items.length)];
+        let canaries = 0;
+        const canary = (): string => `canary${(canaries++).toString(36)}z`;
+        const fragment = (): [text: string, found: string[]] => {
+          if (rand() < 0.25) return [pick(junk), []];
+          const c = canary();
+          const kind = rand();
+          if (kind < 0.15) {
+            return [`{"${pick(nestedNames)}"${pick([':', ': ', ' : '])}"${pick(['', 'a b ', 'Bearer '])}${c}"}`, [c]];
+          }
+          if (kind < 0.3) {
+            // two names nested in one value; the value of the first one can run past the end of the outer value
+            const outer = pick(['"', "'"]);
+            const inner = pick(['"', "'", '']);
+            const [c2, c3] = [canary(), canary()];
+            const tail = inner && inner !== outer ? c3 : 'tail';
+            const nested = `${pick(nestedNames)}=${inner}${c} ${pick(nestedNames)}${pick(['=', ': '])}${c2}${outer}${tail}${inner}`;
+            return [`${pick(names)}=${outer}outer ${nested}`, inner && inner !== outer ? [c, c2, c3] : [c, c2]];
+          }
+          if (kind < 0.4) {
+            // a name right after a key: the key mask must not hide it
+            return [`${pick(['sk-abcdefghijkl', 'hf_abcdefghijklmnopqrstu', 'gsk_abcdefghijklmnopqrstu'])}-${pick(nestedNames)}=${c}`, [c]];
+          }
+          const quote = pick(['', '"', "'", '"+', "'+"]); // a trailing + means: the closing quote is missing
+          const open = quote.slice(0, 1);
+          const close = quote.length === 1 ? quote : '';
+          return [`${pick(names)}${pick(separators)}${open}${pick(open ? quotedLeads : bareLeads)}${c}${close}`, [c]];
+        };
+        let masked = 0;
+        for (let t = 0; t < 2000; t++) {
+          const parts: string[] = [];
+          const found: string[] = [];
+          const count = 1 + Math.floor(rand() * 6);
+          for (let f = 0; f < count; f++) {
+            const [text, cs] = fragment();
+            parts.push(text);
+            found.push(...cs);
+            if (f < count - 1) parts.push(pick(joiners));
+          }
+          const input = parts.join('');
+          const output = redactTokens(input);
+          const leaked = found.filter((c) => output.includes(c));
+          expect(leaked, `${JSON.stringify(input)} -> ${JSON.stringify(output)}`).toEqual([]);
+          if (found.length > 0) masked++;
+        }
+        expect(masked).toBeGreaterThan(1800); // the generator really produces canaries
+      });
+    });
+
+    // Inputs for which a quadratic scan takes seconds; the strict timing tests below are off by default, so this
+    // loose check is the one that runs everywhere.
+    const degenerateInputs: Array<[name: string, input: string]> = [
+      ['prose', 'The module was reviewed, the tests passed and the result was saved in the work directory. '.repeat(1200)],
+      ['eyJ- repeated', 'eyJ-'.repeat(30000)],
+      ['a- repeated', 'a-'.repeat(60000)],
+      ['sk- repeated', 'sk-'.repeat(40000)],
+      ['a key followed by a name', 'sk-abcdefghijkl-PASSWORD=x '.repeat(4000)],
+      ['JWTs in a row', 'eyJabcdefghij.abcdefgh.'.repeat(5000)],
+      ['index openers', 'KEY['.repeat(30000)],
+      ['indexes of one character', 'KEY' + '[KEY]'.repeat(24000)],
+      ['256 index openers per name', ('KEY' + '['.repeat(256)).repeat(460)],
+      ['names that are values of names', 'a_KEY='.repeat(20000)],
+      ['unterminated quotes', 'KEY="'.repeat(24000)],
+      ['bare values that contain names', 'KEY=a:'.repeat(20000) + '"'],
+      ['escapes at the end of the quote', 'KEY="\\'.repeat(20000)],
+      ['alternating quote types', `PASSWORD="a'TOKEN='b"c'KEY="`.repeat(5000)],
+    ];
+
+    it.each(degenerateInputs)('stays near-linear on %s: more than 100 000 characters within a loose 1000 ms budget', (_name, input) => {
+      expect(input.length).toBeGreaterThan(100000);
+      redactTokens(input); // warm-up
+      const start = performance.now();
+      redactTokens(input);
+      expect(performance.now() - start).toBeLessThan(1000);
+    });
+
+    it('long inputs without any hit come back unchanged', () => {
+      for (const [name, input] of degenerateInputs.filter(([name]) => ['eyJ- repeated', 'a- repeated', 'index openers', 'indexes of one character'].includes(name))) {
+        expect(redactTokens(input) === input, name).toBe(true);
       }
     });
 
