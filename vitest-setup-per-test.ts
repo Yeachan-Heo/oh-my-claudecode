@@ -2,11 +2,12 @@
  * Per-test file setup for vitest to prevent pollution of checkout .omc/
  * 
  * This setup is run for each test file (via setupFiles in vitest.config.ts).
- * It creates a temp directory for each test file and sets OMC_STATE_DIR to point
- * to a temp location, ensuring that state is not written to the checkout's .omc/.
+ * It does NOT force OMC_STATE_DIR globally (that breaks fixture-based tests).
+ * Instead, it provides helper functions for tests that need isolated state.
  *
- * Tests can opt-out by setting VITEST_SKIP_OMC_ISOLATION=1 in their describe block
- * or as a test-level config (needed for fixture-based tests that verify specific paths).
+ * Tests that need isolated OMC state can call createIsolatedOmcStateDir() in their setup.
+ * Fixture-based tests like session-start-precompact-restore use their own .omc/ paths
+ * and do NOT use OMC_STATE_DIR (finding P1).
  */
 
 import { mkdtempSync, realpathSync } from 'fs';
@@ -16,7 +17,7 @@ import { createRequire } from 'module';
 
 const require = createRequire(import.meta.url);
 
-// Store original OMC_STATE_DIR in case a test wants to restore it
+// Store original OMC_STATE_DIR before any per-test setup modifies it
 const savedOMC_STATE_DIR = process.env.OMC_STATE_DIR;
 
 // Capture original home before setup modified it (finding P5)
@@ -24,36 +25,46 @@ const savedOMC_STATE_DIR = process.env.OMC_STATE_DIR;
 const originalHome = process.env.__VITEST_ORIG_HOME || homedir();
 process.env.__VITEST_ORIG_HOME = originalHome;
 
-// Use the shared state root if available, otherwise fall back to creating individual dirs (finding P4)
+// Use the shared state root if available for tests that opt-in to isolation (finding P4)
 const stateRoot = process.env.__VITEST_STATE_ROOT || tmpdir();
-const testOmcStateDir = realpathSync.native(mkdtempSync(join(stateRoot, 'vitest-omc-state-')));
-process.env.OMC_STATE_DIR = testOmcStateDir;
-process.env.__VITEST_CUR_STATE_DIR = testOmcStateDir;
 
-// Import and clear the worktree-paths cache to ensure it uses the new OMC_STATE_DIR
-// This must happen after setting the env var
-try {
-  const mod = require('./src/lib/worktree-paths.js');
-  if (typeof mod.clearWorktreeCache === 'function') {
-    mod.clearWorktreeCache();
-  }
-} catch {
-  // Module might not be loaded yet, that's fine - it will use the env var when it is
+/**
+ * Helper for tests that need isolated OMC state.
+ * Call this in your test's beforeAll() to create an isolated state dir.
+ * Example:
+ *   beforeAll(() => {
+ *     const stateDir = createIsolatedOmcStateDir();
+ *     process.env.OMC_STATE_DIR = stateDir;
+ *   });
+ */
+export function createIsolatedOmcStateDir(): string {
+  const testOmcStateDir = realpathSync.native(mkdtempSync(join(stateRoot, 'vitest-omc-state-')));
+  return testOmcStateDir;
 }
 
-// Export reset function for tests that need to opt-out of isolation
-export function restoreLocalOmcState() {
-  if (savedOMC_STATE_DIR === undefined) {
-    delete process.env.OMC_STATE_DIR;
-  } else {
-    process.env.OMC_STATE_DIR = savedOMC_STATE_DIR;
-  }
+/**
+ * Helper to clear worktree-paths cache when OMC_STATE_DIR changes.
+ * Call this after changing OMC_STATE_DIR in your test.
+ */
+export function clearOmcPathsCache(): void {
   try {
     const mod = require('./src/lib/worktree-paths.js');
     if (typeof mod.clearWorktreeCache === 'function') {
       mod.clearWorktreeCache();
     }
   } catch {
-    // ignore
+    // Module might not be loaded yet, that's fine
   }
+}
+
+/**
+ * Restore original OMC_STATE_DIR (for tests that temporarily override it).
+ */
+export function restoreOriginalOmcStateDir(): void {
+  if (savedOMC_STATE_DIR === undefined) {
+    delete process.env.OMC_STATE_DIR;
+  } else {
+    process.env.OMC_STATE_DIR = savedOMC_STATE_DIR;
+  }
+  clearOmcPathsCache();
 }

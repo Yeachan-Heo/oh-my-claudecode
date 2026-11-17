@@ -176,8 +176,11 @@ describe('session-start.mjs PreCompact checkpoint restore (issue #3730)', () => 
 
   beforeAll(() => {
     // PreCompact tests manage their own temp directories with explicit paths.
-    // Clear OMC_STATE_DIR so getOmcRoot() returns {tempDir}/.omc not a centralized temp.
-    // The per-test setup sets OMC_STATE_DIR, but this test manages its own state (finding P1)
+    // This test does NOT use OMC_STATE_DIR; instead it manages state directly in {project}/.omc.
+    // The per-test setup no longer forces OMC_STATE_DIR globally (finding P1).
+    // If OMC_STATE_DIR was inherited, delete it so getOmcRoot() uses the checkout's .omc.
+    delete process.env.OMC_STATE_DIR;
+    clearWorktreeCache();
     delete process.env.OMC_STATE_DIR;
     clearWorktreeCache();
   });
