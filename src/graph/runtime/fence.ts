@@ -149,9 +149,26 @@ export class FileOwnershipFence implements OwnershipFence {
   }
 
   async acquire(): Promise<FenceAcquireResult> {
+    return this.acquireSync();
+  }
+
+  /**
+   * Synchronous form of acquire() for offline maintenance such as `omc graph gc`: the protocol is the same
+   * and all of its work is synchronous.
+   */
+  acquireSync(): FenceAcquireResult {
     return withContainedOperations(this.runDir(), (operations) =>
       this.acquireAt(operations),
     );
+  }
+
+  /**
+   * Closes the descriptor of the held lock and leaves the lock file and the epoch sidecar alone. For a
+   * caller that has moved the whole run directory away while holding the lock, where release() could no
+   * longer find the lock by its path.
+   */
+  closeHeldDescriptor(): void {
+    this.clearHeld();
   }
 
   private acquireAt(operations: DirectoryOperations): FenceAcquireResult {

@@ -36,8 +36,15 @@
  *     protect a run.
  *   - A torn last journal line is copied to `journal.jsonl.torn-<stamp>` before the journal is
  *     truncated. This command never deletes such a copy: a run that holds one is kept.
- *   - Removal walks the tree with lstat and never follows a symbolic link: a link is unlinked,
- *     its target is left alone.
+ *   - Removal takes ownership of the run first, through the same single-writer fence the runtime uses: a run that is
+ *     owned, or whose ownership cannot be taken, is not removed. While it holds the lock it moves the run directory
+ *     to `.deleted-<run id>-<time>-<random>` under the runs root (an atomic rename, so no process can resume the run
+ *     from then on) and deletes the moved directory. A directory left behind by an interrupted removal is finished by
+ *     the next pass, unless the lock inside it still names a live process.
+ *   - Removal never follows a symbolic link: a link is unlinked, its target is left alone. On Linux every directory
+ *     is opened without following links and its entries are removed relative to that open directory, so a
+ *     directory swapped for a link while the tree is walked cannot redirect the removal. Other platforms walk
+ *     the moved directory by path with lstat.
  *   - An invalid retention value stops the command before anything is touched.
  */
 
@@ -57,7 +64,9 @@ import {
   unlinkSync,
   writeSync,
 } from "node:fs";
+import { randomBytes } from "node:crypto";
 import { basename, dirname, join, resolve } from "node:path";
+import { FileOwnershipFence } from "./fence.js";
 import { RUN_ID_PATTERN } from "./run-dir.js";
 
 export const GC_SWITCH_ENV = "OMC_GRAPH_GC";
@@ -221,7 +230,10 @@ export function leaseOf(runDir: string): LeaseState {
   if (!stat.isFile() || stat.size > MAX_LOCK_BYTES) return { held: true, reason: "lock-not-a-small-file" };
   let pid: unknown;
   try {
-    pid = (JSON.parse(readFileSync(lockPath, "utf8")) as Json).pid;
+    // Opened without following a link and refused when not a regular file, even if the entry was swapped after the lstat.
+    const bytes = readRunFile(runDir, LOCK_FILE_NAME);
+    if (bytes.length > MAX_LOCK_BYTES) return { held: true, reason: "lock-not-a-small-file" };
+    pid = (JSON.parse(bytes.toString("utf8")) as Json).pid;
   } catch {
     return { held: true, reason: "lock-unparseable" };
   }
@@ -491,14 +503,16 @@ export function scanRuns({
 
   for (const entry of readdirSync(realRoot, { withFileTypes: true })) {
     const id = entry.name;
-    // Handle quarantined directories from previous failed deletions
+    // A directory left behind by a removal that was interrupted after the move (see quarantineRun). It cannot be a
+    // run: a run id never starts with a dot. It is finished unless the lock inside it names a live process (another
+    // pass may still be deleting it).
     if (id.startsWith(QUARANTINE_PREFIX)) {
-      if (!entry.isDirectory()) {
-        scan.skipped.push({ id, reason: "not-a-directory" });
-        continue;
-      }
       if (entry.isSymbolicLink()) {
         scan.skipped.push({ id, reason: "symbolic-link" });
+        continue;
+      }
+      if (!entry.isDirectory()) {
+        scan.skipped.push({ id, reason: "not-a-directory" });
         continue;
       }
       const runDir = join(realRoot, id);
@@ -509,11 +523,11 @@ export function scanRuns({
         scan.runs.push({ id, decision: "keep", reason: "unreadable", state: null, bytes: 0, newestMs: null, torn: false });
         continue;
       }
-      // Quarantined directories are always marked for deletion as failed cleanup attempts
+      const lease = leaseOf(runDir);
       scan.runs.push({
         id,
-        decision: "delete",
-        reason: "quarantine-cleanup",
+        decision: lease.held ? "keep" : "delete",
+        reason: lease.held ? lease.reason : "quarantine-cleanup",
         state: null,
         bytes: measured.bytes,
         newestMs: measured.newestMs,
@@ -585,9 +599,58 @@ export function scanRuns({
   return scan;
 }
 
-function removeTree(path: string): void {
+// Removes the directory at `path` and everything below it, never following a symbolic link: a link is unlinked
+// itself. `afterLstat` is a test-only interlock that runs between the check of an entry and its use.
+export function removeTree(path: string, interlock: { afterLstat?: (path: string) => void } = {}): void {
+  if (process.platform === "linux") {
+    removeTreeAnchored(path, interlock);
+    return;
+  }
+  removeTreeByPath(path, interlock);
+}
+
+// Linux: every directory is opened with O_NOFOLLOW|O_DIRECTORY, and its entries are checked and removed through
+// /proc/self/fd/<fd>/<name>, which names the opened directory itself. A directory swapped for a symbolic link after
+// the check makes the open fail (ELOOP or ENOTDIR) instead of being followed, and rmdir and unlink never follow
+// the last component.
+function removeTreeAnchored(path: string, interlock: { afterLstat?: (path: string) => void }): void {
+  const fd = openSync(path, fsConstants.O_RDONLY | (fsConstants.O_DIRECTORY ?? 0) | NOFOLLOW);
+  try {
+    removeEntriesOf(fd, interlock);
+  } finally {
+    closeSync(fd);
+  }
+  rmdirSync(path);
+}
+
+function removeEntriesOf(directoryFd: number, interlock: { afterLstat?: (path: string) => void }): void {
+  const anchor = `/proc/self/fd/${directoryFd}`;
+  for (const name of readdirSync(anchor)) {
+    const entry = `${anchor}/${name}`;
+    const stat = lstatSync(entry);
+    if (!stat.isDirectory()) {
+      unlinkSync(entry);
+      continue;
+    }
+    interlock.afterLstat?.(entry);
+    const childFd = openSync(entry, fsConstants.O_RDONLY | (fsConstants.O_DIRECTORY ?? 0) | NOFOLLOW);
+    try {
+      const opened = fstatSync(childFd);
+      if (opened.dev !== stat.dev || opened.ino !== stat.ino) throw new Error("a directory changed while it was removed");
+      removeEntriesOf(childFd, interlock);
+    } finally {
+      closeSync(childFd);
+    }
+    rmdirSync(entry);
+  }
+}
+
+// Other platforms have no directory-relative path form in Node: walk by path with lstat. The tree is the run
+// directory that removeRun has already moved out of the runs namespace.
+function removeTreeByPath(path: string, interlock: { afterLstat?: (path: string) => void }): void {
   if (lstatSync(path).isDirectory()) {
-    for (const name of readdirSync(path)) removeTree(join(path, name));
+    interlock.afterLstat?.(path);
+    for (const name of readdirSync(path)) removeTreeByPath(join(path, name), interlock);
     rmdirSync(path);
   } else {
     // Files and symbolic links: a link is unlinked itself, its target is never followed.
@@ -595,44 +658,51 @@ function removeTree(path: string): void {
   }
 }
 
-// Removes one candidate after re-checking that it is still a plain directory under the real root.
+// Moves one run out of the runs namespace while this process owns it, and returns the new path.
+// Ownership is taken through the runtime's single-writer fence, so a live owner, a concurrent resume and another
+// pass all see the run as busy and nothing is moved. After the rename the run directory name is gone: a later
+// resume of the same run id starts a fresh directory, and nothing can reach the moved one by its run id.
+export function quarantineRun(realRoot: string, id: string, nowMs: number = Date.now()): string {
+  const runDir = join(realRoot, id);
+  // Opened without following a link, so a run directory swapped for a link fails here; the fence checks the identity again.
+  let fd: number;
+  try {
+    fd = openSync(runDir, fsConstants.O_RDONLY | (fsConstants.O_DIRECTORY ?? 0) | NOFOLLOW);
+  } catch (error) {
+    const code = (error as NodeJS.ErrnoException).code;
+    if (code === "ELOOP" || code === "ENOTDIR") throw new Error("run is no longer a plain directory");
+    throw error;
+  }
+  let identity;
+  try {
+    identity = fstatSync(fd);
+  } finally {
+    closeSync(fd);
+  }
+  if (realpathSync(runDir) !== runDir) throw new Error("run directory resolves outside the runs root");
+  const fence = new FileOwnershipFence(realRoot, id, undefined, { path: runDir, device: identity.dev, inode: identity.ino });
+  if (fence.acquireSync().outcome !== "acquired") throw new Error("run is held by a live owner; not removed");
+  try {
+    const quarantine = join(realRoot, `${QUARANTINE_PREFIX}${id}-${nowMs}-${randomBytes(4).toString("hex")}`);
+    renameSync(runDir, quarantine);
+    return quarantine;
+  } finally {
+    fence.closeHeldDescriptor();
+  }
+}
+
+// Removes one candidate: a run is quarantined under exclusive ownership and then deleted; a directory that an
+// earlier removal left quarantined is deleted unless the lock inside it names a live process.
 export function removeRun(realRoot: string, id: string): void {
   const runDir = join(realRoot, id);
-  if (!lstatSync(runDir).isDirectory()) throw new Error("run is no longer a plain directory");
-  if (realpathSync(runDir) !== runDir) throw new Error("run directory resolves outside the runs root");
-  
-  // If this is an already-quarantined directory from a previous failed deletion, remove it directly
   if (id.startsWith(QUARANTINE_PREFIX)) {
+    if (!lstatSync(runDir).isDirectory()) throw new Error("run is no longer a plain directory");
+    if (realpathSync(runDir) !== runDir) throw new Error("run directory resolves outside the runs root");
+    if (leaseOf(runDir).held) throw new Error("quarantined run is held by a live process; not removed");
     removeTree(runDir);
     return;
   }
-  
-  // The owner lock is checked again here: a run started after the scan must not be removed.
-  if (leaseOf(runDir).held) throw new Error("run is held by a live owner; not removed");
-  
-  // Hold run ownership throughout GC deletion by using atomic quarantine.
-  // Move the directory to a quarantine location before deletion, so any new process
-  // acquiring ownership gets a fresh directory, not one being deleted by GC.
-  const quarantineDir = `${runDir}.deleted-${Date.now()}-${Math.random().toString(36).slice(2)}`;
-  try {
-    renameSync(runDir, quarantineDir);
-  } catch (error) {
-    // If rename fails (e.g., another process acquired ownership and created new files),
-    // the directory no longer exists as expected, so we're done.
-    if ((error as NodeJS.ErrnoException).code === "ENOENT" ||
-        (error as NodeJS.ErrnoException).code === "EEXIST") {
-      return;
-    }
-    throw error;
-  }
-  
-  // Now safely delete from the quarantine location
-  try {
-    removeTree(quarantineDir);
-  } catch (error) {
-    // Log but don't fail - quarantine cleanup can be retried in future GC passes
-    throw new Error(`failed to delete quarantined run ${quarantineDir}: ${(error as Error).message}`);
-  }
+  removeTree(quarantineRun(realRoot, id));
 }
 
 function writeAll(fd: number, buffer: Buffer): void {
@@ -654,6 +724,8 @@ export function repairTornTail(runDir: string, nowMs: number): { repaired: boole
   try {
     const before = fstatSync(fd);
     if (!before.isFile()) throw new Error("journal is not a regular file");
+    // A hard link shares its inode with another name, possibly outside the runs root; truncating it would change that file too.
+    if (before.nlink !== 1) throw new Error("journal has more than one hard link; left unchanged");
     const { complete, tail } = splitTornTail(readFileSync(fd));
     if (tail.length === 0) return { repaired: false, copy: null };
     if (leaseOf(runDir).held) throw new Error("run is held by a live owner; journal left unchanged");

@@ -13,13 +13,14 @@ import { createHash } from "node:crypto";
 import {
   existsSync,
   lstatSync,
+  linkSync,
   lutimesSync,
   mkdirSync,
   mkdtempSync,
   readdirSync,
   readFileSync,
   readlinkSync,
-  renameSync,
+  realpathSync,
   rmSync,
   symlinkSync,
   utimesSync,
@@ -30,12 +31,16 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { graphCommand } from "../../../cli/graph.js";
+import { FileOwnershipFence } from "../../runtime/fence.js";
+import { resolveRunDirHandle } from "../../runtime/run-dir.js";
 import {
   classifyRun,
   DEFAULT_RETENTION_DAYS,
   isSwitchOn,
   parseRetentionDays,
+  quarantineRun,
   removeRun,
+  removeTree,
   repairTornTail,
   runGc,
   runGraphGc,
@@ -1122,26 +1127,118 @@ describe("omc graph gc", () => {
     });
   });
 
-  it("quarantined directories from previous failed deletions are detected and retried in the next GC pass", () => {
+  it("a removal that a contender races after the scan does not take the run: the contender took ownership from a stale owner", () => {
     withBase((base) => {
       const root = makeRoot(base);
-      // Simulate a quarantined directory from a previous failed deletion
-      const finishedRun = makeFinishedRun(root, "run-original");
-      ageTree(finishedRun, OLD);
-      const quarantineDir = join(root, ".deleted-prev-failure-123");
-      renameSync(finishedRun, quarantineDir);
-      // The quarantined directory contains the remnants of the failed deletion
-      expect(existsSync(quarantineDir)).toBe(true);
-      
-      // GC scan should detect the quarantined directory and mark it for deletion
+      const dir = makeFinishedRun(root, "run-contended");
+      ageTree(dir, OLD);
+      const journalBefore = readFileSync(join(dir, "journal.jsonl"), "utf8");
+      const remove = (realRoot: string, id: string) => {
+        // The scan saw a dead owner's old lock. Now a resuming process takes the run over through the real fence.
+        const contender = new FileOwnershipFence(realRoot, id);
+        expect(contender.acquireSync().outcome, "the contender takes over the stale lock").toBe("acquired");
+        removeRun(realRoot, id);
+      };
+
+      const result = gc(root, { remove });
+      const run = decisionOf(result, "run-contended");
+      expect(run.action).toBe("failed");
+      expect(run.error).toMatch(/held by a live owner/);
+      expect(readFileSync(join(dir, "journal.jsonl"), "utf8"), "the contended run lost its journal").toBe(journalBefore);
+      expect(readdirSync(root).filter((name) => name.startsWith(".deleted-"))).toEqual([]);
+    });
+  });
+
+  it("a removal interrupted after the move leaves a directory the next pass finishes, by the name removeRun gave it", () => {
+    withBase((base) => {
+      const root = makeRoot(base);
+      const realRoot = realpathSync(root);
+      const dir = makeFinishedRun(root, "run-original");
+      ageTree(dir, OLD);
+      // The move that removeRun makes before it deletes; the process stops right after it.
+      const quarantine = quarantineRun(realRoot, "run-original", NOW);
+      expect(existsSync(dir), "the run directory name must be free after the move").toBe(false);
+      expect(existsSync(join(quarantine, "journal.jsonl"))).toBe(true);
+      const name = quarantine.slice(realRoot.length + 1);
+      // The lock inside names the process that moved the run. It is still alive here (the test process), so the
+      // directory is kept; once that process is gone the lock no longer protects it.
+      const whileAlive = gc(root);
+      expect(decisionOf(whileAlive, name).action).toBe("keep");
+      expect(decisionOf(whileAlive, name).reason).toBe("lock-live-pid");
+      expect(existsSync(quarantine)).toBe(true);
+
+      writeFileSync(join(quarantine, "owner.lock"), JSON.stringify({ pid: deadPid(), epoch: 2, timestamp: OLD }));
       const result = gc(root);
-      const quarantinedRun = result.runs.find((r) => r.id === ".deleted-prev-failure-123");
-      expect(quarantinedRun).toBeDefined();
-      expect(quarantinedRun?.action).toBe("deleted");
-      expect(quarantinedRun?.reason).toBe("quarantine-cleanup");
+      expect(decisionOf(result, name).action).toBe("deleted");
+      expect(decisionOf(result, name).reason).toBe("quarantine-cleanup");
       expect(result.summary.deleted).toBe(1);
-      expect(result.summary.candidates).toBe(1);
-      expect(existsSync(quarantineDir)).toBe(false);
+      expect(existsSync(quarantine)).toBe(false);
+    });
+  });
+
+  it("after the move a contender with the old directory handle cannot lock the moved run, and a new resume starts a fresh directory", async () => {
+    await withBaseAsync(async (base) => {
+      const root = makeRoot(base);
+      const realRoot = realpathSync(root);
+      const dir = makeFinishedRun(root, "run-moved");
+      ageTree(dir, OLD);
+      const staleHandle = resolveRunDirHandle(realRoot, "run-moved");
+      const quarantine = quarantineRun(realRoot, "run-moved", NOW);
+      const lockBefore = readFileSync(join(quarantine, "owner.lock"), "utf8");
+
+      await expect(new FileOwnershipFence(realRoot, "run-moved", undefined, staleHandle).acquire()).rejects.toThrow();
+      expect(readFileSync(join(quarantine, "owner.lock"), "utf8"), "the moved run's lock changed").toBe(lockBefore);
+
+      const resumed = new FileOwnershipFence(realRoot, "run-moved");
+      const got = await resumed.acquire();
+      expect(got.outcome).toBe("acquired");
+      expect(readdirSync(join(realRoot, "run-moved")).sort(), "a new directory holds the new lock only").toEqual(["owner.epoch", "owner.lock"]);
+      expect(existsSync(join(quarantine, "journal.jsonl")), "the moved run was touched").toBe(true);
+    });
+  });
+
+  it.runIf(process.platform === "linux")("removeTree: a subdirectory swapped for a symbolic link after its check is not followed", () => {
+    withBase((base) => {
+      const tree = join(base, "tree");
+      mkdirSync(join(tree, "artifacts"), { recursive: true });
+      writeFileSync(join(tree, "artifacts", "inner.txt"), "inner\n");
+      const outside = join(base, "outside");
+      mkdirSync(outside);
+      writeFileSync(join(outside, "victim.txt"), "outside content\n");
+      const before = snapshot(outside);
+      let swapped = false;
+
+      expect(() =>
+        removeTree(tree, {
+          afterLstat: (entry) => {
+            if (swapped) return;
+            swapped = true;
+            // Between the lstat that saw a directory and the walk into it, a concurrent process swaps in a link.
+            rmSync(entry, { recursive: true, force: true });
+            symlinkSync(outside, entry);
+          },
+        }),
+      ).toThrow();
+      expect(swapped, "the interlock did not run").toBe(true);
+      expect(snapshot(outside), "a file outside the removed tree was deleted through the swapped link").toBe(before);
+    });
+  });
+
+  it("repairTornTail refuses a journal with a second hard link and leaves the other name untouched", () => {
+    withBase((base) => {
+      const root = makeRoot(base);
+      const dir = makeTornRun(root, "run-hardlink");
+      const outside = join(base, "outside.jsonl");
+      linkSync(join(dir, "journal.jsonl"), outside);
+      const before = snapshot(base);
+
+      expect(() => repairTornTail(dir, NOW)).toThrow(/hard link/);
+      expect(snapshot(base), "the shared journal or a copy was written").toBe(before);
+
+      const result = gc(root, { repairTornWal: true });
+      expect(decisionOf(result, "run-hardlink").action).toBe("repair-failed");
+      expect(readFileSync(outside, "utf8"), "the file outside the runs root was truncated").toBe(readFileSync(join(dir, "journal.jsonl"), "utf8"));
+      expect(readFileSync(outside, "utf8").endsWith('{"seq":1,"epoch":1,"descr')).toBe(true);
     });
   });
 
