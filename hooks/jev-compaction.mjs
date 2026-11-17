@@ -2359,14 +2359,14 @@ async function tokensBeforeOf($, e, cfg, messages, api) {
 // The record fields of one compaction with token accounting: the window and threshold, the tokens before (the host's usage in the main loop, else
 // the prefix plus the estimate of the API form) and after (the tokens before less what the keep decisions of allocate remove), the target and its
 // ceiling. Read-only: the cut itself stays with allocate.
-async function tokenAccounting($, e, cfg, messages, api, candidates) {
+async function tokenAccounting($, e, cfg, messages, api, candidates, installedStageTokens = 0) {
   const detail = await hostValue($, () => $.session.usage({ breakdown: 'summary' }));
   const usage = await hostValue($, () => $.session.usage());
   const win = await resolveWindow($, cfg, detail, usage);
   const real = usage?.context?.tokens;
   const main = e.agentId === undefined && finitePositive(real) !== undefined;
   const tokensBefore = Math.round(main ? real : prefixTokens(detail) + listTokens(api ?? rowsAsApi(messages), cfg.rates));
-  let removed = 0;
+  let removed = installedStageTokens;
   for (const c of candidates) {
     const t = itemTokens(c, cfg.rates);
     removed += t.full - (c.keep === 'drop' ? 0 : c.keep === 'short' ? t.short : c.keep === 'trace' ? t.trace : t.full);
@@ -3716,6 +3716,7 @@ async function decide($, e, cfg, record, started) {
   record.mentioned = markMentioned(candidates, user);
   let replyEdits;
   let pasteSwaps;
+  let stageTokens = 0;
   if (cfg.targetPercent === undefined) allocate(candidates, before, cfg.target, envelopes);
   else {
     // Token cascade (OMC_JEV_COMPACT_TARGET_PERCENT): the target and the prediction are in tokens; the envelopes and delivered text that build
@@ -3727,7 +3728,6 @@ async function decide($, e, cfg, record, started) {
     // The reply and paste stages write their files now, as the agent stage did, so the text they move comes off the prediction before the plan: the plan
     // then stops earlier and the host handoff below sees the cut they make. Only a stage that moved text (active, files written) counts. A fallback after
     // this point leaves the files, which hold the text word for word.
-    let stageTokens = 0;
     if (cfg.replies !== 'off' && e.agentId === undefined) {
       replyEdits = await moveReplies($, cfg, record, messages, api, keepFrom, deadline);
       if (replyEdits.size) stageTokens += movedTokens(record.replies);
@@ -3788,7 +3788,7 @@ async function decide($, e, cfg, record, started) {
     score_hist: hist,
     unanswered: asked.length - answered,
   });
-  if (cfg.tokenAccounting) Object.assign(record, await tokenAccounting($, e, cfg, messages, api, candidates));
+  if (cfg.tokenAccounting) Object.assign(record, await tokenAccounting($, e, cfg, messages, api, candidates, trimTokens + agentTokens + (cfg.targetPercent !== undefined ? stageTokens : 0)));
   return { messages: built, before, after, predicted: record.tokens_after_pred, tokensBefore: tokens?.tokens, tokensAfter: record.tokens_after_pred };
 }
 
@@ -3912,7 +3912,16 @@ async function ownThreshold($, e, next) {
     let before = messages.reduce((s, m) => s + messageChars(m), 0);
     const candidates = findCandidates(messages, cfg.privatePaths, cfg.notifications);
     // Not even the floor (every removable result gone) cuts HOST_MIN_CUT of the tokens: the request would only end in a skip after Jev's scores.
-    if (cfg.ownSkip && tokens - floorPrediction(candidates, tokens, cfg.rates) < Math.max(OWN_MIN_GAIN * window, HOST_MIN_CUT * tokens)) return result;
+    // With active text stages (agent trim), include conservative savings to avoid suppressing useful early compactions.
+    let floor = floorPrediction(candidates, tokens, cfg.rates);
+    if (cfg.targetPercent !== undefined && cfg.agentTrim) {
+      // Conservative estimate: agent trim might save up to 5% of non-candidate text. This is a floor estimate, not actual savings.
+      const candidateTokens = candidates.reduce((s, c) => s + itemTokens(c, cfg.rates).full, 0);
+      const conservativeAgentSavings = Math.round((tokens - candidateTokens) * 0.05);
+      // Don't let the adjusted floor go below the window; actual savings in decide() might be less.
+      floor = Math.max(window, floor - conservativeAgentSavings);
+    }
+    if (cfg.ownSkip && tokens - floor < Math.max(OWN_MIN_GAIN * window, HOST_MIN_CUT * tokens)) return result;
     let removable = removableChars(candidates);
     const tooSmall = () => !before || removable / before < MIN_REDUCTION || removable / CHARS_PER_TOKEN < OWN_MIN_GAIN * window;
     // The delivered messages can only make this worse (they add to `before`, their envelopes come off

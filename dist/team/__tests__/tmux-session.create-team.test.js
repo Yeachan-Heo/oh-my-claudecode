@@ -39,7 +39,8 @@ const supportsStrictTmuxFixture = (process.platform === 'darwin' || process.plat
 const strictSocketPath = mockedCalls.identitySocketPath;
 vi.mock('child_process', async (importOriginal) => {
     const actual = await importOriginal();
-    const runMockExec = (args) => {
+    const runMockExec = (rawArgs) => {
+        const args = rawArgs[0] === '-u' ? rawArgs.slice(1) : rawArgs;
         mockedCalls.execFileArgs.push(args);
         const commandArgs = args[0]?.toLowerCase().endsWith('cmd.exe') ? args.slice(1) : args;
         const socket = commandArgs[0] === '-S' ? commandArgs[1] : undefined;
@@ -192,7 +193,7 @@ vi.mock('child_process', async (importOriginal) => {
         // guard markers; tokenizing them with the fixture's simple parser loses
         // the native command and makes the mock unlike tmux.
         if (cmd.includes('if-shell')) {
-            const socket = cmd.match(/tmux\s+'-S'\s+'([^']+)'/)?.[1];
+            const socket = cmd.match(/tmux\s+(?:-u\s+)?'-S'\s+'([^']+)'/)?.[1];
             return socket ? ['-S', socket, 'if-shell', cmd] : ['if-shell', cmd];
         }
         return parseTmuxShellCmd(cmd);

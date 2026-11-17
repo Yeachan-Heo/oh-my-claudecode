@@ -10,7 +10,7 @@
  *
  * @see https://github.com/anthropics/oh-my-claudecode/issues/1047
  */
-import { paneLooksReady, paneHasActiveTask, captureOwnedTeamPane, } from './tmux-session.js';
+import { paneLooksReady, paneHasActiveTask, captureOwnedTeamPane, providerForTeamTarget, } from './tmux-session.js';
 import { isValidTeamInstanceId, isValidTmuxServerIdentity, } from './types.js';
 export const DEFAULT_NUDGE_CONFIG = {
     delayMs: 30_000,
@@ -61,18 +61,19 @@ export class NudgeTracker {
             return [];
         const sessionName = typeof authority.sessionName === 'string' ? authority.sessionName : '';
         const provider = authority.provider
-            ?? (sessionName.startsWith('cmux:') ? 'cmux' : 'tmux');
+            ?? providerForTeamTarget(sessionName);
         if (!Array.isArray(paneIds)
-            || (provider !== 'tmux' && provider !== 'cmux')
+            || (provider !== 'tmux' && provider !== 'cmux' && provider !== 'herdr')
             || sessionName.length === 0
             || !isValidTeamInstanceId(authority.instanceId)
             || sessionName.trim() !== sessionName
             || (authority.provider !== undefined && authority.provider !== provider)
             || typeof authority.getPaneOwnership !== 'function'
+            || typeof authority.getProviderLiveness !== 'function'
             || typeof authority.executeNudge !== 'function'
             || (provider === 'tmux'
                 && (!authority.tmuxServerIdentity || !isValidTmuxServerIdentity(authority.tmuxServerIdentity)))
-            || (provider === 'cmux' && authority.tmuxServerIdentity !== undefined)) {
+            || ((provider === 'cmux' || provider === 'herdr') && authority.tmuxServerIdentity !== undefined)) {
             return [];
         }
         const now = Date.now();
@@ -113,7 +114,8 @@ export class NudgeTracker {
                 || (provider === 'cmux' && ownership.tmuxServerIdentity !== undefined)) {
                 continue;
             }
-            const idle = await isPaneIdle(ownership);
+            const idle = (await authority.getProviderLiveness(paneId)) !== 'dead'
+                && await isPaneIdle(ownership);
             if (!idle) {
                 // Pane is active — reset idle tracking
                 state.firstIdleAt = null;

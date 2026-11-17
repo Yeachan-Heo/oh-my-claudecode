@@ -126,8 +126,12 @@ export function checkWindowsUnsafePluginHooks() {
                     for (const hook of group.hooks ?? []) {
                         if (hook.type !== 'command' || typeof hook.command !== 'string')
                             continue;
-                        if (isWindowsUnsafePluginHookCommand(hook.command)) {
-                            unsafe.push({ pluginRoot, event, command: hook.command });
+                        const argText = Array.isArray(hook.args)
+                            ? hook.args.filter((item) => typeof item === 'string').join(' ')
+                            : '';
+                        const invocation = `${hook.command} ${argText}`.trim();
+                        if (isWindowsUnsafePluginHookCommand(invocation)) {
+                            unsafe.push({ pluginRoot, event, command: invocation });
                         }
                     }
                 }

@@ -39,6 +39,8 @@ export interface HookRegistryEntry {
 export interface HooksJsonCommand {
     type: string;
     command: string;
+    /** Present when the host spawns `command` with no shell. */
+    args?: readonly string[];
     timeout?: number;
     async?: boolean;
 }

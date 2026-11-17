@@ -77,6 +77,7 @@ const TEST_AUTHORITY = {
     getPaneOwnership: (paneId) => ['%2', '%3'].includes(paneId)
         ? { ...TEST_OWNERSHIP, paneId }
         : undefined,
+    getProviderLiveness: async () => 'unknown',
     executeNudge: (paneId, message) => sendToWorker(TEST_AUTHORITY.sessionName, paneId, message, TEST_TMUX_IDENTITY),
 };
 beforeEach(() => {
@@ -204,6 +205,20 @@ describe('NudgeTracker', () => {
         expect(nudged).toEqual(['%2']);
         expect(vi.mocked(sendToWorker)).toHaveBeenCalledWith('test-session', '%2', DEFAULT_NUDGE_CONFIG.message, TEST_TMUX_IDENTITY);
         expect(tracker.totalNudges).toBe(1);
+    });
+    it('does not nudge a shell prompt left behind by an exited provider', async () => {
+        mockCaptureOutput(['$ claude', 'bye', '❯ '].join('\n'));
+        const tracker = new NudgeTracker({ delayMs: 10_000 });
+        const authority = {
+            ...TEST_AUTHORITY,
+            getProviderLiveness: async (paneId) => (paneId === '%2' ? 'dead' : 'unknown'),
+        };
+        await tracker.checkAndNudge(['%2', '%3'], '%1', authority);
+        vi.advanceTimersByTime(15_000);
+        const nudged = await tracker.checkAndNudge(['%2', '%3'], '%1', authority);
+        expect(nudged).toEqual(['%3']);
+        expect(vi.mocked(sendToWorker)).toHaveBeenCalledTimes(1);
+        expect(vi.mocked(sendToWorker)).toHaveBeenCalledWith('test-session', '%3', DEFAULT_NUDGE_CONFIG.message, TEST_TMUX_IDENTITY);
     });
     it('uses custom nudge message', async () => {
         mockCaptureOutput(IDLE_PANE_CONTENT);
@@ -340,12 +355,31 @@ describe('NudgeTracker', () => {
             getPaneOwnership: (paneId) => paneId === '%2'
                 ? { ...TEST_OWNERSHIP, provider: 'cmux', providerTarget: 'cmux:workspace', tmuxServerIdentity: undefined }
                 : undefined,
+            getProviderLiveness: TEST_AUTHORITY.getProviderLiveness,
             executeNudge: (paneId, message) => sendToWorker('cmux:workspace', paneId, message),
         };
         vi.advanceTimersByTime(6_000);
         const nudged = await tracker.checkAndNudge(['%2'], '%1', authority);
         expect(nudged).toEqual(['%2']);
         expect(vi.mocked(sendToWorker)).toHaveBeenCalledWith('cmux:workspace', '%2', DEFAULT_NUDGE_CONFIG.message);
+    });
+    it('allows HERDR with instance identity but without a tmux identity', async () => {
+        mockCaptureOutput(IDLE_PANE_CONTENT);
+        const tracker = new NudgeTracker({ delayMs: 0 });
+        const authority = {
+            instanceId: TEST_AUTHORITY.instanceId,
+            sessionName: 'herdr-workspace',
+            provider: 'herdr',
+            getPaneOwnership: (paneId) => paneId === '%2'
+                ? { ...TEST_OWNERSHIP, provider: 'herdr', providerTarget: 'herdr-workspace', tmuxServerIdentity: undefined }
+                : undefined,
+            getProviderLiveness: TEST_AUTHORITY.getProviderLiveness,
+            executeNudge: (paneId, message) => sendToWorker('herdr-workspace', paneId, message),
+        };
+        vi.advanceTimersByTime(6_000);
+        const nudged = await tracker.checkAndNudge(['%2'], '%1', authority);
+        expect(nudged).toEqual(['%2']);
+        expect(vi.mocked(sendToWorker)).toHaveBeenCalledWith('herdr-workspace', '%2', DEFAULT_NUDGE_CONFIG.message);
     });
     it('handles multiple panes independently', async () => {
         const tracker = new NudgeTracker({ delayMs: 0, maxCount: 1 });

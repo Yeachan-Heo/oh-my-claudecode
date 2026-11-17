@@ -15,9 +15,9 @@
  *
  * Follows the daemon pattern from src/features/rate-limit-wait/daemon.ts
  */
-import { type SessionMapping } from './session-registry.js';
-import type { ReplyConfig } from './types.js';
-import { SlackConnectionStateTracker, type SlackValidationResult } from './slack-socket.js';
+import { type SessionMapping } from "./session-registry.js";
+import type { ReplyConfig } from "./types.js";
+import { SlackConnectionStateTracker, type SlackValidationResult } from "./slack-socket.js";
 /** Reply listener daemon state */
 export interface ReplyListenerState {
     isRunning: boolean;
@@ -61,6 +61,12 @@ export interface DaemonResponse {
     error?: string;
 }
 /**
+ * Create a minimal environment for daemon child processes.
+ * Only includes allowlisted variables to prevent credential leakage.
+ * @internal Exported for testing only.
+ */
+export declare function createMinimalDaemonEnv(): NodeJS.ProcessEnv;
+/**
  * Build daemon config from notification config.
  * Derives bot tokens, channel IDs, and reply settings from getNotificationConfig().
  */
@@ -84,15 +90,16 @@ export declare function sanitizeReplyInput(text: string): string;
 /**
  * Parse a reply as an approval decision. Returns null when the reply does
  * not look like a decision (the message is then left for normal handling).
+ * Question marks indicate uncertainty and always return null.
  */
-export declare function parseApprovalReply(text: string): 'approved' | 'denied' | null;
+export declare function parseApprovalReply(text: string): "approved" | "denied" | null;
 /**
  * Resolve an approval gate from a platform reply.
  *
  * Returns the recorded decision, or null when the text is not a decision
  * (callers should fall back to normal reply handling or ignore).
  */
-export declare function handleApprovalReply(approvalRef: NonNullable<SessionMapping['approvalRef']>, text: string, platform: string): 'approved' | 'denied' | null;
+export declare function handleApprovalReply(approvalRef: NonNullable<SessionMapping["approvalRef"]>, text: string, platform: string): "approved" | "denied" | null;
 declare class RateLimiter {
     private readonly maxPerMinute;
     private timestamps;
@@ -107,13 +114,22 @@ declare class RateLimiter {
  * Returns true if injection succeeded, false otherwise.
  */
 export type ReplyInjectionStep = {
-    kind: 'literal';
+    kind: "literal";
     value: string;
 } | {
-    kind: 'key';
+    kind: "key";
     value: string;
 };
-export declare function buildReplyInjectionSteps(text: string, platform: string, config: Pick<ReplyListenerDaemonConfig, 'includePrefix' | 'maxMessageLength'>, mapping?: Pick<SessionMapping, 'event' | 'askUserQuestionOptionCount' | 'askUserQuestionAllowOther'>): ReplyInjectionStep[];
+export declare function buildReplyInjectionSteps(text: string, platform: string, config: Pick<ReplyListenerDaemonConfig, "includePrefix" | "maxMessageLength">, mapping?: Pick<SessionMapping, "event" | "askUserQuestionOptionCount" | "askUserQuestionAllowOther">): ReplyInjectionStep[];
+/**
+ * Inject a reply into a Herdr agent pane through the semantic agent surface.
+ *
+ * herdrSendPrompt types the sanitized text and submits it in one
+ * submission-verified step (the literal + Enter pair the tmux path sends).
+ * The ask-user-question Down/Enter menu walk is a tmux-keyboard artifact;
+ * Herdr delivers the typed reply itself, which Claude's question UI accepts.
+ */
+export declare function injectReplyIntoHerdrPane(paneId: string, text: string, platform: string, config: ReplyListenerDaemonConfig, mapping?: SessionMapping): Promise<boolean>;
 /**
  * Main daemon polling loop
  */
@@ -157,12 +173,12 @@ export declare function getReplyListenerStatus(): DaemonResponse;
  * @param timestamp - Slack request timestamp header (x-slack-request-timestamp)
  * @returns Object with injection result and validation details
  */
-export declare function processSlackSocketMessage(rawMessage: string, connectionState: SlackConnectionStateTracker, paneId: string | null, config: ReplyListenerDaemonConfig, state: ReplyListenerState, rateLimiter: RateLimiter, signature?: string, timestamp?: string): {
+export declare function processSlackSocketMessage(rawMessage: string, connectionState: SlackConnectionStateTracker, paneId: string | null, config: ReplyListenerDaemonConfig, state: ReplyListenerState, rateLimiter: RateLimiter, signature?: string, timestamp?: string): Promise<{
     injected: boolean;
     validation: SlackValidationResult;
-};
-export { SlackConnectionStateTracker } from './slack-socket.js';
-export type { SlackValidationResult } from './slack-socket.js';
+}>;
+export { SlackConnectionStateTracker } from "./slack-socket.js";
+export type { SlackValidationResult } from "./slack-socket.js";
 export { RateLimiter };
 export { pollLoop };
 //# sourceMappingURL=reply-listener.d.ts.map
