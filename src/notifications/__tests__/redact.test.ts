@@ -346,6 +346,19 @@ describe('redactTokens key-shape masking (OMC_REDACT_KEY_SHAPES=1)', () => {
       expect(redactTokens('a-'.repeat(50000))).toBe('a-'.repeat(50000));
     });
 
+    // P1: Preserve literal backslashes in single-quoted assignments
+    it('handles literal backslashes in single-quoted values', () => {
+      // In shell, backslashes inside single quotes are literal (not escape characters)
+      // A sequence like PASSWORD='abc\' TOKEN='secret' should not skip the closing quote
+      const shellReply = "PASSWORD='abc\\' TOKEN='secret'";
+      const result = redactTokens(shellReply);
+      // Should mask both PASSWORD and TOKEN values, not expose the token name or its value
+      expect(result).toContain("PASSWORD='****'");
+      expect(result).toContain("TOKEN='****'");
+      expect(result).not.toContain('abc\\');
+      expect(result).not.toContain('secret');
+    });
+
     it('stays near-linear on large inputs: 100 000 characters within a loose 1000 ms budget', () => {
       const base = 'Report of the stage: the module was reviewed, tests passed, result saved in the work directory. ';
       const inputs = [

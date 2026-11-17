@@ -142,8 +142,9 @@ function redactKeyShapes(input: string): string {
           if (quote) {
             // quoted value: up to the matching closing quote (not escaped) on the same line, or to line/input end
             while (valueEnd < n && input[valueEnd] !== '\n') {
-              if (input[valueEnd] === '\\' && valueEnd + 1 < n) {
-                // Skip escaped character (including escaped quotes)
+              if (quote === '"' && input[valueEnd] === '\\' && valueEnd + 1 < n) {
+                // Skip escaped character (including escaped quotes) - only in double quotes
+                // In single quotes, backslashes are literal
                 valueEnd += 2;
               } else if (input[valueEnd] === quote) {
                 // Found closing quote
