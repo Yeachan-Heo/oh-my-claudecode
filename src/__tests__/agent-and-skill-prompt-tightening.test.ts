@@ -4,6 +4,7 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, 
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+// @ts-expect-error Standalone hook runtime source is intentionally JavaScript-only.
 import { publishCacheOccupancy } from '../../scripts/lib/cache-occupancy.mjs';
 
 const __filename = fileURLToPath(import.meta.url);
