@@ -204,7 +204,7 @@ const PAIR_VALUE = new Set(['value', 'parameter_value']);
 //   - in text, the value or the whole option in quotes (a quoted value runs to its closing quote, white space included), a backslash
 //     before a space, each element quoted (`'-u' 'u:p'`, `"-p", "x"`); in an array the element is the value, white space and quotes
 //     included. After `--` nothing changes: what looks like an option is masked all the same (fail closed).
-// A long name is read in any case, a short letter is case sensitive (`-U` is not `-u`, `-P` is the port of mysql). `value` is 'all'
+// A long name is read in any case, a short letter is case sensitive (`-U` is not `-u`, and `-P` of mysql takes a port). `value` is 'all'
 // (the value is the credential) or 'user' (`name:password`: the password, the part after the first colon, is). `program`: the option
 // is a credential only after a program of this kind in the same command (in an array: before it in the list; in text: before it in
 // the same command, which a new line, `|`, `;` or `&` outside quotes ends), as -p is for the mysql family and sshpass (docker login -p
