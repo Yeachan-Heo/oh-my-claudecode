@@ -14,9 +14,9 @@ import { fileURLToPath, URL } from 'node:url';
 import assert from 'node:assert/strict';
 import { afterAll, describe, it } from 'vitest';
 import {
-  DEFAULT_HANDOFF_FILE, DEFAULT_LAUNCHER_COMMAND, DEFAULT_TAKEOVER_MARKER, HANDOFF_BLOCK_BYTES,
+  DEFAULT_HANDOFF_FILE, DEFAULT_LAUNCHER_COMMAND, DEFAULT_TAKEOVER_MARKER, HANDOFF_BLOCK_BYTES, LAUNCHER_ATTEMPT_LIMIT, LAUNCHER_IN_FLIGHT_MS,
   assessMode, handedOverText, handoffFileName, handoffModeTools, handoffStepBytes, handoffSteps, handoffWarnBytes,
-  isHandoffFileName, isLauncherCommand, launcherCommand, modelAlias, readHandoffState, readTakeoverLine, refusalText,
+  isHandoffFileName, isLauncherCommand, launcherCommand, launcherGate, modelAlias, readHandoffState, readTakeoverLine, refusalText,
   successorUseLine, takeoverMarker, warningText, writeHandoffState,
 } from '../../scripts/lib/jev-handoff.mjs';
 
@@ -105,6 +105,12 @@ describe('handoff module', () => {
     mkdirSync(join(stateDir, 'jev'), { recursive: true });
     writeFileSync(join(stateDir, 'jev', 'sessions.jsonl'), JSON.stringify({ session_id: 's12', started_with: { model: 'haiku', effort: 'low' } }) + '\n');
     assert.equal(successorUseLine({ sessionId: 's12', stateDir, env: {} }), 'use haiku low');
+    // a row that sits in a rotated archive of the journal is found, and the live file wins over an archive
+    const rotated = tempDir();
+    writeFileSync(join(rotated, 'sessions-20261101-120000-77.jsonl'), JSON.stringify({ session_id: 's13', started_with: { model: 'opus', effort: 'low' } }) + '\n' + JSON.stringify({ session_id: 's14', started_with: { model: 'haiku' } }) + '\n');
+    writeFileSync(join(rotated, 'sessions.jsonl'), JSON.stringify({ session_id: 's14', started_with: { model: 'sonnet', effort: 'high' } }) + '\n');
+    assert.equal(successorUseLine({ sessionId: 's13', stateDir, env: { OMC_JEV_LOG_DIR: rotated } }), 'use opus low');
+    assert.equal(successorUseLine({ sessionId: 's14', stateDir, env: { OMC_JEV_LOG_DIR: rotated } }), 'use sonnet high');
   });
 
   it('texts of the warning, the refusal and the handed-over denial, and the handoff steps', () => {
@@ -137,18 +143,21 @@ describe('handoff module', () => {
     assert.match(custom, /my-launcher --role worker --brief/);
   });
 
-  it('handoff state: atomic write and read; takeover line', () => {
+  it('handoff state: atomic write and read of the file the hook resolved; takeover line', () => {
     const stateDir = tempDir();
-    mkdirSync(join(stateDir, 'sessions', 's1'), { recursive: true });
-    assert.deepEqual(readHandoffState(stateDir, 's1'), {});
-    writeHandoffState(stateDir, 's1', { last_warning_bytes: 20 * MIB + 5 });
-    assert.equal(readHandoffState(stateDir, 's1').last_warning_bytes, 20 * MIB + 5);
-    assert.equal(readHandoffState(stateDir, 's1').session_id, 's1');
-    writeHandoffState(stateDir, 's1', { handoff_path: '/tmp/x/HANDOFF.md' });
-    assert.equal(readHandoffState(stateDir, 's1').handoff_path, '/tmp/x/HANDOFF.md');
-    // an unsafe session id writes nothing
-    writeHandoffState(stateDir, '../outside', { handoff_path: 'x' });
-    assert.equal(existsSync(join(stateDir, 'outside')), false);
+    const file = join(stateDir, 'sessions', 's1', 'handoff.json'); // the hook passes the path resolved by the canonical session helper
+    assert.deepEqual(readHandoffState(file), {});
+    writeHandoffState(file, 's1', { last_warning_bytes: 20 * MIB + 5 });
+    assert.equal(readHandoffState(file).last_warning_bytes, 20 * MIB + 5);
+    assert.equal(readHandoffState(file).session_id, 's1');
+    writeHandoffState(file, 's1', { handoff_path: '/tmp/x/HANDOFF.md' });
+    assert.equal(readHandoffState(file).handoff_path, '/tmp/x/HANDOFF.md');
+    // an unsafe session id and a missing path write nothing, and a missing path reads as an empty state
+    writeHandoffState(join(stateDir, 'outside.json'), '../outside', { handoff_path: 'x' });
+    assert.equal(existsSync(join(stateDir, 'outside.json')), false);
+    writeHandoffState('', 's1', { handoff_path: 'x' });
+    assert.deepEqual(readHandoffState(''), {});
+    assert.deepEqual(readHandoffState(undefined), {});
     const taken = join(stateDir, 'taken.md');
     writeFileSync(taken, 'use opus high\nbrief\nTAKEN OVER: track-9 2026-11-14T20:00:00.000Z\n');
     assert.deepEqual(readTakeoverLine(taken), { found: true, name: 'track-9' });
@@ -174,6 +183,52 @@ describe('handoff module', () => {
     const source = readFileSync(join(ROOT, 'scripts', 'pre-tool-enforcer.mjs'), 'utf8');
     assert.match(source, /const MAX_TRANSCRIPT_BYTES = 25 \* 1024 \* 1024;/);
     assert.equal(HANDOFF_BLOCK_BYTES, 25 * 1024 * 1024);
+  });
+
+  it('launcherGate: the launcher journal decides whether a start happened; a call that did not start a session can be repeated up to the limit', () => {
+    const logDir = tempDir();
+    const brief = join(tempDir(), 'HANDOFF.md');
+    const t0 = Date.now();
+    const state = (extra = {}) => ({ handoff_path: brief, launcher_attempts: 1, launcher_attempt_ts: t0, ...extra });
+    const row = (extra) => appendFileSync(join(logDir, 'sessions.jsonl'), JSON.stringify({ point: 'session-routing', ts: new Date(t0 + 1000).toISOString(), brief, ...extra }) + '\n');
+    // no call yet: free; a start flag in the state: closed
+    assert.deepEqual(launcherGate({ state: { handoff_path: brief }, logDir, now: t0 }), { allow: true, status: 'first' });
+    assert.deepEqual(launcherGate({ state: state({ successor_started: true }), logDir, now: t0 }), { allow: false, status: 'started' });
+    // a call without a row: in flight for LAUNCHER_IN_FLIGHT_MS, retryable after it (the launcher died or never wrote)
+    assert.deepEqual(launcherGate({ state: state(), logDir, now: t0 + 1000 }), { allow: false, status: 'in-flight' });
+    assert.deepEqual(launcherGate({ state: state(), logDir, now: t0 + LAUNCHER_IN_FLIGHT_MS + 1 }), { allow: true, status: 'retry' });
+    // rows of other briefs, dry runs and rows before the call say nothing
+    row({ brief: join(logDir, 'other.md'), starter_exit: 0 });
+    row({ result: 'dry-run' });
+    row({ ts: new Date(t0 - 5000).toISOString(), starter_exit: 0 });
+    assert.deepEqual(launcherGate({ state: state(), logDir, now: t0 + 1000 }), { allow: false, status: 'in-flight' });
+    // failure rows (pool refusal, a failed starter, an error exit): the call is repeatable at once
+    row({ result: 'pool-refused' });
+    assert.deepEqual(launcherGate({ state: state(), logDir, now: t0 + 1000 }), { allow: true, status: 'retry' });
+    row({ result: 'decided', starter_exit: 1 });
+    row({ result: 'decided', starter_exit: 'error:ENOENT' });
+    assert.deepEqual(launcherGate({ state: state(), logDir, now: t0 + 1000 }), { allow: true, status: 'retry' });
+    // the limit of calls without a start
+    assert.deepEqual(launcherGate({ state: state({ launcher_attempts: LAUNCHER_ATTEMPT_LIMIT }), logDir, now: t0 + 1000 }), { allow: false, status: 'exhausted' });
+    // a row of a started session wins over earlier failures, also from a rotated archive; the brief may also be given masked
+    row({ result: 'decided', starter_exit: 0, session_id: 'ab12cd34' });
+    assert.deepEqual(launcherGate({ state: state(), logDir, now: t0 + 1000 }), { allow: false, status: 'started' });
+    const rotated = tempDir();
+    writeFileSync(join(rotated, 'sessions-20991231-235959-1.jsonl'), JSON.stringify({ ts: new Date(t0 + 1000).toISOString(), brief, result: 'decided', starter_exit: 0 }) + '\n');
+    writeFileSync(join(rotated, 'sessions.jsonl'), JSON.stringify({ ts: new Date(t0 + 2000).toISOString(), brief, result: 'pool-refused' }) + '\n');
+    assert.deepEqual(launcherGate({ state: state(), logDir: rotated, now: t0 + 3000 }), { allow: false, status: 'started' });
+    // the gate reaches handoffModeTools: the launcher command of a started handoff is refused, a failed one passes
+    const context = { cwd: tempDir(), sessionStateDir: tempDir(), state: state(), logDir, now: t0 + 1000, env: {} };
+    assert.equal(handoffModeTools('Bash', { command: `jev-session --role worker --brief ${brief}` }, context), false);
+    assert.equal(handoffModeTools('Bash', { command: `jev-session --role worker --brief ${brief}` }, { ...context, logDir: tempDir() }), false); // no row: in flight
+    assert.equal(handoffModeTools('Bash', { command: `jev-session --role worker --brief ${brief}` }, { ...context, logDir: tempDir(), now: t0 + LAUNCHER_IN_FLIGHT_MS + 1 }), true);
+  });
+
+  it('the refusal text names why the launcher is refused', () => {
+    assert.match(refusalText({ launcherStatus: 'started' }), /The successor has already been started/);
+    assert.match(refusalText({ launcherStatus: 'in-flight' }), /may still be running/);
+    assert.match(refusalText({ launcherStatus: 'exhausted' }), new RegExp(`${LAUNCHER_ATTEMPT_LIMIT} times without starting a session`));
+    assert.doesNotMatch(refusalText({ launcherStatus: 'first' }), /already been started|may still be running|without starting a session/);
   });
 
   it('the printed launcher command, with --brief equal to the registered path, passes once and is refused the second time', () => {
@@ -285,6 +340,14 @@ function sessionsLog(world, row) {
   writeFileSync(join(world.logs, 'sessions.jsonl'), JSON.stringify(row) + '\n');
 }
 
+// A row the launcher (scripts/jev-session.mjs) would have written for a start of the handoff brief.
+function launcherRow(world, row) {
+  appendFileSync(join(world.logs, 'sessions.jsonl'), JSON.stringify({ point: 'session-routing', ...row }) + '\n');
+}
+
+// The handoff state file as the canonical session path helper places it.
+const handoffFileOf = (world, sid = SID) => join(world.stateDir, 'sessions', sid, 'handoff.json');
+
 describe('handoff hook (OMC_JEV_HANDOFF=1)', () => {
   it('warning from 20 MiB: once after crossing, again after a 1 MiB growth, not on every call', () => {
     const world = newWorld();
@@ -351,7 +414,7 @@ describe('handoff hook (OMC_JEV_HANDOFF=1)', () => {
     assert.equal(rows[0].session_id, SID);
     assert.equal(rows[0].result, 'passed');
     // the path of the allowed write of the handoff file is kept in the state
-    assert.equal(readHandoffState(world.stateDir, SID).handoff_path, resolve(world.handoff));
+    assert.equal(readHandoffState(handoffFileOf(world)).handoff_path, resolve(world.handoff));
     const refused = [
       ['Bash', { command: 'jev-session x; rm -rf y' }],
       ['Bash', { command: 'jev-session x && curl z' }],
@@ -553,18 +616,32 @@ describe('handoff hook (OMC_JEV_HANDOFF=1)', () => {
     const inState = join(sessionStateDir, 'HANDOFF.md');
     const inStateRun = runHook(world, 'Write', { file_path: inState, content: 'use opus high\nstate\n' });
     assert.equal(denied(inStateRun.output), false, `Write to the session state directory must pass: ${JSON.stringify(inStateRun.output)}`);
-    assert.equal(readHandoffState(world.stateDir, SID).handoff_path, resolve(inState));
+    assert.equal(readHandoffState(handoffFileOf(world)).handoff_path, resolve(inState));
     // (c) Bash launcher with a foreign --brief: refused
     const foreign = runHook(world, 'Bash', { command: 'jev-session --role worker --brief /etc/hostname --name "x (successor)"' });
     assert.equal(denied(foreign.output, 'hand the session over'), true, `Bash with a foreign --brief must be refused: ${JSON.stringify(foreign.output)}`);
-    // (d) Bash with --brief equal to the registered path: passes once (the successor_started flag)
+    // (d) Bash with --brief equal to the registered path: passes; the call is noted in the state, a start is not assumed
     const command = `jev-session --role worker --brief ${inState} --name "successor"`;
     const once = runHook(world, 'Bash', { command });
     assert.equal(denied(once.output), false, `Bash with --brief equal to the registered path must pass: ${JSON.stringify(once.output)}`);
-    assert.equal(readHandoffState(world.stateDir, SID).successor_started, true);
-    // (e) a second run of the launcher: refused with the text
+    const afterCall = readHandoffState(handoffFileOf(world));
+    assert.equal(afterCall.launcher_attempts, 1);
+    assert.equal(afterCall.successor_started, undefined);
+    // (e) a second call while the first has left no row in the launcher journal: refused, it may still be running
     const twice = runHook(world, 'Bash', { command });
-    assert.equal(denied(twice.output, 'The successor has already been started'), true, `the second run must be refused: ${JSON.stringify(twice.output)}`);
+    assert.equal(denied(twice.output, 'may still be running'), true, `the second call must wait: ${JSON.stringify(twice.output)}`);
+    // (e2) the launcher refused the start (a pool refusal row for this brief): the call can be repeated, and the repeat is noted
+    launcherRow(world, { ts: new Date(Date.now() + 1000).toISOString(), brief: inState, result: 'pool-refused' });
+    const retry = runHook(world, 'Bash', { command });
+    assert.equal(denied(retry.output), false, `a call that did not start a session can be repeated: ${JSON.stringify(retry.output)}`);
+    assert.equal(readHandoffState(handoffFileOf(world)).launcher_attempts, 2);
+    // (e3) the launcher started a session (starter_exit 0): the next call is refused for good, and the start is kept in the state
+    launcherRow(world, { ts: new Date(Date.now() + 2000).toISOString(), brief: inState, result: 'decided', starter_exit: 0, session_id: 'ab12cd34' });
+    const third = runHook(world, 'Bash', { command });
+    assert.equal(denied(third.output, 'The successor has already been started'), true, `a confirmed start must not be repeated: ${JSON.stringify(third.output)}`);
+    assert.equal(readHandoffState(handoffFileOf(world)).successor_started, true);
+    const fourth = runHook(world, 'Bash', { command });
+    assert.equal(denied(fourth.output, 'The successor has already been started'), true);
     // (f) Edit of the own file in the session state directory: passes (written earlier by this session)
     const own = runHook(world, 'Edit', { file_path: inState, old_string: 'state', new_string: 'state appended' });
     assert.equal(denied(own.output), false, `Edit of the own file must pass: ${JSON.stringify(own.output)}`);

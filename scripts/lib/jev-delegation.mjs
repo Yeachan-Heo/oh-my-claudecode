@@ -5,7 +5,6 @@
 // never denies and never changes the call: with the point active the answer `session` only adds a hint.
 // Only node built-ins are imported.
 import { existsSync, readFileSync } from 'node:fs';
-import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 export const SESSION_ROLES = ['coordinator', 'worker'];
@@ -29,13 +28,12 @@ export function sessionRoleFacts(env = process.env) {
 }
 
 // Agents the tracker (SubagentStart/Stop) lists as running in THIS session: the session-scoped file only (the legacy shared files mix sessions), entries
-// started within 6 hours (an agent whose stop was never seen stays "running" for ever). undefined when the file is missing or unreadable: no number is better than a guess.
-export function readRunningAgents(stateDir, sessionId, now = Date.now()) {
+// started within 6 hours (an agent whose stop was never seen stays "running" for ever). The hook passes the path of that file, resolved by the canonical
+// session path helper. undefined when the file is missing or unreadable: no number is better than a guess.
+export function readRunningAgents(trackerFile, now = Date.now()) {
   try {
-    if (typeof sessionId !== 'string' || !/^[A-Za-z0-9_-]{1,128}$/.test(sessionId) || !stateDir) return undefined;
-    const file = join(stateDir, 'sessions', sessionId, 'subagent-tracking-state.json');
-    if (!existsSync(file)) return undefined;
-    const data = JSON.parse(readFileSync(file, 'utf8'));
+    if (typeof trackerFile !== 'string' || !trackerFile || !existsSync(trackerFile)) return undefined;
+    const data = JSON.parse(readFileSync(trackerFile, 'utf8'));
     if (!data || !Array.isArray(data.agents)) return undefined;
     return data.agents.filter((a) => a && a.status === 'running' && Number.isFinite(Date.parse(a.started_at)) && now - Date.parse(a.started_at) < 6 * 3600 * 1000).length;
   } catch { return undefined; }

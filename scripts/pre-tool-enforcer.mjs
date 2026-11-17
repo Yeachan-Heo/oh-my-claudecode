@@ -27,7 +27,7 @@ import { isJevAppliedLogEnabled, isJevShadowOptedIn, jevModeFor, jevNoulOf, reco
 import { pointerSecretPath } from './lib/jev-pointer-secret-path.mjs';
 import { agentLimit, poolDir, poolEnabled, readPoolState, refusalText, reserveAgent, writePoolRow } from './lib/jev-pool.mjs';
 import { isJevLogContextEnabled, isJevRowTelemetryEnabled, JEV_ROW_NO_ANSWER, jevLogContextOf, resolveExcerptChars, resolveJevLogMaxBytes, rotateJevLog } from './jev-resolve.mjs';
-import { denialK, denialKey, denialLogDir, denialMarker, denialSessionMax, isDenialSwitchOn, keyHash, registerDenial, writeDenialRow } from './lib/jev-denial-counter.mjs';
+import { denialK, denialKey, denialLogDir, denialMarker, denialSessionMax, denialStateFileName, isDenialSwitchOn, keyHash, registerDenial, writeDenialRow } from './lib/jev-denial-counter.mjs';
 
 // Inlined from src/config/models.ts — avoids a dist/ import so the hook works
 // before a build and stays consistent with the TypeScript source.
@@ -2714,7 +2714,7 @@ function settlePoolReservation(output, input) {
 // (OMC_SESSION_ROLE, set by scripts/jev-session.mjs): `delegation` and `delegation:shadow` ask Jev and log the answer in
 // shadow.jsonl, `delegation:active` also gives the hint when Jev says "session". Context only: this never denies and never
 // changes the call; a failure of any kind returns no hint. One applied.jsonl row per decision (with OMC_JEV_APPLIED_LOG).
-async function delegationHintFor(toolName, toolInput, data, stateDir, sessionId) {
+async function delegationHintFor(toolName, toolInput, data, directory, sessionId) {
   try {
     if (data.agent_id || data.agentId) return ''; // a subagent's own call is never a coordinator's choice
     const mode = jevModeFor('delegation', process.env, data.permission_mode);
@@ -2722,7 +2722,9 @@ async function delegationHintFor(toolName, toolInput, data, stateDir, sessionId)
     const { DELEGATION_QUESTIONS, decideDelegation, delegationHintText, delegationState, readRunningAgents, sessionRoleFacts } = await import('./lib/jev-delegation.mjs');
     const facts = sessionRoleFacts();
     if (!facts || facts.role !== 'coordinator') return '';
-    const running = readRunningAgents(stateDir, sessionId);
+    // The tracker's session file is found by the canonical session path helper; an id it does not accept gives no number.
+    const trackerFile = isValidSessionId(sessionId) ? (await resolveSessionStatePathsForHook(directory, 'subagent-tracking', sessionId)).sessionScopedPath : '';
+    const running = readRunningAgents(trackerFile);
     const marker = parseModelRoutingMarker(toolInput.prompt);
     const markerApplies = Boolean(marker && (marker.model || marker.effort)); // a refused word alone leaves the prompt as it was
     const result = recordJevShadow({ point: 'delegation', state: delegationState({ toolName, toolInput: markerApplies ? { ...toolInput, prompt: marker.prompt } : toolInput, facts, running }), questions: DELEGATION_QUESTIONS, heuristic: null, permissionMode: data.permission_mode });
@@ -2732,6 +2734,23 @@ async function delegationHintFor(toolName, toolInput, data, stateDir, sessionId)
     recordJevApplied('delegation', { subagent_type: toolInput.subagent_type || null, role: facts.role, choice: decision.choice, confidence: decision.confidence, ...(running !== undefined ? { running } : {}) });
     return decision.choice === 'session' ? delegationHintText({ running, sessionId }) : '';
   } catch { return ''; }
+}
+
+// The session-scoped files of the opt-in guards: the denial counter state (denials-<agent id or main>.json) and the handoff state
+// (handoff.json). Their paths come from the canonical resolveSessionStatePathsForHook(), once per call, before the guards run
+// (the guards are synchronous). A missing or invalid session id, or a path the helper rejects, leaves the path empty: the guard then
+// runs without its state (fail-open; the denial counter writes a `state` row).
+let jevSessionFiles = { denials: '', handoff: '' };
+async function resolveJevSessionFiles(data, directory) {
+  jevSessionFiles = { denials: '', handoff: '' };
+  const sessionId = typeof data?.session_id === 'string' ? data.session_id : typeof data?.sessionId === 'string' ? data.sessionId : '';
+  if (!isValidSessionId(sessionId)) return;
+  const agentId = typeof data?.agent_id === 'string' ? data.agent_id : typeof data?.agentId === 'string' ? data.agentId : '';
+  const fileOf = async (stateName, fileName) => {
+    try { return (await resolveSessionStatePathsForHook(directory, stateName, sessionId, { fileName })).writePath || ''; } catch { return ''; }
+  };
+  if (isDenialSwitchOn('OMC_JEV_DENIAL_COUNTER')) jevSessionFiles.denials = await fileOf('denials', denialStateFileName(agentId));
+  if (isDenialSwitchOn('OMC_JEV_HANDOFF') && !agentId) jevSessionFiles.handoff = await fileOf('handoff', 'handoff.json');
 }
 
 // Opt-in denial counter (OMC_JEV_DENIAL_COUNTER=1): every guard denial of this hook passes through here. Returns the
@@ -2753,6 +2772,7 @@ function denialReasonWithCounter(guard, reason, data, stateDir) {
   try {
     const result = registerDenial({
       stateDir,
+      statePath: jevSessionFiles.denials,
       sessionId: typeof data?.session_id === 'string' ? data.session_id : typeof data?.sessionId === 'string' ? data.sessionId : '',
       agentId: typeof data?.agent_id === 'string' ? data.agent_id : typeof data?.agentId === 'string' ? data.agentId : '',
       guard,
@@ -2851,6 +2871,7 @@ async function main() {
     data = {};
     try { data = JSON.parse(input); } catch {}
     await setJevHookContext(data);
+    await resolveJevSessionFiles(data, directory);
 
     // Opt-in agent pool (OMC_JEV_POOL=1): refuses Agent/Task calls over the ceiling before any Jev query.
     if (toolName === 'Task' || toolName === 'Agent') {
@@ -2958,7 +2979,7 @@ async function main() {
     const handoffOn = isDenialSwitchOn('OMC_JEV_HANDOFF');
     const handoff = handoffOn ? await import('./lib/jev-handoff.mjs') : null;
     const handoffSize = handoffOn ? handoffTranscriptSize(data, directory, sessionId) : null; // statSync, no reading of the file
-    const handoffBefore = handoffOn ? handoff.handoffBeforeGuard({ stateDir, sessionId, data, sizeBytes: handoffSize }) : { output: null, context: '' };
+    const handoffBefore = handoffOn ? handoff.handoffBeforeGuard({ stateDir, handoffFile: jevSessionFiles.handoff, sessionId, data, sizeBytes: handoffSize }) : { output: null, context: '' };
     if (handoffBefore.output) {
       const handedOverReason = handoffBefore.output?.hookSpecificOutput?.permissionDecision === 'deny'
         ? denialReasonWithCounter('handoff', handoffBefore.output.hookSpecificOutput.permissionDecisionReason, data, stateDir)
@@ -2974,7 +2995,7 @@ async function main() {
       // Handoff mode replaces the denial when readBoundedTranscript recognised the size overflow: a subagent passes with a
       // journal row, a main session gets the handoff tools or the "hand the session over" denial (through the denial counter
       // under the guard name `handoff`, which is never released).
-      const handoffOverride = handoffOn ? handoff.overrideUltragoalDenial({ stateDir, sessionId, data, sizeBytes: handoffSize, overLimit: transcriptOverLimit }) : null;
+      const handoffOverride = handoffOn ? handoff.overrideUltragoalDenial({ stateDir, handoffFile: jevSessionFiles.handoff, sessionId, data, sizeBytes: handoffSize, overLimit: transcriptOverLimit }) : null;
       if (handoffOverride) {
         handoffContext = ''; // in handoff mode a warning would only grow the transcript
         if (handoffOverride.hookSpecificOutput?.permissionDecision === 'deny') {
@@ -3274,7 +3295,7 @@ async function main() {
       const toolInput = data.toolInput || data.tool_input || null;
       // Reflect any injected per-agent model (issue #3242) in the advisory label.
       message = await generateAgentSpawnMessage(updatedToolInput || toolInput, stateDir, directory, todoStatus, sessionId);
-      delegationHint = toolInput && typeof toolInput === 'object' ? await delegationHintFor(toolName, toolInput, data, stateDir, sessionId) : ''; // coordinator hint (point delegation), context only
+      delegationHint = toolInput && typeof toolInput === 'object' ? await delegationHintFor(toolName, toolInput, data, directory, sessionId) : ''; // coordinator hint (point delegation), context only
     } else {
       message = generateMessage(toolName, todoStatus, modeActive);
     }

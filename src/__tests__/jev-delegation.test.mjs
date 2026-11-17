@@ -59,23 +59,24 @@ describe('delegation point: module', () => {
     assert.equal(unknown.run_in_background, false);
   });
 
-  it('readRunningAgents: this session only, entries of the last 6 hours, running status; undefined when unknown', () => {
+  it('readRunningAgents: the file the hook resolved, entries of the last 6 hours, running status; undefined when unknown', () => {
     const stateDir = tempDir();
     const now = Date.now();
-    assert.equal(readRunningAgents(stateDir, 's1', now), undefined);
+    const file = join(stateDir, 'sessions', 's1', 'subagent-tracking-state.json'); // the hook passes the session-scoped path of the canonical helper
+    assert.equal(readRunningAgents(file, now), undefined);
     mkdirSync(join(stateDir, 'sessions', 's1'), { recursive: true });
-    writeFileSync(join(stateDir, 'sessions', 's1', 'subagent-tracking-state.json'), JSON.stringify({ agents: [
+    writeFileSync(file, JSON.stringify({ agents: [
       { agent_id: 'a1', status: 'running', started_at: new Date(now - 60_000).toISOString() },
       { agent_id: 'a2', status: 'running', started_at: new Date(now - 3_600_000).toISOString() },
       { agent_id: 'a3', status: 'running', started_at: new Date(now - 20 * 3_600_000).toISOString() },
       { agent_id: 'a4', status: 'completed', started_at: new Date(now - 60_000).toISOString() },
       { agent_id: 'a5', status: 'running', started_at: 'not a date' },
     ] }));
-    assert.equal(readRunningAgents(stateDir, 's1', now), 2);
-    assert.equal(readRunningAgents(stateDir, '../s1', now), undefined);
-    assert.equal(readRunningAgents('', 's1', now), undefined);
-    writeFileSync(join(stateDir, 'sessions', 's1', 'subagent-tracking-state.json'), '{broken');
-    assert.equal(readRunningAgents(stateDir, 's1', now), undefined);
+    assert.equal(readRunningAgents(file, now), 2);
+    assert.equal(readRunningAgents('', now), undefined);
+    assert.equal(readRunningAgents(undefined, now), undefined);
+    writeFileSync(file, '{broken');
+    assert.equal(readRunningAgents(file, now), undefined);
   });
 
   it('delegationHintText: the launcher of this plugin copy, the facts and the sentence about a restart', () => {

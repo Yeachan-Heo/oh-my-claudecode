@@ -11,7 +11,10 @@
  * Only the /goal guard (ultragoal-goal) can be released, and only in a main Claude session, after the session
  * ceiling, and only with OMC_JEV_DENIAL_RELEASE=1. Every other denial is only counted and escalated.
  *
- * State: <stateDir>/sessions/<session>/denials-<agent_id or main>.json, written atomically under a lock.
+ * State: the file denials-<agent_id or main>.json of the session's state directory, written atomically under a lock. The hook
+ * resolves its path with the canonical session path helper (resolveSessionStatePathsForHook of lib/state-root.mjs, the file name
+ * from denialStateFileName) and passes it in as statePath; this module builds no session path itself. Without a statePath (a
+ * session id the helper does not accept) nothing is counted: the denial stays and the journal gets a `state` row.
  * The counts of the state are keyed by 16-hex hashes of the keys; the once-per-key action markers carry the
  * normalized key itself (so after the first escalation the file holds up to 2000 characters of denial text).
  * Log: denials.jsonl in OMC_JEV_LOG_DIR, or <stateDir>/jev when that is unset. One decision row per fired
@@ -23,7 +26,7 @@
  *   OMC_JEV_DENIAL_LOCK_MS (1800), OMC_JEV_DENIAL_LOCK_ATTEMPTS (50).
  *
  * Contract used by pre-tool-enforcer.mjs and the documentation in docs/HOOKS.md; do not rename:
- *   registerDenial({ stateDir, sessionId, agentId, guard, reason, call, env, now })
+ *   registerDenial({ stateDir, statePath, sessionId, agentId, guard, reason, call, env, now })
  *     -> { key, n, sessionCount, degree, release, action, state, text }
  *   denialMarker(key, n)  -> "[denial <16-hex hash> #<n>]", #0 when n is unknown
  */
@@ -159,12 +162,10 @@ export function writeDenialRow(row, logDir) {
   }
 }
 
-function statePath(stateDir, sessionId, agentId) {
-  const file = agentId ? `denials-${String(agentId).replace(/[^A-Za-z0-9._-]/g, '_').slice(0, 120)}.json` : 'denials-main.json';
-  const cleaned = typeof sessionId === 'string' ? sessionId.trim().replace(/[^A-Za-z0-9._-]/g, '_').slice(0, 120) : '';
-  // An id made only of dots ("." or "..") would climb out of the sessions directory.
-  const session = cleaned && !/^\.+$/.test(cleaned) ? cleaned : 'no-session';
-  return join(stateDir, 'sessions', session, file);
+/** The file name of the counter state of a main session (agentId empty) or of one subagent, for the canonical path helper: [A-Za-z0-9_-] only. */
+export function denialStateFileName(agentId) {
+  const agent = typeof agentId === 'string' && agentId ? agentId.replace(/[^A-Za-z0-9_-]/g, '_').slice(0, 120) : '';
+  return agent ? `denials-${agent}.json` : 'denials-main.json';
 }
 
 /** Read the state: 'ok' (usable), 'missing' (a fresh session), 'broken' (unreadable JSON) or 'nan' (wrong shape). */
@@ -229,14 +230,14 @@ function saveState(path, state) {
  * Returns { key, n, sessionCount, degree, release, action, state, text }:
  *   key       normalized key (use denialMarker)            n         windowed count, or null when unknown
  *   degree    0 none, 1 reminder, 2 block                  release   true: the caller lets the call pass
- *   action    the fired action id or null                  state     'ok' | 'missing' | 'broken' | 'nan' | 'lock-unavailable'
+ *   action    the fired action id or null                  state     'ok' | 'missing' | 'broken' | 'nan' | 'lock-unavailable' | 'path-unavailable'
  *   text      escalation text to append (may be empty)
  */
-export function registerDenial({ stateDir, sessionId, agentId, guard, reason, call = {}, env = process.env, now }) {
+export function registerDenial({ stateDir, statePath, sessionId, agentId, guard, reason, call = {}, env = process.env, now }) {
   const key = denialKey(guard, reason);
   const hash = keyHash(key);
   const ts = isFiniteNumber(now) ? now : Date.now();
-  const path = statePath(stateDir, sessionId, agentId);
+  const path = typeof statePath === 'string' ? statePath : '';
   const logDir = denialLogDir(stateDir, env);
   const k = denialK(env);
   const windowMs = denialWindowMs(env);
@@ -250,7 +251,7 @@ export function registerDenial({ stateDir, sessionId, agentId, guard, reason, ca
   const windowS = Math.round(windowMs / 1000);
   let result = null;
 
-  const lock = withStateFileLockAtPathSync(`${path}.lock`, () => {
+  const lock = path ? withStateFileLockAtPathSync(`${path}.lock`, () => {
     const read = readState(path);
     const state = read.kind === 'ok'
       ? read.state
@@ -332,19 +333,20 @@ export function registerDenial({ stateDir, sessionId, agentId, guard, reason, ca
       }
     }
     saveState(path, state);
-  }, true, lockAttempts, 600, 900, lockBudgetMs);
+  }, true, lockAttempts, 600, 900, lockBudgetMs) : { acquired: false };
 
   const written = lock.acquired || lock.callbackRan === true;
   if (!written || !result) {
-    // The lock was unavailable: fail-open, the denial stays, the lost increment is visible in the journal.
+    // The state path is missing or the lock was unavailable: fail-open, the denial stays, the lost increment is visible in the journal.
+    const state = path ? 'lock-unavailable' : 'path-unavailable';
     writeDenialRow({
       kind: 'state', session_id: sessionId || null, agent_id: agentId || null,
       guard, key: hash, n: null, sessionCount: null, k, maxSession,
-      degree: 0, result: 'denied', action: 'state-lock-unavailable', reason_code: 'guard_denial',
-      effectiveness: null, state: 'lock-unavailable',
+      degree: 0, result: 'denied', action: `state-${state}`, reason_code: 'guard_denial',
+      effectiveness: null, state,
       tool_name: call.toolName || null, tool_use_id: call.toolUseId || null,
     }, logDir);
-    return { key, n: null, sessionCount: null, degree: 0, release: false, action: null, state: 'lock-unavailable', text: '' };
+    return { key, n: null, sessionCount: null, degree: 0, release: false, action: null, state, text: '' };
   }
 
   if (result.action) {

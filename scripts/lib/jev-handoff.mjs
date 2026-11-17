@@ -3,7 +3,7 @@
 // warning from OMC_JEV_HANDOFF_WARN_MIB (default 20 MiB), attached to the calls that pass. With an active ultragoal and a
 // transcript over 25 MiB (the limit the /goal guard reads: MAX_TRANSCRIPT_BYTES in the hook) only the handoff tools pass
 // (Write/Edit on the handoff file, Read/Grep/Glob, ToolSearch/ListAgents/SendMessage, Bash with one command of the session
-// launcher), and after the takeover line in the handoff file every tool is refused. Subagents (input with agent_id) pass at
+// launcher, until a start is confirmed: see launcherGate), and after the takeover line in the handoff file every tool is refused. Subagents (input with agent_id) pass at
 // a transcript over the limit, with a journal row. Rows go to denials.jsonl (kind "handoff") through the denial counter's writer.
 //
 // Configuration (all optional):
@@ -17,7 +17,9 @@ import { createHash } from 'crypto';
 import { existsSync, lstatSync, openSync, readFileSync, readSync, closeSync, statSync } from 'fs';
 import { basename, dirname, join, resolve } from 'path';
 import { atomicWriteFileSync } from './atomic-write.mjs';
+import { jevLogFiles } from '../jev-resolve.mjs';
 import { denialLogDir, writeDenialRow } from './jev-denial-counter.mjs';
+import { maskSecrets } from './jev-mask.mjs';
 import { parseUseMarker, USE_MARKER_EFFORTS } from './jev-routing.mjs';
 import { sessionRoleFacts } from './jev-delegation.mjs';
 
@@ -28,6 +30,8 @@ export const HANDOFF_BLOCK_BYTES = 25 * MIB; // = MAX_TRANSCRIPT_BYTES in pre-to
 export const DEFAULT_HANDOFF_FILE = 'HANDOFF.md';
 export const DEFAULT_TAKEOVER_MARKER = 'TAKEN OVER:';
 export const DEFAULT_LAUNCHER_COMMAND = 'jev-session';
+export const LAUNCHER_ATTEMPT_LIMIT = 3; // launcher calls per handoff that did not start a session
+export const LAUNCHER_IN_FLIGHT_MS = 150_000; // a launcher call without a journal row may still run: two starts of 120 s at most
 
 function positiveMib(env, name, fallback) {
   const raw = String(env?.[name] ?? '').trim();
@@ -127,13 +131,13 @@ function isHandedOver(state, path, env) {
 }
 
 // Registration of a handoff write in the session state (the path and the hash of the predicted content after the write).
-function registerHandoffWrite(stateDir, sessionId, state, toolName, toolInput) {
+function registerHandoffWrite(handoffFile, sessionId, state, toolName, toolInput) {
   try {
     const path = resolve(String(toolInput?.file_path ?? toolInput?.path ?? ''));
     const hash = hashAfterWrite(toolName, toolInput, path);
     if (!hash) return state;
-    writeHandoffState(stateDir, sessionId, { ...state, handoff_path: path, handoff_hash: hash });
-    return readHandoffState(stateDir, sessionId);
+    writeHandoffState(handoffFile, sessionId, { ...state, handoff_path: path, handoff_hash: hash });
+    return readHandoffState(handoffFile);
   } catch { return state; }
 }
 
@@ -143,13 +147,57 @@ function argumentValue(command, name) {
   return m ? (m[2] ?? m[3] ?? m[1]).trim() : '';
 }
 
+// The outcome of the last launcher call of this handoff, from the launcher's own journal (sessions.jsonl in the Jev log directory, with
+// its rotated archives): the hook sees a launcher call only before it runs, so the journal is the only evidence whether a session was
+// started. 'started': a row for this brief since the call whose starter exited 0; 'failed': a row for this brief since the call that is
+// not a start (refused by the session pool, the start failed; a dry run does not count); 'pending': no row yet.
+function launcherOutcome({ state, logDir }) {
+  const since = Number(state?.launcher_attempt_ts) || 0;
+  const path = state?.handoff_path ? resolve(String(state.handoff_path)) : '';
+  if (!since || !path || !logDir) return 'pending';
+  const sameBrief = (brief) => typeof brief === 'string' && (resolve(brief) === path || brief === maskSecrets(path));
+  let failed = false;
+  try {
+    for (const file of jevLogFiles(logDir, 'sessions', since)) {
+      const rows = readFileSync(file, 'utf8').split('\n');
+      for (let i = rows.length - 1; i >= 0; i--) {
+        if (!rows[i].trim()) continue;
+        let row;
+        try { row = JSON.parse(rows[i]); } catch { continue; }
+        const at = Date.parse(row?.ts);
+        if (Number.isFinite(at) && at < since) break; // the rows are in time order: older rows belong to earlier calls
+        if (!sameBrief(row?.brief) || row.result === 'dry-run') continue;
+        if (row.starter_exit === 0) return 'started';
+        failed = true;
+      }
+    }
+  } catch { /* an unreadable journal is no evidence */ }
+  return failed ? 'failed' : 'pending';
+}
+
+// Whether the launcher may run now: { allow, status } with status 'first' (no call yet), 'retry' (the last call did not start a session:
+// a failure row in the journal, or no row and the call is older than LAUNCHER_IN_FLIGHT_MS), 'started' (a start is confirmed: once per
+// handoff), 'in-flight' (the last call has no row yet and is younger than LAUNCHER_IN_FLIGHT_MS) or 'exhausted' (LAUNCHER_ATTEMPT_LIMIT
+// calls without a start). The state keeps launcher_attempts and launcher_attempt_ts (set when a launcher call is let through) and
+// successor_started once a start was seen.
+export function launcherGate({ state, logDir, now = Date.now() }) {
+  if (state?.successor_started === true) return { allow: false, status: 'started' };
+  const attempts = Number(state?.launcher_attempts) || 0;
+  if (!attempts) return { allow: true, status: 'first' };
+  const outcome = launcherOutcome({ state, logDir });
+  if (outcome === 'started') return { allow: false, status: 'started' };
+  if (outcome === 'pending' && now - (Number(state?.launcher_attempt_ts) || 0) < LAUNCHER_IN_FLIGHT_MS) return { allow: false, status: 'in-flight' };
+  if (attempts >= LAUNCHER_ATTEMPT_LIMIT) return { allow: false, status: 'exhausted' };
+  return { allow: true, status: 'retry' };
+}
+
 // The tools allowed in handoff mode: (a) Write/Edit on the handoff file, (b) Read/Grep/Glob (reading the brief and notes),
 // (c) ToolSearch (SendMessage is a deferred tool), ListAgents, SendMessage, (d) Bash with one launcher command. Everything else: refused.
 // Write/Edit only for the handoff file in the working directory of the session (cwd of the hook input) or in the session's
 // state directory of .omc, and only for a file that does not exist or was written earlier by this session (the path in the state);
-// Bash only with --brief equal to the registered handoff_path, and only one run per handoff (the successor_started flag in the
-// state; a second run is refused).
-export function handoffModeTools(toolName, toolInput, { cwd = '', sessionStateDir = '', state = null, env = process.env } = {}) {
+// Bash only with --brief equal to the registered handoff_path, and only until a start is confirmed (launcherGate: the launcher's
+// journal says whether a session was started; a call that did not start one can be repeated, up to LAUNCHER_ATTEMPT_LIMIT calls).
+export function handoffModeTools(toolName, toolInput, { cwd = '', sessionStateDir = '', state = null, logDir = '', now = Date.now(), env = process.env } = {}) {
   const input = toolInput && typeof toolInput === 'object' ? toolInput : {};
   if (toolName === 'Write' || toolName === 'Edit') {
     const path = String(input.file_path ?? input.path ?? '');
@@ -170,9 +218,7 @@ export function handoffModeTools(toolName, toolInput, { cwd = '', sessionStateDi
     const brief = argumentValue(input.command ?? '', 'brief');
     if (!handoffState?.handoff_path || !brief) return false;
     if (resolve(brief) !== resolve(String(handoffState.handoff_path))) return false;
-    // Allow one launcher attempt: check both successor_started (confirmed) and launcher_attempted (pending confirmation)
-    if (handoffState.successor_started === true || handoffState.launcher_attempted === true) return false;
-    return true;
+    return launcherGate({ state: handoffState, logDir, now }).allow;
   }
   return false;
 }
@@ -204,9 +250,10 @@ export function successorUseLine({ sessionId, transcriptPath, stateDir, env = pr
   let effort = '';
   try {
     if (typeof sessionId === 'string' && sessionId) {
-      const file = join(denialLogDir(stateDir, env), 'sessions.jsonl'); // the same log directory as the launcher's
-      if (existsSync(file)) {
+      // The live journal of the launcher and its rotated archives, newest first: the last row of this session wins.
+      for (const file of jevLogFiles(denialLogDir(stateDir, env), 'sessions')) {
         const rows = readFileSync(file, 'utf8').trim().split('\n').filter(Boolean);
+        let found = false;
         for (let i = rows.length - 1; i >= 0; i--) {
           let row; // the last row of this session (a start or a fallback, both have started_with/model.to)
           try { row = JSON.parse(rows[i]); } catch { continue; }
@@ -214,8 +261,10 @@ export function successorUseLine({ sessionId, transcriptPath, stateDir, env = pr
           model = String(row?.started_with?.model || row?.model?.to || '');
           const rawEffort = String(row?.started_with?.effort || row?.effort?.to || '');
           effort = USE_MARKER_EFFORTS.includes(rawEffort) ? rawEffort : '';
+          found = true;
           break;
         }
+        if (found) break;
       }
     }
   } catch { /* reading the journal must not stop the hook */ }
@@ -273,10 +322,15 @@ export function warningText({ sizeBytes, useLine = '', facts = null, env = proce
   return `[OMC HANDOFF] The transcript of this session is ${mib.toFixed(1)} MiB. From ${HANDOFF_BLOCK_BYTES / MIB} MiB with an active ultragoal the /goal guard lets only the handoff tools through (writing ${handoffFileName(env)}, reads, ${launcherCommand(env)}, SendMessage), and after the ${takeoverMarker(env)} line it refuses everything. Consider handing the session over now.\n${handoffSteps({ useLine, facts, env })}`;
 }
 
-export function refusalText({ useLine = '', facts = null, successorAlreadyStarted = false, env = process.env } = {}) {
+export function refusalText({ useLine = '', facts = null, launcherStatus = '', env = process.env } = {}) {
+  const launcherNotes = {
+    started: `The successor has already been started: ${launcherCommand(env)} can be run only once per handoff.`,
+    'in-flight': `The last ${launcherCommand(env)} call has left no row in the launcher journal yet and may still be running: wait for its result before running it again.`,
+    exhausted: `${launcherCommand(env)} has been called ${LAUNCHER_ATTEMPT_LIMIT} times without starting a session: do not run it again.`,
+  };
   const notes = [
-    `[OMC HANDOFF] Transcript over ${HANDOFF_BLOCK_BYTES / MIB} MiB with an active ultragoal: hand the session over. Only the handoff tools are allowed: Write and Edit on a file whose base name is ${handoffFileName(env)} in the working directory of the session or in the session's .omc state directory, for a file that does not exist or was written earlier by this session; Read, Grep, Glob; ToolSearch, ListAgents, SendMessage; Bash with one ${launcherCommand(env)} command with --brief equal to the registered handoff path, once per handoff. Other tools are refused.`,
-    successorAlreadyStarted ? `The successor has already been started: ${launcherCommand(env)} can be run only once per handoff.` : '',
+    `[OMC HANDOFF] Transcript over ${HANDOFF_BLOCK_BYTES / MIB} MiB with an active ultragoal: hand the session over. Only the handoff tools are allowed: Write and Edit on a file whose base name is ${handoffFileName(env)} in the working directory of the session or in the session's .omc state directory, for a file that does not exist or was written earlier by this session; Read, Grep, Glob; ToolSearch, ListAgents, SendMessage; Bash with one ${launcherCommand(env)} command with --brief equal to the registered handoff path, once per handoff (a call that did not start a session can be repeated, up to ${LAUNCHER_ATTEMPT_LIMIT} calls). Other tools are refused.`,
+    launcherNotes[launcherStatus] || '',
     'If you cannot hand the session over, end your turn with a line `BLOCKED: <reason, at least 20 characters>`.',
   ].filter(Boolean);
   return `${notes.join(' ')}\n${handoffSteps({ useLine, facts, env })}`;
@@ -287,23 +341,24 @@ export function handedOverText(successorName) {
   return `[OMC HANDOFF] The session was handed over to ${name}, end your turn; the coordinator will close the session (claude stop).`;
 }
 
-// The state of the session <stateDir>/sessions/<sid>/handoff.json (an atomic write), fields: last_warning_bytes (the frequency
-// of warnings: the first above the warning threshold, the next after growth by the step), handoff_path and handoff_hash (the
-// path and the hash of the allowed write of the handoff file, for the check of the takeover line) and successor_started.
-export function readHandoffState(stateDir, sessionId) {
+// The state of the session, the file handoff.json of the session's state directory (an atomic write). The hook resolves its path with the
+// canonical session path helper (resolveSessionStatePathsForHook of lib/state-root.mjs, fileName handoff.json) and passes it in as
+// handoffFile; this module builds no session path itself. Fields: last_warning_bytes (the frequency of warnings: the first above the
+// warning threshold, the next after growth by the step), handoff_path and handoff_hash (the path and the hash of the allowed write of the
+// handoff file, for the check of the takeover line), launcher_attempts and launcher_attempt_ts (the launcher calls let through) and
+// successor_started (a start confirmed by the launcher's journal).
+export function readHandoffState(handoffFile) {
   try {
-    if (!stateDir || typeof sessionId !== 'string' || !sessionId) return {};
-    const file = join(stateDir, 'sessions', sessionId, 'handoff.json');
-    if (!existsSync(file)) return {};
-    return JSON.parse(readFileSync(file, 'utf8')) || {};
+    if (!handoffFile || typeof handoffFile !== 'string' || !existsSync(handoffFile)) return {};
+    return JSON.parse(readFileSync(handoffFile, 'utf8')) || {};
   } catch { return {}; }
 }
 
-export function writeHandoffState(stateDir, sessionId, state) {
+export function writeHandoffState(handoffFile, sessionId, state) {
   try {
-    if (!stateDir || typeof sessionId !== 'string' || !/^[A-Za-z0-9_-]{1,128}$/.test(sessionId)) return;
+    if (!handoffFile || typeof handoffFile !== 'string' || typeof sessionId !== 'string' || !/^[A-Za-z0-9_-]{1,128}$/.test(sessionId)) return;
     atomicWriteFileSync(
-      join(stateDir, 'sessions', sessionId, 'handoff.json'),
+      handoffFile,
       JSON.stringify({ version: 1, ...state, session_id: sessionId, updated: new Date().toISOString() }, null, 2),
     );
   } catch { /* the state does not stop the hook */ }
@@ -335,10 +390,10 @@ export function assessMode({ sessionId, sizeBytes = null, ultragoalDenial = fals
 // The entry point of the hook before the /goal guard (a main session): (c) after the takeover line every tool is refused
 // with a handed-over-refused row; the path of an allowed write of the handoff file goes to the state; (b) the warning from the
 // warning threshold (the frequency in the state, a warning row), returned as a context that the hook attaches to the calls that pass.
-export function handoffBeforeGuard({ stateDir, sessionId, data, sizeBytes = null, env = process.env }) {
+export function handoffBeforeGuard({ stateDir, handoffFile, sessionId, data, sizeBytes = null, env = process.env }) {
   const none = { output: null, context: '' };
-  if (!stateDir || !sessionId || (data.agent_id || data.agentId)) return none; // subagents: no state and none of the main session's warnings
-  let state = readHandoffState(stateDir, sessionId);
+  if (!stateDir || !handoffFile || !sessionId || (data.agent_id || data.agentId)) return none; // subagents: no state and none of the main session's warnings
+  let state = readHandoffState(handoffFile);
   if (state.handoff_path) {
     // The takeover line counts only when it appeared after a write of the handoff file by another session (the session has its
     // own registered hash and the file content differs from its last write); the session's own line does not close it.
@@ -362,12 +417,12 @@ export function handoffBeforeGuard({ stateDir, sessionId, data, sizeBytes = null
   // An ordinary session (a size below the warning threshold) registers nothing.
   if ((toolName === 'Write' || toolName === 'Edit') && typeof sizeBytes === 'number' && sizeBytes > handoffWarnBytes(env)
     && sizeBytes <= HANDOFF_BLOCK_BYTES && isHandoffFileName(toolInput.file_path ?? toolInput.path ?? '', env)) {
-    state = registerHandoffWrite(stateDir, sessionId, state, toolName, toolInput);
+    state = registerHandoffWrite(handoffFile, sessionId, state, toolName, toolInput);
   }
   if (typeof sizeBytes === 'number' && sizeBytes > handoffWarnBytes(env)) {
     const last = typeof state.last_warning_bytes === 'number' ? state.last_warning_bytes : null;
     if (last === null || sizeBytes - last >= handoffStepBytes(env)) {
-      writeHandoffState(stateDir, sessionId, { ...state, last_warning_bytes: sizeBytes });
+      writeHandoffState(handoffFile, sessionId, { ...state, last_warning_bytes: sizeBytes });
       writeHandoffRow(stateDir, env, data, 'warning', sizeBytes);
       const useLine = successorUseLine({ sessionId, transcriptPath: data.transcript_path ?? data.transcriptPath, stateDir, env });
       return { output: null, context: warningText({ sizeBytes, useLine, facts: sessionFacts(env), env }) };
@@ -379,7 +434,7 @@ export function handoffBeforeGuard({ stateDir, sessionId, data, sizeBytes = null
 // The entry point of the hook in the branch of the /goal guard's denial (only when readBoundedTranscript recognised the size
 // overflow): a subagent passes with a row; a main session in handoff mode: the handoff tools pass (handoff-allowed), the rest
 // is refused with the "hand the session over" text (handoff-refused). Null: today's denial, unchanged.
-export function overrideUltragoalDenial({ stateDir, sessionId, data, sizeBytes = null, overLimit = false, env = process.env }) {
+export function overrideUltragoalDenial({ stateDir, handoffFile, sessionId, data, sizeBytes = null, overLimit = false, env = process.env }) {
   if (!overLimit || !sessionId || !stateDir) return null;
   const toolName = data.tool_name || data.toolName || '';
   const toolInput = data.toolInput || data.tool_input || {};
@@ -387,19 +442,25 @@ export function overrideUltragoalDenial({ stateDir, sessionId, data, sizeBytes =
     writeHandoffRow(stateDir, env, data, 'handoff-subagent', sizeBytes);
     return { continue: true, suppressOutput: true };
   }
-  let state = readHandoffState(stateDir, sessionId);
+  if (!handoffFile) return null; // no state path for this session: today's denial, unchanged
+  let state = readHandoffState(handoffFile);
   if (isHandedOver(state, state.handoff_path, env)) return null; // handed over (the hash of another session's write): handoffBeforeGuard issued the denial
   const mode = assessMode({ sessionId, sizeBytes, ultragoalDenial: true, state, env });
   if (mode !== 'handoff') return null;
   // The context of the restrictions on Write/Edit and Bash in handoff mode.
-  const context = { cwd: String(data.cwd ?? ''), sessionStateDir: join(stateDir, 'sessions', sessionId), state, env };
+  const logDir = denialLogDir(stateDir, env);
+  const context = { cwd: String(data.cwd ?? ''), sessionStateDir: dirname(handoffFile), state, logDir, env };
+  const gate = launcherGate({ state, logDir });
+  if (gate.status === 'started' && state.successor_started !== true) {
+    state = { ...state, successor_started: true }; // a start seen in the launcher's journal is kept in the state
+    writeHandoffState(handoffFile, sessionId, state);
+  }
   if (handoffModeTools(toolName, toolInput, context)) {
     writeHandoffRow(stateDir, env, data, 'handoff-allowed', sizeBytes);
-    if (toolName === 'Write' || toolName === 'Edit') state = registerHandoffWrite(stateDir, sessionId, state, toolName, toolInput);
+    if (toolName === 'Write' || toolName === 'Edit') state = registerHandoffWrite(handoffFile, sessionId, state, toolName, toolInput);
     if ((toolName === 'Bash' || toolName === 'PowerShell') && isLauncherCommand(toolInput.command ?? '', env)) {
-      // Mark launcher attempt to prevent retries. The SubagentStart hook should confirm success by updating to successor_started: true.
-      // If the launcher fails, this flag will prevent retries until the session is manually fixed.
-      writeHandoffState(stateDir, sessionId, { ...state, launcher_attempted: true });
+      // The launcher call is let through; whether it started a session is read from the launcher's journal at the next call.
+      writeHandoffState(handoffFile, sessionId, { ...state, launcher_attempts: (Number(state.launcher_attempts) || 0) + 1, launcher_attempt_ts: Date.now() });
     }
     return { continue: true, suppressOutput: true };
   }
@@ -407,6 +468,6 @@ export function overrideUltragoalDenial({ stateDir, sessionId, data, sizeBytes =
   const useLine = successorUseLine({ sessionId, transcriptPath: data.transcript_path ?? data.transcriptPath, stateDir, env });
   return {
     continue: true,
-    hookSpecificOutput: { hookEventName: 'PreToolUse', permissionDecision: 'deny', permissionDecisionReason: refusalText({ useLine, facts: sessionFacts(env), successorAlreadyStarted: state.successor_started === true, env }) },
+    hookSpecificOutput: { hookEventName: 'PreToolUse', permissionDecision: 'deny', permissionDecisionReason: refusalText({ useLine, facts: sessionFacts(env), launcherStatus: gate.status, env }) },
   };
 }

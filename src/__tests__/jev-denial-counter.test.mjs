@@ -15,6 +15,7 @@ import {
   denialKey,
   denialMarker,
   denialSessionMax,
+  denialStateFileName,
   denialWindowMs,
   keyHash,
   registerDenial,
@@ -53,6 +54,7 @@ function setup(extraEnv = {}) {
 function deny(ctx, now, { pkg = `msg-${now}`, guard = 'agent-pool', reason = 'pool is full', sessionId = 's1', agentId = '', env } = {}) {
   return registerDenial({
     stateDir: ctx.stateDir,
+    statePath: stateFile(ctx.stateDir, sessionId, denialStateFileName(agentId)), // the hook passes the path resolved by the canonical helper; the layout of its fallback stands in for it here
     sessionId,
     agentId,
     guard,
@@ -198,6 +200,7 @@ describe('denial counter: parallel processes and an unavailable lock', () => {
 import { registerDenial } from ${JSON.stringify(MODULE_URL)};
 registerDenial({
   stateDir: ${JSON.stringify(ctx.stateDir)},
+  statePath: ${JSON.stringify(stateFile(ctx.stateDir, 'stress'))},
   sessionId: 'stress',
   guard: 'agent-pool',
   reason: 'reason-' + ${i},
@@ -257,7 +260,7 @@ if (lock) {
         setTimeout(() => resolve(out), 5000);
       });
       expect(JSON.parse(first.trim().split('\n').pop() || '{}').holds).toBe(true);
-      const result = registerDenial({ stateDir: ctx.stateDir, sessionId: 'lk', guard: 'agent-pool', reason: 'guard reason', call: { toolName: 'Bash', toolUseId: 'tu-lock' }, env: ctx.env, now: 0 });
+      const result = registerDenial({ stateDir: ctx.stateDir, statePath: stateFile(ctx.stateDir, 'lk'), sessionId: 'lk', guard: 'agent-pool', reason: 'guard reason', call: { toolName: 'Bash', toolUseId: 'tu-lock' }, env: ctx.env, now: 0 });
       expect(result.state).toBe('lock-unavailable');
       expect(result.degree).toBe(0);
       expect(result.release).toBe(false);
@@ -328,13 +331,23 @@ describe('denial counter: state and journal', () => {
     expect(Object.keys(state.keys)).toEqual([keyHash(key)]);
   });
 
-  it('keeps an id made only of dots inside the sessions directory', () => {
+  it('names the state file of a main session and of a subagent with the characters the canonical helper accepts', () => {
+    expect(denialStateFileName('')).toBe('denials-main.json');
+    expect(denialStateFileName(undefined)).toBe('denials-main.json');
+    expect(denialStateFileName('agent-7_a')).toBe('denials-agent-7_a.json');
+    expect(denialStateFileName('../x/y.z')).toBe('denials-___x_y_z.json');
+    expect(denialStateFileName('a'.repeat(300))).toBe(`denials-${'a'.repeat(120)}.json`);
+    for (const name of [denialStateFileName(''), denialStateFileName('a.b/c d'), denialStateFileName('é')]) expect(name).toMatch(/^[A-Za-z0-9][A-Za-z0-9_-]*\.json$/);
+  });
+
+  it('builds no session path itself: without a resolved state path nothing is counted, the denial stays and one state row says why', () => {
     const ctx = setup();
-    deny(ctx, T0, { sessionId: '..' });
-    deny(ctx, T0 + 3_000, { sessionId: '.' });
-    expect(existsSync(join(ctx.stateDir, 'sessions', 'no-session', 'denials-main.json'))).toBe(true);
-    expect(existsSync(join(ctx.stateDir, 'denials-main.json'))).toBe(false);
-    expect(readdirSync(join(ctx.stateDir, 'sessions'))).toEqual(['no-session']);
+    const result = registerDenial({ stateDir: ctx.stateDir, sessionId: 's1', guard: 'agent-pool', reason: 'pool is full', call: { toolName: 'Agent', toolUseId: 'tu-1' }, env: ctx.env, now: T0 });
+    expect(result).toMatchObject({ n: null, degree: 0, release: false, state: 'path-unavailable', text: '' });
+    expect(existsSync(ctx.stateDir)).toBe(false);
+    const rows = journal(ctx.logDir).filter((row) => row.kind === 'state');
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({ action: 'state-path-unavailable', state: 'path-unavailable', result: 'denied' });
   });
 
   it('keeps at most 64 entries per state map', () => {
@@ -399,6 +412,28 @@ describe('denial counter: switch on in the hook', () => {
     expect(reasons[2]).toContain(`[denial ${hash} #3]`);
     expect(reasons[2]).toContain('[DENIAL COUNTER] The same denial of guard agent-pool has come 3 times');
     expect(journal(logDir).some((row) => row.action === 'escalation-1' && row.key === hash)).toBe(true);
+  });
+
+  it('keeps the counter state at the path of the canonical session helper, for a main session and for a subagent', () => {
+    const run = runPoolDeny({ OMC_JEV_DENIAL_COUNTER: '1' }, 'hook-canonical');
+    const expected = join(run.home, '.omc', 'state', 'sessions', 'hook-canonical', 'denials-main.json');
+    expect(existsSync(expected)).toBe(true);
+    expect(JSON.parse(readFileSync(expected, 'utf8')).version).toBe(1);
+    expect(listRecursive(run.home).filter((name) => name.includes('denials-'))).toEqual([join('.omc', 'state', 'sessions', 'hook-canonical', 'denials-main.json')]);
+    const agent = runPoolDeny({ OMC_JEV_DENIAL_COUNTER: '1' }, 'hook-canonical-agent', { agent_id: 'agent.7/x' });
+    expect(existsSync(join(agent.home, '.omc', 'state', 'sessions', 'hook-canonical-agent', 'denials-agent_7_x.json'))).toBe(true);
+  });
+
+  it('counts nothing for a session id the canonical helper does not accept: the refusal stays, nothing is written outside the session directory', () => {
+    for (const sid of ['../escape', '..', 'a/b', '']) {
+      const run = runPoolDeny({ OMC_JEV_DENIAL_COUNTER: '1' }, sid);
+      expect(run.permissionDecision, `session id ${JSON.stringify(sid)}`).toBe('deny');
+      expect(run.reason).toContain('[AGENT POOL]');
+      expect(run.reason).toMatch(/\[denial [0-9a-f]{16} #0\]/); // the counter did not count: #0
+      expect(listRecursive(run.home).filter((name) => name.includes('denials-'))).toEqual([]);
+      expect(existsSync(join(run.root, 'escape'))).toBe(false);
+      expect(journal(run.logDir).some((row) => row.kind === 'state' && row.state === 'path-unavailable')).toBe(true);
+    }
   });
 
   it('adds the three common sentences with the counter switch alone; OMC_JEV_DENIAL_TEXTS=1 alone adds nothing', () => {
@@ -537,7 +572,7 @@ function runHook(home, cwd, env, input) {
 }
 
 /** One Agent call against a full pool (limit 1, one reserved slot), with a fresh session and its own transcript. */
-function runPoolDeny(extraEnv, sid) {
+function runPoolDeny(extraEnv, sid, extraInput = {}) {
   const root = tempDir();
   const home = join(root, 'home');
   const cwd = join(root, 'proj');
@@ -555,8 +590,9 @@ function runPoolDeny(extraEnv, sid) {
     tool_use_id: 'tool-1',
     transcript_path: transcript,
     cwd,
+    ...extraInput,
   });
-  return { ...run, home, logDir };
+  return { ...run, home, logDir, root };
 }
 
 /** Several Agent calls of one session, each in its own model response (its own transcript message id). */
