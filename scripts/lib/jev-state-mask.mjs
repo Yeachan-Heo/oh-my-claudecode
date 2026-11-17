@@ -96,7 +96,7 @@ const SECRET_KEY = new RegExp(
 );
 // A number under such a key that counts or measures something (token_count, password_length, tokenBudget) stays.
 const COUNTER_KEY = /(?:tokens|(?:^|[^a-z0-9])(?:count|length|len|budget|usage|size))$/;
-const MARKER = /\[(?:key|line) omitted: [^\]]*\]/g;
+const MARKER = /\[(?:key|line) omitted: [^\]]{0,1000}\]/g;
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 function normalizeKey(key) {
@@ -116,7 +116,7 @@ function normalizeKey(key) {
       const nextIsLower = next === next.toLowerCase() && next !== next.toUpperCase();
       const prevIsUpper = prev === prev.toUpperCase() && prev !== prev.toLowerCase();
       // Break before uppercase if preceded by lowercase/digit, or if this is the start of a new acronym (preceded by uppercase, followed by lowercase)
-      if (prevIsLower || prevIsDigit || (prevIsUpper && nextIsLower && i > 1)) {
+      if (prevIsLower || prevIsDigit || (prevIsUpper && nextIsLower)) {
         result.push('_');
       }
     }
