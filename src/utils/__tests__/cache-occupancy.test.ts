@@ -511,4 +511,50 @@ describe('cache occupancy registry', () => {
     expect(existsSync(join(protectedVersion, 'package.json'))).toBe(true);
     expect(existsSync(join(staleVersion, 'package.json'))).toBe(true);
   });
+
+  it('skips relinking when occupancy registry is unreadable, even with an active sibling', async () => {
+    // Scenario: occupancy registry read fails (unavailable), but an active sibling exists.
+    // The fail-closed behavior should skip the stale version instead of relinking it.
+    const cacheDir = join(dir, 'plugins', 'cache', 'omc', 'oh-my-claudecode');
+    const oldVersion = join(cacheDir, '5.8.0');
+    const newVersion = join(cacheDir, '5.9.0');
+    mkdirSync(join(oldVersion, 'hooks'), { recursive: true });
+    mkdirSync(join(oldVersion, 'scripts'), { recursive: true });
+    mkdirSync(join(newVersion, 'hooks'), { recursive: true });
+    mkdirSync(join(newVersion, 'scripts'), { recursive: true });
+    writeFileSync(join(oldVersion, 'hooks', 'hooks.json'), '{}');
+    writeFileSync(join(oldVersion, 'scripts', 'run.cjs'), '// fixture');
+    writeFileSync(join(oldVersion, 'package.json'), JSON.stringify({ version: '5.8.0' }));
+    writeFileSync(join(newVersion, 'hooks', 'hooks.json'), '{}');
+    writeFileSync(join(newVersion, 'scripts', 'run.cjs'), '// fixture');
+    writeFileSync(join(newVersion, 'package.json'), JSON.stringify({ version: '5.9.0' }));
+
+    // Publish an occupancy record for 5.8.0
+    expect(await publishCacheOccupancy(oldVersion, dir)).toBe(true);
+
+    // Set up installed_plugins.json with 5.9.0 as the active version
+    const installed = join(dir, 'plugins', 'installed_plugins.json');
+    mkdirSync(join(dir, 'plugins'), { recursive: true });
+    writeFileSync(installed, JSON.stringify({
+      version: 2,
+      plugins: {
+        'oh-my-claudecode@omc': [{ scope: 'user', installPath: newVersion }],
+      },
+    }));
+
+    // Inject a read failure on the occupancy record
+    const registry = join(dir, '.omc', 'cache-occupancy');
+    const recordPath = join(registry, readdirSync(registry)[0]);
+    readFailures.set(recordPath, 'EACCES');
+
+    vi.stubEnv('CLAUDE_CONFIG_DIR', dir);
+    const result = purgeStalePluginCacheVersions({ skipGracePeriod: true });
+
+    // When registry is unreadable (occupancy.unavailable=true) and an active sibling
+    // exists, the fail-closed behavior should skip the stale version.
+    expect(result.skipped).toBeGreaterThanOrEqual(1);
+    expect(result.skippedPaths).toContain(oldVersion);
+    expect(result.symlinked).toBe(0);
+    expect(existsSync(join(oldVersion, 'package.json'))).toBe(true);
+  });
 });
