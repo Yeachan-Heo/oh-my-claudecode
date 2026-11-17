@@ -89,79 +89,82 @@ function redactKeyShapes(input: string): string {
   while (i < n) {
     if (i > 0 && isWordChar(input.charCodeAt(i - 1))) { i++; continue; } // not a word boundary (\b)
     let hit: [number, number, string] | null = null;
-    for (const [prefix, minLength] of REDACT_KEY_SHAPES_PREFIXES) {
-      if (!input.startsWith(prefix, i)) continue;
-      let j = i + prefix.length;
-      while (j < n && isTokenChar(input.charCodeAt(j))) j++;
-      if (j - (i + prefix.length) >= minLength) hit = [i + prefix.length, j, '****'];
-      break; // at most one prefix can match at a position
+    // Check for NAME=value or NAME: value assignments FIRST (takes precedence over prefixes)
+    // with an optional ["index"] or quotes after the name
+    let j = i;
+    while (j < n && j - i < 64 && isWordChar(input.charCodeAt(j))) j++;
+    const name = input.slice(i, j).toUpperCase();
+    if (j - i >= 3 && REDACT_KEY_SHAPES_PHRASES.some((phrase) => name.includes(phrase))) {
+      let k = j;
+      // Scan through optional quotes and brackets (e.g. NAME["index"] or NAME['key'])
+      // to find the assignment separator. Bound the total scan to avoid quadratic retries
+      // on inputs like 'KEY' + '[KEY]'.repeat(10000).
+      const maxBracketScan = Math.min(256, n - k); // limit lookahead to 256 chars from name end
+      const scanEnd = k + maxBracketScan;
+      while (k < scanEnd && (input[k] === '"' || input[k] === "'" || input[k] === '[' || input[k] === ']')) {
+        if (input[k] === '[') {
+          let z = k + 1;
+          while (z < n && z - k <= 64 && input[z] !== ']') z++;
+          k = input[z] === ']' ? z + 1 : k + 1;
+        } else {
+          k++;
+        }
+      }
+      while (k < n && (input[k] === ' ' || input[k] === '\t')) k++;
+      if (input[k] === '=' || input[k] === ':') {
+        k++;
+        while (k < n && (input[k] === ' ' || input[k] === '\t')) k++;
+        const quote = input[k] === '"' || input[k] === "'" ? input[k] : '';
+        if (quote) k++;
+        const valueStart = k;
+        let valueEnd = valueStart;
+        if (quote) {
+          // quoted value: up to the matching closing quote (not escaped) on the same line, or to line/input end
+          while (valueEnd < n && input[valueEnd] !== '\n') {
+            if (quote === '"' && input[valueEnd] === '\\' && valueEnd + 1 < n) {
+              // Skip escaped character (including escaped quotes) - only in double quotes
+              // In single quotes, backslashes are literal
+              valueEnd += 2;
+            } else if (input[valueEnd] === quote) {
+              // Found closing quote
+              break;
+            } else {
+              valueEnd++;
+            }
+          }
+          // Mask if we found content, even if the closing quote is missing (truncated input)
+          if (valueEnd > valueStart) hit = [valueStart, valueEnd, '****'];
+        } else {
+          // bare value: up to a separator, like [^\s"'&;|),}]+
+          while (valueEnd < n && !' \t\r\n"\'&;|,)}'.includes(input[valueEnd])) valueEnd++;
+          if (valueEnd > valueStart) hit = [valueStart, valueEnd, '****'];
+        }
+      }
     }
+    // If no assignment match, check for prefixes
+    if (!hit) {
+      for (const [prefix, minLength] of REDACT_KEY_SHAPES_PREFIXES) {
+        if (!input.startsWith(prefix, i)) continue;
+        let j2 = i + prefix.length;
+        while (j2 < n && isTokenChar(input.charCodeAt(j2))) j2++;
+        if (j2 - (i + prefix.length) >= minLength) hit = [i + prefix.length, j2, '****'];
+        break; // at most one prefix can match at a position
+      }
+    }
+    // If no prefix match, check for JWT patterns
     if (!hit && i >= jwtSkipUntil && input.startsWith('eyJ', i)) {
-      let j = i + 3;
-      while (j < n && isTokenChar(input.charCodeAt(j))) j++;
-      if (j - i >= 11 && input[j] === '.') {
-        let k = j + 1;
+      let j2 = i + 3;
+      while (j2 < n && isTokenChar(input.charCodeAt(j2))) j2++;
+      if (j2 - i >= 11 && input[j2] === '.') {
+        let k = j2 + 1;
         while (k < n && isTokenChar(input.charCodeAt(k))) k++;
-        if (k - (j + 1) >= 8 && input[k] === '.') {
+        if (k - (j2 + 1) >= 8 && input[k] === '.') {
           let m = k + 1;
           while (m < n && isTokenChar(input.charCodeAt(m))) m++;
           if (m - (k + 1) >= 8) hit = [i + 3, m, '***'];
         }
       }
-      if (!hit) jwtSkipUntil = j;
-    }
-    if (!hit) {
-      // NAME=value or NAME: value, with an optional ["index"] or quotes after the name
-      let j = i;
-      while (j < n && j - i < 64 && isWordChar(input.charCodeAt(j))) j++;
-      const name = input.slice(i, j).toUpperCase();
-      if (j - i >= 3 && REDACT_KEY_SHAPES_PHRASES.some((phrase) => name.includes(phrase))) {
-        let k = j;
-        // Scan through optional quotes and brackets (e.g. NAME["index"] or NAME['key'])
-        // to find the assignment separator. Bound the total scan to avoid quadratic retries
-        // on inputs like 'KEY' + '[KEY]'.repeat(10000).
-        const maxBracketScan = Math.min(256, n - k); // limit lookahead to 256 chars from name end
-        const scanEnd = k + maxBracketScan;
-        while (k < scanEnd && (input[k] === '"' || input[k] === "'" || input[k] === '[' || input[k] === ']')) {
-          if (input[k] === '[') {
-            let z = k + 1;
-            while (z < n && z - k <= 64 && input[z] !== ']') z++;
-            k = input[z] === ']' ? z + 1 : k + 1;
-          } else {
-            k++;
-          }
-        }
-        while (k < n && (input[k] === ' ' || input[k] === '\t')) k++;
-        if (input[k] === '=' || input[k] === ':') {
-          k++;
-          while (k < n && (input[k] === ' ' || input[k] === '\t')) k++;
-          const quote = input[k] === '"' || input[k] === "'" ? input[k] : '';
-          if (quote) k++;
-          const valueStart = k;
-          let valueEnd = valueStart;
-          if (quote) {
-            // quoted value: up to the matching closing quote (not escaped) on the same line, or to line/input end
-            while (valueEnd < n && input[valueEnd] !== '\n') {
-              if (quote === '"' && input[valueEnd] === '\\' && valueEnd + 1 < n) {
-                // Skip escaped character (including escaped quotes) - only in double quotes
-                // In single quotes, backslashes are literal
-                valueEnd += 2;
-              } else if (input[valueEnd] === quote) {
-                // Found closing quote
-                break;
-              } else {
-                valueEnd++;
-              }
-            }
-            // Mask if we found content, even if the closing quote is missing (truncated input)
-            if (valueEnd > valueStart) hit = [valueStart, valueEnd, '****'];
-          } else {
-            // bare value: up to a separator, like [^\s"'&;|),}]+
-            while (valueEnd < n && !' \t\r\n"\'&;|,)}'.includes(input[valueEnd])) valueEnd++;
-            if (valueEnd > valueStart) hit = [valueStart, valueEnd, '****'];
-          }
-        }
-      }
+      if (!hit) jwtSkipUntil = j2;
     }
     if (hit) {
       ranges.push(hit);

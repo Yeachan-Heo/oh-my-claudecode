@@ -359,6 +359,19 @@ describe('redactTokens key-shape masking (OMC_REDACT_KEY_SHAPES=1)', () => {
       expect(result).not.toContain('secret');
     });
 
+    // P2: Give assignment matching precedence over prefix-shaped names
+    it('masks assignment values, not prefix-matched identifiers with TOKEN', () => {
+      // hf_ is a prefix in REDACT_KEY_SHAPES_PREFIXES (Hugging Face token prefix)
+      // But if the full identifier is part of a NAME=value assignment, the value should be masked
+      const hfToken = 'hf_token_long_variable_name=canary';
+      const result = redactTokens(hfToken);
+      // Should mask the value 'canary', not the identifier prefix
+      expect(result).toContain('****');
+      expect(result).not.toContain('canary');
+      // The hf_ prefix should stay visible
+      expect(result).toContain('hf_');
+    });
+
     it('stays near-linear on large inputs: 100 000 characters within a loose 1000 ms budget', () => {
       const base = 'Report of the stage: the module was reviewed, tests passed, result saved in the work directory. ';
       const inputs = [
