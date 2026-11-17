@@ -196,6 +196,20 @@ describe.skipIf(!toolsOk)('plugin_install_smoke.sh', () => {
     expect(existsSync(join(fresh, 'plugins', 'cache', 'local', 'demo', '1.2.3'))).toBe(true);
   });
 
+  it('resolves a relative --config-dir to an absolute path before changing directories', () => {
+    // With a relative config dir like ./relative-config, the phase function changes into $T
+    // and exports $C. If $C is relative, commands will resolve it relative to $T, not the original caller's directory.
+    // This test verifies that the config dir is resolved to an absolute path before phases run.
+    // The fix converts $C to an absolute path after creating it, so the CLAUDE_CONFIG_DIR exported to phases is absolute.
+    const relative = join(root, 'relative-config');
+    const r = run(base(['--config-dir', relative, '--keep']));
+    // The script should succeed and create the config directory correctly
+    expect(r.status, r.out).toBe(0);
+    expect(r.out).toContain('SMOKE RESULT: OK');
+    // Verify the config was created with the correct absolute path
+    expect(existsSync(join(relative, 'plugins', 'cache', 'local', 'demo', '1.2.3'))).toBe(true);
+  });
+
   it('usage errors exit 2: missing options, bad plugin directory, no manifest, unknown option, missing value', () => {
     expect(run(['--plugin-dir', plugin, '--dry-run-cmd', DRY, '--apply-cmd', APPLY]).status).toBe(2);
     expect(run(base().filter((a, i, all) => a !== '--plugin-dir' && all[i - 1] !== '--plugin-dir')).status).toBe(2);

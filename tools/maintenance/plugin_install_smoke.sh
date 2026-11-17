@@ -92,6 +92,7 @@ T=$(mktemp -d "${TMPDIR:-/tmp}/plugin-smoke.XXXXXX") || die "cannot create the w
 chmod 700 "$T"
 C=${CONFIG_DIR:-$T/config}
 mkdir -p "$C/plugins" || die "cannot create the configuration directory: $C"
+C=$(cd "$C" 2>/dev/null && pwd) || die "cannot resolve the configuration directory to an absolute path: $C"
 python3 -I - "$PLUGIN_DIR" "$C" "$NAME" "$VERSION" "$MARKETPLACE" "$SETTINGS_FROM" <<'PY' || { echo "ERROR: could not prepare the throwaway configuration" >&2; exit 2; }
 import json, os, shutil, sys
 src, c, name, version, marketplace, settings_from = sys.argv[1:7]
