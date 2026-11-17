@@ -2522,10 +2522,12 @@ function planWritePathAllowed(filePath, cwd) {
     const idx = filePath.indexOf(planDirPrefix);
     relPathInPlans = filePath.substring(idx + planDirPrefix.length);
   }
-  // If the extracted path tries to escape the plans directory (starts with ..), 
-  // use the already-normalized relative path instead (which never contains .. that escapes).
+  // SECURITY: Validate the original traversal (relPathInPlans) before checking if it escapes.
+  // A leading '..' like '.omc/plans/../plans/link/../victim.md' must be rejected even though
+  // it normalized to something inside. The normalized path check alone allows symlink escapes.
   if (relPathInPlans && relPathInPlans.split(sep)[0] === '..') {
-    relPathInPlans = rel;
+    // Leading '..' always escapes; never fall back to normalized path
+    return false;
   }
   if (!pathWithSymlinksStaysInside(relPathInPlans, realPlansDir)) return false;
   // The nearest existing directory above the target must resolve inside the real plans directory, so a missing directory
