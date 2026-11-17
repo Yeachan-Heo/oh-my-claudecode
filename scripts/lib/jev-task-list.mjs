@@ -1,4 +1,4 @@
-/* global process, console */
+/* global process, console, Buffer */
 // Task lists of agents: storage, update semantics and the PostToolUse entry point.
 // Opt-in: the state hooks do nothing unless OMC_TASK_LIST=1 (see scripts/jev-task-list-state.mjs).
 // The list of every agent is what the agent itself sent to a list tool (source of truth: the tool_input of a call that ran, as the
@@ -22,6 +22,7 @@ export const ITEMS_MAX = 50;
 export const CONTENT_MAX = 500;
 export const NOTE_MAX = 600;
 export const LISTS_MAX_AGE_MS = 7 * 24 * 3600 * 1000;
+export const RECORD_MAX_BYTES = 1024 * 1024; // the largest list or event file the reader accepts; the writers stay below it
 export const LOG_MAX_BYTES = 50 * 1024 * 1024; // size at which task-list.jsonl and batches.jsonl are rotated
 const SWEEP_EVERY_MS = 3600 * 1000;
 const STATUSES = new Set(['pending', 'in_progress', 'completed']);
@@ -68,7 +69,7 @@ function readRecord(path) {
   try {
     if (!path || !existsSync(path)) return { record: null, broken: false };
     const link = lstatSync(path);
-    if (link.isSymbolicLink() || !link.isFile() || link.size > 1024 * 1024) return { record: null, broken: true };
+    if (link.isSymbolicLink() || !link.isFile() || link.size > RECORD_MAX_BYTES) return { record: null, broken: true };
     const record = JSON.parse(readFileSync(path, 'utf8'));
     return record && typeof record === 'object' && !Array.isArray(record) ? { record, broken: false } : { record: null, broken: true };
   } catch {
@@ -367,12 +368,43 @@ const EVENTS_READ_MAX = 5000;
 const EVENT_NAME = /^\d{13}-\d{1,10}-[0-9a-f]{8}\.json$/;
 export const eventsDir = (path) => (path ? path.replace(/\.json$/, '.events') : null);
 
-// Strings of a tool input masked before the event goes to disk (arrays sent as JSON text parsed first, so masking cannot break them).
-function maskedInput(value, depth = 0) {
-  if (typeof value === 'string') return maskListText(value);
-  if (depth > 6 || value === null || typeof value !== 'object') return value;
-  if (Array.isArray(value)) return value.map((x) => maskedInput(x, depth + 1));
-  return Object.fromEntries(Object.entries(value).map(([k, v]) => [k, maskedInput((k === 'items' || k === 'todos') ? (arrayOf(v) ?? v) : v, depth + 1)]));
+// What of a tool input goes to disk in an event: only the fields nextList reads (and of a task only content, subject, status and note),
+// strings masked (arrays sent as JSON text parsed first, so masking cannot break them) and then cut to the longest text a list keeps
+// (NOTE_MAX; the cut comes after the masking, so a secret is never cut in half). An event stays small and holds nothing unmasked.
+const LIST_INPUT_KEYS = ['items', 'todos', 'done', 'start', 'advance', 'subject', 'description', 'taskId', 'status'];
+const TASK_KEYS = ['content', 'subject', 'status', 'note'];
+const KEEP_CHARS = Math.max(CONTENT_MAX, NOTE_MAX);
+const idText = (value) => (typeof value === 'string' ? value.slice(0, 200) : null);
+function boundedValue(value) {
+  if (typeof value === 'string') {
+    const masked = maskListText(value);
+    return masked.length > KEEP_CHARS ? `${masked.slice(0, KEEP_CHARS - 1)}…` : masked;
+  }
+  if (Array.isArray(value)) return value.map(boundedValue);
+  return value === null || typeof value !== 'object' ? value : null;
+}
+const boundedTask = (raw) => (raw && typeof raw === 'object' && !Array.isArray(raw)
+  ? Object.fromEntries(TASK_KEYS.filter((k) => raw[k] !== undefined).map((k) => [k, boundedValue(raw[k])]))
+  : boundedValue(raw));
+
+// The input of a list call as its event keeps it, small enough for the reader (RECORD_MAX_BYTES). The call changes the list as it did
+// before: more than ITEMS_MAX items make task_list and update_plan refuse the call, so the first ITEMS_MAX + 1 are enough to refuse it
+// again. A TodoWrite call replaces the list and the list keeps its newest ITEMS_MAX tasks (applyEvent): the event keeps those, in the form
+// the list stores them, and `todos_total`, the number of tasks the call held. The retention is applied after the whole call is normalized.
+function persistedInput(tool, input) {
+  const source = input && typeof input === 'object' ? input : {};
+  const kept = {};
+  for (const k of LIST_INPUT_KEYS) {
+    if (source[k] === undefined) continue;
+    const list = k === 'items' || k === 'todos' ? arrayOf(source[k]) : null;
+    kept[k] = list ? list.map(boundedTask) : boundedValue(source[k]);
+  }
+  if (Array.isArray(kept.items)) kept.items = kept.items.slice(0, ITEMS_MAX + 1);
+  if (tool === 'TodoWrite' && Array.isArray(kept.todos)) {
+    const tasks = kept.todos.map((raw) => itemOf(raw, null)).filter(Boolean);
+    if (tasks.length > ITEMS_MAX) return { ...kept, todos: tasks.slice(-ITEMS_MAX), todos_total: tasks.length };
+  }
+  return kept;
 }
 
 // Writes the event of one list call; the TaskCreate claim happens here once, the event keeps the claimed id. false when nothing was written.
@@ -385,18 +417,21 @@ function writeEvent(dir, data, key, env, now) {
   const id = randomBytes(4).toString('hex');
   const event = {
     ts: new Date(now).toISOString(), pid: process.pid, id, session_id: data.session_id, tool_name: data.tool_name,
-    tool_input: maskedInput(data.tool_input && typeof data.tool_input === 'object' ? data.tool_input : {}),
-    agent_type: typeof data.agent_type === 'string' ? data.agent_type : null,
-    tool_use_id: typeof data.tool_use_id === 'string' ? data.tool_use_id : null,
-    prompt_id: typeof data.prompt_id === 'string' ? data.prompt_id : null,
+    tool_input: persistedInput(data.tool_name, data.tool_input),
+    agent_type: idText(data.agent_type),
+    tool_use_id: idText(data.tool_use_id),
+    prompt_id: idText(data.prompt_id),
     ...(taskId ? { task_id: taskId } : {}),
   };
   const name = `${String(now).padStart(13, '0')}-${process.pid}-${id}.json`;
   try {
+    const body = JSON.stringify(event);
+    // an event the reader would refuse is never written: it would stay on disk, unread, for good
+    if (Buffer.byteLength(body) > RECORD_MAX_BYTES) { storeEvent('event_too_large', join(dir, name), env); return false; }
     mkdirSync(dir, { recursive: true });
     const tmp = join(dir, `${name}.tmp`);
     const fd = openSync(tmp, 'wx', 0o600);
-    try { writeSync(fd, JSON.stringify(event)); } finally { closeSync(fd); }
+    try { writeSync(fd, body); } finally { closeSync(fd); }
     renameSync(tmp, join(dir, name));
     return true;
   } catch {
@@ -426,6 +461,8 @@ function applyEvent(record, event, key, env, broken) {
   // a completed task has no note; above ITEMS_MAX the newest tasks stay, the record counts the dropped ones
   const all = changed.map((x) => (x.status === 'completed' && x.note !== undefined ? (({ note, ...rest }) => rest)(x) : x));
   const items = all.slice(-ITEMS_MAX);
+  // a TodoWrite event keeps only the newest ITEMS_MAX tasks of the call and the number it held (persistedInput)
+  const sent = event.tool_name === 'TodoWrite' && Number.isInteger(event.tool_input?.todos_total) ? Math.max(all.length, event.tool_input.todos_total) : all.length;
   return {
     v: LIST_RECORD_VERSION,
     session_id: event.session_id,
@@ -437,7 +474,7 @@ function applyEvent(record, event, key, env, broken) {
     updated: event.ts,
     updates: (Number.isInteger(record?.updates) ? record.updates : 0) + 1,
     items,
-    ...(all.length > items.length ? { dropped: all.length - items.length } : {}),
+    ...(sent > items.length ? { dropped: sent - items.length } : {}),
   };
 }
 
@@ -461,7 +498,9 @@ function fold(path, key, env) {
 }
 
 // Under the lock: fold, write the list with the folded names, then remove the folded event files (retention: the folder holds only the
-// events that no fold under the lock has taken yet). false when the lock was not taken; the events then stay for the next fold or reader.
+// events that no fold under the lock has taken yet). An event file whose name is already in `folded` is a leftover of a fold that was
+// interrupted between the write of the list and the removal: it is removed too, always, before 500 newer names push its name out of
+// `folded` and the file folds a second time. false when the lock was not taken; the events then stay for the next fold or reader.
 export function syncList(sessionId, key, env = process.env) {
   const path = listPath(sessionId, key, env);
   if (!path) return false;
@@ -473,9 +512,10 @@ export function syncList(sessionId, key, env = process.env) {
   const ok = withFileLock(path, (owned) => {
     const f = fold(path, key, env);
     saved = f.record;
+    if (!owned()) return; // the lock was taken over: the newer fold writes
+    remove(waiting.filter((name) => f.done.has(name)));
     if (!f.names.length) return;
     // events that change nothing (also on a broken list without a replacing call) leave the list file as it is
-    if (!owned()) return; // the lock was taken over: the newer fold writes
     if (!f.changed) { remove(f.names); return; }
     const next = { ...f.record, folded: [...f.done, ...f.names].slice(-Math.max(EVENTS_KEPT, f.names.length)) };
     if (!owned() || !writeJson(path, next, env)) return;

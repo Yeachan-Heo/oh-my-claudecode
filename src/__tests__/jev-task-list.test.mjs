@@ -661,3 +661,139 @@ describe('task list: masking of quoted credentials and its cost', () => {
     }
   });
 });
+
+describe('task list: what an event keeps, and the journal cleanup', () => {
+  const env = () => envFor();
+  const call = (sid, tool, input, extra = {}, now = Date.now()) => L.recordListCall(postToolUse(sid, tool, input, extra), env(), now);
+  const eventText = (sid, key) => eventFiles(sid, key).map((f) => readFileSync(join(LOGS, 'lists', sid, `${key}.events`, f), 'utf8')).join('');
+
+  it('a TodoWrite of 150 tasks with a 1 MiB task keeps the newest 50, counts 100 dropped, and leaves no unreadable event', () => {
+    const sid = session();
+    const todos = Array.from({ length: 150 }, (_, i) => ({ content: i === 120 ? 'x'.repeat(1024 * 1024) : `Task ${i + 1}`, status: 'pending' }));
+    const saved = call(sid, 'TodoWrite', { todos });
+    expect(saved?.items).toHaveLength(50);
+    expect(saved.items[0].content).toBe('Task 101');
+    expect(saved.items[49].content).toBe('Task 150');
+    expect(saved.dropped).toBe(100);
+    const big = saved.items.find((x) => x.content.startsWith('xxxx'));
+    expect(big.content).toHaveLength(500);
+    expect(big.content.endsWith('…')).toBe(true);
+    expect(eventFiles(sid, 'main')).toHaveLength(0);
+    expect(statSync(listFile(sid, 'main')).size).toBeLessThan(L.RECORD_MAX_BYTES);
+    expect(L.readList(sid, 'main', env()).items.map((x) => x.content)).toEqual(saved.items.map((x) => x.content));
+  });
+
+  it('a list of 50 tasks with the longest texts, in three-byte characters, stays far below the size the reader accepts', () => {
+    const sid = session();
+    const items = Array.from({ length: 50 }, (_, i) => ({ content: '€'.repeat(5000) + i, status: 'in_progress', note: '€'.repeat(5000) }));
+    call(sid, LIST_TOOL, { items }, { agent_id: 'w1', agent_type: 'a'.repeat(5000), prompt_id: 'p'.repeat(5000) });
+    const file = listFile(sid, 'w1');
+    expect(statSync(file).size).toBeLessThan(L.RECORD_MAX_BYTES / 4);
+    const record = readListFile(sid, 'w1');
+    expect(record.items).toHaveLength(50);
+    expect(record.agent_type).toHaveLength(200);
+    expect(record.prompt_id).toHaveLength(200);
+  });
+
+  it('an event that would outgrow the reader is refused with a log row and no file', () => {
+    const sid = session();
+    // 600 000 task numbers are not shortened by any rule and serialize to about 1.2 MB
+    const saved = call(sid, LIST_TOOL, { done: Array.from({ length: 600_000 }, () => 1) }, { agent_id: 'big' });
+    expect(saved).toBeNull();
+    expect(eventFiles(sid, 'big')).toHaveLength(0);
+    expect(existsSync(listFile(sid, 'big'))).toBe(false);
+    expect(logRows('task-list.jsonl').some((x) => x.event === 'event_too_large')).toBe(true);
+  });
+
+  it('fields the list never reads are not written: a secret in an unknown field stays out of the event', () => {
+    const sid = session();
+    const lock = `${listFile(sid, 'meta')}.lock`;
+    mkdirSync(join(LOGS, 'lists', sid), { recursive: true });
+    writeFileSync(lock, 'foreign'); // the event stays on disk
+    call(sid, LIST_TOOL, { items: [{ content: 'A', status: 'pending', extra: { apiKey: 'plain-secret-77' } }], metadata: { apiKey: 'plain-secret-88' } }, { agent_id: 'meta' });
+    const text = eventText(sid, 'meta');
+    rmSync(lock, { force: true });
+    expect(text).toContain('"content":"A"');
+    expect(text).not.toContain('plain-secret');
+    expect(L.readList(sid, 'meta', env()).items[0].content).toBe('A');
+  });
+
+  it('an event file left behind after its fold is removed at the next fold, so it cannot replay after its name ages out', () => {
+    const sid = session();
+    const base = Date.now();
+    call(sid, 'TodoWrite', { todos: [{ content: 'Old list', status: 'pending' }] }, {}, base);
+    const first = readListFile(sid, 'main').folded[0];
+    const dir = join(LOGS, 'lists', sid, 'main.events');
+    expect(eventFiles(sid, 'main')).toHaveLength(0);
+    // a fold interrupted after it published the list and before it removed the event: the same event file is back on disk
+    const leftover = { ts: new Date(base).toISOString(), pid: 1, id: 'aaaaaaaa', session_id: sid, tool_name: 'TodoWrite', tool_input: { todos: [{ content: 'Old list', status: 'pending' }] }, agent_type: null, tool_use_id: null, prompt_id: null };
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(join(dir, first), JSON.stringify(leftover));
+    // no new event: the sync alone removes it
+    L.syncList(sid, 'main', env());
+    expect(eventFiles(sid, 'main')).toHaveLength(0);
+    // and with a new event in the same fold
+    writeFileSync(join(dir, first), JSON.stringify(leftover));
+    call(sid, 'TodoWrite', { todos: [{ content: 'Current list', status: 'completed' }] }, {}, base + 1);
+    expect(eventFiles(sid, 'main')).toHaveLength(0);
+    // 520 later calls push the name out of `folded`; the list must still be the last one sent
+    for (let i = 0; i < 520; i += 1) call(sid, 'TodoWrite', { todos: [{ content: `Later ${i}`, status: 'pending' }] }, {}, base + 10 + i);
+    expect(readListFile(sid, 'main').folded).not.toContain(first);
+    expect(readListFile(sid, 'main').items[0].content).toBe('Later 519');
+    expect(L.readList(sid, 'main', env()).items[0].content).toBe('Later 519');
+  }, TOTAL_MS);
+});
+
+describe('task list: session retention sweep', () => {
+  const HOUR = 3600 * 1000;
+  const root = () => join(LOGS, 'lists');
+  const age = (path, ms, now) => utimesSync(path, new Date(now - ms), new Date(now - ms));
+  const sessionDir = (name, ageMs, now) => {
+    const dir = join(root(), name);
+    mkdirSync(join(dir, 'main.events'), { recursive: true });
+    writeFileSync(join(dir, 'main.json'), '{}');
+    age(dir, ageMs, now);
+    return dir;
+  };
+  const fresh = () => rmSync(root(), { recursive: true, force: true });
+
+  it('removes a session directory older than seven days with everything in it and keeps a younger one', () => {
+    fresh();
+    const now = Date.now();
+    const expired = sessionDir('expired', L.LISTS_MAX_AGE_MS + HOUR, now);
+    const recent = sessionDir('recent', L.LISTS_MAX_AGE_MS - HOUR, now);
+    L.sweep(envFor(), now);
+    expect(existsSync(expired)).toBe(false);
+    expect(existsSync(recent)).toBe(true);
+    expect(existsSync(join(recent, 'main.json'))).toBe(true);
+  });
+
+  it('never touches an entry whose name starts with a dot, and writes its marker', () => {
+    fresh();
+    const now = Date.now();
+    const dotted = sessionDir('.keep', L.LISTS_MAX_AGE_MS * 2, now);
+    L.sweep(envFor(), now);
+    expect(existsSync(dotted)).toBe(true);
+    expect(existsSync(join(root(), '.sweep'))).toBe(true);
+  });
+
+  it('runs at most once an hour: an expired directory survives a second sweep within the hour and goes after it', () => {
+    fresh();
+    const now = Date.now();
+    L.sweep(envFor(), now); // writes the marker
+    const late = sessionDir('late', L.LISTS_MAX_AGE_MS + HOUR, now);
+    L.sweep(envFor(), now + 10 * 60 * 1000);
+    expect(existsSync(late)).toBe(true);
+    age(join(root(), '.sweep'), HOUR + 1000, now);
+    L.sweep(envFor(), now);
+    expect(existsSync(late)).toBe(false);
+  });
+
+  it('a list call triggers the sweep', () => {
+    fresh();
+    const now = Date.now();
+    const expired = sessionDir('old-session', L.LISTS_MAX_AGE_MS + HOUR, now);
+    L.recordListCall(postToolUse(session(), 'TodoWrite', { todos: [{ content: 'A', status: 'pending' }] }), envFor(), now);
+    expect(existsSync(expired)).toBe(false);
+  });
+});
