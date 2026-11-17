@@ -923,19 +923,21 @@ describe('maskJevState: the program of a command is read from the end of its arg
     expect(path).toHaveLength(length);
     return path;
   };
-  // [name, what follows the program, what is sent of it]; `db` after each, so that no argv is a pair of two elements
+  // [name, what follows the program, what is sent of it when the program is one of the family, whether the program decides];
+  // `db` after each, so that no argv is a pair of two elements
   const positions = [
-    ['-p SECRET', ['-p', SECRET, 'db'], ['-p', '***', 'db']],
-    ['-pSECRET', [`-p${SECRET}`, 'db'], ['-p***', 'db']],
-    ['-u root -p SECRET', ['-u', 'root', '-p', SECRET, 'db'], ['-u', 'root', '-p', '***', 'db']],
-    ['-u root -pSECRET', ['-u', 'root', `-p${SECRET}`, 'db'], ['-u', 'root', '-p***', 'db']],
-    ['--password SECRET', ['--password', SECRET, 'db'], ['--password', '***', 'db']],
-    ['--password=SECRET', [`--password=${SECRET}`, 'db'], ['--password=***', 'db']],
-    ['-u user:SECRET', ['-u', `user:${SECRET}`, 'db'], ['-u', 'user:***', 'db']],
-    ['--user=user:SECRET', [`--user=user:${SECRET}`, 'db'], ['--user=user:***', 'db']],
-    ['a URL with user:SECRET@host', [`https://user:${SECRET}@host`, 'db'], ['https://user:***@host', 'db']],
+    ['-p SECRET', ['-p', SECRET, 'db'], ['-p', '***', 'db'], true],
+    ['-pSECRET', [`-p${SECRET}`, 'db'], ['-p***', 'db'], true],
+    ['-u root -p SECRET', ['-u', 'root', '-p', SECRET, 'db'], ['-u', 'root', '-p', '***', 'db'], true],
+    ['-u root -pSECRET', ['-u', 'root', `-p${SECRET}`, 'db'], ['-u', 'root', '-p***', 'db'], true],
+    ['--password SECRET', ['--password', SECRET, 'db'], ['--password', '***', 'db'], false],
+    ['--password=SECRET', [`--password=${SECRET}`, 'db'], ['--password=***', 'db'], false],
+    ['-u user:SECRET', ['-u', `user:${SECRET}`, 'db'], ['-u', 'user:***', 'db'], false],
+    ['--user=user:SECRET', [`--user=user:${SECRET}`, 'db'], ['--user=user:***', 'db'], false],
+    ['a URL with user:SECRET@host', [`https://user:${SECRET}@host`, 'db'], ['https://user:***@host', 'db'], false],
   ];
-  const programs = ['mysql', 'mysqldump', 'mysqladmin', 'mariadb', 'mariadb-dump', 'mysql.exe', 'sshpass'];
+  // curl is no program of the family: its -p is left alone by both masks, whatever the path, and what does not depend on the program is masked
+  const programs = ['mysql', 'mysqldump', 'mysqladmin', 'mariadb', 'mariadb-dump', 'mysql.exe', 'sshpass', 'curl'];
   const lengths = [MAX - 1, MAX, CAP, CAP + 1, PATH_TAIL, 100_000];
   const before = { none: [], sudo: ['sudo'], 'a number and a long argument': [7, 'a/'.repeat(CAP)] };
 
@@ -947,7 +949,8 @@ describe('maskJevState: the program of a command is read from the end of its arg
           for (const deep of [true, false]) {
             const path = programPath(program, length, sep, deep);
             for (const [prefixName, prefix] of Object.entries(before)) {
-              for (const [position, rest, expected] of positions) {
+              for (const [position, rest, masked, viaProgram] of positions) {
+                const expected = program === 'curl' && viaProgram ? rest : masked;
                 const argv = [...prefix, path, ...rest];
                 const label = `${program} ${length} ${sep} ${deep} / ${prefixName} / ${position}`;
                 const skip = prefix.length + 1;
@@ -956,7 +959,7 @@ describe('maskJevState: the program of a command is read from the end of its arg
                 // ...and a window hides all of it too, never less
                 const windowed = sentOf(argv, { maxChars: MAX });
                 expect(windowed.slice(skip), label).toEqual(expected);
-                expect(JSON.stringify(windowed), label).not.toContain(SECRET);
+                if (expected !== rest) expect(JSON.stringify(windowed), label).not.toContain(SECRET);
                 cells++;
               }
             }
@@ -1362,7 +1365,7 @@ describe('maskJevState: the cost is the window, not the input', () => {
     });
 
     it('sends the line when its secret path starts beyond that: nothing of the path is sent, and the rest of the line is not read', () => {
-      // the one bound of the mask that is not fail closed (see HOOKS.md): the part of the line that is sent stays, where the mask without a window omits the whole line
+      // a deliberate cost bound (see HOOKS.md): the rest of a longer line is not read, so a secret path that starts further on does not omit the part that is sent
       const text = textWithPathAt(LINE_EXTENSION + 200);
       const sent = sentOf(text);
       expect(sent.startsWith('first line\necho hunter2 > x x')).toBe(true);
