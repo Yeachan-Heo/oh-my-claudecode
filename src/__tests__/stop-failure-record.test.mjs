@@ -2,7 +2,7 @@
  * Tests for the StopFailure hook (scripts/stop-failure-record.mjs, opt-in
  * OMC_JEV_STOP_FAILURE=1). The hook runs as Claude Code runs it: a node
  * subprocess reading the hook input from stdin, state dir in a temp dir, one
- * lane per test. Cases follow the hook test the port is based on: all known
+ * lane per test. Cases: all known
  * error codes fall into their class, unknown and missing fall back to
  * unknown; the .error.json record keeps the contract fields, the 300-char
  * trims, an ISO ts and the file modes; prompt_id is recorded only when the
@@ -262,7 +262,7 @@ describe('stop-failure-record hook', () => {
       withStateFileLockAtPathSync(${JSON.stringify(join(state, 'errors.jsonl.lock'))}, () => {
         writeFileSync(${JSON.stringify(markers.held)}, '1');
         ${until(markers.waiting)}
-        ${pause(500)} // B has had time to open the journal, if it opens it before the lock
+        ${pause(150)} // B has had time to open the journal, if it opens it before the lock (its own wait for the lock lasts 1 s at most)
         appendErrorsJsonl(${JSON.stringify(state)}, ${record('s-a')}, 1000);
       }, true);
     `;

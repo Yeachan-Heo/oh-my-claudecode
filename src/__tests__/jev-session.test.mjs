@@ -66,7 +66,7 @@ const argv = process.argv.slice(2);
 writeFileSync(process.env.FAKE_ARGV, JSON.stringify(argv));
 writeFileSync(process.env.FAKE_ARGV + '.cwd', process.cwd());
 if (process.env.FAKE_START === 'flags' && argv.includes('--model')) { console.error('error: unknown model combination'); process.exit(1); }
-if (process.env.FAKE_START === 'slow') Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 2500);
+if (process.env.FAKE_START === 'slow') Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 8000);
 if (process.env.FAKE_START === 'trust') { console.error('Workspace not trusted. Run \`claude\` in ' + process.cwd() + ' once and accept the trust prompt, then retry.'); process.exit(1); }
 const name = argv[argv.indexOf('--name') + 1] ?? '';
 console.log('backgrounded · ab12cd34 · ' + name);
