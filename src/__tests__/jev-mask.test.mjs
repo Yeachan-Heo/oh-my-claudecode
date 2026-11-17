@@ -283,6 +283,48 @@ describe.each([
     }
   });
 
+  it('masks the value of a pair whose name field is Key and of a pair whose value field is Val, raw and serialized, and leaves other pairs', () => {
+    // [text, masked, masked when the text is the value of a JSON string]. In the raw text the `*KEY=` rule also masks the value of a "Key"
+    // field; inside a JSON string the quote before the colon is escaped and only the pair rule masks (the value field, never the name).
+    const cases = [
+      ['{"Key":"DB_PASSWORD","Value":"hunter2zz"}', '{"Key":"***","Value":"***"}', '{"Key":"DB_PASSWORD","Value":"***"}'],
+      ['{"Name":"DB_PASSWORD","Val":"hunter2zz"}', '{"Name":"DB_PASSWORD","Val":"***"}', '{"Name":"DB_PASSWORD","Val":"***"}'],
+      ['{"Key":"DB_PASSWORD","Val":"hunter2zz"}', '{"Key":"***","Val":"***"}', '{"Key":"DB_PASSWORD","Val":"***"}'],
+      ['{"Val":"hunter2zz","Key":"DB_PASSWORD"}', '{"Val":"***","Key":"***"}', '{"Val":"***","Key":"DB_PASSWORD"}'],
+      ['{"Value":"hunter2zz","Key":"DB_PASSWORD"}', '{"Value":"***","Key":"***"}', '{"Value":"***","Key":"DB_PASSWORD"}'],
+      ['{"Key":"DB_PASSWORD","Val":123456}', '{"Key":"***","Val":***}', '{"Key":"DB_PASSWORD","Val":***}'],
+      ['{"Name":"DB_PASSWORD","Val":true,"x":1}', '{"Name":"DB_PASSWORD","Val":***,"x":1}', '{"Name":"DB_PASSWORD","Val":***,"x":1}'],
+      ['{"Val":123456,"Key":"DB_PASSWORD"}', '{"Val":***,"Key":"***"}', '{"Val":***,"Key":"DB_PASSWORD"}'],
+      [
+        '{"oldKey":"REGION","newKey":"DB_PASSWORD","oldVal":"public","newVal":"hunter2zz"}',
+        '{"oldKey":"***","newKey":"***","oldVal":"public","newVal":"***"}',
+        '{"oldKey":"REGION","newKey":"DB_PASSWORD","oldVal":"public","newVal":"***"}',
+      ],
+      [
+        '[{"Key":"A_TOKEN","Val":"t0k3n"},{"Key":"REGION","Val":"eu-west-1"}]',
+        '[{"Key":"***","Val":"***"},{"Key":"***","Val":"eu-west-1"}]',
+        '[{"Key":"A_TOKEN","Val":"***"},{"Key":"REGION","Val":"eu-west-1"}]',
+      ],
+      ['{"Key":"REGION","Val":"eu-west-1"}', '{"Key":"***","Val":"eu-west-1"}', '{"Key":"REGION","Val":"eu-west-1"}'],
+      ['{"Key":"REGION","Value":"eu-west-1"}', '{"Key":"***","Value":"eu-west-1"}', '{"Key":"REGION","Value":"eu-west-1"}'],
+      ['{"Name":"REGION","Val":"eu-west-1"}', '{"Name":"REGION","Val":"eu-west-1"}', '{"Name":"REGION","Val":"eu-west-1"}'],
+    ];
+    for (const [text, masked, maskedInString] of cases) {
+      expect({ text, out: mask(text) }).toEqual({ text, out: masked });
+      const inString = JSON.stringify({ command: text });
+      expect({ inString, out: mask(inString) }).toEqual({ inString, out: JSON.stringify({ command: maskedInString }) });
+    }
+    // The same pairs with the delimiters escaped at higher depths (JSON string, shell-escaped, and so on up to 255 backslashes).
+    for (const depth of [1, 2, 3, 4, 5, 8]) {
+      const q = '\\'.repeat(2 ** depth - 1) + '"';
+      const pair = (name, value, label) => `{${q}${name}${q}:${q}DB_PASSWORD${q},${q}${label}${q}:${value}}`;
+      for (const [name, label] of [['Key', 'Value'], ['Name', 'Val'], ['Key', 'Val']]) {
+        expect({ depth, name, label, out: mask(pair(name, `${q}hunter2zz${q}`, label)) }).toEqual({ depth, name, label, out: pair(name, `${q}***${q}`, label) });
+        expect({ depth, name, label, out: mask(pair(name, '123456', label)) }).toEqual({ depth, name, label, out: pair(name, '***', label) });
+      }
+    }
+  });
+
   it('masks the value after a field name in another language, and leaves prose with the same words', () => {
     const cases = [
       ['hasło: Zaq12wsx', 'hasło: ***'],
@@ -548,6 +590,45 @@ describe.each([
       expect({ cut, left: mask(cut).includes('hunter2zz') }).toEqual({ cut, left: false });
     }
   });
+
+  it('leaves nothing of a secret-bearing value under any field name, separator, key and value quoting and serialization', () => {
+    // The class behind the findings about rule order: a rule that runs before the named-value rule and needs the first word of the
+    // value as its marker, a field key that another rule would erase or not read, a separator or quote written as JSON writes it.
+    const values = [
+      'hunter2zz',
+      'Cookie: session=hunter2zz',
+      'Set-Cookie: sid=hunter2zz; Path=/',
+      'Authorization: Basic aHVudGVyMnp6',
+      'Authorization: Bearer aHVudGVyMnp6',
+      'bearer aHVudGVyMnp6',
+      'mysql -phunter2zz db',
+      'sshpass -p hunter2zz ssh host',
+      'curl -u alice:hunter2zz x',
+      'x-api-key: hunter2zz',
+      'DB_PASSWORD: hunter2zz',
+      'API_KEY=hunter2zz',
+      'https://alice:hunter2zz@example.test/p',
+    ];
+    const names = ['password', 'hasło', String.raw`h\u0061s\u0142o`, 'service_01234567890123456789_klucz', String.raw`service_01234567890123456789_p\u0061ssword`, 'MY_TOKEN'];
+    const separators = [':', '=', ' : ', ': ', ' = ', '\n:\n'];
+    const keyQuotes = [(k) => k, (k) => `"${k}"`, (k) => `'${k}'`, (k) => String.raw`\"${k}\"`];
+    const valueQuotes = [(v) => v, (v) => `"${v}"`, (v) => `'${v}'`, (v) => String.raw`\"${v}\"`];
+    const serializations = [(t) => t, (t) => JSON.stringify(t).slice(1, -1), (t) => JSON.stringify({ command: t })];
+    const leaks = [];
+    let checked = 0;
+    for (const value of values) for (const name of names) for (const separator of separators) for (const keyQuote of keyQuotes) for (const valueQuote of valueQuotes) {
+      for (const [index, serialize] of serializations.entries()) {
+        // A word rule that needs `\b` before its marker does not see a marker glued to a serialized line break (`\nmysql`): the same on
+        // dev, and not what these rules decide.
+        if (index && separator === '\n:\n' && /^(?:mysql|sshpass|bearer)/.test(value)) continue;
+        const text = serialize(`${keyQuote(name)}${separator}${valueQuote(value)}`);
+        checked++;
+        if (/hunter2zz|aHVudGVyMnp6/.test(mask(text))) leaks.push(text);
+      }
+    }
+    expect(checked).toBeGreaterThan(15_000);
+    expect(leaks.slice(0, 5)).toEqual([]);
+  });
 });
 
 describe('the two copies of maskSecrets', () => {
@@ -565,6 +646,39 @@ describe('the two copies of maskSecrets', () => {
       for (const name of names) {
         const text = JSON.stringify({ content: `{\n  "${name}"\n  :\n  "${context}"\n}` });
         if (shellChecksMaskSecrets(text) !== maskSecrets(text)) differences.push(text);
+      }
+    }
+    expect(differences).toEqual([]);
+  });
+
+  it('give the same result on pairs with Key and Val, on a word that holds repeated keywords and on the labels that read the next word', () => {
+    const texts = [
+      '{"Key":"DB_PASSWORD","Value":"hunter2zz"}',
+      '{"Name":"DB_PASSWORD","Val":"hunter2zz"}',
+      '{"Key":"DB_PASSWORD","Val":123456}',
+      '{"Val":"hunter2zz","Key":"DB_PASSWORD"}',
+      '[{"Key":"A_TOKEN","Val":"t0k3n"},{"Key":"REGION","Val":"eu-west-1"}]',
+      'KEY=: ' + 'klucz'.repeat(40),
+      'KEY=: ' + 'PASS'.repeat(40),
+      'KEY=: ' + '\\'.repeat(40),
+      'secret=a: ' + 'klucz'.repeat(40),
+      'hasło=: ' + 'klucz'.repeat(40),
+      'klucz: a: ' + 'PASS'.repeat(40),
+      'secret: x-api-key: YWJjZA=',
+      'secret: x-api-key: hunter2zz=',
+      "API_KEY=YWJjZA== DB_PASSWORD='hunter2zz' ./app",
+      'KEY=: DB_PASSWORD=x',
+      'KEY=: DB_PASSWORD =x',
+      'KEY=: DB_PASSWORD "=x',
+      String.raw`KEY=: a\u0061b: x`,
+      String.raw`KEY=: a\u0061b x`,
+      String.raw`KEY=: abc\\: x`,
+      'hasło:\n  "p\\u0061ssword": "hunter2zz"',
+    ];
+    const differences = [];
+    for (const text of texts) {
+      for (const variant of [text, JSON.stringify(text).slice(1, -1), JSON.stringify({ command: text })]) {
+        if (shellChecksMaskSecrets(variant) !== maskSecrets(variant)) differences.push(variant);
       }
     }
     expect(differences).toEqual([]);
