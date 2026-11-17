@@ -140,14 +140,103 @@ export function cleanTextBlockKeeping(value, identifiers) {
   try {
     const text = toText(value);
     const names = [...new Set((Array.isArray(identifiers) ? identifiers : []).map(toText))]
-      .filter((name) => name !== '' && text.includes(name) && escapeIdentifier(name) !== name)
-      .sort((first, second) => second.length - first.length);
+      .filter((name) => name !== '' && text.includes(name) && escapeIdentifier(name) !== name);
     if (names.length === 0) return cleanTextBlock(text);
-    const pattern = new RegExp(names.map((name) => name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('|'), 'g');
-    const written = text.replace(pattern, (name) => escapeIdentifier(name));
+    // A name that the text already puts in double quotes (an attribute value, a quoted name) is replaced with its quotes, because
+    // the written form is a quoted string itself.
+    const written = substituteText(text, names.flatMap((name) => [[`"${name}"`, escapeIdentifier(name)], [name, escapeIdentifier(name)]]));
     return `${cleanTextBlock(written)}\n\n${DECODE_NOTE}`;
   } catch {
     return '';
+  }
+}
+
+// Replaces every occurrence of each text in `pairs` ([text, replacement]) in one pass; where two texts overlap, the longer wins.
+// A hook uses it to bound the text that a module quotes verbatim from a field the hook knows (an original task, a claim), or to
+// write a name in a form other than escapeIdentifier. Pairs that are not two texts, and texts that do not occur, are ignored.
+export function substituteText(value, pairs) {
+  try {
+    const text = toText(value);
+    const replacements = new Map();
+    for (const pair of Array.isArray(pairs) ? pairs : []) {
+      if (!Array.isArray(pair) || typeof pair[0] !== 'string' || typeof pair[1] !== 'string') continue;
+      if (pair[0] !== '' && text.includes(pair[0]) && !replacements.has(pair[0])) replacements.set(pair[0], pair[1]);
+    }
+    if (replacements.size === 0) return text;
+    const pattern = new RegExp([...replacements.keys()].sort((first, second) => second.length - first.length)
+      .map((name) => name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('|'), 'g');
+    return text.replace(pattern, (found) => replacements.get(found));
+  } catch {
+    return '';
+  }
+}
+
+function isLowSurrogate(code) {
+  return code >= 0xDC00 && code <= 0xDFFF;
+}
+
+// Text cut to its first `max` UTF-16 units (never inside a surrogate pair), with "…" after the cut; text that fits is returned as it is.
+export function cutText(value, max) {
+  try {
+    const text = toText(value);
+    const limit = typeof max === 'number' && max >= 1 ? Math.floor(max) : Infinity;
+    if (text.length <= limit) return text;
+    let end = limit;
+    while (end > 0 && isHighSurrogate(text.charCodeAt(end - 1))) end -= 1;
+    return `${text.slice(0, end)}…`;
+  } catch {
+    return '';
+  }
+}
+
+// Text of at most `max` characters (a limit under 64 is ignored): when it is longer, the middle is replaced by a line that
+// counts the omitted characters, and the start (40 %) and the end (the rest) stay, so a closing instruction or tag at the end
+// survives. Neither cut splits a surrogate pair.
+export function capText(value, max) {
+  try {
+    const text = toText(value);
+    const limit = typeof max === 'number' && max >= 64 ? Math.floor(max) : Infinity;
+    if (text.length <= limit) return text;
+    const room = limit - 40;
+    const headLength = Math.floor(room * 0.4);
+    let headEnd = headLength;
+    while (headEnd > 0 && isHighSurrogate(text.charCodeAt(headEnd - 1))) headEnd -= 1;
+    let tailStart = text.length - (room - headLength);
+    while (tailStart < text.length && isLowSurrogate(text.charCodeAt(tailStart))) tailStart += 1;
+    return `${text.slice(0, headEnd)}\n[… ${tailStart - headEnd} characters omitted …]\n${text.slice(tailStart)}`;
+  } catch {
+    return '';
+  }
+}
+
+// What a hook writes to the model or the user is cleaned in one place, at its emission, so that no branch of the hook (an early
+// return, a delegation to another module, a fallback, an error or a refusal) can skip it. Returns a copy of a hook output
+// object with its text fields cleaned: reason, message, systemMessage and stopReason, and additionalContext and
+// permissionDecisionReason of hookSpecificOutput. Every other field (decision, permissionDecision, updatedInput, flags) is
+// copied as it is. `options.substitutions` ([text, replacement] pairs, see substituteText) run first, `options.identifiers`
+// are written exactly (see cleanTextBlockKeeping), and each text is cut to `options.max` characters (default 20000, see
+// capText). A value that is not an object is returned as it is, and a failure returns the output unchanged.
+export const HOOK_OUTPUT_MAX_CHARS = 20000;
+const OUTPUT_TEXT_FIELDS = ['reason', 'message', 'systemMessage', 'stopReason'];
+const HOOK_OUTPUT_TEXT_FIELDS = ['additionalContext', 'permissionDecisionReason'];
+
+export function cleanHookOutput(output, options = {}) {
+  try {
+    if (!output || typeof output !== 'object' || Array.isArray(output)) return output;
+    const { identifiers = [], substitutions = [], max = HOOK_OUTPUT_MAX_CHARS } = options ?? {};
+    const clean = (value) => (typeof value === 'string'
+      ? capText(cleanTextBlockKeeping(substituteText(value, substitutions), identifiers), max)
+      : value);
+    const result = { ...output };
+    for (const field of OUTPUT_TEXT_FIELDS) if (field in result) result[field] = clean(result[field]);
+    const specific = result.hookSpecificOutput;
+    if (specific && typeof specific === 'object' && !Array.isArray(specific)) {
+      result.hookSpecificOutput = { ...specific };
+      for (const field of HOOK_OUTPUT_TEXT_FIELDS) if (field in specific) result.hookSpecificOutput[field] = clean(specific[field]);
+    }
+    return result;
+  } catch {
+    return output;
   }
 }
 

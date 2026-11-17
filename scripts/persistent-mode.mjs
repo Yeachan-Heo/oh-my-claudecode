@@ -1671,6 +1671,31 @@ function delegateToBridge(input) {
 // Opt-in text cleaning (OMC_CONTEXT_TEXT_SANITIZE=1 or true): the Ralph task line and the /goal objective in Stop blocks are
 // cleaned only when the switch is on. main() loads the module; with the switch off nothing is imported.
 let contextText = null;
+
+// With the switch on, every text that a Stop output carries is cleaned and bounded here, at the one place where the hook emits, so
+// that no branch (a delegation to the bridge, a fallback, a tool error notice, a workflow stage prompt) can skip it. With the
+// switch off the output is written as it is.
+function emit(output) {
+  console.log(JSON.stringify(contextText ? contextText.cleanHookOutput(output) : output));
+}
+
+// The reviewer prompt that the bridge composes quotes the original task, the completion claim and the earlier reviewer feedback
+// verbatim. With the switch on they are cut here, where the hook knows them (the bridge is not changed), and emit() then cleans
+// and bounds the whole message. The story id in the approval tag has to be copied exactly: it is written as a JSON string when
+// it holds a removed character.
+const DELEGATED_QUOTE_LIMITS = [["original_task", 2000], ["completion_claim", 1000], ["architect_feedback", 2000]];
+async function boundDelegated(delegated, { directory, omcRoot, sessionId, task }) {
+  if (!contextText || !delegated) return delegated;
+  const request = await readPendingVerificationRequest(directory, omcRoot, sessionId);
+  const substitutions = [];
+  const quote = (value, limit) => {
+    if (typeof value === "string" && value.length > limit) substitutions.push([value, contextText.cutText(value, limit)]);
+  };
+  for (const [field, limit] of DELEGATED_QUOTE_LIMITS) quote(request?.[field], limit);
+  quote(task, DELEGATED_QUOTE_LIMITS[0][1]);
+  return contextText.cleanHookOutput(delegated, { identifiers: [request?.story_id], substitutions });
+}
+
 async function main() {
   try {
     contextText = await loadContextText();
@@ -1711,35 +1736,35 @@ async function main() {
     // Blocking these causes a deadlock where Claude Code cannot compact.
     // See: https://github.com/Yeachan-Heo/oh-my-claudecode/issues/213
     if (isContextLimitStop(data)) {
-      console.log(JSON.stringify({ continue: true, suppressOutput: true }));
+      emit({ continue: true, suppressOutput: true });
       return;
     }
 
     const criticalTranscriptPath = data.transcript_path || data.transcriptPath || "";
     if (estimateContextPercent(criticalTranscriptPath) >= CRITICAL_CONTEXT_STOP_PERCENT) {
-      console.log(JSON.stringify({ continue: true, suppressOutput: true }));
+      emit({ continue: true, suppressOutput: true });
       return;
     }
 
     // Respect user abort (Ctrl+C, cancel)
     if (isUserAbort(data)) {
-      console.log(JSON.stringify({ continue: true, suppressOutput: true }));
+      emit({ continue: true, suppressOutput: true });
       return;
     }
 
     // Never block auth failures (401/403/expired OAuth): allow re-auth flow.
     if (isAuthenticationError(data)) {
-      console.log(JSON.stringify({ continue: true, suppressOutput: true }));
+      emit({ continue: true, suppressOutput: true });
       return;
     }
 
     if (isScheduledWakeupStop(data)) {
-      console.log(JSON.stringify({ continue: true, suppressOutput: true }));
+      emit({ continue: true, suppressOutput: true });
       return;
     }
 
     if (hasPendingOwnedAsyncWork(stateDir, sessionId)) {
-      console.log(JSON.stringify({ continue: true, suppressOutput: true }));
+      emit({ continue: true, suppressOutput: true });
       return;
     }
 
@@ -1783,12 +1808,12 @@ async function main() {
               || afterRalph.state.current_story_id !== beforeStoryId);
           const verificationAdvanced = after.pending && reviewerWorkKey(after) !== beforeKey;
           if (delegated && delegated.decision === "block" && (verificationAdvanced || ralphProgressed)) {
-            console.log(JSON.stringify(delegated));
+            emit(await boundDelegated(delegated, { directory, omcRoot, sessionId, task: ralph.state.prompt }));
             return;
           }
         }
       }
-      console.log(JSON.stringify({ continue: true, suppressOutput: true }));
+      emit({ continue: true, suppressOutput: true });
       return;
     }
     const ultragoal = readStateFileWithSession(
@@ -1837,17 +1862,17 @@ async function main() {
       const reason = transcriptFailure === "workflow_transcript_record_too_large"
         ? `[AUTOPILOT WORKFLOW] ${transcriptFailure}. Run /cancel and re-invoke the workflow.`
         : "[AUTOPILOT WORKFLOW] workflow_descriptor_integrity_failed. Run /cancel and re-invoke the workflow.";
-      console.log(JSON.stringify({ continue: false, decision: "block", reason }));
+      emit({ continue: false, decision: "block", reason });
       return;
     }
     if (currentAutopilot && hasNamedWorkflowMarkers(currentAutopilot) && !isWorkflowRuntimeSupported()) {
-      console.log(JSON.stringify(SAFE_CONTINUE));
+      emit(SAFE_CONTINUE);
       return;
     }
     const cancellation = isSessionCancelInProgress(stateDir, sessionId, autopilot.path, { directory, isGlobal: autopilot.isGlobal, hasValidSessionId });
     if (cancellation.currentAutopilot) autopilot.state = cancellation.currentAutopilot;
     if (cancellation.active) {
-      console.log(JSON.stringify({ continue: true, suppressOutput: true }));
+      emit({ continue: true, suppressOutput: true });
       return;
     }
 
@@ -1899,17 +1924,15 @@ async function main() {
           ralph.state.active = false;
           ralph.state.last_checked_at = new Date().toISOString();
           if (!shouldWriteStateBack(ralph.path)) {
-            console.log(JSON.stringify({ continue: true, suppressOutput: true }));
+            emit({ continue: true, suppressOutput: true });
             return;
           }
           writeJsonFile(ralph.path, ralph.state);
 
-          console.log(
-            JSON.stringify({
-              decision: "block",
-              reason: `[RALPH LOOP - HARD LIMIT] Reached hard max iterations (${hardMax}). Mode auto-disabled. Restart with /oh-my-claudecode:ralph if needed.`,
-            }),
-          );
+          emit({
+            decision: "block",
+            reason: `[RALPH LOOP - HARD LIMIT] Reached hard max iterations (${hardMax}). Mode auto-disabled. Restart with /oh-my-claudecode:ralph if needed.`,
+          });
           return;
         }
 
@@ -1921,7 +1944,7 @@ async function main() {
         if (work.pending) {
           const delegated = delegateToBridge(data);
           if (delegated) {
-            console.log(JSON.stringify(delegated));
+            emit(await boundDelegated(delegated, { directory, omcRoot, sessionId, task: ralph.state.prompt }));
             return;
           }
         }
@@ -1933,7 +1956,7 @@ async function main() {
           ralph.state.iteration = iteration + 1;
           ralph.state.last_checked_at = new Date().toISOString();
           if (!shouldWriteStateBack(ralph.path)) {
-            console.log(JSON.stringify({ continue: true, suppressOutput: true }));
+            emit({ continue: true, suppressOutput: true });
             return;
           }
           writeJsonFile(ralph.path, ralph.state);
@@ -1964,7 +1987,7 @@ async function main() {
 
           if (jevCompletion) {
             if (!hasActiveAutopilotForSession) {
-              console.log(JSON.stringify(jevCompletionStopOutput(jevCompletion, "ralph")));
+              emit(jevCompletionStopOutput(jevCompletion, "ralph"));
               return;
             }
 
@@ -1975,12 +1998,10 @@ async function main() {
             break ralphPriority;
           }
 
-          console.log(
-            JSON.stringify({
-              decision: "block",
-              reason: reason,
-            }),
-          );
+          emit({
+            decision: "block",
+            reason: reason,
+          });
           return;
         }
 
@@ -1988,7 +2009,7 @@ async function main() {
         ralph.state.max_iterations = maxIter + 10;
         ralph.state.last_checked_at = new Date().toISOString();
         if (!shouldWriteStateBack(ralph.path)) {
-          console.log(JSON.stringify({ continue: true, suppressOutput: true }));
+          emit({ continue: true, suppressOutput: true });
           return;
         }
         writeJsonFile(ralph.path, ralph.state);
@@ -2012,17 +2033,15 @@ async function main() {
         const jevCompletionAtExtend = jevCompletionOutcome(jevExtendResult, ralph.state, ralph.path, !hasActiveAutopilotForSession);
 
         if (!jevCompletionAtExtend) {
-          console.log(
-            JSON.stringify({
-              decision: "block",
-              reason: ralphExtendedReason,
-            }),
-          );
+          emit({
+            decision: "block",
+            reason: ralphExtendedReason,
+          });
           return;
         }
 
         if (!hasActiveAutopilotForSession) {
-          console.log(JSON.stringify(jevCompletionStopOutput(jevCompletionAtExtend, "ralph")));
+          emit(jevCompletionStopOutput(jevCompletionAtExtend, "ralph"));
           return;
         }
 
@@ -2047,7 +2066,7 @@ async function main() {
         const maxReinforcements = ultragoal.state.max_reinforcements || 50;
 
         if (newCount > maxReinforcements) {
-          console.log(JSON.stringify({ continue: true, suppressOutput: true }));
+          emit({ continue: true, suppressOutput: true });
           return;
         }
 
@@ -2057,7 +2076,7 @@ async function main() {
         ultragoal.state.reinforcement_count = newCount;
         ultragoal.state.last_checked_at = new Date().toISOString();
         if (!shouldWriteStateBack(ultragoal.path)) {
-          console.log(JSON.stringify({ continue: true, suppressOutput: true }));
+          emit({ continue: true, suppressOutput: true });
           return;
         }
         writeJsonFile(ultragoal.path, ultragoal.state);
@@ -2069,7 +2088,7 @@ async function main() {
           reason = errorGuidance + reason;
         }
 
-        console.log(JSON.stringify({ decision: "block", reason }));
+        emit({ decision: "block", reason });
         return;
       }
     }
@@ -2088,7 +2107,7 @@ async function main() {
       // contains only the routing echo and is deleted, any deferred child Ralph release
       // must be written before the orphan handler returns SAFE_CONTINUE.
       writeChildRalphRelease();
-      console.log(JSON.stringify({ continue: true, suppressOutput: true }));
+      emit({ continue: true, suppressOutput: true });
       return;
     }
 
@@ -2103,35 +2122,35 @@ async function main() {
       if (sessionMatches) {
         if (hasNamedWorkflowMarkers(autopilot.state) && !isValidNamedWorkflowState(autopilot.state, sessionId)) {
           const transcriptFailure = takeWorkflowTranscriptFailure(sessionId);
-          console.log(JSON.stringify({ continue: false, decision: "block", reason: transcriptFailure === 'workflow_transcript_record_too_large' ? '[AUTOPILOT WORKFLOW] workflow_transcript_record_too_large. Run /cancel and re-invoke the workflow.' : "[AUTOPILOT WORKFLOW] workflow_descriptor_integrity_failed. Run /cancel and re-invoke the workflow." }));
+          emit({ continue: false, decision: "block", reason: transcriptFailure === 'workflow_transcript_record_too_large' ? '[AUTOPILOT WORKFLOW] workflow_transcript_record_too_large. Run /cancel and re-invoke the workflow.' : "[AUTOPILOT WORKFLOW] workflow_descriptor_integrity_failed. Run /cancel and re-invoke the workflow." });
           return;
         }
         if (hasNamedWorkflowMarkers(autopilot.state) && !isWorkflowRuntimeSupported()) {
-          console.log(JSON.stringify(SAFE_CONTINUE));
+          emit(SAFE_CONTINUE);
           return;
         }
         const workflowAdvance = advanceWorkflowOnStop(autopilot.state, data, sessionId);
         if (workflowAdvance) {
           const commit = commitWorkflowAdvance(autopilot.path, workflowAdvance);
           if (commit.committed) {
-            console.log(JSON.stringify({ continue: false, decision: "block", reason: workflowAdvance.nextStage
+            emit({ continue: false, decision: "block", reason: workflowAdvance.nextStage
               ? workflowAdvance.nextStagePrompt
-              : "[AUTOPILOT WORKFLOW] All selected stages are complete." }));
+              : "[AUTOPILOT WORKFLOW] All selected stages are complete." });
           } else if (takeWorkflowTranscriptFailure(sessionId) === 'workflow_transcript_record_too_large') {
-            console.log(JSON.stringify({ continue: false, decision: 'block', reason: '[AUTOPILOT WORKFLOW] workflow_transcript_record_too_large. Run /cancel and re-invoke the workflow.' }));
+            emit({ continue: false, decision: 'block', reason: '[AUTOPILOT WORKFLOW] workflow_transcript_record_too_large. Run /cancel and re-invoke the workflow.' });
           } else if (hasNamedWorkflowMarkers(commit.state) && (!isValidWorkflowDescriptor(commit.state.workflow) || !isValidWorkflowTrackingState(commit.state, sessionId))) {
-            console.log(JSON.stringify({ continue: false, decision: "block", reason: "[AUTOPILOT WORKFLOW] workflow_descriptor_integrity_failed. Run /cancel and re-invoke the workflow." }));
+            emit({ continue: false, decision: "block", reason: "[AUTOPILOT WORKFLOW] workflow_descriptor_integrity_failed. Run /cancel and re-invoke the workflow." });
           } else {
-            console.log(JSON.stringify(hasNamedWorkflowMarkers(commit.state) ? workflowStopResponse(commit.state) : SAFE_CONTINUE));
+            emit(hasNamedWorkflowMarkers(commit.state) ? workflowStopResponse(commit.state) : SAFE_CONTINUE);
           }
           return;
         }
         if (takeWorkflowTranscriptFailure(sessionId) === 'workflow_transcript_record_too_large') {
-          console.log(JSON.stringify({ continue: false, decision: 'block', reason: '[AUTOPILOT WORKFLOW] workflow_transcript_record_too_large. Run /cancel and re-invoke the workflow.' }));
+          emit({ continue: false, decision: 'block', reason: '[AUTOPILOT WORKFLOW] workflow_transcript_record_too_large. Run /cancel and re-invoke the workflow.' });
           return;
         }
         if (hasNamedWorkflowMarkers(autopilot.state) && (!isValidWorkflowDescriptor(autopilot.state.workflow) || !isValidWorkflowTrackingState(autopilot.state, sessionId))) {
-          console.log(JSON.stringify({ continue: false, decision: "block", reason: "[AUTOPILOT WORKFLOW] workflow_descriptor_integrity_failed. Run /cancel and re-invoke the workflow." }));
+          emit({ continue: false, decision: "block", reason: "[AUTOPILOT WORKFLOW] workflow_descriptor_integrity_failed. Run /cancel and re-invoke the workflow." });
           return;
         }
         if (hasNamedWorkflowMarkers(autopilot.state)) {
@@ -2146,9 +2165,9 @@ async function main() {
           };
           const refresh = refreshNamedWorkflowDispatch(autopilot.path, expected);
           if (refresh.integrityFailed || (hasNamedWorkflowMarkers(refresh.state) && (!isValidWorkflowDescriptor(refresh.state.workflow) || !isValidWorkflowTrackingState(refresh.state, sessionId)))) {
-            console.log(JSON.stringify({ continue: false, decision: "block", reason: "[AUTOPILOT WORKFLOW] workflow_descriptor_integrity_failed. Run /cancel and re-invoke the workflow." }));
+            emit({ continue: false, decision: "block", reason: "[AUTOPILOT WORKFLOW] workflow_descriptor_integrity_failed. Run /cancel and re-invoke the workflow." });
           } else {
-            console.log(JSON.stringify(refresh.committed ? workflowStopResponse(refresh.state) : SAFE_CONTINUE));
+            emit(refresh.committed ? workflowStopResponse(refresh.state) : SAFE_CONTINUE);
           }
           return;
         }
@@ -2174,7 +2193,7 @@ async function main() {
               });
               if (!locked.acquired || !committed) {
                 if (!locked.acquired) reportLockFailure('Autopilot state reinforcement');
-                console.log(JSON.stringify(SAFE_CONTINUE));
+                emit(SAFE_CONTINUE);
                 return;
               }
               autopilot.state = reinforced;
@@ -2222,17 +2241,15 @@ async function main() {
             const jevAutopilotCompletion = jevCompletionOutcome(jevAutopilotResult, autopilot.state, autopilot.path, !reinforcementLimitReached);
             if (jevAutopilotCompletion) {
               if (jevAutopilotCompletion === "released") writeChildRalphRelease();
-              console.log(JSON.stringify(jevCompletionStopOutput(jevAutopilotCompletion, "autopilot")));
+              emit(jevCompletionStopOutput(jevAutopilotCompletion, "autopilot"));
               return;
             }
 
             if (!reinforcementLimitReached || refreshed) {
-              console.log(
-                JSON.stringify({
-                  decision: "block",
-                  reason: reason,
-                }),
-              );
+              emit({
+                decision: "block",
+                reason: reason,
+              });
               return;
             }
           }
@@ -2268,12 +2285,10 @@ async function main() {
             reason = errorGuidance + reason;
           }
 
-          console.log(
-            JSON.stringify({
-              decision: "block",
-              reason,
-            }),
-          );
+          emit({
+            decision: "block",
+            reason,
+          });
           return;
         }
       }
@@ -2303,12 +2318,10 @@ async function main() {
             reason = errorGuidance + reason;
           }
 
-          console.log(
-            JSON.stringify({
-              decision: "block",
-              reason,
-            }),
-          );
+          emit({
+            decision: "block",
+            reason,
+          });
           return;
         }
       }
@@ -2340,12 +2353,10 @@ async function main() {
             reason = errorGuidance + reason;
           }
 
-          console.log(
-            JSON.stringify({
-              decision: "block",
-              reason,
-            }),
-          );
+          emit({
+            decision: "block",
+            reason,
+          });
           return;
         }
       }
@@ -2377,12 +2388,10 @@ async function main() {
               reason = errorGuidance + reason;
             }
 
-            console.log(
-              JSON.stringify({
-                decision: "block",
-                reason,
-              }),
-            );
+            emit({
+              decision: "block",
+              reason,
+            });
             return;
           }
         }
@@ -2415,7 +2424,7 @@ async function main() {
               reason = errorGuidance + reason;
             }
 
-            console.log(JSON.stringify({ decision: "block", reason }));
+            emit({ decision: "block", reason });
             return;
           }
         }
@@ -2431,7 +2440,7 @@ async function main() {
     }
     // No mode blocked: a child Ralph that Jev released was what let this Stop through.
     writeChildRalphRelease();
-    console.log(JSON.stringify(await releaseOutput(directory, sessionId, hasValidSessionId)));
+    emit(await releaseOutput(directory, sessionId, hasValidSessionId));
   } catch (error) {
     // On any error, allow stop rather than blocking forever
     try {

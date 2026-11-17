@@ -2609,6 +2609,10 @@ ${hookOutput.additionalContext}`
 
 function emitPreToolUseOutput(output, input, space = 0) {
   output = withShellCheckContext(output);
+  // With the text cleaning switch on, every text of the output (a refusal, a model routing notice, the shell check warnings, the
+  // reminders) is cleaned and bounded here, at the one place where the hook emits, so that no branch can skip it. updatedInput,
+  // the decision and the flags are not touched. With the switch off the output is written as it is.
+  if (contextText) output = contextText.cleanHookOutput(output);
   flushJevRouting(output);
   if (!isCodexPreToolUse(input)) {
     console.log(JSON.stringify(output, null, space));
@@ -2659,7 +2663,8 @@ function emitPreToolUseOutput(output, input, space = 0) {
 }
 
 // Opt-in text cleaning (OMC_CONTEXT_TEXT_SANITIZE=1 or true): the /goal objective and the expected objective are cleaned in the
-// deny reason only when the switch is on. main() loads the module; with the switch off nothing is imported.
+// deny reason, and every output of the hook is cleaned and bounded in emitPreToolUseOutput, only when the switch is on. main()
+// loads the module right after it reads the input; with the switch off nothing is imported.
 let contextText = null;
 // Plan write guard (opt-in, OMC_PLANNER_WRITE_GUARD=1): a Write, Edit, MultiEdit or NotebookEdit call made inside a
 // subagent whose agent_type is in the guarded list is denied unless the target is a Markdown file under <cwd>/.omc/plans/.

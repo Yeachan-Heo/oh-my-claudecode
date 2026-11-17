@@ -1531,6 +1531,9 @@ async function jevDeliveryGuardAtSessionStart(data) {
 let contextText = null;
 const cleanBlock = (text) => (contextText ? contextText.cleanTextBlock(text) : text);
 const cleanHost = (text, max) => (contextText ? contextText.cleanHostText(text, max) : text);
+// The messages for the user (systemMessage): the parts are cleaned one by one, because the context carries envelopes whose tags a
+// block-wide cleaning would neutralize, and the joined text is bounded.
+const boundMessages = (text) => (contextText ? contextText.capText(text, contextText.HOOK_OUTPUT_MAX_CHARS) : text);
 
 async function main() {
   const sessionStartDeadline = Date.now() + SESSION_START_HOOK_TIMEOUT_MS;
@@ -1566,7 +1569,7 @@ async function main() {
         'jev',
       ));
       const guardMessage = await jevDeliveryGuardAtSessionStart(data);
-      const noWorkspaceMessage = [compaction.systemMessage, guardMessage].filter(Boolean).join('\n');
+      const noWorkspaceMessage = boundMessages(cleanBlock([compaction.systemMessage, guardMessage].filter(Boolean).join('\n')));
       if (compaction.context || noWorkspaceMessage) {
         console.log(JSON.stringify({
           continue: true,
@@ -1610,9 +1613,9 @@ async function main() {
     // compaction.jsonl; after a compaction that used the built-in summary, add the work-state registry.
     const compaction = await jevCompactionAfterSessionStart(data, () => join(omcRoot, 'state', 'jev'));
     if (compaction.context) messages.push(`<session-restore>\n\n${cleanBlock(compaction.context)}\n\n</session-restore>\n\n---\n`);
-    if (compaction.systemMessage) userMessages.push(compaction.systemMessage);
+    if (compaction.systemMessage) userMessages.push(cleanBlock(compaction.systemMessage));
     const guardMessage = await jevDeliveryGuardAtSessionStart(data);
-    if (guardMessage) userMessages.push(guardMessage);
+    if (guardMessage) userMessages.push(cleanBlock(guardMessage));
 
     // Fire sibling-retrofit warning once per session (lifted off getOmcRoot hot path)
     try {
@@ -1653,12 +1656,12 @@ async function main() {
         ? `\nRun '/plugin marketplace update omc && /omc-setup' to sync plugin-managed components.`
         : `\nRun 'omc update' to sync all components.`;
 
-      messages.push(`<session-restore>\n\n${driftMsg}\n\n</session-restore>\n\n---\n`);
+      messages.push(`<session-restore>\n\n${cleanBlock(driftMsg)}\n\n</session-restore>\n\n---\n`);
     }
 
     // Check npm registry for available updates (with 24h cache)
     const updateNotice = await runUpdateChecks();
-    if (updateNotice) userMessages.push(updateNotice);
+    if (updateNotice) userMessages.push(cleanBlock(updateNotice));
 
     // Warn if silentAutoUpdate is enabled but running in plugin mode (#1773)
     if (process.env.CLAUDE_PLUGIN_ROOT) {
@@ -1707,7 +1710,7 @@ async function main() {
 
 You have an active ralph-loop session.
 Original task: ${cleanHost(ralphState.prompt || 'Task in progress', 500)}
-Iteration: ${ralphState.iteration || 1}/${ralphState.max_iterations || 10}
+Iteration: ${cleanHost(ralphState.iteration || 1, 20)}/${cleanHost(ralphState.max_iterations || 10, 20)}
 
 Treat this as prior-session context only. Prioritize the user's newest request, and resume the ralph loop only if the user explicitly asks to continue it.
 
@@ -2010,7 +2013,7 @@ ${cleanBlock(cleanContent)}
         continue: true,
       };
       if (userMessages.length > 0) {
-        output.systemMessage = userMessages.join('\n');
+        output.systemMessage = boundMessages(userMessages.join('\n'));
       }
       if (messages.length > 0) {
         output.hookSpecificOutput = {

@@ -1286,7 +1286,8 @@ async function main() {
       };
     }
 
-    console.log(JSON.stringify(response, null, 2));
+    // With the text cleaning switch on the message is cleaned and bounded where it is emitted, whatever branch composed it.
+    console.log(JSON.stringify(contextText ? contextText.cleanHookOutput(response) : response, null, 2));
   } catch (error) {
     // On error, always continue
     console.log(JSON.stringify({ continue: true }));

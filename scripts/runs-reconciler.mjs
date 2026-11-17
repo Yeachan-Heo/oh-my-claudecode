@@ -99,13 +99,15 @@ async function main() {
     'Nothing was changed automatically. If a lesson was learned in those runs, record it now (the notepad is the refit surface); otherwise acknowledge and move on.',
   ];
 
-  console.log(JSON.stringify({
+  // The number of findings is not bounded, so with the switch on the whole message is also bounded where it is emitted.
+  const output = {
     continue: true,
     hookSpecificOutput: {
       hookEventName: 'SessionStart',
       additionalContext: lines.join('\n'),
     },
-  }));
+  };
+  console.log(JSON.stringify(sanitize ? sanitize.cleanHookOutput(output) : output));
 }
 
 await main();
