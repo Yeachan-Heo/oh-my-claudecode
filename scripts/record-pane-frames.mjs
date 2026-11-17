@@ -111,7 +111,10 @@ async function record(values) {
   const steps = (values.step ?? []).map(parseStep);
 
   const contract = await contractLaunchArgs(provider, values.model);
-  const bin = values.bin ?? contract.binary;
+  // The pane starts in --cwd, so a relative path is pinned to where the recorder
+  // was started. A bare command name is left for PATH.
+  const bin = values.bin === undefined ? contract.binary
+    : /[\\/]/.test(values.bin) ? resolve(values.bin) : values.bin;
   const launchArgs = values.args === undefined ? contract.args : parseJsonArray(values.args, '--args');
   const out = resolve(values.out ?? mkdtempSync(join(tmpdir(), `pane-frames-${provider}-`)));
   mkdirSync(out, { recursive: true });

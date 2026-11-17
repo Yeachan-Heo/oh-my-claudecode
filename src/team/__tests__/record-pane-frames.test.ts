@@ -1,5 +1,5 @@
 import { spawn, spawnSync } from 'node:child_process';
-import { chmodSync, existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -55,10 +55,10 @@ function leftoverSockets(): string[] {
     .flatMap(dir => readdirSync(join(root, dir)).map(name => join(root, dir, name)));
 }
 
-function runRecorder(args: string[], whileRunning?: () => Promise<void>): Promise<RecorderRun> {
+function runRecorder(args: string[], whileRunning?: () => Promise<void>, cwd?: string): Promise<RecorderRun> {
   const env: NodeJS.ProcessEnv = { ...process.env, TMUX_TMPDIR: root };
   delete env.TMUX;
-  const child = spawn(process.execPath, [RECORDER, ...args], { env, stdio: ['ignore', 'pipe', 'pipe'] });
+  const child = spawn(process.execPath, [RECORDER, ...args], { env, cwd, stdio: ['ignore', 'pipe', 'pipe'] });
   let stdout = '';
   let stderr = '';
   child.stdout.on('data', chunk => { stdout += String(chunk); });
@@ -302,6 +302,23 @@ describe.skipIf(!HAS_TMUX)('record-pane-frames record', () => {
     expect(summary.launch_args.length).toBeGreaterThan(0);
     expect(JSON.parse(readFileSync(join(root, 'argv.json'), 'utf8'))).toEqual(summary.launch_args);
     expect(extractLast().entry).toMatchObject({ provider: 'claude', version: '9.8.7', launch_args: summary.launch_args });
+  });
+
+  it('launches a relative --bin from the directory the recorder was started in', async () => {
+    writeFileSync(join(root, 'stub-claude.mjs'), CONTRACT_STUB_SOURCE);
+    chmodSync(join(root, 'stub-claude.mjs'), 0o755);
+    const paneCwd = join(root, 'pane-cwd');
+    mkdirSync(paneCwd);
+    out = join(root, 'out');
+
+    const run = await runRecorder([
+      'record', '--provider', 'claude', '--bin', './stub-claude.mjs', '--args', '["--flag"]', '--out', out, '--cwd', paneCwd,
+      '--interval-ms', '20', '--settle', '0.3', '--timeout', '20', '--step', 'wait:READY>',
+    ], undefined, root);
+
+    expect(run.code).toBe(0);
+    expect(JSON.parse(run.stdout)).toMatchObject({ stop: 'settled', version: '9.8.7' });
+    expect(JSON.parse(readFileSync(join(root, 'argv.json'), 'utf8'))).toEqual(['--flag']);
   });
 
   it('starts a reused --out directory from empty logs', async () => {
