@@ -522,7 +522,7 @@ function expandLongOption(name, table) {
 
 // The options and the positional arguments of a pkill or killall command (argv[0] is the command). Returns
 // { positionals, flags: Set of long names, values: Map of long name to the list of its values }. Signal words (`-9`, `-KILL`)
-// are skipped; the words after `--` are positionals.
+// are skipped (the first one; see below); the words after `--` are positionals.
 function parseProcessOptions(argv, table) {
   const out = { positionals: [], flags: new Set(), values: new Map() };
   const take = (name, value) => {
@@ -530,6 +530,7 @@ function parseProcessOptions(argv, table) {
     out.values.set(name, [...(out.values.get(name) || []), value]);
   };
   let afterDashes = false;
+  let signalSeen = false;
   for (let i = 1; i < argv.length; i++) {
     const t = argv[i];
     if (afterDashes || !t.startsWith('-') || t === '-') {
@@ -548,7 +549,12 @@ function parseProcessOptions(argv, table) {
       continue;
     }
     const body = t.slice(1);
-    if (isSignalWord(body)) continue;
+    // The first word that names a signal is the signal, wherever it stands (`pkill -io caddy` sends SIGIO); a later one is read as
+    // option letters (`pkill -9 -io caddy` is -i and -o), as procps does (checked with pkill -0 on a process of its own).
+    if (!signalSeen && isSignalWord(body)) {
+      signalSeen = true;
+      continue;
+    }
     for (let k = 0; k < body.length; k++) {
       const name = table.short[body[k]];
       if (name && table.longWithValue.includes(name)) {

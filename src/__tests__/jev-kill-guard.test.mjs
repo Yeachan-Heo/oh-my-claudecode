@@ -237,7 +237,7 @@ test('table p4-p7: per-wrapper flags, nesting depth, broadcast, stop-everything 
 
 test('table p8: options of pkill, killall and kill are read as the tools read them, and wrapped commands by their base name', () => {
   // `caddy` is a protected name of the fixture, 4242 an ancestor and its process group; the pass rows use a name that is not protected,
-  // another letter case without -i, or a pid that is not an ancestor.
+  // another letter case without -i (also `pkill -io`, whose first signal-like word is the signal SIGIO, as procps reads it), or a pid that is not an ancestor.
   const refuse = [
     // pkill: flags that take no value (-n, -c, -o, -x, -e, -A, -v), alone or clustered, and their long forms
     'pkill -n caddy', 'pkill -c caddy', 'pkill -o caddy', 'pkill -x caddy', 'pkill -e caddy', 'pkill -A caddy', 'pkill -v caddy', 'pkill -nf caddy', 'pkill -fn caddy',
@@ -247,7 +247,7 @@ test('table p8: options of pkill, killall and kill are read as the tools read th
     'pkill -t pts/0 caddy', 'pkill -P 12 caddy', 'pkill -F /run/x.pid caddy', 'pkill -r R caddy', 'pkill -q 1 caddy', 'pkill --euid root caddy', 'pkill --older=5 caddy',
     'pkill --parent 12 caddy', 'pkill --sig 9 caddy', 'pkill --ns 1 caddy', 'pkill --signal KILL caddy', 'pkill -9 caddy', 'pkill -KILL caddy', 'pkill -SIGKILL caddy',
     // pkill: ignore case, in every comparison (protected names, generic names, regular expressions), short, long, shortened and clustered
-    'pkill -i CADDY', 'pkill --ignore-case CADDY', 'pkill --ignore-c CADDY', 'pkill -fi CADDY', 'pkill -if Caddy', 'pkill -i -f CADDY', 'pkill -i CLAUDE', 'pkill -i Tmux', 'pkill -i "CAD+Y"', 'pkill -i -9 CADDY',
+    'pkill -i CADDY', 'pkill --ignore-case CADDY', 'pkill --ignore-c CADDY', 'pkill -fi CADDY', 'pkill -if Caddy', 'pkill -i -f CADDY', 'pkill -i CLAUDE', 'pkill -i Tmux', 'pkill -i "CAD+Y"', 'pkill -i -9 CADDY', 'pkill -9 -io CADDY', 'pkill -0 -e -io CADDY', 'pkill -KILL -fi CADDY',
     // killall: -r is a flag (the names are regular expressions), -n and the time, user and signal options take values, every name is judged
     'killall -r caddy', 'killall --regexp caddy', "killall -r 'cad+y'", "killall -r 'cad'", 'killall -n 123 caddy', 'killall --ns 123 caddy', 'killall -s TERM caddy', 'killall -o 5m caddy', 'killall -y 5m caddy',
     'killall -Z ctx caddy', 'killall -u root caddy', 'killall -u root', 'killall -g caddy', 'killall -e caddy', 'killall -w caddy', 'killall -v caddy', 'killall -q caddy', 'killall -9 caddy', 'killall -SIGKILL caddy',
@@ -262,7 +262,7 @@ test('table p8: options of pkill, killall and kill are read as the tools read th
     "env /bin/sh -c 'kill 1'", 'env /usr/bin/docker stop example-db-prod', 'sudo /usr/bin/systemctl stop caddy', 'env /usr/sbin/reboot',
   ];
   const pass = [
-    'pkill -n my-test-proc', 'pkill -i MY-TEST-PROC', 'pkill -fu root my-test-proc', 'pkill -nu root my-test-proc', 'pkill CADDY', 'pkill -x CADDY', 'pkill -P 1234',
+    'pkill -io CADDY', 'pkill -n my-test-proc', 'pkill -i MY-TEST-PROC', 'pkill -fu root my-test-proc', 'pkill -nu root my-test-proc', 'pkill CADDY', 'pkill -x CADDY', 'pkill -P 1234',
     'killall -r "zzz.*"', 'killall -I MY-TEST-PROC', 'killall -9 myprocess', 'killall sleep', 'killall -n 123 my-test-proc',
     'kill -0 4242', 'kill -s 0 4242', 'kill -n 0 1', 'kill -l', 'kill -L', 'kill -s TERM 5555', 'kill -9 -4243', 'kill -TERM 5555', 'kill -TERM -5555',
     'echo kill 1', 'sudo -u root /bin/ls', 'env FOO=bar /bin/echo kill 1', 'env /bin/echo pkill caddy', 'sudo -r role /bin/ls',
