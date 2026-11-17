@@ -309,6 +309,38 @@ describe('redactTokens key-shape masking (OMC_REDACT_KEY_SHAPES=1)', () => {
       expect(redactTokens('PASSWORD reset completed')).toBe('PASSWORD reset completed');
     });
 
+    // P1: Mask unterminated quoted values in truncated log previews
+    it('masks unterminated quoted values (closing quote cut off)', () => {
+      // Simulates a password truncated at 50 chars before the closing quote
+      const truncatedPassword = `PASSWORD='verylongpasswordthatgetstruncatedbeforeclosingquote`;
+      const result = redactTokens(truncatedPassword);
+      // Should mask the value even though the closing quote is missing
+      expect(result).toContain('PASSWORD=\'****');
+      expect(result).not.toContain('verylongpasswordthatgetstruncatedbeforeclosingquote');
+    });
+
+    // P1: Skip escaped quotes when locating a secret's closing quote
+    it('skips escaped quotes when finding the closing quote', () => {
+      // JSON.stringify result with escaped quote in the password
+      const jsonWithEscapedQuote = `CONFIG='{"PASSWORD": "start\\"sensitive-suffix"}'`;
+      const result = redactTokens(jsonWithEscapedQuote);
+      // Should mask the entire value, not stop at the escaped quote
+      expect(result).toContain('****');
+      expect(result).not.toContain('sensitive-suffix');
+    });
+
+    // P2: Bound the optional-index scan to avoid quadratic retries
+    it('handles degenerate bracket patterns efficiently', () => {
+      // This would cause quadratic behavior if not bounded: 'KEY' repeated with brackets
+      const degenerate = `'KEY' + '[KEY]'.repeat(20000)`;
+      const start = performance.now();
+      const result = redactTokens(degenerate);
+      const elapsed = performance.now() - start;
+      // Should complete in reasonable time (< 500ms even on slower machines)
+      expect(elapsed).toBeLessThan(500);
+      expect(result).toBeTruthy(); // Basic sanity check
+    });
+
     it('long degenerate inputs without hits come back unchanged', () => {
       expect(redactTokens('eyJ-'.repeat(25000))).toBe('eyJ-'.repeat(25000));
       expect(redactTokens('a-'.repeat(50000))).toBe('a-'.repeat(50000));

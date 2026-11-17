@@ -117,7 +117,12 @@ function redactKeyShapes(input: string): string {
       const name = input.slice(i, j).toUpperCase();
       if (j - i >= 3 && REDACT_KEY_SHAPES_PHRASES.some((phrase) => name.includes(phrase))) {
         let k = j;
-        while (k < n && (input[k] === '"' || input[k] === "'" || input[k] === '[' || input[k] === ']')) {
+        // Scan through optional quotes and brackets (e.g. NAME["index"] or NAME['key'])
+        // to find the assignment separator. Bound the total scan to avoid quadratic retries
+        // on inputs like 'KEY' + '[KEY]'.repeat(10000).
+        const maxBracketScan = Math.min(256, n - k); // limit lookahead to 256 chars from name end
+        const scanEnd = k + maxBracketScan;
+        while (k < scanEnd && (input[k] === '"' || input[k] === "'" || input[k] === '[' || input[k] === ']')) {
           if (input[k] === '[') {
             let z = k + 1;
             while (z < n && z - k <= 64 && input[z] !== ']') z++;
@@ -135,9 +140,20 @@ function redactKeyShapes(input: string): string {
           const valueStart = k;
           let valueEnd = valueStart;
           if (quote) {
-            // quoted value: up to the matching closing quote on the same line
-            while (valueEnd < n && input[valueEnd] !== quote && input[valueEnd] !== '\n') valueEnd++;
-            if (valueEnd > valueStart && valueEnd < n && input[valueEnd] === quote) hit = [valueStart, valueEnd, '****'];
+            // quoted value: up to the matching closing quote (not escaped) on the same line, or to line/input end
+            while (valueEnd < n && input[valueEnd] !== '\n') {
+              if (input[valueEnd] === '\\' && valueEnd + 1 < n) {
+                // Skip escaped character (including escaped quotes)
+                valueEnd += 2;
+              } else if (input[valueEnd] === quote) {
+                // Found closing quote
+                break;
+              } else {
+                valueEnd++;
+              }
+            }
+            // Mask if we found content, even if the closing quote is missing (truncated input)
+            if (valueEnd > valueStart) hit = [valueStart, valueEnd, '****'];
           } else {
             // bare value: up to a separator, like [^\s"'&;|),}]+
             while (valueEnd < n && !' \t\r\n"\'&;|,)}'.includes(input[valueEnd])) valueEnd++;
