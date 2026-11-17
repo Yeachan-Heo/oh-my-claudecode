@@ -2000,7 +2000,7 @@ function shortText(c) {
   if (c.note) {
     const body = /<result>([\s\S]*?)(?:<\/result>|$)/.exec(c.res.text);
     const kept = body ? `${c.summary}\n${body[1].slice(0, SHORT_CHARS)}` : c.res.text.slice(0, SHORT_CHARS);
-    return `${kept}\n[notification shortened at compaction: kept ${SHORT_CHARS} of ${c.resultChars} chars]`;
+    return `[SYSTEM NOTIFICATION - NOT USER INPUT]\n${kept}\n[notification shortened at compaction: kept ${SHORT_CHARS} of ${c.resultChars} chars]`;
   }
   return `${c.res.text.slice(0, SHORT_CHARS)}\n[result shortened at compaction: kept ${SHORT_CHARS} of ${c.resultChars} chars]`;
 }
@@ -3105,9 +3105,7 @@ async function movePastes($, mode, jobs, messages, stats, deadline) {
     let text = '';
     let at = 0;
     for (const j of list.sort((a, b) => a.tag.start - b.tag.start)) { text += m.text.slice(at, j.tag.start) + j.trace; at = j.tag.end; }
-    const swap = { role: m.role, text: text + m.text.slice(at), toolUses: m.toolUses || [] };
-    if (m.handle) swap.handle = m.handle;
-    swaps.set(m, swap);
+    swaps.set(m, { role: m.role, text: text + m.text.slice(at), toolUses: m.toolUses || [] });
   }
   return swaps;
 }
@@ -3914,7 +3912,7 @@ async function ownThreshold($, e, next) {
     let before = messages.reduce((s, m) => s + messageChars(m), 0);
     const candidates = findCandidates(messages, cfg.privatePaths, cfg.notifications);
     // Not even the floor (every removable result gone) cuts HOST_MIN_CUT of the tokens: the request would only end in a skip after Jev's scores.
-    if (cfg.ownSkip && tokens - floorPrediction(candidates, tokens) < Math.max(OWN_MIN_GAIN * window, HOST_MIN_CUT * tokens)) return result;
+    if (cfg.ownSkip && tokens - floorPrediction(candidates, tokens, cfg.rates) < Math.max(OWN_MIN_GAIN * window, HOST_MIN_CUT * tokens)) return result;
     let removable = removableChars(candidates);
     const tooSmall = () => !before || removable / before < MIN_REDUCTION || removable / CHARS_PER_TOKEN < OWN_MIN_GAIN * window;
     // The delivered messages can only make this worse (they add to `before`, their envelopes come off

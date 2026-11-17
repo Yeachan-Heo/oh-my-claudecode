@@ -519,7 +519,7 @@ describe('token cascade by target percent: the passes and where the cascade stop
     const r3 = await compactRun({ ...env, OMC_JEV_COMPACT_TARGET_PERCENT: '20' }, w3, { event: { trigger: 'auto' }, usage: estimateUsage(w3), score: byMarker });
     const short = r3.out.messages.find((m) => m.role === 'user' && /notification shortened at compaction: kept 300 of \d+ chars/.test(m.text || ''));
     expect(r3.record.result).toBe('jev');
-    expect(short && short.text.startsWith('Agent "Important" finished\nREPORT-TEXT IMPORTANT') && !short.text.includes('SYSTEM NOTIFICATION') && short.text.length < 400).toBe(true);
+    expect(short && short.text.includes('[SYSTEM NOTIFICATION - NOT USER INPUT]') && short.text.includes('Agent "Important" finished') && short.text.includes('REPORT-TEXT IMPORTANT') && short.text.length < 600).toBe(true);
   });
 });
 
