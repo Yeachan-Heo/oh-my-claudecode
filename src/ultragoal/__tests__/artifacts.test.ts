@@ -703,7 +703,7 @@ describe('ultragoal artifacts', () => {
   it('creates temp files with restrictive permissions (0o600) before final rename', async () => {
     await withTempRepo(async (cwd) => {
       const { statSync } = await import('node:fs');
-      const { chmod, rm } = await import('node:fs/promises');
+      const { chmod, writeFile, rm } = await import('node:fs/promises');
       const goalsPath = join(cwd, '.omc', 'ultragoal', 'plans', 'test-perms', 'goals.json');
       
       // First, create a plan to establish a baseline file with specific permissions

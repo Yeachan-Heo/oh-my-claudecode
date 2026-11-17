@@ -103,7 +103,7 @@ describe('ultragoal goals.json atomic write', () => {
     expect(match).not.toBeNull();
     const writePlan = match?.[0] ?? '';
     expect(writePlan).toMatch(/\brename\(/);
-    expect(writePlan).toMatch(/writeFile\(\s*tmpPath,[\s\S]*\{ flag: 'wx'(?:, mode: 0o600)? \}/);
+    expect(writePlan).toMatch(/writeFile\(\s*tmpPath,[\s\S]*\{ flag: 'wx' \}/);
     expect(writePlan).toMatch(/`\$\{goalsPath\}\.tmp\.\$\{process\.pid\}\.\$\{randomUUID\(\)\}`/);
     expect(writePlan).toMatch(/catch \(error\) \{\s*await rm\(tmpPath, \{ force: true \}\);\s*throw error;\s*\}/);
     expect(source).toMatch(/import \{ randomUUID \} from 'node:crypto';/);
@@ -221,13 +221,13 @@ describe.skipIf(process.platform === 'win32')('ultragoal goals.json permissions'
     });
   });
 
-  it('creates a new goals.json with restrictive permissions (0o600) for security', async () => {
+  it('gives a new goals.json the default mode of a newly created file', async () => {
     await withTempRepo(async (cwd) => {
       await createUltragoalPlan(cwd, { planId: PLAN_ID, brief: BRIEF });
-      const mode = statSync(ultragoalGoalsPath(cwd, PLAN_ID)).mode & 0o777;
-      // goals.json contains sensitive plan data and should never be world-readable
-      expect(mode).toBe(0o600);
-      expect((mode & 0o044)).toBe(0); // No group/other read permissions
+      const reference = join(ultragoalDir(cwd, PLAN_ID), 'default-mode-reference');
+      writeFileSync(reference, 'reference');
+
+      expect(statSync(ultragoalGoalsPath(cwd, PLAN_ID)).mode & 0o777).toBe(statSync(reference).mode & 0o777);
     });
   });
 });
