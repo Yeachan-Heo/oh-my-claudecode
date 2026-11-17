@@ -72,6 +72,7 @@ const DESCRIPTOR_FILE_NAME = "descriptor.json";
 const JOURNAL_FILE_NAME = "journal.jsonl";
 const SNAPSHOT_FILE_NAME = "projection.json";
 const TORN_COPY_PREFIX = `${JOURNAL_FILE_NAME}.torn-`;
+const QUARANTINE_PREFIX = ".deleted-";
 const MAX_LOCK_BYTES = 4096;
 const DESCRIPTOR_HASH_PATTERN = /^[a-f0-9]{64}$/;
 const ACTIVATION_STATUSES = new Set(["ready", "running", "completed", "failed"]);
@@ -480,6 +481,36 @@ export function scanRuns({
 
   for (const entry of readdirSync(realRoot, { withFileTypes: true })) {
     const id = entry.name;
+    // Handle quarantined directories from previous failed deletions
+    if (id.startsWith(QUARANTINE_PREFIX)) {
+      if (!entry.isDirectory()) {
+        scan.skipped.push({ id, reason: "not-a-directory" });
+        continue;
+      }
+      if (entry.isSymbolicLink()) {
+        scan.skipped.push({ id, reason: "symbolic-link" });
+        continue;
+      }
+      const runDir = join(realRoot, id);
+      let measured: { newestMs: number; bytes: number };
+      try {
+        measured = measureRun(runDir);
+      } catch {
+        scan.runs.push({ id, decision: "keep", reason: "unreadable", state: null, bytes: 0, newestMs: null, torn: false });
+        continue;
+      }
+      // Quarantined directories are always marked for deletion as failed cleanup attempts
+      scan.runs.push({
+        id,
+        decision: "delete",
+        reason: "quarantine-cleanup",
+        state: null,
+        bytes: measured.bytes,
+        newestMs: measured.newestMs,
+        torn: false,
+      });
+      continue;
+    }
     if (!RUN_ID_PATTERN.test(id)) {
       scan.skipped.push({ id, reason: "not-a-run-id" });
       continue;
@@ -559,6 +590,13 @@ export function removeRun(realRoot: string, id: string): void {
   const runDir = join(realRoot, id);
   if (!lstatSync(runDir).isDirectory()) throw new Error("run is no longer a plain directory");
   if (realpathSync(runDir) !== runDir) throw new Error("run directory resolves outside the runs root");
+  
+  // If this is an already-quarantined directory from a previous failed deletion, remove it directly
+  if (id.startsWith(QUARANTINE_PREFIX)) {
+    removeTree(runDir);
+    return;
+  }
+  
   // The owner lock is checked again here: a run started after the scan must not be removed.
   if (leaseOf(runDir).held) throw new Error("run is held by a live owner; not removed");
   

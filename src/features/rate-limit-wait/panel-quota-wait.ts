@@ -181,11 +181,19 @@ function tailLines(content: string): string[] {
 }
 
 // Returns { code } when a configured quota error is in the tail of the pane, otherwise null.
+// When multiple codes are present, returns the last (latest) one.
 export function detectQuotaError(content: string, codes: QuotaCodes): { code: number } | null {
   const pattern = quotaErrorPattern(codes);
   if (!pattern) return null;
-  const match = pattern.exec(tailLines(content).join(''));
-  return match ? { code: Number(match[1]) } : null;
+  const tail = tailLines(content).join('');
+  let lastMatch: RegExpExecArray | null = null;
+  let match: RegExpExecArray | null;
+  // Create a fresh regex with global flag to find all matches
+  const globalPattern = new RegExp(pattern.source, 'g');
+  while ((match = globalPattern.exec(tail)) !== null) {
+    lastMatch = match;
+  }
+  return lastMatch ? { code: Number(lastMatch[1]) } : null;
 }
 
 // True when the external wrapper prints its own wait or end-of-task line in the tail of the pane.

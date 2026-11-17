@@ -19,6 +19,7 @@ import {
   readdirSync,
   readFileSync,
   readlinkSync,
+  renameSync,
   rmSync,
   symlinkSync,
   utimesSync,
@@ -1118,6 +1119,29 @@ describe("omc graph gc", () => {
       expect(run.action).toBe("failed");
       expect(run.error).toMatch(/held by a live owner/);
       expect(existsSync(dir), "a run with a live owner was removed").toBe(true);
+    });
+  });
+
+  it("quarantined directories from previous failed deletions are detected and retried in the next GC pass", () => {
+    withBase((base) => {
+      const root = makeRoot(base);
+      // Simulate a quarantined directory from a previous failed deletion
+      const finishedRun = makeFinishedRun(root, "run-original");
+      ageTree(finishedRun, OLD);
+      const quarantineDir = join(root, ".deleted-prev-failure-123");
+      renameSync(finishedRun, quarantineDir);
+      // The quarantined directory contains the remnants of the failed deletion
+      expect(existsSync(quarantineDir)).toBe(true);
+      
+      // GC scan should detect the quarantined directory and mark it for deletion
+      const result = gc(root);
+      const quarantinedRun = result.runs.find((r) => r.id === ".deleted-prev-failure-123");
+      expect(quarantinedRun).toBeDefined();
+      expect(quarantinedRun?.action).toBe("deleted");
+      expect(quarantinedRun?.reason).toBe("quarantine-cleanup");
+      expect(result.summary.deleted).toBe(1);
+      expect(result.summary.candidates).toBe(1);
+      expect(existsSync(quarantineDir)).toBe(false);
     });
   });
 

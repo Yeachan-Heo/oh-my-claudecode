@@ -187,6 +187,28 @@ describe('panel quota wait: decision logic', () => {
     expect(detectQuotaError('the snippet says code: 1308 here', codes)).toBeNull();
   });
 
+  it('when both 1308 and 1310 are in the tail, detects the latest (1310), not the first (1308)', () => {
+    const codes = { wait: [1308], end: [1310] };
+    // Multiple errors with 1310 appearing after 1308: should detect 1310 (latest)
+    const contentWithBothErrors = [
+      'line 1',
+      'line 2',
+      'API Error: 429 {"error":{"code":1308,"message":"usage limit"}}',
+      'retry in 5h',
+      'API Error: 429 {"error":{"code":1310,"message":"quota exceeded"}}',
+    ].join('\n');
+    const result = detectQuotaError(contentWithBothErrors, codes);
+    expect(result?.code).toBe(1310);
+    // Also test when 1310 is first and 1308 appears later
+    const contentReversed = [
+      'API Error: 429 {"error":{"code":1310,"message":"quota exceeded"}}',
+      'retry',
+      'API Error: 429 {"error":{"code":1308,"message":"usage limit"}}',
+    ].join('\n');
+    const resultReversed = detectQuotaError(contentReversed, codes);
+    expect(resultReversed?.code).toBe(1308);
+  });
+
   it('with no codes configured nothing is detected', async () => {
     expect(detectQuotaError(ERR_1308, { wait: [], end: [] })).toBeNull();
     const w = world({ panes: [PANE_A], screens: { '%7': screen(ERR_1308) }, readingValue: exhausted5h(BASE_MS + H) });
