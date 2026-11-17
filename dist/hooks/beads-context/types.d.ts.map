@@ -1,1 +1,0 @@
-{"version":3,"file":"types.d.ts","sourceRoot":"","sources":["../../../src/hooks/beads-context/types.ts"],"names":[],"mappings":"AAAA,MAAM,MAAM,QAAQ,GAAG,SAAS,GAAG,OAAO,GAAG,YAAY,CAAC;AAE1D,MAAM,WAAW,kBAAkB;IACjC,QAAQ,EAAE,QAAQ,CAAC;IACnB,kBAAkB,EAAE,OAAO,CAAC;IAC5B,MAAM,EAAE,OAAO,CAAC;CACjB"}
