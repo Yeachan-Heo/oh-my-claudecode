@@ -553,7 +553,10 @@ export function readList(sessionId, key, env = process.env) {
   }
 }
 
-export const logRow = (name, row, env = process.env) => appendLog(name, { ts: new Date().toISOString(), ...row }, env);
+// A log row is small by design: every string of it (also in a list of strings) is cut to 200 characters, so an identifier the host sends
+// cannot make a row of batches.jsonl large.
+const rowText = (value) => (typeof value === 'string' ? value.slice(0, 200) : Array.isArray(value) ? value.map(rowText) : value);
+export const logRow = (name, row, env = process.env) => appendLog(name, { ts: new Date().toISOString(), ...Object.fromEntries(Object.entries(row).map(([k, v]) => [k, rowText(v)])) }, env);
 
 // Kill switches of OMC hooks: DISABLE_OMC=1|true, or OMC_SKIP_HOOKS with the event token or "task-list".
 export function skipped(eventToken, env = process.env) {

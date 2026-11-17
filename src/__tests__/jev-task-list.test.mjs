@@ -705,6 +705,15 @@ describe('task list: what an event keeps, and the journal cleanup', () => {
     expect(logRows('task-list.jsonl').some((x) => x.event === 'event_too_large')).toBe(true);
   });
 
+  it('the strings of a log row are cut to 200 characters, also inside a list', () => {
+    L.logRow('batches.jsonl', { session_id: 's'.repeat(5000), agent_type: 'a'.repeat(5000), tools: ['T'.repeat(5000), 'Read'], n: 2 }, env());
+    const row = logRows('batches.jsonl').pop();
+    expect(row.session_id).toHaveLength(200);
+    expect(row.agent_type).toHaveLength(200);
+    expect(row.tools.map((x) => x.length)).toEqual([200, 4]);
+    expect(row.n).toBe(2);
+  });
+
   it('fields the list never reads are not written: a secret in an unknown field stays out of the event', () => {
     const sid = session();
     const lock = `${listFile(sid, 'meta')}.lock`;
