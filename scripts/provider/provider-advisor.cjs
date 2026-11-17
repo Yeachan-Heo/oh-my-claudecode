@@ -10,7 +10,8 @@
 // temporary directory (mkdtemp, removed afterwards; the plan is read by an absolute path) and with `--setting-sources ""`,
 // so `.claude/settings*.json` written by the worker in the task worktree (for example an env with ANTHROPIC_BASE_URL)
 // cannot bring a foreign address back after the env was cleared. A foreign ANTHROPIC_BASE_URL in the incoming env
-// (isForeignProvider): exit code 2 without a start (a second layer next to the env clearing).
+// (isForeignProvider): exit code 2 without a start (a second layer next to the env clearing), except the address of the
+// calling provider worker's own session (see ownSessionAddress below).
 // The script sends nothing to the provider address and reads no provider key. The advisor answers with plain text:
 // `--tools ""` disables the built-in tools, an empty --mcp-config with --strict-mcp-config disables MCP.
 // Prompt on the stdin of claude: the role header and the answer format (the line `ADVISOR: change|confirm|reject`),
@@ -176,9 +177,22 @@ if (!binary || !existsSync(binary)) finish(127, S.NO_BINARY, `no claude binary (
 
 // A foreign ANTHROPIC_BASE_URL in the INCOMING env (not anthropic.com): refusal with exit code 2 before the clearing (the
 // clearing removes every ANTHROPIC_*, so a check after it would never be true).
+// The one address that is not refused is the own session address of a provider worker: its settings env block sets
+// ANTHROPIC_BASE_URL (the provider, or the local proxy) for every process of the session, the advisor shim included, so the
+// consultation that the worker rule asks for would never start. That address is recognised by the settings file of the session
+// (OMC_PROVIDER_SETTINGS_FILE, written by the worker wrapper): the OMC_PROVIDER marker and ANTHROPIC_BASE_URL of the incoming env must
+// equal the ones in its env block. Any other address, also under a marker without such a file, is refused as before; the address
+// does not reach claude in either case, because every ANTHROPIC_* is cleared below.
 // ANTHROPIC_AUTH_TOKEN in the input does not refuse: provider workers hold the provider key in their process env and call
 // the advisor from it; the key is cleared below.
-if (isForeignProvider(env)) finish(2, S.REFUSED_ENV, 'the incoming env has a foreign ANTHROPIC_BASE_URL; start aborted (the advisor goes to the Claude login; the login token must not go to a foreign address)', question.length, 0);
+const ownSessionAddress = () => {
+  if (!env.OMC_PROVIDER || !env.OMC_PROVIDER_SETTINGS_FILE || !env.ANTHROPIC_BASE_URL) return false;
+  try {
+    const session = JSON.parse(readFileSync(env.OMC_PROVIDER_SETTINGS_FILE, 'utf8')).env;
+    return Boolean(session) && session.OMC_PROVIDER === env.OMC_PROVIDER && session.ANTHROPIC_BASE_URL === env.ANTHROPIC_BASE_URL;
+  } catch { return false; }
+};
+if (isForeignProvider(env) && !ownSessionAddress()) finish(2, S.REFUSED_ENV, 'the incoming env has a foreign ANTHROPIC_BASE_URL; start aborted (the advisor goes to the Claude login; the login token must not go to a foreign address)', question.length, 0);
 
 // Env without the provider: the helpers of env.cjs plus every ANTHROPIC_*; PATH without the shim directories.
 const clean = stripProviderEnv(stripOverrides(env));

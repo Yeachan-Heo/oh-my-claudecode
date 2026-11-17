@@ -638,6 +638,41 @@ for (const p of procs) p.on('exit', (code) => { finished++; if (code === 0) ok++
     const a = advisor({ ANTHROPIC_BASE_URL: 'https://api.anthropic.com' });
     check(a.status === 0 && a.called, js({ s: a.status, e: a.stderr }));
   });
+  it('(19b) a provider worker reaches the advisor through the installed shim with the env of its generated settings (the provider or the local proxy address from the settings env block, the OMC_PROVIDER marker, the key in the process env, no profiles file variable): exit 0 and the fake claude has no ANTHROPIC_* and no marker; another address, a missing marker or a missing settings file: exit 2 before the claude start', () => {
+    const settingsLib = require('../../../scripts/provider/lib/settings.cjs');
+    const { loadProfile } = require('../../../scripts/provider/lib/profile.cjs');
+    const dir = join(TMP, 'own-session');
+    const { env: profileEnv } = writeProfile(dir);
+    const { profile } = loadProfile(profileEnv);
+    const run = (baseUrl, mutate = (e) => e) => {
+      const file = join(dir, `session-${++n}.json`);
+      const settings = settingsLib.addProvider({}, { profile, baseUrl, env: profileEnv, file, target: ADVISOR, guardPath: ADVISOR, keyInProcessEnv: true, executor: true, extraShims: { 'provider-advisor': ADVISOR } });
+      writeFileSync(file, js(settings), { mode: 0o600 });
+      const shim = join(settingsLib.shimDir(profile, profileEnv), 'provider-advisor');
+      const out = join(TMP, `w-own-${n}`);
+      // The worker env: the settings env block (without its PATH, the shim directory is not needed to call the shim by path) and the key in the process env.
+      const { PATH: shimPath, ...block } = settings.env;
+      expect(shimPath.startsWith(settingsLib.shimDir(profile, profileEnv))).toBe(true);
+      const workerEnv = mutate({ ...base(), ...block, ANTHROPIC_AUTH_TOKEN: FAKE_KEY, FAKE_OUT: out });
+      for (const k of Object.keys(workerEnv)) if (workerEnv[k] === undefined) delete workerEnv[k];
+      const r = spawnSync(shim, ['question from a provider worker'], { encoding: 'utf8', env: workerEnv });
+      const names = existsSync(`${out}.env`) ? readFileSync(`${out}.env`, 'utf8').trim().split('\n') : null;
+      return { ...r, called: existsSync(`${out}.argv`), names, file };
+    };
+    for (const baseUrl of [profile.baseUrl, 'http://127.0.0.1:33177']) {
+      const ok = run(baseUrl);
+      check(ok.status === 0 && ok.called && /STUB-ANSWER/.test(ok.stdout), js({ baseUrl, s: ok.status, e: ok.stderr }));
+      check(ok.names.every((k) => !/^ANTHROPIC_|^OMC_PROVIDER/.test(k)), js({ baseUrl, leaked: ok.names.filter((k) => /^ANTHROPIC_|^OMC_PROVIDER/.test(k)) }));
+    }
+    const other = run(profile.baseUrl, (e) => ({ ...e, ANTHROPIC_BASE_URL: 'https://llm.other.example/anthropic' })); // not the address of the session
+    check(other.status === 2 && !other.called && lastRow().status === 'refused-env', js({ s: other.status, e: other.stderr, w: lastRow() }));
+    const unmarked = run(profile.baseUrl, (e) => ({ ...e, OMC_PROVIDER: undefined })); // the same address without the marker
+    check(unmarked.status === 2 && !unmarked.called, js({ s: unmarked.status, e: unmarked.stderr }));
+    const noFile = run(profile.baseUrl, (e) => ({ ...e, OMC_PROVIDER_SETTINGS_FILE: join(dir, 'no-such-session.json') }));
+    check(noFile.status === 2 && !noFile.called, js({ s: noFile.status, e: noFile.stderr }));
+    const wrongMarker = run(profile.baseUrl, (e) => ({ ...e, OMC_PROVIDER: 'other-profile' })); // the marker differs from the one of the session
+    check(wrongMarker.status === 2 && !wrongMarker.called, js({ s: wrongMarker.status, e: wrongMarker.stderr }));
+  });
   it('(20) OMC_PROVIDER_ADVISOR_MODEL: sonnet and FABLE go to --model and to the journal row (trim, case-insensitive), none = opus, a wrong value: exit 2, the fake not called, a bad-model row', () => {
     const s = advisor({ OMC_PROVIDER_ADVISOR_MODEL: ' sonnet ' });
     check(s.status === 0 && s.argv[s.argv.indexOf('--model') + 1] === 'sonnet' && lastRow().model === 'sonnet', js({ s: s.status, m: lastRow().model, e: s.stderr }));
