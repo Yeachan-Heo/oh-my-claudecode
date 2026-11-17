@@ -176,14 +176,14 @@ function stricter(a, b) {
 // What becomes of a value: the one place where everything that classifies it meets, used for the value under a key, in a pair
 // of an object, in an array and in a pair of two elements. The label says what its name makes of it ('secret', 'counter' or
 // false, see stricter) and the argument what its place among the arguments of a command makes of it ('secret' for the
-// element after a secret flag, or a partial mode, a key of ARGUMENT_REST, for an element that holds a credential in part
-// of it). The order, strongest first, is the same everywhere:
+// element after an option whose value is a credential, or 'partial' for an element that holds a credential in part of it, see
+// CREDENTIAL_OPTIONS). The order, strongest first, is the same everywhere:
 //   1. a secret label or a secret argument: the value is replaced whole, a number too;
 //   2. a counter label: a number stays, anything else (a string, an array, an object) is replaced whole;
-//   3. a partial argument mode: the credential in the element is replaced and the rest of the element is judged by the
-//      text rules. It applies only when 1 and 2 do not: a label always decides over a partial mode;
+//   3. a partial argument: the credential in the element is replaced and the rest of the element is judged by the
+//      text rules. It applies only when 1 and 2 do not: a label always decides over a partial argument;
 //   4. nothing: a string goes through the text rules, an array or an object is walked, a number stays.
-// Returns 'secret', 'counter', the partial mode, or false.
+// Returns 'secret', 'counter', 'partial', or false.
 export function treatment(label, argument) {
   const whole = stricter(label, argument === 'secret' ? 'secret' : false);
   return whole || argument || false;
@@ -195,68 +195,268 @@ export function treatment(label, argument) {
 // its value into such a pair, so a list of results such as ['pass', 'fail'] loses its second element: that is the price).
 const PAIR_NAME = new Set(['name', 'key', 'parameter_key']);
 const PAIR_VALUE = new Set(['value', 'parameter_value']);
-// Arguments of a command written as an array: what maskSecrets masks in the same command line as a string, which its
-// rules cannot see when each element is masked alone. The element after a secret flag is a value; after -u or --user
-// the part of "user:password" after the colon; for a command of the mysql family or sshpass, the element after -p and
-// the password stuck to -p (-phunter2). -p takes a password only for these commands (docker login -p is left alone,
-// as it is in a string). An element is one argument, so a credential in it runs to the end of the element, white
-// space and quotes included (curl -u 'user:a b' is the argument "user:a b"): the text rules stop at white space, so
-// the part of the element after it is masked here, with --password=... and --user=... in one element too.
-const SECRET_FLAGS = 'password|passwd|pass|token|secret|api-key|apikey|access-token|auth-token|client-secret';
-const SECRET_FLAG = new RegExp(`^--(?:${SECRET_FLAGS})$`, 'i');
-const USER_FLAG = /^(?:-u|--user)$/;
-// What follows the part that stays (the first group) is the credential: the whole rest of the element.
-const ARGUMENT_REST = {
-  user: /^([^:]*:)[\s\S]+/,
-  userEquals: /^(--user=[^:]*:)[\s\S]+/,
-  secretEquals: new RegExp(`^(--(?:${SECRET_FLAGS})=)[\\s\\S]+`, 'i'),
-  glued: /^(-p)[\s\S]+/,
-};
-// The command word of the rules of maskSecrets (\bmysql\b and the like, also mariadb-dump, mysql.exe, a path to it).
-const P_COMMAND = /^(?:mysql|mysqldump|mysqladmin|mariadb|sshpass)(?![a-z0-9_])/i;
+// Options of a command line that carry a credential, in ONE table: the rules for the text (maskOptions) and the rules for an array
+// of arguments (secretArguments) are both built from it, so an option that one of them knows is known to the other in every way it
+// can be written:
+//   - apart: the value is the next word or argument (`--user u:p`, `-u u:p`, `-p x`);
+//   - joined: a long name with `=` (`--user=u:p`), a short letter with the value stuck to it (`-uu:p`, `-px`) or with `=` (`-u=u:p`);
+//   - in a cluster of flags that take no value, the letter last (`-sSu u:p`, `-sSuu:p`);
+//   - in text, the value or the whole option in quotes (a quoted value runs to its closing quote, white space included), a backslash
+//     before a space, each element quoted (`'-u' 'u:p'`, `"-p", "x"`); in an array the element is the value, white space and quotes
+//     included. After `--` nothing changes: what looks like an option is masked all the same (fail closed).
+// A long name is read in any case, a short letter is case sensitive (`-U` is not `-u`, `-P` is the port of mysql). `value` is 'all'
+// (the value is the credential) or 'user' (`name:password`: the password, the part after the first colon, is). `program`: the option
+// is a credential only after a program of this kind in the same command (in an array: before it in the list; in text: before it in
+// the same command, which a new line, `|`, `;` or `&` outside quotes ends), as -p is for the mysql family and sshpass (docker login -p
+// and ssh -p are not). `flags` are the short flags of the program that take no value and may stand before the letter in a cluster.
+// To know another option, add a row here: both paths and the grid test (src/__tests__/jev-state-mask-options.test.mjs) take it from it.
+export const PROGRAMS = Object.freeze({
+  mysql: Object.freeze(['mysql', 'mysqldump', 'mysqladmin', 'mariadb', 'sshpass']),
+  curl: Object.freeze(['curl']),
+  'redis-cli': Object.freeze(['redis-cli']),
+});
+const CURL_FLAGS = '0123469aBfgGhiIjJklLMnNOpqRsSvVZ#';
+const MYSQL_FLAGS = '?ABbCcEfGHiILnNoqrstTUvVwWX';
+export const CREDENTIAL_OPTIONS = Object.freeze([
+  { names: Object.freeze(['password', 'passwd', 'pass', 'token', 'secret', 'api-key', 'apikey', 'access-token', 'auth-token', 'client-secret', 'http-password', 'ftp-password', 'proxy-password', 'oauth2-bearer']), value: 'all' },
+  { names: Object.freeze(['user', 'proxy-user']), value: 'user' },
+  { letter: 'u', flags: CURL_FLAGS, value: 'user' },
+  { letter: 'U', flags: CURL_FLAGS, value: 'user', program: 'curl' },
+  { letter: 'p', flags: MYSQL_FLAGS, value: 'all', program: 'mysql' },
+  { letter: 'a', flags: '', value: 'all', program: 'redis-cli' },
+].map(Object.freeze));
+
+const PROGRAM_KINDS = Object.keys(PROGRAMS);
+// What the program of a command looks like: in an array the base name of an argument (see programsOf), in text a word of its own.
+const PROGRAM_NAME = Object.fromEntries(PROGRAM_KINDS.map((kind) => [kind, new RegExp(`^(?:${PROGRAMS[kind].join('|')})(?![a-z0-9_])`, 'i')]));
+// In text: a quote, the end of a command, or a program (what the scan of programSeenAt looks for).
+const PROGRAM_EVENTS = Object.fromEntries(PROGRAM_KINDS.map((kind) => [kind, new RegExp(`(['"])|([\\n|;&])|(?<![A-Za-z0-9_])(?:${PROGRAMS[kind].join('|')})(?![A-Za-z0-9_])`, 'gi')]));
+const OPTION_RULES = CREDENTIAL_OPTIONS.map((option) => {
+  const long = option.names !== undefined;
+  const name = long ? `--(?:${option.names.join('|')})` : `-${option.flags ? `[${option.flags}]*` : ''}${option.letter}`;
+  const flags = long ? 'i' : '';
+  return {
+    program: option.program,
+    value: option.value,
+    // an argument that is the option alone: the value is the next argument
+    alone: new RegExp(`^${name}$`, flags),
+    // an argument that holds the option and its value: the first group stays, the rest is the value
+    joined: new RegExp(`^(${name}${long ? '=' : ''})([\\s\\S]+)$`, flags),
+    // text: the option at the start of a word (after white space, a quote or the start of the text); a long name ends before what follows it
+    text: new RegExp(`(?<![^\\s'"])${name}${long ? `(?=[=\\s'",]|$)` : ''}`, `g${flags}`),
+    long,
+  };
+});
+
 /**
- * Whether a string can be the program of a command of the mysql family or sshpass: the base name (what follows the last /
- * or \) starts with the name of one. The base name is at the end of the string, so it is looked for from the end, in the last
- * `limit` characters, and the cost does not grow with the length of the string. With no separator in them and more string
- * before, the base name starts further back than they reach: it can be one, and the answer is yes (fail closed).
+ * The credential of a value of an option, replaced: all of it ('all'), or the password of `name:password` ('user': the part after the
+ * first colon; no colon, or nothing after it, leaves the value as it is). A value in quotes keeps its closing quote, and what closes a
+ * list or a call after it (a "-u", "name:password", of a list written out as text), so that the quotes of the text stay in pairs.
  */
-function mayBeCommand(text, limit) {
+function maskCredential(kind, value) {
+  if (kind === 'all') return MASKED_VALUE;
+  const colon = value.indexOf(':');
+  if (colon === -1) return value;
+  // the value may open with an = (-u='name:password'), then the quote
+  const at = value[0] === '=' ? 1 : 0;
+  const quote = value[at] === "'" || value[at] === '"' ? value[at] : '';
+  const close = quote ? value.indexOf(quote, at + 1) : -1;
+  if (close !== -1 && colon < close) {
+    if (colon === close - 1) return value;
+    const after = value.slice(close + 1);
+    return value.slice(0, colon + 1) + MASKED_VALUE + quote + (/^[,\])}]*$/.test(after) ? after : '');
+  }
+  return colon === value.length - 1 ? value : value.slice(0, colon + 1) + MASKED_VALUE;
+}
+
+/**
+ * The end of the word of a shell that starts at `start`: a quoted part (which may hold white space) and a backslash escape belong to
+ * it. A quote that opens the word and never closes takes the rest of the text (fail closed); one inside the word that never closes
+ * closes the quotes the whole command is in (sh -c "mysql -px"), so the word ends before it and the quotes stay in pairs.
+ */
+function wordEnd(text, start) {
+  let i = start;
+  while (i < text.length) {
+    const c = text[i];
+    if (c === "'" || c === '"') {
+      const close = text.indexOf(c, i + 1);
+      if (close === -1) return i === start ? text.length : i;
+      i = close + 1;
+    } else if (c === '\\') {
+      i += 2;
+    } else if (/\s/.test(c)) {
+      break;
+    } else {
+      i++;
+    }
+  }
+  return Math.min(i, text.length);
+}
+
+/** The first index at or after `i` that is no space or tab (and no comma, between the elements of a list written out as text). */
+function skipBlanks(text, i, comma) {
+  while (i < text.length && (text[i] === ' ' || text[i] === '\t' || (comma && text[i] === ','))) i++;
+  return i;
+}
+
+/**
+ * For a text: a function that tells, at an offset (the offsets it is asked for only grow), whether a program of the kind was named
+ * in the same command before it. A command ends at a new line, `|`, `;` or `&` that is not inside quotes; a program counts inside
+ * quotes too (sh -c "mysql -p..."). One pass over the text.
+ */
+function programSeenAt(text, kind) {
+  const at = [];
+  const named = [];
+  let quoteEnd = -1;
+  for (const found of text.matchAll(PROGRAM_EVENTS[kind])) {
+    if (found[1] !== undefined) {
+      if (found.index > quoteEnd) {
+        const close = text.indexOf(found[1], found.index + 1);
+        quoteEnd = close === -1 ? text.length : close;
+      }
+    } else if (found[2] === undefined || found.index > quoteEnd) {
+      at.push(found.index);
+      named.push(found[2] === undefined);
+    }
+  }
+  let next = 0;
+  let seen = false;
+  return (offset) => {
+    while (next < at.length && at[next] < offset) seen = named[next++];
+    return seen;
+  };
+}
+
+/** The text with the credential of every option of the table replaced, in every way the option can be written (see CREDENTIAL_OPTIONS). */
+function maskOptions(text) {
+  let result = text;
+  for (const rule of OPTION_RULES) {
+    const pattern = rule.text;
+    pattern.lastIndex = 0;
+    let out = '';
+    let last = 0;
+    let seenAt;
+    for (let found = pattern.exec(result); found !== null; found = pattern.exec(result)) {
+      if (rule.program !== undefined) {
+        seenAt ??= programSeenAt(result, rule.program);
+        if (!seenAt(found.index)) continue;
+      }
+      let start = found.index + found[0].length;
+      let end;
+      const quote = found.index > 0 ? result[found.index - 1] : '';
+      if (quote === "'" || quote === '"') {
+        // the option is quoted itself: its value is inside the same quotes ("--user=u:p w", "-pa b") or it is the next element ('-u' 'u:p', "-p", "x")
+        if (result[start] === quote) {
+          start = skipBlanks(result, start + 1, true);
+          end = wordEnd(result, start);
+        } else {
+          start = result[start] === '=' && rule.long ? start + 1 : skipBlanks(result, start, false);
+          const close = result.indexOf(quote, start);
+          end = close === -1 ? result.length : close;
+        }
+      } else if (rule.long) {
+        if (result[start] === '=') start++;
+        else if (result[start] === ' ' || result[start] === '\t') start = skipBlanks(result, start, false);
+        else continue;
+        end = wordEnd(result, start);
+      } else {
+        start = skipBlanks(result, start, false);
+        end = wordEnd(result, start);
+      }
+      if (end <= start) continue;
+      out += result.slice(last, start) + maskCredential(rule.value, result.slice(start, end));
+      last = end;
+      pattern.lastIndex = end;
+    }
+    if (last > 0) result = out + result.slice(last);
+  }
+  return result;
+}
+
+// The Authorization header: the credential after the name of the scheme is replaced, to the end of the line, or to the quote that
+// closes the argument the header is in (-H "Authorization: Bearer x y") or the value (a "Authorization": "Digest a=\"b\", c=d" of a
+// JSON text). maskSecrets knows one word after Bearer, Basic and Token; a credential of another scheme (Digest, ApiKey, Negotiate) or
+// of more words, or one in quotes, is the rest of this.
+const AUTHORIZATION = /(?<![A-Za-z0-9_-])(?:proxy-)?authorization(["']?)[ \t]*:[ \t]*/gi;
+// the schemes that maskSecrets reads past, so that a second pass changes nothing; the name of any other scheme goes with its credential
+const AUTH_SCHEME = /^(?:bearer|basic|token)[ \t]+(?=\S)/i;
+
+/** The end of a header value that starts at `start`: the end of the line, or `quote` when the value is inside quotes. */
+function headerEnd(text, start, quote) {
+  let i = start;
+  while (i < text.length && text[i] !== '\n' && text[i] !== '\r' && text[i] !== quote) i += quote && text[i] === '\\' ? 2 : 1;
+  return Math.min(i, text.length);
+}
+
+function maskAuthorization(text) {
+  AUTHORIZATION.lastIndex = 0;
+  let out = '';
+  let last = 0;
+  for (let found = AUTHORIZATION.exec(text); found !== null; found = AUTHORIZATION.exec(text)) {
+    let start = found.index + found[0].length;
+    const before = found.index > 0 ? text[found.index - 1] : '';
+    let quote = '';
+    if (text[start] === '"' || text[start] === "'") {
+      quote = text[start];
+      start++;
+    } else if (found[1] === '' && (before === '"' || before === "'")) {
+      quote = before;
+    }
+    const end = headerEnd(text, start, quote);
+    if (end <= start) continue;
+    const scheme = AUTH_SCHEME.exec(text.slice(start, end))?.[0] ?? '';
+    if (start + scheme.length >= end) continue;
+    out += `${text.slice(last, start)}${scheme}${MASKED_VALUE}`;
+    last = end;
+    AUTHORIZATION.lastIndex = end;
+  }
+  return last > 0 ? out + text.slice(last) : text;
+}
+
+/**
+ * Whether a string can be the program of a command, and of which kinds (PROGRAMS): the base name (what follows the last / or \) starts
+ * with the name of one. The base name is at the end of the string, so it is looked for from the end, in the last `limit` characters,
+ * and the cost does not grow with the length of the string. With no separator in them and more string before, the base name starts
+ * further back than they reach: it can be any, and the answer is every kind (fail closed).
+ */
+function programsOf(text, limit) {
   const tail = text.length > limit ? text.slice(-limit) : text;
   const cut = Math.max(tail.lastIndexOf('/'), tail.lastIndexOf('\\'));
-  if (cut === -1 && tail.length < text.length) return true;
-  return P_COMMAND.test(tail.slice(cut + 1));
+  if (cut === -1 && tail.length < text.length) return PROGRAM_KINDS;
+  const base = tail.slice(cut + 1);
+  return PROGRAM_KINDS.filter((kind) => PROGRAM_NAME[kind].test(base));
 }
-// Map: index of an element -> 'secret' (all of it is the value) or one of the keys of ARGUMENT_REST (the part of the
-// element that is the credential). The elements are the strings as the rules read them (the window of each one, see
-// maskJevState) and what is no string; commandAt(i) tells whether element i can be the program of a command (it reads the
-// end of the whole element, which a window does not hold); the name of a pair is not looked at here (see treatment).
-function secretArguments(array, commandAt) {
-  const modes = new Map();
-  let command = -1;
+
+// What an array of arguments says about its elements, by the table: the elements whose whole value is the credential (`whole`), and
+// the elements that hold it in part, as they are with it replaced (`partial`). The elements are the strings as the rules read them
+// (the window of each one, see maskJevState) and what is no string; programsAt(i) tells the kinds of programs that element i can be
+// (it reads the end of the whole element, which a window does not hold). The name of a pair is not looked at here (see treatment).
+function secretArguments(array, programsAt) {
+  const whole = new Set();
+  const partial = new Map();
+  const first = new Map();
+  const replace = (i, text) => {
+    if (text !== (partial.get(i) ?? array[i])) partial.set(i, text);
+  };
   for (let i = 0; i < array.length; i++) {
     const element = array[i];
     if (typeof element !== 'string') continue;
-    if (command < 0 && commandAt(i)) command = i;
-    if (SECRET_FLAG.test(element)) {
-      if (i + 1 < array.length) modes.set(i + 1, 'secret');
-    } else if (USER_FLAG.test(element)) {
-      if (typeof array[i + 1] === 'string' && ARGUMENT_REST.user.test(array[i + 1])) modes.set(i + 1, 'user');
-    } else if (ARGUMENT_REST.secretEquals.test(element)) {
-      modes.set(i, 'secretEquals');
-    } else if (ARGUMENT_REST.userEquals.test(element)) {
-      modes.set(i, 'userEquals');
-    } else if (command >= 0 && i > command) {
-      if (element === '-p') {
-        if (i + 1 < array.length) modes.set(i + 1, 'secret');
-      } else if (ARGUMENT_REST.glued.test(element)) {
-        modes.set(i, 'glued');
+    if (first.size < PROGRAM_KINDS.length) {
+      for (const kind of programsAt(i)) if (!first.has(kind)) first.set(kind, i);
+    }
+    for (const rule of OPTION_RULES) {
+      if (rule.program !== undefined && !(first.get(rule.program) < i)) continue;
+      if (rule.alone.test(element)) {
+        if (i + 1 >= array.length) continue;
+        if (rule.value === 'all') whole.add(i + 1);
+        else if (typeof array[i + 1] === 'string') replace(i + 1, maskCredential('user', partial.get(i + 1) ?? array[i + 1]));
+      } else {
+        const joined = rule.joined.exec(element);
+        if (joined) replace(i, joined[1] + maskCredential(rule.value, joined[2]));
       }
     }
   }
-  return modes;
-}
-function maskArgument(item, mode) {
-  return item.replace(ARGUMENT_REST[mode], '$1***');
+  return { whole, partial };
 }
 
 function omitSecretLines(text) {
@@ -321,7 +521,7 @@ function maskString(text, maxChars) {
   const cutText = maxChars !== undefined && text.length > maxChars + WINDOW_MARGIN;
   const cut = cutText ? cutAndCloseTail(text, maxChars + WINDOW_MARGIN) : text;
   const omitted = omitSecretLines(maskPrivateKeys(cut));
-  const masked = maskSecrets(omitted, { keepGitHashes: true });
+  const masked = maskSecrets(maskAuthorization(maskOptions(omitted)), { keepGitHashes: true });
   return cutText ? masked.replace(/(\/\/[^/\s:@]+:)[^/\s@]+$/, '$1***') : masked;
 }
 
@@ -370,12 +570,12 @@ export function maskJevState(state, { maxChars } = {}) {
     return name.length > cap ? null : normalizeKey(name);
   };
   const pairNameKind = (name) => (typeof name === 'string' ? secretKindOf(nameOf(name)) : false);
-  // Whether a string can be the program of a command: its base name is at the end of it, which the window does not hold, so it
-  // is read from the end, up to PATH_TAIL characters (see mayBeCommand); what the window already paid for is not paid again.
+  // The kinds of program that a string can be the name of: its base name is at the end of it, which the window does not hold, so it
+  // is read from the end, up to PATH_TAIL characters (see programsOf); what the window already paid for is not paid again.
   const pathTail = maxChars === undefined ? Infinity : PATH_TAIL;
-  const isCommand = (text) => {
+  const programsAt = (text) => {
     if (text.length > cap) pay(Math.min(text.length, pathTail));
-    return mayBeCommand(text, pathTail);
+    return programsOf(text, pathTail);
   };
   const tooMany = () => new JevStateMaskError(`state has more than ${MAX_STATE_NODES} nodes`);
 
@@ -409,13 +609,13 @@ export function maskJevState(state, { maxChars } = {}) {
         // more elements than nodes are allowed: no rule reads them before the node limit would have refused the state
         if (value.length > MAX_STATE_NODES) throw tooMany();
         const heads = value.map((item) => (typeof item === 'string' ? head(item) : item));
-        const modes = secretArguments(heads, (i) => isCommand(value[i]));
+        const { whole: wholeIndexes, partial } = secretArguments(heads, (i) => programsAt(value[i]));
         // the first of two elements is the name of the second
         const label = value.length === 2 ? pairNameKind(value[0]) : false;
         return value.map((item, i) => {
-          const how = treatment(i === 1 ? label : false, modes.get(i));
+          const how = treatment(i === 1 ? label : false, wholeIndexes.has(i) ? 'secret' : partial.has(i) ? 'partial' : false);
           const whole = how === 'secret' || how === 'counter';
-          return walk(how && !whole ? maskArgument(heads[i], how) : item, String(i), depth + 1, whole ? how : false, false) ?? null;
+          return walk(how && !whole ? partial.get(i) : item, String(i), depth + 1, whole ? how : false, false) ?? null;
         });
       }
       const out = {};

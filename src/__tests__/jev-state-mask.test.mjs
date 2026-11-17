@@ -1170,36 +1170,27 @@ describe('maskJevState: what a key name can change, by key, depth and parent', (
 
 // The order in which what classifies a value is applied: one function (treatment) decides it for the value under a key, in a
 // pair of an object, in an array and in a pair of two elements. A label (the name of the value) that names a secret
-// replaces the value whole and always wins over a partial argument mode (the credential in part of an element); a counter label
-// replaces a string whole too, and a number stays; a partial mode applies only without a label. Every expected value is written out.
-describe('maskJevState: the order of the labels and the partial argument modes', () => {
+// replaces the value whole and always wins over a partial argument (the credential in part of an element); a counter label
+// replaces a string whole too, and a number stays; a partial argument applies only without a label. Every expected value is written out.
+describe('maskJevState: the order of the labels and the partial arguments', () => {
   const S = 'hunter2zzQ';
 
   it.each([
     [false, undefined, false],
     [false, false, false],
     [false, 'secret', 'secret'],
-    [false, 'user', 'user'],
-    [false, 'userEquals', 'userEquals'],
-    [false, 'secretEquals', 'secretEquals'],
-    [false, 'glued', 'glued'],
+    [false, 'partial', 'partial'],
     ['counter', undefined, 'counter'],
     ['counter', 'secret', 'secret'],
-    ['counter', 'user', 'counter'],
-    ['counter', 'userEquals', 'counter'],
-    ['counter', 'secretEquals', 'counter'],
-    ['counter', 'glued', 'counter'],
+    ['counter', 'partial', 'counter'],
     ['secret', undefined, 'secret'],
     ['secret', 'secret', 'secret'],
-    ['secret', 'user', 'secret'],
-    ['secret', 'userEquals', 'secret'],
-    ['secret', 'secretEquals', 'secret'],
-    ['secret', 'glued', 'secret'],
+    ['secret', 'partial', 'secret'],
   ])('label %s, argument mode %s: %s', (label, argument, expected) => {
     expect(treatment(label, argument)).toBe(expected);
   });
 
-  // [what the value is, the value, what it becomes with no label at all (a partial mode, or the text rules)]
+  // [what the value is, the value, what it becomes with no label at all (a partial argument, or the text rules)]
   const VALUES = [
     ['a --user argument', `--user=${S}:tail`, `--user=${S}:***`],
     ['a --password argument', `--password=${S}`, '--password=***'],
@@ -1249,11 +1240,11 @@ describe('maskJevState: the order of the labels and the partial argument modes',
     expect(rows).toHaveLength(11 * 6 * 7);
   });
 
-  // The partial modes user and glued are not in the grid above: user needs a preceding element that is -u or --user, and glued a
-  // preceding command word, which a pair of two elements has as its name. Neither -u nor --user names a secret, so user cannot meet a
-  // label; glued can, with a command word that is also a name (the cells with mysql.password below), and the table of treatment
-  // above covers every label against every mode.
-  it('applies the same partial mode in an array of arguments of any length, with no label', () => {
+  // A partial argument is not in the grid above: it needs a preceding element that is an option of CREDENTIAL_OPTIONS (or the option in the
+  // same element), and a program for some of them, which a pair of two elements has as its name. No option names a secret, so a partial
+  // argument cannot meet a label in a pair of an option and its value; it can in a pair of a program and a joined option, with a program
+  // that is also a name (the cells with mysql.password below), and the table of treatment above covers every label against every mode.
+  it('applies the same partial argument in an array of arguments of any length, with no label', () => {
     for (const [, value, unlabeled] of VALUES) {
       expect(maskJevState({ t: ['run', 'x', value] }).t).toEqual(['run', 'x', unlabeled]);
       expect(maskJevState({ t: [['run', 'x', value]] }).t).toEqual([['run', 'x', unlabeled]]);
@@ -1271,10 +1262,10 @@ describe('maskJevState: the order of the labels and the partial argument modes',
     [['curl', '-u', `root:${S}`], ['curl', '-u', 'root:***']],
     // the first of two elements is a name, whatever it is made of: this one names a secret
     [[`--password=${S}`, 'x'], ['--password=***', '***']],
-    // a command word that is also a name: the glued -p of the second element is a partial mode, the name decides over it
+    // a command word that is also a name: the stuck -p of the second element is a partial argument, the name decides over it
     [['mysql.password', `-p${S}`], ['mysql.password', '***']],
     [['mysql.token_count', `-p${S}`], ['mysql.token_count', '***']],
-  ])('an array of arguments, the partial modes and the name of a pair: %j', (input, expected) => {
+  ])('an array of arguments, the partial arguments and the name of a pair: %j', (input, expected) => {
     expect(maskJevState({ a: input }).a).toEqual(expected);
   });
 

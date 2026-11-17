@@ -20,11 +20,28 @@ export const RUN_EXTENSION: number;
 /** The characters that a run of token characters is made of (see the comment in the module). */
 export const TOKEN_CHAR: RegExp;
 /**
- * What becomes of a value, from the label its name gives it ('secret', 'counter' or false) and the argument mode its place
- * among the arguments of a command gives it ('secret' or a partial mode): 'secret', 'counter', the partial mode, or false.
- * A secret label or argument beats a counter label, which beats a partial mode.
+ * What becomes of a value, from the label its name gives it ('secret', 'counter' or false) and what its place among the
+ * arguments of a command gives it ('secret', or 'partial' for an element that holds a credential in part of it): 'secret',
+ * 'counter', 'partial' or false. A secret label or argument beats a counter label, which beats a partial argument.
  */
-export function treatment(label: 'secret' | 'counter' | false, argument?: string | false): string | false;
+export function treatment(label: 'secret' | 'counter' | false, argument?: string | false): 'secret' | 'counter' | 'partial' | false;
+/** One row of the table of the options of a command line that carry a credential (see CREDENTIAL_OPTIONS). */
+export interface CredentialOption {
+  /** Long names (written `--name`, in any case, with `=` or apart); a row has `names` or `letter`. */
+  readonly names?: readonly string[];
+  /** A short letter (case sensitive; stuck to its value, with `=`, apart, or last in a cluster of flags). */
+  readonly letter?: string;
+  /** The short flags of the program that take no value and may stand before the letter in a cluster. */
+  readonly flags?: string;
+  /** 'all': the value is the credential; 'user': the value is `name:password` and the password is. */
+  readonly value: 'all' | 'user';
+  /** A key of PROGRAMS: the option is a credential only after a program of this kind in the same command. */
+  readonly program?: string;
+}
+/** The options of a command line that carry a credential: the one table both the text rules and the rules for an array of arguments are built from. */
+export const CREDENTIAL_OPTIONS: readonly CredentialOption[];
+/** The programs a scoped option counts after, by kind: the base names (what follows the last / or \), in any case, with an extension or a suffix after a non-letter. */
+export const PROGRAMS: Readonly<Record<string, readonly string[]>>;
 /** The name of a key as the secret classification reads it: our markers taken out, words split at humps and acronym ends, lower case. */
 export function normalizeKey(key: string): string;
 

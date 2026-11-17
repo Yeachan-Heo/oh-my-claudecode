@@ -268,6 +268,29 @@ describe('resolveJudgment state mask', () => {
     });
   });
 
+  describe('the options of a command line in every way they are written', () => {
+    const logText = () => readFileSync(join(dir, 'log', 'shadow.jsonl'), 'utf8');
+    beforeEach(() => {
+      process.env.OMC_JEV_EXCERPT_CHARS_MODEL_ROUTING = '200';
+    });
+    afterEach(() => {
+      delete process.env.OMC_JEV_EXCERPT_CHARS_MODEL_ROUTING;
+    });
+
+    it.each([
+      ['a command with the user stuck to -u', { command: 'curl -uuser:hunter2zzQ https://h/' }],
+      ['an array with the user stuck to -u', { argv: ['curl', '-uuser:hunter2zzQ', 'https://h/'] }],
+      ['a command with -u in a cluster of flags', { command: 'curl -sSu user:hunter2zzQ https://h/' }],
+      ['an array with --proxy-user', { argv: ['curl', '--proxy-user', 'user:hunter2zzQ', 'https://h/'] }],
+      ['a command with a quoted value', { command: "mysql -p'a hunter2zzQ' db" }],
+    ])('masks the credential of %s, in the body and in the log', async (_name, state) => {
+      const bodies: string[] = [];
+      await resolveJudgment({ point: 'model-routing', state, questions: QUESTIONS, twin: () => 'sonnet', fetchFn: recordingFetch(bodies) });
+      expect(bodies).toHaveLength(1);
+      for (const text of [bodies[0], logText()]) expect(text).not.toContain('hunter2zzQ');
+    });
+  });
+
   describe('the time before the request', () => {
     // The mask runs in the hook process before the request is made, so its cost must not grow with the size of the state.
     const repeatTo = (unit: string, n: number): string => unit.repeat(Math.ceil(n / unit.length)).slice(0, n);
@@ -277,6 +300,10 @@ describe('resolveJudgment state mask', () => {
       'a key': () => ({ [repeatTo('the quick brown fox ', SIZE)]: 'v' }),
       'the name of a pair': () => ({ name: repeatTo('k', SIZE), value: 'v' }),
       'the path of a program': () => ({ argv: [repeatTo('d/', SIZE) + 'mysql', '-p', 'hunter2zzQ', 'db'] }),
+      'a cluster of flags': () => ({ command: `-${repeatTo('sS', SIZE)}` }),
+      'options and quotes': () => ({ command: repeatTo('-u "', SIZE) }),
+      'a program and many commands': () => ({ command: `${repeatTo('mysql ;', SIZE)} -p x` }),
+      'headers': () => ({ command: repeatTo('Authorization: "', SIZE) }),
     };
 
     it.each(Object.keys(states))('sends %s of 32 MiB after milliseconds of masking', async (name) => {
