@@ -263,6 +263,10 @@ describe('PreToolUse refusal with OMC_JEV_POOL=1', () => {
     expect(JSON.parse(skill.stdout)?.hookSpecificOutput?.permissionDecision).toBe('deny');
     expect(skill.stdout).toContain('[SKILL vs AGENT]');
     expect(poolFiles(logDir)).toHaveLength(0);
+    // the agent type deny list of the same hook is another later guard: its refusal takes no slot either
+    const typed = preToolUse(cwd, logDir, { ...env, OMC_AGENT_TYPE_DENY: 'helper', OMC_AGENT_TYPE_DENY_MODE: 'deny' });
+    expect(JSON.parse(typed.stdout)?.hookSpecificOutput?.permissionDecisionReason).toContain('[AGENT TYPE]');
+    expect(poolFiles(logDir)).toHaveLength(0);
     const corrected = preToolUse(cwd, logDir, env);
     expect(corrected.stdout).not.toContain('[AGENT POOL]');
     expect(poolFiles(logDir)).toHaveLength(1);
