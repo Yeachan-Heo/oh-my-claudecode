@@ -167,8 +167,8 @@ function applyCall(state, call) {
   const signs = [];
   let quiet = "none"; // the reason reported when no sign applies
 
-  // A saved path not saved before by this session.
-  if (SAVING_TOOLS.has(tool)) {
+  // A saved path not saved before by this session. A call that reports an error saved nothing.
+  if (SAVING_TOOLS.has(tool) && call?.ok !== false) {
     const paths = savePaths(input);
     const isNew = paths.some((path) => !state.paths.includes(path));
     for (const path of paths) rememberNew(state.paths, path);
@@ -243,7 +243,11 @@ export function classifyTranscript(text, progress, fromTsMs = 0) {
   // Classify a JSONL transcript: assistant tool-use blocks and user
   // tool-result blocks paired by id, durations taken from the row
   // timestamps (a duration stays unknown when either row has none); a
-  // truncated last line is skipped. Rows without a usable timestamp are
+  // truncated last line is skipped. Every call is classified once, when its
+  // result is read, so that a guard-denial marker in the result applies to
+  // the whole call (a denied Write is no progress and its path is not
+  // remembered); a call without a result row has not shown that it did
+  // anything and is not classified. Rows without a usable timestamp are
   // classified like any other, unless a window start (fromTsMs > 0) is given:
   // such a row cannot be placed in the window and stays outside it.
   const result = { calls: 0, progress: false };
@@ -260,7 +264,6 @@ export function classifyTranscript(text, progress, fromTsMs = 0) {
     for (const part of parts) {
       if (row.type === "assistant" && part?.type === "tool_use") {
         pending.set(part.id, { tool: part.name, input: part.input, ts: tsMs, ok: null, result: null, durationMs: null });
-        // Don't count saving tools as progress here; wait until we see the result to check for denial markers
         continue;
       }
       if (row.type === "user" && part?.type === "tool_result") {
@@ -269,13 +272,9 @@ export function classifyTranscript(text, progress, fromTsMs = 0) {
         if (call && tsMs >= fromTsMs) {
           call.ok = part.is_error !== true;
           call.result = flattenResult(part.content);
-          call.durationMs = (call.durationMs === null) ? null : call.durationMs;
-          // Check for denial markers before counting as progress
-          if (!carriesDenialMarker(call.result) && !carriesDenialMarker(part.is_error ? call.result : '')) {
-            const r = progress.add(call);
-            if (r.progress) result.progress = true;
-            result.calls += 1;
-          }
+          const r = progress.add(call);
+          if (r.progress) result.progress = true;
+          result.calls += 1;
         }
       }
     }

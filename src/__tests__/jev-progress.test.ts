@@ -90,13 +90,41 @@ describe("jev-progress module", () => {
   it("pairs transcript tool calls with and without timestamps and skips a truncated line", () => {
     const use = (ts: string, id: string) => JSON.stringify({ type: "assistant", timestamp: ts, message: { content: [{ type: "tool_use", id, name: "Write", input: { file_path: "/x/a.md" } }] } });
     const res = (ts: string, id: string) => JSON.stringify({ type: "user", timestamp: ts, message: { content: [{ type: "tool_result", tool_use_id: id, content: "ok" }] } });
+    // a call is classified once, when its result is read
     const r1 = classifyTranscript(use(new Date(1000).toISOString(), "tu1") + "\n" + res(new Date(62000).toISOString(), "tu1") + "\n", new ProgressState());
-    expect(r1).toEqual({ calls: 2, progress: true });
+    expect(r1).toEqual({ calls: 1, progress: true });
+    // a call without a result row has shown nothing: not classified
     const undated = JSON.stringify({ type: "assistant", message: { content: [{ type: "tool_use", id: "tu2", name: "Write", input: { file_path: "/x/b.md" } }] } }) + "\n";
     const r2 = classifyTranscript(undated, new ProgressState());
-    expect(r2).toEqual({ calls: 1, progress: true });
+    expect(r2).toEqual({ calls: 0, progress: false });
     const r3 = classifyTranscript(use(new Date(1000).toISOString(), "tu3") + "\n" + "{\"type\":\"assist", new ProgressState());
-    expect(r3).toEqual({ calls: 1, progress: true });
+    expect(r3).toEqual({ calls: 0, progress: false });
+    // a truncated last line does not hide the calls before it
+    const r4 = classifyTranscript(use(new Date(1000).toISOString(), "tu4") + "\n" + res(new Date(2000).toISOString(), "tu4") + "\n" + "{\"type\":\"user\"", new ProgressState());
+    expect(r4).toEqual({ calls: 1, progress: true });
+  });
+
+  it("applies a guard denial to the whole call: a denied or failed save is no progress and its path stays unsaved", () => {
+    const writeRows = (id: string, path: string, content: string, isError: boolean, ts: number) => [
+      JSON.stringify({ type: "assistant", timestamp: new Date(ts).toISOString(), message: { content: [{ type: "tool_use", id, name: "Write", input: { file_path: path } }] } }),
+      JSON.stringify({ type: "user", timestamp: new Date(ts + 50).toISOString(), message: { content: [{ type: "tool_result", tool_use_id: id, is_error: isError, content }] } }),
+    ];
+    // repeated denials against new paths never reset the series
+    const denied = new ProgressState();
+    const rows = [1, 2, 3].flatMap((i) => writeRows("d" + i, "/x/new-" + i + ".md", "Guard stopped the call. [denied 0123456789abcdef #" + i + "]", true, i * 1000));
+    expect(classifyTranscript(rows.join("\n") + "\n", denied)).toEqual({ calls: 3, progress: false });
+    expect(denied.state().paths).toEqual([]);
+    // the same path saved afterwards is still new progress, because the denied call saved nothing
+    expect(classifyTranscript(writeRows("w1", "/x/new-1.md", "ok", false, 9000).join("\n") + "\n", denied)).toEqual({ calls: 1, progress: true });
+    // a save that reports an error saved nothing; the next successful save of the path is progress
+    const failing = new ProgressState();
+    const failed = classifyTranscript(writeRows("f1", "/x/f.md", "File has not been read yet", true, 1000).join("\n") + "\n", failing);
+    expect(failing.state().paths).toEqual([]);
+    expect(failed.calls).toBe(1);
+    expect(classifyTranscript(writeRows("f2", "/x/f.md", "ok", false, 2000).join("\n") + "\n", failing)).toEqual({ calls: 1, progress: true });
+    // the same through ProgressState.add: the denial marker wins over a new path
+    expect(add(new ProgressState(), { tool: "Write", input: { file_path: "/p/z.md" }, result: "[denied 0123456789abcdef #1]", ok: false })).toEqual({ progress: false, reason: "guard-denial" });
+    expect(add(new ProgressState(), { tool: "Write", input: { file_path: "/p/z.md" }, result: "Error: no such file", ok: false })).toEqual({ progress: true, reason: "new-error" });
   });
 
   it("classifies a transcript without timestamps: the other rules work and the duration stays unknown", () => {

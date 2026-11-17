@@ -209,7 +209,8 @@ describe("persistent-mode Stop progress release", () => {
     fs.writeFileSync(path.join(PROJECT, "session-file.md"), "x\n");
     const tr = path.join(TRANSCRIPTS, "git.jsonl");
     const useRow = JSON.stringify({ type: "assistant", timestamp: new Date().toISOString(), message: { content: [{ type: "tool_use", id: "tu-git", name: "Write", input: { file_path: path.join(PROJECT, "session-file.md"), content: "x" } }] } });
-    fs.writeFileSync(tr, useRow + "\n");
+    const resultRow = JSON.stringify({ type: "user", timestamp: new Date().toISOString(), message: { content: [{ type: "tool_result", tool_use_id: "tu-git", content: "File created successfully" }] } });
+    fs.writeFileSync(tr, useRow + "\n" + resultRow + "\n"); // a save counts once its result is in the transcript
     const scenario = { OMC_JEV_STOP_PROGRESS: "1" };
     const r1 = runHook(scenario, sid, { transcript_path: tr });
     expect(r1.status).toBe(0);
