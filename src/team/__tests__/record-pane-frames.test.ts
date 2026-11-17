@@ -10,9 +10,17 @@ const RECORDER = resolve(HERE, '../../../scripts/record-pane-frames.mjs');
 const HAS_TMUX = process.platform !== 'win32' && spawnSync('tmux', ['-V']).status === 0;
 
 const PROVIDER_SOURCE = `
-import { writeFileSync } from 'node:fs';
+import { execSync } from 'node:child_process';
+import { readFileSync, writeFileSync } from 'node:fs';
 import { createInterface } from 'node:readline';
 writeFileSync(process.argv[2], String(process.pid));
+const settingsAt = process.argv.indexOf('--settings');
+if (settingsAt > 0) {
+  const { hooks } = JSON.parse(readFileSync(process.argv[settingsAt + 1], 'utf8'));
+  for (const input of [{ hook_event_name: 'SessionStart' }, { hook_event_name: 'Stop', stop_hook_active: true }]) {
+    execSync(hooks[input.hook_event_name][0].hooks[0].command, { input: JSON.stringify(input) });
+  }
+}
 console.log('=== test results ===');
 console.log('READY>');
 createInterface({ input: process.stdin }).on('line', (line) => {
@@ -146,13 +154,19 @@ describe.skipIf(!HAS_TMUX)('record-pane-frames record', () => {
   let pidFile = '';
   let out = '';
 
-  function record(steps: string[], extra: string[] = [], whileRunning?: () => Promise<void>): Promise<RecorderRun> {
+  function record(
+    steps: string[],
+    extra: string[] = [],
+    whileRunning?: () => Promise<void>,
+    launch: { provider?: string; args?: string[] } = {},
+  ): Promise<RecorderRun> {
     const provider = join(root, 'provider.mjs');
     pidFile = join(root, 'provider.pid');
     out = join(root, 'out');
     writeFileSync(provider, PROVIDER_SOURCE);
     return runRecorder([
-      'record', '--provider', 'claude', '--bin', process.execPath, '--args', JSON.stringify([provider, pidFile]),
+      'record', '--provider', launch.provider ?? 'claude', '--bin', process.execPath,
+      '--args', JSON.stringify([provider, pidFile, ...(launch.args ?? [])]),
       '--out', out, '--cwd', root, '--interval-ms', '20', '--settle', '0.3', '--timeout', '20',
       ...extra, ...steps.flatMap(step => ['--step', step]),
     ], whileRunning);
@@ -200,6 +214,39 @@ describe.skipIf(!HAS_TMUX)('record-pane-frames record', () => {
     expect(run.stderr).toContain('stopped before step wait:never-shown');
     expect(leftoverSockets()).toEqual([]);
     expect(processIsAlive(await providerPid())).toBe(false);
+  });
+
+  it('starts a reused --out directory from empty logs', async () => {
+    await record(['wait:READY>'], ['--hooks']);
+    const run = await record(['wait:READY>', 'sleep:0.1']);
+
+    expect(run.code).toBe(0);
+    expect(actions()).toEqual(['launch', 'wait:READY>', 'sleep:0.1']);
+    expect(existsSync(join(out, 'hook-events.log'))).toBe(false);
+    expect(JSON.parse(readFileSync(join(out, 'meta.json'), 'utf8'))).toMatchObject({ hooks: false });
+  });
+
+  it('with --hooks, passes the provider settings whose hooks log each event', async () => {
+    const run = await record(['wait:READY>'], ['--hooks']);
+
+    expect(run.code).toBe(0);
+    const settings = JSON.parse(readFileSync(join(out, 'hook-settings.json'), 'utf8')) as { hooks: Record<string, unknown> };
+    expect(Object.keys(settings.hooks)).toEqual(['SessionStart', 'UserPromptSubmit', 'Stop']);
+    const events = readFileSync(join(out, 'hook-events.log'), 'utf8').trim().split('\n');
+    expect(events.map(line => line.replace(/^\d+\.\d{3} /, ''))).toEqual(['SessionStart', 'Stop stop_hook_active']);
+    expect(JSON.parse(readFileSync(join(out, 'meta.json'), 'utf8'))).toMatchObject({ hooks: true });
+  });
+
+  it.each([
+    { name: 'a provider other than claude', launch: { provider: 'codex' }, message: '--hooks is only supported for claude' },
+    { name: 'claude under --bare', launch: { args: ['--bare'] }, message: '--hooks cannot record under --bare' },
+  ])('refuses --hooks for $name before it starts tmux', async ({ launch, message }) => {
+    const run = await record([], ['--hooks'], undefined, launch);
+
+    expect(run.code).toBe(2);
+    expect(run.stderr).toContain(message);
+    expect(existsSync(pidFile)).toBe(false);
+    expect(leftoverSockets()).toEqual([]);
   });
 
   it('fails and removes the socket when its tmux server dies mid-run', async () => {

@@ -117,6 +117,7 @@ async function record(values) {
   mkdirSync(out, { recursive: true });
   const cwd = realpathSync(values.cwd ?? mkdtempSync(join(tmpdir(), `pane-frames-cwd-${provider}-`)));
   const framesPath = join(out, 'frames.txt');
+  const actionsLog = join(out, 'actions.log');
   const eventsLog = join(out, 'hook-events.log');
   const argv = [...launchArgs];
   if (values.hooks) {
@@ -140,7 +141,10 @@ async function record(values) {
     started_at: new Date().toISOString(),
   };
   writeFileSync(join(out, 'meta.json'), `${JSON.stringify(meta, null, 2)}\n`);
+  // A reused --out must not keep the previous run's frames, actions or hook events.
   writeFileSync(framesPath, '');
+  writeFileSync(actionsLog, '');
+  rmSync(eventsLog, { force: true });
 
   const socket = `pane-frames-${process.pid}-${randomBytes(4).toString('hex')}`;
   const tmux = (...args) => execFileSync('tmux', ['-u', '-L', socket, '-f', '/dev/null', ...args], { encoding: 'utf8' });
@@ -176,7 +180,7 @@ async function record(values) {
     tmux('set-option', '-g', 'remain-on-exit', 'on');
     tmux('respawn-pane', '-k', '-t', 'rec:0.0', '-c', cwd, [bin, ...argv].map(shellQuote).join(' '));
     const launchedAt = Date.now();
-    appendFileSync(join(out, 'actions.log'), `${(launchedAt / 1000).toFixed(3)} launch\n`);
+    appendFileSync(actionsLog, `${(launchedAt / 1000).toFixed(3)} launch\n`);
 
     let stepIndex = 0;
     let stepStartedAt = Date.now();
@@ -196,7 +200,7 @@ async function record(values) {
         done = true;
       }
       if (done) {
-        appendFileSync(join(out, 'actions.log'), `${(Date.now() / 1000).toFixed(3)} ${values.step[stepIndex]}\n`);
+        appendFileSync(actionsLog, `${(Date.now() / 1000).toFixed(3)} ${values.step[stepIndex]}\n`);
         stepIndex += 1;
         stepStartedAt = Date.now();
         if (stepIndex === steps.length) settleUntil = Date.now() + settleMs;
