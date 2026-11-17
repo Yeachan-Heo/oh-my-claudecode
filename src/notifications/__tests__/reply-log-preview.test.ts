@@ -383,6 +383,21 @@ describe("errors from the Herdr CLI in the log", () => {
     const lines = readFileSync(LOG_FILE, "utf-8").trim().split("\n");
     return (lines.filter((l) => l.includes(needle)).pop() ?? "").replace(/^\[[^\]]*\] /, "");
   };
+  // A process that fails without printing anything: the error that runHerdr throws carries the message of the
+  // failed process, which is its command line, and the command line holds the reply as it was typed.
+  const failingWithCommandLine = (message: string): Promise<HerdrError> =>
+    runHerdr(["agent", "prompt", "w9:p2"], {
+      env: {},
+      execFn: (() => Promise.reject(Object.assign(new Error(message), { stderr: "" }))) as unknown as HerdrExecOptions["execFn"],
+    }).then(
+      () => {
+        throw new Error("runHerdr did not fail");
+      },
+      (error: HerdrError) => error,
+    );
+  const REPLY = 'PASSWORD="start\\"sensitive-suffix"';
+  const typed = (reply: string): string =>
+    (buildReplyInjectionSteps(reply, "discord", configWith(500))[0] as { value: string }).value;
 
   it("runHerdr keeps the whole stderr in detail and the first 300 characters in the message", async () => {
     const { stderr, filler } = stderrWithKeyAtTheCut();
@@ -412,6 +427,24 @@ describe("errors from the Herdr CLI in the log", () => {
       expect(loggedLine("Failed to capture")).toBe(`WARN: Failed to capture herdr pane w9:p2: herdr_error: ${filler}hf_****`);
     });
 
+    it("send failure with empty stderr: the command line holds the typed reply, which is redacted as it was written", async () => {
+      const message = `Command failed: herdr agent prompt w9:p2 ${typed(REPLY)}`;
+      expect(message).toContain('start\\\\"sensitive-suffix'); // the typed reply has the doubled backslash
+      mocks.herdrSendPrompt.mockRejectedValue(await failingWithCommandLine(message));
+      await expect(injectReplyIntoHerdrPane("w9:p2", REPLY, "discord", configWith(500))).resolves.toBe(false);
+      expect(loggedLine("Failed to inject")).toBe(
+        'ERROR: Failed to inject reply into herdr pane w9:p2: herdr_spawn_failed: Command failed: herdr agent prompt w9:p2 PASSWORD="****"',
+      );
+    });
+
+    it("capture failure with empty stderr: the message is not a typed reply, its backslashes stay", async () => {
+      const message = "Command failed: herdr agent read w9:p2 C:\\\\temp\\\\x";
+      mocks.captureHerdrWorkerPane.mockRejectedValue(await failingWithCommandLine(message));
+      mocks.isHerdrWorkerAlive.mockResolvedValue(true);
+      await expect(injectReplyIntoHerdrPane("w9:p2", "hello", "discord", configWith(500))).resolves.toBe(false);
+      expect(loggedLine("Failed to capture")).toBe(`WARN: Failed to capture herdr pane w9:p2: herdr_spawn_failed: ${message}`);
+    });
+
     it("other errors keep their own message: a JSON error envelope, another error class, a value that is not an error", async () => {
       const cases: Array<[unknown, string]> = [
         [new HerdrError("agent_name_taken", "taken", '{"error":{"code":"agent_name_taken","message":"taken"}}'), "herdr_agent_name_taken: taken"],
@@ -425,6 +458,15 @@ describe("errors from the Herdr CLI in the log", () => {
         expect(loggedLine("Failed to inject")).toBe(`ERROR: Failed to inject reply into herdr pane w9:p2: ${text}`);
       }
     });
+  });
+
+  it.each([undefined, "", "0", "true"])("switch off (%s): a failed prompt with empty stderr is logged as the error carries it", async (value) => {
+    if (value === undefined) delete process.env[SWITCH];
+    else process.env[SWITCH] = value;
+    const message = `Command failed: herdr agent prompt w9:p2 ${typed(REPLY)}`;
+    mocks.herdrSendPrompt.mockRejectedValue(await failingWithCommandLine(message));
+    await injectReplyIntoHerdrPane("w9:p2", REPLY, "discord", configWith(500));
+    expect(loggedLine("Failed to inject")).toBe(`ERROR: Failed to inject reply into herdr pane w9:p2: herdr_spawn_failed: ${message}`);
   });
 
   it.each([undefined, "", "0", "true"])("switch off (%s): the message is cut first, as the error carries it", async (value) => {

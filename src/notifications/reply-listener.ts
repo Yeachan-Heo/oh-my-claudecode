@@ -575,9 +575,12 @@ function sendKeysErrorText(error: unknown): string {
 /**
  * The text of an error from the Herdr CLI for the daemon log. For plain-text stderr the error message holds
  * only the first 300 characters, while `detail` keeps all of it, so the message is rebuilt from the whole
- * stderr: redacted first and cut afterwards (see redactedPrefix). Every other error keeps its own message.
+ * stderr: redacted first and cut afterwards (see redactedPrefix). Every other error keeps its own message,
+ * except that, for a command that sent a reply (`typedReply`) and with the switch on, the message is redacted
+ * with the escapes of the typed reply undone: when Herdr printed nothing to stderr the message is the command
+ * line of the failed process, and the command line holds the reply as it was typed (see sendKeysErrorText).
  */
-function herdrErrorText(error: unknown): string {
+function herdrErrorText(error: unknown, typedReply = false): string {
   if (!(error instanceof Error)) return String(error);
   if (error instanceof HerdrError && error.detail) {
     const stderr = error.detail.trim();
@@ -586,7 +589,7 @@ function herdrErrorText(error: unknown): string {
       return prefix + redactedPrefix(stderr, 300);
     }
   }
-  return error.message;
+  return typedReply && keyShapesEnabled() ? redactTokens(unescapeReplyInput(error.message)) : error.message;
 }
 
 /**
@@ -730,7 +733,7 @@ export async function injectReplyIntoHerdrPane(
     return true;
   } catch (error) {
     log(
-      `ERROR: Failed to inject reply into herdr pane ${paneId}: ${herdrErrorText(error)}`,
+      `ERROR: Failed to inject reply into herdr pane ${paneId}: ${herdrErrorText(error, true)}`,
     );
     return false;
   }
