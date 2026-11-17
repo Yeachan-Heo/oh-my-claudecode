@@ -1,5 +1,5 @@
-import { spawnSync } from 'node:child_process';
-import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { spawn, spawnSync } from 'node:child_process';
+import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -7,6 +7,19 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const RECORDER = resolve(HERE, '../../../scripts/record-pane-frames.mjs');
+const HAS_TMUX = process.platform !== 'win32' && spawnSync('tmux', ['-V']).status === 0;
+
+const PROVIDER_SOURCE = `
+import { writeFileSync } from 'node:fs';
+import { createInterface } from 'node:readline';
+writeFileSync(process.argv[2], String(process.pid));
+console.log('=== test results ===');
+console.log('READY>');
+createInterface({ input: process.stdin }).on('line', (line) => {
+  if (line === 'quit') process.exit(0);
+  console.log('got:' + line);
+});
+`;
 
 interface RecorderRun {
   code: number | null;
@@ -17,12 +30,59 @@ interface RecorderRun {
 let root = '';
 
 beforeEach(() => {
-  root = mkdtempSync(join(tmpdir(), 'rpf-'));
+  // A unix socket path is capped near 104 bytes, which macOS's tmpdir() nearly fills.
+  root = mkdtempSync(join(process.platform === 'win32' ? tmpdir() : '/tmp', 'rpf-'));
 });
 
 afterEach(() => {
+  for (const socket of leftoverSockets()) spawnSync('tmux', ['-S', socket, 'kill-server'], { stdio: 'ignore' });
   rmSync(root, { recursive: true, force: true });
 });
+
+function leftoverSockets(): string[] {
+  return readdirSync(root)
+    .filter(name => name.startsWith('tmux-'))
+    .flatMap(dir => readdirSync(join(root, dir)).map(name => join(root, dir, name)));
+}
+
+function runRecorder(args: string[], whileRunning?: () => Promise<void>): Promise<RecorderRun> {
+  const env: NodeJS.ProcessEnv = { ...process.env, TMUX_TMPDIR: root };
+  delete env.TMUX;
+  const child = spawn(process.execPath, [RECORDER, ...args], { env, stdio: ['ignore', 'pipe', 'pipe'] });
+  let stdout = '';
+  let stderr = '';
+  child.stdout.on('data', chunk => { stdout += String(chunk); });
+  child.stderr.on('data', chunk => { stderr += String(chunk); });
+  const exited = new Promise<RecorderRun>((resolveRun, reject) => {
+    child.on('error', reject);
+    child.on('close', code => resolveRun({ code, stdout, stderr }));
+  });
+  if (!whileRunning) return exited;
+  return whileRunning().then(() => exited, async (error) => {
+    child.kill('SIGKILL');
+    await exited;
+    throw error;
+  });
+}
+
+async function until<T>(read: () => T | undefined | false | null, what: string, timeoutMs = 15_000): Promise<T> {
+  const deadline = Date.now() + timeoutMs;
+  for (;;) {
+    const value = read();
+    if (value) return value;
+    if (Date.now() > deadline) throw new Error(`timed out waiting for ${what}`);
+    await new Promise(done => setTimeout(done, 20));
+  }
+}
+
+function processIsAlive(pid: number): boolean {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch {
+    return false;
+  }
+}
 
 describe('record-pane-frames extract', () => {
   function extract(from: string, ...extra: string[]): RecorderRun & { corpus: string } {
@@ -79,5 +139,93 @@ describe('record-pane-frames extract', () => {
     expect(result.code).toBe(2);
     expect(result.stderr).toContain('--frame 4 is out of range (0..0)');
     expect(existsSync(join(result.corpus, 'manifest.json'))).toBe(false);
+  });
+});
+
+describe.skipIf(!HAS_TMUX)('record-pane-frames record', () => {
+  let pidFile = '';
+  let out = '';
+
+  function record(steps: string[], extra: string[] = [], whileRunning?: () => Promise<void>): Promise<RecorderRun> {
+    const provider = join(root, 'provider.mjs');
+    pidFile = join(root, 'provider.pid');
+    out = join(root, 'out');
+    writeFileSync(provider, PROVIDER_SOURCE);
+    return runRecorder([
+      'record', '--provider', 'claude', '--bin', process.execPath, '--args', JSON.stringify([provider, pidFile]),
+      '--out', out, '--cwd', root, '--interval-ms', '20', '--settle', '0.3', '--timeout', '20',
+      ...extra, ...steps.flatMap(step => ['--step', step]),
+    ], whileRunning);
+  }
+
+  const providerPid = () => until(() => existsSync(pidFile) && Number(readFileSync(pidFile, 'utf8')), 'the provider to start');
+  const actions = () => readFileSync(join(out, 'actions.log'), 'utf8').trim().split('\n').map(line => line.replace(/^\S+ /, ''));
+
+  it('runs its steps in order, settles, and leaves no tmux server', async () => {
+    const steps = ['wait:READY>', 'text:hello', 'keys:Enter', 'wait:got:hello', 'sleep:0.1'];
+    const run = await record(steps);
+
+    expect(run.code).toBe(0);
+    const summary = JSON.parse(run.stdout) as { stop: string; frames: number; out: string };
+    expect(summary.stop).toBe('settled');
+    expect(summary.frames).toBeGreaterThanOrEqual(2);
+    expect(actions()).toEqual(['launch', ...steps]);
+    expect(leftoverSockets()).toEqual([]);
+    expect(processIsAlive(await providerPid())).toBe(false);
+
+    const corpus = join(root, 'corpus');
+    const extracted = spawnSync(process.execPath, [RECORDER, 'extract', '--from', join(out, 'frames.txt'), '--state', 'idle', '--corpus', corpus], { encoding: 'utf8' });
+    expect(extracted.status).toBe(0);
+    const frame = readFileSync(join(corpus, extracted.stdout.trim()), 'utf8');
+    expect(frame).toContain('=== test results ===');
+    expect(frame).toContain('READY>');
+    expect(frame).toContain('got:hello');
+  });
+
+  it('stops with pane_dead when the provider exits and names the step it never reached', async () => {
+    const run = await record(['wait:READY>', 'text:quit', 'keys:Enter', 'wait:never-shown']);
+
+    expect(run.code).toBe(0);
+    expect((JSON.parse(run.stdout) as { stop: string }).stop).toBe('pane_dead');
+    expect(run.stderr).toContain('stopped before step wait:never-shown');
+    expect(readFileSync(join(out, 'frames.txt'), 'utf8')).toContain('READY>');
+    expect(leftoverSockets()).toEqual([]);
+  });
+
+  it('stops with timeout when a wait step never matches', async () => {
+    const run = await record(['wait:never-shown'], ['--timeout', '1']);
+
+    expect(run.code).toBe(0);
+    expect((JSON.parse(run.stdout) as { stop: string }).stop).toBe('timeout');
+    expect(run.stderr).toContain('stopped before step wait:never-shown');
+    expect(leftoverSockets()).toEqual([]);
+    expect(processIsAlive(await providerPid())).toBe(false);
+  });
+
+  it('fails and removes the socket when its tmux server dies mid-run', async () => {
+    const run = await record(['wait:never-shown'], [], async () => {
+      await providerPid();
+      const [socket] = await until(() => { const found = leftoverSockets(); return found.length > 0 && found; }, 'the tmux socket');
+      spawnSync('tmux', ['-S', socket!, 'kill-server'], { stdio: 'ignore' });
+    });
+
+    expect(run.code).not.toBe(0);
+    expect(run.stdout).toBe('');
+    expect(leftoverSockets()).toEqual([]);
+  });
+
+  it.each(['SIGINT', 'SIGTERM', 'SIGHUP'] as const)('kills its tmux server and the provider on %s', async (signal) => {
+    let pid = 0;
+    let recorderPid = 0;
+    const run = await record(['wait:never-shown'], [], async () => {
+      pid = await providerPid();
+      recorderPid = Number(/pane-frames-(\d+)-/.exec(leftoverSockets()[0] ?? '')?.[1]);
+      process.kill(recorderPid, signal);
+    });
+
+    expect(recorderPid).toBeGreaterThan(0);
+    expect(run.code).toBe(128 + { SIGINT: 2, SIGTERM: 15, SIGHUP: 1 }[signal]);
+    expect(leftoverSockets()).toEqual([]);
+    await until(() => !processIsAlive(pid), 'the provider to exit');
   });
 });
