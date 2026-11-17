@@ -56,6 +56,15 @@ describe('settings_drift.mjs', () => {
     expect(r.out).not.toContain('/expected/path');
   });
 
+  it('a machine-specific key in the template that is missing from settings is reported once, without the template value', () => {
+    // the settings carry every template key except OMC_LOG_DIR, which the template also lists as machine-specific
+    const r = run(['--settings', settingsFile('machine-missing.json', { ...template.env }), '--template', templateMachineInTemplate]);
+    expect(r.status).toBe(1);
+    expect(r.stdout).toContain('differences: 1');
+    expect(r.stdout.match(/DIFFERENCE env OMC_LOG_DIR/g)).toHaveLength(1);
+    expect(r.out).not.toContain('/expected/path');
+  });
+
   it('settings that match the template and carry the machine-specific variable: no differences, exit 0', () => {
     const env = { ...template.env, OMC_LOG_DIR: '/synthetic/log' };
     const r = run(['--settings', settingsFile('ok2.json', env), '--template', templateFile]);

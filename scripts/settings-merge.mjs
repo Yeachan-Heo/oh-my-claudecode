@@ -42,11 +42,12 @@ const readJsonFile = (file) => {
 
 const isPlainObject = (x) => x !== null && typeof x === 'object' && !Array.isArray(x);
 
-const hasSecretKey = (obj) => {
-  if (!isPlainObject(obj)) return false;
-  for (const key of Object.keys(obj)) {
+const hasSecretKey = (value) => {
+  if (Array.isArray(value)) return value.some(hasSecretKey);
+  if (!isPlainObject(value)) return false;
+  for (const key of Object.keys(value)) {
     if (/key|token|secret|pass|auth|credential/i.test(key)) return true;
-    if (hasSecretKey(obj[key])) return true;
+    if (hasSecretKey(value[key])) return true;
   }
   return false;
 };

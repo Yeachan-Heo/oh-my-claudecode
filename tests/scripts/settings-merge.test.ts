@@ -173,6 +173,20 @@ describe('settings-merge script', () => {
     expect(JSON.parse(readFileSync(output, 'utf8'))).toEqual({ data: { ANTHROPIC_API_KEY: 'secret123' } });
   });
 
+  it('redacts secrets nested in arrays of objects when deleting or replacing them', () => {
+    const settings = writeJson('settings.json', { servers: [{ name: 'a', authToken: 'secret123' }], more: [[{ apiKey: 'secret456' }]] });
+    const patch = writeJson('patch.json', { servers: null, more: [{ name: 'b' }] });
+    const output = join(dir, 'out.json');
+    const r = runTool(['--settings', settings, '--output', output, '--patch', patch]);
+    expect(r.status).toBe(0);
+    expect(r.stdout).toContain('servers: <redacted> -> (deleted)');
+    expect(r.stdout).toContain('more: <redacted> -> ');
+    expect(r.stdout).not.toContain('authToken');
+    expect(r.stdout).not.toContain('apiKey');
+    expect(r.stdout).not.toContain('secret');
+    expect(JSON.parse(readFileSync(output, 'utf8'))).toEqual({ more: [{ name: 'b' }] });
+  });
+
   it('exits 2 when the patch file is missing', () => {
     const settings = writeJson('settings.json', { model: 'sonnet' });
     const r = runTool(['--settings', settings, '--output', join(dir, 'out.json'), '--patch', join(dir, 'nope.json')]);
