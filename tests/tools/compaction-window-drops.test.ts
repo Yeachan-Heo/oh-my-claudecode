@@ -532,6 +532,33 @@ describe('compaction_window_drops.py', () => {
     }
   });
 
+  it('message without usage followed by same message ID with usage is counted', () => {
+    const dir = makeDir();
+    try {
+      const withoutUsage = JSON.stringify({
+        type: 'assistant',
+        timestamp: '2026-11-14T09:00:01Z',
+        sessionId: 'S14',
+        uuid: 'u-no-usage',
+        message: { id: 'msg_no_usage', model: 'claude-opus-5-5', content: [] },
+      });
+      const file = save(dir, 'S14.jsonl', [
+        withoutUsage,
+        call('msg_no_usage', '2026-11-14T09:00:02Z', 300000, { session: 'S14' }),
+        call('msg_2', '2026-11-14T09:10:01Z', 100000, { session: 'S14' }),
+      ]);
+      save(dir, 'compaction.jsonl', []);
+      const run1 = run(dir, [file]);
+      expect(run1.status).toBe(0);
+      const r = run1.json;
+      // Both msg_no_usage (second occurrence with usage) and msg_2 should be counted: n=1 (drop between them)
+      // msg_no_usage should be counted once it has usage, not skipped because of the first fragment
+      expect(r.n.value).toBe(1);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
   it('a drop outside the period is not counted', () => {
     const dir = makeDir();
     try {

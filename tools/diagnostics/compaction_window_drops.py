@@ -453,14 +453,14 @@ def scan_file(path, agent_id, context):
             mid = msg.get("id")
             if not isinstance(mid, str) or not mid:
                 continue
-            if mid in seen_ids:
-                continue
-            seen_ids.add(mid)
             if msg.get("model") == "<synthetic>":
                 continue
             usage = msg.get("usage")
             if not isinstance(usage, dict):
                 continue
+            if mid in seen_ids:
+                continue
+            seen_ids.add(mid)
             stats["calls"] += 1
             if pending_request is None:
                 stats["without_api_request"] += 1
