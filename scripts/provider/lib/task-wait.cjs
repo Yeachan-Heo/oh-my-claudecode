@@ -191,14 +191,7 @@ async function wait(options) {
   const o = { now: options.now || Date.now, sleepSync: options.sleepSync || sleepSyncDefault };
   const sleep = options.sleep || sleepDefault;
   const timeout = options.timeoutS == null ? TIMEOUT_DEFAULT_S : timeoutClamp(options.timeoutS);
-  let limit = options.limitS == null ? null : seconds(options.limitS, '--limit');
-  // Use profile's task timeout as fallback when no explicit limit is supplied
-  if (limit === null && options.profile === undefined) {
-    const profileData = loadProfile(options.env || process.env).profile;
-    if (profileData?.limits?.taskTimeoutSeconds) limit = profileData.limits.taskTimeoutSeconds;
-  } else if (limit === null && options.profile?.limits?.taskTimeoutSeconds) {
-    limit = options.profile.limits.taskTimeoutSeconds;
-  }
+  const limit = options.limitS == null ? null : seconds(options.limitS, '--limit');
   const ids = options.ids;
   if (!Array.isArray(ids) || !ids.length) throw inputError('provider-task wait: give at least one task id');
   const bad = ids.filter((x) => !/^[0-9a-f]{8}$/.test(x));

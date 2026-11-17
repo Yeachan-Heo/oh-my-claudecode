@@ -174,16 +174,14 @@ const explicitBinary = String(env.OMC_PROVIDER_ADVISOR_CLAUDE_BIN || '').trim() 
 const binary = explicitBinary || pathEntries.map((p) => join(p, 'claude')).find((c) => existsSync(c)) || null;
 if (!binary || !existsSync(binary)) finish(127, S.NO_BINARY, `no claude binary (${env.OMC_PROVIDER_ADVISOR_CLAUDE_BIN ? 'OMC_PROVIDER_ADVISOR_CLAUDE_BIN' : explicitBinary ? 'advisor.claudeBinary' : 'none found on PATH'})`, question.length, 0);
 
-// A foreign ANTHROPIC_BASE_URL in the INCOMING env (not anthropic.com): refusal with exit code 2 after the clearing (the
-// clearing removes every ANTHROPIC_* from a provider worker, so a check on the cleaned env catches true foreign providers).
+// A foreign ANTHROPIC_BASE_URL in the INCOMING env (not anthropic.com): refusal with exit code 2 before the clearing (the
+// clearing removes every ANTHROPIC_*, so a check after it would never be true).
 // ANTHROPIC_AUTH_TOKEN in the input does not refuse: provider workers hold the provider key in their process env and call
 // the advisor from it; the key is cleared below.
+if (isForeignProvider(env)) finish(2, S.REFUSED_ENV, 'the incoming env has a foreign ANTHROPIC_BASE_URL; start aborted (the advisor goes to the Claude login; the login token must not go to a foreign address)', question.length, 0);
 
 // Env without the provider: the helpers of env.cjs plus every ANTHROPIC_*; PATH without the shim directories.
 const clean = stripProviderEnv(stripOverrides(env));
-
-// Check for foreign provider after sanitization: a provider worker's ANTHROPIC_BASE_URL is now gone.
-if (isForeignProvider(clean)) finish(2, S.REFUSED_ENV, 'the env still has a foreign ANTHROPIC_BASE_URL after sanitization; start aborted (the advisor goes to the Claude login; the login token must not go to a foreign address)', question.length, 0);
 for (const k of Object.keys(clean)) if (/^ANTHROPIC_/.test(k)) delete clean[k];
 clean.PATH = pathEntries.join(':');
 // Kill switches in the env of the advisor process: the advisor does not call the native advisor on its own transcript (double cost) and the OMC hooks do not load.
