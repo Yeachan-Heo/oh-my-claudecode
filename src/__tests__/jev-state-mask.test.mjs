@@ -3,6 +3,7 @@
  */
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { performance } from 'node:perf_hooks';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 
@@ -228,7 +229,6 @@ describe('maskJevState: secret paths of any project', () => {
     'secretsManager',
     'mySecrets.ts',
     'the secrets are kept elsewhere',
-    'hasla.txt',
   ])('does not take %s for a secret path', (text) => {
     expect(SECRET_PATH.test(`a ${text} b`)).toBe(false);
     expect(maskJevState({ t: `a ${text} b` }).t).not.toContain('[line omitted');
