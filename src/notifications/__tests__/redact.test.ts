@@ -372,6 +372,27 @@ describe('redactTokens key-shape masking (OMC_REDACT_KEY_SHAPES=1)', () => {
       expect(result).toContain('hf_');
     });
 
+    // P1: Cover malformed-index recovery with regression tests
+    it('handles unterminated brackets via bounded fallback without crashing', () => {
+      // When an index is opened but not closed within 64 chars, the bounded scan triggers fallback (k = k + 1)
+      // This tests that the fallback code path executes without errors
+      const malformedIndex = `CREDENTIALS['a_very_long_string_that_exceeds_64_chars_and_has_no_closing_bracket_so_we_just_move_on_inside'=secret`;
+      const result = redactTokens(malformedIndex);
+      // Verify the function completes without crashing; malformed bracket is an edge case
+      expect(result).toBeTruthy();
+      expect(typeof result).toBe('string');
+    });
+
+    it('handles multiple properly-closed brackets before assignment', () => {
+      // Multiple brackets encountered before the assignment separator
+      // The bracket scan loop should handle them and continue until the separator is found
+      // This exercises the bracket scan loop iteration path
+      const withPhrase = `CONFIG_PASSWORD['key1']['key2']=secret`;
+      const result = redactTokens(withPhrase);
+      expect(result).toContain('****');
+      expect(result).not.toContain('secret');
+    });
+
     it('stays near-linear on large inputs: 100 000 characters within a loose 1000 ms budget', () => {
       const base = 'Report of the stage: the module was reviewed, tests passed, result saved in the work directory. ';
       const inputs = [
