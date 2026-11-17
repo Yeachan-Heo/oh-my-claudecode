@@ -115,9 +115,9 @@ function buildMessage(files) {
   // JSON string with \uXXXX escapes; every other name stays exactly as git printed it. A cleaned name would point the
   // simplifier at a file that does not exist.
   const shown = contextText ? files.map((f) => contextText.escapeIdentifier(f)) : files;
-  const escapedNote = shown.some((f, index) => f !== files[index])
-    ? `A name in double quotes is a JSON string: its \\uXXXX escapes stand for characters that are not shown. Decode them to get the exact name.\n\n`
-    : '';
+  const escaped = shown.some((f, index) => f !== files[index]);
+  const decodeRule = 'a name in double quotes is a JSON string: its \\uXXXX escapes stand for characters that are not shown; decode them to get the exact name';
+  const escapedNote = escaped ? `Note: ${decodeRule}.\n\n` : '';
   const fileList = shown.map((f) => `  - ${f}`).join('\n');
   const fileArgs = shown.join('\\n');
   return (
@@ -127,7 +127,7 @@ function buildMessage(files) {
     `${fileList}\n\n` +
     escapedNote +
     `Use: Task(subagent_type="oh-my-claudecode:code-simplifier", ` +
-    `prompt="Simplify the recently modified files:\\n${fileArgs}")`
+    `prompt="Simplify the recently modified files${escaped ? ` (${decodeRule})` : ''}:\\n${fileArgs}")`
   );
 }
 

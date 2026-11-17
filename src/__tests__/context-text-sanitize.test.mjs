@@ -977,7 +977,7 @@ describe('identifiers that a message tells the model to use stay exact with the 
     expect(reason).toContain(`\n  - ${spaced}\n`);
     expect(reason).toContain(`\n  - ${long}\n`);
     expect(reason).toContain(`prompt="Simplify the recently modified files:\\n${[spaced, long].sort().join('\\n')}")`);
-    expect(reason).not.toContain('A name in double quotes');
+    expect(reason).not.toContain('JSON string');
   }, 60000);
 
   it('code-simplifier: a name with a removed character is written as a JSON string that decodes to the exact name', () => {
@@ -988,7 +988,13 @@ describe('identifiers that a message tells the model to use stay exact with the 
     expect(rows.sort()).toEqual([JSON.stringify(markerName).replace('<', '\\u003c'), `"bad\\u202ename.ts"`, 'plain.ts'].sort());
     expect(JSON.parse(rows.find((row) => row.includes('bad')))).toBe(rtlName);
     expect(JSON.parse(rows.find((row) => row.includes('system-reminder')))).toBe(markerName);
-    expect(reason).toContain('A name in double quotes is a JSON string');
+    expect(reason).toContain('Note: a name in double quotes is a JSON string');
+    // The subagent sees only the prompt, so the rule for decoding must be inside it.
+    const promptLine = reason.split('\n').find((line) => line.startsWith('Use: Task('));
+    expect(promptLine).toBeDefined();
+    const promptText = promptLine.slice(promptLine.indexOf('prompt="'));
+    expect(promptText).toContain('a name in double quotes is a JSON string: its \\uXXXX escapes stand for characters that are not shown; decode them to get the exact name');
+    expect(promptText).toContain('"bad\\u202ename.ts"');
     expect(reason.includes(RTL) || reason.includes('<system-reminder>')).toBe(false);
     expect(hasControl(reason, new Set([0x000A]))).toBe(false);
   }, 60000);
