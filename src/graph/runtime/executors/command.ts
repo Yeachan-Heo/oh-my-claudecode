@@ -32,6 +32,9 @@ const STREAM_TAIL_CHARS = 2000;
 /** Grace period after the first kill before escalating to a hard kill. */
 const KILL_ESCALATION_MS = 5000;
 
+/** How often the signal cleanup checks whether a closed command's process group is gone. */
+const GROUP_POLL_MS = 50;
+
 // Graph run signal cleanup. Active only when OMC_GRAPH_SIGNAL_CLEANUP is exactly "1";
 // any other value keeps the upstream behavior (no handlers, no AbortSignal, no child tracking).
 const graphSignalState = { interrupted: false };
@@ -70,12 +73,25 @@ export function installGraphSignalCleanup(): AbortSignal | undefined {
       terminateProcessTree(child, "SIGTERM");
       const escalation = setTimeout(() => terminateProcessTree(child, "SIGKILL"), KILL_ESCALATION_MS);
       child.once("close", () => {
-        clearTimeout(escalation);
-        open -= 1;
-        if (open === 0) {
-          clearTimeout(hardDeadline);
-          process.exit(exitCode);
-        }
+        // The shell closing does not prove that its descendants stopped: one that ignores SIGTERM
+        // and has closed or ignored stdio outlives it. Count the child as done only when its whole
+        // process group is gone; the escalation timer sends SIGKILL to what is left.
+        const settleWhenGroupIsGone = (): boolean => {
+          if (!processGroupExists(child)) {
+            clearTimeout(escalation);
+            open -= 1;
+            if (open === 0) {
+              clearTimeout(hardDeadline);
+              process.exit(exitCode);
+            }
+            return true;
+          }
+          return false;
+        };
+        if (settleWhenGroupIsGone()) return;
+        const poll = setInterval(() => {
+          if (settleWhenGroupIsGone()) clearInterval(poll);
+        }, GROUP_POLL_MS);
       });
     }
   };
@@ -157,6 +173,22 @@ function terminateProcessTree(child: ChildProcess, signal: NodeJS.Signals): void
     } catch {
       // Process already gone.
     }
+  }
+}
+
+/**
+ * True while a process of the child's process group exists (POSIX: signal 0 to the negative pid).
+ * Windows has no process group here: `taskkill /T` is the tree kill, so the group counts as gone.
+ */
+function processGroupExists(child: ChildProcess): boolean {
+  if (process.platform === "win32" || child.pid === undefined) {
+    return false;
+  }
+  try {
+    process.kill(-child.pid, 0);
+    return true;
+  } catch (error) {
+    return (error as NodeJS.ErrnoException).code === "EPERM";
   }
 }
 

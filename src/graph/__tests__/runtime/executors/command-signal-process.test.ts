@@ -265,6 +265,27 @@ describe.runIf(process.platform !== "win32")("graph run with real signals (switc
     expect(isAlive(stepPid), "step still alive 10 s after SIGTERM").toBe(false);
   }, STEP_TIMEOUT_MS);
 
+  it("SIGTERM: a descendant that ignores SIGTERM and holds no pipe outlives its shell; the run exits only after the SIGKILL", async () => {
+    const fx = fixture("descendant");
+    // The shell stays alive (`wait`) and dies of SIGTERM at once, but the step it started in the background
+    // ignores SIGTERM and has closed stdio, so the shell's own close event proves nothing about the step.
+    const detached = `${stepCommand(fx, "step-1", false, true)} >/dev/null 2>&1 </dev/null & wait`;
+    writeDescriptor(fx, chainDescriptor("sig-descendant", detached, NODE_OK));
+    const started = startRun(fx, true);
+    await until(() => existsSync(pidFile(fx, "step-1")), 30_000, "step 1 to start");
+    const stepPid = pidOf(fx, "step-1");
+    expect(isAlive(stepPid), "control: step alive before the signal").toBe(true);
+
+    const sentAt = Date.now();
+    started.child.kill("SIGTERM");
+    const result = await started.done;
+    expect(result.code, result.out).toBe(143);
+    // The exit waited for the 5 s grace and the SIGKILL of the process group; it did not follow the shell's close.
+    expect(Date.now() - sentAt).toBeGreaterThanOrEqual(4_500);
+    await until(() => !isAlive(stepPid), 5_000, "step to die");
+    expect(isAlive(stepPid), "the step outlived the run").toBe(false);
+  }, STEP_TIMEOUT_MS);
+
   it("SIGINT during a running step stops it and exits 130; the step does not survive", async () => {
     const fx = fixture("sigint");
     writeDescriptor(fx, chainDescriptor("sig-int", stepCommand(fx, "step-1", false), NODE_OK));
