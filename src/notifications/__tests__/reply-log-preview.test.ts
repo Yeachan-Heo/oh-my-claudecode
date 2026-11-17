@@ -53,6 +53,7 @@ vi.mock("../session-registry.js", async (importOriginal) => {
   return { ...actual, removeMessagesByPane: mocks.removeMessagesByPane };
 });
 
+import { HerdrError, runHerdr, type HerdrExecOptions } from "../../team/herdr-session.js";
 import {
   injectReplyIntoHerdrPane,
   processSlackSocketMessage,
@@ -242,5 +243,81 @@ describe("injection paths write the masked preview to the log", () => {
     await injectReplyIntoHerdrPane("w9:p2", text, "discord", configWith(500));
     expect(loggedPreview()).toBe(`${filler}hf_${"a".repeat(19)}...`);
     expect(existsSync(LOG_FILE)).toBe(true);
+  });
+});
+
+// A failed Herdr command puts the first 300 characters of its plain-text stderr into the error message and keeps
+// all of it in `detail`. The log must mask a key that starts shortly before character 300.
+describe("errors from the Herdr CLI in the log", () => {
+  const stderrWithKeyAtTheCut = (): { stderr: string; filler: string } => {
+    // 278 characters, then hf_ and 19 characters of the key: character 300 falls inside the key
+    const filler = "x".repeat(277) + " ";
+    return { stderr: `${filler}hf_${"a".repeat(40)}\n`, filler };
+  };
+  const failingHerdr = (stderr: string): Promise<HerdrError> =>
+    runHerdr(["agent", "prompt", "w9:p2"], {
+      env: {},
+      execFn: (() => Promise.reject(Object.assign(new Error("exit 1"), { stderr }))) as unknown as HerdrExecOptions["execFn"],
+    }).then(
+      () => {
+        throw new Error("runHerdr did not fail");
+      },
+      (error: HerdrError) => error,
+    );
+  const loggedLine = (needle: string): string => {
+    const lines = readFileSync(LOG_FILE, "utf-8").trim().split("\n");
+    return (lines.filter((l) => l.includes(needle)).pop() ?? "").replace(/^\[[^\]]*\] /, "");
+  };
+
+  it("runHerdr keeps the whole stderr in detail and the first 300 characters in the message", async () => {
+    const { stderr, filler } = stderrWithKeyAtTheCut();
+    const error = await failingHerdr(stderr);
+    expect(error).toBeInstanceOf(HerdrError);
+    expect(error.detail).toBe(stderr);
+    expect(error.message).toBe(`herdr_error: ${filler}hf_${"a".repeat(19)}`);
+  });
+
+  describe("switch on", () => {
+    beforeEach(() => {
+      process.env[SWITCH] = "1";
+    });
+
+    it("send failure: the key at character 300 is masked", async () => {
+      const { stderr, filler } = stderrWithKeyAtTheCut();
+      mocks.herdrSendPrompt.mockRejectedValue(await failingHerdr(stderr));
+      await expect(injectReplyIntoHerdrPane("w9:p2", "hello", "discord", configWith(500))).resolves.toBe(false);
+      expect(loggedLine("Failed to inject")).toBe(`ERROR: Failed to inject reply into herdr pane w9:p2: herdr_error: ${filler}hf_****`);
+    });
+
+    it("capture failure: the key at character 300 is masked", async () => {
+      const { stderr, filler } = stderrWithKeyAtTheCut();
+      mocks.captureHerdrWorkerPane.mockRejectedValue(await failingHerdr(stderr));
+      mocks.isHerdrWorkerAlive.mockResolvedValue(true);
+      await expect(injectReplyIntoHerdrPane("w9:p2", "hello", "discord", configWith(500))).resolves.toBe(false);
+      expect(loggedLine("Failed to capture")).toBe(`WARN: Failed to capture herdr pane w9:p2: herdr_error: ${filler}hf_****`);
+    });
+
+    it("other errors keep their own message: a JSON error envelope, another error class, a value that is not an error", async () => {
+      const cases: Array<[unknown, string]> = [
+        [new HerdrError("agent_name_taken", "taken", '{"error":{"code":"agent_name_taken","message":"taken"}}'), "herdr_agent_name_taken: taken"],
+        [new HerdrError("error", "short", "not the cut of this stderr"), "herdr_error: short"],
+        [new Error("boom"), "boom"],
+        ["plain failure", "plain failure"],
+      ];
+      for (const [error, text] of cases) {
+        mocks.herdrSendPrompt.mockRejectedValue(error);
+        await injectReplyIntoHerdrPane("w9:p2", "hello", "discord", configWith(500));
+        expect(loggedLine("Failed to inject")).toBe(`ERROR: Failed to inject reply into herdr pane w9:p2: ${text}`);
+      }
+    });
+  });
+
+  it.each([undefined, "", "0", "true"])("switch off (%s): the message is cut first, as the error carries it", async (value) => {
+    if (value === undefined) delete process.env[SWITCH];
+    else process.env[SWITCH] = value;
+    const { stderr, filler } = stderrWithKeyAtTheCut();
+    mocks.herdrSendPrompt.mockRejectedValue(await failingHerdr(stderr));
+    await injectReplyIntoHerdrPane("w9:p2", "hello", "discord", configWith(500));
+    expect(loggedLine("Failed to inject")).toBe(`ERROR: Failed to inject reply into herdr pane w9:p2: herdr_error: ${filler}hf_${"a".repeat(19)}`);
   });
 });

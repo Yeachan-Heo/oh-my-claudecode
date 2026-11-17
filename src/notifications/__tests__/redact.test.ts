@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { redactedPreview, redactTokens } from '../redact.js';
+import { redactedPrefix, redactedPreview, redactTokens } from '../redact.js';
 
 describe('redactTokens', () => {
   const SWITCH = 'OMC_REDACT_KEY_SHAPES';
@@ -726,5 +726,35 @@ describe('redactedPreview', () => {
       }
       expect(redactedPreview(texts[0], 50)).toBe(`${'x'.repeat(28)} hf_${'a'.repeat(18)}...`);
     });
+  });
+});
+
+describe('redactedPrefix', () => {
+  const SWITCH = 'OMC_REDACT_KEY_SHAPES';
+  let saved: string | undefined;
+
+  beforeEach(() => {
+    saved = process.env[SWITCH];
+  });
+
+  afterEach(() => {
+    if (saved === undefined) delete process.env[SWITCH];
+    else process.env[SWITCH] = saved;
+  });
+
+  const text = `${'x'.repeat(277)} hf_${'a'.repeat(40)}`; // character 300 falls 19 characters into the key
+
+  it('switch on: the text is redacted before it is cut', () => {
+    process.env[SWITCH] = '1';
+    expect(redactedPrefix(text, 300)).toBe(`${'x'.repeat(277)} hf_****`);
+    expect(redactedPrefix(text, 10)).toBe('x'.repeat(10));
+    expect(redactedPrefix('short', 300)).toBe('short');
+  });
+
+  it.each([undefined, '', '0', 'true'])('switch off (%s): the first characters, as they are', (value) => {
+    if (value === undefined) delete process.env[SWITCH];
+    else process.env[SWITCH] = value;
+    expect(redactedPrefix(text, 300)).toBe(text.slice(0, 300));
+    expect(redactedPrefix(text, 300)).toBe(`${'x'.repeat(277)} hf_${'a'.repeat(19)}`);
   });
 });

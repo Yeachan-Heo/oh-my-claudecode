@@ -45,16 +45,23 @@ export function redactTokens(input: string): string {
 }
 
 /**
- * The start of `text` for a log line: its first `max` characters, followed by `...` when there is more.
- * `cut` is how many characters of `text` the caller really uses (for example what it types into a pane);
- * the rest is ignored.
+ * The first `max` characters of `text` for a log line or an error message.
  *
  * With OMC_REDACT_KEY_SHAPES=1 the whole text is redacted before it is cut, so a key that starts shortly
  * before the cut cannot leave a fragment that is too short to be recognized as a key. Without the switch the
  * text is cut first, and the caller's own redaction masks what is left, so the output does not change.
  */
+export function redactedPrefix(text: string, max: number): string {
+  return (process.env.OMC_REDACT_KEY_SHAPES === '1' ? redactTokens(text) : text).slice(0, max);
+}
+
+/**
+ * The start of `text` for a log line: its first `max` characters (see redactedPrefix), followed by `...` when
+ * there is more. `cut` is how many characters of `text` the caller really uses (for example what it types
+ * into a pane); the rest is ignored.
+ */
 export function redactedPreview(text: string, max: number, cut: number = text.length): string {
-  const shown = (process.env.OMC_REDACT_KEY_SHAPES === '1' ? redactTokens(text) : text).slice(0, cut);
+  const shown = redactedPrefix(text, cut);
   return `${shown.slice(0, max)}${shown.length > max ? '...' : ''}`;
 }
 

@@ -43,6 +43,7 @@ import {
 } from "../features/rate-limit-wait/tmux-detector.js";
 import {
   captureHerdrWorkerPane,
+  HerdrError,
   herdrSendPrompt,
   isHerdrWorkerAlive,
 } from "../team/herdr-session.js";
@@ -59,7 +60,7 @@ import { writeApprovalDecision } from "../graph/runtime/remote-approval.js";
 
 import type { ReplyConfig } from "./types.js";
 import { parseMentionAllowedMentions } from "./config.js";
-import { redactedPreview, redactTokens } from "./redact.js";
+import { redactedPrefix, redactedPreview, redactTokens } from "./redact.js";
 import {
   getProcessStartIdentity,
   isProcessAlive,
@@ -537,6 +538,23 @@ function sanitizeReplyText(
 }
 
 /**
+ * The text of an error from the Herdr CLI for the daemon log. For plain-text stderr the error message holds
+ * only the first 300 characters, while `detail` keeps all of it, so the message is rebuilt from the whole
+ * stderr: redacted first and cut afterwards (see redactedPrefix). Every other error keeps its own message.
+ */
+function herdrErrorText(error: unknown): string {
+  if (!(error instanceof Error)) return String(error);
+  if (error instanceof HerdrError && error.detail) {
+    const stderr = error.detail.trim();
+    const prefix = `herdr_${error.code}: `;
+    if (error.message === prefix + stderr.slice(0, 300)) {
+      return prefix + redactedPrefix(stderr, 300);
+    }
+  }
+  return error.message;
+}
+
+/**
  * The first 50 characters of the injected reply for the daemon log. The whole reply is redacted before it is
  * cut (see redactedPreview), not after: a key that starts shortly before the cut would otherwise be logged
  * as a fragment that is too short to be recognized.
@@ -640,7 +658,7 @@ export async function injectReplyIntoHerdrPane(
     content = await captureHerdrWorkerPane(paneId, 15);
   } catch (error) {
     log(
-      `WARN: Failed to capture herdr pane ${paneId}: ${error instanceof Error ? error.message : String(error)}`,
+      `WARN: Failed to capture herdr pane ${paneId}: ${herdrErrorText(error)}`,
     );
   }
 
@@ -674,7 +692,7 @@ export async function injectReplyIntoHerdrPane(
     return true;
   } catch (error) {
     log(
-      `ERROR: Failed to inject reply into herdr pane ${paneId}: ${error instanceof Error ? error.message : String(error)}`,
+      `ERROR: Failed to inject reply into herdr pane ${paneId}: ${herdrErrorText(error)}`,
     );
     return false;
   }
