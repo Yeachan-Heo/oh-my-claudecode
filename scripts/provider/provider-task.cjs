@@ -39,6 +39,7 @@
 // kill ID: records killed in the task file, then `omc team shutdown <team> --force`.
 // list [--refresh]: all task files with their status.
 // wait ID... [--timeout S] [--any] [--limit S]: see lib/task-wait.cjs; exit 2 on a handoff line, 1 at the time limits, 0 otherwise.
+// Without --limit the limit is limits.taskTimeoutSeconds of the profile.
 //
 // Test variables (loopback and fakes only): OMC_PROVIDER_TASK_OMC_BIN (fake omc), OMC_PROVIDER_TASK_TEAM_BIN (fake
 // provider-team), OMC_PROVIDER_TASK_RESULT_MODULE and OMC_PROVIDER_TASK_LOG_MODULE (injected modules),
@@ -371,7 +372,10 @@ function waitCommand(args) {
   }
   if (!ids.length) fail(EXIT.CONFIG, 'wait: give at least one task id (8 characters [0-9a-f])');
   const { wait } = require('./lib/task-wait.cjs');
-  wait({ ids, timeoutS, any, limitS, env, profile: profileOf() })
+  // Without --limit the task deadline of the profile applies (limits.taskTimeoutSeconds, 1800 by default): past it the wait loop shuts the
+  // team down and records failed/timeout, so repeated waits cannot leave an overdue worker running.
+  const profile = profileOf();
+  wait({ ids, timeoutS, any, limitS: limitS ?? profile.limits.taskTimeoutSeconds, env, profile })
     .then((r) => {
       for (const w of r.results) console.log(`${w.id} -> ${w.status} verified=${w.verified ? 'yes' : 'no'} error=${w.error}`);
       console.log(`in progress: ${r.in_progress}`);
@@ -516,16 +520,27 @@ async function startInternal(id) {
     try { completeTask(id, env, (d) => ({ ...d, start_exit_code: 1, start_error: lockError })); } catch { /* the task file lock is busy: the evaluation uses start_pid */ }
     process.exit(0);
   }
-  // Recheck cancellation before spawning: the task may have been killed while waiting for the start lock.
-  const zz = readTask(id, env);
-  if (zz && zz.killed) {
-    try { completeTask(id, env, (d) => ({ ...d, start_exit_code: 0, start_error: 'task killed before spawn' })); } catch { /* the task file lock is busy */ }
-    process.exit(0);
-  }
+  // Release of the start lock: removed only when it holds this pid.
+  const releaseStartLock = () => {
+    if (lockFd === null) return;
+    try { closeSync(lockFd); } catch { /* already closed */ }
+    let m2 = null;
+    try { m2 = JSON.parse(readFileSync(startLock, 'utf8')); } catch { /* another process took it over and removed it: not removed here */ }
+    if (m2 && m2.pid === process.pid) { try { unlinkSync(startLock); } catch { /* race */ } }
+  };
   // The moment of the actual start is taking the start lock: omc_started_at (ISO) goes under the lock of the task file BEFORE provider-team
-  // runs - the grace period of a missing OMC task counts from it, not from the start entry.
-  try { completeTask(id, env, (d) => ({ ...d, omc_started_at: new Date().toISOString() })); }
-  catch (e3) { console.error(`_start: writing omc_started_at failed (${e3.message}); the grace period is evaluated from start_pid`); }
+  // runs - the grace period of a missing OMC task counts from it, not from the start entry. The same write checks cancellation (one critical
+  // section): a task that was killed, or already has a verdict (a `kill`, the time limit of `wait`, a start_failed of the queue ceiling), while
+  // this launcher waited for the start lock must not start a team. `kill` and the limit shut down a team that does not exist yet (omc answers
+  // "No team state found"), so nothing else would stop it; `wait` and `kill` write killed or the verdict before they shut down.
+  let cancelled = false;
+  try {
+    completeTask(id, env, (d) => {
+      if (d.killed || d.verdict) { cancelled = true; return { ...d, start_error: 'cancelled before the team was started' }; }
+      return { ...d, omc_started_at: new Date().toISOString() };
+    });
+  } catch (e3) { console.error(`_start: writing omc_started_at failed (${e3.message}); the grace period is evaluated from start_pid`); }
+  if (cancelled) { releaseStartLock(); process.exit(0); }
   // Resolved before the spawn: an `error` event of the child (e.g. ENOENT) must not fire while no listener is registered yet.
   const teamDir = await teamStateDir(cwd);
   const out = openSync(join(dir, `${id}.log`), 'a');
@@ -576,13 +591,8 @@ async function startInternal(id) {
   }
   // The final write only completes the task: a missing task file (removed while _start ran) ends quietly with exit code 0, without a stub file.
   completeTask(id, env, (d) => ({ ...d, start_exit_code: code, start_error: lastLine }));
-  // Release of the start lock after the child ends: removed only when it holds this pid.
-  if (lockFd !== null) {
-    try { closeSync(lockFd); } catch { /* already closed */ }
-    let m2 = null;
-    try { m2 = JSON.parse(readFileSync(startLock, 'utf8')); } catch { /* another process took it over and removed it: not removed here */ }
-    if (m2 && m2.pid === process.pid) { try { unlinkSync(startLock); } catch { /* race */ } }
-  }
+  // Release of the start lock after the child ends.
+  releaseStartLock();
   process.exit(0);
 }
 

@@ -19,10 +19,10 @@ describe.skipIf(process.platform === 'win32')('provider-task wait command', () =
 
   let nr = 0;
   // One case: a profile with its own state dir and a task directory.
-  const environment = () => {
+  const environment = (overrides = {}) => {
     const dir = join(tmp.dir, `case-${++nr}`);
     mkdirSync(dir, { recursive: true });
-    const { env } = writeProfile(dir);
+    const { env } = writeProfile(dir, overrides);
     const tasks = join(dir, 'state', 'tasks');
     mkdirSync(tasks, { recursive: true });
     const file = (id) => join(tasks, `${id}.json`);
@@ -177,5 +177,35 @@ process.exit(${Number(code)});
     const d = s.read(id);
     assert.equal(d.verdict.status, 'failed');
     assert.equal(d.verdict.cause, 'timeout');
+  });
+  it('CLI: without --limit the profile deadline (limits.taskTimeoutSeconds) applies: a task older than it is shut down and ends as failed/timeout (exit code 2, a HANDOFF line, the team shut down with --force); the same task with an explicit --limit above its age keeps waiting (exit code 1)', () => {
+    // The task started 60 s ago; the profile deadline is 1 s.
+    const s = environment({ limits: { taskTimeoutSeconds: 1 } });
+    const id = 'e0f1a2b3';
+    s.save(id);
+    const logFile = join(s.dir, 'omc-log.jsonl');
+    const omc = fakeOmc(s.dir, { logFile, answers: { 'list-tasks': listTasks(id, 'in_progress', '') } });
+    const r = run(s, [id, '--timeout', '10'], { OMC_PROVIDER_TASK_OMC_BIN: omc });
+    assert.equal(r.status, 2, JSON.stringify({ o: r.stdout, e: r.stderr }));
+    assert.ok(r.stdout.includes(`${id} -> failed verified=no error=total time limit exceeded; timeout`), r.stdout);
+    assert.ok(r.stdout.includes(`HANDOFF ${id} failed`), r.stdout);
+    assert.deepEqual(calls(logFile).filter((c) => c.argv[1] === 'shutdown').map((c) => c.argv), [['team', 'shutdown', sub(id), '--force']]);
+    const d = s.read(id);
+    assert.equal(d.verdict.status, 'failed');
+    assert.equal(d.verdict.cause, 'timeout');
+    assert.equal(d.limit_s, 1, 'the effective limit is written to the task file');
+    assert.equal(d.killed, null);
+    // an explicit --limit wins over the profile
+    const t = environment({ limits: { taskTimeoutSeconds: 1 } });
+    const id2 = 'f1a2b3c4';
+    t.save(id2);
+    const logFile2 = join(t.dir, 'omc-log.jsonl');
+    const omc2 = fakeOmc(t.dir, { logFile: logFile2, answers: { 'list-tasks': listTasks(id2, 'in_progress', '') } });
+    const r2 = run(t, [id2, '--timeout', '10', '--limit', '3600'], { OMC_PROVIDER_TASK_OMC_BIN: omc2 });
+    assert.equal(r2.status, 1, JSON.stringify({ o: r2.stdout, e: r2.stderr }));
+    assert.ok(r2.stdout.includes('in progress: 1'), r2.stdout);
+    assert.ok(!calls(logFile2).some((c) => c.argv[1] === 'shutdown'), 'no shutdown below the explicit limit');
+    assert.equal(t.read(id2).limit_s, 3600);
+    assert.equal(t.read(id2).verdict, null);
   });
 });

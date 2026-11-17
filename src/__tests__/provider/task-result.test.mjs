@@ -241,12 +241,12 @@ describe.skipIf(process.platform === 'win32')('provider task result validator', 
     assert.equal(abandon.handoff, true, js(abandon));
   });
 
-  it('(21) failed start: start_exit_code 4 gives start_failed with cause quota, another code environment, code 0 does not interfere', () => {
-    const quota = evaluateResult({ task: { status: 'pending' }, taskFile: { start_exit_code: 4 } });
+  it('(21) failed start: with no OMC task found, start_exit_code 4 gives start_failed with cause quota, another code environment, code 0 does not interfere', () => {
+    const quota = evaluateResult({ task: null, taskFile: { start_exit_code: 4 } });
     assert.equal(quota.status, 'start_failed', js(quota));
     assert.equal(quota.cause, 'quota', js(quota));
     assert.equal(quota.handoff, true, js(quota));
-    const environment = evaluateResult({ task: { status: 'pending' }, taskFile: { start_exit_code: 1 } });
+    const environment = evaluateResult({ task: null, taskFile: { start_exit_code: 1 } });
     assert.equal(environment.status, 'start_failed', js(environment));
     assert.equal(environment.cause, 'environment', js(environment));
     const ok = evaluateResult({ task: { status: 'completed', result: DONECLAIM }, taskFile: { start_exit_code: 0 } });
@@ -254,6 +254,27 @@ describe.skipIf(process.platform === 'win32')('provider task result validator', 
     // killed takes precedence over start_failed as well
     const killed = evaluateResult({ task: { status: 'pending' }, taskFile: { killed: '2026-11-14T20:00:00.000Z', start_exit_code: 4 } });
     assert.equal(killed.status, 'killed', js(killed));
+  });
+
+  it('(21b) a found OMC task wins over a non-zero start_exit_code, whatever its status (omc team can end with a non-zero exit code for a team that ran): completed is evaluated from its result, failed and blocked keep their own status, pending and in_progress stay in_progress; none of them is a start_failed verdict', () => {
+    const taskFile = { start_exit_code: 1, start_error: 'startup_failure worker=worker-1' };
+    const completed = evaluateResult({ task: { status: 'completed', result: DONECLAIM }, taskFile });
+    assert.equal(completed.status, 'success', js(completed));
+    assert.equal(completed.handoff, false, js(completed));
+    assert.deepEqual(completed.errors, [], js(completed));
+    const failed = evaluateResult({ task: { status: 'failed', error: 'worker crashed' }, taskFile });
+    assert.equal(failed.status, 'failed', js(failed));
+    assert.equal(failed.cause, 'worker crashed', js(failed));
+    const blocked = evaluateResult({ task: { status: 'blocked', result: 'NEED: a decision' }, taskFile });
+    assert.equal(blocked.status, 'blocked', js(blocked));
+    for (const status of ['pending', 'in_progress']) {
+      const running = evaluateResult({ task: { status }, taskFile });
+      assert.equal(running.status, 'in_progress', js(running));
+      assert.equal(running.handoff, false, js(running));
+      assert.equal(running.cause, null, js(running));
+    }
+    // no task at all: the launch failure decides
+    assert.equal(evaluateResult({ task: null, taskFile }).status, 'start_failed');
   });
 
   it('(22) no input data gives unknown with a handoff; a task in progress with a live worker gives in_progress', () => {

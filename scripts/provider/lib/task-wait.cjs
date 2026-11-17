@@ -10,12 +10,15 @@
 // same directory and rename), so `kill` and `wait` do not lose each other's fields.
 // `limitS` (--limit S): total time limit counted from the `start` field of the task file; after it is exceeded
 // `omc team shutdown <team> --force` runs (binary from OMC_PROVIDER_TASK_OMC_BIN) and the result is
-// { status: 'failed', cause: 'timeout' }. Without limitS there is no limit.
+// { status: 'failed', cause: 'timeout' }; the verdict is written first, so a launcher that still waits for the start lock does not start
+// the team afterwards. Without limitS this function has no limit (the `provider-task wait` command passes the profile's
+// limits.taskTimeoutSeconds when --limit is not given).
 // Limits of --timeout: min 10 s, default 30 s, max 3600 s; a value <= 0 or non-numeric is rejected (an Error
 // with errorCode 2, the CLI exits with code 2).
 // Order of resolving the state of a task: (a) killed in the task file gives a verdict at once through
 // `evaluate` with the task file, also with a task in progress and with a missing OMC task; (b) an OMC task
-// found gives the state from the task, also with start_exit_code != 0; (c) a missing OMC task with a start
+// found gives the state from the task, also with start_exit_code != 0 (a task still pending or in progress
+// ends early only on a worker status blocked or failed); (c) a missing OMC task with a start
 // exit code other than 0 and null gives start_failed at once with the cause from the code (4 = quota), without
 // grace; (d) a missing task with code 0/null goes through evaluateMissingTask (start-lock queue, grace,
 // dead _start, queue ceiling). A failure of the `omc team api` call (exit code != 0, bad JSON) is not a
@@ -166,8 +169,8 @@ const taskFactsDefault = (ctx) => {
 };
 
 // Worker status from `omc team api read-worker-status --input '{"team_name":...,"worker":...}' --json` (field
-// data.status); a spawn failure or invalid JSON gives null. It does not read the heartbeat (tasks in progress
-// are not evaluated). The call runs in the cwd of the task (third argument).
+// data.status); a spawn failure or invalid JSON gives null. It does not read the heartbeat. The call runs in the cwd of the task
+// (third argument).
 const workerStatusDefault = (env) => (team, owner, d) => {
   const w = spawnSync(omcBinary(env), ['team', 'api', 'read-worker-status', '--input', JSON.stringify({ team_name: team, worker: owner }), '--json'], { encoding: 'utf8', maxBuffer: 32 * 1024 * 1024, cwd: (d && d.cwd) || process.cwd() });
   if (w.status !== 0) return null;
@@ -244,17 +247,11 @@ async function wait(options) {
   };
   // Verdict: the evaluation is written BEFORE delivery under the lock, without overwriting a foreign one (a
   // parallel wait won); in_progress from the evaluation is not a verdict. Shared by: killed, finished tasks,
-  // start_exit_code and the limit.
-  const verdict = async (id, evaluation, fromEvaluation, markKilled = false) => {
+  // start_exit_code and the limit. afterWrite (optional) runs right after the write and before delivery.
+  const verdict = async (id, evaluation, fromEvaluation, afterWrite = null) => {
     if (!evaluation || evaluation.status === STATUSES.IN_PROGRESS) return;
-    const accepted = changeTaskFile(ctx, id, (x) => {
-      if (!x.verdict) {
-        x.verdict = evaluation;
-        x.verdict_ts = new Date(o.now()).toISOString();
-        if (markKilled) x.killed = true;
-      }
-      return x;
-    });
+    const accepted = changeTaskFile(ctx, id, (x) => { if (!x.verdict) { x.verdict = evaluation; x.verdict_ts = new Date(o.now()).toISOString(); } return x; });
+    if (afterWrite) afterWrite();
     await finish(id, accepted && accepted.verdict ? accepted.verdict : evaluation, fromEvaluation);
   };
 
@@ -275,21 +272,19 @@ async function wait(options) {
         await verdict(id, await evaluate({ task, workerStatus: null, taskFile: d, facts: null }), true);
         continue;
       }
-      // Check worker status for active owned tasks (in_progress state) to detect blocked or failed workers:
-      // the worker bootstrap instructs blocked workers to write their status, and evaluateResult recognizes
-      // them as 'blocked' or 'worker_dead'. Also check for finished tasks (state and evaluation from the OMC task).
-      // with data: the worker status from read-worker-status for the team from the task file and the owner of
-      // the OMC task (without an owner, an error or bad JSON: null) and the facts from the journal (a missing
-      // module, an exception or null: null and a message on stderr). The heartbeat is not read.
+      // The worker status comes from read-worker-status for the team from the task file and the owner of the OMC task (without an
+      // owner, an error or bad JSON: null); the facts from the journal (a missing module, an exception or null: null and a message
+      // on stderr). The heartbeat is not read. A finished task is evaluated with both. A task still pending or in progress is
+      // ended early only on proof from the worker status: `blocked` (a blocker or a request, evaluated as blocked) or `failed` (a
+      // dead worker, evaluated as worker_dead); any other state keeps waiting.
       if (task) {
-        // Read worker status for both in-progress and finished tasks (if the task has an owner).
+        const finished = !IN_PROGRESS_STATES.has(task.status);
         let status = null;
         if (typeof task.owner === 'string' && task.owner) {
           try { status = await workerStatus(d.team, task.owner, d); } catch (e) { console.error(`provider-task wait: ${id}: worker status: ${e.message}`); }
         }
-        // Finished tasks also read facts from the journal.
         let facts = null;
-        if (!IN_PROGRESS_STATES.has(task.status)) {
+        if (finished) {
           if (typeof taskFacts !== 'function') console.error(`provider-task wait: ${id}: journal facts unavailable (no task log module)`);
           else {
             try {
@@ -298,8 +293,7 @@ async function wait(options) {
             } catch (e) { console.error(`provider-task wait: ${id}: journal facts: ${e.message}`); facts = null; }
           }
         }
-        // Evaluate if finished or if worker status indicates a terminal state (blocked/worker_dead).
-        if (!IN_PROGRESS_STATES.has(task.status) || (status && status.state && ['blocked', 'failed'].includes(status.state))) {
+        if (finished || ['blocked', 'failed'].includes(status?.state)) {
           await verdict(id, await evaluate({ task, workerStatus: status, taskFile: d, facts }), true);
           continue;
         }
@@ -315,9 +309,13 @@ async function wait(options) {
       if (limit != null && d.start) {
         const elapsed = (o.now() - Date.parse(d.start)) / 1000;
         if (Number.isFinite(elapsed) && elapsed > limit) {
-          if (typeof d.team === 'string' && d.team) shutdownSync(env, d.team, d);
-          else console.error(`provider-task wait: ${id}: time limit exceeded and the task file has no team name; shutdown skipped`);
-          await verdict(id, { status: 'failed', cause: 'timeout', handoff: true, errors: ['total time limit exceeded'], gaps: null, required: null, unverified: null, evidence: null, points: null, escalation: null, heartbeat_age_s: null }, false, true);
+          // The verdict is written BEFORE the shutdown (afterWrite): a launcher that still waits for the start lock has no team yet, so the
+          // shutdown finds nothing to close; it sees the verdict when it takes the lock and does not start the team.
+          const shutdown = () => {
+            if (typeof d.team === 'string' && d.team) shutdownSync(env, d.team, d);
+            else console.error(`provider-task wait: ${id}: time limit exceeded and the task file has no team name; shutdown skipped`);
+          };
+          await verdict(id, { status: 'failed', cause: 'timeout', handoff: true, errors: ['total time limit exceeded'], gaps: null, required: null, unverified: null, evidence: null, points: null, escalation: null, heartbeat_age_s: null }, false, shutdown);
         }
       }
       // The start-lock queue and grace are evaluated in one function, evaluateMissingTask: the queue and grace

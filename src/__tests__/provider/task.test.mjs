@@ -1069,6 +1069,60 @@ setTimeout(()=>process.exit(0), 3200);`], { stdio: 'ignore' });
     cleanup();
   }, 120000);
 
+  // A launcher queued on the start lock has no team yet, so `kill` and the time limit of `wait` shut down nothing; after they record killed or the verdict,
+  // the launcher must not start the team when it takes the lock (quota and the worktree would be used by a task already reported as ended).
+  const queuedLauncher = async (f, text) => {
+    const lockDir = join(f.state, 'locks');
+    mkdirSync(lockDir, { recursive: true });
+    const lock = join(lockDir, `start-${createHash('sha1').update(realpathSync(f.cwd)).digest('hex')}.lock`);
+    const marker = join(f.dir, 'marker-queued');
+    const fakeMarker = join(f.dir, 'team-fake-marker.cjs');
+    writeFileSync(fakeMarker, `#!${process.execPath}
+require('node:fs').writeFileSync(process.env.MARKER_FILE, String(process.pid));
+process.exit(0);
+`, { mode: 0o755 });
+    const peer = livePeer();
+    writeFileSync(lock, js({ pid: peer.pid, ts: Date.now() }));
+    const r = await f.start([text], undefined, { OMC_PROVIDER_TASK_TEAM_BIN: fakeMarker, MARKER_FILE: marker });
+    check(r.status === 0 && /^[0-9a-f]{8}$/.test(r.id), `start: ${js(r.stdout.slice(0, 200))}, err ${r.stderr.slice(0, 200)}`);
+    check(await waitFor(() => (f.task(r.id) || {}).queue_ts, 15000), `the launcher did not queue: ${js(f.task(r.id))}`);
+    const release = () => { try { peer.kill('SIGKILL'); } catch { /* already dead */ } try { unlinkSync(lock); } catch { /* none */ } };
+    return { id: r.id, marker, lock, release };
+  };
+  it('(T10) a launcher queued on the start lock does not start the team after `wait` ended the task at its time limit (the explicit --limit, and the profile deadline without --limit); the timeout stays failed/timeout in result and status (not killed), the start lock is released', async () => {
+    for (const viaProfile of [false, true]) {
+      const f = fixture(viaProfile ? { limits: { taskTimeoutSeconds: 1 } } : {});
+      const q = await queuedLauncher(f, `Test a queued launcher after the time limit ${viaProfile ? 'from the profile' : 'from --limit'}`);
+      try {
+        const w = f.run(['wait', q.id, ...(viaProfile ? [] : ['--limit', '1']), '--timeout', '10'], f.scenario({}));
+        check(w.status === 2 && new RegExp(`${q.id} -> failed .*timeout`).test(w.stdout), `wait: ${js({ s: w.status, o: w.stdout, e: w.stderr.slice(0, 300) })}`);
+        const z = f.task(q.id);
+        check(z.verdict && z.verdict.status === 'failed' && z.verdict.cause === 'timeout' && !z.killed, js(z));
+        check(f.shutdowns().length === 1, `the shutdown of the limit: ${js(f.omcCalls())}`);
+        for (const command of ['result', 'status']) {
+          const out = JSON.parse(f.run([command, q.id], f.scenario({})).stdout);
+          check(out.status === 'failed' && !/killed/.test(js(out)), `${command} after the timeout: ${js(out)}`);
+        }
+        q.release();
+        check(await waitFor(() => (f.task(q.id) || {}).start_error === 'cancelled before the team was started', 20000), `the launcher did not cancel: ${js(f.task(q.id))}`);
+        check(!existsSync(q.marker), 'the team was started after the verdict');
+        check(!existsSync(q.lock), 'the start lock of the cancelled launcher was not released');
+        check((f.task(q.id).omc_started_at ?? null) === null, js(f.task(q.id)));
+      } finally { q.release(); }
+    }
+  }, 120000);
+  it('(T11) a launcher queued on the start lock does not start the team after `kill`: the task stays killed, the launcher cancels and releases the lock', async () => {
+    const f = fixture();
+    const q = await queuedLauncher(f, 'Test a queued launcher after a kill');
+    try {
+      const k = f.run(['kill', q.id], f.scenario({}));
+      check(k.status === 0 && f.task(q.id).killed && f.shutdowns().length === 1, js({ s: k.status, z: f.task(q.id), c: f.omcCalls() }));
+      q.release();
+      check(await waitFor(() => (f.task(q.id) || {}).start_error === 'cancelled before the team was started', 20000), `the launcher did not cancel: ${js(f.task(q.id))}`);
+      check(!existsSync(q.marker) && !existsSync(q.lock), `marker ${existsSync(q.marker)}, lock ${existsSync(q.lock)}`);
+      check(JSON.parse(f.run(['status', q.id], f.scenario({})).stdout).status === 'killed', 'status killed');
+    } finally { q.release(); }
+  }, 120000);
   it('(T9) start_error null on start_exit_code 0 with a non-empty stderr of provider-team (the stderr stays in <id>.err.log); on a non-zero code the last stderr line as before (L6)', async () => {
     const f = fixture();
     const stderrLine = '[team/tmux-session] worker start submit key sent worker=worker-1 sendStatus=0 stderr=""';

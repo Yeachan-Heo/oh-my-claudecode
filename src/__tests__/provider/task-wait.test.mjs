@@ -496,6 +496,88 @@ process.exit(${Number(code)});
     assert.equal(d.delivered, null);
   });
 
+  it('(25b) the worker status of a task that is still in progress is read: state blocked ends the wait with a blocked verdict (the reason as Required), state failed with worker_dead and a handoff; any other state (idle, null) keeps waiting without a verdict', async () => {
+    const inProgress = { id: '1', status: 'in_progress', owner: 'worker-1' };
+    // blocked: the real evaluation, the verdict is written and delivered once
+    let s = environment();
+    let id = 'a5b6c7d8';
+    s.save(id);
+    let statusCalls = 0;
+    let r = await wait({
+      ids: [id], timeoutS: 10, ...s.common,
+      readTask: async () => ({ ...inProgress, subject: `${sub(id)} test task` }),
+      workerStatus: async (team, owner) => { statusCalls++; assert.equal(team, sub(id)); assert.equal(owner, 'worker-1'); return { state: 'blocked', reason: 'needs a decision on the scope' }; },
+    });
+    assert.ok(statusCalls >= 1, 'the worker status is read for a task in progress');
+    assert.equal(r.in_progress, 0);
+    assert.equal(r.results[0].status, 'blocked');
+    let d = s.read(id);
+    assert.equal(d.verdict.status, 'blocked');
+    assert.equal(d.verdict.required, 'needs a decision on the scope');
+    assert.ok(d.verdict_ts && d.delivered);
+    // failed: proof of death of the worker
+    s = environment();
+    id = 'b6c7d8e9';
+    s.save(id);
+    r = await wait({
+      ids: [id], timeoutS: 10, ...s.common,
+      readTask: async () => ({ ...inProgress, subject: `${sub(id)} test task` }),
+      workerStatus: async () => ({ state: 'failed' }),
+    });
+    assert.equal(r.results[0].status, 'worker_dead');
+    assert.equal(r.results[0].handoff, true);
+    assert.equal(r.handoff, true);
+    d = s.read(id);
+    assert.equal(d.verdict.status, 'worker_dead');
+    assert.ok(d.delivered);
+    // no proof: waiting goes on (idle, working, no status at all)
+    for (const state of [{ state: 'idle' }, { state: 'working' }, null]) {
+      s = environment();
+      id = 'c7d8e9fa';
+      s.save(id);
+      statusCalls = 0;
+      r = await wait({
+        ids: [id], timeoutS: 10, ...s.common,
+        readTask: async () => ({ ...inProgress, subject: `${sub(id)} test task` }),
+        workerStatus: async () => { statusCalls++; return state; },
+      });
+      assert.equal(r.timed_out, true, JSON.stringify(state));
+      assert.deepEqual(r.results, []);
+      assert.ok(statusCalls >= 1);
+      d = s.read(id);
+      assert.equal(d.verdict, null);
+      assert.equal(d.delivered, null);
+    }
+  });
+
+  it('(9b) the time limit writes the verdict BEFORE the shutdown (a launcher queued on the start lock must see it when it takes the lock) and does not mark the task killed: the verdict stays failed/timeout', async () => {
+    const s = environment();
+    const id = 'e1f2a3b4';
+    s.save(id);
+    const record = join(s.dir, 'omc-snapshot.json');
+    const fake = join(s.dir, 'omc-snapshot.cjs');
+    writeFileSync(fake, `#!${process.execPath}
+const { readFileSync, writeFileSync } = require('node:fs');
+const d = JSON.parse(readFileSync(${JSON.stringify(s.file(id))}, 'utf8'));
+writeFileSync(${JSON.stringify(record)}, JSON.stringify({ argv: process.argv.slice(2), verdict: d.verdict, killed: d.killed, delivered: d.delivered }));
+`, { mode: 0o755 });
+    const r = await wait({
+      ids: [id], limitS: 30, ...s.common, env: { ...s.env, OMC_PROVIDER_TASK_OMC_BIN: fake },
+      readTask: async () => ({ status: 'in_progress' }),
+    });
+    const seen = JSON.parse(readFileSync(record, 'utf8'));
+    assert.deepEqual(seen.argv, ['team', 'shutdown', sub(id), '--force']);
+    assert.equal(seen.verdict.status, 'failed', 'the verdict is already in the task file when the shutdown runs');
+    assert.equal(seen.verdict.cause, 'timeout');
+    assert.equal(seen.delivered, null, 'delivery follows the shutdown');
+    assert.equal(seen.killed, null);
+    const d = s.read(id);
+    assert.equal(d.killed, null, 'the limit does not mark the task killed (result and status would report killed instead of failed/timeout)');
+    assert.equal(d.verdict.status, 'failed');
+    assert.ok(d.delivered);
+    assert.equal(r.results[0].cause, 'timeout');
+  });
+
   it('(29) an empty lock from 2 min ago is taken over (wait works normally), a fresh empty lock is awaited up to the lock ceiling', async () => {
     // A: an old empty lock taken over: wait passes and ends with a result.
     const s = environment();
