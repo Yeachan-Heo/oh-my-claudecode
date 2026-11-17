@@ -36,7 +36,8 @@ export async function launch(options = {}) {
       await page.goto(target, { waitUntil: "load" });
     },
     async snapshot() {
-      return page.evaluate(() => ({
+      /* eslint-disable no-undef -- location, document are browser globals available in page.evaluate() */
+      const browserState = await page.evaluate(() => ({
         url: location.href,
         title: document.title,
         text: document.body?.innerText?.slice(0, 4000) ?? "",
@@ -44,10 +45,14 @@ export async function launch(options = {}) {
           (b) => b.textContent?.trim() ?? "",
         ),
         inputs: [...document.querySelectorAll("input, textarea")].map((i) => i.type ?? "text"),
+      }));
+      /* eslint-enable no-undef */
+      return {
+        ...browserState,
         consoleErrors: [...consoleErrors],
         failedResponses: [...failedResponses],
         uncaught: [...uncaught],
-      }));
+      };
     },
     async apply(action) {
       switch (action.action) {
