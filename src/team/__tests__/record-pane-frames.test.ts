@@ -212,6 +212,28 @@ describe('record-pane-frames extract', () => {
   });
 });
 
+describe('record-pane-frames arguments', () => {
+  it.each([
+    { name: 'an unknown step kind', args: ['record', '--provider', 'claude', '--step', 'typo:x'], message: 'unknown --step typo:x' },
+    { name: 'a negative sleep', args: ['record', '--provider', 'claude', '--step', 'sleep:-1'], message: 'unknown --step sleep:-1' },
+    { name: 'a sleep that is not a number', args: ['record', '--provider', 'claude', '--step', 'sleep:soon'], message: 'unknown --step sleep:soon' },
+    { name: 'record without --provider', args: ['record'], message: '--provider is required' },
+    { name: 'an unknown command', args: ['replay'], message: 'unknown command replay' },
+    { name: 'no command', args: [], message: 'unknown command <none>' },
+  ])('refuses $name before it records anything', async ({ args, message }) => {
+    const out = join(root, 'out');
+    // A binary that does not exist, so a recorder that stops refusing launches no real provider.
+    const safe = ['--out', out, '--bin', join(root, 'no-such-provider'), '--args', '[]', '--settle', '0', '--timeout', '2'];
+    const run = await runRecorder(args[0] === 'record' ? [...args, ...safe] : args);
+
+    expect(run.code).toBe(2);
+    expect(run.stderr).toContain(message);
+    expect(run.stdout).toBe('');
+    expect(existsSync(out)).toBe(false);
+    expect(leftoverSockets()).toEqual([]);
+  });
+});
+
 const CONTRACT_STUB_SOURCE = `#!/usr/bin/env node
 import { writeFileSync } from 'node:fs';
 if (process.argv[2] === '--version') {
