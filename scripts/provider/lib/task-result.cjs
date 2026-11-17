@@ -291,8 +291,10 @@ function evaluateResult({ task = null, workerStatus = null, taskFile = null, fac
   if (taskFile?.killed) {
     // killed takes precedence over a late completed (a human decision is not overwritten by a worker result).
     evaluation.status = 'killed';
-  } else if (typeof taskFile?.start_exit_code === 'number' && taskFile.start_exit_code !== 0) {
-    // Failed start: code 4 is a refusal by the quota gate, other codes go as environment.
+  } else if (typeof taskFile?.start_exit_code === 'number' && taskFile.start_exit_code !== 0 && (!task || ['pending', 'in_progress'].includes(task.status))) {
+    // Failed start: applies only when no task was found or the task is still in progress (not terminal).
+    // For a completed/failed/blocked task, prefer the task status over the launch exit code.
+    // Code 4 is a refusal by the quota gate, other codes go as environment.
     evaluation.status = 'start_failed';
     evaluation.cause = CAUSE_OF_START_EXIT[taskFile.start_exit_code] ?? vocab.CAUSES.ENVIRONMENT;
     evaluation.handoff = true;

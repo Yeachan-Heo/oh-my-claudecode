@@ -3,7 +3,7 @@
 // (a previous life of a recycled pid) and corrupt or very old slots are removed while a slot is taken.
 // Starts above the limit wait (polling) for profile.limits.slotWaitMs; 0 means refuse at once.
 // Races between parallel starts are serialized by a lock file (O_EXCL, owner pid and timestamp inside).
-const { closeSync, mkdirSync, openSync, readdirSync, readFileSync, unlinkSync, writeFileSync, writeSync } = require('node:fs');
+const { closeSync, mkdirSync, openSync, readdirSync, readFileSync, statSync, unlinkSync, writeFileSync, writeSync } = require('node:fs');
 const { join } = require('node:path');
 const { ProfileError, statePath } = require('./profile.cjs');
 
@@ -48,7 +48,12 @@ function tryAcquireSlot(dir, limit) {
   } catch (e) {
     if (e && e.code !== 'EEXIST') throw e;
     let owner = null;
-    try { owner = JSON.parse(readFileSync(lock, 'utf8')); } catch { /* empty or corrupt lock: treated as dead */ }
+    try { owner = JSON.parse(readFileSync(lock, 'utf8')); } catch {
+      // Empty or corrupt lock: check age before taking over (avoid race with fresh locks being written).
+      let st = null;
+      try { st = statSync(lock); } catch { /* vanished */ }
+      if (st && Date.now() - st.mtimeMs < 1000) return null; // Fresh lock (less than 1 second old): assume it's being written
+    }
     if (owner && alive(owner.pid) && Date.now() - owner.ts < LOCK_MAX_AGE_MS) return null;
     try { unlinkSync(lock); } catch { /* another process took it over */ }
     return null;

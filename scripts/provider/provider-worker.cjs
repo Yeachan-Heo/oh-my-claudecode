@@ -109,7 +109,13 @@ if (!direct && !env.OMC_TEAM_WORKER) {
   for (;;) {
     try { loadedProfile = loadProfile(env); break; } catch (e) {
       if (!(e instanceof ProfileError)) throw e;
-      if (e.code === 'missing_profile') { loadedProfile = null; break; }
+      if (e.code === 'missing_profile') {
+        // Reject invalid profile selections: if OMC_PROVIDER_PROFILE is set but the profile is not found,
+        // fail with a configuration error instead of launching as Claude (which would bypass provider credential/quota checks).
+        if (env.OMC_PROVIDER_PROFILE) fail(2, `provider profile selection error: ${e.message}`);
+        loadedProfile = null;
+        break;
+      }
       const name = e.code === 'bad_field' ? (/\b(OMC_PROVIDER_[A-Z_]+)\b/.exec(e.message) || [])[1] : null;
       if (!name || !TOLERATED.has(name) || !(name in env)) fail(e.exit, e.message);
       badEnv.add(name);

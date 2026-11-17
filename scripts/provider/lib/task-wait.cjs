@@ -245,9 +245,16 @@ async function wait(options) {
   // Verdict: the evaluation is written BEFORE delivery under the lock, without overwriting a foreign one (a
   // parallel wait won); in_progress from the evaluation is not a verdict. Shared by: killed, finished tasks,
   // start_exit_code and the limit.
-  const verdict = async (id, evaluation, fromEvaluation) => {
+  const verdict = async (id, evaluation, fromEvaluation, markKilled = false) => {
     if (!evaluation || evaluation.status === STATUSES.IN_PROGRESS) return;
-    const accepted = changeTaskFile(ctx, id, (x) => { if (!x.verdict) { x.verdict = evaluation; x.verdict_ts = new Date(o.now()).toISOString(); } return x; });
+    const accepted = changeTaskFile(ctx, id, (x) => {
+      if (!x.verdict) {
+        x.verdict = evaluation;
+        x.verdict_ts = new Date(o.now()).toISOString();
+        if (markKilled) x.killed = true;
+      }
+      return x;
+    });
     await finish(id, accepted && accepted.verdict ? accepted.verdict : evaluation, fromEvaluation);
   };
 
@@ -268,25 +275,34 @@ async function wait(options) {
         await verdict(id, await evaluate({ task, workerStatus: null, taskFile: d, facts: null }), true);
         continue;
       }
-      // Finished (the state and evaluation come from the OMC task, also with start_exit_code != 0): evaluation
+      // Check worker status for active owned tasks (in_progress state) to detect blocked or failed workers:
+      // the worker bootstrap instructs blocked workers to write their status, and evaluateResult recognizes
+      // them as 'blocked' or 'worker_dead'. Also check for finished tasks (state and evaluation from the OMC task).
       // with data: the worker status from read-worker-status for the team from the task file and the owner of
       // the OMC task (without an owner, an error or bad JSON: null) and the facts from the journal (a missing
       // module, an exception or null: null and a message on stderr). The heartbeat is not read.
-      if (task && !IN_PROGRESS_STATES.has(task.status)) {
+      if (task) {
+        // Read worker status for both in-progress and finished tasks (if the task has an owner).
         let status = null;
         if (typeof task.owner === 'string' && task.owner) {
           try { status = await workerStatus(d.team, task.owner, d); } catch (e) { console.error(`provider-task wait: ${id}: worker status: ${e.message}`); }
         }
+        // Finished tasks also read facts from the journal.
         let facts = null;
-        if (typeof taskFacts !== 'function') console.error(`provider-task wait: ${id}: journal facts unavailable (no task log module)`);
-        else {
-          try {
-            facts = await taskFacts(id);
-            if (facts == null) console.error(`provider-task wait: ${id}: no journal facts (taskRow returned null)`);
-          } catch (e) { console.error(`provider-task wait: ${id}: journal facts: ${e.message}`); facts = null; }
+        if (!IN_PROGRESS_STATES.has(task.status)) {
+          if (typeof taskFacts !== 'function') console.error(`provider-task wait: ${id}: journal facts unavailable (no task log module)`);
+          else {
+            try {
+              facts = await taskFacts(id);
+              if (facts == null) console.error(`provider-task wait: ${id}: no journal facts (taskRow returned null)`);
+            } catch (e) { console.error(`provider-task wait: ${id}: journal facts: ${e.message}`); facts = null; }
+          }
         }
-        await verdict(id, await evaluate({ task, workerStatus: status, taskFile: d, facts }), true);
-        continue;
+        // Evaluate if finished or if worker status indicates a terminal state (blocked/worker_dead).
+        if (!IN_PROGRESS_STATES.has(task.status) || (status && status.state && ['blocked', 'failed'].includes(status.state))) {
+          await verdict(id, await evaluate({ task, workerStatus: status, taskFile: d, facts }), true);
+          continue;
+        }
       }
       // A missing OMC task (successful read) with a start exit code other than 0 and null: start_failed at once,
       // without grace, with the cause from the code (4 = quota). Before the limit: the team did not start and shutdown has nothing to close.
@@ -301,7 +317,7 @@ async function wait(options) {
         if (Number.isFinite(elapsed) && elapsed > limit) {
           if (typeof d.team === 'string' && d.team) shutdownSync(env, d.team, d);
           else console.error(`provider-task wait: ${id}: time limit exceeded and the task file has no team name; shutdown skipped`);
-          await verdict(id, { status: 'failed', cause: 'timeout', handoff: true, errors: ['total time limit exceeded'], gaps: null, required: null, unverified: null, evidence: null, points: null, escalation: null, heartbeat_age_s: null }, false);
+          await verdict(id, { status: 'failed', cause: 'timeout', handoff: true, errors: ['total time limit exceeded'], gaps: null, required: null, unverified: null, evidence: null, points: null, escalation: null, heartbeat_age_s: null }, false, true);
         }
       }
       // The start-lock queue and grace are evaluated in one function, evaluateMissingTask: the queue and grace
