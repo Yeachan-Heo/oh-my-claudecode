@@ -5,6 +5,7 @@
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach, afterAll } from "vitest";
+import { execFileSync } from "node:child_process";
 import { existsSync, readFileSync, rmSync } from "node:fs";
 import { join } from "node:path";
 
@@ -60,6 +61,7 @@ vi.mock("../session-registry.js", async (importOriginal) => {
   return { ...actual, removeMessagesByPane: mocks.removeMessagesByPane };
 });
 
+import { quoteForCmd } from "../../cli/tmux-utils.js";
 import { HerdrError, runHerdr, type HerdrExecOptions } from "../../team/herdr-session.js";
 import {
   buildReplyInjectionSteps,
@@ -532,5 +534,181 @@ describe("errors from tmux send-keys in the log", () => {
     expect(fail(reply)).toBe(
       'ERROR: Failed to send reply injection steps to pane %5: Command failed: tmux send-keys -t %5 -l PASSWORD="start\\\\"sensitive-suffix"',
     );
+  });
+});
+
+// A failed `tmux send-keys` has the reply in the message of its error, in the form the command line has after every
+// layer around it: the escapes of the typed text (escapeReplyInput) and, for a tmux that is a `.cmd` or `.bat`
+// wrapper on native Windows, the quoting of quoteForCmd (resolveTmuxInvocation in tmux-utils.ts), which wraps the
+// argument in quotes and doubles every `"` and `%`. Node builds the message in JavaScript as
+// `Command failed: <file> <arguments joined by spaces>`, so it looks the same on every system, and the layers can
+// be put around the text here, with the real quoteForCmd, on any system. The log must show the reply masked as it
+// was written, in the same layers.
+describe("errors from tmux send-keys in the log: every layer around the typed reply, with every form of a secret", () => {
+  const WRAPPER = "C:\\Program Files\\psmux\\tmux.cmd";
+  const COMSPEC = "C:\\Windows\\System32\\cmd.exe";
+  const cmdWrapperLine = (args: string[]): string => `Command failed: ${COMSPEC} /d /s /c ${[WRAPPER, ...args].map(quoteForCmd).join(" ")}`;
+  const LAYERS: Array<[name: string, message: (args: string[]) => string]> = [
+    ["tmux started directly", (args) => `Command failed: tmux -u ${args.join(" ")}`],
+    ["a native Windows tmux.exe", (args) => `Command failed: C:\\psmux\\tmux.exe ${args.join(" ")}`],
+    ["a .cmd wrapper on native Windows (quoteForCmd)", cmdWrapperLine],
+  ];
+  // [label, reply, the reply masked]
+  const FORMS: Array<[label: string, reply: string, masked: string]> = [
+    ["bare assignment", "PASSWORD=canarysecret", "PASSWORD=****"],
+    ["escaped quote (the example from review)", 'PASSWORD="start\\"sensitive-suffix"', 'PASSWORD="****"'],
+    ["single quotes with a space", "TOKEN='two words'", "TOKEN='****'"],
+    ["a quoted value with %, spaces, &, parentheses and escaped quotes", 'api_key="50% of \\"it\\" & (more)"', 'api_key="****"'],
+    ["an escaped backslash before the closing quote", 'PASSWORD="abc\\\\" tail', 'PASSWORD="****" tail'],
+    ["a backtick, $( and ${ in a quoted value", 'SECRET="a\\"`b`$(id)${x}\\"c"', 'SECRET="****"'],
+    ["text around an escaped quote", 'please use PASSWORD="start\\"sensitive-suffix" thanks', 'please use PASSWORD="****" thanks'],
+    ["key prefix", "sk-proj-abcdefghijklmnop", "sk-****"],
+    ["key prefix inside a sentence", "use sk-proj-abcdefghijklmnop now", "use sk-**** now"],
+    ["JWT", "eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxMjM0NTY3ODkwIn0.dBjftJeZ4CVPmB92K27uhbUJU1p1r", "eyJ***"],
+    ["a path with backslashes and a percent sign next to an assignment", "copy C:\\temp\\x.txt 100% PASSWORD=canary", "copy C:\\temp\\x.txt 100% PASSWORD=****"],
+  ];
+  const PREFIX = "[reply:discord] ";
+
+  /** The text of the last send-keys failure in the log, from the word ERROR to the end of the message. */
+  const loggedFailure = (): string => {
+    const text = readFileSync(LOG_FILE, "utf-8");
+    return text.slice(text.lastIndexOf("ERROR: Failed to send reply injection steps")).replace(/\n$/, "");
+  };
+  /** Types the reply, with every send-keys call failing with the message that `message` builds from its arguments. */
+  const failThrough = (
+    message: (args: string[]) => string,
+    reply: string,
+    includePrefix = false,
+    tail = "",
+    steps = buildReplyInjectionSteps(reply, "discord", configWith(500, includePrefix)),
+  ): { logged: string; sent: string[] } => {
+    let sent: string[] = [];
+    mocks.tmuxExec.mockImplementation((args: string[]) => {
+      if (!args.includes("-l")) return "";
+      sent = args;
+      throw new Error(message(args) + tail);
+    });
+    expect(sendReplyInjectionSteps("%5", steps)).toBe(false);
+    return { logged: loggedFailure(), sent };
+  };
+  const expected = (message: (args: string[]) => string, masked: string, includePrefix: boolean): string =>
+    `ERROR: Failed to send reply injection steps to pane %5: ${message(["send-keys", "-t", "%5", "-l", (includePrefix ? PREFIX : "") + masked])}`;
+
+  describe("switch on", () => {
+    beforeEach(() => {
+      process.env[SWITCH] = "1";
+    });
+
+    it.each(LAYERS)("%s: the reply is masked as it was written, with and without the reply prefix", (_name, message) => {
+      for (const [label, reply, masked] of FORMS) {
+        for (const includePrefix of [false, true]) {
+          expect(failThrough(message, reply, includePrefix).logged, `${label}, prefix ${includePrefix}`).toBe(expected(message, masked, includePrefix));
+        }
+      }
+    });
+
+    it("the example from review, through the .cmd wrapper: the quotes that quoteForCmd doubled do not end the value", () => {
+      const { logged, sent } = failThrough(cmdWrapperLine, 'PASSWORD="start\\"sensitive-suffix"');
+      expect(sent[sent.length - 1]).toBe('PASSWORD="start\\\\"sensitive-suffix"'); // typed with the doubled backslash
+      expect(cmdWrapperLine(sent)).toContain('"PASSWORD=""start\\\\""sensitive-suffix"""'); // the doubled quotes
+      expect(logged).toBe(
+        'ERROR: Failed to send reply injection steps to pane %5: Command failed: C:\\Windows\\System32\\cmd.exe /d /s /c "C:\\Program Files\\psmux\\tmux.cmd" send-keys -t "%%5" -l "PASSWORD=""****"""',
+      );
+    });
+
+    it.each(LAYERS)("%s: the steps that walk the question menu come first and the failing step is the typed reply", (_name, message) => {
+      const mapping = { event: "ask-user-question", askUserQuestionOptionCount: 2, askUserQuestionAllowOther: true } as const;
+      const reply = 'PASSWORD="start\\"sensitive-suffix"';
+      const steps = buildReplyInjectionSteps(reply, "discord", configWith(500), mapping);
+      expect(steps.map((step) => step.kind)).toEqual(["key", "key", "key", "literal", "key"]);
+      expect(failThrough(message, reply, false, "", steps).logged).toBe(expected(message, 'PASSWORD="****"', false));
+    });
+
+    it("what the command printed to stderr follows the first line and is kept, with the reply masked in the first line", () => {
+      const tail = "\npsmux: can't find pane: %5";
+      const { logged } = failThrough(cmdWrapperLine, 'PASSWORD="start\\"sensitive-suffix"', false, tail);
+      expect(logged).toBe(`${expected(cmdWrapperLine, 'PASSWORD="****"', false)}${tail}`);
+    });
+
+    it("a real error of execFileSync through the .cmd quoting has the message that the grid builds", () => {
+      const reply = 'PASSWORD="start\\"sensitive-suffix"';
+      const steps = buildReplyInjectionSteps(reply, "discord", configWith(500));
+      mocks.tmuxExec.mockImplementation((args: string[]) => {
+        if (!args.includes("-l")) return "";
+        // Node runs the command and fails with `Command failed: <file> <arguments>` and the stderr of the command.
+        execFileSync(process.execPath, ["/d", "/s", "/c", [WRAPPER, ...args].map(quoteForCmd).join(" ")], { encoding: "utf-8", stdio: "pipe" });
+        return "";
+      });
+      expect(sendReplyInjectionSteps("%5", steps)).toBe(false);
+      const logged = loggedFailure();
+      expect(logged.split("\n")[0]).toBe(
+        `ERROR: Failed to send reply injection steps to pane %5: Command failed: ${process.execPath} /d /s /c "C:\\Program Files\\psmux\\tmux.cmd" send-keys -t "%%5" -l "PASSWORD=""****"""`,
+      );
+      expect(logged).not.toContain("sensitive-suffix");
+    });
+
+    it("a reply that quoteForCmd refuses (a NUL character) does not stop the log line", () => {
+      const steps = [{ kind: "literal", value: "PASSWORD=a\u0000b" }] as const;
+      const { logged } = failThrough((args) => `Command failed: tmux -u ${args.join(" ")}`, "", false, "", [...steps]);
+      expect(logged).toBe("ERROR: Failed to send reply injection steps to pane %5: Command failed: tmux -u send-keys -t %5 -l PASSWORD=****");
+    });
+
+    it("the Herdr path (no quoting layer): a failed prompt, with every form of a secret, in the command line and in an echo in stderr", async () => {
+      const loggedHerdrFailure = (): string => {
+        const lines = readFileSync(LOG_FILE, "utf-8").trim().split("\n");
+        return (lines.filter((l) => l.includes("Failed to inject reply into herdr pane")).pop() ?? "").replace(/^\[[^\]]*\] /, "");
+      };
+      for (const [label, reply, masked] of FORMS) {
+        for (const includePrefix of [false, true]) {
+          const typedText = (buildReplyInjectionSteps(reply, "discord", configWith(500, includePrefix))[0] as { value: string }).value;
+          const shown = (includePrefix ? PREFIX : "") + masked;
+          // empty stderr: the message is the command line of the process, logged with the escapes undone
+          mocks.herdrSendPrompt.mockRejectedValue(new HerdrError("spawn_failed", `Command failed: herdr agent prompt w9:p2 ${typedText}`));
+          await injectReplyIntoHerdrPane("w9:p2", reply, "discord", configWith(500, includePrefix));
+          expect(loggedHerdrFailure(), `${label}, prefix ${includePrefix}, command line`).toBe(
+            `ERROR: Failed to inject reply into herdr pane w9:p2: herdr_spawn_failed: Command failed: herdr agent prompt w9:p2 ${shown}`,
+          );
+          // stderr that echoes the typed text: kept as Herdr wrote it (the typed form), with the echo masked
+          const stderr = `cannot type ${typedText} into the pane\n`;
+          mocks.herdrSendPrompt.mockRejectedValue(new HerdrError("error", stderr.trim(), stderr));
+          await injectReplyIntoHerdrPane("w9:p2", reply, "discord", configWith(500, includePrefix));
+          expect(loggedHerdrFailure(), `${label}, prefix ${includePrefix}, stderr`).toBe(
+            `ERROR: Failed to inject reply into herdr pane w9:p2: herdr_error: cannot type ${sanitizeReplyInput(shown)} into the pane`,
+          );
+        }
+      }
+    });
+
+    it("a message that holds the reply in a form that is not known is masked as it was before: nothing is lost", () => {
+      const { logged } = failThrough(
+        (args) => `Command failed: wrapper-that-is-not-known ${args.slice(0, 4).join(" ")} (${args[4].replace(/ /g, "+")}) PASSWORD=bare-secret`,
+        "TOKEN=canary one",
+      );
+      expect(logged).toBe("ERROR: Failed to send reply injection steps to pane %5: Command failed: wrapper-that-is-not-known send-keys -t %5 -l (TOKEN=****) PASSWORD=****");
+    });
+  });
+
+  it.each(LAYERS.flatMap(([name, message]) => [undefined, "", "0", "true"].map((value) => [name, message, value] as const)))(
+    "switch off, %s (%s): the message is logged as the error carries it",
+    (_name, message, value) => {
+      if (value === undefined) delete process.env[SWITCH];
+      else process.env[SWITCH] = value;
+      for (const [label, reply] of FORMS) {
+        const { logged, sent } = failThrough(message, reply);
+        expect(logged, label).toBe(`ERROR: Failed to send reply injection steps to pane %5: ${message(sent)}`);
+      }
+    },
+  );
+
+  it.each([undefined, "", "0", "true"])("switch off (%s): a Herdr prompt that fails with an echo of the typed reply in stderr is logged as the error carries it", async (value) => {
+    if (value === undefined) delete process.env[SWITCH];
+    else process.env[SWITCH] = value;
+    const reply = 'PASSWORD="start\\"sensitive-suffix"';
+    const typedText = (buildReplyInjectionSteps(reply, "discord", configWith(500))[0] as { value: string }).value;
+    const stderr = `cannot type ${typedText} into the pane\n`;
+    mocks.herdrSendPrompt.mockRejectedValue(new HerdrError("error", stderr.trim(), stderr));
+    await injectReplyIntoHerdrPane("w9:p2", reply, "discord", configWith(500));
+    const line = readFileSync(LOG_FILE, "utf-8").trim().split("\n").filter((l) => l.includes("Failed to inject reply into herdr pane")).pop() ?? "";
+    expect(line.replace(/^\[[^\]]*\] /, "")).toBe(`ERROR: Failed to inject reply into herdr pane w9:p2: herdr_error: cannot type ${typedText} into the pane`);
   });
 });

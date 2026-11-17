@@ -32,7 +32,7 @@ import { join } from "path";
 import { fileURLToPath, pathToFileURL } from "url";
 import { spawn } from "child_process";
 import { randomUUID } from "crypto";
-import { tmuxExec } from "../cli/tmux-utils.js";
+import { quoteForCmd, tmuxExec } from "../cli/tmux-utils.js";
 import { request as httpsRequest } from "https";
 import { resolveDaemonModulePath } from "../utils/daemon-module-path.js";
 import { getGlobalOmcStateRoot } from "../utils/paths.js";
@@ -563,33 +563,80 @@ function unescapeReplyInput(text: string): string {
 }
 
 /**
- * The text of an error from a tmux send-keys command for the daemon log. The command line in the message of
- * such an error holds the reply as it was typed, in the escaped form of escapeReplyInput, so with the switch
- * on the escapes are undone before the redaction, which would otherwise end a quoted value early.
+ * The forms in which a text that was typed into a pane (the argument of the command that typed it) can stand in
+ * the message of an error from that command, which Node builds as `Command failed: <file> <arguments joined by
+ * spaces>`. Every layer that is put around the argument on its way to such a message belongs here:
+ * - quoteForCmd: tmux as a `.cmd` or `.bat` wrapper on native Windows gets every argument quoted (resolveTmuxInvocation
+ *   in tmux-utils.ts): wrapped in quotes, with every `"` and `%` doubled. The doubled quotes end a quoted value for
+ *   the scan, so the text cannot be redacted in this form. It throws for NUL, CR and LF, so such a text cannot stand
+ *   in a command line in this form;
+ * - the argument as it is: tmux on every other system, a native Windows tmux.exe, Herdr (execFile, no shell).
+ * The escapes of escapeReplyInput are part of the typed text itself.
  */
-function sendKeysErrorText(error: unknown): string {
+const TYPED_TEXT_FORMS: ReadonlyArray<(typed: string) => string> = [(typed) => quoteForCmd(typed), (typed) => typed];
+
+/**
+ * `text` with every typed text that stands in it, in any of its forms (TYPED_TEXT_FORMS), replaced by the same text
+ * redacted as it was written, in the same form. The scan then never sees a layer that changes where a value ends.
+ */
+function maskTypedText(text: string, typed: readonly string[]): string {
+  let masked = text;
+  for (const literal of typed) {
+    const redacted = escapeReplyInput(redactTokens(unescapeReplyInput(literal)));
+    if (redacted === literal) continue;
+    for (const form of TYPED_TEXT_FORMS) {
+      try {
+        const shown = form(literal);
+        if (shown) masked = masked.split(shown).join(form(redacted));
+      } catch {
+        // this form cannot hold the text (quoteForCmd refuses NUL, CR and LF)
+      }
+    }
+  }
+  return masked;
+}
+
+/**
+ * An error text that holds the typed text of a command: first the typed text is masked as it was written (see
+ * maskTypedText), then the whole text is redacted with the escapes of the typed text undone, which also catches
+ * what is not in a known form, as before.
+ */
+function redactTypedText(text: string, typed: readonly string[]): string {
+  return redactTokens(unescapeReplyInput(maskTypedText(text, typed)));
+}
+
+/**
+ * The text of an error from a tmux send-keys command for the daemon log. The message of such an error is the
+ * command line, and it holds the reply as it was typed: in the escaped form of escapeReplyInput and, with a `.cmd`
+ * wrapper, in the quoting of quoteForCmd (see TYPED_TEXT_FORMS). With the switch on the typed texts of `steps`
+ * are redacted as they were written (see redactTypedText); with it off the message is logged as it is.
+ */
+function sendKeysErrorText(error: unknown, steps: readonly ReplyInjectionStep[]): string {
   const message = error instanceof Error ? error.message : String(error);
-  return keyShapesEnabled() ? redactTokens(unescapeReplyInput(message)) : message;
+  if (!keyShapesEnabled()) return message;
+  return redactTypedText(message, steps.flatMap((step) => (step.kind === "literal" ? [step.value] : [])));
 }
 
 /**
  * The text of an error from the Herdr CLI for the daemon log. For plain-text stderr the error message holds
  * only the first 300 characters, while `detail` keeps all of it, so the message is rebuilt from the whole
  * stderr: redacted first and cut afterwards (see redactedPrefix). Every other error keeps its own message,
- * except that, for a command that sent a reply (`typedReply`) and with the switch on, the message is redacted
- * with the escapes of the typed reply undone: when Herdr printed nothing to stderr the message is the command
- * line of the failed process, and the command line holds the reply as it was typed (see sendKeysErrorText).
+ * except that, for a command that typed a reply (`typed` is the text it typed) and with the switch on, the typed
+ * text is redacted as it was written wherever it stands in the stderr or the message (see maskTypedText): when
+ * Herdr printed nothing to stderr the message is the command line of the failed process, and the command line
+ * holds the reply as it was typed (see sendKeysErrorText).
  */
-function herdrErrorText(error: unknown, typedReply = false): string {
+function herdrErrorText(error: unknown, typed?: string): string {
   if (!(error instanceof Error)) return String(error);
+  const typedTexts = typed !== undefined && keyShapesEnabled() ? [typed] : [];
   if (error instanceof HerdrError && error.detail) {
     const stderr = error.detail.trim();
     const prefix = `herdr_${error.code}: `;
     if (error.message === prefix + stderr.slice(0, 300)) {
-      return prefix + redactedPrefix(stderr, 300);
+      return prefix + redactedPrefix(maskTypedText(stderr, typedTexts), 300);
     }
   }
-  return typedReply && keyShapesEnabled() ? redactTokens(unescapeReplyInput(error.message)) : error.message;
+  return typedTexts.length > 0 ? redactTypedText(error.message, typedTexts) : error.message;
 }
 
 /**
@@ -673,7 +720,7 @@ export function sendReplyInjectionSteps(
     return true;
   } catch (error) {
     log(
-      `ERROR: Failed to send reply injection steps to pane ${paneId}: ${sendKeysErrorText(error)}`,
+      `ERROR: Failed to send reply injection steps to pane ${paneId}: ${sendKeysErrorText(error, steps)}`,
     );
     return false;
   }
@@ -733,7 +780,7 @@ export async function injectReplyIntoHerdrPane(
     return true;
   } catch (error) {
     log(
-      `ERROR: Failed to inject reply into herdr pane ${paneId}: ${herdrErrorText(error, true)}`,
+      `ERROR: Failed to inject reply into herdr pane ${paneId}: ${herdrErrorText(error, preview)}`,
     );
     return false;
   }
