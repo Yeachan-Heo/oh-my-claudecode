@@ -109,11 +109,12 @@ export function summarizeRows(rows) {
   const byKind = new Map();
   const bySubject = new Map();
   const decisions = new Map(); // id -> ts_ms
+  const decisionRows = new Map(); // id -> the decision row
   const outcomes = new Map(); // ref -> delta ms
   const keyFacts = new Map(); // key -> Set(facts)
   // First pass: index all decisions (regardless of file order)
   for (const w of rows) {
-    if (w.kind !== 'outcome' && typeof w.id === 'string') decisions.set(w.id, w.ts_ms);
+    if (w.kind !== 'outcome' && typeof w.id === 'string') { decisions.set(w.id, w.ts_ms); decisionRows.set(w.id, w); }
   }
   // Second pass: process all rows and match outcomes to decisions
   for (const w of rows) {
@@ -135,7 +136,7 @@ export function summarizeRows(rows) {
     }
   }
   for (const [ref, delta] of outcomes) { // decision-to-outcome deltas go to both group views of the decision
-    const d = rows.find((x) => x.id === ref);
+    const d = decisionRows.get(ref);
     if (!d) continue;
     for (const [map, g] of [[byKind, d.kind || '?'], [bySubject, subjectOf(d)]]) {
       const group = map.get(g);
