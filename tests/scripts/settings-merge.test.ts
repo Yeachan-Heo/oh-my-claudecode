@@ -149,6 +149,30 @@ describe('settings-merge script', () => {
     expect(JSON.parse(readFileSync(output, 'utf8'))).toEqual({ model: 'sonnet', apiKey: 'v', long: 'x'.repeat(201) });
   });
 
+  it('redacts nested secrets when deleting an object', () => {
+    const settings = writeJson('settings.json', { env: { ANTHROPIC_API_KEY: 'secret123', OMC_X: '1' } });
+    const patch = writeJson('patch.json', { env: null });
+    const output = join(dir, 'out.json');
+    const r = runTool(['--settings', settings, '--output', output, '--patch', patch]);
+    expect(r.status).toBe(0);
+    expect(r.stdout).toContain('env: <redacted> -> (deleted)');
+    expect(r.stdout).not.toContain('ANTHROPIC_API_KEY');
+    expect(r.stdout).not.toContain('secret123');
+    expect(JSON.parse(readFileSync(output, 'utf8'))).toEqual({});
+  });
+
+  it('redacts nested secrets when replacing a scalar with an object containing a secret', () => {
+    const settings = writeJson('settings.json', { data: 'oldvalue' });
+    const patch = writeJson('patch.json', { data: { ANTHROPIC_API_KEY: 'secret123' } });
+    const output = join(dir, 'out.json');
+    const r = runTool(['--settings', settings, '--output', output, '--patch', patch]);
+    expect(r.status).toBe(0);
+    // When replacing a scalar with an object, the merge logs the scalar replacement and then recursively processes keys
+    expect(r.stdout).toContain('data.ANTHROPIC_API_KEY: (missing) -> <redacted>');
+    expect(r.stdout).not.toContain('secret123');
+    expect(JSON.parse(readFileSync(output, 'utf8'))).toEqual({ data: { ANTHROPIC_API_KEY: 'secret123' } });
+  });
+
   it('exits 2 when the patch file is missing', () => {
     const settings = writeJson('settings.json', { model: 'sonnet' });
     const r = runTool(['--settings', settings, '--output', join(dir, 'out.json'), '--patch', join(dir, 'nope.json')]);
