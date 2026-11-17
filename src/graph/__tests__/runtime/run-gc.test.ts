@@ -354,6 +354,13 @@ function gc(root: string, extra: Partial<Parameters<typeof runGc>[0]> = {}) {
   return runGc({ runsRoot: root, retentionDays: 7, enabled: true, nowMs: NOW, ...extra });
 }
 
+// What a removal gets from a scan of the runs root, for the first run the scan lists.
+function scannedFirst(root: string): ScannedRun {
+  const scan = scanRuns({ runsRoot: root, retentionDays: 7, nowMs: NOW });
+  const run = scan.runs[0] as { identity: { dev: number; ino: number } | null; epochFloor?: number };
+  return { identity: run.identity as { dev: number; ino: number }, cutoffMs: scan.cutoffMs, epochFloor: run.epochFloor ?? 0 };
+}
+
 describe("omc graph gc", () => {
   // ---- Switch, configuration and basic retention ------------------------------------------------
 
@@ -1272,12 +1279,8 @@ describe("omc graph gc", () => {
       const realRoot = realpathSync(root);
       const dir = makeFinishedRun(root, "run-twice");
       ageTree(dir, OLD);
-      const scanOf = (): ScannedRun => {
-        const scan = scanRuns({ runsRoot: root, retentionDays: 7, nowMs: NOW });
-        return { identity: scan.runs[0].identity as { dev: number; ino: number }, cutoffMs: scan.cutoffMs };
-      };
-      const first = scanOf();
-      const second = scanOf();
+      const first = scannedFirst(root);
+      const second = scannedFirst(root);
       // An open descriptor keeps the removed directory's inode allocated, so the new run cannot reuse its number.
       const hold = openSync(dir, "r");
       try {
@@ -1338,16 +1341,97 @@ describe("omc graph gc", () => {
     });
   });
 
+  it("a run that another process locked and released after the scan, changing nothing, is kept: the lock epoch moved", () => {
+    withBase((base) => {
+      const root = makeRoot(base);
+      const dir = makeFinishedRun(root, "run-touched");
+      ageTree(dir, OLD);
+      // A resume that finds the run already finished takes the lock, changes no file and releases it.
+      const first = new FileOwnershipFence(realpathSync(root), "run-touched");
+      const taken = first.acquireSync();
+      expect(taken.outcome).toBe("acquired");
+      if (taken.outcome === "acquired") first.releaseSync(taken.epoch);
+      ageTree(dir, OLD);
+      const scannedBefore = scannedFirst(root);
+      // The scan above already saw the first epoch; a second touch happens after it.
+      const second = new FileOwnershipFence(realpathSync(root), "run-touched");
+      const again = second.acquireSync();
+      if (again.outcome === "acquired") second.releaseSync(again.epoch);
+      ageTree(dir, OLD);
+
+      expect(() => removeRun(realpathSync(root), "run-touched", scannedBefore)).toThrow(/resumed after the scan/);
+      expect(existsSync(join(dir, "journal.jsonl"))).toBe(true);
+      expect(existsSync(join(dir, "owner.lock")), "the lock taken for the check was left in the run").toBe(false);
+    });
+  });
+
+  it("without a touch after the scan the same run is removed although its epoch sidecar is recent", () => {
+    withBase((base) => {
+      const root = makeRoot(base);
+      const dir = makeFinishedRun(root, "run-quiet");
+      ageTree(dir, OLD);
+      const first = new FileOwnershipFence(realpathSync(root), "run-quiet");
+      const taken = first.acquireSync();
+      if (taken.outcome === "acquired") first.releaseSync(taken.epoch);
+      ageTree(dir, OLD);
+
+      removeRun(realpathSync(root), "run-quiet", scannedFirst(root));
+      expect(existsSync(dir)).toBe(false);
+    });
+  });
+
+  it.runIf(process.platform === "linux")("a swap of the run's name after the lock is held is refused by identity before the run is decided again", () => {
+    withBase((base) => {
+      const root = makeRoot(base);
+      const realRoot = realpathSync(root);
+      const dir = makeFinishedRun(root, "run-swapped-late");
+      ageTree(dir, OLD);
+      const swapped: ScannedRun = {
+        ...scannedFirst(root),
+        afterOwnership: () => {
+          renameSync(dir, join(base, "moved-away"));
+          makeScenarioRun(root, "run-swapped-late", SCENARIOS.running);
+          ageTree(dir, OLD);
+        },
+      };
+
+      expect(() => removeRun(realRoot, "run-swapped-late", swapped)).toThrow(/not the directory that was scanned/);
+      expect(readFileSync(join(dir, "journal.jsonl"), "utf8"), "the run that took the name was changed").toBe(journalText(1));
+      expect(readdirSync(root).filter((name) => name.startsWith(".deleted-"))).toEqual([]);
+    });
+  });
+
+  it.runIf(process.platform === "linux")("the run is decided again from the directory that was opened: a swap of the name while it is read changes nothing it reads", () => {
+    withBase((base) => {
+      const root = makeRoot(base);
+      const realRoot = realpathSync(root);
+      const dir = makeFinishedRun(root, "run-swapped-reading");
+      ageTree(dir, OLD);
+      const swapped: ScannedRun = {
+        ...scannedFirst(root),
+        afterHandle: () => {
+          // The directory is open and was checked. The name now leads to an interrupted run; reads by path would see
+          // that run and keep it. The reads of the open directory still see the finished one, and the name is
+          // refused at the moment of the move.
+          renameSync(dir, join(base, "moved-away"));
+          makeScenarioRun(root, "run-swapped-reading", SCENARIOS.running);
+          ageTree(dir, OLD);
+        },
+      };
+
+      expect(() => removeRun(realRoot, "run-swapped-reading", swapped)).toThrow(/not the directory that was scanned/);
+      expect(readFileSync(join(dir, "journal.jsonl"), "utf8"), "the run that took the name was changed").toBe(journalText(1));
+      expect(readdirSync(root).filter((name) => name.startsWith(".deleted-"))).toEqual([]);
+    });
+  });
+
   it("a leftover directory that was replaced after the scan is not deleted", () => {
     withBase((base) => {
       const root = makeRoot(base);
       const realRoot = realpathSync(root);
       const name = `.deleted-run-left-${NOW}-aaaa`;
       const leftover = makeRun(root, name);
-      const scanned: ScannedRun = {
-        identity: scanRuns({ runsRoot: root, retentionDays: 7, nowMs: NOW }).runs[0].identity as { dev: number; ino: number },
-        cutoffMs: NOW,
-      };
+      const scanned = scannedFirst(root);
       renameSync(leftover, join(base, "moved-away"));
       const replacement = makeRun(root, name, { "descriptor.json": "{}\n", "journal.jsonl": "other\n" });
 

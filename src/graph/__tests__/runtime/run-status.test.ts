@@ -323,6 +323,16 @@ describe.runIf(process.platform !== "win32")("omc graph status", () => {
     expect(refused.err).toContain("invalid run_id");
   });
 
+  it("a runs root that is a file has no such run: missing, not unreadable", async () => {
+    const runs = makeRunsRoot();
+    const file = join(runs, "not-a-directory");
+    writeFileSync(file, "x");
+
+    const result = await statusCli(["st-any", "--runs-root", file]);
+    expect(result.code).toBe(2);
+    expect(result.json?.state).toBe("missing");
+  });
+
   it("without --runs-root it reads the default .omc/graph-runs, the same literal omc graph run uses", async () => {
     const result = await statusCli(["st-no-such-run"]);
     expect(result.code).toBe(2);

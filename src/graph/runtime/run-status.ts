@@ -145,7 +145,9 @@ function readRunFiles(runDir: string, interlock: RunStatusOptions["interlock"]):
   try {
     before = lstatSync(runDir);
   } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === "ENOENT") return null;
+    // A missing run, or a runs root that is not a directory, has no such run.
+    const code = (error as NodeJS.ErrnoException).code;
+    if (code === "ENOENT" || code === "ENOTDIR") return null;
     throw error;
   }
   if (before.isSymbolicLink()) throw new UnreadableError("run directory is a symbolic link");

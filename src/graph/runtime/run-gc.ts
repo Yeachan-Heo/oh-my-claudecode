@@ -66,6 +66,7 @@ import {
   realpathSync,
   renameSync,
   rmdirSync,
+  statSync,
   unlinkSync,
   writeSync,
 } from "node:fs";
@@ -121,10 +122,16 @@ export interface FileIdentity {
   readonly ino: number;
 }
 
-// What a removal needs from the scan to re-check a run under ownership: the scanned directory and the retention cutoff.
+// What a removal needs from the scan to re-check a run under ownership: the scanned directory, the retention cutoff and
+// the highest writer epoch the run had seen. Taking the lock gives the next epoch, so a higher one means that another
+// process held the lock after the scan, even one that changed nothing.
 export interface ScannedRun {
   readonly identity: FileIdentity;
   readonly cutoffMs: number;
+  readonly epochFloor: number;
+  /** Test-only interlocks: once the lock is held, and once the directory is open, each before the run is decided again. */
+  readonly afterOwnership?: () => void;
+  readonly afterHandle?: () => void;
 }
 
 interface RunEntry {
@@ -135,6 +142,7 @@ interface RunEntry {
   bytes: number;
   newestMs: number | null;
   identity: FileIdentity | null;
+  epochFloor?: number;
   torn: boolean;
   action?: string;
   copy?: string;
@@ -271,6 +279,21 @@ function isFenceEntry(name: string): boolean {
   return name === LOCK_FILE_NAME || name === "owner.epoch" || name.startsWith(`${LOCK_FILE_NAME}.tomb.`);
 }
 
+// The highest writer epoch a run has seen, from the epoch sidecar and from the lock; 0 when it has neither.
+function epochFloorOf(runDir: string): number {
+  let floor = 0;
+  for (const name of ["owner.epoch", LOCK_FILE_NAME]) {
+    try {
+      const text = readRunFile(runDir, name).toString("utf8");
+      const value = name === LOCK_FILE_NAME ? (JSON.parse(text) as Json).epoch : Number(text);
+      if (Number.isSafeInteger(value) && value > floor) floor = value;
+    } catch {
+      // Missing or unreadable: this file gives no floor. The fence refuses a corrupt sidecar when it takes the lock.
+    }
+  }
+  return floor;
+}
+
 // Identity, newest modification time and total file size of a run directory. The directory must be a plain directory.
 // Every entry is read with lstat, so symbolic links are never followed. Under ownership (`ownedByFence`) the fence's
 // own entries and the time of the directory itself are left out: taking the lock rewrote them just now and say nothing
@@ -278,8 +301,10 @@ function isFenceEntry(name: string): boolean {
 function measureRun(
   runDir: string,
   ownedByFence = false,
+  anchored = false,
 ): { newestMs: number; bytes: number; identity: FileIdentity } {
-  const top = lstatSync(runDir);
+  // An anchored path (/proc/self/fd/<fd>) is a link to the open directory, so it is read with stat, not lstat.
+  const top = anchored ? statSync(runDir) : lstatSync(runDir);
   if (!top.isDirectory()) throw new Error("run is not a plain directory");
   let newestMs = ownedByFence ? 0 : top.mtimeMs;
   let bytes = 0;
@@ -692,6 +717,7 @@ export function scanRuns({
     run.reason = verdict.reason;
     run.state = verdict.state;
     run.torn = verdict.torn;
+    if (verdict.decision === "delete") run.epochFloor = epochFloorOf(runDir);
   }
   return scan;
 }
@@ -850,6 +876,30 @@ function takeOwnership(
   return { fence, epoch: acquired.epoch };
 }
 
+// Calls `read` with a path for reading the run directory through an open handle on it, after checking that the handle
+// is the expected directory. On Linux the path is /proc/self/fd/<fd>, which names the opened directory itself, so a
+// swap of the directory's name cannot redirect the reads; elsewhere it is the path of the directory.
+function withDirectoryHandle<T>(
+  runDir: string,
+  expected: FileIdentity,
+  read: (path: string, anchored: boolean) => T,
+): T {
+  let fd: number;
+  try {
+    fd = openSync(runDir, fsConstants.O_RDONLY | (fsConstants.O_DIRECTORY ?? 0) | NOFOLLOW);
+  } catch (error) {
+    const code = (error as NodeJS.ErrnoException).code;
+    if (code === "ELOOP" || code === "ENOTDIR") throw new Error("run is no longer a plain directory");
+    throw error;
+  }
+  try {
+    assertIdentity(fstatSync(fd), expected, "the run directory");
+    return process.platform === "linux" ? read(`/proc/self/fd/${fd}`, true) : read(runDir, false);
+  } finally {
+    closeSync(fd);
+  }
+}
+
 // Moves one run out of the runs namespace while this process owns it, and returns the new path. After the rename
 // the run directory name is gone: a later resume of the same run id starts a fresh directory, and nothing can
 // reach the moved one by its run id. With `scanned` the run must be the scanned directory and must still be a
@@ -868,11 +918,18 @@ export function quarantineRun(
   const quarantine = join(realRoot, `${QUARANTINE_PREFIX}${id}-${nowMs}-${suffix}`);
   try {
     if (scanned !== undefined) {
+      scanned.afterOwnership?.();
+      // Another process took the lock after the scan, even if it changed nothing: it used the run since.
+      if (epoch > scanned.epochFloor + 1) throw new Error("run was resumed after the scan; not removed");
       // The verdict of the scan is only a hint: the run may have been resumed and finished since. It is decided
-      // again, now that no other process can change it.
-      const verdict = judgeRun(runDir, id, measureRun(runDir, true).newestMs, scanned.cutoffMs);
+      // again, now that no other process can change it. The files are read through the open directory, so the name
+      // cannot be swapped under the reads (Linux; elsewhere by path), and the name must still be the scanned
+      // directory at the moment of the move.
+      const verdict = withDirectoryHandle(runDir, scanned.identity, (path, anchored) => {
+        scanned.afterHandle?.();
+        return judgeRun(path, id, measureRun(path, true, anchored).newestMs, scanned.cutoffMs);
+      });
       if (verdict.decision !== "delete") throw new Error(`run changed after the scan (${verdict.reason}); not removed`);
-      // The reads above went by path: the name must still be the scanned directory at the moment of the move.
       assertIdentity(lstatSync(runDir), scanned.identity, "the run directory");
     }
     renameSync(runDir, quarantine);
@@ -1035,7 +1092,11 @@ export function runGc(options: GcRunOptions): GcResult {
       continue;
     }
     try {
-      remove(scan.realRoot as string, run.id, { identity: run.identity as FileIdentity, cutoffMs: scan.cutoffMs });
+      remove(scan.realRoot as string, run.id, {
+        identity: run.identity as FileIdentity,
+        cutoffMs: scan.cutoffMs,
+        epochFloor: run.epochFloor ?? 0,
+      });
       run.action = "deleted";
       deleted += 1;
       bytesDeleted += run.bytes;
