@@ -91,6 +91,64 @@ export function envelopeError(value: unknown): string | null {
   return null;
 }
 
+/**
+ * Parses the text of a journal file into its records, with the checks `readAll` makes: every line complete and valid
+ * JSON with a well-formed envelope, and seq 0, 1, 2, ... without a gap. Throws JournalCorruptionError counting every bad
+ * line, and an incomplete last line as one more. Text that is empty gives no records. `filePath` is named in the error.
+ */
+export function parseJournalText(
+  content: string,
+  filePath: string,
+): readonly JournalRecord[] {
+  if (content.length === 0) {
+    return [];
+  }
+  const lines = content.split("\n");
+  const tailIsIncomplete = lines[lines.length - 1] !== "";
+  // Complete lines are everything before the final split element (which is
+  // "" for a well-formed file, or the partial tail being dropped).
+  const bodyLines = lines.slice(0, -1);
+
+  // Count ALL bad lines (interior + incomplete tail) before throwing once.
+  let badCount = tailIsIncomplete ? 1 : 0;
+  const records: JournalRecord[] = [];
+  let prevSeq = -1;
+
+  for (const line of bodyLines) {
+    let failure: string | null = null;
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(line);
+    } catch {
+      failure = "line is not valid JSON";
+    }
+    if (failure === null) {
+      failure = envelopeError(parsed);
+    }
+    if (failure === null) {
+      const record = parsed as JournalRecord;
+      const expectedSeq = prevSeq + 1;
+      if (record.seq !== expectedSeq) {
+        failure = `seq ${record.seq} does not continue from ${prevSeq}`;
+      } else {
+        prevSeq = record.seq;
+        records.push(record);
+      }
+    }
+    if (failure !== null) {
+      badCount += 1;
+    }
+  }
+
+  if (badCount > 0) {
+    throw new JournalCorruptionError(
+      `journal ${filePath} has ${badCount} corrupt or incomplete record(s)`,
+      badCount,
+    );
+  }
+  return records;
+}
+
 export class FileJournal implements Journal {
   private readonly runsRoot: string;
   private readonly runId?: string;
@@ -221,53 +279,6 @@ export class FileJournal implements Journal {
       }
       throw error;
     }
-    if (content.length === 0) {
-      return [];
-    }
-
-    const lines = content.split("\n");
-    const tailIsIncomplete = lines[lines.length - 1] !== "";
-    // Complete lines are everything before the final split element (which is
-    // "" for a well-formed file, or the partial tail being dropped).
-    const bodyLines = lines.slice(0, -1);
-
-    // Count ALL bad lines (interior + incomplete tail) before throwing once.
-    let badCount = tailIsIncomplete ? 1 : 0;
-    const records: JournalRecord[] = [];
-    let prevSeq = -1;
-
-    for (const line of bodyLines) {
-      let failure: string | null = null;
-      let parsed: unknown;
-      try {
-        parsed = JSON.parse(line);
-      } catch {
-        failure = "line is not valid JSON";
-      }
-      if (failure === null) {
-        failure = envelopeError(parsed);
-      }
-      if (failure === null) {
-        const record = parsed as JournalRecord;
-        const expectedSeq = prevSeq + 1;
-        if (record.seq !== expectedSeq) {
-          failure = `seq ${record.seq} does not continue from ${prevSeq}`;
-        } else {
-          prevSeq = record.seq;
-          records.push(record);
-        }
-      }
-      if (failure !== null) {
-        badCount += 1;
-      }
-    }
-
-    if (badCount > 0) {
-      throw new JournalCorruptionError(
-        `journal ${filePath} has ${badCount} corrupt or incomplete record(s)`,
-        badCount,
-      );
-    }
-    return records;
+    return parseJournalText(content, filePath);
   }
 }

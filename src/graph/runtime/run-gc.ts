@@ -15,16 +15,20 @@
  *   retention days   --retention-days <N>         | OMC_GRAPH_RETENTION_DAYS       | 7 (positive integer only)
  *   repair torn WAL  --repair-torn-wal            | OMC_GRAPH_REPAIR_TORN_WAL="1"  | off
  *
- * Run state, derived from the files on disk (the runtime stores no status field):
- *   final-succeeded      the scheduler success predicate holds for the snapshot
- *   final-failed         no activation is ready or running, and the run did not succeed
- *   resumable-running    an activation was running when the process stopped
+ * Run state, derived from the files on disk (the runtime stores no status field). It is derived the way the runtime
+ * derives it, by the function `omc graph status` uses (classifyRunFiles in run-state.ts): the journal is replayed with
+ * the runtime's replay fold (descriptor binding, epochs, envelope and request fingerprints, scheduler transitions) and
+ * projection.json is only a status cache, never trusted for the verdict. Under ownership the replay is bounded by the
+ * epoch the lock gave, which is the bound a resume applies.
+ *   final-succeeded      the scheduler success predicate holds after the replay
+ *   final-failed         no activation can run after the replay, and the run did not succeed
  *   resumable-approval   a human-approval activation is ready
- *   resumable-ready      an activation is ready to start
- *   unknown:<reason>     anything else; the run is kept (fail closed)
- * Only the two final states can be deleted, and only after the retention window. The
- * runtime has no separate "cancelled" state: an aborted run keeps its ready or running
- * activations and stays resumable.
+ *   resumable-ready      an activation is ready to start (an attempt that was running when the process stopped was
+ *                        never committed, so it is ready again after the replay)
+ *   unknown:<reason>     anything else (no descriptor, a descriptor of another run, a journal that is corrupt or fails
+ *                        the replay, a descriptor with neither a record nor the initial snapshot); the run is kept
+ * Only the two final states can be deleted, and only after the retention window. The runtime has no separate
+ * "cancelled" state: an aborted run keeps its ready activations and stays resumable. Any doubt keeps the run.
  *
  * Safety rules:
  *   - The runs root must be named `.omc/graph-runs`. A symbolic link at the runs root is refused.
@@ -73,10 +77,8 @@ import {
 import { randomBytes } from "node:crypto";
 import { basename, dirname, join, resolve } from "node:path";
 import { FileOwnershipFence } from "./fence.js";
-import { envelopeError } from "./journal.js";
 import { RUN_ID_PATTERN } from "./run-dir.js";
-import { parseStoredEnvelope, sameSnapshotBinding } from "./store.js";
-import type { ProjectionSnapshotEnvelope } from "./types.js";
+import { classifyRunFiles } from "./run-state.js";
 
 export const GC_SWITCH_ENV = "OMC_GRAPH_GC";
 export const GC_RETENTION_ENV = "OMC_GRAPH_RETENTION_DAYS";
@@ -87,13 +89,11 @@ export const DEFAULT_GC_RUNS_ROOT = join(".omc", "graph-runs");
 
 const LOCK_FILE_NAME = "owner.lock";
 const DESCRIPTOR_FILE_NAME = "descriptor.json";
-const JOURNAL_FILE_NAME = "journal.jsonl";
 const SNAPSHOT_FILE_NAME = "projection.json";
+const JOURNAL_FILE_NAME = "journal.jsonl";
 const TORN_COPY_PREFIX = `${JOURNAL_FILE_NAME}.torn-`;
 const QUARANTINE_PREFIX = ".deleted-";
 const MAX_LOCK_BYTES = 4096;
-const DESCRIPTOR_HASH_PATTERN = /^[a-f0-9]{64}$/;
-const ACTIVATION_STATUSES = new Set(["ready", "running", "completed", "failed"]);
 const MAX_RETENTION_DAYS = 36500;
 const DAY_MS = 24 * 60 * 60 * 1000;
 const NOFOLLOW = fsConstants.O_NOFOLLOW ?? 0;
@@ -107,9 +107,6 @@ export class ConfigError extends Error {}
 
 // Raised while reading one run. Its message is the reason recorded for that run.
 class StateError extends Error {}
-
-// Raised when a file of a run does not belong to that run. `omc graph status` reports it as unreadable.
-export class RunBindingError extends Error {}
 
 export interface LeaseState {
   readonly held: boolean;
@@ -322,14 +319,6 @@ function measureRun(
   return { newestMs, bytes, identity: { dev: top.dev, ino: top.ino } };
 }
 
-function isPlainObject(value: unknown): value is Json {
-  return value !== null && typeof value === "object" && !Array.isArray(value);
-}
-
-function ownValue(object: Json, key: string): Json | undefined {
-  return Object.prototype.hasOwnProperty.call(object, key) ? object[key] : undefined;
-}
-
 // Reads one regular file below a run directory. Never follows a symbolic link, and a FIFO or other
 // non-regular file is refused right after open (O_NONBLOCK), so it cannot block the command.
 function readRunFile(runDir: string, name: string): Buffer {
@@ -353,227 +342,40 @@ function readRunFile(runDir: string, name: string): Buffer {
   }
 }
 
-function parseJsonBytes(bytes: Buffer, name: string): unknown {
-  try {
-    return JSON.parse(bytes.toString("utf8"));
-  } catch {
-    throw new StateError(`${name}-not-json`);
-  }
-}
-
-export interface RunDescriptor {
-  descriptorHash: string;
-  revisionId: string;
-  kindById: Map<string, string>;
-}
-
-// Checks the parsed descriptor.json of a run and returns what the other files are bound to: the descriptor hash, the
-// revision and the kind of every node, keyed by node id. Throws RunBindingError when it is not the run's descriptor.
-export function parseRunDescriptor(value: unknown, runId: string): RunDescriptor {
-  if (
-    !isPlainObject(value) ||
-    value.run_id !== runId ||
-    typeof value.descriptor_hash !== "string" ||
-    !DESCRIPTOR_HASH_PATTERN.test(value.descriptor_hash) ||
-    typeof value.revision_id !== "string" ||
-    value.revision_id.length === 0 ||
-    !Array.isArray(value.nodes)
-  ) {
-    throw new RunBindingError("descriptor.json is not the descriptor of this run");
-  }
-  const kindById = new Map<string, string>();
-  for (const node of value.nodes) {
-    if (!isPlainObject(node) || typeof node.id !== "string" || typeof node.kind !== "string") {
-      throw new RunBindingError("descriptor.json is not the descriptor of this run");
-    }
-    kindById.set(node.id, node.kind);
-  }
-  return { descriptorHash: value.descriptor_hash, revisionId: value.revision_id, kindById };
-}
-
-function readDescriptor(runDir: string, runId: string): RunDescriptor {
-  const value = parseJsonBytes(readRunFile(runDir, DESCRIPTOR_FILE_NAME), DESCRIPTOR_FILE_NAME);
-  try {
-    return parseRunDescriptor(value, runId);
-  } catch (error) {
-    if (error instanceof RunBindingError) throw new StateError("descriptor-malformed");
-    throw error;
-  }
-}
-
 // Splits journal bytes into complete lines and a torn tail (the bytes after the last newline).
 export function splitTornTail(bytes: Buffer): { complete: Buffer; tail: Buffer } {
   const cut = bytes.lastIndexOf(0x0a) + 1;
   return { complete: bytes.subarray(0, cut), tail: bytes.subarray(cut) };
 }
 
-// Parses the lines of a run's journal with the checks the runtime makes when it replays one: the record envelope
-// FileJournal requires, seq 0, 1, 2, ... without a gap, the hash of this run's descriptor on every record, and writer
-// epochs that never decrease. The fingerprint value is not verified here; the runtime verifies it on resume.
-// Throws RunBindingError.
-export function parseJournalLines(lines: readonly string[], descriptorHash: string): Json[] {
-  let lastEpoch = 0;
-  return lines.map((line, index) => {
-    let record: unknown;
-    try {
-      record = JSON.parse(line);
-    } catch (error) {
-      throw new RunBindingError(`journal.jsonl line ${index + 1}: ${(error as Error).message}`);
-    }
-    const problem = envelopeError(record);
-    if (problem !== null) throw new RunBindingError(`journal.jsonl line ${index + 1}: ${problem}`);
-    const entry = record as Json;
-    if (entry.seq !== index) {
-      throw new RunBindingError(`journal.jsonl line ${index + 1} has seq ${String(entry.seq)}, expected ${index}`);
-    }
-    if (entry.descriptor_hash !== descriptorHash) {
-      throw new RunBindingError(`journal.jsonl line ${index + 1} is bound to another descriptor`);
-    }
-    if (entry.epoch < lastEpoch) {
-      throw new RunBindingError(`journal.jsonl line ${index + 1} has epoch ${entry.epoch}, below the one before it`);
-    }
-    lastEpoch = entry.epoch;
-    return entry;
-  });
-}
-
-// Returns the last seq of the complete journal lines, or -1 for an empty journal.
-function lastJournalSeq(complete: Buffer, descriptorHash: string): number {
-  if (complete.length === 0) return -1;
-  const lines = complete.toString("utf8").split("\n");
-  lines.pop(); // the text after the final newline is empty
+// Reads one file of a run as text; null when it does not exist.
+function readRunText(runDir: string, name: string): string | null {
   try {
-    return parseJournalLines(lines, descriptorHash).length - 1;
+    return readRunFile(runDir, name).toString("utf8");
   } catch (error) {
-    if (error instanceof RunBindingError) throw new StateError("journal-bad-record");
+    if (error instanceof StateError && error.message === `${name}-missing`) return null;
     throw error;
   }
 }
 
-// The envelope of projection.json as FileProjectionStore.load validates it (schema, hash format, run id, revision,
-// epoch, sequence, body), bound to the run it sits in: the descriptor hash, run id and revision must be those of the
-// run's descriptor.json, which is the binding FileProjectionStore.save keeps between writes. Throws RunBindingError.
-export function checkSnapshotEnvelope(raw: unknown, descriptor: RunDescriptor, runId: string): ProjectionSnapshotEnvelope {
-  let envelope: ProjectionSnapshotEnvelope;
+// Derives the state of one run from its files by the runtime's own replay (classifyRunFiles, the same function
+// `omc graph status` uses): the journal is folded the way a resume folds it and the snapshot is never trusted. The
+// states a run can have: final-succeeded and final-failed (the only ones that can be deleted), resumable-ready and
+// resumable-approval (something is ready to run or to approve), and unknown:<reason> for anything else, which is kept.
+// `epochCeiling` is the epoch the caller holds on the run, when it holds one (the runtime's bound on resume).
+export function classifyRun(runDir: string, runId: string, epochCeiling?: number): { state: string; reason: string } {
   try {
-    envelope = parseStoredEnvelope(raw);
-  } catch (error) {
-    throw new RunBindingError((error as Error).message);
-  }
-  const bound = { descriptor_hash: descriptor.descriptorHash, run_id: runId, revision_id: descriptor.revisionId };
-  if (!sameSnapshotBinding(envelope, bound)) {
-    throw new RunBindingError("projection.json is bound to another descriptor, run or revision");
-  }
-  return envelope;
-}
-
-// The projection inside a snapshot must name the run and the descriptor of the run it sits in.
-export function projectionBelongsToRun(projection: Json, descriptorHash: string, runId: string): boolean {
-  return projection.descriptor_hash === descriptorHash && projection.run_id === runId;
-}
-
-function readSnapshot(runDir: string, runId: string, descriptor: RunDescriptor): ProjectionSnapshotEnvelope {
-  const raw = parseJsonBytes(readRunFile(runDir, SNAPSHOT_FILE_NAME), SNAPSHOT_FILE_NAME);
-  try {
-    return checkSnapshotEnvelope(raw, descriptor, runId);
-  } catch (error) {
-    if (error instanceof RunBindingError) throw new StateError("snapshot-malformed");
-    throw error;
-  }
-}
-
-// Same success rule as the runtime's isGraphSucceeded (src/graph/scheduler.ts), applied to the snapshot.
-function isGraphSucceeded(projection: Json): boolean {
-  const { activations, cohorts, committed_transitions: transitions } = projection;
-  const terminalVerified = projection.terminal_verification_activation_ids.some((activationId: string) => {
-    const activation = ownValue(activations, activationId);
-    if (activation === undefined || activation.status !== "completed") return false;
-    const transition =
-      typeof activation.completed_transition_id === "string"
-        ? ownValue(transitions, activation.completed_transition_id)
-        : undefined;
-    return (
-      transition?.outcome === "succeeded" &&
-      Array.isArray(transition.evidence_refs) &&
-      transition.evidence_refs.length > 0
-    );
-  });
-  if (!terminalVerified) return false;
-  const activationList = Object.values(activations) as Json[];
-  if (!activationList.every((activation) => activation.status === "completed")) return false;
-  const cohortList = Object.values(cohorts) as Json[];
-  return cohortList.every((cohort) => cohort.consumed === true);
-}
-
-// How a snapshot ends if nothing else happens, by the runtime's own rule: the scheduler success predicate holds
-// (succeeded); an activation is ready or running (open); otherwise no activation can run and the run did not
-// succeed, which the runtime ends as failed. `omc graph status` derives its state from the same function.
-export function projectionOutcome(projection: Json): "succeeded" | "open" | "failed" {
-  if (isGraphSucceeded(projection)) return "succeeded";
-  const entries = Object.values(projection.activations) as Json[];
-  return entries.some((activation) => activation.status === "running" || activation.status === "ready")
-    ? "open"
-    : "failed";
-}
-
-// Decides the state from a snapshot that has already passed the freshness check.
-function stateOfProjection(
-  descriptor: RunDescriptor,
-  projection: Json,
-  runId: string,
-): { state: string; reason: string } {
-  if (!projectionBelongsToRun(projection, descriptor.descriptorHash, runId)) {
-    throw new StateError("projection-mismatch");
-  }
-  const { activations, cohorts, committed_transitions: transitions } = projection;
-  const terminal = projection.terminal_verification_activation_ids;
-  if (
-    !isPlainObject(activations) ||
-    !isPlainObject(cohorts) ||
-    !isPlainObject(transitions) ||
-    !Array.isArray(terminal) ||
-    !terminal.every((id: unknown) => typeof id === "string")
-  ) {
-    throw new StateError("projection-malformed");
-  }
-  const entries: Json[] = Object.values(activations);
-  for (const activation of entries) {
-    if (
-      !isPlainObject(activation) ||
-      typeof activation.node_id !== "string" ||
-      !descriptor.kindById.has(activation.node_id) ||
-      !ACTIVATION_STATUSES.has(activation.status)
-    ) {
-      throw new StateError("activation-unknown");
-    }
-  }
-  for (const cohort of Object.values(cohorts) as unknown[]) {
-    if (!isPlainObject(cohort) || typeof cohort.consumed !== "boolean") throw new StateError("projection-malformed");
-  }
-  if (entries.length === 0) throw new StateError("no-activations");
-  const outcome = projectionOutcome(projection);
-  if (outcome === "succeeded") return { state: "final-succeeded", reason: "final-succeeded" };
-  if (outcome === "failed") return { state: "final-failed", reason: "final-failed" };
-  if (entries.some((activation) => activation.status === "running")) {
-    return { state: "resumable-running", reason: "resumable-running" };
-  }
-  const approval = entries.some(
-    (activation) => activation.status === "ready" && descriptor.kindById.get(activation.node_id) === "human-approval",
-  );
-  const state = approval ? "resumable-approval" : "resumable-ready";
-  return { state, reason: state };
-}
-
-// Derives the state of one run from its descriptor, journal and snapshot. Any doubt is `unknown`.
-export function classifyRun(runDir: string, runId: string): { state: string; reason: string } {
-  try {
-    const descriptor = readDescriptor(runDir, runId);
-    const { complete, tail } = splitTornTail(readRunFile(runDir, JOURNAL_FILE_NAME));
-    if (tail.length > 0) throw new StateError("journal-torn-tail");
-    const lastSeq = lastJournalSeq(complete, descriptor.descriptorHash);
-    const snapshot = readSnapshot(runDir, runId, descriptor);
-    if (snapshot.saved_at_seq !== lastSeq) throw new StateError("snapshot-stale");
-    return stateOfProjection(descriptor, snapshot.projection, runId);
+    const files = {
+      descriptor: readRunText(runDir, DESCRIPTOR_FILE_NAME),
+      journal: readRunText(runDir, JOURNAL_FILE_NAME),
+      projection: readRunText(runDir, SNAPSHOT_FILE_NAME),
+    };
+    const verdict = classifyRunFiles(runId, files, epochCeiling);
+    if (verdict.state === "unreadable") return { state: "unknown", reason: `unknown:${verdict.reason}` };
+    if (verdict.state === "succeeded") return { state: "final-succeeded", reason: "final-succeeded" };
+    if (verdict.state === "failed") return { state: "final-failed", reason: "final-failed" };
+    const state = verdict.approvalPending ? "resumable-approval" : "resumable-ready";
+    return { state, reason: state };
   } catch (error) {
     if (error instanceof StateError) return { state: "unknown", reason: `unknown:${error.message}` };
     return { state: "unknown", reason: "unknown:unexpected-error" };
@@ -602,11 +404,11 @@ interface Verdict {
 
 // The rules that decide a run whose lease is known to be free, in order: a torn journal, a torn copy of an earlier
 // repair, a change inside the retention window, then the state. The scan and the re-check under ownership both use it.
-function judgeRun(runDir: string, id: string, newestMs: number, cutoffMs: number): Verdict {
+function judgeRun(runDir: string, id: string, newestMs: number, cutoffMs: number, epochCeiling?: number): Verdict {
   if (hasTornTail(runDir)) return { decision: "keep", reason: "torn-wal", state: null, torn: true };
   if (hasTornCopy(runDir)) return { decision: "keep", reason: "torn-copy-kept", state: null, torn: false };
   if (newestMs >= cutoffMs) return { decision: "keep", reason: "fresh", state: null, torn: false };
-  const verdict = classifyRun(runDir, id);
+  const verdict = classifyRun(runDir, id, epochCeiling);
   if (verdict.state === "final-succeeded" || verdict.state === "final-failed") {
     return { decision: "delete", reason: "expired", state: verdict.state, torn: false };
   }
@@ -927,7 +729,7 @@ export function quarantineRun(
       // directory at the moment of the move.
       const verdict = withDirectoryHandle(runDir, scanned.identity, (path, anchored) => {
         scanned.afterHandle?.();
-        return judgeRun(path, id, measureRun(path, true, anchored).newestMs, scanned.cutoffMs);
+        return judgeRun(path, id, measureRun(path, true, anchored).newestMs, scanned.cutoffMs, epoch);
       });
       if (verdict.decision !== "delete") throw new Error(`run changed after the scan (${verdict.reason}); not removed`);
       assertIdentity(lstatSync(runDir), scanned.identity, "the run directory");

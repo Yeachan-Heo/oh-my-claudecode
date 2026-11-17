@@ -34,8 +34,14 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { graphCommand } from "../../../cli/graph.js";
+import { sealGraphDescriptor, canonicalJson } from "../../descriptor.js";
+import { runGraph } from "../../runtime/runner.js";
+import { computeJournalFingerprint } from "../../runtime/journal.js";
+import { readRunStatus } from "../../runtime/run-status.js";
+import type { NodeExecutor } from "../../runtime/types.js";
 import { FileOwnershipFence } from "../../runtime/fence.js";
 import { resolveRunDirHandle } from "../../runtime/run-dir.js";
+import { writeRealRun, type RealRunKind } from "./real-run-fixtures.js";
 import {
   classifyRun,
   DEFAULT_RETENTION_DAYS,
@@ -127,6 +133,58 @@ async function withEnvAsync<T>(vars: Record<string, string | undefined>, fn: () 
       if (value === undefined) delete process.env[name];
       else process.env[name] = value;
     }
+  }
+}
+
+// Re-signs a journal record that a test edited, so that only the rule under test can refuse it.
+function resign(record: Record<string, unknown>): string {
+  const { journal_fingerprint: _old, ...unsigned } = record;
+  return canonicalJson({ ...unsigned, journal_fingerprint: computeJournalFingerprint(unsigned as never) });
+}
+
+// Runs a two-step chain through the runtime itself, with in-process steps. Returns how the run ended.
+async function runRuntimeChain(
+  root: string,
+  id: string,
+  options: { failFirst?: boolean; stopAfterFirst?: boolean },
+): Promise<string> {
+  const node = (nodeId: string) => ({
+    id: nodeId,
+    kind: "command" as const,
+    title: nodeId,
+    timeout_ms: 60_000,
+    max_attempts: 1,
+    effect_policy: { policy: "side_effect_free" as const },
+    command: "unused",
+  });
+  const sealed = sealGraphDescriptor({
+    descriptor_version: 1,
+    run_id: id,
+    revision_id: `rev-${id}`,
+    goal: "differential",
+    nodes: [node("step-1"), node("step-2")],
+    edges: [{ id: "e-1-2", kind: "fixed" as const, from: "step-1", to: "step-2" }],
+    entry_node_ids: ["step-1"],
+    concurrency_limit: 1,
+    terminal_verification_node_id: "step-2",
+  });
+  const controller = new AbortController();
+  const executor: NodeExecutor = {
+    kinds: ["command", "agent"],
+    execute: async (context) => {
+      if (options.stopAfterFirst === true && context.node.id === "step-1") controller.abort();
+      return {
+        outcome: options.failFirst === true && context.node.id === "step-1" ? "failed" : "succeeded",
+        output_summary: "done",
+        evidence_refs: [{ kind: "command", ref: "unused" }],
+      };
+    },
+  };
+  try {
+    const result = await runGraph(sealed, { runsRoot: root, executors: [executor], prompter: { prompt: async () => "approved" }, signal: controller.signal });
+    return result.terminal;
+  } catch {
+    return "aborted";
   }
 }
 
@@ -275,32 +333,10 @@ interface Scenario {
   expected?: string;
 }
 
+// Fabricated runs for the tests of retention, locks and torn-journal repair. Their descriptor is not a sealed one, so
+// the runtime's replay cannot read them and gc keeps them as unknown; the tests that decide on a run's state use
+// writeRealRun (real-run-fixtures.ts) instead.
 const SCENARIOS: Record<string, Scenario & { expected: string }> = {
-  // Verification node completed with evidence; every activation completed; no cohorts.
-  succeeded: {
-    count: 2,
-    activations: {
-      a1: activation("a1", "n1", "completed", { completed_transition_id: "t1" }),
-      a2: activation("a2", "v1", "completed", { completed_transition_id: "t2" }),
-    },
-    committed: {
-      t1: { outcome: "succeeded", evidence_refs: [] },
-      t2: { outcome: "succeeded", evidence_refs: [{ kind: "file" }] },
-    },
-    terminal: ["a2"],
-    expected: "final-succeeded",
-  },
-  // A node failed for good; nothing ready or running; not a success.
-  failed: {
-    count: 1,
-    activations: {
-      a1: activation("a1", "n1", "failed"),
-      a2: activation("a2", "v1", "completed", { completed_transition_id: "t1" }),
-    },
-    committed: { t1: { outcome: "succeeded", evidence_refs: [] } },
-    terminal: [],
-    expected: "final-failed",
-  },
   // The process stopped while an attempt was running. An aborted run looks the same.
   running: {
     count: 1,
@@ -316,14 +352,6 @@ const SCENARIOS: Record<string, Scenario & { expected: string }> = {
     committed: {},
     terminal: ["a1"],
     expected: "resumable-ready",
-  },
-  // A human-approval gate is waiting for a decision.
-  approval: {
-    count: 1,
-    activations: { ap1: activation("ap1", "ap", "ready") },
-    committed: {},
-    terminal: [],
-    expected: "resumable-approval",
   },
 };
 
@@ -345,9 +373,19 @@ function makeScenarioRun(
   return makeRun(root, id, files);
 }
 
+// The journal text of every run written by makeFinishedRun, by directory.
+const finishedJournals = new Map<string, string>();
+
 // A run that finished successfully (final state), as the runtime leaves it.
 function makeFinishedRun(root: string, id: string): string {
-  return makeScenarioRun(root, id, SCENARIOS.succeeded);
+  return makeRealRun(root, id, "succeeded");
+}
+
+// A run of the given kind written the way the runtime writes it (descriptor, journal and snapshot of a real run).
+function makeRealRun(root: string, id: string, kind: RealRunKind, epoch = 1): string {
+  const run = writeRealRun(root, id, kind, epoch);
+  finishedJournals.set(run.dir, run.journal);
+  return run.dir;
 }
 
 function gc(root: string, extra: Partial<Parameters<typeof runGc>[0]> = {}) {
@@ -677,165 +715,223 @@ describe("omc graph gc", () => {
     });
   });
 
-  // ---- Run states ------------------------------------------------------------------------------
+  // ---- Run states: the replay of the journal decides, the snapshot never does -------------------
 
-  for (const [name, scenario] of Object.entries(SCENARIOS)) {
-    it(`state ${scenario.expected}: ${name} run`, () => {
+  const STATE_CASES: { kind: RealRunKind; expected: string }[] = [
+    { kind: "succeeded", expected: "final-succeeded" },
+    { kind: "failed", expected: "final-failed" },
+    { kind: "denied", expected: "final-failed" },
+    { kind: "ready", expected: "resumable-ready" },
+    { kind: "approval", expected: "resumable-approval" },
+    // An attempt that was running when the process stopped is never committed, so the replay leaves it ready.
+    { kind: "initial", expected: "resumable-ready" },
+  ];
+
+  for (const { kind, expected } of STATE_CASES) {
+    it(`state ${expected}: ${kind} run`, () => {
       withBase((base) => {
         const root = makeRoot(base);
-        const dir = makeScenarioRun(root, "run-state", scenario);
+        const dir = makeRealRun(root, "run-state", kind);
         ageTree(dir, OLD);
 
         const classified = classifyRun(dir, "run-state");
-        expect(classified.state).toBe(scenario.expected);
+        expect(classified.state).toBe(expected);
 
         const result = gc(root);
         const run = decisionOf(result, "run-state");
-        expect(run.state).toBe(scenario.expected);
-        if (scenario.expected.startsWith("final-")) {
+        expect(run.state).toBe(expected);
+        if (expected.startsWith("final-")) {
           expect(run.action, "a final run past retention must be removed").toBe("deleted");
           expect(existsSync(dir)).toBe(false);
         } else {
           expect(run.action, "a resumable run must never be removed").toBe("keep");
-          expect(run.reason).toBe(scenario.expected);
+          expect(run.reason).toBe(expected);
           expect(existsSync(join(dir, "projection.json"))).toBe(true);
         }
       });
     });
   }
 
-  it("a succeeded transition without evidence is not a success: the run is final-failed", () => {
-    withBase((base) => {
-      const root = makeRoot(base);
-      const scenario = {
-        ...SCENARIOS.succeeded,
-        committed: {
-          t1: { outcome: "succeeded", evidence_refs: [] },
-          t2: { outcome: "succeeded", evidence_refs: [] },
-        },
-      };
-      const dir = makeScenarioRun(root, "run-no-evidence", scenario);
-      ageTree(dir, OLD);
-      expect(classifyRun(dir, "run-no-evidence").state).toBe("final-failed");
-    });
-  });
+  function editSnapshot(dir: string, edit: (envelope: Record<string, any>) => void): void {
+    const file = join(dir, "projection.json");
+    const envelope = JSON.parse(readFileSync(file, "utf8")) as Record<string, any>;
+    edit(envelope);
+    writeFileSync(file, JSON.stringify(envelope));
+  }
 
-  it("an aborted run with a ready and a running activation is resumable, not final", () => {
-    withBase((base) => {
-      const root = makeRoot(base);
-      const scenario: Scenario = {
-        count: 1,
-        activations: {
-          a1: activation("a1", "n1", "running"),
-          a2: activation("a2", "v1", "ready"),
-        },
-        committed: {},
-        terminal: ["a2"],
-      };
-      const dir = makeScenarioRun(root, "run-aborted", scenario);
-      ageTree(dir, OLD);
-      const result = gc(root);
-      expect(decisionOf(result, "run-aborted").state).toBe("resumable-running");
-      expect(existsSync(dir)).toBe(true);
-    });
-  });
+  const setActivationStatus = (status: string) => (envelope: Record<string, any>) => {
+    for (const activation of Object.values(envelope.projection.activations) as Record<string, any>[]) activation.status = status;
+  };
 
-  // Each case leaves one piece of the run unreadable or inconsistent. Every one must be kept.
+  // Damage to projection.json. The runtime folds every journal record and treats the snapshot as a status cache, so
+  // none of these changes the verdict of a run whose journal replays.
+  const SNAPSHOT_DAMAGE: { name: string; damage: (dir: string) => void }[] = [
+    { name: "missing", damage: (dir) => rmSync(join(dir, "projection.json")) },
+    { name: "not JSON", damage: (dir) => writeFileSync(join(dir, "projection.json"), "not json") },
+    { name: "older than the journal", damage: (dir) => editSnapshot(dir, (envelope) => { envelope.saved_at_seq = -1; }) },
+    { name: "bound to another descriptor", damage: (dir) => editSnapshot(dir, (envelope) => { envelope.descriptor_hash = OTHER_HASH; }) },
+    { name: "naming another run", damage: (dir) => editSnapshot(dir, (envelope) => { envelope.projection.run_id = "other-run"; }) },
+    { name: "restored with every activation failed, at the right seq", damage: (dir) => editSnapshot(dir, setActivationStatus("failed")) },
+    { name: "restored with every activation completed, at the right seq", damage: (dir) => editSnapshot(dir, setActivationStatus("completed")) },
+    { name: "restored with every activation ready, at the right seq", damage: (dir) => editSnapshot(dir, setActivationStatus("ready")) },
+    { name: "valid JSON with an emptied body", damage: (dir) => editSnapshot(dir, (envelope) => { envelope.projection.activations = {}; }) },
+    { name: "valid JSON with an unknown activation status", damage: (dir) => editSnapshot(dir, setActivationStatus("paused")) },
+  ];
+
+  for (const { kind, expected } of [
+    { kind: "succeeded" as const, expected: "final-succeeded" },
+    { kind: "failed" as const, expected: "final-failed" },
+    { kind: "ready" as const, expected: "resumable-ready" },
+    { kind: "approval" as const, expected: "resumable-approval" },
+  ]) {
+    for (const { name, damage } of SNAPSHOT_DAMAGE) {
+      it(`a ${kind} run is ${expected} whatever its snapshot is: ${name}`, () => {
+        withBase((base) => {
+          const root = makeRoot(base);
+          const dir = makeRealRun(root, "run-cache", kind);
+          damage(dir);
+          ageTree(dir, OLD);
+          expect(classifyRun(dir, "run-cache").state).toBe(expected);
+
+          const run = decisionOf(gc(root), "run-cache");
+          expect(run.state).toBe(expected);
+          if (expected.startsWith("final-")) {
+            expect(run.action).toBe("deleted");
+            expect(existsSync(dir)).toBe(false);
+          } else {
+            expect(run.action, "a resumable run was removed on the word of its snapshot").toBe("keep");
+            expect(existsSync(dir)).toBe(true);
+          }
+        });
+      });
+    }
+  }
+
+  // Each case leaves one piece of the run unreadable or inconsistent for the replay. Every one must be kept.
   const UNKNOWN_CASES: {
     name: string;
     reason: string;
     build: (root: string, id: string, base: string) => string;
   }[] = [
     {
-      name: "snapshot file missing",
-      reason: "unknown:projection.json-missing",
-      build: (root, id) => makeScenarioRun(root, id, SCENARIOS.succeeded, { projection: null }),
-    },
-    {
-      name: "snapshot older than the journal",
-      reason: "unknown:snapshot-stale",
-      build: (root, id) => makeScenarioRun(root, id, SCENARIOS.succeeded, { savedAtSeq: 0 }),
-    },
-    {
-      name: "snapshot is not JSON",
-      reason: "unknown:projection.json-not-json",
-      build: (root, id) => makeScenarioRun(root, id, SCENARIOS.succeeded, { projection: "not json" }),
-    },
-    {
-      name: "snapshot bound to another descriptor",
-      reason: "unknown:snapshot-malformed",
-      build: (root, id) =>
-        makeScenarioRun(root, id, SCENARIOS.succeeded, {
-          projection: JSON.stringify({ ...envelopeFor(id, projectionFor(id, SCENARIOS.succeeded), 1), descriptor_hash: OTHER_HASH }),
-        }),
-    },
-    {
-      name: "snapshot projection names another run",
-      reason: "unknown:projection-mismatch",
-      build: (root, id) =>
-        makeScenarioRun(root, id, SCENARIOS.succeeded, {
-          projection: JSON.stringify(envelopeFor(id, { ...projectionFor("other-run", SCENARIOS.succeeded) }, 1)),
-        }),
-    },
-    {
-      name: "activation with a status this tool does not know",
-      reason: "unknown:activation-unknown",
-      build: (root, id) =>
-        makeScenarioRun(root, id, {
-          count: 1,
-          activations: { a1: activation("a1", "n1", "paused") },
-          committed: {},
-          terminal: [],
-        }),
-    },
-    {
-      name: "cohort without a boolean consumed flag",
-      reason: "unknown:projection-malformed",
-      build: (root, id) =>
-        makeScenarioRun(root, id, {
-          count: 1,
-          activations: { a1: activation("a1", "n1", "failed") },
-          cohorts: { c1: {} },
-          committed: {},
-          terminal: [],
-        }),
-    },
-    {
-      name: "no activations at all",
-      reason: "unknown:no-activations",
-      build: (root, id) => makeScenarioRun(root, id, { count: 1, activations: {}, committed: {}, terminal: [] }),
+      name: "descriptor missing",
+      reason: "unknown:descriptor-missing",
+      build: (root, id) => {
+        const dir = makeRealRun(root, id, "succeeded");
+        rmSync(join(dir, "descriptor.json"));
+        return dir;
+      },
     },
     {
       name: "descriptor is not JSON",
-      reason: "unknown:descriptor.json-not-json",
-      build: (root, id) => makeScenarioRun(root, id, SCENARIOS.succeeded, { descriptor: "{not json" }),
+      reason: "unknown:descriptor-malformed",
+      build: (root, id) => {
+        const dir = makeRealRun(root, id, "succeeded");
+        writeFileSync(join(dir, "descriptor.json"), "{not json");
+        return dir;
+      },
+    },
+    {
+      name: "descriptor is not a sealed descriptor (the hash does not match)",
+      reason: "unknown:descriptor-malformed",
+      build: (root, id) => {
+        const dir = makeRealRun(root, id, "succeeded");
+        const descriptor = JSON.parse(readFileSync(join(dir, "descriptor.json"), "utf8")) as Record<string, unknown>;
+        writeFileSync(join(dir, "descriptor.json"), JSON.stringify({ ...descriptor, goal: "another goal" }));
+        return dir;
+      },
     },
     {
       name: "descriptor names another run",
-      reason: "unknown:descriptor-malformed",
-      build: (root, id) =>
-        makeScenarioRun(root, id, SCENARIOS.succeeded, { descriptor: JSON.stringify({ ...descriptorFor("other-run") }) }),
+      reason: "unknown:descriptor-not-of-run",
+      build: (root, id) => {
+        const dir = makeRealRun(root, id, "succeeded");
+        const other = writeRealRun(root, "run-other", "succeeded");
+        writeFileSync(join(dir, "descriptor.json"), readFileSync(join(other.dir, "descriptor.json")));
+        rmSync(other.dir, { recursive: true });
+        return dir;
+      },
     },
     {
-      name: "journal file missing",
-      reason: "unknown:journal.jsonl-missing",
-      build: (root, id) => makeRun(root, id, { "descriptor.json": JSON.stringify(descriptorFor(id)), "projection.json": "{}" }),
+      name: "journal file missing although the snapshot has committed records",
+      reason: "unknown:no-history",
+      build: (root, id) => {
+        const dir = makeRealRun(root, id, "succeeded");
+        rmSync(join(dir, "journal.jsonl"));
+        return dir;
+      },
+    },
+    {
+      name: "descriptor without a journal and without the initial snapshot",
+      reason: "unknown:no-history",
+      build: (root, id) => {
+        const dir = makeRealRun(root, id, "initial");
+        rmSync(join(dir, "projection.json"));
+        return dir;
+      },
+    },
+    {
+      name: "journal emptied behind a snapshot that has committed records",
+      reason: "unknown:no-history",
+      build: (root, id) => {
+        const dir = makeRealRun(root, id, "succeeded");
+        writeFileSync(join(dir, "journal.jsonl"), "");
+        return dir;
+      },
     },
     {
       name: "journal sequence has a gap",
-      reason: "unknown:journal-bad-record",
-      build: (root, id) =>
-        makeScenarioRun(root, id, SCENARIOS.succeeded, {
-          journal: `${JSON.stringify({ seq: 0, transition: {} })}\n${JSON.stringify({ seq: 2, transition: {} })}\n`,
-        }),
+      reason: "unknown:journal-corrupt",
+      build: (root, id) => {
+        const dir = makeRealRun(root, id, "succeeded");
+        const lines = readFileSync(join(dir, "journal.jsonl"), "utf8").split("\n").filter((line) => line !== "");
+        writeFileSync(join(dir, "journal.jsonl"), `${lines[1]}\n`);
+        return dir;
+      },
+    },
+    {
+      name: "journal record edited after it was committed (fails its fingerprint)",
+      reason: "unknown:replay-rejected",
+      build: (root, id) => {
+        const dir = makeRealRun(root, id, "succeeded");
+        const text = readFileSync(join(dir, "journal.jsonl"), "utf8");
+        expect(text).toContain('"output_summary":"succeeded"');
+        writeFileSync(join(dir, "journal.jsonl"), text.replace('"output_summary":"succeeded"', '"output_summary":"changed"'));
+        return dir;
+      },
+    },
+    {
+      name: "journal copied from another run (records bound to another descriptor)",
+      reason: "unknown:replay-rejected",
+      build: (root, id) => {
+        const dir = makeRealRun(root, id, "succeeded");
+        const other = writeRealRun(root, "run-other", "succeeded");
+        writeFileSync(join(dir, "journal.jsonl"), other.journal);
+        rmSync(other.dir, { recursive: true });
+        return dir;
+      },
+    },
+    {
+      name: "journal records with epochs that decrease",
+      reason: "unknown:replay-rejected",
+      build: (root, id) => {
+        const dir = makeRealRun(root, id, "succeeded");
+        const [first, second] = readFileSync(join(dir, "journal.jsonl"), "utf8").split("\n").filter((line) => line !== "");
+        const raised = JSON.parse(first) as Record<string, unknown>;
+        raised.epoch = 3;
+        // The record is re-signed, so only the epoch rule can refuse the run.
+        writeFileSync(join(dir, "journal.jsonl"), `${resign(raised)}\n${second}\n`);
+        return dir;
+      },
     },
     {
       name: "snapshot is a symbolic link",
       reason: "unknown:projection.json-not-a-regular-file",
       build: (root, id, base) => {
-        const dir = makeScenarioRun(root, id, SCENARIOS.succeeded, { projection: null });
+        const dir = makeRealRun(root, id, "succeeded");
         const outside = join(base, "outside-projection.json");
-        writeFileSync(outside, JSON.stringify(envelopeFor(id, projectionFor(id, SCENARIOS.succeeded), 1)));
+        writeFileSync(outside, readFileSync(join(dir, "projection.json")));
+        rmSync(join(dir, "projection.json"));
         symlinkSync(outside, join(dir, "projection.json"));
         return dir;
       },
@@ -861,6 +957,42 @@ describe("omc graph gc", () => {
       });
     });
   }
+
+  it("a journal whose epoch is above the epoch the lock gives is not removed: a resume would refuse it too", () => {
+    withBase((base) => {
+      const root = makeRoot(base);
+      // No owner.epoch and no lock: the fence hands out epoch 1, and the records say 3.
+      const dir = makeRealRun(root, "run-ahead", "succeeded", 3);
+      ageTree(dir, OLD);
+      // The scan has no ceiling, so it proposes the removal; the replay under ownership, which has one, refuses it.
+      const result = gc(root);
+      const run = decisionOf(result, "run-ahead");
+      expect(run.action).toBe("failed");
+      expect(run.error).toMatch(/run changed after the scan \(unknown:replay-rejected\); not removed/);
+      expect(existsSync(dir)).toBe(true);
+    });
+  });
+
+  it("gc and status give the state the runtime gives, on runs the runtime wrote", async () => {
+    await withBaseAsync(async (base) => {
+      const root = makeRoot(base);
+      const cases: { id: string; expected: "succeeded" | "failed" | "in_progress"; chain: Parameters<typeof runRuntimeChain>[2] }[] = [
+        { id: "rt-ok", expected: "succeeded", chain: {} },
+        { id: "rt-fail", expected: "failed", chain: { failFirst: true } },
+        { id: "rt-stopped", expected: "in_progress", chain: { stopAfterFirst: true } },
+      ];
+      for (const { id, expected, chain } of cases) {
+        const result = await runRuntimeChain(root, id, chain);
+        const dir = join(root, id);
+        const gcState = classifyRun(dir, id).state;
+        const status = JSON.parse(readRunStatus({ runId: id, runsRoot: root }).stdout) as { state: string };
+        const gcExpected = { succeeded: "final-succeeded", failed: "final-failed", in_progress: "resumable-ready" }[expected];
+        expect({ id, terminal: result }, `${id}: the runtime ended it differently`).toEqual({ id, terminal: expected === "in_progress" ? "aborted" : expected });
+        expect(gcState, `${id}: gc state`).toBe(gcExpected);
+        expect(status.state, `${id}: status state`).toBe(expected);
+      }
+    });
+  });
 
   // ---- Torn journal repair ---------------------------------------------------------------------
 
@@ -1290,7 +1422,7 @@ describe("omc graph gc", () => {
         ageTree(fresh, OLD);
 
         expect(() => removeRun(realRoot, "run-twice", second)).toThrow(/replaced after the scan/);
-        expect(readFileSync(join(fresh, "journal.jsonl"), "utf8")).toBe(journalText(2));
+        expect(readFileSync(join(fresh, "journal.jsonl"), "utf8")).toBe(finishedJournals.get(fresh));
         expect(existsSync(join(fresh, "owner.lock")), "a lock was created in the new run").toBe(false);
       } finally {
         closeSync(hold);
@@ -1326,8 +1458,8 @@ describe("omc graph gc", () => {
       const dir = makeFinishedRun(root, "run-reopened");
       ageTree(dir, OLD);
       const remove = (realRoot: string, id: string, scanned?: ScannedRun) => {
-        // Same directory, now an interrupted run with an activation still running; its files keep their old times.
-        makeScenarioRun(realRoot, id, SCENARIOS.running);
+        // Same directory, now a run stopped between two steps (the second is ready); its files keep their old times.
+        makeRealRun(realRoot, id, "ready");
         ageTree(join(realRoot, id), OLD);
         removeRun(realRoot, id, scanned);
       };
@@ -1335,7 +1467,7 @@ describe("omc graph gc", () => {
       const result = gc(root, { remove });
       const run = decisionOf(result, "run-reopened");
       expect(run.action).toBe("failed");
-      expect(run.error).toMatch(/changed after the scan \(resumable-running\)/);
+      expect(run.error).toMatch(/changed after the scan \(resumable-ready\)/);
       expect(existsSync(join(dir, "journal.jsonl"))).toBe(true);
       expect(existsSync(join(dir, "owner.lock"))).toBe(false);
     });

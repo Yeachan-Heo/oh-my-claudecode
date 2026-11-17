@@ -26,7 +26,9 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { sealGraphDescriptor } from "../../descriptor.js";
+import { canonicalJson, sealGraphDescriptor } from "../../descriptor.js";
+import { computeJournalFingerprint } from "../../runtime/journal.js";
+import { writeRealRun } from "./real-run-fixtures.js";
 import { CommandNodeExecutor } from "../../runtime/executors/command.js";
 import { runGraph } from "../../runtime/runner.js";
 import type { NodeExecutor } from "../../runtime/types.js";
@@ -225,10 +227,8 @@ describe.runIf(process.platform !== "win32")("omc graph status", () => {
     const dir = join(runs, "st-corrupt");
     const projection = readFileSync(join(dir, "projection.json"), "utf8");
     const journal = readFileSync(join(dir, "journal.jsonl"), "utf8");
+    // Damage to the journal, which the runtime replays. Damage to projection.json is in the next test.
     const damage: Record<string, () => void> = {
-      "truncated projection": () => writeFileSync(join(dir, "projection.json"), projection.slice(0, Math.floor(projection.length / 2))),
-      "empty projection": () => writeFileSync(join(dir, "projection.json"), ""),
-      "projection without the projection key": () => writeFileSync(join(dir, "projection.json"), JSON.stringify({ other: 1 })),
       "truncated last journal line": () => writeFileSync(join(dir, "journal.jsonl"), journal.slice(0, journal.length - 20)),
       "journal missing although transitions are committed": () => rmSync(join(dir, "journal.jsonl")),
       "journal with a gap in its seq numbers": () => writeFileSync(join(dir, "journal.jsonl"), journal.replace('"seq":1', '"seq":7')),
@@ -244,14 +244,43 @@ describe.runIf(process.platform !== "win32")("omc graph status", () => {
     }
   });
 
-  it("an emptied journal still shows a failure that is committed in the projection", async () => {
+  it("a damaged, lost or restored snapshot beside a journal that replays does not change the report: the state comes from the journal", async () => {
+    const runs = makeRunsRoot();
+    await runChain(runs, "st-cache", NODE_OK);
+    const dir = join(runs, "st-cache");
+    const projection = readFileSync(join(dir, "projection.json"), "utf8");
+    const damage: Record<string, () => void> = {
+      "truncated": () => writeFileSync(join(dir, "projection.json"), projection.slice(0, Math.floor(projection.length / 2))),
+      "empty": () => writeFileSync(join(dir, "projection.json"), ""),
+      "without the projection key": () => writeFileSync(join(dir, "projection.json"), JSON.stringify({ other: 1 })),
+      "lost": () => rmSync(join(dir, "projection.json")),
+      "older than the journal (crash between the append and the save)": () => editEnvelope(runs, "st-cache", (envelope) => { envelope.saved_at_seq = 0; }),
+      "restored with the activations failed, at the right seq": () =>
+        editProjection(runs, "st-cache", (body) => {
+          for (const activation of Object.values(body.activations) as Record<string, any>[]) activation.status = "failed";
+        }),
+      "valid JSON with an emptied body": () => editProjection(runs, "st-cache", (body) => { body.activations = {}; }),
+    };
+    for (const [label, breakIt] of Object.entries(damage)) {
+      writeFileSync(join(dir, "projection.json"), projection);
+      breakIt();
+      const result = await statusCli(["st-cache", "--runs-root", runs]);
+      expect(result.code, `${label}: ${JSON.stringify(result.json)}`).toBe(0);
+      expect(result.json?.state, label).toBe("succeeded");
+      expect(result.json?.committed_transitions, label).toBe(2);
+      expect(nodeOf(result.json as Record<string, any>, "step-2").state, label).toBe("succeeded");
+    }
+  });
+
+  it("an emptied journal is unreadable, as the runtime refuses it: the snapshot does not stand in for the history", async () => {
     const runs = makeRunsRoot();
     await runChain(runs, "st-empty", NODE_FAIL);
     writeFileSync(join(runs, "st-empty", "journal.jsonl"), "");
 
     const result = await statusCli(["st-empty", "--runs-root", runs]);
-    expect(result.code, JSON.stringify(result.json)).toBe(1);
-    expect(result.json?.state).toBe("failed");
+    expect(result.code, JSON.stringify(result.json)).toBe(4);
+    expect(result.json?.state).toBe("unreadable");
+    expect(String(result.json?.error)).toMatch(/no committed journal history/);
   });
 
   it("a denied approval that leaves nothing to run ends the run as failed, not in_progress", async () => {
@@ -268,47 +297,17 @@ describe.runIf(process.platform !== "win32")("omc graph status", () => {
     expect(approved.json?.state).toBe("succeeded");
   });
 
-  it("an older running activation of a node keeps the run in_progress although the node's newest activation failed", async () => {
+  it("a run stopped between two steps is in_progress with the second step ready, from the journal alone", async () => {
     const runs = makeRunsRoot();
-    await runChain(runs, "st-overlap", NODE_FAIL);
-    editProjection(runs, "st-overlap", (projection) => {
-      // Two concurrent activations of step-1: the older one is still running, the newer one failed.
-      projection.activations = {
-        "step-1-older": { activation_id: "step-1-older", node_id: "step-1", status: "running", attempt_no: 1 },
-        ...projection.activations,
-      };
-    });
+    writeRealRun(runs, "st-between", "ready");
+    rmSync(join(runs, "st-between", "projection.json"));
 
-    const result = await statusCli(["st-overlap", "--runs-root", runs]);
+    const result = await statusCli(["st-between", "--runs-root", runs]);
     expect(result.code, JSON.stringify(result.json)).toBe(3);
     expect(result.json?.state).toBe("in_progress");
-  });
-
-  it("a projection that lags the journal is refused as unreadable instead of reported from the older snapshot", async () => {
-    const runs = makeRunsRoot();
-    // The crash window of the runner: the journal holds both committed transitions, the snapshot of the same run
-    // only the first (saved_at_seq 0).
-    await runChain(runs, "st-lag", NODE_OK);
-    editEnvelope(runs, "st-lag", (envelope) => {
-      envelope.saved_at_seq = 0;
-    });
-
-    const result = await statusCli(["st-lag", "--runs-root", runs]);
-    expect(result.code, JSON.stringify(result.json)).toBe(4);
-    expect(result.json?.state).toBe("unreadable");
-    expect(String(result.json?.error)).toMatch(/stale/);
-  });
-
-  it("an unconsumed cohort keeps a run from being reported as succeeded, as in the scheduler success rule", async () => {
-    const runs = makeRunsRoot();
-    await runChain(runs, "st-cohort", NODE_OK);
-    editProjection(runs, "st-cohort", (projection) => {
-      projection.cohorts = { "cohort-1": { consumed: false } };
-    });
-
-    const result = await statusCli(["st-cohort", "--runs-root", runs]);
-    expect(result.json?.state).not.toBe("succeeded");
-    expect(result.code).not.toBe(0);
+    expect(nodeOf(result.json as Record<string, any>, "step-1").state).toBe("succeeded");
+    expect(nodeOf(result.json as Record<string, any>, "step-2").state).toBe("ready");
+    expect(result.json?.committed_transitions).toBe(1);
   });
 
   it("uses the same run id limit as omc graph gc: 128 characters pass, 129 are a usage error", async () => {
@@ -381,22 +380,24 @@ describe.runIf(process.platform !== "win32")("omc graph status", () => {
     expect((await statusCli(["st-ok", "--runs-root", runs])).json?.state).toBe("succeeded");
   }
 
-  const FOREIGN_FILES: Record<string, string[]> = {
-    "projection.json": ["projection.json"],
-    "journal.jsonl": ["journal.jsonl"],
-    "projection.json and journal.jsonl": ["projection.json", "journal.jsonl"],
-    "descriptor.json, projection.json and journal.jsonl": ["descriptor.json", "projection.json", "journal.jsonl"],
+  // The foreign projection is ignored (the state comes from the journal of the requested run); a foreign journal or
+  // descriptor makes the run unreadable.
+  const FOREIGN_FILES: Record<string, { names: string[]; code: number; state: string }> = {
+    "projection.json": { names: ["projection.json"], code: 0, state: "succeeded" },
+    "journal.jsonl": { names: ["journal.jsonl"], code: 4, state: "unreadable" },
+    "projection.json and journal.jsonl": { names: ["projection.json", "journal.jsonl"], code: 4, state: "unreadable" },
+    "descriptor.json, projection.json and journal.jsonl": { names: ["descriptor.json", "projection.json", "journal.jsonl"], code: 4, state: "unreadable" },
   };
-  for (const [label, names] of Object.entries(FOREIGN_FILES)) {
-    it(`${label} copied from another run is unreadable, not the state of the requested run`, async () => {
+  for (const [label, expected] of Object.entries(FOREIGN_FILES)) {
+    it(`${label} copied from another run: ${expected.state}, never the state of the other run`, async () => {
       const runs = makeRunsRoot();
       await runPair(runs);
-      for (const name of names) copyFileSync(join(runs, "st-other", name), join(runs, "st-ok", name));
+      for (const name of expected.names) copyFileSync(join(runs, "st-other", name), join(runs, "st-ok", name));
 
       const result = await statusCli(["st-ok", "--runs-root", runs]);
-      expect(result.code, JSON.stringify(result.json)).toBe(4);
-      expect(result.json?.state).toBe("unreadable");
-      expect(result.json?.nodes).toBeUndefined();
+      expect(result.code, JSON.stringify(result.json)).toBe(expected.code);
+      expect(result.json?.state).toBe(expected.state);
+      if (expected.state === "unreadable") expect(result.json?.nodes).toBeUndefined();
     });
   }
 
@@ -421,28 +422,91 @@ describe.runIf(process.platform !== "win32")("omc graph status", () => {
     },
   };
   for (const [label, damage] of Object.entries(BROKEN_BINDINGS)) {
-    it(`${label} is unreadable`, async () => {
+    it(`${label} is not trusted and not needed: the report comes from the journal`, async () => {
       const runs = makeRunsRoot();
       await runChain(runs, "st-bind", NODE_OK);
       editEnvelope(runs, "st-bind", damage);
 
       const result = await statusCli(["st-bind", "--runs-root", runs]);
-      expect(result.code, JSON.stringify(result.json)).toBe(4);
-      expect(result.json?.state).toBe("unreadable");
+      expect(result.code, JSON.stringify(result.json)).toBe(0);
+      expect(result.json?.state).toBe("succeeded");
     });
   }
 
-  it("a journal record with a later epoch than the snapshot is unreadable", async () => {
+  it("a journal record edited after it was committed is unreadable: it fails its fingerprint in the replay", async () => {
+    const runs = makeRunsRoot();
+    await runChain(runs, "st-edited", NODE_OK);
+    const file = join(runs, "st-edited", "journal.jsonl");
+    const rows = readFileSync(file, "utf8").trim().split("\n").map((line) => JSON.parse(line) as Record<string, any>);
+    rows[rows.length - 1].epoch += 1;
+    writeFileSync(file, `${rows.map((row) => JSON.stringify(row)).join("\n")}\n`);
+
+    const result = await statusCli(["st-edited", "--runs-root", runs]);
+    expect(result.code, JSON.stringify(result.json)).toBe(4);
+    expect(String(result.json?.error)).toMatch(/fingerprint/);
+  });
+
+  it("journal records whose epochs decrease are unreadable, as in a resume", async () => {
     const runs = makeRunsRoot();
     await runChain(runs, "st-epoch", NODE_OK);
     const file = join(runs, "st-epoch", "journal.jsonl");
     const rows = readFileSync(file, "utf8").trim().split("\n").map((line) => JSON.parse(line) as Record<string, any>);
-    rows[rows.length - 1].epoch = (JSON.parse(readFileSync(join(runs, "st-epoch", "projection.json"), "utf8")) as { epoch: number }).epoch + 1;
-    writeFileSync(file, `${rows.map((row) => JSON.stringify(row)).join("\n")}\n`);
+    rows[0].epoch = rows[1].epoch + 1;
+    // Re-signed, so only the epoch rule can refuse the run.
+    const resigned = rows.map((row) => {
+      const { journal_fingerprint: _old, ...unsigned } = row;
+      return canonicalJson({ ...unsigned, journal_fingerprint: computeJournalFingerprint(unsigned as never) });
+    });
+    writeFileSync(file, `${resigned.join("\n")}\n`);
 
     const result = await statusCli(["st-epoch", "--runs-root", runs]);
     expect(result.code, JSON.stringify(result.json)).toBe(4);
     expect(String(result.json?.error)).toMatch(/epoch/);
+  });
+
+  // missing means that there is no run directory. A directory that exists is a run the caller may have to recover.
+  it("an existing run directory is never reported as missing: no files, no snapshot, a descriptor of another run", async () => {
+    const runs = makeRunsRoot();
+    mkdirSync(join(runs, "st-bare"), { recursive: true });
+    const bare = await statusCli(["st-bare", "--runs-root", runs]);
+    expect(bare.code, JSON.stringify(bare.json)).toBe(4);
+    expect(bare.json?.state).toBe("unreadable");
+    expect(String(bare.json?.error)).toMatch(/descriptor\.json is missing/);
+
+    // The descriptor was written and the first save of the snapshot failed: nothing is committed, no initial snapshot.
+    writeRealRun(runs, "st-nosave", "initial");
+    rmSync(join(runs, "st-nosave", "projection.json"));
+    const nosave = await statusCli(["st-nosave", "--runs-root", runs]);
+    expect(nosave.code, JSON.stringify(nosave.json)).toBe(4);
+    expect(nosave.json?.state).toBe("unreadable");
+    expect(String(nosave.json?.error)).toMatch(/no committed journal history/);
+
+    writeRealRun(runs, "st-other-desc", "succeeded");
+    writeRealRun(runs, "st-foreign", "succeeded");
+    copyFileSync(join(runs, "st-other-desc", "descriptor.json"), join(runs, "st-foreign", "descriptor.json"));
+    const foreign = await statusCli(["st-foreign", "--runs-root", runs]);
+    expect(foreign.code, JSON.stringify(foreign.json)).toBe(4);
+    expect(String(foreign.json?.error)).toMatch(/not the descriptor of this run/);
+
+    const gone = await statusCli(["st-gone", "--runs-root", runs]);
+    expect(gone.code).toBe(2);
+    expect(gone.json?.state).toBe("missing");
+  });
+
+  it("a run that is initialised and has committed nothing is in_progress; one with a corrupt descriptor is unreadable", async () => {
+    const runs = makeRunsRoot();
+    writeRealRun(runs, "st-initial", "initial");
+    const initial = await statusCli(["st-initial", "--runs-root", runs]);
+    expect(initial.code, JSON.stringify(initial.json)).toBe(3);
+    expect(initial.json?.state).toBe("in_progress");
+    expect(initial.json?.committed_transitions).toBe(0);
+    expect(nodeOf(initial.json as Record<string, any>, "step-1").state).toBe("ready");
+
+    writeRealRun(runs, "st-baddesc", "succeeded");
+    writeFileSync(join(runs, "st-baddesc", "descriptor.json"), "{not json");
+    const bad = await statusCli(["st-baddesc", "--runs-root", runs]);
+    expect(bad.code, JSON.stringify(bad.json)).toBe(4);
+    expect(String(bad.json?.error)).toMatch(/descriptor\.json/);
   });
 
   it("a run without its descriptor.json is unreadable", async () => {

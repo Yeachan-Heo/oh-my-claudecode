@@ -1,25 +1,23 @@
 /**
  * Read-only status of one graph run, for `omc graph status <run_id>`.
  *
- * Reads only `<runs-root>/<run_id>/descriptor.json`, `projection.json` and `journal.jsonl`. The
- * run state is derived, because the graph runtime writes no terminal record to
- * disk. The rule is the one the runtime and `omc graph gc` use (projectionOutcome in run-gc.ts):
- *   succeeded    the scheduler success predicate holds: a terminal verification activation completed with an
- *                evidence-bearing succeeded transition, every activation is completed and every cohort is consumed;
- *   failed       no activation is ready or running and the run did not succeed (the runtime ends such a run as failed,
- *                for example after a failed step or a denied approval);
- *   in_progress  an activation is ready or running, including a run interrupted by a signal (its last attempt was
- *                never committed).
+ * Reads only `<runs-root>/<run_id>/descriptor.json`, `projection.json` and `journal.jsonl`. The run state is derived,
+ * because the graph runtime writes no terminal record to disk, and it is derived the way the runtime derives it: the
+ * journal is replayed (classifyRunFiles in run-state.ts, the same function `omc graph gc` uses, built on the
+ * runtime's replay fold) and `projection.json` is a status cache that is never trusted for the verdict. The states:
+ *   succeeded    the scheduler success predicate holds after the replay;
+ *   failed       no activation can be started, resolved or approved and the run did not succeed (the runtime ends
+ *                such a run as failed, for example after a failed step or a denied approval);
+ *   in_progress  an activation is ready, including a run interrupted by a signal (its last attempt was never
+ *                committed, so it is ready again);
+ *   missing      there is no run directory (exit 2);
+ *   unreadable   the directory exists but its files are not a run the runtime could resume (exit 4): no descriptor, a
+ *                descriptor of another run, a partial last journal line (a file still being written), a journal with
+ *                a gap, another run's records or a record that fails the replay, or a descriptor with neither a
+ *                committed record nor the initial snapshot. A run whose snapshot is lost, stale or restored is
+ *                reported from its journal.
  * Every activation counts, not only the latest one of each node. A node that never got an activation (for example the
  * step after a failed step) is not listed.
- * A file that is still being written (a partial last journal line), a journal with a gap in its seq numbers, and a
- * projection that lags the journal (a crash between the journal append and the snapshot save) read as "unreadable":
- * retry later, or rerun the run, which replays the journal.
- *
- * The files must belong to the requested run. The snapshot is validated as FileProjectionStore validates it and is
- * bound to the run's descriptor.json (descriptor hash, run id, revision; the projection inside names the same run
- * and descriptor), every journal record carries that descriptor's hash and no writer epoch above the snapshot's.
- * A projection or journal copied or restored from another run reads as "unreadable", never as the state of this one.
  *
  * The three files are read through one open handle on the run directory (the runtime's own directory-relative
  * operations, on Linux and on macOS with the native module), so a directory that is swapped for a link or for another
@@ -32,14 +30,7 @@ import { closeSync, constants as fsConstants, fstatSync, lstatSync, openSync, re
 import { join } from "node:path";
 import { containedFsPlatformSupported } from "./contained-fd.js";
 import { RUN_ID_PATTERN } from "./run-dir.js";
-import {
-  checkSnapshotEnvelope,
-  parseJournalLines,
-  parseRunDescriptor,
-  projectionBelongsToRun,
-  projectionOutcome,
-  RunBindingError,
-} from "./run-gc.js";
+import { classifyRunFiles } from "./run-state.js";
 import { withContainedOperations } from "./safe-fs.js";
 
 export const RUN_STATUS_EXIT_CODES = {
@@ -91,13 +82,6 @@ interface Transition {
   readonly outcome: string;
   readonly output_summary?: string;
   readonly evidence_refs: readonly unknown[];
-}
-
-interface Projection {
-  readonly activations: Record<string, Activation>;
-  readonly cohorts: Record<string, { readonly consumed: boolean }>;
-  readonly committed_transitions: Record<string, Transition | undefined>;
-  readonly terminal_verification_activation_ids: readonly string[];
 }
 
 class UnreadableError extends Error {}
@@ -188,24 +172,6 @@ function readRunFiles(runDir: string, interlock: RunStatusOptions["interlock"]):
   return files;
 }
 
-function parseJson(name: string, text: string): unknown {
-  try {
-    return JSON.parse(text);
-  } catch (error) {
-    throw new UnreadableError(`${name}: ${(error as Error).message}`);
-  }
-}
-
-// A file that does not belong to the run is unreadable, with the reason the shared check gives.
-function bound<T>(check: () => T): T {
-  try {
-    return check();
-  } catch (error) {
-    if (error instanceof RunBindingError) throw new UnreadableError(error.message);
-    throw error;
-  }
-}
-
 function nodeStateOf(
   activation: Activation,
   committed: Record<string, Transition | undefined>,
@@ -222,61 +188,13 @@ function nodeStateOf(
 }
 
 function summarize(runId: string, files: RunFiles, runsRoot: string): Record<string, unknown> {
-  if (files.descriptor === null) throw new UnreadableError("descriptor.json is missing");
-  const descriptor = bound(() => parseRunDescriptor(parseJson("descriptor.json", files.descriptor as string), runId));
-  const envelope = bound(() =>
-    checkSnapshotEnvelope(parseJson("projection.json", files.projection as string), descriptor, runId),
-  );
-  const projection = envelope.projection as unknown as Projection;
-  if (!projectionBelongsToRun(projection as unknown as Record<string, any>, descriptor.descriptorHash, runId)) {
-    throw new UnreadableError("projection.json holds the projection of another run or descriptor");
-  }
-  if (
-    !projection.activations ||
-    !projection.cohorts ||
-    !projection.committed_transitions ||
-    !Array.isArray(projection.terminal_verification_activation_ids)
-  ) {
-    throw new UnreadableError(
-      "projection.json lacks activations, cohorts, committed_transitions or terminal_verification_activation_ids",
-    );
-  }
-  if (Object.keys(projection.activations).length === 0) {
-    throw new UnreadableError("projection.json has no activations");
-  }
-  const committed = projection.committed_transitions;
-  const activations = projection.activations;
-  let transitions: Transition[] = [];
-  let journalEpoch = 0;
-  if (files.journal !== null) {
-    const lines = files.journal.split("\n").filter((line) => line.trim() !== "");
-    // Same checks as the runtime's replay: envelope, seq 0, 1, 2, ... without a gap, this run's descriptor on every
-    // record, epochs that never decrease (as omc graph gc checks), so the last seq is the count - 1.
-    const records = bound(() => parseJournalLines(lines, descriptor.descriptorHash));
-    transitions = records.map((record) => record.transition as Transition);
-    journalEpoch = records.length > 0 ? (records[records.length - 1].epoch as number) : 0;
-  } else if (Object.keys(committed).length > 0) {
-    throw new UnreadableError(
-      "journal.jsonl is missing although the projection has committed transitions",
-    );
-  }
-
-  // A snapshot that lags the journal (the crash window between journal.append and store.save in the runner) shows
-  // older activation states than the committed history; refuse it rather than report it. A journal that is shorter
-  // than the snapshot (for example emptied) is not refused: the snapshot still holds every committed transition.
-  const journalSeq = transitions.length - 1;
-  if (envelope.saved_at_seq < journalSeq) {
-    throw new UnreadableError(
-      `projection is stale (saved_at_seq ${envelope.saved_at_seq} < journal seq ${journalSeq})`,
-    );
-  }
-  // The snapshot is saved by the writer that appended its last record, so no record may carry a later epoch.
-  if (journalEpoch > envelope.epoch) {
-    throw new UnreadableError(`journal.jsonl has epoch ${journalEpoch}, above the epoch ${envelope.epoch} of projection.json`);
-  }
+  const verdict = classifyRunFiles(runId, files);
+  if (verdict.state === "unreadable") throw new UnreadableError(verdict.detail);
+  const committed = verdict.projection.committed_transitions as unknown as Record<string, Transition | undefined>;
+  const transitions = verdict.records.map((record) => record.transition as unknown as Transition);
 
   const lastActivationByNode = new Map<string, Activation>();
-  for (const activation of Object.values(activations)) {
+  for (const activation of Object.values(verdict.projection.activations) as unknown as Activation[]) {
     lastActivationByNode.set(activation.node_id, activation);
   }
 
@@ -295,15 +213,11 @@ function summarize(runId: string, files: RunFiles, runsRoot: string): Record<str
     };
   });
 
-  const outcome = projectionOutcome(projection as unknown as Record<string, any>);
-  const state: keyof typeof RUN_STATUS_EXIT_CODES =
-    outcome === "succeeded" ? "succeeded" : outcome === "failed" ? "failed" : "in_progress";
-
   return {
     run_id: runId,
     runs_root: runsRoot,
-    state,
-    exit_code: RUN_STATUS_EXIT_CODES[state],
+    state: verdict.state,
+    exit_code: RUN_STATUS_EXIT_CODES[verdict.state],
     committed_transitions: transitions.length,
     nodes,
   };
@@ -321,7 +235,7 @@ export function readRunStatus(options: RunStatusOptions): RunStatusOutcome {
     // A symlinked run directory is refused before anything is read through it, and the files are read through
     // one open handle on the directory (see readRunFiles).
     const files = readRunFiles(runDir, options.interlock);
-    if (files === null || files.projection === null) {
+    if (files === null) {
       const missing = { run_id: options.runId, runs_root: runsRoot, state: "missing", exit_code: RUN_STATUS_EXIT_CODES.missing };
       return {
         exitCode: RUN_STATUS_EXIT_CODES.missing,
