@@ -6,13 +6,14 @@
  * Claude Code does (stdin JSON payload), against a built dist tree.
  */
 
-import { describe, expect, it, beforeEach, afterEach, vi } from 'vitest';
+import { describe, expect, it, beforeEach, afterEach, beforeAll, vi } from 'vitest';
 import { execFileSync, spawn } from 'node:child_process';
 import { mkdtempSync, mkdirSync, renameSync, rmSync, symlinkSync, unlinkSync, writeFileSync, existsSync, readFileSync, linkSync, realpathSync, utimesSync } from 'node:fs';
 import * as nodeFs from 'fs';
 import { basename, join } from 'node:path';
 import { homedir } from 'node:os';
 import { fileURLToPath, pathToFileURL } from 'node:url';
+import { clearWorktreeCache } from '../lib/worktree-paths.js';
 
 vi.mock('fs', async () => {
   const actual = await vi.importActual<typeof import('fs')>('fs');
@@ -172,6 +173,13 @@ describe('session-start.mjs PreCompact checkpoint restore (issue #3730)', () => 
   let tempDir: string;
   let home: string;
   let project: string;
+
+  beforeAll(() => {
+    // PreCompact tests manage their own temp directories with explicit paths.
+    // Clear OMC_STATE_DIR so getOmcRoot() returns {tempDir}/.omc not a centralized temp.
+    delete process.env.OMC_STATE_DIR;
+    clearWorktreeCache();
+  });
 
   beforeEach(() => {
     tempDir = mkdtempSync(join(homedir(), 'omc-precompact-session-start-'));
@@ -982,6 +990,13 @@ process.stdout.write(JSON.stringify(restorePreCompactCheckpoint(process.env.OMC_
 // Template/installed parity: both self-contained helper copies must reject
 // the same traversal and TOCTOU payloads.
 describe('precompact-restore helper parity (issue #3730 security)', () => {
+  beforeAll(() => {
+    // PreCompact tests manage their own temp directories with explicit paths.
+    // Clear OMC_STATE_DIR so getOmcRoot() returns {tempDir}/.omc not a centralized temp.
+    delete process.env.OMC_STATE_DIR;
+    clearWorktreeCache();
+  });
+
   const TEMPLATE_HELPER = join(__dirname, '..', '..', 'templates', 'hooks', 'lib', 'precompact-restore.mjs');
   const INSTALLED_HELPER = join(__dirname, '..', '..', 'scripts', 'lib', 'precompact-restore.mjs');
 

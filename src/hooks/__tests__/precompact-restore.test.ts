@@ -10,7 +10,7 @@
  *    checkpoint to the same session twice.
  */
 
-import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, beforeAll, vi } from 'vitest';
 import {
   mkdtempSync,
   mkdirSync,
@@ -54,6 +54,7 @@ import {
   CHECKPOINT_MAX_AGE_MS,
   CHECKPOINT_MAX_BYTES,
 } from '../pre-compact/restore.js';
+import { clearWorktreeCache } from '../../lib/worktree-paths.js';
 
 // Marker publication is portable across every supported Node platform.
 const SECURE_MARKER_SUPPORTED = true;
@@ -144,6 +145,13 @@ function getOmcRootForTest(dir: string): string {
 
 describe('PreCompact writer - plan anchors (issue #3730)', () => {
   let tempDir: string;
+
+  beforeAll(() => {
+    // PreCompact tests manage their own temp directories with explicit paths.
+    // Clear OMC_STATE_DIR so getOmcRoot() returns {tempDir}/.omc not a centralized temp.
+    delete process.env.OMC_STATE_DIR;
+    clearWorktreeCache();
+  });
 
   beforeEach(() => {
     tempDir = createTempDir();
@@ -325,6 +333,13 @@ describe('PreCompact writer - plan anchors (issue #3730)', () => {
 
 describe('PreCompact restore (issue #3730)', () => {
   let tempDir: string;
+
+  beforeAll(() => {
+    // PreCompact tests manage their own temp directories with explicit paths.
+    // Clear OMC_STATE_DIR so getOmcRoot() returns {tempDir}/.omc not a centralized temp.
+    delete process.env.OMC_STATE_DIR;
+    clearWorktreeCache();
+  });
 
   beforeEach(() => {
     tempDir = createTempDir();
@@ -1335,6 +1350,13 @@ syncBuiltinESMExports();
 
 describe('writer → restore lifecycle (issue #3730)', () => {
   let tempDir: string;
+
+  beforeAll(() => {
+    // PreCompact tests manage their own temp directories with explicit paths.
+    // Clear OMC_STATE_DIR so getOmcRoot() returns {tempDir}/.omc not a centralized temp.
+    delete process.env.OMC_STATE_DIR;
+    clearWorktreeCache();
+  });
 
   beforeEach(() => {
     tempDir = createTempDir();
