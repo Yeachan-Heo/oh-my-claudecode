@@ -204,18 +204,24 @@ function openErrorsLog(path) {
 export function appendErrorsJsonl(dir, record, threshold) {
   const path = join(dir, 'errors.jsonl');
   const line = JSON.stringify(jsonlRowOf(record)) + '\n';
-  let fd = openErrorsLog(path);
+  let fd = -1;
   try {
     const result = withStateFileLockAtPathSync(
       `${path}.lock`,
       () => {
-        if (statSync(path).size > threshold) {
-          renameSync(path, path + '.1');
-          closeSync(fd);
+        // Open the journal after acquiring the lock to prevent stale file descriptors after rotation
+        fd = openErrorsLog(path);
+        try {
+          if (statSync(path).size > threshold) {
+            renameSync(path, path + '.1');
+            closeSync(fd);
+            fd = openErrorsLog(path);
+          }
+          writeSync(fd, line);
+        } finally {
+          if (fd >= 0) closeSync(fd);
           fd = -1;
-          fd = openErrorsLog(path);
         }
-        writeSync(fd, line);
       },
       true,
       APPEND_LOCK_ATTEMPTS,
