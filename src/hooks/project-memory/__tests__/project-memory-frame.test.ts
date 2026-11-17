@@ -12,6 +12,7 @@ import {
 import { processPreCompact, PreCompactInput } from "../pre-compact.js";
 import { ProjectMemory } from "../types.js";
 import { SCHEMA_VERSION } from "../constants.js";
+import * as writers from "../../../../scripts/lib/context-text-sanitize.mjs";
 
 vi.mock("../../rules-injector/finder.js", () => ({
   findProjectRoot: vi.fn(),
@@ -186,6 +187,97 @@ describe("project memory frame", () => {
       const summary = formatContextSummary(createMemory(), {});
       expect(summary.length).toBeLessThanOrEqual(650);
       expect(summary).not.toContain("[REFERENCE ONLY]");
+    });
+  });
+
+  describe("identifiers in the summary", () => {
+    const FE0F = String.fromCodePoint(0xfe0f);
+    const removedCharacters: Record<string, string> = {
+      "variation selector": FE0F,
+      "bidi override": RTL_OVERRIDE,
+      "format character": String.fromCodePoint(0x200b),
+      "astral tag character": String.fromCodePoint(0xe0041),
+      "Braille filler": String.fromCodePoint(0x2800),
+    };
+    const hotPathMemory = (path: string, extra: Partial<ProjectMemory> = {}): ProjectMemory =>
+      createMemory({
+        hotPaths: [{ path, accessCount: 5, lastAccessed: Date.now(), type: "file" }],
+        ...extra,
+      });
+    const hotPathLine = (text: string): string =>
+      text.split("\n").find((line) => line.startsWith("- ") && line.endsWith("x)") && !line.includes(": ")) ?? "";
+    const decodeHotPath = (line: string): string => {
+      const written = line.slice(2, line.lastIndexOf(" ("));
+      return written.startsWith('"') ? JSON.parse(written) : written;
+    };
+
+    it("keeps a hot path with a variation selector exact in the framed summary", async () => {
+      const path = `project-\u2699${FE0F}/file.ts`;
+      const framed = await formatContextSummaryWithFrame(hotPathMemory(path), {});
+      expect(decodeHotPath(hotPathLine(framed))).toBe(path);
+      expect(framed).not.toContain(FE0F);
+      expect(framed).toContain('"project-\u2699\\ufe0f/file.ts" (');
+    });
+
+    it("keeps a hot path exact in the unframed summary when the writers are passed, and cleaned as a block otherwise", () => {
+      const path = `project-\u2699${FE0F}/file.ts`;
+      const memory = hotPathMemory(path);
+      expect(decodeHotPath(hotPathLine(formatContextSummary(memory, {}, writers)))).toBe(path);
+      expect(formatContextSummary(memory, {})).toContain(`- ${path} (`);
+      expect(hotPathLine(writers.cleanTextBlock(formatContextSummary(memory, {})))).toContain("project-\u2699 /file.ts");
+    });
+
+    it("writes the summary as it always was when no writers are passed", () => {
+      const memory = hotPathMemory("src/a b.ts", {
+        build: { buildCommand: "pnpm build", testCommand: "pnpm test", lintCommand: "pnpm lint", devCommand: null, scripts: {} },
+      });
+      const summary = formatContextSummary(memory, {});
+      expect(summary).toContain("- build=pnpm build | test=pnpm test | lint=pnpm lint");
+      expect(summary).toContain("- src/a b.ts (");
+      expect(formatContextSummary(memory, {}, undefined)).toBe(summary);
+      expect(formatContextSummary(memory, {}, writers)).toBe(summary);
+    });
+
+    for (const [label, character] of Object.entries(removedCharacters)) {
+      it(`keeps a four-component hot path exact or replaces it by a notice: ${label}`, async () => {
+        for (const repeat of [0, 1, 60, 240]) {
+          const path = ["src", "module", "deep", "file.ts"].map((part) => `${part}${character.repeat(repeat)}`).join("/");
+          const written = writers.escapeIdentifier(path);
+          const framed = await formatContextSummaryWithFrame(hotPathMemory(path), {});
+          const line = hotPathLine(framed);
+          if (written.length <= 200) expect(decodeHotPath(line), `${repeat} times`).toBe(path);
+          else expect(line, `${repeat} times`).toBe(`- [identifier of ${written.length} characters not shown] (5x)`);
+          expect(writers.cleanTextBlock(framed), `${repeat} times`).toBe(framed);
+          expect(framed.slice(framed.indexOf("\n\n") + 2).length, `${repeat} times`).toBeLessThanOrEqual(650);
+        }
+      });
+    }
+
+    it("writes a build command exact too, with a notice for one over 120 characters", () => {
+      const command = `pnpm build${FE0F} --mode=ci`;
+      const summary = formatContextSummary(
+        createMemory({ build: { buildCommand: command, testCommand: `x${"y".repeat(200)}`, lintCommand: null, devCommand: null, scripts: {} } }),
+        {},
+        writers,
+      );
+      const line = summary.split("\n").find((entry) => entry.startsWith("- build=")) ?? "";
+      expect(line).toContain(`build=${JSON.stringify(command).replace(FE0F, "\\ufe0f")} | test=[identifier of 201 characters not shown]`);
+    });
+
+    it("cuts the summary at a line, never inside a hot path, when the budget is over", () => {
+      const memory = hotPathMemory(`${"a".repeat(180)}/file.ts`, {
+        userDirectives: [
+          { timestamp: 1, directive: "x".repeat(300), context: "", source: "explicit", priority: "high" },
+          { timestamp: 2, directive: "y".repeat(300), context: "", source: "explicit", priority: "high" },
+        ],
+      });
+      const summary = formatContextSummary(memory, {}, writers);
+      expect(summary.length).toBeLessThanOrEqual(650);
+      expect(summary.endsWith("\n…")).toBe(true);
+      expect(summary).toContain(`- ${"a".repeat(180)}/file.ts (`);
+      const lines = summary.split("\n").slice(0, -1);
+      expect(lines.every((line) => line === "" || line.length < 650)).toBe(true);
+      expect(formatContextSummary(memory, {}).length).toBeLessThanOrEqual(650);
     });
   });
 

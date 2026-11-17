@@ -1043,8 +1043,9 @@ function getAgentCompletionSummary(directory, quietLevel = QUIET_LEVEL, sessionI
       const parts = [];
       if (quietLevel < 2 && running.length > 0) {
         if (contextText) {
-          // Names are cleaned and bounded to 80 characters; at most 10 are listed, the rest as "+N more".
-          const names = running.map(a => contextText.cleanHostText(String(a.agent_type ?? '').replace('oh-my-claudecode:', ''), 80) || 'unknown');
+          // Names are identifiers: each is written exactly (escaped, not cleaned; a written form over 80 characters is replaced by
+          // a notice). At most 10 are listed, the rest as "+N more".
+          const names = running.map(a => contextText.escapeIdentifier(String(a.agent_type ?? '').replace('oh-my-claudecode:', ''), 80) || 'unknown');
           const shown = names.slice(0, 10);
           const more = names.length > shown.length ? `, +${names.length - shown.length} more` : '';
           parts.push(`Running: ${running.length} [${shown.join(', ')}${more}]`);

@@ -814,7 +814,10 @@ async function resolveProjectMemorySummary(directory, projectMemoryModules) {
     return '';
   }
 
-  return (await formatContextSummary(memory))?.trim() || '';
+  // With the cleaning switch on the formatter writes hot paths and commands exactly (escaped, not cleaned) and fits the summary
+  // by whole lines; a built formatter without the third parameter ignores it and the summary is cleaned as a block below.
+  const summary = contextText ? await formatContextSummary(memory, undefined, contextText) : await formatContextSummary(memory);
+  return summary?.trim() || '';
 }
 
 // Semantic version comparison (for cache cleanup sorting and update checks)
@@ -1501,7 +1504,7 @@ async function jevCompactionAfterSessionStart(data, logDirOf) {
   if (!(process.env.OMC_JEV || '').includes('compaction')) return {};
   try {
     const { afterSessionStart } = await import(pathToFileURL(join(__dirname, 'lib', 'jev-compaction-state.mjs')).href);
-    return afterSessionStart(data, { logDir: process.env.OMC_JEV_LOG_DIR || logDirOf() }) || {};
+    return afterSessionStart(data, { logDir: process.env.OMC_JEV_LOG_DIR || logDirOf(), writers: contextText ?? undefined }) || {};
   } catch {
     return {};
   }
@@ -1592,7 +1595,7 @@ async function main() {
         const { preparePreCompactCheckpointRestore, claimPreCompactCheckpointRestore } = await import(
           pathToFileURL(join(__dirname, 'lib', 'precompact-restore.mjs')).href
         );
-        const prepared = preparePreCompactCheckpointRestore(omcRoot, sessionId);
+        const prepared = preparePreCompactCheckpointRestore(omcRoot, sessionId, contextText ?? undefined);
         if (prepared) {
           pendingRestore = { ...prepared, preparePreCompactCheckpointRestore, claimPreCompactCheckpointRestore };
           pendingRestoreMessage = `<session-restore>\n\n${cleanBlock(prepared.text)}\n\n</session-restore>\n\n---\n`;
@@ -1971,7 +1974,7 @@ ${cleanBlock(cleanContent)}
           }
           if (status !== 'contended') break;
           Atomics.wait(waitCell, 0, 0, 10);
-          const refreshed = pendingRestore.preparePreCompactCheckpointRestore(omcRoot, sessionId);
+          const refreshed = pendingRestore.preparePreCompactCheckpointRestore(omcRoot, sessionId, contextText ?? undefined);
           if (!refreshed) break;
           const refreshedMessage = `<session-restore>\n\n${cleanBlock(refreshed.text)}\n\n</session-restore>\n\n---\n`;
           const refreshedMessages = messages.map((message) => (

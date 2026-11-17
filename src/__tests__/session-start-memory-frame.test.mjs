@@ -17,8 +17,11 @@ const SCRIPT_PATH = join(dirname(fileURLToPath(import.meta.url)), '..', '..', 's
 const BARE_FORMATTER = "export function formatContextSummary() { return 'BARE-SUMMARY'; }\n";
 const FRAMED_FORMATTER = `${BARE_FORMATTER}export async function formatContextSummaryWithFrame() { return 'FRAMED-SUMMARY'; }\n`;
 
+// Reports what the hook passes to the formatter: the number of arguments, and the names of the writers when it passes them.
+const ARGUMENT_FORMATTER = "export function formatContextSummary(memory, context, writers) { return writers ? `WRITERS:${Object.keys(writers).sort().join(',')}` : `NO-WRITERS:${arguments.length}`; }\n";
+
 // Runs the hook once per call with `variable` as OMC_PROJECT_MEMORY_FRAME (undefined = not set) and returns its context text.
-function sessionStartContext(formatterSource, variable) {
+function sessionStartContext(formatterSource, variable, extraEnv = {}) {
   const sandbox = mkdtempSync(join(tmpdir(), 'session-start-memory-frame-'));
   try {
     const pluginRoot = join(sandbox, 'plugin');
@@ -46,6 +49,7 @@ function sessionStartContext(formatterSource, variable) {
       OMC_NOTIFY: '0',
     });
     if (variable !== undefined) env.OMC_PROJECT_MEMORY_FRAME = variable;
+    Object.assign(env, extraEnv);
     const result = spawnSync(process.execPath, [SCRIPT_PATH], {
       cwd: projectDir,
       input: JSON.stringify({ cwd: projectDir, session_id: 'sess-memory-frame', hook_event_name: 'SessionStart' }),
@@ -86,4 +90,29 @@ describe('session-start project memory formatter selection', () => {
       expect(text, `value ${JSON.stringify(value)}`).toBe(baseline);
     }
   }, 180000);
+});
+
+describe('session-start passes the cleaning writers to the project memory formatter', () => {
+  it('passes the module, and only the module, as the third argument when OMC_CONTEXT_TEXT_SANITIZE is 1 or true', () => {
+    for (const value of ['1', 'true']) {
+      const text = sessionStartContext(ARGUMENT_FORMATTER, undefined, { OMC_CONTEXT_TEXT_SANITIZE: value });
+      expect(text, value).toContain('WRITERS:');
+      for (const name of ['cleanHostText', 'cleanTextBlock', 'escapeIdentifier', 'escapeRemovedCharacters', 'fitLines']) expect(text, value).toContain(name);
+    }
+  }, 120000);
+
+  it('calls the formatter with the memory alone, as before, when the switch is off or unset', () => {
+    for (const extra of [{}, { OMC_CONTEXT_TEXT_SANITIZE: '0' }, { OMC_CONTEXT_TEXT_SANITIZE: 'yes' }]) {
+      const text = sessionStartContext(ARGUMENT_FORMATTER, undefined, extra);
+      expect(text, JSON.stringify(extra)).toContain('NO-WRITERS:1');
+    }
+  }, 180000);
+
+  it('leaves a summary that holds escaped identifiers as it is when it cleans the block', () => {
+    const escapedPath = JSON.stringify('project-\u2699\ufe0f/file.ts').replace('\ufe0f', '\\ufe0f').replace('\u2699', '\\u2699');
+    const summary = `[Hot Paths]\n- ${escapedPath} (3x)`;
+    const formatter = `export function formatContextSummary() { return ${JSON.stringify(summary)}; }\n`;
+    const text = sessionStartContext(formatter, undefined, { OMC_CONTEXT_TEXT_SANITIZE: '1' });
+    expect(text).toContain(`- ${escapedPath} (3x)`);
+  }, 60000);
 });

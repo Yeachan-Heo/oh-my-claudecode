@@ -178,14 +178,16 @@ export function foldRegistry(sessionId, agentId, env = process.env) {
 const STATUS_LABEL = { in_progress: 'in progress', pending: 'pending' };
 
 /** The registry as text for the model, at most REGISTRY_CHARS characters; '' when there is nothing to say. */
-export function renderRegistry(sessionId, agentId, env = process.env) {
+export function renderRegistry(sessionId, agentId, env = process.env, writers) {
   const reg = foldRegistry(sessionId, agentId, env);
   if (!reg) return '';
   const lines = [];
   if (reg.tasks.length) lines.push('Open tasks: ' + reg.tasks.map((x) => `[${STATUS_LABEL[x.status] || x.status || '?'}] ${x.text}`).join('; '));
   if (reg.error) lines.push(`Last tool error with no later successful call of the same: ${reg.error.tool}(${reg.error.input}): ${reg.error.text}`);
   if (reg.git.length) lines.push('Recent git changes: ' + reg.git.join(' | '));
-  const files = [...reg.files];
+  // With the cleaning writers of the SessionStart hook a changed file is written exactly (escaped, not cleaned), and a text over
+  // the limit is cut by whole lines.
+  const files = writers ? reg.files.map((file) => writers.escapeIdentifier(file, 250)) : [...reg.files];
   if (!lines.length && !files.length) return '';
   const head = '[OMC: work state from before the compaction that the summary may have left out]';
   let text;
@@ -195,6 +197,7 @@ export function renderRegistry(sessionId, agentId, env = process.env) {
     if (text.length <= REGISTRY_CHARS || !files.length) break;
     files.shift();
   }
+  if (writers) return writers.fitLines(text, REGISTRY_CHARS);
   return text.length > REGISTRY_CHARS ? text.slice(0, REGISTRY_CHARS - 1) + '…' : text;
 }
 
@@ -276,9 +279,10 @@ function claim(entries, data, now) {
 /**
  * SessionStart: move the session's module records to compaction.jsonl; after a compaction return
  * {context?, systemMessage?} for the hook output. `logDir` is the Jev log directory of the session's
- * state root (where shadow.jsonl goes).
+ * state root (where shadow.jsonl goes). `writers` (optional) is the text cleaning module of the hook: with it
+ * the changed files in the registry text are written exactly (see renderRegistry).
  */
-export function afterSessionStart(data, { logDir } = {}, env = process.env) {
+export function afterSessionStart(data, { logDir, writers } = {}, env = process.env) {
   try {
     if (!compactionEnabled(env)) return {};
     const sessionId = data?.session_id || data?.sessionId;
@@ -304,7 +308,7 @@ export function afterSessionStart(data, { logDir } = {}, env = process.env) {
         if (noteMissing(stateDir, now)) out.systemMessage = MISSING_MESSAGE;
       }
       if (!claimed || claimed.record.result !== 'jev') {
-        const text = renderRegistry(sessionId, agent, env);
+        const text = renderRegistry(sessionId, agent, env, writers);
         if (text) out.context = text;
       }
     }

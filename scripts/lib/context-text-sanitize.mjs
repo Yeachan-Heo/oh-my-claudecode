@@ -85,10 +85,12 @@ export function cleanTextBlock(value) {
   }
 }
 
-// Identifiers (file names, paths) that a message tells the model to use are never cleaned: cleaning would turn a name with
-// a removed character, a run of spaces or a long name into a different name that does not exist. They are escaped instead,
-// and the escape is reversible. Each character that cleaning removes, and each "<" that starts a structure marker, becomes
-// \uXXXX (one escape per UTF-16 unit, so an astral character gives two); cleanTextBlock does not change the result.
+// Identifiers (file names, paths, agent names, ids, commands) that a message names for the model are never cleaned: cleaning
+// would turn a name with a removed character, a run of spaces or a long name into a different name that does not exist. They
+// are escaped instead, and the escape is reversible. Each character that cleaning removes, and each "<" that starts a
+// structure marker, becomes \uXXXX (one escape per UTF-16 unit, so an astral character gives two); cleanTextBlock does not
+// change the result. A hook writes its identifiers with escapeIdentifier and its prose with cleanHostText or cleanTextBlock;
+// cleaning a whole block that already holds escaped identifiers leaves them as they are.
 const ESCAPED_CHARACTERS = new RegExp(`${REMOVED_CHARACTERS.source}|${STRUCTURE_MARKER.source}`, 'giu');
 
 function unicodeEscape(text) {
@@ -109,12 +111,40 @@ export function escapeRemovedCharacters(json) {
   }
 }
 
-// A name that contains none of those characters is returned as it is. Any other name is returned as a double-quoted JSON
-// string with the characters escaped, so JSON.parse of the result gives the exact name.
-export function escapeIdentifier(value) {
+// A name that contains none of those characters and does not start with a double quote is returned as it is. Any other name
+// is returned as a double-quoted JSON string with the characters escaped, so JSON.parse of the result gives the exact name; a
+// name that starts with a double quote is written that way too, so a quoted name always means a JSON string. The limit
+// counts the characters of the written form, after escaping. A name whose written form is longer is not shown in part (a
+// part of a name is another name): a fixed notice that gives the length stands in its place.
+export function escapeIdentifier(value, max = Infinity) {
   try {
     const text = toText(value);
-    return text.search(ESCAPED_CHARACTERS) === -1 ? text : escapeRemovedCharacters(JSON.stringify(text));
+    const written = text.search(ESCAPED_CHARACTERS) === -1 && !text.startsWith('"') ? text : escapeRemovedCharacters(JSON.stringify(text));
+    const limit = typeof max === 'number' && max >= 0 ? max : Infinity;
+    return written.length <= limit ? written : `[identifier of ${written.length} characters not shown]`;
+  } catch {
+    return '';
+  }
+}
+
+// Multi-line text cut to at most `max` characters at a line boundary: whole lines are dropped from the end, so a line that
+// holds an identifier is never cut in half, and the text then ends with a line "…". Text that fits is returned as it is.
+export function fitLines(value, max) {
+  try {
+    const text = toText(value);
+    const limit = typeof max === 'number' && max >= 2 ? max : Infinity;
+    if (text.length <= limit) return text;
+    const lines = text.split('\n');
+    let kept = 0;
+    let length = 0;
+    for (const line of lines) {
+      const next = length + (kept > 0 ? 1 : 0) + line.length;
+      if (next > limit - 2) break;
+      length = next;
+      kept += 1;
+    }
+    while (kept > 0 && lines[kept - 1] === '') kept -= 1;
+    return `${lines.slice(0, kept).join('\n')}${kept > 0 ? '\n' : ''}…`;
   } catch {
     return '';
   }

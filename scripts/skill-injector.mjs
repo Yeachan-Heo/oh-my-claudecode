@@ -517,9 +517,29 @@ function summarizeSkillContent(content) {
   return compactText(firstUsefulLine || content.replace(/\s+/g, ' ').trim(), 240);
 }
 
-// `sanitize` is the text cleaning module when OMC_CONTEXT_TEXT_SANITIZE is on, otherwise null. The names and the summary are
-// cleaned. The path is not: cleaning would turn it into a path that does not exist, so it is written exactly, with each
-// character that cleaning removes as a \uXXXX escape (see escapeIdentifier). The same holds for every field of the metadata.
+// With the text cleaning switch on (`sanitize` is the cleaning module). The name, the scope and the summary are prose and are
+// cleaned. The path is an identifier: it is written exactly, never cleaned and never cut, with each character that cleaning
+// removes as a \uXXXX escape (see escapeIdentifier), and a path whose written form is over 2000 characters is replaced by a
+// notice. The descriptor limit counts the text as written, after the escapes: the heading and the load line with the whole
+// path stay; the metadata tag stays whole or is left out, so it is never cut off before its closing tag; the summary takes
+// the room that is left. If the heading and the load line alone are over the limit, the limit yields and the budget of the
+// whole message decides whether the descriptor fits.
+function formatCleanedSkillDescriptor(skill, metadata, summary, sanitize) {
+  const path = sanitize.escapeIdentifier(skill.path, 2000);
+  const heading = `### ${sanitize.cleanHostText(skill.name, 200)} (${sanitize.cleanHostText(skill.scope, 50)})`;
+  const load = `Load instructions: if this skill is needed, read ${path}${path.startsWith('"') ? ' (a JSON string: decode its escapes to get the exact path)' : ''} and follow the full instructions there.`;
+  const tag = `<skill-metadata>${sanitize.escapeRemovedCharacters(JSON.stringify(metadata))}</skill-metadata>`;
+  const parts = [heading];
+  let room = MAX_LEARNED_SKILL_DESCRIPTOR_CHARS - heading.length - load.length - 1;
+  if (tag.length + 1 <= room) {
+    parts.push(tag);
+    room -= tag.length + 1;
+  }
+  if (summary && room - 1 >= 40) parts.push(compactText(`Summary: ${sanitize.cleanTextBlock(summary)}`, room - 1));
+  parts.push(load);
+  return parts.join('\n');
+}
+
 function formatSkillDescriptor(skill, sanitize = null) {
   const metadata = {
     path: skill.path,
@@ -528,13 +548,12 @@ function formatSkillDescriptor(skill, sanitize = null) {
     scope: skill.scope
   };
   const summary = skill.description || skill.summary || summarizeSkillContent(skill.content);
-  const metadataJson = JSON.stringify(metadata);
-  const path = sanitize ? sanitize.escapeIdentifier(skill.path) : skill.path;
+  if (sanitize) return formatCleanedSkillDescriptor(skill, metadata, summary, sanitize);
   return compactText([
-    `### ${sanitize ? sanitize.cleanHostText(skill.name, 200) : skill.name} (${sanitize ? sanitize.cleanHostText(skill.scope, 50) : skill.scope})`,
-    `<skill-metadata>${sanitize ? sanitize.escapeRemovedCharacters(metadataJson) : metadataJson}</skill-metadata>`,
-    summary ? `Summary: ${sanitize ? sanitize.cleanTextBlock(summary) : summary}` : '',
-    `Load instructions: if this skill is needed, read ${path}${path === skill.path ? '' : ' (a JSON string: decode its escapes to get the exact path)'} and follow the full instructions there.`,
+    `### ${skill.name} (${skill.scope})`,
+    `<skill-metadata>${JSON.stringify(metadata)}</skill-metadata>`,
+    summary ? `Summary: ${summary}` : '',
+    `Load instructions: if this skill is needed, read ${skill.path} and follow the full instructions there.`,
   ].filter(Boolean).join('\n'), MAX_LEARNED_SKILL_DESCRIPTOR_CHARS);
 }
 

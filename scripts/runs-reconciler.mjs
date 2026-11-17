@@ -88,12 +88,14 @@ async function main() {
     return;
   }
 
-  // Ledger fields are data: with the switch on each field is cleaned to one line and cut to 200 characters.
+  // Ledger fields are data. With the switch on the run and the session id are identifiers: each is written exactly (escaped,
+  // not cleaned; a written form over 200 characters is replaced by a notice), and the time is cleaned to one line.
   const sanitize = await loadContextText();
   const field = (value) => (sanitize ? sanitize.cleanHostText(value, 200) : value);
+  const identifier = (value) => (sanitize ? sanitize.escapeIdentifier(value, 200) : value);
   const lines = [
     `[RUN RECONCILIATION] ${findings.length} unattended run(s) ended without a notepad closeout — the run's friction was not captured:`,
-    ...findings.map((entry) => `- ${field(entry.run)}${entry.sessionId ? ` (session ${field(entry.sessionId)})` : ''}: ended ${field(entry.ts)} without a notepad closeout`),
+    ...findings.map((entry) => `- ${identifier(entry.run)}${entry.sessionId ? ` (session ${identifier(entry.sessionId)})` : ''}: ended ${field(entry.ts)} without a notepad closeout`),
     'Nothing was changed automatically. If a lesson was learned in those runs, record it now (the notepad is the refit surface); otherwise acknowledge and move on.',
   ];
 
