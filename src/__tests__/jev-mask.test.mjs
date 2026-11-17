@@ -13,7 +13,34 @@ import { describe, expect, it } from 'vitest';
 import { maskSecrets } from '../../scripts/lib/jev-mask.mjs';
 import { maskSecrets as shellChecksMaskSecrets } from '../../scripts/lib/shell-checks.mjs';
 
+const readSource = (file) => readFileSync(new URL(`../../scripts/lib/${file}`, import.meta.url), 'utf8');
+// The constants and the function that read the names and the pairs, from the field names to the end of maskNamedValues.
+const sharedRules = (source) => {
+  const from = source.indexOf('// Field names in other languages.');
+  const named = source.indexOf('function maskNamedValues(', from);
+  return source.slice(from, source.indexOf('\n}\n', named) + 3);
+};
 const repeat = (unit, n) => unit.repeat(Math.ceil(n / unit.length)).slice(0, n);
+
+// The field names in other languages, and each of their forms: precomposed, decomposed (base letter and combining mark), plain ASCII,
+// upper case, and with every non-ASCII character as a JSON `\uXXXX` escape.
+const LOCAL_FIELD_NAMES = ['hasło', 'klucz', 'sekret', 'passwort', 'kennwort', 'contraseña'];
+const escapeNonAscii = (text) => [...text].map((ch) => (ch.charCodeAt(0) > 127 ? String.raw`\u${ch.charCodeAt(0).toString(16).padStart(4, '0')}` : ch)).join('');
+const nameForms = (name) => {
+  const composed = name.normalize('NFC');
+  const decomposed = composed.normalize('NFD');
+  return [...new Set([
+    composed,
+    decomposed,
+    composed.toUpperCase(),
+    decomposed.toUpperCase(),
+    decomposed.replace(/[\u0300-\u036f]/g, '').replace(/ł/g, 'l'),
+    escapeNonAscii(composed),
+    escapeNonAscii(decomposed),
+    escapeNonAscii(composed.toUpperCase()),
+    escapeNonAscii(decomposed.toUpperCase()),
+  ])];
+};
 
 // Secret-bearing constructs that a rule reads by their first word (a marker), and ways to wrap them as the value of a named field.
 const CONTEXTS = [
@@ -128,6 +155,11 @@ describe.each([
       'a localized label, a word and a word of repeated PASS, masked': (n) => 'klucz: a: ' + repeat('PASS', n),
       'a localized label and a run of backslashes, masked': (n) => 'sekret=: ' + '\\'.repeat(n),
       'a serialized localized label and a word of repeated keywords, masked': (n) => String.raw`hasło=\"a: ` + repeat('klucz', n),
+      // The forms of a name: each is read once.
+      'a decomposed name and combining marks': (n) => 'contrasen' + '\u0303'.repeat(n),
+      'decomposed names without a separator': (n) => repeat('contrasen\u0303a', n),
+      'a label and a word of repeated decomposed names, masked': (n) => 'KEY=: ' + repeat('contrasen\u0303a', n),
+      'a padded assignment and words of decomposed names, masked': (n) => repeat('API_KEY=YWJjZA== contrasen\u0303a=x ', n),
     };
     for (const n of [100_000, 1_000_000]) {
       for (const [name, make] of Object.entries(shapes)) {
@@ -358,6 +390,34 @@ describe.each([
     for (const text of ['Passwort="hunter2zz"', String.raw`Passwort=\"hunter2zz\"`]) {
       expect({ text, left: mask(text).includes('hunter2zz') }).toEqual({ text, left: false });
     }
+  });
+
+  it('reads every name of the list in each of its forms in every rule: alone, beside an assignment before and after it, and as a pair name', () => {
+    // The class behind the findings on one spelling of one name: each rule that reads a name must read the same forms of every name.
+    const cases = [];
+    for (const name of LOCAL_FIELD_NAMES) {
+      for (const form of nameForms(name)) {
+        for (const separator of ['=', ': ', ' = ', ':']) {
+          for (const quote of [(v) => v, (v) => `'${v}'`, (v) => `"${v}"`]) {
+            const own = `${form}${separator}`;
+            cases.push([`${own}${quote('hunter2zz')}`, `${own}${quote('***')}`]);
+            // The assignment before: its value ends in padding (`==`, `=`) or not; only a padded value reads the next word, and leaves it
+            // alone when it is a key of its own (it ends in a separator, or a separator follows it). A word with its value attached
+            // (`name=value`) is none, so it is read as the value of the padded assignment, as an English name is.
+            for (const first of ['YWJjZA==', 'YWJjZA=', 'abcd']) {
+              const attached = first !== 'abcd' && /\S$/.test(own) && quote('x') === 'x';
+              cases.push([`API_KEY=${first} ${own}${quote('hunter2zz')}`, attached ? 'API_KEY=***' : `API_KEY=*** ${own}${quote('***')}`]);
+            }
+            cases.push([`${own}${quote('hunter2zz')} API_KEY=YWJjZA==`, `${own}${quote('***')} API_KEY=***`]);
+          }
+        }
+        cases.push([`{"Name":"${form}","Value":"hunter2zz"}`, `{"Name":"${form}","Value":"***"}`]);
+        cases.push([`{"${form}":"hunter2zz"}`, `{"${form}":"***"}`]);
+      }
+    }
+    expect(cases.length).toBeGreaterThan(1000);
+    const wrong = cases.filter(([text, masked]) => mask(text) !== masked).map(([text, masked]) => ({ text, masked, out: mask(text) }));
+    expect(wrong.slice(0, 5)).toEqual([]);
   });
 
   it('masks the value of a field whose key has JSON escapes in any of its letters, and leaves other keys', () => {
@@ -632,6 +692,13 @@ describe.each([
 });
 
 describe('the two copies of maskSecrets', () => {
+  it('are built from one list of field names: each name of the list is written once in the code of the shared rules', () => {
+    for (const file of ['jev-mask.mjs', 'shell-checks.mjs']) {
+      const code = sharedRules(readSource(file)).split('\n').filter((line) => !/^\s*\/\//.test(line)).join('\n').normalize('NFC');
+      for (const name of LOCAL_FIELD_NAMES) expect({ file, name, written: code.split(name).length - 1 }).toEqual({ file, name, written: 1 });
+    }
+  });
+
   it('give the same result on text that holds no private key block, no hf_, npm_ or sk_live_ token and no long hex string', () => {
     const names = ['password', 'secret', 'token', 'api_key', 'hasło', 'klucz', 'Passwort', 'contraseña'];
     const serializations = [(t) => t, (t) => JSON.stringify(t).slice(1, -1), (t) => JSON.stringify({ command: t })];
@@ -685,17 +752,10 @@ describe('the two copies of maskSecrets', () => {
   });
 
   it('hold the same rules: the private key rule, the chain of replacements and every constant and function after it are the same text in both files', () => {
-    const read = (file) => readFileSync(new URL(`../../scripts/lib/${file}`, import.meta.url), 'utf8');
-    const maskSource = read('jev-mask.mjs');
-    const shellSource = read('shell-checks.mjs');
-    // The constants and the function that read the pairs, from the `*KEY=` rule to the end of maskNamedValues.
-    const shared = (source) => {
-      const from = source.indexOf('// The `*KEY=` rule.');
-      const named = source.indexOf('function maskNamedValues(', from);
-      return source.slice(from, source.indexOf('\n}\n', named) + 3);
-    };
-    expect(shared(shellSource).length).toBeGreaterThan(1000);
-    expect(shared(shellSource)).toBe(shared(maskSource));
+    const maskSource = readSource('jev-mask.mjs');
+    const shellSource = readSource('shell-checks.mjs');
+    expect(sharedRules(shellSource).length).toBeGreaterThan(1000);
+    expect(sharedRules(shellSource)).toBe(sharedRules(maskSource));
     // The chain of replacements, one line per rule. The copy lacks the hf_, npm_ and sk_live_ token rule, and the long mixed
     // letter-digit rule differs where it keeps git hashes; every other rule is the same line.
     const chain = (source) => {

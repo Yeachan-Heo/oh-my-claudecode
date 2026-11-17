@@ -4,7 +4,8 @@
  * `*KEY=`-style assignments and long mixed letter-digit strings.
  *
  * Field names are matched by the name list in the `name: value` / `name=value` rule; the list is open: a name in
- * another language is one more alternative there (hasło, klucz, sekret, passwort, kennwort and contraseña as examples).
+ * another language is one more entry of LOCAL_NAMES, from which every rule that reads a name is built (hasło, klucz, sekret,
+ * passwort, kennwort and contraseña as examples).
  *
  * Each rule reads the text once: where a match fails, the rule consumes the run, segment or gap it scanned, so the
  * next attempt does not read it again (src/__tests__/jev-mask.test.mjs times the shapes that once took seconds).
@@ -58,6 +59,26 @@ export function maskPrivateKeys(text) {
   return String(text ?? '').replace(/(-{4,5} ?BEGIN +(?:[A-Z0-9]+(?: +|-))*[A-Z0-9]*PRIVATE KEY(?: BLOCK)? ?-{4,5})[\s\S]*?(-{4,5} ?END +(?:[A-Z0-9]+(?: +|-))*[A-Z0-9]*PRIVATE KEY(?: BLOCK)? ?-{4,5}|$)/g, '$1***$2');
 }
 
+// Field names in other languages. This list is the one source of every rule that reads a name: the word that is a key of its own
+// (NEXT_KEY), the `name: value` rule and the classifier of a pair name are all built from it, so a name added here is known to each of
+// them. A letter with a diacritic is read as itself (the precomposed letter), as its base letter alone (`haslo`, `contrasena`) and as its
+// base letter followed by combining marks (`n` and U+0303, the decomposed form of `ñ`); a rule that reads JSON `\uXXXX` escapes reads
+// them in a name too.
+const LOCAL_NAMES = ['hasło', 'klucz', 'sekret', 'passwort', 'kennwort', 'contraseña'];
+const BASE_LETTERS = { 'ł': 'l', 'ñ': 'n' };
+const ENGLISH_KEYWORDS = String.raw`KEY|TOKEN|SECRET|PASSWORD|PASSWD|PASS|PWD|CREDENTIALS?`;
+const localNames = (escapes) => {
+  const marks = escapes ? String.raw`(?:[\u0300-\u036f]|\\+u03[0-6][0-9a-fA-F])*` : String.raw`[\u0300-\u036f]*`;
+  const code = (letter) => letter.codePointAt(0).toString(16).padStart(4, '0');
+  const letter = (ch) => {
+    const base = BASE_LETTERS[ch];
+    if (!base) return ch;
+    const escaped = escapes ? String.raw`|\\+u(?:${code(ch)}|${code(ch.toUpperCase())})` : '';
+    return `(?:${ch}${escaped}|${base}${marks})`;
+  };
+  return LOCAL_NAMES.map((name) => [...name.normalize('NFC')].map(letter).join('')).join('|');
+};
+
 // The `*KEY=` rule. A word that holds a secret keyword, a separator and a value; the word after a value that ends in `=` or `:` is
 // taken too (`secret: x-api-key: YWJjZA=`) unless it is a key of its own: a word that holds a keyword and either ends in a separator
 // (and backslashes) or has a separator after it (spaces, quotes). Whether the next word is a key is decided in one pass over that
@@ -65,9 +86,9 @@ export function maskPrivateKeys(text) {
 // is not rescanned from each of its characters), then the word is read to its end once, and that end is tested. The test does not
 // depend on where the keyword is, so a word that holds many keywords is not read again from each of them.
 const WORD = String.raw`[^\s"'&;|)]`;
-const KEYWORD = String.raw`KEY|TOKEN|SECRET|PASSWORD|PASSWD|PASS|PWD|CREDENTIALS?|has[łl]o|klucz|sekret|passwort|kennwort|contrase[ñn]a|\\u[0-9a-fA-F]{4}`;
+const KEYWORD = String.raw`${ENGLISH_KEYWORDS}|${localNames(false)}|\\u[0-9a-fA-F]{4}`;
 const NEXT_KEY = String.raw`(?:(?!${KEYWORD})${WORD})*(?:${KEYWORD})${WORD}*(?!${WORD})(?:(?<=[:=]\\*)|(?:\\*["']|\s)+[:=])`;
-const KEYWORD_ASSIGNMENT = new RegExp(String.raw`(\b(?=[A-Za-z0-9_]*(?:KEY|TOKEN|SECRET|PASSWORD|PASSWD|PASS|PWD|CREDENTIALS?))[A-Za-z0-9_]+\b["'\]]*\s*[=:]\s*(?:\\*["'])?)(?:(bearer|basic)[ \t]+)?${WORD}+(?:(?:(?<=[:=])|[ \t]+[:=])[ \t]*(?:\\*["'])?(?!${NEXT_KEY})${WORD}+)?`, 'gi');
+const KEYWORD_ASSIGNMENT = new RegExp(String.raw`(\b(?=[A-Za-z0-9_]*(?:${ENGLISH_KEYWORDS}))[A-Za-z0-9_]+\b["'\]]*\s*[=:]\s*(?:\\*["'])?)(?:(bearer|basic)[ \t]+)?${WORD}+(?:(?:(?<=[:=])|[ \t]+[:=])[ \t]*(?:\\*["'])?(?!${NEXT_KEY})${WORD}+)?`, 'gi');
 
 // Whitespace between the parts of a field (the name, its separator, the value): a space or a line break, also as JSON writes it into
 // a string (`\n`, `\t`, `\r`, `\f` or `\uXXXX` of a whitespace character), with any number of backslashes (the run doubles each time the
@@ -81,7 +102,7 @@ const WS = String.raw`(?:\s|\\+(?:[ntrf]|u(?:000[9a-dA-D]|0020|00[aA]0|1680|200[
 // that word is a key of its own (it ends in a separator or has one after it), which is left to the rule that reads it.
 const VALUE = String.raw`(?:[^\s"'&;|,}\\]|\\(?!["']))+`;
 const NEXT_FIELD = String.raw`(?:(?:\\*["'])?${WS}*[:=]|(?<=[^=][:=]))${WS}*(?:\\*["'])?(?!(?=(?<word>${VALUE}))\k<word>(?:(?<=[:=])|(?:\\*["']|${WS})*[:=]))${VALUE}`;
-const NAMED_VALUE = new RegExp(String.raw`((?:api[_-]?key|access[_-]?key|client[_-]?secret|private[_-]?key|password|passwd|token|secret|has(?:[łl]|\\+u014[12])o|klucz|sekret|passwort|kennwort|contrase(?:[ñn]|ñ|n\\+u0303|\\+u00d1|\\+u00f1)a)(?:\\*["'])?${WS}*[:=]${WS}*(?:\\*["'])?(?:(?:bearer|basic)[ \t]+)?)${VALUE}(?:${NEXT_FIELD})?`, 'gi');
+const NAMED_VALUE = new RegExp(String.raw`((?:api[_-]?key|access[_-]?key|client[_-]?secret|private[_-]?key|password|passwd|token|secret|${localNames(true)})(?:\\*["'])?${WS}*[:=]${WS}*(?:\\*["'])?(?:(?:bearer|basic)[ \t]+)?)${VALUE}(?:${NEXT_FIELD})?`, 'gi');
 
 // A field key that holds JSON `\uXXXX` escapes in any of its letters (`h\u0061s\u0142o`, `p\u0061ssword`), which the name list above does not
 // read: the key is decoded and classified as the key of a pair is, and the value is masked when it names a secret. The key is a run of
@@ -117,7 +138,8 @@ const PAIR_FORMS = QUOTE_DEPTHS.map((d) =>
   new RegExp(String.raw`${d}(${stringBody(d)}*)${d}${WS}*:${WS}*(${d}${stringBody(d)}*${d}${AFTER_CLOSE}|${d}[^\n]*?(?=,${WS}*${d}${stringBody(d)}*${d}${WS}*:|[}\]](?:(?<=["'][}\]])|(?=${WS}*(?:[,{}\[\]]|$)))|\n|$)|[^,{}\[\]\s"\\]+)`, 'g'));
 // JSON `\uXXXX` escapes of the name are read first (`DB_PASS\u0057ORD`), with any number of backslashes before the u.
 const decodeUnicode = (text) => text.replace(/(?<!\\)\\+u([0-9a-f]{4})/gi, (_, hex) => String.fromCharCode(parseInt(hex, 16)));
-const secretPairName = (name) => /key|token|secret|pass|pwd|credential|has[łl]o|klucz|sekret|kennwort|contrase(?:ñ|n\u0303?)a|^securestring$/i.test(decodeUnicode(name));
+const SECRET_PAIR_NAME = new RegExp(String.raw`${ENGLISH_KEYWORDS}|${localNames(false)}|^securestring$`, 'i');
+const secretPairName = (name) => SECRET_PAIR_NAME.test(decodeUnicode(name));
 
 // The text of a quoted value without its quotes and without the backslashes of an escaped closing quote.
 function unquoted(value, quote) {
