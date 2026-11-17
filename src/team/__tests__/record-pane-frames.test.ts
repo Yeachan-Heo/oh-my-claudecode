@@ -426,6 +426,26 @@ describe.skipIf(!HAS_TMUX)('record-pane-frames record', () => {
     expect(processIsAlive(await providerPid())).toBe(false);
   });
 
+  it('files frames under version "unknown" when the binary reports no version', async () => {
+    const stub = join(root, 'stub-claude.mjs');
+    writeFileSync(stub, CONTRACT_STUB_SOURCE.replace("console.log('stub 9.8.7');", "console.error('no version here');"));
+    chmodSync(stub, 0o755);
+    out = join(root, 'out');
+
+    const run = await runRecorder([
+      'record', '--provider', 'claude', '--bin', stub, '--args', '["--flag"]', '--out', out, '--cwd', root,
+      '--interval-ms', '20', '--settle', '0.3', '--timeout', '20', '--step', 'wait:READY>',
+    ]);
+
+    expect(run.code).toBe(0);
+    expect(JSON.parse(run.stdout)).toMatchObject({ stop: 'settled', version: 'unknown' });
+    expect(JSON.parse(readFileSync(join(out, 'meta.json'), 'utf8'))).toMatchObject({ version: 'unknown' });
+    const { frame, entry } = extractLast();
+    expect(frame).toContain('READY>');
+    expect(entry).toMatchObject({ file: 'claude/unknown/idle.txt', version: 'unknown' });
+    expect(leftoverSockets()).toEqual([]);
+  });
+
   it('without --bin, launches the model contract binary found on PATH', async () => {
     const bin = join(root, 'bin');
     mkdirSync(bin);
