@@ -120,6 +120,33 @@ describe('account probe', () => {
     expect(run(f).code).toBe(3);
   });
 
+  it('rotated archives of the logs count: a 402 or an answer that sits in an archive still decides the alarm', () => {
+    const stamp = (t) => new Date(t).toISOString().replace(/\.\d+Z$/, '').replace(/[-:]/g, '').replace('T', '-');
+    // the 402 is only in shadow.jsonl, which rotates after the breaker has expired; a held-back request lands in the new file
+    const held = fixture();
+    appendRows(join(held.logs, `shadow-${stamp(NOW - 10 * MIN)}-4242.jsonl`), [error402(NOW - 30 * MIN), skipped(NOW - 20 * MIN)]);
+    appendRows(join(held.logs, 'shadow.jsonl'), [skipped(NOW - 5 * MIN)]);
+    expect(run(held).code).toBe(3);
+    expect(existsSync(held.alarm)).toBe(true);
+    // an answer in an archive that is newer than the 402 clears it, whether the 402 is in the live file or in an older archive
+    const answered = fixture();
+    appendRows(join(answered.logs, `shadow-${stamp(NOW - 20 * MIN)}-4242.jsonl`), [error402(NOW - 30 * MIN)]);
+    appendRows(join(answered.logs, `shadow-${stamp(NOW - 10 * MIN)}-4243.jsonl`), [success(NOW - 15 * MIN)]);
+    appendRows(join(answered.logs, 'shadow.jsonl'), [skipped(NOW - 5 * MIN)]);
+    expect(run(answered).code).toBe(0);
+    // a compact.jsonl archive carries the answer too
+    const compact = fixture();
+    appendRows(join(compact.logs, 'shadow.jsonl'), [error402(NOW - 30 * MIN)]);
+    appendRows(join(compact.logs, `compact-${stamp(NOW - 10 * MIN)}-77.jsonl`), [{ ts: iso(NOW - 15 * MIN), jev_noul: 0.3 }]);
+    expect(run(compact).code).toBe(0);
+    // an archive rotated more than two days ago holds nothing that can matter and is not read; another name is never read
+    const old = fixture();
+    appendRows(join(old.logs, 'shadow.jsonl'), [skipped(NOW - 5 * MIN)]);
+    appendRows(join(old.logs, `shadow-${stamp(NOW - 3 * 24 * 3600_000)}-1.jsonl`), [error402(NOW - 3 * 24 * 3600_000 - MIN)]);
+    appendRows(join(old.logs, `denials-${stamp(NOW - 10 * MIN)}-1.jsonl`), [error402(NOW - 30 * MIN)]);
+    expect(run(old).code).toBe(0);
+  });
+
   it('a 402 without a readable answer log and without an open breaker is no evidence: exit 0', () => {
     const f = fixture();
     opening(f, NOW - 30 * MIN);

@@ -40,7 +40,7 @@
  * deliberate mirrors; parity with the TS parse is locked by the test suite.
  */
 
-import { existsSync, lstatSync, readFileSync, renameSync, rmdirSync, statSync, unlinkSync } from "node:fs";
+import { existsSync, lstatSync, readdirSync, readFileSync, renameSync, rmdirSync, statSync, unlinkSync } from "node:fs";
 import { appendFile, mkdir } from "node:fs/promises";
 import { basename, dirname, join, resolve } from "node:path";
 import { tmpdir } from "node:os";
@@ -140,6 +140,35 @@ export function rotateJevLog(path, maxBytes, now = new Date()) {
   } catch {
     // Missing file or failed rename: nothing to rotate, the append goes on.
   }
+}
+
+/**
+ * The files of one Jev log, newest first: the live file <name>.jsonl and its
+ * rotated archives <name>-<YYYYMMDD-HHmmss>-<pid>.jsonl (see rotateJevLog),
+ * ordered by their stamp, newest archive first. Only files that exist. With
+ * sinceMs, an archive whose rotation time is older than that is left out (every
+ * row of an archive is older than its rotation time). A reader that looks for
+ * the last row of a kind goes through the list in order; rotation never
+ * deletes, so the archives are the history of the log.
+ */
+export function jevLogFiles(dir, name, sinceMs = 0) {
+  const files = [];
+  const live = join(dir, `${name}.jsonl`);
+  if (existsSync(live)) files.push(live);
+  let names = [];
+  try { names = readdirSync(dir); } catch { return files; }
+  const escaped = name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const pattern = new RegExp(`^${escaped}-(\\d{4})(\\d{2})(\\d{2})-(\\d{2})(\\d{2})(\\d{2})-\\d+\\.jsonl$`);
+  const archives = [];
+  for (const entry of names) {
+    const m = pattern.exec(entry);
+    if (!m) continue;
+    const stamp = Date.UTC(Number(m[1]), Number(m[2]) - 1, Number(m[3]), Number(m[4]), Number(m[5]), Number(m[6]));
+    if (!(stamp >= sinceMs)) continue;
+    archives.push({ stamp, path: join(dir, entry) });
+  }
+  archives.sort((a, b) => b.stamp - a.stamp || (a.path < b.path ? 1 : -1));
+  return [...files, ...archives.map((archive) => archive.path)];
 }
 
 /**

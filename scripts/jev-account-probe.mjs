@@ -12,11 +12,12 @@
  *                       with `until` in the past. One directory per endpoint and key.
  *   <state>/openings/<ms>-*.json  one file per opening of the breaker {ts, reason, ...}; a 402 has reason "http-402"
  *                       (written with OMC_JEV_BREAKER_TIMEOUT_LOW=1).
- *   shadow.jsonl        the Jev request log: a row with `jev` (an object) is a successful Jev answer; a row with error.status
+ *   shadow.jsonl        the Jev request log (with OMC_JEV_LOG_MAX_MB also its rotated archives shadow-<YYYYMMDD-HHmmss>-<pid>.jsonl, read
+ *                       for the last 24 h and a day of slack): a row with `jev` (an object) is a successful Jev answer; a row with error.status
  *                       402 is the 402 itself (written even with the breaker off); a row with mode "breaker" is a request
  *                       the open breaker held back, not an answer.
- *   compact.jsonl       a second trace of a successful answer: a row with a numeric `jev_noul`, or an event "compact" with
- *                       result "jev" (the compaction module asks Jev itself).
+ *   compact.jsonl       a second trace of a successful answer (its archives are read like those of shadow.jsonl): a row with a
+ *                       numeric `jev_noul`, or an event "compact" with result "jev" (the compaction module asks Jev itself).
  * The alarm holds when rule A or rule B holds:
  *   A  the last 402 of the last 24 h (the latest of the breaker openings with reason http-402 and the shadow.jsonl rows with
  *      an error 402) has no successful Jev answer after it (needs a readable answer log; an older 402 without an answer is
@@ -37,6 +38,7 @@ import { appendFileSync, closeSync, existsSync, fstatSync, mkdirSync, openSync, 
 import { homedir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { pathToFileURL } from 'node:url';
+import { jevLogFiles } from './jev-resolve.mjs';
 
 const BREAKER_MAX_MS = 1800_000;
 const SLACK_MS = 60_000;
@@ -147,13 +149,22 @@ export function probe(argv, env = process.env) {
 
   let lastSuccess = null;
   const success = (t) => { if (t !== null) lastSuccess = Math.max(lastSuccess ?? 0, t); };
-  const shadowLog = scan(join(logDir, 'shadow.jsonl'), last402, (row) => {
+  // A log with rotation on (OMC_JEV_LOG_MAX_MB) continues in rotated archives: the 402 or the answer that decides the alarm
+  // can sit in an archive, so every archive of the last 24 h (and a day of slack) is read as well as the live file.
+  const scanWithArchives = (name, collect) => {
+    let readable = null;
+    for (const file of jevLogFiles(logDir, name, now - RULE_A_MAX_MS - 24 * 3600_000)) {
+      if (scan(file, last402, collect) === true) readable = true;
+    }
+    return readable;
+  };
+  const shadowLog = scanWithArchives('shadow', (row) => {
     const t = toMs(row.ts);
     if (t === null) return;
     if (row.error && row.error.status === 402) { last402 = Math.max(last402 ?? 0, t); times402.push(t); }
     else if (row.jev && typeof row.jev === 'object') success(t);
   });
-  const compactLog = scan(join(logDir, 'compact.jsonl'), last402, (row) => {
+  const compactLog = scanWithArchives('compact', (row) => {
     if (Number.isFinite(row.jev_noul) || (row.event === 'compact' && row.result === 'jev')) success(toMs(row.ts));
   });
   const readableLog = shadowLog === true || compactLog === true;
