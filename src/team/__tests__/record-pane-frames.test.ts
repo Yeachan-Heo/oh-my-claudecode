@@ -1,7 +1,7 @@
 import { spawn, spawnSync } from 'node:child_process';
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { dirname, join, resolve } from 'node:path';
+import { delimiter, dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
@@ -55,10 +55,14 @@ function leftoverSockets(): string[] {
     .flatMap(dir => readdirSync(join(root, dir)).map(name => join(root, dir, name)));
 }
 
-function runRecorder(args: string[], whileRunning?: () => Promise<void>, cwd?: string): Promise<RecorderRun> {
-  const env: NodeJS.ProcessEnv = { ...process.env, TMUX_TMPDIR: root };
+function runRecorder(
+  args: string[],
+  whileRunning?: () => Promise<void>,
+  spawnOptions: { cwd?: string; env?: NodeJS.ProcessEnv } = {},
+): Promise<RecorderRun> {
+  const env: NodeJS.ProcessEnv = { ...process.env, TMUX_TMPDIR: root, ...spawnOptions.env };
   delete env.TMUX;
-  const child = spawn(process.execPath, [RECORDER, ...args], { env, cwd, stdio: ['ignore', 'pipe', 'pipe'] });
+  const child = spawn(process.execPath, [RECORDER, ...args], { env, cwd: spawnOptions.cwd, stdio: ['ignore', 'pipe', 'pipe'] });
   let stdout = '';
   let stderr = '';
   child.stdout.on('data', chunk => { stdout += String(chunk); });
@@ -371,6 +375,27 @@ describe.skipIf(!HAS_TMUX)('record-pane-frames record', () => {
     expect(extractLast().entry).toMatchObject({ provider: 'codex', launch_args: argv });
   });
 
+  it('without --bin, launches the model contract binary found on PATH', async () => {
+    const bin = join(root, 'bin');
+    mkdirSync(bin);
+    writeFileSync(join(bin, 'codex'), CONTRACT_STUB_SOURCE);
+    chmodSync(join(bin, 'codex'), 0o755);
+    out = join(root, 'out');
+
+    // /bin/sh reads no startup file, so the pane resolves `codex` from this PATH.
+    const run = await runRecorder([
+      'record', '--provider', 'codex', '--out', out, '--cwd', root,
+      '--interval-ms', '20', '--settle', '0.3', '--timeout', '20', '--step', 'wait:READY>',
+    ], undefined, { env: { PATH: `${bin}${delimiter}${process.env.PATH ?? ''}`, SHELL: '/bin/sh' } });
+
+    expect(run.code).toBe(0);
+    const summary = JSON.parse(run.stdout) as { version: string; launch_args: string[] };
+    expect(summary.version).toBe('9.8.7');
+    expect(JSON.parse(readFileSync(join(bin, 'argv.json'), 'utf8'))).toEqual(summary.launch_args);
+    expect(JSON.parse(readFileSync(join(out, 'meta.json'), 'utf8'))).toMatchObject({ binary: 'codex' });
+    expect(extractLast().entry).toMatchObject({ provider: 'codex', version: '9.8.7', launch_args: summary.launch_args });
+  });
+
   it('launches a relative --bin from the directory the recorder was started in', async () => {
     writeFileSync(join(root, 'stub-claude.mjs'), CONTRACT_STUB_SOURCE);
     chmodSync(join(root, 'stub-claude.mjs'), 0o755);
@@ -381,7 +406,7 @@ describe.skipIf(!HAS_TMUX)('record-pane-frames record', () => {
     const run = await runRecorder([
       'record', '--provider', 'claude', '--bin', './stub-claude.mjs', '--args', '["--flag"]', '--out', out, '--cwd', paneCwd,
       '--interval-ms', '20', '--settle', '0.3', '--timeout', '20', '--step', 'wait:READY>',
-    ], undefined, root);
+    ], undefined, { cwd: root });
 
     expect(run.code).toBe(0);
     expect(JSON.parse(run.stdout)).toMatchObject({ stop: 'settled', version: '9.8.7' });
