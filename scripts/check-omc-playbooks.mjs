@@ -115,17 +115,13 @@ function buildSkillIndex(skillsRoot) {
     // parsing so the registered name still joins the index. Decode matching
     // YAML quotes the way the runtime frontmatter parser does, or a quoted
     // `name: "omc-plan"` indexes under the quoted scalar and rejects extends
-    // targets the runtime would accept.
+    // targets the runtime would accept. Preserve trimming for registered skill
+    // names so a name with trailing blanks like name: "omc-plan"   still
+    // indexes under the trimmed key.
     const raw = parseFrontmatter(
       stripLeadingUtf8Bom(readFileSync(bodyPath, "utf8")),
     ).name;
-    const registeredName =
-      typeof raw === "string" &&
-      raw.length > 1 &&
-      ((raw.startsWith('"') && raw.endsWith('"')) ||
-        (raw.startsWith("'") && raw.endsWith("'")))
-        ? raw.slice(1, -1)
-        : raw;
+    const registeredName = yamlScalar(raw);
     if (registeredName) index.set(registeredName, bodyPath);
   }
   return index;
@@ -256,7 +252,12 @@ async function main() {
       // A YAML one-line flow list `extends: [tdd, verify]` reads as one
       // scalar: strip the brackets before splitting, then read each item as
       // a scalar — a quoted flow list stays one stem, as YAML reads it.
-      const baseNames = yamlScalar(extendsValue.replace(/^\[(.*)\]$/, "$1"))
+      // For ["tdd", "verify"], bracket stripping yields "tdd", "verify";
+      // split first, then unquote each item individually so "tdd" becomes tdd,
+      // not leaving tdd" and "verify by incorrectly unquoting the bracket-stripped
+      // list as a whole.
+      const baseNames = extendsValue
+        .replace(/^\[(.*)\]$/, "$1")
         .split(",")
         .map(yamlScalar)
         .filter(Boolean);

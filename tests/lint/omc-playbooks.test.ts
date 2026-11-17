@@ -222,6 +222,24 @@ describe('check-omc-playbooks', () => {
     rmSync(root, { recursive: true, force: true });
   });
 
+  it('indexes a quoted registered name with trailing blanks', () => {
+    const { root, skillsRoot } = buildProject();
+    mkdirSync(join(skillsRoot, 'audit'), { recursive: true });
+    writeFileSync(
+      join(skillsRoot, 'audit', 'SKILL.md'),
+      '---\nname: "omc-audit"  \n---\n\n# Audit\n\nAudit body text.\n',
+    );
+    writePlaybook(
+      root,
+      'trailing-blanks.md',
+      '---\nextends: omc-audit\nwhen: Trailing blanks in skill name.\n---\n\n**After** "Audit body text." keep the output artifact path.\n',
+    );
+    const r = runChecker(root, skillsRoot);
+    expect(r.status).toBe(0);
+    expect(r.stderr).not.toContain('no bundled skill');
+    rmSync(root, { recursive: true, force: true });
+  });
+
   it('validates a playbook saved with a UTF-8 BOM', () => {
     const { root, skillsRoot } = buildProject();
     writeFileSync(
@@ -231,6 +249,24 @@ describe('check-omc-playbooks', () => {
     const r = runChecker(root, skillsRoot);
     expect(r.status).toBe(0);
     expect(r.stderr).not.toContain('missing an "extends:"');
+    rmSync(root, { recursive: true, force: true });
+  });
+
+  it('parses quoted items in a flow list independently', () => {
+    const { root, skillsRoot } = buildProject();
+    mkdirSync(join(skillsRoot, 'verify'), { recursive: true });
+    writeFileSync(
+      join(skillsRoot, 'verify', 'SKILL.md'),
+      '---\nname: verify\n---\n\n# Verify\n\nCheck the result.\n',
+    );
+    writePlaybook(
+      root,
+      'quoted-flow-list.md',
+      '---\nextends: ["tdd", "verify"]\nwhen: Both quoted items in flow list.\n---\n\n**After** "Write the failing test first." keep the output artifact path.\n',
+    );
+    const r = runChecker(root, skillsRoot);
+    expect(r.status).toBe(0);
+    expect(r.stderr).not.toContain('invalid extended skill name');
     rmSync(root, { recursive: true, force: true });
   });
 
