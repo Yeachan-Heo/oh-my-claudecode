@@ -126,6 +126,17 @@ describe('denial_log_summary.mjs summary', () => {
     expect(denial.p50_ms).toBeNull();
   });
 
+  it('matches outcomes to decisions across multiple files in any order (outcome-first file read before decision-only file)', () => {
+    const d = decision({ key: 'cccccccccccccccc' });
+    const o = outcome(d.id as string, { ts_ms: 1731600000500 });
+    // Write outcome to file A (read first), decision to file B (read second, like a rotated log)
+    const fileA = writeJournal('order/denials-20261114-100000.jsonl', [o]);
+    const fileB = writeJournal('order/denials-20261114-093000.jsonl', [d]);
+    const result = summarize([fileA, fileB]); // Read newest-first (A before B)
+    const denial = result.kinds.find((g: { group: string }) => g.group === 'denial');
+    expect(denial.p50_ms).toBe(500); // Outcome should be matched despite being read first
+  });
+
   it('skips unparseable rows and counts them; rows without an id are all kept', () => {
     const file = writeJournal('trunc/denials-20261114-101500.jsonl', [
       decision({ key: 'eeeeeeeeeeeeeeee' }),

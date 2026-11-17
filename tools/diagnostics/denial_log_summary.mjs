@@ -111,6 +111,11 @@ export function summarizeRows(rows) {
   const decisions = new Map(); // id -> ts_ms
   const outcomes = new Map(); // ref -> delta ms
   const keyFacts = new Map(); // key -> Set(facts)
+  // First pass: index all decisions (regardless of file order)
+  for (const w of rows) {
+    if (w.kind !== 'outcome' && typeof w.id === 'string') decisions.set(w.id, w.ts_ms);
+  }
+  // Second pass: process all rows and match outcomes to decisions
   for (const w of rows) {
     for (const [map, g] of [[byKind, w.kind || '?'], [bySubject, subjectOf(w)]]) {
       if (!map.has(g)) map.set(g, { count: 0, degree: {}, result: {}, keys: new Set() });
@@ -120,7 +125,6 @@ export function summarizeRows(rows) {
       if (w.result !== undefined) group.result[w.result] = (group.result[w.result] || 0) + 1;
       if (typeof w.key === 'string' && w.key) group.keys.add(w.key);
     }
-    if (w.kind !== 'outcome' && typeof w.id === 'string') decisions.set(w.id, w.ts_ms);
     if (w.kind === 'outcome' && typeof w.ref === 'string' && decisions.has(w.ref) && typeof w.ts_ms === 'number') {
       const delta = w.ts_ms - decisions.get(w.ref);
       if (delta >= 0) outcomes.set(w.ref, delta);
