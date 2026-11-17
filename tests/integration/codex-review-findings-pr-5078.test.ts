@@ -15,7 +15,6 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { spawnSync } from "node:child_process";
-import { createServer, type Server } from "node:http";
 
 const PROJECT_ROOT = fileURLToPath(new URL("../../", import.meta.url));
 
@@ -67,39 +66,6 @@ function runJevEval(logPath: string): { stdout: string; jsonOutput: Record<strin
   };
 }
 
-// Mock Jev server for testing
-async function createMockJevServer(): Promise<{ server: Server; endpoint: string; requests: Array<Record<string, unknown>> }> {
-  const requests: Array<Record<string, unknown>> = [];
-  const server = createServer((request, response) => {
-    let raw = "";
-    request.setEncoding("utf8");
-    request.on("data", (chunk: string) => {
-      raw += chunk;
-    });
-    request.on("end", () => {
-      try {
-        requests.push(JSON.parse(raw) as Record<string, unknown>);
-      } catch {
-        // Parse error
-      }
-      response.writeHead(200, { "Content-Type": "application/json", Connection: "close" });
-      response.end(JSON.stringify({ answers: { "model-tier": { type: "choice", choice: "sonnet", confidence: 0.9 } } }));
-    });
-  });
-
-  return new Promise((resolve, reject) => {
-    server.once("error", reject);
-    server.listen(0, "127.0.0.1", () => {
-      const address = server.address();
-      if (!address || typeof address === "string") {
-        reject(new Error("Expected local TCP endpoint"));
-        return;
-      }
-      const endpoint = `http://${address.address}:${address.port}`;
-      resolve({ server, endpoint, requests });
-    });
-  });
-}
 
 describe("PR #5078 Codex Review Findings", () => {
   let tmpDir: string;
@@ -143,8 +109,10 @@ describe("PR #5078 Codex Review Findings", () => {
       // Skip rows should be counted as requests but not in mode statistics
       const points = Array.isArray(jsonOutput.points) ? jsonOutput.points : [];
       const point = points.find((p: Record<string, unknown>) => p.point === "model-routing");
-      expect((point as Record<string, unknown>)?.requests).toBe(2);
-      expect((point as Record<string, unknown>)?.modes?.shadow).toBe(1); // Only the normal row contributes to mode count
+      expect(point).toBeDefined();
+      expect((point as Record<string, unknown>).requests).toBe(2);
+      const modes = (point as Record<string, unknown>).modes as Record<string, unknown>;
+      expect(modes.shadow).toBe(1); // Only the normal row contributes to mode count
     });
 
     it("jev-eval should count multiple skip rows in latency correctly", () => {
@@ -259,23 +227,21 @@ describe("PR #5078 Codex Review Findings", () => {
   });
 
   describe("Finding 4: Preserve explicit efforts in marker telemetry", () => {
-    it("applied log preserves explicit efforts from active Jev decisions", async () => {
+    it("applied log preserves explicit efforts in marker-only mode", async () => {
       const logDir = join(tmpDir, ".omc", "jev");
       mkdirSync(logDir, { recursive: true });
       // Create .omc directory so stateDir can be resolved
       mkdirSync(join(tmpDir, ".omc"), { recursive: true });
 
-      const { server, endpoint } = await createMockJevServer();
-
       try {
         const env = {
           ...process.env,
           TYPESAFE_API_KEY: "test-key-123",
-          OMC_JEV_ENDPOINT: endpoint,
-          OMC_JEV: "model-routing:active",
           OMC_JEV_APPLIED_LOG: "1",
           OMC_JEV_LOG_CONTEXT: "1",
           OMC_JEV_LOG_DIR: logDir,
+          OMC_JEV_MODEL_ROUTING_MARKER: "1",
+          OMC_JEV_ROW_TELEMETRY: "1",
           OMC_JEV_MAX_EFFORT: "medium", // Set a max effort to test that explicit efforts are not capped
         };
 
@@ -283,17 +249,17 @@ describe("PR #5078 Codex Review Findings", () => {
           tool_name: "Task",
           tool_input: {
             subagent_type: "test",
-            prompt: "Task with explicit high effort",
+            prompt: "use sonnet\nTask with explicit high effort",
             effort: "high", // Explicit effort that should not be capped by OMC_JEV_MAX_EFFORT
-            model: "haiku", // Set an explicit model so Jev's decision (sonnet) will cause a detectable change
+            model: "haiku", // Set an explicit model; marker pins to sonnet
           },
           session_id: "test-session-effort",
           tool_use_id: "test-tool-effort",
           cwd: tmpDir,
         };
 
-        // Run the enforcer with explicit effort='high' and max effort='medium'
-        // The applied log should show that explicit effort was not capped
+        // Run the enforcer with marker-only mode (Jev OFF, marker enabled)
+        // The applied log should show that explicit effort was preserved
         const result = await runEnforcer(input, env, tmpDir);
         expect(result.exitCode).toBe(0);
 
@@ -317,52 +283,52 @@ describe("PR #5078 Codex Review Findings", () => {
         const routingEntry = appliedEntries.find((e: Record<string, unknown>) => e.point === "model-routing");
         expect(routingEntry).toBeDefined();
         
-        // UNCONDITIONAL: Verify that explicit effort was not capped by OMC_JEV_MAX_EFFORT
+        // UNCONDITIONAL: Verify that explicit effort was preserved in marker telemetry
         // The applied log should show effort: "high" (not capped to "medium")
-        if (routingEntry?.applied?.effort) {
-          expect(routingEntry.applied.effort.to).toBe("high");
-        }
+        expect(routingEntry).toBeTruthy();
+        const applied = (routingEntry as Record<string, unknown>).applied as Record<string, unknown>;
+        expect(applied).toBeDefined();
+        const effortRecord = applied.effort as Record<string, unknown>;
+        expect(effortRecord).toBeDefined();
+        expect((effortRecord.to as string)).toBe("high");
       } finally {
-        server.close();
+        // No server to close in marker-only mode
       }
     });
   });
 
   describe("Finding 5: Capture hook IDs for marker-only rows", () => {
-    it("applied log includes hook context from Jev decisions", async () => {
+    it("applied log captures hook context from marker-only applied rows", async () => {
       const logDir = join(tmpDir, ".omc", "jev");
       mkdirSync(logDir, { recursive: true });
 
-      // Create a mock Jev server that provides decisions
-      const { server, endpoint } = await createMockJevServer();
+      // Create .omc directory structure
+      mkdirSync(join(tmpDir, ".omc"), { recursive: true });
 
       try {
-        // Create .omc directory structure
-        mkdirSync(join(tmpDir, ".omc"), { recursive: true });
-
         const env = {
           ...process.env,
           TYPESAFE_API_KEY: "test-key-123",
-          OMC_JEV_ENDPOINT: endpoint,
-          OMC_JEV: "model-routing:active",
           OMC_JEV_APPLIED_LOG: "1",
           OMC_JEV_LOG_CONTEXT: "1",
           OMC_JEV_LOG_DIR: logDir,
+          OMC_JEV_MODEL_ROUTING_MARKER: "1",
+          OMC_JEV_ROW_TELEMETRY: "1",
         };
 
         const input = {
           tool_name: "Task",
           tool_input: {
             subagent_type: "test",
-            prompt: "Task prompt",
-            model: "haiku", // Explicit model that will be overridden by Jev
+            prompt: "use sonnet\nTask prompt",
+            model: "haiku", // Explicit model; marker pins to sonnet
           },
           session_id: "test-session-id-123",
           tool_use_id: "test-tool-use-id-456",
           cwd: tmpDir,
         };
 
-        // Run the enforcer with active Jev that will change the model
+        // Run the enforcer with marker-only mode (Jev OFF, marker enabled)
         const result = await runEnforcer(input, env, tmpDir);
       expect(result.exitCode).toBe(0);
 
@@ -379,7 +345,7 @@ describe("PR #5078 Codex Review Findings", () => {
       
       const appliedEntries = appliedLines.map((line) => JSON.parse(line));
       
-      // UNCONDITIONAL: Must have entries even with Jev off and marker-only
+      // UNCONDITIONAL: Must have entries in marker-only mode
       expect(appliedEntries.length).toBeGreaterThan(0);
       
       // UNCONDITIONAL: Entries with hook context should exist
@@ -392,10 +358,11 @@ describe("PR #5078 Codex Review Findings", () => {
       const markerEntry = entriesWithContext.find((e: Record<string, unknown>) => e.session_id === "test-session-id-123");
       expect(markerEntry).toBeDefined();
       
-      // UNCONDITIONAL: Verify the tool_use_id is captured
-      expect(markerEntry?.tool_use_id).toBe("test-tool-use-id-456");
+      // UNCONDITIONAL: Verify the tool_use_id is captured unconditionally
+      expect(markerEntry).toBeTruthy();
+      expect((markerEntry as Record<string, unknown>).tool_use_id).toBe("test-tool-use-id-456");
       } finally {
-        server.close();
+        // No server to close in marker-only mode
       }
     });
   });
