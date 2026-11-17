@@ -66,13 +66,12 @@ function runJevEval(logPath: string): { stdout: string; jsonOutput: Record<strin
   };
 }
 
+
 describe("PR #5078 Codex Review Findings", () => {
   let tmpDir: string;
-  let cwd: string;
 
   beforeEach(() => {
     tmpDir = mkdtempSync(join(tmpdir(), "codex-findings-"));
-    cwd = PROJECT_ROOT;
   });
 
   afterEach(() => {
@@ -104,15 +103,16 @@ describe("PR #5078 Codex Review Findings", () => {
 
       const { jsonOutput } = runJevEval(shadowLog);
 
-      // Before fix: malformed count would be 1 (the skip row)
       // After fix: malformed count should be 0
       expect(jsonOutput.malformed).toBe(0);
       expect(jsonOutput.totalLines).toBe(2);
       // Skip rows should be counted as requests but not in mode statistics
       const points = Array.isArray(jsonOutput.points) ? jsonOutput.points : [];
       const point = points.find((p: Record<string, unknown>) => p.point === "model-routing");
-      expect((point as Record<string, unknown>)?.requests).toBe(2);
-      expect((point as Record<string, unknown>)?.modes?.shadow).toBe(1); // Only the normal row contributes to mode count
+      expect(point).toBeDefined();
+      expect((point as Record<string, unknown>).requests).toBe(2);
+      const modes = (point as Record<string, unknown>).modes as Record<string, unknown>;
+      expect(modes.shadow).toBe(1); // Only the normal row contributes to mode count
     });
 
     it("jev-eval should count multiple skip rows in latency correctly", () => {
@@ -215,108 +215,154 @@ describe("PR #5078 Codex Review Findings", () => {
         tool_use_id: "test-tool",
       };
 
-      // With proper root-safe containment check, this should work without crashing
+      // With proper root-safe containment check, this should complete successfully
       // The root-safe check is: if (directory === sep) return canonicalPath.startsWith(sep);
       const result = await runEnforcer(input, env, tmpDir);
+      
+      // UNCONDITIONAL: Must exit successfully with no interactive prompt
       expect(result.exitCode).toBe(0);
-      // The enforcer should complete successfully with root containment logic
-      // Actual expansion is tested through the returned JSON/state, not stdout
+      // Result should be valid JSON with either state or other output
+      expect(result.stdout).toBeTruthy();
     });
   });
 
   describe("Finding 4: Preserve explicit efforts in marker telemetry", () => {
-    it("marker telemetry captures explicit effort in applied log", async () => {
+    it("applied log preserves explicit efforts in marker-only mode", async () => {
       const logDir = join(tmpDir, ".omc", "jev");
       mkdirSync(logDir, { recursive: true });
+      // Create .omc directory so stateDir can be resolved
+      mkdirSync(join(tmpDir, ".omc"), { recursive: true });
 
-      const env = {
-        ...process.env,
-        OMC_JEV_MODEL_ROUTING_MARKER: "1",
-        OMC_JEV_APPLIED_LOG: "1",
-        OMC_JEV_LOG_CONTEXT: "1",
-        OMC_JEV_LOG_DIR: logDir,
-      };
+      try {
+        const env = {
+          ...process.env,
+          TYPESAFE_API_KEY: "test-key-123",
+          OMC_JEV_APPLIED_LOG: "1",
+          OMC_JEV_LOG_CONTEXT: "1",
+          OMC_JEV_LOG_DIR: logDir,
+          OMC_JEV_MODEL_ROUTING_MARKER: "1",
+          OMC_JEV_ROW_TELEMETRY: "1",
+          OMC_JEV_MAX_EFFORT: "medium", // Set a max effort to test that explicit efforts are not capped
+        };
 
-      const input = {
-        tool_name: "Task",
-        tool_input: {
-          subagent_type: "test",
-          prompt: "use opus\n\nSome task",
-          effort: "high",
-        },
-        session_id: "test-session-effort",
-        tool_use_id: "test-tool-effort",
-        cwd,
-      };
+        const input = {
+          tool_name: "Task",
+          tool_input: {
+            subagent_type: "test",
+            prompt: "use sonnet\nTask with explicit high effort",
+            effort: "high", // Explicit effort that should not be capped by OMC_JEV_MAX_EFFORT
+            model: "haiku", // Set an explicit model; marker pins to sonnet
+          },
+          session_id: "test-session-effort",
+          tool_use_id: "test-tool-effort",
+          cwd: tmpDir,
+        };
 
-      // Run the enforcer with explicit effort='high'
-      const result = await runEnforcer(input, env, cwd);
-      expect(result.exitCode).toBe(0);
+        // Run the enforcer with marker-only mode (Jev OFF, marker enabled)
+        // The applied log should show that explicit effort was preserved
+        const result = await runEnforcer(input, env, tmpDir);
+        expect(result.exitCode).toBe(0);
 
-      // Check applied.jsonl for the effort record
-      const appliedLog = join(logDir, "applied.jsonl");
-      if (existsSync(appliedLog)) {
+        // Check applied.jsonl for the effort record - UNCONDITIONAL
+        const appliedLog = join(logDir, "applied.jsonl");
+        
+        // UNCONDITIONAL: applied.jsonl MUST exist
+        expect(existsSync(appliedLog)).toBe(true);
+        
         const appliedLines = readFileSync(appliedLog, "utf8").trim().split("\n").filter(Boolean);
+        
+        // UNCONDITIONAL: Must have at least one entry
         expect(appliedLines.length).toBeGreaterThan(0);
+        
         const appliedEntries = appliedLines.map((line) => JSON.parse(line));
-        // Applied log should capture the marker's decision
+        
+        // UNCONDITIONAL: Must have at least one applied entry
         expect(appliedEntries.length).toBeGreaterThan(0);
-        // At least one entry should be from model-routing (the marker)
+        
+        // UNCONDITIONAL: At least one entry should be from model-routing
         const routingEntry = appliedEntries.find((e: Record<string, unknown>) => e.point === "model-routing");
         expect(routingEntry).toBeDefined();
+        
+        // UNCONDITIONAL: Verify that explicit effort was preserved in marker telemetry
+        // The applied log should show effort: "high" (not capped to "medium")
+        expect(routingEntry).toBeTruthy();
+        const applied = (routingEntry as Record<string, unknown>).applied as Record<string, unknown>;
+        expect(applied).toBeDefined();
+        const effortRecord = applied.effort as Record<string, unknown>;
+        expect(effortRecord).toBeDefined();
+        expect((effortRecord.to as string)).toBe("high");
+      } finally {
+        // No server to close in marker-only mode
       }
-      // Test passes if enforcer runs without error and applies logging
-      expect(result.exitCode).toBe(0);
     });
   });
 
   describe("Finding 5: Capture hook IDs for marker-only rows", () => {
-    it("applied log includes hook context even when Jev is off", async () => {
+    it("applied log captures hook context from marker-only applied rows", async () => {
       const logDir = join(tmpDir, ".omc", "jev");
       mkdirSync(logDir, { recursive: true });
 
-      const env = {
-        ...process.env,
-        OMC_JEV_MODEL_ROUTING_MARKER: "1",
-        OMC_JEV_APPLIED_LOG: "1",
-        OMC_JEV_LOG_CONTEXT: "1",
-        // Ensure Jev is off so we test the marker-only code path
-        OMC_JEV: "",
-        OMC_JEV_LOG_DIR: logDir,
-      };
+      // Create .omc directory structure
+      mkdirSync(join(tmpDir, ".omc"), { recursive: true });
 
-      const input = {
-        tool_name: "Task",
-        tool_input: {
-          subagent_type: "test",
-          prompt: "use sonnet\n\nTask prompt",
-        },
-        session_id: "test-session-id-123",
-        tool_use_id: "test-tool-use-id-456",
-        cwd,
-      };
+      try {
+        const env = {
+          ...process.env,
+          TYPESAFE_API_KEY: "test-key-123",
+          OMC_JEV_APPLIED_LOG: "1",
+          OMC_JEV_LOG_CONTEXT: "1",
+          OMC_JEV_LOG_DIR: logDir,
+          OMC_JEV_MODEL_ROUTING_MARKER: "1",
+          OMC_JEV_ROW_TELEMETRY: "1",
+        };
 
-      // Run the enforcer with marker-only decision (Jev off)
-      const result = await runEnforcer(input, env, cwd);
+        const input = {
+          tool_name: "Task",
+          tool_input: {
+            subagent_type: "test",
+            prompt: "use sonnet\nTask prompt",
+            model: "haiku", // Explicit model; marker pins to sonnet
+          },
+          session_id: "test-session-id-123",
+          tool_use_id: "test-tool-use-id-456",
+          cwd: tmpDir,
+        };
+
+        // Run the enforcer with marker-only mode (Jev OFF, marker enabled)
+        const result = await runEnforcer(input, env, tmpDir);
       expect(result.exitCode).toBe(0);
 
       // Check applied.jsonl for the marker-only row with hook context
       const appliedLog = join(logDir, "applied.jsonl");
-      if (existsSync(appliedLog)) {
-        const appliedLines = readFileSync(appliedLog, "utf8").trim().split("\n").filter(Boolean);
-        expect(appliedLines.length).toBeGreaterThan(0);
-        const appliedEntries = appliedLines.map((line) => JSON.parse(line));
-        // Even with Jev off (marker-only), hook context should be captured with OMC_JEV_LOG_CONTEXT=1
-        const entriesWithContext = appliedEntries.filter(
-          (e: Record<string, unknown>) => e.session_id || e.tool_use_id,
-        );
-        expect(entriesWithContext.length).toBeGreaterThan(0);
-        // The specific context should match the input
-        const markerEntry = entriesWithContext.find((e: Record<string, unknown>) => e.session_id === "test-session-id-123");
-        expect(markerEntry).toBeDefined();
-        if (markerEntry) {
-          expect(markerEntry.tool_use_id).toBe("test-tool-use-id-456");
-        }
+      
+      // UNCONDITIONAL: applied.jsonl MUST exist
+      expect(existsSync(appliedLog)).toBe(true);
+      
+      const appliedLines = readFileSync(appliedLog, "utf8").trim().split("\n").filter(Boolean);
+      
+      // UNCONDITIONAL: Must have at least one entry
+      expect(appliedLines.length).toBeGreaterThan(0);
+      
+      const appliedEntries = appliedLines.map((line) => JSON.parse(line));
+      
+      // UNCONDITIONAL: Must have entries in marker-only mode
+      expect(appliedEntries.length).toBeGreaterThan(0);
+      
+      // UNCONDITIONAL: Entries with hook context should exist
+      const entriesWithContext = appliedEntries.filter(
+        (e: Record<string, unknown>) => e.session_id || e.tool_use_id,
+      );
+      expect(entriesWithContext.length).toBeGreaterThan(0);
+      
+      // UNCONDITIONAL: The specific context should match the input
+      const markerEntry = entriesWithContext.find((e: Record<string, unknown>) => e.session_id === "test-session-id-123");
+      expect(markerEntry).toBeDefined();
+      
+      // UNCONDITIONAL: Verify the tool_use_id is captured unconditionally
+      expect(markerEntry).toBeTruthy();
+      expect((markerEntry as Record<string, unknown>).tool_use_id).toBe("test-tool-use-id-456");
+      } finally {
+        // No server to close in marker-only mode
       }
     });
   });
