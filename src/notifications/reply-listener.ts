@@ -583,11 +583,10 @@ function maskTypedText(text: string, typed: readonly string[]): string {
   let masked = text;
   for (const literal of typed) {
     const redacted = escapeReplyInput(redactTokens(unescapeReplyInput(literal)));
-    if (redacted === literal) continue;
+    if (redacted === literal) continue; // nothing to mask (this also means no form below is the empty string)
     for (const form of TYPED_TEXT_FORMS) {
       try {
-        const shown = form(literal);
-        if (shown) masked = masked.split(shown).join(form(redacted));
+        masked = masked.split(form(literal)).join(form(redacted));
       } catch {
         // this form cannot hold the text (quoteForCmd refuses NUL, CR and LF)
       }
