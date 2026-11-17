@@ -451,14 +451,17 @@ export async function readUltragoalPlan(cwd: string, planId?: string): Promise<U
 async function writePlan(cwd: string, plan: UltragoalPlan): Promise<void> {
   // The plan is written to a unique temporary file in the same directory and renamed into place,
   // so an interrupted write never leaves a truncated goals.json; a failed write removes its temporary file.
-  // The permissions of an existing goals.json carry over to the new file; without one the default mode applies.
+  // The permissions of an existing goals.json carry over to the new file, and the temporary file is created with them
+  // (the plan is never in a file readable by more users than the one it replaces); without one the default mode applies.
   const goalsPath = ultragoalGoalsPath(cwd, plan.planId);
   const tmpPath = `${goalsPath}.tmp.${process.pid}.${randomUUID()}`;
   await mkdir(ultragoalDir(cwd, plan.planId), { recursive: true });
   const existing = await stat(goalsPath).catch(() => null);
+  const mode = existing ? existing.mode & 0o777 : undefined;
   try {
-    await writeFile(tmpPath, `${JSON.stringify(plan, null, 2)}\n`, { flag: 'wx' });
-    if (existing) await chmod(tmpPath, existing.mode & 0o777);
+    await writeFile(tmpPath, `${JSON.stringify(plan, null, 2)}\n`, mode === undefined ? { flag: 'wx' } : { flag: 'wx', mode });
+    // The umask can narrow the creation mode of a wider file (0o664 under 0o022): restore the exact mode before the rename.
+    if (mode !== undefined) await chmod(tmpPath, mode);
     await rename(tmpPath, goalsPath);
   } catch (error) {
     await rm(tmpPath, { force: true });

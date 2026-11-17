@@ -700,44 +700,6 @@ describe('ultragoal artifacts', () => {
     });
   });
 
-  it('creates temp files with restrictive permissions (0o600) before final rename', async () => {
-    await withTempRepo(async (cwd) => {
-      const { statSync } = await import('node:fs');
-      const { chmod, writeFile, rm } = await import('node:fs/promises');
-      const goalsPath = join(cwd, '.omc', 'ultragoal', 'plans', 'test-perms', 'goals.json');
-      
-      // First, create a plan to establish a baseline file with specific permissions
-      await createUltragoalPlan(cwd, {
-        brief: 'Initial plan',
-        planId: 'test-perms',
-        now: new Date('2026-05-04T10:00:00Z'),
-      });
-      
-      // Set the existing file to have restrictive permissions
-      await chmod(goalsPath, 0o600);
-      const existingMode = statSync(goalsPath).mode & 0o777;
-      expect(existingMode).toBe(0o600);
-      
-      // Remove the file and test the temp file creation permissions
-      await rm(goalsPath, { force: true });
-      
-      // Now create a new plan to test the temp file handling
-      // The temp file should be created with 0o600 from the start
-      await createUltragoalPlan(cwd, {
-        brief: 'Updated plan with security check',
-        planId: 'test-perms',
-        now: new Date('2026-05-04T11:00:00Z'),
-      });
-      
-      // After creation, the file should have the default umask applied to 0o600
-      // which will be 0o600 (read/write for owner, nothing for others)
-      const finalMode = statSync(goalsPath).mode & 0o777;
-      // The file should NOT be world-readable (0o644 would be bad)
-      expect(finalMode).toBeLessThanOrEqual(0o600);
-      expect((finalMode & 0o044)).toBe(0); // No group/other read permissions
-    });
-  });
-
   describe('multi-repo workspace anchor', () => {
     it('writes artifacts to the workspace anchor .omc/ when .omc-workspace marker exists in a parent dir', async () => {
       const workspaceRoot = await mkdtemp(join(homedir(), 'omc-workspace-anchor-'));

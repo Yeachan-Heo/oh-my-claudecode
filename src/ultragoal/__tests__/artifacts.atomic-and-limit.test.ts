@@ -14,13 +14,23 @@ import {
   ultragoalGoalsPath,
 } from '../artifacts.js';
 
-const control = vi.hoisted(() => ({ failRenameNext: false, fixedUuid: undefined as string | undefined }));
+const control = vi.hoisted(() => ({
+  failRenameNext: false,
+  fixedUuid: undefined as string | undefined,
+  // Mode of each temporary goals.json file as it exists when chmod is called on it (the moment the write is complete).
+  tmpModesAtChmod: [] as number[],
+}));
 
-// Simulates a crash between the temporary write and the rename, and pins randomUUID when a test needs a known temporary name.
+// Simulates a crash between the temporary write and the rename, records the mode of the temporary file before its chmod,
+// and pins randomUUID when a test needs a known temporary name.
 vi.mock('node:fs/promises', async (importOriginal) => {
   const actual = await importOriginal<typeof import('node:fs/promises')>();
   return {
     ...actual,
+    chmod: async (...args: Parameters<typeof actual.chmod>) => {
+      if (String(args[0]).includes('.tmp.')) control.tmpModesAtChmod.push(statSync(String(args[0])).mode & 0o777);
+      return actual.chmod(...args);
+    },
     rename: async (...args: Parameters<typeof actual.rename>) => {
       if (control.failRenameNext) {
         control.failRenameNext = false;
@@ -103,7 +113,7 @@ describe('ultragoal goals.json atomic write', () => {
     expect(match).not.toBeNull();
     const writePlan = match?.[0] ?? '';
     expect(writePlan).toMatch(/\brename\(/);
-    expect(writePlan).toMatch(/writeFile\(\s*tmpPath,[\s\S]*\{ flag: 'wx' \}/);
+    expect(writePlan).toMatch(/writeFile\(\s*tmpPath,[\s\S]*flag: 'wx'/);
     expect(writePlan).toMatch(/`\$\{goalsPath\}\.tmp\.\$\{process\.pid\}\.\$\{randomUUID\(\)\}`/);
     expect(writePlan).toMatch(/catch \(error\) \{\s*await rm\(tmpPath, \{ force: true \}\);\s*throw error;\s*\}/);
     expect(source).toMatch(/import \{ randomUUID \} from 'node:crypto';/);
@@ -204,6 +214,7 @@ describe.skipIf(process.platform === 'win32')('ultragoal goals.json permissions'
   beforeEach(() => {
     control.failRenameNext = false;
     control.fixedUuid = undefined;
+    control.tmpModesAtChmod.length = 0;
   });
 
   it('keeps the permissions of an existing goals.json across the atomic write', async () => {
@@ -219,6 +230,35 @@ describe.skipIf(process.platform === 'win32')('ultragoal goals.json permissions'
       }
       expect(temporaryFiles(cwd)).toEqual([]);
     });
+  });
+
+  it('creates the temporary file with the mode of the goals.json it replaces, never wider', async () => {
+    // Under a umask of 0o022 the default mode of a new file (0o644) is wider than both modes below; fix the umask where the
+    // runner allows it, so that the check cannot pass by accident.
+    let previousUmask: number | undefined;
+    try {
+      previousUmask = process.umask(0o022);
+    } catch {
+      /* a worker thread cannot change the umask */
+    }
+    try {
+      await withTempRepo(async (cwd) => {
+        await createUltragoalPlan(cwd, { planId: PLAN_ID, brief: BRIEF });
+        const goalsPath = ultragoalGoalsPath(cwd, PLAN_ID);
+
+        for (const mode of [0o600, 0o640]) {
+          chmodSync(goalsPath, mode);
+          control.tmpModesAtChmod.length = 0;
+          await addUltragoalGoal(cwd, { planId: PLAN_ID, title: `goal for mode ${mode.toString(8)}`, objective: 'Mode test goal.' });
+          expect(control.tmpModesAtChmod).toHaveLength(1);
+          // Every permission bit of the temporary file is also set on the file it replaces.
+          expect(control.tmpModesAtChmod[0] & ~mode).toBe(0);
+          expect(statSync(goalsPath).mode & 0o777).toBe(mode);
+        }
+      });
+    } finally {
+      if (previousUmask !== undefined) process.umask(previousUmask);
+    }
   });
 
   it('gives a new goals.json the default mode of a newly created file', async () => {
