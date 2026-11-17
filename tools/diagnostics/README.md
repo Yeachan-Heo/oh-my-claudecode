@@ -252,6 +252,11 @@ Output files: `--tsv` and `--json` open the given path for writing, so an existi
   `cost_status` `unavailable`.
 - `cost_status`: `reported` (all turns priced), `partial` (cost of the priced turns only, the count in `turns_unpriced`),
   `unavailable` (no turns, or none priced).
+- A request is priced with the one row of its own tier: a Haiku request above 100k tokens with `haiku>100k`, any other request
+  with its family row. A table may hold only the rows it needs; a turn with no row for its tier, or without any `usage`, is
+  unpriced. A turn is a `message.id` (a row without one is a turn identified by its `uuid`); a tool call id is counted once.
+- `end_is_error` and `end_api_error_status` come from `is_error` and `api_error_status` fields of a row; a last assistant row
+  marked `isApiErrorMessage` also sets `end_is_error`, and the status is read from its text, in parentheses or after a colon.
 - `model_match`: `match`, `mismatch` (the dominant transcript model is not the model Jev chose), `undetermined` (no transcript
   or no `message.model`), `no model decision` (Jev chose no model).
 - A duplicate `tool_use_id` is counted once in the result and once under `distribution.duplicates`.
