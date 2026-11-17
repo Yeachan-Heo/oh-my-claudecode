@@ -132,9 +132,9 @@ export function readPoolState(dir, now = Date.now()) {
 export function reserveAgent({ dir, sessionId, toolUseId, subagentType, now = Date.now(), env = process.env }) {
   const limit = agentLimit(env);
   let result = { ok: false, alive: 0, occupied: 0, limit };
-  
+
   // Hold a shared lock across the check and reservation to prevent race conditions
-  withStateFileLockAtPathSync(
+  const lockResult = withStateFileLockAtPathSync(
     join(dir, '.pool.lock'),
     () => {
       const alive = countAlive(dir, now);
@@ -159,6 +159,12 @@ export function reserveAgent({ dir, sessionId, toolUseId, subagentType, now = Da
     3000, // processProbeTimeoutMs
     5000, // overallTimeoutMs - 5 seconds should be plenty for a quick check+write
   );
+  
+  // If lock acquisition failed, fail open by allowing the call with no reservation (Codex P2 finding).
+  // This prevents treating lock failures as pool-full refusals, which would cause spurious denials.
+  if (lockResult && !lockResult.acquired) {
+    return { ok: true, file: null, alive: 0, occupied: 0, limit, untracked: true };
+  }
   
   return result;
 }
@@ -194,18 +200,33 @@ export function commitAgent(dir, sessionId, now = Date.now()) {
 export function releaseAgent(dir, sessionId, now = Date.now()) {
   if (!sessionId) return false;
   try {
-    const pool = readPool(dir, now);
-    const alive = pool.alive.filter((entry) => entry.sessionId === sessionId).sort((a, b) => a.ts - b.ts); // FIFO, the usual order of the stops
-    if (alive.length) {
-      rmSync(alive[0].path, { force: true });
-      return true;
-    }
-    const pending = pool.pending.filter((entry) => entry.sessionId === sessionId).sort((a, b) => a.ts - b.ts); // a stop without a registered start
-    if (pending.length) {
-      rmSync(pending[0].path, { force: true });
-      return true;
-    }
-    return false;
+    // Serialize the read + delete under a lock to prevent concurrent SubagentStop hooks from selecting and deleting the same reservation.
+    // Without this, multiple callers can all report success even when only one file is actually deleted (Codex P1 finding).
+    let result = false;
+    withStateFileLockAtPathSync(
+      join(dir, '.pool.lock'),
+      () => {
+        const pool = readPool(dir, now);
+        const alive = pool.alive.filter((entry) => entry.sessionId === sessionId).sort((a, b) => a.ts - b.ts); // FIFO, the usual order of the stops
+        if (alive.length) {
+          rmSync(alive[0].path, { force: true });
+          result = true;
+          return;
+        }
+        const pending = pool.pending.filter((entry) => entry.sessionId === sessionId).sort((a, b) => a.ts - b.ts); // a stop without a registered start
+        if (pending.length) {
+          rmSync(pending[0].path, { force: true });
+          result = true;
+          return;
+        }
+      },
+      true, // requireExclusive: serialize all operations
+      50, // attempts
+      2000, // busyTimeoutMs
+      3000, // processProbeTimeoutMs
+      5000, // overallTimeoutMs
+    );
+    return result;
   } catch {
     return false;
   }
@@ -215,12 +236,24 @@ export function releaseAgent(dir, sessionId, now = Date.now()) {
 export function releaseAgentByToolUseId(dir, toolUseId, now = Date.now()) {
   if (!toolUseId) return false;
   try {
-    const pool = readPool(dir, now);
-    const hits = [...pool.alive, ...pool.pending].filter((entry) => entry.toolUseId === toolUseId);
+    // Serialize the read + delete under a lock to prevent concurrent releases from both succeeding when only one file exists.
+    // This ensures the pool capacity is correctly tracked (Codex P1 finding).
     let released = false;
-    for (const entry of hits) {
-      try { rmSync(entry.path, { force: true }); released = true; } catch { /* best effort */ }
-    }
+    withStateFileLockAtPathSync(
+      join(dir, '.pool.lock'),
+      () => {
+        const pool = readPool(dir, now);
+        const hits = [...pool.alive, ...pool.pending].filter((entry) => entry.toolUseId === toolUseId);
+        for (const entry of hits) {
+          try { rmSync(entry.path, { force: true }); released = true; } catch { /* best effort */ }
+        }
+      },
+      true, // requireExclusive: serialize all operations
+      50, // attempts
+      2000, // busyTimeoutMs
+      3000, // processProbeTimeoutMs
+      5000, // overallTimeoutMs
+    );
     return released;
   } catch {
     return false;
