@@ -858,4 +858,37 @@ describe('redactedPrefix', () => {
     expect(redactedPrefix(text, 300)).toBe(text.slice(0, 300));
     expect(redactedPrefix(text, 300)).toBe(`${'x'.repeat(277)} hf_${'a'.repeat(19)}`);
   });
+
+  describe('finish: a transformation that adds syntax runs on the redacted text, before the cut', () => {
+    const doubleBackslashes = (value: string): string => value.replace(/\\/g, '\\\\');
+    const quoted = 'PASSWORD="start\\"sensitive-suffix" tail';
+
+    it('switch on: the text is redacted as written, then transformed, then cut', () => {
+      process.env[SWITCH] = '1';
+      expect(redactedPrefix(quoted, 300, doubleBackslashes)).toBe('PASSWORD="****" tail');
+      expect(redactedPrefix(quoted, 12, doubleBackslashes)).toBe('PASSWORD="**');
+      expect(redactedPrefix('a\\b', 300, doubleBackslashes)).toBe('a\\\\b'); // nothing to redact: only transformed
+      // a cut after the transformation sees the longer text
+      expect(redactedPrefix('a\\b', 3, doubleBackslashes)).toBe('a\\\\');
+    });
+
+    it.each([undefined, '', '0', 'true'])('switch off (%s): transformed and cut, not redacted', (value) => {
+      if (value === undefined) delete process.env[SWITCH];
+      else process.env[SWITCH] = value;
+      expect(redactedPrefix(quoted, 300, doubleBackslashes)).toBe(doubleBackslashes(quoted));
+      expect(redactedPrefix(quoted, 12, doubleBackslashes)).toBe(doubleBackslashes(quoted).slice(0, 12));
+    });
+
+    it('without finish nothing changes', () => {
+      process.env[SWITCH] = '1';
+      expect(redactedPrefix(quoted, 300)).toBe(redactedPrefix(quoted, 300, (value) => value));
+      expect(redactedPreview(quoted, 12, quoted.length)).toBe(redactedPreview(quoted, 12, quoted.length, (value) => value));
+    });
+
+    it('redactedPreview passes finish on and cuts the transformed text', () => {
+      process.env[SWITCH] = '1';
+      expect(redactedPreview(quoted, 50, 500, doubleBackslashes)).toBe('PASSWORD="****" tail');
+      expect(redactedPreview('a\\bcd', 4, 500, doubleBackslashes)).toBe('a\\\\b...');
+    });
+  });
 });

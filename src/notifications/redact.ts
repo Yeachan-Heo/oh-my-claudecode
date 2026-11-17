@@ -33,6 +33,11 @@ const TOKEN_RULES: ReadonlyArray<readonly [pattern: RegExp, visible: (head: stri
   [/\b(AKIA)[A-Z0-9]{16}\b/g, (head) => head],
 ];
 
+/** Whether the opt-in key-shape redaction is on: OMC_REDACT_KEY_SHAPES is exactly `1`. */
+export function keyShapesEnabled(): boolean {
+  return process.env.OMC_REDACT_KEY_SHAPES === '1';
+}
+
 /** A part of the input that is replaced by a mask: [start, end) in the characters of the original input. */
 type MaskRange = [start: number, end: number, mask: string];
 
@@ -55,7 +60,7 @@ type MaskRange = [start: number, end: number, mask: string];
  * an assignment whatever the `ghp_` rule does to its name). Every range they find is masked in one pass.
  */
 export function redactTokens(input: string): string {
-  if (process.env.OMC_REDACT_KEY_SHAPES !== '1') {
+  if (!keyShapesEnabled()) {
     return TOKEN_RULES.reduce(
       (text, [pattern, visible]) => text.replace(pattern, (_match, head: string) => visible(head) + MASK),
       input,
@@ -81,20 +86,33 @@ export function redactTokens(input: string): string {
  * The first `max` characters of `text` for a log line or an error message.
  *
  * With OMC_REDACT_KEY_SHAPES=1 the whole text is redacted before it is cut, so a key that starts shortly
- * before the cut cannot leave a fragment that is too short to be recognized as a key. Without the switch the
+ * before the cut cannot leave a fragment that is too short to be recognized. Without the switch the
  * text is cut first, and the caller's own redaction masks what is left, so the output does not change.
+ *
+ * `finish` is a transformation of the text that the caller applies before it logs it and that adds syntax the
+ * scan would misread (escapes: `\"` becomes `\\"` and ends a quoted value). It runs on the redacted text,
+ * before the cut, so the redaction always sees the text as it was before the transformation.
  */
-export function redactedPrefix(text: string, max: number): string {
-  return (process.env.OMC_REDACT_KEY_SHAPES === '1' ? redactTokens(text) : text).slice(0, max);
+export function redactedPrefix(
+  text: string,
+  max: number,
+  finish: (redacted: string) => string = (redacted) => redacted,
+): string {
+  return finish(keyShapesEnabled() ? redactTokens(text) : text).slice(0, max);
 }
 
 /**
  * The start of `text` for a log line: its first `max` characters (see redactedPrefix), followed by `...` when
  * there is more. `cut` is how many characters of `text` the caller really uses (for example what it types
- * into a pane); the rest is ignored.
+ * into a pane); the rest is ignored. `finish` is the one of redactedPrefix.
  */
-export function redactedPreview(text: string, max: number, cut: number = text.length): string {
-  const shown = redactedPrefix(text, cut);
+export function redactedPreview(
+  text: string,
+  max: number,
+  cut: number = text.length,
+  finish?: (redacted: string) => string,
+): string {
+  const shown = redactedPrefix(text, cut, finish);
   return `${shown.slice(0, max)}${shown.length > max ? '...' : ''}`;
 }
 

@@ -60,7 +60,7 @@ import { writeApprovalDecision } from "../graph/runtime/remote-approval.js";
 
 import type { ReplyConfig } from "./types.js";
 import { parseMentionAllowedMentions } from "./config.js";
-import { redactedPrefix, redactedPreview, redactTokens } from "./redact.js";
+import { keyShapesEnabled, redactedPrefix, redactedPreview, redactTokens } from "./redact.js";
 import {
   getProcessStartIdentity,
   isProcessAlive,
@@ -394,10 +394,23 @@ export function isDaemonRunning(): boolean {
  * - Control characters stripped
  */
 export function sanitizeReplyInput(text: string): string {
+  return escapeReplyInput(stripReplyInput(text));
+}
+
+/** First half of sanitizeReplyInput: removes and replaces characters, adds none. */
+function stripReplyInput(text: string): string {
   return text
     .replace(/[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]/g, "") // Strip control chars (keep \n, \r, \t)
     .replace(/[\u202a-\u202e\u2066-\u2069]/g, "") // Strip bidi override characters
-    .replace(/\r\n|[\r\n]/g, " ") // Newlines -> spaces
+    .replace(/\r\n|[\r\n]/g, " "); // Newlines -> spaces
+}
+
+/**
+ * Second half of sanitizeReplyInput: adds backslashes. That changes where a quoted value ends (`\"` becomes
+ * `\\"`), so a text that is to be redacted must be redacted before this step, not after it.
+ */
+function escapeReplyInput(text: string): string {
+  return text
     .replace(/\\/g, "\\\\") // Escape backslashes
     .replace(/`/g, "\\`") // Escape backticks
     .replace(/\$\(/g, "\\$(") // Escape $()
@@ -528,13 +541,35 @@ export type ReplyInjectionStep =
   | { kind: "literal"; value: string }
   | { kind: "key"; value: string };
 
+function prefixedReply(
+  text: string,
+  platform: string,
+  config: Pick<ReplyListenerDaemonConfig, "includePrefix">,
+): string {
+  return (config.includePrefix ? `[reply:${platform}] ` : "") + text;
+}
+
 function sanitizeReplyText(
   text: string,
   platform: string,
   config: Pick<ReplyListenerDaemonConfig, "includePrefix">,
 ): string {
-  const prefix = config.includePrefix ? `[reply:${platform}] ` : "";
-  return sanitizeReplyInput(prefix + text);
+  return sanitizeReplyInput(prefixedReply(text, platform, config));
+}
+
+/** The inverse of escapeReplyInput, apart from the trim: it undoes the escapes and nothing else. */
+function unescapeReplyInput(text: string): string {
+  return text.replace(/\\(\\|`|\$(?=[({]))/g, "$1");
+}
+
+/**
+ * The text of an error from a tmux send-keys command for the daemon log. The command line in the message of
+ * such an error holds the reply as it was typed, in the escaped form of escapeReplyInput, so with the switch
+ * on the escapes are undone before the redaction, which would otherwise end a quoted value early.
+ */
+function sendKeysErrorText(error: unknown): string {
+  const message = error instanceof Error ? error.message : String(error);
+  return keyShapesEnabled() ? redactTokens(unescapeReplyInput(message)) : message;
 }
 
 /**
@@ -555,9 +590,11 @@ function herdrErrorText(error: unknown): string {
 }
 
 /**
- * The first 50 characters of the injected reply for the daemon log. The whole reply is redacted before it is
- * cut (see redactedPreview), not after: a key that starts shortly before the cut would otherwise be logged
- * as a fragment that is too short to be recognized.
+ * The first 50 characters of the injected reply for the daemon log. The reply is redacted before it is cut
+ * (see redactedPreview), not after: a key that starts shortly before the cut would otherwise be logged as
+ * a fragment that is too short to be recognized. It is also redacted before the escapes of sanitizeReplyInput
+ * are added (see escapeReplyInput): they double every backslash, which turns `"a\"b"` into a quoted value
+ * that ends after `a\\` and leaves `b` visible. What is typed into the pane is not changed.
  */
 export function replyLogPreview(
   text: string,
@@ -565,9 +602,10 @@ export function replyLogPreview(
   config: Pick<ReplyListenerDaemonConfig, "includePrefix" | "maxMessageLength">,
 ): string {
   return redactedPreview(
-    sanitizeReplyText(text, platform, config),
+    stripReplyInput(prefixedReply(text, platform, config)),
     50,
     config.maxMessageLength,
+    escapeReplyInput,
   );
 }
 
@@ -611,7 +649,7 @@ export function buildReplyInjectionSteps(
   ];
 }
 
-function sendReplyInjectionSteps(
+export function sendReplyInjectionSteps(
   paneId: string,
   steps: ReplyInjectionStep[],
 ): boolean {
@@ -632,7 +670,7 @@ function sendReplyInjectionSteps(
     return true;
   } catch (error) {
     log(
-      `ERROR: Failed to send reply injection steps to pane ${paneId}: ${error instanceof Error ? error.message : String(error)}`,
+      `ERROR: Failed to send reply injection steps to pane ${paneId}: ${sendKeysErrorText(error)}`,
     );
     return false;
   }

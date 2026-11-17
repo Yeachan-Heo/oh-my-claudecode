@@ -1,6 +1,7 @@
 /**
  * The daemon log shows the first 50 characters of an injected reply. The reply must be redacted before it is
- * cut, on both injection paths (Herdr and tmux), also when maxMessageLength cuts the reply first.
+ * cut, on both injection paths (Herdr and tmux), also when maxMessageLength cuts the reply first, and before
+ * sanitizeReplyInput adds its escapes (they double every backslash, which ends a quoted value too early).
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach, afterAll } from "vitest";
@@ -24,7 +25,13 @@ const mocks = vi.hoisted(() => ({
   capturePaneContent: vi.fn(),
   sendToPane: vi.fn(),
   removeMessagesByPane: vi.fn(),
+  tmuxExec: vi.fn(),
 }));
+
+vi.mock("../../cli/tmux-utils.js", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../../cli/tmux-utils.js")>();
+  return { ...actual, tmuxExec: mocks.tmuxExec };
+});
 
 vi.mock("../../team/herdr-session.js", async (importOriginal) => {
   const actual =
@@ -55,10 +62,12 @@ vi.mock("../session-registry.js", async (importOriginal) => {
 
 import { HerdrError, runHerdr, type HerdrExecOptions } from "../../team/herdr-session.js";
 import {
+  buildReplyInjectionSteps,
   injectReplyIntoHerdrPane,
   processSlackSocketMessage,
   replyLogPreview,
   sanitizeReplyInput,
+  sendReplyInjectionSteps,
   SlackConnectionStateTracker,
   RateLimiter,
   type ReplyListenerDaemonConfig,
@@ -108,6 +117,8 @@ beforeEach(() => {
   mocks.herdrSendPrompt.mockResolvedValue(undefined);
   mocks.capturePaneContent.mockReturnValue("Claude Code session output");
   mocks.sendToPane.mockReturnValue(true);
+  mocks.tmuxExec.mockReset();
+  mocks.tmuxExec.mockReturnValue("");
 });
 
 afterEach(() => {
@@ -150,6 +161,92 @@ describe("replyLogPreview, switch on", () => {
   });
 });
 
+// The reply is typed in the sanitized form (control characters removed, line breaks as spaces, backslashes
+// doubled, backticks and $( ${ escaped, trimmed). The log shows that form, but the redaction must see the reply
+// without the doubled backslashes.
+describe("replyLogPreview, switch on: every transformation of the reply, with every form of a quoted secret", () => {
+  beforeEach(() => {
+    process.env[SWITCH] = "1";
+  });
+
+  // [label, reply, preview]
+  const CASES: Array<[string, string, string]> = [
+    ["escaped quote (the example from review)", 'PASSWORD="start\\"sensitive-suffix"', 'PASSWORD="****"'],
+    ["escaped quote, colon", 'PASSWORD: "start\\"sensitive-suffix"', 'PASSWORD: "****"'],
+    ["escaped quote, spaces around the equals sign", 'PASSWORD = "start\\"sensitive-suffix"', 'PASSWORD = "****"'],
+    ["escaped quote at the start of the value", 'TOKEN="\\"sensitive-suffix"', 'TOKEN="****"'],
+    ["two escaped quotes", 'SECRET="a\\"b\\"sensitive-suffix" tail', 'SECRET="****" tail'],
+    ["escaped quote, then a second assignment", 'PASSWORD="a\\"b" TOKEN="canary"', 'PASSWORD="****" TOKEN="****"'],
+    ["an escaped backslash before the closing quote", 'PASSWORD="abc\\\\" tail', 'PASSWORD="****" tail'],
+    ["a backslash in a bare value", "PASSWORD=ab\\cd tail", "PASSWORD=**** tail"],
+    ["a backtick and $( in a quoted value", 'PASSWORD="a\\"`b`$(id)\\"c"', 'PASSWORD="****"'],
+    ["a line break inside the quotes", 'PASSWORD="start\nsensitive-suffix"', 'PASSWORD="****"'],
+    ["a line break after a bare value", "PASSWORD=canary\nnext", "PASSWORD=**** next"],
+    ["a line break right after the equals sign", "PASSWORD=\ncanary", "PASSWORD= ****"],
+    ["a line break right after the opening quote", 'PASSWORD="\ncanary"', 'PASSWORD="****"'],
+    ["a control character inside the name", "PASS\u0001WORD=canary", "PASSWORD=****"],
+    ["a bidi override inside the name, escaped quote", 'PASS\u202eWORD="a\\"sensitive-suffix"', 'PASSWORD="****"'],
+  ];
+
+  it.each(CASES)("%s", (_label, reply, preview) => {
+    expect(replyLogPreview(reply, "slack", configWith(500))).toBe(preview);
+    expect(replyLogPreview(reply, "slack", configWith(500, true))).toBe(`[reply:slack] ${preview}`);
+  });
+
+  it("spaces around the reply are trimmed, with or without the reply prefix", () => {
+    const reply = '  PASSWORD="a\\"sensitive-suffix"  ';
+    expect(replyLogPreview(reply, "slack", configWith(500))).toBe('PASSWORD="****"');
+    expect(replyLogPreview(reply, "slack", configWith(500, true))).toBe('[reply:slack]   PASSWORD="****"');
+  });
+
+  it("the cut at maxMessageLength: the value is longer than the typed text", () => {
+    const reply = `PASSWORD="start\\"${"s".repeat(60)}"`;
+    expect(replyLogPreview(reply, "slack", configWith(30))).toBe('PASSWORD="****"');
+    expect(replyLogPreview(reply, "slack", configWith(500))).toBe('PASSWORD="****"');
+  });
+
+  it("the cut at 50 characters: a key that starts at the cut of the escaped text", () => {
+    // the doubled backslashes move the key: its first characters lie inside the first 50 characters of the escaped text
+    const { text, filler } = replyWithKeyAtTheCut("hf_", 20);
+    const escapedFiller = "\\\\".repeat(4) + filler.slice(8);
+    const raw = "\\".repeat(4) + filler.slice(8) + text.slice(filler.length);
+    expect(sanitizeReplyInput(raw).startsWith(`${escapedFiller}hf_`)).toBe(true);
+    expect(replyLogPreview(raw, "slack", configWith(500))).toBe(`${escapedFiller}hf_****`);
+  });
+
+  it("the typed text is still the sanitized reply", () => {
+    expect(sanitizeReplyInput('PASSWORD="start\\"sensitive-suffix"')).toBe('PASSWORD="start\\\\"sensitive-suffix"');
+  });
+});
+
+describe("sanitizeReplyInput is what it was before it was split into two steps", () => {
+  const before = (text: string): string =>
+    text
+      .replace(/[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]/g, "")
+      .replace(/[\u202a-\u202e\u2066-\u2069]/g, "")
+      .replace(/\r\n|[\r\n]/g, " ")
+      .replace(/\\/g, "\\\\")
+      .replace(/`/g, "\\`")
+      .replace(/\$\(/g, "\\$(")
+      .replace(/\$\{/g, "\\${")
+      .trim();
+
+  it("gives the same text for 3000 generated replies", () => {
+    const pieces = ["a", " ", "\\", "`", "$(", "${", "$", "(", "{", "\n", "\r\n", "\r", "\t", "\u0001", "\u007f", "\u202e", "\u2066", '"', "'", "PASSWORD=", "x"];
+    let seed = 99;
+    const next = (): number => {
+      seed = (seed * 1664525 + 1013904223) >>> 0;
+      return seed / 4294967296;
+    };
+    for (let t = 0; t < 3000; t++) {
+      let text = "";
+      const length = 1 + Math.floor(next() * 20);
+      for (let k = 0; k < length; k++) text += pieces[Math.floor(next() * pieces.length)];
+      expect(sanitizeReplyInput(text), JSON.stringify(text)).toBe(before(text));
+    }
+  });
+});
+
 describe("replyLogPreview, switch off: the preview is cut first and the output does not change", () => {
   it.each([undefined, "", "0", "true"])("with value %s", (value) => {
     if (value === undefined) delete process.env[SWITCH];
@@ -170,6 +267,8 @@ describe("replyLogPreview, switch off: the preview is cut first and the output d
       `${"x".repeat(28)} hf_${"a".repeat(40)}`,
       `echo \`whoami\` $(id) ${"z".repeat(60)}`,
       `line one\nline two ${"q".repeat(60)}`,
+      'PASSWORD="start\\"sensitive-suffix"',
+      `  TOKEN: "a\\\\"\nb"  ${"w".repeat(60)}`,
     ];
     for (const text of texts) {
       for (const max of [10, 40, 50, 51, 500]) {
@@ -207,6 +306,15 @@ describe("injection paths write the masked preview to the log", () => {
     expect(loggedPreview()).toBe(`${"x".repeat(24)} hf_****`);
   });
 
+  const EXACT = 'PASSWORD="start\\"sensitive-suffix"'; // the reply from review: backslash, quote, suffix
+
+  it("Herdr path, escaped quote in a quoted secret: the suffix is not logged", async () => {
+    await expect(injectReplyIntoHerdrPane("w9:p2", EXACT, "discord", configWith(500))).resolves.toBe(true);
+    expect(mocks.herdrSendPrompt).toHaveBeenCalledWith("w9:p2", 'PASSWORD="start\\\\"sensitive-suffix"'); // typed with doubled backslash
+    expect(loggedPreview()).toBe('PASSWORD="****"');
+    expect(readFileSync(LOG_FILE, "utf-8")).not.toContain("sensitive-suffix");
+  });
+
   const slackMessage = (text: string): string =>
     JSON.stringify({ type: "events_api", envelope_id: "E1", payload: { event: { type: "message", text } } });
   const processSlack = async (text: string, config: ReplyListenerDaemonConfig): Promise<boolean> => {
@@ -235,6 +343,13 @@ describe("injection paths write the masked preview to the log", () => {
     await processSlack(text, configWith(40));
     expect(mocks.sendToPane).toHaveBeenCalledWith("%5", `${"x".repeat(24)} hf_${"a".repeat(12)}`, true);
     expect(loggedPreview()).toBe(`${"x".repeat(24)} hf_****`);
+  });
+
+  it("tmux path, escaped quote in a quoted secret: the suffix is not logged", async () => {
+    await expect(processSlack(EXACT, configWith(500))).resolves.toBe(true);
+    expect(mocks.sendToPane).toHaveBeenCalledWith("%5", 'PASSWORD="start\\\\"sensitive-suffix"', true);
+    expect(loggedPreview()).toBe('PASSWORD="****"');
+    expect(readFileSync(LOG_FILE, "utf-8")).not.toContain("sensitive-suffix");
   });
 
   it("with the switch off the log line is the same as before (the fragment of the key is logged)", async () => {
@@ -319,5 +434,61 @@ describe("errors from the Herdr CLI in the log", () => {
     mocks.herdrSendPrompt.mockRejectedValue(await failingHerdr(stderr));
     await injectReplyIntoHerdrPane("w9:p2", "hello", "discord", configWith(500));
     expect(loggedLine("Failed to inject")).toBe(`ERROR: Failed to inject reply into herdr pane w9:p2: herdr_error: ${filler}hf_${"a".repeat(19)}`);
+  });
+});
+
+// When tmux send-keys fails, the message of the error holds the command line, and the command line holds the
+// reply as it was typed: with doubled backslashes. The log must mask the reply as the user wrote it.
+describe("errors from tmux send-keys in the log", () => {
+  const failWith = (typed: string): void => {
+    mocks.tmuxExec.mockImplementation(() => {
+      throw new Error(`Command failed: tmux send-keys -t %5 -l ${typed}`);
+    });
+  };
+  const sendFailureLine = (): string => {
+    const lines = readFileSync(LOG_FILE, "utf-8").trim().split("\n");
+    return (lines.filter((l) => l.includes("Failed to send reply injection steps")).pop() ?? "").replace(/^\[[^\]]*\] /, "");
+  };
+  const fail = (reply: string): string => {
+    const steps = buildReplyInjectionSteps(reply, "discord", configWith(500));
+    failWith((steps[0] as { value: string }).value);
+    expect(sendReplyInjectionSteps("%5", steps)).toBe(false);
+    return sendFailureLine();
+  };
+
+  describe("switch on", () => {
+    beforeEach(() => {
+      process.env[SWITCH] = "1";
+    });
+
+    it("an escaped quote in a quoted secret: the suffix is not logged", () => {
+      expect(fail('PASSWORD="start\\"sensitive-suffix"')).toBe(
+        'ERROR: Failed to send reply injection steps to pane %5: Command failed: tmux send-keys -t %5 -l PASSWORD="****"',
+      );
+    });
+
+    it("the escapes are undone for the whole message and nothing else is changed", () => {
+      const reply = "echo `x` $(id) ${HOME} \\ done PASSWORD=\"a\\\"b\"";
+      expect(fail(reply)).toBe(
+        'ERROR: Failed to send reply injection steps to pane %5: Command failed: tmux send-keys -t %5 -l echo `x` $(id) ${HOME} \\ done PASSWORD="****"',
+      );
+    });
+
+    it("an error that is not an Error is logged as text", () => {
+      mocks.tmuxExec.mockImplementation(() => {
+        throw "plain failure"; // eslint-disable-line @typescript-eslint/only-throw-error
+      });
+      expect(sendReplyInjectionSteps("%5", [{ kind: "literal", value: "x" }])).toBe(false);
+      expect(sendFailureLine()).toBe("ERROR: Failed to send reply injection steps to pane %5: plain failure");
+    });
+  });
+
+  it.each([undefined, "", "0", "true"])("switch off (%s): the message is logged as the error carries it", (value) => {
+    if (value === undefined) delete process.env[SWITCH];
+    else process.env[SWITCH] = value;
+    const reply = 'PASSWORD="start\\"sensitive-suffix"';
+    expect(fail(reply)).toBe(
+      'ERROR: Failed to send reply injection steps to pane %5: Command failed: tmux send-keys -t %5 -l PASSWORD="start\\\\"sensitive-suffix"',
+    );
   });
 });
