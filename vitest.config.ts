@@ -6,6 +6,8 @@ export default defineConfig({
     globals: true,
     environment: 'node',
     testTimeout: 30000,
+    globalSetup: ['vitest-setup-global.ts'],
+    setupFiles: ['vitest-setup-per-test.ts'],
     // Test-only seams (for example the conditional-clear replacement hooks in
     // src/lib/mode-state-io.ts) run only when NODE_ENV is 'test'. Pin it so an
     // inherited NODE_ENV=production cannot silently disable them.
