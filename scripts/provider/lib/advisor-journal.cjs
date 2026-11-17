@@ -26,7 +26,7 @@
 // orphaned starts (over the whole file); no alarm. Retention: purge() removes the advice field from rows older than 30
 // days (metadata stays), runs automatically at most once per 24 h (marker <journal>.retention) and by hand with the
 // `purge [--days N]` mode. No network, no provider key, no model hard-coded.
-const { appendFileSync, chmodSync, closeSync, fstatSync, mkdirSync, openSync, readFileSync, renameSync, statSync, unlinkSync, writeFileSync } = require('node:fs');
+const { appendFileSync, chmodSync, closeSync, mkdirSync, openSync, readFileSync, renameSync, statSync, unlinkSync, writeFileSync } = require('node:fs');
 const { dirname } = require('node:path');
 const { ADVISOR_STATUSES, ADVISOR_EVENTS } = require('./vocab.cjs');
 const { loadProfile, statePath } = require('./profile.cjs');
@@ -141,16 +141,18 @@ function withLock(filePath, operation) {
       Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, WAIT_STEP_MS);
       continue;
     }
-    let ino = null;
-    try { ino = fstatSync(fd).ino; } catch { /* the lock is then left for the takeover rules */ }
-    try { writeFileSync(fd, JSON.stringify({ pid: process.pid, ts: new Date().toISOString() })); } catch { /* auxiliary content */ }
+    // The owner is recognised by a token written into the lock, not by the inode: a file system hands the number of a removed file
+    // to the next file it creates, so after a takeover the lock of the next owner can have the same inode as this one.
+    const token = `${process.pid}-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
+    let written = false;
+    try { writeFileSync(fd, JSON.stringify({ pid: process.pid, ts: new Date().toISOString(), token })); written = true; } catch { /* the lock is then left for the takeover rules */ }
     try { closeSync(fd); } catch { /* fd already closed */ }
     try {
       return operation();
     } finally {
-      // Removed only while it is still the file this process created: after the takeover of a holder that hung for 300 s the file at this
+      // Removed only while it still holds this process's token: after the takeover of a holder that hung for 300 s the file at this
       // path belongs to the next owner, whose critical section must not be opened by this late release.
-      try { if (ino !== null && statSync(lock).ino === ino) unlinkSync(lock); } catch { /* release is best effort */ }
+      try { if (written && JSON.parse(readFileSync(lock, 'utf8')).token === token) unlinkSync(lock); } catch { /* release is best effort */ }
     }
   }
 }

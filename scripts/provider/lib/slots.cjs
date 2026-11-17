@@ -3,7 +3,7 @@
 // (a previous life of a recycled pid) and corrupt or very old slots are removed while a slot is taken.
 // Starts above the limit wait (polling) for profile.limits.slotWaitMs; 0 means refuse at once.
 // Races between parallel starts are serialized by a lock file (O_EXCL, owner pid and timestamp inside).
-const { closeSync, fstatSync, mkdirSync, openSync, readdirSync, readFileSync, statSync, unlinkSync, writeFileSync, writeSync } = require('node:fs');
+const { closeSync, mkdirSync, openSync, readdirSync, readFileSync, statSync, unlinkSync, writeFileSync, writeSync } = require('node:fs');
 const { join } = require('node:path');
 const { ProfileError, statePath } = require('./profile.cjs');
 
@@ -60,10 +60,13 @@ function tryAcquireSlot(dir, limit) {
     try { unlinkSync(lock); } catch { /* another process took it over */ }
     return null;
   }
-  let ino = null;
-  try { ino = fstatSync(fd).ino; } catch { /* the lock is then left for the takeover rules */ }
+  // The owner is recognised by a token written into the lock, not by the inode: a file system hands the number of a removed file to the
+  // next file it creates, so after a takeover the lock of the next owner can have the same inode as this one.
+  const token = `${process.pid}-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
+  let written = false;
   try {
-    writeSync(fd, JSON.stringify({ pid: process.pid, ts: Date.now() }));
+    writeSync(fd, JSON.stringify({ pid: process.pid, ts: Date.now(), token }));
+    written = true;
     const live = [];
     for (const name of readdirSync(dir)) {
       if (!/^slot-/.test(name)) continue;
@@ -85,9 +88,9 @@ function tryAcquireSlot(dir, limit) {
     return file;
   } finally {
     closeSync(fd);
-    // Removed only while it is still the file this process created: after a long stall the lock may have been taken over, and the file at
+    // Removed only while it still holds this process's token: after a long stall the lock may have been taken over, and the file at
     // this path then belongs to another owner, whose critical section this must not open to a third start.
-    try { if (ino !== null && statSync(lock).ino === ino) unlinkSync(lock); } catch { /* gone, or taken over by another process */ }
+    try { if (written && JSON.parse(readFileSync(lock, 'utf8')).token === token) unlinkSync(lock); } catch { /* gone, or taken over by another process */ }
   }
 }
 
