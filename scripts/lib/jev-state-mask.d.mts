@@ -13,6 +13,8 @@ export const WINDOW_MARGIN: number;
 export const RUN_EXTENSION: number;
 /** The characters that a run of token characters is made of (see the comment in the module). */
 export const TOKEN_CHAR: RegExp;
+/** The name of a key as the secret classification reads it: our markers taken out, words split at humps and acronym ends, lower case. */
+export function normalizeKey(key: string): string;
 
 export class JevStateMaskError extends Error {
   constructor(message?: string, options?: ErrorOptions);

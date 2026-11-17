@@ -83,24 +83,31 @@ export class JevStateFieldOmittedError extends JevStateMaskError {
 // A key names a secret when it has one of the strong words (password, passwd, passphrase, secret, token,
 // credential, apikey), alone or glued to a prefix (dbpassword, apitoken, clientsecret, mypassphrase), or one of
 // the weak words (pass, pwd, cookie, bearer, api key, access key, private key, authorization) between separators,
-// camelCase humps or acronym ends (accessToken, DBPassword, api_key, Client-Secret, AWS_SECRET_ACCESS_KEY,
-// password2): a digit run may follow. The plural counts for the strong words and for "tokens" as the last word
+// camelCase humps or acronym ends (accessToken, DBPassword, api_key, api.key, Client-Secret, AWS_SECRET_ACCESS_KEY,
+// password2): a digit run may follow, and the words of "api key" and the like may be set apart by any one
+// character that is no letter or digit. The plural counts for the strong words and for "tokens" as the last word
 // (accessTokens, refresh_tokens), not for pass and pwd. Not "tokenizer", "secretary", "passwordless", "bypass",
 // "compass", "passenger", "passes" or "tokens_used". "secretsManager" and "cookieJar" are secret keys on purpose:
 // what they hold is secrets. A key that ends with "tokens" is also a counter (COUNTER_KEY): a number under it stays,
 // a string, array or object under it is masked.
 const SECRET_KEY = new RegExp(
   '(?:(?:passwords?|passwd|passphrases?|secrets?|token|credentials?|apikeys?)\\d*(?:[^a-z0-9]|$)' +
-  '|(?:^|[^a-z0-9])(?:pass|pwds?|cookies?|bearer|api[_ -]?keys?|access[_ -]?keys?|private[_ -]?keys?|client[_ -]?secrets?|authorization)\\d*(?:[^a-z0-9]|$)' +
+  '|(?:^|[^a-z0-9])(?:pass|pwds?|cookies?|bearer|api[^a-z0-9]?keys?|access[^a-z0-9]?keys?|private[^a-z0-9]?keys?|client[^a-z0-9]?secrets?|authorization)\\d*(?:[^a-z0-9]|$)' +
   '|tokens\\d*$)',
 );
 // A number under such a key that counts or measures something (token_count, password_length, tokenBudget) stays.
 const COUNTER_KEY = /(?:tokens|(?:^|[^a-z0-9])(?:count|length|len|budget|usage|size))$/;
-const MARKER = /\[(?:key|line) omitted: [^\]]{0,1000}\]/g;
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
-function normalizeKey(key) {
-  const cleaned = key.replace(MARKER, '');
+/**
+ * The name of a key as the classification reads it: our own two markers taken out (they name no secret, and
+ * "[line omitted: secret path]" would make a second pass see one), the words split at camelCase humps and acronym
+ * ends, in lower case. The markers go by exact text (a key that only looks like one, "[key omitted: password]",
+ * keeps its words) and the rest is one pass over the key with no backtracking, so the cost grows with the length of
+ * the key and no more.
+ */
+export function normalizeKey(key) {
+  const cleaned = key.split(KEY_OMITTED).join('').split(SECRET_LINE).join('');
   // Linear-time acronym splitter: insert underscores at word boundaries without backtracking regexes.
   // Boundaries: (1) uppercase sequence before an uppercase+lowercase pair, (2) lowercase/digit before uppercase.
   const chars = cleaned.split('');
@@ -126,10 +133,17 @@ function normalizeKey(key) {
 }
 
 // 'secret' (the value is masked, a number too), 'counter' (a number stays) or false, for the name of a key or of a pair.
-function secretKind(name) {
-  const normalized = normalizeKey(name);
+function secretKindOf(normalized) {
   if (!SECRET_KEY.test(normalized)) return false;
   return COUNTER_KEY.test(normalized) ? 'counter' : 'secret';
+}
+function secretKind(name) {
+  return secretKindOf(normalizeKey(name));
+}
+// Two classifications of the same value (several names beside it): the stricter one wins, so the result does not
+// depend on the order of the names. 'secret' beats 'counter' beats false.
+function stricter(a, b) {
+  return a === 'secret' || b === 'secret' ? 'secret' : a || b;
 }
 
 // Pairs: the value of { name: 'DB_PASSWORD', value: x }, { key: 'apiToken', value: x }, { Name, Value },
@@ -144,46 +158,55 @@ function pairNameKind(name) {
 // rules cannot see when each element is masked alone. The element after a secret flag is a value; after -u or --user
 // the part of "user:password" after the colon; for a command of the mysql family or sshpass, the element after -p and
 // the password stuck to -p (-phunter2). -p takes a password only for these commands (docker login -p is left alone,
-// as it is in a string).
-const SECRET_FLAG = /^--(?:password|passwd|pass|token|secret|api-key|apikey|access-token|auth-token|client-secret)$/i;
+// as it is in a string). An element is one argument, so a credential in it runs to the end of the element, white
+// space and quotes included (curl -u 'user:a b' is the argument "user:a b"): the text rules stop at white space, so
+// the part of the element after it is masked here, with --password=... and --user=... in one element too.
+const SECRET_FLAGS = 'password|passwd|pass|token|secret|api-key|apikey|access-token|auth-token|client-secret';
+const SECRET_FLAG = new RegExp(`^--(?:${SECRET_FLAGS})$`, 'i');
 const USER_FLAG = /^(?:-u|--user)$/;
-const USER_PASSWORD = /^([^\s:"']+:)[^\s"']+/;
-const GLUED_P = /^(-p)[^\s"']/;
-const P_COMMANDS = new Set(['mysql', 'mariadb', 'mysqldump', 'mysqladmin', 'sshpass']);
-const EXECUTABLE_SUFFIXES = /\.(?:exe|bat|cmd|com)$/i;
-function normalizeExecutable(name) {
-  return name.replace(EXECUTABLE_SUFFIXES, '');
-}
-// Map: index of an element -> 'value' (all of it), 'user' (after the colon) or 'glued' (after -p)
+// What follows the part that stays (the first group) is the credential: the whole rest of the element.
+const ARGUMENT_REST = {
+  user: /^([^:]*:)[\s\S]+/,
+  userEquals: /^(--user=[^:]*:)[\s\S]+/,
+  secretEquals: new RegExp(`^(--(?:${SECRET_FLAGS})=)[\\s\\S]+`, 'i'),
+  glued: /^(-p)[\s\S]+/,
+};
+// The command word of the rules of maskSecrets (\bmysql\b and the like, also mariadb-dump, mysql.exe, a path to it).
+const P_COMMAND = /^(?:mysql|mysqldump|mysqladmin|mariadb|sshpass)(?![a-z0-9_])/i;
+// Map: index of an element -> 'secret' (all of it is the value), 'counter' (a pair that names a counter), or one of
+// the keys of ARGUMENT_REST (the part of the element that is the credential)
 function secretArguments(array) {
   const modes = new Map();
   let command = -1;
   for (let i = 0; i < array.length; i++) {
     const element = array[i];
     if (typeof element !== 'string') continue;
-    if (command < 0 && P_COMMANDS.has(normalizeExecutable(element.split(/[/\\]/).pop()).toLowerCase())) command = i;
+    if (command < 0 && P_COMMAND.test(element.split(/[/\\]/).pop())) command = i;
     if (SECRET_FLAG.test(element)) {
-      if (i + 1 < array.length) modes.set(i + 1, 'value');
+      if (i + 1 < array.length) modes.set(i + 1, 'secret');
     } else if (USER_FLAG.test(element)) {
-      if (typeof array[i + 1] === 'string' && USER_PASSWORD.test(array[i + 1])) modes.set(i + 1, 'user');
+      if (typeof array[i + 1] === 'string' && ARGUMENT_REST.user.test(array[i + 1])) modes.set(i + 1, 'user');
+    } else if (ARGUMENT_REST.secretEquals.test(element)) {
+      modes.set(i, 'secretEquals');
+    } else if (ARGUMENT_REST.userEquals.test(element)) {
+      modes.set(i, 'userEquals');
     } else if (command >= 0 && i > command) {
       if (element === '-p') {
-        if (i + 1 < array.length) modes.set(i + 1, 'value');
-      } else if (GLUED_P.test(element)) {
+        if (i + 1 < array.length) modes.set(i + 1, 'secret');
+      } else if (ARGUMENT_REST.glued.test(element)) {
         modes.set(i, 'glued');
       }
     }
   }
-  if (array.length === 2 && pairNameKind(array[0])) {
+  // A pair of two: the second element is the value of the first. What the arguments above found stays.
+  if (array.length === 2 && !modes.has(1)) {
     const kind = pairNameKind(array[0]);
-    modes.set(1, kind);
+    if (kind) modes.set(1, kind);
   }
   return modes;
 }
 function maskArgument(item, mode) {
-  if (mode === 'user') return item.replace(USER_PASSWORD, '$1***');
-  if (mode === 'glued') return item.replace(/^(-p)[^\s"']+/, '$1***');
-  return item;
+  return item.replace(ARGUMENT_REST[mode], '$1***');
 }
 
 function omitSecretLines(text) {
@@ -299,20 +322,23 @@ export function maskJevState(state, { maxChars } = {}) {
         const modes = secretArguments(value);
         return value.map((item, i) => {
           const mode = modes.get(i);
-          return walk(mode && mode !== 'value' && mode !== 'secret' && mode !== 'counter' ? maskArgument(item, mode) : item, String(i), depth + 1, mode === 'value' || mode === 'secret' ? 'secret' : (mode === 'counter' ? 'counter' : false), false) ?? null;
+          const whole = mode === 'secret' || mode === 'counter';
+          return walk(mode && !whole ? maskArgument(item, mode) : item, String(i), depth + 1, whole ? mode : false, false) ?? null;
         });
       }
       const out = {};
       const keys = Object.keys(value);
+      const normalizedKeys = keys.map(normalizeKey);
+      // the names of a pair, whatever their order: the stricter classification of all of them
       let pairKind = false;
-      for (const k of keys) {
-        if (PAIR_NAME.has(normalizeKey(k))) pairKind = pairNameKind(value[k]) || pairKind;
-      }
+      keys.forEach((k, i) => {
+        if (PAIR_NAME.has(normalizedKeys[i])) pairKind = stricter(pairKind, pairNameKind(value[k]));
+      });
       // names that collide after masking get the next free " #n" of their base, kept in one place so many collisions stay linear
       const nextSuffix = new Map();
-      for (const k of keys) {
-        const normalized = normalizeKey(k);
-        const secret = secretKind(k) || (PAIR_VALUE.has(normalized) ? pairKind : false);
+      for (const [i, k] of keys.entries()) {
+        const normalized = normalizedKeys[i];
+        const secret = stricter(secretKindOf(normalized), PAIR_VALUE.has(normalized) ? pairKind : false);
         const kind = normalized === 'session_id' ? 'uuid' : normalized === 'cwd' ? 'cwd' : false;
         const masked = walk(value[k], k, depth + 1, secret, kind);
         if (masked === undefined) continue;

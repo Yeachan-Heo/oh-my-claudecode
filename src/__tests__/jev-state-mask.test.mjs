@@ -8,7 +8,7 @@ import { describe, expect, it } from 'vitest';
 
 import { makeCase, checkCase, seededRandom } from './jev-state-mask-cases.mjs';
 import { maskSecrets } from '../../scripts/lib/jev-mask.mjs';
-import { JevStateFieldOmittedError, JevStateMaskError, MAX_STATE_DEPTH, MAX_STATE_NODES, RUN_EXTENSION, SECRET_PATH, TOKEN_CHAR, WINDOW_MARGIN, maskJevState } from '../../scripts/lib/jev-state-mask.mjs';
+import { JevStateFieldOmittedError, JevStateMaskError, MAX_STATE_DEPTH, MAX_STATE_NODES, RUN_EXTENSION, SECRET_PATH, TOKEN_CHAR, WINDOW_MARGIN, maskJevState, normalizeKey } from '../../scripts/lib/jev-state-mask.mjs';
 
 const root = join(fileURLToPath(import.meta.url), '..', '..', '..');
 const GHP = 'ghp_' + 'A'.repeat(36);
@@ -739,14 +739,174 @@ describe('maskJevState: oversized keys should not cause performance issues', () 
     expect(maskJevState({ cmd: ['mysqladmin.COM', '-phunter2'] })).toEqual({ cmd: ['mysqladmin.COM', '-p***'] });
   });
 
-  it('handles bounded marker scan without quadratic backtracking', () => {
-    // Repeated unterminated [key omitted: prefixes should not cause exponential backtracking
+  it('keeps a key made of unterminated marker prefixes as it is, and fast', () => {
     const markerKey = '[key omitted: '.repeat(10000);
-    const start = Date.now();
+    const start = performance.now();
     const result = maskJevState({ [markerKey]: 'value' });
-    const duration = Date.now() - start;
-    expect(duration).toBeLessThan(1000); // Should complete in under 1 second, not hang
-    expect(result).toHaveProperty(markerKey); // Key should be present
+    const duration = performance.now() - start;
+    expect(duration).toBeLessThan(1000);
+    expect(Object.keys(result)).toEqual([markerKey]);
+    expect(result[markerKey]).toBe('value');
+  });
+});
+
+describe('maskJevState: the name of a key', () => {
+  it.each(['api.key', 'x.api.key', 'stripe.api.key', 'aws.secret.access.key', 'private.key', 'access.key', 'x/api/key', 'API.KEY'])(
+    'a word set apart by a dot or a slash still names a secret: %s',
+    (key) => {
+      expect(maskJevState({ [key]: 'hunter2zzQ' })).toEqual({ [key]: '***' });
+    },
+  );
+
+  it.each(['[key omitted: password]', '[line omitted: password]', '[key omitted: token] x', 'x [line omitted: api_key]'])(
+    'a key that only looks like one of our markers keeps its words: %s',
+    (key) => {
+      expect(maskJevState({ [key]: 'hunter2zzQ' })).toEqual({ [key]: '***' });
+    },
+  );
+
+  it('takes out the two markers themselves, so a second pass changes nothing', () => {
+    expect(normalizeKey('[key omitted: path] #2')).toBe(' #2');
+    expect(normalizeKey('[line omitted: secret path]')).toBe('');
+    const once = maskJevState({ '/run/secrets/a': 'plain', '/run/secrets/b': 'plain', 'ok': 'plain' });
+    expect(Object.keys(once)).toEqual(['[key omitted: path]', '[key omitted: path] #2', 'ok']);
+    expect(maskJevState(once)).toEqual(once);
+  });
+
+  it('classifies a key of any length: the words are found beyond the first 1000 characters', () => {
+    for (const key of ['A'.repeat(1001) + 'PrivateKey', 'a'.repeat(5000) + 'ApiKey', 'X'.repeat(3000) + 'Password', '_'.repeat(2000) + 'token']) {
+      expect(maskJevState({ [key]: 'hunter2zzQ' }), key.slice(-12)).toEqual({ [key]: '***' });
+      expect(maskJevState({ env: [{ name: key, value: 'hunter2zzQ' }] }).env[0].value, key.slice(-12)).toBe('***');
+    }
+    expect(maskJevState({ ['A'.repeat(5000)]: 'plain value' })).toEqual({ ['A'.repeat(5000)]: 'plain value' });
+  });
+
+  it('splits words as the regular expressions it replaced did, on every ASCII key of a seeded corpus', () => {
+    const reference = (key) => key.replace(/\[(?:key|line) omitted: [^\]]*\]/g, '').replace(/([A-Z]+)([A-Z][a-z])/g, '$1_$2').replace(/([a-z0-9])([A-Z])/g, '$1_$2').toLowerCase();
+    const next = seededRandom(20261117);
+    const alphabet = 'aAbBxXyY09_- .Zz';
+    for (const key of ['XApiKey', 'DBPassword', 'APIToken', 'HTTPServer', 'getHTTPResponseCode', 'a1B2c3D', 'ABC', 'aBC', 'AbC', 'X', '']) expect(normalizeKey(key), key).toBe(reference(key));
+    for (let i = 0; i < 3000; i++) {
+      let key = '';
+      for (let j = Math.floor(next() * 14); j > 0; j--) key += alphabet[Math.floor(next() * alphabet.length)];
+      expect(normalizeKey(key), JSON.stringify(key)).toBe(reference(key));
+    }
+  });
+});
+
+describe('maskJevState: the cost of a key grows with its length and no more', () => {
+  const SHAPES = {
+    'one capital letter repeated': (n) => 'A'.repeat(n),
+    'humps': (n) => 'aB'.repeat(n / 2),
+    'a capital before a small letter': (n) => 'Ab'.repeat(n / 2),
+    'digits before capitals': (n) => '0A'.repeat(n / 2),
+    'separators': (n) => '_'.repeat(n),
+    'unterminated key markers': (n) => '[key omitted: '.repeat(Math.ceil(n / 14)),
+    'unterminated line markers': (n) => '[line omitted: secret path'.repeat(Math.ceil(n / 26)),
+    'a strong word repeated': (n) => 'password'.repeat(n / 8),
+    'a weak word and digits': (n) => 'pass1'.repeat(n / 5),
+    'a weak word set apart by dots': (n) => 'api.key.'.repeat(n / 8),
+  };
+  const best = (run) => {
+    const times = [];
+    for (let i = 0; i < 3; i++) {
+      const start = performance.now();
+      run();
+      times.push(performance.now() - start);
+    }
+    return Math.min(...times);
+  };
+
+  it.each(Object.keys(SHAPES))('%s: as a key, as the name of a pair and as an argument', (name) => {
+    // as the resolvers call it: with the excerpt limit, so a string is cut before the text rules see it
+    const options = { maxChars: 200 };
+    for (const mask of [(key) => maskJevState({ [key]: 'v' }, options), (key) => maskJevState({ name: key, value: 'v' }, options), (key) => maskJevState({ argv: ['run', key, `${key}=x`] }, options)]) {
+      const small = best(() => mask(SHAPES[name](25000)));
+      const large = best(() => mask(SHAPES[name](100000)));
+      // four times the length: a linear cost is about four times, a quadratic one sixteen; the bounds leave room for a slow machine
+      expect(large).toBeLessThan(12 * Math.max(small, 2) + 100);
+      expect(large).toBeLessThan(2000);
+    }
+  });
+});
+
+describe('maskJevState: several names beside one value', () => {
+  it.each([
+    [{ key: 'password', name: 'token_count', value: 123456 }],
+    [{ name: 'token_count', key: 'password', value: 123456 }],
+    [{ value: 123456, name: 'token_count', key: 'password' }],
+    [{ name: 'token_count', value: 123456, parameter_key: 'api_key' }],
+    [{ parameter_key: 'token_count', name: 'client_secret', value: 123456 }],
+  ])('a secret name wins over a counter name, whatever the order: %j', (input) => {
+    expect(maskJevState(input).value).toBe('***');
+  });
+
+  it('keeps a number when every name is a counter, and a string under a counter name that is also a secret', () => {
+    expect(maskJevState({ name: 'token_count', key: 'input_tokens', value: 5 }).value).toBe(5);
+    expect(maskJevState({ key: 'input_tokens', name: 'token_count', value: 'text' }).value).toBe('***');
+  });
+
+  it('does the same for a pair of two elements that other rules have classified', () => {
+    expect(maskJevState({ t: ['--password', 5] }).t).toEqual(['--password', '***']);
+    expect(maskJevState({ t: ['token_count', 5] }).t).toEqual(['token_count', 5]);
+    expect(maskJevState({ t: ['--token', 5] }).t).toEqual(['--token', '***']);
+  });
+});
+
+describe('maskJevState: an argument is one value, white space and quotes included', () => {
+  it.each([
+    [['curl', '-u', 'user:prefix hunter2zzQ'], ['curl', '-u', 'user:***']],
+    [['curl', '-u', 'user: x y'], ['curl', '-u', 'user:***']],
+    [['curl', '-u', 'user:a "b" \'c\''], ['curl', '-u', 'user:***']],
+    [['curl', '-u', ':only a password'], ['curl', '-u', ':***']],
+    [['curl', '-u', 'my user:pass word'], ['curl', '-u', 'my user:***']],
+    [['curl', '--user=user:pre fix'], ['curl', '--user=user:***']],
+    [['curl', '--user=useronly'], ['curl', '--user=useronly']],
+    [['run', '--password=a b c'], ['run', '--password=***']],
+    [['run', '--token=a b', '--api-key=c d'], ['run', '--token=***', '--api-key=***']],
+    [['run', '--password-file=/etc/x y'], ['run', '--password-file=/etc/x y']],
+    [['mysql', '-phunter 2zzQ'], ['mysql', '-p***']],
+    [['mysql', '-p"a b"'], ['mysql', '-p***']],
+    [['mariadb-dump', '-phunter2zzQ', 'db'], ['mariadb-dump', '-p***', 'db']],
+    [['C:\\Program Files\\MySQL\\bin\\mysql.exe', '-phunter2zzQ'], ['C:\\Program Files\\MySQL\\bin\\mysql.exe', '-p***']],
+    [['mysql', '-p'], ['mysql', '-p']],
+    [['mysql_upgrade', '-phunter2zzQ'], ['mysql_upgrade', '-phunter2zzQ']],
+  ])('%j', (input, expected) => {
+    expect(maskJevState({ argv: input }).argv).toEqual(expected);
+  });
+
+  it('hides in an array what the same command line hides as a string, for each command word and each way to give a credential', () => {
+    const SECRET = 'hunter2zzQ';
+    const commands = ['mysql', '/usr/bin/mysql', 'mysql.exe', 'C:\\bin\\mysql.exe', 'mariadb', 'mariadb-dump', 'mysqldump.bat', 'mysqladmin', 'sshpass', 'sudo mysql', 'docker exec db mysql'];
+    const credentials = [['-p' + SECRET], ['-p', SECRET], ['-u', 'root', '-p' + SECRET], ['-u', 'root', '-p', SECRET], ['--password', SECRET], ['--password=' + SECRET], ['--user', 'u:' + SECRET], ['--user=u:' + SECRET], ['-u', 'u:' + SECRET], ['--token=' + SECRET], ['--api-key', SECRET], ['--passwd=' + SECRET]];
+    let checked = 0;
+    for (const command of commands) {
+      for (const credential of credentials) {
+        for (const tail of [[], ['db']]) {
+          const argv = [...command.split(' '), ...credential, ...tail];
+          if (maskJevState({ t: argv.join(' ') }).t.includes(SECRET)) continue;
+          expect(JSON.stringify(maskJevState({ argv }).argv), argv.join(' ')).not.toContain(SECRET);
+          checked++;
+        }
+      }
+    }
+    expect(checked).toBeGreaterThan(100);
+  });
+});
+
+describe('maskJevState: a token in the path of a URL is masked like any other', () => {
+  const TOKEN = 'aB3dE5gH7jK9mN1pQ3sT5vW7yZ9bC1dE3fG5'; // 36 letters and digits
+  it.each([
+    [`https://hooks.slack.com/services/T0123/B0123/${TOKEN}`],
+    [`GET /api/${TOKEN}/items`],
+    [`https://api.example.com/bot${TOKEN}/getMe`],
+    [`/${TOKEN}`],
+    [`see /srv/app/${TOKEN}/log`],
+  ])('%s', (text) => {
+    for (const masked of [maskJevState(text), maskJevState({ t: text }).t, maskSecrets(text)]) {
+      expect(masked).not.toContain(TOKEN);
+      expect(masked).toContain('***');
+    }
   });
 });
 
