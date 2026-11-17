@@ -446,6 +446,25 @@ describe.skipIf(!HAS_TMUX)('record-pane-frames record', () => {
     expect(leftoverSockets()).toEqual([]);
   });
 
+  it('counts --timeout from the launch, not from a slow version probe', async () => {
+    const stub = join(root, 'stub-claude.mjs');
+    writeFileSync(stub, CONTRACT_STUB_SOURCE.replace(
+      "console.log('stub 9.8.7');",
+      "Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 2500); console.log('stub 9.8.7');",
+    ));
+    chmodSync(stub, 0o755);
+    out = join(root, 'out');
+
+    const run = await runRecorder([
+      'record', '--provider', 'claude', '--bin', stub, '--args', '["--flag"]', '--out', out, '--cwd', root,
+      '--interval-ms', '20', '--settle', '0.3', '--timeout', '2', '--step', 'wait:READY>',
+    ]);
+
+    expect(run.code).toBe(0);
+    expect(JSON.parse(run.stdout)).toMatchObject({ stop: 'settled', version: '9.8.7' });
+    expect(extractLast().frame).toContain('READY>');
+  });
+
   it('without --bin, launches the model contract binary found on PATH', async () => {
     const bin = join(root, 'bin');
     mkdirSync(bin);

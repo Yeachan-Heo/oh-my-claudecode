@@ -106,7 +106,7 @@ async function record(values) {
   const rows = Number(values.rows ?? 40);
   const history = Number(values.history ?? 0);
   const intervalMs = Number(values['interval-ms'] ?? 50);
-  const deadline = Date.now() + Number(values.timeout ?? 120) * 1000;
+  const timeoutMs = Number(values.timeout ?? 120) * 1000;
   const settleMs = Number(values.settle ?? 3) * 1000;
   const steps = (values.step ?? []).map(parseStep);
 
@@ -183,6 +183,8 @@ async function record(values) {
     tmux('set-option', '-g', 'remain-on-exit', 'on');
     tmux('respawn-pane', '-k', '-t', 'rec:0.0', '-c', cwd, [bin, ...argv].map(shellQuote).join(' '));
     const launchedAt = Date.now();
+    // Counted from the launch, so a slow version probe cannot use up the recording window.
+    const deadline = launchedAt + timeoutMs;
     appendFileSync(actionsLog, `${(launchedAt / 1000).toFixed(3)} launch\n`);
 
     let stepIndex = 0;
