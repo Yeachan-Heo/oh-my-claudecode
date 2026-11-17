@@ -303,6 +303,8 @@ describe('plan write guard (pre-tool-enforcer.mjs)', () => {
       symlinkSync(join(plans(), 'walk-real'), join(plans(), 'walk-inner'), 'dir');
       symlinkSync(join(outside(), 'nested'), join(projectDir, 'walk-jump'), 'dir');
       symlinkSync(join(plans(), 'walk-link'), join(plans(), 'walk-chain'), 'dir');
+      writeFileSync(join(plans(), 'walk-file.md'), 'plan\n');
+      symlinkSync('walk-loop', join(plans(), 'walk-loop'));
     });
 
     it('denies a link followed by .. that leads out of the plans directory', () => {
@@ -330,6 +332,13 @@ describe('plan write guard (pre-tool-enforcer.mjs)', () => {
       }
       rmSync(join(outside(), '.omc'), { recursive: true, force: true });
       expect(verdictOf(callTool('Write', 'walk-jump/../.omc/plans/victim.md')), 'the outside target does not exist').toBe('deny');
+    });
+
+    it('denies a path that cannot be resolved: a file used as a directory, and a link that loops', () => {
+      for (const path of ['.omc/plans/walk-file.md/x.md', '.omc/plans/walk-loop/x.md']) {
+        expect(verdictOf(callTool('Write', path)), path).toBe('deny');
+      }
+      expect(verdictOf(callTool('Write', '.omc/plans/walk-file.md')), 'the file itself').toBe('allow');
     });
 
     it('allows .. after a real directory or after a link that stays inside the plans directory', () => {
