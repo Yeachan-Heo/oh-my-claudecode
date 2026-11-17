@@ -476,7 +476,7 @@ describe("errors from tmux send-keys in the log", () => {
 
     it("an error that is not an Error is logged as text", () => {
       mocks.tmuxExec.mockImplementation(() => {
-        throw "plain failure"; // eslint-disable-line @typescript-eslint/only-throw-error
+        throw "plain failure";
       });
       expect(sendReplyInjectionSteps("%5", [{ kind: "literal", value: "x" }])).toBe(false);
       expect(sendFailureLine()).toBe("ERROR: Failed to send reply injection steps to pane %5: plain failure");

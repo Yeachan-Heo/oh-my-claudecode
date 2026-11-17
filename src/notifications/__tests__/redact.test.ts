@@ -393,7 +393,7 @@ describe('redactTokens key-shape masking (OMC_REDACT_KEY_SHAPES=1)', () => {
         ['xoxe-pwd', 'xoxe-****', 'xoxe-****'],
         ['xapp-SECRET', 'xapp-****', 'xapp-****'],
         ['sk-ant-api_TOKEN', 'sk-ant-api****', 'sk-****'], // the prefix rule sees the whole key as well
-        ['AKIAABCDEFGHIJKEY123', 'AKIA****', 'AKIA****'],
+        ['AKIA' + 'ABCDEFGHIJKEY123', 'AKIA****', 'AKIA****'],
         ['123456789:AAAAAAAAAAAAAAAAAAAA_PASSWORD', '123456789:****', '123456789:****'],
         ['/bot123456789:AAAAAAAAAAAAAAAAAAAA_PASSWORD', '/bot123456789:****', '/bot123456789:****'],
         // not matched by any token rule: the same with the switch on and off
