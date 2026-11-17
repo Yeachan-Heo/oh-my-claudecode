@@ -7,6 +7,35 @@
  * @see https://github.com/Yeachan-Heo/oh-my-claudecode/issues/1162
  */
 
+const MASK = '****';
+
+// The regex rules, in the order they run. Each one keeps the head of its match (`visible` turns the captured
+// group into what stays readable) and replaces the rest of the match with ****.
+const TOKEN_RULES: ReadonlyArray<readonly [pattern: RegExp, visible: (head: string) => string]> = [
+  // Slack tokens: xoxb-..., xapp-..., xoxp-..., xoxa-...
+  [/\b(xox[bpae]-)[A-Za-z0-9-]+/g, (head) => head],
+  [/\b(xapp-)[A-Za-z0-9-]+/g, (head) => head],
+  // Telegram bot tokens in URL paths: /bot123456:ABC.../
+  [/\/bot(\d+):[A-Za-z0-9_-]+/g, (id) => `/bot${id}:`],
+  // Telegram bot tokens standalone: 123456789:AAHfoo-bar_Baz
+  [/\b(\d{8,12}):[A-Za-z0-9_-]{20,}\b/g, (id) => `${id}:`],
+  // Bearer/Bot authorization values in error strings
+  [/(Bearer\s+)\S+/gi, (head) => head],
+  [/(Bot\s+)\S+/gi, (head) => head],
+  // Anthropic API keys: sk-ant-api...
+  [/\b(sk-ant-api)[A-Za-z0-9_-]+/g, (head) => head],
+  // GitHub tokens: ghp_, gho_, ghs_, github_pat_
+  [/\b(ghp_)[A-Za-z0-9]+/g, (head) => head],
+  [/\b(gho_)[A-Za-z0-9]+/g, (head) => head],
+  [/\b(ghs_)[A-Za-z0-9]+/g, (head) => head],
+  [/\b(github_pat_)[A-Za-z0-9_]+/g, (head) => head],
+  // AWS access key IDs: AKIA...
+  [/\b(AKIA)[A-Z0-9]{16}\b/g, (head) => head],
+];
+
+/** A part of the input that is replaced by a mask: [start, end) in the characters of the original input. */
+type MaskRange = [start: number, end: number, mask: string];
+
 /**
  * Redact sensitive tokens from a string.
  *
@@ -18,30 +47,34 @@
  * - Telegram bot tokens standalone: 123456789:AAF-abc123...
  * - Bearer and Bot authorization values
  * - With OMC_REDACT_KEY_SHAPES=1 (opt-in): key shapes and NAME=value assignments
- *   (see redactKeyShapes)
+ *   (see keyShapeRanges)
+ *
+ * Without the switch the regex rules run one after the other on the text, as they always did. With it, the
+ * rules and the key-shape scan all look at the ORIGINAL text: a rule that has masked a part of it cannot
+ * take the name, the quote or the separator of an assignment away from the scan (`ghp_PASSWORD=canary` is
+ * an assignment whatever the `ghp_` rule does to its name). Every range they find is masked in one pass.
  */
 export function redactTokens(input: string): string {
-  const masked = input
-    // Slack tokens: xoxb-..., xapp-..., xoxp-..., xoxa-...
-    .replace(/\b(xox[bpae]-)[A-Za-z0-9-]+/g, '$1****')
-    .replace(/\b(xapp-)[A-Za-z0-9-]+/g, '$1****')
-    // Telegram bot tokens in URL paths: /bot123456:ABC.../
-    .replace(/\/bot(\d+):[A-Za-z0-9_-]+/g, '/bot$1:****')
-    // Telegram bot tokens standalone: 123456789:AAHfoo-bar_Baz
-    .replace(/\b(\d{8,12}):[A-Za-z0-9_-]{20,}\b/g, '$1:****')
-    // Bearer/Bot authorization values in error strings
-    .replace(/(Bearer\s+)\S+/gi, '$1****')
-    .replace(/(Bot\s+)\S+/gi, '$1****')
-    // Anthropic API keys: sk-ant-api...
-    .replace(/\b(sk-ant-api)[A-Za-z0-9_-]+/g, '$1****')
-    // GitHub tokens: ghp_, gho_, ghs_, github_pat_
-    .replace(/\b(ghp_)[A-Za-z0-9]+/g, '$1****')
-    .replace(/\b(gho_)[A-Za-z0-9]+/g, '$1****')
-    .replace(/\b(ghs_)[A-Za-z0-9]+/g, '$1****')
-    .replace(/\b(github_pat_)[A-Za-z0-9_]+/g, '$1****')
-    // AWS access key IDs: AKIA...
-    .replace(/\b(AKIA)[A-Z0-9]{16}\b/g, '$1****');
-  return process.env.OMC_REDACT_KEY_SHAPES === '1' ? redactKeyShapes(masked) : masked;
+  if (process.env.OMC_REDACT_KEY_SHAPES !== '1') {
+    return TOKEN_RULES.reduce(
+      (text, [pattern, visible]) => text.replace(pattern, (_match, head: string) => visible(head) + MASK),
+      input,
+    );
+  }
+  const ranges: MaskRange[] = [];
+  // The rules run one after the other, each on what the one before left, as without the switch. The text
+  // keeps its length (a masked part becomes `*` characters, which no rule treats differently from ****), so
+  // the position of every match is a position in the original input.
+  let text = input;
+  for (const [pattern, visible] of TOKEN_RULES) {
+    text = text.replace(pattern, (match: string, head: string, offset: number) => {
+      const kept = visible(head).length;
+      ranges.push([offset + kept, offset + match.length, MASK]);
+      return match.slice(0, kept) + '*'.repeat(match.length - kept);
+    });
+  }
+  for (const range of keyShapeRanges(input)) ranges.push(range);
+  return applyMasks(input, ranges);
 }
 
 /**
@@ -184,8 +217,8 @@ function valueEnds(input: string, quote: string): Int32Array {
 }
 
 /**
- * Key shapes that the regex rules above do not cover, found in linear time
- * (no regular expressions, so no backtracking). Applied after those rules.
+ * The parts of `input` that hold key shapes, found in linear time (no regular expressions, so no
+ * backtracking) on the original text, before any other rule has changed it (see redactTokens).
  *
  * - Prefixed keys: the prefix stays visible and the rest is replaced by `****`
  *   (for example `sk-****`). The minimum length counts the characters after the prefix.
@@ -203,10 +236,9 @@ function valueEnds(input: string, quote: string): Int32Array {
  * the start before them ended (inside the run of characters of a key or of a JWT's first segment), so their
  * masks lie inside masks that were already made.
  */
-function redactKeyShapes(input: string): string {
-  if (typeof input !== 'string' || input.length === 0) return input;
+function keyShapeRanges(input: string): MaskRange[] {
   const n = input.length;
-  const ranges: Array<[start: number, end: number, mask: string]> = [];
+  const ranges: MaskRange[] = [];
   const tables: KeyShapeTables = { ends: new Map() };
   let keySkipUntil = 0;
   let jwtSkipUntil = 0;
@@ -221,7 +253,7 @@ function redactKeyShapes(input: string): string {
         if (quote) valueStart++;
         let table = tables.ends.get(quote);
         if (!table) tables.ends.set(quote, (table = valueEnds(input, quote)));
-        if (table[valueStart] > valueStart) ranges.push([valueStart, table[valueStart], '****']);
+        if (table[valueStart] > valueStart) ranges.push([valueStart, table[valueStart], MASK]);
       }
     }
     if (i >= keySkipUntil) {
@@ -230,7 +262,7 @@ function redactKeyShapes(input: string): string {
         let j = i + prefix.length;
         while (j < n && isTokenChar(input.charCodeAt(j))) j++;
         if (j - (i + prefix.length) >= minLength) {
-          ranges.push([i + prefix.length, j, '****']);
+          ranges.push([i + prefix.length, j, MASK]);
           keySkipUntil = j;
         }
         break; // at most one prefix can match at a position
@@ -251,6 +283,11 @@ function redactKeyShapes(input: string): string {
       }
     }
   }
+  return ranges;
+}
+
+/** `input` with every range replaced by its mask; ranges that overlap are merged into the earlier mask. */
+function applyMasks(input: string, ranges: MaskRange[]): string {
   if (ranges.length === 0) return input;
   ranges.sort((a, b) => a[0] - b[0]);
   let out = '';

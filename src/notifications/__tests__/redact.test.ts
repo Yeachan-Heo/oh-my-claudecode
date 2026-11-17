@@ -336,12 +336,13 @@ describe('redactTokens key-shape masking (OMC_REDACT_KEY_SHAPES=1)', () => {
         expect(redactTokens('PASSWORD="abc\\" TOKEN="canary"')).toBe('PASSWORD="****"****"');
       });
 
-      it('quote eaten by the Bearer rule', () => {
-        expect(redactTokens('TOKEN="Bearer abc" PASSWORD="canary"')).toBe('TOKEN="****"****"');
+      // The Bearer and Bot rules match up to the next space, so their match includes the closing quote.
+      it('quote inside the match of the Bearer rule', () => {
+        expect(redactTokens('TOKEN="Bearer abc" PASSWORD="canary"')).toBe('TOKEN="**** PASSWORD="****"');
       });
 
-      it('quote eaten by the Bot rule, which has no word boundary (robot)', () => {
-        expect(redactTokens('TOKEN="robot abc" PASSWORD="canary"')).toBe('TOKEN="****"****"');
+      it('quote inside the match of the Bot rule, which has no word boundary (robot)', () => {
+        expect(redactTokens('TOKEN="robot abc" PASSWORD="canary"')).toBe('TOKEN="**** PASSWORD="****"');
       });
 
       it('bare value that ends at the quote opening the next value', () => {
@@ -373,6 +374,106 @@ describe('redactTokens key-shape masking (OMC_REDACT_KEY_SHAPES=1)', () => {
 
       it('masks a key that contains a name phrase and is followed by a colon', () => {
         expect(redactTokens('gsk_abcKEYdefghijklmnopqrstuvwxyz: ok')).toBe('gsk_****: ****');
+      });
+    });
+
+    // The token rules (xox*, xapp-, Telegram, Bearer, Bot, sk-ant-api, gh*_, github_pat_, AKIA) and the scan all
+    // look at the original text. A token rule that changes the name of an assignment, or a quote, must not hide
+    // the assignment from the scan: the value is masked whatever the rules do to the name.
+    describe('token rules do not hide assignments from the scan (grid)', () => {
+      // [name, what the token rules leave visible of it (switch off), what is visible with the switch on]
+      const NAMES: Array<[string, string, string]> = [
+        ['ghp_PASSWORD', 'ghp_****', 'ghp_****'],
+        ['gho_TOKEN', 'gho_****', 'gho_****'],
+        ['ghs_SECRET', 'ghs_****', 'ghs_****'],
+        ['github_pat_API_KEY', 'github_pat_****', 'github_pat_****'],
+        ['xoxb-PASSWORD', 'xoxb-****', 'xoxb-****'],
+        ['xoxp-token', 'xoxp-****', 'xoxp-****'],
+        ['xoxa-API-KEY', 'xoxa-****', 'xoxa-****'],
+        ['xoxe-pwd', 'xoxe-****', 'xoxe-****'],
+        ['xapp-SECRET', 'xapp-****', 'xapp-****'],
+        ['sk-ant-api_TOKEN', 'sk-ant-api****', 'sk-****'], // the prefix rule sees the whole key as well
+        ['AKIAABCDEFGHIJKEY123', 'AKIA****', 'AKIA****'],
+        ['123456789:AAAAAAAAAAAAAAAAAAAA_PASSWORD', '123456789:****', '123456789:****'],
+        ['/bot123456789:AAAAAAAAAAAAAAAAAAAA_PASSWORD', '/bot123456789:****', '/bot123456789:****'],
+        // not matched by any token rule: the same with the switch on and off
+        ['xoxb_SECRET', 'xoxb_SECRET', 'xoxb_SECRET'],
+      ];
+      // [label, value as written, with the switch on, with the switch off]
+      const VALUES: Array<[string, string, string, string]> = [
+        ['bare', 'canary', '****', 'canary'],
+        ['double quotes', '"two words"', '"****"', '"two words"'],
+        ['single quotes', "'two words'", "'****'", "'two words'"],
+        ['escaped quote', '"start\\"sensitive-suffix"', '"****"', '"start\\"sensitive-suffix"'],
+        ['escaped quote and a Bearer word', '"start\\" Bearer sensitive-suffix"', '"****', '"start\\" Bearer ****'],
+      ];
+      const SEPARATORS = ['=', ': ', ' = '];
+
+      it.each(NAMES)('%s', (name, visibleOff, visibleOn) => {
+        for (const [label, value, masked, plain] of VALUES) {
+          for (const separator of SEPARATORS) {
+            const input = `${name}${separator}${value}`;
+            setSwitch('1');
+            expect(redactTokens(input), `on, ${label}, ${JSON.stringify(separator)}`).toBe(`${visibleOn}${separator}${masked}`);
+            setSwitch(undefined);
+            expect(redactTokens(input), `off, ${label}, ${JSON.stringify(separator)}`).toBe(`${visibleOff}${separator}${plain}`);
+          }
+        }
+      });
+
+      it('the example from review: ghp_PASSWORD=canary', () => {
+        expect(redactTokens('ghp_PASSWORD=canary')).toBe('ghp_****=****');
+        setSwitch(undefined);
+        expect(redactTokens('ghp_PASSWORD=canary')).toBe('ghp_****=canary'); // unchanged without the switch
+      });
+
+      it('a word that a token rule masks as a whole, and the part of its assignment that is left', () => {
+        expect(redactTokens('Bearer PASSWORD=canary')).toBe('Bearer ****');
+        expect(redactTokens('robot TOKEN=canary')).toBe('robot ****');
+        expect(redactTokens('Bot KEY: "two words"')).toBe('Bot **** "****"'); // the Bot rule stops at the space
+      });
+
+      it('a token as the value of an assignment, and an assignment next to a token', () => {
+        expect(redactTokens('TOKEN=xoxb-abc123 PASSWORD=canary')).toBe('TOKEN=**** PASSWORD=****');
+        expect(redactTokens('xoxb-abc123 PASSWORD=canary ghp_abc123')).toBe('xoxb-**** PASSWORD=**** ghp_****');
+        expect(redactTokens('KEY=123456789:AAAAAAAAAAAAAAAAAAAAAAAA next')).toBe('KEY=**** next');
+      });
+
+      it('with no key shape in the text the output is what the token rules alone give', () => {
+        const frozen = (text: string): string =>
+          text
+            .replace(/\b(xox[bpae]-)[A-Za-z0-9-]+/g, '$1****')
+            .replace(/\b(xapp-)[A-Za-z0-9-]+/g, '$1****')
+            .replace(/\/bot(\d+):[A-Za-z0-9_-]+/g, '/bot$1:****')
+            .replace(/\b(\d{8,12}):[A-Za-z0-9_-]{20,}\b/g, '$1:****')
+            .replace(/(Bearer\s+)\S+/gi, '$1****')
+            .replace(/(Bot\s+)\S+/gi, '$1****')
+            .replace(/\b(sk-ant-api)[A-Za-z0-9_-]+/g, '$1****')
+            .replace(/\b(ghp_)[A-Za-z0-9]+/g, '$1****')
+            .replace(/\b(gho_)[A-Za-z0-9]+/g, '$1****')
+            .replace(/\b(ghs_)[A-Za-z0-9]+/g, '$1****')
+            .replace(/\b(github_pat_)[A-Za-z0-9_]+/g, '$1****')
+            .replace(/\b(AKIA)[A-Z0-9]{16}\b/g, '$1****');
+        // pieces without a name phrase, a key prefix of the scan or eyJ: the scan finds nothing in any combination
+        const pieces = ['xoxb-', 'xoxp-', 'xoxa-', 'xapp-', '/bot', '/bot123456:', '123456789:', 'ghp_', 'gho_', 'ghs_', 'github_pat_', 'AKIA',
+          'ABCDEFGHIJKLMNOP', 'Bearer ', 'bearer\t', 'Bot ', 'robot ', 'abc', 'x', '12345678', ':', '-', '_', ' ', '\n', '"', "'", '*', '****',
+          '.', ',', 'AAAAAAAAAAAAAAAAAAAAAAAA', '(', ')', '/'];
+        let seed = 20261117;
+        const next = (): number => {
+          seed = (seed * 1664525 + 1013904223) >>> 0;
+          return seed / 4294967296;
+        };
+        for (let t = 0; t < 4000; t++) {
+          let text = '';
+          const length = 1 + Math.floor(next() * 24);
+          for (let k = 0; k < length; k++) text += pieces[Math.floor(next() * pieces.length)];
+          setSwitch('1');
+          const on = redactTokens(text);
+          setSwitch(undefined);
+          const off = redactTokens(text);
+          expect(on, JSON.stringify(text)).toBe(frozen(text));
+          expect(off, JSON.stringify(text)).toBe(frozen(text));
+        }
       });
     });
 
