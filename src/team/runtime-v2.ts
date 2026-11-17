@@ -9263,12 +9263,6 @@ export async function shutdownTeamV2(
       }
       paneOwnership = ownership.ownership;
     }
-    if (paneOwnership && worker.pane_id.startsWith("%")) {
-      await killWorkerPaneProcessTree(
-        paneOwnership.tmuxServerIdentity!,
-        paneOwnership.paneId,
-      );
-    }
     const attempt = await loadWorkerLaunchAttempt({
       cwd,
       teamName: sanitized,
@@ -9286,6 +9280,12 @@ export async function shutdownTeamV2(
         "team_shutdown",
         async () => {
           try {
+            if (paneOwnership && worker.pane_id && worker.pane_id.startsWith("%")) {
+              await killWorkerPaneProcessTree(
+                paneOwnership.tmuxServerIdentity!,
+                paneOwnership.paneId,
+              );
+            }
             let lastLiveness: WorkerPaneLiveness = paneOwnership
               ? await getOwnedWorkerLiveness(paneOwnership)
               : initialPaneLiveness;

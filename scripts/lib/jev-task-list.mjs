@@ -161,7 +161,7 @@ const LIST_SECRET_RULES = [
   [/\b(xox[a-z]-)[A-Za-z0-9-]{8,}/g, '$1***'],
   [/\b(AKIA)[0-9A-Z]{12,}/g, '$1***'],
   [/\b(Bearer\s+)[A-Za-z0-9._~+/=-]{8,}/gi, '$1***'],
-  [/(^|[^A-Za-z0-9])((?:[A-Za-z0-9]+[_.-])*(?:key|token|secret|pass|passwd|password|pwd)(?:[_.-][A-Za-z0-9]+)*)(\s*[=:]\s*)(["']?)[^\s"',;]+/gi, '$1$2$3$4***'],
+  [/(^|[^A-Za-z0-9])(["']?)((?:[A-Za-z0-9]+[_.-])*(?:key|token|secret|pass|passwd|password|pwd)(?:[_.-][A-Za-z0-9]+)*)(["']?)(\s*[=:]\s*)(["']?)[^\s"',;]+/gi, '$1$2$3$4$5$6***'],
 ];
 export function maskListText(text) {
   let s = String(text ?? '');
@@ -313,7 +313,7 @@ export function nextList(record, data, env = process.env, broken = false) {
   return null;
 }
 
-function sweep(env, now) {
+export function sweep(env, now) {
   try {
     const root = listsDir(env);
     const marker = join(root, '.sweep');
@@ -343,7 +343,7 @@ export const eventsDir = (path) => (path ? path.replace(/\.json$/, '.events') : 
 function maskedInput(value, depth = 0) {
   if (typeof value === 'string') return maskListText(value);
   if (depth > 6 || value === null || typeof value !== 'object') return value;
-  if (Array.isArray(value)) return value.slice(0, ITEMS_MAX * 2).map((x) => maskedInput(x, depth + 1));
+  if (Array.isArray(value)) return value.map((x) => maskedInput(x, depth + 1));
   return Object.fromEntries(Object.entries(value).map(([k, v]) => [k, maskedInput((k === 'items' || k === 'todos') ? (arrayOf(v) ?? v) : v, depth + 1)]));
 }
 

@@ -457,7 +457,7 @@ async function writePlan(cwd: string, plan: UltragoalPlan): Promise<void> {
   await mkdir(ultragoalDir(cwd, plan.planId), { recursive: true });
   const existing = await stat(goalsPath).catch(() => null);
   try {
-    await writeFile(tmpPath, `${JSON.stringify(plan, null, 2)}\n`, { flag: 'wx' });
+    await writeFile(tmpPath, `${JSON.stringify(plan, null, 2)}\n`, { flag: 'wx', mode: 0o600 });
     if (existing) await chmod(tmpPath, existing.mode & 0o777);
     await rename(tmpPath, goalsPath);
   } catch (error) {
