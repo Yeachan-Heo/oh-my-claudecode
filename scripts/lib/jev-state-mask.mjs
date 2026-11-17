@@ -62,8 +62,18 @@ export const MASKED_VALUE = '***';
 export const KEY_OMITTED = '[key omitted: path]';
 export const MAX_STATE_DEPTH = 64;
 export const MAX_STATE_NODES = 50_000;
+/**
+ * With a window (maxChars), the most characters the mask reads in all: a string counts for at most its window
+ * (maxChars + WINDOW_MARGIN + LINE_EXTENSION), once for each time a rule reads it (a string is read at most twice: to
+ * classify it and to mask it). A state that needs more is an error, so the work of the mask has a bound that does not
+ * depend on the size of the state. Never less than sixteen windows, so a large window that the caller asked for does
+ * not refuse a state by its size alone.
+ */
+export const MAX_STATE_CHARS = 4_000_000;
 /** A string longer than maxChars plus this is cut before it is masked: the part beyond is never sent. */
 export const WINDOW_MARGIN = 512;
+/** How far past the cut the last line of a cut text is read, to find a secret path in it: the rest of a longer line is not read. */
+export const LINE_EXTENSION = 4096;
 
 export class JevStateMaskError extends Error {
   constructor(message, options) {
@@ -105,14 +115,15 @@ const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 // (its top level: the loop-continuation point puts the id of the session there) stays, which maskSecrets would take for
 // a token. No key name lets a string skip a rule of the text mask: under `toolInput`, `args`, in an array or anywhere
 // deeper than the top, a `session_id` or a `cwd` is a string like any other (the grid test in
-// src/__tests__/jev-state-mask.test.mjs covers every such key at every depth and parent).
+// src/__tests__/jev-state-mask.test.mjs covers every such key at every depth and parent). With a window, a name longer than
+// the window is not read at all: it names a secret (see maskJevState).
 
 /**
  * The name of a key as the classification reads it: our own two markers taken out (they name no secret, and
  * "[line omitted: secret path]" would make a second pass see one), the words split at camelCase humps and acronym
  * ends, in lower case. The markers go by exact text (a key that only looks like one, "[key omitted: password]",
  * keeps its words) and the rest is one pass over the key with no backtracking, so the cost grows with the length of
- * the key and no more.
+ * the key and no more (maskJevState calls it only for a name that fits the window).
  */
 export function normalizeKey(key) {
   const cleaned = key.split(KEY_OMITTED).join('').split(SECRET_LINE).join('');
@@ -140,18 +151,34 @@ export function normalizeKey(key) {
   return result.join('');
 }
 
-// 'secret' (the value is masked, a number too), 'counter' (a number stays) or false, for the name of a key or of a pair.
+// What a name says about its value, 'secret' (the value is masked, a number too), 'counter' (a number stays) or false: the
+// label of a value. A normalized name is null when the name is longer than the window (see maskJevState): such a name
+// cannot be read in full for a cost that stays bounded, so it names a secret.
 function secretKindOf(normalized) {
+  if (normalized === null) return 'secret';
   if (!SECRET_KEY.test(normalized)) return false;
   return COUNTER_KEY.test(normalized) ? 'counter' : 'secret';
 }
-function secretKind(name) {
-  return secretKindOf(normalizeKey(name));
-}
-// Two classifications of the same value (several names beside it): the stricter one wins, so the result does not
-// depend on the order of the names. 'secret' beats 'counter' beats false.
+// Two labels of the same value (several names beside it): the stricter one wins, so the result does not depend on the
+// order of the names. 'secret' beats 'counter' beats false.
 function stricter(a, b) {
   return a === 'secret' || b === 'secret' ? 'secret' : a || b;
+}
+
+// What becomes of a value: the one place where everything that classifies it meets, used for the value under a key, in a pair
+// of an object, in an array and in a pair of two elements. The label says what its name makes of it ('secret', 'counter' or
+// false, see stricter) and the argument what its place among the arguments of a command makes of it ('secret' for the
+// element after a secret flag, or a partial mode, a key of ARGUMENT_REST, for an element that holds a credential in part
+// of it). The order, strongest first, is the same everywhere:
+//   1. a secret label or a secret argument: the value is replaced whole, a number too;
+//   2. a counter label: a number stays, anything else (a string, an array, an object) is replaced whole;
+//   3. a partial argument mode: the credential in the element is replaced and the rest of the element is judged by the
+//      text rules. It applies only when 1 and 2 do not: a label always decides over a partial mode;
+//   4. nothing: a string goes through the text rules, an array or an object is walked, a number stays.
+// Returns 'secret', 'counter', the partial mode, or false.
+export function treatment(label, argument) {
+  const whole = stricter(label, argument === 'secret' ? 'secret' : false);
+  return whole || argument || false;
 }
 
 // Pairs: the value of { name: 'DB_PASSWORD', value: x }, { key: 'apiToken', value: x }, { Name, Value },
@@ -160,9 +187,6 @@ function stricter(a, b) {
 // its value into such a pair, so a list of results such as ['pass', 'fail'] loses its second element: that is the price).
 const PAIR_NAME = new Set(['name', 'key', 'parameter_key']);
 const PAIR_VALUE = new Set(['value', 'parameter_value']);
-function pairNameKind(name) {
-  return typeof name === 'string' ? secretKind(name) : false;
-}
 // Arguments of a command written as an array: what maskSecrets masks in the same command line as a string, which its
 // rules cannot see when each element is masked alone. The element after a secret flag is a value; after -u or --user
 // the part of "user:password" after the colon; for a command of the mysql family or sshpass, the element after -p and
@@ -182,8 +206,9 @@ const ARGUMENT_REST = {
 };
 // The command word of the rules of maskSecrets (\bmysql\b and the like, also mariadb-dump, mysql.exe, a path to it).
 const P_COMMAND = /^(?:mysql|mysqldump|mysqladmin|mariadb|sshpass)(?![a-z0-9_])/i;
-// Map: index of an element -> 'secret' (all of it is the value), 'counter' (a pair that names a counter), or one of
-// the keys of ARGUMENT_REST (the part of the element that is the credential)
+// Map: index of an element -> 'secret' (all of it is the value) or one of the keys of ARGUMENT_REST (the part of the
+// element that is the credential). The elements are the strings as the rules read them (the window of each one, see
+// maskJevState) and what is no string; the name of a pair is not looked at here (see treatment).
 function secretArguments(array) {
   const modes = new Map();
   let command = -1;
@@ -206,11 +231,6 @@ function secretArguments(array) {
         modes.set(i, 'glued');
       }
     }
-  }
-  // A pair of two: the second element is the value of the first. What the arguments above found stays.
-  if (array.length === 2 && !modes.has(1)) {
-    const kind = pairNameKind(array[0]);
-    if (kind) modes.set(1, kind);
   }
   return modes;
 }
@@ -238,8 +258,12 @@ export const RUN_EXTENSION = 4096;
  * its "@", a JWT, a long token with the letter and the digit that may come later, "AKIA..." with its end), the
  * same line (a secret path), the text up to a closing mark (a private key block, masked to the end of the text),
  * or what stands before the value (KEY=, authorization:, --password, -u, mysql -p, cookie), which a cut value
- * does not take away. The cut removes context only at its tail, so only the tail has to be made safe:
- * - the last line, when it is cut: the secret path is looked for in the whole original line, and a hit omits it;
+ * does not take away. The cut removes context only at its tail, so only the tail has to be made safe, and the
+ * tail is read only so far (LINE_EXTENSION, RUN_EXTENSION): the cost of the mask is the window and no more, however
+ * long the text is:
+ * - the last line, when it is cut: the secret path is looked for in the part of the line that is sent and in the
+ *   next LINE_EXTENSION characters of it, and a hit omits the part that is sent (a secret path that starts further
+ *   on is nowhere near what is sent);
  * - otherwise the last run of token characters, when the cut is inside one (the next character is one too):
  *   the cut moves to the end of the run, so that every rule sees the whole token (its end, a digit beyond the
  *   old cut); a run longer than RUN_EXTENSION past the cut becomes "***" (fail closed);
@@ -251,8 +275,9 @@ function cutAndCloseTail(text, end) {
   const cut = text.slice(0, end);
   if (text[end] !== '\n') {
     const lineStart = cut.lastIndexOf('\n') + 1;
-    const next = text.indexOf('\n', end);
-    const line = text.slice(lineStart, next === -1 ? text.length : next);
+    const ahead = text.slice(end, end + LINE_EXTENSION);
+    const newline = ahead.indexOf('\n');
+    const line = cut.slice(lineStart) + (newline === -1 ? ahead : ahead.slice(0, newline));
     if (SECRET_PATH.test(line)) return cut.slice(0, lineStart) + SECRET_LINE;
   }
   if (TOKEN_CHAR.test(cut[end - 1]) && TOKEN_CHAR.test(text[end])) {
@@ -295,18 +320,42 @@ function fieldOmitted(masked, maxChars) {
  * undefined left out of objects, null in arrays). The input is not changed.
  * Throws JevStateMaskError when the state cannot be masked completely, and JevStateFieldOmittedError when a
  * non-empty string was omitted whole. With maxChars, a string is cut to maxChars + WINDOW_MARGIN before it is
- * masked (the cost of the mask then does not grow with the size of the state).
+ * masked, and no rule reads more of a string than that window (plus LINE_EXTENSION of its tail): the cost of the mask
+ * then does not grow with the size of the state (it has a bound: MAX_STATE_NODES nodes, MAX_STATE_CHARS characters). A
+ * name longer than the window (a key, the name of a pair, the first of two elements) is not read: it names a secret.
  */
 export function maskJevState(state, { maxChars } = {}) {
   let nodes = 0;
   const ancestors = new Set();
+  // With a window, a string is read up to cap characters (and its tail up to LINE_EXTENSION more) and the reads of the whole
+  // state are paid for from one budget: the work of the mask has a bound that does not depend on the size of the input.
+  const cap = maxChars === undefined ? Infinity : maxChars + WINDOW_MARGIN;
+  const budget = maxChars === undefined ? Infinity : Math.max(MAX_STATE_CHARS, 16 * (cap + LINE_EXTENSION));
+  let charsLeft = budget;
+  const charge = (text) => {
+    charsLeft -= Math.min(text.length, cap + LINE_EXTENSION);
+    if (charsLeft < 0) throw new JevStateMaskError(`state has more than ${budget} characters to read`);
+  };
+  // the part of a string that a classification reads: all of it, or its window
+  const head = (text) => {
+    charge(text);
+    return text.length > cap ? text.slice(0, cap) : text;
+  };
+  // A name as the classification reads it. A name longer than the window is not read at all (null, which names a secret): the
+  // words of a name can be anywhere in it, and reading all of it would cost as much as the name is long.
+  const nameOf = (name) => {
+    charge(name);
+    return name.length > cap ? null : normalizeKey(name);
+  };
+  const pairNameKind = (name) => (typeof name === 'string' ? secretKindOf(nameOf(name)) : false);
+  const tooMany = () => new JevStateMaskError(`state has more than ${MAX_STATE_NODES} nodes`);
 
   // secretKey: false, 'secret' or 'counter'; sessionId: the value of the key `session_id` of the state itself
   const walk = (input, key, depth, secretKey, sessionId) => {
     let value = input;
     if (value !== null && typeof value === 'object' && typeof value.toJSON === 'function') value = value.toJSON(key);
     if (typeof value === 'function' || typeof value === 'symbol' || value === undefined) return undefined;
-    if (++nodes > MAX_STATE_NODES) throw new JevStateMaskError(`state has more than ${MAX_STATE_NODES} nodes`);
+    if (++nodes > MAX_STATE_NODES) throw tooMany();
     if (depth > MAX_STATE_DEPTH) throw new JevStateMaskError(`state is deeper than ${MAX_STATE_DEPTH} levels`);
     if (value === null || typeof value === 'boolean') return value;
     if (typeof value === 'bigint') throw new JevStateMaskError('state has a BigInt');
@@ -319,6 +368,7 @@ export function maskJevState(state, { maxChars } = {}) {
     if (typeof value === 'string') {
       // A session id is no secret and a UUID looks like one to maskSecrets.
       if (sessionId && UUID.test(value)) return value;
+      charge(value);
       const masked = maskString(value, maxChars);
       if (fieldOmitted(masked, maxChars)) throw new JevStateFieldOmittedError('a string of the state is a secret path');
       return masked;
@@ -327,17 +377,23 @@ export function maskJevState(state, { maxChars } = {}) {
     ancestors.add(value);
     try {
       if (Array.isArray(value)) {
-        const modes = secretArguments(value);
+        // more elements than nodes are allowed: no rule reads them before the node limit would have refused the state
+        if (value.length > MAX_STATE_NODES) throw tooMany();
+        const heads = value.map((item) => (typeof item === 'string' ? head(item) : item));
+        const modes = secretArguments(heads);
+        // the first of two elements is the name of the second
+        const label = value.length === 2 ? pairNameKind(value[0]) : false;
         return value.map((item, i) => {
-          const mode = modes.get(i);
-          const whole = mode === 'secret' || mode === 'counter';
-          return walk(mode && !whole ? maskArgument(item, mode) : item, String(i), depth + 1, whole ? mode : false, false) ?? null;
+          const how = treatment(i === 1 ? label : false, modes.get(i));
+          const whole = how === 'secret' || how === 'counter';
+          return walk(how && !whole ? maskArgument(heads[i], how) : item, String(i), depth + 1, whole ? how : false, false) ?? null;
         });
       }
       const out = {};
       const keys = Object.keys(value);
-      const normalizedKeys = keys.map(normalizeKey);
-      // the names of a pair, whatever their order: the stricter classification of all of them
+      if (keys.length > MAX_STATE_NODES) throw tooMany();
+      const normalizedKeys = keys.map(nameOf);
+      // the names of a pair, whatever their order: the stricter label of all of them
       let pairKind = false;
       keys.forEach((k, i) => {
         if (PAIR_NAME.has(normalizedKeys[i])) pairKind = stricter(pairKind, pairNameKind(value[k]));
@@ -346,10 +402,12 @@ export function maskJevState(state, { maxChars } = {}) {
       const nextSuffix = new Map();
       for (const [i, k] of keys.entries()) {
         const normalized = normalizedKeys[i];
-        const secret = stricter(secretKindOf(normalized), PAIR_VALUE.has(normalized) ? pairKind : false);
+        const secret = treatment(stricter(secretKindOf(normalized), PAIR_VALUE.has(normalized) ? pairKind : false), false);
         const masked = walk(value[k], k, depth + 1, secret, depth === 0 && normalized === 'session_id');
         if (masked === undefined) continue;
-        const base = SECRET_PATH.test(k) ? KEY_OMITTED : maskString(k, maxChars);
+        charge(k);
+        // the secret path of a key is looked for as far as a cut key is read
+        const base = SECRET_PATH.test(k.length > cap + LINE_EXTENSION ? k.slice(0, cap + LINE_EXTENSION) : k) ? KEY_OMITTED : maskString(k, maxChars);
         let name = base;
         if (Object.hasOwn(out, name)) {
           let n = nextSuffix.get(base) ?? 2;

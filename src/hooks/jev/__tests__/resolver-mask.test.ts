@@ -6,6 +6,7 @@ import { readFileSync } from 'node:fs';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { performance } from 'node:perf_hooks';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { resetJevResolverState, resolveJudgment } from '../resolver.js';
 import type { JevQuestions } from '../types.js';
@@ -245,6 +246,36 @@ describe('resolveJudgment state mask', () => {
         for (const secret of ['tok_hunter2zz', 'hunter2zz', 'tok-one-zzQ', 'arg-secret-zzQ', 'pair-secret-zzQ']) expect(text).not.toContain(secret);
         expect(text).toContain('fine');
       }
+    });
+  });
+
+  describe('the time before the request', () => {
+    // The mask runs in the hook process before the request is made, so its cost must not grow with the size of the state.
+    const repeatTo = (unit: string, n: number): string => unit.repeat(Math.ceil(n / unit.length)).slice(0, n);
+    const SIZE = 32 * 1024 * 1024;
+    const states: Record<string, () => unknown> = {
+      'a prompt of one line': () => ({ prompt: repeatTo('/srv/app/dir/', SIZE) }),
+      'a key': () => ({ [repeatTo('the quick brown fox ', SIZE)]: 'v' }),
+      'the name of a pair': () => ({ name: repeatTo('k', SIZE), value: 'v' }),
+    };
+
+    it.each(Object.keys(states))('sends %s of 32 MiB after milliseconds of masking', async (name) => {
+      const state = states[name]();
+      // the best of three calls: a pause of the machine in one of them is no cost of the mask
+      const times: number[] = [];
+      for (let i = 0; i < 3; i++) {
+        const started = performance.now();
+        let before = -1;
+        const fetchFn = (async () => {
+          before = performance.now() - started;
+          return { ok: true, status: 200, json: async () => ({ answers: { route: { type: 'choice', choice: 'opus' } } }) } as unknown as Response;
+        }) as unknown as typeof fetch;
+        const result = await resolveJudgment({ point: 'model-routing', state, questions: QUESTIONS, twin: () => 'sonnet', fetchFn });
+        expect(result).toMatchObject({ mode: 'active', source: 'jev' });
+        expect(before).toBeGreaterThanOrEqual(0);
+        times.push(before);
+      }
+      expect(Math.min(...times)).toBeLessThan(250);
     });
   });
 });

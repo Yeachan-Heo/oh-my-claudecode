@@ -9,7 +9,7 @@ import { describe, expect, it } from 'vitest';
 
 import { makeCase, checkCase, seededRandom } from './jev-state-mask-cases.mjs';
 import { maskSecrets } from '../../scripts/lib/jev-mask.mjs';
-import { JevStateFieldOmittedError, JevStateMaskError, MAX_STATE_DEPTH, MAX_STATE_NODES, RUN_EXTENSION, SECRET_PATH, TOKEN_CHAR, WINDOW_MARGIN, maskJevState, normalizeKey } from '../../scripts/lib/jev-state-mask.mjs';
+import { JevStateFieldOmittedError, JevStateMaskError, KEY_OMITTED, LINE_EXTENSION, MAX_STATE_CHARS, MAX_STATE_DEPTH, MAX_STATE_NODES, RUN_EXTENSION, SECRET_PATH, TOKEN_CHAR, WINDOW_MARGIN, maskJevState, normalizeKey, treatment } from '../../scripts/lib/jev-state-mask.mjs';
 
 const root = join(fileURLToPath(import.meta.url), '..', '..', '..');
 const GHP = 'ghp_' + 'A'.repeat(36);
@@ -1038,6 +1038,275 @@ describe('maskJevState: what a key name can change, by key, depth and parent', (
         }
       }
     }
+  });
+});
+
+// The order in which what classifies a value is applied: one function (treatment) decides it for the value under a key, in a
+// pair of an object, in an array and in a pair of two elements. A label (the name of the value) that names a secret
+// replaces the value whole and always wins over a partial argument mode (the credential in part of an element); a counter label
+// replaces a string whole too, and a number stays; a partial mode applies only without a label. Every expected value is written out.
+describe('maskJevState: the order of the labels and the partial argument modes', () => {
+  const S = 'hunter2zzQ';
+
+  it.each([
+    [false, undefined, false],
+    [false, false, false],
+    [false, 'secret', 'secret'],
+    [false, 'user', 'user'],
+    [false, 'userEquals', 'userEquals'],
+    [false, 'secretEquals', 'secretEquals'],
+    [false, 'glued', 'glued'],
+    ['counter', undefined, 'counter'],
+    ['counter', 'secret', 'secret'],
+    ['counter', 'user', 'counter'],
+    ['counter', 'userEquals', 'counter'],
+    ['counter', 'secretEquals', 'counter'],
+    ['counter', 'glued', 'counter'],
+    ['secret', undefined, 'secret'],
+    ['secret', 'secret', 'secret'],
+    ['secret', 'user', 'secret'],
+    ['secret', 'userEquals', 'secret'],
+    ['secret', 'secretEquals', 'secret'],
+    ['secret', 'glued', 'secret'],
+  ])('label %s, argument mode %s: %s', (label, argument, expected) => {
+    expect(treatment(label, argument)).toBe(expected);
+  });
+
+  // [what the value is, the value, what it becomes with no label at all (a partial mode, or the text rules)]
+  const VALUES = [
+    ['a --user argument', `--user=${S}:tail`, `--user=${S}:***`],
+    ['a --password argument', `--password=${S}`, '--password=***'],
+    ['an --api-key argument', `--api-key=${S}`, '--api-key=***'],
+    // no rule of the text mask knows the next four, so they stay without a secret label (the mask removes the shapes it knows and no more)
+    ['a user and password with a host', `user:${S}@host`, `user:${S}@host`],
+    ['a glued -p without a command', `-p${S}`, `-p${S}`],
+    ['a bare value', S, S],
+    ['a value with a colon', `${S}:tail`, `${S}:tail`],
+  ];
+  const LABELS = {
+    secret: ['PASSWORD', 'token', 'X-Api-Key', 'Authorization', 'client_secret'],
+    counter: ['token_count', 'input_tokens', 'max_tokens'],
+    none: ['LOG_LEVEL', 'user', 'curl'],
+  };
+  // the places where a name stands beside a value: a pair of two elements, in a list too (the shape of an environment), a name and value
+  // pair of an object in its three spellings, and the key that holds the value
+  const CONTEXTS = {
+    'a pair of two elements': (label, value) => [{ t: [label, value] }, (m) => ({ t: [label, m] })],
+    'a pair of two elements in a list': (label, value) => [{ t: [[label, value]] }, (m) => ({ t: [[label, m]] })],
+    'name and value': (label, value) => [{ name: label, value }, (m) => ({ name: label, value: m })],
+    'key and value': (label, value) => [{ key: label, value }, (m) => ({ key: label, value: m })],
+    'ParameterKey and ParameterValue': (label, value) => [{ ParameterKey: label, ParameterValue: value }, (m) => ({ ParameterKey: label, ParameterValue: m })],
+    'the value under a key': (label, value) => [{ [label]: value }, (m) => ({ [label]: m })],
+  };
+  const rows = [];
+  for (const [kind, labels] of Object.entries(LABELS)) {
+    for (const label of labels) {
+      for (const [contextName, context] of Object.entries(CONTEXTS)) {
+        for (const [valueName, value, unlabeled] of VALUES) {
+          rows.push([`${kind} label ${label}: ${valueName} in ${contextName}`, kind, label, contextName, context, value, kind === 'none' ? unlabeled : '***']);
+        }
+      }
+    }
+  }
+
+  it.each(rows)('%s', (_name, kind, label, _contextName, context, value, expected) => {
+    const [input, expectedFor] = context(label, value);
+    const out = maskJevState(input);
+    expect(out).toEqual(expectedFor(expected));
+    // the secret of a value under a secret or counter label is in no part of the result
+    if (kind !== 'none') expect(JSON.stringify(out)).not.toContain(S);
+  });
+
+  it('has the grid it says it has', () => {
+    // 11 labels x 6 places x 7 values
+    expect(rows).toHaveLength(11 * 6 * 7);
+  });
+
+  // The partial modes user and glued are not in the grid above: user needs a preceding element that is -u or --user, and glued a
+  // preceding command word, which a pair of two elements has as its name. Neither -u nor --user names a secret, so user cannot meet a
+  // label; glued can, with a command word that is also a name (the cells with mysql.password below), and the table of treatment
+  // above covers every label against every mode.
+  it('applies the same partial mode in an array of arguments of any length, with no label', () => {
+    for (const [, value, unlabeled] of VALUES) {
+      expect(maskJevState({ t: ['run', 'x', value] }).t).toEqual(['run', 'x', unlabeled]);
+      expect(maskJevState({ t: [['run', 'x', value]] }).t).toEqual([['run', 'x', unlabeled]]);
+    }
+  });
+
+  it.each([
+    [['-u', `root:${S}`], ['-u', 'root:***']],
+    [['--user', `root:${S}`], ['--user', 'root:***']],
+    [['mysql', `-p${S}`], ['mysql', '-p***']],
+    [['--password', S], ['--password', '***']],
+    [['--password', 5], ['--password', '***']],
+    [[`--user=root:${S}`, 'x'], ['--user=root:***', 'x']],
+    [['mysql', '-p', S], ['mysql', '-p', '***']],
+    [['curl', '-u', `root:${S}`], ['curl', '-u', 'root:***']],
+    // the first of two elements is a name, whatever it is made of: this one names a secret
+    [[`--password=${S}`, 'x'], ['--password=***', '***']],
+    // a command word that is also a name: the glued -p of the second element is a partial mode, the name decides over it
+    [['mysql.password', `-p${S}`], ['mysql.password', '***']],
+    [['mysql.token_count', `-p${S}`], ['mysql.token_count', '***']],
+  ])('an array of arguments, the partial modes and the name of a pair: %j', (input, expected) => {
+    expect(maskJevState({ a: input }).a).toEqual(expected);
+  });
+
+  it('keeps a number under a counter label and under no label, and masks it under a secret label', () => {
+    for (const make of Object.values(CONTEXTS)) {
+      for (const [label, expected] of [['token_count', 4096], ['LOG_LEVEL', 4096], ['PASSWORD', '***']]) {
+        const [input, expectedFor] = make(label, 4096);
+        expect(maskJevState(input), `${label}`).toEqual(expectedFor(expected));
+      }
+    }
+  });
+
+  it('masks an array or an object under a counter label whole, and under a secret label', () => {
+    for (const label of ['token_count', 'PASSWORD']) {
+      expect(maskJevState({ t: [label, [S]] }).t).toEqual([label, '***']);
+      expect(maskJevState({ name: label, value: { a: S } })).toEqual({ name: label, value: '***' });
+    }
+  });
+
+  it('is idempotent for every cell of the grid: a second pass changes nothing', () => {
+    for (const [, , , , context, value] of rows) {
+      const [input] = context(LABELS.secret[0], value);
+      const once = maskJevState(input);
+      expect(maskJevState(once)).toEqual(once);
+    }
+  });
+});
+
+// The class of the findings on the cost before the timeout: the work of the mask is the window, whatever the input. Every string is
+// read up to its window (maxChars + WINDOW_MARGIN, and LINE_EXTENSION of its tail), a name longer than the window is not read, and all
+// the reads of one state are paid for from one budget (MAX_STATE_CHARS).
+describe('maskJevState: the cost is the window, not the input', () => {
+  const MAX = 200;
+  const WORDS = 'the quick brown fox jumps over the lazy dog and runs away from the farm ';
+  const repeatTo = (unit, n) => unit.repeat(Math.ceil(n / unit.length)).slice(0, n);
+  const BIG = 32 * 1024 * 1024;
+  const SHAPES = {
+    'one line of words': () => ({ prompt: repeatTo(WORDS, BIG) }),
+    'one line of path-like text': () => ({ prompt: repeatTo('/srv/app/dir/', BIG) }),
+    'one line with a secret path far beyond the cut': () => ({ prompt: 'first line\nnote ' + repeatTo('x ', BIG) + '/home/u/.ssh/id_rsa' }),
+    'a long key': () => ({ [repeatTo(WORDS, BIG)]: 'v' }),
+    'a long name of a pair': () => ({ name: repeatTo('k', BIG), value: 'v' }),
+    'a long first element of a pair of two elements': () => ({ t: [repeatTo('k', BIG), 'v'] }),
+    'long arguments of a command': () => ({ argv: ['mysql', repeatTo('a', BIG / 8), '-u', `${repeatTo('b', BIG / 8)}:x`, `--user=${repeatTo('c', BIG / 8)}:y`, `-p${repeatTo('d', BIG / 8)}`] }),
+    'long strings at several places': () => ({ a: { b: [repeatTo(WORDS, BIG / 4), repeatTo(WORDS, BIG / 4)] }, c: repeatTo(WORDS, BIG / 4) }),
+  };
+
+  it.each(Object.keys(SHAPES))('%s: 32 MiB take milliseconds, not the length of the input', (name) => {
+    const state = SHAPES[name]();
+    // the best of three runs (the mask does not change its input): a pause of the machine in one run is no cost of the mask
+    const times = [];
+    for (let i = 0; i < 3; i++) {
+      const start = performance.now();
+      maskJevState(state, { maxChars: MAX });
+      times.push(performance.now() - start);
+    }
+    // about 5 ms; the mask without the bound took 0.5 to 2.5 s for these (a linear cost), so this leaves room for a slow machine
+    expect(Math.min(...times)).toBeLessThan(150);
+  });
+
+  it('hands no rule more than the window of a string and its tail (a structure check, no clock)', () => {
+    const seen = [];
+    const original = SECRET_PATH.test;
+    SECRET_PATH.test = function test(text) {
+      seen.push(text.length);
+      return original.call(this, text);
+    };
+    try {
+      maskJevState({ prompt: repeatTo(WORDS, 3_000_000), [repeatTo(WORDS, 3_000_000)]: 1, list: [repeatTo('/a/', 3_000_000)] }, { maxChars: MAX });
+    } finally {
+      delete SECRET_PATH.test;
+    }
+    expect(seen.length).toBeGreaterThan(0);
+    expect(Math.max(...seen)).toBeLessThanOrEqual(MAX + WINDOW_MARGIN + LINE_EXTENSION);
+  });
+
+  describe('the last line of a cut text', () => {
+    const CUT = MAX + WINDOW_MARGIN;
+    const lead = 'first line\necho hunter2 > ';
+    const textWithPathAt = (past) => lead + repeatTo('x ', CUT + past - lead.length) + '~/.ssh/id_ed25519\nlast';
+    const sentOf = (text) => maskJevState({ t: text }, { maxChars: MAX }).t.slice(0, MAX);
+
+    it('omits the line when its secret path starts within LINE_EXTENSION past the cut', () => {
+      for (const past of [1, 100, LINE_EXTENSION - 40]) expect(sentOf(textWithPathAt(past)), `${past}`).toBe('first line\n[line omitted: secret path]');
+    });
+
+    it('sends the line when its secret path starts beyond that: nothing of the path is sent, and the rest of the line is not read', () => {
+      const sent = sentOf(textWithPathAt(LINE_EXTENSION + 200));
+      expect(sent.startsWith('first line\necho hunter2 > x x')).toBe(true);
+      expect(SECRET_PATH.test(sent)).toBe(false);
+    });
+  });
+
+  describe('a name longer than the window', () => {
+    const CAP = MAX + WINDOW_MARGIN;
+    // one word per two characters: a run of token characters at the cut would be followed to its end, a name with spaces is cut where it is
+    const longName = () => repeatTo('k ', CAP + 1);
+    const opts = { maxChars: MAX };
+
+    it('is not read and names a secret: the value under a long key is masked and the key is cut', () => {
+      const out = maskJevState({ [longName()]: 'plain value', short: 'plain value' }, opts);
+      const [first] = Object.keys(out);
+      expect(first).toHaveLength(CAP);
+      expect(out[first]).toBe('***');
+      expect(out.short).toBe('plain value');
+      expect(Object.values(maskJevState({ [longName()]: 7 }, opts))).toEqual(['***']);
+    });
+
+    it('is the same for the name of a pair and the first of two elements', () => {
+      expect(maskJevState({ name: longName(), value: 'plain value' }, opts).value).toBe('***');
+      expect(maskJevState({ ParameterKey: longName(), ParameterValue: 'plain value' }, opts).ParameterValue).toBe('***');
+      expect(maskJevState({ t: [longName(), 'plain value'] }, opts).t[1]).toBe('***');
+      expect(maskJevState({ t: [longName(), 7] }, opts).t[1]).toBe('***');
+    });
+
+    it('is classified in full when it fits the window, and without a window whatever its length', () => {
+      const fits = repeatTo('k', CAP - 'password'.length) + 'password';
+      expect(fits).toHaveLength(CAP);
+      expect(maskJevState({ [fits]: 'plain value' }, opts)[fits]).toBe('***');
+      const plain = repeatTo('k', CAP);
+      expect(maskJevState({ [plain]: 'plain value' }, opts)[plain]).toBe('plain value');
+      expect(maskJevState({ t: [plain, 'plain value'] }, opts).t[1]).toBe('plain value');
+      expect(maskJevState({ t: [longName(), 'plain value'] }).t[1]).toBe('plain value');
+    });
+
+    it('turns a long key that names a secret path in its first window into the marker', () => {
+      const key = `/home/u/.ssh/id_rsa ${repeatTo('k', CAP * 3)}`;
+      expect(Object.keys(maskJevState({ [key]: 1 }, opts))).toEqual([KEY_OMITTED]);
+    });
+  });
+
+  describe('the budget of all the reads', () => {
+    it('refuses a state of many strings that each fit the window and together need more than MAX_STATE_CHARS, fast', () => {
+      const text = repeatTo(WORDS, MAX + WINDOW_MARGIN);
+      const state = { a: Array.from({ length: Math.ceil(MAX_STATE_CHARS / (MAX + WINDOW_MARGIN)) + 100 }, () => text) };
+      const start = performance.now();
+      expect(() => maskJevState(state, { maxChars: MAX })).toThrow(new RegExp(`more than ${MAX_STATE_CHARS} characters`));
+      expect(performance.now() - start).toBeLessThan(2000);
+    });
+
+    it('accepts the same state without a window (there is no bound to keep when the whole text is wanted), and a few strings with one', () => {
+      const text = repeatTo(WORDS, 1000);
+      expect(maskJevState({ a: Array.from({ length: 10 }, () => text) }, { maxChars: MAX }).a).toHaveLength(10);
+      expect(maskJevState({ a: Array.from({ length: 6000 }, () => text) }).a).toHaveLength(6000);
+    });
+
+    it('does not refuse a state because of a large window that the caller asked for', () => {
+      const big = 1_200_000;
+      const text = repeatTo(WORDS, big - 10_000);
+      const out = maskJevState({ a: [text, text, text, text] }, { maxChars: big });
+      expect(out.a.map((t) => t.length)).toEqual([text.length, text.length, text.length, text.length]);
+    });
+
+    it('refuses more keys or more elements than the node limit before any rule reads them', () => {
+      const keys = Object.fromEntries(Array.from({ length: MAX_STATE_NODES + 1 }, (_, i) => [`key${i}`, 1]));
+      expect(() => maskJevState(keys, { maxChars: MAX })).toThrow(/nodes/);
+      expect(() => maskJevState(new Array(MAX_STATE_NODES + 1).fill('x'), { maxChars: MAX })).toThrow(/nodes/);
+      expect(() => maskJevState(new Array(MAX_STATE_NODES + 1).fill('x'))).toThrow(/nodes/);
+    });
   });
 });
 

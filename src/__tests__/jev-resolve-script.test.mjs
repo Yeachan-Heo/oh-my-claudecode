@@ -15,6 +15,7 @@ import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'no
 import { createServer } from 'node:http';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { performance } from 'node:perf_hooks';
 import { fileURLToPath } from 'node:url';
 import { afterAll, describe, expect, it } from 'vitest';
 
@@ -690,6 +691,37 @@ describe('state mask: plural keys, bearer with ~, arguments and pairs', () => {
       for (const secret of ['tok_hunter2zz', 'hunter2zz', 'tok-one-zzQ', 'arg-secret-zzQ', 'pair-secret-zzQ']) expect(text).not.toContain(secret);
       expect(text).toContain('fine');
     }
+  });
+});
+
+describe('state mask: the time before the request', () => {
+  // The mask runs before the request timeout is armed, so its cost must not grow with the size of the state: a long prompt
+  // or a long name is read up to the window only. Without the bound these took 0.5 to 2.5 s.
+  const repeatTo = (unit, n) => unit.repeat(Math.ceil(n / unit.length)).slice(0, n);
+  const SIZE = 32 * 1024 * 1024;
+  const states = {
+    'a prompt of one line': () => ({ prompt: repeatTo('/srv/app/dir/', SIZE) }),
+    'a key': () => ({ [repeatTo('the quick brown fox ', SIZE)]: 'v' }),
+    'the name of a pair': () => ({ name: repeatTo('k', SIZE), value: 'v' }),
+  };
+
+  it.each(Object.keys(states))('sends %s of 32 MiB after milliseconds of masking', async (name) => {
+    const state = states[name]();
+    // the best of three requests: a pause of the machine in one of them is no cost of the mask
+    const times = [];
+    for (let i = 0; i < 3; i++) {
+      const started = performance.now();
+      let before = -1;
+      const fetchFn = async () => {
+        before = performance.now() - started;
+        return { ok: true, status: 200, json: async () => ({ answers: { route: { type: 'choice', choice: 'opus' } } }) };
+      };
+      const result = await resolveRequest({ point: 'model-routing', state, questions: QUESTIONS }, baseEnv({ OMC_JEV: 'model-routing:active' }), fetchFn);
+      expect(result.mode).toBe('active');
+      expect(before).toBeGreaterThanOrEqual(0);
+      times.push(before);
+    }
+    expect(Math.min(...times)).toBeLessThan(250);
   });
 });
 
