@@ -170,6 +170,14 @@ beforeAll(() => {
     JSON.stringify({ ts: 'not-a-date', point: 'model-routing', tool_use_id: 'tid-11',
       session_id: 'ses-11', subagent_type: 'executor',
       applied: { model: { from: null, to: 'haiku', source: 'jev' } } }) + '\n');
+
+  // A12: subagent_type only in applied, not at top level
+  appendFileSync(join(journal, 'applied.jsonl'),
+    JSON.stringify({ ts: '2026-11-14T09:54:00.000Z', point: 'model-routing', tool_use_id: 'tid-12',
+      session_id: 'ses-12',
+      applied: { model: { from: null, to: 'haiku', source: 'jev' }, subagent_type: 'custom-executor' } }) + '\n');
+  write(join(transcripts, 'project-p', 'ses-12', 'subagents', 'agent-a12.meta.json'), meta('tid-12', 'a12', 'haiku', 'low'));
+  write(join(transcripts, 'project-p', 'ses-12', 'subagents', 'agent-a12.jsonl'), assistant('12a', 'claude-haiku-5-5', { usage: usage(1000, 200, 0, 300, 50) }));
 });
 
 afterAll(() => {
@@ -207,20 +215,20 @@ describe.skipIf(!hasPython3)('decision_outcome_join', () => {
     expect(result.status, result.stderr).toBe(0);
     const out = JSON.parse(readFileSync(jsonPath, 'utf8'));
 
-    // coverage (a): 11 applied model-routing rows in the period, 5 joined to a transcript with turns > 0
-    expect(out.join.n).toBe(11);
-    expect(out.join.k).toBe(5);
+    // coverage (a): 12 applied model-routing rows in the period, 6 joined to a transcript with turns > 0
+    expect(out.join.n).toBe(12);
+    expect(out.join.k).toBe(6);
     expect(out.join.distribution.no_tool_use_id).toBe(1);
     expect(out.join.distribution.no_meta).toBe(1);
     expect(out.join.distribution.duplicates).toBe(1);
     expect(out.join.distribution.no_transcript).toBe(1);
     expect(out.join.distribution.zero_turns).toBe(1);
     expect(out.join.distribution.bad_ts).toBe(1);
-    expect(out.join.distribution.joined).toBe(5);
+    expect(out.join.distribution.joined).toBe(6);
     expect(out.join.wilson_1_96[0] > 0 && out.join.wilson_1_96[0] <= out.join.k / out.join.n).toBe(true);
     expect(out.join.wilson_lower_1_645).toBeLessThanOrEqual(out.join.share);
 
-    expect(out.join.model_match).toEqual({ 'no model decision': 1, mismatch: 1, undetermined: 1, match: 3 });
+    expect(out.join.model_match).toEqual({ 'no model decision': 1, mismatch: 1, undetermined: 1, match: 4 });
 
     const byTid: Record<string, Record<string, unknown>> = {};
     for (const a of out.agents) byTid[a.tool_use_id] = a;
@@ -287,13 +295,20 @@ describe.skipIf(!hasPython3)('decision_outcome_join', () => {
     expect(a6.model_match).toBe('undetermined');
     expect(a6.reasoning).toBeNull();
 
+    // A12: subagent_type from applied field (not at top level)
+    const a12 = byTid['tid-12'];
+    expect(a12.subagent_type).toBe('custom-executor');
+    expect(a12.model_match).toBe('match');
+    expect(a12.cost_status).toBe('reported');
+    expect(Math.abs((a12.cost_usd as number) - 0.000153)).toBeLessThan(1e-9);
+
     // price consistency: the same cost by two functions (A1 + A2 + A3 + A4 + A10)
-    expect(Math.abs(out.price_consistency.single_model_usd_p1 - 0.408049)).toBeLessThan(1e-6);
-    expect(Math.abs(out.price_consistency.single_model_usd_p2 - 0.408049)).toBeLessThan(1e-6);
-    expect(out.price_consistency.n).toBe(5);
+    expect(Math.abs(out.price_consistency.single_model_usd_p1 - 0.408202)).toBeLessThan(1e-6);
+    expect(Math.abs(out.price_consistency.single_model_usd_p2 - 0.408202)).toBeLessThan(1e-6);
+    expect(out.price_consistency.n).toBe(6);
     expect(out.price_consistency.consistent).toBe(true);
-    expect(Math.abs(out.cost_sums.reported_partial_usd - 0.408049)).toBeLessThan(1e-6);
-    expect(Math.abs(out.cost_sums.reported_only_usd - 0.401989)).toBeLessThan(1e-6);
+    expect(Math.abs(out.cost_sums.reported_partial_usd - 0.408202)).toBeLessThan(1e-6);
+    expect(Math.abs(out.cost_sums.reported_only_usd - 0.402142)).toBeLessThan(1e-6);
     expect(out.cost_sums.total_usd).toBeNull();
     expect(out.cost_sums.n_unavailable).toBe(1);
 
@@ -318,9 +333,9 @@ describe.skipIf(!hasPython3)('decision_outcome_join', () => {
     // prices of the fixture are read from the file: no price table means no cost (covered below)
     expect(out.prices.haiku).toEqual(PRICES.haiku);
 
-    // TSV: header + 6 agents (A1, A2, A3, A4, A6, A10)
+    // TSV: header + 7 agents (A1, A2, A3, A4, A6, A10, A12)
     const lines = readFileSync(tsvPath, 'utf8').trim().split('\n');
-    expect(lines.length).toBe(7);
+    expect(lines.length).toBe(8);
     const header = lines[0].split('\t');
     expect(header).toContain('cost_usd');
     expect(header).toContain('task_source');
@@ -353,7 +368,7 @@ describe.skipIf(!hasPython3)('decision_outcome_join', () => {
     expect(missing.stderr.trim().split('\n').length).toBe(1);
     expect(missing.stderr).toMatch(/no --prices given/);
     const outMissing = JSON.parse(readFileSync(noPrices, 'utf8'));
-    expect(outMissing.agents.length).toBe(6);
+    expect(outMissing.agents.length).toBe(7);
     for (const a of outMissing.agents) {
       expect(a.cost_usd).toBeNull();
       expect(a.gross_saving).toBeNull();
@@ -369,7 +384,7 @@ describe.skipIf(!hasPython3)('decision_outcome_join', () => {
     expect(result.status, result.stderr).toBe(0);
     expect(result.stderr).toBe('');
     const out = JSON.parse(readFileSync(planPath, 'utf8'));
-    expect(out.agents.length).toBe(6);
+    expect(out.agents.length).toBe(7);
     for (const a of out.agents) {
       expect(a.cost_usd).toBeNull();
       expect(a.gross_saving).toBeNull();
