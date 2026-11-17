@@ -98,11 +98,18 @@ GITHUB_HOST="${GITHUB_SERVER_URL#https://}"
 GITHUB_HOST="${GITHUB_HOST#http://}"
 GITHUB_HOST="${GITHUB_HOST:-github.com}"  # default to github.com if unset
 
-HEAD_REPO_URL=$(git remote -v | awk -v r="${HEAD_REPO}" '$3 == "(fetch)" {
+HEAD_REPO_URL=$(git remote -v | awk -v r="${HEAD_REPO}" -v h="${GITHUB_HOST}" '$3 == "(fetch)" {
   url = $2
-  sub(/^((https?:\/\/|git@|[a-z]+@)?[[:alnum:]._-]+[:\/])/, "", url)
-  sub(/\.git$/, "", url)
-  if (url == r) { print $2; exit }
+  # Extract and validate the host to prevent selecting a mirror with the same owner/repo
+  host = url
+  sub(/^https?:\/\//, "", host)
+  sub(/^git@/, "", host)
+  sub(/[:@\/.].+$/, "", host)  # Remove port, user, path
+  # Only match if host matches expected GitHub host
+  normalized_url = url
+  sub(/^((https?:\/\/|git@|[a-z]+@)?[[:alnum:]._-]+[:\/])/, "", normalized_url)
+  sub(/\.git$/, "", normalized_url)
+  if (normalized_url == r && host == h) { print $2; exit }
 }')
 if [ -z "${HEAD_REPO_URL}" ]; then
   if [ "$(gh config get git_protocol 2>/dev/null)" = "ssh" ]; then
@@ -124,7 +131,8 @@ ORIGINAL_TREE=$(git rev-parse pr-head-${N}^{tree})
 # Snapshot the PR's three-dot patch, not just the tree: when the base branch
 # advanced, a regroup onto the newer base can keep the tip tree while
 # changing the PR's merge result.
-ORIGINAL_PATCH=$(mktemp)
+# Use stable paths for patches keyed by PR number so they persist across separate bash calls in Claude Code
+ORIGINAL_PATCH="${TMPDIR:-/tmp}/pr-${N}-original.patch"
 git diff "${MERGE_BASE}...pr-head-${N}" > "${ORIGINAL_PATCH}"
 ```
 
@@ -154,7 +162,8 @@ if [ "${CURRENT_MERGE_BASE}" != "${ORIGINAL_MERGE_BASE}" ]; then
   exit 1
 fi
 
-REWRITTEN_PATCH=$(mktemp)
+# Use consistent filename pattern for verification patches
+REWRITTEN_PATCH="${TMPDIR:-/tmp}/pr-${N}-rewritten.patch"
 git diff "${ORIGINAL_MERGE_BASE}...HEAD" > "${REWRITTEN_PATCH}"
 diff -u "${ORIGINAL_PATCH}" "${REWRITTEN_PATCH}" || {
   echo "the PR's patch against its base changed — reconcile" >&2

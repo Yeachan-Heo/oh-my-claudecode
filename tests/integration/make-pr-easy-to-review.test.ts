@@ -88,11 +88,13 @@ describe('make-pr-easy-to-review skill', () => {
 
   it('should verify patch integrity against base', () => {
     const skillBody = readFileSync(skillPath, 'utf8');
-    // Must snapshot the original three-dot patch
-    expect(skillBody).toContain('ORIGINAL_PATCH=$(mktemp)');
+    // Must snapshot the original three-dot patch with stable filename for cross-call persistence
+    expect(skillBody).toContain('ORIGINAL_PATCH=');
+    expect(skillBody).toContain('pr-${N}-original.patch');
     expect(skillBody).toContain('git diff');
     // Must verify patch hasn't changed
-    expect(skillBody).toContain('REWRITTEN_PATCH=$(mktemp)');
+    expect(skillBody).toContain('REWRITTEN_PATCH=');
+    expect(skillBody).toContain('pr-${N}-rewritten.patch');
     expect(skillBody).toContain('diff -u');
     expect(skillBody).toContain('the PR\'s patch against its base changed');
   });
