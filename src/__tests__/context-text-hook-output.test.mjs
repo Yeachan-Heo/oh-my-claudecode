@@ -287,7 +287,7 @@ describe('persistent-mode: the reviewer prompt that the bridge composes, with th
   const claim = `claim${BEL}${'c'.repeat(3000)}`;
   const feedback = `feedback${RTL}${'f'.repeat(4000)}`;
 
-  function pendingRun(fields, { shape = 'reason', switchValue = '1', advance = false, input = {} } = {}) {
+  function pendingRun(fields, { shape = 'reason', switchValue = '1', advance = false, advanceFields = null, input = {} } = {}) {
     const f = makeProject();
     const sessionId = `pending-${Math.random().toString(36).slice(2, 8)}`;
     writeModeState(f, sessionId, 'ralph-state.json', { iteration: 1, max_iterations: 100, prompt: task });
@@ -298,7 +298,7 @@ describe('persistent-mode: the reviewer prompt that the bridge composes, with th
       env: {
         BRIDGE_VERIFICATION_FILE: file,
         BRIDGE_SHAPE: shape === 'message' ? 'message' : 'reason',
-        ...(advance ? { BRIDGE_ADVANCE: '1', BRIDGE_ADVANCE_FIELDS: JSON.stringify({ original_task: task, completion_claim: claim, architect_feedback: feedback }) } : {}),
+        ...(advance ? { BRIDGE_ADVANCE: '1', BRIDGE_ADVANCE_FIELDS: JSON.stringify(advanceFields ?? { original_task: task, completion_claim: claim, architect_feedback: feedback }) } : {}),
       },
     });
   }
@@ -349,6 +349,14 @@ describe('persistent-mode: the reviewer prompt that the bridge composes, with th
     expect(dirty(text)).toBe(false);
     expect(text).toContain(`request-id="req-1" story-id=${writtenName(storyId, [FE0F])}>VERIFIED_COMPLETE</ralph-approved>`);
     expect(text.endsWith(`\n\n${DECODE_NOTE}`)).toBe(true);
+  }, 90000);
+
+  it('bounds the quoted fields when the bridge settles the request while it answers, as a rejection prompt does', () => {
+    const output = pendingRun({ original_task: 'first request' }, { advance: true, advanceFields: { pending: false, original_task: task, completion_claim: claim, architect_feedback: feedback } });
+    const text = textOf(output);
+    expect(dirty(text)).toBe(false);
+    expect(sectionAfter(text, '**Original Task:**')).toBe(`${task.slice(0, 2000).replace(RTL, ' ').replace(BEL, ' ')}…`);
+    expect(sectionAfter(text, '**Previous Architect Feedback (rejected):**')).toBe(`${feedback.slice(0, 2000).replace(RTL, ' ')}…`);
   }, 90000);
 
   it('does the same when the stop hook is active and the bridge starts a new request (the re-entrant Stop)', () => {

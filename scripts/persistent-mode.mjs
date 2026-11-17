@@ -1531,7 +1531,7 @@ function hasPendingArchitectVerification(prd) {
  * session-scoped file only: falling back to the unscoped legacy file would
  * delegate for a request the bridge deliberately does not read.
  */
-async function readPendingVerificationRequest(directory, omcRoot, sessionId) {
+async function readPendingVerificationRequest(directory, omcRoot, sessionId, { includeSettled = false } = {}) {
   if (sessionId) {
     try {
       const { sessionScopedPath } = await resolveSessionStatePathsForHook(
@@ -1540,14 +1540,14 @@ async function readPendingVerificationRequest(directory, omcRoot, sessionId) {
         sessionId,
       );
       const state = sessionScopedPath ? readJsonFile(sessionScopedPath) : null;
-      return state && state.pending === true ? state : null;
+      return state && (includeSettled || state.pending === true) ? state : null;
     } catch {
       return null;
     }
   }
 
   const state = readJsonFile(join(omcRoot, "ralph-verification.json"));
-  return state && state.pending === true ? state : null;
+  return state && (includeSettled || state.pending === true) ? state : null;
 }
 
 /**
@@ -1686,7 +1686,8 @@ function emit(output) {
 const DELEGATED_QUOTE_LIMITS = [["original_task", 2000], ["completion_claim", 1000], ["architect_feedback", 2000]];
 async function boundDelegated(delegated, { directory, omcRoot, sessionId, task }) {
   if (!contextText || !delegated) return delegated;
-  const request = await readPendingVerificationRequest(directory, omcRoot, sessionId);
+  // The bridge may have settled the request while it answered (a rejection prompt quotes the same fields), so a settled one counts.
+  const request = await readPendingVerificationRequest(directory, omcRoot, sessionId, { includeSettled: true });
   const substitutions = [];
   const quote = (value, limit) => {
     if (typeof value === "string" && value.length > limit) substitutions.push([value, contextText.cutText(value, limit)]);
