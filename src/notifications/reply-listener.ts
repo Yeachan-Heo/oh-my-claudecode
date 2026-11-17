@@ -583,7 +583,7 @@ function maskTypedText(text: string, typed: readonly string[]): string {
   let masked = text;
   for (const literal of typed) {
     const redacted = escapeReplyInput(redactTokens(unescapeReplyInput(literal)));
-    if (redacted === literal) continue; // nothing to mask (this also means no form below is the empty string)
+    if (redacted === literal) continue; // the redaction changes nothing; an empty text is never changed, so no form below is empty
     for (const form of TYPED_TEXT_FORMS) {
       try {
         masked = masked.split(form(literal)).join(form(redacted));
