@@ -203,7 +203,7 @@ export function releaseAgent(dir, sessionId, now = Date.now()) {
     // Serialize the read + delete under a lock to prevent concurrent SubagentStop hooks from selecting and deleting the same reservation.
     // Without this, multiple callers can all report success even when only one file is actually deleted (Codex P1 finding).
     let result = false;
-    withStateFileLockAtPathSync(
+    const lockResult = withStateFileLockAtPathSync(
       join(dir, '.pool.lock'),
       () => {
         const pool = readPool(dir, now);
@@ -221,11 +221,15 @@ export function releaseAgent(dir, sessionId, now = Date.now()) {
         }
       },
       true, // requireExclusive: serialize all operations
-      50, // attempts
+      100, // attempts: more attempts for cleanup operations
       2000, // busyTimeoutMs
       3000, // processProbeTimeoutMs
-      5000, // overallTimeoutMs
+      15000, // overallTimeoutMs: cleanup can take longer with high concurrency
     );
+    // If lock acquisition failed, fail open by returning false (not untracked like reserveAgent, since this is cleanup)
+    if (lockResult && !lockResult.acquired) {
+      return false;
+    }
     return result;
   } catch {
     return false;
@@ -239,7 +243,7 @@ export function releaseAgentByToolUseId(dir, toolUseId, now = Date.now()) {
     // Serialize the read + delete under a lock to prevent concurrent releases from both succeeding when only one file exists.
     // This ensures the pool capacity is correctly tracked (Codex P1 finding).
     let released = false;
-    withStateFileLockAtPathSync(
+    const lockResult = withStateFileLockAtPathSync(
       join(dir, '.pool.lock'),
       () => {
         const pool = readPool(dir, now);
@@ -249,11 +253,15 @@ export function releaseAgentByToolUseId(dir, toolUseId, now = Date.now()) {
         }
       },
       true, // requireExclusive: serialize all operations
-      50, // attempts
+      100, // attempts: more attempts for cleanup operations
       2000, // busyTimeoutMs
       3000, // processProbeTimeoutMs
-      5000, // overallTimeoutMs
+      15000, // overallTimeoutMs: cleanup can take longer with high concurrency
     );
+    // If lock acquisition failed, fail open by returning false (not untracked, since this is cleanup)
+    if (lockResult && !lockResult.acquired) {
+      return false;
+    }
     return released;
   } catch {
     return false;
