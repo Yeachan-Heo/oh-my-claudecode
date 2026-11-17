@@ -10,7 +10,7 @@
 //            and upsert its manifest entry.
 import { execFileSync, spawnSync } from 'node:child_process';
 import { randomBytes } from 'node:crypto';
-import { appendFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
+import { appendFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { constants as osConstants, tmpdir } from 'node:os';
 import { dirname, join, relative, resolve } from 'node:path';
 import process from 'node:process';
@@ -53,6 +53,23 @@ function parseJsonArray(value, flag) {
   return fail(`${flag} must be a JSON array of strings`);
 }
 
+function numberOption(values, name, fallback, { integer = false, min = 0 } = {}) {
+  if (values[name] === undefined) return fallback;
+  const number = values[name].trim() === '' ? NaN : Number(values[name]);
+  if (!Number.isFinite(number) || number < min || (integer && !Number.isInteger(number))) {
+    fail(`--${name} must be ${integer ? 'an integer' : 'a number'} of at least ${min}`);
+  }
+  return number;
+}
+
+// provider and version become directories under the corpus, so neither may name a path.
+function pathComponent(value, flag) {
+  if (typeof value !== 'string' || !/^[A-Za-z0-9][A-Za-z0-9._+-]*$/.test(value)) {
+    fail(`${flag} must be a single name of letters, digits, ".", "_", "+" and "-"`);
+  }
+  return value;
+}
+
 function shellQuote(value) {
   return `'${String(value).replace(/'/g, `'\\''`)}'`;
 }
@@ -79,7 +96,7 @@ function parseStep(raw) {
   if (kind === 'wait') return { kind, pattern: new RegExp(value, 'u') };
   if (kind === 'keys') return { kind, keys: value.split(/\s+/).filter(Boolean) };
   if (kind === 'text') return { kind, text: value };
-  if (kind === 'sleep' && Number(value) >= 0) return { kind, ms: Number(value) * 1000 };
+  if (kind === 'sleep' && value.trim() !== '' && Number.isFinite(Number(value)) && Number(value) >= 0) return { kind, ms: Number(value) * 1000 };
   return fail(`unknown --step ${raw}`);
 }
 
@@ -102,13 +119,17 @@ function writeHookSettings(dir, eventsLog) {
 
 async function record(values) {
   const provider = values.provider ?? fail('--provider is required');
-  const cols = Number(values.cols ?? 120);
-  const rows = Number(values.rows ?? 40);
-  const history = Number(values.history ?? 0);
-  const intervalMs = Number(values['interval-ms'] ?? 50);
-  const timeoutMs = Number(values.timeout ?? 120) * 1000;
-  const settleMs = Number(values.settle ?? 3) * 1000;
+  const cols = numberOption(values, 'cols', 120, { integer: true, min: 1 });
+  const rows = numberOption(values, 'rows', 40, { integer: true, min: 1 });
+  const history = numberOption(values, 'history', 0, { integer: true });
+  const intervalMs = numberOption(values, 'interval-ms', 50, { min: 1 });
+  const timeoutMs = numberOption(values, 'timeout', 120) * 1000;
+  const settleMs = numberOption(values, 'settle', 3) * 1000;
   const steps = (values.step ?? []).map(parseStep);
+  // tmux starts the pane in the home directory when -c is not a directory.
+  if (values.cwd !== undefined && !(existsSync(values.cwd) && statSync(values.cwd).isDirectory())) {
+    fail(`--cwd ${values.cwd} is not a directory`);
+  }
 
   const contract = await contractLaunchArgs(provider, values.model);
   // The pane starts in --cwd, so a relative path is pinned to where the recorder
@@ -202,7 +223,7 @@ async function record(values) {
       else if (step?.kind === 'sleep') done = Date.now() - stepStartedAt >= step.ms;
       else if (step) {
         if (step.kind === 'keys') tmux('send-keys', '-t', 'rec:0.0', ...step.keys);
-        else tmux('send-keys', '-t', 'rec:0.0', '-l', step.text);
+        else tmux('send-keys', '-t', 'rec:0.0', '-l', '--', step.text);
         done = true;
       }
       if (done) {
@@ -240,14 +261,16 @@ function extract(values) {
   const metaPath = join(dirname(from), 'meta.json');
   const meta = existsSync(metaPath) ? JSON.parse(readFileSync(metaPath, 'utf8')) : {};
   const frames = readFrames(from);
-  const index = values.frame === undefined || values.frame === 'last' ? frames.length - 1 : Number(values.frame);
+  const index = values.frame === undefined || values.frame === 'last'
+    ? frames.length - 1
+    : numberOption(values, 'frame', 0, { integer: true });
   const frame = frames[index];
   if (frame === undefined) fail(`--frame ${values.frame} is out of range (0..${frames.length - 1})`);
   const source = values.source ?? 'recorded';
   if (!SOURCES.includes(source)) fail(`--source must be one of ${SOURCES.join(', ')}`);
 
-  const provider = values.provider ?? meta.provider ?? fail('--provider is required without meta.json');
-  const version = values.version ?? meta.version ?? fail('--version is required without meta.json');
+  const provider = pathComponent(values.provider ?? meta.provider ?? fail('--provider is required without meta.json'), '--provider');
+  const version = pathComponent(values.version ?? meta.version ?? fail('--version is required without meta.json'), '--version');
   const file = `${provider}/${version}/${state}.txt`;
   const corpusRoot = values.corpus === undefined ? CORPUS_ROOT : resolve(values.corpus);
   const manifestPath = join(corpusRoot, 'manifest.json');
@@ -258,8 +281,8 @@ function extract(values) {
     provider,
     version,
     state,
-    cols: values.cols === undefined ? (meta.cols ?? null) : Number(values.cols),
-    rows: values.rows === undefined ? (meta.rows ?? null) : Number(values.rows),
+    cols: numberOption(values, 'cols', meta.cols ?? null, { integer: true, min: 1 }),
+    rows: numberOption(values, 'rows', meta.rows ?? null, { integer: true, min: 1 }),
     launch_args: values.args === undefined ? (meta.launch_args ?? null) : parseJsonArray(values.args, '--args'),
     // --hooks adds --settings to the launch but not to launch_args.
     ...(meta.hooks ? { hooks: true } : {}),

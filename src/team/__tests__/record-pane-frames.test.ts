@@ -1,5 +1,5 @@
 import { spawn, spawnSync } from 'node:child_process';
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { basename, delimiter, dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -7,7 +7,8 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const RECORDER = resolve(HERE, '../../../scripts/record-pane-frames.mjs');
-const HAS_TMUX = process.platform !== 'win32' && spawnSync('tmux', ['-V']).status === 0;
+const TMUX_PATH = process.platform === 'win32' ? '' : spawnSync('sh', ['-c', 'command -v tmux'], { encoding: 'utf8' }).stdout.trim();
+const HAS_TMUX = TMUX_PATH !== '' && spawnSync(TMUX_PATH, ['-V']).status === 0;
 
 const PROVIDER_SOURCE = `
 import { execSync } from 'node:child_process';
@@ -62,6 +63,8 @@ function runRecorder(
 ): Promise<RecorderRun> {
   const env: NodeJS.ProcessEnv = { ...process.env, TMUX_TMPDIR: root, ...spawnOptions.env };
   delete env.TMUX;
+  // The model contract refuses some providers under the developer's own security mode.
+  delete env.OMC_SECURITY;
   const child = spawn(process.execPath, [RECORDER, ...args], { env, cwd: spawnOptions.cwd, stdio: ['ignore', 'pipe', 'pipe'] });
   let stdout = '';
   let stderr = '';
@@ -185,6 +188,38 @@ describe('record-pane-frames extract', () => {
     expect(existsSync(result.corpus)).toBe(false);
   });
 
+  it.each([
+    { name: 'a --provider that names a path', args: ['--provider', '../escaped'], message: '--provider must be a single name' },
+    { name: 'a --version that names a path', args: ['--version', '..'], message: '--version must be a single name' },
+    { name: 'a --version with a separator', args: ['--version', '1.0/../../escaped'], message: '--version must be a single name' },
+    { name: 'a --cols that is not a number', args: ['--cols', 'oops'], message: '--cols must be an integer of at least 1' },
+    { name: 'an empty --frame', args: ['--frame', ''], message: '--frame must be an integer of at least 0' },
+    { name: 'a fractional --frame', args: ['--frame', '0.5'], message: '--frame must be an integer of at least 0' },
+  ])('refuses $name and writes nothing', ({ args, message }) => {
+    const from = join(root, 'plain.txt');
+    writeFileSync(from, '> \n');
+
+    const result = extract(from, ...args);
+
+    expect(result.code).toBe(2);
+    expect(result.stderr).toContain(message);
+    expect(readdirSync(root)).toEqual(['plain.txt']);
+  });
+
+  it('refuses a meta.json whose provider would file the frame outside the corpus', () => {
+    const recording = join(root, 'recording');
+    mkdirSync(recording);
+    writeFileSync(join(recording, 'frames.txt'), '=== 1763340000.100\n> \n');
+    writeFileSync(join(recording, 'meta.json'), JSON.stringify({ provider: '../../escaped', version: '1.0.0' }));
+    const corpus = join(root, 'corpus');
+
+    const result = spawnSync(process.execPath, [RECORDER, 'extract', '--from', join(recording, 'frames.txt'), '--state', 'idle', '--corpus', corpus], { encoding: 'utf8' });
+
+    expect(result.status).toBe(2);
+    expect(result.stderr).toContain('--provider must be a single name');
+    expect(readdirSync(root)).toEqual(['recording']);
+  });
+
   it('needs --provider and --version when the recording has no meta.json', () => {
     const from = join(root, 'plain.txt');
     writeFileSync(from, '> \n');
@@ -217,6 +252,15 @@ describe('record-pane-frames arguments', () => {
     { name: 'an unknown step kind', args: ['record', '--provider', 'claude', '--step', 'typo:x'], message: 'unknown --step typo:x' },
     { name: 'a negative sleep', args: ['record', '--provider', 'claude', '--step', 'sleep:-1'], message: 'unknown --step sleep:-1' },
     { name: 'a sleep that is not a number', args: ['record', '--provider', 'claude', '--step', 'sleep:soon'], message: 'unknown --step sleep:soon' },
+    { name: 'a sleep that never ends', args: ['record', '--provider', 'claude', '--step', 'sleep:Infinity'], message: 'unknown --step sleep:Infinity' },
+    { name: 'a pane with no columns', args: ['record', '--provider', 'claude', '--cols', '0'], message: '--cols must be an integer of at least 1' },
+    { name: 'a fractional row count', args: ['record', '--provider', 'claude', '--rows', '12.5'], message: '--rows must be an integer of at least 1' },
+    { name: 'a negative history', args: ['record', '--provider', 'claude', '--history=-1'], message: '--history must be an integer of at least 0' },
+    { name: 'a zero interval', args: ['record', '--provider', 'claude', '--interval-ms', '0'], message: '--interval-ms must be a number of at least 1' },
+    { name: 'a timeout that is not a number', args: ['record', '--provider', 'claude', '--timeout', 'NaN'], message: '--timeout must be a number of at least 0' },
+    { name: 'an empty settle time', args: ['record', '--provider', 'claude', '--settle', ''], message: '--settle must be a number of at least 0' },
+    { name: 'a --cwd that is a file', args: ['record', '--provider', 'claude', '--cwd', '<a file>'], message: 'is not a directory' },
+    { name: 'a --cwd that does not exist', args: ['record', '--provider', 'claude', '--cwd', '<missing>'], message: 'is not a directory' },
     { name: 'record without --provider', args: ['record'], message: '--provider is required' },
     { name: 'an unknown command', args: ['replay'], message: 'unknown command replay' },
     { name: 'no command', args: [], message: 'unknown command <none>' },
@@ -224,7 +268,9 @@ describe('record-pane-frames arguments', () => {
     const out = join(root, 'out');
     // A binary that does not exist, so a recorder that stops refusing launches no real provider.
     const safe = ['--out', out, '--bin', join(root, 'no-such-provider'), '--args', '[]', '--settle', '0', '--timeout', '2'];
-    const run = await runRecorder(args[0] === 'record' ? [...args, ...safe] : args);
+    writeFileSync(join(root, 'a-file'), '');
+    const given = args.map(arg => (arg === '<a file>' ? join(root, 'a-file') : arg === '<missing>' ? join(root, 'missing') : arg));
+    const run = await runRecorder(given[0] === 'record' ? ['record', ...safe, ...given.slice(1)] : given);
 
     expect(run.code).toBe(2);
     expect(run.stderr).toContain(message);
@@ -268,6 +314,10 @@ describe.skipIf(!HAS_TMUX)('record-pane-frames record', () => {
   }
 
   const providerPid = () => until(() => existsSync(pidFile) && Number(readFileSync(pidFile, 'utf8')), 'the provider to start');
+  const providerHasExited = async () => {
+    const pid = await providerPid();
+    await until(() => !processIsAlive(pid), 'the provider to exit');
+  };
   const actions = () => readFileSync(join(out, 'actions.log'), 'utf8').trim().split('\n').map(line => line.replace(/^\S+ /, ''));
 
   it('runs its steps in order, settles, and leaves no tmux server', async () => {
@@ -280,7 +330,7 @@ describe.skipIf(!HAS_TMUX)('record-pane-frames record', () => {
     expect(summary.frames).toBeGreaterThanOrEqual(2);
     expect(actions()).toEqual(['launch', ...steps]);
     expect(leftoverSockets()).toEqual([]);
-    expect(processIsAlive(await providerPid())).toBe(false);
+    await providerHasExited();
 
     const { frame } = extractLast();
     expect(frame).toContain('=== test results ===');
@@ -298,7 +348,15 @@ describe.skipIf(!HAS_TMUX)('record-pane-frames record', () => {
     expect(actions()).toEqual(['launch']);
     expect(extractLast().frame).toContain('READY>');
     expect(leftoverSockets()).toEqual([]);
-    expect(processIsAlive(await providerPid())).toBe(false);
+    await providerHasExited();
+  });
+
+  it('types text that starts with a hyphen as text', async () => {
+    const run = await record(['wait:READY>', 'text:-n', 'keys:Enter', 'wait:got:-n']);
+
+    expect(run.code).toBe(0);
+    expect((JSON.parse(run.stdout) as { stop: string }).stop).toBe('settled');
+    expect(extractLast().frame).toContain('got:-n');
   });
 
   it('saves the screen its last step produced even when the settle time is shorter than the interval', async () => {
@@ -326,7 +384,7 @@ describe.skipIf(!HAS_TMUX)('record-pane-frames record', () => {
     expect((JSON.parse(run.stdout) as { stop: string }).stop).toBe('timeout');
     expect(run.stderr).toContain('stopped before step wait:never-shown');
     expect(leftoverSockets()).toEqual([]);
-    expect(processIsAlive(await providerPid())).toBe(false);
+    await providerHasExited();
   });
 
   function extractLast(): { frame: string; entry: Record<string, unknown> } {
@@ -423,7 +481,7 @@ describe.skipIf(!HAS_TMUX)('record-pane-frames record', () => {
     expect(frame).toContain('size:120x40');
     expect(entry).toMatchObject({ cols: 120, rows: 40 });
     expect(leftoverSockets()).toEqual([]);
-    expect(processIsAlive(await providerPid())).toBe(false);
+    await providerHasExited();
   });
 
   it('files frames under version "unknown" when the binary reports no version', async () => {
@@ -450,14 +508,14 @@ describe.skipIf(!HAS_TMUX)('record-pane-frames record', () => {
     const stub = join(root, 'stub-claude.mjs');
     writeFileSync(stub, CONTRACT_STUB_SOURCE.replace(
       "console.log('stub 9.8.7');",
-      "Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 2500); console.log('stub 9.8.7');",
+      "Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 3500); console.log('stub 9.8.7');",
     ));
     chmodSync(stub, 0o755);
     out = join(root, 'out');
 
     const run = await runRecorder([
       'record', '--provider', 'claude', '--bin', stub, '--args', '["--flag"]', '--out', out, '--cwd', root,
-      '--interval-ms', '20', '--settle', '0.3', '--timeout', '2', '--step', 'wait:READY>',
+      '--interval-ms', '20', '--settle', '0.3', '--timeout', '3', '--step', 'wait:READY>',
     ]);
 
     expect(run.code).toBe(0);
@@ -472,11 +530,14 @@ describe.skipIf(!HAS_TMUX)('record-pane-frames record', () => {
     chmodSync(join(bin, 'codex'), 0o755);
     out = join(root, 'out');
 
-    // /bin/sh reads no startup file, so the pane resolves `codex` from this PATH.
+    // PATH holds only the stub, node, tmux and the system directories, and /bin/sh reads
+    // no startup file, so neither the recorder nor the pane can reach an installed codex.
+    symlinkSync(process.execPath, join(bin, 'node'));
+    symlinkSync(TMUX_PATH, join(bin, 'tmux'));
     const run = await runRecorder([
       'record', '--provider', 'codex', '--out', out, '--cwd', root,
       '--interval-ms', '20', '--settle', '0.3', '--timeout', '20', '--step', 'wait:READY>',
-    ], undefined, { env: { PATH: `${bin}${delimiter}${process.env.PATH ?? ''}`, SHELL: '/bin/sh' } });
+    ], undefined, { env: { PATH: [bin, '/usr/bin', '/bin'].join(delimiter), SHELL: '/bin/sh' } });
 
     expect(run.code).toBe(0);
     const summary = JSON.parse(run.stdout) as { version: string; launch_args: string[] };
