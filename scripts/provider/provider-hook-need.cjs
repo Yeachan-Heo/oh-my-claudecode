@@ -65,11 +65,22 @@ function count(key) {
   }
 }
 
+// Lifecycle commands that must work even when the tool budget is exhausted: team api operations for task reporting and status transitions.
+function isLifecycleCommand(input) {
+  if (!input || typeof input !== 'object') return false;
+  if (input.tool_name !== 'Bash') return false;
+  const cmd = String(input.tool_input?.command ?? '');
+  // Allow team api commands: claim-task, transition-task-status, release-task-claim, renew-task-claim, send-message, read-task
+  return /\bteam\s+api\s+(claim-task|transition-task-status|release-task-claim|renew-task-claim|send-message|read-task)\b/.test(cmd);
+}
+
 // Handles the hook input (text from stdin or a parsed object in tests); null = let the call through (no response).
 function hookResponse(input) {
   let parsed = null;
   try { parsed = typeof input === 'string' ? JSON.parse(input) : input; } catch { return needResponse(`${NEED_TEXT} (hook input damaged: fail-closed)`); }
   if (parsed?.tool_name === 'AskUserQuestion') return needResponse(NEED_TEXT);
+  // Lifecycle commands bypass the tool budget limit
+  if (isLifecycleCommand(parsed)) return null;
   const key = taskKey(parsed);
   if (!key) return null;
   const n = count(key);

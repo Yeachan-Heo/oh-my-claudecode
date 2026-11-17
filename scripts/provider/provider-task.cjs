@@ -516,6 +516,12 @@ async function startInternal(id) {
     try { completeTask(id, env, (d) => ({ ...d, start_exit_code: 1, start_error: lockError })); } catch { /* the task file lock is busy: the evaluation uses start_pid */ }
     process.exit(0);
   }
+  // Recheck cancellation before spawning: the task may have been killed while waiting for the start lock.
+  const zz = readTask(id, env);
+  if (zz && zz.killed) {
+    try { completeTask(id, env, (d) => ({ ...d, start_exit_code: 0, start_error: 'task killed before spawn' })); } catch { /* the task file lock is busy */ }
+    process.exit(0);
+  }
   // The moment of the actual start is taking the start lock: omc_started_at (ISO) goes under the lock of the task file BEFORE provider-team
   // runs - the grace period of a missing OMC task counts from it, not from the start entry.
   try { completeTask(id, env, (d) => ({ ...d, omc_started_at: new Date().toISOString() })); }

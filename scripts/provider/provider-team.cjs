@@ -47,6 +47,11 @@ const { profile } = loaded;
   for (const name of Object.keys(env)) {
     if (name.startsWith('OMC_PROVIDER_') && name !== 'OMC_PROVIDER_SETTINGS_FILE' && !passthrough.includes(name)) passthrough.push(name);
   }
+  // Forward the profile's environment key source (e.g., ACME_API_KEY when apiKey.env is set) so the worker can read it
+  const { profile: loadedProfile } = loaded;
+  if (loadedProfile?.apiKey?.env && !passthrough.includes(loadedProfile.apiKey.env)) {
+    passthrough.push(loadedProfile.apiKey.env);
+  }
   env.OMC_TEAM_WORKER_ENV_PASSTHROUGH = passthrough.join(',');
   // A worktree per worker is on by default: mode `named` gives every worker a branch omc-team/<team>/<worker> for review, and removal keeps unmerged commits;
   // an explicit value of the user wins (||= does not overwrite). Without a value OMC uses `disabled` and workers write into one tree.

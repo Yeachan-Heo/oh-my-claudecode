@@ -78,7 +78,9 @@ async function readQuota(profile, env = process.env, key, { fresh = false } = {}
   const cachePath = statePath(profile, env, 'quota-cache.json');
   if (!fresh) {
     const cache = readJson(cachePath);
-    if (cache && typeof cache.ts === 'number' && Date.now() - cache.ts < QUOTA_CACHE_MS && cache.response) {
+    // Use profile's quota cache lifetime instead of the constant default
+    const cacheLifetimeMs = (profile.quota?.cacheSeconds ?? PROFILE_DEFAULTS.quota.cacheSeconds) * 1000;
+    if (cache && typeof cache.ts === 'number' && Date.now() - cache.ts < cacheLifetimeMs && cache.response) {
       return { data: cache.response, fromCache: true };
     }
   }
