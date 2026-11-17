@@ -260,7 +260,11 @@ export function classifyTranscript(text, progress, fromTsMs = 0) {
     for (const part of parts) {
       if (row.type === "assistant" && part?.type === "tool_use") {
         pending.set(part.id, { tool: part.name, input: part.input, ts: tsMs, ok: null, result: null, durationMs: null });
-        // Don't count saving tools as progress here; wait until we see the result to check for denial markers
+        if (SAVING_TOOLS.has(part.name) && tsMs >= fromTsMs) {
+          const r = progress.add({ tool: part.name, input: part.input, result: null, durationMs: null, ok: null });
+          if (r.progress) result.progress = true;
+          result.calls += 1;
+        }
         continue;
       }
       if (row.type === "user" && part?.type === "tool_result") {
@@ -270,12 +274,10 @@ export function classifyTranscript(text, progress, fromTsMs = 0) {
           call.ok = part.is_error !== true;
           call.result = flattenResult(part.content);
           call.durationMs = (call.durationMs === null) ? null : call.durationMs;
-          // Check for denial markers before counting as progress
-          if (!carriesDenialMarker(call.result) && !carriesDenialMarker(part.is_error ? call.result : '')) {
-            const r = progress.add(call);
-            if (r.progress) result.progress = true;
-            result.calls += 1;
-          }
+          // Count the call regardless of denial markers; progress.add() checks for denials
+          const r = progress.add(call);
+          if (r.progress) result.progress = true;
+          result.calls += 1;
         }
       }
     }

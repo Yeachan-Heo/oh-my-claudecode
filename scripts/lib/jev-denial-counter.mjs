@@ -232,11 +232,19 @@ function saveState(path, state) {
  *   action    the fired action id or null                  state     'ok' | 'missing' | 'broken' | 'nan' | 'lock-unavailable'
  *   text      escalation text to append (may be empty)
  */
-export function registerDenial({ stateDir, sessionId, agentId, guard, reason, call = {}, env = process.env, now }) {
+export function registerDenial({ stateDir, sessionId, agentId, guard, reason, call = {}, env = process.env, now, resolvedSessionDir }) {
   const key = denialKey(guard, reason);
   const hash = keyHash(key);
   const ts = isFiniteNumber(now) ? now : Date.now();
-  const path = statePath(stateDir, sessionId, agentId);
+  // Use resolved session directory if provided (passed from resolveSessionStatePathsForHook at the hook boundary);
+  // otherwise fall back to building the path from components for backward compatibility.
+  let path;
+  if (resolvedSessionDir) {
+    const file = agentId ? `denials-${String(agentId).replace(/[^A-Za-z0-9._-]/g, '_').slice(0, 120)}.json` : 'denials-main.json';
+    path = join(resolvedSessionDir, file);
+  } else {
+    path = statePath(stateDir, sessionId, agentId);
+  }
   const logDir = denialLogDir(stateDir, env);
   const k = denialK(env);
   const windowMs = denialWindowMs(env);

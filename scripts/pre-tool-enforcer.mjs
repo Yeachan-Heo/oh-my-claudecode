@@ -24,7 +24,7 @@ import { resolveConfiguredAgentModel } from './lib/agent-model-config.mjs';
 import { BOUNDED_GIT_TIMEOUT_MS } from './lib/bounded-git-timeout.mjs';
 import { isSkillVisibleToUser } from './lib/skill-entitlements.mjs';
 import { isJevAppliedLogEnabled, isJevShadowOptedIn, jevModeFor, jevNoulOf, recordJevApplied, recordJevShadow, setJevHookContext, setJevSessionId } from './lib/jev-shadow.mjs';
-import { agentLimit, poolDir, poolEnabled, readPoolState, refusalText, reserveAgent, writePoolRow } from './lib/jev-pool.mjs';
+import { agentLimit, poolDir, poolEnabled, readPoolState, refusalText, releaseAgentByToolUseId, reserveAgent, writePoolRow } from './lib/jev-pool.mjs';
 import { resolveExcerptChars, resolveJevLogMaxBytes, rotateJevLog } from './jev-resolve.mjs';
 import { denialK, denialKey, denialLogDir, denialMarker, denialSessionMax, isDenialSwitchOn, keyHash, registerDenial, writeDenialRow } from './lib/jev-denial-counter.mjs';
 
@@ -2447,6 +2447,26 @@ function evaluateAgentPool(toolName, data, stateDir) {
   return null;
 }
 
+// Helper to emit a denial and release the pool reservation if one was made for this call.
+// When a guard denies after the pool guard reserves a slot, we must release it to avoid
+// stranding the reservation for the duration of its TTL (issue from P2 Codex finding).
+function emitDenialAndReleasePool(output, data, stateDir) {
+  // Release the pool reservation if this is an Agent/Task call that made one
+  const toolName = data?.tool_name || data?.toolName || '';
+  if ((toolName === 'Task' || toolName === 'Agent') && poolEnabled()) {
+    const toolUseId = typeof data?.tool_use_id === 'string' ? data.tool_use_id : '';
+    if (toolUseId) {
+      try {
+        const dir = poolDir(process.env, stateDir);
+        releaseAgentByToolUseId(dir, toolUseId);
+      } catch {
+        // Best-effort: fail silently if release fails
+      }
+    }
+  }
+  emitPreToolUseOutput(output, data);
+}
+
 // The named-only Jev point `delegation` (OMC_JEV=delegation, delegation:shadow or delegation:active; `all` never enables it,
 // lib/jev-delegation.mjs). Only the session's own Agent/Task call (no agent_id) in a session whose role is coordinator
 // (OMC_SESSION_ROLE, set by scripts/jev-session.mjs): `delegation` and `delegation:shadow` ask Jev and log the answer in
@@ -2761,7 +2781,7 @@ async function main() {
       const skillAgentDeny = evaluateSkillAsAgentCall(toolName, toolInput, directory);
       if (skillAgentDeny) {
         skillAgentDeny.hookSpecificOutput.permissionDecisionReason = denialReasonWithCounter('skill-vs-agent', skillAgentDeny.hookSpecificOutput.permissionDecisionReason, data, stateDir);
-        emitPreToolUseOutput(skillAgentDeny, data);
+        emitDenialAndReleasePool(skillAgentDeny, data, stateDir);
         return;
       }
       const toolModel = toolInput.model;
@@ -2792,14 +2812,14 @@ async function main() {
             const guidance = derivedTier
               ? `Set ANTHROPIC_DEFAULT_${derivedTier}_MODEL=<valid-bedrock-id> in settings.json env, or set OMC_SUBAGENT_MODEL as a global override.`
               : `Remove the \`model\` parameter, or set ANTHROPIC_DEFAULT_SONNET_MODEL=<valid-bedrock-id> in settings.json env.`;
-            emitPreToolUseOutput({
+            emitDenialAndReleasePool({
               continue: true,
               hookSpecificOutput: {
                 hookEventName: 'PreToolUse',
                 permissionDecision: 'deny',
                 permissionDecisionReason: denialReasonWithCounter('model-routing', `[MODEL ROUTING] This environment uses a non-standard provider (Bedrock/Vertex/proxy). ${guidance} The model "${toolModel}" is not valid for this provider.`, data, stateDir)
               }
-            }, data);
+            }, data, stateDir);
             return;
           }
           // else: valid provider-specific model ID — fall through to continue.
@@ -2814,14 +2834,14 @@ async function main() {
           const suggestion = resolvedSafe
             ? `Pass model="${tierAlias}" explicitly on this ${toolName} call — tier aliases resolve cleanly on Bedrock.`
             : `Pass model="${tierAlias}" explicitly on this ${toolName} call, and set ANTHROPIC_DEFAULT_${tierAlias.toUpperCase()}_MODEL=<valid-bedrock-id> in settings.json env.`;
-          emitPreToolUseOutput({
+          emitDenialAndReleasePool({
             continue: true,
             hookSpecificOutput: {
               hookEventName: 'PreToolUse',
               permissionDecision: 'deny',
               permissionDecisionReason: denialReasonWithCounter('model-routing', `[MODEL ROUTING] Your session model "${sessionModel}" has a context-window suffix ([1m]) that sub-agents cannot inherit — the runtime strips it to a bare Anthropic model ID which is invalid on Bedrock. ${suggestion}`, data, stateDir)
             }
-          }, data);
+          }, data, stateDir);
           return;
         }
         // Agent-definition model check: runs for any no-model call with a subagent_type,
@@ -2841,14 +2861,14 @@ async function main() {
               && hasSafeRouting) {
             const guidance = `Add model="${defTierAlias}" to this ${toolName} call — tier aliases resolve to configured provider models (${resolvedModel}).`;
             const agentType = (toolInput.subagent_type).replace(/^oh-my-claudecode:/, '');
-            emitPreToolUseOutput({
+            emitDenialAndReleasePool({
               continue: true,
               hookSpecificOutput: {
                 hookEventName: 'PreToolUse',
                 permissionDecision: 'deny',
                 permissionDecisionReason: denialReasonWithCounter('model-routing', `[MODEL ROUTING] Agent type "${agentType}" has model "${agentDefModel}" in its definition, which is not valid for this Bedrock/Vertex/proxy environment. ${guidance}`, data, stateDir)
               }
-            }, data);
+            }, data, stateDir);
             return;
           }
         }
