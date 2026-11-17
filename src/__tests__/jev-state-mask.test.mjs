@@ -558,6 +558,19 @@ describe('maskJevState: names that collide after masking', () => {
     expect(keys[299]).toBe('[key omitted: path] #300');
     expect(new Set(keys).size).toBe(300);
   });
+
+  it('numbers 20000 colliding keys in well under a second (the numbering is linear, not a rescan from #2 for every key)', () => {
+    const state = {};
+    for (let i = 0; i < 20000; i++) state[`/run/secrets/key-${i}`] = i;
+    const start = performance.now();
+    const keys = Object.keys(maskJevState(state));
+    const duration = performance.now() - start;
+    expect(keys).toHaveLength(20000);
+    expect(keys[19999]).toBe('[key omitted: path] #20000');
+    expect(new Set(keys).size).toBe(20000);
+    // linear: tens of milliseconds; the rescan took 52 s
+    expect(duration).toBeLessThan(3000);
+  });
 });
 
 describe('maskJevState: values that stand beside their names', () => {
