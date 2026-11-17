@@ -4372,7 +4372,9 @@ export interface PaneProcessTree {
 /**
  * Opt-in (`OMC_TEAM_KILL_PANE_TREE=1`), first half: reads the descendants of the
  * pane's root process, found by parent PID regardless of session or process
- * group, and the process start identity of each. It only reads and signals
+ * group, and the process start identity of each (a descendant is kept only
+ * when a second read of the process table shows the parent it had in the
+ * first, so a PID reused in between is not recorded). It only reads and signals
  * nothing, so a caller can take it before an action that detaches descendants
  * from the pane (the termination of the worker's provider) and hand it to
  * `terminatePaneProcessTree` later. Returns null, before any tmux or `ps`
@@ -4435,7 +4437,15 @@ export async function capturePaneProcessTree(
         startIdentities.set(pid, null);
       }
     }
-    return { panePid, pids, startIdentities };
+    // The identities above were read after the process table. A PID that exited and was reused in between is recorded under the
+    // identity of its new process; a second read of the table shows it with another parent (or not at all), so only a PID that
+    // still has the parent it had in the first read is kept.
+    const again = await readRecords();
+    const kept = pids.filter(
+      (pid) => again.get(pid)?.ppid === records.get(pid)?.ppid,
+    );
+    if (kept.length === 0) return null;
+    return { panePid, pids: kept, startIdentities };
   } catch {
     /* reading the tree must not block the pane kill */
     return null;

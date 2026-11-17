@@ -379,6 +379,44 @@ describe("pane process tree captured first and terminated later (injected depend
     expect(killProcess).not.toHaveBeenCalled();
   });
 
+  it("records only the descendants that keep their parent in a second read of the process table (a reused PID shows another parent)", async () => {
+    process.env.OMC_TEAM_KILL_PANE_TREE = "1";
+    mockPanePid(FAKE_PANE_PID);
+    const LATER = 4_000_003;
+    const first = new Map([
+      [CHILD, { ppid: FAKE_PANE_PID }],
+      [GRANDCHILD, { ppid: CHILD }],
+      [LATER, { ppid: CHILD }],
+    ]);
+    // GRANDCHILD exited and its PID went to an unrelated process (another parent); LATER exited and is not in the table any more
+    const second = new Map([
+      [CHILD, { ppid: FAKE_PANE_PID }],
+      [GRANDCHILD, { ppid: 1 }],
+    ]);
+    const readProcessRecords = vi.fn().mockResolvedValueOnce(first).mockResolvedValue(second);
+
+    const tree = await capturePaneProcessTree(IDENTITY, "%7", {
+      readProcessRecords,
+      processIdentity: (pid) => `start-${pid}`,
+    });
+
+    expect(readProcessRecords).toHaveBeenCalledTimes(2);
+    expect(tree?.pids).toEqual([CHILD]);
+  });
+
+  it("a capture whose descendants all changed parent before the second read is null, so nothing is signalled later", async () => {
+    process.env.OMC_TEAM_KILL_PANE_TREE = "1";
+    mockPanePid(FAKE_PANE_PID);
+    const readProcessRecords = vi
+      .fn()
+      .mockResolvedValueOnce(new Map([[CHILD, { ppid: FAKE_PANE_PID }]]))
+      .mockResolvedValue(new Map([[CHILD, { ppid: 1 }]]));
+
+    await expect(
+      capturePaneProcessTree(IDENTITY, "%7", { readProcessRecords, processIdentity: (pid) => `start-${pid}` }),
+    ).resolves.toBeNull();
+  });
+
   it("terminating a null capture does nothing", async () => {
     const killProcess = vi.fn();
     const sleep = vi.fn(async () => undefined);
