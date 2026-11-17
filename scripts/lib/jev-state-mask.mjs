@@ -100,10 +100,29 @@ const MARKER = /\[(?:key|line) omitted: [^\]]*\]/g;
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 function normalizeKey(key) {
-  // Fail fast on oversized keys: acronym-splitting regexes can backtrack quadratically on
-  // long all-uppercase strings. Very long keys are unlikely to match secret patterns anyway.
-  if (key.length > 1000) return key.toLowerCase();
-  return key.replace(MARKER, '').replace(/([A-Z]+)([A-Z][a-z])/g, '$1_$2').replace(/([a-z0-9])([A-Z])/g, '$1_$2').toLowerCase();
+  const cleaned = key.replace(MARKER, '');
+  // Linear-time acronym splitter: insert underscores at word boundaries without backtracking regexes.
+  // Boundaries: (1) uppercase sequence before an uppercase+lowercase pair, (2) lowercase/digit before uppercase.
+  const chars = cleaned.split('');
+  const result = [];
+  for (let i = 0; i < chars.length; i++) {
+    const c = chars[i];
+    const prev = i > 0 ? chars[i - 1] : '';
+    const next = i < chars.length - 1 ? chars[i + 1] : '';
+    // Insert underscore before uppercase letter if preceded by lowercase/digit or if part of acronym break
+    if (c === c.toUpperCase() && c !== c.toLowerCase() && i > 0) {
+      const prevIsLower = prev === prev.toLowerCase() && prev !== prev.toUpperCase();
+      const prevIsDigit = /[0-9]/.test(prev);
+      const nextIsLower = next === next.toLowerCase() && next !== next.toUpperCase();
+      const prevIsUpper = prev === prev.toUpperCase() && prev !== prev.toLowerCase();
+      // Break before uppercase if preceded by lowercase/digit, or if this is the start of a new acronym (preceded by uppercase, followed by lowercase)
+      if (prevIsLower || prevIsDigit || (prevIsUpper && nextIsLower && i > 1)) {
+        result.push('_');
+      }
+    }
+    result.push(c.toLowerCase());
+  }
+  return result.join('');
 }
 
 // 'secret' (the value is masked, a number too), 'counter' (a number stays) or false, for the name of a key or of a pair.
