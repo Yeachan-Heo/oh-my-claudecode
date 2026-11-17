@@ -9,7 +9,7 @@ import { describe, expect, it } from 'vitest';
 
 import { makeCase, checkCase, seededRandom } from './jev-state-mask-cases.mjs';
 import { maskSecrets } from '../../scripts/lib/jev-mask.mjs';
-import { JevStateFieldOmittedError, JevStateMaskError, KEY_OMITTED, LINE_EXTENSION, MAX_STATE_CHARS, MAX_STATE_DEPTH, MAX_STATE_NODES, RUN_EXTENSION, SECRET_PATH, TOKEN_CHAR, WINDOW_MARGIN, maskJevState, normalizeKey, treatment } from '../../scripts/lib/jev-state-mask.mjs';
+import { JevStateFieldOmittedError, JevStateMaskError, KEY_OMITTED, LINE_EXTENSION, MAX_STATE_CHARS, MAX_STATE_DEPTH, MAX_STATE_NODES, PATH_TAIL, RUN_EXTENSION, SECRET_PATH, TOKEN_CHAR, WINDOW_MARGIN, maskJevState, normalizeKey, treatment } from '../../scripts/lib/jev-state-mask.mjs';
 
 const root = join(fileURLToPath(import.meta.url), '..', '..', '..');
 const GHP = 'ghp_' + 'A'.repeat(36);
@@ -909,6 +909,130 @@ describe('maskJevState: an argument is one value, white space and quotes include
   });
 });
 
+describe('maskJevState: the program of a command is read from the end of its argument, whatever the window', () => {
+  const MAX = 200;
+  const CAP = MAX + WINDOW_MARGIN;
+  const SECRET = 'hunter2zzQ';
+  // what is sent: every string cut to maxChars, as the resolvers do after the mask
+  const sentOf = (argv, options) => maskJevState({ argv }, options).argv.map((item) => (typeof item === 'string' ? item.slice(0, MAX) : item));
+  // a path of exactly `length` characters that ends in `program`: many directories, or one long directory name
+  const programPath = (program, length, sep, deep) => {
+    const room = length - program.length - 1;
+    const dirs = Math.floor(room / 2);
+    const path = deep ? 'd'.repeat(room - 2 * dirs) + sep + ('d' + sep).repeat(dirs) + program : 'd'.repeat(room) + sep + program;
+    expect(path).toHaveLength(length);
+    return path;
+  };
+  // [name, what follows the program, what is sent of it]; `db` after each, so that no argv is a pair of two elements
+  const positions = [
+    ['-p SECRET', ['-p', SECRET, 'db'], ['-p', '***', 'db']],
+    ['-pSECRET', [`-p${SECRET}`, 'db'], ['-p***', 'db']],
+    ['-u root -p SECRET', ['-u', 'root', '-p', SECRET, 'db'], ['-u', 'root', '-p', '***', 'db']],
+    ['-u root -pSECRET', ['-u', 'root', `-p${SECRET}`, 'db'], ['-u', 'root', '-p***', 'db']],
+    ['--password SECRET', ['--password', SECRET, 'db'], ['--password', '***', 'db']],
+    ['--password=SECRET', [`--password=${SECRET}`, 'db'], ['--password=***', 'db']],
+    ['-u user:SECRET', ['-u', `user:${SECRET}`, 'db'], ['-u', 'user:***', 'db']],
+    ['--user=user:SECRET', [`--user=user:${SECRET}`, 'db'], ['--user=user:***', 'db']],
+    ['a URL with user:SECRET@host', [`https://user:${SECRET}@host`, 'db'], ['https://user:***@host', 'db']],
+  ];
+  const programs = ['mysql', 'mysqldump', 'mysqladmin', 'mariadb', 'mariadb-dump', 'mysql.exe', 'sshpass'];
+  const lengths = [MAX - 1, MAX, CAP, CAP + 1, PATH_TAIL, 100_000];
+  const before = { none: [], sudo: ['sudo'], 'a number and a long argument': [7, 'a/'.repeat(CAP)] };
+
+  it('hides what the mask without a window hides, for a program path of every length around the window, each program, each place of the secret and each prefix', () => {
+    let cells = 0;
+    for (const program of programs) {
+      for (const length of lengths) {
+        for (const sep of ['/', '\\']) {
+          for (const deep of [true, false]) {
+            const path = programPath(program, length, sep, deep);
+            for (const [prefixName, prefix] of Object.entries(before)) {
+              for (const [position, rest, expected] of positions) {
+                const argv = [...prefix, path, ...rest];
+                const label = `${program} ${length} ${sep} ${deep} / ${prefixName} / ${position}`;
+                const skip = prefix.length + 1;
+                // the mask without a window is the reference for what is hidden...
+                expect(sentOf(argv).slice(skip), `${label}: without a window`).toEqual(expected);
+                // ...and a window hides all of it too, never less
+                const windowed = sentOf(argv, { maxChars: MAX });
+                expect(windowed.slice(skip), label).toEqual(expected);
+                expect(JSON.stringify(windowed), label).not.toContain(SECRET);
+                cells++;
+              }
+            }
+          }
+        }
+      }
+    }
+    expect(cells).toBe(programs.length * lengths.length * 2 * 2 * Object.keys(before).length * positions.length);
+  });
+
+  it('does the same for a program that is a path with the command as its base name and a separator close to the end, at any length', () => {
+    for (const length of [CAP + 1, 100_000, 2_000_000]) {
+      const argv = ['x'.repeat(length) + '/mysql', '-p', SECRET, 'db'];
+      expect(sentOf(argv, { maxChars: MAX }).slice(1)).toEqual(['-p', '***', 'db']);
+      expect(sentOf(argv).slice(1)).toEqual(['-p', '***', 'db']);
+    }
+  });
+
+  describe('an argument that is longer than PATH_TAIL and has no separator in its last PATH_TAIL characters', () => {
+    const argvOf = (first) => [first, '-p', SECRET, 'db'];
+    // the base name is the whole of `/mysqlzzz...`: not a program of the family when it is read whole, so the mask without a window leaves the -p alone
+    const longName = (n) => '/usr/bin/mysql' + 'z'.repeat(n);
+
+    it('is the end of the base name that is read, so a separator inside the last PATH_TAIL characters decides exactly', () => {
+      // the separator is the first of the last PATH_TAIL characters: the base name is z...z, no program, the -p stays in both
+      const exact = '/' + 'z'.repeat(PATH_TAIL - 1);
+      expect(exact.length).toBe(PATH_TAIL);
+      expect(sentOf(argvOf('x'.repeat(5000) + exact), { maxChars: MAX })[2]).toBe(SECRET);
+      expect(sentOf(argvOf('x'.repeat(5000) + exact))[2]).toBe(SECRET);
+    });
+
+    it('is taken for a program: the window hides more than the whole argument would (fail closed)', () => {
+      const argv = argvOf(longName(PATH_TAIL + 10));
+      expect(sentOf(argv)[2]).toBe(SECRET);
+      expect(sentOf(argv, { maxChars: MAX })[2]).toBe('***');
+      // one character more than the separator can be seen in: no separator in the last PATH_TAIL characters
+      const noSeparator = '/' + 'z'.repeat(PATH_TAIL);
+      expect(sentOf(argvOf('x'.repeat(5000) + noSeparator))[2]).toBe(SECRET);
+      expect(sentOf(argvOf('x'.repeat(5000) + noSeparator), { maxChars: MAX })[2]).toBe('***');
+      expect(sentOf(argvOf('mysql.' + 'z'.repeat(5000)))[2]).toBe('***');
+      expect(sentOf(argvOf('mysql.' + 'z'.repeat(5000)), { maxChars: MAX })[2]).toBe('***');
+    });
+
+    it('is no program when a window leaves the argument whole or its end shows the base name', () => {
+      expect(sentOf(argvOf('/usr/bin/' + 'z'.repeat(PATH_TAIL - 20)), { maxChars: MAX })[2]).toBe(SECRET);
+      expect(sentOf(argvOf('/usr/bin/' + 'z'.repeat(5000) + '/ls'), { maxChars: MAX })[2]).toBe(SECRET);
+      expect(sentOf(argvOf('/usr/bin/' + 'z'.repeat(5000) + '/mysqlx'), { maxChars: MAX })[2]).toBe(SECRET);
+    });
+  });
+
+  it('reads no more than PATH_TAIL characters of the end of an argument (a structure check, no clock)', () => {
+    const seen = [];
+    const original = String.prototype.lastIndexOf;
+    String.prototype.lastIndexOf = function lastIndexOf(...args) {
+      seen.push(String(this).length);
+      return original.apply(this, args);
+    };
+    try {
+      maskJevState({ argv: ['z'.repeat(3_000_000), '/' + 'd/'.repeat(1_000_000) + 'mysql', 'x'.repeat(500_000) + '/ls', '-p', SECRET, 'db'] }, { maxChars: MAX });
+    } finally {
+      String.prototype.lastIndexOf = original;
+    }
+    expect(seen.length).toBeGreaterThan(0);
+    expect(Math.max(...seen)).toBeLessThanOrEqual(Math.max(PATH_TAIL, CAP));
+  });
+
+  it('pays for the end of the arguments it reads: the budget counts it, so many long arguments are refused, fast', () => {
+    // each argument is read twice (its window and its mask) and its end once more: 4808 + 4808 + 4096 characters
+    const argv = (n) => ({ argv: Array.from({ length: n }, () => 'z'.repeat(5000) + '/d') });
+    expect(maskJevState(argv(250), { maxChars: MAX }).argv).toHaveLength(250);
+    const start = performance.now();
+    expect(() => maskJevState(argv(350), { maxChars: MAX })).toThrow(new RegExp(`more than ${MAX_STATE_CHARS} characters`));
+    expect(performance.now() - start).toBeLessThan(2000);
+  });
+});
+
 describe('maskJevState: a token in the path of a URL is masked like any other', () => {
   const TOKEN = 'aB3dE5gH7jK9mN1pQ3sT5vW7yZ9bC1dE3fG5'; // 36 letters and digits
   it.each([
@@ -1192,6 +1316,9 @@ describe('maskJevState: the cost is the window, not the input', () => {
     'a long name of a pair': () => ({ name: repeatTo('k', BIG), value: 'v' }),
     'a long first element of a pair of two elements': () => ({ t: [repeatTo('k', BIG), 'v'] }),
     'long arguments of a command': () => ({ argv: ['mysql', repeatTo('a', BIG / 8), '-u', `${repeatTo('b', BIG / 8)}:x`, `--user=${repeatTo('c', BIG / 8)}:y`, `-p${repeatTo('d', BIG / 8)}`] }),
+    'a long path of a program': () => ({ argv: [repeatTo('d/', BIG) + 'mysql', '-p', 'hunter2zzQ', 'db'] }),
+    'a long argument with no separator before -p': () => ({ argv: [repeatTo('a', BIG), '-p', 'hunter2zzQ', 'db'] }),
+    'many long arguments': () => ({ argv: Array.from({ length: 40 }, () => repeatTo('d/', BIG / 40) + 'x') }),
     'long strings at several places': () => ({ a: { b: [repeatTo(WORDS, BIG / 4), repeatTo(WORDS, BIG / 4)] }, c: repeatTo(WORDS, BIG / 4) }),
   };
 
@@ -1235,9 +1362,12 @@ describe('maskJevState: the cost is the window, not the input', () => {
     });
 
     it('sends the line when its secret path starts beyond that: nothing of the path is sent, and the rest of the line is not read', () => {
-      const sent = sentOf(textWithPathAt(LINE_EXTENSION + 200));
+      // the one bound of the mask that is not fail closed (see HOOKS.md): the part of the line that is sent stays, where the mask without a window omits the whole line
+      const text = textWithPathAt(LINE_EXTENSION + 200);
+      const sent = sentOf(text);
       expect(sent.startsWith('first line\necho hunter2 > x x')).toBe(true);
       expect(SECRET_PATH.test(sent)).toBe(false);
+      expect(maskJevState({ t: text }).t).not.toContain('hunter2');
     });
   });
 

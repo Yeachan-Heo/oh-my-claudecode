@@ -249,6 +249,25 @@ describe('resolveJudgment state mask', () => {
     });
   });
 
+  describe('the program of a command that has a long path', () => {
+    const logText = () => readFileSync(join(dir, 'log', 'shadow.jsonl'), 'utf8');
+    beforeEach(() => {
+      process.env.OMC_JEV_EXCERPT_CHARS_MODEL_ROUTING = '200';
+    });
+    afterEach(() => {
+      delete process.env.OMC_JEV_EXCERPT_CHARS_MODEL_ROUTING;
+    });
+
+    it('masks the value of -p after a program whose path is longer than the window, in the body and in the log', async () => {
+      // the base name of the path is at its end, 806 characters from the start, beyond the window of 200 + 512
+      const argv = ['/' + 'd/'.repeat(400) + 'mysql', '-p', 'hunter2zzQ'];
+      const bodies: string[] = [];
+      await resolveJudgment({ point: 'model-routing', state: { argv }, questions: QUESTIONS, twin: () => 'sonnet', fetchFn: recordingFetch(bodies) });
+      expect(bodies).toHaveLength(1);
+      for (const text of [bodies[0], logText()]) expect(text).not.toContain('hunter2zzQ');
+    });
+  });
+
   describe('the time before the request', () => {
     // The mask runs in the hook process before the request is made, so its cost must not grow with the size of the state.
     const repeatTo = (unit: string, n: number): string => unit.repeat(Math.ceil(n / unit.length)).slice(0, n);
@@ -257,6 +276,7 @@ describe('resolveJudgment state mask', () => {
       'a prompt of one line': () => ({ prompt: repeatTo('/srv/app/dir/', SIZE) }),
       'a key': () => ({ [repeatTo('the quick brown fox ', SIZE)]: 'v' }),
       'the name of a pair': () => ({ name: repeatTo('k', SIZE), value: 'v' }),
+      'the path of a program': () => ({ argv: [repeatTo('d/', SIZE) + 'mysql', '-p', 'hunter2zzQ', 'db'] }),
     };
 
     it.each(Object.keys(states))('sends %s of 32 MiB after milliseconds of masking', async (name) => {

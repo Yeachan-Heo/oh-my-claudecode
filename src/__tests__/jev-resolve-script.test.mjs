@@ -694,6 +694,23 @@ describe('state mask: plural keys, bearer with ~, arguments and pairs', () => {
   });
 });
 
+describe('state mask: the program of a command that has a long path', () => {
+  const okFetch = (bodies) => async (_url, init) => {
+    bodies.push(String(init.body));
+    return { ok: true, status: 200, json: async () => ({ answers: { route: { type: 'choice', choice: 'opus' } } }) };
+  };
+
+  it('masks the value of -p after a program whose path is longer than the window, in the body and in the log', async () => {
+    // the base name of the path is at its end, 806 characters from the start, beyond the window of 200 + 512
+    const argv = ['/' + 'd/'.repeat(400) + 'mysql', '-p', 'hunter2zzQ'];
+    const bodies = [];
+    await resolveRequest({ point: 'model-routing', state: { argv }, questions: QUESTIONS }, baseEnv({ OMC_JEV: 'model-routing:active', OMC_JEV_EXCERPT_CHARS_MODEL_ROUTING: '200' }), okFetch(bodies));
+    expect(bodies).toHaveLength(1);
+    const log = readFileSync(join(tmp, 'shadow.jsonl'), 'utf8');
+    for (const text of [bodies[0], log]) expect(text).not.toContain('hunter2zzQ');
+  });
+});
+
 describe('state mask: the time before the request', () => {
   // The mask runs before the request timeout is armed, so its cost must not grow with the size of the state: a long prompt
   // or a long name is read up to the window only. Without the bound these took 0.5 to 2.5 s.
@@ -703,6 +720,7 @@ describe('state mask: the time before the request', () => {
     'a prompt of one line': () => ({ prompt: repeatTo('/srv/app/dir/', SIZE) }),
     'a key': () => ({ [repeatTo('the quick brown fox ', SIZE)]: 'v' }),
     'the name of a pair': () => ({ name: repeatTo('k', SIZE), value: 'v' }),
+    'the path of a program': () => ({ argv: [repeatTo('d/', SIZE) + 'mysql', '-p', 'hunter2zzQ', 'db'] }),
   };
 
   it.each(Object.keys(states))('sends %s of 32 MiB after milliseconds of masking', async (name) => {

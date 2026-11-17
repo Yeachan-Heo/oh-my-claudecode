@@ -13,6 +13,8 @@ export const MAX_STATE_CHARS: number;
 export const WINDOW_MARGIN: number;
 /** How far past the cut the last line of a cut text is read for a secret path. */
 export const LINE_EXTENSION: number;
+/** How far from its end an argument of a command is read to tell its program; with no separator in it, a longer argument is taken for one (fail closed). */
+export const PATH_TAIL: number;
 /** How far past the cut a run of token characters is followed to its end. */
 export const RUN_EXTENSION: number;
 /** The characters that a run of token characters is made of (see the comment in the module). */

@@ -65,15 +65,23 @@ export const MAX_STATE_NODES = 50_000;
 /**
  * With a window (maxChars), the most characters the mask reads in all: a string counts for at most its window
  * (maxChars + WINDOW_MARGIN + LINE_EXTENSION), once for each time a rule reads it (a string is read at most twice: to
- * classify it and to mask it). A state that needs more is an error, so the work of the mask has a bound that does not
- * depend on the size of the state. Never less than sixteen windows, so a large window that the caller asked for does
- * not refuse a state by its size alone.
+ * classify it and to mask it; the end of an argument of a command is read once more, up to PATH_TAIL, to tell its
+ * program, and that counts when it goes beyond the window). A state that needs more is an error, so the work of the mask
+ * has a bound that does not depend on the size of the state. Never less than sixteen windows, so a large window that
+ * the caller asked for does not refuse a state by its size alone.
  */
 export const MAX_STATE_CHARS = 4_000_000;
 /** A string longer than maxChars plus this is cut before it is masked: the part beyond is never sent. */
 export const WINDOW_MARGIN = 512;
 /** How far past the cut the last line of a cut text is read, to find a secret path in it: the rest of a longer line is not read. */
 export const LINE_EXTENSION = 4096;
+/**
+ * How far from its end an argument of a command is read to tell its program (the base name: what follows the last / or \).
+ * A path that long is rare (PATH_MAX is 4096 on Linux, a file name is at most 255 characters). An argument longer than this
+ * with no separator in its last PATH_TAIL characters has a base name that starts further back: it is taken for a program
+ * that takes a password (fail closed: the mask hides more, never less, than it would with the whole argument).
+ */
+export const PATH_TAIL = 4096;
 
 export class JevStateMaskError extends Error {
   constructor(message, options) {
@@ -206,16 +214,29 @@ const ARGUMENT_REST = {
 };
 // The command word of the rules of maskSecrets (\bmysql\b and the like, also mariadb-dump, mysql.exe, a path to it).
 const P_COMMAND = /^(?:mysql|mysqldump|mysqladmin|mariadb|sshpass)(?![a-z0-9_])/i;
+/**
+ * Whether a string can be the program of a command of the mysql family or sshpass: the base name (what follows the last /
+ * or \) starts with the name of one. The base name is at the end of the string, so it is looked for from the end, in the last
+ * `limit` characters, and the cost does not grow with the length of the string. With no separator in them and more string
+ * before, the base name starts further back than they reach: it can be one, and the answer is yes (fail closed).
+ */
+function mayBeCommand(text, limit) {
+  const tail = text.length > limit ? text.slice(-limit) : text;
+  const cut = Math.max(tail.lastIndexOf('/'), tail.lastIndexOf('\\'));
+  if (cut === -1 && tail.length < text.length) return true;
+  return P_COMMAND.test(tail.slice(cut + 1));
+}
 // Map: index of an element -> 'secret' (all of it is the value) or one of the keys of ARGUMENT_REST (the part of the
 // element that is the credential). The elements are the strings as the rules read them (the window of each one, see
-// maskJevState) and what is no string; the name of a pair is not looked at here (see treatment).
-function secretArguments(array) {
+// maskJevState) and what is no string; commandAt(i) tells whether element i can be the program of a command (it reads the
+// end of the whole element, which a window does not hold); the name of a pair is not looked at here (see treatment).
+function secretArguments(array, commandAt) {
   const modes = new Map();
   let command = -1;
   for (let i = 0; i < array.length; i++) {
     const element = array[i];
     if (typeof element !== 'string') continue;
-    if (command < 0 && P_COMMAND.test(element.split(/[/\\]/).pop())) command = i;
+    if (command < 0 && commandAt(i)) command = i;
     if (SECRET_FLAG.test(element)) {
       if (i + 1 < array.length) modes.set(i + 1, 'secret');
     } else if (USER_FLAG.test(element)) {
@@ -332,10 +353,11 @@ export function maskJevState(state, { maxChars } = {}) {
   const cap = maxChars === undefined ? Infinity : maxChars + WINDOW_MARGIN;
   const budget = maxChars === undefined ? Infinity : Math.max(MAX_STATE_CHARS, 16 * (cap + LINE_EXTENSION));
   let charsLeft = budget;
-  const charge = (text) => {
-    charsLeft -= Math.min(text.length, cap + LINE_EXTENSION);
+  const pay = (length) => {
+    charsLeft -= length;
     if (charsLeft < 0) throw new JevStateMaskError(`state has more than ${budget} characters to read`);
   };
+  const charge = (text) => pay(Math.min(text.length, cap + LINE_EXTENSION));
   // the part of a string that a classification reads: all of it, or its window
   const head = (text) => {
     charge(text);
@@ -348,6 +370,13 @@ export function maskJevState(state, { maxChars } = {}) {
     return name.length > cap ? null : normalizeKey(name);
   };
   const pairNameKind = (name) => (typeof name === 'string' ? secretKindOf(nameOf(name)) : false);
+  // Whether a string can be the program of a command: its base name is at the end of it, which the window does not hold, so it
+  // is read from the end, up to PATH_TAIL characters (see mayBeCommand); what the window already paid for is not paid again.
+  const pathTail = maxChars === undefined ? Infinity : PATH_TAIL;
+  const isCommand = (text) => {
+    if (text.length > cap) pay(Math.min(text.length, pathTail));
+    return mayBeCommand(text, pathTail);
+  };
   const tooMany = () => new JevStateMaskError(`state has more than ${MAX_STATE_NODES} nodes`);
 
   // secretKey: false, 'secret' or 'counter'; sessionId: the value of the key `session_id` of the state itself
@@ -380,7 +409,7 @@ export function maskJevState(state, { maxChars } = {}) {
         // more elements than nodes are allowed: no rule reads them before the node limit would have refused the state
         if (value.length > MAX_STATE_NODES) throw tooMany();
         const heads = value.map((item) => (typeof item === 'string' ? head(item) : item));
-        const modes = secretArguments(heads);
+        const modes = secretArguments(heads, (i) => isCommand(value[i]));
         // the first of two elements is the name of the second
         const label = value.length === 2 ? pairNameKind(value[0]) : false;
         return value.map((item, i) => {

@@ -2,7 +2,7 @@
  * Random cases for the differential test of scripts/lib/jev-state-mask.mjs (src/__tests__/jev-state-mask.test.mjs):
  * a secret of a random kind, with body characters drawn from everything its rule takes, placed around the edge of
  * the window (maxChars and maxChars + 512), after a text that the mask shortens or not, in a string, a key, an
- * array, a nested object, a pair of name and value or the arguments of a command. The generator takes a function
+ * array, a nested object, a pair of name and value or the arguments of a command (also one whose program has a path longer than the window). The generator takes a function
  * that returns numbers in [0, 1), so a seed gives the same cases every time. Not a test file.
  */
 
@@ -80,6 +80,13 @@ const STRUCTURE_KINDS = [
   ['-p argument', (n) => { const s = makeBody(n, 'word', 8, 80); return { state: { argv: [pick(n, ['mysql', 'mariadb', 'mysqldump', 'mysqladmin', 'sshpass']), '-p', s] }, secret: s }; }],
   ['-u argument', (n) => { const s = makeBody(n, 'word', 8, 80); return { state: { argv: [pick(n, ['curl', 'http', 'wget']), pick(n, ['-u', '--user']), `${pick(n, ['user', 'u', 'admin'])}:${s}`, 'http://h'] }, secret: s }; }],
   ['glued -p argument', (n) => { const s = makeBody(n, 'word', 8, 80); return { state: { argv: [pick(n, ['sudo', 'docker', 'mysql']), pick(n, ['mysql', 'mariadb', 'mysqldump', 'mysqladmin', 'sshpass']), '-u', 'root', `-p${s}`, 'db'] }, secret: s }; }],
+  ['-p argument after a long path', (n) => {
+    const s = makeBody(n, 'word', 8, 80);
+    const sep = pick(n, ['/', '\\']);
+    const path = pick(n, [sep + ('d' + sep).repeat(Math.floor(n() * 2500)), 'x'.repeat(Math.floor(n() * 6000)) + sep, '']) + pick(n, ['mysql', 'mariadb', 'mysqldump', 'mysqladmin', 'sshpass']);
+    const credential = pick(n, [['-p', s], [`-p${s}`], ['-u', 'root', `-p${s}`], ['-u', 'root', '-p', s]]);
+    return { state: { argv: [...pick(n, [[], ['sudo'], ['docker', 'exec', 'db']]), path, ...credential, 'db'] }, secret: s };
+  }],
   ['tuple', (n) => { const s = makeBody(n, 'word', 8, 80); return { state: { headers: [[pick(n, ['Authorization', 'X-Api-Key', 'Cookie', 'x-auth-token']), s]] }, secret: s }; }],
   ['headers', (n) => { const s = makeBody(n, 'word', 8, 80); return { state: { headers: { [pick(n, ['Authorization', 'X-Api-Key', 'Cookie', 'Proxy-Authorization'])]: s } }, secret: s }; }],
 ];
