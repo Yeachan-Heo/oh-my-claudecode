@@ -4,6 +4,7 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, 
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { publishCacheOccupancy } from '../../scripts/lib/cache-occupancy.mjs';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -164,6 +165,15 @@ describe('omc-doctor skill', () => {
     expect(stale).toContain(NO_PRUNE_RULE);
     expect(outdated).toContain('installed_plugins.json');
     expect(stale).toContain('installed_plugins.json');
+  });
+
+  test('cache fix sections name every protection source and the fail-closed rule', () => {
+    for (const heading of ['Fix: Outdated Plugin', 'Fix: Stale Cache']) {
+      const fix = section(text, heading);
+      expect(fix).toContain('by `version` or by `installPath`');
+      expect(fix).toContain('.omc/cache-occupancy/');
+      expect(fix).toContain('cannot be read completely, move nothing');
+    }
   });
 
   test('cache fix sections put backups outside plugins/cache and explain why', () => {
@@ -388,6 +398,149 @@ describe('omc-doctor cache commands on a synthetic config directory', () => {
         expect(result.stdout).toMatch(/Kept protected cache versions.*5.8.1.*5.9.0/);
       } finally {
         rmSync(dir, { recursive: true, force: true });
+      }
+    }
+  });
+  // The protection set of both commands is the union of every source that says a
+  // cache version is in use. A source that cannot be read completely makes the
+  // command move nothing instead of acting on a partial set.
+  const PLUGIN_ID = 'oh-my-claudecode@omc';
+
+  function makeCache(versions: string[]) {
+    const dir = mkdtempSync(path.join(tmpdir(), 'omc-doctor-skill-'));
+    const cache = path.join(dir, 'plugins', 'cache', 'omc', 'oh-my-claudecode');
+    for (const v of versions) {
+      mkdirSync(path.join(cache, v), { recursive: true });
+      writeFileSync(path.join(cache, v, 'package.json'), JSON.stringify({ version: v }));
+    }
+    return { dir, cache };
+  }
+
+  function writeRegistry(dir: string, plugins: Record<string, unknown>) {
+    writeFileSync(path.join(dir, 'plugins', 'installed_plugins.json'), JSON.stringify({ version: 2, plugins }, null, 2));
+  }
+
+  test('a version registered only by installPath is protected, also when the path points below it', () => {
+    for (const command of commands) {
+      for (const suffix of ['', 'hooks']) {
+        const { dir, cache } = makeCache(['5.8.0', '5.8.1', '5.9.0']);
+        try {
+          writeRegistry(dir, {
+            [PLUGIN_ID]: [
+              { scope: 'user', version: '5.8.1' },
+              { scope: 'user', installPath: path.join(cache, '5.9.0', suffix) },
+            ],
+          });
+          const result = runCommand(command, dir);
+          expect(result.status).toBe(0);
+          expect(digitVersions(cache)).toBe('5.8.1,5.9.0');
+          expect(movedAside(dir)).toBe(1);
+          expect(readdirSync(backupDir(dir))[0]).toMatch(/^5\.8\.0-/);
+        } finally {
+          rmSync(dir, { recursive: true, force: true });
+        }
+      }
+    }
+  });
+
+  test('an installPath-only entry is a pin on its own', () => {
+    for (const command of commands) {
+      const { dir, cache } = makeCache(['5.8.0', '5.9.0']);
+      try {
+        writeRegistry(dir, { [PLUGIN_ID]: [{ scope: 'user', installPath: path.join(cache, '5.9.0') }] });
+        const result = runCommand(command, dir);
+        expect(result.status).toBe(0);
+        expect(digitVersions(cache)).toBe('5.9.0');
+        expect(movedAside(dir)).toBe(1);
+      } finally {
+        rmSync(dir, { recursive: true, force: true });
+      }
+    }
+  });
+
+  test('a version occupied by a live session is kept even though another version is the active pin', () => {
+    for (const command of commands) {
+      for (const suffix of ['', 'scripts']) {
+        const { dir, cache } = makeCache(['5.8.0', '5.8.1', '5.9.0']);
+        try {
+          writeRegistry(dir, { [PLUGIN_ID]: [{ scope: 'user', version: '5.8.1', installPath: path.join(cache, '5.8.1') }] });
+          // The record is written by the same publisher the SessionStart hook uses.
+          expect(publishCacheOccupancy(path.join(cache, '5.9.0', suffix), dir, process.pid)).toBe(true);
+          const result = runCommand(command, dir);
+          expect(result.status).toBe(0);
+          expect(digitVersions(cache)).toBe('5.8.1,5.9.0');
+          expect(movedAside(dir)).toBe(1);
+          expect(readdirSync(backupDir(dir))[0]).toMatch(/^5\.8\.0-/);
+          expect(result.stdout).toMatch(/Kept protected cache versions.*5\.8\.1.*5\.9\.0/);
+        } finally {
+          rmSync(dir, { recursive: true, force: true });
+        }
+      }
+    }
+  });
+
+  test('an occupancy registry that cannot be read completely moves nothing', () => {
+    const break_ = {
+      'registry path is a file': (dir: string) => {
+        mkdirSync(path.join(dir, '.omc'), { recursive: true });
+        writeFileSync(path.join(dir, '.omc', 'cache-occupancy'), 'not a directory');
+      },
+      'a record is not valid JSON': (dir: string) => {
+        mkdirSync(path.join(dir, '.omc', 'cache-occupancy'), { recursive: true });
+        writeFileSync(path.join(dir, '.omc', 'cache-occupancy', `${'a'.repeat(64)}.json`), '{ truncated');
+      },
+      'a record has no plugin root': (dir: string) => {
+        mkdirSync(path.join(dir, '.omc', 'cache-occupancy'), { recursive: true });
+        writeFileSync(path.join(dir, '.omc', 'cache-occupancy', `${'b'.repeat(64)}.json`), JSON.stringify({ version: 1, pid: process.pid }));
+      },
+    };
+    for (const command of commands) {
+      for (const [label, breakIt] of Object.entries(break_)) {
+        const { dir, cache } = makeCache(['5.8.0', '5.8.1', '5.9.0']);
+        try {
+          writeRegistry(dir, { [PLUGIN_ID]: [{ scope: 'user', version: '5.8.1' }] });
+          breakIt(dir);
+          const result = runCommand(command, dir);
+          expect({ label, status: result.status, versions: digitVersions(cache), moved: movedAside(dir) })
+            .toEqual({ label, status: 0, versions: '5.8.0,5.8.1,5.9.0', moved: 0 });
+          expect(result.stdout).toMatch(/Nothing moved/);
+          expect(result.stdout).not.toMatch(/Moved \d/);
+        } finally {
+          rmSync(dir, { recursive: true, force: true });
+        }
+      }
+    }
+  });
+
+  test('a registry that cannot be traversed completely moves nothing', () => {
+    const registries: Record<string, (cache: string) => Record<string, unknown>> = {
+      'null entry before a valid pin under a later ID': () => ({
+        [PLUGIN_ID]: [{ scope: 'user', version: '5.8.1' }],
+        'oh-my-claudecode': [null, { scope: 'user', version: '5.9.0' }],
+      }),
+      'entry that is not an object': () => ({ [PLUGIN_ID]: [{ scope: 'user', version: '5.8.1' }, 'junk'] }),
+      'entries that are not an array': () => ({
+        [PLUGIN_ID]: [{ scope: 'user', version: '5.8.1' }],
+        'oh-my-claudecode': { scope: 'user', version: '5.9.0' },
+      }),
+      'empty string instead of the entries': () => ({
+        [PLUGIN_ID]: [{ scope: 'user', version: '5.8.1' }],
+        'oh-my-claudecode': '',
+      }),
+      'installPath that is not a string': () => ({ [PLUGIN_ID]: [{ scope: 'user', version: '5.8.1' }, { scope: 'user', installPath: 42 }] }),
+    };
+    for (const command of commands) {
+      for (const [label, registry] of Object.entries(registries)) {
+        const { dir, cache } = makeCache(['5.8.0', '5.8.1', '5.9.0']);
+        try {
+          writeRegistry(dir, registry(cache));
+          const result = runCommand(command, dir);
+          expect({ label, status: result.status, versions: digitVersions(cache), moved: movedAside(dir) })
+            .toEqual({ label, status: 0, versions: '5.8.0,5.8.1,5.9.0', moved: 0 });
+          expect(result.stdout).toMatch(/Nothing moved/);
+        } finally {
+          rmSync(dir, { recursive: true, force: true });
+        }
       }
     }
   });
