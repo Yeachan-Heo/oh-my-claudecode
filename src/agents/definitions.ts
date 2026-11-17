@@ -9,7 +9,7 @@
  */
 
 import type { AgentConfig, PluginConfig } from '../shared/types.js';
-import { loadAgentPrompt, parseDisallowedTools } from './utils.js';
+import { loadAgentPrompt, parseDisallowedTools, getExtraDisallowedTools, mergeDisallowedTools } from './utils.js';
 import { loadConfig } from '../config/loader.js';
 import { resolveInheritedModelFromEnv } from '../config/models.js';
 import { appendSkininthegamebrosGuidance } from './skininthegamebros-guidance.js';
@@ -256,11 +256,15 @@ export function getAgentDefinitions(options?: {
     ? resolveInheritedModelFromEnv()
     : undefined;
   const result: Record<string, { description: string; prompt: string; tools?: string[]; disallowedTools?: string[]; model?: string; defaultModel?: string }> = {};
+  const extraDisallowedTools = getExtraDisallowedTools();
 
   for (const [name, agentConfig] of Object.entries(agents)) {
     const override = options?.overrides?.[name];
     const configuredModel = getConfiguredAgentModel(name, resolvedConfig);
-    const disallowedTools = agentConfig.disallowedTools ?? parseDisallowedTools(name);
+    const disallowedTools = mergeDisallowedTools(
+      agentConfig.disallowedTools ?? parseDisallowedTools(name),
+      extraDisallowedTools,
+    );
     const resolvedModel = override?.model ?? inheritModel ?? configuredModel ?? agentConfig.model;
     const resolvedDefaultModel = override?.defaultModel ?? agentConfig.defaultModel;
 
