@@ -19,9 +19,28 @@ const tmuxSessionMocks = vi.hoisted(() => ({
   getOwnedWorkerLiveness: vi.fn(async (): Promise<'alive' | 'dead' | 'unknown'> => 'dead'),
   observeTeamSessionTargetPresence: vi.fn(async () => ({ kind: 'owned' as const })),
   workerPaneBelongsToOwnedProviderTarget: vi.fn(async () => true),
+  adoptWorkerPaneOwnership: vi.fn(async (input: any) => ({
+    ok: true as const,
+    ownership: {
+      provider: input.provider,
+      providerTarget: input.providerTarget,
+      paneId: input.paneId,
+      splitTarget: '',
+      leaderPaneId: '',
+      reservedPaneIds: [],
+      source: 'adopted' as const,
+      ...(input.provider === 'tmux' && input.tmuxServerIdentity ? { tmuxServerIdentity: input.tmuxServerIdentity } : {}),
+    },
+  })),
   killOwnedWorkerPane: vi.fn(async () => undefined),
   killWorkerPaneProcessTree: vi.fn<(identity: unknown, paneId: string) => Promise<void>>(async () => undefined),
   killTeamSession: vi.fn(async () => true),
+}));
+const workerLaunchMocks = vi.hoisted(() => ({
+  loadWorkerLaunchAttempt: vi.fn(async (): Promise<any> => null),
+  retireAndCleanupCurrentWorkerLaunchAttempt: vi.fn(async (_attempt: any, _reason: string, cleanup: () => Promise<boolean>) => {
+    return await cleanup();
+  }),
 }));
 
 const TEAM_INSTANCE_ID = '55555555-5555-4555-8555-555555555555';
@@ -44,9 +63,19 @@ vi.mock('../tmux-session.js', async importOriginal => {
     getOwnedWorkerLiveness: tmuxSessionMocks.getOwnedWorkerLiveness,
     observeTeamSessionTargetPresence: tmuxSessionMocks.observeTeamSessionTargetPresence,
     workerPaneBelongsToOwnedProviderTarget: tmuxSessionMocks.workerPaneBelongsToOwnedProviderTarget,
+    adoptWorkerPaneOwnership: tmuxSessionMocks.adoptWorkerPaneOwnership,
     killOwnedWorkerPane: tmuxSessionMocks.killOwnedWorkerPane,
     killWorkerPaneProcessTree: tmuxSessionMocks.killWorkerPaneProcessTree,
     killTeamSession: tmuxSessionMocks.killTeamSession,
+  };
+});
+
+vi.mock('../worker-launch-ack.js', async importOriginal => {
+  const actual = await importOriginal<typeof import('../worker-launch-ack.js')>();
+  return {
+    ...actual,
+    loadWorkerLaunchAttempt: workerLaunchMocks.loadWorkerLaunchAttempt,
+    retireAndCleanupCurrentWorkerLaunchAttempt: workerLaunchMocks.retireAndCleanupCurrentWorkerLaunchAttempt,
   };
 });
 
@@ -161,6 +190,21 @@ describe.skipIf(currentStrictProcessStartIdentity(process.pid) === null)('shutdo
   it('a pane with proven ownership gets its tree taken down with the recorded server identity and the pane id', async () => {
     process.env.OMC_TEAM_KILL_PANE_TREE = '1';
     tmuxSessionMocks.getOwnedWorkerLiveness.mockResolvedValue('alive');
+    // Mock loadWorkerLaunchAttempt to return a valid attempt for this test
+    workerLaunchMocks.loadWorkerLaunchAttempt.mockResolvedValueOnce({
+      id: 'attempt-123',
+      cwd: '',
+      teamName: 'pane-tree-alive-team',
+      workerName: 'worker-1',
+      paneId: '%2',
+      instanceId: TEAM_INSTANCE_ID,
+      provider: 'claude',
+      attemptId: LAUNCH_ATTEMPT_ID,
+      runtimeCliPath: '',
+      launchTime: new Date().toISOString(),
+      acceptedAt: new Date().toISOString(),
+      state: 'accepted' as const,
+    });
     await writeTeam('pane-tree-alive-team');
 
     const { shutdownTeamV2 } = await import('../runtime-v2.js');
