@@ -182,7 +182,7 @@ describe('omc-doctor cache commands on a synthetic config directory', () => {
     .split('\n')
     .filter((l) => l.startsWith('node -e ') && l.includes("'installed_plugins.json'") && l.includes("'oh-my-claudecode'"));
 
-  function makeConfigDir(versions: string[], pinned: string | null, installed = true) {
+  function makeConfigDir(versions: string[], pinned: string | null, installed = true, pluginId = 'oh-my-claudecode@omc') {
     const dir = mkdtempSync(path.join(tmpdir(), 'omc-doctor-skill-'));
     const cache = path.join(dir, 'plugins', 'cache', 'omc', 'oh-my-claudecode');
     for (const v of versions) {
@@ -193,7 +193,7 @@ describe('omc-doctor cache commands on a synthetic config directory', () => {
       const entries = [{ scope: 'user', version: pinned ?? '0.0.0' }];
       writeFileSync(
         path.join(dir, 'plugins', 'installed_plugins.json'),
-        JSON.stringify({ version: 2, plugins: { 'oh-my-claudecode@omc': entries } }, null, 2),
+        JSON.stringify({ version: 2, plugins: { [pluginId]: entries } }, null, 2),
       );
     }
     return { dir, cache };
@@ -317,6 +317,58 @@ describe('omc-doctor cache commands on a synthetic config directory', () => {
         expect(digitVersions(cache)).toBe('5.8.1');
         expect(movedAside(dir)).toBe(1);
         expect(result.stdout).toMatch(/Moved 1 unprotected version/);
+      } finally {
+        rmSync(dir, { recursive: true, force: true });
+      }
+    }
+  });
+
+  test('pinned versions are protected under all supported plugin IDs (legacy and new)', () => {
+    for (const command of commands) {
+      // Test with legacy ID 'oh-my-claudecode'
+      const { dir, cache } = makeConfigDir(['5.8.0', '5.8.1', '5.9.0'], '5.8.1', true, 'oh-my-claudecode');
+      try {
+        const result = runCommand(command, dir);
+        expect(result.status).toBe(0);
+        expect(digitVersions(cache)).toBe('5.8.1');
+        expect(movedAside(dir)).toBe(2);
+        expect(result.stdout).toMatch(/Kept protected cache versions/);
+        expect(result.stdout).toMatch(/Moved 2 unprotected version/);
+      } finally {
+        rmSync(dir, { recursive: true, force: true });
+      }
+    }
+  });
+
+  test('all three supported plugin IDs are checked for pinned versions', () => {
+    for (const command of commands) {
+      // Create config with new ID pinning one version and legacy ID pinning another
+      const dir = mkdtempSync(path.join(tmpdir(), 'omc-doctor-skill-'));
+      const cache = path.join(dir, 'plugins', 'cache', 'omc', 'oh-my-claudecode');
+      for (const v of ['5.8.0', '5.8.1', '5.9.0']) {
+        mkdirSync(path.join(cache, v), { recursive: true });
+        writeFileSync(path.join(cache, v, 'package.json'), JSON.stringify({ version: v }));
+      }
+      writeFileSync(
+        path.join(dir, 'plugins', 'installed_plugins.json'),
+        JSON.stringify(
+          {
+            version: 2,
+            plugins: {
+              'oh-my-claudecode@omc': [{ scope: 'user', version: '5.8.1' }],
+              'oh-my-claudecode': [{ scope: 'user', version: '5.9.0' }],
+            },
+          },
+          null,
+          2,
+        ),
+      );
+      try {
+        const result = runCommand(command, dir);
+        expect(result.status).toBe(0);
+        expect(digitVersions(cache)).toBe('5.8.1,5.9.0');
+        expect(movedAside(dir)).toBe(1); // Only 5.8.0 is unprotected
+        expect(result.stdout).toMatch(/Kept protected cache versions.*5.8.1.*5.9.0/);
       } finally {
         rmSync(dir, { recursive: true, force: true });
       }
