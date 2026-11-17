@@ -251,16 +251,43 @@ async function main() {
       if (missingExtends) continue;
       // A YAML one-line flow list `extends: [tdd, verify]` reads as one
       // scalar: strip the brackets before splitting, then read each item as
-      // a scalar — a quoted flow list stays one stem, as YAML reads it.
+      // a scalar. A quoted value like `extends: "tdd, verify"` must be
+      // unquoted first to preserve the comma-separated items; decode as the
+      // runtime frontmatter parser does. Trim before bracket matching so
+      // lists with trailing whitespace are recognized correctly.
       // For ["tdd", "verify"], bracket stripping yields "tdd", "verify";
       // split first, then unquote each item individually so "tdd" becomes tdd,
       // not leaving tdd" and "verify by incorrectly unquoting the bracket-stripped
       // list as a whole.
-      const baseNames = extendsValue
-        .replace(/^\[(.*)\]$/, "$1")
-        .split(",")
-        .map(yamlScalar)
-        .filter(Boolean);
+      // Check for explicitly quoted values: if quoted, unquote and split by comma
+      // only (do not reinterpret brackets within the quoted content).
+      const trimmedValue = extendsValue.trim();
+      let baseNames = [];
+      const isQuoted =
+        trimmedValue.length > 1 &&
+        ((trimmedValue.startsWith('"') && trimmedValue.endsWith('"')) ||
+          (trimmedValue.startsWith("'") && trimmedValue.endsWith("'")));
+      if (isQuoted) {
+        // Explicitly quoted value: unquote and split by comma only
+        const unquoted = trimmedValue.slice(1, -1);
+        baseNames = unquoted
+          .split(",")
+          .map(yamlScalar)
+          .filter(Boolean);
+      } else if (trimmedValue.startsWith("[") && trimmedValue.endsWith("]")) {
+        // Bracket-enclosed list (not quoted): strip brackets, split by comma, then unquote each
+        baseNames = trimmedValue
+          .slice(1, -1)
+          .split(",")
+          .map(yamlScalar)
+          .filter(Boolean);
+      } else {
+        // Plain value or comma-separated: split by comma and unquote each
+        baseNames = extendsValue
+          .split(",")
+          .map(yamlScalar)
+          .filter(Boolean);
+      }
       if (baseNames.length === 0) {
         problems.push(
           `${fileLabel}: "extends:" lists no skills (empty or separators only)`,

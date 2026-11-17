@@ -607,4 +607,27 @@ describe("check-omc-playbooks YAML frontmatter robustness (upstream #455)", () =
     expect(r.stderr).toContain('invalid extended skill name "[tdd]"');
     rmSync(root, { recursive: true, force: true });
   });
+
+  it("CRLF-encoded playbooks with anchors pass after normalization", () => {
+    const { root, skillsRoot } = buildProject();
+    // Write a CRLF-encoded playbook with anchor text that could be confused with
+    // YAML delimiters (e.g., '---' in the anchor). The normalization ensures
+    // the frontmatter is correctly identified and removed before anchor validation.
+    const crlfContent = [
+      '---\r',
+      'extends: tdd\r',
+      'when: Verify the red-green cycle.\r',
+      '---\r',
+      '- In **In** "Write the failing test first." keep the output artifact path.\r',
+      '',
+    ].join('\n');
+    writeFileSync(
+      join(root, ".omc", "playbooks", "crlf-encoded.md"),
+      crlfContent,
+    );
+    const r = runChecker(root, skillsRoot);
+    expect(r.status).toBe(0);
+    expect(r.stdout).toContain('1 project playbook(s) valid');
+    rmSync(root, { recursive: true, force: true });
+  });
 });
