@@ -1016,11 +1016,22 @@ export function maskSecrets(text) {
     .replace(/\b(gh[pousr]_|github_pat_|glpat-|xox[abprs]-)[A-Za-z0-9_-]{10,}/g, '$1***')
     .replace(/\bAKIA[0-9A-Z]{16}\b/g, 'AKIA***')
     .replace(/\beyJ(?:[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}|[A-Za-z0-9_-]*)/g, (m) => m.includes('.') ? 'eyJ***' : m)
-    .replace(/(\b(?=[A-Za-z0-9_]*(?:KEY|TOKEN|SECRET|PASSWORD|PASSWD|PASS|PWD|CREDENTIALS?))[A-Za-z0-9_]+\b["'\]]*\s*[=:]\s*(?:\\*["'])?)(?:(bearer|basic)[ \t]+)?[^\s"'&;|)]+(?:(?:(?<=[:=])|[ \t]+[:=])[ \t]*(?:\\*["'])?(?![^\s"'&;|)]*(?:KEY|TOKEN|SECRET|PASSWORD|PASSWD|PASS|PWD|CREDENTIALS?|has[łl]o|klucz|sekret|passwort|kennwort|contrase[ñn]a|\\+u[0-9a-fA-F]{4})[^\s"'&;|)]*(?:[:=]\\*(?![^\s"'&;|)])|(?:\\*["']|\s)+[:=]))[^\s"'&;|)]+)?/gi, (whole, head, scheme) => head + (scheme ? '*** ***' : '***'))
+    .replace(KEYWORD_ASSIGNMENT, (whole, head, scheme) => head + (scheme ? '*** ***' : '***'))
     .replace(NAMED_VALUE, '$1***')
     .replace(ESCAPED_KEY, (whole, key, separator) => secretPairName(key) ? key + separator + '***' : whole)
     .replace(/(?<![A-Za-z0-9+_-])(?=[A-Za-z0-9+_-]*\d)(?=[A-Za-z0-9+_-]*[A-Za-z])[A-Za-z0-9+_-]{32,}={0,2}/g, '***');
 }
+
+// The `*KEY=` rule. A word that holds a secret keyword, a separator and a value; the word after a value that ends in `=` or `:` is
+// taken too (`secret: x-api-key: YWJjZA=`) unless it is a key of its own: a word that holds a keyword and either ends in a separator
+// (and backslashes) or has a separator after it (spaces, quotes). Whether the next word is a key is decided in one pass over that
+// word: the first keyword is found by a scan that stops there (a keyword is a whole `\uXXXX` escape or a name, so a run of backslashes
+// is not rescanned from each of its characters), then the word is read to its end once, and that end is tested. The test does not
+// depend on where the keyword is, so a word that holds many keywords is not read again from each of them.
+const WORD = String.raw`[^\s"'&;|)]`;
+const KEYWORD = String.raw`KEY|TOKEN|SECRET|PASSWORD|PASSWD|PASS|PWD|CREDENTIALS?|has[łl]o|klucz|sekret|passwort|kennwort|contrase[ñn]a|\\u[0-9a-fA-F]{4}`;
+const NEXT_KEY = String.raw`(?:(?!${KEYWORD})${WORD})*(?:${KEYWORD})${WORD}*(?!${WORD})(?:(?<=[:=]\\*)|(?:\\*["']|\s)+[:=])`;
+const KEYWORD_ASSIGNMENT = new RegExp(String.raw`(\b(?=[A-Za-z0-9_]*(?:KEY|TOKEN|SECRET|PASSWORD|PASSWD|PASS|PWD|CREDENTIALS?))[A-Za-z0-9_]+\b["'\]]*\s*[=:]\s*(?:\\*["'])?)(?:(bearer|basic)[ \t]+)?${WORD}+(?:(?:(?<=[:=])|[ \t]+[:=])[ \t]*(?:\\*["'])?(?!${NEXT_KEY})${WORD}+)?`, 'gi');
 
 // Whitespace between the parts of a field (the name, its separator, the value): a space or a line break, also as JSON writes it into
 // a string (`\n`, `\t`, `\r`, `\f` or `\uXXXX` of a whitespace character), with any number of backslashes (the run doubles each time the

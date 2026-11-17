@@ -5,6 +5,9 @@
  * masking those rules keep.
  */
 
+import { readFileSync } from 'node:fs';
+import { URL } from 'node:url';
+
 import { describe, expect, it } from 'vitest';
 
 import { maskSecrets } from '../../scripts/lib/jev-mask.mjs';
@@ -114,6 +117,17 @@ describe.each([
       'a label and one long word, masked': (n) => 'KEY=: ' + 'x'.repeat(n),
       'labels and words that hold a keyword, masked': (n) => repeat('KEY=: xxxxxxxxxxKEYxxxxxxxxx ', n),
       'a label and a long word that holds a keyword and a quote, masked': (n) => 'KEY=: ' + 'x'.repeat(n) + 'KEY"',
+      // One long word that holds a keyword over and over: the rule that decides whether the next word is a key reads it once.
+      'a label and a word of repeated localized keywords, masked': (n) => 'KEY=: ' + repeat('klucz', n),
+      'a label and a word of repeated PASS, masked': (n) => 'KEY=: ' + repeat('PASS', n),
+      'a label and a run of backslashes, masked': (n) => 'KEY=: ' + '\\'.repeat(n),
+      'a label, a word and a word of repeated keywords, masked': (n) => 'secret=a: ' + repeat('klucz', n),
+      'a serialized label, a word and a word of repeated keywords, masked': (n) => String.raw`secret=\"a: ` + repeat('klucz', n),
+      'a label and a word of repeated keywords with escapes, masked': (n) => 'KEY=: ' + repeat(String.raw`\u0061klucz`, n),
+      'a localized label and a word of repeated keywords, masked': (n) => 'hasło=: ' + repeat('klucz', n),
+      'a localized label, a word and a word of repeated PASS, masked': (n) => 'klucz: a: ' + repeat('PASS', n),
+      'a localized label and a run of backslashes, masked': (n) => 'sekret=: ' + '\\'.repeat(n),
+      'a serialized localized label and a word of repeated keywords, masked': (n) => String.raw`hasło=\"a: ` + repeat('klucz', n),
     };
     for (const n of [100_000, 1_000_000]) {
       for (const [name, make] of Object.entries(shapes)) {
@@ -554,5 +568,35 @@ describe('the two copies of maskSecrets', () => {
       }
     }
     expect(differences).toEqual([]);
+  });
+
+  it('hold the same rules: the private key rule, the chain of replacements and every constant and function after it are the same text in both files', () => {
+    const read = (file) => readFileSync(new URL(`../../scripts/lib/${file}`, import.meta.url), 'utf8');
+    const maskSource = read('jev-mask.mjs');
+    const shellSource = read('shell-checks.mjs');
+    // The constants and the function that read the pairs, from the `*KEY=` rule to the end of maskNamedValues.
+    const shared = (source) => {
+      const from = source.indexOf('// The `*KEY=` rule.');
+      const named = source.indexOf('function maskNamedValues(', from);
+      return source.slice(from, source.indexOf('\n}\n', named) + 3);
+    };
+    expect(shared(shellSource).length).toBeGreaterThan(1000);
+    expect(shared(shellSource)).toBe(shared(maskSource));
+    // The chain of replacements, one line per rule. The copy lacks the hf_, npm_ and sk_live_ token rule, and the long mixed
+    // letter-digit rule differs where it keeps git hashes; every other rule is the same line.
+    const chain = (source) => {
+      const from = source.indexOf('export function maskSecrets(');
+      return source
+        .slice(from, source.indexOf('\n}\n', from))
+        .split('\n')
+        .map((line) => line.trim())
+        .filter((line) => /^\.replace\(\//.test(line) && !/hf_\|npm_|\{32,\}/.test(line));
+    };
+    expect(chain(shellSource).length).toBeGreaterThan(10);
+    expect(chain(shellSource)).toEqual(chain(maskSource));
+    // The private key rule of maskPrivateKeys (jev-mask.mjs) is the first step of the copy, which drops the END line it matched.
+    const keyRule = maskSource.slice(maskSource.indexOf('/(-{4,5} ?BEGIN'), maskSource.indexOf("'$1***$2')") + "'$1***$2')".length);
+    expect(keyRule.length).toBeGreaterThan(100);
+    expect(shellSource).toContain(keyRule.replace("'$1***$2')", "'$1***')"));
   });
 });
