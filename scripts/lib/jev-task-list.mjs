@@ -161,12 +161,40 @@ const LIST_SECRET_RULES = [
   [/\b(xox[a-z]-)[A-Za-z0-9-]{8,}/g, '$1***'],
   [/\b(AKIA)[0-9A-Z]{12,}/g, '$1***'],
   [/\b(Bearer\s+)[A-Za-z0-9._~+/=-]{8,}/gi, '$1***'],
-  [/(^|[^A-Za-z0-9])(["']?)((?:[A-Za-z0-9]+[_.-])*(?:key|token|secret|pass|passwd|password|pwd)(?:[_.-][A-Za-z0-9]+)*)(["']?)(\s*[=:]\s*)(["']?)[^\s"',;]+/gi, '$1$2$3$4$5$6***'],
 ];
+// "name = value" pairs. The head is matched only where a name starts (the character before is not a name character), so the work
+// per text is linear: a rule that may start inside a name and read on to its end costs the square of the length of "a-a-a-...".
+// The name is a whole run of name characters, optionally quoted (a JSON field); a segment test decides whether it hides its value.
+const ASSIGNMENT_HEAD = /(?<![A-Za-z0-9_.-])(["']?)([A-Za-z0-9_.-]+)(["']?)(\s*[=:]\s*)/g;
+// The value: a quoted string through its closing quote (spaces, commas and semicolons included); a quote that is never closed takes the
+// rest of its line; else a run up to whitespace, a quote, a comma or a semicolon. An empty quoted value is not a value. Sticky: it is
+// read at the end of the head, never searched for.
+const ASSIGNMENT_VALUE = /"(?:[^"\\]|\\.)+"|'(?:[^'\\]|\\.)+'|"(?!")[^\n]+|'(?!')[^\n]+|[^\s"',;]+/y;
+const SECRET_SEGMENT = /^(?:key|token|secret|pass|passwd|password|pwd)$/i;
+function maskAssignments(text) {
+  let out = '';
+  let from = 0;
+  ASSIGNMENT_HEAD.lastIndex = 0;
+  for (let head = ASSIGNMENT_HEAD.exec(text); head; head = ASSIGNMENT_HEAD.exec(text)) {
+    const valueAt = head.index + head[0].length;
+    // a name that hides nothing (or ends in a separator, which no name does): the scan goes on inside its value, which may hold a
+    // name that does ("status:password=x")
+    if (/[_.-]$/.test(head[2]) || !head[2].split(/[_.-]+/).some((segment) => SECRET_SEGMENT.test(segment))) continue;
+    ASSIGNMENT_VALUE.lastIndex = valueAt;
+    const value = ASSIGNMENT_VALUE.exec(text);
+    if (!value) continue;
+    const quote = value[0][0] === '"' || value[0][0] === "'" ? value[0][0] : '';
+    const closed = quote && value[0].length > 1 && value[0].endsWith(quote);
+    out += `${text.slice(from, valueAt)}${quote}***${closed ? quote : ''}`;
+    from = valueAt + value[0].length;
+    ASSIGNMENT_HEAD.lastIndex = from;
+  }
+  return out + text.slice(from);
+}
 export function maskListText(text) {
   let s = String(text ?? '');
   for (const [re, to] of LIST_SECRET_RULES) s = s.replace(re, to);
-  return s;
+  return maskAssignments(s);
 }
 
 const cut = (text, max) => {

@@ -7,6 +7,7 @@
 import { spawn } from 'node:child_process';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, truncateSync, utimesSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
+import { performance } from 'node:perf_hooks';
 import { join } from 'node:path';
 import { fileURLToPath, pathToFileURL, URL } from 'node:url';
 import process from 'node:process';
@@ -612,4 +613,51 @@ describe('task list: storage library', () => {
     }
     expect(report).toHaveLength(6);
   }, TOTAL_MS);
+});
+
+describe('task list: masking of quoted credentials and its cost', () => {
+  const mask = (text) => L.maskListText(text);
+
+  it('masks the whole value of a quoted credential, quoted field names included', () => {
+    const cases = [
+      ['Configure {"api_key":"plain-secret-value"}', 'Configure {"api_key":"***"}'],
+      ['{"password":"correct horse battery staple"}', '{"password":"***"}'],
+      ['{ "token" : "x y, z; w" , "name": "keep me"}', '{ "token" : "***" , "name": "keep me"}'],
+      ["db_pass = 'a b c' rest", "db_pass = '***' rest"],
+      ['pwd="a\\"b c" tail', 'pwd="***" tail'],
+      ['password: "never closed and more', 'password: "***'],
+      ['AUTH_TOKEN: "xyz-secret-1"', 'AUTH_TOKEN: "***"'],
+      ['status:password=abc', 'status:password=***'],
+      ['--api-key=abc and secret.key: v', '--api-key=*** and secret.key: ***'],
+    ];
+    for (const [input, expected] of cases) expect(mask(input), input).toBe(expected);
+  });
+
+  it('leaves task names and other quoted text alone, and masking twice changes nothing more', () => {
+    for (const keep of ['Passed: 26 tests', 'tokens: 5 items', 'Key monkey=3 and task-list-abcdefghij', '{"name": "pass the key to Bob"}', 'password=""']) {
+      expect(mask(keep), keep).toBe(keep);
+    }
+    for (const text of ['{"password":"a b c"}', 'x_secret_y = \'p q\'', 'token=abc password: "d e" Bearer abcdefgh12345678']) {
+      expect(mask(mask(text)), text).toBe(mask(text));
+    }
+  });
+
+  it('costs time linear in the length of the text: shapes that made the name rule square its input', () => {
+    const shapes = {
+      'a-a-': (n) => 'a-'.repeat(n / 2),
+      'a.a.': (n) => 'a.'.repeat(n / 2),
+      'x_x_': (n) => 'x_'.repeat(n / 2),
+      'a=a=': (n) => 'a='.repeat(n / 2),
+      'key=" ': (n) => 'key="'.repeat(n / 5),
+      'unclosed': (n) => `password: "${'x'.repeat(n)}`,
+    };
+    for (const [name, make] of Object.entries(shapes)) {
+      const text = make(200_000);
+      const start = performance.now();
+      mask(text);
+      const ms = performance.now() - start;
+      // a linear pass takes a few milliseconds; the square of 200 000 characters took minutes
+      expect(ms, `${name}: ${Math.round(ms)} ms`).toBeLessThan(2000);
+    }
+  });
 });
