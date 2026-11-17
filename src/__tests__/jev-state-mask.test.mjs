@@ -164,16 +164,18 @@ describe('maskJevState: more secret keys, counters, ids', () => {
     expect(maskJevState({ password: 1234, token_count: 'abc' })).toEqual({ password: '***', token_count: '***' });
   });
 
-  it('leaves a UUID under session_id and sessionId, a git hash and cwd alone', () => {
+  it('leaves a UUID under session_id and sessionId at the top of the state, a git hash and a short cwd alone', () => {
     const uuid = '8f14e45f-ceea-4672-8a3e-5e1b6f3d2a10';
     const sha = '2bd2a9dbaa4fddce7d93d1ee138cb3c39294bcf2';
-    const cwd = '/work/worktrees/feature-oauth-refresh-rotation-2026-abcdef0123';
+    const cwd = '/work/worktrees/feature-oauth';
     expect(maskJevState({ session_id: uuid, sessionId: uuid, cwd, task: `Revert commit ${sha} now` })).toEqual({ session_id: uuid, sessionId: uuid, cwd, task: `Revert commit ${sha} now` });
   });
 
-  it('does not exempt a UUID under another key, and still checks cwd for a secret path', () => {
+  it('masks cwd like any other string: a token and a long directory name go, and a secret path is still refused', () => {
     const uuid = '8f14e45f-ceea-4672-8a3e-5e1b6f3d2a10';
     expect(maskJevState({ other: `key ${uuid}` })).toEqual({ other: 'key ***' });
+    expect(maskJevState({ cwd: '/tmp/' + GHP })).toEqual({ cwd: '/tmp/ghp_***' });
+    expect(maskJevState({ cwd: '/work/worktrees/feature-oauth-refresh-rotation-2026-abcdef0123' })).toEqual({ cwd: '/work/worktrees/***' });
     expect(() => maskJevState({ cwd: '/home/u/.ssh/id_ed25519' })).toThrow(JevStateFieldOmittedError);
     expect(maskJevState({ cwd: '/work/a\n/home/u/.ssh/id_ed25519' })).toEqual({ cwd: '/work/a\n[line omitted: secret path]' });
   });
@@ -589,7 +591,7 @@ describe('maskJevState: values that stand beside their names', () => {
     [['Authorization', 'Basic abc123'], ['Authorization', '***']],
     [['X-Api-Key', 'hunter2zzQ'], ['X-Api-Key', '***']],
     [['Cookie', 'a=b'], ['Cookie', '***']],
-    [['pass', 'fail'], ['pass', 'fail']],
+    [['pass', 'hunter2zzQ'], ['pass', '***']],
     [['name', 'value'], ['name', 'value']],
   ])('tuple %j', (input, expected) => {
     expect(maskJevState({ headers: [input] }).headers[0]).toEqual(expected);
@@ -919,6 +921,122 @@ describe('maskJevState: a token in the path of a URL is masked like any other', 
     for (const masked of [maskJevState(text), maskJevState({ t: text }).t, maskSecrets(text)]) {
       expect(masked).not.toContain(TOKEN);
       expect(masked).toContain('***');
+    }
+  });
+});
+
+// What a key name can change, key by key, level by level. A key name makes the value under it a secret (at any depth), makes
+// a number a counter (a number stays at any depth), and lets an exact UUID through under session_id and sessionId at the top
+// of the state. It never lets a string skip a rule of the text mask: every expected value below is written out, not computed
+// by the mask, and the secret is also looked for in the JSON of each result.
+describe('maskJevState: what a key name can change, by key, depth and parent', () => {
+  const UUID_VALUE = '8f14e45f-ceea-4672-8a3e-5e1b6f3d2a10';
+  const MIXED = 'aB3dE5gH7jK9mN1pQ3sT5vW7yZ9bC1dE3fG5'; // 36 letters and digits, no prefix
+  const SK = 'sk-' + 'a1b2c3d4e5f6'.repeat(2);
+  // [label, input value, what it becomes under a key that names nothing secret, the secret that must not survive]
+  const VALUES = [
+    ['a plain path', '/work/proj/src', '/work/proj/src', null],
+    ['a path with a ghp token', '/tmp/' + GHP, '/tmp/ghp_***', GHP],
+    ['a path with an sk token', '/tmp/' + SK, '/tmp/sk-***', SK],
+    ['a path with a long mixed component', '/tmp/' + MIXED, '/tmp/***', MIXED],
+    ['a long mixed token', MIXED, '***', MIXED],
+    ['a UUID', UUID_VALUE, '***', UUID_VALUE],
+  ];
+  // The places of a key, as the keys and indexes from the top of the state down to the object that holds it: its parent
+  // is the state itself (depth 0), state.toolInput and state.tool_input (the input of a tool call), an array of
+  // objects, or a nested object; depth is the number of steps.
+  const PLACES = [
+    ['the state', []],
+    ['state.toolInput', ['toolInput']],
+    ['state.tool_input', ['tool_input']],
+    ['state.toolInput.a', ['toolInput', 'a']],
+    ['state.toolInput.a.b', ['toolInput', 'a', 'b']],
+    ['state.toolInput.items[0]', ['toolInput', 'items', 0]],
+    ['state.items[0]', ['items', 0]],
+    ['state.items[0].a', ['items', 0, 'a']],
+    ['state.candidates[0]', ['candidates', 0]],
+    ['state.config', ['config']],
+    ['state.config.a', ['config', 'a']],
+    ['state.config.a.b', ['config', 'a', 'b']],
+  ];
+  // The state that has the object `leaf` at the place.
+  const at = (place, leaf) => place.reduceRight((inner, step) => (typeof step === 'number' ? [inner] : { [step]: inner }), leaf);
+
+  const cases = (keys, values, expectedFor) => {
+    const rows = [];
+    for (const key of keys) {
+      for (const [valueLabel, input, , secret] of values) {
+        for (const [placeLabel, place] of PLACES) {
+          rows.push([`${key} = ${valueLabel} in ${placeLabel}`, key, input, place, expectedFor(key, input, place), secret]);
+        }
+      }
+    }
+    return rows;
+  };
+
+  const check = (_label, key, input, place, expected, secret) => {
+    const out = maskJevState(at(place, { [key]: input }));
+    expect(out).toEqual(at(place, { [key]: expected }));
+    // the one value that is let through on purpose (a UUID under session_id at the top) is its own expected value
+    if (secret && expected !== input) expect(JSON.stringify(out)).not.toContain(secret);
+  };
+
+  const plainBecomes = new Map(VALUES.map(([, input, becomes]) => [input, becomes]));
+
+  // cwd is masked like any other string everywhere, the top of the state too (a path with a token has the token masked).
+  // session_id and sessionId keep an exact UUID at the top of the state only; any other value is masked like any string.
+  // The key name `session-id` is no session id key.
+  const SESSION_KEYS = ['session_id', 'sessionId'];
+  it.each(cases(['cwd', 'session_id', 'sessionId', 'session-id', 'sessionid', 'directory'], VALUES, (key, input, place) => (
+    SESSION_KEYS.includes(key) && place.length === 0 && input === UUID_VALUE ? UUID_VALUE : plainBecomes.get(input)
+  )))('%s', check);
+
+  // A counter key keeps a number at every place and masks anything else under it, whatever it holds.
+  const COUNTER_KEYS = ['tokens', 'totalTokens', 'token_count', 'max_tokens'];
+  it.each(cases(COUNTER_KEYS, [['a number', 4096, 4096, null]], () => 4096))('%s', check);
+  it.each(cases(COUNTER_KEYS, [...VALUES, ['an array', ['x', GHP], null, GHP], ['an object', { a: GHP }, null, GHP]], () => '***'))('%s', check);
+
+  // A secret key masks its value at every place, a number too.
+  it.each(cases(['password', 'api_key', 'accessToken'], [...VALUES, ['a number', 1234, 1234, null]], () => '***'))('%s', check);
+
+  // The bare name "pass" is a secret name in a pair, as it is as a key: the value stands for the same thing at every place.
+  it.each(PLACES.flatMap(([label, place]) => VALUES.map(([valueLabel, input, , secret]) => [`${valueLabel} in ${label}`, place, input, secret])))(
+    'a pair named pass: %s',
+    (_label, place, input, secret) => {
+      for (const [shape, expected] of [
+        [{ name: 'pass', value: input }, { name: 'pass', value: '***' }],
+        [{ key: 'pass', value: input }, { key: 'pass', value: '***' }],
+        [['pass', input], ['pass', '***']],
+      ]) {
+        const out = maskJevState(at(place, { pair: shape }));
+        expect(out, JSON.stringify(shape)).toEqual(at(place, { pair: expected }));
+        if (secret) expect(JSON.stringify(out)).not.toContain(secret);
+      }
+    },
+  );
+
+  // The one other thing that is let through by shape and not by name (see keepGitHashes): an exact 40 or 64 character hex string.
+  it('leaves a git object id at every place, and masks it under a key that names a secret', () => {
+    for (const id of ['2bd2a9dbaa4fddce7d93d1ee138cb3c39294bcf2', '2bd2a9dbaa4fddce7d93d1ee138cb3c39294bcf22bd2a9dbaa4fddce7d93d1ee']) {
+      for (const [, place] of PLACES) {
+        expect(maskJevState(at(place, { commit: id, token: id }))).toEqual(at(place, { commit: id, token: '***' }));
+      }
+    }
+  });
+
+  it('reads no id out of a name and value pair or an argument', () => {
+    const state = { toolInput: { env: [{ name: 'SESSION', value: UUID_VALUE }, { name: 'session_id', value: UUID_VALUE }], argv: ['run', '--cwd', '/tmp/' + GHP] } };
+    expect(maskJevState(state)).toEqual({ toolInput: { env: [{ name: 'SESSION', value: '***' }, { name: 'session_id', value: '***' }], argv: ['run', '--cwd', '/tmp/ghp_***'] } });
+  });
+
+  it('is idempotent for every place of cwd and session_id: a second pass changes nothing', () => {
+    for (const key of ['cwd', 'session_id']) {
+      for (const [, place] of PLACES) {
+        for (const [, input] of VALUES) {
+          const once = maskJevState(at(place, { [key]: input }));
+          expect(maskJevState(once)).toEqual(once);
+        }
+      }
     }
   });
 });

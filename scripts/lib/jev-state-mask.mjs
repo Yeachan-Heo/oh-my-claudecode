@@ -95,9 +95,17 @@ const SECRET_KEY = new RegExp(
   '|(?:^|[^a-z0-9])(?:pass|pwds?|cookies?|bearer|api[^a-z0-9]?keys?|access[^a-z0-9]?keys?|private[^a-z0-9]?keys?|client[^a-z0-9]?secrets?|authorization)\\d*(?:[^a-z0-9]|$)' +
   '|tokens\\d*$)',
 );
-// A number under such a key that counts or measures something (token_count, password_length, tokenBudget) stays.
+// A number under such a key that counts or measures something (token_count, password_length, tokenBudget) stays, at any
+// depth: a number is no text, and a number under a key that names no secret is left as well, so this is no gap that
+// the name opens. A string, array or object under a counter key is masked.
 const COUNTER_KEY = /(?:tokens|(?:^|[^a-z0-9])(?:count|length|len|budget|usage|size))$/;
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+// What a key name does here, all of it: the value under a key that names a secret is replaced (at any depth); a number
+// under a key that counts something stays (above); and an exact UUID under the key `session_id` of the state itself
+// (its top level: the loop-continuation point puts the id of the session there) stays, which maskSecrets would take for
+// a token. No key name lets a string skip a rule of the text mask: under `toolInput`, `args`, in an array or anywhere
+// deeper than the top, a `session_id` or a `cwd` is a string like any other (the grid test in
+// src/__tests__/jev-state-mask.test.mjs covers every such key at every depth and parent).
 
 /**
  * The name of a key as the classification reads it: our own two markers taken out (they name no secret, and
@@ -148,11 +156,12 @@ function stricter(a, b) {
 
 // Pairs: the value of { name: 'DB_PASSWORD', value: x }, { key: 'apiToken', value: x }, { Name, Value },
 // { ParameterKey, ParameterValue } and the second element of a ['Authorization', 'Basic abc'] pair is masked when the
-// name is a secret name. The bare name "pass" is not one here (['pass', 'fail'] is a list of results).
+// name is a secret name, "pass" too (the same word as a key masks the value of the key, and Object.entries turns a key and
+// its value into such a pair, so a list of results such as ['pass', 'fail'] loses its second element: that is the price).
 const PAIR_NAME = new Set(['name', 'key', 'parameter_key']);
 const PAIR_VALUE = new Set(['value', 'parameter_value']);
 function pairNameKind(name) {
-  return typeof name === 'string' && normalizeKey(name) !== 'pass' ? secretKind(name) : false;
+  return typeof name === 'string' ? secretKind(name) : false;
 }
 // Arguments of a command written as an array: what maskSecrets masks in the same command line as a string, which its
 // rules cannot see when each element is masked alone. The element after a secret flag is a value; after -u or --user
@@ -262,10 +271,9 @@ function cutAndCloseTail(text, end) {
  * The text with secret-path lines omitted and secrets masked. Cut to maxChars + WINDOW_MARGIN first when
  * maxChars is given: the caller sends only the first maxChars characters (see cutAndCloseTail).
  */
-function maskString(text, maxChars, plain) {
+function maskString(text, maxChars) {
   const cutText = maxChars !== undefined && text.length > maxChars + WINDOW_MARGIN;
   const cut = cutText ? cutAndCloseTail(text, maxChars + WINDOW_MARGIN) : text;
-  if (plain === 'cwd') return omitSecretLines(cut);
   const omitted = omitSecretLines(maskPrivateKeys(cut));
   const masked = maskSecrets(omitted, { keepGitHashes: true });
   return cutText ? masked.replace(/(\/\/[^/\s:@]+:)[^/\s@]+$/, '$1***') : masked;
@@ -293,8 +301,8 @@ export function maskJevState(state, { maxChars } = {}) {
   let nodes = 0;
   const ancestors = new Set();
 
-  // secretKey: false, 'secret' or 'counter'; plain: 'uuid' (a session id key) or 'cwd'
-  const walk = (input, key, depth, secretKey, plain) => {
+  // secretKey: false, 'secret' or 'counter'; sessionId: the value of the key `session_id` of the state itself
+  const walk = (input, key, depth, secretKey, sessionId) => {
     let value = input;
     if (value !== null && typeof value === 'object' && typeof value.toJSON === 'function') value = value.toJSON(key);
     if (typeof value === 'function' || typeof value === 'symbol' || value === undefined) return undefined;
@@ -310,8 +318,8 @@ export function maskJevState(state, { maxChars } = {}) {
     if (secretKey) return MASKED_VALUE;
     if (typeof value === 'string') {
       // A session id is no secret and a UUID looks like one to maskSecrets.
-      if (plain === 'uuid' && UUID.test(value)) return value;
-      const masked = maskString(value, maxChars, plain);
+      if (sessionId && UUID.test(value)) return value;
+      const masked = maskString(value, maxChars);
       if (fieldOmitted(masked, maxChars)) throw new JevStateFieldOmittedError('a string of the state is a secret path');
       return masked;
     }
@@ -339,10 +347,9 @@ export function maskJevState(state, { maxChars } = {}) {
       for (const [i, k] of keys.entries()) {
         const normalized = normalizedKeys[i];
         const secret = stricter(secretKindOf(normalized), PAIR_VALUE.has(normalized) ? pairKind : false);
-        const kind = normalized === 'session_id' ? 'uuid' : normalized === 'cwd' ? 'cwd' : false;
-        const masked = walk(value[k], k, depth + 1, secret, kind);
+        const masked = walk(value[k], k, depth + 1, secret, depth === 0 && normalized === 'session_id');
         if (masked === undefined) continue;
-        const base = SECRET_PATH.test(k) ? KEY_OMITTED : maskString(k, maxChars, false);
+        const base = SECRET_PATH.test(k) ? KEY_OMITTED : maskString(k, maxChars);
         let name = base;
         if (Object.hasOwn(out, name)) {
           let n = nextSuffix.get(base) ?? 2;

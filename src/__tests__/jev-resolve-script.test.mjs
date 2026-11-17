@@ -529,6 +529,21 @@ describe('state mask', () => {
     }
   });
 
+  it('masks a token under a cwd key at any place of the state, and keeps a UUID under session_id at the top only', async () => {
+    const ghp = 'ghp_' + 'A'.repeat(36);
+    const uuid = '8f14e45f-ceea-4672-8a3e-5e1b6f3d2a10';
+    const state = { session_id: uuid, cwd: '/tmp/' + ghp, toolName: 'Edit', toolInput: { cwd: '/tmp/' + ghp, session_id: uuid, nested: [{ cwd: '/tmp/' + ghp }] } };
+    const expected = { session_id: uuid, cwd: '/tmp/ghp_***', toolName: 'Edit', toolInput: { cwd: '/tmp/ghp_***', session_id: '***', nested: [{ cwd: '/tmp/ghp_***' }] } };
+    const bodies = [];
+    const result = await resolveRequest({ point: 'model-routing', state, questions: QUESTIONS }, baseEnv({ OMC_JEV: 'model-routing:active' }), okFetch(bodies));
+    expect(result.mode).toBe('active');
+    expect(bodies).toHaveLength(1);
+    const line = readFileSync(join(tmp, 'shadow.jsonl'), 'utf8').trim().split('\n').pop();
+    expect(JSON.parse(bodies[0]).state).toEqual(expected);
+    expect(JSON.parse(line).state).toEqual(expected);
+    for (const text of [bodies[0], line]) expect(text).not.toContain(ghp);
+  });
+
   // The state of a request is JSON (stdin or the request file), so a cycle cannot reach the script: depth can.
   const nested = (levels) => JSON.parse('{"a":'.repeat(levels) + '"leaf"' + '}'.repeat(levels));
   const lastLine = () => JSON.parse(readFileSync(join(tmp, 'shadow.jsonl'), 'utf8').trim().split('\n').pop());

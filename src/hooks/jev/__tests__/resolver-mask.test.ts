@@ -75,6 +75,20 @@ describe('resolveJudgment state mask', () => {
     }
   });
 
+  it('masks a token under a cwd key at any place of the state, and keeps a UUID under session_id at the top only', async () => {
+    const uuid = '8f14e45f-ceea-4672-8a3e-5e1b6f3d2a10';
+    const state = { session_id: uuid, cwd: '/tmp/' + GHP, tool_name: 'Edit', tool_input: { cwd: '/tmp/' + GHP, session_id: uuid, nested: [{ cwd: '/tmp/' + GHP }] } };
+    const expected = { session_id: uuid, cwd: '/tmp/ghp_***', tool_name: 'Edit', tool_input: { cwd: '/tmp/ghp_***', session_id: '***', nested: [{ cwd: '/tmp/ghp_***' }] } };
+    const bodies: string[] = [];
+    const result = await resolveJudgment({ point: 'model-routing', state, questions: QUESTIONS, twin: () => 'sonnet', fetchFn: recordingFetch(bodies) });
+    expect(result).toMatchObject({ mode: 'active', source: 'jev' });
+    expect(bodies).toHaveLength(1);
+    const line = readFileSync(join(dir, 'log', 'shadow.jsonl'), 'utf8');
+    expect(JSON.parse(bodies[0]).state).toEqual(expected);
+    expect(lastLogLine().state).toEqual(expected);
+    for (const text of [bodies[0], line]) expect(text).not.toContain(GHP);
+  });
+
   it('sends nothing, answers with the twin and logs a marker when the state cannot be masked', async () => {
     const error = vi.spyOn(console, 'error').mockImplementation(() => {});
     const bodies: string[] = [];
