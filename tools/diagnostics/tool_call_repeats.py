@@ -285,7 +285,8 @@ def load_contexts(dir_path, rng, poll_commands, extra_tools):
                             stats['bad_lines'] += 1
                             continue
                         row_type = row.get('type')
-                        content = (row.get('message') or {}).get('content')
+                        message = row.get('message')
+                        content = message.get('content') if isinstance(message, dict) else None
                         if row_type == 'assistant':
                             if not isinstance(content, list):
                                 continue
@@ -576,8 +577,8 @@ def collect(calls_by_context, options):
                     'variant': 'subsequence',
                     'context': label,
                     'tool': tool,
-                    'from_ts': stream[s['start']]['ts_raw'],
-                    'to_ts': stream[s['end'] - 1]['ts_raw'],
+                    'from_ts': normal[s['start']]['ts_raw'],
+                    'to_ts': normal[s['end'] - 1]['ts_raw'],
                     'calls': s['end'] - s['start'],
                     'period': '',
                     'signature': s['sig'][:12],

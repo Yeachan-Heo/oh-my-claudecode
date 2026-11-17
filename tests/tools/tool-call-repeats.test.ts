@@ -427,3 +427,96 @@ describe.skipIf(!hasPython3)('tool_call_repeats.py', () => {
     expect(badWrite.stderr).toMatch(/cannot write/);
   });
 });
+
+// Edge cases on one-session fixtures (one transcript per case, temp directory only).
+describe.skipIf(!hasPython3)('tool_call_repeats.py edge cases', () => {
+  /** Writes one session transcript, runs the script on it and returns the JSON result and the TSV rows. */
+  function runSession(rows: string[]): { out: Json; findings: Array<Record<string, string>> } {
+    const dir = mkdtempSync(join(tmpdir(), 'tool-call-repeats-edge-'));
+    try {
+      mkdirSync(join(dir, 'proj'), { recursive: true });
+      writeFileSync(join(dir, 'proj', 'ses-edge.jsonl'), rows.join(''));
+      const jsonFile = join(dir, 'out.json');
+      const tsvFile = join(dir, 'out.tsv');
+      const r = spawnSync('python3', ['-I', SCRIPT, '--transcripts', dir, '--json', jsonFile, '--tsv', tsvFile], { encoding: 'utf8' });
+      expect(r.status, r.stderr).toBe(0);
+      const lines = readFileSync(tsvFile, 'utf8').trimEnd().split('\n');
+      const columns = lines[0].split('\t');
+      const findings = lines.slice(1).filter((l) => l !== '').map((l) => Object.fromEntries(columns.map((c, i) => [c, l.split('\t')[i] ?? ''])));
+      return { out: JSON.parse(readFileSync(jsonFile, 'utf8')), findings };
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  }
+
+  it('rows whose message is not an object are skipped without ending the run', () => {
+    const t = builder();
+    const c = t.call('Read', { file_path: '/tmp/ok.md' });
+    const malformed = ['"text"', '7', '[1, 2]'].flatMap((message) => [
+      `{"type":"assistant","timestamp":"${D}T09:00:00.000Z","message":${message}}\n`,
+      `{"type":"user","timestamp":"${D}T09:00:01.000Z","message":${message}}\n`,
+    ]);
+    const { out } = runSession([...malformed, c.row, t.result(c.id, 'fine')]);
+    expect(out.denominators.by_tool).toEqual({ Read: 1 });
+  });
+
+  it('counts replayed copies of one tool call (the same tool-use id) once', () => {
+    const t = builder();
+    const c = t.call('Read', { file_path: '/tmp/replayed.md' });
+    const rows = [c.row, c.row, c.row, t.result(c.id, 'same-result')];
+    const { out, findings } = runSession(rows);
+    expect(out.denominators.by_tool).toEqual({ Read: 1 });
+    expect(out.a.subsequence.sequences).toBe(0);
+    expect(out.a.strict.sequences).toBe(0);
+    expect(out.repeat_work_sum.strict.strict_sum).toBe(0);
+    expect(findings).toEqual([]);
+  });
+
+  it('keeps polling-only series and cycles out of the repeat-work sums, and still counts a mixed cycle', () => {
+    const polling = builder();
+    const rows: string[] = [];
+    for (let i = 0; i < 3; i += 1) {
+      for (const taskId of ['1', '2']) {
+        const c = polling.call('TaskGet', { task_id: taskId });
+        rows.push(c.row, polling.result(c.id, `status-${i}`));
+      }
+    }
+    const { out } = runSession(rows);
+    expect(out.polling.matched_calls_total).toBe(6);
+    expect(out.d.cycles, 'a cycle of polling calls only').toBe(0);
+    expect(out.c.strict.series).toBe(0);
+    expect(out.c.subsequence.series).toBe(0);
+    expect(out.repeat_work_sum.strict.strict_sum).toBe(0);
+    expect(out.repeat_work_sum.subsequence.strict_sum).toBe(0);
+
+    // a cycle with one non-polling call in it is real repeat work
+    const mixed = builder();
+    const mixedRows: string[] = [];
+    for (let i = 0; i < 3; i += 1) {
+      const read = mixed.call('Read', { file_path: '/tmp/mixed.md' });
+      const poll = mixed.call('TaskGet', { task_id: '1' });
+      mixedRows.push(read.row, mixed.result(read.id, `r${i}`), poll.row, mixed.result(poll.id, `p${i}`));
+    }
+    expect(runSession(mixedRows).out.d.cycles).toBe(1);
+  });
+
+  it('takes the evidence range of a subsequence run from the calls of the run, not from the unfiltered stream', () => {
+    const t = builder();
+    const rows: string[] = [];
+    const sleep = t.call('Bash', { command: 'sleep 30' });
+    rows.push(sleep.row, t.result(sleep.id, 'ok'));
+    const lsTimes: string[] = [];
+    for (let i = 0; i < 3; i += 1) {
+      const c = t.call('Bash', { command: 'ls -la /tmp/project' });
+      lsTimes.push(JSON.parse(c.row).timestamp);
+      rows.push(c.row, t.result(c.id, 'files'));
+    }
+    const { findings } = runSession(rows);
+    const run = findings.find((f) => f.kind === 'a' && f.variant === 'subsequence');
+    expect(run, 'the three identical ls calls are one run').toBeDefined();
+    expect(run!.calls).toBe('3');
+    expect(run!.from_ts).toBe(lsTimes[0]);
+    expect(run!.to_ts).toBe(lsTimes[2]);
+  });
+});
+
