@@ -54,6 +54,12 @@ async function traceSteps(): Promise<string[]> {
   return raw.split('\n').filter(Boolean).map(line => (JSON.parse(line) as { step: string }).step);
 }
 
+async function traceTimes(): Promise<Record<string, number>> {
+  const raw = await readFile(tracePath, 'utf8').catch(() => '');
+  const entries = raw.split('\n').filter(Boolean).map(line => JSON.parse(line) as { step: string; at: string });
+  return Object.fromEntries(entries.map(entry => [entry.step, Date.parse(entry.at)]));
+}
+
 function startFake(scenario: string | undefined, selectBy: 'flag' | 'env' = 'flag'): FakeRun {
   const env: NodeJS.ProcessEnv = {
     ...process.env,
@@ -206,9 +212,11 @@ describe.skipIf(process.platform === 'win32')('fake team provider scenarios', ()
 
   it('claude-slow-banner: holds the bypass banner for seconds before the idle prompt', async () => {
     const run = startFake('claude-slow-banner');
-    const bannerAt = await run.waitForOutput(frame('claude/unversioned/startup-banner-bypass.txt'));
-    const idleAt = await run.waitForOutput(frame('claude/2.1.325/idle.txt'));
-    expect(idleAt - bannerAt).toBeGreaterThanOrEqual(2_500);
+    await run.waitForOutput(frame('claude/unversioned/startup-banner-bypass.txt'));
+    await run.waitForOutput(frame('claude/2.1.325/idle.txt'));
+    // The provider's own trace times, so a late read by this process cannot shorten the gap.
+    const drawnAt = await traceTimes();
+    expect(drawnAt['idle-prompt']! - drawnAt['startup-banner']!).toBeGreaterThanOrEqual(2_500);
     await runClaimLifecycle(run, '\ntask completed\n❯ ');
   });
 
@@ -299,6 +307,16 @@ describe.skipIf(process.platform === 'win32')('fake team provider scenarios', ()
     await shutDown(run);
   });
 
+  it('recovery-continuation: fails on a recovery section it cannot parse and calls no task API', async () => {
+    const run = startFake('recovery-continuation');
+    await run.waitForOutput('❯ ');
+    await writeFile(inboxPath, '## Recovery Continuation\nYou own adopted task 1 at checkpoint sequence 1.\n');
+    sendStartupTrigger(run);
+    expect(await run.exitCode).toBe(1);
+    expect(run.output()).toContain('fake-claude failed at read-inbox: recovery_continuation_unparseable');
+    expect(await apiCalls()).toEqual([]);
+  });
+
   it('recovery-continuation: claims a fresh task inbox like the default scenario', async () => {
     const run = startFake('recovery-continuation');
     await run.waitForOutput('❯ ');
@@ -311,9 +329,9 @@ describe.skipIf(process.platform === 'win32')('fake team provider scenarios', ()
     expect(run.output()).not.toContain('fake-claude for omc team tmux smoke');
   });
 
-  it('rejects an unknown scenario', async () => {
-    const run = startFake('no-such-scenario');
+  it.each(['no-such-scenario', 'constructor'])('rejects the unknown scenario %s', async (scenario) => {
+    const run = startFake(scenario);
     expect(await run.exitCode).toBe(2);
-    expect(run.output()).toContain('fake-claude: unknown scenario no-such-scenario');
+    expect(run.output()).toContain(`fake-claude: unknown scenario ${scenario}`);
   });
 });

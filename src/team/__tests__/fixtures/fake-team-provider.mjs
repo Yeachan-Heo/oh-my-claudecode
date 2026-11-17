@@ -258,7 +258,7 @@ const SCENARIOS = {
 
 const scenarioIndex = process.argv.indexOf('--scenario');
 const scenarioName = (scenarioIndex >= 0 ? process.argv[scenarioIndex + 1] : process.env.OMC_FAKE_PROVIDER_SCENARIO) || 'default';
-const STEPS = SCENARIOS[scenarioName];
+const STEPS = Object.hasOwn(SCENARIOS, scenarioName) ? SCENARIOS[scenarioName] : undefined;
 if (!STEPS) {
   trace('failed', { failed_step: 'select-scenario', message: `unknown_scenario:${scenarioName}` });
   process.stdout.write(`fake-claude: unknown scenario ${scenarioName}\n`);
