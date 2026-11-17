@@ -22,6 +22,8 @@ const templateFile = join(dir, 'template.json');
 writeFileSync(templateFile, JSON.stringify(template));
 const templateNoMachine = join(dir, 'template-no-machine.json');
 writeFileSync(templateNoMachine, JSON.stringify({ ...template, machine_specific: ['OMC_PRIVATE_PATHS'] }));
+const templateMachineInTemplate = join(dir, 'template-machine-in-template.json');
+writeFileSync(templateMachineInTemplate, JSON.stringify({ ...template, env: { ...template.env, OMC_LOG_DIR: '/expected/path' }, machine_specific: ['OMC_LOG_DIR'] }));
 
 function settingsFile(name: string, env: Record<string, string>, extra: Record<string, unknown> = {}): string {
   const file = join(dir, name);
@@ -41,6 +43,17 @@ describe('settings_drift.mjs', () => {
     expect(r.status).toBe(0);
     expect(r.stdout).toContain('differences: 0');
     expect(r.out).not.toContain('/synthetic/');
+  });
+
+  it('a machine-specific key in both template and machine_specific list: presence checked, value not compared or printed', () => {
+    // Template expects OMC_LOG_DIR = '/expected/path', but settings has '/different/path'
+    // Because OMC_LOG_DIR is machine-specific, the difference should not be reported and the value should not be printed
+    const env = { ...template.env, OMC_LOG_DIR: '/different/path' };
+    const r = run(['--settings', settingsFile('machine-in-template.json', env), '--template', templateMachineInTemplate]);
+    expect(r.status).toBe(0);
+    expect(r.stdout).toContain('differences: 0');
+    expect(r.out).not.toContain('/different/path');
+    expect(r.out).not.toContain('/expected/path');
   });
 
   it('settings that match the template and carry the machine-specific variable: no differences, exit 0', () => {

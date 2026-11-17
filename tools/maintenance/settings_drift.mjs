@@ -63,6 +63,7 @@ let matching = 0;
 
 for (const [k, expected] of Object.entries(templateEnv)) {
   if (!(k in env)) differences.push(`env ${k}: missing in settings (template ${show(k, expected)})`);
+  else if (machineSpecific.has(k)) { matching++; } // presence is enough for machine-specific keys
   else if (String(env[k]) !== String(expected)) differences.push(`env ${k}: settings ${show(k, env[k])}, template ${show(k, expected)}`);
   else matching++;
 }
