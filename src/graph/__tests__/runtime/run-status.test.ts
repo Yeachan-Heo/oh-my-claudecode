@@ -98,6 +98,41 @@ async function runChain(
   });
 }
 
+/** Entry command, then a human-approval gate, then the terminal command; `decision` answers the gate. */
+async function runApprovalChain(runsRoot: string, runId: string, decision: "approved" | "denied"): Promise<void> {
+  const sealed = sealGraphDescriptor({
+    descriptor_version: 1,
+    run_id: runId,
+    revision_id: `rev-${runId}`,
+    goal: "status approval chain",
+    nodes: [
+      commandNode("step-1", NODE_OK),
+      { id: "gate", kind: "human-approval" as const, title: "Approve", prompt: "Approve?" },
+      commandNode("step-2", NODE_OK),
+    ],
+    edges: [
+      { id: "e-1-gate", kind: "fixed" as const, from: "step-1", to: "gate" },
+      { id: "e-gate-2", kind: "fixed" as const, from: "gate", to: "step-2" },
+    ],
+    entry_node_ids: ["step-1"],
+    concurrency_limit: 1,
+    terminal_verification_node_id: "step-2",
+  });
+  await runGraph(sealed, {
+    runsRoot,
+    executors: [new CommandNodeExecutor()],
+    prompter: { prompt: async () => decision },
+  });
+}
+
+/** Rewrites projection.json of a run through `edit`, keeping every other field. */
+function editProjection(runsRoot: string, runId: string, edit: (projection: Record<string, any>) => void): void {
+  const file = join(runsRoot, runId, "projection.json");
+  const envelope = JSON.parse(readFileSync(file, "utf8")) as { projection: Record<string, any> };
+  edit(envelope.projection);
+  writeFileSync(file, JSON.stringify(envelope));
+}
+
 interface StatusNode {
   id: string;
   state: string;
@@ -179,6 +214,7 @@ describe.runIf(process.platform !== "win32")("omc graph status", () => {
       "projection without the projection key": () => writeFileSync(join(dir, "projection.json"), JSON.stringify({ other: 1 })),
       "truncated last journal line": () => writeFileSync(join(dir, "journal.jsonl"), journal.slice(0, journal.length - 20)),
       "journal missing although transitions are committed": () => rmSync(join(dir, "journal.jsonl")),
+      "journal with a gap in its seq numbers": () => writeFileSync(join(dir, "journal.jsonl"), journal.replace('"seq":1', '"seq":7')),
     };
     for (const [label, breakIt] of Object.entries(damage)) {
       writeFileSync(join(dir, "projection.json"), projection);
@@ -199,6 +235,61 @@ describe.runIf(process.platform !== "win32")("omc graph status", () => {
     const result = await statusCli(["st-empty", "--runs-root", runs]);
     expect(result.code, JSON.stringify(result.json)).toBe(1);
     expect(result.json?.state).toBe("failed");
+  });
+
+  it("a denied approval that leaves nothing to run ends the run as failed, not in_progress", async () => {
+    const runs = makeRunsRoot();
+    await runApprovalChain(runs, "st-denied", "denied");
+    await runApprovalChain(runs, "st-approved", "approved");
+
+    const denied = await statusCli(["st-denied", "--runs-root", runs]);
+    expect(denied.code, JSON.stringify(denied.json)).toBe(1);
+    expect(denied.json?.state).toBe("failed");
+    expect(nodeOf(denied.json as Record<string, any>, "gate").state).toBe("failed");
+    const approved = await statusCli(["st-approved", "--runs-root", runs]);
+    expect(approved.code, JSON.stringify(approved.json)).toBe(0);
+    expect(approved.json?.state).toBe("succeeded");
+  });
+
+  it("an older running activation of a node keeps the run in_progress although the node's newest activation failed", async () => {
+    const runs = makeRunsRoot();
+    await runChain(runs, "st-overlap", NODE_FAIL);
+    editProjection(runs, "st-overlap", (projection) => {
+      // Two concurrent activations of step-1: the older one is still running, the newer one failed.
+      projection.activations = {
+        "step-1-older": { activation_id: "step-1-older", node_id: "step-1", status: "running", attempt_no: 1 },
+        ...projection.activations,
+      };
+    });
+
+    const result = await statusCli(["st-overlap", "--runs-root", runs]);
+    expect(result.code, JSON.stringify(result.json)).toBe(3);
+    expect(result.json?.state).toBe("in_progress");
+  });
+
+  it("a projection that lags the journal is refused as unreadable instead of reported from the older snapshot", async () => {
+    const runs = makeRunsRoot();
+    // The crash window of the runner: the journal holds both committed transitions, the snapshot only the first.
+    await expect(runChain(runs, "st-lag-old", NODE_OK, { interruptAfterStepOne: true })).rejects.toThrow("graph run aborted");
+    await runChain(runs, "st-lag", NODE_OK);
+    writeFileSync(join(runs, "st-lag", "projection.json"), readFileSync(join(runs, "st-lag-old", "projection.json")));
+
+    const result = await statusCli(["st-lag", "--runs-root", runs]);
+    expect(result.code, JSON.stringify(result.json)).toBe(4);
+    expect(result.json?.state).toBe("unreadable");
+    expect(String(result.json?.error)).toMatch(/stale/);
+  });
+
+  it("an unconsumed cohort keeps a run from being reported as succeeded, as in the scheduler success rule", async () => {
+    const runs = makeRunsRoot();
+    await runChain(runs, "st-cohort", NODE_OK);
+    editProjection(runs, "st-cohort", (projection) => {
+      projection.cohorts = { "cohort-1": { consumed: false } };
+    });
+
+    const result = await statusCli(["st-cohort", "--runs-root", runs]);
+    expect(result.json?.state).not.toBe("succeeded");
+    expect(result.code).not.toBe(0);
   });
 
   it("uses the same run id limit as omc graph gc: 128 characters pass, 129 are a usage error", async () => {

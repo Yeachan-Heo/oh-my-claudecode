@@ -3,17 +3,24 @@
  *
  * Reads only `<runs-root>/<run_id>/projection.json` and `journal.jsonl`. The
  * run state is derived, because the graph runtime writes no terminal record to
- * disk:
- *   succeeded    the terminal verification activation completed with a succeeded transition and every activation is completed;
- *   failed       a committed transition failed and no activation is ready or running (nothing can still run);
- *   in_progress  anything else, including a run interrupted by a signal (its last attempt was never committed).
- * A node that never got an activation (for example the step after a failed step) is not listed.
- * A file that is still being written (a partial last journal line) reads as "unreadable": retry later.
+ * disk. The rule is the one the runtime and `omc graph gc` use (projectionOutcome in run-gc.ts):
+ *   succeeded    the scheduler success predicate holds: a terminal verification activation completed with an
+ *                evidence-bearing succeeded transition, every activation is completed and every cohort is consumed;
+ *   failed       no activation is ready or running and the run did not succeed (the runtime ends such a run as failed,
+ *                for example after a failed step or a denied approval);
+ *   in_progress  an activation is ready or running, including a run interrupted by a signal (its last attempt was
+ *                never committed).
+ * Every activation counts, not only the latest one of each node. A node that never got an activation (for example the
+ * step after a failed step) is not listed.
+ * A file that is still being written (a partial last journal line), a journal with a gap in its seq numbers, and a
+ * projection that lags the journal (a crash between the journal append and the snapshot save) read as "unreadable":
+ * retry later, or rerun the run, which replays the journal.
  */
 
 import { closeSync, constants as fsConstants, existsSync, fstatSync, lstatSync, openSync, readFileSync } from "node:fs";
 import { basename, join } from "node:path";
 import { RUN_ID_PATTERN } from "./run-dir.js";
+import { projectionOutcome } from "./run-gc.js";
 
 export const RUN_STATUS_EXIT_CODES = {
   succeeded: 0,
@@ -61,6 +68,7 @@ interface Transition {
 
 interface Projection {
   readonly activations: Record<string, Activation>;
+  readonly cohorts: Record<string, { readonly consumed: boolean }>;
   readonly committed_transitions: Record<string, Transition | undefined>;
   readonly terminal_verification_activation_ids: readonly string[];
 }
@@ -117,12 +125,16 @@ function readProjectionEnvelope(file: string): ProjectionEnvelope {
   }
   if (
     !projection.activations ||
+    !projection.cohorts ||
     !projection.committed_transitions ||
     !Array.isArray(projection.terminal_verification_activation_ids)
   ) {
     throw new UnreadableError(
-      "projection.json lacks activations, committed_transitions or terminal_verification_activation_ids",
+      "projection.json lacks activations, cohorts, committed_transitions or terminal_verification_activation_ids",
     );
+  }
+  if (Object.keys(projection.activations).length === 0) {
+    throw new UnreadableError("projection.json has no activations");
   }
   if (typeof savedAtSeq !== "number" || !Number.isInteger(savedAtSeq)) {
     throw new UnreadableError("projection.json has invalid saved_at_seq");
@@ -132,28 +144,23 @@ function readProjectionEnvelope(file: string): ProjectionEnvelope {
 
 
 
-// Returns the last seq in the journal, or -1 for an empty journal.
-function lastJournalSeq(transitions: Transition[]): number {
-  if (transitions.length === 0) return -1;
-  // Transitions are read in order from the journal, so the last one has the highest seq
-  // However, seq is not always present in Transition. We need to count the transitions instead.
-  // The journal should have seq 0, 1, 2, ... so the last index is the last seq.
-  return transitions.length - 1;
-}
-
 function readJournal(file: string): Transition[] {
   const lines = readRunText(file)
     .split("\n")
     .filter((line) => line.trim() !== "");
   return lines.map((line, index) => {
-    let entry: { transition?: Transition } | null;
+    let entry: { seq?: unknown; transition?: Transition } | null;
     try {
-      entry = JSON.parse(line) as { transition?: Transition } | null;
+      entry = JSON.parse(line) as { seq?: unknown; transition?: Transition } | null;
     } catch (error) {
       throw new UnreadableError(`journal.jsonl line ${index + 1}: ${(error as Error).message}`);
     }
     if (!entry || !entry.transition) {
       throw new UnreadableError(`journal.jsonl line ${index + 1} has no transition`);
+    }
+    // The runtime numbers records 0, 1, 2, ... without gaps (as omc graph gc checks), so the last seq is the count - 1.
+    if (entry.seq !== index) {
+      throw new UnreadableError(`journal.jsonl line ${index + 1} has seq ${String(entry.seq)}, expected ${index}`);
     }
     return entry.transition;
   });
@@ -189,10 +196,10 @@ function summarize(runId: string, runDir: string, runsRoot: string): Record<stri
     );
   }
 
-  // Verify that the snapshot is fresh: reject snapshots that lag the journal.
-  // If the graph crashed after journal.append() but before store.save(), the projection
-  // would lag committed history.
-  const journalSeq = lastJournalSeq(transitions);
+  // A snapshot that lags the journal (the crash window between journal.append and store.save in the runner) shows
+  // older activation states than the committed history; refuse it rather than report it. A journal that is shorter
+  // than the snapshot (for example emptied) is not refused: the snapshot still holds every committed transition.
+  const journalSeq = transitions.length - 1;
   if (envelope.saved_at_seq < journalSeq) {
     throw new UnreadableError(
       `projection is stale (saved_at_seq ${envelope.saved_at_seq} < journal seq ${journalSeq})`,
@@ -206,7 +213,9 @@ function summarize(runId: string, runDir: string, runsRoot: string): Record<stri
 
   const nodes = [...lastActivationByNode.entries()].map(([nodeId, activation]) => {
     const state = nodeStateOf(activation, committed);
-    const failures = transitions.filter((t) => t.node_id === nodeId && t.outcome === "failed");
+    const failures = transitions.filter(
+      (t) => t.node_id === nodeId && (t.outcome === "failed" || t.outcome === "denied"),
+    );
     const lastFailure = failures.length > 0 ? failures[failures.length - 1] : null;
     return {
       id: nodeId,
@@ -217,30 +226,9 @@ function summarize(runId: string, runDir: string, runsRoot: string): Record<stri
     };
   });
 
-  const terminalSucceeded = projection.terminal_verification_activation_ids.some((id) => {
-    const activation = activations[id];
-    if (!activation || activation.status !== "completed") return false;
-    const transition = activation.completed_transition_id
-      ? committed[activation.completed_transition_id]
-      : undefined;
-    return Boolean(transition) && transition?.outcome === "succeeded" && transition.evidence_refs.length > 0;
-  });
-  const allCompleted = Object.values(activations).every((activation) => activation.status === "completed");
-  // A failure counts whether it is in the journal or only in the projection.
-  // Include denied approvals in terminal failure detection.
-  const anyFailed =
-    transitions.some((t) => t.outcome === "failed" || t.outcome === "denied") ||
-    Object.values(committed).some((t) => t?.outcome === "failed" || t?.outcome === "denied");
-  // Check all activations before declaring the run failed.
-  // A newer failed activation should not hide an older running activation.
-  const anyOpen = Object.values(activations).some(
-    (activation) => activation.status === "ready" || activation.status === "running"
-  );
-
-  let state: keyof typeof RUN_STATUS_EXIT_CODES;
-  if (terminalSucceeded && allCompleted) state = "succeeded";
-  else if (anyFailed && !anyOpen) state = "failed";
-  else state = "in_progress";
+  const outcome = projectionOutcome(projection as unknown as Record<string, any>);
+  const state: keyof typeof RUN_STATUS_EXIT_CODES =
+    outcome === "succeeded" ? "succeeded" : outcome === "failed" ? "failed" : "in_progress";
 
   return {
     run_id: runId,

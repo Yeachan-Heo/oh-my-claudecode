@@ -377,6 +377,17 @@ function isGraphSucceeded(projection: Json): boolean {
   return cohortList.every((cohort) => cohort.consumed === true);
 }
 
+// How a snapshot ends if nothing else happens, by the runtime's own rule: the scheduler success predicate holds
+// (succeeded); an activation is ready or running (open); otherwise no activation can run and the run did not
+// succeed, which the runtime ends as failed. `omc graph status` derives its state from the same function.
+export function projectionOutcome(projection: Json): "succeeded" | "open" | "failed" {
+  if (isGraphSucceeded(projection)) return "succeeded";
+  const entries = Object.values(projection.activations) as Json[];
+  return entries.some((activation) => activation.status === "running" || activation.status === "ready")
+    ? "open"
+    : "failed";
+}
+
 // Decides the state from a snapshot that has already passed the freshness check.
 function stateOfProjection(
   descriptor: { descriptorHash: string; kindById: Map<string, string> },
@@ -412,18 +423,17 @@ function stateOfProjection(
     if (!isPlainObject(cohort) || typeof cohort.consumed !== "boolean") throw new StateError("projection-malformed");
   }
   if (entries.length === 0) throw new StateError("no-activations");
-  if (isGraphSucceeded(projection)) return { state: "final-succeeded", reason: "final-succeeded" };
+  const outcome = projectionOutcome(projection);
+  if (outcome === "succeeded") return { state: "final-succeeded", reason: "final-succeeded" };
+  if (outcome === "failed") return { state: "final-failed", reason: "final-failed" };
   if (entries.some((activation) => activation.status === "running")) {
     return { state: "resumable-running", reason: "resumable-running" };
   }
-  const ready = entries.filter((activation) => activation.status === "ready");
-  if (ready.length > 0) {
-    const approval = ready.some((activation) => descriptor.kindById.get(activation.node_id) === "human-approval");
-    const state = approval ? "resumable-approval" : "resumable-ready";
-    return { state, reason: state };
-  }
-  // Nothing ready or running, and not succeeded: the runtime ends such a run as failed.
-  return { state: "final-failed", reason: "final-failed" };
+  const approval = entries.some(
+    (activation) => activation.status === "ready" && descriptor.kindById.get(activation.node_id) === "human-approval",
+  );
+  const state = approval ? "resumable-approval" : "resumable-ready";
+  return { state, reason: state };
 }
 
 // Derives the state of one run from its descriptor, journal and snapshot. Any doubt is `unknown`.
