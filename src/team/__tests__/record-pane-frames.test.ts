@@ -156,6 +156,47 @@ describe('record-pane-frames extract', () => {
     expect(readFileSync(manifestPath, 'utf8')).toBe(manifestBefore);
   });
 
+  it.each(['migrated', 'synthetic'])('files a %s frame with the origin and note it was given', (source) => {
+    const from = join(root, 'plain.txt');
+    writeFileSync(from, '> \n');
+
+    const result = extract(from, '--source', source, '--origin', 'tmux-session.test.ts', '--note', 'idle prompt');
+
+    expect(result.code).toBe(0);
+    const [entry] = JSON.parse(readFileSync(join(result.corpus, 'manifest.json'), 'utf8')) as Array<Record<string, unknown>>;
+    expect(entry).toMatchObject({ source, origin: 'tmux-session.test.ts', note: 'idle prompt', cols: null, rows: null, launch_args: null });
+  });
+
+  it.each([
+    { name: 'an unknown --source', args: ['--source', 'copied'], message: '--source must be one of recorded, migrated, synthetic' },
+    { name: 'a --state that is not kebab-case', args: ['--state', 'Idle Prompt'], message: '--state must be kebab-case' },
+  ])('refuses $name and writes nothing', ({ args, message }) => {
+    const from = join(root, 'plain.txt');
+    writeFileSync(from, '> \n');
+
+    const result = extract(from, ...args);
+
+    expect(result.code).toBe(2);
+    expect(result.stderr).toContain(message);
+    expect(existsSync(result.corpus)).toBe(false);
+  });
+
+  it('needs --provider and --version when the recording has no meta.json', () => {
+    const from = join(root, 'plain.txt');
+    writeFileSync(from, '> \n');
+    const corpus = join(root, 'corpus');
+    const base = [RECORDER, 'extract', '--from', from, '--state', 'idle', '--corpus', corpus];
+
+    const noProvider = spawnSync(process.execPath, [...base, '--version', '1.0.0'], { encoding: 'utf8' });
+    const noVersion = spawnSync(process.execPath, [...base, '--provider', 'claude'], { encoding: 'utf8' });
+
+    expect(noProvider.status).toBe(2);
+    expect(noProvider.stderr).toContain('--provider is required without meta.json');
+    expect(noVersion.status).toBe(2);
+    expect(noVersion.stderr).toContain('--version is required without meta.json');
+    expect(existsSync(corpus)).toBe(false);
+  });
+
   it('refuses a frame index the recording does not have', () => {
     const from = join(root, 'frames.txt');
     writeFileSync(from, '=== 1763340000.100\nonly\n');
