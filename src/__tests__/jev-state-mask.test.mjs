@@ -717,6 +717,37 @@ describe('maskJevState: oversized keys should not cause performance issues', () 
     expect(duration).toBeLessThan(1000); // Should complete in under 1 second
     expect(result).toEqual({ [longKey]: 'value' });
   });
+
+  it('classifies single-letter acronym prefixes as secrets', () => {
+    // Single-letter uppercase followed by lowercase should split: XApiKey -> X_Api_Key -> x_api_key
+    expect(maskJevState({ XApiKey: 'hunter2' })).toEqual({ XApiKey: '***' });
+    expect(maskJevState({ XPrivateKey: 'secret' })).toEqual({ XPrivateKey: '***' });
+    expect(maskJevState({ XAuthorization: 'bearer' })).toEqual({ XAuthorization: '***' });
+  });
+
+  it('classifies long labels in name/value pairs as secrets', () => {
+    // Long secret names (>200 chars) should still be classified without length guard
+    const longSecret = 'DB_PASSWORD_' + 'A'.repeat(200);
+    const result = maskJevState([{ name: longSecret, value: 'hunter2zzQ' }]);
+    expect(result[0].value).toBe('***');
+  });
+
+  it('recognizes Windows executable suffixes in P_COMMANDS', () => {
+    // Commands with .exe, .bat, .COM suffixes should be recognized for password masking
+    expect(maskJevState({ cmd: ['mysql.exe', '-phunter2'] })).toEqual({ cmd: ['mysql.exe', '-p***'] });
+    expect(maskJevState({ cmd: ['mysqldump.bat', '-phunter2'] })).toEqual({ cmd: ['mysqldump.bat', '-p***'] });
+    expect(maskJevState({ cmd: ['mysqladmin.COM', '-phunter2'] })).toEqual({ cmd: ['mysqladmin.COM', '-p***'] });
+  });
+
+  it('handles bounded marker scan without quadratic backtracking', () => {
+    // Repeated unterminated [key omitted: prefixes should not cause exponential backtracking
+    const markerKey = '[key omitted: '.repeat(10000);
+    const start = Date.now();
+    const result = maskJevState({ [markerKey]: 'value' });
+    const duration = Date.now() - start;
+    expect(duration).toBeLessThan(1000); // Should complete in under 1 second, not hang
+    expect(result).toHaveProperty(markerKey); // Key should be present
+  });
 });
 
 describe('SECRET_PATH', () => {
