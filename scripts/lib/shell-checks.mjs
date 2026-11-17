@@ -998,28 +998,37 @@ function logContextOf(data) {
 // The rules of scripts/lib/jev-mask.mjs (copied, so that this module stays self-contained), in time linear in the text
 // length; the comments there say why the mysql, JWT and KEY= rules have their shape.
 export function maskSecrets(text) {
-  // The private key blocks and the pairs run first (a pair value holding a key block is masked as a block). The named values come
-  // last and only add masking: every rule before them sees the text as it was, so the first word of a value (`secret='Cookie: ...'`,
-  // `hasło: DB_PASSWORD=...`) is still the marker of the rule that needs it. The word rule opens on a serialized quote (`\"`), takes the
-  // scheme of `token: Bearer ...` along, and a first word that is itself an assignment (`secret: "x-api-key: ..."`) with its value.
-  return maskNamedValues(String(text ?? '').replace(/(-{4,5} ?BEGIN +(?:[A-Z0-9]+(?: +|-))*[A-Z0-9]*PRIVATE KEY(?: BLOCK)? ?-{4,5})[\s\S]*?(-{4,5} ?END +(?:[A-Z0-9]+(?: +|-))*[A-Z0-9]*PRIVATE KEY(?: BLOCK)? ?-{4,5}|$)/g, '$1***'))
-    .replace(/(\/\/[^/\s:@]+:)[^/\s@]+@/g, '$1***@')
-    .replace(/((?:authorization|proxy-authorization)\s*:\s*(?:(?:bearer|basic|token)\s*)?)[^\s"']+/gi, '$1***')
-    .replace(/((?:set-)?cookie\s*:\s*)[^\r\n"']+/gi, '$1***')
-    .replace(/\b(bearer\s+)[A-Za-z0-9._~+/=-]{8,}/gi, '$1***')
-    .replace(/((?:^|\s)(?:-u|--user)(?:\s+|=)["']?[^\s:"']+:)[^\s"']+/g, '$1***')
-    .replace(/((?:^|\s)--(?:password|passwd|pass|token|secret|api-key|apikey|access-token|auth-token|client-secret)(?:\s+|=)["']?)[^\s"']+/gi, '$1***')
-    .replace(/(\b(?:mysql|mysqldump|mysqladmin|mariadb)\b[^\n|;&]*?)(?:(\s-p)[^\s"']+|(?=[\n|;&]|$))/g, (whole, head, flag) =>
-      flag ? head + flag + '***' : whole)
-    .replace(/(\bsshpass\s+-p\s*["']?)[^\s"']+/g, '$1***')
-    .replace(/\b(sk-(?:ant-|proj-)?)[A-Za-z0-9_-]{12,}/g, '$1***')
-    .replace(/\b(gh[pousr]_|github_pat_|glpat-|xox[abprs]-)[A-Za-z0-9_-]{10,}/g, '$1***')
-    .replace(/\bAKIA[0-9A-Z]{16}\b/g, 'AKIA***')
-    .replace(/\beyJ(?:[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}|[A-Za-z0-9_-]*)/g, (m) => m.includes('.') ? 'eyJ***' : m)
-    .replace(KEYWORD_ASSIGNMENT, (whole, head, quotedScheme, scheme) => head + (quotedScheme || scheme ? '*** ***' : '***'))
-    .replace(NAMED_VALUE, '$1***')
-    .replace(ESCAPED_KEY, (whole, key, separator) => secretPairName(key) ? key + separator + '***' : whole)
-    .replace(/(?<![A-Za-z0-9+_-])(?=[A-Za-z0-9+_-]*\d)(?=[A-Za-z0-9+_-]*[A-Za-z])[A-Za-z0-9+_-]{32,}={0,2}/g, '***');
+  // The private key blocks run first (a pair value holding a key block is masked as a block). Every other rule then reads that same
+  // text and only reports what it would mask, so none can erase the field name, the separator, the quote or the marker that another
+  // one needs, whatever their order (src/__tests__/jev-mask.test.mjs pins it with keys that start with each kind of token). What each
+  // rule masks is joined with the rest, and a part masked twice is masked once. Then the long-string rule reads the result, and the
+  // whole is read once more, which only adds masking.
+  return maskRules(String(text ?? '').replace(/(-{4,5} ?BEGIN +(?:[A-Z0-9]+(?: +|-))*[A-Z0-9]*PRIVATE KEY(?: BLOCK)? ?-{4,5})[\s\S]*?(-{4,5} ?END +(?:[A-Z0-9]+(?: +|-))*[A-Z0-9]*PRIVATE KEY(?: BLOCK)? ?-{4,5}|$)/g, '$1***'), [
+    // [pattern, what of a match stays (a length, or a function of the match; by default its first group), what replaces the rest].
+    // URL credentials, headers, flags and the word rules that need a marker:
+    [/(\/\/[^/\s:@]+:)[^/\s@]+(?=@)/g],
+    [/((?:authorization|proxy-authorization)\s*:\s*(?:(?:bearer|basic|token)\s*)?)[^\s"']+/gi],
+    [/((?:set-)?cookie\s*:\s*)[^\r\n"']+/gi],
+    [/\b(bearer\s+)[A-Za-z0-9._~+/=-]{8,}/gi],
+    [/((?:^|\s)(?:-u|--user)(?:\s+|=)["']?[^\s:"']+:)[^\s"']+/g],
+    [/((?:^|\s)--(?:password|passwd|pass|token|secret|api-key|apikey|access-token|auth-token|client-secret)(?:\s+|=)["']?)[^\s"']+/gi],
+    // At each step ` -p` and a value is tried before the segment end (\n | ; &); a word without a value keeps its segment
+    // unchanged, as a later mysql word of the same segment cannot find a value the earlier one missed.
+    [/(\b(?:mysql|mysqldump|mysqladmin|mariadb)\b[^\n|;&]*?)(?:(\s-p)[^\s"']+|(?=[\n|;&]|$))/g, (m) => m[1].length + (m[2]?.length ?? Infinity)],
+    [/(\bsshpass\s+-p\s*["']?)[^\s"']+/g],
+    // Token prefixes:
+    [/\b(sk-(?:ant-|proj-)?)[A-Za-z0-9_-]{12,}/g],
+    [/\b(gh[pousr]_|github_pat_|glpat-|xox[abprs]-)[A-Za-z0-9_-]{10,}/g],
+    [/\bAKIA[0-9A-Z]{16}\b/g, 4],
+    // A JWT, or else the rest of the run kept unchanged; the run class has no dot, so a match with a dot is the JWT.
+    [/\beyJ(?:[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}|[A-Za-z0-9_-]*)/g, (m) => m[0].includes('.') ? 3 : Infinity],
+    // A whole word containing a keyword: the lookahead finds the keyword once, then the word is read to its end.
+    [KEYWORD_ASSIGNMENT, undefined, (m) => m[2] || m[3] ? '*** ***' : '***'],
+    [NAMED_VALUE],
+  ], [
+    // The long mixed letter-digit strings, read on what the rules above made: `sk-***` is not one.
+    [/(?<![A-Za-z0-9+_-])(?=[A-Za-z0-9+_-]*\d)(?=[A-Za-z0-9+_-]*[A-Za-z])[A-Za-z0-9+_-]{32,}={0,2}/g, 0],
+  ]);
 }
 
 // Field names in other languages. This list is the one source of every rule that reads a name: the word that is a key of its own
@@ -1062,27 +1071,48 @@ const KEYWORD_ASSIGNMENT = new RegExp(String.raw`(\b(?=[A-Za-z0-9_]*(?:${ENGLISH
 // Whitespace between the parts of a field (the name, its separator, the value): a space or a line break, also as JSON writes it into
 // a string (`\n`, `\t`, `\r`, `\f` or `\uXXXX` of a whitespace character), with any number of backslashes (the run doubles each time the
 // text goes through a string).
-const WS = String.raw`(?:\s|\\+(?:[ntrf]|u(?:000[9a-dA-D]|0020|00[aA]0|1680|200[0-9aA]|202[89fF]|205[fF]|3000|[fF][eE][fF][fF])))`;
+const WS_CODES = String.raw`000[9a-dA-D]|0020|00[aA]0|1680|200[0-9aA]|202[89fF]|205[fF]|3000|[fF][eE][fF][fF]`;
+const WS = String.raw`(?:\s|\\+(?:[ntrf]|u(?:${WS_CODES})))`;
 
-// The `name: value` / `name=value` rule, the last one of the chain: it masks the first word of a value, so every other rule runs
-// before it, and it adds the names of other languages and whitespace written as JSON writes it into a string.
+// The `name: value` / `name=value` rule: it masks the first word of a value (the other rules read the same text, so the marker of a
+// contextual rule in that word is still read by it), and it adds the names of other languages and whitespace written as JSON writes
+// it into a string.
 // A value is read to the first whitespace, quote or separator. When that first word is itself a field key (`"password": "x"` inside the
 // value of `hasło:`, or `x-api-key: x`), the word after its separator is the secret and is masked too, as the `KEY=` rule does, unless
 // that word is a key of its own (it ends in a separator or has one after it), which is left to the rule that reads it.
-const VALUE = String.raw`(?:[^\s"'&;|,}\\]|\\(?!["']))+`;
+const VALUE = String.raw`(?:[^\s"'&;|,}\\]|\\+(?![\\"']))+`;
 // After an opening quote the word is read as in the `KEY=` rule: the closing quote or a space ends it, and a comma, a closing brace or a
 // shell separator inside the quotes is content.
-const QUOTED_VALUE = String.raw`(?:[^\s"'\\]|\\(?!["']))+`;
+const QUOTED_VALUE = String.raw`(?:[^\s"'\\]|\\+(?![\\"']))+`;
 const FIELD_VALUE = String.raw`(?:${AFTER_QUOTE}${QUOTED_VALUE}|${VALUE})`;
 const NEXT_FIELD = String.raw`(?:(?:\\*["'])?${WS}*[:=]|(?<=[^=][:=]))${WS}*(?:\\*["'])?(?!(?=(?<word>${VALUE}))\k<word>(?:(?<=[:=])|(?:\\*["']|${WS})*[:=]))${VALUE}`;
 const NAMED_VALUE = new RegExp(String.raw`((?:api[_-]?key|access[_-]?key|client[_-]?secret|private[_-]?key|password|passwd|token|secret|${localNames(true)})(?:\\*["'])?${WS}*[:=]${WS}*(?:\\*["'])?(?:(?:bearer|basic)[ \t]+)?)${FIELD_VALUE}(?:${NEXT_FIELD})?`, 'gi');
 
 // A field key that holds JSON `\uXXXX` escapes in any of its letters (`h\u0061s\u0142o`, `p\u0061ssword`), which the name list above does not
 // read: the key is decoded and classified as the key of a pair is, and the value is masked when it names a secret. The key is a run of
-// word characters and escapes (not of whitespace, which stays the separator), read from its start only, so each character is read once.
-const KEY_ESCAPE = String.raw`\\+u(?!(?:000[9a-dA-D]|0020|00[aA]0|1680|200[0-9aA]|202[89fF]|205[fF]|3000|[fF][eE][fF][fF]))[0-9a-fA-F]{4}`;
+// word characters and escapes (not of whitespace, which stays the separator; a key that holds spaces or punctuation is quoted, and a quoted
+// key is read whole by the pair scanner, below), read from its start only, so each character is read once. A key that is not read whole is not read past its
+// separator either, so what follows it is read as the text it is: `m\u0079:p\u0061ssword=x` holds the key `m\u0079` and then the key
+// `p\u0061ssword`. A key starts after a whitespace escape as after a space.
+const KEY_ESCAPE = String.raw`\\+u(?!(?:${WS_CODES}))[0-9a-fA-F]{4}`;
 const KEY_CHAR = String.raw`[^\s\x00-\x2c\x2e\x2f\x3a-\x40\x5b-\x5e\x60\x7b-\x7f]`;
-const ESCAPED_KEY = new RegExp(String.raw`(?<!${KEY_CHAR}|\\)((?=(?:${KEY_CHAR}|${KEY_ESCAPE})*${KEY_ESCAPE})(?:${KEY_CHAR}|${KEY_ESCAPE})+)((?:\\*["'])?${WS}*[:=]${WS}*(?:\\*["'])?)${FIELD_VALUE}`, 'g');
+const ESCAPED_KEY = new RegExp(String.raw`(?:(?<!${KEY_CHAR}|\\)|(?<=\\+u(?:${WS_CODES})))((?=(?:${KEY_CHAR}|${KEY_ESCAPE})*${KEY_ESCAPE})(?:${KEY_CHAR}|${KEY_ESCAPE})+)((?:\\*["'])?${WS}*[:=]${WS}*(?:\\*["'])?)`, 'g');
+const FIELD_VALUE_AT = new RegExp(FIELD_VALUE, 'y');
+// The masked part (from, to, replacement) of the value of each field whose escaped key names a secret.
+function keyParts(source) {
+  const parts = [];
+  // A key that starts inside a value that is masked already is masked with it, so each value is read once.
+  let masked = 0;
+  for (const m of source.matchAll(ESCAPED_KEY)) {
+    if (m.index < masked || !secretPairName(m[1])) continue;
+    FIELD_VALUE_AT.lastIndex = m.index + m[0].length;
+    const value = FIELD_VALUE_AT.exec(source);
+    if (!value) continue;
+    masked = FIELD_VALUE_AT.lastIndex;
+    parts.push([masked - value[0].length, masked, '***']);
+  }
+  return parts;
+}
 
 // A quote delimiter at escaping depth 0 (a plain quote), 1 (inside a JSON string: `\"`), 2 (shell-escaped before it went into the
 // JSON string: `\\\"`), 3 (7 backslashes) and so on up to 8 (255 backslashes): a maximal run of backslashes whose length is 2^depth - 1 plus a multiple of 2^(depth + 1),
@@ -1106,6 +1136,7 @@ const AFTER_CLOSE = String.raw`(?=[\s,}\])&;|"'\\]|$)`;
 const PAIR_PREFIX = String.raw`[^\s\x00-\x2c\x2f\x3a-\x40\x5b-\x5e\x60\x7b-\x7f]*`;
 const PAIR_NAME_FIELD = new RegExp(String.raw`^(${PAIR_PREFIX})(?:name|key|type)$`, 'i');
 const PAIR_VALUE_FIELD = new RegExp(String.raw`^(${PAIR_PREFIX})(?:value|val)$`, 'i');
+const PLAIN_KEY = /^[A-Za-z0-9_]+$/;
 const PAIR_SEPARATOR = new RegExp(String.raw`^${WS}*,${WS}*$`);
 // The value of a pair field at quote depth d: a complete quoted string, or else a value whose quote is open or was misread.
 // The text sent to a model is often clipped, so a value can end where the text does, and what closes a value (a bracket, a comma, a
@@ -1125,6 +1156,9 @@ const PAIR_FORMS = QUOTE_DEPTHS.map((d) =>
 const decodeUnicode = (text) => text.replace(/(?<!\\)\\+u([0-9a-f]{4})/gi, (_, hex) => String.fromCharCode(parseInt(hex, 16)));
 const SECRET_PAIR_NAME = new RegExp(String.raw`${ENGLISH_KEYWORDS}|${localNames(false)}|^securestring$`, 'i');
 const secretPairName = (name) => SECRET_PAIR_NAME.test(decodeUnicode(name));
+// A quoted key read whole: decoded, it is classified by the word it ends in (the part the word rules read before a separator), so
+// punctuation, spaces and escapes in front of that word do not change the result.
+const keyNamesSecret = (key) => secretPairName(decodeUnicode(key).split(/[^\p{L}\p{N}\p{M}_]+/u).findLast(Boolean) ?? '');
 
 // The text of a quoted value without its quotes and without the backslashes of an escaped closing quote.
 function unquoted(value, quote) {
@@ -1136,11 +1170,48 @@ function unquoted(value, quote) {
   return value.slice(quote.length, end);
 }
 
-function maskNamedValues(text) {
-  let out = text;
-  if (!out.includes('"')) return out;
+// Applies the rules to one text, and then once more to what it made (a value that only shows once the first value of a field is
+// masked, as in `key: a'= b`, is found by the second pass, which only adds masking). A rule is [pattern, keep, replacement]: each
+// match of the pattern keeps its first `keep` characters (by default its first group) and the rest is replaced; a rule that keeps all of
+// a match masks nothing there. The replacement is a string or a function of the match. The pair scanner and the scanners of quoted and
+// escaped keys add their own parts. Parts that overlap or touch are joined and take the replacement of the part that starts first (the
+// longer one on a tie, then the one that came first). The last rules read the result of the others: a token that a rule masked and
+// kept the kind of (`sk-***`) is no longer a long string.
+function maskRules(source, rules, lastRules) {
+  const pass = (text) => maskParts(maskParts(text, rules, (t) => pairParts(t).concat(keyParts(t))), lastRules, () => []);
+  const once = pass(source);
+  return once === source ? once : pass(once);
+}
+function maskParts(source, rules, scan) {
+  const parts = [];
+  for (const [pattern, keep = (m) => m[1].length, replacement = '***'] of rules) {
+    for (const m of source.matchAll(pattern)) {
+      const from = m.index + (typeof keep === 'function' ? keep(m) : keep);
+      const to = m.index + m[0].length;
+      if (from < to) parts.push([from, to, typeof replacement === 'function' ? replacement(m) : replacement]);
+    }
+  }
+  const all = parts.concat(scan(source));
+  all.sort((a, b) => a[0] - b[0] || b[1] - a[1]);
+  let out = '';
+  let at = 0;
+  for (let i = 0; i < all.length;) {
+    const [from, , replacement] = all[i];
+    let to = all[i][1];
+    for (i++; i < all.length && all[i][0] <= to; i++) to = Math.max(to, all[i][1]);
+    out += source.slice(at, from) + replacement;
+    at = to;
+  }
+  return out + source.slice(at);
+}
+
+// The masked part (from, to, replacement) of the value of each field of a name/value pair whose name names a secret, and of each
+// field whose key names a secret: the keys are read whole, at every quote depth.
+function pairParts(source) {
+  const parts = [];
+  if (!source.includes('"')) return parts;
   for (const [depth, field] of PAIR_FORMS.entries()) {
-    if (depth && !out.includes('\\'.repeat((1 << depth) - 1) + '"')) continue;
+    if (depth && !source.includes('\\'.repeat((1 << depth) - 1) + '"')) continue;
     const cuts = [];
     let group = [];
     const flush = () => {
@@ -1156,7 +1227,7 @@ function maskNamedValues(text) {
       if (secret.size) {
         for (const f of group) {
           const m = PAIR_VALUE_FIELD.exec(decodeUnicode(f.key));
-          if (!m || f.value === f.quote + '***' + f.quote) continue;
+          if (!m) continue;
           const prefix = m[1].toLowerCase();
           if (secret.has(prefix) || (!names.has(prefix) && secret.has(''))) cuts.push(f);
         }
@@ -1166,24 +1237,27 @@ function maskNamedValues(text) {
     field.lastIndex = 0;
     let end = 0;
     let m;
-    while ((m = field.exec(out))) {
-      if (group.length && !PAIR_SEPARATOR.test(out.slice(end, m.index))) flush();
+    while ((m = field.exec(source))) {
+      if (group.length && !PAIR_SEPARATOR.test(source.slice(end, m.index))) flush();
       end = m.index + m[0].length;
       const quote = /^\\*"/.exec(m[2])?.[0] ?? '';
-      group.push({ key: m[1], value: m[2], quote, start: end - m[2].length, end });
+      const f = { key: m[1], value: m[2], quote, start: end - m[2].length, end };
+      group.push(f);
+      // A key is read whole, up to its closing quote, and decoded: a key that ends in a secret word masks its value, whatever stands
+      // inside the key (a colon, a space, escapes). A key that is one plain word (letters, digits and underscores) is left to the
+      // rules that read a word, as before.
+      if (!PLAIN_KEY.test(f.key) && keyNamesSecret(f.key)) cuts.push(f);
     }
     flush();
-    if (cuts.length) {
-      let masked = '';
-      let at = 0;
-      for (const f of cuts) {
-        masked += out.slice(at, f.start) + f.quote + '***' + f.quote;
-        at = f.end;
-      }
-      out = masked + out.slice(at);
+    // The text inside the quotes is what is masked, so the quotes stay where they are when another rule masks the same value; a value
+    // whose quote is not closed gets its closing quote.
+    for (const f of cuts) {
+      if (/^\s*\*[*\s]*$/.test(unquoted(f.value, f.quote))) continue;
+      const closed = f.quote && f.value.length >= 2 * f.quote.length && f.value.endsWith(f.quote);
+      parts.push([f.start + f.quote.length, closed ? f.end - f.quote.length : f.end, closed || !f.quote ? '***' : '***' + f.quote]);
     }
   }
-  return out;
+  return parts;
 }
 
 const excerptForLog = (text) => maskSecrets(text).slice(0, EXCERPT_CHARS);

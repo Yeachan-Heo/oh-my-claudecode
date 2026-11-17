@@ -14,10 +14,10 @@ import { maskSecrets } from '../../scripts/lib/jev-mask.mjs';
 import { maskSecrets as shellChecksMaskSecrets } from '../../scripts/lib/shell-checks.mjs';
 
 const readSource = (file) => readFileSync(new URL(`../../scripts/lib/${file}`, import.meta.url), 'utf8');
-// The constants and the function that read the names and the pairs, from the field names to the end of maskNamedValues.
+// The constants and the function that read the names and the pairs, from the field names to the end of pairParts.
 const sharedRules = (source) => {
   const from = source.indexOf('// Field names in other languages.');
-  const named = source.indexOf('function maskNamedValues(', from);
+  const named = source.indexOf('function pairParts(', from);
   return source.slice(from, source.indexOf('\n}\n', named) + 3);
 };
 const repeat = (unit, n) => unit.repeat(Math.ceil(n / unit.length)).slice(0, n);
@@ -41,6 +41,29 @@ const nameForms = (name) => {
     escapeNonAscii(decomposed.toUpperCase()),
   ])];
 };
+
+// Keys that start with something a word rule masks (a credential-shaped prefix), with what that rule leaves of such a key: the field
+// rules read the key from the text as it was, so the value under it is masked whatever the prefix rule makes of the key itself.
+// [label, the prefix, what joins it to the name, the key as the prefix rule leaves it, only in jev-mask.mjs]
+const PREFIX_KEYS = [
+  ['sk-', 'sk-proj-abcdefghijklm', '_', (k) => k.replace(/\b(sk-(?:ant-|proj-)?)[A-Za-z0-9_-]{12,}/, '$1***')],
+  ['sk-ant-', 'sk-ant-abcdefghijklm', '_', (k) => k.replace(/\b(sk-(?:ant-|proj-)?)[A-Za-z0-9_-]{12,}/, '$1***')],
+  ['ghp_', 'ghp_abcdefghijklmnop', '_', (k) => k.replace(/\b(gh[pousr]_|github_pat_|glpat-|xox[abprs]-)[A-Za-z0-9_-]{10,}/, '$1***')],
+  ['github_pat_', 'github_pat_abcdefghijklmnop', '_', (k) => k.replace(/\b(gh[pousr]_|github_pat_|glpat-|xox[abprs]-)[A-Za-z0-9_-]{10,}/, '$1***')],
+  ['glpat-', 'glpat-abcdefghijklmnop', '_', (k) => k.replace(/\b(gh[pousr]_|github_pat_|glpat-|xox[abprs]-)[A-Za-z0-9_-]{10,}/, '$1***')],
+  ['xoxb-', 'xoxb-abcdefghijklm', '-', (k) => k.replace(/\b(gh[pousr]_|github_pat_|glpat-|xox[abprs]-)[A-Za-z0-9_-]{10,}/, '$1***')],
+  ['AKIA', 'AKIAIOSFODNN7EXAMPLE', '-', (k) => k.replace(/\bAKIA[0-9A-Z]{16}\b/, 'AKIA***')],
+  ['JWT', 'eyJabcdefgh.abcdefgh.abcdefgh', '_', (k) => k.replace(/\beyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}/, 'eyJ***')],
+  ['bearer', 'bearer abcdefghijklm', '-', (k) => k.replace(/\b(bearer\s+)[A-Za-z0-9._~+/=-]{8,}/i, '$1***')],
+  ['long mixed string', 'abcdefghijklmnopqrstuvwxyz012345', '_', (k) => k.replace(/(^|[^A-Za-z0-9+_-])(?=[A-Za-z0-9+_-]*\d)(?=[A-Za-z0-9+_-]*[A-Za-z])[A-Za-z0-9+_-]{32,}={0,2}/, '$1***')],
+  ['hf_', 'hf_abcdefghijklmnopqrst', '_', (k) => k.replace(/\b((?:sk|rk|pk)_(?:live|test)_|hf_|npm_)[A-Za-z0-9]{16,}/, '$1***'), true],
+  ['sk_live_', 'sk_live_abcdefghijklmnopqrst', '_', (k) => k.replace(/\b((?:sk|rk|pk)_(?:live|test)_|hf_|npm_)[A-Za-z0-9]{16,}/, '$1***'), true],
+];
+// The kinds whose rule reads `=` (and the letters after it) as part of the token: what stays in front of it, and the characters it reads.
+const WORD_RULES = { bearer: ['bearer ', /[A-Za-z0-9._~+/=-]/, 'bearer *** next'], 'long mixed string': ['', /[A-Za-z0-9+_-]/, '****** next'] };
+const serializeOnce = (text) => JSON.stringify(text).slice(1, -1);
+const serializeTwice = (text) => serializeOnce(serializeOnce(text));
+const FORMS = [['raw', (t) => t], ['serialized once', serializeOnce], ['serialized twice', serializeTwice]];
 
 // Secret-bearing constructs that a rule reads by their first word (a marker), and ways to wrap them as the value of a named field.
 const CONTEXTS = [
@@ -173,6 +196,29 @@ describe.each([
       'misread closes before brackets, masked': (n) => '{"Name":"DB_PASSWORD","Value":"abc"' + repeat('x\\"},', n),
       'misread closes before brackets after backslash runs, masked': (n) => '{"Name":"DB_PASSWORD","Value":"abc"d' + repeat('\\\\\\\\"},', n),
       'serialized misread closes before brackets, masked': (n) => String.raw`{\"Name\":\"DB_PASSWORD\",\"Value\":\"abc\"` + repeat('x\\\\\\"},', n),
+      // The class of a key read whole: a quoted key with punctuation, spaces or escapes, an apostrophe key, a key after a whitespace escape.
+      'escaped keys that name a secret, one after another, masked': (n) => repeat(String.raw`KEY\u0079:`, n),
+      'localized escaped keys one after another, masked': (n) => repeat(String.raw`hasło\u0079:`, n),
+      'apostrophe keys that name a secret, one after another, masked': (n) => repeat("'password':", n),
+      'quoted keys with punctuation, masked': (n) => repeat('"a:b:password":"x",', n),
+      'one long quoted key that names a secret, masked': (n) => '{"' + repeat('a:', n) + 'password":"x"}',
+      'one long quoted key that is never closed': (n) => '{"' + repeat('a b ', n),
+      'one long quoted key of escapes, masked': (n) => '{"' + repeat(String.raw`pa `, n) + 'password":"x"}',
+      'a long quoted key of backslashes': (n) => '{"' + '\\'.repeat(n) + '":"x"}',
+      'escaped quotes in a key, masked': (n) => '{"' + repeat('a\\"b', n) + 'password":"x"}',
+      'deeply serialized quoted keys, masked': (n) => repeat(String.raw`\\\"a:password\\\":\\\"x\\\",`, n),
+      'quoted keys of repeated secret words, masked': (n) => repeat('"passwordtokenkey":"x",', n),
+      'apostrophe keys': (n) => repeat("'a b': ", n),
+      'apostrophe keys, masked': (n) => repeat(String.raw`'my:password': 'x' `, n),
+      'an apostrophe and a long run': (n) => "'" + 'a'.repeat(n),
+      'apostrophes in prose': (n) => repeat("don't it's ", n),
+      'apostrophes and spaces': (n) => repeat("' ", n),
+      'many assignments, masked': (n) => repeat('password=x ', n),
+      'whitespace escapes before escaped keys, masked': (n) => repeat(String.raw`my password=x `, n),
+      'a backslash run before a whitespace escape, masked': (n) => '\\'.repeat(n) + String.raw`u0020password=x`,
+      'whitespace escapes without a key': (n) => repeat(String.raw` `, n),
+      'a localized label and a run of backslashes before a quote, masked': (n) => 'hasło=' + '\\'.repeat(n) + '"',
+      'a serialized label and a run of backslashes before a quote, masked': (n) => String.raw`\"hasło\":\"a` + '\\'.repeat(n) + '"',
     };
     for (const n of [100_000, 1_000_000]) {
       for (const [name, make] of Object.entries(shapes)) {
@@ -746,6 +792,29 @@ describe.each([
     expect(wrong.slice(0, 5)).toEqual([]);
   });
 
+  it('keeps the kind of a token that a prefix rule masks: the long-string rule reads the result of the others, not the original text', () => {
+    const cases = [
+      ['HEAD-1 key sk-' + 'a1'.repeat(20) + '\nx', 'HEAD-1 key sk-***\nx'],
+      ['TAIL-1 ghp_' + 'Zx9'.repeat(10), 'TAIL-1 ghp_***'],
+      ['sk-ant-' + 'a1'.repeat(20), 'sk-ant-***'],
+      ['xoxb-' + 'a1'.repeat(20), 'xoxb-***'],
+      ['AKIAIOSFODNN7EXAMPLE', 'AKIA***'],
+      ['eyJabcdefgh.abcdefgh.abcdefgh', 'eyJ***'],
+      // A long string that no rule knows is still masked whole.
+      ['id ' + 'a1'.repeat(20), 'id ***'],
+    ];
+    for (const [text, masked] of cases) expect({ text, out: mask(text) }).toEqual({ text, out: masked });
+  });
+
+  it('masks a value that only shows once the first value of its field is masked (the second pass reads what the first one made)', () => {
+    const cases = [
+      ["x-api-key: [}]'= hunter2zz \\u0061", 'x-api-key: *** \\u0061'],
+      ["secret: ,'=  hunter2zz passwort\"Name\":\"", 'secret: *** passwort"Name":"'],
+      ['DB_PASSWORD=\\\\: Bearer =  hunter2zz PASS', 'DB_PASSWORD=*** PASS'],
+    ];
+    for (const [text, masked] of cases) expect({ text, out: mask(text) }).toEqual({ text, out: masked });
+  });
+
   it('leaves nothing of a secret-bearing value under any field name, separator, key and value quoting and serialization', () => {
     // The class behind the findings about rule order: a rule that runs before the named-value rule and needs the first word of the
     // value as its marker, a field key that another rule would erase or not read, a separator or quote written as JSON writes it.
@@ -783,6 +852,116 @@ describe.each([
     }
     expect(checked).toBeGreaterThan(15_000);
     expect(leaks.slice(0, 5)).toEqual([]);
+  });
+
+  it('masks the value under a key that starts with a credential-shaped prefix, as a key, a nested key, a pair name and an assignment, raw and serialized, with exact results', () => {
+    // The class behind the findings about rule order: a rule that rewrites a prefix of a key must not take away what the field rules read.
+    const names = ['hasło', 'contraseña', 'passwort', 'kennwort'].flatMap((name) => [name.normalize('NFC'), name.normalize('NFD')]);
+    const positions = [
+      ['field', (key, value) => `{"${key}":"${value}"}`],
+      ['nested key', (key, value) => `{"a":{"${key}":"${value}"},"b":1}`],
+      ['pair name', (key, value) => `{"Name":"${key}","Value":"${value}"}`],
+      ['assignment', (key, value) => `${key}=${value} next`],
+      ['label', (key, value) => `${key}: ${value}`],
+    ];
+    const wrong = [];
+    let checked = 0;
+    for (const [label, prefix, joint, leave, onlyJevMask] of PREFIX_KEYS) {
+      if (onlyJevMask && _file !== 'jev-mask.mjs') continue;
+      for (const name of names) {
+        const key = prefix + joint + name;
+        for (const [position, make] of positions) {
+          for (const [form, serialize] of FORMS) {
+            const text = serialize(make(key, 'hunter2zz'));
+            let raw = make(leave(key), '***');
+            // The bearer and the long string rules read `=` and the letters after it as part of what they mask: where the whole name is
+            // made of the characters they read (an ASCII name), the key, the equals sign and the value are masked (the long string rule makes its own
+            // `***` of the key and the equals sign, beside that of the value); else what
+            // follows the first other character of the name stays, as does the equals sign.
+            if (WORD_RULES[label] && position === 'assignment') {
+              const [visible, wordChar, whole] = WORD_RULES[label];
+              const cut = [...name].findIndex((ch) => !wordChar.test(ch));
+              raw = cut < 0 ? whole : `${visible}***${name.slice(cut)}=*** next`;
+            }
+            const expected = serialize(raw);
+            const out = mask(text);
+            checked++;
+            if (out !== expected || mask(out) !== out) wrong.push({ label, name, position, form, text, out, expected });
+          }
+        }
+      }
+    }
+    expect(checked).toBeGreaterThan(1000);
+    expect(wrong.slice(0, 3)).toEqual([]);
+    // The cases of the finding itself.
+    expect(mask('{"sk-proj-abcdefghijklm_hasło":"hunter2zz"}')).toBe('{"sk-proj-***ło":"***"}');
+    expect(mask('{"ghp_abcdefghijklmnop_hasło":"hunter2zz"}')).toBe('{"ghp_***ło":"***"}');
+    expect(mask('{"eyJabcdefgh.abcdefgh.abcdefgh_hasło":"hunter2zz"}')).toBe('{"eyJ***ło":"***"}');
+  });
+
+  it('reads a quoted key whole, decoded, before it looks for the separator: punctuation, spaces and escapes in the key are part of it', () => {
+    // A key is classified by the word it ends in, as the word rules do for the same key without the escapes: `my pwd` is read by the pair
+    // scanner only where the rules that read a word cannot (a serialized key).
+    const keys = ['my:password', 'my password', 'x-api-key', 'a.b.c_secret', 'a/b,c-token', 'my:hasło', 'my.contraseña', 'my pwd', 'a b credentials', 'x/y.pass'];
+    // The key as written, and with one character at a time written as a JSON escape (a letter, a punctuation mark, a space), and with all.
+    const spellings = (key) => {
+      const escape = (ch) => String.raw`\u${ch.charCodeAt(0).toString(16).padStart(4, '0')}`;
+      const chars = [...key.normalize('NFC')];
+      return [...new Set([key, ...chars.map((_, i) => chars.map((ch, j) => (i === j ? escape(ch) : ch)).join('')), chars.map(escape).join('')])];
+    };
+    const shapes = [
+      ['an object', (key, value) => `{"${key}":${value}}`],
+      ['a field among others', (key, value) => `{"a":1,"${key}":${value},"b":"x"}`],
+      ['a nested field', (key, value) => `{"a":{"${key}":${value}}}`],
+      ['spaces around the separator', (key, value) => `{"${key}" : ${value}}`],
+    ];
+    const wrong = [];
+    let checked = 0;
+    for (const key of keys) {
+      for (const spelled of spellings(key)) {
+        for (const [shape, make] of shapes) {
+          for (const [form, serialize] of FORMS) {
+            const text = serialize(make(spelled, '"hunter2zz"'));
+            const expected = serialize(make(spelled, '"***"'));
+            const out = mask(text);
+            checked++;
+            if (out !== expected) wrong.push({ key, spelled, shape, form, text, out, expected });
+            // A number is masked too (the rules that read a word also take the brace or comma after it).
+            if (mask(serialize(make(spelled, '123456'))).includes('123456')) wrong.push({ key, spelled, shape, form, number: true });
+          }
+        }
+      }
+    }
+    expect(checked).toBeGreaterThan(1000);
+    expect(wrong.slice(0, 3)).toEqual([]);
+    // The cases of the finding itself.
+    expect(mask('{"m\\u0079:p\\u0061ssword":"hunter2zz"}')).toBe('{"m\\u0079:p\\u0061ssword":"***"}');
+    expect(mask('{"my\\u0020p\\u0061ssword":"hunter2zz"}')).toBe('{"my\\u0020p\\u0061ssword":"***"}');
+    // A key that names no secret keeps its value, with the same punctuation and escapes in it.
+    // (`[line omitted: secret path]` is what the compaction hook writes in place of a key that names a secret path.)
+    for (const text of ['{"m\\u0079:name":"hunter2zz"}', '{"my pet":"x"}', '{"a:b":"c"}', '{"[line omitted: secret path]":"KEYED-VALUE"}', String.raw`{\"[line omitted: secret path]\":\"KEYED-VALUE\"}`]) {
+      expect(mask(text)).toBe(text);
+    }
+  });
+
+  it('masks a key in apostrophes, and reads an unquoted key that holds escapes up to its own separator, without taking the next key for a value', () => {
+    const cases = [
+      ["{'m\\u0079:p\\u0061ssword': 'hunter2zz'}", "{'m\\u0079:p\\u0061ssword': '***'}"],
+      ["{'my password': 'hunter2zz'}", "{'my password': '***'}"],
+      ["{'a.b.c pwd': 'hunter2zz'}", "{'a.b.c pwd': '***'}"],
+      ["{'a.b.c_secret':'hunter2zz','b':1}", "{'a.b.c_secret':'***','b':1}"],
+      ["{'p\\u0061ssword': 'hunter2zz'}", "{'p\\u0061ssword': '***'}"],
+      ["{'my:name': 'hunter2zz'}", "{'my:name': 'hunter2zz'}"],
+      ['m\\u0079:p\\u0061ssword=hunter2zz', 'm\\u0079:p\\u0061ssword=***'],
+      ['m\\u0079:p\\u0061ssword: hunter2zz', 'm\\u0079:p\\u0061ssword: ***'],
+      ['my\\u0020p\\u0061ssword=hunter2zz', 'my\\u0020p\\u0061ssword=***'],
+      ['m\\u0079=a p\\u0061ssword=hunter2zz', 'm\\u0079=a p\\u0061ssword=***'],
+      ['m\\u0079:name=hunter2zz', 'm\\u0079:name=hunter2zz'],
+      // A value is read up to the closing delimiter of its depth, whole: a run of backslashes before a quote is not part of the value.
+      [String.raw`hasło=hunter2zz\\\"} next`, String.raw`hasło=***\\\"} next`],
+      [String.raw`{\\\"hasło\\\":\\\"hunter2zz\\\"}`, String.raw`{\\\"hasło\\\":\\\"***\\\"}`],
+    ];
+    for (const [text, masked] of cases) expect({ text, out: mask(text) }).toEqual({ text, out: masked });
   });
 });
 
@@ -846,6 +1025,28 @@ describe('the two copies of maskSecrets', () => {
     expect(differences).toEqual([]);
   });
 
+  it('give the same result on the keys that start with a credential-shaped prefix and on the keys with punctuation, spaces and escapes', () => {
+    const texts = [];
+    for (const [, prefix, joint] of PREFIX_KEYS.filter((kind) => !kind[4])) {
+      for (const name of ['hasło', 'contraseña'.normalize('NFD'), 'passwort']) {
+        for (const make of [(k) => `{"${k}":"hunter2zz"}`, (k) => `{"Name":"${k}","Value":"hunter2zz"}`, (k) => `${k}=hunter2zz next`, (k) => `${k}: hunter2zz`]) {
+          texts.push(make(prefix + joint + name));
+        }
+      }
+    }
+    for (const key of ['my:password', 'my password', 'x-api-key', 'a.b.c_secret', String.raw`my:password`, String.raw`my password`, String.raw`a.b_secret`]) {
+      for (const make of [(k) => `{"${k}":"hunter2zz"}`, (k) => `{"a":{"${k}":"hunter2zz"},"b":1}`, (k) => `{'${k}': 'hunter2zz'}`, (k) => `${k}=hunter2zz`]) texts.push(make(key));
+    }
+    const differences = [];
+    for (const text of texts) {
+      for (const variant of [text, serializeOnce(text), serializeTwice(text)]) {
+        if (shellChecksMaskSecrets(variant) !== maskSecrets(variant)) differences.push(variant);
+      }
+    }
+    expect(texts.length).toBeGreaterThan(140);
+    expect(differences).toEqual([]);
+  });
+
   it('hold the same rules: the private key rule, the chain of replacements and every constant and function after it are the same text in both files', () => {
     const maskSource = readSource('jev-mask.mjs');
     const shellSource = readSource('shell-checks.mjs');
@@ -859,7 +1060,7 @@ describe('the two copies of maskSecrets', () => {
         .slice(from, source.indexOf('\n}\n', from))
         .split('\n')
         .map((line) => line.trim())
-        .filter((line) => /^\.replace\(\//.test(line) && !/hf_\|npm_|\{32,\}/.test(line));
+        .filter((line) => /^\[(?:\/|KEYWORD_ASSIGNMENT|NAMED_VALUE)/.test(line) && !/hf_\|npm_|\{32,\}/.test(line));
     };
     expect(chain(shellSource).length).toBeGreaterThan(10);
     expect(chain(shellSource)).toEqual(chain(maskSource));
