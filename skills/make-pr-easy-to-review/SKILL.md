@@ -95,7 +95,7 @@ HEAD_OID=$(gh pr view "${N}" ${TARGET_REPO:+-R "${TARGET_REPO}"} --json headRefO
 # to a mirror like acme/app-mirror.git when the head repo is acme/app.
 HEAD_REPO_URL=$(git remote -v | awk -v r="${HEAD_REPO}" '$3 == "(fetch)" {
   url = $2
-  sub(/^(\w+:\/\/)?[^\/@]+[:\/]/, "", url)
+  sub(/^((https?:\/\/|git@|[a-z]+@)?[\w.-]+[:\/])/, "", url)
   sub(/\.git$/, "", url)
   if (url == r) { print $2; exit }
 }')
@@ -170,7 +170,7 @@ branch, and never bypass branch protection or hooks:
 ```bash
 # Verify the head repository owner matches exactly — never force-push to an unexpected repo
 EXPECTED_OWNER="$(echo "${HEAD_REPO}" | cut -d/ -f1)"
-ACTUAL_OWNER="$(gh api -R "${HEAD_REPO}" "repos/${HEAD_REPO}" --jq '.owner.login' 2>/dev/null || echo '')"
+ACTUAL_OWNER="$(gh api --hostname "${GITHUB_HOST}" "repos/${HEAD_REPO}" --jq '.owner.login' 2>/dev/null || echo '')"
 if [ "${ACTUAL_OWNER}" != "${EXPECTED_OWNER}" ]; then
   echo "Repository owner mismatch: expected ${EXPECTED_OWNER}, got ${ACTUAL_OWNER}" >&2
   exit 1
