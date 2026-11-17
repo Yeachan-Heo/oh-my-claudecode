@@ -56,13 +56,14 @@ const write = (path: string, text: string) => {
   writeFileSync(path, text);
 };
 
+// The row has the shape the routing hook writes: the subagent type is inside the applied object.
 const applied = (ts: string, session: string, subagentType: string, modelFrom: string | null, modelTo: string | null, effortFrom: string | null, effortTo: string | null, extra: Record<string, unknown> = {}) => JSON.stringify({
   ts,
   point: 'model-routing',
   tool_use_id: extra.toolUseId ?? undefined,
   session_id: session,
-  subagent_type: subagentType,
   applied: {
+    subagent_type: subagentType,
     model: { from: modelFrom, to: modelTo, source: extra.source ?? 'jev' },
     effort: { from: effortFrom, to: effortTo, source: extra.source ?? 'jev' },
   },
@@ -171,11 +172,11 @@ beforeAll(() => {
       session_id: 'ses-11', subagent_type: 'executor',
       applied: { model: { from: null, to: 'haiku', source: 'jev' } } }) + '\n');
 
-  // A12: subagent_type only in applied, not at top level
+  // A12: subagent_type only at the top level of the row (the fallback for rows without it in the applied object)
   appendFileSync(join(journal, 'applied.jsonl'),
     JSON.stringify({ ts: '2026-11-14T09:54:00.000Z', point: 'model-routing', tool_use_id: 'tid-12',
-      session_id: 'ses-12',
-      applied: { model: { from: null, to: 'haiku', source: 'jev' }, subagent_type: 'custom-executor' } }) + '\n');
+      session_id: 'ses-12', subagent_type: 'custom-executor',
+      applied: { model: { from: null, to: 'haiku', source: 'jev' } } }) + '\n');
   write(join(transcripts, 'project-p', 'ses-12', 'subagents', 'agent-a12.meta.json'), meta('tid-12', 'a12', 'haiku', 'low'));
   write(join(transcripts, 'project-p', 'ses-12', 'subagents', 'agent-a12.jsonl'), assistant('12a', 'claude-haiku-5-5', { usage: usage(1000, 200, 0, 300, 50) }));
 });
@@ -211,7 +212,7 @@ describe.skipIf(!hasPython3)('decision_outcome_join', () => {
   });
 
   it('join, agents, margins, price consistency and outputs', () => {
-    const result = run(['--tsv', tsvPath, '--json', jsonPath, '--from', '2026-11-14T00:00:00Z', '--to', '2026-11-15T00:00:00Z', '--source-map', 'reviewer=reviewer', '--source-map', 'advisor-agent=advisor']);
+    const result = run(['--tsv', tsvPath, '--json', jsonPath, '--from', '2026-11-14T00:00:00Z', '--to', '2026-11-15T00:00:00Z', '--source-map', 'reviewer=reviewer', '--source-map', 'advisor-agent=advisor', '--source-map', 'custom=custom-source']);
     expect(result.status, result.stderr).toBe(0);
     const out = JSON.parse(readFileSync(jsonPath, 'utf8'));
 
@@ -295,9 +296,10 @@ describe.skipIf(!hasPython3)('decision_outcome_join', () => {
     expect(a6.model_match).toBe('undetermined');
     expect(a6.reasoning).toBeNull();
 
-    // A12: subagent_type from applied field (not at top level)
+    // A12: subagent_type from the top level of the row (fallback)
     const a12 = byTid['tid-12'];
     expect(a12.subagent_type).toBe('custom-executor');
+    expect(a12.task_source).toBe('custom-source');
     expect(a12.model_match).toBe('match');
     expect(a12.cost_status).toBe('reported');
     expect(Math.abs((a12.cost_usd as number) - 0.000153)).toBeLessThan(1e-9);
@@ -479,5 +481,148 @@ describe.skipIf(!hasPython3)('decision_outcome_join', () => {
     } finally {
       rmSync(pidBase, { recursive: true, force: true });
     }
+  });
+});
+
+// Edge cases on one-agent fixtures. The applied row has the shape the routing hook writes: the subagent type sits
+// inside the applied object, not at the top level of the row.
+describe.skipIf(!hasPython3)('decision_outcome_join edge cases', () => {
+  type Agent = Record<string, unknown>;
+  const rawAssistant = (fields: Record<string, unknown>) => JSON.stringify({ type: 'assistant', ...fields }) + '\n';
+  const apiErrorRow = (text: string) => rawAssistant({
+    uuid: 'err-1',
+    isApiErrorMessage: true,
+    error: 'rate_limit',
+    message: { model: '<synthetic>', stop_reason: 'stop_sequence', content: [{ type: 'text', text }] },
+  });
+
+  /** One routed task (haiku) with the given transcript rows; returns the exit status, stderr and the agent rows. */
+  function oneAgent(transcriptRows: string, priceTable: Record<string, number[]> | null, extra: string[] = []) {
+    const dir = mkdtempSync(join(tmpdir(), 'decision-outcome-join-edge-'));
+    try {
+      write(join(dir, 'journal', 'applied.jsonl'), JSON.stringify({
+        ts: '2026-11-14T09:10:00.000Z', point: 'model-routing', tool_use_id: 'tid-e', session_id: 'ses-e',
+        applied: { subagent_type: 'executor', model: { from: 'haiku', to: 'haiku', source: 'jev' } },
+      }) + '\n');
+      write(join(dir, 'transcripts', 'project-p', 'ses-e', 'subagents', 'agent-e.meta.json'), meta('tid-e', 'e', 'haiku', 'low'));
+      write(join(dir, 'transcripts', 'project-p', 'ses-e', 'subagents', 'agent-e.jsonl'), transcriptRows);
+      const args = ['-I', SCRIPT, '--journal', join(dir, 'journal'), '--transcripts', join(dir, 'transcripts'), '--json', join(dir, 'out.json'), ...extra];
+      if (priceTable) {
+        writeFileSync(join(dir, 'prices.json'), JSON.stringify(priceTable));
+        args.push('--prices', join(dir, 'prices.json'));
+      }
+      const result = spawnSync('python3', args, { encoding: 'utf8' });
+      const out = result.status === 0 ? JSON.parse(readFileSync(join(dir, 'out.json'), 'utf8')) : null;
+      return { status: result.status, stderr: result.stderr, out, agent: (out?.agents?.[0] ?? null) as Agent | null };
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  }
+
+  it('prices a Haiku request above 100k tokens with the tier row alone (no base haiku row needed)', () => {
+    const tierOnly = { 'haiku>100k': PRICES['haiku>100k'] };
+    const big = assistant('big', 'claude-haiku-5-5', { usage: usage(100001, 0, 0, 0, 100) });
+    const small = assistant('small', 'claude-haiku-5-5', { usage: usage(1000, 0, 0, 0, 100) });
+    const result = oneAgent(big, tierOnly);
+    expect(result.status, result.stderr).toBe(0);
+    expect(result.agent!.cost_status).toBe('reported');
+    expect(Math.abs((result.agent!.cost_usd as number) - (100001 * 0.5 + 100 * 2.5) / 1e6)).toBeLessThan(1e-6);
+    expect(result.agent!.gross_saving).toBe(0);
+    expect(result.out.price_consistency.consistent).toBe(true);
+    // a request below the threshold has no row of its tier: unpriced, and the run still ends normally
+    const mixed = oneAgent(big + small, tierOnly);
+    expect(mixed.status, mixed.stderr).toBe(0);
+    expect(mixed.agent!.cost_status).toBe('partial');
+    expect(mixed.agent!.turns_unpriced).toBe(1);
+  });
+
+  it('counts a Haiku request above 100k tokens as unpriced when only the base haiku row exists', () => {
+    const baseOnly = { haiku: PRICES.haiku };
+    const big = assistant('big', 'claude-haiku-5-5', { usage: usage(100001, 0, 0, 0, 100) });
+    const result = oneAgent(big, baseOnly);
+    expect(result.status, result.stderr).toBe(0);
+    expect(result.agent!.cost_status).toBe('unavailable');
+    expect(result.agent!.cost_usd).toBeNull();
+    expect(result.agent!.turns_unpriced).toBe(1);
+    expect(result.agent!.gross_saving).toBeNull();
+  });
+
+  it('a turn without usage is unpriced, with or without a price table', () => {
+    const noUsage = assistant('nu', 'claude-haiku-5-5');
+    const withUsage = assistant('wu', 'claude-haiku-5-5', { usage: usage(1000, 0, 0, 0, 100) });
+    const only = oneAgent(noUsage, PRICES);
+    expect(only.status, only.stderr).toBe(0);
+    expect(only.agent!.cost_status).toBe('unavailable');
+    expect(only.agent!.cost_usd).toBeNull();
+    expect(only.agent!.turns_unpriced).toBe(1);
+    const mixed = oneAgent(noUsage + withUsage, PRICES);
+    expect(mixed.agent!.cost_status).toBe('partial');
+    expect(mixed.agent!.turns).toBe(2);
+    expect(mixed.agent!.turns_unpriced).toBe(1);
+    const unpriced = oneAgent(noUsage, null);
+    expect(unpriced.agent!.cost_status).toBe('unavailable');
+    expect(unpriced.agent!.cost_usd).toBeNull();
+  });
+
+  it('a row with usage but no message id is one priced turn (identified by its uuid)', () => {
+    const noId = rawAssistant({ uuid: 'u-1', message: { model: 'claude-haiku-5-5', content: [{ type: 'text', text: 'ok' }], usage: usage(1000, 0, 0, 0, 100) } });
+    const result = oneAgent(noId, PRICES);
+    expect(result.status, result.stderr).toBe(0);
+    expect(result.agent!.turns).toBe(1);
+    expect(result.agent!.turns_unpriced).toBe(0);
+    expect(result.agent!.cost_status).toBe('reported');
+  });
+
+  it('reads a terminal API error row of the host as is_error and takes the status from its text', () => {
+    const answer = assistant('ok', 'claude-haiku-5-5', { usage: usage(1000, 0, 0, 0, 100) });
+    const failed = oneAgent(answer + apiErrorRow('API Error: Request rejected (429) rate limit reached'), PRICES);
+    expect(failed.status, failed.stderr).toBe(0);
+    expect(failed.agent!.end_is_error).toBe(true);
+    expect(failed.agent!.end_api_error_status).toBe(429);
+    // the error notice is not a model call
+    expect(failed.agent!.turns).toBe(1);
+    expect(failed.agent!.cost_status).toBe('reported');
+    const noStatus = oneAgent(answer + apiErrorRow('API Error: connection closed'), PRICES);
+    expect(noStatus.agent!.end_is_error).toBe(true);
+    expect(noStatus.agent!.end_api_error_status).toBeNull();
+    // an error followed by a normal answer is not terminal
+    const recovered = oneAgent(apiErrorRow('API Error: Request rejected (529)') + answer, PRICES);
+    expect(recovered.agent!.end_is_error).toBeNull();
+    expect(recovered.agent!.end_api_error_status).toBeNull();
+  });
+
+  it('usage sub-objects and rows that are not objects do not end the run', () => {
+    const odd = rawAssistant({
+      message: { id: 'msg-odd', model: 'claude-haiku-5-5', content: [{ type: 'text', text: 'ok' }], usage: { ...usage(1000, 0, 0, 0, 100), output_tokens_details: 5, cache_creation: 7 } },
+    });
+    const result = oneAgent('"not an object"\n' + odd, PRICES);
+    expect(result.status, result.stderr).toBe(0);
+    expect(result.agent!.turns).toBe(1);
+    expect(result.agent!.input).toBe(1000);
+  });
+
+  it('uses the first copy (by path) of a tool_use_id that two transcript directories both hold', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'decision-outcome-join-copies-'));
+    try {
+      write(join(dir, 'journal', 'applied.jsonl'), row('tid-copy', 'ses-copy', 'executor', null, 'haiku', null, 'low'));
+      for (const [project, agentId] of [['project-b', 'second'], ['project-a', 'first'], ['project-c', 'third']]) {
+        write(join(dir, 'transcripts', project, 'ses-copy', 'subagents', `agent-${agentId}.meta.json`), meta('tid-copy', agentId, 'haiku', 'low'));
+        write(join(dir, 'transcripts', project, 'ses-copy', 'subagents', `agent-${agentId}.jsonl`), assistant(agentId, 'claude-haiku-5-5', { usage: usage(1000, 0, 0, 0, 50) }));
+      }
+      const result = spawnSync('python3', ['-I', SCRIPT, '--journal', join(dir, 'journal'), '--transcripts', join(dir, 'transcripts'), '--json', join(dir, 'out.json')], { encoding: 'utf8' });
+      expect(result.status, result.stderr).toBe(0);
+      expect(JSON.parse(readFileSync(join(dir, 'out.json'), 'utf8')).agents[0].agent_id).toBe('first');
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('counts a replayed tool call once', () => {
+    const call = { type: 'tool_use', id: 'toolu-1', name: 'Read', input: { file_path: '/tmp/a' } };
+    const first = assistant('r1', 'claude-haiku-5-5', { content: [call], usage: usage(1000, 0, 0, 0, 100) });
+    const replay = assistant('r2', 'claude-haiku-5-5', { content: [call, { type: 'tool_use', id: 'toolu-2', name: 'Read', input: { file_path: '/tmp/b' } }], usage: usage(1000, 0, 0, 0, 100) });
+    const result = oneAgent(first + replay, PRICES);
+    expect(result.status, result.stderr).toBe(0);
+    expect(result.agent!.tool_calls).toBe(2);
   });
 });

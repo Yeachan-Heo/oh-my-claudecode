@@ -21,7 +21,9 @@ Inputs (arguments only; there are no default paths):
   --from/--to    time filter on ts (ISO 8601, both ends inclusive); without them the whole file
   --prices       optional; JSON file with the price table: {"family": [input, cache write 5 min, cache write 1 h,
                  cache read, output], ...} in USD per 1 million tokens. Families are haiku, sonnet, opus,
-                 fable-5-1 and fable-5-2; "haiku>100k" applies to Haiku requests above 100k tokens of input.
+                 fable-5-1 and fable-5-2; "haiku>100k" applies to Haiku requests above 100k tokens of input
+                 (and only those: a request is priced with the one row of its own tier, so a table may hold
+                 "haiku>100k" without "haiku"; a turn without a row for its tier is unpriced).
                  Without the option (or with an empty table, {}) the price table is empty: every cost is
                  unavailable (null), never zero, and one note is printed on stderr. No price table is built in
   --pointer-verbs WORD  extra verb (repeatable) that marks a pointer prompt, besides read and brief
@@ -45,7 +47,9 @@ models_observed); model_match: match | mismatch | undetermined (no transcript or
 no model decision; tokens and cache (input, output, cache_write_5m, cache_write_1h, cache_read; sums over all
 turns of usage); reasoning with reasoning_source: usage (the sum of output_tokens_details.thinking_tokens) or
 block_length (characters of thinking blocks; the usage field can be zero in some transcripts); turns (unique
-message.id); tool_calls (tool_use blocks); end status (last stop_reason, is_error, api_error_status, when present);
+message.id, else the row uuid); tool_calls (tool_use blocks, each call id once); end status (last stop_reason, is_error, api_error_status, when
+present; an is_error or api_error_status field of a row is used as is, and a last assistant row marked isApiErrorMessage
+sets is_error and takes the status from its text when the text holds one);
 cost_status: reported | partial | unavailable; cost_usd (null when unavailable; with partial, the cost of the priced
 turns only) and turns_unpriced; gross_saving (the cost of the same tokens at the model_from price minus at the model_to
 price; null when model_from is empty, outside the price table, or the cost is unmeasured); the Jev margins (p1-p2 of the
@@ -129,6 +133,11 @@ def model_family(model_id):
     return None
 
 
+def dict_of(value):
+    """The value when it is a JSON object, else an empty dict (a malformed row never ends the run)."""
+    return value if isinstance(value, dict) else {}
+
+
 def strip_suffix(model_id):
     """Model identifier without a bracketed suffix (for example "model[1m]" gives "model")."""
     return re.sub(r'\[[^\]]*\]$', '', str(model_id or ''))
@@ -152,8 +161,9 @@ def cost_loop(requests, families, prices):
 
 
 def cost_as(requests, family, prices):
-    """USD cost of the same requests at another model's price (Haiku with the 100k threshold); None when the family is not in the table."""
-    if family not in prices:
+    """USD cost of the same requests at another model's price (Haiku with the 100k threshold); None when the family is None
+    or a request has no price row of its applicable tier."""
+    if family is None:
         return None
     usd = 0.0
     for inp, z5, z1h, cache_read, out in requests:
@@ -265,6 +275,19 @@ def merge_usage(old, new):
     return result
 
 
+# HTTP status in the text of a host API error row: "(429)" or ": 429".
+API_STATUS_PATTERNS = (re.compile(r'\((\d{3})\)'), re.compile(r':\s*(\d{3})\b'))
+
+
+def text_of_content(content):
+    """Text of a message content: a string as is, or the text blocks joined by a space."""
+    if isinstance(content, str):
+        return content
+    if not isinstance(content, list):
+        return ''
+    return ' '.join(b['text'] for b in content if isinstance(b, dict) and isinstance(b.get('text'), str))
+
+
 def scan_transcript(path, prices):
     """Scan of an agent transcript: tokens and cache (sums over all turns with usage), turns (unique message.id),
     tool calls (tool_use blocks), characters of thinking blocks, reasoning (usage or block lengths), the last
@@ -279,6 +302,9 @@ def scan_transcript(path, prices):
     stop_reason = None
     is_error = None
     api_error_status = None
+    seen_tool_use_ids = set()
+    ended_with_api_error = False   # the last assistant row is a host API error row (isApiErrorMessage)
+    api_error_text = ''
     try:
         with open(path, encoding='utf8', errors='replace') as f:
             for line in f:
@@ -294,7 +320,13 @@ def scan_transcript(path, prices):
                     api_error_status = x['api_error_status']
                 if x.get('type') != 'assistant':
                     continue
-                msg = x.get('message') or {}
+                msg = x.get('message')
+                if not isinstance(msg, dict):
+                    msg = {}
+                ended_with_api_error = x.get('isApiErrorMessage') is True
+                api_error_text = text_of_content(msg.get('content')) if ended_with_api_error else ''
+                if msg.get('model') == '<synthetic>':
+                    continue  # a row written by the host itself (an API error notice), not a model call
                 mid = msg.get('id')
                 if mid:
                     turn_ids.add(mid)
@@ -305,6 +337,11 @@ def scan_transcript(path, prices):
                 if isinstance(content, list):
                     for b in content:
                         if isinstance(b, dict) and b.get('type') == 'tool_use':
+                            block_id = b.get('id')
+                            if isinstance(block_id, str) and block_id:
+                                if block_id in seen_tool_use_ids:
+                                    continue  # a replayed copy of the same call
+                                seen_tool_use_ids.add(block_id)
                             tool_calls += 1
                         elif isinstance(b, dict) and b.get('type') == 'thinking':
                             t = b.get('thinking')
@@ -316,6 +353,7 @@ def scan_transcript(path, prices):
                 key = mid or x.get('uuid')
                 if key is None:
                     continue
+                turn_ids.add(key)  # a row without message.id is one turn, identified by its uuid
                 if key in last:
                     previous_model, previous = last[key]
                     last[key] = (previous_model if model_family(previous_model) else msg.get('model'), merge_usage(previous, u))
@@ -323,6 +361,14 @@ def scan_transcript(path, prices):
                     last[key] = (msg.get('model'), merge_usage({}, u))
     except OSError:
         return None
+    if ended_with_api_error:
+        is_error = True
+        if api_error_status is None:
+            for pattern in API_STATUS_PATTERNS:
+                found = pattern.search(api_error_text)
+                if found:
+                    api_error_status = int(found.group(1))
+                    break
     requests = []            # (input, cache write 5 min, cache write 1 h, cache read, output) for priced turns only
     families = []            # family of each priced turn
     turns_unpriced = 0
@@ -330,13 +376,13 @@ def scan_transcript(path, prices):
     raw_turns = Counter()      # raw message.model -> number of turns
     thinking_usage = 0
     sum_input = sum_output = sum_z5 = sum_z1h = sum_read = 0
-    # Count turns without usage as unpriced
-    turns_unpriced += len(turn_ids) - len(last)
+    # A turn (message id) without any usage has no token measurement: it is unpriced, not free.
+    turns_unpriced += len(turn_ids - set(last))
     for model_id, u in last.values():
         family = model_family(model_id)
         inp = u.get('input_tokens') or 0
         cache_read = u.get('cache_read_input_tokens') or 0
-        cc = u.get('cache_creation') or {}
+        cc = dict_of(u.get('cache_creation'))
         z1h = cc.get('ephemeral_1h_input_tokens') or 0
         z5 = cc.get('ephemeral_5m_input_tokens')
         if z5 is None:
@@ -345,7 +391,7 @@ def scan_transcript(path, prices):
         if model_id:
             raw_turns[model_id] += 1
             turn_families[family or 'other'] += 1
-        thinking_usage += ((u.get('output_tokens_details') or {}).get('thinking_tokens') or 0)
+        thinking_usage += (dict_of(u.get('output_tokens_details')).get('thinking_tokens') or 0)
         sum_input += inp
         sum_output += out
         sum_z5 += z5
@@ -452,13 +498,10 @@ def claude_row(r, m, meta_path, tr, shadow_row, prices, source_map):
     status, usd, unpriced = cost_status(tr, prices)
     saving = None
     if tr is not None and tr['requests']:
-        family_from = model_family(model_from)
-        family_to = model_family(model_to)
-        if family_from in prices and family_to in prices:
-            a = cost_as(tr['requests'], family_from, prices)
-            b = cost_as(tr['requests'], family_to, prices)
-            if a is not None and b is not None:
-                saving = a - b
+        a = cost_as(tr['requests'], model_family(model_from), prices)
+        b = cost_as(tr['requests'], model_family(model_to), prices)
+        if a is not None and b is not None:
+            saving = a - b
     answers = (shadow_row or {}).get('answers') if isinstance((shadow_row or {}).get('answers'), dict) else {}
     margin_model = margin(answers.get('model-tier'))
     margin_effort = margin(answers.get('effort'))
@@ -535,7 +578,7 @@ def margin_groups(shadow_active, pointer_verbs=()):
                   'pointer': {'n': 0, 'margins': [], 'conf': []},
                   'full': {'n': 0, 'margins': [], 'conf': []}}
         for r in shadow_active:
-            task = ((r.get('state') or {}).get('task') or '')
+            task = (dict_of(r.get('state')).get('task') or '')
             g = 'pointer' if is_pointer_task(task, pointer_verbs) else 'full'
             a = (r.get('answers') or {}).get(q) if isinstance(r.get('answers'), dict) else None
             m = margin(a)
@@ -655,7 +698,7 @@ def main():
     meta_by_tid = {}
     for pattern in (os.path.join(a.transcripts, '*', '*', 'subagents', 'agent-*.meta.json'),
                     os.path.join(a.transcripts, '*', '*', 'subagents', '*', 'agent-*.meta.json')):
-        for p in glob.glob(pattern):
+        for p in sorted(glob.glob(pattern)):  # sorted: the first copy of a duplicated tool_use_id is the same on every run
             try:
                 with open(p, encoding='utf8') as f:
                     m = json.load(f)
