@@ -235,6 +235,44 @@ test('table p4-p7: per-wrapper flags, nesting depth, broadcast, stop-everything 
 });
 
 
+test('table p8: options of pkill, killall and kill are read as the tools read them, and wrapped commands by their base name', () => {
+  // `caddy` is a protected name of the fixture, 4242 an ancestor and its process group; the pass rows use a name that is not protected,
+  // another letter case without -i, or a pid that is not an ancestor.
+  const refuse = [
+    // pkill: flags that take no value (-n, -c, -o, -x, -e, -A, -v), alone or clustered, and their long forms
+    'pkill -n caddy', 'pkill -c caddy', 'pkill -o caddy', 'pkill -x caddy', 'pkill -e caddy', 'pkill -A caddy', 'pkill -v caddy', 'pkill -nf caddy', 'pkill -fn caddy',
+    'pkill --newest caddy', 'pkill --count caddy', 'pkill --oldest caddy', 'pkill --exact caddy', 'pkill --echo caddy',
+    // pkill: options with a value, alone, glued, clustered, long and shortened
+    'pkill -u root caddy', 'pkill -uroot caddy', 'pkill -fu root caddy', 'pkill -nu root caddy', 'pkill -g 1234 caddy', 'pkill -G 12 caddy', 'pkill -O 5 caddy', 'pkill -s 1 caddy',
+    'pkill -t pts/0 caddy', 'pkill -P 12 caddy', 'pkill -F /run/x.pid caddy', 'pkill -r R caddy', 'pkill -q 1 caddy', 'pkill --euid root caddy', 'pkill --older=5 caddy',
+    'pkill --parent 12 caddy', 'pkill --sig 9 caddy', 'pkill --ns 1 caddy', 'pkill --signal KILL caddy', 'pkill -9 caddy', 'pkill -KILL caddy', 'pkill -SIGKILL caddy',
+    // pkill: ignore case, in every comparison (protected names, generic names, regular expressions), short, long, shortened and clustered
+    'pkill -i CADDY', 'pkill --ignore-case CADDY', 'pkill --ignore-c CADDY', 'pkill -fi CADDY', 'pkill -if Caddy', 'pkill -i -f CADDY', 'pkill -i CLAUDE', 'pkill -i Tmux', 'pkill -i "CAD+Y"', 'pkill -i -9 CADDY',
+    // killall: -r is a flag (the names are regular expressions), -n and the time, user and signal options take values, every name is judged
+    'killall -r caddy', 'killall --regexp caddy', "killall -r 'cad+y'", "killall -r 'cad'", 'killall -n 123 caddy', 'killall --ns 123 caddy', 'killall -s TERM caddy', 'killall -o 5m caddy', 'killall -y 5m caddy',
+    'killall -Z ctx caddy', 'killall -u root caddy', 'killall -u root', 'killall -g caddy', 'killall -e caddy', 'killall -w caddy', 'killall -v caddy', 'killall -q caddy', 'killall -9 caddy', 'killall -SIGKILL caddy',
+    'killall my-test-proc caddy', 'killall caddy my-test-proc', 'killall -I CADDY', 'killall --ignore-case Caddy', 'killall -Ir CAD+Y', 'killall -s KILL -I CADDY',
+    // kill: the process group after the signal, in every way of choosing the signal
+    'kill -TERM -4242', 'kill -s TERM -4242', 'kill -sTERM -4242', 'kill -n 15 -4242', 'kill --signal TERM -4242', 'kill --signal=KILL -4242', 'kill -9 -4242', 'kill -SIGKILL -4242', 'kill -KILL -4242',
+    'kill -TERM -- -4242', 'kill -TERM -1', 'kill -9 -1', 'kill -TERM 4243', 'kill -s KILL 1', 'kill -n 9 1', 'kill -q 5 -s TERM 1', 'kill -TERM 5555 -4242',
+    // wrappers: the path of the command after each wrapper, value flags of the wrappers
+    'env /bin/kill 1', 'env -i /bin/kill 1', 'env FOO=bar /bin/kill 1', 'sudo /usr/bin/env /bin/kill 1', '/usr/bin/sudo /usr/bin/env /bin/kill 1', 'timeout 5 /usr/bin/pkill caddy', 'nice -n 5 /bin/kill 1',
+    'nohup /bin/kill 1', 'sudo -u root /bin/kill 1', 'sudo --user root /bin/kill 1', 'sudo -r role kill 1', 'sudo -t type kill 1', 'sudo -U root kill 1', 'sudo -h host kill 1', 'env -a name kill 1',
+    'exec -a name kill 1', 'systemd-run --unit x kill 1', 'systemd-run -p Foo=bar kill 1', 'stdbuf --output L kill 1', '/usr/bin/sudo /usr/bin/pkill -i CADDY', '/usr/bin/env /usr/bin/timeout 5 /bin/kill 1',
+    "env /bin/sh -c 'kill 1'", 'env /usr/bin/docker stop example-db-prod', 'sudo /usr/bin/systemctl stop caddy', 'env /usr/sbin/reboot',
+  ];
+  const pass = [
+    'pkill -n my-test-proc', 'pkill -i MY-TEST-PROC', 'pkill -fu root my-test-proc', 'pkill -nu root my-test-proc', 'pkill CADDY', 'pkill -x CADDY', 'pkill -P 1234',
+    'killall -r "zzz.*"', 'killall -I MY-TEST-PROC', 'killall -9 myprocess', 'killall sleep', 'killall -n 123 my-test-proc',
+    'kill -0 4242', 'kill -s 0 4242', 'kill -n 0 1', 'kill -l', 'kill -L', 'kill -s TERM 5555', 'kill -9 -4243', 'kill -TERM 5555', 'kill -TERM -5555',
+    'echo kill 1', 'sudo -u root /bin/ls', 'env FOO=bar /bin/echo kill 1', 'env /bin/echo pkill caddy', 'sudo -r role /bin/ls',
+  ];
+  const mistakes = [];
+  for (const command of refuse) if (!RT(command)?.refuse) mistakes.push(`should refuse: ${command}`);
+  for (const command of pass) if (RT(command)?.refuse) mistakes.push(`should pass: ${command}`);
+  assert.deepEqual(mistakes, []);
+});
+
 test('refuses the twelve commands of the acceptance set with the refusal form', () => {
   const ancestors = KG.protectedAncestors();
   assert.ok(ancestors.hasProc, 'no /proc in the test environment (Linux expected)');

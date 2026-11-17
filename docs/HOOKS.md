@@ -159,8 +159,9 @@ Opt-in with `OMC_JEV_DENIAL_COUNTER=1`. Every refusal of `pre-tool-enforcer.mjs`
 
 Opt-in with `OMC_JEV_KILL_GUARD=1` (off by default; without it nothing is imported or judged). `pre-tool-enforcer.mjs` judges each Bash command with `scripts/lib/jev-kill-guard.mjs`, after the shell checks, and refuses commands that signal protected processes or stop protected services and containers:
 
-- signals to pid 1, to the ancestors of the agent shell and to their process groups;
-- `pkill` and `killall` patterns that match a protected name, a generic process name, or the command line or name of an ancestor;
+- signals to pid 1, to the ancestors of the agent shell and to their process groups (a command under a wrapper such as `env`, `sudo`, `timeout` or `nice` is judged like the bare command, also when its path is given: `env /bin/kill 1`);
+- `pkill` and `killall` patterns that match a protected name, a generic process name, or the command line or name of an ancestor. The options are read as the two tools read them: they differ (`-r` is a value for `pkill` and a flag for `killall`, `-n` is a flag for `pkill` and a value for `killall`), short options can be clustered (`-fu root`), long options can be shortened to an unambiguous prefix, `pkill -i` and `killall -I` (and `--ignore-case`) make the comparison ignore the letter case, `killall -r` reads every name as a regular expression, and every name of a `killall` command is judged;
+- `kill` of a process group after the signal (`kill -TERM -4242`, whichever way the signal is chosen: `-s`, `-n`, `--signal`, `-SIG`, `-9`);
 - `systemctl`, `service` and `/etc/init.d/` stop-like actions on protected units, and actions that stop the whole system;
 - `docker` and `docker compose` stop-like actions on protected containers and projects, and commands whose targets cannot be read (globs, unknown substitutions, `xargs` input).
 

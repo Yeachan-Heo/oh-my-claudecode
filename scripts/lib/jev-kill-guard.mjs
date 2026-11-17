@@ -328,16 +328,18 @@ function segmentArgv(segment) {
 
 // --- wrappers: unwrapped so that the command under them is judged (flags with a value per wrapper) ---
 const WRAPPER_FLAGS = new Map([
-  ['sudo', ['-u', '-g', '-C', '-D', '-R', '-T', '-p', '-h']],
-  ['env', ['-u', '-C']],
+  ['sudo', ['-u', '-g', '-C', '-D', '-R', '-T', '-p', '-h', '-r', '-t', '-U', '--user', '--group', '--close-from', '--chdir', '--chroot', '--prompt', '--host', '--role', '--type', '--other-user', '--command-timeout']],
+  ['env', ['-u', '-C', '-a', '--unset', '--chdir', '--argv0']],
   ['timeout', ['-s', '-k', '--signal', '--kill-after']],
   ['nice', ['-n', '--adjustment']],
   ['ionice', ['-n', '-c', '--class', '--classdata']],
-  ['stdbuf', ['-i', '-o', '-e']],
-  ['watch', ['-n']],
+  ['stdbuf', ['-i', '-o', '-e', '--input', '--output', '--error']],
+  ['watch', ['-n', '--interval']],
   ['chroot', ['--userspec', '--groups']],
-  ['nsenter', ['-t', '--target']],
+  ['nsenter', ['-t', '--target', '-S', '-G', '-r', '-w', '--setuid', '--setgid', '--root', '--wd']],
   ['su', ['-c', '--command']],
+  ['exec', ['-a']],
+  ['systemd-run', ['-u', '--unit', '-p', '--property', '--slice', '--uid', '--gid', '-E', '--setenv', '--description', '-M', '--machine', '-H', '--host', '--working-directory']],
 ]);
 const WRAPPERS = new Set([...WRAPPER_FLAGS.keys(), 'nohup', 'command', 'exec', 'time', 'builtin', 'setsid', 'busybox', 'systemd-run']);
 const SHELLS = new Set(['bash', 'sh', 'zsh', 'dash', 'ksh']);
@@ -369,13 +371,18 @@ function xargsUnknownTarget(sub) {
 
 // Unwraps the wrappers in front of the command. Returns the argv that remains, the nested segments (shell -c text,
 // su -c text, env -S text) and the flags unknownTarget (xargs) and unreadable (ambiguous quoting after -c).
+// A path to a binary is reduced to its base name, except for an /etc/init.d/ script (a unit, not a command).
+const headName = (word) => (!/^\/etc\/init\.d\//.test(word) && /^\//.test(word) ? word.split('/').pop() : word);
+
 function unwrapWrappers(argv, depth) {
-  // A path to a binary is reduced to its base name, except for an /etc/init.d/ script (a unit, not a command).
-  let a = argv.map((s, idx) => (idx === 0 && !/^\/etc\/init\.d\//.test(s) && /^\//.test(s) ? s.split('/').pop() : s));
+  let a = argv;
   const nested = [];
   let unknownTarget = false;
   for (;;) {
     if (!a.length) break;
+    // The command at the head is named by its base name each time a wrapper has been removed, so `env /bin/kill 1`
+    // and `sudo /usr/bin/env /bin/kill 1` are judged like `kill 1`.
+    if (headName(a[0]) !== a[0]) a = [headName(a[0]), ...a.slice(1)];
     const s = a[0];
     if (/^[A-Za-z_][A-Za-z0-9_]*=/.test(s)) {
       a = a.slice(1);
@@ -477,88 +484,135 @@ function unwrapWrappers(argv, depth) {
   return { argv: a, nested, unknownTarget };
 }
 
+// --- signal words and option parsing shared by kill, pkill and killall ---
+// Signal names of Linux (without the SIG prefix); `-9`, `-KILL`, `-SIGKILL` and `-RTMIN+3` select a signal.
+const SIGNAL_NAMES = new Set(['EXIT', 'HUP', 'INT', 'QUIT', 'ILL', 'TRAP', 'ABRT', 'IOT', 'BUS', 'FPE', 'KILL', 'USR1', 'SEGV', 'USR2', 'PIPE', 'ALRM', 'TERM', 'STKFLT', 'CHLD', 'CLD', 'CONT', 'STOP', 'TSTP', 'TTIN', 'TTOU', 'URG', 'XCPU', 'XFSZ', 'VTALRM', 'PROF', 'WINCH', 'IO', 'POLL', 'PWR', 'SYS', 'UNUSED']);
+function isSignalWord(word) {
+  const w = String(word).replace(/^SIG/i, '').toUpperCase();
+  return /^[0-9]{1,3}$/.test(String(word)) || SIGNAL_NAMES.has(w) || /^RT(MIN|MAX)([+-][0-9]+)?$/.test(w);
+}
+// The number of a signal word (0 for `0` and for EXIT), a name otherwise.
+const signalOf = (word) => {
+  const w = String(word ?? '').replace(/^SIG/i, '').toUpperCase();
+  return /^[0-9]+$/.test(w) ? Number(w) : w === 'EXIT' ? 0 : w;
+};
+
+// pkill (procps-ng) and killall (psmisc) read their options differently: `-r` is a value (the run states) for pkill and a flag
+// (the names are regular expressions) for killall; `-n` and `-c` of pkill take nothing, `-n` of killall is a value; `-i` and `-I`
+// mean "ignore case". Each table maps the short letters to the long names, and the long names that take a value are listed.
+// Short options can be clustered (`-fi`, `-furoot`): a letter that takes a value takes the rest of the cluster, else the next word.
+// A long option can be shortened to any unambiguous prefix (`--ignore`), as getopt_long does.
+const PKILL_OPTIONS = {
+  short: { H: 'require-handler', q: 'queue', e: 'echo', c: 'count', f: 'full', g: 'pgroup', G: 'group', i: 'ignore-case', n: 'newest', o: 'oldest', O: 'older', P: 'parent', s: 'session', t: 'terminal', u: 'euid', U: 'uid', x: 'exact', F: 'pidfile', L: 'logpidfile', r: 'runstates', A: 'ignore-ancestors', v: 'inverse', w: 'lightweight' },
+  longWithValue: ['signal', 'queue', 'pgroup', 'group', 'older', 'parent', 'session', 'terminal', 'euid', 'uid', 'pidfile', 'runstates', 'cgroup', 'ns', 'nslist'],
+  longFlags: ['require-handler', 'echo', 'count', 'full', 'ignore-case', 'newest', 'oldest', 'exact', 'logpidfile', 'ignore-ancestors', 'inverse', 'lightweight', 'help', 'version'],
+};
+const KILLALL_OPTIONS = {
+  short: { e: 'exact', I: 'ignore-case', g: 'process-group', y: 'younger-than', o: 'older-than', i: 'interactive', l: 'list', q: 'quiet', r: 'regexp', s: 'signal', u: 'user', v: 'verbose', w: 'wait', n: 'ns', Z: 'context', V: 'version' },
+  longWithValue: ['younger-than', 'older-than', 'signal', 'user', 'ns', 'context'],
+  longFlags: ['exact', 'ignore-case', 'process-group', 'interactive', 'list', 'quiet', 'regexp', 'verbose', 'wait', 'version', 'help'],
+};
+
+function expandLongOption(name, table) {
+  const all = [...table.longWithValue, ...table.longFlags];
+  if (all.includes(name)) return name;
+  const matches = all.filter((long) => long.startsWith(name));
+  return matches.length === 1 ? matches[0] : name;
+}
+
+// The options and the positional arguments of a pkill or killall command (argv[0] is the command). Returns
+// { positionals, flags: Set of long names, values: Map of long name to the list of its values }. Signal words (`-9`, `-KILL`)
+// are skipped; the words after `--` are positionals.
+function parseProcessOptions(argv, table) {
+  const out = { positionals: [], flags: new Set(), values: new Map() };
+  const take = (name, value) => {
+    if (value === undefined) return;
+    out.values.set(name, [...(out.values.get(name) || []), value]);
+  };
+  let afterDashes = false;
+  for (let i = 1; i < argv.length; i++) {
+    const t = argv[i];
+    if (afterDashes || !t.startsWith('-') || t === '-') {
+      out.positionals.push(t);
+      continue;
+    }
+    if (t === '--') {
+      afterDashes = true;
+      continue;
+    }
+    if (t.startsWith('--')) {
+      const eq = t.indexOf('=');
+      const name = expandLongOption(eq < 0 ? t.slice(2) : t.slice(2, eq), table);
+      if (table.longWithValue.includes(name)) take(name, eq >= 0 ? t.slice(eq + 1) : argv[++i]);
+      else out.flags.add(name);
+      continue;
+    }
+    const body = t.slice(1);
+    if (isSignalWord(body)) continue;
+    for (let k = 0; k < body.length; k++) {
+      const name = table.short[body[k]];
+      if (name && table.longWithValue.includes(name)) {
+        take(name, body.slice(k + 1) || argv[++i]);
+        break;
+      }
+      out.flags.add(name || body[k]);
+    }
+  }
+  return out;
+}
+
 // --- pkill and killall: a pattern matches a name as a whole word (word characters [A-Za-z0-9_-]), ---
 // a name equal to the pattern or to "<name>.service", or a name that contains a pattern of at least 4 characters.
+// With ignoreCase (pkill -i, killall -I) the comparisons ignore the letter case, regular expressions get the i flag.
 const WORD_CHARS = /[A-Za-z0-9_-]/;
-function patternMatchesName(pattern, name, full = true) {
-  if (pattern === name) return true;
+function patternMatchesName(pattern, name, full = true, ignoreCase = false) {
+  const flags = ignoreCase ? 'i' : '';
+  const test = (source) => {
+    try {
+      return new RegExp(source, flags).test(name);
+    } catch {
+      return false; // an invalid regular expression: no match
+    }
+  };
+  const p = ignoreCase ? pattern.toLowerCase() : pattern;
+  const n = ignoreCase ? name.toLowerCase() : name;
+  if (p === n) return true;
   if (full === false) {
     // Narrow mode for the generic names and the comm of ancestors: only "the pattern matches the name".
-    if (pattern.length >= 4 && name.includes(pattern)) return true;
+    if (p.length >= 4 && n.includes(p)) return true;
     if (/[^A-Za-z0-9_@ .-]/.test(pattern)) {
-      try {
-        if (new RegExp(`^(?:${pattern})$`).test(name)) return true;
-      } catch {
-        /* invalid regex: no match */
-      }
-      try {
-        return new RegExp(pattern.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).test(name);
-      } catch {
-        return false;
-      }
+      return test(`^(?:${pattern})$`) || test(pattern.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'));
     }
     return false;
   }
-  if (pattern === `${name}.service` || pattern.startsWith(`${name}.service`)) return true;
-  let idx = pattern.indexOf(name);
+  if (p === `${n}.service` || p.startsWith(`${n}.service`)) return true;
+  let idx = p.indexOf(n);
   while (idx >= 0) {
-    const before = idx > 0 ? pattern[idx - 1] : '';
-    const after = idx + name.length < pattern.length ? pattern[idx + name.length] : '';
+    const before = idx > 0 ? p[idx - 1] : '';
+    const after = idx + n.length < p.length ? p[idx + n.length] : '';
     if (!WORD_CHARS.test(before) && !WORD_CHARS.test(after)) return true;
-    idx = pattern.indexOf(name, idx + 1);
+    idx = p.indexOf(n, idx + 1);
   }
-  if (pattern.length >= 4 && name.includes(pattern)) return true;
+  if (p.length >= 4 && n.includes(p)) return true;
   if (/[^A-Za-z0-9_@ .-]/.test(pattern)) {
     // Metacharacters: pkill reads the pattern as an extended regex, and the escaped form is tested too.
-    try {
-      if (new RegExp(pattern).test(name)) return true;
-    } catch {
-      /* invalid regex: no match */
-    }
-    try {
-      if (new RegExp(pattern.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).test(name)) return true;
-    } catch {
-      return false;
-    }
-    return false;
+    return test(pattern) || test(pattern.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'));
   }
   return false;
 }
 
-const PKILL_FLAGS_WITH_VALUE = new Set(['-u', '-U', '-g', '-G', '-t', '-P', '-F', '-r', '-s', '--ns', '--parent', '--older', '--signal', '--sid', '--tty', '--uid']);
-const MASS_SELECTORS = new Set(['-u', '-U', '-g', '-G', '-t']); // without a pattern they select every process of a user or group
+const MASS_SELECTORS = ['euid', 'uid', 'pgroup', 'group', 'terminal', 'session', 'cgroup', 'user', 'process-group']; // without a pattern they select every process of a user, group, terminal or session
 function pkillKillall(argv, guarded) {
   const isPkill = argv[0] === 'pkill';
-  let fullLine = false;
-  let pattern = null;
-  const selectors = new Set();
-  const pidValues = [];
-  for (let i = 1; i < argv.length; i++) {
-    const t = argv[i];
-    if (t === '--') continue;
-    if (t.startsWith('-')) {
-      if (t === '-f' && isPkill) {
-        fullLine = true;
-        continue;
-      }
-      if (MASS_SELECTORS.has(t)) selectors.add(t);
-      if (t === '-P') {
-        if (argv[i + 1]) pidValues.push(argv[i + 1]);
-        i += 1;
-        continue;
-      }
-      if (PKILL_FLAGS_WITH_VALUE.has(t)) {
-        i += 1;
-        continue;
-      }
-      continue;
-    }
-    if (pattern === null) pattern = t; // the first positional argument
-  }
-  if (pattern !== null) pattern = pattern.replace(/\x01/g, ' ');
-  if (!pattern) {
-    if (selectors.size) return refusal('pkill/killall: user or group selector without a pattern (mass kill of every process it selects)');
-    for (const pidText of pidValues) {
+  const parsed = parseProcessOptions(argv, isPkill ? PKILL_OPTIONS : KILLALL_OPTIONS);
+  const fullLine = isPkill && parsed.flags.has('full');
+  const ignoreCase = parsed.flags.has('ignore-case');
+  const regexp = !isPkill && parsed.flags.has('regexp'); // killall -r: every name is a regular expression
+  // pkill takes one pattern; killall takes any number of names, and each of them is judged.
+  const patterns = (isPkill ? parsed.positionals.slice(0, 1) : parsed.positionals).map((p) => p.replace(/\x01/g, ' ')).filter((p) => p !== '');
+  if (!patterns.length) {
+    if (MASS_SELECTORS.some((name) => parsed.values.has(name) || parsed.flags.has(name))) return refusal('pkill/killall: user or group selector without a pattern (mass kill of every process it selects)');
+    for (const pidText of parsed.values.get('parent') || []) {
       const text = pidText.replace(/\x01/g, ' ').trim();
       if (text === '$$') continue; // children of the shell that runs the command, not the hook's ancestor
       if (/PPID/.test(text)) return refusal('pkill: selector -P on the parent pid ($PPID)');
@@ -571,30 +625,41 @@ function pkillKillall(argv, guarded) {
     }
     return null; // pkill -F file or pkill without anything: no pattern selects a target, so no signal goes out
   }
-  const matchesFull = (name) => patternMatchesName(pattern, name, true);
-  const matchesNarrow = (name) => patternMatchesName(pattern, name, false);
   const flagText = fullLine ? ' -f' : '';
-  for (const name of guarded.names) {
-    if (matchesFull(name)) {
-      return refusal(isPkill
-        ? `pkill${flagText}: pattern matches protected name (${name})`
-        : `killall: pattern matches protected name (${name})`);
+  for (const pattern of patterns) {
+    const matchesFull = (name) => (regexp ? regexMatches(pattern, name, ignoreCase) : patternMatchesName(pattern, name, true, ignoreCase));
+    const matchesNarrow = (name) => (regexp ? regexMatches(pattern, name, ignoreCase) : patternMatchesName(pattern, name, false, ignoreCase));
+    for (const name of guarded.names) {
+      if (matchesFull(name)) {
+        return refusal(isPkill
+          ? `pkill${flagText}: pattern matches protected name (${name})`
+          : `killall: pattern matches protected name (${name})`);
+      }
     }
-  }
-  for (const name of guarded.generic) {
-    if (matchesNarrow(name)) {
-      return refusal(isPkill
-        ? `pkill${flagText}: pattern matches generic protected name (${name})`
-        : `killall: pattern matches generic protected name (${name})`);
+    for (const name of guarded.generic) {
+      if (matchesNarrow(name)) {
+        return refusal(isPkill
+          ? `pkill${flagText}: pattern matches generic protected name (${name})`
+          : `killall: pattern matches generic protected name (${name})`);
+      }
     }
-  }
-  for (const comm of guarded.comms || []) {
-    if (matchesNarrow(comm)) return refusal(`pkill${flagText}: pattern matches comm of an agent shell ancestor (${comm})`);
-  }
-  for (const line of guarded.cmdline || []) {
-    if (matchesFull(line)) return refusal(`pkill${flagText}: pattern matches cmdline of an agent shell ancestor`);
+    for (const comm of guarded.comms || []) {
+      if (matchesNarrow(comm)) return refusal(`pkill${flagText}: pattern matches comm of an agent shell ancestor (${comm})`);
+    }
+    for (const line of guarded.cmdline || []) {
+      if (matchesFull(line)) return refusal(`pkill${flagText}: pattern matches cmdline of an agent shell ancestor`);
+    }
   }
   return null;
+}
+
+// killall -r: the name is an extended regular expression searched in the process name; a pattern that is not one matches nothing.
+function regexMatches(pattern, name, ignoreCase) {
+  try {
+    return new RegExp(pattern, ignoreCase ? 'i' : '').test(name);
+  } catch {
+    return false;
+  }
 }
 
 // --- kill: targets are pids, groups, %jobs, shell variables of the agent, $$/$PPID, globs and substitutions ---
@@ -634,35 +699,48 @@ function killTargetUncertain(target, guarded) {
   return null;
 }
 
+// kill reads its words in order: options (`-s SIG`, `-n NUM`, `--signal SIG`, `-SIG`, `-9`) until the signal is chosen, and every other
+// word is a target, including a negative number after the signal (`kill -TERM -4242` signals the process group 4242). Before a signal is
+// chosen a lone `-<digits>` is the signal itself.
 function killFamily(argv, guarded) {
   let signal = null;
+  let signalChosen = false;
   let afterDashes = false;
   const targets = [];
   for (let i = 1; i < argv.length; i++) {
     const t = argv[i];
-    if (!afterDashes && t === '--') {
+    if (afterDashes || !t.startsWith('-') || t === '-') {
+      targets.push(t);
+      continue;
+    }
+    if (t === '--') {
       afterDashes = true;
       continue;
     }
-    if (!afterDashes && t.startsWith('-')) {
-      if (t === '-l' || t === '-L' || t === '--list') return null; // listing signals sends nothing
-      if (t === '-s' || t === '--signal') {
-        i += 1;
-        continue;
-      }
-      if (t.startsWith('--signal=')) continue;
-      const numeric = /^-(\d+)$/.exec(t);
-      if (numeric) {
-        signal = Number(numeric[1]);
-        continue;
-      }
-      if (/^-(SIG)?[A-Z]+$/i.test(t)) {
-        signal = t.slice(1).toUpperCase().replace(/^SIG/, '');
-        continue;
-      }
+    if (t === '-l' || t === '-L' || t === '--list' || t === '--table' || t.startsWith('--list=')) return null; // listing signals sends nothing
+    if (t === '-s' || t === '-n' || t === '--signal') {
+      signal = signalOf(argv[i + 1]);
+      signalChosen = true;
+      i += 1;
       continue;
     }
-    targets.push(t);
+    if (t === '-q' || t === '--queue') {
+      i += 1; // the integer sent with the signal
+      continue;
+    }
+    if (t.startsWith('--signal=')) {
+      signal = signalOf(t.slice('--signal='.length));
+      signalChosen = true;
+      continue;
+    }
+    if (t.startsWith('--')) continue;
+    const word = t.slice(1);
+    if (!signalChosen && isSignalWord(word)) {
+      signal = signalOf(word);
+      signalChosen = true;
+      continue;
+    }
+    if (/^[0-9]+$/.test(word)) targets.push(t); // after the signal: a process group
   }
   if (signal === 0) return null; // signal 0 sends nothing (existence check)
   for (const target of targets) {
