@@ -7,31 +7,31 @@
  * @see https://github.com/Yeachan-Heo/oh-my-claudecode/issues/1162
  */
 
-const MASK = '****';
-
-// The regex rules, in the order they run. Each one keeps the head of its match (`visible` turns the captured
-// group into what stays readable) and replaces the rest of the match with ****.
-const TOKEN_RULES: ReadonlyArray<readonly [pattern: RegExp, visible: (head: string) => string]> = [
+// The regex rules, in the order they run, each with its replacement: the captured head stays visible and the
+// rest of the match becomes ****.
+const TOKEN_RULES: ReadonlyArray<readonly [pattern: RegExp, replacement: string]> = [
   // Slack tokens: xoxb-..., xapp-..., xoxp-..., xoxa-...
-  [/\b(xox[bpae]-)[A-Za-z0-9-]+/g, (head) => head],
-  [/\b(xapp-)[A-Za-z0-9-]+/g, (head) => head],
+  [/\b(xox[bpae]-)[A-Za-z0-9-]+/g, '$1****'],
+  [/\b(xapp-)[A-Za-z0-9-]+/g, '$1****'],
   // Telegram bot tokens in URL paths: /bot123456:ABC.../
-  [/\/bot(\d+):[A-Za-z0-9_-]+/g, (id) => `/bot${id}:`],
+  [/\/bot(\d+):[A-Za-z0-9_-]+/g, '/bot$1:****'],
   // Telegram bot tokens standalone: 123456789:AAHfoo-bar_Baz
-  [/\b(\d{8,12}):[A-Za-z0-9_-]{20,}\b/g, (id) => `${id}:`],
+  [/\b(\d{8,12}):[A-Za-z0-9_-]{20,}\b/g, '$1:****'],
   // Bearer/Bot authorization values in error strings
-  [/(Bearer\s+)\S+/gi, (head) => head],
-  [/(Bot\s+)\S+/gi, (head) => head],
+  [/(Bearer\s+)\S+/gi, '$1****'],
+  [/(Bot\s+)\S+/gi, '$1****'],
   // Anthropic API keys: sk-ant-api...
-  [/\b(sk-ant-api)[A-Za-z0-9_-]+/g, (head) => head],
+  [/\b(sk-ant-api)[A-Za-z0-9_-]+/g, '$1****'],
   // GitHub tokens: ghp_, gho_, ghs_, github_pat_
-  [/\b(ghp_)[A-Za-z0-9]+/g, (head) => head],
-  [/\b(gho_)[A-Za-z0-9]+/g, (head) => head],
-  [/\b(ghs_)[A-Za-z0-9]+/g, (head) => head],
-  [/\b(github_pat_)[A-Za-z0-9_]+/g, (head) => head],
+  [/\b(ghp_)[A-Za-z0-9]+/g, '$1****'],
+  [/\b(gho_)[A-Za-z0-9]+/g, '$1****'],
+  [/\b(ghs_)[A-Za-z0-9]+/g, '$1****'],
+  [/\b(github_pat_)[A-Za-z0-9_]+/g, '$1****'],
   // AWS access key IDs: AKIA...
-  [/\b(AKIA)[A-Z0-9]{16}\b/g, (head) => head],
+  [/\b(AKIA)[A-Z0-9]{16}\b/g, '$1****'],
 ];
+
+const MASK = '****';
 
 /** Whether the opt-in key-shape redaction is on: OMC_REDACT_KEY_SHAPES is exactly `1`. */
 export function keyShapesEnabled(): boolean {
@@ -61,19 +61,16 @@ type MaskRange = [start: number, end: number, mask: string];
  */
 export function redactTokens(input: string): string {
   if (!keyShapesEnabled()) {
-    return TOKEN_RULES.reduce(
-      (text, [pattern, visible]) => text.replace(pattern, (_match, head: string) => visible(head) + MASK),
-      input,
-    );
+    return TOKEN_RULES.reduce((text, [pattern, replacement]) => text.replace(pattern, replacement), input);
   }
   const ranges: MaskRange[] = [];
   // The rules run one after the other, each on what the one before left, as without the switch. The text
   // keeps its length (a masked part becomes `*` characters, which no rule treats differently from ****), so
   // the position of every match is a position in the original input.
   let text = input;
-  for (const [pattern, visible] of TOKEN_RULES) {
+  for (const [pattern, replacement] of TOKEN_RULES) {
     text = text.replace(pattern, (match: string, head: string, offset: number) => {
-      const kept = visible(head).length;
+      const kept = replacement.replace('$1', () => head).length - MASK.length; // what stays visible of the match
       ranges.push([offset + kept, offset + match.length, MASK]);
       return match.slice(0, kept) + '*'.repeat(match.length - kept);
     });
