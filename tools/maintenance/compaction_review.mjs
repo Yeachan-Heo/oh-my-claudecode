@@ -82,14 +82,14 @@ const records = jsonl(logFile, true)
   .map((o) => ({ ts: o.ts, t: Date.parse(o.ts), session: String(o.session_id || ''), agent: o.agent_id ? String(o.agent_id) : null, result: o.result ?? null, kept: o.kept_thinking, rev: typeof o.module_rev === 'string' ? o.module_rev.slice(0, 8) : null }));
 
 // ---------- transcript files ----------
-const projectDirs = readdirSync(projects).map((n) => join(projects, n)).filter((p) => { try { return statSync(p).isDirectory(); } catch { return false; } });
+const projectDirs = readdirSync(projects).sort().map((n) => join(projects, n)).filter((p) => { try { return statSync(p).isDirectory(); } catch { return false; } });
 function sessionFiles(session) {
   const found = { main: null, agents: new Map() };
   for (const p of projectDirs) {
     const m = join(p, `${session}.jsonl`);
     if (existsSync(m)) found.main = m;
     const sa = join(p, session, 'subagents');
-    if (existsSync(sa)) for (const n of readdirSync(sa)) if (n.startsWith('agent-') && n.endsWith('.jsonl')) found.agents.set(n.slice(6, -6), join(sa, n));
+    if (existsSync(sa)) for (const n of readdirSync(sa).sort()) if (n.startsWith('agent-') && n.endsWith('.jsonl')) found.agents.set(n.slice(6, -6), join(sa, n));
   }
   return found;
 }

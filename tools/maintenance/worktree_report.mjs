@@ -179,7 +179,7 @@ export function reportRepo(repo, { mainBranch = 'main', minAgeDays = 0, exclude 
         w.class = back === true ? 'ahead' : (back === false ? 'diverged' : '');
       }
       if (exists && !rec.bare) {
-        const status = git(rec.path, ['status', '--porcelain'], timeoutMs);
+        const status = git(rec.path, ['status', '--porcelain', '--untracked-files=normal'], timeoutMs);
         if (status.status !== 0) { w.dirty = true; w.dirty_reason = 'status_failed'; }
         else if (status.stdout.trim() !== '') { w.dirty = true; w.dirty_reason = 'changes'; }
       }

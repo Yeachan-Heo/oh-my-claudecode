@@ -216,6 +216,16 @@ describe('reportRepo on fixture repositories', () => {
     expect(w).toMatchObject({ decision: 'keep', reason: 'dirty', dirty: true, dirty_reason: 'status_failed' });
   });
 
+  it('counts an untracked file as dirty even when the repository hides untracked files in git status', () => {
+    const hiding = makeRepo('hides-untracked');
+    git(hiding, 'config', 'status.showUntrackedFiles', 'no');
+    const mergedWithFile = addWorktree(hiding, 'mergedfile');
+    writeFileSync(join(mergedWithFile, 'user-data.txt'), 'x\n');
+    expect(git(mergedWithFile, 'status', '--porcelain'), 'the setting hides the file from plain git status').toBe('');
+    const w = byPath(reportRepo(hiding, { cwd: dir }), mergedWithFile);
+    expect(w).toMatchObject({ decision: 'keep', reason: 'dirty', dirty: true, dirty_reason: 'changes', merged: true });
+  });
+
   it('uses the fully qualified main branch ref so a same-named tag does not confuse the ancestry check', () => {
     const w = byPath(report(), tagged);
     expect(w).toMatchObject({ merged: false, decision: 'keep', reason: 'unmerged', class: 'diverged' });
