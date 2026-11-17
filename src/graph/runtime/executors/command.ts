@@ -68,11 +68,9 @@ export function installGraphSignalCleanup(): AbortSignal | undefined {
     const hardDeadline = setTimeout(() => process.exit(exitCode), KILL_ESCALATION_MS * 2);
     for (const child of children) {
       terminateProcessTree(child, "SIGTERM");
-      const _escalation = setTimeout(() => terminateProcessTree(child, "SIGKILL"), KILL_ESCALATION_MS);
+      const escalation = setTimeout(() => terminateProcessTree(child, "SIGKILL"), KILL_ESCALATION_MS);
       child.once("close", () => {
-        // Don't cancel escalation: descendants of the child may still be alive
-        // even though the shell closed. The escalation timeout will fire
-        // independently to ensure SIGKILL reaches stubborn descendants.
+        clearTimeout(escalation);
         open -= 1;
         if (open === 0) {
           clearTimeout(hardDeadline);
