@@ -49,7 +49,10 @@ afterAll(async () => {
 });
 
 function makeContext() {
-  const root = mkdtempSync(join(tmpdir(), 'jev-agent-type-pointer-fork-'));
+  // A short prefix: the path of a fixture is part of the prompts below, and the state mask replaces a path component
+  // of 32 or more letters and digits (a token, to the mask) when it holds a digit, so the random suffix must not
+  // make the directory name that long.
+  const root = mkdtempSync(join(tmpdir(), 'jev-pointer-'));
   CLEANUPS.push(root);
   const cwd = join(root, 'project');
   const home = join(root, 'home');
@@ -505,9 +508,13 @@ describe('pointer expansion (OMC_JEV_POINTER_EXPAND, OMC_JEV_POINTER_EXPAND_DIRS
     mkdirSync(join(dir, 'dots-b'));
     const ordinary = briefFixture(context, 'ordinary.md', 'Brief reachable through "..".');
     const toSecret = dir + '/private/.ssh/../.ssh/brief.md';
-    const excluded = await taskSentFor(context, TASK + ' Details in ' + toSecret);
+    // The path goes on its own line: the state mask omits a line that names a secret path, and a prompt that is only
+    // such a line would not be sent at all (nothing would be left to judge).
+    const excluded = await taskSentFor(context, TASK + '\nDetails in ' + toSecret);
     expect(excluded.task).not.toContain('Secret brief.');
     expect(excluded.task).not.toContain('source file');
+    expect(excluded.row?.pointer_unexpanded).toBe('secret-path');
+    expect(excluded.row?.pointer_expanded).toBe(false);
     const viaDots = dir + '/dots-a/../dots-b/../ordinary.md';
     const prompt = TASK + ' Details in ' + viaDots;
     const expanded = await taskSentFor(context, prompt);
