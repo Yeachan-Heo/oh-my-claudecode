@@ -707,6 +707,18 @@ describe('maskJevState: random cases against the mask without a window', () => {
   });
 });
 
+describe('maskJevState: oversized keys should not cause performance issues', () => {
+  it('handles very long all-uppercase keys without quadratic backtracking', () => {
+    // A 50,000-character all-uppercase key should not cause 8+ second hangs
+    const longKey = 'A'.repeat(50000);
+    const start = Date.now();
+    const result = maskJevState({ [longKey]: 'value' });
+    const duration = Date.now() - start;
+    expect(duration).toBeLessThan(1000); // Should complete in under 1 second
+    expect(result).toEqual({ [longKey]: 'value' });
+  });
+});
+
 describe('SECRET_PATH', () => {
   // Everything the compaction expression catches is caught here too (this one adds patterns).
   function compactionPath() {

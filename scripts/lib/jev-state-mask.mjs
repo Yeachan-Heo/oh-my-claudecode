@@ -100,6 +100,9 @@ const MARKER = /\[(?:key|line) omitted: [^\]]*\]/g;
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 function normalizeKey(key) {
+  // Fail fast on oversized keys: acronym-splitting regexes can backtrack quadratically on
+  // long all-uppercase strings. Very long keys are unlikely to match secret patterns anyway.
+  if (key.length > 1000) return key.toLowerCase();
   return key.replace(MARKER, '').replace(/([A-Z]+)([A-Z][a-z])/g, '$1_$2').replace(/([a-z0-9])([A-Z])/g, '$1_$2').toLowerCase();
 }
 
