@@ -1,1 +1,0 @@
-{"version":3,"file":"types.d.ts","sourceRoot":"","sources":["../../../src/hooks/non-interactive-env/types.ts"],"names":[],"mappings":"AAAA,MAAM,WAAW,uBAAuB;IACtC,QAAQ,CAAC,EAAE,OAAO,CAAA;CACnB;AAED;;GAEG;AACH,MAAM,WAAW,SAAS;IACxB,IAAI,EAAE,MAAM,CAAA;IACZ,aAAa,CAAC,CAAC,OAAO,EAAE,MAAM,GAAG,OAAO,CAAC;QAAE,OAAO,EAAE,MAAM,CAAC;QAAC,OAAO,CAAC,EAAE,MAAM,CAAA;KAAE,CAAC,CAAA;CAChF"}
