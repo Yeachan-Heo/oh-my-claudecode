@@ -545,7 +545,37 @@ describe('doctor-conflicts: hook ownership classification', () => {
     expect(conflicts[0].isOmc).toBe(true);
   });
 
-  it('merges hooks from both profile and project settings (issue #669)', () => {
+  it('reports non-OMC hooks from project-local settings as conflicts', async () => {
+    const command = 'python ~/my-project/hooks/local-lint.py';
+    writeFileSync(join(TEST_PROJECT_CLAUDE_DIR, 'settings.local.json'), JSON.stringify({
+      hooks: { PreToolUse: [{ hooks: [{ type: 'command', command }] }] },
+    }));
+
+    const report = runConflictCheck();
+    expect(report.hookConflicts).toEqual([{ event: 'PreToolUse', command, isOmc: false }]);
+    expect(report.hasConflicts).toBe(true);
+
+    const consoleLogSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+    try {
+      await expect(doctorConflictsCommand({ json: true })).resolves.toBe(1);
+    } finally {
+      consoleLogSpy.mockRestore();
+    }
+  });
+
+  it('classifies OMC hooks from project-local settings without reporting a conflict', () => {
+    const command = 'node "$HOME/.claude/hooks/pre-tool-use.mjs"';
+    writeFileSync(join(TEST_PROJECT_CLAUDE_DIR, 'settings.local.json'), JSON.stringify({
+      hooks: { PreToolUse: [{ hooks: [{ type: 'command', command }] }] },
+    }));
+
+    const report = runConflictCheck();
+    expect(report.hookConflicts).toEqual([{ event: 'PreToolUse', command, isOmc: true }]);
+    expect(report.hasConflicts).toBe(false);
+  });
+
+  it('merges profile and project hooks even when project-local settings are malformed', () => {
+    writeFileSync(join(TEST_PROJECT_CLAUDE_DIR, 'settings.local.json'), '{invalid JSON');
     const profileSettings = {
       hooks: {
         SessionStart: [{
@@ -580,7 +610,7 @@ describe('doctor-conflicts: hook ownership classification', () => {
     expect(preTool?.isOmc).toBe(false);
   });
 
-  it('deduplicates identical hooks present in both levels (issue #669)', () => {
+  it('deduplicates identical hooks present in all three settings files', () => {
     const sharedHook = {
       hooks: {
         PreToolUse: [{
@@ -592,12 +622,13 @@ describe('doctor-conflicts: hook ownership classification', () => {
       },
     };
 
-    // Same hook in both profile and project settings
+    // Same hook in profile, project, and project-local settings
     writeFileSync(join(TEST_CLAUDE_DIR, 'settings.json'), JSON.stringify(sharedHook));
     writeFileSync(join(TEST_PROJECT_CLAUDE_DIR, 'settings.json'), JSON.stringify(sharedHook));
+    writeFileSync(join(TEST_PROJECT_CLAUDE_DIR, 'settings.local.json'), JSON.stringify(sharedHook));
     const conflicts = checkHookConflicts();
 
-    // Should appear only once, not twice
+    // Should appear only once
     expect(conflicts).toHaveLength(1);
     expect(conflicts[0].event).toBe('PreToolUse');
     expect(conflicts[0].isOmc).toBe(true);
