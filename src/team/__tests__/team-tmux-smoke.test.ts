@@ -32,6 +32,9 @@ const TSX_LOADER_URL = pathToFileURL(join(REPO_ROOT, 'node_modules', 'tsx', 'dis
 const SMOKE_CACHE = join(REPO_ROOT, 'node_modules', '.cache', 'omc-team-tmux-smoke');
 const RUNTIME_CLI_PATH = join(SMOKE_CACHE, 'bridge', 'runtime-cli.cjs');
 const SHUTDOWN_ACK_TIMEOUT_MS = 30_000;
+// Live lanes pick a fake-team-provider.mjs scenario; only the default one
+// meets every assertion below.
+const FAKE_PROVIDER_SCENARIO = process.env.OMC_FAKE_PROVIDER_SCENARIO;
 const execFileAsync = promisify(execFile);
 
 type TraceEntry = {
@@ -181,7 +184,7 @@ describe.skipIf(!SMOKE_ENABLED)('team tmux smoke: fake claude worker lifecycle',
       '#!/bin/sh',
       // Login shells may reorder PATH (macOS path_helper); pin the omc shim.
       `export PATH=${shellQuote(binDir)}:"$PATH"`,
-      `exec ${shellQuote(process.execPath)} --import ${shellQuote(TSX_LOADER_URL)} ${shellQuote(FAKE_PROVIDER)} --trace ${shellQuote(tracePath)} "$@"`,
+      `exec ${shellQuote(process.execPath)} --import ${shellQuote(TSX_LOADER_URL)} ${shellQuote(FAKE_PROVIDER)} --trace ${shellQuote(tracePath)}${FAKE_PROVIDER_SCENARIO ? ` --scenario ${shellQuote(FAKE_PROVIDER_SCENARIO)}` : ''} "$@"`,
     ]);
     await writeExecutable(join(binDir, 'omc'), [
       '#!/bin/sh',
