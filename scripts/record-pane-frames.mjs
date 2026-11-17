@@ -258,6 +258,8 @@ function extract(values) {
     cols: values.cols === undefined ? (meta.cols ?? null) : Number(values.cols),
     rows: values.rows === undefined ? (meta.rows ?? null) : Number(values.rows),
     launch_args: values.args === undefined ? (meta.launch_args ?? null) : parseJsonArray(values.args, '--args'),
+    // --hooks adds --settings to the launch but not to launch_args.
+    ...(meta.hooks ? { hooks: true } : {}),
     source,
     origin: values.origin ?? `${relative(REPO_ROOT, from)}#${index}`,
     ...(values.note ? { note: values.note } : {}),

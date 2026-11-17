@@ -26,6 +26,7 @@ interface ManifestEntry {
   launch_args: string[] | null;
   source: 'recorded' | 'migrated' | 'synthetic';
   origin: string;
+  hooks?: boolean;
   note?: string;
 }
 

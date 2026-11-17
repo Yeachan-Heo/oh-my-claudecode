@@ -269,6 +269,7 @@ describe.skipIf(!HAS_TMUX)('record-pane-frames record', () => {
     const { frame, entry } = extractLast();
     expect(frame).toContain('size:70x12');
     expect(entry).toMatchObject({ cols: 70, rows: 12 });
+    expect(entry).not.toHaveProperty('hooks');
   });
 
   it('captures scrolled-off lines only with --history', async () => {
@@ -340,6 +341,7 @@ describe.skipIf(!HAS_TMUX)('record-pane-frames record', () => {
     const events = readFileSync(join(out, 'hook-events.log'), 'utf8').trim().split('\n');
     expect(events.map(line => line.replace(/^\d+\.\d{3} /, ''))).toEqual(['SessionStart', 'Stop stop_hook_active']);
     expect(JSON.parse(readFileSync(join(out, 'meta.json'), 'utf8'))).toMatchObject({ hooks: true });
+    expect(extractLast().entry).toMatchObject({ hooks: true });
   });
 
   it.each([
