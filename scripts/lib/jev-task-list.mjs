@@ -10,7 +10,7 @@
 
 import { createHash, randomBytes } from 'node:crypto';
 import { homedir } from 'node:os';
-import { appendFileSync, closeSync, existsSync, linkSync, lstatSync, mkdirSync, openSync, readFileSync, readdirSync, renameSync, rmSync, statSync, unlinkSync, writeSync } from 'node:fs';
+import { appendFileSync, closeSync, existsSync, fstatSync, linkSync, lstatSync, mkdirSync, openSync, readFileSync, readdirSync, renameSync, rmSync, statSync, unlinkSync, writeSync } from 'node:fs';
 import { basename, join } from 'node:path';
 import { atomicWriteFileSync } from './atomic-write.mjs';
 import { rotateJevLog } from '../jev-resolve.mjs';
@@ -95,18 +95,46 @@ function storeEvent(event, path, env) {
 
 const readToken = (lockPath) => { try { return readFileSync(lockPath, 'utf8'); } catch { return null; } };
 
-// A lock older than staleMs is moved aside under a unique name (only one process wins the rename); when the moved file is not the
-// one that was seen as old (a new holder took the lock in between), it is linked back (link never overwrites) and the holder keeps it.
+// A file by what survives a replacement: device, inode, modification time (ns) and size. A recycled inode alone proves nothing.
+const statExact = (path) => { try { return lstatSync(path, { bigint: true }); } catch { return null; } };
+const sameFile = (a, b) => a.ino === b.ino && a.mtimeNs === b.mtimeNs && a.size === b.size && (process.platform === 'win32' || a.dev === b.dev);
+
+// Removes the lock file only when isTarget(movedPath) confirms that the file moved is the one meant. The lock is moved to a unique name
+// first (a rename has one winner, so one process judges and removes it); the moved file is judged, never the path, which another process
+// may have taken since it was read. A lock that is another holder's is linked back (link never overwrites) and its holder keeps it.
+function removeLockIf(lockPath, isTarget) {
+  const aside = `${lockPath}.${randomBytes(6).toString('hex')}.moved`;
+  try { renameSync(lockPath, aside); } catch { return; }
+  let meant = false;
+  try { meant = isTarget(aside); } catch { /* not judged to be the file meant */ }
+  if (!meant) { try { linkSync(aside, lockPath); } catch { /* a third process holds the lock now */ } }
+  try { unlinkSync(aside); } catch { /* already gone */ }
+}
+
+// A lock older than staleMs belongs to a dead holder. The age, the token and the identity of the file are read from one open handle,
+// so none of them comes from a later file that took the path. Right before the rename the path must still name that file; after it, the
+// moved file must be that file again (removeLockIf). A lock that a new holder took in between has another inode, modification time and
+// token, and is never removed.
 function breakStaleLock(lockPath, staleMs = LOCK_STALE_MS) {
   let seen;
+  let token;
+  let fd;
   try {
-    if (Date.now() - statSync(lockPath).mtimeMs <= staleMs) return;
-    seen = readFileSync(lockPath, 'utf8');
-  } catch { return; }
-  const aside = `${lockPath}.${randomBytes(6).toString('hex')}.stale`;
-  try { renameSync(lockPath, aside); } catch { return; }
-  if (readToken(aside) !== seen) { try { linkSync(aside, lockPath); } catch { /* a third process holds the lock now */ } }
-  try { unlinkSync(aside); } catch { /* already gone */ }
+    fd = openSync(lockPath, 'r');
+    seen = fstatSync(fd, { bigint: true });
+    if (!seen.isFile() || Date.now() - Number(seen.mtimeMs) <= staleMs) return;
+    token = readFileSync(fd, 'utf8');
+  } catch {
+    return; // gone or unreadable: nothing to break
+  } finally {
+    if (fd !== undefined) { try { closeSync(fd); } catch { /* closed */ } }
+  }
+  const named = statExact(lockPath);
+  if (!named || !sameFile(named, seen)) return;
+  removeLockIf(lockPath, (moved) => {
+    const now = statExact(moved);
+    return Boolean(now) && sameFile(now, seen) && readToken(moved) === token;
+  });
 }
 
 // Runs fn under <path>.lock (the lock file holds a random token; only its owner removes it). false when the lock was not taken in time
@@ -135,7 +163,7 @@ export function withFileLock(path, fn, env = process.env, staleMs = LOCK_STALE_M
   } catch {
     return false;
   } finally {
-    if (readToken(lockPath) === token) { try { unlinkSync(lockPath); } catch { /* moved aside as stale */ } }
+    removeLockIf(lockPath, (moved) => readToken(moved) === token); // a lock taken over as stale is another holder's now: it stays
   }
 }
 
@@ -478,7 +506,12 @@ function applyEvent(record, event, key, env, broken) {
   };
 }
 
-// Folds the pending events into the list file. { record, broken, names, changed }: names are the events folded (all pending ones).
+// The generation of the list file as a fold read it: the number of updates it holds (every fold that publishes raises it), or that it
+// is unreadable or missing. A fold publishes only while the file still has the generation it folded from.
+const generationOf = ({ record, broken }) => (broken ? 'broken' : record ? String(record.updates ?? 0) : 'none');
+
+// Folds the pending events into the list file. { record, broken, names, changed, done, generation }: names are the events folded (all
+// pending ones), generation is the one of the file the fold started from.
 function fold(path, key, env) {
   const dir = eventsDir(path);
   const events = pendingEvents(dir, null); // listed before the snapshot is read: a fold in between has its names in folded
@@ -494,7 +527,7 @@ function fold(path, key, env) {
     if (next !== record && next) { record = next; broken = false; changed = true; }
     names.push(name);
   }
-  return { record, broken, names, changed, done };
+  return { record, broken, names, changed, done, generation: generationOf(start) };
 }
 
 // Under the lock: fold, write the list with the folded names, then remove the folded event files (retention: the folder holds only the
@@ -515,10 +548,14 @@ export function syncList(sessionId, key, env = process.env) {
     if (!owned()) return; // the lock was taken over: the newer fold writes
     remove(waiting.filter((name) => f.done.has(name)));
     if (!f.names.length) return;
+    // What this fold decided rests on the list it read. It acts only while the lock is still its own and no other fold has published
+    // since (the generation of the file is the one it folded from): a lock lost in a window no check closes must not let an older fold
+    // overwrite the newer list, or delete events the newer list does not hold.
+    const current = () => owned() && generationOf(readRecord(path)) === f.generation;
     // events that change nothing (also on a broken list without a replacing call) leave the list file as it is
-    if (!f.changed) { remove(f.names); return; }
+    if (!f.changed) { if (current()) remove(f.names); return; }
     const next = { ...f.record, folded: [...f.done, ...f.names].slice(-Math.max(EVENTS_KEPT, f.names.length)) };
-    if (!owned() || !writeJson(path, next, env)) return;
+    if (!current() || !writeJson(path, next, env)) return;
     saved = next;
     remove(f.names);
   }, env, SYNC_STALE_MS);

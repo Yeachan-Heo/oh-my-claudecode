@@ -798,6 +798,16 @@ describe('task list: session retention sweep', () => {
     expect(existsSync(late)).toBe(false);
   });
 
+  it('a session a list call just used is never swept, however old its directory was: the lock of the fold renews the age the sweep reads', () => {
+    fresh();
+    const now = Date.now();
+    const sid = session();
+    const dir = sessionDir(sid, L.LISTS_MAX_AGE_MS + HOUR, now);
+    expect(L.recordListCall(postToolUse(sid, 'TodoWrite', { todos: [{ content: 'Back after a week', status: 'pending' }] }), envFor(), now)).not.toBeNull();
+    expect(existsSync(dir)).toBe(true);
+    expect(JSON.parse(readFileSync(join(dir, 'main.json'), 'utf8')).items[0].content).toBe('Back after a week');
+  });
+
   it('a list call triggers the sweep', () => {
     fresh();
     const now = Date.now();
