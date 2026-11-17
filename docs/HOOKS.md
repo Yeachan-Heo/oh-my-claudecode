@@ -596,7 +596,11 @@ stopomc
 
 The rate-limit-wait daemon can wait out a provider quota error shown on an `omc team` worker pane instead of leaving the task stopped. It is opt-in: with `OMC_PANEL_QUOTA_WAIT` unset or not `1`, the daemon reads nothing, sends no keys and writes no state.
 
-Once per daemon poll, a team pane (its session name starts with `OMC_PANEL_SESSION_PREFIX`) whose last 15 lines show an API error line with a code from `OMC_PANEL_QUOTA_WAIT_CODES` waits until the reset of the 5 h window plus `OMC_PANEL_QUOTA_WAIT_MARGIN_S` seconds. Then a fresh capture must still show the error, and the pane gets one `continue` keystroke. A code from `OMC_PANEL_QUOTA_END_CODES`, a reset beyond the window, an exhausted weekly limit, or more than `OMC_PANEL_QUOTA_WAIT_MAX` waits ends the task with class `quota`. The reset date goes to the daemon log and to `OMC_PANEL_QUOTA_JOURNAL` when that is set.
+Once per daemon poll, a team pane (its session name starts with `OMC_PANEL_SESSION_PREFIX`) whose last 15 lines show an API error line with a code from `OMC_PANEL_QUOTA_WAIT_CODES` waits until the reset of the 5 h window plus `OMC_PANEL_QUOTA_WAIT_MARGIN_S` seconds. Then a fresh capture must still show the error, and the pane gets one `continue` keystroke. A code from `OMC_PANEL_QUOTA_END_CODES`, a reset beyond the window, an exhausted weekly limit, or more than `OMC_PANEL_QUOTA_WAIT_MAX` waits ends the wait of that pane with class `quota`, and no key is sent. The reset date goes to the daemon log and to `OMC_PANEL_QUOTA_JOURNAL` when that is set.
+
+Before the keystroke the pass checks the pane again, on the fresh capture: the error must still be on the screen, the code must not have turned into one from `OMC_PANEL_QUOTA_END_CODES` (the latest error in the last 15 lines decides), an `OMC_PANEL_WRAPPER_OWNS_RE` line must not be on the screen, and the provider must still run in the pane (tmux reports the pane as dead or a shell in the foreground when it exited, and no key is typed into the shell). A capture or a provider state that cannot be read leaves the wait in place for the next poll. A tmux pane list that cannot be read leaves every saved wait in place and scans nothing. A pane is identified by its tmux pane id, so moving it to another window keeps its wait. Panes that already wait are handled before new detections in every pass, and a pass that runs out of time (`OMC_PANEL_QUOTA_PASS_LIMIT_S`) starts the next one at the pane after the one it stopped at.
+
+The daemon does not change the state of a team task: a task claimed by a pane whose wait ended stays as the team runtime has it, and the log and the journal are where the end is recorded.
 
 | Variable | Default | Meaning |
 |----------|---------|---------|
@@ -605,10 +609,10 @@ Once per daemon poll, a team pane (its session name starts with `OMC_PANEL_SESSI
 | `OMC_PANEL_QUOTA_END_CODES` | (unset) | Comma-separated error codes that never resume the pane. |
 | `OMC_PANEL_QUOTA_READ_URL` | (unset) | Endpoint of the provider reading. `https`, or `http` on a loopback host. Unset: no reading, so no wait. |
 | `OMC_PANEL_QUOTA_KEY_FILE` | (unset) | File holding the API key for the reading. The key is never read from the environment and never logged. |
-| `OMC_PANEL_QUOTA_WAIT_MAX` | `3` | Waits per pane before the task ends. |
+| `OMC_PANEL_QUOTA_WAIT_MAX` | `3` | Waits per pane before its wait ends with class `quota`. |
 | `OMC_PANEL_QUOTA_WAIT_MARGIN_S` | `120` | Seconds after the reset before the continue keystroke. |
 | `OMC_PANEL_QUOTA_PASS_LIMIT_S` | `30` | Time limit of one pass, in seconds. Zero, negative and non-numeric values fall back to `30`. |
-| `OMC_PANEL_QUOTA_WEEK_UNIT` | `6` | Unit code of the weekly limit in the provider reading. An exhausted limit with this unit never waits: the task ends with class `quota`. Negative, fractional and non-numeric values fall back to `6`. |
+| `OMC_PANEL_QUOTA_WEEK_UNIT` | `6` | Unit code of the weekly limit in the provider reading. An exhausted limit with this unit never waits: the wait ends with class `quota`. Negative, fractional and non-numeric values fall back to `6`. |
 | `OMC_PANEL_SESSION_PREFIX` | `omc-` | Only sessions with this prefix are inspected. |
 | `OMC_PANEL_WRAPPER_OWNS_RE` | (unset) | Panes whose last lines match this pattern are left alone, for a wrapper that runs its own wait. |
 | `OMC_PANEL_QUOTA_STATE` | `provider-quota-panels.json` in the daemon state directory | State file of the panels. |
@@ -1159,16 +1163,18 @@ node scripts/jev-repair-transcript.mjs ~/.claude/projects/<project>/<session>.js
 
 ## Graph Run Switches
 
-The graph runtime (`omc graph`) reads these variables. None of them changes behavior unless it is set. `omc graph status <run_id>` prints the derived state of one run as JSON and changes nothing.
+The graph runtime (`omc graph`) reads these variables. None of them changes behavior unless it is set. `omc graph status <run_id>` prints the derived state of one run as JSON and changes nothing. The state follows the rule of the runtime and of `omc graph gc`: `succeeded` when the scheduler success predicate holds, `in_progress` while an activation is ready or running (every activation counts), `failed` when none can run and the run did not succeed, for example after a failed step or a denied approval. A projection that lags the journal (a crash between the two writes), a gap in the journal numbers and a partly written file read as `unreadable` (exit 4); a rerun of the run replays the journal.
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `OMC_GRAPH_SIGNAL_CLEANUP` | (unset) | `1` makes `omc graph run` handle SIGINT and SIGTERM: active command nodes get SIGTERM (SIGKILL after 5 s), the run stops, and the process exits 130 (SIGINT) or 143 (SIGTERM). Any other value keeps the default behavior. |
-| `OMC_GRAPH_GC` | (unset) | `1` lets `omc graph gc` delete expired final runs and repair torn journals. Without it the command only reports what it would do. |
+| `OMC_GRAPH_SIGNAL_CLEANUP` | (unset) | `1` makes `omc graph run` handle SIGINT and SIGTERM: active command nodes get SIGTERM (SIGKILL to their process group after 5 s), the run stops, and the process exits 130 (SIGINT) or 143 (SIGTERM) once no process of those groups is left, or after 10 s at the latest. Any other value keeps the default behavior. |
+| `OMC_GRAPH_GC` | (unset) | `1` lets `omc graph gc` delete expired final runs and repair torn journals. Without it the command only reports what it would do. A run is changed only while `omc graph gc` owns it through the same single-writer fence as `omc graph run`; a run that is owned, or a stale lock that is younger than 30 s, is kept. |
 | `OMC_GRAPH_RETENTION_DAYS` | `7` | Days a final run is kept by `omc graph gc` (positive integer; `--retention-days` overrides it). |
 | `OMC_GRAPH_REPAIR_TORN_WAL` | (unset) | `1` makes `omc graph gc` repair a torn last journal line, as `--repair-torn-wal` does. Writing the repair still needs `OMC_GRAPH_GC=1`. |
 | `OMC_GRAPH_RUNS_ROOT` | `.omc/graph-runs` | Runs root of `omc graph gc` when `--runs-root` is not given. The directory must be named `.omc/graph-runs`. |
 
 **Interrupted runs.** A run stopped by a signal (with `OMC_GRAPH_SIGNAL_CLEANUP=1`) leaves its `owner.lock` behind, with the process id of the stopped run. The signal path exits without releasing the lock. A dead owner's lock is taken over only once it is 30 s old (the stale grace period of the single-writer fence), so a rerun with the same run id is refused with exit 19 ("another writer owns this run") until then. Wait 30 s before rerunning the same run id.
+
+**What `omc graph gc` does to a run.** It takes ownership of the run through the fence, moves the directory to `.deleted-<run id>-<time>-<random>` under the runs root with one rename (a resume of that run id from then on starts a new directory), and deletes the moved directory. A directory left behind by an interrupted removal is deleted by the next pass, unless its lock names a live process. On Linux every directory of the tree is opened without following links and its entries are removed relative to that descriptor, so a directory swapped for a symbolic link during the walk is refused; on other platforms the moved directory is walked by path with `lstat`. A torn journal is repaired under the same ownership, and only when the journal is a regular file with a single name.
 
 **Signals without the switch.** With `OMC_GRAPH_SIGNAL_CLEANUP` unset, the graph code installs no SIGINT or SIGTERM handler, and a running step is not stopped. The CLI still does not exit on SIGTERM: the LSP client manager (`src/tools/lsp/client.ts`) registers SIGTERM, SIGINT and SIGHUP listeners at startup that stop the language servers and do not exit, so SIGTERM ends neither the run nor its step. The SIGTERM behavior is covered by a test (`command-signal-process.test.ts`, switch off).
