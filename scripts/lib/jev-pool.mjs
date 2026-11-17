@@ -36,6 +36,7 @@ import { spawnSync } from 'node:child_process';
 import { join } from 'node:path';
 import { resolveJevLogMaxBytes, rotateJevLog } from '../jev-resolve.mjs';
 import { resolveOmcStateRoot } from './state-root.mjs';
+import { withStateFileLockAtPathSync } from './atomic-write.mjs';
 
 export const DEFAULT_SESSION_LIMIT = 0;
 export const DEFAULT_AGENT_LIMIT = 0;
@@ -126,21 +127,40 @@ export function readPoolState(dir, now = Date.now()) {
  * has already passed the pool check; this is the second, race-tolerant look. Returns
  * {ok: false, alive, occupied, limit} on a refusal and {ok: true, file, alive, occupied, limit}
  * on a reservation. Throws on a file error (the caller fails open).
+ * The check and reservation are atomic under a shared lock to prevent overallocation.
  */
 export function reserveAgent({ dir, sessionId, toolUseId, subagentType, now = Date.now(), env = process.env }) {
   const limit = agentLimit(env);
-  const alive = countAlive(dir, now);
-  const occupied = countOccupied(dir, now);
-  if (limit > 0 && occupied >= limit) return { ok: false, alive, occupied, limit }; // the pool filled meanwhile
-  mkdirSync(join(dir, RESERVATION_DIR), { recursive: true });
-  const file = `${now}-${Math.random().toString(36).slice(2, 10)}.json`;
-  const fd = openSync(join(dir, RESERVATION_DIR, file), 'wx'); // never overwrites a reservation of another call
-  try {
-    writeFileSync(fd, JSON.stringify({ ts: now, state: 'pending', session_id: sessionId || null, tool_use_id: toolUseId || null, subagent_type: subagentType || null }) + '\n', 'utf8');
-  } finally {
-    closeSync(fd);
-  }
-  return { ok: true, file, alive, occupied, limit };
+  let result = { ok: false, alive: 0, occupied: 0, limit };
+  
+  // Hold a shared lock across the check and reservation to prevent race conditions
+  withStateFileLockAtPathSync(
+    join(dir, '.pool.lock'),
+    () => {
+      const alive = countAlive(dir, now);
+      const occupied = alive + readPool(dir, now).pending.length;
+      if (limit > 0 && occupied >= limit) {
+        result = { ok: false, alive, occupied, limit };
+        return;
+      }
+      mkdirSync(join(dir, RESERVATION_DIR), { recursive: true });
+      const file = `${now}-${Math.random().toString(36).slice(2, 10)}.json`;
+      const fd = openSync(join(dir, RESERVATION_DIR, file), 'wx'); // never overwrites a reservation of another call
+      try {
+        writeFileSync(fd, JSON.stringify({ ts: now, state: 'pending', session_id: sessionId || null, tool_use_id: toolUseId || null, subagent_type: subagentType || null }) + '\n', 'utf8');
+      } finally {
+        closeSync(fd);
+      }
+      result = { ok: true, file, alive, occupied, limit };
+    },
+    true, // requireExclusive
+    50, // attempts
+    2000, // busyTimeoutMs
+    3000, // processProbeTimeoutMs
+    5000, // overallTimeoutMs - 5 seconds should be plenty for a quick check+write
+  );
+  
+  return result;
 }
 
 /** Commit the newest pending reservation of the session (SubagentStart): the agent started. False when there is none. */
