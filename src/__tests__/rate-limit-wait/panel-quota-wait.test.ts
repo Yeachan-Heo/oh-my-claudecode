@@ -672,6 +672,18 @@ describe('panel quota wait: state transitions and their effects', () => {
     expect(w.journal.filter((r) => r.result === 'end'), 'the new event was suppressed').toHaveLength(2);
   });
 
+  // Row: waiting x the error is gone from the screen at reset time -> resumed without a key
+  it('an error that is gone at reset time ends the wait without a key: resumed, nothing journaled as a resume', async () => {
+    const { w, state, disk } = await waitingAtResetWithDisk();
+    w.screens['%7'] = screen('the provider continued by itself');
+    await runPanelQuotaPass(state, w.deps, ON);
+    expect(w.sent).toHaveLength(0);
+    expect(state.panes[KEY_A].state).toBe('resumed');
+    expect(w.log.some((t) => /no quota error on screen at reset time/.test(t))).toBe(true);
+    expect(w.journal.some((r) => r.result === 'resume')).toBe(false);
+    expect(disk.events, 'an intent was saved for a key that is not sent').toEqual([]);
+  });
+
   // Row: resumed x a new error whose reading runs out of the pass time -> nothing is recorded, the next pass sees it again
   it('a new error that a pass ran out of time on is not taken for an old event by the next pass', async () => {
     const { w, state } = await waitingAtResetWithDisk();
