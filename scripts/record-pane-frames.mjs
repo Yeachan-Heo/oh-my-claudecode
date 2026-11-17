@@ -246,8 +246,6 @@ function extract(values) {
   const corpusRoot = values.corpus === undefined ? CORPUS_ROOT : resolve(values.corpus);
   const manifestPath = join(corpusRoot, 'manifest.json');
   const target = join(corpusRoot, file);
-  mkdirSync(dirname(target), { recursive: true });
-  writeFileSync(target, frame);
 
   const entry = {
     file,
@@ -263,6 +261,9 @@ function extract(values) {
   };
   const manifest = (existsSync(manifestPath) ? JSON.parse(readFileSync(manifestPath, 'utf8')) : [])
     .filter(existing => existing.file !== file);
+  // Both writes come after every check, so a refused extract leaves the corpus as it was.
+  mkdirSync(dirname(target), { recursive: true });
+  writeFileSync(target, frame);
   manifest.push(entry);
   manifest.sort((a, b) => a.file.localeCompare(b.file));
   writeFileSync(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`);

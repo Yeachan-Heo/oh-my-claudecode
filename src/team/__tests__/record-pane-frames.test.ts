@@ -1,5 +1,5 @@
 import { spawn, spawnSync } from 'node:child_process';
-import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -21,7 +21,9 @@ if (settingsAt > 0) {
     execSync(hooks[input.hook_event_name][0].hooks[0].command, { input: JSON.stringify(input) });
   }
 }
+if (process.argv.includes('--scroll')) for (let line = 1; line <= 30; line += 1) console.log('scrolled-' + line + '.');
 console.log('=== test results ===');
+console.log('size:' + process.stdout.columns + 'x' + process.stdout.rows);
 console.log('READY>');
 createInterface({ input: process.stdin }).on('line', (line) => {
   if (line === 'quit') process.exit(0);
@@ -139,6 +141,21 @@ describe('record-pane-frames extract', () => {
     expect(String(manifest[0]!.origin)).toMatch(/frames\.txt#1$/);
   });
 
+  it('leaves the fixture and the manifest alone when --args is refused', () => {
+    const from = join(root, 'frames.txt');
+    writeFileSync(from, '=== 1763340000.100\nfirst\n=== 1763340000.250\nsecond\n');
+    const filed = extract(from, '--frame', '0');
+    const manifestPath = join(filed.corpus, 'manifest.json');
+    const manifestBefore = readFileSync(manifestPath, 'utf8');
+
+    const refused = extract(from, '--frame', '1', '--args', 'not json');
+
+    expect(refused.code).toBe(2);
+    expect(refused.stderr).toContain('--args must be a JSON array of strings');
+    expect(readFileSync(join(filed.corpus, 'claude/1.0.0/idle.txt'), 'utf8')).toBe('first\n');
+    expect(readFileSync(manifestPath, 'utf8')).toBe(manifestBefore);
+  });
+
   it('refuses a frame index the recording does not have', () => {
     const from = join(root, 'frames.txt');
     writeFileSync(from, '=== 1763340000.100\nonly\n');
@@ -149,6 +166,17 @@ describe('record-pane-frames extract', () => {
     expect(existsSync(join(result.corpus, 'manifest.json'))).toBe(false);
   });
 });
+
+const CONTRACT_STUB_SOURCE = `#!/usr/bin/env node
+import { writeFileSync } from 'node:fs';
+if (process.argv[2] === '--version') {
+  console.log('stub 9.8.7');
+  process.exit(0);
+}
+writeFileSync(new URL('./argv.json', import.meta.url), JSON.stringify(process.argv.slice(2)));
+console.log('READY>');
+setInterval(() => {}, 1000);
+`;
 
 describe.skipIf(!HAS_TMUX)('record-pane-frames record', () => {
   let pidFile = '';
@@ -187,10 +215,7 @@ describe.skipIf(!HAS_TMUX)('record-pane-frames record', () => {
     expect(leftoverSockets()).toEqual([]);
     expect(processIsAlive(await providerPid())).toBe(false);
 
-    const corpus = join(root, 'corpus');
-    const extracted = spawnSync(process.execPath, [RECORDER, 'extract', '--from', join(out, 'frames.txt'), '--state', 'idle', '--corpus', corpus], { encoding: 'utf8' });
-    expect(extracted.status).toBe(0);
-    const frame = readFileSync(join(corpus, extracted.stdout.trim()), 'utf8');
+    const { frame } = extractLast();
     expect(frame).toContain('=== test results ===');
     expect(frame).toContain('READY>');
     expect(frame).toContain('got:hello');
@@ -214,6 +239,56 @@ describe.skipIf(!HAS_TMUX)('record-pane-frames record', () => {
     expect(run.stderr).toContain('stopped before step wait:never-shown');
     expect(leftoverSockets()).toEqual([]);
     expect(processIsAlive(await providerPid())).toBe(false);
+  });
+
+  function extractLast(): { frame: string; entry: Record<string, unknown> } {
+    const corpus = join(root, 'corpus');
+    const extracted = spawnSync(process.execPath, [RECORDER, 'extract', '--from', join(out, 'frames.txt'), '--state', 'idle', '--corpus', corpus], { encoding: 'utf8' });
+    expect(extracted.status).toBe(0);
+    const [entry] = JSON.parse(readFileSync(join(corpus, 'manifest.json'), 'utf8')) as Array<Record<string, unknown>>;
+    return { frame: readFileSync(join(corpus, extracted.stdout.trim()), 'utf8'), entry: entry! };
+  }
+
+  it('gives the pane the --cols and --rows it was asked for and files them with the frame', async () => {
+    const run = await record(['wait:READY>'], ['--cols', '70', '--rows', '12']);
+
+    expect(run.code).toBe(0);
+    const { frame, entry } = extractLast();
+    expect(frame).toContain('size:70x12');
+    expect(entry).toMatchObject({ cols: 70, rows: 12 });
+  });
+
+  it('captures scrolled-off lines only with --history', async () => {
+    const size = ['--cols', '70', '--rows', '12'];
+    expect((await record(['wait:READY>'], size, undefined, { args: ['--scroll'] })).code).toBe(0);
+    const visibleOnly = extractLast().frame;
+    expect(visibleOnly).toContain('scrolled-30.');
+    expect(visibleOnly).not.toContain('scrolled-1.');
+
+    expect((await record(['wait:READY>'], [...size, '--history', '80'], undefined, { args: ['--scroll'] })).code).toBe(0);
+    const withHistory = extractLast().frame;
+    expect(withHistory).toContain('scrolled-1.');
+    expect(withHistory).toContain('scrolled-30.');
+    expect(withHistory).toContain('READY>');
+  });
+
+  it('launches with the model contract args and records the binary version when --args is omitted', async () => {
+    const stub = join(root, 'stub-claude.mjs');
+    writeFileSync(stub, CONTRACT_STUB_SOURCE);
+    chmodSync(stub, 0o755);
+    out = join(root, 'out');
+
+    const run = await runRecorder([
+      'record', '--provider', 'claude', '--bin', stub, '--out', out, '--cwd', root,
+      '--interval-ms', '20', '--settle', '0.3', '--timeout', '20', '--step', 'wait:READY>',
+    ]);
+
+    expect(run.code).toBe(0);
+    const summary = JSON.parse(run.stdout) as { version: string; launch_args: string[] };
+    expect(summary.version).toBe('9.8.7');
+    expect(summary.launch_args.length).toBeGreaterThan(0);
+    expect(JSON.parse(readFileSync(join(root, 'argv.json'), 'utf8'))).toEqual(summary.launch_args);
+    expect(extractLast().entry).toMatchObject({ provider: 'claude', version: '9.8.7', launch_args: summary.launch_args });
   });
 
   it('starts a reused --out directory from empty logs', async () => {
