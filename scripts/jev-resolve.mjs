@@ -600,6 +600,9 @@ export async function resolveRequest(
   // that cannot be masked, a string that is a secret path whole, or a missing mask module sends nothing: fail
   // closed, the caller uses its twin.
   let maskedState;
+  // OMC_JEV_ROW_TELEMETRY: a row without an answer carries the telemetry fields empty (JEV_ROW_NO_ANSWER), as the
+  // other degraded rows of the resolver do.
+  const rowTelemetry = isJevRowTelemetryEnabled(env);
   try {
     const { maskJevState } = await import("./lib/jev-state-mask.mjs");
     maskedState = maskJevState(request.state, { maxChars: resolveExcerptChars(request.point, env) });
@@ -620,6 +623,7 @@ export async function resolveRequest(
         jev: null,
         answers: null,
         durationMs,
+        ...(rowTelemetry ? { usage: null, model: null, ...JEV_ROW_NO_ANSWER } : {}),
         ...(request.tool_use_id ? { tool_use_id: request.tool_use_id } : {}),
       },
       await logDirFor(env),
@@ -632,6 +636,7 @@ export async function resolveRequest(
       ...(logContext?.request_id ? { request_id: logContext.request_id } : {}),
       confidence: undefined,
       durationMs,
+      ...(rowTelemetry ? { jevModel: null } : {}),
     };
   }
   // Only the state carries user text. Question definitions are static text
@@ -644,12 +649,14 @@ export async function resolveRequest(
   };
   // OMC_JEV_ROW_TELEMETRY: lengths of the state before and after the cut, and
   // the pointer telemetry the caller sends in request.pointer as
-  // {expanded, unexpanded} (false and null when it sends none).
-  const rowTelemetry = isJevRowTelemetryEnabled(env);
+  // {expanded, unexpanded} (false and null when it sends none). The lengths are
+  // those of the state as the point built it and of its excerpt cut, so what the
+  // secret mask replaces is not counted as a cut (a masked token is shorter or
+  // longer than its mask, and that says nothing about what the cut removed).
   const telemetryInput = rowTelemetry
     ? {
         sourceChars: stateCharsOf(request.state),
-        sentChars: stateCharsOf(bound.state),
+        sentChars: stateCharsOf(boundExcerpts(request.state, resolveExcerptChars(request.point, env))),
         pointer: {
           expanded: request.pointer?.expanded === true,
           unexpanded: typeof request.pointer?.unexpanded === "string" && request.pointer.unexpanded !== "" ? request.pointer.unexpanded : null,
