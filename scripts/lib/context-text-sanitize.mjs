@@ -12,7 +12,8 @@
 // replaced by ONE space and never split. Multi-line text keeps line feed and tab.
 //
 // Structure markers: the closing tags of the envelopes that hooks write around their text (`</notepad-context>`,
-// `</session-restore>`, `</project-memory-context>`) and both tags of `<system-reminder>` lose their "<" (it becomes "<\"),
+// `</session-restore>`, `</project-memory-context>`, `</mnemosyne>`, `</skill-metadata>`) and both tags of `<system-reminder>`
+// lose their "<" (it becomes "<\"),
 // so cleaned text cannot close an envelope early. This goes beyond removing invisible characters: it also keeps the
 // content of an envelope from ending it.
 const CHARACTER_RANGES = [
@@ -29,7 +30,7 @@ const REMOVED_CHARACTERS = new RegExp(
 
 // The pattern finds only the start of a marker. A marker counts when some ">" follows it, which the replacer checks against
 // the last ">" of the text, so the cost stays linear for a long text without any ">".
-const STRUCTURE_MARKER = /<(?=\/(?:notepad-context|session-restore|project-memory-context)\b|\/?system-reminder\b)/gi;
+const STRUCTURE_MARKER = /<(?=\/(?:notepad-context|session-restore|project-memory-context|mnemosyne|skill-metadata)\b|\/?system-reminder\b)/gi;
 
 const ENVELOPE_END = '[end of untrusted data]';
 const ENVELOPE_END_ESCAPED = '[end of untrusted data, escaped]';
