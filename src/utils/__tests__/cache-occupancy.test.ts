@@ -440,4 +440,69 @@ describe('cache occupancy registry', () => {
       }
     });
   });
+
+  it('protects occupied plugin roots from relinking when an active sibling exists', async () => {
+    // Scenario: session is using old version 5.8.0 (occupied), user pins new version 5.9.0,
+    // purge runs and tries to relink 5.8.0 to 5.9.0 — should skip instead.
+    const cacheDir = join(dir, 'plugins', 'cache', 'omc', 'oh-my-claudecode');
+    const oldVersion = join(cacheDir, '5.8.0');
+    const newVersion = join(cacheDir, '5.9.0');
+    mkdirSync(oldVersion, { recursive: true });
+    mkdirSync(newVersion, { recursive: true });
+    writeFileSync(join(oldVersion, 'package.json'), JSON.stringify({ version: '5.8.0' }));
+    writeFileSync(join(newVersion, 'package.json'), JSON.stringify({ version: '5.9.0' }));
+
+    // Mark 5.8.0 as occupied (session is using it)
+    expect(await publishCacheOccupancy(oldVersion, dir)).toBe(true);
+
+    // Set up installed_plugins.json with 5.9.0 pinned (the active version)
+    const installed = join(dir, 'plugins', 'installed_plugins.json');
+    mkdirSync(join(dir, 'plugins'), { recursive: true });
+    writeFileSync(installed, JSON.stringify({
+      version: 2,
+      plugins: {
+        'oh-my-claudecode@omc': [{ scope: 'user', version: '5.9.0' }],
+      },
+    }));
+
+    vi.stubEnv('CLAUDE_CONFIG_DIR', dir);
+    const result = purgeStalePluginCacheVersions({ skipGracePeriod: true });
+
+    // Should skip the occupied version instead of relinking it
+    expect(result.skipped).toBeGreaterThanOrEqual(1);
+    expect(result.skippedPaths).toContain(oldVersion);
+    expect(result.symlinked).toBe(0);
+    expect(existsSync(join(oldVersion, 'package.json'))).toBe(true);
+  });
+
+  it('protects cache paths referenced via install-path-only entries', async () => {
+    // Scenario: an entry has only installPath (no version field) pointing to a cache directory.
+    // The purge should recognize this as an active path and not remove it.
+    const cacheDir = join(dir, 'plugins', 'cache', 'omc', 'oh-my-claudecode');
+    const protectedVersion = join(cacheDir, '5.9.0');
+    const staleVersion = join(cacheDir, '5.8.0');
+    mkdirSync(protectedVersion, { recursive: true });
+    mkdirSync(staleVersion, { recursive: true });
+    writeFileSync(join(protectedVersion, 'package.json'), JSON.stringify({ version: '5.9.0' }));
+    writeFileSync(join(staleVersion, 'package.json'), JSON.stringify({ version: '5.8.0' }));
+
+    // Set up installed_plugins.json with an install-path-only entry (no version field)
+    const installed = join(dir, 'plugins', 'installed_plugins.json');
+    mkdirSync(join(dir, 'plugins'), { recursive: true });
+    writeFileSync(installed, JSON.stringify({
+      version: 2,
+      plugins: {
+        'oh-my-claudecode@omc': [{ scope: 'user', installPath: protectedVersion }],
+      },
+    }));
+
+    vi.stubEnv('CLAUDE_CONFIG_DIR', dir);
+    const result = purgeStalePluginCacheVersions({ skipGracePeriod: true });
+
+    // The protected version should be recognized as active despite having no version field
+    expect(result.removed).toBe(0);
+    expect(result.skipped).toBeGreaterThanOrEqual(0);
+    expect(existsSync(join(protectedVersion, 'package.json'))).toBe(true);
+    expect(existsSync(join(staleVersion, 'package.json'))).toBe(true);
+  });
 });

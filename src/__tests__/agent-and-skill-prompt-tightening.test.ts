@@ -85,6 +85,23 @@ describe('reviewer and architect agent prompts', () => {
     }
   });
 
+  test('architect guards record-review-blockers against non-Ultragoal contexts', () => {
+    const text = read('agents/architect.md');
+    // Both status lines must include the Ultragoal final-review context condition
+    for (const status of ['WATCH', 'BLOCK']) {
+      const statusSection = text.match(new RegExp(`- ${status}:.*(?=\n    - |\n  <|\n</)`));
+      expect(statusSection).toBeDefined();
+      expect(statusSection![0]).toContain('If in Ultragoal final-review context');
+      expect(statusSection![0]).toContain('sole unresolved story with /goal active');
+    }
+  });
+
+  test('architect clarifies that ordinary reviews track concerns without invoking record-review-blockers', () => {
+    const text = read('agents/architect.md');
+    // Verify that the agent prompt explicitly handles non-Ultragoal contexts
+    expect(text).toMatch(/For ordinary\s+\/ralph\s+and\s+\/ralplan\s+reviews.*track\s+concerns.*without\s+attempting\s+to\s+invoke\s+record-review-blockers/i);
+  });
+
   test('code-reviewer has the root-cause guard that treats error-masking fallbacks as blockers', () => {
     const text = read('agents/code-reviewer.md');
     expect(text).toMatch(/root-cause guard/i);
