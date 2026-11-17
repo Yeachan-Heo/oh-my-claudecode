@@ -305,6 +305,23 @@ describe.skipIf(!HAS_TMUX)('record-pane-frames record', () => {
     expect(extractLast().entry).toMatchObject({ provider: 'claude', version: '9.8.7', launch_args: summary.launch_args });
   });
 
+  it('passes --model through the model contract to the provider and the manifest entry', async () => {
+    const stub = join(root, 'stub-codex.mjs');
+    writeFileSync(stub, CONTRACT_STUB_SOURCE);
+    chmodSync(stub, 0o755);
+    out = join(root, 'out');
+
+    const run = await runRecorder([
+      'record', '--provider', 'codex', '--model', 'stub-model-1', '--bin', stub, '--out', out, '--cwd', root,
+      '--interval-ms', '20', '--settle', '0.3', '--timeout', '20', '--step', 'wait:READY>',
+    ]);
+
+    expect(run.code).toBe(0);
+    const argv = JSON.parse(readFileSync(join(root, 'argv.json'), 'utf8')) as string[];
+    expect(argv[argv.indexOf('--model') + 1]).toBe('stub-model-1');
+    expect(extractLast().entry).toMatchObject({ provider: 'codex', launch_args: argv });
+  });
+
   it('launches a relative --bin from the directory the recorder was started in', async () => {
     writeFileSync(join(root, 'stub-claude.mjs'), CONTRACT_STUB_SOURCE);
     chmodSync(join(root, 'stub-claude.mjs'), 0o755);
