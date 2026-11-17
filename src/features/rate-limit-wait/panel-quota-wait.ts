@@ -28,6 +28,12 @@
  * end code, a wait limit, a weekly limit) needs no key and is decided on the screen first: it is not held back by
  * a slow reading, which only supplies the reset date for the log.
  *
+ * One pass has one time limit (OMC_PANEL_QUOTA_PASS_LIMIT_S), shared by every pane. Panes that wait come first, then the
+ * others. A wait whose reset has not come needs no capture and no time, a pane resumed a moment ago is not captured while
+ * the old error text can be on its screen, and a due wait is captured once, right before its key. A pass that runs out of
+ * time saves a cursor: the next pass starts after the last pane this one worked on, so a pane that used up the time goes
+ * to the end of the next pass and a pane that was not reached goes to its start, for waiting and other panes alike.
+ *
  * Tmux, the clock and the provider reading are injected, so the decision logic runs in tests without
  * tmux or a live account. The API key is read from the file named by OMC_PANEL_QUOTA_KEY_FILE and is never
  * written to the state file, the journal or the log.
@@ -108,7 +114,7 @@ export interface PanelEntry {
 
 export interface PanelState {
   panes: Record<string, PanelEntry>;
-  /** Key of the pane the next pass scans first among the panes without a wait, after a pass that ran out of time. */
+  /** Key of the pane the next pass starts at, after a pass that ran out of time (see runPanelQuotaPass). */
   cursor?: string;
 }
 
@@ -350,8 +356,10 @@ export async function runPanelQuotaPass(
   const max = waitsLimit(env);
   const codes = quotaCodes(env);
   const pattern = wrapperPattern(env);
-  // Time limit of the whole pass, on a monotonic clock. Checked before every tmux call and every reading;
-  // after the limit no keys are sent in this pass.
+  // Time limit of the whole pass, on a monotonic clock: the only budget of a pass, shared by every pane. It is checked
+  // before each pane that needs a tmux call, before every call after the first of a pane, and before every reading
+  // (a reading is also cut off when the time runs out). A tmux call itself is not cut short, so a pass can end later
+  // than the limit by one call (a capture waits up to 5 s). After the limit no key is sent in this pass.
   const monotonic = deps.monotonic ?? (() => performance.now());
   const limitMs = passLimitMs(env);
   const deadline = monotonic() + limitMs;
@@ -379,20 +387,21 @@ export async function runPanelQuotaPass(
   for (const key of Object.keys(state.panes)) {
     if (!live.has(key)) delete state.panes[key];
   }
-  // Panes that already wait come first: their due resumes need no reading and must not queue behind a new
-  // detection that runs out of time. The other panes start where the last pass that ran out of time stopped.
+  // One sequence for the whole pass: panes that already wait come first (their due resumes need no reading and must
+  // not queue behind a new detection that runs out of time), then the others, each group in tmux order. A pass that ran
+  // out of time leaves the cursor at the pane where the next pass starts, so the order rotates over waiting and other
+  // panes alike and no pane is always the first to be tried or always the one that is never reached.
   const waiting = panes.filter((pane) => state.panes[paneKey(pane)]?.state === 'waiting_quota');
   const others = panes.filter((pane) => state.panes[paneKey(pane)]?.state !== 'waiting_quota');
-  const resumeFrom = others.findIndex((pane) => paneKey(pane) === state.cursor);
-  const ordered = [...waiting, ...(resumeFrom > 0 ? [...others.slice(resumeFrom), ...others.slice(0, resumeFrom)] : others)];
-  const previousCursor = state.cursor;
+  const sequence = [...waiting, ...others];
+  const startAt = sequence.findIndex((pane) => paneKey(pane) === state.cursor);
+  const ordered = startAt > 0 ? [...sequence.slice(startAt), ...sequence.slice(0, startAt)] : sequence;
   delete state.cursor;
   // Where the time limit ended the pass: the index in `ordered`, and whether that pane was already worked on.
   let limitedAt: { index: number; attempted: boolean } | null = null;
 
   for (let index = 0; index < ordered.length; index++) {
     const pane = ordered[index];
-    if (timeLeft() <= 0) { stopForTimeLimit(); limitedAt = { index, attempted: false }; break; }
     const key = paneKey(pane);
     let entry = state.panes[key];
     if (entry) {
@@ -401,33 +410,21 @@ export async function runPanelQuotaPass(
       entry.windowIndex = pane.windowIndex;
       entry.paneIndex = pane.paneIndex;
     }
-    const content = deps.capture(pane, TAIL_LINES);
-    if (content === null || content === undefined) continue;
-    if (pattern && wrapperOwnsPane(content, pattern)) {
-      deps.log(`pane ${key}: an external wrapper owns this error; the daemon sends no keys`);
-      continue;
-    }
-    const sig = screenSignature(content);
-
-    if (entry?.unconfirmed) {
-      // The key may sit typed in the pane's input: nothing is sent while the error shows, however the tail changed.
-      if (detectQuotaError(content, codes)) continue;
-      delete entry.unconfirmed;
-      entry.sig = null;
-      deps.log(`pane ${key}: the quota error is gone from the screen; the unconfirmed resume is closed`);
-      continue;
-    }
+    // A pane that needs nothing from this pass costs no time and no tmux call: a wait whose reset has not come, and a
+    // pane resumed a moment ago whose old error text is still on the screen.
+    if (entry?.state === 'waiting_quota' && entry.untilMs !== undefined && now < entry.untilMs) continue;
+    if (entry?.state === 'resumed' && !entry.unconfirmed && entry.resumedAt !== undefined && now - entry.resumedAt < settleMs) continue;
+    if (timeLeft() <= 0) { stopForTimeLimit(); limitedAt = { index, attempted: false }; break; }
 
     if (entry && entry.state === 'waiting_quota') {
-      if (entry.untilMs !== undefined && now < entry.untilMs) continue;
-      // Strict capture right before the keys: the quota error must still be on screen for this pane identity.
+      // The reset has come. One capture, taken right before the key, decides everything the key depends on: the quota
+      // error must still be on the screen of this pane identity.
       const fresh = deps.capture(pane, TAIL_LINES);
       // An unreadable capture is not a reason to close the wait: retry on the next pass.
       if (fresh === null || fresh === undefined) {
-        deps.log(`pane ${key}: fresh capture failed at reset time; retry on next pass`);
+        deps.log(`pane ${key}: capture failed at reset time; retry on next pass`);
         continue;
       }
-      // Everything the first capture was checked for is checked again on the screen the keys would meet.
       if (pattern && wrapperOwnsPane(fresh, pattern)) {
         deps.log(`pane ${key}: an external wrapper owns this error at reset time; the daemon sends no keys`);
         continue;
@@ -445,6 +442,9 @@ export async function runPanelQuotaPass(
         endQuota(entry, deps, now, `quota error ${freshErr.code} is non-resumable: no resume`, entry.resetMs ?? null);
         continue;
       }
+      // A capture that used up the time leaves nothing for the provider check: this wait is tried again later, after the
+      // panes that were not reached.
+      if (timeLeft() <= 0) { stopForTimeLimit(); limitedAt = { index, attempted: true }; break; }
       // After the provider exits the pane shows the user's shell, and the old error is still in its scrollback.
       const running = deps.providerRunning(pane);
       if (running === null) {
@@ -494,10 +494,26 @@ export async function runPanelQuotaPass(
       continue;
     }
 
-    if (entry && entry.state === 'resumed') {
-      // Settle time after a resume, and an unchanged screen, mean the old error text is still visible: not a new error.
-      if ((entry.resumedAt !== undefined && now - entry.resumedAt < settleMs) || sig === entry.sig) continue;
+    const content = deps.capture(pane, TAIL_LINES);
+    if (content === null || content === undefined) continue;
+    if (pattern && wrapperOwnsPane(content, pattern)) {
+      deps.log(`pane ${key}: an external wrapper owns this error; the daemon sends no keys`);
+      continue;
     }
+    const sig = screenSignature(content);
+
+    if (entry?.unconfirmed) {
+      // The key may sit typed in the pane's input: nothing is sent while the error shows, however the tail changed.
+      if (detectQuotaError(content, codes)) continue;
+      delete entry.unconfirmed;
+      entry.sig = null;
+      deps.log(`pane ${key}: the quota error is gone from the screen; the unconfirmed resume is closed`);
+      continue;
+    }
+
+    // An unchanged screen after a resume means the old error text is still visible: not a new error. (A pane inside
+    // its settle time was passed over before the capture.)
+    if (entry && entry.state === 'resumed' && sig === entry.sig) continue;
 
     const err = detectQuotaError(content, codes);
     if (!err) {
@@ -555,14 +571,10 @@ export async function runPanelQuotaPass(
     }
   }
   if (limitedAt !== null) {
-    // Next pass: a limit inside the waiting panes changes nothing for the others; a limit among the others moves
-    // the start to the next pane, so one pane that always uses up the time cannot hold back the rest.
-    if (limitedAt.index < waiting.length) {
-      if (previousCursor !== undefined) state.cursor = previousCursor;
-    } else {
-      const next = ordered[limitedAt.index + (limitedAt.attempted ? 1 : 0)];
-      if (next !== undefined) state.cursor = paneKey(next);
-    }
+    // The next pass starts after the last pane this one worked on, wrapping to the first: a pane that used up the time
+    // goes to the end of the next pass, and a pane that was not reached goes to its start.
+    const reached = limitedAt.index + (limitedAt.attempted ? 1 : 0);
+    state.cursor = paneKey(ordered[reached % ordered.length]);
   }
   return state;
 }

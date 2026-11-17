@@ -316,15 +316,15 @@ describe('panel quota wait: decision logic', () => {
     expect(w.log.some((t) => /no quota error on screen/.test(t))).toBe(false);
   });
 
-  it('a fresh capture that fails at reset time keeps the wait retryable: no keys, still waiting, resumed on the next readable pass', async () => {
+  it('a capture that fails at reset time keeps the wait retryable: no keys, still waiting, resumed on the next readable pass', async () => {
     const { w, state } = await waitingAtReset();
-    let calls = 0;
     const capture = w.deps.capture;
-    // The first capture of the pass reads, the fresh one before the keys fails.
-    w.deps.capture = (pane, lines) => (++calls === 2 ? null : capture(pane, lines));
+    // A due wait is captured once, right before the key: that capture fails.
+    w.deps.capture = () => null;
     await runPanelQuotaPass(state, w.deps, ON);
     expect(w.sent).toHaveLength(0);
     expect(state.panes[KEY_A].state).toBe('waiting_quota');
+    expect(w.log.some((t) => /capture failed at reset time/.test(t))).toBe(true);
 
     w.deps.capture = capture;
     await runPanelQuotaPass(state, w.deps, ON);
@@ -353,14 +353,14 @@ describe('panel quota wait: decision logic', () => {
     expect(w.sent).toHaveLength(0);
   });
 
-  it('a wrapper line that appears between the first capture and the reset-time capture stops the keys', async () => {
+  it('a wrapper line on the screen at reset time stops the keys, and a due wait is captured exactly once', async () => {
     const env = { ...ON, OMC_PANEL_WRAPPER_OWNS_RE: 'external wrapper: quota wait' };
     const { w, state } = await waitingAtReset(env);
-    let calls = 0;
-    const plain = screen(ERR_1308);
-    // The first capture of the pass is plain, the fresh one shows the wrapper's line next to the error.
-    w.deps.capture = () => (++calls === 1 ? plain : [ERR_1308, WRAPPER_LINE].join('\n'));
+    let captures = 0;
+    // The wrapper's line appears next to the error after the wait began.
+    w.deps.capture = () => { captures++; return [ERR_1308, WRAPPER_LINE].join('\n'); };
     await runPanelQuotaPass(state, w.deps, env);
+    expect(captures, 'one capture, right before the key').toBe(1);
     expect(w.sent).toHaveLength(0);
     expect(state.panes[KEY_A].state).toBe('waiting_quota');
     expect(w.log.some((t) => /wrapper owns this error at reset time/.test(t))).toBe(true);
