@@ -493,7 +493,7 @@ describe.runIf(process.platform !== "win32")("omc graph status", () => {
     expect(gone.json?.state).toBe("missing");
   });
 
-  it("a run that is initialised and has committed nothing is in_progress; one with a corrupt descriptor is unreadable", async () => {
+  it("a run that is initialized and has committed nothing is in_progress; one with a corrupt descriptor is unreadable", async () => {
     const runs = makeRunsRoot();
     writeRealRun(runs, "st-initial", "initial");
     const initial = await statusCli(["st-initial", "--runs-root", runs]);

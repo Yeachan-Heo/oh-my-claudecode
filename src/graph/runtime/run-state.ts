@@ -19,7 +19,7 @@
  *
  * The snapshot never decides a verdict. It is read only for a descriptor with an empty journal, where the replay has
  * nothing to fold: the initial snapshot (`saved_at_seq` -1, bound to the descriptor, run and revision) is the evidence
- * that the run was initialised and has not committed a record yet. A lost, restored or corrupt snapshot beside a
+ * that the run was initialized and has not committed a record yet. A lost, restored or corrupt snapshot beside a
  * journal that replays does not change the verdict.
  */
 
@@ -108,7 +108,7 @@ export function classifyRunFiles(runId: string, files: RunFileTexts, epochCeilin
     throw error;
   }
   if (records.length === 0) {
-    // The runtime refuses a persisted descriptor without committed history; only a run that was just initialised, and
+    // The runtime refuses a persisted descriptor without committed history; only a run that was just initialized, and
     // has the initial snapshot to show for it, is a run that has not committed anything yet.
     const problem = initialSnapshotProblem(files.projection, descriptor);
     if (problem !== null) return unreadable("no-history", `descriptor.json has no committed journal history and no initial snapshot (${problem})`);
