@@ -2261,7 +2261,7 @@ export async function resolveWindow($, cfg, detail, usage) {
   const model = finitePositive(usage?.context?.window) ?? finitePositive(detail?.context?.window);
   let window = windowInt(cfg.autoCompactWindow);
   let source = window ? 'env' : undefined;
-  if (!window) { window = await settingsWindow($, cfg); if (window) source = 'settings'; }
+  if (!window) { window = await hostValue($, () => settingsWindow($, cfg)); if (window) source = 'settings'; }
   if (window && model) window = Math.min(window, model);
   if (!window && model) { window = model; source = 'model'; }
   if (!window) return undefined;
@@ -2369,7 +2369,7 @@ async function tokenAccounting($, e, cfg, messages, api, candidates) {
   let removed = 0;
   for (const c of candidates) {
     const t = itemTokens(c, cfg.rates);
-    removed += t.full - (c.keep === 'short' ? t.short : c.keep === 'trace' ? t.trace : t.full);
+    removed += t.full - (c.keep === 'drop' ? 0 : c.keep === 'short' ? t.short : c.keep === 'trace' ? t.trace : t.full);
   }
   const target = Math.floor(cfg.target * tokensBefore);
   const ceiling = tokenCeiling(cfg.maxWindowTokens, cfg.rates);
@@ -2860,7 +2860,7 @@ function envelopeChars(messages, queued, candidates) {
   let envelopes = 0;
   for (const [i, blocks] of queued) {
     const m = messages[i];
-    if (!((m.toolResults || []).length || noteRows.has(i)) || !(m.toolResults.every(textOnlyResult) || changing.has(i))) continue;
+    if (!((m.toolResults || []).length || noteRows.has(i)) || !((m.toolResults || []).every(textOnlyResult) || changing.has(i))) continue;
     const c = carriedText(m, blocks);
     envelopes += c.text.length - (m.text || '').length - rawChars(c.own);
   }
@@ -3105,7 +3105,9 @@ async function movePastes($, mode, jobs, messages, stats, deadline) {
     let text = '';
     let at = 0;
     for (const j of list.sort((a, b) => a.tag.start - b.tag.start)) { text += m.text.slice(at, j.tag.start) + j.trace; at = j.tag.end; }
-    swaps.set(m, { role: m.role, text: text + m.text.slice(at), toolUses: m.toolUses || [] });
+    const swap = { role: m.role, text: text + m.text.slice(at), toolUses: m.toolUses || [] };
+    if (m.handle) swap.handle = m.handle;
+    swaps.set(m, swap);
   }
   return swaps;
 }
@@ -3755,7 +3757,11 @@ async function decide($, e, cfg, record, started) {
     if (cfg.ownSkip && plan.predicted > (1 - HOST_MIN_CUT) * tokens.tokens && e.trigger === 'plugin' && session.ownCompactInFlight) return { fallback: 'cut_below_host_min_skipped', skip: true, tokensBefore: tokens.tokens };
   }
   const stats = {};
-  const rows = agentMoved.size ? trimmed.map((m, i) => agentMoved.get(i) ?? m) : trimmed;
+  let rows = agentMoved.size ? trimmed.map((m, i) => agentMoved.get(i) ?? m) : trimmed;
+  if (pasted) {
+    const swaps = pasteSwaps ?? (await movePastes($, pasted.stats.mode, pasted.jobs, messages, pasted.stats, deadline).catch(() => { pasted.stats.error = 1; return new Map(); }));
+    if (swaps.size) { rows = rows.map((m, i) => (swaps.has(messages[i]) ? swaps.get(messages[i]) : m)); pasted.stats.installed = true; }
+  }
   let built = build(rows, candidates, keepFrom, group, stats, queued);
   if (!pairingOk(messages, built)) return { fallback: 'build_error' };
   if (cfg.replies !== 'off' && e.agentId === undefined) {
@@ -3764,10 +3770,6 @@ async function decide($, e, cfg, record, started) {
       built = build(rows.map((m, i) => (edited.has(i) ? { ...m, text: edited.get(i) } : m)), candidates, keepFrom, group, stats, queued);
       record.replies.installed = true;
     }
-  }
-  if (pasted) {
-    const swaps = pasteSwaps ?? (await movePastes($, pasted.stats.mode, pasted.jobs, messages, pasted.stats, deadline).catch(() => { pasted.stats.error = 1; return new Map(); }));
-    if (swaps.size) { built = built.map((m) => swaps.get(m) ?? m); pasted.stats.installed = true; }
   }
   const after = built.reduce((s, m) => s + messageChars(m), stats.queuedKeptChars);
   const hist = [0, 0, 0, 0];
