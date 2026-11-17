@@ -135,7 +135,13 @@ export function analyzeLog(text, logPath) {
       malformed += 1;
       continue;
     }
-    if (entry === null || typeof entry !== 'object' || typeof entry.point !== 'string' || typeof entry.mode !== 'string') {
+    if (entry === null || typeof entry !== 'object' || typeof entry.point !== 'string') {
+      malformed += 1;
+      continue;
+    }
+    // Accept either a mode (normal row) or a skipped field (fork skip row)
+    const isSkipRow = typeof entry.skipped === 'string';
+    if (!isSkipRow && typeof entry.mode !== 'string') {
       malformed += 1;
       continue;
     }
@@ -145,12 +151,16 @@ export function analyzeLog(text, logPath) {
       byPoint.set(entry.point, stats);
     }
     stats.requests += 1;
-    if (Object.hasOwn(stats.modes, entry.mode)) {
-      stats.modes[entry.mode] += 1;
+    // Skip rows do not contribute to mode statistics
+    if (!isSkipRow) {
+      if (Object.hasOwn(stats.modes, entry.mode)) {
+        stats.modes[entry.mode] += 1;
+      }
     }
     const duration = typeof entry.durationMs === 'number' && Number.isFinite(entry.durationMs) ? entry.durationMs : 0;
     stats._durations ??= [];
-    if (!HELD_BACK_MODES.has(entry.mode)) stats._durations.push(duration);
+    // Skip rows have zero duration and do not contribute to latency statistics
+    if (!isSkipRow && !HELD_BACK_MODES.has(entry.mode)) stats._durations.push(duration);
 
     const verdict = comparePair(entry.heuristic, entry.jev);
     if (verdict === null) {

@@ -2718,7 +2718,7 @@ describe('jev-compaction module: shared breaker and request limit (OMC_JEV_BREAK
 
 describe('jev-compaction module: mirrors and mods API', () => {
   it('pointMode matches parseJevEnv for the named-only point', () => {
-    for (const value of [undefined, '', 'off', 'all', 'all:active', 'compaction', 'compaction:active', 'all:active,compaction', 'compaction:active,all', 'compaction:off', 'compaction: OFF', 'compaction:active,compaction:off', 'compaction:off,compaction', 'model-routing,compaction:shadow', ' compaction:active ']) {
+    for (const value of [undefined, '', 'off', 'all', 'all:active', 'compaction', 'compaction:active', 'all:active,compaction', 'compaction:active,all', 'compaction:off', 'compaction: OFF', 'compaction:active,compaction:off', 'compaction:off,compaction', 'model-routing,compaction:shadow', ' compaction:active ', 'compaction:active,compaction:shadow', 'compaction:shadow,compaction:active', 'all:active,compaction:shadow', 'compaction:shadow,compaction:off,compaction']) {
       for (const key of [undefined, 'k']) {
         expect(pointMode(value, key), `${value} / ${key}`).toBe(parseJevEnv('compaction', { OMC_JEV: value, TYPESAFE_API_KEY: key }));
       }

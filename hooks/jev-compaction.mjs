@@ -324,12 +324,14 @@ export function pointMode(raw, key) {
   let listed = false;
   let active = false;
   let off = false;
+  let explicitShadow = false; // the last entry naming this point is `point:shadow`
   for (const entry of value.split(',')) {
     const token = entry.trim();
     if (!token) continue;
     const colon = token.lastIndexOf(':');
     const name = colon === -1 ? token : token.slice(0, colon);
     if (name !== POINT) continue;
+    explicitShadow = colon !== -1 && token.slice(colon + 1) === 'shadow';
     if (colon !== -1 && token.slice(colon + 1).trim().toLowerCase() === 'off') {
       off = true;
       active = false;
@@ -340,6 +342,7 @@ export function pointMode(raw, key) {
     if (colon !== -1 && token.slice(colon + 1) === 'active') active = true;
   }
   if (off || !listed) return 'off';
+  if (explicitShadow) active = false;
   return active ? 'active' : 'shadow';
 }
 
