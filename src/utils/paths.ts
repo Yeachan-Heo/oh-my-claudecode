@@ -643,13 +643,6 @@ export function purgeStalePluginCacheVersions(options?: { skipGracePeriod?: bool
         // When an active version exists in the same plugin namespace, replace the
         // stale directory with a symlink rather than deleting it.  This keeps any
         // running session whose CLAUDE_PLUGIN_ROOT still points to this path working.
-        // However, if the stale version itself is currently occupied (in-use cache),
-        // skip relinking to preserve the session's hook files in place.
-        if (occupancy.unavailable || occupancy.roots.has(pathIdentity(versionDir))) {
-          result.skipped++;
-          result.skippedPaths.push(versionDir);
-          continue;
-        }
         if (activeVersionDirsHere.length > 0) {
           const target = [...activeVersionDirsHere].sort((a, b) =>
             compareSemverDesc(versionLeaf(a), versionLeaf(b)),
