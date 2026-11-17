@@ -50,7 +50,7 @@ export function computeJournalFingerprint(record: JournalAppendRecord): string {
 }
 
 /** Envelope validation for one parsed record; returns an error message or null. */
-function envelopeError(value: unknown): string | null {
+export function envelopeError(value: unknown): string | null {
   if (value === null || typeof value !== "object" || Array.isArray(value)) {
     return "record is not an object";
   }

@@ -11,16 +11,19 @@ import { CommanderError } from "commander";
 import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import {
+  closeSync,
   existsSync,
   lstatSync,
   linkSync,
   lutimesSync,
   mkdirSync,
   mkdtempSync,
+  openSync,
   readdirSync,
   readFileSync,
   readlinkSync,
   realpathSync,
+  renameSync,
   rmSync,
   symlinkSync,
   utimesSync,
@@ -44,6 +47,8 @@ import {
   repairTornTail,
   runGc,
   runGraphGc,
+  scanRuns,
+  type ScannedRun,
 } from "../../runtime/run-gc.js";
 
 const DAY = 24 * 60 * 60 * 1000;
@@ -1232,6 +1237,158 @@ describe("omc graph gc", () => {
       expect(readFileSync(join(dir, "journal.jsonl"), "utf8"), "the run lost its journal").toBe(journalBefore);
       expect(existsSync(join(dir, "owner.lock")), "the lock of the failed move was left in the run").toBe(false);
       expect(readdirSync(taken)).toEqual(["occupant"]);
+    });
+  });
+
+  // Class: a verdict of the scan is used later than it was read. Every test below puts a change between the scan and
+  // the removal. A replacement run is aged and in a final state, so only the directory identity can tell it apart.
+  it("a removal does not delete a new run that took the place of the scanned run, even when that run looks expired and final", () => {
+    withBase((base) => {
+      const root = makeRoot(base);
+      const dir = makeFinishedRun(root, "run-replaced");
+      ageTree(dir, OLD);
+      const remove = (realRoot: string, id: string, scanned?: ScannedRun) => {
+        // Another pass moved the scanned run away; a new run with the same id was created. The old directory stays
+        // on disk here, so its inode number cannot be reused by the new one.
+        renameSync(join(realRoot, id), join(base, "moved-away"));
+        const replacement = makeFinishedRun(realRoot, id);
+        ageTree(replacement, OLD);
+        removeRun(realRoot, id, scanned);
+      };
+
+      const result = gc(root, { remove });
+      const run = decisionOf(result, "run-replaced");
+      expect(run.action).toBe("failed");
+      expect(run.error).toMatch(/replaced after the scan/);
+      expect(existsSync(join(dir, "journal.jsonl")), "the new run was deleted on the verdict of the old one").toBe(true);
+      expect(readdirSync(dir).sort(), "the refused run was written to").toEqual(["descriptor.json", "journal.jsonl", "projection.json"]);
+      expect(readdirSync(root).filter((name) => name.startsWith(".deleted-"))).toEqual([]);
+    });
+  });
+
+  it("two overlapping passes: the second one, which scanned the same expired run, does not delete the run that replaced it", () => {
+    withBase((base) => {
+      const root = makeRoot(base);
+      const realRoot = realpathSync(root);
+      const dir = makeFinishedRun(root, "run-twice");
+      ageTree(dir, OLD);
+      const scanOf = (): ScannedRun => {
+        const scan = scanRuns({ runsRoot: root, retentionDays: 7, nowMs: NOW });
+        return { identity: scan.runs[0].identity as { dev: number; ino: number }, cutoffMs: scan.cutoffMs };
+      };
+      const first = scanOf();
+      const second = scanOf();
+      // An open descriptor keeps the removed directory's inode allocated, so the new run cannot reuse its number.
+      const hold = openSync(dir, "r");
+      try {
+        removeRun(realRoot, "run-twice", first);
+        expect(existsSync(dir)).toBe(false);
+        const fresh = makeFinishedRun(root, "run-twice");
+        ageTree(fresh, OLD);
+
+        expect(() => removeRun(realRoot, "run-twice", second)).toThrow(/replaced after the scan/);
+        expect(readFileSync(join(fresh, "journal.jsonl"), "utf8")).toBe(journalText(2));
+        expect(existsSync(join(fresh, "owner.lock")), "a lock was created in the new run").toBe(false);
+      } finally {
+        closeSync(hold);
+      }
+    });
+  });
+
+  it("a run that was resumed and finished after the scan is decided again under ownership: it is fresh, so it stays", () => {
+    withBase((base) => {
+      const root = makeRoot(base);
+      const dir = makeFinishedRun(root, "run-resumed");
+      ageTree(dir, OLD);
+      const remove = (realRoot: string, id: string, scanned?: ScannedRun) => {
+        // The same directory: a resume wrote to it and released its lock. Its files are recent now.
+        const now = new Date();
+        utimesSync(join(realRoot, id, "journal.jsonl"), now, now);
+        removeRun(realRoot, id, scanned);
+      };
+
+      const result = gc(root, { remove });
+      const run = decisionOf(result, "run-resumed");
+      expect(run.action).toBe("failed");
+      expect(run.error).toMatch(/changed after the scan \(fresh\)/);
+      expect(existsSync(join(dir, "journal.jsonl"))).toBe(true);
+      expect(existsSync(join(dir, "owner.lock")), "the lock taken for the check was left in the run").toBe(false);
+      expect(readdirSync(root).filter((name) => name.startsWith(".deleted-"))).toEqual([]);
+    });
+  });
+
+  it("a run that is no longer final under ownership stays: the scan's verdict is not reused", () => {
+    withBase((base) => {
+      const root = makeRoot(base);
+      const dir = makeFinishedRun(root, "run-reopened");
+      ageTree(dir, OLD);
+      const remove = (realRoot: string, id: string, scanned?: ScannedRun) => {
+        // Same directory, now an interrupted run with an activation still running; its files keep their old times.
+        makeScenarioRun(realRoot, id, SCENARIOS.running);
+        ageTree(join(realRoot, id), OLD);
+        removeRun(realRoot, id, scanned);
+      };
+
+      const result = gc(root, { remove });
+      const run = decisionOf(result, "run-reopened");
+      expect(run.action).toBe("failed");
+      expect(run.error).toMatch(/changed after the scan \(resumable-running\)/);
+      expect(existsSync(join(dir, "journal.jsonl"))).toBe(true);
+      expect(existsSync(join(dir, "owner.lock"))).toBe(false);
+    });
+  });
+
+  it("a leftover directory that was replaced after the scan is not deleted", () => {
+    withBase((base) => {
+      const root = makeRoot(base);
+      const realRoot = realpathSync(root);
+      const name = `.deleted-run-left-${NOW}-aaaa`;
+      const leftover = makeRun(root, name);
+      const scanned: ScannedRun = {
+        identity: scanRuns({ runsRoot: root, retentionDays: 7, nowMs: NOW }).runs[0].identity as { dev: number; ino: number },
+        cutoffMs: NOW,
+      };
+      renameSync(leftover, join(base, "moved-away"));
+      const replacement = makeRun(root, name, { "descriptor.json": "{}\n", "journal.jsonl": "other\n" });
+
+      expect(() => removeRun(realRoot, name, scanned)).toThrow(/not the directory that was scanned/);
+      expect(readFileSync(join(replacement, "journal.jsonl"), "utf8")).toBe("other\n");
+    });
+  });
+
+  it("a torn journal is repaired only in the directory that was scanned", () => {
+    withBase((base) => {
+      const root = makeRoot(base);
+      const dir = makeTornRun(root, "run-torn-replaced");
+      const identity = scanRuns({ runsRoot: root, retentionDays: 7, nowMs: NOW }).runs[0].identity as { dev: number; ino: number };
+      renameSync(dir, join(base, "moved-away"));
+      const replacement = makeTornRun(root, "run-torn-replaced");
+      const before = readFileSync(join(replacement, "journal.jsonl"), "utf8");
+
+      expect(() => repairTornTail(replacement, NOW, identity)).toThrow(/replaced after the scan/);
+      expect(readFileSync(join(replacement, "journal.jsonl"), "utf8")).toBe(before);
+      expect(readdirSync(replacement).sort()).toEqual(["descriptor.json", "journal.jsonl", "projection.json"]);
+    });
+  });
+
+  it("removeTree: an entry that another pass removes after its check is not an error", () => {
+    withBase((base) => {
+      const tree = join(base, "tree");
+      mkdirSync(join(tree, "artifacts"), { recursive: true });
+      writeFileSync(join(tree, "artifacts", "inner.txt"), "inner\n");
+      writeFileSync(join(tree, "top.txt"), "top\n");
+      let raced = false;
+
+      removeTree(tree, {
+        afterLstat: (entry) => {
+          if (raced) return;
+          raced = true;
+          // The other pass is faster: the subdirectory is gone before this one opens it.
+          rmSync(entry, { recursive: true, force: true });
+        },
+      });
+      expect(raced, "the interlock did not run").toBe(true);
+      expect(existsSync(tree)).toBe(false);
     });
   });
 

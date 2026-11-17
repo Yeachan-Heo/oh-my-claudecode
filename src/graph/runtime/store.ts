@@ -40,7 +40,7 @@ export class ProjectionStoreError extends Error {
  * Validates an untrusted parsed envelope; returns it typed or throws corrupt.
  * Fail-closed: never returns partial data (AC-3).
  */
-function parseStoredEnvelope(raw: unknown): ProjectionSnapshotEnvelope {
+export function parseStoredEnvelope(raw: unknown): ProjectionSnapshotEnvelope {
   if (typeof raw !== "object" || raw === null) {
     throw new ProjectionStoreError(
       "corrupt",
@@ -111,6 +111,20 @@ function parseStoredEnvelope(raw: unknown): ProjectionSnapshotEnvelope {
   return candidate;
 }
 
+type SnapshotBinding = Pick<ProjectionSnapshotEnvelope, "descriptor_hash" | "run_id" | "revision_id">;
+
+/**
+ * The three fields that bind a snapshot to one descriptor, run and revision. save() compares a new envelope with
+ * the stored one on them; `omc graph status` and `omc graph gc` compare a stored envelope with the run's descriptor.
+ */
+export function sameSnapshotBinding(left: SnapshotBinding, right: SnapshotBinding): boolean {
+  return (
+    left.descriptor_hash === right.descriptor_hash &&
+    left.run_id === right.run_id &&
+    left.revision_id === right.revision_id
+  );
+}
+
 /** Load/save surface over one run's `<run_id>/projection.json`. */
 export class FileProjectionStore implements ProjectionStore {
   private readonly runsRoot: string;
@@ -158,12 +172,7 @@ export class FileProjectionStore implements ProjectionStore {
       }
       stored = null;
     }
-    if (
-      stored !== null &&
-      (envelope.descriptor_hash !== stored.descriptor_hash ||
-        envelope.run_id !== stored.run_id ||
-        envelope.revision_id !== stored.revision_id)
-    ) {
+    if (stored !== null && !sameSnapshotBinding(envelope, stored)) {
       throw new ProjectionStoreError(
         "descriptor_mismatch",
         `snapshot path bound to descriptor ${stored.descriptor_hash}, run ${stored.run_id}, revision ${stored.revision_id}`,

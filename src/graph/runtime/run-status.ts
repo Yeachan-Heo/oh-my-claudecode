@@ -1,7 +1,7 @@
 /**
  * Read-only status of one graph run, for `omc graph status <run_id>`.
  *
- * Reads only `<runs-root>/<run_id>/projection.json` and `journal.jsonl`. The
+ * Reads only `<runs-root>/<run_id>/descriptor.json`, `projection.json` and `journal.jsonl`. The
  * run state is derived, because the graph runtime writes no terminal record to
  * disk. The rule is the one the runtime and `omc graph gc` use (projectionOutcome in run-gc.ts):
  *   succeeded    the scheduler success predicate holds: a terminal verification activation completed with an
@@ -15,12 +15,32 @@
  * A file that is still being written (a partial last journal line), a journal with a gap in its seq numbers, and a
  * projection that lags the journal (a crash between the journal append and the snapshot save) read as "unreadable":
  * retry later, or rerun the run, which replays the journal.
+ *
+ * The files must belong to the requested run. The snapshot is validated as FileProjectionStore validates it and is
+ * bound to the run's descriptor.json (descriptor hash, run id, revision; the projection inside names the same run
+ * and descriptor), every journal record carries that descriptor's hash and no writer epoch above the snapshot's.
+ * A projection or journal copied or restored from another run reads as "unreadable", never as the state of this one.
+ *
+ * The three files are read through one open handle on the run directory (the runtime's own directory-relative
+ * operations, on Linux and on macOS with the native module), so a directory that is swapped for a link or for another
+ * directory after the check cannot redirect the reads, and the name must still be the same directory (device and
+ * inode) after the reads. Where the runtime has no such primitive the files are read by path, with the same check of
+ * the directory before and after.
  */
 
-import { closeSync, constants as fsConstants, existsSync, fstatSync, lstatSync, openSync, readFileSync } from "node:fs";
-import { basename, join } from "node:path";
+import { closeSync, constants as fsConstants, fstatSync, lstatSync, openSync, readFileSync } from "node:fs";
+import { join } from "node:path";
+import { containedFsPlatformSupported } from "./contained-fd.js";
 import { RUN_ID_PATTERN } from "./run-dir.js";
-import { projectionOutcome } from "./run-gc.js";
+import {
+  checkSnapshotEnvelope,
+  parseJournalLines,
+  parseRunDescriptor,
+  projectionBelongsToRun,
+  projectionOutcome,
+  RunBindingError,
+} from "./run-gc.js";
+import { withContainedOperations } from "./safe-fs.js";
 
 export const RUN_STATUS_EXIT_CODES = {
   succeeded: 0,
@@ -40,6 +60,13 @@ export interface RunStatusOptions {
   readonly runId: string;
   /** Runs root directory; the CLI passes `.omc/graph-runs` when `--runs-root` is not given. */
   readonly runsRoot: string;
+  /** Test-only hooks that run inside the window between the check of the run directory and its use. */
+  readonly interlock?: {
+    /** After the run directory was checked and before it is opened. */
+    readonly afterDirectoryCheck?: () => void;
+    /** After the files were read and before the directory is checked again. */
+    readonly afterRead?: () => void;
+  };
 }
 
 export interface RunStatusOutcome {
@@ -73,11 +100,6 @@ interface Projection {
   readonly terminal_verification_activation_ids: readonly string[];
 }
 
-interface ProjectionEnvelope {
-  readonly projection: Projection;
-  readonly saved_at_seq: number;
-}
-
 class UnreadableError extends Error {}
 
 function usage(message: string): RunStatusOutcome {
@@ -88,15 +110,17 @@ function usage(message: string): RunStatusOutcome {
   };
 }
 
-// Reads one run file as text. Never follows a symbolic link, and refuses a FIFO or other
-// non-regular file right after open, so it cannot block the command.
-function readRunText(file: string): string {
-  const name = basename(file);
+type OpenRunFile = (name: string) => number;
+
+// Reads one run file as text through `open`, which never follows a symbolic link. Returns null when the file does not
+// exist. A FIFO or other non-regular file is refused right after open, so it cannot block the command.
+function readRunText(open: OpenRunFile, name: string): string | null {
   let fd: number;
   try {
-    fd = openSync(file, fsConstants.O_RDONLY | NOFOLLOW | NONBLOCK);
+    fd = open(name);
   } catch (error) {
     const code = (error as NodeJS.ErrnoException).code;
+    if (code === "ENOENT") return null;
     throw new UnreadableError(
       `${name}: ${code === "ELOOP" || code === "ENOTDIR" ? "not a regular file" : (code ?? "unreadable")}`,
     );
@@ -109,61 +133,75 @@ function readRunText(file: string): string {
   }
 }
 
-function readProjectionEnvelope(file: string): ProjectionEnvelope {
-  const text = readRunText(file);
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(text);
-  } catch (error) {
-    throw new UnreadableError(`projection.json: ${(error as Error).message}`);
-  }
-  const envelope = parsed as { projection?: Projection; saved_at_seq?: unknown } | null;
-  const projection = envelope?.projection;
-  const savedAtSeq = envelope?.saved_at_seq;
-  if (!projection || typeof projection !== "object") {
-    throw new UnreadableError("projection.json has no projection object");
-  }
-  if (
-    !projection.activations ||
-    !projection.cohorts ||
-    !projection.committed_transitions ||
-    !Array.isArray(projection.terminal_verification_activation_ids)
-  ) {
-    throw new UnreadableError(
-      "projection.json lacks activations, cohorts, committed_transitions or terminal_verification_activation_ids",
-    );
-  }
-  if (Object.keys(projection.activations).length === 0) {
-    throw new UnreadableError("projection.json has no activations");
-  }
-  if (typeof savedAtSeq !== "number" || !Number.isInteger(savedAtSeq)) {
-    throw new UnreadableError("projection.json has invalid saved_at_seq");
-  }
-  return { projection, saved_at_seq: savedAtSeq };
+interface RunFiles {
+  readonly descriptor: string | null;
+  readonly projection: string | null;
+  readonly journal: string | null;
 }
 
+// Reads the files of one run. Returns null when there is no run directory.
+function readRunFiles(runDir: string, interlock: RunStatusOptions["interlock"]): RunFiles | null {
+  let before;
+  try {
+    before = lstatSync(runDir);
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") return null;
+    throw error;
+  }
+  if (before.isSymbolicLink()) throw new UnreadableError("run directory is a symbolic link");
+  if (!before.isDirectory()) throw new UnreadableError("run directory is not a directory");
+  interlock?.afterDirectoryCheck?.();
 
-
-function readJournal(file: string): Transition[] {
-  const lines = readRunText(file)
-    .split("\n")
-    .filter((line) => line.trim() !== "");
-  return lines.map((line, index) => {
-    let entry: { seq?: unknown; transition?: Transition } | null;
-    try {
-      entry = JSON.parse(line) as { seq?: unknown; transition?: Transition } | null;
-    } catch (error) {
-      throw new UnreadableError(`journal.jsonl line ${index + 1}: ${(error as Error).message}`);
-    }
-    if (!entry || !entry.transition) {
-      throw new UnreadableError(`journal.jsonl line ${index + 1} has no transition`);
-    }
-    // The runtime numbers records 0, 1, 2, ... without gaps (as omc graph gc checks), so the last seq is the count - 1.
-    if (entry.seq !== index) {
-      throw new UnreadableError(`journal.jsonl line ${index + 1} has seq ${String(entry.seq)}, expected ${index}`);
-    }
-    return entry.transition;
+  const flags = fsConstants.O_RDONLY | NONBLOCK;
+  const readAll = (open: OpenRunFile): RunFiles => ({
+    descriptor: readRunText(open, "descriptor.json"),
+    projection: readRunText(open, "projection.json"),
+    journal: readRunText(open, "journal.jsonl"),
   });
+  let files: RunFiles;
+  if (containedFsPlatformSupported(process.platform)) {
+    try {
+      // The directory is opened without following a link and must be the one that was checked (device and inode).
+      files = withContainedOperations({ path: runDir, device: before.dev, inode: before.ino }, (operations) =>
+        readAll((name) => operations.open(name, flags)),
+      );
+    } catch (error) {
+      const code = (error as NodeJS.ErrnoException).code;
+      if (code === "ELOOP" || code === "ENOTDIR") {
+        throw new UnreadableError("run directory was replaced by a link or a file while it was read");
+      }
+      if ((error as Error).message === "run directory identity changed") {
+        throw new UnreadableError("run directory was replaced while it was read");
+      }
+      throw error;
+    }
+  } else {
+    files = readAll((name) => openSync(join(runDir, name), flags | NOFOLLOW));
+  }
+  interlock?.afterRead?.();
+  const after = lstatSync(runDir);
+  if (after.dev !== before.dev || after.ino !== before.ino) {
+    throw new UnreadableError("run directory was replaced while it was read");
+  }
+  return files;
+}
+
+function parseJson(name: string, text: string): unknown {
+  try {
+    return JSON.parse(text);
+  } catch (error) {
+    throw new UnreadableError(`${name}: ${(error as Error).message}`);
+  }
+}
+
+// A file that does not belong to the run is unreadable, with the reason the shared check gives.
+function bound<T>(check: () => T): T {
+  try {
+    return check();
+  } catch (error) {
+    if (error instanceof RunBindingError) throw new UnreadableError(error.message);
+    throw error;
+  }
 }
 
 function nodeStateOf(
@@ -181,15 +219,40 @@ function nodeStateOf(
   return activation.status;
 }
 
-function summarize(runId: string, runDir: string, runsRoot: string): Record<string, unknown> {
-  const envelope = readProjectionEnvelope(join(runDir, "projection.json"));
-  const projection = envelope.projection;
-  const journalFile = join(runDir, "journal.jsonl");
+function summarize(runId: string, files: RunFiles, runsRoot: string): Record<string, unknown> {
+  if (files.descriptor === null) throw new UnreadableError("descriptor.json is missing");
+  const descriptor = bound(() => parseRunDescriptor(parseJson("descriptor.json", files.descriptor as string), runId));
+  const envelope = bound(() =>
+    checkSnapshotEnvelope(parseJson("projection.json", files.projection as string), descriptor, runId),
+  );
+  const projection = envelope.projection as unknown as Projection;
+  if (!projectionBelongsToRun(projection as unknown as Record<string, any>, descriptor.descriptorHash, runId)) {
+    throw new UnreadableError("projection.json holds the projection of another run or descriptor");
+  }
+  if (
+    !projection.activations ||
+    !projection.cohorts ||
+    !projection.committed_transitions ||
+    !Array.isArray(projection.terminal_verification_activation_ids)
+  ) {
+    throw new UnreadableError(
+      "projection.json lacks activations, cohorts, committed_transitions or terminal_verification_activation_ids",
+    );
+  }
+  if (Object.keys(projection.activations).length === 0) {
+    throw new UnreadableError("projection.json has no activations");
+  }
   const committed = projection.committed_transitions;
   const activations = projection.activations;
   let transitions: Transition[] = [];
-  if (existsSync(journalFile)) {
-    transitions = readJournal(journalFile);
+  let journalEpoch = 0;
+  if (files.journal !== null) {
+    const lines = files.journal.split("\n").filter((line) => line.trim() !== "");
+    // Same checks as the runtime's replay: envelope, seq 0, 1, 2, ... without a gap, this run's descriptor on every
+    // record, epochs that never decrease (as omc graph gc checks), so the last seq is the count - 1.
+    const records = bound(() => parseJournalLines(lines, descriptor.descriptorHash));
+    transitions = records.map((record) => record.transition as Transition);
+    journalEpoch = records.length > 0 ? (records[records.length - 1].epoch as number) : 0;
   } else if (Object.keys(committed).length > 0) {
     throw new UnreadableError(
       "journal.jsonl is missing although the projection has committed transitions",
@@ -204,6 +267,10 @@ function summarize(runId: string, runDir: string, runsRoot: string): Record<stri
     throw new UnreadableError(
       `projection is stale (saved_at_seq ${envelope.saved_at_seq} < journal seq ${journalSeq})`,
     );
+  }
+  // The snapshot is saved by the writer that appended its last record, so no record may carry a later epoch.
+  if (journalEpoch > envelope.epoch) {
+    throw new UnreadableError(`journal.jsonl has epoch ${journalEpoch}, above the epoch ${envelope.epoch} of projection.json`);
   }
 
   const lastActivationByNode = new Map<string, Activation>();
@@ -240,15 +307,6 @@ function summarize(runId: string, runDir: string, runsRoot: string): Record<stri
   };
 }
 
-// True only for a symbolic link that exists; a missing path is not a link.
-function isSymbolicLink(path: string): boolean {
-  try {
-    return lstatSync(path).isSymbolicLink();
-  } catch {
-    return false;
-  }
-}
-
 /** Derives the status of one run. Read-only: nothing on disk is created or changed. */
 export function readRunStatus(options: RunStatusOptions): RunStatusOutcome {
   if (!RUN_ID_PATTERN.test(options.runId)) {
@@ -258,10 +316,10 @@ export function readRunStatus(options: RunStatusOptions): RunStatusOutcome {
   const runDir = join(runsRoot, options.runId);
 
   try {
-    // A symlinked run directory is refused before anything is read through it. Run files are opened
-    // without following links (see readRunText).
-    if (isSymbolicLink(runDir)) throw new UnreadableError("run directory is a symbolic link");
-    if (!existsSync(join(runDir, "projection.json"))) {
+    // A symlinked run directory is refused before anything is read through it, and the files are read through
+    // one open handle on the directory (see readRunFiles).
+    const files = readRunFiles(runDir, options.interlock);
+    if (files === null || files.projection === null) {
       const missing = { run_id: options.runId, runs_root: runsRoot, state: "missing", exit_code: RUN_STATUS_EXIT_CODES.missing };
       return {
         exitCode: RUN_STATUS_EXIT_CODES.missing,
@@ -270,7 +328,7 @@ export function readRunStatus(options: RunStatusOptions): RunStatusOutcome {
       };
     }
 
-    const status = summarize(options.runId, runDir, runsRoot);
+    const status = summarize(options.runId, files, runsRoot);
     return { exitCode: status.exit_code as number, stdout: `${JSON.stringify(status)}\n`, stderr: "" };
   } catch (error) {
     // Any read or parse failure is reported as state "unreadable", never as a crash or as "failed".
