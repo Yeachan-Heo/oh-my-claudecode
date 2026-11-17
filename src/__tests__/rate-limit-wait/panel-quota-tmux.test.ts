@@ -27,6 +27,31 @@ describe('panelQuotaTmux adapter', () => {
     expect(panes).toEqual([expect.objectContaining({ id: '%7', session: 'omc-team-a', windowIndex: 0, paneIndex: 1 })]);
   });
 
+  it('listPanes returns null, not an empty list, when the inventory cannot be read', () => {
+    vi.mocked(tmuxExec).mockImplementationOnce(() => { throw new Error('no server running'); });
+    expect(panelQuotaTmux.listPanes()).toBeNull();
+    vi.mocked(tmuxSpawn).mockReturnValue({ status: 1 } as never);
+    expect(panelQuotaTmux.listPanes()).toBeNull();
+  });
+
+  it('providerRunning is false for a dead pane and for a shell in the foreground, true for another command, null when unknown', () => {
+    const ask = (output: string | Error): boolean | null => {
+      vi.mocked(tmuxExec).mockReset();
+      if (output instanceof Error) vi.mocked(tmuxExec).mockImplementationOnce(() => { throw output; });
+      else vi.mocked(tmuxExec).mockReturnValueOnce(output);
+      return panelQuotaTmux.providerRunning(PANE);
+    };
+    expect(ask('0 node\n')).toBe(true);
+    expect(ask('0 claude\n')).toBe(true);
+    expect(ask('0 bash\n')).toBe(false);
+    expect(ask('0 -zsh\n')).toBe(false);
+    expect(ask('0 fish\n')).toBe(false);
+    expect(ask('1 node\n')).toBe(false);
+    expect(ask('0 \n')).toBeNull();
+    expect(ask(new Error("can't find pane"))).toBeNull();
+    expect(vi.mocked(tmuxExec).mock.calls[0][0]).toEqual(['display-message', '-t', '%7', '-p', '#{pane_dead} #{pane_current_command}']);
+  });
+
   it('capture returns the pane screen read with capture-pane', () => {
     vi.mocked(tmuxExec).mockReturnValueOnce('working...\nAPI Error: 429 {"error":{"code":1308}}\n');
     const screen = panelQuotaTmux.capture(PANE, 15);

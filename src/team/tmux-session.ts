@@ -1944,7 +1944,7 @@ function logWorkerSpawnDiagnostic(message: string): void {
   process.stderr.write(`[team/tmux-session] ${message}\n`);
 }
 
-function paneCurrentCommandLooksReady(command: string): boolean {
+export function paneCurrentCommandLooksReady(command: string): boolean {
   const normalized = basename(command.replace(/\\/g, "/"))
     .replace(/\.(exe|cmd|bat)$/i, "")
     .toLowerCase();

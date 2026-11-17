@@ -19,7 +19,7 @@ import {
   herdrWorkspaceIdFromPaneId,
   type HerdrAgentLikeInfo,
 } from '../../team/herdr-session.js';
-import { isHerdrPaneId, resolveTeamMultiplexer } from '../../team/tmux-session.js';
+import { isHerdrPaneId, paneCurrentCommandLooksReady, resolveTeamMultiplexer } from '../../team/tmux-session.js';
 
 /**
  * Validate tmux pane ID format to prevent command injection
@@ -313,7 +313,7 @@ function parseTmuxPanes(result: string): TmuxPane[] {
   return panes;
 }
 
-function listTmuxPanesStrict(): TmuxPane[] | null {
+export function listTmuxPanesStrict(): TmuxPane[] | null {
   if (!isTmuxAvailable()) {
     return null;
   }
@@ -838,7 +838,35 @@ export function formatBlockedPanesSummary(blockedPanes: BlockedPane[]): string {
  * Strict capture: a pane that cannot be read is skipped, not treated as an empty screen.
  */
 export const panelQuotaTmux = {
-  listPanes: (): TmuxPane[] => listTmuxPanes(),
+  // null when the inventory cannot be read (tmux missing, server unreachable, timeout): the pass keeps its saved waits.
+  listPanes: (): TmuxPane[] | null => listTmuxPanesStrict(),
   capture: (pane: TmuxPane, lines: number): string | null => capturePaneContentStrict(pane.id, lines),
   sendContinue: (pane: TmuxPane): boolean => sendToPane(pane.id, 'continue', true),
+  providerRunning: (pane: TmuxPane): boolean | null => paneProviderRunning(pane.id),
 };
+
+/**
+ * Whether the provider still runs in a pane. After the provider exits the pane keeps running the user's
+ * shell, which shows the old error in its scrollback and would take a typed key as a command. False for a
+ * dead pane or a shell in the foreground, true for any other foreground command, null when tmux cannot tell.
+ */
+function paneProviderRunning(paneId: string): boolean | null {
+  if (!isTmuxAvailable() || !isValidPaneId(paneId)) {
+    return null;
+  }
+  try {
+    const status = tmuxExec(
+      ['display-message', '-t', paneId, '-p', '#{pane_dead} #{pane_current_command}'],
+      { stripTmux: true, stdio: 'pipe', timeout: 3000 },
+    ).trim();
+    const [dead, ...commandParts] = status.split(/\s+/);
+    if (dead === '1') {
+      return false;
+    }
+    // A login shell may be reported as "-bash".
+    const command = commandParts.join(' ').replace(/^-+/, '');
+    return command === '' ? null : !paneCurrentCommandLooksReady(command);
+  } catch {
+    return null;
+  }
+}

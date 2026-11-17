@@ -7,7 +7,13 @@
  * The rate-limit-wait daemon calls runDaemonPanelQuotaPass once per poll. A team pane whose last lines
  * show a provider quota error waits until the reset of the 5 h window plus a margin, then receives one
  * continue key. A non-resumable code, a reset beyond the window, an exhausted weekly limit, or the wait
- * limit ends the task with class "quota"; the reset date goes to the log and to the optional journal.
+ * limit ends the wait of that pane with class "quota" and no key is sent; the reset date goes to the log and
+ * to the optional journal. The pass does not change the state of a team task: a task claimed by a pane that
+ * ended its wait stays as the team runtime has it, and the log and the journal are where the end is recorded.
+ *
+ * Before a continue key is sent the pass looks at the pane again: the quota error must still be on the screen,
+ * no wrapper may own the wait, the code must not have turned non-resumable, and the provider must still run
+ * in the pane (a pane whose provider exited shows the user's shell, and the key would be typed into it).
  *
  * Tmux, the clock and the provider reading are injected, so the decision logic runs in tests without
  * tmux or a live account. The API key is read from the file named by OMC_PANEL_QUOTA_KEY_FILE and is never
@@ -18,7 +24,7 @@
  *   OMC_PANEL_QUOTA_END_CODES    codes that never resume ([none])
  *   OMC_PANEL_QUOTA_READ_URL     reading endpoint, https or loopback http ([none: no reading, no wait])
  *   OMC_PANEL_QUOTA_KEY_FILE    file holding the API key ([none: no reading])
- *   OMC_PANEL_QUOTA_WAIT_MAX     waits per pane before the task ends ([3])
+ *   OMC_PANEL_QUOTA_WAIT_MAX     waits per pane before its wait ends ([3])
  *   OMC_PANEL_QUOTA_WAIT_MARGIN_S margin after the reset, seconds ([120])
  *   OMC_PANEL_QUOTA_PASS_LIMIT_S time limit of one pass, seconds ([30])
  *   OMC_PANEL_QUOTA_WEEK_UNIT    unit code of the weekly limit in the reading ([6]; a weekly limit never waits)
@@ -31,8 +37,9 @@
  * OMC_PANEL_QUOTA_READ_URL=https://api.z.ai/api/monitor/usage/quota/limit.
  */
 import { createHash } from 'node:crypto';
-import { appendFileSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
+import { appendFileSync, mkdirSync, readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
+import { atomicWriteFileSync } from '../../lib/atomic-write.js';
 
 export type PanelEnv = Readonly<Record<string, string | undefined>>;
 
@@ -49,9 +56,12 @@ export interface QuotaReading {
 }
 
 export interface PanelTmux {
-  listPanes(): PanePoint[];
+  /** The panes of the tmux server, or null when the inventory cannot be read (tmux missing, server unreachable, timeout). */
+  listPanes(): PanePoint[] | null;
   capture(pane: PanePoint, lines: number): string | null;
   sendContinue(pane: PanePoint): boolean;
+  /** Whether the provider still runs in the pane: false for a dead pane or a shell in the foreground, null when it cannot be told. */
+  providerRunning(pane: PanePoint): boolean | null;
 }
 
 export interface PanelEntry {
@@ -71,6 +81,8 @@ export interface PanelEntry {
 
 export interface PanelState {
   panes: Record<string, PanelEntry>;
+  /** Key of the pane the next pass scans first among the panes without a wait, after a pass that ran out of time. */
+  cursor?: string;
 }
 
 export interface QuotaCodes {
@@ -87,9 +99,10 @@ type Journal = Record<string, unknown>;
 export interface PanelQuotaDeps {
   now(): number;
   monotonic?(): number;
-  listPanes(): PanePoint[];
+  listPanes(): PanePoint[] | null;
   capture(pane: PanePoint, lines: number): string | null | undefined;
   sendContinue(pane: PanePoint): boolean;
+  providerRunning(pane: PanePoint): boolean | null;
   readQuota(): Promise<QuotaReading | null>;
   log(text: string): void;
   journal(row: Journal): void;
@@ -201,8 +214,11 @@ export function wrapperOwnsPane(content: string, pattern: RegExp): boolean {
   return tailLines(content).some((line) => pattern.test(line));
 }
 
+// The tmux pane id is the identity of a pane: it stays the same when the pane moves to another window, changes
+// its index or when its session is renamed. Session, window index and pane index are refreshed on the entry at
+// every pass, not part of the key.
 export function paneKey(pane: PanePoint): string {
-  return `${pane.session}:${pane.windowIndex}.${pane.paneIndex}#${pane.id}`;
+  return pane.id;
 }
 
 function screenSignature(content: string): string {
@@ -222,15 +238,14 @@ export function loadState(file: string): PanelState {
 
 export function saveState(file: string, state: PanelState): void {
   mkdirSync(dirname(file), { recursive: true, mode: 0o700 });
-  const tmp = `${file}.${process.pid}.tmp`;
-  writeFileSync(tmp, JSON.stringify(state) + '\n', { mode: 0o600 });
-  renameSync(tmp, file);
+  // Random temporary name, exclusive creation and an atomic rename: no predictable name for a link to take over.
+  atomicWriteFileSync(file, JSON.stringify(state) + '\n');
 }
 
 /**
  * Pure decision on a provider reading. Takes limits with percentage >= 100; the unblock time is the latest
  * nextResetTime among them. Waits only if that reset is at most `windowMs` away and no weekly limit is
- * exhausted; otherwise the task ends. Missing reading, no exhausted limit or no positive reset: no wait.
+ * exhausted; otherwise the wait ends. Missing reading, no exhausted limit or no positive reset: no wait.
  */
 export function planQuotaWait(
   body: unknown,
@@ -315,21 +330,41 @@ export async function runPanelQuotaPass(
   const settleMs = marginMs(env);
   const weekUnit = weekLimitUnit(env);
   const prefix = sessionPrefix(env);
-  const listedPanes = deps.listPanes(); // null if enumeration failed, [] if no panes
-  // Preserve quota waits when pane enumeration fails.
-  // Only delete entries if we have a successful enumeration.
-  if (listedPanes !== null) {
-    const panes = listedPanes.filter((pane) => String(pane.session).startsWith(prefix));
-    const live = new Set(panes.map(paneKey));
-    for (const key of Object.keys(state.panes)) {
-      if (!live.has(key)) delete state.panes[key];
+  const listedPanes = deps.listPanes();
+  if (listedPanes === null) {
+    // An inventory that cannot be read is not an empty one: the saved waits stay and nothing is scanned or sent.
+    if (Object.keys(state.panes).length > 0) {
+      deps.log('pane inventory unavailable: the saved quota waits are kept and nothing is scanned in this pass');
     }
+    return state;
   }
-  const panes = (listedPanes || []).filter((pane) => String(pane.session).startsWith(prefix));
+  const panes = listedPanes.filter((pane) => String(pane.session).startsWith(prefix));
+  const live = new Set(panes.map(paneKey));
+  for (const key of Object.keys(state.panes)) {
+    if (!live.has(key)) delete state.panes[key];
+  }
+  // Panes that already wait come first: their due resumes need no reading and must not queue behind a new
+  // detection that runs out of time. The other panes start where the last pass that ran out of time stopped.
+  const waiting = panes.filter((pane) => state.panes[paneKey(pane)]?.state === 'waiting_quota');
+  const others = panes.filter((pane) => state.panes[paneKey(pane)]?.state !== 'waiting_quota');
+  const resumeFrom = others.findIndex((pane) => paneKey(pane) === state.cursor);
+  const ordered = [...waiting, ...(resumeFrom > 0 ? [...others.slice(resumeFrom), ...others.slice(0, resumeFrom)] : others)];
+  const previousCursor = state.cursor;
+  delete state.cursor;
+  // Where the time limit ended the pass: the index in `ordered`, and whether that pane was already worked on.
+  let limitedAt: { index: number; attempted: boolean } | null = null;
 
-  for (const pane of panes) {
-    if (timeLeft() <= 0) { stopForTimeLimit(); break; }
+  for (let index = 0; index < ordered.length; index++) {
+    const pane = ordered[index];
+    if (timeLeft() <= 0) { stopForTimeLimit(); limitedAt = { index, attempted: false }; break; }
     const key = paneKey(pane);
+    let entry = state.panes[key];
+    if (entry) {
+      // The key is the pane id; where the pane sits now is refreshed, not matched.
+      entry.session = pane.session;
+      entry.windowIndex = pane.windowIndex;
+      entry.paneIndex = pane.paneIndex;
+    }
     const content = deps.capture(pane, TAIL_LINES);
     if (content === null || content === undefined) continue;
     if (pattern && wrapperOwnsPane(content, pattern)) {
@@ -337,16 +372,19 @@ export async function runPanelQuotaPass(
       continue;
     }
     const sig = screenSignature(content);
-    let entry = state.panes[key];
 
     if (entry && entry.state === 'waiting_quota') {
       if (entry.untilMs !== undefined && now < entry.untilMs) continue;
       // Strict capture right before the keys: the quota error must still be on screen for this pane identity.
       const fresh = deps.capture(pane, TAIL_LINES);
-      // Keep quota waits retryable when the fresh capture fails.
-      // If capture times out or returns null, retry on the next pass rather than marking as resumed.
+      // An unreadable capture is not a reason to close the wait: retry on the next pass.
       if (fresh === null || fresh === undefined) {
         deps.log(`pane ${key}: fresh capture failed at reset time; retry on next pass`);
+        continue;
+      }
+      // Everything the first capture was checked for is checked again on the screen the keys would meet.
+      if (pattern && wrapperOwnsPane(fresh, pattern)) {
+        deps.log(`pane ${key}: an external wrapper owns this error at reset time; the daemon sends no keys`);
         continue;
       }
       const freshErr = detectQuotaError(fresh, codes);
@@ -357,13 +395,25 @@ export async function runPanelQuotaPass(
         deps.log(`pane ${key}: no quota error on screen at reset time; no keys sent`);
         continue;
       }
-      // Reclassify terminal quota errors before sending a resume.
-      // The error code may have changed from resumable to non-resumable due to a user retry.
+      // The error code may have turned non-resumable since the wait began (for example after a retry by the user).
       if (codes.end.includes(freshErr.code)) {
         endQuota(entry, deps, now, `quota error ${freshErr.code} is non-resumable: no resume`, entry.resetMs ?? null);
         continue;
       }
-      if (timeLeft() <= 0) { stopForTimeLimit(); break; }
+      // After the provider exits the pane shows the user's shell, and the old error is still in its scrollback.
+      const running = deps.providerRunning(pane);
+      if (running === null) {
+        deps.log(`pane ${key}: cannot tell whether the provider still runs in the pane; retry on next pass`);
+        continue;
+      }
+      if (!running) {
+        entry.state = 'resumed';
+        entry.sig = screenSignature(fresh);
+        entry.resumedAt = now;
+        deps.log(`pane ${key}: the provider no longer runs in the pane; no keys sent`);
+        continue;
+      }
+      if (timeLeft() <= 0) { stopForTimeLimit(); limitedAt = { index, attempted: true }; break; }
       if (deps.sendContinue(pane)) {
         entry.state = 'resumed';
         entry.sig = screenSignature(fresh);
@@ -396,9 +446,9 @@ export async function runPanelQuotaPass(
       endQuota(entry, deps, now, `wait limit reached (${max})`, entry.resetMs ?? null);
       continue;
     }
-    if (timeLeft() <= 0) { stopForTimeLimit(); break; }
+    if (timeLeft() <= 0) { stopForTimeLimit(); limitedAt = { index, attempted: false }; break; }
     const reading = await withTimeLimit(deps.readQuota(), timeLeft());
-    if (reading === TIME_LIMIT) { stopForTimeLimit(); break; }
+    if (reading === TIME_LIMIT) { stopForTimeLimit(); limitedAt = { index, attempted: true }; break; }
     const plan = planForReading(reading, now, settleMs, weekUnit);
     if (codes.end.includes(err.code)) {
       // A non-resumable code is never resumed, whatever the reading says; the reset date goes to the coordinator.
@@ -416,15 +466,26 @@ export async function runPanelQuotaPass(
       endQuota(entry, deps, now, plan.reason, plan.reset ?? null);
     }
   }
+  if (limitedAt !== null) {
+    // Next pass: a limit inside the waiting panes changes nothing for the others; a limit among the others moves
+    // the start to the next pane, so one pane that always uses up the time cannot hold back the rest.
+    if (limitedAt.index < waiting.length) {
+      if (previousCursor !== undefined) state.cursor = previousCursor;
+    } else {
+      const next = ordered[limitedAt.index + (limitedAt.attempted ? 1 : 0)];
+      if (next !== undefined) state.cursor = paneKey(next);
+    }
+  }
   return state;
 }
 
-// The task ends with class quota: the reset date goes to the journal and to the log for the coordinator.
+// The wait of this pane ends with class quota and the pane is left alone: the reset date goes to the journal and
+// to the log for the coordinator. No team task state is written here.
 function endQuota(entry: PanelEntry, deps: PanelQuotaDeps, now: number, reason: string, resetMs: number | null): void {
   entry.state = 'quota-ended';
   entry.resetMs = resetMs;
   entry.updatedAt = now;
-  deps.log(`pane ${entry.key}: task ends with class quota (${reason}); reset ${iso(resetMs)}`);
+  deps.log(`pane ${entry.key}: wait ends with class quota, no keys sent (${reason}); reset ${iso(resetMs)}`);
   deps.journal({ ts: new Date(now).toISOString(), point: 'team-panel', pane: entry.key, result: 'end', class: 'quota', reason, reset_ms: resetMs, attempt: entry.waits });
 }
 
@@ -517,6 +578,7 @@ export async function runDaemonPanelQuotaPass({
     listPanes: () => tmux.listPanes(),
     capture: (pane, lines) => tmux.capture(pane, lines),
     sendContinue: (pane) => tmux.sendContinue(pane),
+    providerRunning: (pane) => tmux.providerRunning(pane),
     readQuota: readQuota ?? (() => readProviderQuota(env)),
     log,
     journal: (row) => appendJournal(env, row),

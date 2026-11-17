@@ -55,7 +55,10 @@ const exhaustedWeek = (resetMs: number): QuotaReading => reading([{ unit: 6, per
 
 interface World {
   clock: { now: number };
-  panes: PanePoint[];
+  /** null: the pane inventory cannot be read. */
+  panes: PanePoint[] | null;
+  /** Provider state by pane id; a pane that is not listed runs its provider. */
+  running: Record<string, boolean | null>;
   screens: Record<string, string>;
   reading: { value: QuotaReading | null };
   sent: string[];
@@ -68,6 +71,7 @@ function world(init: { panes: PanePoint[]; screens: Record<string, string>; read
   const w: World = {
     clock: { now: BASE_MS },
     panes: init.panes,
+    running: {},
     screens: init.screens,
     reading: { value: init.readingValue },
     sent: [],
@@ -80,6 +84,7 @@ function world(init: { panes: PanePoint[]; screens: Record<string, string>; read
     listPanes: () => w.panes,
     capture: (pane) => (Object.prototype.hasOwnProperty.call(w.screens, pane.id) ? w.screens[pane.id] : null),
     sendContinue: (pane) => { w.sent.push(pane.id); return true; },
+    providerRunning: (pane) => (Object.prototype.hasOwnProperty.call(w.running, pane.id) ? w.running[pane.id] : true),
     readQuota: async () => w.reading.value,
     log: (t) => { w.log.push(t); },
     journal: (row) => { w.journal.push(row); },
@@ -88,6 +93,7 @@ function world(init: { panes: PanePoint[]; screens: Record<string, string>; read
 }
 
 const PANE_A: PanePoint = { id: '%7', session: 'omc-team-a', windowIndex: 0, paneIndex: 1 };
+const PANE_B: PanePoint = { id: '%8', session: 'omc-team-a', windowIndex: 0, paneIndex: 2 };
 const KEY_A = paneKey(PANE_A);
 
 describe('panel quota wait: decision logic', () => {
@@ -114,7 +120,7 @@ describe('panel quota wait: decision logic', () => {
     expect(w.sent).toHaveLength(1);
   });
 
-  it('week reset: no resume, task ends with class quota and the reset date', async () => {
+  it('week reset: no resume, the wait ends with class quota and the reset date', async () => {
     const reset = BASE_MS + 3 * 24 * H;
     const w = world({ panes: [PANE_A], screens: { '%7': screen(ERR_1308) }, readingValue: exhaustedWeek(reset) });
     const state: PanelState = { panes: {} };
@@ -272,6 +278,143 @@ describe('panel quota wait: decision logic', () => {
     expect(Object.keys(state.panes)).toHaveLength(0);
   });
 
+  // A pane in the waiting state whose reset has come (margin 0), ready for the pass that decides about the keys.
+  async function waitingAtReset(env: PanelEnv = ON): Promise<{ w: World; state: PanelState }> {
+    const w = world({ panes: [PANE_A], screens: { '%7': screen(ERR_1308) }, readingValue: exhausted5h(BASE_MS + 2 * H) });
+    const state: PanelState = { panes: {} };
+    await runPanelQuotaPass(state, w.deps, env);
+    expect(state.panes[KEY_A].state).toBe('waiting_quota');
+    w.clock.now = BASE_MS + 2 * H;
+    return { w, state };
+  }
+
+  it('an unreadable pane inventory keeps the saved waits: nothing is deleted, scanned or sent, and the wait resumes when the inventory is back', async () => {
+    const { w, state } = await waitingAtReset();
+    w.panes = null;
+    await runPanelQuotaPass(state, w.deps, ON);
+    expect(state.panes[KEY_A]?.state, 'the wait was dropped with the inventory').toBe('waiting_quota');
+    expect(w.sent).toHaveLength(0);
+    expect(w.log.some((t) => /inventory unavailable/.test(t))).toBe(true);
+
+    w.panes = [PANE_A];
+    await runPanelQuotaPass(state, w.deps, ON);
+    expect(w.sent).toEqual(['%7']);
+    expect(state.panes[KEY_A].state).toBe('resumed');
+  });
+
+  it('a pane that changes its window or pane index keeps its wait: the key is the pane id and the position is refreshed', async () => {
+    const { w, state } = await waitingAtReset();
+    const moved: PanePoint = { id: '%7', session: 'omc-team-a', windowIndex: 3, paneIndex: 0 };
+    w.panes = [moved];
+    await runPanelQuotaPass(state, w.deps, ON);
+    expect(Object.keys(state.panes)).toEqual([KEY_A]);
+    expect(w.sent, 'the moved pane was not resumed').toEqual(['%7']);
+    const entry = state.panes[KEY_A];
+    expect(entry.state).toBe('resumed');
+    expect(entry.windowIndex).toBe(3);
+    expect(entry.paneIndex).toBe(0);
+    expect(w.log.some((t) => /no quota error on screen/.test(t))).toBe(false);
+  });
+
+  it('a fresh capture that fails at reset time keeps the wait retryable: no keys, still waiting, resumed on the next readable pass', async () => {
+    const { w, state } = await waitingAtReset();
+    let calls = 0;
+    const capture = w.deps.capture;
+    // The first capture of the pass reads, the fresh one before the keys fails.
+    w.deps.capture = (pane, lines) => (++calls === 2 ? null : capture(pane, lines));
+    await runPanelQuotaPass(state, w.deps, ON);
+    expect(w.sent).toHaveLength(0);
+    expect(state.panes[KEY_A].state).toBe('waiting_quota');
+
+    w.deps.capture = capture;
+    await runPanelQuotaPass(state, w.deps, ON);
+    expect(w.sent).toEqual(['%7']);
+    expect(state.panes[KEY_A].state).toBe('resumed');
+  });
+
+  it('a code that turned non-resumable before the reset ends the wait and sends no key', async () => {
+    const { w, state } = await waitingAtReset();
+    w.screens['%7'] = screen(ERR_1310);
+    await runPanelQuotaPass(state, w.deps, ON);
+    expect(w.sent).toHaveLength(0);
+    expect(state.panes[KEY_A].state).toBe('quota-ended');
+    expect(w.journal.some((r) => r.result === 'end' && r.class === 'quota')).toBe(true);
+  });
+
+  it('an older resumable error and a newer non-resumable one in the same tail: the newer decides, no wait and no key', async () => {
+    const both = [ERR_1308, 'retrying...', 'API Error: 429 {"error":{"code":1310,"message":"quota exceeded"}}'].join('\n');
+    const w = world({ panes: [PANE_A], screens: { '%7': both }, readingValue: exhausted5h(BASE_MS + H) });
+    const state: PanelState = { panes: {} };
+    await runPanelQuotaPass(state, w.deps, ON);
+    w.clock.now = BASE_MS + 2 * H;
+    await runPanelQuotaPass(state, w.deps, ON);
+    expect(state.panes[KEY_A].state).toBe('quota-ended');
+    expect(state.panes[KEY_A].waits).toBe(0);
+    expect(w.sent).toHaveLength(0);
+  });
+
+  it('a wrapper line that appears between the first capture and the reset-time capture stops the keys', async () => {
+    const env = { ...ON, OMC_PANEL_WRAPPER_OWNS_RE: 'external wrapper: quota wait' };
+    const { w, state } = await waitingAtReset(env);
+    let calls = 0;
+    const plain = screen(ERR_1308);
+    // The first capture of the pass is plain, the fresh one shows the wrapper's line next to the error.
+    w.deps.capture = () => (++calls === 1 ? plain : [ERR_1308, WRAPPER_LINE].join('\n'));
+    await runPanelQuotaPass(state, w.deps, env);
+    expect(w.sent).toHaveLength(0);
+    expect(state.panes[KEY_A].state).toBe('waiting_quota');
+    expect(w.log.some((t) => /wrapper owns this error at reset time/.test(t))).toBe(true);
+  });
+
+  it('a pane whose provider exited during the wait gets no key; an unknown provider state is retried on the next pass', async () => {
+    const { w, state } = await waitingAtReset();
+    w.running['%7'] = null;
+    await runPanelQuotaPass(state, w.deps, ON);
+    expect(w.sent).toHaveLength(0);
+    expect(state.panes[KEY_A].state, 'an unknown state must keep the wait').toBe('waiting_quota');
+
+    w.running['%7'] = false;
+    await runPanelQuotaPass(state, w.deps, ON);
+    expect(w.sent, 'the key would be typed into the shell').toHaveLength(0);
+    expect(state.panes[KEY_A].state).toBe('resumed');
+    expect(w.log.some((t) => /provider no longer runs in the pane/.test(t))).toBe(true);
+    expect(w.journal.some((r) => r.result === 'resume')).toBe(false);
+  });
+
+  it('due resumes run before new detections: a pane whose reading never answers does not hold back a pane that is due', async () => {
+    const { w, state } = await waitingAtReset();
+    // Listed first: a second pane with a new error whose provider reading never comes back.
+    w.panes = [PANE_B, PANE_A];
+    w.screens['%8'] = screen(ERR_1308);
+    w.deps.readQuota = () => new Promise<QuotaReading | null>(() => {});
+    await runPanelQuotaPass(state, w.deps, { ...ON, OMC_PANEL_QUOTA_PASS_LIMIT_S: '0.2' });
+    expect(w.sent, 'the due pane was not resumed').toEqual(['%7']);
+    expect(state.panes[KEY_A].state).toBe('resumed');
+    expect(w.log.filter((t) => /time limit/.test(t))).toHaveLength(1);
+  });
+
+  it('a pass that ran out of time on one new pane starts the next pass at the pane after it', async () => {
+    const w = world({ panes: [PANE_A, PANE_B], screens: { '%7': screen(ERR_1308), '%8': screen(ERR_1308) }, readingValue: exhausted5h(BASE_MS + 2 * H) });
+    const captured: string[] = [];
+    const capture = w.deps.capture;
+    w.deps.capture = (pane, lines) => { captured.push(pane.id); return capture(pane, lines); };
+    const state: PanelState = { panes: {} };
+    // Pass 1: the reading for the first pane never comes back.
+    w.deps.readQuota = () => new Promise<QuotaReading | null>(() => {});
+    await runPanelQuotaPass(state, w.deps, { ...ON, OMC_PANEL_QUOTA_PASS_LIMIT_S: '0.1' });
+    expect(captured).toEqual(['%7']);
+    expect(state.cursor).toBe(paneKey(PANE_B));
+
+    // Pass 2 reads fast and begins with the pane that the last pass did not reach.
+    captured.length = 0;
+    w.deps.readQuota = async () => w.reading.value;
+    await runPanelQuotaPass(state, w.deps, ON);
+    expect(captured[0]).toBe('%8');
+    expect(state.panes[paneKey(PANE_B)].state).toBe('waiting_quota');
+    expect(state.panes[KEY_A].state).toBe('waiting_quota');
+    expect(state.cursor).toBeUndefined();
+  });
+
   it('an external wrapper that owns the wait: no entry, no keys, the pane is left alone', async () => {
     const owned = [ERR_1308, WRAPPER_LINE].join('\n');
     const w = world({ panes: [PANE_A], screens: { '%7': owned }, readingValue: exhausted5h(BASE_MS + H) });
@@ -407,6 +550,7 @@ describe('panel quota wait: daemon entry point and real reading', () => {
       listPanes: () => [PANE_A],
       capture: () => screen(ERR_1308),
       sendContinue: (pane) => { sent.push(pane.id); return true; },
+      providerRunning: () => true,
     };
     const stateDir = join(dir, 'daemon');
     await runDaemonPanelQuotaPass({ stateDir, env, tmux, log: (t) => log.push(t), now: () => BASE_MS });
@@ -427,6 +571,7 @@ describe('panel quota wait: daemon entry point and real reading', () => {
       listPanes: () => [PANE_A],
       capture: () => screen(ERR_1308),
       sendContinue: () => true,
+      providerRunning: () => true,
     };
     const offDir = join(dir, 'off');
     const out = await runDaemonPanelQuotaPass({ stateDir: offDir, env: {}, tmux, now: () => BASE_MS });
@@ -434,12 +579,13 @@ describe('panel quota wait: daemon entry point and real reading', () => {
     expect(existsSync(offDir)).toBe(false);
   });
 
-  it('a missing key file gives no reading: the task ends with class quota and no keys are sent', async () => {
+  it('a missing key file gives no reading: the wait ends with class quota and no keys are sent', async () => {
     const sent: string[] = [];
     const tmux: PanelTmux = {
       listPanes: () => [PANE_A],
       capture: () => screen(ERR_1308),
       sendContinue: (pane) => { sent.push(pane.id); return true; },
+      providerRunning: () => true,
     };
     const env: PanelEnv = {
       ...ON,
