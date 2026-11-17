@@ -525,12 +525,6 @@ function formatSkillDescriptor(skill) {
     scope: skill.scope
   };
   const summary = skill.description || skill.summary || summarizeSkillContent(skill.content);
-  // Note: skill.path contains the exact filesystem path and must be preserved exactly.
-  // If the message containing this descriptor is passed through cleanTextBlock(),
-  // ensure the path is not modified (variation selectors, unicode chars must survive).
-  // The JSON.stringify() provides reversible encoding for the metadata path, but the
-  // text path in "Load instructions" is not encoded. This is intentional so the agent
-  // can read it directly without decoding.
   return compactText([
     `### ${skill.name} (${skill.scope})`,
     `<skill-metadata>${JSON.stringify(metadata)}</skill-metadata>`,
@@ -617,36 +611,11 @@ async function main() {
     if (matchingSkills.length > 0) {
       const message = formatSkillsMessage(matchingSkills);
       const sanitize = await loadContextText();
-      // SECURITY: Path identifiers in skill descriptors must be preserved exactly, including special unicode.
-      // When OMC_CONTEXT_TEXT_SANITIZE=1, cleanTextBlock removes variation selectors and format chars,
-      // which corrupts paths like 'project-⚙️'. To preserve paths, extract them before cleaning,
-      // apply cleaning to the rest of the message, then restore paths.
-      let cleanedMessage = message;
-      if (sanitize) {
-        // Extract all literal file paths (from "Load instructions: if this skill is needed, read <PATH>")
-        // and preserve them from cleaning. Since paths are already in JSON.stringify in <skill-metadata>,
-        // we only need to protect the literal path in the Load instructions line.
-        const pathPattern = /Load instructions: if this skill is needed, read (.+?) and follow/g;
-        const pathMap = new Map();
-        let pathIndex = 0;
-        const messageWithPlaceholders = message.replace(pathPattern, (match, path) => {
-          const placeholder = `__SKILL_PATH_${pathIndex}__`;
-          pathMap.set(placeholder, path);
-          pathIndex++;
-          return `Load instructions: if this skill is needed, read ${placeholder} and follow`;
-        });
-        // Clean the message with placeholders instead of paths
-        cleanedMessage = sanitize.cleanTextBlock(messageWithPlaceholders);
-        // Restore the original paths
-        for (const [placeholder, path] of pathMap) {
-          cleanedMessage = cleanedMessage.replace(placeholder, path);
-        }
-      }
       console.log(JSON.stringify({
         continue: true,
         hookSpecificOutput: {
           hookEventName: 'UserPromptSubmit',
-          additionalContext: cleanedMessage
+          additionalContext: sanitize ? sanitize.cleanTextBlock(message) : message
         }
       }));
     } else {
