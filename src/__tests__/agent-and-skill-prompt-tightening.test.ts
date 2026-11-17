@@ -86,21 +86,21 @@ describe('reviewer and architect agent prompts', () => {
     }
   });
 
-  test('architect guards record-review-blockers against non-Ultragoal contexts', () => {
-    const text = read('agents/architect.md');
-    // Both status lines must include the Ultragoal final-review context condition
+  test('architect scopes record-review-blockers to the Ultragoal final review on both status lines', () => {
+    // src/ultragoal/artifacts.ts recordFinalReviewBlockers rejects the call unless the goal is in
+    // progress and the only unresolved story, with an active /goal snapshot.
+    const lines = read('agents/architect.md').split('\n');
     for (const status of ['WATCH', 'BLOCK']) {
-      const statusSection = text.match(new RegExp(`- ${status}:.*(?=\n    - |\n  <|\n</)`));
-      expect(statusSection).toBeDefined();
-      expect(statusSection![0]).toContain('If in Ultragoal final-review context');
-      expect(statusSection![0]).toContain('sole unresolved story with /goal active');
+      const line = lines.find((l) => l.trim().startsWith(`- ${status}:`));
+      expect(line).toBeDefined();
+      const condition = line!.indexOf('If in Ultragoal final-review context (sole unresolved story with /goal active)');
+      expect(condition).toBeGreaterThanOrEqual(0);
+      // The first mention of the command follows the condition: no unscoped instruction before it.
+      expect(line!.indexOf('record-review-blockers')).toBeGreaterThan(condition);
+      // Ordinary reviews are told not to invoke it, and the command is named only in those two sentences.
+      expect(line).toContain('For ordinary /ralph and /ralplan reviews without an active Ultragoal plan, track concerns in your review response without attempting to invoke record-review-blockers.');
+      expect(line!.match(/record-review-blockers/g)).toHaveLength(2);
     }
-  });
-
-  test('architect clarifies that ordinary reviews track concerns without invoking record-review-blockers', () => {
-    const text = read('agents/architect.md');
-    // Verify that the agent prompt explicitly handles non-Ultragoal contexts
-    expect(text).toMatch(/For ordinary\s+\/ralph\s+and\s+\/ralplan\s+reviews.*track\s+concerns.*without\s+attempting\s+to\s+invoke\s+record-review-blockers/i);
   });
 
   test('code-reviewer has the root-cause guard that treats error-masking fallbacks as blockers', () => {
