@@ -1,0 +1,1 @@
+{"version":3,"file":"tmux.d.ts","sourceRoot":"","sources":["../../src/notifications/tmux.ts"],"names":[],"mappings":"AAAA;;;;GAIG;AAIH;;;GAGG;AACH,wBAAgB,qBAAqB,IAAI,MAAM,GAAG,IAAI,CA8BrD;AAED;;GAEG;AACH,wBAAgB,mBAAmB,CAAC,QAAQ,EAAE,MAAM,GAAG,MAAM,EAAE,CAkB9D;AAED;;;GAGG;AACH,wBAAgB,cAAc,IAAI,MAAM,GAAG,IAAI,CAI9C;AAED;;;;;GAKG;AACH,wBAAgB,oBAAoB,IAAI,MAAM,GAAG,IAAI,CAiBpD"}

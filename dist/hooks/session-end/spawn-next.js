@@ -1,0 +1,252 @@
+import * as fs from 'fs';
+import * as path from 'path';
+import { randomUUID } from 'crypto';
+import { spawn } from 'child_process';
+import { decideNextStage, VERIFY_COMMAND_PATTERN, MAX_VERIFY_COMMAND_LENGTH, MAX_VERIFY_COMMANDS } from './routing.js';
+import { getOmcRoot, validateSessionId } from '../../lib/worktree-paths.js';
+import { quoteForCmd } from '../../cli/tmux-utils.js';
+/**
+ * AFK allowlist for factory-spawned sessions: gh read/comment, file read/write,
+ * and github.com-only WebFetch. Everything else is denied in -p mode and must
+ * fall back to HITL (the session's issue-comment contract), never silent failure.
+ */
+export const AFK_ALLOWED_TOOLS = [
+    'Bash(gh issue view:*)',
+    'Bash(gh issue comment:*)',
+    'Bash(gh issue edit:*)',
+    'Bash(gh pr view:*)',
+    'Bash(gh pr list:*)',
+    'Bash(gh label list:*)',
+    'Read',
+    'Glob',
+    'Grep',
+    'Write',
+    'Edit',
+    'WebFetch(domain:github.com)',
+].join(',');
+export const AFK_INCLUDE_USER_SETTINGS_ENV = 'OMC_AFK_INCLUDE_USER_SETTINGS';
+export const AFK_SPAWN_FLAGS = [
+    '--permission-mode', 'acceptEdits',
+    '--allowedTools', AFK_ALLOWED_TOOLS,
+    // Default isolation: user-level hooks/settings do not fire in a headless
+    // chain link unless OMC_AFK_INCLUDE_USER_SETTINGS=1 opts them in.
+    '--setting-sources', 'project,local',
+];
+function afkSpawnFlags(includeUserSettings) {
+    const flags = [...AFK_SPAWN_FLAGS];
+    if (includeUserSettings) {
+        flags[flags.indexOf('--setting-sources') + 1] = 'user,project,local';
+    }
+    return flags;
+}
+/**
+ * Args (command excluded) for one factory chain link: intent prompt + AFK
+ * permission profile. A stage's declared `verify` commands extend the profile
+ * with exactly those `Bash(...)` entries — the argv is a trust boundary, so
+ * they are re-checked against the routing pattern here rather than trusted from
+ * whatever route table produced the directive.
+ */
+export function factoryLinkArgv(prompt, sessionId, verifyCommands = [], fixedBashCommands = [], includeUserSettings = process.env[AFK_INCLUDE_USER_SETTINGS_ENV] === '1') {
+    if (verifyCommands.length === 0 && fixedBashCommands.length === 0) {
+        return ['-p', prompt, '--session-id', sessionId, ...afkSpawnFlags(includeUserSettings)];
+    }
+    const isValid = (command) => command.length <= MAX_VERIFY_COMMAND_LENGTH && VERIFY_COMMAND_PATTERN.test(command);
+    // fixedBashCommands are caller-owned constants (e.g. ralph's read-only git
+    // set); only the user/route-declared verify list counts against the cap.
+    const allowedTools = [
+        AFK_ALLOWED_TOOLS,
+        ...fixedBashCommands.filter(isValid).map((command) => `Bash(${command})`),
+        ...verifyCommands
+            .filter(isValid)
+            .slice(0, MAX_VERIFY_COMMANDS)
+            .map((command) => `Bash(${command})`),
+    ].join(',');
+    const flags = afkSpawnFlags(includeUserSettings);
+    flags[flags.indexOf('--allowedTools') + 1] = allowedTools;
+    return ['-p', prompt, '--session-id', sessionId, ...flags];
+}
+const REPO_PATTERN = /^[\w.-]+\/[\w.-]+$/;
+/** Shared label charset (stage/skill/labels): safe for paths and argv. */
+export const LABEL_PATTERN = /^[\w.-]+$/;
+/**
+ * The chain rides a detached manifest job: every field that lands in a
+ * spawned argv or a filesystem path is validated here. An invalid chain is a
+ * hard reject (manifest failure), not a partial spawn.
+ */
+export function validateChainFields(chain) {
+    validateSessionId(chain.sessionId);
+    if (chain.includeUserSettings !== undefined && typeof chain.includeUserSettings !== 'boolean') {
+        throw new Error('invalid chain user settings option');
+    }
+    const tracker = chain.tracker;
+    if (tracker) {
+        if (!REPO_PATTERN.test(tracker.repo))
+            throw new Error(`invalid tracker repo: ${tracker.repo}`);
+        if (!LABEL_PATTERN.test(tracker.nextLabel) || !LABEL_PATTERN.test(tracker.failedLabel)) {
+            throw new Error(`invalid tracker label: ${tracker.nextLabel}/${tracker.failedLabel}`);
+        }
+    }
+    if (chain.visits) {
+        for (const [stage, count] of Object.entries(chain.visits)) {
+            if (!LABEL_PATTERN.test(stage) || !Number.isInteger(count) || count < 0 || count > 99) {
+                throw new Error(`invalid visits entry: ${stage}=${count}`);
+            }
+        }
+    }
+}
+export function spawnNextAlertComment(chain) {
+    return `链已停住：会话结束状态 ${chain.outcome}:${chain.reason} 触发下一环启动失败，需人工修复（v1 无自动重试）。`;
+}
+export function planSpawnNext(chain, omcRoot) {
+    validateChainFields(chain);
+    const directive = decideNextStage(chain.outcome, chain.reason, chain.routeTable);
+    if (!directive)
+        return null;
+    const handoffPath = path.join(omcRoot, 'handoffs', `${chain.sessionId}-${directive.stage}.json`);
+    const trackerCommands = chain.tracker
+        ? [
+            ['gh', 'issue', 'edit', String(chain.tracker.issue), '--repo', chain.tracker.repo, '--add-label', chain.tracker.nextLabel],
+            ['gh', 'issue', 'comment', String(chain.tracker.issue), '--repo', chain.tracker.repo, '--body', `链已推进到 ${directive.stage}，交接上下文：${path.basename(handoffPath)}`],
+        ]
+        : [];
+    const nextSessionId = randomUUID();
+    return {
+        directive,
+        handoffPath,
+        spawnArgv: ['claude', ...factoryLinkArgv(`/${directive.skill} 继续 ${directive.stage} 环；交接上下文：${path.basename(handoffPath)}`, nextSessionId, directive.verify, [], chain.includeUserSettings === true)],
+        nextSessionId,
+        trackerCommands,
+    };
+}
+/** IO orchestration only: the routing decision comes from the T1 pure function via planSpawnNext. */
+export function executeSpawnNext(chain, directory, spawnFn = defaultSpawnFn) {
+    const omcRoot = getOmcRoot(directory);
+    const plan = planSpawnNext(chain, omcRoot);
+    if (!plan)
+        return;
+    fs.mkdirSync(path.dirname(plan.handoffPath), { recursive: true });
+    fs.writeFileSync(plan.handoffPath, JSON.stringify({
+        sessionId: chain.sessionId,
+        from: { outcome: chain.outcome, reason: chain.reason },
+        next: plan.directive,
+        context: chain.handoffContext ?? '',
+    }, null, 2), 'utf8');
+    const factoryDir = path.join(omcRoot, 'state', 'factory');
+    const ledgerPath = path.join(factoryDir, `chain-${plan.nextSessionId}.json`);
+    try {
+        // The next link's ledger must exist before it ends its session, so the
+        // SessionEnd enqueuer finds it; written under the same failure alerts.
+        fs.mkdirSync(factoryDir, { recursive: true });
+        fs.writeFileSync(ledgerPath, JSON.stringify({
+            intentId: chain.intentId ?? `chain-${chain.sessionId}`,
+            stage: plan.directive.stage,
+            routeTable: chain.routeTable,
+            tracker: chain.tracker,
+            visits: { ...(chain.visits ?? {}), [plan.directive.stage]: (chain.visits?.[plan.directive.stage] ?? 0) + 1 },
+            includeUserSettings: chain.includeUserSettings === true,
+        }, null, 2), 'utf8');
+        spawnFn(plan.spawnArgv[0], plan.spawnArgv.slice(1), { cwd: directory });
+    }
+    catch (error) {
+        // Don't leave a dead ledger pointing at a session that never started.
+        try {
+            fs.unlinkSync(ledgerPath);
+        }
+        catch { /* never written */ }
+        if (chain.tracker) {
+            spawnFn('gh', ['issue', 'comment', String(chain.tracker.issue), '--repo', chain.tracker.repo, '--body', spawnNextAlertComment(chain)]);
+            spawnFn('gh', ['issue', 'edit', String(chain.tracker.issue), '--repo', chain.tracker.repo, '--add-label', chain.tracker.failedLabel]);
+        }
+        throw error;
+    }
+    for (const argv of plan.trackerCommands) {
+        spawnFn(argv[0], argv.slice(1));
+    }
+}
+/**
+ * `claude` and `gh` are .cmd shims on Windows, which CreateProcess cannot exec
+ * directly; route those through cmd.exe. The -p prompt for claude and --body
+ * for gh go through stdin on Windows: cmd.exe's ANSI codepage mangles non-ASCII
+ * argv (dogfood: Chinese intent prompts and issue bodies mojibake'd), while the
+ * stdin pipe stays UTF-8 end to end. This prevents cmd.exe's quote handling
+ * from being exploited: backslash-quote is not an escape (unlike POSIX shells),
+ * so embedded quotes would toggle quoting and allow shell metacharacters (&|<>)
+ * to run as commands. Additionally, cmd.exe expands %VAR% inside quotes,
+ * risking env var leaks. Using stdin with --body-file - and stdin with -p
+ * neutralizes both issues while maintaining proper argument escaping via
+ * quoteForCmd (which doubles quotes and percent signs, rejecting CR/LF).
+ *
+ * The .cmd-shim constraint is a Windows PLATFORM fact, not a shell fact: gate
+ * on process.platform, never on shell detection. Gating on the shell made
+ * Git Bash (MSYSTEM set) skip the cmd.exe route and spawn the .cmd shim
+ * directly, which CreateProcess cannot exec — the child died instantly and
+ * silently (stdio ignored), so `omc ralph afk` under Git Bash launched
+ * nothing. Factory chain links escaped this only by accident: the detached
+ * worker's env is an allowlist that drops MSYSTEM. The long-running factory
+ * listener (src/factory/listener.ts), which spawns links from its own
+ * inherited environment, had the same broken route under Git Bash.
+ *
+ * detached:true is win32-hostile here (dogfood bisect: cmd.exe children
+ * spawned detached exit 1 before writing a transcript), so it is only
+ * applied off-win32. Orphaning still holds: Windows children survive
+ * parent exit without the detached flag.
+ */
+export function defaultSpawnFn(command, args, ctx) {
+    const baseOpts = process.platform === 'win32'
+        ? { windowsHide: true, cwd: ctx?.cwd }
+        : { detached: true, windowsHide: true, cwd: ctx?.cwd };
+    if (process.platform === 'win32' && command === 'claude') {
+        const pIdx = args.indexOf('-p');
+        const inlinePrompt = pIdx !== -1 && pIdx + 1 < args.length ? args[pIdx + 1] : undefined;
+        if (inlinePrompt !== undefined && !inlinePrompt.startsWith('--')) {
+            const rest = [...args.slice(0, pIdx + 1), ...args.slice(pIdx + 2)];
+            const child = spawn('cmd.exe', ['/d', '/s', '/c', `"${command} ${rest.map(quoteForCmd).join(' ')}"`], {
+                ...baseOpts,
+                stdio: ['pipe', 'ignore', 'ignore'],
+                windowsVerbatimArguments: true,
+            });
+            child.stdin?.write(inlinePrompt, 'utf8');
+            child.stdin?.end();
+            child.unref();
+            return child;
+        }
+        const child = spawn('cmd.exe', ['/d', '/s', '/c', `"${command} ${args.map(quoteForCmd).join(' ')}"`], {
+            ...baseOpts,
+            stdio: 'ignore',
+            windowsVerbatimArguments: true,
+        });
+        child.unref();
+        return child;
+    }
+    // gh is a .cmd shim on Windows too. Use --body-file - for comment bodies to
+    // avoid cmd.exe's quote toggle and %VAR% expansion on free-form text; properly
+    // quote remaining argv using quoteForCmd.
+    if (process.platform === 'win32' && command === 'gh') {
+        const bodyIdx = args.indexOf('--body');
+        if (bodyIdx !== -1 && bodyIdx + 1 < args.length) {
+            const bodyText = args[bodyIdx + 1];
+            // Replace --body <text> with --body-file -
+            const argsWithBodyFile = [...args.slice(0, bodyIdx), '--body-file', '-', ...args.slice(bodyIdx + 2)];
+            const child = spawn('cmd.exe', ['/d', '/s', '/c', `"${command} ${argsWithBodyFile.map(quoteForCmd).join(' ')}"`], {
+                ...baseOpts,
+                stdio: ['pipe', 'ignore', 'ignore'],
+                windowsVerbatimArguments: true,
+            });
+            child.stdin?.write(bodyText, 'utf8');
+            child.stdin?.end();
+            child.unref();
+            return child;
+        }
+        const child = spawn('cmd.exe', ['/d', '/s', '/c', `"${command} ${args.map(quoteForCmd).join(' ')}"`], {
+            ...baseOpts,
+            stdio: 'ignore',
+            windowsVerbatimArguments: true,
+        });
+        child.unref();
+        return child;
+    }
+    const child = spawn(command, args, { ...baseOpts, stdio: 'ignore' });
+    child.unref();
+    return child;
+}
+//# sourceMappingURL=spawn-next.js.map

@@ -1,0 +1,101 @@
+/**
+ * Persistent Mode Hook
+ *
+ * Unified handler for persistent work modes: ralph and todo-continuation.
+ * This hook intercepts Stop events and enforces work continuation based on:
+ * 1. Active ralph loop (until cancelled via /oh-my-claudecode:cancel)
+ * 2. Any pending todos (general enforcement)
+ *
+ * Priority order: Ralph > Todo Continuation
+ */
+import { StopContext } from '../todo-continuation/index.js';
+import type { IdleNotificationRepoState } from './idle-repo-state.js';
+export interface ToolErrorState {
+    tool_name: string;
+    tool_input_preview?: string;
+    error: string;
+    timestamp: string;
+    retry_count: number;
+}
+export interface PersistentModeResult {
+    /** Whether to block the stop event */
+    shouldBlock: boolean;
+    /** Message to inject into context */
+    message: string;
+    /** Which mode triggered the block */
+    mode: 'ralph' | 'todo-continuation' | 'autopilot' | 'autoresearch' | 'team' | 'ralplan' | 'skill-active' | 'none';
+    /** Additional metadata */
+    metadata?: {
+        todoCount?: number;
+        iteration?: number;
+        maxIterations?: number;
+        reinforcementCount?: number;
+        todoContinuationAttempts?: number;
+        phase?: string;
+        tasksCompleted?: number;
+        tasksTotal?: number;
+        toolError?: ToolErrorState;
+    };
+}
+export declare function shouldWriteStateBack(statePath: string | null | undefined): boolean;
+/**
+ * Pending owned async work (background Bash/Task or an armed wakeup) means the
+ * agent is legitimately waiting for an external notification/resume. In that
+ * window persistent modes should not inject a "stalled" reinforcement.
+ */
+export declare function hasPendingOwnedAsyncWork(directory: string, sessionId?: string): boolean;
+/**
+ * Read last tool error from state directory.
+ * Returns null if file doesn't exist or error is stale (>60 seconds old).
+ */
+export declare function readLastToolError(directory: string): ToolErrorState | null;
+/**
+ * Clear tool error state file atomically.
+ */
+export declare function clearToolErrorState(directory: string): void;
+/**
+ * Generate retry guidance message for tool errors.
+ * After 5+ retries, suggests alternative approaches.
+ */
+export declare function getToolErrorRetryGuidance(toolError: ToolErrorState | null): string;
+/**
+ * Reset todo-continuation attempt counter (call when todos actually change)
+ */
+export declare function resetTodoContinuationAttempts(sessionId: string): void;
+/**
+ * Read the session-idle notification cooldown in seconds from global OMC config.
+ * Default: 60 seconds. 0 = disabled (no cooldown).
+ */
+export declare function getIdleNotificationCooldownSeconds(): number;
+/**
+ * OpenClaw stop wakes should usually bypass idle cooldowns, but unchanged
+ * zero-backlog repo state should stay suppressed so stale repo-level CI replay
+ * bursts do not re-arm after the actionable backlog is already zero.
+ */
+export declare function shouldWakeOpenClawOnStop(stateDir: string, sessionId?: string, repoState?: IdleNotificationRepoState | null): boolean;
+/**
+ * Check whether the session-idle notification cooldown has elapsed.
+ * Returns true if the notification should be sent.
+ */
+export declare function shouldSendIdleNotification(stateDir: string, sessionId?: string, repoState?: IdleNotificationRepoState | null): boolean;
+/**
+ * Record that the session-idle notification was sent at the current timestamp.
+ */
+export declare function recordIdleNotificationSent(stateDir: string, sessionId?: string, repoState?: IdleNotificationRepoState | null): void;
+/**
+ * Main persistent mode checker.
+ * Resolves which mode (if any) should block, then applies the thinking-only
+ * streak guard so an active mode cannot loop forever re-injecting continuation
+ * prompts while the agent only emits thinking blocks and never tool_use (#3280).
+ */
+export declare function checkPersistentModes(sessionId?: string, directory?: string, stopContext?: StopContext): Promise<PersistentModeResult>;
+/**
+ * Create hook output for Claude Code.
+ * Returns `continue: false` when `shouldBlock` is true to hard-block the stop event.
+ * Returns `continue: true` for terminal states, escape hatches, and errors.
+ */
+export declare function createHookOutput(result: PersistentModeResult): {
+    continue: boolean;
+    message?: string;
+};
+//# sourceMappingURL=index.d.ts.map

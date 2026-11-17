@@ -1,0 +1,1 @@
+{"version":3,"file":"last-tool.js","sourceRoot":"","sources":["../../../src/hud/elements/last-tool.ts"],"names":[],"mappings":"AAAA;;;;GAIG;AAEH,OAAO,EAAE,GAAG,EAAE,MAAM,cAAc,CAAC;AAEnC;;;;GAIG;AACH,MAAM,UAAU,cAAc,CAAC,YAA2B;IACxD,IAAI,CAAC,YAAY;QAAE,OAAO,IAAI,CAAC;IAC/B,OAAO,GAAG,GAAG,CAAC,OAAO,CAAC,GAAG,YAAY,EAAE,CAAC;AAC1C,CAAC"}
