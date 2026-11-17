@@ -24,6 +24,7 @@ import {
   type TeamInstanceId,
   type TmuxServerIdentity,
 } from './types.js';
+import type { WorkerProviderLiveness } from './worker-provider-liveness.js';
 
 // ---------------------------------------------------------------------------
 // Config
@@ -52,6 +53,11 @@ export interface NudgeAuthority {
    * Missing ownership is never replaced with ambient pane capture.
    */
   getPaneOwnership: (paneId: string) => WorkerPaneOwnership | undefined;
+  /**
+   * Provider liveness for one persisted worker pane. A `dead` provider leaves
+   * a shell prompt that reads as idle, so it is never nudged.
+   */
+  getProviderLiveness: (paneId: string) => Promise<WorkerProviderLiveness>;
   /**
    * Perform final authority validation and transport while holding the
    * original instance lifecycle lock. Returning false means no delivery was
@@ -134,6 +140,7 @@ export class NudgeTracker {
       || sessionName.trim() !== sessionName
       || (authority.provider !== undefined && authority.provider !== provider)
       || typeof authority.getPaneOwnership !== 'function'
+      || typeof authority.getProviderLiveness !== 'function'
       || typeof authority.executeNudge !== 'function'
       || (provider === 'tmux'
         && (!authority.tmuxServerIdentity || !isValidTmuxServerIdentity(authority.tmuxServerIdentity)))
@@ -181,7 +188,8 @@ export class NudgeTracker {
         continue;
       }
 
-      const idle = await isPaneIdle(ownership);
+      const idle = (await authority.getProviderLiveness(paneId)) !== 'dead'
+        && await isPaneIdle(ownership);
 
       if (!idle) {
         // Pane is active — reset idle tracking

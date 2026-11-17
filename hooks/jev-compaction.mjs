@@ -1,4 +1,4 @@
-/* global crypto, TextEncoder */
+/* global crypto, TextEncoder, URL */
 /**
  * Jev compaction: a Claude Code hooks module ("mod") for the judgment point `compaction`.
  *
@@ -33,7 +33,12 @@
  * The built-in summary (next(e)) also runs when the conversation is too short or its tool results
  * are too small for the removal to matter, while requests are paused after an endpoint failure, when
  * OMC_JEV_MAX_REQUESTS is used up, while the shared breaker is open or the shared request limit is
- * used up, and when Jev fails, answers too little or does not answer in time.
+ * used up, and when Jev fails, answers too little or does not answer in time. A batch the API refuses
+ * (HTTP 400, 413, 422) and ends the compaction in the built-in summary keeps that agent (the main loop, or a
+ * subagent) from asking again for BATCH_REFUSED_MS (reason batch_refused; no shared breaker opens, the refusal
+ * is about the conversation). A result Jev did not rate (failed or
+ * unstarted batch, missing answer) has no rating: it counts as UNRATED_SCORE, so it is cut for lack of
+ * room only after the results rated lower.
  *
  * turn.complete. With OMC_JEV_COMPACT_AT_PERCENT (off when unset) the module asks the host to compact
  * once the context reaches that share of the compaction window: main loop only, at most once per
@@ -42,6 +47,11 @@
  * made). After a compaction of the main loop (this module's or the built-in summary) it also waits
  * until the context has grown by OWN_MIN_GAIN of the window from the lowest usage since it (from the
  * threshold at most).
+ *
+ * turn.step. After a compaction of the main loop that this module installed, the first model request
+ * that carries usage writes an `after` record: the input tokens the API counted for it
+ * (tokens_after_real) next to chars_after of the compaction record (compact_ts). Every record carries
+ * module_rev, the sha256 of the module file the process loaded (null when it cannot be read).
  *
  * What goes to the endpoint: the /compact instructions and the last USER_MESSAGES user messages
  * (together USER_CHARS characters), and for each scored result its tool, its input (STATE_INPUT_CHARS)
@@ -121,10 +131,23 @@ export const DEFAULT_EXCERPT_CHARS = 4000;
 const MIN_TURNS_BETWEEN = 5;
 const WINDOW_REFRESH_TURNS = 20;
 const CONFIG_TTL_MS = 30000;
-// A request batch counts when at least this share of its questions got a score; unanswered
-// questions get UNANSWERED_SCORE ("may be useful" is 2/3).
+// A request batch counts when at least this share of its questions got a score.
 const PARTIAL_OK = 0.5;
+// The score from which a result that does not fit whole may be kept as a short copy (allocate).
+const SHORT_COPY_MIN_SCORE = 0.5;
+// A result held back on purpose (a prose call naming a secret path, TaskOutput) is never sent and has no rating: UNANSWERED_SCORE ranks it
+// below every result that was merely not rated and gives it no short copy.
 const UNANSWERED_SCORE = 0.4;
+// A result Jev was asked about but did not rate (its batch failed, was never started, or the answer lacks it) has no rating at all:
+// UNRATED_SCORE is the lowest score that still allows a short copy, so it is cut for lack of room only after the results rated lower
+// (a result rated "may be useful" is 2/3).
+const UNRATED_SCORE = SHORT_COPY_MIN_SCORE;
+// A batch the API refuses (HTTP 400, 413, 422) is about that conversation, not about the endpoint being down, so it opens no breaker.
+// When the compaction ends in the built-in summary because of it, the process remembers the refusal for BATCH_REFUSED_MS, per session id
+// and agent (the main loop is 'main'), and the compactions in between run the summary (blockedReason). It is about one conversation, so
+// another session in the same process (a resume or a swap) is not held back by it.
+const BATCH_REFUSED_MS = 10 * 60 * 1000;
+const BATCH_REFUSED_STATUSES = [400, 413, 422];
 const PROBE_MAX_CHARS = 5_000_000;
 // A file or URL named in the last user messages counts as needed when its name has at least this
 // many characters (shorter names match too much text).
@@ -264,7 +287,7 @@ const TOOL_PATH_FIELDS = { Glob: ['pattern'], Grep: ['glob'] };
 const NAMED_FIELD_TOOLS = new Set(['Read', 'Write', 'Edit', 'MultiEdit', 'NotebookEdit', 'Grep', 'Glob', 'LS', 'Bash', 'PowerShell', 'Monitor', 'WebFetch', 'WebSearch']);
 // Tools whose input is prose (an agent prompt, a message, a task). A secret or private path anywhere in it does
 // not make the call a trace, since the result is the agent's own report, but the result is not sent either:
-// it is kept as if its request had been held back (UNANSWERED_SCORE), because the agent may have read the path.
+// it is kept at UNANSWERED_SCORE (never sent, no short copy), because the agent may have read the path.
 const PROSE_TOOLS = new Set(['Agent', 'Task', 'SendMessage', 'TaskCreate', 'TaskUpdate', 'TaskStop', 'TodoWrite', 'AskUserQuestion', 'ExitPlanMode', 'Skill']);
 // Tools that return the output of a call started in the background, by its id: their results are held.
 const OUTPUT_TOOLS = new Set(['TaskOutput', 'BashOutput']);
@@ -418,6 +441,7 @@ function freshState() {
     sharedQueue: Promise.resolve(), compacting: 0, pausedUntil: 0, pauseReason: null, failedInRow: 0, noResponseAt: [], requests: 0,
     turnCount: 0, lastAttempt: -Infinity, hostCannot: false, compactWindow: undefined, windowTurn: -Infinity,
     cachedConfig: undefined, cachedAt: -Infinity, growthArmed: false, growthBase: undefined,
+    batchRefusedUntil: new Map(), pendingAfter: undefined, moduleRev: undefined,
   };
 }
 let session = freshState();
@@ -927,12 +951,23 @@ async function rpmCapacityAvailable($, shared, point, now) {
   }
 }
 
+// The key of a refused-batch hold: session id and agent ('main' for the main loop).
+const refusedKey = (sessionId, agentId) => `${sessionId ?? ''}|${agentId ?? 'main'}`;
+// The session id, read within HOST_MS; undefined when it cannot be read.
+async function sessionIdOf($) {
+  const read = await withDeadline($, Promise.resolve().then(() => $.session.id()), HOST_MS);
+  return typeof read.value === 'string' ? read.value : undefined;
+}
+
 // No request goes out: paused after a failure, breaker open, OMC_JEV_MAX_REQUESTS used up, the
 // shared breaker open, or RPM capacity exhausted.
-async function blockedReason($, cfg, now) {
+async function blockedReason($, cfg, now, agentId) {
   if (session.failedInRow >= FAILURES_TO_OPEN) return 'circuit_open';
   if (now < session.pausedUntil) return 'paused';
   if (cfg.maxRequests && session.requests >= cfg.maxRequests) return 'cap';
+  // Expired holds go first, so the map does not grow with every refused conversation and an expired hold costs no session id read.
+  for (const [key, until] of session.batchRefusedUntil) if (until <= now) session.batchRefusedUntil.delete(key);
+  if (session.batchRefusedUntil.size && now < (session.batchRefusedUntil.get(refusedKey(await sessionIdOf($), agentId)) ?? 0)) return 'batch_refused';
   // Bounded like admission: a stalled shared volume falls back to "not open" after SHARED_OP_MS.
   if (cfg.shared && (await sharedStep($, () => readSharedBreaker($, cfg.shared, now), undefined))) return 'breaker_open';
   // The capacity peek is bounded the same way and fails open. Skip the peek when RPM is not enabled.
@@ -1792,7 +1827,7 @@ function allocate(candidates, before, target, added = 0) {
     else if (upFull <= 0 || c.task) c.keep = 'full';
     else if (!c.asked) c.keep = 'trace';
     else if (upFull <= avail) { c.keep = 'full'; avail -= upFull; }
-    else if (c.score >= 0.5 && c.shortCost < c.fullCost && upShort <= avail) { c.keep = 'short'; avail -= Math.max(0, upShort); }
+    else if (c.score >= SHORT_COPY_MIN_SCORE && c.shortCost < c.fullCost && upShort <= avail) { c.keep = 'short'; avail -= Math.max(0, upShort); }
     else c.keep = 'trace';
   }
 }
@@ -2127,11 +2162,18 @@ function withDeadline($, promise, ms) {
   });
 }
 
+// A lone UTF-16 surrogate (a pair cut in two by a head/tail cut, clip or slice) is not valid text: JSON.stringify writes it as a lone \udXXX
+// escape, which a strict server may refuse with a 400 for the whole batch. Every string of a body that goes to Jev is made well-formed first
+// (U+FFFD for each lone surrogate): String.prototype.toWellFormed where the host runtime has it, else the same by a regular expression.
+const LONE_SURROGATE = /[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/g;
+const wellFormed = (text) => (typeof text.toWellFormed === 'function' ? text.toWellFormed() : text.replace(LONE_SURROGATE, '\uFFFD'));
+export const wellFormedBody = (value) => JSON.stringify(value, (_key, v) => (typeof v === 'string' ? wellFormed(v) : v));
+
 async function askJev($, cfg, state, questions) {
   const response = await $.http.fetch(cfg.endpoint, {
     method: 'POST',
     headers: { 'content-type': 'application/json', authorization: `Bearer ${cfg.key}` },
-    body: JSON.stringify({ model: JEV_MODEL, state, questions }),
+    body: wellFormedBody({ model: JEV_MODEL, state, questions }),
   });
   if (!response.ok) {
     const failure = new Error(`HTTP ${response.status}`);
@@ -2159,11 +2201,76 @@ function scoreOf(answer) {
   return typeof s === 'number' && Number.isFinite(s) && s >= 0 && s <= QUESTION_CRITERIA.length - 1 ? s / (QUESTION_CRITERIA.length - 1) : undefined;
 }
 
+// Every record names the module this process loaded: module_rev is the sha256 of the module file (the digest sha256sum prints), read
+// once per process through $.fs from the module's own URL, else from CLAUDE_PLUGIN_ROOT/hooks; null when neither can be read. A running
+// process keeps the code it loaded, so after an update of the plugin the records say which version produced them.
+const MODULE_URL = (() => { try { return import.meta.url; } catch { return undefined; } })();
+function moduleRevOf($) {
+  if (!session.moduleRev) {
+    // Read once, within HOST_MS: a read that never settles (a stalled plugin file system) must not hold every later record, and with it
+    // the compaction and the model request, so on a timeout the revision is null for the rest of the process.
+    session.moduleRev = withDeadline($, (async () => {
+      const paths = [];
+      try {
+        const u = new URL(MODULE_URL);
+        if (u.protocol === 'file:') paths.push(decodeURIComponent(u.pathname).replace(/^\/([A-Za-z]:)/, '$1'));
+      } catch { /* no URL */ }
+      try {
+        const root = await $.env.get('CLAUDE_PLUGIN_ROOT');
+        if (root) paths.push(`${String(root).replace(/\\/g, '/').replace(/\/+$/, '')}/hooks/jev-compaction.mjs`);
+      } catch { /* no root */ }
+      for (const path of paths) {
+        try {
+          const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(await $.fs.read(path)));
+          return [...new Uint8Array(digest)].map((x) => x.toString(16).padStart(2, '0')).join('');
+        } catch { /* the next path */ }
+      }
+      return null;
+    })(), HOST_MS).then((r) => (typeof r.value === 'string' ? r.value : null));
+  }
+  return session.moduleRev;
+}
+
 async function writeRecord($, cfg, record) {
   if (!cfg.spoolDir) return;
   try {
-    await $.fs.write(`${cfg.spoolDir}/${safeName(record.session_id ?? 'unknown')}--${Date.now()}-${randomId()}.json`, JSON.stringify(record));
+    let rev = null;
+    try { rev = await moduleRevOf($); } catch { rev = null; }
+    await $.fs.write(`${cfg.spoolDir}/${safeName(record.session_id ?? 'unknown')}--${Date.now()}-${randomId()}.json`, JSON.stringify({ ...record, module_rev: rev }));
   } catch { /* the log never breaks a compaction */ }
+}
+
+// What the first model request after a compaction of this module reports (turn.step): the input the API counted for it (input, cache
+// read and cache creation tokens) against the characters the module left in the conversation. The tokens include what the characters do not
+// (system prompt, tool definitions), so the two are raw measurements, not a ratio. One record per compaction, written by the first request of
+// the main loop that carries usage; a newer compaction of the main loop replaces one still waiting.
+async function measureAfter($, usage) {
+  const p = session.pendingAfter;
+  const parts = [usage?.input_tokens, usage?.cache_read_input_tokens, usage?.cache_creation_input_tokens];
+  if (!p || typeof parts[0] !== 'number') return;
+  const real = parts.reduce((sum, n) => sum + (typeof n === 'number' && Number.isFinite(n) && n > 0 ? n : 0), 0);
+  if (real <= 0) return;
+  session.pendingAfter = undefined;
+  // A conversation swapped in the same process (not re-registered) is not the one that was compacted: the id must be known now and equal to
+  // the one the compaction was armed with (installed only with a known id), else the measurement is dropped.
+  let now;
+  try { now = await $.session.id(); } catch { now = undefined; }
+  if (typeof now !== 'string' || now !== p.sessionId) return;
+  await writeRecord($, p.cfg, {
+    ts: isoNow(), point: POINT, event: 'after', session_id: p.sessionId, agent_id: null, compact_ts: p.ts,
+    chars_after: p.charsAfter, tokens_after_real: real, measured: 'first_request',
+  });
+}
+
+// turn.step: every model request passes through here; the first one of the main loop after a compaction of this module that brings usage
+// writes the `after` record. The measurement never breaks a request.
+async function* firstRequest($, e, next) {
+  const result = yield* next(e);
+  try {
+    // Bounded: a session id or a write that never settles must not hold the model request (the pending entry is already taken).
+    if (e.agentId === undefined && session.pendingAfter) await withDeadline($, measureAfter($, result?.usage), HOST_MS);
+  } catch { /* the measurement never breaks a request */ }
+  return result;
 }
 
 function noteFailures(failures, now) {
@@ -2248,19 +2355,20 @@ async function decide($, e, cfg, record, started) {
   const net = removable - envelopes;
   record.max_reduction = before ? Math.round((net / before) * 1000) / 1000 : 0;
   if (!before || net / before < MIN_REDUCTION) return { fallback: 'too_few_results' };
-  const blocked = await blockedReason($, cfg, Date.now());
+  const blocked = await blockedReason($, cfg, Date.now(), e.agentId);
   if (blocked) {
     if (blocked === 'paused') Object.assign(record, { paused_until: new Date(session.pausedUntil).toISOString(), pause_reason: session.pauseReason });
     else if (blocked === 'rpm') Object.assign(record, { held: 'rpm' });
     else if (blocked === 'breaker_open') Object.assign(record, { held: 'breaker' });
     else if (blocked === 'cap') Object.assign(record, { held: 'cap' });
+    else if (blocked === 'batch_refused') Object.assign(record, { held: 'batch_refused' });
     return { fallback: blocked };
   }
 
   // Newest results first; only text results of calls outside secret paths are asked about.
   const askable = [...candidates].sort((a, b) => b.resIdx - a.resIdx).filter((c) => !c.secret && !c.proseSecret && !c.taskOutput && c.textOnly);
   record.secret_skipped = candidates.filter((c) => c.secret).length;
-  // A prose call that names a secret path: its result is never sent; it stays as if its request were held back.
+  // A prose call that names a secret path: its result is never sent; it keeps UNANSWERED_SCORE.
   record.secret_held = 0;
   for (const c of candidates) if (c.proseSecret && !c.secret && c.textOnly) { c.asked = true; c.score = UNANSWERED_SCORE; record.secret_held++; }
   // A TaskOutput result whose source task may have accessed a secret: conservatively hold it.
@@ -2311,9 +2419,9 @@ async function decide($, e, cfg, record, started) {
   }
   if (held) {
     // A request held back by the shared breaker or limit is no failure of the endpoint. The results it
-    // would have scored count as unanswered, as after a failed request: the budget decides about them.
+    // would have scored count as unrated, as after a failed request: the budget decides about them.
     const unscored = asked.slice(runs.length * BATCH);
-    for (const c of unscored) { c.asked = true; c.score = UNANSWERED_SCORE; }
+    for (const c of unscored) { c.asked = true; c.score = UNRATED_SCORE; }
     record.unscored = unscored.length;
     record.requests = runs.length;
     if (held.mode === 'circuit-open') Object.assign(record, { held: 'breaker', breaker_until: new Date(held.breaker.until).toISOString(), breaker_reason: held.breaker.reason });
@@ -2331,7 +2439,7 @@ async function decide($, e, cfg, record, started) {
     for (const c of r.batch) {
       c.asked = true;
       const s = r.value ? scoreOf(r.value[c.question]) : undefined;
-      if (s === undefined) c.score = UNANSWERED_SCORE;
+      if (s === undefined) c.score = UNRATED_SCORE;
       else { c.score = s; c.answered = true; answered++; }
     }
     if (!r.value) failures.push(classifyFailure(r));
@@ -2342,6 +2450,11 @@ async function decide($, e, cfg, record, started) {
     record.failure = failures.map((f) => f.kind).join(',');
     noteFailures(failures, Date.now());
     if (!asked.length || answered / asked.length < PARTIAL_OK) {
+      // Only a compaction that ends in the summary because of a refused batch is remembered; one that went on with the other batches is not.
+      if (results.some((r) => !r.value && BATCH_REFUSED_STATUSES.includes(r.error?.status))) {
+        session.batchRefusedUntil.set(refusedKey(record.session_id, e.agentId), Date.now() + BATCH_REFUSED_MS);
+        record.batch_refused = true;
+      }
       session.failedInRow++;
       // A deadline hold still records the failures of the requests that did go out.
       if (held?.mode === 'deadline') return { fallback: 'timeout' };
@@ -2379,18 +2492,26 @@ async function decide($, e, cfg, record, started) {
 }
 
 async function compact($, e, next) {
+  // The point is off or its configuration unreadable: the built-in summary runs. One that replaces the messages of the main loop also ends the
+  // wait for the measurement of an earlier compaction of this module, or the next request would be measured against that one.
+  const passThrough = async () => {
+    const out = await next(e);
+    if (e.agentId === undefined && e.trigger !== 'precompute' && !out?.skip) session.pendingAfter = undefined;
+    return out;
+  };
   let cfg;
-  try { cfg = await readConfig($); } catch { return next(e); }
-  if (cfg.mode === 'off') return next(e);
+  try { cfg = await readConfig($); } catch { return passThrough(); }
+  if (cfg.mode === 'off') return passThrough();
   // An active point replaces the summary, so a summary computed ahead of time would be wasted; while
   // the breaker is open the summary will run, so the host may compute it ahead.
-  if (e.trigger === 'precompute') return cfg.mode === 'active' && !(await blockedReason($, cfg, Date.now())) ? { skip: 'jev-compaction replaces the summary' } : next(e);
+  if (e.trigger === 'precompute') return cfg.mode === 'active' && !(await blockedReason($, cfg, Date.now(), e.agentId)) ? { skip: 'jev-compaction replaces the summary' } : next(e);
   const started = Date.now();
   // Any compaction of the main loop that actually replaced the messages, this module's or the built-in
   // summary, arms the own threshold's growth gate again (ownThreshold). A skip leaves the context as it
-  // was, so the gate stays as it was too.
+  // was, so the gate stays as it was too. The same holds for the measurement still waiting for the request after an earlier compaction
+  // of this module: it ends only when the messages were really replaced.
   const armGrowthGate = (out) => {
-    if (e.agentId === undefined && !out?.skip) { session.growthArmed = true; session.growthBase = undefined; }
+    if (e.agentId === undefined && !out?.skip) { session.growthArmed = true; session.growthBase = undefined; session.pendingAfter = undefined; }
     return out;
   };
   session.compacting++;
@@ -2418,7 +2539,10 @@ async function compact($, e, next) {
     await writeRecord($, cfg, record);
     if (decision.fallback || cfg.mode !== 'active') return armGrowthGate(await next(e));
     if (cfg.toast) { try { $.ui.toast(`Jev compaction: ${decision.before} -> ${decision.after} chars`); } catch { /* optional */ } }
-    return armGrowthGate({ messages: decision.messages });
+    const installed = armGrowthGate({ messages: decision.messages });
+    // The measurement of this compaction replaces any still waiting for an earlier one (armGrowthGate cleared it).
+    if (e.agentId === undefined && record.session_id) session.pendingAfter = { cfg, ts: record.ts, sessionId: record.session_id, charsAfter: decision.after };
+    return installed;
   } finally {
     session.compacting--;
   }
@@ -2443,7 +2567,7 @@ async function ownThreshold($, e, next) {
       if (first || session.turnCount - session.lastAttempt < MIN_TURNS_BETWEEN) return result;
     }
     const cfg = session.cachedConfig;
-    if (cfg.mode !== 'active' || cfg.atPercent === undefined || (await blockedReason($, cfg, Date.now()))) return result;
+    if (cfg.mode !== 'active' || cfg.atPercent === undefined || (await blockedReason($, cfg, Date.now(), undefined))) return result;
     const usage = await $.session.usage();
     const tokens = usage?.context?.tokens;
     if (!Number.isFinite(tokens) || tokens <= 0) return result;
@@ -2516,4 +2640,6 @@ export function register(on) {
   session = freshState();
   on('session.compact', compact);
   on('turn.complete', ownThreshold);
+  // A host without the event only loses the measurement.
+  try { on('turn.step', firstRequest); } catch { /* no turn.step */ }
 }

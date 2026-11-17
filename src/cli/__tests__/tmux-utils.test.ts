@@ -400,7 +400,7 @@ describe('tmux command execution parity on Windows', () => {
 
     expect(mockedExecFile).not.toHaveBeenCalled();
     expect(mockedExec).toHaveBeenLastCalledWith(
-      "tmux 'display-message' '-p' '#{window_width}'",
+      "tmux -u 'display-message' '-p' '#{window_width}'",
       expect.objectContaining({ encoding: 'utf-8' }),
       expect.any(Function),
     );
@@ -648,35 +648,38 @@ describe('createHudWatchPane login shell wrapping', () => {
 
 describe('HUD pane tmux server targeting', () => {
   it('creates HUD panes against the current tmux server', () => {
+    Object.defineProperty(process, 'platform', { value: 'linux', configurable: true });
     vi.stubEnv('TMUX', '/tmp/tmux-100/default,123,0');
     mockedExecFileSync.mockReturnValue('%12\n' as any);
 
     expect(createHudWatchPane('/tmp/project', 'omc hud --watch')).toBe('%12');
 
     const lastCall = mockedExecFileSync.mock.calls.at(-1);
-    expect(lastCall?.[1]?.[0]).toBe('split-window');
+    expect(lastCall?.[1]?.slice(0, 2)).toEqual(['-u', 'split-window']);
     expect(lastCall?.[2]?.env?.TMUX).toBe('/tmp/tmux-100/default,123,0');
   });
 
   it('lists HUD panes against the current tmux server', () => {
+    Object.defineProperty(process, 'platform', { value: 'linux', configurable: true });
     vi.stubEnv('TMUX', '/tmp/tmux-100/default,123,0');
     mockedExecFileSync.mockReturnValue('%2\tnode\tnode /tmp/omc.js hud --watch\n' as any);
 
     expect(listHudWatchPaneIdsInCurrentWindow()).toEqual(['%2']);
 
     const lastCall = mockedExecFileSync.mock.calls.at(-1);
-    expect(lastCall?.[1]).toEqual(['list-panes', '-F', '#{pane_id}\t#{pane_current_command}\t#{pane_start_command}']);
+    expect(lastCall?.[1]).toEqual(['-u', 'list-panes', '-F', '#{pane_id}\t#{pane_current_command}\t#{pane_start_command}']);
     expect(lastCall?.[2]?.env?.TMUX).toBe('/tmp/tmux-100/default,123,0');
   });
 
   it('kills HUD panes against the current tmux server', () => {
+    Object.defineProperty(process, 'platform', { value: 'linux', configurable: true });
     vi.stubEnv('TMUX', '/tmp/tmux-100/default,123,0');
     mockedExecFileSync.mockReturnValue('' as any);
 
     killTmuxPane('%9');
 
     const lastCall = mockedExecFileSync.mock.calls.at(-1);
-    expect(lastCall?.[1]).toEqual(['kill-pane', '-t', '%9']);
+    expect(lastCall?.[1]).toEqual(['-u', 'kill-pane', '-t', '%9']);
     expect(lastCall?.[2]?.env?.TMUX).toBe('/tmp/tmux-100/default,123,0');
   });
 });
