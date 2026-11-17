@@ -198,6 +198,27 @@ describe('which reservation a start and a stop take', () => {
     expect(byCall()['call-a']).toMatchObject({ state: 'alive', agent_id: 'agent-a' });
   });
 
+  it('tells two calls of one type apart by the name or description the start carries back', () => {
+    const dir = tempDir();
+    const now = Date.now();
+    reserveAgent({ dir, sessionId: 'session', toolUseId: 'call-1', subagentType: 'helper', label: 'check the risks', now, env: {} });
+    reserveAgent({ dir, sessionId: 'session', toolUseId: 'call-2', subagentType: 'helper', label: 'write the summary', now: now + 1, env: {} });
+    // the second call starts first: it takes its own reservation, then the first call takes the one that is left
+    expect(commitAgent(dir, 'session', now + 2, { agentType: 'helper', agentId: 'agent-2', label: 'write the summary' })).toBe(true);
+    const byCall = () => Object.fromEntries(poolRecords(dir).map((record) => [record.tool_use_id, record]));
+    expect(byCall()['call-2']).toMatchObject({ state: 'alive', agent_id: 'agent-2' });
+    expect(byCall()['call-1']).toMatchObject({ state: 'pending' });
+    // the second call fails after its start: the reservation of the first stays pending and keeps its slot
+    expect(releaseAgentByToolUseId(dir, 'call-2', now + 3)).toBe(true);
+    expect(byCall()['call-1']).toMatchObject({ state: 'pending' });
+    expect(commitAgent(dir, 'session', now + 4, { agentType: 'helper', agentId: 'agent-1', label: 'check the risks' })).toBe(true);
+    expect(byCall()['call-1']).toMatchObject({ state: 'alive', agent_id: 'agent-1' });
+    // a label nobody reserved falls back to the type
+    reserveAgent({ dir, sessionId: 'session', toolUseId: 'call-3', subagentType: 'helper', label: 'x', now: now + 5, env: {} });
+    expect(commitAgent(dir, 'session', now + 6, { agentType: 'helper', agentId: 'agent-3', label: 'another label' })).toBe(true);
+    expect(byCall()['call-3']).toMatchObject({ state: 'alive', agent_id: 'agent-3' });
+  });
+
   it('commits the oldest pending reservation when the type is unknown or twice reserved, and only of the same session', () => {
     const dir = tempDir();
     const now = Date.now();

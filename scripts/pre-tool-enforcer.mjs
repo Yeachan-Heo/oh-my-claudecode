@@ -2666,6 +2666,7 @@ function evaluateAgentPool(toolName, data, stateDir) {
   const sessionId = typeof data?.session_id === 'string' ? data.session_id : '';
   const toolUseId = typeof data?.tool_use_id === 'string' ? data.tool_use_id : '';
   const subagentType = toolInput && typeof toolInput === 'object' && typeof toolInput.subagent_type === 'string' ? toolInput.subagent_type.slice(0, 200) : null;
+  const label = toolInput && typeof toolInput === 'object' ? String(toolInput.name || toolInput.description || '').slice(0, 200) : ''; // what SubagentStart carries back as name or description
   let alive;
   let pending = 0;
   let readOk = true;
@@ -2682,7 +2683,7 @@ function evaluateAgentPool(toolName, data, stateDir) {
   if (decision === 'deny') {
     return { continue: true, hookSpecificOutput: { hookEventName: 'PreToolUse', permissionDecision: 'deny', permissionDecisionReason: `[AGENT POOL] ${refusalText(occupied, limit)}` } };
   }
-  if (decision === 'allow') poolPending = { dir, sessionId, toolUseId, subagentType, toolName, stateDir };
+  if (decision === 'allow') poolPending = { dir, sessionId, toolUseId, subagentType, label, toolName, stateDir };
   return null;
 }
 
@@ -2699,7 +2700,7 @@ function settlePoolReservation(output, input) {
   poolPending = null;
   if (!pending || outputDeniesCall(output)) return output;
   try {
-    const result = reserveAgent({ dir: pending.dir, sessionId: pending.sessionId, toolUseId: pending.toolUseId, subagentType: pending.subagentType });
+    const result = reserveAgent({ dir: pending.dir, sessionId: pending.sessionId, toolUseId: pending.toolUseId, subagentType: pending.subagentType, label: pending.label });
     if (result.ok === false) {
       writePoolRow(pending.dir, { tool_name: pending.toolName, session_id: pending.sessionId || null, tool_use_id: pending.toolUseId || null, subagent_type: pending.subagentType, alive: result.alive, pending: result.occupied - result.alive, occupied: result.occupied, limit: result.limit, decision: 'deny' });
       const reason = denialReasonWithCounter('agent-pool', `[AGENT POOL] ${refusalText(result.occupied, result.limit)}`, input, pending.stateDir);

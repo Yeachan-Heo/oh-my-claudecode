@@ -223,7 +223,7 @@ Fires when a subagent is spawned.
 |--------|------|---------|
 | `subagent-tracker.mjs start` | Tracks subagent start, injects prompts | 3s |
 
-Records the subagent name, start time, and session information. With `OMC_JEV_POOL=1`, it also commits an agent-pool reservation of the session to alive (also when the tracker is skipped): the oldest pending one whose `subagent_type` is the `agent_type` that started (the namespace before `:` and the letter case do not count), else the oldest pending one, with the `agent_id` recorded on it; with the variable unset the pool module is not loaded.
+Records the subagent name, start time, and session information. With `OMC_JEV_POOL=1`, it also commits an agent-pool reservation of the session to alive (also when the tracker is skipped): the oldest pending one whose `subagent_type` is the `agent_type` that started (the namespace before `:` and the letter case do not count) and whose label (the `name`, else the `description`, of the Agent call) is the one the start carries, else the oldest of that type, else the oldest pending one, with the `agent_id` recorded on it (calls of one type and label are interchangeable and commit in the order of their reservations); with the variable unset the pool module is not loaded.
 
 ### SubagentStop
 

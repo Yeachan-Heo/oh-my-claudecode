@@ -8,11 +8,13 @@
 // The state lives in the Jev log directory (OMC_JEV_LOG_DIR, else state/jev under the state root;
 // set OMC_JEV_LOG_DIR to share one pool between projects):
 //   pool-agents/<epoch ms>-<random>.json  one reservation per allowed Agent/Task call:
-//                                         {ts, state, session_id, tool_use_id, subagent_type[, agent_id]}.
+//                                         {ts, state, session_id, tool_use_id, subagent_type[, label][, agent_id]}.
 //                                         "pending" is the reservation before the start; the
 //                                         SubagentStart hook commits it to "alive" (it takes the pending
 //                                         reservation of the session whose subagent_type is the type
-//                                         that started, else the oldest one, and records the agent_id),
+//                                         that started and whose label (the name or description of the
+//                                         call) is the one the start carries, else one of that type, else
+//                                         the oldest one, and records the agent_id),
 //                                         the SubagentStop hook releases it (by agent_id, else the oldest
 //                                         alive one of the session), and the PostToolUseFailure hook
 //                                         releases it by tool_use_id (a start that failed after the
@@ -92,7 +94,7 @@ export function poolDir(env, stateDir) {
   return env?.OMC_JEV_LOG_DIR || join(stateDir, 'jev');
 }
 
-/** The pool as read from pool-agents/: {pending: [...], alive: [...]} of {name, path, ts, state, sessionId, toolUseId, agentId, subagentType}. Sweeps expired and corrupt files on the way. */
+/** The pool as read from pool-agents/: {pending: [...], alive: [...]} of {name, path, ts, state, sessionId, toolUseId, agentId, subagentType, label}. Sweeps expired and corrupt files on the way. */
 function readPool(dir, now) {
   const folder = join(dir, RESERVATION_DIR);
   let names;
@@ -127,6 +129,7 @@ function readPool(dir, now) {
       toolUseId: typeof record.tool_use_id === 'string' ? record.tool_use_id : null,
       agentId: typeof record.agent_id === 'string' ? record.agent_id : null,
       subagentType: typeof record.subagent_type === 'string' ? record.subagent_type : null,
+      label: typeof record.label === 'string' ? record.label : null,
     };
     const expired = record.state === 'pending' ? record.ts < now - PENDING_TTL_MS : record.ts < now - ALIVE_TTL_MS;
     if (expired) {
@@ -163,7 +166,7 @@ export function readPoolState(dir, now = Date.now()) {
  * {ok: true, file: null, untracked: true, ...} when the lock was not obtained in time (fail-open:
  * not a refusal). Throws on a file error (the caller fails open).
  */
-export function reserveAgent({ dir, sessionId, toolUseId, subagentType, now = Date.now(), env = process.env, lockBudgetMs }) {
+export function reserveAgent({ dir, sessionId, toolUseId, subagentType, label, now = Date.now(), env = process.env, lockBudgetMs }) {
   const limit = agentLimit(env);
   let result = null;
   const ran = underPoolLock(dir, () => {
@@ -178,7 +181,7 @@ export function reserveAgent({ dir, sessionId, toolUseId, subagentType, now = Da
     const file = `${now}-${Math.random().toString(36).slice(2, 10)}.json`;
     const fd = openSync(join(dir, RESERVATION_DIR, file), 'wx'); // never overwrites a reservation of another call
     try {
-      writeFileSync(fd, JSON.stringify({ ts: now, state: 'pending', session_id: sessionId || null, tool_use_id: toolUseId || null, subagent_type: subagentType || null }) + '\n', 'utf8');
+      writeFileSync(fd, JSON.stringify({ ts: now, state: 'pending', session_id: sessionId || null, tool_use_id: toolUseId || null, subagent_type: subagentType || null, ...(label ? { label: String(label).slice(0, 200) } : {}) }) + '\n', 'utf8');
     } finally {
       closeSync(fd);
     }
@@ -193,7 +196,9 @@ const baseType = (type) => String(type ?? '').trim().toLowerCase().replace(/^[^:
 /**
  * Commit a pending reservation of the session (SubagentStart): the agent started. The reservation is the oldest pending
  * one of the session whose subagent_type is the type that started (the namespace before ":" and the letter case do not
- * count), else the oldest pending one of the session; the agent_id of the start is recorded on it, so that the
+ * count) and whose label is the name or description the start carries, else the oldest of that type, else the oldest
+ * pending one of the session. Calls of one type and label are interchangeable, so no reservation can be told from the
+ * others: they commit in the order of their reservations. The agent_id of the start is recorded on it, so that the
  * SubagentStop of this agent releases exactly this reservation. The selection and the rewrite run under the pool lock,
  * so concurrent starts of one session commit distinct reservations. False when there is none or the lock was not obtained.
  */
@@ -204,7 +209,9 @@ export function commitAgent(dir, sessionId, now = Date.now(), start = {}) {
     underPoolLock(dir, () => {
       const pending = readPool(dir, now).pending.filter((entry) => entry.sessionId === sessionId).sort((a, b) => a.ts - b.ts); // the oldest first
       const type = baseType(start.agentType);
-      const entry = (type && pending.find((candidate) => baseType(candidate.subagentType) === type)) || pending[0];
+      const label = start.label ? String(start.label).slice(0, 200) : '';
+      const ofType = type ? pending.filter((candidate) => baseType(candidate.subagentType) === type) : [];
+      const entry = (label && ofType.find((candidate) => candidate.label === label)) || ofType[0] || pending[0];
       if (!entry) return;
       const record = JSON.parse(readFileSync(entry.path, 'utf8')); // reread, keep the unknown fields
       record.ts = now; // the alive TTL counts from the start
@@ -385,12 +392,12 @@ export function countSessions({ env = process.env, readCmdline = readFileSync } 
  * session and the PostToolUseFailure release by tool_use_id. Disabled pool and every error are a
  * no-op (fail-open). Returns true when the state changed.
  */
-export async function handlePoolEvent({ event, sessionId, toolUseId, agentId, agentType, cwd, env = process.env, now = Date.now() }) {
+export async function handlePoolEvent({ event, sessionId, toolUseId, agentId, agentType, label, cwd, env = process.env, now = Date.now() }) {
   if (!poolEnabled(env)) return false;
   try {
     const omcRoot = await resolveOmcStateRoot(cwd || process.cwd());
     const dir = poolDir(env, join(omcRoot, 'state'));
-    if (event === 'SubagentStart') return commitAgent(dir, sessionId, now, { agentId, agentType });
+    if (event === 'SubagentStart') return commitAgent(dir, sessionId, now, { agentId, agentType, label });
     if (event === 'SubagentStop') return releaseAgent(dir, sessionId, now, { agentId });
     if (event === 'PostToolUseFailure') return releaseAgentByToolUseId(dir, toolUseId, now);
   } catch { return false; }
@@ -413,6 +420,7 @@ export async function handlePoolHookEvent(data, options = {}) {
     toolUseId: text(data.tool_use_id),
     agentId: text(data.agent_id),
     agentType: text(data.agent_type),
+    label: text(data.name) || text(data.description),
     ...options,
   });
 }
