@@ -9,6 +9,7 @@
  * - Text inputs are sanitized to prevent command injection
  */
 
+import { execFileSync } from 'node:child_process';
 import { tmuxExec, tmuxSpawn } from '../../cli/tmux-utils.js';
 import { getNewPaneTail } from './pane-fresh-capture.js';
 import type { TmuxPane, PaneAnalysisResult, BlockedPane } from './types.js';
@@ -848,7 +849,12 @@ export const panelQuotaTmux = {
 /**
  * Whether the provider still runs in a pane. After the provider exits the pane keeps running the user's
  * shell, which shows the old error in its scrollback and would take a typed key as a command. False for a
- * dead pane or a shell in the foreground, true for any other foreground command, null when tmux cannot tell.
+ * dead pane or for the shell at its own prompt, true when something else runs in the foreground, null when
+ * that cannot be told.
+ *
+ * A provider started through a shell wrapper script shows the shell as `pane_current_command`, so a shell
+ * name alone does not mean the provider is gone: the terminal's foreground process group tells. At the
+ * prompt it is the shell's own group; while a wrapper script or the provider runs it is another group.
  */
 function paneProviderRunning(paneId: string): boolean | null {
   if (!isTmuxAvailable() || !isValidPaneId(paneId)) {
@@ -856,16 +862,45 @@ function paneProviderRunning(paneId: string): boolean | null {
   }
   try {
     const status = tmuxExec(
-      ['display-message', '-t', paneId, '-p', '#{pane_dead} #{pane_current_command}'],
+      ['display-message', '-t', paneId, '-p', '#{pane_dead} #{pane_pid} #{pane_current_command}'],
       { stripTmux: true, stdio: 'pipe', timeout: 3000 },
     ).trim();
-    const [dead, ...commandParts] = status.split(/\s+/);
+    const [dead, panePid, ...commandParts] = status.split(/\s+/);
     if (dead === '1') {
       return false;
     }
     // A login shell may be reported as "-bash".
     const command = commandParts.join(' ').replace(/^-+/, '');
-    return command === '' ? null : !paneCurrentCommandLooksReady(command);
+    if (command === '') {
+      return null;
+    }
+    if (!paneCurrentCommandLooksReady(command)) {
+      return true;
+    }
+    return shellHasForegroundJob(panePid);
+  } catch {
+    return null;
+  }
+}
+
+/** True when a job other than the shell itself holds the terminal of the pane's shell; null when ps cannot tell. */
+function shellHasForegroundJob(shellPid: string): boolean | null {
+  if (!/^\d+$/.test(shellPid)) {
+    return null;
+  }
+  try {
+    const [pgid, tpgid] = execFileSync('ps', ['-o', 'pgid=,tpgid=', '-p', shellPid], {
+      encoding: 'utf8',
+      stdio: ['ignore', 'pipe', 'ignore'],
+      timeout: 3000,
+    })
+      .trim()
+      .split(/\s+/);
+    if (!/^\d+$/.test(pgid ?? '') || !/^-?\d+$/.test(tpgid ?? '')) {
+      return null;
+    }
+    // tpgid is -1 when the process has no controlling terminal.
+    return Number(tpgid) < 0 ? null : tpgid !== pgid;
   } catch {
     return null;
   }
