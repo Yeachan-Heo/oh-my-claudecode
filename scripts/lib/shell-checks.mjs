@@ -1017,7 +1017,17 @@ export function maskSecrets(text) {
     .replace(/\bAKIA[0-9A-Z]{16}\b/g, 'AKIA***')
     .replace(/\beyJ(?:[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}|[A-Za-z0-9_-]*)/g, (m) => m.includes('.') ? 'eyJ***' : m)
     .replace(/(\b(?=[A-Za-z0-9_]*(?:KEY|TOKEN|SECRET|PASSWORD|PASSWD|PASS|PWD|CREDENTIALS?))[A-Za-z0-9_]+\b["'\]]*\s*[=:]\s*(?:\\*["'])?)(?:(bearer|basic)[ \t]+)?[^\s"'&;|)]+(?:(?:(?<=[:=])|[ \t]+[:=])[ \t]*(?:\\*["'])?(?![^\s"'&;|)]*(?:KEY|TOKEN|SECRET|PASSWORD|PASSWD|PASS|PWD|CREDENTIALS?|has[łl]o|klucz|sekret|passwort|kennwort|contrase[ñn]a|\\+u[0-9a-fA-F]{4})[^\s"'&;|)]*(?:[:=]\\*(?![^\s"'&;|)])|(?:\\*["']|\s)+[:=]))[^\s"'&;|)]+)?/gi, (whole, head, scheme) => head + (scheme ? '*** ***' : '***'))
-    .replace(NAMED_VALUE, '$1***')
+    .replace(NAMED_VALUE, (whole, keyword, offset, string) => {
+      // Check if NEXT_FIELD matches at the current position (after the matched VALUE).
+      // If it matches, we need to check if the next VALUE is a field key.
+      // To avoid quadratic behavior, we check the pattern once and decide whether to extend the match.
+      const remaining = string.slice(offset + whole.length);
+      const nextMatch = new RegExp('^' + NEXT_FIELD_PATTERN).exec(remaining);
+      if (!nextMatch) return keyword + '***';
+      // If NEXT_FIELD matched, the whole match should include it.
+      // We indicate this by returning a placeholder that will be processed by the next replace().
+      return keyword + '***' + nextMatch[0];
+    })
     .replace(ESCAPED_KEY, (whole, key, separator) => secretPairName(key) ? key + separator + '***' : whole)
     .replace(/(?<![A-Za-z0-9+_-])(?=[A-Za-z0-9+_-]*\d)(?=[A-Za-z0-9+_-]*[A-Za-z])[A-Za-z0-9+_-]{32,}={0,2}/g, '***');
 }
@@ -1033,8 +1043,8 @@ const WS = String.raw`(?:\s|\\+(?:[ntrf]|u(?:000[9a-dA-D]|0020|00[aA]0|1680|200[
 // value of `hasło:`, or `x-api-key: x`), the word after its separator is the secret and is masked too, as the `KEY=` rule does, unless
 // that word is a key of its own (it ends in a separator or has one after it), which is left to the rule that reads it.
 const VALUE = String.raw`(?:[^\s"'&;|,}\\]|\\(?!["']))+`;
-const NEXT_FIELD = String.raw`(?:(?:\\*["'])?${WS}*[:=]|(?<=[^=][:=]))${WS}*(?:\\*["'])?(?!(?=(?<word>${VALUE}))\k<word>(?:(?<=[:=])|(?:\\*["']|${WS})*[:=]))${VALUE}`;
-const NAMED_VALUE = new RegExp(String.raw`((?:api[_-]?key|access[_-]?key|client[_-]?secret|private[_-]?key|password|passwd|token|secret|has(?:[łl]|\\+u014[12])o|klucz|sekret|passwort|kennwort|contrase(?:[ñn]|ñ|n\\+u0303|\\+u00d1|\\+u00f1)a)(?:\\*["'])?${WS}*[:=]${WS}*(?:\\*["'])?(?:(?:bearer|basic)[ \t]+)?)${VALUE}(?:${NEXT_FIELD})?`, 'gi');
+const NEXT_FIELD_PATTERN = String.raw`(?:(?:\\*["'])?${WS}*[:=]|(?<=[^=][:=]))${WS}*(?:\\*["'])?(?!${VALUE}(?:(?<=[:=])|(?:\\*["']|${WS})*[:=]))${VALUE}`;
+const NAMED_VALUE = new RegExp(String.raw`((?:api[_-]?key|access[_-]?key|client[_-]?secret|private[_-]?key|password|passwd|token|secret|has(?:[\u0142l]|\\+u014[12])o|klucz|sekret|passwort|kennwort|contrase(?:[\u00f1n]|\u00f1|n\\+u0303|\\+u00d1|\\+u00f1)a)(?:\\*["'])?${WS}*[:=]${WS}*(?:\\*["'])?(?:(?:bearer|basic)[ \t]+)?)${VALUE}`, 'gi');
 
 // A field key that holds JSON `\uXXXX` escapes in any of its letters (`h\u0061s\u0142o`, `p\u0061ssword`), which the name list above does not
 // read: the key is decoded and classified as the key of a pair is, and the value is masked when it names a secret. The key is a run of

@@ -304,6 +304,50 @@ describe('shell checks: helpers', () => {
     expect(masked2).toContain('mysql -uroot');
   });
 
+  it('masks JSON secret pairs with Key/Val selectors and unquoted values', () => {
+    // Test Key selector (alternative to Name)
+    const keyPairQuoted = lib.maskSecrets('{"Key":"DB_PASSWORD","Value":"hunter2zz"}');
+    expect(keyPairQuoted).not.toContain('hunter2zz');
+    expect(keyPairQuoted).toContain('***');
+
+    // Test Val selector (alternative to Value)
+    const valPairQuoted = lib.maskSecrets('{"Name":"DB_PASSWORD","Val":"hunter2zz"}');
+    expect(valPairQuoted).not.toContain('hunter2zz');
+    expect(valPairQuoted).toContain('***');
+
+    // Test unquoted pair value (numeric)
+    const unquotedNumeric = lib.maskSecrets('{"Name":"DB_PASSWORD","Value":123456}');
+    expect(unquotedNumeric).not.toContain('123456');
+    expect(unquotedNumeric).toContain('***');
+
+    // Test unquoted pair value (boolean)
+    const unquotedBool = lib.maskSecrets('{"Name":"DB_PASSWORD","Value":true}');
+    expect(unquotedBool).toContain('***');
+
+    // Test reversed order: Value before Name
+    const reversedOrder = lib.maskSecrets('{"Value":"hunter2zz","Name":"DB_PASSWORD"}');
+    expect(reversedOrder).not.toContain('hunter2zz');
+    expect(reversedOrder).toContain('***');
+
+    // Test Key selector with unquoted value
+    const keyUnquoted = lib.maskSecrets('{"Key":"DB_PASSWORD","Value":42}');
+    expect(keyUnquoted).not.toContain('42');
+    expect(keyUnquoted).toContain('***');
+
+    // Test serialized form (JSON in a string with escaped quotes)
+    const serialized = lib.maskSecrets('{"Name":"DB_PASSWORD","Value":"hunter2zz"}');
+    expect(serialized).not.toContain('hunter2zz');
+
+    // Test non-secret name (should not be masked)
+    const nonSecret = lib.maskSecrets('{"Name":"USERNAME","Value":"admin"}');
+    expect(nonSecret).toContain('admin'); // Should keep non-secret values
+
+    // Test multiple pairs in sequence
+    const multiple = lib.maskSecrets('{"Name":"DB_PASSWORD","Value":"secret1"},{"Key":"API_TOKEN","Value":"secret2"}');
+    expect(multiple).not.toContain('secret1');
+    expect(multiple).not.toContain('secret2');
+  });
+
   it('keeps OMC_SHELL_SYNTAX_TIMEOUT_MS inside 100-3000 ms, below the hook budget', () => {
     for (const [value, expected] of [[undefined, 1000], ['', 1000], ['abc', 1000], ['50', 1000], ['100', 100], ['2500', 2500], ['3000', 3000], ['3001', 1000], ['15000', 1000]] as const) {
       expect(lib.syntaxTimeoutMs(value === undefined ? {} : { OMC_SHELL_SYNTAX_TIMEOUT_MS: value }), String(value)).toBe(expected);
