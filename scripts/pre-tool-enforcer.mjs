@@ -2515,7 +2515,19 @@ function planWritePathAllowed(filePath, cwd) {
   // SECURITY: Validate that symlink-based traversals (e.g. 'link/../victim.md') cannot escape the guard.
   // Check the input path with symlinks resolved to prevent attacks where the symlink target contains '..',
   // allowing escape when the filesystem kernel processes symlinks before '..' (issue #5085).
-  if (!pathWithSymlinksStaysInside(filePath, realPlansDir)) return false;
+  // Extract the relative part within the plans directory, preserving '..' for symlink validation.
+  let relPathInPlans = filePath;
+  const planDirPrefix = join('.omc', 'plans') + sep;
+  if (filePath.includes(planDirPrefix)) {
+    const idx = filePath.indexOf(planDirPrefix);
+    relPathInPlans = filePath.substring(idx + planDirPrefix.length);
+  }
+  // If the extracted path tries to escape the plans directory (starts with ..), 
+  // use the already-normalized relative path instead (which never contains .. that escapes).
+  if (relPathInPlans && relPathInPlans.split(sep)[0] === '..') {
+    relPathInPlans = rel;
+  }
+  if (!pathWithSymlinksStaysInside(relPathInPlans, realPlansDir)) return false;
   // The nearest existing directory above the target must resolve inside the real plans directory, so a missing directory
   // under a link cannot be created outside it. The target itself, when it exists, must too.
   let ancestor = dirname(target);
