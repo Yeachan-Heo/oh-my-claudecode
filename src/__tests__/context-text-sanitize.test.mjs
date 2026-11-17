@@ -36,7 +36,8 @@ const hasControl = (text, allowed = new Set()) => [...text].some((ch) => {
 const LF_TAB = new Set([0x000A, 0x0009]);
 // An identifier as the hooks write it when it holds removed characters: a JSON string with each of them as \uXXXX. This
 // independent copy escapes the characters the tests use.
-const jsonName = (name) => JSON.stringify(name).replace(/[\u0000-\u001f\u202e\ufe0f\u2800\u200b]/gu, (ch) => `\\u${ch.charCodeAt(0).toString(16).padStart(4, '0')}`);
+const jsonName = (name) => [RTL, FE0F, String.fromCodePoint(0x2800), String.fromCodePoint(0x200B)]
+  .reduce((json, ch) => json.split(ch).join(`\\u${ch.charCodeAt(0).toString(16).padStart(4, '0')}`), JSON.stringify(name));
 
 describe('context-text-sanitize module', () => {
   it('cleanHostText removes control and bidi characters and bounds the length', () => {
