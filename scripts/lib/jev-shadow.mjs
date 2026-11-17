@@ -23,7 +23,9 @@ import { basename, dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
   isJevLogContextEnabled,
+  isJevRowTelemetryEnabled,
   isJevStateOmitIdsEnabled,
+  JEV_ROW_NO_ANSWER,
   jevLogContextOf,
   parseJevEnv,
   resolveJevEndpoint,
@@ -151,6 +153,7 @@ function recordResolverEnded(point, result, durationMs) {
         point,
         mode: "degraded",
         reason: code === "ETIMEDOUT" ? "resolver-timeout" : "resolver-exit",
+        ...(isJevRowTelemetryEnabled(process.env) ? JEV_ROW_NO_ANSWER : {}),
         ...how,
         durationMs,
       }) + "\n",
@@ -457,8 +460,10 @@ export function jevNoulOf(result, questionName) {
  * Falls back to undefined (caller uses heuristic) on timeout/error/parse-failure.
  * permissionMode is the hook input's permission_mode; it travels in the
  * request so the resolver logs the same mode the caller acted on.
+ * pointer ({expanded, unexpanded}) is the pointer telemetry of the
+ * request; it travels in the request file only when given.
  */
-export function recordJevShadow({ point, state, questions, heuristic, permissionMode, toolUseId }) {
+export function recordJevShadow({ point, state, questions, heuristic, permissionMode, toolUseId, pointer }) {
   const mode = jevModeFor(point, process.env, permissionMode);
   if (mode === "off") return undefined;
   // Opt-in shared breaker: the resolver holds the call back itself and logs
@@ -502,7 +507,24 @@ export function recordJevShadow({ point, state, questions, heuristic, permission
 
     writeFileSync(
       requestFile,
-      JSON.stringify({ point, state, questions, heuristic, permissionMode, spawnMode, ...(toolUseId ? { tool_use_id: toolUseId } : {}), ...(logContext ? { context: logContext } : {}) }),
+      JSON.stringify({
+        point,
+        state,
+        questions,
+        heuristic,
+        permissionMode,
+        spawnMode,
+        ...(toolUseId ? { tool_use_id: toolUseId } : {}),
+        ...(logContext ? { context: logContext } : {}),
+        ...(pointer
+          ? {
+              pointer: {
+                expanded: pointer.expanded === true,
+                unexpanded: typeof pointer.unexpanded === "string" && pointer.unexpanded !== "" ? pointer.unexpanded : null,
+              },
+            }
+          : {}),
+      }),
       {
         encoding: "utf8",
         mode: 0o600,
@@ -657,8 +679,9 @@ export async function setJevHookContext(data) {
   hookLogDir = undefined;
   lastRequestIds.clear();
   const logContext = isJevLogContextEnabled(process.env);
-  if ((!logContext && !isJevAppliedLogEnabled(process.env)) || !mayRequestJev(process.env)) return;
-  if (logContext) {
+  const appliedLog = isJevAppliedLogEnabled(process.env);
+  // Capture context if log context is needed, or for applied logging even when Jev is off
+  if (logContext || appliedLog) {
     const context = jevLogContextOf(data);
     delete context.request_id;
     if (context.cwd === undefined) {
@@ -668,12 +691,20 @@ export async function setJevHookContext(data) {
         // No working directory: the field is left out.
       }
     }
-    hookLogContext = context;
+    // Store context for applied logging and log context (OMC_JEV_LOG_CONTEXT=1)
+    if (logContext) {
+      hookLogContext = context;
+    }
   }
-  try {
-    hookLogDir = await resolveJevLogDir(process.env);
-  } catch {
-    // Without a log directory the hook writes no lines itself.
+  // Resolve log directory only when Jev can be requested or when OMC_JEV_LOG_DIR is explicitly set.
+  // For marker-only applied logging (Jev off, OMC_JEV_APPLIED_LOG=1), let recordJevApplied use
+  // the fallbackLogDir from the payload's project so applied.jsonl goes to the right place.
+  if (logContext || (appliedLog && mayRequestJev(process.env))) {
+    try {
+      hookLogDir = await resolveJevLogDir(process.env);
+    } catch {
+      // Without a log directory the hook writes no lines itself.
+    }
   }
 }
 
@@ -703,25 +734,31 @@ export function jevLastRequestId(point) {
  * that request's shadow.jsonl line; a caller that records after a later request
  * for the same point passes the earlier request's id (jevLastRequestId) as
  * `requestId`. Only with OMC_JEV_APPLIED_LOG=1; never throws.
+ * `extra` holds top-level fields of the line (such as jev_model, given only
+ * with OMC_JEV_ROW_TELEMETRY=1 by the caller). `fallbackLogDir` is the
+ * directory used when the hook has no Jev log directory (a line written
+ * without a Jev request, such as a `use` marker's).
  */
-export function recordJevApplied(point, applied, requestId = lastRequestIds.get(point)) {
+export function recordJevApplied(point, applied, requestId = lastRequestIds.get(point), extra = {}, fallbackLogDir = undefined) {
   if (!isJevAppliedLogEnabled(process.env)) return;
   appendJevLogLine("applied.jsonl", {
     ts: new Date().toISOString(),
     point,
     ...(isJevLogContextEnabled(process.env) ? { ...hookLogContext, ...(requestId ? { request_id: requestId } : {}) } : {}),
+    ...extra,
     applied,
-  });
+  }, fallbackLogDir);
 }
 
 /**
  * Append one line to a Jev log file in the hook's log directory
- * (OMC_JEV_LOG_DIR when setJevHookContext did not resolve one), rotated like
+ * (OMC_JEV_LOG_DIR when setJevHookContext did not resolve one, else the
+ * optional fallback directory), rotated like
  * the resolver's lines (OMC_JEV_LOG_MAX_MB). Every file a hook script writes
  * next to shadow.jsonl goes through this. Never throws.
  */
-export function appendJevLogLine(fileName, entry) {
-  const logDir = hookLogDir || process.env.OMC_JEV_LOG_DIR;
+export function appendJevLogLine(fileName, entry, fallbackLogDir = undefined) {
+  const logDir = hookLogDir || process.env.OMC_JEV_LOG_DIR || fallbackLogDir;
   if (!logDir) return;
   try {
     mkdirSync(logDir, { recursive: true });
@@ -750,6 +787,7 @@ function recordResolverFailure(point, result, durationMs, logContext) {
     ...logContext,
     mode: "degraded",
     reason: code === "ETIMEDOUT" ? "resolver-timeout" : result?.error ? "resolver-spawn" : "resolver-exit",
+    ...(isJevRowTelemetryEnabled(process.env) ? JEV_ROW_NO_ANSWER : {}),
     ...(typeof result?.status === "number" ? { status: result.status } : {}),
     ...(result?.signal ? { signal: result.signal } : {}),
     durationMs,

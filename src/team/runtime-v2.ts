@@ -107,6 +107,7 @@ import {
   spawnOwnedWorkerInPane,
   deliverStartupInbox,
   probeStartupPaneActivity,
+  startupProviderExited,
   retryStartupInboxSubmit,
   proveWorkerPaneOwnership,
   adoptWorkerPaneOwnership,
@@ -297,10 +298,10 @@ import {
   isWorkerLaunchAttemptAccepted,
   loadCurrentWorkerLaunchAttempt,
   loadWorkerLaunchAttempt,
-  observeWorkerLaunchProvider,
   retireAndCleanupCurrentWorkerLaunchAttempt,
   withWorkerLaunchAttemptFence,
 } from "./worker-launch-ack.js";
+import { getWorkerProviderLiveness } from "./worker-provider-liveness.js";
 import { isProcessIdentityLive } from "../platform/process-utils.js";
 import {
   activateTeamInstanceUnderLock,
@@ -1176,40 +1177,6 @@ function configuredPaneOwnership(
 }
 
 /**
- * Read provider execution health from the exact launch receipt.  A missing or
- * malformed attempt is deliberately unknown; pane liveness is not a provider
- * termination proof.
- */
-async function getWorkerProviderLiveness(
-  teamName: string,
-  cwd: string,
-  instanceId: TeamInstanceId | undefined,
-  worker: Pick<
-    WorkerInfo,
-    "name" | "pane_id" | "worker_cli" | "launch_attempt_id"
-  > & {
-    launch_descriptor?: WorkerLaunchDescriptor;
-  },
-): Promise<"alive" | "dead" | "unknown"> {
-  if (!instanceId || !worker.pane_id || !worker.launch_attempt_id)
-    return "unknown";
-  const provider = worker.launch_descriptor?.provider ?? worker.worker_cli;
-  if (!provider) return "unknown";
-  const attempt = await loadWorkerLaunchAttempt({
-    cwd,
-    teamName,
-    instanceId,
-    workerName: worker.name,
-    paneId: worker.pane_id,
-    provider,
-    attemptId: worker.launch_attempt_id,
-    runtimeCliPath: resolveRuntimeCliPath(),
-  }).catch(() => null);
-  if (!attempt) return "unknown";
-  return observeWorkerLaunchProvider(attempt);
-}
-
-/**
  * Recovery only treats a positively dead provider as dead.  A live provider
  * remains protected even when its pane has disappeared, and unknown evidence
  * never authorizes replacement.
@@ -1697,10 +1664,13 @@ export async function waitForStartupEvidenceBudget(
   hasEvidence: () => Promise<boolean>,
   budgetMs: number,
   delayMs = WORKER_STARTUP_EVIDENCE_POLL_INTERVAL_MS,
+  providerExited?: () => Promise<boolean>,
 ): Promise<boolean> {
   const deadline = Date.now() + Math.max(0, budgetMs);
   for (;;) {
     if (await hasEvidence()) return true;
+    // An exited provider can write no further evidence. Evidence is read again after the exit is confirmed, since the provider may have written it while that check ran.
+    if (providerExited && (await providerExited())) return hasEvidence();
     const remainingMs = deadline - Date.now();
     if (remainingMs <= 0) return false;
     await new Promise((resolve) =>
@@ -1717,7 +1687,7 @@ async function waitForWorkerStartupEvidence(
   baseline: WorkerStartupBaseline,
   launchAttemptId: string,
   budgetMs: number,
-  delayMs = WORKER_STARTUP_EVIDENCE_POLL_INTERVAL_MS,
+  providerExited?: () => Promise<boolean>,
 ): Promise<boolean> {
   return waitForStartupEvidenceBudget(
     () =>
@@ -1730,7 +1700,8 @@ async function waitForWorkerStartupEvidence(
         launchAttemptId,
       ),
     budgetMs,
-    delayMs,
+    WORKER_STARTUP_EVIDENCE_POLL_INTERVAL_MS,
+    providerExited,
   );
 }
 
@@ -1741,7 +1712,7 @@ async function waitForWorkerStatusTransition(
   baselineFingerprint: string,
   launchAttemptId: string,
   budgetMs: number,
-  delayMs = 250,
+  providerExited?: () => Promise<boolean>,
 ): Promise<boolean> {
   return waitForStartupEvidenceBudget(
     async () => {
@@ -1753,7 +1724,8 @@ async function waitForWorkerStatusTransition(
       );
     },
     budgetMs,
-    delayMs,
+    250,
+    providerExited,
   );
 }
 /**
@@ -1816,6 +1788,16 @@ function startupEvidenceMissingReason(
     ? `${agentType}_startup_evidence_missing`
     : "worker_startup_evidence_missing";
   return paneBusy ? `${base}_pane_busy` : base;
+}
+
+async function startupEvidenceFailureReason(
+  context: StartupPaneContext,
+  paneBusy: boolean,
+  agentType?: CliAgentType,
+): Promise<string> {
+  return (await startupProviderExited(context))
+    ? "provider_exited"
+    : startupEvidenceMissingReason(paneBusy, agentType);
 }
 
 const CLAIM_ERROR_CAPTURE_MAX = 16_384;
@@ -2266,6 +2248,7 @@ async function spawnV2Worker(
       startupBaseline,
       startupContext.attempt.attempt_id,
       budgetMs,
+      () => startupProviderExited(startupContext),
     );
   const probeActivity =
     opts.agentType === "cursor" || opts.agentType === "codex"
@@ -2336,7 +2319,8 @@ async function spawnV2Worker(
                   : {
                       ok: false,
                       transport: "prompt_stdin" as const,
-                      reason: startupEvidenceMissingReason(
+                      reason: await startupEvidenceFailureReason(
+                        startupContext,
                         settlement.paneBusy,
                         opts.agentType,
                       ),
@@ -2373,7 +2357,10 @@ async function spawnV2Worker(
                 : {
                     ok: false,
                     transport: "tmux_send_keys" as const,
-                    reason: startupEvidenceMissingReason(settlement.paneBusy),
+                    reason: await startupEvidenceFailureReason(
+                      startupContext,
+                      settlement.paneBusy,
+                    ),
                   };
             },
             deps: { writeWorkerInbox },
@@ -5303,6 +5290,7 @@ export async function executeRecoverDeadWorkerV2Owner(
                 startupBaseline,
                 startupAttemptId,
                 budgetMs,
+                () => startupProviderExited(startupContext),
               )
             : waitForWorkerStatusTransition(
                 input.teamName,
@@ -5311,6 +5299,7 @@ export async function executeRecoverDeadWorkerV2Owner(
                 statusBaseline,
                 startupAttemptId,
                 budgetMs,
+                () => startupProviderExited(startupContext),
               );
         const probeActivity =
           pending.agentType === "cursor" || pending.agentType === "codex"
@@ -5468,7 +5457,8 @@ export async function executeRecoverDeadWorkerV2Owner(
               if (!settlement.settled)
                 return {
                   ok: false as const,
-                  error: startupEvidenceMissingReason(
+                  error: await startupEvidenceFailureReason(
+                    startupContext,
                     settlement.paneBusy,
                     pending.agentType,
                   ),
@@ -5532,7 +5522,8 @@ export async function executeRecoverDeadWorkerV2Owner(
                     : {
                         ok: false,
                         transport: "tmux_send_keys" as const,
-                        reason: startupEvidenceMissingReason(
+                        reason: await startupEvidenceFailureReason(
+                          startupContext,
                           settlement.paneBusy,
                         ),
                       };
@@ -8357,8 +8348,12 @@ export async function monitorTeamV2(
       }
     }
 
+    // A dead provider leaves its shell prompt behind; that is not an idle worker.
     const paneSuggestsIdle =
-      alive && paneLooksReady(paneCapture) && !paneHasActiveTask(paneCapture);
+      alive &&
+      providerLiveness !== "dead" &&
+      paneLooksReady(paneCapture) &&
+      !paneHasActiveTask(paneCapture);
     const statusFresh = isFreshTimestamp(status.updated_at);
     const heartbeatFresh = isFreshTimestamp(heartbeat?.last_turn_at);
     const hasWorkStartEvidence =

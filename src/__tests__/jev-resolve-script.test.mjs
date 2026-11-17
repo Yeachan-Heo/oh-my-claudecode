@@ -19,6 +19,7 @@ import { fileURLToPath } from 'node:url';
 import { afterAll, describe, expect, it } from 'vitest';
 
 import { parseJevEnv, pointExcerptChars, readRequestFile, resolveExcerptChars, resolveJevTimeoutMs, resolveRequest, serializeQuestions, validateJevResponse } from '../../scripts/jev-resolve.mjs';
+import { isJevShadowOptedIn, jevModeFor } from '../../scripts/lib/jev-shadow.mjs';
 import { excerptCharsFor, parseJevConfig, pointState } from '../hooks/jev/config.ts';
 
 const root = join(fileURLToPath(import.meta.url), '..', '..', '..');
@@ -130,6 +131,74 @@ describe('parseJevEnv tri-state parity', () => {
       expect(pointState('compaction', parseJevConfig(env)), value).toBe(expected);
       // Every other point keeps the `all` semantics.
       expect(parseJevEnv('task-size', env), value).toBe(pointState('task-size', parseJevConfig(env)));
+    }
+  });
+});
+
+describe('point:shadow: a named shadow entry wins over all:active; the last entry of the name decides', () => {
+  const env = (omcJev, extra = {}) => ({ OMC_JEV: omcJev, TYPESAFE_API_KEY: 'test-key', ...extra });
+
+  it.each([
+    ['all:active,task-size:shadow', { 'task-size': 'shadow', intent: 'active', 'model-routing': 'active', compaction: 'off' }],
+    ['all:active,compaction:active,context-pruning:off,intent:off,ralph-verdict:off,slop-warning:off,task-size:shadow', { 'task-size': 'shadow', intent: 'off', 'slop-warning': 'off', 'context-pruning': 'off', 'model-routing': 'active', 'skill-trigger': 'active', compaction: 'active' }],
+    ['all:active,intent:off', { intent: 'off', 'task-size': 'active', compaction: 'off' }],
+    ['all:active', { intent: 'active', 'task-size': 'active', compaction: 'off' }],
+    ['all:active,compaction:shadow', { compaction: 'shadow', intent: 'active' }],
+    ['all:active,compaction:active', { compaction: 'active', intent: 'active' }],
+    ['all:active,intent', { intent: 'active', 'task-size': 'active' }],
+    ['all:active,intent:abc', { intent: 'active' }],
+    ['all:active,intent:shadow,intent:active,task-size:active,task-size:shadow', { intent: 'active', 'task-size': 'shadow', 'model-routing': 'active' }],
+    ['intent:shadow,task-size:shadow,model-routing:active', { intent: 'shadow', 'task-size': 'shadow', 'model-routing': 'active', 'skill-trigger': 'off' }],
+  ])('OMC_JEV=%s', (omcJev, expected) => {
+    for (const [point, want] of Object.entries(expected)) {
+      expect(parseJevEnv(point, env(omcJev)), `${omcJev} ${point}`).toBe(want);
+      expect(pointState(point, parseJevConfig(env(omcJev))), `${omcJev} ${point}`).toBe(want);
+      expect(jevModeFor(point, env(omcJev)), `${omcJev} ${point}`).toBe(want);
+      expect(isJevShadowOptedIn(point, env(omcJev)), `${omcJev} ${point}`).toBe(want !== 'off');
+    }
+  });
+
+  it('plan mode: the shadow entry keeps its rule; OMC_JEV_PLAN_MODE=shadow and =off apply as before', () => {
+    const planShadow = env('all:active,task-size:shadow', { OMC_JEV_PLAN_MODE: 'shadow' });
+    for (const [point, want] of [['task-size', 'shadow'], ['intent', 'shadow']]) {
+      expect(parseJevEnv(point, planShadow, 'plan'), point).toBe(want);
+      expect(jevModeFor(point, planShadow, 'plan'), point).toBe(want);
+      expect(isJevShadowOptedIn(point, planShadow, 'plan'), point).toBe(true);
+    }
+    const planOff = env('all:active,task-size:shadow', { OMC_JEV_PLAN_MODE: 'off' });
+    for (const [point, want] of [['task-size', 'off'], ['intent', 'off']]) {
+      expect(parseJevEnv(point, planOff, 'plan'), point).toBe(want);
+      expect(jevModeFor(point, planOff, 'plan'), point).toBe(want);
+      expect(isJevShadowOptedIn(point, planOff, 'plan'), point).toBe(false);
+    }
+  });
+
+  it('TS track: shadow wins over all:active; all:active, point:off and an opted-in point are unchanged', () => {
+    const state = (omcJev, point) => pointState(point, parseJevConfig(env(omcJev)));
+    expect(state('all:active,task-size:shadow', 'task-size')).toBe('shadow');
+    expect(state('all:active,task-size:shadow', 'intent')).toBe('active');
+    expect(state('all:active,compaction:active,context-pruning:off,intent:off,ralph-verdict:off,slop-warning:off,task-size:shadow', 'task-size')).toBe('shadow');
+    expect(state('all:active,compaction:active,context-pruning:off,intent:off,ralph-verdict:off,slop-warning:off,task-size:shadow', 'intent')).toBe('off');
+    expect(state('all:active,intent:off', 'intent')).toBe('off');
+    expect(state('all:active', 'intent')).toBe('active');
+    expect(state('all:active,intent:shadow,intent:active', 'intent')).toBe('active');
+    expect(state('all:active,intent:active,intent:shadow', 'intent')).toBe('shadow');
+    expect(state('all:active,compaction:active', 'compaction')).toBe('active');
+    expect(state('all:active,compaction:shadow', 'compaction')).toBe('shadow');
+  });
+
+  it('TS track: a later entry of the same name takes the point back from :off; the last entry wins, as in parseJevEnv', () => {
+    const cases = [
+      ['intent:off,intent:shadow', 'shadow'],
+      ['intent:off,intent:active', 'active'],
+      ['all:active,intent:off,intent:active', 'active'],
+      ['all:active,intent:off,intent:shadow', 'shadow'],
+      ['intent:shadow,intent:off', 'off'],
+      ['all:active,intent:shadow,intent:off,intent:active', 'active'],
+    ];
+    for (const [omcJev, want] of cases) {
+      expect(pointState('intent', parseJevConfig(env(omcJev))), omcJev).toBe(want);
+      expect(parseJevEnv('intent', env(omcJev)), omcJev).toBe(want);
     }
   });
 });
