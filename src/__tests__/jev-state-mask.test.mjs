@@ -745,7 +745,7 @@ describe('maskJevState: oversized keys should not cause performance issues', () 
     expect(result[0].value).toBe('***');
   });
 
-  it('recognizes Windows executable suffixes in P_COMMANDS', () => {
+  it('recognizes Windows executable suffixes of the command word', () => {
     // Commands with .exe, .bat, .COM suffixes should be recognized for password masking
     expect(maskJevState({ cmd: ['mysql.exe', '-phunter2'] })).toEqual({ cmd: ['mysql.exe', '-p***'] });
     expect(maskJevState({ cmd: ['mysqldump.bat', '-phunter2'] })).toEqual({ cmd: ['mysqldump.bat', '-p***'] });

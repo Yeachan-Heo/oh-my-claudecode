@@ -365,7 +365,9 @@ export function sanitizeUsage(usage) {
  * Telemetry fields of a row without an answer (degraded, skipped, breaker):
  * they are present with null, never zero. The hook-side writers spread it too.
  * Field names: source_chars is the state length before the resolver's cut,
- * sent_chars the length the classifier saw, cut_chars the characters the cut
+ * sent_chars the length after the cut (both measured on the state as the point
+ * built it, so what the secret mask replaces is not counted: it is no longer
+ * the length of the state the classifier saw), cut_chars the characters the cut
  * removed, input_complete true when nothing was cut, pointer_expanded and
  * pointer_unexpanded the pointer telemetry of the request, questions_version
  * a hash of the questions sent, usage_status reported | partial | unavailable.
