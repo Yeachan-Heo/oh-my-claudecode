@@ -1718,6 +1718,36 @@ describe('identifiers in blocks that another module composed stay exact with the
     }
   }
 
+  // The hook shows only the first 30 lines of the index. A page file on line 30 is written exactly; one on line 31 is not shown,
+  // not even in cleaned form.
+  for (const [characterLabel, character] of Object.entries(BLOCK_CHARACTERS)) {
+    it(`wiki session start: a page file with a ${characterLabel} on line 30 of a longer index is listed exactly and the one on line 31 is not shown`, () => {
+      withFixture((fixture) => {
+        const wiki = join(fixture.nonGit, 'wiki');
+        mkdirSync(wiki, { recursive: true });
+        const shown = `shown${character}.md`;
+        const cut = `beyond${character}.md`;
+        for (const name of [shown, cut]) writeFileSync(join(wiki, name), '# Page\n\npage body\n');
+        const lines = ['# Wiki Index', ''];
+        for (let index = 1; index <= 27; index += 1) lines.push(`- [Filler ${index}](filler-${index}.md) — filler`);
+        lines.push(`- [Shown](${shown}) — on line 30`, `- [Cut](${cut}) — on line 31`);
+        for (let index = 28; index <= 31; index += 1) lines.push(`- [Filler ${index}](filler-${index}.md) — filler`);
+        expect(lines.indexOf(`- [Shown](${shown}) — on line 30`)).toBe(29);
+        writeFileSync(join(wiki, 'index.md'), `${lines.join('\n')}\n`);
+        const out = runHook('wiki-session-start.mjs', SESSION_START(fixture.project, `ctx-text-wiki-cut-${characterLabel.replace(/ /g, '-')}`), fixture, SWITCH_ON);
+        const text = String(out.hookSpecificOutput?.additionalContext ?? '');
+        const written = writtenName(shown, [character]);
+        expect(JSON.parse(written)).toBe(shown);
+        expect(existsSync(join(wiki, shown))).toBe(true);
+        expect(text).toContain(`](${written}) — on line 30`);
+        expect(text).not.toContain('beyond');
+        expect(text).not.toContain('on line 31');
+        expect(hasControl(text, LF_TAB)).toBe(false);
+        expect(text.endsWith(`\n\n${DECODE_NOTE}`)).toBe(true);
+      });
+    }, 30000);
+  }
+
   it('wiki session start: the index keeps the raw page file name when the switch is off', () => {
     withFixture((fixture) => {
       const name = `page${FE0F}.md`;
