@@ -1,0 +1,1 @@
+{"version":3,"file":"workspace.d.ts","sourceRoot":"","sources":["../../../src/features/lookout/workspace.ts"],"names":[],"mappings":"AAIA,OAAO,KAAK,EAAE,cAAc,EAAE,MAAM,YAAY,CAAC;AA+EjD,wBAAgB,QAAQ,CAAC,OAAO,EAAE,MAAM,GAAG,MAAM,GAAG,IAAI,CAiCvD;AAED,wBAAgB,aAAa,CAC3B,IAAI,EAAE,MAAM,EACZ,MAAM,EAAE;IAAE,IAAI,EAAE,MAAM,CAAC;IAAC,UAAU,EAAE,MAAM,CAAA;CAAE,GAC3C,cAAc,EAAE,CAsClB"}

@@ -1,0 +1,300 @@
+/**
+ * Host Load Gate for Cross-Session Resource Contention
+ *
+ * Observes real host state (CPU load, free memory) and counts live sibling
+ * OMC sessions to gate expensive operations (browser launches, test runners,
+ * package installs) when the host is saturated or too many sessions are active.
+ *
+ * Fails open: never deadlocks, never blocks when metrics are unavailable.
+ * Disable-able via OMC_HOST_LOAD_GATE_DISABLED environment variable.
+ */
+import { cpus, freemem, loadavg, totalmem } from 'os';
+import { existsSync, readdirSync } from 'fs';
+import { join } from 'path';
+import { getGlobalOmcStateRoot } from '../utils/paths.js';
+/**
+ * Default configuration for host load gating.
+ * Thresholds are conservative to allow most operations through.
+ */
+export function getDefaultGateConfig() {
+    return {
+        // CPU load threshold: 80% of available cores
+        cpuLoadThreshold: cpus().length * 0.8,
+        // Free memory threshold: 256 MB (allow through if more than this free)
+        freeMemoryThreshold: 256 * 1024 * 1024,
+        // Max sibling sessions: 8 (allow 8+ concurrent sessions)
+        maxSiblingSessions: 8,
+        // Gate is enabled by default
+        enabled: !process.env['OMC_HOST_LOAD_GATE_DISABLED'],
+        // Default timeout: 30 seconds
+        gateTimeoutMs: 30_000,
+        // Check interval: 2 seconds
+        checkIntervalMs: 2_000,
+    };
+}
+/**
+ * Parse configuration from environment variables.
+ * Environment variables override defaults:
+ * - OMC_HOST_LOAD_THRESHOLD: CPU load threshold (float)
+ * - OMC_FREE_MEMORY_THRESHOLD: Free memory in MB (int)
+ * - OMC_MAX_SIBLING_SESSIONS: Max sibling sessions (int)
+ * - OMC_HOST_LOAD_GATE_DISABLED: Disable gating entirely (any value disables)
+ */
+export function parseGateConfig(overrides) {
+    const defaults = getDefaultGateConfig();
+    const freeMemoryMb = parseIntEnv('OMC_FREE_MEMORY_THRESHOLD');
+    const config = {
+        cpuLoadThreshold: parseFloatEnv('OMC_HOST_LOAD_THRESHOLD') ?? defaults.cpuLoadThreshold,
+        freeMemoryThreshold: freeMemoryMb !== null
+            ? freeMemoryMb * 1024 * 1024
+            : defaults.freeMemoryThreshold,
+        maxSiblingSessions: parseIntEnv('OMC_MAX_SIBLING_SESSIONS') ?? defaults.maxSiblingSessions,
+        enabled: defaults.enabled,
+        gateTimeoutMs: defaults.gateTimeoutMs,
+        checkIntervalMs: defaults.checkIntervalMs,
+        ...overrides,
+    };
+    return config;
+}
+/**
+ * Parse a finite non-negative float from the environment, or null when
+ * unset/unparseable. Invalid values fall back to the documented default.
+ *
+ * Uses Number() rather than parseFloat() because parseFloat() stops at the first
+ * character it cannot read: it turns '0.5abc' into 0.5 and 'off' into NaN, so a
+ * typo silently becomes a real threshold instead of falling back to the default.
+ * Negative environment values are invalid; a negative threshold supplied in a
+ * config override can still disable that check.
+ */
+function parseFloatEnv(key) {
+    const val = process.env[key];
+    if (!val || val.trim() === '')
+        return null;
+    const parsed = Number(val);
+    return Number.isFinite(parsed) && parsed >= 0 ? parsed : null;
+}
+/**
+ * Parse a non-negative safe integer from the environment, or null when
+ * unset/unparseable. Invalid values fall back to the documented default.
+ *
+ * Uses Number() rather than parseInt(), which stops at the first character it
+ * cannot read and so silently truncates: parseInt('1e3', 10) and
+ * parseInt('1_000', 10) both yield 1, meaning OMC_FREE_MEMORY_THRESHOLD=1e3
+ * configured a 1MB floor instead of 1000MB and quietly stopped gating on
+ * memory. Number() parses the whole value, so an unambiguous form is honoured
+ * ('1e3' -> 1000) and an ambiguous one is rejected in favour of the documented
+ * default ('12abc', '8.9') instead of being truncated. Exact integrality is
+ * checked from the text before converting to Number so binary rounding cannot
+ * turn a fractional literal into a safe integer.
+ */
+/** A radix-prefixed magnitude: integral by construction. */
+const RADIX_MAGNITUDE = /^0(?:[xX][0-9a-fA-F]+|[oO][0-7]+|[bB][01]+)$/;
+/** A decimal magnitude: integer digits, optional fraction, optional exponent. */
+const DECIMAL_MAGNITUDE = /^(?:(\d+)(?:\.(\d*))?|\.(\d+))(?:[eE]([+-]?\d+))?$/;
+/**
+ * Parse an environment value that must denote an exact integer, or null.
+ *
+ * Integrality is decided from the digits, never from the parsed double, because
+ * Number() rounds: the nearest double to '8.9999999999999999' is exactly 9 and
+ * '1e-324' underflows to 0, so both would otherwise pass Number.isSafeInteger
+ * despite being fractional.
+ *
+ * For a decimal magnitude, shift the decimal point by the exponent and ask
+ * whether anything but zeros would be pushed past it. That one rule covers every
+ * spelling of the same value, so '1024', '1024.0', '1.024e3' and '10240e-1' are
+ * all accepted while '1.5e0', '8.9' and '1e-324' are not. The sign is handled
+ * separately because Number('-0x1') is NaN, so a signed radix form has to be
+ * reassembled rather than passed through whole.
+ */
+function parseIntegerEnvValue(value) {
+    const negative = value.startsWith('-');
+    const magnitude = negative || value.startsWith('+') ? value.slice(1) : value;
+    const sign = negative ? -1 : 1;
+    if (!RADIX_MAGNITUDE.test(magnitude)) {
+        const match = DECIMAL_MAGNITUDE.exec(magnitude);
+        if (!match)
+            return null;
+        const integerDigits = match[1] ?? '';
+        const fractionDigits = match[2] ?? match[3] ?? '';
+        const exponent = match[4] === undefined ? 0 : Number(match[4]);
+        // Digits that the exponent cannot lift back above the decimal point.
+        const shift = fractionDigits.length - exponent;
+        if (shift > 0) {
+            const significand = integerDigits + fractionDigits;
+            // Zero is integral at every scale, including negative exponents.
+            if (/[1-9]/.test(significand)) {
+                const trailingZeros = significand.length - significand.replace(/0+$/, '').length;
+                if (trailingZeros < shift)
+                    return null;
+            }
+        }
+    }
+    const parsed = sign * Number(magnitude);
+    if (!Number.isSafeInteger(parsed))
+        return null;
+    return parsed === 0 ? 0 : parsed;
+}
+function parseIntEnv(key) {
+    const val = process.env[key];
+    if (!val || val.trim() === '')
+        return null;
+    const parsed = parseIntegerEnvValue(val.trim());
+    return parsed !== null && parsed >= 0 ? parsed : null;
+}
+/**
+ * Count live sibling OMC sessions on this host.
+ * Scans .omc/state/sessions/ for directories, treating each as a session.
+ * Returns 0 if the state directory doesn't exist (fails open).
+ */
+export function countLiveSessions() {
+    try {
+        const stateRoot = getGlobalOmcStateRoot();
+        const sessionsDir = join(stateRoot, 'sessions');
+        if (!existsSync(sessionsDir)) {
+            return 0;
+        }
+        const entries = readdirSync(sessionsDir, { withFileTypes: true });
+        // Count only directories (each directory is one session)
+        return entries.filter((e) => e.isDirectory()).length;
+    }
+    catch {
+        // Fail open: if we can't count sessions, assume zero
+        return 0;
+    }
+}
+/**
+ * Get current host metrics (CPU load, free memory, sibling sessions).
+ * Returns 0/defaults if metrics are unavailable (fails open).
+ */
+export function getHostMetrics() {
+    try {
+        const loads = loadavg();
+        const cpuLoad = loads[0]; // 1-minute load average
+        const freeMemoryBytes = freemem();
+        const totalMemoryBytes = totalmem();
+        const freeMemoryPercent = (freeMemoryBytes / totalMemoryBytes) * 100;
+        const siblingSessions = countLiveSessions();
+        return {
+            cpuLoad,
+            freeMemoryBytes,
+            totalMemoryBytes,
+            freeMemoryPercent,
+            siblingSessions,
+        };
+    }
+    catch {
+        // Fail open: if metrics unavailable, return safe defaults
+        return {
+            cpuLoad: 0,
+            freeMemoryBytes: totalmem(),
+            totalMemoryBytes: totalmem(),
+            freeMemoryPercent: 100,
+            siblingSessions: 0,
+        };
+    }
+}
+/**
+ * Check if a host load gate should allow an operation to proceed.
+ * Gate is disabled if OMC_HOST_LOAD_GATE_DISABLED is set.
+ * Returns { allowed: true } if all conditions pass or gate is disabled.
+ * Returns { allowed: false, reason, waitMs } if any threshold is exceeded.
+ */
+export function checkHostLoadGate(config) {
+    const gateConfig = config ?? parseGateConfig();
+    const metrics = getHostMetrics();
+    // If gating is disabled, always allow
+    if (!gateConfig.enabled) {
+        return {
+            allowed: true,
+            metrics,
+        };
+    }
+    // Check CPU load
+    if (gateConfig.cpuLoadThreshold >= 0 && metrics.cpuLoad > gateConfig.cpuLoadThreshold) {
+        return {
+            allowed: false,
+            reason: `CPU load (${metrics.cpuLoad.toFixed(2)}) exceeds threshold (${gateConfig.cpuLoadThreshold.toFixed(2)})`,
+            waitMs: gateConfig.checkIntervalMs,
+            metrics,
+        };
+    }
+    // Check free memory
+    if (gateConfig.freeMemoryThreshold >= 0 && metrics.freeMemoryBytes < gateConfig.freeMemoryThreshold) {
+        const freeMemMB = (metrics.freeMemoryBytes / (1024 * 1024)).toFixed(0);
+        const thresholdMB = (gateConfig.freeMemoryThreshold / (1024 * 1024)).toFixed(0);
+        return {
+            allowed: false,
+            reason: `Free memory (${freeMemMB}MB) below threshold (${thresholdMB}MB)`,
+            waitMs: gateConfig.checkIntervalMs,
+            metrics,
+        };
+    }
+    // Check sibling sessions
+    if (gateConfig.maxSiblingSessions >= 0 && metrics.siblingSessions > gateConfig.maxSiblingSessions) {
+        return {
+            allowed: false,
+            reason: `Too many sibling sessions (${metrics.siblingSessions}) exceeds max (${gateConfig.maxSiblingSessions})`,
+            waitMs: gateConfig.checkIntervalMs,
+            metrics,
+        };
+    }
+    return {
+        allowed: true,
+        metrics,
+    };
+}
+/**
+ * Wait for the gate to allow an operation, with timeout.
+ * Polls the gate at regular intervals until allowed or timeout.
+ * Always returns eventually (fails open, never deadlocks).
+ *
+ * @param config Gate configuration (uses defaults if not provided)
+ * @param timeoutMs Override for max wait time
+ * @returns Gate result (allowed: true if successful, false if timeout)
+ */
+export async function waitForHostLoadGate(config, timeoutMs) {
+    const gateConfig = config ?? parseGateConfig();
+    const deadline = Date.now() + (timeoutMs ?? gateConfig.gateTimeoutMs);
+    while (true) {
+        const result = checkHostLoadGate(gateConfig);
+        if (result.allowed) {
+            return result;
+        }
+        // Check timeout
+        if (Date.now() >= deadline) {
+            // Fail open: return allowed=true after timeout
+            return {
+                allowed: true,
+                reason: 'Gate timeout - allowing operation to proceed',
+                metrics: result.metrics,
+            };
+        }
+        // Wait before retrying
+        const waitMs = result.waitMs ?? gateConfig.checkIntervalMs;
+        await new Promise((resolve) => setTimeout(resolve, Math.min(waitMs, deadline - Date.now())));
+    }
+}
+/**
+ * Gate an expensive operation with a timeout message.
+ * Returns { allowed: true } if operation can proceed.
+ * Returns { allowed: false, message } if gated, suggesting to try again later.
+ */
+export function gateExpensiveOperation(operationName, config) {
+    const result = checkHostLoadGate(config);
+    if (result.allowed) {
+        return { allowed: true };
+    }
+    const message = [
+        `Host load gate: cannot start ${operationName}`,
+        result.reason,
+        `Sibling sessions: ${result.metrics.siblingSessions}`,
+        `CPU load: ${result.metrics.cpuLoad.toFixed(2)}, Free memory: ${((result.metrics.freeMemoryBytes / (1024 * 1024)) | 0)}MB`,
+        `Try again in a few moments or disable with: export OMC_HOST_LOAD_GATE_DISABLED=1`,
+    ].join('\n');
+    return {
+        allowed: false,
+        message,
+        result,
+    };
+}
+//# sourceMappingURL=host-load-gate.js.map

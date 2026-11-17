@@ -1,0 +1,115 @@
+/**
+ * Cross-Platform Path Utilities
+ *
+ * Provides utility functions for handling paths across Windows, macOS, and Linux.
+ * These utilities ensure paths in configuration files use forward slashes
+ * (which work universally) and handle platform-specific directory conventions.
+ */
+/**
+ * Convert a path to use forward slashes (for JSON/config files)
+ * This is necessary because settings.json commands are executed
+ * by shells that expect forward slashes even on Windows
+ */
+export declare function toForwardSlash(path: string): string;
+/**
+ * Get a path suitable for use in shell commands
+ * Converts backslashes to forward slashes for cross-platform compatibility
+ */
+export declare function toShellPath(path: string): string;
+/**
+ * Get Windows-appropriate data directory
+ * Falls back to sensible locations instead of XDG paths
+ */
+export declare function getDataDir(): string;
+/**
+ * Get Windows-appropriate config directory
+ */
+export declare function getConfigDir(): string;
+/**
+ * Get Windows-appropriate state directory.
+ */
+export declare function getStateDir(): string;
+/**
+ * Legacy global OMC directory under the user's home directory.
+ */
+export declare function getLegacyOmcDir(): string;
+/**
+ * Global OMC config directory.
+ *
+ * Precedence:
+ * 1. OMC_HOME (existing explicit override)
+ * 2. XDG-aware config root on Linux/Unix
+ * 3. Legacy ~/.omc elsewhere
+ */
+export declare function getGlobalOmcConfigRoot(): string;
+/**
+ * Global OMC state directory.
+ *
+ * When OMC_HOME is set, preserve that existing override semantics by treating
+ * it as the shared root and resolving state beneath it.
+ */
+export declare function getGlobalOmcStateRoot(): string;
+export declare function getGlobalOmcConfigPath(...segments: string[]): string;
+export declare function getGlobalOmcStatePath(...segments: string[]): string;
+export declare function getLegacyOmcPath(...segments: string[]): string;
+export declare function getGlobalOmcConfigCandidates(...segments: string[]): string[];
+export declare function getGlobalOmcStateCandidates(...segments: string[]): string[];
+/**
+ * Get the plugin cache base directory for oh-my-claudecode.
+ * This is the directory containing version subdirectories.
+ *
+ * Structure: <configDir>/plugins/cache/omc/oh-my-claudecode/
+ */
+export declare function getPluginCacheBase(): string;
+/**
+ * Safely delete a file, ignoring ENOENT errors.
+ * Prevents crashes when cleaning up files that may not exist (Bug #13 fix).
+ */
+export declare function safeUnlinkSync(filePath: string): boolean;
+/**
+ * Safely remove a directory recursively, ignoring errors.
+ */
+export declare function safeRmSync(dirPath: string): boolean;
+/**
+ * Result of a plugin cache purge operation.
+ */
+export interface PurgeCacheResult {
+    /** Number of stale version directories removed */
+    removed: number;
+    /** Paths that were removed */
+    removedPaths: string[];
+    /** Number of stale version directories replaced with symlinks to the active version */
+    symlinked: number;
+    /** Paths that were converted to symlinks */
+    symlinkPaths: string[];
+    /** Number of version directories restored from an interrupted relink */
+    restored: number;
+    /** Version paths that were restored from an interrupted relink */
+    restoredPaths: string[];
+    /** Number of backups left in place because their owning purge is still running */
+    skipped: number;
+    /** Backup paths left to their live owner, with the version path they belong to */
+    skippedPaths: string[];
+    /** Errors encountered (non-fatal) */
+    errors: string[];
+}
+/**
+ * Compare two semver-like version strings descending (higher version first).
+ * Non-numeric segments fall back to 0.
+ */
+/**
+ * The trailing path segment, split on either separator.
+ *
+ * These paths come from the plugin registration file, so on Windows they are
+ * native and splitting on '/' alone returned the whole string. The comparator
+ * then read the drive and directory names as version components: every path
+ * under the default .claude directory parsed to the same leading numbers, so
+ * '...\\1.2.3' and '...\\1.2.4' compared equal and the newest active version
+ * was not reliably chosen.
+ */
+export declare function versionLeaf(path: string): string;
+export declare function compareSemverDesc(a: string, b: string): number;
+export declare function purgeStalePluginCacheVersions(options?: {
+    skipGracePeriod?: boolean;
+}): PurgeCacheResult;
+//# sourceMappingURL=paths.d.ts.map

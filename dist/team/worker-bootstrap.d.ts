@@ -1,0 +1,69 @@
+import type { CliAgentType } from './model-contract.js';
+export interface WorkerBootstrapParams {
+    teamName: string;
+    workerName: string;
+    agentType: CliAgentType;
+    tasks: Array<{
+        id: string;
+        subject: string;
+        description: string;
+    }>;
+    bootstrapInstructions?: string;
+    /** Whether the runtime assigned this worker a reviewer-style verdict role. */
+    reviewerRole?: boolean;
+    cwd: string;
+    /**
+     * Worker-facing root used in instructions. The default is the leader cwd
+     * relative global state root (`.omc/state`); non-default values are treated as
+     * a team-specific root (`.../.omc/state/team/<team>`), matching
+     * `OMC_TEAM_STATE_ROOT` and `teamStateRoot()` semantics.
+     */
+    instructionStateRoot?: string;
+}
+export declare function generateTriggerMessage(teamName: string, workerName: string, teamStateRoot?: string): string;
+export declare function generatePromptModeStartupPrompt(teamName: string, workerName: string, teamStateRoot?: string, cliOutputContract?: string): string;
+export declare function generateMailboxTriggerMessage(teamName: string, workerName: string, count?: number, teamStateRoot?: string): string;
+export interface RecoveryContinuationInstruction {
+    teamName: string;
+    workerName: string;
+    taskId: string;
+    claimToken: string;
+    taskVersion: number;
+    sequence: number;
+    resumePayload: unknown;
+}
+/** Render owner-adopted continuation data only after the activation gate opens. */
+export declare function renderRecoveryContinuationInstruction(instruction: RecoveryContinuationInstruction): string;
+/** Exit sentence shared by the worker overlay and the initial task inbox. */
+export declare function renderWorkerExitContract(agentType: CliAgentType, reviewerRole?: boolean): string;
+export declare function renderCursorWorkerGuidance(reviewerRole?: boolean): string;
+/**
+ * Generate the worker overlay markdown.
+ * This is injected as AGENTS.md content for the worker agent.
+ * CRITICAL: All task content is sanitized via sanitizePromptContent() before embedding.
+ * Does NOT mutate the project AGENTS.md.
+ */
+export declare function generateWorkerOverlay(params: WorkerBootstrapParams): string;
+/**
+ * Write the initial inbox file for a worker.
+ */
+export declare function composeInitialInbox(teamName: string, workerName: string, content: string, cwd: string, cliOutputContract?: string): Promise<void>;
+/**
+ * Append a message to the worker inbox.
+ *
+ * Sanitizes both `teamName` and `workerName` (mirroring the leader-inbox
+ * pattern) and validates the resolved path stays under `cwd` to prevent
+ * traversal — callers in `merge-orchestrator` may pass un-sanitized names.
+ */
+export declare function appendToInbox(teamName: string, workerName: string, message: string, cwd: string): Promise<void>;
+export { getWorkerEnv } from './model-contract.js';
+/**
+ * Ensure worker state directory exists.
+ */
+export declare function ensureWorkerStateDir(teamName: string, workerName: string, cwd: string): Promise<void>;
+/**
+ * Write worker overlay as an AGENTS.md file in the worker state dir.
+ * This is separate from the project AGENTS.md — it will be passed to the worker via inbox.
+ */
+export declare function writeWorkerOverlay(params: WorkerBootstrapParams): Promise<string>;
+//# sourceMappingURL=worker-bootstrap.d.ts.map
