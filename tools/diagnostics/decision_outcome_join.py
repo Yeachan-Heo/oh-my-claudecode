@@ -330,6 +330,8 @@ def scan_transcript(path, prices):
     raw_turns = Counter()      # raw message.model -> number of turns
     thinking_usage = 0
     sum_input = sum_output = sum_z5 = sum_z1h = sum_read = 0
+    # Count turns without usage as unpriced
+    turns_unpriced += len(turn_ids) - len(last)
     for model_id, u in last.values():
         family = model_family(model_id)
         inp = u.get('input_tokens') or 0
@@ -349,7 +351,7 @@ def scan_transcript(path, prices):
         sum_z5 += z5
         sum_z1h += z1h
         sum_read += cache_read
-        if family not in prices:
+        if price_row(family, inp, cache_read, z5, z1h, prices) is None:
             turns_unpriced += 1
             continue
         requests.append((inp, z5, z1h, cache_read, out))
@@ -435,6 +437,7 @@ def claude_row(r, m, meta_path, tr, shadow_row, prices, source_map):
     applied = r.get('applied') or {}
     model_decision = applied.get('model') if isinstance(applied.get('model'), dict) else {}
     effort_decision = applied.get('effort') if isinstance(applied.get('effort'), dict) else {}
+    applied_subagent_type = applied.get('subagent_type') or r.get('subagent_type') or ''
     model_to = model_decision.get('to')
     model_from = model_decision.get('from')
     dominant = None
@@ -466,7 +469,7 @@ def claude_row(r, m, meta_path, tr, shadow_row, prices, source_map):
         'tool_use_id': r.get('tool_use_id') or '',
         'session_id': r.get('session_id') or '',
         'agent_id': m.get('agentId') or m.get('agent_id') or identifier,
-        'subagent_type': r.get('subagent_type') or '',
+        'subagent_type': applied_subagent_type,
         'ts': r.get('ts') or '',
         'model_from': model_from,
         'model_to': model_to,
@@ -503,7 +506,7 @@ def claude_row(r, m, meta_path, tr, shadow_row, prices, source_map):
         'end_api_error_status': tr['api_error_status'] if tr else None,
         'started_with_model': m.get('model'),
         'started_with_effort': m.get('effort'),
-        'task_source': task_source(subagent_type=r.get('subagent_type'), source_map=source_map),
+        'task_source': task_source(subagent_type=applied_subagent_type, source_map=source_map),
     }
 
 

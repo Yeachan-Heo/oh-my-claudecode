@@ -373,7 +373,15 @@ export function analyze({ columns, rows }, options = {}) {
         nHoldout = accepted.length;
         kHoldout = accepted.reduce((s, r) => s + r.result, 0);
         holdoutHitRate = nHoldout === 0 ? null : kHoldout / nHoldout;
-        holdoutStatus = holdoutHitRate !== null && holdoutHitRate < target - SLACK_HOLDOUT ? 'holdout_miss' : 'holdout_ok';
+        if (nHoldout === 0) {
+          holdoutStatus = 'holdout unevaluable';
+        } else if (direction === 'upper') {
+          const upperBound = wilsonUpper(kHoldout, nHoldout);
+          holdoutStatus = upperBound !== null && upperBound < target - SLACK_HOLDOUT ? 'holdout_miss' : 'holdout_ok';
+        } else {
+          const lowerBound = wilsonLower(kHoldout, nHoldout);
+          holdoutStatus = lowerBound !== null && lowerBound < target - SLACK_HOLDOUT ? 'holdout_miss' : 'holdout_ok';
+        }
       }
       holdoutResult = { fitSessions: fit.size, holdoutSessions: holdoutSessions.size, threshold: thresholdValue, nHoldout, kHoldout, hitRateHoldout: holdoutHitRate, status: holdoutStatus };
     }

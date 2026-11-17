@@ -270,6 +270,7 @@ def load_contexts(dir_path, rng, poll_commands, extra_tools):
             stats['files'] += 1
             calls = []
             results = {}   # tool_use_id -> (row position, content, is_error)
+            seen_tool_use_ids = set()  # Track already-added tool_use IDs to deduplicate within context
             try:
                 with open(path, encoding='utf8', errors='replace') as f:
                     for position, line in enumerate(f):
@@ -294,6 +295,11 @@ def load_contexts(dir_path, rng, poll_commands, extra_tools):
                             for block in content:
                                 if not (isinstance(block, dict) and block.get('type') == 'tool_use'):
                                     continue
+                                tool_use_id = block.get('id')
+                                if tool_use_id in seen_tool_use_ids:
+                                    continue
+                                if tool_use_id:
+                                    seen_tool_use_ids.add(tool_use_id)
                                 tool = block.get('name')
                                 inp = block.get('input')
                                 if not isinstance(inp, dict):
@@ -637,6 +643,10 @@ def collect(calls_by_context, options):
                     'signature': calls[s['start']]['sig'][:12],
                 })
         for s in similar_series_strict(calls, options['min_similar'], options['dice'], input_texts):
+            # Check if all calls in this series are polling; if so, exclude from totals
+            series_calls = calls[s['start']:s['end']]
+            if all(w['polling'] for w in series_calls):
+                continue
             c_total['strict'][0] += 1
             c_total['strict'][1] += s['end'] - s['start']
             series_tool = calls[s['start']]['tool']
@@ -658,6 +668,10 @@ def collect(calls_by_context, options):
         for tool in sorted({w['tool'] for w in calls}):
             stream = [w for w in calls if w['tool'] == tool]
             for s in similar_series(stream, options['min_similar'], options['dice'], input_texts):
+                # Check if all calls in this series are polling; if so, exclude from totals
+                series_calls = stream[s['start']:s['end']]
+                if all(w['polling'] for w in series_calls):
+                    continue
                 c_total['subsequence'][0] += 1
                 c_total['subsequence'][1] += s['end'] - s['start']
                 c_by_tool['subsequence'].setdefault(tool, Counter())['series'] += 1
@@ -677,6 +691,10 @@ def collect(calls_by_context, options):
         # (d): cycles on the stream of all calls of the context (polling included)
         stream_d = calls
         for cy in cycles(stream_d, options['periods'], options['min_cycle_repeats'], options['window']):
+            # Check if all calls in this cycle are polling; if so, exclude from totals
+            cycle_calls_list = stream_d[cy['start']:cy['end']]
+            if all(w['polling'] for w in cycle_calls_list):
+                continue
             cycles_total += 1
             run_len = cy['end'] - cy['start']
             cycle_calls += run_len

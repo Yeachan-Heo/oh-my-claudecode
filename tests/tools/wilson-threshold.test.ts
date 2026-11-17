@@ -257,6 +257,29 @@ describe('wilson_threshold', () => {
     expect(r3.groups[0].holdout).toBeNull();
   });
 
+  it('holdout unevaluable when no rows meet threshold', () => {
+    // Create fit with high confidence threshold and holdout with low confidences
+    const ids = Array.from({ length: 150 }, (_, i) => `session-${i}`);
+    const split = splitFitHoldout(ids, 0.4);
+    const rows = ids.map((s) => {
+      if (split.fit.has(s)) {
+        // Fit: all with high confidence and hits
+        return ['1', '0.95', s];
+      } else {
+        // Holdout: all with low confidence (below the chosen threshold)
+        return ['0', '0.1', s];
+      }
+    });
+    const text = tsv(['result', 'confidence', 'session'], rows);
+    const r = run(text, { target: 0.9, minSupport: 30, holdout: 0.4 });
+    const g = r.groups[0];
+    expect(g.holdout).not.toBeNull();
+    // The threshold will be 0.95 (from fit); no holdout rows meet this, so nHoldout = 0
+    expect(g.holdout!.nHoldout).toBe(0);
+    // Status should be unevaluable, not holdout_ok
+    expect(g.holdout!.status).toBe('holdout unevaluable');
+  });
+
   it('small sample: n < 100 gives a warning in the text report and does not change the status', () => {
     const text = tsv(['result', 'confidence'], Array.from({ length: 40 }, () => ['1', '0.9']));
     const report = run(text, { target: 0.9, minSupport: 30 });
