@@ -264,6 +264,66 @@ describe("project memory frame", () => {
       expect(line).toContain(`build=${JSON.stringify(command).replace(FE0F, "\\ufe0f")} | test=[identifier of 201 characters not shown]`);
     });
 
+    // An identifier whose written form (escaped, quoted) has exactly `length` characters: `count` removed characters of
+    // `junk` (6 written characters each, 12 for an astral one) and plain characters for the rest.
+    const writtenLength = (length: number, junk: string, count: number): string =>
+      `${"x".repeat(length - 2 - count * (junk.length === 2 ? 12 : 6))}${junk.repeat(count)}`;
+    const junkCases: Array<[string, string, number]> = [
+      ["variation selector", FE0F, 1],
+      ["variation selector", FE0F, 15],
+      ["astral tag character", String.fromCodePoint(0xe0041), 1],
+      ["astral tag character", String.fromCodePoint(0xe0041), 8],
+    ];
+
+    for (const [label, junk, count] of junkCases) {
+      it(`hot path limit of 200 written characters, one on each side: ${count} x ${label}`, () => {
+        for (const length of [199, 200, 201]) {
+          const path = writtenLength(length, junk, count);
+          expect(writers.escapeIdentifier(path).length).toBe(length);
+          const line = hotPathLine(formatContextSummary(hotPathMemory(path), {}, writers));
+          if (length <= 200) expect(decodeHotPath(line), `${length}`).toBe(path);
+          else expect(line, `${length}`).toBe("- [identifier of 201 characters not shown] (5x)");
+        }
+      });
+
+      it(`command limit of 120 written characters, one on each side: ${count} x ${label}`, () => {
+        for (const length of [119, 120, 121]) {
+          const command = writtenLength(length, junk, count);
+          const summary = formatContextSummary(
+            createMemory({ build: { buildCommand: command, testCommand: null, lintCommand: null, devCommand: null, scripts: {} } }),
+            {},
+            writers,
+          );
+          const line = summary.split("\n").find((entry) => entry.startsWith("- build=")) ?? "";
+          expect(line, `${length}`).toBe(
+            length <= 120 ? `- build=${writers.escapeIdentifier(command)}` : "- build=[identifier of 121 characters not shown]",
+          );
+        }
+      });
+    }
+
+    it("summary budget of 650 characters, one on each side: whole lines or the whole summary", () => {
+      const unfitted = { ...writers, fitLines: (value: unknown) => String(value) };
+      const memoryWith = (directive: string): ProjectMemory =>
+        hotPathMemory(`src/${FE0F}/a.ts`, {
+          userDirectives: [{ timestamp: 1, directive, context: "", source: "explicit", priority: "high" }],
+        });
+      const base = formatContextSummary(memoryWith(""), {}, unfitted).length;
+      for (const length of [649, 650, 651]) {
+        const memory = memoryWith("d".repeat(length - base));
+        expect(formatContextSummary(memory, {}, unfitted).length).toBe(length);
+        const fitted = formatContextSummary(memory, {}, writers);
+        if (length <= 650) {
+          expect(fitted, `${length}`).toBe(formatContextSummary(memory, {}, unfitted));
+        } else {
+          expect(fitted.length, `${length}`).toBeLessThanOrEqual(650);
+          expect(fitted.endsWith("\n…"), `${length}`).toBe(true);
+          expect(fitted, `${length}`).toContain(`- "src/\\ufe0f/a.ts" (5x)`);
+          expect(fitted, `${length}`).not.toContain("- critical: ");
+        }
+      }
+    });
+
     it("cuts the summary at a line, never inside a hot path, when the budget is over", () => {
       const memory = hotPathMemory(`${"a".repeat(180)}/file.ts`, {
         userDirectives: [

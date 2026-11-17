@@ -455,6 +455,26 @@ describe('post-tool-verifier with the text cleaning switch', () => {
     });
   }, 30000);
 
+  it('writes an agent name of 80 written characters exactly and one of 81 as a notice', () => {
+    withFixture((fixture) => {
+      mkdirSync(join(fixture.project, '.omc', 'state'), { recursive: true });
+      // 'x' fillers and one U+FE0F: the written form is a JSON string with a six character escape and two quotes.
+      const nameOfLength = (length) => `${'x'.repeat(length - 8)}${FE0F}`;
+      for (const length of [79, 80, 81]) {
+        const name = nameOfLength(length);
+        writeFileSync(join(fixture.project, '.omc', 'state', 'subagent-tracking.json'), JSON.stringify({
+          agents: [{ status: 'running', agent_type: name }], total_completed: 0, total_failed: 0,
+        }));
+        const out = runHook('post-tool-verifier.mjs', {
+          hook_event_name: 'PostToolUse', session_id: `ctx-text-a4-${length}`, tool_name: 'Task',
+          tool_input: { description: 'x', prompt: 'y' }, tool_output: '', cwd: fixture.project,
+        }, fixture, SWITCH_ON);
+        const text = String(out.hookSpecificOutput?.additionalContext ?? '');
+        expect(text, `${length}`).toContain(length <= 80 ? `Running: 1 [${jsonName(name)}]` : 'Running: 1 [[identifier of 81 characters not shown]]');
+      }
+    });
+  }, 60000);
+
   it('writes agent names with removed characters exactly, one JSON string each, when the switch is on', () => {
     withFixture((fixture) => {
       mkdirSync(join(fixture.project, '.omc', 'state'), { recursive: true });
@@ -1013,6 +1033,20 @@ describe('text cleaning in the injectors, wiki hooks and run reporters', () => {
     });
   }, 30000);
 
+  it('runs reconciler: a run of 200 written characters is exact and one of 201 is a notice', () => {
+    for (const length of [199, 200, 201]) {
+      withFixture((fixture) => {
+        mkdirSync(join(fixture.nonGit, 'state', 'runs'), { recursive: true });
+        const run = `${'r'.repeat(length - 8)}${FE0F}`;
+        const entry = { run, sessionId: 'session-1', event: 'end', closeoutWritten: false, ts: new Date().toISOString() };
+        writeFileSync(join(fixture.nonGit, 'state', 'runs', 'ledger.jsonl'), JSON.stringify(entry) + '\n');
+        const out = runHook('runs-reconciler.mjs', SESSION_START(fixture.project, `ctx-text-runs-${length}`), fixture, SWITCH_ON);
+        const line = String(out.hookSpecificOutput?.additionalContext ?? '').split('\n')[1];
+        expect(line.startsWith(length <= 200 ? `- ${jsonName(run)} (session session-1)` : '- [identifier of 201 characters not shown] (session session-1)'), `${length}`).toBe(true);
+      });
+    }
+  }, 60000);
+
   it('runs reconciler: the ledger fields are written unchanged when the switch is off', () => {
     withFixture((fixture) => {
       mkdirSync(join(fixture.nonGit, 'state', 'runs'), { recursive: true });
@@ -1089,6 +1123,28 @@ describe('text cleaning in the injectors, wiki hooks and run reporters', () => {
       rmSync(fixture.root, { recursive: true, force: true });
     }
   }, 30000);
+
+  it('stale-run reporter: a path of 500 characters is exact and one of 501 is a notice', () => {
+    for (const length of [499, 500, 501]) {
+      const fixture = makeFixture('context-text-sanitize-' + 'p'.repeat(170) + '-');
+      try {
+        const sessions = join(fixture.nonGit, 'state', 'sessions');
+        const sessionId = 'k'.repeat(length - (sessions.length + 1 + 1 + 'autopilot-state.json'.length));
+        const sessionDir = join(sessions, sessionId);
+        mkdirSync(sessionDir, { recursive: true });
+        const autopilot = join(sessionDir, 'autopilot-state.json');
+        expect(autopilot.length).toBe(length);
+        writeFileSync(autopilot, JSON.stringify({ active: true }));
+        const threeHoursAgo = new Date(Date.now() - 3 * 3600_000);
+        utimesSync(autopilot, threeHoursAgo, threeHoursAgo);
+        const out = runHook('stale-run-reporter.mjs', SESSION_START(fixture.project, `ctx-text-stale-${length}`), fixture, SWITCH_ON);
+        const line = String(out.hookSpecificOutput?.additionalContext ?? '').split('\n').find((l) => l.startsWith('- autopilot'));
+        expect(line.endsWith(length <= 500 ? ` — ${autopilot}` : ' — [identifier of 501 characters not shown]'), `${length}`).toBe(true);
+      } finally {
+        rmSync(fixture.root, { recursive: true, force: true });
+      }
+    }
+  }, 60000);
 
   it('stale-run reporter: a path whose written form is over 500 characters is replaced by a notice, not cut', () => {
     const fixture = makeFixture('context-text-sanitize-' + 'p'.repeat(200) + '-');
