@@ -17,7 +17,7 @@ import { mkdtempSync, mkdirSync, writeFileSync, rmSync, copyFileSync, readFileSy
 import { tmpdir } from 'node:os';
 import { join, dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { OMC_PLUGIN_ROOT_ENV } from '../../lib/env-vars.js';
+import { OMC_HUD_UNBUILT_VERSION_ENV, OMC_PLUGIN_ROOT_ENV } from '../../lib/env-vars.js';
 import { buildHudWrapper as buildHudWrapperTs } from '../../lib/hud-wrapper-template.js';
 
 const CACHE_STUB_MARKER = 'FROM_CACHE_TEST_STUB';
@@ -449,6 +449,84 @@ describe('HUD wrapper — OMC_PLUGIN_ROOT resolution', () => {
     expect(diagnosticLines[0].length).toBeLessThanOrEqual(150);
     expect(result.stdout).not.toContain('omc update');
     expect(result.stdout).not.toContain('paste:');
+    expect(result.stderr ?? '').toBe('');
+  });
+
+  it('case 9: tells the older HUD which newer installed version it replaced for lack of a build', () => {
+    const s = staged!;
+    const configDir = join(s.dir, 'isolated-config-unbuilt-latest');
+    const cacheBase = join(configDir, 'plugins', 'cache', 'omc', 'oh-my-claudecode');
+    const reportUnbuilt = `process.stdout.write("UNBUILT=" + (process.env.${OMC_HUD_UNBUILT_VERSION_ENV} ?? "unset") + "\\n");\n`;
+
+    // 4.11.3 is installed without dist/ (the #5027 shape); 4.11.2 is built.
+    mkdirSync(join(cacheBase, '4.11.3', 'bridge'), { recursive: true });
+    const olderBuiltDir = join(cacheBase, '4.11.2', 'dist', 'hud');
+    mkdirSync(olderBuiltDir, { recursive: true });
+    writeFileSync(join(olderBuiltDir, 'index.js'), reportUnbuilt, 'utf8');
+
+    const result = runWrapper(s.wrapperPath, scrubbedEnv({ CLAUDE_CONFIG_DIR: configDir }));
+
+    expect(result.status).toBe(0);
+    expect(result.stdout).toBe('UNBUILT=4.11.3\n');
+    expect(result.stderr ?? '').toBe('');
+  });
+
+  it('case 10: leaves the unbuilt-version signal unset when the newest installed version is built', () => {
+    const s = staged!;
+    const configDir = join(s.dir, 'isolated-config-built-latest');
+    const cacheBase = join(configDir, 'plugins', 'cache', 'omc', 'oh-my-claudecode');
+    const reportUnbuilt = `process.stdout.write("UNBUILT=" + (process.env.${OMC_HUD_UNBUILT_VERSION_ENV} ?? "unset") + "\\n");\n`;
+
+    // An older unbuilt version must not be reported: nothing newer was skipped.
+    mkdirSync(join(cacheBase, '4.11.2', 'bridge'), { recursive: true });
+    const latestBuiltDir = join(cacheBase, '4.11.3', 'dist', 'hud');
+    mkdirSync(latestBuiltDir, { recursive: true });
+    writeFileSync(join(latestBuiltDir, 'index.js'), reportUnbuilt, 'utf8');
+
+    const result = runWrapper(s.wrapperPath, scrubbedEnv({ CLAUDE_CONFIG_DIR: configDir }));
+
+    expect(result.status).toBe(0);
+    expect(result.stdout).toBe('UNBUILT=unset\n');
+  });
+
+  it('case 11: drops an inherited unbuilt-version signal when the newest installed version is built', () => {
+    const s = staged!;
+    const configDir = join(s.dir, 'isolated-config-inherited-signal');
+    const latestBuiltDir = join(configDir, 'plugins', 'cache', 'omc', 'oh-my-claudecode', '4.11.3', 'dist', 'hud');
+    mkdirSync(latestBuiltDir, { recursive: true });
+    writeFileSync(
+      join(latestBuiltDir, 'index.js'),
+      `process.stdout.write("UNBUILT=" + (process.env.${OMC_HUD_UNBUILT_VERSION_ENV} ?? "unset") + "\\n");\n`,
+      'utf8',
+    );
+
+    const result = runWrapper(s.wrapperPath, scrubbedEnv({
+      CLAUDE_CONFIG_DIR: configDir,
+      [OMC_HUD_UNBUILT_VERSION_ENV]: '9.9.9',
+    }));
+
+    expect(result.status).toBe(0);
+    expect(result.stdout).toBe('UNBUILT=unset\n');
+  });
+
+  it('case 12: tells a fallback HUD which installed version it replaced when no cached version is built', () => {
+    const s = staged!;
+    const configDir = join(s.dir, 'isolated-config-unbuilt-only');
+    const reportUnbuilt = `process.stdout.write("UNBUILT=" + (process.env.${OMC_HUD_UNBUILT_VERSION_ENV} ?? "unset") + "\\n");\n`;
+
+    // The cache holds only an unbuilt 4.11.3; the marketplace clone has a built HUD.
+    mkdirSync(join(configDir, 'plugins', 'cache', 'omc', 'oh-my-claudecode', '4.11.3', 'bridge'), { recursive: true });
+    const marketplaceHudDir = join(configDir, 'plugins', 'marketplaces', 'omc', 'dist', 'hud');
+    mkdirSync(marketplaceHudDir, { recursive: true });
+    writeFileSync(join(marketplaceHudDir, 'index.js'), reportUnbuilt, 'utf8');
+
+    const result = runWrapper(s.wrapperPath, scrubbedEnv({
+      CLAUDE_CONFIG_DIR: configDir,
+      OMC_HUD_DISABLE_NPM_FALLBACK: '1',
+    }));
+
+    expect(result.status).toBe(0);
+    expect(result.stdout).toBe('UNBUILT=4.11.3\n');
     expect(result.stderr ?? '').toBe('');
   });
 
