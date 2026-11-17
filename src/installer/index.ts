@@ -31,6 +31,7 @@ import { buildHudWrapper } from '../lib/hud-wrapper-template.js';
 import { getOmcRoot } from '../lib/worktree-paths.js';
 import { syncOmcLearnedUserSkillsForClaudeCode } from '../utils/user-skill-compat.js';
 import { OMC_PLUGIN_ROOT_ENV } from '../lib/env-vars.js';
+import { applyExtraDisallowedToolsToMarkdown, getExtraDisallowedTools, isPlainYamlToken } from '../agents/utils.js';
 import { analyzeLegacyClaudeMd, OMC_END_MARKER, OMC_START_MARKER, parseClaudeMdMarkers, removeClaudeMdRanges } from './claude-md-analysis.js';
 import { executeClaudeMdTransaction, isClaudeMdEnabledInConfig } from './claude-md-transaction.js';
 import { HISTORICAL_AGENT_OWNERSHIP, type HistoricalAgentOwnership } from './historical-agent-ownership.js';
@@ -2607,7 +2608,14 @@ export function install(options: InstallOptions = {}): InstallResult {
       // Install agents
       if (shouldInstallLegacyAgents) {
         log('Installing agent definitions...');
-        for (const [filename, content] of Object.entries(loadAgentDefinitions())) {
+        const extraDisallowedTools = getExtraDisallowedTools();
+        for (const token of extraDisallowedTools) {
+          if (!isPlainYamlToken(token)) {
+            log(`  Skipping extra disallowed tool ${JSON.stringify(token)} (not a plain YAML value)`);
+          }
+        }
+        for (const [filename, rawContent] of Object.entries(loadAgentDefinitions())) {
+          const content = applyExtraDisallowedToolsToMarkdown(rawContent, extraDisallowedTools);
           const filepath = join(AGENTS_DIR, filename);
           if (existsSync(filepath) && !options.force) {
             log(`  Skipping ${filename} (already exists)`);

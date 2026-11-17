@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from 'vitest';
-import { renderUpdateHints } from '../../hud/elements/update-hint.js';
+import { renderUpdateHints, resolveOmcUpdateState } from '../../hud/elements/update-hint.js';
 import { render } from '../../hud/render.js';
 import { DEFAULT_HUD_CONFIG } from '../../hud/types.js';
 import type { HudRenderContext, HudConfig } from '../../hud/types.js';
@@ -108,6 +108,103 @@ describe('renderUpdateHints', () => {
     expect(lines).toHaveLength(2);
     expect(lines[1]).toBe('[!] claude 2.1.240 - paste: ! claude update');
     expect(lines[1].length).toBeLessThan(110);
+  });
+});
+
+describe('resolveOmcUpdateState', () => {
+  it('advertises a newer latest version when nothing was skipped', () => {
+    expect(resolveOmcUpdateState('5.8.5', '5.8.6', undefined)).toEqual({
+      updateAvailable: '5.8.6',
+      unbuiltVersion: null,
+    });
+  });
+
+  it('reports an installed-but-unbuilt version instead of advertising it as an update', () => {
+    expect(resolveOmcUpdateState('5.8.5', '5.8.6', '5.8.6')).toEqual({
+      updateAvailable: null,
+      unbuiltVersion: '5.8.6',
+    });
+  });
+
+  it('reports the unbuilt version when the update cache is unreadable', () => {
+    expect(resolveOmcUpdateState('5.8.5', null, '5.8.6')).toEqual({
+      updateAvailable: null,
+      unbuiltVersion: '5.8.6',
+    });
+  });
+
+  it('still advertises a latest version above the unbuilt one', () => {
+    expect(resolveOmcUpdateState('5.8.5', '5.8.7', '5.8.6')).toEqual({
+      updateAvailable: '5.8.7',
+      unbuiltVersion: null,
+    });
+  });
+
+  it('ignores an unbuilt version that is not newer than the running HUD or is not a version', () => {
+    expect(resolveOmcUpdateState('5.8.6', '5.8.6', '5.8.6')).toEqual({
+      updateAvailable: null,
+      unbuiltVersion: null,
+    });
+    expect(resolveOmcUpdateState('5.8.5', '5.8.6', '5.8.4')).toEqual({
+      updateAvailable: '5.8.6',
+      unbuiltVersion: null,
+    });
+    expect(resolveOmcUpdateState('5.8.5', '5.8.6', '../9.9.9')).toEqual({
+      updateAvailable: '5.8.6',
+      unbuiltVersion: null,
+    });
+  });
+
+  it('treats the stable release as an update over an unbuilt prerelease of it', () => {
+    expect(resolveOmcUpdateState('5.8.5', '5.8.6', '5.8.6-beta.1')).toEqual({
+      updateAvailable: '5.8.6',
+      unbuiltVersion: null,
+    });
+  });
+
+  it('ignores a cached latest version that is not a string', () => {
+    expect(resolveOmcUpdateState('5.8.5', 5, undefined)).toEqual({
+      updateAvailable: null,
+      unbuiltVersion: null,
+    });
+  });
+
+  it('says nothing when the running version is unknown', () => {
+    expect(resolveOmcUpdateState(null, '5.8.6', '5.8.6')).toEqual({
+      updateAvailable: null,
+      unbuiltVersion: null,
+    });
+  });
+});
+
+describe('OMC unbuilt version notice', () => {
+  it('replaces the update command with the installed-but-not-built notice', async () => {
+    const output = stripAnsi(
+      await render(
+        createMinimalContext({
+          omcVersion: '5.8.5',
+          updateAvailable: null,
+          omcUnbuiltVersion: '5.8.6',
+          omcUpdateSource: 'marketplace',
+        }),
+        createMinimalConfig(),
+      ),
+    );
+
+    expect(output).toContain('[!] omc 5.8.6 is installed but not built - HUD is running 5.8.5');
+    expect(output).not.toContain('omc update');
+    expect(output).not.toContain('paste:');
+  });
+
+  it('is suppressed when updateNotification is disabled', async () => {
+    const output = stripAnsi(
+      await render(
+        createMinimalContext({ omcVersion: '5.8.5', omcUnbuiltVersion: '5.8.6' }),
+        createMinimalConfig({ updateNotification: false }),
+      ),
+    );
+
+    expect(output).not.toContain('not built');
   });
 });
 
