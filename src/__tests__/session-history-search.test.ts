@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from 'fs';
 import { homedir, tmpdir } from 'os';
 import { basename, join } from 'path';
+import { getOmcRoot } from '../lib/worktree-paths.js';
 import {
   __testingCreateMatchRetainer,
   __testingIsWithinProject,
@@ -187,6 +188,51 @@ describe('session history search', () => {
     expect(report.totalMatches).toBe(3);
     expect(report.results).toHaveLength(1);
     expect(report.results[0].sessionId).toBe('session-current');
+  });
+
+  it.each(['other-project', 'OTHER-PROJECT'])('searches another project by path filter %s', async (project) => {
+    const report = await searchSessionHistory({
+      query: 'notify-hook',
+      project,
+      workingDirectory: repoRoot,
+    });
+
+    expect(report.scope.mode).toBe('project');
+    expect(report.totalMatches).toBe(1);
+    expect(report.results.map((result) => result.sessionId)).toEqual(['session-other']);
+    expect(report.results[0].projectPath).toBe(otherProject);
+  });
+
+  it('does not return another project when the project filter has no match', async () => {
+    const report = await searchSessionHistory({
+      query: 'notify-hook',
+      project: 'nonexistent-project',
+      workingDirectory: repoRoot,
+    });
+
+    expect(report.totalMatches).toBe(0);
+    expect(report.results).toEqual([]);
+  });
+
+  it('keeps current-project artifacts without duplicating transcripts in a named scope', async () => {
+    const omcRoot = getOmcRoot(repoRoot);
+    mkdirSync(join(omcRoot, 'sessions'), { recursive: true });
+    writeFileSync(join(omcRoot, 'sessions', 'session-summary.json'), JSON.stringify({
+      session_id: 'session-summary', cwd: repoRoot, summary: 'notify-hook summary',
+    }));
+    writeTranscript(join(omcRoot, 'state', 'agent-replay-test.jsonl'), [{
+      sessionId: 'session-replay', cwd: repoRoot,
+      message: { role: 'assistant', content: 'notify-hook replay' },
+    }]);
+
+    const report = await searchSessionHistory({
+      query: 'notify-hook', project: repoRoot, workingDirectory: repoRoot,
+    });
+
+    expect(report.totalMatches).toBe(4);
+    expect(report.results.map((result) => result.sessionId).sort()).toEqual([
+      'session-current', 'session-current', 'session-replay', 'session-summary',
+    ]);
   });
 
   it('bounds retained matches while counting every match', () => {
