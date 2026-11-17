@@ -398,13 +398,13 @@ export function mergeDisallowedTools(
  * text value. Rejected: line breaks (including U+0085, U+2028 and U+2029), a
  * colon followed by whitespace or ending the token, a `#` preceded by
  * whitespace, a leading character that YAML gives a meaning (`-`, `?`, `:`,
- * `#`, `&`, `*`, `!`, `|`, `>`, quotes, `%`, `@`, a backtick, `[`, `{`), and
+ * `#`, `&`, `*`, `!`, `|`, `>`, quotes, `%`, `@`, a backtick, `[`, `{`, `]`, `}`), and
  * words YAML reads as null, boolean or number instead of text. A `*` inside
  * a pattern such as `mcp__server__*` is accepted.
  */
 export function isPlainYamlToken(token: string): boolean {
   if (/[\r\n\u0085\u2028\u2029]/.test(token)) return false;
-  if (/^[-?:#&*!|>'"%@`[{]/.test(token)) return false;
+  if (/^[-?:#&*!|>'"%@`[{\}\]]/.test(token)) return false;
   if (/:(\s|$)/.test(token) || /\s#/.test(token)) return false;
   if (/^(?:~|null|true|false|\.inf|\.nan|0x[0-9a-f]+|0o[0-7]+|\+?(?:\d+\.?\d*|\.\d+)(?:e[+-]?\d+)?)$/i.test(token)) {
     return false;

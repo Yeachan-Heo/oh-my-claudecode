@@ -211,6 +211,8 @@ describe('isPlainYamlToken', () => {
     ['a leading question mark', '? x'],
     ['a leading brace', '{x}'],
     ['a leading bracket', '[a]'],
+    ['a closing brace', '}'],
+    ['a closing bracket', ']'],
     ['a leading ampersand', '&anchor'],
     ['a leading star', '*alias'],
     ['a lone star', '*'],
@@ -300,7 +302,7 @@ describe('applyExtraDisallowedToolsToMarkdown with unusual token values', () => 
   });
 
   test('every skipped token leaves every bundled agent file unchanged', () => {
-    const skipped = ['a: b', 'x #y', '*alias', '*', '!tag', '@x', '%x', '`x', '- x', '? x', '{x}', '[a]', '|', '>', '&a', 'null', '123', 'a\u2028b'];
+    const skipped = ['a: b', 'x #y', '*alias', '*', '!tag', '@x', '%x', '`x', '- x', '? x', '{x}', '[a]', '}', ']', '|', '>', '&a', 'null', '123', 'a\u2028b'];
     for (const token of skipped) expect(isPlainYamlToken(token)).toBe(false);
     for (const agent of AGENTS) {
       const original = readFileSync(join(AGENTS_DIR, `${agent}.md`), 'utf-8');
