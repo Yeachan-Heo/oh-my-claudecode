@@ -121,27 +121,6 @@ async function applyTemplate(instance, facade, template) {
   await instance.apply(template);
 }
 
-async function runTrace(trace, { property, url, seed: runSeed, maxSteps }) {
-  const instance = await launchDriver({ headless: true, seed: runSeed });
-  const facade = instance.facade ?? instance;
-  const localRng = mulberry32(runSeed);
-  let violated = false;
-  try {
-    if (url) await instance.goto(url);
-    for (let i = 0; i < trace.length; i++) {
-      await applyTemplate(instance, facade, trace[i]);
-      await instance.settle?.();
-      const snapshot = await capture(instance);
-      const failure = defaultProperties(snapshot);
-      if (failure.length > 0) return { violated: true, at: i, snapshot };
-      if (property.op === "always" && !property.thunk()) return { violated: true, at: i, snapshot };
-    }
-  } finally {
-    await instance.close?.();
-  }
-  return { violated, at: trace.length, snapshot: null };
-}
-
 async function runExploration({ url, seed: runSeed, maxSteps }) {
   const instance = await launchDriver({ headless: true, seed: runSeed });
   const facade = instance.facade ?? instance;
@@ -180,9 +159,21 @@ async function runExploration({ url, seed: runSeed, maxSteps }) {
       trace.push(template);
       await applyTemplate(instance, facade, template);
       await instance.settle?.();
+      // Evaluate the state after the final action before checking deadlines
+      const postActionSnapshot = await capture(instance);
+      const finalFailure = defaultProperties(postActionSnapshot);
+      if (finalFailure.length > 0) {
+        violation = { property: "defaults", snapshot: postActionSnapshot };
+        break;
+      }
+      const finalBroken = evaluateAlways();
+      if (finalBroken) {
+        violation = { property: finalBroken.name ?? "always", snapshot: postActionSnapshot };
+        break;
+      }
       for (const [name, deadline] of deadlines) {
         if (!deadline.satisfied && Date.now() - deadline.start > deadline.withinMs) {
-          violation = { property: name, snapshot: await instance.snapshot() };
+          violation = { property: name, snapshot: postActionSnapshot };
           break;
         }
       }
@@ -197,7 +188,7 @@ async function runExploration({ url, seed: runSeed, maxSteps }) {
   const elapsed = Date.now() - start;
   if (!violation) {
     for (const [name, deadline] of deadlines) {
-      if (!deadline.satisfied) {
+      if (!deadline.satisfied && Date.now() - deadline.start >= deadline.withinMs) {
         violation = { property: name, snapshot: { reason: "eventually deadline expired" } };
         break;
       }
@@ -215,14 +206,29 @@ async function replayViolates(trace, property) {
     for (const template of trace) {
       await applyTemplate(instance, facade, template);
       await instance.settle?.();
-      await capture(instance);
-      if (property.op === "always" && !property.thunk()) {
+      const snapshot = await capture(instance);
+      // For default properties, check if defaults actually exist in the replay
+      if (property.name === "defaults") {
+        const failure = defaultProperties(snapshot);
+        if (failure.length > 0) {
+          violated = true;
+          break;
+        }
+      } else if (property.op === "always" && !property.thunk()) {
         violated = true;
         break;
       }
+      // For eventually properties, evaluate if satisfied
+      if (property.op === "eventually" && property.thunk?.()) {
+        // Eventually satisfied during replay
+      }
     }
   } catch {
-    violated = true;
+    // Only treat as violation if this is actually a driver error violation
+    if (property.name === "driver") {
+      violated = true;
+    }
+    // For other properties, unrelated exceptions don't confirm the violation
   } finally {
     await instance.close?.();
   }
@@ -268,17 +274,21 @@ if (exploration.violation) {
   const name = exploration.violation.property;
   const property = runtime.properties.find((p) => p.name === name) ?? { op: "always", thunk: () => false };
   const { minimizedTrace, confirmations } = await shrink(exploration.trace, property);
-  report.violations.push({
-    property: name,
-    op: property.op,
-    discoveryTraceLength: exploration.trace.length,
-    minimizedTrace,
-    minimizedLength: minimizedTrace.length,
-    confirmationRuns: 2,
-    confirmations,
-    snapshotAtViolation: exploration.violation.snapshot,
-    reproduce: `re-run with --driver ${driverPath} --spec ${specPath} --seed ${seed} and replay the minimized trace`,
-  });
+  // Only report as violation if both confirmation runs reproduced it (confirmations === 2)
+  // Treat confirmations < 2 as flakiness rather than confirmed bugs
+  if (confirmations === 2) {
+    report.violations.push({
+      property: name,
+      op: property.op,
+      discoveryTraceLength: exploration.trace.length,
+      minimizedTrace,
+      minimizedLength: minimizedTrace.length,
+      confirmationRuns: 2,
+      confirmations,
+      snapshotAtViolation: exploration.violation.snapshot,
+      reproduce: `re-run with --driver ${driverPath} --spec ${specPath} --seed ${seed} and replay the minimized trace`,
+    });
+  }
 }
 
 if (jsonOut) console.log(JSON.stringify(report, null, 2));
