@@ -541,6 +541,42 @@ describe.skipIf(!hasPython3)('executor_outcome_metrics.py', () => {
       assert.equal(out.tasks[0].parent, 'sess-test');
     });
 
+    it('a subagent file is judged on its own thread: sidechain rows give the final answer, in a main file they do not', () => {
+      const sidechainText = (second: number, value: string) =>
+        row('assistant', second, { id: `msg-side-${second}`, model: MODEL, content: [{ type: 'text', text: value }] }, { isSidechain: true });
+      const sessionDir = path.join(dir, 'sidechain-session');
+      fs.mkdirSync(path.join(sessionDir, 'subagents'), { recursive: true });
+      const agent = path.join(sessionDir, 'subagents', 'agent-side.jsonl');
+      const sidechainError = row('assistant', 2, { id: 'msg-side-err', model: '<synthetic>', content: [{ type: 'text', text: 'API Error: Request rejected (529)' }] }, { isApiErrorMessage: true, isSidechain: true });
+      fs.writeFileSync(agent, [sidechainText(1, 'The answer is, '), sidechainError].join('\n') + '\n');
+      const worker = JSON.parse(run(['--transcript', agent, '--json']).stdout).tasks[0];
+      assert.equal(worker.final_result.status, 'measured');
+      assert.deepEqual(worker.final_result.flags, ['cut_off', 'ended_with_api_error']);
+      // the same rows in a main transcript are another thread's work: no main-thread text
+      const main = taskOf([sidechainText(1, 'The answer is, ')]);
+      assert.equal(main.final_result.status, 'unmeasured');
+    });
+
+    it('rows whose message is not an object are skipped without ending the run', () => {
+      const malformed = ['"text"', '7', '[1, 2]'].flatMap((message) => [
+        `{"type":"assistant","timestamp":"${at(0)}","message":${message}}`,
+        `{"type":"user","timestamp":"${at(0)}","message":${message}}`,
+      ]);
+      const task = taskOf([...malformed, text(1, 'Done.')]);
+      assert.equal(task.transcript, 'present');
+      assert.equal(task.metrics.assistant_steps, 1);
+    });
+
+    it('a transcript with only API error rows keeps its exhaustion measurement', () => {
+      const prompt = row('user', 0, { role: 'user', content: 'Do the task.' }, { isSidechain: false });
+      const task = taskOf([prompt, apiError(1, 'API Error: Request rejected (429)', 'rate_limit')]);
+      assert.equal(task.transcript, 'present');
+      assert.equal(task.metrics.exhaustion_api, 1);
+      assert.deepEqual(task.metrics.exhaustion_api_by_status, { '429': 1 });
+      assert.equal(task.metrics.assistant_steps, 0);
+      assert.equal(task.final_result.status, 'unmeasured');
+    });
+
     it('the same file given twice is skipped and reported', () => {
       const file = write([text(1, 'Done.')]);
       const out = JSON.parse(run(['--transcript', file, '--transcript', file, '--json']).stdout);

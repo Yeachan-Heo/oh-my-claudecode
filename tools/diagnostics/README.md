@@ -178,7 +178,7 @@ with `--error-field-status` (empty by default). Anything else is `other`. A fail
 
 ## Final answer flags
 
-The last main-thread assistant text is checked. Without such text the answer is `unmeasured`.
+The last main-thread assistant text is checked (rows with `isSidechain` false; in a subagent file `agent-*.jsonl` the whole file is the worker's own thread, which the host writes with `isSidechain` true). Without such text the answer is `unmeasured`.
 
 | Flag | Meaning |
 |---|---|

@@ -167,11 +167,14 @@ def exhaustion_key(text, status, statuses=EXHAUSTION_STATUSES, phrases=EXHAUSTIO
     return None
 
 
-def parse_transcript(rows):
+def parse_transcript(rows, own_thread=False):
     """Elements of one transcript from its rows (only type assistant and user is read).
 
     API request blobs and every other type are skipped: they copy request content and repeat
-    call ids. Returns None when the file has no assistant or user row.
+    call ids. Returns None when the file has no assistant or user row, or only rows that carry
+    no measurement (no step, call, result or API error). The "main thread" is the rows with
+    isSidechain false; in a subagent file (own_thread true) every row belongs to the worker's
+    own thread, which the host marks isSidechain true.
     """
     calls = []  # {id, name, signature, time, row, block}
     results = {}  # tool_use_id -> {is_error, text, time}
@@ -203,7 +206,7 @@ def parse_transcript(rows):
             if not isinstance(message, dict):
                 message = {}
             synthetic = message.get("model") == "<synthetic>"
-            if row.get("isSidechain") is False:
+            if own_thread or row.get("isSidechain") is False:
                 last_main_api_error = row.get("isApiErrorMessage") is True
             if row.get("isApiErrorMessage") is True:
                 error = row.get("error")
@@ -248,10 +251,11 @@ def parse_transcript(rows):
                                       "time": when, "input": arguments, "row": index, "block": position})
                     elif block_type == "server_tool_use":
                         server_blocks.append({"time": when, "name": block.get("name"), "row": index, "block": position})
-            if row.get("isSidechain") is False and blocks_of(row, "text"):
+            if (own_thread or row.get("isSidechain") is False) and blocks_of(row, "text"):
                 last_main_text = text_of_blocks(row, "text")
         else:
-            content = (row.get("message") or {}).get("content")
+            user_message = row.get("message")
+            content = user_message.get("content") if isinstance(user_message, dict) else None
             if isinstance(content, list):
                 for block in content:
                     if isinstance(block, dict) and block.get("type") == "tool_result" and isinstance(block.get("tool_use_id"), str):
@@ -260,7 +264,7 @@ def parse_transcript(rows):
                             "text": result_text(block),
                             "time": when,
                         })
-    if not steps and not calls and not results:
+    if not steps and not calls and not results and not api_errors:
         return None
     return {
         "calls": calls,
@@ -771,14 +775,15 @@ def analyse_transcript(path, mapping, test_pattern, advisor_pattern, options=Non
         rows, bad = read_jsonl(path)
     except OSError:
         rows, bad = None, 0
-    parsed = parse_transcript(rows) if rows is not None else None
+    agent = AGENT_FILE.match(os.path.basename(path))
+    is_subagent_file = bool(agent) and os.path.basename(os.path.dirname(os.path.abspath(path))) == SUBAGENT_DIR
+    parsed = parse_transcript(rows, own_thread=is_subagent_file) if rows is not None else None
     status = "unreadable" if rows is None else ("present" if parsed is not None else "empty")
     model, provider = first_model(rows, mapping) if rows is not None else (None, "unknown")
     stem = os.path.splitext(os.path.basename(path))[0]
     session_id = first_session_id(rows) if rows is not None else None
     parent = None
-    agent = AGENT_FILE.match(os.path.basename(path))
-    if agent and os.path.basename(os.path.dirname(os.path.abspath(path))) == SUBAGENT_DIR:
+    if is_subagent_file:
         parent = session_id
         session_id = f"agent-{agent.group(1)}"
     elif session_id is None:
