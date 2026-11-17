@@ -1,6 +1,6 @@
 import { describe, test, expect } from 'vitest';
 import { spawnSync } from 'node:child_process';
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -180,7 +180,9 @@ describe('omc-doctor skill', () => {
       const fix = section(text, heading);
       expect(fix).toContain('by `version` or by `installPath`');
       expect(fix).toContain('.omc/cache-occupancy/');
-      expect(fix).toContain('cannot be read completely, move nothing');
+      expect(fix).toContain('Paths are compared after resolving symlinks');
+      expect(fix).toContain('cannot be read or resolved completely');
+      expect(fix).toContain('move nothing');
     }
   });
 
@@ -562,6 +564,122 @@ describe('omc-doctor cache commands on a synthetic config directory', () => {
         } finally {
           rmSync(dir, { recursive: true, force: true });
         }
+      }
+    }
+  });
+  // The SessionStart cleanup and the stale cache purge replace old version
+  // directories with symlinks to the active one, so a protected name can be a
+  // symlink whose target is the directory a running session really uses.
+  test('a symlinked version that is occupied keeps the directory it points to', () => {
+    for (const command of commands) {
+      const { dir, cache } = makeCache(['5.7.0', '5.8.1', '5.9.0']);
+      try {
+        symlinkSync('5.9.0', path.join(cache, '5.8.0'));
+        writeRegistry(dir, { [PLUGIN_ID]: [{ scope: 'user', version: '5.8.1' }] });
+        expect(publishCacheOccupancy(path.join(cache, '5.8.0'), dir, process.pid)).toBe(true);
+        const result = runCommand(command, dir);
+        expect(result.status).toBe(0);
+        expect(digitVersions(cache)).toBe('5.8.0,5.8.1,5.9.0');
+        expect(existsSync(path.join(cache, '5.8.0', 'package.json'))).toBe(true);
+        expect(movedAside(dir)).toBe(1);
+        expect(readdirSync(backupDir(dir))[0]).toMatch(/^5\.7\.0-/);
+      } finally {
+        rmSync(dir, { recursive: true, force: true });
+      }
+    }
+  });
+
+  test('a pinned symlinked version keeps the directory it points to, whether pinned by version or by installPath', () => {
+    for (const command of commands) {
+      for (const pin of ['version', 'installPath']) {
+        const { dir, cache } = makeCache(['5.7.0', '5.9.0']);
+        try {
+          symlinkSync(path.join(cache, '5.9.0'), path.join(cache, '5.8.0'));
+          writeRegistry(dir, {
+            [PLUGIN_ID]: [pin === 'version' ? { scope: 'user', version: '5.8.0' } : { scope: 'user', installPath: path.join(cache, '5.8.0') }],
+          });
+          const result = runCommand(command, dir);
+          expect(result.status).toBe(0);
+          expect({ pin, versions: digitVersions(cache) }).toEqual({ pin, versions: '5.8.0,5.9.0' });
+          expect(movedAside(dir)).toBe(1);
+          expect(readdirSync(backupDir(dir))[0]).toMatch(/^5\.7\.0-/);
+        } finally {
+          rmSync(dir, { recursive: true, force: true });
+        }
+      }
+    }
+  });
+
+  test('a symlinked version nothing uses is moved aside as a link and its target stays', () => {
+    for (const command of commands) {
+      const { dir, cache } = makeCache(['5.9.0']);
+      try {
+        symlinkSync('5.9.0', path.join(cache, '5.8.0'));
+        writeRegistry(dir, { [PLUGIN_ID]: [{ scope: 'user', version: '5.9.0' }] });
+        const result = runCommand(command, dir);
+        expect(result.status).toBe(0);
+        expect(digitVersions(cache)).toBe('5.9.0');
+        expect(movedAside(dir)).toBe(1);
+        const [moved] = readdirSync(backupDir(dir));
+        expect(lstatSync(path.join(backupDir(dir), moved)).isSymbolicLink()).toBe(true);
+        expect(existsSync(path.join(cache, '5.9.0', 'package.json'))).toBe(true);
+      } finally {
+        rmSync(dir, { recursive: true, force: true });
+      }
+    }
+  });
+
+  test('paths that reach the cache through a symlinked config directory still protect their version', () => {
+    for (const command of commands) {
+      const { dir, cache } = makeCache(['5.8.0', '5.8.1', '5.9.0']);
+      const alias = `${dir}-alias`;
+      try {
+        symlinkSync(dir, alias);
+        writeRegistry(dir, { [PLUGIN_ID]: [{ scope: 'user', version: '5.8.1' }] });
+        expect(publishCacheOccupancy(path.join(alias, 'plugins', 'cache', 'omc', 'oh-my-claudecode', '5.9.0'), dir, process.pid)).toBe(true);
+        const result = runCommand(command, dir);
+        expect(result.status).toBe(0);
+        expect(digitVersions(cache)).toBe('5.8.1,5.9.0');
+        expect(movedAside(dir)).toBe(1);
+      } finally {
+        rmSync(dir, { recursive: true, force: true });
+        rmSync(alias, { force: true });
+      }
+    }
+  });
+
+  test('a path that cannot be resolved for a reason other than being absent moves nothing', () => {
+    for (const command of commands) {
+      const { dir, cache } = makeCache(['5.8.0', '5.8.1', '5.9.0']);
+      try {
+        writeRegistry(dir, {
+          [PLUGIN_ID]: [{ scope: 'user', version: '5.8.1' }, { scope: 'user', installPath: path.join(dir, 'a'.repeat(300)) }],
+        });
+        const result = runCommand(command, dir);
+        expect(result.status).toBe(0);
+        expect(digitVersions(cache)).toBe('5.8.0,5.8.1,5.9.0');
+        expect(movedAside(dir)).toBe(0);
+        expect(result.stdout).toMatch(/Nothing moved/);
+      } finally {
+        rmSync(dir, { recursive: true, force: true });
+      }
+    }
+  });
+
+  test('a path that does not exist or loops back on itself adds no protection and does not block the move', () => {
+    for (const command of commands) {
+      const { dir, cache } = makeCache(['5.8.0', '5.8.1']);
+      try {
+        symlinkSync('5.7.0', path.join(cache, '5.7.0'));
+        writeRegistry(dir, {
+          [PLUGIN_ID]: [{ scope: 'user', version: '5.8.1' }, { scope: 'user', installPath: path.join(dir, 'gone', 'x') }],
+        });
+        const result = runCommand(command, dir);
+        expect(result.status).toBe(0);
+        expect(digitVersions(cache)).toBe('5.8.1');
+        expect(movedAside(dir)).toBe(2);
+      } finally {
+        rmSync(dir, { recursive: true, force: true });
       }
     }
   });
