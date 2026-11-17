@@ -138,7 +138,7 @@ function secretKind(name) {
 const PAIR_NAME = new Set(['name', 'key', 'parameter_key']);
 const PAIR_VALUE = new Set(['value', 'parameter_value']);
 function pairNameKind(name) {
-  return typeof name === 'string' && name.length <= 200 && normalizeKey(name) !== 'pass' ? secretKind(name) : false;
+  return typeof name === 'string' && normalizeKey(name) !== 'pass' ? secretKind(name) : false;
 }
 // Arguments of a command written as an array: what maskSecrets masks in the same command line as a string, which its
 // rules cannot see when each element is masked alone. The element after a secret flag is a value; after -u or --user
@@ -150,6 +150,10 @@ const USER_FLAG = /^(?:-u|--user)$/;
 const USER_PASSWORD = /^([^\s:"']+:)[^\s"']+/;
 const GLUED_P = /^(-p)[^\s"']/;
 const P_COMMANDS = new Set(['mysql', 'mariadb', 'mysqldump', 'mysqladmin', 'sshpass']);
+const EXECUTABLE_SUFFIXES = /\.(?:exe|bat|cmd|com)$/i;
+function normalizeExecutable(name) {
+  return name.replace(EXECUTABLE_SUFFIXES, '');
+}
 // Map: index of an element -> 'value' (all of it), 'user' (after the colon) or 'glued' (after -p)
 function secretArguments(array) {
   const modes = new Map();
@@ -157,7 +161,7 @@ function secretArguments(array) {
   for (let i = 0; i < array.length; i++) {
     const element = array[i];
     if (typeof element !== 'string') continue;
-    if (command < 0 && P_COMMANDS.has(element.split(/[\\/]/).pop().toLowerCase())) command = i;
+    if (command < 0 && P_COMMANDS.has(normalizeExecutable(element.split(/[/\\]/).pop()).toLowerCase())) command = i;
     if (SECRET_FLAG.test(element)) {
       if (i + 1 < array.length) modes.set(i + 1, 'value');
     } else if (USER_FLAG.test(element)) {
