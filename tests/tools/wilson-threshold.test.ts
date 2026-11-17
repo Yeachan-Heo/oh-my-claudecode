@@ -280,6 +280,38 @@ describe('wilson_threshold', () => {
     expect(g.holdout!.status).toBe('holdout unevaluable');
   });
 
+  it('holdout with direction upper compares the error rate to the target from above', () => {
+    const ids = Array.from({ length: 150 }, (_, i) => `session-${i}`);
+    const split = splitFitHoldout(ids, 0.4);
+    const options = { target: 0.1, minSupport: 30, holdout: 0.4, direction: 'upper' as const };
+    // The fit part has no errors, so the upper bound is below the target and a threshold exists.
+    const errorsInHoldout = tsv(['result', 'session'], ids.map((s) => [split.fit.has(s) ? '0' : '1', s]));
+    const bad = run(errorsInHoldout, options).groups[0];
+    expect(bad.holdout!.status).toBe('holdout_miss');
+    expect(bad.holdout!.nHoldout!).toBeGreaterThan(0);
+    expect(bad.holdout!.kHoldout).toBe(bad.holdout!.nHoldout);
+    const cleanHoldout = tsv(['result', 'session'], ids.map((s) => ['0', s]));
+    const good = run(cleanHoldout, options).groups[0];
+    expect(good.holdout!.status).toBe('holdout_ok');
+    expect(good.holdout!.kHoldout).toBe(0);
+    // The slack is on the upper side: an error rate of exactly the target plus 0.02 is still ok.
+    const holdoutIds = ids.filter((s) => !split.fit.has(s));
+    const kAtLimit = Math.floor(holdoutIds.length * (options.target + 0.02));
+    const errorSessions = new Set(holdoutIds.slice(0, kAtLimit));
+    const atLimit = tsv(['result', 'session'], ids.map((s) => [errorSessions.has(s) ? '1' : '0', s]));
+    expect(run(atLimit, options).groups[0].holdout!.status).toBe('holdout_ok');
+  });
+
+  it('holdout with direction lower still compares the hit rate to the target from below', () => {
+    const ids = Array.from({ length: 150 }, (_, i) => `session-${i}`);
+    const split = splitFitHoldout(ids, 0.4);
+    const options = { target: 0.8, minSupport: 30, holdout: 0.4, direction: 'lower' as const };
+    const text = tsv(['result', 'session'], ids.map((s) => [split.fit.has(s) ? '1' : '0', s]));
+    expect(run(text, options).groups[0].holdout!.status).toBe('holdout_miss');
+    const allHits = tsv(['result', 'session'], ids.map((s) => ['1', s]));
+    expect(run(allHits, options).groups[0].holdout!.status).toBe('holdout_ok');
+  });
+
   it('small sample: n < 100 gives a warning in the text report and does not change the status', () => {
     const text = tsv(['result', 'confidence'], Array.from({ length: 40 }, () => ['1', '0.9']));
     const report = run(text, { target: 0.9, minSupport: 30 });

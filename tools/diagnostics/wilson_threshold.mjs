@@ -52,9 +52,12 @@
 // Fit/holdout split (--holdout <fraction 0-0.5>, requires the session column): sessions are split
 // deterministically by the sha256 hash of the session identifier (first 16 hex digits / 2^64 < fraction ->
 // holdout, otherwise fit); a whole session goes to one side. The threshold is chosen on the fit part; on the
-// holdout part the status is "holdout_miss" when the holdout hit rate at the chosen threshold is below the
-// target minus SLACK_HOLDOUT = 0.02, otherwise "holdout_ok"; when the fit part has no threshold, the holdout
-// checks nothing ("holdout without threshold"). With small samples only the Wilson rule applies, no holdout.
+// holdout part the status is "holdout_miss" when the holdout rate at the chosen threshold is on the wrong side of
+// the target by more than SLACK_HOLDOUT = 0.02 (direction lower: the hit rate is below target - 0.02; direction
+// upper: the rate, which counts errors, is above target + 0.02), otherwise "holdout_ok"; when the fit part has no
+// threshold, the holdout checks nothing ("holdout without threshold"); when no holdout row reaches the chosen
+// threshold, nothing was tested ("holdout unevaluable", not "holdout_ok"). With small samples only the Wilson
+// rule applies, no holdout.
 //
 // Wilson score interval: p = k/n; centre = (p + z^2/(2n)) / (1 + z^2/n); half-width =
 // z * sqrt(p(1-p)/n + z^2/(4n^2)) / (1 + z^2/n); lower = centre - half-width (not below 0); upper = centre +
@@ -341,7 +344,7 @@ export function analyze({ columns, rows }, options = {}) {
         status: statusForRatio(nB, kB),
       };
     }
-    // Holdout: split of the group's sessions; threshold from the fit part (sweep or ratio); hit rate on the holdout part at that threshold vs target minus SLACK_HOLDOUT.
+    // Holdout: split of the group's sessions; threshold from the fit part (sweep or ratio); the rate on the holdout part at that threshold vs the target, with SLACK_HOLDOUT on the side that matters for the direction.
     let holdoutResult = null;
     if (holdout !== null) {
       const ids = [...new Set([...list, ...noConfidenceList].map((r) => r.session))];
@@ -373,15 +376,9 @@ export function analyze({ columns, rows }, options = {}) {
         nHoldout = accepted.length;
         kHoldout = accepted.reduce((s, r) => s + r.result, 0);
         holdoutHitRate = nHoldout === 0 ? null : kHoldout / nHoldout;
-        if (nHoldout === 0) {
-          holdoutStatus = 'holdout unevaluable';
-        } else if (direction === 'upper') {
-          const upperBound = wilsonUpper(kHoldout, nHoldout);
-          holdoutStatus = upperBound !== null && upperBound < target - SLACK_HOLDOUT ? 'holdout_miss' : 'holdout_ok';
-        } else {
-          const lowerBound = wilsonLower(kHoldout, nHoldout);
-          holdoutStatus = lowerBound !== null && lowerBound < target - SLACK_HOLDOUT ? 'holdout_miss' : 'holdout_ok';
-        }
+        if (nHoldout === 0) holdoutStatus = 'holdout unevaluable';
+        else if (direction === 'upper') holdoutStatus = holdoutHitRate > target + SLACK_HOLDOUT ? 'holdout_miss' : 'holdout_ok';
+        else holdoutStatus = holdoutHitRate < target - SLACK_HOLDOUT ? 'holdout_miss' : 'holdout_ok';
       }
       holdoutResult = { fitSessions: fit.size, holdoutSessions: holdoutSessions.size, threshold: thresholdValue, nHoldout, kHoldout, hitRateHoldout: holdoutHitRate, status: holdoutStatus };
     }
