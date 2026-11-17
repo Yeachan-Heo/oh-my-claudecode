@@ -525,7 +525,7 @@ function patternMatchesName(pattern, name, full = true) {
   return false;
 }
 
-const PKILL_FLAGS_WITH_VALUE = new Set(['-u', '-U', '-g', '-G', '-t', '-P', '-F', '-c', '-n', '-r', '-s', '--ns', '--parent', '--older', '--signal', '--sid', '--tty', '--uid']);
+const PKILL_FLAGS_WITH_VALUE = new Set(['-u', '-U', '-g', '-G', '-t', '-P', '-F', '-r', '-s', '--ns', '--parent', '--older', '--signal', '--sid', '--tty', '--uid']);
 const MASS_SELECTORS = new Set(['-u', '-U', '-g', '-G', '-t']); // without a pattern they select every process of a user or group
 function pkillKillall(argv, guarded) {
   const isPkill = argv[0] === 'pkill';
