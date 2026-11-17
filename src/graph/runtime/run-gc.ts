@@ -43,8 +43,9 @@
  *     the next pass, unless the lock inside it still names a live process.
  *   - Removal never follows a symbolic link: a link is unlinked, its target is left alone. On Linux every directory
  *     is opened without following links and its entries are removed relative to that open directory, so a
- *     directory swapped for a link while the tree is walked cannot redirect the removal. Other platforms walk
- *     the moved directory by path with lstat.
+ *     directory swapped for a link while the tree is walked cannot redirect the removal. macOS (with the native
+ *     contained-fs module) walks the moved directory by path with lstat. Where the fence cannot run (Windows, macOS
+ *     without the module) ownership cannot be taken, and removal and repair fail closed: the run stays.
  *   - An invalid retention value stops the command before anything is touched.
  */
 
@@ -645,8 +646,8 @@ function removeEntriesOf(directoryFd: number, interlock: { afterLstat?: (path: s
   }
 }
 
-// Other platforms have no directory-relative path form in Node: walk by path with lstat. The tree is the run
-// directory that removeRun has already moved out of the runs namespace.
+// macOS: Node has no directory-relative path form there, so walk by path with lstat. The tree is the run directory
+// that quarantineRun has already moved out of the runs namespace, under the lock the fence gave this process.
 function removeTreeByPath(path: string, interlock: { afterLstat?: (path: string) => void }): void {
   if (lstatSync(path).isDirectory()) {
     interlock.afterLstat?.(path);
@@ -689,19 +690,31 @@ function takeOwnership(runDir: string, refusal: string): { fence: FileOwnershipF
 // Moves one run out of the runs namespace while this process owns it, and returns the new path. After the rename
 // the run directory name is gone: a later resume of the same run id starts a fresh directory, and nothing can
 // reach the moved one by its run id.
-export function quarantineRun(realRoot: string, id: string, nowMs: number = Date.now()): string {
+export function quarantineRun(
+  realRoot: string,
+  id: string,
+  nowMs: number = Date.now(),
+  suffix: string = randomBytes(4).toString("hex"),
+): string {
   const runDir = join(realRoot, id);
   if (!lstatSync(runDir).isDirectory()) throw new Error("run is no longer a plain directory");
   if (realpathSync(runDir) !== runDir) throw new Error("run directory resolves outside the runs root");
-  const { fence } = takeOwnership(runDir, "run is held by a live owner; not removed");
+  const { fence, epoch } = takeOwnership(runDir, "run is held by a live owner; not removed");
+  const quarantine = join(realRoot, `${QUARANTINE_PREFIX}${id}-${nowMs}-${suffix}`);
   try {
-    const quarantine = join(realRoot, `${QUARANTINE_PREFIX}${id}-${nowMs}-${randomBytes(4).toString("hex")}`);
     renameSync(runDir, quarantine);
-    return quarantine;
-  } finally {
-    // The lock moved with the directory; only the descriptor is left to close.
-    fence.closeHeldDescriptor();
+  } catch (error) {
+    // The run stays where it was, so the lock this process took must not stay with it.
+    try {
+      fence.releaseSync(epoch);
+    } catch {
+      // The rename error below is the one to report.
+    }
+    throw error;
   }
+  // The lock moved with the directory; only the descriptor is left to close.
+  fence.closeHeldDescriptor();
+  return quarantine;
 }
 
 // Removes one candidate: a run is quarantined under exclusive ownership and then deleted; a directory that an

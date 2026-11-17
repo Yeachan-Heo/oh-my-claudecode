@@ -1216,6 +1216,25 @@ describe("omc graph gc", () => {
     });
   });
 
+  it("a move that fails leaves the run where it was and releases the lock this process took", () => {
+    withBase((base) => {
+      const root = makeRoot(base);
+      const realRoot = realpathSync(root);
+      const dir = makeFinishedRun(root, "run-stays");
+      ageTree(dir, OLD);
+      const journalBefore = readFileSync(join(dir, "journal.jsonl"), "utf8");
+      // The target name is taken by a directory that is not empty, so the rename is refused.
+      const taken = join(realRoot, `.deleted-run-stays-${NOW}-fixed`);
+      mkdirSync(taken);
+      writeFileSync(join(taken, "occupant"), "x");
+
+      expect(() => quarantineRun(realRoot, "run-stays", NOW, "fixed")).toThrow(/ENOTEMPTY|EEXIST/);
+      expect(readFileSync(join(dir, "journal.jsonl"), "utf8"), "the run lost its journal").toBe(journalBefore);
+      expect(existsSync(join(dir, "owner.lock")), "the lock of the failed move was left in the run").toBe(false);
+      expect(readdirSync(taken)).toEqual(["occupant"]);
+    });
+  });
+
   it.runIf(process.platform === "linux")("removeTree: a subdirectory swapped for a symbolic link after its check is not followed", () => {
     withBase((base) => {
       const tree = join(base, "tree");
