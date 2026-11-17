@@ -447,21 +447,27 @@ describe('cache occupancy registry', () => {
     const cacheDir = join(dir, 'plugins', 'cache', 'omc', 'oh-my-claudecode');
     const oldVersion = join(cacheDir, '5.8.0');
     const newVersion = join(cacheDir, '5.9.0');
-    mkdirSync(oldVersion, { recursive: true });
-    mkdirSync(newVersion, { recursive: true });
+    mkdirSync(join(oldVersion, 'hooks'), { recursive: true });
+    mkdirSync(join(oldVersion, 'scripts'), { recursive: true });
+    mkdirSync(join(newVersion, 'hooks'), { recursive: true });
+    mkdirSync(join(newVersion, 'scripts'), { recursive: true });
+    writeFileSync(join(oldVersion, 'hooks', 'hooks.json'), '{}');
+    writeFileSync(join(oldVersion, 'scripts', 'run.cjs'), '// fixture');
     writeFileSync(join(oldVersion, 'package.json'), JSON.stringify({ version: '5.8.0' }));
+    writeFileSync(join(newVersion, 'hooks', 'hooks.json'), '{}');
+    writeFileSync(join(newVersion, 'scripts', 'run.cjs'), '// fixture');
     writeFileSync(join(newVersion, 'package.json'), JSON.stringify({ version: '5.9.0' }));
 
     // Mark 5.8.0 as occupied (session is using it)
     expect(await publishCacheOccupancy(oldVersion, dir)).toBe(true);
 
-    // Set up installed_plugins.json with 5.9.0 pinned (the active version)
+    // Set up installed_plugins.json with 5.9.0 as the active version via installPath
     const installed = join(dir, 'plugins', 'installed_plugins.json');
     mkdirSync(join(dir, 'plugins'), { recursive: true });
     writeFileSync(installed, JSON.stringify({
       version: 2,
       plugins: {
-        'oh-my-claudecode@omc': [{ scope: 'user', version: '5.9.0' }],
+        'oh-my-claudecode@omc': [{ scope: 'user', installPath: newVersion }],
       },
     }));
 
