@@ -1,7 +1,7 @@
 import { spawn, spawnSync } from 'node:child_process';
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { delimiter, dirname, join, resolve } from 'node:path';
+import { basename, delimiter, dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
@@ -373,6 +373,35 @@ describe.skipIf(!HAS_TMUX)('record-pane-frames record', () => {
     const argv = JSON.parse(readFileSync(join(root, 'argv.json'), 'utf8')) as string[];
     expect(argv[argv.indexOf('--model') + 1]).toBe('stub-model-1');
     expect(extractLast().entry).toMatchObject({ provider: 'codex', launch_args: argv });
+  });
+
+  it('with only a provider and a binary, records a 120x40 pane into new temporary directories', async () => {
+    const provider = join(root, 'provider.mjs');
+    pidFile = join(root, 'provider.pid');
+    writeFileSync(provider, PROVIDER_SOURCE);
+    const tmp = join(root, 'tmp');
+    mkdirSync(tmp);
+
+    const run = await runRecorder(
+      ['record', '--provider', 'claude', '--bin', process.execPath, '--args', JSON.stringify([provider, pidFile])],
+      undefined,
+      { env: { TMPDIR: tmp } },
+    );
+
+    expect(run.code).toBe(0);
+    const summary = JSON.parse(run.stdout) as { out: string; cwd: string; stop: string };
+    expect(summary.stop).toBe('settled');
+    expect(dirname(realpathSync(summary.out))).toBe(realpathSync(tmp));
+    expect(basename(summary.out)).toMatch(/^pane-frames-claude-/);
+    expect(dirname(summary.cwd)).toBe(realpathSync(tmp));
+    expect(basename(summary.cwd)).toMatch(/^pane-frames-cwd-claude-/);
+    out = summary.out;
+    expect(JSON.parse(readFileSync(join(out, 'meta.json'), 'utf8'))).toMatchObject({ cols: 120, rows: 40, history: 0, hooks: false, cwd: summary.cwd });
+    const { frame, entry } = extractLast();
+    expect(frame).toContain('size:120x40');
+    expect(entry).toMatchObject({ cols: 120, rows: 40 });
+    expect(leftoverSockets()).toEqual([]);
+    expect(processIsAlive(await providerPid())).toBe(false);
   });
 
   it('without --bin, launches the model contract binary found on PATH', async () => {
