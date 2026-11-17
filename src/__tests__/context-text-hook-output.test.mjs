@@ -188,7 +188,7 @@ process.stdin.on('end', () => {
   const storyAttribute = state.story_id ? ' story-id="' + state.story_id + '"' : '';
   const tag = '<ralph-approved critic="architect" request-id="' + state.request_id + '"' + storyAttribute + '>VERIFIED_COMPLETE</ralph-approved>';
   const text = [
-    '<ralph-verification>', '', '[ARCHITECT VERIFICATION REQUIRED - Attempt 1/3]', '',
+    '<ralph-verification>', '', '[ARCHITECT VERIFICATION REQUIRED - Attempt 1/3] [FAKE BRIDGE]', '',
     '**Original Task:**', state.original_task, '',
     '**Completion Claim:**', state.completion_claim, '',
     state.architect_feedback ? '**Previous Architect Feedback (rejected):**\n' + state.architect_feedback + '\n' : '',
@@ -292,7 +292,7 @@ describe('persistent-mode: the reviewer prompt that the bridge composes, with th
     const sessionId = `pending-${Math.random().toString(36).slice(2, 8)}`;
     writeModeState(f, sessionId, 'ralph-state.json', { iteration: 1, max_iterations: 100, prompt: task });
     const file = writeVerification(f, sessionId, fields);
-    return runStop(f, sessionId, {
+    const output = runStop(f, sessionId, {
       switchValue,
       input,
       env: {
@@ -301,6 +301,9 @@ describe('persistent-mode: the reviewer prompt that the bridge composes, with th
         ...(advance ? { BRIDGE_ADVANCE: '1', BRIDGE_ADVANCE_FIELDS: JSON.stringify(advanceFields ?? { original_task: task, completion_claim: claim, architect_feedback: feedback }) } : {}),
       },
     });
+    // A bridge that fails to start is replaced by omc-cli from the PATH when there is one: the marker shows that the fake one answered.
+    expect(textOf(output)).toContain('[FAKE BRIDGE]');
+    return output;
   }
 
   for (const shape of ['reason', 'message']) {
