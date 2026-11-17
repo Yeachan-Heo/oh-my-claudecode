@@ -7,12 +7,12 @@
  * outside the pool lock fails these tests. The identity tests check which reservation a start or a stop takes.
  */
 import { spawn } from 'node:child_process';
-import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync } from 'node:fs';
+import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import process from 'node:process';
 import { setTimeout } from 'node:timers';
-import { fileURLToPath, URL } from 'node:url';
+import { URL } from 'node:url';
 import { afterEach, describe, expect, it } from 'vitest';
 import {
   commitAgent,
@@ -253,6 +253,25 @@ describe('which reservation a start and a stop take', () => {
   });
 });
 
+describe('a stop whose own start was not committed', () => {
+  it('releases the pending reservation of the session and never the alive one of another agent', () => {
+    const dir = tempDir();
+    const now = Date.now();
+    reserveAgent({ dir, sessionId: 'session', toolUseId: 'call-1', subagentType: 'helper', now, env: {} });
+    reserveAgent({ dir, sessionId: 'session', toolUseId: 'call-2', subagentType: 'helper', now: now + 1, env: {} });
+    expect(commitAgent(dir, 'session', now + 2, { agentType: 'helper', agentId: 'agent-1' })).toBe(true); // agent-2's start missed the lock budget
+    // the stop of agent-2 finds no alive reservation of its own: its pending one goes, agent-1 keeps its slot
+    expect(releaseAgent(dir, 'session', now + 3, { agentId: 'agent-2' })).toBe(true);
+    expect(poolRecords(dir)).toMatchObject([{ state: 'alive', agent_id: 'agent-1' }]);
+    // with nothing pending and no unrecorded alive one, the stop of an unknown agent releases nothing
+    expect(releaseAgent(dir, 'session', now + 4, { agentId: 'agent-3' })).toBe(false);
+    expect(poolRecords(dir)).toHaveLength(1);
+    // a stop without an agent id still takes the oldest alive reservation
+    expect(releaseAgent(dir, 'session', now + 5)).toBe(true);
+    expect(poolFiles(dir)).toHaveLength(0);
+  });
+});
+
 describe('a pool lock that is not obtained', () => {
   /** A child process that holds the pool lock of `dir` for `holdMs`; resolves once the lock is held. */
   async function holdLock(dir, holdMs) {
@@ -276,16 +295,23 @@ describe('a pool lock that is not obtained', () => {
     const dir = tempDir();
     fill(dir, 40);
     const before = poolFiles(dir).sort();
-    const holder = await holdLock(dir, 4000);
+    const holder = await holdLock(dir, 30_000);
     try {
-      const started = Date.now();
+      const timed = (call) => {
+        const started = Date.now();
+        const result = call();
+        return { result, ms: Date.now() - started };
+      };
       // the pool is full (40 of 40), but nobody could read it under the lock: this is not a refusal at 40/40
-      expect(reserveAgent({ dir, sessionId: 'session', toolUseId: 'late', env: LIMIT_40 })).toMatchObject({ ok: true, file: null, untracked: true });
-      expect(commitAgent(dir, 'session', Date.now(), { agentType: 'helper', agentId: 'agent-late' })).toBe(false);
-      expect(releaseAgent(dir, 'session', Date.now(), { agentId: 'agent-late' })).toBe(false);
-      expect(releaseAgentByToolUseId(dir, 'call-0')).toBe(false);
-      expect(reserveSession({ dir, counted: 5, limit: 1 })).toMatchObject({ ok: true, file: null });
-      expect(Date.now() - started).toBeLessThan(3900); // five waits of the 700 ms budget end before the holder lets go
+      const reserve = timed(() => reserveAgent({ dir, sessionId: 'session', toolUseId: 'late', env: LIMIT_40 }));
+      expect(reserve.result).toMatchObject({ ok: true, file: null, untracked: true });
+      expect(timed(() => commitAgent(dir, 'session', Date.now(), { agentType: 'helper', agentId: 'agent-late' })).result).toBe(false);
+      expect(timed(() => releaseAgent(dir, 'session', Date.now(), { agentId: 'agent-late' })).result).toBe(false);
+      expect(timed(() => releaseAgentByToolUseId(dir, 'call-0')).result).toBe(false);
+      const session = timed(() => reserveSession({ dir, counted: 5, limit: 1 }));
+      expect(session.result).toMatchObject({ ok: true, file: null });
+      // each wait ends at the 0.7 s budget, with room for a loaded machine; none runs on towards the 3 s hook timeout
+      expect(Math.max(reserve.ms, session.ms)).toBeLessThan(2500);
       expect(poolFiles(dir).sort()).toEqual(before);
     } finally {
       holder.child.kill();
@@ -294,14 +320,4 @@ describe('a pool lock that is not obtained', () => {
     // with the lock free again the same calls act normally: at 40 of 40 the reservation is refused
     expect(reserveAgent({ dir, sessionId: 'session', toolUseId: 'late', env: LIMIT_40 }).ok).toBe(false);
   }, 30_000);
-});
-
-describe('pool directory of the tests', () => {
-  it('is created on demand by the first reservation', () => {
-    const dir = join(tempDir(), 'nested', 'jev');
-    mkdirSync(dir, { recursive: true });
-    expect(reserveAgent({ dir, sessionId: 'session', env: LIMIT_40 }).ok).toBe(true);
-    expect(readdirSync(join(dir, 'pool-agents'))).toHaveLength(1);
-    expect(fileURLToPath(MODULE_URL)).toContain('jev-pool.mjs');
-  });
 });

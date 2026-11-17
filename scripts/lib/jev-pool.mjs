@@ -229,10 +229,12 @@ export function commitAgent(dir, sessionId, now = Date.now(), start = {}) {
 }
 
 /**
- * Release the reservation of a stopped agent (SubagentStop): the alive one that carries its agent_id; without one, the
- * oldest alive reservation of the session that carries no agent_id (a start that was not recorded with its id), then the
- * oldest alive one of the session, then the oldest pending one. The selection and the removal run under the pool lock, so
- * concurrent stops release distinct reservations. False when there is none or the lock was not obtained.
+ * Release the reservation of a stopped agent (SubagentStop). With an agent_id: the alive reservation that carries it; else the
+ * oldest alive reservation of the session that carries no agent_id (a start that was not recorded with its id); else the oldest
+ * pending one of the session (the start of this agent was not committed in time). An alive reservation of another agent is
+ * never released for a stop that names its own agent. Without an agent_id the stops are in the order of the starts: the oldest
+ * alive one of the session (the ones without an id first), then the oldest pending one. The selection and the removal run
+ * under the pool lock, so concurrent stops release distinct reservations. False when there is none or the lock was not obtained.
  */
 export function releaseAgent(dir, sessionId, now = Date.now(), stop = {}) {
   if (!sessionId) return false;
@@ -241,12 +243,12 @@ export function releaseAgent(dir, sessionId, now = Date.now(), stop = {}) {
     underPoolLock(dir, () => {
       const pool = readPool(dir, now);
       const aliveOfSession = pool.alive.filter((entry) => entry.sessionId === sessionId).sort((a, b) => a.ts - b.ts); // FIFO, the usual order of the stops
-      const agentId = typeof stop.agentId === 'string' ? stop.agentId : '';
       const pending = pool.pending.filter((entry) => entry.sessionId === sessionId).sort((a, b) => a.ts - b.ts); // a stop without a registered start
-      const entry = (agentId && aliveOfSession.find((candidate) => candidate.agentId === agentId))
-        || aliveOfSession.find((candidate) => !candidate.agentId)
-        || aliveOfSession[0]
-        || pending[0];
+      const agentId = typeof stop.agentId === 'string' ? stop.agentId : '';
+      const withoutId = aliveOfSession.find((candidate) => !candidate.agentId);
+      const entry = agentId
+        ? aliveOfSession.find((candidate) => candidate.agentId === agentId) || withoutId || pending[0]
+        : withoutId || aliveOfSession[0] || pending[0];
       if (!entry) return;
       rmSync(entry.path, { force: true });
       released = true;
