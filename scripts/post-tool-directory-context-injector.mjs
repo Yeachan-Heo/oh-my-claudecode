@@ -53,7 +53,10 @@ function extractFilePath(toolInput) {
 }
 
 // Opt-in text cleaning (OMC_CONTEXT_TEXT_SANITIZE=1 or true): the README text read from disk is cleaned before it is
-// injected. The module is loaded only when the switch is on; with the switch off the text is injected unchanged.
+// injected. The header and the truncation notice that the injector module writes name the file (the notice tells the model
+// to read it), so the paths of the context files are identifiers: they are written exactly, and the text around them is
+// cleaned (see cleanTextBlockKeeping). The module is loaded only when the switch is on; with the switch off the text is
+// injected unchanged.
 async function main() {
   // Honor the documented kill switches (issues #838, #3253) with the same
   // `post-tool-use` event token as the other PostToolUse hooks.
@@ -100,11 +103,19 @@ async function main() {
 
     if (contextText) {
       const sanitize = await loadContextText();
+      let paths = [];
+      if (sanitize && typeof hook.getContextFilesForFile === 'function') {
+        try {
+          paths = hook.getContextFilesForFile(filePath);
+        } catch {
+          // The paths are not known: the text is cleaned as a whole.
+        }
+      }
       console.log(JSON.stringify({
         continue: true,
         hookSpecificOutput: {
           hookEventName: 'PostToolUse',
-          additionalContext: sanitize ? sanitize.cleanTextBlock(contextText) : contextText,
+          additionalContext: sanitize ? sanitize.cleanTextBlockKeeping(contextText, paths) : contextText,
         },
       }));
     } else {

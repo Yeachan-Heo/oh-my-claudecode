@@ -50,7 +50,9 @@ function extractFilePath(toolInput) {
 }
 
 // Opt-in text cleaning (OMC_CONTEXT_TEXT_SANITIZE=1 or true): the rules file text read from disk is cleaned before it is
-// injected. The module is loaded only when the switch is on; with the switch off the text is injected unchanged.
+// injected. The header of each rule names its file, so the paths of the rule files are identifiers: they are written
+// exactly, and the text around them is cleaned (see cleanTextBlockKeeping). The module is loaded only when the switch is
+// on; with the switch off the text is injected unchanged.
 async function main() {
   // Skip guard: honor the documented kill switches (see issues #838, #3253).
   // This hook injects context on PostToolUse alongside post-tool-verifier.mjs, so it
@@ -105,11 +107,19 @@ async function main() {
 
     if (rulesText) {
       const sanitize = await loadContextText();
+      let paths = [];
+      if (sanitize && typeof hook.getRulesForFile === 'function') {
+        try {
+          paths = hook.getRulesForFile(filePath).map((rule) => rule.relativePath);
+        } catch {
+          // The paths are not known: the text is cleaned as a whole.
+        }
+      }
       console.log(JSON.stringify({
         continue: true,
         hookSpecificOutput: {
           hookEventName: 'PostToolUse',
-          additionalContext: sanitize ? sanitize.cleanTextBlock(rulesText) : rulesText,
+          additionalContext: sanitize ? sanitize.cleanTextBlockKeeping(rulesText, paths) : rulesText,
         },
       }));
     } else {

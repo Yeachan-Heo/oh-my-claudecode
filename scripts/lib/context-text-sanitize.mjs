@@ -127,6 +127,30 @@ export function escapeIdentifier(value, max = Infinity) {
   }
 }
 
+// A block that another module composed: a header, a notice or a list written by that module around the text of a document.
+// The names that module put into the block (the path in a header, the file the notice tells the model to read, a page file
+// in a list) are identifiers, and the hook that cleans the block knows them from the module's read-only accessors. Every
+// occurrence of such a name in the block is written with escapeIdentifier, then the whole block is cleaned as text, so the
+// header and the notice name the file exactly and the document text is cleaned. A name that cleaning would not change
+// (no removed character, no marker start, no leading double quote) is left as it is. When a name was written as a JSON
+// string, one line at the end tells the model to decode it. The longest name wins where names overlap.
+const DECODE_NOTE = 'Note: a name in double quotes is a JSON string: its \\uXXXX escapes stand for characters that are not shown; decode them to get the exact name.';
+
+export function cleanTextBlockKeeping(value, identifiers) {
+  try {
+    const text = toText(value);
+    const names = [...new Set((Array.isArray(identifiers) ? identifiers : []).map(toText))]
+      .filter((name) => name !== '' && text.includes(name) && escapeIdentifier(name) !== name)
+      .sort((first, second) => second.length - first.length);
+    if (names.length === 0) return cleanTextBlock(text);
+    const pattern = new RegExp(names.map((name) => name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('|'), 'g');
+    const written = text.replace(pattern, (name) => escapeIdentifier(name));
+    return `${cleanTextBlock(written)}\n\n${DECODE_NOTE}`;
+  } catch {
+    return '';
+  }
+}
+
 // Multi-line text cut to at most `max` characters at a line boundary: whole lines are dropped from the end, so a line that
 // holds an identifier is never cut in half, and the text then ends with a line "…". Text that fits is returned as it is.
 export function fitLines(value, max) {
