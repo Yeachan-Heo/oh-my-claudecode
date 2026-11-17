@@ -1093,10 +1093,10 @@ const NAMED_VALUE = new RegExp(String.raw`((?:api[_-]?key|access[_-]?key|client[
 // word characters and escapes (not of whitespace, which stays the separator; a key that holds spaces or punctuation is quoted, and a quoted
 // key is read whole by the pair scanner, below), read from its start only, so each character is read once. A key that is not read whole is not read past its
 // separator either, so what follows it is read as the text it is: `m\u0079:p\u0061ssword=x` holds the key `m\u0079` and then the key
-// `p\u0061ssword`. A key starts after a whitespace escape as after a space.
+// `p\u0061ssword`. A key starts after a whitespace escape (`\n`, `\t`, `\r`, `\f` or `\u0020`) as after a space.
 const KEY_ESCAPE = String.raw`\\+u(?!(?:${WS_CODES}))[0-9a-fA-F]{4}`;
 const KEY_CHAR = String.raw`[^\s\x00-\x2c\x2e\x2f\x3a-\x40\x5b-\x5e\x60\x7b-\x7f]`;
-const ESCAPED_KEY = new RegExp(String.raw`(?:(?<!${KEY_CHAR}|\\)|(?<=\\+u(?:${WS_CODES})))((?=(?:${KEY_CHAR}|${KEY_ESCAPE})*${KEY_ESCAPE})(?:${KEY_CHAR}|${KEY_ESCAPE})+)((?:\\*["'])?${WS}*[:=]${WS}*(?:\\*["'])?)`, 'g');
+const ESCAPED_KEY = new RegExp(String.raw`(?:(?<!${KEY_CHAR}|\\)|(?<=\\+(?:[ntrf]|u(?:${WS_CODES}))))((?=(?:${KEY_CHAR}|${KEY_ESCAPE})*${KEY_ESCAPE})(?:${KEY_CHAR}|${KEY_ESCAPE})+)((?:\\*["'])?${WS}*[:=]${WS}*(?:\\*["'])?)`, 'g');
 const FIELD_VALUE_AT = new RegExp(FIELD_VALUE, 'y');
 // The masked part (from, to, replacement) of the value of each field whose escaped key names a secret.
 function keyParts(source) {
@@ -1131,12 +1131,32 @@ const AFTER_CLOSE = String.raw`(?=[\s,}\])&;|"'\\]|$)`;
 // a value, and a value goes with the names of its own prefix (`oldName` and `oldValue`), or else with the names without a prefix.
 // The text is read at each quote depth, so the same pair inside a JSON string (as a tool input is sent) is found too. There is no
 // length cap and no cutoff in the number of fields, and each character is read a constant number of times.
-// A prefix of a pair-field key (`old` in `oldName`, `paramètre-` in `paramètre-name`): word characters, hyphens, dots and non-ASCII characters
-// that are not whitespace, so a key in another language pairs as an English one does.
-const PAIR_PREFIX = String.raw`[^\s\x00-\x2c\x2f\x3a-\x40\x5b-\x5e\x60\x7b-\x7f]*`;
-const PAIR_NAME_FIELD = new RegExp(String.raw`^(${PAIR_PREFIX})(?:name|key|type)$`, 'i');
-const PAIR_VALUE_FIELD = new RegExp(String.raw`^(${PAIR_PREFIX})(?:value|val)$`, 'i');
-const PLAIN_KEY = /^[A-Za-z0-9_]+$/;
+// The key of a pair field is read whole, up to its closing quote, and decoded; the word it ends in is its selector, and everything in
+// front of the selector is its prefix, whatever characters it holds (`old` in `oldName`, `ns:` in `ns:name`, `my ` in `my name`, `a/b#`
+// in `a/b#value`): no character class decides whether a key is recognized.
+const PAIR_NAME_WORDS = ['name', 'key', 'type'];
+const PAIR_VALUE_WORDS = ['value', 'val'];
+const NON_WORD = /[^\p{L}\p{N}\p{M}_]/u;
+// A key of ASCII letters, digits and underscores only has no escape and no separator: its head is the key itself (a shortcut, same result).
+const ASCII_WORD = /^[A-Za-z0-9_]*$/;
+// The key decoded and cut after its last word, in lower case: what follows it (separators, spaces, a JSON line break or tab such as
+// `password\n`) does not count, as in the word rules. One pass from the end of the key.
+function keyHead(key) {
+  if (ASCII_WORD.test(key)) return key.toLowerCase();
+  const chars = [...decodeUnicode(key).toLowerCase()];
+  let end = chars.length;
+  for (;;) {
+    while (end > 0 && NON_WORD.test(chars[end - 1])) end--;
+    if (end < 2 || chars[end - 2] !== '\\' || !'nrtbf'.includes(chars[end - 1])) break;
+    end--;
+  }
+  return chars.slice(0, end).join('');
+}
+// The prefix of a key head that ends in one of the selector words, or null.
+function pairPrefix(head, words) {
+  const word = words.find((w) => head.endsWith(w));
+  return word === undefined ? null : head.slice(0, head.length - word.length);
+}
 const PAIR_SEPARATOR = new RegExp(String.raw`^${WS}*,${WS}*$`);
 // The value of a pair field at quote depth d: a complete quoted string, or else a value whose quote is open or was misread.
 // The text sent to a model is often clipped, so a value can end where the text does, and what closes a value (a bracket, a comma, a
@@ -1157,8 +1177,9 @@ const decodeUnicode = (text) => text.replace(/(?<!\\)\\+u([0-9a-f]{4})/gi, (_, h
 const SECRET_PAIR_NAME = new RegExp(String.raw`${ENGLISH_KEYWORDS}|${localNames(false)}|^securestring$`, 'i');
 const secretPairName = (name) => SECRET_PAIR_NAME.test(decodeUnicode(name));
 // A quoted key read whole: decoded, it is classified by the word it ends in (the part the word rules read before a separator), so
-// punctuation, spaces and escapes in front of that word do not change the result.
-const keyNamesSecret = (key) => secretPairName(decodeUnicode(key).split(/[^\p{L}\p{N}\p{M}_]+/u).findLast(Boolean) ?? '');
+// punctuation, spaces and escapes in front of that word do not change the result. A key that is one plain word is classified too: the
+// word rules read it only where nothing but a quote stands between it and its separator (not in a serialized string).
+const keyNamesSecret = (head) => SECRET_PAIR_NAME.test(ASCII_WORD.test(head) ? head : head.split(/[^\p{L}\p{N}\p{M}_]+/u).pop());
 
 // The text of a quoted value without its quotes and without the backslashes of an escaped closing quote.
 function unquoted(value, quote) {
@@ -1218,19 +1239,28 @@ function pairParts(source) {
       const names = new Set();
       const secret = new Set();
       for (const f of group) {
-        const m = PAIR_NAME_FIELD.exec(decodeUnicode(f.key));
-        if (!m || !f.quote) continue;
-        const prefix = m[1].toLowerCase();
+        const prefix = f.quote ? pairPrefix(f.head, PAIR_NAME_WORDS) : null;
+        if (prefix === null) continue;
         names.add(prefix);
         if (secretPairName(unquoted(f.value, f.quote))) secret.add(prefix);
       }
-      if (secret.size) {
-        for (const f of group) {
-          const m = PAIR_VALUE_FIELD.exec(decodeUnicode(f.key));
-          if (!m) continue;
-          const prefix = m[1].toLowerCase();
-          if (secret.has(prefix) || (!names.has(prefix) && secret.has(''))) cuts.push(f);
-        }
+      // A value goes with the names of its own prefix, or else with the names without a prefix; `paired` holds the prefixes of the names
+      // that have a value.
+      const paired = new Set();
+      for (const f of group) {
+        const prefix = pairPrefix(f.head, PAIR_VALUE_WORDS);
+        if (prefix === null) continue;
+        const name = names.has(prefix) ? prefix : '';
+        paired.add(name);
+        if (secret.has(name)) cuts.push(f);
+      }
+      // A key that ends in a secret word masks its value, whatever stands inside the key (a colon, a space, escapes) and whether it is
+      // one plain word or not. A name that has a value field to go with is the name of a pair, not a secret key: the pair rule above
+      // reads that value (`{"Key":"DB_PASSWORD","Val":"x"}`).
+      for (const f of group) {
+        if (!keyNamesSecret(f.head)) continue;
+        const prefix = f.quote ? pairPrefix(f.head, PAIR_NAME_WORDS) : null;
+        if (prefix === null || !paired.has(prefix)) cuts.push(f);
       }
       group = [];
     };
@@ -1241,12 +1271,7 @@ function pairParts(source) {
       if (group.length && !PAIR_SEPARATOR.test(source.slice(end, m.index))) flush();
       end = m.index + m[0].length;
       const quote = /^\\*"/.exec(m[2])?.[0] ?? '';
-      const f = { key: m[1], value: m[2], quote, start: end - m[2].length, end };
-      group.push(f);
-      // A key is read whole, up to its closing quote, and decoded: a key that ends in a secret word masks its value, whatever stands
-      // inside the key (a colon, a space, escapes). A key that is one plain word (letters, digits and underscores) is left to the
-      // rules that read a word, as before.
-      if (!PLAIN_KEY.test(f.key) && keyNamesSecret(f.key)) cuts.push(f);
+      group.push({ head: keyHead(m[1]), value: m[2], quote, start: end - m[2].length, end });
     }
     flush();
     // The text inside the quotes is what is masked, so the quotes stay where they are when another rule masks the same value; a value
