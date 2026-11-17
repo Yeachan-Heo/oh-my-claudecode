@@ -1015,13 +1015,32 @@ describe("omc graph gc", () => {
       const dir = makeTornRun(root, "run-collision");
       const stamp = new Date(NOW).toISOString().replace(/[:.]/g, "-");
       writeFileSync(join(dir, `journal.jsonl.torn-${stamp}`), "earlier copy");
-      const before = snapshot(base);
+      const journalBefore = readFileSync(join(dir, "journal.jsonl"), "utf8");
       const result = gc(root, { repairTornWal: true, nowMs: NOW });
       const run = decisionOf(result, "run-collision");
       expect(run.action).toBe("repair-failed");
       expect(run.error).toMatch(/EEXIST/);
       expect(result.summary.repair_failed).toBe(1);
-      expect(snapshot(base), "a failed repair changed the tree").toBe(before);
+      // The repair owns the run while it works, which leaves the epoch sidecar of the lock protocol; the data stays.
+      expect(readFileSync(join(dir, "journal.jsonl"), "utf8"), "a failed repair changed the journal").toBe(journalBefore);
+      expect(readFileSync(join(dir, `journal.jsonl.torn-${stamp}`), "utf8")).toBe("earlier copy");
+      expect(readdirSync(dir).filter((name) => name.startsWith("journal.jsonl.torn-"))).toEqual([`journal.jsonl.torn-${stamp}`]);
+      expect(existsSync(join(dir, "owner.lock")), "the lock taken for the repair was not released").toBe(false);
+    });
+  });
+
+  it("a repair does not start on a run that a contender took over through the fence after the scan", () => {
+    withBase((base) => {
+      const root = makeRoot(base);
+      const dir = makeTornRun(root, "run-repair-contended");
+      ageTree(dir, OLD);
+      const journalBefore = readFileSync(join(dir, "journal.jsonl"), "utf8");
+      const contender = new FileOwnershipFence(realpathSync(root), "run-repair-contended");
+      expect(contender.acquireSync().outcome).toBe("acquired");
+
+      expect(() => repairTornTail(dir, NOW)).toThrow(/held by a live owner/);
+      expect(readFileSync(join(dir, "journal.jsonl"), "utf8"), "the owner's journal was truncated").toBe(journalBefore);
+      expect(readdirSync(dir).filter((name) => name.startsWith("journal.jsonl.torn-"))).toEqual([]);
     });
   });
 

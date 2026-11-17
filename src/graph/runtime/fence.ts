@@ -317,6 +317,11 @@ export class FileOwnershipFence implements OwnershipFence {
   }
 
   async release(epoch: number): Promise<boolean> {
+    return this.releaseSync(epoch);
+  }
+
+  /** Synchronous form of release(), the counterpart of acquireSync(). */
+  releaseSync(epoch: number): boolean {
     return withContainedOperations(this.runDir(), (operations) =>
       this.releaseAt(epoch, operations),
     );

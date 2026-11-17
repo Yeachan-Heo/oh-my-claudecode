@@ -658,12 +658,9 @@ function removeTreeByPath(path: string, interlock: { afterLstat?: (path: string)
   }
 }
 
-// Moves one run out of the runs namespace while this process owns it, and returns the new path.
-// Ownership is taken through the runtime's single-writer fence, so a live owner, a concurrent resume and another
-// pass all see the run as busy and nothing is moved. After the rename the run directory name is gone: a later
-// resume of the same run id starts a fresh directory, and nothing can reach the moved one by its run id.
-export function quarantineRun(realRoot: string, id: string, nowMs: number = Date.now()): string {
-  const runDir = join(realRoot, id);
+// Takes ownership of one run through the runtime's single-writer fence. A live owner, a resume under way and another
+// pass all leave the run busy, and then nothing is changed: the run is refused with `refusal`.
+function takeOwnership(runDir: string, refusal: string): { fence: FileOwnershipFence; epoch: number } {
   // Opened without following a link, so a run directory swapped for a link fails here; the fence checks the identity again.
   let fd: number;
   try {
@@ -679,14 +676,30 @@ export function quarantineRun(realRoot: string, id: string, nowMs: number = Date
   } finally {
     closeSync(fd);
   }
+  const fence = new FileOwnershipFence(dirname(runDir), basename(runDir), undefined, {
+    path: runDir,
+    device: identity.dev,
+    inode: identity.ino,
+  });
+  const acquired = fence.acquireSync();
+  if (acquired.outcome !== "acquired") throw new Error(refusal);
+  return { fence, epoch: acquired.epoch };
+}
+
+// Moves one run out of the runs namespace while this process owns it, and returns the new path. After the rename
+// the run directory name is gone: a later resume of the same run id starts a fresh directory, and nothing can
+// reach the moved one by its run id.
+export function quarantineRun(realRoot: string, id: string, nowMs: number = Date.now()): string {
+  const runDir = join(realRoot, id);
+  if (!lstatSync(runDir).isDirectory()) throw new Error("run is no longer a plain directory");
   if (realpathSync(runDir) !== runDir) throw new Error("run directory resolves outside the runs root");
-  const fence = new FileOwnershipFence(realRoot, id, undefined, { path: runDir, device: identity.dev, inode: identity.ino });
-  if (fence.acquireSync().outcome !== "acquired") throw new Error("run is held by a live owner; not removed");
+  const { fence } = takeOwnership(runDir, "run is held by a live owner; not removed");
   try {
     const quarantine = join(realRoot, `${QUARANTINE_PREFIX}${id}-${nowMs}-${randomBytes(4).toString("hex")}`);
     renameSync(runDir, quarantine);
     return quarantine;
   } finally {
+    // The lock moved with the directory; only the descriptor is left to close.
     fence.closeHeldDescriptor();
   }
 }
@@ -716,19 +729,51 @@ function stampFor(nowMs: number): string {
   return new Date(nowMs).toISOString().replace(/[:.]/g, "-");
 }
 
+// Opens the journal without following a link. It must be a regular file with no other name: a hard link shares its
+// inode with another name, possibly outside the runs root, and truncating it would change that file too.
+function openJournal(runDir: string, flags: number): number {
+  const fd = openSync(join(runDir, JOURNAL_FILE_NAME), flags | NOFOLLOW);
+  try {
+    const stat = fstatSync(fd);
+    if (!stat.isFile()) throw new Error("journal is not a regular file");
+    if (stat.nlink !== 1) throw new Error("journal has more than one hard link; left unchanged");
+    return fd;
+  } catch (error) {
+    closeSync(fd);
+    throw error;
+  }
+}
+
 // Moves the torn last line of one journal to a copy beside it. Complete lines are not touched.
 // The copy is written and synced before the journal is truncated, so the tail is never lost.
-// Returns { repaired, copy }. Throws when the run became live, or the journal changed, meanwhile.
+// The journal is changed only while this process owns the run (the same fence as the removal), so a writer cannot
+// append between the last look and the truncation. Returns { repaired, copy }. Throws when the run is owned by
+// another process, or the journal is not a private regular file.
 export function repairTornTail(runDir: string, nowMs: number): { repaired: boolean; copy: string | null } {
-  const fd = openSync(join(runDir, JOURNAL_FILE_NAME), fsConstants.O_RDWR | NOFOLLOW);
+  // Looked at before the lock is taken, so a run with nothing to repair, or with a journal that must not be
+  // touched, is left exactly as it was.
+  const probe = openJournal(runDir, fsConstants.O_RDONLY | NONBLOCK);
+  let torn: boolean;
+  try {
+    torn = splitTornTail(readFileSync(probe)).tail.length > 0;
+  } finally {
+    closeSync(probe);
+  }
+  if (!torn) return { repaired: false, copy: null };
+  const owned = takeOwnership(runDir, "run is held by a live owner; journal left unchanged");
+  try {
+    return repairOwnedJournal(runDir, nowMs);
+  } finally {
+    owned.fence.releaseSync(owned.epoch);
+  }
+}
+
+function repairOwnedJournal(runDir: string, nowMs: number): { repaired: boolean; copy: string | null } {
+  const fd = openJournal(runDir, fsConstants.O_RDWR);
   try {
     const before = fstatSync(fd);
-    if (!before.isFile()) throw new Error("journal is not a regular file");
-    // A hard link shares its inode with another name, possibly outside the runs root; truncating it would change that file too.
-    if (before.nlink !== 1) throw new Error("journal has more than one hard link; left unchanged");
     const { complete, tail } = splitTornTail(readFileSync(fd));
     if (tail.length === 0) return { repaired: false, copy: null };
-    if (leaseOf(runDir).held) throw new Error("run is held by a live owner; journal left unchanged");
     const copyName = `${TORN_COPY_PREFIX}${stampFor(nowMs)}`;
     const copyFd = openSync(
       join(runDir, copyName),
@@ -741,9 +786,8 @@ export function repairTornTail(runDir: string, nowMs: number): { repaired: boole
     } finally {
       closeSync(copyFd);
     }
-    // Re-check just before truncation: a writer that took the lock or appended meanwhile wins.
-    if (leaseOf(runDir).held || fstatSync(fd).size !== before.size) {
-      throw new Error("run changed during repair; journal left unchanged, torn copy kept");
+    if (fstatSync(fd).size !== before.size) {
+      throw new Error("journal changed during repair; left unchanged, torn copy kept");
     }
     ftruncateSync(fd, complete.length);
     fsyncSync(fd);
