@@ -680,8 +680,8 @@ export async function setJevHookContext(data) {
   lastRequestIds.clear();
   const logContext = isJevLogContextEnabled(process.env);
   const appliedLog = isJevAppliedLogEnabled(process.env);
-  // Capture context if log context is needed, regardless of whether Jev can be requested
-  if (logContext) {
+  // Capture context if log context is needed, or for applied logging even when Jev is off
+  if (logContext || appliedLog) {
     const context = jevLogContextOf(data);
     delete context.request_id;
     if (context.cwd === undefined) {
@@ -691,10 +691,15 @@ export async function setJevHookContext(data) {
         // No working directory: the field is left out.
       }
     }
-    hookLogContext = context;
+    // Store context for applied logging and log context (OMC_JEV_LOG_CONTEXT=1)
+    if (logContext) {
+      hookLogContext = context;
+    }
   }
-  // Resolve log directory if log context or applied logging is needed
-  if (logContext || appliedLog) {
+  // Resolve log directory only when Jev can be requested or when OMC_JEV_LOG_DIR is explicitly set.
+  // For marker-only applied logging (Jev off, OMC_JEV_APPLIED_LOG=1), let recordJevApplied use
+  // the fallbackLogDir from the payload's project so applied.jsonl goes to the right place.
+  if (logContext || (appliedLog && mayRequestJev(process.env))) {
     try {
       hookLogDir = await resolveJevLogDir(process.env);
     } catch {
