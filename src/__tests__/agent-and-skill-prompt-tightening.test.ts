@@ -670,6 +670,8 @@ describe('omc-doctor cache commands on a synthetic config directory', () => {
       'empty entry list under a supported ID': () => ({ [PLUGIN_ID]: [{ scope: 'user', version: '5.8.1' }], 'oh-my-claudecode@oh-my-claudecode': [] }),
       'empty entry list under an unrelated key': () => ({ [PLUGIN_ID]: [{ scope: 'user', version: '5.8.1' }], 'other-plugin@market': [] }),
       'entries that are not an array under an unrelated key': () => ({ [PLUGIN_ID]: [{ scope: 'user', version: '5.8.1' }], 'other-plugin@market': { scope: 'user' } }),
+      'a non-empty string instead of the entries under an unrelated key': () => ({ [PLUGIN_ID]: [{ scope: 'user', version: '5.8.1' }], 'other-plugin@market': 'junk' }),
+      'an object with a length instead of the entries under an unrelated key': () => ({ [PLUGIN_ID]: [{ scope: 'user', version: '5.8.1' }], 'other-plugin@market': { length: 3 } }),
       'key that only resembles a supported ID': () => ({
         [PLUGIN_ID]: [{ scope: 'user', version: '5.8.1' }],
         'oh-my-claudecode@omc-fork': [{ scope: 'user', version: '5.9.0' }],
