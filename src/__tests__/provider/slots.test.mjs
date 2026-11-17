@@ -2,7 +2,7 @@
 // Session slots: limit, stale owners, waiting starts, release rules and parallel starts.
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { spawn, spawnSync } from 'node:child_process';
-import { existsSync, mkdirSync, readFileSync, readdirSync, unlinkSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, readdirSync, unlinkSync, utimesSync, writeFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -141,4 +141,58 @@ setTimeout(() => { require('node:fs').writeFileSync(${JSON.stringify(work)}+'/en
     expect(firstWave, 'starts in the first wave').toBe(4);
     expect(f.slotFiles().length).toBe(0);
   }, 90_000);
+  it('(21) the lock of a start whose content is not written yet (an empty or partial file) is not taken over while it is fresh, so two starts cannot count the same free capacity; a lock older than a minute, and a lock of a dead owner, are taken over', () => {
+    const { tryAcquireSlot } = require(join(LIB, 'slots.cjs'));
+    const f = fixture('s21', { maxSessions: 1, slotWaitMs: 0 });
+    mkdirSync(f.slots, { recursive: true });
+    const lock = join(f.slots, '.lock');
+    const touch = (secondsAgo) => { const t = new Date(Date.now() - secondsAgo * 1000); utimesSync(lock, t, t); };
+    for (const content of ['', '{"pid":']) {
+      writeFileSync(lock, content);
+      touch(5); // far older than the gap between openSync and writeSync, younger than the takeover age
+      expect(tryAcquireSlot(f.slots, 1), `content ${JSON.stringify(content)}`).toBeNull();
+      expect(existsSync(lock), 'a fresh unreadable lock stays').toBe(true);
+      expect(f.slotFiles().length).toBe(0);
+      touch(61);
+      expect(tryAcquireSlot(f.slots, 1), 'the attempt that removes a stale lock does not take the slot yet').toBeNull();
+      expect(existsSync(lock)).toBe(false);
+      const file = tryAcquireSlot(f.slots, 1);
+      expect(file && existsSync(file), 'the next attempt takes the slot').toBeTruthy();
+      expect(releaseSlot(file)).toBe(true);
+    }
+    writeFileSync(lock, JSON.stringify({ pid: spawnSync('true').pid, ts: Date.now() })); // a dead owner
+    expect(tryAcquireSlot(f.slots, 1)).toBeNull();
+    expect(existsSync(lock)).toBe(false);
+    const file = tryAcquireSlot(f.slots, 1);
+    expect(file).toBeTruthy();
+    releaseSlot(file);
+  });
+
+  it('(22) the lock is released only by the start that created it: when it was taken over during the critical section, the lock of the new owner stays', () => {
+    const f = fixture('s22', { maxSessions: 1, slotWaitMs: 0 });
+    mkdirSync(f.slots, { recursive: true });
+    const lock = join(f.slots, '.lock');
+    // A copy of the module whose readdirSync (called inside the critical section) first replaces the lock, as a takeover after a long stall would.
+    const fs = require('node:fs');
+    const path = require.resolve(join(LIB, 'slots.cjs'));
+    const realReaddir = fs.readdirSync;
+    let takeover = null;
+    fs.readdirSync = (...args) => { if (takeover) { const run = takeover; takeover = null; run(); } return realReaddir(...args); };
+    let copy;
+    try { delete require.cache[path]; copy = require(path); } finally { fs.readdirSync = realReaddir; }
+    try {
+      takeover = () => { unlinkSync(lock); writeFileSync(lock, JSON.stringify({ pid: foreign.pid, ts: Date.now() })); };
+      const file = copy.tryAcquireSlot(f.slots, 1);
+      expect(file, 'the start itself succeeds').toBeTruthy();
+      expect(existsSync(lock), 'the lock of the new owner is not removed by the late release').toBe(true);
+      expect(JSON.parse(readFileSync(lock, 'utf8')).pid).toBe(foreign.pid);
+      unlinkSync(lock);
+      copy.releaseSlot(file);
+      // an undisturbed start removes its own lock
+      const second = copy.tryAcquireSlot(f.slots, 1);
+      expect(second).toBeTruthy();
+      expect(existsSync(lock)).toBe(false);
+      copy.releaseSlot(second);
+    } finally { delete require.cache[path]; }
+  });
 });

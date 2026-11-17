@@ -3,7 +3,7 @@
 // (a previous life of a recycled pid) and corrupt or very old slots are removed while a slot is taken.
 // Starts above the limit wait (polling) for profile.limits.slotWaitMs; 0 means refuse at once.
 // Races between parallel starts are serialized by a lock file (O_EXCL, owner pid and timestamp inside).
-const { closeSync, mkdirSync, openSync, readdirSync, readFileSync, statSync, unlinkSync, writeFileSync, writeSync } = require('node:fs');
+const { closeSync, fstatSync, mkdirSync, openSync, readdirSync, readFileSync, statSync, unlinkSync, writeFileSync, writeSync } = require('node:fs');
 const { join } = require('node:path');
 const { ProfileError, statePath } = require('./profile.cjs');
 
@@ -49,15 +49,19 @@ function tryAcquireSlot(dir, limit) {
     if (e && e.code !== 'EEXIST') throw e;
     let owner = null;
     try { owner = JSON.parse(readFileSync(lock, 'utf8')); } catch {
-      // Empty or corrupt lock: check age before taking over (avoid race with fresh locks being written).
+      // Unreadable content (an empty file) is the gap between openSync(wx) and writeSync of a live owner, not a dead lock: the age comes from the
+      // mtime of the lock file, as for the other locks of this package. A fresh one is waited for like a live owner's lock, one older than
+      // LOCK_MAX_AGE_MS is taken over; taking it over at once would let two starts count the same free capacity.
       let st = null;
-      try { st = statSync(lock); } catch { /* vanished */ }
-      if (st && Date.now() - st.mtimeMs < 1000) return null; // Fresh lock (less than 1 second old): assume it's being written
+      try { st = statSync(lock); } catch { return null; } // the lock vanished: the next attempt
+      if (Date.now() - st.mtimeMs < LOCK_MAX_AGE_MS) return null;
     }
     if (owner && alive(owner.pid) && Date.now() - owner.ts < LOCK_MAX_AGE_MS) return null;
     try { unlinkSync(lock); } catch { /* another process took it over */ }
     return null;
   }
+  let ino = null;
+  try { ino = fstatSync(fd).ino; } catch { /* the lock is then left for the takeover rules */ }
   try {
     writeSync(fd, JSON.stringify({ pid: process.pid, ts: Date.now() }));
     const live = [];
@@ -81,7 +85,9 @@ function tryAcquireSlot(dir, limit) {
     return file;
   } finally {
     closeSync(fd);
-    try { unlinkSync(lock); } catch { /* taken over by another process */ }
+    // Removed only while it is still the file this process created: after a long stall the lock may have been taken over, and the file at
+    // this path then belongs to another owner, whose critical section this must not open to a third start.
+    try { if (ino !== null && statSync(lock).ino === ino) unlinkSync(lock); } catch { /* gone, or taken over by another process */ }
   }
 }
 

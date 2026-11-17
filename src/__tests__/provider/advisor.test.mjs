@@ -6,7 +6,7 @@ import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import { spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { createRequire } from 'node:module';
-import { chmodSync, cpSync, existsSync, mkdirSync, readFileSync, realpathSync, statSync, symlinkSync, writeFileSync } from 'node:fs';
+import { chmodSync, cpSync, existsSync, mkdirSync, readFileSync, realpathSync, rmSync, statSync, symlinkSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { ADVISOR, ROLE_TEMPLATE, fakeAdvisorClaude, readRows, runAdvisor } from './_advisor-helpers.mjs';
 import { makeTmp, waitProcessGone, writeProfile } from './_helpers.mjs';
@@ -672,6 +672,19 @@ for (const p of procs) p.on('exit', (code) => { finished++; if (code === 0) ok++
     check(noFile.status === 2 && !noFile.called, js({ s: noFile.status, e: noFile.stderr }));
     const wrongMarker = run(profile.baseUrl, (e) => ({ ...e, OMC_PROVIDER: 'other-profile' })); // the marker differs from the one of the session
     check(wrongMarker.status === 2 && !wrongMarker.called, js({ s: wrongMarker.status, e: wrongMarker.stderr }));
+  });
+  it('(19c) the journal lock is released only by the holder that created it: a lock replaced by the next owner during the critical section (a takeover after a hung holder) stays; an undisturbed holder removes its lock', () => {
+    const file = join(TMP, 'lock-owner', 'advisor.jsonl');
+    const lock = `${file}.lock`;
+    const result = journalLib.withLock(file, () => {
+      rmSync(lock);
+      writeFileSync(lock, js({ pid: process.pid, ts: new Date().toISOString() })); // the lock of the next owner
+      return 'done';
+    });
+    check(result === 'done' && existsSync(lock), 'the lock of the next owner was removed by the late release');
+    rmSync(lock);
+    journalLib.withLock(file, () => { check(existsSync(lock), 'the holder has the lock inside the critical section'); });
+    check(!existsSync(lock), 'an undisturbed holder leaves no lock');
   });
   it('(20) OMC_PROVIDER_ADVISOR_MODEL: sonnet and FABLE go to --model and to the journal row (trim, case-insensitive), none = opus, a wrong value: exit 2, the fake not called, a bad-model row', () => {
     const s = advisor({ OMC_PROVIDER_ADVISOR_MODEL: ' sonnet ' });

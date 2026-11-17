@@ -26,7 +26,7 @@
 // orphaned starts (over the whole file); no alarm. Retention: purge() removes the advice field from rows older than 30
 // days (metadata stays), runs automatically at most once per 24 h (marker <journal>.retention) and by hand with the
 // `purge [--days N]` mode. No network, no provider key, no model hard-coded.
-const { appendFileSync, chmodSync, closeSync, mkdirSync, openSync, readFileSync, renameSync, statSync, unlinkSync, writeFileSync } = require('node:fs');
+const { appendFileSync, chmodSync, closeSync, fstatSync, mkdirSync, openSync, readFileSync, renameSync, statSync, unlinkSync, writeFileSync } = require('node:fs');
 const { dirname } = require('node:path');
 const { ADVISOR_STATUSES, ADVISOR_EVENTS } = require('./vocab.cjs');
 const { loadProfile, statePath } = require('./profile.cjs');
@@ -141,12 +141,16 @@ function withLock(filePath, operation) {
       Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, WAIT_STEP_MS);
       continue;
     }
+    let ino = null;
+    try { ino = fstatSync(fd).ino; } catch { /* the lock is then left for the takeover rules */ }
     try { writeFileSync(fd, JSON.stringify({ pid: process.pid, ts: new Date().toISOString() })); } catch { /* auxiliary content */ }
     try { closeSync(fd); } catch { /* fd already closed */ }
     try {
       return operation();
     } finally {
-      try { unlinkSync(lock); } catch { /* release is best effort */ }
+      // Removed only while it is still the file this process created: after the takeover of a holder that hung for 300 s the file at this
+      // path belongs to the next owner, whose critical section must not be opened by this late release.
+      try { if (ino !== null && statSync(lock).ino === ino) unlinkSync(lock); } catch { /* release is best effort */ }
     }
   }
 }
