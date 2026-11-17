@@ -170,7 +170,8 @@ export function handoffModeTools(toolName, toolInput, { cwd = '', sessionStateDi
     const brief = argumentValue(input.command ?? '', 'brief');
     if (!handoffState?.handoff_path || !brief) return false;
     if (resolve(brief) !== resolve(String(handoffState.handoff_path))) return false;
-    if (handoffState.successor_started === true) return false; // one run per handoff
+    // Allow one launcher attempt: check both successor_started (confirmed) and launcher_attempted (pending confirmation)
+    if (handoffState.successor_started === true || handoffState.launcher_attempted === true) return false;
     return true;
   }
   return false;
@@ -396,7 +397,9 @@ export function overrideUltragoalDenial({ stateDir, sessionId, data, sizeBytes =
     writeHandoffRow(stateDir, env, data, 'handoff-allowed', sizeBytes);
     if (toolName === 'Write' || toolName === 'Edit') state = registerHandoffWrite(stateDir, sessionId, state, toolName, toolInput);
     if ((toolName === 'Bash' || toolName === 'PowerShell') && isLauncherCommand(toolInput.command ?? '', env)) {
-      writeHandoffState(stateDir, sessionId, { ...state, successor_started: true }); // one run per handoff
+      // Mark launcher attempt to prevent retries. The SubagentStart hook should confirm success by updating to successor_started: true.
+      // If the launcher fails, this flag will prevent retries until the session is manually fixed.
+      writeHandoffState(stateDir, sessionId, { ...state, launcher_attempted: true });
     }
     return { continue: true, suppressOutput: true };
   }
