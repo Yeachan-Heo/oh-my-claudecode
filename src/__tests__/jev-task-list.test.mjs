@@ -1050,6 +1050,17 @@ describe('task list: an event that becomes visible after a later call was folded
     call(other, 'TaskUpdate', { taskId: '94', status: 'in_progress' }, {}, T + 1000); // older than the done of the other task
     expect(L.readList(other, 'main', env()).items.map((x) => `${x.id}:${x.status}`)).toEqual(['93:completed', '94:in_progress']);
     expect(dropped()).toBe(rows);
+    // a held-up call that completes more than one task is applied to the tasks the later update did not touch
+    for (const [label, tool, input] of [['wrap_up', 'mcp__ccd_turn__wrap_up', {}], ['done of both', LIST_TOOL, { done: [1, 2] }]]) {
+      const sid3 = session();
+      create(sid3, 98, 'Task one', T);
+      create(sid3, 99, 'Task two', T + 1);
+      call(sid3, 'TaskUpdate', { taskId: '99', status: 'in_progress' }, {}, T + 2000);
+      call(sid3, tool, input, {}, T + 1000);
+      expect(L.readList(sid3, 'main', env()).items.map((x) => `${x.id}:${x.status}`), label).toEqual(['98:completed', '99:in_progress']);
+      expect(eventFiles(sid3, 'main'), label).toEqual([]);
+    }
+    expect(dropped()).toBe(rows);
   });
 
   it('the tasks a completing call named are what the fold keeps of it: a marker and one key for each task with an id', () => {
@@ -1100,7 +1111,8 @@ describe('task list: an event that becomes visible after a later call was folded
     };
     // the later calls (columns) that drop an older call (row); every other pair is applied. A completing call (done, wrapUp) acts on the tasks
     // it names: the done of task 1 and the update of task 2 do not undo each other, in either order (so update1 is not dropped by done, whose
-    // B call completes task 2, and done, which completes task 1 as A, is not dropped by update2); wrapUp names every task.
+    // B call completes task 2, and done, which completes task 1 as A, is not dropped by update2); wrapUp names every task, and a held-up wrapUp
+    // is applied to the tasks a later update did not touch (so it is not dropped by update1 or update2) and dropped by a deletion.
     const everything = Object.keys(calls);
     const drops = {
       replace: everything,
@@ -1110,7 +1122,7 @@ describe('task list: an event that becomes visible after a later call was folded
       delete2: ['replace'],
       done: ['replace', 'update1', 'delete2', 'start'],
       start: ['replace', 'update1', 'update2', 'delete2', 'done', 'start', 'wrapUp'],
-      wrapUp: ['replace', 'update1', 'update2', 'delete2', 'start'],
+      wrapUp: ['replace', 'delete2', 'start'],
     };
     const differences = {
       // the wrap_up folded first did not see task 3: it stays pending
@@ -1162,22 +1174,19 @@ describe('task list: an event that becomes visible after a later call was folded
       }
     }
 
-    // A completing call acts on the tasks it names (`done` the ones at its numbers, wrap_up every task); it undoes a call on one of them and
-    // is undone by one, and by nothing else but a call that moves the numbers or the whole list. Tasks 1 to 3 exist.
+    // A completing call acts on the tasks it names (`done` the ones at its numbers, wrap_up every task). A held-up one is applied to the tasks
+    // a later call did not edit, as an in-order fold gives, and dropped only when every task it names was edited; a held-up update is dropped
+    // by a later completing call that named its task. Tasks 1 to 3 exist.
     describe('a completing call and a call on one task, three tasks, in both orders', () => {
-      const names = ['done1', 'done2', 'done3', 'wrapUp', 'update1', 'update2', 'update3'];
+      const named = { done1: [1], done2: [2], done3: [3], done12: [1, 2], wrapUp: [1, 2, 3] };
+      const names = [...Object.keys(named), 'update1', 'update2', 'update3'];
       const spec = (kind) => {
         if (kind === 'wrapUp') return { tool_name: 'mcp__ccd_turn__wrap_up', tool_input: {} };
-        if (kind.startsWith('done')) return { tool_name: LIST_TOOL, tool_input: { done: [Number(kind.slice(4))] } };
+        if (kind.startsWith('done')) return { tool_name: LIST_TOOL, tool_input: { done: named[kind] } };
         return { tool_name: 'TaskUpdate', tool_input: { taskId: kind.slice(6), status: 'in_progress' } };
       };
-      const completing = (kind) => kind === 'wrapUp' || kind.startsWith('done');
-      // the later call B and the held-up older call A are dropped by each other when one acts on a task the other names
-      const clashes = (a, b) => {
-        if (completing(a) === completing(b)) return false; // two completing calls, or two updates (not in this grid)
-        const [cal, upd] = completing(a) ? [a, b] : [b, a];
-        return cal === 'wrapUp' || cal.slice(4) === upd.slice(6);
-      };
+      const completing = (kind) => kind in named;
+      const clashes = (a, b) => (completing(a) ? named[a].every((n) => n === Number(b.slice(6))) : named[b].includes(Number(a.slice(6))));
       const seed3 = (t0) => {
         const sid = session();
         for (const id of [1, 2, 3]) create(sid, id, `Seed ${id}`, t0 + id);
@@ -1185,7 +1194,7 @@ describe('task list: an event that becomes visible after a later call was folded
       };
       for (const first of names) {
         for (const second of names) {
-          if (completing(first) !== !completing(second)) continue; // one completing call and one update, in both orders
+          if (completing(first) === completing(second)) continue; // one completing call and one update, in both orders
           it(`A ${first} held up behind B ${second}: ${clashes(first, second) ? 'dropped' : 'applied'}`, () => {
             for (const gap of [0, 1]) {
               const t0 = T0;

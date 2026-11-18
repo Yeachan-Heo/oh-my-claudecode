@@ -324,8 +324,9 @@ export function updateShape(input, noteField = null) {
 // marks one in_progress and, as "Keep exactly one step in_progress" says, puts any other task in progress back to pending; advance
 // completes the task in progress and starts the next pending one (the first pending after it, else the first pending).
 // A note of a task sent again without a note is kept only when the content is the same and the task was and still is in progress.
-// advance, done or start without an existing list change nothing (null), so an unreadable file never ends as an empty list.
-export function applyUpdate(items, input, noteField) {
+// advance, done or start without an existing list change nothing (null), so an unreadable file never ends as an empty list. `skip` (a set of task
+// ids, from the fold of a held-up call) leaves the tasks it names as they are when `done` completes tasks.
+export function applyUpdate(items, input, noteField, skip = null) {
   const shape = updateShape(input, noteField);
   if (!shape.ok) return null;
   if (!shape.items && items.length === 0) return null;
@@ -337,7 +338,7 @@ export function applyUpdate(items, input, noteField) {
       return before?.note && !x.note && before.status === 'in_progress' && x.status === 'in_progress' ? { ...x, note: before.note } : x;
     });
   }
-  for (const n of shape.done ?? []) if (list[n - 1]) list[n - 1].status = 'completed';
+  for (const n of shape.done ?? []) if (list[n - 1] && !skip?.has(list[n - 1].id)) list[n - 1].status = 'completed';
   if (shape.start && list[shape.start - 1]) {
     list.forEach((x, i) => { if (i !== shape.start - 1 && x.status === 'in_progress') x.status = 'pending'; });
     list[shape.start - 1].status = 'in_progress';
@@ -401,14 +402,14 @@ const replacesList = (tool, input) => ((LIST_TOOL_RE.test(tool) || tool === 'mcp
 
 // New list of one agent after a list-tool call, or null when the call does not change it. `record` is the current file (or null);
 // `broken` (the file exists but cannot be read): only a call that replaces the whole list (items, TodoWrite) is saved.
-export function nextList(record, data, env = process.env, broken = false) {
+export function nextList(record, data, env = process.env, broken = false, skip = null) {
   const tool = data?.tool_name;
   const input = data?.tool_input && typeof data.tool_input === 'object' ? data.tool_input : {};
   const items = Array.isArray(record?.items) ? record.items : [];
   if (broken && !replacesList(tool, input)) return null;
-  if (LIST_TOOL_RE.test(tool)) return applyUpdate(items, input, 'note');
-  if (tool === 'mcp__ccd_turn__update_plan') return applyUpdate(items, input, null);
-  if (tool === 'mcp__ccd_turn__wrap_up') return items.length ? items.map((x) => ({ ...x, status: 'completed' })) : null; // wrap_up checks off the task list (its description)
+  if (LIST_TOOL_RE.test(tool)) return applyUpdate(items, input, 'note', skip);
+  if (tool === 'mcp__ccd_turn__update_plan') return applyUpdate(items, input, null, skip);
+  if (tool === 'mcp__ccd_turn__wrap_up') return items.length ? items.map((x) => ({ ...x, status: skip?.has(x.id) ? x.status : 'completed' })) : null; // wrap_up checks off the task list (its description)
   if (tool === 'TodoWrite') {
     const todos = arrayOf(input.todos);
     return todos ? todos.map((raw) => itemOf(raw, null)).filter(Boolean) : null;
@@ -631,8 +632,8 @@ function pendingEvents(dir, record) {
 }
 
 // The record after one event, or the same record when the event changes nothing (null stays null).
-function applyEvent(record, event, key, env, broken) {
-  const changed = nextList(record, event, env, broken);
+function applyEvent(record, event, key, env, broken, skip = null) {
+  const changed = nextList(record, event, env, broken, skip);
   if (!changed) return record;
   // a completed task has no note; above ITEMS_MAX the newest tasks stay, the record counts the dropped ones
   const all = changed.map((x) => (x.status === 'completed' && x.note !== undefined ? (({ note, ...rest }) => rest)(x) : x));
@@ -669,9 +670,9 @@ const laterWithin = (name, other) => {
 // What a call that changes part of the list acts on: one task (the id of a TaskUpdate, a deletion too), the whole list (EDIT_ALL: start and
 // advance move tasks by position and state), tasks that it only marks completed (EDIT_COMPLETING: done, wrap_up), or nothing yet (null: a
 // TaskCreate adds a task). A completing call acts on the tasks it names: the ones at the numbers of `done` or, for wrap_up, every task of
-// the list it meets (completedIds). `touched` keeps, for such a call, the marker EDIT_COMPLETING and one key `+<id>` for each task it completed
-// (an id never starts with "+"); a TaskUpdate keeps its task id and start or advance EDIT_ALL. Two completing calls give the same list in
-// either order, a completing call and a call on another task do too; every other two calls on one task or on the list do not.
+// the list it meets (completionTargets). `touched` keeps, for such a call, the marker EDIT_COMPLETING and one key `+<id>` for each task it
+// completed (an id never starts with "+"); a TaskUpdate keeps its task id and start or advance EDIT_ALL. Two completing calls give the same
+// list in either order, a completing call and a call on another task do too; every other two calls on one task or on the list do not.
 const EDIT_ALL = '*';
 const EDIT_COMPLETING = '+';
 function editScope(event) {
@@ -680,36 +681,45 @@ function editScope(event) {
   if (event.tool_name === 'mcp__ccd_turn__wrap_up') return EDIT_COMPLETING;
   return event.tool_input?.start !== undefined || event.tool_input?.advance === true ? EDIT_ALL : EDIT_COMPLETING;
 }
-// The ids of the tasks of `items` that a completing call marks completed. A task without an id is not named: only the numbers of a
-// position call reach it.
-function completedIds(event, items) {
-  const list = Array.isArray(items) ? items : [];
-  const picked = event.tool_name === 'mcp__ccd_turn__wrap_up' ? list : (arrayOf(event.tool_input?.done) ?? []).map((n) => list[(intOf(n) ?? 0) - 1]);
-  return picked.filter((x) => typeof x?.id === 'string').map((x) => x.id);
+// The tasks of `list` that a completing call marks completed (the ones at the numbers of `done`, or all for wrap_up).
+function completionTargets(event, list) {
+  if (event.tool_name === 'mcp__ccd_turn__wrap_up') return list;
+  return (arrayOf(event.tool_input?.done) ?? []).map((n) => list[(intOf(n) ?? 0) - 1]).filter(Boolean);
 }
-// What the fold records in `touched` for an applied call that edits tasks, read from the list as it was before the call.
+// What the fold records in `touched` for an applied call that edits tasks, read from the list as it was before the call. A task without an id
+// is not named: no call but a position call reaches it.
 const touchedKeys = (event, items) => {
   const scope = editScope(event);
-  return scope === EDIT_COMPLETING ? [scope, ...completedIds(event, items).map((id) => `${EDIT_COMPLETING}${id}`)] : [scope];
+  if (scope !== EDIT_COMPLETING) return [scope];
+  const named = completionTargets(event, Array.isArray(items) ? items : []).map((x) => x.id).filter((id) => typeof id === 'string');
+  return [scope, ...named.map((id) => `${EDIT_COMPLETING}${id}`)];
 };
-// Does the entry `key` of `touched` (a later call folded) undo, or move the numbers of, the held-up call with this scope? `completes` are the
-// ids a held-up completing call names and `ids` those of the list now: a task that a later call edited and the list no longer holds was
-// deleted, and the numbers of `done` then point at other tasks.
-const clash = (scope, completes, ids, key) => {
-  if (scope === EDIT_ALL || key === EDIT_ALL) return true;
-  const completion = key.startsWith(EDIT_COMPLETING);
-  if (scope === EDIT_COMPLETING) return !completion && (completes.has(key) || !ids.has(key));
-  return key === scope || key === `${EDIT_COMPLETING}${scope}`;
-};
-// A held-up call that edits tasks is overtaken when a later call on the same task, or on the list as a whole, was folded: applying it would
-// put an older state over a later one. A deletion is never overtaken (it gives the same list after a later call on its task, which then finds
-// nothing), and a call that only adds a task is not either. `items` is the list the fold holds when the held-up call comes.
-const overtaken = (touched, name, event, items) => {
+// How the calls folded after a held-up call that edits tasks meet it. true: the call is overtaken, applying it would put an older state over
+// a later one (a later call on its task, a later start or advance, for a TaskUpdate also a later completing call that named its task; for a
+// completing call a later deletion, whichever task it removed, as the numbers of `done` may move, and every task it names having been edited
+// by a later call). A Set: a completing call that names some tasks a later call edited; it is applied to the other tasks, as an in-order fold
+// gives, and these ids are left as they are. false: nothing is in the way. A deletion is never overtaken (it gives the same list after a later
+// call on its task, which then finds nothing), and a call that only adds a task is not either. `items` is the list the fold holds when the
+// held-up call comes.
+const fence = (touched, name, event, items) => {
   const scope = editScope(event);
   if (scope === null || (event.tool_name === 'TaskUpdate' && event.tool_input?.status === 'deleted')) return false;
-  const completes = new Set(scope === EDIT_COMPLETING ? completedIds(event, items) : []);
-  const ids = new Set((Array.isArray(items) ? items : []).map((x) => x?.id));
-  return Object.entries(touched).some(([key, at]) => laterWithin(name, at) && clash(scope, completes, ids, key));
+  const list = Array.isArray(items) ? items : [];
+  const ids = new Set(list.map((x) => x?.id));
+  const targets = scope === EDIT_COMPLETING ? completionTargets(event, list) : [];
+  const skip = new Set();
+  for (const [key, at] of Object.entries(touched)) {
+    if (!laterWithin(name, at)) continue;
+    if (scope === EDIT_ALL || key === EDIT_ALL) return true;
+    if (scope !== EDIT_COMPLETING) {
+      if (key === scope || key === `${EDIT_COMPLETING}${scope}`) return true;
+    } else if (!key.startsWith(EDIT_COMPLETING)) {
+      if (!ids.has(key)) return true; // a task a later call edited is not on the list now: it was deleted
+      if (targets.some((x) => x.id === key)) skip.add(key);
+    }
+  }
+  if (!skip.size) return false;
+  return targets.every((x) => skip.has(x.id)) ? true : skip;
 };
 // `touched` of the list file as the fold reads it: key (see editScope and touchedKeys) -> name of the newest call folded that edited it. The file
 // is not trusted.
@@ -766,8 +776,9 @@ function fold(path, key, env) {
     names.push(name);
     // within one millisecond the order of two calls is the order of their names (the tick, then the process), as when both are pending in one fold
     if (older > 0 ? older <= LATE_EVENT_MS : older === 0 && name < (replaces ? lastEventName : lastReplaceName)) { late += 1; continue; }
-    if (!replaces && overtaken(touched, name, event, broken ? null : record?.items)) { late += 1; continue; }
-    const next = applyEvent(broken ? null : record, event, key, env, broken);
+    const fenced = replaces ? false : fence(touched, name, event, broken ? null : record?.items);
+    if (fenced === true) { late += 1; continue; }
+    const next = applyEvent(broken ? null : record, event, key, env, broken, fenced || null);
     if (!replaces && editScope(event) !== null && ms + LATE_EVENT_MS >= horizon && !(next && next !== record && !sameItems(next, record))) {
       names.pop(); // changes nothing now, but an older call that is not visible yet may give it something to change
       continue;
