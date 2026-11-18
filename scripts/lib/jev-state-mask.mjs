@@ -421,7 +421,7 @@ function lexShell(text) {
       // it opens one of its own; anywhere else it closes a quote and opens nothing
       if (quote !== '"' && quote !== "'") return false;
       const region = innermost(at);
-      return region !== -1 && regionKind[region] <= DQ;
+      return region !== -1 && regionKind[region] <= DQ && regionClose[region] !== at;
     },
     // the index of the quote that closes the one opening at `at` (-1: it never closes, or none opens there)
     closeAt(at) {
@@ -573,6 +573,12 @@ function maskHeaders(text) {
   let lex;
   let out = '';
   let last = 0;
+  // the end of the line of the offsets asked for so far (they only grow): a line is read once, however many headers stand in it
+  let eol = -1;
+  const lineEndAt = (from) => {
+    if (eol < from) eol = lineEnd(text, from);
+    return eol;
+  };
   for (let found = HEADERS.exec(text); found !== null; found = HEADERS.exec(text)) {
     lex ??= lexShell(text);
     let start = found.index + found[0].length;
@@ -584,11 +590,11 @@ function maskHeaders(text) {
         const close = lex.closeAt(start);
         end = close === -1 ? text.length : close;
         start++;
-      } else end = lineEnd(text, start);
+      } else end = lineEndAt(start);
     } else if ((before === '"' || before === "'") && lex.opens(found.index - 1)) {
       const close = lex.closeAt(found.index - 1);
-      end = Math.min(close === -1 ? text.length : close, lineEnd(text, start));
-    } else end = lineEnd(text, start);
+      end = Math.min(close === -1 ? text.length : close, lineEndAt(start));
+    } else end = lineEndAt(start);
     if (end <= start) continue;
     let scheme = 0;
     if (AUTH_NAME.test(found[1])) {

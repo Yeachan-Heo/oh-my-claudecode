@@ -127,3 +127,57 @@ describe('the lexer of maskJevState: where a word ends', () => {
     expect(performance.now() - started).toBeLessThan(2000);
   });
 });
+
+describe('the lexer of maskJevState: the cost is the window, not the input', () => {
+  const repeatTo = (unit, n) => unit.repeat(Math.ceil(n / unit.length)).slice(0, n);
+  // shapes that a scan that backtracks, reads on from every start or nests without a bound would take quadratic time or memory on
+  const shapes = {
+    'nested substitutions': (n) => `curl ${repeatTo('"$(', n)}`,
+    'nested substitutions that close': (n) => `curl -U u:x ${repeatTo('$(', n / 2)}${repeatTo(')', n / 2)}`,
+    'single quotes': (n) => `curl -U ${repeatTo("'", n)}`,
+    'double quotes': (n) => `curl -U ${repeatTo('"', n)}`,
+    'escaped quotes': (n) => `curl -u "${repeatTo('\\"', n)}`,
+    'backslashes': (n) => `curl -u ${repeatTo('\\', n)}`,
+    'ANSI-C quotes': (n) => `curl -u ${repeatTo("$'", n)}`,
+    'groups': (n) => `curl -U ${repeatTo('(', n)}`,
+    'command boundaries': (n) => `curl ${repeatTo(';', n)} -U u:x`,
+    'many options with escapes': (n) => repeatTo('curl -H "x\\";y" -U a:b ', n),
+    'many programs and boundaries': (n) => `${repeatTo('curl x ; mysql y | ', n)}-p z`,
+    'cookie quotes': (n) => repeatTo('Cookie: "', n),
+    'cookie lines': (n) => repeatTo('Cookie: a="b c"; d\n', n),
+    'headers and quotes': (n) => repeatTo("-H 'X-Api-Key: \"", n),
+    'authorization and quotes': (n) => repeatTo('Authorization: Bearer "', n),
+    'url slashes': (n) => repeatTo('//', n),
+    'url with an empty user': (n) => repeatTo('//:', n),
+    'url with a long password and no @': (n) => `//u:${repeatTo('a', n)}`,
+    'url with many @': (n) => `//u:${repeatTo('p@', n)}`,
+    'many urls': (n) => repeatTo('http://u:p@h/x ', n),
+  };
+  it.each(Object.keys(shapes))('reads %s of 8 MiB to its window and no further', (name) => {
+    const text = shapes[name](8 * 1024 * 1024);
+    const times = [];
+    for (let i = 0; i < 3; i++) {
+      const started = performance.now();
+      maskJevState({ t: text }, { maxChars: MAX });
+      times.push(performance.now() - started);
+    }
+    expect(Math.min(...times)).toBeLessThan(300);
+  });
+
+  it.each(Object.keys(shapes))('takes time in proportion to the text without a window: %s', (name) => {
+    // 1 MiB then 4 MiB: four times the text takes well under sixteen times as long (a quadratic rule would take sixteen)
+    const time = (n) => {
+      const text = shapes[name](n);
+      const best = [];
+      for (let i = 0; i < 3; i++) {
+        const started = performance.now();
+        maskJevState({ t: text });
+        best.push(performance.now() - started);
+      }
+      return Math.min(...best);
+    };
+    const small = time(1024 * 1024);
+    const large = time(4 * 1024 * 1024);
+    expect(large, `${small.toFixed(0)} ms, then ${large.toFixed(0)} ms`).toBeLessThan(Math.max(small, 25) * 12);
+  });
+});

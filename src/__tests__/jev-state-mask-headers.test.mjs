@@ -82,6 +82,9 @@ describe('the headers of maskJevState: every header x every way it is written x 
       ['X-Api-Keys: a=b c', 'X-Api-Keys: *** c'],
       ['myauthorization-x: a b', 'myauthorization-x: a b'],
       ['Cookie:', 'Cookie:'],
+      // a header right after the closing quote of another argument is a bare one, and goes to the end of the line
+      [`echo 'a'Cookie: ${SECRET}`, `echo 'a'Cookie: ***`],
+      [`echo "a"X-Api-Key: ${SECRET} b`, `echo "a"X-Api-Key: ***`],
     ]) {
       expect(asText(text), text).toBe(expected);
     }
