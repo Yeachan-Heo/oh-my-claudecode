@@ -66,6 +66,31 @@ describe('the lexer of maskJevState: every option x every way to write its value
     expect(cells).toBe(valueForms(row.kind).length * BEFORE.length);
   });
 
+  // how the option and its value are joined: stuck or with `=` to the option, or the whole option inside quotes (the quote then closes
+  // the value, and an escaped quote inside it does not)
+  it.each(rows.map((row) => [row.opt, row]))('%s is masked joined to its value, and as a whole option in quotes, with an escaped quote inside', (_opt, row) => {
+    const user = row.kind === 'user';
+    const u = user ? 'u:' : '';
+    const m = user ? 'u:***' : '***';
+    const long = row.opt.startsWith('--');
+    const cells = [
+      // [the text of the option and its value, what it becomes]
+      [`${row.opt}${long ? '=' : ''}"${u}a\\" b ${SECRET}"`, user ? `${row.opt}${long ? '=' : ''}"${m}"` : `${row.opt}${long ? '=' : ''}***`],
+      [`${row.opt}${long ? '=' : ''}$'${u}a\\' b ${SECRET}'`, user ? `${row.opt}${long ? '=' : ''}$'${m}'` : `${row.opt}${long ? '=' : ''}***`],
+      [`"${row.opt}${long ? '=' : ''}${u}a\\" b ${SECRET}"`, `"${row.opt}${long ? '=' : ''}${m}"`],
+      [`'${row.opt}${long ? '=' : ''}${u}a" b ${SECRET}'`, `'${row.opt}${long ? '=' : ''}${m}'`],
+    ];
+    for (const before of ['', '-H "x\\";y"']) {
+      for (const [value, masked] of cells) {
+        const text = `${row.command} ${before} ${value} tail`;
+        const expected = `${row.command} ${before} ${masked} tail`;
+        expect(asText(text), text).toBe(expected);
+        expect(asText(text, { maxChars: MAX }), `${text} (window)`).toBe(expected);
+        expect(asText(expected), `${text} (second pass)`).toBe(expected);
+      }
+    }
+  });
+
   it.each(rows.filter((row) => row.program).map((row) => [row.opt, row]))('%s counts only in the command of its program, and the end of the command is found outside quotes only', (_opt, row) => {
     const same = (text) => expect(asText(text), text).toBe(text);
     const word = `${row.opt} ${row.kind === 'user' ? 'u:' : ''}${SECRET}`;
@@ -146,6 +171,8 @@ describe('the lexer of maskJevState: the cost is the window, not the input', () 
     'cookie quotes': (n) => repeatTo('Cookie: "', n),
     'cookie lines': (n) => repeatTo('Cookie: a="b c"; d\n', n),
     'headers and quotes': (n) => repeatTo("-H 'X-Api-Key: \"", n),
+    'many quoted headers on one line': (n) => repeatTo("-H 'Cookie: a' ", n),
+    'many quoted headers on one line, double quotes': (n) => repeatTo('-H "X-Api-Key: a" ', n),
     'authorization and quotes': (n) => repeatTo('Authorization: Bearer "', n),
     'url slashes': (n) => repeatTo('//', n),
     'url with an empty user': (n) => repeatTo('//:', n),
