@@ -162,13 +162,12 @@ describe('omc-doctor skill', () => {
   });
 
   test('an outdated plugin is routed to the updater, and the cache commands are described as cleanup only', () => {
-    expect(text).toContain('If INSTALLED != LATEST: WARN - outdated plugin (it is updated through the updater named in "Fix: Outdated Plugin"; the cache commands only clean up and never update it)');
+    expect(text).toContain('it is updated through the `Updater:` line Step 1 printed for that plugin ID, see "Fix: Outdated Plugin"; the cache commands only clean up and never update it');
     const outdated = section(text, 'Fix: Outdated Plugin');
     expect(outdated).toContain('moving cache directories does not update the plugin');
-    expect(outdated).toContain('`/plugin marketplace update omc` and then `/omc-setup`');
-    expect(outdated).toContain('`claude plugin marketplace update omc && claude plugin update oh-my-claudecode@omc`');
-    expect(outdated).toContain('`omc update` for an npm install');
-    expect(outdated).toContain('Do not report the plugin as fixed until a later run of Step 1 shows INSTALLED equal to LATEST');
+    expect(outdated).toContain('run the `Updater:` line that Step 1 printed for the active plugin ID');
+    expect(outdated).toContain('`omc update`');
+    expect(outdated).toContain('Do not report the plugin as fixed until a later run of Step 1 shows INSTALLED equal to that channel\'s `Latest:`');
     expect(outdated.indexOf('**Update first**')).toBeLessThan(outdated.indexOf('**Cache guard**'));
     expect(text).not.toContain('Restart Claude Code to fetch latest version');
   });

@@ -11,7 +11,7 @@ export const read = (rel: string): string => readFileSync(path.join(ROOT, rel), 
 // The two `node -e` cache commands of the omc-doctor skill.
 export const commands = read('skills/omc-doctor/SKILL.md')
   .split('\n')
-  .filter((l) => l.startsWith('node -e ') && l.includes("'installed_plugins.json'") && l.includes("'oh-my-claudecode'"));
+  .filter((l) => l.startsWith('node -e ') && l.includes("'installed_plugins.json'") && l.includes("'oh-my-claudecode'") && l.includes("'backups'"));
 
 // The JavaScript of a `node -e "..."` line. It is run by Node directly, without a shell, so the
 // same case runs on every platform; one POSIX test below runs the unchanged line through bash.

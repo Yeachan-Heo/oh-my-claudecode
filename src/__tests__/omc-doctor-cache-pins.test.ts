@@ -68,8 +68,8 @@ describe('omc-doctor cache commands on a synthetic config directory (pins, regis
       try {
         const result = runCommand(outdated!, dir);
         expect(result.stdout).toContain('only cleans up cached versions and does not update the plugin');
-        expect(result.stdout).toContain('/plugin marketplace update omc');
-        expect(result.stdout).toContain('omc update');
+        expect(result.stdout).toContain('run the Updater line that Step 1 printed');
+        expect(result.stdout).not.toMatch(/marketplace update|omc update/);
         expect(result.stdout).not.toContain('to fetch latest version');
         expect(runCommand(stale!, dir).stdout).not.toContain('does not update the plugin');
       } finally {
