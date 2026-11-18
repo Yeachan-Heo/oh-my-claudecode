@@ -192,6 +192,50 @@ describe('monitorTeamV2 pane-based stall inference', () => {
     );
   });
 
+  const monitorWithPane = async (prefix: string, capture: string) => {
+    cwd = await mkdtemp(join(tmpdir(), prefix));
+    isolateFixtureRoot(cwd);
+    await writeConfigAndTask('pending');
+    mocks.tmuxExecAsync.mockImplementation(async (args: string[]) => (
+      { stdout: args[0] === 'capture-pane' ? capture : '', stderr: '' }
+    ));
+    const { monitorTeamV2 } = await import('../runtime-v2.js');
+    return monitorTeamV2('demo-team', cwd);
+  };
+
+  it.each([
+    ['a Claude files dialog', 'Do you trust the files in this folder?\n❯ No, exit\n  Yes, proceed\n', 'waiting at a trust dialog'],
+    ['the Codex folder dialog', 'Trust this folder?\n› 1. Yes, trust this folder\n  2. No, continue without trust\n', 'waiting at a trust dialog'],
+    ['the Cursor workspace notice', '⚠ Workspace Trust Required\n  • Pass --trust, --yolo, or -f if you trust this directory\n', 'stopped at the Cursor workspace trust notice'],
+  ])('flags a worker stopped at %s and names it, not an idle prompt', async (_label, capture, waitsAt) => {
+    const snapshot = await monitorWithPane('omc-runtime-v2-monitor-trust-', capture);
+
+    expect(snapshot?.nonReportingWorkers).toContain('worker-1');
+    expect(snapshot?.recommendations).toContain(
+      `Investigate worker-1: assigned work but no work-start evidence; pane is ${waitsAt}`,
+    );
+  });
+
+  it('does not flag a busy pane, even one whose output quotes a trust dialog', async () => {
+    const snapshot = await monitorWithPane(
+      'omc-runtime-v2-monitor-busy-trust-',
+      'Do you trust the contents of this directory?\n› 1. Yes, continue\n  2. No, quit\n· Thinking…\n❯ \n',
+    );
+
+    expect(snapshot?.nonReportingWorkers).toEqual([]);
+  });
+
+  it('flags an idle worker whose earlier output mentions loading', async () => {
+    const snapshot = await monitorWithPane(
+      'omc-runtime-v2-monitor-loading-',
+      '⏺ Fixed the lazy loading regression in src/app.ts and reran the tests.\n❯ \n',
+    );
+
+    expect(snapshot?.recommendations).toContain(
+      'Investigate worker-1: assigned work but no work-start evidence; pane is idle at prompt',
+    );
+  });
+
   it('surfaces missing blocker task ids in monitor recommendations', async () => {
     cwd = await mkdtemp(join(tmpdir(), 'omc-runtime-v2-monitor-missing-blocker-'));
     isolateFixtureRoot(cwd);

@@ -13,7 +13,13 @@ export type PaneTrustPromptKind =
  */
 export interface PaneSignals {
   trust: PaneTrustPromptKind | null;
+  /** A startup word anywhere on screen, or the startup banner. Read before sending keys. */
   bootstrapping: boolean;
+  /**
+   * A startup word on a status line, or the startup banner. Read by classifyPane,
+   * so a reply that mentions "loading" does not keep an idle pane starting.
+   */
+  startupStatus: boolean;
   idlePrompt: boolean;
   busy: boolean;
 }
@@ -24,6 +30,7 @@ export interface ProviderPanePatterns {
   /** Counts as bootstrapping only while no idle prompt is drawn. */
   readonly startupBannerLines: readonly RegExp[];
   readonly loadingLines: readonly RegExp[];
+  readonly startupStatusLines: readonly RegExp[];
   readonly trustKinds: readonly PaneTrustPromptKind[];
   /** Provider version whose recorded frames are in the pane-frame corpus. */
   readonly verifiedVersion: string | null;
@@ -50,6 +57,20 @@ const SHARED_PATTERNS = {
   loadingLines: [
     /\b(loading|initializing|starting up)\b/i,
     /\bconnecting\s+to\b/i,
+  ],
+  // A status line starts with the startup word, inside an optional box border.
+  // Behind a spinner it may be any length, since it names what loads or
+  // connects. A spinner is a braille frame or one of Claude's spinner glyphs;
+  // any other leading mark opens output, a list item, quoted text or an input
+  // prompt. Without a spinner the line is short, not counting the padding and
+  // border of a box. Gemini's own status lines are read in their exact form,
+  // with or without its spinner, since they can grow long: "Resuming
+  // session..." alone or opening its MCP progress, which wraps in a narrow pane,
+  // and "Connecting to MCP servers... (n/m)" alone or with the servers it waits for.
+  startupStatusLines: [
+    /^(?:[│┃║▌▐▏▕╎┆┊]\s*)?[\u2800-\u28FF·✻✢✳✶✽✺✹✸✷]\s*(?:model:\s*)?(?:loading|initializing|starting up|connecting\s+to)\b/iu,
+    /^(?:[│┃║▌▐▏▕╎┆┊]\s*)?(?:model:\s*)?(?:loading|initializing|starting up|connecting\s+to)\b.{0,40}?\s*(?:[│┃║▌▐▏▕╎┆┊]\s*)?$/iu,
+    /^(?:[│┃║▌▐▏▕╎┆┊]\s*)?(?:[\u2800-\u28FF]\s*)?(?:Resuming session\.\.\.(?: \(|\s*(?:[│┃║▌▐▏▕╎┆┊]\s*)?$)|Connecting to MCP servers\.\.\. \(\d+\/\d+\)(?: - Waiting for: .+)?\s*(?:[│┃║▌▐▏▕╎┆┊]\s*)?$)/u,
   ],
   trustKinds: ['directory', 'codex_hooks'],
   verifiedVersion: null,
@@ -220,14 +241,35 @@ export function observePane(
 ): PaneSignals {
   const patterns = patternsFor(provider);
   const lines = paneLines(captured);
+  const startupBanner = hasStartupBanner(lines, patterns);
   return {
     trust: detectTrustPrompt(lines, patterns.trustKinds),
-    bootstrapping:
-      hasStartupBanner(lines, patterns) ||
-      anyLineMatches(lines, patterns.loadingLines),
+    bootstrapping: startupBanner || anyLineMatches(lines, patterns.loadingLines),
+    startupStatus: startupBanner || anyLineMatches(lines, patterns.startupStatusLines),
     idlePrompt: lines.some((line) => patterns.idlePromptLine.test(line)),
     busy: anyLineMatches(lines.slice(-40), patterns.busyLines),
   };
+}
+
+/**
+ * One state for a pane, for decisions that send no keys themselves: whether the
+ * idle nudge fires and what the monitor reports. Earlier states win, so a trust
+ * dialog is never idle and a working pane is never idle. The checks that send
+ * keys keep reading the signals the way they always have.
+ */
+export type PaneState =
+  | { kind: 'trust'; trust: PaneTrustPromptKind }
+  | { kind: 'busy' }
+  | { kind: 'bootstrapping' }
+  | { kind: 'idle' }
+  | { kind: 'unknown' };
+
+export function classifyPane(signals: PaneSignals): PaneState {
+  if (signals.trust) return { kind: 'trust', trust: signals.trust };
+  if (signals.busy) return { kind: 'busy' };
+  if (signals.startupStatus) return { kind: 'bootstrapping' };
+  if (signals.idlePrompt) return { kind: 'idle' };
+  return { kind: 'unknown' };
 }
 
 export function detectPaneTrustPromptKind(
