@@ -379,3 +379,76 @@ describe('agent messages to files in the compaction', () => {
     expect(spilled(store)).toHaveLength(0);
   });
 });
+
+// Only the host's outer frame leaves a report: a report that quotes a whole envelope (its header, its block and its note) keeps the quoted copy as written.
+const KINDS = ['teammate-message', 'agent-message', 'cross-session-message'];
+const ATTRS = {
+  'teammate-message': (who) => `teammate_id="${who}" color="green"`,
+  'agent-message': (who) => `from="${who}"`,
+  'cross-session-message': (who) => `from="bridge:${who}" from-name="Session ${who}"`,
+};
+const envelope = (kind, who, text) => `${HEAD}<${kind} ${ATTRS[kind](who)}>\n${text}\n</${kind}>${TAIL}`;
+const QUOTING = {
+  plain: (q) => q,
+  fenced: (q) => `\`\`\`\n${q}\n\`\`\``,
+  blockquote: (q) => q.split('\n').map((l) => `> ${l}`).join('\n'),
+};
+const reportQuoting = (kind, quoted, style) => `<${kind} ${ATTRS[kind]('a1')}>\nDiagnosis of the framing, the delivery was:\n${QUOTING[style](quoted)}\nEnd of the report.\n</${kind}>`;
+const trimmed = (m, keepFrom = 10) => { const { rows, stats } = trimAgentRows(m, { keepFrom }); return { rows, stats, text: (i) => (rows.get(i) ?? m[i]).text }; };
+
+describe('agent trim keeps the text of a report as written', () => {
+  const grid = [];
+  for (const outer of KINDS) for (const inner of KINDS) for (const style of Object.keys(QUOTING)) for (const framed of [true, false]) {
+    if (!framed && outer !== 'teammate-message') continue; // a row that opens with another block has no frame of the host: it is the user's words
+    grid.push([outer, inner, style, framed]);
+  }
+
+  it.each(grid)('report of kind %s quoting a %s envelope (%s), outer frame: %s', (outer, inner, style, framed) => {
+    const quoted = envelope(inner, 'q1', 'Quoted message with its own header and note.');
+    const block = reportQuoting(outer, quoted, style);
+    const row = framed ? `${HEAD}${block}${TAIL}` : block;
+    const t = trimmed(talk([row]));
+    const expected = outer === 'teammate-message' ? block : `${HEAD}${block}`; // a row that would open with another block keeps the host's header
+    expect(t.text(1)).toBe(expected);
+    expect(t.text(1)).toContain(QUOTING[style](quoted));
+    expect(t.stats).toMatchObject({ rows: 1, unbalanced: 0 });
+    expect(t.stats.note).toBe(framed ? 1 : 0);
+  });
+
+  it('cuts the frame of each of two blocks in a row and the blank space between them, and nothing inside them', () => {
+    const quoted = envelope('teammate-message', 'q1', 'Quoted.');
+    const row = `${HEAD}${body('a1', `Report a1 quotes:\n${quoted}`)}${TAIL}\n\n${HEAD}${body('a2', 'Report a2.')}${TAIL}`;
+    const t = trimmed(talk([row]));
+    expect(t.text(1)).toBe(`${body('a1', `Report a1 quotes:\n${quoted}`)}\n\n${body('a2', 'Report a2.')}`);
+  });
+
+  it('leaves a row with a tag that has no partner as it is, and counts it', () => {
+    for (const stray of [`${HEAD}${body('a1', 'Report.')}</teammate-message>${TAIL}`, `${HEAD}${body('a1', 'Report.')}${TAIL}\n<agent-message from="a2">`, `${HEAD}<teammate-message teammate_id="a1">Report</agent-message>${TAIL}`]) {
+      const t = trimmed(talk([stray]));
+      expect(t.rows.size).toBe(0);
+      expect(t.stats).toMatchObject({ rows: 0, unbalanced: 1 });
+    }
+  });
+
+  it('removes an idle notification that stands outside every block, and keeps one that a report quotes', () => {
+    const quotedIdle = body('a2', JSON.stringify({ type: 'idle_notification', from: 'a2', timestamp: '2026-11-11T07:34:03.398Z', result: '' }));
+    const t = trimmed(talk([`${HEAD}${body('a1', `Report quoting an idle notification:\n${quotedIdle}`)}${TAIL}`, idle('a2', '')]));
+    expect(t.text(1)).toBe(body('a1', `Report quoting an idle notification:\n${quotedIdle}`));
+    expect(t.rows.get(3)).toMatchObject({ trimDrop: true });
+  });
+
+  it('moves the report to the file with the quoted envelope word for word, and without the outer frame of the host', async () => {
+    const quoted = envelope('teammate-message', 'q1', `Quoted: ${filler(300)}`);
+    const message = `Report that quotes:\n\`\`\`\n${quoted}\n\`\`\`\n${filler(900)}`;
+    const messages = talk([report('a1', message, 'N1 done'), ...rowsOf(6, (k) => longReport(k))]);
+    const trim = trimAgentRows(messages, { keepFrom: messages.length - 12 });
+    const after = messages.map((m, i) => trim.rows.get(i) ?? m);
+    expect(after[1].text).toBe(body('a1', message, 'N1 done'));
+    const host = fakeHost();
+    const { rows } = await run(host, after);
+    expect([...rows.keys()]).toEqual([1]);
+    const path = /: (\/state\/[^ ]+) \(/.exec(rows.get(1).text)[1];
+    expect(host.files.get(path)).toBe(body('a1', message, 'N1 done'));
+    expect(host.files.get(path)).toContain(quoted);
+  });
+});

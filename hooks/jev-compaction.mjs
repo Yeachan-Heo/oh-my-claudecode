@@ -378,8 +378,34 @@ export function scoreQuestion(name, named) {
 
 // Blocks the host or a hook adds to a user message; they stay in the conversation but are not the
 // user's words, so they are cut from the task sent to Jev.
-const HOST_BLOCK = /<(system-reminder|task-notification|teammate-message|command-name|command-message|command-args|local-command-stdout|local-command-stderr|local-command-caveat|bash-input|bash-stdout|bash-stderr)\b[^>]*>[\s\S]*?<\/\1>/g;
-const HOST_BLOCK_OPEN = /^<(?:system-reminder|task-notification|teammate-message|command-name|command-message|command-args|local-command-stdout|local-command-stderr|local-command-caveat|bash-input|bash-stdout|bash-stderr)\b/;
+const HOST_TAGS = ['system-reminder', 'task-notification', 'teammate-message', 'command-name', 'command-message', 'command-args', 'local-command-stdout', 'local-command-stderr', 'local-command-caveat', 'bash-input', 'bash-stdout', 'bash-stderr'];
+const HOST_OPEN = new RegExp(`<(${HOST_TAGS.join('|')})\\b`, 'g');
+const HOST_BLOCK_OPEN = new RegExp(`^<(?:${HOST_TAGS.join('|')})\\b`);
+// The text without its host blocks: the result of removing every `<tag ...>` up to the first `</tag>` after it, one pass. An opener the regular expression
+// /<(tag)\b[^>]*>[\s\S]*?<\/\1>/g would try on every later opener again (a text of many unclosed openers took seconds, and a synchronous scan cannot be stopped
+// by the deadline) is settled once: when no '>' follows, or no closing tag of its name follows, no later opener has one either.
+export function cutHostBlocks(text) {
+  let out = '';
+  let kept = 0; // the text before this index is in `out` or cut
+  let from = 0;
+  let gt = -2; // the first '>' after the last opener's name; -1: none
+  const noCloser = new Set();
+  for (;;) {
+    HOST_OPEN.lastIndex = from;
+    const open = HOST_OPEN.exec(text);
+    if (!open) break;
+    const nameEnd = open.index + open[0].length;
+    if (gt !== -1 && gt < nameEnd) gt = text.indexOf('>', nameEnd);
+    if (gt === -1) break;
+    const close = `</${open[1]}>`;
+    const end = noCloser.has(open[1]) ? -1 : text.indexOf(close, gt + 1);
+    if (end === -1) { noCloser.add(open[1]); from = open.index + 1; continue; }
+    out += text.slice(kept, open.index);
+    kept = end + close.length;
+    from = kept;
+  }
+  return kept === 0 ? text : out + text.slice(kept);
+}
 // Messages that start with one of these are not the user's words either: skill and interruption
 // notices, the session summary, and the notices the Claude desktop app adds as entries of their own
 // (side-session and CI-monitor events, scheduled tasks, messages from another session: the same
@@ -420,8 +446,12 @@ const DELIVERY_WRAP = /^(?:\s*<system-reminder[^>]*>)+\s*/; // a wrapper, also t
 // The first line of another sender's frame: "<sender> sent a message (or a report) while you were
 // working:", and the bound conversation's "A message arrived ...", "Messages arrived ..." and
 // "Activity ... in the bound conversation ..." frames. A line that only ends with "while you were
-// working:" is no frame.
-const OTHER_FRAME = /^(?:.+ sent an? (?:new )?(?:message|report)|(?:A message|Messages) arrived .+|Activity (?:was observed )?in the bound conversation) while you were working(?:,.*)?:$/;
+// working:" is no frame. otherFrame below reads a line as /^(?:.+ sent an? (?:new )?(?:message|report)|(?:A message|Messages) arrived .+|
+// Activity (?:was observed )?in the bound conversation) while you were working(?:,.*)?:$/ does, without its backtracking.
+const FRAME_WORKING = ' while you were working';
+const FRAME_SENT = ['a', 'an'].flatMap((a) => ['', 'new '].flatMap((n) => ['message', 'report'].map((w) => ` sent ${a} ${n}${w}`)));
+const FRAME_ARRIVED = ['A message arrived ', 'Messages arrived '];
+const FRAME_ACTIVITY = ['Activity in the bound conversation', 'Activity was observed in the bound conversation'];
 const DELIVERY_OPENERS = ['Another Claude session sent a message:', '<agent-message', '<cross-session-message', '<teammate-message', '<task-notification', '[MESSAGE FROM NON-USER SOURCE'];
 // An envelope in a row's text: the host's <system-reminder id="..."> and the one build writes around a
 // carried block, each closed only by the closing tag with its own id.
@@ -432,7 +462,20 @@ const ENVELOPE_ID = /([^"\n]{1,64})">/y; // the id and end of a closing tag, rea
 const DELIVERY_NOTES = ['[SYSTEM NOTIFICATION - NOT USER INPUT]', '<task-notification>'];
 // A complete reminder before a block's frame (the Claude desktop app writes "<system-reminder>...</system-reminder>
 // Another Claude session sent a message:"); at most PRELUDES_MAX of them are skipped.
-const DELIVERY_PRELUDE = /^\s*<system-reminder[^>]*>[\s\S]*?<\/system-reminder[^>]*>\s*/;
+const PRELUDE_HEAD = /^\s*<system-reminder[^>]*>/;
+const PRELUDE_SPACE = /\s*/y;
+// The length of the complete reminder a text opens with (the match of /^\s*<system-reminder[^>]*>[\s\S]*?<\/system-reminder[^>]*>\s*/), 0 when it opens with none. Only the
+// first closing tag can end it (when no '>' follows that one, none follows a later one either), so a text of many closing tags without a '>' is read in linear time.
+export function preludeLength(text) {
+  const head = PRELUDE_HEAD.exec(text);
+  if (!head) return 0;
+  const close = text.indexOf('</system-reminder', head[0].length);
+  const gt = close < 0 ? -1 : text.indexOf('>', close + '</system-reminder'.length);
+  if (gt < 0) return 0;
+  PRELUDE_SPACE.lastIndex = gt + 1;
+  PRELUDE_SPACE.exec(text);
+  return PRELUDE_SPACE.lastIndex;
+}
 const PRELUDES_MAX = 4;
 
 // Secret paths: SSH keys (every file in a .ssh directory but known_hosts*, authorized_keys*, config, config.d/,
@@ -1435,13 +1478,28 @@ function bodyOf(text, starts) {
   for (let k = 0; k <= PRELUDES_MAX; k++) {
     const body = t.replace(DELIVERY_WRAP, '');
     if (starts(body)) return body;
-    const prelude = DELIVERY_PRELUDE.exec(t);
+    const prelude = preludeLength(t);
     if (!prelude) return undefined;
-    t = t.slice(prelude[0].length);
+    t = t.slice(prelude);
   }
   return undefined;
 }
-const startsFrame = (t) => t.startsWith(QUEUED_PREFIX) || OTHER_FRAME.test(t.split('\n', 1)[0]) || DELIVERY_OPENERS.some((p) => t.startsWith(p));
+// Whether the first line of a text is such a frame. Each place where the line says " while you were working" is tried once, and what stands before it and after
+// it is told by its ends alone, so a line of many such phrases is read in linear time.
+export function otherFrame(t) {
+  const line = t.split('\n', 1)[0];
+  const last = line.length - 1;
+  if (line[last] !== ':' || /[\r\u2028\u2029]/.test(line)) return false; // `.` matches none of these, and the line ends with ':'
+  for (let p = line.indexOf(FRAME_WORKING); p >= 0; p = line.indexOf(FRAME_WORKING, p + 1)) {
+    const q = p + FRAME_WORKING.length;
+    if (q !== last && line[q] !== ',') continue; // ':' or ',' and then anything up to the final ':'
+    if (FRAME_SENT.some((s) => p > s.length && line.startsWith(s, p - s.length))) return true;
+    if (FRAME_ARRIVED.some((s) => p > s.length && line.startsWith(s))) return true;
+    if (FRAME_ACTIVITY.some((s) => p === s.length && line.startsWith(s))) return true;
+  }
+  return false;
+}
+const startsFrame = (t) => t.startsWith(QUEUED_PREFIX) || otherFrame(t) || DELIVERY_OPENERS.some((p) => t.startsWith(p));
 const startsNote = (t) => DELIVERY_NOTES.some((k) => t.startsWith(k));
 
 // The frame a text opens with, after an optional <system-reminder ...> wrapper and complete reminders: 'user',
@@ -1526,6 +1584,27 @@ function carriedText(m, blocks = []) {
   return { own: blocks, text: parts.join('\n') };
 }
 
+// `body` without the closing tags of reminders at its end and the blank space around them: the result of
+// body.replace(/(?:\s*<\/system-reminder[^>]*>)+\s*$/, '') in one pass from the end (a tag cannot hold a '>', so each closing tag starts at the first
+// `</system-reminder` after the '>' before it).
+export function withoutTrailingClosers(body) {
+  const word = '</system-reminder';
+  let end = body.length;
+  let cut = -1;
+  for (;;) {
+    let k = end;
+    while (k > 0 && /\s/.test(body[k - 1])) k--;
+    if (k === 0 || body[k - 1] !== '>') break;
+    const open = body.indexOf(word, (k >= 2 ? body.lastIndexOf('>', k - 2) : -1) + 1);
+    if (open < 0 || open + word.length > k - 1) break;
+    end = open;
+    cut = open;
+  }
+  if (cut < 0) return body;
+  while (cut > 0 && /\s/.test(body[cut - 1])) cut--;
+  return body.slice(0, cut);
+}
+
 // The user's words in one delivered block: from the user's header to the last framing note of the
 // block (the user may write the note's words too); none for a block of another sender. Nothing inside
 // a block is read as a frame of its own, so a header another sender quotes is not the user's.
@@ -1533,7 +1612,7 @@ function blockWords(block) {
   if (frameOf(block) !== 'user') return [];
   const body = bodyOf(block, startsFrame).slice(QUEUED_PREFIX.length);
   const tail = body.lastIndexOf(QUEUED_TAIL);
-  const words = (tail < 0 ? body.replace(/(?:\s*<\/system-reminder[^>]*>)+\s*$/, '') : body.slice(0, tail)).trim();
+  const words = (tail < 0 ? withoutTrailingClosers(body) : body.slice(0, tail)).trim();
   return words ? [words] : [];
 }
 
@@ -1573,10 +1652,10 @@ function opaqueOf(text, envelopes = envelopesOf(text)) {
   let skipped = 0;
   for (let t = text, k = 0; !envelopes.length && k <= PRELUDES_MAX; k++) {
     native = NATIVE_NOTIFICATION.exec(t);
-    const prelude = native ? undefined : DELIVERY_PRELUDE.exec(t);
+    const prelude = native ? 0 : preludeLength(t);
     if (!prelude) break;
-    skipped += prelude[0].length;
-    t = t.slice(prelude[0].length);
+    skipped += prelude;
+    t = t.slice(prelude);
   }
   if (native) {
     let tail = text.trimEnd();
@@ -1816,7 +1895,7 @@ function userWords(m, prefixes = NOT_USER_PREFIXES) {
     for (const o of outside) for (const p of piecesOf(o.text)) found.push({ at: o.from + p.at, words: blockWords(p.text) });
     return found.sort((x, y) => x.at - y.at).flatMap((f) => f.words);
   }
-  const text = own.replace(HOST_BLOCK, '').trim();
+  const text = cutHostBlocks(own).trim();
   const carried = delivered.flatMap((e) => blockWords(e.text));
   if (!text || HOST_BLOCK_OPEN.test(text) || prefixes.some((p) => text.startsWith(p))) return carried;
   // A prompt the user typed: an envelope in it is a quote they pasted, so the whole prompt is theirs. Except
@@ -1824,7 +1903,7 @@ function userWords(m, prefixes = NOT_USER_PREFIXES) {
   // whatever it holds; a result row keeps its own text before them): those stay messages of their senders.
   let cut = m.text.length;
   if (Array.isArray(m.toolResults)) for (let k = delivered.length - 1; k >= 0 && /^<system-reminder id="jev-\d+">/.test(delivered[k].text) && !m.text.slice(delivered[k].to, cut).trim(); k--) cut = delivered[k].from;
-  const typed = m.text.slice(0, cut).replace(HOST_BLOCK, '').trim();
+  const typed = cutHostBlocks(m.text.slice(0, cut)).trim();
   return [...(typed ? [typed] : []), ...delivered.filter((e) => e.from >= cut).flatMap((e) => blockWords(e.text))];
 }
 
@@ -2064,18 +2143,43 @@ function onlyNoteEnvelopes(t, envelopes) {
 }
 export function isNotification(m) {
   if (m.role !== 'user' || (m.toolResults && m.toolResults.length) || typeof m.text !== 'string' || !m.text) return false;
-  if (userWords(m, STAGE_NOT_USER).length || !DELIVERY_NOTES.some((k) => m.text.includes(k))) return false;
+  // The marker first: a row without one is no notification, and its words are not read at all.
+  if (!DELIVERY_NOTES.some((k) => m.text.includes(k)) || userWords(m, STAGE_NOT_USER).length) return false;
   const t = m.text.trim();
   const envelopes = envelopesOf(t);
   return envelopes.length ? onlyNoteEnvelopes(t, envelopes) : isNoteBody(t);
 }
 // What the notification says in a line: its <summary>, else the first line of its body after the marker.
-function noteSummary(text) {
-  const tag = /<summary>([\s\S]*?)<\/summary>/.exec(text);
-  if (tag && oneLine(tag[1])) return clip(oneLine(tag[1]), TRACE_INPUT_CHARS);
+// `l` without its <...> tags (each replaced by a space): the result of l.replace(/<[^>]*>/g, ' ') in one pass; a '<' with no '>' after it ends the search.
+export function withoutTags(l) {
+  let out = '';
+  let at = 0;
+  for (let open = l.indexOf('<'); open >= 0;) {
+    const close = l.indexOf('>', open + 1);
+    if (close < 0) break;
+    out += `${l.slice(at, open)} `;
+    at = close + 1;
+    open = l.indexOf('<', at);
+  }
+  return out + l.slice(at);
+}
+export function noteSummary(text) {
+  // The first <summary> that a </summary> follows: when none does after the first one, none does after a later one either.
+  const open = text.indexOf('<summary>');
+  const close = open < 0 ? -1 : text.indexOf('</summary>', open + '<summary>'.length);
+  const tag = close < 0 ? '' : oneLine(text.slice(open + '<summary>'.length, close));
+  if (tag) return clip(tag, TRACE_INPUT_CHARS);
   let at = -1;
   for (const k of DELIVERY_NOTES) { const i = text.indexOf(k); if (i >= 0 && (at < 0 || i + k.length < at)) at = i + k.length; }
-  const line = (at >= 0 ? text.slice(at) : text).split('\n').map((l) => oneLine(l.replace(/<[^>]*>/g, ' '))).find(Boolean) || '';
+  const rest = at >= 0 ? text.slice(at) : text;
+  // The first line with anything in it, once its tags are out.
+  let line = '';
+  for (let from = 0; !line;) {
+    const nl = rest.indexOf('\n', from);
+    line = oneLine(withoutTags(rest.slice(from, nl < 0 ? rest.length : nl)));
+    if (nl < 0) break;
+    from = nl + 1;
+  }
   return clip(line, TRACE_INPUT_CHARS);
 }
 
@@ -3028,7 +3132,7 @@ function planPastes(messages, api, keepFrom, cfg, sessionId, stats, queued = new
     let rest = '';
     let at = 0;
     for (const t of tags) { rest += text.slice(at, t.start); at = t.end; }
-    if ((rest + text.slice(at)).replace(HOST_BLOCK, '').replace(/\s+/g, '').length < PASTE_OWN_MIN_CHARS) { stats.kept_whole += tags.length; continue; }
+    if (cutHostBlocks(rest + text.slice(at)).replace(/\s+/g, '').length < PASTE_OWN_MIN_CHARS) { stats.kept_whole += tags.length; continue; }
     for (const tag of tags) {
       const size = tag.end - tag.start;
       if (size < cfg.pasteMinChars) { stats.small++; continue; }
@@ -3176,6 +3280,25 @@ export function replyRuns(text, minChars = REPLY_MIN_CHARS) {
   return runs;
 }
 
+const PASTE_MARK = '[pasted text moved at compaction: ';
+/** The text without its traces of moved pasted text: text.replace(/\[pasted text moved at compaction: [^\n]*\]/g, '') in one pass (a trace runs from its start to the last `]` of its line). */
+export function withoutPasteMarks(text) {
+  let out = '';
+  let at = 0;
+  let from = 0;
+  for (;;) {
+    const open = text.indexOf(PASTE_MARK, from);
+    if (open < 0) break;
+    const nl = text.indexOf('\n', open);
+    const line = text.slice(open, nl < 0 ? text.length : nl);
+    const close = line.lastIndexOf(']');
+    if (close < PASTE_MARK.length) { if (nl < 0) break; from = nl + 1; continue; } // no ']' after the start: nor for a later start of the line
+    out += text.slice(at, open);
+    at = from = open + close + 1;
+  }
+  return out + text.slice(at);
+}
+
 /**
  * The assistant replies that answer a user message directly, which the stage never takes text from: after each user message that still
  * holds words of its own (not only the traces of pasted text), the first row with text and the last one before the next user message.
@@ -3189,7 +3312,7 @@ export function directReplyRows(messages, users, delivered = []) {
   const sent = new Set(delivered);
   const bounds = [...new Set([...users, ...sent])].sort((a, b) => a - b);
   bounds.forEach((row, n) => {
-    if (!sent.has(row) && !String(messages[row].text ?? '').replace(/\[pasted text moved at compaction: [^\n]*\]/g, '').trim()) return;
+    if (!sent.has(row) && !withoutPasteMarks(String(messages[row].text ?? '')).trim()) return;
     const stop = n + 1 < bounds.length ? bounds[n + 1] : messages.length;
     let first = -1;
     let last = -1;
@@ -3310,9 +3433,7 @@ async function moveReplies($, cfg, record, messages, api, keepFrom, deadline, qu
 // report stays as the agent's message. Rows with the owner's words, a delivered block anchored to them or a block the host cannot rebuild from text stay as
 // they are.
 const TRIM_HEAD = 'Another Claude session sent a message:';
-const TRIM_PRE = /Another Claude session sent a message:\n?(?=\s*<teammate-message\b)/g; // only before a <teammate-message
-const TRIM_TAIL = /(<\/(?:teammate-message|agent-message|cross-session-message)>)\n*This came from another Claude session[^\n]*?permission laundering\./g; // after any of the three
-const TRIM_TM = /(<teammate-message\b[^>]*>)\n?([\s\S]*?)\n?(<\/teammate-message>)/g;
+const TRIM_NOTE = /^\n*This came from another Claude session[^\n]*?permission laundering\./; // the note after a block, read from the start of the text after it
 const TRIM_STATE_MAX = 200; // a longer result is a state only when the agent's earlier message carries its summary
 const TRIM_DUP_MIN = 40; // a shorter result is never a duplicate by its text
 const trimNorm = (t) => String(t ?? '').replace(/\s+/g, ' ').trim();
@@ -3330,6 +3451,99 @@ function trimIdle(body) {
   try { const d = JSON.parse(t); return d && d.type === 'idle_notification' ? d : undefined; } catch { return undefined; }
 }
 const trimRow = (m, text) => ({ role: m.role, text, toolUses: m.toolUses || [], ...(m.toolResults ? { toolResults: m.toolResults } : {}) });
+// The blocks of an agent row: a <teammate-message>, <agent-message> or <cross-session-message> up to its closing tag. The tags are paired by nesting (a closing
+// tag closes the latest open block of its name), so a block that quotes a whole block of its own kind keeps it inside, and every change below touches only the
+// blocks that stand outside every other block and the text around them. Returns {blocks, loose}: those blocks (name, at, end, attrs: the text between the name and
+// the '>' of the opening tag, bodyFrom, bodyTo) and whether a tag outside them has no partner (an opener without its closing tag, a closing tag without its
+// opener, blocks that cross): such a row is not read as a whole and no change is made to it. A value in an opening tag may hold '>'. The tags are read in one
+// pass (the '>' of an opening tag is the first one after it that has the same parity of quotes before it), so a row of many unclosed tags, unclosed quotes or
+// stray closing tags is read in linear time.
+const BLOCK_NAMES = 'teammate-message|agent-message|cross-session-message';
+const BLOCK_TOKEN = new RegExp(`</(${BLOCK_NAMES})>|<(${BLOCK_NAMES})\\b|"|>`, 'g');
+export function agentBlocks(text) {
+  const opens = [];
+  const closes = [];
+  const gts = [[], []]; // the positions of '>' by the parity of the quotes before them
+  let parity = 0;
+  for (const t of text.matchAll(BLOCK_TOKEN)) {
+    if (t[0] === '"') parity ^= 1;
+    else if (t[0] === '>') gts[parity].push(t.index);
+    else if (t[1]) { closes.push({ name: t[1], at: t.index, end: t.index + t[0].length }); gts[parity].push(t.index + t[0].length - 1); }
+    else opens.push({ name: t[2], at: t.index, nameEnd: t.index + t[0].length, parity });
+  }
+  const next = [0, 0];
+  const stacks = new Map();
+  const pairs = [];
+  const stray = [];
+  let tagEnd = 0; // where the opening tag read last ends: a token inside it is part of it
+  for (let i = 0, j = 0; i < opens.length || j < closes.length;) {
+    if (j >= closes.length || (i < opens.length && opens[i].at < closes[j].at)) {
+      const o = opens[i++];
+      if (o.at < tagEnd) continue;
+      const list = gts[o.parity];
+      while (next[o.parity] < list.length && list[next[o.parity]] < o.nameEnd) next[o.parity]++;
+      if (next[o.parity] >= list.length) continue; // no '>' ends the tag: it is text
+      o.tagEnd = list[next[o.parity]] + 1;
+      tagEnd = o.tagEnd;
+      if (!stacks.has(o.name)) stacks.set(o.name, []);
+      stacks.get(o.name).push(o);
+    } else {
+      const c = closes[j++];
+      if (c.at < tagEnd) continue;
+      const open = stacks.get(c.name)?.pop();
+      if (open) pairs.push({ name: c.name, at: open.at, end: c.end, tagEnd: open.tagEnd, bodyTo: c.at });
+      else stray.push(c.at);
+    }
+  }
+  for (const list of stacks.values()) for (const o of list) stray.push(o.at);
+  pairs.sort((x, y) => x.at - y.at);
+  const blocks = [];
+  let loose = false;
+  let to = 0;
+  for (const p of pairs) {
+    if (p.at < to) { if (p.end > to) loose = true; continue; } // inside a block (and across its end: loose)
+    blocks.push({ name: p.name, at: p.at, end: p.end, attrs: text.slice(p.at + 1 + p.name.length, p.tagEnd - 1), bodyFrom: p.tagEnd, bodyTo: p.bodyTo });
+    to = p.end;
+  }
+  stray.sort((x, y) => x - y);
+  for (let k = 0, i = 0; !loose && k < stray.length; k++) {
+    while (i < blocks.length && blocks[i].end <= stray[k]) i++;
+    if (i === blocks.length || stray[k] < blocks[i].at) loose = true;
+  }
+  return { blocks, loose };
+}
+// The row with the host's frame cut where it stands outside the blocks: the header before a <teammate-message> block and the note after a block. The text of a
+// block (a report that quotes a whole message with its header and note too) is never read. `drop` names the blocks to remove; the blank space between two blocks
+// that stay becomes one blank line, and the row is trimmed. Returns {text, removed, header, note}.
+function reframe(row, blocks, drop) {
+  const out = { removed: 0, header: false, note: false };
+  let text = '';
+  let between = ''; // the text outside the blocks since the last block that stayed
+  let stayed = false;
+  let at = 0;
+  for (let k = 0; k <= blocks.length; k++) {
+    let gap = row.slice(at, k < blocks.length ? blocks[k].at : row.length);
+    const note = TRIM_NOTE.exec(gap);
+    if (note && k > 0) { gap = gap.slice(note[0].length); out.note = true; }
+    const head = gap.indexOf(TRIM_HEAD);
+    if (head >= 0 && k < blocks.length && blocks[k].name === 'teammate-message' && !gap.slice(0, head).trim() && !gap.slice(head + TRIM_HEAD.length).trim()) {
+      gap = gap.slice(0, head) + gap.slice(head + TRIM_HEAD.length).replace(/^\n/, '');
+      out.header = true;
+    }
+    between += gap;
+    if (k === blocks.length) break;
+    if (drop(blocks[k])) out.removed++;
+    else {
+      if (stayed && !between.trim() && between.includes('\n')) between = '\n\n';
+      text += between + row.slice(blocks[k].at, blocks[k].end);
+      between = '';
+      stayed = true;
+    }
+    at = blocks[k].end;
+  }
+  out.text = (text + between).trim();
+  return out;
+}
 // opts: keepFrom (the first row of the tail), skipRows (a Set of rows the host cannot rebuild from text), queuedRows (a Map of rows with delivered blocks
 // anchored to them), statePattern. Returns {rows: Map row -> rebuilt row, saved: Map row -> characters, stats}.
 export function trimAgentRows(messages, opts = {}) {
@@ -3337,19 +3551,21 @@ export function trimAgentRows(messages, opts = {}) {
   const skip = opts.skipRows instanceof Set ? opts.skipRows : new Set();
   const queued = opts.queuedRows instanceof Map ? opts.queuedRows : new Map();
   const state = opts.statePattern instanceof RegExp ? opts.statePattern : agentStatePattern('');
-  const stats = { rows: 0, pre: 0, note: 0, idle_removed: 0, idle_kept: 0, rows_dropped: 0, chars: 0, anchored: 0 };
+  const stats = { rows: 0, pre: 0, note: 0, idle_removed: 0, idle_kept: 0, rows_dropped: 0, chars: 0, anchored: 0, unbalanced: 0 };
   const rows = new Map();
   const saved = new Map();
   const said = new Map(); // what every agent said outside idle notifications in the rows before the current one: summaries and bodies
   const learn = (m) => {
     if (m.role !== 'user' || (m.toolResults || []).length || typeof m.text !== 'string' || m.text.length > AGENT_ROW_MAX_CHARS || !m.text.includes('<teammate-message')) return;
-    for (const b of m.text.matchAll(TRIM_TM)) {
-      if (trimIdle(b[2])) continue;
-      const who = (/teammate_id="([^"]*)"/.exec(b[1]) || [])[1] || '';
-      const sum = (/summary="([^"]*)"/.exec(b[1]) || [])[1] || '';
+    for (const b of agentBlocks(m.text).blocks) {
+      if (b.name !== 'teammate-message') continue;
+      const body = m.text.slice(b.bodyFrom, b.bodyTo);
+      if (trimIdle(body)) continue;
+      const who = (/teammate_id="([^"]*)"/.exec(b.attrs) || [])[1] || '';
+      const sum = (/summary="([^"]*)"/.exec(b.attrs) || [])[1] || '';
       const e = said.get(who) || { sums: new Set(), body: '' };
       if (sum) e.sums.add(trimNorm(sum));
-      e.body += ` ${trimNorm(b[2])}`;
+      e.body += ` ${trimNorm(body)}`;
       said.set(who, e);
     }
   };
@@ -3363,30 +3579,33 @@ export function trimAgentRows(messages, opts = {}) {
       learn(m);
       continue;
     }
+    const { blocks, loose } = agentBlocks(row);
+    if (loose || !blocks.length) { stats.unbalanced++; learn(m); continue; } // a tag without its partner: the row is left as it is
     stats.rows++;
-    let removed = 0;
-    // The frame first, while every block still anchors it; then the idle notifications.
-    const framed = row.replace(TRIM_TAIL, '$1').replace(TRIM_PRE, '');
-    let text = framed.replace(TRIM_TM, (all, open, body) => {
+    // The idle notifications: only a block that stands outside every other block, so a report that quotes one keeps it.
+    const idle = (b) => {
+      if (b.name !== 'teammate-message') return false;
+      const body = row.slice(b.bodyFrom, b.bodyTo);
       const d = trimIdle(body);
-      if (!d) return all;
-      const who = typeof d.from === 'string' ? d.from : (/teammate_id="([^"]*)"/.exec(open) || [])[1] || '';
+      if (!d) return false;
+      const who = typeof d.from === 'string' ? d.from : (/teammate_id="([^"]*)"/.exec(b.attrs) || [])[1] || '';
       const r = trimNorm(d.result);
       const e = said.get(who);
       const isState = state.test(r);
       const dup = !r || (isState && r.length <= TRIM_STATE_MAX) || (isState && d.summary && e && e.sums.has(trimNorm(d.summary))) || (r.length >= TRIM_DUP_MIN && e && e.body.includes(r));
-      if (!dup) { stats.idle_kept++; return all; }
-      removed++;
-      return '';
-    });
-    if (!text.trim() && i !== tail - 1) { stats.idle_removed += removed; stats.rows_dropped++; stats.chars += row.length; saved.set(i, row.length); rows.set(i, { ...trimRow(m, ''), trimDrop: true }); learn(m); continue; }
-    if (!text.trim()) text = framed; // the row right before the tail: its notification stays, without the frame
-    else stats.idle_removed += removed;
-    text = text.replace(/(<\/(?:teammate-message|agent-message|cross-session-message)>)\s*\n\s*(?=<(?:teammate-message|agent-message|cross-session-message)\b)/g, '$1\n\n').replace(/^\s+|\s+$/g, '');
+      if (!dup) stats.idle_kept++;
+      return Boolean(dup);
+    };
+    const cut = reframe(row, blocks, idle);
+    let text = cut.text;
+    let framed = cut;
+    if (!text && i !== tail - 1) { stats.idle_removed += cut.removed; stats.rows_dropped++; stats.chars += row.length; saved.set(i, row.length); rows.set(i, { ...trimRow(m, ''), trimDrop: true }); learn(m); continue; }
+    // The row right before the tail: its notification stays, without the frame.
+    if (!text) { framed = reframe(row, blocks, () => false); text = framed.text; } else stats.idle_removed += cut.removed;
     // A row that would open with <agent-message> or <cross-session-message> keeps the host's header, which tells it from the owner's words.
     if (lead.startsWith(TRIM_HEAD) && !text.startsWith('<teammate-message') && !text.startsWith(TRIM_HEAD)) text = `${TRIM_HEAD}\n${text}`;
-    if (row.match(TRIM_TAIL)) stats.note++;
-    if (row.match(TRIM_PRE) && !text.startsWith(TRIM_HEAD)) stats.pre++;
+    if (framed.note) stats.note++;
+    if (framed.header && !text.startsWith(TRIM_HEAD)) stats.pre++;
     if (text !== row) { stats.chars += row.length - text.length; saved.set(i, row.length - text.length); rows.set(i, trimRow(m, text)); }
     learn(m);
   }
@@ -3405,8 +3624,8 @@ export function trimAgentRows(messages, opts = {}) {
 // rebuild from text (an unmatched API message with a non-text block stops the stage), a row shorter than AGENT_MIN_CHARS or than its trace, and a row with
 // a secret (a secret path, or anything maskSecrets would change; also in its trace). The stage runs on the rows as the trim leaves them.
 const AGENT_MIN_CHARS = 800;
-// The block patterns below (AGENT_BLOCK, TRIM_TM) are quadratic on a row of many openers without a closer (100 000 characters take about 0.7 s, 400 000 about
-// 12 s), so a longer row is no agent row for the trim and the move: it stays as it is.
+// A row longer than this is no agent row for the trim and the move: it stays as it is. (Reading a row is linear; this bounds what one row can cost, and the
+// text a file may hold.)
 const AGENT_ROW_MAX_CHARS = 60000;
 const AGENT_KEEP_LAST = 6;
 const AGENT_SUMMARY_CHARS = 150;
@@ -3414,18 +3633,17 @@ const AGENT_SENT_CHARS = 60;
 const AGENT_SENDERS_MAX = 4;
 const AGENT_OPENERS = ['Another Claude session sent a message', '<teammate-message', '<agent-message', '<cross-session-message'];
 const AGENT_BARE = /^\s*<(?:agent-message|cross-session-message)\b/; // a row that opens with one of these blocks has no header of the host: it is read as the user's words
-const AGENT_BLOCK = /<(teammate-message|agent-message|cross-session-message)\b((?:[^>"]|"[^"]*")*)>([\s\S]*?)<\/\1>/g; // a quoted value may hold '>'
 const AGENT_TRACE_PREFIX = '[agent message moved at compaction, not from the user: ';
 const AGENT_LEAD = 'team-lead'; // the teammate_id of a team's lead in its members' sessions
 const utf8Bytes = (text) => new TextEncoder().encode(text).length;
-const isAgentRow = (m) => m.role === 'user' && !(m.toolResults || []).length && typeof m.text === 'string' && m.text.length <= AGENT_ROW_MAX_CHARS && AGENT_OPENERS.some((p) => m.text.trimStart().startsWith(p)) && new RegExp(AGENT_BLOCK.source).test(m.text);
+const isAgentRow = (m) => m.role === 'user' && !(m.toolResults || []).length && typeof m.text === 'string' && m.text.length <= AGENT_ROW_MAX_CHARS && AGENT_OPENERS.some((p) => m.text.trimStart().startsWith(p)) && agentBlocks(m.text).blocks.length > 0;
 const agentWord = (v, max) => Array.from(oneLine(typeof v === 'string' ? v : '').replace(/[<>[\]"]/g, '')).slice(0, max).join(''); // by code point: never half a surrogate pair
 // Who, when and what of each block, in order.
 export function agentSenders(text, statePattern = agentStatePattern('')) {
   const out = [];
-  for (const b of text.matchAll(AGENT_BLOCK)) {
+  for (const b of agentBlocks(text).blocks) {
     const at = {};
-    for (const a of b[2].matchAll(/([\w-]+)="([^"]*)"/g)) at[a[1]] = a[2];
+    for (const a of b.attrs.matchAll(/([\w-]+)="([^"]*)"/g)) at[a[1]] = a[2];
     let who = at.teammate_id || at['from-name'] || at.from || at.name || '';
     let when = at.timestamp || '';
     let what = at.summary || '';
@@ -3433,7 +3651,7 @@ export function agentSenders(text, statePattern = agentStatePattern('')) {
     let state = false;
     let sent = '';
     let json = '';
-    const body = b[3].trim();
+    const body = text.slice(b.bodyFrom, b.bodyTo).trim();
     if (body.startsWith('{')) {
       try {
         const j = JSON.parse(body);

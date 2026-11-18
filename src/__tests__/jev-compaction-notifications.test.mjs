@@ -66,6 +66,18 @@ describe('background task notifications as candidates (OMC_JEV_COMPACT_NOTIFICAT
     expect(s.p1.text).toContain('Report');
   });
 
+  it('an older row of 40000 unclosed reminders is no notification and is not read for its words: the compaction does not time out', async () => {
+    const s = SHAPE();
+    const hostile = Object.freeze(row('<system-reminder>'.repeat(40000), { handle: 'x1' }));
+    const big = Object.freeze(row(note('Status: big', `Report ${'r'.repeat(900000)}`), { handle: 'n9' })); // enough to remove, next to the hostile row
+    const started = Date.now();
+    const { out, record } = await compactRun(NOTE_ENV, [...s.w.slice(0, 3), hostile, ...s.w.slice(3, 7), s.p1, big, s.p2, s.mixed, s.owner, ...s.w.slice(7)]);
+    expect(Date.now() - started).toBeLessThan(5000);
+    expect(record).toMatchObject({ result: 'jev', notifications: 3 });
+    expect(out.messages).toContain(hostile);
+    expect(isNotification(hostile)).toBe(false);
+  }, 20000);
+
   it('traces the notification rows in a user row of their own and leaves mixed rows, the owner\'s words and the assistant\'s text as they are', async () => {
     const s = SHAPE();
     const { out, record, bodies } = await compactRun(NOTE_ENV, s.all);
