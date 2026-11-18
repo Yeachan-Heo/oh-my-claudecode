@@ -844,6 +844,87 @@ describe('task list: session retention sweep', () => {
   });
 });
 
+describe('task list: an event that becomes visible after a later call was folded', () => {
+  const env = () => envFor();
+  const T = Date.now(); // call times near the present: the sweep that follows a list call judges the age of session directories by it
+  const call = (sid, tool, input, extra = {}, now = Date.now()) => L.recordListCall(postToolUse(sid, tool, input, extra), env(), now);
+  const write = (sid, content, status, now) => call(sid, 'TodoWrite', { todos: [{ content, status }] }, {}, now);
+  const create = (sid, id, subject, now) => call(sid, 'TaskCreate', { subject }, { tool_response: `Task #${id} created successfully: ${subject}` }, now);
+  const contents = (sid) => L.readList(sid, 'main', env()).items.map((x) => x.content);
+  const dropped = () => logRows('task-list.jsonl').filter((x) => x.event === 'late_event_dropped').length;
+
+  it('an older call that replaces the list does not put its list back over a newer replacement; its event is removed and a row is logged', () => {
+    const sid = session();
+    const rows = dropped();
+    write(sid, 'Newer list', 'completed', T + 2000);
+    write(sid, 'Older list', 'pending', T + 1000);
+    expect(contents(sid)).toEqual(['Newer list']);
+    expect(readListFile(sid, 'main').items[0].status).toBe('completed');
+    expect(eventFiles(sid, 'main')).toEqual([]);
+    expect(dropped()).toBe(rows + 1);
+    expect(readListFile(sid, 'main').last_event_ms).toBe(T + 2000);
+    expect(readListFile(sid, 'main').last_replace_ms).toBe(T + 2000);
+  });
+
+  it('an older call that replaces the list does not undo a newer call that changed part of it', () => {
+    const sid = session();
+    create(sid, 11, 'Created later', T + 2000);
+    write(sid, 'Replaced earlier', 'pending', T + 1000);
+    expect(contents(sid)).toEqual(['Created later']);
+    expect(eventFiles(sid, 'main')).toEqual([]);
+  });
+
+  it('an older call that changes part of the list is dropped when a newer call replaced the list, and the later list is as sent', () => {
+    const sid = session();
+    write(sid, 'Replaced later', 'pending', T + 2000);
+    create(sid, 12, 'Created earlier', T + 1000);
+    expect(contents(sid)).toEqual(['Replaced later']);
+    expect(eventFiles(sid, 'main')).toEqual([]);
+    // the number stays claimed: a later TaskUpdate of it changes nothing in a list that does not hold it
+    const updates = readListFile(sid, 'main').updates;
+    call(sid, 'TaskUpdate', { taskId: '12', status: 'completed' }, {}, T + 3000);
+    expect(contents(sid)).toEqual(['Replaced later']);
+    expect(readListFile(sid, 'main').updates).toBe(updates);
+  });
+
+  it('an older call that changes part of the list is applied after a newer call that changed part of it (tasks created together all stay)', () => {
+    const sid = session();
+    create(sid, 21, 'Task B', T + 2000);
+    create(sid, 22, 'Task A', T + 1000);
+    expect(contents(sid).sort()).toEqual(['Task A', 'Task B']);
+    expect(eventFiles(sid, 'main')).toEqual([]);
+  });
+
+  it('calls in the same millisecond are in order of arrival, not late', () => {
+    const sid = session();
+    write(sid, 'First', 'pending', T);
+    write(sid, 'Second', 'pending', T);
+    expect(contents(sid)).toEqual(['Second']);
+  });
+
+  it('a call more than LATE_EVENT_MS older than the newest folded one comes from a clock set back, not from a held-up hook, and is applied', () => {
+    const sid = session();
+    write(sid, 'Newest', 'pending', T + 60_000);
+    write(sid, 'Exactly the window', 'pending', T + 60_000 - L.LATE_EVENT_MS);
+    expect(contents(sid)).toEqual(['Newest']);
+    write(sid, 'Beyond the window', 'pending', T + 60_000 - L.LATE_EVENT_MS - 1);
+    expect(contents(sid)).toEqual(['Beyond the window']);
+  });
+
+  it('a reader that folds a pending older event on its own gets the same list as a fold that writes (no write, event left)', () => {
+    const sid = session();
+    write(sid, 'Newer list', 'pending', T + 2000);
+    const dir = join(LOGS, 'lists', sid, 'main.events');
+    const name = `${String(T + 1000).padStart(13, '0')}-77-aaaaaaaa.json`;
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(join(dir, name), JSON.stringify({ ts: new Date(T + 1000).toISOString(), pid: 77, id: 'aaaaaaaa', session_id: sid, tool_name: 'TodoWrite', tool_input: { todos: [{ content: 'Older list', status: 'pending' }] }, agent_type: null, tool_use_id: null, prompt_id: null }));
+    expect(contents(sid)).toEqual(['Newer list']);
+    L.syncList(sid, 'main', env());
+    expect(contents(sid)).toEqual(['Newer list']);
+    expect(eventFiles(sid, 'main')).toEqual([]);
+  });
+});
+
 describe('task list: the hook accepts what the task_list tool accepts', () => {
   // The handler of the tool checks the call as the schema declares it; the hook must refuse the same items, or a call the tool accepted
   // is saved as something else (a note of another type dropped, a number turned into text).

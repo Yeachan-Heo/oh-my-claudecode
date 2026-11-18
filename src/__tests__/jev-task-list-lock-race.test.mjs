@@ -28,6 +28,8 @@ let counter = 0;
 //   before-publish      before the fold of PAUSE_MATCH (a list file) decides or starts to publish: the second lstat of that path (the generation check
 //                       of the fold) or, when there is none, the creation of the temporary file of the atomic write
 //   sweep-observed      right after the stat of the directory PAUSE_MATCH (the sweep reading the age of a session directory)
+//   before-event-publish  before the temporary file of an event (<key>.events/<name>.json.tmp) is renamed to its name: the event is written
+//                       and its call time is fixed, but it is not visible yet
 // The process writes PAUSE_MARK and waits until PAUSE_GO exists (with several kinds both names get the suffix ".<kind>").
 const PRELOAD = `
 import fs from 'node:fs';
@@ -70,6 +72,10 @@ if (kinds.includes('before-publish')) {
   fs.lstatSync = (p, ...rest) => { if (p === PAUSE_MATCH && (looks += 1) === 2) hold('before-publish'); return lstat(p, ...rest); };
   const open = fs.openSync;
   fs.openSync = (p, flags, ...rest) => { if (flags === 'wx' && typeof p === 'string' && p.startsWith(PAUSE_MATCH.replace(/[^/]*$/, '.')) && /\\.tmp\\.[0-9a-f-]+$/.test(p)) hold('before-publish'); return open(p, flags, ...rest); };
+}
+if (kinds.includes('before-event-publish')) {
+  const rename = fs.renameSync;
+  fs.renameSync = (from, to, ...rest) => { if (typeof from === 'string' && /\\.events\\/[^/]+\\.json\\.tmp$/.test(from)) hold('before-event-publish'); return rename(from, to, ...rest); };
 }
 if (kinds.includes('sweep-observed')) {
   const stat = fs.statSync;
@@ -344,6 +350,46 @@ describe('task-list fold: an older fold does not overwrite a list another fold p
     expect(rb.code).toBe(0);
     const names = L.readList('race-session', 'main', env).items.map((x) => x.content).sort();
     expect(names).toEqual(['base', 'from-b', 'from-parent']);
+  }, TOTAL_MS);
+});
+
+describe('task-list events: a hook held up before its event is visible', () => {
+  const todo = (content) => ({ session_id: 'race-session', tool_name: 'TodoWrite', tool_input: { todos: [{ content, status: 'pending' }] }, tool_use_id: `toolu_${content}` });
+
+  it('a TodoWrite held between its call time and its publication does not put its older list back over the one a later call folded meanwhile', async () => {
+    counter += 1;
+    const dir = join(TMP, `late-${counter}`);
+    mkdirSync(dir, { recursive: true });
+    const logs = join(dir, 'logs');
+    const env = baseEnv(logs);
+    const files = (name) => join(dir, name);
+    const a = startChild(dir, { kind: 'record', data: todo('older list'), done: files('a-done') }, { kind: 'before-event-publish', mark: files('a-paused'), go: files('a-go') }, env);
+    await waitUntil(files('a-paused')); // A has its call time and its event written, and nothing is visible yet
+    await new Promise((done) => setTimeout(done, 30)); // the later call has a later time
+    expect(L.recordListCall(todo('newer list'), env)).not.toBeNull(); // the later call folds, publishes and removes its event
+    expect(L.readList('race-session', 'main', env).items.map((x) => x.content)).toEqual(['newer list']);
+    writeFileSync(files('a-go'), '1');
+    expect((await a.exited).code).toBe(0);
+    const record = JSON.parse(readFileSync(join(logs, 'lists', 'race-session', 'main.json'), 'utf8'));
+    expect(record.items.map((x) => x.content)).toEqual(['newer list']);
+    expect(L.readList('race-session', 'main', env).items.map((x) => x.content)).toEqual(['newer list']);
+    expect(readdirSync(join(logs, 'lists', 'race-session', 'main.events'))).toEqual([]);
+  }, TOTAL_MS);
+
+  it('the same held-up call, when it only changes part of the list, is applied: two TaskCreate calls sent together both stay', async () => {
+    counter += 1;
+    const dir = join(TMP, `late-${counter}`);
+    mkdirSync(dir, { recursive: true });
+    const logs = join(dir, 'logs');
+    const env = baseEnv(logs);
+    const files = (name) => join(dir, name);
+    const a = startChild(dir, { kind: 'record', data: task('held up', 1), done: files('a-done') }, { kind: 'before-event-publish', mark: files('a-paused'), go: files('a-go') }, env);
+    await waitUntil(files('a-paused'));
+    await new Promise((done) => setTimeout(done, 30));
+    expect(L.recordListCall(task('later', 2), env)).not.toBeNull();
+    writeFileSync(files('a-go'), '1');
+    expect((await a.exited).code).toBe(0);
+    expect(L.readList('race-session', 'main', env).items.map((x) => x.content).sort()).toEqual(['held up', 'later']);
   }, TOTAL_MS);
 });
 

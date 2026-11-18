@@ -339,14 +339,16 @@ function claimTask(sessionId, taskId, key, env) {
 
 // --- the PostToolUse entry point ----------------------------------------------------------
 
+// Does the call replace the whole list (items of the list tools, TodoWrite) instead of changing part of it.
+const replacesList = (tool, input) => ((LIST_TOOL_RE.test(tool) || tool === 'mcp__ccd_turn__update_plan') ? input?.items !== undefined : tool === 'TodoWrite');
+
 // New list of one agent after a list-tool call, or null when the call does not change it. `record` is the current file (or null);
 // `broken` (the file exists but cannot be read): only a call that replaces the whole list (items, TodoWrite) is saved.
 export function nextList(record, data, env = process.env, broken = false) {
   const tool = data?.tool_name;
   const input = data?.tool_input && typeof data.tool_input === 'object' ? data.tool_input : {};
   const items = Array.isArray(record?.items) ? record.items : [];
-  const replaces = (LIST_TOOL_RE.test(tool) || tool === 'mcp__ccd_turn__update_plan') ? input.items !== undefined : tool === 'TodoWrite';
-  if (broken && !replaces) return null;
+  if (broken && !replacesList(tool, input)) return null;
   if (LIST_TOOL_RE.test(tool)) return applyUpdate(items, input, 'note');
   if (tool === 'mcp__ccd_turn__update_plan') return applyUpdate(items, input, null);
   if (tool === 'mcp__ccd_turn__wrap_up') return items.length ? items.map((x) => ({ ...x, status: 'completed' })) : null; // wrap_up checks off the task list (its description)
@@ -431,6 +433,11 @@ export function sweep(env, now) {
 // to it loses lines.
 export const EVENTS_KEPT = 500;
 const EVENTS_READ_MAX = 5000;
+// An event is named after the time of its call, but it becomes visible only when its hook has written it; a hook held up in between
+// (descheduled, masking a large payload) publishes after a hook with a later call has folded. How much older than a folded event a
+// held-up hook can be is bounded by the host, which stops a hook after 3 s; an event more than LATE_EVENT_MS older than the newest
+// one folded comes from a clock that was set back, not from a held-up hook, and is applied as any other.
+export const LATE_EVENT_MS = 10_000;
 const EVENT_NAME = /^\d{13}-\d{1,10}-[0-9a-f]{8}\.json$/;
 export const eventsDir = (path) => (path ? path.replace(/\.json$/, '.events') : null);
 
@@ -548,8 +555,19 @@ function applyEvent(record, event, key, env, broken) {
 // is unreadable or missing. A fold publishes only while the file still has the generation it folded from.
 const generationOf = ({ record, broken }) => (broken ? 'broken' : record ? String(record.updates ?? 0) : 'none');
 
-// Folds the pending events into the list file. { record, broken, names, changed, done, generation }: names are the events folded (all
-// pending ones), generation is the one of the file the fold started from.
+// The time of the call an event name starts with (13 digits of milliseconds).
+const eventMs = (name) => Number(name.slice(0, 13));
+
+// Folds the pending events into the list file. { record, broken, names, changed, done, generation, late }: names are the events folded
+// (all pending ones, late ones included), generation is the one of the file the fold started from, late counts the events not applied.
+// The order of the events is the order of their calls, and a fold applies the pending ones in that order; but an event that becomes
+// visible after a fold took a later one is older than the list it would change, and applying it would put the older state back. The
+// record keeps the time of the newest call folded (lastEvent) and of the newest call that replaced the whole list (lastReplace). A late
+// event is not applied (it is acknowledged and removed, so it never comes back): a call that replaces the list when any later call has
+// been folded; a call that changes part of the list (TaskCreate, TaskUpdate, done, start, advance) only when a later call replaced the
+// list, because then it changed a list that no longer exists. A part-changing call that is only older than other part-changing calls is
+// applied: those calls do not undo each other, and the tasks of calls sent together all stay (a TaskCreate that is dropped for the
+// later replacement leaves its claim in _task, which is harmless: TaskUpdate of an id the list does not hold changes nothing).
 function fold(path, key, env) {
   const dir = eventsDir(path);
   const events = pendingEvents(dir, null); // listed before the snapshot is read: a fold in between has its names in folded
@@ -558,14 +576,28 @@ function fold(path, key, env) {
   let record = start.record;
   let broken = start.broken;
   let changed = false;
+  let lastEvent = Number.isFinite(start.record?.last_event_ms) ? start.record.last_event_ms : 0;
+  let lastReplace = Number.isFinite(start.record?.last_replace_ms) ? start.record.last_replace_ms : 0;
+  let late = 0;
   const names = [];
   for (const { name, event } of events) {
     if (done.has(name)) continue;
-    const next = applyEvent(broken ? null : record, event, key, env, broken);
-    if (next !== record && next) { record = next; broken = false; changed = true; }
+    const ms = eventMs(name);
+    const replaces = replacesList(event.tool_name, event.tool_input);
+    const older = (replaces ? lastEvent : lastReplace) - ms;
     names.push(name);
+    if (older > 0 && older <= LATE_EVENT_MS) { late += 1; continue; }
+    const next = applyEvent(broken ? null : record, event, key, env, broken);
+    if (next !== record && next) {
+      record = next;
+      broken = false;
+      changed = true;
+      if (replaces) lastReplace = Math.max(lastReplace, ms);
+    }
+    lastEvent = Math.max(lastEvent, ms);
   }
-  return { record, broken, names, changed, done, generation: generationOf(start) };
+  if (changed) record = { ...record, last_event_ms: lastEvent, last_replace_ms: lastReplace };
+  return { record, broken, names, changed, done, generation: generationOf(start), late };
 }
 
 // Under the lock: fold, write the list with the folded names, then remove the folded event files (retention: the folder holds only the
@@ -588,6 +620,7 @@ export function syncList(sessionId, key, env = process.env) {
     // overwrite the newer list, or delete events the newer list does not hold. Every removal and the write below stand behind it.
     const current = () => owned() && generationOf(readRecord(path)) === f.generation;
     if (!current()) return; // the lock was taken over or another fold published: the newer fold writes
+    if (f.late) storeEvent('late_event_dropped', path, env);
     remove(waiting.filter((name) => f.done.has(name)));
     if (!f.names.length) return;
     // events that change nothing (also on a broken list without a replacing call) leave the list file as it is
