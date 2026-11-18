@@ -19,7 +19,7 @@
  * home directory without HOME (os.userInfo()).
  */
 import { createHash } from 'node:crypto';
-import { existsSync, mkdtempSync, readFileSync, readdirSync, readlinkSync, realpathSync, rmSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, readdirSync, readlinkSync, realpathSync, rmSync, statSync } from 'node:fs';
 import { homedir, hostname } from 'node:os';
 import { basename, dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 
@@ -46,7 +46,19 @@ export const LOCATION_VARS = [
   'XDG_STATE_HOME',
   'XDG_DATA_HOME',
   'XDG_CACHE_HOME',
+  // Set by Claude Code for hooks. setup-init appends to it.
+  'CLAUDE_ENV_FILE',
 ] as const;
+
+/**
+ * A home from another PID scope cannot be probed for liveness. It is removed
+ * once its folder has not changed for this long. A running suite keeps
+ * creating fixture folders in its home, which updates the folder's mtime.
+ */
+export const FOREIGN_HOME_MAX_AGE_MS = 7 * 24 * 60 * 60 * 1000;
+
+// `<prefix><host tag>-<pid>-<random>`.
+const TEST_HOME_NAME = new RegExp(`^${TEST_HOME_PREFIX}[0-9a-f]{16}-\\d+-`);
 
 // Same name as WORKSPACE_MARKER in src/lib/worktree-paths.ts. Not imported, so
 // the setup loads no product code.
@@ -137,13 +149,23 @@ export function pidScope(host: string = hostname()): string {
   return [host, bootId, pidNamespace].join('\0');
 }
 
+function isOlderThan(path: string, ageMs: number, now: number): boolean {
+  try {
+    return now - statSync(path).mtimeMs > ageMs;
+  } catch {
+    return false;
+  }
+}
+
 /**
- * Remove homes left by runs that were killed before teardown. A home is only
- * removed when it was created in this PID scope (see pidScope()) and its
- * process no longer exists, so a concurrent run keeps its own, also when the
- * home is shared with another machine or a container.
+ * Remove homes left by runs that were killed before teardown. A home created
+ * in this PID scope (see pidScope()) is removed when its process no longer
+ * exists, so a concurrent run keeps its own, also when the home is shared with
+ * another machine or a container. A home from another scope (another host, or
+ * this host before a reboot or hostname change) is removed only after
+ * FOREIGN_HOME_MAX_AGE_MS without changes.
  */
-export function removeStaleTestHomes(outerHome: string, ownPrefix: string): void {
+export function removeStaleTestHomes(outerHome: string, ownPrefix: string, now: number = Date.now()): void {
   let names: string[];
   try {
     names = readdirSync(outerHome);
@@ -151,8 +173,14 @@ export function removeStaleTestHomes(outerHome: string, ownPrefix: string): void
     return;
   }
   for (const name of names) {
-    const match = name.startsWith(ownPrefix) ? /^(\d+)-/.exec(name.slice(ownPrefix.length)) : null;
-    if (!match || isProcessAlive(Number(match[1]))) continue;
+    let stale: boolean;
+    if (name.startsWith(ownPrefix)) {
+      const match = /^(\d+)-/.exec(name.slice(ownPrefix.length));
+      stale = match !== null && !isProcessAlive(Number(match[1]));
+    } else {
+      stale = TEST_HOME_NAME.test(name) && isOlderThan(join(outerHome, name), FOREIGN_HOME_MAX_AGE_MS, now);
+    }
+    if (!stale) continue;
     try {
       rmSync(join(outerHome, name), { recursive: true, force: true });
     } catch {

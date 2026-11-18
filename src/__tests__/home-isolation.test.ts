@@ -7,12 +7,14 @@ import {
   realpathSync,
   rmSync,
   symlinkSync,
+  utimesSync,
   writeFileSync,
 } from 'node:fs';
 import { homedir } from 'node:os';
 import { basename, join, sep } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import {
+  FOREIGN_HOME_MAX_AGE_MS,
   LOCATION_VARS,
   TEST_HOME_PREFIX,
   findExposedWorkspaceMarker,
@@ -147,6 +149,25 @@ describe('removeStaleTestHomes', () => {
     expect(existsSync(otherHost)).toBe(true);
     expect(existsSync(unrelated)).toBe(true);
     expect(existsSync(userFolder)).toBe(true);
+  });
+
+  // After a reboot or hostname change the prefix differs, so earlier leftovers
+  // can only be told apart by age.
+  it('removes a home from another PID scope once it is old enough', () => {
+    const own = `${TEST_HOME_PREFIX}${hostTag('this-host')}-`;
+    const foreign = `${TEST_HOME_PREFIX}${hostTag('before-reboot')}-`;
+    const old = home(`${foreign}${process.pid}-old`);
+    const recent = home(`${foreign}${process.pid}-recent`);
+    const oldUnrelated = home(`${TEST_HOME_PREFIX}not-ours`);
+    const longAgo = new Date(Date.now() - FOREIGN_HOME_MAX_AGE_MS - 60_000);
+    utimesSync(old, longAgo, longAgo);
+    utimesSync(oldUnrelated, longAgo, longAgo);
+
+    removeStaleTestHomes(outer, own);
+
+    expect(existsSync(old)).toBe(false);
+    expect(existsSync(recent)).toBe(true);
+    expect(existsSync(oldUnrelated)).toBe(true);
   });
 
   it('does nothing when the home cannot be read', () => {
