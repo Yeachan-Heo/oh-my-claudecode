@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { mkdtemp, mkdir, readFile, rm, writeFile } from 'node:fs/promises';
+import { access, mkdtemp, mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { dirname, isAbsolute, join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { isProcessAlive } from '../../platform/process-utils.js';
@@ -18,20 +18,22 @@ import {
   type WorkerLaunchAttempt,
 } from '../worker-launch-ack.js';
 
-// The team shutdown loop reads the process tree of a worker pane before the provider of the worker is terminated and signals it
-// only after the launch fence (current and accepted attempt) is held and the provider is gone (opt-in through
-// OMC_TEAM_KILL_PANE_TREE, checked inside the two tree functions, which are mocks here). The launch records are real: the cases
-// cover the call sites and their order around the fence, not the tree walk (see tmux-session.kill-pane-tree.test.ts).
+// The team shutdown loop reads the process tree of each worker pane before the first request to exit goes out (a worker that
+// follows the request exits during the wait, and its pane's root with it), reads it once more before the provider of the worker is
+// terminated, and signals only after the launch fence (current and accepted attempt) is held and the provider is gone (opt-in
+// through OMC_TEAM_KILL_PANE_TREE, checked inside the two tree functions, which are mocks here, and before the first read). The
+// launch records are real: the cases cover the call sites and their order around the requests and the fence, not the tree walk
+// (see tmux-session.kill-pane-tree.test.ts).
 
 const tmuxUtilsMocks = vi.hoisted(() => ({
   tmuxExecAsync: vi.fn(),
   tmuxCmdAsync: vi.fn(),
 }));
-const paneState = vi.hoisted(() => ({ killed: false, events: [] as string[] }));
+const paneState = vi.hoisted(() => ({ killed: false, rootGone: false, events: [] as string[] }));
 const tmuxSessionMocks = vi.hoisted(() => ({
   observeTmuxServerIdentity: vi.fn(async () => 'matching' as const),
-  // The pane counts as alive until the shutdown loop kills it.
-  getOwnedWorkerLiveness: vi.fn(async (): Promise<'alive' | 'dead' | 'unknown'> => (paneState.killed ? 'dead' : 'alive')),
+  // The pane counts as alive until the shutdown loop kills it (or its root exits: rootGone).
+  getOwnedWorkerLiveness: vi.fn(async (): Promise<'alive' | 'dead' | 'unknown'> => (paneState.killed || paneState.rootGone ? 'dead' : 'alive')),
   observeTeamSessionTargetPresence: vi.fn(async () => ({ kind: 'owned' as const })),
   workerPaneBelongsToOwnedProviderTarget: vi.fn(async () => true),
   killOwnedWorkerPane: vi.fn(async () => {
@@ -100,11 +102,12 @@ describe.skipIf(currentStrictProcessStartIdentity(process.pid) === null)('shutdo
     process.env.USERPROFILE = cwd;
     delete process.env.OMC_STATE_DIR;
     paneState.killed = false;
+    paneState.rootGone = false;
     paneState.events.length = 0;
     tmuxUtilsMocks.tmuxExecAsync.mockReset();
     tmuxUtilsMocks.tmuxCmdAsync.mockReset();
     for (const mock of Object.values(tmuxSessionMocks)) mock.mockClear();
-    tmuxSessionMocks.getOwnedWorkerLiveness.mockImplementation(async () => (paneState.killed ? 'dead' : 'alive'));
+    tmuxSessionMocks.getOwnedWorkerLiveness.mockImplementation(async () => (paneState.killed || paneState.rootGone ? 'dead' : 'alive'));
     tmuxSessionMocks.capturePaneProcessTree.mockImplementation(async () => {
       paneState.events.push('capture');
       return FIXTURE_TREE;
@@ -224,9 +227,14 @@ describe.skipIf(currentStrictProcessStartIdentity(process.pid) === null)('shutdo
     expect(tmuxSessionMocks.killOwnedWorkerPane).not.toHaveBeenCalled();
   });
 
-  it('reads the tree while the provider runs and signals it after the provider is terminated, before the pane is killed', async () => {
-    process.env.OMC_TEAM_KILL_PANE_TREE = '1';
-    const teamName = 'pane-tree-accepted-team';
+  /**
+   * Runs `body` with a real provider whose launch attempt is accepted, so the shutdown loop reaches the cleanup callback and its fence;
+   * the provider is stopped and reaped afterwards. `body` gets the team root and the pid and process group of the provider.
+   */
+  async function withAcceptedProvider(
+    teamName: string,
+    body: (teamRoot: string, provider: { pid: number }) => Promise<void>,
+  ): Promise<void> {
     let attempt: WorkerLaunchAttempt | undefined;
     let bootstrap: Promise<unknown> | undefined;
     let providerPid = 0;
@@ -244,32 +252,9 @@ describe.skipIf(currentStrictProcessStartIdentity(process.pid) === null)('shutdo
       providerGroup = started.process_group_id;
       // Publication precedes the bootstrap's final handoff checks: wait for its fence before shutting the team down.
       await expect(withWorkerLaunchAttemptFence(attempt, async () => isProcessAlive(providerPid))).resolves.toEqual({ ok: true, value: true });
-      await writeTeam(teamName, attempt.attempt_id);
-
-      let providerAliveAtCapture: boolean | undefined;
-      let providerAliveAtTerminate: boolean | undefined;
-      tmuxSessionMocks.capturePaneProcessTree.mockImplementation(async () => {
-        paneState.events.push('capture');
-        providerAliveAtCapture = isProcessAlive(providerPid);
-        return FIXTURE_TREE;
-      });
-      tmuxSessionMocks.terminatePaneProcessTree.mockImplementation(async () => {
-        paneState.events.push('terminate');
-        providerAliveAtTerminate = isProcessAlive(providerPid);
-      });
-
-      const { shutdownTeamV2 } = await import('../runtime-v2.js');
-      await shutdownTeamV2(teamName, cwd, { timeoutMs: 0, force: true });
+      const teamRoot = await writeTeam(teamName, attempt.attempt_id);
+      await body(teamRoot, { pid: providerPid });
       await bootstrap;
-
-      expect(paneState.events).toEqual(['capture', 'terminate', 'kill-pane']);
-      expect(tmuxSessionMocks.capturePaneProcessTree).toHaveBeenCalledTimes(1);
-      expect(tmuxSessionMocks.capturePaneProcessTree).toHaveBeenCalledWith(ownProcessTmuxIdentity(), '%2');
-      expect(tmuxSessionMocks.terminatePaneProcessTree).toHaveBeenCalledTimes(1);
-      expect(tmuxSessionMocks.terminatePaneProcessTree).toHaveBeenCalledWith(FIXTURE_TREE);
-      // The order that matters: the tree is read while the provider is alive and signalled once it is gone.
-      expect(providerAliveAtCapture).toBe(true);
-      expect(providerAliveAtTerminate).toBe(false);
     } finally {
       if (attempt) await terminateWorkerLaunchProvider(attempt, 2_000).catch(() => false);
       if (bootstrap) await bootstrap.catch(() => undefined);
@@ -282,5 +267,90 @@ describe.skipIf(currentStrictProcessStartIdentity(process.pid) === null)('shutdo
         }, { timeout: 2_000, interval: 20 });
       }
     }
+  }
+
+  const exists = (path: string): Promise<boolean> => access(path).then(() => true, () => false);
+
+  it('reads the tree before the request to exit and again while the provider runs, and signals after the provider is terminated, before the pane is killed', async () => {
+    process.env.OMC_TEAM_KILL_PANE_TREE = '1';
+    const teamName = 'pane-tree-accepted-team';
+    await withAcceptedProvider(teamName, async (teamRoot, provider) => {
+      const requestFile = join(teamRoot, 'workers', 'worker-1', 'shutdown-request.json');
+      const requestWrittenAtCapture: boolean[] = [];
+      let providerAliveAtCapture: boolean | undefined;
+      let providerAliveAtTerminate: boolean | undefined;
+      tmuxSessionMocks.capturePaneProcessTree.mockImplementation(async () => {
+        paneState.events.push('capture');
+        requestWrittenAtCapture.push(await exists(requestFile));
+        providerAliveAtCapture = isProcessAlive(provider.pid);
+        return FIXTURE_TREE;
+      });
+      tmuxSessionMocks.terminatePaneProcessTree.mockImplementation(async () => {
+        paneState.events.push('terminate');
+        providerAliveAtTerminate = isProcessAlive(provider.pid);
+      });
+
+      const { shutdownTeamV2 } = await import('../runtime-v2.js');
+      await shutdownTeamV2(teamName, cwd, { timeoutMs: 0, force: true });
+
+      expect(paneState.events).toEqual(['capture', 'capture', 'terminate', 'terminate', 'kill-pane']);
+      expect(tmuxSessionMocks.capturePaneProcessTree).toHaveBeenCalledTimes(2);
+      expect(tmuxSessionMocks.capturePaneProcessTree).toHaveBeenNthCalledWith(1, ownProcessTmuxIdentity(), '%2');
+      expect(tmuxSessionMocks.capturePaneProcessTree).toHaveBeenNthCalledWith(2, ownProcessTmuxIdentity(), '%2');
+      // the first read comes before the request to exit, the second after it; both while the provider runs
+      expect(requestWrittenAtCapture).toEqual([false, true]);
+      expect(providerAliveAtCapture).toBe(true);
+      expect(tmuxSessionMocks.terminatePaneProcessTree).toHaveBeenCalledTimes(2);
+      expect(tmuxSessionMocks.terminatePaneProcessTree).toHaveBeenNthCalledWith(1, FIXTURE_TREE);
+      expect(tmuxSessionMocks.terminatePaneProcessTree).toHaveBeenNthCalledWith(2, FIXTURE_TREE);
+      // The order that matters: the trees are read while the provider is alive and signalled once it is gone.
+      expect(providerAliveAtTerminate).toBe(false);
+    });
+  }, 60_000);
+
+  it('without OMC_TEAM_KILL_PANE_TREE nothing is read before the requests: the one read is the one before the fence', async () => {
+    await withAcceptedProvider('pane-tree-off-team', async (teamRoot) => {
+      const requestFile = join(teamRoot, 'workers', 'worker-1', 'shutdown-request.json');
+      const requestWrittenAtCapture: boolean[] = [];
+      tmuxSessionMocks.capturePaneProcessTree.mockImplementation(async () => {
+        requestWrittenAtCapture.push(await exists(requestFile));
+        return FIXTURE_TREE;
+      });
+      const { shutdownTeamV2 } = await import('../runtime-v2.js');
+      await shutdownTeamV2('pane-tree-off-team', cwd, { timeoutMs: 0, force: true });
+      expect(requestWrittenAtCapture).toEqual([true]);
+      expect(tmuxSessionMocks.terminatePaneProcessTree.mock.calls.map((call) => call[0])).toEqual([null, FIXTURE_TREE]);
+    });
+  }, 60_000);
+
+  // The pane's root exits while the leader waits: its worker followed the request to exit (or the wait ends by its deadline and the
+  // root is gone anyway). A read taken after the wait finds a dead pane and no tree, but the read before the requests has it.
+  it.each([
+    ['ordinary shutdown, the worker acknowledges and exits', { timeoutMs: 8_000 }, true],
+    ['forced shutdown, the worker exits and never acknowledges (the wait ends at its deadline)', { timeoutMs: 100, force: true }, false],
+    ['ordinary shutdown, the worker exits and the acknowledgement never comes (the wait ends at its deadline)', { timeoutMs: 100 }, false],
+  ])('signals the tree read before the requests when the pane root exits during the wait: %s', async (_what, options, acknowledges) => {
+    process.env.OMC_TEAM_KILL_PANE_TREE = '1';
+    const teamName = `pane-tree-exit-${acknowledges ? 'ack' : options.force ? 'force' : 'deadline'}`;
+    await withAcceptedProvider(teamName, async (teamRoot) => {
+      const workerDir = join(teamRoot, 'workers', 'worker-1');
+      // the first read sees the live pane; once the root has exited the pane is dead and a later read returns no tree
+      tmuxSessionMocks.capturePaneProcessTree.mockImplementation(async () => {
+        paneState.events.push('capture');
+        return paneState.rootGone ? null : FIXTURE_TREE;
+      });
+      const { shutdownTeamV2 } = await import('../runtime-v2.js');
+      const shutdown = shutdownTeamV2(teamName, cwd, options);
+      await vi.waitFor(async () => expect(await exists(join(workerDir, 'shutdown-request.json'))).toBe(true), { timeout: 10_000, interval: 10 });
+      paneState.rootGone = true;
+      if (acknowledges) {
+        await writeJson(cwd, join(workerDir, 'shutdown-ack.json'), { status: 'accept', reason: 'ok', updated_at: new Date().toISOString() });
+      }
+      await shutdown;
+
+      expect(paneState.events).toEqual(['capture', 'terminate', 'terminate']);
+      expect(tmuxSessionMocks.terminatePaneProcessTree.mock.calls.map((call) => call[0])).toEqual([FIXTURE_TREE, null]);
+      expect(tmuxSessionMocks.killOwnedWorkerPane).not.toHaveBeenCalled();
+    });
   }, 60_000);
 });

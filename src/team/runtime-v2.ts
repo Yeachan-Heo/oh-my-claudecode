@@ -132,6 +132,7 @@ import {
   type WorkerPaneConfig,
   type WorkerPaneLiveness,
   type WorkerPaneOwnership,
+  type PaneProcessTree,
   type WorkerPaneSplitEvidence,
   type TeamSessionMode,
   TeamSessionCreationError,
@@ -1175,6 +1176,27 @@ function configuredPaneOwnership(
       .map((candidate) => candidate.pane_id as string),
     source: "adopted",
     ...(identity ? { tmuxServerIdentity: identity } : {}),
+  };
+}
+
+/** The arguments with which a worker's pane is adopted (its ownership proved) from the config of the team. */
+function workerPaneOwnershipInput(
+  config: TeamConfig,
+  workerName: string,
+  paneId: string,
+) {
+  return {
+    provider: providerForTeamTarget(config.tmux_session, paneId),
+    providerTarget: config.tmux_session,
+    paneId,
+    leaderPaneId: config.leader_pane_id ?? "",
+    reservedPaneIds: config.workers
+      .filter((candidate) => candidate.name !== workerName)
+      .map((candidate) => candidate.pane_id)
+      .filter((id): id is string => Boolean(id)),
+    ...(config.tmux_server_identity
+      ? { tmuxServerIdentity: config.tmux_server_identity }
+      : {}),
   };
 }
 
@@ -9135,6 +9157,39 @@ export async function shutdownTeamV2(
     ).catch(logEventFailure);
   }
 
+  // Opt-in tree kill (OMC_TEAM_KILL_PANE_TREE): the process tree of each live worker pane is read here, before any request to exit goes out.
+  // A worker that follows the request exits during the wait below, and a descendant that left its process group is then no longer below the
+  // pane's root: a read taken after the wait does not find it. Whatever the way out of the wait (acknowledgements, a rejection under --force,
+  // the timeout), the trees were read while the panes were live; nothing is signalled until the launch fence is held in step 4.
+  const startConfig = config;
+  const earlyPaneTrees = new Map<string, { paneId: string; tree: PaneProcessTree }>();
+  if (process.env.OMC_TEAM_KILL_PANE_TREE === "1") {
+    await Promise.all(
+      startConfig.workers.map(async (worker) => {
+        const initialOwnership = configuredPaneOwnership(startConfig, worker);
+        if (
+          !worker.pane_id?.startsWith("%") ||
+          !initialOwnership ||
+          (await getOwnedWorkerLiveness(initialOwnership)) === "dead"
+        )
+          return;
+        const ownership = await adoptWorkerPaneOwnership(
+          workerPaneOwnershipInput(startConfig, worker.name, worker.pane_id),
+        );
+        if (!ownership.ok || !ownership.ownership.tmuxServerIdentity) return;
+        const tree = await capturePaneProcessTree(
+          ownership.ownership.tmuxServerIdentity,
+          ownership.ownership.paneId,
+        );
+        if (tree)
+          earlyPaneTrees.set(worker.name, {
+            paneId: ownership.ownership.paneId,
+            tree,
+          });
+      }),
+    );
+  }
+
   // 2. Send shutdown request to each worker
   const shutdownRequestTimes = new Map<string, string>();
   for (const w of config.workers) {
@@ -9241,19 +9296,9 @@ export async function shutdownTeamV2(
       : "unknown";
     let paneOwnership: WorkerPaneOwnership | null = null;
     if (initialPaneLiveness !== "dead") {
-      const ownership = await adoptWorkerPaneOwnership({
-        provider: providerForTeamTarget(config.tmux_session, worker.pane_id),
-        providerTarget: config.tmux_session,
-        paneId: worker.pane_id,
-        leaderPaneId: config.leader_pane_id ?? "",
-        reservedPaneIds: config.workers
-          .filter((candidate) => candidate.name !== worker.name)
-          .map((candidate) => candidate.pane_id)
-          .filter((paneId): paneId is string => Boolean(paneId)),
-        ...(config.tmux_server_identity
-          ? { tmuxServerIdentity: config.tmux_server_identity }
-          : {}),
-      });
+      const ownership = await adoptWorkerPaneOwnership(
+        workerPaneOwnershipInput(config, worker.name, worker.pane_id),
+      );
       if (!ownership.ok) {
         // Issue #4261: When ownership cannot be verified (pane doesn't exist),
         // allow --force cleanup to proceed. Otherwise preserve state.
@@ -9264,9 +9309,13 @@ export async function shutdownTeamV2(
       }
       paneOwnership = ownership.ownership;
     }
-    // Opt-in tree kill (OMC_TEAM_KILL_PANE_TREE): the pane's process tree is only read here, before the launch fence is taken.
-    // Terminating the provider inside the fence can leave a descendant that left its process group outside the pane's tree, so the
-    // read comes first; nothing is signalled before the fence below is held (see the cleanup callback).
+    // Opt-in tree kill (OMC_TEAM_KILL_PANE_TREE): the pane's process tree is read once more here, before the launch fence is taken, for
+    // what the worker started after the read before the requests to exit (earlyPaneTrees). Terminating the provider inside the fence can
+    // leave a descendant that left its process group outside the pane's tree, so the read comes first; nothing is signalled before the
+    // fence below is held (see the cleanup callback).
+    const earlyPaneTree = earlyPaneTrees.get(worker.name);
+    const earlyTree =
+      earlyPaneTree?.paneId === worker.pane_id ? earlyPaneTree.tree : null;
     const paneTree =
       paneOwnership?.tmuxServerIdentity && worker.pane_id.startsWith("%")
         ? await capturePaneProcessTree(
@@ -9291,6 +9340,8 @@ export async function shutdownTeamV2(
         "team_shutdown",
         async () => {
           try {
+            // The tree read before the requests first: its pane may be gone by now, and the descendants it names still run.
+            await terminatePaneProcessTree(earlyTree);
             await terminatePaneProcessTree(paneTree);
             let lastLiveness: WorkerPaneLiveness = paneOwnership
               ? await getOwnedWorkerLiveness(paneOwnership)
