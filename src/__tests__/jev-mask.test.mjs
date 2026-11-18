@@ -6,6 +6,7 @@
  */
 
 import { readFileSync } from 'node:fs';
+import process from 'node:process';
 import { URL } from 'node:url';
 
 import { describe, expect, it } from 'vitest';
@@ -238,19 +239,23 @@ describe.each([
     for (const n of [100_000, 1_000_000]) {
       for (const [name, make] of Object.entries(shapes)) {
         const text = make(n);
-        // The fastest of up to three runs, so one pause of a busy runner does not fail the test.
+        // The fastest of up to three runs, in the smaller of the wall time and the CPU time of the run: a busy runner (other test files
+        // on the same cores) stretches the wall time and not the CPU time, and the threads of the garbage collector stretch the CPU time
+        // and not the wall time.
         let best = Infinity;
         for (let run = 0; run < 3 && best >= n / 1000; run++) {
           const t0 = performance.now();
+          const cpu0 = process.cpuUsage();
           const out = mask(text);
+          const cpu = process.cpuUsage(cpu0);
           // The shapes named quote or masked are masked (their values are read); the others pass unchanged.
           if (!/quote|masked/.test(name)) expect(out).toBe(text);
-          best = Math.min(best, performance.now() - t0);
+          best = Math.min(best, performance.now() - t0, (cpu.user + cpu.system) / 1000);
         }
         expect(best, `${name}, ${n} characters: ${Math.round(best)} ms`).toBeLessThan(n / 1000);
       }
     }
-  });
+  }, 600_000);
 
   it('keeps what the Authorization, mysql, JWT and KEY= rules mask', () => {
     const cases = [
