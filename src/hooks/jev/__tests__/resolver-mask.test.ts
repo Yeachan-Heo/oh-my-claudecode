@@ -283,6 +283,11 @@ describe('resolveJudgment state mask', () => {
       ['a command with -u in a cluster of flags', { command: 'curl -sSu user:hunter2zzQ https://h/' }],
       ['an array with --proxy-user', { argv: ['curl', '--proxy-user', 'user:hunter2zzQ', 'https://h/'] }],
       ['a command with a quoted value', { command: "mysql -p'a hunter2zzQ' db" }],
+      ['a command with an escaped quote inside a quoted --user', { command: 'curl --user "name:pre\\"suffix hunter2zzQ"' }],
+      ['a command with a separator after an escaped quote before -U', { command: 'curl -H "X-Note: foo\\";bar" -U u:hunter2zzQ https://host' }],
+      ['a command with a quoted Cookie value', { command: "curl -H 'Cookie: \"sid=hunter2zzQ\"' https://host" }],
+      ['a URL with an empty user name', { command: 'psql postgresql://:hunter2zzQ@db/app' }],
+      ['a URL with an @ in the password', { command: 'curl http://u:p@ss:hunter2zzQ@h/x' }],
     ])('masks the credential of %s, in the body and in the log', async (_name, state) => {
       const bodies: string[] = [];
       await resolveJudgment({ point: 'model-routing', state, questions: QUESTIONS, twin: () => 'sonnet', fetchFn: recordingFetch(bodies) });
@@ -304,6 +309,12 @@ describe('resolveJudgment state mask', () => {
       'options and quotes': () => ({ command: repeatTo('-u "', SIZE) }),
       'a program and many commands': () => ({ command: `${repeatTo('mysql ;', SIZE)} -p x` }),
       'headers': () => ({ command: repeatTo('Authorization: "', SIZE) }),
+      'escaped quotes': () => ({ command: `curl -u "${repeatTo('\\"', SIZE)}` }),
+      'nested substitutions': () => ({ command: `curl ${repeatTo('"$(', SIZE)}` }),
+      'cookie quotes': () => ({ command: repeatTo('Cookie: "', SIZE) }),
+      'headers and single quotes': () => ({ command: repeatTo("-H 'X-Api-Key: \"", SIZE) }),
+      'urls with an empty user': () => ({ command: repeatTo('//:', SIZE) }),
+      'a long password and no @': () => ({ command: `//u:${repeatTo('a', SIZE)}` }),
     };
 
     it.each(Object.keys(states))('sends %s of 32 MiB after milliseconds of masking', async (name) => {
