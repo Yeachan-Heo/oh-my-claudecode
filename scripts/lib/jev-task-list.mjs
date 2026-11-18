@@ -456,12 +456,16 @@ function lastActivityMs(dir) {
 const SWEEPING = '.sweeping';
 const HIDDEN_NAME = /^\.(.+)\.[0-9a-f]{12}\.sweeping$/; // the hidden name of a moved tree: .<session id>.<12 hex digits>.sweeping
 
-// Moves what `from` holds into `to` without overwriting anything `to` has: link never replaces a file, so a list file, an event or a task
-// claim that the live tree has stays the live tree's (a list file in the moved tree is older than the fold that wrote the live one), and
-// every other file arrives, the events of the moved tree first of all. A folder both trees have is merged the same way. Lock files and
-// temporary files are not moved: a lock a dead holder left would only stall the next fold, and a temporary file is never read. true when
-// every entry was moved or deliberately left, false when one could not be moved (the moved tree is kept then).
-function mergeTree(from, to) {
+// Moves what `from` holds into `to` without overwriting anything `to` has: link never replaces a file, so an event or a task claim that the
+// live tree has stays the live tree's, and every other file arrives, the events of the moved tree first of all. A folder both trees have is
+// merged the same way. A list file (a file of the top level, `top`) the live tree has stays the live tree's too: the two lists were folded
+// from different events and there is no rule that joins them. The one of the moved tree is kept next to it as <name>.moved (no reader looks
+// at that name) and a row with `event: "moved_list_set_aside"` goes to task-list.jsonl, so what only that list held (a fold published into
+// the moved tree just before it was moved, and removed its events) is not lost for good; the events of the moved tree still arrive and are
+// folded into the live list. Lock files and temporary files are not moved: a lock a dead holder left would only stall the next fold, and a
+// temporary file is never read. true when every entry was moved or deliberately left, false when one could not be moved (the moved tree is
+// kept then).
+function mergeTree(from, to, env, top = true) {
   let complete = true;
   for (const entry of readdirSync(from, { withFileTypes: true })) {
     const source = join(from, entry.name);
@@ -469,9 +473,17 @@ function mergeTree(from, to) {
     try {
       if (entry.isDirectory()) {
         mkdirSync(target, { recursive: true });
-        if (!mergeTree(source, target)) complete = false;
+        if (!mergeTree(source, target, env, false)) complete = false;
       } else if (entry.isFile() && !/\.(?:lock|tmp)$/.test(entry.name)) {
-        try { linkSync(source, target); } catch (error) { if (error?.code !== 'EEXIST') throw error; }
+        try {
+          linkSync(source, target);
+        } catch (error) {
+          if (error?.code !== 'EEXIST') throw error;
+          if (top && entry.name.endsWith('.json')) {
+            try { linkSync(source, `${target}.moved`); } catch { /* an earlier merge left one: that one stays */ }
+            storeEvent('moved_list_set_aside', target, env);
+          }
+        }
         unlinkSync(source);
       }
     } catch { complete = false; }
@@ -482,19 +494,19 @@ function mergeTree(from, to) {
 // A moved tree with recent activity goes back to its own name: one rename when the name is free. When a hook has made the directory
 // again, the rename fails and the tree is merged into the new one, so an event published into the old tree stays visible to the readers of
 // the live path. A tree that cannot be merged completely stays under its hidden name; the next sweep tries again (see sweep).
-function putBack(aside, dir) {
+function putBack(aside, dir, env) {
   try { renameSync(aside, dir); return; } catch { /* the name is taken: merge */ }
-  try { if (mergeTree(aside, dir)) rmSync(aside, { recursive: true, force: true }); } catch { /* kept under its hidden name */ }
+  try { if (mergeTree(aside, dir, env)) rmSync(aside, { recursive: true, force: true }); } catch { /* kept under its hidden name */ }
 }
 
-function removeIfIdle(root, name, now) {
+function removeIfIdle(root, name, now, env) {
   const dir = join(root, name);
   const aside = join(root, `.${name}.${randomBytes(6).toString('hex')}${SWEEPING}`);
   try { renameSync(dir, aside); } catch { return; }
   let idle = false;
   try { idle = now - lastActivityMs(aside) > LISTS_MAX_AGE_MS; } catch { /* not judged idle */ }
   if (idle) { rmSync(aside, { recursive: true, force: true }); return; }
-  putBack(aside, dir);
+  putBack(aside, dir, env);
 }
 
 export function sweep(env, now) {
@@ -509,9 +521,9 @@ export function sweep(env, now) {
         if (name.startsWith('.') && name.endsWith(SWEEPING)) { // a tree that could not be moved back (never a session id: those do not start with a dot)
           const aside = join(root, name);
           if (now - lastActivityMs(aside) > LISTS_MAX_AGE_MS) rmSync(aside, { recursive: true, force: true }); // removed once idle
-          else if (HIDDEN_NAME.test(name)) putBack(aside, join(root, name.replace(HIDDEN_NAME, '$1'))); // in use: back to its own name
+          else if (HIDDEN_NAME.test(name)) putBack(aside, join(root, name.replace(HIDDEN_NAME, '$1')), env); // in use: back to its own name
         } else if (!name.startsWith('.') && now - statSync(join(root, name)).mtimeMs > LISTS_MAX_AGE_MS) {
-          removeIfIdle(root, name, now);
+          removeIfIdle(root, name, now, env);
         }
       } catch { /* next */ }
     }

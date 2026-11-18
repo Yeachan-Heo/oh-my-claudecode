@@ -26,7 +26,7 @@ let counter = 0;
 //   before-lock-rename  before a ".lock" file is renamed (the removal of a lock: the last moment before the file that is moved is fixed)
 //   after-lock-rename   right after a ".lock" file was renamed: the lock path is free and the moved file is not judged yet
 //   before-publish      before the fold of PAUSE_MATCH (a list file) decides or starts to publish: the second lstat of that path (the generation check
-//                       of the fold) or, when there is none, the creation of the temporary file of the atomic write
+//                       of the fold) or, when there is none, the creation of the temporary file of the list (see before-list-temp)
 //   sweep-observed      right after the stat of the directory PAUSE_MATCH (the sweep reading the age of a session directory)
 //   before-event-publish  before the temporary file of an event (<key>.events/<name>.json.tmp) is renamed to its name: the event is written
 //                       and its call time is fixed, but it is not visible yet
@@ -80,7 +80,8 @@ if (kinds.includes('before-publish')) {
   const lstat = fs.lstatSync;
   fs.lstatSync = (p, ...rest) => { if (p === PAUSE_MATCH && (looks += 1) === 2) hold('before-publish'); return lstat(p, ...rest); };
   const open = fs.openSync;
-  fs.openSync = (p, flags, ...rest) => { if (flags === 'wx' && typeof p === 'string' && p.startsWith(PAUSE_MATCH.replace(/[^/]*$/, '.')) && /\\.tmp\\.[0-9a-f-]+$/.test(p)) hold('before-publish'); return open(p, flags, ...rest); };
+  const listDir = PAUSE_MATCH.replace(/[^/]*$/, '');
+  fs.openSync = (p, flags, ...rest) => { if (flags === 'wx' && typeof p === 'string' && p.startsWith(listDir) && !p.slice(listDir.length).includes('/') && p.slice(listDir.length).includes(PAUSE_MATCH.slice(listDir.length)) && !p.endsWith('.lock')) hold('before-publish'); return open(p, flags, ...rest); };
 }
 if (kinds.includes('before-event-publish')) {
   const rename = fs.renameSync;
@@ -526,6 +527,11 @@ describe('task-list sweep: a hook writes while the sweep judges the session dire
     const rs = await s.exited;
     expect(rs.code, rs.stderr).toBe(0);
     expect(readdirSync(join(logs, 'lists')).filter((n) => n.endsWith('.sweeping'))).toEqual([]);
+    // the list of the moved tree does not replace the live directory's own list: it is kept next to it, and a row says so
+    const rows = existsSync(join(logs, 'task-list.jsonl')) ? readFileSync(join(logs, 'task-list.jsonl'), 'utf8') : '';
+    expect(rows.includes('moved_list_set_aside')).toBe(how === 'fold');
+    expect(existsSync(join(session, 'main.json.moved'))).toBe(how === 'fold');
+    if (how === 'fold') expect(JSON.parse(readFileSync(join(session, 'main.json.moved'), 'utf8')).items.map((x) => x.content)).toEqual(['base']);
     expect(L.readList('race-session', 'main', env).items.map((x) => x.content).sort()).toEqual(expected);
     L.syncList('race-session', 'main', env);
     expect(JSON.parse(readFileSync(join(session, 'main.json'), 'utf8')).items.map((x) => x.content).sort()).toEqual(expected);
