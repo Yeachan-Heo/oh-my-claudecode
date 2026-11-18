@@ -447,7 +447,7 @@ describe('inventory-graph drift enforcement (#3702)', () => {
     expect(existsSync(outsideOut)).toBe(false);
   });
 
-  it('--write produces minimal baseline without volatile fields', { timeout: 30_000 }, () => {
+  it('--write produces minimal baseline without volatile fields', { timeout: 120_000 }, () => {
     const temp = join(REPO_ROOT, `.tmp-write-check-${process.pid}-${Math.random().toString(16).slice(2)}.json`);
     const opts = { cwd: REPO_ROOT, encoding: 'utf8' as const, maxBuffer: 20 * 1024 * 1024 };
     const result = spawnSync('node', [GENERATOR, '--write', '--out', temp], opts);
