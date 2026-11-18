@@ -576,13 +576,24 @@ function unescapeReplyInput(text: string): string {
 const TYPED_TEXT_FORMS: ReadonlyArray<(typed: string) => string> = [(typed) => quoteForCmd(typed), (typed) => typed];
 
 /**
+ * A text that was typed into a pane (`literal`) and, when the caller has it, the form in which it goes to the log
+ * (`logged`: see typedReplyForLog). `literal` is cut at maxMessageLength, so a key that runs over the cut is only
+ * a fragment in it, too short to be recognized; `logged` is made from the whole reply, so it is not.
+ */
+interface TypedText {
+  literal: string;
+  logged?: string;
+}
+
+/**
  * `text` with every typed text that stands in it, in any of its forms (TYPED_TEXT_FORMS), replaced by the same text
  * redacted as it was written, in the same form. The scan then never sees a layer that changes where a value ends.
+ * A typed text that comes with its `logged` form is replaced by that; any other is redacted as it stands.
  */
-function maskTypedText(text: string, typed: readonly string[]): string {
+function maskTypedText(text: string, typed: readonly TypedText[]): string {
   let masked = text;
-  for (const literal of typed) {
-    const redacted = escapeReplyInput(redactTokens(unescapeReplyInput(literal)));
+  for (const { literal, logged } of typed) {
+    const redacted = logged ?? escapeReplyInput(redactTokens(unescapeReplyInput(literal)));
     if (redacted === literal) continue; // the redaction changes nothing; an empty text is never changed, so no form below is empty
     for (const form of TYPED_TEXT_FORMS) {
       try {
@@ -600,7 +611,7 @@ function maskTypedText(text: string, typed: readonly string[]): string {
  * maskTypedText), then the whole text is redacted with the escapes of the typed text undone, which also catches
  * what is not in a known form, as before.
  */
-function redactTypedText(text: string, typed: readonly string[]): string {
+function redactTypedText(text: string, typed: readonly TypedText[]): string {
   return redactTokens(unescapeReplyInput(maskTypedText(text, typed)));
 }
 
@@ -608,12 +619,17 @@ function redactTypedText(text: string, typed: readonly string[]): string {
  * The text of an error from a tmux send-keys command for the daemon log. The message of such an error is the
  * command line, and it holds the reply as it was typed: in the escaped form of escapeReplyInput and, with a `.cmd`
  * wrapper, in the quoting of quoteForCmd (see TYPED_TEXT_FORMS). With the switch on the typed texts of `steps`
- * are redacted as they were written (see redactTypedText); with it off the message is logged as it is.
+ * are redacted as they were written (see redactTypedText); with it off the message is logged as it is. The typed
+ * text is cut, so it is the log form of the whole reply (see loggedReplyOf) that is put in its place.
  */
 function sendKeysErrorText(error: unknown, steps: readonly ReplyInjectionStep[]): string {
   const message = error instanceof Error ? error.message : String(error);
   if (!keyShapesEnabled()) return message;
-  return redactTypedText(message, steps.flatMap((step) => (step.kind === "literal" ? [step.value] : [])));
+  const logged = loggedReplyOf(steps); // buildReplyInjectionSteps makes one literal step, the reply
+  return redactTypedText(
+    message,
+    steps.flatMap((step) => (step.kind === "literal" ? [{ literal: step.value, logged }] : [])),
+  );
 }
 
 /**
@@ -623,11 +639,12 @@ function sendKeysErrorText(error: unknown, steps: readonly ReplyInjectionStep[])
  * except that, for a command that typed a reply (`typed` is the text it typed) and with the switch on, the typed
  * text is redacted as it was written wherever it stands in the stderr or the message (see maskTypedText): when
  * Herdr printed nothing to stderr the message is the command line of the failed process, and the command line
- * holds the reply as it was typed (see sendKeysErrorText).
+ * holds the reply as it was typed (see sendKeysErrorText). `logged` is the log form of the typed reply (see
+ * typedReplyForLog).
  */
-function herdrErrorText(error: unknown, typed?: string): string {
+function herdrErrorText(error: unknown, typed?: string, logged?: string): string {
   if (!(error instanceof Error)) return String(error);
-  const typedTexts = typed !== undefined && keyShapesEnabled() ? [typed] : [];
+  const typedTexts: TypedText[] = typed !== undefined && keyShapesEnabled() ? [{ literal: typed, logged }] : [];
   if (error instanceof HerdrError && error.detail) {
     const stderr = error.detail.trim();
     const prefix = `herdr_${error.code}: `;
@@ -636,6 +653,33 @@ function herdrErrorText(error: unknown, typed?: string): string {
     }
   }
   return typedTexts.length > 0 ? redactTypedText(error.message, typedTexts) : error.message;
+}
+
+/**
+ * The reply as it is typed into a pane (see buildReplyInjectionSteps), for the daemon log: the whole reply is
+ * redacted first and cut afterwards (see redactedPrefix), as the escapes of escapeReplyInput are added after the
+ * redaction. The typed text itself is cut at maxMessageLength before anything can redact it, so a key that runs
+ * over the cut is a fragment in it that is too short to be recognized. It is the text that replaces the typed one
+ * in the message of an error from the command that typed it.
+ */
+function typedReplyForLog(
+  text: string,
+  platform: string,
+  config: Pick<ReplyListenerDaemonConfig, "includePrefix" | "maxMessageLength">,
+): string {
+  return redactedPrefix(
+    stripReplyInput(prefixedReply(text, platform, config)),
+    config.maxMessageLength,
+    escapeReplyInput,
+  );
+}
+
+/** For the steps that buildReplyInjectionSteps made: the log form of the reply they type (see typedReplyForLog). */
+const loggedReplies = new WeakMap<readonly ReplyInjectionStep[], () => string>();
+
+/** The log form of the reply that `steps` type, made from the whole reply, or undefined for steps built by hand. */
+function loggedReplyOf(steps: readonly ReplyInjectionStep[]): string | undefined {
+  return loggedReplies.get(steps)?.();
 }
 
 /**
@@ -671,6 +715,7 @@ export function buildReplyInjectionSteps(
     0,
     config.maxMessageLength,
   );
+  let steps: ReplyInjectionStep[];
 
   if (
     mapping?.event === "ask-user-question" &&
@@ -681,7 +726,7 @@ export function buildReplyInjectionSteps(
       0,
       Math.floor(mapping.askUserQuestionOptionCount ?? 0),
     );
-    return [
+    steps = [
       ...Array.from({ length: optionCount }, () => ({
         kind: "key" as const,
         value: "Down",
@@ -690,12 +735,14 @@ export function buildReplyInjectionSteps(
       { kind: "literal", value: truncated },
       { kind: "key", value: "Enter" },
     ];
+  } else {
+    steps = [
+      { kind: "literal", value: truncated },
+      { kind: "key", value: "Enter" },
+    ];
   }
-
-  return [
-    { kind: "literal", value: truncated },
-    { kind: "key", value: "Enter" },
-  ];
+  loggedReplies.set(steps, () => typedReplyForLog(text, platform, config));
+  return steps;
 }
 
 export function sendReplyInjectionSteps(
@@ -779,7 +826,7 @@ export async function injectReplyIntoHerdrPane(
     return true;
   } catch (error) {
     log(
-      `ERROR: Failed to inject reply into herdr pane ${paneId}: ${herdrErrorText(error, preview)}`,
+      `ERROR: Failed to inject reply into herdr pane ${paneId}: ${herdrErrorText(error, preview, loggedReplyOf(steps))}`,
     );
     return false;
   }
