@@ -30,6 +30,7 @@ let counter = 0;
 //   sweep-observed      right after the stat of the directory PAUSE_MATCH (the sweep reading the age of a session directory)
 //   before-event-publish  before the temporary file of an event (<key>.events/<name>.json.tmp) is renamed to its name: the event is written
 //                       and its call time is fixed, but it is not visible yet
+//   short-writes        no hold: every writeSync of the process stores at most N bytes (N = PAUSE_MATCH; 0 stores none), as a disk that is filling up can
 //   before-session-write  before the first file of a call is opened inside the session tree: the claim of a task number (<session>/_task/<id>.json) or the
 //                       temporary file of an event; the directory of the writer was made just before, so the sweep can move it away now
 // The process writes PAUSE_MARK and waits until PAUSE_GO exists (with several kinds both names get the suffix ".<kind>").
@@ -78,6 +79,15 @@ if (kinds.includes('before-publish')) {
 if (kinds.includes('before-event-publish')) {
   const rename = fs.renameSync;
   fs.renameSync = (from, to, ...rest) => { if (typeof from === 'string' && /\\.events\\/[^/]+\\.json\\.tmp$/.test(from)) hold('before-event-publish'); return rename(from, to, ...rest); };
+}
+if (kinds.includes('short-writes')) {
+  const write = fs.writeSync;
+  const most = Number(PAUSE_MATCH);
+  fs.writeSync = (fd, data, ...rest) => {
+    if (typeof data === 'string') { const bytes = Buffer.from(data, 'utf8'); return most === 0 ? 0 : write(fd, bytes, 0, Math.min(bytes.length, most)); }
+    const [offset = 0, length = data.length - offset, ...tail] = rest;
+    return most === 0 ? 0 : write(fd, data, offset, Math.min(length, most), ...tail);
+  };
 }
 if (kinds.includes('before-session-write')) {
   const open = fs.openSync;
@@ -484,5 +494,43 @@ describe('task-list sweep: a hook writes while the sweep judges the session dire
     const rows = existsSync(join(logs, 'task-list.jsonl')) ? readFileSync(join(logs, 'task-list.jsonl'), 'utf8') : '';
     expect(rows).not.toContain('event_write_failed');
     expect(readdirSync(join(logs, 'lists')).filter((n) => n.endsWith('.sweeping'))).toEqual([]);
+  }, TOTAL_MS);
+});
+
+describe('task-list writes: a write that stores fewer bytes than it was given', () => {
+  const run = async (data, most) => {
+    counter += 1;
+    const dir = join(TMP, `short-${counter}`);
+    mkdirSync(dir, { recursive: true });
+    const logs = join(dir, 'logs');
+    const env = baseEnv(logs);
+    const files = (name) => join(dir, name);
+    const w = startChild(dir, { kind: 'record', data, done: files('w-done') }, { kind: 'short-writes', match: String(most), mark: files('w-paused'), go: files('w-go') }, env);
+    const result = await w.exited;
+    expect(result.code, result.stderr).toBe(0);
+    const session = join(logs, 'lists', 'race-session');
+    const rows = existsSync(join(logs, 'task-list.jsonl')) ? readFileSync(join(logs, 'task-list.jsonl'), 'utf8') : '';
+    return { session, rows };
+  };
+
+  // Everything the call writes goes through writeSync: the token of the lock, the claim of the task number and the event. Each is checked in
+  // the file it ends in: a lock token cut short only stops the fold from publishing, and a claim is never read back by the library.
+  it.each([
+    ['TodoWrite', { session_id: 'race-session', tool_name: 'TodoWrite', tool_input: { todos: [{ content: 'from the writer', status: 'pending' }] }, tool_use_id: 'toolu_s1' }, false],
+    ['TaskCreate', task('from the writer', 2), true],
+  ])('a %s call written five bytes at a time is saved whole', async (_name, data, claims) => {
+    const { session, rows } = await run(data, 5);
+    const record = JSON.parse(readFileSync(join(session, 'main.json'), 'utf8'));
+    expect(record.items.map((x) => x.content)).toEqual(['from the writer']);
+    expect(readdirSync(join(session, 'main.events'))).toEqual([]);
+    if (claims) expect(JSON.parse(readFileSync(join(session, '_task', '2.json'), 'utf8'))).toEqual({ agent: 'main' });
+    expect(rows).not.toMatch(/event_write_failed|lock_error|write_failed/);
+  }, TOTAL_MS);
+
+  it('a write that stores nothing ends the call at once: a log row, no event, no temporary file left', async () => {
+    const { session, rows } = await run({ session_id: 'race-session', tool_name: 'TodoWrite', tool_input: { todos: [{ content: 'never stored', status: 'pending' }] }, tool_use_id: 'toolu_s2' }, 0);
+    expect(rows).toContain('event_write_failed');
+    expect(readdirSync(join(session, 'main.events'))).toEqual([]);
+    expect(existsSync(join(session, 'main.json'))).toBe(false);
   }, TOTAL_MS);
 });

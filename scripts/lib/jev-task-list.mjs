@@ -138,6 +138,18 @@ function breakStaleLock(lockPath, staleMs = LOCK_STALE_MS) {
   });
 }
 
+// Writes all of `text` to the open file. writeSync may store fewer bytes than it was given without an error (a disk that is filling up, an
+// interrupted call), and a file closed after that is cut short: a lock token that is not its owner's, a claim that is not JSON, and an event
+// that would be published truncated and skipped by every reader for good. The count it returns is checked and the rest is written.
+function writeAll(fd, text) {
+  const bytes = Buffer.from(text, 'utf8');
+  for (let at = 0; at < bytes.length;) {
+    const written = writeSync(fd, bytes, at, bytes.length - at);
+    if (!(written > 0)) throw new Error('write stored no bytes');
+    at += written;
+  }
+}
+
 // Runs fn under <path>.lock (the lock file holds a random token; only its owner removes it). false when the lock was not taken in time
 // or fn threw; the call then changes nothing. fn gets owned(): true while the lock file still holds this token. staleMs: the age after
 // which a lock counts as a dead holder's.
@@ -149,7 +161,7 @@ export function withFileLock(path, fn, env = process.env, staleMs = LOCK_STALE_M
   for (;;) {
     try {
       const fd = openSync(lockPath, 'wx', 0o600);
-      try { writeSync(fd, token); } finally { closeSync(fd); }
+      try { writeAll(fd, token); } finally { closeSync(fd); }
       break;
     } catch (error) {
       if (error?.code !== 'EEXIST') { storeEvent('lock_error', path, env); return false; }
@@ -341,7 +353,7 @@ function claimTask(sessionId, taskId, key, env) {
     inSessionDir(() => {
       mkdirSync(join(dir, '_task'), { recursive: true });
       const fd = openSync(join(dir, '_task', `${taskId}.json`), 'wx', 0o600); // the first creator wins; the store numbers tasks once per session
-      try { writeSync(fd, JSON.stringify({ agent: key })); } finally { closeSync(fd); }
+      try { writeAll(fd, JSON.stringify({ agent: key })); } finally { closeSync(fd); }
     });
     return true;
   } catch {
@@ -520,9 +532,14 @@ function writeEvent(dir, data, key, env, now) {
     inSessionDir(() => {
       mkdirSync(dir, { recursive: true });
       const tmp = join(dir, `${name}.tmp`);
-      const fd = openSync(tmp, 'wx', 0o600);
-      try { writeSync(fd, body); } finally { closeSync(fd); }
-      renameSync(tmp, join(dir, name));
+      try {
+        const fd = openSync(tmp, 'wx', 0o600);
+        try { writeAll(fd, body); } finally { closeSync(fd); }
+        renameSync(tmp, join(dir, name));
+      } catch (error) {
+        try { unlinkSync(tmp); } catch { /* never created, or moved away with its directory */ }
+        throw error;
+      }
     });
     return true;
   } catch {
