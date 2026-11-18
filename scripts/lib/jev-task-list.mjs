@@ -426,7 +426,7 @@ export function sweep(env, now) {
 }
 
 // --- event journal ------------------------------------------------------------------------
-// Every list call is one file <key>.events/<ms>-<pid>-<id>.json, written without a lock (temp file, then rename), so a lock that is not
+// Every list call is one file <key>.events/<ms>-<tick>-<pid>-<id>.json, written without a lock (temp file, then rename), so a lock that is not
 // taken in time loses nothing. The list <key>.json is the fold of the events in name order (time of the call), written under the lock
 // together with the names it folded (`folded`, the newest EVENTS_KEPT); the folded files are then removed. A reader folds the list plus
 // the events not yet folded. One file per event instead of one appended journal: trimming an appended file while other processes append
@@ -438,7 +438,9 @@ const EVENTS_READ_MAX = 5000;
 // held-up hook can be is bounded by the host, which stops a hook after 3 s; an event more than LATE_EVENT_MS older than the newest
 // one folded comes from a clock that was set back, not from a held-up hook, and is applied as any other.
 export const LATE_EVENT_MS = 10_000;
-const EVENT_NAME = /^\d{13}-\d{1,10}-[0-9a-f]{8}\.json$/;
+// <tick> is the monotonic clock of the host in nanoseconds (shared by the processes of the machine), so that two calls of one millisecond
+// have a fixed order in their names; a name without it (an event of an earlier version) is still read.
+const EVENT_NAME = /^\d{13}-(?:\d{20}-)?\d{1,10}-[0-9a-f]{8}\.json$/;
 export const eventsDir = (path) => (path ? path.replace(/\.json$/, '.events') : null);
 
 // What of a tool input goes to disk in an event: only the fields nextList reads (and of a task only content, subject, status and note),
@@ -482,6 +484,7 @@ function persistedInput(tool, input) {
 
 // Writes the event of one list call; the TaskCreate claim happens here once, the event keeps the claimed id. false when nothing was written.
 function writeEvent(dir, data, key, env, now) {
+  const tick = process.hrtime.bigint().toString().padStart(20, '0'); // taken at the start of the call, before anything that can hold the hook up
   let taskId;
   if (data.tool_name === 'TaskCreate') {
     taskId = taskIdOf(data.tool_response);
@@ -496,7 +499,7 @@ function writeEvent(dir, data, key, env, now) {
     prompt_id: idText(data.prompt_id),
     ...(taskId ? { task_id: taskId } : {}),
   };
-  const name = `${String(now).padStart(13, '0')}-${process.pid}-${id}.json`;
+  const name = `${String(now).padStart(13, '0')}-${tick}-${process.pid}-${id}.json`;
   try {
     const body = JSON.stringify(event);
     // an event the reader would refuse is never written: it would stay on disk, unread, for good
@@ -578,6 +581,8 @@ function fold(path, key, env) {
   let changed = false;
   let lastEvent = Number.isFinite(start.record?.last_event_ms) ? start.record.last_event_ms : 0;
   let lastReplace = Number.isFinite(start.record?.last_replace_ms) ? start.record.last_replace_ms : 0;
+  let lastEventName = typeof start.record?.last_event_name === 'string' ? start.record.last_event_name : '';
+  let lastReplaceName = typeof start.record?.last_replace_name === 'string' ? start.record.last_replace_name : '';
   let late = 0;
   const names = [];
   for (const { name, event } of events) {
@@ -586,17 +591,22 @@ function fold(path, key, env) {
     const replaces = replacesList(event.tool_name, event.tool_input);
     const older = (replaces ? lastEvent : lastReplace) - ms;
     names.push(name);
-    if (older > 0 && older <= LATE_EVENT_MS) { late += 1; continue; }
+    // within one millisecond the order of two calls is the order of their names (the tick, then the process), as when both are pending in one fold
+    if (older > 0 ? older <= LATE_EVENT_MS : older === 0 && name < (replaces ? lastEventName : lastReplaceName)) { late += 1; continue; }
     const next = applyEvent(broken ? null : record, event, key, env, broken);
     if (next !== record && next) {
       record = next;
       broken = false;
       changed = true;
-      if (replaces) lastReplace = Math.max(lastReplace, ms);
+      if (replaces) {
+        lastReplace = Math.max(lastReplace, ms);
+        if (ms === lastReplace && name > lastReplaceName) lastReplaceName = name;
+      }
     }
     lastEvent = Math.max(lastEvent, ms);
+    if (ms === lastEvent && name > lastEventName) lastEventName = name;
   }
-  if (changed) record = { ...record, last_event_ms: lastEvent, last_replace_ms: lastReplace };
+  if (changed) record = { ...record, last_event_ms: lastEvent, last_replace_ms: lastReplace, last_event_name: lastEventName, last_replace_name: lastReplaceName };
   return { record, broken, names, changed, done, generation: generationOf(start), late };
 }
 

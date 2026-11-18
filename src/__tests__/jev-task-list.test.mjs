@@ -895,11 +895,69 @@ describe('task list: an event that becomes visible after a later call was folded
     expect(eventFiles(sid, 'main')).toEqual([]);
   });
 
-  it('calls in the same millisecond are in order of arrival, not late', () => {
+  it('calls in the same millisecond are in order of arrival (the monotonic tick in the name), not late', () => {
     const sid = session();
-    write(sid, 'First', 'pending', T);
-    write(sid, 'Second', 'pending', T);
-    expect(contents(sid)).toEqual(['Second']);
+    for (let i = 0; i < 25; i += 1) {
+      write(sid, `Call ${i}`, 'pending', T);
+      expect(contents(sid), `call ${i}`).toEqual([`Call ${i}`]);
+    }
+  });
+
+  // The calls of the grid are A (the earlier by name) and B (the later). Both orders of publication must give the list that one fold of
+  // both gives: B folded first and A visible afterwards (a held-up hook), whatever the two calls are and whether they share a millisecond.
+  describe('a held-up call of the same millisecond or the one before gives the list of the fold that saw both (a held-up replacement is not applied over a part-changing call folded before it)', () => {
+    const kinds = {
+      replace: (label, id) => ({ tool_name: 'TodoWrite', tool_input: { todos: [{ content: label, status: 'pending' }] } }),
+      create: (label, id) => ({ tool_name: 'TaskCreate', tool_input: { subject: label }, task_id: String(id) }),
+    };
+    const publish = (sid, ms, tick, pid, kind, label, id) => {
+      const dir = join(LOGS, 'lists', sid, 'main.events');
+      mkdirSync(dir, { recursive: true });
+      const evId = String(id).padStart(8, 'a');
+      const event = { ts: new Date(ms).toISOString(), pid, id: evId, session_id: sid, agent_type: null, tool_use_id: null, prompt_id: null, ...kinds[kind](label, id) };
+      const name = `${String(ms).padStart(13, '0')}-${String(tick).padStart(20, '0')}-${pid}-${evId}.json`;
+      writeFileSync(join(dir, name), JSON.stringify(event));
+    };
+    const places = [
+      ['the same millisecond', 0],
+      ['the millisecond before', 1],
+    ];
+    for (const [placeLabel, gap] of places) {
+      for (const first of Object.keys(kinds)) {
+        for (const second of Object.keys(kinds)) {
+          it(`A ${first} then B ${second}, ${placeLabel}`, () => {
+            const run = (heldUp) => {
+              const sid = session();
+              publish(sid, T + 5000 - gap, 100, 11, first, 'from A', 'aa1');
+              publish(sid, T + 5000, 200, 12, second, 'from B', 'bb2');
+              if (!heldUp) return contents(sid);
+              // the same two calls, with A visible only after B was folded
+              const sid2 = session();
+              publish(sid2, T + 5000, 200, 12, second, 'from B', 'bb2');
+              L.syncList(sid2, 'main', env());
+              publish(sid2, T + 5000 - gap, 100, 11, first, 'from A', 'aa1');
+              L.syncList(sid2, 'main', env());
+              expect(eventFiles(sid2, 'main')).toEqual([]);
+              return contents(sid2);
+            };
+            // the one deliberate difference: a replacement that was held up is not applied over a part-changing call folded before it
+            // (it would undo that call, as the call it is older than is a later state of the list), whether in one millisecond or not
+            const expected = first === 'replace' && second === 'create' ? ['from B'] : run(false).sort();
+            expect(run(true).sort()).toEqual(expected);
+          });
+        }
+      }
+    }
+
+    it('a held-up call that replaces the list is dropped, not applied, when the call after it in the same millisecond was folded first', () => {
+      const sid = session();
+      publish(sid, T + 5000, 200, 12, 'replace', 'from B', 'bb2');
+      L.syncList(sid, 'main', env());
+      publish(sid, T + 5000, 100, 11, 'replace', 'from A', 'aa1');
+      expect(contents(sid)).toEqual(['from B']);
+      L.syncList(sid, 'main', env());
+      expect(contents(sid)).toEqual(['from B']);
+    });
   });
 
   it('a call more than LATE_EVENT_MS older than the newest folded one comes from a clock set back, not from a held-up hook, and is applied', () => {
