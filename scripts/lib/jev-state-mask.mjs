@@ -229,8 +229,8 @@ export const CREDENTIAL_OPTIONS = Object.freeze([
 const PROGRAM_KINDS = Object.keys(PROGRAMS);
 // What the program of a command looks like: in an array the base name of an argument (see programsOf), in text a word of its own.
 const PROGRAM_NAME = Object.fromEntries(PROGRAM_KINDS.map((kind) => [kind, new RegExp(`^(?:${PROGRAMS[kind].join('|')})(?![a-z0-9_])`, 'i')]));
-// In text: a quote, the end of a command, or a program (what the scan of programSeenAt looks for).
-const PROGRAM_EVENTS = Object.fromEntries(PROGRAM_KINDS.map((kind) => [kind, new RegExp(`(['"])|([\\n|;&])|(?<![A-Za-z0-9_])(?:${PROGRAMS[kind].join('|')})(?![A-Za-z0-9_])`, 'gi')]));
+// In text: a program of the kind, as a word of its own (what the lexer reports, see lexShell).
+const PROGRAM_EVENTS = Object.fromEntries(PROGRAM_KINDS.map((kind) => [kind, new RegExp(`(?<![A-Za-z0-9_])(?:${PROGRAMS[kind].join('|')})(?![A-Za-z0-9_])`, 'gi')]));
 const OPTION_RULES = CREDENTIAL_OPTIONS.map((option) => {
   const long = option.names !== undefined;
   const name = long ? `--(?:${option.names.join('|')})` : `-${option.flags ? `[${option.flags}]*` : ''}${option.letter}`;
@@ -252,15 +252,17 @@ const OPTION_RULES = CREDENTIAL_OPTIONS.map((option) => {
  * The credential of a value of an option, replaced: all of it ('all'), or the password of `name:password` ('user': the part after the
  * first colon; no colon, or nothing after it, leaves the value as it is). A value in quotes keeps its closing quote, and what closes a
  * list or a call after it (a "-u", "name:password", of a list written out as text), so that the quotes of the text stay in pairs.
+ * `closeAt(i)` tells where the quote that opens at index i of the value closes (-1: nowhere), as the lexer reads it.
  */
-function maskCredential(kind, value) {
+function maskCredential(kind, value, closeAt = (i) => lexShell(value).closeAt(i)) {
   if (kind === 'all') return MASKED_VALUE;
   const colon = value.indexOf(':');
   if (colon === -1) return value;
-  // the value may open with an = (-u='name:password'), then the quote
-  const at = value[0] === '=' ? 1 : 0;
+  // the value may open with an = (-u='name:password'), then the quote, which a $ may stand before ($'name:password')
+  let at = value[0] === '=' ? 1 : 0;
+  if (value[at] === '$' && value[at + 1] === "'") at++;
   const quote = value[at] === "'" || value[at] === '"' ? value[at] : '';
-  const close = quote ? value.indexOf(quote, at + 1) : -1;
+  const close = quote ? closeAt(at) : -1;
   if (close !== -1 && colon < close) {
     if (colon === close - 1) return value;
     const after = value.slice(close + 1);
@@ -269,102 +271,273 @@ function maskCredential(kind, value) {
   return colon === value.length - 1 ? value : value.slice(0, colon + 1) + MASKED_VALUE;
 }
 
-/**
- * The end of the word of a shell that starts at `start`: a quoted part (which may hold white space) and a backslash escape belong to
- * it. A quote that opens the word and never closes takes the rest of the text (fail closed); one inside the word that never closes
- * closes the quotes the whole command is in (sh -c "mysql -px"), so the word ends before it and the quotes stay in pairs.
- */
-function wordEnd(text, start) {
-  let i = start;
-  while (i < text.length) {
-    const c = text[i];
-    if (c === "'" || c === '"') {
-      const close = text.indexOf(c, i + 1);
-      if (close === -1) return i === start ? text.length : i;
-      i = close + 1;
-    } else if (c === '\\') {
-      i += 2;
-    } else if (/\s/.test(c)) {
-      break;
-    } else {
-      i++;
-    }
-  }
-  return Math.min(i, text.length);
-}
-
 /** The first index at or after `i` that is no space or tab (and no comma, between the elements of a list written out as text). */
 function skipBlanks(text, i, comma) {
   while (i < text.length && (text[i] === ' ' || text[i] === '\t' || (comma && text[i] === ','))) i++;
   return i;
 }
 
+// The kinds of region that the lexer opens. A quote of an outer shell holds the text of an inner one (sh -c "mysql -p x") or of JSON:
+// the pass does not read inside it (OPAQUE), and a word that starts there ends at its close.
+const SQ = 1;
+const ANSI = 2;
+const DQ = 3;
+const SUB = 4;
+const BACK = 5;
+const GROUP = 6;
+const LEX_MAX_DEPTH = 64;
+const WHITE = /\s/;
+
 /**
- * For a text: a function that tells, at an offset (the offsets it is asked for only grow), whether a program of the kind was named
- * in the same command before it. A command ends at a new line, `|`, `;` or `&` that is not inside quotes; a program counts inside
- * quotes too (sh -c "mysql -p..."). One pass over the text.
+ * THE lexer of this file: one linear pass over a text as a POSIX shell reads it, with no backtracking, and every rule that needs the
+ * end of a quote, the end of a word, the end of a command or the program of a command asks it (nothing else looks for one). It knows
+ * single quotes (no escapes inside), double quotes (a backslash escapes the next character, `$(` and a back quote open a region
+ * inside), ANSI-C quotes $'...' (a backslash escapes), a backslash outside quotes (it is part of the word), `$(...)`, back quotes and
+ * (...) groups, and a word is what runs to white space outside all of these: `a"b c"d` is one word. A command ends at a new line,
+ * `;`, `&` or `|` that is outside quotes, and a region of commands ($( ), ` ` and ( )) is a command of its own whose end gives the
+ * outer command back, so `curl $(a; b) -U u:p` is still curl. A quote that never closes runs to the end of the text (fail closed), and
+ * so does everything beyond the nesting depth LEX_MAX_DEPTH. Returns:
+ *   closeAt(i)       the index of the quote that closes the quote opening at i, or -1;
+ *   wordEnd(start)   the end of the word that starts at `start`; a word that starts inside the quotes of an outer shell ends at their
+ *                    close, and a quote or a backslash in that text, which is a shell of its own, takes the rest of it (fail closed);
+ *   programSeenAt(kind)  a function that tells, at an offset (they only grow), whether a program of the kind (PROGRAMS) was named in
+ *                    the same command before it; a program counts inside quotes too.
  */
-function programSeenAt(text, kind) {
-  const at = [];
-  const named = [];
-  let quoteEnd = -1;
-  for (const found of text.matchAll(PROGRAM_EVENTS[kind])) {
-    if (found[1] !== undefined) {
-      if (found.index > quoteEnd) {
-        const close = text.indexOf(found[1], found.index + 1);
-        quoteEnd = close === -1 ? text.length : close;
-      }
-    } else if (found[2] === undefined || found.index > quoteEnd) {
-      at.push(found.index);
-      named.push(found[2] === undefined);
+function lexShell(text) {
+  const n = text.length;
+  // close[i] is one more than the index of the character that closes the region opened at i (-1: it opened and never closes, 0: none opened)
+  const close = new Int32Array(n + 1);
+  const regionOpen = [];
+  const regionKind = [];
+  const regionParent = [];
+  const regionClose = [];
+  const stack = [];
+  // pairs of [index, what]: 0 a command ends, 1 a region of commands opens, 2 it closes
+  const marks = [];
+  let tooDeep = -1;
+  const open = (kind, at) => {
+    if (stack.length >= LEX_MAX_DEPTH) {
+      tooDeep = at;
+      return;
+    }
+    regionParent.push(stack.length > 0 ? stack[stack.length - 1] : -1);
+    stack.push(regionOpen.length);
+    regionOpen.push(at);
+    regionKind.push(kind);
+    regionClose.push(-1);
+    close[at] = -1;
+    if (kind >= SUB) marks.push(at, 1);
+  };
+  const shut = (at) => {
+    const id = stack.pop();
+    regionClose[id] = at;
+    close[regionOpen[id]] = at + 1;
+    if (regionKind[id] >= SUB) marks.push(at, 2);
+  };
+  let dollar = -2;
+  let i = 0;
+  while (i < n && tooDeep < 0) {
+    const kind = stack.length > 0 ? regionKind[stack[stack.length - 1]] : 0;
+    if (kind === SQ) {
+      const end = text.indexOf("'", i);
+      if (end === -1) break;
+      shut(end);
+      i = end + 1;
+      continue;
+    }
+    const c = text[i];
+    if (kind === ANSI || kind === DQ) {
+      if (c === '\\') i += 2;
+      else if (c === (kind === ANSI ? "'" : '"')) {
+        shut(i);
+        i++;
+      } else if (kind === DQ && c === '$' && text[i + 1] === '(') {
+        open(SUB, i + 1);
+        i += 2;
+      } else if (kind === DQ && c === '`') {
+        open(BACK, i);
+        i++;
+      } else i++;
+      continue;
+    }
+    // a region of commands, or the top
+    if (c === '\\') i += 2;
+    else if (c === "'") {
+      open(dollar === i - 1 ? ANSI : SQ, i);
+      i++;
+    } else if (c === '"') {
+      open(DQ, i);
+      i++;
+    } else if (c === '`') {
+      if (kind === BACK) shut(i);
+      else open(BACK, i);
+      i++;
+    } else if (c === '$') {
+      dollar = i;
+      if (text[i + 1] === '(') {
+        open(SUB, i + 1);
+        i += 2;
+      } else i++;
+    } else if (c === '(') {
+      open(GROUP, i);
+      i++;
+    } else if (c === ')') {
+      if (kind === SUB || kind === GROUP) shut(i);
+      i++;
+    } else {
+      if (c === ';' || c === '&' || c === '|' || c === '\n') marks.push(i, 0);
+      i++;
     }
   }
-  let next = 0;
-  let seen = false;
-  return (offset) => {
-    while (next < at.length && at[next] < offset) seen = named[next++];
-    return seen;
+
+  // The innermost region that holds index p (-1: none): the last region that opened before p, or the nearest one around it that is
+  // still open at p. The nesting is bounded, so this is a short walk.
+  const innermost = (p) => {
+    let lo = 0;
+    let hi = regionOpen.length - 1;
+    let found = -1;
+    while (lo <= hi) {
+      const mid = (lo + hi) >> 1;
+      if (regionOpen[mid] < p) {
+        found = mid;
+        lo = mid + 1;
+      } else hi = mid - 1;
+    }
+    while (found !== -1 && regionClose[found] !== -1 && regionClose[found] < p) found = regionParent[found];
+    return found;
+  };
+  const limitOf = (region) => (region === -1 || regionClose[region] === -1 ? n : regionClose[region]);
+  const programIndexes = new Map();
+
+  return {
+    text,
+    // whether a quote opens at `at` (it may never close)
+    opens(at) {
+      if (close[at] !== 0) return true;
+      const quote = text[at];
+      if (tooDeep >= 0 && at >= tooDeep) return false;
+      // a quote that the pass did not open stands inside the text of an outer quote (the words of an inner shell, a JSON string), where
+      // it opens one of its own; anywhere else it closes a quote and opens nothing
+      if (quote !== '"' && quote !== "'") return false;
+      const region = innermost(at);
+      return region !== -1 && regionKind[region] <= DQ;
+    },
+    // the index of the quote that closes the one opening at `at` (-1: it never closes, or none opens there)
+    closeAt(at) {
+      if (close[at] > 0) return close[at] - 1;
+      if (close[at] < 0 || !this.opens(at)) return -1;
+      // closes at its own next quote, within the text it stands in
+      const quote = text[at];
+      for (let j = at + 1, limit = limitOf(innermost(at)); j < limit; j++) {
+        if (text[j] === '\\' && quote === '"') j++;
+        else if (text[j] === quote) return j;
+      }
+      return -1;
+    },
+    wordEnd(start) {
+      if (tooDeep >= 0 && start >= tooDeep) return n;
+      const region = innermost(start);
+      const limit = limitOf(region);
+      const opaque = region !== -1 && regionKind[region] <= DQ;
+      let j = start;
+      while (j < limit) {
+        const c = text[j];
+        if (WHITE.test(c)) break;
+        if (opaque) {
+          // the text of an inner shell: its quotes and escapes are not read here, the word takes the rest of the text (fail closed)
+          if (c === "'" || c === '"' || c === '\\' || c === '`' || (c === '$' && text[j + 1] === '(')) return limit;
+          j++;
+        } else if (c === '\\') j += 2;
+        else if (c === "'" || c === '"' || c === '`') {
+          if (close[j] < 1) return limit;
+          j = close[j];
+        } else if (c === '(' || (c === '$' && text[j + 1] === '(')) {
+          const at = c === '(' ? j : j + 1;
+          if (close[at] > 0) j = close[at];
+          else if (c === '(') j++;
+          else return limit;
+        } else j++;
+      }
+      return Math.min(j, limit);
+    },
+    programSeenAt(kind) {
+      let programs = programIndexes.get(kind);
+      if (programs === undefined) {
+        programs = Array.from(text.matchAll(PROGRAM_EVENTS[kind]), (found) => found.index);
+        programIndexes.set(kind, programs);
+      }
+      const seen = [false];
+      let p = 0;
+      let m = 0;
+      return (offset) => {
+        if (tooDeep >= 0 && offset >= tooDeep) return true;
+        for (;;) {
+          const nextProgram = p < programs.length ? programs[p] : Infinity;
+          const nextMark = m < marks.length ? marks[m] : Infinity;
+          if (Math.min(nextProgram, nextMark) >= offset) break;
+          if (nextMark < nextProgram) {
+            const what = marks[m + 1];
+            if (what === 0) seen[seen.length - 1] = false;
+            else if (what === 1) seen.push(false);
+            else if (seen.length > 1) seen.pop();
+            m += 2;
+          } else {
+            seen[seen.length - 1] = true;
+            p++;
+          }
+        }
+        return seen[seen.length - 1];
+      };
+    },
   };
 }
 
 /** The text with the credential of every option of the table replaced, in every way the option can be written (see CREDENTIAL_OPTIONS). */
 function maskOptions(text) {
   let result = text;
+  let lexed;
   for (const rule of OPTION_RULES) {
     const pattern = rule.text;
     pattern.lastIndex = 0;
     let out = '';
     let last = 0;
     let seenAt;
+    let lex;
     for (let found = pattern.exec(result); found !== null; found = pattern.exec(result)) {
+      // the one lexer, for the text as it stands (made when a rule first needs it, again after a rule has changed the text)
+      if (lexed?.text !== result) lexed = lexShell(result);
+      lex = lexed;
       if (rule.program !== undefined) {
-        seenAt ??= programSeenAt(result, rule.program);
+        seenAt ??= lex.programSeenAt(rule.program);
         if (!seenAt(found.index)) continue;
       }
       let start = found.index + found[0].length;
       let end;
       const quote = found.index > 0 ? result[found.index - 1] : '';
-      if (quote === "'" || quote === '"') {
+      if ((quote === "'" || quote === '"') && lex.opens(found.index - 1)) {
         // the option is quoted itself: its value is inside the same quotes ("--user=u:p w", "-pa b") or it is the next element ('-u' 'u:p', "-p", "x")
-        if (result[start] === quote) {
+        const close = lex.closeAt(found.index - 1);
+        if (close === start) {
           start = skipBlanks(result, start + 1, true);
-          end = wordEnd(result, start);
+          end = lex.wordEnd(start);
         } else {
           start = result[start] === '=' && rule.long ? start + 1 : skipBlanks(result, start, false);
-          const close = result.indexOf(quote, start);
           end = close === -1 ? result.length : close;
         }
       } else if (rule.long) {
         if (result[start] === '=') start++;
         else if (result[start] === ' ' || result[start] === '\t') start = skipBlanks(result, start, false);
         else continue;
-        end = wordEnd(result, start);
+        end = lex.wordEnd(start);
       } else {
         start = skipBlanks(result, start, false);
-        end = wordEnd(result, start);
+        end = lex.wordEnd(start);
       }
       if (end <= start) continue;
-      out += result.slice(last, start) + maskCredential(rule.value, result.slice(start, end));
+      out += result.slice(last, start) + maskCredential(rule.value, result.slice(start, end), (i) => {
+        const at = lex.closeAt(start + i);
+        return at === -1 ? -1 : at - start;
+      });
       last = end;
       pattern.lastIndex = end;
     }
