@@ -2675,8 +2675,9 @@ let contextText = null;
 // (see planEntryAllowed): every entry on the way must be a path that ends in .md inside the real plans directory, and the
 // entry that ends the chain must be a regular file or must not exist yet. A link that cannot be resolved, a link that loops
 // and a directory are denied. Every text among file_path, filePath, notebook_path, path and file (the names the hooks of
-// this plugin read) must pass, because the tool may act on any of them; a call with none of them readable passes. Anything
-// else unreadable passes (fail-open). With the guard on, each call of a guarded tool adds one row to
+// this plugin read), in tool_input and in toolInput, must pass, because the tool may act on any of them; a call with none of
+// them readable passes. The agent is guarded when agent_type or agentType is in the list. Anything else unreadable passes
+// (fail-open). With the guard on, each call of a guarded tool adds one row to
 // plan-write-guard.jsonl in OMC_JEV_LOG_DIR or <state dir>/jev, with decision allow or deny; a call without agent_type or
 // with another agent_type adds one row with decision allow and a reason.
 const PLAN_WRITE_TOOLS = new Set(['Write', 'Edit', 'MultiEdit', 'NotebookEdit']);
@@ -2804,9 +2805,10 @@ function appendPlanWriteGuardRow(data, toolName, stateDir, row) {
 function evaluatePlanWriteGuard(toolName, data, directory, stateDir) {
   if (process.env.OMC_PLANNER_WRITE_GUARD !== '1' || !PLAN_WRITE_TOOLS.has(toolName)) return null;
   try {
-    const rawType = data?.agent_type ?? data?.agentType;
-    const agentType = typeof rawType === 'string' ? rawType.trim() : '';
-    if (!agentType || !planWriteGuardTypes().includes(agentType)) {
+    const guardedTypes = planWriteGuardTypes();
+    const agentTypes = [data?.agent_type, data?.agentType].filter((value) => typeof value === 'string').map((value) => value.trim()).filter(Boolean);
+    const agentType = agentTypes.find((name) => guardedTypes.includes(name)) ?? agentTypes[0] ?? '';
+    if (!agentType || !guardedTypes.includes(agentType)) {
       appendPlanWriteGuardRow(data, toolName, stateDir, {
         agent_type: agentType ? agentType.slice(0, 200) : null,
         decision: 'allow',
@@ -2814,9 +2816,10 @@ function evaluatePlanWriteGuard(toolName, data, directory, stateDir) {
       });
       return null;
     }
-    const toolInput = data.tool_input ?? data.toolInput;
-    if (toolInput === null || typeof toolInput !== 'object' || Array.isArray(toolInput)) return null;
-    const filePaths = PLAN_WRITE_PATH_FIELDS.map((field) => toolInput[field]).filter((value) => typeof value === 'string' && value.trim() !== '');
+    const filePaths = [data.tool_input, data.toolInput]
+      .filter((input) => input !== null && typeof input === 'object' && !Array.isArray(input))
+      .flatMap((input) => PLAN_WRITE_PATH_FIELDS.map((field) => input[field]))
+      .filter((value) => typeof value === 'string' && value.trim() !== '');
     if (filePaths.length === 0) return null;
     const cwd = typeof data.cwd === 'string' && data.cwd !== '' ? data.cwd : directory;
     const deniedPath = filePaths.find((candidate) => !planWritePathAllowed(candidate, cwd));

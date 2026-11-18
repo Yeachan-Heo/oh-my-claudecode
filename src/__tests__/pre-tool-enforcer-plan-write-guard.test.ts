@@ -75,10 +75,11 @@ interface CallOptions {
   extraEnv?: Record<string, string>;
   field?: string;
   input?: Record<string, unknown>;
+  extra?: Record<string, unknown>;
 }
 
 function callTool(tool: string, path: string, options: CallOptions = {}) {
-  const { agentType = PLANNER, guard = '1', extraEnv = {}, field, input } = options;
+  const { agentType = PLANNER, guard = '1', extraEnv = {}, field, input, extra = {} } = options;
   const key = field ?? (tool === 'NotebookEdit' ? 'notebook_path' : 'file_path');
   const payload: Record<string, unknown> = {
     hook_event_name: 'PreToolUse',
@@ -92,7 +93,7 @@ function callTool(tool: string, path: string, options: CallOptions = {}) {
     payload.agent_id = 'agent-1';
     payload.agent_type = agentType;
   }
-  return runHook(JSON.stringify(payload), {
+  return runHook(JSON.stringify({ ...payload, ...extra }), {
     ...extraEnv,
     OMC_PLANNER_WRITE_GUARD: guard === null ? undefined : guard,
   });
@@ -558,6 +559,74 @@ describe('plan write guard (pre-tool-enforcer.mjs)', () => {
       callTool('Write', '', { input: { file_path: inside(), path: inside() } });
       const added = logRows().slice(before);
       expect(added.map((row) => [row.decision, row.path])).toEqual([['deny', outside()], ['allow', inside()]]);
+    });
+  });
+
+  // The hook input may spell its keys in snake case or in camel case (agent_type or agentType, tool_input or toolInput).
+  // The guard reads both: the agent is guarded when either spelling is in the list, and every path text of either object
+  // must pass. A value that is empty, not a text or not an object is left out.
+  describe('the two spellings of the hook input keys', () => {
+    const inside = () => join(projectDir, '.omc', 'plans', 'spelling-plan.md');
+    const outside = () => join(projectDir, 'src', 'spelling-code.js');
+
+    it('guards the agent when either spelling of agent_type is in the list', () => {
+      const cases: Array<Record<string, unknown>> = [
+        { agentType: PLANNER },
+        { agent_type: PLANNER, agentType: 'other-agent' },
+        { agent_type: 'other-agent', agentType: PLANNER },
+        { agent_type: '', agentType: PLANNER },
+        { agent_type: '  ', agentType: PLANNER },
+        { agent_type: 7, agentType: PLANNER },
+        { agent_type: null, agentType: PLANNER },
+      ];
+      for (const extra of cases) {
+        const result = callTool('Write', outside(), { agentType: null, extra: { agent_id: 'agent-1', ...extra } });
+        expect(verdictOf(result), JSON.stringify(extra)).toBe('deny');
+      }
+    });
+
+    it('lets the call through when neither spelling is in the list or is a text', () => {
+      const cases: Array<Record<string, unknown>> = [
+        { agent_type: 'other-agent', agentType: 'another-agent' },
+        { agent_type: 7, agentType: 8 },
+        { agent_type: '', agentType: '' },
+        {},
+      ];
+      for (const extra of cases) {
+        const result = callTool('Write', outside(), { agentType: null, extra: { agent_id: 'agent-1', ...extra } });
+        expect(verdictOf(result), JSON.stringify(extra)).toBe('allow');
+      }
+    });
+
+    it('checks the path texts of both tool_input and toolInput', () => {
+      const cases: Array<[Record<string, unknown>, 'allow' | 'deny']> = [
+        [{ tool_input: {}, toolInput: { file_path: outside() } }, 'deny'],
+        [{ tool_input: { file_path: inside() }, toolInput: { file_path: outside() } }, 'deny'],
+        [{ tool_input: { file_path: outside() }, toolInput: { file_path: inside() } }, 'deny'],
+        [{ tool_input: null, toolInput: { file_path: outside() } }, 'deny'],
+        [{ tool_input: [], toolInput: { notebook_path: outside() } }, 'deny'],
+        [{ tool_input: 'text', toolInput: { path: outside() } }, 'deny'],
+        [{ tool_input: undefined, toolInput: { file_path: outside() } }, 'deny'],
+        [{ tool_input: undefined, toolInput: { file_path: inside() } }, 'allow'],
+        [{ tool_input: { file_path: inside() }, toolInput: { file_path: inside() } }, 'allow'],
+        [{ tool_input: { file_path: inside() }, toolInput: [] }, 'allow'],
+        [{ tool_input: [], toolInput: [] }, 'allow'],
+        [{ tool_input: undefined }, 'allow'],
+      ];
+      for (const [extra, expected] of cases) {
+        expect(verdictOf(callTool('Write', '', { extra })), JSON.stringify(extra)).toBe(expected);
+      }
+    });
+
+    it('logs the guarded type and the text that was denied', () => {
+      const before = logRows().length;
+      callTool('Write', outside(), { agentType: null, extra: { agent_id: 'agent-1', agent_type: 'other-agent', agentType: PLANNER } });
+      callTool('Write', '', { extra: { tool_input: { file_path: inside() }, toolInput: { file_path: outside() } } });
+      const added = logRows().slice(before);
+      expect(added.map((row) => [row.agent_type, row.decision, row.path])).toEqual([
+        [PLANNER, 'deny', outside()],
+        [PLANNER, 'deny', outside()],
+      ]);
     });
   });
 });
