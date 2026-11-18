@@ -1,5 +1,5 @@
 import { spawnSync } from 'node:child_process';
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, lutimesSync, readdirSync, writeFileSync } from 'node:fs';
+import { existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, lutimesSync, readdirSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -43,23 +43,36 @@ export const movedAside = (dir: string) => (existsSync(backupDir(dir)) ? readdir
 // command move nothing instead of acting on a partial set.
 export const PLUGIN_ID = 'oh-my-claudecode@omc';
 
-// The commands leave a version directory modified in the last 10 minutes alone, so a fixture version
-// is dated an hour back unless a test wants it fresh. Creating an entry inside a version changes the
-// date again; call this after such a change.
-export function ageVersions(cache: string, ageMs = 3_600_000) {
-  const then = new Date(Date.now() - ageMs);
-  for (const name of readdirSync(cache)) lutimesSync(path.join(cache, name), then, then);
+// The commands leave a version directory alone when it, or an entry in its first two levels, was modified
+// in the last 10 minutes, so a fixture version and everything inside it is dated an hour back unless a test
+// wants it fresh. Creating an entry changes the dates again; call this after such a change. Links are
+// dated themselves and never followed.
+export function ageTree(entry: string, then: Date) {
+  const stat = lstatSync(entry);
+  if (stat.isDirectory()) for (const name of readdirSync(entry)) ageTree(path.join(entry, name), then);
+  lutimesSync(entry, then, then);
 }
 
-export function makeCache(versions: string[]) {
-  const dir = mkdtempSync(path.join(tmpdir(), 'omc-doctor-skill-'));
-  const cache = path.join(dir, 'plugins', 'cache', 'omc', 'oh-my-claudecode');
+export function ageVersions(cache: string, ageMs = 3_600_000) {
+  const then = new Date(Date.now() - ageMs);
+  for (const name of readdirSync(cache)) ageTree(path.join(cache, name), then);
+}
+
+// Adds the versions to the cache of a marketplace, the marketplace part of the plugin ID (`omc` for
+// oh-my-claudecode@omc), and dates them an hour back.
+export function addCache(dir: string, versions: string[], market = 'omc') {
+  const cache = path.join(dir, 'plugins', 'cache', market, 'oh-my-claudecode');
   for (const v of versions) {
     mkdirSync(path.join(cache, v), { recursive: true });
     writeFileSync(path.join(cache, v, 'package.json'), JSON.stringify({ version: v }));
   }
   ageVersions(cache);
-  return { dir, cache };
+  return cache;
+}
+
+export function makeCache(versions: string[], market = 'omc') {
+  const dir = mkdtempSync(path.join(tmpdir(), 'omc-doctor-skill-'));
+  return { dir, cache: addCache(dir, versions, market) };
 }
 
 export function writeRegistryFile(dir: string, content: unknown) {
