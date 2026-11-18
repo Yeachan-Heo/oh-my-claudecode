@@ -34,6 +34,7 @@ import { runGraph } from "../../runtime/runner.js";
 import type { NodeExecutor } from "../../runtime/types.js";
 import { graphCommand } from "../../../cli/graph.js";
 import { readRunStatus } from "../../runtime/run-status.js";
+import { directoryOperations, type DirectoryOperations } from "../../runtime/contained-fd.js";
 
 const tempDirs: string[] = [];
 
@@ -622,6 +623,71 @@ describe.runIf(process.platform !== "win32")("omc graph status", () => {
     it("without a change the same call reports the run", async () => {
       const { runs } = await runWithForgedCopy();
       const outcome = readRunStatus({ runId: "st-ok", runsRoot: runs, interlock: { afterDirectoryCheck: () => {}, afterRead: () => {} } });
+      expect(outcome.exitCode).toBe(0);
+      expect((JSON.parse(outcome.stdout) as Record<string, any>).state).toBe("succeeded");
+    });
+  });
+
+  // Class: a platform with directory-relative operations reads through the open directory, and a platform without them
+  // reads by name, checked before and after. The operations of another platform are stood in for on Linux: the
+  // directory-relative operations of Linux play a platform that has them (macOS with the native module), and `null`
+  // plays one that has none (Windows). A name swapped to another run after the directory was opened, and swapped back
+  // before the check that follows the reads, is the swap that only reads through the open directory withstand.
+  describe.runIf(process.platform === "linux")("a run directory swapped and swapped back during the reads, on each kind of platform", () => {
+    const calls: string[] = [];
+    const recording = (fd: number): DirectoryOperations => {
+      const real = directoryOperations(fd, "linux");
+      return { ...real, open: (name, flags, mode) => { calls.push(name); return real.open(name, flags, mode); } };
+    };
+
+    function swapRig(): { runs: string; interlock: NonNullable<Parameters<typeof readRunStatus>[0]["interlock"]> } {
+      const runs = makeRunsRoot();
+      writeRealRun(runs, "st-aba", "succeeded");
+      const dir = join(runs, "st-aba");
+      // Another run of the same id that is not finished, written outside the runs root and copied in under the name.
+      const other = join(dirname(runs), "other");
+      mkdirSync(other, { recursive: true });
+      writeRealRun(other, "st-aba", "ready");
+      const parked = `${dir}.parked`;
+      return {
+        runs,
+        interlock: {
+          afterOpen: () => {
+            renameSync(dir, parked);
+            cpSync(join(other, "st-aba"), dir, { recursive: true });
+          },
+          afterRead: () => {
+            rmSync(dir, { recursive: true, force: true });
+            renameSync(parked, dir);
+          },
+        },
+      };
+    }
+
+    it("a platform with operations reads the directory that was opened, so the report is the original run, not the one that took the name", () => {
+      for (const [kind, operationsFor] of [["Linux", undefined], ["a platform with operations", recording]] as const) {
+        calls.length = 0;
+        const { runs, interlock } = swapRig();
+        const outcome = readRunStatus({ runId: "st-aba", runsRoot: runs, interlock: { ...interlock, operationsFor } });
+        const report = JSON.parse(outcome.stdout) as Record<string, any>;
+        expect(report.state, `${kind}: ${outcome.stdout}`).toBe("succeeded");
+        expect(outcome.exitCode, kind).toBe(0);
+        if (operationsFor !== undefined) expect(calls.sort(), "the three files were opened through the operations").toEqual(["descriptor.json", "journal.jsonl", "projection.json"]);
+      }
+    });
+
+    it("a platform without operations reads by name and checks the directory before and after: a swap that stays is refused", () => {
+      const staying = swapRig();
+      const refused = readRunStatus({ runId: "st-aba", runsRoot: staying.runs, interlock: { afterOpen: staying.interlock.afterOpen, operationsFor: () => null } });
+      const report = JSON.parse(refused.stdout) as Record<string, any>;
+      expect(refused.exitCode, refused.stdout).toBe(4);
+      expect(report.error).toMatch(/replaced while it was read/);
+    });
+
+    it("a platform without operations still reports an unchanged run", () => {
+      const runs = makeRunsRoot();
+      writeRealRun(runs, "st-plain", "succeeded");
+      const outcome = readRunStatus({ runId: "st-plain", runsRoot: runs, interlock: { operationsFor: () => null } });
       expect(outcome.exitCode).toBe(0);
       expect((JSON.parse(outcome.stdout) as Record<string, any>).state).toBe("succeeded");
     });

@@ -50,15 +50,23 @@
  *     from then on) and deletes the moved directory. A directory left behind by an interrupted removal is finished by
  *     the next pass, unless the lock inside it still names a live process.
  *   - Under ownership every file of the run is reached through the open run directory, whose identity is the scanned
- *     one (withRunDirectory): the decision reads, the journal and torn copy of a repair, and the directory sync. The
- *     name of the run is checked again before the copy, before the truncation and after the decision reads; a name
- *     that was swapped refuses the step. A directory can only be renamed by name, so the name is checked right before
- *     the move and the moved directory right after it, and a directory that is not the scanned one is put back.
- *   - Removal never follows a symbolic link: a link is unlinked, its target is left alone. On Linux every directory
- *     is opened without following links and its entries are removed relative to that open directory, so a
- *     directory swapped for a link while the tree is walked cannot redirect the removal. macOS (with the native
- *     contained-fs module) walks the moved directory by path with lstat. Where the fence cannot run (Windows, macOS
- *     without the module) ownership cannot be taken, and removal and repair fail closed: the run stays.
+ *     one (withRunDirectory): the decision reads (the age of the run and its state), the journal and torn copy of a
+ *     repair, and the directory sync. The name of the run is checked again before the copy, before the truncation and
+ *     after the decision reads; a name that was swapped refuses the step. A directory can only be renamed by name, so
+ *     the name is checked right before the move and the moved directory right after it, and a directory that is not
+ *     the scanned one is put back.
+ *   - The platform is never told by its name: every platform that has directory-relative operations (the runtime's
+ *     contained filesystem layer: Linux, and macOS with the native module) makes all of those decisions and the
+ *     removal through them. A platform that has none cannot take ownership (the fence needs the same operations), and
+ *     gc and repair refuse before anything is read: a decision that deletes is never made on reads by name that are
+ *     only checked before and after, because a name swapped and swapped back in between would pass both checks. The
+ *     scan, which runs before ownership, reads by name; its verdict is only a hint and is decided again under the lock.
+ *   - Removal never follows a symbolic link: a link is unlinked, its target is left alone. Every directory is opened
+ *     without following links, checked to be the one that was seen, and its entries are removed relative to that open
+ *     directory, so a directory swapped for a link while the tree is walked cannot redirect the removal. Two steps are
+ *     by name, because the operations have no form relative to a directory: the final rmdir of the top directory, and
+ *     the rmdir of an emptied subdirectory where the platform's operations have no `rmdir` (macOS). A directory
+ *     swapped in at that moment is removed only if it is empty, and rmdir never follows a link.
  *   - An invalid retention value stops the command before anything is touched.
  */
 
@@ -75,13 +83,11 @@ import {
   realpathSync,
   renameSync,
   rmdirSync,
-  statSync,
-  unlinkSync,
   writeSync,
 } from "node:fs";
 import { randomBytes } from "node:crypto";
 import { basename, dirname, join, resolve } from "node:path";
-import { directoryOperations, type DirectoryOperations } from "./contained-fd.js";
+import { directoryOperationsIfSupported, type DirectoryOperations } from "./contained-fd.js";
 import { FileOwnershipFence } from "./fence.js";
 import { RUN_ID_PATTERN } from "./run-dir.js";
 import { classifyRunFiles } from "./run-state.js";
@@ -139,6 +145,8 @@ export interface ScannedRun {
   readonly afterReads?: () => void;
   /** Test-only interlock: after the name was checked for the last time, right before the directory is moved. */
   readonly beforeMove?: () => void;
+  /** Test-only: replaces the directory-relative operations of the platform (see OperationsFor). */
+  readonly operationsFor?: OperationsFor;
 }
 
 interface RunEntry {
@@ -301,40 +309,88 @@ function epochFloorOf(runDir: string): number {
   return floor;
 }
 
-// Identity, newest modification time and total file size of a run directory. The directory must be a plain directory.
-// Every entry is read with lstat, so symbolic links are never followed. Under ownership (`ownedByFence`) the fence's
-// own entries and the time of the directory itself are left out: taking the lock rewrote them just now and say nothing
-// about when the run last changed.
-function measureRun(
-  runDir: string,
-  ownedByFence = false,
-  anchored = false,
-): { newestMs: number; bytes: number; identity: FileIdentity } {
-  // An anchored path (/proc/self/fd/<fd>) is a link to the open directory, so it is read with stat, not lstat.
-  const top = anchored ? statSync(runDir) : lstatSync(runDir);
-  if (!top.isDirectory()) throw new Error("run is not a plain directory");
-  let newestMs = ownedByFence ? 0 : top.mtimeMs;
-  let bytes = 0;
-  const visit = (dir: string, isTop: boolean): void => {
-    for (const name of readdirSync(dir)) {
-      if (ownedByFence && isTop && isFenceEntry(name)) continue;
-      const path = join(dir, name);
-      const stat = lstatSync(path);
-      newestMs = Math.max(newestMs, stat.mtimeMs);
-      if (stat.isFile()) bytes += stat.size;
-      if (stat.isDirectory()) visit(path, false);
-    }
-  };
-  visit(runDir, true);
-  return { newestMs, bytes, identity: { dev: top.dev, ino: top.ino } };
+// Directory-relative operations for an open directory, or null where the platform has none. Every platform that has
+// them (Linux, and macOS with the native module) is read through them; the platform is never told by its name. The
+// default asks the contained filesystem layer, and tests replace it to stand in for another platform.
+export type OperationsFor = (fd: number) => DirectoryOperations | null;
+
+const NO_OPERATIONS = "this platform has no directory-relative file operations; the run was left unchanged";
+
+// Read access to one directory of a run. The scan, which only gives hints, reads by name (`byName`). Every decision
+// under ownership reads relative to the open directory (`relativeTo`): the name of the run can then be swapped for
+// another directory, and even swapped back, without changing what is read.
+interface TreeReader {
+  names(): string[];
+  /** The entry itself, never what a link points to. */
+  stat(name: string): { dev: number; ino: number; mtimeMs: number; size: number; isFile(): boolean; isDirectory(): boolean };
+  /** One regular file, read without following a link. */
+  read(name: string): Buffer;
+  /** Runs `action` on a subdirectory that is the one `seen` describes: a directory swapped for a link or another directory since is refused. */
+  enter<T>(name: string, seen: { dev: number; ino: number }, action: (inner: TreeReader) => T): T;
 }
 
-// Reads one regular file below a run directory. Never follows a symbolic link, and a FIFO or other
-// non-regular file is refused right after open (O_NONBLOCK), so it cannot block the command.
-function readRunFile(runDir: string, name: string): Buffer {
+function byName(dir: string): TreeReader {
+  return {
+    names: () => readdirSync(dir),
+    stat: (name) => lstatSync(join(dir, name)),
+    read: (name) => readThrough((flags) => openSync(join(dir, name), flags | NOFOLLOW), name),
+    enter: (name, _seen, action) => action(byName(join(dir, name))),
+  };
+}
+
+function relativeTo(operations: DirectoryOperations, operationsFor: OperationsFor): TreeReader {
+  return {
+    names: () => operations.readDir(),
+    stat: (name) => operations.lstat(name),
+    read: (name) => readThrough((flags) => operations.open(name, flags), name),
+    enter: (name, seen, action) => {
+      const fd = operations.open(name, fsConstants.O_RDONLY | (fsConstants.O_DIRECTORY ?? 0));
+      try {
+        const opened = fstatSync(fd);
+        if (opened.dev !== seen.dev || opened.ino !== seen.ino) throw new Error("a directory changed while it was read");
+        const inner = operationsFor(fd);
+        if (inner === null) throw new Error(NO_OPERATIONS);
+        return action(relativeTo(inner, operationsFor));
+      } finally {
+        closeSync(fd);
+      }
+    },
+  };
+}
+
+// Newest modification time and total file size below a run directory. Every entry is read with lstat, so symbolic
+// links are never followed. Under ownership (`ownedByFence`) the fence's own entries and the time of the directory
+// itself are left out: taking the lock rewrote them just now and say nothing about when the run last changed.
+function measureTree(reader: TreeReader, topMtimeMs: number, ownedByFence: boolean): { newestMs: number; bytes: number } {
+  let newestMs = ownedByFence ? 0 : topMtimeMs;
+  let bytes = 0;
+  const visit = (directory: TreeReader, isTop: boolean): void => {
+    for (const name of directory.names()) {
+      if (ownedByFence && isTop && isFenceEntry(name)) continue;
+      const stat = directory.stat(name);
+      newestMs = Math.max(newestMs, stat.mtimeMs);
+      if (stat.isFile()) bytes += stat.size;
+      if (stat.isDirectory()) directory.enter(name, stat, (inner) => visit(inner, false));
+    }
+  };
+  visit(reader, true);
+  return { newestMs, bytes };
+}
+
+// Identity, newest modification time and total file size of a run directory, by name: the scan. The directory must be
+// a plain directory.
+function measureRun(runDir: string): { newestMs: number; bytes: number; identity: FileIdentity } {
+  const top = lstatSync(runDir);
+  if (!top.isDirectory()) throw new Error("run is not a plain directory");
+  return { ...measureTree(byName(runDir), top.mtimeMs, false), identity: { dev: top.dev, ino: top.ino } };
+}
+
+// Reads one regular file through `open`, which never follows a symbolic link. A FIFO or other non-regular file is
+// refused right after open (O_NONBLOCK), so it cannot block the command.
+function readThrough(open: (flags: number) => number, name: string): Buffer {
   let fd: number;
   try {
-    fd = openSync(join(runDir, name), fsConstants.O_RDONLY | NOFOLLOW | NONBLOCK);
+    fd = open(fsConstants.O_RDONLY | NONBLOCK);
   } catch (error) {
     const code = (error as NodeJS.ErrnoException).code;
     if (code === "ENOENT") throw new StateError(`${name}-missing`);
@@ -352,6 +408,11 @@ function readRunFile(runDir: string, name: string): Buffer {
   }
 }
 
+// Reads one regular file below a run directory, by name.
+function readRunFile(runDir: string, name: string): Buffer {
+  return byName(runDir).read(name);
+}
+
 // Splits journal bytes into complete lines and a torn tail (the bytes after the last newline).
 export function splitTornTail(bytes: Buffer): { complete: Buffer; tail: Buffer } {
   const cut = bytes.lastIndexOf(0x0a) + 1;
@@ -359,9 +420,9 @@ export function splitTornTail(bytes: Buffer): { complete: Buffer; tail: Buffer }
 }
 
 // Reads one file of a run as text; null when it does not exist.
-function readRunText(runDir: string, name: string): string | null {
+function readRunText(reader: TreeReader, name: string): string | null {
   try {
-    return readRunFile(runDir, name).toString("utf8");
+    return reader.read(name).toString("utf8");
   } catch (error) {
     if (error instanceof StateError && error.message === `${name}-missing`) return null;
     throw error;
@@ -373,12 +434,12 @@ function readRunText(runDir: string, name: string): string | null {
 // states a run can have: final-succeeded and final-failed (the only ones that can be deleted), resumable-ready and
 // resumable-approval (something is ready to run or to approve), and unknown:<reason> for anything else, which is kept.
 // `epochCeiling` is the epoch the caller holds on the run, when it holds one (the runtime's bound on resume).
-export function classifyRun(runDir: string, runId: string, epochCeiling?: number): { state: string; reason: string } {
+function classifyTree(reader: TreeReader, runId: string, epochCeiling?: number): { state: string; reason: string } {
   try {
     const files = {
-      descriptor: readRunText(runDir, DESCRIPTOR_FILE_NAME),
-      journal: readRunText(runDir, JOURNAL_FILE_NAME),
-      projection: readRunText(runDir, SNAPSHOT_FILE_NAME),
+      descriptor: readRunText(reader, DESCRIPTOR_FILE_NAME),
+      journal: readRunText(reader, JOURNAL_FILE_NAME),
+      projection: readRunText(reader, SNAPSHOT_FILE_NAME),
     };
     const verdict = classifyRunFiles(runId, files, epochCeiling);
     if (verdict.state === "unreadable") return { state: "unknown", reason: `unknown:${verdict.reason}` };
@@ -392,17 +453,21 @@ export function classifyRun(runDir: string, runId: string, epochCeiling?: number
   }
 }
 
+export function classifyRun(runDir: string, runId: string, epochCeiling?: number): { state: string; reason: string } {
+  return classifyTree(byName(runDir), runId, epochCeiling);
+}
+
 // True when the journal's last line is torn. A missing or unreadable journal is not torn.
-function hasTornTail(runDir: string): boolean {
+function hasTornTail(reader: TreeReader): boolean {
   try {
-    return splitTornTail(readRunFile(runDir, JOURNAL_FILE_NAME)).tail.length > 0;
+    return splitTornTail(reader.read(JOURNAL_FILE_NAME)).tail.length > 0;
   } catch {
     return false;
   }
 }
 
-function hasTornCopy(runDir: string): boolean {
-  return readdirSync(runDir).some((name) => name.startsWith(TORN_COPY_PREFIX));
+function hasTornCopy(reader: TreeReader): boolean {
+  return reader.names().some((name) => name.startsWith(TORN_COPY_PREFIX));
 }
 
 interface Verdict {
@@ -413,12 +478,13 @@ interface Verdict {
 }
 
 // The rules that decide a run whose lease is known to be free, in order: a torn journal, a torn copy of an earlier
-// repair, a change inside the retention window, then the state. The scan and the re-check under ownership both use it.
-function judgeRun(runDir: string, id: string, newestMs: number, cutoffMs: number, epochCeiling?: number): Verdict {
-  if (hasTornTail(runDir)) return { decision: "keep", reason: "torn-wal", state: null, torn: true };
-  if (hasTornCopy(runDir)) return { decision: "keep", reason: "torn-copy-kept", state: null, torn: false };
+// repair, a change inside the retention window, then the state. The scan (by name, a hint) and the re-check under
+// ownership (relative to the open directory) both use it.
+function judgeRun(reader: TreeReader, id: string, newestMs: number, cutoffMs: number, epochCeiling?: number): Verdict {
+  if (hasTornTail(reader)) return { decision: "keep", reason: "torn-wal", state: null, torn: true };
+  if (hasTornCopy(reader)) return { decision: "keep", reason: "torn-copy-kept", state: null, torn: false };
   if (newestMs >= cutoffMs) return { decision: "keep", reason: "fresh", state: null, torn: false };
-  const verdict = classifyRun(runDir, id, epochCeiling);
+  const verdict = classifyTree(reader, id, epochCeiling);
   if (verdict.state === "final-succeeded" || verdict.state === "final-failed") {
     return { decision: "delete", reason: "expired", state: verdict.state, torn: false };
   }
@@ -527,7 +593,7 @@ export function scanRuns({
     // The fence gives the epoch above the highest it has seen, so a resume would refuse a record above this one: the
     // scan applies the same bound as the replay under ownership, and the two verdicts cannot differ for the same files.
     const epochFloor = epochFloorOf(runDir);
-    const verdict = judgeRun(runDir, id, measured.newestMs, cutoffMs, epochFloor + 1);
+    const verdict = judgeRun(byName(runDir), id, measured.newestMs, cutoffMs, epochFloor + 1);
     run.decision = verdict.decision;
     run.reason = verdict.reason;
     run.state = verdict.state;
@@ -541,16 +607,28 @@ export function scanRuns({
 // itself. With `expected` the directory must be the one with that identity, or nothing is removed. `afterLstat` is a
 // test-only interlock that runs between the check of an entry and its use. An entry that is already gone (another
 // pass removed it) is not an error.
+//
+// Every directory is opened without following a link (O_NOFOLLOW), checked to be the one that was just seen, and its
+// entries are removed relative to the open directory (`unlink`, and `rmdir` of an emptied subdirectory), so a directory
+// swapped for a link while the tree is walked cannot redirect the removal. The same code serves every platform that has
+// directory-relative operations; where there are none nothing is removed. Two steps are by name where the operations
+// have no form that is relative to a directory: the final rmdir of the top directory, and the rmdir of an emptied
+// subdirectory on a platform whose operations have no `rmdir` (macOS). A directory swapped in at that moment is removed
+// only if it is empty, and a link is never followed by rmdir.
 export function removeTree(
   path: string,
-  interlock: { afterLstat?: (path: string) => void } = {},
+  interlock: { afterLstat?: (path: string) => void; operationsFor?: OperationsFor } = {},
   expected?: FileIdentity,
 ): void {
-  if (process.platform === "linux") {
-    removeTreeAnchored(path, interlock, expected);
-    return;
+  const operationsFor = interlock.operationsFor ?? directoryOperationsIfSupported;
+  const fd = openSync(path, fsConstants.O_RDONLY | (fsConstants.O_DIRECTORY ?? 0) | NOFOLLOW);
+  try {
+    assertIdentity(fstatSync(fd), expected, "the directory to remove");
+    removeEntriesOf(fd, path, interlock, operationsFor);
+  } finally {
+    closeSync(fd);
   }
-  removeTreeByPath(path, interlock, expected);
+  ignoreMissing(() => rmdirSync(path));
 }
 
 function ignoreMissing(action: () => void): void {
@@ -567,44 +645,31 @@ function assertIdentity(actual: FileIdentity, expected: FileIdentity | undefined
   }
 }
 
-// Linux: every directory is opened with O_NOFOLLOW|O_DIRECTORY, and its entries are checked and removed through
-// /proc/self/fd/<fd>/<name>, which names the opened directory itself. A directory swapped for a symbolic link after
-// the check makes the open fail (ELOOP or ENOTDIR) instead of being followed, and rmdir and unlink never follow
-// the last component.
-function removeTreeAnchored(
+function removeEntriesOf(
+  directoryFd: number,
   path: string,
   interlock: { afterLstat?: (path: string) => void },
-  expected: FileIdentity | undefined,
+  operationsFor: OperationsFor,
 ): void {
-  const fd = openSync(path, fsConstants.O_RDONLY | (fsConstants.O_DIRECTORY ?? 0) | NOFOLLOW);
-  try {
-    assertIdentity(fstatSync(fd), expected, "the directory to remove");
-    removeEntriesOf(fd, interlock);
-  } finally {
-    closeSync(fd);
-  }
-  ignoreMissing(() => rmdirSync(path));
-}
-
-function removeEntriesOf(directoryFd: number, interlock: { afterLstat?: (path: string) => void }): void {
-  const anchor = `/proc/self/fd/${directoryFd}`;
-  for (const name of readdirSync(anchor)) {
-    const entry = `${anchor}/${name}`;
+  const operations = operationsFor(directoryFd);
+  if (operations === null) throw new Error("this platform has no directory-relative file operations; nothing was removed");
+  for (const name of operations.readDir()) {
     let stat;
     try {
-      stat = lstatSync(entry);
+      stat = operations.lstat(name);
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code === "ENOENT") continue;
       throw error;
     }
     if (!stat.isDirectory()) {
-      ignoreMissing(() => unlinkSync(entry));
+      ignoreMissing(() => operations.unlink(name));
       continue;
     }
+    const entry = join(path, name);
     interlock.afterLstat?.(entry);
     let childFd: number;
     try {
-      childFd = openSync(entry, fsConstants.O_RDONLY | (fsConstants.O_DIRECTORY ?? 0) | NOFOLLOW);
+      childFd = operations.open(name, fsConstants.O_RDONLY | (fsConstants.O_DIRECTORY ?? 0));
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code === "ENOENT") continue;
       throw error;
@@ -612,45 +677,11 @@ function removeEntriesOf(directoryFd: number, interlock: { afterLstat?: (path: s
     try {
       const opened = fstatSync(childFd);
       if (opened.dev !== stat.dev || opened.ino !== stat.ino) throw new Error("a directory changed while it was removed");
-      removeEntriesOf(childFd, interlock);
+      removeEntriesOf(childFd, entry, interlock, operationsFor);
     } finally {
       closeSync(childFd);
     }
-    ignoreMissing(() => rmdirSync(entry));
-  }
-}
-
-// macOS: Node has no directory-relative path form there, so walk by path with lstat. The tree is the run directory
-// that quarantineRun has already moved out of the runs namespace, under the lock the fence gave this process.
-function removeTreeByPath(
-  path: string,
-  interlock: { afterLstat?: (path: string) => void },
-  expected?: FileIdentity,
-): void {
-  let stat;
-  try {
-    stat = lstatSync(path);
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === "ENOENT") return;
-    throw error;
-  }
-  if (stat.isDirectory()) {
-    assertIdentity(stat, expected, "the directory to remove");
-    interlock.afterLstat?.(path);
-    for (const name of ignoreMissingList(path)) removeTreeByPath(join(path, name), interlock);
-    ignoreMissing(() => rmdirSync(path));
-  } else {
-    // Files and symbolic links: a link is unlinked itself, its target is never followed.
-    ignoreMissing(() => unlinkSync(path));
-  }
-}
-
-function ignoreMissingList(path: string): string[] {
-  try {
-    return readdirSync(path);
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === "ENOENT") return [];
-    throw error;
+    ignoreMissing(() => (operations.rmdir === undefined ? rmdirSync(entry) : operations.rmdir(name)));
   }
 }
 
@@ -691,26 +722,29 @@ function takeOwnership(
   return { fence, epoch: acquired.epoch };
 }
 
-// What a step that works on a run directory under ownership gets: the open directory and a way to check its name.
+// What a step that works on a run directory under ownership gets: the open directory, as operations and as a reader of
+// its files, and a way to check its name.
 interface AnchoredRun {
-  /** A path that names the open directory itself on Linux (/proc/self/fd/<fd>); the path of the directory elsewhere. */
-  readonly path: string;
-  readonly anchored: boolean;
-  /** Operations relative to the open directory (every open adds O_NOFOLLOW); throws where the platform has none. */
+  /** Operations relative to the open directory (every open adds O_NOFOLLOW). */
   readonly operations: DirectoryOperations;
+  /** The files of the directory, read through `operations`. */
+  readonly reader: TreeReader;
   /** Throws unless the name of the run still is the directory that is open (device and inode). */
   assertNamed(): void;
 }
 
 // The one way gc and repair touch the files of a run after the scan or under ownership. The directory is opened
 // without following a link and must be `expected` (device and inode), so a name that was swapped refuses the step
-// before anything is read or written; `action` reads and writes through the open directory (`operations`, or `path`
-// for the readers that take a path); and with `checkAfter` the name must still be the same directory when the step
-// is over, or the result is refused. A step that has changed something on disk checks the name (`assertNamed`)
-// before each change instead, and takes `checkAfter` false, because a refusal then could not undo the change.
+// before anything is read or written; `action` reads and writes through the open directory (`operations`, `reader`),
+// never by name; and with `checkAfter` the name must still be the same directory when the step is over, or the result
+// is refused. A step that has changed something on disk checks the name (`assertNamed`) before each change instead,
+// and takes `checkAfter` false, because a refusal then could not undo the change. A platform without directory-relative
+// operations is refused here, before anything is read: a decision that deletes is not made on reads by name that are
+// only checked before and after, because a name swapped and swapped back in between would pass both checks.
 function withRunDirectory<T>(
   runDir: string,
   expected: FileIdentity,
+  operationsFor: OperationsFor,
   action: (run: AnchoredRun) => T,
   checkAfter = true,
 ): T {
@@ -724,22 +758,15 @@ function withRunDirectory<T>(
   }
   try {
     assertIdentity(fstatSync(fd), expected, "the run directory");
-    const linux = process.platform === "linux";
+    const operations = operationsFor(fd);
+    if (operations === null) throw new Error(NO_OPERATIONS);
     const assertNamed = (): void => {
       const named = lstatSync(runDir);
       if (named.dev !== expected.dev || named.ino !== expected.ino) {
         throw new Error("the run directory was replaced while it was in use; left unchanged");
       }
     };
-    const run: AnchoredRun = {
-      path: linux ? `/proc/self/fd/${fd}` : runDir,
-      anchored: linux,
-      get operations() {
-        return directoryOperations(fd);
-      },
-      assertNamed,
-    };
-    const result = action(run);
+    const result = action({ operations, reader: relativeTo(operations, operationsFor), assertNamed });
     if (checkAfter) assertNamed();
     return result;
   } finally {
@@ -781,6 +808,7 @@ export function quarantineRun(
   const runDir = join(realRoot, id);
   if (!lstatSync(runDir).isDirectory()) throw new Error("run is no longer a plain directory");
   if (realpathSync(runDir) !== runDir) throw new Error("run directory resolves outside the runs root");
+  const operationsFor = scanned?.operationsFor ?? directoryOperationsIfSupported;
   const { fence, epoch } = takeOwnership(runDir, "run is held by a live owner; not removed", scanned?.identity);
   const quarantine = join(realRoot, `${QUARANTINE_PREFIX}${id}-${nowMs}-${suffix}`);
   try {
@@ -789,12 +817,12 @@ export function quarantineRun(
       // Another process took the lock after the scan, even if it changed nothing: it used the run since.
       if (epoch > scanned.epochFloor + 1) throw new Error("run was resumed after the scan; not removed");
       // The verdict of the scan is only a hint: the run may have been resumed and finished since. It is decided
-      // again, now that no other process can change it. The files are read through the open directory, so the name
-      // cannot be swapped under the reads (Linux; elsewhere by path), and the name must still be the scanned
-      // directory at the moment of the move.
-      const verdict = withRunDirectory(runDir, scanned.identity, (run) => {
+      // again, now that no other process can change it. Both the age and the state are read through the open
+      // directory, on every platform that has directory-relative operations, so the name cannot be swapped under the
+      // reads, and the name must still be the scanned directory at the moment of the move.
+      const verdict = withRunDirectory(runDir, scanned.identity, operationsFor, ({ reader }) => {
         scanned.afterHandle?.();
-        const judged = judgeRun(run.path, id, measureRun(run.path, true, run.anchored).newestMs, scanned.cutoffMs, epoch);
+        const judged = judgeRun(reader, id, measureTree(reader, 0, true).newestMs, scanned.cutoffMs, epoch);
         scanned.afterReads?.();
         return judged;
       });
@@ -827,10 +855,10 @@ export function removeRun(realRoot: string, id: string, scanned?: ScannedRun): v
     if (!lstatSync(runDir).isDirectory()) throw new Error("run is no longer a plain directory");
     if (realpathSync(runDir) !== runDir) throw new Error("run directory resolves outside the runs root");
     if (leaseOf(runDir).held) throw new Error("quarantined run is held by a live process; not removed");
-    removeTree(runDir, {}, scanned?.identity);
+    removeTree(runDir, { operationsFor: scanned?.operationsFor }, scanned?.identity);
     return;
   }
-  removeTree(quarantineRun(realRoot, id, undefined, undefined, scanned), {}, scanned?.identity);
+  removeTree(quarantineRun(realRoot, id, undefined, undefined, scanned), { operationsFor: scanned?.operationsFor }, scanned?.identity);
 }
 
 function writeAll(fd: number, buffer: Buffer): void {
@@ -874,6 +902,8 @@ export interface RepairInterlock {
   readonly beforeTruncate?: () => void;
   /** The repair is done; the lock is not released yet. */
   readonly beforeRelease?: () => void;
+  /** Test-only: replaces the directory-relative operations of the platform (see OperationsFor). */
+  readonly operationsFor?: OperationsFor;
 }
 
 // Moves the torn last line of one journal to a copy beside it. Complete lines are not touched.
@@ -897,7 +927,8 @@ export function repairTornTail(
   }
   // Looked at before the lock is taken, so a run with nothing to repair, or with a journal that must not be
   // touched, is left exactly as it was.
-  const torn = withRunDirectory(runDir, identity, ({ operations }) => {
+  const operationsFor = interlock.operationsFor ?? directoryOperationsIfSupported;
+  const torn = withRunDirectory(runDir, identity, operationsFor, ({ operations }) => {
     const probe = openJournal(operations, fsConstants.O_RDONLY | NONBLOCK);
     try {
       return splitTornTail(readFileSync(probe)).tail.length > 0;
@@ -914,6 +945,7 @@ export function repairTornTail(
     outcome = withRunDirectory(
       runDir,
       ownedIdentity,
+      operationsFor,
       (run) => {
         interlock.afterHandle?.();
         return repairOwnedJournal(run, nowMs, interlock);

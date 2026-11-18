@@ -41,6 +41,7 @@ import { readRunStatus } from "../../runtime/run-status.js";
 import type { NodeExecutor } from "../../runtime/types.js";
 import { FileOwnershipFence } from "../../runtime/fence.js";
 import { resolveRunDirHandle } from "../../runtime/run-dir.js";
+import { directoryOperations } from "../../runtime/contained-fd.js";
 import { writeRealRun, type RealRunKind } from "./real-run-fixtures.js";
 import {
   classifyRun,
@@ -51,6 +52,7 @@ import {
   removeRun,
   removeTree,
   repairTornTail,
+  type OperationsFor,
   type RepairInterlock,
   runGc,
   runGraphGc,
@@ -399,6 +401,28 @@ function scannedFirst(root: string): ScannedRun {
   const run = scan.runs[0] as { identity: { dev: number; ino: number } | null; epochFloor?: number };
   return { identity: run.identity as { dev: number; ino: number }, cutoffMs: scan.cutoffMs, epochFloor: run.epochFloor ?? 0 };
 }
+
+// Stand-ins for the directory-relative operations of other platforms, so that on Linux the code those platforms run is
+// exercised. `macLike` plays macOS with the native module: the operations of Linux without `rmdir` (the native module has
+// none), every call recorded. `noOperations` plays a platform that has none (Windows).
+const operationCalls: string[] = [];
+const macLike: OperationsFor = (fd) => {
+  const real = directoryOperations(fd, "linux");
+  const { rmdir: _rmdir, ...withoutRmdir } = real;
+  return {
+    ...withoutRmdir,
+    open: (name, flags, mode) => { operationCalls.push(`open ${name}`); return real.open(name, flags, mode); },
+    lstat: (name) => { operationCalls.push(`lstat ${name}`); return real.lstat(name); },
+    readDir: () => { operationCalls.push("readDir"); return real.readDir(); },
+    unlink: (name) => { operationCalls.push(`unlink ${name}`); real.unlink(name); },
+  };
+};
+const noOperations: OperationsFor = () => null;
+// Every platform that has operations: Linux itself (the default) and the stand-in for macOS.
+const KINDS_WITH_OPERATIONS: readonly (readonly [string, OperationsFor | undefined])[] = [
+  ["Linux", undefined],
+  ["a platform with operations and no rmdir", macLike],
+];
 
 describe("omc graph gc", () => {
   // ---- Switch, configuration and basic retention ------------------------------------------------
@@ -1682,8 +1706,9 @@ describe("omc graph gc", () => {
     const KINDS: Swap[] = ["link to an outside directory", "another real run directory"];
 
     for (const { point, message, copy, truncated } of POINTS) {
+      for (const [platform, operationsFor] of KINDS_WITH_OPERATIONS) {
       for (const kind of KINDS) {
-        it(`${point}: the name is swapped for a ${kind}; the repair changes nothing that took the name`, () => {
+        it(`${point} on ${platform}: the name is swapped for a ${kind}; the repair changes nothing that took the name`, () => {
           withBase((base) => {
             const root = makeRoot(base);
             const dir = makeTornRun(root, "run-torn-swap");
@@ -1691,6 +1716,7 @@ describe("omc graph gc", () => {
             let target = "";
             let targetBefore = "";
             const interlock: RepairInterlock = {
+              operationsFor,
               [point]: () => {
                 target = swapIn(base, root, "run-torn-swap", dir, kind).target;
                 targetBefore = snapshot(target);
@@ -1709,6 +1735,7 @@ describe("omc graph gc", () => {
             if (!truncated) expect(journal).toBe(`${journalText(1)}${TORN}`);
           });
         });
+      }
       }
     }
 
@@ -1872,6 +1899,195 @@ describe("omc graph gc", () => {
       expect(existsSync(dir), "a run with a FIFO in place of a file was removed").toBe(true);
     });
   }, 90_000);
+});
+
+// Class: a platform with directory-relative operations makes every decision under ownership through the open directory,
+// the age as well as the state, and removes the tree through it; a platform without them makes none, and the run stays.
+// Each test runs on Linux itself and on the stand-in for macOS.
+describe.runIf(process.platform === "linux")("decisions and removal under ownership on each kind of platform", () => {
+  for (const [platform, operationsFor] of KINDS_WITH_OPERATIONS) {
+    it(`${platform}: the state is read from the directory that was opened, not from a name that was swapped and swapped back during the reads`, () => {
+      withBase((base) => {
+        operationCalls.length = 0;
+        const root = makeRoot(base);
+        const realRoot = realpathSync(root);
+        const dir = makeFinishedRun(root, "run-aba");
+        ageTree(dir, OLD);
+        const finishedCopy = join(base, "finished-copy");
+        const parked = join(base, "parked");
+        const scanned: ScannedRun = {
+          ...scannedFirst(root),
+          operationsFor,
+          afterOwnership: () => {
+            // Under the lock the run turns out to be resumable: a stopped run with the second step ready.
+            makeRealRun(root, "run-aba", "ready");
+            ageTree(dir, OLD);
+          },
+          afterHandle: () => {
+            // A finished, expired copy takes the name while the reads run.
+            renameSync(dir, parked);
+            const copy = makeRealRun(root, "run-aba", "succeeded");
+            ageTree(copy, OLD);
+            renameSync(copy, finishedCopy);
+            renameSync(parked, dir);
+            renameSync(dir, parked);
+            renameSync(finishedCopy, dir);
+          },
+          afterReads: () => {
+            // And the opened directory gets its name back before the name is checked.
+            renameSync(dir, finishedCopy);
+            renameSync(parked, dir);
+          },
+        };
+
+        expect(() => removeRun(realRoot, "run-aba", scanned)).toThrow(/changed after the scan \(resumable-ready\)/);
+        expect(existsSync(join(dir, "journal.jsonl")), "the resumable run was removed on what a swapped name showed").toBe(true);
+        expect(readdirSync(root).filter((name) => name.startsWith(".deleted-"))).toEqual([]);
+        if (operationsFor !== undefined) {
+          expect(operationCalls, "the files were read through the operations").toContain("open journal.jsonl");
+          expect(operationCalls).toContain("readDir");
+        }
+      });
+    });
+
+    it(`${platform}: the age is read from the directory that was opened: a fresh copy that holds the name during the reads does not keep an expired run`, () => {
+      withBase((base) => {
+        const root = makeRoot(base);
+        const realRoot = realpathSync(root);
+        const dir = makeFinishedRun(root, "run-age");
+        ageTree(dir, OLD);
+        const parked = join(base, "parked");
+        const freshCopy = join(base, "fresh-copy");
+        const scanned: ScannedRun = {
+          ...scannedFirst(root),
+          operationsFor,
+          afterHandle: () => {
+            // A finished run that changed a moment ago takes the name: reads by name would find it fresh and keep the run.
+            renameSync(dir, parked);
+            const copy = makeRealRun(root, "run-age", "succeeded");
+            renameSync(copy, freshCopy);
+            renameSync(freshCopy, dir);
+          },
+          afterReads: () => {
+            renameSync(dir, freshCopy);
+            renameSync(parked, dir);
+          },
+        };
+
+        removeRun(realRoot, "run-age", scanned);
+        expect(existsSync(dir), "the expired run was kept on the age of a copy that held its name").toBe(false);
+        expect(readdirSync(root).filter((name) => name.startsWith(".deleted-"))).toEqual([]);
+        expect(existsSync(join(freshCopy, "journal.jsonl")), "what held the name for a moment was removed").toBe(true);
+      });
+    });
+
+    it(`${platform}: a name that stays swapped during the reads is refused, and what took the name is left alone`, () => {
+      withBase((base) => {
+        const root = makeRoot(base);
+        const realRoot = realpathSync(root);
+        const dir = makeFinishedRun(root, "run-swapped-reading");
+        ageTree(dir, OLD);
+        const scanned: ScannedRun = {
+          ...scannedFirst(root),
+          operationsFor,
+          afterHandle: () => {
+            renameSync(dir, join(base, "moved-away"));
+            makeScenarioRun(root, "run-swapped-reading", SCENARIOS.running);
+            ageTree(dir, OLD);
+          },
+        };
+        expect(() => removeRun(realRoot, "run-swapped-reading", scanned)).toThrow(/replaced while it was in use/);
+        expect(readFileSync(join(dir, "journal.jsonl"), "utf8"), "the run that took the name was changed").toBe(journalText(1));
+        expect(readdirSync(root).filter((name) => name.startsWith(".deleted-"))).toEqual([]);
+      });
+    });
+
+    it(`${platform}: a whole run is removed with its subdirectories, and a link inside it is unlinked with its target left alone`, () => {
+      withBase((base) => {
+        const root = makeRoot(base);
+        const dir = makeFinishedRun(root, "run-tree");
+        mkdirSync(join(dir, "artifacts", "deep"), { recursive: true });
+        writeFileSync(join(dir, "artifacts", "deep", "inner.txt"), "inner\n");
+        writeFileSync(join(dir, "artifacts", "top.txt"), "top\n");
+        const outside = join(base, "outside");
+        mkdirSync(outside);
+        writeFileSync(join(outside, "keep.txt"), "outside content\n");
+        symlinkSync(outside, join(dir, "artifacts", "link-to-outside"));
+        ageTree(dir, OLD);
+        const before = snapshot(outside);
+
+        const result = gc(root, { remove: (realRoot, id, scanned) => removeRun(realRoot, id, { ...scanned, operationsFor } as ScannedRun) });
+        expect(decisionOf(result, "run-tree").action, JSON.stringify(result.runs)).toBe("deleted");
+        expect(existsSync(dir)).toBe(false);
+        expect(readdirSync(root)).toEqual([]);
+        expect(snapshot(outside), "the target of a link inside the run was touched").toBe(before);
+      });
+    });
+
+    it(`${platform}: a subdirectory swapped for a symbolic link after its check is not followed`, () => {
+      withBase((base) => {
+        const tree = join(base, "tree");
+        mkdirSync(join(tree, "artifacts"), { recursive: true });
+        writeFileSync(join(tree, "artifacts", "inner.txt"), "inner\n");
+        const outside = join(base, "outside");
+        mkdirSync(outside);
+        writeFileSync(join(outside, "victim.txt"), "outside content\n");
+        const before = snapshot(outside);
+        let swapped = false;
+
+        expect(() =>
+          removeTree(tree, {
+            operationsFor,
+            afterLstat: (entry) => {
+              if (swapped) return;
+              swapped = true;
+              rmSync(entry, { recursive: true, force: true });
+              symlinkSync(outside, entry);
+            },
+          }),
+        ).toThrow();
+        expect(swapped, "the interlock did not run").toBe(true);
+        expect(snapshot(outside), "a file outside the removed tree was deleted through the swapped link").toBe(before);
+      });
+    });
+  }
+
+  it("a platform without operations decides nothing and removes nothing: the run stays, the lock is released, and the reason is the platform", () => {
+    withBase((base) => {
+      const root = makeRoot(base);
+      const dir = makeFinishedRun(root, "run-no-operations");
+      ageTree(dir, OLD);
+      const files = ["descriptor.json", "journal.jsonl", "projection.json"];
+      const before = files.map((name) => readFileSync(join(dir, name), "utf8"));
+
+      const result = gc(root, { remove: (realRoot, id, scanned) => removeRun(realRoot, id, { ...scanned, operationsFor: noOperations } as ScannedRun) });
+      const run = decisionOf(result, "run-no-operations");
+      expect(run.action).toBe("failed");
+      expect(run.error).toMatch(/no directory-relative file operations; the run was left unchanged/);
+      expect(existsSync(join(dir, "owner.lock")), "the lock was left behind").toBe(false);
+      expect(files.map((name) => readFileSync(join(dir, name), "utf8")), "a file of the run was modified").toEqual(before);
+      expect(readdirSync(root), "the run was moved or removed").toEqual(["run-no-operations"]);
+    });
+  });
+
+  it("a platform without operations repairs nothing and removes no tree", () => {
+    withBase((base) => {
+      const root = makeRoot(base);
+      const dir = makeScenarioRun(root, "run-no-operations-torn", SCENARIOS.ready, { journal: `${journalText(1)}{"seq":1,"epoch":1,"descr` });
+      const identity = scanRuns({ runsRoot: root, retentionDays: 7, nowMs: NOW }).runs[0].identity as { dev: number; ino: number };
+      const before = snapshot(base);
+      expect(() => repairTornTail(dir, NOW, identity, { operationsFor: noOperations })).toThrow(/no directory-relative file operations/);
+      expect(snapshot(base), "the journal or the directory was modified").toBe(before);
+
+      const tree = join(base, "tree");
+      mkdirSync(join(tree, "sub"), { recursive: true });
+      writeFileSync(join(tree, "sub", "file.txt"), "x\n");
+      writeFileSync(join(tree, "top.txt"), "y\n");
+      const treeBefore = snapshot(tree);
+      expect(() => removeTree(tree, { operationsFor: noOperations })).toThrow(/no directory-relative file operations/);
+      expect(snapshot(tree), "something was removed").toBe(treeBefore);
+    });
+  });
 });
 
 /** Async variant of withBase for tests that drive the CLI. */

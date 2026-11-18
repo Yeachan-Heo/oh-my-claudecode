@@ -28,10 +28,9 @@
 
 import { closeSync, constants as fsConstants, fstatSync, lstatSync, openSync, readFileSync } from "node:fs";
 import { join } from "node:path";
-import { containedFsPlatformSupported } from "./contained-fd.js";
+import { directoryOperationsIfSupported, type DirectoryOperations } from "./contained-fd.js";
 import { RUN_ID_PATTERN } from "./run-dir.js";
 import { classifyRunFiles } from "./run-state.js";
-import { withContainedOperations } from "./safe-fs.js";
 
 export const RUN_STATUS_EXIT_CODES = {
   succeeded: 0,
@@ -51,12 +50,16 @@ export interface RunStatusOptions {
   readonly runId: string;
   /** Runs root directory; the CLI passes `.omc/graph-runs` when `--runs-root` is not given. */
   readonly runsRoot: string;
-  /** Test-only hooks that run inside the window between the check of the run directory and its use. */
+  /** Test-only hooks: they run inside the window between the check of the run directory and its use, or replace the operations of the platform. */
   readonly interlock?: {
     /** After the run directory was checked and before it is opened. */
     readonly afterDirectoryCheck?: () => void;
     /** After the files were read and before the directory is checked again. */
     readonly afterRead?: () => void;
+    /** The directory is open and is the one that was checked; no file is read yet. */
+    readonly afterOpen?: () => void;
+    /** Replaces the directory-relative operations of the platform; null stands for a platform that has none. */
+    readonly operationsFor?: (fd: number) => DirectoryOperations | null;
   };
 }
 
@@ -144,25 +147,32 @@ function readRunFiles(runDir: string, interlock: RunStatusOptions["interlock"]):
     projection: readRunText(open, "projection.json"),
     journal: readRunText(open, "journal.jsonl"),
   });
-  let files: RunFiles;
-  if (containedFsPlatformSupported(process.platform)) {
-    try {
-      // The directory is opened without following a link and must be the one that was checked (device and inode).
-      files = withContainedOperations({ path: runDir, device: before.dev, inode: before.ino }, (operations) =>
-        readAll((name) => operations.open(name, flags)),
-      );
-    } catch (error) {
-      const code = (error as NodeJS.ErrnoException).code;
-      if (code === "ELOOP" || code === "ENOTDIR") {
-        throw new UnreadableError("run directory was replaced by a link or a file while it was read");
-      }
-      if ((error as Error).message === "run directory identity changed") {
-        throw new UnreadableError("run directory was replaced while it was read");
-      }
-      throw error;
+  // The directory is opened without following a link and must be the one that was checked (device and inode).
+  let fd: number;
+  try {
+    fd = openSync(runDir, fsConstants.O_RDONLY | (fsConstants.O_DIRECTORY ?? 0) | NOFOLLOW);
+  } catch (error) {
+    const code = (error as NodeJS.ErrnoException).code;
+    if (code === "ELOOP" || code === "ENOTDIR") {
+      throw new UnreadableError("run directory was replaced by a link or a file while it was read");
     }
-  } else {
-    files = readAll((name) => openSync(join(runDir, name), flags | NOFOLLOW));
+    throw error;
+  }
+  let files: RunFiles;
+  try {
+    const opened = fstatSync(fd);
+    if (opened.dev !== before.dev || opened.ino !== before.ino) {
+      throw new UnreadableError("run directory was replaced while it was read");
+    }
+    interlock?.afterOpen?.();
+    // A platform with directory-relative operations (Linux, and macOS with the native module) reads relative to the
+    // open directory. Only where there are none, the files are read by name, with the same check of the directory
+    // before (above) and after (below): a name swapped and swapped back in between is not seen there, and the report
+    // is read-only.
+    const operations = (interlock?.operationsFor ?? directoryOperationsIfSupported)(fd);
+    files = readAll(operations === null ? (name) => openSync(join(runDir, name), flags | NOFOLLOW) : (name) => operations.open(name, flags));
+  } finally {
+    closeSync(fd);
   }
   interlock?.afterRead?.();
   const after = lstatSync(runDir);
