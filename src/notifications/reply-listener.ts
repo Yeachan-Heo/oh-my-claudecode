@@ -32,7 +32,7 @@ import { join } from "path";
 import { fileURLToPath, pathToFileURL } from "url";
 import { spawn } from "child_process";
 import { randomUUID } from "crypto";
-import { tmuxExec } from "../cli/tmux-utils.js";
+import { quoteForCmd, tmuxExec } from "../cli/tmux-utils.js";
 import { request as httpsRequest } from "https";
 import { resolveDaemonModulePath } from "../utils/daemon-module-path.js";
 import { getGlobalOmcStateRoot } from "../utils/paths.js";
@@ -43,6 +43,7 @@ import {
 } from "../features/rate-limit-wait/tmux-detector.js";
 import {
   captureHerdrWorkerPane,
+  HerdrError,
   herdrSendPrompt,
   isHerdrWorkerAlive,
 } from "../team/herdr-session.js";
@@ -59,7 +60,7 @@ import { writeApprovalDecision } from "../graph/runtime/remote-approval.js";
 
 import type { ReplyConfig } from "./types.js";
 import { parseMentionAllowedMentions } from "./config.js";
-import { redactTokens } from "./redact.js";
+import { keyShapesEnabled, redactedPrefix, redactedPreview, redactTokens } from "./redact.js";
 import {
   getProcessStartIdentity,
   isProcessAlive,
@@ -393,10 +394,23 @@ export function isDaemonRunning(): boolean {
  * - Control characters stripped
  */
 export function sanitizeReplyInput(text: string): string {
+  return escapeReplyInput(stripReplyInput(text));
+}
+
+/** First half of sanitizeReplyInput: removes and replaces characters, adds none. */
+function stripReplyInput(text: string): string {
   return text
     .replace(/[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]/g, "") // Strip control chars (keep \n, \r, \t)
     .replace(/[\u202a-\u202e\u2066-\u2069]/g, "") // Strip bidi override characters
-    .replace(/\r\n|[\r\n]/g, " ") // Newlines -> spaces
+    .replace(/\r\n|[\r\n]/g, " "); // Newlines -> spaces
+}
+
+/**
+ * Second half of sanitizeReplyInput: adds backslashes. That changes where a quoted value ends (`\"` becomes
+ * `\\"`), so a text that is to be redacted must be redacted before this step, not after it.
+ */
+function escapeReplyInput(text: string): string {
+  return text
     .replace(/\\/g, "\\\\") // Escape backslashes
     .replace(/`/g, "\\`") // Escape backticks
     .replace(/\$\(/g, "\\$(") // Escape $()
@@ -527,6 +541,167 @@ export type ReplyInjectionStep =
   | { kind: "literal"; value: string }
   | { kind: "key"; value: string };
 
+function prefixedReply(
+  text: string,
+  platform: string,
+  config: Pick<ReplyListenerDaemonConfig, "includePrefix">,
+): string {
+  return (config.includePrefix ? `[reply:${platform}] ` : "") + text;
+}
+
+function sanitizeReplyText(
+  text: string,
+  platform: string,
+  config: Pick<ReplyListenerDaemonConfig, "includePrefix">,
+): string {
+  return sanitizeReplyInput(prefixedReply(text, platform, config));
+}
+
+/** The inverse of escapeReplyInput, apart from the trim: it undoes the escapes and nothing else. */
+function unescapeReplyInput(text: string): string {
+  return text.replace(/\\(\\|`|\$(?=[({]))/g, "$1");
+}
+
+/**
+ * The forms in which a text that was typed into a pane (the argument of the command that typed it) can stand in
+ * the message of an error from that command, which Node builds as `Command failed: <file> <arguments joined by
+ * spaces>`. Every layer that is put around the argument on its way to such a message belongs here:
+ * - quoteForCmd: tmux as a `.cmd` or `.bat` wrapper on native Windows gets every argument quoted (resolveTmuxInvocation
+ *   in tmux-utils.ts): wrapped in quotes, with every `"` and `%` doubled. The doubled quotes end a quoted value for
+ *   the scan, so the text cannot be redacted in this form. It throws for NUL, CR and LF, so such a text cannot stand
+ *   in a command line in this form;
+ * - the argument as it is: tmux on every other system, a native Windows tmux.exe, Herdr (execFile, no shell).
+ * The escapes of escapeReplyInput are part of the typed text itself.
+ */
+const TYPED_TEXT_FORMS: ReadonlyArray<(typed: string) => string> = [(typed) => quoteForCmd(typed), (typed) => typed];
+
+/**
+ * A text that was typed into a pane (`literal`) and, when the caller has it, the form in which it goes to the log
+ * (`logged`: see typedReplyForLog). `literal` is cut at maxMessageLength, so a key that runs over the cut is only
+ * a fragment in it, too short to be recognized; `logged` is made from the whole reply, so it is not.
+ */
+interface TypedText {
+  literal: string;
+  logged?: string;
+}
+
+/**
+ * `text` with every typed text that stands in it, in any of its forms (TYPED_TEXT_FORMS), replaced by the same text
+ * redacted as it was written, in the same form. The scan then never sees a layer that changes where a value ends.
+ * A typed text that comes with its `logged` form is replaced by that; any other is redacted as it stands.
+ */
+function maskTypedText(text: string, typed: readonly TypedText[]): string {
+  let masked = text;
+  for (const { literal, logged } of typed) {
+    const redacted = logged ?? escapeReplyInput(redactTokens(unescapeReplyInput(literal)));
+    if (redacted === literal) continue; // the redaction changes nothing; an empty text is never changed, so no form below is empty
+    for (const form of TYPED_TEXT_FORMS) {
+      try {
+        masked = masked.split(form(literal)).join(form(redacted));
+      } catch {
+        // this form cannot hold the text (quoteForCmd refuses NUL, CR and LF)
+      }
+    }
+  }
+  return masked;
+}
+
+/**
+ * An error text that holds the typed text of a command: first the typed text is masked as it was written (see
+ * maskTypedText), then the whole text is redacted with the escapes of the typed text undone, which also catches
+ * what is not in a known form, as before.
+ */
+function redactTypedText(text: string, typed: readonly TypedText[]): string {
+  return redactTokens(unescapeReplyInput(maskTypedText(text, typed)));
+}
+
+/**
+ * The text of an error from a tmux send-keys command for the daemon log. The message of such an error is the
+ * command line, and it holds the reply as it was typed: in the escaped form of escapeReplyInput and, with a `.cmd`
+ * wrapper, in the quoting of quoteForCmd (see TYPED_TEXT_FORMS). With the switch on the typed texts of `steps`
+ * are redacted as they were written (see redactTypedText); with it off the message is logged as it is. The typed
+ * text is cut, so it is the log form of the whole reply (see loggedReplyOf) that is put in its place.
+ */
+function sendKeysErrorText(error: unknown, steps: readonly ReplyInjectionStep[]): string {
+  const message = error instanceof Error ? error.message : String(error);
+  if (!keyShapesEnabled()) return message;
+  const logged = loggedReplyOf(steps); // buildReplyInjectionSteps makes one literal step, the reply
+  return redactTypedText(
+    message,
+    steps.flatMap((step) => (step.kind === "literal" ? [{ literal: step.value, logged }] : [])),
+  );
+}
+
+/**
+ * The text of an error from the Herdr CLI for the daemon log. For plain-text stderr the error message holds
+ * only the first 300 characters, while `detail` keeps all of it, so the message is rebuilt from the whole
+ * stderr: redacted first and cut afterwards (see redactedPrefix). Every other error keeps its own message,
+ * except that, for a command that typed a reply (`typed` is the text it typed) and with the switch on, the typed
+ * text is redacted as it was written wherever it stands in the stderr or the message (see maskTypedText): when
+ * Herdr printed nothing to stderr the message is the command line of the failed process, and the command line
+ * holds the reply as it was typed (see sendKeysErrorText). `logged` is the log form of the typed reply (see
+ * typedReplyForLog).
+ */
+function herdrErrorText(error: unknown, typed?: string, logged?: string): string {
+  if (!(error instanceof Error)) return String(error);
+  const typedTexts: TypedText[] = typed !== undefined && keyShapesEnabled() ? [{ literal: typed, logged }] : [];
+  if (error instanceof HerdrError && error.detail) {
+    const stderr = error.detail.trim();
+    const prefix = `herdr_${error.code}: `;
+    if (error.message === prefix + stderr.slice(0, 300)) {
+      return prefix + redactedPrefix(maskTypedText(stderr, typedTexts), 300);
+    }
+  }
+  return typedTexts.length > 0 ? redactTypedText(error.message, typedTexts) : error.message;
+}
+
+/**
+ * The reply as it is typed into a pane (see buildReplyInjectionSteps), for the daemon log: the whole reply is
+ * redacted first and cut afterwards (see redactedPrefix), as the escapes of escapeReplyInput are added after the
+ * redaction. The typed text itself is cut at maxMessageLength before anything can redact it, so a key that runs
+ * over the cut is a fragment in it that is too short to be recognized. It is the text that replaces the typed one
+ * in the message of an error from the command that typed it.
+ */
+function typedReplyForLog(
+  text: string,
+  platform: string,
+  config: Pick<ReplyListenerDaemonConfig, "includePrefix" | "maxMessageLength">,
+): string {
+  return redactedPrefix(
+    stripReplyInput(prefixedReply(text, platform, config)),
+    config.maxMessageLength,
+    escapeReplyInput,
+  );
+}
+
+/** For the steps that buildReplyInjectionSteps made: the log form of the reply they type (see typedReplyForLog). */
+const loggedReplies = new WeakMap<readonly ReplyInjectionStep[], () => string>();
+
+/** The log form of the reply that `steps` type, made from the whole reply, or undefined for steps built by hand. */
+function loggedReplyOf(steps: readonly ReplyInjectionStep[]): string | undefined {
+  return loggedReplies.get(steps)?.();
+}
+
+/**
+ * The first 50 characters of the injected reply for the daemon log. The reply is redacted before it is cut
+ * (see redactedPreview), not after: a key that starts shortly before the cut would otherwise be logged as
+ * a fragment that is too short to be recognized. It is also redacted before the escapes of sanitizeReplyInput
+ * are added (see escapeReplyInput): they double every backslash, which turns `"a\"b"` into a quoted value
+ * that ends after `a\\` and leaves `b` visible. What is typed into the pane is not changed.
+ */
+export function replyLogPreview(
+  text: string,
+  platform: string,
+  config: Pick<ReplyListenerDaemonConfig, "includePrefix" | "maxMessageLength">,
+): string {
+  return redactedPreview(
+    stripReplyInput(prefixedReply(text, platform, config)),
+    50,
+    config.maxMessageLength,
+    escapeReplyInput,
+  );
+}
+
 export function buildReplyInjectionSteps(
   text: string,
   platform: string,
@@ -536,9 +711,11 @@ export function buildReplyInjectionSteps(
     "event" | "askUserQuestionOptionCount" | "askUserQuestionAllowOther"
   >,
 ): ReplyInjectionStep[] {
-  const prefix = config.includePrefix ? `[reply:${platform}] ` : "";
-  const sanitized = sanitizeReplyInput(prefix + text);
-  const truncated = sanitized.slice(0, config.maxMessageLength);
+  const truncated = sanitizeReplyText(text, platform, config).slice(
+    0,
+    config.maxMessageLength,
+  );
+  let steps: ReplyInjectionStep[];
 
   if (
     mapping?.event === "ask-user-question" &&
@@ -549,7 +726,7 @@ export function buildReplyInjectionSteps(
       0,
       Math.floor(mapping.askUserQuestionOptionCount ?? 0),
     );
-    return [
+    steps = [
       ...Array.from({ length: optionCount }, () => ({
         kind: "key" as const,
         value: "Down",
@@ -558,15 +735,17 @@ export function buildReplyInjectionSteps(
       { kind: "literal", value: truncated },
       { kind: "key", value: "Enter" },
     ];
+  } else {
+    steps = [
+      { kind: "literal", value: truncated },
+      { kind: "key", value: "Enter" },
+    ];
   }
-
-  return [
-    { kind: "literal", value: truncated },
-    { kind: "key", value: "Enter" },
-  ];
+  loggedReplies.set(steps, () => typedReplyForLog(text, platform, config));
+  return steps;
 }
 
-function sendReplyInjectionSteps(
+export function sendReplyInjectionSteps(
   paneId: string,
   steps: ReplyInjectionStep[],
 ): boolean {
@@ -587,7 +766,7 @@ function sendReplyInjectionSteps(
     return true;
   } catch (error) {
     log(
-      `ERROR: Failed to send reply injection steps to pane ${paneId}: ${error instanceof Error ? error.message : String(error)}`,
+      `ERROR: Failed to send reply injection steps to pane ${paneId}: ${sendKeysErrorText(error, steps)}`,
     );
     return false;
   }
@@ -613,7 +792,7 @@ export async function injectReplyIntoHerdrPane(
     content = await captureHerdrWorkerPane(paneId, 15);
   } catch (error) {
     log(
-      `WARN: Failed to capture herdr pane ${paneId}: ${error instanceof Error ? error.message : String(error)}`,
+      `WARN: Failed to capture herdr pane ${paneId}: ${herdrErrorText(error)}`,
     );
   }
 
@@ -642,12 +821,12 @@ export async function injectReplyIntoHerdrPane(
   try {
     await herdrSendPrompt(paneId, preview);
     log(
-      `Injected reply from ${platform} into herdr pane ${paneId}: "${preview.slice(0, 50)}${preview.length > 50 ? "..." : ""}"`,
+      `Injected reply from ${platform} into herdr pane ${paneId}: "${replyLogPreview(text, platform, config)}"`,
     );
     return true;
   } catch (error) {
     log(
-      `ERROR: Failed to inject reply into herdr pane ${paneId}: ${error instanceof Error ? error.message : String(error)}`,
+      `ERROR: Failed to inject reply into herdr pane ${paneId}: ${herdrErrorText(error, preview, loggedReplyOf(steps))}`,
     );
     return false;
   }
@@ -687,7 +866,7 @@ async function injectReply(
 
   if (success) {
     log(
-      `Injected reply from ${platform} into pane ${paneId}: "${preview.slice(0, 50)}${preview.length > 50 ? "..." : ""}"`,
+      `Injected reply from ${platform} into pane ${paneId}: "${replyLogPreview(text, platform, config)}"`,
     );
   } else {
     log(`ERROR: Failed to inject reply into pane ${paneId}`);
