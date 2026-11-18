@@ -83,8 +83,8 @@ const argvOf = (command, form, args) => [command, ...args, 'tail'];
 describe('maskJevState: the options of a command line that carry a credential, by the table', () => {
   it('has the rows it says it has', () => {
     expect(rows.map((row) => row.opt)).toEqual([
-      '--password', '--passwd', '--pass', '--token', '--secret', '--api-key', '--apikey', '--access-token', '--auth-token', '--client-secret', '--http-password', '--ftp-password', '--proxy-password', '--oauth2-bearer',
-      '--user', '--proxy-user', '-u', '-U', '-p', '-a',
+      '--password', '--passwd', '--pass', '--token', '--secret', '--api-key', '--apikey', '--access-token', '--auth-token', '--client-secret', '--http-password', '--ftp-password', '--proxy-password', '--oauth2-bearer', '--cookie',
+      '--user', '--proxy-user', '-u', '-U', '-b', '-p', '-a',
     ]);
     expect(Object.keys(PROGRAMS)).toEqual(['mysql', 'curl', 'redis-cli']);
     expect(PROGRAMS.mysql).toEqual(['mysql', 'mysqldump', 'mysqladmin', 'mariadb', 'sshpass']);

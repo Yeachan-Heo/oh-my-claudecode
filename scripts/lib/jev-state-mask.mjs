@@ -218,10 +218,11 @@ export const PROGRAMS = Object.freeze({
 const CURL_FLAGS = '0123469aBfgGhiIjJklLMnNOpqRsSvVZ#';
 const MYSQL_FLAGS = '?ABbCcEfGHiILnNoqrstTUvVwWX';
 export const CREDENTIAL_OPTIONS = Object.freeze([
-  { names: Object.freeze(['password', 'passwd', 'pass', 'token', 'secret', 'api-key', 'apikey', 'access-token', 'auth-token', 'client-secret', 'http-password', 'ftp-password', 'proxy-password', 'oauth2-bearer']), value: 'all' },
+  { names: Object.freeze(['password', 'passwd', 'pass', 'token', 'secret', 'api-key', 'apikey', 'access-token', 'auth-token', 'client-secret', 'http-password', 'ftp-password', 'proxy-password', 'oauth2-bearer', 'cookie']), value: 'all' },
   { names: Object.freeze(['user', 'proxy-user']), value: 'user' },
   { letter: 'u', flags: CURL_FLAGS, value: 'user' },
   { letter: 'U', flags: CURL_FLAGS, value: 'user', program: 'curl' },
+  { letter: 'b', flags: CURL_FLAGS, value: 'all', program: 'curl' },
   { letter: 'p', flags: MYSQL_FLAGS, value: 'all', program: 'mysql' },
   { letter: 'a', flags: '', value: 'all', program: 'redis-cli' },
 ].map(Object.freeze));
@@ -428,11 +429,13 @@ function lexShell(text) {
       if (close[at] < 0 || !this.opens(at)) return -1;
       // closes at its own next quote, within the text it stands in
       const quote = text[at];
-      for (let j = at + 1, limit = limitOf(innermost(at)); j < limit; j++) {
+      const limit = limitOf(innermost(at));
+      for (let j = at + 1; j < limit; j++) {
         if (text[j] === '\\' && quote === '"') j++;
         else if (text[j] === quote) return j;
       }
-      return -1;
+      // it does not close before the quote around it does (an inner shell's quote written as \" in an outer one): the close of the outer one
+      return limit < n ? limit : -1;
     },
     wordEnd(start) {
       if (tooDeep >= 0 && start >= tooDeep) return n;
@@ -546,44 +549,70 @@ function maskOptions(text) {
   return result;
 }
 
-// The Authorization header: the credential after the name of the scheme is replaced, to the end of the line, or to the quote that
-// closes the argument the header is in (-H "Authorization: Bearer x y") or the value (a "Authorization": "Digest a=\"b\", c=d" of a
-// JSON text). maskSecrets knows one word after Bearer, Basic and Token; a credential of another scheme (Digest, ApiKey, Negotiate) or
-// of more words, or one in quotes, is the rest of this.
-const AUTHORIZATION = /(?<![A-Za-z0-9_-])(?:proxy-)?authorization(["']?)[ \t]*:[ \t]*/gi;
-// the schemes that maskSecrets reads past, so that a second pass changes nothing; the name of any other scheme goes with its credential
-const AUTH_SCHEME = /^(?:bearer|basic|token)[ \t]+(?=\S)/i;
+// Headers that carry a credential, in ONE table (a header name, and the schemes that stay before the credential): the value of the header
+// is replaced to the end of the header, whatever it holds (quotes, white space, `;` and `,` of a cookie) and however it starts. The end of
+// the header is the end of the line; when the header is the start of a quoted argument or string (-H "Cookie: a=b", 'X-Api-Key: k', a
+// "Cookie": "a=b" of JSON text) it is the close of that quote as the lexer reads it (an escaped quote does not close it). maskSecrets
+// knows the single word after Bearer, Basic and Token and a cookie up to a quote; the rest is this, and what this leaves is a fixed point
+// of maskSecrets (a test checks it), so a second pass changes nothing.
+const HEADER_NAME = String.raw`(?:proxy-)?authorization|(?:set-)?cookie|x-api-key|x-auth-token|x-access-token|x-csrf-token|x-xsrf-token|private-token`;
+const HEADERS = new RegExp(String.raw`(?<![A-Za-z0-9_-])(${HEADER_NAME})(["']?)[ \t]*:[ \t]*`, 'gi');
+// the schemes of an Authorization header that stay before its credential, so that a second pass changes nothing; the name of any other scheme goes with its credential
+const AUTH_SCHEME = /(?:bearer|basic|token)[ \t]+(?=\S)/iy;
+const AUTH_NAME = /authorization$/i;
 
-/** The end of a header value that starts at `start`: the end of the line, or `quote` when the value is inside quotes. */
-function headerEnd(text, start, quote) {
-  let i = start;
-  while (i < text.length && text[i] !== '\n' && text[i] !== '\r' && text[i] !== quote) i += quote && text[i] === '\\' ? 2 : 1;
-  return Math.min(i, text.length);
+/** The end of the line that holds index `from`. */
+function lineEnd(text, from) {
+  let i = from;
+  while (i < text.length && text[i] !== '\n' && text[i] !== '\r') i++;
+  return i;
 }
 
-function maskAuthorization(text) {
-  AUTHORIZATION.lastIndex = 0;
+function maskHeaders(text) {
+  HEADERS.lastIndex = 0;
+  let lex;
   let out = '';
   let last = 0;
-  for (let found = AUTHORIZATION.exec(text); found !== null; found = AUTHORIZATION.exec(text)) {
+  for (let found = HEADERS.exec(text); found !== null; found = HEADERS.exec(text)) {
+    lex ??= lexShell(text);
     let start = found.index + found[0].length;
     const before = found.index > 0 ? text[found.index - 1] : '';
-    let quote = '';
-    if (text[start] === '"' || text[start] === "'") {
-      quote = text[start];
-      start++;
-    } else if (found[1] === '' && (before === '"' || before === "'")) {
-      quote = before;
-    }
-    const end = headerEnd(text, start, quote);
+    let end;
+    if (found[2] !== '') {
+      // the name is a key of JSON text ("Cookie": "a=b"): a value in quotes runs to its closing quote, any other to the end of the line
+      if ((text[start] === '"' || text[start] === "'") && lex.opens(start)) {
+        const close = lex.closeAt(start);
+        end = close === -1 ? text.length : close;
+        start++;
+      } else end = lineEnd(text, start);
+    } else if ((before === '"' || before === "'") && lex.opens(found.index - 1)) {
+      const close = lex.closeAt(found.index - 1);
+      end = Math.min(close === -1 ? text.length : close, lineEnd(text, start));
+    } else end = lineEnd(text, start);
     if (end <= start) continue;
-    const scheme = AUTH_SCHEME.exec(text.slice(start, end))?.[0] ?? '';
-    if (start + scheme.length >= end) continue;
-    out += `${text.slice(last, start)}${scheme}${MASKED_VALUE}`;
+    let scheme = 0;
+    if (AUTH_NAME.test(found[1])) {
+      AUTH_SCHEME.lastIndex = start;
+      scheme = AUTH_SCHEME.exec(text)?.[0].length ?? 0;
+    }
+    if (start + scheme >= end) continue;
+    out += `${text.slice(last, start + scheme)}${MASKED_VALUE}`;
     last = end;
-    AUTHORIZATION.lastIndex = end;
+    HEADERS.lastIndex = end;
   }
   return last > 0 ? out + text.slice(last) : text;
+}
+
+// URL userinfo (RFC 3986 `userinfo@host`, after `//`): the name may be empty (`//:pw@host`), the password is everything after the first
+// colon up to the LAST `@` of the authority (a `@` may stand in a password: `//u:p@ss@host`, which the URL parser reads as one password),
+// and an authority ends at a `/` or white space. An empty password (`//u:@host`) stays. One function for the whole text and for the
+// text of a cut: an authority that runs to the end of a cut text may go on past it, so an `@` in it proves nothing and the password is
+// masked from its colon to the end.
+const USERINFO = /(\/\/[^/\s:]*:)[^/\s]+@/g;
+const USERINFO_CUT = /(\/\/[^/\s:]*:)[^/\s]*$/;
+
+function maskUserinfo(text, cut) {
+  return (cut ? text.replace(USERINFO_CUT, `$1${MASKED_VALUE}`) : text).replace(USERINFO, `$1${MASKED_VALUE}@`);
 }
 
 /**
@@ -704,8 +733,7 @@ function maskString(text, maxChars) {
   const cutText = maxChars !== undefined && text.length > maxChars + WINDOW_MARGIN;
   const cut = cutText ? cutAndCloseTail(text, maxChars + WINDOW_MARGIN) : text;
   const omitted = omitSecretLines(maskPrivateKeys(cut));
-  const masked = maskSecrets(maskAuthorization(maskOptions(omitted)), { keepGitHashes: true });
-  return cutText ? masked.replace(/(\/\/[^/\s:@]+:)[^/\s@]+$/, '$1***') : masked;
+  return maskSecrets(maskUserinfo(maskHeaders(maskOptions(omitted)), cutText), { keepGitHashes: true });
 }
 
 /**
