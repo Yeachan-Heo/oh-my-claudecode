@@ -30,6 +30,8 @@ let counter = 0;
 //   sweep-observed      right after the stat of the directory PAUSE_MATCH (the sweep reading the age of a session directory)
 //   before-event-publish  before the temporary file of an event (<key>.events/<name>.json.tmp) is renamed to its name: the event is written
 //                       and its call time is fixed, but it is not visible yet
+//   before-session-write  before the first file of a call is opened inside the session tree: the claim of a task number (<session>/_task/<id>.json) or the
+//                       temporary file of an event; the directory of the writer was made just before, so the sweep can move it away now
 // The process writes PAUSE_MARK and waits until PAUSE_GO exists (with several kinds both names get the suffix ".<kind>").
 const PRELOAD = `
 import fs from 'node:fs';
@@ -76,6 +78,10 @@ if (kinds.includes('before-publish')) {
 if (kinds.includes('before-event-publish')) {
   const rename = fs.renameSync;
   fs.renameSync = (from, to, ...rest) => { if (typeof from === 'string' && /\\.events\\/[^/]+\\.json\\.tmp$/.test(from)) hold('before-event-publish'); return rename(from, to, ...rest); };
+}
+if (kinds.includes('before-session-write')) {
+  const open = fs.openSync;
+  fs.openSync = (p, flags, ...rest) => { if (flags === 'wx' && typeof p === 'string' && /\\/(?:[^/]+\\.events\\/[^/]+\\.json\\.tmp|_task\\/[^/]+\\.json)$/.test(p)) hold('before-session-write'); return open(p, flags, ...rest); };
 }
 if (kinds.includes('sweep-observed')) {
   const stat = fs.statSync;
@@ -445,6 +451,38 @@ describe('task-list sweep: a hook writes while the sweep judges the session dire
     const s = startChild(dir, { kind: 'sweep', done: join(dir, 's-done') }, null, env);
     expect((await s.exited).code).toBe(0);
     expect(existsSync(session)).toBe(false);
+    expect(readdirSync(join(logs, 'lists')).filter((n) => n.endsWith('.sweeping'))).toEqual([]);
+  }, TOTAL_MS);
+
+  // The writer made its directory (a no-op for an old session) and is held before its first file; the sweep, run to its end meanwhile, reads
+  // the session as idle, moves it away and removes it. The call of the writer is the newest thing the session has: it must be saved.
+  it.each([
+    ['TodoWrite: the temporary file of the event', { session_id: 'race-session', tool_name: 'TodoWrite', tool_input: { todos: [{ content: 'from the writer', status: 'pending' }] }, tool_use_id: 'toolu_w1' }, ['from the writer']],
+    ['TaskCreate: the claim of the task number, then the event', task('from the writer', 2), ['from the writer']],
+  ])('a writer held after its mkdir, while the sweep removes the idle session, saves its call (%s)', async (_what, data, expected) => {
+    counter += 1;
+    const dir = join(TMP, `sweep-${counter}`);
+    mkdirSync(dir, { recursive: true });
+    const logs = join(dir, 'logs');
+    const env = baseEnv(logs);
+    const session = join(logs, 'lists', 'race-session');
+    const files = (name) => join(dir, name);
+    L.recordListCall(task('base', 1), env);
+    ageTree(session, 8 * DAY);
+    rmSync(join(logs, 'lists', '.sweep'), { force: true }); // the sweep is due
+    const w = startChild(dir, { kind: 'record', data, done: files('w-done') }, { kind: 'before-session-write', mark: files('w-paused'), go: files('w-go') }, env);
+    await waitUntil(files('w-paused')); // the directory of the writer exists; no file of the call does
+    L.sweep(env, Date.now());
+    expect(existsSync(session)).toBe(false); // the old tree is gone, with the folder the writer had made
+    writeFileSync(files('w-go'), '1');
+    const rw = await w.exited;
+    expect(rw.code, rw.stderr).toBe(0);
+    const record = JSON.parse(readFileSync(join(session, 'main.json'), 'utf8'));
+    expect(record.items.map((x) => x.content)).toEqual(expected);
+    expect(readdirSync(join(session, 'main.events'))).toEqual([]);
+    if (data.tool_name === 'TaskCreate') expect(JSON.parse(readFileSync(join(session, '_task', '2.json'), 'utf8'))).toEqual({ agent: 'main' });
+    const rows = existsSync(join(logs, 'task-list.jsonl')) ? readFileSync(join(logs, 'task-list.jsonl'), 'utf8') : '';
+    expect(rows).not.toContain('event_write_failed');
     expect(readdirSync(join(logs, 'lists')).filter((n) => n.endsWith('.sweeping'))).toEqual([]);
   }, TOTAL_MS);
 });

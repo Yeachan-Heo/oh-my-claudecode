@@ -324,13 +324,25 @@ export function taskIdOf(response) {
 
 // --- ownership of Task* tasks -------------------------------------------------------------
 
+// The retention sweep may move a session directory away between the mkdir of a writer and its next file operation (it judged the
+// directory idle before the writer wrote anything in it), and the writer then gets ENOENT. The writer repeats the whole step from its
+// mkdir, which makes the directory anew; the sweep runs at most once an hour, so a few tries are enough. Any other error is thrown at once.
+const DIR_TRIES = 3;
+function inSessionDir(step) {
+  for (let attempt = 1; ; attempt += 1) {
+    try { return step(); } catch (error) { if (error?.code !== 'ENOENT' || attempt >= DIR_TRIES) throw error; }
+  }
+}
+
 function claimTask(sessionId, taskId, key, env) {
   const dir = sessionDir(sessionId, env);
   if (!dir || !TASK_ID.test(taskId)) return false;
   try {
-    mkdirSync(join(dir, '_task'), { recursive: true });
-    const fd = openSync(join(dir, '_task', `${taskId}.json`), 'wx', 0o600); // the first creator wins; the store numbers tasks once per session
-    try { writeSync(fd, JSON.stringify({ agent: key })); } finally { closeSync(fd); }
+    inSessionDir(() => {
+      mkdirSync(join(dir, '_task'), { recursive: true });
+      const fd = openSync(join(dir, '_task', `${taskId}.json`), 'wx', 0o600); // the first creator wins; the store numbers tasks once per session
+      try { writeSync(fd, JSON.stringify({ agent: key })); } finally { closeSync(fd); }
+    });
     return true;
   } catch {
     return false;
@@ -504,11 +516,14 @@ function writeEvent(dir, data, key, env, now) {
     const body = JSON.stringify(event);
     // an event the reader would refuse is never written: it would stay on disk, unread, for good
     if (Buffer.byteLength(body) > RECORD_MAX_BYTES) { storeEvent('event_too_large', join(dir, name), env); return false; }
-    mkdirSync(dir, { recursive: true });
-    const tmp = join(dir, `${name}.tmp`);
-    const fd = openSync(tmp, 'wx', 0o600);
-    try { writeSync(fd, body); } finally { closeSync(fd); }
-    renameSync(tmp, join(dir, name));
+    // the name (the time and the tick of the call) stays the same across the tries: the order of the calls is the order of the names
+    inSessionDir(() => {
+      mkdirSync(dir, { recursive: true });
+      const tmp = join(dir, `${name}.tmp`);
+      const fd = openSync(tmp, 'wx', 0o600);
+      try { writeSync(fd, body); } finally { closeSync(fd); }
+      renameSync(tmp, join(dir, name));
+    });
     return true;
   } catch {
     storeEvent('event_write_failed', join(dir, name), env);
