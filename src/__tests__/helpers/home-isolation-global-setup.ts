@@ -18,11 +18,15 @@
  * Not covered: APPDATA and LOCALAPPDATA on Windows, and code that reaches the
  * home directory without HOME (os.userInfo()).
  */
+import { createHash } from 'node:crypto';
 import { existsSync, mkdtempSync, readFileSync, readdirSync, realpathSync, rmSync } from 'node:fs';
 import { homedir, hostname } from 'node:os';
 import { basename, isAbsolute, join, relative } from 'node:path';
 
-/** Per-run homes are named `<prefix><host>-<pid of the vitest process>-<random>`. */
+/**
+ * Per-run homes are named `<prefix><host tag>-<pid of the vitest process>-<random>`,
+ * where the host tag is hostTag(os.hostname()).
+ */
 export const TEST_HOME_PREFIX = 'omc-vitest-home-';
 
 /**
@@ -66,6 +70,32 @@ function isInside(parent: string, child: string): boolean {
   return rel !== '' && !rel.startsWith('..') && !isAbsolute(rel);
 }
 
+function canonical(path: string): string {
+  try {
+    return realpathSync.native(path);
+  } catch {
+    return path;
+  }
+}
+
+/**
+ * Whether `cwd` is below `home`. Compared on canonical paths: with a symlinked
+ * home (mounted or NFS homes) homedir() is the link while process.cwd() is the
+ * real path, and the workspace walk runs through the real path.
+ */
+export function isUnderHome(home: string, cwd: string): boolean {
+  return isInside(home, cwd) || isInside(canonical(home), canonical(cwd));
+}
+
+/**
+ * Identifies the host in per-run home names, so cleanup only probes PIDs from
+ * its own host. A hash of the full hostname: truncating it would let two hosts
+ * that share a home and a long name prefix remove each other's running homes.
+ */
+export function hostTag(host: string): string {
+  return createHash('sha256').update(host).digest('hex').slice(0, 16);
+}
+
 /**
  * Remove homes left by runs that were killed before teardown. A home is only
  * removed when it was created on this host and its process no longer exists,
@@ -99,7 +129,7 @@ export default function setup(): () => void {
   // findWorkspaceRoot() stops its upward walk at homedir(). Once HOME moves,
   // a walk from the checkout passes the real home and would adopt a marker
   // there, which anchors state at the real ~/.omc.
-  if (!nested && isInside(outerHome, process.cwd()) && existsSync(join(outerHome, WORKSPACE_MARKER))) {
+  if (!nested && isUnderHome(outerHome, process.cwd()) && existsSync(join(outerHome, WORKSPACE_MARKER))) {
     throw new Error(
       `${join(outerHome, WORKSPACE_MARKER)} exists. With HOME redirected for the test run, ` +
         'tests started from this checkout would write state into the real ~/.omc. ' +
@@ -112,7 +142,7 @@ export default function setup(): () => void {
   const canaryPath = join(outerHome, '.omc', 'template-version.json');
   const canaryBefore = nested ? null : readOrNull(canaryPath);
 
-  const ownPrefix = `${TEST_HOME_PREFIX}${hostname().replace(/[^A-Za-z0-9]/g, '').slice(0, 16)}-`;
+  const ownPrefix = `${TEST_HOME_PREFIX}${hostTag(hostname())}-`;
   removeStaleTestHomes(outerHome, ownPrefix);
 
   const saved = (['HOME', 'USERPROFILE', ...LOCATION_VARS] as const).map(
