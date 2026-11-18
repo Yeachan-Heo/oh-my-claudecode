@@ -410,7 +410,7 @@ export function sweep(env, now) {
     writeJson(marker, { ts: new Date(now).toISOString() });
     for (const name of readdirSync(root)) {
       try {
-        if (name.endsWith(SWEEPING)) { // a tree that could not be moved back: removed once idle
+        if (name.startsWith('.') && name.endsWith(SWEEPING)) { // a tree that could not be moved back (never a session id: those do not start with a dot): removed once idle
           if (now - lastActivityMs(join(root, name)) > LISTS_MAX_AGE_MS) rmSync(join(root, name), { recursive: true, force: true });
         } else if (!name.startsWith('.') && now - statSync(join(root, name)).mtimeMs > LISTS_MAX_AGE_MS) {
           removeIfIdle(root, name, now);

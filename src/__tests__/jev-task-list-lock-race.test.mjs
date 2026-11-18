@@ -158,8 +158,8 @@ function overlapped(log) {
   return false;
 }
 
-const task = (subject, id) => ({
-  session_id: 'race-session', tool_name: 'TaskCreate', tool_input: { subject }, tool_response: `Task #${id} created successfully: ${subject}`, tool_use_id: `toolu_${id}`,
+const task = (subject, id, sessionId = 'race-session') => ({
+  session_id: sessionId, tool_name: 'TaskCreate', tool_input: { subject }, tool_response: `Task #${id} created successfully: ${subject}`, tool_use_id: `toolu_${id}`,
 });
 
 describe('task-list lock: two hooks contend for the lock a dead holder left', () => {
@@ -362,27 +362,28 @@ describe('task-list sweep: a hook writes while the sweep judges the session dire
     walk(root);
   };
 
-  it('a session read as old by the sweep but written by a hook before the removal keeps what the hook wrote', async () => {
+  // 'race.sweeping' is a valid session id that ends like the hidden name of a tree the sweep moved aside: it is a session, not a leftover
+  it.each(['race-session', 'race.sweeping'])('a session (%s) read as old by the sweep but written by a hook before the removal keeps what the hook wrote', async (sessionId) => {
     counter += 1;
     const dir = join(TMP, `sweep-${counter}`);
     mkdirSync(dir, { recursive: true });
     const logs = join(dir, 'logs');
     const env = baseEnv(logs);
-    const session = join(logs, 'lists', 'race-session');
+    const session = join(logs, 'lists', sessionId);
     const files = (name) => join(dir, name);
-    L.recordListCall(task('base', 1), env);
+    L.recordListCall(task('base', 1, sessionId), env);
     ageTree(session, 8 * DAY);
     rmSync(join(logs, 'lists', '.sweep'), { force: true }); // the sweep of the child is due
     const s = startChild(dir, { kind: 'sweep', done: files('s-done') }, { kind: 'sweep-observed', match: session, mark: files('s-paused'), go: files('s-go') }, env);
     await waitUntil(files('s-paused')); // the sweep has read the directory as old and has not moved it yet
-    expect(L.recordListCall(task('from-hook', 2), env)).not.toBeNull();
+    expect(L.recordListCall(task('from-hook', 2, sessionId), env)).not.toBeNull();
     writeFileSync(files('s-go'), '1');
     const rs = await s.exited;
     expect(rs.code).toBe(0);
     expect(existsSync(session)).toBe(true);
-    const names = (L.readList('race-session', 'main', env)?.items ?? []).map((x) => x.content).sort();
+    const names = (L.readList(sessionId, 'main', env)?.items ?? []).map((x) => x.content).sort();
     expect(names).toEqual(['base', 'from-hook']);
-    expect(readdirSync(join(logs, 'lists')).filter((n) => n.endsWith('.sweeping'))).toEqual([]);
+    expect(readdirSync(join(logs, 'lists')).filter((n) => n.startsWith('.') && n.endsWith('.sweeping'))).toEqual([]);
   }, TOTAL_MS);
 
   it('a session nobody wrote to for eight days is removed with everything in it', async () => {
