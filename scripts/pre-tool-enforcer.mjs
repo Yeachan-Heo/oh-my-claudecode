@@ -2670,9 +2670,9 @@ let contextText = null;
 // subagent whose agent_type is in the guarded list is denied unless the target is a Markdown file under <cwd>/.omc/plans/.
 // The list comes from OMC_PLANNER_WRITE_GUARD_TYPES (comma separated, exact match after trimming; default:
 // oh-my-claudecode:planner). Calls without agent_type and calls of other agent types pass. The path is normalized
-// lexically first. When the plans directory exists, the raw path and the normalized path are then walked from the working
-// directory the way the kernel resolves them (see walkKernelPath), and the last component is followed one link at a time
-// (see planEntryAllowed): every entry on the way must be a path that ends in .md inside the real plans directory, and the
+// lexically first. The raw path and the normalized path are then walked from the working directory the way the kernel
+// resolves them (see walkKernelPath), also when the plans directory does not exist yet, and the last component is followed
+// one link at a time (see planEntryAllowed): every entry on the way must be a path that ends in .md inside the real plans directory, and the
 // entry that ends the chain must be a regular file or must not exist yet. A link that cannot be resolved, a link that loops
 // and a directory are denied. Every text among file_path, filePath, notebook_path, path and file (the names the hooks of
 // this plugin read), in tool_input and in toolInput, must pass, because the tool may act on any of them; a call with none of
@@ -2690,15 +2690,6 @@ const PLAN_WRITE_DEFAULT_TYPES = ['oh-my-claudecode:planner'];
 function planWriteGuardTypes(env = process.env) {
   const list = String(env.OMC_PLANNER_WRITE_GUARD_TYPES ?? '').split(',').map((name) => name.trim()).filter(Boolean);
   return list.length > 0 ? list : PLAN_WRITE_DEFAULT_TYPES;
-}
-
-function pathExists(path) {
-  try {
-    lstatSync(path);
-    return true;
-  } catch {
-    return false;
-  }
 }
 
 // The path the kernel reaches for `filePath`, walked from `cwd` one component at a time on the raw text: a link is followed
@@ -2772,13 +2763,10 @@ function planWritePathAllowed(filePath, cwd) {
   const target = resolve(cwd, filePath);
   const rel = relative(plansDir, target);
   if (rel === '' || rel.split(sep)[0] === '..' || isAbsolute(rel) || !rel.endsWith(PLAN_WRITE_EXT)) return false;
-  if (!pathExists(plansDir)) return true;
-  let nativePlansDir;
-  try {
-    nativePlansDir = realpathSync.native(plansDir);
-  } catch {
-    return false;
-  }
+  // The plans directory as the kernel reaches it, also when it does not exist yet: the existing part is resolved, the rest
+  // stays text, so the raw walks below run in every case. A part that cannot be resolved is a denial.
+  const nativePlansDir = walkKernelPath(plansDir, cwd);
+  if (nativePlansDir === null) return false;
   // The raw path as the kernel resolves it must end inside the real plans directory: a link followed by ".." in the input
   // must not lead out of it, whether the link comes before or after the plans directory in the path. The normalized target is
   // checked the same way, for a caller that normalizes the path before it opens it.

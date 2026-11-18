@@ -3,9 +3,9 @@
  * Every hook run gets its own temporary home, state and log directories.
  */
 
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'fs';
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'fs';
 import { tmpdir } from 'os';
-import { join } from 'path';
+import { isAbsolute, join, relative, resolve, sep } from 'path';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 
 vi.unmock('child_process');
@@ -627,6 +627,112 @@ describe('plan write guard (pre-tool-enforcer.mjs)', () => {
         [PLANNER, 'deny', outside()],
         [PLANNER, 'deny', outside()],
       ]);
+    });
+  });
+
+  // The guard resolves the raw path against the plans directory as the kernel reaches it, whether that directory exists or
+  // not. The expected verdict comes from the file system: the write is made for real in the same tree (after the hook ran),
+  // and the file must have landed inside the real plans directory, and the normalized path must name the plans directory too.
+  describe('a plans directory that does not exist, or is a link, combined with links and ..', () => {
+    const roots: Record<string, (root: string, cwd: string) => void> = {
+      'no .omc': () => {},
+      '.omc without plans': (root, cwd) => mkdirSync(join(cwd, '.omc'), { recursive: true }),
+      'plans directory': (root, cwd) => mkdirSync(join(cwd, '.omc', 'plans'), { recursive: true }),
+      'plans directory that is a link': (root, cwd) => {
+        mkdirSync(join(cwd, '.omc'), { recursive: true });
+        mkdirSync(join(root, 'real-plans'), { recursive: true });
+        symlinkSync(join(root, 'real-plans'), join(cwd, '.omc', 'plans'), 'dir');
+      },
+      '.omc that is a link, without plans': (root, cwd) => {
+        mkdirSync(join(root, 'real-omc'), { recursive: true });
+        symlinkSync(join(root, 'real-omc'), join(cwd, '.omc'), 'dir');
+      },
+    };
+    const layouts: Record<string, (root: string, cwd: string) => void> = {
+      'no link': () => {},
+      'link to a directory with plans beside it': (root, cwd) => {
+        mkdirSync(join(root, 'out', 'nested'), { recursive: true });
+        mkdirSync(join(root, 'out', '.omc', 'plans'), { recursive: true });
+        symlinkSync(join(root, 'out', 'nested'), join(cwd, 'jump'), 'dir');
+      },
+      'link to a directory without plans beside it': (root, cwd) => {
+        mkdirSync(join(root, 'out', 'nested'), { recursive: true });
+        symlinkSync(join(root, 'out', 'nested'), join(cwd, 'jump'), 'dir');
+      },
+      'link to a deeper directory of the project': (root, cwd) => {
+        mkdirSync(join(cwd, 'a', 'b'), { recursive: true });
+        symlinkSync(join(cwd, 'a', 'b'), join(cwd, 'jump'), 'dir');
+      },
+      'link that dangles': (root, cwd) => symlinkSync(join(root, 'nowhere'), join(cwd, 'jump'), 'dir'),
+    };
+    const paths: Array<(cwd: string) => string> = [
+      () => '.omc/plans/v.md',
+      () => 'jump/../.omc/plans/v.md',
+      (cwd) => `${cwd}/jump/../.omc/plans/v.md`,
+      () => '.omc/plans/s/../v.md',
+      () => '.omc/plans/jump/../v.md',
+      () => 'jump/../../.omc/plans/v.md',
+    ];
+
+    function landedFiles(dir: string, found: string[] = []): string[] {
+      for (const entry of readdirSync(dir, { withFileTypes: true })) {
+        const full = join(dir, entry.name);
+        if (entry.isDirectory()) landedFiles(full, found);
+        else if (entry.name === 'v.md') found.push(full);
+      }
+      return found;
+    }
+
+    function kernelVerdict(root: string, cwd: string, path: string): 'allow' | 'deny' {
+      const write = spawnSync('sh', ['-c', 'mkdir -p -- "$(dirname -- "$1")" && : > "$1"', 'sh', path], { cwd, encoding: 'utf8' });
+      if (write.status !== 0) return 'deny';
+      const landed = landedFiles(root);
+      if (landed.length !== 1 || !existsSync(join(cwd, '.omc', 'plans'))) return 'deny';
+      const plansReal = realpathSync(join(cwd, '.omc', 'plans'));
+      const rel = relative(plansReal, landed[0]);
+      const lexical = relative(join(cwd, '.omc', 'plans'), resolve(cwd, path));
+      const lexicalInside = lexical !== '' && lexical.split(sep)[0] !== '..' && !isAbsolute(lexical);
+      return rel !== '' && rel.split(sep)[0] !== '..' && !isAbsolute(rel) && lexicalInside ? 'allow' : 'deny';
+    }
+
+    for (const [rootName, buildRoot] of Object.entries(roots)) {
+      it(`gives the verdict of the file system for ${rootName}, for every link layout and path`, () => {
+        let allowed = 0;
+        let denied = 0;
+        for (const [layoutName, buildLayout] of Object.entries(layouts)) {
+          for (const [index, makePath] of paths.entries()) {
+            const root = mkdtempSync(join(tmp, 'grid-'));
+            const cwd = join(root, 'project');
+            mkdirSync(cwd, { recursive: true });
+            buildRoot(root, cwd);
+            buildLayout(root, cwd);
+            const path = makePath(cwd);
+            const verdict = verdictOf(callTool('Write', path, { extra: { cwd } }));
+            const expected = kernelVerdict(root, cwd, path);
+            expect(verdict, `${rootName} | ${layoutName} | ${path}`).toBe(expected);
+            if (verdict === 'allow') allowed += 1;
+            else denied += 1;
+            rmSync(root, { recursive: true, force: true });
+          }
+        }
+        expect(denied, 'the grid has denied cases').toBeGreaterThan(0);
+        expect(allowed, 'the grid has allowed cases').toBeGreaterThan(0);
+      }, 120000);
+    }
+
+    it('denies the raw path through a link when the plans directory does not exist, whichever tool and field names it', () => {
+      const root = mkdtempSync(join(tmp, 'grid-'));
+      const cwd = join(root, 'project');
+      mkdirSync(cwd, { recursive: true });
+      mkdirSync(join(root, 'out', 'nested'), { recursive: true });
+      mkdirSync(join(root, 'out', '.omc', 'plans'), { recursive: true });
+      symlinkSync(join(root, 'out', 'nested'), join(cwd, 'jump'), 'dir');
+      for (const tool of ['Write', 'Edit', 'MultiEdit', 'NotebookEdit']) {
+        expect(verdictOf(callTool(tool, 'jump/../.omc/plans/victim.md', { extra: { cwd } })), tool).toBe('deny');
+      }
+      expect(verdictOf(callTool('Write', '', { input: { file_path: '.omc/plans/ok.md', path: 'jump/../.omc/plans/victim.md' }, extra: { cwd } }))).toBe('deny');
+      expect(verdictOf(callTool('Write', '.omc/plans/new.md', { extra: { cwd } })), 'a new plan in a plans directory that does not exist yet').toBe('allow');
+      rmSync(root, { recursive: true, force: true });
     });
   });
 });
