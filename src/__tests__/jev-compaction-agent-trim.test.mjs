@@ -437,18 +437,30 @@ describe('agent trim keeps the text of a report as written', () => {
     expect(t.rows.get(3)).toMatchObject({ trimDrop: true });
   });
 
-  it('moves the report to the file with the quoted envelope word for word, and without the outer frame of the host', async () => {
+  it('moves the row to the file as it came, not as the trim left it, and counts the tokens of the trimmed row', async () => {
     const quoted = envelope('teammate-message', 'q1', `Quoted: ${filler(300)}`);
-    const message = `Report that quotes:\n\`\`\`\n${quoted}\n\`\`\`\n${filler(900)}`;
-    const messages = talk([report('a1', message, 'N1 done'), ...rowsOf(6, (k) => longReport(k))]);
+    const original = report('a1', `Report that quotes:\n\`\`\`\n${quoted}\n\`\`\`\n${filler(900)}`, 'N1 done');
+    const messages = talk([original, ...rowsOf(6, (k) => longReport(k))]);
     const trim = trimAgentRows(messages, { keepFrom: messages.length - 12 });
     const after = messages.map((m, i) => trim.rows.get(i) ?? m);
-    expect(after[1].text).toBe(body('a1', message, 'N1 done'));
+    expect(after[1].text.length).toBeLessThan(original.length);
     const host = fakeHost();
-    const { rows } = await run(host, after);
+    const { rows, stats } = await run(host, after, { source: messages });
     expect([...rows.keys()]).toEqual([1]);
     const path = /: (\/state\/[^ ]+) \(/.exec(rows.get(1).text)[1];
-    expect(host.files.get(path)).toBe(body('a1', message, 'N1 done'));
-    expect(host.files.get(path)).toContain(quoted);
+    expect(host.files.get(path)).toBe(original);
+    expect(rows.get(1).text).toContain(`(${original.length} chars, `);
+    expect(stats.moved_chars).toBe(after[1].text.length);
+  });
+
+  it('a row that quotes an opener without its closing tag is no agent row: not trimmed, not moved, and never taken for the quoted sender', async () => {
+    const stray = `${HEAD}<teammate-message teammate_id="a1">\nSaw <teammate-message teammate_id="q9"> with no end. ${filler(900)}\n</teammate-message>${TAIL}`;
+    const messages = talk([stray, ...rowsOf(6, (k) => longReport(k))]);
+    const trim = trimAgentRows(messages, { keepFrom: messages.length - 12 });
+    expect(trim.rows.has(1)).toBe(false);
+    expect(trim.stats.unbalanced).toBe(1);
+    const { rows, stats } = await run(fakeHost(), messages, { source: messages });
+    expect(rows.has(1)).toBe(false);
+    expect(stats).toMatchObject({ agent_rows: 6, moved: 0 });
   });
 });

@@ -373,11 +373,8 @@ describe('agent messages in the compaction: the whole conversation', () => {
         const t = traceOf(m.text);
         const text = on.store.get(t.path);
         expect(text, t.path).toBeDefined();
-        const fromRow = agentRows.some((r) => r.text === text);
-        const fromTrim = blocksOf(text).length > 0 && !withoutBlocks(text).trim() && agentRows.some((r) => blocksOf(text).every((b) => r.text.includes(b)));
-        expect(fromRow || fromTrim, `file ${t.path} is not an agent message of the conversation`).toBe(true);
+        expect(agentRows.some((r) => r.text === text), `file ${t.path} is not an agent message of the conversation as it came`).toBe(true);
         expect(t.chars).toBe(text.length);
-        expect(text).not.toContain('This came from another Claude session');
       }
       expect(files(on.store).sort()).toEqual(traces.map((m) => traceOf(m.text).path).sort());
       const texts = new Set(out.map((m) => m.text));
@@ -409,7 +406,7 @@ describe('agent messages in the compaction: the whole conversation', () => {
     expect(files(r.store)).toHaveLength(0);
   });
 
-  it('notifications of a state only leave without a trace and without a file, the only carrier of a report stays, the files hold no frame, the pairs hold, the prediction is not higher', async () => {
+  it('notifications of a state only leave without a trace and without a file, the only carrier of a report stays, the files hold the rows as they came, the pairs hold, the prediction is not higher', async () => {
     const state = { 2: idle('s2', 'Waiting: for the review.'), 5: idle('s5', 'Report sent.'), 7: idle('s7', 'Ready to restart.') };
     const carrier = { 9: idle('n9', `Result of the stage: ${fill(1300)}`) };
     const msgs = talk({ ...state, ...carrier });
@@ -425,8 +422,8 @@ describe('agent messages in the compaction: the whole conversation', () => {
       expect(all).not.toContain(`from s${n}`);
       expect(contents.some((x) => x.includes(`teammate_id="s${n}"`))).toBe(false);
     }
-    expect(contents.some((x) => x.includes('"from":"n9"') && !x.includes('This came from another Claude session')) || all.includes(blocksOf(carrier[9])[0])).toBe(true);
-    expect(contents.every((x) => !x.includes('This came from another Claude session') && !x.startsWith('Another Claude session'))).toBe(true);
+    expect(contents.some((x) => x.includes('"from":"n9"')) || all.includes(blocksOf(carrier[9])[0])).toBe(true);
+    expect(contents.every((x) => msgs.some((m) => m.text === x))).toBe(true);
     expect(insidePairing(on.out.messages)).toBe('');
     expect(on.record.chars_after).toBeLessThanOrEqual(off.record.chars_after);
   });
@@ -618,7 +615,7 @@ describe('the frame of agent messages in the compaction: the repeated report and
     const texts = [...r.out.messages.map((m) => m.text || ''), ...files(r.store).map((p) => r.store.get(p))];
     const has = (s) => texts.some((t) => t.includes(s));
     const block = (who, text, summary) => `<teammate-message teammate_id="${who}" color="green"${summary ? ` summary="${summary}"` : ''}>\n${text}\n</teammate-message>`;
-    expect(texts).toContain(block('a1', `Report a1: ${fill(1500)}`, 'N1 ready'));
+    expect(has(block('a1', `Report a1: ${fill(1500)}`, 'N1 ready'))).toBe(true);
     for (const n of ['state1', 'state2', 'state3', 'dupe', 'outside']) expect(has(TEAM[n].split('\n')[2]), n).toBe(false);
     expect(has(TEAM.dupeSummary.split('\n')[2])).toBe(true);
     expect(has('Text outside the block from the host.')).toBe(true);

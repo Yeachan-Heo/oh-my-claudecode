@@ -3557,7 +3557,9 @@ export function trimAgentRows(messages, opts = {}) {
   const said = new Map(); // what every agent said outside idle notifications in the rows before the current one: summaries and bodies
   const learn = (m) => {
     if (m.role !== 'user' || (m.toolResults || []).length || typeof m.text !== 'string' || m.text.length > AGENT_ROW_MAX_CHARS || !m.text.includes('<teammate-message')) return;
-    for (const b of agentBlocks(m.text).blocks) {
+    const { blocks, loose } = agentBlocks(m.text);
+    if (loose) return;
+    for (const b of blocks) {
       if (b.name !== 'teammate-message') continue;
       const body = m.text.slice(b.bodyFrom, b.bodyTo);
       if (trimIdle(body)) continue;
@@ -3622,7 +3624,8 @@ export function trimAgentRows(messages, opts = {}) {
 // one with it), a row with the user's words (a delivered block, QUEUED_PREFIX anywhere in it, or a row opening with a block without the host's header) or
 // that a delivered block is anchored to, a row with a JSON body other than an idle notification (a request waiting for an answer), a row the host cannot
 // rebuild from text (an unmatched API message with a non-text block stops the stage), a row shorter than AGENT_MIN_CHARS or than its trace, and a row with
-// a secret (a secret path, or anything maskSecrets would change; also in its trace). The stage runs on the rows as the trim leaves them.
+// a secret (a secret path, or anything maskSecrets would change; also in its trace). The stage decides on the rows as the trim leaves them; the file holds the
+// row as it came.
 const AGENT_MIN_CHARS = 800;
 // A row longer than this is no agent row for the trim and the move: it stays as it is. (Reading a row is linear; this bounds what one row can cost, and the
 // text a file may hold.)
@@ -3636,7 +3639,10 @@ const AGENT_BARE = /^\s*<(?:agent-message|cross-session-message)\b/; // a row th
 const AGENT_TRACE_PREFIX = '[agent message moved at compaction, not from the user: ';
 const AGENT_LEAD = 'team-lead'; // the teammate_id of a team's lead in its members' sessions
 const utf8Bytes = (text) => new TextEncoder().encode(text).length;
-const isAgentRow = (m) => m.role === 'user' && !(m.toolResults || []).length && typeof m.text === 'string' && m.text.length <= AGENT_ROW_MAX_CHARS && AGENT_OPENERS.some((p) => m.text.trimStart().startsWith(p)) && agentBlocks(m.text).blocks.length > 0;
+// A row is read as one of blocks only when every tag in it has its partner: with a stray tag the pairing of the rest is a guess (a quoted opener would take the
+// closing tag of the real block, and the sender would be the quoted one), so such a row is no agent row for the trim and the move.
+const wholeBlocks = (text) => { const { blocks, loose } = agentBlocks(text); return blocks.length > 0 && !loose; };
+const isAgentRow = (m) => m.role === 'user' && !(m.toolResults || []).length && typeof m.text === 'string' && m.text.length <= AGENT_ROW_MAX_CHARS && AGENT_OPENERS.some((p) => m.text.trimStart().startsWith(p)) && wholeBlocks(m.text);
 const agentWord = (v, max) => Array.from(oneLine(typeof v === 'string' ? v : '').replace(/[<>[\]"]/g, '')).slice(0, max).join(''); // by code point: never half a surrogate pair
 // Who, when and what of each block, in order.
 export function agentSenders(text, statePattern = agentStatePattern('')) {
@@ -3684,7 +3690,8 @@ export function agentTrace(path, text, statePattern) {
 const agentSecret = (text, privatePaths) => namesSecretPath(text, privatePaths) || maskSecrets(text) !== text;
 
 // Plans the rows that move and, with opts.write, writes their files. opts: sessionId, skipRows (a Set of rows the host cannot rebuild from text, with
-// `unmatched`), keepFrom, queuedRows, statePattern, write (default true), deadline. Returns {rows: Map row -> rebuilt row, stats}; the tokens it saves
+// `unmatched`), keepFrom, queuedRows, statePattern, write (default true), deadline, source (the rows before the trim: a file holds the row as it came, whatever
+// the trim cut from it; the tokens that leave the conversation are those of the row as the trim left it). Returns {rows: Map row -> rebuilt row, stats}; the tokens it saves
 // are RATE_MOVED * moved_chars - RATE_TRACE * trace_chars of the stats. Never rejects.
 export async function moveAgentMessages($, cfg, messages, opts = {}) {
   const write = opts.write !== false;
@@ -3724,19 +3731,20 @@ export async function moveAgentMessages($, cfg, messages, opts = {}) {
       if (senders.get(i).some((x) => leads.has(x.who))) { stats.lead++; continue; }
       stats.considered++;
       const text = m.text;
+      const file = typeof opts.source?.[i]?.text === 'string' ? opts.source[i].text : text; // the row as it came: what the file holds and the trace describes
       if (text.length < AGENT_MIN_CHARS) { stats.too_short++; stats.too_short_chars += text.length; continue; }
-      const held = secretCheck(text, cfg.privatePaths, budget);
+      const held = secretCheck(file, cfg.privatePaths, budget);
       if (held) { stats[held]++; continue; }
-      const path = `${cfg.pasteDir}/${safeName(opts.sessionId)}/${(await sha256Hex(text)).slice(0, 32)}.txt`;
-      const trace = agentTrace(path, text, state);
+      const path = `${cfg.pasteDir}/${safeName(opts.sessionId)}/${(await sha256Hex(file)).slice(0, 32)}.txt`;
+      const trace = agentTrace(path, file, state);
       if (trace.length >= text.length) { stats.too_short++; stats.too_short_chars += text.length; continue; }
       if (agentSecret(trace.replace(path, ''), cfg.privatePaths)) { stats.secret++; continue; } // the path is ours; the trace is short, so no budget
-      jobs.push({ i, text, path, trace });
+      jobs.push({ i, text, file, path, trace });
     }
     const gate = { deadline: opts.deadline ?? Date.now() + TOTAL_MS, stalled: false };
     for (const job of jobs) {
       if (write) {
-        const saved = await savePaste($, gate, job.path, job.text);
+        const saved = await savePaste($, gate, job.path, job.file);
         if (saved === 'written' || saved === 'reused') stats[saved]++;
         else { stats[saved === 'timeout' ? 'timed_out' : 'write_failed']++; continue; }
       }
@@ -3817,8 +3825,8 @@ async function decide($, e, cfg, record, started) {
   }
   const trimmed = trim && trim.rows.size ? messages.map((m, i) => trim.rows.get(i) ?? m) : messages;
   const trimTokens = trim ? cfg.rates.RATE_ATT * trim.stats.chars : 0;
-  // Agent messages to files: the rows as the trim leaves them; the window of rows and the files are the same in the plan and in the run.
-  const agentOpts = agentSkip ? { sessionId: record.session_id, skipRows: Object.assign(new Set(agentSkip.rows), { unmatched: agentSkip.unmatched }), keepFrom: Math.min(keepFrom, Math.max(1, messages.length - KEEP_LAST)), queuedRows: queued, statePattern: cfg.agentStates } : undefined;
+  // Agent messages to files: decided on the rows as the trim leaves them, filed as they came (source); the window of rows and the files are the same in the plan and in the run.
+  const agentOpts = agentSkip ? { sessionId: record.session_id, source: messages, skipRows: Object.assign(new Set(agentSkip.rows), { unmatched: agentSkip.unmatched }), keepFrom: Math.min(keepFrom, Math.max(1, messages.length - KEEP_LAST)), queuedRows: queued, statePattern: cfg.agentStates } : undefined;
   const movedTokens = (st) => cfg.rates.RATE_MOVED * st.moved_chars - cfg.rates.RATE_TRACE * st.trace_chars;
   record.max_reduction = before ? Math.round((net / before) * 1000) / 1000 : 0;
   if (!before || net / before < MIN_REDUCTION) return { fallback: 'too_few_results' };
