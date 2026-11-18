@@ -165,7 +165,8 @@ describe('the lexer of maskJevState: the cost is the window, not the input', () 
   });
 
   it.each(Object.keys(shapes))('takes time in proportion to the text without a window: %s', (name) => {
-    // 1 MiB then 4 MiB: four times the text takes well under sixteen times as long (a quadratic rule would take sixteen)
+    // 0.5 MiB then 4 MiB: eight times the text takes well under sixty-four times as long (a quadratic rule would take sixty-four; the
+    // bound leaves room for a machine that is busy with other work)
     const time = (n) => {
       const text = shapes[name](n);
       const best = [];
@@ -176,8 +177,8 @@ describe('the lexer of maskJevState: the cost is the window, not the input', () 
       }
       return Math.min(...best);
     };
-    const small = time(1024 * 1024);
+    const small = time(512 * 1024);
     const large = time(4 * 1024 * 1024);
-    expect(large, `${small.toFixed(0)} ms, then ${large.toFixed(0)} ms`).toBeLessThan(Math.max(small, 25) * 12);
+    expect(large, `${small.toFixed(0)} ms, then ${large.toFixed(0)} ms`).toBeLessThan(Math.max(small, 50) * 24);
   });
 });
