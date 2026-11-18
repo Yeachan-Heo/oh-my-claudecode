@@ -4374,10 +4374,11 @@ export interface PaneProcessTree {
  * pane's root process, found by parent PID regardless of session or process
  * group, and the process start identity of each (a descendant is kept only
  * when a second read of the process table shows the parent it had in the
- * first, so a PID reused in between is not recorded). It only reads and signals
- * nothing, so a caller can take it before an action that detaches descendants
- * from the pane (the termination of the worker's provider) and hand it to
- * `terminatePaneProcessTree` later. Returns null, before any tmux or `ps`
+ * first, so a PID reused in between is not recorded, and only when the pane's
+ * root process is, after those reads, still the same live process it was at the
+ * start). It only reads and signals nothing, so a caller can take it before an
+ * action that detaches descendants from the pane (the termination of the
+ * worker's provider) and hand it to `terminatePaneProcessTree` later. Returns null, before any tmux or `ps`
  * call, when the variable is not `1`; also null when nothing can be read or
  * the pane has no descendants.
  */
@@ -4388,25 +4389,37 @@ export async function capturePaneProcessTree(
 ): Promise<PaneProcessTree | null> {
   if (process.env.OMC_TEAM_KILL_PANE_TREE !== "1") return null;
   try {
-    const readResult = await runGuardedNativeTmuxCommand(
-      identity,
-      tmuxCommandString(
-        ["display-message", "-p", "-t", paneId, "#{pane_pid}"],
-        ["#{pane_pid}"],
-      ),
-    );
-    if (readResult.outcome !== "executed") return null;
-    let panePid = 0;
-    for (const line of readResult.stdout.split(/\r?\n/)) {
-      const value = line.trim();
-      if (/^[1-9]\d*$/.test(value) && panePid === 0) {
-        panePid = Number(value);
+    // The pane's root process as tmux reports it now: its PID, or null when the pane is dead or cannot be read.
+    const readPaneRoot = async (): Promise<number | null> => {
+      const result = await runGuardedNativeTmuxCommand(
+        identity,
+        tmuxCommandString(
+          ["display-message", "-p", "-t", paneId, "#{pane_pid} #{pane_dead}"],
+          ["#{pane_pid} #{pane_dead}"],
+        ),
+      );
+      if (result.outcome !== "executed") return null;
+      for (const line of result.stdout.split(/\r?\n/)) {
+        const match = line.trim().match(/^([1-9]\d*) ([01])$/);
+        if (match) return match[2] === "0" ? Number(match[1]) : null;
       }
+      return null;
+    };
+    const panePid = await readPaneRoot();
+    if (panePid === null || panePid <= 1 || panePid === process.pid) {
+      return null;
     }
-    if (panePid <= 1 || panePid === process.pid) return null;
     const readRecords = dependencies.readProcessRecords ?? readProcessRecords;
     const readIdentity =
       dependencies.processIdentity ?? currentStrictProcessStartIdentity;
+    const identityOf = (pid: number): string | null => {
+      try {
+        return readIdentity(pid);
+      } catch {
+        return null;
+      }
+    };
+    const rootIdentity = identityOf(panePid);
     const records = await readRecords();
     const byParent = new Map<number, number[]>();
     for (const [pid, record] of records) {
@@ -4430,13 +4443,7 @@ export async function capturePaneProcessTree(
     }
     if (pids.length === 0) return null;
     const startIdentities = new Map<number, string | null>();
-    for (const pid of pids) {
-      try {
-        startIdentities.set(pid, readIdentity(pid));
-      } catch {
-        startIdentities.set(pid, null);
-      }
-    }
+    for (const pid of pids) startIdentities.set(pid, identityOf(pid));
     // The identities above were read after the process table. A PID that exited and was reused in between is recorded under the
     // identity of its new process; a second read of the table shows it with another parent (or not at all), so only a PID that
     // still has the parent it had in the first read is kept.
@@ -4445,6 +4452,16 @@ export async function capturePaneProcessTree(
       (pid) => again.get(pid)?.ppid === records.get(pid)?.ppid,
     );
     if (kept.length === 0) return null;
+    // Everything above rests on the root PID of the first read being the pane's root process the whole time. If the pane's process
+    // exited and its PID was reused after that read, the children of the new process would pass as the pane's descendants, with start
+    // identities that are valid for unrelated processes. So the root is revalidated after the last read: the pane must still report
+    // the same PID and not be dead (tmux reaps the root before it reports the pane dead, and a PID is not reused before the root is
+    // reaped, so the PID was the pane's root throughout), and the process on that PID must have the start identity read at the
+    // beginning (a pane respawned onto the same PID in between has another one). A root whose identity cannot be read is not compared.
+    if ((await readPaneRoot()) !== panePid) return null;
+    if (rootIdentity !== null && identityOf(panePid) !== rootIdentity) {
+      return null;
+    }
     return { panePid, pids: kept, startIdentities };
   } catch {
     /* reading the tree must not block the pane kill */

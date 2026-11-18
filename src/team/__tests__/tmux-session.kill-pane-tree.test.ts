@@ -38,12 +38,22 @@ const IDENTITY = {
 
 const spawned: ChildProcess[] = [];
 
-/** Stands in for the tmux pane: the mocked guarded query answers with this PID as `#{pane_pid}`. */
-function mockPanePid(panePid: number): void {
+/**
+ * Stands in for the tmux pane: the mocked guarded query answers `#{pane_pid} #{pane_dead}` with this PID and a live pane. `afterwards`
+ * are the answers to the queries after the first (the last one repeats): another PID, or a dead pane. Without it the pane stays alive
+ * on the same PID.
+ */
+function mockPanePid(panePid: number, ...afterwards: Array<{ pid: number; dead?: boolean }>): void {
+  let queries = 0;
   tmuxUtilsMocks.tmuxCmdAsync.mockImplementation(async (args: string[]) => {
     const marker = args.join(" ").match(/OMC_TMUX_GUARD_OK_[A-Za-z0-9_]+/)?.[0];
     if (!marker) return { stdout: "", stderr: "" };
-    return { stdout: `${panePid}\n${marker}\n`, stderr: "" };
+    const answer =
+      queries === 0 || afterwards.length === 0
+        ? { pid: panePid, dead: false }
+        : afterwards[Math.min(queries - 1, afterwards.length - 1)]!;
+    queries += 1;
+    return { stdout: `${answer.pid} ${answer.dead ? 1 : 0}\n${marker}\n`, stderr: "" };
   });
 }
 
@@ -202,6 +212,24 @@ describe("killWorkerPaneProcessTree (opt-in OMC_TEAM_KILL_PANE_TREE=1)", () => {
     await killWorkerPaneProcessTree(IDENTITY, "%7");
 
     expect((await taggedSleeps("240")).length).toBe(1);
+    expect(isAlive(pane.pid!)).toBe(true);
+  });
+});
+
+describe("killWorkerPaneProcessTree with a pane root that is not the one it read (real processes)", () => {
+  it("signals nothing when the pane is dead at the second read: the descendants keep running and the root is not touched", async () => {
+    process.env.OMC_TEAM_KILL_PANE_TREE = "1";
+    const pane = startPane(`sh -c 'sleep 240.${TAG}' & sleep 241.${TAG} & wait`);
+    await waitForTaggedSleeps("240", 1);
+    await waitForTaggedSleeps("241", 1);
+    mockPanePid(pane.pid!, { pid: pane.pid!, dead: true });
+    const killSpy = vi.spyOn(process, "kill");
+
+    await killWorkerPaneProcessTree(IDENTITY, "%7");
+
+    expect((await taggedSleeps("240")).length).toBe(1);
+    expect((await taggedSleeps("241")).length).toBe(1);
+    expect(killSpy.mock.calls.filter(([, signal]) => signal === "SIGTERM" || signal === "SIGKILL")).toEqual([]);
     expect(isAlive(pane.pid!)).toBe(true);
   });
 });
@@ -417,6 +445,91 @@ describe("pane process tree captured first and terminated later (injected depend
     ).resolves.toBeNull();
   });
 
+  describe("the pane root is revalidated before its descendants are trusted", () => {
+    const OTHER = 4_000_009;
+    const identities = (pid: number) => `start-${pid}`;
+    const capture = (extra: Parameters<typeof capturePaneProcessTree>[2] = {}) =>
+      capturePaneProcessTree(IDENTITY, "%7", { readProcessRecords: records, processIdentity: identities, ...extra });
+
+    beforeEach(() => {
+      process.env.OMC_TEAM_KILL_PANE_TREE = "1";
+    });
+
+    it("asks tmux for the root PID and whether the pane is dead, once before and once after the process table reads", async () => {
+      mockPanePid(FAKE_PANE_PID);
+      const readProcessRecords = vi.fn(records);
+
+      await expect(capture({ readProcessRecords })).resolves.not.toBeNull();
+
+      const queries = tmuxUtilsMocks.tmuxCmdAsync.mock.invocationCallOrder;
+      const tables = readProcessRecords.mock.invocationCallOrder;
+      expect(queries).toHaveLength(2);
+      expect(tables).toHaveLength(2);
+      expect(queries[0]!).toBeLessThan(tables[0]!);
+      expect(queries[1]!).toBeGreaterThan(tables[1]!);
+      for (const call of tmuxUtilsMocks.tmuxCmdAsync.mock.calls) {
+        expect((call[0] as string[]).join(" ")).toContain("#{pane_pid} #{pane_dead}");
+      }
+    });
+
+    it("a pane that reports another root PID after the reads (its process exited and the PID went to another process) gives no tree", async () => {
+      mockPanePid(FAKE_PANE_PID, { pid: OTHER });
+      await expect(capture()).resolves.toBeNull();
+    });
+
+    it("a pane that is dead after the reads gives no tree, even on the same PID (remain-on-exit keeps the PID)", async () => {
+      mockPanePid(FAKE_PANE_PID, { pid: FAKE_PANE_PID, dead: true });
+      await expect(capture()).resolves.toBeNull();
+    });
+
+    it("a pane that cannot be read the second time gives no tree", async () => {
+      let queries = 0;
+      tmuxUtilsMocks.tmuxCmdAsync.mockImplementation(async (args: string[]) => {
+        const marker = args.join(" ").match(/OMC_TMUX_GUARD_OK_[A-Za-z0-9_]+/)?.[0];
+        queries += 1;
+        if (queries > 1) return { stdout: "", stderr: "tmux_server_unavailable" };
+        return { stdout: `${FAKE_PANE_PID} 0\n${marker}\n`, stderr: "" };
+      });
+      await expect(capture()).resolves.toBeNull();
+    });
+
+    it("a pane that is dead at the first read gives no tree and the process table is not read", async () => {
+      mockPanePid(FAKE_PANE_PID);
+      tmuxUtilsMocks.tmuxCmdAsync.mockImplementation(async (args: string[]) => {
+        const marker = args.join(" ").match(/OMC_TMUX_GUARD_OK_[A-Za-z0-9_]+/)?.[0];
+        return { stdout: `${FAKE_PANE_PID} 1\n${marker}\n`, stderr: "" };
+      });
+      const readProcessRecords = vi.fn(records);
+      await expect(capture({ readProcessRecords })).resolves.toBeNull();
+      expect(readProcessRecords).not.toHaveBeenCalled();
+    });
+
+    it("a root process whose start identity changed between the reads (a pane respawned onto the same PID) gives no tree", async () => {
+      mockPanePid(FAKE_PANE_PID);
+      let rootReads = 0;
+      const processIdentity = (pid: number) => (pid === FAKE_PANE_PID ? `root-incarnation-${++rootReads}` : identities(pid));
+      await expect(capture({ processIdentity })).resolves.toBeNull();
+      expect(rootReads).toBe(2);
+    });
+
+    it("a root process whose start identity cannot be read is not compared, and the tree is kept (descendants carry their own identities)", async () => {
+      mockPanePid(FAKE_PANE_PID);
+      const tree = await capture({ processIdentity: (pid) => (pid === FAKE_PANE_PID ? null : identities(pid)) });
+      expect(tree?.pids).toEqual([CHILD, GRANDCHILD]);
+    });
+
+    it("a root identity that throws is treated as unreadable, not as a failure of the capture", async () => {
+      mockPanePid(FAKE_PANE_PID);
+      const tree = await capture({
+        processIdentity: (pid) => {
+          if (pid === FAKE_PANE_PID) throw new Error("no such process");
+          return identities(pid);
+        },
+      });
+      expect(tree?.pids).toEqual([CHILD, GRANDCHILD]);
+    });
+  });
+
   it("terminating a null capture does nothing", async () => {
     const killProcess = vi.fn();
     const sleep = vi.fn(async () => undefined);
@@ -533,7 +646,7 @@ describe.skipIf(currentStrictProcessStartIdentity(process.pid) === null)("killOw
       if (args[2] !== "if-shell" || !marker) return { stdout: "", stderr: "" };
       if (joined.includes("#{pane_pid}")) {
         events.push("pane-pid-query");
-        return { stdout: `${panePid}\n${marker}\n`, stderr: "" };
+        return { stdout: `${panePid} 0\n${marker}\n`, stderr: "" };
       }
       if (joined.includes("kill-pane")) {
         events.push("kill-pane");
@@ -555,7 +668,8 @@ describe.skipIf(currentStrictProcessStartIdentity(process.pid) === null)("killOw
 
     await killOwnedWorkerPane(ownership);
 
-    expect(events).toEqual(["pane-pid-query", "kill-pane"]);
+    // the root is read before and after the process table; both reads come before the pane is killed
+    expect(events).toEqual(["pane-pid-query", "pane-pid-query", "kill-pane"]);
     expect(sleepsAtKillPane).toEqual([0, 0]);
     // The pane root is left to the pane kill: it is never signalled by the tree kill.
     expect(killSpy.mock.calls.some(([pid]) => pid === pane.pid)).toBe(false);
