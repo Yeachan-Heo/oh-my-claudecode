@@ -10,8 +10,8 @@
 
 import { createHash, randomBytes } from 'node:crypto';
 import { homedir } from 'node:os';
-import { appendFileSync, closeSync, existsSync, fstatSync, linkSync, lstatSync, mkdirSync, openSync, readFileSync, readdirSync, renameSync, rmSync, statSync, unlinkSync, writeSync } from 'node:fs';
-import { basename, join } from 'node:path';
+import { appendFileSync, closeSync, existsSync, fstatSync, fsyncSync, linkSync, lstatSync, mkdirSync, openSync, readFileSync, readdirSync, renameSync, rmSync, statSync, unlinkSync, writeSync } from 'node:fs';
+import { basename, dirname, join } from 'node:path';
 import { atomicWriteFileSync } from './atomic-write.mjs';
 import { rotateJevLog } from '../jev-resolve.mjs';
 
@@ -190,6 +190,39 @@ function writeJson(path, value, env = process.env) {
     storeEvent('write_failed', path, env);
     return false;
   }
+}
+
+// Publishes the list of a fold (path-based writes cannot be bound to a directory, so the order of the steps does it). The temporary file is
+// written first, then stillCurrent() is asked (the lock is still this fold's and the list is the one it folded from), and only then is the
+// file renamed over the list. The retention sweep may move the session directory away after the check of a fold, and another hook may make
+// the directory again, fold a newer call and remove its event: a write that checked before it began would then put the older list over the
+// newer one, for good. Here a directory that changed hands after the check has no such temporary file (it stays in the moved tree, which
+// the merge of a put back does not take along: the name ends in .tmp), so the rename finds no source and fails; and one that changed hands
+// before the temporary file was made fails the check, because the lock file this fold holds is in the moved tree. The directory is never
+// made here: a fold whose directory is gone publishes nothing, and its events are folded by the next fold. false when nothing was
+// published; a refusal by stillCurrent() is silent (the newer fold writes), a failed write is a row.
+function publishJson(path, value, stillCurrent, env = process.env) {
+  const temp = `${path}.${randomBytes(6).toString('hex')}.tmp`;
+  let fd;
+  let published = false;
+  try {
+    fd = openSync(temp, 'wx', 0o600);
+    writeAll(fd, JSON.stringify(value, null, 1));
+    fsyncSync(fd);
+    closeSync(fd);
+    fd = undefined;
+    if (stillCurrent()) {
+      renameSync(temp, path);
+      published = true;
+      try { const dirFd = openSync(dirname(path), 'r'); try { fsyncSync(dirFd); } finally { closeSync(dirFd); } } catch { /* a platform without directory fsync */ }
+    }
+  } catch {
+    storeEvent('write_failed', path, env);
+  } finally {
+    if (fd !== undefined) { try { closeSync(fd); } catch { /* closed */ } }
+    if (!published) { try { unlinkSync(temp); } catch { /* never made, or moved away with its directory */ } }
+  }
+  return published;
 }
 
 // --- record shape -------------------------------------------------------------------------
@@ -772,14 +805,17 @@ export function syncList(sessionId, key, env = process.env) {
   try { waiting = readdirSync(eventsDir(path)).filter((n) => EVENT_NAME.test(n)); } catch { /* no events folder */ }
   if (!waiting.length) return readRecord(path).record; // nothing to fold: no lock (most batches)
   let saved = null;
-  const remove = (names) => { for (const name of names) { try { unlinkSync(join(eventsDir(path), name)); } catch { /* removed by an earlier fold */ } } };
   const ok = withFileLock(path, (owned) => {
     const f = fold(path, key, env);
     saved = f.record;
     // What this fold decided rests on the list it read. It acts only while the lock is still its own and no other fold has published
     // since (the generation of the file is the one it folded from): a lock lost in a window no check closes must not let an older fold
-    // overwrite the newer list, or delete events the newer list does not hold. Every removal and the write below stand behind it.
+    // overwrite the newer list, or delete events the newer list does not hold. The lock file is in the session directory, so it also tells
+    // that the path still names the directory the fold started in: the retention sweep may move that directory away and another hook may
+    // make it again. The check stands behind the removal of every event (a file of the moved tree that was merged into the new directory
+    // is not removed, it is folded again there) and, after the temporary file is written, behind the publication (see publishJson).
     const current = () => owned() && generationOf(readRecord(path)) === f.generation;
+    const remove = (names) => { for (const name of names) { if (!owned()) return; try { unlinkSync(join(eventsDir(path), name)); } catch { /* removed by an earlier fold */ } } };
     if (!current()) return; // the lock was taken over or another fold published: the newer fold writes
     if (f.late) storeEvent('late_event_dropped', path, env);
     remove(waiting.filter((name) => f.done.has(name)));
@@ -787,7 +823,7 @@ export function syncList(sessionId, key, env = process.env) {
     // events that change nothing (also on a broken list without a replacing call) leave the list file as it is
     if (!f.changed) { if (current()) remove(f.names); return; }
     const next = { ...f.record, folded: [...f.done, ...f.names].slice(-Math.max(EVENTS_KEPT, f.names.length)) };
-    if (!current() || !writeJson(path, next, env)) return;
+    if (!publishJson(path, next, current, env)) return;
     saved = next;
     remove(f.names);
   }, env, SYNC_STALE_MS);

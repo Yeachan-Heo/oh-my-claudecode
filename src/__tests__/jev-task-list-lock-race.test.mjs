@@ -35,6 +35,10 @@ let counter = 0;
 //                       moved tree is not judged yet
 //   before-session-write  before the first file of a call is opened inside the session tree: the claim of a task number (<session>/_task/<id>.json) or the
 //                       temporary file of an event; the directory of the writer was made just before, so the sweep can move it away now
+//   before-list-temp   before the temporary file of the list PAUSE_MATCH (a file in the list's directory whose name holds the name of the list and
+//                       does not end in ".lock") is created: the fold has made its last check of the lock and the list, and has written nothing
+//   before-list-rename  before a file is renamed to the list PAUSE_MATCH: the temporary file is written and the fold has checked a last time
+//   after-list-publish  right after a file was renamed to the list PAUSE_MATCH: the list is published and the events it folded are not removed yet
 // The process writes PAUSE_MARK and waits until PAUSE_GO exists (with several kinds both names get the suffix ".<kind>").
 const PRELOAD = `
 import fs from 'node:fs';
@@ -98,6 +102,25 @@ if (kinds.includes('before-session-write')) {
 if (kinds.includes('after-sweep-move')) {
   const rename = fs.renameSync;
   fs.renameSync = (from, to, ...rest) => { const result = rename(from, to, ...rest); if (typeof to === 'string' && /\\.sweeping$/.test(to)) hold('after-sweep-move'); return result; };
+}
+if (kinds.includes('before-list-temp')) {
+  const open = fs.openSync;
+  const dir = PAUSE_MATCH.replace(/[^/]*$/, '');
+  const base = PAUSE_MATCH.slice(dir.length);
+  fs.openSync = (p, flags, ...rest) => {
+    const name = typeof p === 'string' && p.startsWith(dir) ? p.slice(dir.length) : '';
+    if (flags === 'wx' && name && !name.includes('/') && name.includes(base) && !name.endsWith('.lock')) hold('before-list-temp');
+    return open(p, flags, ...rest);
+  };
+}
+if (kinds.includes('before-list-rename') || kinds.includes('after-list-publish')) {
+  const rename = fs.renameSync;
+  fs.renameSync = (from, to, ...rest) => {
+    if (to === PAUSE_MATCH && kinds.includes('before-list-rename')) hold('before-list-rename');
+    const result = rename(from, to, ...rest);
+    if (to === PAUSE_MATCH && kinds.includes('after-list-publish')) hold('after-list-publish');
+    return result;
+  };
 }
 if (kinds.includes('sweep-observed')) {
   const stat = fs.statSync;
@@ -509,6 +532,69 @@ describe('task-list sweep: a hook writes while the sweep judges the session dire
     expect(readdirSync(join(session, 'main.events'))).toEqual([]);
     expect(readdirSync(join(session, '_task')).sort()).toEqual(how === 'fold' ? ['1.json', '3.json'] : ['1.json']);
   }, TOTAL_MS);
+
+  // An older fold, held after it began to publish, meets a session directory that the sweep moved away and another hook made again with a newer
+  // list. The sweep is held twice (after it read the age of the session, before the fold takes its lock, which would make the directory new; and
+  // after it moved the directory away); the fold is held at `fold`; the other hook runs in this process while the path is free.
+  describe('an older fold held while the sweep moves its session directory away and another hook makes the directory again', () => {
+    const run = async (fold) => {
+      counter += 1;
+      const dir = join(TMP, `sweep-${counter}`);
+      mkdirSync(dir, { recursive: true });
+      const logs = join(dir, 'logs');
+      const env = baseEnv(logs);
+      const lists = join(logs, 'lists');
+      const session = join(lists, 'race-session');
+      const files = (name) => join(dir, name);
+      mkdirSync(join(session, '_task'), { recursive: true });
+      writeFileSync(join(session, '_task', '1.json'), JSON.stringify({ agent: 'main' }));
+      ageTree(session, 8 * DAY); // an old session: no list, nothing the folds start from
+      rmSync(join(lists, '.sweep'), { force: true }); // the sweep of the child is due
+      const s = startChild(dir, { kind: 'sweep', done: files('s-done') }, { kind: 'sweep-observed+after-sweep-move', match: session, mark: files('s-paused'), go: files('s-go') }, env);
+      await waitUntil(files('s-paused.sweep-observed')); // the sweep has read the directory as old and has not moved it yet
+      const p = startChild(dir, { kind: 'record', data: task('from the older fold', 2), done: files('p-done') }, { kind: fold, match: join(session, 'main.json'), mark: files('p-paused'), go: files('p-go') }, env);
+      await waitUntil(files('p-paused')); // the fold holds its lock in the directory the sweep is about to move
+      writeFileSync(files('s-go.sweep-observed'), '1');
+      await waitUntil(files('s-paused.after-sweep-move')); // the directory is under its hidden name, the path is free
+      expect(existsSync(session)).toBe(false);
+      expect(L.recordListCall(task('from the other hook', 3), env)).not.toBeNull(); // makes the directory again, folds, publishes, removes its event
+      expect(L.readList('race-session', 'main', env).items.map((x) => x.content)).toEqual(['from the other hook']);
+      // the fold held after it published removes its events after the merge brought them into the new directory; the others finish first
+      const release = async (child, name) => {
+        writeFileSync(files(name), '1');
+        const r = await child.exited;
+        expect(r.code, r.stderr).toBe(0);
+      };
+      if (fold === 'after-list-publish') {
+        await release(s, 's-go.after-sweep-move');
+        await release(p, 'p-go');
+      } else {
+        await release(p, 'p-go');
+        await release(s, 's-go.after-sweep-move');
+      }
+      return { env, session, lists };
+    };
+    // the call of the older fold is an event in the moved tree; the merge brings it into the new directory, where a fold takes it
+    const finish = ({ env, session, lists }) => {
+      L.syncList('race-session', 'main', env);
+      expect(JSON.parse(readFileSync(join(session, 'main.json'), 'utf8')).items.map((x) => x.content).sort()).toEqual(['from the older fold', 'from the other hook']);
+      expect(readdirSync(join(session, 'main.events'))).toEqual([]);
+      expect(readdirSync(lists).filter((n) => n.endsWith('.sweeping'))).toEqual([]);
+      expect(readdirSync(session).filter((n) => n.endsWith('.tmp') || n.includes('.tmp.'))).toEqual([]); // no temporary file of the older fold in the live directory
+    };
+
+    it('held before it creates the temporary file of the list: the newer list is not overwritten, and the older call is folded in the new directory', async () => {
+      finish(await run('before-list-temp'));
+    }, TOTAL_MS);
+
+    it('held after it wrote the temporary file and checked, before the rename: the rename finds no source, the newer list stays and no temporary file reaches the new directory', async () => {
+      finish(await run('before-list-rename'));
+    }, TOTAL_MS);
+
+    it('held after it published the list and before it removes the events: the events the merge brought into the new directory are not removed', async () => {
+      finish(await run('after-list-publish'));
+    }, TOTAL_MS);
+  });
 
   // The writer made its directory (a no-op for an old session) and is held before its first file; the sweep, run to its end meanwhile, reads
   // the session as idle, moves it away and removes it. The call of the writer is the newest thing the session has: it must be saved.
