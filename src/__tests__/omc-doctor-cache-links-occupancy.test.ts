@@ -332,6 +332,38 @@ process.kill = function (pid, signal) {
     }
   });
 
+  // The registry file is read the same way: a FIFO in its place would block the read, so a registry that
+  // is not a regular file counts as unreadable (a link to a regular file is fine, dotfile setups use them).
+  test.skipIf(process.platform === 'win32')('a registry that is a FIFO moves nothing instead of hanging, and a link to a regular registry still pins', () => {
+    for (const command of commands) {
+      const { dir, cache } = makeCache(['5.8.0', '5.8.1']);
+      try {
+        const registry = path.join(dir, 'plugins', 'installed_plugins.json');
+        expect(spawnSync('mkfifo', [registry]).status).toBe(0);
+        const result = runCommand(command, dir, { timeout: 20_000 });
+        expect(result.error).toBeUndefined();
+        expect(result.status).toBe(0);
+        expect(result.stdout).toMatch(/could not be read completely/);
+        expect(digitVersions(cache)).toBe('5.8.0,5.8.1');
+        expect(movedAside(dir)).toBe(0);
+      } finally {
+        rmSync(dir, { recursive: true, force: true });
+      }
+      const linked = makeCache(['5.8.0', '5.8.1']);
+      try {
+        const real = path.join(linked.dir, 'registry-real.json');
+        writeFileSync(real, JSON.stringify({ version: 2, plugins: { [PLUGIN_ID]: [{ scope: 'user', version: '5.8.1' }] } }));
+        symlinkSync(real, path.join(linked.dir, 'plugins', 'installed_plugins.json'));
+        const result = runCommand(command, linked.dir, { timeout: 20_000 });
+        expect(result.status).toBe(0);
+        expect(digitVersions(linked.cache)).toBe('5.8.1');
+        expect(movedAside(linked.dir)).toBe(1);
+      } finally {
+        rmSync(linked.dir, { recursive: true, force: true });
+      }
+    }
+  });
+
   // Chains: the top entry links to the next one and so on, down to the real directory 5.9.0.
   // 5.0.0 is the only free version; 5.1.0 is the registered one so that "nothing pinned" does not apply.
   function makeChainCache(links: number, form: 'relative' | 'junction') {
