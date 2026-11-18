@@ -19,24 +19,28 @@
  * home directory without HOME (os.userInfo()).
  */
 import { createHash } from 'node:crypto';
-import { existsSync, mkdtempSync, readFileSync, readdirSync, realpathSync, rmSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, readdirSync, readlinkSync, realpathSync, rmSync } from 'node:fs';
 import { homedir, hostname } from 'node:os';
-import { basename, dirname, isAbsolute, join, relative, resolve } from 'node:path';
+import { basename, dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 
 /**
  * Per-run homes are named `<prefix><host tag>-<pid of the vitest process>-<random>`,
- * where the host tag is hostTag(os.hostname()).
+ * where the host tag is hostTag(pidScope()).
  */
 export const TEST_HOME_PREFIX = 'omc-vitest-home-';
 
 /**
- * Variables that move a storage root. An inherited value would still point at
- * the developer's real directories. Tests that need one set it themselves.
+ * Variables that move a storage root or a stored file. An inherited value
+ * would still point at the developer's real directories. Tests that need one
+ * set it themselves.
  */
 export const LOCATION_VARS = [
   'CLAUDE_CONFIG_DIR',
+  'CLAUDE_MCP_CONFIG_PATH',
   'OMC_STATE_DIR',
   'OMC_HOME',
+  'OMC_MCP_REGISTRY_PATH',
+  'OMC_JOBS_DIR',
   'CODEX_HOME',
   'XDG_CONFIG_HOME',
   'XDG_STATE_HOME',
@@ -65,9 +69,10 @@ function isProcessAlive(pid: number): boolean {
   }
 }
 
-function isInside(parent: string, child: string): boolean {
+export function isInside(parent: string, child: string): boolean {
   const rel = relative(parent, child);
-  return rel !== '' && !rel.startsWith('..') && !isAbsolute(rel);
+  // A `..` component, not a name that starts with two dots (`~/..work`).
+  return rel !== '' && rel !== '..' && !rel.startsWith(`..${sep}`) && !isAbsolute(rel);
 }
 
 function canonical(path: string): string {
@@ -106,19 +111,37 @@ export function findExposedWorkspaceMarker(home: string, cwd: string): string | 
 }
 
 /**
- * Identifies the host in per-run home names, so cleanup only probes PIDs from
- * its own host. A hash of the full hostname: truncating it would let two hosts
- * that share a home and a long name prefix remove each other's running homes.
+ * Identifies the PID scope in per-run home names, so cleanup only probes PIDs
+ * it can see. A hash of the full input: truncating a hostname would let two
+ * hosts that share a home and a long name prefix remove each other's running
+ * homes.
  */
-export function hostTag(host: string): string {
-  return createHash('sha256').update(host).digest('hex').slice(0, 16);
+export function hostTag(scope: string): string {
+  return createHash('sha256').update(scope).digest('hex').slice(0, 16);
+}
+
+/**
+ * Where a PID is looked up. Containers can share a home and a hostname while
+ * each has its own PID namespace, in which the other's PIDs look dead. On
+ * Linux this adds the kernel boot id (one per machine) and the PID namespace;
+ * elsewhere only the hostname is available.
+ */
+export function pidScope(host: string = hostname()): string {
+  const bootId = readOrNull('/proc/sys/kernel/random/boot_id')?.trim() ?? '';
+  let pidNamespace = '';
+  try {
+    pidNamespace = readlinkSync('/proc/self/ns/pid');
+  } catch {
+    // Not Linux, or /proc is not mounted.
+  }
+  return [host, bootId, pidNamespace].join('\0');
 }
 
 /**
  * Remove homes left by runs that were killed before teardown. A home is only
- * removed when it was created on this host and its process no longer exists,
- * so a concurrent run keeps its own, also when the home is shared with
- * another machine or a container.
+ * removed when it was created in this PID scope (see pidScope()) and its
+ * process no longer exists, so a concurrent run keeps its own, also when the
+ * home is shared with another machine or a container.
  */
 export function removeStaleTestHomes(outerHome: string, ownPrefix: string): void {
   let names: string[];
@@ -161,7 +184,7 @@ export default function setup(): () => void {
   const canaryPath = join(outerHome, '.omc', 'template-version.json');
   const canaryBefore = nested ? null : readOrNull(canaryPath);
 
-  const ownPrefix = `${TEST_HOME_PREFIX}${hostTag(hostname())}-`;
+  const ownPrefix = `${TEST_HOME_PREFIX}${hostTag(pidScope())}-`;
   removeStaleTestHomes(outerHome, ownPrefix);
 
   const saved = (['HOME', 'USERPROFILE', ...LOCATION_VARS] as const).map(

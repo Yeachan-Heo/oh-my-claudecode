@@ -1,13 +1,24 @@
 import { execFileSync, spawnSync } from 'node:child_process';
-import { existsSync, mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readlinkSync,
+  realpathSync,
+  rmSync,
+  symlinkSync,
+  writeFileSync,
+} from 'node:fs';
 import { homedir } from 'node:os';
-import { basename, join } from 'node:path';
+import { basename, join, sep } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import {
   LOCATION_VARS,
   TEST_HOME_PREFIX,
   findExposedWorkspaceMarker,
   hostTag,
+  isInside,
+  pidScope,
   removeStaleTestHomes,
 } from './helpers/home-isolation-global-setup.js';
 
@@ -140,6 +151,40 @@ describe('removeStaleTestHomes', () => {
 
   it('does nothing when the home cannot be read', () => {
     expect(() => removeStaleTestHomes(join(outer, 'missing'), `${TEST_HOME_PREFIX}x-`)).not.toThrow();
+  });
+});
+
+describe('isInside', () => {
+  it('treats a child whose name starts with two dots as inside', () => {
+    expect(isInside(join(sep, 'home', 'me'), join(sep, 'home', 'me', '..work', 'repo'))).toBe(true);
+    expect(isInside(join(sep, 'home', 'me'), join(sep, 'home', 'me', '..'))).toBe(false);
+    expect(isInside(join(sep, 'home', 'me'), join(sep, 'home', 'other'))).toBe(false);
+    expect(isInside(join(sep, 'home', 'me'), join(sep, 'home', 'me'))).toBe(false);
+  });
+
+  it('finds a marker in the home for a checkout under a two-dot folder', () => {
+    const root = realpathSync.native(mkdtempSync(join(homedir(), 'home-isolation-dots-')));
+    try {
+      const home = join(root, 'home');
+      const checkout = join(home, '..work', 'repo');
+      mkdirSync(checkout, { recursive: true });
+      writeFileSync(join(home, '.omc-workspace'), '');
+      expect(findExposedWorkspaceMarker(home, checkout)).toBe(join(home, '.omc-workspace'));
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+});
+
+describe('pidScope', () => {
+  it('includes the hostname', () => {
+    expect(pidScope('host-a')).not.toBe(pidScope('host-b'));
+    expect(pidScope('host-a')).toBe(pidScope('host-a'));
+  });
+
+  // Containers that share a home and a hostname still get different prefixes.
+  it.runIf(process.platform === 'linux')('includes the PID namespace on Linux', () => {
+    expect(pidScope('host-a')).toContain(readlinkSync('/proc/self/ns/pid'));
   });
 });
 
