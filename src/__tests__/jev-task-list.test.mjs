@@ -981,6 +981,122 @@ describe('task list: an event that becomes visible after a later call was folded
     expect(contents(sid)).toEqual(['Newer list']);
     expect(eventFiles(sid, 'main')).toEqual([]);
   });
+
+  it('an older TaskUpdate to in_progress does not put its status back over a newer TaskUpdate to completed (calls through the entry point)', () => {
+    const sid = session();
+    create(sid, 31, 'One task', T);
+    call(sid, 'TaskUpdate', { taskId: '31', status: 'completed' }, {}, T + 2000);
+    const rows = dropped();
+    call(sid, 'TaskUpdate', { taskId: '31', status: 'in_progress' }, {}, T + 1000);
+    expect(L.readList(sid, 'main', env()).items.map((x) => x.status)).toEqual(['completed']);
+    expect(readListFile(sid, 'main').items.map((x) => x.status)).toEqual(['completed']);
+    expect(eventFiles(sid, 'main')).toEqual([]);
+    expect(dropped()).toBe(rows + 1);
+  });
+
+  it('the calls on other tasks of a list are applied whatever their order, so overlapping hooks of parallel calls all land', () => {
+    const sid = session();
+    create(sid, 41, 'Task one', T);
+    create(sid, 42, 'Task two', T + 1);
+    call(sid, 'TaskUpdate', { taskId: '42', status: 'completed' }, {}, T + 2000);
+    call(sid, 'TaskUpdate', { taskId: '41', status: 'in_progress' }, {}, T + 1000);
+    expect(L.readList(sid, 'main', env()).items.map((x) => `${x.id}:${x.status}`).sort()).toEqual(['41:in_progress', '42:completed']);
+  });
+
+  // Every pair of kinds: A is the older call, held up so that it becomes visible only after B, the later call, was folded. Tasks 1 and 2 exist
+  // before the pair. The expectation of a pair is one of three: applied (the list of one fold that saw both, compared as a set), dropped
+  // (the list B gives alone, one `late_event_dropped` row), or the stated difference of a call that did not exist when the other one acted.
+  describe('held-up call after later call, every pair of kinds', () => {
+    const who = (r, a, b) => (r === 'A' ? a : b);
+    const calls = {
+      replace: (r) => ({ tool_name: 'TodoWrite', tool_input: { todos: [{ content: `list ${r}`, status: 'pending' }] } }),
+      create: (r) => ({ tool_name: 'TaskCreate', tool_input: { subject: `task ${r}` }, task_id: who(r, '3', '4') }),
+      update1: (r) => ({ tool_name: 'TaskUpdate', tool_input: { taskId: '1', status: who(r, 'in_progress', 'completed') } }),
+      update2: (r) => ({ tool_name: 'TaskUpdate', tool_input: { taskId: '2', status: who(r, 'in_progress', 'completed') } }),
+      delete2: () => ({ tool_name: 'TaskUpdate', tool_input: { taskId: '2', status: 'deleted' } }),
+      done: (r) => ({ tool_name: LIST_TOOL, tool_input: { done: [who(r, 1, 2)] } }),
+      start: (r) => ({ tool_name: LIST_TOOL, tool_input: { start: who(r, 1, 2) } }),
+      wrapUp: () => ({ tool_name: 'mcp__ccd_turn__wrap_up', tool_input: {} }),
+    };
+    // the later calls (columns) that drop an older call (row); every other pair is applied
+    const everything = Object.keys(calls);
+    const drops = {
+      replace: everything,
+      create: ['replace'],
+      update1: ['replace', 'update1', 'done', 'start', 'wrapUp'],
+      update2: ['replace', 'update2', 'delete2', 'done', 'start', 'wrapUp'],
+      delete2: ['replace'],
+      done: ['replace', 'update1', 'update2', 'delete2', 'start'],
+      start: ['replace', 'update1', 'update2', 'delete2', 'done', 'start', 'wrapUp'],
+      wrapUp: ['replace', 'update1', 'update2', 'delete2', 'start'],
+    };
+    const differences = {
+      // the wrap_up folded first did not see task 3: it stays pending
+      'create/wrapUp': ['Seed 1:completed', 'Seed 2:completed', 'task A:pending'],
+      // the wrap_up applies to every task of the list it meets, task 4 included
+      'wrapUp/create': ['Seed 1:completed', 'Seed 2:completed', 'task B:completed'],
+    };
+    const seed = () => {
+      const sid = session();
+      create(sid, 1, 'Seed 1', T + 100);
+      create(sid, 2, 'Seed 2', T + 200);
+      return sid;
+    };
+    const publish = (sid, ms, tick, pid, spec, evId) => {
+      const dir = join(LOGS, 'lists', sid, 'main.events');
+      mkdirSync(dir, { recursive: true });
+      const event = { ts: new Date(ms).toISOString(), pid, id: evId, session_id: sid, agent_type: null, tool_use_id: null, prompt_id: null, ...spec };
+      writeFileSync(join(dir, `${String(ms).padStart(13, '0')}-${String(tick).padStart(20, '0')}-${pid}-${evId}.json`), JSON.stringify(event));
+    };
+    const tasks = (sid) => L.readList(sid, 'main', env()).items.map((x) => `${x.content}:${x.status}`).sort();
+
+    for (const first of everything) {
+      for (const second of everything) {
+        if (first === 'create' && second === 'create') continue; // the two calls have their own task numbers
+        const verdict = drops[first].includes(second) ? 'dropped' : differences[`${first}/${second}`] ? 'applied with a stated difference' : 'applied';
+        it(`A ${first} held up behind B ${second}: ${verdict}`, () => {
+          for (const gap of [0, 1]) { // the same millisecond (the order of the names decides) and the millisecond before
+            const a = calls[first]('A');
+            const b = calls[second]('B');
+            const run = (steps) => {
+              const sid = seed();
+              for (const step of steps) {
+                if (step === 'A') publish(sid, T + 5000 - gap, 100, 11, a, 'aaaaaaaa');
+                else if (step === 'B') publish(sid, T + 5000, 200, 12, b, 'bbbbbbbb');
+                else L.syncList(sid, 'main', env());
+              }
+              return sid;
+            };
+            const rows = dropped();
+            const held = run(['B', 'sync', 'A', 'sync']);
+            expect(dropped() - rows, `${first}/${second} gap ${gap}: rows`).toBe(verdict === 'dropped' ? 1 : 0);
+            expect(eventFiles(held, 'main'), `${first}/${second} gap ${gap}`).toEqual([]);
+            expect(tasks(held), `${first}/${second} gap ${gap}`).toEqual(
+              verdict === 'dropped' ? tasks(run(['B', 'sync']))
+                : differences[`${first}/${second}`] ?? tasks(run(['A', 'B', 'sync'])),
+            );
+          }
+        });
+      }
+    }
+  });
+
+  it('what a fold keeps to fence held-up calls is read with care: a file with a wrong touched field is folded as without it, and old entries are dropped', () => {
+    const sid = session();
+    create(sid, 51, 'Task', T);
+    const path = join(LOGS, 'lists', sid, 'main.json');
+    for (const bad of [[1, 2], 'text', 7, null, { 51: 5 }, { 51: null }, { 51: 'not an event name' }, JSON.parse('{"__proto__":"x"}')]) {
+      writeFileSync(path, JSON.stringify({ ...JSON.parse(readFileSync(path, 'utf8')), touched: bad }));
+      expect(call(sid, 'TaskUpdate', { taskId: '51', status: 'completed' }, {}, T + 2000)).not.toBeNull();
+      expect(L.readList(sid, 'main', env()).items.map((x) => x.status)).toEqual(['completed']);
+      call(sid, 'TaskUpdate', { taskId: '51', status: 'pending' }, {}, T + 3000);
+    }
+    // an entry more than LATE_EVENT_MS behind the newest call folded fences nothing and is not kept
+    call(sid, 'TaskUpdate', { taskId: '51', status: 'in_progress' }, {}, T + 10_000);
+    call(sid, 'TaskCreate', { subject: 'Newer' }, { tool_response: 'Task #52 created successfully: Newer' }, T + 10_000 + L.LATE_EVENT_MS + 5);
+    call(sid, 'TaskUpdate', { taskId: '52', status: 'completed' }, {}, T + 10_000 + L.LATE_EVENT_MS + 6);
+    expect(Object.keys(readListFile(sid, 'main').touched)).toEqual(['52']);
+  });
 });
 
 describe('task list: the hook accepts what the task_list tool accepts', () => {
