@@ -4376,7 +4376,7 @@ export interface PaneProcessTree {
  * when a second read of the process table shows the parent it had in the
  * first, so a PID reused in between is not recorded, and only when the pane's
  * root process is, after those reads, still the same live process it was at the
- * start). It only reads and signals nothing, so a caller can take it before an
+ * start, with a readable start identity). It only reads and signals nothing, so a caller can take it before an
  * action that detaches descendants from the pane (the termination of the
  * worker's provider) and hand it to `terminatePaneProcessTree` later. Returns null, before any tmux or `ps`
  * call, when the variable is not `1`; also null when nothing can be read or
@@ -4420,6 +4420,7 @@ export async function capturePaneProcessTree(
       }
     };
     const rootIdentity = identityOf(panePid);
+    if (rootIdentity === null) return null;
     const records = await readRecords();
     const byParent = new Map<number, number[]>();
     for (const [pid, record] of records) {
@@ -4457,11 +4458,10 @@ export async function capturePaneProcessTree(
     // identities that are valid for unrelated processes. So the root is revalidated after the last read: the pane must still report
     // the same PID and not be dead (tmux reaps the root before it reports the pane dead, and a PID is not reused before the root is
     // reaped, so the PID was the pane's root throughout), and the process on that PID must have the start identity read at the
-    // beginning (a pane respawned onto the same PID in between has another one). A root whose identity cannot be read is not compared.
+    // beginning (a pane respawned onto the same PID in between has another one). A root whose identity cannot be read, at the beginning
+    // or now, gives no tree: without it the incarnation cannot be checked and nothing is signalled.
     if ((await readPaneRoot()) !== panePid) return null;
-    if (rootIdentity !== null && identityOf(panePid) !== rootIdentity) {
-      return null;
-    }
+    if (identityOf(panePid) !== rootIdentity) return null;
     return { panePid, pids: kept, startIdentities };
   } catch {
     /* reading the tree must not block the pane kill */

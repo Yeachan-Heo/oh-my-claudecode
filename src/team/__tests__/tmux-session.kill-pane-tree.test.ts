@@ -512,21 +512,59 @@ describe("pane process tree captured first and terminated later (injected depend
       expect(rootReads).toBe(2);
     });
 
-    it("a root process whose start identity cannot be read is not compared, and the tree is kept (descendants carry their own identities)", async () => {
+    it("a root process whose start identity cannot be read at the first read gives no tree, and a kill signals nothing", async () => {
       mockPanePid(FAKE_PANE_PID);
-      const tree = await capture({ processIdentity: (pid) => (pid === FAKE_PANE_PID ? null : identities(pid)) });
-      expect(tree?.pids).toEqual([CHILD, GRANDCHILD]);
+      const processIdentity = (pid: number) => (pid === FAKE_PANE_PID ? null : identities(pid));
+      await expect(capture({ processIdentity })).resolves.toBeNull();
+
+      const killProcess = vi.fn();
+      const sleep = vi.fn(async () => undefined);
+      mockPanePid(FAKE_PANE_PID);
+      await killWorkerPaneProcessTree(IDENTITY, "%7", { readProcessRecords: records, processIdentity, killProcess, sleep });
+      expect(killProcess).not.toHaveBeenCalled();
+      expect(sleep).not.toHaveBeenCalled();
     });
 
-    it("a root identity that throws is treated as unreadable, not as a failure of the capture", async () => {
+    it("a root process whose start identity can be read at the first read but not at the second gives no tree", async () => {
       mockPanePid(FAKE_PANE_PID);
-      const tree = await capture({
-        processIdentity: (pid) => {
-          if (pid === FAKE_PANE_PID) throw new Error("no such process");
-          return identities(pid);
-        },
-      });
-      expect(tree?.pids).toEqual([CHILD, GRANDCHILD]);
+      let rootReads = 0;
+      const processIdentity = (pid: number) => (pid === FAKE_PANE_PID ? (++rootReads === 1 ? "root-incarnation" : null) : identities(pid));
+      await expect(capture({ processIdentity })).resolves.toBeNull();
+      expect(rootReads).toBe(2);
+    });
+
+    it("a root identity that throws is treated as unreadable: no tree, and no failure of the capture", async () => {
+      mockPanePid(FAKE_PANE_PID);
+      const throwing = (pid: number) => {
+        if (pid === FAKE_PANE_PID) throw new Error("no such process");
+        return identities(pid);
+      };
+      await expect(capture({ processIdentity: throwing })).resolves.toBeNull();
+
+      let rootReads = 0;
+      const throwsSecond = (pid: number) => {
+        if (pid !== FAKE_PANE_PID) return identities(pid);
+        if (++rootReads > 1) throw new Error("no such process");
+        return "root-incarnation";
+      };
+      await expect(capture({ processIdentity: throwsSecond })).resolves.toBeNull();
+    });
+
+    it("a grid of root identity reads at the first and the second read gives a tree only when both are readable and equal", async () => {
+      const reads: Array<[string | null, string | null, boolean]> = [
+        ["a", "a", true],
+        ["a", "b", false],
+        ["a", null, false],
+        [null, "a", false],
+        [null, null, false],
+      ];
+      for (const [first, second, expectTree] of reads) {
+        mockPanePid(FAKE_PANE_PID);
+        let rootReads = 0;
+        const processIdentity = (pid: number) => (pid === FAKE_PANE_PID ? (++rootReads === 1 ? first : second) : identities(pid));
+        const tree = await capture({ processIdentity });
+        expect(tree !== null, `${first} then ${second}`).toBe(expectTree);
+      }
     });
   });
 
