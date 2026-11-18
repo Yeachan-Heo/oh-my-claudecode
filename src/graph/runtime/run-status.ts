@@ -28,7 +28,7 @@
 
 import { closeSync, constants as fsConstants, fstatSync, lstatSync, openSync, readFileSync } from "node:fs";
 import { join } from "node:path";
-import { directoryOperationsIfSupported, type DirectoryOperations } from "./contained-fd.js";
+import { containedFsPlatformSupported, directoryOperationsIfSupported, type DirectoryOperations } from "./contained-fd.js";
 import { RUN_ID_PATTERN } from "./run-dir.js";
 import { classifyRunFiles } from "./run-state.js";
 
@@ -147,32 +147,39 @@ function readRunFiles(runDir: string, interlock: RunStatusOptions["interlock"]):
     projection: readRunText(open, "projection.json"),
     journal: readRunText(open, "journal.jsonl"),
   });
-  // The directory is opened without following a link and must be the one that was checked (device and inode).
-  let fd: number;
-  try {
-    fd = openSync(runDir, fsConstants.O_RDONLY | (fsConstants.O_DIRECTORY ?? 0) | NOFOLLOW);
-  } catch (error) {
-    const code = (error as NodeJS.ErrnoException).code;
-    if (code === "ELOOP" || code === "ENOTDIR") {
-      throw new UnreadableError("run directory was replaced by a link or a file while it was read");
-    }
-    throw error;
-  }
+  const byName: OpenRunFile = (name) => openSync(join(runDir, name), flags | NOFOLLOW);
   let files: RunFiles;
-  try {
-    const opened = fstatSync(fd);
-    if (opened.dev !== before.dev || opened.ino !== before.ino) {
-      throw new UnreadableError("run directory was replaced while it was read");
+  if (interlock?.operationsFor === undefined && !containedFsPlatformSupported(process.platform)) {
+    // A platform that has no directory-relative operations (Windows) cannot open a directory as a file either: the files
+    // are read by name, with the check of the directory before (above) and after (below). A name swapped and swapped back
+    // in between is not seen there, and the report is read-only.
+    files = readAll(byName);
+  } else {
+    // The directory is opened without following a link and must be the one that was checked (device and inode).
+    let fd: number;
+    try {
+      fd = openSync(runDir, fsConstants.O_RDONLY | (fsConstants.O_DIRECTORY ?? 0) | NOFOLLOW);
+    } catch (error) {
+      const code = (error as NodeJS.ErrnoException).code;
+      if (code === "ELOOP" || code === "ENOTDIR") {
+        throw new UnreadableError("run directory was replaced by a link or a file while it was read");
+      }
+      throw error;
     }
-    interlock?.afterOpen?.();
-    // A platform with directory-relative operations (Linux, and macOS with the native module) reads relative to the
-    // open directory. Only where there are none, the files are read by name, with the same check of the directory
-    // before (above) and after (below): a name swapped and swapped back in between is not seen there, and the report
-    // is read-only.
-    const operations = (interlock?.operationsFor ?? directoryOperationsIfSupported)(fd);
-    files = readAll(operations === null ? (name) => openSync(join(runDir, name), flags | NOFOLLOW) : (name) => operations.open(name, flags));
-  } finally {
-    closeSync(fd);
+    try {
+      const opened = fstatSync(fd);
+      if (opened.dev !== before.dev || opened.ino !== before.ino) {
+        throw new UnreadableError("run directory was replaced while it was read");
+      }
+      interlock?.afterOpen?.();
+      // Every platform that has directory-relative operations (Linux, and macOS with the native module) reads relative
+      // to the open directory, so a name swapped and swapped back during the reads changes nothing. Where the injected
+      // operations are none, the files are read by name as above.
+      const operations = (interlock?.operationsFor ?? directoryOperationsIfSupported)(fd);
+      files = readAll(operations === null ? byName : (name) => operations.open(name, flags));
+    } finally {
+      closeSync(fd);
+    }
   }
   interlock?.afterRead?.();
   const after = lstatSync(runDir);

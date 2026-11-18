@@ -684,6 +684,22 @@ describe.runIf(process.platform !== "win32")("omc graph status", () => {
       expect(report.error).toMatch(/replaced while it was read/);
     });
 
+    it("a platform that cannot open a directory at all (Windows) reads by name without opening the directory", () => {
+      const runs = makeRunsRoot();
+      writeRealRun(runs, "st-windows", "succeeded");
+      const real = Object.getOwnPropertyDescriptor(process, "platform") as PropertyDescriptor;
+      let opened = false;
+      Object.defineProperty(process, "platform", { value: "win32" });
+      try {
+        const outcome = readRunStatus({ runId: "st-windows", runsRoot: runs, interlock: { afterOpen: () => { opened = true; } } });
+        expect(outcome.exitCode, outcome.stdout).toBe(0);
+        expect((JSON.parse(outcome.stdout) as Record<string, any>).state).toBe("succeeded");
+      } finally {
+        Object.defineProperty(process, "platform", real);
+      }
+      expect(opened, "the directory was opened as a file").toBe(false);
+    });
+
     it("a platform without operations still reports an unchanged run", () => {
       const runs = makeRunsRoot();
       writeRealRun(runs, "st-plain", "succeeded");

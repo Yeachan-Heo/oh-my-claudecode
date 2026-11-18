@@ -404,7 +404,8 @@ function scannedFirst(root: string): ScannedRun {
 
 // Stand-ins for the directory-relative operations of other platforms, so that on Linux the code those platforms run is
 // exercised. `macLike` plays macOS with the native module: the operations of Linux without `rmdir` (the native module has
-// none), every call recorded. `noOperations` plays a platform that has none (Windows).
+// none) and with the entry fields the native module returns, every call recorded. `noOperations` plays a platform
+// that has none (Windows).
 const operationCalls: string[] = [];
 const macLike: OperationsFor = (fd) => {
   const real = directoryOperations(fd, "linux");
@@ -412,7 +413,17 @@ const macLike: OperationsFor = (fd) => {
   return {
     ...withoutRmdir,
     open: (name, flags, mode) => { operationCalls.push(`open ${name}`); return real.open(name, flags, mode); },
-    lstat: (name) => { operationCalls.push(`lstat ${name}`); return real.lstat(name); },
+    // What the native module returns for an entry: these six fields and the type tests derived from the mode.
+    lstat: (name) => {
+      operationCalls.push(`lstat ${name}`);
+      const { dev, ino, mode, nlink, size, mtimeMs } = real.lstat(name);
+      return {
+        dev, ino, mode, nlink, size, mtimeMs,
+        isFile: () => (mode & 0o170000) === 0o100000,
+        isDirectory: () => (mode & 0o170000) === 0o040000,
+        isSymbolicLink: () => (mode & 0o170000) === 0o120000,
+      };
+    },
     readDir: () => { operationCalls.push("readDir"); return real.readDir(); },
     unlink: (name) => { operationCalls.push(`unlink ${name}`); real.unlink(name); },
   };
