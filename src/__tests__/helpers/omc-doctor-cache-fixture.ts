@@ -18,9 +18,10 @@ export const commands = read('skills/omc-doctor/SKILL.md')
 export const scriptOf = (command: string) => command.slice('node -e "'.length, -1);
 
 // Preload scripts (--require) change the process the command runs in, e.g. to report another platform.
-export function runCommand(command: string, configDir: string, options: { env?: Record<string, string>; preloads?: string[] } = {}) {
+export function runCommand(command: string, configDir: string, options: { env?: Record<string, string>; preloads?: string[]; timeout?: number } = {}) {
   return spawnSync(process.execPath, [...(options.preloads ?? []).flatMap((file) => ['--require', file]), '-e', scriptOf(command)], {
     encoding: 'utf8',
+    timeout: options.timeout,
     env: {
       ...process.env,
       CLAUDE_CONFIG_DIR: configDir,

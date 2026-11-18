@@ -300,6 +300,38 @@ process.kill = function (pid, signal) {
     }
   });
 
+  // The shared reader (readOccupiedPluginRoots) inspects an entry with lstat and skips everything that is
+  // not a regular file; opening a FIFO for reading would block until a writer shows up.
+  test.skipIf(process.platform === 'win32')('an occupancy entry that is not a regular file is skipped without being opened, so the command does not hang', () => {
+    for (const command of commands) {
+      for (const kind of ['fifo', 'link to a fifo', 'directory'] as const) {
+        const { dir, cache } = makeCache(['5.8.0', '5.8.1', '5.9.0']);
+        try {
+          writeRegistry(dir, { [PLUGIN_ID]: [{ scope: 'user', version: '5.8.1', installPath: path.join(cache, '5.8.1') }] });
+          const records = path.join(dir, '.omc', 'cache-occupancy');
+          mkdirSync(records, { recursive: true });
+          const entry = path.join(records, `${'f'.repeat(64)}.json`);
+          if (kind === 'directory') {
+            mkdirSync(entry);
+          } else {
+            const fifo = kind === 'fifo' ? entry : path.join(dir, 'pipe');
+            expect(spawnSync('mkfifo', [fifo]).status).toBe(0);
+            if (kind === 'link to a fifo') symlinkSync(fifo, entry);
+          }
+          const result = runCommand(command, dir, { timeout: 20_000 });
+          // A hung command is killed by the timeout: no status and an ETIMEDOUT error.
+          expect(result.error).toBeUndefined();
+          expect(result.status).toBe(0);
+          // The entry protects nothing; the registered version stays and the others are moved aside.
+          expect(digitVersions(cache)).toBe('5.8.1');
+          expect(movedAside(dir)).toBe(2);
+        } finally {
+          rmSync(dir, { recursive: true, force: true });
+        }
+      }
+    }
+  });
+
   // Chains: the top entry links to the next one and so on, down to the real directory 5.9.0.
   // 5.0.0 is the only free version; 5.1.0 is the registered one so that "nothing pinned" does not apply.
   function makeChainCache(links: number, form: 'relative' | 'junction') {
