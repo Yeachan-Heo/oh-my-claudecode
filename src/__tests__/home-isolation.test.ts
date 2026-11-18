@@ -46,6 +46,29 @@ describe('test home isolation', () => {
     expect(childHome).toBe(homedir());
   });
 
+  // Pinned here so that dropping a variable from LOCATION_VARS fails a test
+  // instead of silently shrinking the list below.
+  const PINNED_LOCATION_VARS = [
+    'CLAUDE_CONFIG_DIR',
+    'CLAUDE_MCP_CONFIG_PATH',
+    'OMC_STATE_DIR',
+    'OMC_HOME',
+    'OMC_MCP_REGISTRY_PATH',
+    'OMC_JOBS_DIR',
+    'CODEX_HOME',
+    'XDG_CONFIG_HOME',
+    'XDG_STATE_HOME',
+    'XDG_DATA_HOME',
+    'XDG_CACHE_HOME',
+    'CLAUDE_ENV_FILE',
+    'OMC_JEV_LOG_DIR',
+    'OMC_JEV_BREAKER_DIR',
+  ];
+
+  it('unsets at least the pinned location variables', () => {
+    expect([...LOCATION_VARS]).toEqual(expect.arrayContaining(PINNED_LOCATION_VARS));
+  });
+
   it.each(LOCATION_VARS)('does not inherit %s', (name) => {
     expect(process.env[name]).toBeUndefined();
   });
