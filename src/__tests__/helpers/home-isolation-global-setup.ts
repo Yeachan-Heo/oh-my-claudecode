@@ -19,7 +19,17 @@
  * home directory without HOME (os.userInfo()).
  */
 import { createHash } from 'node:crypto';
-import { existsSync, mkdtempSync, readFileSync, readdirSync, readlinkSync, realpathSync, rmSync, statSync } from 'node:fs';
+import {
+  existsSync,
+  mkdtempSync,
+  readFileSync,
+  readdirSync,
+  readlinkSync,
+  realpathSync,
+  rmSync,
+  statSync,
+  utimesSync,
+} from 'node:fs';
 import { homedir, hostname } from 'node:os';
 import { basename, dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 
@@ -48,14 +58,19 @@ export const LOCATION_VARS = [
   'XDG_CACHE_HOME',
   // Set by Claude Code for hooks. setup-init appends to it.
   'CLAUDE_ENV_FILE',
+  // Jev appends to and rotates shadow.jsonl here, and keeps breaker state.
+  'OMC_JEV_LOG_DIR',
+  'OMC_JEV_BREAKER_DIR',
 ] as const;
 
 /**
  * A home from another PID scope cannot be probed for liveness. It is removed
- * once its folder has not changed for this long. A running suite keeps
- * creating fixture folders in its home, which updates the folder's mtime.
+ * once its folder has not changed for this long. A running suite, including
+ * an idle watch-mode run, touches its home every HOME_HEARTBEAT_MS.
  */
 export const FOREIGN_HOME_MAX_AGE_MS = 7 * 24 * 60 * 60 * 1000;
+
+export const HOME_HEARTBEAT_MS = 60 * 60 * 1000;
 
 // `<prefix><host tag>-<pid>-<random>`.
 const TEST_HOME_NAME = new RegExp(`^${TEST_HOME_PREFIX}[0-9a-f]{16}-\\d+-`);
@@ -103,7 +118,13 @@ function canonical(path: string): string {
  * the canonical paths: with a symlinked home (mounted or NFS homes) homedir()
  * is the link while process.cwd() is the real path.
  */
-export function findExposedWorkspaceMarker(home: string, cwd: string): string | null {
+export function findExposedWorkspaceMarker(
+  home: string,
+  cwd: string,
+  env: NodeJS.ProcessEnv = process.env,
+): string | null {
+  // findWorkspaceRoot() returns null without walking when this is set.
+  if (env.OMC_DISABLE_MULTIREPO === '1') return null;
   const pairs: Array<[string, string]> = [
     [resolve(home), resolve(cwd)],
     [canonical(home), canonical(cwd)],
@@ -138,11 +159,11 @@ export function hostTag(scope: string): string {
  * Linux this adds the kernel boot id (one per machine) and the PID namespace;
  * elsewhere only the hostname is available.
  */
-export function pidScope(host: string = hostname()): string {
-  const bootId = readOrNull('/proc/sys/kernel/random/boot_id')?.trim() ?? '';
+export function pidScope(host: string = hostname(), procRoot: string = '/proc'): string {
+  const bootId = readOrNull(join(procRoot, 'sys', 'kernel', 'random', 'boot_id'))?.trim() ?? '';
   let pidNamespace = '';
   try {
-    pidNamespace = readlinkSync('/proc/self/ns/pid');
+    pidNamespace = readlinkSync(join(procRoot, 'self', 'ns', 'pid'));
   } catch {
     // Not Linux, or /proc is not mounted.
   }
@@ -165,6 +186,23 @@ function isOlderThan(path: string, ageMs: number, now: number): boolean {
  * this host before a reboot or hostname change) is removed only after
  * FOREIGN_HOME_MAX_AGE_MS without changes.
  */
+/**
+ * Keep the home's mtime fresh while the run lives, so another PID scope does
+ * not take it for a leftover. Returns a function that stops it.
+ */
+export function startHomeHeartbeat(path: string, intervalMs: number = HOME_HEARTBEAT_MS): () => void {
+  const timer = setInterval(() => {
+    try {
+      const now = new Date();
+      utimesSync(path, now, now);
+    } catch {
+      // The folder is gone; teardown or another run removed it.
+    }
+  }, intervalMs);
+  timer.unref();
+  return () => clearInterval(timer);
+}
+
 export function removeStaleTestHomes(outerHome: string, ownPrefix: string, now: number = Date.now()): void {
   let names: string[];
   try {
@@ -225,8 +263,10 @@ export default function setup(): () => void {
   process.env.HOME = testHome;
   process.env.USERPROFILE = testHome;
   for (const name of LOCATION_VARS) delete process.env[name];
+  const stopHeartbeat = startHomeHeartbeat(testHome);
 
   return () => {
+    stopHeartbeat();
     for (const [name, value] of saved) {
       if (value === undefined) delete process.env[name];
       else process.env[name] = value;

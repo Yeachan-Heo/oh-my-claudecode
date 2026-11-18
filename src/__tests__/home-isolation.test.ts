@@ -6,6 +6,7 @@ import {
   readlinkSync,
   realpathSync,
   rmSync,
+  statSync,
   symlinkSync,
   utimesSync,
   writeFileSync,
@@ -22,6 +23,7 @@ import {
   isInside,
   pidScope,
   removeStaleTestHomes,
+  startHomeHeartbeat,
 } from './helpers/home-isolation-global-setup.js';
 
 // #5089: the suite wrote fixture state into the real ~/.omc.
@@ -106,6 +108,16 @@ describe('findExposedWorkspaceMarker', () => {
     mkdirSync(checkout, { recursive: true });
     expect(findExposedWorkspaceMarker(home, checkout)).toBeNull();
   });
+
+  // findWorkspaceRoot() ignores every marker then, so none can anchor state.
+  it('returns null when OMC_DISABLE_MULTIREPO is set', () => {
+    const home = join(root, 'home');
+    const checkout = join(home, 'repo');
+    mkdirSync(checkout, { recursive: true });
+    const planted = marker(home);
+    expect(findExposedWorkspaceMarker(home, checkout, { OMC_DISABLE_MULTIREPO: '1' })).toBeNull();
+    expect(findExposedWorkspaceMarker(home, checkout, { OMC_DISABLE_MULTIREPO: '0' })).toBe(planted);
+  });
 });
 
 describe('removeStaleTestHomes', () => {
@@ -170,6 +182,25 @@ describe('removeStaleTestHomes', () => {
     expect(existsSync(oldUnrelated)).toBe(true);
   });
 
+  // An idle watch-mode run creates no fixture folders, so without the
+  // heartbeat its home would look a week old to another PID scope.
+  it('keeps a live run home fresh with the heartbeat', async () => {
+    const live = home(`${TEST_HOME_PREFIX}${hostTag('other-host')}-${process.pid}-live`);
+    const longAgo = new Date(Date.now() - FOREIGN_HOME_MAX_AGE_MS - 60_000);
+    utimesSync(live, longAgo, longAgo);
+    const stop = startHomeHeartbeat(live, 10);
+    try {
+      await new Promise((done) => setTimeout(done, 100));
+    } finally {
+      stop();
+    }
+
+    removeStaleTestHomes(outer, `${TEST_HOME_PREFIX}${hostTag('this-host')}-`);
+
+    expect(existsSync(live)).toBe(true);
+    expect(Date.now() - statSync(live).mtimeMs).toBeLessThan(FOREIGN_HOME_MAX_AGE_MS);
+  });
+
   it('does nothing when the home cannot be read', () => {
     expect(() => removeStaleTestHomes(join(outer, 'missing'), `${TEST_HOME_PREFIX}x-`)).not.toThrow();
   });
@@ -204,8 +235,21 @@ describe('pidScope', () => {
   });
 
   // Containers that share a home and a hostname still get different prefixes.
-  it.runIf(process.platform === 'linux')('includes the PID namespace on Linux', () => {
+  const procfs = ((): boolean => {
+    try {
+      readlinkSync('/proc/self/ns/pid');
+      return true;
+    } catch {
+      return false;
+    }
+  })();
+  it.runIf(procfs)('includes the PID namespace when procfs is readable', () => {
     expect(pidScope('host-a')).toContain(readlinkSync('/proc/self/ns/pid'));
+  });
+
+  // A chroot or hardened container without a readable /proc.
+  it('falls back to the hostname without procfs', () => {
+    expect(pidScope('host-a', join(sep, 'no-such-proc'))).toBe('host-a\0\0');
   });
 });
 
