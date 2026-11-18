@@ -116,10 +116,10 @@ describe('reviewer and architect agent prompts', () => {
 
   test('code-reviewer keeps the fail-open exception and flags silent suppression', () => {
     const reviewer = read('agents/code-reviewer.md');
-    expect(reviewer).toMatch(/Intentional fail-open with a comment stating the reason and the logged signal is not a finding/);
-    expect(reviewer).toMatch(/flag silent suppression without a stated reason, without a log row or without a bounded scope/);
+    // The exception needs all three properties; a missing one (for example an unbounded scope) is a finding.
+    expect(reviewer).toContain('Intentional fail-open is not a finding only when it has all three: a comment stating the reason, a logged signal, and a bounded scope; flag silent suppression that lacks any one of them.');
     const skill = read('skills/ai-slop-cleaner/SKILL.md');
-    expect(skill).toMatch(/Intentional fail-open with a comment stating the reason and the logged signal is not slop/);
+    expect(skill).toContain('Intentional fail-open is not slop only when it has all three: a comment stating the reason, a logged signal, and a bounded scope; flag silent suppression that lacks any one of them.');
   });
 
   test('code-reviewer treats repository files and executor reports as evidence, and has noise thresholds', () => {
