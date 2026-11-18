@@ -27,9 +27,17 @@ describe('panelQuotaTmux adapter', () => {
   });
 
   it('listPanes maps the tmux pane list to pane points', () => {
-    vi.mocked(tmuxExec).mockReturnValueOnce('omc-team-a:0.1 %7 1 team title\n');
+    vi.mocked(tmuxExec).mockReturnValueOnce('4100:1795000000 omc-team-a:0.1 %7 1 team title\n');
     const panes = panelQuotaTmux.listPanes();
-    expect(panes).toEqual([expect.objectContaining({ id: '%7', session: 'omc-team-a', windowIndex: 0, paneIndex: 1 })]);
+    expect(panes).toEqual([expect.objectContaining({ id: '%7', session: 'omc-team-a', windowIndex: 0, paneIndex: 1, server: '4100:1795000000' })]);
+    expect(vi.mocked(tmuxExec).mock.calls[0][0][3]).toMatch(/^#\{pid\}:#\{start_time\} /);
+  });
+
+  it('listPanes returns null when a line carries no server value: the binding cannot be made', () => {
+    vi.mocked(tmuxExec).mockReturnValueOnce(': omc-team-a:0.1 %7 1 team title\n');
+    expect(panelQuotaTmux.listPanes()).toBeNull();
+    vi.mocked(tmuxExec).mockReturnValueOnce('omc-team-a:0.1 %7 1 team title\n');
+    expect(panelQuotaTmux.listPanes()).toBeNull();
   });
 
   it('listPanes returns null, not an empty list, when the inventory cannot be read', () => {

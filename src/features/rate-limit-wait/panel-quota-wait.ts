@@ -34,6 +34,11 @@
  * captured once, right before its key. A pass that runs out of time saves a cursor: the next pass starts after the last pane this one worked on, so a pane that used up the time goes
  * to the end of the next pass and a pane that was not reached goes to its start, for waiting and other panes alike.
  *
+ * A state file that exists but cannot be read, parsed or recognised stops the pass before anything is scanned or sent
+ * and is left as it is: only a missing file starts an empty state. An entry belongs to a pane id of one tmux server
+ * run (PanePoint.server); a pane id that comes back under another run of the server, after a restart, does not inherit
+ * the wait of the worker that had it.
+ *
  * Tmux, the clock and the provider reading are injected, so the decision logic runs in tests without
  * tmux or a live account. The API key is read from the file named by OMC_PANEL_QUOTA_KEY_FILE and is never
  * written to the state file, the journal or the log.
@@ -67,6 +72,11 @@ export interface PanePoint {
   session: string;
   windowIndex: number;
   paneIndex: number;
+  /**
+   * Incarnation of the tmux server that listed the pane. A pane id is unique only within one server run: after a
+   * server restart the same id can name an unrelated worker. Undefined when the listing carries no such value.
+   */
+  server?: string;
 }
 
 /** Provider reading: the raw JSON body with `data.limits` (or a bare array of limits). */
@@ -96,6 +106,8 @@ export interface PanelEntry {
   session: string;
   windowIndex: number;
   paneIndex: number;
+  /** Incarnation of the tmux server the pane id belongs to, set when the entry is created and never refreshed (see PanePoint.server). */
+  server?: string;
   waits: number;
   /** "resuming": the continue key is about to be sent, or was sent without the pass finishing; it is never sent again. */
   state?: 'waiting_quota' | 'resuming' | 'resumed' | 'quota-ended';
@@ -260,15 +272,24 @@ function screenSignature(content: string): string {
   return createHash('sha256').update(String(content)).digest('hex').slice(0, 16);
 }
 
+/**
+ * Reads the state file. A file that does not exist is an empty state; a file that cannot be read, parsed or does not
+ * have the shape of a state throws. A pass that took an unreadable file for an empty one would overwrite the saved
+ * waits and resume intents, and could send again a key that was already delivered.
+ */
 export function loadState(file: string): PanelState {
+  let text: string;
   try {
-    const parsed = JSON.parse(readFileSync(file, 'utf8')) as Partial<PanelState> | null;
-    return parsed && typeof parsed === 'object' && parsed.panes && typeof parsed.panes === 'object'
-      ? (parsed as PanelState)
-      : { panes: {} };
-  } catch {
-    return { panes: {} };
+    text = readFileSync(file, 'utf8');
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException)?.code === 'ENOENT') return { panes: {} };
+    throw error;
   }
+  const parsed = JSON.parse(text) as Partial<PanelState> | null;
+  if (!parsed || typeof parsed !== 'object' || !parsed.panes || typeof parsed.panes !== 'object') {
+    throw new Error('the file is not a quota wait state');
+  }
+  return parsed as PanelState;
 }
 
 export function saveState(file: string, state: PanelState): void {
@@ -383,9 +404,13 @@ export async function runPanelQuotaPass(
     return state;
   }
   const panes = listedPanes.filter((pane) => String(pane.session).startsWith(prefix));
-  const live = new Set(panes.map(paneKey));
-  for (const key of Object.keys(state.panes)) {
-    if (!live.has(key)) delete state.panes[key];
+  // An entry belongs to a pane id of one tmux server run: a pane that is gone, or whose id now belongs to another run
+  // of the server (a restart can give an unrelated worker the same id), loses its entry. A listing that carries no
+  // server value cannot tell, and keeps the entry.
+  const live = new Map(panes.map((pane) => [paneKey(pane), pane]));
+  for (const [key, entry] of Object.entries(state.panes)) {
+    const pane = live.get(key);
+    if (!pane || (pane.server !== undefined && entry.server !== pane.server)) delete state.panes[key];
   }
   // One sequence for the whole pass: panes that already wait come first (their due resumes need no reading and must
   // not queue behind a new detection that runs out of time), then the others, each group in tmux order. A pass that ran
@@ -525,7 +550,7 @@ export async function runPanelQuotaPass(
     if (entry && entry.state === 'quota-ended' && sig === entry.sig) continue;
 
     if (!entry) {
-      entry = { key, pane: pane.id, session: pane.session, windowIndex: pane.windowIndex, paneIndex: pane.paneIndex, waits: 0 };
+      entry = { key, pane: pane.id, session: pane.session, windowIndex: pane.windowIndex, paneIndex: pane.paneIndex, server: pane.server, waits: 0 };
       state.panes[key] = entry;
     }
     // The screen is recorded as the last event only once the event is acted on: a pass that runs out of time on it
@@ -658,8 +683,8 @@ function appendJournal(env: PanelEnv, row: Journal): void {
 }
 
 /**
- * Entry point for the daemon: one pass per poll. Returns the state, or null when the switch is off
- * (no reads, no tmux calls, no file writes).
+ * Entry point for the daemon: one pass per poll. Returns the state, or null when the switch is off or the saved state
+ * cannot be read (no reads of the provider, no tmux calls, no file writes).
  */
 export async function runDaemonPanelQuotaPass({
   stateDir,
@@ -680,7 +705,14 @@ export async function runDaemonPanelQuotaPass({
 }): Promise<PanelState | null> {
   if (!enabled(env)) return null;
   const file = env.OMC_PANEL_QUOTA_STATE || join(stateDir, STATE_FILE_NAME);
-  const state = loadState(file);
+  let state: PanelState;
+  try {
+    state = loadState(file);
+  } catch (error) {
+    // The saved waits and resume intents are kept as they are: nothing is scanned, sent or written in this pass.
+    log(`panel quota state ${file} cannot be read (${error instanceof Error ? error.message : String(error)}); the pass is skipped and the file is left as it is`);
+    return null;
+  }
   const deps: PanelQuotaDeps = {
     now,
     monotonic,

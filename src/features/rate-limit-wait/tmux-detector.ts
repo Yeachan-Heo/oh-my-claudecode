@@ -314,19 +314,36 @@ function parseTmuxPanes(result: string): TmuxPane[] {
   return panes;
 }
 
-export function listTmuxPanesStrict(): TmuxPane[] | null {
+/**
+ * With `withServer`, every line also carries the server's pid and start time, and each pane gets them as `server`: a
+ * pane id is unique only within one run of the tmux server. A listing whose lines do not all carry that value is
+ * reported as unreadable (null), because the caller asked for a binding it could then not make.
+ */
+export function listTmuxPanesStrict(withServer = false): TmuxPane[] | null {
   if (!isTmuxAvailable()) {
     return null;
   }
 
   try {
-    // Format: session_name:window_index.pane_index pane_id pane_active window_name pane_title
-    const format = '#{session_name}:#{window_index}.#{pane_index} #{pane_id} #{pane_active} #{window_name} #{pane_title}';
+    // Format: [pid:start_time ]session_name:window_index.pane_index pane_id pane_active window_name pane_title
+    const format = (withServer ? '#{pid}:#{start_time} ' : '')
+      + '#{session_name}:#{window_index}.#{pane_index} #{pane_id} #{pane_active} #{window_name} #{pane_title}';
     const result = tmuxExec(['list-panes', '-a', '-F', format], {
       stripTmux: true,
       timeout: 5000,
     });
 
+    if (withServer) {
+      const panes: TmuxPane[] = [];
+      for (const line of result.split(/\r?\n/)) {
+        if (!line.trim()) continue;
+        const split = line.indexOf(' ');
+        const server = line.slice(0, split);
+        if (!/^\d+:\d+$/.test(server)) return null;
+        for (const pane of parseTmuxPanes(line.slice(split + 1))) panes.push({ ...pane, server });
+      }
+      return panes;
+    }
     return parseTmuxPanes(result);
   } catch (error) {
     console.error('[TmuxDetector] Error listing panes:', error);
@@ -875,7 +892,7 @@ export function formatBlockedPanesSummary(blockedPanes: BlockedPane[]): string {
  */
 export const panelQuotaTmux = {
   // null when the inventory cannot be read (tmux missing, server unreachable, timeout): the pass keeps its saved waits.
-  listPanes: (): TmuxPane[] | null => listTmuxPanesStrict(),
+  listPanes: (): TmuxPane[] | null => listTmuxPanesStrict(true),
   capture: (pane: TmuxPane, lines: number): string | null => capturePaneContentStrict(pane.id, lines),
   sendContinue: (pane: TmuxPane): PaneSendOutcome => sendToPaneOutcome(pane.id, 'continue', true),
   providerRunning: (pane: TmuxPane): boolean | null => paneProviderRunning(pane.id),
