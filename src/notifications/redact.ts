@@ -167,31 +167,35 @@ function isSkippable(c: string | undefined): boolean {
 /**
  * The positions of the separators (`=` or `:`) that can belong to the NAME that ends at `from`. Quotes, `]` and
  * `[index]` parts of any length may stand between the name and the separator, and spaces and tabs may stand
- * before the separator. A `[` is read both ways: as the start of an index, which is jumped over up to the next
- * `]`, and as an ordinary character, so that an index that swallows the separator (`PASSWORD[=x ]`) cannot
- * hide it. Every position is followed at most once for the whole input (a position gives the same separators
- * whichever name led to it), so the total cost is linear however many names and brackets there are.
+ * anywhere between those parts (`NAME ["a"] ["b"] = x`). A `[` is read both ways: as the start of an index,
+ * which is jumped over up to the next `]`, and as an ordinary character, so that an index that swallows the
+ * separator (`PASSWORD[=x ]`) cannot hide it. Every position is followed at most once for the whole input (a
+ * position gives the same separators whichever name led to it), so the total cost is linear however many
+ * names and brackets there are. A run of spaces and tabs is entered only at its start (the character before
+ * it is never a space or a tab), so skipping it does not make the scan quadratic.
  */
 function separatorsAfter(input: string, from: number, tables: KeyShapeTables): number[] {
   const n = input.length;
   const found: number[] = [];
-  const leaf = (start: number): void => {
+  const skipBlanks = (start: number): number => {
     let k = start;
     while (k < n && (input[k] === ' ' || input[k] === '\t')) k++;
-    if (input[k] === '=' || input[k] === ':') found.push(k);
+    return k;
   };
-  if (!isSkippable(input[from])) { // the usual case: nothing stands between the name and the separator
-    leaf(from);
+  const first = skipBlanks(from);
+  if (!isSkippable(input[first])) { // the usual case: nothing stands between the name and the separator
+    if (input[first] === '=' || input[first] === ':') found.push(first);
     return found;
   }
   const followed = (tables.followed ??= new Uint8Array(n + 1));
-  const stack = [from];
+  const stack = [first];
   while (stack.length > 0) {
-    const k = stack.pop() as number;
-    if (followed[k]) continue;
-    followed[k] = 1;
+    const entry = stack.pop() as number;
+    if (followed[entry]) continue;
+    followed[entry] = 1;
+    const k = skipBlanks(entry);
     if (!isSkippable(input[k])) {
-      leaf(k);
+      if (input[k] === '=' || input[k] === ':') found.push(k);
       continue;
     }
     if (input[k] === '[') {
@@ -240,7 +244,8 @@ function valueEnds(input: string, quote: string): Int32Array {
  * - JWTs: three base64url segments, the first starting with `eyJ`; masked as `eyJ***`.
  * - NAME=value and NAME: value, where NAME contains KEY, TOKEN, SECRET, PASSWORD,
  *   PASSWD, PASS, PWD or CREDENTIALS (matched case-insensitively, anywhere in the name). The name and the
- *   quotes and `[index]` parts between it and the separator have no length limit (see separatorsAfter).
+ *   quotes and `[index]` parts between it, and the spaces and tabs around them, have no length limit (see
+ *   separatorsAfter).
  *   A quoted value runs to the matching quote on the same line, or to the end of the line when the quote is
  *   missing (a truncated preview); see valueEnds for escapes and for where a bare value ends.
  *
