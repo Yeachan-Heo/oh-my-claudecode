@@ -258,6 +258,29 @@ describe('omc-doctor cache commands on a synthetic config directory (pins, regis
     });
   }
 
+  // A pinned version spelled in another letter case than its cache directory names that directory on a volume
+  // that ignores case (win32, darwin); where case counts it names no directory, so no pin is found and nothing moves.
+  test('a pinned version spelled in another letter case protects the directory only where the platform folds case', () => {
+    for (const command of commands) {
+      for (const platform of ['win32', 'darwin', 'linux'] as const) {
+        const { dir, cache } = makeCache(['5.1.0', '5.9.0-beta']);
+        try {
+          writeRegistry(dir, { [PLUGIN_ID]: [{ scope: 'user', version: '5.9.0-BETA' }] });
+          const preload = path.join(dir, 'platform.cjs');
+          writeFileSync(preload, `Object.defineProperty(process, 'platform', { value: '${platform}' });\n`);
+          const result = runCommand(command, dir, { preloads: [preload] });
+          expect({ platform, status: result.status, versions: digitVersions(cache), moved: movedAside(dir) }).toEqual(
+            platform === 'linux'
+              ? { platform, status: 0, versions: '5.1.0,5.9.0-beta', moved: 0 }
+              : { platform, status: 0, versions: '5.9.0-beta', moved: 1 },
+          );
+        } finally {
+          rmSync(dir, { recursive: true, force: true });
+        }
+      }
+    }
+  });
+
   test('a pin under a differently spelled ID is enough on its own, and its installPath may carry padding', () => {
     for (const command of commands) {
       for (const id of OFFICIAL_IDS) {

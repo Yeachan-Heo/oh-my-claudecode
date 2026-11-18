@@ -1,5 +1,6 @@
 import { describe, test, expect } from 'vitest';
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { chmodSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { spawnSync } from 'node:child_process';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { read, runCommand, writeRegistry, writeRegistryFile } from './helpers/omc-doctor-cache-fixture.js';
@@ -7,7 +8,7 @@ import { read, runCommand, writeRegistry, writeRegistryFile } from './helpers/om
 const text = read('skills/omc-doctor/SKILL.md');
 const versionCommand = text.split('\n').find((l) => l.startsWith('node -e ') && l.includes("'Updater: "));
 
-type Profile = { plugins?: Record<string, unknown>; raw?: string; cache?: Record<string, string[]>; clone?: Record<string, string> };
+type Profile = { plugins?: Record<string, unknown> | ((dir: string) => Record<string, unknown>); platform?: string; raw?: string; cache?: Record<string, string[]>; clone?: Record<string, string> };
 
 // Runs the Step 1 command against a synthetic config directory. `cache` maps a marketplace name to the
 // version directories under plugins/cache/<marketplace>/oh-my-claudecode, `clone` maps a marketplace name
@@ -25,8 +26,10 @@ function step1(profile: Profile) {
       writeFileSync(path.join(manifestDir, 'marketplace.json'), JSON.stringify({ name: market, plugins: [{ name: 'oh-my-claudecode', version }] }));
     }
     if (profile.raw !== undefined) writeRegistryFile(dir, profile.raw);
-    else if (profile.plugins) writeRegistry(dir, profile.plugins);
-    const result = runCommand(versionCommand ?? '', dir);
+    else if (profile.plugins) writeRegistry(dir, typeof profile.plugins == 'function' ? profile.plugins(dir) : profile.plugins);
+    const preload = path.join(dir, 'platform.cjs');
+    if (profile.platform) writeFileSync(preload, `Object.defineProperty(process, 'platform', { value: '${profile.platform}' });\n`);
+    const result = runCommand(versionCommand ?? '', dir, { preloads: profile.platform ? [preload] : [] });
     expect(result.status).toBe(0);
     return Object.fromEntries(result.stdout.trim().split('\n').map((l) => [l.slice(0, l.indexOf(': ')), l.slice(l.indexOf(': ') + 2)]));
   } finally {
@@ -42,6 +45,7 @@ describe('omc-doctor Step 1 derives the plugin ID, channel and latest version fr
     // The npm line has its own label, so an offline run never prints a second `Latest:` next to a marketplace one.
     const block = text.slice(text.indexOf('### Step 1'), text.indexOf('**Diagnosis**'));
     expect(block).toContain('echo "npm latest: (unavailable)"');
+    expect(block).toContain('echo "npm latest: $latest"');
     expect(block.split('\n').filter((l) => !l.startsWith('node -e ') && l.includes('Latest:') && !l.startsWith('#'))).toEqual([]);
   });
 
@@ -95,6 +99,78 @@ describe('omc-doctor Step 1 derives the plugin ID, channel and latest version fr
       cache: { 'oh-my-claudecode': ['5.7.0', '5.10.0'], omc: ['6.0.0'] },
     });
     expect(out).toMatchObject({ Installed: '5.10.0', Latest: '(unavailable) (marketplace clone)' });
+  });
+
+  // Grid: spelling of the registry key x where the installed version comes from x platform. The marketplace
+  // name, the clone it is looked up in and the updater follow the normalized official ID, as the installer
+  // reads the registry; the plugin ID in the updater stays as recorded.
+  test('the registry key in any letter case, with the version from version, installPath or the cache, on every platform', () => {
+    const keys: Array<[string, string]> = [
+      ['oh-my-claudecode@omc', 'omc'],
+      ['OH-MY-CLAUDECODE@OMC', 'omc'],
+      ['Oh-My-ClaudeCode@Oh-My-ClaudeCode', 'oh-my-claudecode'],
+      ['OH-MY-CLAUDECODE', 'omc'],
+    ];
+    const sources: Array<[string, (dir: string, market: string) => unknown, string]> = [
+      ['version', () => ({ version: '5.8.0' }), '5.8.0'],
+      // Only the registered path names the running version; a newer stale directory must not win.
+      ['installPath named for its version', (dir, market) => ({ installPath: path.join(dir, 'plugins', 'cache', market, 'oh-my-claudecode', '5.8.0') + path.sep }), '5.8.0'],
+      ['installPath with a padded Windows spelling', () => ({ installPath: ' X:\\cfg\\plugins\\cache\\omc\\oh-my-claudecode\\5.8.0\\ ' }), '5.8.0'],
+      ['installPath of an alias directory, version in its package.json', (dir) => {
+        mkdirSync(path.join(dir, 'alias'), { recursive: true });
+        writeFileSync(path.join(dir, 'alias', 'package.json'), JSON.stringify({ version: '5.8.0' }));
+        return { installPath: path.join(dir, 'alias') };
+      }, '5.8.0'],
+      ['neither: the cache of the marketplace', () => ({ scope: 'user' }), '5.9.0'],
+    ];
+    for (const [key, market] of keys) {
+      for (const [label, entry, installed] of sources) {
+        for (const platform of ['linux', 'darwin', 'win32']) {
+          const out = step1({
+            platform,
+            plugins: (dir) => ({ [key]: [entry(dir, market)] }),
+            cache: { [market]: ['5.8.0', '5.9.0'] },
+            clone: { [market]: '6.0.0', [market == 'omc' ? 'oh-my-claudecode' : 'omc']: '9.9.9' },
+          });
+          expect({ key, label, platform, out }).toEqual({
+            key, label, platform,
+            out: {
+              Plugin: key,
+              Channel: 'marketplace ' + market,
+              Installed: installed,
+              Latest: '6.0.0 (marketplace clone)',
+              Updater: `claude plugin marketplace update ${market} && claude plugin update ${key}`,
+            },
+          });
+        }
+      }
+    }
+  });
+
+  test('an installPath that names no version and has no metadata falls back to the cache of the marketplace', () => {
+    const out = step1({ plugins: { 'oh-my-claudecode@omc': [{ installPath: '/nowhere/current' }, { installPath: '   ' }] }, cache: { omc: ['5.7.0', '5.8.0'] } });
+    expect(out.Installed).toBe('5.8.0');
+  });
+
+  // The npm line runs in the shell, so the case runs it with a fake npm first on PATH.
+  test.skipIf(process.platform === 'win32')('the npm line is labelled on success and on failure, never a bare version', () => {
+    const line = text.split('\n').find((l) => l.startsWith('latest=$(npm view '));
+    expect(line).toBeDefined();
+    const dir = mkdtempSync(path.join(tmpdir(), 'omc-doctor-npm-'));
+    try {
+      const run = (npm: string) => {
+        writeFileSync(path.join(dir, 'npm'), `#!/bin/sh\n${npm}\n`);
+        chmodSync(path.join(dir, 'npm'), 0o755);
+        const result = spawnSync('bash', ['-c', line ?? ''], { encoding: 'utf8', env: { ...process.env, PATH: dir + path.delimiter + (process.env.PATH ?? '') } });
+        return { status: result.status, stdout: result.stdout };
+      };
+      expect(run('echo 5.9.1')).toEqual({ status: 0, stdout: 'npm latest: 5.9.1\n' });
+      expect(run('exit 1')).toEqual({ status: 0, stdout: 'npm latest: (unavailable)\n' });
+      expect(run('exit 0')).toEqual({ status: 0, stdout: 'npm latest: (unavailable)\n' });
+      expect(run('echo 5.9.1; exit 3')).toEqual({ status: 0, stdout: 'npm latest: (unavailable)\n' });
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 
   test('a bare plugin ID keeps the legacy omc marketplace', () => {
