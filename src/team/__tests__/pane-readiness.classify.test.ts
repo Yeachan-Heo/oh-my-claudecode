@@ -4,8 +4,11 @@ import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 import type { CliAgentType } from '../model-contract.js';
 import {
-  PANE_PATTERNS,
+  detectPaneTrustPromptKind,
   observePane,
+  PANE_PATTERNS,
+  paneHasActiveTask,
+  paneLooksReady,
   type PaneSignals,
 } from '../pane-readiness.js';
 
@@ -137,6 +140,20 @@ describe('observePane on the frame corpus', () => {
     const cursorBusy = frame('cursor/unversioned/busy-ctrl-c.txt');
     expect(observePane(cursorBusy, 'cursor').busy).toBe(true);
     expect(observePane(cursorBusy, 'claude').busy).toBe(false);
+  });
+});
+
+describe('a provider name outside the table', () => {
+  // Team state is read back with casts such as `worker.provider as CliAgentType`.
+  const stored = (name: string) => name as CliAgentType;
+
+  it.each(['other', 'constructor', 'CLAUDE', ''])('reads %j with the shared patterns instead of throwing', (name) => {
+    const provider = stored(name);
+    expect(paneLooksReady('Some output\n❯ ', provider)).toBe(true);
+    expect(paneHasActiveTask('· Thinking…\n❯ ', provider)).toBe(true);
+    expect(detectPaneTrustPromptKind(frame('claude/2.1.325/trust.txt'), provider)).toBeNull();
+    expect(detectPaneTrustPromptKind('Do you trust the contents of this directory?\n› 1. Yes, continue\n  2. No, quit', provider)).toBe('directory');
+    expect(observePane('→ ready', provider).idlePrompt).toBe(false);
   });
 });
 

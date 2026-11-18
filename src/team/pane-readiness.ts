@@ -88,10 +88,12 @@ const UNKNOWN_PROVIDER_PATTERNS: ProviderPanePatterns = {
   ],
 };
 
+// A provider name outside the table, such as one cast from stored team state,
+// gets the shared patterns, which is how the checks read it before the table:
+// only the shared trust dialogs, busy markers and prompt.
 function patternsFor(provider: CliAgentType | undefined): ProviderPanePatterns {
-  return provider === undefined
-    ? UNKNOWN_PROVIDER_PATTERNS
-    : PANE_PATTERNS[provider];
+  if (provider === undefined) return UNKNOWN_PROVIDER_PATTERNS;
+  return Object.hasOwn(PANE_PATTERNS, provider) ? PANE_PATTERNS[provider] : SHARED_PATTERNS;
 }
 
 function paneLines(captured: string): string[] {
