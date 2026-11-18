@@ -4,7 +4,7 @@ import { createHash } from 'node:crypto';
 import { existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import { commands, scriptOf, runCommand, digitVersions, backupDir, movedAside, PLUGIN_ID, makeCache, writeRegistry } from './helpers/omc-doctor-cache-fixture';
+import { commands, scriptOf, runCommand, digitVersions, backupDir, movedAside, PLUGIN_ID, makeCache, writeRegistry } from './helpers/omc-doctor-cache-fixture.js';
 // @ts-expect-error Standalone hook runtime source is intentionally JavaScript-only.
 import { publishCacheOccupancy } from '../../scripts/lib/cache-occupancy.mjs';
 

@@ -2,7 +2,7 @@ import { describe, test, expect } from 'vitest';
 import { existsSync, mkdirSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import { read, commands, runCommand, digitVersions, backupDir, movedAside, PLUGIN_ID, makeCache, writeRegistryFile, writeRegistry } from './helpers/omc-doctor-cache-fixture';
+import { read, commands, runCommand, digitVersions, backupDir, movedAside, PLUGIN_ID, makeCache, writeRegistryFile, writeRegistry } from './helpers/omc-doctor-cache-fixture.js';
 
 describe('omc-doctor cache commands on a synthetic config directory (pins, registry shapes, failed moves)', { timeout: 120_000 }, () => {
   function makeConfigDir(versions: string[], pinned: string | null, installed = true, pluginId = 'oh-my-claudecode@omc') {
