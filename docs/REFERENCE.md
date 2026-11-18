@@ -1400,6 +1400,14 @@ stopomc
 
 > **Note**: AST tools use [@ast-grep/napi](https://ast-grep.github.io/) for structural code matching. Supports meta-variables like `$VAR` (single node) and `$$$` (multiple nodes).
 
+### Task List Tool (opt-in)
+
+| Tool        | Status                       | Description                                                                                                                             |
+| ----------- | ---------------------------- | --------------------------------------------------------------------------------------------------------------------------------------- |
+| `task_list` | ✅ Implemented (off by default) | Task list of a subagent: send the whole list as `items`, or `advance`, `done` or `start` as in `update_plan`. The tool checks the shape of the call and confirms it. |
+
+> **Note**: `task_list` is registered only when `OMC_TASK_LIST=1` is set when the MCP server starts; without it the tool does not exist and the standalone server exposes the same tools as before. With the variable set, `OMC_DISABLE_TOOLS=task-list` hides the tool again. The list itself is saved per agent by the `PostToolUse` hook `scripts/jev-task-list-state.mjs`, which you register yourself and which writes nothing when `OMC_TASK_LIST` is unset (also turned off by `OMC_SKIP_HOOKS=task-list` or `DISABLE_OMC=1`). Details, storage layout and the log files: [HOOKS.md](./HOOKS.md#task-list-scriptslibjev-task-listmjs).
+
 ---
 
 ## Performance Monitoring
