@@ -71,8 +71,10 @@ const KINDS: Array<[name: string, head: string, needs: number, length: number, m
   ["AKIA (exactly 16 after the head)", "AKIA", 16, 16, "AKIA****"],
   ["Telegram bot token", "123456789:", 20, 30, "123456789:****"],
   ["an assignment", "PASSWORD=", 1, 12, "PASSWORD=****"],
+  ["a JWT (segments of at least 8 characters)", "eyJ", 26, 48, "eyJ***"],
 ];
-const secret = (length: number): string => "QZ".repeat(length).slice(0, length);
+const secret = (head: string, length: number): string =>
+  (head === "eyJ" ? `QZQZQZQZ.QZQZQZQZ.${"QZ".repeat(30)}` : "QZ".repeat(length)).slice(0, length);
 
 /**
  * A reply in which `inside` characters of the secret lie inside the first `max` characters of the typed text
@@ -88,7 +90,7 @@ const replyWith = (
   const fillerLength = max - prefix.length - head.length - inside - 1;
   if (fillerLength < 1) return undefined; // the filler is not blank: sanitizeReplyInput trims
   const filler = `${"x".repeat(fillerLength)} `;
-  const reply = `${filler}${head}${secret(length)}`;
+  const reply = `${filler}${head}${secret(head, length)}`;
   // The log line is redacted once more as a whole, which makes the part of **** that the cut leaves after an
   // assignment (`PASSWORD=*`) a value of its own: it becomes ****.
   const shown = `${prefix}${filler}${masked}`.slice(0, max).replace(/(PASSWORD=)\*+$/, "$1****");
@@ -249,7 +251,7 @@ describe("a failed command that typed a cut reply: the log shows the reply redac
   it.each([undefined, "", "0", "true"])("switch off (%s): the message is logged as the error carries it", async (value) => {
     if (value === undefined) delete process.env[SWITCH];
     else process.env[SWITCH] = value;
-    for (const { label, reply, typed, max, includePrefix } of grid().filter((_, i) => i % 7 === 0)) {
+    for (const { label, reply, typed, max, includePrefix } of grid()) {
       const { logged } = sendFailure(LAYERS[0][1], reply, max, includePrefix);
       // the message as the error carries it, with what the log line has always done to it: the regex rules
       expect(logged, label).toBe(redactTokens(expectedLine(LAYERS[0][1], typed)));
