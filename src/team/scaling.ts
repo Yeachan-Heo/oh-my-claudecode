@@ -53,6 +53,8 @@ import {
 } from "./monitor.js";
 import {
   adoptWorkerPaneOwnership,
+  capturePaneProcessTree,
+  terminatePaneProcessTree,
   sanitizeName,
   getOwnedWorkerLiveness,
   killOwnedWorkerPane,
@@ -61,6 +63,7 @@ import {
   workerPaneBelongsToOwnedProviderTarget,
   waitForPaneReady,
   type StartupPaneContext,
+  type PaneProcessTree,
   type WorkerPaneOwnership,
   isHerdrSessionTarget,
   providerForTeamTarget,
@@ -303,6 +306,27 @@ function configuredPaneOwnership(
       .map((worker) => worker.pane_id as string),
     source: "adopted",
     ...(validIdentity ? { tmuxServerIdentity: validIdentity } : {}),
+  };
+}
+
+/** The arguments with which a worker's pane is adopted (its ownership proved) from the config of the team. */
+function workerPaneOwnershipInput(
+  config: TeamConfig,
+  workerName: string,
+  paneId: string,
+) {
+  return {
+    provider: providerForTeamTarget(config.tmux_session, paneId),
+    providerTarget: config.tmux_session,
+    paneId,
+    leaderPaneId: config.leader_pane_id ?? "",
+    reservedPaneIds: config.workers
+      .filter((candidate) => candidate.name !== workerName)
+      .map((candidate) => candidate.pane_id)
+      .filter((id): id is string => Boolean(id)),
+    ...(config.tmux_server_identity
+      ? { tmuxServerIdentity: config.tmux_server_identity }
+      : {}),
   };
 }
 
@@ -2241,6 +2265,49 @@ export async function scaleDownOwned(
 
       const removedNames: string[] = [];
 
+      // Opt-in tree kill (OMC_TEAM_KILL_PANE_TREE): the process tree of each live worker pane is read before the workers are asked to
+      // drain. A worker that finishes during the drain wait exits, its pane root goes with it, and a descendant that left its process
+      // group is then no longer below the pane's root: a read taken after the wait does not find it. Nothing is signalled before the
+      // launch fence of phase 3 is held.
+      const earlyPaneTrees = new Map<
+        string,
+        { paneId: string; tree: PaneProcessTree }
+      >();
+      if (process.env.OMC_TEAM_KILL_PANE_TREE === "1") {
+        await Promise.all(
+          targetWorkers.map(async (worker) => {
+            try {
+              const initialOwnership = configuredPaneOwnership(
+                config,
+                worker.pane_id!,
+                worker.name,
+              );
+              if (
+                !worker.pane_id!.startsWith("%") ||
+                !initialOwnership ||
+                (await getOwnedWorkerLiveness(initialOwnership)) === "dead"
+              )
+                return;
+              const adopted = await adoptWorkerPaneOwnership(
+                workerPaneOwnershipInput(config, worker.name, worker.pane_id!),
+              );
+              if (!adopted.ok || !adopted.ownership.tmuxServerIdentity) return;
+              const tree = await capturePaneProcessTree(
+                adopted.ownership.tmuxServerIdentity,
+                adopted.ownership.paneId,
+              );
+              if (tree)
+                earlyPaneTrees.set(worker.name, {
+                  paneId: adopted.ownership.paneId,
+                  tree,
+                });
+            } catch {
+              /* reading a tree must not hold up the scale down: the read before the launch fence is still taken */
+            }
+          }),
+        );
+      }
+
       // Phase 1: Set workers to 'draining' status. Worktree safety is checked
       // after the drain/kill boundary so active workers can finish and clean up
       // ordinary in-progress work before removal is attempted.
@@ -2313,19 +2380,9 @@ export async function scaleDownOwned(
           : "unknown";
         let paneOwnership: WorkerPaneOwnership | null = null;
         if (initialPaneLiveness !== "dead") {
-          const ownershipResult = await adoptWorkerPaneOwnership({
-            provider: providerForTeamTarget(config.tmux_session, paneId),
-            providerTarget: config.tmux_session,
-            paneId,
-            leaderPaneId: config.leader_pane_id ?? "",
-            reservedPaneIds: config.workers
-              .filter((candidate) => candidate.name !== worker.name)
-              .map((candidate) => candidate.pane_id)
-              .filter((id): id is string => Boolean(id)),
-            ...(config.tmux_server_identity
-              ? { tmuxServerIdentity: config.tmux_server_identity }
-              : {}),
-          });
+          const ownershipResult = await adoptWorkerPaneOwnership(
+            workerPaneOwnershipInput(config, worker.name, paneId),
+          );
           if (!ownershipResult.ok) {
             const reason = `pane_cleanup_failed:${worker.name}:${ownershipResult.reason}`;
             await markScaleDownFailed(reason);
@@ -2333,6 +2390,19 @@ export async function scaleDownOwned(
           }
           paneOwnership = ownershipResult.ownership;
         }
+        // Opt-in tree kill: read once more before the provider is ended, for what the worker started after the read before the drain request.
+        const earlyPaneTree = earlyPaneTrees.get(worker.name);
+        const earlyTree =
+          earlyPaneTree?.paneId === paneId ? earlyPaneTree.tree : null;
+        const paneTree =
+          process.env.OMC_TEAM_KILL_PANE_TREE === "1" &&
+          paneOwnership?.tmuxServerIdentity &&
+          paneId.startsWith("%")
+            ? await capturePaneProcessTree(
+                paneOwnership.tmuxServerIdentity,
+                paneOwnership.paneId,
+              )
+            : null;
         let attempt: Awaited<ReturnType<typeof loadWorkerLaunchAttempt>> = null;
         try {
           attempt = await loadWorkerLaunchAttempt({
@@ -2361,6 +2431,10 @@ export async function scaleDownOwned(
             "scale_down",
             async () => {
               try {
+                // The trees read before the drain request and before the provider was ended, first: the pane may be gone by now, and the
+                // descendants they name still run.
+                if (earlyTree) await terminatePaneProcessTree(earlyTree);
+                if (paneTree) await terminatePaneProcessTree(paneTree);
                 // Verify pane-workspace membership independently of agent liveness.
                 // Even if the agent dies before cleanup, we must verify the pane
                 // is actually removed from the provider target.
