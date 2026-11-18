@@ -828,7 +828,7 @@ describe('task list: session retention sweep', () => {
     expect(readdirSync(root()).filter((n) => n.endsWith('.sweeping'))).toEqual([]);
   });
 
-  it('removes a tree left under a hidden name by an earlier sweep once it is idle, and keeps it while it is not', () => {
+  it('removes a tree left under a hidden name by an earlier sweep once it is idle, and puts it back under its own name while it is in use', () => {
     fresh();
     const now = Date.now();
     const idle = sessionDir('.old-session.0123456789ab.sweeping', L.LISTS_MAX_AGE_MS + HOUR, now);
@@ -836,7 +836,41 @@ describe('task list: session retention sweep', () => {
     writeFileSync(join(active, 'main.json'), '{"updated":1}');
     L.sweep(envFor(), now);
     expect(existsSync(idle)).toBe(false);
-    expect(existsSync(active)).toBe(true);
+    expect(existsSync(active)).toBe(false);
+    expect(readFileSync(join(root(), 'live-session', 'main.json'), 'utf8')).toBe('{"updated":1}');
+    expect(readdirSync(root()).filter((n) => n.endsWith('.sweeping'))).toEqual([]);
+  });
+
+  it('merges a tree in use under a hidden name into the directory a hook made again: its events and claims arrive, nothing the live tree has is replaced, locks and temporary files are left behind', () => {
+    fresh();
+    const now = Date.now();
+    const put = (path, text) => { mkdirSync(join(path, '..'), { recursive: true }); writeFileSync(path, text); };
+    const moved = join(root(), '.merged-session.0123456789ab.sweeping');
+    const live = join(root(), 'merged-session');
+    put(join(moved, 'main.json'), '{"moved":1}');
+    put(join(moved, 'main.json.lock'), 'a-dead-holder');
+    put(join(moved, 'main.events', 'e-moved.json'), '{"moved":1}');
+    put(join(moved, 'main.events', 'e-same.json'), '{"moved":1}');
+    put(join(moved, 'main.events', 'e-partial.json.tmp'), '{"half');
+    put(join(moved, '_task', '1.json'), '{"agent":"moved"}');
+    put(join(moved, '_task', '9.json'), '{"agent":"moved"}');
+    put(join(moved, 'other.events', 'e-other.json'), '{"moved":1}');
+    put(join(live, 'main.json'), '{"live":1}');
+    put(join(live, 'main.events', 'e-live.json'), '{"live":1}');
+    put(join(live, 'main.events', 'e-same.json'), '{"live":1}');
+    put(join(live, '_task', '9.json'), '{"agent":"live"}');
+    L.sweep(envFor(), now);
+    expect(existsSync(moved)).toBe(false);
+    const read = (...parts) => readFileSync(join(live, ...parts), 'utf8');
+    expect(read('main.json')).toBe('{"live":1}');
+    expect(readdirSync(join(live, 'main.events')).sort()).toEqual(['e-live.json', 'e-moved.json', 'e-same.json']);
+    expect(read('main.events', 'e-moved.json')).toBe('{"moved":1}');
+    expect(read('main.events', 'e-same.json')).toBe('{"live":1}');
+    expect(readdirSync(join(live, '_task')).sort()).toEqual(['1.json', '9.json']);
+    expect(read('_task', '9.json')).toBe('{"agent":"live"}');
+    expect(read('_task', '1.json')).toBe('{"agent":"moved"}');
+    expect(read('other.events', 'e-other.json')).toBe('{"moved":1}');
+    expect(readdirSync(live).sort()).toEqual(['_task', 'main.events', 'main.json', 'other.events']);
   });
 
   it('a list call triggers the sweep', () => {

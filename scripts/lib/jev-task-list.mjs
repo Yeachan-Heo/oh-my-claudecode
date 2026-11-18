@@ -417,9 +417,42 @@ function lastActivityMs(dir) {
 
 // A session directory goes only when nothing in it was touched for LISTS_MAX_AGE_MS. The age read from the path is not enough: a hook may
 // write there between that read and the removal. The directory is moved to a unique hidden name first (a hook that arrives later makes a
-// new directory instead of writing into the one being removed) and the moved tree is judged. A tree with recent activity is moved back;
-// when a new directory has its name by then, the tree stays under the hidden name until a later sweep finds it idle.
+// new directory instead of writing into the one being removed) and the moved tree is judged. A tree with recent activity is put back
+// (putBack); a hook may have made the directory again by then, and the tree is then merged into it.
 const SWEEPING = '.sweeping';
+const HIDDEN_NAME = /^\.(.+)\.[0-9a-f]{12}\.sweeping$/; // the hidden name of a moved tree: .<session id>.<12 hex digits>.sweeping
+
+// Moves what `from` holds into `to` without overwriting anything `to` has: link never replaces a file, so a list file, an event or a task
+// claim that the live tree has stays the live tree's (a list file in the moved tree is older than the fold that wrote the live one), and
+// every other file arrives, the events of the moved tree first of all. A folder both trees have is merged the same way. Lock files and
+// temporary files are not moved: a lock a dead holder left would only stall the next fold, and a temporary file is never read. true when
+// every entry was moved or deliberately left, false when one could not be moved (the moved tree is kept then).
+function mergeTree(from, to) {
+  let complete = true;
+  for (const entry of readdirSync(from, { withFileTypes: true })) {
+    const source = join(from, entry.name);
+    const target = join(to, entry.name);
+    try {
+      if (entry.isDirectory()) {
+        mkdirSync(target, { recursive: true });
+        if (!mergeTree(source, target)) complete = false;
+      } else if (entry.isFile() && !/\.(?:lock|tmp)$/.test(entry.name)) {
+        try { linkSync(source, target); } catch (error) { if (error?.code !== 'EEXIST') throw error; }
+        unlinkSync(source);
+      }
+    } catch { complete = false; }
+  }
+  return complete;
+}
+
+// A moved tree with recent activity goes back to its own name: one rename when the name is free. When a hook has made the directory
+// again, the rename fails and the tree is merged into the new one, so an event published into the old tree stays visible to the readers of
+// the live path. A tree that cannot be merged completely stays under its hidden name; the next sweep tries again (see sweep).
+function putBack(aside, dir) {
+  try { renameSync(aside, dir); return; } catch { /* the name is taken: merge */ }
+  try { if (mergeTree(aside, dir)) rmSync(aside, { recursive: true, force: true }); } catch { /* kept under its hidden name */ }
+}
+
 function removeIfIdle(root, name, now) {
   const dir = join(root, name);
   const aside = join(root, `.${name}.${randomBytes(6).toString('hex')}${SWEEPING}`);
@@ -427,7 +460,7 @@ function removeIfIdle(root, name, now) {
   let idle = false;
   try { idle = now - lastActivityMs(aside) > LISTS_MAX_AGE_MS; } catch { /* not judged idle */ }
   if (idle) { rmSync(aside, { recursive: true, force: true }); return; }
-  try { renameSync(aside, dir); } catch { /* a new directory has the name: the moved tree waits under its hidden name */ }
+  putBack(aside, dir);
 }
 
 export function sweep(env, now) {
@@ -439,8 +472,10 @@ export function sweep(env, now) {
     writeJson(marker, { ts: new Date(now).toISOString() });
     for (const name of readdirSync(root)) {
       try {
-        if (name.startsWith('.') && name.endsWith(SWEEPING)) { // a tree that could not be moved back (never a session id: those do not start with a dot): removed once idle
-          if (now - lastActivityMs(join(root, name)) > LISTS_MAX_AGE_MS) rmSync(join(root, name), { recursive: true, force: true });
+        if (name.startsWith('.') && name.endsWith(SWEEPING)) { // a tree that could not be moved back (never a session id: those do not start with a dot)
+          const aside = join(root, name);
+          if (now - lastActivityMs(aside) > LISTS_MAX_AGE_MS) rmSync(aside, { recursive: true, force: true }); // removed once idle
+          else if (HIDDEN_NAME.test(name)) putBack(aside, join(root, name.replace(HIDDEN_NAME, '$1'))); // in use: back to its own name
         } else if (!name.startsWith('.') && now - statSync(join(root, name)).mtimeMs > LISTS_MAX_AGE_MS) {
           removeIfIdle(root, name, now);
         }

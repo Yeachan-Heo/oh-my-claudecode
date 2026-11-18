@@ -31,6 +31,8 @@ let counter = 0;
 //   before-event-publish  before the temporary file of an event (<key>.events/<name>.json.tmp) is renamed to its name: the event is written
 //                       and its call time is fixed, but it is not visible yet
 //   short-writes        no hold: every writeSync of the process stores at most N bytes (N = PAUSE_MATCH; 0 stores none), as a disk that is filling up can
+//   after-sweep-move    right after the sweep moved a session directory to its hidden name (<root>/.<session>.<hex>.sweeping): the session path is free and the
+//                       moved tree is not judged yet
 //   before-session-write  before the first file of a call is opened inside the session tree: the claim of a task number (<session>/_task/<id>.json) or the
 //                       temporary file of an event; the directory of the writer was made just before, so the sweep can move it away now
 // The process writes PAUSE_MARK and waits until PAUSE_GO exists (with several kinds both names get the suffix ".<kind>").
@@ -92,6 +94,10 @@ if (kinds.includes('short-writes')) {
 if (kinds.includes('before-session-write')) {
   const open = fs.openSync;
   fs.openSync = (p, flags, ...rest) => { if (flags === 'wx' && typeof p === 'string' && /\\/(?:[^/]+\\.events\\/[^/]+\\.json\\.tmp|_task\\/[^/]+\\.json)$/.test(p)) hold('before-session-write'); return open(p, flags, ...rest); };
+}
+if (kinds.includes('after-sweep-move')) {
+  const rename = fs.renameSync;
+  fs.renameSync = (from, to, ...rest) => { const result = rename(from, to, ...rest); if (typeof to === 'string' && /\\.sweeping$/.test(to)) hold('after-sweep-move'); return result; };
 }
 if (kinds.includes('sweep-observed')) {
   const stat = fs.statSync;
@@ -462,6 +468,46 @@ describe('task-list sweep: a hook writes while the sweep judges the session dire
     expect((await s.exited).code).toBe(0);
     expect(existsSync(session)).toBe(false);
     expect(readdirSync(join(logs, 'lists')).filter((n) => n.endsWith('.sweeping'))).toEqual([]);
+  }, TOTAL_MS);
+
+  // The sweep moved an old session away and, judging the moved tree, found an event a hook had published into it (so the tree is in use and goes
+  // back), but another hook made the session directory again in between: the rename back fails. The event published into the moved tree must
+  // stay reachable from the live path (a reader of the live path scans nothing under the hidden name).
+  it.each([
+    ['the other hook folded its call', 'fold', ['fresh', 'second']],
+    ['the other hook only published its event', 'publish', ['base', 'fresh', 'second']],
+  ])('a session the sweep moved away and found in use goes back into the directory another hook made meanwhile, with the event published into it (%s)', async (_what, how, expected) => {
+    counter += 1;
+    const dir = join(TMP, `sweep-${counter}`);
+    mkdirSync(dir, { recursive: true });
+    const logs = join(dir, 'logs');
+    const env = baseEnv(logs);
+    const session = join(logs, 'lists', 'race-session');
+    const files = (name) => join(dir, name);
+    const publish = (subject, id, tick) => {
+      const events = join(session, 'main.events');
+      mkdirSync(events, { recursive: true });
+      const event = { ts: new Date().toISOString(), pid: 1000 + tick, id: `${tick}`.padStart(8, '0'), session_id: 'race-session', tool_name: 'TaskCreate', tool_input: { subject }, task_id: String(id), agent_type: null, tool_use_id: null, prompt_id: null };
+      writeFileSync(join(events, `${String(Date.now()).padStart(13, '0')}-${String(tick).padStart(20, '0')}-${event.pid}-${event.id}.json`), JSON.stringify(event));
+    };
+    L.recordListCall(task('base', 1), env);
+    ageTree(session, 8 * DAY);
+    publish('fresh', 2, 100); // a hook published this just before the sweep: the folder of the events is the only thing of the session that is not old
+    rmSync(join(logs, 'lists', '.sweep'), { force: true });
+    const s = startChild(dir, { kind: 'sweep', done: files('s-done') }, { kind: 'after-sweep-move', mark: files('s-paused'), go: files('s-go') }, env);
+    await waitUntil(files('s-paused')); // the tree is under its hidden name; the session path is free and nothing is judged yet
+    expect(existsSync(session)).toBe(false);
+    if (how === 'fold') expect(L.recordListCall(task('second', 3), env)).not.toBeNull();
+    else publish('second', 3, 200);
+    writeFileSync(files('s-go'), '1');
+    const rs = await s.exited;
+    expect(rs.code, rs.stderr).toBe(0);
+    expect(readdirSync(join(logs, 'lists')).filter((n) => n.endsWith('.sweeping'))).toEqual([]);
+    expect(L.readList('race-session', 'main', env).items.map((x) => x.content).sort()).toEqual(expected);
+    L.syncList('race-session', 'main', env);
+    expect(JSON.parse(readFileSync(join(session, 'main.json'), 'utf8')).items.map((x) => x.content).sort()).toEqual(expected);
+    expect(readdirSync(join(session, 'main.events'))).toEqual([]);
+    expect(readdirSync(join(session, '_task')).sort()).toEqual(how === 'fold' ? ['1.json', '3.json'] : ['1.json']);
   }, TOTAL_MS);
 
   // The writer made its directory (a no-op for an old session) and is held before its first file; the sweep, run to its end meanwhile, reads
