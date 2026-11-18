@@ -9166,26 +9166,30 @@ export async function shutdownTeamV2(
   if (process.env.OMC_TEAM_KILL_PANE_TREE === "1") {
     await Promise.all(
       startConfig.workers.map(async (worker) => {
-        const initialOwnership = configuredPaneOwnership(startConfig, worker);
-        if (
-          !worker.pane_id?.startsWith("%") ||
-          !initialOwnership ||
-          (await getOwnedWorkerLiveness(initialOwnership)) === "dead"
-        )
-          return;
-        const ownership = await adoptWorkerPaneOwnership(
-          workerPaneOwnershipInput(startConfig, worker.name, worker.pane_id),
-        );
-        if (!ownership.ok || !ownership.ownership.tmuxServerIdentity) return;
-        const tree = await capturePaneProcessTree(
-          ownership.ownership.tmuxServerIdentity,
-          ownership.ownership.paneId,
-        );
-        if (tree)
-          earlyPaneTrees.set(worker.name, {
-            paneId: ownership.ownership.paneId,
-            tree,
-          });
+        try {
+          const initialOwnership = configuredPaneOwnership(startConfig, worker);
+          if (
+            !worker.pane_id?.startsWith("%") ||
+            !initialOwnership ||
+            (await getOwnedWorkerLiveness(initialOwnership)) === "dead"
+          )
+            return;
+          const ownership = await adoptWorkerPaneOwnership(
+            workerPaneOwnershipInput(startConfig, worker.name, worker.pane_id),
+          );
+          if (!ownership.ok || !ownership.ownership.tmuxServerIdentity) return;
+          const tree = await capturePaneProcessTree(
+            ownership.ownership.tmuxServerIdentity,
+            ownership.ownership.paneId,
+          );
+          if (tree)
+            earlyPaneTrees.set(worker.name, {
+              paneId: ownership.ownership.paneId,
+              tree,
+            });
+        } catch {
+          /* reading a tree must not hold up the shutdown: the read before the launch fence is still taken */
+        }
       }),
     );
   }

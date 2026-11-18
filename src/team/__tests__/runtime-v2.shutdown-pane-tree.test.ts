@@ -308,6 +308,19 @@ describe.skipIf(currentStrictProcessStartIdentity(process.pid) === null)('shutdo
     });
   }, 60_000);
 
+  it('a failure of the read before the requests does not hold up the shutdown: the read before the launch fence still signals', async () => {
+    process.env.OMC_TEAM_KILL_PANE_TREE = '1';
+    await withAcceptedProvider('pane-tree-early-failure-team', async () => {
+      tmuxSessionMocks.capturePaneProcessTree
+        .mockRejectedValueOnce(new Error('tmux went away'))
+        .mockImplementation(async () => FIXTURE_TREE);
+      const { shutdownTeamV2 } = await import('../runtime-v2.js');
+      await shutdownTeamV2('pane-tree-early-failure-team', cwd, { timeoutMs: 0, force: true });
+      expect(tmuxSessionMocks.capturePaneProcessTree).toHaveBeenCalledTimes(2);
+      expect(tmuxSessionMocks.terminatePaneProcessTree.mock.calls.map((call) => call[0])).toEqual([null, FIXTURE_TREE]);
+    });
+  }, 60_000);
+
   it('without OMC_TEAM_KILL_PANE_TREE nothing is read before the requests: the one read is the one before the fence', async () => {
     await withAcceptedProvider('pane-tree-off-team', async (teamRoot) => {
       const requestFile = join(teamRoot, 'workers', 'worker-1', 'shutdown-request.json');
@@ -325,7 +338,7 @@ describe.skipIf(currentStrictProcessStartIdentity(process.pid) === null)('shutdo
 
   // The pane's root exits while the leader waits: its worker followed the request to exit (or the wait ends by its deadline and the
   // root is gone anyway). A read taken after the wait finds a dead pane and no tree, but the read before the requests has it.
-  it.each([
+  it.each<[string, { timeoutMs: number; force?: boolean }, boolean]>([
     ['ordinary shutdown, the worker acknowledges and exits', { timeoutMs: 8_000 }, true],
     ['forced shutdown, the worker exits and never acknowledges (the wait ends at its deadline)', { timeoutMs: 100, force: true }, false],
     ['ordinary shutdown, the worker exits and the acknowledgement never comes (the wait ends at its deadline)', { timeoutMs: 100 }, false],
