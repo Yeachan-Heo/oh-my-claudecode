@@ -97,6 +97,65 @@ describe('capText', () => {
     }
   });
 
+  it('keeps every line that survives whole: the retained start and end are cut at line boundaries, whatever the line lengths and the limit', () => {
+    const marker = /\n\[… (\d+) characters omitted …\]\n/;
+    for (const limit of [64, 100, 333, 1000, 20000]) {
+      for (const width of [1, 7, 40, 150, 700]) {
+        for (const extra of [0, 1, 2, 3, 29, 500]) {
+          const count = Math.ceil((limit + extra) / (width + 5)) + 3;
+          const lines = Array.from({ length: count }, (_, index) => `${index}:${'i'.repeat(width + (index % 3))}`);
+          const text = lines.join('\n');
+          const capped = capText(text, limit);
+          const label = `limit ${limit}, width ${width}, extra ${extra}`;
+          expect(capped.length, label).toBeLessThanOrEqual(limit);
+          const parts = capped.split(marker);
+          expect(parts.length, label).toBe(3);
+          const [head, omitted, tail] = [parts[0], Number(parts[1]), parts[2]];
+          expect(head.length + omitted + tail.length, label).toBe(text.length);
+          // Every retained line is a complete original line, where a part is long enough to hold the longest line: a shorter
+          // part falls back to the character cut. The retained parts are the start and the end of the text.
+          const known = new Set(lines);
+          const longest = Math.max(...lines.map((line) => line.length));
+          const headRoom = Math.floor((limit - 40) * 0.4);
+          const tailRoom = limit - 40 - headRoom;
+          if (longest + 1 <= headRoom) {
+            for (const line of head.split('\n')) expect(known.has(line), `${label}: ${line}`).toBe(true);
+            expect(text.startsWith(`${head}\n`), label).toBe(true);
+          }
+          if (longest + 1 <= tailRoom) {
+            for (const line of tail.split('\n')) expect(known.has(line), `${label}: ${line}`).toBe(true);
+            expect(text.endsWith(`\n${tail}`), label).toBe(true);
+          }
+          expect(text.endsWith(tail), label).toBe(true);
+          expect(text.startsWith(head), label).toBe(true);
+          expect(tail.length, label).toBeGreaterThan(0);
+        }
+      }
+    }
+  });
+
+  it('keeps the character cut for a part that the line boundary would leave empty', () => {
+    // One very long line with a trailing line end: the end part would be empty, so the last characters stay (an end tag, say).
+    const longLine = `START${'m'.repeat(1000)}END`;
+    const capped = capText(`${longLine}\n`, 200);
+    expect(capped.length).toBeLessThanOrEqual(200);
+    expect(capped.startsWith('START')).toBe(true);
+    expect(capped.endsWith('END\n')).toBe(true);
+    // A first line longer than the start part: the start part is cut at the character limit, the end part still at a line.
+    const text = `${'h'.repeat(500)}\n${Array.from({ length: 60 }, (_, index) => `ROW-${index}`).join('\n')}`;
+    const cappedFirst = capText(text, 200);
+    expect(cappedFirst.startsWith('h'.repeat(10))).toBe(true);
+    expect(cappedFirst.endsWith('\nROW-59')).toBe(true);
+    expect(cappedFirst.split(/\n\[… \d+ characters omitted …\]\n/)[1].split('\n').every((line) => /^ROW-\d+$/.test(line))).toBe(true);
+  });
+
+  it('is linear: a megabyte of lines is capped in well under a second', () => {
+    const text = Array.from({ length: 40000 }, (_, index) => `- run-${index}-${'x'.repeat(20)}`).join('\n');
+    const started = Date.now();
+    for (let round = 0; round < 20; round += 1) capText(text, 20000);
+    expect(Date.now() - started).toBeLessThan(5000);
+  });
+
   it('ignores a limit under 64 and a limit that is not a number', () => {
     for (const limit of [undefined, null, 0, 63, -5, 'x', NaN]) expect(capText('y'.repeat(500), limit)).toBe('y'.repeat(500));
   });
@@ -504,6 +563,35 @@ describe('post-tool-verifier, runs-reconciler and stale-run-reporter emit throug
     const whole = run('0');
     expect(whole.length).toBeGreaterThan(HOOK_OUTPUT_MAX_CHARS);
     expect(whole).not.toContain('characters omitted');
+  }, 120000);
+
+  // The retained start and end of a bounded message keep every run and session id exact and each row complete.
+  it('runs-reconciler.mjs keeps whole rows, with the run, the session and the time together, when it bounds the message', () => {
+    const f = makeProject('reconciler-rows');
+    mkdirSync(join(f.project, '.omc', 'state', 'runs'), { recursive: true });
+    const ts = new Date(Date.now() - 1000).toISOString();
+    const entries = Array.from({ length: 200 }, (_, index) => ({ run: `run-${index}-${'r'.repeat(120)}`, sessionId: `session-${index}-${'s'.repeat(60)}` }));
+    const lines = entries.map((entry) => JSON.stringify({ ...entry, event: 'end', closeoutWritten: false, ts }));
+    writeFileSync(join(f.project, '.omc', 'state', 'runs', 'ledger.jsonl'), `${lines.join('\n')}\n`);
+    const result = spawnSync(process.execPath, [join(REPO_ROOT, 'scripts', 'runs-reconciler.mjs')], {
+      cwd: f.project,
+      input: JSON.stringify({ hook_event_name: 'SessionStart', session_id: 'reconcile-rows', cwd: f.project }),
+      encoding: 'utf8',
+      timeout: 60000,
+      env: { ...cleanEnv(), HOME: f.home, USERPROFILE: f.home, CLAUDE_CONFIG_DIR: f.config, OMC_STATE_DIR: '', OMC_CONTEXT_TEXT_SANITIZE: '1' },
+    });
+    expect(result.status, result.stderr).toBe(0);
+    const text = JSON.parse(result.stdout.trim()).hookSpecificOutput.additionalContext;
+    expect(text).toMatch(/\[… \d+ characters omitted …\]/);
+    const rows = text.split('\n').filter((line) => line.startsWith('- '));
+    expect(rows.length).toBeGreaterThan(10);
+    const row = /^- (run-\d+-r{120}) \(session (session-\d+-s{60})\): ended \S+ without a notepad closeout$/;
+    for (const line of rows) {
+      const match = row.exec(line);
+      expect(match, line).not.toBeNull();
+      expect(match[1].split('-')[1], line).toBe(match[2].split('-')[1]);
+    }
+    expect(rows.length).toBeLessThan(200);
   }, 120000);
 });
 

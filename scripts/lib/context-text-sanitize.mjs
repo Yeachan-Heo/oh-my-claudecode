@@ -191,7 +191,9 @@ export function cutText(value, max) {
 
 // Text of at most `max` characters (a limit under 64 is ignored): when it is longer, the middle is replaced by a line that
 // counts the omitted characters, and the start (40 %) and the end (the rest) stay, so a closing instruction or tag at the end
-// survives. Neither cut splits a surrogate pair.
+// survives. Each retained part ends or starts at a line boundary, so a line that holds an identifier (a path, a glob, a name,
+// an id) stays whole or goes whole; a part that the line boundary would leave empty (one very long line) is cut at the
+// character limit instead, and no cut splits a surrogate pair.
 export function capText(value, max) {
   try {
     const text = toText(value);
@@ -203,6 +205,11 @@ export function capText(value, max) {
     while (headEnd > 0 && isHighSurrogate(text.charCodeAt(headEnd - 1))) headEnd -= 1;
     let tailStart = text.length - (room - headLength);
     while (tailStart < text.length && isLowSurrogate(text.charCodeAt(tailStart))) tailStart += 1;
+    // The head ends at the last line end at or before its limit; the tail starts after the first line end at or after its limit.
+    const headLineEnd = text.lastIndexOf('\n', headEnd);
+    if (headLineEnd > 0) headEnd = headLineEnd;
+    const tailLineEnd = text.indexOf('\n', tailStart - 1);
+    if (tailLineEnd !== -1 && tailLineEnd + 1 < text.length) tailStart = tailLineEnd + 1;
     return `${text.slice(0, headEnd)}\n[… ${tailStart - headEnd} characters omitted …]\n${text.slice(tailStart)}`;
   } catch {
     return '';
