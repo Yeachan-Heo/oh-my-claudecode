@@ -94,4 +94,20 @@ describe('task_list replies', () => {
       expect(r.isError, JSON.stringify(args)).toBe(true);
     }
   });
+
+  it('rejects a note that is present but not a string, as the schema declares it, before it acknowledges the call', async () => {
+    // the standalone server hands the raw arguments to the handler, so the handler holds every item to the schema
+    for (const note of [5, true, null, {}, { text: 'x' }, [], ['a']]) {
+      const r = await call({ items: [{ content: 'A', status: 'in_progress', note }] });
+      expect(r.isError, JSON.stringify(note)).toBe(true);
+      expect(r.content[0].text).toContain('note');
+    }
+    // one bad item among good ones, and the same list sent as JSON text
+    expect((await call({ items: [{ content: 'A', status: 'pending' }, { content: 'B', status: 'pending', note: 5 }] })).isError).toBe(true);
+    expect((await call({ items: JSON.stringify([{ content: 'A', status: 'pending', note: {} }]) })).isError).toBe(true);
+    for (const note of [undefined, '', ' ', 'why']) {
+      const r = await call({ items: [{ content: 'A', status: 'in_progress', note }] });
+      expect(r.isError, JSON.stringify(note)).toBeUndefined();
+    }
+  });
 });

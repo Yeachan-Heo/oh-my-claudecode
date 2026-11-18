@@ -13,6 +13,7 @@ import { fileURLToPath, pathToFileURL, URL } from 'node:url';
 import process from 'node:process';
 import { clearTimeout, setTimeout } from 'node:timers';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { taskListTool } from '../tools/task-list-tools.ts';
 
 const ROOT = fileURLToPath(new URL('../..', import.meta.url));
 const SCRIPTS = join(ROOT, 'scripts');
@@ -840,5 +841,43 @@ describe('task list: session retention sweep', () => {
     const expired = sessionDir('old-session', L.LISTS_MAX_AGE_MS + HOUR, now);
     L.recordListCall(postToolUse(session(), 'TodoWrite', { todos: [{ content: 'A', status: 'pending' }] }), envFor(), now);
     expect(existsSync(expired)).toBe(false);
+  });
+});
+
+describe('task list: the hook accepts what the task_list tool accepts', () => {
+  // The handler of the tool checks the call as the schema declares it; the hook must refuse the same items, or a call the tool accepted
+  // is saved as something else (a note of another type dropped, a number turned into text).
+  const values = [undefined, null, 5, true, false, {}, { text: 'x' }, [], ['a'], '', ' ', 'text'];
+  const label = (v) => (v === undefined ? 'absent' : JSON.stringify(v));
+
+  it.each(['content', 'note'])('for every value of %s the hook and the tool give the same verdict on an item', async (field) => {
+    let accepted = 0;
+    for (const value of values) {
+      const item = { content: 'Task', status: 'in_progress', note: 'why' };
+      if (value === undefined) delete item[field];
+      else item[field] = value;
+      const tool = await taskListTool.handler({ items: [item] });
+      const hook = L.updateShape({ items: [item] }, 'note');
+      expect(hook.ok, `${field} ${label(value)}`).toBe(tool.isError !== true);
+      if (hook.ok) accepted += 1;
+    }
+    // content: only a non-blank string ('text'); note: absent, '', ' ' and 'text'
+    expect(accepted).toBe(field === 'content' ? 1 : 4);
+  });
+
+  it('content given as subject, status of another type, and items that are not objects are refused by both', async () => {
+    for (const item of [{ subject: 'Task', status: 'pending' }, { content: 'Task', status: 1 }, { content: 'Task' }, null, 'Task', 7]) {
+      const tool = await taskListTool.handler({ items: [item] });
+      expect(tool.isError, JSON.stringify(item)).toBe(true);
+      expect(L.updateShape({ items: [item] }, 'note').ok, JSON.stringify(item)).toBe(false);
+    }
+  });
+
+  it('a call with a note of another type changes nothing in the hook, and update_plan keeps its own rules', () => {
+    const sid = session();
+    expect(L.recordListCall(postToolUse(sid, LIST_TOOL, { items: [{ content: 'A', status: 'in_progress', note: { why: 'x' } }] }), envFor())).toBeNull();
+    expect(readListFile(sid, 'main')).toBeNull();
+    const saved = L.recordListCall(postToolUse(sid, 'mcp__ccd_turn__update_plan', { items: [{ content: 'A', status: 'pending', note: 5 }] }), envFor());
+    expect(saved.items.map((x) => x.content)).toEqual(['A']);
   });
 });

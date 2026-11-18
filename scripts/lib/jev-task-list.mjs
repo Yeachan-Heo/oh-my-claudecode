@@ -260,10 +260,13 @@ function itemOf(raw, noteField) {
   return item;
 }
 
-// Is an update call well formed: items (a non-empty array of tasks) or at least one of advance, done, start. Used by the MCP tool too.
-export function updateShape(input) {
+// Is an update call well formed: items (a non-empty array of tasks) or at least one of advance, done, start. With a noteField (the
+// task_list tool) an item is held to the schema of the tool, as its handler checks it: content a string, note absent or a string; so the
+// hook never saves a call as something other than it was sent (a note of another type dropped, a number turned into text).
+export function updateShape(input, noteField = null) {
   const items = input?.items === undefined ? undefined : arrayOf(input.items);
-  if (input?.items !== undefined && (!items || items.length === 0 || items.length > ITEMS_MAX || items.some((x) => !itemOf(x, null) || !STATUSES.has(x.status)))) return { ok: false, why: 'items' };
+  const typed = (x) => !noteField || (typeof x.content === 'string' && (x[noteField] === undefined || typeof x[noteField] === 'string'));
+  if (input?.items !== undefined && (!items || items.length === 0 || items.length > ITEMS_MAX || items.some((x) => !itemOf(x, null) || !STATUSES.has(x.status) || !typed(x)))) return { ok: false, why: 'items' };
   const done = input?.done === undefined ? undefined : arrayOf(input.done);
   if (input?.done !== undefined && (!done || done.some((n) => intOf(n) === null))) return { ok: false, why: 'done' };
   if (input?.start !== undefined && intOf(input.start) === null) return { ok: false, why: 'start' };
@@ -278,7 +281,7 @@ export function updateShape(input) {
 // A note of a task sent again without a note is kept only when the content is the same and the task was and still is in progress.
 // advance, done or start without an existing list change nothing (null), so an unreadable file never ends as an empty list.
 export function applyUpdate(items, input, noteField) {
-  const shape = updateShape(input);
+  const shape = updateShape(input, noteField);
   if (!shape.ok) return null;
   if (!shape.items && items.length === 0) return null;
   let list = items.map((x) => ({ ...x }));

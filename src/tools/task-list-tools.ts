@@ -39,7 +39,17 @@ const taskListSchema = {
   start: z.number().int().optional().describe('1-based number of the task to mark in_progress'),
 };
 
-type TaskListItem = { content?: unknown; status?: unknown };
+type TaskListItem = { content?: unknown; status?: unknown; note?: unknown };
+
+// An item as the schema declares it, checked here because the standalone server hands over the raw arguments: content a non-empty
+// string, status one of the three, note absent or a string. The PostToolUse hook (updateShape in scripts/lib/jev-task-list.mjs)
+// applies the same rule, so a call that is accepted here is saved as sent.
+const taskListItemOk = (x: TaskListItem | null | undefined): boolean =>
+  !!x &&
+  typeof x.content === 'string' &&
+  x.content.trim() !== '' &&
+  TASK_LIST_STATUSES.includes(x.status as typeof TASK_LIST_STATUSES[number]) &&
+  (x.note === undefined || typeof x.note === 'string');
 
 export const taskListTool = {
   name: 'task_list',
@@ -49,8 +59,8 @@ export const taskListTool = {
     const input = (args ?? {}) as Record<string, unknown>;
     const fail = (text: string) => ({ content: [{ type: 'text' as const, text }], isError: true });
     const items = input.items === undefined ? undefined : taskListArray(input.items);
-    if (input.items !== undefined && (!items || items.length === 0 || items.length > 50 || (items as TaskListItem[]).some((x) => !x || typeof x.content !== 'string' || !x.content.trim() || !TASK_LIST_STATUSES.includes(x.status as typeof TASK_LIST_STATUSES[number])))) {
-      return fail('items: 1-50 tasks, each with a non-empty content and status pending, in_progress or completed.');
+    if (input.items !== undefined && (!items || items.length === 0 || items.length > 50 || !(items as TaskListItem[]).every(taskListItemOk))) {
+      return fail('items: 1-50 tasks, each with a non-empty content, a status pending, in_progress or completed, and a note that, when present, is a string.');
     }
     const done = input.done === undefined ? undefined : taskListArray(input.done);
     if (input.done !== undefined && (!done || !done.every(taskListPositive))) return fail('done: a list of 1-based task numbers.');
