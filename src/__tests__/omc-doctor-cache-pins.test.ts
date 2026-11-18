@@ -1,8 +1,8 @@
 import { describe, test, expect } from 'vitest';
-import { existsSync, mkdirSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, rmSync, utimesSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import { read, commands, runCommand, digitVersions, backupDir, movedAside, PLUGIN_ID, makeCache, writeRegistryFile, writeRegistry } from './helpers/omc-doctor-cache-fixture.js';
+import { read, commands, ageVersions, runCommand, digitVersions, backupDir, movedAside, PLUGIN_ID, makeCache, writeRegistryFile, writeRegistry } from './helpers/omc-doctor-cache-fixture.js';
 
 describe('omc-doctor cache commands on a synthetic config directory (pins, registry shapes, failed moves)', { timeout: 120_000 }, () => {
   function makeConfigDir(versions: string[], pinned: string | null, installed = true, pluginId = 'oh-my-claudecode@omc') {
@@ -12,6 +12,7 @@ describe('omc-doctor cache commands on a synthetic config directory (pins, regis
       mkdirSync(path.join(cache, v), { recursive: true });
       writeFileSync(path.join(cache, v, 'package.json'), JSON.stringify({ version: v }));
     }
+    if (versions.length) ageVersions(cache);
     if (installed) {
       const entries = [{ scope: 'user', version: pinned ?? '0.0.0' }];
       writeFileSync(
@@ -25,7 +26,56 @@ describe('omc-doctor cache commands on a synthetic config directory (pins, regis
 
   test('both cache commands are present', () => {
     expect(commands).toHaveLength(2);
-    expect(commands.some((c) => c.includes('Restart Claude Code to fetch latest version'))).toBe(true);
+    expect(commands.some((c) => c.includes('does not update the plugin'))).toBe(true);
+  });
+
+  // An update installs a new version directory before it records it in installed_plugins.json, and the
+  // commands cannot see it as protected in between. SessionStart's own cleanup skips a directory modified
+  // within STALE_THRESHOLD_MS for the same reason, so both commands use that threshold.
+  test('a version directory modified within the threshold is left alone, an older one is moved aside', () => {
+    for (const command of commands) {
+      for (const [minutesAgo, moved] of [[1, false], [9, false], [11, true], [60, true]] as const) {
+        const { dir, cache } = makeConfigDir(['5.8.0', '5.8.1', '5.9.0'], '5.8.1');
+        try {
+          const then = new Date(Date.now() - minutesAgo * 60_000);
+          utimesSync(path.join(cache, '5.9.0'), then, then);
+          const result = runCommand(command, dir);
+          expect({ minutesAgo, status: result.status, versions: digitVersions(cache), moved: movedAside(dir) })
+            .toEqual({ minutesAgo, status: 0, versions: moved ? '5.8.1' : '5.8.1,5.9.0', moved: moved ? 2 : 1 });
+          expect(result.stdout.includes('modified in the last 10 minutes')).toBe(!moved);
+        } finally {
+          rmSync(dir, { recursive: true, force: true });
+        }
+      }
+    }
+  });
+
+  test('the freshness threshold of both commands is the one the SessionStart cleanup uses', () => {
+    const [, a, b, c] = /const STALE_THRESHOLD_MS = (\d+) \* (\d+) \* (\d+);/.exec(read('src/utils/paths.ts')) ?? [];
+    const ms = Number(a) * Number(b) * Number(c);
+    expect(ms).toBeGreaterThan(0);
+    for (const command of commands) expect(command).toContain(`Date.now()-w<${ms}`);
+    expect(ms / 60_000).toBe(10);
+    expect(read('skills/omc-doctor/SKILL.md')).toContain('modified in the last 10 minutes');
+  });
+
+  test('the outdated-plugin command always says it only cleans up and does not update, the stale-cache command does not', () => {
+    const [outdated, stale] = [commands.find((c) => c.includes('does not update the plugin')), commands.find((c) => !c.includes('does not update the plugin'))];
+    expect(outdated).toBeDefined();
+    expect(stale).toBeDefined();
+    for (const [versions, pinned, installed] of [[['5.9.0'], '5.9.0', true], [['5.8.0', '5.9.0'], '5.9.0', true], [['5.8.0', '5.9.0'], null, false], [[], null, false]] as const) {
+      const { dir } = makeConfigDir([...versions], pinned, installed);
+      try {
+        const result = runCommand(outdated!, dir);
+        expect(result.stdout).toContain('only cleans up cached versions and does not update the plugin');
+        expect(result.stdout).toContain('/plugin marketplace update omc');
+        expect(result.stdout).toContain('omc update');
+        expect(result.stdout).not.toContain('to fetch latest version');
+        expect(runCommand(stale!, dir).stdout).not.toContain('does not update the plugin');
+      } finally {
+        rmSync(dir, { recursive: true, force: true });
+      }
+    }
   });
 
   test('pinned version is kept and unpinned versions are moved aside, not deleted', () => {

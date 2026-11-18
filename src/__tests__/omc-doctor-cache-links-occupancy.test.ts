@@ -4,7 +4,7 @@ import { createHash } from 'node:crypto';
 import { existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import { commands, scriptOf, runCommand, digitVersions, backupDir, movedAside, PLUGIN_ID, makeCache, writeRegistry } from './helpers/omc-doctor-cache-fixture.js';
+import { commands, ageVersions, scriptOf, runCommand, digitVersions, backupDir, movedAside, PLUGIN_ID, makeCache, writeRegistry } from './helpers/omc-doctor-cache-fixture.js';
 // @ts-expect-error Standalone hook runtime source is intentionally JavaScript-only.
 import { publishCacheOccupancy } from '../../scripts/lib/cache-occupancy.mjs';
 
@@ -185,6 +185,7 @@ describe('omc-doctor cache commands on a synthetic config directory (occupancy, 
       const { dir, cache } = makeCache(['5.8.0', '5.8.1']);
       try {
         symlinkSync('5.7.0', path.join(cache, '5.7.0'));
+        ageVersions(cache);
         writeRegistry(dir, { [PLUGIN_ID]: [{ scope: 'user', version: '5.8.1' }] });
         const result = runCommand(command, dir);
         expect(result.status).toBe(0);
@@ -369,6 +370,7 @@ process.kill = function (pid, signal) {
   function makeChainCache(links: number, form: 'relative' | 'junction') {
     const made = makeCache(['5.0.0', '5.1.0', '5.9.0']);
     mkdirSync(path.join(made.cache, '5.9.0', 'scripts'));
+    ageVersions(made.cache);
     for (let i = 1; i <= links; i++) link(`5.${10 - i}.0`, path.join(made.cache, `5.${9 - i}.0`), form);
     const chainNames = Array.from({ length: links + 1 }, (_unused, i) => `5.${9 - links + i}.0`);
     return { ...made, top: chainNames[0], chainNames };
@@ -418,6 +420,7 @@ process.kill = function (pid, signal) {
         const { dir, cache } = makeCache(['5.1.0', '5.9.0']);
         try {
           mkdirSync(path.join(cache, '5.9.0', 'scripts'));
+          ageVersions(cache);
           link('5.9.0', path.join(cache, '5.8.0'));
           const env = referTo(kind, dir, cache, '5.9.0');
           const result = runCommand(command, dir, { env });
@@ -455,6 +458,7 @@ process.kill = function (pid, signal) {
         const { dir, cache } = makeCache(['5.1.0', '5.6.0', '5.9.0']);
         try {
           mkdirSync(path.join(cache, '5.6.0', 'scripts'));
+          ageVersions(cache);
           link(path.join('..', '5.6.0'), path.join(cache, '5.9.0', 'shared'));
           writeRegistry(dir, { [PLUGIN_ID]: [{ scope: 'user', version: '5.1.0' }, { scope: 'user', installPath: path.join(cache, '5.9.0', subpath) }] });
           const result = runCommand(command, dir);
@@ -533,6 +537,7 @@ fs.readlinkSync = function () { const e = new Error('injected readlink failure')
         try {
           symlinkSync('5.7.0', path.join(cache, '5.8.0'));
           symlinkSync('5.8.0', path.join(cache, '5.7.0'));
+          ageVersions(cache);
           writeRegistry(dir, { [PLUGIN_ID]: [{ scope: 'user', version: '5.1.0' }, ...(referenced ? [{ scope: 'user', version: '5.7.0' }] : [])] });
           const result = runCommand(command, dir);
           expect({ referenced, status: result.status, versions: digitVersions(cache), moved: movedAside(dir) })

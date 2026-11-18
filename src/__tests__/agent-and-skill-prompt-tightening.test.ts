@@ -161,6 +161,27 @@ describe('omc-doctor skill', () => {
     expect(moves.filter((l) => !/\bif\b/.test(l))).toEqual([]);
   });
 
+  test('an outdated plugin is routed to the updater, and the cache commands are described as cleanup only', () => {
+    expect(text).toContain('If INSTALLED != LATEST: WARN - outdated plugin (it is updated through the updater named in "Fix: Outdated Plugin"; the cache commands only clean up and never update it)');
+    const outdated = section(text, 'Fix: Outdated Plugin');
+    expect(outdated).toContain('moving cache directories does not update the plugin');
+    expect(outdated).toContain('`/plugin marketplace update omc` and then `/omc-setup`');
+    expect(outdated).toContain('`claude plugin marketplace update omc && claude plugin update oh-my-claudecode@omc`');
+    expect(outdated).toContain('`omc update` for an npm install');
+    expect(outdated).toContain('Do not report the plugin as fixed until a later run of Step 1 shows INSTALLED equal to LATEST');
+    expect(outdated.indexOf('**Update first**')).toBeLessThan(outdated.indexOf('**Cache guard**'));
+    expect(text).not.toContain('Restart Claude Code to fetch latest version');
+  });
+
+  test('both cache fix sections describe the freshness rule with the threshold of the SessionStart cleanup', () => {
+    for (const heading of ['Fix: Outdated Plugin', 'Fix: Stale Cache']) {
+      const fix = section(text, heading);
+      expect(fix).toContain('modified in the last 10 minutes');
+      expect(fix).toContain('`STALE_THRESHOLD_MS` in `src/utils/paths.ts`');
+      expect(fix).toContain('it is left in place and reported');
+    }
+  });
+
   test('cache fix sections state the no-prune rule and keep pinned versions', () => {
     const outdated = section(text, 'Fix: Outdated Plugin');
     const stale = section(text, 'Fix: Stale Cache');

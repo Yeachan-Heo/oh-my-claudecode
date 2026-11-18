@@ -1,5 +1,5 @@
 import { spawnSync } from 'node:child_process';
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, lutimesSync, readdirSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -43,6 +43,14 @@ export const movedAside = (dir: string) => (existsSync(backupDir(dir)) ? readdir
 // command move nothing instead of acting on a partial set.
 export const PLUGIN_ID = 'oh-my-claudecode@omc';
 
+// The commands leave a version directory modified in the last 10 minutes alone, so a fixture version
+// is dated an hour back unless a test wants it fresh. Creating an entry inside a version changes the
+// date again; call this after such a change.
+export function ageVersions(cache: string, ageMs = 3_600_000) {
+  const then = new Date(Date.now() - ageMs);
+  for (const name of readdirSync(cache)) lutimesSync(path.join(cache, name), then, then);
+}
+
 export function makeCache(versions: string[]) {
   const dir = mkdtempSync(path.join(tmpdir(), 'omc-doctor-skill-'));
   const cache = path.join(dir, 'plugins', 'cache', 'omc', 'oh-my-claudecode');
@@ -50,6 +58,7 @@ export function makeCache(versions: string[]) {
     mkdirSync(path.join(cache, v), { recursive: true });
     writeFileSync(path.join(cache, v, 'package.json'), JSON.stringify({ version: v }));
   }
+  ageVersions(cache);
   return { dir, cache };
 }
 
