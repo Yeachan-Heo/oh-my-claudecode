@@ -635,7 +635,10 @@ const laterWithin = (name, other) => {
 
 // What a call that changes part of the list acts on: one task (the id of a TaskUpdate, a deletion too), the whole list (EDIT_ALL: start and
 // advance move tasks by position and state), tasks that it only marks completed (EDIT_COMPLETING: done, wrap_up), or nothing yet (null: a
-// TaskCreate adds a task). Two completing calls give the same list in either order; every other two calls on one task or on the list do not.
+// TaskCreate adds a task). A completing call acts on the tasks it names: the ones at the numbers of `done` or, for wrap_up, every task of
+// the list it meets (completedIds). `touched` keeps, for such a call, the marker EDIT_COMPLETING and one key `+<id>` for each task it completed
+// (an id never starts with "+"); a TaskUpdate keeps its task id and start or advance EDIT_ALL. Two completing calls give the same list in
+// either order, a completing call and a call on another task do too; every other two calls on one task or on the list do not.
 const EDIT_ALL = '*';
 const EDIT_COMPLETING = '+';
 function editScope(event) {
@@ -644,16 +647,39 @@ function editScope(event) {
   if (event.tool_name === 'mcp__ccd_turn__wrap_up') return EDIT_COMPLETING;
   return event.tool_input?.start !== undefined || event.tool_input?.advance === true ? EDIT_ALL : EDIT_COMPLETING;
 }
-const clash = (a, b) => (a === EDIT_COMPLETING && b === EDIT_COMPLETING ? false : a === b || a === EDIT_ALL || b === EDIT_ALL || a === EDIT_COMPLETING || b === EDIT_COMPLETING);
+// The ids of the tasks of `items` that a completing call marks completed. A task without an id is not named: only the numbers of a
+// position call reach it.
+function completedIds(event, items) {
+  const list = Array.isArray(items) ? items : [];
+  const picked = event.tool_name === 'mcp__ccd_turn__wrap_up' ? list : (arrayOf(event.tool_input?.done) ?? []).map((n) => list[(intOf(n) ?? 0) - 1]);
+  return picked.filter((x) => typeof x?.id === 'string').map((x) => x.id);
+}
+// What the fold records in `touched` for an applied call that edits tasks, read from the list as it was before the call.
+const touchedKeys = (event, items) => {
+  const scope = editScope(event);
+  return scope === EDIT_COMPLETING ? [scope, ...completedIds(event, items).map((id) => `${EDIT_COMPLETING}${id}`)] : [scope];
+};
+// Does the entry `key` of `touched` (a later call folded) undo, or move the numbers of, the held-up call with this scope? `completes` are the
+// ids a held-up completing call names and `ids` those of the list now: a task that a later call edited and the list no longer holds was
+// deleted, and the numbers of `done` then point at other tasks.
+const clash = (scope, completes, ids, key) => {
+  if (scope === EDIT_ALL || key === EDIT_ALL) return true;
+  const completion = key.startsWith(EDIT_COMPLETING);
+  if (scope === EDIT_COMPLETING) return !completion && (completes.has(key) || !ids.has(key));
+  return key === scope || key === `${EDIT_COMPLETING}${scope}`;
+};
 // A held-up call that edits tasks is overtaken when a later call on the same task, or on the list as a whole, was folded: applying it would
 // put an older state over a later one. A deletion is never overtaken (it gives the same list after a later call on its task, which then finds
-// nothing), and a call that only adds a task is not either.
-const overtaken = (touched, name, event) => {
+// nothing), and a call that only adds a task is not either. `items` is the list the fold holds when the held-up call comes.
+const overtaken = (touched, name, event, items) => {
   const scope = editScope(event);
   if (scope === null || (event.tool_name === 'TaskUpdate' && event.tool_input?.status === 'deleted')) return false;
-  return Object.entries(touched).some(([other, at]) => clash(scope, other) && laterWithin(name, at));
+  const completes = new Set(scope === EDIT_COMPLETING ? completedIds(event, items) : []);
+  const ids = new Set((Array.isArray(items) ? items : []).map((x) => x?.id));
+  return Object.entries(touched).some(([key, at]) => laterWithin(name, at) && clash(scope, completes, ids, key));
 };
-// `touched` of the list file as the fold reads it: scope -> name of the newest call folded that edited it. The file is not trusted.
+// `touched` of the list file as the fold reads it: key (see editScope and touchedKeys) -> name of the newest call folded that edited it. The file
+// is not trusted.
 const touchedOf = (record) => {
   const stored = record?.touched;
   const touched = Object.create(null);
@@ -678,8 +704,9 @@ const sameItems = (next, record) => next.items.length === (record?.items?.length
 // `touched`, the newest call that edited each task or the whole list. A late event is not applied (it is acknowledged and removed, so it
 // never comes back) when it replaces the list and any later call has been folded; when it changes part of the list and a later call
 // replaced the list (it changed a list that no longer exists); or when it edits tasks (TaskUpdate, done, start, advance, wrap_up) and a later
-// call that edited the same task, or the whole list, was folded (see editScope). A deletion, a TaskCreate, and calls on other tasks are
-// applied after later calls of their kind: they do not undo each other, and the tasks of calls sent together all stay (a TaskCreate that is
+// call that edited the same task, or the whole list, was folded (see editScope: a completing call edits the tasks it names, not every task).
+// A deletion, a TaskCreate, and calls on other tasks are applied after later calls of their kind: they do not undo each other, and the tasks
+// of calls sent together all stay (a TaskCreate that is
 // dropped for the later replacement leaves its claim in _task, which is harmless: TaskUpdate of an id the list does not hold changes
 // nothing). A TaskCreate held up behind a wrap_up is applied and stays pending: the wrap_up folded before it did not see the task.
 function fold(path, key, env) {
@@ -706,23 +733,22 @@ function fold(path, key, env) {
     names.push(name);
     // within one millisecond the order of two calls is the order of their names (the tick, then the process), as when both are pending in one fold
     if (older > 0 ? older <= LATE_EVENT_MS : older === 0 && name < (replaces ? lastEventName : lastReplaceName)) { late += 1; continue; }
-    if (!replaces && overtaken(touched, name, event)) { late += 1; continue; }
+    if (!replaces && overtaken(touched, name, event, broken ? null : record?.items)) { late += 1; continue; }
     const next = applyEvent(broken ? null : record, event, key, env, broken);
     if (!replaces && editScope(event) !== null && ms + LATE_EVENT_MS >= horizon && !(next && next !== record && !sameItems(next, record))) {
       names.pop(); // changes nothing now, but an older call that is not visible yet may give it something to change
       continue;
     }
     if (next !== record && next) {
+      const keys = replaces || editScope(event) === null ? [] : touchedKeys(event, broken ? null : record?.items); // the list before this call
       record = next;
       broken = false;
       changed = true;
       if (replaces) {
         lastReplace = Math.max(lastReplace, ms);
         if (ms === lastReplace && name > lastReplaceName) lastReplaceName = name;
-      } else {
-        const scope = editScope(event);
-        if (scope !== null && !(touched[scope] >= name)) touched[scope] = name;
       }
+      for (const key of keys) if (!(touched[key] >= name)) touched[key] = name;
     }
     lastEvent = Math.max(lastEvent, ms);
     if (ms === lastEvent && name > lastEventName) lastEventName = name;

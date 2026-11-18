@@ -1032,6 +1032,45 @@ describe('task list: an event that becomes visible after a later call was folded
     expect(dropped()).toBe(rows + 1);
   });
 
+  it('an older done of one task is applied after a newer TaskUpdate of another task, and the other way round (calls through the entry point)', () => {
+    const sid = session();
+    create(sid, 91, 'Task one', T);
+    create(sid, 92, 'Task two', T + 1);
+    const rows = dropped();
+    call(sid, 'TaskUpdate', { taskId: '92', status: 'completed' }, {}, T + 2000);
+    call(sid, LIST_TOOL, { done: [1] }, {}, T + 1000); // older than the update of the other task, and visible after it
+    expect(L.readList(sid, 'main', env()).items.map((x) => `${x.id}:${x.status}`)).toEqual(['91:completed', '92:completed']);
+    expect(readListFile(sid, 'main').items.map((x) => `${x.id}:${x.status}`)).toEqual(['91:completed', '92:completed']);
+    expect(eventFiles(sid, 'main')).toEqual([]);
+    expect(dropped()).toBe(rows);
+    const other = session();
+    create(other, 93, 'Task one', T);
+    create(other, 94, 'Task two', T + 1);
+    call(other, LIST_TOOL, { done: [1] }, {}, T + 2000);
+    call(other, 'TaskUpdate', { taskId: '94', status: 'in_progress' }, {}, T + 1000); // older than the done of the other task
+    expect(L.readList(other, 'main', env()).items.map((x) => `${x.id}:${x.status}`)).toEqual(['93:completed', '94:in_progress']);
+    expect(dropped()).toBe(rows);
+  });
+
+  it('the tasks a completing call named are what the fold keeps of it: a marker and one key for each task with an id', () => {
+    const sid = session();
+    create(sid, 95, 'Task one', T);
+    create(sid, 96, 'Task two', T + 1);
+    create(sid, 97, 'Task three', T + 2);
+    call(sid, LIST_TOOL, { done: [1, 3] }, {}, T + 1000);
+    expect(Object.keys(readListFile(sid, 'main').touched).sort()).toEqual(['+', '+95', '+97']);
+    call(sid, 'mcp__ccd_turn__wrap_up', {}, {}, T + 2000);
+    expect(Object.keys(readListFile(sid, 'main').touched).sort()).toEqual(['+', '+95', '+96', '+97']);
+    // a list of tasks without ids (a replacement): only the marker, which still fences a call that moves tasks by position
+    const plain = session();
+    write(plain, 'First', 'pending', T);
+    call(plain, LIST_TOOL, { done: [1] }, {}, T + 2000);
+    expect(Object.keys(readListFile(plain, 'main').touched)).toEqual(['+']);
+    const rows = dropped();
+    call(plain, LIST_TOOL, { start: 1 }, {}, T + 1000);
+    expect(dropped()).toBe(rows + 1);
+  });
+
   it('the calls on other tasks of a list are applied whatever their order, so overlapping hooks of parallel calls all land', () => {
     const sid = session();
     create(sid, 41, 'Task one', T);
@@ -1045,6 +1084,9 @@ describe('task list: an event that becomes visible after a later call was folded
   // before the pair. The expectation of a pair is one of three: applied (the list of one fold that saw both, compared as a set), dropped
   // (the list B gives alone, one `late_event_dropped` row), or the stated difference of a call that did not exist when the other one acted.
   describe('held-up call after later call, every pair of kinds', () => {
+    // call times more than LATE_EVENT_MS in the past: a call that finds nothing to change is then acknowledged at once, as it is once the
+    // tests before this one have taken that long (a call that changes nothing waits while it is within LATE_EVENT_MS of the clock)
+    const T0 = T - 60_000;
     const who = (r, a, b) => (r === 'A' ? a : b);
     const calls = {
       replace: (r) => ({ tool_name: 'TodoWrite', tool_input: { todos: [{ content: `list ${r}`, status: 'pending' }] } }),
@@ -1056,15 +1098,17 @@ describe('task list: an event that becomes visible after a later call was folded
       start: (r) => ({ tool_name: LIST_TOOL, tool_input: { start: who(r, 1, 2) } }),
       wrapUp: () => ({ tool_name: 'mcp__ccd_turn__wrap_up', tool_input: {} }),
     };
-    // the later calls (columns) that drop an older call (row); every other pair is applied
+    // the later calls (columns) that drop an older call (row); every other pair is applied. A completing call (done, wrapUp) acts on the tasks
+    // it names: the done of task 1 and the update of task 2 do not undo each other, in either order (so update1 is not dropped by done, whose
+    // B call completes task 2, and done, which completes task 1 as A, is not dropped by update2); wrapUp names every task.
     const everything = Object.keys(calls);
     const drops = {
       replace: everything,
       create: ['replace'],
-      update1: ['replace', 'update1', 'done', 'start', 'wrapUp'],
+      update1: ['replace', 'update1', 'start', 'wrapUp'],
       update2: ['replace', 'update2', 'delete2', 'done', 'start', 'wrapUp'],
       delete2: ['replace'],
-      done: ['replace', 'update1', 'update2', 'delete2', 'start'],
+      done: ['replace', 'update1', 'delete2', 'start'],
       start: ['replace', 'update1', 'update2', 'delete2', 'done', 'start', 'wrapUp'],
       wrapUp: ['replace', 'update1', 'update2', 'delete2', 'start'],
     };
@@ -1076,8 +1120,8 @@ describe('task list: an event that becomes visible after a later call was folded
     };
     const seed = () => {
       const sid = session();
-      create(sid, 1, 'Seed 1', T + 100);
-      create(sid, 2, 'Seed 2', T + 200);
+      create(sid, 1, 'Seed 1', T0 + 100);
+      create(sid, 2, 'Seed 2', T0 + 200);
       return sid;
     };
     const publish = (sid, ms, tick, pid, spec, evId) => {
@@ -1099,8 +1143,8 @@ describe('task list: an event that becomes visible after a later call was folded
             const run = (steps) => {
               const sid = seed();
               for (const step of steps) {
-                if (step === 'A') publish(sid, T + 5000 - gap, 100, 11, a, 'aaaaaaaa');
-                else if (step === 'B') publish(sid, T + 5000, 200, 12, b, 'bbbbbbbb');
+                if (step === 'A') publish(sid, T0 + 5000 - gap, 100, 11, a, 'aaaaaaaa');
+                else if (step === 'B') publish(sid, T0 + 5000, 200, 12, b, 'bbbbbbbb');
                 else L.syncList(sid, 'main', env());
               }
               return sid;
@@ -1117,6 +1161,53 @@ describe('task list: an event that becomes visible after a later call was folded
         });
       }
     }
+
+    // A completing call acts on the tasks it names (`done` the ones at its numbers, wrap_up every task); it undoes a call on one of them and
+    // is undone by one, and by nothing else but a call that moves the numbers or the whole list. Tasks 1 to 3 exist.
+    describe('a completing call and a call on one task, three tasks, in both orders', () => {
+      const names = ['done1', 'done2', 'done3', 'wrapUp', 'update1', 'update2', 'update3'];
+      const spec = (kind) => {
+        if (kind === 'wrapUp') return { tool_name: 'mcp__ccd_turn__wrap_up', tool_input: {} };
+        if (kind.startsWith('done')) return { tool_name: LIST_TOOL, tool_input: { done: [Number(kind.slice(4))] } };
+        return { tool_name: 'TaskUpdate', tool_input: { taskId: kind.slice(6), status: 'in_progress' } };
+      };
+      const completing = (kind) => kind === 'wrapUp' || kind.startsWith('done');
+      // the later call B and the held-up older call A are dropped by each other when one acts on a task the other names
+      const clashes = (a, b) => {
+        if (completing(a) === completing(b)) return false; // two completing calls, or two updates (not in this grid)
+        const [cal, upd] = completing(a) ? [a, b] : [b, a];
+        return cal === 'wrapUp' || cal.slice(4) === upd.slice(6);
+      };
+      const seed3 = (t0) => {
+        const sid = session();
+        for (const id of [1, 2, 3]) create(sid, id, `Seed ${id}`, t0 + id);
+        return sid;
+      };
+      for (const first of names) {
+        for (const second of names) {
+          if (completing(first) !== !completing(second)) continue; // one completing call and one update, in both orders
+          it(`A ${first} held up behind B ${second}: ${clashes(first, second) ? 'dropped' : 'applied'}`, () => {
+            for (const gap of [0, 1]) {
+              const t0 = T0;
+              const run = (steps) => {
+                const sid = seed3(t0);
+                for (const step of steps) {
+                  if (step === 'A') publish(sid, t0 + 5000 - gap, 100, 11, spec(first), 'aaaaaaaa');
+                  else if (step === 'B') publish(sid, t0 + 5000, 200, 12, spec(second), 'bbbbbbbb');
+                  else L.syncList(sid, 'main', env());
+                }
+                return sid;
+              };
+              const rows = dropped();
+              const held = run(['B', 'sync', 'A', 'sync']);
+              expect(dropped() - rows, `${first}/${second} gap ${gap}: rows`).toBe(clashes(first, second) ? 1 : 0);
+              expect(eventFiles(held, 'main'), `${first}/${second} gap ${gap}`).toEqual([]);
+              expect(tasks(held), `${first}/${second} gap ${gap}`).toEqual(tasks(run(clashes(first, second) ? ['B', 'sync'] : ['A', 'B', 'sync'])));
+            }
+          });
+        }
+      }
+    });
   });
 
   // The opposite order: a call that edits tasks is visible and finds nothing to change because the older call it depends on (the TaskCreate that
