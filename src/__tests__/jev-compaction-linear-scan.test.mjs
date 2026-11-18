@@ -13,7 +13,7 @@ import {
 const HOST_BLOCK = /<(system-reminder|task-notification|teammate-message|command-name|command-message|command-args|local-command-stdout|local-command-stderr|local-command-caveat|bash-input|bash-stdout|bash-stderr)\b[^>]*>[\s\S]*?<\/\1>/g;
 const PRELUDE = /^\s*<system-reminder[^>]*>[\s\S]*?<\/system-reminder[^>]*>\s*/;
 const TRAILING_CLOSERS = /(?:\s*<\/system-reminder[^>]*>)+\s*$/;
-const PASTE_MARKS = /\[pasted text moved at compaction: [^\n]*\]/g;
+const PASTE_MARKS = /\[pasted text moved at compaction: \d+ chars, full text in (?:(?!; start: ")[^\n])*; start: "(?:[^"\\\n]|\\[^\n])*"; end: "(?:[^"\\\n]|\\[^\n])*"\]/g;
 const OTHER_FRAME = /^(?:.+ sent an? (?:new )?(?:message|report)|(?:A message|Messages) arrived .+|Activity (?:was observed )?in the bound conversation) while you were working(?:,.*)?:$/;
 const oneLine = (text) => String(text ?? '').replace(/\s+/g, ' ').trim();
 const NOTES = ['[SYSTEM NOTIFICATION - NOT USER INPUT]', '<task-notification>'];
@@ -32,7 +32,7 @@ const PIECES = {
   closers: ['</system-reminder>', '</system-reminder ', '</system-reminder id="x">', '</system-reminderx>', '<system-reminder>', '>', '<', 'x', ' ', '\n', ' \n ', '\t', '\u00a0', '</', '\r', '"', '\u2028'],
   tags: ['<', '>', 'a', ' ', '\n', '<a>', '</a>', '<<', '>>', 'x y', '\u00a0', '<b c="d">'],
   note: ['<summary>', '</summary>', '[SYSTEM NOTIFICATION - NOT USER INPUT]', '<task-notification>', '\n', ' ', 'x', '<', '>', '<b>', '</b>', 'line', '  ', '\u00a0', '<summary></summary>', '<summary> </summary>'],
-  paste: ['[pasted text moved at compaction: ', '[pasted text moved at compaction: 5 chars; start: "a]b"; end: "c"]', ']', '[', '\n', '\r', 'x', ' ', '"', '[pasted text moved at compaction:'],
+  paste: ['[pasted text moved at compaction: ', '[pasted text moved at compaction: 5 chars; start: "a]b"; end: "c"]', '[pasted text moved at compaction: 5 chars, full text in /p; start: "a]b\\"c"; end: "d]"]', '[pasted text moved at compaction: 5 chars, full text in /p; start: "a"; end: "b"]', '5 chars, full text in ', '/p', '; start: "', '; end: "', '\\', '\\"', 'a]b', ']', '[', '[Keep it.]', '\n', '\r', '\u2028', 'x', ' ', '"', '[pasted text moved at compaction:'],
   frame: [' sent a message', ' sent an new report', ' sent a new message', ' sent an report', ' while you were working', ',', ':', 'A message arrived ', 'Messages arrived ', 'Activity ', 'was observed ', 'in the bound conversation', 'Activity in the bound conversation', 'Activity was observed in the bound conversation', 'x', ' ', '\r', '\u2028', '\u2029', '\n', 'sent a message', ' sent a', 'message', 'report', ' sent  a message', ':\n', ',:'],
 };
 const CASES = [
@@ -58,6 +58,15 @@ describe('the one-pass scans give what the regular expressions they replace give
       if (expected !== actual) different.push({ text, expected, actual });
     }
     expect(different.slice(0, 3)).toEqual([]);
+  });
+
+  it('withoutPasteMarks cuts a trace at its own closing bracket and keeps what stands after it on the line', () => {
+    const trace = '[pasted text moved at compaction: 2038 chars, full text in /p/e-aa-0.txt; start: "a] b [c"; end: "x\\" ] y"]';
+    expect(withoutPasteMarks(`${trace} [Keep the second instruction exactly as given.]`)).toBe(' [Keep the second instruction exactly as given.]');
+    expect(withoutPasteMarks(`${trace}[one]${trace} [two] ]`)).toBe('[one] [two] ]');
+    expect(withoutPasteMarks(`before ${trace}\nafter [x]`)).toBe('before \nafter [x]');
+    const open = '[pasted text moved at compaction: 5 chars, full text in /p; start: "a"; end: "b';
+    expect(withoutPasteMarks(`${open} [x]`)).toBe(`${open} [x]`); // a mark that does not open a whole trace is the user's text
   });
 
   it('otherFrame reads the frames of the other senders and nothing near them', () => {
@@ -93,6 +102,9 @@ const SHAPES = {
   lt: rep('<', N * 4),
   ltLine: `${rep('<a ')}\nx`,
   pasteMarks: rep('[pasted text moved at compaction: '),
+  pasteHeads: rep('[pasted text moved at compaction: 5 chars, full text in /p ') + '; start: "a',
+  pasteUnclosed: rep('[pasted text moved at compaction: 5 chars, full text in /p; start: "a'),
+  pasteWhole: rep('[pasted text moved at compaction: 5 chars, full text in /p; start: "a]"; end: "b]"] [x] '),
   sent: rep('x sent a message while you were working,') + 'y',
   plain: 'lorem ipsum dolor sit amet '.repeat(40000), // about a megabyte, no tag
 };
@@ -102,7 +114,7 @@ const SCANS = [
   ['withoutTrailingClosers', withoutTrailingClosers, ['closersNoGt', 'closersEnd', 'closed', 'teammateStray', 'plain']],
   ['withoutTags', withoutTags, ['lt', 'ltLine', 'open', 'openNoGt', 'closed', 'plain']],
   ['noteSummary', noteSummary, ['summaryOpen', 'taskOpen', 'ltLine', 'lt', 'closed', 'plain']],
-  ['withoutPasteMarks', withoutPasteMarks, ['pasteMarks', 'plain']],
+  ['withoutPasteMarks', withoutPasteMarks, ['pasteMarks', 'pasteHeads', 'pasteUnclosed', 'pasteWhole', 'plain']],
   ['otherFrame', otherFrame, ['sent', 'plain']],
   ['agentBlocks', agentBlocks, ['teammateOpen', 'teammateQuote', 'teammateClosed', 'teammateStray', 'lt', 'plain']],
   ['isNotification', (text) => isNotification({ role: 'user', text, toolUses: [] }), ['open', 'openNoGt', 'closersNoGt', 'mixed', 'taskOpen', 'summaryOpen', 'teammateOpen', 'plain']],

@@ -4176,6 +4176,14 @@ describe('jev-compaction module: pasted text (OMC_JEV_COMPACT_PASTES)', () => {
       expect([...directReplyRows(rows, [0, 6])].sort((a, b) => a - b)).toEqual([1, 5, 7, 10]);
     });
 
+    it('directReplyRows treats a bracketed instruction after a paste trace on the same line as words of the user, whatever brackets the excerpts hold', () => {
+      const trace = '[pasted text moved at compaction: 2038 chars, full text in /p; start: "[a] b]"; end: "c [d]"]';
+      const row = (text) => [U('first'), A('one'), U(text), A('answer'), A('last')];
+      expect([...directReplyRows(row(`${trace} [Keep the second instruction exactly as given.]`), [0, 2])].sort((a, b) => a - b)).toEqual([1, 3, 4]);
+      expect([...directReplyRows(row(`${trace}\n[Keep it.] ${trace}`), [0, 2])].sort((a, b) => a - b)).toEqual([1, 3, 4]);
+      expect([...directReplyRows(row(`${trace} ${trace}`), [0, 2])].sort((a, b) => a - b)).toEqual([1]);
+    });
+
     it('splits runs at trace lines and counts a run from its first to its last non-empty line', () => {
       const text = `${'a'.repeat(300)}\n\n${'b'.repeat(300)}\n[compacted] Bash(x) - removed\n${'c'.repeat(100)}\n[reply moved at compaction: 1 chars, full text in /p; start: "a"; end: "a"]\n${'d'.repeat(500)}\n`;
       const runs = replyRuns(text);

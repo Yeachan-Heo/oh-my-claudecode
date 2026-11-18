@@ -3281,20 +3281,47 @@ export function replyRuns(text, minChars = REPLY_MIN_CHARS) {
 }
 
 const PASTE_MARK = '[pasted text moved at compaction: ';
-/** The text without its traces of moved pasted text: text.replace(/\[pasted text moved at compaction: [^\n]*\]/g, '') in one pass (a trace runs from its start to the last `]` of its line). */
+const PASTE_TRACE_HEADER = /\d+ chars, full text in /y;
+const PASTE_TRACE_START = '; start: "';
+const PASTE_TRACE_END = '; end: "';
+// The index after the JSON string whose opening quote is at `at` (a backslash takes the next character with it), or -1 when the line ends first.
+function jsonStringEnd(text, at, stop) {
+  for (let i = at + 1; i < stop; i++) {
+    const c = text.charCodeAt(i);
+    if (c === 92) i++;
+    else if (c === 34) return i + 1;
+  }
+  return -1;
+}
+/**
+ * The text without its traces of moved pasted text, in one pass. A trace is read by its own shape, so it ends at its own closing bracket and
+ * what stands after it on the line stays: the mark, `<digits> chars, full text in `, a path without `; start: "`, then `; start: ` and `; end: ` each
+ * followed by a JSON string (brackets inside the strings are text), and `]`. It is
+ * text.replace(/\[pasted text moved at compaction: \d+ chars, full text in (?:(?!; start: ")[^\n])*; start: "(?:[^"\\\n]|\\[^\n])*"; end: "(?:[^"\\\n]|\\[^\n])*"\]/g, '').
+ * A mark that does not open a whole trace is the user's text. Each failed read skips the marks that would fail the same way, so the cost stays linear.
+ */
 export function withoutPasteMarks(text) {
   let out = '';
   let at = 0;
   let from = 0;
+  let lineEnd = -1;
+  let start = -1; // the nearest '; start: "' at or after the last mark head; Infinity once there is none
   for (;;) {
     const open = text.indexOf(PASTE_MARK, from);
     if (open < 0) break;
-    const nl = text.indexOf('\n', open);
-    const line = text.slice(open, nl < 0 ? text.length : nl);
-    const close = line.lastIndexOf(']');
-    if (close < PASTE_MARK.length) { if (nl < 0) break; from = nl + 1; continue; } // no ']' after the start: nor for a later start of the line
+    if (lineEnd < open) { const nl = text.indexOf('\n', open); lineEnd = nl < 0 ? text.length : nl; }
+    const head = open + PASTE_MARK.length;
+    PASTE_TRACE_HEADER.lastIndex = head;
+    if (!PASTE_TRACE_HEADER.test(text)) { from = open + 1; continue; }
+    const pathFrom = PASTE_TRACE_HEADER.lastIndex;
+    if (start < head) { start = text.indexOf(PASTE_TRACE_START, head); if (start < 0) start = Infinity; }
+    if (start === Infinity || start >= lineEnd) { from = lineEnd + 1; continue; } // no start on the rest of the line: nor for a later mark of it
+    if (start < pathFrom) { from = open + 1; continue; }
+    const first = jsonStringEnd(text, start + PASTE_TRACE_START.length - 1, lineEnd);
+    const second = first < 0 || !text.startsWith(PASTE_TRACE_END, first) ? -1 : jsonStringEnd(text, first + PASTE_TRACE_END.length - 1, lineEnd);
+    if (second < 0 || text[second] !== ']' || second >= lineEnd) { from = start; continue; } // a mark before this start fails the same way
     out += text.slice(at, open);
-    at = from = open + close + 1;
+    at = from = second + 1;
   }
   return out + text.slice(at);
 }
