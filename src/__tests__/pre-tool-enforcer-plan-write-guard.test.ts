@@ -74,15 +74,16 @@ interface CallOptions {
   guard?: string | null;
   extraEnv?: Record<string, string>;
   field?: string;
+  input?: Record<string, unknown>;
 }
 
 function callTool(tool: string, path: string, options: CallOptions = {}) {
-  const { agentType = PLANNER, guard = '1', extraEnv = {}, field } = options;
+  const { agentType = PLANNER, guard = '1', extraEnv = {}, field, input } = options;
   const key = field ?? (tool === 'NotebookEdit' ? 'notebook_path' : 'file_path');
   const payload: Record<string, unknown> = {
     hook_event_name: 'PreToolUse',
     tool_name: tool,
-    tool_input: { [key]: path },
+    tool_input: input ?? { [key]: path },
     session_id: 'ses-plan-write',
     tool_use_id: `t-${Math.random().toString(36).slice(2, 8)}`,
     cwd: projectDir,
@@ -495,6 +496,68 @@ describe('plan write guard (pre-tool-enforcer.mjs)', () => {
       callTool('Write', '.omc/plans/alias-abs.md');
       const added = logRows().slice(before);
       expect(added.map((row) => [row.decision, row.path])).toEqual([['deny', '.omc/plans/alias-abs.md']]);
+    });
+  });
+
+  // The guard does not decide from one field and let the tool act on another: every text among file_path, filePath,
+  // notebook_path, path and file must pass, and a field that is empty or not a text is left out.
+  describe('the path fields of the tool input', () => {
+    const inside = () => join(projectDir, '.omc', 'plans', 'field-plan.md');
+    const outside = () => join(projectDir, 'src', 'field-code.ipynb');
+
+    it('denies when a text field leads outside the plans directory, whichever field holds it and whatever the others hold', () => {
+      const cases: Array<[string, Record<string, unknown>]> = [
+        ['NotebookEdit', { file_path: '', notebook_path: outside() }],
+        ['NotebookEdit', { file_path: 42, notebook_path: outside() }],
+        ['NotebookEdit', { file_path: null, notebook_path: outside() }],
+        ['NotebookEdit', { file_path: '  ', notebook_path: outside() }],
+        ['NotebookEdit', { file_path: inside(), notebook_path: outside() }],
+        ['NotebookEdit', { notebook_path: inside(), path: outside() }],
+        ['Write', { file_path: inside(), notebook_path: outside() }],
+        ['Write', { file_path: outside(), notebook_path: inside() }],
+        ['Write', { file_path: '', path: outside() }],
+        ['Edit', { file_path: inside(), path: outside() }],
+        ['MultiEdit', { path: outside() }],
+        ['Write', { file_path: inside(), filePath: outside() }],
+        ['Edit', { file: outside() }],
+        ['MultiEdit', { file_path: 7, notebook_path: inside(), path: outside() }],
+      ];
+      for (const [tool, input] of cases) {
+        expect(verdictOf(callTool(tool, '', { input })), `${tool} ${JSON.stringify(input)}`).toBe('deny');
+      }
+    });
+
+    it('allows when every text field leads to a Markdown file inside the plans directory, and when no field is a text', () => {
+      const cases: Array<[string, Record<string, unknown>]> = [
+        ['Write', { file_path: inside() }],
+        ['Write', { file_path: inside(), path: inside() }],
+        ['Write', { file_path: inside(), filePath: inside(), file: inside() }],
+        ['NotebookEdit', { notebook_path: inside() }],
+        ['NotebookEdit', { file_path: '', notebook_path: inside() }],
+        ['Edit', { file_path: inside(), notebook_path: 5, path: '' }],
+        ['Write', { file_path: 42 }],
+        ['Write', { file_path: '  ', notebook_path: null }],
+        ['Write', {}],
+      ];
+      for (const [tool, input] of cases) {
+        expect(verdictOf(callTool(tool, '', { input })), `${tool} ${JSON.stringify(input)}`).toBe('allow');
+      }
+    });
+
+    it('applies the link rules to every text field', () => {
+      const plans = join(projectDir, '.omc', 'plans');
+      writeFileSync(join(plans, 'field-state.json'), '{}\n');
+      symlinkSync('field-state.json', join(plans, 'field-alias.md'));
+      expect(verdictOf(callTool('NotebookEdit', '', { input: { file_path: inside(), notebook_path: join(plans, 'field-alias.md') } }))).toBe('deny');
+      expect(verdictOf(callTool('Write', '', { input: { file_path: join(plans, 'field-alias.md'), path: inside() } }))).toBe('deny');
+    });
+
+    it('logs the text that was denied', () => {
+      const before = logRows().length;
+      callTool('NotebookEdit', '', { input: { file_path: inside(), notebook_path: outside() } });
+      callTool('Write', '', { input: { file_path: inside(), path: inside() } });
+      const added = logRows().slice(before);
+      expect(added.map((row) => [row.decision, row.path])).toEqual([['deny', outside()], ['allow', inside()]]);
     });
   });
 });

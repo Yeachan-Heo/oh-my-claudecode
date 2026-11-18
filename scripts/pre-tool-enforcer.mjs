@@ -2674,12 +2674,15 @@ let contextText = null;
 // directory the way the kernel resolves them (see walkKernelPath), and the last component is followed one link at a time
 // (see planEntryAllowed): every entry on the way must be a path that ends in .md inside the real plans directory, and the
 // entry that ends the chain must be a regular file or must not exist yet. A link that cannot be resolved, a link that loops
-// and a directory are denied. Anything else unreadable passes (fail-open). With the guard on, each call of a guarded tool adds one row to
+// and a directory are denied. Every text among file_path, filePath, notebook_path, path and file (the names the hooks of
+// this plugin read) must pass, because the tool may act on any of them; a call with none of them readable passes. Anything
+// else unreadable passes (fail-open). With the guard on, each call of a guarded tool adds one row to
 // plan-write-guard.jsonl in OMC_JEV_LOG_DIR or <state dir>/jev, with decision allow or deny; a call without agent_type or
 // with another agent_type adds one row with decision allow and a reason.
 const PLAN_WRITE_TOOLS = new Set(['Write', 'Edit', 'MultiEdit', 'NotebookEdit']);
 const PLAN_WRITE_DIR = join('.omc', 'plans');
 const PLAN_WRITE_EXT = '.md';
+const PLAN_WRITE_PATH_FIELDS = ['file_path', 'filePath', 'notebook_path', 'path', 'file'];
 const PLAN_WRITE_MAX_LINKS = 40;
 const PLAN_WRITE_DEFAULT_TYPES = ['oh-my-claudecode:planner'];
 
@@ -2813,10 +2816,12 @@ function evaluatePlanWriteGuard(toolName, data, directory, stateDir) {
     }
     const toolInput = data.tool_input ?? data.toolInput;
     if (toolInput === null || typeof toolInput !== 'object' || Array.isArray(toolInput)) return null;
-    const filePath = toolInput.file_path ?? toolInput.notebook_path ?? toolInput.path;
-    if (typeof filePath !== 'string' || filePath.trim() === '') return null;
+    const filePaths = PLAN_WRITE_PATH_FIELDS.map((field) => toolInput[field]).filter((value) => typeof value === 'string' && value.trim() !== '');
+    if (filePaths.length === 0) return null;
     const cwd = typeof data.cwd === 'string' && data.cwd !== '' ? data.cwd : directory;
-    const allowed = planWritePathAllowed(filePath, cwd);
+    const deniedPath = filePaths.find((candidate) => !planWritePathAllowed(candidate, cwd));
+    const allowed = deniedPath === undefined;
+    const filePath = deniedPath ?? filePaths[0];
     appendPlanWriteGuardRow(data, toolName, stateDir, {
       agent_type: agentType.slice(0, 200),
       path: filePath.slice(0, 300),
