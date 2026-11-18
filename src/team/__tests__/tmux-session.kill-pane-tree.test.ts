@@ -296,7 +296,7 @@ describe("killWorkerPaneProcessTree SIGKILL identity check (injected dependencie
 
     await killWorkerPaneProcessTree(IDENTITY, "%7", {
       readProcessRecords: async () => new Map(),
-      processIdentity: () => null,
+      processIdentity: (pid) => (pid === FAKE_PANE_PID ? "root-incarnation" : null),
       killProcess: (pid, signal) => {
         calls.push([pid, signal]);
       },
@@ -351,7 +351,7 @@ describe("killWorkerPaneProcessTree SIGKILL identity check (injected dependencie
 
     await killWorkerPaneProcessTree(IDENTITY, "%7", {
       readProcessRecords: async () => new Map([[CHILD, { ppid: FAKE_PANE_PID }]]),
-      processIdentity: () => null,
+      processIdentity: (pid) => (pid === FAKE_PANE_PID ? "root-incarnation" : null),
       killProcess: (pid, signal) => {
         calls.push([pid, signal]);
       },

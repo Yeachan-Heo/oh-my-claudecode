@@ -907,7 +907,7 @@ describe('task list: an event that becomes visible after a later call was folded
   // both gives: B folded first and A visible afterwards (a held-up hook), whatever the two calls are and whether they share a millisecond.
   describe('a held-up call of the same millisecond or the one before gives the list of the fold that saw both (a held-up replacement is not applied over a part-changing call folded before it)', () => {
     const kinds = {
-      replace: (label, id) => ({ tool_name: 'TodoWrite', tool_input: { todos: [{ content: label, status: 'pending' }] } }),
+      replace: (label) => ({ tool_name: 'TodoWrite', tool_input: { todos: [{ content: label, status: 'pending' }] } }),
       create: (label, id) => ({ tool_name: 'TaskCreate', tool_input: { subject: label }, task_id: String(id) }),
     };
     const publish = (sid, ms, tick, pid, kind, label, id) => {
