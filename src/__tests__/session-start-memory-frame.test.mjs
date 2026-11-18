@@ -116,3 +116,70 @@ describe('session-start passes the cleaning writers to the project memory format
     expect(text).toContain(`- ${escapedPath} (3x)`);
   }, 60000);
 });
+
+// A summary whose hot paths are long identifiers. When the aggregate SessionStart budget cuts the memory section, the cut is by
+// whole lines (with the text cleaning switch or the frame on), so no path is left half written and the envelope stays closed.
+const HOT_PATHS = [1, 2, 3].map((n) => `src/${'d'.repeat(130)}/file-${n}.ts`);
+const SUMMARY = ['[REFERENCE ONLY] a short frame', '', '[Hot Paths]', ...HOT_PATHS.map((path, index) => `- ${path} (${3 - index}x)`)].join('\n');
+const SUMMARY_FORMATTER = `export function formatContextSummary() { return ${JSON.stringify(SUMMARY)}; }\nexport async function formatContextSummaryWithFrame() { return ${JSON.stringify(SUMMARY)}; }\n`;
+const CUT_NOTICE = '...[truncated to preserve SessionStart context budget]';
+const SECTION_END = '</project-memory-context>';
+
+// The budget that puts the character cut in the middle of the second path.
+function budgetInsideSecondPath() {
+  const full = sessionStartContext(SUMMARY_FORMATTER, '1');
+  return full.indexOf(HOT_PATHS[1]) + 100;
+}
+
+describe('session-start cuts the memory section by whole lines when the aggregate budget is short', () => {
+  it('keeps every written path whole and the closing tag when the frame is on', () => {
+    const budget = budgetInsideSecondPath();
+    const text = sessionStartContext(SUMMARY_FORMATTER, '1', { OMC_SESSION_START_CONTEXT_BUDGET: String(budget) });
+    expect(text.length).toBeLessThanOrEqual(budget);
+    expect(text).toContain(`- ${HOT_PATHS[0]} (3x)`);
+    expect(text).not.toContain('file-2');
+    expect(text).toContain(CUT_NOTICE);
+    expect(text).toContain(`${SECTION_END}\n`);
+    for (const line of text.split('\n').filter((entry) => entry.startsWith('- '))) expect(SUMMARY.split('\n')).toContain(line);
+  }, 120000);
+
+  it('does the same when only the text cleaning switch is on', () => {
+    const budget = budgetInsideSecondPath();
+    const text = sessionStartContext(SUMMARY_FORMATTER, undefined, { OMC_CONTEXT_TEXT_SANITIZE: '1', OMC_SESSION_START_CONTEXT_BUDGET: String(budget) });
+    expect(text).toContain(`- ${HOT_PATHS[0]} (3x)`);
+    expect(text).not.toContain('file-2');
+    expect(text).toContain(`${SECTION_END}\n`);
+  }, 60000);
+
+  it('keeps the whole section when it fits, and for every budget keeps only whole lines', () => {
+    const full = sessionStartContext(SUMMARY_FORMATTER, '1');
+    expect(sessionStartContext(SUMMARY_FORMATTER, '1', { OMC_SESSION_START_CONTEXT_BUDGET: String(full.length) })).toBe(full);
+    for (const budget of [full.length - 1, full.length - 100, full.indexOf(HOT_PATHS[2]) + 40, 400, 150]) {
+      const text = sessionStartContext(SUMMARY_FORMATTER, '1', { OMC_SESSION_START_CONTEXT_BUDGET: String(budget) });
+      expect(text.length, `budget ${budget}`).toBeLessThanOrEqual(budget);
+      for (const line of text.split('\n').filter((entry) => entry.startsWith('- '))) expect(SUMMARY.split('\n'), `budget ${budget}`).toContain(line);
+      if (text.includes(CUT_NOTICE)) expect(text, `budget ${budget}`).toContain(`${SECTION_END}\n`);
+    }
+  }, 240000);
+
+  it('keeps a 147 character hot path whole, or leaves it out, with the frame on and a budget of 800', () => {
+    const path = `src/${'p'.repeat(134)}/hot-1.ts`;
+    expect(path.length).toBe(147);
+    const summary = [`[REFERENCE ONLY] ${'frame text '.repeat(52).trim()}`, '', '[Hot Paths]', `- ${path} (3x)`, `- ${path.replace('hot-1', 'hot-2')} (2x)`].join('\n');
+    const formatter = `export function formatContextSummary() { return ${JSON.stringify(summary)}; }\nexport async function formatContextSummaryWithFrame() { return ${JSON.stringify(summary)}; }\n`;
+    const text = sessionStartContext(formatter, '1', { OMC_SESSION_START_CONTEXT_BUDGET: '800' });
+    expect(text.length).toBeLessThanOrEqual(800);
+    for (const line of text.split('\n').filter((entry) => entry.startsWith('- '))) expect(summary.split('\n')).toContain(line);
+    expect(text).toContain(CUT_NOTICE);
+    expect(text).toContain(`${SECTION_END}\n`);
+  }, 120000);
+
+  it('still cuts by characters, as before, when the switch and the frame are off', () => {
+    const budget = budgetInsideSecondPath();
+    const text = sessionStartContext(SUMMARY_FORMATTER, undefined, { OMC_SESSION_START_CONTEXT_BUDGET: String(budget) });
+    expect(text.split('src/dddd').length - 1, 'the second path is cut in the middle').toBe(2);
+    expect(text).not.toContain('file-2');
+    expect(text).not.toContain(SECTION_END);
+    expect(text.endsWith(`\n${CUT_NOTICE}`)).toBe(true);
+  }, 120000);
+});

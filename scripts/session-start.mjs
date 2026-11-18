@@ -691,6 +691,10 @@ function reconcileAbandonedSessionStarts(omcRoot, currentSessionId) {
   }
 }
 
+function projectMemoryFrameEnabled() {
+  return ['1', 'true'].includes(String(process.env.OMC_PROJECT_MEMORY_FRAME ?? '').trim().toLowerCase());
+}
+
 function getRuntimeBaseDir() {
   return process.env.CLAUDE_PLUGIN_ROOT || join(__dirname, '..');
 }
@@ -715,7 +719,7 @@ async function loadProjectMemoryModules() {
       detectProjectEnvironment: projectMemoryDetector.detectProjectEnvironment,
       // Opt-in (OMC_PROJECT_MEMORY_FRAME=1 or true): framed summary. Falls back to the bare summary when the
       // built formatter does not export the framed variant (dist is rebuilt by release, not by feature commits).
-      formatContextSummary: (['1', 'true'].includes(String(process.env.OMC_PROJECT_MEMORY_FRAME ?? '').trim().toLowerCase())
+      formatContextSummary: (projectMemoryFrameEnabled()
         ? projectMemoryFormatter.formatContextSummaryWithFrame
         : undefined) ?? projectMemoryFormatter.formatContextSummary,
       findProjectRoot: rulesFinder.findProjectRoot,
@@ -995,6 +999,29 @@ function compactBudgetedText(text, maxChars) {
   return `${text.slice(0, maxChars - notice.length).trimEnd()}${notice}`;
 }
 
+// Same cut as compactBudgetedText, by whole lines: a line that holds a path or a command stays whole or goes whole, and the
+// closing tag (with the lines after it) of an envelope stays, so the envelope is never left open. Returns null when not even
+// the first line fits, and the caller then writes the omission notice instead of a part of the section.
+function compactBudgetedLines(text, maxChars) {
+  const notice = '...[truncated to preserve SessionStart context budget]';
+  const lines = text.split('\n');
+  const closeIndex = lines.findLastIndex((line) => /^<\/[A-Za-z][\w-]*>$/.test(line));
+  const tailStart = closeIndex > 0 && closeIndex >= lines.length - 4 ? closeIndex : lines.length;
+  const tail = lines.slice(tailStart).map((line) => `\n${line}`).join('');
+  const room = maxChars - notice.length - 1 - tail.length;
+  const kept = [];
+  let length = 0;
+  for (const line of lines.slice(0, tailStart)) {
+    const next = length + (kept.length > 0 ? 1 : 0) + line.length;
+    if (next > room) break;
+    length = next;
+    kept.push(line);
+  }
+  while (kept.length > 0 && kept[kept.length - 1].trim() === '') kept.pop();
+  if (kept.length === 0) return null;
+  return `${kept.join('\n')}\n${notice}${tail}`;
+}
+
 function formatUpdateNoticeForUser(updateInfo, options = {}) {
   const latestVersion = updateInfo?.latestVersion || 'latest';
   const currentVersion = updateInfo?.currentVersion || 'unknown';
@@ -1036,11 +1063,12 @@ function buildSessionStartAdditionalContext(messages) {
     if (used + separator + message.length > budget) {
       const remainingBudget = budget - used - separator;
       if (remainingBudget > 0) {
-        selected.push(
-          remainingBudget > 120
-            ? compactBudgetedText(message, remainingBudget)
-            : compactBudgetedText(sessionStartOmissionNotice(budget), remainingBudget),
-        );
+        // With the text cleaning switch or the memory frame on, the section is cut by whole lines (see compactBudgetedLines);
+        // otherwise by characters, as it always was.
+        const omission = () => compactBudgetedText(sessionStartOmissionNotice(budget), remainingBudget);
+        if (remainingBudget <= 120) selected.push(omission());
+        else if (contextText || projectMemoryFrameEnabled()) selected.push(compactBudgetedLines(message, remainingBudget) ?? omission());
+        else selected.push(compactBudgetedText(message, remainingBudget));
       }
       break;
     }
