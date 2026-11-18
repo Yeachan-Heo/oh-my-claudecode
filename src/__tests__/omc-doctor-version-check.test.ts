@@ -39,6 +39,10 @@ describe('omc-doctor Step 1 derives the plugin ID, channel and latest version fr
     expect(versionCommand).toBeDefined();
     expect(text.split('\n').filter((l) => l.startsWith('node -e ') && l.includes("'Updater: "))).toHaveLength(1);
     expect(versionCommand).not.toMatch(/npm view|registry\.npmjs|child_process/);
+    // The npm line has its own label, so an offline run never prints a second `Latest:` next to a marketplace one.
+    const block = text.slice(text.indexOf('### Step 1'), text.indexOf('**Diagnosis**'));
+    expect(block).toContain('echo "npm latest: (unavailable)"');
+    expect(block.split('\n').filter((l) => !l.startsWith('node -e ') && l.includes('Latest:') && !l.startsWith('#'))).toEqual([]);
   });
 
   test('npm profile: no registry entry means the npm channel, installed from the cache, updated with omc update', () => {
@@ -115,7 +119,7 @@ describe('omc-doctor Step 1 derives the plugin ID, channel and latest version fr
     expect(text).not.toMatch(/\/omc-setup\b.*\bnpm install\b/);
     const diagnosis = text.slice(text.indexOf('### Step 1'), text.indexOf('### Step 2'));
     expect(diagnosis).toContain('LATEST comes from the install channel the registry records');
-    expect(diagnosis).toContain('`npm view` is consulted only for `Channel: npm`');
+    expect(diagnosis).toContain('`npm view` (the `npm latest:` line) is consulted only for `Channel: npm`, so ignore that line for a marketplace install');
     expect(diagnosis).toContain('never compared with an npm-only release');
     expect(diagnosis).toContain('If INSTALLED equals the channel\'s latest, there is no WARN');
     const outdated = text.slice(text.indexOf('### Fix: Outdated Plugin'), text.indexOf('### Fix: Stale Cache'));
