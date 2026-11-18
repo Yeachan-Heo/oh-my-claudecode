@@ -2,7 +2,8 @@
  * Task List Tool
  *
  * MCP tool `task_list`: the task list of a subagent. Registered only when OMC_TASK_LIST=1, in the standalone registry
- * (tool-registry.ts) and in the in-process server (omc-tools-server.ts).
+ * (tool-registry.ts), in the in-process server (omc-tools-server.ts) and in the public aggregate `allCustomTools` (index.ts), which
+ * `omc capabilities` reads.
  * The server does not know which agent calls it, so the tool checks the shape of the call and confirms it; the PostToolUse hook
  * scripts/jev-task-list-state.mjs saves the list per agent_id.
  */

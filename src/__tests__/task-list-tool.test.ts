@@ -116,6 +116,82 @@ describe('task_list in the in-process MCP server', () => {
   }, 30_000);
 });
 
+// The exported aggregate allCustomTools (src/tools/index.ts, re-exported by the package) is what `omc capabilities` builds its tool
+// surface from; it has its own opt-in switch next to the two MCP registries.
+describe('task_list in the public tool aggregate (allCustomTools) and the capability surface', () => {
+  async function loadAggregate(taskList: string | undefined) {
+    if (taskList === undefined) delete process.env.OMC_TASK_LIST;
+    else process.env.OMC_TASK_LIST = taskList;
+    vi.resetModules();
+    return import('../tools/index.js');
+  }
+
+  it('has no task_list tool without OMC_TASK_LIST=1, or for any other value', async () => {
+    for (const value of [undefined, 'true', '0', '']) {
+      const index = await loadAggregate(value);
+      expect(index.allCustomTools.map((t) => t.name), String(value)).not.toContain('task_list');
+      expect(index.getToolsByCategory('all').map((t) => t.name), String(value)).not.toContain('task_list');
+    }
+  }, 30_000);
+
+  it('lists task_list with OMC_TASK_LIST=1, after the tools it lists without the switch, and in the "all" category only', async () => {
+    const without = (await loadAggregate(undefined)).allCustomTools.map((t) => t.name);
+    const index = await loadAggregate('1');
+    const names = index.allCustomTools.map((t) => t.name);
+    expect(names).toContain('task_list');
+    expect(names.filter((n) => n !== 'task_list')).toEqual(without);
+    expect(names[names.length - 1]).toBe('task_list');
+    expect(index.getToolsByCategory('all').map((t) => t.name)).toContain('task_list');
+    expect(index.getToolsByCategory('lsp').map((t) => t.name)).not.toContain('task_list');
+    expect(index.getToolsByCategory('ast').map((t) => t.name)).not.toContain('task_list');
+    // the entry is the tool itself, so its handler is the one the registries serve
+    const { taskListTool: tool } = await import('../tools/task-list-tools.js');
+    expect(index.allCustomTools.find((t) => t.name === 'task_list')?.handler).toBe(tool.handler);
+  }, 30_000);
+
+  it('is part of the package export that consumers import', async () => {
+    delete process.env.OMC_TASK_LIST;
+    vi.resetModules();
+    expect((await import('../index.js')).allCustomTools.map((t) => t.name)).not.toContain('task_list');
+    process.env.OMC_TASK_LIST = '1';
+    vi.resetModules();
+    expect((await import('../index.js')).allCustomTools.map((t) => t.name)).toContain('task_list');
+  }, 30_000);
+
+  it('shows up in the capability surface with its schema with OMC_TASK_LIST=1 and is absent without it', async () => {
+    delete process.env.OMC_TASK_LIST;
+    vi.resetModules();
+    const off = (await import('../cli/commands/capabilities.js')).collectCapabilitySurface();
+    expect(off.tools.map((t) => t.name)).not.toContain('task_list');
+
+    process.env.OMC_TASK_LIST = '1';
+    vi.resetModules();
+    const capabilities = await import('../cli/commands/capabilities.js');
+    const on = capabilities.collectCapabilitySurface();
+    expect(on.tools.map((t) => t.name).filter((n) => n !== 'task_list')).toEqual(off.tools.map((t) => t.name));
+    const entry = on.tools.find((t) => t.name === 'task_list');
+    expect(entry).toBeDefined();
+    const props = entry!.inputSchema.properties as Record<string, any>;
+    expect(props.items.type).toBe('array');
+    expect(props.items.items.properties.status.enum).toEqual(['pending', 'in_progress', 'completed']);
+    expect(props.items.items.required).toEqual(['content', 'status']);
+    expect(props.done.items.type).toBe('integer');
+    expect(props.start.type).toBe('integer');
+    expect(props.advance.type).toBe('boolean');
+    expect(entry!.inputSchema.required).toEqual([]);
+    // the deterministic fixtures that name a tool find it, and its arguments are checked against its schema
+    const results = capabilities.runDeterministicCapabilityFixtures(
+      [
+        { id: 'task-list-selection', kind: 'tool_selection', description: 'the opt-in tool is selectable', expectedOutcome: 'pass', toolName: 'task_list', expectedToolName: 'task_list' },
+        { id: 'task-list-args', kind: 'arg_validity', description: 'valid args', expectedOutcome: 'pass', toolName: 'task_list', args: { done: [1] } },
+        { id: 'task-list-bad-args', kind: 'arg_validity', description: 'invalid args', expectedOutcome: 'fail', toolName: 'task_list', args: { done: ['x'] } },
+      ],
+      on,
+    );
+    expect(results.map((r) => [r.id, r.ok])).toEqual([['task-list-selection', true], ['task-list-args', true], ['task-list-bad-args', true]]);
+  }, 30_000);
+});
+
 describe('task_list replies', () => {
   it('accepts a whole list and names the task in progress', async () => {
     const r = await call({ items: [{ content: 'Read', status: 'completed' }, { content: 'Write hook', status: 'in_progress', note: 'why' }] });
