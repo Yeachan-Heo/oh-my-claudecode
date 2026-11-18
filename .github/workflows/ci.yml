@@ -121,6 +121,8 @@ jobs:
           src/__tests__/run-cjs-generic-timeout.test.ts
           src/__tests__/run-cjs-windows-stdio-contract.test.ts
           src/__tests__/release-boundary.test.ts
+          src/__tests__/omc-doctor-cache-pins.test.ts
+          src/__tests__/omc-doctor-cache-links-occupancy.test.ts
           src/installer/__tests__/claude-md-transaction.test.ts
           src/team/__tests__/cli-detection.windows.integration.test.ts
           src/team/__tests__/worker-launch-windows-supervisor.test.ts
