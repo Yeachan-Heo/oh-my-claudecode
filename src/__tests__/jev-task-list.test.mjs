@@ -841,7 +841,7 @@ describe('task list: session retention sweep', () => {
     expect(readdirSync(root()).filter((n) => n.endsWith('.sweeping'))).toEqual([]);
   });
 
-  it('merges a tree in use under a hidden name into the directory a hook made again: its events and claims arrive, nothing the live tree has is replaced, locks and temporary files are left behind', () => {
+  it('merges a tree in use under a hidden name into the directory a hook made again: its events and claims arrive, nothing the live tree has is replaced (its list is kept next to the live list), locks and temporary files are left behind', () => {
     fresh();
     const now = Date.now();
     const put = (path, text) => { mkdirSync(join(path, '..'), { recursive: true }); writeFileSync(path, text); };
@@ -870,7 +870,8 @@ describe('task list: session retention sweep', () => {
     expect(read('_task', '9.json')).toBe('{"agent":"live"}');
     expect(read('_task', '1.json')).toBe('{"agent":"moved"}');
     expect(read('other.events', 'e-other.json')).toBe('{"moved":1}');
-    expect(readdirSync(live).sort()).toEqual(['_task', 'main.events', 'main.json', 'other.events']);
+    expect(readdirSync(live).sort()).toEqual(['_task', 'main.events', 'main.json', 'main.json.moved', 'other.events']);
+    expect(read('main.json.moved')).toBe('{"moved":1}');
   });
 
   it('a list call triggers the sweep', () => {
