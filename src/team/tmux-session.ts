@@ -4374,9 +4374,11 @@ export interface PaneProcessTree {
  * pane's root process, found by parent PID regardless of session or process
  * group, and the process start identity of each (a descendant is kept only
  * when a second read of the process table shows the parent it had in the
- * first, so a PID reused in between is not recorded, and only when the pane's
- * root process is, after those reads, still the same live process it was at the
- * start, with a readable start identity). It only reads and signals nothing, so a caller can take it before an
+ * first and that parent is the pane's root process or a descendant kept in the
+ * same way, so a PID reused in between is not recorded, nor is a process below
+ * one that was replaced, and only when the pane's root process is, after those
+ * reads, still the same live process it was at the start, with a readable start
+ * identity). It only reads and signals nothing, so a caller can take it before an
  * action that detaches descendants from the pane (the termination of the
  * worker's provider) and hand it to `terminatePaneProcessTree` later. Returns null, before any tmux or `ps`
  * call, when the variable is not `1`; also null when nothing can be read or
@@ -4447,11 +4449,22 @@ export async function capturePaneProcessTree(
     for (const pid of pids) startIdentities.set(pid, identityOf(pid));
     // The identities above were read after the process table. A PID that exited and was reused in between is recorded under the
     // identity of its new process; a second read of the table shows it with another parent (or not at all), so only a PID that
-    // still has the parent it had in the first read is kept.
+    // still has the parent it had in the first read is kept. That check alone is not enough for a process below one that was
+    // replaced: if an intermediate process and its child both exited, an unrelated process can take the parent's PID (another parent,
+    // so it is dropped) and start a child that takes the child's PID, which again has the parent number the old child had. So the
+    // second table is walked from the pane's root, in the breadth first order of the first read (a parent comes before its children):
+    // a PID is kept only when its parent is the root or a PID kept before it, and has the same parent in both reads. Every kept PID
+    // then has an unbroken chain of kept ancestors up to the root in the second table, the one read after the identities.
     const again = await readRecords();
-    const kept = pids.filter(
-      (pid) => again.get(pid)?.ppid === records.get(pid)?.ppid,
-    );
+    const keptSet = new Set<number>([panePid]);
+    const kept: number[] = [];
+    for (const pid of pids) {
+      const parent = records.get(pid)?.ppid;
+      if (parent !== undefined && again.get(pid)?.ppid === parent && keptSet.has(parent)) {
+        keptSet.add(pid);
+        kept.push(pid);
+      }
+    }
     if (kept.length === 0) return null;
     // Everything above rests on the root PID of the first read being the pane's root process the whole time. If the pane's process
     // exited and its PID was reused after that read, the children of the new process would pass as the pane's descendants, with start

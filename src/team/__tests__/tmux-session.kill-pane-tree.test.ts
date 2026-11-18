@@ -445,6 +445,147 @@ describe("pane process tree captured first and terminated later (injected depend
     ).resolves.toBeNull();
   });
 
+  describe("a descendant is kept only with an unbroken chain of kept ancestors in the second read", () => {
+    const UNRELATED = 4_000_099;
+    const INTERMEDIATE = CHILD;
+    const REPLACEMENT_CHILD = GRANDCHILD;
+
+    it("an unrelated process that took the PID of an intermediate descendant and started a child on the PID of the old child is not signalled", async () => {
+      process.env.OMC_TEAM_KILL_PANE_TREE = "1";
+      mockPanePid(FAKE_PANE_PID);
+      // The first read shows INTERMEDIATE below the pane and REPLACEMENT_CHILD below it. Both exit after that read; an unrelated process
+      // takes the PID INTERMEDIATE (another parent) and starts a child that takes the PID REPLACEMENT_CHILD, so in the second read the
+      // child has the parent number the old child had. The identities are read between the two reads, so they are the replacements'.
+      const first = new Map([
+        [INTERMEDIATE, { ppid: FAKE_PANE_PID }],
+        [REPLACEMENT_CHILD, { ppid: INTERMEDIATE }],
+      ]);
+      const second = new Map([
+        [INTERMEDIATE, { ppid: UNRELATED }],
+        [REPLACEMENT_CHILD, { ppid: INTERMEDIATE }],
+      ]);
+      let reads = 0;
+      const readProcessRecords = async () => (++reads === 1 ? first : second);
+      const replaced = new Set([INTERMEDIATE, REPLACEMENT_CHILD]);
+      const processIdentity = (pid: number) => (replaced.has(pid) && reads >= 1 ? `replacement-${pid}` : `original-${pid}`);
+      const killProcess = vi.fn();
+      const sleep = vi.fn(async () => undefined);
+
+      const tree = await capturePaneProcessTree(IDENTITY, "%7", { readProcessRecords, processIdentity });
+      expect(reads).toBe(2);
+      expect(tree).toBeNull();
+
+      // the whole flow as a kill of the pane runs it: nothing is signalled and nothing is waited for
+      reads = 0;
+      mockPanePid(FAKE_PANE_PID);
+      await killWorkerPaneProcessTree(IDENTITY, "%7", { readProcessRecords, processIdentity, killProcess, sleep });
+      expect(killProcess).not.toHaveBeenCalled();
+      expect(sleep).not.toHaveBeenCalled();
+    });
+
+    it("the same replacement beside an intact branch signals only the intact branch, deepest first", async () => {
+      process.env.OMC_TEAM_KILL_PANE_TREE = "1";
+      mockPanePid(FAKE_PANE_PID);
+      const SIBLING = 4_000_004;
+      const SIBLING_CHILD = 4_000_005;
+      const first = new Map([
+        [INTERMEDIATE, { ppid: FAKE_PANE_PID }],
+        [SIBLING, { ppid: FAKE_PANE_PID }],
+        [REPLACEMENT_CHILD, { ppid: INTERMEDIATE }],
+        [SIBLING_CHILD, { ppid: SIBLING }],
+      ]);
+      const second = new Map([
+        [INTERMEDIATE, { ppid: UNRELATED }],
+        [SIBLING, { ppid: FAKE_PANE_PID }],
+        [REPLACEMENT_CHILD, { ppid: INTERMEDIATE }],
+        [SIBLING_CHILD, { ppid: SIBLING }],
+      ]);
+      let reads = 0;
+      const calls: Array<[number, NodeJS.Signals | 0]> = [];
+      await killWorkerPaneProcessTree(IDENTITY, "%7", {
+        readProcessRecords: async () => (++reads === 1 ? first : second),
+        processIdentity: (pid) => `identity-${pid}`,
+        killProcess: (pid, signal) => {
+          calls.push([pid, signal]);
+          if (signal === 0) throw Object.assign(new Error("gone"), { code: "ESRCH" });
+        },
+        sleep: async () => undefined,
+      });
+      expect(calls.filter(([, signal]) => signal === "SIGTERM").map(([pid]) => pid)).toEqual([SIBLING_CHILD, SIBLING]);
+      expect(calls.some(([pid]) => pid === REPLACEMENT_CHILD || pid === INTERMEDIATE)).toBe(false);
+    });
+
+    // A (below the pane) -> B -> C, and S (below the pane) -> T. The first read breadth first is A, S, B, T, C.
+    const A = 4_000_001;
+    const B = 4_000_002;
+    const C = 4_000_003;
+    const S = 4_000_004;
+    const T = 4_000_005;
+    const firstRead = (): Map<number, { ppid: number }> =>
+      new Map([
+        [A, { ppid: FAKE_PANE_PID }],
+        [B, { ppid: A }],
+        [C, { ppid: B }],
+        [S, { ppid: FAKE_PANE_PID }],
+        [T, { ppid: S }],
+      ]);
+    const secondRead = (change: (table: Map<number, { ppid: number }>) => void): Map<number, { ppid: number }> => {
+      const table = firstRead();
+      change(table);
+      return table;
+    };
+    const grid: Array<[string, (table: Map<number, { ppid: number }>) => void, number[] | null]> = [
+      ["nothing changed", () => undefined, [A, S, B, T, C]],
+      ["the second table lists the processes in another order", (table) => {
+        const entries = [...table].reverse();
+        table.clear();
+        for (const [pid, record] of entries) table.set(pid, record);
+      }, [A, S, B, T, C]],
+      ["A has another parent", (table) => table.set(A, { ppid: UNRELATED }), [S, T]],
+      ["A is gone", (table) => table.delete(A), [S, T]],
+      ["B has another parent", (table) => table.set(B, { ppid: UNRELATED }), [A, S, T]],
+      ["B is gone", (table) => table.delete(B), [A, S, T]],
+      ["C has another parent", (table) => table.set(C, { ppid: UNRELATED }), [A, S, B, T]],
+      ["C moved below the other branch", (table) => table.set(C, { ppid: S }), [A, S, B, T]],
+      ["C is gone", (table) => table.delete(C), [A, S, B, T]],
+      ["S has another parent", (table) => table.set(S, { ppid: UNRELATED }), [A, B, C]],
+      ["S is gone", (table) => table.delete(S), [A, B, C]],
+      ["T has another parent", (table) => table.set(T, { ppid: UNRELATED }), [A, S, B, C]],
+      ["A and S have other parents", (table) => { table.set(A, { ppid: UNRELATED }); table.set(S, { ppid: UNRELATED }); }, null],
+      ["B and T have other parents, A and S keep theirs", (table) => { table.set(B, { ppid: UNRELATED }); table.set(T, { ppid: UNRELATED }); }, [A, S]],
+    ];
+    it.each(grid)("grid of second reads: %s", async (_label, change, expected) => {
+      process.env.OMC_TEAM_KILL_PANE_TREE = "1";
+      mockPanePid(FAKE_PANE_PID);
+      const readProcessRecords = vi.fn().mockResolvedValueOnce(firstRead()).mockResolvedValue(secondRead(change));
+
+      const tree = await capturePaneProcessTree(IDENTITY, "%7", { readProcessRecords, processIdentity: (pid) => `start-${pid}` });
+
+      expect(tree?.pids ?? null).toEqual(expected);
+    });
+
+    it("what is not kept in the capture is not signalled by the termination that follows", async () => {
+      process.env.OMC_TEAM_KILL_PANE_TREE = "1";
+      mockPanePid(FAKE_PANE_PID);
+      const readProcessRecords = vi
+        .fn()
+        .mockResolvedValueOnce(firstRead())
+        .mockResolvedValue(secondRead((table) => table.set(B, { ppid: UNRELATED })));
+      const killProcess = vi.fn((_pid: number, signal: NodeJS.Signals | 0) => {
+        if (signal === 0) throw Object.assign(new Error("gone"), { code: "ESRCH" });
+      });
+
+      await killWorkerPaneProcessTree(IDENTITY, "%7", {
+        readProcessRecords,
+        processIdentity: (pid) => `start-${pid}`,
+        killProcess,
+        sleep: async () => undefined,
+      });
+
+      expect(killProcess.mock.calls.filter(([, signal]) => signal === "SIGTERM").map(([pid]) => pid)).toEqual([T, S, A]);
+    });
+  });
+
   describe("the pane root is revalidated before its descendants are trusted", () => {
     const OTHER = 4_000_009;
     const identities = (pid: number) => `start-${pid}`;
