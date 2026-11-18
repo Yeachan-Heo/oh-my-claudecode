@@ -19,6 +19,7 @@ import { sharedMemoryTools } from "../tools/shared-memory-tools.js";
 import { getInteropTools } from "../interop/mcp-bridge.js";
 import { deepinitManifestTool } from "../tools/deepinit-manifest.js";
 import { wikiTools } from "../tools/wiki-tools.js";
+import { taskListTool } from "../tools/task-list-tools.js";
 import { TOOL_CATEGORIES, type ToolCategory } from "../constants/index.js";
 import { filterDisabledTools, tagCategory } from "./disable-tools.js";
 export { DISABLE_TOOLS_GROUP_MAP, parseDisabledGroups } from "./disable-tools.js";
@@ -51,6 +52,10 @@ const allTools: ToolDef[] = [
   ...tagCategory(sharedMemoryTools as unknown as ToolDef[], TOOL_CATEGORIES.SHARED_MEMORY),
   { ...(deepinitManifestTool as unknown as ToolDef), category: TOOL_CATEGORIES.DEEPINIT },
   ...tagCategory(wikiTools as unknown as ToolDef[], TOOL_CATEGORIES.WIKI),
+  // Opt-in, as in tool-registry.ts: the task-list tool exists only when OMC_TASK_LIST=1 is set when the server starts.
+  ...(process.env.OMC_TASK_LIST === '1'
+    ? [{ ...(taskListTool as unknown as ToolDef), category: TOOL_CATEGORIES.TASK_LIST }]
+    : []),
   ...interopTools,
 ];
 
@@ -105,6 +110,7 @@ interface ToolNameFilterOptions {
   includeSharedMemory?: boolean;
   includeDeepinit?: boolean;
   includeWiki?: boolean;
+  includeTaskList?: boolean;
 }
 
 function getExcludedCategories(options?: ToolNameFilterOptions): Set<ToolCategory> {
@@ -121,6 +127,7 @@ function getExcludedCategories(options?: ToolNameFilterOptions): Set<ToolCategor
     includeSharedMemory = true,
     includeDeepinit = true,
     includeWiki = true,
+    includeTaskList = true,
   } = options || {};
 
   const excludedCategories = new Set<ToolCategory>();
@@ -136,6 +143,7 @@ function getExcludedCategories(options?: ToolNameFilterOptions): Set<ToolCategor
   if (!includeSharedMemory) excludedCategories.add(TOOL_CATEGORIES.SHARED_MEMORY);
   if (!includeDeepinit) excludedCategories.add(TOOL_CATEGORIES.DEEPINIT);
   if (!includeWiki) excludedCategories.add(TOOL_CATEGORIES.WIKI);
+  if (!includeTaskList) excludedCategories.add(TOOL_CATEGORIES.TASK_LIST);
   return excludedCategories;
 }
 

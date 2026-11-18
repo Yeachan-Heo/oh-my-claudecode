@@ -62,6 +62,60 @@ describe('task_list registration', () => {
   });
 });
 
+// The in-process server (createOmcSession, omcToolsServer, getOmcToolNames) has its own tool aggregate next to the standalone registry.
+describe('task_list in the in-process MCP server', () => {
+  const SAVED_DISABLE = process.env.OMC_DISABLE_TOOLS;
+  afterEach(() => {
+    if (SAVED_DISABLE === undefined) delete process.env.OMC_DISABLE_TOOLS;
+    else process.env.OMC_DISABLE_TOOLS = SAVED_DISABLE;
+  });
+  async function loadServer(taskList: string | undefined) {
+    if (taskList === undefined) delete process.env.OMC_TASK_LIST;
+    else process.env.OMC_TASK_LIST = taskList;
+    vi.resetModules();
+    return import('../mcp/omc-tools-server.js');
+  }
+
+  it('has no task_list tool without OMC_TASK_LIST=1, or for any other value', async () => {
+    for (const value of [undefined, 'true', '0', '']) {
+      const server = await loadServer(value);
+      expect(server.omcToolNames, String(value)).not.toContain('mcp__t__task_list');
+      expect(server.getOmcToolNames(), String(value)).not.toContain('mcp__t__task_list');
+      expect(server._getAllToolNamesForTests(), String(value)).not.toContain('mcp__t__task_list');
+    }
+  }, 30_000);
+
+  it('registers task_list with OMC_TASK_LIST=1 in the tool names and in the names createOmcSession allows', async () => {
+    const server = await loadServer('1');
+    expect(server.omcToolNames).toContain('mcp__t__task_list');
+    expect(server.getOmcToolNames()).toContain('mcp__t__task_list');
+    const { createOmcSession } = await import('../index.js');
+    const session = createOmcSession({ skipConfigLoad: true, skipContextInjection: true });
+    expect(session.queryOptions.options.allowedTools).toContain('mcp__t__task_list');
+    expect((session.queryOptions.options.mcpServers as Record<string, unknown>).t).toBe(server.omcToolsServer);
+  }, 30_000);
+
+  it('takes the same tool and category as the standalone registry, and the category switch and OMC_DISABLE_TOOLS hide it', async () => {
+    const server = await loadServer('1');
+    const registry = await import('../mcp/tool-registry.js');
+    expect(registry.allTools.find((t) => t.name === 'task_list')?.category).toBe('task-list');
+    expect(server.getOmcToolNames({ includeTaskList: false })).not.toContain('mcp__t__task_list');
+    expect(server.getOmcToolNames({ includeLsp: false })).toContain('mcp__t__task_list');
+    // the full list stays unfiltered; the names the server exposes drop the group named in OMC_DISABLE_TOOLS
+    process.env.OMC_DISABLE_TOOLS = 'task-list';
+    const hidden = await loadServer('1');
+    expect(hidden.omcToolNames).not.toContain('mcp__t__task_list');
+    expect(hidden.getOmcToolNames()).not.toContain('mcp__t__task_list');
+    expect(hidden._getAllToolNamesForTests()).toContain('mcp__t__task_list');
+  }, 30_000);
+
+  it('leaves the other tools as they were: the same names with and without the switch, task_list apart', async () => {
+    const without = (await loadServer(undefined)).omcToolNames;
+    const withIt = (await loadServer('1')).omcToolNames;
+    expect(withIt.filter((n) => n !== 'mcp__t__task_list')).toEqual(without);
+  }, 30_000);
+});
+
 describe('task_list replies', () => {
   it('accepts a whole list and names the task in progress', async () => {
     const r = await call({ items: [{ content: 'Read', status: 'completed' }, { content: 'Write hook', status: 'in_progress', note: 'why' }] });
