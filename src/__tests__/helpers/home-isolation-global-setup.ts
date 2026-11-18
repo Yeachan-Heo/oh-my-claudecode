@@ -21,7 +21,7 @@
 import { createHash } from 'node:crypto';
 import { existsSync, mkdtempSync, readFileSync, readdirSync, realpathSync, rmSync } from 'node:fs';
 import { homedir, hostname } from 'node:os';
-import { basename, isAbsolute, join, relative } from 'node:path';
+import { basename, dirname, isAbsolute, join, relative, resolve } from 'node:path';
 
 /**
  * Per-run homes are named `<prefix><host tag>-<pid of the vitest process>-<random>`,
@@ -79,12 +79,30 @@ function canonical(path: string): string {
 }
 
 /**
- * Whether `cwd` is below `home`. Compared on canonical paths: with a symlinked
- * home (mounted or NFS homes) homedir() is the link while process.cwd() is the
- * real path, and the workspace walk runs through the real path.
+ * findWorkspaceRoot() walks up from the checkout and stops at homedir(). With
+ * HOME moved to a child folder, a walk that used to stop at `home` (checkout
+ * at or below it) passes it and every folder above it. Returns the first
+ * workspace marker the walk would newly see, or null. Checks the literal and
+ * the canonical paths: with a symlinked home (mounted or NFS homes) homedir()
+ * is the link while process.cwd() is the real path.
  */
-export function isUnderHome(home: string, cwd: string): boolean {
-  return isInside(home, cwd) || isInside(canonical(home), canonical(cwd));
+export function findExposedWorkspaceMarker(home: string, cwd: string): string | null {
+  const pairs: Array<[string, string]> = [
+    [resolve(home), resolve(cwd)],
+    [canonical(home), canonical(cwd)],
+  ];
+  for (const [h, c] of pairs) {
+    if (h !== c && !isInside(h, c)) continue;
+    let cursor = h;
+    while (true) {
+      const marker = join(cursor, WORKSPACE_MARKER);
+      if (existsSync(marker)) return marker;
+      const parent = dirname(cursor);
+      if (parent === cursor) break;
+      cursor = parent;
+    }
+  }
+  return null;
 }
 
 /**
@@ -102,7 +120,7 @@ export function hostTag(host: string): string {
  * so a concurrent run keeps its own, also when the home is shared with
  * another machine or a container.
  */
-function removeStaleTestHomes(outerHome: string, ownPrefix: string): void {
+export function removeStaleTestHomes(outerHome: string, ownPrefix: string): void {
   let names: string[];
   try {
     names = readdirSync(outerHome);
@@ -128,11 +146,12 @@ export default function setup(): () => void {
 
   // findWorkspaceRoot() stops its upward walk at homedir(). Once HOME moves,
   // a walk from the checkout passes the real home and would adopt a marker
-  // there, which anchors state at the real ~/.omc.
-  if (!nested && isUnderHome(outerHome, process.cwd()) && existsSync(join(outerHome, WORKSPACE_MARKER))) {
+  // there or above it, which anchors state outside the per-run home.
+  const exposedMarker = nested ? null : findExposedWorkspaceMarker(outerHome, process.cwd());
+  if (exposedMarker) {
     throw new Error(
-      `${join(outerHome, WORKSPACE_MARKER)} exists. With HOME redirected for the test run, ` +
-        'tests started from this checkout would write state into the real ~/.omc. ' +
+      `${exposedMarker} exists. With HOME redirected for the test run, ` +
+        'tests started from this checkout would write state outside the per-run home. ' +
         'Remove the marker and run again.',
     );
   }
