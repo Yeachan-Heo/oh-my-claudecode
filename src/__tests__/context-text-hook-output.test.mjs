@@ -17,6 +17,7 @@ import process from 'node:process';
 import {
   capText,
   cleanHookOutput,
+  cleanHostText,
   cleanTextBlockKeeping,
   cutText,
   escapeIdentifier,
@@ -515,7 +516,7 @@ describe('every output of a hook goes through its cleaning point', () => {
     const source = readFileSync(join(REPO_ROOT, 'scripts', 'persistent-mode.mjs'), 'utf8');
     expect(countOf(source, /console\.log\(/g)).toBe(1);
     const emit = source.slice(source.indexOf('function emit(output) {'));
-    expect(emit.slice(0, emit.indexOf('\n}\n'))).toContain('console.log(JSON.stringify(contextText ? contextText.cleanHookOutput(output) : output));');
+    expect(emit.slice(0, emit.indexOf('\n}\n'))).toContain('console.log(JSON.stringify(contextText ? contextText.cleanHookOutput(output, { whole: wholeTexts }) : output));');
     expect(countOf(source, /\bemit\(/g)).toBeGreaterThan(40);
     // The one other write is the plain continue answer of the safety timeout.
     expect(countOf(source, /process\.stdout\.write\(/g)).toBe(1);
@@ -526,8 +527,8 @@ describe('every output of a hook goes through its cleaning point', () => {
     const start = source.indexOf('function emitPreToolUseOutput(');
     const body = source.slice(start, source.indexOf('\n}\n', start));
     expect(countOf(source, /console\.log\(/g)).toBe(countOf(body, /console\.log\(/g));
-    expect(body).toContain('if (contextText) output = contextText.cleanHookOutput(output);');
-    expect(body.indexOf('contextText.cleanHookOutput(output)')).toBeLessThan(body.indexOf('console.log('));
+    expect(body).toContain('if (contextText) output = contextText.cleanHookOutput(output, { whole: wholeTexts });');
+    expect(body.indexOf('contextText.cleanHookOutput(output, ')).toBeLessThan(body.indexOf('console.log('));
   });
 });
 
@@ -698,5 +699,221 @@ describe('session-start: the parts that the module does not compose from cleaned
 
   it('writes the iteration and the maximum of the restored Ralph loop as they are with the switch off', () => {
     expect(ralphRestoreContext('0')).toContain(`Iteration: 3${RTL}${'9'.repeat(100)}/10${BEL}\n`);
+  }, 120000);
+});
+
+// A value that a guard needs back in full (the /goal objective that the enforcer compares, the story id of the approval tag) is
+// never cut by the bound on the output: the bound applies to the text around it. The cases run the hooks as subprocesses, over
+// the length of the value, its kind, the output shape and the part of the output that is cut.
+describe('capText and cleanHookOutput: a text that must come back whole', () => {
+  const LABEL = 'Expected objective: ';
+
+  it('never cuts the last place where a text of `whole` occurs, and cuts the text around it', () => {
+    const value = `value-${'v'.repeat(30000)}-end`;
+    for (const [before, after] of [[0, 0], [25000, 0], [0, 25000], [25000, 25000], [50, 30000]]) {
+      const text = `${before ? `${'a'.repeat(before)}\n` : ''}${LABEL}${value}${after ? `\n${'z'.repeat(after)}` : ''}`;
+      const capped = capText(text, 20000, [value]);
+      const label = `${before} before, ${after} after`;
+      expect(capped.includes(`${LABEL}${value}`), label).toBe(true);
+      if (before + after + LABEL.length > 20000) {
+        expect(capped.length, label).toBeLessThan(20000 + value.length + 200);
+        expect(capped, label).toMatch(/\[… \d+ characters omitted …\]/);
+      } else {
+        expect(capped, label).toBe(text);
+      }
+    }
+  });
+
+  it('keeps the label next to the value and the start and the end of the rest', () => {
+    const value = 'w'.repeat(24000);
+    const text = `HEAD\n${'h'.repeat(30000)}\nmiddle\n${'t'.repeat(30000)}\nTAIL ${LABEL}${value}`;
+    const capped = capText(text, 20000, [value]);
+    expect(capped.startsWith('HEAD')).toBe(true);
+    expect(capped.endsWith(`TAIL ${LABEL}${value}`)).toBe(true);
+    expect(capped.length).toBeLessThan(20000 + value.length + 200);
+  });
+
+  it('is the same as before without a text of `whole`, and when no text of `whole` occurs', () => {
+    const texts = [`START${'m'.repeat(30000)}END`, Array.from({ length: 4000 }, (_, index) => `- run-${index}`).join('\n'), `${'ab '.repeat(9000)}`, 'short'];
+    for (const text of texts) {
+      const plain = capText(text, 20000);
+      for (const whole of [undefined, null, [], [''], ['absent-text'], [7, null], 'not-a-list']) expect(capText(text, 20000, whole)).toBe(plain);
+    }
+  });
+
+  it('keeps the text whole when the text around the kept places fits the limit', () => {
+    const value = 'v'.repeat(40000);
+    const text = `note ${value} end`;
+    expect(capText(text, 20000, [value])).toBe(text);
+    expect(capText(text, 20000, [value, 'note'])).toBe(text);
+  });
+
+  it('protects one place for each text, so a short text repeated through a megabyte does not weaken the bound', () => {
+    const text = 'a '.repeat(500000);
+    const started = Date.now();
+    const capped = capText(text, 20000, ['a']);
+    expect(Date.now() - started).toBeLessThan(5000);
+    expect(capped.length).toBeLessThan(20100);
+    expect(capped.endsWith('a ')).toBe(true);
+    const many = Array.from({ length: 200 }, (_, index) => `id-${index}`);
+    const listed = `${'filler line\n'.repeat(50000)}${many.join('\n')}`;
+    const cappedList = capText(listed, 20000, many);
+    for (const id of many) expect(cappedList.includes(id)).toBe(true);
+    expect(cappedList.length).toBeLessThan(20000 + many.join('\n').length + 2 * 256);
+  });
+
+  it('joins texts that overlap, keeps two places apart and never cuts inside a surrogate pair at a cut next to a kept text', () => {
+    const first = `first-${'1'.repeat(3000)}`;
+    const second = `second-${'2'.repeat(3000)}`;
+    const text = `${'x'.repeat(30000)}\n${first}\n${'y'.repeat(30000)}\n${second}\n${'z'.repeat(30000)}`;
+    const capped = capText(text, 20000, [first, second, `${first}\n`]);
+    expect(capped.includes(first)).toBe(true);
+    expect(capped.includes(second)).toBe(true);
+    const pairs = `${EMOJI.repeat(20000)}\n`.concat(`value-${'q'.repeat(100)}`);
+    const cappedPairs = capText(pairs, 20000, [`value-${'q'.repeat(100)}`]);
+    expect(cappedPairs.endsWith(`value-${'q'.repeat(100)}`)).toBe(true);
+    expect(/[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/.test(cappedPairs)).toBe(false);
+  });
+
+  it('cleanHookOutput keeps the texts of `whole` and the written identifiers in every text field, and cuts the rest', () => {
+    const value = `goal-${'g'.repeat(30000)}`;
+    const storyId = `US-${'9'.repeat(30000)}${FE0F}`;
+    const written = JSON.stringify(storyId).replace(FE0F, '\\ufe0f');
+    const reason = `${'x'.repeat(30000)}\n${LABEL}${value}\ntag ${written}`;
+    const cleaned = cleanHookOutput(
+      { decision: 'block', reason: `${'x'.repeat(30000)}\n${LABEL}${value}\ntag story-id="${storyId}"`, hookSpecificOutput: { permissionDecisionReason: reason } },
+      { whole: [value], identifiers: [storyId] },
+    );
+    expect(cleaned.reason.includes(`${LABEL}${value}\n`)).toBe(true);
+    expect(cleaned.reason.includes(`tag story-id=${written}`)).toBe(true);
+    expect(cleaned.hookSpecificOutput.permissionDecisionReason.includes(`${LABEL}${value}\ntag ${written}`)).toBe(true);
+    expect(cleaned.reason).toMatch(/\[… \d+ characters omitted …\]/);
+    expect(cleaned.reason.length).toBeLessThan(HOOK_OUTPUT_MAX_CHARS + value.length + written.length + 500);
+  });
+
+  /* The hooks, as subprocesses. */
+
+  const lengths = [15000, 19900, 20500, 24394, 100000];
+  const kinds = {
+    plain: (index) => `step${index}`,
+    'removed characters': (index) => `step${index}${RTL}${BEL}`,
+    'surrogate pairs': (index) => `s${EMOJI}${index}`,
+    'line breaks': (index) => `step${index}\n \t`,
+  };
+  const objectiveOf = (kind, length) => {
+    let text = '';
+    for (let index = 0; text.length < length + 20; index += 1) text += `${kinds[kind](index)} `;
+    return text.slice(0, length);
+  };
+  // What the hooks show for an objective: the text cleaned to one line, as a goal that the model types has to match.
+  const shownOf = (objective) => cleanHostText(objective, Infinity);
+
+  function guardRun(f, objective, goal, { shape = 'claude', switchValue = '1' } = {}) {
+    const sessionId = `goal-${Math.random().toString(36).slice(2, 8)}`;
+    writeModeState(f, sessionId, 'ultragoal-state.json', { objective });
+    const transcript = join(f.dir, `${sessionId}.jsonl`);
+    writeFileSync(transcript, `${JSON.stringify({ type: 'user', message: { role: 'user', content: `<command-name>/goal</command-name>\n<command-args>${goal}</command-args>` } })}\n`);
+    const result = spawnSync(process.execPath, [join(REPO_ROOT, 'scripts', 'pre-tool-enforcer.mjs')], {
+      cwd: f.project,
+      input: JSON.stringify({ hook_event_name: 'PreToolUse', tool_name: 'Bash', tool_input: { command: 'echo show-state' }, session_id: sessionId, cwd: f.project, transcript_path: transcript }),
+      encoding: 'utf8',
+      timeout: 60000,
+      maxBuffer: 64 * 1024 * 1024,
+      env: { ...cleanEnv(), HOME: f.home, USERPROFILE: f.home, CLAUDE_CONFIG_DIR: f.config, OMC_STATE_DIR: '', OMC_JEV_QUIET: '1', ...(shape === 'codex' ? { PLUGIN_ROOT: '/plugin' } : {}), ...(switchValue === null ? {} : { OMC_CONTEXT_TEXT_SANITIZE: switchValue }) },
+    });
+    expect(result.status, result.stderr).toBe(0);
+    const output = JSON.parse(result.stdout.trim());
+    const specific = output.hookSpecificOutput ?? {};
+    return { denied: specific.permissionDecision === 'deny', reason: String(specific.permissionDecisionReason ?? output.reason ?? '') };
+  }
+
+  for (const kind of Object.keys(kinds)) {
+    it(`pre-tool-enforcer, objective with ${kind}: the Expected objective is whole at every length and in both shapes, and typing it back passes`, () => {
+      const f = makeProject('goal-guard');
+      for (const length of lengths) {
+        const objective = objectiveOf(kind, length);
+        const shown = shownOf(objective);
+        for (const shape of ['claude', 'codex']) {
+          const label = `${length} characters, ${shape}`;
+          const { denied, reason } = guardRun(f, objective, 'another goal', { shape });
+          expect(denied, label).toBe(true);
+          expect(reason.endsWith(`${LABEL}${shown}`), label).toBe(true);
+          expect(reason, label).not.toMatch(/characters omitted/);
+          expect(dirty(reason), label).toBe(false);
+          // The value is read from the reason, as the model reads it, and typed back as the /goal objective.
+          if (shape === 'claude') {
+            const typed = reason.slice(reason.indexOf(LABEL) + LABEL.length);
+            expect(guardRun(f, objective, typed, { shape }).denied, label).toBe(false);
+          }
+        }
+      }
+    }, 600000);
+  }
+
+  it('pre-tool-enforcer: the output is the same as before with the switch off, at 24394 characters', () => {
+    const f = makeProject('goal-guard');
+    const objective = objectiveOf('plain', 24394);
+    for (const switchValue of ['0', null]) {
+      const { denied, reason } = guardRun(f, objective, 'another goal', { switchValue });
+      expect(denied).toBe(true);
+      expect(reason.endsWith(`${LABEL}${objective.trim()}`)).toBe(true);
+    }
+  }, 120000);
+
+  function stopRun(f, objective, toolError) {
+    const sessionId = `ug-${Math.random().toString(36).slice(2, 8)}`;
+    writeModeState(f, sessionId, 'ultragoal-state.json', { objective, reinforcement_count: 0, max_reinforcements: 50 });
+    const errorPath = join(f.project, '.omc', 'state', 'last-tool-error.json');
+    if (toolError) writeFileSync(errorPath, JSON.stringify({ timestamp: new Date().toISOString(), retry_count: 1, ...toolError }));
+    else rmSync(errorPath, { force: true });
+    return { sessionId, output: runStop(f, sessionId, { switchValue: '1' }) };
+  }
+
+  for (const kind of Object.keys(kinds)) {
+    it(`persistent-mode, objective with ${kind}: the /goal objective of the Stop block is whole, also when the text before it is cut`, () => {
+      const f = makeProject('goal-stop');
+      const label = 'Claude /goal objective: ';
+      for (const length of lengths) {
+        const objective = objectiveOf(kind, length);
+        const shown = shownOf(objective);
+        for (const toolError of [null, { tool_name: 'n'.repeat(30000), error: 'generic' }]) {
+          const text = textOf(stopRun(f, objective, toolError).output);
+          const name = `${length} characters, ${toolError ? 'long tool error' : 'no tool error'}`;
+          expect(text.endsWith(`${label}${shown}`), name).toBe(true);
+          expect(dirty(text), name).toBe(false);
+          if (toolError) {
+            expect(text, name).toMatch(/\[… \d+ characters omitted …\]/);
+            expect(text, name).toContain('/oh-my-claudecode:cancel');
+          } else {
+            expect(text, name).not.toMatch(/characters omitted/);
+          }
+        }
+      }
+    }, 600000);
+  }
+
+  it('the objective that the Stop block shows is accepted by the enforcer as the /goal', () => {
+    const f = makeProject('goal-cross');
+    const objective = objectiveOf('removed characters', 60000);
+    const text = textOf(stopRun(f, objective, null).output);
+    const shown = text.slice(text.indexOf('Claude /goal objective: ') + 'Claude /goal objective: '.length);
+    expect(shown).toBe(shownOf(objective));
+    expect(shown.length).toBeGreaterThan(HOOK_OUTPUT_MAX_CHARS);
+    expect(guardRun(f, objective, shown).denied).toBe(false);
+  }, 120000);
+
+  it('persistent-mode: a story id of any length stays whole in the approval tag, written as a JSON string', () => {
+    const f = makeProject('story-id');
+    const sessionId = 'story-long';
+    writeModeState(f, sessionId, 'ralph-state.json', { iteration: 1, max_iterations: 100, prompt: 'finish' });
+    for (const [length, junk] of [[100, FE0F], [25000, FE0F], [25000, '']]) {
+      const storyId = `US-${'9'.repeat(length)}${junk}`;
+      const file = writeVerification(f, sessionId, { original_task: 'finish', story_id: storyId });
+      const output = runStop(f, sessionId, { env: { BRIDGE_VERIFICATION_FILE: file, BRIDGE_SHAPE: 'reason' } });
+      const text = textOf(output);
+      const written = junk ? writtenName(storyId, [junk]) : `"${storyId}"`;
+      expect(text, `${length}`).toContain(`<ralph-approved critic="architect" request-id="req-1" story-id=${written}>VERIFIED_COMPLETE</ralph-approved>`);
+      expect(dirty(text), `${length}`).toBe(false);
+    }
   }, 120000);
 });

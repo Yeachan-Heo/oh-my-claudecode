@@ -2174,7 +2174,10 @@ function evaluateUltragoalPreToolEnforcement(stateDir, directory, sessionId, dat
   const mismatch = actualObjective
     ? `current Claude /goal appears unrelated: "${contextText ? contextText.cleanHostText(actual.objective) : actual.objective}".`
     : 'no active Claude /goal snapshot was visible to the hook.';
-  return `[ULTRAGOAL /GOAL REQUIRED] Active ultragoal state requires the matching Claude /goal before tools run; ${mismatch} Activate /goal with the ultragoal objective, or set ALLOW_ULTRAGOAL_WITHOUT_GOAL=1 to bypass this guard intentionally. Expected objective: ${(contextText ? contextText.cleanHostText(expected, Infinity) : expected) || '<record one in ultragoal-state.json or .omc/ultragoal/goals.json>'}`;
+  // The expected objective is a value that the model has to give back in full, so the bound on the output does not cut it.
+  const expectedText = contextText ? contextText.cleanHostText(expected, Infinity) : expected;
+  if (contextText && expectedText) wholeTexts.push(expectedText);
+  return `[ULTRAGOAL /GOAL REQUIRED] Active ultragoal state requires the matching Claude /goal before tools run; ${mismatch} Activate /goal with the ultragoal objective, or set ALLOW_ULTRAGOAL_WITHOUT_GOAL=1 to bypass this guard intentionally. Expected objective: ${expectedText || '<record one in ultragoal-state.json or .omc/ultragoal/goals.json>'}`;
 }
 
 function hasActiveJsonMode(stateDir, { allowSessionTagged = false } = {}) {
@@ -2611,8 +2614,9 @@ function emitPreToolUseOutput(output, input, space = 0) {
   output = withShellCheckContext(output);
   // With the text cleaning switch on, every text of the output (a refusal, a model routing notice, the shell check warnings, the
   // reminders) is cleaned and bounded here, at the one place where the hook emits, so that no branch can skip it. updatedInput,
-  // the decision and the flags are not touched. With the switch off the output is written as it is.
-  if (contextText) output = contextText.cleanHookOutput(output);
+  // the decision and the flags are not touched; a text that the model has to give back in full (wholeTexts) is not cut. With
+  // the switch off the output is written as it is.
+  if (contextText) output = contextText.cleanHookOutput(output, { whole: wholeTexts });
   flushJevRouting(output);
   if (!isCodexPreToolUse(input)) {
     console.log(JSON.stringify(output, null, space));
@@ -2666,6 +2670,8 @@ function emitPreToolUseOutput(output, input, space = 0) {
 // deny reason, and every output of the hook is cleaned and bounded in emitPreToolUseOutput, only when the switch is on. main()
 // loads the module right after it reads the input; with the switch off nothing is imported.
 let contextText = null;
+// Texts that a refusal asks the model to give back exactly (the expected /goal objective): cleanHookOutput does not cut them.
+const wholeTexts = [];
 // Plan write guard (opt-in, OMC_PLANNER_WRITE_GUARD=1): a Write, Edit, MultiEdit or NotebookEdit call made inside a
 // subagent whose agent_type is in the guarded list is denied unless the target is a Markdown file under <cwd>/.omc/plans/.
 // The list comes from OMC_PLANNER_WRITE_GUARD_TYPES (comma separated, exact match after trimming; default:

@@ -1671,12 +1671,14 @@ function delegateToBridge(input) {
 // Opt-in text cleaning (OMC_CONTEXT_TEXT_SANITIZE=1 or true): the Ralph task line and the /goal objective in Stop blocks are
 // cleaned only when the switch is on. main() loads the module; with the switch off nothing is imported.
 let contextText = null;
+// Texts that a Stop output asks the model to give back exactly (the /goal objective): cleanHookOutput does not cut them.
+const wholeTexts = [];
 
 // With the switch on, every text that a Stop output carries is cleaned and bounded here, at the one place where the hook emits, so
 // that no branch (a delegation to the bridge, a fallback, a tool error notice, a workflow stage prompt) can skip it. With the
 // switch off the output is written as it is.
 function emit(output) {
-  console.log(JSON.stringify(contextText ? contextText.cleanHookOutput(output) : output));
+  console.log(JSON.stringify(contextText ? contextText.cleanHookOutput(output, { whole: wholeTexts }) : output));
 }
 
 // The reviewer prompt that the bridge composes quotes the original task, the completion claim and the earlier reviewer feedback
@@ -1694,6 +1696,8 @@ async function boundDelegated(delegated, { directory, omcRoot, sessionId, task }
   };
   for (const [field, limit] of DELEGATED_QUOTE_LIMITS) quote(request?.[field], limit);
   quote(task, DELEGATED_QUOTE_LIMITS[0][1]);
+  // The story id has to be copied exactly, so emit() does not cut it either, in the form in which it stands in the tag.
+  if (typeof request?.story_id === "string" && request.story_id) wholeTexts.push(contextText.escapeIdentifier(request.story_id));
   return contextText.cleanHookOutput(delegated, { identifiers: [request?.story_id], substitutions });
 }
 
@@ -2084,7 +2088,12 @@ async function main() {
 
         let reason = `[ULTRAGOAL #${newCount}/${maxReinforcements}] Ultragoal mode is active. Continue the durable goal workflow, keep the matching Claude /goal active, and checkpoint .omc/ultragoal/ledger.jsonl before stopping. When all ultragoal stories are complete and the final quality gate passes, run /oh-my-claudecode:cancel to cleanly exit.`;
         const objective = getUltragoalObjective(ultragoal.state, omcRoot);
-        if (objective) reason += `\nClaude /goal objective: ${contextText ? contextText.cleanHostText(objective, Infinity) : objective}`;
+        if (objective) {
+          // The objective is a value that the model has to give back in full, so the bound on the output does not cut it.
+          const objectiveText = contextText ? contextText.cleanHostText(objective, Infinity) : objective;
+          if (contextText && objectiveText) wholeTexts.push(objectiveText);
+          reason += `\nClaude /goal objective: ${objectiveText}`;
+        }
         if (errorGuidance) {
           reason = errorGuidance + reason;
         }

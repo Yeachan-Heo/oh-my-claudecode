@@ -194,23 +194,64 @@ export function cutText(value, max) {
 // survives. Each retained part ends or starts at a line boundary, so a line that holds an identifier (a path, a glob, a name,
 // an id) stays whole or goes whole; a part that the line boundary would leave empty (one very long line) is cut at the
 // character limit instead, and no cut splits a surrogate pair.
-export function capText(value, max) {
+//
+// `whole` lists the texts that the reader has to give back exactly (a goal objective that a guard compares, an id that has to be
+// copied): the last place where each occurs is never cut, so the result can be longer than `max` by the length of those texts,
+// and the limit applies to everything around them (a part of up to 256 characters next to such a text is kept whole). A text that does not occur, and an empty text, are ignored. Without any such
+// text the result is the same as for a call without `whole`.
+function capPlain(text, limit) {
+  if (text.length <= limit) return text;
+  const room = limit - 40;
+  const headLength = Math.floor(room * 0.4);
+  let headEnd = headLength;
+  while (headEnd > 0 && isHighSurrogate(text.charCodeAt(headEnd - 1))) headEnd -= 1;
+  let tailStart = text.length - (room - headLength);
+  while (tailStart < text.length && isLowSurrogate(text.charCodeAt(tailStart))) tailStart += 1;
+  // The head ends at the last line end at or before its limit; the tail starts after the first line end at or after its limit.
+  const headLineEnd = text.lastIndexOf('\n', headEnd);
+  if (headLineEnd > 0) headEnd = headLineEnd;
+  const tailLineEnd = text.indexOf('\n', tailStart - 1);
+  if (tailLineEnd !== -1 && tailLineEnd + 1 < text.length) tailStart = tailLineEnd + 1;
+  return `${text.slice(0, headEnd)}\n[… ${tailStart - headEnd} characters omitted …]\n${text.slice(tailStart)}`;
+}
+
+// The last place where each text of `whole` occurs, as [start, end) pairs in order, with overlapping places joined.
+function wholeSpans(text, whole) {
+  const spans = [];
+  for (const part of new Set(Array.isArray(whole) ? whole.filter((item) => typeof item === 'string' && item !== '') : [])) {
+    const start = text.lastIndexOf(part);
+    if (start !== -1) spans.push([start, start + part.length]);
+  }
+  spans.sort((first, second) => first[0] - second[0]);
+  const joined = [];
+  for (const span of spans) {
+    const last = joined[joined.length - 1];
+    if (last && span[0] <= last[1]) last[1] = Math.max(last[1], span[1]);
+    else joined.push([...span]);
+  }
+  return joined;
+}
+
+export function capText(value, max, whole) {
   try {
     const text = toText(value);
     const limit = typeof max === 'number' && max >= 64 ? Math.floor(max) : Infinity;
     if (text.length <= limit) return text;
-    const room = limit - 40;
-    const headLength = Math.floor(room * 0.4);
-    let headEnd = headLength;
-    while (headEnd > 0 && isHighSurrogate(text.charCodeAt(headEnd - 1))) headEnd -= 1;
-    let tailStart = text.length - (room - headLength);
-    while (tailStart < text.length && isLowSurrogate(text.charCodeAt(tailStart))) tailStart += 1;
-    // The head ends at the last line end at or before its limit; the tail starts after the first line end at or after its limit.
-    const headLineEnd = text.lastIndexOf('\n', headEnd);
-    if (headLineEnd > 0) headEnd = headLineEnd;
-    const tailLineEnd = text.indexOf('\n', tailStart - 1);
-    if (tailLineEnd !== -1 && tailLineEnd + 1 < text.length) tailStart = tailLineEnd + 1;
-    return `${text.slice(0, headEnd)}\n[… ${tailStart - headEnd} characters omitted …]\n${text.slice(tailStart)}`;
+    const spans = wholeSpans(text, whole);
+    if (spans.length === 0) return capPlain(text, limit);
+    // The text between the kept places shares the limit by length; a part of up to 256 characters stays whole, so the label that
+    // stands next to a kept text (a heading, a name and a colon) is not cut.
+    const free = text.length - spans.reduce((sum, [start, end]) => sum + end - start, 0);
+    if (free <= limit) return text;
+    let result = '';
+    let position = 0;
+    for (const [start, end] of spans) {
+      const gap = text.slice(position, start);
+      result += capPlain(gap, Math.max(256, Math.floor((limit * gap.length) / free))) + text.slice(start, end);
+      position = end;
+    }
+    const rest = text.slice(position);
+    return result + capPlain(rest, Math.max(256, Math.floor((limit * rest.length) / free)));
   } catch {
     return '';
   }
@@ -222,7 +263,10 @@ export function capText(value, max) {
 // permissionDecisionReason of hookSpecificOutput. Every other field (decision, permissionDecision, updatedInput, flags) is
 // copied as it is. `options.substitutions` ([text, replacement] pairs, see substituteText) run first, `options.identifiers`
 // are written exactly (see cleanTextBlockKeeping), and each text is cut to `options.max` characters (default 20000, see
-// capText). A value that is not an object is returned as it is, and a failure returns the output unchanged.
+// capText). The identifiers in their written form and the texts of `options.whole` (text that the reader has to give back
+// exactly, in the form in which it stands in the output) are not cut: capText keeps the last place of each whole, so a text
+// that holds one can be longer than `max` by its length. A value that is not an object is returned as it is, and a failure
+// returns the output unchanged.
 export const HOOK_OUTPUT_MAX_CHARS = 20000;
 const OUTPUT_TEXT_FIELDS = ['reason', 'message', 'systemMessage', 'stopReason'];
 const HOOK_OUTPUT_TEXT_FIELDS = ['additionalContext', 'permissionDecisionReason'];
@@ -230,9 +274,10 @@ const HOOK_OUTPUT_TEXT_FIELDS = ['additionalContext', 'permissionDecisionReason'
 export function cleanHookOutput(output, options = {}) {
   try {
     if (!output || typeof output !== 'object' || Array.isArray(output)) return output;
-    const { identifiers = [], substitutions = [], max = HOOK_OUTPUT_MAX_CHARS } = options ?? {};
+    const { identifiers = [], substitutions = [], max = HOOK_OUTPUT_MAX_CHARS, whole = [] } = options ?? {};
+    const kept = [...(Array.isArray(whole) ? whole : []), ...(Array.isArray(identifiers) ? identifiers : []).map((name) => escapeIdentifier(name))];
     const clean = (value) => (typeof value === 'string'
-      ? capText(cleanTextBlockKeeping(substituteText(value, substitutions), identifiers), max)
+      ? capText(cleanTextBlockKeeping(substituteText(value, substitutions), identifiers), max, kept)
       : value);
     const result = { ...output };
     for (const field of OUTPUT_TEXT_FIELDS) if (field in result) result[field] = clean(result[field]);
