@@ -518,7 +518,7 @@ describe('redactTokens key-shape masking (OMC_REDACT_KEY_SHAPES=1)', () => {
       // together and one place at a time, for each shape of index.
       it('masks the value whichever blanks stand around the index parts (grid)', () => {
         const blanks = ['', ' ', '\t', ' '.repeat(70), ' \t '];
-        const indexes = ['"a"', "'a'", 'a', '1', '"a b"', ''];
+        const indexes = ['"a"', "'a'", 'a', '1', '"a b"', '', '"a]b"', "'a]b'", '"]"', '"]]a]"', '"a\\"]b"', "'a\\']b'", '"[a]"', '"a=b]c:d"'];
         const places = ['n', 'o1', 'i1', 'c1', 'o2', 'i2', 'c2', 's', 'v']; // name, open, inside, close, ..., separator, value
         const build = (at: (place: string) => string, index: string, value: string): string =>
           `CREDENTIALS${at('n')}[${at('o1')}${index}${at('i1')}]${at('c1')}[${at('o2')}${index}${at('i2')}]${at('c2')}=${at('s')}${value}`;
@@ -535,6 +535,20 @@ describe('redactTokens key-shape masking (OMC_REDACT_KEY_SHAPES=1)', () => {
           }
         }
         expect(cases).toBe(indexes.length * blanks.length * (places.length + 1));
+      });
+
+      it('a quoted key can contain a ] (the example from review) and the key of a later index too', () => {
+        expect(redactTokens('CREDENTIALS["a]b"]="canary"')).toBe('CREDENTIALS["a]b"]="****"');
+        expect(redactTokens("CREDENTIALS['a]b']=canary")).toBe("CREDENTIALS['a]b']=****");
+        expect(redactTokens('CREDENTIALS["a]b"]["c]d"]: canary TOKEN=x')).toBe('CREDENTIALS["a]b"]["c]d"]: **** TOKEN=****');
+        expect(redactTokens('CREDENTIALS [ "a]b" ] = canary')).toBe('CREDENTIALS [ "a]b" ] = ****');
+        expect(redactTokens('CREDENTIALS["a\\"]b"]=canary')).toBe('CREDENTIALS["a\\"]b"]=****'); // escaped quote
+        expect(redactTokens("CREDENTIALS['a\\']b']=canary")).toBe("CREDENTIALS['a\\']b']=****"); // escape in single quotes
+      });
+
+      it('a quoted key that is never closed, or is not followed by ], does not hide the next assignment', () => {
+        expect(redactTokens('CREDENTIALS["a]b TOKEN=canary')).toBe('CREDENTIALS["a]b TOKEN=****');
+        expect(redactTokens('CREDENTIALS["a]b" x TOKEN=canary')).toBe('CREDENTIALS["a]b" x TOKEN=****');
       });
 
       it('reads a [ both ways: an index that swallows the separator cannot hide the value', () => {
@@ -721,6 +735,9 @@ describe('redactTokens key-shape masking (OMC_REDACT_KEY_SHAPES=1)', () => {
       ['alternating quote types', `PASSWORD="a'TOKEN='b"c'KEY="`.repeat(5000)],
       ['names followed by blanks and index openers', 'KEY [ '.repeat(20000)],
       ['index parts separated by blanks', 'KEY' + ' ["a"]'.repeat(20000)],
+      ['quoted index keys that hold a closing bracket', 'KEY' + '["a]"]'.repeat(20000)],
+      ['quoted index keys with escapes and blanks', "KEY" + " [ 'a\\' ] ".repeat(20000)],
+      ['quoted index openers, one closing quote', 'KEY' + '["'.repeat(60000) + '"]'],
       ['names followed by long blank runs', ('KEY' + ' '.repeat(97) + '[').repeat(1100)],
     ];
 

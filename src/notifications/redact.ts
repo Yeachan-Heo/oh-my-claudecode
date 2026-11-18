@@ -156,6 +156,8 @@ interface KeyShapeTables {
   ends: Map<string, Int32Array>;
   /** For every position p, the index of the first `]` at or after p, or -1. */
   closeFrom?: Int32Array;
+  /** Per quote character: the ends of a quoted index key, in which a backslash escapes the next character in both kinds of quote. */
+  keyEnds: Map<string, Int32Array>;
   /** Positions of the quote and bracket run after a name that have been followed already. */
   followed?: Uint8Array;
 }
@@ -169,9 +171,11 @@ function isSkippable(c: string | undefined): boolean {
  * `[index]` parts of any length may stand between the name and the separator, and spaces and tabs may stand
  * anywhere between those parts (`NAME ["a"] ["b"] = x`). A `[` is read both ways: as the start of an index,
  * which is jumped over up to the next `]`, and as an ordinary character, so that an index that swallows the
- * separator (`PASSWORD[=x ]`) cannot hide it. Every position is followed at most once for the whole input (a
- * position gives the same separators whichever name led to it), so the total cost is linear however many
- * names and brackets there are. A run of spaces and tabs is entered only at its start (the character before
+ * separator (`PASSWORD[=x ]`) cannot hide it. A `[` followed by a quoted key is also read as an index that
+ * ends at the first `]` after the closing quote, so a `]` inside the key (`CREDENTIALS["a]b"]=x`) does not end
+ * the index; the key is read with and without backslash escapes (the escape is optional in single quotes).
+ * Every position is followed at most once for the whole input (a position gives the same separators
+ * whichever name led to it), so the total cost is linear however many names and brackets there are. A run of spaces and tabs is entered only at its start (the character before
  * it is never a space or a tab), so skipping it does not make the scan quadratic.
  */
 function separatorsAfter(input: string, from: number, tables: KeyShapeTables): number[] {
@@ -201,6 +205,22 @@ function separatorsAfter(input: string, from: number, tables: KeyShapeTables): n
     if (input[k] === '[') {
       const close = (tables.closeFrom ??= closeIndexes(input))[k + 1];
       if (close >= 0) stack.push(close + 1);
+      const open = skipBlanks(k + 1);
+      const quote = input[open];
+      if (quote === '"' || quote === "'") {
+        for (const escaped of quote === '"' ? [true] : [false, true]) {
+          const map: Map<string, Int32Array> = quote === "'" && escaped ? tables.keyEnds : tables.ends; // double quotes: the table of values
+          let table: Int32Array | undefined = map.get(quote);
+          if (!table) {
+            table = valueEnds(input, quote, escaped);
+            map.set(quote, table);
+          }
+          const end: number = table[open + 1];
+          if (input[end] !== quote) continue; // the key is not closed on this line
+          const after = skipBlanks(end + 1);
+          if (input[after] === ']') stack.push(after + 1);
+        }
+      }
     }
     stack.push(k + 1);
   }
@@ -220,16 +240,17 @@ function closeIndexes(input: string): Int32Array {
  * any value is found in constant time and values that contain other values never make the scan quadratic.
  * A quoted value ends at the next matching quote or line break; in double quotes a backslash escapes the
  * next character, but never a line break; in single quotes it is literal. A bare value ends at a space, tab,
- * line break, quote, `&`, `;`, `|`, `,`, `)` or `}`.
+ * line break, quote, `&`, `;`, `|`, `,`, `)` or `}`. With `escapes` set, a backslash also escapes in single
+ * quotes (a quoted index key).
  */
-function valueEnds(input: string, quote: string): Int32Array {
+function valueEnds(input: string, quote: string, escapes: boolean = quote === '"'): Int32Array {
   const n = input.length;
   const ends = new Int32Array(n + 1);
   ends[n] = n;
   for (let p = n - 1; p >= 0; p--) {
     const c = input[p];
     if (quote ? c === quote || c === '\n' : ' \t\r\n"\'&;|,)}'.includes(c)) ends[p] = p;
-    else if (quote === '"' && c === '\\' && p + 1 < n && input[p + 1] !== '\n') ends[p] = ends[p + 2];
+    else if (quote && escapes && c === '\\' && p + 1 < n && input[p + 1] !== '\n') ends[p] = ends[p + 2];
     else ends[p] = ends[p + 1];
   }
   return ends;
@@ -259,7 +280,7 @@ function valueEnds(input: string, quote: string): Int32Array {
 function keyShapeRanges(input: string): MaskRange[] {
   const n = input.length;
   const ranges: MaskRange[] = [];
-  const tables: KeyShapeTables = { ends: new Map() };
+  const tables: KeyShapeTables = { ends: new Map(), keyEnds: new Map() };
   let keySkipUntil = 0;
   let jwtSkipUntil = 0;
   for (let i = 0; i < n; i++) {
