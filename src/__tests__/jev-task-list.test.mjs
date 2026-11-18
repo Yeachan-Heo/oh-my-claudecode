@@ -509,13 +509,17 @@ describe('task list: storage library', () => {
     expect(rows.every((x) => Number.isInteger(x.ms) && x.ms > 0 && x.agent === 'r14' && !('panel' in x))).toBe(true);
   });
 
-  it('a task that does not change the list leaves no file and no event', async () => {
+  it('a call that does not change the list leaves no list file; its event waits for an older call and goes once none can come', async () => {
     const sid = session();
     await stan(sid, 'TaskUpdate', { taskId: '9999', status: 'completed' }, { agent_id: 'o4' });
     await stan(sid, LIST_TOOL, { advance: true }, { agent_id: 'o4' });
     expect(existsSync(listFile(sid, 'o4'))).toBe(false);
-    expect(eventFiles(sid, 'o4')).toHaveLength(0);
+    expect(eventFiles(sid, 'o4')).toHaveLength(2); // kept: a TaskCreate or a replacement that is held up may still become visible
     expect(L.readList(sid, 'o4', envFor())).toBeNull();
+    // a later call, more than LATE_EVENT_MS ahead, shows that no held-up hook can precede the two any more (it waits itself)
+    L.recordListCall(postToolUse(sid, 'TaskUpdate', { taskId: '9999', status: 'completed' }, { agent_id: 'o4' }), envFor(), Date.now() + L.LATE_EVENT_MS + 1000);
+    expect(eventFiles(sid, 'o4')).toHaveLength(1);
+    expect(existsSync(listFile(sid, 'o4'))).toBe(false);
   });
 
   it('the event file keeps masked text, also for items sent as JSON text', async () => {
@@ -1079,6 +1083,101 @@ describe('task list: an event that becomes visible after a later call was folded
         });
       }
     }
+  });
+
+  // The opposite order: a call that edits tasks is visible and finds nothing to change because the older call it depends on (the TaskCreate that
+  // makes its task, the call that replaces the list) is held up. A is that older call, B the later one; B is folded first, then A becomes visible.
+  // The list must be the one of a fold that saw both, and nothing may be dropped as late because B came first.
+  describe('a call that changes nothing yet, with the older call it waits for held up, every pair of kinds', () => {
+    const two = [{ content: 'one', status: 'pending' }, { content: 'two', status: 'pending' }];
+    const three = [...two, { content: 'three', status: 'pending' }];
+    const older = {
+      create3: { tool_name: 'TaskCreate', tool_input: { subject: 'three' }, task_id: '3' },
+      replace3: { tool_name: 'TodoWrite', tool_input: { todos: three } },
+      items3: { tool_name: LIST_TOOL, tool_input: { items: three } },
+    };
+    const later = {
+      update3: { tool_name: 'TaskUpdate', tool_input: { taskId: '3', status: 'completed' } },
+      rename3: { tool_name: 'TaskUpdate', tool_input: { taskId: '3', subject: 'renamed' } },
+      delete3: { tool_name: 'TaskUpdate', tool_input: { taskId: '3', status: 'deleted' } },
+      done3: { tool_name: LIST_TOOL, tool_input: { done: [3] } },
+      start3: { tool_name: LIST_TOOL, tool_input: { start: 3 } },
+      advance: { tool_name: LIST_TOOL, tool_input: { advance: true } },
+      wrapUp: { tool_name: 'mcp__ccd_turn__wrap_up', tool_input: {} },
+    };
+    // after a list of two tasks, the calls that still change nothing are the ones aimed at a third task; advance and wrap_up would change the list
+    const cases = [['no list', Object.keys(later)], ['a list of two tasks', ['update3', 'rename3', 'delete3', 'done3', 'start3']]];
+    const publish = (sid, ms, tick, pid, spec, evId) => {
+      const dir = join(LOGS, 'lists', sid, 'main.events');
+      mkdirSync(dir, { recursive: true });
+      const event = { ts: new Date(ms).toISOString(), pid, id: evId, session_id: sid, agent_type: null, tool_use_id: null, prompt_id: null, ...spec };
+      writeFileSync(join(dir, `${String(ms).padStart(13, '0')}-${String(tick).padStart(20, '0')}-${pid}-${evId}.json`), JSON.stringify(event));
+    };
+    const tasks = (sid) => L.readList(sid, 'main', env()).items.map((x) => `${x.id ?? '-'} ${x.content}:${x.status}`);
+    // call times near the present: a call that changes nothing waits for as long as it is within LATE_EVENT_MS of the clock
+    const run = (seed, steps, a, b, gap, t0) => {
+      const sid = session();
+      if (seed === 'a list of two tasks') call(sid, 'TodoWrite', { todos: two }, {}, t0 + 100);
+      for (const step of steps) {
+        if (step === 'A') publish(sid, t0 + 5000 - gap, 100, 11, a, 'aaaaaaaa');
+        else if (step === 'B') publish(sid, t0 + 5000, 200, 12, b, 'bbbbbbbb');
+        else L.syncList(sid, 'main', env());
+      }
+      return sid;
+    };
+
+    for (const [seed, laterKinds] of cases) {
+      for (const first of Object.keys(older)) {
+        for (const second of laterKinds) {
+          it(`${seed}: ${second} folded before the held-up ${first} (it waits, and both apply)`, () => {
+            for (const gap of [0, 1]) { // the same millisecond (the order of the names decides) and the millisecond before
+              const rows = dropped();
+              const t0 = Date.now();
+              const held = run(seed, ['B', 'sync', 'A', 'sync'], older[first], later[second], gap, t0);
+              const inOrder = run(seed, ['A', 'B', 'sync'], older[first], later[second], gap, t0);
+              expect(tasks(held), `${first}/${second} gap ${gap}`).toEqual(tasks(inOrder));
+              expect(eventFiles(held, 'main').length, `${first}/${second} gap ${gap}: what still waits`).toBe(eventFiles(inOrder, 'main').length);
+              expect(dropped() - rows, `${first}/${second} gap ${gap}: nothing dropped as late`).toBe(0);
+            }
+          });
+        }
+      }
+    }
+
+    it('a TaskUpdate and a deletion that find no task wait for the TaskCreate held up before them, and apply when it is visible (calls through the entry point)', () => {
+      const sid = session();
+      const t0 = Date.now();
+      call(sid, 'TaskUpdate', { taskId: '61', status: 'in_progress' }, {}, t0 + 2000);
+      call(sid, 'TaskUpdate', { taskId: '61', status: 'completed' }, {}, t0 + 3000);
+      call(sid, 'TaskUpdate', { taskId: '62', status: 'deleted' }, {}, t0 + 3500);
+      expect(L.readList(sid, 'main', env())).toBeNull();
+      expect(eventFiles(sid, 'main')).toHaveLength(3); // kept for the creation that is not visible yet
+      publish(sid, t0 + 1000, 100, 11, { tool_name: 'TaskCreate', tool_input: { subject: 'Held up' }, task_id: '61' }, 'cccccccc');
+      publish(sid, t0 + 1001, 100, 13, { tool_name: 'TaskCreate', tool_input: { subject: 'Deleted at once' }, task_id: '62' }, 'dddddddd');
+      L.syncList(sid, 'main', env());
+      expect(tasks(sid)).toEqual(['61 Held up:completed']);
+      expect(eventFiles(sid, 'main')).toEqual([]);
+    });
+
+    it('a TaskCreate that cannot change the list is acknowledged at once: no older call can give it anything to change', () => {
+      const sid = session();
+      call(sid, 'TaskCreate', { subject: '  ' }, { tool_response: 'Task #81 created successfully: x' }, Date.now());
+      expect(eventFiles(sid, 'main')).toEqual([]);
+      expect(L.readList(sid, 'main', env())).toBeNull();
+    });
+
+    it('a call that finds nothing to change goes once it is more than LATE_EVENT_MS behind the newest call seen, whatever comes later', () => {
+      const sid = session();
+      const t0 = Date.now();
+      call(sid, 'TaskUpdate', { taskId: '71', status: 'completed' }, {}, t0 + 1000);
+      call(sid, 'TaskUpdate', { taskId: '72', status: 'completed' }, {}, t0 + 1000 + L.LATE_EVENT_MS); // exactly the window: still waits
+      expect(eventFiles(sid, 'main')).toHaveLength(2);
+      call(sid, 'TaskUpdate', { taskId: '73', status: 'completed' }, {}, t0 + 1001 + L.LATE_EVENT_MS); // the first is beyond the window now
+      expect(eventFiles(sid, 'main')).toHaveLength(2);
+      call(sid, 'TaskCreate', { subject: 'Later' }, { tool_response: 'Task #74 created successfully: Later' }, t0 + 60_000);
+      expect(tasks(sid)).toEqual(['74 Later:pending']);
+      expect(eventFiles(sid, 'main')).toEqual([]);
+    });
   });
 
   it('what a fold keeps to fence held-up calls is read with care: a file with a wrong touched field is folded as without it, and old entries are dropped', () => {

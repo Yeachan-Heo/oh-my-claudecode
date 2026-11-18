@@ -626,8 +626,17 @@ const touchedOf = (record) => {
   return touched;
 };
 
+// Do the two lists hold the same tasks? (next is a list record, record the one it was made from, or null.)
+const sameItems = (next, record) => next.items.length === (record?.items?.length ?? 0) && JSON.stringify(next.items) === JSON.stringify(record?.items ?? []);
+
 // Folds the pending events into the list file. { record, broken, names, changed, done, generation, late }: names are the events folded
-// (all pending ones, late ones included), generation is the one of the file the fold started from, late counts the events not applied.
+// (all pending ones, late ones included, except the ones that wait for an older call, see below), generation is the one of the file the fold
+// started from, late counts the events not applied.
+// A call that edits tasks (TaskUpdate, done, start, advance, wrap_up) and changes nothing may only be waiting for an older call that is not
+// visible yet: the TaskCreate that makes its task, or the call that replaces the list it acts on. It is not acknowledged: it stays pending,
+// in the order of its name, and the next fold that sees the older call applies both. It goes once no held-up call can precede it, that is
+// when it is more than LATE_EVENT_MS behind the clock and behind the newest call seen. Acknowledging it at once would also move the time of the
+// newest call folded forward, and the older call would then be dropped as late.
 // The order of the events is the order of their calls, and a fold applies the pending ones in that order; but an event that becomes
 // visible after a fold took a later one is older than the list it would change, and applying it would put the older state back. The
 // record keeps the time of the newest call folded (lastEvent), of the newest call that replaced the whole list (lastReplace) and, in
@@ -651,6 +660,7 @@ function fold(path, key, env) {
   let lastEventName = typeof start.record?.last_event_name === 'string' ? start.record.last_event_name : '';
   let lastReplaceName = typeof start.record?.last_replace_name === 'string' ? start.record.last_replace_name : '';
   const touched = touchedOf(start.record);
+  const horizon = Math.max(Date.now(), lastEvent, events.length ? eventMs(events[events.length - 1].name) : 0);
   let late = 0;
   const names = [];
   for (const { name, event } of events) {
@@ -663,6 +673,10 @@ function fold(path, key, env) {
     if (older > 0 ? older <= LATE_EVENT_MS : older === 0 && name < (replaces ? lastEventName : lastReplaceName)) { late += 1; continue; }
     if (!replaces && overtaken(touched, name, event)) { late += 1; continue; }
     const next = applyEvent(broken ? null : record, event, key, env, broken);
+    if (!replaces && editScope(event) !== null && ms + LATE_EVENT_MS >= horizon && !(next && next !== record && !sameItems(next, record))) {
+      names.pop(); // changes nothing now, but an older call that is not visible yet may give it something to change
+      continue;
+    }
     if (next !== record && next) {
       record = next;
       broken = false;
