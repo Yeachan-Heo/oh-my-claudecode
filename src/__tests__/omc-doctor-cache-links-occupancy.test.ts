@@ -586,6 +586,92 @@ fs.readlinkSync = function () { const e = new Error('injected readlink failure')
     }
   });
 
+  // Two names of one directory are not a conflict: the variables are compared after resolving links, in the platform's case form.
+  test('the plugin root variables naming one directory through links or letter case are not a conflict', () => {
+    const win32 = `Object.defineProperty(process, 'platform', { value: 'win32' });\n`;
+    const upperOf = (cache: string) => path.join(cache, '5.9.0').toUpperCase();
+    const aliases: Array<{ label: string; simulated: boolean; env: (dir: string, cache: string) => Record<string, string>; same: boolean }> = [
+      { label: 'a link to the directory', simulated: false, same: true, env: (d, c) => { link(path.join(c, '5.9.0'), path.join(d, 'alias')); return { OMC_PLUGIN_ROOT: path.join(c, '5.9.0'), CLAUDE_PLUGIN_ROOT: path.join(d, 'alias') }; } },
+      { label: 'a link to a link, the other variable one level deeper', simulated: false, same: true, env: (d, c) => { link(path.join(c, '5.9.0'), path.join(d, 'alias1')); link(path.join(d, 'alias1'), path.join(d, 'alias2')); return { OMC_PLUGIN_ROOT: path.join(d, 'alias2'), CLAUDE_PLUGIN_ROOT: path.join(c, '5.9.0') }; } },
+      { label: 'letter case only, platform that folds case', simulated: true, same: true, env: (d, c) => ({ OMC_PLUGIN_ROOT: path.join(c, '5.9.0'), CLAUDE_PLUGIN_ROOT: upperOf(c) }) },
+      { label: 'letter case only, platform that does not fold case', simulated: false, same: process.platform === 'win32', env: (d, c) => ({ OMC_PLUGIN_ROOT: path.join(c, '5.9.0'), CLAUDE_PLUGIN_ROOT: upperOf(c) }) },
+    ];
+    for (const command of commands) {
+      for (const { label, simulated, env, same } of aliases) {
+        // 5.8.0 is pinned, 5.9.0 is named by the variables, 5.7.0 is free.
+        const { dir, cache } = makeCache(['5.7.0', '5.8.0', '5.9.0']);
+        try {
+          writeRegistry(dir, { [PLUGIN_ID]: [{ scope: 'user', version: '5.8.0' }] });
+          const preload = path.join(dir, 'win32.cjs');
+          writeFileSync(preload, win32);
+          const result = runCommand(command, dir, { env: env(dir, cache), preloads: simulated ? [preload] : [] });
+          expect({ label, status: result.status, versions: digitVersions(cache), moved: movedAside(dir) }).toEqual(
+            same
+              ? { label, status: 0, versions: '5.8.0,5.9.0', moved: 1 }
+              : { label, status: 0, versions: '5.7.0,5.8.0,5.9.0', moved: 0 },
+          );
+        } finally {
+          rmSync(dir, { recursive: true, force: true });
+        }
+      }
+    }
+  });
+
+  // The protection is read again just before each move. A preload runs the change that a concurrent
+  // SessionStart (a published record) or an installer (a new pin) makes after the first read: it fires when
+  // the command creates the backup directory, which happens after the first read and before the first move.
+  test('a record or a pin that appears after the first read still protects a version, and a registry that turns unreadable stops the move', () => {
+    const racePreload = `const fs = require('fs'), path = require('path'), crypto = require('crypto');
+const realMkdir = fs.mkdirSync;
+let fired = false;
+fs.mkdirSync = function (target, ...rest) {
+  if (!fired && String(target) === process.env.RACE_BACKUP) {
+    fired = true;
+    const kind = process.env.RACE_KIND;
+    if (kind === 'record') {
+      const dir = path.join(process.env.CLAUDE_CONFIG_DIR, '.omc', 'cache-occupancy');
+      realMkdir.call(fs, dir, { recursive: true });
+      const record = JSON.stringify({ version: 1, pid: process.pid, pluginRoot: process.env.RACE_ROOT, updatedAt: new Date().toISOString() });
+      fs.writeFileSync(path.join(dir, crypto.createHash('sha256').update(record).digest('hex') + '.json'), record);
+    } else if (kind === 'pin') {
+      fs.writeFileSync(path.join(process.env.CLAUDE_CONFIG_DIR, 'plugins', 'installed_plugins.json'), process.env.RACE_REGISTRY);
+    } else {
+      fs.writeFileSync(path.join(process.env.CLAUDE_CONFIG_DIR, 'plugins', 'installed_plugins.json'), '{ not json');
+    }
+  }
+  return realMkdir.call(fs, target, ...rest);
+};
+`;
+    for (const command of commands) {
+      for (const kind of ['record', 'pin', 'unreadable registry'] as const) {
+        // 5.8.0 is pinned from the start; 5.8.1 and 5.9.0 are free at the first read.
+        const { dir, cache } = makeCache(['5.8.0', '5.8.1', '5.9.0']);
+        try {
+          writeRegistry(dir, { [PLUGIN_ID]: [{ scope: 'user', version: '5.8.0' }] });
+          const preload = path.join(dir, 'race.cjs');
+          writeFileSync(preload, racePreload);
+          const env = {
+            RACE_KIND: kind === 'unreadable registry' ? 'unreadable' : kind,
+            RACE_BACKUP: backupDir(dir),
+            RACE_ROOT: path.join(cache, '5.9.0'),
+            RACE_REGISTRY: JSON.stringify({ version: 2, plugins: { [PLUGIN_ID]: [{ scope: 'user', version: '5.8.0' }, { scope: 'user', version: '5.9.0' }] } }),
+          };
+          const result = runCommand(command, dir, { env, preloads: [preload] });
+          expect(result.status).toBe(0);
+          // A record or a pin on 5.9.0 keeps it and 5.8.1 (still free) is moved; an unreadable registry moves nothing.
+          expect({ kind, versions: digitVersions(cache), moved: movedAside(dir) }).toEqual(
+            kind === 'unreadable registry'
+              ? { kind, versions: '5.8.0,5.8.1,5.9.0', moved: 0 }
+              : { kind, versions: '5.8.0,5.9.0', moved: 1 },
+          );
+          expect(result.stdout).toMatch(kind === 'unreadable registry' ? /Skipped 2 version\(s\)/ : /Skipped 1 version\(s\)/);
+        } finally {
+          rmSync(dir, { recursive: true, force: true });
+        }
+      }
+    }
+  });
+
   // ---- Platforms: the command is plain Node, so these run everywhere; win32 is reported by a preload on the others ----
   const win32Preload = `Object.defineProperty(process, 'platform', { value: 'win32' });\n`;
   const folds = process.platform === 'win32';

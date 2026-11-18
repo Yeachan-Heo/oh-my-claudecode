@@ -182,6 +182,9 @@ describe('omc-doctor skill', () => {
       expect(fix).toContain('an old date alone never ignores a record, and this command never deletes one');
       expect(fix).toContain('the `installPath` of any other plugin or `OMC_PLUGIN_ROOT` or `CLAUDE_PLUGIN_ROOT` points into it');
       expect(fix).toContain('`OMC_PLUGIN_ROOT` and `CLAUDE_PLUGIN_ROOT` naming different directories');
+      expect(fix).toContain('the two variables are compared after resolving links, in the platform\'s letter-case form');
+      expect(fix).toContain('are read again just before each version is moved');
+      expect(fix).toContain('only the instant between that last read and the rename remains open');
       expect(fix).toContain('cannot be read or resolved completely');
       expect(fix).toContain('`oh-my-claudecode@oh-my-claudecode`, in any letter case');
       expect(fix).toContain('the registry is read like the installer reads it, from its `plugins` object or, when there is none, from its top level');
