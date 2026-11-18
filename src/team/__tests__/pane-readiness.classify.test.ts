@@ -4,6 +4,7 @@ import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 import type { CliAgentType } from '../model-contract.js';
 import {
+  classifyPane,
   detectPaneTrustPromptKind,
   observePane,
   PANE_PATTERNS,
@@ -31,6 +32,7 @@ function describeSignals(signals: PaneSignals): string {
   return [
     signals.trust ? `trust:${signals.trust}` : '',
     signals.bootstrapping ? 'bootstrapping' : '',
+    signals.startupStatus ? 'startupStatus' : '',
     signals.idlePrompt ? 'idlePrompt' : '',
     signals.busy ? 'busy' : '',
   ].filter(Boolean).join(' ');
@@ -69,7 +71,7 @@ const SIGNALS: Readonly<Record<string, string>> = {
   'claude/unversioned/idle-welcome-greater-than.txt': 'idlePrompt',
   'claude/unversioned/idle-welcome.txt': 'idlePrompt',
   'claude/unversioned/output-quoting-trust-choices.txt': 'idlePrompt',
-  'claude/unversioned/startup-banner-bypass.txt': 'bootstrapping',
+  'claude/unversioned/startup-banner-bypass.txt': 'bootstrapping startupStatus',
   'claude/unversioned/startup-trigger-pending.txt': 'idlePrompt',
   'claude/unversioned/trust-files-question.txt': 'trust:claude_directory idlePrompt',
   'claude/unversioned/trust-files-then-idle.txt': 'trust:claude_directory idlePrompt',
@@ -82,7 +84,7 @@ const SIGNALS: Readonly<Record<string, string>> = {
   'codex/0.167.0/idle-before-trust.txt': 'idlePrompt',
   'codex/0.167.0/idle.txt': 'idlePrompt',
   'codex/0.167.0/prompt-typed-unsubmitted.txt': 'idlePrompt',
-  'codex/0.167.0/startup-loading.txt': 'bootstrapping idlePrompt',
+  'codex/0.167.0/startup-loading.txt': 'bootstrapping startupStatus idlePrompt',
   'codex/0.167.0/trust-just-answered.txt': 'idlePrompt',
   'codex/0.167.0/trust.txt': 'trust:codex_directory idlePrompt',
   'codex/synthetic/shell-prompt-after-exit-single-angle.txt': 'idlePrompt',
@@ -120,13 +122,13 @@ describe('observePane on the frame corpus', () => {
 
   it('reports the idle prompt and the busy marker together while Claude works', () => {
     expect(observePane(frame('claude/2.1.325/busy-spinner.txt'), 'claude')).toEqual({
-      trust: null, bootstrapping: false, idlePrompt: true, busy: true,
+      trust: null, bootstrapping: false, startupStatus: false, idlePrompt: true, busy: true,
     });
   });
 
   it('reports nothing for a blank capture', () => {
-    expect(observePane('', 'claude')).toEqual({ trust: null, bootstrapping: false, idlePrompt: false, busy: false });
-    expect(observePane(' \r\n\n', undefined)).toEqual({ trust: null, bootstrapping: false, idlePrompt: false, busy: false });
+    expect(observePane('', 'claude')).toEqual({ trust: null, bootstrapping: false, startupStatus: false, idlePrompt: false, busy: false });
+    expect(observePane(' \r\n\n', undefined)).toEqual({ trust: null, bootstrapping: false, startupStatus: false, idlePrompt: false, busy: false });
   });
 
   it('accepts another provider\'s trust dialog only when the provider is unknown', () => {
@@ -154,6 +156,60 @@ describe('a provider name outside the table', () => {
     expect(detectPaneTrustPromptKind(frame('claude/2.1.325/trust.txt'), provider)).toBeNull();
     expect(detectPaneTrustPromptKind('Do you trust the contents of this directory?\n› 1. Yes, continue\n  2. No, quit', provider)).toBe('directory');
     expect(observePane('→ ready', provider).idlePrompt).toBe(false);
+  });
+});
+
+describe('classifyPane', () => {
+  const all = { trust: 'claude_directory', bootstrapping: true, startupStatus: true, idlePrompt: true, busy: true } as const;
+  const none = { trust: null, bootstrapping: false, startupStatus: false, idlePrompt: false, busy: false } as const;
+
+  it('puts a pane in exactly one state, in the order trust, busy, bootstrapping, idle', () => {
+    expect(classifyPane(all)).toEqual({ kind: 'trust', trust: 'claude_directory' });
+    expect(classifyPane({ ...all, trust: null })).toEqual({ kind: 'busy' });
+    expect(classifyPane({ ...all, trust: null, busy: false })).toEqual({ kind: 'bootstrapping' });
+    expect(classifyPane({ ...none, idlePrompt: true })).toEqual({ kind: 'idle' });
+    expect(classifyPane(none)).toEqual({ kind: 'unknown' });
+  });
+
+  it('reads a startup word as starting only on a status line', () => {
+    const state = (capture: string) => classifyPane(observePane(capture)).kind;
+    expect(state('model: loading\ngpt-5.3-codex high · 80% left\n› ')).toBe('bootstrapping');
+    expect(state('⠋ Initializing…\n❯ ')).toBe('bootstrapping');
+    expect(state('│ ⠋ Initializing… │\n│ > Type your message │')).toBe('bootstrapping');
+    expect(state('⠋ Connecting to https://models.example.test/v1/sessions/worker-12345\n› ')).toBe('bootstrapping');
+    expect(state(`loading ${'x'.repeat(39)}\n❯ `)).toBe('bootstrapping');
+    expect(state(`loading ${'x'.repeat(40)}\n❯ `)).toBe('idle');
+    for (const gemini of [
+      '⠋ Resuming session... (Connecting to MCP servers... (1/3))',
+      '⠋ Resuming session...',
+      'Resuming session...',
+      'Resuming session... (Connecting to MCP servers... (0/1))',
+      'Connecting to MCP servers... (0/3) - Waiting for: playwright, filesystem, github',
+    ]) {
+      expect(state(`${gemini}\n> earlier request`)).toBe('bootstrapping');
+    }
+    expect(state('⏺ It said:\nResuming session... worked after the restart.\n❯ ')).toBe('idle');
+    expect(state('⠋ Resuming session... (Connecting\nto MCP servers... (1/3))\n> earlier request')).toBe('bootstrapping');
+    expect(state('⏺ Found it.\nConnecting to MCP servers... (0/3) was the last line before the fix.\n❯ ')).toBe('idle');
+    expect(state(`│ model: loading${' '.repeat(60)}│\n› Ask Codex to do anything`)).toBe('bootstrapping');
+    expect(state('⣾ Loading model weights from the local cache\n❯ ')).toBe('bootstrapping');
+    for (const quoted of ['  "loadingState": "idle",', '  "loading": false,', "  'connecting to the db' was the cause", '# Loading the config', '[loading] done']) {
+      expect(state(`⏺ Changes verified\n${quoted}\n❯ `)).toBe('idle');
+    }
+    for (const listed of ['  - Resuming session after a disconnect now preserves the draft.', '* Loading the config was slow.', '+ Initializing the cache is done.']) {
+      expect(state(`⏺ Changes verified\n${listed}\n❯ `)).toBe('idle');
+    }
+    for (const history of ['❯ Loading the config fails. Diagnose it.', '› Loading the config fails.', '> loading', '→ loading']) {
+      expect(state(`${history}\n⏺ Done.\n❯ `)).toBe('idle');
+    }
+    for (const reply of ['⏺ Loading the fixtures took 2s.', '• Starting up the dev server worked.', '✦ Connecting to MCP servers was slow today.', 'The page kept loading forever.']) {
+      expect(state(`${reply}\n❯ `)).toBe('idle');
+    }
+  });
+
+  it('keeps the startup word anywhere on screen in the signal read before sending keys', () => {
+    expect(observePane('⏺ Fixed the lazy loading regression.\n❯ ').bootstrapping).toBe(true);
+    expect(paneLooksReady('⏺ Fixed the lazy loading regression.\n❯ ')).toBe(false);
   });
 });
 
