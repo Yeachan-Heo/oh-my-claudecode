@@ -528,6 +528,10 @@ describe.skipIf(!HAS_TMUX)('record-pane-frames record', () => {
     mkdirSync(bin);
     writeFileSync(join(bin, 'codex'), CONTRACT_STUB_SOURCE);
     chmodSync(join(bin, 'codex'), 0o755);
+    // The stub has no extension, so Node takes its module type from the nearest package.json.
+    // One beside it keeps a package.json above the test root, such as /tmp/package.json, out of it.
+    writeFileSync(join(bin, 'package.json'), '{"type":"module"}');
+    writeFileSync(join(root, 'package.json'), '{"type":"commonjs"}');
     out = join(root, 'out');
 
     // PATH holds only the stub, node, tmux and the system directories, and /bin/sh reads
