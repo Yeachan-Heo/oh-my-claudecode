@@ -21,51 +21,64 @@ let TMP;
 let L;
 let counter = 0;
 
-// Wraps `fs` before the library is loaded. PAUSE_KIND:
-//   lock-observed   after the first look at a file whose name ends in ".lock" (a stat of the path, or a stat of a handle opened on it for reading)
+// Wraps `fs` before the library is loaded. PAUSE_KIND (kinds joined by "+" are held one after the other):
+//   lock-observed       after the first look at a file whose name ends in ".lock" (a stat of the path, or a stat of a handle opened on it for reading)
 //   before-lock-rename  before a ".lock" file is renamed (the removal of a lock: the last moment before the file that is moved is fixed)
-//   before-publish  before the fold of PAUSE_MATCH (a list file) decides or starts to publish: the second lstat of that path (the generation check
-//                   of the fold) or, when there is none, the creation of the temporary file of the atomic write
-// The process writes PAUSE_MARK and waits until PAUSE_GO exists.
+//   after-lock-rename   right after a ".lock" file was renamed: the lock path is free and the moved file is not judged yet
+//   before-publish      before the fold of PAUSE_MATCH (a list file) decides or starts to publish: the second lstat of that path (the generation check
+//                       of the fold) or, when there is none, the creation of the temporary file of the atomic write
+//   sweep-observed      right after the stat of the directory PAUSE_MATCH (the sweep reading the age of a session directory)
+// The process writes PAUSE_MARK and waits until PAUSE_GO exists (with several kinds both names get the suffix ".<kind>").
 const PRELOAD = `
 import fs from 'node:fs';
 import { syncBuiltinESMExports } from 'node:module';
 const { PAUSE_KIND, PAUSE_MATCH, PAUSE_MARK, PAUSE_GO } = process.env;
-let fired = false;
+const kinds = PAUSE_KIND.split('+');
+const fired = new Set();
 const sleeper = new Int32Array(new SharedArrayBuffer(4));
-const hold = () => {
-  if (fired) return;
-  fired = true;
-  fs.writeFileSync(PAUSE_MARK, String(process.pid));
-  for (let i = 0; i < 3000 && !fs.existsSync(PAUSE_GO); i += 1) Atomics.wait(sleeper, 0, 0, 10);
+const hold = (kind) => {
+  if (fired.has(kind)) return;
+  fired.add(kind);
+  const suffix = kinds.length > 1 ? '.' + kind : '';
+  fs.writeFileSync(PAUSE_MARK + suffix, String(process.pid));
+  for (let i = 0; i < 3000 && !fs.existsSync(PAUSE_GO + suffix); i += 1) Atomics.wait(sleeper, 0, 0, 10);
 };
 const isLock = (p) => typeof p === 'string' && p.endsWith('.lock');
-if (PAUSE_KIND === 'lock-observed') {
+if (kinds.includes('lock-observed')) {
   const lockFds = new Set();
   const open = fs.openSync;
   fs.openSync = (p, flags, ...rest) => { const fd = open(p, flags, ...rest); if (isLock(p) && (flags === undefined || flags === 'r')) lockFds.add(fd); return fd; };
   for (const name of ['statSync', 'lstatSync']) {
     const real = fs[name];
-    fs[name] = (p, ...rest) => { const r = real(p, ...rest); if (isLock(p)) hold(); return r; };
+    fs[name] = (p, ...rest) => { const r = real(p, ...rest); if (isLock(p)) hold('lock-observed'); return r; };
   }
   const fstat = fs.fstatSync;
-  fs.fstatSync = (fd, ...rest) => { const r = fstat(fd, ...rest); if (lockFds.has(fd)) hold(); return r; };
+  fs.fstatSync = (fd, ...rest) => { const r = fstat(fd, ...rest); if (lockFds.has(fd)) hold('lock-observed'); return r; };
 }
-if (PAUSE_KIND === 'before-lock-rename') {
+if (kinds.includes('before-lock-rename') || kinds.includes('after-lock-rename')) {
   const rename = fs.renameSync;
-  fs.renameSync = (from, to, ...rest) => { if (isLock(from)) hold(); return rename(from, to, ...rest); };
+  fs.renameSync = (from, to, ...rest) => {
+    if (isLock(from) && kinds.includes('before-lock-rename')) hold('before-lock-rename');
+    const result = rename(from, to, ...rest);
+    if (isLock(from) && kinds.includes('after-lock-rename')) hold('after-lock-rename');
+    return result;
+  };
 }
-if (PAUSE_KIND === 'before-publish') {
+if (kinds.includes('before-publish')) {
   let looks = 0;
   const lstat = fs.lstatSync;
-  fs.lstatSync = (p, ...rest) => { if (p === PAUSE_MATCH && (looks += 1) === 2) hold(); return lstat(p, ...rest); };
+  fs.lstatSync = (p, ...rest) => { if (p === PAUSE_MATCH && (looks += 1) === 2) hold('before-publish'); return lstat(p, ...rest); };
   const open = fs.openSync;
-  fs.openSync = (p, flags, ...rest) => { if (flags === 'wx' && typeof p === 'string' && p.startsWith(PAUSE_MATCH.replace(/[^/]*$/, '.')) && /\\.tmp\\.[0-9a-f-]+$/.test(p)) hold(); return open(p, flags, ...rest); };
+  fs.openSync = (p, flags, ...rest) => { if (flags === 'wx' && typeof p === 'string' && p.startsWith(PAUSE_MATCH.replace(/[^/]*$/, '.')) && /\\.tmp\\.[0-9a-f-]+$/.test(p)) hold('before-publish'); return open(p, flags, ...rest); };
+}
+if (kinds.includes('sweep-observed')) {
+  const stat = fs.statSync;
+  fs.statSync = (p, ...rest) => { const r = stat(p, ...rest); if (p === PAUSE_MATCH) hold('sweep-observed'); return r; };
 }
 syncBuiltinESMExports();
 `;
 
-// The process under test: waits for CHILD_WAIT, then runs the case named by CHILD_CASE and writes CHILD_DONE.
+// The process under test: waits for cfg.waitFor, runs the case named by cfg.kind (a lock, a sweep or a list call) and writes cfg.done.
 const CHILD = `
 import fs from 'node:fs';
 const cfg = JSON.parse(process.env.CHILD_CFG);
@@ -76,10 +89,13 @@ if (cfg.waitFor) waitFor(cfg.waitFor, 30000);
 if (cfg.kind === 'lock') {
   const ok = L.withFileLock(cfg.path, () => {
     fs.appendFileSync(cfg.log, cfg.label + '-enter\\n');
+    if (cfg.takeover) { fs.rmSync(cfg.path + '.lock'); fs.writeFileSync(cfg.path + '.lock', 'new-holder'); fs.writeFileSync(cfg.takeover, '1'); } // another hook took the lock over as stale
     if (cfg.holdUntil) { fs.writeFileSync(cfg.holdMark, '1'); waitFor(cfg.holdUntil, 8000); } else Atomics.wait(sleeper, 0, 0, 300);
     fs.appendFileSync(cfg.log, cfg.label + '-exit\\n');
   }, process.env, cfg.staleMs);
   fs.appendFileSync(cfg.log, cfg.label + '-result ' + ok + '\\n');
+} else if (cfg.kind === 'sweep') {
+  L.sweep(process.env, Date.now());
 } else {
   L.recordListCall(cfg.data, process.env);
 }
@@ -101,6 +117,14 @@ const waitUntil = async (file, ms = 20_000) => {
   const end = Date.now() + ms;
   while (!existsSync(file)) {
     if (Date.now() > end) throw new Error(`timeout waiting for ${file}`);
+    await new Promise((done) => setTimeout(done, 10));
+  }
+};
+
+const waitUntilAny = async (candidates, ms = 20_000) => {
+  const end = Date.now() + ms;
+  while (!candidates.some((file) => existsSync(file))) {
+    if (Date.now() > end) throw new Error(`timeout waiting for one of ${candidates.join(', ')}`);
     await new Promise((done) => setTimeout(done, 10));
   }
 };
@@ -133,6 +157,10 @@ function overlapped(log) {
   }
   return false;
 }
+
+const task = (subject, id) => ({
+  session_id: 'race-session', tool_name: 'TaskCreate', tool_input: { subject }, tool_response: `Task #${id} created successfully: ${subject}`, tool_use_id: `toolu_${id}`,
+});
 
 describe('task-list lock: two hooks contend for the lock a dead holder left', () => {
   it.each([
@@ -208,13 +236,93 @@ describe('task-list lock: two hooks contend for the lock a dead holder left', ()
     expect(readFileSync(lock, 'utf8')).toBe('new-holder');
     expect(readdirSync(dir).filter((n) => n.endsWith('.moved'))).toEqual([]);
   });
+
+  it('a hook that finds the lock another hook took does not move it aside, so a third hook cannot take the free path', async () => {
+    counter += 1;
+    const dir = join(TMP, `lock-${counter}`);
+    mkdirSync(dir, { recursive: true });
+    const path = join(dir, 'list.json');
+    const lock = `${path}.lock`;
+    const log = join(dir, 'log.txt');
+    writeFileSync(log, '');
+    writeFileSync(lock, 'dead-holder');
+    const old = new Date(Date.now() - 120_000);
+    utimesSync(lock, old, old);
+    const env = baseEnv(join(dir, 'logs'));
+    const files = (name) => join(dir, name);
+    // A looked at the old lock and is held. B breaks it, takes its own and stays inside until A is done. A goes on: it must leave the
+    // lock of B where it is. If it moves it aside it is held there with the path free, and C, a third hook, takes the path.
+    const a = startChild(dir, { kind: 'lock', path, log, label: 'A', staleMs: 60_000, done: files('a-done') }, { kind: 'lock-observed+after-lock-rename', mark: files('a-paused'), go: files('a-go') }, env);
+    const b = startChild(dir, { kind: 'lock', path, log, label: 'B', staleMs: 60_000, waitFor: files('b-go'), holdMark: files('b-holding'), holdUntil: files('a-done'), done: files('b-done') }, null, env);
+    await waitUntil(files('a-paused.lock-observed'));
+    writeFileSync(files('b-go'), '1');
+    await waitUntil(files('b-holding'));
+    writeFileSync(files('a-go.lock-observed'), '1');
+    await waitUntilAny([files('a-done'), files('a-paused.after-lock-rename')]);
+    const c = startChild(dir, { kind: 'lock', path, log, label: 'C', staleMs: 60_000, holdMark: files('c-holding'), holdUntil: files('a-done'), done: files('c-done') }, null, env);
+    await waitUntil(files('c-holding'));
+    writeFileSync(files('a-go.after-lock-rename'), '1');
+    const results = await Promise.all([a.exited, b.exited, c.exited]);
+    expect(results.map((r) => r.code)).toEqual([0, 0, 0]);
+    const lines = readFileSync(log, 'utf8');
+    expect(overlapped(log), lines).toBe(false);
+    expect(lines).toContain('A-result false');
+    expect(lines).toContain('B-result true');
+    expect(lines).toContain('C-result true');
+    expect(existsSync(lock)).toBe(false);
+    expect(readdirSync(dir).filter((n) => n.endsWith('.moved'))).toEqual([]);
+  }, TOTAL_MS);
+
+  it('a holder whose lock was taken over leaves the lock path alone when it ends, so another hook cannot take the free path', async () => {
+    counter += 1;
+    const dir = join(TMP, `lock-${counter}`);
+    mkdirSync(dir, { recursive: true });
+    const path = join(dir, 'list.json');
+    const lock = `${path}.lock`;
+    const log = join(dir, 'log.txt');
+    writeFileSync(log, '');
+    const env = baseEnv(join(dir, 'logs'));
+    const files = (name) => join(dir, name);
+    // A takes the lock and another hook takes it over (the file is replaced by the lock of a live holder, which is not in the log). A ends.
+    // If A moved that lock aside to look at it, it is held there with the path free and B, arriving now, takes the path.
+    const a = startChild(dir, { kind: 'lock', path, log, label: 'A', staleMs: 60_000, takeover: files('a-took'), done: files('a-done') }, { kind: 'after-lock-rename', mark: files('a-paused'), go: files('a-go') }, env);
+    await waitUntil(files('a-took'));
+    await waitUntilAny([files('a-done'), files('a-paused')]);
+    const b = startChild(dir, { kind: 'lock', path, log, label: 'B', staleMs: 60_000, holdMark: files('b-holding'), holdUntil: files('a-done'), done: files('b-done') }, null, env);
+    await waitUntilAny([files('b-holding'), files('b-done')]);
+    writeFileSync(files('a-go'), '1');
+    const results = await Promise.all([a.exited, b.exited]);
+    expect(results.map((r) => r.code)).toEqual([0, 0]);
+    const lines = readFileSync(log, 'utf8');
+    expect(lines).not.toContain('B-enter');
+    expect(lines).toContain('B-result false');
+    expect(readFileSync(lock, 'utf8')).toBe('new-holder');
+    expect(readdirSync(dir).filter((n) => n.endsWith('.moved'))).toEqual([]);
+  }, TOTAL_MS);
+
+  it('a holder whose lock changes hands in the instant before its release moves the lock leaves the new holder the lock', async () => {
+    counter += 1;
+    const dir = join(TMP, `lock-${counter}`);
+    mkdirSync(dir, { recursive: true });
+    const path = join(dir, 'list.json');
+    const lock = `${path}.lock`;
+    const log = join(dir, 'log.txt');
+    writeFileSync(log, '');
+    const env = baseEnv(join(dir, 'logs'));
+    const files = (name) => join(dir, name);
+    // A has read its own token in the lock file and is held right before it moves the file; the lock then changes hands.
+    const a = startChild(dir, { kind: 'lock', path, log, label: 'A', staleMs: 60_000, done: files('a-done') }, { kind: 'before-lock-rename', mark: files('a-paused'), go: files('a-go') }, env);
+    await waitUntil(files('a-paused'));
+    rmSync(lock);
+    writeFileSync(lock, 'new-holder');
+    writeFileSync(files('a-go'), '1');
+    expect((await a.exited).code).toBe(0);
+    expect(readFileSync(lock, 'utf8')).toBe('new-holder');
+    expect(readdirSync(dir).filter((n) => n.endsWith('.moved'))).toEqual([]);
+  }, TOTAL_MS);
 });
 
 describe('task-list fold: an older fold does not overwrite a list another fold published', () => {
-  const task = (subject, id) => ({
-    session_id: 'race-session', tool_name: 'TaskCreate', tool_input: { subject }, tool_response: `Task #${id} created successfully: ${subject}`, tool_use_id: `toolu_${id}`,
-  });
-
   it('the fold held before it publishes, its lock taken over and put back, finds the list changed and leaves it alone', async () => {
     counter += 1;
     const dir = join(TMP, `fold-${counter}`);
@@ -236,5 +344,60 @@ describe('task-list fold: an older fold does not overwrite a list another fold p
     expect(rb.code).toBe(0);
     const names = L.readList('race-session', 'main', env).items.map((x) => x.content).sort();
     expect(names).toEqual(['base', 'from-b', 'from-parent']);
+  }, TOTAL_MS);
+});
+
+describe('task-list sweep: a hook writes while the sweep judges the session directory', () => {
+  const DAY = 24 * 3600 * 1000;
+  // Every file and folder of the session looks eight days old (the retention is seven).
+  const ageTree = (root, ms) => {
+    const when = new Date(Date.now() - ms);
+    const walk = (path) => {
+      for (const entry of readdirSync(path, { withFileTypes: true })) {
+        if (entry.isDirectory()) walk(join(path, entry.name));
+        utimesSync(join(path, entry.name), when, when);
+      }
+      utimesSync(path, when, when);
+    };
+    walk(root);
+  };
+
+  it('a session read as old by the sweep but written by a hook before the removal keeps what the hook wrote', async () => {
+    counter += 1;
+    const dir = join(TMP, `sweep-${counter}`);
+    mkdirSync(dir, { recursive: true });
+    const logs = join(dir, 'logs');
+    const env = baseEnv(logs);
+    const session = join(logs, 'lists', 'race-session');
+    const files = (name) => join(dir, name);
+    L.recordListCall(task('base', 1), env);
+    ageTree(session, 8 * DAY);
+    rmSync(join(logs, 'lists', '.sweep'), { force: true }); // the sweep of the child is due
+    const s = startChild(dir, { kind: 'sweep', done: files('s-done') }, { kind: 'sweep-observed', match: session, mark: files('s-paused'), go: files('s-go') }, env);
+    await waitUntil(files('s-paused')); // the sweep has read the directory as old and has not moved it yet
+    expect(L.recordListCall(task('from-hook', 2), env)).not.toBeNull();
+    writeFileSync(files('s-go'), '1');
+    const rs = await s.exited;
+    expect(rs.code).toBe(0);
+    expect(existsSync(session)).toBe(true);
+    const names = (L.readList('race-session', 'main', env)?.items ?? []).map((x) => x.content).sort();
+    expect(names).toEqual(['base', 'from-hook']);
+    expect(readdirSync(join(logs, 'lists')).filter((n) => n.endsWith('.sweeping'))).toEqual([]);
+  }, TOTAL_MS);
+
+  it('a session nobody wrote to for eight days is removed with everything in it', async () => {
+    counter += 1;
+    const dir = join(TMP, `sweep-${counter}`);
+    mkdirSync(dir, { recursive: true });
+    const logs = join(dir, 'logs');
+    const env = baseEnv(logs);
+    const session = join(logs, 'lists', 'race-session');
+    L.recordListCall(task('base', 1), env);
+    ageTree(session, 8 * DAY);
+    rmSync(join(logs, 'lists', '.sweep'), { force: true });
+    const s = startChild(dir, { kind: 'sweep', done: join(dir, 's-done') }, null, env);
+    expect((await s.exited).code).toBe(0);
+    expect(existsSync(session)).toBe(false);
+    expect(readdirSync(join(logs, 'lists')).filter((n) => n.endsWith('.sweeping'))).toEqual([]);
   }, TOTAL_MS);
 });

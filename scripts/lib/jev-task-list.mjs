@@ -114,7 +114,8 @@ function removeLockIf(lockPath, isTarget) {
 // A lock older than staleMs belongs to a dead holder. The age, the token and the identity of the file are read from one open handle,
 // so none of them comes from a later file that took the path. Right before the rename the path must still name that file; after it, the
 // moved file must be that file again (removeLockIf). A lock that a new holder took in between has another inode, modification time and
-// token, and is never removed.
+// token, and is put back. Mutual exclusion stays best effort for the instant between the move and the put back (a third contender can
+// take the free path then); what the fold relies on is its own check before it publishes (see syncList).
 function breakStaleLock(lockPath, staleMs = LOCK_STALE_MS) {
   let seen;
   let token;
@@ -163,7 +164,9 @@ export function withFileLock(path, fn, env = process.env, staleMs = LOCK_STALE_M
   } catch {
     return false;
   } finally {
-    removeLockIf(lockPath, (moved) => readToken(moved) === token); // a lock taken over as stale is another holder's now: it stays
+    // a lock taken over as stale is another holder's now: it is not touched. The move below checks the file again, so a lock that
+    // changes hands between this read and the move is put back.
+    if (readToken(lockPath) === token) removeLockIf(lockPath, (moved) => readToken(moved) === token);
   }
 }
 
@@ -370,6 +373,34 @@ export function nextList(record, data, env = process.env, broken = false) {
   return null;
 }
 
+// The newest modification time in a session directory: the directory, its entries and the entries of its folders (<key>.events, _task).
+// An event is written into a folder, which does not change the modification time of the session directory itself, so the directory
+// alone does not tell that a hook wrote there lately.
+function lastActivityMs(dir) {
+  let newest = lstatSync(dir).mtimeMs;
+  for (const entry of readdirSync(dir, { withFileTypes: true })) {
+    const path = join(dir, entry.name);
+    newest = Math.max(newest, lstatSync(path).mtimeMs);
+    if (entry.isDirectory()) for (const inner of readdirSync(path)) newest = Math.max(newest, lstatSync(join(path, inner)).mtimeMs);
+  }
+  return newest;
+}
+
+// A session directory goes only when nothing in it was touched for LISTS_MAX_AGE_MS. The age read from the path is not enough: a hook may
+// write there between that read and the removal. The directory is moved to a unique hidden name first (a hook that arrives later makes a
+// new directory instead of writing into the one being removed) and the moved tree is judged. A tree with recent activity is moved back;
+// when a new directory has its name by then, the tree stays under the hidden name until a later sweep finds it idle.
+const SWEEPING = '.sweeping';
+function removeIfIdle(root, name, now) {
+  const dir = join(root, name);
+  const aside = join(root, `.${name}.${randomBytes(6).toString('hex')}${SWEEPING}`);
+  try { renameSync(dir, aside); } catch { return; }
+  let idle = false;
+  try { idle = now - lastActivityMs(aside) > LISTS_MAX_AGE_MS; } catch { /* not judged idle */ }
+  if (idle) { rmSync(aside, { recursive: true, force: true }); return; }
+  try { renameSync(aside, dir); } catch { /* a new directory has the name: the moved tree waits under its hidden name */ }
+}
+
 export function sweep(env, now) {
   try {
     const root = listsDir(env);
@@ -378,9 +409,13 @@ export function sweep(env, now) {
     mkdirSync(root, { recursive: true });
     writeJson(marker, { ts: new Date(now).toISOString() });
     for (const name of readdirSync(root)) {
-      if (name.startsWith('.')) continue;
-      const dir = join(root, name);
-      try { if (now - statSync(dir).mtimeMs > LISTS_MAX_AGE_MS) rmSync(dir, { recursive: true, force: true }); } catch { /* next */ }
+      try {
+        if (name.endsWith(SWEEPING)) { // a tree that could not be moved back: removed once idle
+          if (now - lastActivityMs(join(root, name)) > LISTS_MAX_AGE_MS) rmSync(join(root, name), { recursive: true, force: true });
+        } else if (!name.startsWith('.') && now - statSync(join(root, name)).mtimeMs > LISTS_MAX_AGE_MS) {
+          removeIfIdle(root, name, now);
+        }
+      } catch { /* next */ }
     }
   } catch { /* cleanup never breaks the hook */ }
 }
@@ -545,13 +580,13 @@ export function syncList(sessionId, key, env = process.env) {
   const ok = withFileLock(path, (owned) => {
     const f = fold(path, key, env);
     saved = f.record;
-    if (!owned()) return; // the lock was taken over: the newer fold writes
-    remove(waiting.filter((name) => f.done.has(name)));
-    if (!f.names.length) return;
     // What this fold decided rests on the list it read. It acts only while the lock is still its own and no other fold has published
     // since (the generation of the file is the one it folded from): a lock lost in a window no check closes must not let an older fold
-    // overwrite the newer list, or delete events the newer list does not hold.
+    // overwrite the newer list, or delete events the newer list does not hold. Every removal and the write below stand behind it.
     const current = () => owned() && generationOf(readRecord(path)) === f.generation;
+    if (!current()) return; // the lock was taken over or another fold published: the newer fold writes
+    remove(waiting.filter((name) => f.done.has(name)));
+    if (!f.names.length) return;
     // events that change nothing (also on a broken list without a replacing call) leave the list file as it is
     if (!f.changed) { if (current()) remove(f.names); return; }
     const next = { ...f.record, folded: [...f.done, ...f.names].slice(-Math.max(EVENTS_KEPT, f.names.length)) };

@@ -761,6 +761,7 @@ describe('task list: session retention sweep', () => {
     const dir = join(root(), name);
     mkdirSync(join(dir, 'main.events'), { recursive: true });
     writeFileSync(join(dir, 'main.json'), '{}');
+    for (const entry of ['main.json', 'main.events']) age(join(dir, entry), ageMs, now);
     age(dir, ageMs, now);
     return dir;
   };
@@ -806,6 +807,31 @@ describe('task list: session retention sweep', () => {
     expect(L.recordListCall(postToolUse(sid, 'TodoWrite', { todos: [{ content: 'Back after a week', status: 'pending' }] }), envFor(), now)).not.toBeNull();
     expect(existsSync(dir)).toBe(true);
     expect(JSON.parse(readFileSync(join(dir, 'main.json'), 'utf8')).items[0].content).toBe('Back after a week');
+  });
+
+  it('keeps a directory that looks old when something in it, or in its event folder, was written lately', () => {
+    fresh();
+    const now = Date.now();
+    const byEvent = sessionDir('by-event', L.LISTS_MAX_AGE_MS + HOUR, now);
+    writeFileSync(join(byEvent, 'main.events', '1-1-aaaaaaaa.json'), '{}');
+    age(byEvent, L.LISTS_MAX_AGE_MS + HOUR, now); // the writer of the event did not change the directory itself
+    const byFile = sessionDir('by-file', L.LISTS_MAX_AGE_MS + HOUR, now);
+    writeFileSync(join(byFile, 'main.json'), '{"updated":1}');
+    L.sweep(envFor(), now);
+    expect(existsSync(join(byEvent, 'main.events', '1-1-aaaaaaaa.json'))).toBe(true);
+    expect(readFileSync(join(byFile, 'main.json'), 'utf8')).toBe('{"updated":1}');
+    expect(readdirSync(root()).filter((n) => n.endsWith('.sweeping'))).toEqual([]);
+  });
+
+  it('removes a tree left under a hidden name by an earlier sweep once it is idle, and keeps it while it is not', () => {
+    fresh();
+    const now = Date.now();
+    const idle = sessionDir('.old-session.0123456789ab.sweeping', L.LISTS_MAX_AGE_MS + HOUR, now);
+    const active = sessionDir('.live-session.0123456789ab.sweeping', L.LISTS_MAX_AGE_MS + HOUR, now);
+    writeFileSync(join(active, 'main.json'), '{"updated":1}');
+    L.sweep(envFor(), now);
+    expect(existsSync(idle)).toBe(false);
+    expect(existsSync(active)).toBe(true);
   });
 
   it('a list call triggers the sweep', () => {
