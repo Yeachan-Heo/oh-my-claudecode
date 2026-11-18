@@ -22,6 +22,8 @@ const sharedRules = (source) => {
   return source.slice(from, source.indexOf('\n}\n', named) + 3);
 };
 const repeat = (unit, n) => unit.repeat(Math.ceil(n / unit.length)).slice(0, n);
+// Every short JSON escape and a `\uXXXX` escape of a slash, as a key holds them.
+const escapesUnit = String.raw`\/\\\b\f\n\r\t\"` + String.raw`\u` + '002f';
 
 // The field names in other languages, and each of their forms: precomposed, decomposed (base letter and combining mark), plain ASCII,
 // upper case, and with every non-ASCII character as a JSON `\uXXXX` escape.
@@ -235,6 +237,18 @@ describe.each([
       'whitespace escapes without a key': (n) => repeat(String.raw`\u0020`, n),
       'a localized label and a run of backslashes before a quote, masked': (n) => 'hasło=' + '\\'.repeat(n) + '"',
       'a serialized label and a run of backslashes before a quote, masked': (n) => String.raw`\"hasło\":\"a` + '\\'.repeat(n) + '"',
+      // The keys of a pair decoded: every short JSON escape and a `\uXXXX` in a long prefix, at the first level and at a deep one.
+      'two long pair keys of JSON escapes, masked': (n) => {
+        const prefix = repeat(escapesUnit, n / 2);
+        return `{"ns${prefix}name":"A_TOKEN","ns${prefix}value":"x"}`;
+      },
+      'two long pair keys of JSON escapes at a deep level of serialization, masked': (n) => {
+        const prefix = repeat(escapesUnit, n / 16);
+        return serializeOnce(serializeTwice(`{"ns${prefix}name":"A_TOKEN","ns${prefix}value":"x"}`));
+      },
+      'one object of many pair fields with escaped prefixes, masked': (n) => '{' + repeat(String.raw`"ns\/name":"A_TOKEN","ns/value":"x",`, n),
+      'many objects of pair fields with escaped prefixes, masked': (n) => repeat(String.raw`{"ns\/name":"A_TOKEN","ns/value":"x"},`, n),
+      'pair keys of a backslash before a selector letter, masked': (n) => '{' + repeat(String.raw`"ns\name":"A_TOKEN","ns\value":"x",`, n),
     };
     for (const n of [100_000, 1_000_000]) {
       for (const [name, make] of Object.entries(shapes)) {
@@ -1017,6 +1031,118 @@ describe.each([
     expect(mask('{"ns:name:":"DB_PASSWORD","ns:value ":"hunter2zz"}')).toBe('{"ns:name:":"DB_PASSWORD","ns:value ":"***"}');
     expect(mask('{"ns\\u003aname":"DB_PASSWORD","ns:value":"hunter2zz"}')).toBe('{"ns\\u003aname":"DB_PASSWORD","ns:value":"***"}');
     expect(mask(String.raw`{"ns:Name":"DB_PASSWORD","ns:Value\n":"hunter2zz"}`)).toBe(String.raw`{"ns:Name":"DB_PASSWORD","ns:Value\n":"***"}`);
+  });
+
+  it('reads two spellings of one key as one key: a prefix, a selector and a name written with any JSON escape, raw and serialized, with exact results', () => {
+    // How a text is written in a JSON key: as it is where JSON allows it, with its short escape, and with `\uXXXX` escapes in both cases
+    // of the hex digits (a character outside the first plane as a surrogate pair).
+    const escaped = (text, upper) => [...text].map((char) => Array.from({ length: char.length }, (_, i) => {
+      const hex = char.charCodeAt(i).toString(16).padStart(4, '0');
+      return String.raw`\u` + (upper ? hex.toUpperCase() : hex);
+    }).join('')).join('');
+    const KINDS = [
+      ['a slash', '/', ['/', String.raw`\/`]],
+      ['a quote', '"', [String.raw`\"`]],
+      ['a backslash', '\\', [String.raw`\\`]],
+      ['a backspace', '\b', [String.raw`\b`]],
+      ['a form feed', '\f', [String.raw`\f`]],
+      ['a line feed', '\n', [String.raw`\n`]],
+      ['a carriage return', '\r', [String.raw`\r`]],
+      ['a tab', '\t', [String.raw`\t`]],
+      ['a colon', ':', [':']],
+      ['a space', ' ', [' ']],
+      ['an accented letter', 'é', ['é']],
+      ['an emoji', '😀', ['😀']],
+    ].map(([kind, char, written]) => [kind, [...new Set([...written, escaped(char, false), escaped(char, true)])]]);
+    const wrong = [];
+    let checked = 0;
+    const check = (text, expected, what) => {
+      checked++;
+      const out = mask(text);
+      if (out !== expected) wrong.push({ what, text, out, expected });
+    };
+    const object = (fields, nameFirst) => `{${(nameFirst ? fields : [...fields].reverse()).join(',')}}`;
+    let expectedChecks = 0;
+    // One prefix written any way on the name field and on the value field, in both orders: the value is masked.
+    for (const [kind, spellings] of KINDS) {
+      for (const nameSpelling of spellings) {
+        for (const valueSpelling of spellings) {
+          for (const nameFirst of [true, false]) {
+            for (const [form, serialize] of FORMS) {
+              const make = (value) => object([`"ns${nameSpelling}Name":"DB_PASSWORD"`, `"ns${valueSpelling}Value":"${value}"`], nameFirst);
+              check(serialize(make('hunter2zz')), serialize(make('***')), `${kind}, ${form}`);
+              expectedChecks++;
+            }
+          }
+        }
+      }
+    }
+    // A selector and the name it holds, with letters written as escapes: a secret name masks the value, any other name leaves it.
+    const lettersEscaped = (word) => [word, escaped(word, false), escaped(word, true), escaped(word[0], true) + word.slice(1)];
+    for (const nameWord of ['Name', 'Type']) {
+      for (const nameSpelling of lettersEscaped(nameWord)) {
+        for (const valueSpelling of lettersEscaped('Value')) {
+          for (const secretName of [true, false]) {
+            const names = secretName
+              ? [...lettersEscaped('DB_PASSWORD'), 'DB_PASS' + escaped('W', true) + 'ORD', String.raw`DB\/PASSWORD`]
+              : lettersEscaped('REGION');
+            for (const nameValue of names) {
+              for (const nameFirst of [true, false]) {
+                for (const [form, serialize] of FORMS) {
+                  const make = (value) => object([`"ns/${nameSpelling}":"${nameValue}"`, `"ns/${valueSpelling}":"${value}"`], nameFirst);
+                  check(serialize(make('hunter2zz')), serialize(make(secretName ? '***' : 'hunter2zz')), `${nameSpelling} ${valueSpelling} ${nameValue}, ${form}`);
+                  expectedChecks++;
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+    // The secret itself written with an escape, in each spelling: the whole value is masked.
+    for (const [kind, spellings] of KINDS) {
+      for (const spelling of spellings) {
+        for (const nameFirst of [true, false]) {
+          for (const [form, serialize] of FORMS) {
+            const make = (value) => object(['"ns/Name":"DB_PASSWORD"', `"ns/Value":"${value}"`], nameFirst);
+            check(serialize(make(`hunter${spelling}2zz`)), serialize(make('***')), `a value with ${kind}, ${form}`);
+            expectedChecks++;
+          }
+        }
+      }
+    }
+    // Two prefixes that differ are two prefixes, whatever the spelling: no value goes with a name of another prefix.
+    for (const [nameKind, nameSpellings] of KINDS) {
+      for (const [valueKind, valueSpellings] of KINDS) {
+        if (nameKind === valueKind) continue;
+        for (const nameSpelling of nameSpellings) {
+          for (const valueSpelling of valueSpellings) {
+            for (const [form, serialize] of FORMS) {
+              const text = serialize(`{"ns${nameSpelling}Name":"DB_PASSWORD","ns${valueSpelling}Value":"hunter2zz"}`);
+              check(text, text, `${nameKind} and ${valueKind}, ${form}`);
+              expectedChecks++;
+            }
+          }
+        }
+      }
+    }
+    expect(checked).toBe(expectedChecks);
+    expect(checked).toBeGreaterThan(5000);
+    expect(wrong.slice(0, 3)).toEqual([]);
+    // The case of the finding itself, in both orders, raw and serialized.
+    for (const [, serialize] of FORMS) {
+      expect(mask(serialize(String.raw`{"ns\/name":"DB_PASSWORD","ns/value":"hunter2zz"}`))).toBe(serialize(String.raw`{"ns\/name":"DB_PASSWORD","ns/value":"***"}`));
+      expect(mask(serialize(String.raw`{"ns/value":"hunter2zz","ns\/name":"DB_PASSWORD"}`))).toBe(serialize(String.raw`{"ns/value":"***","ns\/name":"DB_PASSWORD"}`));
+      // `\\` is one backslash for JSON: `ns\\/name` is a different key from `ns/name`.
+      const other = serialize(String.raw`{"ns\\/name":"DB_PASSWORD","ns/value":"hunter2zz"}`);
+      expect(mask(other)).toBe(other);
+    }
+    // A backslash and a letter that JSON takes for an escape (`\n` of `ns\name`, `\t` of `C:\token`) is read as text too, as the key was
+    // read before JSON escapes were decoded: where only that reading recognizes the key, the value is masked.
+    for (const [, serialize] of FORMS) {
+      expect(mask(serialize(String.raw`{"ns\name":"DB_PASSWORD","ns\value":"hunter2zz"}`))).toBe(serialize(String.raw`{"ns\name":"DB_PASSWORD","ns\value":"***"}`));
+      expect(mask(serialize(String.raw`{"C:\token":"hunter2zz"}`))).toBe(serialize(String.raw`{"C:\token":"***"}`));
+    }
   });
 
   it('reads a key that ends in a JSON escape, and a key that is one plain word in serialized text, as the word rules read the same key in raw text', () => {

@@ -1139,11 +1139,10 @@ const PAIR_VALUE_WORDS = ['value', 'val'];
 const NON_WORD = /[^\p{L}\p{N}\p{M}_]/u;
 // A key of ASCII letters, digits and underscores only has no escape and no separator: its head is the key itself (a shortcut, same result).
 const ASCII_WORD = /^[A-Za-z0-9_]*$/;
-// The key decoded and cut after its last word, in lower case: what follows it (separators, spaces, a JSON line break or tab such as
-// `password\n`) does not count, as in the word rules. One pass from the end of the key.
-function keyHead(key) {
-  if (ASCII_WORD.test(key)) return key.toLowerCase();
-  const chars = [...decodeUnicode(key).toLowerCase()];
+// A decoded key cut after its last word, in lower case: what follows it (separators, spaces, a line break or tab such as `password\n`)
+// does not count, as in the word rules. One pass from the end of the key.
+function cutHead(text) {
+  const chars = [...text.toLowerCase()];
   let end = chars.length;
   for (;;) {
     while (end > 0 && NON_WORD.test(chars[end - 1])) end--;
@@ -1151,6 +1150,16 @@ function keyHead(key) {
     end--;
   }
   return chars.slice(0, end).join('');
+}
+// The heads of a quoted key, in two readings. Every comparison of two keys, of a key and a prefix and of a key and a word reads these
+// forms, so two spellings of the same key (`ns/name`, `ns\/name`, the slash as a `\uXXXX` escape) meet: the first reading is the one
+// JSON gives (decodeKey), the second the key as text with only its `\uXXXX` escapes decoded, which is how the key was read before and
+// how it reads where JSON takes a backslash and a letter for an escape (`ns\name` is `ns`, a line break and `ame` to JSON). A pair is
+// masked when either reading says so, so the second can only add masking.
+function keyHeads(key, depth) {
+  if (ASCII_WORD.test(key)) return [key.toLowerCase(), key.toLowerCase()];
+  const json = cutHead(decodeKey(key, depth));
+  return [json, key.includes('\\') ? cutHead(decodeUnicode(key)) : json];
 }
 // The prefix of a key head that ends in one of the selector words, or null.
 function pairPrefix(head, words) {
@@ -1174,6 +1183,18 @@ const PAIR_FORMS = QUOTE_DEPTHS.map((d) =>
   new RegExp(String.raw`${d}(${stringBody(d)}*)${d}${WS}*:${WS}*(${pairValue(d)})`, 'g'));
 // JSON `\uXXXX` escapes of the name are read first (`DB_PASS\u0057ORD`), with any number of backslashes before the u.
 const decodeUnicode = (text) => text.replace(/(?<!\\)\\+u([0-9a-f]{4})/gi, (_, hex) => String.fromCharCode(parseInt(hex, 16)));
+// The one reading of a quoted key, whatever escapes spell it: the short escapes of a JSON string (`\\`, `\"`, `\/`, `\b`, `\f`, `\n`, `\r`,
+// `\t`) are decoded left to right, once for the string of the key and once more for each level of serialization the text went through
+// (the depth of the quote that delimits it), so `\\name` is a backslash and `name`, not a line break and `ame`. Then a `\uXXXX` after any
+// run of backslashes is decoded, in either case of its hex digits (as it always was, whatever the depth; the two halves of a surrogate
+// pair decode to the character). A key without a backslash is its own reading.
+const JSON_ESCAPES = { b: '\b', f: '\f', n: '\n', r: '\r', t: '\t' };
+const unescapeJson = (text) => text.replace(/\\(["\\/bfnrt])/g, (_, ch) => JSON_ESCAPES[ch] ?? ch);
+function decodeKey(key, depth = 0) {
+  let text = key;
+  for (let level = 0; level <= depth && text.includes('\\'); level++) text = unescapeJson(text);
+  return decodeUnicode(text);
+}
 const SECRET_PAIR_NAME = new RegExp(String.raw`${ENGLISH_KEYWORDS}|${localNames(false)}|^securestring$`, 'i');
 const secretPairName = (name) => SECRET_PAIR_NAME.test(decodeUnicode(name));
 // A quoted key read whole: decoded, it is classified by the word it ends in (the part the word rules read before a separator), so
@@ -1233,13 +1254,13 @@ function pairParts(source) {
   if (!source.includes('"')) return parts;
   for (const [depth, field] of PAIR_FORMS.entries()) {
     if (depth && !source.includes('\\'.repeat((1 << depth) - 1) + '"')) continue;
-    const cuts = [];
+    const cuts = new Set();
     let group = [];
-    const flush = () => {
+    const read = (headOf) => {
       const names = new Set();
       const secret = new Set();
       for (const f of group) {
-        const prefix = f.quote ? pairPrefix(f.head, PAIR_NAME_WORDS) : null;
+        const prefix = f.quote ? pairPrefix(headOf(f), PAIR_NAME_WORDS) : null;
         if (prefix === null) continue;
         names.add(prefix);
         if (secretPairName(unquoted(f.value, f.quote))) secret.add(prefix);
@@ -1248,20 +1269,25 @@ function pairParts(source) {
       // that have a value.
       const paired = new Set();
       for (const f of group) {
-        const prefix = pairPrefix(f.head, PAIR_VALUE_WORDS);
+        const prefix = pairPrefix(headOf(f), PAIR_VALUE_WORDS);
         if (prefix === null) continue;
         const name = names.has(prefix) ? prefix : '';
         paired.add(name);
-        if (secret.has(name)) cuts.push(f);
+        if (secret.has(name)) cuts.add(f);
       }
       // A key that ends in a secret word masks its value, whatever stands inside the key (a colon, a space, escapes) and whether it is
       // one plain word or not. A name that has a value field to go with is the name of a pair, not a secret key: the pair rule above
       // reads that value (`{"Key":"DB_PASSWORD","Val":"x"}`).
       for (const f of group) {
-        if (!keyNamesSecret(f.head)) continue;
-        const prefix = f.quote ? pairPrefix(f.head, PAIR_NAME_WORDS) : null;
-        if (prefix === null || !paired.has(prefix)) cuts.push(f);
+        if (!keyNamesSecret(headOf(f))) continue;
+        const prefix = f.quote ? pairPrefix(headOf(f), PAIR_NAME_WORDS) : null;
+        if (prefix === null || !paired.has(prefix)) cuts.add(f);
       }
+    };
+    // A group is read in the second reading of its keys too when a key has one that differs.
+    const flush = () => {
+      read((f) => f.head);
+      if (group.some((f) => f.plain !== f.head)) read((f) => f.plain);
       group = [];
     };
     field.lastIndex = 0;
@@ -1271,7 +1297,8 @@ function pairParts(source) {
       if (group.length && !PAIR_SEPARATOR.test(source.slice(end, m.index))) flush();
       end = m.index + m[0].length;
       const quote = /^\\*"/.exec(m[2])?.[0] ?? '';
-      group.push({ head: keyHead(m[1]), value: m[2], quote, start: end - m[2].length, end });
+      const [head, plain] = keyHeads(m[1], depth);
+      group.push({ head, plain, value: m[2], quote, start: end - m[2].length, end });
     }
     flush();
     // The text inside the quotes is what is masked, so the quotes stay where they are when another rule masks the same value; a value
