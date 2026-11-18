@@ -19,14 +19,14 @@ export interface PaneSignals {
 }
 
 export interface ProviderPanePatterns {
-  idlePromptLine: RegExp;
-  busyLines: readonly RegExp[];
+  readonly idlePromptLine: RegExp;
+  readonly busyLines: readonly RegExp[];
   /** Counts as bootstrapping only while no idle prompt is drawn. */
-  startupBannerLines: readonly RegExp[];
-  loadingLines: readonly RegExp[];
-  trustKinds: readonly PaneTrustPromptKind[];
+  readonly startupBannerLines: readonly RegExp[];
+  readonly loadingLines: readonly RegExp[];
+  readonly trustKinds: readonly PaneTrustPromptKind[];
   /** Provider version whose recorded frames are in the pane-frame corpus. */
-  verifiedVersion: string | null;
+  readonly verifiedVersion: string | null;
 }
 
 const LEGACY_IDLE_PROMPT_LINE = /^\s*(?:[│┃║▌▐▏▕╎┆┊]\s*)?[›>❯]\s*/u;
