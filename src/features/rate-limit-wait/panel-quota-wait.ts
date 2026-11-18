@@ -29,9 +29,9 @@
  * a slow reading, which only supplies the reset date for the log.
  *
  * One pass has one time limit (OMC_PANEL_QUOTA_PASS_LIMIT_S), shared by every pane. Panes that wait come first, then the
- * others. A wait whose reset has not come needs no capture and no time, a pane resumed a moment ago is not captured while
- * the old error text can be on its screen, and a due wait is captured once, right before its key. A pass that runs out of
- * time saves a cursor: the next pass starts after the last pane this one worked on, so a pane that used up the time goes
+ * others, unless the previous pass ran out of time (below). A wait whose reset has not come needs no capture and no
+ * time, a pane resumed a moment ago is not captured while the old error text can be on its screen, and a due wait is
+ * captured once, right before its key. A pass that runs out of time saves a cursor: the next pass starts after the last pane this one worked on, so a pane that used up the time goes
  * to the end of the next pass and a pane that was not reached goes to its start, for waiting and other panes alike.
  *
  * Tmux, the clock and the provider reading are injected, so the decision logic runs in tests without
