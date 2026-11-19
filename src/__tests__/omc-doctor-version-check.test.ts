@@ -575,13 +575,16 @@ describe('omc-doctor Step 1 derives the plugin ID, channel and latest version fr
           });
           expect({ spelled, channel: out.Channel, installed: out.Installed }).toEqual({ spelled, channel: 'marketplace omc', installed: '5.8.0' });
         }
-        // The cache directory the pinned version names is the registry's install even when the entry has no installPath.
-        const pinned = step1({
-          plugins: { 'oh-my-claudecode@omc': [{ scope: 'user', version: '5.8.0' }] },
-          cache: { omc: ['5.7.0', '5.8.0'] },
-          env: (dir) => ({ OMC_PLUGIN_ROOT: path.join(dir, 'plugins', 'cache', 'omc', 'oh-my-claudecode', '5.8.0') }),
-        });
-        expect(pinned.Channel).toBe('marketplace omc');
+        // The cache directory the pinned version names is the registry's install even when the entry has no installPath, in
+        // the cache of the marketplace its key names (any letter case; the bare key and the legacy key use the omc one).
+        for (const [key, market] of [['oh-my-claudecode@omc', 'omc'], ['oh-my-claudecode@oh-my-claudecode', 'oh-my-claudecode'], ['OH-MY-CLAUDECODE@OH-MY-CLAUDECODE', 'oh-my-claudecode'], ['oh-my-claudecode', 'omc']] as const) {
+          const pinned = step1({
+            plugins: { [key]: [{ scope: 'user', version: '5.8.0' }] },
+            cache: { [market]: ['5.7.0', '5.8.0'] },
+            env: (dir) => ({ OMC_PLUGIN_ROOT: path.join(dir, 'plugins', 'cache', market, 'oh-my-claudecode', '5.8.0') }),
+          });
+          expect({ key, channel: pinned.Channel }).toEqual({ key, channel: `marketplace ${market}` });
+        }
       });
 
       // An explicit root is explicit wherever it lies. A cache version the registry does not pin, a directory in the cache of
