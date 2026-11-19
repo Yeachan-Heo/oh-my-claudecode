@@ -9735,6 +9735,28 @@ export async function shutdownTeamV2(
     async () => {
       await assertTeamInstanceUnderLock(shutdownInstance);
       await commitStoppedFenceUnderLock();
+      // Disposal deletes last_recovery, the only record of a saved timeout
+      // whose owner died before publishing the request final.
+      const savedTimeout = (await readRevisionedTeamConfig(sanitized, cwd))
+        ?.config.last_recovery;
+      if (savedTimeout?.failure_reason === "recovery_request_timeout") {
+        await publishSavedRecoveryTimeout(
+          {
+            teamName: sanitized,
+            cwd,
+            workerName: savedTimeout.worker_name,
+            requestId: savedTimeout.request_id,
+            instanceId: shutdownInstance.instance_id,
+          },
+          savedTimeout.recovery_id,
+        ).catch(() => null);
+        if (readRecoveryFinalState(cwd, savedTimeout.request_id).kind !== "valid")
+          return {
+            outcome: "failed",
+            reason: "state_cleanup_failed",
+            detail: `recovery_final_unpublished:${savedTimeout.recovery_id}`,
+          };
+      }
       let worktreeCleanupFailure: string | null = null;
       let preservedWorktrees = 0;
       try {
