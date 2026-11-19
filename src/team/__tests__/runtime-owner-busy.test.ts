@@ -782,6 +782,49 @@ describe('recovery owner retry deadline', () => {
     });
   });
 
+  it('does not expire a recovery while another attempt of it runs in the same owner process', async () => {
+    cwd = mkdtempFixture('runtime-owner-deadline-same-process-');
+    const teamName = 'deadline-same-process';
+    await seedElectedUnknownLiveness(teamName, BEFORE_DEADLINE_MS);
+    // Attempt A passes the fence before the deadline, then pauses inside its
+    // effects, where it could be about to write a task reservation.
+    let entered!: () => void;
+    const enteredEffects = new Promise<void>(resolve => { entered = resolve; });
+    let release!: () => void;
+    const released = new Promise<void>(resolve => { release = resolve; });
+    tmuxMocks.observeTmuxServerIdentity.mockImplementationOnce(async () => {
+      entered();
+      await released;
+      return 'matching' as const;
+    });
+    const attemptA = execute(teamName);
+    await enteredEffects;
+
+    writeIntent(teamName, 'stuck-request', 'stuck-recovery', PAST_DEADLINE_MS);
+    let attemptBSettled = false;
+    const attemptB = execute(teamName).finally(() => { attemptBSettled = true; });
+    await new Promise(resolve => setTimeout(resolve, 1_000));
+    const settledWhileAPaused = attemptBSettled;
+
+    // A's effect lands, then A finishes.
+    const taskPath = absPath(cwd, TeamPaths.taskFile(teamName, '1'));
+    mkdirSync(join(taskPath, '..'), { recursive: true });
+    writeFileSync(taskPath, JSON.stringify({ id: '1', subject: 'reserved task', description: 'requeued for the replacement',
+      status: 'pending', version: 2, blocked_by: [], created_at: new Date().toISOString(),
+      recovery_reservation: { recovery_id: 'stuck-recovery', request_id: 'stuck-request', continuation_sequence: 1,
+        checkpoint_path: 'checkpoint.json', checkpoint_hash: 'a'.repeat(64), replacement_worker: 'worker-1',
+        replacement_generation: 2, adoption_token_hash: 'b'.repeat(64), reserved_at: new Date().toISOString() } }));
+    release();
+    await attemptA;
+    await expect(attemptB).resolves.not.toMatchObject({ error: 'recovery_request_timeout' });
+
+    expect(settledWhileAPaused).toBe(false);
+    expect(readRecoveryOutcome(cwd, 'stuck-request')?.kind).not.toBe('final');
+    await expect(readRevisionedTeamConfig(teamName, cwd)).resolves.toMatchObject({
+      config: { active_recovery: { recovery_id: 'stuck-recovery' } },
+    });
+  });
+
   it('keeps retrying past the deadline when a successor finds a persisted replacement launch for the recovery', async () => {
     cwd = mkdtempFixture('runtime-owner-deadline-persisted-launch-');
     const teamName = 'deadline-persisted-launch';
