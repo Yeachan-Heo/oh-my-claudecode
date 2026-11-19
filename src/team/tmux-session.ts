@@ -65,7 +65,7 @@ import {
   paneHasStartupBanner,
   paneHasTrustPrompt,
   paneLooksReady,
-  paneShowsClaudeTrustYesFocused,
+  claudeTrustFocus,
   type PaneTrustPromptKind,
 } from "./pane-readiness.js";
 
@@ -4666,8 +4666,9 @@ export async function waitForStartupPaneReady(
         // confirming "No" after a Down was sent; the likely cause is a busy
         // Claude Code reading both keys at once against the focus drawn before
         // them. Enter waits until the pane shows the affirmative choice focused.
-        if (!paneShowsClaudeTrustYesFocused(captured)) {
-          if (!claudeTrustDownSent) {
+        const focus = claudeTrustFocus(captured);
+        if (focus !== "yes") {
+          if (focus === "no" && !claudeTrustDownSent) {
             await sendTeamPaneKey(
               context.ownership.paneId,
               "Down",

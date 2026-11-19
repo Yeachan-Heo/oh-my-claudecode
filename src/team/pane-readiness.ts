@@ -160,6 +160,13 @@ function codexTrustQuestionIsActive(lines: readonly string[]): boolean {
   return activePrompt === '' && !previousChoiceWasRendered;
 }
 
+// True when the question, wrapped over at most 3 lines, is in the lines from index on.
+function claudeTrustQuestionStartsAt(lines: readonly string[], index: number): boolean {
+  return /(?:Do you trust the files in this folder|Quick safety check:\s*Is this a project you created or one you trust)\?/i.test(
+    lines.slice(index, index + 3).join(' '),
+  );
+}
+
 function detectTrustPrompt(
   lines: readonly string[],
   kinds: readonly PaneTrustPromptKind[],
@@ -191,11 +198,7 @@ function detectTrustPrompt(
   const claudeQuestionLines = lines.slice(-20);
   if (
     kinds.includes('claude_directory') &&
-    claudeQuestionLines.some((_, index) =>
-      /(?:Do you trust the files in this folder|Quick safety check:\s*Is this a project you created or one you trust)\?/i.test(
-        claudeQuestionLines.slice(index, index + 3).join(' '),
-      ),
-    ) &&
+    claudeQuestionLines.some((_, index) => claudeTrustQuestionStartsAt(claudeQuestionLines, index)) &&
     tailHas(/\bNo,\s*exit\b/i) &&
     tailHas(/\bYes,\s*(?:proceed|I trust this folder)\b/i)
   ) {
@@ -280,12 +283,17 @@ export function detectPaneTrustPromptKind(
 }
 
 // Claude Code marks the focused choice of its trust dialog with ❯ and draws
-// "Yes" right below "No, exit". Only the last such pair is the live dialog;
-// an answered dialog can remain in the scrollback above it.
-export function paneShowsClaudeTrustYesFocused(captured: string): boolean {
+// "Yes" right below "No, exit". Only the pair after the latest question is the
+// live dialog: an answered dialog can remain in the scrollback above it. Null
+// while that pair is not drawn yet.
+export function claudeTrustFocus(captured: string): 'no' | 'yes' | null {
   const lines = paneLines(captured);
-  const no = lines.findLastIndex((line) => /^\s*(?:❯\s*)?No,\s*exit\b/i.test(line));
-  return no >= 0 && /^\s*❯\s*Yes,\s*(?:proceed|I trust this folder)\b/i.test(lines[no + 1] ?? '');
+  const question = lines.findLastIndex((_, index) => claudeTrustQuestionStartsAt(lines, index));
+  if (question < 0) return null;
+  const no = lines.findIndex((line, index) => index > question && /^\s*(?:❯\s*)?No,\s*exit\b/i.test(line));
+  const yes = no >= 0 ? lines[no + 1] ?? '' : '';
+  if (!/^\s*(?:❯\s*)?Yes,\s*(?:proceed|I trust this folder)\b/i.test(yes)) return null;
+  return /^\s*❯/.test(yes) ? 'yes' : 'no';
 }
 
 export function paneHasTrustPrompt(

@@ -1,8 +1,10 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { randomUUID } from 'node:crypto';
+import { readFileSync } from 'node:fs';
 import { mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { join, relative } from 'node:path';
+import { dirname, join, relative } from 'node:path';
+import { fileURLToPath } from 'node:url';
 
 import type { WorkerLaunchAttempt } from '../worker-launch-ack.js';
 import { currentStrictProcessStartIdentity } from '../team-owner-epoch.js';
@@ -933,6 +935,32 @@ describe('worker pane startup safety', () => {
     await deliverStartupInbox(context, 'Read inbox.md, execute now.');
     const keys = tmuxState.args.filter(args => args[0] === 'send-keys' && !args.includes('-l')).map(args => args.at(-1));
     expect(keys[0]).toBe('Down');
+  });
+
+  strictTmuxIt('waits for a new trust dialog below an answered one to draw its choices, then sends Down, then Enter', async () => {
+    const context = await acceptedContext('claude');
+    const corpus = join(dirname(fileURLToPath(import.meta.url)), 'fixtures', 'pane-frames');
+    const answered = readFileSync(join(corpus, 'claude/2.1.328/trust-yes-focused.txt'), 'utf8');
+    const live = readFileSync(join(corpus, 'claude/2.1.325/trust.txt'), 'utf8');
+    const midDraw = live.slice(0, live.indexOf('Security guide') + 'Security guide'.length);
+    const yesFocused = live.replace('❯ No, exit', '  No, exit').replace('  Yes, I trust this folder', '❯ Yes, I trust this folder');
+    const stages = [`${answered}\n${midDraw}`, `${answered}\n${live}`, `${answered}\n${yesFocused}`];
+    const keysAfterStage: string[][] = stages.map(() => []);
+    let stage = -1;
+    let seen = 0;
+    tmuxState.captureAt = () => {
+      const sent = tmuxState.args.slice(seen).filter(args => args[0] === 'send-keys' && !args.includes('-l')).map(args => String(args.at(-1)));
+      seen = tmuxState.args.length;
+      if (stage >= 0 && stage < stages.length) keysAfterStage[stage]!.push(...sent);
+      stage = Math.min(stage + 1, stages.length);
+      return stages[stage] ?? '❯ ready\n';
+    };
+
+    await expect(deliverStartupInbox(context, 'Read inbox.md, execute now.')).resolves.toEqual({
+      ok: true,
+      kind: 'attempted_unconfirmed',
+    });
+    expect(keysAfterStage).toEqual([[], ['Down'], ['Enter']]);
   });
 
   strictTmuxIt.each([

@@ -4,13 +4,13 @@ import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 import type { CliAgentType } from '../model-contract.js';
 import {
+  claudeTrustFocus,
   classifyPane,
   detectPaneTrustPromptKind,
   observePane,
   PANE_PATTERNS,
   paneHasActiveTask,
   paneLooksReady,
-  paneShowsClaudeTrustYesFocused,
   type PaneSignals,
 } from '../pane-readiness.js';
 
@@ -227,27 +227,34 @@ describe('PANE_PATTERNS', () => {
   });
 });
 
-describe('paneShowsClaudeTrustYesFocused', () => {
+describe('claudeTrustFocus', () => {
   const read = (file: string) => readFileSync(join(CORPUS_ROOT, file), 'utf8');
   const STALE_YES = ' ❯ Yes, I trust this folder\n';
+  const trust = read('claude/2.1.325/trust.txt');
+  const midDraw = trust.slice(0, trust.indexOf('Security guide') + 'Security guide'.length);
 
   it.each([
-    ['claude/2.1.328/trust-yes-focused.txt', true],
-    ['claude/2.1.325/trust.txt', false],
-    ['claude/2.1.310/trust-35col.txt', false],
-    ['claude/unversioned/trust-files-wrapped.txt', false],
-  ] as const)('%s -> %s', (file, focused) => {
-    expect(paneShowsClaudeTrustYesFocused(read(file))).toBe(focused);
+    ['claude/2.1.328/trust-yes-focused.txt', 'yes'],
+    ['claude/2.1.325/trust.txt', 'no'],
+    ['claude/2.1.310/trust-35col.txt', 'no'],
+    ['claude/unversioned/trust-files-wrapped.txt', 'no'],
+  ] as const)('%s -> %s', (file, focus) => {
+    expect(claudeTrustFocus(read(file))).toBe(focus);
   });
 
   it('reads the 35-column dialog once Down moved its focus', () => {
     const moved = read('claude/2.1.310/trust-35col.txt')
       .replace(' ❯ No, exit', '   No, exit')
       .replace('   Yes, I trust this folder', ' ❯ Yes, I trust this folder');
-    expect(paneShowsClaudeTrustYesFocused(moved)).toBe(true);
+    expect(claudeTrustFocus(moved)).toBe('yes');
   });
 
   it('ignores a stale focused Yes in the scrollback above a live dialog focused on No', () => {
-    expect(paneShowsClaudeTrustYesFocused(`${STALE_YES}${read('claude/2.1.325/trust.txt')}`)).toBe(false);
+    expect(claudeTrustFocus(`${STALE_YES}${trust}`)).toBe('no');
+  });
+
+  it('reads no focus while a new dialog below an answered one has not drawn its choices', () => {
+    expect(claudeTrustFocus(midDraw)).toBeNull();
+    expect(claudeTrustFocus(`${read('claude/2.1.328/trust-yes-focused.txt')}\n${midDraw}`)).toBeNull();
   });
 });
