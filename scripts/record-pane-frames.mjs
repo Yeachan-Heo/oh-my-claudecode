@@ -21,7 +21,7 @@ import { setTimeout as sleep } from 'node:timers/promises';
 const REPO_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const CORPUS_ROOT = join(REPO_ROOT, 'src', 'team', '__tests__', 'fixtures', 'pane-frames');
 const SOURCES = ['recorded', 'migrated', 'synthetic'];
-const HOOK_EVENTS = ['SessionStart', 'UserPromptSubmit', 'Stop'];
+const HOOK_EVENTS = ['SessionStart', 'UserPromptSubmit', 'Stop', 'StopFailure'];
 
 const USAGE = `Usage:
   node scripts/record-pane-frames.mjs record --provider <claude|codex|cursor|gemini|grok|antigravity>

@@ -583,7 +583,7 @@ describe.skipIf(!HAS_TMUX)('record-pane-frames record', () => {
 
     expect(run.code).toBe(0);
     const settings = JSON.parse(readFileSync(join(out, 'hook-settings.json'), 'utf8')) as { hooks: Record<string, unknown> };
-    expect(Object.keys(settings.hooks)).toEqual(['SessionStart', 'UserPromptSubmit', 'Stop']);
+    expect(Object.keys(settings.hooks)).toEqual(['SessionStart', 'UserPromptSubmit', 'Stop', 'StopFailure']);
     const events = readFileSync(join(out, 'hook-events.log'), 'utf8').trim().split('\n');
     expect(events.map(line => line.replace(/^\d+\.\d{3} /, ''))).toEqual(['SessionStart', 'Stop stop_hook_active']);
     expect(JSON.parse(readFileSync(join(out, 'meta.json'), 'utf8'))).toMatchObject({ hooks: true });
