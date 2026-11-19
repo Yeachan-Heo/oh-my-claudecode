@@ -486,7 +486,7 @@ change OMC behaviour, has no switch, and is not shipped in the npm package.
 ## Requirements and usage
 
 - `python3` (standard library only). Run it in isolated mode with `python3 -I`.
-- The inputs are only read. The only file written is the `--out` file, if given (a new file with mode `0600`).
+- The inputs are only read. The files written are the `--out` file and, with `--export-labeling`, the export file (new files with mode `0600`). The result and the `--out` file carry no ask or state content; the opt-in export file holds human message text by design, and also the transcript path (`file`) and the `session_id` of each unit.
 - This tool does not resolve the state root (it uses `.omc/state/jev` under the current directory); `denial_log_summary.mjs` and `compaction_review.mjs` do.
 
 ```
@@ -500,6 +500,165 @@ python3 -I tools/diagnostics/compaction_ask_probe.py [--projects <dir>] [--days 
 | `--ask-loss-threshold X` | the threshold the upper Wilson bound is compared with (default 0.05) |
 | `--details` | add the list of units (without ask contents) |
 | `--json`, `--out <file>` | the result as one JSON object, and the file to write it to |
+| `--export-labeling <file>` | write the blind labelling export (see below); a new file with mode `0600`, an existing file is refused (exit 1) |
+| `--labels <file>` | read blind labels and add the `command_measure` block (see below); a missing file exits 2 |
+| `--export-window N`, `--export-limit N` | human messages kept per unit in the export (default 40) and characters kept per text block (default 500) |
+
+## Binding and stale instructions (opt-in)
+
+Without `--export-labeling` and `--labels` the output is exactly the one described above. The two options
+measure a failure that the ask levels do not show: a standing instruction that disappears from the state,
+and an outdated instruction that survives while its correction disappears.
+
+1. `--export-labeling <file.jsonl>` writes one JSON line per main-thread unit with the last `--export-window`
+   human messages before the boundary, split into text blocks with the ids `<message uuid>#<block index>`
+   (a message without a uuid gets `line-<row number>`). Each block is cut to `--export-limit` characters and
+   flagged `truncated`. Nothing after the boundary is written, so a reader labelling the file cannot see the
+   state. Standard output carries only the counts of units and blocks.
+2. A reader labels blocks in a JSONL file of rows
+   `{"unit_id", "block_id", "label": "binding" | "stale", "superseded_by", "reason"}`. `reason` is a non-empty
+   string. A `stale` block must name a later block in `superseded_by` (its correction); a `binding` block may
+   name a later block that restates it.
+3. `--labels <file.jsonl>` adds `command_measure` to the result, per group `jev/main` and `fallback/main`:
+   `binding_lost` is the share of `binding` blocks that are lost after the compaction (level `lost`, as for
+   `ask_lost`) and whose restatement, if named, is lost too; `stale_kept_fix_lost` is the share of `stale`
+   blocks that are kept while the block named in `superseded_by` is lost. A removed `stale` block is not a
+   failure and is counted in `stale_removed`. The denominators are the labelled blocks of units that have a
+   state; unlabelled blocks are counted separately and rejected label rows are counted by reason
+   (`bad_json`, `not_an_object`, `bad_ids`, `bad_label`, `missing_reason`, `bad_superseded_by`, `unknown_unit`,
+   `unknown_block`, `stale_without_fix`, `unknown_successor`, `successor_not_later`, `duplicate`). The verdict
+   follows `--ask-loss-threshold`; with fewer than 30 blocks in a group it is `insufficient data`.
+
+# Compaction harm monitor
+
+`compaction_harm_monitor.py` computes three cheap signals of harm after a compaction from transcripts and
+the compaction journal, and, when given the per-unit output of the ask probe, measures how well each signal
+agrees with `ask_lost`. It takes no action: nothing is written to sessions, the plugin or the state, and
+standard output carries only numbers and group names. It is a standalone offline diagnostic run by hand.
+
+## Requirements and usage
+
+- `python3` (standard library only). Run it in isolated mode with `python3 -I`.
+- Inputs: Claude Code transcripts (`<projects>/<dir>/<id>.jsonl` and `<id>/subagents/agent-*.jsonl`, rows with
+  `type`, `message.id`, `message.content`, with `system` rows of `subtype` `compact_boundary` and `api-request`
+  rows) and the compaction journal `compaction.jsonl` (rows with `event` `compact`, `session_id`, `agent_id`,
+  `ts` and `result` `jev`, `fallback` or `shadow`; it is written by the Jev compaction module when the
+  compaction point is enabled, see `docs/HOOKS.md`). Defaults: `$CLAUDE_CONFIG_DIR/projects`, else
+  `~/.claude/projects`, and `$OMC_JEV_LOG_DIR/compaction.jsonl`, else `.omc/state/jev/compaction.jsonl` under
+  the current directory (run the tool from the project root). With `OMC_STATE_DIR` set, the Jev log directory
+  has a project identifier in its path: pass the file with `--compact` or set `OMC_JEV_LOG_DIR`.
+- Only `compaction.jsonl` is read. `OMC_JEV_LOG_MAX_MB` rotates the journal into `compaction-<YYYYMMDD-HHmmss>-<pid>.jsonl`
+  files next to it; the rotated files are not read, so a period that spans a rotation loses the older journal
+  rows and those units are counted as `host`. Check the rotation setting before you read a long period.
+- `--probe <file>` is the result of `compaction_ask_probe.py --details --out <file>`, run with the same
+  `--to` and `--days` and the same transcript files.
+
+```
+python3 -I tools/diagnostics/compaction_harm_monitor.py [--projects <dir>] [--transcript <file>]... [--compact <file>] [--to <ISO>] [--days 7] [--probe <file>] [--json]
+```
+
+`--transcript <file>` (repeatable) replaces the search under `--projects`.
+
+## Units and signals
+
+A unit, its group (`jev`, `fallback` or `host`, times `main` or `subagent`) and the pairing with a journal row
+are the ones of the ask probe. The state after a compaction is the user and assistant rows after the boundary
+up to the first `api-request` row. A call is all assistant rows that share one `message.id`; only calls first
+seen after the state count.
+
+| Signal | Definition | Flagged when |
+|---|---|---|
+| `empty_series` | the longest run of empty calls (no non-blank text, no `tool_use`) among the first 10 calls after the state; text or a tool call ends a run | defined from 3 calls; flagged at a run of 3 |
+| `tool_errors` | the share of `tool_result` blocks with `is_error` among the first 10 `tool_use` blocks after the state | defined from 3 results; flagged at a share of 0.5 |
+| `fallback_run` | the number of consecutive `fallback` rows of the journal in one thread, ending at the unit's own row (a `jev` row resets the run) | defined only for group `fallback`; flagged at 5 |
+
+The thresholds are options (`--window`, `--tool-window`, `--series-min`, `--min-tool-results`,
+`--error-share-min`, `--fallback-run-min`) and the rule is fixed in the script docstring before a measurement.
+
+## Output
+
+Per group and signal: the number of units, how many have the signal defined and how many are flagged. With
+`--probe`, also `n`, `tp`, `fp`, `fn`, `tn`, the agreement with `ask_lost` with 95 % Wilson bounds, the lost
+share among flagged units (`selective`) and the flagged-and-lost units over all joined units (`per_query`),
+plus the counters `monitor_only`, `probe_only` and `group_mismatch` (a value other than 0 means another period
+or another set of files). With `n` below 30 the verdict is `no threshold` and the rates are hidden. With `n`
+of at least 30 the verdict is `correlated` only when the lower Wilson bound of the lost share among flagged
+units is above the upper Wilson bound of the lost share among unflagged units; otherwise `no correlation` and
+the signal is dropped (agreement alone depends on the base rate). The report also counts the lines it could not
+read, as `input.journal` and `input.transcripts` (`rows`: lines that are JSON objects, `bad_lines`: the other
+non-empty lines), and the text report prints them on its `input:` line. A journal that has lines but none that is
+a JSON object (a wrong file or a wrong format) still exits 0, but every unit then counts as `host` and a warning
+goes to stderr. Exit codes: 0, 2 (a usage error or a missing or unusable input file).
+
+# User prohibitions after compaction
+
+`user_prohibitions_after_compaction.py` counts how many times a tool call that changes state matches an
+explicit prohibition the user gave earlier in the same session, after a compaction boundary. A candidate is
+a call that matches a prohibition, not proof of a breach: the reader decides. It is a standalone offline
+diagnostic run by hand; the report holds no message text, command or transcript path; the `--locators` file
+holds the transcript path of each candidate.
+
+## Requirements and usage
+
+- `python3` (standard library only). Run it in isolated mode with `python3 -I`.
+- Inputs are only read: transcripts under `--projects` (default `$CLAUDE_CONFIG_DIR/projects`, else
+  `~/.claude/projects`; subagent transcripts are counted, not read) and, optionally, the compaction journal
+  `--compact-log` (rows with `event` `compact`, `result` `jev` and no `agent_id` are Jev boundaries; the
+  journal is described under the harm monitor above). Only the file given as `--compact-log` is read: when
+  `OMC_JEV_LOG_MAX_MB` has rotated the journal, the older rows are in the rotated files next to it, which are
+  not read, so the Jev boundaries of that period are undercounted. The files written are `--out` and
+  `--locators`, both new files with mode `0600`; they must be two different paths, and when the second write
+  fails the first file is removed again.
+
+```
+python3 -I tools/diagnostics/user_prohibitions_after_compaction.py [--projects <dir>] [--compact-log <file>] [--to <ISO>] [--days 7] [--rule 1|2|3] [--patterns <file>] [--out <file>] [--locators <file>]
+```
+
+Without `--out` the JSON report goes to standard output and the summary line to standard error. Exit codes: 0,
+2 (a usage error, an unreadable input, a bad `--patterns` file or an output file that already exists).
+
+## What is counted
+
+The full rules (a to f for rule 1, then rules 2 and 3) are in the script docstring, written before a
+measurement. In short:
+
+- A user message is a `user` row without `isMeta`, `isCompactSummary`, `isVisibleInTranscriptOnly`,
+  `toolUseResult` or a `tool_result` block; reminder fragments are cut from its blocks.
+- A prohibition is a user message that matches a prohibition pattern; it has targets (backtick text, absolute
+  paths, file names with an extension) or is general. A candidate is a `Bash`, `Edit`, `Write`, `MultiEdit` or
+  `NotebookEdit` call after the first boundary that follows the prohibition and matches its class (`edit`,
+  `delete`, `commit`, `push`, `restart`, `run`, `install`, `deploy`, `merge`; `other` never gives a candidate
+  under rule 1). Each call counts once, for the earliest matching prohibition, under rule 1.
+- Rule 2 cuts more fragment kinds (counted in `removed_fragments`), flags a prohibition revoked in its own
+  message, matches general prohibitions by the kind of call (a `Bash` command is read-only or state-changing by
+  its first word), and counts pairs (prohibition, call); `--locators` then has one row per prohibition with a
+  candidate and a `history_group` hash that copies of the same message share. Rule 3 (the default) changes only
+  the revocation check: explicit permission only, no revocation in a question, none after a negation.
+
+## Wording as data
+
+Everything that depends on a language is a list of regular expressions, not code. The English defaults are in
+`DEFAULT_PATTERNS` in the script; `--patterns <file>` reads a JSON object whose keys replace the default list
+of the same name as a whole (a key that is absent keeps its default):
+
+| Key | Content |
+|---|---|
+| `prohibitions` | `[regular expression, class]` pairs in matching order |
+| `revocations_v2` | revocation wording of rule 2 (a negation before the phrase is part of each pattern) |
+| `revocations_v3` | explicit permission phrases of rule 3 |
+| `permission_words`, `question_starts` | a sentence with a permission word that ends with `?` or starts with a question word does not revoke (empty by default) |
+| `negations` | words that, directly before a revocation phrase, cancel it (default `not`) |
+
+Patterns are matched case-insensitively. A pattern that does not compile, an unknown key or an unknown class
+exits 2.
+
+## Output
+
+The report (template `compaction-report/1`, metric `user-prohibitions`) holds only numbers: the period, the
+files and sessions, the boundaries (`host`, `jev`), the user messages (in the period, before a boundary, with a
+prohibition), the prohibitions (total, with a target, general, by class, revoked in the same message), the
+candidates (total, by class, by tool, by boundary kind, sessions with a candidate, unique calls, prohibitions
+with a candidate, history groups), the data quality counters and the method limits.
 
 # Compaction cache cost
 
@@ -595,3 +754,152 @@ change, not from this one). A row that does not match this layout is still summa
 | `bytes` | of a `handoff` row: the size in bytes, or `null` when unknown |
 | `effectiveness` | always `null` |
 | `tool_name`, `tool_use_id`, `truncated` | the call, and a marker for a row that was shortened to fit 2000 characters |
+
+# Hook latency p95
+
+`hook_latency_p95.mjs` prints the number of samples, p50, p95 and maximum of the run times of OMC hooks that do not call a
+model, read from the hook logs of the last N days, as tab-separated text. Percentiles use the nearest-rank method. It is a
+standalone diagnostic run by hand. It reads files only, does not change OMC behaviour and is not shipped in the npm package.
+The header of the script lists every option and rule.
+
+```
+node tools/diagnostics/hook_latency_p95.mjs [--days 7] [--hooks-json hooks/hooks.json --hooks-json ~/.claude/settings.json]
+node tools/diagnostics/hook_latency_p95.mjs --dir <Jev log dir> --shell-checks-dir <shell-checks dir> --process-max-ms 150
+```
+
+| Option | Meaning |
+|---|---|
+| `--dir <dir>` | Jev log directory (`OMC_JEV_LOG_DIR`, default `state/jev` under the state root plus `~/.omc/state/jev` for `hook-timing*.jsonl`, see below); a directory that was given must exist and is the only one read |
+| `--shell-checks-dir <dir>` | shell-checks directory (`OMC_SHELL_CHECKS_LOG_DIR`, default `state/shell-checks` under the state root); a directory that was given must exist |
+| `--days <N>` | window in days (`HOOK_LATENCY_DAYS`, default 7); a log file whose last change is older than the window is not read |
+| `--hook-max-ms <ms>` | limit for the hook logic time (`HOOK_LATENCY_HOOK_MAX_MS`, default 40) |
+| `--process-max-ms <ms>` | limit for the whole-process time of `hook-timing.jsonl` rows (`OMC_HOOK_PROCESS_MAX_MS`, no default; an empty value is no limit) |
+| `--total-max-ms <ms>` | limit for the `TOTAL` row (`HOOK_LATENCY_TOTAL_MAX_MS`, default 60) |
+| `--hooks-json <file>` | a `hooks.json` or `settings.json` (repeatable): the hooks in its `hooks` section are named `Event:script` and listed with `n` 0 when no log has a time for them. Both forms of a hook are read: one `command` text, or `command` plus the array `args` as in `hooks/hooks.json` |
+| `--now <ISO time>` | end of the window (`HOOK_LATENCY_NOW`, default the system clock); for tests |
+| `--help`, `-h` | print the options and exit with code 0 |
+
+Exit codes: `0` success, also when there are no samples; `2` bad argument, a log directory that was given and is missing or is not a directory, an unreadable log file or an unreadable `--hooks-json` file.
+The window, the directories and files read, and the row counts go to stderr.
+
+## Default directories
+
+Without `--dir` and `--shell-checks-dir` (or their variables) the tool uses the directories of the hooks: `state/jev` and
+`state/shell-checks` under the state root of the current directory, which follows `OMC_STATE_DIR` like the hooks do, so run it from the
+project root. When the state root cannot be resolved the home directory is used (`~/.omc/state/jev`). A default directory that does
+not exist is skipped, so the tool then shows no samples for it.
+
+`scripts/run.cjs` does not resolve the project state root: without `OMC_JEV_LOG_DIR` it writes `hook-timing.jsonl` to `~/.omc/state/jev`,
+which is not the project's default directory. So when neither `--dir` nor a non-empty `OMC_JEV_LOG_DIR` is given, the tool also reads
+`hook-timing*.jsonl` (only those files) from `~/.omc/state/jev`; a file reached through both directories is read once. To read one
+directory only, pass `--dir` or set `OMC_JEV_LOG_DIR`, and set the same variable for the hooks when you switch on `OMC_HOOK_TIMING`.
+The directories and files read are listed on stderr.
+
+## Input format
+
+Only these logs are read, and only the time field and the field that selects the row. Rotated files
+(`<name>-YYYYMMDD-HHMMSS.jsonl`, with `-<pid>` appended for the Jev logs) are read as well. A line that is not JSON, or has no
+text `ts`, is counted as unparsable; a row whose time is missing, not a number, negative or not finite is counted as without a usable time.
+
+| Log | Directory | Rows used | Time field | Kind |
+|---|---|---|---|---|
+| `hook-timing.jsonl` | Jev log directory (and `~/.omc/state/jev` when no directory was given) | every row `{ts, hook, ms}` written by `scripts/run.cjs` when `OMC_HOOK_TIMING=1` (see [Hooks](../../docs/HOOKS.md)); grouped by `hook` | `ms` | `whole` |
+| `checks.jsonl` | shell-checks directory | rows with `point` `shell-check`, one per Bash or PowerShell command the `pre-tool-enforcer` checked | `durationMs` | `partial` |
+| `compaction.jsonl` | Jev log directory | rows with `event` `compact` | `duration_ms` | `model` |
+
+`hook-timing.jsonl` exists only after `OMC_HOOK_TIMING=1` has been set; without it the other two logs give only the two rows below.
+`shadow.jsonl` is not read: its `durationMs` is the wait for a model answer.
+
+## Kinds and flags
+
+- `whole`: the time of the whole `run.cjs` process, node start included. Rows are judged against `--process-max-ms` only: `NO_PROCESS_LIMIT` without a limit, `TOO_FEW_SAMPLES` with a limit and fewer than 30 samples, `OVER` above the limit, otherwise empty. A script that also has a `partial` row (the enforcer) is named `<name> (process)`.
+- `partial`: only the shell checks inside the enforcer, so the figure is a lower bound for that hook. The flag is `OVER` above `--hook-max-ms` and otherwise `LOWER_BOUND_ONLY`: a lower bound can never show that the hook meets the limit.
+- `model`: the compaction module including its model calls. It is shown with the flag `n/a`, not compared with a limit and not part of the total.
+- `none`: a hook listed by `--hooks-json` for which no log has a time. It is never estimated.
+
+The `TOTAL` row is the plain sum of the p95 of the measured `partial` hooks (with these logs, the shell checks of the enforcer alone;
+`whole` rows are on another scale and are left out). It is not the p95 of a tool call and not a bound: percentiles are not additive, the hooks run at different rates,
+and hooks without a time are missing from it. Its source column states the coverage (measured hooks of all listed hooks; the listing needs `--hooks-json`). The flag is `OVER` above `--total-max-ms`, otherwise `PARTIAL_COVERAGE`.
+When `hook-timing.jsonl` has rows, a `TOTAL_PROCESS` row follows with the sum of their p95, flag `NO_VERDICT` (information only, same caveats, no limit).
+
+## Output
+
+One header line and then one line per hook: `hook`, `source` (`<log>:<field>`, or `-`), `kind`, `n`, `p50_ms`, `p95_ms`, `max_ms`, `flag`.
+An empty cell is `-`. The `n` of a `TOTAL` row is `-`.
+
+# Check classifier
+
+`check_classifier.mjs` is a pure ESM library (no imports, no state, no I/O) for offline diagnostics. It classifies a shell
+command as a check (`test`, `lint`, `typecheck` or `build`), classifies the tool result of a check as `passed`, `failed` or
+`undetermined`, and tells whether a tool call changes code. It is not wired into any hook, has no switch and does not change
+OMC behaviour. It is not shipped in the npm package.
+
+It does not duplicate `scripts/lib/shell-checks.mjs`: that module denies malformed shell commands at hook time (length,
+syntax, here-documents), while this one only classifies commands, results and writes after the fact.
+
+```
+import { classifyCommand, classifyCheckResult, isMutation } from './tools/diagnostics/check_classifier.mjs';
+```
+
+| Export | Meaning |
+|---|---|
+| `classifyCommand(command)` | `{ isCheck, kind, runner, narrowed, exitHidden, pipefail, reason }`. A runner counts at the start of a shell piece after launch wrappers (`env`, `timeout`, `npx`, `uv run`, ...); quoted text, comments and printing commands (`echo`, `cat`, `grep`, `git`) name no check. `narrowed` is set for flags that weaken a check (`--passWithNoTests`, `--exclude`) and, for tests, for selectors and file arguments (`-t`, `-k`, `-run`, `src/a.test.ts`). `exitHidden` is set when `&`, `\|\|`, a pipe without `pipefail` into anything but `tail`, or a separator with a successor hides the runner's own exit status |
+| `classifyCheckResult({ command, output, isError, exitCode })` | `{ verdict, reason, rule }`. Zero tests run and narrowed checks stay `undetermined`; a failure in the runner summary wins over a zero exit; a visible exit status decides; when the status is hidden, a printed exit code (`echo $?`) or the runner summary in the last 6000 characters of the output decides |
+| `isMutation(toolName, toolInput)` | true for `Write`, `Edit`, `MultiEdit` and `NotebookEdit` on a code file, and for `Bash` commands that write a code file by redirection, `tee`, a here-document or in-place `sed` / `perl`. Documentation, images, lockfiles, logs, temp directories (`TEMP_DIRS`), `/dev/null` and `$TMPDIR` are not code |
+| `RULES_VERSION`, `TEMP_DIRS` | the rules version string and the temp directories whose writes hold no code |
+
+Runner summaries are read for node:test, pytest, vitest, eslint, ruff (the same rule reads mypy and biome counts) and tsc. Gradle
+and Maven are not recognized on purpose: their lifecycle goals can also publish, so an exit code proves less there.
+
+# Advisor event coverage
+
+`advisor_event_coverage.py` measures whether a session called the advisor near the events where the advisor rule asks for it: a
+plan, a series of failures and the end of the session. It reads Claude Code transcripts and writes counts only (no message text,
+command or file path in the report). It is a standalone offline diagnostic run by hand: it does not change OMC behaviour, has
+no switch and is not shipped in the npm package.
+
+## Requirements and usage
+
+- `python3` (standard library only). Run it in isolated mode with `python3 -I`.
+- The transcripts are only read. The only files written are `--out` and `--sessions-out`: each must not exist before the run
+  and is created with mode 0600.
+
+```
+python3 -I tools/diagnostics/advisor_event_coverage.py --projects <dir> --label <text> [--since <ISO>] [--until <ISO>]
+python3 -I tools/diagnostics/advisor_event_coverage.py --projects <dir> --label week-47 --consult-command my-advisor --out report.json --sessions-out sessions.json
+```
+
+| Option | Meaning |
+|---|---|
+| `--projects <dir>` | required: transcripts laid out `<dir>/<any depth>/<session>.jsonl`; files with a `subagents` directory on the path are counted and never read |
+| `--label <text>` | required: written to the field `label` of the report |
+| `--since`, `--until` | ISO 8601 window `[since, until)`; without an offset the time is UTC. The window limits what is counted, not the numbering of calls |
+| `--consult-command <name>` | Bash command that counts as a consultation (kind `bash-<name>`); repeatable, none by default. It matches the first word of the command after leading `NAME=value` assignments, never a prefix |
+| `--declaration-prefix <text>` | prefix of the lines an agent writes after a consultation (default `ADVISOR:`, leading whitespace allowed); counted beside the consultations, not as consultations |
+| `--report-prefix <text>` | prefix of the first line of a final report (default `STATUS:`); a text block with such a line is an `end` event |
+| `--out <file>` | write the JSON report to a new file; without it the report goes to stdout |
+| `--sessions-out <file>` | write the list of main sessions that have, in the window, at least one `advisor` call or declaration line: a JSON list (ASCII only), sorted by session id, with the fields `session`, `model_class`, `transcript` (absolute path, the only place where a transcript path is written), `fired` and `advisor_rows`. It must not exist and must differ from `--out`; the report is the same with or without it |
+
+Exit codes: `0` normal run, `2` usage error, invalid time, unreadable input, an output file that already exists, or a write error (a write error removes the files
+the run created). The output directories are checked before the input is read.
+
+## Input format
+
+- The main transcript `<session>.jsonl` rows of `type` `assistant` and `user`, as in the session comparison tool above: `message.content` blocks
+  `text`, `tool_use`, `server_tool_use` (the advisor tool block is `server_tool_use` or `tool_use` named `advisor`) and `tool_result` with `is_error`,
+  `message.model`, `message.id`, `uuid` and `timestamp`.
+- Not created by OMC itself and read only when you use the convention: the declaration lines (`--declaration-prefix`), the report lines
+  (`--report-prefix`) and Bash consult commands (`--consult-command`). Without them the tool counts the `advisor` tool calls only.
+
+## What is counted
+
+- Session class: the most frequent `message.model` of the assistant rows (`<synthetic>` and empty models ignored; a tie goes to the
+  alphabetically first model): `glm` for a name starting with `glm-`, `haiku` for a name containing `haiku`, `claude` for any other
+  model and for a session without a model. Every count is given per class and in `total`.
+- Events: `plan` (`ExitPlanMode`, a `Write` or `Edit` of a plan or brief file, the first `TodoWrite`), `failures` (the second and each further
+  consecutive `tool_result` with `is_error`, one event per series) and `end` (the last assistant text and each text with a report line).
+- Distance: calls between the event and the nearest consultation of the same session, looking back for `plan` and `end` (after the previous event of that class)
+  and forward for `failures` (before the next one). Coverage is reported for the windows 1, 2, 3, 5, 10, 20 and unlimited calls, with the
+  one-sided lower Wilson bound for z = 1.645; below 30 events the share and the bound read `too little data` and the counts stay.
+- Copies of one history (forked and resumed sessions) count once for the whole run: the first file in sorted path order owns a call id or a text;
+  skipped copies are counted in `duplicates`. Positions and distances are still numbered over the whole file.
