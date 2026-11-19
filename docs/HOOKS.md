@@ -198,7 +198,7 @@ Keep `run.cjs` and the 3 s timeout: the 1.5 s lock wait is sized for the runner'
 | `OMC_TASK_LIST` | (unset) | `1` enables the task-list tool and the state hook. Any other value leaves both off. |
 | `OMC_TASK_LIST_LOG_DIR` | `<home>/.omc/state/task-list` | Log directory override for the lists and the two log files. |
 
-Setting `OMC_SKIP_HOOKS=task-list` (or `DISABLE_OMC=1`) turns the state hook off. The tool can be hidden with `OMC_DISABLE_TOOLS=task-list`.
+Setting `OMC_SKIP_HOOKS=task-list` (or `DISABLE_OMC=1`) turns the state hook off. In the two MCP servers the tool can be hidden with `OMC_DISABLE_TOOLS=task-list`; the exported `allCustomTools` aggregate is not filtered by that variable.
 
 ### PostToolUseFailure
 
