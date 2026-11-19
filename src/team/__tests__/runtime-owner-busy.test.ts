@@ -826,6 +826,31 @@ describe('recovery owner retry deadline', () => {
     });
   });
 
+  it('returns the final a preceding attempt published instead of re-electing the recovery', async () => {
+    cwd = mkdtempFixture('runtime-owner-chain-final-');
+    const teamName = 'chain-final';
+    await seedElectedUnknownLiveness(teamName, BEFORE_DEADLINE_MS);
+    let entered!: () => void;
+    const enteredCheck = new Promise<void>(resolve => { entered = resolve; });
+    let release!: () => void;
+    const released = new Promise<void>(resolve => { release = resolve; });
+    // Attempt A pauses at the tmux server check, then finds the server gone.
+    tmuxMocks.observeTmuxServerIdentity.mockImplementationOnce((async () => {
+      entered();
+      await released;
+      return 'unknown';
+    }) as never);
+    const attemptA = execute(teamName);
+    await enteredCheck;
+    const attemptB = execute(teamName);
+    release();
+
+    await expect(attemptA).resolves.toMatchObject({ outcome: 'failed', error: 'team_session_dead' });
+    await expect(attemptB).resolves.toMatchObject({ outcome: 'failed', error: 'team_session_dead' });
+    expect(readRecoveryOutcome(cwd, 'stuck-request')).toMatchObject({ kind: 'final', error: { code: 'team_session_dead' } });
+    expect((await readRevisionedTeamConfig(teamName, cwd))?.config.active_recovery).toBeUndefined();
+  });
+
   it('keeps retrying past the deadline when a successor finds a persisted replacement launch for the recovery', async () => {
     cwd = mkdtempFixture('runtime-owner-deadline-persisted-launch-');
     const teamName = 'deadline-persisted-launch';
