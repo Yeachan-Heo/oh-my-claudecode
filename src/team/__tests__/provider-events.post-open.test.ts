@@ -39,6 +39,13 @@ const SWAPS = {
     renameSync(workerDir, `${workerDir}.moved`);
     symlinkSync(outside, workerDir);
   },
+  // workers/<name> becomes a symlink to its own moved directory, so the path
+  // still names the opened file: only the directory check can catch this.
+  parentSameLeaf: (path: string) => {
+    const workerDir = dirname(path);
+    renameSync(workerDir, `${workerDir}.moved`);
+    symlinkSync(`${workerDir}.moved`, workerDir);
+  },
 };
 
 describe.skipIf(process.platform === 'win32')('provider events after a swap between open and re-check', () => {
@@ -72,6 +79,12 @@ describe.skipIf(process.platform === 'win32')('provider events after a swap betw
     expect(await readLatestProviderEvent(root, 'worker-1', 'a1')).toEqual({ event: 'none' });
   });
 
+  it('reader returns none when the worker directory becomes a symlink to the same file after the open', async () => {
+    writeFileSync(path, EVENT_LINE);
+    swap.afterOpen = opened => SWAPS.parentSameLeaf(opened);
+    expect(await readLatestProviderEvent(root, 'worker-1', 'a1')).toEqual({ event: 'none' });
+  });
+
   it('reader still reads the file when nothing is swapped', async () => {
     writeFileSync(path, EVENT_LINE);
     expect(await readLatestProviderEvent(root, 'worker-1', 'a1')).toEqual({ event: 'Stop', at: 7 });
@@ -94,6 +107,7 @@ describe.skipIf(process.platform === 'win32')('provider events after a swap betw
       "  if (path.endsWith('provider-events.jsonl')) {",
       "    if (kind === 'leaf') { renameSync(path, `${path}.moved`); writeFileSync(path, ''); }",
       "    if (kind === 'parent') { const dir = dirname(path); renameSync(dir, `${dir}.moved`); symlinkSync(outside, dir); }",
+      "    if (kind === 'parentSameLeaf') { const dir = dirname(path); renameSync(dir, `${dir}.moved`); symlinkSync(`${dir}.moved`, dir); }",
       '  }',
       '  return handle;',
       '};',
@@ -122,6 +136,11 @@ describe.skipIf(process.platform === 'win32')('provider events after a swap betw
     expectSilentExit(runHook('parent'));
     expect(readFileSync(join(`${workerDir}.moved`, 'provider-events.jsonl'), 'utf8')).toBe('');
     expect(readFileSync(join(outside, 'provider-events.jsonl'), 'utf8')).toBe('');
+  });
+
+  it('hook appends nothing when the worker directory becomes a symlink to the same file after the open', () => {
+    expectSilentExit(runHook('parentSameLeaf'));
+    expect(readFileSync(join(`${workerDir}.moved`, 'provider-events.jsonl'), 'utf8')).toBe('');
   });
 
   it('hook appends one line through the same preload when nothing is swapped', () => {
