@@ -5555,7 +5555,32 @@ export async function executeRecoverDeadWorkerV2Owner(
           },
         );
         if (!effects.ok) throw new Error("worker_activation_failed");
-        if (!effects.value.ok) throw new Error(effects.value.error);
+        if (!effects.value.ok) {
+          const failure = effects.value.error;
+          if (failure.startsWith("worker_startup_not_ready:")) {
+            // This failure is final, so a later recover (new request) must
+            // find the worker dead and relaunch it, not confirm the not-ready
+            // pane as already running. The launch-attempt fence is released
+            // here, which provider cleanup needs. Unverified cleanup is
+            // recorded by cleanupRecoveryPaneAttempt and does not reopen the
+            // retry loop.
+            await withTeamInstanceLifecycleLock(
+              instance.cwd,
+              instance.team_name,
+              async () => {
+                await assertTeamInstanceUnderLock(instance);
+                await cleanupRecoveryPaneAttempt(
+                  input,
+                  recoveryId,
+                  pending,
+                  failure,
+                );
+              },
+            ).catch(() => undefined);
+            pendingRecoveryPanes.delete(sagaInput.recoveryId);
+          }
+          throw new Error(failure);
+        }
         pendingRecoveryPanes.delete(sagaInput.recoveryId);
       },
       killAttemptPane: async (paneAttemptId) => {
