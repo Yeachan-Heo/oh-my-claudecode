@@ -15,7 +15,7 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { afterAll, describe, expect, it, vi } from 'vitest';
 
-import { boundExcerpts, classifyFailure, wellFormedBody, DEFAULT_EXCERPT_CHARS, mediumThreshold, omitSecretLines, pairingOk, parseMaxRpm, pointMode, QUESTION_CRITERIA, QUESTION_INSTRUCTIONS, register, retryAfterFromBody, retryAfterMs, sharedFailureClass, tailRedacted, pasteMode, pasteTags, ownerMarkerPatterns, ownerMarked, replyRuns, replyTrace, directReplyRows } from '../../hooks/jev-compaction.mjs';
+import { boundExcerpts, classifyFailure, readConfig, wellFormedBody, DEFAULT_EXCERPT_CHARS, mediumThreshold, omitSecretLines, pairingOk, parseMaxRpm, pointMode, QUESTION_CRITERIA, QUESTION_INSTRUCTIONS, register, retryAfterFromBody, retryAfterMs, sharedFailureClass, tailRedacted, pasteMode, pasteTags, ownerMarkerPatterns, ownerMarked, replyRuns, replyTrace, directReplyRows } from '../../hooks/jev-compaction.mjs';
 import { breakerSettings, classifyFailure as sharedClassifyFailure, parseMaxRpm as sharedParseMaxRpm, readBreaker, recordFailure, reserveRequest, retryAfterFromBody as sharedRetryAfterFromBody, thresholdFor } from '../../scripts/lib/jev-breaker.mjs';
 import { maskSecrets } from '../../scripts/lib/jev-mask.mjs';
 import { parseJevEnv, resolveExcerptChars, serializeQuestions } from '../../scripts/jev-resolve.mjs';
@@ -2768,6 +2768,71 @@ describe('jev-compaction module: mirrors and mods API', () => {
     expect(readFileSync(join(root, 'scripts', 'lib', 'jev-mask.mjs'), 'utf8')).not.toMatch(/^\s*import\s/m);
     expect(source).not.toMatch(/\bimport\s*\(|\brequire\s*\(|\bprocess\.(?:env|argv|cwd|exit|platform)\b/);
     expect(source).not.toMatch(/\$\.ui\.log\s*\(|\$\.clock\.sleep\s*\(/);
+  });
+});
+
+describe('jev-compaction module: settings fallback for the options of the stages', () => {
+  // Every gate readConfig looked at before the options of the token, agent, notification, paste and reply stages existed is already in the process
+  // environment, so no earlier read of the settings is due: a value that only the settings hold must still be read.
+  const GATES = { OMC_JEV: 'compaction:active', TYPESAFE_API_KEY: 'test-key', OMC_JEV_BREAKER: '0', OMC_JEV_MAX_RPM: '0', HOME: '/home/u' };
+  // The options the module added: [variable, value in the settings, field of the configuration, what the field holds, what it holds without the value].
+  const OPTIONS = [
+    ['OMC_JEV_COMPACT_TOKEN_ACCOUNTING', '1', (c) => c.tokenAccounting, true, false],
+    ['OMC_JEV_COMPACT_MAX_WINDOW_TOKENS', '123456', (c) => c.maxWindowTokens, 123456, undefined],
+    ['OMC_JEV_COMPACT_TARGET_PERCENT', '50', (c) => c.targetPercent, 50, undefined],
+    ['OMC_JEV_COMPACT_RATES', '{"RATE_IN":7}', (c) => c.rates.RATE_IN, 7, 0.5513],
+    ['OMC_JEV_COMPACT_QUESTION_NAME', '1', (c) => c.questionNamed, true, false],
+    ['OMC_JEV_COMPACT_HOST_HANDOFF', '1', (c) => c.handoff, true, false],
+    ['OMC_JEV_COMPACT_OWN_THRESHOLD', '1', (c) => c.ownSkip, true, false],
+    ['OMC_JEV_COMPACT_AGENT_TRIM', '1', (c) => c.agentTrim, true, false],
+    ['OMC_JEV_COMPACT_AGENT_STATES', 'standing by', (c) => c.agentStates.test('standing by'), true, false],
+    ['OMC_JEV_COMPACT_NOTIFICATIONS', '1', (c) => c.notifications, true, false],
+    ['CLAUDE_CODE_AUTO_COMPACT_WINDOW', '150000', (c) => c.autoCompactWindow, '150000', undefined],
+    ['CLAUDE_CONFIG_DIR', '/cfg/claude', (c) => c.configDir, '/cfg/claude', undefined],
+    ['OMC_JEV_COMPACT_PASTES', 'active', (c) => c.pastes, 'active', 'off'],
+    ['OMC_JEV_COMPACT_PASTE_MIN_CHARS', '1234', (c) => c.pasteMinChars, 1234, 2000],
+    ['OMC_JEV_COMPACT_PASTE_MAX_CHARS', '99999', (c) => c.pasteMaxChars, 99999, 30000],
+    ['OMC_JEV_COMPACT_PASTE_YES', '0.5', (c) => c.pasteYes, 0.5, 0.8],
+    ['OMC_JEV_COMPACT_OWNER_MARKERS', 'my marker', (c) => c.ownerMarkers.length, 1, 0],
+    ['OMC_JEV_COMPACT_LONG_REPLIES', 'active', (c) => c.replies, 'active', 'off'],
+    ['OMC_JEV_COMPACT_HOOK_ROW_PREFIXES', 'Custom note:', (c) => c.hookRowPrefixes.includes('Custom note:'), true, false],
+  ];
+  // The keys readConfig read before those options (the other keys of its environment table).
+  const READ_BEFORE = ['OMC_JEV', 'TYPESAFE_API_KEY', 'OMC_JEV_ENDPOINT', 'OMC_JEV_LOG_DIR', 'OMC_JEV_MAX_REQUESTS', 'OMC_JEV_EXCERPT_CHARS_COMPACTION', 'OMC_JEV_COMPACT_AT_PERCENT', 'OMC_JEV_COMPACT_TARGET', 'OMC_JEV_COMPACT_TOAST', 'OMC_JEV_COMPACT_PRIVATE_PATHS', 'OMC_JEV_BREAKER', 'OMC_JEV_MAX_RPM', 'OMC_JEV_BREAKER_DIR', 'OS', 'USERPROFILE', 'HOME'];
+  const configFor = (env, settingsEnv) => { const fake = fakeDollar({ env, settingsEnv }); return readConfig(fake.$).then((cfg) => ({ cfg, calls: fake.calls })); };
+
+  it('lists every option readConfig reads beyond the ones it read before', () => {
+    const source = readFileSync(join(root, 'hooks', 'jev-compaction.mjs'), 'utf8');
+    const body = source.slice(source.indexOf('export async function readConfig'), source.indexOf('// --- shared breaker and request limit'));
+    const read = [...body.matchAll(/\$\.env\.get\('([A-Z_]+)'\)/g)].map((m) => m[1]);
+    expect(read.filter((name) => !READ_BEFORE.includes(name)).sort()).toEqual(OPTIONS.map((o) => o[0]).sort());
+  });
+
+  it.each(OPTIONS)('%s: read from the settings when the activation and the breaker values all stand in the process environment', async (name, value, field, expected, fallback) => {
+    const without = await configFor(GATES, {});
+    expect(field(without.cfg), 'the default').toEqual(fallback);
+    const withValue = await configFor(GATES, { [name]: value });
+    expect(field(withValue.cfg), 'from the settings').toEqual(expected);
+    // The process environment still wins over the settings.
+    const both = await configFor({ ...GATES, [name]: '(' }, { [name]: value });
+    expect(field(both.cfg), 'from the environment').not.toEqual(expected);
+  });
+
+  it('keeps the older options as they were: the extra read fills only the options of the stages', async () => {
+    const { cfg } = await configFor(GATES, { OMC_JEV_COMPACT_TOAST: '1', OMC_JEV_COMPACT_AT_PERCENT: '10', OMC_JEV_ENDPOINT: 'https://example.test/x', OMC_JEV_COMPACT_PRIVATE_PATHS: '/secret', OMC_JEV_COMPACT_AGENT_TRIM: '1' });
+    expect(cfg).toMatchObject({ toast: false, atPercent: undefined, endpoint: expect.not.stringContaining('example.test'), privatePaths: [], agentTrim: true });
+  });
+
+  it('reads the settings only while the point is on, and not at all when every option is in the process environment', async () => {
+    const off = await configFor({ ...GATES, OMC_JEV: 'off' }, { OMC_JEV_COMPACT_AGENT_TRIM: '1' });
+    expect(off.calls.settings).toBe(0);
+    expect(off.cfg.agentTrim).toBe(false);
+    const every = Object.fromEntries(OPTIONS.map((o) => [o[0], '0']));
+    const full = await configFor({ ...GATES, ...every }, { OMC_JEV_COMPACT_AGENT_TRIM: '1' });
+    expect(full.calls.settings).toBe(0);
+    expect(full.cfg.agentTrim).toBe(false);
+    const one = await configFor(GATES, {});
+    expect(one.calls.settings).toBe(1);
   });
 });
 

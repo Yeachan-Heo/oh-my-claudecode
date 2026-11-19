@@ -675,10 +675,17 @@ function freshState() {
 }
 let session = freshState();
 
+// The keys of readConfig's environment table that it read before the options of the token, agent, notification, paste and reply stages: the activation,
+// the breaker, the endpoint, the state directory, the request limits, the own threshold, the private paths and the home directory.
+const BASE_ENV_KEYS = new Set([
+  'OMC_JEV', 'TYPESAFE_API_KEY', 'OMC_JEV_ENDPOINT', 'OMC_JEV_LOG_DIR', 'OMC_JEV_MAX_REQUESTS', 'OMC_JEV_EXCERPT_CHARS_COMPACTION', 'OMC_JEV_COMPACT_AT_PERCENT',
+  'OMC_JEV_COMPACT_TARGET', 'OMC_JEV_COMPACT_TOAST', 'OMC_JEV_COMPACT_PRIVATE_PATHS', 'OMC_JEV_BREAKER', 'OMC_JEV_MAX_RPM', 'OMC_JEV_BREAKER_DIR', 'OS', 'USERPROFILE', 'HOME',
+]);
+
 // Configuration from the process environment, with the settings' env as a fallback for a host that did
 // not put it into its environment. $.env.get takes literal names only. Without a state directory
 // nothing is written.
-async function readConfig($) {
+export async function readConfig($) {
   const env = {
     OMC_JEV: await $.env.get('OMC_JEV'),
     TYPESAFE_API_KEY: await $.env.get('TYPESAFE_API_KEY'),
@@ -729,12 +736,16 @@ async function readConfig($) {
   }
   // Short-circuit: if mode is 'off' after filling from settings, don't read breaker/rpm settings.
   const mode = pointMode(env.OMC_JEV, env.TYPESAFE_API_KEY);
-  if (mode !== 'off' && (env.OMC_JEV_BREAKER === undefined || env.OMC_JEV_MAX_RPM === undefined)) {
+  // The options of the stages (every key above but the ones in BASE_ENV_KEYS) are read from the settings too, also when the activation and breaker
+  // values all stand in the process environment. Then only they are filled, so a key read before them behaves as it did.
+  const breakerGap = env.OMC_JEV_BREAKER === undefined || env.OMC_JEV_MAX_RPM === undefined;
+  const optionGaps = Object.keys(env).filter((name) => env[name] === undefined && !BASE_ENV_KEYS.has(name));
+  if (mode !== 'off' && (breakerGap || optionGaps.length)) {
     try {
       const result = await withDeadline($, $.settings.read({ key: 'env' }), 1000);
       const fromSettings = result && typeof result === 'object' ? (result.value || result) : result;
       if (fromSettings && typeof fromSettings === 'object') {
-        for (const name of Object.keys(env)) if (env[name] === undefined && typeof fromSettings[name] === 'string') env[name] = fromSettings[name];
+        for (const name of breakerGap ? Object.keys(env) : optionGaps) if (env[name] === undefined && typeof fromSettings[name] === 'string') env[name] = fromSettings[name];
       }
     } catch { /* no settings: the process environment stands */ }
   }
