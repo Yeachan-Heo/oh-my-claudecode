@@ -4598,6 +4598,9 @@ export async function startupProviderExited(
   return (await observeWorkerLaunchProvider(context.attempt)) === "dead";
 }
 
+// A Down sent 530ms after the trust dialog drew took effect (recording E0).
+const CLAUDE_TRUST_DOWN_RESEND_MS = 1_000;
+
 export async function waitForStartupPaneReady(
   context: StartupPaneContext,
   opts: WaitForPaneReadyOptions = {},
@@ -4618,7 +4621,7 @@ export async function waitForStartupPaneReady(
       : 250;
   const deadline = Date.now() + timeoutMs;
   const handledSelectors = new Set<PaneTrustPromptKind>();
-  let claudeTrustDownSent = false;
+  let claudeTrustDownSentAt = -Infinity;
 
   while (Date.now() < deadline) {
     if (!(await startupContextIsActive(context, opts.attemptAlreadyFenced)))
@@ -4662,19 +4665,22 @@ export async function waitForStartupPaneReady(
       if (handledSelectors.has(selector))
         return { ok: false, reason: "selector_persistent" };
       if (selector === "claude_directory") {
-        // This dialog focuses "No, exit" first. Recorded failures show Enter
-        // confirming "No" after a Down was sent; the likely cause is a busy
-        // Claude Code reading both keys at once against the focus drawn before
-        // them. Enter waits until the pane shows the affirmative choice focused.
+        // This dialog focuses "No, exit" first. Claude Code 2.1.328 was
+        // measured to drop a Down sent right after the dialog drew, so Down is
+        // resent while "No" stays focused, and Enter waits until the pane shows
+        // the affirmative choice focused: Enter never confirms "No".
         const focus = claudeTrustFocus(captured);
         if (focus !== "yes") {
-          if (focus === "no" && !claudeTrustDownSent) {
+          if (
+            focus === "no" &&
+            Date.now() - claudeTrustDownSentAt >= CLAUDE_TRUST_DOWN_RESEND_MS
+          ) {
             await sendTeamPaneKey(
               context.ownership.paneId,
               "Down",
               context.ownership.tmuxServerIdentity,
             );
-            claudeTrustDownSent = true;
+            claudeTrustDownSentAt = Date.now();
           }
           await sleep(pollIntervalMs);
           continue;
