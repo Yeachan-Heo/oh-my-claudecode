@@ -61,6 +61,9 @@ export const LOCATION_VARS = [
   // Jev appends to and rotates shadow.jsonl here, and keeps breaker state.
   'OMC_JEV_LOG_DIR',
   'OMC_JEV_BREAKER_DIR',
+  'OMC_SHELL_CHECKS_LOG_DIR',
+  'OMC_TEAM_STATE_ROOT',
+  'OMX_TEAM_STATE_ROOT',
 ] as const;
 
 /**

@@ -13,8 +13,8 @@ import {
 } from 'node:fs';
 import { homedir } from 'node:os';
 import { basename, join, sep } from 'node:path';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import {
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import setup, {
   FOREIGN_HOME_MAX_AGE_MS,
   LOCATION_VARS,
   TEST_HOME_PREFIX,
@@ -63,14 +63,33 @@ describe('test home isolation', () => {
     'CLAUDE_ENV_FILE',
     'OMC_JEV_LOG_DIR',
     'OMC_JEV_BREAKER_DIR',
+    'OMC_SHELL_CHECKS_LOG_DIR',
+    'OMC_TEAM_STATE_ROOT',
+    'OMX_TEAM_STATE_ROOT',
   ];
 
   it('unsets at least the pinned location variables', () => {
     expect([...LOCATION_VARS]).toEqual(expect.arrayContaining(PINNED_LOCATION_VARS));
   });
 
-  it.each(LOCATION_VARS)('does not inherit %s', (name) => {
+  it.each(PINNED_LOCATION_VARS)('does not inherit %s', (name) => {
     expect(process.env[name]).toBeUndefined();
+  });
+
+  it.each(PINNED_LOCATION_VARS)('clears inherited %s during setup and restores it at teardown', (name) => {
+    const inherited = join(homedir(), 'inherited', name);
+    vi.stubEnv(name, inherited);
+    try {
+      const teardown = setup();
+      try {
+        expect(process.env[name]).toBeUndefined();
+      } finally {
+        teardown();
+      }
+      expect(process.env[name]).toBe(inherited);
+    } finally {
+      vi.unstubAllEnvs();
+    }
   });
 });
 
