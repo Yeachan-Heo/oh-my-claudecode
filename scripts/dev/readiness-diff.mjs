@@ -11,11 +11,12 @@
 // recreated. To clear the cache by hand:
 //   git worktree remove --force "$TMPDIR/omc-readiness-diff-<base sha>"
 // Both trees run the head copy of
-// src/team/__tests__/readiness-trace.harness.test.ts against the head pane
-// frame fixtures with tmux mocked, so neither run starts tmux or a provider.
+// src/team/__tests__/readiness-trace.harness.test.ts and its tmux mock against
+// the head pane frame fixtures with tmux mocked, so neither run starts tmux or a provider.
 // Writes base.json, head.json and summary.txt to --out; exits 0 only when
 // summary.txt ends in RESULT PASS.
 import { execFileSync, spawnSync } from 'node:child_process';
+import { createHash } from 'node:crypto';
 import {
   copyFileSync, existsSync, lstatSync, mkdirSync, readdirSync, readFileSync, realpathSync, symlinkSync, unlinkSync, writeFileSync,
 } from 'node:fs';
@@ -23,22 +24,30 @@ import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import process from 'node:process';
 import console from 'node:console';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import { isDeepStrictEqual } from 'node:util';
+import { tsImport } from 'tsx/esm/api';
 
 const HEAD_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..', '..');
 const HARNESS = join('src', 'team', '__tests__', 'readiness-trace.harness.test.ts');
+const HARNESS_FILES = [HARNESS, join('src', 'team', '__tests__', 'helpers', 'readiness-trace-tmux.ts')];
 const FIXTURE_ROOT = join(HEAD_ROOT, 'src', 'team', '__tests__', 'fixtures', 'pane-frames');
 
 // Modules head must load for a set; a miss means head ran the base path.
 const REQUIRED_HEAD_MODULES = { r5: [] };
 
 const STARTUP_WAIT_MAX_MS = 120_000;
+const STARTUP_WAIT_DEFAULT_MS = 30_000;
 
-function readinessTimeoutBelowFloor(raw) {
-  if (raw === null) return true;
-  const trimmed = raw.trim();
-  return !/^[+-]?\d+$/.test(trimmed) || Number(trimmed) < 30_000;
+// The product's own parser decides which values may lengthen the wait, so the
+// comparator cannot read a value differently from it (6e4, unsafe integers).
+const { resolveStartupReadyTimeoutMs } = await tsImport(
+  pathToFileURL(join(HEAD_ROOT, 'src', 'team', 'ready-timeout.ts')).href, import.meta.url,
+);
+
+function readinessTimeoutAtDefault(raw) {
+  const env = raw === null ? {} : { OMC_TEAM_READY_TIMEOUT_MS: raw };
+  return resolveStartupReadyTimeoutMs(env) === STARTUP_WAIT_DEFAULT_MS;
 }
 
 // Set-specific review criteria, on top of the checks every set must pass.
@@ -48,7 +57,7 @@ const SET_CRITERIA = {
     for (const { id, base, head, sameKeys, sameResult } of pairs) {
       if (!sameKeys) failures.push(`${id} key sequence differs from base`);
       if (!sameResult) failures.push(`${id} result differs from base`);
-      if (readinessTimeoutBelowFloor(base.env.OMC_TEAM_READY_TIMEOUT_MS) && head.wait_ms !== base.wait_ms) {
+      if (readinessTimeoutAtDefault(base.env.OMC_TEAM_READY_TIMEOUT_MS) && head.wait_ms !== base.wait_ms) {
         failures.push(`${id} wait changed although the variable cannot lengthen it`);
       }
       if (head.wait_ms > STARTUP_WAIT_MAX_MS) failures.push(`${id} head waited ${head.wait_ms}ms > ${STARTUP_WAIT_MAX_MS}ms`);
@@ -70,7 +79,8 @@ function parseArgs(argv) {
   if (!options.set || !Object.hasOwn(SET_CRITERIA, options.set)) {
     throw new Error(`--set must be one of: ${Object.keys(SET_CRITERIA).join(', ')}`);
   }
-  options.out ??= join('/tmp', `readiness-diff-${options.set}`);
+  // Absolute, because the base harness runs with the base worktree as cwd.
+  options.out = resolve(options.out ?? join('/tmp', `readiness-diff-${options.set}`));
   return options;
 }
 
@@ -95,7 +105,7 @@ function cachedBaseProblem(baseRoot, baseSha) {
     return 'not a git worktree';
   }
   if (headSha !== baseSha) return `at ${headSha}`;
-  const allowed = new Set([`?? ${HARNESS}`, ` M ${HARNESS}`, '?? node_modules']);
+  const allowed = new Set([...HARNESS_FILES.flatMap(file => [`?? ${file}`, ` M ${file}`]), '?? node_modules']);
   const dirty = execFileSync('git', ['status', '--porcelain', '--untracked-files=all'], { cwd: baseRoot, encoding: 'utf8' })
     .split('\n').filter(line => line && !allowed.has(line));
   if (dirty.length > 0) return `changed files: ${dirty.slice(0, 5).join(', ')}`;
@@ -109,6 +119,8 @@ function cachedBaseProblem(baseRoot, baseSha) {
   }
   return undefined;
 }
+
+const sha256 = (file) => createHash('sha256').update(readFileSync(file)).digest('hex');
 
 function prepareBaseTree(baseSha) {
   const baseRoot = join(tmpdir(), `omc-readiness-diff-${baseSha}`);
@@ -126,16 +138,20 @@ function prepareBaseTree(baseSha) {
     if (sameLockfile(baseRoot)) symlinkSync(join(HEAD_ROOT, 'node_modules'), join(baseRoot, 'node_modules'), 'dir');
     else execFileSync('npm', ['ci'], { cwd: baseRoot, stdio: 'inherit' });
   }
-  // The native addon is a local build product that git does not carry.
+  // The native addon is a local build product that git does not carry; a
+  // cached copy goes stale when head rebuilds it.
   const nativeDir = join(HEAD_ROOT, 'native');
   if (existsSync(nativeDir)) {
     mkdirSync(join(baseRoot, 'native'), { recursive: true });
     for (const name of readdirSync(nativeDir).filter(entry => entry.endsWith('.node'))) {
-      if (!existsSync(join(baseRoot, 'native', name))) copyFileSync(join(nativeDir, name), join(baseRoot, 'native', name));
+      const [source, copy] = [join(nativeDir, name), join(baseRoot, 'native', name)];
+      if (!existsSync(copy) || sha256(copy) !== sha256(source)) copyFileSync(source, copy);
     }
   }
-  mkdirSync(dirname(join(baseRoot, HARNESS)), { recursive: true });
-  copyFileSync(join(HEAD_ROOT, HARNESS), join(baseRoot, HARNESS));
+  for (const file of HARNESS_FILES) {
+    mkdirSync(dirname(join(baseRoot, file)), { recursive: true });
+    copyFileSync(join(HEAD_ROOT, file), join(baseRoot, file));
+  }
   return baseRoot;
 }
 
@@ -197,8 +213,9 @@ export function compare(set, base, head) {
       differences.push(`${id} ${parts.join(' ')}`);
     }
     for (const [side, traceCase] of [['base', baseCase], ['head', headCase]]) {
-      if (traceCase.unknown_commands.some(command => command.includes('send-keys'))) {
-        failures.push(`${id} ${side} sent keys outside the recorded paths`);
+      // An unrecognized command may be a key send the mock failed to read.
+      if (traceCase.unknown_commands.length > 0) {
+        failures.push(`${id} ${side} ran ${traceCase.unknown_commands.length} unrecognized tmux command(s)`);
       }
     }
   }

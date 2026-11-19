@@ -66,4 +66,24 @@ describe('readiness-diff set r5', () => {
     const summary = run(trace([traceCase(null, 1_000), traceCase('60000', 120_001)]));
     expect(summary).toMatch(/RESULT FAIL$/);
   });
+
+  it.each(['base', 'head'] as const)('fails when the %s run has an unrecognized tmux command', side => {
+    const odd = traceCase('60000', 1_000);
+    odd.unknown_commands = ['tmuxCmdAsync: ["swap-pane"]'];
+    const base = trace([traceCase(null, 1_000), side === 'base' ? odd : traceCase('60000', 1_000)]);
+    const head = trace([traceCase(null, 1_000), side === 'head' ? odd : traceCase('60000', 1_000)]);
+    const summary = summarize({ set: 'r5', baseSha: 'base', headSha: 'head', base, head });
+    expect(summary).toContain(`${side} ran 1 unrecognized tmux command(s)`);
+    expect(summary).toMatch(/RESULT FAIL$/);
+  });
+
+  it.each([
+    ['6e4', true],
+    ['9007199254740992', false],
+  ])('lets %s lengthen the wait only if the product reads it above 30000ms (%s)', (raw, allowed) => {
+    const base = trace([traceCase(null, 1_000), traceCase(raw, 1_000)]);
+    const head = trace([traceCase(null, 1_000), traceCase(raw, 40_000)]);
+    const summary = summarize({ set: 'r5', baseSha: 'base', headSha: 'head', base, head });
+    expect(summary).toMatch(allowed ? /RESULT PASS$/ : /RESULT FAIL$/);
+  });
 });
