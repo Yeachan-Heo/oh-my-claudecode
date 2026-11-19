@@ -1,0 +1,40 @@
+ ▐▛███▛█   Claude Code v2.1.328
+▝▜██████▀  Opus 5.5 with medium effort · Claude Max
+ ▝▝   ▝▝   /private/var/folders/39/6cjg007j1fj8p1bj2s40vgsh0000gn/T/tmp.5zKgJyd9Iy
+
+  Updated: 20 features, 334 fixes, 185 other changes
+  code.claude.com/docs/en/changelog for details
+
+
+❯ Reply with only the uppercase form of the word e0-done-1 and nothing else. Do not write the uppercase form anywhere   
+  before your final answer.                                                                                             
+                                                                                                                        
+⏺ E0-DONE-1                                                                                                             
+                                                                                                                      
+✻ Crunched for 1s · done 3:51 PM                                                                                        
+
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+❯                                                                                                     
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+  [OMC#5.8.4] | Model: Opus 5.5 | effort:medium | 5h:60%(1h18m) wk:87%(4d4h) fable:100%(4d4h) | ctx:0%                
+  ⏵⏵ bypass permissions on (shift+tab to cycle)                                  
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
