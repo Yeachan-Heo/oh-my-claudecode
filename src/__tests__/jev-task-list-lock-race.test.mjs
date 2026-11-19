@@ -419,7 +419,7 @@ describe('task-list events: a hook held up before its event is visible', () => {
     const record = JSON.parse(readFileSync(join(logs, 'lists', 'race-session', 'main.json'), 'utf8'));
     expect(record.items.map((x) => x.content)).toEqual(['newer list']);
     expect(L.readList('race-session', 'main', env).items.map((x) => x.content)).toEqual(['newer list']);
-    expect(readdirSync(join(logs, 'lists', 'race-session', 'main.events'))).toEqual([]);
+    expect(readdirSync(join(logs, 'lists', 'race-session', 'main.events'))).toHaveLength(2); // both calls are in the window: the list is the replay of the two
   }, TOTAL_MS);
 
   it('the same held-up call, when it only changes part of the list, is applied: two TaskCreate calls sent together both stay', async () => {
@@ -498,7 +498,7 @@ describe('task-list sweep: a hook writes while the sweep judges the session dire
   // back), but another hook made the session directory again in between: the rename back fails. The event published into the moved tree must
   // stay reachable from the live path (a reader of the live path scans nothing under the hidden name).
   it.each([
-    ['the other hook folded its call', 'fold', ['fresh', 'second']],
+    ['the other hook folded its call', 'fold', ['base', 'fresh', 'second']],
     ['the other hook only published its event', 'publish', ['base', 'fresh', 'second']],
   ])('a session the sweep moved away and found in use goes back into the directory another hook made meanwhile, with the event published into it (%s)', async (_what, how, expected) => {
     counter += 1;
@@ -527,15 +527,16 @@ describe('task-list sweep: a hook writes while the sweep judges the session dire
     const rs = await s.exited;
     expect(rs.code, rs.stderr).toBe(0);
     expect(readdirSync(join(logs, 'lists')).filter((n) => n.endsWith('.sweeping'))).toEqual([]);
-    // the list of the moved tree does not replace the live directory's own list: it is kept next to it, and a row says so
+    // the list of the moved tree does not replace the live directory's own list: the live list had settled nothing, so the moved list is the base
+    // the live events are replayed on, and the calls that made the moved list are events in their window that arrive with the merge: nothing is
+    // set aside, and the list holds the calls of both trees
     const rows = existsSync(join(logs, 'task-list.jsonl')) ? readFileSync(join(logs, 'task-list.jsonl'), 'utf8') : '';
-    expect(rows.includes('moved_list_set_aside')).toBe(how === 'fold');
-    expect(existsSync(join(session, 'main.json.moved'))).toBe(how === 'fold');
-    if (how === 'fold') expect(JSON.parse(readFileSync(join(session, 'main.json.moved'), 'utf8')).items.map((x) => x.content)).toEqual(['base']);
+    expect(rows.includes('moved_list_set_aside')).toBe(false);
+    expect(existsSync(join(session, 'main.json.moved'))).toBe(false);
     expect(L.readList('race-session', 'main', env).items.map((x) => x.content).sort()).toEqual(expected);
     L.syncList('race-session', 'main', env);
     expect(JSON.parse(readFileSync(join(session, 'main.json'), 'utf8')).items.map((x) => x.content).sort()).toEqual(expected);
-    expect(readdirSync(join(session, 'main.events'))).toEqual([]);
+    expect(readdirSync(join(session, 'main.events'))).toHaveLength(3); // the call of the first list, the one published into it, the one of the other hook: all in the window
     expect(readdirSync(join(session, '_task')).sort()).toEqual(how === 'fold' ? ['1.json', '3.json'] : ['1.json']);
   }, TOTAL_MS);
 
@@ -584,7 +585,7 @@ describe('task-list sweep: a hook writes while the sweep judges the session dire
     const finish = ({ env, session, lists }) => {
       L.syncList('race-session', 'main', env);
       expect(JSON.parse(readFileSync(join(session, 'main.json'), 'utf8')).items.map((x) => x.content).sort()).toEqual(['from the older fold', 'from the other hook']);
-      expect(readdirSync(join(session, 'main.events'))).toEqual([]);
+      expect(readdirSync(join(session, 'main.events'))).toHaveLength(2); // the call of the older fold and the one of the other hook stay in the window
       expect(readdirSync(lists).filter((n) => n.endsWith('.sweeping'))).toEqual([]);
       expect(readdirSync(session).filter((n) => n.endsWith('.tmp') || n.includes('.tmp.'))).toEqual([]); // no temporary file of the older fold in the live directory
     };
@@ -627,7 +628,7 @@ describe('task-list sweep: a hook writes while the sweep judges the session dire
     expect(rw.code, rw.stderr).toBe(0);
     const record = JSON.parse(readFileSync(join(session, 'main.json'), 'utf8'));
     expect(record.items.map((x) => x.content)).toEqual(expected);
-    expect(readdirSync(join(session, 'main.events'))).toEqual([]);
+    expect(readdirSync(join(session, 'main.events'))).toHaveLength(1); // the call of the writer, in the window
     if (data.tool_name === 'TaskCreate') expect(JSON.parse(readFileSync(join(session, '_task', '2.json'), 'utf8'))).toEqual({ agent: 'main' });
     const rows = existsSync(join(logs, 'task-list.jsonl')) ? readFileSync(join(logs, 'task-list.jsonl'), 'utf8') : '';
     expect(rows).not.toContain('event_write_failed');
@@ -660,7 +661,7 @@ describe('task-list writes: a write that stores fewer bytes than it was given', 
     const { session, rows } = await run(data, 5);
     const record = JSON.parse(readFileSync(join(session, 'main.json'), 'utf8'));
     expect(record.items.map((x) => x.content)).toEqual(['from the writer']);
-    expect(readdirSync(join(session, 'main.events'))).toEqual([]);
+    expect(readdirSync(join(session, 'main.events'))).toHaveLength(1); // the call, in the window
     if (claims) expect(JSON.parse(readFileSync(join(session, '_task', '2.json'), 'utf8'))).toEqual({ agent: 'main' });
     expect(rows).not.toMatch(/event_write_failed|lock_error|write_failed/);
   }, TOTAL_MS);

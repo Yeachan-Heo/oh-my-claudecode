@@ -4,7 +4,7 @@
 // The list of every agent is what the agent itself sent to a list tool (source of truth: the tool_input of a call that ran, as the
 // PostToolUse hook gets it); nothing here judges the work.
 //   <logdir>/lists/<session_id>/<agent_id|main>.json   the list of one agent (main = the main thread, no agent_id in the hook input)
-//   <logdir>/lists/<session_id>/<key>.events/*.json    list calls not yet folded into <key>.json (event journal, see syncList)
+//   <logdir>/lists/<session_id>/<key>.events/*.json    the list calls of the last seconds, and those no fold has taken yet (event journal, see foldEvents)
 //   <lists>/<session_id>/_task/<id>.json               which agent created a Task* task (the Task* store is one per session, without owner)
 // <logdir> is OMC_TASK_LIST_LOG_DIR or ~/.omc/state/task-list. Every function is fail-open: it returns null/false and never throws.
 
@@ -324,9 +324,8 @@ export function updateShape(input, noteField = null) {
 // marks one in_progress and, as "Keep exactly one step in_progress" says, puts any other task in progress back to pending; advance
 // completes the task in progress and starts the next pending one (the first pending after it, else the first pending).
 // A note of a task sent again without a note is kept only when the content is the same and the task was and still is in progress.
-// advance, done or start without an existing list change nothing (null), so an unreadable file never ends as an empty list. `skip` (a set of task
-// ids, from the fold of a held-up call) leaves the tasks it names as they are when `done` completes tasks.
-export function applyUpdate(items, input, noteField, skip = null) {
+// advance, done or start without an existing list change nothing (null), so an unreadable file never ends as an empty list.
+export function applyUpdate(items, input, noteField) {
   const shape = updateShape(input, noteField);
   if (!shape.ok) return null;
   if (!shape.items && items.length === 0) return null;
@@ -338,7 +337,7 @@ export function applyUpdate(items, input, noteField, skip = null) {
       return before?.note && !x.note && before.status === 'in_progress' && x.status === 'in_progress' ? { ...x, note: before.note } : x;
     });
   }
-  for (const n of shape.done ?? []) if (list[n - 1] && !skip?.has(list[n - 1].id)) list[n - 1].status = 'completed';
+  for (const n of shape.done ?? []) if (list[n - 1]) list[n - 1].status = 'completed';
   if (shape.start && list[shape.start - 1]) {
     list.forEach((x, i) => { if (i !== shape.start - 1 && x.status === 'in_progress') x.status = 'pending'; });
     list[shape.start - 1].status = 'in_progress';
@@ -402,14 +401,14 @@ const replacesList = (tool, input) => ((LIST_TOOL_RE.test(tool) || tool === 'mcp
 
 // New list of one agent after a list-tool call, or null when the call does not change it. `record` is the current file (or null);
 // `broken` (the file exists but cannot be read): only a call that replaces the whole list (items, TodoWrite) is saved.
-export function nextList(record, data, env = process.env, broken = false, skip = null) {
+export function nextList(record, data, env = process.env, broken = false) {
   const tool = data?.tool_name;
   const input = data?.tool_input && typeof data.tool_input === 'object' ? data.tool_input : {};
   const items = Array.isArray(record?.items) ? record.items : [];
   if (broken && !replacesList(tool, input)) return null;
-  if (LIST_TOOL_RE.test(tool)) return applyUpdate(items, input, 'note', skip);
-  if (tool === 'mcp__ccd_turn__update_plan') return applyUpdate(items, input, null, skip);
-  if (tool === 'mcp__ccd_turn__wrap_up') return items.length ? items.map((x) => ({ ...x, status: skip?.has(x.id) ? x.status : 'completed' })) : null; // wrap_up checks off the task list (its description)
+  if (LIST_TOOL_RE.test(tool)) return applyUpdate(items, input, 'note');
+  if (tool === 'mcp__ccd_turn__update_plan') return applyUpdate(items, input, null);
+  if (tool === 'mcp__ccd_turn__wrap_up') return items.length ? items.map((x) => ({ ...x, status: 'completed' })) : null; // wrap_up checks off the task list (its description)
   if (tool === 'TodoWrite') {
     const todos = arrayOf(input.todos);
     return todos ? todos.map((raw) => itemOf(raw, null)).filter(Boolean) : null;
@@ -459,29 +458,35 @@ const HIDDEN_NAME = /^\.(.+)\.[0-9a-f]{12}\.sweeping$/; // the hidden name of a 
 // Moves what `from` holds into `to` without overwriting anything `to` has: link never replaces a file, so an event or a task claim that the
 // live tree has stays the live tree's, and every other file arrives, the events of the moved tree first of all. A folder both trees have is
 // merged the same way. A list file (a file of the top level, `top`) the live tree has stays the live tree's too: the two lists were folded
-// from different events and there is no rule that joins them. The one of the moved tree is kept next to it as <name>.moved (no reader looks
-// at that name) and a row with `event: "moved_list_set_aside"` goes to task-list.jsonl, so what only that list held (a fold published into
-// the moved tree just before it was moved, and removed its events) is not lost for good; the events of the moved tree still arrive and are
-// folded into the live list. Lock files and temporary files are not moved: a lock a dead holder left would only stall the next fold, and a
-// temporary file is never read. true when every entry was moved or deliberately left, false when one could not be moved (the moved tree is
-// kept then).
-function mergeTree(from, to, env, top = true) {
+// from different events. The list of the moved tree is the base the live events are replayed on when the live list has settled nothing yet
+// (adoptMovedBase; the list files go before the folders, so the base is in place when the events arrive); when it cannot be adopted it is
+// kept next to the live list as <name>.moved (no reader looks at that name) and a row with `event: "moved_list_set_aside"` goes to
+// task-list.jsonl. The events of the moved tree arrive in both cases and are replayed into the live list: the calls that made the moved list
+// are there as long as they are in their window. Lock files and temporary files are not moved: a lock a dead holder left would only stall the
+// next fold, and a temporary file is never read. true when every entry was moved or deliberately left, false when one could not be moved (the
+// moved tree is kept then). `adopted` collects the list files that took a moved base: their lists are folded again when the merge is done.
+function mergeTree(from, to, env, top = true, adopted = []) {
   let complete = true;
-  for (const entry of readdirSync(from, { withFileTypes: true })) {
+  const entries = readdirSync(from, { withFileTypes: true }).sort((a, b) => Number(a.isDirectory()) - Number(b.isDirectory()));
+  for (const entry of entries) {
     const source = join(from, entry.name);
     const target = join(to, entry.name);
     try {
       if (entry.isDirectory()) {
         mkdirSync(target, { recursive: true });
-        if (!mergeTree(source, target, env, false)) complete = false;
+        if (!mergeTree(source, target, env, false, adopted)) complete = false;
       } else if (entry.isFile() && !/\.(?:lock|tmp)$/.test(entry.name)) {
         try {
           linkSync(source, target);
         } catch (error) {
           if (error?.code !== 'EEXIST') throw error;
           if (top && entry.name.endsWith('.json')) {
-            try { linkSync(source, `${target}.moved`); } catch { /* an earlier merge left one: that one stays */ }
-            storeEvent('moved_list_set_aside', target, env);
+            if (adoptMovedBase(source, target, env)) {
+              adopted.push(target);
+            } else {
+              try { linkSync(source, `${target}.moved`); } catch { /* an earlier merge left one: that one stays */ }
+              storeEvent('moved_list_set_aside', target, env);
+            }
           }
         }
         unlinkSync(source);
@@ -491,12 +496,39 @@ function mergeTree(from, to, env, top = true) {
   return complete;
 }
 
+// The list of a moved tree and the list the live tree made after the move. The live list holds calls later than any the moved one holds,
+// so while it has settled nothing (every call it holds is an event of its folder) the moved list is the base those events are replayed on:
+// the moved base, its settled names and its clock replace the live ones. Under the lock of the live list, so no fold publishes meanwhile;
+// false when the lock was not taken or the live list has settled calls of its own (then the moved list is kept next to it).
+function adoptMovedBase(moved, live, env) {
+  let adopted = false;
+  withFileLock(live, (owned) => {
+    const m = readRecord(moved).record;
+    const l = readRecord(live).record;
+    if (!Array.isArray(m?.items) || !Array.isArray(l?.items) || l.base_name || (Array.isArray(l.folded) && l.folded.length > 0)) return;
+    const legacy = !('base' in m);
+    const base = legacy ? m : m.base;
+    adopted = publishJson(live, {
+      ...l,
+      base: base && Array.isArray(base.items) ? listFields(base) : null,
+      base_name: legacy ? (typeof m.last_event_name === 'string' ? m.last_event_name : '') : (typeof m.base_name === 'string' ? m.base_name : ''),
+      last_event_ms: Math.max(Number.isFinite(m.last_event_ms) ? m.last_event_ms : 0, Number.isFinite(l.last_event_ms) ? l.last_event_ms : 0),
+      folded: Array.isArray(m.folded) ? m.folded : [],
+      rev: revOf(l) + 1,
+    }, owned, env);
+  }, env, SYNC_STALE_MS);
+  return adopted;
+}
+
 // A moved tree with recent activity goes back to its own name: one rename when the name is free. When a hook has made the directory
 // again, the rename fails and the tree is merged into the new one, so an event published into the old tree stays visible to the readers of
-// the live path. A tree that cannot be merged completely stays under its hidden name; the next sweep tries again (see sweep).
+// the live path. A tree that cannot be merged completely stays under its hidden name; the next sweep tries again (see sweep). The lists
+// that took a moved base are folded once the merge is done, so the list file shows what the events give.
 function putBack(aside, dir, env) {
   try { renameSync(aside, dir); return; } catch { /* the name is taken: merge */ }
-  try { if (mergeTree(aside, dir, env)) rmSync(aside, { recursive: true, force: true }); } catch { /* kept under its hidden name */ }
+  const adopted = [];
+  try { if (mergeTree(aside, dir, env, true, adopted)) rmSync(aside, { recursive: true, force: true }); } catch { /* kept under its hidden name */ }
+  for (const path of adopted) syncList(basename(dir), basename(path, '.json'), env);
 }
 
 function removeIfIdle(root, name, now, env) {
@@ -532,16 +564,19 @@ export function sweep(env, now) {
 
 // --- event journal ------------------------------------------------------------------------
 // Every list call is one file <key>.events/<ms>-<tick>-<pid>-<id>.json, written without a lock (temp file, then rename), so a lock that is not
-// taken in time loses nothing. The list <key>.json is the fold of the events in name order (time of the call), written under the lock
-// together with the names it folded (`folded`, the newest EVENTS_KEPT); the folded files are then removed. A reader folds the list plus
-// the events not yet folded. One file per event instead of one appended journal: trimming an appended file while other processes append
-// to it loses lines.
+// taken in time loses nothing. The list <key>.json is what the events give when they are replayed in the order of their names (the order of
+// the calls); it is written under the lock. One file per event instead of one appended journal: trimming an appended file while other
+// processes append to it loses lines.
+// An event is named after the time of its call, but it becomes visible only when its hook has written it: a hook held up in between
+// (descheduled, masking a large payload) publishes after a hook with a later call has been seen. So the list is not edited call by call.
+// The record keeps `base`, the list as it was before the events that are not older than LATE_EVENT_MS, and an event stays in its folder until
+// it is older than that: every fold replays the events that stayed on `base`, and a call that becomes visible late takes its place among
+// the later ones, whatever the order in which the hooks published. How much older than a visible event a held-up hook can be is bounded by
+// the host, which stops a hook after 3 s. An event that comes after the list was already settled past its time (older than the last
+// settled call, or more than LATE_EVENT_MS older than the newest call seen) comes from a clock that was set back, not from a held-up hook:
+// the fold settles what it has and applies that call last, as a call of the moment.
 export const EVENTS_KEPT = 500;
 const EVENTS_READ_MAX = 5000;
-// An event is named after the time of its call, but it becomes visible only when its hook has written it; a hook held up in between
-// (descheduled, masking a large payload) publishes after a hook with a later call has folded. How much older than a folded event a
-// held-up hook can be is bounded by the host, which stops a hook after 3 s; an event more than LATE_EVENT_MS older than the newest
-// one folded comes from a clock that was set back, not from a held-up hook, and is applied as any other.
 export const LATE_EVENT_MS = 10_000;
 // <tick> is the monotonic clock of the host in nanoseconds (shared by the processes of the machine), so that two calls of one millisecond
 // have a fixed order in their names; a name without it (an event of an earlier version) is still read.
@@ -629,14 +664,12 @@ function writeEvent(dir, data, key, env, now) {
   }
 }
 
-// The events not yet folded into `record`, oldest first: [{ name, event }]. A file that cannot be read is skipped (it is retried later).
-function pendingEvents(dir, record) {
+// The events in the folder, oldest first: [{ name, event }]. A file that cannot be read is skipped (it is retried later).
+function pendingEvents(dir) {
   let names;
   try { names = readdirSync(dir).filter((n) => EVENT_NAME.test(n)).sort(); } catch { return []; }
-  const folded = new Set(Array.isArray(record?.folded) ? record.folded : []);
   const out = [];
   for (const name of names.slice(0, EVENTS_READ_MAX)) {
-    if (folded.has(name)) continue;
     const { record: event } = readRecord(join(dir, name));
     if (event) out.push({ name, event });
   }
@@ -644,8 +677,8 @@ function pendingEvents(dir, record) {
 }
 
 // The record after one event, or the same record when the event changes nothing (null stays null).
-function applyEvent(record, event, key, env, broken, skip = null) {
-  const changed = nextList(record, event, env, broken, skip);
+function applyEvent(record, event, key, env, broken) {
+  const changed = nextList(record, event, env, broken);
   if (!changed) return record;
   // a completed task has no note; above ITEMS_MAX the newest tasks stay, the record counts the dropped ones
   const all = changed.map((x) => (x.status === 'completed' && x.note !== undefined ? (({ note, ...rest }) => rest)(x) : x));
@@ -667,160 +700,88 @@ function applyEvent(record, event, key, env, broken, skip = null) {
   };
 }
 
-// The generation of the list file as a fold read it: the number of updates it holds (every fold that publishes raises it), or that it
-// is unreadable or missing. A fold publishes only while the file still has the generation it folded from.
-const generationOf = ({ record, broken }) => (broken ? 'broken' : record ? String(record.updates ?? 0) : 'none');
+// The part of a list record that describes the list; the rest of the file is what a fold keeps to replay the events.
+const listFields = ({ v, session_id, agent, agent_type, tool, tool_use_id, prompt_id, updated, updates, items, dropped }) => ({
+  v, session_id, agent, agent_type, tool, tool_use_id, prompt_id, updated, updates, items, ...(dropped !== undefined ? { dropped } : {}),
+});
+
+// The generation of the list file as a fold read it: the number of times it was written (`rev`; the `updates` of a file of an earlier version),
+// or that it is unreadable or missing. A fold publishes only while the file still has the generation it folded from. `updates` is no generation:
+// a call that becomes visible late can leave it as it was while the list changes.
+const revOf = (record) => (Number.isInteger(record?.rev) ? record.rev : Number.isInteger(record?.updates) ? record.updates : 0);
+const generationOf = ({ record, broken }) => (broken ? 'broken' : record ? String(revOf(record)) : 'none');
 
 // The time of the call an event name starts with (13 digits of milliseconds).
 const eventMs = (name) => Number(name.slice(0, 13));
-// Is the call named `other` later than the call named `name`, by no more than a held-up hook can be behind (LATE_EVENT_MS)?
-const laterWithin = (name, other) => {
-  const gap = eventMs(other) - eventMs(name);
-  return gap > 0 ? gap <= LATE_EVENT_MS : gap === 0 && name < other;
-};
 
-// What a call that changes part of the list acts on: one task (the id of a TaskUpdate, a deletion too), the whole list (EDIT_ALL: start and
-// advance move tasks by position and state), tasks that it only marks completed (EDIT_COMPLETING: done, wrap_up), or nothing yet (null: a
-// TaskCreate adds a task). A completing call acts on the tasks it names: the ones at the numbers of `done` or, for wrap_up, every task of
-// the list it meets (completionTargets). `touched` keeps, for such a call, the marker EDIT_COMPLETING and one key `+<id>` for each task it
-// completed (an id never starts with "+"); a TaskUpdate keeps its task id and start or advance EDIT_ALL. Two completing calls give the same
-// list in either order, a completing call and a call on another task do too; every other two calls on one task or on the list do not.
-const EDIT_ALL = '*';
-const EDIT_COMPLETING = '+';
-function editScope(event) {
-  if (event.tool_name === 'TaskCreate') return null;
-  if (event.tool_name === 'TaskUpdate') return event.tool_input?.taskId === undefined ? '' : String(event.tool_input.taskId);
-  if (event.tool_name === 'mcp__ccd_turn__wrap_up') return EDIT_COMPLETING;
-  return event.tool_input?.start !== undefined || event.tool_input?.advance === true ? EDIT_ALL : EDIT_COMPLETING;
+// What a file holds that is not the list nor the clock of the fold: if two files have the same, writing the second changes nothing.
+const signature = (record) => JSON.stringify({ ...record, rev: undefined, folded: undefined, last_event_ms: undefined });
+
+// The list the events give: { record, broken, absorbed, changed, done, generation }. `start` is the list file as readRecord gave it ({ record,
+// broken }), `events` the folder as pendingEvents gave it, `now` the clock.
+// The events are replayed in the order of their names on `base`, the list before the window. The ones older than the window (more than
+// LATE_EVENT_MS behind the clock and the newest call seen) are settled: they go into `base` for good (`absorbed`, removed by syncList, their
+// names kept in `folded`); the others are replayed on top of it for the list, every time, and stay in the folder. A call that edits tasks
+// and finds nothing to change is no special case: it stays in the window like any other and takes effect when an older call it depends on
+// becomes visible, and not before a later TaskCreate it never saw. An event that is not in the window any more when it becomes visible (its
+// name is not above the last settled one, or it is more than LATE_EVENT_MS older than the newest call the file holds) comes from a clock set
+// back, not from a held-up hook: the window is settled and the event is applied last. `record` is null when the events give no list;
+// `changed` is false when the file already holds what they give. A file that cannot be read gives no base: only a call that replaces
+// the list is saved (see nextList).
+export function foldEvents(start, events, key, env, now = Date.now()) {
+  const snap = start.record;
+  const done = new Set(Array.isArray(snap?.folded) ? snap.folded : []);
+  const legacy = Boolean(snap) && !('base' in snap); // a file of an earlier version: its list is the base
+  const settledName = typeof snap?.base_name === 'string' ? snap.base_name : (legacy && typeof snap.last_event_name === 'string' ? snap.last_event_name : '');
+  const lastEvent = Number.isFinite(snap?.last_event_ms) ? snap.last_event_ms : 0;
+  const stored = legacy ? snap : snap?.base;
+  const initial = stored && Array.isArray(stored.items) ? stored : null;
+  const fresh = events.filter(({ name }) => !done.has(name)); // the others are leftovers of a fold that did not remove them
+  const generation = generationOf(start);
+  if (!fresh.length) return { record: snap ?? null, broken: start.broken, absorbed: [], changed: false, done, generation }; // the file is what the events give
+  const newest = fresh.reduce((ms, { name }) => Math.max(ms, eventMs(name)), lastEvent);
+  const horizon = Math.max(now, newest);
+  const behind = ({ name }) => name <= settledName || eventMs(name) + LATE_EVENT_MS < lastEvent;
+  const late = fresh.filter(behind);
+  const ordered = fresh.filter((event) => !behind(event));
+  let settled = 0;
+  while (settled < ordered.length && eventMs(ordered[settled].name) + LATE_EVENT_MS < horizon) settled += 1;
+  const toBase = late.length ? ordered : ordered.slice(0, settled);
+  const step = (state, { event }) => {
+    const record = applyEvent(state.record, event, key, env, state.broken);
+    return record === state.record ? state : { record, broken: false };
+  };
+  let atBase = { record: initial, broken: start.broken };
+  for (const event of [...toBase, ...late]) atBase = step(atBase, event);
+  let atEnd = atBase;
+  for (const event of ordered.slice(toBase.length)) atEnd = step(atEnd, event);
+  const absorbed = [...toBase, ...late].map(({ name }) => name);
+  if (!atEnd.record) return { record: snap ?? null, broken: atEnd.broken, absorbed, changed: false, done, generation };
+  const record = {
+    ...listFields(atEnd.record),
+    base: atBase.record ? listFields(atBase.record) : null,
+    base_name: atBase.record !== initial && toBase.length ? toBase[toBase.length - 1].name : settledName,
+    last_event_ms: newest,
+    rev: revOf(snap),
+  };
+  const changed = !snap || signature(record) !== signature(snap);
+  if (changed) record.rev += 1;
+  return { record, broken: false, absorbed, changed, done, generation };
 }
-// The tasks of `list` that a completing call marks completed (the ones at the numbers of `done`, or all for wrap_up).
-function completionTargets(event, list) {
-  if (event.tool_name === 'mcp__ccd_turn__wrap_up') return list;
-  return (arrayOf(event.tool_input?.done) ?? []).map((n) => list[(intOf(n) ?? 0) - 1]).filter(Boolean);
-}
-// What the fold records in `touched` for an applied call that edits tasks, read from the list as it was before the call. A task without an id
-// is not named: no call but a position call reaches it.
-const touchedKeys = (event, items) => {
-  const scope = editScope(event);
-  if (scope !== EDIT_COMPLETING) return [scope];
-  const named = completionTargets(event, Array.isArray(items) ? items : []).map((x) => x.id).filter((id) => typeof id === 'string');
-  return [scope, ...named.map((id) => `${EDIT_COMPLETING}${id}`)];
-};
-// How the calls folded after a held-up call that edits tasks meet it. true: the call is overtaken, applying it would put an older state over
-// a later one (a later call on its task, a later start or advance, for a TaskUpdate also a later completing call that named its task; for a
-// completing call a later deletion, whichever task it removed, as the numbers of `done` may move, and every task it names having been edited
-// by a later call). A Set: a completing call that names some tasks a later call edited; it is applied to the other tasks, as an in-order fold
-// gives, and these ids are left as they are. false: nothing is in the way. A deletion is never overtaken (it gives the same list after a later
-// call on its task, which then finds nothing), and a call that only adds a task is not either. `items` is the list the fold holds when the
-// held-up call comes.
-const fence = (touched, name, event, items) => {
-  const scope = editScope(event);
-  if (scope === null || (event.tool_name === 'TaskUpdate' && event.tool_input?.status === 'deleted')) return false;
-  const list = Array.isArray(items) ? items : [];
-  const ids = new Set(list.map((x) => x?.id));
-  const targets = scope === EDIT_COMPLETING ? completionTargets(event, list) : [];
-  const skip = new Set();
-  for (const [key, at] of Object.entries(touched)) {
-    if (!laterWithin(name, at)) continue;
-    if (scope === EDIT_ALL || key === EDIT_ALL) return true;
-    if (scope !== EDIT_COMPLETING) {
-      if (key === scope || key === `${EDIT_COMPLETING}${scope}`) return true;
-    } else if (!key.startsWith(EDIT_COMPLETING)) {
-      if (!ids.has(key)) return true; // a task a later call edited is not on the list now: it was deleted
-      if (targets.some((x) => x.id === key)) skip.add(key);
-    }
-  }
-  if (!skip.size) return false;
-  return targets.every((x) => skip.has(x.id)) ? true : skip;
-};
-// `touched` of the list file as the fold reads it: key (see editScope and touchedKeys) -> name of the newest call folded that edited it. The file
-// is not trusted.
-const touchedOf = (record) => {
-  const stored = record?.touched;
-  const touched = Object.create(null);
-  if (stored && typeof stored === 'object' && !Array.isArray(stored)) for (const [scope, at] of Object.entries(stored)) if (typeof at === 'string' && EVENT_NAME.test(at)) touched[scope] = at;
-  return touched;
-};
 
-// Do the two lists hold the same tasks? (next is a list record, record the one it was made from, or null.)
-const sameItems = (next, record) => next.items.length === (record?.items?.length ?? 0) && JSON.stringify(next.items) === JSON.stringify(record?.items ?? []);
-
-// Folds the pending events into the list file. { record, broken, names, changed, done, generation, late }: names are the events folded
-// (all pending ones, late ones included, except the ones that wait for an older call, see below), generation is the one of the file the fold
-// started from, late counts the events not applied.
-// A call that edits tasks (TaskUpdate, done, start, advance, wrap_up) and changes nothing may only be waiting for an older call that is not
-// visible yet: the TaskCreate that makes its task, or the call that replaces the list it acts on. It is not acknowledged: it stays pending,
-// in the order of its name, and the next fold that sees the older call applies both. It goes once no held-up call can precede it, that is
-// when it is more than LATE_EVENT_MS behind the clock and behind the newest call seen. Acknowledging it at once would also move the time of the
-// newest call folded forward, and the older call would then be dropped as late.
-// The order of the events is the order of their calls, and a fold applies the pending ones in that order; but an event that becomes
-// visible after a fold took a later one is older than the list it would change, and applying it would put the older state back. The
-// record keeps the time of the newest call folded (lastEvent), of the newest call that replaced the whole list (lastReplace) and, in
-// `touched`, the newest call that edited each task or the whole list. A late event is not applied (it is acknowledged and removed, so it
-// never comes back) when it replaces the list and any later call has been folded; when it changes part of the list and a later call
-// replaced the list (it changed a list that no longer exists); or when it edits tasks (TaskUpdate, done, start, advance, wrap_up) and a later
-// call that edited the same task, or the whole list, was folded (see editScope: a completing call edits the tasks it names, not every task).
-// A deletion, a TaskCreate, and calls on other tasks are applied after later calls of their kind: they do not undo each other, and the tasks
-// of calls sent together all stay (a TaskCreate that is
-// dropped for the later replacement leaves its claim in _task, which is harmless: TaskUpdate of an id the list does not hold changes
-// nothing). A TaskCreate held up behind a wrap_up is applied and stays pending: the wrap_up folded before it did not see the task.
+// Folds the events of the folder into a list: what the events give, and what a reader sees.
 function fold(path, key, env) {
-  const dir = eventsDir(path);
-  const events = pendingEvents(dir, null); // listed before the snapshot is read: a fold in between has its names in folded
-  const start = readRecord(path);
-  const done = new Set(Array.isArray(start.record?.folded) ? start.record.folded : []);
-  let record = start.record;
-  let broken = start.broken;
-  let changed = false;
-  let lastEvent = Number.isFinite(start.record?.last_event_ms) ? start.record.last_event_ms : 0;
-  let lastReplace = Number.isFinite(start.record?.last_replace_ms) ? start.record.last_replace_ms : 0;
-  let lastEventName = typeof start.record?.last_event_name === 'string' ? start.record.last_event_name : '';
-  let lastReplaceName = typeof start.record?.last_replace_name === 'string' ? start.record.last_replace_name : '';
-  const touched = touchedOf(start.record);
-  const horizon = Math.max(Date.now(), lastEvent, events.length ? eventMs(events[events.length - 1].name) : 0);
-  let late = 0;
-  const names = [];
-  for (const { name, event } of events) {
-    if (done.has(name)) continue;
-    const ms = eventMs(name);
-    const replaces = replacesList(event.tool_name, event.tool_input);
-    const older = (replaces ? lastEvent : lastReplace) - ms;
-    names.push(name);
-    // within one millisecond the order of two calls is the order of their names (the tick, then the process), as when both are pending in one fold
-    if (older > 0 ? older <= LATE_EVENT_MS : older === 0 && name < (replaces ? lastEventName : lastReplaceName)) { late += 1; continue; }
-    const fenced = replaces ? false : fence(touched, name, event, broken ? null : record?.items);
-    if (fenced === true) { late += 1; continue; }
-    const next = applyEvent(broken ? null : record, event, key, env, broken, fenced || null);
-    if (!replaces && editScope(event) !== null && ms + LATE_EVENT_MS >= horizon && !(next && next !== record && !sameItems(next, record))) {
-      names.pop(); // changes nothing now, but an older call that is not visible yet may give it something to change
-      continue;
-    }
-    if (next !== record && next) {
-      const keys = replaces || editScope(event) === null ? [] : touchedKeys(event, broken ? null : record?.items); // the list before this call
-      record = next;
-      broken = false;
-      changed = true;
-      if (replaces) {
-        lastReplace = Math.max(lastReplace, ms);
-        if (ms === lastReplace && name > lastReplaceName) lastReplaceName = name;
-      }
-      for (const key of keys) if (!(touched[key] >= name)) touched[key] = name;
-    }
-    lastEvent = Math.max(lastEvent, ms);
-    if (ms === lastEvent && name > lastEventName) lastEventName = name;
-  }
-  if (changed) {
-    // a call more than LATE_EVENT_MS behind the newest one folded is no held-up hook, so its entry fences nothing
-    for (const [scope, at] of Object.entries(touched)) if (eventMs(at) < lastEvent - LATE_EVENT_MS) delete touched[scope];
-    record = { ...record, last_event_ms: lastEvent, last_replace_ms: lastReplace, last_event_name: lastEventName, last_replace_name: lastReplaceName, touched };
-  }
-  return { record, broken, names, changed, done, generation: generationOf(start), late };
+  const events = pendingEvents(eventsDir(path)); // listed before the list file is read: a fold in between has its names in `folded` there
+  return foldEvents(readRecord(path), events, key, env);
 }
 
-// Under the lock: fold, write the list with the folded names, then remove the folded event files (retention: the folder holds only the
-// events that no fold under the lock has taken yet). An event file whose name is already in `folded` is a leftover of a fold that was
-// interrupted between the write of the list and the removal: it is removed too, always, before 500 newer names push its name out of
-// `folded` and the file folds a second time. false when the lock was not taken; the events then stay for the next fold or reader.
+// The list file after a fold that changed it: the record and the names of the events settled so far (the newest EVENTS_KEPT).
+export const foldedRecord = (f) => ({ ...f.record, folded: [...f.done, ...f.absorbed].slice(-Math.max(EVENTS_KEPT, f.absorbed.length)) });
+
+// Under the lock: fold, write the list, then remove the events that went into `base` (retention: the folder holds the events of the window, and
+// whatever no fold under the lock has taken yet). An event file whose name is already in `folded` is a leftover of a fold that was interrupted
+// between the write of the list and the removal: it is removed too, always, before 500 newer names push its name out of `folded` and the file
+// replays a second time. false when the lock was not taken; the events then stay for the next fold or reader.
 export function syncList(sessionId, key, env = process.env) {
   const path = listPath(sessionId, key, env);
   if (!path) return false;
@@ -840,15 +801,13 @@ export function syncList(sessionId, key, env = process.env) {
     const current = () => owned() && generationOf(readRecord(path)) === f.generation;
     const remove = (names) => { for (const name of names) { if (!owned()) return; try { unlinkSync(join(eventsDir(path), name)); } catch { /* removed by an earlier fold */ } } };
     if (!current()) return; // the lock was taken over or another fold published: the newer fold writes
-    if (f.late) storeEvent('late_event_dropped', path, env);
     remove(waiting.filter((name) => f.done.has(name)));
-    if (!f.names.length) return;
-    // events that change nothing (also on a broken list without a replacing call) leave the list file as it is
-    if (!f.changed) { if (current()) remove(f.names); return; }
-    const next = { ...f.record, folded: [...f.done, ...f.names].slice(-Math.max(EVENTS_KEPT, f.names.length)) };
+    // events that change nothing settle without a write of the list file
+    if (!f.changed) { if (current()) remove(f.absorbed); return; }
+    const next = foldedRecord(f);
     if (!publishJson(path, next, current, env)) return;
     saved = next;
-    remove(f.names);
+    remove(f.absorbed);
   }, env, SYNC_STALE_MS);
   return ok ? saved : false;
 }
