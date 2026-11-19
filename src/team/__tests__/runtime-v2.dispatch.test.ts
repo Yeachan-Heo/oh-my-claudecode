@@ -3930,6 +3930,14 @@ describe('runtime v2 startup inbox dispatch', () => {
     const config = JSON.parse(await readFile(absPath(cwd, TeamPaths.config(fixture.teamName)), 'utf8'));
     expect(config.active_recovery).toBeUndefined();
     expect(config.last_recovery).toMatchObject({ recovery_id: fixture.recoveryId, phase: 'failed' });
+    // The not-ready replacement is torn down, so a later recover under a new
+    // request sees a dead worker and relaunches instead of confirming it.
+    expect(launchMocks.retireAndCleanupCurrentWorkerLaunchAttempt).toHaveBeenCalledWith(
+      expect.objectContaining({ pane_id: '%2' }),
+      expect.stringContaining('worker_startup_not_ready'),
+      expect.any(Function),
+    );
+    expect(mocks.killOwnedWorkerPane).toHaveBeenCalledWith(expect.objectContaining({ paneId: '%2' }));
   });
 
   it('requeues the selected task through an exact read when a sibling corrupts after inventory', async () => {
