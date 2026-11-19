@@ -36,6 +36,21 @@ describe('readiness trace tmux mock', () => {
     expect(trace.unknown).toEqual([]);
   });
 
+  it.each([
+    ['a query chained to a send', ['capture-pane', '-p', '-t', '%2', ';', 'send-keys', '-t', '%2', 'Enter']],
+    ['a query whose last argument ends the command', ['capture-pane', '-p', '-t', '%2;', 'send-keys', '-t', '%2', 'Enter']],
+  ])('keeps %s as unrecognized', (_label, args) => {
+    fakeTmux('tmuxCmdAsync', args);
+    expect(trace.keys).toEqual([]);
+    expect(trace.unknown).toHaveLength(1);
+  });
+
+  it('keeps a guarded command with anything after the marker as unrecognized', () => {
+    fakeTmux('tmuxCmdAsync', ['if-shell', 'true', "send -t %2 Enter; display-message -p 'OMC_TMUX_GUARD_OK_x'; send -t %2 Escape"]);
+    expect(trace.keys).toEqual([]);
+    expect(trace.unknown).toHaveLength(1);
+  });
+
   it('keeps any other command as unrecognized', () => {
     fakeTmux('tmuxCmdAsync', ['kill-pane', '-t', '%2', '#{pane_dead}']);
     expect(trace.keys).toEqual([]);

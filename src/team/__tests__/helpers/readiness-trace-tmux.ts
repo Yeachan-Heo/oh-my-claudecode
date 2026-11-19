@@ -66,11 +66,23 @@ function recordSend(fn: string, args: string[], guarded: boolean): void {
 // `send` is tmux's alias of send-keys.
 const SEND_COMMANDS = new Set(['send', 'send-keys']);
 
+// tmux splits argv into several commands at an argument that is `;` or ends in
+// an unescaped `;`. A query followed by a send must not be answered as a query.
+const chainsCommands = (args: string[]): boolean => args.some(arg => /(^|[^\\]);$/.test(arg));
+
+// runGuardedNativeTmuxCommand appends exactly one marker command. Anything after
+// it would run unrecorded, so only a trailing marker counts.
+const GUARDED_SUCCESS = /^(.*); display-message -p '?(OMC_TMUX_GUARD_OK_[A-Za-z0-9_]+)'?$/s;
+
 export function fakeTmux(fn: string, rawArgs: string[]): string {
   let index = 0;
   while (rawArgs[index] === '-S') index += 2;
   const args = rawArgs.slice(index);
   const command = args[0];
+  if (chainsCommands(args)) {
+    trace.unknown.push(`${fn}: ${JSON.stringify(args)}`);
+    return '';
+  }
   if (command === 'capture-pane') return trace.frame;
   if (command === 'list-panes') return `${PANE_ID}\n`;
   if (command === 'display-message') {
@@ -81,12 +93,11 @@ export function fakeTmux(fn: string, rawArgs: string[]): string {
   }
   if (command === 'if-shell') {
     const success = args[2] ?? '';
-    const marker = success.match(/OMC_TMUX_GUARD_OK_[A-Za-z0-9_]+/)?.[0];
-    const nativeEnd = success.lastIndexOf('; display-message');
-    const native = shellWords(nativeEnd >= 0 ? success.slice(0, nativeEnd) : success);
+    const match = success.match(GUARDED_SUCCESS);
+    const native = match ? shellWords(match[1]!) : null;
     if (native !== null && SEND_COMMANDS.has(native[0] ?? '')) recordSend(fn, native, true);
     else trace.unknown.push(`${fn}: if-shell ${success}`);
-    return marker ? `${marker}\n` : '';
+    return match ? `${match[2]}\n` : '';
   }
   if (SEND_COMMANDS.has(command ?? '')) {
     recordSend(fn, args, false);

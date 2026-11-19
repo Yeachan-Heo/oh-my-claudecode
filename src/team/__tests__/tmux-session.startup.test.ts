@@ -1244,8 +1244,11 @@ describe('startup readiness wait set by OMC_TEAM_READY_TIMEOUT_MS', () => {
   const message = 'Read inbox.md, execute now.';
   const framesRoot = join(__dirname, 'fixtures', 'pane-frames', 'claude');
   let warnings: string[] = [];
+  let savedReadyTimeout: string | undefined;
 
   beforeEach(() => {
+    savedReadyTimeout = process.env.OMC_TEAM_READY_TIMEOUT_MS;
+    delete process.env.OMC_TEAM_READY_TIMEOUT_MS;
     warnings = [];
     vi.spyOn(console, 'warn').mockImplementation((...args: unknown[]) => {
       warnings.push(args.map(String).join(' '));
@@ -1255,7 +1258,8 @@ describe('startup readiness wait set by OMC_TEAM_READY_TIMEOUT_MS', () => {
   afterEach(() => {
     vi.useRealTimers();
     vi.restoreAllMocks();
-    delete process.env.OMC_TEAM_READY_TIMEOUT_MS;
+    if (savedReadyTimeout === undefined) delete process.env.OMC_TEAM_READY_TIMEOUT_MS;
+    else process.env.OMC_TEAM_READY_TIMEOUT_MS = savedReadyTimeout;
   });
 
   // Advance the fake clock only while the code under test sleeps, so file I/O
