@@ -53,19 +53,10 @@ function compareVersionsDesc(a, b) {
   return 0;
 }
 
-function isValidOmcPluginRoot(root) {
-  return existsSync(join(root, 'hooks', 'hooks.json'))
-    || existsSync(join(root, 'skills', 'omc-setup', 'SKILL.md'))
-    || existsSync(join(root, 'docs', 'CLAUDE.md'));
-}
-
+// A cache root is a repair target only when it holds the built runtime the plugin
+// executes. A git-marketplace checkout has hooks.json and skills but no build
+// (#5027, #5094); linking older versions to it deletes the last working build (#5104).
 function isRunnableOmcPluginRoot(root) {
-  // A runnable root must have the built artifacts that the plugin executes:
-  // - bridge/mcp-server.cjs: the MCP bridge that handles plugin communication
-  // - dist/hud/index.js: the HUD display component
-  // These are required for the plugin to function. A root with only metadata files
-  // (hooks/hooks.json, skills/omc-setup/SKILL.md, docs/CLAUDE.md) but no built
-  // artifacts is not runnable and should not be used as a cache link target.
   return existsSync(join(root, 'bridge', 'mcp-server.cjs'))
     && existsSync(join(root, 'dist', 'hud', 'index.js'));
 }
@@ -82,15 +73,10 @@ function latestValidCacheRoot(cacheBase) {
       .filter(name => parseVersion(name))
       .sort(compareVersionsDesc);
 
-    // Prefer the newest runnable version (with built artifacts like bridge/
-    // and dist/hud/index.js). A version with only metadata files is valid but
-    // not runnable and should never be chosen as the link target, to avoid
-    // data loss when unbuilt marketplace checkouts are picked up.
     for (const version of versions) {
       const root = join(cacheBase, version);
       if (isRunnableOmcPluginRoot(root)) return root;
     }
-    // No runnable version found; return null instead of picking an unrunnable one
     return null;
   } catch {
     return null;
@@ -178,14 +164,6 @@ function rewriteOmcRegistryEntries(installedPluginsPath, latestRoot) {
 function replaceWithSymlink(versionPath, latestRoot) {
   const latestVersion = basename(latestRoot);
   if (basename(versionPath) === latestVersion) return false;
-
-  // Never replace a runnable directory with a symlink to a non-runnable target.
-  // This prevents data loss when an unbuilt marketplace install is picked as the
-  // newest version. In the normal case where latestRoot is runnable, existing
-  // runnable versions can be symlinked for backward compatibility.
-  if (isRunnableOmcPluginRoot(versionPath) && !isRunnableOmcPluginRoot(latestRoot)) {
-    return false;
-  }
 
   try {
     const stat = lstatSync(versionPath);

@@ -417,6 +417,44 @@ describe('repair-plugin-cache.mjs', () => {
     });
   });
 
+  it.each([
+    ['bridge/mcp-server.cjs', ['bridge', 'mcp-server.cjs']],
+    ['dist/hud/index.js', ['dist', 'hud', 'index.js']],
+  ])('issue #5104: a newer version missing only %s is not a link target', (_label, missing) => {
+    const root = mkdtempSync(join(tmpdir(), 'omc-issue-5104-partial-'));
+    tempRoots.push(root);
+
+    const configDir = join(root, '.claude');
+    const cacheBase = join(configDir, 'plugins', 'cache', 'omc', 'oh-my-claudecode');
+    const oldBuiltRoot = join(cacheBase, '5.7.7');
+    const newPartialRoot = join(cacheBase, '5.8.6');
+    mkdirSync(join(configDir, 'plugins'), { recursive: true });
+    writePluginRoot(oldBuiltRoot, '5.7.7');
+    writePluginRoot(newPartialRoot, '5.8.6');
+    rmSync(join(newPartialRoot, ...missing));
+
+    writeFileSync(join(configDir, 'plugins', 'installed_plugins.json'), JSON.stringify({
+      version: 2,
+      plugins: { 'oh-my-claudecode@omc': [{ installPath: oldBuiltRoot, version: '5.7.7', enabled: true }] },
+    }, null, 2));
+
+    const result = spawnSync(process.execPath, [SCRIPT_PATH], {
+      env: { ...process.env, CLAUDE_CONFIG_DIR: configDir, OMC_REPAIR_PLUGIN_CACHE_PLATFORM: 'linux' },
+      encoding: 'utf-8',
+    });
+
+    expect(result.status).toBe(0);
+    expect(result.stderr).toBe('');
+    expect(lstatSync(oldBuiltRoot).isSymbolicLink()).toBe(false);
+    expect(existsSync(join(oldBuiltRoot, 'bridge', 'mcp-server.cjs'))).toBe(true);
+    expect(existsSync(join(oldBuiltRoot, 'dist', 'hud', 'index.js'))).toBe(true);
+    // The incomplete version is the one repaired: it now resolves to the complete build.
+    expect(lstatSync(newPartialRoot).isSymbolicLink()).toBe(true);
+    expect(realpathSync(newPartialRoot)).toBe(realpathSync(oldBuiltRoot));
+    const registry = JSON.parse(readFileSync(join(configDir, 'plugins', 'installed_plugins.json'), 'utf-8'));
+    expect(registry.plugins['oh-my-claudecode@omc'][0]).toMatchObject({ installPath: oldBuiltRoot, version: '5.7.7' });
+  });
+
   it('prefers newer runnable version even when newest version is unbuilt', () => {
     const root = mkdtempSync(join(tmpdir(), 'omc-prefer-newer-runnable-'));
     tempRoots.push(root);
