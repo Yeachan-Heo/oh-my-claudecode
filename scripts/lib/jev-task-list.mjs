@@ -571,6 +571,11 @@ function adoptMovedBase(moved, live, env, held = null) {
   return adopted;
 }
 
+// Is a tree of the session under its hidden name (see removeIfIdle), left there by a sweep that was stopped before it put the tree back.
+function hasHiddenTree(sessionId, env) {
+  try { return readdirSync(listsDir(env)).some((name) => HIDDEN_NAME.exec(name)?.[1] === sessionId); } catch { return false; }
+}
+
 // A moved tree with recent activity goes back to its own name: one rename when the name is free. When a hook has made the directory
 // again, the rename fails and the tree is merged into the new one, so an event published into the old tree stays visible to the readers of
 // the live path. A tree that cannot be merged completely stays under its hidden name; the next sweep tries again (see sweep). The lists
@@ -866,8 +871,10 @@ export function syncList(sessionId, key, env = process.env) {
     const remove = (names) => { for (const name of names) { if (!owned()) return; try { unlinkSync(join(eventsDir(path), name)); } catch { /* removed by an earlier fold */ } } };
     if (!current()) return; // the lock was taken over or another fold published: the newer fold writes
     remove(waiting.filter((name) => f.done.has(name)));
-    // events that change nothing settle without a write of the list file
-    if (!f.changed) { if (current()) remove(f.absorbed); return; }
+    // Events that change nothing settle without a write of the list file, so no mark of the list says that they were seen. They stay while a
+    // tree of the session is still hidden (a sweep that was stopped after it moved the directory): it may hold the task they are about, and it
+    // is merged against marks that know nothing of them. Once it is merged or removed, the next fold settles them.
+    if (!f.changed) { if (current() && !(f.absorbed.length && hasHiddenTree(sessionId, env))) remove(f.absorbed); return; }
     const next = foldedRecord(f);
     if (!publishJson(path, next, current, env)) return;
     saved = next;

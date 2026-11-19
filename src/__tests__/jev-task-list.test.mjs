@@ -937,9 +937,9 @@ describe('task list: session retention sweep', () => {
     // are settled and gone, so they cannot be replayed there, and applying them last (as a call of a clock set back) would put an older call over a
     // newer one.
     describe('an interrupted sweep: the moved tree is merged after the new directory settled calls of its own', () => {
-      const held = (sid, key, at, tool, input) => {
+      const held = (sid, key, at, tool, input, extra = {}) => {
         const name = `${at}-${'7'.padStart(20, '0')}-11-aaaaaaaa.json`;
-        const event = { ts: new Date(at).toISOString(), pid: 11, id: 'aaaaaaaa', session_id: sid, agent_type: null, tool_use_id: null, prompt_id: null, tool_name: tool, tool_input: input };
+        const event = { ts: new Date(at).toISOString(), pid: 11, id: 'aaaaaaaa', session_id: sid, agent_type: null, tool_use_id: null, prompt_id: null, tool_name: tool, tool_input: input, ...extra };
         mkdirSync(join(root(), sid, `${key}.events`), { recursive: true });
         writeFileSync(join(root(), sid, `${key}.events`, name), JSON.stringify(event));
         return { name, event };
@@ -1079,6 +1079,50 @@ describe('task list: session retention sweep', () => {
         expect(existsSync(moved)).toBe(false);
         expect(shown(sid)).toEqual(['Moved list:pending', 'Second:completed']);
         expect(rowsSince(rows)).toBe(0);
+      });
+
+      // A call that finds no task to change (a TaskUpdate of a task the new directory does not hold) settles without a write of the list file, so
+      // no mark of the list says that it was seen. The tree a stopped sweep moved aside may hold the task it is about, and when it is merged
+      // later it is judged against marks that know nothing of the call: the call has to be there to take its place after the task.
+      describe('a call that finds no task to change, while a tree of the session is still hidden', () => {
+        const noop = (sid, at, taskId = '1') => L.recordListCall(postToolUse(sid, 'TaskUpdate', { taskId, status: 'completed' }), envFor(), at);
+        const oldTask = (sid, now, withList) => {
+          const at = now - 120_000;
+          const made = held(sid, 'main', at, 'TaskCreate', { subject: 'Old task' }, { task_id: '1' });
+          if (withList) writeFileSync(join(root(), sid, 'main.json'), JSON.stringify(L.foldedRecord(L.foldEvents({ record: null, broken: false }, [made], 'main', envFor(), at))));
+        };
+        const leftNames = (sid) => eventFiles(sid, 'main').map((n) => n.slice(0, 13));
+
+        // the first call is in its window when it is made, and settles when the second one, 25 s later, is folded
+        it.each([['with the list of the moved tree', true], ['with its events only', false]])('stays until the moved tree is merged, and completes the task the moved tree holds (%s)', (_what, withList) => {
+          fresh();
+          const now = Date.now();
+          const sid = session();
+          oldTask(sid, now, withList);
+          const moved = stopAfterMove(sid);
+          noop(sid, now - 5000);
+          noop(sid, now + 20_000, '9'); // another task no list holds: the call before it settles
+          expect(leftNames(sid)).toEqual([String(now - 5000), String(now + 20_000)]); // the first one was not removed, though it settled
+          expect(existsSync(moved)).toBe(true);
+          sweepAgain();
+          expect(existsSync(moved)).toBe(false);
+          expect(shown(sid)).toEqual(['Old task:completed']);
+          L.syncList(sid, 'main', envFor()); // the tree is merged: the calls are settled with the marks of the list like any other
+          expect(leftNames(sid)).toEqual([String(now + 20_000)]);
+          expect(readListFile(sid, 'main').items.map((x) => `${x.id} ${x.content}:${x.status}`)).toEqual(['1 Old task:completed']);
+        });
+
+        it('is settled at once when no tree of the session is hidden (a tree of another session does not keep it)', () => {
+          fresh();
+          const now = Date.now();
+          const sid = session();
+          mkdirSync(join(root(), '.another-session.0123456789ab.sweeping'), { recursive: true });
+          writeFileSync(join(root(), '.sweep'), '{}'); // no sweep runs before the calls below
+          noop(sid, now - 5000);
+          noop(sid, now + 20_000, '9');
+          expect(leftNames(sid)).toEqual([String(now + 20_000)]);
+          expect(readListFile(sid, 'main')).toBeNull();
+        });
       });
     });
   });
