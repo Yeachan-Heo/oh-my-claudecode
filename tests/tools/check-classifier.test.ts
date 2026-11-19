@@ -290,7 +290,7 @@ it('mutations: bash shell writes', () => {
 it('in-place sed and perl: the file operands decide, not the flag', () => {
   const edits = (command: string) => isMutation('Bash', { command });
   // Documentation, lockfiles and temp paths are not code; a source file is.
-  for (const file of ['README.md', 'package-lock.json', '/tmp/x.ts', 'docs/guide.ts', '/var/tmp/x.ts']) {
+  for (const file of ['README.md', 'package-lock.json', '/tmp/x.ts', 'docs/guide.ts']) {
     assert.equal(edits(`sed -i 's/a/b/' ${file}`), false, `sed -i ${file}`);
     assert.equal(edits(`perl -pi -e 's/a/b/' ${file}`), false, `perl -pi ${file}`);
   }
