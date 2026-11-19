@@ -51,10 +51,13 @@ const stdinLines = stdin[Symbol.asyncIterator]();
 
 const FRAMES_ROOT = join(dirname(fileURLToPath(import.meta.url)), 'pane-frames');
 const CLEAR_SCREEN = '\x1b[H\x1b[J';
-const DOWN_KEYS = ['\x1b[B', '\x1bOB'];
 const SLOW_BANNER_MS = Number(process.env.OMC_FAKE_SLOW_BANNER_MS) || 3_000;
 const BUSY_MS = 2_000;
 const PROVIDER_EXIT_MS = 1_000;
+const TRUST_BUSY_MS = 1_000;
+const TRUST_IGNORE_MS = 600;
+// Down (normal and application cursor mode), then Enter.
+const SELECTOR_KEYS = ['\x1b[B', '\x1bOB', '\r', '\n'];
 
 function showFrame(name, file) {
   return {
@@ -159,18 +162,59 @@ const writeShutdownAck = {
   },
 };
 
-// Claude's trust dialog defaults to "No, exit": Enter alone quits, Down then
-// Enter trusts the folder.
-function awaitClaudeTrustAnswer() {
+// Claude's trust dialog focuses "No, exit" and reads raw keys: Down moves the
+// focus to the affirmative choice and redraws, Enter confirms the focused
+// choice. Keys that arrive in one read act against the focus drawn before that
+// read, so a Down and an Enter read together still confirm "No, exit". That
+// is the hypothesis the recorded 2.1.328 failures fit, not observed behavior.
+// busyMs blocks the event loop after the first draw so keys sent meanwhile
+// reach the selector in one read (an unconfirmed hypothesis). ignoreMs drops
+// every key read that soon after the first draw, as Claude Code 2.1.328 was
+// measured to drop a Down sent right after the dialog appeared.
+function moveTrustFocus(frame) {
+  const lines = frame.split('\n');
+  const no = lines.findIndex(line => /❯\s*No, exit/.test(line));
+  const yes = lines.findIndex(line => /^\s*Yes, (?:proceed|I trust this folder)/.test(line));
+  const column = lines[no].indexOf('❯');
+  lines[no] = `${lines[no].slice(0, column)} ${lines[no].slice(column + 1)}`;
+  lines[yes] = `${lines[yes].slice(0, column)}❯${lines[yes].slice(column + 1)}`;
+  return lines.join('\n');
+}
+
+function claudeTrustSelector(file, { busyMs = 0, ignoreMs = 0 } = {}) {
   return {
     name: 'await-trust-answer',
-    run: async () => {
-      for (;;) {
-        const line = await nextLine('stdin_closed_before_trust_answer');
-        if (DOWN_KEYS.some(key => line.includes(key))) return;
-        if (line.trim() === '') throw new Error('trust_declined');
-      }
-    },
+    run: () => new Promise((resolve, reject) => {
+      const frame = readFileSync(join(FRAMES_ROOT, file), 'utf8').trimEnd();
+      let affirmativeFocused = false;
+      if (process.stdin.isTTY) process.stdin.setRawMode(true);
+      const finish = (error) => {
+        process.stdin.off('data', onKeys);
+        if (process.stdin.isTTY) process.stdin.setRawMode(false);
+        if (error) reject(error);
+        else resolve();
+      };
+      let drawnAt = Infinity;
+      const onKeys = (chunk) => {
+        if (Date.now() - drawnAt < ignoreMs) return;
+        const focusedBeforeRead = affirmativeFocused;
+        for (let rest = String(chunk); rest; ) {
+          const key = SELECTOR_KEYS.find(candidate => rest.startsWith(candidate));
+          rest = rest.slice(key?.length ?? 1);
+          if (key === '\r' || key === '\n') return finish(focusedBeforeRead ? undefined : new Error('trust_declined'));
+          if (key && !affirmativeFocused) {
+            affirmativeFocused = true;
+            process.stdout.write(`${CLEAR_SCREEN}${moveTrustFocus(frame)}`);
+          }
+        }
+      };
+      process.stdin.on('data', onKeys);
+      process.stdout.write(`${CLEAR_SCREEN}${frame}`, () => {
+        drawnAt = Date.now();
+        const busyUntil = Date.now() + busyMs;
+        while (Date.now() < busyUntil);
+      });
+    }),
   };
 }
 
@@ -183,7 +227,13 @@ const CLAUDE_IDLE = 'claude/2.1.325/idle.txt';
 const SCENARIOS = {
   default: lifecycle({ startup: [banner, idlePrompt] }),
   'claude-trust': lifecycle({
-    startup: [showFrame('trust-prompt', 'claude/2.1.325/trust.txt'), awaitClaudeTrustAnswer(), showFrame('idle-prompt', CLAUDE_IDLE)],
+    startup: [claudeTrustSelector('claude/2.1.325/trust.txt'), showFrame('idle-prompt', CLAUDE_IDLE)],
+  }),
+  'claude-trust-busy-startup': lifecycle({
+    startup: [claudeTrustSelector('claude/2.1.325/trust.txt', { busyMs: TRUST_BUSY_MS }), showFrame('idle-prompt', CLAUDE_IDLE)],
+  }),
+  'claude-trust-ignores-early-keys': lifecycle({
+    startup: [claudeTrustSelector('claude/2.1.325/trust.txt', { ignoreMs: TRUST_IGNORE_MS }), showFrame('idle-prompt', CLAUDE_IDLE)],
   }),
   'claude-slow-banner': lifecycle({
     startup: [showFrame('startup-banner', 'claude/unversioned/startup-banner-bypass.txt'), pause('slow-startup', SLOW_BANNER_MS), showFrame('idle-prompt', CLAUDE_IDLE)],
@@ -215,7 +265,7 @@ const SCENARIOS = {
     startup: [showFrame('quoted-output', 'claude/synthetic/prompt-glyph-in-output.txt'), pause('drawing-input-box', BUSY_MS), showFrame('idle-prompt', CLAUDE_IDLE)],
   }),
   'wrapped-trust-35col': lifecycle({
-    startup: [showFrame('trust-prompt', 'claude/2.1.310/trust-35col.txt'), awaitClaudeTrustAnswer(), showFrame('idle-prompt', CLAUDE_IDLE)],
+    startup: [claudeTrustSelector('claude/2.1.310/trust-35col.txt'), showFrame('idle-prompt', CLAUDE_IDLE)],
   }),
   'provider-exit-to-shell-prompt': [
     showFrame('idle-prompt', CLAUDE_IDLE),

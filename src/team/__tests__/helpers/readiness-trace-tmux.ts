@@ -5,8 +5,12 @@ export const PANE_ID = '%2';
 
 export type KeyRecord = { fn: string; pane: string; guarded: boolean; keys: string[]; at_ms: number };
 
+// A pane that answers keys, for cases where the frame depends on what was sent.
+export type TracePane = { capture: () => string; send: (keys: string[]) => void };
+
 export const trace = {
   frame: '',
+  pane: null as TracePane | null,
   startedAt: 0,
   keys: [] as KeyRecord[],
   unknown: [] as string[],
@@ -54,13 +58,15 @@ function shellWords(command: string): string[] | null {
 
 function recordSend(fn: string, args: string[], guarded: boolean): void {
   const target = args.indexOf('-t');
+  const keys = args.filter((_, index) => index !== 0 && index !== target && index !== target + 1);
   trace.keys.push({
     fn,
     pane: target >= 0 ? args[target + 1] ?? '' : '',
     guarded,
-    keys: args.filter((_, index) => index !== 0 && index !== target && index !== target + 1),
+    keys,
     at_ms: Date.now() - trace.startedAt,
   });
+  trace.pane?.send(keys);
 }
 
 // `send` is tmux's alias of send-keys.
@@ -83,7 +89,7 @@ export function fakeTmux(fn: string, rawArgs: string[]): string {
     trace.unknown.push(`${fn}: ${JSON.stringify(args)}`);
     return '';
   }
-  if (command === 'capture-pane') return trace.frame;
+  if (command === 'capture-pane') return trace.pane?.capture() ?? trace.frame;
   if (command === 'list-panes') return `${PANE_ID}\n`;
   if (command === 'display-message') {
     if (args.includes('#{pid}')) return `${process.pid}\n`;

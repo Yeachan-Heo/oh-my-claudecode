@@ -11,7 +11,7 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import type { StartupPaneContext } from '../tmux-session.js';
-import { PANE_ID, trace } from './helpers/readiness-trace-tmux.js';
+import { PANE_ID, trace, type TracePane } from './helpers/readiness-trace-tmux.js';
 
 const TRACE_OUT = process.env.READINESS_TRACE_OUT;
 const TRACE_SET = process.env.READINESS_TRACE_SET ?? 'r5';
@@ -44,8 +44,54 @@ type TraceCase = {
   eventState: string | null;
   env: Record<string, string | null>;
   control: boolean;
+  pane?: () => TracePane;
   run: () => Promise<unknown>;
 };
+
+// Claude Code's trust dialog: "No, exit" is focused first, Down moves the
+// focus, Enter confirms the focused choice. `immediate` applies each key as it
+// arrives. `batched` applies the keys sent since the last capture together,
+// against the focus drawn before them: the hypothesis that fits the recorded
+// Claude Code 2.1.328 failures.
+function claudeTrustPane(noFocused: string, idle: string, mode: 'immediate' | 'batched'): TracePane {
+  const lines = noFocused.split('\n');
+  const no = lines.findIndex(line => /❯\s*No, exit/.test(line));
+  const yes = lines.findIndex(line => /^\s*Yes, (?:proceed|I trust this folder)/.test(line));
+  const column = lines[no]!.indexOf('❯');
+  lines[no] = `${lines[no]!.slice(0, column)} ${lines[no]!.slice(column + 1)}`;
+  lines[yes] = `${lines[yes]!.slice(0, column)}❯${lines[yes]!.slice(column + 1)}`;
+  const frames = {
+    no: noFocused,
+    yes: lines.join('\n'),
+    declined: `${noFocused.trimEnd()}\nClaude Code didn't start because this folder isn't trusted.\n`,
+    trusted: idle,
+  };
+  let focus: keyof typeof frames = 'no';
+  let pending: string[] = [];
+  const apply = (keys: string[]) => {
+    const drawn = focus;
+    if (drawn !== 'no' && drawn !== 'yes') return;
+    for (const key of keys) {
+      if (key === 'Enter') {
+        focus = drawn === 'yes' ? 'trusted' : 'declined';
+        return;
+      }
+      if (key === 'Down') focus = 'yes';
+    }
+  };
+  return {
+    send: keys => {
+      if (keys.length !== 1) return;
+      if (mode === 'batched') pending.push(keys[0]!);
+      else apply(keys);
+    },
+    capture: () => {
+      apply(pending);
+      pending = [];
+      return frames[focus];
+    },
+  };
+}
 
 // Each set lists its cases; later PRs add sets here and in readiness-diff.mjs.
 const SETS: Record<string, (fixtures: Fixture[], contexts: Map<string, StartupPaneContext>) => TraceCase[]> = {
@@ -58,6 +104,27 @@ const SETS: Record<string, (fixtures: Fixture[], contexts: Map<string, StartupPa
       eventState: null,
       env: { OMC_TEAM_READY_TIMEOUT_MS: raw ?? null },
       control: fixture.file === 'claude/2.1.325/idle.txt' && raw === undefined,
+      run: () => deliverStartupInbox(contexts.get(fixture.provider)!, STARTUP_MESSAGE, { attemptAlreadyFenced: true }),
+    })));
+  },
+  trust: (fixtures, contexts) => {
+    const idle = readFileSync(join(FIXTURE_ROOT, 'claude/2.1.325/idle.txt'), 'utf8');
+    const dialogs = fixtures.filter(fixture =>
+      fixture.provider === 'claude' && /❯\s*No, exit/.test(readFileSync(join(FIXTURE_ROOT, fixture.file), 'utf8')));
+    // An answered dialog left above the live input prompt: keys reach the
+    // prompt, so the pane stays as recorded.
+    const stale = (file: string) => {
+      const lines = readFileSync(join(FIXTURE_ROOT, file), 'utf8').split('\n');
+      return lines.slice(lines.findIndex(line => /^\s*Yes,/.test(line)) + 1).some(line => /^\s*❯/.test(line));
+    };
+    return dialogs.flatMap(fixture => (stale(fixture.file) ? ['stale'] as const : ['immediate', 'batched'] as const).map(mode => ({
+      case: `${fixture.file} keys=${mode}`,
+      fn: 'deliverStartupInbox',
+      fixture: fixture.file,
+      eventState: mode,
+      env: { OMC_TEAM_READY_TIMEOUT_MS: null },
+      control: fixture.file === 'claude/2.1.325/trust.txt' && mode === 'immediate',
+      pane: mode === 'stale' ? undefined : () => claudeTrustPane(readFileSync(join(FIXTURE_ROOT, fixture.file), 'utf8'), idle, mode),
       run: () => deliverStartupInbox(contexts.get(fixture.provider)!, STARTUP_MESSAGE, { attemptAlreadyFenced: true }),
     })));
   },
@@ -154,6 +221,7 @@ describe.skipIf(!TRACE_OUT)('readiness trace harness', () => {
     const warn = vi.spyOn(console, 'warn');
     for (const traceCase of buildCases!(fixtures, contexts)) {
       trace.frame = readFileSync(join(FIXTURE_ROOT, traceCase.fixture), 'utf8');
+      trace.pane = traceCase.pane?.() ?? null;
       trace.keys = [];
       trace.unknown = [];
       for (const [key, value] of Object.entries(traceCase.env)) {
@@ -172,7 +240,8 @@ describe.skipIf(!TRACE_OUT)('readiness trace harness', () => {
       }
       const waitMs = Date.now() - trace.startedAt;
       vi.useRealTimers();
-      const { run: _run, ...described } = traceCase;
+      trace.pane = null;
+      const { run: _run, pane: _pane, ...described } = traceCase;
       results.push({
         ...described,
         keys: trace.keys,

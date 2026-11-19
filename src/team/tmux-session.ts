@@ -65,6 +65,7 @@ import {
   paneHasStartupBanner,
   paneHasTrustPrompt,
   paneLooksReady,
+  claudeTrustFocus,
   type PaneTrustPromptKind,
 } from "./pane-readiness.js";
 
@@ -4597,6 +4598,9 @@ export async function startupProviderExited(
   return (await observeWorkerLaunchProvider(context.attempt)) === "dead";
 }
 
+// A Down sent 530ms after the trust dialog drew took effect (recording E0).
+const CLAUDE_TRUST_DOWN_RESEND_MS = 1_000;
+
 export async function waitForStartupPaneReady(
   context: StartupPaneContext,
   opts: WaitForPaneReadyOptions = {},
@@ -4617,8 +4621,13 @@ export async function waitForStartupPaneReady(
       : 250;
   const deadline = Date.now() + timeoutMs;
   const handledSelectors = new Set<PaneTrustPromptKind>();
+  let claudeTrustDownSentAt = -Infinity;
+  // Set right after Enter answers Claude's trust dialog: the pane is read once
+  // more even when that Enter went out at the last poll before the deadline.
+  let readAfterTrustAnswer = false;
 
-  while (Date.now() < deadline) {
+  while (Date.now() < deadline || readAfterTrustAnswer) {
+    readAfterTrustAnswer = false;
     if (!(await startupContextIsActive(context, opts.attemptAlreadyFenced)))
       return { ok: false, reason: "attempt_inactive" };
     if (await startupProviderExited(context))
@@ -4660,12 +4669,29 @@ export async function waitForStartupPaneReady(
       if (handledSelectors.has(selector))
         return { ok: false, reason: "selector_persistent" };
       if (selector === "claude_directory") {
-        // This Claude Code dialog focuses "No, exit" by default; move to the affirmative choice.
-        await sendTeamPaneKey(
-          context.ownership.paneId,
-          "Down",
-          context.ownership.tmuxServerIdentity,
-        );
+        // This dialog focuses "No, exit" first. Claude Code 2.1.328 was
+        // measured to drop a Down sent right after the dialog drew, so Down is
+        // resent while "No" stays focused, and Enter is sent only when the last
+        // capture showed the affirmative choice focused. An answered dialog
+        // above a live input prompt gets no key: it would reach the prompt.
+        const focus = claudeTrustFocus(captured);
+        if (focus === "stale")
+          return { ok: false, reason: "selector_persistent" };
+        if (focus !== "yes") {
+          if (
+            focus === "no" &&
+            Date.now() - claudeTrustDownSentAt >= CLAUDE_TRUST_DOWN_RESEND_MS
+          ) {
+            await sendTeamPaneKey(
+              context.ownership.paneId,
+              "Down",
+              context.ownership.tmuxServerIdentity,
+            );
+            claudeTrustDownSentAt = Date.now();
+          }
+          await sleep(pollIntervalMs);
+          continue;
+        }
       } else {
         await sendLiteralPaneText(
           context.ownership.paneId,
@@ -4679,6 +4705,7 @@ export async function waitForStartupPaneReady(
         context.ownership.tmuxServerIdentity,
       );
       handledSelectors.add(selector);
+      readAfterTrustAnswer = selector === "claude_directory";
       await sleep(pollIntervalMs);
       continue;
     }

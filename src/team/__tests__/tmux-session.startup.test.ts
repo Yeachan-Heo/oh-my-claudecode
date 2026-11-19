@@ -1,8 +1,10 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { randomUUID } from 'node:crypto';
+import { readFileSync } from 'node:fs';
 import { mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { join, relative } from 'node:path';
+import { dirname, join, relative } from 'node:path';
+import { fileURLToPath } from 'node:url';
 
 import type { WorkerLaunchAttempt } from '../worker-launch-ack.js';
 import { currentStrictProcessStartIdentity } from '../team-owner-epoch.js';
@@ -867,6 +869,7 @@ describe('worker pane startup safety', () => {
       const context = await acceptedContext('claude');
       tmuxState.captures = [
         `${question}\n❯ No, exit\n  ${affirmativeChoice}\n`,
+        `${question}\n  No, exit\n❯ ${affirmativeChoice}\n`,
         '❯ ready\n',
       ];
 
@@ -886,6 +889,161 @@ describe('worker pane startup safety', () => {
       expect(inboxIndex).toBeGreaterThan(confirmYesIndex);
     },
   );
+
+  strictTmuxIt('presses Enter in Claude Code’s trust dialog only once the pane shows the affirmative choice focused', async () => {
+    const context = await acceptedContext('claude');
+    const question = 'Quick safety check: Is this a project you created or one you trust?';
+    const frames = {
+      no: `${question}\n❯ No, exit\n  Yes, I trust this folder\n`,
+      yes: `${question}\n  No, exit\n❯ Yes, I trust this folder\n`,
+      declined: `${question}\n❯ No, exit\n  Yes, I trust this folder\nClaude Code didn't start because this folder isn't trusted.\n`,
+      trusted: '❯ \n',
+    };
+    // Hypothesis fitting the recorded failures: a busy Claude Code startup
+    // reads the keys sent between two captures together and applies them
+    // against the focus it drew before them.
+    let focus: keyof typeof frames = 'no';
+    let applied = 0;
+    tmuxState.captureAt = () => {
+      const keys = tmuxState.args.slice(applied)
+        .filter(args => args[0] === 'send-keys' && !args.includes('-l'))
+        .map(args => args.at(-1));
+      applied = tmuxState.args.length;
+      const drawn = focus;
+      for (const key of drawn === 'no' || drawn === 'yes' ? keys : []) {
+        if (key === 'Enter') {
+          focus = drawn === 'yes' ? 'trusted' : 'declined';
+          break;
+        }
+        if (key === 'Down') focus = 'yes';
+      }
+      return frames[focus];
+    };
+
+    await expect(deliverStartupInbox(context, 'Read inbox.md, execute now.')).resolves.toEqual({
+      ok: true,
+      kind: 'attempted_unconfirmed',
+    });
+    expect(focus).toBe('trusted');
+  });
+
+  strictTmuxIt('sends Down again when the first Down after the dialog draws is dropped', async () => {
+    const context = await acceptedContext('claude');
+    const question = 'Quick safety check: Is this a project you created or one you trust?';
+    const frames = {
+      no: `${question}\n❯ No, exit\n  Yes, I trust this folder\n`,
+      yes: `${question}\n  No, exit\n❯ Yes, I trust this folder\n`,
+      trusted: '❯ \n',
+    };
+    // Measured on Claude Code 2.1.328: a Down sent right after the dialog
+    // first draws can be dropped. This pane drops the first Down.
+    let focus: keyof typeof frames = 'no';
+    let applied = 0;
+    let downs = 0;
+    tmuxState.captureAt = () => {
+      const keys = tmuxState.args.slice(applied)
+        .filter(args => args[0] === 'send-keys' && !args.includes('-l'))
+        .map(args => args.at(-1));
+      applied = tmuxState.args.length;
+      for (const key of keys) {
+        if (key === 'Down' && ++downs > 1 && focus === 'no') focus = 'yes';
+        if (key === 'Enter' && focus === 'yes') focus = 'trusted';
+      }
+      return frames[focus];
+    };
+
+    await expect(waitForStartupPaneReady(context, { timeoutMs: 3_000, attemptAlreadyFenced: true }))
+      .resolves.toEqual({ ok: true });
+    expect(focus).toBe('trusted');
+    expect(downs).toBe(2);
+  });
+
+  strictTmuxIt('reads the pane once more after answering Claude Code trust at the last poll before the deadline', async () => {
+    const context = await acceptedContext('claude');
+    const question = 'Quick safety check: Is this a project you created or one you trust?';
+    const frames = {
+      no: `${question}\n❯ No, exit\n  Yes, I trust this folder\n`,
+      yes: `${question}\n  No, exit\n❯ Yes, I trust this folder\n`,
+      trusted: '❯ \n',
+    };
+    // The dialog first appears at 29,500 ms of a 30,000 ms wait and takes each key at once.
+    let focus: keyof typeof frames = 'no';
+    let applied = 0;
+    let startedAt = 0;
+    tmuxState.captureAt = () => {
+      for (const args of tmuxState.args.slice(applied)) {
+        if (args[0] !== 'send-keys' || args.includes('-l')) continue;
+        if (args.at(-1) === 'Down' && focus === 'no') focus = 'yes';
+        if (args.at(-1) === 'Enter' && focus === 'yes') focus = 'trusted';
+      }
+      applied = tmuxState.args.length;
+      return Date.now() - startedAt < 29_500 ? 'Starting…\n' : frames[focus];
+    };
+
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'Date'] });
+    try {
+      startedAt = Date.now();
+      const work = waitForStartupPaneReady(context, { timeoutMs: 30_000, pollIntervalMs: 250, attemptAlreadyFenced: true });
+      let settled = false;
+      void work.then(() => { settled = true; }, () => { settled = true; });
+      while (!settled) {
+        if (vi.getTimerCount() > 0) await vi.advanceTimersToNextTimerAsync();
+        else await new Promise(resolveTick => setImmediate(resolveTick));
+      }
+      await expect(work).resolves.toEqual({ ok: true });
+      expect(focus).toBe('trusted');
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  strictTmuxIt('sends no key to an answered Claude trust dialog left above a live input prompt', async () => {
+    const context = await acceptedContext('claude');
+    const corpus = join(dirname(fileURLToPath(import.meta.url)), 'fixtures', 'pane-frames');
+    const answered = readFileSync(join(corpus, 'claude/unversioned/trust-files-then-idle.txt'), 'utf8');
+    // The user pressed Up: the live prompt now shows a history entry.
+    tmuxState.captures = [answered, `${answered.trimEnd()} previous prompt from history\n`];
+
+    await expect(waitForStartupPaneReady(context, { timeoutMs: 3_000, attemptAlreadyFenced: true }))
+      .resolves.toEqual({ ok: false, reason: 'selector_persistent' });
+    expect(tmuxState.args.filter(args => args[0] === 'send-keys')).toEqual([]);
+  });
+
+  strictTmuxIt('sends Down, not Enter, when only a stale line above the live trust dialog shows Yes focused', async () => {
+    const context = await acceptedContext('claude');
+    const live = 'Quick safety check: Is this a project you created or one you trust?\n❯ No, exit\n  Yes, I trust this folder\n';
+    tmuxState.captures = [` ❯ Yes, I trust this folder\n${live}`, '❯ ready\n'];
+
+    await deliverStartupInbox(context, 'Read inbox.md, execute now.');
+    const keys = tmuxState.args.filter(args => args[0] === 'send-keys' && !args.includes('-l')).map(args => args.at(-1));
+    expect(keys[0]).toBe('Down');
+  });
+
+  strictTmuxIt('waits for a new trust dialog below an answered one to draw its choices, then sends Down, then Enter', async () => {
+    const context = await acceptedContext('claude');
+    const corpus = join(dirname(fileURLToPath(import.meta.url)), 'fixtures', 'pane-frames');
+    const answered = readFileSync(join(corpus, 'claude/2.1.328/trust-yes-focused.txt'), 'utf8');
+    const live = readFileSync(join(corpus, 'claude/2.1.325/trust.txt'), 'utf8');
+    const midDraw = live.slice(0, live.indexOf('Security guide') + 'Security guide'.length);
+    const yesFocused = live.replace('❯ No, exit', '  No, exit').replace('  Yes, I trust this folder', '❯ Yes, I trust this folder');
+    const stages = [`${answered}\n${midDraw}`, `${answered}\n${live}`, `${answered}\n${yesFocused}`];
+    const keysAfterStage: string[][] = stages.map(() => []);
+    let stage = -1;
+    let seen = 0;
+    tmuxState.captureAt = () => {
+      const sent = tmuxState.args.slice(seen).filter(args => args[0] === 'send-keys' && !args.includes('-l')).map(args => String(args.at(-1)));
+      seen = tmuxState.args.length;
+      if (stage >= 0 && stage < stages.length) keysAfterStage[stage]!.push(...sent);
+      stage = Math.min(stage + 1, stages.length);
+      return stages[stage] ?? '❯ ready\n';
+    };
+
+    await expect(deliverStartupInbox(context, 'Read inbox.md, execute now.')).resolves.toEqual({
+      ok: true,
+      kind: 'attempted_unconfirmed',
+    });
+    expect(keysAfterStage).toEqual([[], ['Down'], ['Enter']]);
+  });
 
   strictTmuxIt.each([
     ['Cursor workspace trust', 'Workspace Trust Required\nDo you trust the contents of this directory?\nPass --trust, --yolo, or -f to skip this prompt.\n'],

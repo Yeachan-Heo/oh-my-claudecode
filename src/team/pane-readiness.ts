@@ -160,6 +160,13 @@ function codexTrustQuestionIsActive(lines: readonly string[]): boolean {
   return activePrompt === '' && !previousChoiceWasRendered;
 }
 
+// True when the question, wrapped over at most 3 lines, is in the lines from index on.
+function claudeTrustQuestionStartsAt(lines: readonly string[], index: number): boolean {
+  return /(?:Do you trust the files in this folder|Quick safety check:\s*Is this a project you created or one you trust)\?/i.test(
+    lines.slice(index, index + 3).join(' '),
+  );
+}
+
 function detectTrustPrompt(
   lines: readonly string[],
   kinds: readonly PaneTrustPromptKind[],
@@ -191,11 +198,7 @@ function detectTrustPrompt(
   const claudeQuestionLines = lines.slice(-20);
   if (
     kinds.includes('claude_directory') &&
-    claudeQuestionLines.some((_, index) =>
-      /(?:Do you trust the files in this folder|Quick safety check:\s*Is this a project you created or one you trust)\?/i.test(
-        claudeQuestionLines.slice(index, index + 3).join(' '),
-      ),
-    ) &&
+    claudeQuestionLines.some((_, index) => claudeTrustQuestionStartsAt(claudeQuestionLines, index)) &&
     tailHas(/\bNo,\s*exit\b/i) &&
     tailHas(/\bYes,\s*(?:proceed|I trust this folder)\b/i)
   ) {
@@ -277,6 +280,22 @@ export function detectPaneTrustPromptKind(
   provider?: CliAgentType,
 ): PaneTrustPromptKind | null {
   return detectTrustPrompt(paneLines(captured), patternsFor(provider).trustKinds);
+}
+
+// Claude Code marks the focused choice of its trust dialog with ❯ and draws
+// "Yes" right below "No, exit". Only the pair after the latest question is the
+// live dialog: an answered dialog can remain in the scrollback above it. Null
+// while that pair is not drawn yet; 'stale' when an input prompt is drawn
+// below it, so keys would reach that prompt instead of the dialog.
+export function claudeTrustFocus(captured: string): 'no' | 'yes' | 'stale' | null {
+  const lines = paneLines(captured);
+  const question = lines.findLastIndex((_, index) => claudeTrustQuestionStartsAt(lines, index));
+  if (question < 0) return null;
+  const no = lines.findIndex((line, index) => index > question && /^\s*(?:❯\s*)?No,\s*exit\b/i.test(line));
+  const yes = no >= 0 ? lines[no + 1] ?? '' : '';
+  if (!/^\s*(?:❯\s*)?Yes,\s*(?:proceed|I trust this folder)\b/i.test(yes)) return null;
+  if (lines.slice(no + 2).some((line) => patternsFor('claude').idlePromptLine.test(line))) return 'stale';
+  return /^\s*❯/.test(yes) ? 'yes' : 'no';
 }
 
 export function paneHasTrustPrompt(
