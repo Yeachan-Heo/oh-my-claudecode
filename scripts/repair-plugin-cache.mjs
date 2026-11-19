@@ -53,10 +53,12 @@ function compareVersionsDesc(a, b) {
   return 0;
 }
 
-function isValidOmcPluginRoot(root) {
-  return existsSync(join(root, 'hooks', 'hooks.json'))
-    || existsSync(join(root, 'skills', 'omc-setup', 'SKILL.md'))
-    || existsSync(join(root, 'docs', 'CLAUDE.md'));
+// A cache root is a repair target only when it holds the built runtime the plugin
+// executes. A git-marketplace checkout has hooks.json and skills but no build
+// (#5027, #5094); linking older versions to it deletes the last working build (#5104).
+function isRunnableOmcPluginRoot(root) {
+  return existsSync(join(root, 'bridge', 'mcp-server.cjs'))
+    && existsSync(join(root, 'dist', 'hud', 'index.js'));
 }
 
 function latestValidCacheRoot(cacheBase) {
@@ -73,12 +75,12 @@ function latestValidCacheRoot(cacheBase) {
 
     for (const version of versions) {
       const root = join(cacheBase, version);
-      if (isValidOmcPluginRoot(root)) return root;
+      if (isRunnableOmcPluginRoot(root)) return root;
     }
+    return null;
   } catch {
     return null;
   }
-  return null;
 }
 
 function readJson(path) {
