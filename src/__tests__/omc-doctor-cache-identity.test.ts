@@ -2,10 +2,11 @@ import { describe, test, expect } from 'vitest';
 import { mkdirSync, readdirSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { createHash } from 'node:crypto';
 import path from 'node:path';
-import { commands, ageVersions, runCommand, digitVersions, backupDir, movedAside, PLUGIN_ID, makeCache, writeCaseFoldPreload, writeRegistry } from './helpers/omc-doctor-cache-fixture.js';
+import { commands, ageVersions, runCommand, digitVersions, backupDir, movedAside, PLUGIN_ID, makeCache, spellingsMeet, upperBelow, writeCaseFoldPreload, writeRegistry } from './helpers/omc-doctor-cache-fixture.js';
 
 describe('omc-doctor cache commands on a synthetic config directory (identity of paths)', { timeout: 120_000 }, () => {
-  const folds = process.platform === 'win32' || process.platform === 'darwin';
+  // Whether another spelling names an existing path here, without a preload: by the platform name or by the volume.
+  const folds = spellingsMeet();
   // A symlink on POSIX; a junction with an absolute target on Windows (no privilege needed).
   function link(target: string, at: string) {
     if (process.platform === 'win32') symlinkSync(path.resolve(path.dirname(at), target), at, 'junction');
@@ -41,7 +42,7 @@ describe('omc-doctor cache commands on a synthetic config directory (identity of
         writeRegistry(dir, { [PLUGIN_ID]: [{ scope: 'user', version: '5.8.0' }] });
         mkdirSync(path.join(cache, '5.9.0', 'scripts'), { recursive: true });
         ageVersions(cache);
-        const extra = source.setup(dir, cache, path.join(cache, '5.9.0').toUpperCase());
+        const extra = source.setup(dir, cache, upperBelow(dir, path.join(cache, '5.9.0')));
         const result = runCommand(command, dir, { env: (extra && extra.env) || {}, preloads: casefold ? [writeCaseFoldPreload(dir)] : [] });
         return { status: result.status, versions: digitVersions(cache), moved: movedAside(dir), stdout: result.stdout };
       } finally {
@@ -82,7 +83,7 @@ describe('omc-doctor cache commands on a synthetic config directory (identity of
           const { dir, cache } = makeCache(['5.1.0', '5.8.0', '5.9.0']);
           try {
             writeRegistry(dir, { [PLUGIN_ID]: [{ scope: 'user', version: '5.8.0' }] });
-            const env = { OMC_PLUGIN_ROOT: path.join(cache, '5.9.0'), CLAUDE_PLUGIN_ROOT: path.join(cache, second).toUpperCase() };
+            const env = { OMC_PLUGIN_ROOT: path.join(cache, '5.9.0'), CLAUDE_PLUGIN_ROOT: upperBelow(dir, path.join(cache, second)) };
             const result = runCommand(command, dir, { env, preloads: [writeCaseFoldPreload(dir)] });
             expect({ second, status: result.status, versions: digitVersions(cache), moved: movedAside(dir) }).toEqual(
               second === '5.9.0'
@@ -103,7 +104,7 @@ describe('omc-doctor cache commands on a synthetic config directory (identity of
         try {
           link('5.9.0', path.join(cache, '5.9.1'));
           writeRegistry(dir, { [PLUGIN_ID]: [{ scope: 'user', version: '5.8.0' }] });
-          writeRecord(dir, path.join(cache, '5.9.1').toUpperCase());
+          writeRecord(dir, upperBelow(dir, path.join(cache, '5.9.1')));
           const result = runCommand(command, dir, { preloads: [writeCaseFoldPreload(dir)] });
           expect({ status: result.status, versions: digitVersions(cache), moved: movedAside(dir) }).toEqual({ status: 0, versions: '5.8.0,5.9.0,5.9.1', moved: 1 });
         } finally {
@@ -137,7 +138,7 @@ describe('omc-doctor cache commands on a synthetic config directory (identity of
         try {
           link('5.9.0', path.join(cache, '5.9.1'));
           writeRegistry(dir, { [PLUGIN_ID]: [{ scope: 'user', version: '5.8.0' }] });
-          writeRecord(dir, path.join(cache, '5.9.0').toUpperCase());
+          writeRecord(dir, upperBelow(dir, path.join(cache, '5.9.0')));
           const result = runCommand(command, dir, { preloads: [writeCaseFoldPreload(dir)] });
           expect({ status: result.status, versions: digitVersions(cache) }).toEqual({ status: 0, versions: '5.8.0,5.9.0' });
           expect(readdirSync(backupDir(dir)).map((n) => n.replace(/-\d+$/, '')).sort()).toEqual(['5.1.0', '5.9.1']);

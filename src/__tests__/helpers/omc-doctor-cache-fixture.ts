@@ -1,5 +1,5 @@
 import { spawnSync } from 'node:child_process';
-import { existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, lutimesSync, readdirSync, writeFileSync } from 'node:fs';
+import { existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, lutimesSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -123,3 +123,36 @@ export function writeCaseFoldPreload(dir: string) {
   writeFileSync(file, caseFoldPreload);
   return file;
 }
+
+// Whether the volume under `dir` ignores letter case (NTFS, the usual APFS, a casefold ext4 directory, a Windows drive
+// seen from WSL2): a file created as `CaseProbe` is found as `caseprobe`. The commands compare paths by device and inode
+// as well as by name, so a spelling in another letter case names the same directory wherever the volume folds it,
+// whatever platform name the process reports. `statSync` is what the commands call, so it is what the probe calls.
+export function volumeFoldsCase(dir: string = tmpdir()): boolean {
+  const probe = mkdtempSync(path.join(dir, 'omc-case-probe-'));
+  try {
+    writeFileSync(path.join(probe, 'CaseProbe'), '');
+    try {
+      statSync(path.join(probe, 'caseprobe'));
+      return true;
+    } catch {
+      return false;
+    }
+  } finally {
+    rmSync(probe, { recursive: true, force: true });
+  }
+}
+
+// Whether another spelling of an existing path names it: the platform the command sees folds letter case by name
+// (win32 and darwin, reported by the process or by a preload) or the volume folds it. Neither alone is the answer.
+export const spellingsMeet = (platform: string = process.platform, dir?: string): boolean =>
+  platform === 'win32' || platform === 'darwin' || volumeFoldsCase(dir);
+
+// `target` spelled in upper case below the parent of the fixture directory `dir`. Only that part is on the volume under
+// test: the ancestors of the temporary directory may sit on another volume with other case rules (a casefold directory
+// in a case-sensitive tree, a drive mounted under /mnt), so upper-casing the whole path would name nothing there.
+export const upperBelow = (dir: string, target: string): string => {
+  const base = path.dirname(dir);
+  const below = path.relative(base, target);
+  return below.startsWith('..') || path.isAbsolute(below) ? target.toUpperCase() : path.join(base, below.toUpperCase());
+};

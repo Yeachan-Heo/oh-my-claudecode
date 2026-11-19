@@ -2,7 +2,7 @@ import { describe, test, expect } from 'vitest';
 import { existsSync, mkdirSync, mkdtempSync, readdirSync, rmSync, statSync, symlinkSync, utimesSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import { read, commands, ageVersions, runCommand, digitVersions, backupDir, movedAside, PLUGIN_ID, addCache, makeCache, writeRegistryFile, writeRegistry } from './helpers/omc-doctor-cache-fixture.js';
+import { read, commands, ageVersions, runCommand, digitVersions, backupDir, movedAside, PLUGIN_ID, addCache, makeCache, spellingsMeet, writeCaseFoldPreload, writeRegistryFile, writeRegistry } from './helpers/omc-doctor-cache-fixture.js';
 
 describe('omc-doctor cache commands on a synthetic config directory (pins, registry shapes, failed moves)', { timeout: 120_000 }, () => {
   function makeConfigDir(versions: string[], pinned: string | null, installed = true, pluginId = 'oh-my-claudecode@omc') {
@@ -437,9 +437,11 @@ describe('omc-doctor cache commands on a synthetic config directory (pins, regis
     });
   }
 
-  // A pinned version spelled in another letter case than its cache directory names that directory on a volume
-  // that ignores case (win32, darwin); where case counts it names no directory, so no pin is found and nothing moves.
-  test('a pinned version spelled in another letter case protects the directory only where the platform folds case', () => {
+  // A pinned version spelled in another letter case than its cache directory names that directory where the platform
+  // folds case by name (win32, darwin) and wherever the volume folds it (found by device and inode), whatever platform
+  // the process reports: a Windows drive under WSL2 folds case under `linux`, and so does a real Windows volume under a
+  // simulated `linux`. Where neither folds, the pin names no directory, so no pin is found and nothing moves.
+  test('a pinned version spelled in another letter case protects the directory where the platform or the volume folds case', () => {
     for (const command of commands) {
       for (const platform of ['win32', 'darwin', 'linux'] as const) {
         const { dir, cache } = makeCache(['5.1.0', '5.9.0-beta']);
@@ -449,10 +451,30 @@ describe('omc-doctor cache commands on a synthetic config directory (pins, regis
           writeFileSync(preload, `Object.defineProperty(process, 'platform', { value: '${platform}' });\n`);
           const result = runCommand(command, dir, { preloads: [preload] });
           expect({ platform, status: result.status, versions: digitVersions(cache), moved: movedAside(dir) }).toEqual(
-            platform === 'linux'
-              ? { platform, status: 0, versions: '5.1.0,5.9.0-beta', moved: 0 }
-              : { platform, status: 0, versions: '5.9.0-beta', moved: 1 },
+            spellingsMeet(platform)
+              ? { platform, status: 0, versions: '5.9.0-beta', moved: 1 }
+              : { platform, status: 0, versions: '5.1.0,5.9.0-beta', moved: 0 },
           );
+        } finally {
+          rmSync(dir, { recursive: true, force: true });
+        }
+      }
+    }
+  });
+
+  // The same pin on a volume that ignores letter case, under every platform name: the case-sensitive test volume gets
+  // that alias from a preload, a real folding volume (a Windows runner, a casefold directory) has it already.
+  test('on a volume that folds case a pin spelled in another letter case protects the directory under every platform name', () => {
+    for (const command of commands) {
+      for (const platform of ['win32', 'darwin', 'linux'] as const) {
+        const { dir, cache } = makeCache(['5.1.0', '5.9.0-beta']);
+        try {
+          writeRegistry(dir, { [PLUGIN_ID]: [{ scope: 'user', version: '5.9.0-BETA' }] });
+          const preload = path.join(dir, 'platform.cjs');
+          writeFileSync(preload, `Object.defineProperty(process, 'platform', { value: '${platform}' });\n`);
+          const result = runCommand(command, dir, { preloads: [preload, writeCaseFoldPreload(dir)] });
+          expect({ platform, status: result.status, versions: digitVersions(cache), moved: movedAside(dir) })
+            .toEqual({ platform, status: 0, versions: '5.9.0-beta', moved: 1 });
         } finally {
           rmSync(dir, { recursive: true, force: true });
         }

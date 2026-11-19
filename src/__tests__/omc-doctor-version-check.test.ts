@@ -3,7 +3,7 @@ import { chmodSync, mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync }
 import { spawnSync } from 'node:child_process';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import { read, runCommand, scriptOf, writeCaseFoldPreload, writeRegistry, writeRegistryFile } from './helpers/omc-doctor-cache-fixture.js';
+import { read, runCommand, scriptOf, spellingsMeet, upperBelow, writeCaseFoldPreload, writeRegistry, writeRegistryFile } from './helpers/omc-doctor-cache-fixture.js';
 
 const text = read('skills/omc-doctor/SKILL.md');
 const versionCommand = text.split('\n').find((l) => l.startsWith('node -e ') && l.includes("'Updater: "));
@@ -183,6 +183,88 @@ describe('omc-doctor Step 1 derives the plugin ID, channel and latest version fr
   test('an installPath that names no version and has no metadata falls back to the cache of the marketplace', () => {
     const out = step1({ plugins: { 'oh-my-claudecode@omc': [{ installPath: '/nowhere/current' }] }, cache: { omc: ['5.7.0', '5.8.0'] } });
     expect(out.Installed).toBe('5.8.0');
+  });
+
+  // Versions are ordered as semantic versions, never as text. A text order (localeCompare with numeric collation) puts
+  // `5.9.0-beta` above `5.9.0`, because the stable name is a prefix of the prerelease name, so a registry that lists both
+  // (two installation scopes) printed the prerelease as installed while the clone and the other entry were stable.
+  // The chain ascends by precedence. Pairs such as `5.9.0-beta.2` < `5.9.0-beta.10` and `5.9.0` < `5.10.0` also hold in the
+  // text order (numeric collation), so they guard the numeric parts; the stable-versus-prerelease pairs fail on a text order.
+  // The highest element of every prefix of the chain is that prefix's last element, whatever order the versions are listed in.
+  const chain = ['5.8.9', '5.9.0-2', '5.9.0-10', '5.9.0-alpha', '5.9.0-alpha.1', '5.9.0-alpha.beta', '5.9.0-beta', '5.9.0-beta.2', '5.9.0-beta.10', '5.9.0-rc.1', '5.9.0', '5.9.1-alpha', '5.9.10', '5.10.0-beta', '5.10.0'];
+  const prefixes = chain.slice(1).map((top, i) => ({ top, versions: chain.slice(0, i + 2) }));
+  const orders = ({ versions }: { versions: string[] }) => [[...versions].reverse(), versions];
+
+  test('a stable version is newer than its own prerelease in either order, for the entries of two installation scopes', () => {
+    for (const order of [['5.9.0', '5.9.0-beta'], ['5.9.0-beta', '5.9.0']]) {
+      const out = step1({
+        plugins: { 'oh-my-claudecode@omc': order.map((version, i) => ({ scope: i ? 'project' : 'user', version })) },
+        clone: { omc: '5.9.0' },
+      });
+      expect({ order, installed: out.Installed, latest: out.Latest }).toEqual({ order, installed: '5.9.0', latest: '5.9.0 (marketplace clone)' });
+    }
+  });
+
+  // Pairs for the cases that are not a prefix of the chain: a stable release against its own prerelease, numbered
+  // prereleases, a longer numeric part, a core with fewer parts (`5.9` is `5.9.0`), and build metadata, which does not count
+  // (`5.9.0+build.7` is below `5.9.1`). The last two pairs are the same version in semver order; the text of the names
+  // then decides, so the answer does not depend on the order the directory listing or the registry gives.
+  const pairs = [['5.9.0-beta', '5.9.0'], ['5.9.0-beta.2', '5.9.0-beta.10'], ['5.9.0', '5.10.0'], ['5.9.0-rc.1', '5.9.0'], ['5.9.0+build.7', '5.9.1'], ['5.9', '5.9.1'], ['5.9', '5.9.0'], ['5.9.0', '5.9.0+build.7']];
+
+  test('the installed version is the highest registry entry by semantic version, whatever the order of the entries', () => {
+    for (const prefix of prefixes) {
+      for (const versions of orders(prefix)) {
+        const out = step1({ plugins: { 'oh-my-claudecode@omc': versions.map((version) => ({ scope: 'user', version })) }, clone: { omc: '9.9.9' } });
+        expect({ top: prefix.top, installed: out.Installed }).toEqual({ top: prefix.top, installed: prefix.top });
+      }
+    }
+    for (const [low, high] of pairs) {
+      for (const versions of [[low, high], [high, low]]) {
+        const out = step1({ plugins: { 'oh-my-claudecode@omc': versions.map((version) => ({ scope: 'user', version })) }, clone: { omc: '9.9.9' } });
+        expect({ versions, installed: out.Installed }).toEqual({ versions, installed: high });
+      }
+    }
+  }, 60_000);
+
+  test('the highest cached version is chosen by semantic version, for the npm channel and for an entry that names no version', () => {
+    for (const prefix of prefixes) {
+      expect({ top: prefix.top, installed: step1({ cache: { omc: prefix.versions } }).Installed }).toEqual({ top: prefix.top, installed: prefix.top });
+    }
+    for (const [low, high] of pairs) {
+      for (const versions of [[low, high], [high, low]]) {
+        const out = step1({ plugins: { 'oh-my-claudecode@omc': [{ installPath: '/nowhere/current' }] }, cache: { omc: versions } });
+        expect({ versions, installed: out.Installed }).toEqual({ versions, installed: high });
+      }
+    }
+  }, 60_000);
+
+  // Step 4 names the highest cached plugin version as well, with the same comparator. Its line is written for a shell
+  // (the doubled backslashes are the shell's), so it runs through bash.
+  const claudeMdCommand = text.split('\n').find((l) => l.startsWith('node -e ') && l.includes('Latest cached plugin version'));
+  test.skipIf(process.platform === 'win32')('Step 4 names the highest cached plugin version by semantic version, with the comparator of Step 1', () => {
+    expect(claudeMdCommand).toBeDefined();
+    const comparator = (versionCommand ?? '').slice((versionCommand ?? '').indexOf('cv=') + 3, (versionCommand ?? '').indexOf(',rd=x=>'));
+    expect(comparator).toMatch(/^\(a,c\)=>\{.*\}$/);
+    expect(claudeMdCommand).toContain(`.sort(${comparator});pluginV=`);
+    for (const prefix of prefixes) {
+      const dir = mkdtempSync(path.join(tmpdir(), 'omc-doctor-version-'));
+      try {
+        for (const version of prefix.versions) mkdirSync(path.join(dir, 'plugins', 'cache', 'omc', 'oh-my-claudecode', version), { recursive: true });
+        writeFileSync(path.join(dir, 'CLAUDE.md'), '<!-- OMC:VERSION:5.9.0 -->\n');
+        const run = spawnSync('/bin/bash', ['-c', claudeMdCommand ?? ''], { encoding: 'utf8', timeout: 20_000, env: { ...process.env, CLAUDE_CONFIG_DIR: dir, HOME: dir } });
+        expect(run.error).toBeUndefined();
+        expect({ top: prefix.top, line: run.stdout.split('\n').find((l) => l.startsWith('Latest cached plugin version:')) }).toEqual({ top: prefix.top, line: `Latest cached plugin version: ${prefix.top}` });
+      } finally {
+        rmSync(dir, { recursive: true, force: true });
+      }
+    }
+  }, 60_000);
+
+  test('no version in the skill is ordered as text', () => {
+    expect(text).not.toContain('localeCompare');
+    // Step 1 sorts versions in exactly two places, and both use the comparator.
+    expect((versionCommand ?? '').match(/\.sort\(/g)).toHaveLength(2);
+    expect((versionCommand ?? '').match(/\.sort\(cv\)/g)).toHaveLength(2);
   });
 
   // The npm line runs in the shell, so the case runs it with a fake npm first on PATH.
@@ -461,7 +543,7 @@ describe('omc-doctor Step 1 derives the plugin ID, channel and latest version fr
           casefold,
           plugins: { 'oh-my-claudecode@omc': [{ scope: 'user', version: '5.8.0' }] },
           cache: { omc: ['5.8.0'] },
-          env: (dir) => ({ OMC_PLUGIN_ROOT: path.join(dir, 'plugins', 'cache', 'omc', 'oh-my-claudecode', '5.8.0').toUpperCase() }),
+          env: (dir) => ({ OMC_PLUGIN_ROOT: upperBelow(dir, path.join(dir, 'plugins', 'cache', 'omc', 'oh-my-claudecode', '5.8.0')) }),
         });
         expect(aliasOfInstall(true).Channel).toBe('marketplace omc');
         // Control: on a volume that does tell the names apart the alias names no directory, which overrides nothing.
@@ -470,13 +552,13 @@ describe('omc-doctor Step 1 derives the plugin ID, channel and latest version fr
           casefold,
           env: (dir) => {
             const root = makeRoot(dir, 'checkout', { 'package.json': { version: '9.9.0' } });
-            return { OMC_PLUGIN_ROOT: root, CLAUDE_PLUGIN_ROOT: other === 'alias' ? root.toUpperCase() : makeRoot(dir, 'other', { 'package.json': { version: '5.1.0' } }).toUpperCase() };
+            return { OMC_PLUGIN_ROOT: root, CLAUDE_PLUGIN_ROOT: upperBelow(dir, other === 'alias' ? root : makeRoot(dir, 'other', { 'package.json': { version: '5.1.0' } })) };
           },
         });
         expect(twoSpellings(true, 'alias').Channel).toBe('plugin-dir');
         expect(twoSpellings(true, 'different').Channel).toContain('different directories');
         const folded = twoSpellings(false, 'alias').Channel;
-        if (process.platform === 'win32' || process.platform === 'darwin') expect(folded).toBe('plugin-dir');
+        if (spellingsMeet()) expect(folded).toBe('plugin-dir');
         else expect(folded).toContain('different directories');
       });
     });
@@ -537,6 +619,9 @@ describe('omc-doctor Step 1 derives the plugin ID, channel and latest version fr
     expect(diagnosis).toContain('`npm view` (the `npm latest:` line) is consulted only for `Channel: npm`, so ignore that line for a marketplace install');
     expect(diagnosis).toContain('never compared with an npm-only release');
     expect(diagnosis).toContain('If INSTALLED equals the channel\'s latest, there is no WARN');
+    expect(diagnosis).toContain('Order versions as semantic versions, never as text');
+    expect(diagnosis).toContain('If INSTALLED is older than LATEST on the channel\'s own latest (same order): WARN - outdated plugin');
+    expect(diagnosis).toContain('there is none when it is newer than that latest either');
     expect(diagnosis).toContain('If `Channel: unknown`: CRITICAL');
     expect(diagnosis).toContain('If `Channel: plugin-dir`');
     expect(diagnosis).not.toMatch(/or `Channel: unknown`: report that the latest version could not be checked/);
