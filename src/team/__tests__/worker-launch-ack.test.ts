@@ -848,9 +848,35 @@ describe('worker launch acknowledgement', () => {
       provider: accepted.provider, runtimeCliPath: accepted.runtimeCliPath,
     });
     const cleanup = vi.fn(async () => true);
-    await expect(retireAndCleanupCurrentWorkerLaunchAttempt(accepted, 'stale_cleanup', cleanup)).resolves.toBe(false);
-    await expect(retireAndCleanupCurrentWorkerLaunchAttempt(successor, 'expected_only_cleanup', cleanup)).resolves.toBe(false);
+    const beforeProviderTermination = vi.fn(async () => undefined);
+    await expect(retireAndCleanupCurrentWorkerLaunchAttempt(accepted, 'stale_cleanup', cleanup, beforeProviderTermination)).resolves.toBe(false);
+    await expect(retireAndCleanupCurrentWorkerLaunchAttempt(successor, 'expected_only_cleanup', cleanup, beforeProviderTermination)).resolves.toBe(false);
     expect(cleanup).not.toHaveBeenCalled();
+    expect(beforeProviderTermination).not.toHaveBeenCalled(); // only the path that reaches the termination runs it
+  });
+
+  it('runs the hook before the provider termination once the retirement is recorded, ahead of the cleanup, and an error it throws changes nothing', async () => {
+    const launchAttempt = await attempt();
+    const expected = JSON.parse(await readFile(launchAttempt.expectedPath, 'utf8'));
+    await writeFile(launchAttempt.ackPath, JSON.stringify({ ...expected, kind: 'worker_launch_ack', written_at: new Date().toISOString() }), 'utf8');
+    await expect(awaitWorkerLaunchAcknowledgement(launchAttempt, { timeoutMs: 500, pollIntervalMs: 5 })).resolves.toEqual({ ok: true });
+    await writeFile(`${launchAttempt.startedPath}.terminal`, JSON.stringify({ ...expected,
+      kind: 'worker_launch_provider_terminal', outcome: 'exit', cleanup_verified: true,
+      pid: 999_999, process_start_identity: '1',
+      ...(process.platform !== 'win32' ? { process_group_id: 999_999 } : {}),
+      written_at: new Date().toISOString() }), 'utf8');
+    const order: string[] = [];
+    const beforeProviderTermination = vi.fn(async () => {
+      order.push(`hook (retirement recorded: ${existsSync(`${launchAttempt.decisionPath}.retired`)})`);
+      throw new Error('the read failed');
+    });
+    const cleanup = vi.fn(async () => {
+      order.push('cleanup');
+      return true;
+    });
+    await expect(retireAndCleanupCurrentWorkerLaunchAttempt(launchAttempt, 'hook_order', cleanup, beforeProviderTermination)).resolves.toBe(true);
+    expect(order).toEqual(['hook (retirement recorded: true)', 'cleanup']);
+    expect(beforeProviderTermination).toHaveBeenCalledOnce();
   });
 
   it('reuses exact durable cleanup-complete evidence without touching a successor or pane again', async () => {

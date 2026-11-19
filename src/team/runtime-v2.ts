@@ -9314,9 +9314,10 @@ export async function shutdownTeamV2(
       paneOwnership = ownership.ownership;
     }
     // Opt-in tree kill (OMC_TEAM_KILL_PANE_TREE): the pane's process tree is read once more here, before the launch fence is taken, for
-    // what the worker started after the read before the requests to exit (earlyPaneTrees). Terminating the provider inside the fence can
-    // leave a descendant that left its process group outside the pane's tree, so the read comes first; nothing is signalled before the
-    // fence below is held (see the cleanup callback).
+    // what the worker started after the read before the requests to exit (earlyPaneTrees), and a third time at the fence itself (the last
+    // argument below), right before the provider is terminated. Terminating the provider inside the fence can leave a descendant that left
+    // its process group outside the pane's tree, so the reads come first; nothing is signalled before the fence below is held (see the
+    // cleanup callback).
     const earlyPaneTree = earlyPaneTrees.get(worker.name);
     const earlyTree =
       earlyPaneTree?.paneId === worker.pane_id ? earlyPaneTree.tree : null;
@@ -9337,6 +9338,10 @@ export async function shutdownTeamV2(
       attemptId: worker.launch_attempt_id,
       runtimeCliPath: resolveRuntimeCliPath(),
     });
+    // The read at the fence (see retireAndCleanupCurrentWorkerLaunchAttempt): the last one, taken once the launch attempt is current and
+    // accepted and right before the provider is terminated. The worker runs until then, and a descendant it started after the read above
+    // (while the lock of the attempt was awaited, say) is below the pane's root now and is in no earlier read.
+    let fencedTree: PaneProcessTree | null = null;
     if (
       !attempt ||
       !(await retireAndCleanupCurrentWorkerLaunchAttempt(
@@ -9344,9 +9349,10 @@ export async function shutdownTeamV2(
         "team_shutdown",
         async () => {
           try {
-            // The tree read before the requests first: its pane may be gone by now, and the descendants it names still run.
+            // The trees read before the requests and before the fence first: the pane may be gone by now, and the descendants they name still run.
             await terminatePaneProcessTree(earlyTree);
             await terminatePaneProcessTree(paneTree);
+            if (fencedTree) await terminatePaneProcessTree(fencedTree);
             let lastLiveness: WorkerPaneLiveness = paneOwnership
               ? await getOwnedWorkerLiveness(paneOwnership)
               : initialPaneLiveness;
@@ -9367,6 +9373,17 @@ export async function shutdownTeamV2(
             paneCleanupUnknown.push(worker.name);
             return false;
           }
+        },
+        async () => {
+          if (
+            process.env.OMC_TEAM_KILL_PANE_TREE === "1" &&
+            paneOwnership?.tmuxServerIdentity &&
+            paneOwnership.paneId.startsWith("%")
+          )
+            fencedTree = await capturePaneProcessTree(
+              paneOwnership.tmuxServerIdentity,
+              paneOwnership.paneId,
+            );
         },
       ))
     )

@@ -2425,16 +2425,20 @@ export async function scaleDownOwned(
         }
         let paneCleanupError: string | null = null;
         let cleaned = false;
+        // The read at the fence (see retireAndCleanupCurrentWorkerLaunchAttempt): the last one, right before the provider is terminated, for
+        // a descendant the worker started after the read above (while the lock of the launch attempt was awaited, say).
+        let fencedTree: PaneProcessTree | null = null;
         try {
           cleaned = await retireAndCleanupCurrentWorkerLaunchAttempt(
             attempt,
             "scale_down",
             async () => {
               try {
-                // The trees read before the drain request and before the provider was ended, first: the pane may be gone by now, and the
+                // The trees read before the drain request, before the fence and at it, first: the pane may be gone by now, and the
                 // descendants they name still run.
                 if (earlyTree) await terminatePaneProcessTree(earlyTree);
                 if (paneTree) await terminatePaneProcessTree(paneTree);
+                if (fencedTree) await terminatePaneProcessTree(fencedTree);
                 // Verify pane-workspace membership independently of agent liveness.
                 // Even if the agent dies before cleanup, we must verify the pane
                 // is actually removed from the provider target.
@@ -2478,6 +2482,17 @@ export async function scaleDownOwned(
                   error instanceof Error ? error.message : String(error);
                 return false;
               }
+            },
+            async () => {
+              if (
+                process.env.OMC_TEAM_KILL_PANE_TREE === "1" &&
+                paneOwnership?.tmuxServerIdentity &&
+                paneId.startsWith("%")
+              )
+                fencedTree = await capturePaneProcessTree(
+                  paneOwnership.tmuxServerIdentity,
+                  paneOwnership.paneId,
+                );
             },
           );
         } catch {
