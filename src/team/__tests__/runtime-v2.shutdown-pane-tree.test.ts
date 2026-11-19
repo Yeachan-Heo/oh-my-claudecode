@@ -108,6 +108,9 @@ describe.skipIf(currentStrictProcessStartIdentity(process.pid) === null)('shutdo
     tmuxUtilsMocks.tmuxExecAsync.mockReset();
     tmuxUtilsMocks.tmuxCmdAsync.mockReset();
     for (const mock of Object.values(tmuxSessionMocks)) mock.mockClear();
+    // mockClear leaves the queue of mockImplementationOnce and mockRejectedValueOnce: an answer a test did not use must not reach the next one
+    tmuxSessionMocks.capturePaneProcessTree.mockReset();
+    tmuxSessionMocks.terminatePaneProcessTree.mockReset();
     tmuxSessionMocks.getOwnedWorkerLiveness.mockImplementation(async () => (paneState.killed || paneState.rootGone ? 'dead' : 'alive'));
     tmuxSessionMocks.capturePaneProcessTree.mockImplementation(async () => {
       paneState.events.push('capture');

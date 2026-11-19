@@ -89,8 +89,8 @@ function appendLog(name, row, env = process.env) {
 }
 
 // A failed lock or write leaves a row in task-list.jsonl; the row never breaks the hook.
-function storeEvent(event, path, env) {
-  appendLog('task-list.jsonl', { ts: new Date().toISOString(), event, file: basename(String(path)) }, env);
+function storeEvent(event, path, env, extra = {}) {
+  appendLog('task-list.jsonl', { ts: new Date().toISOString(), event, file: basename(String(path)), ...extra }, env);
 }
 
 const readToken = (lockPath) => { try { return readFileSync(lockPath, 'utf8'); } catch { return null; } };
@@ -455,11 +455,28 @@ function lastActivityMs(dir) {
 const SWEEPING = '.sweeping';
 const HIDDEN_NAME = /^\.(.+)\.[0-9a-f]{12}\.sweeping$/; // the hidden name of a moved tree: .<session id>.<12 hex digits>.sweeping
 
+// A list file of the top level of a moved tree: linked when the live tree has none, else the moved base is adopted or the list set aside
+// (see mergeTree). `held`: the owned() check of a lock on the live list this call already runs under (mergeEvents), else adoptMovedBase takes it.
+function mergeListFile(source, target, env, adopted, held = null) {
+  try {
+    linkSync(source, target);
+  } catch (error) {
+    if (error?.code !== 'EEXIST') throw error;
+    if (adoptMovedBase(source, target, env, held)) {
+      adopted.push(target);
+    } else {
+      try { linkSync(source, `${target}.moved`); } catch { /* an earlier merge left one: that one stays */ }
+      storeEvent('moved_list_set_aside', target, env);
+    }
+  }
+}
+
 // Moves what `from` holds into `to` without overwriting anything `to` has: link never replaces a file, so an event or a task claim that the
 // live tree has stays the live tree's, and every other file arrives, the events of the moved tree first of all. A folder both trees have is
 // merged the same way. A list file (a file of the top level, `top`) the live tree has stays the live tree's too: the two lists were folded
 // from different events. The list of the moved tree is the base the live events are replayed on when the live list has settled nothing yet
-// (adoptMovedBase; the list files go before the folders, so the base is in place when the events arrive); when it cannot be adopted it is
+// (adoptMovedBase; a list that has an events folder goes with it, in one step under the lock of the live list, see mergeEvents; the other
+// list files go before the folders); when it cannot be adopted it is
 // kept next to the live list as <name>.moved (no reader looks at that name) and a row with `event: "moved_list_set_aside"` goes to
 // task-list.jsonl. The events of the moved tree arrive in both cases and are replayed into the live list: the calls that made the moved list
 // are there as long as they are in their window (an event the live list has settled past does not arrive, see mergeEvents). Lock files and
@@ -480,19 +497,12 @@ function mergeTree(from, to, env, top = true, adopted = [], skip = null) {
           : mergeTree(source, target, env, false, adopted);
         if (!merged) complete = false;
       } else if (entry.isFile() && !/\.(?:lock|tmp)$/.test(entry.name)) {
+        if (top && entry.name.endsWith('.json') && existsSync(join(from, `${entry.name.slice(0, -'.json'.length)}.events`))) continue; // mergeEvents takes it with its events
         if (!skip?.(entry.name)) {
-          try {
-            linkSync(source, target);
-          } catch (error) {
-            if (error?.code !== 'EEXIST') throw error;
-            if (top && entry.name.endsWith('.json')) {
-              if (adoptMovedBase(source, target, env)) {
-                adopted.push(target);
-              } else {
-                try { linkSync(source, `${target}.moved`); } catch { /* an earlier merge left one: that one stays */ }
-                storeEvent('moved_list_set_aside', target, env);
-              }
-            }
+          if (top && entry.name.endsWith('.json')) {
+            mergeListFile(source, target, env, adopted);
+          } else {
+            try { linkSync(source, target); } catch (error) { if (error?.code !== 'EEXIST') throw error; }
           }
         }
         unlinkSync(source);
@@ -502,8 +512,10 @@ function mergeTree(from, to, env, top = true, adopted = [], skip = null) {
   return complete;
 }
 
-// The events of one list in a moved tree, merged into the live events folder under the lock of the live list (`livePath`): the live record
-// read here is the one the events arrive under, since no fold publishes between that read and the links. An event the live list has settled
+// The events of one list in a moved tree, merged into the live events folder under the lock of the live list (`livePath`), together with the
+// list file of the moved tree when it has one (a file of the top level that mergeTree leaves to this call): adopting the moved base and
+// judging the events are one step, so no fold publishes between them and the events are judged against the base they were made on. The live
+// record read here is the one the events arrive under, since no fold publishes between that read and the links. An event the live list has settled
 // past (behind its record, see isBehind) is not linked: the calls after it are settled into the live base and their events removed, so its
 // place in the order of the calls cannot be restored, and foldEvents would apply it last, as a call of the moment, over calls that were made
 // after it (an older list replacing a newer one). It is dropped with the moved tree, which counts as merged, and a row with
@@ -512,7 +524,12 @@ function mergeTree(from, to, env, top = true, adopted = [], skip = null) {
 function mergeEvents(from, to, livePath, env, adopted) {
   let complete = false;
   let behind = 0;
-  withFileLock(livePath, () => {
+  const movedList = join(dirname(from), basename(livePath));
+  withFileLock(livePath, (owned) => {
+    if (existsSync(movedList)) {
+      mergeListFile(movedList, livePath, env, adopted, owned);
+      unlinkSync(movedList);
+    }
     const marks = settledMarks(readRecord(livePath).record);
     complete = mergeTree(from, to, env, false, adopted, (name) => {
       const skipped = EVENT_NAME.test(name) && isBehind(marks, name);
@@ -520,7 +537,7 @@ function mergeEvents(from, to, livePath, env, adopted) {
       return skipped;
     });
   }, env, SYNC_STALE_MS);
-  if (behind > 0) storeEvent('moved_events_behind_settled', livePath, env);
+  if (behind > 0) storeEvent('moved_events_behind_settled', livePath, env, { session: basename(dirname(livePath)), dropped: behind });
   return complete;
 }
 
@@ -531,9 +548,9 @@ function mergeEvents(from, to, livePath, env, adopted) {
 // next fold takes the time of the newest call from the events it replays. Under the lock of the live list, so no fold publishes meanwhile
 // (and none has published since the list was read: the same generation check as a fold); false when the lock was not taken, a list is
 // unreadable, or the live list has settled calls of its own (then the moved list is kept next to it).
-function adoptMovedBase(moved, live, env) {
+function adoptMovedBase(moved, live, env, held = null) {
   let adopted = false;
-  withFileLock(live, (owned) => {
+  const adopt = (owned) => {
     const m = readRecord(moved).record;
     const read = readRecord(live);
     const l = read.record;
@@ -548,7 +565,9 @@ function adoptMovedBase(moved, live, env) {
       folded: Array.isArray(m.folded) ? m.folded : [],
       rev: revOf(l) + 1,
     }, () => owned() && generationOf(readRecord(live)) === generationOf(read), env);
-  }, env, SYNC_STALE_MS);
+  };
+  if (held) adopt(held);
+  else withFileLock(live, adopt, env, SYNC_STALE_MS);
   return adopted;
 }
 

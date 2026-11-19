@@ -870,13 +870,19 @@ describe('worker launch acknowledgement', () => {
       order.push(`hook (retirement recorded: ${existsSync(`${launchAttempt.decisionPath}.retired`)})`);
       throw new Error('the read failed');
     });
+    let cleanups = 0;
     const cleanup = vi.fn(async () => {
       order.push('cleanup');
-      return true;
+      cleanups += 1;
+      return cleanups > 1;
     });
-    await expect(retireAndCleanupCurrentWorkerLaunchAttempt(launchAttempt, 'hook_order', cleanup, beforeProviderTermination)).resolves.toBe(true);
+    await expect(retireAndCleanupCurrentWorkerLaunchAttempt(launchAttempt, 'hook_order', cleanup, beforeProviderTermination)).resolves.toBe(false);
     expect(order).toEqual(['hook (retirement recorded: true)', 'cleanup']);
     expect(beforeProviderTermination).toHaveBeenCalledOnce();
+    // the retirement is recorded now and the cleanup is not complete (a shutdown that is retried): the hook runs again, before the provider is terminated
+    await expect(retireAndCleanupCurrentWorkerLaunchAttempt(launchAttempt, 'hook_order', cleanup, beforeProviderTermination)).resolves.toBe(true);
+    expect(order).toEqual(['hook (retirement recorded: true)', 'cleanup', 'hook (retirement recorded: true)', 'cleanup']);
+    expect(beforeProviderTermination).toHaveBeenCalledTimes(2);
   });
 
   it('reuses exact durable cleanup-complete evidence without touching a successor or pane again', async () => {

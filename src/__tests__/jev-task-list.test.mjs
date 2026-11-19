@@ -963,6 +963,7 @@ describe('task list: session retention sweep', () => {
       };
       const shown = (sid) => L.readList(sid, 'main', envFor()).items.map((x) => `${x.content}:${x.status}`);
       const rowsSince = (count) => logRows('task-list.jsonl').slice(count).filter((x) => x.event === 'moved_events_behind_settled').length;
+      const dropRowsSince = (count) => logRows('task-list.jsonl').slice(count).filter((x) => x.event === 'moved_events_behind_settled').map((x) => [x.file, x.session, x.dropped]);
 
       it.each([['with the list of the moved tree', true], ['with its events only', false]])('an older replacement of the list does not land over the newer list (%s)', (_what, withList) => {
         fresh();
@@ -977,7 +978,7 @@ describe('task list: session retention sweep', () => {
         expect(shown(sid)).toEqual(['Live task:pending']);
         expect(readListFile(sid, 'main').items.map((x) => x.content)).toEqual(['Live task']);
         expect(eventFiles(sid, 'main').some((n) => n.startsWith(String(now - 120_000)))).toBe(false);
-        expect(rowsSince(rows)).toBe(1);
+        expect(dropRowsSince(rows)).toEqual([['main.json', sid, 1]]); // the row says which list, which session and how many calls
         expect(existsSync(join(root(), sid, 'main.json.moved'))).toBe(withList);
       });
 
@@ -1033,6 +1034,34 @@ describe('task list: session retention sweep', () => {
         sweepAgain();
         expect(existsSync(moved)).toBe(false);
         expect(shown(sid)).toEqual(['Live task:pending']);
+      });
+
+      // the list of the moved tree and its events are decided together under that lock: a fold of the live list cannot publish between the
+      // adoption of the base and the judging of the events, so the events are judged against the base they were made on, and a lock not taken
+      // in time keeps both in the moved tree (the list is not set aside next to the live one, and the events are not left to a later fold)
+      it('keeps the moved list with its events while the lock of the live list is held, and takes the base and the events together at the next sweep', () => {
+        fresh();
+        const now = Date.now();
+        const sid = session();
+        const rows = logRows('task-list.jsonl').length;
+        interrupted(sid, { withList: true });
+        const moved = stopAfterMove(sid);
+        // the new directory has a list that settled nothing (its call is in its window), so the moved base is adopted; the call of the moved tree
+        // is more than 10 s older than the live one: behind the live list as it stands, not behind the base it is merged on
+        L.recordListCall(postToolUse(sid, 'TodoWrite', { todos: [{ content: 'Live task', status: 'pending' }] }), envFor(), now);
+        const lock = join(root(), sid, 'main.json.lock');
+        writeFileSync(lock, 'another-hook');
+        sweepAgain();
+        expect(existsSync(moved)).toBe(true);
+        expect(existsSync(join(moved, 'main.json'))).toBe(true); // the list stayed with its events
+        expect(existsSync(join(root(), sid, 'main.json.moved'))).toBe(false);
+        expect(logRows('task-list.jsonl').slice(rows).some((x) => x.event === 'moved_list_set_aside')).toBe(false);
+        rmSync(lock);
+        sweepAgain();
+        expect(existsSync(moved)).toBe(false);
+        expect(existsSync(join(root(), sid, 'main.json.moved'))).toBe(false);
+        expect(shown(sid)).toEqual(['Live task:pending']);
+        expect(rowsSince(rows)).toBe(0); // the moved call was not judged against the live list as it stood before the adoption
       });
 
       it('an event of the moved tree newer than what the new list has settled still takes its place in the order of the calls', () => {
