@@ -3,7 +3,7 @@
 // read from or written to. These tests swap them right after the real open.
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { spawnSync } from 'node:child_process';
-import { mkdirSync, mkdtempSync, readFileSync, renameSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import { linkSync, mkdirSync, mkdtempSync, readFileSync, renameSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
@@ -46,6 +46,15 @@ const SWAPS = {
     renameSync(workerDir, `${workerDir}.moved`);
     symlinkSync(`${workerDir}.moved`, workerDir);
   },
+  // workers/<name> becomes another real directory holding a hard link to the
+  // opened file: the leaf and is-a-directory checks pass, only the directory's
+  // identity differs.
+  parentHardLink: (path: string) => {
+    const workerDir = dirname(path);
+    renameSync(workerDir, `${workerDir}.moved`);
+    mkdirSync(workerDir);
+    linkSync(join(`${workerDir}.moved`, 'provider-events.jsonl'), path);
+  },
 };
 
 describe.skipIf(process.platform === 'win32')('provider events after a swap between open and re-check', () => {
@@ -85,6 +94,12 @@ describe.skipIf(process.platform === 'win32')('provider events after a swap betw
     expect(await readLatestProviderEvent(root, 'worker-1', 'a1')).toEqual({ event: 'none' });
   });
 
+  it('reader returns none when the worker directory becomes another real directory linking the same file after the open', async () => {
+    writeFileSync(path, EVENT_LINE);
+    swap.afterOpen = opened => SWAPS.parentHardLink(opened);
+    expect(await readLatestProviderEvent(root, 'worker-1', 'a1')).toEqual({ event: 'none' });
+  });
+
   it('reader still reads the file when nothing is swapped', async () => {
     writeFileSync(path, EVENT_LINE);
     expect(await readLatestProviderEvent(root, 'worker-1', 'a1')).toEqual({ event: 'Stop', at: 7 });
@@ -95,8 +110,8 @@ describe.skipIf(process.platform === 'win32')('provider events after a swap betw
     const preload = join(root, 'swap-preload.mjs');
     writeFileSync(preload, [
       "import fsp from 'node:fs/promises';",
-      "import { renameSync, symlinkSync, writeFileSync } from 'node:fs';",
-      "import { dirname } from 'node:path';",
+      "import { linkSync, mkdirSync, renameSync, symlinkSync, writeFileSync } from 'node:fs';",
+      "import { dirname, join } from 'node:path';",
       "import { syncBuiltinESMExports } from 'node:module';",
       'const real = fsp.open;',
       `const kind = ${JSON.stringify(kind)};`,
@@ -108,6 +123,7 @@ describe.skipIf(process.platform === 'win32')('provider events after a swap betw
       "    if (kind === 'leaf') { renameSync(path, `${path}.moved`); writeFileSync(path, ''); }",
       "    if (kind === 'parent') { const dir = dirname(path); renameSync(dir, `${dir}.moved`); symlinkSync(outside, dir); }",
       "    if (kind === 'parentSameLeaf') { const dir = dirname(path); renameSync(dir, `${dir}.moved`); symlinkSync(`${dir}.moved`, dir); }",
+      "    if (kind === 'parentHardLink') { const dir = dirname(path); renameSync(dir, `${dir}.moved`); mkdirSync(dir); linkSync(join(`${dir}.moved`, 'provider-events.jsonl'), path); }",
       '  }',
       '  return handle;',
       '};',
@@ -141,6 +157,13 @@ describe.skipIf(process.platform === 'win32')('provider events after a swap betw
   it('hook appends nothing when the worker directory becomes a symlink to the same file after the open', () => {
     expectSilentExit(runHook('parentSameLeaf'));
     expect(readFileSync(join(`${workerDir}.moved`, 'provider-events.jsonl'), 'utf8')).toBe('');
+  });
+
+  it('hook appends nothing when the worker directory becomes another real directory linking the same file after the open', () => {
+    expectSilentExit(runHook('parentHardLink'));
+    // One inode, two names: the file is still empty under both.
+    expect(readFileSync(join(`${workerDir}.moved`, 'provider-events.jsonl'), 'utf8')).toBe('');
+    expect(readFileSync(path, 'utf8')).toBe('');
   });
 
   it('hook appends one line through the same preload when nothing is swapped', () => {
