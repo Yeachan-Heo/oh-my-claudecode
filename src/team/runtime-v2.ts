@@ -273,6 +273,7 @@ export function buildStartupInboxTrigger(
   return `Read workers/${workerName}/inbox.md under the OMC_TEAM_STATE_ROOT environment variable; execute now, report concrete progress.${suffix}`;
 }
 import {
+  checkOwnerFence,
   currentProcessStartIdentity,
   isProcessIdentityDead,
   publishOwnerEpoch,
@@ -3062,6 +3063,93 @@ async function finalizeBoundRecoveryOwnerTerminal(
   };
 }
 
+/** The longest recover-worker client wait, counted from the persisted intent. */
+const RECOVERY_OWNER_RETRY_DEADLINE_MS = 300_000;
+
+/**
+ * Past the deadline, the fenced owner fails a recovery that has nothing to
+ * hand over instead of running another attempt. Returns null to keep today's
+ * retry: before the deadline, without the fence, or once a task reservation,
+ * a committed replacement, or an uncommitted pane exists.
+ */
+async function finalizeRecoveryPastDeadline(
+  input: RecoverDeadWorkerOwnerInput,
+  recoveryId: string,
+  fence: OwnerFence,
+  instance: TeamInstanceBinding,
+): Promise<RecoverDeadWorkerV2Result | null> {
+  let admittedAt: number;
+  try {
+    const intent = parseRecoveryIntent(
+      await readFile(
+        absPath(input.cwd, TeamPaths.recoveryIntent(input.teamName, recoveryId)),
+        "utf8",
+      ),
+    );
+    if (intent.request_id !== input.requestId) return null;
+    admittedAt = Date.parse(intent.created_at);
+  } catch {
+    return null;
+  }
+  if (Date.now() < admittedAt + RECOVERY_OWNER_RETRY_DEADLINE_MS) return null;
+  const expired = recoveryError(
+    input,
+    recoveryId,
+    "recovery_request_timeout",
+    `Recovery owner deadline exceeded: no attempt finished within ${RECOVERY_OWNER_RETRY_DEADLINE_MS} ms of admission.`,
+  );
+  return withTeamInstanceLifecycleLock(
+    instance.cwd,
+    instance.team_name,
+    async () => {
+      await assertTeamInstanceUnderLock(instance);
+      if (!checkOwnerFence(input.cwd, input.teamName, fence).ok) return null;
+      const current = await readRevisionedTeamConfig(input.teamName, input.cwd);
+      if (
+        !current ||
+        current.config.runtime_owner_epoch?.epoch !== fence.epoch ||
+        current.config.runtime_owner_epoch.nonce !== fence.nonce ||
+        pendingRecoveryPanes.has(recoveryId) ||
+        current.config.workers.some(
+          (worker) => worker.recovery_id === recoveryId,
+        )
+      )
+        return null;
+      const progress = readRecoveryOutcome(input.cwd, input.requestId);
+      if (
+        progress?.kind === "final" ||
+        (progress?.recovery_id === recoveryId &&
+          (progress.continuation === "reserved" ||
+            progress.continuation === "adopted"))
+      )
+        return null;
+      // Reservations are written before the phase records them.
+      const tasks = await teamListTasks(input.teamName, input.cwd);
+      if (
+        tasks.some(
+          (task) =>
+            task.recovery_reservation?.recovery_id === recoveryId ||
+            task.recovery_adoption?.recovery_id === recoveryId,
+        )
+      )
+        return null;
+      const active = current.config.active_recovery;
+      if (active?.recovery_id === recoveryId) {
+        return active.request_id === input.requestId &&
+          active.worker_name === input.workerName &&
+          active.owner_epoch === fence.epoch &&
+          active.owner_nonce === fence.nonce
+          ? finalizeRecoveryOwnerResult(input, recoveryId, expired)
+          : null;
+      }
+      // Never elected: another recovery holds the slot, so nothing ran.
+      if (!active || current.config.last_recovery?.recovery_id === recoveryId)
+        return null;
+      return persistRecoveryFinal(input, recoveryId, expired);
+    },
+  );
+}
+
 export function selectRecoveryReplayTasks(
   tasks: TeamTask[],
   workerName: string,
@@ -4129,6 +4217,13 @@ export async function executeRecoverDeadWorkerV2Owner(
       },
     );
     ownerBound = true;
+    const expired = await finalizeRecoveryPastDeadline(
+      input,
+      recoveryId,
+      owner.fence,
+      instance,
+    );
+    if (expired) return expired;
     if (
       existingAttempt &&
       (existingAttempt.request_id !== input.requestId ||
