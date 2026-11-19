@@ -76,7 +76,9 @@
  *   OMC_JEV_LOOP_WARNING_CYCLE_REPEATS  full pattern repeats of a cycle (3).
  *   OMC_JEV_LOOP_WARNING_STATE_DAYS state file age removed by the sweep of
  *                                   OMC_JEV_LOOP_WARNING_STATE_DIR (2); the
- *                                   session state files go with their session.
+ *                                   session state files are not swept: they
+ *                                   stay in the session directory, like the
+ *                                   other session files of the hooks.
  *   OMC_JEV_LOOP_WARNING_MCP_SUFFIXES  comma-separated MCP tool name suffixes
  *                                   treated as status polling; these three
  *                                   defaults are the host's own state tools:
