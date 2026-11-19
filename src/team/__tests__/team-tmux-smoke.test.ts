@@ -254,6 +254,8 @@ describe.skipIf(!SMOKE_ENABLED)('team tmux smoke: fake claude worker lifecycle',
         : isProcessAlive(pid) ? 'unknown' : 'dead';
       if (state === 'matching') {
         try { process.kill(pid, 'SIGKILL'); } catch { /* exited concurrently */ }
+        await waitFor(`provider ${pid} to exit`, () => isProcessAlive(pid), alive => !alive, 5_000)
+          .catch(() => leftovers.push(`provider pid ${pid} still alive after SIGKILL`));
       } else if (state === 'unknown') {
         leftovers.push(`provider pid ${pid}: identity unverifiable, not signalled`);
       }
@@ -274,8 +276,10 @@ describe.skipIf(!SMOKE_ENABLED)('team tmux smoke: fake claude worker lifecycle',
       else process.env[key] = value;
     }
     savedEnv.clear();
-    await rm(fixtureRoot, { recursive: true, force: true });
-    await rm(runRoot, { recursive: true, force: true });
+    // A lock directory can still be released while the tree is removed;
+    // retry ENOTEMPTY rather than fail the run on cleanup.
+    await rm(fixtureRoot, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
+    await rm(runRoot, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
     if (leftovers.length > 0) throw new Error(`smoke cleanup left live resources:\n${leftovers.join('\n')}`);
   });
 
