@@ -629,7 +629,7 @@ measurement. In short:
   period that pairs with no transcript boundary is a Jev boundary on its own.
 - A user message is a `user` row without `isMeta`, `isCompactSummary`, `isVisibleInTranscriptOnly`,
   `toolUseResult` or a `tool_result` block; reminder fragments are cut from its blocks.
-- The default prohibition wording covers every class except `other` (`don't|do not touch|modify|edit|change|commit|push|delete|remove|restart|run|deploy|merge|install`, `never install`, `no installing`); `other` has no default phrase and exists for wording in a `--patterns` file.
+- The default prohibition wording covers every class except `other`: `don't` or `do not` followed by touch, modify, edit, change, commit, push, delete, remove, restart, run, deploy, merge or install, plus `never install`, `no installing` and `no installs`. `other` has no default phrase and exists for wording in a `--patterns` file.
 - A prohibition is a user message that matches a prohibition pattern; it has targets (backtick text, absolute
   paths, file names with an extension) or is general. A candidate is a `Bash`, `Edit`, `Write`, `MultiEdit` or
   `NotebookEdit` call after the first boundary that follows the prohibition and matches its class (`edit`,
