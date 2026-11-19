@@ -4219,7 +4219,7 @@ describe('runtime v2 startup inbox dispatch', () => {
       instanceId: fixture.instanceId,
     });
 
-    expect(result).toMatchObject({ outcome: 'failed', committed: false });
+    expect(result, JSON.stringify(result)).toMatchObject({ outcome: 'failed', committed: false });
     expect(result).toMatchObject({ message: expect.stringContaining('selector_persistent') });
     expect(mocks.deliverStartupInbox).not.toHaveBeenCalled();
     // A failed final, not a pending phase the owner would retry forever.

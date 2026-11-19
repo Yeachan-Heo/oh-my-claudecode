@@ -89,7 +89,7 @@ const RECOVERY_ERROR_CODES = new Set([
   'recovery_checkpoint_ambiguous', 'recovery_checkpoint_stale', 'task_requeue_failed',
   'launch_metadata_incomplete', 'launch_descriptor_unresolvable', 'spawn_failed',
   'startup_ack_timeout', 'worker_activation_failed', 'auto_merge_unavailable',
-  'worker_cleanup_incomplete',
+  'worker_cleanup_incomplete', 'worker_startup_not_ready',
   'stale_state_revision', 'config_commit_failed',
 ]);
 
