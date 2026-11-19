@@ -609,7 +609,7 @@ describe('task list: storage library', () => {
           const file = listOf(sid, 'o1');
           const ok = (l) => l?.items?.length === count && new Set(l.items.map((x) => x.id)).size === count && l.updates === count;
           expect(ok(reader), `reader ${count}/${run}`).toBe(true);
-          expect(ok(file) && eventFiles(sid, 'o1').length === count, `file ${count}/${run}`).toBe(true); // all calls are in the window
+          expect(ok(file) && eventFiles(sid, 'o1').length <= count, `file ${count}/${run}`).toBe(true); // the calls of the window are still events (a slow run may have settled some)
           report.push(`${count}:${file.items.length}/${count} (${Date.now() - started} ms)`);
         }
       }
@@ -900,6 +900,22 @@ describe('task list: session retention sweep', () => {
       expect(logRows('task-list.jsonl').some((x) => x.event === 'moved_list_set_aside' && String(x.file).startsWith(sid))).toBe(false);
     });
 
+    it('the calls the moved tree still held as events are replayed before the later calls of the new directory, however long before these were made', () => {
+      fresh();
+      const now = Date.now();
+      const sid = session();
+      // the last call of an idle session: still an event of its window (the fold ran at its time), with the list that fold wrote
+      const at = now - 120_000;
+      const name = `${at}-${'7'.padStart(20, '0')}-11-aaaaaaaa.json`;
+      const event = { ts: new Date(at).toISOString(), pid: 11, id: 'aaaaaaaa', session_id: sid, agent_type: null, tool_use_id: null, prompt_id: null, tool_name: 'TodoWrite', tool_input: { todos: [{ content: 'Old list', status: 'pending' }] } };
+      mkdirSync(join(root(), sid, 'main.events'), { recursive: true });
+      writeFileSync(join(root(), sid, 'main.events', name), JSON.stringify(event));
+      writeFileSync(join(root(), sid, 'main.json'), JSON.stringify(L.foldedRecord(L.foldEvents({ record: null, broken: false }, [{ name, event }], 'main', envFor(), at))));
+      moveAndSweep(sid, () => create(sid, 9, 'New call', now));
+      expect(L.readList(sid, 'main', envFor()).items.map((x) => `${x.id ?? '-'} ${x.content}:${x.status}`)).toEqual(['- Old list:pending', '9 New call:pending']);
+      expect(existsSync(join(root(), sid, 'main.json.moved'))).toBe(false);
+    });
+
     it('a live list that has settled calls of its own keeps its base: the list of the moved tree is kept next to it, and a row says so', () => {
       fresh();
       const now = Date.now();
@@ -1080,13 +1096,14 @@ describe('task list: calls whose events become visible out of order give the lis
   const permutations = (n) => (n === 0 ? [[]] : permutations(n - 1).flatMap((p) => Array.from({ length: n }, (_, i) => [...p.slice(0, i), n - 1, ...p.slice(i)])));
   const view = (items) => (items ?? []).map((x) => `${x.id ?? '-'} ${x.content}:${x.status}${x.note ? ` (${x.note})` : ''}`);
 
+  const settle = (sid) => {
+    const at = Date.now() - 60_000; // older than the window: the seed is settled by the first fold
+    seeds.forEach((spec, i) => publish(sid, at + i, 50 + i, 9, spec, `5eed000${i}`));
+    L.syncList(sid, 'main', env());
+  };
+
   // Every order of publication of two calls, on disk, with a fold after each one: the list of the order of the calls, as one fold of both gives it.
   describe('every pair of kinds, two orders of publication, on disk', () => {
-    const settle = (sid) => {
-      const at = Date.now() - 60_000; // older than the window: the seed is settled by the first fold
-      seeds.forEach((spec, i) => publish(sid, at + i, 50 + i, 9, spec, `5eed000${i}`));
-      L.syncList(sid, 'main', env());
-    };
     it.each(kindNames)('first call: %s', (first) => {
       for (const second of kindNames) {
         for (const gap of [0, 1000]) { // the same millisecond (the order of the names decides) and a second apart
@@ -1110,6 +1127,34 @@ describe('task list: calls whose events become visible out of order give the lis
           expect(tasks(run(['A', 'sync', 'B', 'sync'])), `${first} then ${second}, gap ${gap}: in order`).toEqual(inOrder);
         }
       }
+    }, 60_000);
+  });
+
+  // The same for sets of three calls on disk, through syncList and readList (the in-memory grid below runs the functions a fold is made of, which an
+  // older fold does not export): for each first kind, the nine sets whose second and third kind together make a multiple of nine places, 81 sets in all.
+  describe('a sample of the sets of three kinds, every order of publication, on disk', () => {
+    it.each(kindNames)('first call: %s', (first) => {
+      const wrong = [];
+      kindNames.forEach((second, j) => {
+        const third = kindNames[(9 - j) % 9];
+        const at = Date.now() - 3000;
+        const specs = [kinds[first](0), kinds[second](1), kinds[third](2)];
+        const run = (order) => {
+          const sid = session();
+          settle(sid);
+          for (const i of order) {
+            publish(sid, at + 1000 * i, 100 * (i + 1), 11 + i, specs[i], String(i).repeat(8));
+            L.syncList(sid, 'main', env());
+          }
+          return { shown: tasks(sid), file: fileTasks(sid) };
+        };
+        const inOrder = run([0, 1, 2]);
+        for (const order of permutations(3).filter((o) => o.join('') !== '012')) {
+          const got = run(order);
+          if (JSON.stringify(got) !== JSON.stringify(inOrder)) wrong.push(`${first},${second},${third} published ${order.join('')}: ${got.shown.join(' | ')} instead of ${inOrder.shown.join(' | ')}`);
+        }
+      });
+      expect(wrong).toEqual([]);
     }, 60_000);
   });
 

@@ -498,13 +498,17 @@ function mergeTree(from, to, env, top = true, adopted = []) {
 
 // The list of a moved tree and the list the live tree made after the move. The live list holds calls later than any the moved one holds,
 // so while it has settled nothing (every call it holds is an event of its folder) the moved list is the base those events are replayed on:
-// the moved base, its settled names and its clock replace the live ones. Under the lock of the live list, so no fold publishes meanwhile;
-// false when the lock was not taken or the live list has settled calls of its own (then the moved list is kept next to it).
+// the moved base, its settled names and its clock replace the live ones. The clock is the moved one alone: the events the moved tree still
+// held are in its window, and a clock moved on to the live calls would make them calls of a clock set back, applied after the live ones; the
+// next fold takes the time of the newest call from the events it replays. Under the lock of the live list, so no fold publishes meanwhile
+// (and none has published since the list was read: the same generation check as a fold); false when the lock was not taken, a list is
+// unreadable, or the live list has settled calls of its own (then the moved list is kept next to it).
 function adoptMovedBase(moved, live, env) {
   let adopted = false;
   withFileLock(live, (owned) => {
     const m = readRecord(moved).record;
-    const l = readRecord(live).record;
+    const read = readRecord(live);
+    const l = read.record;
     if (!Array.isArray(m?.items) || !Array.isArray(l?.items) || l.base_name || (Array.isArray(l.folded) && l.folded.length > 0)) return;
     const legacy = !('base' in m);
     const base = legacy ? m : m.base;
@@ -512,10 +516,10 @@ function adoptMovedBase(moved, live, env) {
       ...l,
       base: base && Array.isArray(base.items) ? listFields(base) : null,
       base_name: legacy ? (typeof m.last_event_name === 'string' ? m.last_event_name : '') : (typeof m.base_name === 'string' ? m.base_name : ''),
-      last_event_ms: Math.max(Number.isFinite(m.last_event_ms) ? m.last_event_ms : 0, Number.isFinite(l.last_event_ms) ? l.last_event_ms : 0),
+      last_event_ms: Number.isFinite(m.last_event_ms) ? m.last_event_ms : 0,
       folded: Array.isArray(m.folded) ? m.folded : [],
       rev: revOf(l) + 1,
-    }, owned, env);
+    }, () => owned() && generationOf(readRecord(live)) === generationOf(read), env);
   }, env, SYNC_STALE_MS);
   return adopted;
 }
