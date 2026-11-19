@@ -32,8 +32,17 @@ agent mistake into an enforcement the mistake cannot survive.
    read a stray checkout-local `.omc`): the notepads under
    `<state-root>/notepads/*/problems.md`, the verification ledger at
    `<state-root>/state/verification-ledger.tsv`, review comments, recent
-   fix commits. Group by root cause, not by symptom.
+   fix commits, and the user's feedback notes in the memory directory
+   (`${CLAUDE_CONFIG_DIR:-$HOME/.claude}/projects/<project>/memory/`, notes with `type: feedback`):
+   a note's `count` field, when present, counts how many times in total the user
+   stated that correction, the first time included.
+   Group by root cause, not by symptom.
 2. **Rank.** Frequency × cost. Take the top mistakes; one at a time.
+   A feedback note with `count` 3 or more means the user has stated the
+   same correction at least three times, that is, repeated it at least twice
+   (`count` counts every statement, the first included: 1 = stated once,
+   2 = repeated once); read the count as the frequency and rank such a note
+   first. A note without `count` counts as 1.
 3. **Pick the highest enforcement level that works**:
    1. linter rule / compiler error — the mistake stops compiling
    2. type-level guard — the mistake stops type-checking

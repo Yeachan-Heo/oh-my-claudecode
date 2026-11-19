@@ -23,6 +23,9 @@ import { fileURLToPath } from 'url';
 const CHECKPOINT_MAX_AGE_MS = 24 * 60 * 60 * 1000;
 const CHECKPOINT_MAX_BYTES = 256 * 1024;
 const RESTORE_CONTEXT_MAX_CHARS = 1200;
+// With the cleaning writers a path or a mode name whose written form is longer than this is replaced by a notice.
+const MAX_RESTORE_PATH_CHARS = 250;
+const MAX_RESTORE_NAME_CHARS = 80;
 const RESTORE_MARKER_MAX_BYTES = 16 * 1024;
 const RESTORE_LOCK_RETRY_ATTEMPTS = 100;
 const RESTORE_LOCK_RETRY_MS = 10;
@@ -487,7 +490,11 @@ function isWithinAgeBound(createdAt) {
   return age >= 0 && age <= CHECKPOINT_MAX_AGE_MS;
 }
 
-function formatRestoreContext(checkpoint, path) {
+// `writers` (optional) is the text cleaning module of the SessionStart hook: with it the mode names and the paths in the text
+// are written exactly with escapeIdentifier (the text tells the model to consult them) and the text is fitted to the limit by
+// whole lines with fitLines. Without it the text is the same as it always was.
+function formatRestoreContext(checkpoint, path, writers) {
+  const identifier = (value, max) => (writers ? writers.escapeIdentifier(value, max) : value);
   const lines = [
     '[PRECOMPACT CHECKPOINT RESTORED]',
     '',
@@ -498,8 +505,9 @@ function formatRestoreContext(checkpoint, path) {
   const entries = Object.entries(modes).filter(([, value]) => value != null);
   if (entries.length > 0) {
     lines.push('', 'Active modes at compaction time:');
-    for (const [name, mode] of entries) {
+    for (const [key, mode] of entries) {
       if (mode === null || typeof mode !== 'object' || Array.isArray(mode)) continue;
+      const name = identifier(key, MAX_RESTORE_NAME_CHARS);
       if ('iteration' in mode && typeof mode.iteration === 'number') lines.push(`- ${name} (iteration ${mode.iteration})`);
       else if ('cycle' in mode && typeof mode.cycle === 'number') lines.push(`- ${name} (cycle ${mode.cycle})`);
       else if ('phase' in mode && typeof mode.phase === 'string') lines.push(`- ${name} (phase ${mode.phase})`);
@@ -513,20 +521,21 @@ function formatRestoreContext(checkpoint, path) {
   if (refs?.prd) {
     const prd = refs.prd;
     lines.push('', `Active PRD: ${prd.title || 'untitled'} (status: ${prd.status || 'unknown'}, stories: ${prd.stories_completed || 0}/${prd.stories_total || 0})`);
-    lines.push(`PRD file: ${prd.path}`);
+    lines.push(`PRD file: ${identifier(prd.path, MAX_RESTORE_PATH_CHARS)}`);
   }
   if (refs?.boulder) {
     const boulder = refs.boulder;
     lines.push('', `Active plan (boulder): ${boulder.plan_name || 'unnamed'} — ${(boulder.progress?.completed) || 0}/${(boulder.progress?.total) || 0} steps done.`);
-    lines.push(`Plan file: ${boulder.active_plan}`);
+    lines.push(`Plan file: ${identifier(boulder.active_plan, MAX_RESTORE_PATH_CHARS)}`);
   }
   if (checkpoint.wisdom_exported) lines.push('', 'Plan wisdom was exported before compaction (see .omc/state/checkpoints/wisdom-*.md).');
-  lines.push('', 'Treat this as prior-session context only. Prioritize the current user request; consult the plan/PRD files above before resuming long-running work.', `Raw checkpoint: ${path}`);
+  lines.push('', 'Treat this as prior-session context only. Prioritize the current user request; consult the plan/PRD files above before resuming long-running work.', `Raw checkpoint: ${identifier(path, MAX_RESTORE_PATH_CHARS)}`);
   const text = lines.join('\n');
+  if (writers) return writers.fitLines(text, RESTORE_CONTEXT_MAX_CHARS);
   return text.length <= RESTORE_CONTEXT_MAX_CHARS ? text : text.slice(0, RESTORE_CONTEXT_MAX_CHARS - 1) + '…';
 }
 
-function preparePreCompactCheckpointRestoreOnce(omcRoot, sessionId) {
+function preparePreCompactCheckpointRestoreOnce(omcRoot, sessionId, writers) {
   try {
     if (!isValidSessionId(sessionId)) return null;
     const context = getCanonicalCheckpointContext(omcRoot);
@@ -566,7 +575,7 @@ function preparePreCompactCheckpointRestoreOnce(omcRoot, sessionId) {
       if (isCheckpointRestored(omcRoot, sessionId, candidate.path)) return null;
       if (!isWithinAgeBound(candidate.checkpoint.created_at)) continue;
       return {
-        text: formatRestoreContext(candidate.checkpoint, candidate.path),
+        text: formatRestoreContext(candidate.checkpoint, candidate.path, writers),
         path: candidate.path,
         created_at: candidate.checkpoint.created_at,
         mtime_ms: candidate.mtimeMs,
@@ -581,8 +590,8 @@ function preparePreCompactCheckpointRestoreOnce(omcRoot, sessionId) {
 
 
 
-export function preparePreCompactCheckpointRestore(omcRoot, sessionId) {
-  return preparePreCompactCheckpointRestoreOnce(omcRoot, sessionId);
+export function preparePreCompactCheckpointRestore(omcRoot, sessionId, writers) {
+  return preparePreCompactCheckpointRestoreOnce(omcRoot, sessionId, writers);
 }
 
 export function claimPreCompactCheckpointRestore(

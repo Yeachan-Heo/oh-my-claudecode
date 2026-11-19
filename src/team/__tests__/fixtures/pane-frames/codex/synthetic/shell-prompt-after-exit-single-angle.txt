@@ -1,0 +1,5 @@
+Token usage: total=1,234 input=1,000 output=234
+To continue this session, run codex resume 00000000-0000-4000-8000-000000000000
+
+/private/tmp/omc-synthetic/work
+› 

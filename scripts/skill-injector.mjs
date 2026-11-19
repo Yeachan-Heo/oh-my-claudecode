@@ -18,6 +18,7 @@ import { readStdin } from './lib/stdin.mjs';
 import { createRequire } from 'module';
 import { atomicWriteFileSync, ensureDirSync } from './lib/atomic-write.mjs';
 import { stripLeadingUtf8Bom } from './lib/utf8-bom.mjs';
+import { loadContextText } from './lib/context-text-loader.mjs';
 
 const skipHooks = (process.env.OMC_SKIP_HOOKS || '').split(',').map(token => token.trim());
 const isDisabled = process.env.DISABLE_OMC === '1' ||
@@ -516,7 +517,30 @@ function summarizeSkillContent(content) {
   return compactText(firstUsefulLine || content.replace(/\s+/g, ' ').trim(), 240);
 }
 
-function formatSkillDescriptor(skill) {
+// With the text cleaning switch on (`sanitize` is the cleaning module). The name, the scope and the summary are prose and are
+// cleaned. The path is an identifier: it is written exactly, never cleaned and never cut, with each character that cleaning
+// removes as a \uXXXX escape (see escapeIdentifier), and a path whose written form is over 2000 characters is replaced by a
+// notice. The descriptor limit counts the text as written, after the escapes: the heading and the load line with the whole
+// path stay; the metadata tag stays whole or is left out, so it is never cut off before its closing tag; the summary takes
+// the room that is left. If the heading and the load line alone are over the limit, the limit yields and the budget of the
+// whole message decides whether the descriptor fits.
+function formatCleanedSkillDescriptor(skill, metadata, summary, sanitize) {
+  const path = sanitize.escapeIdentifier(skill.path, 2000);
+  const heading = `### ${sanitize.cleanHostText(skill.name, 200)} (${sanitize.cleanHostText(skill.scope, 50)})`;
+  const load = `Load instructions: if this skill is needed, read ${path}${path.startsWith('"') ? ' (a JSON string: decode its escapes to get the exact path)' : ''} and follow the full instructions there.`;
+  const tag = `<skill-metadata>${sanitize.escapeRemovedCharacters(JSON.stringify(metadata))}</skill-metadata>`;
+  const parts = [heading];
+  let room = MAX_LEARNED_SKILL_DESCRIPTOR_CHARS - heading.length - load.length - 1;
+  if (tag.length + 1 <= room) {
+    parts.push(tag);
+    room -= tag.length + 1;
+  }
+  if (summary && room - 1 >= 40) parts.push(compactText(`Summary: ${sanitize.cleanTextBlock(summary)}`, room - 1));
+  parts.push(load);
+  return parts.join('\n');
+}
+
+function formatSkillDescriptor(skill, sanitize = null) {
   const metadata = {
     path: skill.path,
     triggers: skill.triggers,
@@ -524,6 +548,7 @@ function formatSkillDescriptor(skill) {
     scope: skill.scope
   };
   const summary = skill.description || skill.summary || summarizeSkillContent(skill.content);
+  if (sanitize) return formatCleanedSkillDescriptor(skill, metadata, summary, sanitize);
   return compactText([
     `### ${skill.name} (${skill.scope})`,
     `<skill-metadata>${JSON.stringify(metadata)}</skill-metadata>`,
@@ -533,7 +558,7 @@ function formatSkillDescriptor(skill) {
 }
 
 // Format skills for injection
-function formatSkillsMessage(skills) {
+function formatSkillsMessage(skills, sanitize = null) {
   const header = [
     '<mnemosyne>',
     '',
@@ -548,7 +573,7 @@ function formatSkillsMessage(skills) {
   let used = 0;
 
   for (const skill of skills) {
-    const descriptor = formatSkillDescriptor(skill);
+    const descriptor = formatSkillDescriptor(skill, sanitize);
     const separator = descriptors.length > 0 ? '\n\n---\n\n' : '';
     if (used + separator.length + descriptor.length > budget) {
       const omission = `${separator}[Additional learned skills omitted due to ${MAX_LEARNED_SKILLS_CONTEXT_CHARS}-character context budget; use skill metadata paths if needed.]`;
@@ -565,6 +590,8 @@ function formatSkillsMessage(skills) {
   return `${header}${descriptors.join('')}${footer}`;
 }
 
+// Opt-in text cleaning (OMC_CONTEXT_TEXT_SANITIZE=1 or true): the skill descriptors read from skill files are cleaned
+// before they are injected. The module is loaded only when the switch is on; with the switch off the text is unchanged.
 // Main
 async function main() {
   try {
@@ -606,11 +633,12 @@ async function main() {
     }
 
     if (matchingSkills.length > 0) {
+      const sanitize = await loadContextText();
       console.log(JSON.stringify({
         continue: true,
         hookSpecificOutput: {
           hookEventName: 'UserPromptSubmit',
-          additionalContext: formatSkillsMessage(matchingSkills)
+          additionalContext: formatSkillsMessage(matchingSkills, sanitize)
         }
       }));
     } else {

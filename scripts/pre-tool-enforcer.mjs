@@ -6,9 +6,9 @@
  * Cross-platform: Windows, macOS, Linux
  */
 
-import { appendFileSync, closeSync, existsSync, fstatSync, lstatSync, mkdirSync, openSync, readFileSync, readSync, readdirSync, realpathSync, renameSync, statSync, writeFileSync } from 'fs';
+import { appendFileSync, closeSync, existsSync, fstatSync, lstatSync, mkdirSync, openSync, readFileSync, readSync, readdirSync, readlinkSync, realpathSync, renameSync, statSync, writeFileSync } from 'fs';
 import { createHash } from 'crypto';
-import { delimiter, dirname, join, resolve, basename, sep } from 'path';
+import { delimiter, dirname, join, resolve, basename, relative, isAbsolute, parse, sep } from 'path';
 import { homedir } from 'os';
 import { execFileSync } from 'child_process';
 import { fileURLToPath, pathToFileURL } from 'url';
@@ -26,6 +26,7 @@ import { isSkillVisibleToUser } from './lib/skill-entitlements.mjs';
 import { isJevAppliedLogEnabled, isJevShadowOptedIn, jevNoulOf, recordJevApplied, recordJevShadow, setJevHookContext, setJevSessionId } from './lib/jev-shadow.mjs';
 import { pointerSecretPath } from './lib/jev-pointer-secret-path.mjs';
 import { isJevLogContextEnabled, isJevRowTelemetryEnabled, JEV_ROW_NO_ANSWER, jevLogContextOf, resolveExcerptChars, resolveJevLogMaxBytes, rotateJevLog } from './jev-resolve.mjs';
+import { loadContextText } from './lib/context-text-loader.mjs';
 
 // Inlined from src/config/models.ts — avoids a dist/ import so the hook works
 // before a build and stays consistent with the TypeScript source.
@@ -2152,8 +2153,11 @@ function evaluateUltragoalPreToolEnforcement(stateDir, directory, sessionId, dat
 
   const expected = getExpectedUltragoalObjective(state, directory);
   const actual = extractClaudeGoalSnapshot(data, sessionId, directory);
-  const actualObjective = normalizeText(actual?.objective);
-  const expectedObjective = normalizeText(expected);
+  // With the text cleaning switch on the deny reason shows the expected objective cleaned and not cut, so the objectives are
+  // compared in their cleaned form: a goal typed from that text matches an expected objective that contains a removed character.
+  const comparable = (value) => normalizeText(contextText && typeof value === 'string' ? contextText.cleanHostText(value, Infinity) : value);
+  const actualObjective = comparable(actual?.objective);
+  const expectedObjective = comparable(expected);
   const status = normalizePhase(actual?.status);
   const objectiveMatches = Boolean(actualObjective && expectedObjective && actualObjective === expectedObjective);
   const activeStatus = status === '' || status === 'active' || status === 'in_progress' || status === 'running';
@@ -2168,9 +2172,12 @@ function evaluateUltragoalPreToolEnforcement(stateDir, directory, sessionId, dat
   if (objectiveMatches && activeStatus) return null;
 
   const mismatch = actualObjective
-    ? `current Claude /goal appears unrelated: "${actual.objective}".`
+    ? `current Claude /goal appears unrelated: "${contextText ? contextText.cleanHostText(actual.objective) : actual.objective}".`
     : 'no active Claude /goal snapshot was visible to the hook.';
-  return `[ULTRAGOAL /GOAL REQUIRED] Active ultragoal state requires the matching Claude /goal before tools run; ${mismatch} Activate /goal with the ultragoal objective, or set ALLOW_ULTRAGOAL_WITHOUT_GOAL=1 to bypass this guard intentionally. Expected objective: ${expected || '<record one in ultragoal-state.json or .omc/ultragoal/goals.json>'}`;
+  // The expected objective is a value that the model has to give back in full, so the bound on the output does not cut it.
+  const expectedText = contextText ? contextText.cleanHostText(expected, Infinity) : expected;
+  if (contextText && expectedText) wholeTexts.push(expectedText);
+  return `[ULTRAGOAL /GOAL REQUIRED] Active ultragoal state requires the matching Claude /goal before tools run; ${mismatch} Activate /goal with the ultragoal objective, or set ALLOW_ULTRAGOAL_WITHOUT_GOAL=1 to bypass this guard intentionally. Expected objective: ${expectedText || '<record one in ultragoal-state.json or .omc/ultragoal/goals.json>'}`;
 }
 
 function hasActiveJsonMode(stateDir, { allowSessionTagged = false } = {}) {
@@ -2605,6 +2612,11 @@ ${hookOutput.additionalContext}`
 
 function emitPreToolUseOutput(output, input, space = 0) {
   output = withShellCheckContext(output);
+  // With the text cleaning switch on, every text of the output (a refusal, a model routing notice, the shell check warnings, the
+  // reminders) is cleaned and bounded here, at the one place where the hook emits, so that no branch can skip it. updatedInput,
+  // the decision and the flags are not touched; a text that the model has to give back in full (wholeTexts) is not cut. With
+  // the switch off the output is written as it is.
+  if (contextText) output = contextText.cleanHookOutput(output, { whole: wholeTexts });
   flushJevRouting(output);
   if (!isCodexPreToolUse(input)) {
     console.log(JSON.stringify(output, null, space));
@@ -2654,6 +2666,176 @@ function emitPreToolUseOutput(output, input, space = 0) {
   }
 }
 
+// Opt-in text cleaning (OMC_CONTEXT_TEXT_SANITIZE=1 or true): the /goal objective and the expected objective are cleaned in the
+// deny reason, and every output of the hook is cleaned and bounded in emitPreToolUseOutput, only when the switch is on. main()
+// loads the module right after it reads the input; with the switch off nothing is imported.
+let contextText = null;
+// Texts that a refusal asks the model to give back exactly (the expected /goal objective): cleanHookOutput does not cut them.
+const wholeTexts = [];
+// Plan write guard (opt-in, OMC_PLANNER_WRITE_GUARD=1): a Write, Edit, MultiEdit or NotebookEdit call made inside a
+// subagent whose agent_type is in the guarded list is denied unless the target is a Markdown file under <cwd>/.omc/plans/.
+// The list comes from OMC_PLANNER_WRITE_GUARD_TYPES (comma separated, exact match after trimming; default:
+// oh-my-claudecode:planner). Calls without agent_type and calls of other agent types pass. The path is normalized
+// lexically first. The raw path and the normalized path are then walked from the working directory the way the kernel
+// resolves them (see walkKernelPath), also when the plans directory does not exist yet, and the last component is followed
+// one link at a time (see planEntryAllowed): every entry on the way must be a path that ends in .md inside the real plans directory, and the
+// entry that ends the chain must be a regular file or must not exist yet. A link that cannot be resolved, a link that loops
+// and a directory are denied. Every text among file_path, filePath, notebook_path, path and file (the names the hooks of
+// this plugin read), in tool_input and in toolInput, must pass, because the tool may act on any of them; a call with none of
+// them readable passes. The agent is guarded when agent_type or agentType is in the list. Anything else unreadable passes
+// (fail-open). With the guard on, each call of a guarded tool adds one row to
+// plan-write-guard.jsonl in OMC_JEV_LOG_DIR or <state dir>/jev, with decision allow or deny; a call without agent_type or
+// with another agent_type adds one row with decision allow and a reason.
+const PLAN_WRITE_TOOLS = new Set(['Write', 'Edit', 'MultiEdit', 'NotebookEdit']);
+const PLAN_WRITE_DIR = join('.omc', 'plans');
+const PLAN_WRITE_EXT = '.md';
+const PLAN_WRITE_PATH_FIELDS = ['file_path', 'filePath', 'notebook_path', 'path', 'file'];
+const PLAN_WRITE_MAX_LINKS = 40;
+const PLAN_WRITE_DEFAULT_TYPES = ['oh-my-claudecode:planner'];
+
+function planWriteGuardTypes(env = process.env) {
+  const list = String(env.OMC_PLANNER_WRITE_GUARD_TYPES ?? '').split(',').map((name) => name.trim()).filter(Boolean);
+  return list.length > 0 ? list : PLAN_WRITE_DEFAULT_TYPES;
+}
+
+// The path the kernel reaches for `filePath`, walked from `cwd` one component at a time on the raw text: a link is followed
+// where it stands, so ".." after a link goes to the parent of the link target, not to the parent of the link. A component that
+// does not exist has no link below it; the rest is walked as text and a ".." after it only removes it again. With `followLast`
+// false the last component is not followed: the result is the real path of its directory joined with its name, which may be a
+// link. Returns null when a component cannot be resolved (a link that dangles or loops, a file used as a directory).
+function walkKernelPath(filePath, cwd, followLast = true) {
+  try {
+    const root = isAbsolute(filePath) ? parse(filePath).root : '';
+    let current = realpathSync.native(root || cwd);
+    let missing = 0;
+    const parts = filePath.slice(root.length).split(process.platform === 'win32' ? /[\\/]+/ : /\/+/).filter((part) => part !== '' && part !== '.');
+    for (const [index, part] of parts.entries()) {
+      if (part === '..') {
+        current = dirname(current);
+        if (missing > 0) missing -= 1;
+        continue;
+      }
+      const next = join(current, part);
+      if (missing === 0) {
+        try {
+          lstatSync(next);
+        } catch (error) {
+          if (error?.code !== 'ENOENT') return null;
+          missing = 1;
+          current = next;
+          continue;
+        }
+        current = followLast || index < parts.length - 1 ? realpathSync.native(next) : next;
+      } else {
+        missing += 1;
+        current = next;
+      }
+    }
+    return current;
+  } catch {
+    return null;
+  }
+}
+
+// A real directory and a name: the entry the tool opens is that name, followed through every link the way the kernel does,
+// one link at a time (the Linux limit is 40). Every entry on the way must be inside the real plans directory and end in
+// .md, so a link to a file of another extension, a link that leaves the plans directory and comes back, and a link to the
+// plans directory are denied, as are a link that dangles or loops. The entry that ends the chain must be a regular file; it
+// may be missing only when no link was followed, the way a new plan file is.
+function planEntryAllowed(entry, nativePlansDir) {
+  let current = entry;
+  for (let hop = 0; hop <= PLAN_WRITE_MAX_LINKS; hop += 1) {
+    if (current === null) return false;
+    const rel = relative(nativePlansDir, current);
+    if (rel === '' || rel.split(sep)[0] === '..' || isAbsolute(rel) || !current.endsWith(PLAN_WRITE_EXT)) return false;
+    let stat;
+    try {
+      stat = lstatSync(current);
+    } catch (error) {
+      return hop === 0 && error?.code === 'ENOENT';
+    }
+    if (!stat.isSymbolicLink()) return stat.isFile();
+    try {
+      current = walkKernelPath(readlinkSync(current), dirname(current), false);
+    } catch {
+      return false;
+    }
+  }
+  return false;
+}
+
+function planWritePathAllowed(filePath, cwd) {
+  const plansDir = resolve(cwd, PLAN_WRITE_DIR);
+  const target = resolve(cwd, filePath);
+  const rel = relative(plansDir, target);
+  if (rel === '' || rel.split(sep)[0] === '..' || isAbsolute(rel) || !rel.endsWith(PLAN_WRITE_EXT)) return false;
+  // The plans directory as the kernel reaches it, also when it does not exist yet: the existing part is resolved, the rest
+  // stays text, so the raw walks below run in every case. A part that cannot be resolved is a denial.
+  const nativePlansDir = walkKernelPath(plansDir, cwd);
+  if (nativePlansDir === null) return false;
+  // The raw path as the kernel resolves it must end inside the real plans directory: a link followed by ".." in the input
+  // must not lead out of it, whether the link comes before or after the plans directory in the path. The normalized target is
+  // checked the same way, for a caller that normalizes the path before it opens it.
+  return planEntryAllowed(walkKernelPath(filePath, cwd, false), nativePlansDir)
+    && planEntryAllowed(walkKernelPath(target, cwd, false), nativePlansDir);
+}
+
+function appendPlanWriteGuardRow(data, toolName, stateDir, row) {
+  try {
+    const logDir = process.env.OMC_JEV_LOG_DIR || join(stateDir, 'jev');
+    mkdirSync(logDir, { recursive: true });
+    const logPath = join(logDir, 'plan-write-guard.jsonl');
+    rotateJevLog(logPath, resolveJevLogMaxBytes(process.env));
+    appendFileSync(logPath, JSON.stringify({
+      ts: new Date().toISOString(),
+      point: 'plan-write-guard',
+      ...jevLogContextOf(data),
+      tool_name: toolName,
+      ...row,
+    }) + '\n', 'utf8');
+  } catch { /* logging never breaks the hook */ }
+}
+
+function evaluatePlanWriteGuard(toolName, data, directory, stateDir) {
+  if (process.env.OMC_PLANNER_WRITE_GUARD !== '1' || !PLAN_WRITE_TOOLS.has(toolName)) return null;
+  try {
+    const guardedTypes = planWriteGuardTypes();
+    const agentTypes = [data?.agent_type, data?.agentType].filter((value) => typeof value === 'string').map((value) => value.trim()).filter(Boolean);
+    const agentType = agentTypes.find((name) => guardedTypes.includes(name)) ?? agentTypes[0] ?? '';
+    if (!agentType || !guardedTypes.includes(agentType)) {
+      appendPlanWriteGuardRow(data, toolName, stateDir, {
+        agent_type: agentType ? agentType.slice(0, 200) : null,
+        decision: 'allow',
+        reason: agentType ? 'agent_type not guarded' : 'no agent_type',
+      });
+      return null;
+    }
+    const filePaths = [data.tool_input, data.toolInput]
+      .filter((input) => input !== null && typeof input === 'object' && !Array.isArray(input))
+      .flatMap((input) => PLAN_WRITE_PATH_FIELDS.map((field) => input[field]))
+      .filter((value) => typeof value === 'string' && value.trim() !== '');
+    if (filePaths.length === 0) return null;
+    const cwd = typeof data.cwd === 'string' && data.cwd !== '' ? data.cwd : directory;
+    const deniedPath = filePaths.find((candidate) => !planWritePathAllowed(candidate, cwd));
+    const allowed = deniedPath === undefined;
+    const filePath = deniedPath ?? filePaths[0];
+    appendPlanWriteGuardRow(data, toolName, stateDir, {
+      agent_type: agentType.slice(0, 200),
+      path: filePath.slice(0, 300),
+      decision: allowed ? 'allow' : 'deny',
+    });
+    if (allowed) return null;
+    return {
+      continue: true,
+      hookSpecificOutput: {
+        hookEventName: 'PreToolUse',
+        permissionDecision: 'deny',
+        permissionDecisionReason: `[PLAN WRITE GUARD] The planner may write only Markdown files under ${PLAN_WRITE_DIR}/ (denied: "${filePath.slice(0, 200)}"). Write the plan to ${PLAN_WRITE_DIR}/<name>${PLAN_WRITE_EXT} instead.`,
+      },
+    };
+  } catch { return null; }
+}
+
 async function main() {
   // Skip guard: check OMC_SKIP_HOOKS env var (see issue #838)
   const _skipHooks = (process.env.OMC_SKIP_HOOKS || '').split(',').map(s => s.trim());
@@ -2666,6 +2848,7 @@ async function main() {
   let input = '';
   try {
     input = await readStdin();
+    contextText = await loadContextText();
 
     const toolName = extractJsonField(input, 'tool_name') || extractJsonField(input, 'toolName', 'unknown');
     const directory = extractJsonField(input, 'cwd') || extractJsonField(input, 'directory', process.cwd());
@@ -2680,6 +2863,15 @@ async function main() {
     data = {};
     try { data = JSON.parse(input); } catch {}
     await setJevHookContext(data);
+
+    // Opt-in plan write guard (OMC_PLANNER_WRITE_GUARD=1): the planner may write only plan files.
+    if (PLAN_WRITE_TOOLS.has(toolName)) {
+      const planWriteDeny = evaluatePlanWriteGuard(toolName, data, directory, stateDir);
+      if (planWriteDeny) {
+        emitPreToolUseOutput(planWriteDeny, data);
+        return;
+      }
+    }
 
     // Opt-in shell checks (OMC_SHELL_CHECKS=1) for Bash and PowerShell commands. Fail-open: any error here
     // leaves the hook behaving as without the checks.

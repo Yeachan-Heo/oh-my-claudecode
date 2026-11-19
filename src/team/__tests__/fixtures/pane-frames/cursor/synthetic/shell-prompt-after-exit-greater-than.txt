@@ -1,0 +1,4 @@
+Cursor Agent session ended.
+
+/private/tmp/omc-synthetic/work
+> 

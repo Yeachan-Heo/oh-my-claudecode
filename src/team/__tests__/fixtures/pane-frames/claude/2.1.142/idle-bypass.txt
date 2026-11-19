@@ -1,0 +1,8 @@
+▐▛███▜▌   Claude Code v2.1.142
+▝▜█████▛▘  Opus 4.7 (1M context) · Claude Xxx
+  ▘▘ ▝▝    ~/some/repo
+
+───────────────────────────────────────
+❯ 
+───────────────────────────────────────
+  ⏵⏵ bypass permissions on (shift+tab to cycle)
