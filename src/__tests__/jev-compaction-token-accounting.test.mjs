@@ -8,7 +8,11 @@
 
 import { describe, expect, it } from 'vitest';
 
-import { listTokens, prefixTokens, ratesFrom, register, resolveWindow, tokenCeiling } from '../../hooks/jev-compaction.mjs';
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
+import { fileURLToPath } from 'node:url';
+
+import { agentTrace, listTokens, pasteTrace, prefixTokens, ratesFrom, register, replyTrace, resolveWindow, tokenCeiling } from '../../hooks/jev-compaction.mjs';
 
 const ACTIVE_ENV = { OMC_JEV: 'compaction:active', TYPESAFE_API_KEY: 'test-key', HOME: '/home/u' };
 const SPOOL = '/home/u/.omc/state/jev/compaction-spool/';
@@ -187,6 +191,71 @@ describe('token accounting: prefix and estimate', () => {
   it('adds RATE_NON_ASCII for each non-ASCII character', () => {
     const block = 45.4 - 40.5;
     expect(listTokens([{ role: 'user', content: 'é' }])).toBeCloseTo(0.287 * 1 + 3.72 + block, 6);
+  });
+});
+
+describe('token accounting: every trace the module writes is priced at the trace rate when the list is counted again', () => {
+  // A later estimate (a subagent, or no usage of the host) counts the text a compaction left, so the trace of each stage must cost RATE_TRACE a character
+  // there, as it did when the stage took it off the prediction (RATE_MOVED * moved characters less RATE_TRACE * trace characters).
+  const block = 45.4 - 40.5; // one block in a one-block message
+  const rates = ratesFrom(undefined);
+  const text = (role, value) => [{ role, content: [{ type: 'text', text: value }] }];
+  const compacted = '[compacted] Bash({"command":"ls"}) - result of 10 chars removed';
+  const note = '[compacted] a background task notification (the build finished) - 900 chars removed';
+  const paste = pasteTrace(5000, `${'p'.repeat(300)}\n"quoted" [bracket] ${'q'.repeat(300)}`, '/home/u/.omc/state/jev/compaction-pastes/s/abc.txt');
+  const reply = replyTrace(900, `${'r'.repeat(500)}\nsecond [line] "quote"`, '/home/u/.omc/state/jev/compaction-pastes/s/def.txt');
+  const agent = agentTrace('/home/u/.omc/state/jev/compaction-pastes/s/ghi.txt', `<teammate-message teammate_id="worker-1" summary="the report">${'w'.repeat(900)}</teammate-message>`);
+  const FORMATS = [['a removed result', compacted], ['a removed notification', note], ['pasted text', paste], ['a reply', reply], ['an agent message', agent]];
+
+  it.each(FORMATS)('%s: the trace alone costs RATE_TRACE a character, in a user row and in an assistant text', (_name, trace) => {
+    for (const role of ['user', 'assistant']) expect(listTokens(text(role, trace)), role).toBeCloseTo(0.58 * trace.length + block, 6);
+    // The configured rate prices it the same way.
+    expect(listTokens(text('user', trace), ratesFrom('{"RATE_TRACE":2}'))).toBeCloseTo(2 * trace.length + block, 6);
+    expect(listTokens(text('user', trace), ratesFrom('{"RATE_TRACE":2,"RATE_OWN":9,"RATE_NOTE":9,"RATE_ATXT":9}'))).toBeCloseTo(2 * trace.length + block, 6);
+  });
+
+  it('a trace of a line stands apart from the words around it: the line break before it is part of the trace, the words keep their class', () => {
+    for (const [, trace] of [FORMATS[0], FORMATS[3], FORMATS[4]]) {
+      const assistant = `Intro line\n${trace}\nOutro line`;
+      expect(listTokens(text('assistant', assistant))).toBeCloseTo(0.58 * (1 + trace.length) + 0.315 * 'Intro line\nOutro line'.length + block, 6);
+      const twice = `Intro\n${trace}\n${trace}\nOutro`;
+      expect(listTokens(text('assistant', twice))).toBeCloseTo(0.58 * 2 * (1 + trace.length) + 0.315 * 'Intro\nOutro'.length + block, 6);
+    }
+  });
+
+  it('a trace of pasted text inside the user\'s words is priced at the trace rate, the words on both sides at the user rate, also with two traces on one line', () => {
+    const one = `Please read this: ${paste} and tell me what you think.`;
+    expect(listTokens(text('user', one))).toBeCloseTo(0.58 * paste.length + 0.287 * (one.length - paste.length) + block, 6);
+    const two = `first ${paste} between ${paste} last`;
+    expect(listTokens(text('user', two))).toBeCloseTo(0.58 * 2 * paste.length + 0.287 * (two.length - 2 * paste.length) + block, 6);
+    // Beside a tool result the remaining words are reminder-class text, the trace is a trace all the same.
+    const beside = [{ role: 'user', content: [{ type: 'text', text: one }, { type: 'tool_result', tool_use_id: 't1', content: 'xy' }] }];
+    expect(listTokens(beside)).toBeCloseTo(0.58 * paste.length + 0.363 * (one.length - paste.length) + 0.4502 * 2 + 2 * (45.4 - 40.5 / 2), 6);
+    // Words only, and a trace that stands in a quoted tag's place before the words.
+    expect(listTokens(text('user', `${paste}\n${one}`))).toBeCloseTo(0.58 * 2 * paste.length + 0.287 * (one.length - paste.length + 1) + block, 6);
+  });
+
+  it('a mark that does not open a whole trace is the user\'s text and costs the user rate', () => {
+    for (const partial of [`[pasted text moved at compaction: 5 chars, full text in /x; start: "abc`, `[pasted text moved at compaction: nothing here]`, `[reply moved at compaction in the middle of a line`]) {
+      const words = `I typed ${partial} myself`;
+      expect(listTokens(text('user', words)), partial).toBeCloseTo(0.287 * words.length + block, 6);
+    }
+  });
+
+  it('lists every format of trace the module writes: a source with a new one fails here until the estimate prices it', () => {
+    const source = readFileSync(join(fileURLToPath(import.meta.url), '..', '..', '..', 'hooks', 'jev-compaction.mjs'), 'utf8');
+    const moved = new Set([...source.matchAll(/'\[([a-z ]+) moved at compaction/g)].map((m) => m[1]));
+    expect([...moved].sort()).toEqual(['agent message', 'pasted text', 'reply']);
+    expect(source.match(/`\[compacted\] /g)?.length).toBeGreaterThan(0);
+    for (const trace of [paste, reply, agent]) expect(trace).toMatch(/^\[(?:pasted text|reply|agent message) moved at compaction/);
+  });
+
+  it('the cost of a trace when counted again is the cost the stage took off, whatever the rates', () => {
+    for (const raw of [undefined, '{"RATE_TRACE":1.5,"RATE_OWN":0.1,"RATE_NOTE":0.1,"RATE_ATXT":0.1}']) {
+      const r = ratesFrom(raw);
+      for (const [name, trace] of FORMATS) expect(listTokens(text('user', trace), r) - (r.RATE_BLOCK - 40.5), name).toBeCloseTo(r.RATE_TRACE * trace.length, 6);
+    }
+    expect(rates.RATE_TRACE).toBe(0.58);
   });
 });
 

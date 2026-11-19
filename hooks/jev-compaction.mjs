@@ -297,6 +297,7 @@ const REPLY_KEEP_OWNERS = 3;
 const REPLY_KEEP_TURNS = 6;
 const PASTE_TRACE_PREFIX = '[pasted text moved at compaction: ';
 const REPLY_TRACE_PREFIX = '[reply moved at compaction: ';
+const AGENT_TRACE_PREFIX = '[agent message moved at compaction, not from the user: ';
 const PASTE_QUESTIONS = {
   pasted: {
     type: 'noul',
@@ -2405,11 +2406,12 @@ export function tokenCeiling(maxWindowTokens, rates = DEFAULT_RATES) {
   return maxWindowTokens ? Math.floor(maxWindowTokens / (1 + rates.PREDICTION_SHORTFALL)) : undefined;
 }
 
-// A one-line trace of a removed item (traceLine), wherever it stands in an assistant text: at its start or after a line break.
-const TRACE_LINE = /(?:^|\n)\[compacted\] [^\n]*/g;
+// A one-line trace of the module, wherever it stands in a text: at its start or after a line break. A removed item (traceLine), a reply moved to a file and
+// an agent's message moved to a file each fill their line; the trace of a pasted text stands inside a line (PASTE_TRACE_PREFIX, see withoutPasteMarks).
+const TRACE_LINE = new RegExp(`(?:^|\\n)(?:\\[compacted\\] |${escapeRegExp(REPLY_TRACE_PREFIX)}|${escapeRegExp(AGENT_TRACE_PREFIX)})[^\\n]*`, 'g');
 // The API list in tokens by class: a call costs RATE_IN a character of its name and input, a result RATE_OUT, a reminder or a text beside a result
 // RATE_NOTE, the user's words RATE_OWN (a text that userWords reads as the user's: not a summary, a notice or a host block), the assistant's text
-// RATE_ATXT, a trace RATE_TRACE, each non-ASCII character RATE_NON_ASCII more, RATE_BLOCK a block and RATE_MESSAGE a message spread over its blocks,
+// RATE_ATXT, a trace of any of the module's stages RATE_TRACE, each non-ASCII character RATE_NON_ASCII more, RATE_BLOCK a block and RATE_MESSAGE a message spread over its blocks,
 // an image RATE_IMAGE. Thinking, signatures and server blocks are not counted here.
 export function listTokens(api, rates = DEFAULT_RATES) {
   const { RATE_IN, RATE_OUT, RATE_NOTE, RATE_OWN, RATE_ATXT, RATE_TRACE, RATE_NON_ASCII, RATE_BLOCK, RATE_IMAGE } = rates;
@@ -2424,7 +2426,9 @@ export function listTokens(api, rates = DEFAULT_RATES) {
       if (b.type === 'text') {
         const t = strOf(b.text);
         let inTraces = 0;
-        const rest = t.replace(TRACE_LINE, (x) => { inTraces += x.length; return ''; });
+        const lines = t.replace(TRACE_LINE, (x) => { inTraces += x.length; return ''; });
+        const rest = withoutPasteMarks(lines);
+        inTraces += lines.length - rest.length;
         const rate = a.role === 'assistant' ? RATE_ATXT : hasResult || !userWords({ role: 'user', text: t }).length ? RATE_NOTE : RATE_OWN;
         tok += RATE_TRACE * inTraces + rate * rest.length + RATE_NON_ASCII * nonAscii(rest) + over;
       } else if (b.type === 'tool_use') {
@@ -3677,7 +3681,6 @@ const AGENT_SENT_CHARS = 60;
 const AGENT_SENDERS_MAX = 4;
 const AGENT_OPENERS = ['Another Claude session sent a message', '<teammate-message', '<agent-message', '<cross-session-message'];
 const AGENT_BARE = /^\s*<(?:agent-message|cross-session-message)\b/; // a row that opens with one of these blocks has no header of the host: it is read as the user's words
-const AGENT_TRACE_PREFIX = '[agent message moved at compaction, not from the user: ';
 const AGENT_LEAD = 'team-lead'; // the teammate_id of a team's lead in its members' sessions
 const utf8Bytes = (text) => new TextEncoder().encode(text).length;
 // A row is read as one of blocks only when every tag in it has its partner: with a stray tag the pairing of the rest is a guess (a quoted opener would take the
