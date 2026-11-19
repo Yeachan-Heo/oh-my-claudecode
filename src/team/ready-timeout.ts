@@ -63,8 +63,9 @@ export function resolveStartupReadyTimeoutMs(env: NodeJS.ProcessEnv): number {
 const DISPLAY_MAX_CHARS = 32;
 // JSON.stringify already escapes C0 controls, quotes and lone surrogates; this
 // catches what it leaves raw: DEL, C1 (U+009B is a terminal CSI), line and
-// paragraph separators, and bidi controls that reorder the rest of the line.
-const UNSAFE_DISPLAY_CHARS = /[\u007f-\u009f\u200e\u200f\u2028\u2029\u202a-\u202e\u2066-\u2069]/g;
+// paragraph separators, and bidi controls (U+061C included) that reorder the
+// rest of the line.
+const UNSAFE_DISPLAY_CHARS = /[\u007f-\u009f\u2028\u2029\p{Bidi_Control}]/gu;
 
 function displayValue(raw: string): string {
   if (/^[\x21-\x7e]{1,32}$/.test(raw)) return raw;

@@ -77,10 +77,22 @@ describe('startup readiness wait from OMC_TEAM_READY_TIMEOUT_MS', () => {
     ['a right-to-left override', '6\u202e0000', '"6\\u202e0000"'],
     ['a right-to-left isolate', '6\u20670000', '"6\\u20670000"'],
     ['a right-to-left mark', '6\u200f0000', '"6\\u200f0000"'],
+    ['an Arabic letter mark', '6\u061c0000', '"6\\u061c0000"'],
   ])('shows %s in the value as a visible escape', (_label, raw, shown) => {
     const note = describeStartupReadyTimeout(env(raw), 30_000);
     expect(note).toContain(`OMC_TEAM_READY_TIMEOUT_MS=${shown} (effective 30000ms;`);
     expect(note).toMatch(/^[\x20-\x7e]+$/);
+  });
+
+  it('leaves no raw bidi control, C0, C1, DEL or line separator in the note', () => {
+    const unsafe = Array.from({ length: 0x10000 }, (_, code) => String.fromCharCode(code))
+      .filter(char => /[\p{Bidi_Control}\x00-\x1f\x7f-\x9f\u2028\u2029]/u.test(char));
+    expect(unsafe).toContain('\u061c');
+    for (const char of unsafe) {
+      const note = describeStartupReadyTimeout(env(`a${char}b`), 30_000);
+      expect(note, `U+${char.charCodeAt(0).toString(16).padStart(4, '0')}`).not.toMatch(/\p{Bidi_Control}/u);
+      expect(note).toMatch(/^[\x20-\x7e]+$/);
+    }
   });
 
   it('marks a long value as truncated with its full length', () => {
