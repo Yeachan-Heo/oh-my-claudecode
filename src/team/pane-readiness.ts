@@ -279,6 +279,13 @@ export function detectPaneTrustPromptKind(
   return detectTrustPrompt(paneLines(captured), patternsFor(provider).trustKinds);
 }
 
+// Claude Code marks the focused choice of its trust dialog with ❯.
+export function paneShowsClaudeTrustYesFocused(captured: string): boolean {
+  return paneLines(captured)
+    .slice(-12)
+    .some((line) => /^\s*❯\s*Yes,\s*(?:proceed|I trust this folder)\b/i.test(line));
+}
+
 export function paneHasTrustPrompt(
   captured: string,
   provider?: CliAgentType,

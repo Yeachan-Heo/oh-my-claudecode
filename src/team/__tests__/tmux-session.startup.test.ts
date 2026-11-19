@@ -867,6 +867,7 @@ describe('worker pane startup safety', () => {
       const context = await acceptedContext('claude');
       tmuxState.captures = [
         `${question}\n❯ No, exit\n  ${affirmativeChoice}\n`,
+        `${question}\n  No, exit\n❯ ${affirmativeChoice}\n`,
         '❯ ready\n',
       ];
 

@@ -65,6 +65,7 @@ import {
   paneHasStartupBanner,
   paneHasTrustPrompt,
   paneLooksReady,
+  paneShowsClaudeTrustYesFocused,
   type PaneTrustPromptKind,
 } from "./pane-readiness.js";
 
@@ -4617,6 +4618,7 @@ export async function waitForStartupPaneReady(
       : 250;
   const deadline = Date.now() + timeoutMs;
   const handledSelectors = new Set<PaneTrustPromptKind>();
+  let claudeTrustDownSent = false;
 
   while (Date.now() < deadline) {
     if (!(await startupContextIsActive(context, opts.attemptAlreadyFenced)))
@@ -4660,12 +4662,21 @@ export async function waitForStartupPaneReady(
       if (handledSelectors.has(selector))
         return { ok: false, reason: "selector_persistent" };
       if (selector === "claude_directory") {
-        // This Claude Code dialog focuses "No, exit" by default; move to the affirmative choice.
-        await sendTeamPaneKey(
-          context.ownership.paneId,
-          "Down",
-          context.ownership.tmuxServerIdentity,
-        );
+        // This dialog focuses "No, exit" first. A busy Claude Code reads a Down
+        // and an Enter together and confirms the focus drawn before them, so
+        // Enter waits until the pane shows the affirmative choice focused.
+        if (!paneShowsClaudeTrustYesFocused(captured)) {
+          if (!claudeTrustDownSent) {
+            await sendTeamPaneKey(
+              context.ownership.paneId,
+              "Down",
+              context.ownership.tmuxServerIdentity,
+            );
+            claudeTrustDownSent = true;
+          }
+          await sleep(pollIntervalMs);
+          continue;
+        }
       } else {
         await sendLiteralPaneText(
           context.ownership.paneId,
