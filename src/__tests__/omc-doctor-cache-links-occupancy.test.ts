@@ -4,15 +4,16 @@ import { createHash } from 'node:crypto';
 import { existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import { commands, ageVersions, scriptOf, runCommand, digitVersions, backupDir, movedAside, PLUGIN_ID, makeCache, spellingsMeet, upperBelow, writeRegistry } from './helpers/omc-doctor-cache-fixture.js';
+import { commands, ageVersions, scriptOf, runCommand, digitVersions, backupDir, movedAside, PLUGIN_ID, makeCache, upperBelow, volumeFoldsCase, writeRegistry } from './helpers/omc-doctor-cache-fixture.js';
 // @ts-expect-error Standalone hook runtime source is intentionally JavaScript-only.
 import { publishCacheOccupancy } from '../../scripts/lib/cache-occupancy.mjs';
 
 describe('omc-doctor cache commands on a synthetic config directory (occupancy, links, platforms)', { timeout: 120_000 }, () => {
-  // A preload makes the command see another platform; the volumes of win32 and darwin ignore letter case by default.
+  // A preload makes the command see another platform; the volume under it stays the real one, and only the volume decides
+  // whether two spellings of a path name one directory.
   const platformPreload = (name: string) => `Object.defineProperty(process, 'platform', { value: '${name}' });\n`;
-  // Whether another spelling names an existing path with the real platform and no preload: by its name or by the volume.
-  const folds = spellingsMeet();
+  // Whether another spelling names an existing path here, without a preload: only where the volume folds letter case.
+  const folds = volumeFoldsCase();
   // A symlink on POSIX; a junction with an absolute target on Windows (no privilege needed), which is
   // also what the SessionStart cleanup creates there. `junction` forces that form on every platform.
   function link(target: string, at: string, form: 'relative' | 'junction' = 'relative') {
@@ -595,15 +596,16 @@ fs.readlinkSync = function () { const e = new Error('injected readlink failure')
     }
   });
 
-  // Two names of one directory are not a conflict: the variables are compared after resolving links, in the platform's case form.
+  // Two names of one directory are not a conflict: the variables are compared after resolving links, by device and inode.
+  // The platform name a process reports decides nothing: the alias of letter case names the directory where the volume folds case.
   test('the plugin root variables naming one directory through links or letter case are not a conflict', () => {
     const upperOf = (dir: string, cache: string) => upperBelow(dir, path.join(cache, '5.9.0'));
     const aliases: Array<{ label: string; simulated: false | 'win32' | 'darwin'; env: (dir: string, cache: string) => Record<string, string>; same: boolean }> = [
       { label: 'a link to the directory', simulated: false, same: true, env: (d, c) => { link(path.join(c, '5.9.0'), path.join(d, 'alias')); return { OMC_PLUGIN_ROOT: path.join(c, '5.9.0'), CLAUDE_PLUGIN_ROOT: path.join(d, 'alias') }; } },
       { label: 'a link to a link, the other variable one level deeper', simulated: false, same: true, env: (d, c) => { link(path.join(c, '5.9.0'), path.join(d, 'alias1')); link(path.join(d, 'alias1'), path.join(d, 'alias2')); return { OMC_PLUGIN_ROOT: path.join(d, 'alias2'), CLAUDE_PLUGIN_ROOT: path.join(c, '5.9.0') }; } },
-      { label: 'letter case only, win32', simulated: 'win32', same: true, env: (d, c) => ({ OMC_PLUGIN_ROOT: path.join(c, '5.9.0'), CLAUDE_PLUGIN_ROOT: upperOf(d, c) }) },
-      { label: 'letter case only, darwin', simulated: 'darwin', same: true, env: (d, c) => ({ OMC_PLUGIN_ROOT: path.join(c, '5.9.0'), CLAUDE_PLUGIN_ROOT: upperOf(d, c) }) },
-      { label: 'letter case only, platform that does not fold case (where the volume tells the names apart the alias names no directory and takes no part)', simulated: false, same: true, env: (d, c) => ({ OMC_PLUGIN_ROOT: path.join(c, '5.9.0'), CLAUDE_PLUGIN_ROOT: upperOf(d, c) }) },
+      { label: 'letter case only, reported as win32', simulated: 'win32', same: true, env: (d, c) => ({ OMC_PLUGIN_ROOT: path.join(c, '5.9.0'), CLAUDE_PLUGIN_ROOT: upperOf(d, c) }) },
+      { label: 'letter case only, reported as darwin', simulated: 'darwin', same: true, env: (d, c) => ({ OMC_PLUGIN_ROOT: path.join(c, '5.9.0'), CLAUDE_PLUGIN_ROOT: upperOf(d, c) }) },
+      { label: 'letter case only, reported as the real platform (where the volume tells the names apart the alias names no directory and takes no part)', simulated: false, same: true, env: (d, c) => ({ OMC_PLUGIN_ROOT: path.join(c, '5.9.0'), CLAUDE_PLUGIN_ROOT: upperOf(d, c) }) },
     ];
     for (const command of commands) {
       for (const { label, simulated, env, same } of aliases) {
@@ -684,7 +686,8 @@ fs.mkdirSync = function (target, ...rest) {
   // ---- Platforms: the command is plain Node, so these run everywhere; win32 is reported by a preload on the others ----
   const win32Preload = platformPreload('win32');
 
-  test('paths that differ from the cache only in letter case protect a version where the platform folds case', () => {
+  // Only the volume folds letter case: a process that reports win32 or darwin over a case-sensitive volume still tells the names apart.
+  test('paths that differ from the cache only in letter case protect a version where the volume folds case, whatever platform the process reports', () => {
     for (const command of commands) {
       for (const kind of ['installPath', 'installPath of another plugin', 'occupancy record'] as const) {
         for (const simulated of ['win32', 'darwin', false] as const) {
@@ -699,9 +702,8 @@ fs.mkdirSync = function (target, ...rest) {
             const preload = path.join(dir, 'platform.cjs');
             if (simulated) writeFileSync(preload, platformPreload(simulated));
             const result = runCommand(command, dir, simulated ? { preloads: [preload] } : {});
-            const caseFolded = simulated || folds;
             expect({ kind, simulated, status: result.status, versions: digitVersions(cache), moved: movedAside(dir) }).toEqual(
-              caseFolded
+              folds
                 ? { kind, simulated, status: 0, versions: '5.1.0,5.9.0', moved: 1 }
                 : { kind, simulated, status: 0, versions: '5.1.0', moved: 2 },
             );

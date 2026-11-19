@@ -125,9 +125,10 @@ export function writeCaseFoldPreload(dir: string) {
 }
 
 // Whether the volume under `dir` ignores letter case (NTFS, the usual APFS, a casefold ext4 directory, a Windows drive
-// seen from WSL2): a file created as `CaseProbe` is found as `caseprobe`. The commands compare paths by device and inode
-// as well as by name, so a spelling in another letter case names the same directory wherever the volume folds it,
-// whatever platform name the process reports. `statSync` is what the commands call, so it is what the probe calls.
+// seen from WSL2): a file created as `CaseProbe` is found as `caseprobe`. The commands compare existing paths by device
+// and inode, so a spelling in another letter case names the same directory wherever the volume folds it and another
+// directory wherever it does not, whatever platform name the process reports: they never fold letter case by the name
+// of the platform. `statSync` is what the commands call, so it is what the probe calls.
 export function volumeFoldsCase(dir: string = tmpdir()): boolean {
   const probe = mkdtempSync(path.join(dir, 'omc-case-probe-'));
   try {
@@ -142,11 +143,6 @@ export function volumeFoldsCase(dir: string = tmpdir()): boolean {
     rmSync(probe, { recursive: true, force: true });
   }
 }
-
-// Whether another spelling of an existing path names it: the platform the command sees folds letter case by name
-// (win32 and darwin, reported by the process or by a preload) or the volume folds it. Neither alone is the answer.
-export const spellingsMeet = (platform: string = process.platform, dir?: string): boolean =>
-  platform === 'win32' || platform === 'darwin' || volumeFoldsCase(dir);
 
 // `target` spelled in upper case below the parent of the fixture directory `dir`. Only that part is on the volume under
 // test: the ancestors of the temporary directory may sit on another volume with other case rules (a casefold directory

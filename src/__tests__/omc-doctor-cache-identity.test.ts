@@ -2,11 +2,11 @@ import { describe, test, expect } from 'vitest';
 import { mkdirSync, readdirSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { createHash } from 'node:crypto';
 import path from 'node:path';
-import { commands, ageVersions, runCommand, digitVersions, backupDir, movedAside, PLUGIN_ID, makeCache, spellingsMeet, upperBelow, writeCaseFoldPreload, writeRegistry } from './helpers/omc-doctor-cache-fixture.js';
+import { commands, ageVersions, runCommand, digitVersions, backupDir, movedAside, PLUGIN_ID, makeCache, upperBelow, volumeFoldsCase, writeCaseFoldPreload, writeRegistry } from './helpers/omc-doctor-cache-fixture.js';
 
 describe('omc-doctor cache commands on a synthetic config directory (identity of paths)', { timeout: 120_000 }, () => {
-  // Whether another spelling names an existing path here, without a preload: by the platform name or by the volume.
-  const folds = spellingsMeet();
+  // Whether another spelling names an existing path here, without a preload: only where the volume folds letter case.
+  const folds = volumeFoldsCase();
   // A symlink on POSIX; a junction with an absolute target on Windows (no privilege needed).
   function link(target: string, at: string) {
     if (process.platform === 'win32') symlinkSync(path.resolve(path.dirname(at), target), at, 'junction');
