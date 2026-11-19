@@ -18,10 +18,17 @@ a. Inputs. --projects DIR holds session transcripts as DIR/<project>/<session>.j
    the Jev boundaries of that period are undercounted. Input files are only read. The only files written are
    --out and --locators: both must not exist before the run, and both are created with mode 0600.
 
-b. Compaction boundary. Host boundary: a transcript row with type "system" and subtype "compact_boundary";
-   its time is its timestamp. Jev boundary: a journal row with event "compact", result "jev" and no
-   agent_id (or agent_id null); its session is session_id and its time is ts. Counts are kept apart for
-   host and Jev. Boundaries outside the period are ignored.
+b. Compaction boundary. A transcript row with type "system" and subtype "compact_boundary" is one boundary;
+   its time is its timestamp. A journal row (event "compact", result "jev" or "fallback", no agent_id or
+   agent_id null, a readable ts) and a transcript boundary of the same session are two observations of one
+   compaction when their times differ by at most 600 s. Pairing is the rule of the ask probe and the harm
+   monitor: pairs (transcript boundary, journal row) sort by distance, then by file and line of the boundary,
+   then by journal line; a pair is taken when neither side is used yet. A transcript boundary paired with a
+   "jev" row is a Jev boundary; any other transcript boundary (unpaired, or paired with a "fallback" row) is a
+   host boundary. A "jev" journal row inside the period that pairs with no transcript boundary is a Jev
+   boundary on its own (its time is ts). Every real compaction is therefore one boundary in the counts. Counts
+   are kept apart for host and Jev. Boundaries outside the period are ignored; the journal row of a pair may
+   lie outside the period.
 
 c. User message. A transcript row with type "user" and message.role "user", without isMeta true, without
    isCompactSummary true, without isVisibleInTranscriptOnly true, without a toolUseResult field and without any
@@ -146,6 +153,8 @@ RULE_TEXT_V1 = __doc__.split("\nRULE v2\n")[0]
 # Rules v1 and v2 text: the docstring up to the rule v3 heading (the report field "rule" for --rule 2).
 RULE_TEXT_V2 = __doc__.split("\nRULE v3\n")[0]
 DAY_SECONDS = 86400.0
+# A journal row and a transcript boundary this close in time are one compaction (rule b).
+PAIR_WINDOW_S = 600.0
 MIN_TARGET_LENGTH = 3
 # Text prefixes that mark a block as not spoken by the user. The work-state marker is data, as in the
 # human-message predicate of the ask probe.
@@ -532,8 +541,8 @@ def read_transcript(path, start, end, stats, rule=1):
 
 
 def read_compact_log(path, start, end, stats):
-    """Jev boundaries (rule b) grouped by session_id."""
-    boundaries = {}
+    """Journal rows of the main thread (result jev or fallback) grouped by session_id, with their times."""
+    rows = {}
     with open(path, encoding="utf-8", errors="replace") as handle:
         for nr, line in enumerate(handle, 1):
             text = line.strip()
@@ -545,18 +554,43 @@ def read_compact_log(path, start, end, stats):
             except ValueError:
                 stats["journal_bad_lines"] += 1
                 continue
-            if not isinstance(row, dict) or row.get("event") != "compact" or row.get("result") != "jev":
+            if not isinstance(row, dict) or row.get("event") != "compact" or row.get("result") not in ("jev", "fallback"):
                 continue
-            if row.get("agent_id") is not None:
+            if row.get("agent_id") not in (None, "", "null"):
                 continue
             ts = parse_ts(row.get("ts"))
             if ts is None:
-                stats["journal_without_time"] += 1
+                if row.get("result") == "jev":
+                    stats["journal_without_time"] += 1
                 continue
-            if ts < start or ts > end:
-                continue
-            boundaries.setdefault(row.get("session_id"), []).append(
-                {"ts": ts, "kind": "jev", "nr": nr, "file": path})
+            rows.setdefault(row.get("session_id"), []).append(
+                {"ts": ts, "kind": "jev", "nr": nr, "file": path, "result": row.get("result"),
+                 "in_period": start <= ts <= end})
+    return rows
+
+
+def pair_journal_rows(session, journal_rows):
+    """Rule b: pairs the transcript boundaries of one session with its journal rows and returns the boundaries
+    of the session. Paired rows are removed from journal_rows, so that a row is used once in the whole run."""
+    pairs = []
+    for boundary in session["boundaries"]:
+        for row in journal_rows:
+            distance = abs(row["ts"] - boundary["ts"])
+            if distance <= PAIR_WINDOW_S:
+                pairs.append((distance, boundary["file"], boundary["nr"], row["nr"], boundary, row))
+    pairs.sort(key=lambda pair: pair[:4])
+    taken = set()
+    boundaries = []
+    for _distance, _file, _nr, _row_nr, boundary, row in pairs:
+        if "paired" in boundary or id(row) in taken:
+            continue
+        taken.add(id(row))
+        boundary["paired"] = True
+        if row["result"] == "jev":
+            boundary["kind"] = "jev"
+    journal_rows[:] = [row for row in journal_rows if id(row) not in taken]
+    boundaries += session["boundaries"]
+    boundaries += [row for row in journal_rows if row["result"] == "jev" and row["in_period"]]
     return boundaries
 
 
@@ -783,6 +817,7 @@ def group_locators_v2(records):
 
 def new_totals():
     return {"sessions": 0, "sessions_with_boundary": 0, "sessions_with_candidate": 0, "boundaries_host": 0,
+            "boundaries_jev_paired": 0,
             "messages_in_period": 0, "messages_before_boundary": 0, "messages_with_prohibition": 0,
             "prohibitions_total": 0, "prohibitions_with_target": 0, "prohibitions_general": 0, "candidates_total": 0,
             "prohibitions_by_class": Counter(), "candidates_by_class": Counter(),
@@ -790,10 +825,11 @@ def new_totals():
             "prohibitions_revoked": 0, "calls": set(), "prohibitions_with_candidate": set(), "history_groups": set()}
 
 
-def analyse_session(session, jev_boundaries, totals, rule=1):
+def analyse_session(session, journal_rows, totals, rule=1):
     """Adds one session to the totals; returns its locator rows (rule v1: one per call, rule v2: one per prohibition)."""
-    boundaries = sorted(session["boundaries"] + jev_boundaries, key=lambda item: item["ts"])
-    totals["boundaries_host"] += len(session["boundaries"])
+    boundaries = sorted(pair_journal_rows(session, journal_rows), key=lambda item: item["ts"])
+    totals["boundaries_host"] += sum(1 for item in session["boundaries"] if item["kind"] == "host")
+    totals["boundaries_jev_paired"] += sum(1 for item in session["boundaries"] if item["kind"] == "jev")
     totals["messages_in_period"] += len(session["messages"])
     if boundaries:
         totals["sessions_with_boundary"] += 1
@@ -984,7 +1020,9 @@ def main(argv):
             if session["rows_in_period"]:
                 totals["sessions"] += 1
             locators += analyse_session(session, jev.get(session["id"], []), totals, args.rule)
-        jev_total = sum(len(items) for items in jev.values())
+        # Jev boundaries: transcript boundaries paired with a "jev" row, and "jev" rows of the period left unpaired.
+        jev_unpaired = sum(1 for items in jev.values() for item in items if item["result"] == "jev" and item["in_period"])
+        jev_total = totals["boundaries_jev_paired"] + jev_unpaired
         report = build_report(args, now, start, end, files, totals, jev_total, stats)
         text = json.dumps(report, ensure_ascii=False, indent=2) + "\n"
         locator_text = "".join(json.dumps(item, ensure_ascii=False) + "\n" for item in locators)

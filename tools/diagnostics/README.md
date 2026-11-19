@@ -603,8 +603,8 @@ holds the transcript path of each candidate.
 - `python3` (standard library only). Run it in isolated mode with `python3 -I`.
 - Inputs are only read: transcripts under `--projects` (default `$CLAUDE_CONFIG_DIR/projects`, else
   `~/.claude/projects`; subagent transcripts are counted, not read) and, optionally, the compaction journal
-  `--compact-log` (rows with `event` `compact`, `result` `jev` and no `agent_id` are Jev boundaries; the
-  journal is described under the harm monitor above). Only the file given as `--compact-log` is read: when
+  `--compact-log` (rows with `event` `compact`, result `jev` or `fallback` and no `agent_id`; the journal is
+  described under the harm monitor above). Only the file given as `--compact-log` is read: when
   `OMC_JEV_LOG_MAX_MB` has rotated the journal, the older rows are in the rotated files next to it, which are
   not read, so the Jev boundaries of that period are undercounted. The files written are `--out` and
   `--locators`, both new files with mode `0600`; they must be two different paths, and when the second write
@@ -622,6 +622,11 @@ Without `--out` the JSON report goes to standard output and the summary line to 
 The full rules (a to f for rule 1, then rules 2 and 3) are in the script docstring, written before a
 measurement. In short:
 
+- A compaction is one boundary. A journal row and a transcript `compact_boundary` of the same session that are
+  at most 600 s apart are the same compaction (the pairing rule of the ask probe and the harm monitor: closest
+  pair first, each side used once). A transcript boundary paired with a `jev` row is a Jev boundary; every
+  other transcript boundary, including one paired with a `fallback` row, is a host boundary. A `jev` row of the
+  period that pairs with no transcript boundary is a Jev boundary on its own.
 - A user message is a `user` row without `isMeta`, `isCompactSummary`, `isVisibleInTranscriptOnly`,
   `toolUseResult` or a `tool_result` block; reminder fragments are cut from its blocks.
 - A prohibition is a user message that matches a prohibition pattern; it has targets (backtick text, absolute

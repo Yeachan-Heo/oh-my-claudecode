@@ -163,6 +163,66 @@ describe('user prohibitions after compaction', () => {
     expect(push.boundary_file.endsWith('compaction.jsonl')).toBe(true);
   });
 
+  it('a journal row and the transcript boundary of one compaction are one Jev boundary', () => {
+    const rows = [user(1, 'Do not push, please'), host(2), call(3, 'Bash', { command: 'git push origin main' }, 'c1')];
+    const { report, locators } = run('paired-jev', { 'p/s30.jsonl': rows }, { compact: [jev('s30', 2)] });
+    expect(report.boundaries).toEqual({ host: 0, jev: 1 });
+    expect(report.candidates.by_boundary).toEqual({ host: 0, jev: 1 });
+    expect(report.results[0]).toMatchObject({ name: 'candidates by boundary host', numerator: 0, denominator: 0 });
+    expect(report.results[1]).toMatchObject({ name: 'candidates by boundary jev', numerator: 1, denominator: 1, share: 1 });
+    expect([locators[0].boundary, locators[0].boundary_line]).toEqual(['jev', 2]);
+    expect(locators[0].boundary_file.endsWith('s30.jsonl')).toBe(true);
+    // The same holds when the journal time is a few seconds after the transcript boundary, so the order of the two does not matter.
+    const later = run('paired-jev-later', { 'p/s31.jsonl': [user(1, 'Do not push'), host(2), call(4, 'Bash', { command: 'git push' }, 'c1')] },
+      { compact: [{ ...jev('s31', 2), ts: '2026-11-15T10:02:05.000Z' }] });
+    expect(later.report.boundaries).toEqual({ host: 0, jev: 1 });
+    expect(later.report.candidates.by_boundary).toEqual({ host: 0, jev: 1 });
+  });
+
+  it('a transcript boundary without a journal row is a host boundary next to a paired Jev one', () => {
+    const rows = [user(1, 'Do not push'), host(2), host(40), call(41, 'Bash', { command: 'git push' }, 'c1')];
+    const { report } = run('paired-mixed', { 'p/s32.jsonl': rows }, { compact: [jev('s32', 2)] });
+    expect(report.boundaries).toEqual({ host: 1, jev: 1 });
+    expect(report.candidates.by_boundary).toEqual({ host: 0, jev: 1 });
+    const hostOnly = run('host-only-boundary', { 'p/s33.jsonl': [user(1, 'Do not push'), host(2), call(3, 'Bash', { command: 'git push' }, 'c1')] },
+      { compact: [jev('other-session', 2)] });
+    expect(hostOnly.report.boundaries).toEqual({ host: 1, jev: 1 });
+    expect(hostOnly.report.candidates.by_boundary).toEqual({ host: 1, jev: 0 });
+  });
+
+  it('pairing follows the window and consumes rows: far rows stay apart, one row takes one boundary', () => {
+    const far = run('pair-far', { 'p/s34.jsonl': [user(1, 'Do not push'), host(2), call(3, 'Bash', { command: 'git push' }, 'c1')] },
+      { compact: [jev('s34', 20)] });
+    expect(far.report.boundaries).toEqual({ host: 1, jev: 1 });
+    const once = run('pair-once', { 'p/s35.jsonl': [user(1, 'Do not push'), host(2), host(5), call(6, 'Bash', { command: 'git push' }, 'c1')] },
+      { compact: [jev('s35', 4)] });
+    // The journal row is 120 s from the first boundary and 60 s from the second: the closer boundary takes it.
+    expect(once.report.boundaries).toEqual({ host: 1, jev: 1 });
+    expect(once.report.candidates.by_boundary).toEqual({ host: 1, jev: 0 });
+    const closer = run('pair-closer', { 'p/s36.jsonl': [user(1, 'Do not push'), host(2), host(5), call(6, 'Bash', { command: 'git push' }, 'c1')] },
+      { compact: [{ ...jev('s36', 5), ts: '2026-11-15T10:05:10.000Z' }] });
+    expect(closer.report.boundaries).toEqual({ host: 1, jev: 1 });
+    expect(closer.report.candidates.by_boundary).toEqual({ host: 1, jev: 0 });
+  });
+
+  it('a journal row just outside the period still pairs with the boundary inside it', () => {
+    const rows = [
+      { ...user(1, 'Do not push'), timestamp: '2026-11-09T12:01:00.000Z' },
+      host(2, '2026-11-09T12:02:00.000Z'),
+      { ...call(3, 'Bash', { command: 'git push' }, 'c1'), timestamp: '2026-11-09T12:03:00.000Z' },
+    ];
+    const { report } = run('pair-edge', { 'p/s38.jsonl': rows }, { compact: [{ ...jev('s38', 0), ts: '2026-11-09T11:58:00.000Z' }] });
+    expect(report.boundaries).toEqual({ host: 0, jev: 1 });
+    expect(report.candidates.by_boundary).toEqual({ host: 0, jev: 1 });
+  });
+
+  it('a boundary paired with a fallback row is a host boundary', () => {
+    const rows = [user(1, 'Do not push'), host(2), call(3, 'Bash', { command: 'git push' }, 'c1')];
+    const { report } = run('paired-fallback', { 'p/s37.jsonl': rows }, { compact: [jev('s37', 2, 'fallback')] });
+    expect(report.boundaries).toEqual({ host: 1, jev: 0 });
+    expect(report.candidates.by_boundary).toEqual({ host: 1, jev: 0 });
+  });
+
   it("a don't-form prohibition with a git -C commit", () => {
     const rows = [user(1, "Don't commit this yet"), host(2), call(3, 'Bash', { command: 'git -C /srv/repo commit -m x' }, 'c1')];
     expect(run('english', { 'p/s14.jsonl': rows }).report.candidates.by_class).toEqual({ commit: 1 });
