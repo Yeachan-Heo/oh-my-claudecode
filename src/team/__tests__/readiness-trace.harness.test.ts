@@ -33,9 +33,11 @@ vi.mock('../../cli/tmux-utils.js', async importOriginal => {
   };
 });
 
-import { deliverStartupInbox, retryStartupInboxSubmit, sendToWorker } from '../tmux-session.js';
+import {
+  deliverStartupInbox, probeStartupPaneActivity, retryStartupInboxSubmit, sendToWorker, startupProviderExited,
+} from '../tmux-session.js';
 import { DEFAULT_NUDGE_CONFIG, NudgeTracker, isPaneIdle } from '../idle-nudge.js';
-import { getWorkerStartupEvidencePolicy, settleStartupEvidence } from '../runtime-v2.js';
+import { getWorkerStartupEvidencePolicy, settleStartupEvidence, waitForStartupEvidenceBudget } from '../runtime-v2.js';
 import { currentStrictProcessStartIdentity } from '../team-owner-epoch.js';
 import { awaitWorkerLaunchAcknowledgement, prepareWorkerLaunchAttempt } from '../worker-launch-ack.js';
 
@@ -110,6 +112,49 @@ const providerEvents = await import('../provider-events.js').catch(() => null);
 
 const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
 
+const recheckEvidenceAtMs = (provider: StartupPaneContext['provider']): number => {
+  const policy = getWorkerStartupEvidencePolicy(provider);
+  return policy.initialBudgetMs + policy.resubmitAttempts * policy.resubmitBudgetMs + 500;
+};
+
+function settleCase(
+  fixture: Fixture,
+  context: StartupPaneContext,
+  evidence: string,
+  evidenceAtMs: number | null,
+  control: boolean,
+): TraceCase {
+  const resubmit = () => retryStartupInboxSubmit(context, PENDING_TRIGGER, { attemptAlreadyFenced: true });
+  const interactiveExternal = fixture.provider === 'codex' || fixture.provider === 'cursor';
+  return {
+    case: `${fixture.file} settleStartupEvidence evidence=${evidence}`,
+    fn: 'settleStartupEvidence',
+    fixture: fixture.file,
+    eventState: null,
+    env: {},
+    control,
+    run: () => {
+      const startedAt = Date.now();
+      // The production poll (waitForStartupEvidenceBudget, 250ms) over a claim
+      // that appears at evidenceAtMs.
+      const waitForCurrentEvidence = (budgetMs: number) => waitForStartupEvidenceBudget(
+        async () => evidenceAtMs !== null && Date.now() - startedAt >= evidenceAtMs,
+        budgetMs,
+        undefined,
+        () => startupProviderExited(context),
+      );
+      return settleStartupEvidence(
+        getWorkerStartupEvidencePolicy(fixture.provider),
+        waitForCurrentEvidence,
+        interactiveExternal ? undefined : resubmit,
+        interactiveExternal
+          ? () => probeStartupPaneActivity(context, { attemptAlreadyFenced: true })
+          : undefined,
+      );
+    },
+  };
+}
+
 // Every startup-readiness and nudge path on one fixture, as dev drives them.
 function r6Cases(fixture: Fixture, context: StartupPaneContext): TraceCase[] {
   const base = { fixture: fixture.file, eventState: null, env: {} };
@@ -133,18 +178,12 @@ function r6Cases(fixture: Fixture, context: StartupPaneContext): TraceCase[] {
       control: isResubmitControl,
       run: resubmit,
     },
-    {
-      ...base,
-      case: `${fixture.file} settleStartupEvidence`,
-      fn: 'settleStartupEvidence',
-      control: isResubmitControl,
-      // No worker evidence ever appears; claude resubmits as runtime-v2 does.
-      run: () => settleStartupEvidence(
-        getWorkerStartupEvidencePolicy(fixture.provider),
-        async budgetMs => { await sleep(budgetMs); return false; },
-        fixture.provider === 'claude' ? resubmit : undefined,
-      ),
-    },
+    // As runtime-v2 drives it for an interactive worker: claude resubmits,
+    // codex and cursor get the read-only activity probe instead.
+    settleCase(fixture, context, 'never', null, isResubmitControl),
+    // Evidence lands just after the resubmit window, so it is read during the
+    // final or engaged recheck and startup succeeds.
+    settleCase(fixture, context, 'in-recheck', recheckEvidenceAtMs(fixture.provider), isResubmitControl),
     {
       ...base,
       case: `${fixture.file} isPaneIdle`,
