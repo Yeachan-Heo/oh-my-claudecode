@@ -3115,6 +3115,26 @@ async function finalizeRecoveryPastDeadline(
         )
       )
         return null;
+      // A launch persisted by a predecessor owner outlives its in-memory
+      // pending pane. Only its resume path can settle it.
+      const persistedLaunch = await readFile(
+        absPath(
+          input.cwd,
+          TeamPaths.workerLaunchCurrent(input.teamName, input.workerName),
+        ),
+        "utf8",
+      ).then(
+        (text) => {
+          const { context } = JSON.parse(text) as {
+            context?: { kind?: unknown; recovery_id?: unknown } | null;
+          };
+          return (
+            context?.kind === "recovery" && context.recovery_id === recoveryId
+          );
+        },
+        (error: NodeJS.ErrnoException) => error.code !== "ENOENT",
+      ).catch(() => true);
+      if (persistedLaunch) return null;
       const progress = readRecoveryOutcome(input.cwd, input.requestId);
       if (
         progress?.kind === "final" ||
