@@ -442,9 +442,120 @@ const TEMP_TARGET = new RegExp(
 );
 
 /**
+ * Split shell text into words, one pass. Quotes and backslashes are removed from a word (a quoted empty
+ * string is an empty word); `null` marks where an unquoted `;`, `&`, `|`, `(`, `)`, newline or redirection
+ * ends the words of a command (a file descriptor digit before `<` or `>` is dropped with it).
+ */
+function shellWords(text) {
+  const out = [];
+  let word = null;
+  const flush = () => {
+    if (word !== null) out.push(word);
+    word = null;
+  };
+  const boundary = () => {
+    flush();
+    if (out.at(-1) !== null) out.push(null);
+  };
+  for (let i = 0; i < text.length; i += 1) {
+    const ch = text[i];
+    if (ch === '\\') {
+      const next = text[i + 1] ?? '';
+      if (next === '\n' || (next === '\r' && text[i + 2] === '\n')) i += next === '\n' ? 1 : 2; // a continuation joins lines
+      else {
+        word = (word ?? '') + next;
+        i += 1;
+      }
+    } else if (ch === "'") {
+      const close = text.indexOf("'", i + 1);
+      const end = close === -1 ? text.length : close;
+      word = (word ?? '') + text.slice(i + 1, end);
+      i = end;
+    } else if (ch === '"') {
+      let end = i + 1;
+      let inner = '';
+      while (end < text.length && text[end] !== '"') {
+        if (text[end] === '\\' && end + 1 < text.length) end += 1;
+        inner += text[end];
+        end += 1;
+      }
+      word = (word ?? '') + inner;
+      i = end;
+    } else if (ch === '\n' || ';&|()'.includes(ch)) {
+      boundary();
+    } else if (ch === '<' || ch === '>') {
+      if (word !== null && /^\d+$/.test(word)) word = null;
+      boundary();
+    } else if (ch === ' ' || ch === '\t' || ch === '\r') {
+      flush();
+    } else {
+      word = (word ?? '') + ch;
+    }
+  }
+  flush();
+  return out;
+}
+
+/** Stands for the files of an in-place edit that names none: they come from input, so they count as code. */
+const UNKNOWN_TARGET = '(files from input)';
+
+/**
+ * The files an in-place `sed` or `perl` edits, from the words after the program name: the operands that
+ * remain once options and the script are skipped. The script is the first operand unless `-e`/`-E` (perl),
+ * `-e`/`-f` or `--expression`/`--file` (sed) gave it. Options may come after operands; `--` ends them.
+ * An in-place flag is `-i` anywhere in a short cluster (`-i`, `-ni`, `-pi.bak`, `-0777pi`), the rest of
+ * the cluster being its suffix, or `--in-place[=SUFFIX]`. An empty word right after a bare sed `-i` is
+ * its suffix (BSD form). An in-place edit with no file operand (`... | xargs sed -i 's/a/b/'`) gets
+ * UNKNOWN_TARGET. Other commands give no targets.
+ */
+function inPlaceTargets(program, args) {
+  const perl = program === 'perl';
+  let inPlace = false;
+  let hasScript = false;
+  const operands = [];
+  for (let i = 0; i < args.length; i += 1) {
+    const arg = args[i];
+    if (arg === '--') {
+      operands.push(...args.slice(i + 1));
+      break;
+    }
+    if (arg.startsWith('--')) {
+      const name = arg.split('=')[0];
+      if (!perl && name === '--in-place') inPlace = true;
+      else if (!perl && (name === '--expression' || name === '--file')) hasScript = true;
+      if (!perl && ['--expression', '--file', '--line-length'].includes(arg)) i += 1; // the value is the next word
+    } else if (arg.startsWith('-') && arg.length > 1) {
+      for (let at = 1; at < arg.length; at += 1) {
+        const flag = arg[at];
+        const last = at === arg.length - 1;
+        if (flag === 'i') {
+          inPlace = true;
+          if (!perl && last && args[i + 1] === '') i += 1;
+          break;
+        }
+        if (perl ? flag === 'e' || flag === 'E' : flag === 'e' || flag === 'f') {
+          hasScript = true;
+          if (last) i += 1;
+          break;
+        }
+        if (perl ? 'MmIFCdDx'.includes(flag) : flag === 'l') {
+          if (last && !perl) i += 1;
+          break;
+        }
+      }
+    } else {
+      operands.push(arg);
+    }
+  }
+  if (!inPlace) return [];
+  const files = (hasScript ? operands : operands.slice(1)).filter((operand) => operand !== '');
+  return files.length > 0 ? files : [UNKNOWN_TARGET];
+}
+
+/**
  * Files a shell command writes by redirection, `tee`, a heredoc with a target, or an in-place
- * `sed`/`perl`. Quoted strings hold text, not redirections, except a file name quoted right
- * after `>` or `tee`.
+ * `sed`/`perl` (its file operands). Quoted strings hold text, not redirections, except a file name
+ * quoted right after `>` or `tee`.
  */
 function shellWriteTargets(command) {
   const QUOTED = String.raw`"[^"]*"|'[^']*'`;
@@ -459,15 +570,14 @@ function shellWriteTargets(command) {
   for (const m of shell.matchAll(/\btee\s+([^;&|)<>]+)/g)) {
     for (const t of m[1].split(/\s+/)) if (t && !t.startsWith('-')) targets.push(t);
   }
-  // `-i` alone or in a cluster (`-Ei`, `-pi.bak`); perl's `-M`/`-I` take a word, not flags.
-  const SED_IN_PLACE = /^(?:-[a-zA-Z]*i|--in-place)/;
-  const PERL_IN_PLACE = /^-(?![MI])[a-zA-Z0]*i/;
-  for (const m of text.matchAll(/\b(?:sed|perl)\s+[^;&|\n]+/g)) {
-    const flag = m[0].startsWith('perl') ? PERL_IN_PLACE : SED_IN_PLACE;
-    for (const t of m[0].split(/\s+/)) {
-      if (/^\d?[<>]/.test(t)) break;
-      if (flag.test(t)) { targets.push(t); break; }
-    }
+  const words = shellWords(text);
+  for (let i = 0; i < words.length; i += 1) {
+    const program = words[i] === null ? undefined : /(?:^|\/)(sed|perl)$/.exec(words[i])?.[1];
+    if (program === undefined) continue;
+    let end = i + 1;
+    while (end < words.length && words[end] !== null) end += 1;
+    targets.push(...inPlaceTargets(program, words.slice(i + 1, end)));
+    i = end; // the words up to the boundary were its arguments
   }
   return targets;
 }

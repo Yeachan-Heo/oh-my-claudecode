@@ -287,6 +287,80 @@ it('mutations: bash shell writes', () => {
   assert.equal(isMutation('Bash', null), false);
 });
 
+it('in-place sed and perl: the file operands decide, not the flag', () => {
+  const edits = (command: string) => isMutation('Bash', { command });
+  // Documentation, lockfiles and temp paths are not code; a source file is.
+  for (const file of ['README.md', 'package-lock.json', '/tmp/x.ts', 'docs/guide.ts', '/var/tmp/x.ts']) {
+    assert.equal(edits(`sed -i 's/a/b/' ${file}`), false, `sed -i ${file}`);
+    assert.equal(edits(`perl -pi -e 's/a/b/' ${file}`), false, `perl -pi ${file}`);
+  }
+  assert.equal(edits("sed -i 's/a/b/' src/a.ts"), true);
+  assert.equal(edits("perl -pi -e 's/a/b/' src/a.ts"), true);
+  // Suffix forms and clusters: `-i.bak`, `-i ''` (BSD), `-ni`, `-Ei`, `--in-place[=SUFFIX]`, `-0777pi`, `-lpi`.
+  assert.equal(edits("sed -i.bak 's/a/b/' README.md"), false);
+  assert.equal(edits("sed -i.bak 's/a/b/' src/a.ts"), true);
+  assert.equal(edits("sed -i '' 's/a/b/' README.md"), false);
+  assert.equal(edits("sed -i '' 's/a/b/' src/a.ts"), true);
+  assert.equal(edits("sed -ni 's/a/b/p' README.md"), false);
+  assert.equal(edits("sed -Ei 's/a/b/' src/a.ts"), true);
+  assert.equal(edits("sed --in-place 's/a/b/' README.md"), false);
+  assert.equal(edits("sed --in-place=.bak 's/a/b/' README.md"), false);
+  assert.equal(edits("sed --in-place=.bak 's/a/b/' src/a.ts"), true);
+  assert.equal(edits("perl -pi.bak -e 's/a/b/' package-lock.json"), false);
+  assert.equal(edits("perl -i.bak -pe 's/a/b/' src/a.ts"), true);
+  assert.equal(edits("perl -0777pi -e 's/a/b/' README.md"), false);
+  assert.equal(edits("perl -0777pi -e 's/a/b/' src/a.ts"), true);
+  assert.equal(edits("perl -lpi -e 's/a/b/' docs/a.ts"), false);
+  assert.equal(edits("perl -MFoo -pi -e 's/a/b/' README.md"), false);
+  // The script is skipped: given by -e or -f, or the first operand; options may follow operands.
+  assert.equal(edits("sed -i -e 's/a/b/' -e 's/c/d/' README.md"), false);
+  assert.equal(edits("sed -i -e 's/a/b/' src/a.ts"), true);
+  assert.equal(edits('sed -i -f edit.sed README.md'), false, 'the script file is not a target');
+  assert.equal(edits('sed -i -f edit.sed src/a.ts'), true);
+  assert.equal(edits("sed --expression 's/a/b/' --in-place README.md"), false);
+  assert.equal(edits("sed --expression='s/a/b/' -i src/a.ts"), true);
+  assert.equal(edits("sed 's/a/b/' -i README.md"), false);
+  assert.equal(edits("sed -i -- 's/a/b/' README.md"), false);
+  assert.equal(edits("sed -i 's/a/b/' -- src/a.ts"), true);
+  assert.equal(edits('perl -pi edit.pl README.md'), false, 'the program file is not a target');
+  assert.equal(edits('perl -pi edit.pl src/a.ts'), true);
+  // Several files: one code file among ignored ones is a change.
+  assert.equal(edits("sed -i 's/a/b/' README.md docs/x.ts"), false);
+  assert.equal(edits("sed -i 's/a/b/' README.md src/a.ts"), true);
+  // A `;` inside the script, a redirect, a later command: the arguments end where the command ends.
+  assert.equal(edits("sed -i 's/a;b/c/' README.md"), false);
+  assert.equal(edits("sed -i 's/a/b/' README.md && npm test"), false);
+  assert.equal(edits("sed -i 's/a/b/' README.md 2>&1 | tail"), false);
+  assert.equal(edits("sed -i 's/a/b/' README.md; echo x > src/a.ts"), true, 'a later redirect still counts');
+  // No in-place flag: no edit; files from input or a variable are unknown, so they count as code.
+  assert.equal(edits("sed -n 's/a/b/p' src/a.ts"), false);
+  assert.equal(edits("sed 's/a/b/' src/a.ts > /tmp/out.ts"), false);
+  assert.equal(edits("perl -pe 's/a/b/' src/a.ts"), false);
+  assert.equal(edits("git ls-files | xargs sed -i 's/a/b/'"), true);
+  assert.equal(edits("find . -name '*.ts' -exec sed -i 's/a/b/' {} +"), true);
+  assert.equal(edits('sed -i "s/a/b/" "$FILE"'), true);
+  assert.equal(edits('/usr/bin/sed -i s/a/b/ src/a.ts'), true);
+  assert.equal(edits('echo "sed -i x src/a.ts"'), false, 'quoted text is not a command');
+});
+
+it('in-place edit parsing is linear in the length of the command', () => {
+  const long = (piece: string) => piece.repeat(Math.ceil(40000 / piece.length));
+  const got = classifyInChild<boolean>([
+    long('sed '),
+    long('sed -i '),
+    long('perl -pi -e '),
+    `sed -i x ${long('a ')}`,
+    `sed -i ${long("'a' ")}`,
+    long("'"),
+    long('"'),
+    long('\\'),
+    `${long(' ; ')}sed -i x README.md`,
+    `sed -i 's/a/b/' ${long('docs/a.md ')}`,
+  ], 'isMutation', "isMutation('Bash', { command })");
+  assert.equal(got.length, 10);
+  assert.equal(got[9], false, 'a long list of ignored files stays ignored');
+});
+
 it('a runner that writes to the null device is a check, not a mutation; echo of a runner into code is a mutation', () => {
   assert.equal(isMutation('Bash', { command: 'npm test > /dev/null' }), false);
   assert.equal(isMutation('Bash', { command: 'echo npm test > src/a.ts' }), true);
@@ -304,15 +378,20 @@ it('temp directories cover the macOS variants and match whole path segments only
 
 // A synchronous regular expression cannot be interrupted from the test process, so the long inputs run in a
 // child process with a hard timeout: a catastrophic pattern fails the test instead of hanging the run.
-function classifyInChild(commands: string[]): Array<{ isCheck: boolean; kind: string | null }> {
+// `call` is the expression evaluated for each command, with the exported function named in `name`.
+function classifyInChild<T = { isCheck: boolean; kind: string | null }>(
+  commands: string[], name = 'classifyCommand', call = 'classifyCommand(command)',
+): T[] {
   const moduleUrl = new URL('../../tools/diagnostics/check_classifier.mjs', import.meta.url).href;
   const script = `
-    import { classifyCommand } from ${JSON.stringify(moduleUrl)};
+    import { readFileSync } from 'node:fs';
+    import { ${name} } from ${JSON.stringify(moduleUrl)};
     const started = Date.now();
-    const out = JSON.parse(process.argv[1]).map((command) => classifyCommand(command));
+    const out = JSON.parse(readFileSync(0, 'utf8')).map((command) => ${call});
     process.stdout.write(JSON.stringify({ out, elapsed: Date.now() - started }));
   `;
-  const run = spawnSync(process.execPath, ['--input-type=module', '-e', script, JSON.stringify(commands)], {
+  const run = spawnSync(process.execPath, ['--input-type=module', '-e', script], {
+    input: JSON.stringify(commands), // on standard input: a long command does not fit in an argument
     encoding: 'utf8',
     timeout: 20000,
     cwd: fileURLToPath(new URL('../..', import.meta.url)),
