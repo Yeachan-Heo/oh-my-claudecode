@@ -3,53 +3,10 @@ import { chmodSync, mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync }
 import { spawnSync } from 'node:child_process';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import { commands, digitVersions, makeCache, movedAside, read, runCommand, scriptOf, upperBelow, writeCaseFoldPreload, writeRegistry, writeRegistryFile } from './helpers/omc-doctor-cache-fixture.js';
+import { read, runCommand, scriptOf, upperBelow, writeRegistry } from './helpers/omc-doctor-cache-fixture.js';
+import { step1, versionCommand } from './helpers/omc-doctor-step1.js';
 
 const text = read('skills/omc-doctor/SKILL.md');
-const versionCommand = text.split('\n').find((l) => l.startsWith('node -e ') && l.includes("'Updater: "));
-
-type Profile = {
-  plugins?: Record<string, unknown> | ((dir: string) => Record<string, unknown>);
-  platform?: string;
-  casefold?: boolean;
-  raw?: string;
-  cache?: Record<string, string[]>;
-  clone?: Record<string, string>;
-  env?: (dir: string) => Record<string, string>;
-  setup?: (dir: string) => void;
-};
-
-// Runs the Step 1 command against a synthetic config directory. `cache` maps a marketplace name to the
-// version directories under plugins/cache/<marketplace>/oh-my-claudecode, `clone` maps a marketplace name
-// to the plugin version its clone advertises, `env` sets variables (it may create the directories they name)
-// and `setup` runs last. The command always runs with a timeout: a read that blocks must show up as an error.
-function step1(profile: Profile) {
-  const dir = mkdtempSync(path.join(tmpdir(), 'omc-doctor-version-'));
-  try {
-    mkdirSync(path.join(dir, 'plugins'), { recursive: true });
-    for (const [market, versions] of Object.entries(profile.cache ?? {})) {
-      for (const v of versions) mkdirSync(path.join(dir, 'plugins', 'cache', market, 'oh-my-claudecode', v), { recursive: true });
-    }
-    for (const [market, version] of Object.entries(profile.clone ?? {})) {
-      const manifestDir = path.join(dir, 'plugins', 'marketplaces', market, '.claude-plugin');
-      mkdirSync(manifestDir, { recursive: true });
-      writeFileSync(path.join(manifestDir, 'marketplace.json'), JSON.stringify({ name: market, plugins: [{ name: 'oh-my-claudecode', version }] }));
-    }
-    if (profile.raw !== undefined) writeRegistryFile(dir, profile.raw);
-    else if (profile.plugins) writeRegistry(dir, typeof profile.plugins == 'function' ? profile.plugins(dir) : profile.plugins);
-    const preload = path.join(dir, 'platform.cjs');
-    if (profile.platform) writeFileSync(preload, `Object.defineProperty(process, 'platform', { value: '${profile.platform}' });\n`);
-    profile.setup?.(dir);
-    // `casefold` gives the process a volume that ignores letter case while it reports linux (WSL2 on a Windows drive).
-    const preloads = [...(profile.platform ? [preload] : []), ...(profile.casefold ? [writeCaseFoldPreload(dir)] : [])];
-    const result = runCommand(versionCommand ?? '', dir, { preloads, env: profile.env?.(dir), timeout: 20_000 });
-    expect(result.error).toBeUndefined();
-    expect(result.status).toBe(0);
-    return Object.fromEntries(result.stdout.trim().split('\n').map((l) => [l.slice(0, l.indexOf(': ')), l.slice(l.indexOf(': ') + 2)]));
-  } finally {
-    rmSync(dir, { recursive: true, force: true });
-  }
-}
 
 describe('omc-doctor Step 1 derives the plugin ID, channel and latest version from the active install', () => {
   test('the command exists once and does not consult npm or a fixed plugin ID', () => {
@@ -584,60 +541,6 @@ describe('omc-doctor Step 1 derives the plugin ID, channel and latest version fr
             env: (dir) => ({ OMC_PLUGIN_ROOT: path.join(dir, 'plugins', 'cache', market, 'oh-my-claudecode', '5.8.0') }),
           });
           expect({ key, channel: pinned.Channel }).toEqual({ key, channel: `marketplace ${market}` });
-        }
-      });
-
-      // An explicit root is explicit wherever it lies. A cache version the registry does not pin, a directory in the cache of
-      // another plugin and a path below the pinned version are checkouts of their own (the session loads exactly that
-      // directory), and the cache commands still protect the directory the variable points into.
-      test('a root inside plugins/cache that the registry does not pin is the loaded checkout, not the registry install', () => {
-        const cacheDir = (dir: string, ...parts: string[]) => path.join(dir, 'plugins', 'cache', ...parts);
-        const layouts: Array<[string, (dir: string) => string, string]> = [
-          ['an older cache version', (dir) => makeRoot(dir, path.join('plugins', 'cache', 'omc', 'oh-my-claudecode', '5.7.0'), { 'package.json': { version: '5.7.0' } }), '5.7.0'],
-          ['a directory in the cache of another plugin', (dir) => makeRoot(dir, path.join('plugins', 'cache', 'other-market', 'other-plugin', '1.0.0'), { 'package.json': { version: '1.0.0' } }), '1.0.0'],
-          ['a path below the pinned version', (dir) => makeRoot(dir, path.join('plugins', 'cache', 'omc', 'oh-my-claudecode', '5.8.0', 'checkout'), { 'package.json': { version: '5.8.1' } }), '5.8.1'],
-        ];
-        for (const [label, make, installed] of layouts) {
-          for (const withInstallPath of [true, false]) {
-            let root = '';
-            const out = step1({
-              plugins: (dir) => ({ 'oh-my-claudecode@omc': [{ scope: 'user', version: '5.8.0', ...(withInstallPath ? { installPath: cacheDir(dir, 'omc', 'oh-my-claudecode', '5.8.0') } : {}) }] }),
-              cache: { omc: ['5.7.0', '5.8.0'] },
-              clone: { omc: '6.0.0' },
-              env: (dir) => ({ OMC_PLUGIN_ROOT: (root = make(dir)) }),
-            });
-            expect({ label, withInstallPath, out }).toEqual({
-              label, withInstallPath,
-              out: { 'Plugin root': root, Channel: 'plugin-dir', Installed: installed, Latest: '(unavailable) (a --plugin-dir checkout has no update channel)', Updater: updater },
-            });
-          }
-        }
-      });
-
-      // The registry cannot be read, so the cache directory cannot be told from the pinned install: the channel is unknown, not
-      // a guess. Without any registry file there is nothing to tell it from, and the explicit root is the checkout.
-      test('a root inside plugins/cache with a registry that cannot be read is unknown, with no registry at all it is the checkout', () => {
-        const inCache = (dir: string) => path.join(dir, 'plugins', 'cache', 'omc', 'oh-my-claudecode', '5.7.0');
-        for (const raw of ['{not json', '[]', 'null']) {
-          const out = step1({ raw, cache: { omc: ['5.7.0', '5.8.0'] }, env: (dir) => ({ OMC_PLUGIN_ROOT: inCache(dir) }) });
-          expect({ raw, keys: Object.keys(out), channel: (out.Channel ?? '').split(' ')[0] }).toEqual({ raw, keys: ['Channel'], channel: 'unknown' });
-        }
-        const none = step1({ cache: { omc: ['5.7.0', '5.8.0'] }, env: (dir) => ({ OMC_PLUGIN_ROOT: inCache(dir) }) });
-        expect(none.Channel).toBe('plugin-dir');
-      });
-
-      test('the cache commands keep the cache version that OMC_PLUGIN_ROOT names while they move the free one', () => {
-        for (const command of commands) {
-          const { dir, cache } = makeCache(['5.6.0', '5.7.0', '5.8.0']);
-          try {
-            writeRegistry(dir, { 'oh-my-claudecode@omc': [{ scope: 'user', version: '5.8.0', installPath: path.join(cache, '5.8.0') }] });
-            const result = runCommand(command, dir, { env: { OMC_PLUGIN_ROOT: path.join(cache, '5.7.0') } });
-            expect({ status: result.status, versions: digitVersions(cache), moved: movedAside(dir) }).toEqual({ status: 0, versions: '5.7.0,5.8.0', moved: 1 });
-            expect(result.stdout).toContain('Kept protected cache versions');
-            expect(result.stdout).toContain('5.7.0');
-          } finally {
-            rmSync(dir, { recursive: true, force: true });
-          }
         }
       });
 
