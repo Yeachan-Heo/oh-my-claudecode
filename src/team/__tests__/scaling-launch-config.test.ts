@@ -757,6 +757,7 @@ describe('scaleUp launch config', () => {
       expect.objectContaining({ attempt_id: 'attempt-loaded' }),
       'scale_down',
       expect.any(Function),
+      expect.any(Function), // the read of the pane tree at the fence
     );
     expect(tmuxSessionMocks.killOwnedWorkerPane).not.toHaveBeenCalled();
   });
