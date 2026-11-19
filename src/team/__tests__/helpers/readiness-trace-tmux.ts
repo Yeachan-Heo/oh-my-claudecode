@@ -113,3 +113,19 @@ export function fakeShell(fn: string, command: string): string {
   trace.unknown.push(`${fn}: ${command}`);
   return '';
 }
+
+// Every tmux-utils function that starts a tmux process, routed through the mock.
+// readiness-trace-tmux.test.ts fails when tmux-utils gains one this map lacks.
+export function tmuxUtilsOverrides() {
+  return {
+    tmuxExec: (args: string[]) => fakeTmux('tmuxExec', args),
+    tmuxShell: (command: string) => fakeShell('tmuxShell', command),
+    tmuxExecAsync: async (args: string[]) => ({ stdout: fakeTmux('tmuxExecAsync', args), stderr: '' }),
+    tmuxCmdAsync: async (args: string[]) => ({ stdout: fakeTmux('tmuxCmdAsync', args), stderr: '' }),
+    tmuxShellAsync: async (command: string) => ({ stdout: fakeShell('tmuxShellAsync', command), stderr: '' }),
+    tmuxSpawn: (args: string[]) => {
+      const stdout = fakeTmux('tmuxSpawn', args);
+      return { pid: 0, output: [null, stdout, ''], stdout, stderr: '', status: 0, signal: null };
+    },
+  };
+}

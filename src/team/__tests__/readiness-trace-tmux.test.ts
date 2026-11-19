@@ -1,6 +1,9 @@
 import { beforeEach, describe, expect, it } from 'vitest';
 
-import { fakeShell, fakeTmux, trace } from './helpers/readiness-trace-tmux.js';
+import { readFileSync } from 'fs';
+import { join } from 'path';
+
+import { fakeShell, fakeTmux, trace, tmuxUtilsOverrides } from './helpers/readiness-trace-tmux.js';
 
 describe('readiness trace tmux mock', () => {
   beforeEach(() => {
@@ -49,6 +52,19 @@ describe('readiness trace tmux mock', () => {
     fakeTmux('tmuxCmdAsync', ['if-shell', 'true', "send -t %2 Enter; display-message -p 'OMC_TMUX_GUARD_OK_x'; send -t %2 Escape"]);
     expect(trace.keys).toEqual([]);
     expect(trace.unknown).toHaveLength(1);
+  });
+
+  it('records a send made through tmuxSpawn', () => {
+    const result = tmuxUtilsOverrides().tmuxSpawn(['send-keys', '-t', '%2', '-l', 'R5_PROBE']);
+    expect(result.status).toBe(0);
+    expect(trace.keys.map(key => [key.fn, key.keys])).toEqual([['tmuxSpawn', ['-l', 'R5_PROBE']]]);
+  });
+
+  it('overrides every tmux-utils function that starts tmux', () => {
+    const source = readFileSync(join(__dirname, '..', '..', 'cli', 'tmux-utils.ts'), 'utf8');
+    const starters = [...source.matchAll(/^export (?:async )?function (tmux(?:Exec|Shell|Cmd|Spawn)\w*)\(/gm)].map(match => match[1]);
+    expect(starters.length).toBeGreaterThan(0);
+    expect(Object.keys(tmuxUtilsOverrides()).sort()).toEqual([...starters].sort());
   });
 
   it('keeps any other command as unrecognized', () => {

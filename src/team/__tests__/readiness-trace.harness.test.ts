@@ -25,14 +25,10 @@ vi.mock('../../platform/process-utils.js', async importOriginal => ({
 }));
 
 vi.mock('../../cli/tmux-utils.js', async importOriginal => {
-  const { fakeShell, fakeTmux } = await import('./helpers/readiness-trace-tmux.js');
+  const { tmuxUtilsOverrides } = await import('./helpers/readiness-trace-tmux.js');
   return {
     ...await importOriginal<typeof import('../../cli/tmux-utils.js')>(),
-    tmuxExec: vi.fn((args: string[]) => fakeTmux('tmuxExec', args)),
-    tmuxShell: vi.fn((command: string) => fakeShell('tmuxShell', command)),
-    tmuxExecAsync: vi.fn(async (args: string[]) => ({ stdout: fakeTmux('tmuxExecAsync', args), stderr: '' })),
-    tmuxCmdAsync: vi.fn(async (args: string[]) => ({ stdout: fakeTmux('tmuxCmdAsync', args), stderr: '' })),
-    tmuxShellAsync: vi.fn(async (command: string) => ({ stdout: fakeShell('tmuxShellAsync', command), stderr: '' })),
+    ...Object.fromEntries(Object.entries(tmuxUtilsOverrides()).map(([name, fn]) => [name, vi.fn(fn)])),
   };
 });
 
