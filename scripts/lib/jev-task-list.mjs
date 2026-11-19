@@ -834,6 +834,9 @@ export function foldEvents(start, events, key, env, now = Date.now()) {
     rev: revOf(snap),
   };
   const changed = !snap || signature(record) !== signature(snap);
+  // A fold that writes the file puts every call it settles in the marks, those that changed nothing too: they are named in `folded` and removed
+  // with the write, and an older call that becomes visible after it (a moved tree) is behind them, as it is behind a call that changed the list.
+  if (changed && toBase.length) record.base_name = toBase[toBase.length - 1].name;
   if (changed) record.rev += 1;
   return { record, broken: false, absorbed, changed, done, generation };
 }
@@ -873,8 +876,9 @@ export function syncList(sessionId, key, env = process.env) {
     remove(waiting.filter((name) => f.done.has(name)));
     // Events that change nothing settle without a write of the list file, so no mark of the list says that they were seen. They stay while a
     // tree of the session is still hidden (a sweep that was stopped after it moved the directory): it may hold the task they are about, and it
-    // is merged against marks that know nothing of them. Once it is merged or removed, the next fold settles them.
-    if (!f.changed) { if (current() && !(f.absorbed.length && hasHiddenTree(sessionId, env))) remove(f.absorbed); return; }
+    // is merged against marks that know nothing of them. Once it is merged or removed, the next fold settles them. They do not stay past
+    // EVENTS_KEPT files in the folder: every fold reads the folder, and a tree that cannot be merged or removed must not make it grow.
+    if (!f.changed) { if (current() && !(f.absorbed.length && waiting.length <= EVENTS_KEPT && hasHiddenTree(sessionId, env))) remove(f.absorbed); return; }
     const next = foldedRecord(f);
     if (!publishJson(path, next, current, env)) return;
     saved = next;

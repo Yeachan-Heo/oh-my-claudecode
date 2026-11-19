@@ -1086,8 +1086,8 @@ describe('task list: session retention sweep', () => {
       // later it is judged against marks that know nothing of the call: the call has to be there to take its place after the task.
       describe('a call that finds no task to change, while a tree of the session is still hidden', () => {
         const noop = (sid, at, taskId = '1') => L.recordListCall(postToolUse(sid, 'TaskUpdate', { taskId, status: 'completed' }), envFor(), at);
-        const oldTask = (sid, now, withList) => {
-          const at = now - 120_000;
+        const oldTask = (sid, now, withList, age = 120_000) => {
+          const at = now - age;
           const made = held(sid, 'main', at, 'TaskCreate', { subject: 'Old task' }, { task_id: '1' });
           if (withList) writeFileSync(join(root(), sid, 'main.json'), JSON.stringify(L.foldedRecord(L.foldEvents({ record: null, broken: false }, [made], 'main', envFor(), at))));
         };
@@ -1110,6 +1110,44 @@ describe('task list: session retention sweep', () => {
           L.syncList(sid, 'main', envFor()); // the tree is merged: the calls are settled with the marks of the list like any other
           expect(leftNames(sid)).toEqual([String(now + 20_000)]);
           expect(readListFile(sid, 'main').items.map((x) => `${x.id} ${x.content}:${x.status}`)).toEqual(['1 Old task:completed']);
+        });
+
+        // the call that changed nothing is settled by the clock when the next call is folded, and that call changes the list: the fold writes the
+        // file, so the settled call is named in the marks and the older create of the moved tree is behind them (dropped with a row, as for any call
+        // that changed the list), not replayed without the call that completes it
+        it('is in the marks when a later call changes the list in the same fold, so the older create of the moved tree is dropped with a row', () => {
+          fresh();
+          const now = Date.now();
+          const sid = session();
+          oldTask(sid, now, false, 13_000);
+          const moved = stopAfterMove(sid);
+          noop(sid, now - 12_000);
+          expect(leftNames(sid)).toEqual([String(now - 12_000)]); // kept: the tree is hidden
+          L.recordListCall(postToolUse(sid, 'TaskCreate', { subject: 'Second' }, { tool_response: 'Task #2 created successfully: Second' }), envFor(), now - 8000);
+          expect(readListFile(sid, 'main').base_name.startsWith(String(now - 12_000))).toBe(true);
+          expect(leftNames(sid)).toEqual([String(now - 8000)]);
+          const rows = logRows('task-list.jsonl').length;
+          sweepAgain();
+          expect(existsSync(moved)).toBe(false);
+          expect(shown(sid)).toEqual(['Second:pending']);
+          expect(rowsSince(rows)).toBe(1);
+        });
+
+        it('does not stay past EVENTS_KEPT files in the folder, so a tree that is never merged cannot make the folder grow', () => {
+          fresh();
+          const now = Date.now();
+          const sid = session();
+          oldTask(sid, now, false);
+          stopAfterMove(sid);
+          const dir = join(root(), sid, 'main.events');
+          mkdirSync(dir, { recursive: true });
+          for (let i = 0; i <= L.EVENTS_KEPT; i += 1) {
+            const at = now - 100_000 + i;
+            const event = { ts: new Date(at).toISOString(), pid: 11, id: 'bbbbbbbb', session_id: sid, agent_type: null, tool_use_id: null, prompt_id: null, tool_name: 'TaskUpdate', tool_input: { taskId: '9', status: 'completed' } };
+            writeFileSync(join(dir, `${at}-${String(i).padStart(20, '0')}-11-bbbbbbbb.json`), JSON.stringify(event));
+          }
+          noop(sid, now - 5000, '9');
+          expect(leftNames(sid)).toEqual([String(now - 5000)]);
         });
 
         it('is settled at once when no tree of the session is hidden (a tree of another session does not keep it)', () => {
