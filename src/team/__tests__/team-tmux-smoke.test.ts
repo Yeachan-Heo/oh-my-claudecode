@@ -553,6 +553,9 @@ describe.skipIf(!SMOKE_ENABLED)('team tmux smoke: fake claude worker lifecycle',
       const shutdown = await shutdownTeamV2(teamName, cwd, { instanceId, timeoutMs: SHUTDOWN_ACK_TIMEOUT_MS });
       expect(shutdown, await diagnostics()).toEqual({ outcome: 'cleaned' });
     } finally {
+      // A failure before task 1 completes leaves teamSocket unset; the
+      // owner may still have created the server and config.
+      teamSocket ??= (await readTeamConfig(teamName, cwd).catch(() => null))?.tmux_server_identity?.socket_path;
       if (teamSocket) {
         await tmuxCmdAsync(['-S', teamSocket, 'kill-server'], { timeout: 2_000, stripTmux: true }).catch(() => undefined);
       }
