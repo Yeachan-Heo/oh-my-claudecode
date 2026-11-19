@@ -509,7 +509,7 @@ describe('handoff hook (OMC_JEV_HANDOFF=1)', () => {
     activeUltragoal(world);
     const run = runHook(world, 'Write', { file_path: join(world.logs, 'other.md'), content: 'x' });
     assert.equal(denied(run.output, 'ULTRAGOAL /GOAL REQUIRED'), true, `the plain denial: ${JSON.stringify(run.output)}`);
-    assert.equal(handoffRows(world).length, 1); // the 20 MiB warning row only: the denial itself carries no handoff row
+    assert.equal(handoffRows(world).length, 0); // no handoff row: the denial carries none, and the 20 MiB warning was not attached to a refused call, so it is not counted as given
     assert.equal(handoffRows(world).filter((row) => row.action.startsWith('handoff-')).length, 0);
   });
 
@@ -600,6 +600,61 @@ describe('handoff hook (OMC_JEV_HANDOFF=1)', () => {
     const closed = runHook(world, 'Read', { file_path: '/etc/hosts' });
     assert.equal(denied(closed.output, 'The session was handed over to track-9'), true, `a foreign line closes the session: ${JSON.stringify(closed.output)}`);
     assert.equal(handoffRows(world).filter((row) => row.action === 'handed-over-refused').length, 1);
+  });
+
+  it('a write the tool did not carry out is no takeover: the file is as it was before the call, so a takeover line the session wrote itself does not close the session', () => {
+    // (1) handoff mode: the session wrote the line itself with an allowed Write; a later Edit passes the hook (the hash is
+    // predicted) but fails (the file stays as the Write left it): the next calls still pass
+    let world = newWorld();
+    sparseTranscript(world.transcript, 25 * MIB + 1);
+    activeUltragoal(world);
+    sessionsLog(world, { session_id: SID, started_with: { model: 'opus', effort: 'high' } });
+    const own = 'use opus high\nbrief\nTAKEN OVER: mistake-session 2026-11-15T01:00:00Z\n';
+    assert.equal(denied(runHook(world, 'Write', { file_path: world.handoff, content: own }).output), false);
+    writeFileSync(world.handoff, own); // the Write landed
+    const edit = runHook(world, 'Edit', { file_path: world.handoff, old_string: 'brief', new_string: 'brief 2' });
+    assert.equal(denied(edit.output), false, `the Edit must pass the hook: ${JSON.stringify(edit.output)}`);
+    // the Edit failed: the file was not changed
+    for (const [tool, input] of [['Read', { file_path: '/etc/hosts' }], ['SendMessage', { to: 'x', message: 'y' }]]) {
+      const run = runHook(world, tool, input);
+      assert.equal(denied(run.output), false, `${tool} after a failed Edit must pass: ${JSON.stringify(run.output)}`);
+    }
+    assert.equal(handoffRows(world).filter((row) => row.action === 'handed-over-refused').length, 0);
+    // a second Edit that landed leaves the content the hook predicted for it: still the session's own write
+    const edit2 = runHook(world, 'Edit', { file_path: world.handoff, old_string: 'brief', new_string: 'brief 3' });
+    assert.equal(denied(edit2.output), false);
+    writeFileSync(world.handoff, own.replace('brief', 'brief 3'));
+    assert.equal(denied(runHook(world, 'Read', { file_path: '/etc/hosts' }).output), false);
+    // a line another session appends after the failed write still closes the session
+    appendFileSync(world.handoff, 'TAKEN OVER: track-9 2026-11-15T02:00:00Z\n');
+    assert.equal(denied(runHook(world, 'Read', { file_path: '/etc/hosts' }).output, 'The session was handed over'), true);
+    // (2) warning mode: an old handoff file that holds a takeover line of an earlier session; a first Edit that fails leaves it as it
+    // was, which is no takeover; a line appended afterwards is
+    world = newWorld();
+    sparseTranscript(world.transcript, 20 * MIB + 1);
+    writeFileSync(world.handoff, 'use opus high\nbrief\nTAKEN OVER: earlier 2026-11-01T00:00:00Z\n');
+    assert.equal(denied(runHook(world, 'Edit', { file_path: world.handoff, old_string: 'brief', new_string: 'brief 2' }).output), false);
+    assert.equal(denied(runHook(world, 'Read', { file_path: '/etc/hosts' }).output), false, 'a failed first write leaves the old line where it was');
+    appendFileSync(world.handoff, 'TAKEN OVER: track-9 2026-11-15T02:00:00Z\n');
+    assert.equal(denied(runHook(world, 'Read', { file_path: '/etc/hosts' }).output, 'The session was handed over'), true);
+  });
+
+  it('the warning counts as given only when it is attached: a call that a later guard refuses keeps it for the next call', () => {
+    const world = newWorld();
+    sparseTranscript(world.transcript, 20 * MIB + 1);
+    activeUltragoal(world); // below 25 MiB the /goal guard refuses the call after the handoff step has prepared the warning
+    const refused = runHook(world, 'Write', { file_path: join(world.logs, 'other.md'), content: 'x' });
+    assert.equal(denied(refused.output, 'ULTRAGOAL /GOAL REQUIRED'), true, `the /goal guard refuses: ${JSON.stringify(refused.output)}`);
+    assert.equal(reasonOf(refused.output).includes('[OMC HANDOFF]'), false);
+    assert.equal(handoffRows(world).filter((row) => row.action === 'warning').length, 0, 'no warning row for a refused call');
+    assert.equal(readHandoffState(handoffFileOf(world)).last_warning_bytes, undefined, 'the frequency is not advanced');
+    noUltragoal(world);
+    const passed = runHook(world, 'Read', { file_path: '/etc/hosts' });
+    assert.match(contextOf(passed.output), /\[OMC HANDOFF\]/);
+    assert.equal(handoffRows(world).filter((row) => row.action === 'warning').length, 1);
+    assert.ok(readHandoffState(handoffFileOf(world)).last_warning_bytes > 20 * MIB);
+    const again = runHook(world, 'Read', { file_path: '/etc/hosts' });
+    assert.equal(contextOf(again.output).includes('[OMC HANDOFF]'), false, 'given once, not again without growth');
   });
 
   it('handoff mode restrictions: Write/Edit only in the session cwd or state directory and only for a new file or one written by the session; Bash launcher only with --brief equal to the registered path and only once', () => {

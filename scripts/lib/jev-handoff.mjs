@@ -120,23 +120,29 @@ function hashAfterWrite(toolName, toolInput, path) {
 }
 
 // The takeover line counts only when the session itself registered a write of the handoff file (handoff_hash in the state)
-// and the content of the file differs from its last write, that is, the line was appended by another session.
+// and the content of the file differs from both states the session's last write can have left: the content it predicted
+// (handoff_hash) and the content the file had when the write was registered (handoff_before_hash, which is what the file stays
+// when the write fails), that is, the line was appended by another session.
 function isHandedOver(state, path, env) {
   try {
     if (!state?.handoff_path || !state.handoff_hash) return false;
-    const content = readFileSync(path, 'utf8');
-    if (hashContent(content) === state.handoff_hash) return false; // the last write was this session's: not counted
+    const hash = hashContent(readFileSync(path, 'utf8'));
+    if (hash === state.handoff_hash || hash === state.handoff_before_hash) return false; // this session's own write, landed or not: not counted
     return readTakeoverLine(path, env).found;
   } catch { return false; }
 }
 
-// Registration of a handoff write in the session state (the path and the hash of the predicted content after the write).
+// Registration of a handoff write in the session state (the path, the hash of the predicted content after the write and the hash of
+// the content on disk before it). The hook sees the call before it runs and never its result, so the prediction is not trusted alone:
+// the file is whichever of the two states the tool left, and the session's state is judged by both (isHandedOver).
 function registerHandoffWrite(handoffFile, sessionId, state, toolName, toolInput) {
   try {
     const path = resolve(String(toolInput?.file_path ?? toolInput?.path ?? ''));
     const hash = hashAfterWrite(toolName, toolInput, path);
     if (!hash) return state;
-    writeHandoffState(handoffFile, sessionId, { ...state, handoff_path: path, handoff_hash: hash });
+    let before = '';
+    try { before = hashContent(readFileSync(path, 'utf8')); } catch { before = ''; } // a file that does not exist yet has no hash
+    writeHandoffState(handoffFile, sessionId, { ...state, handoff_path: path, handoff_hash: hash, handoff_before_hash: before });
     return readHandoffState(handoffFile);
   } catch { return state; }
 }
@@ -344,9 +350,10 @@ export function handedOverText(successorName) {
 // The state of the session, the file handoff.json of the session's state directory (an atomic write). The hook resolves its path with the
 // canonical session path helper (resolveSessionStatePathsForHook of lib/state-root.mjs, fileName handoff.json) and passes it in as
 // handoffFile; this module builds no session path itself. Fields: last_warning_bytes (the frequency of warnings: the first above the
-// warning threshold, the next after growth by the step), handoff_path and handoff_hash (the path and the hash of the allowed write of the
-// handoff file, for the check of the takeover line), launcher_attempts and launcher_attempt_ts (the launcher calls let through) and
-// successor_started (a start confirmed by the launcher's journal).
+// warning threshold, the next after growth by the step; set when the warning is delivered, see handoffBeforeGuard), handoff_path,
+// handoff_hash and handoff_before_hash (the path, the hash of the content an allowed write of the handoff file is expected to leave and
+// the hash of the content it found, for the check of the takeover line), launcher_attempts and launcher_attempt_ts (the launcher calls
+// let through; whether one started a session is read from the launcher's journal) and successor_started (a start confirmed by that journal).
 export function readHandoffState(handoffFile) {
   try {
     if (!handoffFile || typeof handoffFile !== 'string' || !existsSync(handoffFile)) return {};
@@ -389,9 +396,11 @@ export function assessMode({ sessionId, sizeBytes = null, ultragoalDenial = fals
 
 // The entry point of the hook before the /goal guard (a main session): (c) after the takeover line every tool is refused
 // with a handed-over-refused row; the path of an allowed write of the handoff file goes to the state; (b) the warning from the
-// warning threshold (the frequency in the state, a warning row), returned as a context that the hook attaches to the calls that pass.
+// warning threshold, returned as a context that the hook attaches to the calls that pass, with a `deliver` function that records it
+// (the frequency in the state, a warning row): the hook calls it only when the context is attached, so a call that a later guard
+// refuses does not use up the warning.
 export function handoffBeforeGuard({ stateDir, handoffFile, sessionId, data, sizeBytes = null, env = process.env }) {
-  const none = { output: null, context: '' };
+  const none = { output: null, context: '', deliver: null };
   if (!stateDir || !handoffFile || !sessionId || (data.agent_id || data.agentId)) return none; // subagents: no state and none of the main session's warnings
   let state = readHandoffState(handoffFile);
   if (state.handoff_path) {
@@ -422,10 +431,12 @@ export function handoffBeforeGuard({ stateDir, handoffFile, sessionId, data, siz
   if (typeof sizeBytes === 'number' && sizeBytes > handoffWarnBytes(env)) {
     const last = typeof state.last_warning_bytes === 'number' ? state.last_warning_bytes : null;
     if (last === null || sizeBytes - last >= handoffStepBytes(env)) {
-      writeHandoffState(handoffFile, sessionId, { ...state, last_warning_bytes: sizeBytes });
-      writeHandoffRow(stateDir, env, data, 'warning', sizeBytes);
       const useLine = successorUseLine({ sessionId, transcriptPath: data.transcript_path ?? data.transcriptPath, stateDir, env });
-      return { output: null, context: warningText({ sizeBytes, useLine, facts: sessionFacts(env), env }) };
+      const deliver = () => {
+        writeHandoffState(handoffFile, sessionId, { ...readHandoffState(handoffFile), last_warning_bytes: sizeBytes });
+        writeHandoffRow(stateDir, env, data, 'warning', sizeBytes);
+      };
+      return { output: null, context: warningText({ sizeBytes, useLine, facts: sessionFacts(env), env }), deliver };
     }
   }
   return none;

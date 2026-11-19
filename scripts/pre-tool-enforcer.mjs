@@ -2644,8 +2644,11 @@ ${hookOutput.additionalContext}`
   return merged;
 }
 
-// The handoff warning (OMC_JEV_HANDOFF=1) rides on whatever output the hook emits, unless it denies.
+// The handoff warning (OMC_JEV_HANDOFF=1) rides on whatever output the hook emits, unless it denies. The warning counts as given
+// (its frequency in the handoff state, its journal row) only when it is attached here: a call that a later guard refuses keeps it
+// for the next call that passes.
 let handoffContext = '';
+let handoffDeliver = null;
 function withHandoffContext(output) {
   if (!handoffContext || !output || typeof output !== 'object') return output;
   const hookOutput = output.hookSpecificOutput && typeof output.hookSpecificOutput === 'object' ? output.hookSpecificOutput : {};
@@ -2654,6 +2657,9 @@ function withHandoffContext(output) {
   const merged = { ...output, hookSpecificOutput: { ...hookOutput, hookEventName: 'PreToolUse', additionalContext: context } };
   delete merged.suppressOutput;
   handoffContext = '';
+  const deliver = handoffDeliver;
+  handoffDeliver = null;
+  try { deliver?.(); } catch { /* the state and the row never stop the hook */ }
   return merged;
 }
 
@@ -3181,7 +3187,7 @@ async function main() {
       emitPreToolUseOutput(handoffBefore.output, data);
       return;
     }
-    if (handoffBefore.context) handoffContext = handoffBefore.context;
+    if (handoffBefore.context) { handoffContext = handoffBefore.context; handoffDeliver = handoffBefore.deliver ?? null; }
 
     const ultragoalDenyReason = evaluateUltragoalPreToolEnforcement(stateDir, directory, sessionId, data);
     if (ultragoalDenyReason) {
@@ -3191,6 +3197,7 @@ async function main() {
       const handoffOverride = handoffOn ? handoff.overrideUltragoalDenial({ stateDir, handoffFile: jevSessionFiles.handoff, sessionId, data, sizeBytes: handoffSize, overLimit: transcriptOverLimit }) : null;
       if (handoffOverride) {
         handoffContext = ''; // in handoff mode a warning would only grow the transcript
+        handoffDeliver = null;
         if (handoffOverride.hookSpecificOutput?.permissionDecision === 'deny') {
           const handoffReason = denialReasonWithCounter('handoff', handoffOverride.hookSpecificOutput.permissionDecisionReason, data, stateDir);
           if (handoffReason !== null) handoffOverride.hookSpecificOutput.permissionDecisionReason = handoffReason;
