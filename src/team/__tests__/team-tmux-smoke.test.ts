@@ -152,6 +152,8 @@ describe.skipIf(!SMOKE_ENABLED)('team tmux smoke: fake claude worker lifecycle',
   let runtimeCliPath = '';
   let cwd = '';
   let binDir = '';
+  // A preserved team keeps its recovery owner, which writes into the fixture.
+  let ownerTeam: { teamName: string; cwd: string } | null = null;
   let tracePath = '';
   let socketsBefore = new Set<string>();
   const savedEnv = new Map<string, string | undefined>();
@@ -236,6 +238,15 @@ describe.skipIf(!SMOKE_ENABLED)('team tmux smoke: fake claude worker lifecycle',
 
   afterEach(async () => {
     const leftovers: string[] = [];
+    if (ownerTeam) {
+      const owner = (await readTeamConfig(ownerTeam.teamName, ownerTeam.cwd).catch(() => null))?.runtime_owner_epoch;
+      ownerTeam = null;
+      if (owner && observeProcessIdentity({ pid: owner.pid, process_started_at: owner.process_started_at }) === 'matching') {
+        process.kill(owner.pid, 'SIGKILL');
+        await waitFor('recovery owner to exit', () => isProcessAlive(owner.pid), alive => !alive, 5_000)
+          .catch(() => leftovers.push(`recovery owner pid ${owner.pid} still alive`));
+      }
+    }
     const providers = new Map((await readTrace()).map(entry => [entry.pid, entry.process_started_at]));
     for (const [pid, processStartedAt] of providers) {
       const state = processStartedAt
@@ -365,6 +376,7 @@ describe.skipIf(!SMOKE_ENABLED)('team tmux smoke: fake claude worker lifecycle',
       cwd,
     });
     const leaderCwd = runtime.cwd;
+    ownerTeam = { teamName: runtime.teamName, cwd: leaderCwd };
     expect(runtime.startupFailures, await traceDiagnostics()).toEqual([]);
     await waitFor(
       'task 1 to be completed through the worker API',
@@ -421,13 +433,5 @@ describe.skipIf(!SMOKE_ENABLED)('team tmux smoke: fake claude worker lifecycle',
       timeoutMs: SHUTDOWN_ACK_TIMEOUT_MS,
     });
     expect(shutdown).toEqual({ outcome: 'preserved', reason: 'provider_cleanup_unverified', workers: ['worker-1'] });
-
-    // A preserved team keeps its recovery owner; stop it before cleanup
-    // removes the state it writes to.
-    const owner = (await readTeamConfig(runtime.teamName, leaderCwd))?.runtime_owner_epoch;
-    if (owner && observeProcessIdentity({ pid: owner.pid, process_started_at: owner.process_started_at }) === 'matching') {
-      process.kill(owner.pid, 'SIGKILL');
-      await waitFor('recovery owner to exit', () => isProcessAlive(owner.pid), alive => !alive, 5_000);
-    }
   }, 480_000);
 });
