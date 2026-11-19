@@ -167,6 +167,21 @@ describe.skipIf(!SMOKE_ENABLED)('team tmux smoke: fake claude worker lifecycle',
   let socketsBefore = new Set<string>();
   const savedEnv = new Map<string, string | undefined>();
 
+  // Every later provider launch reads the shim afresh, so a test can change
+  // how only the replacement worker behaves.
+  async function writeClaudeShim(
+    scenario = FAKE_PROVIDER_SCENARIO,
+    slowBannerMs = FAKE_SLOW_BANNER_MS,
+  ): Promise<void> {
+    await writeExecutable(join(binDir, 'claude'), [
+      '#!/bin/sh',
+      // Login shells may reorder PATH (macOS path_helper); pin the omc shim.
+      `export PATH=${shellQuote(binDir)}:"$PATH"`,
+      ...(slowBannerMs ? [`export OMC_FAKE_SLOW_BANNER_MS=${shellQuote(slowBannerMs)}`] : []),
+      `exec ${shellQuote(process.execPath)} --import ${shellQuote(TSX_LOADER_URL)} ${shellQuote(FAKE_PROVIDER)} --trace ${shellQuote(tracePath)}${scenario ? ` --scenario ${shellQuote(scenario)}` : ''} "$@"`,
+    ]);
+  }
+
   async function readTrace(): Promise<TraceEntry[]> {
     const raw = await readFile(tracePath, 'utf8').catch(() => '');
     return raw.split('\n').filter(Boolean).map(line => JSON.parse(line) as TraceEntry);
@@ -194,13 +209,7 @@ describe.skipIf(!SMOKE_ENABLED)('team tmux smoke: fake claude worker lifecycle',
     }
 
     await symlink(RUNTIME_CLI_PATH, runtimeCliPath);
-    await writeExecutable(join(binDir, 'claude'), [
-      '#!/bin/sh',
-      // Login shells may reorder PATH (macOS path_helper); pin the omc shim.
-      `export PATH=${shellQuote(binDir)}:"$PATH"`,
-      ...(FAKE_SLOW_BANNER_MS ? [`export OMC_FAKE_SLOW_BANNER_MS=${shellQuote(FAKE_SLOW_BANNER_MS)}`] : []),
-      `exec ${shellQuote(process.execPath)} --import ${shellQuote(TSX_LOADER_URL)} ${shellQuote(FAKE_PROVIDER)} --trace ${shellQuote(tracePath)}${FAKE_PROVIDER_SCENARIO ? ` --scenario ${shellQuote(FAKE_PROVIDER_SCENARIO)}` : ''} "$@"`,
-    ]);
+    await writeClaudeShim();
     await writeExecutable(join(binDir, 'omc'), [
       '#!/bin/sh',
       `exec ${shellQuote(process.execPath)} --import ${shellQuote(TSX_LOADER_URL)} ${shellQuote(OMC_CLI_ENTRY)} "$@"`,
@@ -470,14 +479,23 @@ describe.skipIf(!SMOKE_ENABLED)('team tmux smoke: fake claude worker lifecycle',
     expect(shutdown).toEqual({ outcome: 'preserved', reason: 'provider_cleanup_unverified', workers: ['worker-1'] });
   }, 480_000);
 
-  it.skipIf(STOP_SCENARIO)('recovers a worker killed after its task completed, then shuts the team down', async () => {
+  type OwnedTeam = {
+    teamName: string;
+    instanceId: string;
+    firstProviderPid: number;
+    diagnostics: () => Promise<string>;
+    recover: (requestId: string) => Promise<Record<string, unknown>>;
+  };
+
+  // Runs a team under its own runtime-cli owner, as `omc team` starts it, so
+  // recovery intents reach the owner loop that serves real teams. The body
+  // starts once task 1 is completed and the first provider is SIGKILLed.
+  async function withKilledWorkerTeam(body: (team: OwnedTeam) => Promise<void>): Promise<void> {
     const teamName = `tmux-recover-${randomUUID().slice(0, 8)}`;
     const instanceId = randomUUID();
     const ownerLog = join(fixtureRoot, 'runtime-cli.stderr.log');
     let teamSocket: string | undefined;
     const ownerLogFd = openSync(ownerLog, 'a');
-    // The team runs under its own runtime-cli owner, as `omc team` starts it,
-    // so recovery intents reach the owner loop that serves real teams.
     const owner = spawn(process.execPath, [runtimeCliPath], {
       cwd,
       env: process.env,
@@ -485,7 +503,7 @@ describe.skipIf(!SMOKE_ENABLED)('team tmux smoke: fake claude worker lifecycle',
       stdio: ['pipe', 'ignore', ownerLogFd],
     });
     closeSync(ownerLogFd);
-    const ownerDiagnostics = async () => `${await traceDiagnostics()}\nruntime-cli stderr:\n${
+    const diagnostics = async () => `${await traceDiagnostics()}\nruntime-cli stderr:\n${
       (await readFile(ownerLog, 'utf8').catch(() => '<none>')).split('\n').slice(-40).join('\n')}\nactive_recovery: ${
       JSON.stringify((await readTeamConfig(teamName, cwd).catch(() => null))?.active_recovery)}`;
     try {
@@ -507,7 +525,7 @@ describe.skipIf(!SMOKE_ENABLED)('team tmux smoke: fake claude worker lifecycle',
         },
         status => status === 'completed',
         60_000,
-        ownerDiagnostics,
+        diagnostics,
       );
       // runtime-cli, not this process, starts the tmux server, so the
       // shared afterEach sweep cannot find its socket.
@@ -516,24 +534,24 @@ describe.skipIf(!SMOKE_ENABLED)('team tmux smoke: fake claude worker lifecycle',
       process.kill(firstProvider!.pid, 'SIGKILL');
       await waitFor('killed provider to exit', () => isProcessAlive(firstProvider!.pid), alive => !alive, 5_000);
 
-      const envelope = await executeTeamApiOperation('recover-worker', {
-        team_name: teamName,
-        worker: 'worker-1',
-        request_id: 'smoke-recover-1',
-      }, cwd);
-      if (!envelope.ok) throw new Error(`recover-worker rejected: ${JSON.stringify(envelope)}`);
-      const result = envelope.data.result;
-      expect(result, `${JSON.stringify(result)}\n${await ownerDiagnostics()}`).toMatchObject({ outcome: 'recovered' });
-      // Recovery succeeds only once the replacement shows its idle prompt
-      // (claude-trust: after the trust dialog is answered), not while it is
-      // still blocked at startup.
-      const replacementSteps = (await readTrace())
-        .filter(entry => entry.pid !== firstProvider!.pid)
-        .map(entry => entry.step);
-      expect(replacementSteps, await ownerDiagnostics()).toContain('idle-prompt');
+      await body({
+        teamName,
+        instanceId,
+        firstProviderPid: firstProvider!.pid,
+        diagnostics,
+        recover: async requestId => {
+          const envelope = await executeTeamApiOperation('recover-worker', {
+            team_name: teamName,
+            worker: 'worker-1',
+            request_id: requestId,
+          }, cwd);
+          if (!envelope.ok) throw new Error(`recover-worker rejected: ${JSON.stringify(envelope)}`);
+          return envelope.data.result as Record<string, unknown>;
+        },
+      });
 
       const shutdown = await shutdownTeamV2(teamName, cwd, { instanceId, timeoutMs: SHUTDOWN_ACK_TIMEOUT_MS });
-      expect(shutdown, await ownerDiagnostics()).toEqual({ outcome: 'cleaned' });
+      expect(shutdown, await diagnostics()).toEqual({ outcome: 'cleaned' });
     } finally {
       if (teamSocket) {
         await tmuxCmdAsync(['-S', teamSocket, 'kill-server'], { timeout: 2_000, stripTmux: true }).catch(() => undefined);
@@ -548,5 +566,47 @@ describe.skipIf(!SMOKE_ENABLED)('team tmux smoke: fake claude worker lifecycle',
         }
       }
     }
+  }
+
+  async function stepsOfProvider(pid: number): Promise<string[]> {
+    return (await readTrace()).filter(entry => entry.pid === pid).map(entry => entry.step);
+  }
+
+  async function providerPids(): Promise<number[]> {
+    return [...new Set((await readTrace()).map(entry => entry.pid))];
+  }
+
+  it.skipIf(STOP_SCENARIO)('recovers a worker killed after its task completed, then shuts the team down', async () => {
+    await withKilledWorkerTeam(async team => {
+      const result = await team.recover('smoke-recover-1');
+      expect(result, `${JSON.stringify(result)}\n${await team.diagnostics()}`).toMatchObject({ outcome: 'recovered' });
+      // Recovery succeeds only once the replacement shows its idle prompt
+      // (claude-trust: after the trust dialog is answered), not while it is
+      // still blocked at startup.
+      const [, replacementPid] = await providerPids();
+      expect(await stepsOfProvider(replacementPid!), await team.diagnostics()).toContain('idle-prompt');
+    });
+  }, 300_000);
+
+  it.skipIf(STOP_SCENARIO)('relaunches a replacement that never became ready when recovery is retried under a new request', async () => {
+    await withKilledWorkerTeam(async team => {
+      // Only the first replacement stalls at its startup banner past the
+      // 30 s readiness wait.
+      await writeClaudeShim('claude-slow-banner', '120000');
+      const failed = await team.recover('smoke-recover-1');
+      expect(failed, `${JSON.stringify(failed)}\n${await team.diagnostics()}`)
+        .toMatchObject({ outcome: 'failed', error: 'worker_startup_not_ready' });
+      const [, stalledPid] = await providerPids();
+
+      await writeClaudeShim();
+      // A new request (the default when request_id is omitted) must not
+      // confirm the stalled pane as running.
+      const retried = await team.recover('smoke-recover-2');
+      expect(retried, `${JSON.stringify(retried)}\n${await team.diagnostics()}`).toMatchObject({ outcome: 'recovered' });
+      expect(isProcessAlive(stalledPid!)).toBe(false);
+      const [, , freshPid] = await providerPids();
+      expect(freshPid, await team.diagnostics()).toBeDefined();
+      expect(await stepsOfProvider(freshPid!), await team.diagnostics()).toContain('idle-prompt');
+    });
   }, 300_000);
 });
