@@ -22,10 +22,19 @@
  * including a missing or non-string error field).
  *
  * Records:
- *   <state dir>/<session>.error.json  the session's current error, replaced
+ *   <session error file>              the session's current error, replaced
  *                                     atomically (temp file with mode 0600 in
  *                                     the same directory, then renamed over;
  *                                     the temp file is removed on failure).
+ *                                     The path comes from the canonical session
+ *                                     path helper (resolveSessionStatePathsForHook
+ *                                     of lib/state-root.mjs):
+ *                                     <state root>/state/sessions/<session>/error.json,
+ *                                     resolved at the hook boundary and passed to
+ *                                     writeErrorJson. With OMC_JEV_STOP_FAILURE_DIR
+ *                                     set it is <that dir>/<session>.error.json.
+ *                                     A session id the helper does not accept has
+ *                                     no error file; errors.jsonl still gets its line.
  *   <state dir>/errors.jsonl          one line per failure: ts, session_id,
  *                                     error, errorClass and prompt_id when
  *                                     the payload carries it, appended as one
@@ -42,16 +51,19 @@
  *                                     errors.jsonl.1 (one copy) before the
  *                                     append.
  *
- * The state directory is created with mode 0700 and checked (lstat): it must
- * be a directory (not a symlink) owned by the current user; wider modes are
- * reduced with chmod to 0700. A failure here means nothing is written.
+ * The state directory (the one of errors.jsonl) is created with mode 0700 and
+ * checked (lstat): it must be a directory (not a symlink) owned by the current
+ * user; wider modes are reduced with chmod to 0700. A failure here means
+ * nothing is written.
  *
  * Environment:
  *   OMC_JEV_STOP_FAILURE           "1" enables the hook; anything else keeps
  *                                  it off (default).
- *   OMC_JEV_STOP_FAILURE_DIR       state directory; default: the Jev log
- *                                  directory (OMC_JEV_LOG_DIR, else the
- *                                  state root's state/jev).
+ *   OMC_JEV_STOP_FAILURE_DIR       state directory of errors.jsonl and of
+ *                                  the <session>.error.json files; default: the
+ *                                  Jev log directory (OMC_JEV_LOG_DIR, else the
+ *                                  state root's state/jev) for errors.jsonl,
+ *                                  and the session state path for the error file.
  *   OMC_JEV_STOP_FAILURE_MAX_B     errors.jsonl rotation threshold in bytes
  *                                  (default 1048576).
  *
@@ -62,10 +74,10 @@
 
 import { chmodSync, closeSync, constants, lstatSync, mkdirSync, openSync, renameSync, rmSync, statSync, writeFileSync, writeSync } from 'node:fs';
 import { homedir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import { withStateFileLockAtPathSync } from './lib/atomic-write.mjs';
 import { readStdin } from './lib/stdin.mjs';
-import { resolveOmcStateRoot } from './lib/state-root.mjs';
+import { resolveOmcStateRoot, resolveSessionStatePathsForHook } from './lib/state-root.mjs';
 
 /** Error codes per class: transient, configuration, task-content. Anything else is unknown. */
 export const ERROR_CLASSES = {
@@ -130,6 +142,25 @@ export async function resolveStateDir(env = process.env, cwd = process.cwd()) {
   }
 }
 
+const SESSION_ID_PATTERN = /^[a-zA-Z0-9][a-zA-Z0-9_-]{0,255}$/; // the pattern of the canonical session path helper
+
+/**
+ * The file of the session's current error, resolved at the hook boundary: <OMC_JEV_STOP_FAILURE_DIR>/<session>.error.json when that
+ * variable is set (the session id cleaned for a file name), otherwise the session state path of the canonical helper (file name
+ * error.json) for the session id as the payload gives it. A missing session id, one the helper does not accept, or a helper that
+ * throws gives '' (no error file).
+ */
+export async function resolveErrorPath(env, cwd, dir, data) {
+  if (String(env.OMC_JEV_STOP_FAILURE_DIR ?? '').trim()) return join(dir, cleanSessionId(data.session_id) + '.error.json');
+  const session = data.session_id;
+  if (typeof session !== 'string' || !SESSION_ID_PATTERN.test(session)) return '';
+  try {
+    return (await resolveSessionStatePathsForHook(cwd, 'stop-failure', session, { fileName: 'error.json' })).writePath || '';
+  } catch {
+    return '';
+  }
+}
+
 /**
  * Create the state directory (mode 0700) and check it: a directory (not a
  * symlink), owned by the current user, wider modes reduced to 0700. Throws
@@ -157,11 +188,12 @@ export function errorRecord(data, session) {
   return record;
 }
 
-/** Atomically replace <session>.error.json: temp file 0600 in the same directory, renamed over; the temp file is removed on failure. */
-export function writeErrorJson(dir, session, record) {
-  const path = join(dir, session + '.error.json');
-  const temp = join(dir, session + '.' + process.pid + '.' + Math.random().toString(36).slice(2, 8) + '.tmp');
+/** Atomically replace the error file at `path`: temp file 0600 in the same directory, renamed over; the temp file is removed on failure. */
+export function writeErrorJson(path, record) {
+  const dir = dirname(path);
+  const temp = join(dir, record.session_id + '.' + process.pid + '.' + Math.random().toString(36).slice(2, 8) + '.tmp');
   try {
+    mkdirSync(dir, { recursive: true });
     const fd = openSync(temp, 'wx', 0o600);
     try {
       writeFileSync(fd, JSON.stringify(record), 'utf8');
@@ -252,7 +284,8 @@ export async function main(argv, stdin, env = process.env, cwd = process.cwd()) 
     const dir = await resolveStateDir(env, cwd);
     prepareStateDir(dir);
     const record = errorRecord(data, session);
-    writeErrorJson(dir, session, record);
+    const errorPath = await resolveErrorPath(env, cwd, dir, data);
+    if (errorPath) writeErrorJson(errorPath, record);
     appendErrorsJsonl(dir, record, rotationThresholdOf(env));
   } catch (error) {
     try {

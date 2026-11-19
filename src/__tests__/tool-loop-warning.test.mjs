@@ -10,7 +10,7 @@
  * JSON: exit 0 without output; output, journal and state never carry
  * tool_input/tool_response content; with the switch off: no output, no files.
  */
-import { spawnSync } from 'node:child_process';
+import { execFileSync, spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, utimesSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -398,6 +398,93 @@ afterEach(() => {
     }
   }
   lane = null;
+});
+
+describe('session state path (OMC_JEV_LOOP_WARNING_STATE_DIR unset)', () => {
+  /** A primary repository and a linked worktree of it, and an empty HOME. */
+  const reposOf = (name) => {
+    const dir = laneOf(name);
+    const primary = join(dir, 'primary');
+    const linked = join(dir, 'linked');
+    const home = join(dir, 'home');
+    for (const path of [primary, home]) mkdirSync(path, { recursive: true });
+    const git = (cwd, ...args) => execFileSync('git', ['-c', 'user.email=t@example.com', '-c', 'user.name=t', ...args], { cwd, stdio: 'ignore' });
+    git(primary, 'init', '-q');
+    git(primary, 'commit', '-q', '--allow-empty', '-m', 'init');
+    git(primary, 'worktree', 'add', '-q', linked, '-b', 'linked');
+    return { dir, primary, linked, home };
+  };
+
+  /** The hook with no state directory variable: the state file comes from the canonical session path helper. */
+  const runDefault = (data, { home, extraEnv = {} }) => {
+    const env = { ...process.env, OMC_JEV_LOOP_WARNING: '1', HOME: home, USERPROFILE: home, ...extraEnv };
+    for (const key of ['OMC_JEV_LOOP_WARNING_STATE_DIR', 'OMC_STATE_DIR', 'CLAUDE_PLUGIN_ROOT', 'OMC_DISABLE_MULTIREPO']) if (!(key in extraEnv)) delete env[key];
+    return spawnSync(process.execPath, [HOOK], {
+      input: JSON.stringify({
+        session_id: 's-loop', transcript_path: '/never/opened/transcript.jsonl', cwd: home, hook_event_name: 'PostToolUse',
+        tool_name: 'Read', tool_input: { file_path: '/tmp/x.md' }, tool_response: 'shared-ok-result', tool_use_id: 'tool-1', ...data,
+      }),
+      encoding: 'utf8',
+      cwd: data.cwd ?? home,
+      env,
+    });
+  };
+  const three = (data, options) => [1, 2, 3].map((n) => runDefault({ ...data, tool_use_id: `t${n}` }, options));
+
+  it.each([
+    ['without CLAUDE_PLUGIN_ROOT (the inline path)', {}],
+    ['with the built helper of the plugin root', { CLAUDE_PLUGIN_ROOT: ROOT }],
+  ])('in a linked worktree the state file is <worktree>/.omc/state/sessions/<session>/tool-loop-main.json, %s', (_label, extraEnv) => {
+    const { linked, home } = reposOf('linked-default');
+    const results = three({ cwd: linked }, { home, extraEnv });
+    expect(results.map((r) => r.status)).toEqual([0, 0, 0]);
+    expect(results[0].stdout.trim()).toBe('');
+    expect(context(results[2])).toMatch(/repeated 3 times in a row/);
+    const file = join(linked, '.omc', 'state', 'sessions', 's-loop', 'tool-loop-main.json');
+    expect(existsSync(file)).toBe(true);
+    expect(JSON.parse(readFileSync(file, 'utf8')).loopCount).toBe(3);
+    expect(existsSync(join(home, '.omc', 'state', 'tool-loop'))).toBe(false); // nothing in the old home directory
+  });
+
+  it.each([
+    ['without CLAUDE_PLUGIN_ROOT (the inline path)', {}],
+    ['with the built helper of the plugin root', { CLAUDE_PLUGIN_ROOT: ROOT }],
+  ])('with OMC_STATE_DIR the primary repository and its linked worktree share one project directory under it, %s', (_label, base) => {
+    const { primary, linked, home, dir } = reposOf('state-dir');
+    const stateRoot = join(dir, 'state-root');
+    const options = { home, extraEnv: { ...base, OMC_STATE_DIR: stateRoot } };
+    runDefault({ cwd: primary, tool_use_id: 't1' }, options);
+    runDefault({ cwd: linked, tool_use_id: 't2' }, options);
+    const third = runDefault({ cwd: primary, tool_use_id: 't3' }, options);
+    expect(context(third)).toMatch(/repeated 3 times in a row/); // one counter for both checkouts
+    const projects = readdirSync(stateRoot);
+    expect(projects).toHaveLength(1);
+    expect(projects[0]).toMatch(/^primary-[0-9a-f]{16}$/);
+    expect(existsSync(join(stateRoot, projects[0], 'state', 'sessions', 's-loop', 'tool-loop-main.json'))).toBe(true);
+    for (const checkout of [primary, linked]) expect(existsSync(join(checkout, '.omc'))).toBe(false);
+  });
+
+  it('a subagent is counted apart in its own file, its id reduced to [A-Za-z0-9_-]', () => {
+    const { linked, home } = reposOf('agent');
+    three({ cwd: linked, agent_id: 'agent/with:odd chars' }, { home });
+    const sessionDir = join(linked, '.omc', 'state', 'sessions', 's-loop');
+    expect(readdirSync(sessionDir)).toEqual(['tool-loop-agent_with_odd_chars.json']);
+    expect(runDefault({ cwd: linked }, { home }).stdout.trim()).toBe(''); // the main session starts its own counter
+    expect(readdirSync(sessionDir).sort()).toEqual(['tool-loop-agent_with_odd_chars.json', 'tool-loop-main.json']);
+  });
+
+  it('a session id the helper does not accept has no state: no output, no file, an error row in the journal', () => {
+    const { linked, home } = reposOf('bad-id');
+    for (const sid of ['../escape', '.hidden', 'a'.repeat(257)]) {
+      const results = three({ cwd: linked, session_id: sid }, { home });
+      expect(results.map((r) => r.status)).toEqual([0, 0, 0]);
+      expect(results.map((r) => r.stdout.trim())).toEqual(['', '', '']);
+    }
+    expect(existsSync(join(linked, '.omc'))).toBe(false);
+    const rows = readFileSync(join(home, '.omc', 'state', 'tool-loop-warnings.jsonl'), 'utf8').trimEnd().split('\n').map((row) => JSON.parse(row));
+    expect(rows).toHaveLength(9);
+    expect(new Set(rows.map((row) => row.category))).toEqual(new Set(['state-path']));
+  });
 });
 
 describe('default state paths', () => {

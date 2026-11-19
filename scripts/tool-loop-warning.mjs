@@ -13,15 +13,21 @@
  * Input: the JSON object on stdin (PostToolUse): session_id, transcript_path
  * (never opened), cwd, hook_event_name (must be PostToolUse), tool_name,
  * tool_input, tool_response, tool_use_id; agent_id and agent_type in calls
- * made inside a subagent. The only data source is stdin; the only directory
- * the hook uses is its own state directory (no session data, transcripts or
- * disk listings).
+ * made inside a subagent. The only data source is stdin; the only files
+ * the hook uses are its own state file and journal (no session data,
+ * transcripts or disk listings).
  *
  * Definitions:
  *   context            the pair (session_id, agent_id; agent_id empty for the
- *                      main session). State per context in its own JSON file
- *                      named by the sha256 of the context in the state dir;
+ *                      main session). State per context in its own JSON file,
  *                      main-session and subagent contexts are counted apart.
+ *                      The file is the session state path of the canonical
+ *                      helper (resolveSessionStatePathsForHook of
+ *                      lib/state-root.mjs): <state root>/state/sessions/<session>/
+ *                      tool-loop-<main or the agent id>.json, resolved once per
+ *                      call at the hook boundary and passed to the helpers below.
+ *                      With OMC_JEV_LOOP_WARNING_STATE_DIR set the file is in
+ *                      that directory instead, named by the sha256 of the context.
  *   call signature     sha256 (first 12 hex chars) of tool_name + NUL + the
  *                      stable JSON of tool_input (keys sorted recursively,
  *                      no spaces).
@@ -59,14 +65,18 @@
  * real data; a non-positive value disables that detection):
  *   OMC_JEV_LOOP_WARNING            "1" enables the hook; anything else keeps
  *                                   it off (default).
- *   OMC_JEV_LOOP_WARNING_STATE_DIR  state directory (default
- *                                   ~/.omc/state/tool-loop); the JSONL
- *                                   journal sits next to it
- *                                   (tool-loop-warnings.jsonl in the parent).
+ *   OMC_JEV_LOOP_WARNING_STATE_DIR  directory for the state files instead of
+ *                                   the session state path (see context); the
+ *                                   JSONL journal sits next to it
+ *                                   (tool-loop-warnings.jsonl in the parent;
+ *                                   with the variable unset the parent of
+ *                                   ~/.omc/state/tool-loop).
  *   OMC_JEV_LOOP_WARNING_THRESHOLD  repeat threshold (3).
  *   OMC_JEV_LOOP_WARNING_WINDOW     window of signatures for cycles (64).
  *   OMC_JEV_LOOP_WARNING_CYCLE_REPEATS  full pattern repeats of a cycle (3).
- *   OMC_JEV_LOOP_WARNING_STATE_DAYS state file age removed by the sweep (2).
+ *   OMC_JEV_LOOP_WARNING_STATE_DAYS state file age removed by the sweep of
+ *                                   OMC_JEV_LOOP_WARNING_STATE_DIR (2); the
+ *                                   session state files go with their session.
  *   OMC_JEV_LOOP_WARNING_MCP_SUFFIXES  comma-separated MCP tool name suffixes
  *                                   treated as status polling; these three
  *                                   defaults are the host's own state tools:
@@ -91,6 +101,7 @@ import { appendFileSync, mkdirSync, openSync, closeSync, existsSync, readFileSyn
 import { createHash } from 'node:crypto';
 import { homedir } from 'node:os';
 import { dirname, join } from 'node:path';
+import { resolveSessionStatePathsForHook } from './lib/state-root.mjs';
 
 // --- constants: exemptions and ranges ---------------------------------------
 
@@ -101,6 +112,7 @@ const STATUS_TOOLS = new Set(['ReadNotifications', 'TaskList', 'TaskGet', 'CronL
 const DEFAULT_MCP_SUFFIXES = ['__state_list_active', '__state_get_status', '__state_read'];
 const PERIODS = [2, 3, 4, 5, 6];
 const SWEEP_EVERY_CALLS = 100;
+const SESSION_ID_PATTERN = /^[a-zA-Z0-9][a-zA-Z0-9_-]{0,255}$/; // the pattern of the canonical session path helper
 
 // --- configuration -----------------------------------------------------------
 
@@ -115,12 +127,14 @@ function intFromEnv(value, fallback) {
 export const loopWarningEnabled = (env = process.env) => flag(env.OMC_JEV_LOOP_WARNING);
 
 export function loopWarningConfig(env = process.env) {
-  const stateDir = String(env.OMC_JEV_LOOP_WARNING_STATE_DIR ?? '').trim()
+  const explicitStateDir = String(env.OMC_JEV_LOOP_WARNING_STATE_DIR ?? '').trim();
+  const stateDir = explicitStateDir
     || (() => {
       try { return join(homedir(), '.omc', 'state', 'tool-loop'); } catch { return '.omc/state/tool-loop'; }
     })();
   return {
     enabled: flag(env.OMC_JEV_LOOP_WARNING),
+    explicitStateDir: Boolean(explicitStateDir),
     stateDir,
     journalPath: join(dirname(stateDir), 'tool-loop-warnings.jsonl'),
     threshold: intFromEnv(env.OMC_JEV_LOOP_WARNING_THRESHOLD, 3),
@@ -193,8 +207,39 @@ export function newState() {
   return { loopPair: '', loopTool: '', loopCount: 0, sequence: [], cyclePeriod: null, calls: 0 };
 }
 
+/** The state file of a context in OMC_JEV_LOOP_WARNING_STATE_DIR: the sha256 of the context. */
 export function statePath(config, session, agent) {
   return join(config.stateDir, digest(session + '\x00' + agent) + '.json');
+}
+
+/** The (session id, agent id) pair of a PostToolUse input; both are '' when missing or not strings. */
+export function contextOf(data) {
+  const source = data && typeof data === 'object' ? data : {};
+  return {
+    session: typeof source.session_id === 'string' ? source.session_id : '',
+    agent: typeof source.agent_id === 'string' ? source.agent_id : '',
+  };
+}
+
+/**
+ * The state file of the input's context, resolved at the hook boundary: with OMC_JEV_LOOP_WARNING_STATE_DIR set the file of
+ * statePath(); otherwise the session state path of the canonical helper (tool-loop-main.json for the main session,
+ * tool-loop-<agent id reduced to [A-Za-z0-9_-]>.json for a subagent). A session id the helper does not accept, or a
+ * helper that throws, gives '' (no state: the hook passes without output).
+ */
+export async function resolveStatePath(config, data) {
+  const { session, agent } = contextOf(data);
+  if (!session) return '';
+  if (config.explicitStateDir) return statePath(config, session, agent);
+  if (!SESSION_ID_PATTERN.test(session)) return '';
+  try {
+    const agentPart = agent ? agent.replace(/[^A-Za-z0-9_-]/g, '_').slice(0, 120) : 'main';
+    const directory = typeof data.cwd === 'string' && data.cwd.trim() ? data.cwd : process.cwd();
+    const paths = await resolveSessionStatePathsForHook(directory, 'tool-loop', session, { fileName: `tool-loop-${agentPart}.json` });
+    return paths.writePath || '';
+  } catch {
+    return '';
+  }
 }
 
 export function readState(path) {
@@ -222,8 +267,8 @@ export function readState(path) {
   return clean;
 }
 
-export function writeState(config, path, state) {
-  mkdirSync(config.stateDir, { recursive: true });
+export function writeState(path, state) {
+  mkdirSync(dirname(path), { recursive: true });
   const temp = path + '.' + process.pid + '.tmp';
   try {
     writeFileSync(temp, JSON.stringify(state), 'utf8');
@@ -340,20 +385,21 @@ export function warningOutput(text) {
 
 // --- main ---------------------------------------------------------------------
 
-export function processCall(data, config) {
+export function processCall(data, config, path) {
   const warnings = [];
   const rows = [];
-  const session = typeof data.session_id === 'string' ? data.session_id : '';
+  const { session } = contextOf(data);
   const tool = typeof data.tool_name === 'string' ? data.tool_name : '';
   if (!session || !tool) {
     recordError(config, 'fields', data);
     return { warnings, rows };
   }
-  let agent = data.agent_id || '';
-  if (typeof agent !== 'string') agent = '';
+  if (!path) {
+    recordError(config, 'state-path', data);
+    return { warnings, rows };
+  }
   let input = data.tool_input;
   if (input === null || input === undefined) input = {};
-  const path = statePath(config, session, agent);
   const state = readState(path);
   state.calls += 1;
   if (isExempt(tool, input, config.mcpSuffixes)) {
@@ -400,13 +446,13 @@ export function processCall(data, config) {
       state.cyclePeriod = null;
     }
   }
-  if (state.calls % SWEEP_EVERY_CALLS === 0) sweep(config, path);
-  writeState(config, path, state);
+  if (config.explicitStateDir && state.calls % SWEEP_EVERY_CALLS === 0) sweep(config, path);
+  writeState(path, state);
   for (const row of rows) appendJournal(config, row);
   return { warnings, rows };
 }
 
-export function main(argv, stdin, env = process.env) {
+export async function main(argv, stdin, env = process.env) {
   let data;
   try {
     data = JSON.parse(stdin);
@@ -423,7 +469,7 @@ export function main(argv, stdin, env = process.env) {
   }
   if (data.hook_event_name !== 'PostToolUse') return 0;
   try {
-    const { warnings } = processCall(data, config);
+    const { warnings } = processCall(data, config, await resolveStatePath(config, data));
     if (warnings.length > 0) console.log(warningOutput(warnings.join('\n\n')));
   } catch {
     // fail-open: exit 0 without output, an error row in the journal when possible
@@ -440,5 +486,8 @@ if (process.argv[1] && /tool-loop-warning\.mjs$/.test(process.argv[1])) {
   } catch {
     // closed stdin: an empty input, the JSON error path
   }
-  process.exit(main(process.argv.slice(2), stdin));
+  main(process.argv.slice(2), stdin).then(
+    (code) => process.exit(code),
+    () => process.exit(0), // fail-open
+  );
 }

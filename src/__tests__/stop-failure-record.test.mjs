@@ -12,7 +12,7 @@
  * and a held lock never block the hook, and every input error passes through
  * with code 0; with the switch off nothing is written.
  */
-import { spawn, spawnSync } from 'node:child_process';
+import { execFileSync, spawn, spawnSync } from 'node:child_process';
 import { existsSync, lstatSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -464,6 +464,84 @@ afterEach(() => {
     }
   }
   lane = null;
+});
+
+describe('session error file (OMC_JEV_STOP_FAILURE_DIR unset)', () => {
+  /** A primary repository and a linked worktree of it, and an empty HOME. */
+  const reposOf = (name) => {
+    const dir = laneOf(name);
+    const primary = join(dir, 'primary');
+    const linked = join(dir, 'linked');
+    const home = join(dir, 'home');
+    for (const path of [primary, home]) mkdirSync(path, { recursive: true });
+    const git = (cwd, ...args) => execFileSync('git', ['-c', 'user.email=t@example.com', '-c', 'user.name=t', ...args], { cwd, stdio: 'ignore' });
+    git(primary, 'init', '-q');
+    git(primary, 'commit', '-q', '--allow-empty', '-m', 'init');
+    git(primary, 'worktree', 'add', '-q', linked, '-b', 'linked');
+    return { dir, primary, linked, home };
+  };
+
+  /** The hook with no state directory variable, started in `cwd`: the error file comes from the canonical session path helper. */
+  const runDefault = (data, { cwd, home, extraEnv = {} }) => {
+    const env = { ...process.env, OMC_JEV_STOP_FAILURE: '1', HOME: home, USERPROFILE: home, ...extraEnv };
+    for (const key of ['OMC_JEV_STOP_FAILURE_DIR', 'OMC_JEV_LOG_DIR', 'OMC_STATE_DIR', 'CLAUDE_PLUGIN_ROOT', 'OMC_DISABLE_MULTIREPO']) if (!(key in extraEnv)) delete env[key];
+    return spawnSync(process.execPath, [HOOK], {
+      input: JSON.stringify({ session_id: 's-sfr', transcript_path: '/never/opened/transcript.jsonl', cwd, hook_event_name: 'StopFailure', error: 'rate_limit', ...data }),
+      encoding: 'utf8',
+      cwd,
+      env,
+    });
+  };
+
+  it.each([
+    ['without CLAUDE_PLUGIN_ROOT (the inline path)', {}],
+    ['with the built helper of the plugin root', { CLAUDE_PLUGIN_ROOT: ROOT }],
+  ])('in a linked worktree the error file is <worktree>/.omc/state/sessions/<session>/error.json and errors.jsonl stays in state/jev, %s', (_label, extraEnv) => {
+    const { linked, home } = reposOf('linked-default');
+    const result = runDefault({}, { cwd: linked, home, extraEnv });
+    expect(result.status).toBe(0);
+    const file = join(linked, '.omc', 'state', 'sessions', 's-sfr', 'error.json');
+    expect(JSON.parse(readFileSync(file, 'utf8'))).toMatchObject({ session_id: 's-sfr', error: 'rate_limit', errorClass: 'transient' });
+    expect(readdirSync(join(linked, '.omc', 'state', 'sessions', 's-sfr'))).toEqual(['error.json']); // no temp file left
+    expect(existsSync(join(linked, '.omc', 'state', 'jev', 's-sfr.error.json'))).toBe(false);
+    expect(jsonlRows(join(linked, '.omc', 'state', 'jev')).map((row) => row.session_id)).toEqual(['s-sfr']);
+  });
+
+  it.each([
+    ['without CLAUDE_PLUGIN_ROOT (the inline path)', {}],
+    ['with the built helper of the plugin root', { CLAUDE_PLUGIN_ROOT: ROOT }],
+  ])('with OMC_STATE_DIR both files go under the project directory of the state root, for the primary repository and its linked worktree alike, %s', (_label, base) => {
+    const { primary, linked, home, dir } = reposOf('state-dir');
+    const stateRoot = join(dir, 'state-root');
+    const options = { home, extraEnv: { ...base, OMC_STATE_DIR: stateRoot } };
+    expect(runDefault({ session_id: 's-one' }, { ...options, cwd: primary }).status).toBe(0);
+    expect(runDefault({ session_id: 's-two' }, { ...options, cwd: linked }).status).toBe(0);
+    const projects = readdirSync(stateRoot);
+    expect(projects).toHaveLength(1);
+    expect(projects[0]).toMatch(/^primary-[0-9a-f]{16}$/);
+    const state = join(stateRoot, projects[0], 'state');
+    for (const id of ['s-one', 's-two']) expect(JSON.parse(readFileSync(join(state, 'sessions', id, 'error.json'), 'utf8')).session_id).toBe(id);
+    expect(jsonlRows(join(state, 'jev')).map((row) => row.session_id)).toEqual(['s-one', 's-two']);
+    for (const checkout of [primary, linked]) expect(existsSync(join(checkout, '.omc'))).toBe(false);
+  });
+
+  it('a session id the helper does not accept gets no error file; the errors.jsonl line is written', () => {
+    const { linked, home } = reposOf('bad-id');
+    for (const sid of ['../escape', '.hidden', undefined]) {
+      expect(runDefault({ session_id: sid }, { cwd: linked, home }).status).toBe(0);
+    }
+    expect(existsSync(join(linked, '.omc', 'state', 'sessions'))).toBe(false);
+    expect(jsonlRows(join(linked, '.omc', 'state', 'jev')).map((row) => row.session_id)).toEqual(['___escape', '_hidden', 'no-session']);
+  });
+
+  it('OMC_JEV_STOP_FAILURE_DIR keeps both files in that directory, as before', () => {
+    const { linked, home, dir } = reposOf('explicit');
+    const state = join(dir, 'explicit-state');
+    expect(runDefault({}, { cwd: linked, home, extraEnv: { OMC_JEV_STOP_FAILURE_DIR: state } }).status).toBe(0);
+    expect(readError(state, 's-sfr')).toMatchObject({ session_id: 's-sfr' });
+    expect(jsonlRows(state)).toHaveLength(1);
+    expect(existsSync(join(linked, '.omc'))).toBe(false);
+  });
 });
 
 describe('default state directory', () => {
