@@ -930,6 +930,128 @@ describe('task list: session retention sweep', () => {
       expect(L.readList(sid, 'main', envFor()).items.map((x) => x.content)).toEqual(['Settled in the new directory', 'In the window']);
       expect(logRows('task-list.jsonl').some((x) => x.event === 'moved_list_set_aside')).toBe(true);
     });
+
+    // The sweep was stopped right after it moved the directory (a hook is stopped by the host after 3 s), so the tree stayed hidden while the
+    // session went on in a new directory; the sweep that finds it merges it when the new list has settled calls of its own. The events the
+    // moved tree held are older than every call the new list has settled: their place in the order of the calls is before those calls, which
+    // are settled and gone, so they cannot be replayed there, and applying them last (as a call of a clock set back) would put an older call over a
+    // newer one.
+    describe('an interrupted sweep: the moved tree is merged after the new directory settled calls of its own', () => {
+      const held = (sid, key, at, tool, input) => {
+        const name = `${at}-${'7'.padStart(20, '0')}-11-aaaaaaaa.json`;
+        const event = { ts: new Date(at).toISOString(), pid: 11, id: 'aaaaaaaa', session_id: sid, agent_type: null, tool_use_id: null, prompt_id: null, tool_name: tool, tool_input: input };
+        mkdirSync(join(root(), sid, `${key}.events`), { recursive: true });
+        writeFileSync(join(root(), sid, `${key}.events`, name), JSON.stringify(event));
+        return { name, event };
+      };
+      const interrupted = (sid, { withList }) => {
+        const at = Date.now() - 120_000;
+        const first = held(sid, 'main', at, 'TodoWrite', { todos: [{ content: 'Old list', status: 'pending' }] });
+        if (withList) writeFileSync(join(root(), sid, 'main.json'), JSON.stringify(L.foldedRecord(L.foldEvents({ record: null, broken: false }, [first], 'main', envFor(), at))));
+        return at;
+      };
+      const stopAfterMove = (sid) => {
+        writeFileSync(join(root(), '.sweep'), '{}'); // the sweep ran a moment ago: no other sweep runs before the one below
+        const moved = join(root(), `.${sid}.0123456789ab.sweeping`);
+        renameSync(join(root(), sid), moved);
+        return moved;
+      };
+      const sweepAgain = () => { rmSync(join(root(), '.sweep'), { force: true }); L.sweep(envFor(), Date.now()); };
+      const liveCalls = (sid, now) => {
+        L.recordListCall(postToolUse(sid, 'TodoWrite', { todos: [{ content: 'Live task', status: 'pending' }] }), envFor(), now - 50_000); // settled at once
+        L.recordListCall(postToolUse(sid, 'TodoWrite', { todos: [{ content: 'Live task', status: 'pending' }] }), envFor(), now);
+      };
+      const shown = (sid) => L.readList(sid, 'main', envFor()).items.map((x) => `${x.content}:${x.status}`);
+      const rowsSince = (count) => logRows('task-list.jsonl').slice(count).filter((x) => x.event === 'moved_events_behind_settled').length;
+
+      it.each([['with the list of the moved tree', true], ['with its events only', false]])('an older replacement of the list does not land over the newer list (%s)', (_what, withList) => {
+        fresh();
+        const now = Date.now();
+        const sid = session();
+        const rows = logRows('task-list.jsonl').length;
+        interrupted(sid, { withList });
+        const moved = stopAfterMove(sid);
+        liveCalls(sid, now);
+        sweepAgain();
+        expect(existsSync(moved)).toBe(false); // merged: the events left behind were deliberately left, not a reason to keep the tree
+        expect(shown(sid)).toEqual(['Live task:pending']);
+        expect(readListFile(sid, 'main').items.map((x) => x.content)).toEqual(['Live task']);
+        expect(eventFiles(sid, 'main').some((n) => n.startsWith(String(now - 120_000)))).toBe(false);
+        expect(rowsSince(rows)).toBe(1);
+        expect(existsSync(join(root(), sid, 'main.json.moved'))).toBe(withList);
+      });
+
+      // every kind of call: none of them changes the list the new directory settled, whatever it does to a list when it is applied last
+      it.each([
+        ['TodoWrite replaces the list', 'TodoWrite', { todos: [{ content: 'Old list', status: 'pending' }] }],
+        ['task_list replaces the list', LIST_TOOL, { items: [{ content: 'Old list', status: 'pending' }] }],
+        ['task_list done by number', LIST_TOOL, { done: [1] }],
+        ['task_list start by number', LIST_TOOL, { start: 1 }],
+        ['task_list advance', LIST_TOOL, { advance: true }],
+        ['wrap_up completes the list', 'mcp__ccd_turn__wrap_up', {}],
+      ])('%s: an older call of the moved tree is not applied over the settled list', (_what, tool, input) => {
+        fresh();
+        const now = Date.now();
+        const sid = session();
+        held(sid, 'main', now - 120_000, tool, input);
+        const moved = stopAfterMove(sid);
+        liveCalls(sid, now);
+        sweepAgain();
+        expect(existsSync(moved)).toBe(false);
+        expect(shown(sid)).toEqual(['Live task:pending']);
+      });
+
+      // its name is above the last call the new list settled, but its time is more than 10 s older than the newest call the new list holds
+      it('an event more than 10 s older than the newest call of the new list is not applied over it either', () => {
+        fresh();
+        const now = Date.now();
+        const sid = session();
+        held(sid, 'main', now - 60_000, 'TodoWrite', { todos: [{ content: 'Old list', status: 'pending' }] });
+        const moved = stopAfterMove(sid);
+        L.recordListCall(postToolUse(sid, 'TodoWrite', { todos: [{ content: 'Live task', status: 'pending' }] }), envFor(), now - 100_000); // settled at once
+        L.recordListCall(postToolUse(sid, LIST_TOOL, { start: 1 }), envFor(), now);
+        sweepAgain();
+        expect(existsSync(moved)).toBe(false);
+        expect(shown(sid)).toEqual(['Live task:in_progress']);
+      });
+
+      // the decision about the events is made under the lock of the live list: when that lock is not taken in time the tree stays hidden, and the next sweep decides
+      it('keeps the moved tree while the lock of the live list is held, and decides at the next sweep', () => {
+        fresh();
+        const now = Date.now();
+        const sid = session();
+        held(sid, 'main', now - 120_000, 'TodoWrite', { todos: [{ content: 'Old list', status: 'pending' }] });
+        const moved = stopAfterMove(sid);
+        liveCalls(sid, now);
+        const lock = join(root(), sid, 'main.json.lock');
+        writeFileSync(lock, 'another-hook');
+        sweepAgain();
+        expect(existsSync(moved)).toBe(true);
+        expect(readdirSync(join(moved, 'main.events')).length).toBe(1); // nothing was linked in or dropped
+        expect(shown(sid)).toEqual(['Live task:pending']);
+        rmSync(lock);
+        sweepAgain();
+        expect(existsSync(moved)).toBe(false);
+        expect(shown(sid)).toEqual(['Live task:pending']);
+      });
+
+      it('an event of the moved tree newer than what the new list has settled still takes its place in the order of the calls', () => {
+        fresh();
+        const now = Date.now();
+        const sid = session();
+        const rows = logRows('task-list.jsonl').length;
+        const early = held(sid, 'main', now - 60_000, 'TodoWrite', { todos: [{ content: 'Moved list', status: 'pending' }] });
+        held(sid, 'main', now - 40_000, 'TodoWrite', { todos: [{ content: 'Moved list', status: 'pending' }, { content: 'Second', status: 'pending' }] });
+        expect(early.name < `${now - 40_000}`).toBe(true);
+        const moved = stopAfterMove(sid);
+        // the new directory settles nothing: its only call is in its window, so the moved events and it are replayed together, in order
+        L.recordListCall(postToolUse(sid, LIST_TOOL, { done: [2] }), envFor(), now);
+        sweepAgain();
+        expect(existsSync(moved)).toBe(false);
+        expect(shown(sid)).toEqual(['Moved list:pending', 'Second:completed']);
+        expect(rowsSince(rows)).toBe(0);
+      });
+    });
   });
 
   it('a list call triggers the sweep', () => {

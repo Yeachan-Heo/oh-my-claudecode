@@ -462,10 +462,11 @@ const HIDDEN_NAME = /^\.(.+)\.[0-9a-f]{12}\.sweeping$/; // the hidden name of a 
 // (adoptMovedBase; the list files go before the folders, so the base is in place when the events arrive); when it cannot be adopted it is
 // kept next to the live list as <name>.moved (no reader looks at that name) and a row with `event: "moved_list_set_aside"` goes to
 // task-list.jsonl. The events of the moved tree arrive in both cases and are replayed into the live list: the calls that made the moved list
-// are there as long as they are in their window. Lock files and temporary files are not moved: a lock a dead holder left would only stall the
-// next fold, and a temporary file is never read. true when every entry was moved or deliberately left, false when one could not be moved (the
-// moved tree is kept then). `adopted` collects the list files that took a moved base: their lists are folded again when the merge is done.
-function mergeTree(from, to, env, top = true, adopted = []) {
+// are there as long as they are in their window (an event the live list has settled past does not arrive, see mergeEvents). Lock files and
+// temporary files are not moved: a lock a dead holder left would only stall the next fold, and a temporary file is never read. true when
+// every entry was moved or deliberately left, false when one could not be moved (the moved tree is kept then). `adopted` collects the list
+// files that took a moved base: their lists are folded again when the merge is done. `skip(name)` leaves a file out of the merge (mergeEvents).
+function mergeTree(from, to, env, top = true, adopted = [], skip = null) {
   let complete = true;
   const entries = readdirSync(from, { withFileTypes: true }).sort((a, b) => Number(a.isDirectory()) - Number(b.isDirectory()));
   for (const entry of entries) {
@@ -474,18 +475,23 @@ function mergeTree(from, to, env, top = true, adopted = []) {
     try {
       if (entry.isDirectory()) {
         mkdirSync(target, { recursive: true });
-        if (!mergeTree(source, target, env, false, adopted)) complete = false;
+        const merged = top && entry.name.endsWith('.events')
+          ? mergeEvents(source, target, join(to, `${entry.name.slice(0, -'.events'.length)}.json`), env, adopted)
+          : mergeTree(source, target, env, false, adopted);
+        if (!merged) complete = false;
       } else if (entry.isFile() && !/\.(?:lock|tmp)$/.test(entry.name)) {
-        try {
-          linkSync(source, target);
-        } catch (error) {
-          if (error?.code !== 'EEXIST') throw error;
-          if (top && entry.name.endsWith('.json')) {
-            if (adoptMovedBase(source, target, env)) {
-              adopted.push(target);
-            } else {
-              try { linkSync(source, `${target}.moved`); } catch { /* an earlier merge left one: that one stays */ }
-              storeEvent('moved_list_set_aside', target, env);
+        if (!skip?.(entry.name)) {
+          try {
+            linkSync(source, target);
+          } catch (error) {
+            if (error?.code !== 'EEXIST') throw error;
+            if (top && entry.name.endsWith('.json')) {
+              if (adoptMovedBase(source, target, env)) {
+                adopted.push(target);
+              } else {
+                try { linkSync(source, `${target}.moved`); } catch { /* an earlier merge left one: that one stays */ }
+                storeEvent('moved_list_set_aside', target, env);
+              }
             }
           }
         }
@@ -493,6 +499,28 @@ function mergeTree(from, to, env, top = true, adopted = []) {
       }
     } catch { complete = false; }
   }
+  return complete;
+}
+
+// The events of one list in a moved tree, merged into the live events folder under the lock of the live list (`livePath`): the live record
+// read here is the one the events arrive under, since no fold publishes between that read and the links. An event the live list has settled
+// past (behind its record, see isBehind) is not linked: the calls after it are settled into the live base and their events removed, so its
+// place in the order of the calls cannot be restored, and foldEvents would apply it last, as a call of the moment, over calls that were made
+// after it (an older list replacing a newer one). It is dropped with the moved tree, which counts as merged, and a row with
+// `event: "moved_events_behind_settled"` says so; the list of the moved tree is kept next to the live one (see mergeTree). false when the
+// lock was not taken or an event could not be moved: the moved tree is kept and the next sweep tries again.
+function mergeEvents(from, to, livePath, env, adopted) {
+  let complete = false;
+  let behind = 0;
+  withFileLock(livePath, () => {
+    const marks = settledMarks(readRecord(livePath).record);
+    complete = mergeTree(from, to, env, false, adopted, (name) => {
+      const skipped = EVENT_NAME.test(name) && isBehind(marks, name);
+      if (skipped) behind += 1;
+      return skipped;
+    });
+  }, env, SYNC_STALE_MS);
+  if (behind > 0) storeEvent('moved_events_behind_settled', livePath, env);
   return complete;
 }
 
@@ -718,6 +746,19 @@ const generationOf = ({ record, broken }) => (broken ? 'broken' : record ? Strin
 // The time of the call an event name starts with (13 digits of milliseconds).
 const eventMs = (name) => Number(name.slice(0, 13));
 
+// What a list record says about the calls it has settled: the name of the last one and the time of the newest call it has seen. An event is
+// behind a record when the record has settled past it: its name is not above the last settled one, or its time is more than LATE_EVENT_MS
+// older than the newest call. foldEvents applies such an event last, as a call of a clock set back; the merge of a moved tree (mergeEvents)
+// asks the same question, so the two cannot disagree on what is behind.
+function settledMarks(snap) {
+  const legacy = Boolean(snap) && !('base' in snap); // a file of an earlier version: its last event name is the last settled one
+  return {
+    settledName: typeof snap?.base_name === 'string' ? snap.base_name : (legacy && typeof snap.last_event_name === 'string' ? snap.last_event_name : ''),
+    lastEvent: Number.isFinite(snap?.last_event_ms) ? snap.last_event_ms : 0,
+  };
+}
+const isBehind = ({ settledName, lastEvent }, name) => name <= settledName || eventMs(name) + LATE_EVENT_MS < lastEvent;
+
 // What a file holds that is not the list nor the clock of the fold: if two files have the same, writing the second changes nothing.
 const signature = (record) => JSON.stringify({ ...record, rev: undefined, folded: undefined, last_event_ms: undefined });
 
@@ -736,8 +777,8 @@ export function foldEvents(start, events, key, env, now = Date.now()) {
   const snap = start.record;
   const done = new Set(Array.isArray(snap?.folded) ? snap.folded : []);
   const legacy = Boolean(snap) && !('base' in snap); // a file of an earlier version: its list is the base
-  const settledName = typeof snap?.base_name === 'string' ? snap.base_name : (legacy && typeof snap.last_event_name === 'string' ? snap.last_event_name : '');
-  const lastEvent = Number.isFinite(snap?.last_event_ms) ? snap.last_event_ms : 0;
+  const marks = settledMarks(snap);
+  const lastEvent = marks.lastEvent;
   const stored = legacy ? snap : snap?.base;
   const initial = stored && Array.isArray(stored.items) ? stored : null;
   const fresh = events.filter(({ name }) => !done.has(name)); // the others are leftovers of a fold that did not remove them
@@ -745,7 +786,7 @@ export function foldEvents(start, events, key, env, now = Date.now()) {
   if (!fresh.length) return { record: snap ?? null, broken: start.broken, absorbed: [], changed: false, done, generation }; // the file is what the events give
   const newest = fresh.reduce((ms, { name }) => Math.max(ms, eventMs(name)), lastEvent);
   const horizon = Math.max(now, newest);
-  const behind = ({ name }) => name <= settledName || eventMs(name) + LATE_EVENT_MS < lastEvent;
+  const behind = ({ name }) => isBehind(marks, name);
   const late = fresh.filter(behind);
   const ordered = fresh.filter((event) => !behind(event));
   let settled = 0;
@@ -764,7 +805,7 @@ export function foldEvents(start, events, key, env, now = Date.now()) {
   const record = {
     ...listFields(atEnd.record),
     base: atBase.record ? listFields(atBase.record) : null,
-    base_name: atBase.record !== initial && toBase.length ? toBase[toBase.length - 1].name : settledName,
+    base_name: atBase.record !== initial && toBase.length ? toBase[toBase.length - 1].name : marks.settledName,
     last_event_ms: newest,
     rev: revOf(snap),
   };
