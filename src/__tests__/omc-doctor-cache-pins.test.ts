@@ -249,6 +249,79 @@ describe('omc-doctor cache commands on a synthetic config directory (pins, regis
     }
   });
 
+  // An error other than a missing directory is not an absent cache: the commands report it with the path and the error
+  // code and move nothing. A preload injects the error because the tests run as root, which ignores permissions.
+  describe('a cache directory that cannot be read is reported, not mistaken for a missing one', () => {
+    function failing(dir: string, rules: Array<{ fn: 'statSync' | 'readdirSync'; path: string; code: string }>) {
+      const file = path.join(dir, 'fs-errors.cjs');
+      writeFileSync(file, `const fs = require('fs'), path = require('path');
+const rules = ${JSON.stringify(rules)};
+for (const name of ['statSync', 'readdirSync']) {
+  const real = fs[name];
+  fs[name] = function (target, ...rest) {
+    const rule = rules.find((r) => r.fn === name && path.resolve(String(target)) === r.path);
+    if (rule) { const error = new Error(rule.code + ': injected'); error.code = rule.code; throw error; }
+    return real.call(fs, target, ...rest);
+  };
+}
+`);
+      return file;
+    }
+
+    for (const code of ['EACCES', 'EIO']) {
+      test(`the directory listing fails with ${code}: reported with the path and the code, nothing moved`, () => {
+        for (const command of commands) {
+          const { dir, cache } = makeConfigDir(['5.8.0', '5.9.0'], '5.9.0');
+          try {
+            const result = runCommand(command, dir, { preloads: [failing(dir, [{ fn: 'readdirSync', path: cache, code }])] });
+            expect({ status: result.status, versions: digitVersions(cache), moved: movedAside(dir) }).toEqual({ status: 0, versions: '5.8.0,5.9.0', moved: 0 });
+            expect(result.stdout).toContain(`Nothing moved: could not read ${cache} (${code})`);
+            expect(result.stdout).not.toMatch(/No plugin cache found|No cache to clean/);
+          } finally {
+            rmSync(dir, { recursive: true, force: true });
+          }
+        }
+      });
+    }
+
+    test.skipIf(process.platform === 'win32')('a file where the cache directory should be is reported as an error, not as a missing cache', () => {
+      for (const command of commands) {
+        const dir = mkdtempSync(path.join(tmpdir(), 'omc-doctor-skill-'));
+        try {
+          const target = path.join(dir, 'plugins', 'cache', 'omc', 'oh-my-claudecode');
+          mkdirSync(path.dirname(target), { recursive: true });
+          writeFileSync(target, 'not a directory');
+          const result = runCommand(command, dir);
+          expect(result.status).toBe(0);
+          expect(result.stdout).toContain(`Nothing moved: could not read ${target} (ENOTDIR)`);
+          expect(result.stdout).not.toMatch(/No plugin cache found|No cache to clean/);
+        } finally {
+          rmSync(dir, { recursive: true, force: true });
+        }
+      }
+    });
+
+    // A cache directory whose `stat` fails is still a cache directory: it must not drop out of the list, or the other
+    // marketplace would be cleaned while nothing says that this one was never looked at.
+    test('with two marketplaces, an unreadable cache directory is reported and stops the run instead of being skipped', () => {
+      for (const command of commands) {
+        const { dir, cache } = makeConfigDir(['5.8.0', '5.9.0'], '5.9.0');
+        const other = addCache(dir, ['5.7.0', '5.8.0'], 'oh-my-claudecode');
+        try {
+          writeRegistry(dir, { 'oh-my-claudecode@omc': [{ version: '5.9.0' }], 'oh-my-claudecode@oh-my-claudecode': [{ version: '5.8.0' }] });
+          const rules = (['statSync', 'readdirSync'] as const).map((fn) => ({ fn, path: cache, code: 'EACCES' }));
+          const result = runCommand(command, dir, { preloads: [failing(dir, rules)] });
+          expect({ status: result.status, first: digitVersions(cache), second: digitVersions(other), moved: movedAside(dir) })
+            .toEqual({ status: 0, first: '5.8.0,5.9.0', second: '5.7.0,5.8.0', moved: 0 });
+          expect(result.stdout).toContain(`omc: Nothing moved: could not read ${cache} (EACCES)`);
+          expect(result.stdout).not.toMatch(/No plugin cache found|No cache to clean|Moved/);
+        } finally {
+          rmSync(dir, { recursive: true, force: true });
+        }
+      }
+    });
+  });
+
   test('without a cache directory the commands report that no cache was found', () => {
     for (const command of commands) {
       const dir = mkdtempSync(path.join(tmpdir(), 'omc-doctor-skill-'));
