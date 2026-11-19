@@ -164,7 +164,8 @@ const writeShutdownAck = {
 // Claude's trust dialog focuses "No, exit" and reads raw keys: Down moves the
 // focus to the affirmative choice and redraws, Enter confirms the focused
 // choice. Keys that arrive in one read act against the focus drawn before that
-// read, so a Down and an Enter read together still confirm "No, exit".
+// read, so a Down and an Enter read together still confirm "No, exit". That
+// is the hypothesis the recorded 2.1.328 failures fit, not observed behavior.
 // busyMs blocks the event loop after the first draw, as a busy startup does,
 // so keys sent meanwhile reach the selector in one read.
 function moveTrustFocus(frame) {

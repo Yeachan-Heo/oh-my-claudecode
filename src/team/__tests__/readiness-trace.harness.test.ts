@@ -51,7 +51,8 @@ type TraceCase = {
 // Claude Code's trust dialog: "No, exit" is focused first, Down moves the
 // focus, Enter confirms the focused choice. `immediate` applies each key as it
 // arrives. `batched` applies the keys sent since the last capture together,
-// against the focus drawn before them, as a Claude Code busy at startup does.
+// against the focus drawn before them: the hypothesis that fits the recorded
+// Claude Code 2.1.328 failures.
 function claudeTrustPane(noFocused: string, idle: string, mode: 'immediate' | 'batched'): TracePane {
   const lines = noFocused.split('\n');
   const no = lines.findIndex(line => /❯\s*No, exit/.test(line));

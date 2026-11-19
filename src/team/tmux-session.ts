@@ -4662,9 +4662,10 @@ export async function waitForStartupPaneReady(
       if (handledSelectors.has(selector))
         return { ok: false, reason: "selector_persistent" };
       if (selector === "claude_directory") {
-        // This dialog focuses "No, exit" first. A busy Claude Code reads a Down
-        // and an Enter together and confirms the focus drawn before them, so
-        // Enter waits until the pane shows the affirmative choice focused.
+        // This dialog focuses "No, exit" first. Recorded failures show Enter
+        // confirming "No" after a Down was sent; the likely cause is a busy
+        // Claude Code reading both keys at once against the focus drawn before
+        // them. Enter waits until the pane shows the affirmative choice focused.
         if (!paneShowsClaudeTrustYesFocused(captured)) {
           if (!claudeTrustDownSent) {
             await sendTeamPaneKey(
